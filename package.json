@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@rolldown/binding-linux-x64-gnu": "^1.0.0-rc.17",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
