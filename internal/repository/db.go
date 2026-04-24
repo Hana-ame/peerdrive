@@ -15,13 +15,58 @@ func InitDB(dbPath string) error {
 	}
 	schema := `
 	CREATE TABLE IF NOT EXISTS files (
-		id INTEGER PRIMARY KEY,
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		hash TEXT NOT NULL UNIQUE,
 		provider_type TEXT NOT NULL,
 		path TEXT NOT NULL,
 		filename TEXT
 	);
 	CREATE INDEX IF NOT EXISTS idx_hash ON files(hash);
+
+	CREATE TABLE IF NOT EXISTS collections (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL,
+		collection_name TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(username, collection_name)
+	);
+
+	CREATE TABLE IF NOT EXISTS collection_entries (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		collection_id INTEGER NOT NULL,
+		path TEXT NOT NULL,
+		file_hash TEXT NOT NULL,
+		FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+		UNIQUE(collection_id, path)
+	);
+
+	CREATE TABLE IF NOT EXISTS collection_versions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		collection_id INTEGER NOT NULL,
+		version_number INTEGER NOT NULL,
+		commit_message TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		parent_version_id INTEGER,
+		FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS version_entries (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		version_id INTEGER NOT NULL,
+		path TEXT NOT NULL,
+		file_hash TEXT NOT NULL,
+		FOREIGN KEY (version_id) REFERENCES collection_versions(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS transfer_tasks (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		type TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT 'pending',
+		params TEXT DEFAULT '',
+		result TEXT DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
 	`
 	_, err = DB.Exec(schema)
 	return err

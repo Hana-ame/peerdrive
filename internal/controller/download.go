@@ -15,7 +15,10 @@ func InitDownloader(s *service.Downloader) {
 }
 
 func DownloadBySHA256(c *gin.Context) {
-	hash := c.Param("sha256")
+	DownloadBySHA256Internal(c, c.Param("sha256"))
+}
+
+func DownloadBySHA256Internal(c *gin.Context, hash string) {
 	if !hashutil.IsValidSHA256(hash) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256 format"})
 		return

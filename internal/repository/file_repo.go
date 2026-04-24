@@ -41,3 +41,21 @@ func InsertFile(meta *model.FileMetadata) error {
 		meta.Hash, meta.ProviderType, meta.Path, meta.Filename)
 	return err
 }
+
+func DeleteFile(hash string) error {
+	_, err := DB.Exec(`DELETE FROM files WHERE hash = ?`, hash)
+	return err
+}
+
+func GetFileByHashTx(tx *sql.Tx, hash string) (*model.FileMetadata, error) {
+	row := tx.QueryRow(`SELECT id, hash, provider_type, path, filename FROM files WHERE hash = ?`, hash)
+	var m model.FileMetadata
+	err := row.Scan(&m.ID, &m.Hash, &m.ProviderType, &m.Path, &m.Filename)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
