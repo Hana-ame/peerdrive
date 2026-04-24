@@ -3,14 +3,12 @@ import { useParams } from 'react-router-dom'
 import {
   getCollection, addEntry, removeEntry, commitCollection,
   getVersionLog, rollbackCollection, uploadFile, pullCollection,
-  mergeFromSource, verifyFile,
+  mergeFromSource,
 } from '../api/client'
-import { usePeerdrive } from '../context/PeerdriveContext'
 import toast from 'react-hot-toast'
 
 export default function CollectionDetail() {
   const { username: paramUser, collName } = useParams()
-  const { username } = usePeerdrive()
   const [collection, setCollection] = useState<any>(null)
   const [entries, setEntries] = useState<any[]>([])
   const [versions, setVersions] = useState<any[]>([])

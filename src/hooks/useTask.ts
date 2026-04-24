@@ -3,7 +3,7 @@ import { getTaskStatus } from '../api/client'
 
 export function useTask() {
   const [taskStatus, setTaskStatus] = useState<string>('')
-  const intervalRef = useRef<ReturnType<typeof setInterval>>()
+  const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
 
   const poll = useCallback((taskId: number) => {
     if (intervalRef.current) clearInterval(intervalRef.current)

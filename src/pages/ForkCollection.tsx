@@ -14,7 +14,7 @@ export default function ForkCollection() {
   const handleFork = async () => {
     if (!username || !localName || !srcUser || !srcColl) return
     try {
-      const r = await forkCollection({
+      await forkCollection({
         username,
         collection_name: localName,
         source_username: srcUser,
