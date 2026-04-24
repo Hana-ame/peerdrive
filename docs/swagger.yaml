@@ -21,4 +21,35 @@ paths:
       summary: Ping the server
       tags:
       - health
+  /sha256sum/{sha256}:
+    get:
+      description: Download a file using its SHA256 hash as the identifier
+      parameters:
+      - description: File SHA256 hash
+        in: path
+        name: sha256
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Invalid hash format
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: File not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Download file by SHA256
+      tags:
+      - download
 swagger: "2.0"

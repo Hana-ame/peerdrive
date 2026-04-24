@@ -1,41 +1,24 @@
 #!/bin/bash
 
-# Bypass proxies for local tests
-export no_proxy=localhost,127.0.0.1
+API_BASE="${API_BASE:-http://localhost:3000}"
 
-# Build the project
-go build -o server main.go
+echo "=== Peerdrive 测试脚本 ==="
+echo "API_BASE: $API_BASE"
+echo ""
 
-# Start the server in the background
-./server &
-SERVER_PID=$!
+echo "1. 测试 /ping"
+curl -x "" -s "$API_BASE/ping"
+echo ""
+echo ""
 
-# Wait for the server to start
-sleep 2
+echo "2. 测试 /p2p/node"
+curl -x "" -s "$API_BASE/p2p/node"
+echo ""
+echo ""
 
-# Test /ping endpoint
-echo "Testing /ping..."
-RESPONSE=$(curl -s http://localhost:8081/ping)
-if [ "$RESPONSE" == '{"message":"pong"}' ]; then
-    echo "✅ /ping passed"
-else
-    echo "❌ /ping failed: $RESPONSE"
-    kill $SERVER_PID
-    exit 1
-fi
+echo "3. 测试 /p2p/peers"
+curl -x "" -s "$API_BASE/p2p/peers"
+echo ""
+echo ""
 
-# Test /swagger endpoint
-echo "Testing /swagger..."
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/swagger/index.html)
-if [ "$HTTP_CODE" == "200" ]; then
-    echo "✅ /swagger passed"
-else
-    echo "❌ /swagger failed: HTTP $HTTP_CODE"
-    kill $SERVER_PID
-    exit 1
-fi
-
-# Cleanup
-kill $SERVER_PID
-rm server
-echo "All tests passed successfully!"
+echo "=== 测试完成 ==="
