@@ -1,3 +1,6 @@
+// File repository — CRUD for the files table.
+// Usage: import "peerdrive/internal/repository"; repository.GetFileByHash(hash), InsertFile(meta), etc.
+
 package repository
 
 import (

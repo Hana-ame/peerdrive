@@ -1,3 +1,6 @@
+// Collection repository — CRUD for collections, entries, versions, and rollback.
+// Usage: CreateCollection, ListCollections, AddEntry, CreateVersion, RestoreVersionEntries, etc.
+
 package repository
 
 import (

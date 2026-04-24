@@ -1,3 +1,17 @@
+// Package router wires Gin routes to all controllers.
+// Usage: called from cmd/server/main.go with initialized services.
+//
+// Route groups:
+//   /ping              — health check
+//   /sha256sum/:sha256 — download by hash
+//   /p2p/*             — P2P node/peer management
+//   /files/*           — file upload/register/verify/delete/diff
+//   /collections/*     — collection CRUD + entries + versioning
+//   /actions/*         — merge/fork/pull
+//   /tasks/*           — async task status
+//   /:user/:coll/*     — download from collection
+//   /swagger/*         — Swagger UI
+
 package router
 
 import (
@@ -5,6 +19,8 @@ import (
 	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 func SetupRouter(
@@ -64,6 +80,8 @@ func SetupRouter(
 		tasks.GET("", controller.ListTasks)
 		tasks.GET("/:id", controller.GetTaskStatus)
 	}
+
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	return r
 }

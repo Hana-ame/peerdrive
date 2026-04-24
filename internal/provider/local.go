@@ -1,3 +1,6 @@
+// Local provider — reads files from the local filesystem under BaseDir.
+// Usage: registered with Manager as provider_type "local".
+
 package provider
 
 import (

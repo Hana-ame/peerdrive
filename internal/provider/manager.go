@@ -1,3 +1,8 @@
+// Provider manager — routes GetReader calls to the appropriate ContentProvider based on provider_type.
+// Usage: NewManager(baseDir) creates a Manager with "local" and "http" providers.
+//   manager.GetReader("local", "path/to/file")  → LocalProvider
+//   manager.GetReader("http", "https://...")    → HTTPProvider
+
 package provider
 
 import (

@@ -1,3 +1,6 @@
+// Package service provides business logic layer for download and P2P operations.
+// Uses provider.Manager for content retrieval and libp2p for networking.
+
 package service
 
 import (

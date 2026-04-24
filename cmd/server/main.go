@@ -1,3 +1,9 @@
+// Peerdrive server entry point.
+// Starts a Gin HTTP server with libp2p P2P node, SQLite metadata DB,
+// and content-addressable file storage.
+// Usage: go run ./cmd/server/main.go
+//   PORT=3000 PEERDRIVE_STORAGE=./storage go run ./cmd/server/main.go
+
 package main
 
 import (
@@ -7,11 +13,18 @@ import (
 	"os/signal"
 	"syscall"
 
+	_ "peerdrive/docs"
 	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
 	"peerdrive/internal/service"
 )
+
+// @title Peerdrive API
+// @version 1.0
+// @description P2P file sharing with content-addressable storage, collection management, versioning, merge/fork/pull.
+// @host localhost:3000
+// @BasePath /
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())

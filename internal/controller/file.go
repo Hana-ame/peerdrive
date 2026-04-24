@@ -1,3 +1,12 @@
+// File controller — upload, register local/file/folder, verify hash, delete, version diff.
+// Usage: InitFileController(storageDir) before handling requests.
+//   POST   /files/upload           — upload file, store by SHA256 path
+//   POST   /files/register_local   — register existing local file by path
+//   POST   /files/register_folder  — batch-register all files in a folder
+//   GET    /files/verify/:hash     — look up file metadata by hash
+//   DELETE /files/:hash            — delete file by hash
+//   POST   /files/diff             — diff entries between two versions
+
 package controller
 
 import (
@@ -22,6 +31,17 @@ func InitFileController(storage string) {
 	os.MkdirAll(storage, 0755)
 }
 
+// UploadFile godoc
+// @Summary Upload a file
+// @Description Upload a file, compute its SHA256 hash, store to disk at storage/{first2}/{hash}, and register in the database. Deduplicates by hash.
+// @Tags files
+// @Accept multipart/form-data
+// @Produce json
+// @Param file formData file true "File to upload"
+// @Success 200 {object} map[string]string "hash and filename"
+// @Failure 400 {object} map[string]string "Missing file"
+// @Failure 409 {object} map[string]string "File already exists"
+// @Router /files/upload [post]
 func UploadFile(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
@@ -69,6 +89,16 @@ func UploadFile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"hash": hash, "filename": header.Filename})
 }
 
+// RegisterLocalFile godoc
+// @Summary Register a local file
+// @Description Register an already-existing file in the storage directory. Computes its SHA256 and inserts into the database without copying.
+// @Tags files
+// @Accept json
+// @Produce json
+// @Param body body object{path=string,filename=string} true "Local path and display filename"
+// @Success 200 {object} map[string]string "hash, filename, note"
+// @Failure 400 {object} map[string]string "Invalid request or file not found"
+// @Router /files/register_local [post]
 func RegisterLocalFile(c *gin.Context) {
 	var req struct {
 		Path     string `json:"path"`
@@ -113,6 +143,16 @@ func RegisterLocalFile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"hash": hash, "filename": req.Filename})
 }
 
+// RegisterFolder godoc
+// @Summary Register all files in a folder
+// @Description Batch-register every file in the given subdirectory of storage/. Non-recursive, skips subdirectories.
+// @Tags files
+// @Accept json
+// @Produce json
+// @Param body body object{folder_path=string} true "Relative folder path under storage/"
+// @Success 200 {object} map[string]interface{} "registered array"
+// @Failure 400 {object} map[string]string "Folder not found"
+// @Router /files/register_folder [post]
 func RegisterFolder(c *gin.Context) {
 	var req struct {
 		FolderPath string `json:"folder_path"`
@@ -162,6 +202,16 @@ func RegisterFolder(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"registered": results})
 }
 
+// VerifyFile godoc
+// @Summary Verify a file by hash
+// @Description Look up file metadata (filename, provider, path) by its SHA256 hash
+// @Tags files
+// @Produce json
+// @Param hash path string true "SHA256 hash"
+// @Success 200 {object} map[string]string "hash, filename, provider, path"
+// @Failure 400 {object} map[string]string "Invalid hash"
+// @Failure 404 {object} map[string]string "Not found"
+// @Router /files/verify/{hash} [get]
 func VerifyFile(c *gin.Context) {
 	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
@@ -185,6 +235,16 @@ func VerifyFile(c *gin.Context) {
 	})
 }
 
+// DeleteFile godoc
+// @Summary Delete a file by hash
+// @Description Remove file metadata from database and delete the local file if provider_type == "local"
+// @Tags files
+// @Produce json
+// @Param hash path string true "SHA256 hash"
+// @Success 200 {object} map[string]string "message"
+// @Failure 400 {object} map[string]string "Invalid hash"
+// @Failure 404 {object} map[string]string "Not found"
+// @Router /files/{hash} [delete]
 func DeleteFile(c *gin.Context) {
 	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
@@ -207,6 +267,16 @@ func DeleteFile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
+// DiffVersions godoc
+// @Summary Diff entries between two versions
+// @Description Compare version_entries between two collection versions and return added/removed/modified lists
+// @Tags files
+// @Accept json
+// @Produce json
+// @Param body body object{version_a=int,version_b=int} true "Version IDs to compare"
+// @Success 200 {object} map[string]interface{} "added, removed, modified"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Router /files/diff [post]
 func DiffVersions(c *gin.Context) {
 	var req struct {
 		VersionA int `json:"version_a"`

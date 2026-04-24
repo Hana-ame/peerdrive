@@ -1,3 +1,7 @@
+// Download controller — content-addressable file download by SHA256 hash.
+// Usage: InitDownloader(svc) must be called before handling requests.
+//   GET /sha256sum/:sha256 — downloads file content by its SHA256 hash.
+
 package controller
 
 import (
@@ -14,6 +18,16 @@ func InitDownloader(s *service.Downloader) {
 	downloader = s
 }
 
+// DownloadBySHA256 godoc
+// @Summary Download file by SHA256
+// @Description Download a file using its SHA256 hash as the content identifier. Looks up metadata in SQLite, then streams from the appropriate provider (local or HTTP).
+// @Tags download
+// @Produce octet-stream
+// @Param sha256 path string true "64-character lowercase SHA256 hex string"
+// @Success 200 {file} binary "File content"
+// @Failure 400 {object} map[string]string "Invalid hash format"
+// @Failure 404 {object} map[string]string "File not found"
+// @Router /sha256sum/{sha256} [get]
 func DownloadBySHA256(c *gin.Context) {
 	DownloadBySHA256Internal(c, c.Param("sha256"))
 }

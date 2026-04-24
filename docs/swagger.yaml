@@ -1,31 +1,750 @@
 basePath: /
-host: localhost:8080
+host: localhost:3000
 info:
   contact: {}
-  description: This is a sample server.
+  description: P2P file sharing with content-addressable storage, collection management,
+    versioning, merge/fork/pull.
   title: Peerdrive API
   version: "1.0"
 paths:
-  /ping:
+  /{username}/{collection_name}/{filepath}:
     get:
-      description: Returns a pong message
+      description: Look up the path in the collection's entries and redirect to /sha256sum/{hash}
+        for download
+      parameters:
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      - description: Collection name
+        in: path
+        name: collection_name
+        required: true
+        type: string
+      - description: File path within the collection
+        in: path
+        name: filepath
+        required: true
+        type: string
       produces:
-      - application/json
+      - application/octet-stream
       responses:
         "200":
-          description: OK
+          description: File content
+          schema:
+            type: file
+        "404":
+          description: Collection or file not found
           schema:
             additionalProperties:
               type: string
             type: object
-      summary: Ping the server
+      summary: Download a file from a collection
+      tags:
+      - collections
+  /actions/fork:
+    post:
+      consumes:
+      - application/json
+      description: Copy all entries from a source collection into a new collection
+        owned by a different user.
+      parameters:
+      - description: Fork request
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            collection_name:
+              type: string
+            source_coll_name:
+              type: string
+            source_username:
+              type: string
+            username:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: forked, id, username, collection_name, entries_count
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Source collection not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Local collection already exists
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Fork a collection
+      tags:
+      - actions
+  /actions/merge:
+    post:
+      consumes:
+      - application/json
+      description: 'Merge entries from source collection into local. Strategy: "ours"
+        keeps local, "theirs" accepts source, "manual" returns conflicts list.'
+      parameters:
+      - description: Merge request
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            collection_name:
+              type: string
+            source_coll_name:
+              type: string
+            source_username:
+              type: string
+            strategy:
+              type: string
+            username:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: merge complete
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Collection not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: conflicts list (when strategy=manual)
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Merge a source collection into the local collection
+      tags:
+      - actions
+  /actions/pull:
+    post:
+      consumes:
+      - application/json
+      description: Placeholder for syncing upstream changes from a forked source.
+        Currently returns a no-op task.
+      parameters:
+      - description: Pull request
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            collection_name:
+              type: string
+            username:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: message
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Pull upstream updates (placeholder)
+      tags:
+      - actions
+  /collections:
+    post:
+      consumes:
+      - application/json
+      description: Create a named collection for a user. Duplicate (username, collection_name)
+        returns 409.
+      parameters:
+      - description: Username and collection name
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            collection_name:
+              type: string
+            username:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: id, username, collection_name
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Duplicate
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a new collection
+      tags:
+      - collections
+  /collections/{username}:
+    get:
+      description: Returns all collections owned by the given username
+      parameters:
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: data array of collections
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List collections for a user
+      tags:
+      - collections
+  /collections/{username}/{collection_name}:
+    get:
+      description: Returns collection metadata and its path→hash entries
+      parameters:
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      - description: Collection name
+        in: path
+        name: collection_name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: collection and entries
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get collection details with entries
+      tags:
+      - collections
+  /collections/{username}/{collection_name}/commit:
+    post:
+      consumes:
+      - application/json
+      description: Snapshot all current entries into a version with a commit message.
+        Creates a linked version chain.
+      parameters:
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      - description: Collection name
+        in: path
+        name: collection_name
+        required: true
+        type: string
+      - description: Commit message
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            commit_message:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: message and version_number
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Collection not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Commit collection entries as a new version
+      tags:
+      - collections
+  /collections/{username}/{collection_name}/entries:
+    post:
+      consumes:
+      - application/json
+      description: Map a path (e.g. "dir/file.txt") to a SHA256 hash within a collection.
+        Creates the collection if it doesn't exist.
+      parameters:
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      - description: Collection name
+        in: path
+        name: collection_name
+        required: true
+        type: string
+      - description: Entry path and file hash
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            hash:
+              type: string
+            path:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: message
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Add an entry to a collection
+      tags:
+      - collections
+  /collections/{username}/{collection_name}/entries/{path}:
+    delete:
+      description: Delete a path→hash mapping from a collection
+      parameters:
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      - description: Collection name
+        in: path
+        name: collection_name
+        required: true
+        type: string
+      - description: Entry path (URL-encoded)
+        in: path
+        name: path
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: message
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Collection not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Remove an entry from a collection
+      tags:
+      - collections
+  /collections/{username}/{collection_name}/log:
+    get:
+      description: Returns all committed versions for a collection, newest first
+      parameters:
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      - description: Collection name
+        in: path
+        name: collection_name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: data array of versions
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Collection not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get collection version history
+      tags:
+      - collections
+  /collections/{username}/{collection_name}/rollback/{version_id}:
+    post:
+      description: Restore collection entries from a specific version's snapshot.
+        Replaces all current entries.
+      parameters:
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      - description: Collection name
+        in: path
+        name: collection_name
+        required: true
+        type: string
+      - description: Version ID to restore
+        in: path
+        name: version_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: message
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid version_id
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Collection not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Rollback collection to a previous version
+      tags:
+      - collections
+  /files/{hash}:
+    delete:
+      description: Remove file metadata from database and delete the local file if
+        provider_type == "local"
+      parameters:
+      - description: SHA256 hash
+        in: path
+        name: hash
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: message
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid hash
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a file by hash
+      tags:
+      - files
+  /files/diff:
+    post:
+      consumes:
+      - application/json
+      description: Compare version_entries between two collection versions and return
+        added/removed/modified lists
+      parameters:
+      - description: Version IDs to compare
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            version_a:
+              type: integer
+            version_b:
+              type: integer
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: added, removed, modified
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Diff entries between two versions
+      tags:
+      - files
+  /files/register_folder:
+    post:
+      consumes:
+      - application/json
+      description: Batch-register every file in the given subdirectory of storage/.
+        Non-recursive, skips subdirectories.
+      parameters:
+      - description: Relative folder path under storage/
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            folder_path:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: registered array
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Folder not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Register all files in a folder
+      tags:
+      - files
+  /files/register_local:
+    post:
+      consumes:
+      - application/json
+      description: Register an already-existing file in the storage directory. Computes
+        its SHA256 and inserts into the database without copying.
+      parameters:
+      - description: Local path and display filename
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            filename:
+              type: string
+            path:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: hash, filename, note
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request or file not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Register a local file
+      tags:
+      - files
+  /files/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload a file, compute its SHA256 hash, store to disk at storage/{first2}/{hash},
+        and register in the database. Deduplicates by hash.
+      parameters:
+      - description: File to upload
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: hash and filename
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Missing file
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: File already exists
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Upload a file
+      tags:
+      - files
+  /files/verify/{hash}:
+    get:
+      description: Look up file metadata (filename, provider, path) by its SHA256
+        hash
+      parameters:
+      - description: SHA256 hash
+        in: path
+        name: hash
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: hash, filename, provider, path
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid hash
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Verify a file by hash
+      tags:
+      - files
+  /p2p/node:
+    get:
+      description: Returns the local node's PeerID and listening multiaddrs
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: peer_id and addrs
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get P2P node info
+      tags:
+      - p2p
+  /p2p/peers:
+    get:
+      description: Returns the list of PeerIDs currently connected to this node
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: peers array
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List connected peers
+      tags:
+      - p2p
+  /p2p/ping/{peer_id}:
+    get:
+      description: Send a ping to a peer and measure round-trip time
+      parameters:
+      - description: Peer ID (e.g. 12D3KooW...)
+        in: path
+        name: peer_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: peer and rtt
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid peer ID
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Ping error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Ping a P2P peer
+      tags:
+      - p2p
+  /ping:
+    get:
+      description: Returns "pong" to confirm the server is running
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: pong
+          schema:
+            type: string
+      summary: Health check
       tags:
       - health
   /sha256sum/{sha256}:
     get:
-      description: Download a file using its SHA256 hash as the identifier
+      description: Download a file using its SHA256 hash as the content identifier.
+        Looks up metadata in SQLite, then streams from the appropriate provider (local
+        or HTTP).
       parameters:
-      - description: File SHA256 hash
+      - description: 64-character lowercase SHA256 hex string
         in: path
         name: sha256
         required: true
@@ -34,7 +753,7 @@ paths:
       - application/octet-stream
       responses:
         "200":
-          description: OK
+          description: File content
           schema:
             type: file
         "400":
@@ -52,4 +771,50 @@ paths:
       summary: Download file by SHA256
       tags:
       - download
+  /tasks:
+    get:
+      description: Returns an empty task list
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: tasks array
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List all tasks (stub)
+      tags:
+      - tasks
+  /tasks/{id}:
+    get:
+      description: Query the status and result of an async task (e.g., pull)
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: task details
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid task ID
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get task status by ID
+      tags:
+      - tasks
 swagger: "2.0"

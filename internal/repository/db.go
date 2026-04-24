@@ -1,3 +1,8 @@
+// Package repository provides SQLite database operations.
+// Usage: InitDB() before any other repository function.
+// Tables: files, collections, collection_entries, collection_versions,
+//         version_entries, transfer_tasks.
+
 package repository
 
 import (

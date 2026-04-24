@@ -1,3 +1,8 @@
+// Merge controller — merge entries from a source collection into a local collection.
+// Strategies: "ours" (keep local), "theirs" (accept source), "manual" (return conflicts).
+// Usage:
+//   POST /actions/merge — merge source collection into local
+
 package controller
 
 import (
@@ -9,18 +14,29 @@ import (
 )
 
 type Conflict struct {
-	Path      string `json:"path"`
-	LocalHash string `json:"local_hash"`
+	Path       string `json:"path"`
+	LocalHash  string `json:"local_hash"`
 	SourceHash string `json:"source_hash"`
 }
 
+// MergeFromSource godoc
+// @Summary Merge a source collection into the local collection
+// @Description Merge entries from source collection into local. Strategy: "ours" keeps local, "theirs" accepts source, "manual" returns conflicts list.
+// @Tags actions
+// @Accept json
+// @Produce json
+// @Param body body object{username=string,collection_name=string,source_username=string,source_coll_name=string,strategy=string} true "Merge request"
+// @Success 200 {object} map[string]interface{} "merge complete"
+// @Failure 409 {object} map[string]interface{} "conflicts list (when strategy=manual)"
+// @Failure 404 {object} map[string]string "Collection not found"
+// @Router /actions/merge [post]
 func MergeFromSource(c *gin.Context) {
 	var req struct {
 		Username       string `json:"username"`
 		CollectionName string `json:"collection_name"`
 		SourceUsername string `json:"source_username"`
 		SourceCollName string `json:"source_coll_name"`
-		Strategy       string `json:"strategy"` // "ours", "theirs", "manual"
+		Strategy       string `json:"strategy"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})

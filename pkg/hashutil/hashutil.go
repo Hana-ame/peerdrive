@@ -1,3 +1,6 @@
+// Package hashutil provides SHA256 hash validation utilities.
+// Usage: hashutil.IsValidSHA256(s) returns true if s is a 64-char lowercase hex string.
+
 package hashutil
 
 import (

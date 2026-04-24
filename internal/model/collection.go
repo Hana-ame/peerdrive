@@ -1,3 +1,9 @@
+// Package model defines data structures for collection management and versioning.
+// Collection: a named set of path→hash mappings owned by a user.
+// CollectionEntry: a single path→hash mapping within a collection.
+// CollectionVersion: a snapshot of entries at commit time.
+// VersionEntry: a single entry within a version snapshot.
+
 package model
 
 type Collection struct {

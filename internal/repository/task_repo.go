@@ -1,3 +1,6 @@
+// Task repository — CRUD for async transfer_tasks table.
+// Usage: CreateTask, UpdateTaskStatus, GetTask.
+
 package repository
 
 import (

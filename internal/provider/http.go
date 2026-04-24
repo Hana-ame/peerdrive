@@ -1,3 +1,6 @@
+// HTTP provider — fetches content from remote URLs via HTTP GET.
+// Usage: registered with Manager as provider_type "http".
+
 package provider
 
 import (

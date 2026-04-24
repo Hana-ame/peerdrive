@@ -1,3 +1,9 @@
+// P2P controller — libp2p node info, connected peers, and ping.
+// Usage: InitP2PController(svc) must be called before handling requests.
+//   GET /p2p/node      — local node's PeerID and multiaddrs
+//   GET /p2p/peers     — list of connected peer IDs
+//   GET /p2p/ping/:id  — ping a peer by its PeerID
+
 package controller
 
 import (
@@ -14,6 +20,13 @@ func InitP2PController(svc *service.P2PService) {
 	p2pSvc = svc
 }
 
+// GetNodeInfo godoc
+// @Summary Get P2P node info
+// @Description Returns the local node's PeerID and listening multiaddrs
+// @Tags p2p
+// @Produce json
+// @Success 200 {object} map[string]interface{} "peer_id and addrs"
+// @Router /p2p/node [get]
 func GetNodeInfo(c *gin.Context) {
 	id, addrs := p2pSvc.GetNodeInfo()
 	c.JSON(http.StatusOK, gin.H{
@@ -22,6 +35,13 @@ func GetNodeInfo(c *gin.Context) {
 	})
 }
 
+// GetPeers godoc
+// @Summary List connected peers
+// @Description Returns the list of PeerIDs currently connected to this node
+// @Tags p2p
+// @Produce json
+// @Success 200 {object} map[string]interface{} "peers array"
+// @Router /p2p/peers [get]
 func GetPeers(c *gin.Context) {
 	peers := p2pSvc.GetConnectedPeers()
 	strs := make([]string, len(peers))
@@ -31,6 +51,16 @@ func GetPeers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"peers": strs})
 }
 
+// PingPeer godoc
+// @Summary Ping a P2P peer
+// @Description Send a ping to a peer and measure round-trip time
+// @Tags p2p
+// @Produce json
+// @Param peer_id path string true "Peer ID (e.g. 12D3KooW...)"
+// @Success 200 {object} map[string]interface{} "peer and rtt"
+// @Failure 400 {object} map[string]string "Invalid peer ID"
+// @Failure 500 {object} map[string]string "Ping error"
+// @Router /p2p/ping/{peer_id} [get]
 func PingPeer(c *gin.Context) {
 	raw := c.Param("peer_id")
 	pid, err := peer.Decode(raw)
