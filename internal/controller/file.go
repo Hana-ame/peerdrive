@@ -1,11 +1,16 @@
-// File controller — upload, register local/file/folder, verify hash, delete, version diff.
-// Usage: InitFileController(storageDir) before handling requests.
-//   POST   /files/upload           — upload file, store by SHA256 path
-//   POST   /files/register_local   — register existing local file by path
-//   POST   /files/register_folder  — batch-register all files in a folder
-//   GET    /files/verify/:hash     — look up file metadata by hash
-//   DELETE /files/:hash            — delete file by hash
-//   POST   /files/diff             — diff entries between two versions
+// 文件控制器 — 上传、注册本地文件/文件夹、哈希验证、删除、版本差异比较。
+// 先调用 InitFileController(storageDir) 创建存储目录并保存引用。
+// 上传流程：multipart 读取 → SHA256 计算 → 存储到 storage/{hex[0:2]}/{hex} →
+//   repository.InsertFile 写入 SQLite。
+// 注册流程：扫描本地文件 → SHA256 计算 → 仅写入 DB 不复制。
+// 差异比较：对比两个 version_entries 的快照，返回 added/removed/modified。
+// 路由：
+//   POST   /files/upload           — 上传文件，按 SHA256 路径存储
+//   POST   /files/register_local   — 注册已有本地文件
+//   POST   /files/register_folder  — 批量注册文件夹内所有文件（不递归）
+//   GET    /files/verify/:hash     — 通过哈希查询文件元数据
+//   DELETE /files/:hash            — 按哈希删除文件（同时删本地文件）
+//   POST   /files/diff             — 对比两个版本的条目差异
 
 package controller
 

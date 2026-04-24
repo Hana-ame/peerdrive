@@ -1,7 +1,12 @@
-// Fork/Pull controller — fork a remote collection into local, or pull upstream updates.
-// Usage:
-//   POST /actions/fork — copy source collection entries into a new local collection
-//   POST /actions/pull — (placeholder) sync upstream updates
+// 复刻/拉取控制器 — 将源集合的所有条目复制到新集合（Fork），
+// 或同步上游更新（Pull，当前为占位实现）。
+// Fork 流程：查询源集合 → GetOrCreate 目标集合 → 逐条复制
+//   collection_entries 内容。
+// Pull 流程：验证请求 → 返回 "not implemented" 消息 → 创建
+//   transfer_tasks 记录并标记为 completed。
+// 路由：
+//   POST /actions/fork — 将源集合条目复制到新本地集合
+//   POST /actions/pull — 拉取上游更新（占位，v2 实现）
 
 package controller
 

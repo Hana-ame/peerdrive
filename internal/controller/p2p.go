@@ -1,8 +1,11 @@
-// P2P controller — libp2p node info, connected peers, and ping.
-// Usage: InitP2PController(svc) must be called before handling requests.
-//   GET /p2p/node      — local node's PeerID and multiaddrs
-//   GET /p2p/peers     — list of connected peer IDs
-//   GET /p2p/ping/:id  — ping a peer by its PeerID
+// P2P 控制器 — libp2p 节点信息、已连接对等节点列表、Ping 测速。
+// 先调用 InitP2PController(svc) 注册 service.P2PService 实例。
+// 技术实现：通过 libp2p host.Network().Peers() 获取连接；通过
+//   ping.PingService 发送协议 Ping 并测量 RTT。
+// 路由：
+//   GET /p2p/node      — 本节点 PeerID 和监听 multiaddr
+//   GET /p2p/peers     — 已连接的对等节点 PeerID 列表
+//   GET /p2p/ping/:id  — 向指定 PeerID 发送 Ping 并返回 RTT
 
 package controller
 

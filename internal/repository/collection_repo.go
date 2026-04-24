@@ -1,5 +1,13 @@
-// Collection repository — CRUD for collections, entries, versions, and rollback.
-// Usage: CreateCollection, ListCollections, AddEntry, CreateVersion, RestoreVersionEntries, etc.
+// 集合仓库 — collections、collection_entries、collection_versions、
+// version_entries 四张表的 CRUD 和业务操作。
+// 函数列表：
+//   CreateCollection / GetOrCreateCollection — 创建/获取集合 ID
+//   ListCollections / GetCollection          — 查询集合列表/详情
+//   AddCollectionEntry / RemoveCollectionEntry — 增删条目（upsert 语义）
+//   GetCollectionEntry / ListCollectionEntries — 查询条目
+//   CreateVersion / SnapshotVersionEntries   — 创建版本快照
+//   GetVersionLog / GetVersionEntries        — 查询版本历史/快照内容
+//   RestoreVersionEntries                   — 事务内回滚（先删后插）
 
 package repository
 

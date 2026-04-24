@@ -1,7 +1,12 @@
-// Package repository provides SQLite database operations.
-// Usage: InitDB() before any other repository function.
-// Tables: files, collections, collection_entries, collection_versions,
-//         version_entries, transfer_tasks.
+// Package repository 提供 SQLite 数据库操作层。
+// 使用 mattn/go-sqlite3 驱动。必须先调用 InitDB(dbPath) 初始化全局 DB 连接。
+// 自动建表（CREATE TABLE IF NOT EXISTS），包含六张表：
+//   files               — 文件元数据（哈希→位置映射）
+//   collections         — 集合（用户+名称唯一）
+//   collection_entries  — 集合条目（path→hash，基于 collection_id 级联删除）
+//   collection_versions — 版本快照记录（带 parent_version_id 版本链）
+//   version_entries     — 版本快照内容
+//   transfer_tasks      — 异步任务跟踪
 
 package repository
 

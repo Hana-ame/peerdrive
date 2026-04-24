@@ -1,5 +1,10 @@
-// File repository — CRUD for the files table.
-// Usage: import "peerdrive/internal/repository"; repository.GetFileByHash(hash), InsertFile(meta), etc.
+// 文件仓库 — files 表的 CRUD 操作。
+// 函数列表：
+//   GetFileByHash(hash)     — 按哈希查询单个文件元数据，未找到返回 (nil, nil)
+//   GetLocations(hash)      — 按哈希查询所有位置（同一文件可能多地存储）
+//   InsertFile(meta)        — 插入新文件记录，哈希冲突返回错误
+//   DeleteFile(hash)        — 按哈希删除文件记录
+//   GetFileByHashTx(tx,hash)— 在事务内按哈希查询
 
 package repository
 

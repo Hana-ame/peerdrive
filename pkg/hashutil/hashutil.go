@@ -1,5 +1,6 @@
-// Package hashutil provides SHA256 hash validation utilities.
-// Usage: hashutil.IsValidSHA256(s) returns true if s is a 64-char lowercase hex string.
+// Package hashutil 提供 SHA256 哈希值格式验证工具。
+// IsValidSHA256(s) 判断字符串是否为 64 位十六进制小写哈希值。
+// 验证步骤：转小写 → 检查长度是否为 64 → hex.DecodeString 解码验证。
 
 package hashutil
 

@@ -1,33 +1,10 @@
-// Package controller provides Gin HTTP handlers for all API endpoints.
-// Usage: controllers are initialized via Init* functions called from router.SetupRouter.
-//
-// Endpoint handlers:
-//   Ping                    GET  /ping
-//   DownloadBySHA256        GET  /sha256sum/:sha256
-//   DownloadBySHA256Internal     
-//   GetNodeInfo             GET  /p2p/node
-//   GetPeers                GET  /p2p/peers
-//   PingPeer                GET  /p2p/ping/:peer_id
-//   UploadFile              POST /files/upload
-//   RegisterLocalFile       POST /files/register_local
-//   RegisterFolder          POST /files/register_folder
-//   VerifyFile              GET  /files/verify/:hash
-//   DeleteFile              DELETE /files/:hash
-//   DiffVersions            POST /files/diff
-//   CreateCollection        POST /collections
-//   ListCollections         GET  /collections/:username
-//   GetCollection           GET  /collections/:username/:collection_name
-//   AddEntry                POST /collections/:username/:collection_name/entries
-//   RemoveEntry             DELETE /collections/:username/:collection_name/entries/*path
-//   DownloadCollectionFile  GET  /:username/:collection_name/*filepath
-//   CommitCollection        POST /collections/:username/:collection_name/commit
-//   GetVersionLog           GET  /collections/:username/:collection_name/log
-//   RollbackCollection      POST /collections/:username/:collection_name/rollback/:version_id
-//   MergeFromSource         POST /actions/merge
-//   ForkCollection          POST /actions/fork
-//   PullCollection          POST /actions/pull
-//   GetTaskStatus           GET  /tasks/:id
-//   ListTasks               GET  /tasks
+// 健康检查控制器 — 返回 "pong" 确认服务运行中。
+// Package controller 是所有 API 处理函数的包定义。每个 Controller 文件
+// 通过独立的 Init* 函数（InitDownloader、InitP2PController、InitFileController）
+// 注册各自依赖的服务实例。
+// 本文件包含 Ping 函数：简单返回 200 + "pong" 文本，用于负载均衡健康检查。
+// 路由：
+//   GET /ping — 健康检查
 
 package controller
 

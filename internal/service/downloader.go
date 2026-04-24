@@ -1,5 +1,8 @@
-// Package service provides business logic layer for download and P2P operations.
-// Uses provider.Manager for content retrieval and libp2p for networking.
+// Package service 提供业务逻辑层，封装下载和 P2P 操作。
+// Downloader 使用 provider.Manager 进行内容检索，流程：
+//   repository.GetFileByHash(hash) 查询元数据 →
+//   manager.GetReader(providerType, path) 获取流 →
+//   返回 io.ReadCloser + 文件名给控制器层流式响应。
 
 package service
 

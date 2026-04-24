@@ -1,5 +1,6 @@
-// Package model defines data structures for the Peerdrive system.
-// TransferTask: tracks async operations (pull, merge, etc.) with status polling.
+// Package model 定义 Peerdrive 系统的异步任务数据结构。
+// TransferTask（transfer_tasks 表）：跟踪异步操作（pull、merge 等），
+//   支持状态轮询（pending/completed/failed），params 和 result 为 JSON 字符串。
 
 package model
 

@@ -1,5 +1,7 @@
-// Local provider — reads files from the local filesystem under BaseDir.
-// Usage: registered with Manager as provider_type "local".
+// 本地文件提供者 — 从 BaseDir 下的路径读取文件。
+// 通过 Manager 注册为 provider_type "local"。
+// GetReader 使用 os.Open 打开 BaseDir + path 的完整路径。
+// GetFilenameHint 优先返回原始文件名，否则返回 path 的基本名。
 
 package provider
 

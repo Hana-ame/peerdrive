@@ -1,15 +1,17 @@
-// Collection controller — CRUD for collections, entries, commit/version log/rollback.
-// A collection is a named set of path→hash mappings belonging to a user.
-// Usage:
-//   POST   /collections                              — create collection
-//   GET    /collections/:username                     — list user's collections
-//   GET    /collections/:username/:coll               — get collection + entries
-//   POST   /collections/:username/:coll/entries       — add path→hash entry
-//   DELETE /collections/:username/:coll/entries/:path — remove entry
-//   POST   /collections/:username/:coll/commit        — snapshot entries as version
-//   GET    /collections/:username/:coll/log           — version history
-//   POST   /collections/:username/:coll/rollback/:vid — restore entries from version
-//   GET    /:username/:coll/*filepath                 — download file from collection
+// 集合控制器 — 集合 CRUD、条目增删、版本提交/日志/回滚。
+// 集合是一个命名的一组 path→hash 映射，属于某个用户。
+// 通过 repository 包操作 SQLite 的 collections、collection_entries、
+// collection_versions、version_entries 四张表。
+// 路由：
+//   POST   /collections                              — 创建集合
+//   GET    /collections/:username                     — 列出用户集合
+//   GET    /collections/:username/:coll               — 获取集合 + 条目列表
+//   POST   /collections/:username/:coll/entries       — 添加 path→hash 条目
+//   DELETE /collections/:username/:coll/entries/:path — 删除条目
+//   POST   /collections/:username/:coll/commit        — 快照当前条目为版本
+//   GET    /collections/:username/:coll/log           — 版本历史（最新优先）
+//   POST   /collections/:username/:coll/rollback/:vid — 回滚到指定版本
+//   GET    /:username/:coll/*filepath                 — 从集合下文件条目下载
 
 package controller
 

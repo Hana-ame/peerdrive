@@ -1,7 +1,10 @@
-// Task controller — query async task status.
-// Usage:
-//   GET /tasks     — list tasks (currently returns empty)
-//   GET /tasks/:id — get task status by ID
+// 任务控制器 — 查询异步任务状态。
+// 异步任务（如 pull）通过 transfer_tasks 表跟踪状态（pending/completed/failed）。
+// 技术实现：ListTasks 当前返回空数组占位；GetTaskStatus 通过
+//   repository.GetTask 查询 SQLite 并返回完整任务记录。
+// 路由：
+//   GET /tasks     — 列出所有任务（当前返回空占位）
+//   GET /tasks/:id — 按 ID 查询任务状态和结果
 
 package controller
 

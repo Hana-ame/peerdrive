@@ -1,8 +1,9 @@
-// Package model defines data structures for collection management and versioning.
-// Collection: a named set of path→hash mappings owned by a user.
-// CollectionEntry: a single path→hash mapping within a collection.
-// CollectionVersion: a snapshot of entries at commit time.
-// VersionEntry: a single entry within a version snapshot.
+// Package model 定义集合管理与版本控制的数据结构。
+// Collection（collections 表）：用户拥有的一组命名的 path→hash 映射。
+// CollectionEntry（collection_entries 表）：集合中的单个路径映射。
+// CollectionVersion（collection_versions 表）：commit 时的条目快照，
+//   通过 parent_version_id 形成版本链。
+// VersionEntry（version_entries 表）：版本快照中的单个条目记录。
 
 package model
 

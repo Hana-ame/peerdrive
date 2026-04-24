@@ -1,8 +1,7 @@
-// Package model defines data structures for the Peerdrive system.
-// Includes FileMetadata (content-addressed file records),
-// Collection/CollectionEntry (user-managed file sets),
-// CollectionVersion/VersionEntry (version snapshots),
-// and TransferTask (async operation tracking).
+// Package model 定义 Peerdrive 系统的核心数据结构和 SQLite 表映射。
+// 文件结构 FileMetadata：对应 files 表，包含 ID、SHA256 哈希、
+//   提供者类型（local/http）、存储路径和原始文件名。
+// 使用 db 标签标记数据库列名，用于 repository 层的 Scan 绑定。
 
 package model
 

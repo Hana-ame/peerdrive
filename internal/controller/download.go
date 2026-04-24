@@ -1,6 +1,9 @@
-// Download controller — content-addressable file download by SHA256 hash.
-// Usage: InitDownloader(svc) must be called before handling requests.
-//   GET /sha256sum/:sha256 — downloads file content by its SHA256 hash.
+// 下载控制器 — 通过 SHA256 哈希进行内容寻址文件下载。
+// 先调用 InitDownloader(svc) 注册 service.Downloader 实例。
+// 流程：校验哈希格式 → repository.GetFileByHash 查元数据 →
+//   provider.Manager.GetReader 获取 io.ReadCloser → Gin DataFromReader 流式返回。
+// 路由：
+//   GET /sha256sum/:sha256 — 按 SHA256 哈希下载文件
 
 package controller
 

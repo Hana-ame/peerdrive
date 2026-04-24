@@ -1,16 +1,16 @@
-// Package router wires Gin routes to all controllers.
-// Usage: called from cmd/server/main.go with initialized services.
-//
-// Route groups:
-//   /ping              — health check
-//   /sha256sum/:sha256 — download by hash
-//   /p2p/*             — P2P node/peer management
-//   /files/*           — file upload/register/verify/delete/diff
-//   /collections/*     — collection CRUD + entries + versioning
-//   /actions/*         — merge/fork/pull
-//   /tasks/*           — async task status
-//   /:user/:coll/*     — download from collection
-//   /swagger/*         — Swagger UI
+// Package router 将 Gin 路由注册到所有 Controller 处理函数。
+// 由 cmd/server/main.go 调用，传入已初始化的服务实例（Downloader、
+// P2PService、storageDir）。
+// 路由分组：
+//   /ping              — 健康检查（GET）
+//   /sha256sum/:sha256 — 通过 SHA256 哈希下载文件（GET）
+//   /p2p/*             — P2P 节点信息、对等列表、Ping（GET）
+//   /files/*           — 文件上传/注册/验证/删除/版本差异（POST/GET/DELETE）
+//   /collections/*     — 集合 CRUD + 条目管理 + 版本控制（POST/GET/DELETE）
+//   /actions/*         — 合并/复刻/拉取（POST）
+//   /tasks/*           — 异步任务状态查询（GET）
+//   /:user/:coll/*     — 从集合条目中下载文件（GET）
+//   /swagger/*         — Swagger UI 页面（GET）
 
 package router
 

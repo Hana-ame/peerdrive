@@ -1,5 +1,8 @@
-// Task repository — CRUD for async transfer_tasks table.
-// Usage: CreateTask, UpdateTaskStatus, GetTask.
+// 任务仓库 — transfer_tasks 表的异步任务 CRUD 操作。
+// 函数列表：
+//   CreateTask(type, params)    — 创建新任务，状态初始为 "pending"
+//   UpdateTaskStatus(id,status,result) — 更新任务状态和结果（自动更新 updated_at）
+//   GetTask(id)                 — 按 ID 查询任务详情，未找到返回 (nil, nil)
 
 package repository
 

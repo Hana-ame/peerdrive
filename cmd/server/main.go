@@ -1,8 +1,11 @@
-// Peerdrive server entry point.
-// Starts a Gin HTTP server with libp2p P2P node, SQLite metadata DB,
-// and content-addressable file storage.
-// Usage: go run ./cmd/server/main.go
+// Peerdrive 服务端入口点。
+// 启动 Gin HTTP 服务器，同时初始化 libp2p P2P 节点、SQLite 元数据库
+// 和内容寻址文件存储。支持环境变量 PORT（监听端口）和
+// PEERDRIVE_STORAGE（存储目录，默认 ./storage）。
+// 使用方式：go run ./cmd/server/main.go
 //   PORT=3000 PEERDRIVE_STORAGE=./storage go run ./cmd/server/main.go
+// 内部流程：repository.InitDB → provider.NewManager → service.NewDownloader
+//   → service.NewP2PService → router.SetupRouter → r.Run(port)
 
 package main
 

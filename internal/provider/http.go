@@ -1,5 +1,7 @@
-// HTTP provider — fetches content from remote URLs via HTTP GET.
-// Usage: registered with Manager as provider_type "http".
+// HTTP 远程提供者 — 通过 HTTP GET 从 URL 获取文件内容。
+// 通过 Manager 注册为 provider_type "http"。
+// GetReader 发送 net/http GET 请求，检查 200 状态码后返回 Body。
+// GetFilenameHint 使用 path.Base 从 URL 提取文件名。
 
 package provider
 

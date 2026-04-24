@@ -1,7 +1,10 @@
-// Provider manager — routes GetReader calls to the appropriate ContentProvider based on provider_type.
-// Usage: NewManager(baseDir) creates a Manager with "local" and "http" providers.
+// 提供者管理器 — 根据 provider_type 字符串将 GetReader 调用路由到
+// 对应的 ContentProvider 实现。
+// NewManager(baseDir) 创建 Manager 并注册 "local" 和 "http" 两个提供者。
+// 路由示例：
 //   manager.GetReader("local", "path/to/file")  → LocalProvider
 //   manager.GetReader("http", "https://...")    → HTTPProvider
+// 未知 provider_type 返回 "unknown provider" 错误。
 
 package provider
 

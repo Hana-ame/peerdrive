@@ -1,5 +1,9 @@
-// Package service provides business logic layer for download and P2P operations.
-// Uses provider.Manager for content retrieval and libp2p for networking.
+// Package service 提供业务逻辑层，封装下载和 P2P 操作。
+// P2PService 封装 libp2p 节点的生命周期管理：
+//   NewP2PService — 创建 libp2p Host，监听 /ip4/0.0.0.0/tcp/0（随机端口）
+//   GetNodeInfo   — 返回 PeerID + 所有 multiaddr
+//   GetConnectedPeers — 通过 host.Network().Peers() 获取连接的对等节点
+//   PingPeer      — 通过 ping.PingService 发送 Ping 并等待 RTT 结果
 
 package service
 
