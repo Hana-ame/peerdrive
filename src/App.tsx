@@ -1,66 +1,45 @@
-import { useState } from 'react'
-import { API_BASE } from './config'
+import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom'
+import { Toaster } from 'react-hot-toast'
+import { PeerdriveProvider } from './context/PeerdriveContext'
+import Dashboard from './pages/Dashboard'
+import CollectionDetail from './pages/CollectionDetail'
+import ForkCollection from './pages/ForkCollection'
+import P2PInfo from './pages/P2PInfo'
+import TaskStatus from './pages/TaskStatus'
 import './App.css'
 
-function App() {
-  const [status, setStatus] = useState<string>('')
-  const [nodeInfo, setNodeInfo] = useState<{ peer_id: string; addrs: string[] } | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  const checkPing = async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(`${API_BASE}/ping`)
-      const text = await res.text()
-      setStatus(text)
-    } catch (e) {
-      setStatus('Error: ' + (e as Error).message)
-    }
-    setLoading(false)
-  }
-
-  const getNodeInfo = async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(`${API_BASE}/p2p/node`)
-      const data = await res.json()
-      setNodeInfo(data)
-    } catch (e) {
-      setStatus('Error: ' + (e as Error).message)
-    }
-    setLoading(false)
-  }
-
+function Navbar() {
+  const location = useLocation()
   return (
-    <>
-      <section id="center">
-        <h1>Peerdrive</h1>
-        <p>P2P 文件分享系统</p>
-      </section>
+    <nav className="navbar">
+      <Link to="/" className="brand">Peerdrive</Link>
+      <div className="nav-links">
+        <Link to="/" className={location.pathname === '/' ? 'active' : ''}>Dashboard</Link>
+        <Link to="/p2p" className={location.pathname === '/p2p' ? 'active' : ''}>P2P</Link>
+        <Link to="/fork" className={location.pathname === '/fork' ? 'active' : ''}>Fork</Link>
+        <Link to="/tasks" className={location.pathname === '/tasks' ? 'active' : ''}>Tasks</Link>
+      </div>
+    </nav>
+  )
+}
 
-      <section id="controls">
-        <button onClick={checkPing} disabled={loading}>
-          Check /ping
-        </button>
-        <button onClick={getNodeInfo} disabled={loading}>
-          Get /p2p/node
-        </button>
-      </section>
-
-      {status && (
-        <section id="result">
-          <h3>/ping Response:</h3>
-          <pre>{status}</pre>
-        </section>
-      )}
-
-      {nodeInfo && (
-        <section id="result">
-          <h3>/p2p/node Response:</h3>
-          <pre>{JSON.stringify(nodeInfo, null, 2)}</pre>
-        </section>
-      )}
-    </>
+function App() {
+  return (
+    <PeerdriveProvider>
+      <BrowserRouter>
+        <Toaster position="top-right" />
+        <Navbar />
+        <main>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/collections/:username/:collName" element={<CollectionDetail />} />
+            <Route path="/fork" element={<ForkCollection />} />
+            <Route path="/p2p" element={<P2PInfo />} />
+            <Route path="/tasks" element={<TaskStatus />} />
+          </Routes>
+        </main>
+      </BrowserRouter>
+    </PeerdriveProvider>
   )
 }
 
