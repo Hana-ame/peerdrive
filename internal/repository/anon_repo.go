@@ -1,23 +1,16 @@
-// 匿名合集仓库 — 将 AnonCollection JSON 写入文件系统并注册到 files 表。
+// 匿名合集仓库 — 将 AnonCollection JSON 写入文件系统并注册到数据库。
 //
 // SaveCollection(coll, storageDir):
 //   1. entries 按 Path 字典序排序
 //   2. json.Marshal(coll) → []byte（字段顺序固定，保证确定性）
-//   3. SHA256([]byte) → hashStr（即集合唯一标识）
-//   4. 写文件到 storage/anon/{hashStr[:2]}/{hashStr}
-//   5. 注册到 files 表，type='anon_collection'
-//   6. 幂等：文件已存在则跳过写，UNIQUE(hash) 保证不重复插入
+//   3. SHA256([]byte) → hashStr
+//   4. 写文件到 storage/{hashStr[:2]}/{hashStr}
+//   5. INSERT file_meta (hash, gziped=0, filename, type=anon_collection)
+//   6. INSERT file_providers (hash, 'local', path)
 //
 // GetAnonCollectionByHash(hash, storageDir):
-//   1. 从 storage/anon/{hash[:2]}/{hash} 读取文件内容
-//   2. json.Unmarshal 解析为 AnonCollection
-//   3. 校验 Version 字段（目前支持 1）
-//
-// storageDir 通过 SetStorageDir(dir) 注入。
-//
-// 依赖：
-//   - files 表有 type TEXT DEFAULT 'blob' 列
-//   - model.AnonCollection 结构体字段顺序固定（json.Marshal 按声明顺序）
+//   1. 从 storage/{hash[:2]}/{hash} 读取文件内容
+//   2. json.Unmarshal 解析为 AnonCollection → 校验 Version
 
 package repository
 
@@ -53,7 +46,8 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 	h := sha256.Sum256(data)
 	hashStr := hex.EncodeToString(h[:])
 
-	dir := filepath.Join(storageDir, "anon", hashStr[:2])
+	// 写文件
+	dir := filepath.Join(storageDir, hashStr[:2])
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
@@ -64,12 +58,16 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 		}
 	}
 
+	// 注册 file_meta（幂等）
 	relPath := fmt.Sprintf("%s/%s", hashStr[:2], hashStr)
-	_, err = DB.Exec(`
-		INSERT INTO files (hash, provider_type, path, filename, type)
-		VALUES (?, 'local', ?, ?, ?)`,
-		hashStr, relPath, fmt.Sprintf("anon_%s.json", hashStr), FileTypeAnonCollection,
-	)
+	_ = InsertFileMeta(&model.FileMeta{
+		Hash:     hashStr,
+		Gziped:   false,
+		Filename: fmt.Sprintf("anon_%s.json", hashStr),
+		Type:     FileTypeAnonCollection,
+	})
+	_ = InsertFileProvider(hashStr, "local", relPath)
+
 	return hashStr, nil
 }
 
@@ -91,4 +89,3 @@ func GetAnonCollectionByHash(hash string, storageDir string) (*model.AnonCollect
 	}
 	return &coll, nil
 }
-

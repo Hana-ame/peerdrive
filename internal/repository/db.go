@@ -1,16 +1,13 @@
 // Package repository 提供 SQLite 数据库操作层。
 // 使用 mattn/go-sqlite3 驱动。必须先调用 InitDB(dbPath) 初始化全局 DB 连接。
-// 自动建表（CREATE TABLE IF NOT EXISTS），包含六张表：
-//   files               — 文件元数据（哈希→位置映射；metadata TEXT 存 JSON 扩展属性）
-//   collections         — 集合（用户+名称唯一；current_hash 指向最新快照 hash）
-//   collection_entries  — 集合条目（path→hash，基于 collection_id 级联删除）
-//   collection_versions — 版本快照记录（带 parent_version_id 版本链）
+// 七张表：
+//   file_meta       — 文件内容元数据（hash PK：size / mime_type / gziped / filename / type）
+//   file_providers  — 文件存储位置（hash → provider_type + path，多副本可用）
+//   collections     — 注册用户合集（current_hash 指向最新快照）
+//   collection_entries  — 合集工作区条目
+//   collection_versions — 版本快照记录
 //   version_entries     — 版本快照内容
 //   transfer_tasks      — 异步任务跟踪
-//
-// Metadata 格式示例：
-//   {"is_gzip": true, "mime_type": "application/gzip"}
-// 所有文件级扩展属性全部放入 metadata JSON，不新增专用列。
 
 package repository
 
@@ -19,7 +16,6 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// 文件类型常量（与 model 包保持一致）
 const (
 	FileTypeBlob           = "blob"
 	FileTypeAnonCollection = "anon_collection"
@@ -34,17 +30,24 @@ func InitDB(dbPath string) error {
 		return err
 	}
 	schema := `
-	CREATE TABLE IF NOT EXISTS files (
+	CREATE TABLE IF NOT EXISTS file_meta (
+		hash TEXT PRIMARY KEY,
+		size INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		mime_type TEXT DEFAULT '',
+		gziped INTEGER DEFAULT 0,
+		filename TEXT,
+		type TEXT DEFAULT '` + FileTypeBlob + `'
+	);
+
+	CREATE TABLE IF NOT EXISTS file_providers (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		hash TEXT NOT NULL,
+		hash TEXT NOT NULL REFERENCES file_meta(hash),
 		provider_type TEXT NOT NULL,
 		path TEXT NOT NULL,
-		filename TEXT,
-		metadata TEXT DEFAULT '{}',
-		type TEXT DEFAULT '` + FileTypeBlob + `',
 		available INTEGER DEFAULT 1
 	);
-	CREATE INDEX IF NOT EXISTS idx_hash ON files(hash);
+	CREATE INDEX IF NOT EXISTS idx_provider_hash ON file_providers(hash);
 
 	CREATE TABLE IF NOT EXISTS collections (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,13 +95,12 @@ func InitDB(dbPath string) error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	`
+
 	if _, err := DB.Exec(schema); err != nil {
 		return err
 	}
-	// 迁移：为旧数据库添加缺失列（已有则忽略）
-	DB.Exec(`ALTER TABLE files ADD COLUMN metadata TEXT DEFAULT '{}'`)
-	DB.Exec(`ALTER TABLE files ADD COLUMN type TEXT DEFAULT '` + FileTypeBlob + `'`)
-	DB.Exec(`ALTER TABLE files ADD COLUMN available INTEGER DEFAULT 1`)
+
+	// 迁移：从旧 files 表迁移到新表（忽略错误）
 	DB.Exec(`ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`)
 	return nil
 }

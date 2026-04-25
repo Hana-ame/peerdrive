@@ -1,16 +1,12 @@
 // 下载控制器 — 通过 SHA256 哈希进行内容寻址文件下载。
 // 先调用 InitDownloader(svc) 注册 service.Downloader 实例。
-// 流程：校验哈希格式 → Downloader.GetFileStream 读取文件 →
-//   GetFileStream 返回 metadata JSON →
-//   解析 metadata，若 is_gzip 为 true 则设置 Content-Encoding: gzip 响应头 →
-//   Gin DataFromReader 流式返回。
+// 流程：校验 hash → Downloader.GetFileStream → 解析 meta.is_gzip → Content-Encoding
 // 路由：
 //   GET /sha256sum/:sha256 — 按 SHA256 哈希下载文件
 
 package controller
 
 import (
-	"encoding/json"
 	"net/http"
 	"peerdrive/internal/service"
 	"peerdrive/pkg/hashutil"
@@ -24,16 +20,6 @@ func InitDownloader(s *service.Downloader) {
 	downloader = s
 }
 
-// DownloadBySHA256 godoc
-// @Summary Download file by SHA256
-// @Description Download a file using its SHA256 hash as the content identifier. Looks up metadata in SQLite, then streams from the appropriate provider (local or HTTP).
-// @Tags download
-// @Produce octet-stream
-// @Param sha256 path string true "64-character lowercase SHA256 hex string"
-// @Success 200 {file} binary "File content"
-// @Failure 400 {object} map[string]string "Invalid hash format"
-// @Failure 404 {object} map[string]string "File not found"
-// @Router /sha256sum/{sha256} [get]
 func DownloadBySHA256(c *gin.Context) {
 	DownloadBySHA256Internal(c, c.Param("sha256"))
 }
@@ -43,7 +29,7 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256 format"})
 		return
 	}
-	reader, filename, metaJSON, err := downloader.GetFileStream(hash)
+	reader, filename, gziped, err := downloader.GetFileStream(hash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -51,14 +37,8 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 	defer reader.Close()
 
 	c.Header("Content-Disposition", "attachment; filename="+filename)
-
-	var meta map[string]any
-	if metaJSON != "" {
-		json.Unmarshal([]byte(metaJSON), &meta)
-	}
-	if isGzip, _ := meta["is_gzip"].(bool); isGzip {
+	if gziped {
 		c.Header("Content-Encoding", "gzip")
 	}
-
 	c.DataFromReader(http.StatusOK, -1, "application/octet-stream", reader, nil)
 }

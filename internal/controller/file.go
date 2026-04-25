@@ -1,14 +1,9 @@
 // 文件控制器 — 上传、注册本地文件/文件夹、哈希验证、删除、版本差异比较。
 // 先调用 InitFileController(storageDir) 创建存储目录并保存引用。
-// 上传流程：multipart 读取 → SHA256 计算 → 检测 gzip 魔数（0x1f 0x8b） →
-//   存储到 storage/{hex[0:2]}/{hex} → 组装 metadata JSON → InsertFile。
-// 注册流程：扫描本地文件 → SHA256 计算 → 同上传检测 gzip → 仅写入 DB 不复制。
-// 差异比较：对比两个 version_entries 的快照，返回 added/removed/modified。
+// 上传流程：multipart → SHA256 → storage/{h[:2]}/{h} → INSERT file_meta → INSERT file_providers
+// 注册流程：扫描本地文件 → SHA256 → INSERT file_meta（如不存在）→ INSERT file_providers
 //
-// metadata 格式：{"is_gzip": true/false}
-//   gzip 检测：文件前 2 字节若为 0x1f 0x8b 则 is_gzip = true
-//   扩展属性（如 mime_type）直接追加到 metadata JSON 中。
-// metadata 影响 /sha256sum/:hash 下载时是否设置 Content-Encoding: gzip。
+// metadata 属性（gzip/mime_type）存储在 file_meta 的专用列中。
 //
 // 路由：
 //   POST   /files/upload           — 上传文件，按 SHA256 路径存储
@@ -23,7 +18,6 @@ package controller
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -44,16 +38,6 @@ func InitFileController(storage string) {
 }
 
 // UploadFile godoc
-// @Summary Upload a file
-// @Description Upload a file, compute its SHA256 hash, store to disk at storage/{first2}/{hash}, and register in the database. Deduplicates by hash.
-// @Tags files
-// @Accept multipart/form-data
-// @Produce json
-// @Param file formData file true "File to upload"
-// @Success 200 {object} map[string]string "hash and filename"
-// @Failure 400 {object} map[string]string "Missing file"
-// @Failure 409 {object} map[string]string "File already exists"
-// @Router /files/upload [post]
 func UploadFile(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
@@ -87,37 +71,22 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
-	// 构建 metadata
-	metaData, _ := json.Marshal(map[string]any{
-		"is_gzip": isGzipFile(fullPath),
-	})
+	isGzip := isGzipFile(fullPath)
 
-	meta := &model.FileMetadata{
-		Hash:         hash,
-		ProviderType: "local",
-		Path:         relPath,
-		Filename:     header.Filename,
-		Metadata:     string(metaData),
-		Available:    true,
-	}
-	if err := repository.InsertFile(meta); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
+	// file_meta（幂等）
+	_ = repository.InsertFileMeta(&model.FileMeta{
+		Hash:     hash,
+		Gziped:   isGzip,
+		Filename: header.Filename,
+		Type:     repository.FileTypeBlob,
+	})
+	// file_providers
+	_ = repository.InsertFileProvider(hash, "local", relPath)
 
 	c.JSON(http.StatusOK, gin.H{"hash": hash, "filename": header.Filename})
 }
 
 // RegisterLocalFile godoc
-// @Summary Register a local file
-// @Description Register an already-existing file in the storage directory. Computes its SHA256 and inserts into the database without copying.
-// @Tags files
-// @Accept json
-// @Produce json
-// @Param body body object{path=string,filename=string} true "Local path and display filename"
-// @Success 200 {object} map[string]string "hash, filename, note"
-// @Failure 400 {object} map[string]string "Invalid request or file not found"
-// @Router /files/register_local [post]
 func RegisterLocalFile(c *gin.Context) {
 	var req struct {
 		Path     string `json:"path"`
@@ -143,35 +112,25 @@ func RegisterLocalFile(c *gin.Context) {
 	}
 	hash := hex.EncodeToString(h.Sum(nil))
 
-	metaData, _ := json.Marshal(map[string]any{
-		"is_gzip": isGzipFile(fullPath),
-	})
+	isGzip := isGzipFile(fullPath)
 
-	meta := &model.FileMetadata{
-		Hash:         hash,
-		ProviderType: "local",
-		Path:         req.Path,
-		Filename:     req.Filename,
-		Metadata:     string(metaData),
-		Available:    true,
+	// file_meta（hash 已存在则忽略）
+	existing, _ := repository.GetFileMeta(hash)
+	if existing == nil {
+		_ = repository.InsertFileMeta(&model.FileMeta{
+			Hash:     hash,
+			Gziped:   isGzip,
+			Filename: req.Filename,
+			Type:     repository.FileTypeBlob,
+		})
 	}
-	if err := repository.InsertFile(meta); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
+	// file_providers（同一位置可重复注册）
+	_ = repository.InsertFileProvider(hash, "local", req.Path)
+
 	c.JSON(http.StatusOK, gin.H{"hash": hash, "filename": req.Filename})
 }
 
 // RegisterFolder godoc
-// @Summary Register all files in a folder
-// @Description Batch-register every file in the given subdirectory of storage/. Non-recursive, skips subdirectories.
-// @Tags files
-// @Accept json
-// @Produce json
-// @Param body body object{folder_path=string} true "Relative folder path under storage/"
-// @Success 200 {object} map[string]interface{} "registered array"
-// @Failure 400 {object} map[string]string "Folder not found"
-// @Router /files/register_folder [post]
 func RegisterFolder(c *gin.Context) {
 	var req struct {
 		FolderPath string `json:"folder_path"`
@@ -203,19 +162,18 @@ func RegisterFolder(c *gin.Context) {
 		f.Close()
 		hash := hex.EncodeToString(h.Sum(nil))
 		rel := filepath.Join(req.FolderPath, entry.Name())
+		isGzip := isGzipFile(fp)
 
-		metaData, _ := json.Marshal(map[string]any{
-			"is_gzip": isGzipFile(fp),
-		})
+		if existing, _ := repository.GetFileMeta(hash); existing == nil {
+			_ = repository.InsertFileMeta(&model.FileMeta{
+				Hash:     hash,
+				Gziped:   isGzip,
+				Filename: entry.Name(),
+				Type:     repository.FileTypeBlob,
+			})
+		}
+		_ = repository.InsertFileProvider(hash, "local", rel)
 
-		repository.InsertFile(&model.FileMetadata{
-			Hash:         hash,
-			ProviderType: "local",
-			Path:         rel,
-			Filename:     entry.Name(),
-			Metadata:     string(metaData),
-			Available:    true,
-		})
 		results = append(results, map[string]string{
 			"filename": entry.Name(),
 			"hash":     hash,
@@ -225,22 +183,13 @@ func RegisterFolder(c *gin.Context) {
 }
 
 // VerifyFile godoc
-// @Summary Verify a file by hash
-// @Description Look up file metadata (filename, provider, path) by its SHA256 hash
-// @Tags files
-// @Produce json
-// @Param hash path string true "SHA256 hash"
-// @Success 200 {object} map[string]string "hash, filename, provider, path"
-// @Failure 400 {object} map[string]string "Invalid hash"
-// @Failure 404 {object} map[string]string "Not found"
-// @Router /files/verify/{hash} [get]
 func VerifyFile(c *gin.Context) {
 	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
 		return
 	}
-	meta, err := repository.GetFileByHash(hash)
+	meta, err := repository.GetFileMeta(hash)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -249,34 +198,24 @@ func VerifyFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
 	}
-	var metaMap map[string]any
-	json.Unmarshal([]byte(meta.Metadata), &metaMap)
 	c.JSON(http.StatusOK, gin.H{
 		"hash":     meta.Hash,
 		"filename": meta.Filename,
-		"provider": meta.ProviderType,
-		"path":     meta.Path,
-		"metadata": metaMap,
+		"size":     meta.Size,
+		"mime":     meta.MimeType,
+		"gziped":   meta.Gziped,
+		"type":     meta.Type,
 	})
 }
 
 // DeleteFile godoc
-// @Summary Delete a file by hash
-// @Description Remove file metadata from database and delete the local file if provider_type == "local"
-// @Tags files
-// @Produce json
-// @Param hash path string true "SHA256 hash"
-// @Success 200 {object} map[string]string "message"
-// @Failure 400 {object} map[string]string "Invalid hash"
-// @Failure 404 {object} map[string]string "Not found"
-// @Router /files/{hash} [delete]
 func DeleteFile(c *gin.Context) {
 	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
 		return
 	}
-	meta, err := repository.GetFileByHash(hash)
+	meta, err := repository.GetFileMeta(hash)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -285,25 +224,19 @@ func DeleteFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
 	}
-	if meta.ProviderType == "local" {
-		os.Remove(filepath.Join(storageDir, meta.Path))
+	// 删除本地文件（如果有 local provider）
+	providers, _ := repository.GetFileProviders(hash)
+	for _, p := range providers {
+		if p.ProviderType == "local" {
+			os.Remove(filepath.Join(storageDir, p.Path))
+		}
 	}
-	repository.DeleteFile(hash)
-	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+	// 删除 file_providers 和 file_meta
+	repository.DB.Exec(`DELETE FROM file_providers WHERE hash = ?`, hash)
+	repository.DB.Exec(`DELETE FROM file_meta WHERE hash = ?`, hash)
 }
 
-// DiffVersions godoc
-// @Summary Diff entries between two versions
-// @Description Compare version_entries between two collection versions and return added/removed/modified lists
-// @Tags files
-// @Accept json
-// @Produce json
-// @Param body body object{version_a=int,version_b=int} true "Version IDs to compare"
-// @Success 200 {object} map[string]interface{} "added, removed, modified"
-// @Failure 400 {object} map[string]string "Invalid request"
-// @Router /files/diff [post]
 // isGzipFile 检测文件是否为 gzip 压缩（魔数 0x1f 0x8b）。
-// 返回 false 表示不是 gzip 或文件不可读。
 func isGzipFile(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
@@ -315,6 +248,7 @@ func isGzipFile(path string) bool {
 	return n == 2 && buf[0] == 0x1f && buf[1] == 0x8b
 }
 
+// DiffVersions godoc
 func DiffVersions(c *gin.Context) {
 	var req struct {
 		VersionA int `json:"version_a"`
