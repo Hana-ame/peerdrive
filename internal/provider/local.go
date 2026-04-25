@@ -16,7 +16,10 @@ type LocalProvider struct {
 }
 
 func (p *LocalProvider) GetReader(path string) (io.ReadCloser, error) {
-	fullPath := filepath.Join(p.BaseDir, path)
+	fullPath := path
+	if !filepath.IsAbs(path) {
+		fullPath = filepath.Join(p.BaseDir, path)
+	}
 	return os.Open(fullPath)
 }
 

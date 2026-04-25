@@ -73,3 +73,9 @@ PRIMARY KEY (repo_name, username, path, created_at)
 - **repo_files table**: Maps `repo@username/path` to hash, includes provider_type and file_path for peer-to-peer sharing
 - Each repo can have its own storage provider (local, http, or peer network)
 - History preserved via append-only inserts (multiple rows per path with different timestamps)
+
+## 2026-04-25
+- **移除 Gzip 检测**：移除了 `internal/controller/file.go` 中的 `isGzipFile` 检测逻辑及辅助函数。文件注册时 `Gziped` 默认设为 `false`。
+- **修复路径拼接问题**：修复了 `RegisterLocalFile` 和 `RegisterFolder` 中将用户路径错误地与 `storageDir` 拼接的 Bug。现在支持注册本地文件系统的绝对路径及任意路径。
+- **自适应路径加载**：更新了 `LocalProvider` 以同时支持绝对路径和相对路径。绝对路径直接访问，相对路径则继续相对于 `storageDir` 解析。
+

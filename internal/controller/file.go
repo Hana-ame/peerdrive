@@ -71,12 +71,10 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
-	isGzip := isGzipFile(fullPath)
-
 	// file_meta（幂等）
 	_ = repository.InsertFileMeta(&model.FileMeta{
 		Hash:     hash,
-		Gziped:   isGzip,
+		Gziped:   false,
 		Filename: header.Filename,
 		Type:     repository.FileTypeBlob,
 	})
@@ -97,7 +95,7 @@ func RegisterLocalFile(c *gin.Context) {
 		return
 	}
 
-	fullPath := filepath.Join(storageDir, req.Path)
+	fullPath := req.Path
 	f, err := os.Open(fullPath)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file not found"})
@@ -112,14 +110,12 @@ func RegisterLocalFile(c *gin.Context) {
 	}
 	hash := hex.EncodeToString(h.Sum(nil))
 
-	isGzip := isGzipFile(fullPath)
-
 	// file_meta（hash 已存在则忽略）
 	existing, _ := repository.GetFileMeta(hash)
 	if existing == nil {
 		_ = repository.InsertFileMeta(&model.FileMeta{
 			Hash:     hash,
-			Gziped:   isGzip,
+			Gziped:   false,
 			Filename: req.Filename,
 			Type:     repository.FileTypeBlob,
 		})
@@ -140,7 +136,7 @@ func RegisterFolder(c *gin.Context) {
 		return
 	}
 
-	fullDir := filepath.Join(storageDir, req.FolderPath)
+	fullDir := req.FolderPath
 	entries, err := os.ReadDir(fullDir)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "folder not found"})
@@ -162,12 +158,11 @@ func RegisterFolder(c *gin.Context) {
 		f.Close()
 		hash := hex.EncodeToString(h.Sum(nil))
 		rel := filepath.Join(req.FolderPath, entry.Name())
-		isGzip := isGzipFile(fp)
 
 		if existing, _ := repository.GetFileMeta(hash); existing == nil {
 			_ = repository.InsertFileMeta(&model.FileMeta{
 				Hash:     hash,
-				Gziped:   isGzip,
+				Gziped:   false,
 				Filename: entry.Name(),
 				Type:     repository.FileTypeBlob,
 			})
@@ -234,18 +229,6 @@ func DeleteFile(c *gin.Context) {
 	// 删除 file_providers 和 file_meta
 	repository.DB.Exec(`DELETE FROM file_providers WHERE hash = ?`, hash)
 	repository.DB.Exec(`DELETE FROM file_meta WHERE hash = ?`, hash)
-}
-
-// isGzipFile 检测文件是否为 gzip 压缩（魔数 0x1f 0x8b）。
-func isGzipFile(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	buf := make([]byte, 2)
-	n, _ := f.Read(buf)
-	return n == 2 && buf[0] == 0x1f && buf[1] == 0x8b
 }
 
 // DiffVersions godoc
