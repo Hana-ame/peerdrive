@@ -1,15 +1,16 @@
 // 下载控制器 — 通过 SHA256 哈希进行内容寻址文件下载。
 // 先调用 InitDownloader(svc) 注册 service.Downloader 实例。
 // 流程：校验哈希格式 → Downloader.GetFileStream 读取文件 →
-//   GetFileStream 返回 isGzip 标志 →
-//   若 isGzip 为 true 则设置 Content-Encoding: gzip 响应头（浏览器自动解压），
-//   否则不设置 → Gin DataFromReader 流式返回。
+//   GetFileStream 返回 metadata JSON →
+//   解析 metadata，若 is_gzip 为 true 则设置 Content-Encoding: gzip 响应头 →
+//   Gin DataFromReader 流式返回。
 // 路由：
 //   GET /sha256sum/:sha256 — 按 SHA256 哈希下载文件
 
 package controller
 
 import (
+	"encoding/json"
 	"net/http"
 	"peerdrive/internal/service"
 	"peerdrive/pkg/hashutil"
@@ -42,7 +43,7 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256 format"})
 		return
 	}
-	reader, filename, isGzip, err := downloader.GetFileStream(hash)
+	reader, filename, metaJSON, err := downloader.GetFileStream(hash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -50,8 +51,14 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 	defer reader.Close()
 
 	c.Header("Content-Disposition", "attachment; filename="+filename)
-	if isGzip {
+
+	var meta map[string]any
+	if metaJSON != "" {
+		json.Unmarshal([]byte(metaJSON), &meta)
+	}
+	if isGzip, _ := meta["is_gzip"].(bool); isGzip {
 		c.Header("Content-Encoding", "gzip")
 	}
+
 	c.DataFromReader(http.StatusOK, -1, "application/octet-stream", reader, nil)
 }

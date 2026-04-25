@@ -1,12 +1,16 @@
 // Package repository 提供 SQLite 数据库操作层。
 // 使用 mattn/go-sqlite3 驱动。必须先调用 InitDB(dbPath) 初始化全局 DB 连接。
 // 自动建表（CREATE TABLE IF NOT EXISTS），包含六张表：
-//   files               — 文件元数据（哈希→位置映射）
-//   collections         — 集合（用户+名称唯一；新增 current_cid 指向最新 CID）
+//   files               — 文件元数据（哈希→位置映射；metadata TEXT 存 JSON 扩展属性）
+//   collections         — 集合（用户+名称唯一；current_cid 指向最新 CID）
 //   collection_entries  — 集合条目（path→hash，基于 collection_id 级联删除）
 //   collection_versions — 版本快照记录（带 parent_version_id 版本链）
 //   version_entries     — 版本快照内容
 //   transfer_tasks      — 异步任务跟踪
+//
+// Metadata 格式示例：
+//   {"is_gzip": true, "mime_type": "application/gzip"}
+// 所有文件级扩展属性全部放入 metadata JSON，不新增专用列。
 
 package repository
 
@@ -30,7 +34,7 @@ func InitDB(dbPath string) error {
 		provider_type TEXT NOT NULL,
 		path TEXT NOT NULL,
 		filename TEXT,
-		is_gzip INTEGER DEFAULT 0
+		metadata TEXT DEFAULT '{}'
 	);
 	CREATE INDEX IF NOT EXISTS idx_hash ON files(hash);
 
@@ -80,6 +84,10 @@ func InitDB(dbPath string) error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	`
-	_, err = DB.Exec(schema)
-	return err
+	if _, err := DB.Exec(schema); err != nil {
+		return err
+	}
+	// 迁移：为旧数据库添加 metadata 列（已有则忽略）
+	DB.Exec(`ALTER TABLE files ADD COLUMN metadata TEXT DEFAULT '{}'`)
+	return nil
 }

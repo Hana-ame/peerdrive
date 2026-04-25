@@ -1,11 +1,15 @@
 // 文件控制器 — 上传、注册本地文件/文件夹、哈希验证、删除、版本差异比较。
 // 先调用 InitFileController(storageDir) 创建存储目录并保存引用。
 // 上传流程：multipart 读取 → SHA256 计算 → 检测 gzip 魔数（0x1f 0x8b） →
-//   存储到 storage/{hex[0:2]}/{hex} → repository.InsertFile 写入 SQLite（含 is_gzip 标记）。
+//   存储到 storage/{hex[0:2]}/{hex} → 组装 metadata JSON → InsertFile。
 // 注册流程：扫描本地文件 → SHA256 计算 → 同上传检测 gzip → 仅写入 DB 不复制。
 // 差异比较：对比两个 version_entries 的快照，返回 added/removed/modified。
-// gzip 检测：读取文件前 2 字节，若为 0x1f 0x8b 则视作 gzip 压缩。
-//   该标记影响 /sha256sum/:hash 下载时是否设置 Content-Encoding: gzip 头。
+//
+// metadata 格式：{"is_gzip": true/false}
+//   gzip 检测：文件前 2 字节若为 0x1f 0x8b 则 is_gzip = true
+//   扩展属性（如 mime_type）直接追加到 metadata JSON 中。
+// metadata 影响 /sha256sum/:hash 下载时是否设置 Content-Encoding: gzip。
+//
 // 路由：
 //   POST   /files/upload           — 上传文件，按 SHA256 路径存储
 //   POST   /files/register_local   — 注册已有本地文件
@@ -19,6 +23,7 @@ package controller
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -82,23 +87,17 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
-	// 检测 gzip 魔数
-	isGzip := false
-	f, _ := os.Open(fullPath)
-	if f != nil {
-		buf := make([]byte, 2)
-		if n, _ := f.Read(buf); n == 2 && buf[0] == 0x1f && buf[1] == 0x8b {
-			isGzip = true
-		}
-		f.Close()
-	}
+	// 构建 metadata
+	metaData, _ := json.Marshal(map[string]any{
+		"is_gzip": isGzipFile(fullPath),
+	})
 
 	meta := &model.FileMetadata{
 		Hash:         hash,
 		ProviderType: "local",
 		Path:         relPath,
 		Filename:     header.Filename,
-		IsGzip:       isGzip,
+		Metadata:     string(metaData),
 	}
 	if err := repository.InsertFile(meta); err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "file already exists", "hash": hash})
@@ -149,23 +148,16 @@ func RegisterLocalFile(c *gin.Context) {
 		return
 	}
 
-	// 检测 gzip 魔数
-	isGzip := false
-	gzF, _ := os.Open(fullPath)
-	if gzF != nil {
-		buf := make([]byte, 2)
-		if n, _ := gzF.Read(buf); n == 2 && buf[0] == 0x1f && buf[1] == 0x8b {
-			isGzip = true
-		}
-		gzF.Close()
-	}
+	metaData, _ := json.Marshal(map[string]any{
+		"is_gzip": isGzipFile(fullPath),
+	})
 
 	meta := &model.FileMetadata{
 		Hash:         hash,
 		ProviderType: "local",
 		Path:         req.Path,
 		Filename:     req.Filename,
-		IsGzip:       isGzip,
+		Metadata:     string(metaData),
 	}
 	if err := repository.InsertFile(meta); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -216,16 +208,9 @@ func RegisterFolder(c *gin.Context) {
 		hash := hex.EncodeToString(h.Sum(nil))
 		rel := filepath.Join(req.FolderPath, entry.Name())
 
-		// 检测 gzip 魔数
-		isGzip := false
-		gzF, _ := os.Open(fp)
-		if gzF != nil {
-			buf := make([]byte, 2)
-			if n, _ := gzF.Read(buf); n == 2 && buf[0] == 0x1f && buf[1] == 0x8b {
-				isGzip = true
-			}
-			gzF.Close()
-		}
+		metaData, _ := json.Marshal(map[string]any{
+			"is_gzip": isGzipFile(fp),
+		})
 
 		existing, _ := repository.GetFileByHash(hash)
 		if existing == nil {
@@ -234,7 +219,7 @@ func RegisterFolder(c *gin.Context) {
 				ProviderType: "local",
 				Path:         rel,
 				Filename:     entry.Name(),
-				IsGzip:       isGzip,
+				Metadata:     string(metaData),
 			})
 		}
 		results = append(results, map[string]string{
@@ -270,12 +255,14 @@ func VerifyFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
 	}
+	var metaMap map[string]any
+	json.Unmarshal([]byte(meta.Metadata), &metaMap)
 	c.JSON(http.StatusOK, gin.H{
 		"hash":     meta.Hash,
 		"filename": meta.Filename,
 		"provider": meta.ProviderType,
 		"path":     meta.Path,
-		"is_gzip":  meta.IsGzip,
+		"metadata": metaMap,
 	})
 }
 
@@ -321,6 +308,19 @@ func DeleteFile(c *gin.Context) {
 // @Success 200 {object} map[string]interface{} "added, removed, modified"
 // @Failure 400 {object} map[string]string "Invalid request"
 // @Router /files/diff [post]
+// isGzipFile 检测文件是否为 gzip 压缩（魔数 0x1f 0x8b）。
+// 返回 false 表示不是 gzip 或文件不可读。
+func isGzipFile(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, 2)
+	n, _ := f.Read(buf)
+	return n == 2 && buf[0] == 0x1f && buf[1] == 0x8b
+}
+
 func DiffVersions(c *gin.Context) {
 	var req struct {
 		VersionA int `json:"version_a"`
