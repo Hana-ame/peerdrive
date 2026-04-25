@@ -2,7 +2,7 @@
 set -euo pipefail
 
 API_BASE="${API_BASE:-http://localhost:3000}"
-CURL="curl -sf"
+CURL="curl -sf --noproxy '*'"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
