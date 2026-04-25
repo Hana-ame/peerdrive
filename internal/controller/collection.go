@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
@@ -105,10 +106,27 @@ func GetCollection(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
 	}
-	entries, err := repository.ListCollectionEntries(col.ID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+
+	var entries []model.CollectionEntry
+	if col.CurrentHash != nil && *col.CurrentHash != "" {
+		storageDir := c.MustGet("storageDir").(string)
+		anonColl, err := repository.GetAnonCollectionByHash(*col.CurrentHash, storageDir)
+		if err == nil {
+			entries = make([]model.CollectionEntry, 0, len(anonColl.Entries))
+			for _, ae := range anonColl.Entries {
+				entries = append(entries, model.CollectionEntry{
+					Path: ae.Path,
+					FileHash: ae.Hash,
+				})
+			}
+		}
+	}
+	if entries == nil {
+		entries, err = repository.ListCollectionEntries(col.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	if entries == nil {
 		entries = []model.CollectionEntry{}
@@ -221,13 +239,14 @@ func DownloadCollectionFile(c *gin.Context) {
 // CommitCollection godoc
 // @Summary Commit collection entries as a new version
 // @Description Snapshot all current entries into a version with a commit message. Creates a linked version chain.
+//   Also generates an anonymous collection JSON (SHA256), updates collections.current_hash.
 // @Tags collections
 // @Accept json
 // @Produce json
 // @Param username path string true "Username"
 // @Param collection_name path string true "Collection name"
 // @Param body body object{commit_message=string} true "Commit message"
-// @Success 200 {object} map[string]interface{} "message and version_number"
+// @Success 200 {object} map[string]interface{} "message, version_number, snapshot_hash"
 // @Failure 404 {object} map[string]string "Collection not found"
 // @Router /collections/{username}/{collection_name}/commit [post]
 func CommitCollection(c *gin.Context) {
@@ -249,6 +268,49 @@ func CommitCollection(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
 	}
+
+	// 1. 获取当前工作区条目
+	entries, err := repository.ListCollectionEntries(col.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 2. 转换为匿名集合的 entries
+	anonEntries := make([]model.AnonEntry, 0, len(entries))
+	for _, e := range entries {
+		size := int64(0)
+		if meta, _ := repository.GetFileByHash(e.FileHash); meta != nil {
+			// metadata JSON 解析获取 size (假设- la- la)
+		}
+		anonEntries = append(anonEntries, model.AnonEntry{
+			Path: e.Path,
+			Hash: e.FileHash,
+			Size: size,
+		})
+	}
+
+	// 3. 构造匿名集合并保存
+	anonColl := &model.AnonCollection{
+		Version:   1,
+		Name:      fmt.Sprintf("%s/%s snapshot", username, collectionName),
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		Entries:   anonEntries,
+	}
+	storageDir := c.MustGet("storageDir").(string)
+	hash, err := repository.SaveCollection(anonColl, storageDir)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create snapshot: " + err.Error()})
+		return
+	}
+
+	// 4. 更新 current_hash
+	if err := repository.UpdateCurrentHash(col.ID, hash); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update current hash: " + err.Error()})
+		return
+	}
+
+	// 5. 原有版本快照逻辑 (保留历史)
 	versions, err := repository.GetVersionLog(col.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -267,9 +329,9 @@ func CommitCollection(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "committed", "version_number": verNum})
-}
 
+	c.JSON(http.StatusOK, gin.H{"message": "committed", "version_number": verNum, "snapshot_hash": hash})
+}
 // GetVersionLog godoc
 // @Summary Get collection version history
 // @Description Returns all committed versions for a collection, newest first
@@ -337,5 +399,26 @@ func RollbackCollection(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 重新生成 CID
+	entries, err := repository.ListCollectionEntries(col.ID)
+	if err == nil {
+		anonEntries := make([]model.AnonEntry, 0, len(entries))
+		for _, e := range entries {
+			anonEntries = append(anonEntries, model.AnonEntry{Path: e.Path, Hash: e.FileHash})
+		}
+		anonColl := &model.AnonCollection{
+			Version:   1,
+			Name:      fmt.Sprintf("%s/%s rollback", username, collectionName),
+			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+			Entries:   anonEntries,
+		}
+		storageDir := c.MustGet("storageDir").(string)
+		hash, err := repository.SaveCollection(anonColl, storageDir)
+		if err == nil {
+			repository.UpdateCurrentHash(col.ID, hash)
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "rolled back"})
 }

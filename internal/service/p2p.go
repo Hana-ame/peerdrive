@@ -16,6 +16,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
@@ -61,4 +62,12 @@ func (p *P2PService) PingPeer(ctx context.Context, peerID peer.ID) (time.Duratio
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	}
+}
+
+// FetchFile 通过 P2P Bitswap 获取文件（占位，未完成 Bitswap 集成）。
+func (p *P2PService) FetchFile(ctx context.Context, hash string) ([]byte, error) {
+	if p.Host == nil {
+		return nil, fmt.Errorf("p2p not initialized")
+	}
+	return nil, fmt.Errorf("p2p fetch not implemented")
 }

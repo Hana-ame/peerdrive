@@ -45,6 +45,15 @@ func SetupRouter(
 		p2p.GET("/ping/:peer_id", controller.PingPeer)
 	}
 
+	// 匿名合集路由
+	anon := r.Group("/anon")
+	{
+		anon.POST("/collections", controller.CreateAnonCollection)
+		anon.GET("/collections/:hash", controller.GetAnonCollection)
+		anon.GET("/collections/:hash/entries/*filepath", controller.DownloadAnonFile)
+		anon.POST("/collections/fork", controller.ForkAnonCollection)
+	}
+
 	files := r.Group("/files")
 	{
 		files.POST("/upload", controller.UploadFile)

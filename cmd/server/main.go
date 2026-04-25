@@ -4,11 +4,9 @@
 // PEERDRIVE_STORAGE（存储目录，默认 ./storage）。
 // 使用方式：go run ./cmd/server/main.go
 //   PORT=3000 PEERDRIVE_STORAGE=./storage go run ./cmd/server/main.go
-// 内部流程：repository.InitDB → provider.NewManager → service.NewDownloader(p2pSvc, storageDir)
-//   → service.NewP2PService → router.SetupRouter → r.Run(port)
+// 内部流程：InitDB → NewP2PService → NewManager → NewDownloader → SetAnonStorageDir → SetupRouter
 //
-// NewDownloader 新增参数：p2pSvc, storageDir（支持 P2P 回退下载）
-// 需要在 initFileController(storageDir) 后，调用 repository.SetAnonStorageDir(storageDir)
+// storageDir 注入到 Gin Context，供 controller/anon.go 等使用。
 
 package main
 
@@ -17,6 +15,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	_ "peerdrive/docs"
@@ -24,6 +23,8 @@ import (
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
 	"peerdrive/internal/service"
+
+	"github.com/gin-gonic/gin"
 )
 
 // @title Peerdrive API
@@ -41,13 +42,12 @@ func main() {
 		storageDir = s
 	}
 
+	// 初始化 DB（含迁移）
 	if err := repository.InitDB("./peerdrive.db"); err != nil {
 		log.Fatalf("数据库初始化失败: %v", err)
 	}
 
-	providerMgr := provider.NewManager(storageDir)
-	downloader := service.NewDownloader(providerMgr)
-
+	// 初始化 P2P
 	p2pSvc, err := service.NewP2PService(ctx)
 	if err != nil {
 		log.Fatalf("libp2p 节点启动失败: %v", err)
@@ -56,7 +56,22 @@ func main() {
 	id, addrs := p2pSvc.GetNodeInfo()
 	log.Printf("libp2p 节点已启动: PeerID=%s, 监听地址=%v", id, addrs)
 
+	// 初始化存储
+	providerMgr := provider.NewManager(storageDir)
+	downloader := service.NewDownloader(providerMgr, p2pSvc, storageDir)
+
+	// 初始化匿名存储目录
+	repository.SetAnonStorageDir(filepath.Join(storageDir, "anon"))
+
+	// 设置路由
 	r := router.SetupRouter(downloader, p2pSvc, storageDir)
+
+	// 注入到 Gin Context
+	r.Use(func(c *gin.Context) {
+		c.Set("storageDir", storageDir)
+		c.Set("downloader", downloader)
+		c.Next()
+	})
 
 	port := ":3000"
 	if p := os.Getenv("PORT"); p != "" {

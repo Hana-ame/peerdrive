@@ -2,7 +2,7 @@
 // 使用 mattn/go-sqlite3 驱动。必须先调用 InitDB(dbPath) 初始化全局 DB 连接。
 // 自动建表（CREATE TABLE IF NOT EXISTS），包含六张表：
 //   files               — 文件元数据（哈希→位置映射；metadata TEXT 存 JSON 扩展属性）
-//   collections         — 集合（用户+名称唯一；current_cid 指向最新 CID）
+//   collections         — 集合（用户+名称唯一；current_hash 指向最新快照 hash）
 //   collection_entries  — 集合条目（path→hash，基于 collection_id 级联删除）
 //   collection_versions — 版本快照记录（带 parent_version_id 版本链）
 //   version_entries     — 版本快照内容
@@ -17,6 +17,12 @@ package repository
 import (
 	"database/sql"
 	_ "github.com/mattn/go-sqlite3"
+)
+
+// 文件类型常量（与 model 包保持一致）
+const (
+	FileTypeBlob           = "blob"
+	FileTypeAnonCollection = "anon_collection"
 )
 
 var DB *sql.DB
@@ -34,7 +40,8 @@ func InitDB(dbPath string) error {
 		provider_type TEXT NOT NULL,
 		path TEXT NOT NULL,
 		filename TEXT,
-		metadata TEXT DEFAULT '{}'
+		metadata TEXT DEFAULT '{}',
+		type TEXT DEFAULT '` + FileTypeBlob + `'
 	);
 	CREATE INDEX IF NOT EXISTS idx_hash ON files(hash);
 
@@ -42,7 +49,7 @@ func InitDB(dbPath string) error {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT NOT NULL,
 		collection_name TEXT NOT NULL,
-		current_cid TEXT DEFAULT '',
+		current_hash TEXT DEFAULT NULL,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(username, collection_name)
 	);
@@ -87,7 +94,9 @@ func InitDB(dbPath string) error {
 	if _, err := DB.Exec(schema); err != nil {
 		return err
 	}
-	// 迁移：为旧数据库添加 metadata 列（已有则忽略）
+	// 迁移：为旧数据库添加缺失列（已有则忽略）
 	DB.Exec(`ALTER TABLE files ADD COLUMN metadata TEXT DEFAULT '{}'`)
+	DB.Exec(`ALTER TABLE files ADD COLUMN type TEXT DEFAULT '` + FileTypeBlob + `'`)
+	DB.Exec(`ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`)
 	return nil
 }

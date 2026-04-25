@@ -1,16 +1,16 @@
 // 集合仓库 — collections、collection_entries、collection_versions、
 // version_entries 四张表的 CRUD 和业务操作。
 // 函数列表：
-//   CreateCollection / GetOrCreateCollection — 创建/获取集合 ID（INSERT 含 current_cid）
-//   ListCollections / GetCollection          — 查询集合列表/详情（SELECT 含 current_cid）
-//   UpdateCurrentCID                         — 更新集合的 current_cid（Commit/Rollback 后调用）
+//   CreateCollection / GetOrCreateCollection — 创建/获取集合 ID（INSERT 含 current_hash）
+//   ListCollections / GetCollection          — 查询集合列表/详情（SELECT 含 current_hash）
+//   UpdateCurrentHash                      — 更新集合的 current_hash（Commit/Rollback 后调用）
 //   AddCollectionEntry / RemoveCollectionEntry — 增删条目（upsert 语义）
 //   GetCollectionEntry / ListCollectionEntries — 查询条目
 //   CreateVersion / SnapshotVersionEntries   — 创建版本快照
 //   GetVersionLog / GetVersionEntries        — 查询版本历史/快照内容
 //   RestoreVersionEntries                   — 事务内回滚（先删后插）
 //
-// current_cid 迁移：已有数据库需执行 ALTER TABLE collections ADD COLUMN current_cid TEXT DEFAULT ''
+// current_hash 迁移：已有数据库需执行 ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL
 
 package repository
 
@@ -39,8 +39,13 @@ func GetOrCreateCollection(username, collectionName string) (int, error) {
 	return id, err
 }
 
+func UpdateCurrentHash(collectionID int, hash string) error {
+	_, err := DB.Exec(`UPDATE collections SET current_hash = ? WHERE id = ?`, hash, collectionID)
+	return err
+}
+
 func ListCollections(username string) ([]model.Collection, error) {
-	rows, err := DB.Query(`SELECT id, username, collection_name, created_at FROM collections WHERE username = ? ORDER BY created_at DESC`, username)
+	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, created_at FROM collections WHERE username = ? ORDER BY created_at DESC`, username)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +53,7 @@ func ListCollections(username string) ([]model.Collection, error) {
 	var cols []model.Collection
 	for rows.Next() {
 		var c model.Collection
-		if err := rows.Scan(&c.ID, &c.Username, &c.CollectionName, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Username, &c.CollectionName, &c.CurrentHash, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		cols = append(cols, c)
@@ -58,8 +63,8 @@ func ListCollections(username string) ([]model.Collection, error) {
 
 func GetCollection(username, collectionName string) (*model.Collection, error) {
 	var c model.Collection
-	err := DB.QueryRow(`SELECT id, username, collection_name, created_at FROM collections WHERE username = ? AND collection_name = ?`,
-		username, collectionName).Scan(&c.ID, &c.Username, &c.CollectionName, &c.CreatedAt)
+	err := DB.QueryRow(`SELECT id, username, collection_name, current_hash, created_at FROM collections WHERE username = ? AND collection_name = ?`,
+		username, collectionName).Scan(&c.ID, &c.Username, &c.CollectionName, &c.CurrentHash, &c.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
