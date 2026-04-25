@@ -2,6 +2,11 @@ const API_BASE = 'https://wsl-3000.moonchan.xyz';
 
 async function request(method, path, body = null, isFormData = false) {
   const opts = { method, headers: {}, credentials: 'include' };
+  const authKey = localStorage.getItem('peerdrive_authkey');
+  if (authKey) {
+    opts.headers['Authorization'] = `Bearer ${authKey}`;
+  }
+
   if (body && !isFormData) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -20,6 +25,12 @@ async function request(method, path, body = null, isFormData = false) {
   }
   return res.json();
 }
+
+// === Auth ===
+export const register = (username, password) => request('POST', '/auth/register', { username, password });
+export const login = (username, password) => request('POST', '/auth/login', { username, password });
+export const logout = () => request('POST', '/auth/logout');
+export const getMe = () => request('GET', '/auth/me');
 
 // === 基础 & 文件 ===
 export const uploadFile = (file) => {
@@ -46,13 +57,17 @@ export const commitVersion = (username, collName, commit_message) =>
 export const getVersionLog = (username, collName) =>
   request('GET', `/collections/${username}/${collName}/log`);
 export const rollbackVersion = (username, collName, version_id) =>
-  request('POST', `/collections/${username}/${collName}/rollback/${version_id}`);
+  request('POST', `/collections/${username}/${collName}/rollback/${version_id}`, { version_id });
 
 // === 协作 ===
 export const forkCollection = (username, collection_name, source_username, source_coll_name) =>
   request('POST', '/actions/fork', { username, collection_name, source_username, source_coll_name });
 export const mergeCollection = (username, collection_name, source_username, source_coll_name, strategy = 'ours') =>
   request('POST', '/actions/merge', { username, collection_name, source_username, source_coll_name, strategy });
+
+// === 本地同步 ===
+export const saveLocal = (req) => request('POST', '/local/save', req);
+export const getLocalStatus = (hash) => request('GET', `/local/status/${hash}`);
 
 // === P2P ===
 export const getNodeInfo = () => request('GET', '/p2p/node');
