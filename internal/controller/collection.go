@@ -279,14 +279,9 @@ func CommitCollection(c *gin.Context) {
 	// 2. 转换为匿名集合的 entries
 	anonEntries := make([]model.AnonEntry, 0, len(entries))
 	for _, e := range entries {
-		size := int64(0)
-		if meta, _ := repository.GetFileByHash(e.FileHash); meta != nil {
-			// metadata JSON 解析获取 size (假设- la- la)
-		}
 		anonEntries = append(anonEntries, model.AnonEntry{
 			Path: e.Path,
 			Hash: e.FileHash,
-			Size: size,
 		})
 	}
 

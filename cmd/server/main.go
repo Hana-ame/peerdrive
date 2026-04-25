@@ -15,7 +15,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	_ "peerdrive/docs"
@@ -60,8 +59,8 @@ func main() {
 	providerMgr := provider.NewManager(storageDir)
 	downloader := service.NewDownloader(providerMgr, p2pSvc, storageDir)
 
-	// 初始化匿名存储目录
-	repository.SetAnonStorageDir(filepath.Join(storageDir, "anon"))
+	// 初始化匿名存储目录（与普通文件同一目录）
+	repository.SetAnonStorageDir(storageDir)
 
 	// 设置路由
 	r := router.SetupRouter(downloader, p2pSvc, storageDir)

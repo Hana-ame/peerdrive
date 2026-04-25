@@ -64,7 +64,7 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 		}
 	}
 
-	relPath := fmt.Sprintf("anon/%s/%s", hashStr[:2], hashStr)
+	relPath := fmt.Sprintf("%s/%s", hashStr[:2], hashStr)
 	_, err = DB.Exec(`
 		INSERT INTO files (hash, provider_type, path, filename, type)
 		VALUES (?, 'local', ?, ?, ?)`,
@@ -77,7 +77,7 @@ func GetAnonCollectionByHash(hash string, storageDir string) (*model.AnonCollect
 	if storageDir == "" {
 		storageDir = anonStorageDir
 	}
-	filePath := filepath.Join(storageDir, "anon", hash[:2], hash)
+	filePath := filepath.Join(storageDir, hash[:2], hash)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("collection not found locally: %w", err)
