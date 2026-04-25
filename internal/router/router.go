@@ -19,6 +19,8 @@
 package router
 
 import (
+	"net/http"
+
 	"peerdrive/internal/config"
 	"peerdrive/internal/controller"
 	"peerdrive/internal/repository"
@@ -35,6 +37,19 @@ func SetupRouter(
 	cfg *config.Config,
 ) *gin.Engine {
 	r := gin.Default()
+
+	r.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		c.Header("Access-Control-Expose-Headers", "Content-Disposition, X-Peerdrive-Collection")
+		c.Header("Access-Control-Max-Age", "86400")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	})
 
 	controller.InitDownloader(downloader)
 	controller.InitP2PController(p2pSvc)
