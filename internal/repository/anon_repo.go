@@ -26,9 +26,6 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 		return coll.Entries[i].Path < coll.Entries[j].Path
 	})
 
-	// Update timestamp before marshaling
-	coll.CreatedAt = coll.CreatedAt
-
 	data, err := json.Marshal(coll)
 	if err != nil {
 		return "", fmt.Errorf("marshal collection: %w", err)

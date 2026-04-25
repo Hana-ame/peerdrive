@@ -74,9 +74,16 @@ func SetupRouter(
 	// P2P routes (public)
 	p2p := r.Group("/p2p")
 	{
+		p2p.GET("/status", controller.P2PStatus)
 		p2p.GET("/node", controller.GetNodeInfo)
 		p2p.GET("/peers", controller.GetPeers)
+		p2p.GET("/discovered", controller.GetDiscoveredPeers)
 		p2p.GET("/ping/:peer_id", controller.PingPeer)
+		p2p.POST("/connect", controller.ConnectPeer)
+		p2p.POST("/announce", controller.AnnounceHash)
+		p2p.POST("/fetch", controller.FetchCollection)
+		p2p.POST("/sync", controller.SyncFromPeer)
+		p2p.POST("/push", controller.PushSync)
 	}
 
 	// Anonymous Collection routes (public)

@@ -70,12 +70,12 @@ func (d *Downloader) GetFileStream(hash string) (io.ReadCloser, string, bool, er
 }
 
 func (d *Downloader) p2pFallback(hash string) (io.ReadCloser, string, bool, error) {
-	if d.p2pSvc == nil {
+	if d.p2pSvc == nil || !d.p2pSvc.IsEnabled() {
 		return nil, "", false, fmt.Errorf("file not found")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	data, err := d.p2pSvc.FetchFile(ctx, hash)
+	data, err := d.p2pSvc.FetchFile(ctx, hash, nil)
 	if err != nil {
 		return nil, "", false, fmt.Errorf("file not found")
 	}

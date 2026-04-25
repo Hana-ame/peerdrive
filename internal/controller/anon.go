@@ -18,14 +18,15 @@ func InitAnonController(svc *service.AnonService) {
 
 func CreateAnonCollection(c *gin.Context) {
 	var req struct {
-		Entries []model.AnonCollectionEntry `json:"entries"`
+		FriendlyName string                    `json:"friendly_name"`
+		Entries      []model.AnonCollectionEntry `json:"entries"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
-	hash, err := anonSvc.CreateCollection(req.Entries)
+	hash, err := anonSvc.CreateCollection(req.FriendlyName, req.Entries)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid path") || strings.Contains(err.Error(), "invalid hash") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -86,9 +87,10 @@ func DownloadAnonFile(c *gin.Context) {
 
 func ForkAnonCollection(c *gin.Context) {
 	var req struct {
-		SourceHash  string                    `json:"source_hash"`
-		AddEntries  []model.AnonCollectionEntry `json:"add_entries"`
-		RemovePaths []string                  `json:"remove_paths"`
+		SourceHash   string                    `json:"source_hash"`
+		FriendlyName string                    `json:"friendly_name"`
+		AddEntries   []model.AnonCollectionEntry `json:"add_entries"`
+		RemovePaths  []string                  `json:"remove_paths"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -125,7 +127,11 @@ func ForkAnonCollection(c *gin.Context) {
 		}
 	}
 
-	hash, err := anonSvc.CreateCollection(newEntries)
+	friendlyName := req.FriendlyName
+	if friendlyName == "" {
+		friendlyName = src.FriendlyName
+	}
+	hash, err := anonSvc.CreateCollection(friendlyName, newEntries)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

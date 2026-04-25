@@ -46,11 +46,11 @@ func main() {
 	}
 
 	// 初始化 P2P
-	p2pSvc, err := service.NewP2PService(ctx)
+	p2pSvc, err := service.NewP2PService(ctx, cfg)
 	if err != nil {
 		log.Fatalf("libp2p 节点启动失败: %v", err)
 	}
-	defer p2pSvc.Host.Close()
+	defer p2pSvc.Close()
 	id, addrs := p2pSvc.GetNodeInfo()
 	log.Printf("libp2p 节点已启动: PeerID=%s, 监听地址=%v", id, addrs)
 

@@ -1,16 +1,12 @@
-// P2P 控制器 — libp2p 节点信息、已连接对等节点列表、Ping 测速。
-// 先调用 InitP2PController(svc) 注册 service.P2PService 实例。
-// 技术实现：通过 libp2p host.Network().Peers() 获取连接；通过
-//   ping.PingService 发送协议 Ping 并测量 RTT。
-// 路由：
-//   GET /p2p/node      — 本节点 PeerID 和监听 multiaddr
-//   GET /p2p/peers     — 已连接的对等节点 PeerID 列表
-//   GET /p2p/ping/:id  — 向指定 PeerID 发送 Ping 并返回 RTT
-
 package controller
 
 import (
+	"context"
 	"net/http"
+	"strings"
+	"time"
+
+	"peerdrive/internal/model"
 	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -23,13 +19,6 @@ func InitP2PController(svc *service.P2PService) {
 	p2pSvc = svc
 }
 
-// GetNodeInfo godoc
-// @Summary Get P2P node info
-// @Description Returns the local node's PeerID and listening multiaddrs
-// @Tags p2p
-// @Produce json
-// @Success 200 {object} map[string]interface{} "peer_id and addrs"
-// @Router /p2p/node [get]
 func GetNodeInfo(c *gin.Context) {
 	id, addrs := p2pSvc.GetNodeInfo()
 	c.JSON(http.StatusOK, gin.H{
@@ -38,13 +27,6 @@ func GetNodeInfo(c *gin.Context) {
 	})
 }
 
-// GetPeers godoc
-// @Summary List connected peers
-// @Description Returns the list of PeerIDs currently connected to this node
-// @Tags p2p
-// @Produce json
-// @Success 200 {object} map[string]interface{} "peers array"
-// @Router /p2p/peers [get]
 func GetPeers(c *gin.Context) {
 	peers := p2pSvc.GetConnectedPeers()
 	strs := make([]string, len(peers))
@@ -54,16 +36,22 @@ func GetPeers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"peers": strs})
 }
 
-// PingPeer godoc
-// @Summary Ping a P2P peer
-// @Description Send a ping to a peer and measure round-trip time
-// @Tags p2p
-// @Produce json
-// @Param peer_id path string true "Peer ID (e.g. 12D3KooW...)"
-// @Success 200 {object} map[string]interface{} "peer and rtt"
-// @Failure 400 {object} map[string]string "Invalid peer ID"
-// @Failure 500 {object} map[string]string "Ping error"
-// @Router /p2p/ping/{peer_id} [get]
+func GetDiscoveredPeers(c *gin.Context) {
+	peers := p2pSvc.GetDiscoveredPeers()
+	result := make([]gin.H, len(peers))
+	for i, pi := range peers {
+		addrs := make([]string, len(pi.Addrs))
+		for j, a := range pi.Addrs {
+			addrs[j] = a.String()
+		}
+		result[i] = gin.H{
+			"peer_id": pi.ID.String(),
+			"addrs":   addrs,
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"peers": result})
+}
+
 func PingPeer(c *gin.Context) {
 	raw := c.Param("peer_id")
 	pid, err := peer.Decode(raw)
@@ -77,4 +65,179 @@ func PingPeer(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"peer": raw, "rtt": rtt.String()})
+}
+
+func ConnectPeer(c *gin.Context) {
+	var req struct {
+		Addr string `json:"addr"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if err := p2pSvc.ConnectByAddr(c.Request.Context(), req.Addr); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "connected"})
+}
+
+func AnnounceHash(c *gin.Context) {
+	var req struct {
+		Hash string `json:"hash"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if err := p2pSvc.AnnounceHash(req.Hash); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "announced"})
+}
+
+func FetchCollection(c *gin.Context) {
+	var req struct {
+		Hash string `json:"hash"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+
+	coll, err := p2pSvc.FetchCollection(ctx, req.Hash, nil)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found on p2p: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, coll)
+}
+
+func SyncFromPeer(c *gin.Context) {
+	var req struct {
+		PeerID    string   `json:"peer_id"`
+		Hash      string   `json:"hash"`
+		FileHashes []string `json:"file_hashes"`
+		TargetDir string   `json:"target_dir"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	pid, err := peer.Decode(req.PeerID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid peer id"})
+		return
+	}
+
+	if req.Hash != "" && len(req.FileHashes) == 0 {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+		defer cancel()
+		coll, err := p2pSvc.FetchCollection(ctx, req.Hash, []peer.AddrInfo{{ID: pid}})
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		hashes := make([]string, len(coll.Entries))
+		for i, e := range coll.Entries {
+			hashes[i] = e.Hash
+		}
+		req.FileHashes = hashes
+	}
+
+	if len(req.FileHashes) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no files to sync"})
+		return
+	}
+
+	if req.TargetDir == "" {
+		req.TargetDir = "./p2p_sync"
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
+	defer cancel()
+
+	synced, err := p2pSvc.SyncFiles(ctx, pid, req.FileHashes, req.TargetDir)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"synced":  synced,
+		"count":   len(synced),
+		"saved_to": req.TargetDir,
+	})
+}
+
+func P2PStatus(c *gin.Context) {
+	enabled := p2pSvc.IsEnabled()
+	resp := gin.H{"enabled": enabled}
+	if enabled {
+		id, addrs := p2pSvc.GetNodeInfo()
+		peers := p2pSvc.GetConnectedPeers()
+		disc := p2pSvc.GetDiscoveredPeers()
+		resp["peer_id"] = id.String()
+		resp["addrs"] = addrs
+		resp["connected_count"] = len(peers)
+		resp["discovered_count"] = len(disc)
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func PushSync(c *gin.Context) {
+	var req struct {
+		Hash      string                     `json:"hash"`
+		Entries   []model.AnonCollectionEntry `json:"entries"`
+		TargetDir string                     `json:"target_dir"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	if req.Hash != "" {
+		coll, err := anonSvc.GetCollectionByHash(req.Hash)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
+			return
+		}
+		if req.TargetDir == "" {
+			if n := coll.FriendlyName; n != "" {
+				req.TargetDir = n
+			}
+		}
+		for _, e := range coll.Entries {
+			req.Entries = append(req.Entries, e)
+		}
+	}
+
+	if len(req.Entries) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no entries to sync"})
+		return
+	}
+
+	if req.TargetDir == "" && len(req.Entries) > 0 {
+		req.TargetDir = req.Entries[0].Path
+		if idx := strings.LastIndex(req.TargetDir, "/"); idx >= 0 {
+			req.TargetDir = req.TargetDir[:idx]
+		}
+	}
+
+	targetDir := req.TargetDir
+	if !strings.HasPrefix(targetDir, "/") {
+		targetDir = "./" + targetDir
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"entries":    req.Entries,
+		"target_dir": targetDir,
+		"message":    "collection received, ready to download",
+	})
 }
