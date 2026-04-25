@@ -18,6 +18,7 @@ import (
 	"syscall"
 
 	_ "peerdrive/docs"
+	"peerdrive/internal/config"
 	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
@@ -36,10 +37,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	storageDir := "./storage"
-	if s := os.Getenv("PEERDRIVE_STORAGE"); s != "" {
-		storageDir = s
-	}
+	cfg := config.Load()
+	storageDir := cfg.StorageDir
 
 	// 初始化 DB（含迁移）
 	if err := repository.InitDB("./peerdrive.db"); err != nil {
@@ -63,7 +62,7 @@ func main() {
 	repository.SetAnonStorageDir(storageDir)
 
 	// 设置路由
-	r := router.SetupRouter(downloader, p2pSvc, storageDir)
+	r := router.SetupRouter(downloader, p2pSvc, cfg)
 
 	// 注入到 Gin Context
 	r.Use(func(c *gin.Context) {

@@ -19,6 +19,7 @@
 package router
 
 import (
+	"peerdrive/internal/config"
 	"peerdrive/internal/controller"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
@@ -31,13 +32,13 @@ import (
 func SetupRouter(
 	downloader *service.Downloader,
 	p2pSvc *service.P2PService,
-	storageDir string,
+	cfg *config.Config,
 ) *gin.Engine {
 	r := gin.Default()
 
 	controller.InitDownloader(downloader)
 	controller.InitP2PController(p2pSvc)
-	controller.InitFileController(service.NewFileService(storageDir))
+	controller.InitFileController(service.NewFileService(cfg))
 
 	// Sync controller initialization
 	syncRepo := repository.NewSyncRepository()

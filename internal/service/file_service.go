@@ -3,26 +3,33 @@ package service
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
+	"peerdrive/internal/config"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 )
 
 type FileService struct {
-	storageDir string
+	storageDir    string
+	storageEnable bool
 }
 
-func NewFileService(storageDir string) *FileService {
+func NewFileService(cfg *config.Config) *FileService {
 	return &FileService{
-		storageDir: storageDir,
+		storageDir:    cfg.StorageDir,
+		storageEnable: cfg.StorageEnable,
 	}
 }
 
 // RegisterLocal handles the logic of registering a local file.
 func (s *FileService) RegisterLocal(path, filename string) (string, error) {
+	if !s.storageEnable {
+		return "", fmt.Errorf("storage is disabled")
+	}
 	fullPath := path
 	// If path is relative, it's assumed to be relative to storageDir
 	if !filepath.IsAbs(path) {
@@ -60,6 +67,9 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 
 // RegisterFolder handles batch registration of files in a folder.
 func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, error) {
+	if !s.storageEnable {
+		return nil, fmt.Errorf("storage is disabled")
+	}
 	fullDir := folderPath
 	if !filepath.IsAbs(folderPath) {
 		fullDir = filepath.Join(s.storageDir, folderPath)
@@ -93,6 +103,9 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 
 // Upload handles uploading a file from a stream.
 func (s *FileService) Upload(reader io.Reader, filename string) (string, error) {
+	if !s.storageEnable {
+		return "", fmt.Errorf("storage is disabled")
+	}
 	// Use a temporary file to calculate hash
 	tempFile, err := os.CreateTemp("", "peerdrive-upload-*")
 	if err != nil {
@@ -136,6 +149,9 @@ func (s *FileService) Verify(hash string) (*model.FileMeta, error) {
 }
 
 func (s *FileService) Delete(hash string) error {
+	if !s.storageEnable {
+		return fmt.Errorf("storage is disabled")
+	}
 	providers, _ := repository.GetFileProviders(hash)
 	for _, p := range providers {
 		if p.ProviderType == "local" {
