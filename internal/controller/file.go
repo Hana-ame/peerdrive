@@ -16,25 +16,19 @@
 package controller
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 
-	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
+	"peerdrive/internal/service"
 	"peerdrive/pkg/hashutil"
 
 	"github.com/gin-gonic/gin"
 )
 
-var storageDir string
+var fileSvc *service.FileService
 
-func InitFileController(storage string) {
-	storageDir = storage
-	os.MkdirAll(storage, 0755)
+func InitFileController(svc *service.FileService) {
+	fileSvc = svc
 }
 
 // UploadFile godoc
@@ -46,40 +40,11 @@ func UploadFile(c *gin.Context) {
 	}
 	defer file.Close()
 
-	h := sha256.New()
-	if _, err := io.Copy(h, file); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "hash failed"})
-		return
-	}
-	hash := hex.EncodeToString(h.Sum(nil))
-
-	file.Seek(0, 0)
-
-	relPath := hash[:2] + "/" + hash
-	fullPath := filepath.Join(storageDir, relPath)
-	os.MkdirAll(filepath.Dir(fullPath), 0755)
-
-	dst, err := os.Create(fullPath)
+	hash, err := fileSvc.Upload(file, header.Filename)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "save failed"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, file); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "write failed"})
-		return
-	}
-
-	// file_meta（幂等）
-	_ = repository.InsertFileMeta(&model.FileMeta{
-		Hash:     hash,
-		Gziped:   false,
-		Filename: header.Filename,
-		Type:     repository.FileTypeBlob,
-	})
-	// file_providers
-	_ = repository.InsertFileProvider(hash, "local", relPath)
 
 	c.JSON(http.StatusOK, gin.H{"hash": hash, "filename": header.Filename})
 }
@@ -95,33 +60,11 @@ func RegisterLocalFile(c *gin.Context) {
 		return
 	}
 
-	fullPath := req.Path
-	f, err := os.Open(fullPath)
+	hash, err := fileSvc.RegisterLocal(req.Path, req.Filename)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file not found"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "hash failed"})
-		return
-	}
-	hash := hex.EncodeToString(h.Sum(nil))
-
-	// file_meta（hash 已存在则忽略）
-	existing, _ := repository.GetFileMeta(hash)
-	if existing == nil {
-		_ = repository.InsertFileMeta(&model.FileMeta{
-			Hash:     hash,
-			Gziped:   false,
-			Filename: req.Filename,
-			Type:     repository.FileTypeBlob,
-		})
-	}
-	// file_providers（同一位置可重复注册）
-	_ = repository.InsertFileProvider(hash, "local", req.Path)
 
 	c.JSON(http.StatusOK, gin.H{"hash": hash, "filename": req.Filename})
 }
@@ -136,44 +79,12 @@ func RegisterFolder(c *gin.Context) {
 		return
 	}
 
-	fullDir := req.FolderPath
-	entries, err := os.ReadDir(fullDir)
+	results, err := fileSvc.RegisterFolder(req.FolderPath)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "folder not found"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	var results []map[string]string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		fp := filepath.Join(fullDir, entry.Name())
-		f, err := os.Open(fp)
-		if err != nil {
-			continue
-		}
-		h := sha256.New()
-		io.Copy(h, f)
-		f.Close()
-		hash := hex.EncodeToString(h.Sum(nil))
-		rel := filepath.Join(req.FolderPath, entry.Name())
-
-		if existing, _ := repository.GetFileMeta(hash); existing == nil {
-			_ = repository.InsertFileMeta(&model.FileMeta{
-				Hash:     hash,
-				Gziped:   false,
-				Filename: entry.Name(),
-				Type:     repository.FileTypeBlob,
-			})
-		}
-		_ = repository.InsertFileProvider(hash, "local", rel)
-
-		results = append(results, map[string]string{
-			"filename": entry.Name(),
-			"hash":     hash,
-		})
-	}
 	c.JSON(http.StatusOK, gin.H{"registered": results})
 }
 
@@ -184,7 +95,8 @@ func VerifyFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
 		return
 	}
-	meta, err := repository.GetFileMeta(hash)
+
+	meta, err := fileSvc.Verify(hash)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -193,6 +105,7 @@ func VerifyFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"hash":     meta.Hash,
 		"filename": meta.Filename,
@@ -210,25 +123,13 @@ func DeleteFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
 		return
 	}
-	meta, err := repository.GetFileMeta(hash)
-	if err != nil {
+
+	if err := fileSvc.Delete(hash); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if meta == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
-		return
-	}
-	// 删除本地文件（如果有 local provider）
-	providers, _ := repository.GetFileProviders(hash)
-	for _, p := range providers {
-		if p.ProviderType == "local" {
-			os.Remove(filepath.Join(storageDir, p.Path))
-		}
-	}
-	// 删除 file_providers 和 file_meta
-	repository.DB.Exec(`DELETE FROM file_providers WHERE hash = ?`, hash)
-	repository.DB.Exec(`DELETE FROM file_meta WHERE hash = ?`, hash)
+
+	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
 // DiffVersions godoc
