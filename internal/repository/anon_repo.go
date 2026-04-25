@@ -67,8 +67,7 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 	relPath := fmt.Sprintf("anon/%s/%s", hashStr[:2], hashStr)
 	_, err = DB.Exec(`
 		INSERT INTO files (hash, provider_type, path, filename, type)
-		VALUES (?, 'local', ?, ?, ?)
-		ON CONFLICT(hash) DO NOTHING`,
+		VALUES (?, 'local', ?, ?, ?)`,
 		hashStr, relPath, fmt.Sprintf("anon_%s.json", hashStr), FileTypeAnonCollection,
 	)
 	return hashStr, nil

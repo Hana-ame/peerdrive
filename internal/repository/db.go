@@ -36,12 +36,13 @@ func InitDB(dbPath string) error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS files (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		hash TEXT NOT NULL UNIQUE,
+		hash TEXT NOT NULL,
 		provider_type TEXT NOT NULL,
 		path TEXT NOT NULL,
 		filename TEXT,
 		metadata TEXT DEFAULT '{}',
-		type TEXT DEFAULT '` + FileTypeBlob + `'
+		type TEXT DEFAULT '` + FileTypeBlob + `',
+		available INTEGER DEFAULT 1
 	);
 	CREATE INDEX IF NOT EXISTS idx_hash ON files(hash);
 
@@ -97,6 +98,7 @@ func InitDB(dbPath string) error {
 	// 迁移：为旧数据库添加缺失列（已有则忽略）
 	DB.Exec(`ALTER TABLE files ADD COLUMN metadata TEXT DEFAULT '{}'`)
 	DB.Exec(`ALTER TABLE files ADD COLUMN type TEXT DEFAULT '` + FileTypeBlob + `'`)
+	DB.Exec(`ALTER TABLE files ADD COLUMN available INTEGER DEFAULT 1`)
 	DB.Exec(`ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`)
 	return nil
 }

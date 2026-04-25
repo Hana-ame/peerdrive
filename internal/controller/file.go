@@ -98,9 +98,10 @@ func UploadFile(c *gin.Context) {
 		Path:         relPath,
 		Filename:     header.Filename,
 		Metadata:     string(metaData),
+		Available:    true,
 	}
 	if err := repository.InsertFile(meta); err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "file already exists", "hash": hash})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -142,12 +143,6 @@ func RegisterLocalFile(c *gin.Context) {
 	}
 	hash := hex.EncodeToString(h.Sum(nil))
 
-	existing, _ := repository.GetFileByHash(hash)
-	if existing != nil {
-		c.JSON(http.StatusOK, gin.H{"hash": hash, "filename": req.Filename, "note": "already registered"})
-		return
-	}
-
 	metaData, _ := json.Marshal(map[string]any{
 		"is_gzip": isGzipFile(fullPath),
 	})
@@ -158,6 +153,7 @@ func RegisterLocalFile(c *gin.Context) {
 		Path:         req.Path,
 		Filename:     req.Filename,
 		Metadata:     string(metaData),
+		Available:    true,
 	}
 	if err := repository.InsertFile(meta); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -212,16 +208,14 @@ func RegisterFolder(c *gin.Context) {
 			"is_gzip": isGzipFile(fp),
 		})
 
-		existing, _ := repository.GetFileByHash(hash)
-		if existing == nil {
-			repository.InsertFile(&model.FileMetadata{
-				Hash:         hash,
-				ProviderType: "local",
-				Path:         rel,
-				Filename:     entry.Name(),
-				Metadata:     string(metaData),
-			})
-		}
+		repository.InsertFile(&model.FileMetadata{
+			Hash:         hash,
+			ProviderType: "local",
+			Path:         rel,
+			Filename:     entry.Name(),
+			Metadata:     string(metaData),
+			Available:    true,
+		})
 		results = append(results, map[string]string{
 			"filename": entry.Name(),
 			"hash":     hash,

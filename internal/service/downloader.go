@@ -51,49 +51,52 @@ func NewDownloader(manager *provider.Manager, p2pSvc *P2PService, storageDir str
 }
 
 func (d *Downloader) GetFileStream(hash string) (io.ReadCloser, string, string, error) {
-	meta, err := repository.GetFileByHash(hash)
-	if err != nil {
-		return nil, "", "", err
-	}
-	if meta == nil {
-		// P2P 回退
-		if d.p2pSvc != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			data, err := d.p2pSvc.FetchFile(ctx, hash)
-			if err == nil {
-				// 验证 hash
-				h := sha256.Sum256(data)
-				if hex.EncodeToString(h[:]) != hash {
-					return nil, "", "", fmt.Errorf("p2p data hash mismatch")
-				}
-				// 缓存到本地
-				relPath := filepath.Join("p2p", hash[:2], hash)
-				fullPath := filepath.Join(d.storageDir, relPath)
-				os.MkdirAll(filepath.Dir(fullPath), 0755)
-				os.WriteFile(fullPath, data, 0644)
-
-				// 注册到 files 表（幂等）
-				repository.InsertFile(&model.FileMetadata{
-					Hash:         hash,
-					ProviderType: "local",
-					Path:         relPath,
-					Filename:     hash,
-					Metadata:     `{}`,
-				})
-
-				return io.NopCloser(bytes.NewReader(data)), hash, `{}`, nil
-			}
+	// 遍历所有可用位置
+	for {
+		meta, err := repository.GetFileByHash(hash)
+		if err != nil {
+			return nil, "", "", err
 		}
-		return nil, "", "", fmt.Errorf("file not found")
+		if meta == nil {
+			break // 无可用位置，尝试 P2P
+		}
+		reader, filenameHint, err := d.providerManager.GetReader(meta.ProviderType, meta.Path)
+		if err == nil {
+			finalFilename := meta.Filename
+			if finalFilename == "" {
+				finalFilename = filenameHint
+			}
+			return reader, finalFilename, meta.Metadata, nil
+		}
+		// 读取失败 → 标记不可用 → 尝试下一位置
+		repository.MarkFileUnavailable(meta.ID)
 	}
-	reader, filenameHint, err := d.providerManager.GetReader(meta.ProviderType, meta.Path)
-	if err != nil {
-		return nil, "", "", err
+
+	// P2P 回退
+	if d.p2pSvc != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		data, err := d.p2pSvc.FetchFile(ctx, hash)
+		if err == nil {
+			h := sha256.Sum256(data)
+			if hex.EncodeToString(h[:]) != hash {
+				return nil, "", "", fmt.Errorf("p2p data hash mismatch")
+			}
+			relPath := filepath.Join("p2p", hash[:2], hash)
+			fullPath := filepath.Join(d.storageDir, relPath)
+			os.MkdirAll(filepath.Dir(fullPath), 0755)
+			os.WriteFile(fullPath, data, 0644)
+
+			repository.InsertFile(&model.FileMetadata{
+				Hash:         hash,
+				ProviderType: "local",
+				Path:         relPath,
+				Filename:     hash,
+				Metadata:     `{}`,
+			})
+
+			return io.NopCloser(bytes.NewReader(data)), hash, `{}`, nil
+		}
 	}
-	finalFilename := meta.Filename
-	if finalFilename == "" {
-		finalFilename = filenameHint
-	}
-	return reader, finalFilename, meta.Metadata, nil
+	return nil, "", "", fmt.Errorf("file not found")
 }

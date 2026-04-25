@@ -2,8 +2,7 @@
 // 文件结构 FileMetadata：对应 files 表。
 // Metadata 字段为 TEXT 类型，存储 JSON 格式的扩展属性，例如：
 //   {"is_gzip": true, "mime_type": "application/gzip"}
-// 下载时根据 Metadata 中的 is_gzip 决定是否设置 Content-Encoding: gzip。
-// 新增任何属性都只需修改 JSON 内容，无需改表结构。
+// Available 字段标记某份副本是否可用，不可用时 downloader 尝试另一份。
 // 使用 db 标签标记数据库列名，用于 repository 层的 Scan 绑定。
 
 package model
@@ -15,4 +14,5 @@ type FileMetadata struct {
 	Path         string `db:"path"`
 	Filename     string `db:"filename"`
 	Metadata     string `db:"metadata"`
+	Available    bool   `db:"available"`
 }
