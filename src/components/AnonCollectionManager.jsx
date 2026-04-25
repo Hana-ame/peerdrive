@@ -16,6 +16,8 @@ export default function AnonCollectionManager({ prefillEntries }) {
 
   /* --- fork section --- */
   const [forkAddPath, setForkAddPath] = useState('');
+  const [forkAddHash, setForkAddHash] = useState('');
+  const [forkRemovePath, setForkRemovePath] = useState('');
 
   // When prefillEntries changes from outside, update form
   useEffect(() => {
