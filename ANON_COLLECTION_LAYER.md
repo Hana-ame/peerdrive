@@ -31,10 +31,10 @@ repository.SaveCollection(coll, storageDir)
         │
         ├─ 3. SHA256([]byte) → hashStr
         │
-        ├─ 4. 写本地文件 storage/anon/{hashStr[:2]}/{hashStr}
+        ├─ 4. 写本地文件 storage/{hashStr[:2]}/{hashStr}
         │
         └─ 5. INSERT INTO files (hash, provider_type, path, filename, type)
-               VALUES (hashStr, 'local', 'anon/{h[:2]}/{h}', 'anon_{h}.json', 'anon_collection')
+               VALUES (hashStr, 'local', '{h[:2]}/{h}', 'anon_{h}.json', 'anon_collection')
                ON CONFLICT(hash) DO NOTHING
         │
         return hashStr
@@ -54,7 +54,7 @@ controller.GetAnonCollection
         ▼
 repository.GetCollection(hash, storageDir)
         │
-        ├─ 读取 storage/anon/{hash[:2]}/{hash}
+        ├─ 读取 storage/{hash[:2]}/{hash}
         ├─ json.Unmarshal → model.AnonCollection
         └─ 校验 Version == 1
         │
@@ -89,11 +89,11 @@ controller.DownloadAnonFile
 ## 数据流方向
 
 ```
-创建:  JSON → sort(entries) → json.Marshal → SHA256 → storage/anon/{hash[:2]}/{hash} → files 表
+创建:  JSON → sort(entries) → json.Marshal → SHA256 → storage/{hash[:2]}/{hash} → files 表
         ↑                                                                                 ↑
   用户 POST 请求                                                              type='anon_collection'
 
-读取:  hash → storage/anon/{hash[:2]}/{hash} → json.Unmarshal → AnonCollection JSON
+读取:  hash → storage/{hash[:2]}/{hash} → json.Unmarshal → AnonCollection JSON
                                                         ↓
                                              返回给客户端（含 entries 列表）
 
@@ -120,7 +120,7 @@ controller.DownloadAnonFile
 |------|------|------|
 | 合集标识 | SHA256(canonical JSON) | 内容寻址，天然防冲突，不可篡改 |
 | JSON 规范性 | entries 按 Path 排序后序列化 | 保证相同内容产出相同 hash |
-| 存储路径 | storage/anon/{hash[:2]}/{hash} | 与普通文件隔离，方便策略管理 |
+| 存储路径 | storage/{hash[:2]}/{hash} | 与普通文件同一目录，files 表 type 区分 |
 | 幂等创建 | ON CONFLICT DO NOTHING | 相同合集重复创建返回相同 hash |
 | files 表复用 | type='anon_collection' 区分 | 与 blob 文件共用同一套寻址/下载/缓存机制 |
 | URL 下载策略 | 有 URL 则 302 重定向 | 节省本地存储，利用原始 CDN/HTTP 源 |

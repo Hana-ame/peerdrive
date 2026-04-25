@@ -4,11 +4,11 @@
 
 ```
 internal/controller/download.go    — HTTP 入口 /sha256sum/:sha256
-internal/service/downloader.go     — 业务逻辑（查询元数据 + provider 读取）
+internal/service/downloader.go     — 业务逻辑（查询元数据 + provider 读取 + 多位置重试）
 internal/provider/                 — 内容寻址读取（local/http）
-internal/model/file.go             — FileMetadata（含 metadata JSON）
-internal/repository/file_repo.go   — files 表查询
-internal/repository/db.go          — files 表 schema（metadata TEXT）
+internal/model/file.go             — FileMetadata（含 metadata JSON + available）
+internal/repository/file_repo.go   — files 表查询（优先 local 可用记录）
+internal/repository/db.go          — files 表 schema（metadata TEXT + available + type）
 internal/controller/file.go        — 文件上传/注册（写入元数据）
 ```
 
@@ -23,36 +23,41 @@ controller.DownloadBySHA256
         ▼
 service.Downloader.GetFileStream(hash)
         │
-        ├─ repository.GetFileByHash(hash)
-        │   └─ SELECT id, hash, provider_type, path, filename, metadata
-        │      FROM files WHERE hash = ?
+        ┌──[循环]──────────────────────────────────────┐
+        │  repository.GetFileByHash(hash)               │
+        │  └─ SELECT ... WHERE hash=? AND available=1   │
+        │     ORDER BY local优先                        │
+        │                                               │
+        │  ├─ meta != nil                               │
+        │  │   ├─ provider.GetReader → OK → return       │
+        │  │   └─ provider.GetReader → FAIL              │
+        │  │       └─ MarkFileUnavailable(id) → 重试     │
+        │  │                                             │
+        │  └─ meta == nil → 跳出循环                     │
+        └───────────────────────────────────────────────┘
         │
-        ├─ meta == nil → P2P 回退（未实现）→ 404
+        ├─ P2P 回退（已实现占位）
+        │   ├─ FetchFile(hash) → OK → 缓存到 storage/p2p/{...} → INSERT files → return
+        │   └─ FetchFile(hash) → FAIL → 404
         │
-        └─ meta != nil
+        return (io.ReadCloser, filename, metadataJSON)
                 │
-                ├─ provider.Manager.GetReader(meta.ProviderType, meta.Path)
-                │   ├─ "local" → 读取 storage/{hash[:2]}/{hash}
-                │   └─ "http"  → 远程 HTTP 流
+                ▼
+        controller.DownloadBySHA256Internal
                 │
-                └─ return (io.ReadCloser, filename, metadataJSON)
-                        │
-                        ▼
-                controller.DownloadBySHA256Internal
-                        │
-                        ├─ set Content-Disposition: attachment; filename=xxx
-                        ├─ parse metadata JSON → if is_gzip → set Content-Encoding: gzip
-                        └─ c.DataFromReader(200, -1, "application/octet-stream", reader, nil)
+                ├─ set Content-Disposition: attachment; filename=xxx
+                ├─ parse metadata JSON → if is_gzip → set Content-Encoding: gzip
+                └─ c.DataFromReader(200, -1, "application/octet-stream", reader, nil)
 ```
 
 ## 数据流方向
 
 ```
-上传:  multipart → SHA256 → storage/{prefix}/{hash} → files 表 INSERT (含 metadata)
-                                                          │
-下载:  files 表 SELECT ← hash → provider.GetReader  → HTTP stream
-                           ↑       ↑
-                      Content-Encoding  Content-Disposition
+上传:  multipart → SHA256 → storage/{prefix}/{hash} → files INSERT (hash可能已存在)
+                                                         │
+下载:  files SELECT(available=1) ← hash → 循环重试 → HTTP stream
+                                          ↑       ↑
+                                    失败标记不可用  Content-Encoding/Disposition
 ```
 
 ## 元数据设计
@@ -106,9 +111,9 @@ if mime, _ := meta["mime_type"].(string); mime != "" {
 ## 向后兼容性
 
 - 旧表有 `is_gzip INTEGER` 列：保留不动，新代码忽略该列
-- `InitDB` 执行 `ALTER TABLE files ADD COLUMN metadata TEXT DEFAULT '{}'`，列已有时 SQLite 返回错误，忽略即可
-- 旧数据 `metadata` 为 `'{}'`，is_gzip 默认为 false，不设置 gzip 编码
-- 所有新写入的文件都有完整的 metadata JSON
+- `InitDB` 执行三条 `ALTER TABLE` 迁移：metadata / type / available
+- 旧数据 `metadata` 为 `'{}'`，type 为 `'blob'`，available 为 1
+- 旧数据库 files 表 hash 列从 `UNIQUE` 改为非唯一（多条迁移语句需手动处理 UNIQUE 约束）
 
 ## 设计决策
 
@@ -118,3 +123,5 @@ if mime, _ := meta["mime_type"].(string); mime != "" {
 | gzip 检测方式 | 读文件前 2 字节 | 不需要解压，零成本 |
 | 返回类型 | GetFileStream 返回原始 metadata string | controller 层自行解析，灵活 |
 | 版本隔离 | GetFileStream 不关心 metadata 含义 | downloader 只负责"拿到文件流 + 附带的元数据" |
+| 多副本重试 | 读取失败 → MarkFileUnavailable → 尝试下一记录 | 自动容错，无需手动修复 |
+
