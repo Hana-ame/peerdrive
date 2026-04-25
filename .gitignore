@@ -1,0 +1,16 @@
+# Database
+peerdrive.db
+*.db
+
+# Storage directory (uploaded files)
+storage/
+
+# Compiled binaries
+peerdrive-server
+peerdrive
+*.exe
+*.out
+
+# OS files
+.DS_Store
+Thumbs.db

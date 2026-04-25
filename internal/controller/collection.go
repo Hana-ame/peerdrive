@@ -18,6 +18,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
@@ -187,7 +188,7 @@ func RemoveEntry(c *gin.Context) {
 func DownloadCollectionFile(c *gin.Context) {
 	username := c.Param("username")
 	collectionName := c.Param("collection_name")
-	filepath := c.Param("filepath")
+	filepath := strings.TrimPrefix(c.Param("filepath"), "/")
 	col, err := repository.GetCollection(username, collectionName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

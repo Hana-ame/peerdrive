@@ -2,7 +2,7 @@
 set -euo pipefail
 
 API_BASE="${API_BASE:-http://localhost:3000}"
-CURL="curl -x '' -sf"
+CURL="curl -sf"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -14,11 +14,11 @@ fail_cnt=0
 
 pass() {
   echo -e "  ${GREEN}✓${NC} $1"
-  ((pass_cnt++))
+  pass_cnt=$((pass_cnt + 1))
 }
 fail() {
   echo -e "  ${RED}✗${NC} $1: $2"
-  ((fail_cnt++))
+  fail_cnt=$((fail_cnt + 1))
 }
 
 section() {
