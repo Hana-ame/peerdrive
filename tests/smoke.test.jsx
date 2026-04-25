@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import Sha256Manager from '../src/components/Sha256Manager'
-import AnonCollectionManager from '../src/components/AnonCollectionManager'
-import PathRegistrar from '../src/components/PathRegistrar'
+import CollectionBuilder from '../src/components/CollectionBuilder'
 import App from '../src/App'
 
 describe('Sha256Manager', () => {
@@ -12,22 +11,11 @@ describe('Sha256Manager', () => {
   })
 })
 
-describe('AnonCollectionManager', () => {
-  it('renders without crashing (no prefill)', () => {
-    render(<AnonCollectionManager />)
-    expect(screen.getByText('匿名合集').textContent).toBe('匿名合集')
-  })
-
-  it('renders with prefill', () => {
-    render(<AnonCollectionManager prefillEntries={[{ path: 'a.txt', hash: 'a'.repeat(64) }]} />)
-    expect(screen.getByText('创建新匿名合集').textContent).toBe('创建新匿名合集')
-  })
-})
-
-describe('PathRegistrar', () => {
+describe('CollectionBuilder', () => {
   it('renders without crashing', () => {
-    render(<PathRegistrar />)
-    expect(screen.getByText('注册本地路径').textContent).toBe('注册本地路径')
+    render(<CollectionBuilder />)
+    expect(screen.getByText('合集构建器').textContent).toBe('合集构建器')
+    expect(screen.getByText('浏览合集').textContent).toBe('浏览合集')
   })
 })
 
