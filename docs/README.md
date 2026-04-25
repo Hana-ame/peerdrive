@@ -4,6 +4,7 @@
 docs/
 ├── specs/              ← 功能规格说明（开发者阅读）
 │   ├── design.md             系统设计总览
+│   ├── api-reference.md      完整 API 参考（请求/响应格式）
 │   ├── database.md           数据库表结构
 │   ├── register.md           文件注册层
 │   ├── upload.md             文件上传层
