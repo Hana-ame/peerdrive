@@ -29,7 +29,8 @@ func InitDB(dbPath string) error {
 		hash TEXT NOT NULL UNIQUE,
 		provider_type TEXT NOT NULL,
 		path TEXT NOT NULL,
-		filename TEXT
+		filename TEXT,
+		is_gzip INTEGER DEFAULT 0
 	);
 	CREATE INDEX IF NOT EXISTS idx_hash ON files(hash);
 

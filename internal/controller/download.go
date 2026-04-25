@@ -1,7 +1,9 @@
 // 下载控制器 — 通过 SHA256 哈希进行内容寻址文件下载。
 // 先调用 InitDownloader(svc) 注册 service.Downloader 实例。
-// 流程：校验哈希格式 → repository.GetFileByHash 查元数据 →
-//   provider.Manager.GetReader 获取 io.ReadCloser → Gin DataFromReader 流式返回。
+// 流程：校验哈希格式 → Downloader.GetFileStream 读取文件 →
+//   GetFileStream 返回 isGzip 标志 →
+//   若 isGzip 为 true 则设置 Content-Encoding: gzip 响应头（浏览器自动解压），
+//   否则不设置 → Gin DataFromReader 流式返回。
 // 路由：
 //   GET /sha256sum/:sha256 — 按 SHA256 哈希下载文件
 
@@ -40,7 +42,7 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256 format"})
 		return
 	}
-	reader, filename, err := downloader.GetFileStream(hash)
+	reader, filename, isGzip, err := downloader.GetFileStream(hash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -48,5 +50,8 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 	defer reader.Close()
 
 	c.Header("Content-Disposition", "attachment; filename="+filename)
+	if isGzip {
+		c.Header("Content-Encoding", "gzip")
+	}
 	c.DataFromReader(http.StatusOK, -1, "application/octet-stream", reader, nil)
 }

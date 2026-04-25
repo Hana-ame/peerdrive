@@ -1,9 +1,11 @@
 // 文件控制器 — 上传、注册本地文件/文件夹、哈希验证、删除、版本差异比较。
 // 先调用 InitFileController(storageDir) 创建存储目录并保存引用。
-// 上传流程：multipart 读取 → SHA256 计算 → 存储到 storage/{hex[0:2]}/{hex} →
-//   repository.InsertFile 写入 SQLite。
-// 注册流程：扫描本地文件 → SHA256 计算 → 仅写入 DB 不复制。
+// 上传流程：multipart 读取 → SHA256 计算 → 检测 gzip 魔数（0x1f 0x8b） →
+//   存储到 storage/{hex[0:2]}/{hex} → repository.InsertFile 写入 SQLite（含 is_gzip 标记）。
+// 注册流程：扫描本地文件 → SHA256 计算 → 同上传检测 gzip → 仅写入 DB 不复制。
 // 差异比较：对比两个 version_entries 的快照，返回 added/removed/modified。
+// gzip 检测：读取文件前 2 字节，若为 0x1f 0x8b 则视作 gzip 压缩。
+//   该标记影响 /sha256sum/:hash 下载时是否设置 Content-Encoding: gzip 头。
 // 路由：
 //   POST   /files/upload           — 上传文件，按 SHA256 路径存储
 //   POST   /files/register_local   — 注册已有本地文件
@@ -80,11 +82,23 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
+	// 检测 gzip 魔数
+	isGzip := false
+	f, _ := os.Open(fullPath)
+	if f != nil {
+		buf := make([]byte, 2)
+		if n, _ := f.Read(buf); n == 2 && buf[0] == 0x1f && buf[1] == 0x8b {
+			isGzip = true
+		}
+		f.Close()
+	}
+
 	meta := &model.FileMetadata{
 		Hash:         hash,
 		ProviderType: "local",
 		Path:         relPath,
 		Filename:     header.Filename,
+		IsGzip:       isGzip,
 	}
 	if err := repository.InsertFile(meta); err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "file already exists", "hash": hash})
@@ -135,11 +149,23 @@ func RegisterLocalFile(c *gin.Context) {
 		return
 	}
 
+	// 检测 gzip 魔数
+	isGzip := false
+	gzF, _ := os.Open(fullPath)
+	if gzF != nil {
+		buf := make([]byte, 2)
+		if n, _ := gzF.Read(buf); n == 2 && buf[0] == 0x1f && buf[1] == 0x8b {
+			isGzip = true
+		}
+		gzF.Close()
+	}
+
 	meta := &model.FileMetadata{
 		Hash:         hash,
 		ProviderType: "local",
 		Path:         req.Path,
 		Filename:     req.Filename,
+		IsGzip:       isGzip,
 	}
 	if err := repository.InsertFile(meta); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -190,6 +216,17 @@ func RegisterFolder(c *gin.Context) {
 		hash := hex.EncodeToString(h.Sum(nil))
 		rel := filepath.Join(req.FolderPath, entry.Name())
 
+		// 检测 gzip 魔数
+		isGzip := false
+		gzF, _ := os.Open(fp)
+		if gzF != nil {
+			buf := make([]byte, 2)
+			if n, _ := gzF.Read(buf); n == 2 && buf[0] == 0x1f && buf[1] == 0x8b {
+				isGzip = true
+			}
+			gzF.Close()
+		}
+
 		existing, _ := repository.GetFileByHash(hash)
 		if existing == nil {
 			repository.InsertFile(&model.FileMetadata{
@@ -197,6 +234,7 @@ func RegisterFolder(c *gin.Context) {
 				ProviderType: "local",
 				Path:         rel,
 				Filename:     entry.Name(),
+				IsGzip:       isGzip,
 			})
 		}
 		results = append(results, map[string]string{
@@ -237,6 +275,7 @@ func VerifyFile(c *gin.Context) {
 		"filename": meta.Filename,
 		"provider": meta.ProviderType,
 		"path":     meta.Path,
+		"is_gzip":  meta.IsGzip,
 	})
 }
 

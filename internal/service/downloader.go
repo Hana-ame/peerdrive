@@ -2,7 +2,8 @@
 // Downloader 使用 provider.Manager 进行内容检索，流程：
 //   repository.GetFileByHash(hash) 查询元数据 →
 //   manager.GetReader(providerType, path) 获取流 →
-//   返回 io.ReadCloser + 文件名给控制器层流式响应。
+//   返回 io.ReadCloser + 文件名 + isGzip 给控制器层流式响应。
+// isGzip 来自 files 表的 is_gzip 列，下载时控制器据此设置 Content-Encoding: gzip。
 //
 // P2P 回退（新增）：
 //   当 repository.GetFileByHash 返回 nil（本地无此文件）且 p2pSvc 不为 nil 时，
@@ -32,21 +33,21 @@ func NewDownloader(manager *provider.Manager) *Downloader {
 	return &Downloader{providerManager: manager}
 }
 
-func (d *Downloader) GetFileStream(hash string) (io.ReadCloser, string, error) {
+func (d *Downloader) GetFileStream(hash string) (io.ReadCloser, string, bool, error) {
 	meta, err := repository.GetFileByHash(hash)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	if meta == nil {
-		return nil, "", fmt.Errorf("file not found")
+		return nil, "", false, fmt.Errorf("file not found")
 	}
 	reader, filenameHint, err := d.providerManager.GetReader(meta.ProviderType, meta.Path)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	finalFilename := meta.Filename
 	if finalFilename == "" {
 		finalFilename = filenameHint
 	}
-	return reader, finalFilename, nil
+	return reader, finalFilename, meta.IsGzip, nil
 }
