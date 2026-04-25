@@ -2,44 +2,34 @@ const API_BASE = 'https://wsl-3000.moonchan.xyz';
 
 async function request(method, path, body = null, isFormData = false) {
   const opts = { method, headers: {}, credentials: 'include' };
-
   if (body && !isFormData) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   } else if (body && isFormData) {
     opts.body = body;
   }
-
   const res = await fetch(`${API_BASE}${path}`, opts);
-
   if (res.status === 409) {
     const errData = await res.json().catch(() => ({}));
     const error = new Error(errData.message || 'Conflict');
-    error.status = 409;
-    error.data = errData;
-    throw error;
+    error.status = 409; error.data = errData; throw error;
   }
-
   if (!res.ok) {
     const errData = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     throw new Error(errData.error || errData.message || `HTTP ${res.status}`);
   }
-
   return res.json();
 }
 
-export const ping = () => request('GET', '/ping');
+// === 基础 & 文件 ===
 export const uploadFile = (file) => {
-  const formData = new FormData();
-  formData.append('file', file);
+  const formData = new FormData(); formData.append('file', file);
   return request('POST', '/files/upload', formData, true);
 };
 export const downloadFileByPath = (username, collName, path) =>
   `${API_BASE}/${username}/${collName}/${path}`;
-export const getFileMeta = (hash) => request('GET', `/files/verify/${hash}`);
-export const deleteFile = (hash) => request('DELETE', `/files/${hash}`);
-export const diffVersions = (vA, vB) => request('POST', '/files/diff', { version_a: vA, version_b: vB });
 
+// === 合集 ===
 export const createCollection = (username, collection_name) =>
   request('POST', '/collections', { username, collection_name });
 export const listCollections = (username) => request('GET', `/collections/${username}`);
@@ -50,6 +40,7 @@ export const addEntry = (username, collName, path, hash) =>
 export const deleteEntry = (username, collName, path) =>
   request('DELETE', `/collections/${username}/${collName}/entries/${path}`);
 
+// === 版本控制 ===
 export const commitVersion = (username, collName, commit_message) =>
   request('POST', `/collections/${username}/${collName}/commit`, { commit_message });
 export const getVersionLog = (username, collName) =>
@@ -57,14 +48,12 @@ export const getVersionLog = (username, collName) =>
 export const rollbackVersion = (username, collName, version_id) =>
   request('POST', `/collections/${username}/${collName}/rollback/${version_id}`);
 
+// === 协作 ===
 export const forkCollection = (username, collection_name, source_username, source_coll_name) =>
   request('POST', '/actions/fork', { username, collection_name, source_username, source_coll_name });
 export const mergeCollection = (username, collection_name, source_username, source_coll_name, strategy = 'ours') =>
   request('POST', '/actions/merge', { username, collection_name, source_username, source_coll_name, strategy });
 
+// === P2P ===
 export const getNodeInfo = () => request('GET', '/p2p/node');
 export const getPeers = () => request('GET', '/p2p/peers');
-export const pingPeer = (peerId) => request('GET', `/p2p/ping/${peerId}`);
-
-export const getTasks = () => request('GET', '/tasks');
-export const getTask = (id) => request('GET', `/tasks/${id}`);
