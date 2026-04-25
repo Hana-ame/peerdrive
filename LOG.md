@@ -78,4 +78,16 @@ PRIMARY KEY (repo_name, username, path, created_at)
 - **移除 Gzip 检测**：移除了 `internal/controller/file.go` 中的 `isGzipFile` 检测逻辑及辅助函数。文件注册时 `Gziped` 默认设为 `false`。
 - **修复路径拼接问题**：修复了 `RegisterLocalFile` 和 `RegisterFolder` 中将用户路径错误地与 `storageDir` 拼接的 Bug。现在支持注册本地文件系统的绝对路径及任意路径。
 - **自适应路径加载**：更新了 `LocalProvider` 以同时支持绝对路径和相对路径。绝对路径直接访问，相对路径则继续相对于 `storageDir` 解析。
+- **移除身份验证**：移除了 AuthMiddleware、auth 路由及相关代码。
+- **分层重构**：Controller → Service → Repository 三层分离，将业务逻辑从 controller 移至 service。
+- **配置模块**：新增 `internal/config`，通过环境变量 `PEERDRIVE_STORAGE` 和 `PEERDRIVE_STORAGE_ENABLE` 控制存储目录和开关。
+- **上传功能实现**：
+  - 上传文件自动计算 SHA256、Size、MIME 类型
+  - 重复文件检测，返回 `already_exists` 标识
+  - 存储禁用时返回 403
+  - 跨设备文件移动（fallback copy）
+  - 测试脚本 `test_upload.sh`
+- **元数据补全**：注册和上传时填充 `Size` 和 `MimeType`。
+- **API 清理**：VerifyFile 响应不再返回 `gziped` 和 `type` 字段。
+- **文档更新**：更新 `REGISTER_LAYER.md`、`TESTING.md`，新增 `UPLOAD_LAYER.md`。
 

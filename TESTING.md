@@ -36,14 +36,22 @@ libp2p 节点已启动: PeerID=12D3KooW..., 监听地址=[/ip4/...]
 
 ```bash
 cd go/
-bash test.sh
+
+# 注册 + 下载全链路测试
+bash test_register_download.sh
+
+# 上传功能测试（新文件、重复文件）
+bash test_upload.sh
 ```
 
 脚本覆盖：
 - `/ping` 健康检查
 - `/p2p/node` P2P 节点信息
-- 文件上传 → 校验 → 删除
-- 注册本地文件 / 文件夹
+- 文件上传 → 元数据校验 → 下载对比
+- 重复上传幂等性（`already_exists` 检测）
+- 注册本地绝对路径文件
+- 注册文件夹（递归）
+- 元数据校验（size, mime, hash）
 - 合集创建 → 添加条目 → Commit → 版本日志 → Rollback
 - Fork 合集 → Merge 合集 → Pull
 - 边界情况（无效 hash、重复合集、不存在的任务）
@@ -76,19 +84,19 @@ curl -x "" -F "file=@/tmp/test.txt" http://localhost:3000/files/upload
 
 # 验证文件（用上面的 hash）
 curl -x "" http://localhost:3000/files/verify/<HASH>
-# → {"hash":"...","filename":"test.txt","provider":"local","path":".."}
+# → {"hash":"...","filename":"test.txt","size":...,"mime":"text/plain; charset=utf-8"}
 
 # 通过 SHA256 下载
 curl -x "" -o /tmp/downloaded http://localhost:3000/sha256sum/<HASH>
 
-# 注册本地文件
+# 注册本地文件（绝对路径）
 curl -x "" -H "Content-Type: application/json" \
-  -d '{"path":"test.txt","filename":"test.txt"}' \
+  -d '{"path":"/tmp/test.txt","filename":"test.txt"}' \
   http://localhost:3000/files/register_local
 
-# 注册文件夹
+# 注册文件夹（绝对路径，递归）
 curl -x "" -H "Content-Type: application/json" \
-  -d '{"folder_path":"testdata"}' \
+  -d '{"folder_path":"/tmp/somedir"}' \
   http://localhost:3000/files/register_folder
 
 # 删除文件

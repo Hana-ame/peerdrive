@@ -7,8 +7,8 @@ BASE_URL="http://localhost:3000"
 TEST_DIR="/tmp/peerdrive_upload_test"
 mkdir -p "$TEST_DIR"
 
-echo "First Upload" > "$TEST_DIR/new.txt"
-echo "Second Upload" > "$TEST_DIR/new2.txt"
+echo "First Upload 1" > "$TEST_DIR/new.txt"
+echo "Second Upload 2" > "$TEST_DIR/new2.txt"
 
 # ── Helper ──
 upload() {
