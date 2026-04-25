@@ -69,6 +69,9 @@ export const mergeCollection = (username, collection_name, source_username, sour
 export const saveLocal = (req) => request('POST', '/local/save', req);
 export const getLocalStatus = (hash) => request('GET', `/local/status/${hash}`);
 
+// === 搜索 ===
+export const searchCollections = (query) => request('GET', `/collections/search?q=${encodeURIComponent(query)}`);
+
 // === P2P ===
 export const getNodeInfo = () => request('GET', '/p2p/node');
 export const getPeers = () => request('GET', '/p2p/peers');
