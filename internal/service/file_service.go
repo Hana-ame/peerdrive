@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -25,22 +27,27 @@ func NewFileService(cfg *config.Config) *FileService {
 	}
 }
 
-// RegisterLocal handles the logic of registering a local file.
 func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	if !s.storageEnable {
 		return "", fmt.Errorf("storage is disabled")
 	}
-	fullPath := path
-	// If path is relative, it's assumed to be relative to storageDir
+
+	absPath := path
 	if !filepath.IsAbs(path) {
-		fullPath = filepath.Join(s.storageDir, path)
+		absPath = filepath.Join(s.storageDir, path)
 	}
 
-	f, err := os.Open(fullPath)
+	f, err := os.Open(absPath)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	size := info.Size()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
@@ -48,65 +55,69 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	}
 	hash := hex.EncodeToString(h.Sum(nil))
 
-	// Meta (Idempotent)
+	f.Seek(0, io.SeekStart)
+	buf := make([]byte, 512)
+	n, _ := io.ReadFull(f, buf)
+	mimeType := http.DetectContentType(buf[:n])
+	if mimeType == "application/octet-stream" {
+		if t := mime.TypeByExtension(filepath.Ext(absPath)); t != "" {
+			mimeType = t
+		}
+	}
+
 	existing, _ := repository.GetFileMeta(hash)
 	if existing == nil {
 		_ = repository.InsertFileMeta(&model.FileMeta{
 			Hash:     hash,
+			Size:     size,
+			MimeType: mimeType,
 			Gziped:   false,
 			Filename: filename,
 			Type:     repository.FileTypeBlob,
 		})
 	}
 
-	// Provider
-	_ = repository.InsertFileProvider(hash, "local", path)
+	_ = repository.InsertFileProvider(hash, "local", absPath)
 
 	return hash, nil
 }
 
-// RegisterFolder handles batch registration of files in a folder.
 func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, error) {
 	if !s.storageEnable {
 		return nil, fmt.Errorf("storage is disabled")
 	}
-	fullDir := folderPath
-	if !filepath.IsAbs(folderPath) {
-		fullDir = filepath.Join(s.storageDir, folderPath)
-	}
 
-	entries, err := os.ReadDir(fullDir)
-	if err != nil {
-		return nil, err
+	absDir := folderPath
+	if !filepath.IsAbs(folderPath) {
+		absDir = filepath.Join(s.storageDir, folderPath)
 	}
 
 	var results []map[string]string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		
-		// Note: We pass the relative path as requested by the user in the original logic
-		relPath := filepath.Join(folderPath, entry.Name())
-		hash, err := s.RegisterLocal(relPath, entry.Name())
+	err := filepath.Walk(absDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			continue
+			return err
 		}
-
+		if info.IsDir() {
+			return nil
+		}
+		hash, err := s.RegisterLocal(path, info.Name())
+		if err != nil {
+			return err
+		}
 		results = append(results, map[string]string{
-			"filename": entry.Name(),
+			"filename": info.Name(),
 			"hash":     hash,
 		})
-	}
-	return results, nil
+		return nil
+	})
+	return results, err
 }
 
-// Upload handles uploading a file from a stream.
 func (s *FileService) Upload(reader io.Reader, filename string) (string, error) {
 	if !s.storageEnable {
 		return "", fmt.Errorf("storage is disabled")
 	}
-	// Use a temporary file to calculate hash
+
 	tempFile, err := os.CreateTemp("", "peerdrive-upload-*")
 	if err != nil {
 		return "", err
@@ -121,7 +132,6 @@ func (s *FileService) Upload(reader io.Reader, filename string) (string, error) 
 	}
 	hash := hex.EncodeToString(h.Sum(nil))
 
-	// Move to permanent storage
 	relPath := hash[:2] + "/" + hash
 	fullPath := filepath.Join(s.storageDir, relPath)
 	os.MkdirAll(filepath.Dir(fullPath), 0755)
@@ -130,15 +140,35 @@ func (s *FileService) Upload(reader io.Reader, filename string) (string, error) 
 		return "", err
 	}
 
-	// Meta
+	info, err := os.Stat(fullPath)
+	size := int64(0)
+	if err == nil {
+		size = info.Size()
+	}
+
+	f, _ := os.Open(fullPath)
+	mimeType := "application/octet-stream"
+	if f != nil {
+		buf := make([]byte, 512)
+		n, _ := f.Read(buf)
+		mimeType = http.DetectContentType(buf[:n])
+		if mimeType == "application/octet-stream" {
+			if t := mime.TypeByExtension(filepath.Ext(filename)); t != "" {
+				mimeType = t
+			}
+		}
+		f.Close()
+	}
+
 	_ = repository.InsertFileMeta(&model.FileMeta{
 		Hash:     hash,
+		Size:     size,
+		MimeType: mimeType,
 		Gziped:   false,
 		Filename: filename,
 		Type:     repository.FileTypeBlob,
 	})
 
-	// Provider
 	_ = repository.InsertFileProvider(hash, "local", relPath)
 
 	return hash, nil
@@ -155,11 +185,7 @@ func (s *FileService) Delete(hash string) error {
 	providers, _ := repository.GetFileProviders(hash)
 	for _, p := range providers {
 		if p.ProviderType == "local" {
-			fullPath := p.Path
-			if !filepath.IsAbs(p.Path) {
-				fullPath = filepath.Join(s.storageDir, p.Path)
-			}
-			os.Remove(fullPath)
+			os.Remove(p.Path)
 		}
 	}
 	repository.DB.Exec(`DELETE FROM file_providers WHERE hash = ?`, hash)
