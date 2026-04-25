@@ -4,9 +4,9 @@
 
 ```
 internal/controller/file.go    — HTTP 入口 /files/register_local, /files/register_folder
-internal/model/file.go         — FileMetadata
-internal/repository/file_repo.go — files 表 INSERT
-internal/repository/db.go      — files 表 schema
+internal/model/file.go         — FileMeta + FileProvider
+internal/repository/file_repo.go — file_meta + file_providers INSERT
+internal/repository/db.go      — schema
 ```
 
 ## 请求生命周期

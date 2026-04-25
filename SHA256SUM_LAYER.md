@@ -6,10 +6,10 @@
 internal/controller/download.go    — HTTP 入口 /sha256sum/:sha256
 internal/service/downloader.go     — 业务逻辑（查询元数据 + provider 读取 + 多位置重试）
 internal/provider/                 — 内容寻址读取（local/http）
-internal/model/file.go             — FileMetadata（含 metadata JSON + available）
-internal/repository/file_repo.go   — files 表查询（优先 local 可用记录）
-internal/repository/db.go          — files 表 schema（metadata TEXT + available + type）
-internal/controller/file.go        — 文件上传/注册（写入元数据）
+internal/model/file.go             — FileMeta + FileProvider
+internal/repository/file_repo.go   — file_meta + file_providers 查询
+internal/repository/db.go          — schema（file_meta + file_providers）
+internal/controller/file.go        — 文件上传/注册（写入两表）
 ```
 
 ## 请求生命周期
@@ -113,7 +113,7 @@ if mime, _ := meta["mime_type"].(string); mime != "" {
 - 旧表有 `is_gzip INTEGER` 列：保留不动，新代码忽略该列
 - `InitDB` 执行三条 `ALTER TABLE` 迁移：metadata / type / available
 - 旧数据 `metadata` 为 `'{}'`，type 为 `'blob'`，available 为 1
-- 旧数据库 files 表 hash 列从 `UNIQUE` 改为非唯一（多条迁移语句需手动处理 UNIQUE 约束）
+- 旧数据库需手动迁移 `files` 表数据到 `file_meta` + `file_providers` 新表
 
 ## 设计决策
 
