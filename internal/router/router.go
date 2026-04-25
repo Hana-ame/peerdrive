@@ -31,7 +31,6 @@ import (
 func SetupRouter(
 	downloader *service.Downloader,
 	p2pSvc *service.P2PService,
-	authSvc *service.AuthService,
 	storageDir string,
 ) *gin.Engine {
 	r := gin.Default()
@@ -39,7 +38,6 @@ func SetupRouter(
 	controller.InitDownloader(downloader)
 	controller.InitP2PController(p2pSvc)
 	controller.InitFileController(storageDir)
-	authCtrl := controller.NewAuthController(authSvc)
 
 	// Sync controller initialization
 	syncRepo := repository.NewSyncRepository()
@@ -48,15 +46,6 @@ func SetupRouter(
 
 	r.GET("/ping", controller.Ping)
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256)
-
-	// Auth routes (public)
-	auth := r.Group("/auth")
-	{
-		auth.POST("/register", authCtrl.Register)
-		auth.POST("/login", authCtrl.Login)
-		auth.POST("/logout", authCtrl.Logout)
-		auth.GET("/me", authCtrl.Me)
-	}
 
 	// P2P routes (public)
 	p2p := r.Group("/p2p")
@@ -75,48 +64,43 @@ func SetupRouter(
 		anon.POST("/collections/fork", controller.ForkAnonCollection)
 	}
 
-	// Protected routes (require auth)
-	protected := r.Group("")
-	protected.Use(AuthMiddleware(authSvc))
+	// File management
+	files := r.Group("/files")
 	{
-		// File management
-		files := protected.Group("/files")
-		{
-			files.POST("/upload", controller.UploadFile)
-			files.POST("/register_local", controller.RegisterLocalFile)
-			files.POST("/register_folder", controller.RegisterFolder)
-			files.GET("/verify/:hash", controller.VerifyFile)
-			files.DELETE("/:hash", controller.DeleteFile)
-			files.POST("/diff", controller.DiffVersions)
-		}
+		files.POST("/upload", controller.UploadFile)
+		files.POST("/register_local", controller.RegisterLocalFile)
+		files.POST("/register_folder", controller.RegisterFolder)
+		files.GET("/verify/:hash", controller.VerifyFile)
+		files.DELETE("/:hash", controller.DeleteFile)
+		files.POST("/diff", controller.DiffVersions)
+	}
 
-		// Collection management
-		collections := protected.Group("/collections")
-		{
-			collections.POST("", controller.CreateCollection)
-			collections.GET("/:username", controller.ListCollections)
-			collections.GET("/:username/:collection_name", controller.GetCollection)
-			collections.POST("/:username/:collection_name/entries", controller.AddEntry)
-			collections.DELETE("/:username/:collection_name/entries/*path", controller.RemoveEntry)
-			collections.POST("/:username/:collection_name/commit", controller.CommitCollection)
-			collections.GET("/:username/:collection_name/log", controller.GetVersionLog)
-			collections.POST("/:username/:collection_name/rollback/:version_id", controller.RollbackCollection)
-		}
+	// Collection management
+	collections := r.Group("/collections")
+	{
+		collections.POST("", controller.CreateCollection)
+		collections.GET("/:username", controller.ListCollections)
+		collections.GET("/:username/:collection_name", controller.GetCollection)
+		collections.POST("/:username/:collection_name/entries", controller.AddEntry)
+		collections.DELETE("/:username/:collection_name/entries/*path", controller.RemoveEntry)
+		collections.POST("/:username/:collection_name/commit", controller.CommitCollection)
+		collections.GET("/:username/:collection_name/log", controller.GetVersionLog)
+		collections.POST("/:username/:collection_name/rollback/:version_id", controller.RollbackCollection)
+	}
 
-		// Local sync
-		sync := protected.Group("/local")
-		{
-			sync.POST("/save", syncCtrl.SaveLocal)
-			sync.GET("/status/:hash", syncCtrl.GetStatus)
-		}
+	// Local sync
+	sync := r.Group("/local")
+	{
+		sync.POST("/save", syncCtrl.SaveLocal)
+		sync.GET("/status/:hash", syncCtrl.GetStatus)
+	}
 
-		// Collaboration actions
-		actions := protected.Group("/actions")
-		{
-			actions.POST("/merge", controller.MergeFromSource)
-			actions.POST("/fork", controller.ForkCollection)
-			actions.POST("/pull", controller.PullCollection)
-		}
+	// Collaboration actions
+	actions := r.Group("/actions")
+	{
+		actions.POST("/merge", controller.MergeFromSource)
+		actions.POST("/fork", controller.ForkCollection)
+		actions.POST("/pull", controller.PullCollection)
 	}
 
 	// Public collection file download

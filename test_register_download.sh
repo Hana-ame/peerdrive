@@ -8,7 +8,7 @@ FOLDER_DIR="$TEST_DIR/folder"
 echo "--- 测试单文件注册 ---"
 # 1. 注册单文件
 # 注意：我们使用绝对路径 /tmp/peerdrive_test/single.txt
-REG_RESP=$(curl -s -X POST "$SERVER_URL/files/register_local" \
+REG_RESP=$(curl -s -x "" -X POST "$SERVER_URL/files/register_local" \
     -H "Content-Type: application/json" \
     -d "{\"path\": \"$SINGLE_FILE\", \"filename\": \"single.txt\"}")
 
@@ -23,7 +23,7 @@ fi
 echo "注册成功，Hash: $HASH"
 
 # 2. 下载注册的文件
-curl -s -X GET "$SERVER_URL/sha256sum/$HASH" -o /tmp/downloaded_single.txt
+curl -s -x "" -X GET "$SERVER_URL/sha256sum/$HASH" -o /tmp/downloaded_single.txt
 DIFF=$(diff $SINGLE_FILE /tmp/downloaded_single.txt)
 
 if [ -z "$DIFF" ]; then
@@ -36,7 +36,7 @@ fi
 
 echo -e "\n--- 测试文件夹注册 ---"
 # 3. 注册文件夹
-REG_FOLDER_RESP=$(curl -s -X POST "$SERVER_URL/files/register_folder" \
+REG_FOLDER_RESP=$(curl -s -x "" -X POST "$SERVER_URL/files/register_folder" \
     -H "Content-Type: application/json" \
     -d "{\"folder_path\": \"$FOLDER_DIR\"}")
 
@@ -47,7 +47,7 @@ HASHES=$(echo $REG_FOLDER_RESP | grep -oP '(?<="hash":")[^"]*')
 
 for H in $HASHES; do
     echo "测试下载 Hash: $H"
-    curl -s -X GET "$SERVER_URL/sha256sum/$H" -o /tmp/downloaded_folder_file.txt
+    curl -s -x "" -X GET "$SERVER_URL/sha256sum/$H" -o /tmp/downloaded_folder_file.txt
     # 检查下载的文件是否与文件夹中的任何一个文件匹配
     MATCH=false
     for F in $FOLDER_DIR/*; do
