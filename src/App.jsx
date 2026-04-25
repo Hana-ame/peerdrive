@@ -2,6 +2,8 @@ import React, { useState, createContext, useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Plaza from './pages/Plaza';
 import Explorer from './pages/Explorer';
+import AnonExplorer from './pages/AnonExplorer';
+import AnonCreator from './pages/AnonCreator';
 import Navbar from './components/Navbar';
 import { getMe } from './api';
 
@@ -30,6 +32,8 @@ export default function App() {
           <main className="flex-1 overflow-hidden">
             <Routes>
               <Route path="/" element={<Plaza />} />
+              <Route path="/anon" element={<AnonExplorer />} />
+              <Route path="/anon/create" element={<AnonCreator />} />
               <Route path="/:username/:collName" element={<Explorer />} />
             </Routes>
           </main>

@@ -65,6 +65,13 @@ export const forkCollection = (username, collection_name, source_username, sourc
 export const mergeCollection = (username, collection_name, source_username, source_coll_name, strategy = 'ours') =>
   request('POST', '/actions/merge', { username, collection_name, source_username, source_coll_name, strategy });
 
+// === Anonymous Collections ===
+export const getAnonCollection = (hash) => request('GET', `/anon/collections/${hash}`);
+export const getAnonFileDownloadUrl = (hash, filepath) => `${API_BASE}/anon/collections/${hash}/entries/${filepath}`;
+export const forkAnonCollection = (sourceHash, addEntries, removePaths) => 
+  request('POST', '/anon/collections/fork', { source_hash: sourceHash, add_entries: addEntries, remove_paths: removePaths });
+export const createAnonCollection = (entries) => request('POST', '/anon/collections', { entries });
+
 // === 本地同步 ===
 export const saveLocal = (req) => request('POST', '/local/save', req);
 export const getLocalStatus = (hash) => request('GET', `/local/status/${hash}`);

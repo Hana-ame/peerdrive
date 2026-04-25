@@ -1,13 +1,13 @@
 import React, { useContext, useState, useEffect } from 'react';
 import { AppContext } from '../App';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { getNodeInfo, login, logout } from '../api';
 
 export default function Navbar() {
   const { username, setUsername, user, setUser } = useContext(AppContext);
   const location = useLocation();
+  const navigate = useNavigate();
   const [nodeInfo, setNodeInfo] = useState(null);
-  const [showLogin, setShowLogin] = useState(false);
   const [pass, setPass] = useState('');
 
   useEffect(() => { loadP2P(); }, []);
@@ -38,8 +38,12 @@ export default function Navbar() {
   return (
     <nav className="h-14 bg-gray-800 border-b border-gray-700 flex items-center px-6 justify-between shrink-0">
       <div className="flex items-center space-x-4">
-        <Link to="/" className="text-xl font-bold text-blue-400 hover:text-blue-300">Peerdrive</Link>
-        {pathParts.length === 2 && (
+        <div className="flex items-center space-x-2">
+          <Link to="/" className="text-xl font-bold text-blue-400 hover:text-blue-300">Peerdrive</Link>
+          <Link to="/anon" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">🔍 匿名探索</Link>
+          <Link to="/anon/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">➕ 创建</Link>
+        </div>
+        {pathParts.length >= 2 && (
           <div className="flex items-center text-sm text-gray-400">
             <span className="mx-2">/</span>
             <span className="text-gray-300">{pathParts[0]}</span>
@@ -71,7 +75,7 @@ export default function Navbar() {
         {nodeInfo && (
           <div className="text-xs text-green-400 flex items-center space-x-1">
             <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-            <span>P2P Online</span>
+            <span>P2P</span>
           </div>
         )}
       </div>
