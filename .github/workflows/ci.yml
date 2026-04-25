@@ -1,0 +1,119 @@
+name: Peerdrive CI
+
+on:
+  push:
+    branches: [main, feat/*]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build server
+        run: go build -o peerdrive-server ./cmd/server/main.go
+
+      - name: Run P2P integration test
+        run: |
+          chmod +x test/p2p.sh
+          bash test/p2p.sh
+
+      - name: Run anon collection test
+        run: |
+          ./peerdrive-server &
+          PID=$!
+          sleep 3
+          chmod +x test/anon-collection.sh
+          bash test/anon-collection.sh
+          EXIT_CODE=$?
+          kill $PID 2>/dev/null || true
+          wait $PID 2>/dev/null || true
+          exit $EXIT_CODE
+
+      - name: Run file upload test
+        run: |
+          ./peerdrive-server &
+          PID=$!
+          sleep 3
+          chmod +x test/upload.sh
+          bash test/upload.sh
+          EXIT_CODE=$?
+          kill $PID 2>/dev/null || true
+          wait $PID 2>/dev/null || true
+          exit $EXIT_CODE
+
+      - name: Run register test
+        run: |
+          ./peerdrive-server &
+          PID=$!
+          sleep 3
+          chmod +x test/register.sh
+          bash test/register.sh
+          EXIT_CODE=$?
+          kill $PID 2>/dev/null || true
+          wait $PID 2>/dev/null || true
+          exit $EXIT_CODE
+
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "# Peerdrive CI Test Report" > TEST_REPORT.md
+          echo "" >> TEST_REPORT.md
+          echo "## Build & Unit Tests" >> TEST_REPORT.md
+          echo "- **Go Build**: ${{ job.status }}" >> TEST_REPORT.md
+          echo "" >> TEST_REPORT.md
+          echo "## Integration Tests" >> TEST_REPORT.md
+          echo "" >> TEST_REPORT.md
+          echo "| Test Suite | Description |" >> TEST_REPORT.md
+          echo "|-----------|-------------|" >> TEST_REPORT.md
+          echo "| p2p.sh | Multi-instance P2P discovery, connection, collection exchange, file sync |" >> TEST_REPORT.md
+          echo "| anon-collection.sh | Anonymous collection CRUD, fork, download, path validation |" >> TEST_REPORT.md
+          echo "| upload.sh | File upload with duplicate detection, storage enable/disable |" >> TEST_REPORT.md
+          echo "| register.sh | Local file/folder registration, verify, delete |" >> TEST_REPORT.md
+          echo "" >> TEST_REPORT.md
+          echo "## P2P Stage 2 Features" >> TEST_REPORT.md
+          echo "- mDNS auto-discovery" >> TEST_REPORT.md
+          echo "- Custom exchange protocol (/peerdrive/exchange/1.0.0)" >> TEST_REPORT.md
+          echo "- DHT peer and content routing (requires bootstrap peers)" >> TEST_REPORT.md
+          echo "- Friendly name on anonymous collections" >> TEST_REPORT.md
+          echo "- Collection sync from peer to local storage" >> TEST_REPORT.md
+          echo "- Push sync (callback) endpoint" >> TEST_REPORT.md
+          echo "- P2P status, discovered peers, connect by multiaddr" >> TEST_REPORT.md
+          echo "" >> TEST_REPORT.md
+          echo "## Config" >> TEST_REPORT.md
+          echo "| Env | Default | Description |" >> TEST_REPORT.md
+          echo "|-----|---------|-------------|" >> TEST_REPORT.md
+          echo "| PEERDRIVE_P2P_ENABLE | true | Enable P2P node" >> TEST_REPORT.md
+          echo "| PEERDRIVE_P2P_LISTEN | /ip4/0.0.0.0/tcp/0 | P2P listen address" >> TEST_REPORT.md
+          echo "| PEERDRIVE_BOOTSTRAP_PEER | (empty) | Bootstrap peer multiaddr" >> TEST_REPORT.md
+          echo "| PEERDRIVE_MDNS_ENABLE | true | mDNS local discovery" >> TEST_REPORT.md
+          echo "| PEERDRIVE_RELAY_ENABLE | false | Enable relay/super-node" >> TEST_REPORT.md
+          cat TEST_REPORT.md
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: TEST_REPORT.md
