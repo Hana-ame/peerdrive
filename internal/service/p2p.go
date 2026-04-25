@@ -367,6 +367,21 @@ func (p *P2PService) handleExchange(stream network.Stream) {
 	filePath := filepath.Join(p.storageDir, hash[:2], hash)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
+		meta, _ := repository.GetFileMeta(hash)
+		if meta != nil {
+			providers, _ := repository.GetFileProviders(hash)
+			for _, prov := range providers {
+				if prov.ProviderType == "local" {
+					absPath := prov.Path
+					data, err = os.ReadFile(absPath)
+					if err == nil {
+						break
+					}
+				}
+			}
+		}
+	}
+	if err != nil || data == nil {
 		fmt.Fprintf(stream, "ERR not found\n")
 		return
 	}
