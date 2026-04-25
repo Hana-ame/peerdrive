@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -39,4 +40,24 @@ func parsePeerAddr(s string) (*peer.AddrInfo, error) {
 		return nil, fmt.Errorf("parse peer info: %w", err)
 	}
 	return info, nil
+}
+
+func parseStaticRelays(s string) ([]peer.AddrInfo, error) {
+	parts := strings.Split(s, ",")
+	result := make([]peer.AddrInfo, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		info, err := parsePeerAddr(p)
+		if err != nil {
+			continue
+		}
+		result = append(result, *info)
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("no valid relay addresses")
+	}
+	return result, nil
 }

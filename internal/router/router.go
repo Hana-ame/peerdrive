@@ -84,6 +84,8 @@ func SetupRouter(
 		p2p.POST("/fetch", controller.FetchCollection)
 		p2p.POST("/sync", controller.SyncFromPeer)
 		p2p.POST("/push", controller.PushSync)
+		p2p.POST("/request-file", controller.RequestFile)
+		p2p.GET("/ws/info", controller.WSInfo)
 	}
 
 	// Anonymous Collection routes (public)
@@ -149,6 +151,13 @@ func SetupRouter(
 
 	// Swagger
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	// WebSocket file transfer
+	if p2pSvc != nil {
+		r.GET("/ws/transfer", func(c *gin.Context) {
+			p2pSvc.WSHandler()(c.Writer, c.Request)
+		})
+	}
 
 	return r
 }

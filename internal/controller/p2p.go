@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -120,10 +121,10 @@ func FetchCollection(c *gin.Context) {
 
 func SyncFromPeer(c *gin.Context) {
 	var req struct {
-		PeerID    string   `json:"peer_id"`
-		Hash      string   `json:"hash"`
+		PeerID     string   `json:"peer_id"`
+		Hash       string   `json:"hash"`
 		FileHashes []string `json:"file_hashes"`
-		TargetDir string   `json:"target_dir"`
+		TargetDir  string   `json:"target_dir"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -170,8 +171,8 @@ func SyncFromPeer(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"synced":  synced,
-		"count":   len(synced),
+		"synced":   synced,
+		"count":    len(synced),
 		"saved_to": req.TargetDir,
 	})
 }
@@ -187,15 +188,18 @@ func P2PStatus(c *gin.Context) {
 		resp["addrs"] = addrs
 		resp["connected_count"] = len(peers)
 		resp["discovered_count"] = len(disc)
+		resp["relay_mode"] = p2pSvc.RelayMode()
+		resp["hole_punch"] = p2pSvc.HolePunchEnabled()
+		resp["ws_connections"] = p2pSvc.WSCount()
 	}
 	c.JSON(http.StatusOK, resp)
 }
 
 func PushSync(c *gin.Context) {
 	var req struct {
-		Hash      string                     `json:"hash"`
+		Hash      string                      `json:"hash"`
 		Entries   []model.AnonCollectionEntry `json:"entries"`
-		TargetDir string                     `json:"target_dir"`
+		TargetDir string                      `json:"target_dir"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -239,5 +243,58 @@ func PushSync(c *gin.Context) {
 		"entries":    req.Entries,
 		"target_dir": targetDir,
 		"message":    "collection received, ready to download",
+	})
+}
+
+func RequestFile(c *gin.Context) {
+	var req struct {
+		Hash    string   `json:"hash"`
+		PeerIDs []string `json:"peer_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	pids := make([]peer.ID, len(req.PeerIDs))
+	for i, s := range req.PeerIDs {
+		pid, err := peer.Decode(s)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid peer id: %s", s)})
+			return
+		}
+		pids[i] = pid
+	}
+
+	results, err := p2pSvc.BroadcastRequest(req.Hash, pids)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	responses := make([]gin.H, len(results))
+	for i, r := range results {
+		info := gin.H{"hash": r.Hash}
+		if r.Err != nil {
+			info["error"] = r.Err.Error()
+		} else {
+			info["size"] = len(r.Data)
+		}
+		responses[i] = info
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"hash":       req.Hash,
+		"requested":  len(pids),
+		"responses":  len(results),
+		"details":    responses,
+	})
+}
+
+func WSInfo(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"ws_connections": p2pSvc.WSCount(),
+		"ws_endpoint":    "/ws/transfer",
+		"message_types":  []string{"request", "response", "ping", "pong"},
 	})
 }

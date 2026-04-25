@@ -30,6 +30,7 @@ import (
 const (
 	ProtocolExchange    = "/peerdrive/exchange/1.0.0"
 	ProtocolAnnounce    = "/peerdrive/announce/1.0.0"
+	ProtocolRequest     = "/peerdrive/request/1.0.0"
 	DiscoveryServiceTag = "peerdrive-mdns"
 	FileReadTimeout     = 30 * time.Second
 )
@@ -43,6 +44,22 @@ type P2PService struct {
 
 	mu         sync.RWMutex
 	discovered map[peer.ID]peer.AddrInfo
+
+	wsHub       *wsHub
+	requestCh   chan fileRequest
+	responseCh  chan fileResponse
+}
+
+type fileRequest struct {
+	Hash    string
+	PeerID  peer.ID
+	ReplyCh chan fileResponse
+}
+
+type fileResponse struct {
+	Hash string
+	Data []byte
+	Err  error
 }
 
 func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error) {
@@ -52,9 +69,34 @@ func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error)
 
 	opts := []libp2p.Option{
 		libp2p.ListenAddrStrings(cfg.P2PListenAddr),
+		libp2p.EnableRelay(),
+		libp2p.EnableNATService(),
 	}
-	if cfg.P2PRelayEnable {
-		opts = append(opts, libp2p.EnableRelay())
+
+	if cfg.P2PHolePunch {
+		opts = append(opts, libp2p.EnableHolePunching())
+	}
+
+	switch cfg.P2PRelayMode {
+	case config.RelayServer:
+		opts = append(opts, libp2p.EnableRelayService())
+		opts = append(opts, libp2p.ForceReachabilityPublic())
+	case config.RelayClient:
+		if staticRelays := cfg.P2PStaticRelays; staticRelays != "" {
+			addrs, err := parseStaticRelays(staticRelays)
+			if err == nil && len(addrs) > 0 {
+				opts = append(opts, libp2p.EnableAutoRelayWithStaticRelays(addrs))
+				logf("using %d static relay(s)", len(addrs))
+			}
+		}
+	}
+
+	if cfg.P2PNATPortMap {
+		opts = append(opts, libp2p.NATPortMap())
+	}
+
+	if cfg.P2PAutoNAT {
+		opts = append(opts, libp2p.EnableAutoNATv2())
 	}
 
 	h, err := libp2p.New(opts...)
@@ -82,10 +124,14 @@ func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error)
 		storageDir: cfg.StorageDir,
 		cfg:        cfg,
 		discovered: make(map[peer.ID]peer.AddrInfo),
+		wsHub:      newWSHub(),
+		requestCh:  make(chan fileRequest, 256),
+		responseCh: make(chan fileResponse, 256),
 	}
 
 	h.SetStreamHandler(protocol.ID(ProtocolExchange), svc.handleExchange)
 	h.SetStreamHandler(protocol.ID(ProtocolAnnounce), svc.handleAnnounce)
+	h.SetStreamHandler(protocol.ID(ProtocolRequest), svc.handleRequest)
 
 	if cfg.P2PMDNSEnable {
 		if err := svc.setupMDNS(ctx); err != nil {
@@ -98,6 +144,8 @@ func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error)
 			logf("bootstrap connection warning: %v", err)
 		}
 	}
+
+	go svc.processWSRequests()
 
 	return svc, nil
 }
@@ -227,6 +275,10 @@ func (p *P2PService) FetchFile(ctx context.Context, hash string, peers []peer.Ad
 		if err != nil {
 			logf("DHT search failed for %s: %v", hash, err)
 		}
+	}
+
+	if len(peers) == 0 {
+		return nil, fmt.Errorf("no peers available for %s", hash)
 	}
 
 	for _, pi := range peers {
@@ -413,6 +465,91 @@ func (p *P2PService) handleAnnounce(stream network.Stream) {
 	fmt.Fprintf(stream, "OK\n")
 }
 
+func (p *P2PService) handleRequest(stream network.Stream) {
+	defer stream.Close()
+
+	reader := bufio.NewReader(stream)
+	hashLine, err := reader.ReadString('\n')
+	if err != nil {
+		return
+	}
+	hash := trimNewline(hashLine)
+
+	logf("peer %s requested hash %s via stream", stream.Conn().RemotePeer(), hash)
+
+	p.requestCh <- fileRequest{
+		Hash:   hash,
+		PeerID: stream.Conn().RemotePeer(),
+	}
+}
+
+func (p *P2PService) processWSRequests() {
+	for req := range p.requestCh {
+		filePath := filepath.Join(p.storageDir, req.Hash[:2], req.Hash)
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			meta, _ := repository.GetFileMeta(req.Hash)
+			if meta != nil {
+				providers, _ := repository.GetFileProviders(req.Hash)
+				for _, prov := range providers {
+					if prov.ProviderType == "local" {
+						data, err = os.ReadFile(prov.Path)
+						if err == nil {
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if err != nil || data == nil {
+			logf("requested file not found: %s", req.Hash)
+			continue
+		}
+
+		resp := fileResponse{Hash: req.Hash, Data: data}
+		if req.ReplyCh != nil {
+			select {
+			case req.ReplyCh <- resp:
+			default:
+			}
+		}
+	}
+}
+
+func (p *P2PService) BroadcastRequest(hash string, peerIDs []peer.ID) ([]fileResponse, error) {
+	if !p.IsEnabled() {
+		return nil, fmt.Errorf("p2p not enabled")
+	}
+
+	targets := peerIDs
+	if len(targets) == 0 {
+		targets = p.GetConnectedPeers()
+	}
+
+	results := make([]fileResponse, 0)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, pid := range targets {
+		wg.Add(1)
+		go func(pid peer.ID) {
+			defer wg.Done()
+			data, err := p.requestData(context.Background(), pid, hash)
+			mu.Lock()
+			results = append(results, fileResponse{Hash: hash, Data: data, Err: err})
+			mu.Unlock()
+		}(pid)
+	}
+	wg.Wait()
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no peers available")
+	}
+
+	return results, nil
+}
+
 func (p *P2PService) setupMDNS(ctx context.Context) error {
 	discoverySvc := mdns.NewMdnsService(p.Host, DiscoveryServiceTag, p)
 	return discoverySvc.Start()
@@ -425,6 +562,17 @@ func (p *P2PService) HandlePeerFound(pi peer.AddrInfo) {
 	logf("discovered peer: %s", pi.ID.String())
 }
 
+func (p *P2PService) RelayMode() string {
+	if p.cfg == nil {
+		return string(config.RelayOff)
+	}
+	return string(p.cfg.P2PRelayMode)
+}
+
+func (p *P2PService) HolePunchEnabled() bool {
+	return p.cfg != nil && p.cfg.P2PHolePunch
+}
+
 func (p *P2PService) connectToBootstrap(ctx context.Context, addr string) error {
 	info, err := parsePeerAddr(addr)
 	if err != nil {
@@ -434,6 +582,8 @@ func (p *P2PService) connectToBootstrap(ctx context.Context, addr string) error 
 }
 
 func (p *P2PService) Close() error {
+	close(p.requestCh)
+	close(p.responseCh)
 	if p.Host != nil {
 		return p.Host.Close()
 	}
