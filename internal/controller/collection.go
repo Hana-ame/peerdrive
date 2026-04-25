@@ -310,7 +310,7 @@ func CommitCollection(c *gin.Context) {
 	}
 
 	// 3. 构造匿名集合并保存
-	anonColl := model.NewAnonCollection(anonEntries)
+	anonColl := model.NewAnonCollection("", anonEntries)
 	storageDir := c.MustGet("storageDir").(string)
 	hash, err := repository.SaveCollection(anonColl, storageDir)
 	if err != nil {
@@ -421,7 +421,7 @@ func RollbackCollection(c *gin.Context) {
 		for _, e := range entries {
 			anonEntries = append(anonEntries, model.AnonCollectionEntry{Path: e.Path, Hash: e.FileHash})
 		}
-		anonColl := model.NewAnonCollection(anonEntries)
+		anonColl := model.NewAnonCollection("", anonEntries)
 		storageDir := c.MustGet("storageDir").(string)
 		hash, err := repository.SaveCollection(anonColl, storageDir)
 		if err == nil {

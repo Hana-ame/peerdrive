@@ -39,7 +39,7 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-func (s *AnonService) CreateCollection(entries []model.AnonCollectionEntry) (string, error) {
+func (s *AnonService) CreateCollection(name string, entries []model.AnonCollectionEntry) (string, error) {
 	for _, e := range entries {
 		if e.Path == "" || !isRelativePath(e.Path) || strings.Contains(e.Path, "..") {
 			return "", fmt.Errorf("invalid path: %s", e.Path)
@@ -53,7 +53,7 @@ func (s *AnonService) CreateCollection(entries []model.AnonCollectionEntry) (str
 		return entries[i].Path < entries[j].Path
 	})
 
-	coll := model.NewAnonCollection(entries)
+	coll := model.NewAnonCollection(name, entries)
 	jsonBytes, err := json.MarshalIndent(coll, "", "  ")
 	if err != nil {
 		return "", err

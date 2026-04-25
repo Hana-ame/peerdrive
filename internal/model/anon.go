@@ -8,19 +8,21 @@ type AnonCollectionEntry struct {
 }
 
 type AnonCollection struct {
-	Version   int                  `json:"version"`
-	Entries   []AnonCollectionEntry `json:"entries"`
-	CreatedAt string               `json:"created_at"`
+	Version      int                   `json:"version"`
+	FriendlyName string                `json:"friendly_name,omitempty"`
+	Entries      []AnonCollectionEntry `json:"entries"`
+	CreatedAt    string                `json:"created_at"`
 }
 
-func NewAnonCollection(entries []AnonCollectionEntry) *AnonCollection {
+func NewAnonCollection(name string, entries []AnonCollectionEntry) *AnonCollection {
 	if entries == nil {
 		entries = []AnonCollectionEntry{}
 	}
 	return &AnonCollection{
-		Version:   1,
-		Entries:   entries,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		Version:      1,
+		FriendlyName: name,
+		Entries:      entries,
+		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
 }
 
