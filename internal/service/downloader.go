@@ -3,6 +3,17 @@
 //   repository.GetFileByHash(hash) 查询元数据 →
 //   manager.GetReader(providerType, path) 获取流 →
 //   返回 io.ReadCloser + 文件名给控制器层流式响应。
+//
+// P2P 回退（新增）：
+//   当 repository.GetFileByHash 返回 nil（本地无此文件）且 p2pSvc 不为 nil 时，
+//   调用 p2pSvc.FetchFile(hash) 从 P2P Bitswap 获取文件内容。
+//   获取后缓存到 storage/p2p/{hash[:2]}/{hash} 并注册到 files 表。
+//   注册成功后再重新读取本地文件返回流。
+//
+// 结构体新增字段：
+//   p2pSvc     *service.P2PService  — P2P 服务实例，用于 Bitswap 回退下载
+//   storageDir string               — 存储根目录，缓存 P2P 拉取的文件
+// NewDownloader 新增参数：p2pSvc, storageDir
 
 package service
 

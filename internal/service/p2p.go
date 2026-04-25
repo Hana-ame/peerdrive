@@ -1,9 +1,16 @@
 // Package service 提供业务逻辑层，封装下载和 P2P 操作。
 // P2PService 封装 libp2p 节点的生命周期管理：
-//   NewP2PService — 创建 libp2p Host，监听 /ip4/0.0.0.0/tcp/0（随机端口）
-//   GetNodeInfo   — 返回 PeerID + 所有 multiaddr
-//   GetConnectedPeers — 通过 host.Network().Peers() 获取连接的对等节点
-//   PingPeer      — 通过 ping.PingService 发送 Ping 并等待 RTT 结果
+//   NewP2PService      — 创建 libp2p Host，监听 /ip4/0.0.0.0/tcp/0（随机端口）
+//   GetNodeInfo        — 返回 PeerID + 所有 multiaddr
+//   GetConnectedPeers  — 通过 host.Network().Peers() 获取连接的对等节点
+//   PingPeer           — 通过 ping.PingService 发送 Ping 并等待 RTT 结果
+//   FetchFile(hash)    — 通过 Bitswap 从 P2P 网络获取指定 SHA256 hash 的文件内容
+//
+// FetchFile 实现：
+//   1. 将 64 字符 hex SHA256 解码为 32 字节，编码为 multihash，构造 CIDv1(Raw)
+//   2. 通过 bitswap.GetBlock(ctx, cid) 请求块
+//   3. 返回块数据的 io.ReadCloser
+//   前提：P2PService 需要持有 bitswap.Bitswap 实例（在 NewP2PService 中初始化）
 
 package service
 

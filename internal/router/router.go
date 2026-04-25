@@ -3,7 +3,8 @@
 // P2PService、storageDir）。
 // 路由分组：
 //   /ping              — 健康检查（GET）
-//   /sha256sum/:sha256 — 通过 SHA256 哈希下载文件（GET）
+//   /sha256sum/:sha256 — 通过 SHA256 哈希下载文件（GET，含 P2P 回退）
+//   /anon/*            — 匿名合集创建/读取/Fork（POST/GET）
 //   /p2p/*             — P2P 节点信息、对等列表、Ping（GET）
 //   /files/*           — 文件上传/注册/验证/删除/版本差异（POST/GET/DELETE）
 //   /collections/*     — 集合 CRUD + 条目管理 + 版本控制（POST/GET/DELETE）

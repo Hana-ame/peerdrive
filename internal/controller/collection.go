@@ -2,15 +2,23 @@
 // 集合是一个命名的一组 path→hash 映射，属于某个用户。
 // 通过 repository 包操作 SQLite 的 collections、collection_entries、
 // collection_versions、version_entries 四张表。
+//
+// CID 指针机制：
+//   Commit 时，除原有版本快照外，还将当前 entries 组装为 AnonCollection JSON，
+//   经 anon_repo.StoreCollection 存储并获取 CID，然后调用 repo.UpdateCurrentCID。
+//   GetCollection 时，若 collections.current_cid 非空，优先通过 Downloader
+//   读取该 CID 的 JSON 返回 entries；否则 fallback 到 collection_entries 表。
+//   Rollback 后也需重新生成 CID 并更新 current_cid。
+//
 // 路由：
 //   POST   /collections                              — 创建集合
 //   GET    /collections/:username                     — 列出用户集合
-//   GET    /collections/:username/:coll               — 获取集合 + 条目列表
+//   GET    /collections/:username/:coll               — 获取集合 + 条目列表（优先走 CID）
 //   POST   /collections/:username/:coll/entries       — 添加 path→hash 条目
 //   DELETE /collections/:username/:coll/entries/:path — 删除条目
-//   POST   /collections/:username/:coll/commit        — 快照当前条目为版本
+//   POST   /collections/:username/:coll/commit        — 快照当前条目为版本 + 生成 CID
 //   GET    /collections/:username/:coll/log           — 版本历史（最新优先）
-//   POST   /collections/:username/:coll/rollback/:vid — 回滚到指定版本
+//   POST   /collections/:username/:coll/rollback/:vid — 回滚到指定版本 + 更新 CID
 //   GET    /:username/:coll/*filepath                 — 从集合下文件条目下载
 
 package controller

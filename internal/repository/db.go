@@ -2,7 +2,7 @@
 // 使用 mattn/go-sqlite3 驱动。必须先调用 InitDB(dbPath) 初始化全局 DB 连接。
 // 自动建表（CREATE TABLE IF NOT EXISTS），包含六张表：
 //   files               — 文件元数据（哈希→位置映射）
-//   collections         — 集合（用户+名称唯一）
+//   collections         — 集合（用户+名称唯一；新增 current_cid 指向最新 CID）
 //   collection_entries  — 集合条目（path→hash，基于 collection_id 级联删除）
 //   collection_versions — 版本快照记录（带 parent_version_id 版本链）
 //   version_entries     — 版本快照内容
@@ -37,6 +37,7 @@ func InitDB(dbPath string) error {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT NOT NULL,
 		collection_name TEXT NOT NULL,
+		current_cid TEXT DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(username, collection_name)
 	);

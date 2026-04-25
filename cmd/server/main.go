@@ -4,8 +4,11 @@
 // PEERDRIVE_STORAGE（存储目录，默认 ./storage）。
 // 使用方式：go run ./cmd/server/main.go
 //   PORT=3000 PEERDRIVE_STORAGE=./storage go run ./cmd/server/main.go
-// 内部流程：repository.InitDB → provider.NewManager → service.NewDownloader
+// 内部流程：repository.InitDB → provider.NewManager → service.NewDownloader(p2pSvc, storageDir)
 //   → service.NewP2PService → router.SetupRouter → r.Run(port)
+//
+// NewDownloader 新增参数：p2pSvc, storageDir（支持 P2P 回退下载）
+// 需要在 initFileController(storageDir) 后，调用 repository.SetAnonStorageDir(storageDir)
 
 package main
 

@@ -1,13 +1,16 @@
 // 集合仓库 — collections、collection_entries、collection_versions、
 // version_entries 四张表的 CRUD 和业务操作。
 // 函数列表：
-//   CreateCollection / GetOrCreateCollection — 创建/获取集合 ID
-//   ListCollections / GetCollection          — 查询集合列表/详情
+//   CreateCollection / GetOrCreateCollection — 创建/获取集合 ID（INSERT 含 current_cid）
+//   ListCollections / GetCollection          — 查询集合列表/详情（SELECT 含 current_cid）
+//   UpdateCurrentCID                         — 更新集合的 current_cid（Commit/Rollback 后调用）
 //   AddCollectionEntry / RemoveCollectionEntry — 增删条目（upsert 语义）
 //   GetCollectionEntry / ListCollectionEntries — 查询条目
 //   CreateVersion / SnapshotVersionEntries   — 创建版本快照
 //   GetVersionLog / GetVersionEntries        — 查询版本历史/快照内容
 //   RestoreVersionEntries                   — 事务内回滚（先删后插）
+//
+// current_cid 迁移：已有数据库需执行 ALTER TABLE collections ADD COLUMN current_cid TEXT DEFAULT ''
 
 package repository
 
