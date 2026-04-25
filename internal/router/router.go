@@ -39,6 +39,7 @@ func SetupRouter(
 	controller.InitDownloader(downloader)
 	controller.InitP2PController(p2pSvc)
 	controller.InitFileController(service.NewFileService(cfg))
+	controller.InitAnonController(service.NewAnonService(cfg))
 
 	// Sync controller initialization
 	syncRepo := repository.NewSyncRepository()

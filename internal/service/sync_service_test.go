@@ -58,7 +58,7 @@ func TestSyncService_PathTraversal(t *testing.T) {
 
 func TestSyncService_Filtering(t *testing.T) {
 	svc := NewSyncService(nil, nil)
-	entries := []model.AnonEntry{
+	entries := []model.AnonCollectionEntry{
 		{Path: "main.go", Hash: "h1"},
 		{Path: "utils.go", Hash: "h2"},
 		{Path: "README.md", Hash: "h3"},

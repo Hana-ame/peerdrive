@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
@@ -302,21 +301,16 @@ func CommitCollection(c *gin.Context) {
 	}
 
 	// 2. 转换为匿名集合的 entries
-	anonEntries := make([]model.AnonEntry, 0, len(entries))
+	anonEntries := make([]model.AnonCollectionEntry, 0, len(entries))
 	for _, e := range entries {
-		anonEntries = append(anonEntries, model.AnonEntry{
+		anonEntries = append(anonEntries, model.AnonCollectionEntry{
 			Path: e.Path,
 			Hash: e.FileHash,
 		})
 	}
 
 	// 3. 构造匿名集合并保存
-	anonColl := &model.AnonCollection{
-		Version:   1,
-		Name:      fmt.Sprintf("%s/%s snapshot", username, collectionName),
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		Entries:   anonEntries,
-	}
+	anonColl := model.NewAnonCollection(anonEntries)
 	storageDir := c.MustGet("storageDir").(string)
 	hash, err := repository.SaveCollection(anonColl, storageDir)
 	if err != nil {
@@ -423,16 +417,11 @@ func RollbackCollection(c *gin.Context) {
 	// 重新生成 CID
 	entries, err := repository.ListCollectionEntries(col.ID)
 	if err == nil {
-		anonEntries := make([]model.AnonEntry, 0, len(entries))
+		anonEntries := make([]model.AnonCollectionEntry, 0, len(entries))
 		for _, e := range entries {
-			anonEntries = append(anonEntries, model.AnonEntry{Path: e.Path, Hash: e.FileHash})
+			anonEntries = append(anonEntries, model.AnonCollectionEntry{Path: e.Path, Hash: e.FileHash})
 		}
-		anonColl := &model.AnonCollection{
-			Version:   1,
-			Name:      fmt.Sprintf("%s/%s rollback", username, collectionName),
-			CreatedAt: time.Now().UTC().Format(time.RFC3339),
-			Entries:   anonEntries,
-		}
+		anonColl := model.NewAnonCollection(anonEntries)
 		storageDir := c.MustGet("storageDir").(string)
 		hash, err := repository.SaveCollection(anonColl, storageDir)
 		if err == nil {

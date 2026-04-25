@@ -1,17 +1,3 @@
-// 匿名合集仓库 — 将 AnonCollection JSON 写入文件系统并注册到数据库。
-//
-// SaveCollection(coll, storageDir):
-//   1. entries 按 Path 字典序排序
-//   2. json.Marshal(coll) → []byte（字段顺序固定，保证确定性）
-//   3. SHA256([]byte) → hashStr
-//   4. 写文件到 storage/{hashStr[:2]}/{hashStr}
-//   5. INSERT file_meta (hash, gziped=0, filename, type=anon_collection)
-//   6. INSERT file_providers (hash, 'local', path)
-//
-// GetAnonCollectionByHash(hash, storageDir):
-//   1. 从 storage/{hash[:2]}/{hash} 读取文件内容
-//   2. json.Unmarshal 解析为 AnonCollection → 校验 Version
-
 package repository
 
 import (
@@ -39,6 +25,10 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 	sort.Slice(coll.Entries, func(i, j int) bool {
 		return coll.Entries[i].Path < coll.Entries[j].Path
 	})
+
+	// Update timestamp before marshaling
+	coll.CreatedAt = coll.CreatedAt
+
 	data, err := json.Marshal(coll)
 	if err != nil {
 		return "", fmt.Errorf("marshal collection: %w", err)
@@ -46,7 +36,6 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 	h := sha256.Sum256(data)
 	hashStr := hex.EncodeToString(h[:])
 
-	// 写文件
 	dir := filepath.Join(storageDir, hashStr[:2])
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
@@ -58,7 +47,6 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 		}
 	}
 
-	// 注册 file_meta（幂等）
 	relPath := fmt.Sprintf("%s/%s", hashStr[:2], hashStr)
 	_ = InsertFileMeta(&model.FileMeta{
 		Hash:     hashStr,
@@ -71,7 +59,7 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 	return hashStr, nil
 }
 
-func GetAnonCollectionByHash(hash string, storageDir string) (*model.AnonCollection, error) {
+func GetAnonCollectionByHash(hash, storageDir string) (*model.AnonCollection, error) {
 	if storageDir == "" {
 		storageDir = anonStorageDir
 	}

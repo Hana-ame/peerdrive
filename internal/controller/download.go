@@ -8,6 +8,8 @@ package controller
 
 import (
 	"net/http"
+
+	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 	"peerdrive/pkg/hashutil"
 
@@ -40,5 +42,11 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 	if gziped {
 		c.Header("Content-Encoding", "gzip")
 	}
+
+	meta, _ := repository.GetFileMeta(hash)
+	if meta != nil && meta.Type == repository.FileTypeAnonCollection {
+		c.Header("X-Peerdrive-Collection", "true")
+	}
+
 	c.DataFromReader(http.StatusOK, -1, "application/octet-stream", reader, nil)
 }

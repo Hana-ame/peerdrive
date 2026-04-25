@@ -140,8 +140,8 @@ func (s *SyncService) saveFile(hash, targetDir, relPath, fileHash string) error 
 	return err
 }
 
-func (s *SyncService) filterFiles(entries []model.AnonEntry, include, exclude []string) []model.AnonEntry {
-	var result []model.AnonEntry
+func (s *SyncService) filterFiles(entries []model.AnonCollectionEntry, include, exclude []string) []model.AnonCollectionEntry {
+	var result []model.AnonCollectionEntry
 	for _, e := range entries {
 		if s.isExcluded(e.Path, exclude) {
 			continue
