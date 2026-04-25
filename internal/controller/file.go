@@ -16,6 +16,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 
 	"peerdrive/internal/repository"
@@ -40,13 +41,34 @@ func UploadFile(c *gin.Context) {
 	}
 	defer file.Close()
 
-	hash, err := fileSvc.Upload(file, header.Filename)
+	meta, err := fileSvc.Upload(file, header.Filename)
+
+	if errors.Is(err, service.ErrStorageDisabled) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "storage is disabled"})
+		return
+	}
+	if errors.Is(err, service.ErrFileAlreadyExists) {
+		c.JSON(http.StatusOK, gin.H{
+			"hash":           meta.Hash,
+			"size":           meta.Size,
+			"mime":           meta.MimeType,
+			"filename":       meta.Filename,
+			"already_exists": true,
+		})
+		return
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"hash": hash, "filename": header.Filename})
+	c.JSON(http.StatusCreated, gin.H{
+		"hash":           meta.Hash,
+		"size":           meta.Size,
+		"mime":           meta.MimeType,
+		"filename":       meta.Filename,
+		"already_exists": false,
+	})
 }
 
 // RegisterLocalFile godoc

@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -13,6 +14,11 @@ import (
 	"peerdrive/internal/config"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
+)
+
+var (
+	ErrStorageDisabled  = errors.New("storage is disabled")
+	ErrFileAlreadyExists = errors.New("file already exists")
 )
 
 type FileService struct {
@@ -29,7 +35,7 @@ func NewFileService(cfg *config.Config) *FileService {
 
 func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	if !s.storageEnable {
-		return "", fmt.Errorf("storage is disabled")
+		return "", ErrStorageDisabled
 	}
 
 	absPath := path
@@ -84,7 +90,7 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 
 func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, error) {
 	if !s.storageEnable {
-		return nil, fmt.Errorf("storage is disabled")
+		return nil, ErrStorageDisabled
 	}
 
 	absDir := folderPath
@@ -113,69 +119,71 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 	return results, err
 }
 
-func (s *FileService) Upload(reader io.Reader, filename string) (string, error) {
+func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta, error) {
 	if !s.storageEnable {
-		return "", fmt.Errorf("storage is disabled")
+		return nil, ErrStorageDisabled
 	}
 
-	tempFile, err := os.CreateTemp("", "peerdrive-upload-*")
+	tmpFile, err := os.CreateTemp("", "peerdrive-upload-*")
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("create temp file: %w", err)
 	}
-	defer os.Remove(tempFile.Name())
-	defer tempFile.Close()
+	tmpName := tmpFile.Name()
+	defer os.Remove(tmpName)
 
-	h := sha256.New()
-	mw := io.MultiWriter(tempFile, h)
-	if _, err := io.Copy(mw, reader); err != nil {
-		return "", err
+	hasher := sha256.New()
+	tee := io.TeeReader(reader, hasher)
+	size, err := io.Copy(tmpFile, tee)
+	if err != nil {
+		tmpFile.Close()
+		return nil, fmt.Errorf("write temp file: %w", err)
 	}
-	hash := hex.EncodeToString(h.Sum(nil))
+	hash := hex.EncodeToString(hasher.Sum(nil))
+
+	tmpFile.Seek(0, io.SeekStart)
+	buf := make([]byte, 512)
+	n, _ := io.ReadFull(tmpFile, buf)
+	mimeType := http.DetectContentType(buf[:n])
+	if ext := filepath.Ext(filename); ext != "" && mimeType == "application/octet-stream" {
+		if t := mime.TypeByExtension(ext); t != "" {
+			mimeType = t
+		}
+	}
+	tmpFile.Close()
+
+	if existing, _ := repository.GetFileMeta(hash); existing != nil {
+		return existing, ErrFileAlreadyExists
+	}
 
 	relPath := hash[:2] + "/" + hash
 	fullPath := filepath.Join(s.storageDir, relPath)
 	os.MkdirAll(filepath.Dir(fullPath), 0755)
 
-	if _, err := os.Stat(fullPath); err == nil {
-		return hash, nil // File already exists, return success
-	}
-
-	if err := os.Rename(tempFile.Name(), fullPath); err != nil {
-		return "", err
-	}
-
-	info, err := os.Stat(fullPath)
-	size := int64(0)
-	if err == nil {
-		size = info.Size()
-	}
-
-	f, _ := os.Open(fullPath)
-	mimeType := "application/octet-stream"
-	if f != nil {
-		buf := make([]byte, 512)
-		n, _ := f.Read(buf)
-		mimeType = http.DetectContentType(buf[:n])
-		if mimeType == "application/octet-stream" {
-			if t := mime.TypeByExtension(filepath.Ext(filename)); t != "" {
-				mimeType = t
-			}
+	if err := os.Rename(tmpName, fullPath); err != nil {
+		// Fallback: cross-device link, use copy instead
+		if err := copyFile(tmpName, fullPath); err != nil {
+			return nil, fmt.Errorf("move to storage: %w", err)
 		}
-		f.Close()
 	}
+	tmpName = ""
 
-	_ = repository.InsertFileMeta(&model.FileMeta{
+	meta := &model.FileMeta{
 		Hash:     hash,
 		Size:     size,
 		MimeType: mimeType,
 		Gziped:   false,
 		Filename: filename,
 		Type:     repository.FileTypeBlob,
-	})
+	}
+	if err := repository.InsertFileMeta(meta); err != nil {
+		return nil, fmt.Errorf("insert meta: %w", err)
+	}
 
-	_ = repository.InsertFileProvider(hash, "local", relPath)
+	if err := repository.InsertFileProvider(hash, "local", relPath); err != nil {
+		return nil, fmt.Errorf("insert provider: %w", err)
+	}
 
-	return hash, nil
+	return meta, nil
 }
 
 func (s *FileService) Verify(hash string) (*model.FileMeta, error) {
@@ -184,7 +192,7 @@ func (s *FileService) Verify(hash string) (*model.FileMeta, error) {
 
 func (s *FileService) Delete(hash string) error {
 	if !s.storageEnable {
-		return fmt.Errorf("storage is disabled")
+		return ErrStorageDisabled
 	}
 	providers, _ := repository.GetFileProviders(hash)
 	for _, p := range providers {
@@ -195,4 +203,23 @@ func (s *FileService) Delete(hash string) error {
 	repository.DB.Exec(`DELETE FROM file_providers WHERE hash = ?`, hash)
 	repository.DB.Exec(`DELETE FROM file_meta WHERE hash = ?`, hash)
 	return nil
+}
+
+func copyFile(src, dst string) error {
+	s, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	d, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	if _, err := io.Copy(d, s); err != nil {
+		return err
+	}
+	return d.Sync()
 }

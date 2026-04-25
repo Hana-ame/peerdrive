@@ -71,10 +71,7 @@ func main() {
 		c.Next()
 	})
 
-	port := ":3000"
-	if p := os.Getenv("PORT"); p != "" {
-		port = ":" + p
-	}
+	port := ":" + cfg.Port
 
 	go func() {
 		if err := r.Run(port); err != nil {

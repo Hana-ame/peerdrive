@@ -26,9 +26,11 @@ type SaveLocalRequest struct {
 }
 
 type SyncStatusResponse struct {
-	LocalPath   string             `json:"local_path"`
-	TotalFiles  int                `json:"total_files"`
-	SavedFiles  int                `json:"saved_files"`
-	MissingFiles []LocalSyncFile    `json:"missing_files"`
-	LastSynced  time.Time          `json:"last_synced"`
+	CollectionHash string             `json:"collection_hash"`
+	LocalPath      string             `json:"local_path"`
+	TotalFiles     int                `json:"total_files"`
+	SavedFiles     int                `json:"saved_files"`
+	MissingFiles   []LocalSyncFile    `json:"missing_files"`
+	LastSynced     time.Time          `json:"last_synced"`
 }
+

@@ -95,11 +95,12 @@ func (s *SyncService) GetStatus(hash string) (*model.SyncStatusResponse, error) 
 	}
 
 	return &model.SyncStatusResponse{
-		LocalPath:    state.LocalPath,
-		TotalFiles:   len(files),
-		SavedFiles:   savedCount,
-		MissingFiles: missing,
-		LastSynced:   state.SyncedAt,
+		CollectionHash: state.CollectionHash,
+		LocalPath:      state.LocalPath,
+		TotalFiles:     len(files),
+		SavedFiles:     savedCount,
+		MissingFiles:   missing,
+		LastSynced:     state.SyncedAt,
 	}, nil
 }
 
@@ -175,13 +176,18 @@ func (s *SyncService) matchPattern(path, pattern string) bool {
 	if pattern == "*" {
 		return true
 	}
-	// Basic wildcard support: *.ext or prefix*
-	if strings.Contains(pattern, "*") {
-		// This is a very simple wildcard implementation
-		// For production, use filepath.Match or a regex
-		// simplified: check if path contains the parts of the pattern
-		// we'll use a simple contains check for now as a placeholder for real globbing
-		return strings.Contains(path, strings.ReplaceAll(pattern, "*", ""))
+	// Use filepath.Match for proper shell-style pattern matching
+	matched, err := filepath.Match(pattern, filepath.Base(path))
+	if err == nil && matched {
+		return true
 	}
-	return path == pattern
+	// Also support directory-based matching (e.g., "docs/*")
+	if strings.Contains(pattern, "/") {
+		matched, err := filepath.Match(pattern, path)
+		if err == nil && matched {
+			return true
+		}
+	}
+	// Fallback to simple contains if not a formal pattern
+	return strings.Contains(path, pattern)
 }
