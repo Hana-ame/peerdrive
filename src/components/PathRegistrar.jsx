@@ -9,9 +9,9 @@ export default function PathRegistrar({ onHashGenerated }) {
     e.preventDefault();
     try {
       const res = await api.registerLocalFile(path);
-      setResult(res.data);
+      setResult(res);
     } catch (err) {
-      alert('注册失败: ' + (err.response?.data?.error || err.message));
+      alert('注册失败: ' + (err.message || 'unknown error'));
     }
   };
 

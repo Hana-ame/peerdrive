@@ -5,10 +5,8 @@ export default function AnonCollectionManager({ initialHash }) {
   const [viewHash, setViewHash] = useState(initialHash || '');
   const [collection, setCollection] = useState(null);
   
-  // 创建表单
   const [newEntries, setNewEntries] = useState([{ path: '', hash: '' }]);
   
-  // Fork 表单
   const [forkAddPath, setForkAddPath] = useState('');
   const [forkAddHash, setForkAddHash] = useState('');
   const [forkRemovePath, setForkRemovePath] = useState('');
@@ -21,7 +19,7 @@ export default function AnonCollectionManager({ initialHash }) {
     if (!hash) return;
     try {
       const res = await api.getAnonCollection(hash);
-      setCollection(res.data);
+      setCollection(res);
       setViewHash(hash);
     } catch {
       alert('合集不存在');
@@ -35,10 +33,10 @@ export default function AnonCollectionManager({ initialHash }) {
     if (filtered.length === 0) return;
     try {
       const res = await api.createAnonCollection(filtered);
-      fetchCollection(res.data.hash);
+      fetchCollection(res.hash);
       setNewEntries([{ path: '', hash: '' }]);
     } catch (err) {
-      alert('创建失败: ' + (err.response?.data?.error || err.message));
+      alert('创建失败: ' + err.message);
     }
   };
 
@@ -48,9 +46,9 @@ export default function AnonCollectionManager({ initialHash }) {
     const remove_paths = forkRemovePath ? [forkRemovePath] : [];
     try {
       const res = await api.forkAnonCollection(viewHash, add_entries, remove_paths);
-      fetchCollection(res.data.hash);
+      fetchCollection(res.hash);
     } catch (err) {
-      alert('Fork 失败: ' + (err.response?.data?.error || err.message));
+      alert('Fork 失败: ' + err.message);
     }
   };
 
@@ -58,7 +56,6 @@ export default function AnonCollectionManager({ initialHash }) {
     <div>
       <h2>匿名合集 (不可变)</h2>
 
-      {/* 查看区 */}
       <div style={{marginBottom: '30px', padding: '15px', border: '1px solid #000'}}>
         <form onSubmit={(e) => { e.preventDefault(); fetchCollection(viewHash); }}>
           <input value={viewHash} onChange={e => setViewHash(e.target.value)} placeholder="输入 Hash 查看合集" style={{width: '500px'}} />
@@ -89,11 +86,10 @@ export default function AnonCollectionManager({ initialHash }) {
               </tbody>
             </table>
 
-            {/* Fork 区 */}
             <details style={{marginTop: '15px'}}>
               <summary><b>Fork 此合集</b></summary>
               <form onSubmit={handleFork} style={{marginTop: '10px', background:'#eee', padding:'10px'}}>
-                <label>新增文��:</label><br/>
+                <label>新增文件:</label><br/>
                 <input value={forkAddPath} onChange={e => setForkAddPath(e.target.value)} placeholder="路径" style={{width:'40%'}} />
                 <input value={forkAddHash} onChange={e => setForkAddHash(e.target.value)} placeholder="Hash" style={{width:'50%'}} /><br/>
                 
@@ -107,7 +103,6 @@ export default function AnonCollectionManager({ initialHash }) {
         )}
       </div>
 
-      {/* 创建区 */}
       <div style={{padding: '15px', border: '1px dashed #666'}}>
         <h3>创建新匿名合集</h3>
         <form onSubmit={handleCreate}>

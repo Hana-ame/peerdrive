@@ -9,7 +9,7 @@ export default function Sha256Manager() {
     e.preventDefault();
     try {
       const res = await api.verifyFile(hash);
-      setMeta(res.data);
+      setMeta(res);
     } catch {
       setMeta({ error: '未找到' });
     }
