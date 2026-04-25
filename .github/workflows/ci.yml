@@ -75,6 +75,11 @@ jobs:
           wait $PID 2>/dev/null || true
           exit $EXIT_CODE
 
+      - name: Run relay + NAT traversal test
+        run: |
+          chmod +x test/relay.sh
+          bash test/relay.sh
+
       - name: Generate test report
         if: always()
         run: |
@@ -91,6 +96,16 @@ jobs:
           echo "| anon-collection.sh | Anonymous collection CRUD, fork, download, path validation |" >> TEST_REPORT.md
           echo "| upload.sh | File upload with duplicate detection, storage enable/disable |" >> TEST_REPORT.md
           echo "| register.sh | Local file/folder registration, verify, delete |" >> TEST_REPORT.md
+          echo "| relay.sh | Relay server + client, hole punching, WS transfer, request broadcast |" >> TEST_REPORT.md
+          echo "" >> TEST_REPORT.md
+          echo "## P2P Stage 3 Features" >> TEST_REPORT.md
+          echo "- Circuit relay v2 (server/client mode)" >> TEST_REPORT.md
+          echo "- DCUtR hole punching for NAT traversal" >> TEST_REPORT.md
+          echo "- AutoNAT v2 reachability detection" >> TEST_REPORT.md
+          echo "- UPnP/NAT-PMP port mapping" >> TEST_REPORT.md
+          echo "- WebSocket /ws/transfer for bidirectional file exchange" >> TEST_REPORT.md
+          echo "- /p2p/request-file broadcast endpoint" >> TEST_REPORT.md
+          echo "- P2P status includes relay_mode, hole_punch, ws_connections" >> TEST_REPORT.md
           echo "" >> TEST_REPORT.md
           echo "## P2P Stage 2 Features" >> TEST_REPORT.md
           echo "- mDNS auto-discovery" >> TEST_REPORT.md
@@ -109,6 +124,11 @@ jobs:
           echo "| PEERDRIVE_BOOTSTRAP_PEER | (empty) | Bootstrap peer multiaddr" >> TEST_REPORT.md
           echo "| PEERDRIVE_MDNS_ENABLE | true | mDNS local discovery" >> TEST_REPORT.md
           echo "| PEERDRIVE_RELAY_ENABLE | false | Enable relay/super-node" >> TEST_REPORT.md
+          echo "| PEERDRIVE_RELAY_MODE | client | off/client/server" >> TEST_REPORT.md
+          echo "| PEERDRIVE_STATIC_RELAYS | (empty) | Static relay multiaddrs (comma-separated)" >> TEST_REPORT.md
+          echo "| PEERDRIVE_HOLE_PUNCH | true | DCUtR hole punching" >> TEST_REPORT.md
+          echo "| PEERDRIVE_AUTO_NAT | true | AutoNAT v2" >> TEST_REPORT.md
+          echo "| PEERDRIVE_NAT_PORTMAP | false | UPnP port mapping" >> TEST_REPORT.md
           cat TEST_REPORT.md
 
       - name: Upload test report

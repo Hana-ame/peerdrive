@@ -142,7 +142,7 @@ GET /p2p/status
 ```
 **响应 200：**
 ```json
-{"enabled":true,"peer_id":"12D3Koo...","addrs":["/ip4/..."],"connected_count":1,"discovered_count":2}
+{"enabled":true,"peer_id":"12D3Koo...","addrs":["/ip4/..."],"connected_count":1,"discovered_count":2,"relay_mode":"client","hole_punch":true,"ws_connections":0}
 ```
 
 ### 节点信息
@@ -217,6 +217,45 @@ Content-Type: application/json
 }
 ```
 **响应 200：** `{"entries":[...],"target_dir":"./callback-folder","message":"collection received"}`
+
+### 广播文件请求
+```
+POST /p2p/request-file
+Content-Type: application/json
+{"hash": "abc123...", "peer_ids": ["12D3Koo..."]}
+```
+向已连接节点请求文件（peer_ids 为空则广播全部）。通过 `/peerdrive/exchange/1.0.0` 协议拉取。
+**响应 200：** `{"hash":"...","requested":1,"responses":1,"details":[{"hash":"...","size":1024}]}`
+
+### WS 传输信息
+```
+GET /p2p/ws/info
+```
+**响应 200：** `{"ws_connections":0,"ws_endpoint":"/ws/transfer","message_types":["request","response","ping","pong"]}`
+
+### WebSocket 文件传输
+```
+GET /ws/transfer
+Upgrade: websocket
+```
+双向文件传输通道。
+
+**客户端 → 服务端：**
+```json
+{"type":"request","hash":"abc123..."}
+{"type":"response","hash":"abc123..."}  （转发到其他 WS 客户端）
+{"type":"ping"}
+```
+**服务端 → 客户端：**
+```json
+{"type":"response","hash":"abc123...","size":1024}
+  → 紧接着 Binary frame = 文件内容
+{"type":"error","hash":"abc123...","message":"not found locally"}
+{"type":"pong"}
+```
+- `request`: 查询文件。本地有则回复 response + binary；否则转发给其他 WS 客户端
+- `response`: 广播到其他连接（排除发送者）
+- 每个节点可接受多个并发 WS 连接
 
 ---
 

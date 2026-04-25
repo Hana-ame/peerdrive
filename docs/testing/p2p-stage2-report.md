@@ -93,3 +93,65 @@
 3. **文件传输无进度**：大文件同步无进度回调，建议增加 WebSocket 推送。
 4. **NAT 穿透**：未配置 hole punching，公网节点需要端口转发或中继。
 5. **GitHub Actions**：CI 已配置，P2P 测试在单机多实例模式运行。
+
+---
+
+## 七、Stage 3 — NAT穿透 + 中继 + WS传输（2026-04-25）
+
+### 测试结果
+
+| 测试项 | 状态 | 说明 |
+|--------|------|------|
+| 中继节点启动 | ✅ | `relay_mode=server`，`ForceReachabilityPublic` |
+| 客户端节点启动 | ✅ | `relay_mode=client`，hole punch + AutoNAT v2 + NATPortMap 启用 |
+| mDNS 双向发现 | ✅ | relay 与 client 双向发现 |
+| 手动连接 | ✅ | client 通过 multiaddr 连接 relay |
+| P2P 状态字段 | ✅ | `relay_mode`, `hole_punch`, `ws_connections` 正确输出 |
+| 合集通过中继获取 | ✅ | relay 端通过 P2P 协议获取 client 合集，friendly_name="relay-test" |
+| 广播文件请求 | ✅ | `POST /p2p/request-file` 向连接节点请求并收到数据 |
+| WS info 端点 | ✅ | `GET /p2p/ws/info` 返回 `message_types` |
+| WS 传输端点 | ✅ | `GET /ws/transfer` 路由注册成功 |
+
+### Stage 3 新增端点
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `/p2p/request-file` | 向已连接节点广播文件请求，通过 exchange 协议拉取 |
+| GET | `/p2p/ws/info` | WS 传输通道状态查询 |
+| GET | `/ws/transfer` | WebSocket 双向文件传输 |
+
+### Stage 3 新增协议
+
+- `/peerdrive/request/1.0.0` — 接收对等节点的文件请求，异步查找本地文件
+
+### Stage 3 配置参数
+
+| 环境变量 | 默认值 | 说明 |
+|---------|--------|------|
+| `PEERDRIVE_RELAY_MODE` | `client` | `off` / `client` / `server` |
+| `PEERDRIVE_STATIC_RELAYS` | `""` | client 模式静态中继 multiaddr（逗号分隔） |
+| `PEERDRIVE_HOLE_PUNCH` | `true` | DCUtR 打洞（NAT 穿透） |
+| `PEERDRIVE_AUTO_NAT` | `true` | AutoNAT v2 检测可达性 |
+| `PEERDRIVE_NAT_PORTMAP` | `false` | UPnP/NAT-PMP 端口映射 |
+
+### 中继模式行为
+
+| 模式 | `EnableRelayService` | `ForceReachabilityPublic` | `EnableAutoRelay` |
+|------|----------------------|---------------------------|-------------------|
+| `off` | - | - | - |
+| `client` | - | - | 若设 STATIC_RELAYS |
+| `server` | ✅ | ✅ | - |
+
+### WS 传输协议
+
+```
+客户端 → 服务端:
+  {"type":"request","hash":"sha256..."}     # 请求文件
+  {"type":"ping"}                           # 心跳
+
+服务端 → 客户端:
+  {"type":"response","hash":"...","size":N}  # 文件头
+  [Binary frame]                             # 文件内容
+  {"type":"error","hash":"...","message":"..."}
+  {"type":"pong"}
+```
