@@ -1,17 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import Sha256Manager from './components/Sha256Manager';
 import PathRegistrar from './components/PathRegistrar';
 import AnonCollectionManager from './components/AnonCollectionManager';
 
 const tabs = [
-  { key: 'sha256', label: 'SHA256 寻址', icon: '#' },
-  { key: 'path',   label: '注册路径',  icon: '~' },
-  { key: 'anon',   label: '匿名合集',  icon: '@' },
+  { key: 'sha256', label: 'SHA256 寻址' },
+  { key: 'path',   label: '注册路径' },
+  { key: 'anon',   label: '匿名合集' },
 ];
 
 export default function App() {
   const [view, setView] = useState('sha256');
-  const [hashForAnon, setHashForAnon] = useState('');
+  const [prefillEntries, setPrefillEntries] = useState(null);
+
+  const handleFilesRegistered = useCallback((files) => {
+    // Convert registered files into collection entry format
+    const entries = files.map(f => ({
+      path: f.filename || f.path || '',
+      hash: f.hash || '',
+    }));
+    setPrefillEntries(entries);
+    setView('anon');
+  }, []);
 
   return (
     <div className="flex h-screen bg-zinc-950 text-zinc-200">
@@ -24,14 +34,13 @@ export default function App() {
           {tabs.map(tab => (
             <button
               key={tab.key}
-              onClick={() => setView(tab.key)}
+              onClick={() => { setView(tab.key); setPrefillEntries(null); }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors
-                ${view === tab.key 
-                  ? 'bg-zinc-800 text-white font-medium' 
+                ${view === tab.key
+                  ? 'bg-zinc-800 text-white font-medium'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
                 }`}
             >
-              <span className="text-xs font-mono opacity-60">{tab.icon}</span>
               {tab.label}
             </button>
           ))}
@@ -47,8 +56,8 @@ export default function App() {
       {/* Main */}
       <main className="flex-1 overflow-y-auto p-8">
         {view === 'sha256' && <Sha256Manager />}
-        {view === 'path'   && <PathRegistrar onHashGenerated={hash => { setHashForAnon(hash); setView('anon'); }} />}
-        {view === 'anon'   && <AnonCollectionManager initialHash={hashForAnon} />}
+        {view === 'path'   && <PathRegistrar onFilesRegistered={handleFilesRegistered} />}
+        {view === 'anon'   && <AnonCollectionManager prefillEntries={prefillEntries} />}
       </main>
     </div>
   );

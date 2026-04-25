@@ -1,22 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import * as api from '../api';
 
-export default function AnonCollectionManager({ initialHash }) {
-  const [viewHash, setViewHash] = useState(initialHash || '');
+export default function AnonCollectionManager({ prefillEntries }) {
+  const [viewHash, setViewHash] = useState('');
   const [collection, setCollection] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   /* --- create form --- */
-  const [newEntries, setNewEntries] = useState([{ path: '', hash: '' }]);
+  const [newEntries, setNewEntries] = useState(() => {
+    if (prefillEntries && prefillEntries.length > 0) return prefillEntries;
+    return [{ path: '', hash: '' }];
+  });
   const [creating, setCreating] = useState(false);
 
   /* --- fork section --- */
   const [forkAddPath, setForkAddPath] = useState('');
-  const [forkAddHash, setForkAddHash] = useState('');
-  const [forkRemovePath, setForkRemovePath] = useState('');
 
-  useEffect(() => { if (initialHash) fetchCollection(initialHash); }, [initialHash]);
+  // When prefillEntries changes from outside, update form
+  useEffect(() => {
+    if (prefillEntries && prefillEntries.length > 0) {
+      setNewEntries(prefillEntries);
+    }
+  }, [prefillEntries]);
 
   const fetchCollection = async (hash) => {
     if (!hash) return;
