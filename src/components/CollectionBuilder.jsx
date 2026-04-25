@@ -65,7 +65,17 @@ export default function CollectionBuilder() {
   const [forkAddHash, setForkAddHash] = useState('')
   const [forkRemovePath, setForkRemovePath] = useState('')
 
-  /* reset from prefill */
+  /* --- friendly name --- */
+  const [friendlyName, setFriendlyName] = useState('')
+
+  /* --- build helpers --- */
+  const autoFriendlyName = (folderPath) => {
+    if (friendlyName) return // don't overwrite manual input
+    const trimmed = folderPath.replace(/\/+$/, '')
+    const basename = trimmed.split('/').pop() || ''
+    if (basename) setFriendlyName(basename)
+  }
+
   /* ======== build helpers ======== */
   const registerFolder = async () => {
     if (!regPath.trim()) return
@@ -81,6 +91,7 @@ export default function CollectionBuilder() {
         setBuildError('目录中没有文件')
         return
       }
+      autoFriendlyName(regPath.trim())
       setRegPath('')
       setEntries(prev => {
         const seen = new Set(prev.map(e => e.path))
@@ -170,6 +181,7 @@ export default function CollectionBuilder() {
         setQuickMode(false)
         return
       }
+      autoFriendlyName(regPath.trim())
       const coll = await api.createAnonCollection(list)
       setRegPath('')
       setEntries(list)
@@ -262,6 +274,19 @@ export default function CollectionBuilder() {
         {buildError && (
           <div className="mb-4 bg-red-900/20 border border-red-900/40 rounded-lg px-4 py-3 text-sm text-red-400">
             {buildError}
+          </div>
+        )}
+
+        {/* friendly name */}
+        {entries.length > 0 && (
+          <div className="mb-4 flex items-center gap-2">
+            <label className="text-xs text-zinc-500 whitespace-nowrap">合集名称</label>
+            <input
+              value={friendlyName} onChange={e => setFriendlyName(e.target.value)}
+              placeholder="可选，留空则无名称"
+              className="bg-zinc-900 border border-zinc-700 rounded px-3 py-1.5 text-sm
+                         focus:outline-none focus:border-zinc-500 placeholder:text-zinc-600 max-w-xs"
+            />
           </div>
         )}
 
@@ -386,7 +411,9 @@ export default function CollectionBuilder() {
               <div className="flex items-center gap-4 text-xs text-zinc-400">
                 <span>Version <span className="text-zinc-200 font-mono">{collection.version}</span></span>
                 <span>{new Date(collection.created_at).toLocaleString()}</span>
-                {collection.name && <span className="text-zinc-500">{collection.name}</span>}
+                {(friendlyName || collection.name) && (
+                  <span className="text-zinc-300 font-medium">{friendlyName || collection.name}</span>
+                )}
               </div>
               <span className="text-xs text-zinc-600 font-mono truncate max-w-xs">{viewHash}</span>
             </div>
