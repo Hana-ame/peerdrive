@@ -68,6 +68,10 @@ export default function CollectionBuilder() {
   /* --- friendly name --- */
   const [friendlyName, setFriendlyName] = useState('')
 
+  /* --- download dialog --- */
+  const [dlFolder, setDlFolder] = useState('')
+  const [selectedFiles, setSelectedFiles] = useState(new Set())
+
   /* --- build helpers --- */
   const autoFriendlyName = (folderPath) => {
     if (friendlyName) return // don't overwrite manual input
@@ -155,7 +159,7 @@ export default function CollectionBuilder() {
     setCreating(true)
     setBuildError('')
     try {
-      const res = await api.createAnonCollection(valid)
+      const res = await api.createAnonCollection(valid, friendlyName)
       setLastHash(res.hash)
       setViewHash(res.hash)
       fetchCollection(res.hash)
@@ -182,7 +186,7 @@ export default function CollectionBuilder() {
         return
       }
       autoFriendlyName(regPath.trim())
-      const coll = await api.createAnonCollection(list)
+      const coll = await api.createAnonCollection(list, friendlyName)
       setRegPath('')
       setEntries(list)
       setLastHash(coll.hash)
@@ -204,6 +208,7 @@ export default function CollectionBuilder() {
       const res = await api.getAnonCollection(hash)
       setCollection(res)
       setViewHash(hash)
+      if (res.friendly_name) setDlFolder(res.friendly_name)
     } catch {
       setError('合集未找到')
       setCollection(null)
@@ -217,7 +222,7 @@ export default function CollectionBuilder() {
     const add_entries = forkAddPath && forkAddHash ? [{ path: forkAddPath, hash: forkAddHash }] : []
     const remove_paths = forkRemovePath ? [forkRemovePath] : []
     try {
-      const res = await api.forkAnonCollection(viewHash, add_entries, remove_paths)
+      const res = await api.forkAnonCollection(viewHash, add_entries, remove_paths, friendlyName)
       setForkAddPath(''); setForkAddHash(''); setForkRemovePath('')
       fetchCollection(res.hash)
     } catch (err) {
@@ -411,8 +416,8 @@ export default function CollectionBuilder() {
               <div className="flex items-center gap-4 text-xs text-zinc-400">
                 <span>Version <span className="text-zinc-200 font-mono">{collection.version}</span></span>
                 <span>{new Date(collection.created_at).toLocaleString()}</span>
-                {(friendlyName || collection.name) && (
-                  <span className="text-zinc-300 font-medium">{friendlyName || collection.name}</span>
+                {collection.friendly_name && (
+                  <span className="text-zinc-300 font-medium">{collection.friendly_name}</span>
                 )}
               </div>
               <span className="text-xs text-zinc-600 font-mono truncate max-w-xs">{viewHash}</span>
@@ -438,6 +443,70 @@ export default function CollectionBuilder() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* ---- download dialog ---- */}
+        {collection && collection.entries.length > 0 && (
+          <div className="mt-4 bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+            <h3 className="text-sm font-medium text-zinc-300 mb-3">选择下载文件</h3>
+            <div className="flex items-center gap-3 mb-3">
+              <button
+                onClick={() => {
+                  if (selectedFiles.size === collection.entries.length) {
+                    setSelectedFiles(new Set())
+                  } else {
+                    setSelectedFiles(new Set(collection.entries.map((_, i) => i)))
+                  }
+                }}
+                className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+              >
+                {selectedFiles.size === collection.entries.length ? '取消全选' : '全选'}
+              </button>
+              <span className="text-xs text-zinc-600">
+                已选 {selectedFiles.size} / {collection.entries.length}
+              </span>
+            </div>
+            <div className="max-h-48 overflow-y-auto mb-3 space-y-1">
+              {collection.entries.map((entry, idx) => (
+                <label key={idx} className="flex items-center gap-2 cursor-pointer hover:bg-zinc-800/30 px-2 py-1 rounded text-sm">
+                  <input
+                    type="checkbox"
+                    checked={selectedFiles.has(idx)}
+                    onChange={() => {
+                      const next = new Set(selectedFiles)
+                      next.has(idx) ? next.delete(idx) : next.add(idx)
+                      setSelectedFiles(next)
+                    }}
+                    className="accent-amber-500"
+                  />
+                  <span className="text-zinc-300 font-mono text-xs flex-1 truncate">{entry.path}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                value={dlFolder}
+                onChange={e => setDlFolder(e.target.value)}
+                placeholder="下载到目录（如 /downloads/mydata）"
+                className="flex-1 bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-sm font-mono
+                           focus:outline-none focus:border-zinc-500 placeholder:text-zinc-600"
+              />
+              <button
+                onClick={() => {
+                  collection.entries.forEach((entry, idx) => {
+                    if (selectedFiles.has(idx)) {
+                      window.open(api.getAnonFileDownloadUrl(viewHash, entry.path), '_blank')
+                    }
+                  })
+                }}
+                disabled={selectedFiles.size === 0}
+                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                           bg-amber-600 text-white hover:bg-amber-500 disabled:opacity-40 whitespace-nowrap"
+              >
+                下载选中 ({selectedFiles.size})
+              </button>
+            </div>
           </div>
         )}
 

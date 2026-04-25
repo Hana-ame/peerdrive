@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import Sha256Manager from './components/Sha256Manager';
 import CollectionBuilder from './components/CollectionBuilder';
+import P2PStatus from './components/P2PStatus';
 
 const tabs = [
   { key: 'sha256', label: 'SHA256 寻址' },
   { key: 'build',  label: '合集构建' },
+  { key: 'p2p',    label: 'P2P 网络' },
 ];
 
 export default function App() {
@@ -44,6 +46,7 @@ export default function App() {
       <main className="flex-1 overflow-y-auto p-8">
         {view === 'sha256' && <Sha256Manager />}
         {view === 'build'  && <CollectionBuilder />}
+        {view === 'p2p'    && <P2PStatus />}
       </main>
     </div>
   );
