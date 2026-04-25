@@ -30,6 +30,32 @@ func InitDB(dbPath string) error {
 		return err
 	}
 	schema := `
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL UNIQUE,
+		password_hash TEXT NOT NULL,
+		authkey TEXT UNIQUE,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS local_collection_sync (
+		collection_hash TEXT PRIMARY KEY,
+		local_path TEXT NOT NULL,
+		include_filter TEXT,
+		exclude_filter TEXT,
+		synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS local_sync_files (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		collection_hash TEXT NOT NULL REFERENCES local_collection_sync(collection_hash) ON DELETE CASCADE,
+		file_path TEXT NOT NULL,
+		is_saved INTEGER DEFAULT 0,
+		last_modified DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(collection_hash, file_path)
+	);
+
 	CREATE TABLE IF NOT EXISTS file_meta (
 		hash TEXT PRIMARY KEY,
 		size INTEGER DEFAULT 0,

@@ -4,19 +4,23 @@
 // 路由分组：
 //   /ping              — 健康检查（GET）
 //   /sha256sum/:sha256 — 通过 SHA256 哈希下载文件（GET，含 P2P 回退）
-//   /anon/*            — 匿名合集创建/读取/Fork（POST/GET）
+//   /auth/*           — 用户注册、登录、登出（POST/POST/POST/GET）
 //   /p2p/*             — P2P 节点信息、对等列表、Ping（GET）
-//   /files/*           — 文件上传/注册/验证/删除/版本差异（POST/GET/DELETE）
-//   /collections/*     — 集合 CRUD + 条目管理 + 版本控制（POST/GET/DELETE）
+//   /anon/*            — 匿名合集创建/读取/Fork（POST/GET）
+//   /files/*           — 文件上传/注册/验证/删除/版本差异（POST/POST/POST/GET/DELETE）
+//   /collections/*     — 集合 CRUD + 条目管理 + 版本控制（POST/GET）
+//   /local/*           — 本地同步状态管理（POST/GET）
 //   /actions/*         — 合并/复刻/拉取（POST）
 //   /tasks/*           — 异步任务状态查询（GET）
 //   /:user/:coll/*     — 从集合条目中下载文件（GET）
+//   /collections/search — 公开搜索合集（GET）
 //   /swagger/*         — Swagger UI 页面（GET）
 
 package router
 
 import (
 	"peerdrive/internal/controller"
+	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +31,7 @@ import (
 func SetupRouter(
 	downloader *service.Downloader,
 	p2pSvc *service.P2PService,
+	authSvc *service.AuthService,
 	storageDir string,
 ) *gin.Engine {
 	r := gin.Default()
@@ -34,10 +39,26 @@ func SetupRouter(
 	controller.InitDownloader(downloader)
 	controller.InitP2PController(p2pSvc)
 	controller.InitFileController(storageDir)
+	authCtrl := controller.NewAuthController(authSvc)
+
+	// Sync controller initialization
+	syncRepo := repository.NewSyncRepository()
+	syncSvc := service.NewSyncService(syncRepo, downloader)
+	syncCtrl := controller.NewSyncController(syncSvc)
 
 	r.GET("/ping", controller.Ping)
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256)
 
+	// Auth routes (public)
+	auth := r.Group("/auth")
+	{
+		auth.POST("/register", authCtrl.Register)
+		auth.POST("/login", authCtrl.Login)
+		auth.POST("/logout", authCtrl.Logout)
+		auth.GET("/me", authCtrl.Me)
+	}
+
+	// P2P routes (public)
 	p2p := r.Group("/p2p")
 	{
 		p2p.GET("/node", controller.GetNodeInfo)
@@ -45,7 +66,7 @@ func SetupRouter(
 		p2p.GET("/ping/:peer_id", controller.PingPeer)
 	}
 
-	// 匿名合集路由
+	// Anonymous Collection routes (public)
 	anon := r.Group("/anon")
 	{
 		anon.POST("/collections", controller.CreateAnonCollection)
@@ -54,43 +75,64 @@ func SetupRouter(
 		anon.POST("/collections/fork", controller.ForkAnonCollection)
 	}
 
-	files := r.Group("/files")
+	// Protected routes (require auth)
+	protected := r.Group("")
+	protected.Use(AuthMiddleware(authSvc))
 	{
-		files.POST("/upload", controller.UploadFile)
-		files.POST("/register_local", controller.RegisterLocalFile)
-		files.POST("/register_folder", controller.RegisterFolder)
-		files.GET("/verify/:hash", controller.VerifyFile)
-		files.DELETE("/:hash", controller.DeleteFile)
-		files.POST("/diff", controller.DiffVersions)
+		// File management
+		files := protected.Group("/files")
+		{
+			files.POST("/upload", controller.UploadFile)
+			files.POST("/register_local", controller.RegisterLocalFile)
+			files.POST("/register_folder", controller.RegisterFolder)
+			files.GET("/verify/:hash", controller.VerifyFile)
+			files.DELETE("/:hash", controller.DeleteFile)
+			files.POST("/diff", controller.DiffVersions)
+		}
+
+		// Collection management
+		collections := protected.Group("/collections")
+		{
+			collections.POST("", controller.CreateCollection)
+			collections.GET("/:username", controller.ListCollections)
+			collections.GET("/:username/:collection_name", controller.GetCollection)
+			collections.POST("/:username/:collection_name/entries", controller.AddEntry)
+			collections.DELETE("/:username/:collection_name/entries/*path", controller.RemoveEntry)
+			collections.POST("/:username/:collection_name/commit", controller.CommitCollection)
+			collections.GET("/:username/:collection_name/log", controller.GetVersionLog)
+			collections.POST("/:username/:collection_name/rollback/:version_id", controller.RollbackCollection)
+		}
+
+		// Local sync
+		sync := protected.Group("/local")
+		{
+			sync.POST("/save", syncCtrl.SaveLocal)
+			sync.GET("/status/:hash", syncCtrl.GetStatus)
+		}
+
+		// Collaboration actions
+		actions := protected.Group("/actions")
+		{
+			actions.POST("/merge", controller.MergeFromSource)
+			actions.POST("/fork", controller.ForkCollection)
+			actions.POST("/pull", controller.PullCollection)
+		}
 	}
 
-	collections := r.Group("/collections")
-	{
-		collections.POST("", controller.CreateCollection)
-		collections.GET("/:username", controller.ListCollections)
-		collections.GET("/:username/:collection_name", controller.GetCollection)
-		collections.POST("/:username/:collection_name/entries", controller.AddEntry)
-		collections.DELETE("/:username/:collection_name/entries/*path", controller.RemoveEntry)
-		collections.POST("/:username/:collection_name/commit", controller.CommitCollection)
-		collections.GET("/:username/:collection_name/log", controller.GetVersionLog)
-		collections.POST("/:username/:collection_name/rollback/:version_id", controller.RollbackCollection)
-	}
-
+	// Public collection file download
 	r.GET("/:username/:collection_name/*filepath", controller.DownloadCollectionFile)
 
-	actions := r.Group("/actions")
-	{
-		actions.POST("/merge", controller.MergeFromSource)
-		actions.POST("/fork", controller.ForkCollection)
-		actions.POST("/pull", controller.PullCollection)
-	}
-
+	// Task status
 	tasks := r.Group("/tasks")
 	{
 		tasks.GET("", controller.ListTasks)
 		tasks.GET("/:id", controller.GetTaskStatus)
 	}
 
+	// Public search
+	r.GET("/collections/search", controller.SearchCollections)
+
+	// Swagger
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	return r

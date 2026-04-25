@@ -59,11 +59,15 @@ func main() {
 	providerMgr := provider.NewManager(storageDir)
 	downloader := service.NewDownloader(providerMgr, p2pSvc, storageDir)
 
+	// 初始化 Auth
+	userRepo := repository.NewUserRepository()
+	authSvc := service.NewAuthService(userRepo)
+
 	// 初始化匿名存储目录（与普通文件同一目录）
 	repository.SetAnonStorageDir(storageDir)
 
 	// 设置路由
-	r := router.SetupRouter(downloader, p2pSvc, storageDir)
+	r := router.SetupRouter(downloader, p2pSvc, authSvc, storageDir)
 
 	// 注入到 Gin Context
 	r.Use(func(c *gin.Context) {

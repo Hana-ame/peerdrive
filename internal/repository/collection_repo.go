@@ -74,6 +74,24 @@ func GetCollection(username, collectionName string) (*model.Collection, error) {
 	return &c, nil
 }
 
+func SearchCollections(query string) ([]model.Collection, error) {
+	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, created_at FROM collections WHERE username LIKE ? OR collection_name LIKE ? ORDER BY created_at DESC`,
+		"%"+query+"%", "%"+query+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cols []model.Collection
+	for rows.Next() {
+		var c model.Collection
+		if err := rows.Scan(&c.ID, &c.Username, &c.CollectionName, &c.CurrentHash, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		cols = append(cols, c)
+	}
+	return cols, nil
+}
+
 func AddCollectionEntry(collectionID int, path, fileHash string) error {
 	_, err := DB.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash) VALUES (?, ?, ?)
 		ON CONFLICT(collection_id, path) DO UPDATE SET file_hash = excluded.file_hash`,

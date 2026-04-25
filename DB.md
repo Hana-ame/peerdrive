@@ -12,6 +12,30 @@ Peerdrive 使用 SQLite3 存储元数据，将内容标识符（SHA256）与实�
 
 ## 表结构
 
+### `users` — 用户账户
+
+| 列名 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | 自增主键 |
+| `username` | `TEXT` | `NOT NULL UNIQUE` | 用户名 |
+| `password_hash` | `TEXT` | `NOT NULL` | 密码哈希 |
+| `authkey` | `TEXT` | `UNIQUE` | 当前有效会话密钥 |
+| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | 创建时间 |
+| `updated_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | 更新时间 |
+
+**DDL**：
+```sql
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    authkey TEXT UNIQUE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+
 ### `files` — 文件元数据
 
 | 列名 | 类型 | 约束 | 说明 |

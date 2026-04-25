@@ -84,6 +84,31 @@ func ListCollections(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": cols})
 }
 
+// SearchCollections godoc
+// @Summary Search collections
+// @Description Search collections by username or collection name
+// @Tags collections
+// @Produce json
+// @Param q query string true "Search query"
+// @Success 200 {object} map[string]interface{} "data array of collections"
+// @Router /collections/search [get]
+func SearchCollections(c *gin.Context) {
+	q := c.Query("q")
+	if q == "" {
+		c.JSON(http.StatusOK, gin.H{"data": []model.Collection{}})
+		return
+	}
+	cols, err := repository.SearchCollections(q)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if cols == nil {
+		cols = []model.Collection{}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": cols})
+}
+
 // GetCollection godoc
 // @Summary Get collection details with entries
 // @Description Returns collection metadata and its path→hash entries

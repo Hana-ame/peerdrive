@@ -1,0 +1,97 @@
+package service
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"peerdrive/internal/model"
+	"peerdrive/internal/repository"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+var ErrInvalidCredentials = errors.New("invalid username or password")
+
+type AuthService struct {
+	userRepo *repository.UserRepository
+}
+
+func NewAuthService(userRepo *repository.UserRepository) *AuthService {
+	return &AuthService{userRepo: userRepo}
+}
+
+func (s *AuthService) Register(req model.RegisterRequest) (*model.AuthResponse, error) {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	user := &model.User{
+		Username:     req.Username,
+		PasswordHash: string(hashedPassword),
+	}
+
+	if err := s.userRepo.CreateUser(user); err != nil {
+		return nil, err
+	}
+
+	authKey, err := s.generateAuthKey()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.userRepo.UpdateAuthKey(user.ID, authKey); err != nil {
+		return nil, err
+	}
+
+	return &model.AuthResponse{
+		AuthKey:  authKey,
+		Username: user.Username,
+	}, nil
+}
+
+func (s *AuthService) Login(req model.LoginRequest) (*model.AuthResponse, error) {
+	user, err := s.userRepo.GetByUsername(req.Username)
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	authKey, err := s.generateAuthKey()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.userRepo.UpdateAuthKey(user.ID, authKey); err != nil {
+		return nil, err
+	}
+
+	return &model.AuthResponse{
+		AuthKey:  authKey,
+		Username: user.Username,
+	}, nil
+}
+
+func (s *AuthService) Logout(authKey string) error {
+	user, err := s.userRepo.GetByAuthKey(authKey)
+	if err != nil {
+		return err
+	}
+	return s.userRepo.ClearAuthKey(user.ID)
+}
+
+func (s *AuthService) ValidateKey(authKey string) (*model.User, error) {
+	return s.userRepo.GetByAuthKey(authKey)
+}
+
+func (s *AuthService) generateAuthKey() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
