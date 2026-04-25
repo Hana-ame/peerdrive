@@ -136,6 +136,10 @@ func (s *FileService) Upload(reader io.Reader, filename string) (string, error) 
 	fullPath := filepath.Join(s.storageDir, relPath)
 	os.MkdirAll(filepath.Dir(fullPath), 0755)
 
+	if _, err := os.Stat(fullPath); err == nil {
+		return hash, nil // File already exists, return success
+	}
+
 	if err := os.Rename(tempFile.Name(), fullPath); err != nil {
 		return "", err
 	}

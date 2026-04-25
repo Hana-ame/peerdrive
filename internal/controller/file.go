@@ -111,8 +111,6 @@ func VerifyFile(c *gin.Context) {
 		"filename": meta.Filename,
 		"size":     meta.Size,
 		"mime":     meta.MimeType,
-		"gziped":   meta.Gziped,
-		"type":     meta.Type,
 	})
 }
 
