@@ -1,4 +1,17 @@
-const API_BASE = 'https://wsl-3000.moonchan.xyz';
+const STORAGE_KEY = 'peerdrive_api_base';
+const DEFAULT_API = 'https://wsl-3000.moonchan.xyz';
+
+function getApiBase() {
+  return localStorage.getItem(STORAGE_KEY) || DEFAULT_API;
+}
+
+function setApiBase(url) {
+  localStorage.setItem(STORAGE_KEY, url);
+}
+
+function getApiBaseUrl() {
+  return getApiBase();
+}
 
 async function request(method, path, body = null) {
   const opts = { method, headers: {} };
@@ -6,7 +19,8 @@ async function request(method, path, body = null) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(`${API_BASE}${path}`, opts);
+  const url = `${getApiBase()}${path}`;
+  const res = await fetch(url, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     throw new Error(err.error || err.message);
@@ -16,7 +30,7 @@ async function request(method, path, body = null) {
 
 /* ---- file ---- */
 export const verifyFile = (hash) => request('GET', `/files/verify/${hash}`);
-export const getDownloadUrl = (hash) => `${API_BASE}/sha256sum/${hash}`;
+export const getDownloadUrl = (hash) => `${getApiBase()}/sha256sum/${hash}`;
 export const registerLocalFile = (path, filename) =>
   request('POST', '/files/register_local', { path, filename: filename || path.split('/').pop() });
 export const registerFolder = (folderPath) =>
@@ -26,13 +40,13 @@ export const registerFolder = (folderPath) =>
 export const createAnonCollection = (entries, friendly_name = '') =>
   request('POST', '/anon/collections', { entries, friendly_name });
 export const getAnonCollection = (hash) => request('GET', `/anon/collections/${hash}`);
-export const getAnonFileDownloadUrl = (hash, p) => `${API_BASE}/anon/collections/${hash}/${p}`;
+export const getAnonFileDownloadUrl = (hash, p) => `${getApiBase()}/anon/collections/${hash}/${p}`;
 export const forkAnonCollection = (source_hash, add_entries, remove_paths, friendly_name = '') =>
   request('POST', '/anon/collections/fork', { source_hash, add_entries, remove_paths, friendly_name });
 
 /* ---- user collections ---- */
-export const createUserCollection = (username, collection_name) =>
-  request('POST', '/collections', { username, collection_name });
+export const createUserCollection = (username, collection_name, visibility = 'public') =>
+  request('POST', '/collections', { username, collection_name, visibility });
 export const getUserCollections = (username) =>
   request('GET', `/collections/${username}`);
 export const getUserCollection = (username, coll) =>
@@ -54,7 +68,7 @@ export const mergeUserCollection = (username, source_username, coll, source_coll
 export const pullUserCollection = (username, coll) =>
   request('POST', '/actions/pull', { username, collection_name: coll });
 export const getUserFileDownloadUrl = (username, coll, filepath) =>
-  `${API_BASE}/${username}/${coll}/${filepath}`;
+  `${getApiBase()}/${username}/${coll}/${filepath}`;
 
 /* ---- P2P ---- */
 export const getP2PStatus = () => request('GET', '/p2p/status');
@@ -73,7 +87,8 @@ export const p2pPush = (peerId, collectionName) =>
 export const p2pRequestFile = (hash) => request('POST', '/p2p/request-file', { hash });
 export const getWSInfo = () => request('GET', '/p2p/ws/info');
 
-export const WS_TRANSFER_URL = API_BASE.replace(/^http/, 'ws') + '/ws/transfer';
+export { getApiBaseUrl as WS_TRANSFER_URL_BASE };
+export const WS_TRANSFER_URL = getApiBase().replace(/^http/, 'ws') + '/ws/transfer';
 
 /* ---- anon collection commit ---- */
 export const commitAnonCollection = (source_hash, entries, commit_message = '') =>
@@ -85,11 +100,17 @@ export const listAnonCollections = () => request('GET', '/anon/collections');
 export const searchCollections = (q) =>
   request('GET', `/collections/search?q=${encodeURIComponent(q)}`);
 
+export const listPublicCollections = (q = '') =>
+  request('GET', `/collections/public${q ? '?q=' + encodeURIComponent(q) : ''}`);
+
+export const setCollectionVisibility = (username, coll, visibility) =>
+  request('POST', `/collections/${username}/${coll}/visibility`, { visibility });
+
 /* ---- file upload/delete ---- */
 export const uploadFile = (file) => {
   const fd = new FormData();
   fd.append('file', file);
-  return fetch(`${API_BASE}/files/upload`, { method: 'POST', body: fd }).then(r => {
+  return fetch(`${getApiBase()}/files/upload`, { method: 'POST', body: fd }).then(r => {
     if (!r.ok) throw new Error(`Upload failed: ${r.status}`);
     return r.json();
   });
@@ -102,6 +123,9 @@ export const getTaskStatus = (id) => request('GET', `/tasks/${id}`);
 
 /* ---- health ---- */
 export const ping = () => request('GET', '/ping');
+
+/* ---- settings ---- */
+export { getApiBase, setApiBase, DEFAULT_API };
 
 /* ---- alias exports for legacy usage ---- */
 export const createCollection = createUserCollection;

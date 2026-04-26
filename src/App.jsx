@@ -5,6 +5,7 @@ import Explorer from './pages/Explorer';
 import FileManager from './pages/FileManager';
 import AnonCreator from './pages/AnonCreator';
 import AnonExplorer from './pages/AnonExplorer';
+import Settings from './pages/Settings';
 import Navbar from './components/Navbar';
 
 export const AppContext = createContext();
@@ -31,6 +32,7 @@ export default function App() {
               <Route path="/anon/create" element={<AnonCreator />} />
               <Route path="/anon/collections/:hash" element={<AnonExplorer />} />
               <Route path="/anon" element={<AnonExplorer />} />
+              <Route path="/settings" element={<Settings />} />
             </Routes>
           </div>
         </div>

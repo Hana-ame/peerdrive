@@ -23,6 +23,7 @@ export default function Navbar() {
           <Link to="/files" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">文件管理</Link>
           <Link to="/anon" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">匿名探索</Link>
           <Link to="/anon/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">创建合集</Link>
+          <Link to="/settings" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">⚙</Link>
         </div>
         {pathParts.length >= 2 && (
           <div className="flex items-center text-sm text-gray-400">
