@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listAnonCollections, listPublicCollections, searchCollections } from '../api';
+import { listAnonCollections, listPublicCollections } from '../api';
 
 const TABS = [
   { key: 'anon', label: '我的合集' },
   { key: 'public', label: '公开合集' },
-  { key: 'search', label: '搜索' },
 ];
 
 const DUMMY_COLLECTIONS = [
@@ -29,7 +28,6 @@ function SkeletonCard() {
 export default function Plaza() {
   const [collections, setCollections] = useState([]);
   const [tab, setTab] = useState('anon');
-  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -42,25 +40,11 @@ export default function Plaza() {
       if (tab === 'anon') {
         data = await listAnonCollections();
         setCollections(data || []);
-      } else if (tab === 'public') {
+      } else {
         data = await listPublicCollections();
         setCollections(data.collections || data.data || data || []);
-      } else {
-        setCollections(searchQuery ? [] : []);
       }
     } catch { setCollections([]); }
-    setLoading(false);
-  };
-
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-    setTab('search');
-    setLoading(true);
-    try {
-      const data = await searchCollections(searchQuery.trim());
-      setCollections(data.collections || data.data || []);
-    } catch { }
     setLoading(false);
   };
 
@@ -87,32 +71,18 @@ export default function Plaza() {
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <h1 className="text-3xl font-bold">
-            {tab === 'anon' ? '我的合集' : tab === 'search' ? '搜索结果' : '公开合集'}
+            {tab === 'anon' ? '我的合集' : '公开合集'}
           </h1>
-
-          <div className="flex items-center gap-3">
-            <div className="flex bg-gray-800 rounded-lg p-1">
-              {TABS.map(t => (
-                <button
-                  key={t.key}
-                  onClick={() => { setTab(t.key); setSearchQuery(''); }}
-                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === t.key ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-white'}`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            {tab === 'search' && (
-              <form onSubmit={handleSearch} className="flex space-x-2">
-                <input
-                  type="text" placeholder="搜索合集或用户名..."
-                  value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                  className="bg-gray-700 px-4 py-2 rounded text-sm w-48 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-                <button type="submit" className="bg-gray-600 hover:bg-gray-500 px-3 py-2 rounded text-sm">搜索</button>
-              </form>
-            )}
+          <div className="flex bg-gray-800 rounded-lg p-1">
+            {TABS.map(t => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === t.key ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-white'}`}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -134,11 +104,6 @@ export default function Plaza() {
                     浏览文件管理器
                   </button>
                 </div>
-              </div>
-            ) : tab === 'search' ? (
-              <div>
-                <p className="mb-2">未找到匹配结果</p>
-                <p className="text-xs">试试搜索用户名或合集名称</p>
               </div>
             ) : (
               <div>
