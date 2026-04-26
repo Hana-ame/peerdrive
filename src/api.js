@@ -79,6 +79,8 @@ export const WS_TRANSFER_URL = API_BASE.replace(/^http/, 'ws') + '/ws/transfer';
 export const commitAnonCollection = (source_hash, entries, commit_message = '') =>
   request('POST', '/anon/collections/commit', { source_hash, entries, commit_message });
 
+export const listAnonCollections = () => request('GET', '/anon/collections');
+
 /* ---- search ---- */
 export const searchCollections = (q) =>
   request('GET', `/collections/search?q=${encodeURIComponent(q)}`);

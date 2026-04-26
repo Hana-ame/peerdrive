@@ -29,6 +29,7 @@ export default function App() {
               <Route path="/files" element={<FileManager />} />
               <Route path="/:username/:collName" element={<Explorer />} />
               <Route path="/anon/create" element={<AnonCreator />} />
+              <Route path="/anon/collections/:hash" element={<AnonExplorer />} />
               <Route path="/anon" element={<AnonExplorer />} />
             </Routes>
           </div>
