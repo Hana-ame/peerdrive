@@ -146,6 +146,17 @@ export default function AnonCreator() {
   };
   const inDraft = (path, hash) => entries.some(e => e.path === path && e.hash === hash);
 
+  const entryActions = {
+    onRemove: removeEntry,
+    onRename: renameEntry,
+    onNewFolder: (name) => addEntry('', name + '/'),
+    onDrop: (data) => {
+      const d = data.targetDir || '';
+      const n = data.name || data.path || 'untitled';
+      addEntry(data.hash || '', d ? `${d}/${n}` : n, data.mime_type || '', data.size || 0);
+    },
+  };
+
   return (
     <div className={`flex flex-1 overflow-hidden h-full bg-gray-950 ${dragging ? 'select-none' : ''}`}>
       <div style={{ width: `${split}%` }} className="h-full flex flex-col border-r border-gray-700">
@@ -258,7 +269,7 @@ export default function AnonCreator() {
           )}
         </div>
         <div className="flex-1 overflow-hidden">
-          <FileTree entries={entries} entryActions={{ onRemove: removeEntry, onRename: renameEntry, onNewFolder: (name) => addEntry('', name + '/'), onDrop: (data) => { const d = data.targetDir || ''; const n = data.name || data.path || 'untitled'; addEntry(data.hash || '', d ? `${d}/${n}` : n, data.mime_type || '', data.size || 0); } }} />
+           <FileTree entries={entries} entryActions={entryActions} />
         </div>
       </div>
     </div>
