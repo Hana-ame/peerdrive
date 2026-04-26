@@ -237,9 +237,32 @@ export default function AnonCreator() {
           </div>
         )}
         {srcTab === 'local' && <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文件名或路径..." className="w-full bg-gray-800 text-sm px-3 py-2 border-b border-gray-800 focus:outline-none focus:border-blue-600" />}
+        {srcTab === 'local' && (
+          <div className="flex gap-1 px-2 py-1 border-b border-gray-800"><button onClick={() => {setLocalViewMode('tree');setLocalDirPath('');}} className={`text-xs px-2 py-1 rounded ${localViewMode==='tree'?'bg-blue-600 text-white':'text-gray-400'}`}>📁 目录</button><button onClick={() => {setLocalViewMode('timeline');setLocalDirPath('');}} className={`text-xs px-2 py-1 rounded ${localViewMode==='timeline'?'bg-blue-600 text-white':'text-gray-400'}`}>🕐 时间线</button></div>
+        )}
 
         <div className="flex-1 overflow-y-auto">
-          {srcTab === 'local' ? (() => {
+          {srcTab === 'local' && localViewMode === 'timeline' ? (
+            filtered.length === 0 ? <p className="p-4 text-gray-600 text-sm">无匹配文件</p> :
+            (() => {
+              const sorted = [...filtered].sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+              let lastDate = '';
+              return sorted.map(f => {
+                const d = f.created_at ? f.created_at.split('T')[0] : '';
+                const showDate = d !== lastDate;
+                lastDate = d;
+                return <div key={f.hash}>
+                  {showDate && <div className="px-4 py-2 text-xs text-gray-500 bg-gray-900/50">{d}</div>}
+                  <div draggable onDragStart={(e) => { e.dataTransfer.setData('text/plain',f.filename); e.dataTransfer.setData('application/peerdrive-file',JSON.stringify({hash:f.hash,path:f.filename,name:f.filename,mime_type:f.mime_type,size:f.size})); e.dataTransfer.effectAllowed='copy'; }} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group">
+                    <a href={api.getDownloadUrl(f.hash)} target="_blank" rel="noreferrer" className="text-lg">{fileIcon(f.mime_type)}</a>
+                    <span className="text-blue-300 truncate flex-1 font-mono">{f.filename}</span>
+                    <span className="text-gray-500 text-xs">{fmtSize(f.size)}</span>
+                    <button onClick={() => addEntry(f.hash,f.filename,f.mime_type,f.size)} className="text-blue-400 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 shrink-0">+</button>
+                  </div>
+                </div>;
+              });
+            })()
+          ) : srcTab === 'local' ? (() => {
             const prefix = localDirPath ? localDirPath + '/' : '';
             const dirs = new Set();
             const localFiles = [];
