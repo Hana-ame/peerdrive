@@ -30,7 +30,7 @@ function buildTree(entries) {
       if (!seg) continue;
       const isLast = i === parts.length - 1;
       if (!cur[seg]) {
-        cur[seg] = { _children: {}, _files: [], _path: '' };
+        cur[seg] = { _children: {}, _files: [] };
       }
       if (isLast) {
         cur[seg]._files.push({ name: seg, hash: e.hash, path: e.path, size: e.size, mime_type: e.mime_type });
@@ -69,6 +69,7 @@ export default function FileTree({ entries, entryActions }) {
   const tree = buildTree(entries);
   const [expanded, setExpanded] = useState(new Set());
   const [renaming, setRenaming] = useState(null);
+  const [dragOverPath, setDragOverPath] = useState(null);
 
   const toggle = (path) => {
     setExpanded(prev => {
@@ -85,16 +86,49 @@ export default function FileTree({ entries, entryActions }) {
     }
   };
 
-  const renderEntries = (nodes, depth) => {
+  const handleNewFolder = () => {
+    const name = prompt('新建文件夹名称:');
+    if (!name || !name.trim()) return;
+    entryActions?.onNewFolder?.(name.trim());
+  };
+
+  const renderEntries = (nodes, depth, parentPath) => {
     const rows = [];
     for (const node of nodes) {
       const isExp = expanded.has(node.path);
+      const dropOver = dragOverPath === node.path;
       rows.push(
         <div key={node.path} className="flex flex-col">
           <div
-            className="flex items-center gap-1 py-1 px-2 hover:bg-gray-800/50 cursor-pointer group text-xs"
+            className={`flex items-center gap-1 py-1 px-2 hover:bg-gray-800/50 cursor-pointer group text-xs ${dropOver ? 'bg-blue-900/40 ring-1 ring-blue-500/50' : ''}`}
             style={{ paddingLeft: `${depth * 16 + 8}px` }}
             onClick={() => toggle(node.path)}
+            draggable={node.isDir}
+            onDragStart={(e) => {
+              e.dataTransfer.setData('application/peerdrive-path', node.path);
+              e.dataTransfer.effectAllowed = 'move';
+            }}
+            onDragOver={(e) => {
+              if (node.isDir) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+                setDragOverPath(node.path);
+              }
+            }}
+            onDragLeave={() => setDragOverPath(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOverPath(null);
+              if (node.isDir) {
+                try {
+                  const data = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry');
+                  if (data) {
+                    const parsed = JSON.parse(data);
+                    entryActions?.onDrop?.({ ...parsed, targetDir: node.path });
+                  }
+                } catch {}
+              }
+            }}
           >
             <span className="w-4 text-center shrink-0">{isExp ? '▾' : '▸'}</span>
             <span className="text-gray-400">{isExp ? '📂' : '📁'}</span>
@@ -105,13 +139,35 @@ export default function FileTree({ entries, entryActions }) {
           </div>
           {isExp && (
             <div>
-              {renderEntries(node.children || [], depth + 1)}
+              {renderEntries(node.children || [], depth + 1, node.path)}
               {node.files.map((f, i) => (
                 <div
                   key={f.path + i}
-                  className="flex items-center gap-1 py-1 px-2 hover:bg-gray-800/50 group text-xs"
+                  className={`flex items-center gap-1 py-1 px-2 hover:bg-gray-800/50 group text-xs ${dragOverPath === f.path ? 'bg-blue-900/40 ring-1 ring-blue-500/50' : ''}`}
                   style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}
                   onDoubleClick={() => handleDoubleClick(f)}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('application/peerdrive-entry', JSON.stringify({ hash: f.hash, path: f.path, name: f.name, mime_type: f.mime_type, size: f.size }));
+                    e.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                    setDragOverPath(f.path);
+                  }}
+                  onDragLeave={() => setDragOverPath(null)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOverPath(null);
+                    try {
+                      const data = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry');
+                      if (data) {
+                        const parsed = JSON.parse(data);
+                        entryActions?.onDrop?.({ ...parsed, targetDir: f.path });
+                      }
+                    } catch {}
+                  }}
                 >
                   <span className="w-4 shrink-0" />
                   <span>{fileIcon(f.mime_type)}</span>
@@ -155,15 +211,34 @@ export default function FileTree({ entries, entryActions }) {
 
   if (entries.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-600 text-xs">
+      <div
+        className="flex items-center justify-center h-full text-gray-600 text-xs"
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+        onDrop={(e) => {
+          e.preventDefault();
+          try {
+            const data = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry');
+            if (data) {
+              const parsed = JSON.parse(data);
+              entryActions?.onDrop?.({ ...parsed, targetDir: '' });
+            }
+          } catch {}
+        }}
+      >
         空目录 — 从左侧拖拽或点击添加文件
       </div>
     );
   }
 
   return (
-    <div className="overflow-y-auto h-full select-none">
-      {renderEntries(tree, 0)}
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 px-2 py-1 border-b border-gray-800 shrink-0">
+        <button onClick={handleNewFolder} className="text-[10px] bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded">+ 新建文件夹</button>
+        <span className="text-[10px] text-gray-500">{entries.length} 个条目</span>
+      </div>
+      <div className="overflow-y-auto flex-1 select-none">
+        {renderEntries(tree, 0, '')}
+      </div>
     </div>
   );
 }

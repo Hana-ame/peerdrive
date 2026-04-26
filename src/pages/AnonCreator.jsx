@@ -203,7 +203,12 @@ export default function AnonCreator() {
             fLoading ? <p className="p-4 text-gray-600 text-xs">加载中...</p> :
             filtered.length === 0 ? <p className="p-4 text-gray-600 text-xs">无匹配文件</p> :
             filtered.map(f => (
-              <div key={f.hash} className={`flex items-center gap-2 px-3 py-1.5 hover:bg-gray-800 border-b border-gray-800/50 text-[11px] group ${inDraft(f.filename, f.hash) ? 'opacity-40' : ''}`}>
+              <div key={f.hash} draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/peerdrive-file', JSON.stringify({ hash: f.hash, path: f.filename, name: f.filename, mime_type: f.mime_type, size: f.size }));
+                  e.dataTransfer.effectAllowed = 'copy';
+                }}
+                className={`flex items-center gap-2 px-3 py-1.5 hover:bg-gray-800 border-b border-gray-800/50 text-[11px] group ${inDraft(f.filename, f.hash) ? 'opacity-40' : ''}`}>
                 <span>{fileIcon(f.mime_type)}</span>
                 <span className="text-blue-300 truncate flex-1 font-mono">{f.filename}</span>
                 <span className="text-gray-600 text-[10px]">{fmtSize(f.size)}</span>
@@ -219,7 +224,12 @@ export default function AnonCreator() {
             !collSource ? <p className="p-4 text-gray-600 text-xs">选择一个合集查看其文件</p> :
             collFiltered.length === 0 ? <p className="p-4 text-gray-600 text-xs">无匹配文件</p> :
             collFiltered.map(e => (
-              <div key={e.path} className={`flex items-center gap-2 px-3 py-1.5 hover:bg-gray-800 border-b border-gray-800/50 text-[11px] group ${inDraft(e.path, e.hash) ? 'opacity-40' : ''}`}>
+              <div key={e.path} draggable
+                onDragStart={(event) => {
+                  event.dataTransfer.setData('application/peerdrive-file', JSON.stringify({ hash: e.hash, path: e.path, name: e.path.split('/').pop(), mime_type: '', size: 0 }));
+                  event.dataTransfer.effectAllowed = 'copy';
+                }}
+                className={`flex items-center gap-2 px-3 py-1.5 hover:bg-gray-800 border-b border-gray-800/50 text-[11px] group ${inDraft(e.path, e.hash) ? 'opacity-40' : ''}`}>
                 <span>📄</span>
                 <span className="text-blue-300 truncate flex-1 font-mono">{e.path}</span>
                 <span className="text-gray-600 text-[10px] font-mono">{(e.hash || '').substring(0, 8)}</span>
@@ -270,6 +280,13 @@ export default function AnonCreator() {
             entryActions={{
               onRemove: removeEntry,
               onRename: renameEntry,
+              onNewFolder: (name) => addEntry('', name + '/'),
+              onDrop: (data) => {
+                const targetDir = data.targetDir || '';
+                const fileName = data.name || data.path || 'untitled';
+                const newPath = targetDir ? `${targetDir}/${fileName}` : fileName;
+                addEntry(data.hash || '', newPath, data.mime_type || '', data.size || 0);
+              },
             }}
           />
         </div>
