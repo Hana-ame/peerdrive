@@ -1,6 +1,6 @@
 import React, { useContext, useState, useEffect, useRef } from 'react';
 import * as api from '../api';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { PageContext } from '../App';
 
 const SORT_OPTS = [
@@ -11,6 +11,8 @@ const SORT_OPTS = [
 export default function AnonCreator() {
   const nav = useNavigate();
   const { setPageContext } = useContext(PageContext);
+  const location = useLocation();
+  const navState = location.state || {};
 
   // DB files
   const [files, setFiles] = useState([]);
@@ -39,6 +41,23 @@ export default function AnonCreator() {
   const entryEnd = useRef(null);
 
   useEffect(() => { loadFiles(); loadHistory(); }, [sort]);
+
+  useEffect(() => {
+    if (navState.forkFrom) {
+      const c = navState.forkFrom;
+      setEntries(c.entries || []);
+      setFname((c.friendly_name || '') + ' (fork)');
+      setOpenHash(navState.sourceHash || '');
+      nav.replace('/anon/create', {});
+    } else if (navState.editFrom) {
+      const c = navState.editFrom;
+      setEntries(c.entries || []);
+      setFname(c.friendly_name || '');
+      setOpenHash(navState.savedHash || '');
+      setSavedHash(navState.savedHash || '');
+      nav.replace('/anon/create', {});
+    }
+  }, []);
 
   useEffect(() => {
     setPageContext({ type: 'anonCreator', fileCount: files.length, entryCount: entries.length, friendlyName: fname, openHash: openHash ? openHash.substring(0, 16) : '' });

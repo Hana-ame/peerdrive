@@ -20,17 +20,7 @@ export default function AnonExplorer() {
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  // fork / commit panels
-  const [showFork, setShowFork] = useState(false);
-  const [forkData, setForkData] = useState({ addPath: '', addHash: '', removePath: '', friendlyName: '' });
 
-  const [showCommit, setShowCommit] = useState(false);
-  const [commitData, setCommitData] = useState({ message: '', addPath: '', addHash: '', removePath: '' });
-
-  // file list for hash picking in fork/commit
-  const [dbFiles, setDbFiles] = useState([]);
-  const [showFilePicker, setShowFilePicker] = useState(false);
-  const [pickerTarget, setPickerTarget] = useState(''); // 'fork' or 'commit'
 
   // sync URL param <-> input
   useEffect(() => {
@@ -83,11 +73,12 @@ export default function AnonExplorer() {
     }
   };
 
-  const loadDbFiles = async () => {
-    try {
-      const data = await api.listFiles('name');
-      setDbFiles(data || []);
-    } catch (e) { setDbFiles([]); }
+  const handleFork = () => {
+    navigate('/anon/create', { state: { forkFrom: collection, sourceHash: searchHash } });
+  };
+
+  const handleCommit = () => {
+    navigate('/anon/create', { state: { editFrom: collection, savedHash: searchHash } });
   };
 
   const handleInputChange = (val) => {
@@ -105,56 +96,6 @@ export default function AnonExplorer() {
     if (h.length !== 64) return alert('请输入有效的 SHA256 Hash (64位十六进制)');
     setSearchHash(h);
     navigate(`/anon/collections/${h}`);
-  };
-
-  const handleFork = async (e) => {
-    e.preventDefault();
-    const add_entries = forkData.addPath && forkData.addHash
-      ? [{ path: forkData.addPath, hash: forkData.addHash }]
-      : [];
-    const remove_paths = forkData.removePath ? [forkData.removePath] : [];
-    try {
-      const res = await api.forkAnonCollection(searchHash, add_entries, remove_paths, forkData.friendlyName);
-      setShowFork(false);
-      setForkData({ addPath: '', addHash: '', removePath: '', friendlyName: '' });
-      navigate(`/anon/collections/${res.hash}`);
-    } catch (err) {
-      alert(`Fork 失败: ${err.message}`);
-    }
-  };
-
-  const handleCommit = async (e) => {
-    e.preventDefault();
-    const newEntries = [];
-    if (commitData.addPath && commitData.addHash) {
-      newEntries.push({ path: commitData.addPath, hash: commitData.addHash });
-    }
-    if (commitData.removePath) {
-      newEntries.push({ path: commitData.removePath, hash: '' });
-    }
-    try {
-      const res = await api.commitAnonCollection(searchHash, newEntries, commitData.message || 'update');
-      setShowCommit(false);
-      setCommitData({ message: '', addPath: '', addHash: '', removePath: '' });
-      navigate(`/anon/collections/${res.hash}`);
-    } catch (err) {
-      alert(`Commit 失败: ${err.message}`);
-    }
-  };
-
-  const pickFile = (f) => {
-    if (pickerTarget === 'fork') {
-      setForkData(prev => ({ ...prev, addHash: f.hash }));
-    } else if (pickerTarget === 'commit') {
-      setCommitData(prev => ({ ...prev, addHash: f.hash }));
-    }
-    setShowFilePicker(false);
-  };
-
-  const openFilePicker = (target) => {
-    setPickerTarget(target);
-    loadDbFiles();
-    setShowFilePicker(true);
   };
 
   return (
@@ -230,123 +171,16 @@ export default function AnonExplorer() {
                 <code className="text-xs bg-gray-900 px-2 py-1 rounded text-gray-400 truncate max-w-[300px]">
                   {searchHash}
                 </code>
-                <button onClick={() => setShowCommit(!showCommit)}
-                  className="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-xs">
-                  {showCommit ? '取消' : 'Commit'}
+                <button onClick={handleCommit}
+                   className="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-xs">
+                  Commit
                 </button>
-                <button onClick={() => setShowFork(!showFork)}
-                  className="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-xs">
-                  {showFork ? '取消' : '克隆并修改'}
+                <button onClick={handleFork}
+                   className="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-xs">
+                  克隆并修改
                 </button>
               </div>
             </div>
-
-            {showCommit && (
-              <form onSubmit={handleCommit} className="bg-green-900/30 p-4 rounded-lg mb-4 border border-green-700">
-                <h4 className="font-bold mb-3 text-sm">提交新版本</h4>
-                <div className="mb-3">
-                  <label className="block text-xs text-gray-400 mb-1">Commit Message</label>
-                  <input value={commitData.message}
-                    onChange={(e) => setCommitData({...commitData, message: e.target.value})}
-                    placeholder="描述本次变更..."
-                    className="w-full bg-gray-700 px-3 py-2 rounded text-sm" />
-                </div>
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">新增/修改路径</label>
-                    <input value={commitData.addPath}
-                      onChange={(e) => setCommitData({...commitData, addPath: e.target.value})}
-                      placeholder="如 CHANGELOG.md"
-                      className="w-full bg-gray-700 px-3 py-2 rounded text-sm" />
-                  </div>
-                  <div className="flex gap-1 items-end">
-                    <div className="flex-1">
-                      <label className="block text-xs text-gray-400 mb-1">文件 Hash</label>
-                      <input value={commitData.addHash}
-                        onChange={(e) => setCommitData({...commitData, addHash: e.target.value})}
-                        placeholder="sha256..."
-                        className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono" />
-                    </div>
-                    <button type="button" onClick={() => openFilePicker('commit')}
-                      className="bg-gray-600 hover:bg-gray-500 px-2 py-2 rounded text-xs whitespace-nowrap">📂</button>
-                  </div>
-                </div>
-                <div className="mb-3">
-                  <label className="block text-xs text-gray-400 mb-1">移除文件路径 (留空不删除)</label>
-                  <input value={commitData.removePath}
-                    onChange={(e) => setCommitData({...commitData, removePath: e.target.value})}
-                    placeholder="如 old.txt"
-                    className="w-full bg-gray-700 px-3 py-2 rounded text-sm" />
-                </div>
-                <button type="submit" className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm">
-                  确认提交
-                </button>
-              </form>
-            )}
-
-            {showFork && (
-              <form onSubmit={handleFork} className="bg-purple-900/30 p-4 rounded-lg mb-4 border border-purple-700">
-                <h4 className="font-bold mb-3 text-sm">克隆并修改</h4>
-                <div className="mb-3">
-                  <label className="block text-xs text-gray-400 mb-1">Fork 名称</label>
-                  <input value={forkData.friendlyName}
-                    onChange={(e) => setForkData({...forkData, friendlyName: e.target.value})}
-                    placeholder="可选"
-                    className="w-full bg-gray-700 px-3 py-2 rounded text-sm" />
-                </div>
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">新增文件路径</label>
-                    <input value={forkData.addPath}
-                      onChange={(e) => setForkData({...forkData, addPath: e.target.value})}
-                      placeholder="如 new.txt"
-                      className="w-full bg-gray-700 px-3 py-2 rounded text-sm" />
-                  </div>
-                  <div className="flex gap-1 items-end">
-                    <div className="flex-1">
-                      <label className="block text-xs text-gray-400 mb-1">文件 Hash</label>
-                      <input value={forkData.addHash}
-                        onChange={(e) => setForkData({...forkData, addHash: e.target.value})}
-                        placeholder="sha256..."
-                        className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono" />
-                    </div>
-                    <button type="button" onClick={() => openFilePicker('fork')}
-                      className="bg-gray-600 hover:bg-gray-500 px-2 py-2 rounded text-xs whitespace-nowrap">📂</button>
-                  </div>
-                </div>
-                <div className="mb-3">
-                  <label className="block text-xs text-gray-400 mb-1">移除文件路径</label>
-                  <input value={forkData.removePath}
-                    onChange={(e) => setForkData({...forkData, removePath: e.target.value})}
-                    placeholder="如 old.txt"
-                    className="w-full bg-gray-700 px-3 py-2 rounded text-sm" />
-                </div>
-                <button type="submit" className="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded text-sm">
-                  确认克隆
-                </button>
-              </form>
-            )}
-
-            {showFilePicker && (
-              <div className="bg-gray-800 p-4 rounded-lg mb-4 border border-gray-600">
-                <div className="flex justify-between items-center mb-3">
-                  <h4 className="font-bold text-sm">从已注册文件选择</h4>
-                  <button onClick={() => setShowFilePicker(false)} className="text-gray-400 hover:text-white text-sm">× 关闭</button>
-                </div>
-                <div className="max-h-60 overflow-y-auto space-y-1">
-                  {dbFiles.length === 0 ? (
-                    <p className="text-gray-500 text-xs">还没有注册文件</p>
-                  ) : dbFiles.map(f => (
-                    <div key={f.hash}
-                      onClick={() => pickFile(f)}
-                      className="flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer hover:bg-gray-700 text-xs">
-                      <span className="text-blue-300 font-mono truncate flex-1">{f.filename}</span>
-                      <span className="text-gray-500 font-mono">{f.hash.substring(0, 12)}...</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <table className="w-full text-left border-collapse mb-6">
               <thead>
