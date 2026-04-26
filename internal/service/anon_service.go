@@ -40,7 +40,7 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-func (s *AnonService) CreateCollection(name string, entries []model.AnonCollectionEntry) (string, error) {
+func (s *AnonService) CreateCollection(name string, entries []model.AnonCollectionEntry, tags []string) (string, error) {
 	for _, e := range entries {
 		if e.Path == "" || !isRelativePath(e.Path) || strings.Contains(e.Path, "..") {
 			return "", fmt.Errorf("invalid path: %s", e.Path)
@@ -54,7 +54,7 @@ func (s *AnonService) CreateCollection(name string, entries []model.AnonCollecti
 		return entries[i].Path < entries[j].Path
 	})
 
-	coll := model.NewAnonCollection(name, entries)
+	coll := model.NewAnonCollection(name, entries, tags)
 	jsonBytes, err := json.MarshalIndent(coll, "", "  ")
 	if err != nil {
 		return "", err
@@ -142,8 +142,7 @@ func (s *AnonService) CommitCollection(
 		sortedEntries = append(sortedEntries, model.AnonCollectionEntry{Path: path, Hash: hash})
 	}
 	if removeEmpty {
-		coll := newAnonCollectionWithVersion(src.FriendlyName, sortedEntries, src.Version+1)
-		coll.Version = src.Version + 1
+		coll := newAnonCollectionWithVersion(src.FriendlyName, sortedEntries, src.Version+1, src.Tags)
 		return s.saveCollectionJSON(coll)
 	}
 
@@ -151,18 +150,22 @@ func (s *AnonService) CommitCollection(
 		return sortedEntries[i].Path < sortedEntries[j].Path
 	})
 
-	coll := newAnonCollectionWithVersion(src.FriendlyName, sortedEntries, src.Version+1)
+	coll := newAnonCollectionWithVersion(src.FriendlyName, sortedEntries, src.Version+1, src.Tags)
 	return s.saveCollectionJSON(coll)
 }
 
-func newAnonCollectionWithVersion(name string, entries []model.AnonCollectionEntry, version int) *model.AnonCollection {
+func newAnonCollectionWithVersion(name string, entries []model.AnonCollectionEntry, version int, tags []string) *model.AnonCollection {
 	if entries == nil {
 		entries = []model.AnonCollectionEntry{}
+	}
+	if tags == nil {
+		tags = []string{}
 	}
 	return &model.AnonCollection{
 		Version:      version,
 		FriendlyName: name,
 		Entries:      entries,
+		Tags:         tags,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
 }

@@ -105,6 +105,8 @@ func ListAnonCollections(storageDir string) ([]model.AnonCollectionSummary, erro
 			if json.Unmarshal(data, &coll) == nil {
 				summary.FriendlyName = coll.FriendlyName
 				summary.Version = coll.Version
+				summary.Tags = coll.Tags
+				summary.EntryCount = len(coll.Entries)
 			}
 		}
 		results = append(results, summary)

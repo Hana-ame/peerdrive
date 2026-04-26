@@ -36,7 +36,7 @@ func TestCreateCollection_ValidEntries(t *testing.T) {
 		{Path: "src/main.go", Hash: "b7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434b"},
 	}
 
-	hash, err := svc.CreateCollection("test-coll", entries)
+	hash, err := svc.CreateCollection("test-coll", entries, nil)
 	assert.NoError(t, err)
 	assert.Len(t, hash, 64)
 	assert.Regexp(t, `^[a-f0-9]{64}$`, hash)
@@ -53,7 +53,7 @@ func TestCreateCollection_PathTraversal(t *testing.T) {
 		{Path: "../etc/passwd", Hash: "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"},
 	}
 
-	hash, err := svc.CreateCollection("traversal-test", entries)
+	hash, err := svc.CreateCollection("traversal-test", entries, nil)
 	assert.Error(t, err)
 	assert.Empty(t, hash)
 	assert.Contains(t, err.Error(), "invalid path")
@@ -67,7 +67,7 @@ func TestCreateCollection_InvalidHash(t *testing.T) {
 		{Path: "valid.txt", Hash: "not-a-valid-hash"},
 	}
 
-	hash, err := svc.CreateCollection("bad-hash", entries)
+	hash, err := svc.CreateCollection("bad-hash", entries, nil)
 	assert.Error(t, err)
 	assert.Empty(t, hash)
 	assert.Contains(t, err.Error(), "invalid hash")
@@ -77,7 +77,7 @@ func TestCreateCollection_EmptyEntries(t *testing.T) {
 	tmpDir, svc := setupAnonServiceTest(t)
 	defer os.RemoveAll(tmpDir)
 
-	hash, err := svc.CreateCollection("empty-coll", nil)
+	hash, err := svc.CreateCollection("empty-coll", nil, nil)
 	assert.NoError(t, err)
 	assert.Len(t, hash, 64)
 
@@ -95,7 +95,7 @@ func TestGetCollection_ByHash(t *testing.T) {
 		{Path: "docs/readme.md", Hash: "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"},
 	}
 
-	hash, err := svc.CreateCollection("my-collection", entries)
+	hash, err := svc.CreateCollection("my-collection", entries, nil)
 	assert.NoError(t, err)
 
 	coll, err := svc.GetCollectionByHash(hash)
@@ -126,7 +126,7 @@ func TestForkCollection(t *testing.T) {
 		{Path: "file2.txt", Hash: "b7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434b"},
 	}
 
-	srcHash, err := svc.CreateCollection("source", srcEntries)
+	srcHash, err := svc.CreateCollection("source", srcEntries, nil)
 	assert.NoError(t, err)
 
 	srcColl, err := svc.GetCollectionByHash(srcHash)
@@ -139,7 +139,7 @@ func TestForkCollection(t *testing.T) {
 		Hash: "c7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434c",
 	})
 
-	forkHash, err := svc.CreateCollection("forked", forkEntries)
+	forkHash, err := svc.CreateCollection("forked", forkEntries, nil)
 	assert.NoError(t, err)
 	assert.NotEqual(t, srcHash, forkHash)
 
@@ -176,7 +176,7 @@ func TestDownloadFile_FromCollectionEntry(t *testing.T) {
 		{Path: "testfile.txt", Hash: fileHash},
 	}
 
-	hash, err := svc.CreateCollection("download-test", entries)
+	hash, err := svc.CreateCollection("download-test", entries, nil)
 	assert.NoError(t, err)
 
 	coll, err := svc.GetCollectionByHash(hash)
@@ -199,7 +199,7 @@ func TestCreateCollection_EmptyPath(t *testing.T) {
 		{Path: "", Hash: "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"},
 	}
 
-	hash, err := svc.CreateCollection("empty-path", entries)
+	hash, err := svc.CreateCollection("empty-path", entries, nil)
 	assert.Error(t, err)
 	assert.Empty(t, hash)
 }
@@ -212,7 +212,7 @@ func TestCreateCollection_AbsolutePath(t *testing.T) {
 		{Path: "/etc/hosts", Hash: "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"},
 	}
 
-	hash, err := svc.CreateCollection("abs-path", entries)
+	hash, err := svc.CreateCollection("abs-path", entries, nil)
 	assert.Error(t, err)
 	assert.Empty(t, hash)
 	assert.Contains(t, err.Error(), "invalid path")

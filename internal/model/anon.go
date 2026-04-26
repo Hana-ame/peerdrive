@@ -11,17 +11,22 @@ type AnonCollection struct {
 	Version      int                   `json:"version"`
 	FriendlyName string                `json:"friendly_name,omitempty"`
 	Entries      []AnonCollectionEntry `json:"entries"`
+	Tags         []string              `json:"tags,omitempty"`
 	CreatedAt    string                `json:"created_at"`
 }
 
-func NewAnonCollection(name string, entries []AnonCollectionEntry) *AnonCollection {
+func NewAnonCollection(name string, entries []AnonCollectionEntry, tags []string) *AnonCollection {
 	if entries == nil {
 		entries = []AnonCollectionEntry{}
+	}
+	if tags == nil {
+		tags = []string{}
 	}
 	return &AnonCollection{
 		Version:      1,
 		FriendlyName: name,
 		Entries:      entries,
+		Tags:         tags,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
 }
@@ -34,8 +39,10 @@ type AnonEntry struct {
 }
 
 type AnonCollectionSummary struct {
-	Hash         string `json:"hash"`
-	FriendlyName string `json:"friendly_name,omitempty"`
-	Version      int    `json:"version"`
-	CreatedAt    string `json:"created_at"`
+	Hash         string   `json:"hash"`
+	FriendlyName string   `json:"friendly_name,omitempty"`
+	Version      int      `json:"version"`
+	Tags         []string `json:"tags,omitempty"`
+	EntryCount   int      `json:"entry_count"`
+	CreatedAt    string   `json:"created_at"`
 }

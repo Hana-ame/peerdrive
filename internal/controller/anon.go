@@ -33,13 +33,14 @@ func CreateAnonCollection(c *gin.Context) {
 	var req struct {
 		FriendlyName string                    `json:"friendly_name"`
 		Entries      []model.AnonCollectionEntry `json:"entries"`
+		Tags         []string                  `json:"tags"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
-	hash, err := anonSvc.CreateCollection(req.FriendlyName, req.Entries)
+	hash, err := anonSvc.CreateCollection(req.FriendlyName, req.Entries, req.Tags)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid path") || strings.Contains(err.Error(), "invalid hash") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -195,7 +196,7 @@ func ForkAnonCollection(c *gin.Context) {
 	if friendlyName == "" {
 		friendlyName = src.FriendlyName
 	}
-	hash, err := anonSvc.CreateCollection(friendlyName, newEntries)
+	hash, err := anonSvc.CreateCollection(friendlyName, newEntries, src.Tags)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
