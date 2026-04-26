@@ -2,7 +2,9 @@ package config
 
 import (
 	"os"
+	"runtime"
 	"strconv"
+	"strings"
 )
 
 type RelayMode string
@@ -18,6 +20,8 @@ type Config struct {
 	StorageDir    string
 	StorageEnable bool
 
+	AllowedOrigins string
+
 	P2PEnable            bool
 	P2PListenAddr        string
 	P2PBootstrapPeer     string
@@ -31,11 +35,38 @@ type Config struct {
 	P2PNATPortMap        bool
 }
 
+func (c *Config) IsOriginAllowed(origin string) bool {
+	if c.AllowedOrigins == "*" || c.AllowedOrigins == "" {
+		return true
+	}
+	for _, o := range strings.Split(c.AllowedOrigins, ",") {
+		o = strings.TrimSpace(o)
+		if o == "" {
+			continue
+		}
+		if o == "*" || strings.EqualFold(origin, o) {
+			return true
+		}
+		if strings.HasPrefix(o, "*.") && strings.HasSuffix(origin, o[1:]) {
+			return true
+		}
+	}
+	return false
+}
+
+func DefaultRootPath() string {
+	if runtime.GOOS == "windows" {
+		return "C:\\"
+	}
+	return "/"
+}
+
 func Load() *Config {
 	return &Config{
 		Port:                getEnv("PORT", "3000"),
 		StorageDir:          getEnv("PEERDRIVE_STORAGE", "./storage"),
 		StorageEnable:       getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
+		AllowedOrigins:      getEnv("PEERDRIVE_ALLOWED_ORIGINS", "*"),
 		P2PEnable:           getEnvBool("PEERDRIVE_P2P_ENABLE", true),
 		P2PListenAddr:       getEnv("PEERDRIVE_P2P_LISTEN", "/ip4/0.0.0.0/tcp/0"),
 		P2PBootstrapPeer:    getEnv("PEERDRIVE_BOOTSTRAP_PEER", ""),

@@ -37,6 +37,8 @@ func SetupRouter(
 	cfg *config.Config,
 ) *gin.Engine {
 	r := gin.Default()
+	r.RedirectTrailingSlash = false
+	r.RedirectFixedPath = false
 
 	// inject shared deps into context (must register before any routes)
 	r.Use(func(c *gin.Context) {
@@ -47,11 +49,14 @@ func SetupRouter(
 
 	r.Use(func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
-		if origin != "" {
+		allowed := cfg.IsOriginAllowed(origin)
+		if allowed && origin != "" {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Vary", "Origin")
-		} else {
+		} else if allowed {
 			c.Header("Access-Control-Allow-Origin", "*")
+		} else {
+			c.Header("Access-Control-Allow-Origin", "")
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 		reqHeaders := c.Request.Header.Get("Access-Control-Request-Headers")

@@ -19,6 +19,7 @@ import (
 	"errors"
 	"net/http"
 
+	"peerdrive/internal/config"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
@@ -228,7 +229,7 @@ func ListFiles(c *gin.Context) {
 func BrowseDir(c *gin.Context) {
 	dirPath := c.Query("path")
 	if dirPath == "" {
-		dirPath = "/"
+		dirPath = config.DefaultRootPath()
 	}
 
 	entries, err := fileSvc.BrowseDir(dirPath)
