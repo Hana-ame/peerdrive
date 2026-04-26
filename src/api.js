@@ -43,7 +43,7 @@ export const browseDir = (dirPath = '/') =>
 /* ---- anon collections ---- */
 export const createAnonCollection = (entries, friendly_name = '') =>
   request('POST', '/anon/collections', { entries, friendly_name });
-export const getAnonCollection = (hash) => request('GET', `/anon/collections/${hash}`);
+export const getAnonCollection = (hash) => request('GET', `/anon/collections/${hash}.json`);
 export const getAnonFileDownloadUrl = (hash, p) => `${getApiBase()}/anon/collections/${hash}/${p}`;
 export const forkAnonCollection = (source_hash, add_entries, remove_paths, friendly_name = '') =>
   request('POST', '/anon/collections/fork', { source_hash, add_entries, remove_paths, friendly_name });
