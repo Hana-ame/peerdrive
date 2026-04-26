@@ -44,13 +44,17 @@ function buildTree(entries) {
       const item = obj[key];
       const fullPath = prefix ? `${prefix}/${key}` : key;
       const hasChildren = Object.keys(item._children).length > 0;
-      result.push({
-        name: key,
-        path: fullPath,
-        isDir: true,
-        children: toArray(item._children, fullPath),
-        files: item._files,
-      });
+      if (item._files.length === 1 && item._files[0].name === key && !hasChildren) {
+        result.push({ name: key, path: fullPath, isDir: false, ...item._files[0] });
+      } else {
+        result.push({
+          name: key,
+          path: fullPath,
+          isDir: true,
+          children: toArray(item._children, fullPath),
+          files: item._files,
+        });
+      }
     }
     return result;
   }

@@ -93,15 +93,7 @@ export default function AnonCreator() {
   };
 
   const addEntry = (hash, path, mime_type, size) => {
-    setEntries(prev => {
-      const idx = prev.findIndex(e => e.path === path);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = { hash, path, mime_type, size };
-        return next;
-      }
-      return [...prev, { hash, path, mime_type, size }];
-    });
+    setEntries(prev => [...prev, { hash, path, mime_type, size }]);
   };
   const removeEntry = (entry) => {
     setEntries(prev => prev.filter(e => !(e.path === entry.path && e.hash === entry.hash)));
