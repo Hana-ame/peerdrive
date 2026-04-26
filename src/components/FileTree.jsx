@@ -185,9 +185,9 @@ export default function FileTree({ entries, entryActions }) {
         <span className="text-sm text-gray-500">{entries.length} 个条目</span>
       </div>
       <div className="overflow-y-auto flex-1 select-none"
-        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; }}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
         onDrop={(e) => {
-          e.preventDefault(); e.stopPropagation();
+          e.preventDefault();
           try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry') || e.dataTransfer.getData('text/plain'); if (d) { const parsed = d.startsWith('{') ? JSON.parse(d) : { hash: '', name: d, path: d }; entryActions?.onDrop?.({ ...parsed, targetDir: '' }); } } catch {}
         }}>
         {renderEntries(tree, 0, '')}
