@@ -1,4 +1,25 @@
 basePath: /
+definitions:
+  peerdrive_internal_model.AnonCollection:
+    properties:
+      created_at:
+        type: string
+      entries:
+        items:
+          $ref: '#/definitions/peerdrive_internal_model.AnonCollectionEntry'
+        type: array
+      friendly_name:
+        type: string
+      version:
+        type: integer
+    type: object
+  peerdrive_internal_model.AnonCollectionEntry:
+    properties:
+      hash:
+        type: string
+      path:
+        type: string
+    type: object
 host: localhost:3000
 info:
   contact: {}
@@ -164,6 +185,219 @@ paths:
       summary: Pull upstream updates (placeholder)
       tags:
       - actions
+  /anon/collections:
+    post:
+      consumes:
+      - application/json
+      description: Create an immutable content-addressed collection with file entries.
+        Entries validated for path traversal and valid SHA256 hashes.
+      parameters:
+      - description: Collection entries
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            entries:
+              items:
+                properties:
+                  hash:
+                    type: string
+                  path:
+                    type: string
+                type: object
+              type: array
+            friendly_name:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: hash
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request or invalid path/hash
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create anonymous collection
+      tags:
+      - anon
+  /anon/collections/{hash}:
+    get:
+      description: Retrieve an anonymous collection's JSON metadata by its content
+        hash.
+      parameters:
+      - description: Collection SHA256 hash
+        in: path
+        name: hash
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/peerdrive_internal_model.AnonCollection'
+        "404":
+          description: Collection not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get anonymous collection by hash
+      tags:
+      - anon
+  /anon/collections/{hash}/entries/{filepath}:
+    get:
+      description: Download a specific file entry from an anonymous collection by
+        hash and file path.
+      parameters:
+      - description: Collection SHA256 hash
+        in: path
+        name: hash
+        required: true
+        type: string
+      - description: File path within collection
+        in: path
+        name: filepath
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: File content
+          schema:
+            type: file
+        "404":
+          description: Collection or file not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Download file from anonymous collection
+      tags:
+      - anon
+  /anon/collections/commit:
+    post:
+      consumes:
+      - application/json
+      description: Commit modifications to an existing anonymous collection. Accepts
+        a list of entries to add/update (non-empty hash) or remove (empty hash). Increments
+        version and generates a new content hash.
+      parameters:
+      - description: Commit parameters
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            commit_message:
+              type: string
+            entries:
+              items:
+                properties:
+                  hash:
+                    type: string
+                  path:
+                    type: string
+                type: object
+              type: array
+            source_hash:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: hash
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request or invalid path/hash
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Source collection not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Commit anonymous collection (versioned)
+      tags:
+      - anon
+  /anon/collections/fork:
+    post:
+      consumes:
+      - application/json
+      description: Create a variant of an anonymous collection by adding and/or removing
+        file entries.
+      parameters:
+      - description: Fork parameters
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            add_entries:
+              items:
+                properties:
+                  hash:
+                    type: string
+                  path:
+                    type: string
+                type: object
+              type: array
+            friendly_name:
+              type: string
+            remove_paths:
+              items:
+                type: string
+              type: array
+            source_hash:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: hash
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Source collection not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Fork anonymous collection
+      tags:
+      - anon
   /collections:
     post:
       consumes:
@@ -286,7 +520,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: message and version_number
+          description: message, version_number, snapshot_hash
           schema:
             additionalProperties: true
             type: object
@@ -457,274 +691,26 @@ paths:
       summary: Rollback collection to a previous version
       tags:
       - collections
-  /files/{hash}:
-    delete:
-      description: Remove file metadata from database and delete the local file if
-        provider_type == "local"
+  /collections/search:
+    get:
+      description: Search collections by username or collection name
       parameters:
-      - description: SHA256 hash
-        in: path
-        name: hash
+      - description: Search query
+        in: query
+        name: q
         required: true
         type: string
       produces:
       - application/json
       responses:
         "200":
-          description: message
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Invalid hash
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "404":
-          description: Not found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Delete a file by hash
-      tags:
-      - files
-  /files/diff:
-    post:
-      consumes:
-      - application/json
-      description: Compare version_entries between two collection versions and return
-        added/removed/modified lists
-      parameters:
-      - description: Version IDs to compare
-        in: body
-        name: body
-        required: true
-        schema:
-          properties:
-            version_a:
-              type: integer
-            version_b:
-              type: integer
-          type: object
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: added, removed, modified
+          description: data array of collections
           schema:
             additionalProperties: true
             type: object
-        "400":
-          description: Invalid request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Diff entries between two versions
+      summary: Search collections
       tags:
-      - files
-  /files/register_folder:
-    post:
-      consumes:
-      - application/json
-      description: Batch-register every file in the given subdirectory of storage/.
-        Non-recursive, skips subdirectories.
-      parameters:
-      - description: Relative folder path under storage/
-        in: body
-        name: body
-        required: true
-        schema:
-          properties:
-            folder_path:
-              type: string
-          type: object
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: registered array
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Folder not found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Register all files in a folder
-      tags:
-      - files
-  /files/register_local:
-    post:
-      consumes:
-      - application/json
-      description: Register an already-existing file in the storage directory. Computes
-        its SHA256 and inserts into the database without copying.
-      parameters:
-      - description: Local path and display filename
-        in: body
-        name: body
-        required: true
-        schema:
-          properties:
-            filename:
-              type: string
-            path:
-              type: string
-          type: object
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: hash, filename, note
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Invalid request or file not found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Register a local file
-      tags:
-      - files
-  /files/upload:
-    post:
-      consumes:
-      - multipart/form-data
-      description: Upload a file, compute its SHA256 hash, store to disk at storage/{first2}/{hash},
-        and register in the database. Deduplicates by hash.
-      parameters:
-      - description: File to upload
-        in: formData
-        name: file
-        required: true
-        type: file
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: hash and filename
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Missing file
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "409":
-          description: File already exists
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Upload a file
-      tags:
-      - files
-  /files/verify/{hash}:
-    get:
-      description: Look up file metadata (filename, provider, path) by its SHA256
-        hash
-      parameters:
-      - description: SHA256 hash
-        in: path
-        name: hash
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: hash, filename, provider, path
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Invalid hash
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "404":
-          description: Not found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Verify a file by hash
-      tags:
-      - files
-  /p2p/node:
-    get:
-      description: Returns the local node's PeerID and listening multiaddrs
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: peer_id and addrs
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Get P2P node info
-      tags:
-      - p2p
-  /p2p/peers:
-    get:
-      description: Returns the list of PeerIDs currently connected to this node
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: peers array
-          schema:
-            additionalProperties: true
-            type: object
-      summary: List connected peers
-      tags:
-      - p2p
-  /p2p/ping/{peer_id}:
-    get:
-      description: Send a ping to a peer and measure round-trip time
-      parameters:
-      - description: Peer ID (e.g. 12D3KooW...)
-        in: path
-        name: peer_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: peer and rtt
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Invalid peer ID
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Ping error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Ping a P2P peer
-      tags:
-      - p2p
+      - collections
   /ping:
     get:
       description: Returns "pong" to confirm the server is running
@@ -738,39 +724,6 @@ paths:
       summary: Health check
       tags:
       - health
-  /sha256sum/{sha256}:
-    get:
-      description: Download a file using its SHA256 hash as the content identifier.
-        Looks up metadata in SQLite, then streams from the appropriate provider (local
-        or HTTP).
-      parameters:
-      - description: 64-character lowercase SHA256 hex string
-        in: path
-        name: sha256
-        required: true
-        type: string
-      produces:
-      - application/octet-stream
-      responses:
-        "200":
-          description: File content
-          schema:
-            type: file
-        "400":
-          description: Invalid hash format
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "404":
-          description: File not found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Download file by SHA256
-      tags:
-      - download
   /tasks:
     get:
       description: Returns an empty task list

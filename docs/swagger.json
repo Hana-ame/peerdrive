@@ -189,6 +189,323 @@
                 }
             }
         },
+        "/anon/collections": {
+            "post": {
+                "description": "Create an immutable content-addressed collection with file entries. Entries validated for path traversal and valid SHA256 hashes.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "anon"
+                ],
+                "summary": "Create anonymous collection",
+                "parameters": [
+                    {
+                        "description": "Collection entries",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "entries": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "hash": {
+                                                "type": "string"
+                                            },
+                                            "path": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                },
+                                "friendly_name": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "hash",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or invalid path/hash",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/anon/collections/commit": {
+            "post": {
+                "description": "Commit modifications to an existing anonymous collection. Accepts a list of entries to add/update (non-empty hash) or remove (empty hash). Increments version and generates a new content hash.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "anon"
+                ],
+                "summary": "Commit anonymous collection (versioned)",
+                "parameters": [
+                    {
+                        "description": "Commit parameters",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "commit_message": {
+                                    "type": "string"
+                                },
+                                "entries": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "hash": {
+                                                "type": "string"
+                                            },
+                                            "path": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                },
+                                "source_hash": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "hash",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or invalid path/hash",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Source collection not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/anon/collections/fork": {
+            "post": {
+                "description": "Create a variant of an anonymous collection by adding and/or removing file entries.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "anon"
+                ],
+                "summary": "Fork anonymous collection",
+                "parameters": [
+                    {
+                        "description": "Fork parameters",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "add_entries": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "hash": {
+                                                "type": "string"
+                                            },
+                                            "path": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                },
+                                "friendly_name": {
+                                    "type": "string"
+                                },
+                                "remove_paths": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "source_hash": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "hash",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Source collection not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/anon/collections/{hash}": {
+            "get": {
+                "description": "Retrieve an anonymous collection's JSON metadata by its content hash.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "anon"
+                ],
+                "summary": "Get anonymous collection by hash",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Collection SHA256 hash",
+                        "name": "hash",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/peerdrive_internal_model.AnonCollection"
+                        }
+                    },
+                    "404": {
+                        "description": "Collection not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/anon/collections/{hash}/entries/{filepath}": {
+            "get": {
+                "description": "Download a specific file entry from an anonymous collection by hash and file path.",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "anon"
+                ],
+                "summary": "Download file from anonymous collection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Collection SHA256 hash",
+                        "name": "hash",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "File path within collection",
+                        "name": "filepath",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File content",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "404": {
+                        "description": "Collection or file not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/collections": {
             "post": {
                 "description": "Create a named collection for a user. Duplicate (username, collection_name) returns 409.",
@@ -245,6 +562,36 @@
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/collections/search": {
+            "get": {
+                "description": "Search collections by username or collection name",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "collections"
+                ],
+                "summary": "Search collections",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search query",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data array of collections",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -371,7 +718,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "message and version_number",
+                        "description": "message, version_number, snapshot_hash",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -622,404 +969,6 @@
                 }
             }
         },
-        "/files/diff": {
-            "post": {
-                "description": "Compare version_entries between two collection versions and return added/removed/modified lists",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "files"
-                ],
-                "summary": "Diff entries between two versions",
-                "parameters": [
-                    {
-                        "description": "Version IDs to compare",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "version_a": {
-                                    "type": "integer"
-                                },
-                                "version_b": {
-                                    "type": "integer"
-                                }
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "added, removed, modified",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/files/register_folder": {
-            "post": {
-                "description": "Batch-register every file in the given subdirectory of storage/. Non-recursive, skips subdirectories.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "files"
-                ],
-                "summary": "Register all files in a folder",
-                "parameters": [
-                    {
-                        "description": "Relative folder path under storage/",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "folder_path": {
-                                    "type": "string"
-                                }
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "registered array",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Folder not found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/files/register_local": {
-            "post": {
-                "description": "Register an already-existing file in the storage directory. Computes its SHA256 and inserts into the database without copying.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "files"
-                ],
-                "summary": "Register a local file",
-                "parameters": [
-                    {
-                        "description": "Local path and display filename",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "filename": {
-                                    "type": "string"
-                                },
-                                "path": {
-                                    "type": "string"
-                                }
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "hash, filename, note",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request or file not found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/files/upload": {
-            "post": {
-                "description": "Upload a file, compute its SHA256 hash, store to disk at storage/{first2}/{hash}, and register in the database. Deduplicates by hash.",
-                "consumes": [
-                    "multipart/form-data"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "files"
-                ],
-                "summary": "Upload a file",
-                "parameters": [
-                    {
-                        "type": "file",
-                        "description": "File to upload",
-                        "name": "file",
-                        "in": "formData",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "hash and filename",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Missing file",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "File already exists",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/files/verify/{hash}": {
-            "get": {
-                "description": "Look up file metadata (filename, provider, path) by its SHA256 hash",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "files"
-                ],
-                "summary": "Verify a file by hash",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "SHA256 hash",
-                        "name": "hash",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "hash, filename, provider, path",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid hash",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/files/{hash}": {
-            "delete": {
-                "description": "Remove file metadata from database and delete the local file if provider_type == \"local\"",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "files"
-                ],
-                "summary": "Delete a file by hash",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "SHA256 hash",
-                        "name": "hash",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "message",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid hash",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/p2p/node": {
-            "get": {
-                "description": "Returns the local node's PeerID and listening multiaddrs",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "p2p"
-                ],
-                "summary": "Get P2P node info",
-                "responses": {
-                    "200": {
-                        "description": "peer_id and addrs",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/p2p/peers": {
-            "get": {
-                "description": "Returns the list of PeerIDs currently connected to this node",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "p2p"
-                ],
-                "summary": "List connected peers",
-                "responses": {
-                    "200": {
-                        "description": "peers array",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/p2p/ping/{peer_id}": {
-            "get": {
-                "description": "Send a ping to a peer and measure round-trip time",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "p2p"
-                ],
-                "summary": "Ping a P2P peer",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Peer ID (e.g. 12D3KooW...)",
-                        "name": "peer_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "peer and rtt",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid peer ID",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Ping error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/ping": {
             "get": {
                 "description": "Returns \"pong\" to confirm the server is running",
@@ -1035,53 +984,6 @@
                         "description": "pong",
                         "schema": {
                             "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/sha256sum/{sha256}": {
-            "get": {
-                "description": "Download a file using its SHA256 hash as the content identifier. Looks up metadata in SQLite, then streams from the appropriate provider (local or HTTP).",
-                "produces": [
-                    "application/octet-stream"
-                ],
-                "tags": [
-                    "download"
-                ],
-                "summary": "Download file by SHA256",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "64-character lowercase SHA256 hex string",
-                        "name": "sha256",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "File content",
-                        "schema": {
-                            "type": "file"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid hash format",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "File not found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
                         }
                     }
                 }
@@ -1205,6 +1107,39 @@
                             }
                         }
                     }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "peerdrive_internal_model.AnonCollection": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/peerdrive_internal_model.AnonCollectionEntry"
+                    }
+                },
+                "friendly_name": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "peerdrive_internal_model.AnonCollectionEntry": {
+            "type": "object",
+            "properties": {
+                "hash": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
                 }
             }
         }
