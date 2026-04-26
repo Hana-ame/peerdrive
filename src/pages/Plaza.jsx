@@ -2,11 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listAnonCollections, listPublicCollections } from '../api';
 
-const TABS = [
-  { key: 'anon', label: '我的合集' },
-  { key: 'public', label: '公开合集' },
-];
-
 const DUMMY_COLLECTIONS = [
   { hash: 'demo-1', friendly_name: '🧪 示例图片集', version: 1, isDummy: true, entries: [{ path: 'cat.jpg' }, { path: 'dog.png' }] },
   { hash: 'demo-2', friendly_name: '🧪 示例文档集', version: 2, isDummy: true, entries: [{ path: 'readme.md' }, { path: 'notes.txt' }] },
@@ -27,29 +22,29 @@ function SkeletonCard() {
 
 export default function Plaza() {
   const [collections, setCollections] = useState([]);
-  const [tab, setTab] = useState('anon');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => { loadTab(); }, [tab]);
+  useEffect(() => { loadAll(); }, []);
 
-  const loadTab = async () => {
+  const loadAll = async () => {
     setLoading(true);
     try {
-      let data;
-      if (tab === 'anon') {
-        data = await listAnonCollections();
-        setCollections(data || []);
-      } else {
-        data = await listPublicCollections();
-        setCollections(data.collections || data.data || data || []);
-      }
+      const [anon, pub] = await Promise.all([
+        listAnonCollections().catch(() => []),
+        listPublicCollections().catch(() => ({ collections: [] })),
+      ]);
+      const merged = [
+        ...(Array.isArray(anon) ? anon.map(c => ({ ...c, _type: 'anon' })) : []),
+        ...((pub.collections || pub.data || []).map(c => ({ ...c, _type: 'public' }))),
+      ];
+      setCollections(merged);
     } catch { setCollections([]); }
     setLoading(false);
   };
 
   const collName = (c) => c.collection_name || c.friendly_name || (c.hash ? c.hash.substring(0, 12) + '...' : '未命名');
-  const collUser = (c) => c.username || (c.isDummy ? 'Peerdrive' : '');
+  const collUser = (c) => c.username || (c._type === 'public' ? '' : '');
   const collTime = (c) => {
     if (c.isDummy) return '';
     const t = c.created_at || c.timestamp;
@@ -63,30 +58,15 @@ export default function Plaza() {
   };
   const collId = (c) => c.id || c.hash || c.collection_name;
 
-  const showDummies = tab === 'anon' && collections.length === 0 && !loading;
+  const showDummies = collections.length === 0 && !loading;
   const display = showDummies ? DUMMY_COLLECTIONS : collections;
 
   return (
     <div className="p-8 overflow-y-auto h-full">
       <div className="max-w-6xl mx-auto">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-          <h1 className="text-3xl font-bold">
-            {tab === 'anon' ? '我的合集' : '公开合集'}
-          </h1>
-
-          <div className="flex items-center gap-3">
-            <div className="flex bg-gray-800 rounded-lg p-1">
-              {TABS.map(t => (
-                <button
-                  key={t.key}
-                  onClick={() => setTab(t.key)}
-                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === t.key ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-white'}`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-3xl font-bold">合集</h1>
+          <button onClick={() => navigate('/anon/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">+ 创建合集</button>
         </div>
 
         {loading ? (
@@ -95,33 +75,16 @@ export default function Plaza() {
           </div>
         ) : display.length === 0 ? (
           <div className="text-center py-20 text-gray-500 border-2 border-dashed border-gray-700 rounded-xl">
-            {tab === 'anon' ? (
-              <div>
-                <p className="mb-3">还没有创建任何合集</p>
-                <p className="text-xs text-gray-600 mb-4">从文件管理器注册文件并自动创建匿名合集，或手动创建</p>
-                <div className="flex justify-center gap-3">
-                  <button onClick={() => navigate('/anon/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">
-                    + 创建合集
-                  </button>
-                  <button onClick={() => navigate('/files')} className="bg-gray-700 hover:bg-gray-600 text-gray-300 px-4 py-2 rounded text-sm">
-                    浏览文件管理器
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div>
-                <p className="mb-2">暂无公开合集</p>
-                <p className="text-xs text-gray-600 mb-4">公开合集由 Peerdrive 注册中心或 P2P 网络提供</p>
-                <div className="flex justify-center gap-3">
-                  <button onClick={() => navigate('/anon/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">
-                    创建合集并设为公开
-                  </button>
-                  <button className="bg-gray-700 hover:bg-gray-600 text-gray-300 px-4 py-2 rounded text-sm" disabled>
-                    🔗 连接到注册中心
-                  </button>
-                </div>
-              </div>
-            )}
+            <p className="mb-3">还没有创建任何合集</p>
+            <p className="text-xs text-gray-600 mb-4">从文件管理器注册文件并自动创建匿名合集，或手动创建</p>
+            <div className="flex justify-center gap-3">
+              <button onClick={() => navigate('/anon/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">
+                + 创建合集
+              </button>
+              <button onClick={() => navigate('/files')} className="bg-gray-700 hover:bg-gray-600 text-gray-300 px-4 py-2 rounded text-sm">
+                浏览文件管理器
+              </button>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
