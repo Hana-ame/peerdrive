@@ -37,7 +37,6 @@ export default function FileManager() {
   const [dirEntries, setDirEntries] = useState([]);
   const [selectedFiles, setSelectedFiles] = useState({});
   const [browseLoading, setBrowseLoading] = useState(false);
-  const [regTarget, setRegTarget] = useState('collection');
 
   useEffect(() => { loadFiles(); }, []);
 
@@ -176,10 +175,12 @@ export default function FileManager() {
       const res = await api.registerFolder(currentDir);
       const registered = res.registered || [];
       setShowFileBrowser(false);
-      if (regTarget === 'collection' && registered.length > 0) {
+      if (registered.length > 0) {
         const entries = registered.map(r => ({ path: r.filename, hash: r.hash }));
         const name = currentDir.split('/').pop() || 'collection';
-        navigate('/anon/create', { state: { draftFrom: { entries, friendlyName: name } } });
+        const coll = await api.createAnonCollection(entries, name);
+        navigate(`/anon/collections/${coll.hash}`);
+        loadFiles();
         return;
       }
       alert(`注册完成: ${registered.length} 个文件`);

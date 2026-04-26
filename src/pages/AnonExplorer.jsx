@@ -145,8 +145,13 @@ export default function AnonExplorer() {
               <span className="text-xs text-gray-600">{currentItems.totalFiles} 项</span>
               <button onClick={async () => {
                 if (!collection?.entries?.length) return;
-                const name = collection.friendly_name || collection.name_preview || '合集副本';
                 try {
+                  const local = await api.listAnonCollections().catch(() => []);
+                  const exists = Array.isArray(local) && local.some(c => c.hash === searchHash);
+                  if (exists) { alert('此合集已在本机，无需保存'); return; }
+                  const selected = confirm('保存全部文件到本机作为新合集？\n确定=保存全部 | 取消=不保存');
+                  if (!selected) return;
+                  const name = collection.friendly_name || collection.name_preview || '合集副本';
                   const res = await api.createAnonCollection(collection.entries, name + ' (副本)');
                   navigate(`/anon/collections/${res.hash}`);
                 } catch(e) { alert('保存失败: ' + e.message); }

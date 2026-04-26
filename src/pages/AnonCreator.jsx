@@ -56,6 +56,7 @@ export default function AnonCreator() {
   const [search, setSearch] = useState('');
   const [typeF, setTypeF] = useState('');
   const [srcTab, setSrcTab] = useState('local');
+  const [localViewMode, setLocalViewMode] = useState('tree');
   const [collections, setCollections] = useState([]);
   const [collSource, setCollSource] = useState(null);
   const [fname, setFname] = useState('');
@@ -214,7 +215,7 @@ export default function AnonCreator() {
         )}
         {srcTab === 'collection' && collSource && (
           <div className="flex-1 flex flex-col">
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-sm"><button onClick={() => setCollSource(null)} className="text-gray-400 hover:text-white">← 返回</button><span className="text-gray-300 truncate">{collSource.friendly_name || '合集'}</span><span className="text-gray-600 text-xs ml-auto">{collSource.entries?.length || 0} 项</span></div>
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-sm"><button onClick={() => setCollSource(null)} className="text-gray-400 hover:text-white">← 退回列表</button><span className="text-gray-300 truncate text-lg font-bold">📦 {collSource.friendly_name || collSource.name_preview || '合集'}</span><span className="text-gray-600 text-xs ml-auto">{collSource.entries?.length || 0} 项</span></div>
             <div className="flex-1 overflow-y-auto">
               {(() => {
                 const dirs = new Set(); const cfiles = [];
