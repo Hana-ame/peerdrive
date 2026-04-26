@@ -18,6 +18,8 @@ export default function Explorer() {
   const [commitMsg, setCommitMsg] = useState('');
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [mergeSrc, setMergeSrc] = useState({ user: '', coll: '', strategy: 'ours' });
+  const [mergeCollections, setMergeCollections] = useState([]);
+  const [mergeCustom, setMergeCustom] = useState(false);
 
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [syncConfig, setSyncConfig] = useState({ path: '', include: '', exclude: '' });
@@ -63,6 +65,33 @@ export default function Explorer() {
       await api.deleteEntry(username, collName, path);
       loadEntries();
     } catch(e) { alert(`移除失败: ${e.message}`); }
+  };
+
+  const loadMergeSources = async () => {
+    setMergeCustom(false);
+    try {
+      const [anon, pub] = await Promise.all([
+        api.listAnonCollections().catch(() => []),
+        api.listPublicCollections().catch(() => ({ collections: [] })),
+      ]);
+      const merged = [
+        ...(Array.isArray(anon) ? anon.map(c => ({ label: `匿名: ${c.friendly_name || c.hash?.substring(0,12)}`, user: '', coll: '', hash: c.hash })) : []),
+        ...((pub.collections || pub.data || []).map(c => ({ label: `${c.username}/${c.collection_name}`, user: c.username, coll: c.collection_name, hash: '' }))),
+        { label: '自定义...', user: '', coll: '', hash: '' },
+      ];
+      setMergeCollections(merged);
+      setMergeSrc(prev => ({ ...prev, user: '', coll: '' }));
+    } catch (e) { console.error(e); }
+  };
+
+  const handleMergeSourceSelect = (item) => {
+    if (item.label === '自定义...') {
+      setMergeCustom(true);
+      setMergeSrc(prev => ({ ...prev, user: '', coll: '' }));
+    } else {
+      setMergeCustom(false);
+      setMergeSrc(prev => ({ ...prev, user: item.user, coll: item.coll }));
+    }
   };
 
   const handleMerge = async () => {
@@ -131,7 +160,7 @@ export default function Explorer() {
             <label className="bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded text-sm cursor-pointer flex items-center">
               上传文件 <input type="file" className="hidden" onChange={handleUpload} />
             </label>
-            <button onClick={() => setShowMergeModal(true)} className="bg-gray-700 hover:bg-gray-600 px-4 py-1.5 rounded text-sm">
+            <button onClick={() => { setShowMergeModal(true); loadMergeSources(); }} className="bg-gray-700 hover:bg-gray-600 px-4 py-1.5 rounded text-sm">
               Merge
             </button>
           </div>
@@ -174,9 +203,38 @@ export default function Explorer() {
         <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-6 rounded-xl w-96 border border-gray-600 shadow-2xl">
             <h3 className="text-lg font-bold mb-4">Merge 合并</h3>
-            <p className="text-sm text-gray-400 mb-4">将远端合集的条目合并到当前 <span className="text-white">{collName}</span></p>
-            <input type="text" placeholder="源用户名" value={mergeSrc.user} onChange={(e)=>setMergeSrc({...mergeSrc, user: e.target.value})} className="w-full bg-gray-700 p-2 rounded mb-3 text-sm" />
-            <input type="text" placeholder="源合集名" value={mergeSrc.coll} onChange={(e)=>setMergeSrc({...mergeSrc, coll: e.target.value})} className="w-full bg-gray-700 p-2 rounded mb-3 text-sm" />
+            <p className="text-sm text-gray-400 mb-4">将其他合集的条目合并到当前 <span className="text-white">{collName}</span></p>
+            <div className="mb-3">
+              <label className="block text-xs text-gray-500 mb-1">源合集</label>
+              <select
+                value={mergeSrc.user && mergeSrc.coll ? `${mergeSrc.user}/${mergeSrc.coll}` : (mergeCustom ? '__custom__' : '')}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '__custom__') {
+                    setMergeCustom(true);
+                    setMergeSrc(prev => ({ ...prev, user: '', coll: '' }));
+                  } else {
+                    setMergeCustom(false);
+                    const item = mergeCollections.find(c => `${c.user}/${c.coll}` === val);
+                    if (item) setMergeSrc(prev => ({ ...prev, user: item.user, coll: item.coll }));
+                  }
+                }}
+                className="w-full bg-gray-700 p-2 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">-- 选择合集 --</option>
+                {mergeCollections.map((c, i) => {
+                  const val = c.user && c.coll ? `${c.user}/${c.coll}` : (c.hash || `custom_${i}`);
+                  if (c.label === '自定义...') return <option key="__custom__" value="__custom__">自定义...</option>;
+                  return <option key={i} value={val}>{c.label}</option>;
+                })}
+              </select>
+            </div>
+            {mergeCustom && (
+              <>
+                <input type="text" placeholder="源用户名" value={mergeSrc.user} onChange={(e)=>setMergeSrc({...mergeSrc, user: e.target.value})} className="w-full bg-gray-700 p-2 rounded mb-2 text-sm" />
+                <input type="text" placeholder="源合集名" value={mergeSrc.coll} onChange={(e)=>setMergeSrc({...mergeSrc, coll: e.target.value})} className="w-full bg-gray-700 p-2 rounded mb-3 text-sm" />
+              </>
+            )}
             <select value={mergeSrc.strategy} onChange={(e)=>setMergeSrc({...mergeSrc, strategy: e.target.value})} className="w-full bg-gray-700 p-2 rounded mb-6 text-sm">
               <option value="ours">冲突保留本地</option>
               <option value="theirs">冲突采用远端</option>

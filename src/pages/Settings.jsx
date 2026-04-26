@@ -196,12 +196,24 @@ export default function Settings({ dataConsent, setDataConsent }) {
 
             <div>
               <label className="block text-xs text-gray-400 mb-1">模型</label>
-              <input
-                value={llmModel}
-                onChange={e => setLlmModel(e.target.value)}
-                placeholder="Qwen3-8B"
+              <select
+                value={api.FREE_LLM_MODELS.includes(llmModel) ? llmModel : '__custom__'}
+                onChange={e => { if (e.target.value !== '__custom__') setLlmModel(e.target.value); }}
                 className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
-              />
+              >
+                {api.FREE_LLM_MODELS.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+                <option value="__custom__">自定义...</option>
+              </select>
+              {!api.FREE_LLM_MODELS.includes(llmModel) && (
+                <input
+                  value={llmModel}
+                  onChange={e => setLlmModel(e.target.value)}
+                  placeholder="输入自定义模型名"
+                  className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600 mt-1"
+                />
+              )}
             </div>
 
             <div>

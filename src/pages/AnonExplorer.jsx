@@ -236,7 +236,7 @@ export default function AnonExplorer() {
                 </button>
                 <button onClick={() => setShowFork(!showFork)}
                   className="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-xs">
-                  {showFork ? '取消 Fork' : 'Fork'}
+                  {showFork ? '取消' : '克隆并修改'}
                 </button>
               </div>
             </div>
@@ -286,7 +286,7 @@ export default function AnonExplorer() {
 
             {showFork && (
               <form onSubmit={handleFork} className="bg-purple-900/30 p-4 rounded-lg mb-4 border border-purple-700">
-                <h4 className="font-bold mb-3 text-sm">Fork 变体</h4>
+                <h4 className="font-bold mb-3 text-sm">克隆并修改</h4>
                 <div className="mb-3">
                   <label className="block text-xs text-gray-400 mb-1">Fork 名称</label>
                   <input value={forkData.friendlyName}
@@ -322,7 +322,7 @@ export default function AnonExplorer() {
                     className="w-full bg-gray-700 px-3 py-2 rounded text-sm" />
                 </div>
                 <button type="submit" className="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded text-sm">
-                  确认 Fork
+                  确认克隆
                 </button>
               </form>
             )}
