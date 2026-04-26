@@ -47,6 +47,7 @@ export default function AnonCreator() {
   const [collections, setCollections] = useState([]);
   const [collSource, setCollSource] = useState(null);
   const [fname, setFname] = useState('');
+  const [tags, setTags] = useState('');
   const [entries, setEntries] = useState([]);
   const [openHash, setOpenHash] = useState('');
   const [savedHash, setSavedHash] = useState('');
@@ -102,7 +103,7 @@ export default function AnonCreator() {
     setSaving(true);
     const oldHash = savedHash;
     try {
-      const res = await api.createAnonCollection(valid, fname.trim());
+      const res = await api.createAnonCollection(valid, fname.trim(), tags.split(/[,;]/).map(t => t.trim()).filter(Boolean));
       setSavedHash(res.hash); setOpenHash(res.hash);
       loadCollections();
       nav(`/anon/collections/${res.hash}`);
@@ -240,7 +241,8 @@ export default function AnonCreator() {
       <div style={{ width: `${100 - split}%` }} className="h-full flex flex-col">
         <div className="h-12 flex items-center px-4 space-x-3 border-b border-gray-800 shrink-0">
           <Link to="/" className="text-sm text-gray-500 hover:text-white shrink-0">←</Link>
-          <input value={fname} onChange={e => setFname(e.target.value)} placeholder="合集名称 (可选)" className="bg-gray-800 text-sm px-3 py-2 rounded border border-gray-700 w-48 focus:outline-none focus:border-blue-500" />
+          <input value={fname} onChange={e => setFname(e.target.value)} placeholder="合集名称 (可选)" className="bg-gray-800 text-sm px-3 py-2 rounded border border-gray-700 w-36 focus:outline-none focus:border-blue-500" />
+          <input value={tags} onChange={e => setTags(e.target.value)} placeholder="标签: tag1, tag2" className="bg-gray-800 text-sm px-3 py-2 rounded border border-gray-700 w-28 focus:outline-none focus:border-blue-500" />
           <div className="flex-1" />
           {entries.length > 0 && !savedHash && (
             <span className="text-sm text-yellow-500 bg-yellow-500/10 px-3 py-1 rounded border border-yellow-600/30">未保存</span>
