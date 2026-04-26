@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useContext, useState, useEffect, useCallback } from 'react';
 import * as api from '../api';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { PageContext } from '../App';
 
 const SHA256_RE = /\b([a-f0-9]{64})\b/i;
 
@@ -11,6 +12,7 @@ function extractHash(text) {
 
 export default function AnonExplorer() {
   const { hash: paramHash } = useParams();
+  const { setPageContext } = useContext(PageContext);
   const [inputVal, setInputVal] = useState(paramHash || '');
   const [searchHash, setSearchHash] = useState(paramHash || '');
   const [collection, setCollection] = useState(null);
@@ -56,6 +58,14 @@ export default function AnonExplorer() {
       document.title = '匿名合集浏览器';
     }
     return () => { document.title = 'Peerdrive'; };
+  }, [collection, searchHash]);
+
+  useEffect(() => {
+    if (collection) {
+      setPageContext({ type: 'anonExplorer', version: collection.version, entryCount: collection.entries?.length || 0, friendlyName: collection.friendly_name || '', hash: searchHash.substring(0, 16) });
+    } else {
+      setPageContext({ type: 'anonExplorer', hash: searchHash ? searchHash.substring(0, 16) : '' });
+    }
   }, [collection, searchHash]);
 
   const fetchCollection = async (h) => {

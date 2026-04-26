@@ -1,5 +1,5 @@
 import React, { useContext, useState, useEffect } from 'react';
-import { AppContext } from '../App';
+import { AppContext, PageContext } from '../App';
 import { useNavigate } from 'react-router-dom';
 import * as api from '../api';
 
@@ -13,6 +13,7 @@ const SORT_OPTIONS = [
 
 export default function FileManager() {
   const { username, setUsername: ctxSetUsername } = useContext(AppContext);
+  const { setPageContext } = useContext(PageContext);
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('time');
@@ -33,6 +34,10 @@ export default function FileManager() {
       if (saved) ctxSetUsername(saved);
     }
   }, [username, sortBy]);
+
+  useEffect(() => {
+    setPageContext({ type: 'fileManager', fileCount: files.length, selectedCount: selectedEntries.length, sortBy });
+  }, [files, selectedEntries, sortBy]);
 
   useEffect(() => {
     if (showCreateModal && username) {

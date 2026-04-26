@@ -127,6 +127,45 @@ export const ping = () => request('GET', '/ping');
 /* ---- settings ---- */
 export { getApiBase, setApiBase, DEFAULT_API };
 
+/* ---- llm ---- */
+const LLM_ENDPOINT_KEY = 'peerdrive_llm_endpoint';
+const LLM_MODEL_KEY = 'peerdrive_llm_model';
+const LLM_APIKEY_KEY = 'peerdrive_llm_apikey';
+const LLM_BODY_KEY = 'peerdrive_llm_body_template';
+const DATA_CONSENT_KEY = 'peerdrive_data_consent';
+
+const DEFAULT_LLM_ENDPOINT = 'https://siliconflow.moonchan.xyz';
+const DEFAULT_LLM_MODEL = 'Qwen/Qwen3-8B';
+const DEFAULT_LLM_BODY = JSON.stringify({
+  model: 'Qwen/Qwen3-8B',
+  messages: [],
+  stream: true,
+  max_tokens: 4096,
+  temperature: 0.7,
+}, null, 2);
+
+export function getLlmEndpoint() { return localStorage.getItem(LLM_ENDPOINT_KEY) || DEFAULT_LLM_ENDPOINT; }
+export function setLlmEndpoint(v) { localStorage.setItem(LLM_ENDPOINT_KEY, v); }
+export function getLlmModel() { return localStorage.getItem(LLM_MODEL_KEY) || DEFAULT_LLM_MODEL; }
+export function setLlmModel(v) { localStorage.setItem(LLM_MODEL_KEY, v); }
+export function getLlmApiKey() { return localStorage.getItem(LLM_APIKEY_KEY) || ''; }
+export function setLlmApiKey(v) { localStorage.setItem(LLM_APIKEY_KEY, v); }
+export function getLlmBodyTemplate() { return localStorage.getItem(LLM_BODY_KEY) || DEFAULT_LLM_BODY; }
+export function setLlmBodyTemplate(v) { localStorage.setItem(LLM_BODY_KEY, v); }
+export function getDataConsent() { return localStorage.getItem(DATA_CONSENT_KEY) === 'true'; }
+export function setDataConsent(v) { localStorage.setItem(DATA_CONSENT_KEY, v ? 'true' : 'false'); }
+export { DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_MODEL, DEFAULT_LLM_BODY };
+
+const REG_SERVER = 'https://reg.moonchan.xyz';
+export function uploadConsent() {
+  const username = localStorage.getItem('peerdrive_username') || '';
+  return fetch(`${REG_SERVER}/api/v2/consent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, agreed: true, timestamp: Date.now() }),
+  }).catch(() => {});
+}
+
 /* ---- alias exports for legacy usage ---- */
 export const createCollection = createUserCollection;
 export const listCollections = getUserCollections;

@@ -1,11 +1,12 @@
 import React, { useContext, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { AppContext } from '../App';
+import { AppContext, PageContext } from '../App';
 import * as api from '../api';
 import VersionLog from '../components/VersionLog';
 
 export default function Explorer() {
   const { username: contextUser } = useContext(AppContext);
+  const { setPageContext } = useContext(PageContext);
   const { username: paramUser, collName } = useParams();
   const username = paramUser || contextUser;
 
@@ -23,6 +24,10 @@ export default function Explorer() {
   const [syncStatus, setSyncStatus] = useState(null);
 
   useEffect(() => { loadEntries(); }, [username, collName, refreshTrigger]);
+
+  useEffect(() => {
+    setPageContext({ type: 'explorer', username, collectionName: collName, entryCount: entries.length, entries: entries.map(e => ({ path: e.path, hash: (e.file_hash || '').substring(0, 16) })) });
+  }, [entries, username, collName]);
 
   const loadEntries = async () => {
     setLoading(true);

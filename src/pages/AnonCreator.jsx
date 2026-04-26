@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useContext, useState, useEffect, useRef } from 'react';
 import * as api from '../api';
 import { Link, useNavigate } from 'react-router-dom';
+import { PageContext } from '../App';
 
 const SORT_OPTS = [
   { v: 'time', l: '时间' }, { v: 'name', l: '文件名' },
@@ -9,6 +10,7 @@ const SORT_OPTS = [
 
 export default function AnonCreator() {
   const nav = useNavigate();
+  const { setPageContext } = useContext(PageContext);
 
   // DB files
   const [files, setFiles] = useState([]);
@@ -37,6 +39,10 @@ export default function AnonCreator() {
   const entryEnd = useRef(null);
 
   useEffect(() => { loadFiles(); loadHistory(); }, [sort]);
+
+  useEffect(() => {
+    setPageContext({ type: 'anonCreator', fileCount: files.length, entryCount: entries.length, friendlyName: fname, openHash: openHash ? openHash.substring(0, 16) : '' });
+  }, [files, entries, fname, openHash]);
 
   const loadFiles = async () => {
     setFLoading(true);

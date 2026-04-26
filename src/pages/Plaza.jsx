@@ -1,10 +1,11 @@
 import React, { useContext, useState, useEffect } from 'react';
-import { AppContext } from '../App';
+import { AppContext, PageContext } from '../App';
 import { useNavigate } from 'react-router-dom';
 import { listCollections, createCollection, searchCollections } from '../api';
 
 export default function Plaza() {
   const { username } = useContext(AppContext);
+  const { setPageContext } = useContext(PageContext);
   const [collections, setCollections] = useState([]);
   const [newCollName, setNewCollName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -12,6 +13,10 @@ export default function Plaza() {
   const navigate = useNavigate();
 
   useEffect(() => { if (username) loadCollections(); }, [username]);
+
+  useEffect(() => {
+    setPageContext({ type: 'plaza', username, collectionCount: collections.length, isSearching, searchQuery });
+  }, [collections, isSearching, searchQuery, username]);
 
   const loadCollections = async () => {
     try {
