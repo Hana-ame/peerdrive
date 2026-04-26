@@ -65,3 +65,31 @@ json的其他信息至少要包含：version，其他必要字段，可选字段
 2. 查看sha256sum/:hash 是否能够访问到这个collection的json内容。
 3. 查看sha256sum/:hash 是否有正确的HEADER（需要联动之前不让修改的，sha256 - metadata表中的扩展内容，需要提示这是一个collection的json,字段自拟）
 4. 尝试下载collection/path/to/file，是否能找到正确的文件。
+
+# P2P Stage 2
+
+P2P 节点发现、通信、同步功能。
+
+需要验证：
+1. 双节点启动后通过 mDNS 互相发现
+2. 手动 connect 对等点
+3. 声明/拉取匿名合集（FetchCollection）
+4. 从对等点同步文件内容
+5. 向对等点推送合集（PushSync）
+6. P2P 下载回退：本地→HTTP→P2P
+
+测试脚本：`test/p2p.sh`
+
+# P2P Stage 3 (NAT Traversal + Relay + WS)
+
+中继、NAT 穿透、WebSocket 传输功能。
+
+需要验证：
+1. 中继服务器模式启动（relay_mode=server）
+2. 客户端连接中继（relay_mode=client + static_relays）
+3. STUN 打洞启用（hole_punch=true）
+4. 通过中继完成 mDNS 发现和合集传输
+5. 文件请求广播（request-file）
+6. WebSocket 连接信息（ws/info）
+
+测试脚本：`test/relay.sh`

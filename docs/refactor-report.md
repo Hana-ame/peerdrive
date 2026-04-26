@@ -66,3 +66,21 @@
 
 ## 5. 总结
 本次修改将系统从一个简单的原型演变为具有初步分层架构的软件。重点解决了本地文件注册的路径限制问题，并补齐了 CAS 存储最核心的元数据（大小、类型），为后续的 P2P 分发和合集管理奠定了基础。
+
+## 6. 后续发展（已完成）
+
+基于本次重构的基础上继续实现了：
+
+### P2P 网络（Stage 2）
+- libp2p DHT + mDNS 节点发现，自定义 `/peerdrive/exchange/1.0.0` 交换协议
+- P2P 下载回退（本地 → HTTP → P2P），合集跨节点全量同步
+- 详见 `docs/changelog.md` 2026-04-26 节
+
+### NAT 穿透 + 中继 + WS 传输（Stage 3）
+- Relay 中继（server/client 模式），STUN 打洞，AutoNAT 检测
+- WebSocket `/ws/transfer` 文件传输，`/p2p/request-file` 文件请求广播
+- 详见 `docs/changelog.md` 2026-04-26 节
+
+### 匿名合集增强
+- `AnonCollection` 增加 `friendly_name` 字段
+- 详见 `docs/specs/anon-collection.md`

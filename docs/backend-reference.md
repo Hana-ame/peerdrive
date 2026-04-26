@@ -11,7 +11,7 @@
 
 ### 没有用户表
 
-数据库中有 6 张表，没有 `users` 表：
+数据库中有表：
 
 ```
 files               → 文件元数据（hash, provider_type, path, filename）
@@ -22,7 +22,7 @@ version_entries     → 版本条目
 transfer_tasks      → 异步任务
 ```
 
-来源：`internal/repository/db.go:27-50`
+来源：`internal/repository/db.go`
 
 ### username 是集合表的一个列
 
@@ -152,5 +152,3 @@ repository.SnapshotVersionEntries(versionID, collectionID)
 | `internal/repository/db.go` | 6 张表建表 SQL | `collections` 表含 `username TEXT NOT NULL` + `UNIQUE(username, collection_name)` |
 | `internal/repository/collection_repo.go` | 集合四表 CRUD | 所有查询用 `WHERE username=?` 过滤，无认证 |
 | `internal/model/collection.go` | Collection / CollectionEntry / CollectionVersion / VersionEntry 结构体 | Collection 结构体含 `Username string` 字段 |
-| `go/LOG.md` | 开发日志 | 提及 `repo_files` 表设计但未实现 |
-| `go/DB.md` | 数据库 schema 文档 | 描述集合表结构 |

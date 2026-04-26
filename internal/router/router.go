@@ -38,6 +38,13 @@ func SetupRouter(
 ) *gin.Engine {
 	r := gin.Default()
 
+	// inject shared deps into context (must register before any routes)
+	r.Use(func(c *gin.Context) {
+		c.Set("storageDir", cfg.StorageDir)
+		c.Set("downloader", downloader)
+		c.Next()
+	})
+
 	r.Use(func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 		if origin != "" {
@@ -92,6 +99,7 @@ func SetupRouter(
 	anon := r.Group("/anon")
 	{
 		anon.POST("/collections", controller.CreateAnonCollection)
+		anon.POST("/collections/commit", controller.CommitAnonCollection)
 		anon.GET("/collections/:hash", controller.GetAnonCollection)
 		anon.GET("/collections/:hash/entries/*filepath", controller.DownloadAnonFile)
 		anon.POST("/collections/fork", controller.ForkAnonCollection)

@@ -582,8 +582,12 @@ func (p *P2PService) connectToBootstrap(ctx context.Context, addr string) error 
 }
 
 func (p *P2PService) Close() error {
-	close(p.requestCh)
-	close(p.responseCh)
+	if p.requestCh != nil {
+		close(p.requestCh)
+	}
+	if p.responseCh != nil {
+		close(p.responseCh)
+	}
 	if p.Host != nil {
 		return p.Host.Close()
 	}

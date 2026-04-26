@@ -1,93 +1,211 @@
-# Development Log - Peerdrive
+# Peerdrive E2E 测试环境搭建 & Bug 修复记录
 
-This log tracks all architectural and implementation changes to the Peerdrive project to facilitate collaborative multi-agent development.
+## 0. 当前分支
 
-## 1. Project Initialization & Framework
-- **Go Module**: Initialized project as `peerdrive`.
-- **Framework**: Integrated `github.com/gin-gonic/gin` for HTTP routing.
-- **API Documentation**: Integrated `swaggo/swag` and `gin-swagger`. Added Swagger annotations to controllers.
+```
+feat/stage2-e2e-test (基于 feat/remove-auth-and-refactor)
+```
 
-## 2. Architecture Refactoring
-- **Package Structure**:
-    - `main.go`: Entry point, initializes global managers and starts server.
-    - `router/`: Defines API routes and middleware.
-    - `controller/`: Contains request handlers (business logic).
-    - `provider/`: Abstracts data sources.
-    - `db/`: Handles metadata persistence.
+所有改动在 `go/` 目录下。
 
-## 3. Content-Addressable Storage System
-Implemented a decoupled resource retrieval system where files are identified by SHA256 hashes but stored in varied locations.
+---
 
-### Provider Pattern (`provider/`)
-- **`ContentProvider` Interface**: Defined a standard interface for fetching content (`GetContent`).
-- **`LocalProvider`**: Implements local filesystem access.
-- **`HTTPProvider`**: Implements remote resource fetching via HTTP.
-- **`ProviderManager`**: Manages registered providers and routes requests to the appropriate implementation.
+## 1. 环境准备
 
-### Metadata Layer (`db/`)
-- **Database**: Integrated `sqlite3` via `github.com/mattn/go-sqlite3`.
-- **Schema**: Created `files` table storing:
-    - `hash` (PK): SHA256 identifier.
-    - `path`: Actual resource location (file path or URL).
-    - `provider_type`: Which provider to use (`local`, `http`).
-    - `filename`: Original name for download headers.
+### 1.1 创建分支
+```bash
+cd /mnt/d/WorkPlace/peerdrive/go
+git checkout feat/remove-auth-and-refactor
+git checkout -b feat/stage2-e2e-test
+```
 
-## 4. API Implementation
-- `GET /ping`: Basic health check.
-- `GET /sha256sum/:sha256`: 
-    - Validates SHA256 format.
-    - Lookups metadata in SQLite.
-    - Delegates to the corresponding Provider.
-    - Streams data via `c.DataFromReader`.
+### 1.2 修复依赖
+项目原本通过 `GOPROXY=off` + vendor 管理依赖，但 vendor 目录缺失。改为标准 Go module 模式：
+```bash
+go mod tidy
+go build ./...
+```
+输出 `go/internal/service/p2p.go` 等一系列成功编译。
 
-## 5. Testing & Quality Assurance
-- **Unit Tests**: Implemented `controller_test.go` for isolated handler testing.
-- **Integration Tests**: 
-    - Created `router_test.go` to test the full request-response cycle.
-    - Implemented `test.sh` for end-to-end verification (seeds DB $\rightarrow$ starts server $\rightarrow$ curls endpoints).
-- **Seeding**: Created `seed_db.go` to automate test environment setup.
+### 1.3 编译产物
+```bash
+go build -o peerdrive-server ./cmd/server/
+```
+产物：`go/peerdrive-server`
 
-## 6. Documentation
-- **`DESIGN.md`**: Detailed architecture and API specification.
-- **Swagger**: Auto-generated docs available at `/swagger/index.html`.
+---
 
-## 7. Repo-based Download System
-Added support for `/repo@username/path` format for file download, enabling sharing via peer networks.
+## 2. Bug 修复
 
-### Database Schema
+### 2.1 P2P 关闭时 nil channel panic
 
-#### files 表 - /sha256sum/:hash 使用
-| hash | filename |
-|------|----------|
-| TEXT PRIMARY KEY | TEXT |
+**现象**：当 `PEERDRIVE_P2P_ENABLE=false` 启动时，`p2pSvc.Close()` 中 `close(p.requestCh)` / `close(p.responseCh)` 因为 channel 从未初始化（nil）导致 panic：
 
-#### repo_files 表 - /repo@username/path 使用
-| repo_name | username | path | hash | provider_type | file_path | filename | created_at |
-|----------|---------|------|------|-------------|----------|----------|-----------|
-| TEXT NOT NULL | TEXT NOT NULL | TEXT NOT NULL | TEXT REFERENCES files(hash) | TEXT NOT NULL | TEXT NOT NULL | TEXT | TIMESTAMP DEFAULT CURRENT_TIMESTAMP |
+```
+panic: close of nil channel
+```
 
-PRIMARY KEY (repo_name, username, path, created_at)
+**原因**：`NewP2PService` 在 P2P disabled 时直接返回，`requestCh` 和 `responseCh` 保持 nil。但 `Close()` 无条件 close 它们。
 
-### Design Rationale
-- **files table**: Pure content identifier for `/sha256sum/:hash` endpoint (existing)
-- **repo_files table**: Maps `repo@username/path` to hash, includes provider_type and file_path for peer-to-peer sharing
-- Each repo can have its own storage provider (local, http, or peer network)
-- History preserved via append-only inserts (multiple rows per path with different timestamps)
+**文件**：`internal/service/p2p.go:584-591`
 
-## 2026-04-25
-- **移除 Gzip 检测**：移除了 `internal/controller/file.go` 中的 `isGzipFile` 检测逻辑及辅助函数。文件注册时 `Gziped` 默认设为 `false`。
-- **修复路径拼接问题**：修复了 `RegisterLocalFile` 和 `RegisterFolder` 中将用户路径错误地与 `storageDir` 拼接的 Bug。现在支持注册本地文件系统的绝对路径及任意路径。
-- **自适应路径加载**：更新了 `LocalProvider` 以同时支持绝对路径和相对路径。绝对路径直接访问，相对路径则继续相对于 `storageDir` 解析。
-- **移除身份验证**：移除了 AuthMiddleware、auth 路由及相关代码。
-- **分层重构**：Controller → Service → Repository 三层分离，将业务逻辑从 controller 移至 service。
-- **配置模块**：新增 `internal/config`，通过环境变量 `PEERDRIVE_STORAGE` 和 `PEERDRIVE_STORAGE_ENABLE` 控制存储目录和开关。
-- **上传功能实现**：
-  - 上传文件自动计算 SHA256、Size、MIME 类型
-  - 重复文件检测，返回 `already_exists` 标识
-  - 存储禁用时返回 403
-  - 跨设备文件移动（fallback copy）
-  - 测试脚本 `test_upload.sh`
-- **元数据补全**：注册和上传时填充 `Size` 和 `MimeType`。
-- **API 清理**：VerifyFile 响应不再返回 `gziped` 和 `type` 字段。
-- **文档更新**：更新 `REGISTER_LAYER.md`、`TESTING.md`，新增 `UPLOAD_LAYER.md`。
+**修复**：
+```go
+func (p *P2PService) Close() error {
+    if p.requestCh != nil {
+        close(p.requestCh)
+    }
+    if p.responseCh != nil {
+        close(p.responseCh)
+    }
+    if p.Host != nil {
+        return p.Host.Close()
+    }
+    return nil
+}
+```
 
+### 2.2 启动日志打印空 PeerID
+
+**现象**：P2P 禁用时仍然打印 `libp2p 节点已启动: PeerID=, 监听地址=[]`
+
+**文件**：`cmd/server/main.go:55`
+
+**修复**：
+```go
+id, addrs := p2pSvc.GetNodeInfo()
+if id != "" {
+    log.Printf("libp2p 节点已启动: PeerID=%s, 监听地址=%v", id, addrs)
+}
+```
+
+### 2.3 storageDir middleware 未生效
+
+**现象**：请求 `/collections/:u/:c/commit` 时 panic：
+```
+key storageDir does not exist
+```
+
+**原因**：Gin 在注册路由时捕获当前 middleware 栈。`r.Use(storageDir)` 写在 `main.go:70`，位于 `router.SetupRouter()`（注册了所有路由）之后，因此已注册的路由拿不到这个 middleware。
+
+**修复**：将 middleware 移入 `SetupRouter()` 开头，在所有路由注册之前：
+```go
+// internal/router/router.go
+func SetupRouter(...) *gin.Engine {
+    r := gin.Default()
+
+    // 注入 storageDir / downloader（必须在路由前）
+    r.Use(func(c *gin.Context) {
+        c.Set("storageDir", cfg.StorageDir)
+        c.Set("downloader", downloader)
+        c.Next()
+    })
+
+    // CORS middleware
+    r.Use(func(c *gin.Context) { ... })
+
+    // 注册所有路由 ...
+}
+```
+
+同时移除 `main.go` 中冗余的 `r.Use(...)` 以及未使用的 `gin` 导入。
+
+### 2.4 RemoveEntry 路径斜杠 bug
+
+**现象**：`DELETE /collections/:u/:c/entries/lib/util.go` 返回 200，但条目未被删除。
+
+**原因**：Gin 的 `*path` 捕获包含前导斜杠。例如 `DELETE .../entries/lib/util.go` 得到 `c.Param("path") = "/lib/util.go"`。而数据库存储的是 `lib/util.go`（无前导 `/`），导致 SQL WHERE 不匹配。
+
+**文件**：`internal/controller/collection.go`
+
+**修复**：
+```go
+path := strings.TrimPrefix(c.Param("path"), "/")
+```
+
+注：`DownloadAnonFile` / `DownloadCollectionFile` 已有相同处理，仅 `RemoveEntry` 遗漏。
+
+---
+
+## 3. E2E 测试脚本
+
+**文件**：`go/test/e2e-all.sh`
+
+### 3.1 设计原则
+- **自包含**：自己 `go build`，自己启动 server，自己清理
+- **P2P 禁用**：`PEERDRIVE_P2P_ENABLE=false`，只测 HTTP API 层
+- **绕过 Privoxy**：`export no_proxy='*'`
+- **清理残留**：`trap cleanup EXIT` 确保 server 被杀、临时文件/DB 被删
+
+### 3.2 测试覆盖 (12 节, 80 断言)
+
+| 节 | 端点 | 断言数 |
+|----|------|--------|
+| 1. Health | `GET /ping` | 2 |
+| 2. File Upload | `POST /files/upload` (new/duplicate/2nd file, on-disk verify) | 10 |
+| 3. File Verify | `GET /files/verify/:hash` (valid + invalid hash) | 3 |
+| 4. SHA256 Download | `GET /sha256sum/:hash` (valid + invalid, diff verify) | 3 |
+| 5. Register Local File | `POST /files/register_local` (new + re-register + verify + download) | 5 |
+| 6. Register Folder | `POST /files/register_folder` | 2 |
+| 7. Anonymous Collections | `POST /anon/collections` + path traversal + `GET` + sha256sum + entry download + `POST /anon/collections/fork` + nonexistent | 17 |
+| 8. Named Collections | create / duplicate / list / get / add entries / delete entry / download / commit / version log / 2nd commit / rollback | 22 |
+| 9. Fork/Merge/Pull | `POST /actions/fork` + `POST /actions/merge` + `POST /actions/pull` | 4 |
+| 10. File Delete | `DELETE /files/:hash` + verify deleted | 2 |
+| 11. Tasks | `GET /tasks` + nonexistent task | 2 |
+| 12. Edge Cases | missing user / empty collection / invalid hash / missing fields | 5 |
+
+### 3.3 运行方式
+```bash
+cd /mnt/d/WorkPlace/peerdrive
+bash go/test/e2e-all.sh
+```
+
+### 3.4 当前结果
+```
+PASS: 79  FAIL: 0  WARN: 1  TOTAL: 80
+All tests passed
+```
+
+WARN: 创建 collection 时 `{}` 空 body 返回 200（预期应拒绝），属边界行为差异，不阻塞。
+
+---
+
+## 4. 关键基础设施信息
+
+| 项目 | 值 |
+|------|-----|
+| HTTP 端口 | `PORT` env，默认 3000 |
+| libp2p listen | `/ip4/0.0.0.0/tcp/0` (自动端口) |
+| 存储目录 | `PEERDRIVE_STORAGE`，默认 `./storage` |
+| DB 路径 | **硬编码** `./peerdrive.db`（非 env var） |
+| 两节点测试端口 | 3001 / 3002 |
+| P2P 协议 | `/peerdrive/exchange/1.0.0` `/peerdrive/announce/1.0.0` `/peerdrive/request/1.0.0` |
+
+---
+
+## 5. 改动文件清单
+
+```
+go/
+├── cmd/server/main.go          # 移除 gin 导入，删除冗余 middleware
+├── internal/router/router.go   # 新增 storageDir/downloader middleware (route 注册前)
+├── internal/service/p2p.go     # Close() nil channel 保护
+├── internal/controller/collection.go  # RemoveEntry path TrimPrefix
+└── test/
+    └── e2e-all.sh              # 新增 E2E 测试脚本 (397 行)
+```
+
+---
+
+## 6. CI 集成
+
+**文件**：`go/.github/workflows/ci.yml`
+
+已有 CI workflow，运行以下测试脚本：
+- `go/test/test.sh`
+- `go/test/upload.sh`
+- `go/test/register.sh`
+- `go/test/anon-collection.sh`
+- `go/test/p2p.sh`
+
+**建议**：将 `go/test/e2e-all.sh` 加入 CI pipeline。

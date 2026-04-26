@@ -21,13 +21,13 @@ go mod tidy
 # 启动服务
 go run ./cmd/server/main.go
 
-# 或指定端口与存储目录
-PORT=3000 PEERDRIVE_STORAGE=./storage go run ./cmd/server/main.go
+# 或指定端口、存储目录与 P2P 模式
+PORT=3000 PEERDRIVE_STORAGE=./storage PEERDRIVE_RELAY_MODE=server go run ./cmd/server/main.go
 ```
 
 启动后应看到：
 ```
-libp2p 节点已启动: PeerID=12D3KooW..., 监听地址=[/ip4/...]
+libp2p 节点已启动: PeerID=12D3KooW..., 监听地址=[/ip4/...], relay=server, hole_punch=true
 ```
 
 ---
@@ -38,10 +38,19 @@ libp2p 节点已启动: PeerID=12D3KooW..., 监听地址=[/ip4/...]
 cd go/
 
 # 注册 + 下载全链路测试
-bash test_register_download.sh
+bash test/register.sh
 
 # 上传功能测试（新文件、重复文件）
-bash test_upload.sh
+bash test/upload.sh
+
+# 匿名合集测试
+bash test/anon-collection.sh
+
+# P2P Stage 2 双节点集成测试
+bash test/p2p.sh
+
+# P2P Stage 3 中继 + WS 测试
+bash test/relay.sh
 ```
 
 脚本覆盖：
@@ -164,7 +173,58 @@ curl -x "" -H "Content-Type: application/json" \
   -X POST http://localhost:3000/actions/pull
 ```
 
-### 3.6 任务系统
+### 3.7 匿名合集
+
+```bash
+# 创建匿名合集
+curl -x "" -H "Content-Type: application/json" \
+  -d '{"friendly_name":"my-collection","entries":[{"path":"test.txt","hash":"<HASH>"}]}' \
+  -X POST http://localhost:3000/anon/collections
+
+# 获取合集 JSON
+curl -x "" http://localhost:3000/anon/collections/<COLLECTION_HASH>
+
+# 从合集下载文件
+curl -x "" -o /tmp/downloaded http://localhost:3000/anon/collections/<HASH>/entries/test.txt
+
+# Fork 匿名合集
+curl -x "" -H "Content-Type: application/json" \
+  -d '{"source_hash":"<HASH>","friendly_name":"forked","add_entries":[],"remove_paths":[]}' \
+  -X POST http://localhost:3000/anon/collections/fork
+```
+
+### 3.8 P2P 操作
+
+```bash
+# P2P 状态（含 relay_mode / hole_punch / ws_connections）
+curl -x "" http://localhost:3000/p2p/status
+
+# 发现的节点（mDNS + DHT）
+curl -x "" http://localhost:3000/p2p/discovered
+
+# 手动连接节点
+curl -x "" -H "Content-Type: application/json" \
+  -d '{"peer_id":"<PEER_ID>","addrs":["/ip4/127.0.0.1/tcp/43001"]}' \
+  -X POST http://localhost:3000/p2p/connect
+
+# Ping 对等点
+curl -x "" http://localhost:3000/p2p/ping/<PEER_ID>
+
+# 拉取匿名合集
+curl -x "" -H "Content-Type: application/json" \
+  -d '{"peer_id":"<PEER_ID>","hash":"<COLLECTION_HASH>"}' \
+  -X POST http://localhost:3000/p2p/fetch
+
+# 向对等点请求文件（广播）
+curl -x "" -H "Content-Type: application/json" \
+  -d '{"hash":"<FILE_HASH>"}' \
+  -X POST http://localhost:3000/p2p/request-file
+
+# WebSocket 连接信息
+curl -x "" http://localhost:3000/p2p/ws/info
+```
+
+### 3.9 任务系统
 
 ```bash
 # 查看任务
@@ -223,15 +283,29 @@ rm -rf go/storage/
 |------|------|------|
 | GET | `/ping` | 健康检查 |
 | GET | `/sha256sum/:sha256` | 按 hash 下载文件 |
+| GET | `/p2p/status` | P2P 状态（relay/hole_punch/ws） |
 | GET | `/p2p/node` | P2P 节点信息 |
 | GET | `/p2p/peers` | 连接的对等点 |
+| GET | `/p2p/discovered` | mDNS/DHT 发现的节点 |
 | GET | `/p2p/ping/:peer_id` | Ping 对等点 |
+| POST | `/p2p/connect` | 手动连接对等点 |
+| POST | `/p2p/announce` | 声明拥有文件 hash |
+| POST | `/p2p/fetch` | 从 P2P 拉取匿名合集 |
+| POST | `/p2p/sync` | 从对等点全量同步 |
+| POST | `/p2p/push` | 向对等点推送合集 |
+| POST | `/p2p/request-file` | 广播文件请求（P2P） |
+| GET | `/p2p/ws/info` | WebSocket 连接信息 |
+| GET | `/ws/transfer` | WebSocket 文件传输 |
 | POST | `/files/upload` | 上传文件 |
 | POST | `/files/register_local` | 注册本地文件 |
 | POST | `/files/register_folder` | 注册文件夹 |
 | GET | `/files/verify/:hash` | 验证文件 |
 | DELETE | `/files/:hash` | 删除文件 |
 | POST | `/files/diff` | 版本差异比较 |
+| POST | `/anon/collections` | 创建匿名合集 |
+| GET | `/anon/collections/:hash` | 获取匿名合集 JSON |
+| GET | `/anon/collections/:hash/entries/*path` | 从匿名合集下载文件 |
+| POST | `/anon/collections/fork` | Fork 匿名合集 |
 | POST | `/collections` | 创建合集 |
 | GET | `/collections/:username` | 列出合集 |
 | GET | `/collections/:username/:coll` | 获取合集详情 |

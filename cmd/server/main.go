@@ -23,8 +23,6 @@ import (
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
 	"peerdrive/internal/service"
-
-	"github.com/gin-gonic/gin"
 )
 
 // @title Peerdrive API
@@ -52,7 +50,9 @@ func main() {
 	}
 	defer p2pSvc.Close()
 	id, addrs := p2pSvc.GetNodeInfo()
-	log.Printf("libp2p 节点已启动: PeerID=%s, 监听地址=%v", id, addrs)
+	if id != "" {
+		log.Printf("libp2p 节点已启动: PeerID=%s, 监听地址=%v", id, addrs)
+	}
 
 	// 初始化存储
 	providerMgr := provider.NewManager(storageDir)
@@ -61,15 +61,8 @@ func main() {
 	// 初始化匿名存储目录（与普通文件同一目录）
 	repository.SetAnonStorageDir(storageDir)
 
-	// 设置路由
+	// 设置路由（内部注入 storageDir/downloader 到 context）
 	r := router.SetupRouter(downloader, p2pSvc, cfg)
-
-	// 注入到 Gin Context
-	r.Use(func(c *gin.Context) {
-		c.Set("storageDir", storageDir)
-		c.Set("downloader", downloader)
-		c.Next()
-	})
 
 	port := ":" + cfg.Port
 

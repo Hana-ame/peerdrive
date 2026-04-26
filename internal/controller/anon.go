@@ -138,3 +138,31 @@ func ForkAnonCollection(c *gin.Context) {
 	}
 	c.JSON(http.StatusCreated, gin.H{"hash": hash})
 }
+
+func CommitAnonCollection(c *gin.Context) {
+	var req struct {
+		SourceHash    string                    `json:"source_hash"`
+		Entries       []model.AnonCollectionEntry `json:"entries"`
+		CommitMessage string                    `json:"commit_message"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	hash, err := anonSvc.CommitCollection(req.SourceHash, req.Entries, req.CommitMessage)
+	if err != nil {
+		if strings.Contains(err.Error(), "source collection not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		if strings.Contains(err.Error(), "invalid") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"hash": hash})
+}

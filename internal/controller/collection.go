@@ -207,7 +207,7 @@ func AddEntry(c *gin.Context) {
 func RemoveEntry(c *gin.Context) {
 	username := c.Param("username")
 	collectionName := c.Param("collection_name")
-	path := c.Param("path")
+	path := strings.TrimPrefix(c.Param("path"), "/")
 	col, err := repository.GetCollection(username, collectionName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

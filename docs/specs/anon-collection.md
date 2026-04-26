@@ -8,6 +8,7 @@
 ```json
 {
   "version": 1,
+  "friendly_name": "my-collection",
   "entries": [
     {"path": "dir/file.txt", "hash": "a1b2c3..."},
     {"path": "dir/other.txt", "hash": "d4e5f6..."}
@@ -25,6 +26,7 @@
 **请求体：**
 ```json
 {
+  "friendly_name": "my-collection",
   "entries": [
     {"path": "relative/path", "hash": "64-hex-chars"}
   ]

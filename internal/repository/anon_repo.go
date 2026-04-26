@@ -69,7 +69,7 @@ func GetAnonCollectionByHash(hash, storageDir string) (*model.AnonCollection, er
 	if err := json.Unmarshal(data, &coll); err != nil {
 		return nil, fmt.Errorf("invalid collection json: %w", err)
 	}
-	if coll.Version != 1 {
+	if coll.Version < 1 {
 		return nil, fmt.Errorf("unsupported collection version: %d", coll.Version)
 	}
 	return &coll, nil
