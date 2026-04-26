@@ -114,6 +114,7 @@ func SetupRouter(
 		anon.GET("/collections", controller.ListAnonCollections)
 		anon.POST("/collections/commit", controller.CommitAnonCollection)
 		anon.GET("/collections/:hash", controller.GetAnonCollection)
+		anon.GET("/collections/:hash.json", controller.GetAnonCollection)
 		anon.GET("/collections/:hash/*filepath", controller.DownloadAnonFile)
 		anon.POST("/collections/fork", controller.ForkAnonCollection)
 	}
