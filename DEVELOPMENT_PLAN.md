@@ -447,3 +447,762 @@ export const registerPeer = (peerId, signedChallenge) => request('POST', '/p2p/r
 | `internal/controller/p2p_collections.go` | GET /p2p/collections |
 | `internal/model/peer.go` | PeerIdentity + PeerPermission |
 | `internal/repository/auth_repo.go` | users 表 CRUD |
+
+---
+
+## 八、逐步实现指南
+
+### Phase 2.1: P2P 合集发现（3天）
+
+#### Day 1: DHT Scan & Cache
+
+**要做什么**：
+1. 在 `internal/service/p2p_discovery.go` 中实现 `DiscoveryService` 结构体
+2. DHT 定时扫描（每 30 秒）查找类型为 `anon_collection` 的文件
+3. 扫描结果缓存在 `p2p_provider_cache` 表中
+4. 返回 `P2PCollectionItem[]` 结构体
+
+**Go 代码结构**：
+```go
+// internal/service/p2p_discovery.go
+package service
+
+import (
+    "context"
+    "sync"
+    "time"
+    "peerdrive/internal/model"
+    "peerdrive/internal/repository"
+)
+
+type DiscoveryService struct {
+    p2p      *P2PService
+    mu       sync.RWMutex
+    cache    map[string]*P2PCollectionItem
+    stopCh   chan struct{}
+}
+
+type P2PCollectionItem struct {
+    Hash           string   `json:"hash"`
+    NamePreview    string   `json:"name_preview"`
+    EntryCount     int      `json:"entry_count"`
+    ProviderCount  int      `json:"provider_count"`
+    DiscoveredAt   string   `json:"discovered_at"`
+    Tags           []string `json:"tags,omitempty"`
+}
+
+func NewDiscoveryService(p2p *P2PService) *DiscoveryService {
+    return &DiscoveryService{
+        p2p:    p2p,
+        cache:  make(map[string]*P2PCollectionItem),
+        stopCh: make(chan struct{}),
+    }
+}
+
+func (d *DiscoveryService) Start(ctx context.Context) {
+    go d.scanLoop(ctx)
+}
+
+func (d *DiscoveryService) scanLoop(ctx context.Context) {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+    for {
+        select {
+        case <-ticker.C:
+            d.scan(ctx)
+        case <-d.stopCh:
+            return
+        case <-ctx.Done():
+            return
+        }
+    }
+}
+
+func (d *DiscoveryService) scan(ctx context.Context) {
+    // 1. 查询本地已知的 anon_collection 类型的 hash
+    rows, err := repository.DB.Query(
+        `SELECT hash FROM file_meta WHERE type = ?`, repository.FileTypeAnonCollection)
+    if err != nil { return }
+    defer rows.Close()
+    
+    for rows.Next() {
+        var hash string
+        rows.Scan(&hash)
+        
+        // 2. 通过 DHT 查找 providers
+        providers, err := d.p2p.FindProviders(hash)
+        if err != nil || len(providers) == 0 { continue }
+        
+        // 3. 尝试从第一个 provider 拉取合集 JSON 获取 metadata
+        coll, err := d.p2p.FetchCollection(ctx, hash, providers)
+        if err != nil { continue }
+        
+        // 4. 构建 item 并缓存
+        item := &P2PCollectionItem{
+            Hash:          hash,
+            NamePreview:   coll.FriendlyName,
+            EntryCount:    len(coll.Entries),
+            ProviderCount: len(providers),
+            DiscoveredAt:  time.Now().UTC().Format(time.RFC3339),
+            Tags:          coll.Tags,
+        }
+        // name_preview from entries
+        if item.NamePreview == "" && len(coll.Entries) > 0 {
+            names := make([]string, 0, 3)
+            for i, e := range coll.Entries {
+                if i >= 3 { break }
+                names = append(names, e.Path)
+            }
+            item.NamePreview = strings.Join(names, ", ")
+        }
+        
+        d.mu.Lock()
+        d.cache[hash] = item
+        d.mu.Unlock()
+    }
+}
+
+func (d *DiscoveryService) GetCollections() []P2PCollectionItem {
+    d.mu.RLock()
+    defer d.mu.RUnlock()
+    result := make([]P2PCollectionItem, 0, len(d.cache))
+    for _, item := range d.cache {
+        result = append(result, *item)
+    }
+    return result
+}
+```
+
+**数据库迁移**：
+```sql
+-- internal/repository/db.go 新增
+CREATE TABLE IF NOT EXISTS p2p_provider_cache (
+    hash TEXT PRIMARY KEY,
+    providers TEXT,        -- JSON array of peer info
+    collection_data TEXT,  -- JSON of collection metadata
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### Day 2: HTTP 端点 + 前端集成
+
+**要做什么**：
+1. 实现 `GET /p2p/collections` 端点
+2. 实现 `GET /p2p/collections/:hash` 端点
+3. 在 Plaza.jsx 中集成 P2P 合集列表
+
+**Go controller**：
+```go
+// internal/controller/p2p_collections.go
+func ListP2PCollections(c *gin.Context) {
+    items := discoverySvc.GetCollections()
+    c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func GetP2PCollection(c *gin.Context) {
+    hash := c.Param("hash")
+    // 尝试本地 → 失败则 P2P 拉取
+    coll, err := anonSvc.GetCollectionByHash(hash)
+    if err != nil {
+        ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+        defer cancel()
+        coll, err = p2pSvc.FetchCollection(ctx, hash, nil)
+        if err != nil {
+            c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
+            return
+        }
+    }
+    c.JSON(http.StatusOK, coll)
+}
+```
+
+**前端 Plaza.jsx 集成**：
+```jsx
+// 在 loadAll() 中新增 P2P 合集加载
+const loadAll = async () => {
+    setLoading(true);
+    try {
+        const [anon, pub, p2p] = await Promise.all([
+            listAnonCollections().catch(() => []),
+            listPublicCollections().catch(() => ({ collections: [] })),
+            api.discoverP2PCollections().catch(() => ({ data: [] })),
+        ]);
+        const merged = [
+            ...(Array.isArray(anon) ? anon.map(c => ({ ...c, _type: 'anon' })) : []),
+            ...((pub.collections || pub.data || []).map(c => ({ ...c, _type: 'public' }))),
+            ...((p2p.data || []).map(c => ({ ...c, _type: 'p2p', hash: c.hash, friendly_name: c.name_preview }))),
+        ];
+        setCollections(merged);
+    } catch { setCollections([]); }
+    setLoading(false);
+};
+// P2P 合集卡片增加标识
+{c._type === 'p2p' && (
+    <p className="text-[10px] text-purple-400/60 mt-2 flex items-center gap-1">
+        <span>🌐</span> P2P 网络 · {c.provider_count || '?'} 节点
+    </p>
+)}
+```
+
+#### Day 3: 缓存优化 + 测试
+
+**要做什么**：
+1. 实现 `AnnounceHash` 异步化
+2. 实现 provider 缓存过期策略
+3. 测试双节点环境下的 P2P 合集发现
+
+**AnnounceHash 异步化**：
+```go
+func (p *P2PService) AnnounceHashAsync(hash string) {
+    go func() {
+        ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+        defer cancel()
+        if err := p.AnnounceHash(hash); err != nil {
+            logf("announce %s failed: %v", hash, err)
+        }
+    }()
+}
+```
+
+**测试场景**：
+```
+节点 A (public IP)   ←→   节点 B (NAT behind)
+  1. A 创建合集 → AnnounceHash → DHT Provide
+  2. B 启动 DiscoveryService → DHT scan
+  3. B GET /p2p/collections → 返回 A 的合集
+  4. B 点击合集 → GET /p2p/collections/:hash → 从 A 拉取
+  5. B 💾 保存 → 注册到本地 file_meta
+```
+
+---
+
+### Phase 2.2: 前端 P2P UI（2天）
+
+#### Day 1: P2PStatus 组件升级
+
+**要做什么**：
+1. 重新设计 P2PStatus.jsx — 从纯文本表格升级为可视化面板
+2. 增加节点信息卡片、传输进度、DHT 搜索
+
+**组件结构**：
+```jsx
+// components/P2PStatus.jsx 重写
+export default function P2PStatus() {
+  const [status, setStatus] = useState(null);
+  const [transfers, setTransfers] = useState([]);
+  const [dhtQuery, setDhtQuery] = useState('');
+  const [dhtResults, setDhtResults] = useState([]);
+
+  useEffect(() => {
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchStatus = async () => {
+    try { setStatus(await api.getP2PStatus()); } catch {}
+  };
+
+  // UI sections:
+  return (
+    <div className="space-y-4">
+      {/* 1. 节点状态卡片 */}
+      <NodeCard status={status} />
+
+      {/* 2. 连接对等方列表 */}
+      <PeerList peers={status?.peers} />
+
+      {/* 3. DHT 搜索 */}
+      <DHTSearch query={dhtQuery} results={dhtResults} onSearch={handleDHTSearch} />
+
+      {/* 4. 传输进度 */}
+      <TransferPanel transfers={transfers} />
+    </div>
+  );
+}
+```
+
+#### Day 2: 合集 P2P 来源指示器
+
+**要做什么**：
+1. AnonExplorer 中标记 P2P 来源
+2. 远程合集添加下载进度
+3. 公告按钮功能
+
+**AnonExplorer 集成**：
+```jsx
+// 在 collection header 中增加来源标识
+{source === 'p2p' && (
+  <span className="text-xs text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded">
+    🌐 P2P · {providerCount} 节点
+  </span>
+)}
+{source === 'local' && (
+  <span className="text-xs text-green-400 bg-green-400/10 px-2 py-0.5 rounded">
+    ✓ 本地
+  </span>
+)}
+```
+
+---
+
+### Phase 2.3-2.4: AuthKey + JWT 认证（4天）
+
+#### 实现清单
+
+**要做什么**：
+```
+├── internal/middleware/auth.go
+│     ├── AuthMiddleware() — Bearer Token 校验
+│     └── OptionalAuth() — 可选认证（用于读操作）
+├── internal/repository/auth_repo.go
+│     ├── CreateUser(username, passwordHash, authkeyHash)
+│     ├── GetUserByUsername(username)
+│     ├── GetUserByAuthKey(authkeyHash)
+│     └── UpdateLastLogin(username)
+├── internal/service/auth_service.go
+│     ├── Register(username, password) → (user, authkey)
+│     ├── Login(username, password) → JWT token
+│     ├── ValidateAuthKey(key) → username
+│     └── GenerateJWT(username) → token string
+├── internal/controller/auth.go
+│     ├── POST /auth/register
+│     ├── POST /auth/login
+│     └── GET /auth/me
+└── internal/router/router.go
+      ├── authGroup := r.Group("/auth")
+      ├── authGroup.POST("/register", controller.Register)
+      ├── authGroup.POST("/login", controller.Login)
+      └── authGroup.GET("/me", controller.GetMe)
+```
+
+**AuthService 核心代码**：
+```go
+// internal/service/auth_service.go
+package service
+
+import (
+    "crypto/rand"
+    "crypto/sha256"
+    "encoding/hex"
+    "errors"
+    "time"
+
+    "github.com/golang-jwt/jwt/v5"
+    "golang.org/x/crypto/bcrypt"
+    "peerdrive/internal/repository"
+)
+
+var (
+    ErrUserExists     = errors.New("username already taken")
+    ErrInvalidCreds   = errors.New("invalid username or password")
+    ErrInvalidAuthKey = errors.New("invalid auth key")
+)
+
+type AuthService struct {
+    jwtSecret []byte
+}
+
+func NewAuthService(secret string) *AuthService {
+    return &AuthService{jwtSecret: []byte(secret)}
+}
+
+func (s *AuthService) Register(username, password string) (string, error) {
+    // 1. 检查用户名是否已存在
+    existing, _ := repository.GetUserByUsername(username)
+    if existing != nil {
+        return "", ErrUserExists
+    }
+
+    // 2. bcrypt 密码
+    hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+    if err != nil {
+        return "", err
+    }
+
+    // 3. 生成 32 字节 authkey
+    authkey := make([]byte, 32)
+    rand.Read(authkey)
+    authkeyStr := hex.EncodeToString(authkey)
+
+    // 4. SHA256(authkey) 存储
+    authkeyHash := sha256Hex(authkey)
+
+    // 5. 写入数据库
+    if err := repository.CreateUser(username, string(hash), authkeyHash); err != nil {
+        return "", err
+    }
+
+    return authkeyStr, nil
+}
+
+func (s *AuthService) Login(username, password string) (string, error) {
+    user, err := repository.GetUserByUsername(username)
+    if err != nil || user == nil {
+        return "", ErrInvalidCreds
+    }
+
+    if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+        return "", ErrInvalidCreds
+    }
+
+    repository.UpdateLastLogin(username)
+
+    return s.GenerateJWT(username)
+}
+
+func (s *AuthService) GenerateJWT(username string) (string, error) {
+    claims := jwt.MapClaims{
+        "username": username,
+        "exp":      time.Now().Add(7 * 24 * time.Hour).Unix(),
+        "iat":      time.Now().Unix(),
+    }
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    return token.SignedString(s.jwtSecret)
+}
+
+func (s *AuthService) ValidateAuthKey(key string) (string, error) {
+    authkeyHash := sha256Hex([]byte(key))
+    user, err := repository.GetUserByAuthKey(authkeyHash)
+    if err != nil || user == nil {
+        return "", ErrInvalidAuthKey
+    }
+    return user.Username, nil
+}
+
+func sha256Hex(data []byte) string {
+    h := sha256.Sum256(data)
+    return hex.EncodeToString(h[:])
+}
+```
+
+**AuthMiddleware**：
+```go
+// internal/middleware/auth.go
+package middleware
+
+import (
+    "net/http"
+    "strings"
+    "github.com/gin-gonic/gin"
+    "github.com/golang-jwt/jwt/v5"
+    "peerdrive/internal/service"
+)
+
+func AuthRequired(authSvc *service.AuthService) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        header := c.GetHeader("Authorization")
+        if header == "" {
+            c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
+            return
+        }
+
+        // Bearer <token>
+        parts := strings.SplitN(header, " ", 2)
+        if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+            c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format"})
+            return
+        }
+        token := parts[1]
+
+        // 尝试 JWT 解析
+        if username, ok := parseJWT(token, authSvc); ok {
+            c.Set("username", username)
+            c.Next()
+            return
+        }
+
+        // 尝试 AuthKey 校验
+        if username, err := authSvc.ValidateAuthKey(token); err == nil {
+            c.Set("username", username)
+            c.Next()
+            return
+        }
+
+        c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+    }
+}
+```
+
+**路由保护**：
+```go
+// router.go
+authGroup := r.Group("/auth")
+{
+    authGroup.POST("/register", controller.Register)
+    authGroup.POST("/login", controller.Login)
+}
+
+protected := r.Group("")
+protected.Use(middleware.AuthRequired(authSvc))
+{
+    protected.POST("/collections", controller.CreateCollection)
+    protected.POST("/collections/:username/:collection_name/commit", controller.CommitCollection)
+    protected.DELETE("/files/:hash", controller.DeleteFile)
+    protected.POST("/actions/merge", controller.MergeFromSource)
+    protected.POST("/actions/fork", controller.ForkCollection)
+}
+```
+
+---
+
+### Phase 2.5: Relay 优化（2天）
+
+**要做什么**：
+1. 实现传输队列 (TransferQueue)
+2. 实现断点续传
+3. 实现 relay 自动故障转移
+
+**TransferQueue 实现**：
+```go
+// internal/service/transfer_queue.go
+package service
+
+import (
+    "context"
+    "sync"
+)
+
+type Priority int
+const (
+    PriorityHigh   Priority = 0
+    PriorityNormal Priority = 1
+    PriorityLow    Priority = 2
+)
+
+type TransferTask struct {
+    ID         string
+    Hash       string
+    PeerID     string
+    Priority   Priority
+    Progress   int64
+    Total      int64
+    Status     string // "pending","active","paused","done","failed"
+    ResumeFrom int64
+    CreatedAt  int64
+}
+
+type TransferQueue struct {
+    mu            sync.Mutex
+    pending       []*TransferTask
+    active        map[string]*TransferTask
+    maxConcurrent int
+    onProgress    func(task *TransferTask)
+}
+
+func NewTransferQueue(maxConcurrent int) *TransferQueue {
+    return &TransferQueue{
+        pending:       make([]*TransferTask, 0),
+        active:        make(map[string]*TransferTask),
+        maxConcurrent: maxConcurrent,
+    }
+}
+
+func (q *TransferQueue) Enqueue(task *TransferTask) {
+    q.mu.Lock()
+    defer q.mu.Unlock()
+    q.pending = append(q.pending, task)
+    q.tryProcess()
+}
+
+func (q *TransferQueue) tryProcess() {
+    for len(q.active) < q.maxConcurrent && len(q.pending) > 0 {
+        task := q.pending[0]
+        q.pending = q.pending[1:]
+        task.Status = "active"
+        q.active[task.ID] = task
+        go q.executeTask(task)
+    }
+}
+
+func (q *TransferQueue) executeTask(task *TransferTask) {
+    // 实际传输逻辑——分块拉取 + 进度回调
+    defer func() {
+        q.mu.Lock()
+        delete(q.active, task.ID)
+        q.mu.Unlock()
+        q.tryProcess()
+    }()
+    // ... 调用 p2pSvc.FetchFile with progress callback
+}
+```
+
+**Relay 故障转移**：
+```go
+func (p *P2PService) ConnectWithFallback(ctx context.Context, peerID peer.ID) error {
+    strategies := []func(context.Context, peer.ID) error{
+        p.tryDirectConnect,
+        p.tryHolePunch,
+        p.tryRelayConnect,
+    }
+    
+    for _, strategy := range strategies {
+        if err := strategy(ctx, peerID); err == nil {
+            return nil
+        }
+    }
+    return fmt.Errorf("all connection strategies failed for %s", peerID)
+}
+```
+
+---
+
+## 九、安全考量
+
+### AuthKey 安全
+- authkey 在 DB 中存储 SHA256（不存储明文）
+- 支持重新生成 authkey（旧 key 立即失效）
+- 支持多个 authkey（便于切换客户端）
+
+### JWT 安全
+- Secret 通过环境变量注入，不硬编码
+- 短有效期（7 天），支持 refresh token
+- Claims 包含 username + exp + iat
+- 拒绝算法混淆攻击——只允许 HS256
+
+### P2P 安全
+- 未认证 peer 拒绝自动同步
+- 文件 hash 校验防篡改
+- 限制同时传输文件数量防 DoS
+
+---
+
+## 十、前端认证流程
+
+```
+Settings.jsx 认证面板:
+  ┌─────────────────────────────┐
+  │ 认证状态: [未登录]          │
+  │                             │
+  │ 用户名: [________]         │
+  │ 密码:   [________]         │
+  │ [注册] [登录]              │
+  │                             │
+  │ ── 或使用 AuthKey ──      │
+  │ AuthKey: [____________]    │
+  │ [保存 Key]                 │
+  └─────────────────────────────┘
+
+认证流程:
+  1. 用户输入 username + password → POST /auth/login
+  2. 后端返回 JWT token
+  3. 前端存储: localStorage.setItem('peerdrive_token', token)
+  4. 后续请求: api.js 的 request() 函数自动附加 Authorization header
+  5. Token 过期 → 自动跳转登录页
+
+api.js 改造:
+  function request(method, path, body = null) {
+    const opts = { method, headers: {} };
+    const token = localStorage.getItem('peerdrive_token');
+    const authkey = localStorage.getItem('peerdrive_auth_key');
+    if (token) opts.headers['Authorization'] = `Bearer ${token}`;
+    else if (authkey) opts.headers['Authorization'] = `Bearer ${authkey}`;
+    if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    ...
+  }
+```
+
+---
+
+## 十一、数据库迁移脚本
+
+```sql
+-- migration_002_auth.sql
+ALTER TABLE users ADD COLUMN last_login DATETIME;
+ALTER TABLE users ADD COLUMN jwt_version INTEGER DEFAULT 1;
+
+-- migration_003_p2p.sql
+CREATE TABLE IF NOT EXISTS p2p_provider_cache (
+    hash TEXT PRIMARY KEY,
+    providers TEXT,
+    collection_data TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS peer_identities (
+    peer_id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    verified_at DATETIME,
+    FOREIGN KEY (username) REFERENCES users(username)
+);
+
+CREATE TABLE IF NOT EXISTS peer_permissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    peer_id TEXT NOT NULL,
+    permission TEXT NOT NULL,
+    FOREIGN KEY (peer_id) REFERENCES peer_identities(peer_id),
+    UNIQUE(peer_id, permission)
+);
+```
+
+---
+
+## 十二、目录结构（Phase 2 完成后）
+
+```
+go/
+├── internal/
+│   ├── config/config.go          (新增 Auth 相关 env vars)
+│   ├── controller/
+│   │   ├── auth.go               (新建: register/login/me)
+│   │   ├── p2p_collections.go    (新建: P2P collection discovery)
+│   │   └── ...
+│   ├── middleware/
+│   │   └── auth.go                (新建: AuthMiddleware + JWTAuth)
+│   ├── model/
+│   │   ├── peer.go                (新建: PeerIdentity + Permission)
+│   │   └── ...
+│   ├── repository/
+│   │   ├── auth_repo.go           (新建: users 表 CRUD)
+│   │   └── db.go                  (修改: 新增表 migration)
+│   ├── service/
+│   │   ├── auth_service.go        (新建: Register/Login/JWT)
+│   │   ├── p2p_discovery.go       (新建: DHT scan + cache)
+│   │   ├── transfer_queue.go      (新建: 传输队列)
+│   │   └── p2p.go                 (修改: 异步 Announce + 分块)
+│   └── router/
+│       └── router.go               (修改: 新增路由组)
+```
+
+---
+
+## 十三、前端新增/修改文件
+
+```
+react/src/
+├── api.js                          (修改: 新增 auth + p2p 端点)
+├── pages/
+│   ├── Settings.jsx                (修改: 认证面板)
+│   ├── Plaza.jsx                   (修改: P2P 合集集成)
+│   ├── AnonExplorer.jsx            (修改: P2P 来源指示器)
+│   └── ...
+├── components/
+│   ├── P2PStatus.jsx               (重写: 可视化面板)
+│   ├── AuthPanel.jsx               (新建: 注册/登录面板)
+│   └── TransferProgress.jsx        (新建: 传输进度条)
+└── ...
+```
+
+---
+
+## 十四、全部 phases 完成后的 TODO 检查清单
+
+- [ ] 两个节点能通过 mDNS 发现彼此
+- [ ] 两个节点能通过 DHT 发现彼此的合集
+- [ ] Plaza 公开合集 Tab 能显示 P2P 合集
+- [ ] P2P 合集能通过 DHT 拉取到本地
+- [ ] 远程文件通过 WS relay 中转传输
+- [ ] 大文件分块传输 + 进度回调
+- [ ] 断点续传：断开后从上次位置继续
+- [ ] 用户能注册账号（bcrypt 密码）
+- [ ] 用户能登录并获取 JWT token
+- [ ] 受保护的 API 端点要求 Authorization header
+- [ ] AuthKey 校验：Bearer key → 识别用户
+- [ ] Peer 身份绑定到注册用户
+- [ ] Verified peer 自动接受同步请求
+- [ ] P2PStatus 面板显示节点状态 + 传输进度
+- [ ] Settings 页有完整的认证面板
+- [ ] Frontend 自动携带 token 发起请求
+- [ ] `go build ./...` 编译通过
+- [ ] `npm run build` 编译通过
+- [ ] 双节点集成测试通过
