@@ -110,7 +110,14 @@ export default function Plaza() {
                 <p className="text-xs">试试搜索用户名或合集名称</p>
               </div>
             ) : (
-              <p>暂无公开合集</p>
+              <div>
+                <p className="mb-2">暂无公开合集</p>
+                <p className="text-gray-500 text-xs mb-3">公开合集由 Peerdrive 注册中心或 P2P 网络提供</p>
+                <div className="flex justify-center gap-3 text-sm">
+                  <button onClick={() => navigate('/anon/create')} className="text-blue-400 hover:underline">创建合集并公开</button>
+                  <button onClick={() => { setTab('search'); }} className="text-blue-400 hover:underline">搜索公开合集</button>
+                </div>
+              </div>
             )}
           </div>
         ) : (

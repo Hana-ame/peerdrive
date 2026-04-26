@@ -49,6 +49,12 @@ export default function AnonCreator() {
       setFname((c.friendly_name || '') + ' (fork)');
       setOpenHash(navState.sourceHash || '');
       nav('/anon/create', { replace: true });
+    } else if (navState.draftFrom) {
+      const d = navState.draftFrom;
+      setEntries(d.entries || []);
+      setFname(d.friendlyName || '');
+      setSavedHash('');
+      nav('/anon/create', { replace: true });
     } else if (navState.editFrom) {
       const c = navState.editFrom;
       setEntries(c.entries || []);

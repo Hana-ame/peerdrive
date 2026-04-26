@@ -108,22 +108,15 @@ export default function FileManager() {
 
   const totalSize = files.reduce((s, f) => s + (f.size || 0), 0);
 
-  const handleCreateCollection = async () => {
+  const handleCreateCollection = () => {
     if (selectedEntries.length === 0) return alert('请先选择文件');
-    const name = prompt('合集名称:', selectedEntries[0].path || 'collection');
-    if (!name) return;
-    try {
-      const res = await api.createAnonCollection(selectedEntries, name);
-      setSelected({});
-      navigate(`/anon/collections/${res.hash}`);
-    } catch (e) { alert(`创建失败: ${e.message}`); }
+    const name = selectedEntries[0].path || 'collection';
+    navigate('/anon/create', { state: { draftFrom: { entries: selectedEntries, friendlyName: name } } });
+    setSelected({});
   };
 
-  const handleCreateFromFile = async (file) => {
-    try {
-      const res = await api.createAnonCollection([{ path: file.filename, hash: file.hash }], file.filename);
-      navigate(`/anon/collections/${res.hash}`);
-    } catch (e) { alert(`创建失败: ${e.message}`); }
+  const handleCreateFromFile = (file) => {
+    navigate('/anon/create', { state: { draftFrom: { entries: [{ path: file.filename, hash: file.hash }], friendlyName: file.filename } } });
   };
 
   const browseDir = async (dir) => {
@@ -172,31 +165,24 @@ export default function FileManager() {
     }
     setShowFileBrowser(false);
     setSelectedFiles({});
-    if (regTarget === 'collection' && entries.length > 0) {
-      const name = entries[0].path || 'collection';
-      try {
-        const res = await api.createAnonCollection(entries, name);
-        navigate(`/anon/collections/${res.hash}`);
-        return;
-      } catch (e) { alert(`创建合集失败: ${e.message}`); }
-    }
     loadFiles();
+    if (regTarget === 'collection' && entries.length > 0) {
+      navigate('/anon/create', { state: { draftFrom: { entries, friendlyName: entries[0].path || 'collection' } } });
+    }
   };
 
   const handleRegisterCurrentFolder = async () => {
     try {
       const res = await api.registerFolder(currentDir);
       const registered = res.registered || [];
+      setShowFileBrowser(false);
       if (regTarget === 'collection' && registered.length > 0) {
         const entries = registered.map(r => ({ path: r.filename, hash: r.hash }));
         const name = currentDir.split('/').pop() || 'collection';
-        const col = await api.createAnonCollection(entries, name);
-        setShowFileBrowser(false);
-        navigate(`/anon/collections/${col.hash}`);
+        navigate('/anon/create', { state: { draftFrom: { entries, friendlyName: name } } });
         return;
       }
       alert(`注册完成: ${registered.length} 个文件`);
-      setShowFileBrowser(false);
       loadFiles();
     } catch (e) { alert(`注册失败: ${e.message}`); }
   };
@@ -292,11 +278,7 @@ export default function FileManager() {
 
   const handleCreateFromDir = (dirName, dirFiles) => {
     const entries = dirFiles.map(f => ({ path: f.filename, hash: f.hash }));
-    const name = prompt('合集名称:', dirName);
-    if (!name) return;
-    api.createAnonCollection(entries, name)
-      .then(res => navigate(`/anon/collections/${res.hash}`))
-      .catch(e => alert(`创建失败: ${e.message}`));
+    navigate('/anon/create', { state: { draftFrom: { entries, friendlyName: dirName } } });
   };
 
   const tree = buildTree(files);
