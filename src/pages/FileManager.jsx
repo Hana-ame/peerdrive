@@ -224,12 +224,20 @@ export default function FileManager() {
     return root;
   };
 
+  const collectAllHashes = (node) => {
+    const hashes = node.files.map(f => f.hash);
+    for (const name of Object.keys(node.dirs)) {
+      hashes.push(...collectAllHashes(node.dirs[name]));
+    }
+    return hashes;
+  };
+
   const renderTree = (node, depth) => {
     const sortedDirs = Object.keys(node.dirs).sort();
     return sortedDirs.map(name => {
       const dir = node.dirs[name];
       const isExpanded = expanded[name];
-      const allHashes = dir.files.map(f => f.hash);
+      const allHashes = collectAllHashes(dir);
       const dirSelected = allHashes.length > 0 && allHashes.every(h => selected[h]);
       return (
         <div key={name}>
@@ -248,7 +256,7 @@ export default function FileManager() {
             />
             <span className="mr-2 text-base shrink-0">📁</span>
             <span className="text-yellow-400 text-sm truncate flex-1">{name}</span>
-            <span className="text-xs text-gray-600 mr-3">{dir.files.length} 个</span>
+            <span className="text-xs text-gray-600 mr-3">{allHashes.length} 个</span>
             <button
               onClick={() => handleCreateFromDir(name, dir.files)}
               className="hidden group-hover:inline-block bg-teal-600 hover:bg-teal-500 px-2 py-0.5 rounded text-[10px] shrink-0"
