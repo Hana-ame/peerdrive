@@ -177,14 +177,8 @@ const FREE_LLM_MODELS = [
 ];
 export { DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_MODEL, DEFAULT_LLM_BODY, FREE_LLM_MODELS };
 
-const REG_SERVER = 'https://reg.moonchan.xyz';
 export function uploadConsent() {
-  const username = localStorage.getItem('peerdrive_username') || '';
-  return fetch(`${REG_SERVER}/api/v2/consent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, agreed: true, timestamp: Date.now() }),
-  }).catch(() => {});
+  localStorage.setItem('peerdrive_consent', JSON.stringify({ agreed: true, timestamp: Date.now() }));
 }
 
 /* ---- alias exports for legacy usage ---- */

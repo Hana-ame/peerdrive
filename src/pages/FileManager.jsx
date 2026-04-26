@@ -397,7 +397,7 @@ export default function FileManager() {
                 <div key={f.hash} className="flex items-center px-6 py-2.5 border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors group">
                   <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded mr-3 shrink-0" />
                   <span className="mr-3 text-lg shrink-0">{extIcon(f.mime_type)}</span>
-                  <span className="text-sm text-blue-300 truncate flex-1 min-w-0">{f.filename}</span>
+                  <a href={api.getDownloadUrl(f.hash)} className="text-sm text-blue-300 truncate flex-1 min-w-0 hover:text-blue-100 hover:underline cursor-pointer" title={`下载 ${f.filename}`}>{f.filename}</a>
                   <span className="text-xs text-gray-400 w-20 text-right shrink-0 mr-6">{formatSize(f.size)}</span>
                   <span className="text-xs text-gray-500 w-20 text-right shrink-0 mr-6">{(f.mime_type || '').split('/').pop() || '-'}</span>
                   <span className="text-xs text-gray-500 w-36 text-right shrink-0 mr-4">{(f.created_at || '').replace('T', ' ').substring(0, 16)}</span>

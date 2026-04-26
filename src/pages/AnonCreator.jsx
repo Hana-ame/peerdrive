@@ -36,7 +36,7 @@ function fmtSize(b) {
 export default function AnonCreator() {
   const nav = useNavigate();
   const { setPageContext } = useContext(PageContext);
-  const { state: navState = {} } = useLocation();
+  const navState = useLocation().state || {};
 
   const [split, setSplit] = useState(50);
   const [dragging, setDragging] = useState(false);
