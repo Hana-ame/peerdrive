@@ -244,7 +244,7 @@ export default function FileManager() {
                 for (const h of allHashes) next[h] = !dirSelected;
                 setSelected(next);
               }}
-              className="rounded mr-2 shrink-0"
+              className="rounded mr-2 shrink-0 accent-cyan-500 w-4 h-4"
             />
             <span className="mr-2 text-base shrink-0">📁</span>
             <span className="text-yellow-400 text-sm truncate flex-1">{name}</span>
@@ -258,7 +258,7 @@ export default function FileManager() {
             <div>
               {dir.files.length > 0 && dir.files.map(f => (
                 <div key={f.hash} className="flex items-center py-2 px-2 rounded hover:bg-gray-800/50 group" style={{ marginLeft: `${(depth + 1) * 20 + 22}px` }}>
-                  <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded mr-2 shrink-0" />
+                  <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded mr-2 shrink-0 accent-cyan-500 w-4 h-4" />
                   <span className="mr-2 text-base shrink-0">{extIcon(f.mime_type)}</span>
                   <span className="text-sm text-blue-300 truncate flex-1">{f.filename}</span>
                   <span className="text-xs text-gray-500 w-16 text-right shrink-0 mr-3">{formatSize(f.size)}</span>
@@ -395,7 +395,7 @@ export default function FileManager() {
               </div>
               {filtered.map(f => (
                 <div key={f.hash} className="flex items-center px-6 py-2.5 border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors group">
-                  <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded mr-3 shrink-0" />
+                  <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded mr-3 shrink-0 accent-cyan-500 w-4 h-4" />
                   <span className="mr-3 text-lg shrink-0">{extIcon(f.mime_type)}</span>
                   <a href={api.getDownloadUrl(f.hash)} className="text-sm text-blue-300 truncate flex-1 min-w-0 hover:text-blue-100 hover:underline cursor-pointer" title={`下载 ${f.filename}`}>{f.filename}</a>
                   <span className="text-xs text-gray-400 w-20 text-right shrink-0 mr-6">{formatSize(f.size)}</span>
