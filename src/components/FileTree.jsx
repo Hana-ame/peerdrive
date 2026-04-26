@@ -68,7 +68,9 @@ export default function FileTree({ entries, entryActions }) {
     setNewFolderName('');
     setShowNewFolder(false);
   };
-  const openNewFolder = () => { setShowNewFolder(true); setNewFolderName(''); };
+  const openNewFolder = () => {
+    entryActions?.onNewFolder?.('新建文件夹');
+  };
 
   const renderEntries = (nodes, depth, parentPath) => {
     const rows = [];

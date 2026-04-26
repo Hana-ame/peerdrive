@@ -318,6 +318,9 @@ export default function FileManager() {
             </div>
             <div className="flex items-center space-x-2">
               {selCount > 0 && (
+                <span className="text-sm text-cyan-400 bg-cyan-400/10 px-3 py-1 rounded-full font-medium">已选择 {selCount} 个文件</span>
+              )}
+              {selCount > 0 && (
                 <button onClick={handleCreateCollection} className="bg-teal-600 hover:bg-teal-500 px-3 py-1.5 rounded text-sm font-medium">
                   创建合集 ({selCount})
                 </button>
@@ -403,7 +406,7 @@ export default function FileManager() {
               </div>
               {filtered.map(f => (
                 <div key={f.hash} className="flex items-center px-6 py-2.5 border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors group">
-                  <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded mr-3 shrink-0 accent-cyan-500 w-4 h-4" />
+                  <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded mr-3 shrink-0 accent-cyan-500 w-5 h-5" />
                   <span className="mr-3 text-lg shrink-0">{extIcon(f.mime_type)}</span>
                   <a href={api.getDownloadUrl(f.hash)} className="text-sm text-blue-300 truncate flex-1 min-w-0 hover:text-blue-100 hover:underline cursor-pointer" title={`下载 ${f.filename}`}>{f.filename}</a>
                   <span className="text-xs text-gray-400 w-20 text-right shrink-0 mr-6">{formatSize(f.size)}</span>
