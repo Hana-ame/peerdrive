@@ -48,14 +48,15 @@ export default function AnonCreator() {
       setEntries(c.entries || []);
       setFname((c.friendly_name || '') + ' (fork)');
       setOpenHash(navState.sourceHash || '');
-      nav.replace('/anon/create', {});
+      nav('/anon/create', { replace: true });
     } else if (navState.editFrom) {
       const c = navState.editFrom;
       setEntries(c.entries || []);
       setFname(c.friendly_name || '');
       setOpenHash(navState.savedHash || '');
       setSavedHash(navState.savedHash || '');
-      nav.replace('/anon/create', {});
+      nav('/anon/create', { replace: true });
+
     }
   }, []);
 
