@@ -467,7 +467,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/anon/collections/{hash}/entries/{filepath}": {
+        "/anon/collections/{hash}/{filepath}": {
             "get": {
                 "description": "Download a specific file entry from an anonymous collection by hash and file path.",
                 "produces": [

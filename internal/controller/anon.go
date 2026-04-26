@@ -78,7 +78,7 @@ func GetAnonCollection(c *gin.Context) {
 // @Param        filepath  path  string  true  "File path within collection"
 // @Success      200  {file}  binary  "File content"
 // @Failure      404  {object}  map[string]string  "Collection or file not found"
-// @Router       /anon/collections/{hash}/entries/{filepath} [get]
+// @Router       /anon/collections/{hash}/{filepath} [get]
 func DownloadAnonFile(c *gin.Context) {
 	hash := c.Param("hash")
 	filePath := strings.TrimPrefix(c.Param("filepath"), "/")
