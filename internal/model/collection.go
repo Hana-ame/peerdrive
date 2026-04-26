@@ -11,11 +11,12 @@
 package model
 
 type Collection struct {
-	ID             int      `db:"id" json:"id"`
-	Username       string   `db:"username" json:"username"`
-	CollectionName string   `db:"collection_name" json:"collection_name"`
-	CurrentHash    *string  `db:"current_hash" json:"current_hash"`
-	CreatedAt      string   `db:"created_at" json:"created_at"`
+	ID             int     `db:"id" json:"id"`
+	Username       string  `db:"username" json:"username"`
+	CollectionName string  `db:"collection_name" json:"collection_name"`
+	CurrentHash    *string `db:"current_hash" json:"current_hash"`
+	Visibility     string  `db:"visibility" json:"visibility"`
+	CreatedAt      string  `db:"created_at" json:"created_at"`
 }
 
 type CollectionEntry struct {

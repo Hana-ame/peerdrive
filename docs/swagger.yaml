@@ -734,6 +734,75 @@ paths:
       summary: Rollback collection to a previous version
       tags:
       - collections
+  /collections/{username}/{collection_name}/visibility:
+    post:
+      consumes:
+      - application/json
+      description: Change the visibility of a collection (public, unlisted, private)
+      parameters:
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      - description: Collection name
+        in: path
+        name: collection_name
+        required: true
+        type: string
+      - description: 'Visibility: public|unlisted|private'
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            visibility:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: ok
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Set collection visibility
+      tags:
+      - collections
+  /collections/public:
+    get:
+      description: Returns all collections with visibility = 'public', optionally
+        filtered by search query
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: data array of collections
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List all public collections
+      tags:
+      - collections
   /collections/search:
     get:
       description: Search collections by username or collection name

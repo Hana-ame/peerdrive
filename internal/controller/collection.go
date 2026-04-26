@@ -24,6 +24,7 @@
 package controller
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
@@ -49,17 +50,18 @@ func CreateCollection(c *gin.Context) {
 	var req struct {
 		Username       string `json:"username"`
 		CollectionName string `json:"collection_name"`
+		Visibility     string `json:"visibility"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
-	id, err := repository.CreateCollection(req.Username, req.CollectionName)
+	id, err := repository.CreateCollectionWithVisibility(req.Username, req.CollectionName, req.Visibility)
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"id": id, "username": req.Username, "collection_name": req.CollectionName})
+	c.JSON(http.StatusOK, gin.H{"id": id, "username": req.Username, "collection_name": req.CollectionName, "visibility": req.Visibility})
 }
 
 // ListCollections godoc
@@ -430,4 +432,78 @@ func RollbackCollection(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "rolled back"})
+}
+
+// SetCollectionVisibility godoc
+// @Summary Set collection visibility
+// @Description Change the visibility of a collection (public, unlisted, private)
+// @Tags collections
+// @Accept json
+// @Produce json
+// @Param username path string true "Username"
+// @Param collection_name path string true "Collection name"
+// @Param body body object{visibility=string} true "Visibility: public|unlisted|private"
+// @Success 200 {object} map[string]string "ok"
+// @Failure 400,404 {object} map[string]string "error"
+// @Router /collections/{username}/{collection_name}/visibility [post]
+func SetCollectionVisibility(c *gin.Context) {
+	username := c.Param("username")
+	collectionName := c.Param("collection_name")
+	var req struct {
+		Visibility string `json:"visibility"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if req.Visibility != "public" && req.Visibility != "unlisted" && req.Visibility != "private" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "visibility must be public, unlisted, or private"})
+		return
+	}
+	col, err := repository.GetCollection(username, collectionName)
+	if err != nil || col == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
+		return
+	}
+	if err := repository.SetCollectionVisibility(username, collectionName, req.Visibility); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
+}
+
+// ListPublicCollections godoc
+// @Summary List all public collections
+// @Description Returns all collections with visibility = 'public', optionally filtered by search query
+// @Tags collections
+// @Produce json
+// @Param q query string false "Search query"
+// @Success 200 {object} map[string]interface{} "data array of collections"
+// @Router /collections/public [get]
+func ListPublicCollections(c *gin.Context) {
+	q := c.Query("q")
+	var rows *sql.Rows
+	var err error
+	if q != "" {
+		rows, err = repository.DB.Query(`SELECT id, username, collection_name, current_hash, visibility, created_at FROM collections WHERE visibility = 'public' AND (username LIKE ? OR collection_name LIKE ?) ORDER BY created_at DESC`, "%"+q+"%", "%"+q+"%")
+	} else {
+		rows, err = repository.DB.Query(`SELECT id, username, collection_name, current_hash, visibility, created_at FROM collections WHERE visibility = 'public' ORDER BY created_at DESC`)
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	var cols []model.Collection
+	for rows.Next() {
+		var col model.Collection
+		if err := rows.Scan(&col.ID, &col.Username, &col.CollectionName, &col.CurrentHash, &col.Visibility, &col.CreatedAt); err != nil {
+			continue
+		}
+		cols = append(cols, col)
+	}
+	if cols == nil {
+		cols = []model.Collection{}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": cols})
 }

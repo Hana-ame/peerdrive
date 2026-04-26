@@ -29,6 +29,25 @@ func CreateCollection(username, collectionName string) (int, error) {
 	return int(id), err
 }
 
+func CreateCollectionWithVisibility(username, collectionName, visibility string) (int, error) {
+	if visibility == "" {
+		visibility = "public"
+	}
+	res, err := DB.Exec(`INSERT INTO collections (username, collection_name, visibility) VALUES (?, ?, ?)`,
+		username, collectionName, visibility)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	return int(id), err
+}
+
+func SetCollectionVisibility(username, collectionName, visibility string) error {
+	_, err := DB.Exec(`UPDATE collections SET visibility = ? WHERE username = ? AND collection_name = ?`,
+		visibility, username, collectionName)
+	return err
+}
+
 func GetOrCreateCollection(username, collectionName string) (int, error) {
 	var id int
 	err := DB.QueryRow(`SELECT id FROM collections WHERE username = ? AND collection_name = ?`,
@@ -45,7 +64,7 @@ func UpdateCurrentHash(collectionID int, hash string) error {
 }
 
 func ListCollections(username string) ([]model.Collection, error) {
-	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, created_at FROM collections WHERE username = ? ORDER BY created_at DESC`, username)
+	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, created_at FROM collections WHERE username = ? ORDER BY created_at DESC`, username)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +72,7 @@ func ListCollections(username string) ([]model.Collection, error) {
 	var cols []model.Collection
 	for rows.Next() {
 		var c model.Collection
-		if err := rows.Scan(&c.ID, &c.Username, &c.CollectionName, &c.CurrentHash, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Username, &c.CollectionName, &c.CurrentHash, &c.Visibility, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		cols = append(cols, c)
@@ -63,8 +82,8 @@ func ListCollections(username string) ([]model.Collection, error) {
 
 func GetCollection(username, collectionName string) (*model.Collection, error) {
 	var c model.Collection
-	err := DB.QueryRow(`SELECT id, username, collection_name, current_hash, created_at FROM collections WHERE username = ? AND collection_name = ?`,
-		username, collectionName).Scan(&c.ID, &c.Username, &c.CollectionName, &c.CurrentHash, &c.CreatedAt)
+	err := DB.QueryRow(`SELECT id, username, collection_name, current_hash, visibility, created_at FROM collections WHERE username = ? AND collection_name = ?`,
+		username, collectionName).Scan(&c.ID, &c.Username, &c.CollectionName, &c.CurrentHash, &c.Visibility, &c.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -75,7 +94,7 @@ func GetCollection(username, collectionName string) (*model.Collection, error) {
 }
 
 func SearchCollections(query string) ([]model.Collection, error) {
-	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, created_at FROM collections WHERE username LIKE ? OR collection_name LIKE ? ORDER BY created_at DESC`,
+	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, created_at FROM collections WHERE (username LIKE ? OR collection_name LIKE ?) AND visibility = 'public' ORDER BY created_at DESC`,
 		"%"+query+"%", "%"+query+"%")
 	if err != nil {
 		return nil, err
@@ -84,7 +103,7 @@ func SearchCollections(query string) ([]model.Collection, error) {
 	var cols []model.Collection
 	for rows.Next() {
 		var c model.Collection
-		if err := rows.Scan(&c.ID, &c.Username, &c.CollectionName, &c.CurrentHash, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Username, &c.CollectionName, &c.CurrentHash, &c.Visibility, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		cols = append(cols, c)

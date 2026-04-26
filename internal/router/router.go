@@ -122,6 +122,8 @@ func SetupRouter(
 	collections := r.Group("/collections")
 	{
 		collections.POST("", controller.CreateCollection)
+		collections.GET("/public", controller.ListPublicCollections)
+		collections.GET("/search", controller.SearchCollections)
 		collections.GET("/:username", controller.ListCollections)
 		collections.GET("/:username/:collection_name", controller.GetCollection)
 		collections.POST("/:username/:collection_name/entries", controller.AddEntry)
@@ -129,6 +131,7 @@ func SetupRouter(
 		collections.POST("/:username/:collection_name/commit", controller.CommitCollection)
 		collections.GET("/:username/:collection_name/log", controller.GetVersionLog)
 		collections.POST("/:username/:collection_name/rollback/:version_id", controller.RollbackCollection)
+		collections.POST("/:username/:collection_name/visibility", controller.SetCollectionVisibility)
 	}
 
 	// Local sync
@@ -155,9 +158,6 @@ func SetupRouter(
 		tasks.GET("", controller.ListTasks)
 		tasks.GET("/:id", controller.GetTaskStatus)
 	}
-
-	// Public search
-	r.GET("/collections/search", controller.SearchCollections)
 
 	// Swagger
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))

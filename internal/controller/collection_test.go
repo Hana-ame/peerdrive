@@ -562,3 +562,154 @@ func getRespJSON(w *httptest.ResponseRecorder) map[string]interface{} {
 	json.Unmarshal(body, &resp)
 	return resp
 }
+
+func TestCreateCollectionWithVisibility(t *testing.T) {
+	_, cleanup := setupCollectionTest(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	c := newTestContext(w)
+	setJSONBody(c, http.MethodPost, `{"username":"visuser","collection_name":"public-coll","visibility":"public"}`)
+	CreateCollection(c)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	assert.Equal(t, "public", resp["visibility"])
+}
+
+func TestCreateCollectionWithPrivateVisibility(t *testing.T) {
+	_, cleanup := setupCollectionTest(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	c := newTestContext(w)
+	setJSONBody(c, http.MethodPost, `{"username":"visuser2","collection_name":"private-coll","visibility":"private"}`)
+	CreateCollection(c)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	assert.Equal(t, "private", resp["visibility"])
+}
+
+func TestSetCollectionVisibility(t *testing.T) {
+	_, cleanup := setupCollectionTest(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	c := newTestContext(w)
+	setJSONBody(c, http.MethodPost, `{"username":"svuser","collection_name":"sv-coll","visibility":"public"}`)
+	CreateCollection(c)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	w2 := httptest.NewRecorder()
+	c2 := newTestContext(w2)
+	c2.Params = gin.Params{
+		{Key: "username", Value: "svuser"},
+		{Key: "collection_name", Value: "sv-coll"},
+	}
+	setJSONBody(c2, http.MethodPost, `{"visibility":"private"}`)
+	SetCollectionVisibility(c2)
+	assert.Equal(t, http.StatusOK, w2.Code)
+
+	var resp map[string]interface{}
+	err := json.Unmarshal(w2.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	assert.Equal(t, "ok", resp["message"])
+
+	w3 := httptest.NewRecorder()
+	c3 := newTestContext(w3)
+	c3.Params = gin.Params{
+		{Key: "username", Value: "svuser"},
+		{Key: "collection_name", Value: "sv-coll"},
+	}
+	GetCollection(c3)
+	assert.Equal(t, http.StatusOK, w3.Code)
+	var collResp map[string]interface{}
+	json.Unmarshal(w3.Body.Bytes(), &collResp)
+	col, ok := collResp["collection"].(map[string]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, "private", col["visibility"])
+}
+
+func TestListPublicCollections(t *testing.T) {
+	_, cleanup := setupCollectionTest(t)
+	defer cleanup()
+
+	w1 := httptest.NewRecorder()
+	c1 := newTestContext(w1)
+	setJSONBody(c1, http.MethodPost, `{"username":"lpuser","collection_name":"pub-1","visibility":"public"}`)
+	CreateCollection(c1)
+
+	w2 := httptest.NewRecorder()
+	c2 := newTestContext(w2)
+	setJSONBody(c2, http.MethodPost, `{"username":"lpuser","collection_name":"priv-1","visibility":"private"}`)
+	CreateCollection(c2)
+
+	w3 := httptest.NewRecorder()
+	c3 := newTestContext(w3)
+	setJSONBody(c3, http.MethodPost, `{"username":"lpuser2","collection_name":"ul-1","visibility":"unlisted"}`)
+	CreateCollection(c3)
+
+	w4 := httptest.NewRecorder()
+	c4 := newTestContext(w4)
+	ListPublicCollections(c4)
+	assert.Equal(t, http.StatusOK, w4.Code)
+
+	var resp map[string]interface{}
+	err := json.Unmarshal(w4.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	data, ok := resp["data"].([]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(data), "only public collections should appear")
+}
+
+func TestListCollectionsForUserReturnsAllVisibilities(t *testing.T) {
+	_, cleanup := setupCollectionTest(t)
+	defer cleanup()
+
+	CreateCollection(createRespRecorder(`{"username":"luuser","collection_name":"pub-x","visibility":"public"}`))
+	CreateCollection(createRespRecorder(`{"username":"luuser","collection_name":"priv-x","visibility":"private"}`))
+
+	w := httptest.NewRecorder()
+	c := newTestContext(w)
+	c.Params = gin.Params{{Key: "username", Value: "luuser"}}
+	ListCollections(c)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	data, ok := resp["data"].([]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, 2, len(data), "user should see all of their collections")
+}
+
+func TestInvalidVisibilityRejected(t *testing.T) {
+	_, cleanup := setupCollectionTest(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	c := newTestContext(w)
+	c.Params = gin.Params{
+		{Key: "username", Value: "ivuser"},
+		{Key: "collection_name", Value: "iv-coll"},
+	}
+
+	// first create it
+	CreateCollection(createRespRecorder(`{"username":"ivuser","collection_name":"iv-coll","visibility":"public"}`))
+
+	setJSONBody(c, http.MethodPost, `{"visibility":"invalid_vis"}`)
+	SetCollectionVisibility(c)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func createRespRecorder(body string) *gin.Context {
+	w := httptest.NewRecorder()
+	c := newTestContext(w)
+	setJSONBody(c, http.MethodPost, body)
+	return c
+}
