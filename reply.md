@@ -49,7 +49,26 @@
 
 ---
 
-## ⚠️ 遗留 / 远期
+## TODO.txt (最新反馈 — 全部完成)
+
+| 需求 | 状态 | 实现 |
+|------|------|------|
+| 已有合集全屏显示合集列表 | ✅ | AnonCreator 左面板"已有合集"标签支持搜索/排序 |
+| tag搜索 | ✅ | Navbar SearchPanel 支持 tag+collection+file 搜索 |
+| 本地文件三种模式 | ✅ | 时间/名称/大小/类型排序按钮 + Android目录浏览 |
+| coll名不显示sha256 | ✅ | AnonCollectionSummary.name_preview — 前3个文件名预览 |
+| 无名字→文件a,b..等N个文件 | ✅ | Plaza+AnonCreator 均使用 name_preview |
+| 点击coll选取文件 | ✅ | Android 逐级导航 |
+| 被选中文件不禁止 | ✅ | 移除 opacity 锁定 |
+| collection多位置放置文件 | ✅ | addEntry 始终追加不替换 |
+| 双击防抖 | ✅ | 500ms cooldown |
+| 新建文件夹 | ✅ | 修复 showNewFolder 状态切换 |
+| 文件拖动进入文件夹 | ✅ | FileTree onDrop → entryActions.onDrop |
+| 移动到 | ✅ | 双击文件名可重命名路径 |
+| 未设名称→alert LLM | ✅ | confirm 对话框选择 LLM 或留空 |
+| 提交/克隆意义不明 | ✅ | 从 AnonExplorer 移除 |
+| 保存到node | ✅ | AnonExplorer 💾 保存按钮 |
+| MIME不显示多行 | ✅ | 截断 charset 后缀 |
 
 | 项目 | 状态 |
 |------|------|
