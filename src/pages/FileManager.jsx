@@ -36,10 +36,6 @@ export default function FileManager() {
   }, [username, sortBy]);
 
   useEffect(() => {
-    setPageContext({ type: 'fileManager', fileCount: files.length, selectedCount: selectedEntries.length, sortBy });
-  }, [files, selectedEntries, sortBy]);
-
-  useEffect(() => {
     if (showCreateModal && username) {
       api.listCollections(username).then(d => setCollections(d.collections || d.data || [])).catch(() => {});
     }
@@ -80,6 +76,10 @@ export default function FileManager() {
 
   const selectedHashes = Object.keys(selected).filter(k => selected[k]);
   const selectedEntries = files.filter(f => selected[f.hash]).map(f => ({ path: f.filename, hash: f.hash }));
+
+  useEffect(() => {
+    setPageContext({ type: 'fileManager', fileCount: files.length, selectedCount: selectedEntries.length, sortBy });
+  }, [files, selectedEntries, sortBy]);
 
   const handleCreateCollection = async () => {
     if (selectedEntries.length === 0) return alert('请先选择文件');
