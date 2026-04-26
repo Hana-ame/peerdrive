@@ -288,6 +288,20 @@ export default function AnonCreator() {
           <Link to="/" className="text-sm text-gray-500 hover:text-white shrink-0">←</Link>
           <input value={fname} onChange={e => setFname(e.target.value)} placeholder="合集名称 (可选)" className="bg-gray-800 text-sm px-3 py-2 rounded border border-gray-700 w-36 focus:outline-none focus:border-blue-500" />
           <input value={tags} onChange={e => setTags(e.target.value)} placeholder="标签: tag1, tag2" className="bg-gray-800 text-sm px-3 py-2 rounded border border-gray-700 w-28 focus:outline-none focus:border-blue-500" />
+          <button onClick={async () => {
+            if (!entries.length) return alert('请先添加文件');
+            try {
+              const names = entries.slice(0, 20).map(e => e.path).join(', ');
+              const res = await fetch(`${api.getApiBase ? api.getApiBase() : 'https://wsl-3000.moonchan.xyz'}/llm/v1/chat/completions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: 'Qwen/Qwen3-8B', messages: [{ role: 'user', content: `请用3-5个中文字为以下文件集取一个简洁的合集名称,只输出名称: ${names}` }], max_tokens: 20, stream: false }),
+              });
+              const d = await res.json();
+              const name = d.choices?.[0]?.message?.content?.trim()?.replace(/["""'']/g, '');
+              if (name) setFname(name);
+            } catch(e) { alert('AI 推荐失败: ' + e.message); }
+          }} className="text-[10px] bg-purple-700 hover:bg-purple-600 px-2 py-1.5 rounded text-xs shrink-0 whitespace-nowrap" title="AI 推荐名称">🤖 AI</button>
           <div className="flex-1" />
           {entries.length > 0 && !savedHash && (
             <span className="text-sm text-yellow-500 bg-yellow-500/10 px-3 py-1 rounded border border-yellow-600/30">未保存</span>
