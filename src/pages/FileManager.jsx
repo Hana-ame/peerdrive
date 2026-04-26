@@ -407,7 +407,7 @@ export default function FileManager() {
                   <span className="mr-3 text-lg shrink-0">{extIcon(f.mime_type)}</span>
                   <a href={api.getDownloadUrl(f.hash)} className="text-sm text-blue-300 truncate flex-1 min-w-0 hover:text-blue-100 hover:underline cursor-pointer" title={`下载 ${f.filename}`}>{f.filename}</a>
                   <span className="text-xs text-gray-400 w-20 text-right shrink-0 mr-6">{formatSize(f.size)}</span>
-                  <span className="text-xs text-gray-500 w-20 text-right shrink-0 mr-6">{(f.mime_type || '').split('/').pop() || '-'}</span>
+                  <span className="text-xs text-gray-500 w-20 text-right shrink-0 mr-6 overflow-hidden text-ellipsis whitespace-nowrap">{(f.mime_type || '').split(';')[0].split('/').pop() || '-'}</span>
                   <span className="text-xs text-gray-500 w-36 text-right shrink-0 mr-4">{(f.created_at || '').replace('T', ' ').substring(0, 16)}</span>
                   <div className="flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                     <button onClick={() => handleCreateFromFile(f)} className="text-[10px] bg-teal-600 hover:bg-teal-500 px-2 py-0.5 rounded whitespace-nowrap">合集</button>

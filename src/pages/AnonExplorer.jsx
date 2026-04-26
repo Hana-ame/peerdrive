@@ -143,8 +143,6 @@ export default function AnonExplorer() {
               </div>
               <div className="flex-1" />
               <span className="text-xs text-gray-600">{currentItems.totalFiles} 项</span>
-              <button onClick={handleCommit} className="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-xs">提交</button>
-              <button onClick={handleFork} className="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-xs">克隆并修改</button>
             </div>
 
             <div className="flex-1 overflow-y-auto">

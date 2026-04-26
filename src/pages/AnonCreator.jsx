@@ -101,6 +101,21 @@ export default function AnonCreator() {
   const handleMint = async () => {
     const valid = entries.filter(e => e.path?.trim() && e.hash);
     if (!valid.length) return alert('请先添加文件');
+    if (!fname.trim()) {
+      const choice = confirm('合集名称未设置。\n\n点"确定"使用 AI 推荐名称\n点"取消"留空保存');
+      if (choice) {
+        try {
+          const names = valid.slice(0, 20).map(e => e.path).join(', ');
+          const res = await fetch(`${api.getApiBase ? api.getApiBase() : 'https://wsl-3000.moonchan.xyz'}/llm/v1/chat/completions`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'Qwen/Qwen3-8B', messages: [{ role: 'user', content: `请用3-5个中文字为以下文件集取一个简洁的合集名称,只输出名称: ${names}` }], max_tokens: 20, stream: false }),
+          });
+          const d = await res.json();
+          const name = d.choices?.[0]?.message?.content?.trim()?.replace(/["""'']/g, '');
+          if (name) setFname(name);
+        } catch {}
+      }
+    }
     setSaving(true);
     const oldHash = savedHash;
     try {
@@ -176,7 +191,7 @@ export default function AnonCreator() {
               collections.map(c => (
                 <div key={c.hash} onClick={() => loadCollAsSource(c.hash)}
                   className={`text-sm px-3 py-2 rounded cursor-pointer hover:bg-gray-800 flex items-center justify-between ${collSource && c.hash === openHash ? 'bg-blue-900/30' : ''}`}>
-                  <span className="text-blue-300 truncate">{c.friendly_name || c.hash.substring(0, 12) + '...'}</span>
+                  <span className="text-blue-300 truncate">{c.friendly_name || c.name_preview || c.hash?.substring(0, 12) + '...' || '合集'}</span>
                   {c.friendly_name && <span className="text-gray-600 ml-2">v{c.version}</span>}
                 </div>
               ))}

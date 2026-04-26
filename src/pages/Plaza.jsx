@@ -43,7 +43,7 @@ export default function Plaza() {
     setLoading(false);
   };
 
-  const collName = (c) => c.collection_name || c.friendly_name || (c.hash ? c.hash.substring(0, 12) + '...' : '未命名');
+  const collName = (c) => c.collection_name || c.friendly_name || c.name_preview || (c.hash ? c.hash.substring(0, 12) + '...' : '未命名');
   const collUser = (c) => c.username || (c._type === 'public' ? '' : '');
   const collTime = (c) => {
     if (c.isDummy) return '';
