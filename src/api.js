@@ -26,7 +26,7 @@ export const registerFolder = (folderPath) =>
 export const createAnonCollection = (entries, friendly_name = '') =>
   request('POST', '/anon/collections', { entries, friendly_name });
 export const getAnonCollection = (hash) => request('GET', `/anon/collections/${hash}`);
-export const getAnonFileDownloadUrl = (hash, p) => `${API_BASE}/anon/collections/${hash}/entries/${p}`;
+export const getAnonFileDownloadUrl = (hash, p) => `${API_BASE}/anon/collections/${hash}/${p}`;
 export const forkAnonCollection = (source_hash, add_entries, remove_paths, friendly_name = '') =>
   request('POST', '/anon/collections/fork', { source_hash, add_entries, remove_paths, friendly_name });
 
