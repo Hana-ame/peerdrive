@@ -103,7 +103,7 @@ export default function FileTree({ entries, entryActions }) {
             onDrop={(e) => {
               e.preventDefault(); setDragOverPath(null);
               if (node.isDir) {
-                try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry'); if (d) entryActions?.onDrop?.({ ...JSON.parse(d), targetDir: node.path }); } catch {}
+                try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry') || e.dataTransfer.getData('text/plain'); if (d) { const parsed = d.startsWith('{') ? JSON.parse(d) : { hash: '', name: d, path: d }; entryActions?.onDrop?.({ ...parsed, targetDir: node.path }); } } catch {}
               }
             }}
           >

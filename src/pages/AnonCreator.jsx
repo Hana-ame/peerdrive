@@ -4,6 +4,18 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { PageContext } from '../App';
 import FileTree from '../components/FileTree';
 
+const LLM_URL = api.getLlmEndpoint ? api.getLlmEndpoint() : 'https://siliconflow.moonchan.xyz';
+const LLM_CHAT = `${LLM_URL}/v1/chat/completions`;
+
+async function llmSuggest(names) {
+  const res = await fetch(LLM_CHAT, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'Qwen/Qwen3-8B', messages: [{ role: 'user', content: `请用3-5个中文字为以下文件集取一个简洁的合集名称,只输出名称: ${names}` }], max_tokens: 20, stream: false }),
+  });
+  const d = await res.json();
+  return d.choices?.[0]?.message?.content?.trim()?.replace(/["""'']/g, '') || null;
+}
+
 const SORT_OPTS = [
   { v: 'time', l: '时间' }, { v: 'name', l: '名称' },
   { v: 'path', l: '目录' }, { v: 'type', l: '类型' }, { v: 'size', l: '大小' },
@@ -110,12 +122,7 @@ export default function AnonCreator() {
       if (choice) {
         try {
           const names = valid.slice(0, 20).map(e => e.path).join(', ');
-          const res = await fetch(`${api.getApiBase ? api.getApiBase() : 'https://wsl-3000.moonchan.xyz'}/llm/v1/chat/completions`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'Qwen/Qwen3-8B', messages: [{ role: 'user', content: `请用3-5个中文字为以下文件集取一个简洁的合集名称,只输出名称: ${names}` }], max_tokens: 20, stream: false }),
-          });
-          const d = await res.json();
-          const name = d.choices?.[0]?.message?.content?.trim()?.replace(/["""'']/g, '');
+          const name = await llmSuggest(names);
           if (name) setFname(name);
         } catch {}
       }
@@ -189,34 +196,46 @@ export default function AnonCreator() {
           <span className="text-sm text-gray-600">{srcTab === 'local' ? filtered.length : collFiltered.length} 项</span>
         </div>
 
-        {srcTab === 'collection' && (
-          <div className="p-2 border-b border-gray-800 shrink-0 space-y-1 max-h-[200px] overflow-y-auto">
-            {collections.length === 0 ? <p className="text-sm text-gray-600 p-2">暂无历史合集</p> :
-              collections.map(c => (
-                <div key={c.hash} onClick={() => loadCollAsSource(c.hash)}
-                  className={`text-sm px-3 py-2 rounded cursor-pointer hover:bg-gray-800 flex items-center justify-between ${collSource && c.hash === openHash ? 'bg-blue-900/30' : ''}`}>
-                  <span className="text-blue-300 truncate">{c.friendly_name || c.name_preview || c.hash?.substring(0, 12) + '...' || '合集'}</span>
-                  {c.friendly_name && <span className="text-gray-600 ml-2">v{c.version}</span>}
-                </div>
-              ))}
+        {srcTab === 'collection' && !collSource && (
+          <div className="flex-1 flex flex-col">
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索合集..." className="w-full bg-gray-800 text-sm px-3 py-2 border-b border-gray-800 focus:outline-none focus:border-blue-600" />
+            <div className="flex-1 overflow-y-auto">
+              {collections.length === 0 ? <p className="p-4 text-gray-600 text-sm">暂无历史合集</p> :
+                collections.filter(c => !search || (c.friendly_name||c.name_preview||'').toLowerCase().includes(search.toLowerCase()) || (c.hash||'').toLowerCase().includes(search.toLowerCase()))
+                .map(c => (
+                  <div key={c.hash} onClick={() => loadCollAsSource(c.hash)}
+                    className="px-4 py-3 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50">
+                    <div className="flex items-center gap-2"><span className="text-lg">📦</span><span className="text-blue-300 truncate flex-1 text-sm font-medium">{c.friendly_name || c.name_preview || c.hash?.substring(0,16)+'...'}</span></div>
+                    <div className="flex items-center gap-2 mt-1 ml-8">{c.tags?.map(t => <span key={t} className="text-[10px] bg-blue-900/50 text-blue-300 px-1.5 py-0.5 rounded-full">{t}</span>)}<span className="text-xs text-gray-600">{c.entry_count || 0} 文件</span><span className="text-xs text-gray-500">{c.created_at ? new Date(c.created_at).toLocaleDateString() : ''}</span></div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+        {srcTab === 'collection' && collSource && (
+          <div className="flex-1 flex flex-col">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-sm"><button onClick={() => setCollSource(null)} className="text-gray-400 hover:text-white">← 返回</button><span className="text-gray-300 truncate">{collSource.friendly_name || '合集'}</span><span className="text-gray-600 text-xs ml-auto">{collSource.entries?.length || 0} 项</span></div>
+            <div className="flex-1 overflow-y-auto">
+              {(() => {
+                const dirs = new Set(); const cfiles = [];
+                for (const e of collFiltered) { const slash = e.path.indexOf('/'); if (slash === -1) cfiles.push(e); else dirs.add(e.path.slice(0, slash)); }
+                return <div>
+                  {Array.from(dirs).sort().map(dir => <div key={dir} onClick={() => { setCollSource(prev => prev ? {...prev, entries: prev.entries.filter(e => e.path.startsWith(dir+'/'))} : prev); }} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm"><span className="text-lg">📁</span><span className="text-yellow-400 font-mono truncate flex-1">{dir}</span></div>)}
+                  {cfiles.map(e => <div key={e.path} draggable onDragStart={(ev) => { ev.dataTransfer.setData('text/plain', e.path); ev.dataTransfer.setData('application/peerdrive-file', JSON.stringify({hash:e.hash,path:e.path,name:e.path.split('/').pop()})); ev.dataTransfer.effectAllowed = 'copy'; }} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group"><span className="text-lg">📄</span><span className="text-blue-300 truncate flex-1 font-mono">{e.path.split('/').pop()}</span><button onClick={() => addEntry(e.hash, e.path)} className="text-blue-400 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 shrink-0">+</button></div>)}
+                  {dirs.size===0&&cfiles.length===0&&<p className="p-4 text-gray-600 text-sm">空合集</p>}
+                </div>;
+              })()}
+            </div>
           </div>
         )}
 
-        <div className="p-2 border-b border-gray-800 shrink-0 space-y-1.5">
-          <div className="flex gap-1">
-            {SORT_OPTS.map(o => (
-              <button key={o.v} onClick={() => setSort(o.v)}
-                className={`flex-1 text-sm px-2 py-1.5 rounded ${sort === o.v ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>
-            ))}
+        {srcTab === 'local' && (
+          <div className="p-2 border-b border-gray-800 shrink-0 space-y-1.5">
+            <div className="flex gap-1">{SORT_OPTS.map(o => (<button key={o.v} onClick={() => setSort(o.v)} className={`flex-1 text-sm px-2 py-1.5 rounded ${sort===o.v?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>))}</div>
+            <div className="flex gap-1">{TYPE_OPTS.map(o => (<button key={o.v} onClick={() => setTypeF(o.v)} className={`flex-1 text-sm px-2 py-1.5 rounded ${typeF===o.v?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>))}</div>
           </div>
-          <div className="flex gap-1">
-            {TYPE_OPTS.map(o => (
-              <button key={o.v} onClick={() => setTypeF(o.v)}
-                className={`flex-1 text-sm px-2 py-1.5 rounded ${typeF === o.v ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>
-            ))}
-          </div>
-        </div>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文件名或路径..." className="w-full bg-gray-800 text-sm px-3 py-2 border-b border-gray-800 focus:outline-none focus:border-blue-600" />
+        )}
+        {srcTab === 'local' && <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文件名或路径..." className="w-full bg-gray-800 text-sm px-3 py-2 border-b border-gray-800 focus:outline-none focus:border-blue-600" />}
 
         <div className="flex-1 overflow-y-auto">
           {srcTab === 'local' ? (() => {
@@ -257,6 +276,7 @@ export default function AnonCreator() {
                 {localFiles.map(f => (
                   <div key={f.hash} draggable
                     onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', f.filename);
                       e.dataTransfer.setData('application/peerdrive-file', JSON.stringify({ hash: f.hash, path: f.filename, name: f.filename, mime_type: f.mime_type, size: f.size }));
                       e.dataTransfer.effectAllowed = 'copy';
                     }}
@@ -308,19 +328,12 @@ export default function AnonCreator() {
           <input value={fname} onChange={e => setFname(e.target.value)} placeholder="合集名称 (可选)" className="bg-gray-800 text-sm px-3 py-2 rounded border border-gray-700 w-36 focus:outline-none focus:border-blue-500" />
           <input value={tags} onChange={e => setTags(e.target.value)} placeholder="标签: tag1, tag2" className="bg-gray-800 text-sm px-3 py-2 rounded border border-gray-700 w-28 focus:outline-none focus:border-blue-500" />
           <button onClick={async () => {
-            if (!entries.length) return alert('请先添加文件');
+            if (!entries.length) return;
             try {
-              const names = entries.slice(0, 20).map(e => e.path).join(', ');
-              const res = await fetch(`${api.getApiBase ? api.getApiBase() : 'https://wsl-3000.moonchan.xyz'}/llm/v1/chat/completions`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: 'Qwen/Qwen3-8B', messages: [{ role: 'user', content: `请用3-5个中文字为以下文件集取一个简洁的合集名称,只输出名称: ${names}` }], max_tokens: 20, stream: false }),
-              });
-              const d = await res.json();
-              const name = d.choices?.[0]?.message?.content?.trim()?.replace(/["""'']/g, '');
+              const name = await llmSuggest(entries.slice(0, 20).map(e => e.path).join(', '));
               if (name) setFname(name);
-            } catch(e) { alert('AI 推荐失败: ' + e.message); }
-          }} className="text-[10px] bg-purple-700 hover:bg-purple-600 px-2 py-1.5 rounded text-xs shrink-0 whitespace-nowrap" title="AI 推荐名称">🤖 AI</button>
+            } catch(e) {}
+          }} className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1.5 rounded shrink-0 whitespace-nowrap" title="AI 推荐名称">🤖</button>
           <div className="flex-1" />
           {entries.length > 0 && !savedHash && (
             <span className="text-sm text-yellow-500 bg-yellow-500/10 px-3 py-1 rounded border border-yellow-600/30">未保存</span>
