@@ -188,13 +188,19 @@ export default function AnonCreator() {
           </div>
         )}
 
-        <div className="flex gap-1 p-1.5 border-b border-gray-800 shrink-0">
-          <select value={sort} onChange={e => setSort(e.target.value)} className="bg-gray-800 text-[10px] px-1 py-0.5 rounded border border-gray-700 flex-1">
-            {SORT_OPTS.map(o => <option key={o.v} value={o.v}>{o.l} ↓</option>)}
-          </select>
-          <select value={typeF} onChange={e => setTypeF(e.target.value)} className="bg-gray-800 text-[10px] px-1 py-0.5 rounded border border-gray-700 flex-1">
-            {TYPE_OPTS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
-          </select>
+        <div className="p-1.5 border-b border-gray-800 shrink-0 space-y-1">
+          <div className="flex gap-0.5">
+            {SORT_OPTS.map(o => (
+              <button key={o.v} onClick={() => setSort(o.v)}
+                className={`flex-1 text-[10px] px-1 py-0.5 rounded ${sort === o.v ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>
+            ))}
+          </div>
+          <div className="flex gap-0.5">
+            {TYPE_OPTS.map(o => (
+              <button key={o.v} onClick={() => setTypeF(o.v)}
+                className={`flex-1 text-[10px] px-1 py-0.5 rounded ${typeF === o.v ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>
+            ))}
+          </div>
         </div>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文件名或路径..." className="w-full bg-gray-800 text-[10px] px-3 py-1 border-b border-gray-800 focus:outline-none focus:border-blue-600" />
 
