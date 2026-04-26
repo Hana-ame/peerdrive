@@ -129,6 +129,15 @@ export default function Plaza() {
                 </div>
                 <h3 className="text-lg font-bold truncate text-gray-100">{collName(c)}</h3>
                 <p className="text-sm text-gray-400 mt-1">{collUser(c)}</p>
+                {c.tags && c.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-3">
+                    {c.tags.map((tag, i) => (
+                      <span key={i} className="text-[10px] bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

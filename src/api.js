@@ -49,12 +49,14 @@ export const forkAnonCollection = (source_hash, add_entries, remove_paths, frien
   request('POST', '/anon/collections/fork', { source_hash, add_entries, remove_paths, friendly_name });
 
 /* ---- user collections ---- */
-export const createUserCollection = (username, collection_name, visibility = 'public') =>
-  request('POST', '/collections', { username, collection_name, visibility });
+export const createUserCollection = (username, collection_name, visibility = 'public', tags = []) =>
+  request('POST', '/collections', { username, collection_name, visibility, tags });
 export const getUserCollections = (username) =>
   request('GET', `/collections/${username}`);
 export const getUserCollection = (username, coll) =>
   request('GET', `/collections/${username}/${coll}`);
+export const updateCollectionTags = (username, coll, tags) =>
+  request('POST', `/collections/${username}/${coll}/tags`, { tags });
 export const addCollectionEntry = (username, coll, path, hash) =>
   request('POST', `/collections/${username}/${coll}/entries`, { path, hash });
 export const removeCollectionEntry = (username, coll, path) =>
