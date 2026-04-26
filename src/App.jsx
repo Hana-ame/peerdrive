@@ -1,53 +1,37 @@
-import React, { useState } from 'react';
-import Sha256Manager from './components/Sha256Manager';
-import CollectionBuilder from './components/CollectionBuilder';
-import P2PStatus from './components/P2PStatus';
+import React, { useState, createContext } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Plaza from './pages/Plaza';
+import Explorer from './pages/Explorer';
+import AnonCreator from './pages/AnonCreator';
+import AnonExplorer from './pages/AnonExplorer';
+import Navbar from './components/Navbar';
 
-const tabs = [
-  { key: 'sha256', label: 'SHA256 寻址' },
-  { key: 'build',  label: '合集构建' },
-  { key: 'p2p',    label: 'P2P 网络' },
-];
+export const AppContext = createContext();
 
 export default function App() {
-  const [view, setView] = useState('sha256');
+  const [username, setUsername] = useState(localStorage.getItem('peerdrive_username') || '');
+  const [nodeInfo, setNodeInfo] = useState(null);
+
+  const handleUsernameChange = (val) => {
+    setUsername(val);
+    localStorage.setItem('peerdrive_username', val);
+  };
 
   return (
-    <div className="flex h-screen bg-zinc-950 text-zinc-200">
-      {/* Sidebar */}
-      <aside className="w-56 border-r border-zinc-800 flex flex-col shrink-0">
-        <div className="h-14 flex items-center px-5 border-b border-zinc-800">
-          <span className="text-lg font-bold tracking-tight text-white">Peerdrive</span>
-        </div>
-        <nav className="flex-1 p-3 space-y-1">
-          {tabs.map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setView(tab.key)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors
-                ${view === tab.key
-                  ? 'bg-zinc-800 text-white font-medium'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
-                }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-        <div className="p-3 border-t border-zinc-800">
-          <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            节点运行中
+    <AppContext.Provider value={{ username, setUsername: handleUsernameChange, nodeInfo, setNodeInfo }}>
+      <BrowserRouter>
+        <div className="flex flex-col h-screen bg-gray-950 text-gray-200">
+          <Navbar />
+          <div className="flex-1 overflow-hidden">
+            <Routes>
+              <Route path="/" element={<Plaza />} />
+              <Route path="/:username/:collName" element={<Explorer />} />
+              <Route path="/anon/create" element={<AnonCreator />} />
+              <Route path="/anon" element={<AnonExplorer />} />
+            </Routes>
           </div>
         </div>
-      </aside>
-
-      {/* Main */}
-      <main className="flex-1 overflow-y-auto p-8">
-        {view === 'sha256' && <Sha256Manager />}
-        {view === 'build'  && <CollectionBuilder />}
-        {view === 'p2p'    && <P2PStatus />}
-      </main>
-    </div>
+      </BrowserRouter>
+    </AppContext.Provider>
   );
 }

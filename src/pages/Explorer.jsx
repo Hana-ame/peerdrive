@@ -1,7 +1,7 @@
 import React, { useContext, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AppContext } from '../App';
-import { getCollection, uploadFile, addEntry, deleteEntry, commitVersion, downloadFileByPath, mergeCollection, saveLocal, getLocalStatus } from '../api';
+import * as api from '../api';
 import VersionLog from '../components/VersionLog';
 
 export default function Explorer() {
@@ -18,7 +18,6 @@ export default function Explorer() {
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [mergeSrc, setMergeSrc] = useState({ user: '', coll: '', strategy: 'ours' });
 
-  // Local Sync State
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [syncConfig, setSyncConfig] = useState({ path: '', include: '', exclude: '' });
   const [syncStatus, setSyncStatus] = useState(null);
@@ -28,8 +27,8 @@ export default function Explorer() {
   const loadEntries = async () => {
     setLoading(true);
     try {
-      const res = await getCollection(username, collName);
-      setEntries(res.entries || []);
+      const col = await api.getCollection(username, collName);
+      setEntries(col.entries || []);
     } catch (e) { console.error(e); setEntries([]); }
     setLoading(false);
   };
@@ -37,8 +36,8 @@ export default function Explorer() {
   const handleUpload = async (e) => {
     const file = e.target.files[0]; if (!file) return;
     try {
-      const uploadRes = await uploadFile(file);
-      await addEntry(username, collName, file.name, uploadRes.hash);
+      const uploadRes = await api.uploadFile(file);
+      await api.addEntry(username, collName, file.name, uploadRes.hash);
       loadEntries();
     } catch (err) { alert(`上传失败: ${err.message}`); }
     e.target.value = '';
@@ -47,7 +46,7 @@ export default function Explorer() {
   const handleCommit = async () => {
     if (!commitMsg) return alert("请输入提交信息");
     try {
-      await commitVersion(username, collName, commitMsg);
+      await api.commitVersion(username, collName, commitMsg);
       setCommitMsg('');
       setRefreshTrigger(prev => prev + 1);
     } catch (e) { alert(`Commit 失败: ${e.message}`); }
@@ -56,29 +55,28 @@ export default function Explorer() {
   const handleDelete = async (path) => {
     if(!window.confirm(`移除 ${path}？`)) return;
     try {
-      await deleteEntry(username, collName, path);
+      await api.deleteEntry(username, collName, path);
       loadEntries();
     } catch(e) { alert(`移除失败: ${e.message}`); }
   };
 
   const handleMerge = async () => {
     try {
-      const res = await mergeCollection(username, collName, mergeSrc.user, mergeSrc.coll, mergeSrc.strategy);
-      alert(`合并成功! 冲突: ${res.conflicts_found}, 总条目: ${res.total_entries}`);
+      const res = await api.mergeCollection(username, mergeSrc.user, collName, mergeSrc.coll, mergeSrc.strategy);
+      alert(`合并成功! 总条目: ${res.total_entries || Object.keys(res.entries || {}).length}`);
       setShowMergeModal(false);
       loadEntries();
     } catch(e) {
-      if (e.status === 409) alert(`存在冲突，请处理:\n${e.data.conflicts.map(c => c.path).join('\n')}`);
-      else alert(`合并失败: ${e.message}`);
+      alert(`合并失败: ${e.message}`);
     }
   };
 
   const handleSaveLocal = async () => {
     try {
-      const col = await getCollection(username, collName);
+      const col = await api.getCollection(username, collName);
       if (!col.current_hash) return alert("此合集尚未提交任何版本，无法保存快照到本地");
       
-      await saveLocal({
+      await api.saveLocal({
         collection_hash: col.current_hash,
         local_path: syncConfig.path,
         include: syncConfig.include.split(',').filter(Boolean).map(s => s.trim()),
@@ -92,13 +90,13 @@ export default function Explorer() {
 
   const refreshSyncStatus = async (hash) => {
     try {
-      const status = await getLocalStatus(hash);
+      const status = await api.getLocalStatus(hash);
       setSyncStatus(status);
     } catch (e) { console.error("Sync status error:", e); }
   };
 
   return (
-    <div className="flex flex-1 overflow-hidden relative">
+    <div className="flex flex-1 overflow-hidden relative h-full">
       <div className="flex-1 flex flex-col bg-gray-900">
         <div className="h-16 bg-gray-800 border-b border-gray-700 flex items-center px-6 justify-between shrink-0">
           <div className="flex items-center space-x-4">
@@ -151,9 +149,9 @@ export default function Explorer() {
                 <tr key={entry.id || entry.path} className="group hover:bg-gray-800/50">
                   <td className="py-3 text-gray-400">📄</td>
                   <td className="py-3 font-mono text-sm text-blue-300">{entry.path}</td>
-                  <td className="py-3 text-xs text-gray-500 font-mono truncate">{entry.file_hash?.substring(0,16)}...</td>
+                  <td className="py-3 text-xs text-gray-500 font-mono truncate">{(entry.file_hash || '').substring(0,16)}...</td>
                   <td className="py-3 text-right space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <a href={downloadFileByPath(username, collName, entry.path)} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline text-xs">下载</a>
+                    <a href={api.downloadFileByPath(username, collName, entry.path)} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline text-xs">下载</a>
                     <button onClick={() => handleDelete(entry.path)} className="text-red-400 hover:underline text-xs">移除</button>
                   </td>
                 </tr>
@@ -231,8 +229,8 @@ export default function Explorer() {
                   <button onClick={() => refreshSyncStatus(syncStatus.collection_hash)} className="text-indigo-400 hover:underline">刷新</button>
                 </div>
                 <div className="max-h-32 overflow-y-auto text-[10px] font-mono text-gray-500">
-                  {syncStatus.missing_files?.map(f => (
-                    <div key={f.file_path} className="truncate">⚠️ 缺失: {f.file_path}</div>
+                  {syncStatus.missing_files?.map((f, idx) => (
+                    <div key={idx} className="truncate">缺失: {(typeof f === 'string' ? f : f.file_path)}</div>
                   ))}
                 </div>
               </div>

@@ -1,26 +1,26 @@
 import React, { useState } from 'react';
 import * as api from '../api';
+import { Link } from 'react-router-dom';
 
-export default function AnonExplorer({ initialHash = '', onForkSuccess }) {
-  const [hash, setHash] = useState(initialHash);
+export default function AnonExplorer() {
+  const [hash, setHash] = useState('');
   const [collection, setCollection] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const [showFork, setShowFork] = useState(false);
-  const [forkData, setForkData] = useState({ addPath: '', addHash: '', removePath: '' });
+  const [forkData, setForkData] = useState({ addPath: '', addHash: '', removePath: '', friendlyName: '' });
 
-  React.useEffect(() => {
-    if (initialHash) fetchCollection(initialHash);
-  }, [initialHash]);
+  const [showCommit, setShowCommit] = useState(false);
+  const [commitData, setCommitData] = useState({ message: '', addPath: '', addHash: '', removePath: '' });
 
   const fetchCollection = async (targetHash) => {
     if (!targetHash) return;
     setLoading(true);
     setError('');
     try {
-      const res = await api.getAnonCollection(targetHash);
-      setCollection(res.data);
+      const coll = await api.getAnonCollection(targetHash);
+      setCollection(coll);
       setHash(targetHash);
     } catch (err) {
       setError('合集未找到或网络错误');
@@ -38,22 +38,46 @@ export default function AnonExplorer({ initialHash = '', onForkSuccess }) {
     const remove_paths = forkData.removePath ? [forkData.removePath] : [];
     
     try {
-      const res = await api.forkAnonCollection(hash, add_entries, remove_paths);
-      alert(`Fork 成功！新 Hash: ${res.data.hash}`);
-      fetchCollection(res.data.hash);
+      const res = await api.forkAnonCollection(hash, add_entries, remove_paths, forkData.friendlyName);
+      const newHash = res.hash;
+      alert(`Fork 成功！新 Hash: ${newHash}`);
+      fetchCollection(newHash);
       setShowFork(false);
-      setForkData({ addPath: '', addHash: '', removePath: '' });
-      if (onForkSuccess) onForkSuccess(res.data.hash);
+      setForkData({ addPath: '', addHash: '', removePath: '', friendlyName: '' });
     } catch (err) {
-      alert(`Fork 失败: ${err.response?.data?.error || err.message}`);
+      alert(`Fork 失败: ${err.message}`);
+    }
+  };
+
+  const handleCommit = async (e) => {
+    e.preventDefault();
+    const newEntries = [];
+    if (commitData.addPath && commitData.addHash) {
+      newEntries.push({ path: commitData.addPath, hash: commitData.addHash });
+    }
+    if (commitData.removePath) {
+      newEntries.push({ path: commitData.removePath, hash: '' });
+    }
+    
+    try {
+      const res = await api.commitAnonCollection(hash, newEntries, commitData.message || 'update');
+      alert(`Commit 成功！新 Hash: ${res.hash}`);
+      fetchCollection(res.hash);
+      setShowCommit(false);
+      setCommitData({ message: '', addPath: '', addHash: '', removePath: '' });
+    } catch (err) {
+      alert(`Commit 失败: ${err.message}`);
     }
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <h2 className="text-2xl font-bold mb-4 flex items-center">
-        🔍 匿名合集浏览器
-      </h2>
+    <div className="p-6 max-w-4xl mx-auto h-full overflow-y-auto">
+      <div className="flex items-center gap-3 mb-6">
+        <Link to="/anon/create" className="text-sm bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded">
+          + 创建合集
+        </Link>
+        <h2 className="text-2xl font-bold">匿名合集浏览器</h2>
+      </div>
       
       <div className="flex gap-2 mb-4">
         <input
@@ -83,28 +107,90 @@ export default function AnonExplorer({ initialHash = '', onForkSuccess }) {
                 <span className="font-bold text-blue-400">{collection.version}</span>
               </div>
               <div className="text-gray-500 text-xs">
-                {new Date(collection.created_at).toLocaleString()}
+                {collection.created_at ? new Date(collection.created_at).toLocaleString() : ''}
               </div>
             </div>
-            {collection.name && (
-              <p className="text-gray-300 text-sm">{collection.name}</p>
+            {collection.friendly_name && (
+              <p className="text-gray-300 text-sm">{collection.friendly_name}</p>
             )}
-            <div className="mt-3 flex gap-2">
-              <code className="text-xs bg-gray-900 px-2 py-1 rounded text-gray-400 truncate flex-1">
-                Hash: {hash}
+            <div className="mt-3 flex gap-2 flex-wrap">
+              <code className="text-xs bg-gray-900 px-2 py-1 rounded text-gray-400 truncate">
+                Hash: {hash.substring(0, 16)}...
               </code>
+              <button 
+                onClick={() => setShowCommit(!showCommit)} 
+                className="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-xs"
+              >
+                {showCommit ? '取消' : 'Commit'}
+              </button>
               <button 
                 onClick={() => setShowFork(!showFork)} 
                 className="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-xs"
               >
-                {showFork ? '取消 Fork' : '🔀 Fork'}
+                {showFork ? '取消 Fork' : 'Fork'}
               </button>
             </div>
           </div>
 
+          {showCommit && (
+            <form onSubmit={handleCommit} className="bg-green-900/30 p-4 rounded-lg mb-4 border border-green-700">
+              <h4 className="font-bold mb-3">提交新版本</h4>
+              <div className="mb-3">
+                <label className="block text-xs text-gray-400 mb-1">Commit Message</label>
+                <input 
+                  value={commitData.message} 
+                  onChange={(e) => setCommitData({...commitData, message: e.target.value})}
+                  placeholder="描述本次变更..."
+                  className="w-full bg-gray-700 px-3 py-2 rounded text-sm"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">新增/修改文件路径</label>
+                  <input 
+                    value={commitData.addPath} 
+                    onChange={(e) => setCommitData({...commitData, addPath: e.target.value})}
+                    placeholder="如 CHANGELOG.md"
+                    className="w-full bg-gray-700 px-3 py-2 rounded text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">文件 Hash</label>
+                  <input 
+                    value={commitData.addHash} 
+                    onChange={(e) => setCommitData({...commitData, addHash: e.target.value})}
+                    placeholder="sha256..."
+                    className="w-full bg-gray-700 px-3 py-2 rounded text-sm"
+                  />
+                </div>
+              </div>
+              <div className="mb-3">
+                <label className="block text-xs text-gray-400 mb-1">移除文件路径 (留空不删除)</label>
+                <input 
+                  value={commitData.removePath} 
+                  onChange={(e) => setCommitData({...commitData, removePath: e.target.value})}
+                  placeholder="如 old.txt"
+                  className="w-full bg-gray-700 px-3 py-2 rounded text-sm"
+                />
+              </div>
+              <button type="submit" className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm">
+                确认提交
+              </button>
+            </form>
+          )}
+
           {showFork && (
             <form onSubmit={handleFork} className="bg-purple-900/30 p-4 rounded-lg mb-4 border border-purple-700">
-              <h4 className="font-bold mb-3">创建变体</h4>
+              <h4 className="font-bold mb-3">Fork 变体</h4>
+              <div className="mb-3">
+                <label className="block text-xs text-gray-400 mb-1">Fork 名称</label>
+                <input 
+                  value={forkData.friendlyName} 
+                  onChange={(e) => setForkData({...forkData, friendlyName: e.target.value})}
+                  placeholder="可选"
+                  className="w-full bg-gray-700 px-3 py-2 rounded text-sm"
+                />
+              </div>
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">新增文件路径</label>
@@ -149,10 +235,10 @@ export default function AnonExplorer({ initialHash = '', onForkSuccess }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {collection.entries.map((entry, idx) => (
+              {collection.entries?.map((entry, idx) => (
                 <tr key={idx} className="hover:bg-gray-800/50">
                   <td className="py-2 font-mono text-sm text-blue-300">{entry.path}</td>
-                  <td className="py-2 font-mono text-xs text-gray-500 truncate">{entry.hash}</td>
+                  <td className="py-2 font-mono text-xs text-gray-500 truncate">{(entry.hash || '').substring(0, 24)}...</td>
                   <td className="py-2 text-right">
                     <a 
                       href={api.getAnonFileDownloadUrl(hash, entry.path)} 

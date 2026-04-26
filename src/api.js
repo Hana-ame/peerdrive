@@ -74,3 +74,45 @@ export const p2pRequestFile = (hash) => request('POST', '/p2p/request-file', { h
 export const getWSInfo = () => request('GET', '/p2p/ws/info');
 
 export const WS_TRANSFER_URL = API_BASE.replace(/^http/, 'ws') + '/ws/transfer';
+
+/* ---- anon collection commit ---- */
+export const commitAnonCollection = (source_hash, entries, commit_message = '') =>
+  request('POST', '/anon/collections/commit', { source_hash, entries, commit_message });
+
+/* ---- search ---- */
+export const searchCollections = (q) =>
+  request('GET', `/collections/search?q=${encodeURIComponent(q)}`);
+
+/* ---- file upload/delete ---- */
+export const uploadFile = (file) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return fetch(`${API_BASE}/files/upload`, { method: 'POST', body: fd }).then(r => {
+    if (!r.ok) throw new Error(`Upload failed: ${r.status}`);
+    return r.json();
+  });
+};
+export const deleteFile = (hash) => request('DELETE', `/files/${hash}`);
+
+/* ---- task status ---- */
+export const getTasks = () => request('GET', '/tasks');
+export const getTaskStatus = (id) => request('GET', `/tasks/${id}`);
+
+/* ---- health ---- */
+export const ping = () => request('GET', '/ping');
+
+/* ---- alias exports for legacy usage ---- */
+export const createCollection = createUserCollection;
+export const listCollections = getUserCollections;
+export const getCollection = getUserCollection;
+export const addEntry = addCollectionEntry;
+export const deleteEntry = removeCollectionEntry;
+export const commitVersion = commitCollection;
+export const downloadFileByPath = getUserFileDownloadUrl;
+export const mergeCollection = mergeUserCollection;
+export const getNodeInfo = getP2PNode;
+
+/* ---- local sync ---- */
+export const saveLocal = (body) => request('POST', '/local/save', body);
+
+export const getLocalStatus = (hash) => request('GET', `/local/status/${hash}`);

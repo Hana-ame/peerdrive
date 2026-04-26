@@ -15,8 +15,8 @@ export default function Plaza() {
 
   const loadCollections = async () => {
     try {
-      const res = await listCollections(username);
-      setCollections(res.data || []);
+      const data = await listCollections(username);
+      setCollections(data.collections || data.data || []);
     } catch (e) { console.error(e); }
   };
 
@@ -29,9 +29,8 @@ export default function Plaza() {
     }
     setIsSearching(true);
     try {
-      // Using the search endpoint from api.js
       const data = await searchCollections(searchQuery);
-      setCollections(data.data || []);
+      setCollections(data.collections || data.data || []);
     } catch (e) {
       console.error(e);
       alert("搜索失败");
@@ -42,7 +41,7 @@ export default function Plaza() {
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    if (!newCollName) return;
+    if (!newCollName || !username) return;
     try {
       await createCollection(username, newCollName);
       setNewCollName('');
@@ -101,7 +100,7 @@ export default function Plaza() {
                 <div className="w-10 h-10 bg-gray-700 rounded-lg flex items-center justify-center text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition-colors">
                   📦
                 </div>
-                <span className="text-xs text-gray-500">{new Date(coll.created_at).toLocaleDateString()}</span>
+                <span className="text-xs text-gray-500">{coll.created_at ? new Date(coll.created_at).toLocaleDateString() : ''}</span>
               </div>
               <h3 className="text-lg font-bold truncate text-gray-100">{coll.collection_name}</h3>
               <p className="text-sm text-gray-400 mt-1">{coll.username}</p>

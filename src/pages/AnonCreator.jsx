@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import * as api from '../api';
+import { Link, useNavigate } from 'react-router-dom';
 
-export default function AnonCreator({ onCreated }) {
+export default function AnonCreator() {
   const [entries, setEntries] = useState([{ path: '', hash: '' }]);
   const [loading, setLoading] = useState(false);
+  const [friendlyName, setFriendlyName] = useState('');
+  const navigate = useNavigate();
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -12,12 +15,12 @@ export default function AnonCreator({ onCreated }) {
 
     setLoading(true);
     try {
-      const res = await api.createAnonCollection(filtered);
+      const res = await api.createAnonCollection(filtered, friendlyName);
       alert(`创建成功！Hash: ${res.hash}`);
       setEntries([{ path: '', hash: '' }]);
-      if (onCreated) onCreated(res.hash);
+      navigate('/anon');
     } catch (err) {
-      alert(`创建失败: ${err.response?.data?.error || err.message}`);
+      alert(`创建失败: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -42,15 +45,27 @@ export default function AnonCreator({ onCreated }) {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <h2 className="text-2xl font-bold mb-4 flex items-center">
-        ➕ 创建匿名合集
-      </h2>
+    <div className="p-6 max-w-4xl mx-auto h-full overflow-y-auto">
+      <div className="flex items-center gap-3 mb-6">
+        <Link to="/anon" className="text-gray-400 hover:text-white text-sm">
+          ← 匿名浏览器
+        </Link>
+        <h2 className="text-2xl font-bold">创建匿名合集</h2>
+      </div>
       <p className="text-gray-400 text-sm mb-4">
-        创建不可变的匿名合集。创建后无法修改，只能通过 Fork 生成新版本。
+        创建不可变的匿名合集。如需修改，请创建后使用 <strong>Fork</strong> 或 <strong>Commit</strong> 生成新版本。
       </p>
 
       <form onSubmit={handleCreate} className="space-y-3">
+        <div className="mb-4">
+          <label className="block text-xs text-gray-400 mb-1">合集名称</label>
+          <input
+            value={friendlyName}
+            onChange={(e) => setFriendlyName(e.target.value)}
+            placeholder="可选友好名称"
+            className="bg-gray-800 border border-gray-600 px-3 py-2 rounded text-sm w-64 focus:outline-none focus:border-blue-500"
+          />
+        </div>
         {entries.map((entry, idx) => (
           <div key={idx} className="flex gap-2 items-center">
             <input
