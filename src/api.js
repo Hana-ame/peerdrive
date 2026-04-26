@@ -116,3 +116,5 @@ export const getNodeInfo = getP2PNode;
 export const saveLocal = (body) => request('POST', '/local/save', body);
 
 export const getLocalStatus = (hash) => request('GET', `/local/status/${hash}`);
+
+export const listFiles = (sort = 'time') => request('GET', `/files?sort=${sort}`);
