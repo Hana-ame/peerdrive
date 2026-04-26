@@ -106,24 +106,28 @@ export default function AnonCreator() {
     const valid = entries.filter(e => e.path?.trim() && e.hash);
     if (!valid.length) return alert('请先添加文件');
     setSaving(true);
+    const oldHash = savedHash;
     try {
       const res = await api.createAnonCollection(valid, fname.trim());
       setSavedHash(res.hash);
       setOpenHash(res.hash);
       loadCollections();
       nav(`/anon/collections/${res.hash}`);
+      if (oldHash) api.deleteFile(oldHash).catch(() => {});
     } catch (err) { alert(`创建失败: ${err.message}`); }
     setSaving(false);
   };
   const handleCommit = async () => {
     if (!savedHash) return handleMint();
     const valid = entries.filter(e => e.path?.trim() && e.hash);
+    const oldHash = savedHash;
     try {
-      const res = await api.commitAnonCollection(savedHash, valid.map(e => ({ path: e.path, hash: e.hash })));
+      const res = await api.commitAnonCollection(oldHash, valid.map(e => ({ path: e.path, hash: e.hash })));
       setSavedHash(res.hash);
       setOpenHash(res.hash);
       loadCollections();
       nav(`/anon/collections/${res.hash}`);
+      api.deleteFile(oldHash).catch(() => {});
     } catch (err) { alert(`提交失败: ${err.message}`); }
   };
 
