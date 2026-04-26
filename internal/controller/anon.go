@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"peerdrive/internal/model"
@@ -50,14 +52,30 @@ func CreateAnonCollection(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"hash": hash})
 }
 
+// ListAnonCollections godoc
+// @Summary      List anonymous collections
+// @Description  Returns all anonymous collections known to this node (from file_meta).
+// @Tags         anon
+// @Produce      json
+// @Success      200  {array}  model.AnonCollectionSummary  "List of collections"
+// @Router       /anon/collections [get]
+func ListAnonCollections(c *gin.Context) {
+	colls, err := anonSvc.ListCollections()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, colls)
+}
+
 // GetAnonCollection godoc
 // @Summary      Get anonymous collection by hash
-// @Description  Retrieve an anonymous collection's JSON metadata by its content hash.
+// @Description  Retrieve an anonymous collection's metadata and entries.
 // @Tags         anon
 // @Produce      json
 // @Param        hash  path  string  true  "Collection SHA256 hash"
-// @Success      200  {object}  model.AnonCollection
-// @Failure      404  {object}  map[string]string  "Collection not found"
+// @Success      200  {object}  model.AnonCollection  "Collection"
+// @Failure      404  {object}  map[string]string     "Collection not found"
 // @Router       /anon/collections/{hash} [get]
 func GetAnonCollection(c *gin.Context) {
 	hash := c.Param("hash")
@@ -108,7 +126,12 @@ func DownloadAnonFile(c *gin.Context) {
 	}
 	defer reader.Close()
 
-	c.Header("Content-Disposition", "attachment; filename="+filename)
+	downloadFilename := filename
+	if downloadFilename == "" {
+		downloadFilename = filepath.Base(filePath)
+	}
+
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, downloadFilename))
 	if gziped {
 		c.Header("Content-Encoding", "gzip")
 	}

@@ -101,6 +101,10 @@ func (s *AnonService) GetCollectionByHash(hash string) (*model.AnonCollection, e
 	return &coll, nil
 }
 
+func (s *AnonService) ListCollections() ([]model.AnonCollectionSummary, error) {
+	return repository.ListAnonCollections(s.config.StorageDir)
+}
+
 func (s *AnonService) CommitCollection(
 	sourceHash string,
 	entries []model.AnonCollectionEntry,

@@ -20,6 +20,17 @@ definitions:
       path:
         type: string
     type: object
+  peerdrive_internal_model.AnonCollectionSummary:
+    properties:
+      created_at:
+        type: string
+      friendly_name:
+        type: string
+      hash:
+        type: string
+      version:
+        type: integer
+    type: object
   peerdrive_internal_model.FileListItem:
     properties:
       created_at:
@@ -205,6 +216,20 @@ paths:
       tags:
       - actions
   /anon/collections:
+    get:
+      description: Returns all anonymous collections known to this node (from file_meta).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of collections
+          schema:
+            items:
+              $ref: '#/definitions/peerdrive_internal_model.AnonCollectionSummary'
+            type: array
+      summary: List anonymous collections
+      tags:
+      - anon
     post:
       consumes:
       - application/json
@@ -255,8 +280,7 @@ paths:
       - anon
   /anon/collections/{hash}:
     get:
-      description: Retrieve an anonymous collection's JSON metadata by its content
-        hash.
+      description: Retrieve an anonymous collection's metadata and entries.
       parameters:
       - description: Collection SHA256 hash
         in: path
@@ -267,7 +291,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Collection
           schema:
             $ref: '#/definitions/peerdrive_internal_model.AnonCollection'
         "404":

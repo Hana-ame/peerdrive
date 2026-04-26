@@ -196,6 +196,27 @@ const docTemplate = `{
             }
         },
         "/anon/collections": {
+            "get": {
+                "description": "Returns all anonymous collections known to this node (from file_meta).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "anon"
+                ],
+                "summary": "List anonymous collections",
+                "responses": {
+                    "200": {
+                        "description": "List of collections",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/peerdrive_internal_model.AnonCollectionSummary"
+                            }
+                        }
+                    }
+                }
+            },
             "post": {
                 "description": "Create an immutable content-addressed collection with file entries. Entries validated for path traversal and valid SHA256 hashes.",
                 "consumes": [
@@ -431,7 +452,7 @@ const docTemplate = `{
         },
         "/anon/collections/{hash}": {
             "get": {
-                "description": "Retrieve an anonymous collection's JSON metadata by its content hash.",
+                "description": "Retrieve an anonymous collection's metadata and entries.",
                 "produces": [
                     "application/json"
                 ],
@@ -450,7 +471,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "Collection",
                         "schema": {
                             "$ref": "#/definitions/peerdrive_internal_model.AnonCollection"
                         }
@@ -1187,6 +1208,23 @@ const docTemplate = `{
                 },
                 "path": {
                     "type": "string"
+                }
+            }
+        },
+        "peerdrive_internal_model.AnonCollectionSummary": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "friendly_name": {
+                    "type": "string"
+                },
+                "hash": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
                 }
             }
         },

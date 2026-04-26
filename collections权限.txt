@@ -1,0 +1,4 @@
+collections需要分public，unlisted，private三种
+其中，public是公开，并且可以通过列出coll访问的
+unlisted在获得url的情况下可以访问
+private需要验证权限。

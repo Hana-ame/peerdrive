@@ -74,3 +74,43 @@ func GetAnonCollectionByHash(hash, storageDir string) (*model.AnonCollection, er
 	}
 	return &coll, nil
 }
+
+func ListAnonCollections(storageDir string) ([]model.AnonCollectionSummary, error) {
+	if storageDir == "" {
+		storageDir = anonStorageDir
+	}
+	rows, err := DB.Query(
+		`SELECT hash, created_at FROM file_meta WHERE type = ? ORDER BY created_at DESC`,
+		FileTypeAnonCollection,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query anon collections: %w", err)
+	}
+	defer rows.Close()
+
+	var results []model.AnonCollectionSummary
+	for rows.Next() {
+		var hash, createdAt string
+		if err := rows.Scan(&hash, &createdAt); err != nil {
+			continue
+		}
+		summary := model.AnonCollectionSummary{
+			Hash:      hash,
+			CreatedAt: createdAt,
+		}
+		// try to read json for friendly_name & version
+		jsonPath := filepath.Join(storageDir, hash[:2], hash)
+		if data, err := os.ReadFile(jsonPath); err == nil {
+			var coll model.AnonCollection
+			if json.Unmarshal(data, &coll) == nil {
+				summary.FriendlyName = coll.FriendlyName
+				summary.Version = coll.Version
+			}
+		}
+		results = append(results, summary)
+	}
+	if results == nil {
+		results = []model.AnonCollectionSummary{}
+	}
+	return results, nil
+}

@@ -99,6 +99,7 @@ func SetupRouter(
 	anon := r.Group("/anon")
 	{
 		anon.POST("/collections", controller.CreateAnonCollection)
+		anon.GET("/collections", controller.ListAnonCollections)
 		anon.POST("/collections/commit", controller.CommitAnonCollection)
 		anon.GET("/collections/:hash", controller.GetAnonCollection)
 		anon.GET("/collections/:hash/*filepath", controller.DownloadAnonFile)
