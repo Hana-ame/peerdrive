@@ -430,18 +430,7 @@ export default function FileManager() {
         <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-6 rounded-xl w-[680px] border border-gray-600 shadow-2xl flex flex-col max-h-[85vh]">
             <h3 className="text-lg font-bold mb-1">添加文件</h3>
-            <p className="text-xs text-gray-400 mb-4">浏览节点文件系统，选择文件或文件夹注册</p>
-
-            <div className="flex space-x-3 mb-4">
-              <button
-                onClick={() => setRegTarget('collection')}
-                className={`flex-1 px-3 py-2 rounded text-sm border ${regTarget === 'collection' ? 'border-teal-500 bg-teal-900/30 text-teal-300' : 'border-gray-600 text-gray-400'}`}
-              >注册为匿名合集</button>
-              <button
-                onClick={() => setRegTarget('dir')}
-                className={`flex-1 px-3 py-2 rounded text-sm border ${regTarget === 'dir' ? 'border-indigo-500 bg-indigo-900/30 text-indigo-300' : 'border-gray-600 text-gray-400'}`}
-              >仅注册文件</button>
-            </div>
+            <p className="text-xs text-gray-400 mb-4">浏览节点文件系统。选中文件夹注册后自动创建为匿名合集。</p>
 
             <div className="flex items-center space-x-2 mb-3">
               <button onClick={handleRegParent} disabled={currentDir === '/'} className="px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-30 text-xs">←</button>
