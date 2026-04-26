@@ -80,6 +80,7 @@ func InitDB(dbPath string) error {
 		username TEXT NOT NULL,
 		collection_name TEXT NOT NULL,
 		current_hash TEXT DEFAULT NULL,
+		tags TEXT DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(username, collection_name)
 	);
@@ -129,5 +130,6 @@ func InitDB(dbPath string) error {
 	// 迁移：从旧 files 表迁移到新表（忽略错误）
 	DB.Exec(`ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`)
 	DB.Exec(`ALTER TABLE collections ADD COLUMN visibility TEXT DEFAULT 'public'`)
+	DB.Exec(`ALTER TABLE collections ADD COLUMN tags TEXT DEFAULT ''`)
 	return nil
 }

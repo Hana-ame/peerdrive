@@ -140,6 +140,7 @@ func SetupRouter(
 		collections.GET("/:username/:collection_name/log", controller.GetVersionLog)
 		collections.POST("/:username/:collection_name/rollback/:version_id", controller.RollbackCollection)
 		collections.POST("/:username/:collection_name/visibility", controller.SetCollectionVisibility)
+		collections.POST("/:username/:collection_name/tags", controller.UpdateCollectionTags)
 	}
 
 	// Local sync

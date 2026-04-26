@@ -48,15 +48,22 @@ import (
 // @Router /collections [post]
 func CreateCollection(c *gin.Context) {
 	var req struct {
-		Username       string `json:"username"`
-		CollectionName string `json:"collection_name"`
-		Visibility     string `json:"visibility"`
+		Username       string   `json:"username"`
+		CollectionName string   `json:"collection_name"`
+		Visibility     string   `json:"visibility"`
+		Tags           []string `json:"tags"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
-	id, err := repository.CreateCollectionWithVisibility(req.Username, req.CollectionName, req.Visibility)
+	var id int
+	var err error
+	if len(req.Tags) > 0 {
+		id, err = repository.CreateCollectionWithTags(req.Username, req.CollectionName, req.Visibility, req.Tags)
+	} else {
+		id, err = repository.CreateCollectionWithVisibility(req.Username, req.CollectionName, req.Visibility)
+	}
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
@@ -485,9 +492,9 @@ func ListPublicCollections(c *gin.Context) {
 	var rows *sql.Rows
 	var err error
 	if q != "" {
-		rows, err = repository.DB.Query(`SELECT id, username, collection_name, current_hash, visibility, created_at FROM collections WHERE visibility = 'public' AND (username LIKE ? OR collection_name LIKE ?) ORDER BY created_at DESC`, "%"+q+"%", "%"+q+"%")
+		rows, err = repository.DB.Query(`SELECT id, username, collection_name, current_hash, visibility, tags, created_at FROM collections WHERE visibility = 'public' AND (username LIKE ? OR collection_name LIKE ?) ORDER BY created_at DESC`, "%"+q+"%", "%"+q+"%")
 	} else {
-		rows, err = repository.DB.Query(`SELECT id, username, collection_name, current_hash, visibility, created_at FROM collections WHERE visibility = 'public' ORDER BY created_at DESC`)
+		rows, err = repository.DB.Query(`SELECT id, username, collection_name, current_hash, visibility, tags, created_at FROM collections WHERE visibility = 'public' ORDER BY created_at DESC`)
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -496,14 +503,43 @@ func ListPublicCollections(c *gin.Context) {
 	defer rows.Close()
 	var cols []model.Collection
 	for rows.Next() {
-		var col model.Collection
-		if err := rows.Scan(&col.ID, &col.Username, &col.CollectionName, &col.CurrentHash, &col.Visibility, &col.CreatedAt); err != nil {
+		col, err := model.ScanCollection(rows)
+		if err != nil {
 			continue
 		}
-		cols = append(cols, col)
+		cols = append(cols, *col)
 	}
 	if cols == nil {
 		cols = []model.Collection{}
 	}
 	c.JSON(http.StatusOK, gin.H{"data": cols})
+}
+
+// UpdateCollectionTags godoc
+// @Summary Update collection tags
+// @Description Replace the tag list for a collection
+// @Tags collections
+// @Accept json
+// @Produce json
+// @Param username path string true "Username"
+// @Param collection_name path string true "Collection name"
+// @Param body body object{tags=[]string} true "Tag list"
+// @Success 200 {object} map[string]string "ok"
+// @Failure 400,404 {object} map[string]string "error"
+// @Router /collections/{username}/{collection_name}/tags [post]
+func UpdateCollectionTags(c *gin.Context) {
+	username := c.Param("username")
+	collectionName := c.Param("collection_name")
+	var req struct {
+		Tags []string `json:"tags"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if err := repository.UpdateCollectionTags(username, collectionName, req.Tags); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
 }

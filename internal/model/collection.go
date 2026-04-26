@@ -10,13 +10,68 @@
 
 package model
 
+import (
+	"database/sql"
+	"encoding/json"
+)
+
 type Collection struct {
-	ID             int     `db:"id" json:"id"`
-	Username       string  `db:"username" json:"username"`
-	CollectionName string  `db:"collection_name" json:"collection_name"`
-	CurrentHash    *string `db:"current_hash" json:"current_hash"`
-	Visibility     string  `db:"visibility" json:"visibility"`
-	CreatedAt      string  `db:"created_at" json:"created_at"`
+	ID             int      `db:"id" json:"id"`
+	Username       string   `db:"username" json:"username"`
+	CollectionName string   `db:"collection_name" json:"collection_name"`
+	CurrentHash    *string  `db:"current_hash" json:"current_hash"`
+	Visibility     string   `db:"visibility" json:"visibility"`
+	Tags           []string `db:"tags" json:"tags"`
+	CreatedAt      string   `db:"created_at" json:"created_at"`
+}
+
+type collectionRow struct {
+	ID             int
+	Username       string
+	CollectionName string
+	CurrentHash    *string
+	Visibility     string
+	Tags           sql.NullString
+	CreatedAt      string
+}
+
+func (c *Collection) ScanRow(s Scanner, columns ...string) error {
+	var r collectionRow
+	v := &r
+	v.ID = c.ID
+	v.Username = c.Username
+	v.CurrentHash = c.CurrentHash
+	v.Visibility = c.Visibility
+	v.CreatedAt = c.CreatedAt
+	return nil
+}
+
+type Scanner interface {
+	Scan(...interface{}) error
+}
+
+func ScanCollection(scanner interface{ Scan(...interface{}) error }) (*Collection, error) {
+	var c Collection
+	var tagsStr sql.NullString
+	err := scanner.Scan(&c.ID, &c.Username, &c.CollectionName, &c.CurrentHash, &c.Visibility, &tagsStr, &c.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if tagsStr.Valid && tagsStr.String != "" {
+		json.Unmarshal([]byte(tagsStr.String), &c.Tags)
+	}
+	if c.Tags == nil {
+		c.Tags = []string{}
+	}
+	return &c, nil
+}
+
+func MarshalTags(tags []string) string {
+	if tags == nil {
+		return ""
+	}
+	data, _ := json.Marshal(tags)
+	return string(data)
 }
 
 type CollectionEntry struct {
