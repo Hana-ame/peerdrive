@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"peerdrive/internal/model"
 )
@@ -107,6 +108,13 @@ func ListAnonCollections(storageDir string) ([]model.AnonCollectionSummary, erro
 				summary.Version = coll.Version
 				summary.Tags = coll.Tags
 				summary.EntryCount = len(coll.Entries)
+				// name preview: first 3 filenames
+				preview := make([]string, 0, 3)
+				for i, e := range coll.Entries {
+					if i >= 3 { break }
+					preview = append(preview, e.Path)
+				}
+				summary.NamePreview = strings.Join(preview, ", ")
 			}
 		}
 		results = append(results, summary)

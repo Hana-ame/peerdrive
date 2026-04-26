@@ -41,6 +41,7 @@ type AnonEntry struct {
 type AnonCollectionSummary struct {
 	Hash         string   `json:"hash"`
 	FriendlyName string   `json:"friendly_name,omitempty"`
+	NamePreview  string   `json:"name_preview,omitempty"`
 	Version      int      `json:"version"`
 	Tags         []string `json:"tags,omitempty"`
 	EntryCount   int      `json:"entry_count"`
