@@ -49,7 +49,7 @@ export default function Plaza() {
   };
 
   const collName = (c) => c.collection_name || c.friendly_name || (c.hash ? c.hash.substring(0, 12) + '...' : '未命名');
-  const collUser = (c) => c.username || (!c.isDummy ? '匿名' : 'Peerdrive');
+  const collUser = (c) => c.username || (c.isDummy ? 'Peerdrive' : '');
   const collTime = (c) => {
     if (c.isDummy) return '';
     const t = c.created_at || c.timestamp;
@@ -141,7 +141,7 @@ export default function Plaza() {
                   <span className="text-xs text-gray-500">{collTime(c)}</span>
                 </div>
                 <h3 className="text-lg font-bold truncate text-gray-100">{collName(c)}</h3>
-                <p className="text-sm text-gray-400 mt-1">{collUser(c)}</p>
+                {collUser(c) && <p className="text-sm text-gray-400 mt-1">{collUser(c)}</p>}
                 {c.isDummy && (
                   <p className="text-[10px] text-blue-400/60 mt-2 flex items-center gap-1">
                     <span>🔍</span> 来自 P2P 网络的示例合集 — 连接注册中心获取更多
