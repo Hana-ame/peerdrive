@@ -143,6 +143,14 @@ export default function AnonExplorer() {
               </div>
               <div className="flex-1" />
               <span className="text-xs text-gray-600">{currentItems.totalFiles} 项</span>
+              <button onClick={async () => {
+                if (!collection?.entries?.length) return;
+                const name = collection.friendly_name || collection.name_preview || '合集副本';
+                try {
+                  const res = await api.createAnonCollection(collection.entries, name + ' (副本)');
+                  navigate(`/anon/collections/${res.hash}`);
+                } catch(e) { alert('保存失败: ' + e.message); }
+              }} className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-xs">💾 保存</button>
             </div>
 
             <div className="flex-1 overflow-y-auto">

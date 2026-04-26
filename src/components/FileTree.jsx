@@ -58,6 +58,7 @@ export default function FileTree({ entries, entryActions }) {
   const [expanded, setExpanded] = useState(new Set());
   const [renaming, setRenaming] = useState(null);
   const [dragOverPath, setDragOverPath] = useState(null);
+  const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
 
   const toggle = (path) => setExpanded(prev => { const n = new Set(prev); n.has(path) ? n.delete(path) : n.add(path); return n; });
@@ -65,7 +66,9 @@ export default function FileTree({ entries, entryActions }) {
     const n = newFolderName.trim();
     if (n) entryActions?.onNewFolder?.(n);
     setNewFolderName('');
+    setShowNewFolder(false);
   };
+  const openNewFolder = () => { setShowNewFolder(true); setNewFolderName(''); };
 
   const renderEntries = (nodes, depth, parentPath) => {
     const rows = [];
@@ -166,16 +169,16 @@ export default function FileTree({ entries, entryActions }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-800 shrink-0">
-        {newFolderName !== '' ? (
+        {showNewFolder ? (
           <div className="flex items-center gap-2">
             <input autoFocus value={newFolderName} onChange={e => setNewFolderName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') submitNewFolder(); if (e.key === 'Escape') setNewFolderName(''); }}
+              onKeyDown={e => { if (e.key === 'Enter') submitNewFolder(); if (e.key === 'Escape') setShowNewFolder(false); }}
               placeholder="文件夹名称" className="bg-gray-700 px-2 py-1 rounded text-sm border border-blue-500 outline-none w-32" />
             <button onClick={submitNewFolder} className="text-sm bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded">确定</button>
-            <button onClick={() => setNewFolderName('')} className="text-sm text-gray-500 hover:text-white">取消</button>
+            <button onClick={() => setShowNewFolder(false)} className="text-sm text-gray-500 hover:text-white">取消</button>
           </div>
         ) : (
-          <button onClick={() => setNewFolderName('')} className="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded">+ 新建文件夹</button>
+          <button onClick={openNewFolder} className="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded">+ 新建文件夹</button>
         )}
         <span className="text-sm text-gray-500">{entries.length} 个条目</span>
       </div>

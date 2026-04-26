@@ -53,6 +53,7 @@ export default function AnonCreator() {
   const [openHash, setOpenHash] = useState('');
   const [savedHash, setSavedHash] = useState('');
   const [saving, setSaving] = useState(false);
+  const lastClick = useRef(0);
 
   useEffect(() => { loadFiles(); loadCollections(); }, [sort]);
   useEffect(() => {
@@ -89,6 +90,9 @@ export default function AnonCreator() {
   };
 
   const addEntry = (hash, path, mime_type, size) => {
+    const now = Date.now();
+    if (now - lastClick.current < 500) return;
+    lastClick.current = now;
     setEntries(prev => [...prev, { hash, path, mime_type, size }]);
   };
   const removeEntry = (entry) => {
