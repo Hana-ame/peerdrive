@@ -19,6 +19,7 @@ import (
 	"errors"
 	"net/http"
 
+	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 	"peerdrive/pkg/hashutil"
@@ -199,4 +200,26 @@ func DiffVersions(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"added": added, "removed": removed, "modified": modified})
+}
+
+// ListFiles godoc
+// @Summary      List all registered files
+// @Description  Returns all registered files with provider info. Supports sort by time, name, path, type, size.
+// @Tags         files
+// @Produce      json
+// @Param        sort  query  string  false  "Sort field: time|name|path|type|size"  default(time)
+// @Success      200   {array}   model.FileListItem
+// @Failure      500   {object}  map[string]string
+// @Router       /files [get]
+func ListFiles(c *gin.Context) {
+	sortBy := c.DefaultQuery("sort", "time")
+	items, err := repository.ListAllFiles(sortBy)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if items == nil {
+		items = []model.FileListItem{}
+	}
+	c.JSON(http.StatusOK, items)
 }

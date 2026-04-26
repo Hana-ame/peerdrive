@@ -108,6 +108,7 @@ func SetupRouter(
 	// File management
 	files := r.Group("/files")
 	{
+		files.GET("", controller.ListFiles)
 		files.POST("/upload", controller.UploadFile)
 		files.POST("/register_local", controller.RegisterLocalFile)
 		files.POST("/register_folder", controller.RegisterFolder)

@@ -20,6 +20,25 @@ definitions:
       path:
         type: string
     type: object
+  peerdrive_internal_model.FileListItem:
+    properties:
+      created_at:
+        type: string
+      filename:
+        type: string
+      hash:
+        type: string
+      mime_type:
+        type: string
+      provider_path:
+        type: string
+      provider_type:
+        type: string
+      size:
+        type: integer
+      type:
+        type: string
+    type: object
 host: localhost:3000
 info:
   contact: {}
@@ -711,6 +730,34 @@ paths:
       summary: Search collections
       tags:
       - collections
+  /files:
+    get:
+      description: Returns all registered files with provider info. Supports sort
+        by time, name, path, type, size.
+      parameters:
+      - default: time
+        description: 'Sort field: time|name|path|type|size'
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/peerdrive_internal_model.FileListItem'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all registered files
+      tags:
+      - files
   /ping:
     get:
       description: Returns "pong" to confirm the server is running

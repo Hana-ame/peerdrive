@@ -975,6 +975,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/files": {
+            "get": {
+                "description": "Returns all registered files with provider info. Supports sort by time, name, path, type, size.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "List all registered files",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "time",
+                        "description": "Sort field: time|name|path|type|size",
+                        "name": "sort",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/peerdrive_internal_model.FileListItem"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/ping": {
             "get": {
                 "description": "Returns \"pong\" to confirm the server is running",
@@ -1145,6 +1186,35 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "path": {
+                    "type": "string"
+                }
+            }
+        },
+        "peerdrive_internal_model.FileListItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "filename": {
+                    "type": "string"
+                },
+                "hash": {
+                    "type": "string"
+                },
+                "mime_type": {
+                    "type": "string"
+                },
+                "provider_path": {
+                    "type": "string"
+                },
+                "provider_type": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "type": {
                     "type": "string"
                 }
             }

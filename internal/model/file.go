@@ -22,3 +22,14 @@ type FileProvider struct {
 	Path         string `db:"path"`
 	Available    bool   `db:"available"`
 }
+
+type FileListItem struct {
+	Hash         string `json:"hash"`
+	Filename     string `json:"filename"`
+	Size         int64  `json:"size"`
+	MimeType     string `json:"mime_type"`
+	CreatedAt    string `json:"created_at"`
+	Type         string `json:"type"`
+	ProviderType string `json:"provider_type"`
+	ProviderPath string `json:"provider_path"`
+}

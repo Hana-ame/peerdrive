@@ -68,3 +68,44 @@ func MarkProviderUnavailable(id int) error {
 	_, err := DB.Exec(`UPDATE file_providers SET available = 0 WHERE id = ?`, id)
 	return err
 }
+
+func ListAllFiles(sortBy string) ([]model.FileListItem, error) {
+	orderCol := "m.created_at"
+	switch sortBy {
+	case "path":
+		orderCol = "p.path"
+	case "name":
+		orderCol = "m.filename"
+	case "type":
+		orderCol = "m.mime_type"
+	case "size":
+		orderCol = "m.size"
+	default:
+		orderCol = "m.created_at"
+	}
+
+	query := `
+		SELECT m.hash, m.filename, m.size, m.mime_type, m.created_at, m.type,
+		       COALESCE(p.provider_type, ''), COALESCE(p.path, '')
+		FROM file_meta m
+		LEFT JOIN file_providers p ON p.hash = m.hash AND p.available = 1
+		WHERE m.type = 'blob'
+		GROUP BY m.hash
+		ORDER BY ` + orderCol + ` DESC`
+
+	rows, err := DB.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []model.FileListItem
+	for rows.Next() {
+		var f model.FileListItem
+		if err := rows.Scan(&f.Hash, &f.Filename, &f.Size, &f.MimeType, &f.CreatedAt, &f.Type, &f.ProviderType, &f.ProviderPath); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, nil
+}
