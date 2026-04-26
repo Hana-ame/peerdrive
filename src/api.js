@@ -36,6 +36,10 @@ export const registerLocalFile = (path, filename) =>
 export const registerFolder = (folderPath) =>
   request('POST', '/files/register_folder', { folder_path: folderPath });
 
+/* ---- file system browse ---- */
+export const browseDir = (dirPath = '/') =>
+  request('GET', `/files/browse?path=${encodeURIComponent(dirPath)}`);
+
 /* ---- anon collections ---- */
 export const createAnonCollection = (entries, friendly_name = '') =>
   request('POST', '/anon/collections', { entries, friendly_name });
@@ -154,7 +158,22 @@ export function getLlmBodyTemplate() { return localStorage.getItem(LLM_BODY_KEY)
 export function setLlmBodyTemplate(v) { localStorage.setItem(LLM_BODY_KEY, v); }
 export function getDataConsent() { return localStorage.getItem(DATA_CONSENT_KEY) === 'true'; }
 export function setDataConsent(v) { localStorage.setItem(DATA_CONSENT_KEY, v ? 'true' : 'false'); }
-export { DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_MODEL, DEFAULT_LLM_BODY };
+const FREE_LLM_MODELS = [
+  'Qwen/Qwen3-8B',
+  'Qwen/Qwen3.5-4B',
+  'Qwen/Qwen2.5-7B-Instruct',
+  'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
+  'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B',
+  'deepseek-ai/DeepSeek-OCR',
+  'THUDM/GLM-4-9B-0414',
+  'THUDM/GLM-Z1-9B-0414',
+  'THUDM/GLM-4.1V-9B-Thinking',
+  'tencent/Hunyuan-MT-7B',
+  'internlm/internlm2_5-7b-chat',
+  'PaddlePaddle/PaddleOCR-VL',
+  'PaddlePaddle/PaddleOCR-VL-1.5',
+];
+export { DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_MODEL, DEFAULT_LLM_BODY, FREE_LLM_MODELS };
 
 const REG_SERVER = 'https://reg.moonchan.xyz';
 export function uploadConsent() {

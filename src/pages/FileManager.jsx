@@ -25,6 +25,11 @@ export default function FileManager() {
   const [existingColl, setExistingColl] = useState('');
   const [collections, setCollections] = useState([]);
   const [localUser, setLocalUser] = useState(localStorage.getItem('peerdrive_reg_user') || '');
+  const [showFileBrowser, setShowFileBrowser] = useState(false);
+  const [currentDir, setCurrentDir] = useState('/');
+  const [dirEntries, setDirEntries] = useState([]);
+  const [selectedFiles, setSelectedFiles] = useState({});
+  const [browseLoading, setBrowseLoading] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -122,23 +127,67 @@ export default function FileManager() {
     }
   };
 
-  const handleRegisterFolder = async () => {
-    const folderPath = prompt('请输入要注册的文件夹绝对路径:\n(会递归扫描所有文件):');
-    if (!folderPath) return;
+  const browseDir = async (dir) => {
+    setBrowseLoading(true);
     try {
-      const res = await api.registerFolder(folderPath);
-      alert(`注册完成: ${res.registered?.length || 0} 个文件`);
-      loadFiles();
-    } catch (e) { alert(`注册失败: ${e.message}`); }
+      const entries = await api.browseDir(dir);
+      entries.sort((a, b) => {
+        if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      setDirEntries(entries);
+      setCurrentDir(dir);
+    } catch (e) {
+      alert(`目录浏览失败: ${e.message}`);
+    }
+    setBrowseLoading(false);
   };
 
-  const handleRegisterFile = async () => {
-    const fullPath = prompt('请输入本地文件的绝对路径:');
-    if (!fullPath) return;
-    const filename = fullPath.split(/[/\\]/).pop();
+  const handleOpenFileBrowser = () => {
+    setShowFileBrowser(true);
+    setSelectedFiles({});
+    browseDir('/');
+  };
+
+  const handleRegEnter = (entry) => {
+    if (entry.is_dir) {
+      browseDir(entry.path);
+    } else {
+      setSelectedFiles(prev => {
+        const next = { ...prev };
+        next[entry.path] = !next[entry.path];
+        return next;
+      });
+    }
+  };
+
+  const handleRegParent = () => {
+    const parent = currentDir.split('/').slice(0, -1).join('/') || '/';
+    browseDir(parent);
+  };
+
+  const handleRegisterSelected = async () => {
+    const files = Object.keys(selectedFiles).filter(k => selectedFiles[k]);
+    if (files.length === 0) return alert('请先选择文件');
+    let ok = 0, fail = 0;
+    for (const path of files) {
+      try {
+        const filename = path.split('/').pop();
+        await api.registerLocalFile(path, filename);
+        ok++;
+      } catch (e) { fail++; }
+    }
+    alert(`注册完成: ${ok} 成功, ${fail} 失败`);
+    setShowFileBrowser(false);
+    setSelectedFiles({});
+    loadFiles();
+  };
+
+  const handleRegisterCurrentFolder = async () => {
     try {
-      await api.registerLocalFile(fullPath, filename);
-      alert(`已注册: ${filename}`);
+      const res = await api.registerFolder(currentDir);
+      alert(`注册完成: ${res.registered?.length || 0} 个文件`);
+      setShowFileBrowser(false);
       loadFiles();
     } catch (e) { alert(`注册失败: ${e.message}`); }
   };
@@ -196,9 +245,8 @@ export default function FileManager() {
         </div>
 
         <div className="h-12 bg-gray-850 border-b border-gray-700 flex items-center px-6 space-x-4 shrink-0">
-          <button onClick={handleRegisterFolder} className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-xs">注册文件夹</button>
-          <button onClick={handleRegisterFile} className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-xs">注册文件</button>
-          <span className="text-xs text-gray-500">注册后文件将出现在下方列表，可选中后创建合集</span>
+          <button onClick={handleOpenFileBrowser} className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-xs">浏览文件系统</button>
+          <span className="text-xs text-gray-500">浏览节点文件系统，选择文件注册</span>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
@@ -301,6 +349,58 @@ export default function FileManager() {
               <button onClick={handleCreateCollection} className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-sm font-medium">
                 添加到合集
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFileBrowser && (
+        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-6 rounded-xl w-[640px] border border-gray-600 shadow-2xl flex flex-col max-h-[80vh]">
+            <h3 className="text-lg font-bold mb-4">浏览节点文件系统</h3>
+
+            <div className="flex items-center space-x-2 mb-3 text-sm">
+              <button onClick={handleRegParent} disabled={currentDir === '/'} className="px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-30 text-xs">← 上一级</button>
+              <span className="text-gray-300 font-mono text-xs truncate flex-1">{currentDir}</span>
+              <button onClick={() => browseDir('/')} className="px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 text-xs">/</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto bg-gray-900 rounded mb-4 min-h-[200px]">
+              {browseLoading ? (
+                <div className="p-4 text-center text-gray-500">加载中...</div>
+              ) : dirEntries.length === 0 ? (
+                <div className="p-4 text-center text-gray-500">空目录</div>
+              ) : (
+                <div className="divide-y divide-gray-800">
+                  {dirEntries.map(e => (
+                    <div
+                      key={e.path}
+                      onClick={() => handleRegEnter(e)}
+                      className={`flex items-center px-3 py-2 cursor-pointer hover:bg-gray-800 ${e.is_dir ? 'text-yellow-400' : ''} ${selectedFiles[e.path] ? 'bg-blue-900/30 border-l-2 border-blue-500' : ''}`}
+                    >
+                      <span className="mr-2 text-lg">{e.is_dir ? '📁' : '📄'}</span>
+                      <span className="flex-1 text-sm font-mono truncate">{e.name}</span>
+                      {!e.is_dir && <span className="text-xs text-gray-500 ml-2">{formatSize(e.size)}</span>}
+                      {!e.is_dir && <span className="text-xs text-gray-500 ml-2">{e.mod_time?.substring(0,10)}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-gray-500">
+                {Object.values(selectedFiles).filter(Boolean).length} 个文件已选
+              </span>
+              <div className="flex space-x-3">
+                <button onClick={handleRegisterCurrentFolder} className="px-3 py-1.5 bg-indigo-700 hover:bg-indigo-600 rounded text-xs">
+                  注册当前目录
+                </button>
+                <button onClick={handleRegisterSelected} className="px-3 py-1.5 bg-green-600 hover:bg-green-700 rounded text-xs font-medium">
+                  注册选中文件
+                </button>
+                <button onClick={() => setShowFileBrowser(false)} className="px-3 py-1.5 bg-gray-600 rounded text-xs">取消</button>
+              </div>
             </div>
           </div>
         </div>
