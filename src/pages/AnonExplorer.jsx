@@ -33,6 +33,7 @@ export default function AnonExplorer() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [navPath, setNavPath] = useState('');
+  const [isLocal, setIsLocal] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => { if (paramHash) { setInputVal(paramHash); setSearchHash(paramHash); } }, [paramHash]);
@@ -41,10 +42,9 @@ export default function AnonExplorer() {
   const fetchCollection = async (h) => {
     if (!h) return;
     setLoading(true); setError(''); setCollection(null);
-    try { setCollection(await api.getAnonCollection(h)); }
-    catch { setError('合集未找到'); }
-    setLoading(false);
-    setNavPath('');
+    try { setCollection(await api.getAnonCollection(h)); } catch { setError('合集未找到'); }
+    setLoading(false); setNavPath('');
+    api.listAnonCollections().then(l => setIsLocal(Array.isArray(l) && l.some(c => c.hash === h))).catch(() => {});
   };
 
   const handleFork = () => navigate('/anon/create', { state: { forkFrom: collection, sourceHash: searchHash } });
@@ -143,19 +143,20 @@ export default function AnonExplorer() {
               </div>
               <div className="flex-1" />
               <span className="text-xs text-gray-600">{currentItems.totalFiles} 项</span>
-              <button onClick={async () => {
-                if (!collection?.entries?.length) return;
-                try {
-                  const local = await api.listAnonCollections().catch(() => []);
-                  const exists = Array.isArray(local) && local.some(c => c.hash === searchHash);
-                  if (exists) { alert('此合集已在本机，无需保存'); return; }
-                  const selected = confirm('保存全部文件到本机作为新合集？\n确定=保存全部 | 取消=不保存');
+              {isLocal ? (
+                <span className="text-xs text-green-500/70 bg-green-500/10 px-3 py-1 rounded-full">✓ 已保存到本机</span>
+              ) : (
+                <button onClick={async () => {
+                  if (!collection?.entries?.length) return;
+                  const selected = confirm('将合集副本保存到本机？');
                   if (!selected) return;
-                  const name = collection.friendly_name || collection.name_preview || '合集副本';
-                  const res = await api.createAnonCollection(collection.entries, name + ' (副本)');
-                  navigate(`/anon/collections/${res.hash}`);
-                } catch(e) { alert('保存失败: ' + e.message); }
-              }} className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-xs">💾 保存</button>
+                  try {
+                    const name = collection.friendly_name || collection.name_preview || '合集副本';
+                    const res = await api.createAnonCollection(collection.entries, name + ' (副本)');
+                    navigate(`/anon/collections/${res.hash}`);
+                  } catch(e) { alert('保存失败: ' + e.message); }
+                }} className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-xs">💾 保存到本机</button>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto">

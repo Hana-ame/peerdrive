@@ -215,17 +215,22 @@ export default function AnonCreator() {
         )}
         {srcTab === 'collection' && collSource && (
           <div className="flex-1 flex flex-col">
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-sm"><button onClick={() => setCollSource(null)} className="text-gray-400 hover:text-white">← 退回列表</button><span className="text-gray-300 truncate text-lg font-bold">📦 {collSource.friendly_name || collSource.name_preview || '合集'}</span><span className="text-gray-600 text-xs ml-auto">{collSource.entries?.length || 0} 项</span></div>
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-sm">
+              <button onClick={() => setCollSource(null)} className="text-gray-400 hover:text-white">← 退回列表</button>
+              <span className="text-gray-300 truncate text-lg font-bold">📦 {collSource.friendly_name || collSource.name_preview || '合集'}</span>
+              <span className="text-gray-600 text-xs ml-auto">{collSource.entries?.length || 0} 项</span>
+            </div>
             <div className="flex-1 overflow-y-auto">
-              {(() => {
-                const dirs = new Set(); const cfiles = [];
-                for (const e of collFiltered) { const slash = e.path.indexOf('/'); if (slash === -1) cfiles.push(e); else dirs.add(e.path.slice(0, slash)); }
-                return <div>
-                  {Array.from(dirs).sort().map(dir => <div key={dir} onClick={() => { setCollSource(prev => prev ? {...prev, entries: prev.entries.filter(e => e.path.startsWith(dir+'/'))} : prev); }} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm"><span className="text-lg">📁</span><span className="text-yellow-400 font-mono truncate flex-1">{dir}</span></div>)}
-                  {cfiles.map(e => <div key={e.path} draggable onDragStart={(ev) => { ev.dataTransfer.setData('text/plain', e.path); ev.dataTransfer.setData('application/peerdrive-file', JSON.stringify({hash:e.hash,path:e.path,name:e.path.split('/').pop()})); ev.dataTransfer.effectAllowed = 'copy'; }} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group"><span className="text-lg">📄</span><span className="text-blue-300 truncate flex-1 font-mono">{e.path.split('/').pop()}</span><button onClick={() => addEntry(e.hash, e.path.split('/').pop())} className="text-blue-400 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 shrink-0">+</button></div>)}
-                  {dirs.size===0&&cfiles.length===0&&<p className="p-4 text-gray-600 text-sm">空合集</p>}
-                </div>;
-              })()}
+              {collFiltered.length === 0 ? <p className="p-4 text-gray-600 text-sm">此合集为空</p> :
+                collFiltered.map(e => (
+                  <div key={e.path} draggable
+                    onDragStart={(ev) => { ev.dataTransfer.setData('text/plain', e.path); ev.dataTransfer.setData('application/peerdrive-file', JSON.stringify({hash:e.hash,path:e.path,name:e.path.split('/').pop()})); ev.dataTransfer.effectAllowed = 'copy'; }}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group">
+                    <span className="text-lg">📄</span>
+                    <span className="text-blue-300 truncate flex-1 font-mono">{e.path}</span>
+                    <button onClick={() => addEntry(e.hash, e.path.split('/').pop())} className="text-blue-400 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 shrink-0">+</button>
+                  </div>
+                ))}
             </div>
           </div>
         )}
@@ -275,7 +280,7 @@ export default function AnonCreator() {
               else if (rest.slice(0, slash)) dirs.add(rest.slice(0, slash));
             }
             const sortedDirs = Array.from(dirs).sort();
-            if (fLoading) return <p className="p-4 text-gray-600 text-sm">加载中...</p>;
+            if (sortedDirs.length===0 && localFiles.length===0) return <p className="p-4 text-gray-600 text-sm">此目录为空</p>;
             return (
               <div>
                 {(localDirPath || sortedDirs.length > 0 || localFiles.length > 0) && (

@@ -179,7 +179,7 @@ export default function Navbar() {
           <Link to="/" className="text-xl font-bold text-blue-400 hover:text-blue-300">Peerdrive</Link>
           <div className="flex items-center space-x-1">
             <Link to="/files" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">文件管理</Link>
-            <Link to="/anon" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">探索合集</Link>
+            <Link to="/" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">探索合集</Link>
             <Link to="/anon/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">创建合集</Link>
           </div>
         </div>
