@@ -122,12 +122,14 @@ export default function AnonExplorer() {
               {navPath ? (
                 <button onClick={navBack} className="text-gray-400 hover:text-white text-sm">← 返回</button>
               ) : (
-                <h2 className="text-base font-bold truncate">📦 {fname || '合集'}</h2>
-                {collection?.tags?.length > 0 && (
-                  <div className="flex gap-1 ml-2">
-                    {collection.tags.map((t, i) => <span key={i} className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded-full">{t}</span>)}
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold truncate">📦 {fname || '合集'}</h2>
+                  {collection?.tags?.length > 0 && (
+                    <div className="flex gap-1">
+                      {collection.tags.map((t, i) => <span key={i} className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded-full">{t}</span>)}
+                    </div>
+                  )}
+                </div>
               )}
               <div className="flex items-center gap-1 text-xs text-gray-500">
                 {navPath && <span className="text-gray-300">{fname || '合集'}</span>}
