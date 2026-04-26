@@ -48,6 +48,7 @@ export default function AnonCreator() {
   const [collSource, setCollSource] = useState(null);
   const [fname, setFname] = useState('');
   const [tags, setTags] = useState('');
+  const [localDirPath, setLocalDirPath] = useState('');
   const [entries, setEntries] = useState([]);
   const [openHash, setOpenHash] = useState('');
   const [savedHash, setSavedHash] = useState('');
@@ -199,28 +200,61 @@ export default function AnonCreator() {
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文件名或路径..." className="w-full bg-gray-800 text-sm px-3 py-2 border-b border-gray-800 focus:outline-none focus:border-blue-600" />
 
         <div className="flex-1 overflow-y-auto">
-          {srcTab === 'local' ? (
-            fLoading ? <p className="p-4 text-gray-600 text-sm">加载中...</p> :
-            filtered.length === 0 ? <p className="p-4 text-gray-600 text-sm">无匹配文件</p> :
-            filtered.map(f => (
-              <div key={f.hash} draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('application/peerdrive-file', JSON.stringify({ hash: f.hash, path: f.filename, name: f.filename, mime_type: f.mime_type, size: f.size }));
-                  e.dataTransfer.effectAllowed = 'copy';
-                }}
-                className={`flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group ${inDraft(f.filename, f.hash) ? 'opacity-40' : ''}`}>
-                <span className="text-lg">{fileIcon(f.mime_type)}</span>
-                <span className="text-blue-300 truncate flex-1 font-mono">{f.filename}</span>
-                <span className="text-gray-500 text-xs">{fmtSize(f.size)}</span>
-                {!inDraft(f.filename, f.hash) && (
-                  <button onClick={() => addEntry(f.hash, f.filename, f.mime_type, f.size)}
-                    className="text-blue-400 hover:text-blue-200 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 transition-all shrink-0">
-                    + 添加
-                  </button>
+          {srcTab === 'local' ? (() => {
+            const prefix = localDirPath ? localDirPath + '/' : '';
+            const dirs = new Set();
+            const localFiles = [];
+            for (const f of filtered) {
+              const rel = (f.provider_path || f.filename || '');
+              const rest = rel.startsWith(prefix) ? rel.slice(prefix.length) : null;
+              if (rest === null) continue;
+              const slash = rest.indexOf('/');
+              if (slash === -1) localFiles.push(f);
+              else if (rest.slice(0, slash)) dirs.add(rest.slice(0, slash));
+            }
+            const sortedDirs = Array.from(dirs).sort();
+            if (fLoading) return <p className="p-4 text-gray-600 text-sm">加载中...</p>;
+            return (
+              <div>
+                {(localDirPath || sortedDirs.length > 0 || localFiles.length > 0) && (
+                  <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-xs">
+                    {localDirPath ? (
+                      <button onClick={() => { const p = localDirPath.split('/'); p.pop(); setLocalDirPath(p.join('/')); }} className="text-gray-400 hover:text-white">← 返回</button>
+                    ) : (
+                      <span className="text-gray-500">📂</span>
+                    )}
+                    <span className="text-gray-400">{localDirPath || '/'}</span>
+                    <span className="ml-auto text-gray-600">{sortedDirs.length + localFiles.length} 项</span>
+                  </div>
+                )}
+                {sortedDirs.map(dir => (
+                  <div key={dir} onClick={() => setLocalDirPath(localDirPath ? `${localDirPath}/${dir}` : dir)}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm">
+                    <span className="text-lg">📁</span>
+                    <span className="text-yellow-400 font-mono truncate flex-1">{dir}</span>
+                    <span className="text-gray-600 text-xs">文件夹</span>
+                  </div>
+                ))}
+                {localFiles.map(f => (
+                  <div key={f.hash} draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/peerdrive-file', JSON.stringify({ hash: f.hash, path: f.filename, name: f.filename, mime_type: f.mime_type, size: f.size }));
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group">
+                    <a href={api.getDownloadUrl(f.hash)} target="_blank" rel="noreferrer" className="text-lg">{fileIcon(f.mime_type)}</a>
+                    <span className="text-blue-300 truncate flex-1 font-mono">{f.filename}</span>
+                    <span className="text-gray-500 text-xs">{fmtSize(f.size)}</span>
+                    <button onClick={() => addEntry(f.hash, f.filename, f.mime_type, f.size)}
+                      className="text-blue-400 hover:text-blue-200 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 transition-all shrink-0">+</button>
+                  </div>
+                ))}
+                {sortedDirs.length === 0 && localFiles.length === 0 && (
+                  <p className="p-4 text-gray-600 text-sm">{localDirPath ? '此目录为空' : '无匹配文件'}</p>
                 )}
               </div>
-            ))
-          ) : (
+            );
+          })() : (
             !collSource ? <p className="p-4 text-gray-600 text-sm">选择一个合集查看其文件</p> :
             collFiltered.length === 0 ? <p className="p-4 text-gray-600 text-sm">无匹配文件</p> :
             collFiltered.map(e => (
