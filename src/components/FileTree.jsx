@@ -126,9 +126,9 @@ export default function FileTree({ entries, entryActions }) {
                   onDragStart={(e) => { e.dataTransfer.setData('application/peerdrive-entry', JSON.stringify({ hash: f.hash, path: f.path, name: f.name, mime_type: f.mime_type, size: f.size })); e.dataTransfer.effectAllowed = 'move'; }}
                   onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragOverPath(f.path); }}
                   onDragLeave={() => setDragOverPath(null)}
-                  onDrop={(e) => {
-                    e.preventDefault(); setDragOverPath(null);
-                    try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry'); if (d) entryActions?.onDrop?.({ ...JSON.parse(d), targetDir: f.path }); } catch {}
+                    onDrop={(e) => {
+                      e.preventDefault(); setDragOverPath(null);
+                      try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry') || e.dataTransfer.getData('text/plain'); if (d) { const parsed = d.startsWith('{') ? JSON.parse(d) : { hash: '', name: d, path: d }; entryActions?.onDrop?.({ ...parsed, targetDir: f.path }); } } catch {}
                   }}
                 >
                   <span className="w-5 shrink-0" />
@@ -163,7 +163,7 @@ export default function FileTree({ entries, entryActions }) {
         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
         onDrop={(e) => {
           e.preventDefault();
-          try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry'); if (d) entryActions?.onDrop?.({ ...JSON.parse(d), targetDir: '' }); } catch {}
+          try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry') || e.dataTransfer.getData('text/plain'); if (d) { const parsed = d.startsWith('{') ? JSON.parse(d) : { hash: '', name: d, path: d }; entryActions?.onDrop?.({ ...parsed, targetDir: '' }); } } catch {}
         }}>空目录 — 从左侧拖拽或点击添加文件</div>
     );
   }
