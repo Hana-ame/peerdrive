@@ -95,6 +95,21 @@ export default function FileTree({ entries, entryActions }) {
   const renderEntries = (nodes, depth, parentPath) => {
     const rows = [];
     for (const node of nodes) {
+      if (!node.isDir) {
+        rows.push(
+          <div key={node.path} className="flex items-center gap-1 py-1 px-2 hover:bg-gray-800/50 group text-xs"
+            style={{ paddingLeft: `${depth * 16 + 8}px` }}>
+            <span className="w-4 shrink-0" />
+            <span>{fileIcon(node.mime_type)}</span>
+            <span className="text-blue-300 font-mono truncate flex-1">{node.name}</span>
+            <span className="text-gray-600 text-[10px] shrink-0">{fmtSize(node.size)}</span>
+            {entryActions?.onRemove && (
+              <button onClick={() => entryActions.onRemove(node)} className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 text-sm px-1 shrink-0">×</button>
+            )}
+          </div>
+        );
+        continue;
+      }
       const isExp = expanded.has(node.path);
       const dropOver = dragOverPath === node.path;
       rows.push(
