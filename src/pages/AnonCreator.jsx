@@ -322,7 +322,8 @@ export default function AnonCreator() {
                 )}
               </div>
             );
-          })() : (
+           })() : (
+            srcTab === 'collection' ? null :
             !collSource ? <p className="p-4 text-gray-600 text-sm">选择一个合集查看其文件</p> :
             collFiltered.length === 0 ? <p className="p-4 text-gray-600 text-sm">无匹配文件</p> :
             collFiltered.map(e => (
@@ -331,16 +332,14 @@ export default function AnonCreator() {
                   ev.dataTransfer.setData('application/peerdrive-file', JSON.stringify({ hash: e.hash, path: e.path, name: e.path.split('/').pop(), mime_type: '', size: 0 }));
                   ev.dataTransfer.effectAllowed = 'copy';
                 }}
-                className={`flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group ${inDraft(e.path, e.hash) ? 'opacity-40' : ''}`}>
+                className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group">
                 <span className="text-lg">📄</span>
                 <span className="text-blue-300 truncate flex-1 font-mono">{e.path}</span>
                 <span className="text-gray-500 text-xs font-mono">{(e.hash || '').substring(0, 10)}</span>
-                {!inDraft(e.path, e.hash) && (
-                  <button onClick={() => addEntry(e.hash, e.path)}
+                  <button onClick={() => addEntry(e.hash, e.path.split('/').pop())}
                     className="text-blue-400 hover:text-blue-200 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 transition-all shrink-0">
                     + 添加
                   </button>
-                )}
               </div>
             ))
           )}
