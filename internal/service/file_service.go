@@ -205,6 +205,40 @@ func (s *FileService) Delete(hash string) error {
 	return nil
 }
 
+func (s *FileService) BrowseDir(dirPath string) ([]model.DirEntry, error) {
+	if !s.storageEnable {
+		return nil, ErrStorageDisabled
+	}
+
+	absDir := dirPath
+	if !filepath.IsAbs(dirPath) {
+		absDir = filepath.Join(s.storageDir, dirPath)
+	}
+
+	entries, err := os.ReadDir(absDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []model.DirEntry
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		fullPath := filepath.Join(absDir, e.Name())
+		entry := model.DirEntry{
+			Name:    e.Name(),
+			Path:    fullPath,
+			IsDir:   e.IsDir(),
+			Size:    info.Size(),
+			ModTime: info.ModTime().UTC().Format("2006-01-02T15:04:05Z"),
+		}
+		result = append(result, entry)
+	}
+	return result, nil
+}
+
 func copyFile(src, dst string) error {
 	s, err := os.Open(src)
 	if err != nil {

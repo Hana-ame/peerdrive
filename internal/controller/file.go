@@ -223,3 +223,21 @@ func ListFiles(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, items)
 }
+
+// BrowseDir godoc
+func BrowseDir(c *gin.Context) {
+	dirPath := c.Query("path")
+	if dirPath == "" {
+		dirPath = "/"
+	}
+
+	entries, err := fileSvc.BrowseDir(dirPath)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if entries == nil {
+		entries = []model.DirEntry{}
+	}
+	c.JSON(http.StatusOK, entries)
+}

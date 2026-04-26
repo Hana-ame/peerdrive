@@ -114,6 +114,7 @@ func SetupRouter(
 		files.POST("/register_local", controller.RegisterLocalFile)
 		files.POST("/register_folder", controller.RegisterFolder)
 		files.GET("/verify/:hash", controller.VerifyFile)
+		files.GET("/browse", controller.BrowseDir)
 		files.DELETE("/:hash", controller.DeleteFile)
 		files.POST("/diff", controller.DiffVersions)
 	}

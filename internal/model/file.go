@@ -33,3 +33,11 @@ type FileListItem struct {
 	ProviderType string `json:"provider_type"`
 	ProviderPath string `json:"provider_path"`
 }
+
+type DirEntry struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	IsDir   bool   `json:"is_dir"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"mod_time"`
+}
