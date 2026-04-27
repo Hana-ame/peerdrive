@@ -165,14 +165,6 @@ export default function FileManager() {
     setShowFileBrowser(false);
     setSelectedFiles({});
     loadFiles();
-    // Create anonymous collection directly
-    if (entries.length > 0) {
-      try {
-        const name = entries[0].path || 'collection';
-        const coll = await api.createAnonCollection(entries, name);
-        navigate(`/anon/collections/${coll.hash}`);
-      } catch (e) { alert(`创建合集失败: ${e.message}`); }
-    }
   };
 
   const handleRegisterCurrentFolder = async () => {

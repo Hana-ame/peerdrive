@@ -71,6 +71,7 @@ export default function AnonCreator() {
   const [localDirPath, setLocalDirPath] = useState('');
   const [entries, setEntries] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [showNamePrompt, setShowNamePrompt] = useState(false);
   const lastClick = useRef(0);
 
   // Raw filesystem browse state
@@ -131,19 +132,21 @@ export default function AnonCreator() {
     setEntries(prev => prev.map(e => e.path === oldPath ? { ...e, path: newPath } : e));
   };
 
-  const handleSave = async () => {
+  const handleSave = async (useAI = false) => {
     const valid = entries.filter(e => e.path?.trim() && e.hash);
     if (!valid.length) return alert('请先添加文件');
-    if (!fname.trim()) {
-      const choice = confirm('合集名称未设置。\n\n点"确定"使用 AI 推荐名称\n点"取消"留空保存');
-      if (choice) {
-        try {
-          const names = valid.slice(0, 20).map(e => e.path).join(', ');
-          const name = await llmSuggest(names);
-          if (name) setFname(name);
-        } catch {}
-      }
+    if (useAI) {
+      try {
+        const names = valid.slice(0, 20).map(e => e.path).join(', ');
+        const name = await llmSuggest(names);
+        if (name) setFname(name);
+      } catch {}
     }
+    if (!fname.trim() && !useAI && !showNamePrompt) {
+      setShowNamePrompt(true);
+      return;
+    }
+    setShowNamePrompt(false);
     setSaving(true);
     try {
       const res = await api.createAnonCollection(valid, fname.trim(), tags.split(/[,;]/).map(t => t.trim()).filter(Boolean));
@@ -244,8 +247,8 @@ export default function AnonCreator() {
       <div style={{ width: `${split}%` }} className="h-full flex flex-col border-r border-gray-700">
         {/* 4-tab flat bar */}
         <div className="flex bg-gray-800 rounded mx-2 mt-2 shrink-0">
-          <button onClick={() => setSrcTab('timeline')} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'timeline' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>🕐 时间线</button>
-          <button onClick={() => setSrcTab('registered')} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'registered' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>📁 已注册</button>
+          <button onClick={() => { setSrcTab('timeline'); setLocalDirPath(''); }} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'timeline' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>🕐 时间线</button>
+          <button onClick={() => { setSrcTab('registered'); setLocalDirPath(''); }} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'registered' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>📁 已注册</button>
           <button onClick={() => { setSrcTab('system'); setSysPath('/'); }} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'system' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>🖥️ 本机</button>
           <button onClick={() => setSrcTab('collection')} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'collection' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>📦 合集</button>
         </div>
@@ -342,12 +345,10 @@ export default function AnonCreator() {
         {srcTab === 'system' && (
           <>
             <div className="flex-1 overflow-y-auto">
-              {sysPath !== '/' && (
-                <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-xs">
-                  <button onClick={() => { const p = sysPath.split('/'); p.pop(); setSysPath(p.join('/') || '/'); }} className="text-gray-400 hover:text-white">← 返回</button>
-                  <span className="text-gray-400 font-mono text-xs truncate">{sysPath}</span>
-                </div>
-              )}
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-xs">
+                <button onClick={() => { const p = sysPath.split('/'); p.pop(); setSysPath(p.join('/') || '/'); }} disabled={sysPath === '/'} className="text-gray-400 hover:text-white disabled:opacity-30">←</button>
+                <span className="text-gray-300 font-mono text-xs truncate">{sysPath}</span>
+              </div>
               {sysLoading ? <p className="p-4 text-gray-600 text-sm">加载中...</p> :
                sysEntries.length === 0 ? <p className="p-4 text-gray-600 text-sm">此目录为空</p> :
                sysEntries.map(e => (
@@ -492,7 +493,15 @@ export default function AnonCreator() {
           }} className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1.5 rounded shrink-0 whitespace-nowrap" title="AI 推荐名称">🤖</button>
           <div className="flex-1" />
           <span className="text-sm text-gray-500">{entries.filter(e => e.path && e.hash).length} 个文件</span>
-          <button onClick={handleSave} disabled={saving || !entries.filter(e => e.path && e.hash).length}
+          {showNamePrompt && (
+            <div className="flex items-center gap-1 bg-gray-800 rounded px-2 py-1">
+              <span className="text-xs text-gray-400 whitespace-nowrap">名称:</span>
+              <button onClick={() => handleSave(true)} className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded whitespace-nowrap">🤖 AI 推荐</button>
+              <button onClick={() => handleSave(false)} className="text-xs bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded whitespace-nowrap">留空</button>
+              <button onClick={() => setShowNamePrompt(false)} className="text-xs text-gray-500 hover:text-white px-1">✕</button>
+            </div>
+          )}
+          <button onClick={() => handleSave(false)} disabled={saving || !entries.filter(e => e.path && e.hash).length}
             className="bg-green-600 hover:bg-green-700 disabled:opacity-40 text-sm px-4 py-2 rounded font-medium">保存</button>
         </div>
         <div className="flex-1 overflow-hidden">

@@ -35,3 +35,7 @@ use this to test p2p features.
 
 
 make a test grid which is readable for everyone.  whichi has detailed info about 5w1h.
+
+this is a long task without much human assistant. try your best and do not easily stop.
+
+you can create your own tools. and save them into folder you named
