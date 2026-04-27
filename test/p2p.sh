@@ -33,10 +33,14 @@ PEERDRIVE_P2P_ENABLE=true \
 PEERDRIVE_P2P_LISTEN="/ip4/0.0.0.0/tcp/0" \
 PEERDRIVE_MDNS_ENABLE=true \
 PEERDRIVE_RELAY_ENABLE=false \
+PEERDRIVE_BT_DHT_ENABLE=false \
 PORT=3001 \
 "$SERVER_BIN" &
 PID_A=$!
-sleep 3
+for i in $(seq 1 20); do
+  if curl -s -x "" "http://localhost:3001/ping" 2>/dev/null | grep -q pong; then break; fi
+  sleep 1
+done
 
 A_STATUS=$(curl -s -x "" "http://localhost:3001/ping")
 if [ "$A_STATUS" != "pong" ]; then
@@ -54,10 +58,14 @@ PEERDRIVE_P2P_ENABLE=true \
 PEERDRIVE_P2P_LISTEN="/ip4/0.0.0.0/tcp/0" \
 PEERDRIVE_MDNS_ENABLE=true \
 PEERDRIVE_RELAY_ENABLE=false \
+PEERDRIVE_BT_DHT_ENABLE=false \
 PORT=3002 \
 "$SERVER_BIN" &
 PID_B=$!
-sleep 3
+for i in $(seq 1 20); do
+  if curl -s -x "" "http://localhost:3002/ping" 2>/dev/null | grep -q pong; then break; fi
+  sleep 1
+done
 
 B_STATUS=$(curl -s -x "" "http://localhost:3002/ping")
 if [ "$B_STATUS" != "pong" ]; then
