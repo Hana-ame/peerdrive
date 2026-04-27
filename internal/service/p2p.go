@@ -184,12 +184,14 @@ func (p *P2PService) CfgP2PEnabled() bool {
 	return p.cfg != nil && p.cfg.P2PEnable
 }
 
+// IsEnabled 返回 P2P 服务是否已启用且 host 已初始化。
 func (p *P2PService) IsEnabled() bool {
 	enabled := p.cfg != nil && p.cfg.P2PEnable && p.Host != nil
 	log.LogDebug("p2p: IsEnabled=%v", enabled)
 	return enabled
 }
 
+// GetNodeInfo 返回本节点的 PeerID 和监听地址列表。
 func (p *P2PService) GetNodeInfo() (peer.ID, []string) {
 	defer log.LogDuration("P2PService.GetNodeInfo")()
 	if !p.IsEnabled() {
@@ -204,6 +206,7 @@ func (p *P2PService) GetNodeInfo() (peer.ID, []string) {
 	return p.Host.ID(), addrs
 }
 
+// GetConnectedPeers 返回当前已连接的对端 ID 列表。
 func (p *P2PService) GetConnectedPeers() []peer.ID {
 	if !p.IsEnabled() {
 		return nil
@@ -211,6 +214,7 @@ func (p *P2PService) GetConnectedPeers() []peer.ID {
 	return p.Host.Network().Peers()
 }
 
+// GetDiscoveredPeers 返回通过 mDNS 等方式发现的所有对端信息。
 func (p *P2PService) GetDiscoveredPeers() []peer.AddrInfo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -221,6 +225,7 @@ func (p *P2PService) GetDiscoveredPeers() []peer.AddrInfo {
 	return result
 }
 
+// PingPeer 通过 libp2p ping 协议测量到指定对端的 RTT 延迟。
 func (p *P2PService) PingPeer(ctx context.Context, peerID peer.ID) (time.Duration, error) {
 	if !p.IsEnabled() {
 		return 0, fmt.Errorf("p2p not enabled")
@@ -234,6 +239,7 @@ func (p *P2PService) PingPeer(ctx context.Context, peerID peer.ID) (time.Duratio
 	}
 }
 
+// Connect 连接到指定的对端地址信息。
 func (p *P2PService) Connect(ctx context.Context, addrInfo peer.AddrInfo) error {
 	defer log.LogDuration("P2PService.Connect")()
 	log.LogDebug("p2p: Connect peer=%s", addrInfo.ID.String())
@@ -261,6 +267,7 @@ func (p *P2PService) Connect(ctx context.Context, addrInfo peer.AddrInfo) error 
 	return nil
 }
 
+// ConnectByAddr 通过 multiaddr 字符串连接到指定对端。
 func (p *P2PService) ConnectByAddr(ctx context.Context, addrStr string) error {
 	if !p.IsEnabled() {
 		return fmt.Errorf("p2p not enabled")
@@ -276,6 +283,7 @@ func (p *P2PService) ConnectByAddr(ctx context.Context, addrStr string) error {
 	return p.Host.Connect(ctx, *info)
 }
 
+// AnnounceHash 在 libp2p DHT 上 announce 指定文件哈希。
 func (p *P2PService) AnnounceHash(hash string) error {
 	defer log.LogDuration("P2PService.AnnounceHash")()
 	log.LogDebug("p2p: AnnounceHash hash=%s", hash)
@@ -293,6 +301,7 @@ func (p *P2PService) AnnounceHash(hash string) error {
 	return nil
 }
 
+// FindProviders 通过 DHT 查找指定哈希的文件提供者。
 func (p *P2PService) FindProviders(hash string) ([]peer.AddrInfo, error) {
 	defer log.LogDuration("P2PService.FindProviders")()
 	log.LogDebug("p2p: FindProviders hash=%s", hash)
@@ -334,6 +343,7 @@ func (p *P2PService) FindProviders(hash string) ([]peer.AddrInfo, error) {
 	return result, nil
 }
 
+// FetchFile 从指定对端（或 DHT 发现的对端）获取文件，校验 SHA256 哈希。
 func (p *P2PService) FetchFile(ctx context.Context, hash string, peers []peer.AddrInfo) ([]byte, error) {
 	defer log.LogDuration("P2PService.FetchFile")()
 	log.LogDebug("p2p: FetchFile hash=%s, peers=%d", hash, len(peers))
@@ -392,6 +402,7 @@ func (p *P2PService) FetchFile(ctx context.Context, hash string, peers []peer.Ad
 	return nil, err
 }
 
+// FetchCollection 从对端获取集合文件并解析为 AnonCollection。
 func (p *P2PService) FetchCollection(ctx context.Context, hash string, peers []peer.AddrInfo) (*model.AnonCollection, error) {
 	data, err := p.FetchFile(ctx, hash, peers)
 	if err != nil {
@@ -404,6 +415,7 @@ func (p *P2PService) FetchCollection(ctx context.Context, hash string, peers []p
 	return &coll, nil
 }
 
+// SyncFiles 从指定对端同步多个文件到本地目标目录，同时缓存到存储目录。
 func (p *P2PService) SyncFiles(ctx context.Context, peerID peer.ID, hashes []string, targetDir string) ([]string, error) {
 	defer log.LogDuration("P2PService.SyncFiles")()
 	log.LogDebug("p2p: SyncFiles peer=%s, hashes=%d, target=%s", peerID.String(), len(hashes), targetDir)
@@ -641,6 +653,7 @@ func (p *P2PService) processWSRequests() {
 	}
 }
 
+// BroadcastRequest 向多个对端广播文件请求，返回所有响应结果。
 func (p *P2PService) BroadcastRequest(hash string, peerIDs []peer.ID) ([]fileResponse, error) {
 	defer log.LogDuration("P2PService.BroadcastRequest")()
 	log.LogDebug("p2p: BroadcastRequest hash=%s, targets=%d", hash, len(peerIDs))
@@ -703,6 +716,7 @@ func (p *P2PService) HandlePeerFound(pi peer.AddrInfo) {
 	}
 }
 
+// RelayMode 返回当前中继模式（off/server/client）。
 func (p *P2PService) RelayMode() string {
 	if p.cfg == nil {
 		return string(config.RelayOff)
@@ -710,6 +724,7 @@ func (p *P2PService) RelayMode() string {
 	return string(p.cfg.P2PRelayMode)
 }
 
+// HolePunchEnabled 返回是否启用了 NAT 打洞功能。
 func (p *P2PService) HolePunchEnabled() bool {
 	return p.cfg != nil && p.cfg.P2PHolePunch
 }
@@ -722,8 +737,7 @@ func (p *P2PService) connectToBootstrap(ctx context.Context, addr string) error 
 	return p.Host.Connect(ctx, *info)
 }
 
-// SetPeerTracker injects a PeerTracker into the service and registers
-// network notifiees for connect / disconnect events.
+// SetPeerTracker 注入 PeerTracker 并注册网络连接/断开的通知回调。
 func (p *P2PService) SetPeerTracker(t *PeerTracker) {
 	p.tracker = t
 	if p.Host != nil {
@@ -748,6 +762,7 @@ func (p *P2PService) SetPeerTracker(t *PeerTracker) {
 	}
 }
 
+// Close 关闭 P2P 服务，停止连接管理器、请求通道和 libp2p host。
 func (p *P2PService) Close() error {
 	log.LogDebug("p2p: Close shutting down")
 	if p.ConnMgr != nil {

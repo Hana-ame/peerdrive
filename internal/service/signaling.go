@@ -57,7 +57,7 @@ type SignalingHub struct {
 	files    map[string][]string  // hash -> []peerID (who has what file)
 }
 
-// NewSignalingHub creates a new signaling hub.
+// NewSignalingHub 创建新的信令中枢实例。
 func NewSignalingHub() *SignalingHub {
 	return &SignalingHub{
 		peers: make(map[string]*peerConn),
@@ -66,14 +66,14 @@ func NewSignalingHub() *SignalingHub {
 	}
 }
 
-// PeerCount returns the number of connected peers.
+// PeerCount 返回已连接的对端数量。
 func (h *SignalingHub) PeerCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.peers)
 }
 
-// GetPeers returns all connected peer IDs.
+// GetPeers 返回所有已连接的对端 ID 列表。
 func (h *SignalingHub) GetPeers() []string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -84,7 +84,7 @@ func (h *SignalingHub) GetPeers() []string {
 	return peers
 }
 
-// RoomPeers returns the peer IDs in a given room.
+// RoomPeers 返回指定房间内的对端 ID 列表。
 func (h *SignalingHub) RoomPeers(hash string) []string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -96,14 +96,7 @@ func (h *SignalingHub) RoomPeers(hash string) []string {
 	return result
 }
 
-// HandleConnection handles a new WebSocket signaling connection.
-// It reads JSON messages from the WebSocket and dispatches them:
-//
-//   - "register" / "join" — registers the peer and optionally joins a room
-//   - "offer", "answer", "ice", "ice_candidate" — relays to the target peer
-//   - "request_peers" — returns all connected peers
-//   - "room_peers" — returns peers in the same room
-//   - "announce_file" / "find_file" — file provider registry
+// HandleConnection 处理 WebSocket 信令连接，负责注册、房间管理、offer/answer/ICE 转发等。
 func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

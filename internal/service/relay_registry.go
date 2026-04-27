@@ -35,8 +35,7 @@ type RelayRegistry struct {
 	addrs     []string
 }
 
-// NewRelayRegistry creates a new RelayRegistry.  If the P2P service is not
-// enabled the registry will be a no-op.
+// NewRelayRegistry 创建中继注册器实例，P2P 未启用时注册器为空操作。
 func NewRelayRegistry(p2pSvc *P2PService, regURL string, storageMB int, version string) *RelayRegistry {
 	id, addrs := p2pSvc.GetNodeInfo()
 	return &RelayRegistry{
@@ -50,8 +49,7 @@ func NewRelayRegistry(p2pSvc *P2PService, regURL string, storageMB int, version 
 	}
 }
 
-// Start registers this node as a relay immediately and launches a background
-// goroutine that sends a heartbeat every 60 seconds.
+// Start 立即注册本节点为中继并启动后台心跳协程（每 60 秒）。
 func (r *RelayRegistry) Start() {
 	if r.regURL == "" || r.peerID == "" {
 		log.LogInfo("relay-registry: skipping registration (regURL=%q, peerID=%q)", r.regURL, r.peerID)

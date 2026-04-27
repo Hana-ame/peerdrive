@@ -228,19 +228,7 @@ func (r *RelayService) RelayFileRequest(ctx context.Context, hash string, target
 	return reader, err
 }
 
-// RelayFileToHTTP streams a file from a P2P peer directly to an HTTP
-// ResponseWriter. It supports HTTP range requests via the Content-Range
-// mechanism.
-//
-// Parameters:
-//   - w:            the HTTP response writer to stream into.
-//   - hash:         the SHA-256 content hash of the requested file.
-//   - targetPeerID: the libp2p peer ID of the node hosting the file.
-//   - rangeHeader:  the value of the HTTP Range header (or "" for the
-//                   full file). Example: "bytes=0-1048575".
-//
-// The method sets Content-Type, Content-Length, and (when applicable)
-// Content-Range headers before writing the response body.
+// RelayFileToHTTP 将 P2P 对端的文件流式传输到 HTTP ResponseWriter，支持 Range 范围请求。
 func (r *RelayService) RelayFileToHTTP(w http.ResponseWriter, hash string, targetPeerID peer.ID, rangeHeader string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), RelayTransferTimeout)
 	defer cancel()
@@ -317,19 +305,7 @@ func (r *RelayService) serveRange(ctx context.Context, w http.ResponseWriter, pe
 	return nil
 }
 
-// ProxyDownload is a Gin HTTP handler for GET /relay/proxy.
-//
-// Query parameters:
-//   - hash (required): the SHA-256 content hash of the file to relay.
-//   - peer (required): the libp2p peer ID of the node hosting the file.
-//
-// The handler supports the standard HTTP Range header for partial
-// content delivery (Content-Range / 206 Partial Content).
-//
-// Registration example:
-//
-//	relaySvc := service.NewRelayService(p2pSvc)
-//	r.GET("/relay/proxy", relaySvc.ProxyDownload)
+// ProxyDownload 是 GET /relay/proxy 的 Gin 处理器，支持 Range 头部实现断点续传。
 func (r *RelayService) ProxyDownload(c *gin.Context) {
 	hash := c.Query("hash")
 	peerStr := c.Query("peer")

@@ -2,23 +2,29 @@
 
 > Last: 2026-04-28 · Check before claiming "done"
 
-## 🔴 P0 — 用户刚指出的
+## 🔴 P0 — 刚修完
 
-- [ ] IPFS 控制面板页面 → `/p2p/ipfs` (文件不存在)
-- [ ] BT DHT 控制面板页面 → `/p2p/bt` (文件不存在)
-- [ ] P2P 双栈页面 → `/p2p` (文件不存在)
-- [ ] Navbar 里加 P2P 下拉链接
-- [ ] 单文件合集在广场显示文件图标+文件名, 不是 📦
-- [ ] LLM 随页面切换更新上下文
-- [ ] LLM 显示 thinking 过程, SSE 流式响应
-- [ ] 分享创建输入框, 不用 browser alert
-- [ ] "广播"=创建匿名单文件 collection 并 announce
+- [x] IPFS 控制面板 → `/p2p/ipfs` ✅
+- [x] BT DHT 控制面板 → `/p2p/bt` ✅
+- [x] P2P 双栈页面 → `/p2p` ✅
+- [x] Navbar P2P 下拉 ✅
+- [x] 单文件合集显示文件图标+文件名 ✅
+- [x] 分享创建输入框（不再 alert）✅
+- [x] 广播按钮 ✅
+- [x] IPv6 (P2PListenAddrV6) ✅
+- [x] NAT 打洞 (PEERDRIVE_HOLE_PUNCH=true) ✅
+- [x] Peer 状态查看 (/p2p/peers/detail) ✅
+
+## 🟡 P1 — LLM 优化
+- [x] LLM 随页面切换更新上下文 ✅
+- [x] LLM SSE 流式响应 + thinking 显示 ✅
 
 ## 🟡 P1 — 遗留
 
-- [ ] Range 下载 — handler 已加但未实际验证 Range 返回分块
+- [x] Range 下载 ✅ HTTP 206, 100 bytes 验证通过
 - [ ] WebRTC 实际端到端传输 — 代码有, 未测
-- [ ] Docker 5 节点网络 — compose 文件有, 未跑通
+- [x] Docker relay 启动 ✅ P2P 健康
+- [ ] Docker 5 节点全通 — relay 通, peer-a/b 待测
 - [ ] 断点续传 — ResumeManager 代码有, 未端到端验证
 
 ## 🔵 已验证

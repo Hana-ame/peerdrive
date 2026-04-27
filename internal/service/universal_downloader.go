@@ -119,7 +119,7 @@ type BTDHTFetcher struct {
 	dhtSvc *p2p_bt.BTDHTService
 }
 
-// NewBTDHTFetcher creates a BTDHTFetcher backed by the given DHT service.
+// NewBTDHTFetcher 创建基于 BitTorrent DHT 的获取器。
 func NewBTDHTFetcher(dhtSvc *p2p_bt.BTDHTService, storageDir string) *BTDHTFetcher {
 	return &BTDHTFetcher{
 		bridge: p2p_bt.NewBTBridge(dhtSvc, storageDir),
@@ -147,7 +147,7 @@ type WebRTCFetcher struct {
 	enabled bool
 }
 
-// NewWebRTCFetcher creates a WebRTC fetcher.
+// NewWebRTCFetcher 创建 WebRTC 获取器（当前为占位实现）。
 func NewWebRTCFetcher(enabled bool) *WebRTCFetcher {
 	return &WebRTCFetcher{enabled: enabled}
 }
@@ -215,10 +215,7 @@ type UniversalDownloader struct {
 	timeout    time.Duration
 }
 
-// NewUniversalDownloader creates a downloader with the given protocol order.
-//   - order is a comma-separated list of protocol names
-//     (default: "local,ipfs,btdht,http")
-//   - timeout is the per-protocol fetch deadline
+// NewUniversalDownloader 创建通用下载器，支持按优先级顺序尝试多种协议。
 func NewUniversalDownloader(
 	p2pSvc *P2PService,
 	btSvc *p2p_bt.BTDHTService,
@@ -280,8 +277,7 @@ func (d *UniversalDownloader) buildFetchers(order string, p2pSvc *P2PService, bt
 	return fetchers
 }
 
-// Download tries each protocol in priority order.  On success the file is
-// cached to local storage and (data, protocolName, nil) is returned.
+// Download 按优先级顺序尝试各协议下载文件，成功后缓存到本地存储。
 func (d *UniversalDownloader) Download(ctx context.Context, hash string) ([]byte, string, error) {
 	for _, fetcher := range d.fetchers {
 		if !fetcher.IsAvailable() {
@@ -338,9 +334,7 @@ func (d *UniversalDownloader) cacheToLocal(hash string, data []byte) {
 // Source checks
 // ---------------------------------------------------------------------------
 
-// CheckSources returns a map of protocol -> availability for the given hash.
-// For local and http the check is accurate (disk / DB lookup).  For network
-// protocols it returns whether the backend is available at all.
+// CheckSources 返回各协议对指定哈希的可用性映射。
 func (d *UniversalDownloader) CheckSources(ctx context.Context, hash string) map[string]bool {
 	result := make(map[string]bool, len(d.fetchers))
 	for _, fetcher := range d.fetchers {
@@ -363,8 +357,7 @@ func (d *UniversalDownloader) CheckSources(ctx context.Context, hash string) map
 	return result
 }
 
-// ClearLocalCache removes the cached local copy for the given hash so the
-// next download will re-fetch from the network.
+// ClearLocalCache 清除指定哈希的本地缓存，下次下载将从网络重新获取。
 func (d *UniversalDownloader) ClearLocalCache(hash string) {
 	// Remove from standard content-addressed paths.
 	paths := []string{
@@ -386,7 +379,7 @@ func (d *UniversalDownloader) ClearLocalCache(hash string) {
 	}
 }
 
-// Fetchers returns the ordered slice of protocol fetchers (exposed for tests).
+// Fetchers 返回按优先级排序的协议获取器切片（暴露给测试使用）。
 func (d *UniversalDownloader) Fetchers() []ProtocolFetcher {
 	return d.fetchers
 }

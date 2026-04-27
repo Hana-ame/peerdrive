@@ -9,6 +9,7 @@ import (
 	"strings"
 )
 
+// IsValidSHA256 判断字符串是否为有效的 64 字符十六进制 SHA256 哈希值。
 func IsValidSHA256(s string) bool {
 	s = strings.ToLower(s)
 	if len(s) != 64 {

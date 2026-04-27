@@ -32,6 +32,7 @@ import (
 // @host localhost:3000
 // @BasePath /
 
+// main 是 Peerdrive 服务器入口，初始化 DB、P2P、HTTP 路由并监听端口。
 func main() {
 	log.LogInfo("main: Peerdrive server starting")
 	ctx, cancel := context.WithCancel(context.Background())
