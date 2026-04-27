@@ -182,7 +182,17 @@ export default function Navbar() {
             <Link to="/files" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">文件管理</Link>
             <button onClick={() => nav('/')} className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">探索合集</button>
             <Link to="/anon/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">创建合集</Link>
-            <Link to="/p2p" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">P2P 网络</Link>
+            <div className="relative group">
+              <Link to="/p2p" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center gap-1">
+                P2P 网络
+                <svg className="w-3 h-3 text-gray-500 group-hover:text-gray-300 transition-transform group-hover:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              </Link>
+              <div className="absolute top-full left-0 mt-1 w-44 bg-gray-800 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
+                <Link to="/p2p" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-t-lg">双栈总控</Link>
+                <Link to="/p2p/ipfs" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700">IPFS / libp2p</Link>
+                <Link to="/p2p/bt" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-b-lg">BT DHT</Link>
+              </div>
+            </div>
           </div>
         </div>
 

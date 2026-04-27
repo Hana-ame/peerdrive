@@ -18,6 +18,19 @@ function collName(c) {
     (c.entries?.length ? `${c.entries.length} 个文件` : (c.entry_count != null ? `${c.entry_count} 个文件` : (c.hash ? c.hash.substring(0,12)+'...' : '未命名合集')));
 }
 
+function fileIconFromPath(p) {
+  const ext = (p || '').split('.').pop()?.toLowerCase();
+  if (!ext || ext === p) return '📄';
+  if (['jpg','jpeg','png','gif','svg','webp','bmp'].includes(ext)) return '🖼️';
+  if (['mp4','webm','mkv','avi','mov'].includes(ext)) return '🎬';
+  if (['mp3','wav','flac','ogg','aac'].includes(ext)) return '🎵';
+  if (['pdf'].includes(ext)) return '📕';
+  if (['zip','tar','gz','rar','7z'].includes(ext)) return '📦';
+  if (['txt','md','log'].includes(ext)) return '📝';
+  if (['js','ts','jsx','tsx','py','go','rs','java','c','cpp','h','json','yml','yaml','xml','html','css'].includes(ext)) return '💻';
+  return '📄';
+}
+
 function collFileCount(c) {
   return c.entry_count || (c.entries ? c.entries.length : 0);
 }
@@ -43,11 +56,15 @@ export default function CollectionCard({ collection, onFork, onShare, onDownload
     if (link) navigate(link);
   };
 
+const isSingleFile = count === 1;
+  const singleFile = (c.entries?.[0]) || (c.name_preview ? { path: c.name_preview } : null);
+  const cardIcon = isSingleFile && singleFile ? fileIconFromPath(singleFile.path || '') : (isDummy ? '🧪' : '📦');
+
   if (viewMode === 'list') {
     return (
       <div onClick={handleClick} className="flex items-center gap-4 px-4 py-3 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 group">
-        <span className="text-xl shrink-0">{isDummy ? '🧪' : '📦'}</span>
-        <span className="flex-1 truncate text-sm font-medium text-gray-200">{name}</span>
+        <span className="text-xl shrink-0">{cardIcon}</span>
+        <span className="flex-1 truncate text-sm font-medium text-gray-200">{isSingleFile && singleFile ? (singleFile.path || name) : name}</span>
         <span className="text-xs text-gray-500 shrink-0">{count} 文件</span>
         <span className="text-xs text-gray-500 shrink-0">{time}</span>
         <span className={'text-xs px-2 py-0.5 rounded-full shrink-0 ' + (isP2PAvailable ? 'bg-blue-900/50 text-blue-400' : 'bg-gray-700 text-gray-500')}>
@@ -66,11 +83,11 @@ export default function CollectionCard({ collection, onFork, onShare, onDownload
     <div onClick={handleClick} className={'bg-gray-800 border border-gray-700 rounded-xl p-5 transition-all group ' + (link ? 'cursor-pointer hover:border-blue-500 hover:shadow-lg' : 'cursor-default opacity-80')}>
       <div className="flex items-center justify-between mb-4">
         <div className="w-10 h-10 bg-gray-700 rounded-lg flex items-center justify-center text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition-colors text-lg">
-          {isDummy ? '🧪' : '📦'}
+          {cardIcon}
         </div>
         <span className="text-xs text-gray-500">{time}</span>
       </div>
-      <h3 className="text-lg font-bold truncate text-gray-100">{name}</h3>
+      <h3 className="text-lg font-bold truncate text-gray-100">{isSingleFile && singleFile ? (singleFile.path || name) : name}</h3>
       <div className="flex items-center gap-2 mt-2">
         <span className="text-xs text-gray-500">{count} 个文件</span>
         <span className={'text-xs px-2 py-0.5 rounded-full ' + (isP2PAvailable ? 'bg-blue-900/50 text-blue-400' : 'bg-gray-700 text-gray-500')}>

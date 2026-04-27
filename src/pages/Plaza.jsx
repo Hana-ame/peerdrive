@@ -59,12 +59,14 @@ export default function Plaza() {
 
   const collId = (c) => c.id || c.hash || c.collection_name;
 
+  const [showShare, setShowShare] = useState(null); // {url, name}
+
   const handleShare = async (c) => {
     try {
       const share = await createShare(c.hash || c.id, 'collection', c.friendly_name || c.name_preview || '合集');
       const url = getShareUrl(share.token);
-      await navigator.clipboard.writeText(url);
-      alert('分享链接已复制: ' + url);
+      setShowShare({ url, name: c.friendly_name || c.name_preview || '合集' });
+      navigator.clipboard.writeText(url).catch(()=>{});
     } catch(e) { alert('分享失败: ' + e.message); }
   };
 
@@ -113,9 +115,27 @@ export default function Plaza() {
               className="flex-1 bg-gray-800 border border-gray-600 px-4 py-2.5 rounded-lg text-sm font-mono focus:outline-none focus:border-blue-500" />
             <button onClick={handleSearch} className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium">查看</button>
           </div>
+          {showShare && (
+            <div className="flex gap-2 mt-2 p-2 bg-gray-800 rounded-lg border border-gray-700">
+              <input type="text" readOnly value={showShare.url} onClick={e => e.target.select()}
+                className="flex-1 bg-gray-900 text-xs font-mono px-3 py-2 rounded border border-gray-700 text-blue-300" />
+              <button onClick={() => { navigator.clipboard.writeText(showShare.url); setShowShare(null); }}
+                className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-xs">已复制</button>
+              <button onClick={() => setShowShare(null)} className="text-gray-500 hover:text-white px-2">✕</button>
+            </div>
+          )}
           <div className="flex gap-1 mt-3">
             <button onClick={() => setPlazaTab('local')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='local'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>💻 本机 ({localColls.length})</button>
             <button onClick={() => setPlazaTab('p2p')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='p2p'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>🌐 P2P 网络 ({p2pColls.length})</button>
+            <button onClick={async () => {
+              const h = searchInput.trim();
+              if (!h) return alert('输入文件 hash 进行广播');
+              try {
+                await api.createAnonCollection([{path:'broadcast',hash:h}], '广播 '+h.substring(0,8));
+                await api.dualAnnounce(h);
+                setShowShare({url: h, name: '广播: '+h.substring(0,12)});
+              } catch(e) { alert('广播失败: '+e.message); }
+            }} className="px-4 py-1.5 text-sm rounded bg-amber-700 hover:bg-amber-600 text-white">📡 广播</button>
           </div>
         </div>
 

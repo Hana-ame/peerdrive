@@ -7,6 +7,9 @@ import AnonCreator from './pages/AnonCreator';
 import AnonExplorer from './pages/AnonExplorer';
 import Settings from './pages/Settings';
 import P2PDashboard from './pages/P2PDashboard';
+import IPFSPanel from './pages/IPFSPanel';
+import BTPanel from './pages/BTPanel';
+import P2PPanel from './pages/P2PPanel';
 import Navbar from './components/Navbar';
 import MobileNav from './components/MobileNav';
 import LLMAssistant from './components/LLMAssistant';
@@ -40,7 +43,10 @@ export default function App() {
                 <Route path="/anon/create" element={<AnonCreator />} />
                 <Route path="/anon/collections/:hash" element={<AnonExplorer />} />
                 <Route path="/anon" element={<AnonExplorer />} />
-                <Route path="/p2p" element={<P2PDashboard />} />
+                <Route path="/p2p" element={<P2PPanel />} />
+                <Route path="/p2p/ipfs" element={<IPFSPanel />} />
+                <Route path="/p2p/bt" element={<BTPanel />} />
+                <Route path="/p2p/dashboard" element={<P2PDashboard />} />
                 <Route path="/settings" element={<Settings dataConsent={dataConsent} setDataConsent={setDataConsent} />} />
               </Routes>
             </div>
