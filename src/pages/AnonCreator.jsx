@@ -244,10 +244,10 @@ export default function AnonCreator() {
       <div style={{ width: `${split}%` }} className="h-full flex flex-col border-r border-gray-700">
         {/* 4-tab flat bar */}
         <div className="flex bg-gray-800 rounded mx-2 mt-2 shrink-0">
-          <button onClick={() => setSrcTab('timeline')} className={`flex-1 px-2 py-1.5 text-xs rounded ${srcTab === 'timeline' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>🕐 时间线</button>
-          <button onClick={() => setSrcTab('registered')} className={`flex-1 px-2 py-1.5 text-xs rounded ${srcTab === 'registered' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>📁 已注册</button>
-          <button onClick={() => { setSrcTab('system'); setSysPath('/'); }} className={`flex-1 px-2 py-1.5 text-xs rounded ${srcTab === 'system' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>🖥️ 本机</button>
-          <button onClick={() => setSrcTab('collection')} className={`flex-1 px-2 py-1.5 text-xs rounded ${srcTab === 'collection' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>📦 合集</button>
+          <button onClick={() => setSrcTab('timeline')} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'timeline' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>🕐 时间线</button>
+          <button onClick={() => setSrcTab('registered')} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'registered' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>📁 已注册</button>
+          <button onClick={() => { setSrcTab('system'); setSysPath('/'); }} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'system' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>🖥️ 本机</button>
+          <button onClick={() => setSrcTab('collection')} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'collection' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>📦 合集</button>
         </div>
 
         {/* === TIMELINE TAB === */}

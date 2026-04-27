@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listAnonCollections, listPublicCollections } from '../api';
+import { listAnonCollections, listPublicCollections, getP2PStatus, getP2PNode } from '../api';
+
+const SHA256_RE = /\b([a-f0-9]{64})\b/i;
+function extractHash(text) { const m = (text || '').match(SHA256_RE); return m ? m[1].toLowerCase() : null; }
 
 const DUMMY_COLLECTIONS = [
   { hash: 'demo-1', friendly_name: '🧪 示例图片集', version: 1, isDummy: true, entries: [{ path: 'cat.jpg' }, { path: 'dog.png' }] },
@@ -23,9 +26,11 @@ function SkeletonCard() {
 export default function Plaza() {
   const [collections, setCollections] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [p2pOnline, setP2pOnline] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); getP2PStatus().then(s => setP2pOnline(s?.enabled && s?.connected_count > 0)).catch(()=>{}); }, []);
 
   const loadAll = async () => {
     setLoading(true);
@@ -41,6 +46,12 @@ export default function Plaza() {
       setCollections(merged);
     } catch { setCollections([]); }
     setLoading(false);
+  };
+
+  const handleSearch = () => {
+    const h = extractHash(searchInput) || searchInput.trim().toLowerCase();
+    if (h.length === 64) navigate(`/anon/collections/${h}`);
+    else if (h) navigate(`/anon/collections/${h}`);
   };
 
   const collName = (c) => c.collection_name || c.friendly_name || c.name_preview || (c.entries ? `${c.entries.length} 个文件` : (c.entry_count ? `${c.entry_count} 个文件` : '未命名合集'));
@@ -64,9 +75,23 @@ export default function Plaza() {
   return (
     <div className="p-8 overflow-y-auto h-full">
       <div className="max-w-6xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold">合集</h1>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold">合集</h1>
+            {p2pOnline && <span className="text-xs bg-emerald-900/50 text-emerald-400 px-2 py-0.5 rounded-full">P2P 在线</span>}
+          </div>
           <button onClick={() => navigate('/anon/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">+ 创建合集</button>
+        </div>
+        <div className="mb-6">
+          <div className="flex gap-2">
+            <input type="text" value={searchInput}
+              onChange={e => { setSearchInput(e.target.value); const h = extractHash(e.target.value); if (h) { navigate(`/anon/collections/${h}`); } }}
+              onPaste={e => { const h = extractHash(e.clipboardData.getData('text')); if (h) { e.preventDefault(); setSearchInput(h); navigate(`/anon/collections/${h}`); } }}
+              onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
+              placeholder="输入 SHA256 Hash / URL 打开合集，或搜索 P2P 网络..."
+              className="flex-1 bg-gray-800 border border-gray-600 px-4 py-2.5 rounded-lg text-sm font-mono focus:outline-none focus:border-blue-500" />
+            <button onClick={handleSearch} className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium">查看</button>
+          </div>
         </div>
 
         {loading ? (
