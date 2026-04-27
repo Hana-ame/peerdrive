@@ -40,7 +40,7 @@ type PeerScanner struct {
 	lastScanTime map[string]time.Time
 }
 
-// NewPeerScanner creates a new PeerScanner.
+// NewPeerScanner 创建 PeerScanner 实例。
 func NewPeerScanner(svc *P2PService, tracker *PeerTracker, regURL string) *PeerScanner {
 	return &PeerScanner{
 		svc:          svc,
@@ -50,7 +50,7 @@ func NewPeerScanner(svc *P2PService, tracker *PeerTracker, regURL string) *PeerS
 	}
 }
 
-// Start launches the background scanner goroutines.
+// Start 启动后台扫描器协程（DHT、注册服务器、LAN、引导节点维护）。
 func (ps *PeerScanner) Start() {
 	ps.mu.Lock()
 	if ps.active {
@@ -71,7 +71,7 @@ func (ps *PeerScanner) Start() {
 	go ps.runBootstrapMaintainer()
 }
 
-// Stop signals all scanner goroutines to shut down and waits for them.
+// Stop 通知所有扫描器协程停止并等待它们完成。
 func (ps *PeerScanner) Stop() {
 	ps.mu.Lock()
 	if !ps.active {
@@ -86,12 +86,12 @@ func (ps *PeerScanner) Stop() {
 	log.LogInfo("peer-scanner: all scanners stopped")
 }
 
-// ActiveScanners returns the list of active scanner names.
+// ActiveScanners 返回活跃的扫描器名称列表。
 func (ps *PeerScanner) ActiveScanners() []string {
 	return []string{"dht", "reg_server", "lan", "bootstrap"}
 }
 
-// LastScanTimes returns a map of scanner name to last scan time (RFC3339).
+// LastScanTimes 返回扫描器名称到最后扫描时间的映射（RFC3339 格式）。
 func (ps *PeerScanner) LastScanTimes() map[string]string {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()

@@ -29,9 +29,7 @@ var (
 
 // ----- Immutable items -----
 
-// PutImmutable stores arbitrary data in the DHT (up to 1000 bytes) under an
-// immutable key derived from the data itself. The returned target is the
-// 20-byte infohash (SHA1 of bencoded value) that can be used to retrieve it.
+// PutImmutable 将不可变数据存入 DHT（最多 1000 字节），返回 20 字节的 infohash 目标值。
 func (s *BTDHTService) PutImmutable(data []byte) (target [20]byte, err error) {
 	if s.Server == nil {
 		return target, ErrBEP44DHTDisabled
@@ -95,7 +93,7 @@ func (s *BTDHTService) PutImmutable(data []byte) (target [20]byte, err error) {
 	return target, nil
 }
 
-// GetImmutable retrieves data from the DHT by its 20-byte infohash target.
+// GetImmutable 根据 20 字节 infohash 从 DHT 检索不可变数据。
 func (s *BTDHTService) GetImmutable(target [20]byte) (data []byte, err error) {
 	if s.Server == nil {
 		return nil, ErrBEP44DHTDisabled
@@ -113,9 +111,7 @@ func (s *BTDHTService) GetImmutable(target [20]byte) (data []byte, err error) {
 
 // ----- Mutable items -----
 
-// PutMutable stores mutable data in the DHT, signed with the provided Ed25519
-// private key. The target is SHA1(pubkey || salt). The sequence number seq
-// should be incremented for each update.
+// PutMutable 将可变数据存入 DHT，使用 Ed25519 私钥签名，seq 序号需随每次更新递增。
 func (s *BTDHTService) PutMutable(
 	privKey ed25519.PrivateKey,
 	salt []byte,
@@ -198,8 +194,7 @@ func (s *BTDHTService) PutMutable(
 	return target, nil
 }
 
-// GetMutable retrieves mutable data from the DHT. It returns the raw data
-// bytes and the sequence number from the node that responded.
+// GetMutable 从 DHT 检索可变数据，返回原始数据字节和响应节点的序列号。
 func (s *BTDHTService) GetMutable(
 	pubKey ed25519.PublicKey,
 	salt []byte,
@@ -448,8 +443,7 @@ func decodeBEP44Value(v bencode.Bytes) ([]byte, error) {
 	return raw, nil
 }
 
-// MakeBEP44Key generates a new Ed25519 key pair suitable for BEP 44 mutable
-// items. This is a convenience function.
+// MakeBEP44Key 生成适用于 BEP 44 可变项的新 Ed25519 密钥对。
 func MakeBEP44Key() (ed25519.PublicKey, ed25519.PrivateKey, error) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -458,8 +452,7 @@ func MakeBEP44Key() (ed25519.PublicKey, ed25519.PrivateKey, error) {
 	return pub, priv, nil
 }
 
-// MakeBEP44Target returns the target (infohash) for a mutable BEP 44 item
-// given the public key and optional salt.
+// MakeBEP44Target 根据公钥和可选 salt 计算可变 BEP 44 项目的目标值（infohash）。
 func MakeBEP44Target(pubKey ed25519.PublicKey, salt []byte) [20]byte {
 	var pk [32]byte
 	copy(pk[:], pubKey)

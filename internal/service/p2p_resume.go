@@ -51,7 +51,7 @@ type BTDHTProvider interface {
 	FindProviders(hash string) ([]string, error)
 }
 
-// NewResumeManager creates a ResumeManager.
+// NewResumeManager 创建断点续传管理器实例。
 func NewResumeManager(cfg *config.Config, p2p *P2PService, btSvc BTDHTProvider, dualSvc *DualP2PService) *ResumeManager {
 	dir := cfg.DownloadDir
 	if dir == "" {
@@ -74,6 +74,7 @@ func NewResumeManager(cfg *config.Config, p2p *P2PService, btSvc BTDHTProvider, 
 // ResumeDownload resumes a download for the given hash. Checks partial file,
 // reads saved progress from SQLite, and downloads missing chunks. Returns the
 // path to the completed file.
+// ResumeDownload 恢复或新启一个断点续传下载任务，从各 P2P 源获取文件分片。
 func (rm *ResumeManager) ResumeDownload(ctx context.Context, hash, targetPath string) (string, error) {
 	defer log.LogDuration("ResumeManager.ResumeDownload")()
 	log.LogDebug("p2p-resume: ResumeDownload hash=%s target=%s", hash, targetPath)
@@ -176,6 +177,7 @@ func (rm *ResumeManager) ResumeDownload(ctx context.Context, hash, targetPath st
 }
 
 // GetProgress returns saved download progress from SQLite.
+// GetProgress 返回指定 hash 的断点续传下载进度。
 func (rm *ResumeManager) GetProgress(hash string) *DownloadProgress {
 	defer log.LogDuration("ResumeManager.GetProgress")()
 	progress := rm.loadProgress(hash)
@@ -191,6 +193,7 @@ func (rm *ResumeManager) GetProgress(hash string) *DownloadProgress {
 }
 
 // CancelDownload stops an active download and cleans up the partial file.
+// CancelDownload 取消指定 hash 的下载任务并清理临时文件。
 func (rm *ResumeManager) CancelDownload(hash string) error {
 	defer log.LogDuration("ResumeManager.CancelDownload")()
 	rm.mu.Lock()

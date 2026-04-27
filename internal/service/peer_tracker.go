@@ -22,7 +22,7 @@ type PeerTracker struct {
 	regServerConnected bool
 }
 
-// NewPeerTracker creates a new PeerTracker with sensible defaults.
+// NewPeerTracker 创建 PeerTracker 实例，初始化默认值。
 func NewPeerTracker() *PeerTracker {
 	return &PeerTracker{
 		peers:           make(map[string]*model.PeerInfo),
@@ -33,32 +33,28 @@ func NewPeerTracker() *PeerTracker {
 	}
 }
 
-// SetServerVersion sets the local server version string exposed in stats.
+// SetServerVersion 设置本地服务器版本，暴露在统计信息中。
 func (t *PeerTracker) SetServerVersion(version string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.serverVersion = version
 }
 
-// SetTransports sets the list of supported transports exposed in stats.
+// SetTransports 设置支持的传输协议列表，暴露在统计信息中。
 func (t *PeerTracker) SetTransports(transports []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.transports = transports
 }
 
-// SetRegServerConnected sets whether this node is connected to a
-// registration server.
+// SetRegServerConnected 设置本节点是否已连接注册服务器。
 func (t *PeerTracker) SetRegServerConnected(connected bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.regServerConnected = connected
 }
 
-// RecordConnection records that a peer was seen.  If the peer is new its
-// FirstSeen field is populated; otherwise only LastSeen is updated.  The
-// connection start timestamp is stored so that RecordDisconnect can compute
-// connection duration.
+// RecordConnection 记录对端连接事件，新对端设置 FirstSeen，已有对端更新 LastSeen，同时记录连接起始时间。
 func (t *PeerTracker) RecordConnection(peerID string, addrs []string, userAgent string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -84,8 +80,7 @@ func (t *PeerTracker) RecordConnection(peerID string, addrs []string, userAgent 
 	t.connectionStart[peerID] = now
 }
 
-// RecordDisconnect updates the peer's LastSeen and computes the connection
-// duration from the previously recorded connection start time.
+// RecordDisconnect 更新对端的 LastSeen 并根据之前记录的计算连接时长。
 func (t *PeerTracker) RecordDisconnect(peerID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -100,7 +95,7 @@ func (t *PeerTracker) RecordDisconnect(peerID string) {
 	}
 }
 
-// RecordBytesSent adds n bytes to the peer's BytesSent counter.
+// RecordBytesSent 增加对端的已发送字节计数。
 func (t *PeerTracker) RecordBytesSent(peerID string, n int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -110,7 +105,7 @@ func (t *PeerTracker) RecordBytesSent(peerID string, n int64) {
 	}
 }
 
-// RecordBytesRecv adds n bytes to the peer's BytesRecv counter.
+// RecordBytesRecv 增加对端的已接收字节计数。
 func (t *PeerTracker) RecordBytesRecv(peerID string, n int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -120,7 +115,7 @@ func (t *PeerTracker) RecordBytesRecv(peerID string, n int64) {
 	}
 }
 
-// RecordLatency records the last measured RTT for a peer.
+// RecordLatency 记录对端最近一次测量的 RTT 延迟。
 func (t *PeerTracker) RecordLatency(peerID string, rtt time.Duration) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -130,8 +125,7 @@ func (t *PeerTracker) RecordLatency(peerID string, rtt time.Duration) {
 	}
 }
 
-// SetRegInfo sets registration-verification info on a peer.  If the peer is
-// not yet tracked, a minimal entry is created.
+// SetRegInfo 设置对端的注册验证信息，如对端未跟踪则创建最小记录。
 func (t *PeerTracker) SetRegInfo(peerID, username string, verified bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -148,7 +142,7 @@ func (t *PeerTracker) SetRegInfo(peerID, username string, verified bool) {
 	}
 }
 
-// GetPeer returns a copy of the peer info, or nil if the peer is unknown.
+// GetPeer 返回指定对端信息的副本，未知对端返回 nil。
 func (t *PeerTracker) GetPeer(peerID string) *model.PeerInfo {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -160,7 +154,7 @@ func (t *PeerTracker) GetPeer(peerID string) *model.PeerInfo {
 	return nil
 }
 
-// GetAllPeers returns a sorted copy of all tracked peers.
+// GetAllPeers 返回所有已跟踪对端的排序副本（按首次看到时间排序）。
 func (t *PeerTracker) GetAllPeers() []*model.PeerInfo {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -176,8 +170,7 @@ func (t *PeerTracker) GetAllPeers() []*model.PeerInfo {
 	return result
 }
 
-// GetStats returns aggregated global statistics as a map suitable for JSON
-// serialization.
+// GetStats 返回聚合的全局统计信息（对端数、传输量、运行时间等），适用于 JSON 序列化。
 func (t *PeerTracker) GetStats() map[string]interface{} {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -199,14 +192,14 @@ func (t *PeerTracker) GetStats() map[string]interface{} {
 	}
 }
 
-// PeerCount returns the number of unique peers seen.
+// PeerCount 返回已看到的唯一对端数量。
 func (t *PeerTracker) PeerCount() int {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return len(t.peers)
 }
 
-// TotalBytesSent returns the sum of BytesSent across all peers.
+// TotalBytesSent 返回所有对端的已发送字节总数。
 func (t *PeerTracker) TotalBytesSent() int64 {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -217,7 +210,7 @@ func (t *PeerTracker) TotalBytesSent() int64 {
 	return total
 }
 
-// TotalBytesRecv returns the sum of BytesRecv across all peers.
+// TotalBytesRecv 返回所有对端的已接收字节总数。
 func (t *PeerTracker) TotalBytesRecv() int64 {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -228,19 +221,19 @@ func (t *PeerTracker) TotalBytesRecv() int64 {
 	return total
 }
 
-// Uptime returns the duration since the tracker was created.
+// Uptime 返回自追踪器创建以来的运行时间。
 func (t *PeerTracker) Uptime() time.Duration {
 	return time.Since(t.startTime)
 }
 
-// ServerVersion returns the configured server version.
+// ServerVersion 返回已配置的服务器版本字符串。
 func (t *PeerTracker) ServerVersion() string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.serverVersion
 }
 
-// Transports returns a copy of the supported transports list.
+// Transports 返回所支持的传输协议列表的副本。
 func (t *PeerTracker) Transports() []string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -249,15 +242,14 @@ func (t *PeerTracker) Transports() []string {
 	return result
 }
 
-// RegServerConnected returns whether a registration server is connected.
+// RegServerConnected 返回是否已连接注册服务器。
 func (t *PeerTracker) RegServerConnected() bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.regServerConnected
 }
 
-// SetDirection sets the connection direction ("inbound" or "outbound") for a
-// tracked peer. If the peer is not yet tracked this is a no-op.
+// SetDirection 设置对端的连接方向（"inbound" 或 "outbound"），未跟踪的对端不操作。
 func (t *PeerTracker) SetDirection(peerID, direction string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -266,9 +258,7 @@ func (t *PeerTracker) SetDirection(peerID, direction string) {
 	}
 }
 
-// ConnectionCounts returns the number of tracked peers by direction. Only
-// peers whose DisconnectReason is empty (i.e. still considered active) are
-// counted.
+// ConnectionCounts 按方向返回活跃连接数（仅统计 DisconnectReason 为空的活跃对端）。
 func (t *PeerTracker) ConnectionCounts() (inbound, outbound int) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()

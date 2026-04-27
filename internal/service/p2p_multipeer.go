@@ -55,7 +55,7 @@ type MultiPeerDownloader struct {
 	active      map[string]*MultiPeerProgress
 }
 
-// NewMultiPeerDownloader creates a MultiPeerDownloader.
+// NewMultiPeerDownloader 创建多源并行下载器实例。
 func NewMultiPeerDownloader(cfg *config.Config, p2p *P2PService, btSvc *p2p_bt.BTDHTService, dualSvc *DualP2PService) *MultiPeerDownloader {
 	dir := cfg.DownloadDir
 	if dir == "" {
@@ -76,6 +76,7 @@ func NewMultiPeerDownloader(cfg *config.Config, p2p *P2PService, btSvc *p2p_bt.B
 }
 
 // GetSources returns all available sources across IPFS and BT networks.
+// GetSources 查找指定 hash 的所有可用 P2P 源（IPFS 和 BT 网络）。
 func (md *MultiPeerDownloader) GetSources(ctx context.Context, hash string) ([]MultiPeerSource, error) {
 	defer log.LogDuration("MultiPeerDownloader.GetSources")()
 	log.LogDebug("p2p-multipeer: GetSources hash=%s", hash)
@@ -138,6 +139,7 @@ func (md *MultiPeerDownloader) GetSources(ctx context.Context, hash string) ([]M
 }
 
 // MultiPeerDownload orchestrates a multi-source parallel download.
+// MultiPeerDownload 从多个源并行下载文件分片，支持完整性校验。
 func (md *MultiPeerDownloader) MultiPeerDownload(ctx context.Context, hash, targetPath string) (string, error) {
 	defer log.LogDuration("MultiPeerDownloader.MultiPeerDownload")()
 	log.LogDebug("p2p-multipeer: MultiPeerDownload hash=%s", hash)
@@ -283,6 +285,7 @@ func (md *MultiPeerDownloader) MultiPeerDownload(ctx context.Context, hash, targ
 }
 
 // GetProgress returns current multi-peer download progress.
+// GetProgress 返回指定 hash 的多源下载进度。
 func (md *MultiPeerDownloader) GetProgress(hash string) *MultiPeerProgress {
 	md.mu.RLock()
 	defer md.mu.RUnlock()

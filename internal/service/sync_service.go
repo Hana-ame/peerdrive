@@ -24,6 +24,7 @@ func NewSyncService(syncRepo *repository.SyncRepository, downloader *Downloader)
 	}
 }
 
+// SaveToDisk 将集合文件同步到本地磁盘，支持路径过滤（include/exclude）和同步状态跟踪。
 func (s *SyncService) SaveToDisk(req model.SaveLocalRequest) error {
 	// 1. Path Traversal Prevention
 	if strings.Contains(req.LocalPath, "..") {
@@ -71,6 +72,7 @@ func (s *SyncService) SaveToDisk(req model.SaveLocalRequest) error {
 	return nil
 }
 
+// GetStatus 查询集合的本地同步状态，返回已保存/缺失的文件列表。
 func (s *SyncService) GetStatus(hash string) (*model.SyncStatusResponse, error) {
 	state, err := s.syncRepo.GetSyncState(hash)
 	if err != nil {

@@ -84,6 +84,7 @@ func (c *wsConn) writeBinary(data []byte) {
 	c.conn.WriteMessage(websocket.BinaryMessage, data)
 }
 
+// WSHandler 返回 WebSocket 文件传输的 HTTP 处理函数，支持请求/响应/广播消息。
 func (p *P2PService) WSHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		conn, err := wsUpgrader.Upgrade(w, r, nil)
@@ -171,6 +172,7 @@ func (p *P2PService) lookupFile(hash string) []byte {
 	return nil
 }
 
+// WSCount 返回当前 WebSocket 连接数。
 func (p *P2PService) WSCount() int {
 	return p.wsHub.count()
 }

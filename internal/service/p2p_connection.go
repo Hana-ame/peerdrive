@@ -35,7 +35,7 @@ const (
 	connectionTimeout   = 15 * time.Second
 )
 
-// NewConnectionManager creates a connection manager for the P2P service.
+// NewConnectionManager 创建一个 P2P 连接管理器实例。
 func NewConnectionManager(svc *P2PService) *ConnectionManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ConnectionManager{
@@ -47,6 +47,7 @@ func NewConnectionManager(svc *P2PService) *ConnectionManager {
 }
 
 // AddKnownPeer adds a peer to the known peers list for auto-reconnection.
+// AddKnownPeer 将已知对端添加到连接管理器的跟踪列表。
 func (cm *ConnectionManager) AddKnownPeer(info peer.AddrInfo) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -54,6 +55,7 @@ func (cm *ConnectionManager) AddKnownPeer(info peer.AddrInfo) {
 }
 
 // RemoveKnownPeer removes a peer from tracking.
+// RemoveKnownPeer 从连接管理器中移除指定对端。
 func (cm *ConnectionManager) RemoveKnownPeer(id peer.ID) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -61,6 +63,7 @@ func (cm *ConnectionManager) RemoveKnownPeer(id peer.ID) {
 }
 
 // GetKnownPeers returns all tracked peers.
+// GetKnownPeers 返回所有已知对端的信息列表。
 func (cm *ConnectionManager) GetKnownPeers() []peer.AddrInfo {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -72,6 +75,7 @@ func (cm *ConnectionManager) GetKnownPeers() []peer.AddrInfo {
 }
 
 // ConnectToPeer attempts to connect to a peer with retry logic.
+// ConnectToPeer 连接到指定的远程对端，支持自动重试和回退。
 func (cm *ConnectionManager) ConnectToPeer(ctx context.Context, info peer.AddrInfo) error {
 	defer log.LogDuration("ConnectionManager.ConnectToPeer")()
 	log.LogDebug("p2p-conn: ConnectToPeer %s", info.ID.String())
@@ -103,12 +107,14 @@ func (cm *ConnectionManager) ConnectToPeer(ctx context.Context, info peer.AddrIn
 }
 
 // StartHeartbeat begins periodic health checks on connected peers.
+// StartHeartbeat 启动心跳检测协程，定时检查连接状态。
 func (cm *ConnectionManager) StartHeartbeat() {
 	log.LogDebug("p2p-conn: StartHeartbeat beginning")
 	go cm.heartbeatLoop()
 }
 
 // StopHeartbeat stops the heartbeat goroutine.
+// StopHeartbeat 停止心跳检测协程。
 func (cm *ConnectionManager) StopHeartbeat() {
 	log.LogDebug("p2p-conn: StopHeartbeat")
 	if cm.heartbeatCan != nil {
@@ -166,6 +172,7 @@ func (cm *ConnectionManager) checkAndReconnect() {
 }
 
 // AutoConnectFromDiscovered connects to all currently discovered peers.
+// AutoConnectFromDiscovered 自动连接所有已发现的未连接对端。
 func (cm *ConnectionManager) AutoConnectFromDiscovered() {
 	defer log.LogDuration("ConnectionManager.AutoConnectFromDiscovered")()
 	log.LogDebug("p2p-conn: AutoConnectFromDiscovered starting")
@@ -188,11 +195,13 @@ func (cm *ConnectionManager) AutoConnectFromDiscovered() {
 }
 
 // GetPeerLatency returns the last known RTT for a peer.
+// GetPeerLatency 测量并返回与指定对端的网络延迟。
 func (cm *ConnectionManager) GetPeerLatency(ctx context.Context, peerID peer.ID) (time.Duration, error) {
 	return cm.svc.PingPeer(ctx, peerID)
 }
 
 // Stats returns connection manager statistics.
+// Stats 返回连接管理器的统计信息（重连次数、成功/失败连接数等）。
 func (cm *ConnectionManager) Stats() map[string]interface{} {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -212,6 +221,7 @@ func (cm *ConnectionManager) Stats() map[string]interface{} {
 }
 
 // DisconnectPeer disconnects from a specific peer.
+// DisconnectPeer 断开与指定对端的连接。
 func (cm *ConnectionManager) DisconnectPeer(id peer.ID) error {
 	if !cm.svc.IsEnabled() {
 		return fmt.Errorf("p2p not enabled")

@@ -55,8 +55,7 @@ type ForwardService struct {
 	enabled  bool
 }
 
-// NewForwardService creates a ForwardService and registers the libp2p stream
-// handler if the service is enabled and a host is available.
+// NewForwardService 创建端口转发服务，启用时注册 libp2p 流处理器。
 func NewForwardService(h host.Host, enabled bool) *ForwardService {
 	svc := &ForwardService{
 		host:     h,
@@ -70,14 +69,12 @@ func NewForwardService(h host.Host, enabled bool) *ForwardService {
 	return svc
 }
 
-// IsEnabled returns true when the forward service is active.
+// IsEnabled 返回转发服务是否已启用且 host 可用。
 func (f *ForwardService) IsEnabled() bool {
 	return f.enabled && f.host != nil
 }
 
-// CreateForward registers a local service port for incoming forward
-// connections authenticated with sharedKey. This is called on the peer
-// that hosts the service (Peer A / source side).
+// CreateForward 在源端注册本地服务端口，供远程对端通过 sharedKey 认证后转发访问。
 func (f *ForwardService) CreateForward(sharedKey string, localPort int) error {
 	if !f.IsEnabled() {
 		return fmt.Errorf("forward service not enabled")
@@ -101,11 +98,7 @@ func (f *ForwardService) CreateForward(sharedKey string, localPort int) error {
 	return nil
 }
 
-// ConnectForward opens a forward connection to a remote peer. It authenticates
-// with sharedKey, then starts a TCP listener on localhost:localPort. Each
-// incoming TCP connection opens a new libp2p stream to the remote peer.
-// This is called on the peer that wants to access the remote service
-// (Peer B / client side).
+// ConnectForward 在客户端打开到远程对端的转发连接，认证后启动本地 TCP 监听器，将入站连接通过 libp2p 流转发到远程。
 func (f *ForwardService) ConnectForward(ctx context.Context, targetPeer peer.ID, sharedKey string, localPort int) error {
 	if !f.IsEnabled() {
 		return fmt.Errorf("forward service not enabled")
@@ -287,7 +280,7 @@ func (f *ForwardService) handleStream(stream network.Stream) {
 	wg.Wait()
 }
 
-// CloseForward removes a forward session and closes its listener (if any).
+// CloseForward 删除指定 key 的转发会话并关闭监听器（如有）。
 func (f *ForwardService) CloseForward(sharedKey string) error {
 	f.mu.Lock()
 	sess, ok := f.sessions[sharedKey]
@@ -306,8 +299,7 @@ func (f *ForwardService) CloseForward(sharedKey string) error {
 	return nil
 }
 
-// ListSessions returns a snapshot of all active forward sessions with
-// current client counts.
+// ListSessions 返回所有活跃转发会话的快照（含当前客户端连接数）。
 func (f *ForwardService) ListSessions() []ForwardSession {
 	f.mu.RLock()
 	defer f.mu.RUnlock()

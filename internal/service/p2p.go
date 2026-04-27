@@ -71,6 +71,7 @@ type fileResponse struct {
 	Err  error
 }
 
+// NewP2PService 创建 libp2p 服务，根据配置初始化 host、DHT、mDNS、中继和打洞等能力。
 func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error) {
 	defer log.LogDuration("P2PService.NewP2PService")()
 	log.LogDebug("p2p: NewP2PService starting (enabled=%v)", cfg.P2PEnable)

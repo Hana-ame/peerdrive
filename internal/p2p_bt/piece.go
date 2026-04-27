@@ -43,14 +43,14 @@ const (
 // Bitfield tracks which pieces a peer has.
 type Bitfield []byte
 
-// HasPiece returns true if the bitfield indicates the piece at index is present.
+// HasPiece 判断 bitfield 中指定索引的分片是否存在。
 func (bf Bitfield) HasPiece(index int) bool {
 	byteIdx := index / 8
 	bitIdx := 7 - uint(index%8) // big-endian bit ordering
 	return byteIdx < len(bf) && (bf[byteIdx]>>bitIdx)&1 == 1
 }
 
-// SetPiece marks the piece at index as present in the bitfield.
+// SetPiece 将 bitfield 中指定索引的分片标记为存在。
 func (bf Bitfield) SetPiece(index int) {
 	byteIdx := index / 8
 	if byteIdx >= len(bf) {
@@ -60,12 +60,12 @@ func (bf Bitfield) SetPiece(index int) {
 	bf[byteIdx] |= 1 << bitIdx
 }
 
-// NumPieces returns the number of bits in the bitfield.
+// NumPieces 返回 bitfield 中的位数（分片总数）。
 func (bf Bitfield) NumPieces() int {
 	return len(bf) * 8
 }
 
-// NewBitfield creates a bitfield for the given number of pieces.
+// NewBitfield 创建指定分片数的 bitfield。
 func NewBitfield(numPieces int) Bitfield {
 	return make(Bitfield, (numPieces+7)/8)
 }
@@ -178,10 +178,7 @@ func btSendRequest(conn net.Conn, pieceIndex, offset, length uint32) error {
 	return btSendMessage(conn, msgRequest, payload)
 }
 
-// DownloadPiece downloads a single piece from a peer over the BitTorrent wire
-// protocol. It connects to peerAddr (host:port), performs the handshake,
-// requests blocks within the piece, reassembles the data, and verifies the
-// SHA1 hash.
+// DownloadPiece 从指定对端下载单个分片，通过 BitTorrent 线缆协议连接、握手、请求块并校验 SHA1。
 func DownloadPiece(
 	ctx context.Context,
 	peerAddr string,
@@ -355,10 +352,7 @@ func DownloadPiece(
 	return data, nil
 }
 
-// DownloadAllPieces downloads all pieces of a torrent from the given peer,
-// verifying each piece against the torrent metadata. Returns the concatenated
-// data for single-file torrents, or a map of filename to data for multi-file.
-// Downloads multiple pieces concurrently using multiple connections.
+// DownloadAllPieces 从指定对端下载所有分片，每片校验 SHA1，返回文件名到数据的映射。
 func DownloadAllPieces(
 	ctx context.Context,
 	peerAddr string,

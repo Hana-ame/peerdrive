@@ -23,6 +23,7 @@ type AnonService struct {
 	config *config.Config
 }
 
+// NewAnonService 创建一个新的匿名集合服务实例。
 func NewAnonService(cfg *config.Config) *AnonService {
 	return &AnonService{config: cfg}
 }
@@ -42,6 +43,7 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
+// CreateCollection 创建匿名集合，验证条目路径和 hash，写入 content-addressed 存储并返回 SHA256。
 func (s *AnonService) CreateCollection(name string, entries []model.AnonCollectionEntry, tags []string) (string, error) {
 	defer log.LogDuration("AnonService.CreateCollection")()
 	log.LogDebug("anon-svc: CreateCollection name=%s entries=%d", name, len(entries))
@@ -98,6 +100,7 @@ func (s *AnonService) CreateCollection(name string, entries []model.AnonCollecti
 	return hash, nil
 }
 
+// GetCollectionByHash 通过 SHA256 hash 从 content-addressed 存储中读取匿名集合。
 func (s *AnonService) GetCollectionByHash(hash string) (*model.AnonCollection, error) {
 	defer log.LogDuration("AnonService.GetCollectionByHash")()
 	log.LogDebug("anon-svc: GetCollectionByHash hash=%s", hash)
@@ -121,10 +124,12 @@ func (s *AnonService) GetCollectionByHash(hash string) (*model.AnonCollection, e
 	return &coll, nil
 }
 
+// ListCollections 返回所有已注册的匿名集合摘要列表。
 func (s *AnonService) ListCollections() ([]model.AnonCollectionSummary, error) {
 	return repository.ListAnonCollections(s.config.StorageDir)
 }
 
+// CommitCollection 基于源集合创建新版本，支持添加/更新/删除条目，自动递增版本号。
 func (s *AnonService) CommitCollection(
 	sourceHash string,
 	entries []model.AnonCollectionEntry,

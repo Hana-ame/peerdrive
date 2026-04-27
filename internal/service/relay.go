@@ -74,9 +74,7 @@ type RelayService struct {
 	p2p *P2PService
 }
 
-// NewRelayService creates a RelayService backed by the given P2PService.
-// The p2p argument must be non-nil and should have a running libp2p host
-// (IsEnabled() == true) for relay operations to succeed.
+// NewRelayService 创建中继服务实例，需传入已启动的 P2PService。
 func NewRelayService(p2p *P2PService) *RelayService {
 	return &RelayService{p2p: p2p}
 }
@@ -224,19 +222,7 @@ func (r *RelayService) requestFileSize(ctx context.Context, peerID peer.ID, hash
 //  Public API
 // ──────────────────────────────────────────────
 
-// RelayFileRequest opens a libp2p stream to the target peer via the
-// exchange protocol (/peerdrive/exchange/1.0.0), fetches the file
-// identified by hash, and returns an io.ReadCloser for streaming.
-//
-// The caller is responsible for closing the returned reader. The
-// context controls the lifetime of the underlying libp2p stream.
-//
-// Example:
-//
-//	reader, err := relay.RelayFileRequest(ctx, hash, peerID)
-//	if err != nil { ... }
-//	defer reader.Close()
-//	io.Copy(w, reader)
+// RelayFileRequest 通过 libp2p exchange 协议从中继对端获取文件并返回流式读取器。
 func (r *RelayService) RelayFileRequest(ctx context.Context, hash string, targetPeerID peer.ID) (io.ReadCloser, error) {
 	reader, _, err := r.openExchangeStream(ctx, targetPeerID, hash)
 	return reader, err

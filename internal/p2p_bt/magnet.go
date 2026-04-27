@@ -19,11 +19,7 @@ type MagnetInfo struct {
 	Trackers    []string `json:"trackers,omitempty"`
 }
 
-// ParseMagnet parses a magnet URI of the form:
-//
-//	magnet:?xt=urn:btih:<infohash>&dn=<name>&tr=<tracker>&tr=<tracker>
-//
-// The infohash may be 40-char hex or 32-char base32.
+// ParseMagnet 解析磁力链接 URI，支持 40 字符 hex 和 32 字符 base32 格式的 infohash。
 func ParseMagnet(uri string) (*MagnetInfo, error) {
 	defer log.LogDuration("BT.ParseMagnet")()
 	log.LogDebug("bt-magnet: ParseMagnet uri=%s", uri)

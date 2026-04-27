@@ -38,16 +38,19 @@ func InitPeerScanner(s *service.PeerScanner) {
 	peerScanner = s
 }
 
+// InitForwardController 注入 ForwardService 实例供端口转发端点使用。
 func InitForwardController(svc *service.ForwardService) {
 	log.LogDebug("ctrl-p2p: InitForwardController")
 	forwardSvc = svc
 }
 
+// InitP2PController 注入 P2PService 实例供 P2P 处理函数使用。
 func InitP2PController(svc *service.P2PService) {
 	log.LogDebug("ctrl-p2p: InitP2PController")
 	p2pSvc = svc
 }
 
+// InitBTController 注入 BTDHTService 实例供 BitTorrent DHT 处理函数使用。
 func InitBTController(svc *p2p_bt.BTDHTService) {
 	log.LogDebug("ctrl-p2p: InitBTController")
 	btSvc = svc
@@ -65,23 +68,25 @@ func InitMultiPeerDownloader(mp *service.MultiPeerDownloader) {
 	multiPeerDl = mp
 }
 
+// InitBTClient 注入 BTClient 实例供 BitTorrent 下载处理函数使用。
 func InitBTClient(c *p2p_bt.BTClient) {
 	log.LogDebug("ctrl-p2p: InitBTClient")
 	btClient = c
 }
 
+// InitDualController 注入 DualP2PService 实例供双网络（IPFS+BT）操作端点使用。
 func InitDualController(svc *service.DualP2PService) {
 	log.LogDebug("ctrl-p2p: InitDualController")
 	dualSvc = svc
 }
 
-// InitPeerTracker injects the PeerTracker singleton into the controller
-// package so that handlers can query peer metadata and record events.
+// InitPeerTracker 注入 PeerTracker 实例供对端元数据和统计查询使用。
 func InitPeerTracker(t *service.PeerTracker) {
 	log.LogDebug("ctrl-p2p: InitPeerTracker")
 	peerTracker = t
 }
 
+// GetNodeInfo 处理 GET /p2p/node，返回本地节点 ID 和监听地址列表。
 func GetNodeInfo(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: GetNodeInfo")
 	id, addrs := p2pSvc.GetNodeInfo()
@@ -92,6 +97,7 @@ func GetNodeInfo(c *gin.Context) {
 	log.LogInfo("ctrl-p2p: GetNodeInfo peerID=%s, addrs=%d", id.String(), len(addrs))
 }
 
+// GetPeers 处理 GET /p2p/peers，返回当前已连接的对端 ID 列表。
 func GetPeers(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: GetPeers")
 	peers := p2pSvc.GetConnectedPeers()
@@ -103,6 +109,7 @@ func GetPeers(c *gin.Context) {
 	log.LogInfo("ctrl-p2p: GetPeers count=%d", len(peers))
 }
 
+// GetDiscoveredPeers 处理 GET /p2p/discovered，返回 mDNS 发现的局域网对端列表。
 func GetDiscoveredPeers(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: GetDiscoveredPeers")
 	peers := p2pSvc.GetDiscoveredPeers()
@@ -121,6 +128,7 @@ func GetDiscoveredPeers(c *gin.Context) {
 	log.LogInfo("ctrl-p2p: GetDiscoveredPeers count=%d", len(peers))
 }
 
+// PingPeer 处理 GET /p2p/ping/:peer_id，向指定对端发送 ping 并返回 RTT。
 func PingPeer(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: PingPeer")
 	raw := c.Param("peer_id")
@@ -145,6 +153,7 @@ func PingPeer(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"peer": raw, "rtt": rtt.String()})
 }
 
+// ConnectPeer 处理 POST /p2p/connect，通过 multiaddr 连接到远程对端。
 func ConnectPeer(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: ConnectPeer")
 	var req struct {
@@ -164,6 +173,7 @@ func ConnectPeer(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "connected"})
 }
 
+// AnnounceHash 处理 POST /p2p/announce，在 IPFS DHT 上宣布本节点持有指定 hash。
 func AnnounceHash(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: AnnounceHash")
 	var req struct {
@@ -183,6 +193,7 @@ func AnnounceHash(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "announced"})
 }
 
+// FetchCollection 处理 POST /p2p/fetch，从 P2P 网络获取匿名集合。
 func FetchCollection(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: FetchCollection")
 	var req struct {
@@ -208,6 +219,7 @@ func FetchCollection(c *gin.Context) {
 	c.JSON(http.StatusOK, coll)
 }
 
+// SyncFromPeer 处理 POST /p2p/sync，从指定对端同步文件到本地目录。
 func SyncFromPeer(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: SyncFromPeer")
 	var req struct {
@@ -273,6 +285,7 @@ func SyncFromPeer(c *gin.Context) {
 	})
 }
 
+// P2PStatus 处理 GET /p2p/status，返回 P2P 节点综合状态信息（连接数、传输任务、中继模式等）。
 func P2PStatus(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: P2PStatus")
 	enabled := p2pSvc.IsEnabled()
@@ -314,6 +327,7 @@ func P2PStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// PushSync 处理 POST /p2p/push，推送集合条目到目标目录供对端获取。
 func PushSync(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: PushSync")
 	var req struct {
@@ -370,6 +384,7 @@ func PushSync(c *gin.Context) {
 	})
 }
 
+// RequestFile 处理 POST /p2p/request-file，向指定对端列表广播文件请求。
 func RequestFile(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: RequestFile")
 	var req struct {
@@ -420,6 +435,7 @@ func RequestFile(c *gin.Context) {
 	})
 }
 
+// WSInfo 处理 GET /p2p/ws/info，返回 WebSocket 传输端点信息和消息类型。
 func WSInfo(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: WSInfo")
 	c.JSON(http.StatusOK, gin.H{
@@ -431,6 +447,7 @@ func WSInfo(c *gin.Context) {
 
 // --- BitTorrent DHT handlers ---
 
+// BTDHTStatus 处理 GET /p2p/bt/status，返回 BitTorrent DHT 节点状态。
 func BTDHTStatus(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTDHTStatus")
 	if btSvc == nil || btSvc.Server == nil {
@@ -445,6 +462,7 @@ func BTDHTStatus(c *gin.Context) {
 	})
 }
 
+// BTAnnounce 处理 POST /p2p/bt/announce，在 BitTorrent DHT 上 announce 指定 hash。
 func BTAnnounce(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTAnnounce")
 	if btSvc == nil || btSvc.Server == nil {
@@ -469,6 +487,7 @@ func BTAnnounce(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "announced on BT DHT"})
 }
 
+// BTFindProviders 处理 POST /p2p/bt/find，在 BitTorrent DHT 上查找持有指定 hash 的对端。
 func BTFindProviders(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTFindProviders")
 	if btSvc == nil || btSvc.Server == nil {
@@ -500,6 +519,7 @@ func BTFindProviders(c *gin.Context) {
 
 // --- Dual P2P (IPFS + BT DHT) handlers ---
 
+// DualAnnounce 处理 POST /p2p/dual/announce，同时在 IPFS DHT 和 BT DHT 上 announce。
 func DualAnnounce(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: DualAnnounce")
 	if dualSvc == nil {
@@ -524,6 +544,7 @@ func DualAnnounce(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "announced on both networks"})
 }
 
+// DualFindProviders 处理 POST /p2p/dual/find，同时在 IPFS DHT 和 BT DHT 上查找 providers。
 func DualFindProviders(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: DualFindProviders")
 	if dualSvc == nil {
@@ -553,7 +574,7 @@ func DualFindProviders(c *gin.Context) {
 	})
 }
 
-// GetPeersDetail returns detailed metadata for all tracked peers.
+// GetPeersDetail 处理 GET /p2p/peers/detail，返回所有已跟踪对端的详细元数据。
 func GetPeersDetail(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: GetPeersDetail")
 	if peerTracker == nil {
@@ -565,7 +586,7 @@ func GetPeersDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, peers)
 }
 
-// GetPeerDetail returns detailed metadata for a single peer by peer_id.
+// GetPeerDetail 处理 GET /p2p/peers/detail/:peer_id，返回指定对端的详细元数据。
 func GetPeerDetail(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: GetPeerDetail")
 	if peerTracker == nil {
@@ -582,7 +603,7 @@ func GetPeerDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, peer)
 }
 
-// GetP2PStats returns global P2P statistics.
+// GetP2PStats 处理 GET /p2p/stats，返回全局 P2P 统计信息（传输量、对端数等）。
 func GetP2PStats(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: GetP2PStats")
 	if peerTracker == nil {
@@ -594,8 +615,7 @@ func GetP2PStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
-// GetConnections returns connection counts by direction and scanner status.
-//   GET /p2p/connections
+// GetConnections 处理 GET /p2p/connections，返回按方向统计的连接数和扫描器状态。
 func GetConnections(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: GetConnections")
 
@@ -625,10 +645,7 @@ func GetConnections(c *gin.Context) {
 
 // --- BEP 44 (Arbitrary DHT Data Storage) ---
 
-// BEP44Put stores data in the BitTorrent DHT using BEP 44.
-//   POST /p2p/bt/bep44/put
-//   Request: {data: "<base64>", mutable: bool, salt: "<base64>?"}
-//   Response: {target: "<hex>", ...}
+// BEP44Put 处理 POST /p2p/bt/bep44/put，通过 BEP 44 将不可变数据存储到 BT DHT。
 func BEP44Put(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BEP44Put")
 	if btSvc == nil || btSvc.Server == nil {
@@ -679,10 +696,7 @@ func BEP44Put(c *gin.Context) {
 	})
 }
 
-// BEP44Get retrieves data from the BitTorrent DHT using BEP 44.
-//   POST /p2p/bt/bep44/get
-//   Request: {target: "<hex>"}
-//   Response: {data: "<base64>", ...}
+// BEP44Get 处理 POST /p2p/bt/bep44/get，通过 BEP 44 从 BT DHT 读取不可变数据。
 func BEP44Get(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BEP44Get")
 	if btSvc == nil || btSvc.Server == nil {
@@ -724,9 +738,7 @@ func BEP44Get(c *gin.Context) {
 
 // --- BEP 51 (Infohash Indexing) ---
 
-// BEP51Sample returns discovered infohashes from the DHT using BEP 51.
-//   GET /p2p/bt/bep51/sample
-//   Response: {samples: ["<hex>", ...], count: int}
+// BEP51Sample 处理 GET /p2p/bt/bep51/sample，通过 BEP 51 采集 DHT 中的 infohash 样本。
 func BEP51Sample(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BEP51Sample")
 	if btSvc == nil || btSvc.Server == nil {
@@ -755,9 +767,7 @@ func BEP51Sample(c *gin.Context) {
 
 // --- BitTorrent Download Handlers ---
 
-// BTTorrentUpload accepts a .torrent file upload, parses it, and starts
-// downloading the torrent.
-//   POST /p2p/bt/torrent
+// BTTorrentUpload 处理 POST /p2p/bt/torrent，接受 .torrent 文件上传并启动下载。
 func BTTorrentUpload(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTTorrentUpload")
 	if btClient == nil {
@@ -804,8 +814,7 @@ func BTTorrentUpload(c *gin.Context) {
 	})
 }
 
-// BTMagnetResolve accepts a magnet URI and starts downloading.
-//   POST /p2p/bt/magnet  {"uri": "magnet:?xt=urn:btih:..."}
+// BTMagnetResolve 处理 POST /p2p/bt/magnet，解析 magnet URI 并启动 BitTorrent 下载。
 func BTMagnetResolve(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTMagnetResolve")
 	if btClient == nil {
@@ -844,8 +853,7 @@ func BTMagnetResolve(c *gin.Context) {
 	})
 }
 
-// BTDownloadProgress returns the download progress for a specific infohash.
-//   GET /p2p/bt/download/:infohash
+// BTDownloadProgress 处理 GET /p2p/bt/download/:infohash，查询指定 infohash 的下载进度。
 func BTDownloadProgress(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTDownloadProgress")
 	if btClient == nil {
@@ -864,8 +872,7 @@ func BTDownloadProgress(c *gin.Context) {
 	c.JSON(http.StatusOK, status)
 }
 
-// BTDownloadList returns all active and completed BT downloads.
-//   GET /p2p/bt/downloads
+// BTDownloadList 处理 GET /p2p/bt/downloads，返回所有活跃和已完成的 BT 下载任务。
 func BTDownloadList(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTDownloadList")
 	if btClient == nil {
@@ -883,10 +890,7 @@ func BTDownloadList(c *gin.Context) {
 
 // --- Port Forwarding ---
 
-// CreateForwardSession registers a local service port for remote forwarding.
-//
-//	POST /p2p/forward/create  {key: "secret", port: 8080}
-//	Response: {status: "listening", port: 8080}
+// CreateForwardSession 处理 POST /p2p/forward/create，注册本地服务端口供远程转发。
 func CreateForwardSession(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: CreateForwardSession")
 	if forwardSvc == nil || !forwardSvc.IsEnabled() {
@@ -920,10 +924,7 @@ func CreateForwardSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "listening", "port": req.Port})
 }
 
-// ConnectForwardSession connects to a remote peer and forwards a local port.
-//
-//	POST /p2p/forward/connect  {key: "secret", target_peer: "12D3...", local_port: 18080}
-//	Response: {status: "connected", local_port: 18080}
+// ConnectForwardSession 处理 POST /p2p/forward/connect，连接远程对端并转发本地端口。
 func ConnectForwardSession(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: ConnectForwardSession")
 	if forwardSvc == nil || !forwardSvc.IsEnabled() {
@@ -966,10 +967,7 @@ func ConnectForwardSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "connected", "local_port": req.LocalPort})
 }
 
-// ListForwardSessions returns all active forward sessions.
-//
-//	GET /p2p/forward/list
-//	Response: {sessions: [{key, source_peer, local_port, created_at, clients}]}
+// ListForwardSessions 处理 GET /p2p/forward/list，返回所有活跃的端口转发会话。
 func ListForwardSessions(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: ListForwardSessions")
 	if forwardSvc == nil || !forwardSvc.IsEnabled() {
@@ -991,10 +989,7 @@ func ListForwardSessions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"sessions": items})
 }
 
-// CloseForwardSession removes a forward session.
-//
-//	POST /p2p/forward/close  {key: "secret"}
-//	Response: {status: "closed"}
+// CloseForwardSession 处理 POST /p2p/forward/close，关闭指定 key 的端口转发会话。
 func CloseForwardSession(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: CloseForwardSession")
 	if forwardSvc == nil || !forwardSvc.IsEnabled() {

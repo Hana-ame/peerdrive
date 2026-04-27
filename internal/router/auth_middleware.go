@@ -12,14 +12,12 @@ import (
 
 var regServerURL string
 
-// SetRegServer sets the registration server URL for token validation.
+// SetRegServer 设置用于令牌验证的注册服务器 URL。
 func SetRegServer(url string) {
 	regServerURL = url
 }
 
-// AuthOptional validates JWT if present, sets username in context.
-// Routes behind this middleware get c.GetBool("authenticated") and
-// c.GetString("username") if authenticated.
+// AuthOptional 验证 Bearer 令牌（如存在），在 Gin 上下文中设置 authenticated 和 username。
 func AuthOptional() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")
@@ -45,7 +43,7 @@ func AuthOptional() gin.HandlerFunc {
 	}
 }
 
-// AuthRequired rejects requests without valid JWT.
+// AuthRequired 拒绝无有效 Bearer 令牌的请求，返回 401。
 func AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")

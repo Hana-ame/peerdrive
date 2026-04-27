@@ -21,9 +21,7 @@ type BTDHTService struct {
 	listenAddr string
 }
 
-// NewBTDHT creates a UDP DHT server on the given listenAddr, bootstraps from
-// public BitTorrent bootstrap nodes and returns a ready-to-use BTDHTService.
-// If listenAddr is empty, a random port is used.
+// NewBTDHT 创建 UDP DHT 服务器，从公共 BitTorrent 引导节点启动。
 func NewBTDHT(listenAddr string) (*BTDHTService, error) {
 	defer log.LogDuration("BTDHT.NewBTDHT")()
 	log.LogDebug("bt-dht: NewBTDHT listenAddr=%s", listenAddr)
@@ -74,9 +72,7 @@ func NewBTDHT(listenAddr string) (*BTDHTService, error) {
 	return svc, nil
 }
 
-// Announce announces the given 64-char hex SHA256 hash on the BitTorrent DHT.
-// The hash is truncated to the first 20 bytes for the 160-bit infohash.
-// The listen port is automatically used for the announce.
+// Announce 在 BitTorrent DHT 上 announce 指定的 SHA256 哈希（截取前 20 字节为 infohash）。
 func (s *BTDHTService) Announce(hash string) error {
 	defer log.LogDuration("BTDHT.Announce")()
 	log.LogDebug("bt-dht: Announce hash=%s", hash)
@@ -108,8 +104,7 @@ func (s *BTDHTService) Announce(hash string) error {
 	return nil
 }
 
-// FindProviders looks up providers for the given hash on the BitTorrent DHT
-// and returns peer addresses as "ip:port" strings.
+// FindProviders 在 BitTorrent DHT 上查找指定哈希的提供者，返回 "ip:port" 格式的地址列表。
 func (s *BTDHTService) FindProviders(hash string) ([]string, error) {
 	defer log.LogDuration("BTDHT.FindProviders")()
 	log.LogDebug("bt-dht: FindProviders hash=%s", hash)
@@ -164,7 +159,7 @@ func (s *BTDHTService) FindProviders(hash string) ([]string, error) {
 	}
 }
 
-// NumNodes returns the number of nodes in the DHT routing table.
+// NumNodes 返回 DHT 路由表中的节点数量。
 func (s *BTDHTService) NumNodes() int {
 	if s.Server == nil {
 		return 0
@@ -172,7 +167,7 @@ func (s *BTDHTService) NumNodes() int {
 	return s.Server.NumNodes()
 }
 
-// Close shuts down the DHT server.
+// Close 关闭 DHT 服务器。
 func (s *BTDHTService) Close() error {
 	if s.Server == nil {
 		return nil

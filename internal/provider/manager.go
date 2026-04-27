@@ -17,6 +17,7 @@ type Manager struct {
 	providers map[string]ContentProvider
 }
 
+// NewManager 创建提供者管理器，默认注册 "local" 和 "http" 提供者。
 func NewManager(localBaseDir string) *Manager {
 	m := &Manager{
 		providers: make(map[string]ContentProvider),
@@ -26,6 +27,7 @@ func NewManager(localBaseDir string) *Manager {
 	return m
 }
 
+// GetReader 根据 providerType 将请求路由到对应提供者并获取文件读取器。
 func (m *Manager) GetReader(providerType, path string) (io.ReadCloser, string, error) {
 	p, ok := m.providers[providerType]
 	if !ok {

@@ -33,6 +33,7 @@ type FileService struct {
 	cfg           *config.Config
 }
 
+// NewFileService 创建一个新的文件服务实例。
 func NewFileService(cfg *config.Config) *FileService {
 	return &FileService{
 		storageDir:    cfg.StorageDir,
@@ -41,6 +42,7 @@ func NewFileService(cfg *config.Config) *FileService {
 	}
 }
 
+// RegisterLocal 计算本地文件的 SHA256 哈希，注册到 file_meta 和 file_providers。
 func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	defer log.LogDuration("FileService.RegisterLocal")()
 	log.LogDebug("file-svc: RegisterLocal path=%s filename=%s", path, filename)
@@ -105,6 +107,7 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	return hash, nil
 }
 
+// RegisterFolder 递归注册文件夹内的所有文件，返回每个文件的 filename 和 hash。
 func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, error) {
 	defer log.LogDuration("FileService.RegisterFolder")()
 	log.LogDebug("file-svc: RegisterFolder folderPath=%s", folderPath)
@@ -148,9 +151,7 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 	return results, nil
 }
 
-// RegisterURL fetches a file from a URL, computes its SHA256, and registers it.
-// Stores with provider_type="http" and the URL as provider_path.
-// http.Get already follows 301/302 redirects by default.
+// RegisterURL 从 URL 获取文件，计算 SHA256 并注册（provider_type="http"），自动跟随 301/302 重定向。
 func (s *FileService) RegisterURL(url string, filename string) (*model.FileMeta, error) {
 	defer log.LogDuration("FileService.RegisterURL")()
 	log.LogDebug("file-svc: RegisterURL url=%s filename=%s", url, filename)
@@ -245,6 +246,7 @@ func (s *FileService) RegisterURL(url string, filename string) (*model.FileMeta,
 	return meta, nil
 }
 
+// Upload 上传文件到 content-addressed 存储，计算 SHA256 并注册元数据和 provider。
 func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta, error) {
 	defer log.LogDuration("FileService.Upload")()
 	log.LogDebug("file-svc: Upload filename=%s", filename)
@@ -324,6 +326,7 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 	return meta, nil
 }
 
+// Verify 通过 hash 查询文件元数据，用于验证文件是否存在。
 func (s *FileService) Verify(hash string) (*model.FileMeta, error) {
 	defer log.LogDuration("FileService.Verify")()
 	log.LogDebug("file-svc: Verify hash=%s", hash)
@@ -341,6 +344,7 @@ func (s *FileService) Verify(hash string) (*model.FileMeta, error) {
 	return meta, nil
 }
 
+// Delete 删除指定 hash 的本地文件及其元数据和 provider 记录。
 func (s *FileService) Delete(hash string) error {
 	defer log.LogDuration("FileService.Delete")()
 	log.LogDebug("file-svc: Delete hash=%s", hash)
@@ -362,6 +366,7 @@ func (s *FileService) Delete(hash string) error {
 	return nil
 }
 
+// BrowseDir 浏览本地目录，返回文件和子目录列表（含大小和修改时间）。
 func (s *FileService) BrowseDir(dirPath string) ([]model.DirEntry, error) {
 	defer log.LogDuration("FileService.BrowseDir")()
 	log.LogDebug("file-svc: BrowseDir dirPath=%s", dirPath)
@@ -422,8 +427,7 @@ func copyFile(src, dst string) error {
 	return d.Sync()
 }
 
-// MaxUploadBytes returns the max upload size in bytes based on auth status.
-// Authenticated users get cfg.MaxUploadBytes, anonymous get cfg.MaxUploadBytesAnon.
+// MaxUploadBytes 根据认证状态返回最大上传字节数（认证用户使用 cfg.MaxUploadBytes，匿名用户使用 cfg.MaxUploadBytesAnon）。
 func (s *FileService) MaxUploadBytes(c *gin.Context) int64 {
 	if authed, exists := c.Get("authenticated"); exists && authed.(bool) {
 		return s.cfg.MaxUploadBytes

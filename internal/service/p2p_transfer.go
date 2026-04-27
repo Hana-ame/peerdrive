@@ -42,6 +42,7 @@ type TransferProgress struct {
 	onUpdate     func(progress float64)
 }
 
+// Update 更新已接收字节数并触发进度回调（如有设置）。
 func (tp *TransferProgress) Update(bytesReceived int64) {
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
@@ -52,6 +53,7 @@ func (tp *TransferProgress) Update(bytesReceived int64) {
 	}
 }
 
+// Progress 返回当前下载进度百分比（0-100）。
 func (tp *TransferProgress) Progress() float64 {
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
@@ -69,6 +71,7 @@ type ChunkedTransfer struct {
 }
 
 // NewChunkedTransfer creates a new chunked transfer handler.
+// NewChunkedTransfer 创建分片传输服务实例，注册 libp2p 流处理协议。
 func NewChunkedTransfer(svc *P2PService) *ChunkedTransfer {
 	ct := &ChunkedTransfer{
 		svc:        svc,
@@ -81,6 +84,7 @@ func NewChunkedTransfer(svc *P2PService) *ChunkedTransfer {
 }
 
 // ActiveJobs returns all active transfer jobs.
+// ActiveJobs 返回所有正在进行的传输任务。
 func (ct *ChunkedTransfer) ActiveJobs() map[string]*TransferProgress {
 	ct.jobsMu.RLock()
 	defer ct.jobsMu.RUnlock()
@@ -92,6 +96,7 @@ func (ct *ChunkedTransfer) ActiveJobs() map[string]*TransferProgress {
 }
 
 // GetProgress returns the progress for a transfer job.
+// GetProgress 返回指定 hash 的传输进度。
 func (ct *ChunkedTransfer) GetProgress(hash string) *TransferProgress {
 	ct.jobsMu.RLock()
 	defer ct.jobsMu.RUnlock()
@@ -99,6 +104,7 @@ func (ct *ChunkedTransfer) GetProgress(hash string) *TransferProgress {
 }
 
 // DownloadFile downloads a file from P2P network using chunked parallel transfer.
+// DownloadFile 从 P2P 网络并行分片下载文件到本地路径，支持进度回调。
 func (ct *ChunkedTransfer) DownloadFile(ctx context.Context, hash string, targetPath string, onProgress func(float64)) (*TransferProgress, error) {
 	defer log.LogDuration("ChunkedTransfer.DownloadFile")()
 	log.LogDebug("p2p-transfer: DownloadFile hash=%s target=%s", hash, targetPath)

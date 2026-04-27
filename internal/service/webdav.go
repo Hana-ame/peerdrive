@@ -20,6 +20,7 @@ type WebDAVService struct {
 
 // NewWebDAVService creates a new WebDAV service that serves files from the
 // specified storage directory. The service is enabled by default.
+// NewWebDAVService 创建 WebDAV 服务，使用指定存储目录作为根目录。
 func NewWebDAVService(storageDir string) *WebDAVService {
 	return &WebDAVService{
 		handler: &webdav.Handler{
@@ -38,6 +39,7 @@ func NewWebDAVService(storageDir string) *WebDAVService {
 //
 // The caller must set c.Request.URL.Path to the sub-path within the storage
 // directory before invoking this handler.
+// ServeHTTP 处理所有 WebDAV 方法（PROPFIND/MKCOL/GET/PUT/DELETE/COPY/MOVE/LOCK/UNLOCK/OPTIONS）。
 func (w *WebDAVService) ServeHTTP(c *gin.Context) {
 	if !w.enabled {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "WebDAV disabled"})
@@ -47,11 +49,13 @@ func (w *WebDAVService) ServeHTTP(c *gin.Context) {
 }
 
 // IsEnabled returns whether the WebDAV service is currently enabled.
+// IsEnabled 返回 WebDAV 服务是否已启用。
 func (w *WebDAVService) IsEnabled() bool {
 	return w.enabled
 }
 
 // SetEnabled enables or disables the WebDAV service at runtime.
+// SetEnabled 运行时启用或禁用 WebDAV 服务。
 func (w *WebDAVService) SetEnabled(enabled bool) {
 	w.enabled = enabled
 }

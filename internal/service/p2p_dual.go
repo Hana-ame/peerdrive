@@ -27,8 +27,7 @@ type DualP2PService struct {
 	mu   sync.Mutex
 }
 
-// NewDualP2PService creates a DualP2PService that wraps both the existing
-// IPFS/libp2p service and the BitTorrent DHT service.
+// NewDualP2PService 创建双网络 P2P 服务，统一封装 IPFS/libp2p DHT 和 BitTorrent DHT。
 func NewDualP2PService(cfg *config.Config, ipfsSvc *P2PService, btSvc *p2p_bt.BTDHTService) *DualP2PService {
 	return &DualP2PService{
 		IPFS: ipfsSvc,
@@ -37,8 +36,7 @@ func NewDualP2PService(cfg *config.Config, ipfsSvc *P2PService, btSvc *p2p_bt.BT
 	}
 }
 
-// Announce announces the given hash on both the IPFS/libp2p DHT and the
-// BitTorrent DHT (if available).
+// Announce 同时在 IPFS/libp2p DHT 和 BitTorrent DHT 上宣布指定 hash（如可用）。
 func (d *DualP2PService) Announce(hash string) error {
 	defer log.LogDuration("DualP2PService.Announce")()
 	log.LogDebug("p2p-dual: Announce hash=%s", hash)
@@ -84,6 +82,7 @@ func (d *DualP2PService) Announce(hash string) error {
 
 // FindProviders searches both the IPFS/libp2p DHT and the BitTorrent DHT for
 // providers of the given hash and returns merged results.
+// FindProviders 同时在 IPFS/libp2p DHT 和 BitTorrent DHT 上查找持有指定 hash 的对端。
 func (d *DualP2PService) FindProviders(hash string) (*DualFindResult, error) {
 	defer log.LogDuration("DualP2PService.FindProviders")()
 	log.LogDebug("p2p-dual: FindProviders hash=%s", hash)
@@ -137,6 +136,7 @@ func (d *DualP2PService) FindProviders(hash string) (*DualFindResult, error) {
 // FetchFile tries to download a file using the IPFS/libp2p network first
 // (with all its peer discovery), and falls back to the BitTorrent DHT if
 // IPFS did not yield a result.
+// FetchFile 尝试从 IPFS/libp2p DHT 或 BitTorrent DHT 获取文件内容。
 func (d *DualP2PService) FetchFile(ctx context.Context, hash string) ([]byte, error) {
 	defer log.LogDuration("DualP2PService.FetchFile")()
 	log.LogDebug("p2p-dual: FetchFile hash=%s", hash)

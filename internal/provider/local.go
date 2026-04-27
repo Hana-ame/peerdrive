@@ -15,6 +15,7 @@ type LocalProvider struct {
 	BaseDir string
 }
 
+// GetReader 从本地文件系统读取指定路径的文件。
 func (p *LocalProvider) GetReader(path string) (io.ReadCloser, error) {
 	fullPath := path
 	if !filepath.IsAbs(path) {
@@ -23,6 +24,7 @@ func (p *LocalProvider) GetReader(path string) (io.ReadCloser, error) {
 	return os.Open(fullPath)
 }
 
+// GetFilenameHint 从文件路径中提取文件名提示。
 func (p *LocalProvider) GetFilenameHint(path, originalFilename string) string {
 	if originalFilename != "" {
 		return originalFilename

@@ -9,9 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// WebRTCInfoHandler returns a Gin handler for GET /p2p/webrtc/info.
-// It returns the STUN/TURN configuration that the browser should use
-// when creating an RTCPeerConnection for WebRTC file transfers.
+// WebRTCInfoHandler 返回 GET /p2p/webrtc/info 的 Gin 处理函数，提供 STUN/TURN 配置。
 func WebRTCInfoHandler(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		resp := gin.H{

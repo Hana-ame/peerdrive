@@ -24,8 +24,7 @@ type BTBridge struct {
 	shared     map[string]struct{}
 }
 
-// NewBTBridge creates a new bridge using the given DHT service and storage
-// directory. The storage directory is used to serve announced files via HTTP.
+// NewBTBridge 使用给定的 DHT 服务和存储目录创建桥接实例。
 func NewBTBridge(dhtSvc *BTDHTService, storageDir string) *BTBridge {
 	return &BTBridge{
 		DHT:        dhtSvc,
@@ -34,8 +33,7 @@ func NewBTBridge(dhtSvc *BTDHTService, storageDir string) *BTBridge {
 	}
 }
 
-// ShareFile announces the given 64-char hex hash on the BitTorrent DHT and
-// records it in the local shared set.
+// ShareFile 在 BitTorrent DHT 上 announce 指定的 64 字符十六进制哈希。
 func (b *BTBridge) ShareFile(hash string) error {
 	defer log.LogDuration("BTBridge.ShareFile")()
 	log.LogDebug("bt-bridge: ShareFile hash=%s", hash)
@@ -56,9 +54,7 @@ func (b *BTBridge) ShareFile(hash string) error {
 	return nil
 }
 
-// FetchFile looks up providers for the given hash on the BitTorrent DHT, then
-// attempts to download the file via HTTP from discovered peers. It returns
-// the file content from the first successful peer.
+// FetchFile 在 BitTorrent DHT 上查找文件提供者并通过 HTTP 下载。
 func (b *BTBridge) FetchFile(ctx context.Context, hash string) ([]byte, error) {
 	defer log.LogDuration("BTBridge.FetchFile")()
 	log.LogDebug("bt-bridge: FetchFile hash=%s", hash)
@@ -119,7 +115,7 @@ func (b *BTBridge) FetchFile(ctx context.Context, hash string) ([]byte, error) {
 	return nil, err
 }
 
-// ListShared returns all currently shared hashes.
+// ListShared 返回当前所有已共享的哈希列表。
 func (b *BTBridge) ListShared() ([]string, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -130,12 +126,12 @@ func (b *BTBridge) ListShared() ([]string, error) {
 	return result, nil
 }
 
-// FilePath returns the full storage path for a given hash.
+// FilePath 返回给定哈希的完整存储路径。
 func (b *BTBridge) FilePath(hash string) string {
 	return filepath.Join(b.storageDir, hash[:2], hash)
 }
 
-// EnsureFileWritten writes data to the standard peerdrive storage layout.
+// EnsureFileWritten 将数据写入标准的 peerdrive 存储布局。
 func (b *BTBridge) EnsureFileWritten(hash string, data []byte) error {
 	relPath := hash[:2] + "/" + hash
 	fullPath := filepath.Join(b.storageDir, relPath)

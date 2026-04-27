@@ -148,7 +148,7 @@ func (v bval) listIdx(i int) bval { return v.list[i] }
 
 // --- Torrent parsing ---
 
-// ParseTorrent parses a bencoded .torrent file buffer into TorrentMeta.
+// ParseTorrent 解析 bencode 编码的 .torrent 文件数据为 TorrentMeta。
 func ParseTorrent(data []byte) (*TorrentMeta, error) {
 	defer log.LogDuration("BT.ParseTorrent")()
 	log.LogDebug("bt-torrent: ParseTorrent data=%d bytes", len(data))
@@ -261,7 +261,7 @@ func ParseTorrent(data []byte) (*TorrentMeta, error) {
 	return meta, nil
 }
 
-// ParseTorrentFile reads and parses a .torrent file from disk.
+// ParseTorrentFile 从磁盘读取并解析 .torrent 文件。
 func ParseTorrentFile(path string) (*TorrentMeta, error) {
 	defer log.LogDuration("BT.ParseTorrentFile")()
 	log.LogDebug("bt-torrent: ParseTorrentFile path=%s", path)
@@ -274,7 +274,7 @@ func ParseTorrentFile(path string) (*TorrentMeta, error) {
 	return ParseTorrent(data)
 }
 
-// NumberOfPieces returns the number of pieces based on total size and piece length.
+// NumberOfPieces 根据总大小和分片大小计算分片数量。
 func (m *TorrentMeta) NumberOfPieces() int {
 	if m.PieceLength <= 0 {
 		return 0

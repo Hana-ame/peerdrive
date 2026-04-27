@@ -59,9 +59,7 @@ type BTDownload struct {
 	files      []CompletedFile
 }
 
-// BTClient manages BitTorrent downloads. It wraps anacrolix/torrent for the
-// heavy lifting of the BitTorrent protocol (peer wire protocol, tracker
-// communication, piece management).
+// BTClient 管理 BitTorrent 下载任务，封装底层 BitTorrent 协议细节。
 type BTClient struct {
 	dataDir    string
 	downloads  map[string]*BTDownload
@@ -70,8 +68,7 @@ type BTClient struct {
 	stopCh     chan struct{}
 }
 
-// NewBTClient creates a new BT client with the given data directory for storing
-// downloaded files. If dataDir is empty, a temporary directory is used.
+// NewBTClient 创建 BT 客户端实例，指定下载文件存储目录。
 func NewBTClient(dataDir string) *BTClient {
 	if dataDir == "" {
 		dataDir = filepath.Join(os.TempDir(), "peerdrive-bt")
@@ -87,16 +84,14 @@ func NewBTClient(dataDir string) *BTClient {
 	return client
 }
 
-// SetOnComplete registers a callback for completed torrent downloads.
+// SetOnComplete 注册种子下载完成时的回调函数。
 func (c *BTClient) SetOnComplete(fn OnTorrentComplete) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.onComplete = fn
 }
 
-// AddTorrent starts downloading a torrent from its parsed metadata.
-// This uses the BitTorrent DHT and/or trackers for peer discovery, then
-// downloads pieces using the wire protocol.
+// AddTorrent 开始下载种子，通过 DHT 和/或 Tracker 发现对端并下载分片。
 func (c *BTClient) AddTorrent(meta *TorrentMeta) error {
 	defer log.LogDuration("BTClient.AddTorrent")()
 	log.LogInfo("bt-client: AddTorrent infohash=%s name=%q", meta.InfoHashHex, meta.Name)
@@ -127,7 +122,7 @@ func (c *BTClient) AddTorrent(meta *TorrentMeta) error {
 	return nil
 }
 
-// AddMagnet starts downloading from a magnet URI.
+// AddMagnet 通过 magnet URI 开始下载。
 func (c *BTClient) AddMagnet(magnet *MagnetInfo) error {
 	defer log.LogDuration("BTClient.AddMagnet")()
 	log.LogInfo("bt-client: AddMagnet infohash=%s name=%q", magnet.InfoHash, magnet.DisplayName)
@@ -438,7 +433,7 @@ func (c *BTClient) fetchMetadata(ctx context.Context, dl *BTDownload, peerAddrs 
 	return fmt.Errorf("magnet metadata retrieval not implemented; provide a .torrent file instead")
 }
 
-// GetDownload returns the current status of a download by infohash.
+// GetDownload 根据 infohash 返回当前下载任务的状态。
 func (c *BTClient) GetDownload(infohash string) *DownloadStatus {
 	c.mu.RLock()
 	dl, ok := c.downloads[infohash]
@@ -467,7 +462,7 @@ func (c *BTClient) GetDownload(infohash string) *DownloadStatus {
 	return status
 }
 
-// ListDownloads returns all active and completed BT downloads.
+// ListDownloads 返回所有活跃和已完成的 BT 下载任务列表。
 func (c *BTClient) ListDownloads() []DownloadStatus {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -495,12 +490,12 @@ func (c *BTClient) ListDownloads() []DownloadStatus {
 	return result
 }
 
-// GetDownloadDir returns the data directory for downloads.
+// GetDownloadDir 返回下载存储目录。
 func (c *BTClient) GetDownloadDir() string {
 	return c.dataDir
 }
 
-// Close shuts down the BT client and stops all active downloads.
+// Close 关闭 BT 客户端并停止所有活跃下载任务。
 func (c *BTClient) Close() {
 	log.LogInfo("bt-client: closing")
 	close(c.stopCh)
@@ -529,13 +524,12 @@ func discoverPeersFromTrackers(infohash string, trackers []string) ([]string, er
 // globalDHT is set by the router to allow BTClient to discover peers.
 var globalDHT *BTDHTService
 
-// SetGlobalDHT sets the global DHT service reference for peer discovery.
-// Called from the router during initialization.
+// SetGlobalDHT 设置全局 DHT 服务引用，供 BT 客户端发现对端使用。
 func SetGlobalDHT(dht *BTDHTService) {
 	globalDHT = dht
 }
 
-// ListDownloadFiles returns the list of completed files for a download.
+// ListDownloadFiles 返回指定下载任务的已完成文件列表。
 func (c *BTClient) ListDownloadFiles(infohash string) ([]CompletedFile, bool) {
 	c.mu.RLock()
 	dl, ok := c.downloads[infohash]
@@ -549,7 +543,7 @@ func (c *BTClient) ListDownloadFiles(infohash string) ([]CompletedFile, bool) {
 	return dl.files, dl.Status == "completed"
 }
 
-// ReadFileReader returns an io.ReadCloser for a file within a completed download.
+// ReadFileReader 返回已完成下载中指定文件的 io.ReadCloser。
 func (c *BTClient) ReadFileReader(filePath string) (io.ReadCloser, error) {
 	return os.Open(filePath)
 }

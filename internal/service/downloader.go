@@ -30,6 +30,7 @@ type Downloader struct {
 	storageDir      string
 }
 
+// NewDownloader 创建一个下载器实例，通过 provider manager 和 P2P 回退获取文件流。
 func NewDownloader(manager *provider.Manager, p2pSvc *P2PService, storageDir string) *Downloader {
 	return &Downloader{
 		providerManager: manager,
@@ -38,6 +39,7 @@ func NewDownloader(manager *provider.Manager, p2pSvc *P2PService, storageDir str
 	}
 }
 
+// GetFileStream 获取指定 hash 的文件读取流，依次尝试各 provider，失败时回退到 P2P 网络。
 func (d *Downloader) GetFileStream(hash string) (io.ReadCloser, string, bool, error) {
 	defer log.LogDuration("Downloader.GetFileStream")()
 	log.LogDebug("downloader: GetFileStream hash=%s", hash)

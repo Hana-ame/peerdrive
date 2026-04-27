@@ -13,6 +13,7 @@ import (
 
 type HTTPProvider struct{}
 
+// GetReader 发送 HTTP GET 请求获取远程文件内容。
 func (p *HTTPProvider) GetReader(url string) (io.ReadCloser, error) {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -25,6 +26,7 @@ func (p *HTTPProvider) GetReader(url string) (io.ReadCloser, error) {
 	return resp.Body, nil
 }
 
+// GetFilenameHint 从 URL 中提取文件名提示。
 func (p *HTTPProvider) GetFilenameHint(url, originalFilename string) string {
 	if originalFilename != "" {
 		return originalFilename

@@ -43,6 +43,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
+// SetupRouter 创建 Gin 引擎并注册全部路由（健康检查、文件下载、P2P、集合、WebDAV、信令等）。
 func SetupRouter(
 	downloader *service.Downloader,
 	p2pSvc *service.P2PService,

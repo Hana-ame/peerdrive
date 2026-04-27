@@ -18,10 +18,12 @@ type AuthService struct {
 	userRepo *repository.UserRepository
 }
 
+// NewAuthService 创建一个新的认证服务实例。
 func NewAuthService(userRepo *repository.UserRepository) *AuthService {
 	return &AuthService{userRepo: userRepo}
 }
 
+// Register 注册新用户，使用 bcrypt 哈希密码并生成 authkey。
 func (s *AuthService) Register(req model.RegisterRequest) (*model.AuthResponse, error) {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -52,6 +54,7 @@ func (s *AuthService) Register(req model.RegisterRequest) (*model.AuthResponse, 
 	}, nil
 }
 
+// Login 验证用户名密码，成功时返回新生成的 authkey。
 func (s *AuthService) Login(req model.LoginRequest) (*model.AuthResponse, error) {
 	user, err := s.userRepo.GetByUsername(req.Username)
 	if err != nil {
@@ -77,6 +80,7 @@ func (s *AuthService) Login(req model.LoginRequest) (*model.AuthResponse, error)
 	}, nil
 }
 
+// Logout 清除指定 authkey，使用户会话失效。
 func (s *AuthService) Logout(authKey string) error {
 	user, err := s.userRepo.GetByAuthKey(authKey)
 	if err != nil {
@@ -85,6 +89,7 @@ func (s *AuthService) Logout(authKey string) error {
 	return s.userRepo.ClearAuthKey(user.ID)
 }
 
+// ValidateKey 验证 authkey 并返回对应的用户信息。
 func (s *AuthService) ValidateKey(authKey string) (*model.User, error) {
 	return s.userRepo.GetByAuthKey(authKey)
 }
