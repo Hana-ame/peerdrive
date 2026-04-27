@@ -191,6 +191,9 @@ func P2PStatus(c *gin.Context) {
 		resp["relay_mode"] = p2pSvc.RelayMode()
 		resp["hole_punch"] = p2pSvc.HolePunchEnabled()
 		resp["ws_connections"] = p2pSvc.WSCount()
+		if signalHub != nil {
+			resp["signal_peers"] = signalHub.PeerCount()
+		}
 		// Connection manager stats
 		if p2pSvc.ConnMgr != nil {
 			resp["conn_stats"] = p2pSvc.ConnMgr.Stats()

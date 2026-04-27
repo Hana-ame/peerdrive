@@ -182,5 +182,11 @@ func SetupRouter(
 		})
 	}
 
+	// WebRTC signaling
+	controller.InitSignalHub(service.NewSignalingHub())
+	r.GET("/ws/signal", func(c *gin.Context) {
+		controller.GetSignalHub().HandleConnection(c.Writer, c.Request)
+	})
+
 	return r
 }
