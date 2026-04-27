@@ -341,7 +341,6 @@ export default function AnonCreator() {
         {/* === SYSTEM BROWSE TAB === */}
         {srcTab === 'system' && (
           <>
-            <span className="text-xs text-gray-600 px-3 py-1 border-b border-gray-800">{sysPath}</span>
             <div className="flex-1 overflow-y-auto">
               {sysPath !== '/' && (
                 <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-xs">

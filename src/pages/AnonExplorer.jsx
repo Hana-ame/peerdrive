@@ -135,7 +135,12 @@ export default function AnonExplorer() {
                 <button onClick={navBack} className="text-gray-400 hover:text-white text-sm">← 返回</button>
               ) : (
                 <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold truncate">📦 {fname || '合集'}</h2>
+                  {entries.length === 1 ? (
+                    <h2 className="text-base font-bold truncate">📄 {isSingleFile ? entries[0].path.split('/').pop() : (fname || '合集')}</h2>
+                  ) : (
+                    <h2 className="text-base font-bold truncate">📦 {fname || '合集'}</h2>
+                  )}
+                  {entries.length === 1 && <span className="text-[10px] bg-amber-900/40 text-amber-400 px-1.5 py-0.5 rounded-full">单文件</span>}
                   {collection?.tags?.length > 0 && (
                     <div className="flex gap-1">
                       {collection.tags.map((t, i) => <span key={i} className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded-full">{t}</span>)}
@@ -183,26 +188,30 @@ export default function AnonExplorer() {
                 ) : (() => {
                   const mime = entries[0].mime_type || '';
                   const ext = (entries[0].path || '').split('.').pop()?.toLowerCase();
-                  const url = api.getAnonFileDownloadUrl(searchHash, entries[0].path);
-                  const isImage = mime.startsWith('image/');
-                  const isText = mime.startsWith('text/') || ['json','js','jsx','ts','tsx','css','html','xml','md','yaml','yml','toml','ini','cfg','conf','sh','bash','py','go','rs','java','c','cpp','h','log'].includes(ext);
+                  const url = api.getAnonFileDownloadUrl(searchHash, entries[0].path) + '?inline=1';
+                  const dlUrl = api.getAnonFileDownloadUrl(searchHash, entries[0].path);
+                  const filename = entries[0].path.split('/').pop() || 'file';
+                  const isImage = mime.startsWith('image/') || ['png','jpg','jpeg','gif','webp','svg','bmp','ico'].includes(ext);
+                  const isText = mime.startsWith('text/') || ['json','js','jsx','ts','tsx','css','html','xml','md','yaml','yml','toml','ini','cfg','conf','sh','bash','py','go','rs','java','c','cpp','h','log','txt'].includes(ext);
                   const isPdf = mime === 'application/pdf' || ext === 'pdf';
 
                   if (isImage) return (
                     <div className="flex flex-col items-center py-8 px-4">
-                      <h3 className="text-sm font-bold text-gray-200 mb-2">{entries[0].path.split('/').pop()}</h3>
-                      <img src={url} alt={entries[0].path} className="max-w-full max-h-[70vh] object-contain rounded-lg border border-gray-700" />
-                      <a href={url} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline mt-3">⬇ 下载</a>
+                      <h3 className="text-sm font-bold text-gray-200 mb-2">{filename}</h3>
+                      <img src={url} alt={filename} className="max-w-full max-h-[70vh] object-contain rounded-lg border border-gray-700" />
+                      <a href={dlUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline mt-3">⬇ 下载原图</a>
                     </div>
                   );
 
-                  if (isText) return <TextPreview url={url} filename={entries[0].path.split('/').pop()} hash={entries[0].hash} created={collection.created_at} />;
+                  if (isText) return <TextPreview url={url} downloadUrl={dlUrl} filename={filename} hash={entries[0].hash} created={collection.created_at} />;
 
                   if (isPdf) return (
-                    <div className="flex flex-col items-center py-8 px-4 h-full">
-                      <h3 className="text-sm font-bold text-gray-200 mb-2">{entries[0].path.split('/').pop()}</h3>
-                      <iframe src={url} className="flex-1 w-full rounded-lg border border-gray-700" title="PDF Preview" />
-                      <a href={url} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline mt-3">⬇ 下载 PDF</a>
+                    <div className="flex flex-col py-4 px-2 h-full">
+                      <div className="flex items-center justify-between mb-2 px-2">
+                        <h3 className="text-sm font-bold text-gray-200 truncate">{filename}</h3>
+                        <a href={dlUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline ml-3 shrink-0">⬇ 下载 PDF</a>
+                      </div>
+                      <iframe src={url + '#view=FitH'} className="flex-1 w-full rounded-lg border border-gray-700" title="PDF Preview" />
                     </div>
                   );
 
@@ -211,7 +220,7 @@ export default function AnonExplorer() {
                       <span className="text-5xl mb-4">{fileIcon(mime)}</span>
                       <h3 className="text-xl font-bold text-gray-200 mb-1">{entries[0].path.split('/').pop()}</h3>
                       <p className="text-xs text-gray-500 font-mono mb-2">{fmtSize(collection.entries?.[0]?.size || 0)}</p>
-                      <a href={url} target="_blank" rel="noreferrer"
+                      <a href={dlUrl} target="_blank" rel="noreferrer"
                         className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium mb-3">
                         ⬇ 下载文件
                       </a>
@@ -270,7 +279,7 @@ export default function AnonExplorer() {
   );
 }
 
-function TextPreview({ url, filename, hash, created }) {
+function TextPreview({ url, downloadUrl, filename, hash, created }) {
   const [content, setContent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -287,7 +296,7 @@ function TextPreview({ url, filename, hash, created }) {
         {content && content.length >= 50000 && <span className="text-amber-500">（截断至前 50KB）</span>}
       </div>
       <pre className="flex-1 overflow-auto bg-gray-900 border border-gray-800 rounded-lg p-4 text-xs font-mono text-gray-300 whitespace-pre-wrap break-all">{content}</pre>
-      <a href={url} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline mt-2 self-end">⬇ 下载</a>
+      <a href={downloadUrl || url} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline mt-2 self-end">⬇ 下载</a>
     </div>
   );
 }

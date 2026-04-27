@@ -71,6 +71,10 @@ export default function Plaza() {
 
   const showDummies = collections.length === 0 && !loading;
   const display = showDummies ? DUMMY_COLLECTIONS : collections;
+  const [plazaTab, setPlazaTab] = useState('local');
+  const localColls = display.filter(c => c._type === 'anon' || c.isDummy);
+  const p2pColls = display.filter(c => c._type === 'public');
+  const activeColls = plazaTab === 'p2p' ? p2pColls : localColls;
 
   return (
     <div className="p-8 overflow-y-auto h-full">
@@ -92,15 +96,19 @@ export default function Plaza() {
               className="flex-1 bg-gray-800 border border-gray-600 px-4 py-2.5 rounded-lg text-sm font-mono focus:outline-none focus:border-blue-500" />
             <button onClick={handleSearch} className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium">查看</button>
           </div>
+          <div className="flex gap-1 mt-3">
+            <button onClick={() => setPlazaTab('local')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='local'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>💻 本机 ({localColls.length})</button>
+            <button onClick={() => setPlazaTab('p2p')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='p2p'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>🌐 P2P 网络 ({p2pColls.length})</button>
+          </div>
         </div>
 
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
             {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}
           </div>
-        ) : display.length === 0 ? (
+        ) : activeColls.length === 0 ? (
           <div className="text-center py-20 text-gray-500 border-2 border-dashed border-gray-700 rounded-xl">
-            <p className="mb-3">还没有创建任何合集</p>
+            <p className="mb-3">{plazaTab === 'p2p' ? 'P2P 网络暂无公开合集' : '还没有创建任何合集'}</p>
             <p className="text-xs text-gray-600 mb-4">从文件管理器注册文件并自动创建匿名合集，或手动创建</p>
             <div className="flex justify-center gap-3">
               <button onClick={() => navigate('/anon/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">
@@ -113,7 +121,7 @@ export default function Plaza() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {display.map(c => (
+            {activeColls.map(c => (
               <div
                 key={collId(c)}
                 onClick={() => {
