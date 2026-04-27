@@ -182,6 +182,7 @@ export default function Navbar() {
             <Link to="/files" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">文件管理</Link>
             <button onClick={() => nav('/')} className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">探索合集</button>
             <Link to="/anon/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">创建合集</Link>
+            <Link to="/p2p" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">P2P 网络</Link>
           </div>
         </div>
 

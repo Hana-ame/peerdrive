@@ -6,14 +6,25 @@ import { PageContext } from '../App';
 const SHA256_RE = /\b([a-f0-9]{64})\b/i;
 function extractHash(text) { const m = (text || '').match(SHA256_RE); return m ? m[1].toLowerCase() : null; }
 
-function fileIcon(m) {
-  if (!m) return '📄';
-  if (m.startsWith('image/')) return '🖼️';
-  if (m.startsWith('video/')) return '🎬';
-  if (m.startsWith('audio/')) return '🎵';
-  if (m.startsWith('text/')) return '📝';
-  if (m.includes('pdf')) return '📕';
-  if (m.includes('zip') || m.includes('tar') || m.includes('gzip') || m.includes('rar')) return '📦';
+function fileIcon(m, p) {
+  if (!m && !p) return '📄';
+  if (m) {
+    if (m.startsWith('image/')) return '🖼️';
+    if (m.startsWith('video/')) return '🎬';
+    if (m.startsWith('audio/')) return '🎵';
+    if (m.startsWith('text/')) return '📝';
+    if (m.includes('pdf')) return '📕';
+    if (m.includes('zip') || m.includes('tar') || m.includes('gzip') || m.includes('rar')) return '📦';
+  }
+  if (p) {
+    const ext = p.split('.').pop()?.toLowerCase();
+    if (['png','jpg','jpeg','gif','webp','svg','bmp','ico'].includes(ext)) return '🖼️';
+    if (['mp4','avi','mkv','mov','webm'].includes(ext)) return '🎬';
+    if (['mp3','wav','flac','ogg'].includes(ext)) return '🎵';
+    if (['pdf'].includes(ext)) return '📕';
+    if (['zip','rar','7z','tar','gz','gzip'].includes(ext)) return '📦';
+    if (['txt','md','json','js','ts','jsx','tsx','css','html','xml','yaml','yml','py','go','rs','java','c','cpp','h','log','cfg','ini','conf','sh','bash'].includes(ext)) return '📝';
+  }
   return '📄';
 }
 function fmtSize(b) {
@@ -130,17 +141,17 @@ export default function AnonExplorer() {
 
         {collection && (
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-800 shrink-0">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-800 shrink-0 flex-wrap">
               {navPath ? (
-                <button onClick={navBack} className="text-gray-400 hover:text-white text-sm">← 返回</button>
+                <button onClick={navBack} className="text-gray-400 hover:text-white text-sm shrink-0">← 返回</button>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0">
                   {entries.length === 1 ? (
                     <h2 className="text-base font-bold truncate">📄 {isSingleFile ? entries[0].path.split('/').pop() : (fname || '合集')}</h2>
                   ) : (
                     <h2 className="text-base font-bold truncate">📦 {fname || '合集'}</h2>
                   )}
-                  {entries.length === 1 && <span className="text-[10px] bg-amber-900/40 text-amber-400 px-1.5 py-0.5 rounded-full">单文件</span>}
+                  {entries.length === 1 && <span className="text-[10px] bg-amber-900/40 text-amber-400 px-1.5 py-0.5 rounded-full shrink-0">单文件</span>}
                   {collection?.tags?.length > 0 && (
                     <div className="flex gap-1">
                       {collection.tags.map((t, i) => <span key={i} className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded-full">{t}</span>)}
@@ -148,41 +159,57 @@ export default function AnonExplorer() {
                   )}
                 </div>
               )}
-              <div className="flex items-center gap-1 text-xs text-gray-500">
-                {navPath && <span className="text-gray-300">{fname || '合集'}</span>}
-                {navPath.split('/').map((p, i) => (
-                  <span key={i} className="flex items-center gap-1">
-                    <span>›</span>
-                    <button onClick={() => { const parts = navPath.split('/'); setNavPath(parts.slice(0, i + 1).join('/')); }}
-                      className="text-blue-400 hover:underline">{p}</button>
-                  </span>
-                ))}
-              </div>
-              <div className="flex-1" />
-              <span className="text-xs text-gray-600">{currentItems.totalFiles} 项</span>
-              <button onClick={async () => {
-                try {
-                  const share = await api.createShare(searchHash, 'collection', fname || '合集');
-                  const url = api.getShareUrl(share.token);
-                  await navigator.clipboard.writeText(url);
-                  alert(`分享链接已复制: ${url}`);
-                } catch(e) { alert('分享失败: ' + e.message); }
-              }} className="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-xs">🔗 分享</button>
-              {isLocal ? (
-                <span className="text-xs text-green-500/70 bg-green-500/10 px-3 py-1 rounded-full">✓ 已保存到本机</span>
-              ) : (
+              <div className="flex-1 min-w-0" />
+              <span className="text-xs text-gray-600 shrink-0">{currentItems.totalFiles} 项</span>
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={handleFork} className="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs">📋 Fork</button>
                 <button onClick={async () => {
-                  if (!collection?.entries?.length) return;
-                  const selected = confirm('将合集副本保存到本机？');
-                  if (!selected) return;
                   try {
-                    const name = collection.friendly_name || collection.name_preview || '合集副本';
-                    const res = await api.createAnonCollection(collection.entries, name + ' (副本)');
-                    navigate(`/anon/collections/${res.hash}`);
-                  } catch(e) { alert('保存失败: ' + e.message); }
-                }} className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-xs">💾 保存到本机</button>
-              )}
+                    const share = await api.createShare(searchHash, 'collection', fname || '合集');
+                    const url = api.getShareUrl(share.token);
+                    await navigator.clipboard.writeText(url);
+                    alert(`分享链接已复制: ${url}`);
+                  } catch(e) { alert('分享失败: ' + e.message); }
+                }} className="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-xs">🔗 分享</button>
+                <button onClick={async () => {
+                  if (searchHash) {
+                    try {
+                      await api.p2pAnnounce(searchHash);
+                      alert('已在 P2P 网络广播此合集');
+                    } catch(e) { alert('P2P 广播失败: ' + e.message); }
+                  }
+                }} className="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs">🌐 P2P 打开</button>
+                {isLocal ? (
+                  <span className="text-xs text-green-500/70 bg-green-500/10 px-3 py-1 rounded-full">✓ 已保存到本机</span>
+                ) : (
+                  <button onClick={async () => {
+                    if (!collection?.entries?.length) return;
+                    const selected = confirm('将合集副本保存到本机？');
+                    if (!selected) return;
+                    try {
+                      const name = collection.friendly_name || collection.name_preview || '合集副本';
+                      const res = await api.createAnonCollection(collection.entries, name + ' (副本)');
+                      navigate(`/anon/collections/${res.hash}`);
+                    } catch(e) { alert('保存失败: ' + e.message); }
+                  }} className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-xs">💾 保存到本机</button>
+                )}
+              </div>
             </div>
+
+            {navPath && (
+              <div className="flex items-center gap-1 px-4 py-2 bg-gray-800/80 border-b border-gray-700/50 text-xs shrink-0">
+                <button onClick={() => setNavPath('')} className="text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1">
+                  📦 {fname || '合集'}
+                </button>
+                {navPath.split('/').map((p, i) => (
+                    <span key={i} className="flex items-center gap-1">
+                      <span className="text-gray-600">›</span>
+                      <button onClick={() => { const parts = navPath.split('/'); setNavPath(parts.slice(0, i + 1).join('/')); }}
+                        className="text-blue-400 hover:text-blue-300 hover:underline font-medium">{p}</button>
+                    </span>
+                  ))}
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto">
               {isSingleFile && !navPath ? (
@@ -264,7 +291,7 @@ export default function AnonExplorer() {
                     return (
                       <a key={f.path} href={url} target="_blank" rel="noreferrer"
                         className="flex items-center gap-3 px-5 py-3 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm block">
-                        <span className="text-xl">{fileIcon(f.mime_type)}</span>
+                        <span className="text-xl">{fileIcon(f.mime_type, f.path)}</span>
                         <span className="text-blue-300 font-mono truncate flex-1">{f.path.split('/').pop()}</span>
                         <span className="text-gray-600 text-xs">{relTime(collection.created_at)}</span>
                       </a>

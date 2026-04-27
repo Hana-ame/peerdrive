@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listAnonCollections, listPublicCollections, getP2PStatus, getP2PNode } from '../api';
+import { listAnonCollections, listPublicCollections, getP2PStatus, createShare, getShareUrl } from '../api';
+import CollectionCard from '../components/CollectionCard';
 
 const SHA256_RE = /\b([a-f0-9]{64})\b/i;
 function extractHash(text) { const m = (text || '').match(SHA256_RE); return m ? m[1].toLowerCase() : null; }
@@ -28,6 +29,8 @@ export default function Plaza() {
   const [loading, setLoading] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [p2pOnline, setP2pOnline] = useState(false);
+  const [plazaTab, setPlazaTab] = useState('local');
+  const [viewMode, setViewMode] = useState('grid');
   const navigate = useNavigate();
 
   useEffect(() => { loadAll(); getP2PStatus().then(s => setP2pOnline(s?.enabled && s?.connected_count > 0)).catch(()=>{}); }, []);
@@ -50,28 +53,33 @@ export default function Plaza() {
 
   const handleSearch = () => {
     const h = extractHash(searchInput) || searchInput.trim().toLowerCase();
-    if (h.length === 64) navigate(`/anon/collections/${h}`);
+    if (h && h.length === 64) navigate(`/anon/collections/${h}`);
     else if (h) navigate(`/anon/collections/${h}`);
   };
 
-  const collName = (c) => c.collection_name || c.friendly_name || c.name_preview || (c.entries ? `${c.entries.length} 个文件` : (c.entry_count ? `${c.entry_count} 个文件` : '未命名合集'));
-  const collUser = (c) => c.username || (c._type === 'public' ? '' : '');
-  const collTime = (c) => {
-    if (c.isDummy) return '';
-    const t = c.created_at || c.timestamp;
-    return t ? new Date(t).toLocaleDateString() : '';
-  };
-  const collLink = (c) => {
-    if (c.isDummy) return '';
-    if (c.username && c.collection_name) return `/${c.username}/${c.collection_name}`;
-    if (c.hash) return `/anon/collections/${c.hash}`;
-    return '';
-  };
   const collId = (c) => c.id || c.hash || c.collection_name;
+
+  const handleShare = async (c) => {
+    try {
+      const share = await createShare(c.hash || c.id, 'collection', c.friendly_name || c.name_preview || '合集');
+      const url = getShareUrl(share.token);
+      await navigator.clipboard.writeText(url);
+      alert('分享链接已复制: ' + url);
+    } catch(e) { alert('分享失败: ' + e.message); }
+  };
+
+  const handleFork = (c) => {
+    if (c.hash) navigate('/anon/create', { state: { forkFrom: c, sourceHash: c.hash } });
+  };
+
+  const handleDownload = (c) => {
+    if (c.isDummy) return;
+    if (c.hash) navigate(`/anon/collections/${c.hash}`);
+    else if (c.username && c.collection_name) navigate(`/${c.username}/${c.collection_name}`);
+  };
 
   const showDummies = collections.length === 0 && !loading;
   const display = showDummies ? DUMMY_COLLECTIONS : collections;
-  const [plazaTab, setPlazaTab] = useState('local');
   const localColls = display.filter(c => c._type === 'anon' || c.isDummy);
   const p2pColls = display.filter(c => c._type === 'public');
   const activeColls = plazaTab === 'p2p' ? p2pColls : localColls;
@@ -84,7 +92,16 @@ export default function Plaza() {
             <h1 className="text-3xl font-bold">合集</h1>
             {p2pOnline && <span className="text-xs bg-emerald-900/50 text-emerald-400 px-2 py-0.5 rounded-full">P2P 在线</span>}
           </div>
-          <button onClick={() => navigate('/anon/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">+ 创建合集</button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+              className="bg-gray-800 hover:bg-gray-700 text-gray-400 px-3 py-2 rounded-lg text-sm border border-gray-700"
+              title={viewMode === 'grid' ? '切换为列表视图' : '切换为网格视图'}
+            >
+              {viewMode === 'grid' ? '≡ 列表' : '⊞ 网格'}
+            </button>
+            <button onClick={() => navigate('/anon/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">+ 创建合集</button>
+          </div>
         </div>
         <div className="mb-6">
           <div className="flex gap-2">
@@ -119,40 +136,30 @@ export default function Plaza() {
               </button>
             </div>
           </div>
+        ) : viewMode === 'list' ? (
+          <div className="bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden">
+            {activeColls.map(c => (
+              <CollectionCard
+                key={collId(c)}
+                collection={c}
+                viewMode="list"
+                onFork={handleFork}
+                onShare={handleShare}
+                onDownload={handleDownload}
+              />
+            ))}
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
             {activeColls.map(c => (
-              <div
+              <CollectionCard
                 key={collId(c)}
-                onClick={() => {
-                  const link = collLink(c);
-                  if (link) navigate(link);
-                }}
-                className={`bg-gray-800 border border-gray-700 rounded-xl p-5 transition-all group ${collLink(c) ? 'cursor-pointer hover:border-blue-500 hover:shadow-lg' : 'cursor-default opacity-80'}`}
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-10 h-10 bg-gray-700 rounded-lg flex items-center justify-center text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition-colors text-lg">
-                    {c.isDummy ? '🧪' : '📦'}
-                  </div>
-                  <span className="text-xs text-gray-500">{collTime(c)}</span>
-                </div>
-                <h3 className="text-lg font-bold truncate text-gray-100">{collName(c)}</h3>
-                {collUser(c) && <p className="text-sm text-gray-400 mt-1">{collUser(c)}</p>}
-                {c.isDummy && (
-                  <p className="text-[10px] text-blue-400/60 mt-2 flex items-center gap-1">
-                    <span>🔍</span> 来自 P2P 网络的示例合集 — 连接注册中心获取更多
-                  </p>
-                )}
-                {c.tags && c.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-3">
-                    {c.tags.map((tag, i) => (
-                      <span key={i} className="text-[10px] bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
+                collection={c}
+                viewMode="grid"
+                onFork={handleFork}
+                onShare={handleShare}
+                onDownload={handleDownload}
+              />
             ))}
           </div>
         )}
