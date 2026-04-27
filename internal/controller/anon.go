@@ -132,7 +132,11 @@ func DownloadAnonFile(c *gin.Context) {
 		downloadFilename = filepath.Base(filePath)
 	}
 
-	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, downloadFilename))
+	if c.Query("inline") == "1" {
+		c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, downloadFilename))
+	} else {
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, downloadFilename))
+	}
 	if gziped {
 		c.Header("Content-Encoding", "gzip")
 	}

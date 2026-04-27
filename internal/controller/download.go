@@ -38,7 +38,11 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 	}
 	defer reader.Close()
 
-	c.Header("Content-Disposition", "attachment; filename="+filename)
+	if c.Query("inline") == "1" {
+		c.Header("Content-Disposition", "inline; filename="+filename)
+	} else {
+		c.Header("Content-Disposition", "attachment; filename="+filename)
+	}
 	if gziped {
 		c.Header("Content-Encoding", "gzip")
 	}
