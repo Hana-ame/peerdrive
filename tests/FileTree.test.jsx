@@ -5,7 +5,7 @@ import FileTree from '../src/components/FileTree';
 describe('FileTree', () => {
   it('renders empty state', () => {
     const { container } = render(<FileTree entries={[]} entryActions={{}} />);
-    expect(container.textContent).toContain('空目录');
+    expect(container.textContent).toContain('拖拽');
   });
 
   it('renders flat entries', () => {
