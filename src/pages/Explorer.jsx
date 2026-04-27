@@ -27,17 +27,7 @@ export default function Explorer() {
   const [syncConfig, setSyncConfig] = useState({ path: '', include: '', exclude: '' });
   const [syncStatus, setSyncStatus] = useState(null);
 
-  // 统一使用 AnonExplorer 界面查看合集内容
-  useEffect(() => {
-    if (!username || !collName) return;
-    api.getCollection(username, collName).then(col => {
-      if (col?.current_hash) {
-        navigate(`/anon/collections/${col.current_hash}`, { replace: true });
-      } else {
-        loadEntries();
-      }
-    }).catch(() => loadEntries());
-  }, [username, collName]);
+  useEffect(() => { loadEntries(); }, [username, collName, refreshTrigger]);
 
   useEffect(() => {
     setPageContext({ type: 'explorer', username, collectionName: collName, entryCount: entries.length, entries: entries.map(e => ({ path: e.path, hash: (e.file_hash || '').substring(0, 16) })) });
