@@ -62,6 +62,9 @@ func main() {
 	repository.SetAnonStorageDir(storageDir)
 
 	// 设置路由（内部注入 storageDir/downloader 到 context）
+	if cfg.RegistrationServer != "" {
+		router.SetRegServer(cfg.RegistrationServer)
+	}
 	r := router.SetupRouter(downloader, p2pSvc, cfg)
 
 	port := ":" + cfg.Port

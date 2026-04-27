@@ -20,8 +20,9 @@ type Config struct {
 	StorageDir    string
 	StorageEnable bool
 
-	AllowedOrigins     string
-	PublicAccessDomain string
+	AllowedOrigins      string
+	PublicAccessDomain  string
+	RegistrationServer  string
 
 	P2PEnable            bool
 	P2PListenAddr        string
@@ -70,6 +71,7 @@ func Load() *Config {
 		StorageEnable:       getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
 		AllowedOrigins:      getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev"),
 		PublicAccessDomain:  getEnv("PEERDRIVE_PUBLIC_DOMAIN", ""),
+		RegistrationServer:  getEnv("PEERDRIVE_REG_SERVER", ""),
 		P2PEnable:           getEnvBool("PEERDRIVE_P2P_ENABLE", true),
 		P2PListenAddr:       getEnv("PEERDRIVE_P2P_LISTEN", "/ip4/0.0.0.0/tcp/0"),
 		P2PListenAddrV6:     getEnv("PEERDRIVE_P2P_LISTEN_V6", "/ip6/::/tcp/0"),
