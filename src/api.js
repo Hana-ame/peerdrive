@@ -92,6 +92,7 @@ export const p2pPush = (peerId, collectionName) =>
   request('POST', '/p2p/push', { peer_id: peerId, collection_name: collectionName });
 export const p2pRequestFile = (hash) => request('POST', '/p2p/request-file', { hash });
 export const getWSInfo = () => request('GET', '/p2p/ws/info');
+export const getSignalPeers = () => request('GET', '/p2p/status').then(r => r.signal_peers || []);
 
 export { getApiBaseUrl as WS_TRANSFER_URL_BASE };
 export const WS_TRANSFER_URL = getApiBase().replace(/^http/, 'ws') + '/ws/transfer';
