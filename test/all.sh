@@ -44,11 +44,26 @@ fi
 # ── 4. Playwright Smoke Tests ──
 echo ""
 echo "── 4. Playwright Smoke Tests ──"
-if node /home/lumin/.claude/skills/playwright-test/scripts/test-runner.mjs \
-  /mnt/d/WorkPlace/peerdrive/go/test/peerdrive-smoke.mjs 2>&1 | grep -q "Fail 0"; then
+SMOKE_OUT=$(node /home/lumin/.claude/skills/playwright-test/scripts/test-runner.mjs \
+  /mnt/d/WorkPlace/peerdrive/go/test/peerdrive-smoke.mjs 2>&1)
+if echo "$SMOKE_OUT" | grep -q "Fail 0"; then
   pass "playwright smoke (16 tests)"
 else
   fail "playwright smoke"
+  echo "$SMOKE_OUT" | grep "FAIL\|Pass\|Fail"
+fi
+
+# ── 5. Playwright Functional Tests ──
+echo ""
+echo "── 5. Playwright Functional Tests ──"
+FUNC_OUT=$(node /home/lumin/.claude/skills/playwright-test/scripts/test-runner.mjs \
+  /mnt/d/WorkPlace/peerdrive/go/test/peerdrive-functional.mjs 2>&1)
+if echo "$FUNC_OUT" | grep -q "Fail 0"; then
+  FCOUNT=$(echo "$FUNC_OUT" | grep "Total" | grep -oP '\d+')
+  pass "playwright functional ($FCOUNT tests)"
+else
+  fail "playwright functional"
+  echo "$FUNC_OUT" | grep "FAIL\|Pass\|Fail"
 fi
 
 # ── Summary ──
