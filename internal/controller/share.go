@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 
+	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 
 	"github.com/gin-gonic/gin"

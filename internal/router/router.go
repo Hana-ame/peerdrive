@@ -164,6 +164,14 @@ func SetupRouter(
 		tasks.GET("/:id", controller.GetTaskStatus)
 	}
 
+	// Share links
+	shares := r.Group("/shares")
+	{
+		shares.POST("", controller.CreateShare)
+		shares.GET("", controller.ListShares)
+	}
+	r.GET("/s/:token", controller.AccessShare)
+
 	// Swagger
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 

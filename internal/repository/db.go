@@ -131,5 +131,6 @@ func InitDB(dbPath string) error {
 	DB.Exec(`ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`)
 	DB.Exec(`ALTER TABLE collections ADD COLUMN visibility TEXT DEFAULT 'public'`)
 	DB.Exec(`ALTER TABLE collections ADD COLUMN tags TEXT DEFAULT ''`)
+	InitShareTable()
 	return nil
 }
