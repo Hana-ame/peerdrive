@@ -87,6 +87,7 @@ export default function Plaza() {
   const handleDownload = (c) => {
     if (c.isDummy) return;
     if (c.hash) navigate(`/anon/collections/${c.hash}`);
+    else if (c.current_hash) navigate(`/anon/collections/${c.current_hash}`);
     else if (c.username && c.collection_name) navigate(`/${c.username}/${c.collection_name}`);
   };
 
