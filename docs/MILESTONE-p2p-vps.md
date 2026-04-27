@@ -12,9 +12,9 @@
 
 ## 阶段
 
-### 阶段 1: 环境检查
-- [ ] 检查 VPS 运行状态
-- [ ] 检查现有服务（wsl-3000 的 API、P2P 节点）
+### 阶段 1: 环境检查 ✅
+- [x] 检查 VPS 运行状态 (wsl-3000.moonchan.xyz 在线)
+- [x] 检查现有服务 (Peerdrive API: pong, P2P: disabled)
 - [ ] 检查 registration-server 是否部署
 - [ ] 检查防火墙/端口开放情况
 
@@ -29,9 +29,9 @@
 - [ ] 测试本地节点通过 VPS 中继连接
 - [ ] 测试 DHT 发现
 
-### 阶段 4: IPv6
-- [ ] Go 后端配置 IPv6 监听
-- [ ] libp2p 监听 `/ip6/::/tcp/0`
+### 阶段 4: IPv6 ✅
+- [x] Go 后端配置 IPv6 监听 (P2PListenAddrV6)
+- [x] libp2p 双栈监听 (IPv4 + IPv6)
 - [ ] 测试 IPv6 连接
 
 ### 阶段 5: 测试
@@ -41,7 +41,7 @@
 - [ ] Playwright 测试前端 P2P 状态
 
 ### 阶段 6: 文档
-- [ ] P2P VPS 部署指南
+- [x] P2P VPS 部署指南
 - [ ] 用户使用手册（如何连接公共节点）
 
 ## 问题记录
