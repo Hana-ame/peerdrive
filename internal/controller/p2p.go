@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"peerdrive/internal/model"
+	"peerdrive/internal/p2p_bt"
 	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -15,9 +16,19 @@ import (
 )
 
 var p2pSvc *service.P2PService
+var btSvc *p2p_bt.BTDHTService
+var dualSvc *service.DualP2PService
 
 func InitP2PController(svc *service.P2PService) {
 	p2pSvc = svc
+}
+
+func InitBTController(svc *p2p_bt.BTDHTService) {
+	btSvc = svc
+}
+
+func InitDualController(svc *service.DualP2PService) {
+	dualSvc = svc
 }
 
 func GetNodeInfo(c *gin.Context) {
@@ -318,5 +329,107 @@ func WSInfo(c *gin.Context) {
 		"ws_connections": p2pSvc.WSCount(),
 		"ws_endpoint":    "/ws/transfer",
 		"message_types":  []string{"request", "response", "ping", "pong"},
+	})
+}
+
+// --- BitTorrent DHT handlers ---
+
+func BTDHTStatus(c *gin.Context) {
+	if btSvc == nil || btSvc.Server == nil {
+		c.JSON(http.StatusOK, gin.H{"enabled": false})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"enabled":      true,
+		"listen_addr":  btSvc.Server.Addr().String(),
+		"num_nodes":    btSvc.NumNodes(),
+	})
+}
+
+func BTAnnounce(c *gin.Context) {
+	if btSvc == nil || btSvc.Server == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
+		return
+	}
+	var req struct {
+		Hash string `json:"hash"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if err := btSvc.Announce(req.Hash); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "announced on BT DHT"})
+}
+
+func BTFindProviders(c *gin.Context) {
+	if btSvc == nil || btSvc.Server == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
+		return
+	}
+	var req struct {
+		Hash string `json:"hash"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	peers, err := btSvc.FindProviders(req.Hash)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"hash":   req.Hash,
+		"peers":  peers,
+		"count":  len(peers),
+	})
+}
+
+// --- Dual P2P (IPFS + BT DHT) handlers ---
+
+func DualAnnounce(c *gin.Context) {
+	if dualSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Dual P2P not available"})
+		return
+	}
+	var req struct {
+		Hash string `json:"hash"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if err := dualSvc.Announce(req.Hash); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "announced on both networks"})
+}
+
+func DualFindProviders(c *gin.Context) {
+	if dualSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Dual P2P not available"})
+		return
+	}
+	var req struct {
+		Hash string `json:"hash"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	result, err := dualSvc.FindProviders(req.Hash)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"hash":       req.Hash,
+		"ipfs_peers": result.IPFSPeers,
+		"bt_peers":   result.BTPeers,
 	})
 }

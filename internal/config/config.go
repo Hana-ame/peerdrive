@@ -37,6 +37,9 @@ type Config struct {
 	P2PAutoNAT           bool
 	P2PNATPortMap        bool
 
+	BTDHTEnabled    bool
+	BTDHTListenAddr string
+
 	STUNServer string
 	TURNServer string
 	TURNUser   string
@@ -89,6 +92,8 @@ func Load() *Config {
 		P2PPublicReachable:  getEnvBool("PEERDRIVE_PUBLIC_REACHABLE", false),
 		P2PAutoNAT:          getEnvBool("PEERDRIVE_AUTO_NAT", true),
 		P2PNATPortMap:       getEnvBool("PEERDRIVE_NAT_PORTMAP", false),
+		BTDHTEnabled:        getEnvBool("PEERDRIVE_BT_DHT_ENABLE", true),
+		BTDHTListenAddr:     getEnv("PEERDRIVE_BT_DHT_LISTEN", ":6881"),
 		STUNServer:          getEnv("PEERDRIVE_STUN_SERVER", "stun:stun.moonchan.xyz:3478"),
 		TURNServer:          getEnv("PEERDRIVE_TURN_SERVER", ""),
 		TURNUser:            getEnv("PEERDRIVE_TURN_USER", ""),

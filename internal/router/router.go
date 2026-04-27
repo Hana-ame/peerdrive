@@ -19,10 +19,13 @@
 package router
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/controller"
+	"peerdrive/internal/p2p_bt"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 
@@ -30,6 +33,11 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
+
+func logf(format string, args ...interface{}) {
+	full := fmt.Sprintf("[router] "+format, args...)
+	os.Stderr.WriteString(full + "\n")
+}
 
 func SetupRouter(
 	downloader *service.Downloader,
@@ -71,6 +79,21 @@ func SetupRouter(
 	controller.InitDownloader(downloader)
 	controller.InitP2PController(p2pSvc)
 	controller.InitFileController(service.NewFileService(cfg))
+
+	// Initialize BitTorrent DHT service if enabled.
+	var btSvc *p2p_bt.BTDHTService
+	if cfg.BTDHTEnabled {
+		var err error
+		btSvc, err = p2p_bt.NewBTDHT(cfg.BTDHTListenAddr)
+		if err != nil {
+			logf("BT DHT init warning: %v", err)
+		}
+	}
+	controller.InitBTController(btSvc)
+
+	// Initialize dual P2P service (IPFS + BT DHT).
+	dualSvc := service.NewDualP2PService(cfg, p2pSvc, btSvc)
+	controller.InitDualController(dualSvc)
 	controller.InitAnonController(service.NewAnonService(cfg))
 
 	// Sync controller initialization
@@ -96,6 +119,15 @@ func SetupRouter(
 		p2p.POST("/push", controller.PushSync)
 		p2p.POST("/request-file", controller.RequestFile)
 		p2p.GET("/ws/info", controller.WSInfo)
+
+		// BitTorrent DHT routes
+		p2p.GET("/bt/status", controller.BTDHTStatus)
+		p2p.POST("/bt/announce", controller.BTAnnounce)
+		p2p.POST("/bt/find", controller.BTFindProviders)
+
+		// Dual P2P (IPFS + BT DHT) routes
+		p2p.POST("/dual/announce", controller.DualAnnounce)
+		p2p.POST("/dual/find", controller.DualFindProviders)
 	}
 
 	// Anonymous Collection routes (public)
