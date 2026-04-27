@@ -484,7 +484,7 @@ export default function FileManager() {
         {/* content */}
         <div className={`flex-1 overflow-y-auto ${selCount > 0 ? 'pb-16' : ''}`}>
           {loading ? (
-            <div className="text-center text-gray-500 py-20">加载中...</div>
+            <div className="text-center text-gray-500 py-20">{loadingProgress}</div>
           ) : filtered.length === 0 ? (
             <div className="mx-6 my-6">
               {files.length === 0 ? (
