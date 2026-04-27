@@ -1,3 +1,4 @@
+// 活跃连接面板：展示入站/出站连接数、扫描器状态和手动连接表单
 import React, { useState, useEffect, useCallback } from 'react'
 import * as api from '../api'
 

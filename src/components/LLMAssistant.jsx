@@ -1,3 +1,4 @@
+// AI 助手聊天面板：集成 LLM，支持工具调用（导航/查询合集/注册文件等）
 import React, { useState, useRef, useEffect, useContext } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PageContext } from '../App';

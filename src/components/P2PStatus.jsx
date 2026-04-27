@@ -1,3 +1,4 @@
+// P2P 状态综合面板：IPFS/Active Conn/BT/Peers Detail 多标签页
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import * as api from '../api'
 import PeerDetailPanel from './PeerDetailPanel'

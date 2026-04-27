@@ -1,8 +1,10 @@
+// 设置页：节点连接 / 认证 / 存储 / LLM / WebDAV / 关于，六个配置分区
 import React, { useState, useEffect, useCallback } from 'react';
 import * as api from '../api';
 import { useNavigate } from 'react-router-dom';
 import SettingsSection from '../components/SettingsSection';
 
+// 侧边栏导航配置
 const SECTIONS = [
   { id: 'node', label: '节点连接' },
   { id: 'auth', label: '认证' },

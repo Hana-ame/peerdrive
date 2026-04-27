@@ -1,3 +1,4 @@
+// 匿名合集创建器：从文件源（时间线/本机/已有合集）拖拽文件，构建并保存不可变合集
 import React, { useContext, useState, useEffect, useRef } from 'react';
 import * as api from '../api';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
@@ -7,6 +8,7 @@ import FileTree from '../components/FileTree';
 const LLM_URL = api.getLlmEndpoint ? api.getLlmEndpoint() : 'https://siliconflow.moonchan.xyz';
 const LLM_CHAT = `${LLM_URL}/v1/chat/completions`;
 
+// 调用 LLM 根据文件名建议合集名称
 async function llmSuggest(names) {
   const res = await fetch(LLM_CHAT, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -28,6 +30,7 @@ const COLL_SORT_OPTS = [
   { v: 'time', l: '时间' }, { v: 'name', l: '名称' }, { v: 'count', l: '文件数' },
 ];
 
+// 根据 MIME 类型返回文件图标 emoji
 function fileIcon(m) {
   if (!m) return '📄';
   if (m.startsWith('image/')) return '🖼️';
@@ -38,6 +41,7 @@ function fileIcon(m) {
   if (m.includes('zip') || m.includes('tar') || m.includes('gzip') || m.includes('rar')) return '📦';
   return '📄';
 }
+// 格式化文件大小为可读字符串
 function fmtSize(b) {
   if (!b) return '-';
   if (b < 1024) return b + ' B';
@@ -110,21 +114,25 @@ export default function AnonCreator() {
     setPageContext({ type: 'anonCreator', fileCount: files.length, entryCount: entries.length, friendlyName: fname });
   }, [files, entries, fname]);
 
+  // 从后端加载已注册文件列表
   const loadFiles = async () => {
     setFLoading(true);
     try { setFiles(await api.listFiles(sort) || []); } catch { setFiles([]); }
     setFLoading(false);
   };
+  // 加载已有匿名合集列表（作为文件源）
   const loadCollections = async () => {
     try { setCollections(await api.listAnonCollections() || []); } catch { setCollections([]); }
   };
 
+  // 添加一个文件条目到待创建合集中（带防抖）
   const addEntry = (hash, path, mime_type, size) => {
     const now = Date.now();
     if (now - lastClick.current < 500) return;
     lastClick.current = now;
     setEntries(prev => [...prev, { hash, path, mime_type, size }]);
   };
+  // 从待创建合集中移除条目
   const removeEntry = (entry) => {
     setEntries(prev => prev.filter(e => !(e.path === entry.path && e.hash === entry.hash)));
   };
@@ -132,6 +140,7 @@ export default function AnonCreator() {
     setEntries(prev => prev.map(e => e.path === oldPath ? { ...e, path: newPath } : e));
   };
 
+  // 保存/创建匿名合集，支持 AI 推荐名称
   const handleSave = async (useAI = false) => {
     const valid = entries.filter(e => e.path?.trim() && e.hash);
     if (!valid.length) return alert('请先添加文件');
@@ -245,7 +254,7 @@ export default function AnonCreator() {
     <div className={`flex flex-1 overflow-hidden h-full bg-gray-950 ${dragging ? 'select-none' : ''}`}>
       {/* LEFT PANEL — file sources */}
       <div style={{ width: `${split}%` }} className="h-full flex flex-col border-r border-gray-700">
-        {/* 4-tab flat bar */}
+        {/* 文件源顶部标签栏 */}
         <div className="flex bg-gray-800 rounded mx-2 mt-2 shrink-0">
           <button onClick={() => { setSrcTab('timeline'); setLocalDirPath(''); }} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'timeline' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>🕐 时间线</button>
           <button onClick={() => { setSrcTab('registered'); setLocalDirPath(''); }} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'registered' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>📁 已注册</button>

@@ -1,5 +1,7 @@
+// 文件树组件：将合集条目渲染为可拖拽/展开/重命名的目录树
 import React, { useState } from 'react';
 
+// 根据 MIME 类型返回文件图标 emoji
 function fileIcon(mime) {
   if (!mime) return '📄';
   if (mime.startsWith('image/')) return '🖼️';
@@ -11,6 +13,7 @@ function fileIcon(mime) {
   return '📄';
 }
 
+// 格式化文件大小
 function fmtSize(b) {
   if (!b) return '';
   if (b < 1024) return b + ' B';
@@ -56,6 +59,7 @@ function buildTree(entries) {
 export function buildFlatTree(entries) { return buildTree(entries); }
 
 export default function FileTree({ entries, entryActions }) {
+  // 从条目列表构建目录树
   const tree = buildTree(entries);
   const [expanded, setExpanded] = useState(new Set());
   const [renaming, setRenaming] = useState(null);

@@ -1,7 +1,9 @@
+// 顶部导航栏 + 全局搜索面板（Ctrl+K 打开）
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { listAnonCollections, searchCollections, listFiles } from '../api';
 
+// 全局搜索面板：搜索合集和文件，键盘导航选择
 function SearchPanel({ open, onClose }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState({ anon: [], public: [], files: [] });

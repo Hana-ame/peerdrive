@@ -1,6 +1,8 @@
+// P2P 网络仪表盘：实时查看节点/对等连接/文件宣布和查找状态
 import React, { useState, useEffect, useCallback } from 'react';
 import * as api from '../api';
 
+// 根据 RTT 延迟返回文字颜色
 function getRttColor(rtt) {
   if (rtt == null) return 'text-gray-500';
   if (rtt < 50) return 'text-emerald-400';
@@ -8,6 +10,7 @@ function getRttColor(rtt) {
   return 'text-red-400';
 }
 
+// 根据 RTT 延迟返回背景颜色
 function getRttBg(rtt) {
   if (rtt == null) return 'bg-gray-700';
   if (rtt < 50) return 'bg-emerald-500';
@@ -39,7 +42,7 @@ export default function P2PDashboard() {
   const [findResults, setFindResults] = useState([]);
   const [findLoading, setFindLoading] = useState(false);
 
-  /* ---- auto refresh ---- */
+  // 自动刷新所有 P2P 数据
   const refresh = useCallback(async () => {
     try {
       const [s, p, d, sp] = await Promise.all([

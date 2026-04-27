@@ -1,3 +1,4 @@
+// 设置区域卡片组件：标题/描述/子内容 + 保存按钮
 import React, { useState } from 'react';
 
 export default function SettingsSection({ title, description, children, onSave, saveDisabled, id }) {

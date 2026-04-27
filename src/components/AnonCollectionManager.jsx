@@ -1,3 +1,4 @@
+// 匿名合集管理器：浏览/创建/Fork 匿名合集，支持预填条目
 import React, { useState, useEffect } from 'react';
 import * as api from '../api';
 

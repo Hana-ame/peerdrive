@@ -135,6 +135,7 @@ export default function Plaza() {
               <button onClick={() => setShowShare(null)} className="text-gray-500 hover:text-white px-2">✕</button>
             </div>
           )}
+          {/* 标签切换：本机 / P2P 网络 / 广播 */}
           <div className="flex gap-1 mt-3">
             <button onClick={() => setPlazaTab('local')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='local'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>💻 本机 ({localColls.length})</button>
             <button onClick={() => setPlazaTab('p2p')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='p2p'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>🌐 P2P 网络 ({p2pColls.length})</button>

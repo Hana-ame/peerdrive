@@ -1,3 +1,4 @@
+// 版本历史面板：展示合集提交历史，支持回滚到指定版本
 import React, { useState, useEffect } from 'react';
 import { getVersionLog, rollbackVersion } from '../api';
 

@@ -1,3 +1,4 @@
+// 对等节点详情表格：展示每个连接的 Peer 的地址/传输/延迟/字节量/注册状态
 import React, { useState, useEffect, useCallback } from 'react';
 import * as api from '../api';
 

@@ -1,6 +1,8 @@
+// P2P 双栈总控：同时管理 IPFS DHT 和 BT DHT，支持双网宣布/查找/文件共享生命周期
 import React, { useState, useEffect, useCallback } from 'react';
 import * as api from '../api';
 
+// 脉冲动画圆点组件
 function PulsingDot({ color = 'emerald' }) {
   return (
     <span className={`inline-block w-2 h-2 rounded-full bg-${color}-400 animate-pulse mr-1.5`} />

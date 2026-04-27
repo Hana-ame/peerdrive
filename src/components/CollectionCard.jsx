@@ -1,6 +1,8 @@
+// 合集卡片组件：网格/列表两种模式，展示合集名称/图标/操作按钮
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 
+// 格式化时间戳为相对时间（刚刚/分钟前/小时前/天前）
 function relTime(ts) {
   if (!ts) return '';
   const d = new Date(ts);
@@ -13,11 +15,13 @@ function relTime(ts) {
   return d.toLocaleDateString();
 }
 
+// 智能提取合集显示名称
 function collName(c) {
   return c.collection_name || c.friendly_name || c.name_preview ||
     (c.entries?.length ? `${c.entries.length} 个文件` : (c.entry_count != null ? `${c.entry_count} 个文件` : (c.hash ? c.hash.substring(0,12)+'...' : '未命名合集')));
 }
 
+// 根据文件扩展名返回 emoji 图标
 function fileIconFromPath(p) {
   const ext = (p || '').split('.').pop()?.toLowerCase();
   if (!ext || ext === p) return '📄';
@@ -43,6 +47,7 @@ function collLink(c) {
 }
 
 export default function CollectionCard({ collection, onFork, onShare, onDownload, viewMode = 'grid' }) {
+  // 点击卡片跳转到合集详情
   const navigate = useNavigate();
   const c = collection;
   const count = collFileCount(c);

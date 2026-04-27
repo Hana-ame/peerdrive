@@ -1,3 +1,4 @@
+// 用户合集浏览器：查看/上传/提交/合并/同步指定用户合集的条目和版本历史
 import React, { useContext, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AppContext, PageContext } from '../App';

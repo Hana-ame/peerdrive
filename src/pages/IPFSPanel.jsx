@@ -1,3 +1,4 @@
+// IPFS/libp2p 面板：监控 IPFS DHT 节点、对等连接、文件宣布与查找
 import React, { useState, useEffect, useCallback } from 'react';
 import * as api from '../api';
 

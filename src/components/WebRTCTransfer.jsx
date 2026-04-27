@@ -1,3 +1,4 @@
+// WebRTC 点对点文件传输：通过信令建立 DataChannel，分块传输文件
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 const CHUNK_SIZE = 16384; // 16KB data channel chunks

@@ -1,3 +1,4 @@
+// 文件管理器：浏览/搜索/筛选注册文件，支持多选创建合集和分享
 import React, { useContext, useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageContext } from '../App';
@@ -55,7 +56,7 @@ export default function FileManager() {
     setPageContext({ type: 'fileManager', fileCount: files.length, sortBy, category });
   }, [files, sortBy, category]);
 
-  // Auto-dismiss notification
+  // 自动关闭通知提示
   useEffect(() => {
     if (notification) {
       const t = setTimeout(() => setNotification(''), 3000);
@@ -88,6 +89,7 @@ export default function FileManager() {
   }, []);
 
   const [loadingProgress, setLoadingProgress] = useState('');
+  // 加载文件列表并记录耗时
   const loadFiles = async () => {
     setLoading(true);
     setLoadingProgress('加载中...');

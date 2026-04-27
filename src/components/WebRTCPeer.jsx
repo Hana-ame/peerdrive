@@ -1,3 +1,4 @@
+// WebRTC 对等连接模块：通过信令服务器管理多对等连接和数据通道
 import React, { useState, useEffect, useRef } from 'react';
 import * as api from '../api';
 

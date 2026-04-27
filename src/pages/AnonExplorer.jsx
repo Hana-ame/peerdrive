@@ -1,3 +1,4 @@
+// 匿名合集查看器：通过 SHA256 Hash 浏览不可变合集内容，支持预览/下载/Fork
 import React, { useContext, useState, useEffect, useMemo, useRef } from 'react';
 import * as api from '../api';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -6,6 +7,7 @@ import { PageContext } from '../App';
 const SHA256_RE = /\b([a-f0-9]{64})\b/i;
 function extractHash(text) { const m = (text || '').match(SHA256_RE); return m ? m[1].toLowerCase() : null; }
 
+// 根据 MIME 和扩展名返回文件图标
 function fileIcon(m, p) {
   if (!m && !p) return '📄';
   if (m) {
@@ -27,6 +29,7 @@ function fileIcon(m, p) {
   }
   return '📄';
 }
+// 格式化文件大小
 function fmtSize(b) {
   if (!b) return '';
   if (b < 1024) return b + ' B';
@@ -52,6 +55,7 @@ export default function AnonExplorer() {
   useEffect(() => { if (searchHash) fetchCollection(searchHash); }, [searchHash]);
   useEffect(() => { api.listAnonCollections().then(l => { if (Array.isArray(l)) setAllCollHashes(new Set(l.map(c => c.hash))); }).catch(() => {}); }, [searchHash]);
 
+  // 根据 Hash 获取合集数据，空合集自动删除
   const fetchCollection = async (h) => {
     if (!h) return;
     setLoading(true); setError(''); setCollection(null);
@@ -69,6 +73,7 @@ export default function AnonExplorer() {
     api.listAnonCollections().then(l => setIsLocal(Array.isArray(l) && l.some(c => c.hash === h))).catch(() => {});
   };
 
+  // 跳转到创建页进行 Fork 或编辑
   const handleFork = () => navigate('/anon/create', { state: { forkFrom: collection, sourceHash: searchHash } });
   const handleCommit = () => navigate('/anon/create', { state: { editFrom: collection, savedHash: searchHash } });
 
@@ -124,6 +129,7 @@ export default function AnonExplorer() {
   return (
     <div className="flex flex-1 overflow-hidden h-full bg-gray-950">
       <div className="flex-1 flex flex-col max-w-3xl mx-auto w-full">
+        {/* 顶部搜索栏：输入 Hash 或粘贴链接 */}
         <div className="h-14 flex items-center px-4 shrink-0 gap-3 border-b border-gray-800">
           <button onClick={() => { setCollection(null); navigate(-1); }} className="text-gray-400 hover:text-white text-lg">←</button>
           <input type="text" value={inputVal}
@@ -314,6 +320,7 @@ export default function AnonExplorer() {
   );
 }
 
+// 文本文件预览组件：加载并显示前 50KB 内容
 function TextPreview({ url, downloadUrl, filename, hash, created }) {
   const [content, setContent] = useState(null);
   const [loading, setLoading] = useState(true);
