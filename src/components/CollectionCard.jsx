@@ -54,9 +54,9 @@ export default function CollectionCard({ collection, onFork, onShare, onDownload
           {isP2PAvailable ? '🔵 P2P可用' : '⚪ 仅本地'}
         </span>
         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-          {onFork && <button onClick={(e) => { e.stopPropagation(); onFork(c); }} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded">{'📋'} Fork</button>}
-          {onShare && <button onClick={(e) => { e.stopPropagation(); onShare(c); }} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded">{'🔗'} 分享</button>}
-          {onDownload && <button onClick={(e) => { e.stopPropagation(); onDownload(c); }} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded">{'⬇'} 下载</button>}
+          {onFork && <button onClick={(e) => { e.stopPropagation(); onFork(c); }} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded">📋 Fork</button>}
+          {onShare && <button onClick={(e) => { e.stopPropagation(); onShare(c); }} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded">🔗 分享</button>}
+          {onDownload && <button onClick={(e) => { e.stopPropagation(); onDownload(c); }} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded">⬇ 下载</button>}
         </div>
       </div>
     );
@@ -78,21 +78,17 @@ export default function CollectionCard({ collection, onFork, onShare, onDownload
         </span>
       </div>
       {isDummy && (
-        <p className="text-[10px] text-blue-400/60 mt-2 flex items-center gap-1">
-          <span>{'🔍'}</span> 来自 P2P 网络的示例合集 -- 连接注册中心获取更多
-        </p>
+        <p className="text-[10px] text-blue-400/60 mt-2 flex items-center gap-1"><span>🔍</span> 来自 P2P 网络的示例合集 -- 连接注册中心获取更多</p>
       )}
       {c.tags && c.tags.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-3">
-          {c.tags.map((tag, i) => (
-            <span key={i} className="text-[10px] bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full">{tag}</span>
-          ))}
+          {c.tags.map((tag, i) => (<span key={i} className="text-[10px] bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full">{tag}</span>))}
         </div>
       )}
       <div className="flex gap-2 mt-4 pt-3 border-t border-gray-700/50 opacity-0 group-hover:opacity-100 transition-opacity">
-        {onFork && <button onClick={(e) => { e.stopPropagation(); onFork(c); }} className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1.5 rounded">{'📋'} Fork</button>}
-        {onShare && <button onClick={(e) => { e.stopPropagation(); onShare(c); }} className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1.5 rounded">{'🔗'} 分享</button>}
-        {onDownload && <button onClick={(e) => { e.stopPropagation(); onDownload(c); }} className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1.5 rounded">{'⬇'} 下载</button>}
+        {onFork && <button onClick={(e) => { e.stopPropagation(); onFork(c); }} className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1.5 rounded">📋 Fork</button>}
+        {onShare && <button onClick={(e) => { e.stopPropagation(); onShare(c); }} className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1.5 rounded">🔗 分享</button>}
+        {onDownload && <button onClick={(e) => { e.stopPropagation(); onDownload(c); }} className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1.5 rounded">⬇ 下载</button>}
       </div>
     </div>
   );
