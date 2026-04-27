@@ -60,6 +60,9 @@ type Config struct {
 
 	RelayStorageMB int
 	RelayVersion   string
+
+	WebDAVEnable  bool
+	ForwardEnable bool
 }
 
 func (c *Config) IsOriginAllowed(origin string) bool {
@@ -129,6 +132,9 @@ func Load() *Config {
 
 		RelayStorageMB: getEnvInt("PEERDRIVE_RELAY_STORAGE_MB", 0),
 		RelayVersion:   getEnv("PEERDRIVE_RELAY_VERSION", "peerdrive/1.0.0"),
+
+		WebDAVEnable: getEnvBool("PEERDRIVE_WEBDAV_ENABLE", true),
+		ForwardEnable: getEnvBool("PEERDRIVE_FORWARD_ENABLE", false),
 	}
 }
 

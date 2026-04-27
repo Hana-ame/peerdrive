@@ -26,6 +26,8 @@ var dualSvc *service.DualP2PService
 var peerTracker *service.PeerTracker
 var peerScanner *service.PeerScanner
 
+var forwardSvc *service.ForwardService
+
 var resumeMgr *service.ResumeManager
 var multiPeerDl *service.MultiPeerDownloader
 
@@ -34,6 +36,11 @@ var multiPeerDl *service.MultiPeerDownloader
 func InitPeerScanner(s *service.PeerScanner) {
 	log.LogDebug("ctrl-p2p: InitPeerScanner")
 	peerScanner = s
+}
+
+func InitForwardController(svc *service.ForwardService) {
+	log.LogDebug("ctrl-p2p: InitForwardController")
+	forwardSvc = svc
 }
 
 func InitP2PController(svc *service.P2PService) {
@@ -872,4 +879,146 @@ func BTDownloadList(c *gin.Context) {
 		"downloads": downloads,
 		"count":     len(downloads),
 	})
+}
+
+// --- Port Forwarding ---
+
+// CreateForwardSession registers a local service port for remote forwarding.
+//
+//	POST /p2p/forward/create  {key: "secret", port: 8080}
+//	Response: {status: "listening", port: 8080}
+func CreateForwardSession(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: CreateForwardSession")
+	if forwardSvc == nil || !forwardSvc.IsEnabled() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "forward service not enabled"})
+		return
+	}
+
+	var req struct {
+		Key  string `json:"key"`
+		Port int    `json:"port"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: CreateForwardSession invalid request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if req.Key == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "key is required"})
+		return
+	}
+	if req.Port <= 0 || req.Port > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid port"})
+		return
+	}
+	if err := forwardSvc.CreateForward(req.Key, req.Port); err != nil {
+		log.LogError("ctrl-p2p: CreateForwardSession failed: %v", err)
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	log.LogInfo("ctrl-p2p: CreateForwardSession port=%d", req.Port)
+	c.JSON(http.StatusOK, gin.H{"status": "listening", "port": req.Port})
+}
+
+// ConnectForwardSession connects to a remote peer and forwards a local port.
+//
+//	POST /p2p/forward/connect  {key: "secret", target_peer: "12D3...", local_port: 18080}
+//	Response: {status: "connected", local_port: 18080}
+func ConnectForwardSession(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: ConnectForwardSession")
+	if forwardSvc == nil || !forwardSvc.IsEnabled() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "forward service not enabled"})
+		return
+	}
+
+	var req struct {
+		Key        string `json:"key"`
+		TargetPeer string `json:"target_peer"`
+		LocalPort  int    `json:"local_port"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: ConnectForwardSession invalid request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if req.Key == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "key is required"})
+		return
+	}
+	if req.LocalPort <= 0 || req.LocalPort > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid local_port"})
+		return
+	}
+	pid, err := peer.Decode(req.TargetPeer)
+	if err != nil {
+		log.LogWarn("ctrl-p2p: ConnectForwardSession invalid peer: %s", req.TargetPeer)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid target_peer"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	if err := forwardSvc.ConnectForward(ctx, pid, req.Key, req.LocalPort); err != nil {
+		log.LogError("ctrl-p2p: ConnectForwardSession failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	log.LogInfo("ctrl-p2p: ConnectForwardSession target=%s local_port=%d", req.TargetPeer, req.LocalPort)
+	c.JSON(http.StatusOK, gin.H{"status": "connected", "local_port": req.LocalPort})
+}
+
+// ListForwardSessions returns all active forward sessions.
+//
+//	GET /p2p/forward/list
+//	Response: {sessions: [{key, source_peer, local_port, created_at, clients}]}
+func ListForwardSessions(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: ListForwardSessions")
+	if forwardSvc == nil || !forwardSvc.IsEnabled() {
+		c.JSON(http.StatusOK, gin.H{"sessions": []interface{}{}})
+		return
+	}
+	sessions := forwardSvc.ListSessions()
+	items := make([]gin.H, len(sessions))
+	for i, s := range sessions {
+		items[i] = gin.H{
+			"key":         s.Key,
+			"source_peer": s.SourcePeer.String(),
+			"local_port":  s.LocalPort,
+			"created_at":  s.CreatedAt,
+			"clients":     s.Clients,
+		}
+	}
+	log.LogInfo("ctrl-p2p: ListForwardSessions count=%d", len(items))
+	c.JSON(http.StatusOK, gin.H{"sessions": items})
+}
+
+// CloseForwardSession removes a forward session.
+//
+//	POST /p2p/forward/close  {key: "secret"}
+//	Response: {status: "closed"}
+func CloseForwardSession(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: CloseForwardSession")
+	if forwardSvc == nil || !forwardSvc.IsEnabled() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "forward service not enabled"})
+		return
+	}
+
+	var req struct {
+		Key string `json:"key"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: CloseForwardSession invalid request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if req.Key == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "key is required"})
+		return
+	}
+	if err := forwardSvc.CloseForward(req.Key); err != nil {
+		log.LogWarn("ctrl-p2p: CloseForwardSession not found")
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	log.LogInfo("ctrl-p2p: CloseForwardSession closed")
+	c.JSON(http.StatusOK, gin.H{"status": "closed"})
 }

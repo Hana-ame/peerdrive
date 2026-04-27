@@ -93,6 +93,15 @@ func SetupRouter(
 	controller.InitP2PController(p2pSvc)
 	controller.InitFileController(service.NewFileService(cfg))
 
+	// Initialize the port forwarding service.
+	var forwardSvc *service.ForwardService
+	if p2pSvc != nil && p2pSvc.Host != nil {
+		forwardSvc = service.NewForwardService(p2pSvc.Host, cfg.ForwardEnable)
+	} else {
+		forwardSvc = service.NewForwardService(nil, false)
+	}
+	controller.InitForwardController(forwardSvc)
+
 	// Initialize BitTorrent DHT service if enabled.
 	var btSvc *p2p_bt.BTDHTService
 	if cfg.BTDHTEnabled {
@@ -241,6 +250,11 @@ func SetupRouter(
 		// Dual P2P (IPFS + BT DHT) routes
 		p2p.POST("/dual/announce", controller.DualAnnounce)
 		p2p.POST("/dual/find", controller.DualFindProviders)
+		// Port forwarding routes
+		p2p.POST("/forward/create", controller.CreateForwardSession)
+		p2p.POST("/forward/connect", controller.ConnectForwardSession)
+		p2p.GET("/forward/list", controller.ListForwardSessions)
+		p2p.POST("/forward/close", controller.CloseForwardSession)
 	}
 
 	// Anonymous Collection routes (public)
@@ -331,6 +345,16 @@ func SetupRouter(
 	// P2P relay proxy
 	relaySvc := service.NewRelayService(p2pSvc)
 	r.GET("/relay/proxy", relaySvc.ProxyDownload)
+
+	// WebDAV endpoint — mount as network drive
+	if cfg.WebDAVEnable {
+		webdavSvc := service.NewWebDAVService(cfg.StorageDir)
+		// WebDAV uses wildcard path: all /webdav/* requests go to WebDAV handler
+		r.Any("/webdav/*path", func(c *gin.Context) {
+			c.Request.URL.Path = c.Param("path")
+			webdavSvc.ServeHTTP(c)
+		})
+	}
 
 	// WebRTC signaling
 	controller.InitSignalHub(service.NewSignalingHub())
