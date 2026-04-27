@@ -1,3 +1,4 @@
+// SHA256 寻址查询页：通过哈希值查询文件元数据并下载
 import React, { useState } from 'react';
 import * as api from '../api';
 

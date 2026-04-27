@@ -1,3 +1,4 @@
+// 服务状态仪表盘：展示 Relay/注册服务器/存储/BT DHT/WebSocket 等各服务的健康度
 import React, { useState, useEffect, useCallback } from 'react';
 import * as api from '../api';
 

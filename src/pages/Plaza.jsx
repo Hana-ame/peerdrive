@@ -40,7 +40,8 @@ export default function Plaza() {
   // 首次加载时拉取合集列表和 P2P 状态
   useEffect(() => { loadAll(); getP2PStatus().then(s => setP2pOnline(s?.enabled && s?.connected_count > 0)).catch(()=>{}); }, []);
 
-  // 加载本机 + 公开合集
+  const loadAll = async () => {
+    // 加载本机 + 公开合集
     setLoading(true);
     try {
       const [anon, pub] = await Promise.all([

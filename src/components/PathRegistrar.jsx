@@ -1,3 +1,4 @@
+// 文件路径注册器：将服务器本地文件或目录注册到内容寻址系统
 import React, { useState } from 'react';
 import * as api from '../api';
 

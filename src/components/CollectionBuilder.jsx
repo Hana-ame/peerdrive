@@ -1,6 +1,8 @@
+// 合集构建器：注册文件夹/文件、编排路径、一键创建不可变合集
 import React, { useState } from 'react'
 import * as api from '../api'
 
+// 目录树可视化组件
 function Tree({ entries }) {
   const root = {}
   for (const e of entries) {
