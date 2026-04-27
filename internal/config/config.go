@@ -25,6 +25,7 @@ type Config struct {
 
 	P2PEnable            bool
 	P2PListenAddr        string
+	P2PListenAddrV6      string
 	P2PBootstrapPeer     string
 	P2PMDNSEnable        bool
 	P2PRelayEnable       bool
@@ -71,6 +72,7 @@ func Load() *Config {
 		PublicAccessDomain:  getEnv("PEERDRIVE_PUBLIC_DOMAIN", ""),
 		P2PEnable:           getEnvBool("PEERDRIVE_P2P_ENABLE", true),
 		P2PListenAddr:       getEnv("PEERDRIVE_P2P_LISTEN", "/ip4/0.0.0.0/tcp/0"),
+		P2PListenAddrV6:     getEnv("PEERDRIVE_P2P_LISTEN_V6", "/ip6/::/tcp/0"),
 		P2PBootstrapPeer:    getEnv("PEERDRIVE_BOOTSTRAP_PEER", ""),
 		P2PMDNSEnable:       getEnvBool("PEERDRIVE_MDNS_ENABLE", true),
 		P2PRelayEnable:      getEnvBool("PEERDRIVE_RELAY_ENABLE", false),

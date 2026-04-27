@@ -71,8 +71,12 @@ func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error)
 		return &P2PService{cfg: cfg}, nil
 	}
 
+	listenAddrs := []string{cfg.P2PListenAddr}
+	if cfg.P2PListenAddrV6 != "" {
+		listenAddrs = append(listenAddrs, cfg.P2PListenAddrV6)
+	}
 	opts := []libp2p.Option{
-		libp2p.ListenAddrStrings(cfg.P2PListenAddr),
+		libp2p.ListenAddrStrings(listenAddrs...),
 		libp2p.EnableRelay(),
 		libp2p.EnableNATService(),
 	}
