@@ -10,11 +10,12 @@ import (
 )
 
 type AuthController struct {
-	svc *service.AuthService
+	svc      *service.AuthService
+	relaySvc *service.RelayService
 }
 
-func NewAuthController(svc *service.AuthService) *AuthController {
-	return &AuthController{svc: svc}
+func NewAuthController(svc *service.AuthService, relaySvc *service.RelayService) *AuthController {
+	return &AuthController{svc: svc, relaySvc: relaySvc}
 }
 
 // Register godoc
@@ -93,4 +94,89 @@ func (c *AuthController) WhoAmI(ctx *gin.Context) {
 		"username": username,
 		"role":     role,
 	})
+}
+
+func (c *AuthController) ListUsers(ctx *gin.Context) {
+	users, err := c.svc.ListUsers()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, model.ListResponse{
+		Users: users,
+		Total: len(users),
+	})
+}
+
+func (c *AuthController) Ping(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":  "ok",
+		"service": "peerdrive-registration",
+	})
+}
+
+// ──────────────────────────────
+//  Relay node registration
+// ──────────────────────────────
+
+type relayRegisterRequest struct {
+	PeerID    string   `json:"peer_id" binding:"required"`
+	Addrs     []string `json:"addrs"`
+	StorageMB int      `json:"storage_mb"`
+	Version   string   `json:"version"`
+}
+
+type relayHeartbeatRequest struct {
+	PeerID  string  `json:"peer_id" binding:"required"`
+	LoadPct float64 `json:"load_pct"`
+}
+
+// RegisterRelay handles POST /p2p/relay/register
+func (c *AuthController) RegisterRelay(ctx *gin.Context) {
+	var req relayRegisterRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := c.relaySvc.Register(model.RelayNode{
+		PeerID:    req.PeerID,
+		Addrs:     req.Addrs,
+		StorageMB: req.StorageMB,
+		Version:   req.Version,
+	}); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "registered"})
+}
+
+// ListRelays handles GET /p2p/relay/list
+func (c *AuthController) ListRelays(ctx *gin.Context) {
+	relays, err := c.relaySvc.ListActive()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if relays == nil {
+		relays = []model.RelayNode{}
+	}
+	ctx.JSON(http.StatusOK, gin.H{"relays": relays})
+}
+
+// RelayHeartbeat handles POST /p2p/relay/heartbeat
+func (c *AuthController) RelayHeartbeat(ctx *gin.Context) {
+	var req relayHeartbeatRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := c.relaySvc.Heartbeat(req.PeerID, req.LoadPct); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

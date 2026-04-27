@@ -64,12 +64,21 @@ func (s *AuthService) Register(req model.RegisterRequest) (*model.TokenResponse,
 		return nil, ErrUsernameTaken
 	}
 
-	_, err = s.repo.Create(req.Username, req.Password, model.RoleUser)
+	role := model.RoleUser
+	if req.Role == "admin" {
+		role = model.RoleAdmin
+	}
+
+	_, err = s.repo.Create(req.Username, req.Password, role)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.issueToken(req.Username, string(model.RoleUser))
+	return s.issueToken(req.Username, string(role))
+}
+
+func (s *AuthService) ListUsers() ([]model.User, error) {
+	return s.repo.ListAll()
 }
 
 func (s *AuthService) Login(req model.LoginRequest) (*model.TokenResponse, error) {

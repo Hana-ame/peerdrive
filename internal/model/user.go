@@ -20,6 +20,22 @@ type User struct {
 type RegisterRequest struct {
 	Username string `json:"username" binding:"required,min=3,max=32"`
 	Password string `json:"password" binding:"required,min=6"`
+	Role     string `json:"role"`        // optional, defaults to "user"
+}
+
+type ListResponse struct {
+	Users []User `json:"users"`
+	Total int    `json:"total"`
+}
+
+type RelayNode struct {
+	PeerID        string    `json:"peer_id"`
+	Addrs         []string  `json:"addrs"`
+	StorageMB     int       `json:"storage_mb"`
+	LoadPct       float64   `json:"load_pct"`
+	Version       string    `json:"version"`
+	RegisteredAt  time.Time `json:"registered_at"`
+	LastHeartbeat time.Time `json:"last_heartbeat"`
 }
 
 type LoginRequest struct {

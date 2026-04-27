@@ -35,8 +35,14 @@ func main() {
 		log.Fatalf("failed to init schema: %v", err)
 	}
 
+	relayRepo := repository.NewRelayRepository(db)
+	if err := relayRepo.InitSchema(); err != nil {
+		log.Fatalf("failed to init relay schema: %v", err)
+	}
+
 	authSvc := service.NewAuthService(userRepo)
-	authCtrl := controller.NewAuthController(authSvc)
+	relaySvc := service.NewRelayService(relayRepo)
+	authCtrl := controller.NewAuthController(authSvc, relaySvc)
 
 	r := router.SetupRouter(authCtrl, authSvc)
 
