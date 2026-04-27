@@ -16,23 +16,25 @@ import (
 )
 
 type Collection struct {
-	ID             int      `db:"id" json:"id"`
-	Username       string   `db:"username" json:"username"`
-	CollectionName string   `db:"collection_name" json:"collection_name"`
-	CurrentHash    *string  `db:"current_hash" json:"current_hash"`
-	Visibility     string   `db:"visibility" json:"visibility"`
-	Tags           []string `db:"tags" json:"tags"`
-	CreatedAt      string   `db:"created_at" json:"created_at"`
+	ID               int      `db:"id" json:"id"`
+	Username         string   `db:"username" json:"username"`
+	CollectionName   string   `db:"collection_name" json:"collection_name"`
+	CurrentHash      *string  `db:"current_hash" json:"current_hash"`
+	Visibility       string   `db:"visibility" json:"visibility"`
+	FollowRedirects  bool     `db:"follow_redirects" json:"follow_redirects"`
+	Tags             []string `db:"tags" json:"tags"`
+	CreatedAt        string   `db:"created_at" json:"created_at"`
 }
 
 type collectionRow struct {
-	ID             int
-	Username       string
-	CollectionName string
-	CurrentHash    *string
-	Visibility     string
-	Tags           sql.NullString
-	CreatedAt      string
+	ID              int
+	Username        string
+	CollectionName  string
+	CurrentHash     *string
+	Visibility      string
+	FollowRedirects bool
+	Tags            sql.NullString
+	CreatedAt       string
 }
 
 func (c *Collection) ScanRow(s Scanner, columns ...string) error {
@@ -53,7 +55,7 @@ type Scanner interface {
 func ScanCollection(scanner interface{ Scan(...interface{}) error }) (*Collection, error) {
 	var c Collection
 	var tagsStr sql.NullString
-	err := scanner.Scan(&c.ID, &c.Username, &c.CollectionName, &c.CurrentHash, &c.Visibility, &tagsStr, &c.CreatedAt)
+	err := scanner.Scan(&c.ID, &c.Username, &c.CollectionName, &c.CurrentHash, &c.Visibility, &c.FollowRedirects, &tagsStr, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}

@@ -19,17 +19,26 @@
 package router
 
 import (
+	"context"
+	"encoding/json"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/controller"
 	"peerdrive/internal/log"
+	"peerdrive/internal/model"
 	"peerdrive/internal/p2p_bt"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -72,6 +81,14 @@ func SetupRouter(
 		c.Next()
 	})
 
+	// Auth middleware — validates Bearer tokens via registration server.
+	// Sets "authenticated" and "username" in Gin context for downstream handlers.
+	// Anonymous requests (no token) pass through with authenticated=false.
+	if cfg.RegistrationServer != "" {
+		SetRegServer(cfg.RegistrationServer)
+		r.Use(AuthOptional())
+	}
+
 	controller.InitDownloader(downloader)
 	controller.InitP2PController(p2pSvc)
 	controller.InitFileController(service.NewFileService(cfg))
@@ -91,6 +108,57 @@ func SetupRouter(
 	dualSvc := service.NewDualP2PService(cfg, p2pSvc, btSvc)
 	controller.InitDualController(dualSvc)
 	controller.InitAnonController(service.NewAnonService(cfg))
+
+	// Initialize BitTorrent client for torrent/magnet downloads.
+	btClient := p2p_bt.NewBTClient(cfg.DownloadDir)
+	if btSvc != nil && btSvc.Server != nil {
+		p2p_bt.SetGlobalDHT(btSvc)
+	}
+	// When a torrent download completes, register files in peerdrive storage.
+	if cfg.StorageEnable {
+		btClient.SetOnComplete(func(infohash string, files []p2p_bt.CompletedFile) {
+			log.LogInfo("router: BT download complete infohash=%s files=%d", infohash, len(files))
+			for _, f := range files {
+				if f.SHA256 == "" {
+					continue
+				}
+				_ = repository.InsertFileMeta(&model.FileMeta{
+					Hash:     f.SHA256,
+					Size:     f.Size,
+					Filename: filepath.Base(f.Path),
+					Type:     repository.FileTypeBlob,
+				})
+				relPath := filepath.Join(f.SHA256[:2], f.SHA256)
+				_ = repository.InsertFileProvider(f.SHA256, "local", relPath)
+				// Copy to storage directory.
+				dataDir := filepath.Join(cfg.StorageDir, f.SHA256[:2])
+				_ = os.MkdirAll(dataDir, 0755)
+				destPath := filepath.Join(dataDir, f.SHA256)
+				input, err := os.Open(f.Path)
+				if err == nil {
+					output, err := os.Create(destPath)
+					if err == nil {
+						_, _ = io.Copy(output, input)
+						_ = output.Close()
+						log.LogInfo("router: registered BT file %s -> %s", f.SHA256, destPath)
+					}
+					_ = input.Close()
+				}
+			}
+		})
+	}
+	controller.InitBTClient(btClient)
+
+	// Initialize the universal multi-protocol downloader.
+	downloadTimeout := time.Duration(cfg.DownloadTimeoutSecs) * time.Second
+	uniDownloader := service.NewUniversalDownloader(
+		p2pSvc,
+		btSvc,
+		cfg.StorageDir,
+		cfg.DownloadOrder,
+		downloadTimeout,
+	)
+	controller.InitUniversalDownloader(uniDownloader)
 
 	// Create peer tracker and wire it into both the P2P service and
 	// controller handlers so that connections, transfers, and pings
@@ -117,6 +185,11 @@ func SetupRouter(
 		controller.InitPeerScanner(scanner)
 	}
 
+	// Bootstrap from registration server relay list.
+	if cfg.RegServerURL != "" && p2pSvc != nil && p2pSvc.IsEnabled() {
+		go bootstrapFromRelayList(cfg.RegServerURL, p2pSvc)
+	}
+
 	// Sync controller initialization
 	syncRepo := repository.NewSyncRepository()
 	syncSvc := service.NewSyncService(syncRepo, downloader)
@@ -124,6 +197,11 @@ func SetupRouter(
 
 	r.GET("/ping", controller.Ping)
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256)
+
+	// Universal multi-protocol download endpoints.
+	r.GET("/download/:hash", controller.UniversalDownload)
+	r.GET("/download/:hash/sources", controller.UniversalDownloadSources)
+	r.POST("/download/:hash/refresh", controller.UniversalDownloadRefresh)
 
 	// P2P routes (public)
 	p2p := r.Group("/p2p")
@@ -147,6 +225,19 @@ func SetupRouter(
 		p2p.POST("/bt/announce", controller.BTAnnounce)
 		p2p.POST("/bt/find", controller.BTFindProviders)
 
+		// BEP 44 (arbitrary DHT data storage)
+		p2p.POST("/bt/bep44/put", controller.BEP44Put)
+		p2p.POST("/bt/bep44/get", controller.BEP44Get)
+
+		// BEP 51 (infohash indexing)
+		p2p.GET("/bt/bep51/sample", controller.BEP51Sample)
+
+		// BitTorrent download routes (torrent files, magnet links)
+		p2p.POST("/bt/torrent", controller.BTTorrentUpload)
+		p2p.POST("/bt/magnet", controller.BTMagnetResolve)
+		p2p.GET("/bt/download/:infohash", controller.BTDownloadProgress)
+		p2p.GET("/bt/downloads", controller.BTDownloadList)
+
 		// Dual P2P (IPFS + BT DHT) routes
 		p2p.POST("/dual/announce", controller.DualAnnounce)
 		p2p.POST("/dual/find", controller.DualFindProviders)
@@ -169,6 +260,7 @@ func SetupRouter(
 		files.GET("", controller.ListFiles)
 		files.POST("/upload", controller.UploadFile)
 		files.POST("/register_local", controller.RegisterLocalFile)
+		files.POST("/register_url", controller.RegisterURL)
 		files.POST("/register_folder", controller.RegisterFolder)
 		files.GET("/verify/:hash", controller.VerifyFile)
 		files.GET("/browse", controller.BrowseDir)
@@ -250,4 +342,71 @@ func SetupRouter(
 	routes := r.Routes()
 	log.LogInfo("router: SetupRouter completed with %d routes", len(routes))
 	return r
+}
+
+// ──────────────────────────────────────────────
+//  Relay bootstrap helpers
+// ──────────────────────────────────────────────
+
+// bootstrapFromRelayList fetches the list of active relay nodes from the
+// registration server and attempts to connect to each one.  This allows
+// new nodes to discover and connect to publicly reachable relay nodes
+// without hardcoded bootstrap addresses.
+func bootstrapFromRelayList(regURL string, p2pSvc *service.P2PService) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(regURL + "/p2p/relay/list")
+	if err != nil {
+		log.LogWarn("router: relay list fetch failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	var listResp struct {
+		Relays []struct {
+			PeerID string   `json:"peer_id"`
+			Addrs  []string `json:"addrs"`
+		} `json:"relays"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
+		log.LogWarn("router: relay list decode failed: %v", err)
+		return
+	}
+
+	connected := 0
+	for _, relay := range listResp.Relays {
+		pid, err := peer.Decode(relay.PeerID)
+		if err != nil {
+			log.LogWarn("router: invalid relay peer id %s: %v", relay.PeerID, err)
+			continue
+		}
+
+		if pid == p2pSvc.Host.ID() {
+			continue
+		}
+
+		var maddrs []multiaddr.Multiaddr
+		for _, addrStr := range relay.Addrs {
+			maddr, err := multiaddr.NewMultiaddr(addrStr)
+			if err != nil {
+				continue
+			}
+			maddrs = append(maddrs, maddr)
+		}
+
+		if len(maddrs) == 0 {
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if err := p2pSvc.Host.Connect(ctx, peer.AddrInfo{ID: pid, Addrs: maddrs}); err != nil {
+			log.LogWarn("router: connect to relay %s failed: %v", relay.PeerID, err)
+		} else {
+			log.LogInfo("router: connected to relay %s", relay.PeerID)
+			connected++
+		}
+		cancel()
+	}
+
+	log.LogInfo("router: bootstrap from relay list completed (%d connected out of %d)",
+		connected, len(listResp.Relays))
 }

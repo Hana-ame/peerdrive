@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -18,10 +20,14 @@ import (
 
 var p2pSvc *service.P2PService
 var btSvc *p2p_bt.BTDHTService
+var btClient *p2p_bt.BTClient
 var dualSvc *service.DualP2PService
 
 var peerTracker *service.PeerTracker
 var peerScanner *service.PeerScanner
+
+var resumeMgr *service.ResumeManager
+var multiPeerDl *service.MultiPeerDownloader
 
 // InitPeerScanner injects the PeerScanner singleton into the controller
 // package so that handlers can query scanner stats.
@@ -38,6 +44,23 @@ func InitP2PController(svc *service.P2PService) {
 func InitBTController(svc *p2p_bt.BTDHTService) {
 	log.LogDebug("ctrl-p2p: InitBTController")
 	btSvc = svc
+}
+
+// InitResumeManager injects the ResumeManager for resume-able download endpoints.
+func InitResumeManager(mgr *service.ResumeManager) {
+	log.LogDebug("ctrl-p2p: InitResumeManager")
+	resumeMgr = mgr
+}
+
+// InitMultiPeerDownloader injects the MultiPeerDownloader for multi-peer download endpoints.
+func InitMultiPeerDownloader(mp *service.MultiPeerDownloader) {
+	log.LogDebug("ctrl-p2p: InitMultiPeerDownloader")
+	multiPeerDl = mp
+}
+
+func InitBTClient(c *p2p_bt.BTClient) {
+	log.LogDebug("ctrl-p2p: InitBTClient")
+	btClient = c
 }
 
 func InitDualController(svc *service.DualP2PService) {
@@ -590,4 +613,263 @@ func GetConnections(c *gin.Context) {
 		"last_scan_times": peerScanner.LastScanTimes(),
 	})
 	log.LogInfo("ctrl-p2p: GetConnections inbound=%d outbound=%d total=%d", inbound, outbound, inbound+outbound)
+}
+
+
+// --- BEP 44 (Arbitrary DHT Data Storage) ---
+
+// BEP44Put stores data in the BitTorrent DHT using BEP 44.
+//   POST /p2p/bt/bep44/put
+//   Request: {data: "<base64>", mutable: bool, salt: "<base64>?"}
+//   Response: {target: "<hex>", ...}
+func BEP44Put(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BEP44Put")
+	if btSvc == nil || btSvc.Server == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
+		return
+	}
+
+	var req struct {
+		Data    string `json:"data"`
+		Mutable bool   `json:"mutable"`
+		Salt    string `json:"salt"`
+		Key     string `json:"key"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: BEP44Put invalid request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	rawData, err := base64.StdEncoding.DecodeString(req.Data)
+	if err != nil {
+		log.LogWarn("ctrl-p2p: BEP44Put invalid base64: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid base64 data"})
+		return
+	}
+
+	if req.Mutable {
+		log.LogInfo("ctrl-p2p: BEP44Put mutable requested but requires key via API; returning stub")
+		c.JSON(http.StatusNotImplemented, gin.H{
+			"error":   "mutable put via API requires key management; use Go API directly",
+		})
+		return
+	}
+
+	// Immutable put.
+	target, err := btSvc.PutImmutable(rawData)
+	if err != nil {
+		log.LogError("ctrl-p2p: BEP44Put failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-p2p: BEP44Put immutable target=%x size=%d", target, len(rawData))
+	c.JSON(http.StatusOK, gin.H{
+		"target":  hex.EncodeToString(target[:]),
+		"size":    len(rawData),
+		"mutable": false,
+	})
+}
+
+// BEP44Get retrieves data from the BitTorrent DHT using BEP 44.
+//   POST /p2p/bt/bep44/get
+//   Request: {target: "<hex>"}
+//   Response: {data: "<base64>", ...}
+func BEP44Get(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BEP44Get")
+	if btSvc == nil || btSvc.Server == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
+		return
+	}
+
+	var req struct {
+		Target string `json:"target"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Target) != 40 {
+		log.LogWarn("ctrl-p2p: BEP44Get invalid target")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid target (expected 40-char hex)"})
+		return
+	}
+
+	raw, err := hex.DecodeString(req.Target)
+	if err != nil || len(raw) != 20 {
+		log.LogWarn("ctrl-p2p: BEP44Get bad hex: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid hex encoding"})
+		return
+	}
+	var target [20]byte
+	copy(target[:], raw)
+
+	data, err := btSvc.GetImmutable(target)
+	if err != nil {
+		log.LogError("ctrl-p2p: BEP44Get failed: %v", err)
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-p2p: BEP44Get target=%x size=%d", target, len(data))
+	c.JSON(http.StatusOK, gin.H{
+		"data": base64.StdEncoding.EncodeToString(data),
+		"size": len(data),
+	})
+}
+
+// --- BEP 51 (Infohash Indexing) ---
+
+// BEP51Sample returns discovered infohashes from the DHT using BEP 51.
+//   GET /p2p/bt/bep51/sample
+//   Response: {samples: ["<hex>", ...], count: int}
+func BEP51Sample(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BEP51Sample")
+	if btSvc == nil || btSvc.Server == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
+		return
+	}
+
+	samples, err := btSvc.DiscoverInfohashes(200)
+	if err != nil {
+		log.LogError("ctrl-p2p: BEP51Sample failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	hexSamples := make([]string, len(samples))
+	for i, s := range samples {
+		hexSamples[i] = hex.EncodeToString(s[:])
+	}
+
+	log.LogInfo("ctrl-p2p: BEP51Sample collected %d infohashes", len(samples))
+	c.JSON(http.StatusOK, gin.H{
+		"samples": hexSamples,
+		"count":   len(samples),
+	})
+}
+
+// --- BitTorrent Download Handlers ---
+
+// BTTorrentUpload accepts a .torrent file upload, parses it, and starts
+// downloading the torrent.
+//   POST /p2p/bt/torrent
+func BTTorrentUpload(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTTorrentUpload")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	file, header, err := c.Request.FormFile("torrent")
+	if err != nil {
+		log.LogWarn("ctrl-p2p: BTTorrentUpload missing torrent file: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing torrent file"})
+		return
+	}
+	defer file.Close()
+
+	data := make([]byte, header.Size)
+	if _, err := file.Read(data); err != nil {
+		log.LogError("ctrl-p2p: BTTorrentUpload read failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read torrent file"})
+		return
+	}
+
+	meta, err := p2p_bt.ParseTorrent(data)
+	if err != nil {
+		log.LogError("ctrl-p2p: BTTorrentUpload parse failed: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid torrent file: " + err.Error()})
+		return
+	}
+
+	if err := btClient.AddTorrent(meta); err != nil {
+		log.LogError("ctrl-p2p: BTTorrentUpload add torrent failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-p2p: BTTorrentUpload started %q (infohash=%s)", meta.Name, meta.InfoHashHex)
+	c.JSON(http.StatusOK, gin.H{
+		"infohash":  meta.InfoHashHex,
+		"name":      meta.Name,
+		"files":     len(meta.Files),
+		"total":     meta.TotalSize,
+		"pieces":    len(meta.Pieces),
+		"status":    "downloading",
+	})
+}
+
+// BTMagnetResolve accepts a magnet URI and starts downloading.
+//   POST /p2p/bt/magnet  {"uri": "magnet:?xt=urn:btih:..."}
+func BTMagnetResolve(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTMagnetResolve")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	var req struct {
+		URI string `json:"uri"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: BTMagnetResolve invalid request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	magnet, err := p2p_bt.ParseMagnet(req.URI)
+	if err != nil {
+		log.LogError("ctrl-p2p: BTMagnetResolve parse failed: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid magnet URI: " + err.Error()})
+		return
+	}
+
+	if err := btClient.AddMagnet(magnet); err != nil {
+		log.LogError("ctrl-p2p: BTMagnetResolve add magnet failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-p2p: BTMagnetResolve started %q (infohash=%s)", magnet.DisplayName, magnet.InfoHash)
+	c.JSON(http.StatusOK, gin.H{
+		"infohash":     magnet.InfoHash,
+		"display_name": magnet.DisplayName,
+		"trackers":     magnet.Trackers,
+		"status":       "downloading",
+	})
+}
+
+// BTDownloadProgress returns the download progress for a specific infohash.
+//   GET /p2p/bt/download/:infohash
+func BTDownloadProgress(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTDownloadProgress")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	infohash := c.Param("infohash")
+	status := btClient.GetDownload(infohash)
+	if status == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "download not found"})
+		return
+	}
+
+	log.LogInfo("ctrl-p2p: BTDownloadProgress %s: %s (%d/%d pieces)", infohash, status.Status, status.PiecesDone, status.PiecesTotal)
+	c.JSON(http.StatusOK, status)
+}
+
+// BTDownloadList returns all active and completed BT downloads.
+//   GET /p2p/bt/downloads
+func BTDownloadList(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTDownloadList")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	downloads := btClient.ListDownloads()
+	log.LogInfo("ctrl-p2p: BTDownloadList count=%d", len(downloads))
+	c.JSON(http.StatusOK, gin.H{
+		"downloads": downloads,
+		"count":     len(downloads),
+	})
 }

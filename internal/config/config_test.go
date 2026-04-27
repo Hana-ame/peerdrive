@@ -29,6 +29,8 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.TURNServer)
 	assert.Equal(t, "", cfg.TURNUser)
 	assert.Equal(t, "", cfg.TURNPass)
+	assert.Equal(t, "stun:stun.l.google.com:19302", cfg.WebRTCSTUNServer)
+	assert.Equal(t, "", cfg.WebRTCTURNServer)
 }
 
 func TestGetEnv_DefaultWhenNotSet(t *testing.T) {

@@ -33,7 +33,7 @@ func CreateCollectionWithVisibility(username, collectionName, visibility string)
 	if visibility == "" {
 		visibility = "public"
 	}
-	res, err := DB.Exec(`INSERT INTO collections (username, collection_name, visibility, tags) VALUES (?, ?, ?, '')`,
+	res, err := DB.Exec(`INSERT INTO collections (username, collection_name, visibility, tags, follow_redirects) VALUES (?, ?, ?, '', 1)`,
 		username, collectionName, visibility)
 	if err != nil {
 		return 0, err
@@ -47,8 +47,26 @@ func CreateCollectionWithTags(username, collectionName, visibility string, tags 
 		visibility = "public"
 	}
 	tagsJSON := model.MarshalTags(tags)
-	res, err := DB.Exec(`INSERT INTO collections (username, collection_name, visibility, tags) VALUES (?, ?, ?, ?)`,
+	res, err := DB.Exec(`INSERT INTO collections (username, collection_name, visibility, tags, follow_redirects) VALUES (?, ?, ?, ?, 1)`,
 		username, collectionName, visibility, tagsJSON)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	return int(id), err
+}
+
+func CreateCollectionWithFull(username, collectionName, visibility string, followRedirects bool, tags []string) (int, error) {
+	if visibility == "" {
+		visibility = "public"
+	}
+	fr := 0
+	if followRedirects {
+		fr = 1
+	}
+	tagsJSON := model.MarshalTags(tags)
+	res, err := DB.Exec(`INSERT INTO collections (username, collection_name, visibility, tags, follow_redirects) VALUES (?, ?, ?, ?, ?)`,
+		username, collectionName, visibility, tagsJSON, fr)
 	if err != nil {
 		return 0, err
 	}
@@ -85,7 +103,7 @@ func UpdateCurrentHash(collectionID int, hash string) error {
 }
 
 func ListCollections(username string) ([]model.Collection, error) {
-	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, tags, created_at FROM collections WHERE username = ? ORDER BY created_at DESC`, username)
+	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? ORDER BY created_at DESC`, username)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +120,7 @@ func ListCollections(username string) ([]model.Collection, error) {
 }
 
 func GetCollection(username, collectionName string) (*model.Collection, error) {
-	c, err := model.ScanCollection(DB.QueryRow(`SELECT id, username, collection_name, current_hash, visibility, tags, created_at FROM collections WHERE username = ? AND collection_name = ?`,
+	c, err := model.ScanCollection(DB.QueryRow(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? AND collection_name = ?`,
 		username, collectionName))
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -111,7 +129,7 @@ func GetCollection(username, collectionName string) (*model.Collection, error) {
 }
 
 func SearchCollections(query string) ([]model.Collection, error) {
-	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, tags, created_at FROM collections WHERE (username LIKE ? OR collection_name LIKE ?) AND visibility = 'public' ORDER BY created_at DESC`,
+	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE (username LIKE ? OR collection_name LIKE ?) AND visibility = 'public' ORDER BY created_at DESC`,
 		"%"+query+"%", "%"+query+"%")
 	if err != nil {
 		return nil, err

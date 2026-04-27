@@ -39,6 +39,11 @@ func InitFileController(svc *service.FileService) {
 // UploadFile godoc
 func UploadFile(c *gin.Context) {
 	log.LogDebug("ctrl-file: UploadFile")
+	// Enforce upload size limit based on auth status
+	maxBytes := fileSvc.MaxUploadBytes(c)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+	log.LogDebug("ctrl-file: UploadFile maxBytes=%d", maxBytes)
+
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		log.LogWarn("ctrl-file: UploadFile no file provided")
@@ -79,6 +84,43 @@ func UploadFile(c *gin.Context) {
 		"mime":           meta.MimeType,
 		"filename":       meta.Filename,
 		"already_exists": false,
+	})
+}
+
+// RegisterURL godoc
+// POST /files/register_url
+// Body: {"url": "https://...", "filename": "optional"}
+// Registers a file fetched from a URL. http.Get auto-follows 301/302 redirects.
+func RegisterURL(c *gin.Context) {
+	log.LogDebug("ctrl-file: RegisterURL")
+	var req struct {
+		URL      string `json:"url"`
+		Filename string `json:"filename"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-file: RegisterURL invalid request")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if req.URL == "" {
+		log.LogWarn("ctrl-file: RegisterURL empty url")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
+		return
+	}
+
+	meta, err := fileSvc.RegisterURL(req.URL, req.Filename)
+	if err != nil {
+		log.LogError("ctrl-file: RegisterURL %s failed: %v", req.URL, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-file: RegisterURL %s -> hash=%s size=%d", req.URL, meta.Hash, meta.Size)
+	c.JSON(http.StatusCreated, gin.H{
+		"hash":     meta.Hash,
+		"size":     meta.Size,
+		"mime":     meta.MimeType,
+		"filename": meta.Filename,
 	})
 }
 

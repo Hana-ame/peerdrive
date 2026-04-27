@@ -42,10 +42,24 @@ type Config struct {
 
 	RegServerURL string
 
+	MaxUploadBytes    int64 // 0 = unlimited
+	MaxUploadBytesAnon int64
+
 	STUNServer string
 	TURNServer string
 	TURNUser   string
 	TURNPass   string
+
+		WebRTCSTUNServer string
+		WebRTCTURNServer string
+
+	DownloadDir         string
+	MaxPeers            int
+	DownloadOrder       string
+	DownloadTimeoutSecs int
+
+	RelayStorageMB int
+	RelayVersion   string
 }
 
 func (c *Config) IsOriginAllowed(origin string) bool {
@@ -92,6 +106,8 @@ func Load() *Config {
 		P2PStaticRelays:     getEnv("PEERDRIVE_STATIC_RELAYS", ""),
 		P2PHolePunch:        getEnvBool("PEERDRIVE_HOLE_PUNCH", true),
 		RegServerURL:        getEnv("PEERDRIVE_REG_SERVER_URL", ""),
+			MaxUploadBytes:      getEnvInt64("PEERDRIVE_MAX_UPLOAD_BYTES", 100*1024*1024),     // 100MB default
+			MaxUploadBytesAnon:  getEnvInt64("PEERDRIVE_MAX_UPLOAD_ANON_BYTES", 10*1024*1024), // 10MB for anonymous
 		P2PPublicReachable:  getEnvBool("PEERDRIVE_PUBLIC_REACHABLE", false),
 		P2PAutoNAT:          getEnvBool("PEERDRIVE_AUTO_NAT", true),
 		P2PNATPortMap:       getEnvBool("PEERDRIVE_NAT_PORTMAP", false),
@@ -101,6 +117,18 @@ func Load() *Config {
 		TURNServer:          getEnv("PEERDRIVE_TURN_SERVER", ""),
 		TURNUser:            getEnv("PEERDRIVE_TURN_USER", ""),
 		TURNPass:            getEnv("PEERDRIVE_TURN_PASS", ""),
+
+		WebRTCSTUNServer: getEnv("PEERDRIVE_WEBRTC_STUN", "stun:stun.l.google.com:19302"),
+		WebRTCTURNServer: getEnv("PEERDRIVE_WEBRTC_TURN", ""),
+
+		DownloadDir: getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
+		MaxPeers:    getEnvInt("PEERDRIVE_MAX_PEERS", 8),
+
+		DownloadOrder:       getEnv("PEERDRIVE_DOWNLOAD_ORDER", "local,ipfs,btdht,http"),
+		DownloadTimeoutSecs: getEnvInt("PEERDRIVE_DOWNLOAD_TIMEOUT", 30),
+
+		RelayStorageMB: getEnvInt("PEERDRIVE_RELAY_STORAGE_MB", 0),
+		RelayVersion:   getEnv("PEERDRIVE_RELAY_VERSION", "peerdrive/1.0.0"),
 	}
 }
 
@@ -127,6 +155,26 @@ func getEnvBool(key string, defaultVal bool) bool {
 		b, err := strconv.ParseBool(val)
 		if err == nil {
 			return b
+		}
+	}
+	return defaultVal
+}
+
+func getEnvInt64(key string, defaultVal int64) int64 {
+	if val, ok := os.LookupEnv(key); ok {
+		n, err := strconv.ParseInt(val, 10, 64)
+		if err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultVal
+}
+
+func getEnvInt(key string, defaultVal int) int {
+	if val, ok := os.LookupEnv(key); ok {
+		n, err := strconv.Atoi(val)
+		if err == nil && n > 0 {
+			return n
 		}
 	}
 	return defaultVal

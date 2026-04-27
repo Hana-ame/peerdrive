@@ -16,22 +16,28 @@ func SetRegServer(url string) {
 }
 
 // AuthOptional validates JWT if present, sets username in context.
-// Routes behind this middleware get c.GetString("username") if authenticated.
+// Routes behind this middleware get c.GetBool("authenticated") and
+// c.GetString("username") if authenticated.
 func AuthOptional() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")
 		if auth == "" {
+			c.Set("authenticated", false)
 			c.Next()
 			return
 		}
 		parts := strings.SplitN(auth, " ", 2)
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+			c.Set("authenticated", false)
 			c.Next()
 			return
 		}
 		username := validateToken(parts[1])
 		if username != "" {
+			c.Set("authenticated", true)
 			c.Set("username", username)
+		} else {
+			c.Set("authenticated", false)
 		}
 		c.Next()
 	}

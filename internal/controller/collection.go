@@ -48,10 +48,11 @@ import (
 // @Router /collections [post]
 func CreateCollection(c *gin.Context) {
 	var req struct {
-		Username       string   `json:"username"`
-		CollectionName string   `json:"collection_name"`
-		Visibility     string   `json:"visibility"`
-		Tags           []string `json:"tags"`
+		Username        string   `json:"username"`
+		CollectionName  string   `json:"collection_name"`
+		Visibility      string   `json:"visibility"`
+		FollowRedirects *bool    `json:"follow_redirects"`
+		Tags            []string `json:"tags"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -59,7 +60,9 @@ func CreateCollection(c *gin.Context) {
 	}
 	var id int
 	var err error
-	if len(req.Tags) > 0 {
+	if req.FollowRedirects != nil {
+		id, err = repository.CreateCollectionWithFull(req.Username, req.CollectionName, req.Visibility, *req.FollowRedirects, req.Tags)
+	} else if len(req.Tags) > 0 {
 		id, err = repository.CreateCollectionWithTags(req.Username, req.CollectionName, req.Visibility, req.Tags)
 	} else {
 		id, err = repository.CreateCollectionWithVisibility(req.Username, req.CollectionName, req.Visibility)
@@ -492,9 +495,9 @@ func ListPublicCollections(c *gin.Context) {
 	var rows *sql.Rows
 	var err error
 	if q != "" {
-		rows, err = repository.DB.Query(`SELECT id, username, collection_name, current_hash, visibility, tags, created_at FROM collections WHERE visibility = 'public' AND (username LIKE ? OR collection_name LIKE ?) ORDER BY created_at DESC`, "%"+q+"%", "%"+q+"%")
+		rows, err = repository.DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE visibility = 'public' AND (username LIKE ? OR collection_name LIKE ?) ORDER BY created_at DESC`, "%"+q+"%", "%"+q+"%")
 	} else {
-		rows, err = repository.DB.Query(`SELECT id, username, collection_name, current_hash, visibility, tags, created_at FROM collections WHERE visibility = 'public' ORDER BY created_at DESC`)
+		rows, err = repository.DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE visibility = 'public' ORDER BY created_at DESC`)
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

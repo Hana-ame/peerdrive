@@ -9,12 +9,16 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
+
+	"github.com/gin-gonic/gin"
 )
 
 var (
@@ -25,12 +29,14 @@ var (
 type FileService struct {
 	storageDir    string
 	storageEnable bool
+	cfg           *config.Config
 }
 
 func NewFileService(cfg *config.Config) *FileService {
 	return &FileService{
 		storageDir:    cfg.StorageDir,
 		storageEnable: cfg.StorageEnable,
+		cfg:           cfg,
 	}
 }
 
@@ -139,6 +145,103 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 
 	log.LogInfo("file-svc: RegisterFolder %s registered %d files", folderPath, len(results))
 	return results, nil
+}
+
+// RegisterURL fetches a file from a URL, computes its SHA256, and registers it.
+// Stores with provider_type="http" and the URL as provider_path.
+// http.Get already follows 301/302 redirects by default.
+func (s *FileService) RegisterURL(url string, filename string) (*model.FileMeta, error) {
+	defer log.LogDuration("FileService.RegisterURL")()
+	log.LogDebug("file-svc: RegisterURL url=%s filename=%s", url, filename)
+
+	// 1. HTTP GET the URL (http.Get auto-follows 301/302)
+	resp, err := http.Get(url)
+	if err != nil {
+		log.LogError("file-svc: RegisterURL GET %s failed: %v", url, err)
+		return nil, fmt.Errorf("http get: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.LogWarn("file-svc: RegisterURL %s returned status %d", url, resp.StatusCode)
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	// 2. Read body and compute SHA256
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.LogError("file-svc: RegisterURL read body failed: %v", err)
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+
+	h := sha256.Sum256(body)
+	hash := hex.EncodeToString(h[:])
+	size := int64(len(body))
+
+	// Detect MIME type
+	mimeType := http.DetectContentType(body[:min(len(body), 512)])
+	// Prefer Content-Type response header when available
+	if ct := resp.Header.Get("Content-Type"); ct != "" && mimeType == "application/octet-stream" {
+		mimeType = ct
+	}
+
+	// Derive filename from Content-Disposition or URL if not provided
+	if filename == "" {
+		if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+			if _, f, ok := strings.Cut(cd, "filename="); ok {
+				filename = strings.Trim(f, "\" ")
+			}
+		}
+	}
+	if filename == "" {
+		filename = path.Base(url)
+	}
+
+	// 3. Insert into file_meta (skip if already exists)
+	existing, _ := repository.GetFileMeta(hash)
+	if existing == nil {
+		err = repository.InsertFileMeta(&model.FileMeta{
+			Hash:     hash,
+			Size:     size,
+			MimeType: mimeType,
+			Gziped:   false,
+			Filename: filename,
+			Type:     repository.FileTypeBlob,
+		})
+		if err != nil {
+			log.LogError("file-svc: RegisterURL insert meta failed: %v", err)
+			return nil, fmt.Errorf("insert meta: %w", err)
+		}
+	}
+
+	// Insert file_provider (type "http", path = url)
+	err = repository.InsertFileProvider(hash, "http", url)
+	if err != nil {
+		log.LogError("file-svc: RegisterURL insert provider failed: %v", err)
+		return nil, fmt.Errorf("insert provider: %w", err)
+	}
+
+	// 4. If storage enabled, save to content-addressed storage
+	if s.storageEnable {
+		relPath := hash[:2] + "/" + hash
+		fullPath := filepath.Join(s.storageDir, relPath)
+		os.MkdirAll(filepath.Dir(fullPath), 0755)
+		if err := os.WriteFile(fullPath, body, 0644); err != nil {
+			log.LogWarn("file-svc: RegisterURL save to storage failed (non-fatal): %v", err)
+		}
+	}
+
+	meta := &model.FileMeta{
+		Hash:     hash,
+		Size:     size,
+		MimeType: mimeType,
+		Gziped:   false,
+		Filename: filename,
+		Type:     repository.FileTypeBlob,
+	}
+
+	log.LogInfo("file-svc: RegisterURL %s -> hash=%s size=%d", url, hash, size)
+	return meta, nil
 }
 
 func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta, error) {
@@ -317,3 +420,13 @@ func copyFile(src, dst string) error {
 	}
 	return d.Sync()
 }
+
+// MaxUploadBytes returns the max upload size in bytes based on auth status.
+// Authenticated users get cfg.MaxUploadBytes, anonymous get cfg.MaxUploadBytesAnon.
+func (s *FileService) MaxUploadBytes(c *gin.Context) int64 {
+	if authed, exists := c.Get("authenticated"); exists && authed.(bool) {
+		return s.cfg.MaxUploadBytes
+	}
+	return s.cfg.MaxUploadBytesAnon
+}
+

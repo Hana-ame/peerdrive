@@ -1,9 +1,19 @@
+// Package service implements WebRTC signaling and room management for
+// browser-to-browser file transfers. The signaling hub acts as a lightweight
+// relay for SDP offers/answers and ICE candidates between peers that wish
+// to establish a direct WebRTC DataChannel connection.
+//
+// Room-based signaling: peers join a "room" identified by a file hash.
+// Once two peers are in the same room, the hub relays signaling messages
+// (offer, answer, ice) between them so they can establish a direct
+// RTCPeerConnection.
 package service
 
 import (
-	"log"
 	"net/http"
 	"sync"
+
+	"peerdrive/internal/log"
 
 	"github.com/gorilla/websocket"
 )
@@ -14,16 +24,16 @@ var upgrader = websocket.Upgrader{
 
 // SignalingMessage is the WS message format for WebRTC signaling.
 type SignalingMessage struct {
-	Type      string `json:"type"`
-	From      string `json:"from,omitempty"`
-	To        string `json:"to,omitempty"`
-	PeerID    string `json:"peer_id,omitempty"`
-	Token     string `json:"token,omitempty"`
-	SDP       string `json:"sdp,omitempty"`
-	Candidate string `json:"candidate,omitempty"`
-	Hash      string `json:"hash,omitempty"`
+	Type      string   `json:"type"`
+	From      string   `json:"from,omitempty"`
+	To        string   `json:"to,omitempty"`
+	PeerID    string   `json:"peer_id,omitempty"`
+	Token     string   `json:"token,omitempty"`
+	SDP       string   `json:"sdp,omitempty"`
+	Candidate string   `json:"candidate,omitempty"`
+	Hash      string   `json:"hash,omitempty"`
 	Peers     []string `json:"peers,omitempty"`
-	Message   string `json:"message,omitempty"`
+	Message   string   `json:"message,omitempty"`
 }
 
 type peerConn struct {
@@ -38,10 +48,12 @@ func (p *peerConn) send(msg SignalingMessage) error {
 	return p.Conn.WriteJSON(msg)
 }
 
-// SignalingHub manages WebRTC signaling between peers.
+// SignalingHub manages WebRTC signaling between peers, including room-based
+// groups identified by a file hash.
 type SignalingHub struct {
 	mu       sync.RWMutex
-	peers    map[string]*peerConn // peerID -> connection
+	peers    map[string]*peerConn  // peerID -> connection
+	rooms    map[string]map[string]struct{} // hash -> set of peerIDs in that room
 	files    map[string][]string  // hash -> []peerID (who has what file)
 }
 
@@ -49,6 +61,7 @@ type SignalingHub struct {
 func NewSignalingHub() *SignalingHub {
 	return &SignalingHub{
 		peers: make(map[string]*peerConn),
+		rooms: make(map[string]map[string]struct{}),
 		files: make(map[string][]string),
 	}
 }
@@ -71,11 +84,30 @@ func (h *SignalingHub) GetPeers() []string {
 	return peers
 }
 
+// RoomPeers returns the peer IDs in a given room.
+func (h *SignalingHub) RoomPeers(hash string) []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	room := h.rooms[hash]
+	result := make([]string, 0, len(room))
+	for pid := range room {
+		result = append(result, pid)
+	}
+	return result
+}
+
 // HandleConnection handles a new WebSocket signaling connection.
+// It reads JSON messages from the WebSocket and dispatches them:
+//
+//   - "register" / "join" — registers the peer and optionally joins a room
+//   - "offer", "answer", "ice", "ice_candidate" — relays to the target peer
+//   - "request_peers" — returns all connected peers
+//   - "room_peers" — returns peers in the same room
+//   - "announce_file" / "find_file" — file provider registry
 func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[signal] upgrade error: %v", err)
+		log.LogError("signal: upgrade error: %v", err)
 		return
 	}
 
@@ -84,7 +116,7 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 		if peer != nil && peer.PeerID != "" {
 			h.unregister(peer.PeerID)
 			h.broadcast(SignalingMessage{Type: "peer_left", PeerID: peer.PeerID})
-			log.Printf("[signal] peer left: %s", peer.PeerID)
+			log.LogInfo("signal: peer left: %s", peer.PeerID)
 		}
 		conn.Close()
 	}()
@@ -99,22 +131,73 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 		case "register":
 			peer = &peerConn{PeerID: msg.PeerID, Conn: conn}
 			h.register(msg.PeerID, peer)
-			msg.From = msg.PeerID
 			conn.WriteJSON(SignalingMessage{Type: "registered", PeerID: msg.PeerID})
 			h.broadcast(SignalingMessage{Type: "peer_joined", PeerID: msg.PeerID})
-			log.Printf("[signal] peer registered: %s", msg.PeerID)
+			log.LogInfo("signal: peer registered: %s", msg.PeerID)
+
+		case "join":
+			// Room-based join: peer joins a room identified by file hash.
+			if msg.PeerID == "" {
+				conn.WriteJSON(SignalingMessage{Type: "error", Message: "peer_id is required"})
+				continue
+			}
+			if msg.Hash == "" {
+				conn.WriteJSON(SignalingMessage{Type: "error", Message: "hash is required for join"})
+				continue
+			}
+			peer = &peerConn{PeerID: msg.PeerID, Conn: conn}
+			h.register(msg.PeerID, peer)
+			h.joinRoom(msg.PeerID, msg.Hash)
+			log.LogInfo("signal: peer %s joined room %s", msg.PeerID[:8], msg.Hash[:16])
+
+			// Notify the joining peer of existing room occupants.
+			roomPeers := h.RoomPeers(msg.Hash)
+			conn.WriteJSON(SignalingMessage{
+				Type:  "room_joined",
+				Hash:  msg.Hash,
+				Peers: roomPeers,
+				PeerID: msg.PeerID,
+			})
+
+			// Notify other room occupants of the new peer.
+			h.broadcastRoom(msg.Hash, SignalingMessage{
+				Type:   "peer_joined_room",
+				PeerID: msg.PeerID,
+				Hash:   msg.Hash,
+			}, msg.PeerID)
+
+		case "room_peers":
+			if msg.Hash == "" {
+				conn.WriteJSON(SignalingMessage{Type: "error", Message: "hash is required"})
+				continue
+			}
+			conn.WriteJSON(SignalingMessage{
+				Type:  "room_peers",
+				Hash:  msg.Hash,
+				Peers: h.RoomPeers(msg.Hash),
+			})
 
 		case "request_peers":
 			conn.WriteJSON(SignalingMessage{Type: "peers", Peers: h.GetPeers()})
 
-		case "offer", "answer", "ice_candidate":
+		case "offer", "answer":
 			h.relay(msg)
 
+		case "ice_candidate", "ice":
+			// Support both "ice_candidate" (legacy) and "ice" (new protocol).
+			relayMsg := msg
+			relayMsg.Type = "ice_candidate"
+			h.relay(relayMsg)
+
 		case "announce_file":
+			if msg.PeerID == "" || msg.Hash == "" {
+				conn.WriteJSON(SignalingMessage{Type: "error", Message: "peer_id and hash required"})
+				continue
+			}
 			h.mu.Lock()
 			h.files[msg.Hash] = appendIfMissing(h.files[msg.Hash], msg.PeerID)
 			h.mu.Unlock()
-			log.Printf("[signal] file announced: %s by %s", msg.Hash[:16], msg.PeerID)
+			log.LogInfo("signal: file announced: %s by %s", msg.Hash[:16], msg.PeerID[:8])
 
 		case "find_file":
 			h.mu.RLock()
@@ -125,6 +208,9 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 				Hash:  msg.Hash,
 				Peers: providers,
 			})
+
+		default:
+			log.LogDebug("signal: unknown message type: %s", msg.Type)
 		}
 	}
 }
@@ -138,6 +224,14 @@ func (h *SignalingHub) register(peerID string, pc *peerConn) {
 func (h *SignalingHub) unregister(peerID string) {
 	h.mu.Lock()
 	delete(h.peers, peerID)
+	// Remove from all rooms.
+	for hash, room := range h.rooms {
+		delete(room, peerID)
+		if len(room) == 0 {
+			delete(h.rooms, hash)
+		}
+	}
+	// Clean up file announcements.
 	for hash, peers := range h.files {
 		filtered := make([]string, 0)
 		for _, p := range peers {
@@ -150,11 +244,21 @@ func (h *SignalingHub) unregister(peerID string) {
 	h.mu.Unlock()
 }
 
+func (h *SignalingHub) joinRoom(peerID, hash string) {
+	h.mu.Lock()
+	if h.rooms[hash] == nil {
+		h.rooms[hash] = make(map[string]struct{})
+	}
+	h.rooms[hash][peerID] = struct{}{}
+	h.mu.Unlock()
+}
+
 func (h *SignalingHub) relay(msg SignalingMessage) {
 	h.mu.RLock()
 	target, ok := h.peers[msg.To]
 	h.mu.RUnlock()
 	if !ok {
+		log.LogDebug("signal: relay target %s not found", msg.To)
 		return
 	}
 	msg.From = msg.PeerID // the sender is the peer who sent this
@@ -164,8 +268,23 @@ func (h *SignalingHub) relay(msg SignalingMessage) {
 func (h *SignalingHub) broadcast(msg SignalingMessage) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for _, peer := range h.peers {
-		peer.send(msg)
+	for _, p := range h.peers {
+		p.send(msg)
+	}
+}
+
+// broadcastRoom sends a message to all peers in a room except the sender.
+func (h *SignalingHub) broadcastRoom(hash string, msg SignalingMessage, excludePeerID string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	room := h.rooms[hash]
+	for pid := range room {
+		if pid == excludePeerID {
+			continue
+		}
+		if p, ok := h.peers[pid]; ok {
+			p.send(msg)
+		}
 	}
 }
 

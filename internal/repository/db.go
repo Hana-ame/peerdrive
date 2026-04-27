@@ -121,7 +121,19 @@ func InitDB(dbPath string) error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
-	`
+
+
+		CREATE TABLE IF NOT EXISTS download_progress (
+			hash TEXT PRIMARY KEY,
+			total_size INTEGER DEFAULT 0,
+			received_size INTEGER DEFAULT 0,
+			last_chunk INTEGER DEFAULT 0,
+			chunks_total INTEGER DEFAULT 0,
+			chunks_done INTEGER DEFAULT 0,
+			peers_used TEXT DEFAULT '',
+			started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);	`
 
 	if _, err := DB.Exec(schema); err != nil {
 		return err
@@ -131,6 +143,7 @@ func InitDB(dbPath string) error {
 	DB.Exec(`ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`)
 	DB.Exec(`ALTER TABLE collections ADD COLUMN visibility TEXT DEFAULT 'public'`)
 	DB.Exec(`ALTER TABLE collections ADD COLUMN tags TEXT DEFAULT ''`)
+	DB.Exec(`ALTER TABLE collections ADD COLUMN follow_redirects INTEGER DEFAULT 1`)
 	InitShareTable()
 	return nil
 }

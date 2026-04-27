@@ -60,6 +60,12 @@ func main() {
 		log.LogInfo("main: libp2p node started, PeerID=%s, addrs=%v", id, addrs)
 	}
 
+	// 启动中继注册（如果配置了注册服务器 URL）
+	if cfg.RegServerURL != "" && p2pSvc.IsEnabled() {
+		registry := service.NewRelayRegistry(p2pSvc, cfg.RegServerURL, cfg.RelayStorageMB, cfg.RelayVersion)
+		registry.Start()
+	}
+
 	// 初始化存储
 	log.LogInfo("main: initializing provider manager and downloader")
 	providerMgr := provider.NewManager(storageDir)
