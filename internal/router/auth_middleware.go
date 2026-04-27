@@ -1,3 +1,5 @@
+// Package router 提供 Gin 认证中间件。AuthOptional 允许匿名请求通过（authenticated=false），
+// AuthRequired 拒绝无有效令牌的请求。令牌通过注册服务器 /auth/whoami 验证。
 package router
 
 import (

@@ -14,6 +14,7 @@ import (
 
 var anonSvc *service.AnonService
 
+// InitAnonController 注入 AnonService 实例供匿名集合处理函数使用。
 func InitAnonController(svc *service.AnonService) {
 	anonSvc = svc
 }

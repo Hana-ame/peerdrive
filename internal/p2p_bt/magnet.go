@@ -1,3 +1,4 @@
+// Magnet URI 解析器 — 解析 magnet:?xt=urn:btih:... 格式的链接，支持 40 字符 hex 和 32 字符 base32。
 package p2p_bt
 
 import (

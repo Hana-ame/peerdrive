@@ -1,3 +1,4 @@
+// FileService 处理文件上传、URL 注册、本地文件注册/批量注册、文件验证/删除、目录遍历。
 package service
 
 import (

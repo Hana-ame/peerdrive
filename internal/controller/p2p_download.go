@@ -1,3 +1,4 @@
+// P2P 下载控制器 — 断点续传、多源并行下载的 HTTP 端点。
 package controller
 
 import (

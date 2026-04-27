@@ -1,3 +1,4 @@
+// AuthService 处理用户注册、登录、登出和 authkey 验证，使用 bcrypt 密码哈希。
 package service
 
 import (

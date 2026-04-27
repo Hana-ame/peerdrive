@@ -23,6 +23,7 @@ const (
 
 var DB *sql.DB
 
+// InitDB 初始化 SQLite 数据库连接并执行全部建表 DDL，包括 file_meta、file_providers、collections 等七张表。
 func InitDB(dbPath string) error {
 	var err error
 	DB, err = sql.Open("sqlite3", dbPath)

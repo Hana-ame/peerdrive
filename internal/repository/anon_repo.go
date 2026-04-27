@@ -15,10 +15,12 @@ import (
 
 var anonStorageDir string
 
+// SetAnonStorageDir 设置匿名集合的默认存储目录路径。
 func SetAnonStorageDir(dir string) {
 	anonStorageDir = dir
 }
 
+// SaveCollection 将匿名集合序列化为 JSON，写入 content-addressed 存储，返回 SHA256 hash。
 func SaveCollection(coll *model.AnonCollection, storageDir string) (string, error) {
 	if storageDir == "" {
 		storageDir = anonStorageDir
@@ -57,6 +59,7 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 	return hashStr, nil
 }
 
+// GetAnonCollectionByHash 从 content-addressed 存储中读取并反序列化匿名集合。
 func GetAnonCollectionByHash(hash, storageDir string) (*model.AnonCollection, error) {
 	if storageDir == "" {
 		storageDir = anonStorageDir
@@ -76,6 +79,7 @@ func GetAnonCollectionByHash(hash, storageDir string) (*model.AnonCollection, er
 	return &coll, nil
 }
 
+// ListAnonCollections 返回所有已注册的匿名集合摘要（含名称预览和标签），按创建时间倒序。
 func ListAnonCollections(storageDir string) ([]model.AnonCollectionSummary, error) {
 	if storageDir == "" {
 		storageDir = anonStorageDir

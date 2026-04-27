@@ -1,3 +1,4 @@
+// DualP2PService 统一封装 IPFS/libp2p DHT 和 BitTorrent DHT，提供双网络 announce 和 find providers 操作。
 package service
 
 import (

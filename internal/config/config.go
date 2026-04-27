@@ -1,3 +1,5 @@
+// Package config 从环境变量加载全部配置项（端口、存储目录、P2P、中继、WebRTC、WebDAV 等）。
+// Load() 读取 PEERDRIVE_* 系列环境变量并返回 *Config。
 package config
 
 import (
@@ -65,6 +67,7 @@ type Config struct {
 	ForwardEnable bool
 }
 
+// IsOriginAllowed 检查给定的 Origin 是否在允许列表中，支持通配符（*）和子域名通配（*.example.com）。
 func (c *Config) IsOriginAllowed(origin string) bool {
 	if c.AllowedOrigins == "*" || c.AllowedOrigins == "" {
 		return true
@@ -84,6 +87,7 @@ func (c *Config) IsOriginAllowed(origin string) bool {
 	return false
 }
 
+// DefaultRootPath 返回当前操作系统的根路径（Windows 为 C:\，其他为 /）。
 func DefaultRootPath() string {
 	if runtime.GOOS == "windows" {
 		return "C:\\"
@@ -91,6 +95,7 @@ func DefaultRootPath() string {
 	return "/"
 }
 
+// Load 读取 PEERDRIVE_* 环境变量并返回完整配置结构体，未设置的项使用默认值。
 func Load() *Config {
 	return &Config{
 		Port:                getEnv("PORT", "3000"),

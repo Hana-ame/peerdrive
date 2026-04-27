@@ -1,3 +1,4 @@
+// WebSocket 文件传输中枢 — 通过 WebSocket 连接实现文件请求/响应的广播和点对点传输。
 package service
 
 import (

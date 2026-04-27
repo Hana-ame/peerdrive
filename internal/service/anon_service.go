@@ -1,3 +1,4 @@
+// Package service 提供 Peerdrive 业务逻辑层，包括匿名集合管理、下载、P2P 传输、文件注册等功能。
 package service
 
 import (

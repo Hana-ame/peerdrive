@@ -1,3 +1,4 @@
+// 分享链接仓库 — share_links 表的 CRUD 操作，创建带随机 token 的链接、按 token 查询（检查过期）、列出所有有效链接。
 package repository
 
 import (
@@ -8,6 +9,7 @@ import (
 	"peerdrive/internal/model"
 )
 
+// CreateShare 创建一条新的分享链接记录，生成随机 token 并设置 30 天过期时间。
 func CreateShare(hash, shareType, filename string) (*model.ShareLink, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -34,6 +36,7 @@ func CreateShare(hash, shareType, filename string) (*model.ShareLink, error) {
 	}, nil
 }
 
+// GetShareByToken 按 token 查询未过期的分享链接。
 func GetShareByToken(token string) (*model.ShareLink, error) {
 	var s model.ShareLink
 	var exp any
@@ -49,6 +52,7 @@ func GetShareByToken(token string) (*model.ShareLink, error) {
 	return &s, nil
 }
 
+// ListShares 返回所有未过期的分享链接，按创建时间倒序排列，最多 100 条。
 func ListShares() ([]model.ShareLink, error) {
 	rows, err := DB.Query(`SELECT id, token, hash, type, COALESCE(filename,''), created_at, expires_at
 		FROM share_links WHERE expires_at IS NULL OR expires_at > datetime('now')
@@ -73,6 +77,7 @@ func ListShares() ([]model.ShareLink, error) {
 	return shares, nil
 }
 
+// InitShareTable 创建 share_links 表（如不存在）。
 func InitShareTable() {
 	DB.Exec(`CREATE TABLE IF NOT EXISTS share_links (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,

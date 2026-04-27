@@ -1,3 +1,4 @@
+// User 及 RegisterRequest/LoginRequest/AuthResponse 定义用户认证相关的数据结构和 API 请求/响应格式。
 package model
 
 import "time"

@@ -1,3 +1,4 @@
+// ConnectionManager 管理 P2P 对端连接，支持心跳检测、自动重连和断线重连。
 package service
 
 import (

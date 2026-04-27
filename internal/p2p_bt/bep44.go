@@ -1,3 +1,4 @@
+// Package p2p_bt 实现 BitTorrent DHT 的 BEP 44 协议，支持不可变和可变数据的存取。
 package p2p_bt
 
 import (

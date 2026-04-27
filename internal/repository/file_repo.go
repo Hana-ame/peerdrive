@@ -11,6 +11,7 @@ import (
 
 // ─── file_meta ──────────────────────────────────────────
 
+// GetFileMeta 按 hash 查询文件元数据；未找到时返回 (nil, nil)。
 func GetFileMeta(hash string) (*model.FileMeta, error) {
 	var m model.FileMeta
 	err := DB.QueryRow(
@@ -26,6 +27,7 @@ func GetFileMeta(hash string) (*model.FileMeta, error) {
 	return &m, nil
 }
 
+// InsertFileMeta 插入一条新的文件元数据记录。
 func InsertFileMeta(meta *model.FileMeta) error {
 	_, err := DB.Exec(
 		`INSERT INTO file_meta (hash, size, mime_type, gziped, filename, type) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -36,6 +38,7 @@ func InsertFileMeta(meta *model.FileMeta) error {
 
 // ─── file_providers ─────────────────────────────────────
 
+// GetFileProviders 查询指定 hash 的所有可用 provider，优先返回 local 类型。
 func GetFileProviders(hash string) ([]model.FileProvider, error) {
 	rows, err := DB.Query(
 		`SELECT id, hash, provider_type, path, available FROM file_providers WHERE hash = ? AND available = 1 ORDER BY CASE provider_type WHEN 'local' THEN 0 ELSE 1 END ASC, id ASC`,
@@ -56,6 +59,7 @@ func GetFileProviders(hash string) ([]model.FileProvider, error) {
 	return out, nil
 }
 
+// InsertFileProvider 为指定 hash 添加一个新 provider（如 local/http）。
 func InsertFileProvider(hash, providerType, path string) error {
 	_, err := DB.Exec(
 		`INSERT INTO file_providers (hash, provider_type, path) VALUES (?, ?, ?)`,
@@ -64,11 +68,13 @@ func InsertFileProvider(hash, providerType, path string) error {
 	return err
 }
 
+// MarkProviderUnavailable 将指定 provider 标记为不可用。
 func MarkProviderUnavailable(id int) error {
 	_, err := DB.Exec(`UPDATE file_providers SET available = 0 WHERE id = ?`, id)
 	return err
 }
 
+// ListAllFiles 返回所有 blob 类型文件列表，支持按 time/path/name/type/size 排序。
 func ListAllFiles(sortBy string) ([]model.FileListItem, error) {
 	orderCol := "m.created_at"
 	switch sortBy {

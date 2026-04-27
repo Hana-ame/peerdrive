@@ -220,6 +220,9 @@ func SetupRouter(
 		p2p.GET("/peers", controller.GetPeers)
 		p2p.GET("/discovered", controller.GetDiscoveredPeers)
 		p2p.GET("/connections", controller.GetConnections)
+		p2p.GET("/peers/detail", controller.GetPeersDetail)
+		p2p.GET("/peers/detail/:peer_id", controller.GetPeerDetail)
+		p2p.GET("/stats", controller.GetP2PStats)
 		p2p.GET("/ping/:peer_id", controller.PingPeer)
 		p2p.POST("/connect", controller.ConnectPeer)
 		p2p.POST("/announce", controller.AnnounceHash)
@@ -228,6 +231,7 @@ func SetupRouter(
 		p2p.POST("/push", controller.PushSync)
 		p2p.POST("/request-file", controller.RequestFile)
 		p2p.GET("/ws/info", controller.WSInfo)
+		p2p.GET("/webrtc/info", controller.WebRTCInfoHandler(cfg))
 
 		// BitTorrent DHT routes
 		p2p.GET("/bt/status", controller.BTDHTStatus)

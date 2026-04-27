@@ -1,3 +1,4 @@
+// MultiPeerDownloader 从多个 P2P 源（IPFS + BT DHT）并行下载文件分片，支持断点续传和哈希校验。
 package service
 
 import (

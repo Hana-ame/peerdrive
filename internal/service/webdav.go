@@ -1,3 +1,4 @@
+// WebDAVService 提供 WebDAV 协议访问存储目录，支持文件管理器挂载为网络驱动器。
 package service
 
 import (

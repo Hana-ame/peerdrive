@@ -11,6 +11,7 @@ import (
 	"peerdrive/internal/model"
 )
 
+// CreateTask 创建一条新的异步任务记录，状态初始为 pending。
 func CreateTask(taskType, params string) (int, error) {
 	res, err := DB.Exec(`INSERT INTO transfer_tasks (type, status, params) VALUES (?, 'pending', ?)`, taskType, params)
 	if err != nil {
@@ -20,11 +21,13 @@ func CreateTask(taskType, params string) (int, error) {
 	return int(id), nil
 }
 
+// UpdateTaskStatus 更新异步任务的状态和结果，自动更新 updated_at。
 func UpdateTaskStatus(id int, status, result string) error {
 	_, err := DB.Exec(`UPDATE transfer_tasks SET status = ?, result = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, status, result, id)
 	return err
 }
 
+// GetTask 按 ID 查询异步任务详情；未找到时返回 (nil, nil)。
 func GetTask(id int) (*model.TransferTask, error) {
 	var t model.TransferTask
 	err := DB.QueryRow(`SELECT id, type, status, params, result, created_at, updated_at FROM transfer_tasks WHERE id = ?`, id).

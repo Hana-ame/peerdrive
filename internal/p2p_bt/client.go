@@ -1,3 +1,4 @@
+// BTClient 管理 BitTorrent 下载任务，支持 .torrent 文件和 magnet URI，通过 DHT 发现 peers 并下载分片。
 package p2p_bt
 
 import (

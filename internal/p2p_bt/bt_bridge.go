@@ -1,3 +1,4 @@
+// BTBridge 将 Peerdrive 文件系统与 BitTorrent DHT 桥接，支持文件的 announce 和 HTTP 获取。
 package p2p_bt
 
 import (

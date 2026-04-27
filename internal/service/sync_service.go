@@ -1,3 +1,4 @@
+// SyncService 将集合文件同步到本地磁盘，支持路径过滤（include/exclude 模式匹配）和同步状态跟踪。
 package service
 
 import (

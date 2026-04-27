@@ -1,3 +1,4 @@
+// BitTorrent 线缆协议实现 — 握手、消息读取/发送、单文件分片下载（含 SHA1 校验）。
 package p2p_bt
 
 import (

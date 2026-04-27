@@ -1,3 +1,4 @@
+// Package p2p_bt 的日志函数直接委托给 peerdrive/internal/log 包。
 package p2p_bt
 
 import "peerdrive/internal/log"

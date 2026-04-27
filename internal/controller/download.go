@@ -10,6 +10,7 @@
 package controller
 
 import (
+	"fmt"
 	"context"
 	"net/http"
 	"time"
@@ -25,24 +26,22 @@ import (
 var downloader *service.Downloader
 var universalDownloader *service.UniversalDownloader
 
+// InitDownloader 注入 Downloader 实例供下载处理函数使用。
 func InitDownloader(s *service.Downloader) {
 	downloader = s
 }
 
-// InitUniversalDownloader injects the universal downloader singleton.
+// InitUniversalDownloader 注入 UniversalDownloader 实例供多协议下载端点使用。
 func InitUniversalDownloader(d *service.UniversalDownloader) {
 	universalDownloader = d
 }
 
-// DownloadBySHA256 handles GET /sha256sum/:sha256 and is the legacy endpoint.
-// When the universal downloader is available it delegates to it and adds the
-// X-Protocol response header; otherwise it falls back to the original logic.
+// DownloadBySHA256 处理 GET /sha256sum/:sha256，优先使用 UniversalDownloader 多协议下载，否则回退到原始逻辑。
 func DownloadBySHA256(c *gin.Context) {
 	DownloadBySHA256Internal(c, c.Param("sha256"))
 }
 
-// DownloadBySHA256Internal is the shared implementation used by the legacy
-// endpoint and by other controllers that need to resolve a hash to a stream.
+// DownloadBySHA256Internal 是 DownloadBySHA256 的内部实现，也供其他控制器按 hash 获取文件流。
 func DownloadBySHA256Internal(c *gin.Context, hash string) {
 	if !hashutil.IsValidSHA256(hash) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256 format"})
@@ -75,6 +74,20 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 		if meta != nil && meta.Type == repository.FileTypeAnonCollection {
 			c.Header("X-Peerdrive-Collection", "true")
 		}
+		// Handle Range requests for chunked download
+		if rng := c.GetHeader("Range"); rng != "" {
+			var start, end int64
+			if _, err := fmt.Sscanf(rng, "bytes=%d-%d", &start, &end); err == nil && start >= 0 && end >= start {
+				total := int64(len(data))
+				if end == 0 || end >= total {
+					end = total - 1
+				}
+				c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
+				c.Status(http.StatusPartialContent)
+				c.Writer.Write(data[start : end+1])
+				return
+			}
+		}
 		c.Data(http.StatusOK, "application/octet-stream", data)
 		return
 	}
@@ -106,7 +119,7 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 
 // ─── Universal download endpoint ───────────────────────────────────────────
 
-// UniversalDownload handles GET /download/:hash.
+// UniversalDownload 处理 GET /download/:hash，使用通用下载器跨协议获取文件。
 func UniversalDownload(c *gin.Context) {
 	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
@@ -129,7 +142,7 @@ func UniversalDownload(c *gin.Context) {
 	c.Data(http.StatusOK, "application/octet-stream", data)
 }
 
-// UniversalDownloadSources handles GET /download/:hash/sources.
+// UniversalDownloadSources 处理 GET /download/:hash/sources，列出所有可用协议源。
 func UniversalDownloadSources(c *gin.Context) {
 	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
@@ -148,8 +161,7 @@ func UniversalDownloadSources(c *gin.Context) {
 	c.JSON(http.StatusOK, sources)
 }
 
-// UniversalDownloadRefresh handles POST /download/:hash/refresh.
-// It clears the local cache and re-runs the full download pipeline.
+// UniversalDownloadRefresh 处理 POST /download/:hash/refresh，清除本地缓存后重新执行下载流水线。
 func UniversalDownloadRefresh(c *gin.Context) {
 	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {

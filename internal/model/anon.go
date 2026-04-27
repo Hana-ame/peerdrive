@@ -1,3 +1,5 @@
+// Package model 定义匿集合（AnonCollection）及其条目的数据结构。
+// 匿名集合通过 SHA256 内容寻址存储，支持版本递增和标签。
 package model
 
 import "time"
@@ -15,6 +17,7 @@ type AnonCollection struct {
 	CreatedAt    string                `json:"created_at"`
 }
 
+// NewAnonCollection 创建一个新的匿名集合，初始版本为 1，创建时间为当前 UTC 时间。
 func NewAnonCollection(name string, entries []AnonCollectionEntry, tags []string) *AnonCollection {
 	if entries == nil {
 		entries = []AnonCollectionEntry{}

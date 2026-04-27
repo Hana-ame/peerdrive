@@ -1,3 +1,5 @@
+// Package controller 提供所有 HTTP API 处理函数。每个文件对应一组相关端点，
+// 通过独立的 Init* 函数注入服务依赖。
 package controller
 
 import (

@@ -1,3 +1,5 @@
+// P2PService 封装 libp2p host、DHT、mDNS 发现和流式文件交换协议。
+// 支持 announce、find providers、fetch file、sync files 及 WebSocket 文件请求。
 package service
 
 import (

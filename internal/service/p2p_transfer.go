@@ -1,3 +1,4 @@
+// ChunkedTransfer 实现 P2P 分片传输协议，支持并行分片下载、进度回调和服务端分片请求处理。
 package service
 
 import (

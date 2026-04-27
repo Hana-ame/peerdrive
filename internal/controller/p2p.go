@@ -1,3 +1,4 @@
+// Package controller 提供 P2P 网络相关 HTTP 处理函数，包括节点信息、对端管理、BT DHT、双网络、端口转发等端点。
 package controller
 
 import (
@@ -31,8 +32,7 @@ var forwardSvc *service.ForwardService
 var resumeMgr *service.ResumeManager
 var multiPeerDl *service.MultiPeerDownloader
 
-// InitPeerScanner injects the PeerScanner singleton into the controller
-// package so that handlers can query scanner stats.
+// InitPeerScanner 注入 PeerScanner 实例供 P2P 扫描状态查询使用。
 func InitPeerScanner(s *service.PeerScanner) {
 	log.LogDebug("ctrl-p2p: InitPeerScanner")
 	peerScanner = s
@@ -53,13 +53,13 @@ func InitBTController(svc *p2p_bt.BTDHTService) {
 	btSvc = svc
 }
 
-// InitResumeManager injects the ResumeManager for resume-able download endpoints.
+// InitResumeManager 注入 ResumeManager 实例供断点续传端点使用。
 func InitResumeManager(mgr *service.ResumeManager) {
 	log.LogDebug("ctrl-p2p: InitResumeManager")
 	resumeMgr = mgr
 }
 
-// InitMultiPeerDownloader injects the MultiPeerDownloader for multi-peer download endpoints.
+// InitMultiPeerDownloader 注入 MultiPeerDownloader 实例供多源并行下载端点使用。
 func InitMultiPeerDownloader(mp *service.MultiPeerDownloader) {
 	log.LogDebug("ctrl-p2p: InitMultiPeerDownloader")
 	multiPeerDl = mp
@@ -175,8 +175,8 @@ func AnnounceHash(c *gin.Context) {
 		return
 	}
 	if err := p2pSvc.AnnounceHash(req.Hash); err != nil {
-		log.LogError("ctrl-p2p: AnnounceHash %s failed: %v", req.Hash, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.LogWarn("ctrl-p2p: AnnounceHash %s partial: %v", req.Hash, err)
+		c.JSON(http.StatusOK, gin.H{"status": "announced locally", "warning": err.Error()})
 		return
 	}
 	log.LogInfo("ctrl-p2p: AnnounceHash %s successful", req.Hash)

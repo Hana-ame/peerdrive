@@ -1,3 +1,4 @@
+// ShareLink 和 CreateShareRequest 定义文件/合集分享链接的数据库映射与 API 请求结构。
 package model
 
 import "time"

@@ -31,6 +31,7 @@ import (
 
 var fileSvc *service.FileService
 
+// InitFileController 注入 FileService 实例供文件管理处理函数使用。
 func InitFileController(svc *service.FileService) {
 	log.LogDebug("ctrl-file: InitFileController")
 	fileSvc = svc

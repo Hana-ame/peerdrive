@@ -37,6 +37,7 @@ type collectionRow struct {
 	CreatedAt       string
 }
 
+// ScanRow 从数据库扫描器读取集合字段，填充 Collection 结构体。
 func (c *Collection) ScanRow(s Scanner, columns ...string) error {
 	var r collectionRow
 	v := &r
@@ -52,6 +53,7 @@ type Scanner interface {
 	Scan(...interface{}) error
 }
 
+// ScanCollection 从数据库行扫描器读取一条集合记录，返回 Collection 指针。
 func ScanCollection(scanner interface{ Scan(...interface{}) error }) (*Collection, error) {
 	var c Collection
 	var tagsStr sql.NullString
@@ -68,6 +70,7 @@ func ScanCollection(scanner interface{ Scan(...interface{}) error }) (*Collectio
 	return &c, nil
 }
 
+// MarshalTags 将标签字符串切片序列化为 JSON 字符串；入参为 nil 时返回空字符串。
 func MarshalTags(tags []string) string {
 	if tags == nil {
 		return ""

@@ -19,6 +19,7 @@ import (
 	"peerdrive/internal/model"
 )
 
+// CreateCollection 为指定用户创建一个新集合，返回集合 ID。
 func CreateCollection(username, collectionName string) (int, error) {
 	res, err := DB.Exec(`INSERT INTO collections (username, collection_name, tags) VALUES (?, ?, '')`,
 		username, collectionName)
@@ -29,6 +30,7 @@ func CreateCollection(username, collectionName string) (int, error) {
 	return int(id), err
 }
 
+// CreateCollectionWithVisibility 创建集合并指定可见性（public/unlisted/private）。
 func CreateCollectionWithVisibility(username, collectionName, visibility string) (int, error) {
 	if visibility == "" {
 		visibility = "public"
@@ -42,6 +44,7 @@ func CreateCollectionWithVisibility(username, collectionName, visibility string)
 	return int(id), err
 }
 
+// CreateCollectionWithTags 创建集合并设置标签和可见性。
 func CreateCollectionWithTags(username, collectionName, visibility string, tags []string) (int, error) {
 	if visibility == "" {
 		visibility = "public"
@@ -56,6 +59,7 @@ func CreateCollectionWithTags(username, collectionName, visibility string, tags 
 	return int(id), err
 }
 
+// CreateCollectionWithFull 创建集合并指定全部属性（可见性、重定向跟随、标签）。
 func CreateCollectionWithFull(username, collectionName, visibility string, followRedirects bool, tags []string) (int, error) {
 	if visibility == "" {
 		visibility = "public"
@@ -74,6 +78,7 @@ func CreateCollectionWithFull(username, collectionName, visibility string, follo
 	return int(id), err
 }
 
+// UpdateCollectionTags 替换集合的标签列表。
 func UpdateCollectionTags(username, collectionName string, tags []string) error {
 	tagsJSON := model.MarshalTags(tags)
 	_, err := DB.Exec(`UPDATE collections SET tags = ? WHERE username = ? AND collection_name = ?`,
@@ -81,12 +86,14 @@ func UpdateCollectionTags(username, collectionName string, tags []string) error 
 	return err
 }
 
+// SetCollectionVisibility 更新集合的可见性属性。
 func SetCollectionVisibility(username, collectionName, visibility string) error {
 	_, err := DB.Exec(`UPDATE collections SET visibility = ? WHERE username = ? AND collection_name = ?`,
 		visibility, username, collectionName)
 	return err
 }
 
+// GetOrCreateCollection 按用户名和集合名查询集合，不存在则自动创建。
 func GetOrCreateCollection(username, collectionName string) (int, error) {
 	var id int
 	err := DB.QueryRow(`SELECT id FROM collections WHERE username = ? AND collection_name = ?`,
@@ -97,11 +104,13 @@ func GetOrCreateCollection(username, collectionName string) (int, error) {
 	return id, err
 }
 
+// UpdateCurrentHash 更新集合的 current_hash 指针（指向最新的匿名集合快照）。
 func UpdateCurrentHash(collectionID int, hash string) error {
 	_, err := DB.Exec(`UPDATE collections SET current_hash = ? WHERE id = ?`, hash, collectionID)
 	return err
 }
 
+// ListCollections 查询指定用户的所有集合，按创建时间倒序排列。
 func ListCollections(username string) ([]model.Collection, error) {
 	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? ORDER BY created_at DESC`, username)
 	if err != nil {
@@ -119,6 +128,7 @@ func ListCollections(username string) ([]model.Collection, error) {
 	return cols, nil
 }
 
+// GetCollection 按用户名和集合名查询单个集合；未找到时返回 (nil, nil)。
 func GetCollection(username, collectionName string) (*model.Collection, error) {
 	c, err := model.ScanCollection(DB.QueryRow(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? AND collection_name = ?`,
 		username, collectionName))
@@ -128,6 +138,7 @@ func GetCollection(username, collectionName string) (*model.Collection, error) {
 	return c, err
 }
 
+// SearchCollections 在公开集合中按用户名或集合名模糊搜索。
 func SearchCollections(query string) ([]model.Collection, error) {
 	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE (username LIKE ? OR collection_name LIKE ?) AND visibility = 'public' ORDER BY created_at DESC`,
 		"%"+query+"%", "%"+query+"%")
@@ -146,6 +157,7 @@ func SearchCollections(query string) ([]model.Collection, error) {
 	return cols, nil
 }
 
+// AddCollectionEntry 插入或更新集合中的一条 path->fileHash 映射（upsert 语义）。
 func AddCollectionEntry(collectionID int, path, fileHash string) error {
 	_, err := DB.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash) VALUES (?, ?, ?)
 		ON CONFLICT(collection_id, path) DO UPDATE SET file_hash = excluded.file_hash`,
@@ -153,12 +165,14 @@ func AddCollectionEntry(collectionID int, path, fileHash string) error {
 	return err
 }
 
+// RemoveCollectionEntry 从集合中删除指定 path 的条目。
 func RemoveCollectionEntry(collectionID int, path string) error {
 	_, err := DB.Exec(`DELETE FROM collection_entries WHERE collection_id = ? AND path = ?`,
 		collectionID, path)
 	return err
 }
 
+// GetCollectionEntry 查询集合中指定 path 的条目；未找到时返回 (nil, nil)。
 func GetCollectionEntry(collectionID int, path string) (*model.CollectionEntry, error) {
 	var e model.CollectionEntry
 	err := DB.QueryRow(`SELECT id, collection_id, path, file_hash FROM collection_entries WHERE collection_id = ? AND path = ?`,
@@ -172,6 +186,7 @@ func GetCollectionEntry(collectionID int, path string) (*model.CollectionEntry, 
 	return &e, nil
 }
 
+// ListCollectionEntries 查询集合中的所有条目。
 func ListCollectionEntries(collectionID int) ([]model.CollectionEntry, error) {
 	rows, err := DB.Query(`SELECT id, collection_id, path, file_hash FROM collection_entries WHERE collection_id = ?`, collectionID)
 	if err != nil {
@@ -189,6 +204,7 @@ func ListCollectionEntries(collectionID int) ([]model.CollectionEntry, error) {
 	return entries, nil
 }
 
+// CreateVersion 为集合创建新版本快照记录，返回版本 ID 和版本号。
 func CreateVersion(collectionID int, commitMsg string, parentVersionID *int) (int, int, error) {
 	var maxVer int
 	err := DB.QueryRow(`SELECT COALESCE(MAX(version_number), 0) FROM collection_versions WHERE collection_id = ?`,
@@ -212,12 +228,14 @@ func CreateVersion(collectionID int, commitMsg string, parentVersionID *int) (in
 	return int(id), newVer, nil
 }
 
+// SnapshotVersionEntries 将集合当前条目快照复制到指定版本的 version_entries 表中。
 func SnapshotVersionEntries(versionID, collectionID int) error {
 	_, err := DB.Exec(`INSERT INTO version_entries (version_id, path, file_hash) SELECT ?, path, file_hash FROM collection_entries WHERE collection_id = ?`,
 		versionID, collectionID)
 	return err
 }
 
+// GetVersionLog 返回集合的版本历史，按版本号倒序排列。
 func GetVersionLog(collectionID int) ([]model.CollectionVersion, error) {
 	rows, err := DB.Query(`SELECT id, collection_id, version_number, commit_message, created_at, parent_version_id FROM collection_versions WHERE collection_id = ? ORDER BY version_number DESC`, collectionID)
 	if err != nil {
@@ -235,6 +253,7 @@ func GetVersionLog(collectionID int) ([]model.CollectionVersion, error) {
 	return versions, nil
 }
 
+// GetVersionEntries 查询指定版本快照中的全部条目列表。
 func GetVersionEntries(versionID int) ([]model.VersionEntry, error) {
 	rows, err := DB.Query(`SELECT id, version_id, path, file_hash FROM version_entries WHERE version_id = ?`, versionID)
 	if err != nil {
@@ -252,6 +271,7 @@ func GetVersionEntries(versionID int) ([]model.VersionEntry, error) {
 	return entries, nil
 }
 
+// RestoreVersionEntries 在事务内将集合条目回滚到指定版本的快照内容（先删后插）。
 func RestoreVersionEntries(versionID, collectionID int) error {
 	entries, err := GetVersionEntries(versionID)
 	if err != nil {

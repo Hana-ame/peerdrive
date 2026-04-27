@@ -1,3 +1,4 @@
+// 分享链接控制器 — 创建、访问和列出分享链接（文件或合集）。
 package controller
 
 import (
@@ -9,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// CreateShare 处理 POST /shares，创建文件或集合的分享链接。
 func CreateShare(c *gin.Context) {
 	var req struct {
 		Hash     string `json:"hash" binding:"required"`
@@ -40,6 +42,7 @@ func CreateShare(c *gin.Context) {
 	})
 }
 
+// AccessShare 处理 GET /s/:token，按 token 访问分享链接并重定向到文件或集合。
 func AccessShare(c *gin.Context) {
 	token := c.Param("token")
 	if token == "" {
@@ -63,6 +66,7 @@ func AccessShare(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/sha256sum/"+share.Hash)
 }
 
+// ListShares 处理 GET /shares，列出所有未过期的分享链接。
 func ListShares(c *gin.Context) {
 	shares, err := repository.ListShares()
 	if err != nil {

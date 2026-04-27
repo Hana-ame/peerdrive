@@ -1,3 +1,4 @@
+// ResumeManager 处理断点续传，通过 SQLite 持久化下载进度，支持暂停/恢复/取消操作。
 package service
 
 import (

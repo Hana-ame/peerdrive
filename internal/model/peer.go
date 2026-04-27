@@ -1,3 +1,4 @@
+// PeerInfo 描述 P2P 对端节点的连接信息、传输统计和方向。
 package model
 
 import "time"

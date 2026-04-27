@@ -1,3 +1,4 @@
+// 本地同步控制器 — 将集合文件保存到本地磁盘并查询同步状态。
 package controller
 
 import (
