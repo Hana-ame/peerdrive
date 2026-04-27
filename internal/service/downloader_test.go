@@ -33,13 +33,13 @@ func TestDownloader_LocalFile(t *testing.T) {
 	repository.InsertFileProvider(hashStr, "local", relPath)
 
 	d := NewDownloader(pMgr, nil, dir)
-	reader, _, storageOk, err := d.GetFileStream(hashStr)
+	reader, fn, _, err := d.GetFileStream(hashStr)
 	if err != nil {
 		t.Fatalf("GetFileStream failed: %v", err)
 	}
 	defer reader.Close()
-	if !storageOk {
-		t.Error("expected storageOk=true")
+	if fn == "" {
+		t.Error("expected non-empty filename")
 	}
 }
 
