@@ -32,7 +32,7 @@ export default function VersionLog({ username, collName, triggerRefresh }) {
           versions.map((v, idx) => (
             <div key={v.id} className="bg-gray-700/50 p-3 rounded border border-gray-600 relative group hover:border-blue-500 transition-colors">
               <div className="flex justify-between items-start mb-1">
-                <span className="text-blue-400 font-bold text-sm">v{v.version_number}</span>
+                <span className="text-blue-400 text-xs">v{v.version_number}</span>
                 <span className="text-gray-500 text-xs">{v.created_at ? new Date(v.created_at).toLocaleDateString() : ''}</span>
               </div>
               <p className="text-sm text-white mb-2 truncate">{v.commit_message || v.message || 'No message'}</p>

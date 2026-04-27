@@ -159,14 +159,19 @@ export default function FileManager() {
       try {
         const filename = path.split('/').pop();
         const res = await api.registerLocalFile(path, filename);
-        entries.push({ path: filename, hash: res.hash || path });
+        entries.push({ path: filename, hash: res.hash });
       } catch (e) { alert(`注册失败: ${path}: ${e.message}`); return; }
     }
     setShowFileBrowser(false);
     setSelectedFiles({});
     loadFiles();
-    if (regTarget === 'collection' && entries.length > 0) {
-      navigate('/anon/create', { state: { draftFrom: { entries, friendlyName: entries[0].path || 'collection' } } });
+    // Create anonymous collection directly
+    if (entries.length > 0) {
+      try {
+        const name = entries[0].path || 'collection';
+        const coll = await api.createAnonCollection(entries, name);
+        navigate(`/anon/collections/${coll.hash}`);
+      } catch (e) { alert(`创建合集失败: ${e.message}`); }
     }
   };
 
@@ -396,25 +401,29 @@ export default function FileManager() {
             </div>
           ) : viewMode === 'list' ? (
             <div>
-              <div className="flex items-center text-xs text-gray-500 px-6 py-2 border-b border-gray-800">
-                <input type="checkbox" checked={filtered.length > 0 && filtered.every(f => selected[f.hash])}
-                  onChange={selectAllFiltered}
-                  className="rounded mr-3 shrink-0" />
-                <span className="flex-1">文件名</span>
-                <span className="w-20 text-right mr-6">大小</span>
-                <span className="w-20 text-right mr-6">类型</span>
-                <span className="w-36 text-right mr-8">时间</span>
+              <div className="flex items-center text-xs text-gray-500 px-6 py-3 border-b border-gray-800 sticky top-0 bg-gray-900 z-10">
+                <label className="flex items-center gap-2 cursor-pointer mr-3 shrink-0">
+                  <input type="checkbox" checked={filtered.length > 0 && filtered.every(f => selected[f.hash])}
+                    onChange={selectAllFiltered}
+                    className="rounded accent-cyan-500 w-5 h-5 cursor-pointer" />
+                </label>
+                <span className="flex-1 ml-1">文件名</span>
+                <span className="w-24 text-right mr-8">大小</span>
+                <span className="w-24 text-right mr-8">类型</span>
+                <span className="w-40 text-right mr-10">时间</span>
               </div>
               {filtered.map(f => (
-                <div key={f.hash} className="flex items-center px-6 py-2.5 border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors group">
-                  <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded mr-3 shrink-0 accent-cyan-500 w-5 h-5" />
-                  <span className="mr-3 text-lg shrink-0">{extIcon(f.mime_type)}</span>
-                  <a href={api.getDownloadUrl(f.hash)} className="text-sm text-blue-300 truncate flex-1 min-w-0 hover:text-blue-100 hover:underline cursor-pointer" title={`下载 ${f.filename}`}>{f.filename}</a>
-                  <span className="text-xs text-gray-400 w-20 text-right shrink-0 mr-6">{formatSize(f.size)}</span>
-                  <span className="text-xs text-gray-500 w-20 text-right shrink-0 mr-6 overflow-hidden text-ellipsis whitespace-nowrap">{(f.mime_type || '').split(';')[0].split('/').pop() || '-'}</span>
-                  <span className="text-xs text-gray-500 w-36 text-right shrink-0 mr-4">{(f.created_at || '').replace('T', ' ').substring(0, 16)}</span>
+                <div key={f.hash} onClick={() => toggleFile(f.hash)} className={`flex items-center px-6 py-3 border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors group cursor-pointer ${selected[f.hash] ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : ''}`}>
+                  <label className="flex items-center gap-2 cursor-pointer mr-3 shrink-0" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded accent-cyan-500 w-5 h-5 cursor-pointer" />
+                  </label>
+                  <span className="mr-3 text-xl shrink-0">{extIcon(f.mime_type)}</span>
+                  <a href={api.getDownloadUrl(f.hash)} onClick={e => e.stopPropagation()} className="text-sm text-blue-300 truncate flex-1 min-w-0 hover:text-blue-100 hover:underline cursor-pointer" title={`下载 ${f.filename}`}>{f.filename}</a>
+                  <span className="text-sm text-gray-400 w-24 text-right shrink-0 mr-8">{formatSize(f.size)}</span>
+                  <span className="text-xs text-gray-500 w-24 text-right shrink-0 mr-8 overflow-hidden text-ellipsis whitespace-nowrap">{(f.mime_type || '').split(';')[0].split('/').pop() || '-'}</span>
+                  <span className="text-xs text-gray-500 w-40 text-right shrink-0 mr-6">{(f.created_at || '').replace('T', ' ').substring(0, 16)}</span>
                   <div className="flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                    <button onClick={() => handleCreateFromFile(f)} className="text-[10px] bg-teal-600 hover:bg-teal-500 px-2 py-0.5 rounded whitespace-nowrap">合集</button>
+                    <button onClick={(e) => { e.stopPropagation(); handleCreateFromFile(f); }} className="text-[10px] bg-teal-600 hover:bg-teal-500 px-2 py-0.5 rounded whitespace-nowrap">创建合集</button>
                   </div>
                 </div>
               ))}

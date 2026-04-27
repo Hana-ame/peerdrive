@@ -24,6 +24,9 @@ const TYPE_OPTS = [
   { v: '', l: '全部' }, { v: 'image/', l: '图片' }, { v: 'video/', l: '视频' },
   { v: 'audio/', l: '音频' }, { v: 'text/', l: '文本' },
 ];
+const COLL_SORT_OPTS = [
+  { v: 'time', l: '时间' }, { v: 'name', l: '名称' }, { v: 'count', l: '文件数' },
+];
 
 function fileIcon(m) {
   if (!m) return '📄';
@@ -55,26 +58,41 @@ export default function AnonCreator() {
   const [sort, setSort] = useState('time');
   const [search, setSearch] = useState('');
   const [typeF, setTypeF] = useState('');
-  const [srcTab, setSrcTab] = useState('local');
-  const [localViewMode, setLocalViewMode] = useState('tree');
+  const [srcTab, setSrcTab] = useState('timeline');
+  const [localViewMode, setLocalViewMode] = useState('timeline');
   const [collections, setCollections] = useState([]);
+  const [collSort, setCollSort] = useState('time');
+  const [collSearch, setCollSearch] = useState('');
+  const [collTagFilter, setCollTagFilter] = useState('');
   const [collSource, setCollSource] = useState(null);
+  const [collViewPath, setCollViewPath] = useState('');
   const [fname, setFname] = useState('');
   const [tags, setTags] = useState('');
   const [localDirPath, setLocalDirPath] = useState('');
   const [entries, setEntries] = useState([]);
-  const [openHash, setOpenHash] = useState('');
-  const [savedHash, setSavedHash] = useState('');
   const [saving, setSaving] = useState(false);
   const lastClick = useRef(0);
 
+  // Raw filesystem browse state
+  const [sysPath, setSysPath] = useState('/');
+  const [sysEntries, setSysEntries] = useState([]);
+  const [sysLoading, setSysLoading] = useState(false);
+
   useEffect(() => { loadFiles(); loadCollections(); }, [sort]);
+  useEffect(() => {
+    if (srcTab === 'system') {
+      setSysLoading(true);
+      api.browseDir(sysPath).then(res => {
+        res.sort((a,b) => (a.is_dir === b.is_dir) ? a.name.localeCompare(b.name) : (a.is_dir ? -1 : 1));
+        setSysEntries(res);
+      }).catch(() => setSysEntries([])).finally(() => setSysLoading(false));
+    }
+  }, [srcTab, sysPath]);
   useEffect(() => {
     if (navState.forkFrom) {
       const c = navState.forkFrom;
       setEntries(c.entries || []);
       setFname((c.friendly_name || '') + ' (fork)');
-      setOpenHash(navState.sourceHash || '');
       nav('/anon/create', { replace: true });
     } else if (navState.draftFrom) {
       setEntries(navState.draftFrom.entries || []);
@@ -84,14 +102,12 @@ export default function AnonCreator() {
       const c = navState.editFrom;
       setEntries(c.entries || []);
       setFname(c.friendly_name || '');
-      setOpenHash(navState.savedHash || '');
-      setSavedHash(navState.savedHash || '');
       nav('/anon/create', { replace: true });
     }
   }, []);
   useEffect(() => {
-    setPageContext({ type: 'anonCreator', fileCount: files.length, entryCount: entries.length, friendlyName: fname, openHash: openHash ? openHash.substring(0, 16) : '' });
-  }, [files, entries, fname, openHash]);
+    setPageContext({ type: 'anonCreator', fileCount: files.length, entryCount: entries.length, friendlyName: fname });
+  }, [files, entries, fname]);
 
   const loadFiles = async () => {
     setFLoading(true);
@@ -115,7 +131,7 @@ export default function AnonCreator() {
     setEntries(prev => prev.map(e => e.path === oldPath ? { ...e, path: newPath } : e));
   };
 
-  const handleMint = async () => {
+  const handleSave = async () => {
     const valid = entries.filter(e => e.path?.trim() && e.hash);
     if (!valid.length) return alert('请先添加文件');
     if (!fname.trim()) {
@@ -129,30 +145,20 @@ export default function AnonCreator() {
       }
     }
     setSaving(true);
-    const oldHash = savedHash;
     try {
       const res = await api.createAnonCollection(valid, fname.trim(), tags.split(/[,;]/).map(t => t.trim()).filter(Boolean));
-      setSavedHash(res.hash); setOpenHash(res.hash);
       loadCollections();
       nav(`/anon/collections/${res.hash}`);
-      if (oldHash) api.deleteFile(oldHash).catch(() => {});
     } catch (err) { alert(`创建失败: ${err.message}`); }
     setSaving(false);
   };
-  const handleCommit = async () => {
-    if (!savedHash) return handleMint();
-    const valid = entries.filter(e => e.path?.trim() && e.hash);
-    const oldHash = savedHash;
-    try {
-      const res = await api.commitAnonCollection(oldHash, valid.map(e => ({ path: e.path, hash: e.hash })));
-      setSavedHash(res.hash); setOpenHash(res.hash);
-      loadCollections();
-      nav(`/anon/collections/${res.hash}`);
-      api.deleteFile(oldHash).catch(() => {});
-    } catch (err) { alert(`提交失败: ${err.message}`); }
-  };
+
   const loadCollAsSource = async (hash) => {
-    try { setCollSource(await api.getAnonCollection(hash)); } catch { alert('无法加载合集'); }
+    try {
+      const c = await api.getAnonCollection(hash);
+      setCollSource(c);
+      setCollViewPath('');
+    } catch { alert('无法加载合集'); }
   };
 
   const filtered = files.filter(f => {
@@ -160,9 +166,35 @@ export default function AnonCreator() {
     if (typeF && !(f.mime_type || '').startsWith(typeF)) return false;
     return true;
   });
-  const collFiltered = collSource?.entries?.filter(e =>
-    !search || (e.path || '').toLowerCase().includes(search.toLowerCase())
-  ) || [];
+
+  // filter collection source entries by current view path (breadcrumb navigation)
+  const collDirPrefix = collViewPath ? collViewPath + '/' : '';
+  const collSubDirs = new Set();
+  const collFiles = [];
+  if (collSource?.entries) {
+    for (const e of collSource.entries) {
+      const rel = e.path.startsWith(collDirPrefix) ? e.path.slice(collDirPrefix.length) : null;
+      if (rel === null) continue;
+      const slash = rel.indexOf('/');
+      if (slash === -1) collFiles.push(e);
+      else if (rel.slice(0, slash)) collSubDirs.add(rel.slice(0, slash));
+    }
+  }
+
+  // filtered collection list
+  const filteredCollections = collections.filter(c => {
+    if (collSearch && !(c.friendly_name || c.name_preview || '').toLowerCase().includes(collSearch.toLowerCase())) return false;
+    if (collTagFilter && !(c.tags || []).some(t => t.toLowerCase().includes(collTagFilter.toLowerCase()))) return false;
+    return true;
+  }).sort((a, b) => {
+    switch (collSort) {
+      case 'name': return (a.friendly_name || a.name_preview || '').localeCompare(b.friendly_name || b.name_preview || '');
+      case 'count': return (b.entry_count || 0) - (a.entry_count || 0);
+      default: return (b.created_at || '').localeCompare(a.created_at || '');
+    }
+  });
+
+  const allCollTags = [...new Set(collections.flatMap(c => c.tags || []))].sort();
 
   const onSplitMouseDown = (e) => {
     e.preventDefault(); setDragging(true);
@@ -172,189 +204,286 @@ export default function AnonCreator() {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
-  const inDraft = (path, hash) => entries.some(e => e.path === path && e.hash === hash);
+
+  const onDragStartFile = (e, f) => {
+    const payload = JSON.stringify({
+      hash: f.hash || '',
+      path: f.filename || f.name || '',
+      name: f.filename || f.name || '',
+      mime_type: f.mime_type || '',
+      size: f.size || 0,
+      sysPath: f.sysPath || f.path || '',
+    });
+    e.dataTransfer.setData('text/plain', payload);
+    e.dataTransfer.setData('application/peerdrive-file', payload);
+    e.dataTransfer.effectAllowed = 'copy';
+  };
 
   const entryActions = {
     onRemove: removeEntry,
     onRename: renameEntry,
     onNewFolder: (name) => addEntry('', name + '/'),
-    onDrop: (data) => {
+    onDrop: async (data) => {
       const d = data.targetDir || '';
       const n = data.name || data.path || 'untitled';
-      addEntry(data.hash || '', d ? `${d}/${n}` : n, data.mime_type || '', data.size || 0);
+      const filePath = d ? `${d}/${n}` : n;
+      let h = data.hash;
+      if (!h && data.sysPath) {
+        try {
+          const res = await api.registerLocalFile(data.sysPath, n);
+          h = res.hash;
+        } catch (e) { console.error('drop register fail:', e); return; }
+      }
+      if (h) addEntry(h, filePath, data.mime_type || '', data.size || 0);
     },
   };
 
   return (
     <div className={`flex flex-1 overflow-hidden h-full bg-gray-950 ${dragging ? 'select-none' : ''}`}>
+      {/* LEFT PANEL — file sources */}
       <div style={{ width: `${split}%` }} className="h-full flex flex-col border-r border-gray-700">
-        <div className="h-12 flex items-center px-3 border-b border-gray-800 shrink-0 gap-2">
-          <div className="flex bg-gray-800 rounded">
-            <button onClick={() => setSrcTab('local')} className={`px-4 py-1.5 text-sm rounded ${srcTab === 'local' ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>本地文件</button>
-            <button onClick={() => setSrcTab('collection')} className={`px-4 py-1.5 text-sm rounded ${srcTab === 'collection' ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>已有合集</button>
-          </div>
-          <div className="flex-1" />
-          <span className="text-sm text-gray-600">{srcTab === 'local' ? filtered.length : collFiltered.length} 项</span>
+        {/* 4-tab flat bar */}
+        <div className="flex bg-gray-800 rounded mx-2 mt-2 shrink-0">
+          <button onClick={() => setSrcTab('timeline')} className={`flex-1 px-2 py-1.5 text-xs rounded ${srcTab === 'timeline' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>🕐 时间线</button>
+          <button onClick={() => setSrcTab('registered')} className={`flex-1 px-2 py-1.5 text-xs rounded ${srcTab === 'registered' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>📁 已注册</button>
+          <button onClick={() => { setSrcTab('system'); setSysPath('/'); }} className={`flex-1 px-2 py-1.5 text-xs rounded ${srcTab === 'system' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>🖥️ 本机</button>
+          <button onClick={() => setSrcTab('collection')} className={`flex-1 px-2 py-1.5 text-xs rounded ${srcTab === 'collection' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>📦 合集</button>
         </div>
 
-        {srcTab === 'collection' && !collSource && (
-          <div className="flex-1 flex flex-col">
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索合集..." className="w-full bg-gray-800 text-sm px-3 py-2 border-b border-gray-800 focus:outline-none focus:border-blue-600" />
+        {/* === TIMELINE TAB === */}
+        {srcTab === 'timeline' && (
+          <>
+            <div className="p-2 border-b border-gray-800 shrink-0 space-y-1.5">
+              <div className="flex gap-1">{SORT_OPTS.map(o => (<button key={o.v} onClick={() => setSort(o.v)} className={`flex-1 text-sm px-2 py-1.5 rounded ${sort===o.v?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>))}</div>
+              <div className="flex gap-1">{TYPE_OPTS.map(o => (<button key={o.v} onClick={() => setTypeF(o.v)} className={`flex-1 text-sm px-2 py-1.5 rounded ${typeF===o.v?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>))}</div>
+            </div>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文件名..." className="w-full bg-gray-800 text-sm px-3 py-2 border-b border-gray-800 focus:outline-none focus:border-blue-600" />
+            <span className="text-xs text-gray-600 px-3 py-1">{filtered.length} 个文件</span>
             <div className="flex-1 overflow-y-auto">
-              {collections.length === 0 ? <p className="p-4 text-gray-600 text-sm">暂无历史合集</p> :
-                collections.filter(c => !search || (c.friendly_name||c.name_preview||'').toLowerCase().includes(search.toLowerCase()) || (c.hash||'').toLowerCase().includes(search.toLowerCase()))
-                .map(c => (
+              {filtered.length === 0 ? <p className="p-4 text-gray-600 text-sm">无匹配文件</p> :
+                (() => {
+                  const sorted = [...filtered].sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+                  let lastDate = '';
+                  return sorted.map(f => {
+                    const d = f.created_at ? f.created_at.split('T')[0] : '';
+                    const showDate = d !== lastDate;
+                    lastDate = d;
+                    return <div key={f.hash}>
+                      {showDate && <div className="px-4 py-2 text-xs text-gray-500 bg-gray-900/50 sticky top-0">{d}</div>}
+                      <div draggable onDragStart={(e) => onDragStartFile(e, f)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group">
+                        <a href={api.getDownloadUrl(f.hash)} target="_blank" rel="noreferrer" className="text-lg">{fileIcon(f.mime_type)}</a>
+                        <span className="text-blue-300 truncate flex-1 font-mono text-xs">{f.filename}</span>
+                        <span className="text-gray-500 text-xs shrink-0">{fmtSize(f.size)}</span>
+                        <button onClick={() => addEntry(f.hash,f.filename,f.mime_type,f.size)} className="text-blue-400 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 shrink-0">+</button>
+                      </div>
+                    </div>;
+                  });
+                })()
+              }
+            </div>
+          </>
+        )}
+
+        {/* === REGISTERED DIR TAB === */}
+        {srcTab === 'registered' && (
+          <>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文件路径..." className="w-full bg-gray-800 text-sm px-3 py-2 border-b border-gray-800 focus:outline-none focus:border-blue-600" />
+            <span className="text-xs text-gray-600 px-3 py-1">{filtered.length} 个文件</span>
+            <div className="flex-1 overflow-y-auto">
+              {( () => {
+                const prefix = localDirPath ? localDirPath + '/' : '';
+                const dirs = new Set();
+                const localFiles = [];
+                for (const f of filtered) {
+                  const rel = (f.provider_path || f.filename || '').replace(/^\//, '');
+                  const rest = rel.startsWith(prefix) ? rel.slice(prefix.length) : null;
+                  if (rest === null) continue;
+                  const slash = rest.indexOf('/');
+                  if (slash === -1) localFiles.push(f);
+                  else if (rest.slice(0, slash)) dirs.add(rest.slice(0, slash));
+                }
+                const sortedDirs = Array.from(dirs).sort();
+                if (sortedDirs.length===0 && localFiles.length===0) return <p className="p-4 text-gray-600 text-sm">此目录为空</p>;
+                return (
+                  <div>
+                    <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-xs">
+                      {localDirPath ? (
+                        <button onClick={() => { const p = localDirPath.split('/'); p.pop(); setLocalDirPath(p.join('/')); }} className="text-gray-400 hover:text-white">← 返回</button>
+                      ) : <span className="text-gray-500">📂</span>}
+                      <span className="text-gray-400 font-mono text-xs">{localDirPath || '/'}</span>
+                      <span className="ml-auto text-gray-600">{sortedDirs.length + localFiles.length} 项</span>
+                    </div>
+                    {sortedDirs.map(dir => (
+                      <div key={dir} onClick={() => setLocalDirPath(localDirPath ? `${localDirPath}/${dir}` : dir)}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm">
+                        <span className="text-lg">📁</span>
+                        <span className="text-yellow-400 font-mono truncate flex-1 text-xs">{dir}</span>
+                        <span className="text-gray-600 text-xs">文件夹</span>
+                      </div>
+                    ))}
+                    {localFiles.map(f => (
+                      <div key={f.hash} draggable onDragStart={(e) => onDragStartFile(e, f)}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group">
+                        <a href={api.getDownloadUrl(f.hash)} target="_blank" rel="noreferrer" className="text-lg">{fileIcon(f.mime_type)}</a>
+                        <span className="text-blue-300 truncate flex-1 font-mono text-xs">{f.filename}</span>
+                        <span className="text-gray-500 text-xs">{fmtSize(f.size)}</span>
+                        <button onClick={() => addEntry(f.hash, f.filename, f.mime_type, f.size)}
+                          className="text-blue-400 hover:text-blue-200 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 transition-all shrink-0">+</button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          </>
+        )}
+
+        {/* === SYSTEM BROWSE TAB === */}
+        {srcTab === 'system' && (
+          <>
+            <span className="text-xs text-gray-600 px-3 py-1 border-b border-gray-800">{sysPath}</span>
+            <div className="flex-1 overflow-y-auto">
+              {sysPath !== '/' && (
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-xs">
+                  <button onClick={() => { const p = sysPath.split('/'); p.pop(); setSysPath(p.join('/') || '/'); }} className="text-gray-400 hover:text-white">← 返回</button>
+                  <span className="text-gray-400 font-mono text-xs truncate">{sysPath}</span>
+                </div>
+              )}
+              {sysLoading ? <p className="p-4 text-gray-600 text-sm">加载中...</p> :
+               sysEntries.length === 0 ? <p className="p-4 text-gray-600 text-sm">此目录为空</p> :
+               sysEntries.map(e => (
+                 <div key={e.path} draggable={!e.is_dir}
+                   onDragStart={e.is_dir ? undefined : (ev) => onDragStartFile(ev, { name: e.name, path: e.path, sysPath: e.path, size: e.size })}
+                   onClick={() => e.is_dir ? setSysPath(e.path) : null}
+                   className={`flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm ${e.is_dir ? 'cursor-pointer' : ''}`}>
+                   <span className="text-lg">{e.is_dir ? '📁' : '📄'}</span>
+                   <span className={`font-mono truncate flex-1 text-xs ${e.is_dir ? 'text-yellow-400' : 'text-blue-300'}`}>{e.name}</span>
+                   {e.is_dir ? <span className="text-gray-600 text-xs">文件夹</span> :
+                    <button onClick={(ev) => { ev.stopPropagation(); addEntry('', e.path, '', e.size || 0); }}
+                      className="text-blue-400 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 shrink-0">+</button>}
+                 </div>
+               ))}
+            </div>
+          </>
+        )}
+
+        {/* === COLLECTIONS TAB === */}
+        {srcTab === 'collection' && !collSource && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* collection search & sort */}
+            <div className="p-2 border-b border-gray-800 shrink-0 space-y-1.5">
+              <input value={collSearch} onChange={e => setCollSearch(e.target.value)} placeholder="搜索合集..." className="w-full bg-gray-800 text-sm px-3 py-2 rounded border border-gray-700 focus:outline-none focus:border-blue-600" />
+              <div className="flex gap-1 flex-wrap">
+                {COLL_SORT_OPTS.map(o => (
+                  <button key={o.v} onClick={() => setCollSort(o.v)} className={`text-xs px-2 py-1 rounded ${collSort===o.v?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>
+                ))}
+              </div>
+              {allCollTags.length > 0 && (
+                <div className="flex gap-1 flex-wrap">
+                  <button onClick={() => setCollTagFilter('')} className={`text-[10px] px-1.5 py-0.5 rounded-full ${!collTagFilter ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>全部</button>
+                  {allCollTags.map(t => (
+                    <button key={t} onClick={() => setCollTagFilter(t === collTagFilter ? '' : t)} className={`text-[10px] px-1.5 py-0.5 rounded-full ${collTagFilter===t?'bg-blue-600 text-white':'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>{t}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {filteredCollections.length === 0 ? <p className="p-4 text-gray-600 text-sm">暂无合集</p> :
+                filteredCollections.map(c => (
                   <div key={c.hash} onClick={() => loadCollAsSource(c.hash)}
                     className="px-4 py-3 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50">
-                    <div className="flex items-center gap-2"><span className="text-lg">📦</span><span className="text-blue-300 truncate flex-1 text-sm font-medium">{c.friendly_name || c.name_preview || c.hash?.substring(0,16)+'...'}</span></div>
-                    <div className="flex items-center gap-2 mt-1 ml-8">{c.tags?.map(t => <span key={t} className="text-[10px] bg-blue-900/50 text-blue-300 px-1.5 py-0.5 rounded-full">{t}</span>)}<span className="text-xs text-gray-600">{c.entry_count || 0} 文件</span><span className="text-xs text-gray-500">{c.created_at ? new Date(c.created_at).toLocaleDateString() : ''}</span></div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">📦</span>
+                      <span className="text-blue-300 truncate flex-1 text-sm font-medium">{c.friendly_name || c.name_preview || (c.entry_count ? `${c.entry_count} 个文件` : '空合集')}</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1 ml-8">
+                      {c.tags?.map(t => <span key={t} className="text-[10px] bg-blue-900/50 text-blue-300 px-1.5 py-0.5 rounded-full">{t}</span>)}
+                      <span className="text-xs text-gray-600">{c.entry_count || 0} 文件</span>
+                      <span className="text-xs text-gray-500">{c.created_at ? new Date(c.created_at).toLocaleDateString() : ''}</span>
+                    </div>
                   </div>
                 ))}
             </div>
           </div>
         )}
+
+        {/* === COLLECTION SOURCE FILE VIEW === */}
         {srcTab === 'collection' && collSource && (
-          <div className="flex-1 flex flex-col">
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-sm">
-              <button onClick={() => setCollSource(null)} className="text-gray-400 hover:text-white">← 退回列表</button>
-              <span className="text-gray-300 truncate text-lg font-bold">📦 {collSource.friendly_name || collSource.name_preview || '合集'}</span>
-              <span className="text-gray-600 text-xs ml-auto">{collSource.entries?.length || 0} 项</span>
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* breadcrumb nav */}
+            <div className="flex flex-col px-3 py-2 border-b border-gray-800 shrink-0 gap-1">
+              <div className="flex items-center gap-2">
+                <button onClick={() => setCollSource(null)} className="text-gray-400 hover:text-white text-sm">← 合集列表</button>
+                <span className="text-gray-300 text-sm font-bold truncate">📦 {collSource.friendly_name || collSource.name_preview || '合集'}</span>
+              </div>
+              {collViewPath && (
+                <div className="flex items-center gap-1 text-xs">
+                  <button onClick={() => setCollViewPath('')} className="text-gray-500 hover:text-white">📦</button>
+                  {(() => {
+                    const parts = collViewPath.split('/');
+                    return parts.map((p, i) => (
+                      <span key={i} className="flex items-center gap-1">
+                        <span className="text-gray-600">/</span>
+                        <button
+                          onClick={() => setCollViewPath(parts.slice(0, i+1).join('/'))}
+                          className="text-gray-400 hover:text-white">{p}</button>
+                      </span>
+                    ));
+                  })()}
+                </div>
+              )}
+              <div className="text-xs text-gray-600">{collSubDirs.size + collFiles.length} 项</div>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {collFiltered.length === 0 ? <p className="p-4 text-gray-600 text-sm">此合集为空</p> :
-                collFiltered.map(e => (
+              {collSubDirs.size === 0 && collFiles.length === 0 && !collViewPath ? (
+                /* show all entries flat when at root with no subdirs */
+                (collSource.entries || []).map(e => (
                   <div key={e.path} draggable
-                    onDragStart={(ev) => { ev.dataTransfer.setData('text/plain', e.path); ev.dataTransfer.setData('application/peerdrive-file', JSON.stringify({hash:e.hash,path:e.path,name:e.path.split('/').pop()})); ev.dataTransfer.effectAllowed = 'copy'; }}
+                    onDragStart={(ev) => onDragStartFile(ev, {hash:e.hash, path:e.path, name:e.path.split('/').pop()})}
                     className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group">
                     <span className="text-lg">📄</span>
-                    <span className="text-blue-300 truncate flex-1 font-mono">{e.path}</span>
-                    <button onClick={() => addEntry(e.hash, e.path.split('/').pop())} className="text-blue-400 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 shrink-0">+</button>
+                    <span className="text-blue-300 truncate flex-1 font-mono text-xs">{e.path}</span>
+                    <button onClick={() => addEntry(e.hash, e.path)} className="text-blue-400 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 shrink-0">+</button>
                   </div>
-                ))}
+                ))) : collSubDirs.size === 0 && collFiles.length === 0 ? (
+                <p className="p-4 text-gray-600 text-sm">此目录为空</p>
+              ) : (
+                <>
+                  {Array.from(collSubDirs).sort().map(dir => (
+                    <div key={dir} onClick={() => setCollViewPath(collViewPath ? `${collViewPath}/${dir}` : dir)}
+                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm">
+                      <span className="text-lg">📁</span>
+                      <span className="text-yellow-400 font-mono truncate flex-1 text-xs">{dir}</span>
+                      <span className="text-gray-600 text-xs">文件夹</span>
+                    </div>
+                  ))}
+                  {collFiles.map(e => (
+                    <div key={e.path} draggable
+                      onDragStart={(ev) => onDragStartFile(ev, {hash:e.hash, path:e.path, name:e.path.split('/').pop()})}
+                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group">
+                      <span className="text-lg">📄</span>
+                      <span className="text-blue-300 truncate flex-1 font-mono text-xs">{e.path.split('/').pop()}</span>
+                      <button onClick={() => addEntry(e.hash, e.path)} className="text-blue-400 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 shrink-0">+</button>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           </div>
         )}
-
-        {srcTab === 'local' && (
-          <div className="p-2 border-b border-gray-800 shrink-0 space-y-1.5">
-            <div className="flex gap-1">{SORT_OPTS.map(o => (<button key={o.v} onClick={() => setSort(o.v)} className={`flex-1 text-sm px-2 py-1.5 rounded ${sort===o.v?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>))}</div>
-            <div className="flex gap-1">{TYPE_OPTS.map(o => (<button key={o.v} onClick={() => setTypeF(o.v)} className={`flex-1 text-sm px-2 py-1.5 rounded ${typeF===o.v?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>))}</div>
-          </div>
-        )}
-        {srcTab === 'local' && <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文件名或路径..." className="w-full bg-gray-800 text-sm px-3 py-2 border-b border-gray-800 focus:outline-none focus:border-blue-600" />}
-        {srcTab === 'local' && (
-          <div className="flex gap-1 px-2 py-1 border-b border-gray-800"><button onClick={() => {setLocalViewMode('tree');setLocalDirPath('');}} className={`text-xs px-2 py-1 rounded ${localViewMode==='tree'?'bg-blue-600 text-white':'text-gray-400'}`}>📁 目录</button><button onClick={() => {setLocalViewMode('timeline');setLocalDirPath('');}} className={`text-xs px-2 py-1 rounded ${localViewMode==='timeline'?'bg-blue-600 text-white':'text-gray-400'}`}>🕐 时间线</button></div>
-        )}
-
-        <div className="flex-1 overflow-y-auto">
-          {srcTab === 'local' && localViewMode === 'timeline' ? (
-            filtered.length === 0 ? <p className="p-4 text-gray-600 text-sm">无匹配文件</p> :
-            (() => {
-              const sorted = [...filtered].sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
-              let lastDate = '';
-              return sorted.map(f => {
-                const d = f.created_at ? f.created_at.split('T')[0] : '';
-                const showDate = d !== lastDate;
-                lastDate = d;
-                return <div key={f.hash}>
-                  {showDate && <div className="px-4 py-2 text-xs text-gray-500 bg-gray-900/50">{d}</div>}
-                  <div draggable onDragStart={(e) => { e.dataTransfer.setData('text/plain',f.filename); e.dataTransfer.setData('application/peerdrive-file',JSON.stringify({hash:f.hash,path:f.filename,name:f.filename,mime_type:f.mime_type,size:f.size})); e.dataTransfer.effectAllowed='copy'; }} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group">
-                    <a href={api.getDownloadUrl(f.hash)} target="_blank" rel="noreferrer" className="text-lg">{fileIcon(f.mime_type)}</a>
-                    <span className="text-blue-300 truncate flex-1 font-mono">{f.filename}</span>
-                    <span className="text-gray-500 text-xs">{fmtSize(f.size)}</span>
-                    <button onClick={() => addEntry(f.hash,f.filename,f.mime_type,f.size)} className="text-blue-400 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 shrink-0">+</button>
-                  </div>
-                </div>;
-              });
-            })()
-          ) : srcTab === 'local' ? (() => {
-            const prefix = localDirPath ? localDirPath + '/' : '';
-            const dirs = new Set();
-            const localFiles = [];
-            for (const f of filtered) {
-              const rel = (f.provider_path || f.filename || '');
-              const rest = rel.startsWith(prefix) ? rel.slice(prefix.length) : null;
-              if (rest === null) continue;
-              const slash = rest.indexOf('/');
-              if (slash === -1) localFiles.push(f);
-              else if (rest.slice(0, slash)) dirs.add(rest.slice(0, slash));
-            }
-            const sortedDirs = Array.from(dirs).sort();
-            if (sortedDirs.length===0 && localFiles.length===0) return <p className="p-4 text-gray-600 text-sm">此目录为空</p>;
-            return (
-              <div>
-                {(localDirPath || sortedDirs.length > 0 || localFiles.length > 0) && (
-                  <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-xs">
-                    {localDirPath ? (
-                      <button onClick={() => { const p = localDirPath.split('/'); p.pop(); setLocalDirPath(p.join('/')); }} className="text-gray-400 hover:text-white">← 返回</button>
-                    ) : (
-                      <span className="text-gray-500">📂</span>
-                    )}
-                    <span className="text-gray-400">{localDirPath || '/'}</span>
-                    <span className="ml-auto text-gray-600">{sortedDirs.length + localFiles.length} 项</span>
-                  </div>
-                )}
-                {sortedDirs.map(dir => (
-                  <div key={dir} onClick={() => setLocalDirPath(localDirPath ? `${localDirPath}/${dir}` : dir)}
-                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm">
-                    <span className="text-lg">📁</span>
-                    <span className="text-yellow-400 font-mono truncate flex-1">{dir}</span>
-                    <span className="text-gray-600 text-xs">文件夹</span>
-                  </div>
-                ))}
-                {localFiles.map(f => (
-                  <div key={f.hash} draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('text/plain', f.filename);
-                      e.dataTransfer.setData('application/peerdrive-file', JSON.stringify({ hash: f.hash, path: f.filename, name: f.filename, mime_type: f.mime_type, size: f.size }));
-                      e.dataTransfer.effectAllowed = 'copy';
-                    }}
-                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group">
-                    <a href={api.getDownloadUrl(f.hash)} target="_blank" rel="noreferrer" className="text-lg">{fileIcon(f.mime_type)}</a>
-                    <span className="text-blue-300 truncate flex-1 font-mono">{f.filename}</span>
-                    <span className="text-gray-500 text-xs">{fmtSize(f.size)}</span>
-                    <button onClick={() => addEntry(f.hash, f.filename, f.mime_type, f.size)}
-                      className="text-blue-400 hover:text-blue-200 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 transition-all shrink-0">+</button>
-                  </div>
-                ))}
-                {sortedDirs.length === 0 && localFiles.length === 0 && (
-                  <p className="p-4 text-gray-600 text-sm">{localDirPath ? '此目录为空' : '无匹配文件'}</p>
-                )}
-              </div>
-            );
-           })() : (
-            srcTab === 'collection' ? null :
-            !collSource ? <p className="p-4 text-gray-600 text-sm">选择一个合集查看其文件</p> :
-            collFiltered.length === 0 ? <p className="p-4 text-gray-600 text-sm">无匹配文件</p> :
-            collFiltered.map(e => (
-              <div key={e.path} draggable
-                onDragStart={(ev) => {
-                  ev.dataTransfer.setData('application/peerdrive-file', JSON.stringify({ hash: e.hash, path: e.path, name: e.path.split('/').pop(), mime_type: '', size: 0 }));
-                  ev.dataTransfer.effectAllowed = 'copy';
-                }}
-                className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm group">
-                <span className="text-lg">📄</span>
-                <span className="text-blue-300 truncate flex-1 font-mono">{e.path}</span>
-                <span className="text-gray-500 text-xs font-mono">{(e.hash || '').substring(0, 10)}</span>
-                  <button onClick={() => addEntry(e.hash, e.path.split('/').pop())}
-                    className="text-blue-400 hover:text-blue-200 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 transition-all shrink-0">
-                    + 添加
-                  </button>
-              </div>
-            ))
-          )}
-        </div>
       </div>
 
+      {/* SPLIT HANDLE */}
       <div className="w-1 bg-gray-700 hover:bg-blue-600 cursor-col-resize shrink-0 relative group" onMouseDown={onSplitMouseDown}>
         <div className="absolute inset-y-0 -left-1 -right-1" />
       </div>
 
+      {/* RIGHT PANEL — collection editor draft */}
       <div style={{ width: `${100 - split}%` }} className="h-full flex flex-col">
         <div className="h-12 flex items-center px-4 space-x-3 border-b border-gray-800 shrink-0">
           <Link to="/" className="text-sm text-gray-500 hover:text-white shrink-0">←</Link>
           <input value={fname} onChange={e => setFname(e.target.value)} placeholder="合集名称 (可选)" className="bg-gray-800 text-sm px-3 py-2 rounded border border-gray-700 w-36 focus:outline-none focus:border-blue-500" />
-          <input value={tags} onChange={e => setTags(e.target.value)} placeholder="标签: tag1, tag2" className="bg-gray-800 text-sm px-3 py-2 rounded border border-gray-700 w-28 focus:outline-none focus:border-blue-500" />
+          <input value={tags} onChange={e => setTags(e.target.value)} placeholder="标签: tag1, tag2" className="bg-gray-800 text-sm px-3 py-2 rounded border border-gray-700 w-32 focus:outline-none focus:border-blue-500" />
           <button onClick={async () => {
             if (!entries.length) return;
             try {
@@ -363,18 +492,9 @@ export default function AnonCreator() {
             } catch(e) {}
           }} className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1.5 rounded shrink-0 whitespace-nowrap" title="AI 推荐名称">🤖</button>
           <div className="flex-1" />
-          {entries.length > 0 && !savedHash && (
-            <span className="text-sm text-yellow-500 bg-yellow-500/10 px-3 py-1 rounded border border-yellow-600/30">未保存</span>
-          )}
-          {savedHash && entries.length > 0 && (
-            <span className="text-sm text-yellow-500 bg-yellow-500/10 px-3 py-1 rounded border border-yellow-600/30">已修改</span>
-          )}
-          <button onClick={handleMint} disabled={saving || !entries.filter(e => e.path && e.hash).length}
+          <span className="text-sm text-gray-500">{entries.filter(e => e.path && e.hash).length} 个文件</span>
+          <button onClick={handleSave} disabled={saving || !entries.filter(e => e.path && e.hash).length}
             className="bg-green-600 hover:bg-green-700 disabled:opacity-40 text-sm px-4 py-2 rounded font-medium">保存</button>
-          {savedHash && (
-            <button onClick={handleCommit} disabled={saving}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-sm px-4 py-2 rounded font-medium">Commit</button>
-          )}
         </div>
         <div className="flex-1 overflow-hidden">
            <FileTree entries={entries} entryActions={entryActions} />

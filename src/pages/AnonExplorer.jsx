@@ -34,15 +34,26 @@ export default function AnonExplorer() {
   const [error, setError] = useState('');
   const [navPath, setNavPath] = useState('');
   const [isLocal, setIsLocal] = useState(false);
+  const [allCollHashes, setAllCollHashes] = useState(new Set());
   const navigate = useNavigate();
 
   useEffect(() => { if (paramHash) { setInputVal(paramHash); setSearchHash(paramHash); } }, [paramHash]);
   useEffect(() => { if (searchHash) fetchCollection(searchHash); }, [searchHash]);
+  useEffect(() => { api.listAnonCollections().then(l => { if (Array.isArray(l)) setAllCollHashes(new Set(l.map(c => c.hash))); }).catch(() => {}); }, [searchHash]);
 
   const fetchCollection = async (h) => {
     if (!h) return;
     setLoading(true); setError(''); setCollection(null);
-    try { setCollection(await api.getAnonCollection(h)); } catch { setError('合集未找到'); }
+    try {
+      const coll = await api.getAnonCollection(h);
+      if (!coll.entries || coll.entries.length === 0) {
+        await api.deleteFile(h).catch(() => {});
+        setError('空合集，已自动删除');
+        setLoading(false);
+        return;
+      }
+      setCollection(coll);
+    } catch { setError('合集未找到'); }
     setLoading(false); setNavPath('');
     api.listAnonCollections().then(l => setIsLocal(Array.isArray(l) && l.some(c => c.hash === h))).catch(() => {});
   };
@@ -52,6 +63,7 @@ export default function AnonExplorer() {
 
   const entries = collection?.entries || [];
   const fname = collection?.friendly_name || '';
+  const isSingleFile = entries.length === 1 && !entries[0].path.includes('/');
 
   const navIn = (dir) => setNavPath(prev => prev ? `${prev}/${dir}` : dir);
   const navBack = () => {
@@ -160,7 +172,28 @@ export default function AnonExplorer() {
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {currentItems.dirs.length === 0 && currentItems.files.length === 0 ? (
+              {isSingleFile && !navPath ? (
+                allCollHashes.has(entries[0].hash) ? (
+                  <div className="flex flex-col items-center justify-center py-16 px-8 cursor-pointer"
+                    onClick={() => navigate(`/anon/collections/${entries[0].hash}`)}>
+                    <span className="text-5xl mb-4">📦</span>
+                    <h3 className="text-xl font-bold text-purple-300 mb-1">{entries[0].path.split('/').pop()}</h3>
+                    <p className="text-xs text-purple-500 font-mono mb-6">嵌套合集 — 点击打开</p>
+                  </div>
+                ) : (
+                <div className="flex flex-col items-center justify-center py-16 px-8">
+                  <span className="text-5xl mb-4">{fileIcon(entries[0].mime_type)}</span>
+                  <h3 className="text-xl font-bold text-gray-200 mb-1">{entries[0].path.split('/').pop()}</h3>
+                  <p className="text-xs text-gray-500 font-mono mb-6">{(entries[0].hash || '').substring(0, 16)}...</p>
+                  <a href={api.getAnonFileDownloadUrl(searchHash, entries[0].path)}
+                    target="_blank" rel="noreferrer"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium mb-3">
+                    ⬇ 下载文件
+                  </a>
+                  <p className="text-xs text-gray-600">{relTime(collection.created_at)}</p>
+                </div>
+                )
+              ) : currentItems.dirs.length === 0 && currentItems.files.length === 0 ? (
                 <div className="text-center text-gray-600 py-10 text-sm">此目录为空</div>
               ) : (
                 <div>
@@ -173,6 +206,17 @@ export default function AnonExplorer() {
                     </div>
                   ))}
                   {currentItems.files.map(f => {
+                    const isNestedColl = allCollHashes.has(f.hash);
+                    if (isNestedColl) {
+                      return (
+                        <div key={f.path} onClick={() => navigate(`/anon/collections/${f.hash}`)}
+                          className="flex items-center gap-3 px-5 py-3 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm">
+                          <span className="text-xl">📦</span>
+                          <span className="text-purple-300 font-mono truncate flex-1">{f.path.split('/').pop()}</span>
+                          <span className="text-purple-500 text-xs">合集 →</span>
+                        </div>
+                      );
+                    }
                     const url = api.getAnonFileDownloadUrl(searchHash, f.path);
                     return (
                       <a key={f.path} href={url} target="_blank" rel="noreferrer"

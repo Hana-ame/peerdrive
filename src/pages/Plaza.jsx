@@ -43,7 +43,7 @@ export default function Plaza() {
     setLoading(false);
   };
 
-  const collName = (c) => c.collection_name || c.friendly_name || c.name_preview || (c.hash ? c.hash.substring(0, 12) + '...' : '未命名');
+  const collName = (c) => c.collection_name || c.friendly_name || c.name_preview || (c.entries ? `${c.entries.length} 个文件` : (c.entry_count ? `${c.entry_count} 个文件` : '未命名合集'));
   const collUser = (c) => c.username || (c._type === 'public' ? '' : '');
   const collTime = (c) => {
     if (c.isDummy) return '';

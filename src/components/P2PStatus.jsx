@@ -251,6 +251,48 @@ export default function P2PStatus() {
               </div>
             </div>
           )}
+          {status.conn_stats && (
+            <div className="mt-3 pt-3 border-t border-zinc-800">
+              <span className="text-zinc-500 text-xs">连接管理</span>
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                <div className="text-center">
+                  <p className="text-zinc-300 text-base font-mono">{status.conn_stats.known_peers ?? 0}</p>
+                  <span className="text-zinc-600 text-[10px]">已知节点</span>
+                </div>
+                <div className="text-center">
+                  <p className="text-emerald-400 text-base font-mono">{status.conn_stats.successful_conns ?? 0}</p>
+                  <span className="text-zinc-600 text-[10px]">成功连接</span>
+                </div>
+                <div className="text-center">
+                  <p className="text-amber-400 text-base font-mono">{status.conn_stats.failed_conns ?? 0}</p>
+                  <span className="text-zinc-600 text-[10px]">失败</span>
+                </div>
+              </div>
+            </div>
+          )}
+          {status.active_transfers?.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-zinc-800">
+              <span className="text-zinc-500 text-xs">活跃传输</span>
+              <div className="mt-2 space-y-1.5">
+                {status.active_transfers.map((t, i) => (
+                  <div key={i} className="bg-zinc-800/50 rounded px-3 py-2">
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-zinc-400 font-mono truncate">{(t.hash || '').substring(0, 12)}...</span>
+                      <span className="text-zinc-500">{t.progress?.toFixed(1)}%</span>
+                    </div>
+                    <div className="w-full bg-zinc-700 rounded-full h-1.5">
+                      <div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{width: `${Math.min(100, t.progress || 0)}%`}} />
+                    </div>
+                    <div className="flex justify-between text-[10px] text-zinc-600 mt-1">
+                      <span>{t.total_mb?.toFixed(1)} MB</span>
+                      <span>{t.peers} 节点</span>
+                      <span>{t.elapsed}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       )}
 
