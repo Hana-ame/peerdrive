@@ -182,6 +182,10 @@ func SetupRouter(
 		})
 	}
 
+	// P2P relay proxy
+	relaySvc := service.NewRelayService(p2pSvc)
+	r.GET("/relay/proxy", relaySvc.ProxyDownload)
+
 	// WebRTC signaling
 	controller.InitSignalHub(service.NewSignalingHub())
 	r.GET("/ws/signal", func(c *gin.Context) {

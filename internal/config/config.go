@@ -36,6 +36,11 @@ type Config struct {
 	P2PPublicReachable   bool
 	P2PAutoNAT           bool
 	P2PNATPortMap        bool
+
+	STUNServer string
+	TURNServer string
+	TURNUser   string
+	TURNPass   string
 }
 
 func (c *Config) IsOriginAllowed(origin string) bool {
@@ -84,6 +89,10 @@ func Load() *Config {
 		P2PPublicReachable:  getEnvBool("PEERDRIVE_PUBLIC_REACHABLE", false),
 		P2PAutoNAT:          getEnvBool("PEERDRIVE_AUTO_NAT", true),
 		P2PNATPortMap:       getEnvBool("PEERDRIVE_NAT_PORTMAP", false),
+		STUNServer:          getEnv("PEERDRIVE_STUN_SERVER", "stun:stun.moonchan.xyz:3478"),
+		TURNServer:          getEnv("PEERDRIVE_TURN_SERVER", ""),
+		TURNUser:            getEnv("PEERDRIVE_TURN_USER", ""),
+		TURNPass:            getEnv("PEERDRIVE_TURN_PASS", ""),
 	}
 }
 
