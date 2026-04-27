@@ -1,7 +1,9 @@
+// API 请求模块：封装与后端的所有 HTTP 通信和本地存储配置
 const STORAGE_KEY = 'peerdrive_api_base';
 const AUTH_TOKEN_KEY = 'peerdrive_auth_token';
 const DEFAULT_API = 'https://wsl-3000.moonchan.xyz';
 
+// 获取 API 基础地址（从 localStorage 读取）
 function getApiBase() {
   return localStorage.getItem(STORAGE_KEY) || DEFAULT_API;
 }
@@ -37,6 +39,7 @@ function getAuthToken() {
   return '';
 }
 
+// 通用 HTTP 请求封装，自动注入 Auth Token
 async function request(method, path, body = null) {
   const opts = { method, headers: {} };
   const token = getAuthToken();

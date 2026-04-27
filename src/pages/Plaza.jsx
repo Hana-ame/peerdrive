@@ -1,16 +1,20 @@
+// 合集广场：浏览/搜索本机匿名合集和 P2P 公开合集，支持 Fork/分享/下载
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listAnonCollections, listPublicCollections, getP2PStatus, createShare, getShareUrl } from '../api';
 import CollectionCard from '../components/CollectionCard';
 
+// 从文本中提取 SHA256 哈希
 const SHA256_RE = /\b([a-f0-9]{64})\b/i;
 function extractHash(text) { const m = (text || '').match(SHA256_RE); return m ? m[1].toLowerCase() : null; }
 
+// 占位示例合集（无后端时展示）
 const DUMMY_COLLECTIONS = [
   { hash: 'demo-1', friendly_name: '🧪 示例图片集', version: 1, isDummy: true, entries: [{ path: 'cat.jpg' }, { path: 'dog.png' }] },
   { hash: 'demo-2', friendly_name: '🧪 示例文档集', version: 2, isDummy: true, entries: [{ path: 'readme.md' }, { path: 'notes.txt' }] },
 ];
 
+// 骨架屏组件：加载时的占位卡片
 function SkeletonCard() {
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 animate-pulse">
@@ -33,9 +37,10 @@ export default function Plaza() {
   const [viewMode, setViewMode] = useState('grid');
   const navigate = useNavigate();
 
+  // 首次加载时拉取合集列表和 P2P 状态
   useEffect(() => { loadAll(); getP2PStatus().then(s => setP2pOnline(s?.enabled && s?.connected_count > 0)).catch(()=>{}); }, []);
 
-  const loadAll = async () => {
+  // 加载本机 + 公开合集
     setLoading(true);
     try {
       const [anon, pub] = await Promise.all([
@@ -51,6 +56,7 @@ export default function Plaza() {
     setLoading(false);
   };
 
+  // 搜索/跳转：输入 Hash 或关键字导航到合集
   const handleSearch = () => {
     const h = extractHash(searchInput) || searchInput.trim().toLowerCase();
     if (h && h.length === 64) navigate(`/anon/collections/${h}`);
@@ -61,6 +67,7 @@ export default function Plaza() {
 
   const [showShare, setShowShare] = useState(null); // {url, name}
 
+  // 生成分享链接并复制到剪贴板
   const handleShare = async (c) => {
     try {
       const share = await createShare(c.hash || c.id, 'collection', c.friendly_name || c.name_preview || '合集');
@@ -70,10 +77,12 @@ export default function Plaza() {
     } catch(e) { alert('分享失败: ' + e.message); }
   };
 
+  // 跳转到创建页并携带 Fork 源数据
   const handleFork = (c) => {
     if (c.hash) navigate('/anon/create', { state: { forkFrom: c, sourceHash: c.hash } });
   };
 
+  // 点击合集卡片跳转到详情页
   const handleDownload = (c) => {
     if (c.isDummy) return;
     if (c.hash) navigate(`/anon/collections/${c.hash}`);
@@ -89,6 +98,7 @@ export default function Plaza() {
   return (
     <div className="p-8 overflow-y-auto h-full">
       <div className="max-w-6xl mx-auto">
+        {/* 页面标题栏：标题 / P2P 状态 / 视图切换 / 创建按钮 */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <h1 className="text-3xl font-bold">合集</h1>
@@ -105,6 +115,7 @@ export default function Plaza() {
             <button onClick={() => navigate('/anon/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">+ 创建合集</button>
           </div>
         </div>
+        {/* 搜索栏：输入 Hash / URL 直接跳转 */}
         <div className="mb-6">
           <div className="flex gap-2">
             <input type="text" value={searchInput}

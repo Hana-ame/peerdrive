@@ -356,11 +356,13 @@ export default function LLMAssistant() {
     }
   }, [messages, streamText, toolStatus]);
 
-  const buildContext = () => ({
-    route: location.pathname,
-    timestamp: new Date().toISOString(),
-    pageData: pageContext || null,
-  });
+  // 每次页面切换时重建上下文，确保 LLM 知道当前在哪
+  const [currentContext, setCurrentContext] = useState({});
+  useEffect(() => {
+    setCurrentContext({ route: location.pathname, timestamp: new Date().toISOString(), pageData: pageContext || null });
+  }, [location.pathname, pageContext]);
+
+  const buildContext = () => currentContext;
 
   const handleStopStream = () => {
     if (abortRef.current) {
@@ -409,6 +411,11 @@ export default function LLMAssistant() {
           const delta = json.choices?.[0]?.delta;
           if (!delta) continue;
 
+          // 显示 thinking 过程（DeepSeek/Qwen reasoning）
+          if (delta.reasoning_content || json.choices?.[0]?.delta?.reasoning_content) {
+            fullText += '💭' + (delta.reasoning_content || json.choices[0].delta.reasoning_content) + '\n';
+            setStreamText(fullText);
+          }
           if (delta.content) {
             fullText += delta.content;
             setStreamText(fullText);

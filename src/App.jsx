@@ -1,3 +1,4 @@
+// 应用根组件：全局状态 (AppContext/PageContext) + 路由定义
 import React, { useState, createContext } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Plaza from './pages/Plaza';
@@ -24,6 +25,7 @@ export default function App() {
   const [pageContext, setPageContext] = useState(null);
   const [dataConsent, setDataConsent] = useState(getDataConsent());
 
+  // 处理用户名变更，持久化到 localStorage
   const handleUsernameChange = (val) => {
     setUsername(val);
     localStorage.setItem('peerdrive_username', val);
