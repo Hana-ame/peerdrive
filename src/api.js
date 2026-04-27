@@ -192,6 +192,11 @@ export const downloadFileByPath = getUserFileDownloadUrl;
 export const mergeCollection = mergeUserCollection;
 export const getNodeInfo = getP2PNode;
 
+/* ---- share ---- */
+export const createShare = (hash, type, filename) => request('POST', '/shares', { hash, type, filename });
+export const listShares = () => request('GET', '/shares');
+export const getShareUrl = (token) => `${getApiBase()}/s/${token}`;
+
 /* ---- local sync ---- */
 export const saveLocal = (body) => request('POST', '/local/save', body);
 

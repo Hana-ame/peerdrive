@@ -160,6 +160,14 @@ export default function AnonExplorer() {
               </div>
               <div className="flex-1" />
               <span className="text-xs text-gray-600">{currentItems.totalFiles} 项</span>
+              <button onClick={async () => {
+                try {
+                  const share = await api.createShare(searchHash, 'collection', fname || '合集');
+                  const url = api.getShareUrl(share.token);
+                  await navigator.clipboard.writeText(url);
+                  alert(`分享链接已复制: ${url}`);
+                } catch(e) { alert('分享失败: ' + e.message); }
+              }} className="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-xs">🔗 分享</button>
               {isLocal ? (
                 <span className="text-xs text-green-500/70 bg-green-500/10 px-3 py-1 rounded-full">✓ 已保存到本机</span>
               ) : (
