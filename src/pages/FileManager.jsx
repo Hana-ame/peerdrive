@@ -38,11 +38,46 @@ export default function FileManager() {
   const [selectedFiles, setSelectedFiles] = useState({});
   const [browseLoading, setBrowseLoading] = useState(false);
 
+  const [swarmData, setSwarmData] = useState({});
+  const [notification, setNotification] = useState('');
+
   useEffect(() => { loadFiles(); }, []);
 
   useEffect(() => {
     setPageContext({ type: 'fileManager', fileCount: files.length, sortBy, category });
   }, [files, sortBy, category]);
+
+  // Auto-dismiss notification
+  useEffect(() => {
+    if (notification) {
+      const t = setTimeout(() => setNotification(''), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [notification]);
+
+  // Load swarm data (peer counts per file hash)
+  useEffect(() => {
+    (async () => {
+      try {
+        const discovered = await api.getP2PDiscovered();
+        const counts = {};
+        if (Array.isArray(discovered)) {
+          for (const peer of discovered) {
+            const peerHashes = peer.hashes || peer.files || [];
+            if (Array.isArray(peerHashes)) {
+              for (const h of peerHashes) {
+                const hash = typeof h === 'string' ? h : (h.hash || h);
+                counts[hash] = (counts[hash] || 0) + 1;
+              }
+            }
+          }
+        }
+        setSwarmData(counts);
+      } catch (e) {
+        console.debug('Swarm data not available');
+      }
+    })();
+  }, []);
 
   const loadFiles = async () => {
     setLoading(true);
@@ -116,6 +151,49 @@ export default function FileManager() {
 
   const handleCreateFromFile = (file) => {
     navigate('/anon/create', { state: { draftFrom: { entries: [{ path: file.filename, hash: file.hash }], friendlyName: file.filename } } });
+  };
+
+  const handleShare = async (file, e) => {
+    e.stopPropagation();
+    try {
+      const share = await api.createShare(file.hash, 'file', file.filename);
+      const url = api.getShareUrl(share.token);
+      await navigator.clipboard.writeText(url);
+      setNotification(`分享链接已复制: ${file.filename}`);
+    } catch (e) {
+      alert(`分享失败: ${e.message}`);
+    }
+  };
+
+  const handleShareSelected = async () => {
+    const links = [];
+    for (const hash of selectedHashes) {
+      try {
+        const file = files.find(f => f.hash === hash);
+        const share = await api.createShare(hash, 'file', file?.filename || '');
+        links.push(api.getShareUrl(share.token));
+      } catch (e) {
+        console.error(`分享失败: ${hash}`, e);
+      }
+    }
+    if (links.length > 0) {
+      await navigator.clipboard.writeText(links.join('\n'));
+      setNotification(`${links.length} 个分享链接已复制`);
+      setSelected({});
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (!confirm(`确定永久删除 ${selCount} 个文件？`)) return;
+    for (const hash of selectedHashes) {
+      try {
+        await api.deleteFile(hash);
+      } catch (e) {
+        console.error(`删除失败: ${hash}`, e);
+      }
+    }
+    setSelected({});
+    loadFiles();
   };
 
   const browseDir = async (dir) => {
@@ -204,6 +282,25 @@ export default function FileManager() {
     return '📄';
   };
 
+  const getProviderBadge = (file) => {
+    const pt = file.provider_type || '';
+    if (pt === 'local' || (!pt && file.provider_path?.includes('/storage/'))) {
+      return (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-green-900/50 text-green-300 border border-green-800/50 mr-2 shrink-0">
+          🟢 本地
+        </span>
+      );
+    }
+    if (pt === 'p2p') {
+      return (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-900/50 text-blue-300 border border-blue-800/50 mr-2 shrink-0">
+          🔵 P2P
+        </span>
+      );
+    }
+    return null;
+  };
+
   const buildTree = (files) => {
     const root = { name: '/', dirs: {}, files: [] };
     for (const f of files) {
@@ -266,6 +363,7 @@ export default function FileManager() {
                 <div key={f.hash} className="flex items-center py-2 px-2 rounded hover:bg-gray-800/50 group" style={{ marginLeft: `${(depth + 1) * 20 + 22}px` }}>
                   <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded mr-2 shrink-0 accent-cyan-500 w-4 h-4" />
                   <span className="mr-2 text-base shrink-0">{extIcon(f.mime_type)}</span>
+                  {getProviderBadge(f)}
                   <span className="text-sm text-blue-300 truncate flex-1">{f.filename}</span>
                   <span className="text-xs text-gray-500 w-16 text-right shrink-0 mr-3">{formatSize(f.size)}</span>
                   <button
@@ -307,7 +405,7 @@ export default function FileManager() {
     <div className="flex flex-1 overflow-hidden h-full">
       <div className="flex-1 flex flex-col bg-gray-900">
         {/* header */}
-        <div className="bg-gray-800 border-b border-gray-700">
+        <div className="bg-gray-800 border-b border-gray-700 shrink-0">
           <div className="flex items-center px-6 py-3 justify-between">
             <div className="flex items-center space-x-4">
               <button onClick={() => navigate('/')} className="text-gray-400 hover:text-white text-sm">← 广场</button>
@@ -315,14 +413,6 @@ export default function FileManager() {
               <span className="text-xs text-gray-500">{files.length} 个文件 · {formatSize(totalSize)}</span>
             </div>
             <div className="flex items-center space-x-2">
-              {selCount > 0 && (
-                <span className="text-sm text-cyan-400 bg-cyan-400/10 px-3 py-1 rounded-full font-medium">已选择 {selCount} 个文件</span>
-              )}
-              {selCount > 0 && (
-                <button onClick={handleCreateCollection} className="bg-teal-600 hover:bg-teal-500 px-3 py-1.5 rounded text-sm font-medium">
-                  创建合集 ({selCount})
-                </button>
-              )}
               <button onClick={handleOpenFileBrowser} className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded text-sm">
                 + 添加文件
               </button>
@@ -360,8 +450,8 @@ export default function FileManager() {
             </div>
           </div>
 
-          {/* category chips */}
-          <div className="flex px-6 pb-3 space-x-2 overflow-x-auto scrollbar-thin">
+          {/* category chips — sticky at top within the header block */}
+          <div className="flex px-6 pb-3 space-x-2 overflow-x-auto scrollbar-thin sticky top-0 z-10">
             {CATEGORIES.map(c => {
               const count = c.key === '' ? files.length : (categoryCounts[c.key] || 0);
               return (
@@ -377,18 +467,35 @@ export default function FileManager() {
               );
             })}
           </div>
+
+          {/* virtual scroll hint */}
+          {files.length > 500 && (
+            <div className="px-6 pb-2 text-xs text-gray-500">
+              {files.length} 个文件 · 滚动加载
+            </div>
+          )}
         </div>
 
         {/* content */}
-        <div className="flex-1 overflow-y-auto">
+        <div className={`flex-1 overflow-y-auto ${selCount > 0 ? 'pb-16' : ''}`}>
           {loading ? (
             <div className="text-center text-gray-500 py-20">加载中...</div>
           ) : filtered.length === 0 ? (
-            <div className="text-center text-gray-500 py-20 border-2 border-dashed border-gray-700 rounded-xl m-6">
+            <div className="mx-6 my-6">
               {files.length === 0 ? (
-                <>还没有任何文件。点击"添加文件"浏览节点目录。</>
+                <div className="flex flex-col items-center justify-center py-20 border-2 border-dashed border-gray-700 rounded-xl bg-gray-800/20">
+                  <div className="text-6xl mb-4 opacity-30">📂</div>
+                  <p className="text-gray-400 text-lg mb-2">拖拽文件到这里或点击添加</p>
+                  <p className="text-gray-600 text-sm mb-6">支持从本地文件系统浏览和注册文件</p>
+                  <button onClick={handleOpenFileBrowser} className="bg-indigo-600 hover:bg-indigo-500 px-6 py-2.5 rounded-lg text-sm font-medium transition-colors">
+                    + 添加文件
+                  </button>
+                </div>
               ) : (
-                <>没有匹配的文件</>
+                <div className="text-center text-gray-500 py-20 border-2 border-dashed border-gray-700 rounded-xl">
+                  <p className="text-gray-400 text-lg mb-1">没有匹配的文件</p>
+                  <p className="text-gray-600 text-sm">尝试调整搜索条件或分类筛选</p>
+                </div>
               )}
             </div>
           ) : viewMode === 'list' ? (
@@ -399,10 +506,11 @@ export default function FileManager() {
                     onChange={selectAllFiltered}
                     className="rounded accent-cyan-500 w-5 h-5 cursor-pointer" />
                 </label>
-                <span className="flex-1 ml-1">文件名</span>
+                <span className="flex-1 ml-1">文件名 / 来源</span>
                 <span className="w-24 text-right mr-8">大小</span>
                 <span className="w-24 text-right mr-8">类型</span>
                 <span className="w-40 text-right mr-10">时间</span>
+                <span className="w-16 shrink-0" />
               </div>
               {filtered.map(f => (
                 <div key={f.hash} onClick={() => toggleFile(f.hash)} className={`flex items-center px-6 py-3 border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors group cursor-pointer ${selected[f.hash] ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : ''}`}>
@@ -410,12 +518,26 @@ export default function FileManager() {
                     <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded accent-cyan-500 w-5 h-5 cursor-pointer" />
                   </label>
                   <span className="mr-3 text-xl shrink-0">{extIcon(f.mime_type)}</span>
-                  <a href={api.getDownloadUrl(f.hash)} onClick={e => e.stopPropagation()} className="text-sm text-blue-300 truncate flex-1 min-w-0 hover:text-blue-100 hover:underline cursor-pointer" title={`下载 ${f.filename}`}>{f.filename}</a>
+                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                    {getProviderBadge(f)}
+                    <a href={api.getDownloadUrl(f.hash)} onClick={e => e.stopPropagation()} className="text-sm text-blue-300 truncate min-w-0 hover:text-blue-100 hover:underline cursor-pointer" title={`下载 ${f.filename}`}>{f.filename}</a>
+                  </div>
                   <span className="text-sm text-gray-400 w-24 text-right shrink-0 mr-8">{formatSize(f.size)}</span>
                   <span className="text-xs text-gray-500 w-24 text-right shrink-0 mr-8 overflow-hidden text-ellipsis whitespace-nowrap">{(f.mime_type || '').split(';')[0].split('/').pop() || '-'}</span>
                   <span className="text-xs text-gray-500 w-40 text-right shrink-0 mr-6">{(f.created_at || '').replace('T', ' ').substring(0, 16)}</span>
-                  <div className="flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                    <button onClick={(e) => { e.stopPropagation(); handleCreateFromFile(f); }} className="text-[10px] bg-teal-600 hover:bg-teal-500 px-2 py-0.5 rounded whitespace-nowrap">创建合集</button>
+                  <div className="flex items-center space-x-1 shrink-0">
+                    {/* swarm indicator */}
+                    {swarmData[f.hash] > 0 && (
+                      <span className="text-[10px] text-emerald-400 bg-emerald-900/30 px-1.5 py-0.5 rounded-full mr-1 shrink-0" title={`${swarmData[f.hash]} 个节点有此文件`}>
+                        🌱 {swarmData[f.hash]}
+                      </span>
+                    )}
+                    {/* share button */}
+                    <button onClick={(e) => handleShare(f, e)} className="text-xs px-1.5 py-0.5 rounded hover:bg-gray-700 text-gray-400 hover:text-yellow-400 transition-colors" title="分享此文件">
+                      📤
+                    </button>
+                    {/* create collection button */}
+                    <button onClick={(e) => { e.stopPropagation(); handleCreateFromFile(f); }} className="text-[10px] bg-teal-600 hover:bg-teal-500 px-2 py-0.5 rounded whitespace-nowrap transition-colors">创建合集</button>
                   </div>
                 </div>
               ))}
@@ -429,6 +551,34 @@ export default function FileManager() {
             </div>
           )}
         </div>
+
+        {/* multi-select action bar */}
+        {selCount > 0 && (
+          <div className="fixed bottom-0 left-0 right-0 bg-gray-900/80 backdrop-blur-md border-t border-gray-700 z-50 px-6 py-3 flex items-center justify-between shadow-2xl">
+            <span className="text-sm text-cyan-400 bg-cyan-400/10 px-3 py-1 rounded-full font-medium">
+              已选择 {selCount} 个文件
+            </span>
+            <div className="flex items-center space-x-3">
+              <button onClick={handleCreateCollection} className="bg-teal-600 hover:bg-teal-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                创建合集 ({selCount})
+              </button>
+              <button onClick={handleShareSelected} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                分享选中 ({selCount})
+              </button>
+              <button onClick={handleDeleteSelected} className="bg-red-700 hover:bg-red-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                删除选中 ({selCount})
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* notification toast */}
+        {notification && (
+          <div className="fixed top-4 right-4 z-50 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2.5 shadow-xl text-sm max-w-xs">
+            <span className="text-green-400 mr-1.5">✓</span>
+            {notification}
+          </div>
+        )}
       </div>
 
       {showFileBrowser && (
