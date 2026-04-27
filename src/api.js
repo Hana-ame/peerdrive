@@ -92,6 +92,16 @@ export const p2pPush = (peerId, collectionName) =>
   request('POST', '/p2p/push', { peer_id: peerId, collection_name: collectionName });
 export const p2pRequestFile = (hash) => request('POST', '/p2p/request-file', { hash });
 export const getWSInfo = () => request('GET', '/p2p/ws/info');
+export const getSignalPeers = () => request('GET', '/p2p/status').then(r => r.signal_peers || []);
+
+/* ---- P2P BT ---- */
+export const getBTStatus = () => request('GET', '/p2p/bt/status');
+export const btAnnounce = (hash) => request('POST', '/p2p/bt/announce', { hash });
+export const btFind = (hash) => request('POST', '/p2p/bt/find', { hash });
+
+/* ---- P2P Dual ---- */
+export const dualAnnounce = (hash) => request('POST', '/p2p/dual/announce', { hash });
+export const dualFind = (hash) => request('POST', '/p2p/dual/find', { hash });
 
 export { getApiBaseUrl as WS_TRANSFER_URL_BASE };
 export const WS_TRANSFER_URL = getApiBase().replace(/^http/, 'ws') + '/ws/transfer';
