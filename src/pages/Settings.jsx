@@ -12,6 +12,44 @@ export default function Settings({ dataConsent, setDataConsent }) {
   const [testResult, setTestResult] = useState(null);
   const [showKey, setShowKey] = useState(false);
 
+  // Registration server auth
+  const [regServer, setRegServer] = useState(localStorage.getItem('peerdrive_reg_server') || '');
+  const [regUsername, setRegUsername] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regToken, setRegToken] = useState(localStorage.getItem('peerdrive_auth_key') || '');
+  const [regLoading, setRegLoading] = useState(false);
+  const [regError, setRegError] = useState('');
+
+  const regApiCall = async (path, body) => {
+    const res = await fetch(`${regServer}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  };
+  const handleRegister = async () => {
+    if (!regServer || !regUsername || !regPassword) return setRegError('请填写完整');
+    setRegLoading(true); setRegError('');
+    try {
+      await regApiCall('/auth/register', { username: regUsername, password: regPassword });
+      const data = await regApiCall('/auth/login', { username: regUsername, password: regPassword });
+      setRegToken(data.token || '');
+      localStorage.setItem('peerdrive_auth_key', data.token || '');
+      setRegPassword('');
+    } catch(e) { setRegError(e.message); }
+    setRegLoading(false);
+  };
+  const handleLogin = async () => {
+    if (!regServer || !regUsername || !regPassword) return setRegError('请填写完整');
+    setRegLoading(true); setRegError('');
+    try {
+      const data = await regApiCall('/auth/login', { username: regUsername, password: regPassword });
+      setRegToken(data.token || '');
+      localStorage.setItem('peerdrive_auth_key', data.token || '');
+      setRegPassword('');
+    } catch(e) { setRegError(e.message); }
+    setRegLoading(false);
+  };
+
   const [llmEndpoint, setLlmEndpoint] = useState(api.getLlmEndpoint());
   const [llmModel, setLlmModel] = useState(api.getLlmModel());
   const [llmApiKey, setLlmApiKey] = useState(api.getLlmApiKey());
@@ -171,6 +209,31 @@ export default function Settings({ dataConsent, setDataConsent }) {
             <button onClick={addKeyToUrl} className="text-blue-400 hover:underline">写入 URL 哈希</button>
             ）
           </p>
+        </div>
+
+        {/* Registration Server */}
+        <div className="bg-gray-800 rounded-lg p-4 mb-4 border border-green-800/30">
+          <h3 className="text-sm font-bold mb-3">🔐 注册服务器</h3>
+          <div className="flex gap-2 mb-2">
+            <input type="text" value={regServer} onChange={e => setRegServer(e.target.value)}
+              placeholder="https://bwh.moonchan.xyz:4000"
+              className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600" />
+            <button onClick={() => { localStorage.setItem('peerdrive_reg_server', regServer); alert('已保存'); }}
+              className="bg-gray-600 hover:bg-gray-500 px-3 py-2 rounded text-sm">保存</button>
+          </div>
+          <div className="flex gap-2">
+            <input type="text" value={regUsername} onChange={e => setRegUsername(e.target.value)}
+              placeholder="用户名" className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm focus:outline-none focus:border-blue-500 border border-gray-600" />
+            <input type="password" value={regPassword} onChange={e => setRegPassword(e.target.value)}
+              placeholder="密码" onKeyDown={e => e.key==='Enter' && handleRegister()}
+              className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm focus:outline-none focus:border-blue-500 border border-gray-600" />
+            <button onClick={handleRegister} disabled={regLoading}
+              className="bg-green-600 hover:bg-green-700 disabled:opacity-40 px-3 py-2 rounded text-sm whitespace-nowrap">注册</button>
+            <button onClick={handleLogin} disabled={regLoading}
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 px-3 py-2 rounded text-sm whitespace-nowrap">登录</button>
+          </div>
+          {regToken && <p className="text-xs text-green-400 mt-1">已登录: {regUsername} · Token: {regToken.substring(0,20)}...</p>}
+          {regError && <p className="text-xs text-red-400 mt-1">{regError}</p>}
         </div>
 
         {/* LLM Configuration */}
