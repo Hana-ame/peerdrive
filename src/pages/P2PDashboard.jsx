@@ -49,8 +49,8 @@ export default function P2PDashboard() {
         api.getSignalPeers(),
       ]);
       setStatus(s);
-      setPeers(p || []);
-      setDiscovered(d || []);
+      setPeers(Array.isArray(p) ? p : p?.peers || []);
+      setDiscovered(Array.isArray(d) ? d : d?.peers || []);
       setSignalPeers(sp || []);
       setLastRefresh(new Date());
     } catch { /* ignore silent errors */ }
