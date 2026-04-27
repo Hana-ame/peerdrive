@@ -20,6 +20,7 @@ import (
 	"net/http"
 
 	"peerdrive/internal/config"
+	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
@@ -31,25 +32,31 @@ import (
 var fileSvc *service.FileService
 
 func InitFileController(svc *service.FileService) {
+	log.LogDebug("ctrl-file: InitFileController")
 	fileSvc = svc
 }
 
 // UploadFile godoc
 func UploadFile(c *gin.Context) {
+	log.LogDebug("ctrl-file: UploadFile")
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
+		log.LogWarn("ctrl-file: UploadFile no file provided")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
 		return
 	}
 	defer file.Close()
 
+	log.LogDebug("ctrl-file: UploadFile filename=%s", header.Filename)
 	meta, err := fileSvc.Upload(file, header.Filename)
 
 	if errors.Is(err, service.ErrStorageDisabled) {
+		log.LogWarn("ctrl-file: UploadFile storage disabled")
 		c.JSON(http.StatusForbidden, gin.H{"error": "storage is disabled"})
 		return
 	}
 	if errors.Is(err, service.ErrFileAlreadyExists) {
+		log.LogInfo("ctrl-file: UploadFile %s already exists (hash=%s)", header.Filename, meta.Hash)
 		c.JSON(http.StatusOK, gin.H{
 			"hash":           meta.Hash,
 			"size":           meta.Size,
@@ -60,10 +67,12 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		log.LogError("ctrl-file: UploadFile %s failed: %v", header.Filename, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	log.LogInfo("ctrl-file: UploadFile %s uploaded (hash=%s, size=%d)", header.Filename, meta.Hash, meta.Size)
 	c.JSON(http.StatusCreated, gin.H{
 		"hash":           meta.Hash,
 		"size":           meta.Size,
@@ -75,61 +84,74 @@ func UploadFile(c *gin.Context) {
 
 // RegisterLocalFile godoc
 func RegisterLocalFile(c *gin.Context) {
+	log.LogDebug("ctrl-file: RegisterLocalFile")
 	var req struct {
 		Path     string `json:"path"`
 		Filename string `json:"filename"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-file: RegisterLocalFile invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
 	hash, err := fileSvc.RegisterLocal(req.Path, req.Filename)
 	if err != nil {
+		log.LogError("ctrl-file: RegisterLocalFile %s failed: %v", req.Path, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	log.LogInfo("ctrl-file: RegisterLocalFile path=%s hash=%s", req.Path, hash)
 	c.JSON(http.StatusOK, gin.H{"hash": hash, "filename": req.Filename})
 }
 
 // RegisterFolder godoc
 func RegisterFolder(c *gin.Context) {
+	log.LogDebug("ctrl-file: RegisterFolder")
 	var req struct {
 		FolderPath string `json:"folder_path"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-file: RegisterFolder invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
 	results, err := fileSvc.RegisterFolder(req.FolderPath)
 	if err != nil {
+		log.LogError("ctrl-file: RegisterFolder %s failed: %v", req.FolderPath, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	log.LogInfo("ctrl-file: RegisterFolder %s registered %d files", req.FolderPath, len(results))
 	c.JSON(http.StatusOK, gin.H{"registered": results})
 }
 
 // VerifyFile godoc
 func VerifyFile(c *gin.Context) {
+	log.LogDebug("ctrl-file: VerifyFile")
 	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
+		log.LogWarn("ctrl-file: VerifyFile invalid hash: %s", hash)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
 		return
 	}
 
 	meta, err := fileSvc.Verify(hash)
 	if err != nil {
+		log.LogError("ctrl-file: VerifyFile %s failed: %v", hash, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if meta == nil {
+		log.LogInfo("ctrl-file: VerifyFile %s not found", hash)
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
 	}
 
+	log.LogInfo("ctrl-file: VerifyFile %s found (size=%d)", hash, meta.Size)
 	c.JSON(http.StatusOK, gin.H{
 		"hash":     meta.Hash,
 		"filename": meta.Filename,
@@ -140,37 +162,45 @@ func VerifyFile(c *gin.Context) {
 
 // DeleteFile godoc
 func DeleteFile(c *gin.Context) {
+	log.LogDebug("ctrl-file: DeleteFile")
 	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
+		log.LogWarn("ctrl-file: DeleteFile invalid hash: %s", hash)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
 		return
 	}
 
 	if err := fileSvc.Delete(hash); err != nil {
+		log.LogError("ctrl-file: DeleteFile %s failed: %v", hash, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	log.LogInfo("ctrl-file: DeleteFile %s deleted", hash)
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
 // DiffVersions godoc
 func DiffVersions(c *gin.Context) {
+	log.LogDebug("ctrl-file: DiffVersions")
 	var req struct {
 		VersionA int `json:"version_a"`
 		VersionB int `json:"version_b"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-file: DiffVersions invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 	entriesA, err := repository.GetVersionEntries(req.VersionA)
 	if err != nil {
+		log.LogError("ctrl-file: DiffVersions version A %d: %v", req.VersionA, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	entriesB, err := repository.GetVersionEntries(req.VersionB)
 	if err != nil {
+		log.LogError("ctrl-file: DiffVersions version B %d: %v", req.VersionB, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -200,6 +230,7 @@ func DiffVersions(c *gin.Context) {
 			removed = append(removed, map[string]string{"path": e.Path, "hash": e.FileHash})
 		}
 	}
+	log.LogInfo("ctrl-file: DiffVersions %d->%d: added=%d removed=%d modified=%d", req.VersionA, req.VersionB, len(added), len(removed), len(modified))
 	c.JSON(http.StatusOK, gin.H{"added": added, "removed": removed, "modified": modified})
 }
 
@@ -214,8 +245,10 @@ func DiffVersions(c *gin.Context) {
 // @Router       /files [get]
 func ListFiles(c *gin.Context) {
 	sortBy := c.DefaultQuery("sort", "time")
+	log.LogDebug("ctrl-file: ListFiles sort=%s", sortBy)
 	items, err := repository.ListAllFiles(sortBy)
 	if err != nil {
+		log.LogError("ctrl-file: ListFiles failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -227,6 +260,7 @@ func ListFiles(c *gin.Context) {
 
 // BrowseDir godoc
 func BrowseDir(c *gin.Context) {
+	log.LogDebug("ctrl-file: BrowseDir")
 	dirPath := c.Query("path")
 	if dirPath == "" {
 		dirPath = config.DefaultRootPath()
@@ -234,11 +268,13 @@ func BrowseDir(c *gin.Context) {
 
 	entries, err := fileSvc.BrowseDir(dirPath)
 	if err != nil {
+		log.LogError("ctrl-file: BrowseDir %s failed: %v", dirPath, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if entries == nil {
 		entries = []model.DirEntry{}
 	}
+	log.LogInfo("ctrl-file: BrowseDir %s found %d entries", dirPath, len(entries))
 	c.JSON(http.StatusOK, entries)
 }

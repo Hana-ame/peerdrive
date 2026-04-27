@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"peerdrive/internal/config"
+	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 
@@ -67,7 +68,11 @@ type fileResponse struct {
 }
 
 func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error) {
+	defer log.LogDuration("P2PService.NewP2PService")()
+	log.LogDebug("p2p: NewP2PService starting (enabled=%v)", cfg.P2PEnable)
+
 	if !cfg.P2PEnable {
+		log.LogInfo("p2p: P2P disabled, returning minimal service")
 		return &P2PService{cfg: cfg}, nil
 	}
 
@@ -94,7 +99,7 @@ func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error)
 			addrs, err := parseStaticRelays(staticRelays)
 			if err == nil && len(addrs) > 0 {
 				opts = append(opts, libp2p.EnableAutoRelayWithStaticRelays(addrs))
-				logf("using %d static relay(s)", len(addrs))
+				log.LogInfo("p2p: using %d static relay(s)", len(addrs))
 			}
 		}
 	}
@@ -109,17 +114,20 @@ func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error)
 
 	h, err := libp2p.New(opts...)
 	if err != nil {
+		log.LogError("p2p: NewP2PService libp2p host creation failed: %v", err)
 		return nil, fmt.Errorf("libp2p host: %w", err)
 	}
 
 	kdht, err := dht.New(ctx, h, dht.Mode(dht.ModeServer))
 	if err != nil {
 		h.Close()
+		log.LogError("p2p: NewP2PService DHT init failed: %v", err)
 		return nil, fmt.Errorf("dht init: %w", err)
 	}
 
 	if err := kdht.Bootstrap(ctx); err != nil {
 		h.Close()
+		log.LogError("p2p: NewP2PService DHT bootstrap failed: %v", err)
 		return nil, fmt.Errorf("dht bootstrap: %w", err)
 	}
 
@@ -143,13 +151,13 @@ func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error)
 
 	if cfg.P2PMDNSEnable {
 		if err := svc.setupMDNS(ctx); err != nil {
-			logf("mdns setup warning: %v", err)
+			log.LogWarn("p2p: mdns setup warning: %v", err)
 		}
 	}
 
 	if cfg.P2PBootstrapPeer != "" {
 		if err := svc.connectToBootstrap(ctx, cfg.P2PBootstrapPeer); err != nil {
-			logf("bootstrap connection warning: %v", err)
+			log.LogWarn("p2p: bootstrap connection warning: %v", err)
 		}
 	}
 
@@ -163,12 +171,8 @@ func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error)
 	svc.ConnMgr.AutoConnectFromDiscovered()
 	svc.ConnMgr.StartHeartbeat()
 
+	log.LogInfo("p2p: NewP2PService completed, peerID=%s", h.ID().String())
 	return svc, nil
-}
-
-func logf(format string, args ...interface{}) {
-	full := fmt.Sprintf("[p2p] "+format, args...)
-	os.Stderr.WriteString(full + "\n")
 }
 
 func (p *P2PService) CfgP2PEnabled() bool {
@@ -176,17 +180,22 @@ func (p *P2PService) CfgP2PEnabled() bool {
 }
 
 func (p *P2PService) IsEnabled() bool {
-	return p.cfg != nil && p.cfg.P2PEnable && p.Host != nil
+	enabled := p.cfg != nil && p.cfg.P2PEnable && p.Host != nil
+	log.LogDebug("p2p: IsEnabled=%v", enabled)
+	return enabled
 }
 
 func (p *P2PService) GetNodeInfo() (peer.ID, []string) {
+	defer log.LogDuration("P2PService.GetNodeInfo")()
 	if !p.IsEnabled() {
+		log.LogDebug("p2p: GetNodeInfo returning empty (P2P disabled)")
 		return "", []string{}
 	}
 	addrs := make([]string, 0)
 	for _, addr := range p.Host.Addrs() {
 		addrs = append(addrs, addr.String())
 	}
+	log.LogInfo("p2p: GetNodeInfo peerID=%s, addrs=%v", p.Host.ID().String(), addrs)
 	return p.Host.ID(), addrs
 }
 
@@ -221,10 +230,22 @@ func (p *P2PService) PingPeer(ctx context.Context, peerID peer.ID) (time.Duratio
 }
 
 func (p *P2PService) Connect(ctx context.Context, addrInfo peer.AddrInfo) error {
+	defer log.LogDuration("P2PService.Connect")()
+	log.LogDebug("p2p: Connect peer=%s", addrInfo.ID.String())
+
 	if !p.IsEnabled() {
-		return fmt.Errorf("p2p not enabled")
+		err := fmt.Errorf("p2p not enabled")
+		log.LogError("p2p: Connect failed: %v", err)
+		return err
 	}
-	return p.Host.Connect(ctx, addrInfo)
+
+	if err := p.Host.Connect(ctx, addrInfo); err != nil {
+		log.LogError("p2p: Connect to %s failed: %v", addrInfo.ID.String(), err)
+		return err
+	}
+
+	log.LogInfo("p2p: Connect to %s successful", addrInfo.ID.String())
+	return nil
 }
 
 func (p *P2PService) ConnectByAddr(ctx context.Context, addrStr string) error {
@@ -243,17 +264,30 @@ func (p *P2PService) ConnectByAddr(ctx context.Context, addrStr string) error {
 }
 
 func (p *P2PService) AnnounceHash(hash string) error {
+	defer log.LogDuration("P2PService.AnnounceHash")()
+	log.LogDebug("p2p: AnnounceHash hash=%s", hash)
+
 	if !p.IsEnabled() || p.DHT == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return p.DHT.Provide(ctx, cidFromSha256(hash), true)
+	if err := p.DHT.Provide(ctx, cidFromSha256(hash), true); err != nil {
+		log.LogError("p2p: AnnounceHash failed: %v", err)
+		return err
+	}
+	log.LogInfo("p2p: AnnounceHash %s successful", hash)
+	return nil
 }
 
 func (p *P2PService) FindProviders(hash string) ([]peer.AddrInfo, error) {
+	defer log.LogDuration("P2PService.FindProviders")()
+	log.LogDebug("p2p: FindProviders hash=%s", hash)
+
 	if !p.IsEnabled() || p.DHT == nil {
-		return nil, fmt.Errorf("dht not available")
+		err := fmt.Errorf("dht not available")
+		log.LogError("p2p: FindProviders failed: %v", err)
+		return nil, err
 	}
 	p.mu.RLock()
 	for _, info := range p.discovered {
@@ -271,6 +305,7 @@ func (p *P2PService) FindProviders(hash string) ([]peer.AddrInfo, error) {
 	cid := cidFromSha256(hash)
 	providers, err := p.DHT.FindProviders(ctx, cid)
 	if err != nil {
+		log.LogError("p2p: FindProviders DHT search failed: %v", err)
 		return nil, fmt.Errorf("dht find providers: %w", err)
 	}
 
@@ -281,24 +316,33 @@ func (p *P2PService) FindProviders(hash string) ([]peer.AddrInfo, error) {
 		}
 		result = append(result, pi)
 	}
+
+	log.LogInfo("p2p: FindProviders for %s found %d providers", hash, len(result))
 	return result, nil
 }
 
 func (p *P2PService) FetchFile(ctx context.Context, hash string, peers []peer.AddrInfo) ([]byte, error) {
+	defer log.LogDuration("P2PService.FetchFile")()
+	log.LogDebug("p2p: FetchFile hash=%s, peers=%d", hash, len(peers))
+
 	if !p.IsEnabled() {
-		return nil, fmt.Errorf("p2p not enabled")
+		err := fmt.Errorf("p2p not enabled")
+		log.LogError("p2p: FetchFile failed: %v", err)
+		return nil, err
 	}
 
 	if len(peers) == 0 {
 		var err error
 		peers, err = p.FindProviders(hash)
 		if err != nil {
-			logf("DHT search failed for %s: %v", hash, err)
+			log.LogWarn("p2p: DHT search failed for %s: %v", hash, err)
 		}
 	}
 
 	if len(peers) == 0 {
-		return nil, fmt.Errorf("no peers available for %s", hash)
+		err := fmt.Errorf("no peers available for %s", hash)
+		log.LogError("p2p: %v", err)
+		return nil, err
 	}
 
 	for _, pi := range peers {
@@ -316,20 +360,23 @@ func (p *P2PService) FetchFile(ctx context.Context, hash string, peers []peer.Ad
 
 		data, err := p.requestData(ctx, pi.ID, hash)
 		if err != nil {
-			logf("fetch from %s failed: %v", pi.ID, err)
+			log.LogWarn("p2p: fetch from %s failed: %v", pi.ID, err)
 			continue
 		}
 
 		h := sha256.Sum256(data)
 		if hex.EncodeToString(h[:]) != hash {
-			logf("hash mismatch from %s, discarding", pi.ID)
+			log.LogWarn("p2p: hash mismatch from %s, discarding", pi.ID)
 			continue
 		}
 
+		log.LogInfo("p2p: fetched %s from %s (%d bytes)", hash, pi.ID.String(), len(data))
 		return data, nil
 	}
 
-	return nil, fmt.Errorf("file not found on any peer")
+	err := fmt.Errorf("file not found on any peer")
+	log.LogError("p2p: FetchFile %s: %v", hash, err)
+	return nil, err
 }
 
 func (p *P2PService) FetchCollection(ctx context.Context, hash string, peers []peer.AddrInfo) (*model.AnonCollection, error) {
@@ -345,11 +392,17 @@ func (p *P2PService) FetchCollection(ctx context.Context, hash string, peers []p
 }
 
 func (p *P2PService) SyncFiles(ctx context.Context, peerID peer.ID, hashes []string, targetDir string) ([]string, error) {
+	defer log.LogDuration("P2PService.SyncFiles")()
+	log.LogDebug("p2p: SyncFiles peer=%s, hashes=%d, target=%s", peerID.String(), len(hashes), targetDir)
+
 	if !p.IsEnabled() {
-		return nil, fmt.Errorf("p2p not enabled")
+		err := fmt.Errorf("p2p not enabled")
+		log.LogError("p2p: SyncFiles failed: %v", err)
+		return nil, err
 	}
 
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		log.LogError("p2p: SyncFiles create target dir failed: %v", err)
 		return nil, fmt.Errorf("create target dir: %w", err)
 	}
 
@@ -357,16 +410,19 @@ func (p *P2PService) SyncFiles(ctx context.Context, peerID peer.ID, hashes []str
 	for _, hash := range hashes {
 		data, err := p.requestData(ctx, peerID, hash)
 		if err != nil {
+			log.LogError("p2p: SyncFiles fetch %s failed: %v", hash, err)
 			return nil, fmt.Errorf("fetch %s: %w", hash, err)
 		}
 
 		h := sha256.Sum256(data)
 		if hex.EncodeToString(h[:]) != hash {
+			log.LogError("p2p: SyncFiles hash mismatch for %s", hash)
 			return nil, fmt.Errorf("hash mismatch for %s", hash)
 		}
 
 		destPath := filepath.Join(targetDir, hash)
 		if err := os.WriteFile(destPath, data, 0644); err != nil {
+			log.LogError("p2p: SyncFiles write %s failed: %v", destPath, err)
 			return nil, fmt.Errorf("write %s: %w", destPath, err)
 		}
 
@@ -386,6 +442,7 @@ func (p *P2PService) SyncFiles(ctx context.Context, peerID peer.ID, hashes []str
 		synced = append(synced, hash)
 	}
 
+	log.LogInfo("p2p: SyncFiles synced %d files from %s", len(synced), peerID.String())
 	return synced, nil
 }
 
@@ -421,11 +478,13 @@ func (p *P2PService) requestData(ctx context.Context, peerID peer.ID, hash strin
 }
 
 func (p *P2PService) handleExchange(stream network.Stream) {
+	log.LogDebug("p2p: handleExchange from %s", stream.Conn().RemotePeer().String())
 	defer stream.Close()
 
 	reader := bufio.NewReader(stream)
 	hashLine, err := reader.ReadString('\n')
 	if err != nil {
+		log.LogWarn("p2p: handleExchange bad request from %s: %v", stream.Conn().RemotePeer().String(), err)
 		fmt.Fprintf(stream, "ERR bad request\n")
 		return
 	}
@@ -441,6 +500,7 @@ func (p *P2PService) handleExchange(stream network.Stream) {
 		filePath := filepath.Join(p.storageDir, hash[:2], hash)
 		info, err := os.Stat(filePath)
 		if err != nil {
+			log.LogDebug("p2p: handleExchange SIZE not found for %s", hash)
 			fmt.Fprintf(stream, "ERR not found\n")
 			return
 		}
@@ -471,25 +531,29 @@ func (p *P2PService) handleExchange(stream network.Stream) {
 		}
 	}
 	if err != nil || data == nil {
+		log.LogDebug("p2p: handleExchange file not found for %s", hash)
 		fmt.Fprintf(stream, "ERR not found\n")
 		return
 	}
 
+	log.LogInfo("p2p: handleExchange serving %s to %s (%d bytes)", hash, stream.Conn().RemotePeer().String(), len(data))
 	fmt.Fprintf(stream, "OK %d\n", len(data))
 	stream.Write(data)
 }
 
 func (p *P2PService) handleAnnounce(stream network.Stream) {
+	log.LogDebug("p2p: handleAnnounce from %s", stream.Conn().RemotePeer().String())
 	defer stream.Close()
 
 	reader := bufio.NewReader(stream)
 	hashLine, err := reader.ReadString('\n')
 	if err != nil {
+		log.LogWarn("p2p: handleAnnounce read error from %s: %v", stream.Conn().RemotePeer().String(), err)
 		return
 	}
 	hash := trimNewline(hashLine)
 
-	logf("peer %s announced hash %s", stream.Conn().RemotePeer(), hash)
+	log.LogInfo("p2p: peer %s announced hash %s", stream.Conn().RemotePeer().String(), hash)
 
 	if p.DHT != nil {
 		go func() {
@@ -503,16 +567,18 @@ func (p *P2PService) handleAnnounce(stream network.Stream) {
 }
 
 func (p *P2PService) handleRequest(stream network.Stream) {
+	log.LogDebug("p2p: handleRequest from %s", stream.Conn().RemotePeer().String())
 	defer stream.Close()
 
 	reader := bufio.NewReader(stream)
 	hashLine, err := reader.ReadString('\n')
 	if err != nil {
+		log.LogWarn("p2p: handleRequest read error from %s: %v", stream.Conn().RemotePeer().String(), err)
 		return
 	}
 	hash := trimNewline(hashLine)
 
-	logf("peer %s requested hash %s via stream", stream.Conn().RemotePeer(), hash)
+	log.LogInfo("p2p: peer %s requested hash %s via stream", stream.Conn().RemotePeer().String(), hash)
 
 	p.requestCh <- fileRequest{
 		Hash:   hash,
@@ -540,7 +606,7 @@ func (p *P2PService) processWSRequests() {
 		}
 
 		if err != nil || data == nil {
-			logf("requested file not found: %s", req.Hash)
+			log.LogWarn("p2p: requested file not found: %s", req.Hash)
 			continue
 		}
 
@@ -555,13 +621,19 @@ func (p *P2PService) processWSRequests() {
 }
 
 func (p *P2PService) BroadcastRequest(hash string, peerIDs []peer.ID) ([]fileResponse, error) {
+	defer log.LogDuration("P2PService.BroadcastRequest")()
+	log.LogDebug("p2p: BroadcastRequest hash=%s, targets=%d", hash, len(peerIDs))
+
 	if !p.IsEnabled() {
-		return nil, fmt.Errorf("p2p not enabled")
+		err := fmt.Errorf("p2p not enabled")
+		log.LogError("p2p: BroadcastRequest failed: %v", err)
+		return nil, err
 	}
 
 	targets := peerIDs
 	if len(targets) == 0 {
 		targets = p.GetConnectedPeers()
+		log.LogDebug("p2p: BroadcastRequest using %d connected peers", len(targets))
 	}
 
 	results := make([]fileResponse, 0)
@@ -581,9 +653,12 @@ func (p *P2PService) BroadcastRequest(hash string, peerIDs []peer.ID) ([]fileRes
 	wg.Wait()
 
 	if len(results) == 0 {
-		return nil, fmt.Errorf("no peers available")
+		err := fmt.Errorf("no peers available")
+		log.LogError("p2p: BroadcastRequest: %v", err)
+		return nil, err
 	}
 
+	log.LogInfo("p2p: BroadcastRequest %s got %d responses", hash, len(results))
 	return results, nil
 }
 
@@ -596,7 +671,7 @@ func (p *P2PService) HandlePeerFound(pi peer.AddrInfo) {
 	p.mu.Lock()
 	p.discovered[pi.ID] = pi
 	p.mu.Unlock()
-	logf("discovered peer: %s", pi.ID.String())
+	log.LogInfo("p2p: discovered peer: %s", pi.ID.String())
 }
 
 func (p *P2PService) RelayMode() string {
@@ -619,6 +694,7 @@ func (p *P2PService) connectToBootstrap(ctx context.Context, addr string) error 
 }
 
 func (p *P2PService) Close() error {
+	log.LogDebug("p2p: Close shutting down")
 	if p.ConnMgr != nil {
 		p.ConnMgr.StopHeartbeat()
 	}

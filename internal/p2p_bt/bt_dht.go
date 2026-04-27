@@ -7,8 +7,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
-	"os"
 	"time"
+
+	"peerdrive/internal/log"
 
 	dht "github.com/anacrolix/dht/v2"
 )
@@ -24,6 +25,9 @@ type BTDHTService struct {
 // public BitTorrent bootstrap nodes and returns a ready-to-use BTDHTService.
 // If listenAddr is empty, a random port is used.
 func NewBTDHT(listenAddr string) (*BTDHTService, error) {
+	defer log.LogDuration("BTDHT.NewBTDHT")()
+	log.LogDebug("bt-dht: NewBTDHT listenAddr=%s", listenAddr)
+
 	cfg := dht.NewDefaultServerConfig()
 	cfg.StartingNodes = func() ([]dht.Addr, error) {
 		return dht.ResolveHostPorts([]string{
@@ -46,15 +50,16 @@ func NewBTDHT(listenAddr string) (*BTDHTService, error) {
 
 	srv, err := dht.NewServer(cfg)
 	if err != nil {
+		log.LogError("bt-dht: NewBTDHT server creation failed: %v", err)
 		return nil, fmt.Errorf("dht new server: %w", err)
 	}
 
 	// Bootstrap the routing table.
 	bootstrapStats, err := srv.Bootstrap()
 	if err != nil {
-		logf("DHT bootstrap warning: %v", err)
+		log.LogWarn("bt-dht: bootstrap warning: %v", err)
 	} else {
-		logf("DHT bootstrap complete: %d nodes contacted", bootstrapStats.NumResponses)
+		log.LogInfo("bt-dht: bootstrap complete: %d nodes contacted", bootstrapStats.NumResponses)
 	}
 
 	// Allow a moment for the routing table to populate.
@@ -65,7 +70,7 @@ func NewBTDHT(listenAddr string) (*BTDHTService, error) {
 		listenAddr: listenAddr,
 	}
 
-	logf("BT DHT server listening on %s (%d nodes)", srv.Addr().String(), srv.NumNodes())
+	log.LogInfo("bt-dht: server listening on %s (%d nodes)", srv.Addr().String(), srv.NumNodes())
 	return svc, nil
 }
 
@@ -73,11 +78,17 @@ func NewBTDHT(listenAddr string) (*BTDHTService, error) {
 // The hash is truncated to the first 20 bytes for the 160-bit infohash.
 // The listen port is automatically used for the announce.
 func (s *BTDHTService) Announce(hash string) error {
+	defer log.LogDuration("BTDHT.Announce")()
+	log.LogDebug("bt-dht: Announce hash=%s", hash)
+
 	if s.Server == nil {
-		return fmt.Errorf("DHT server not available")
+		err := fmt.Errorf("DHT server not available")
+		log.LogError("bt-dht: Announce failed: %v", err)
+		return err
 	}
 	ih, err := infoHashFromHex(hash)
 	if err != nil {
+		log.LogError("bt-dht: Announce invalid hash: %v", err)
 		return err
 	}
 	var infoHash [20]byte
@@ -88,22 +99,29 @@ func (s *BTDHTService) Announce(hash string) error {
 
 	ann, err := s.Server.Announce(infoHash, dhtPort, false)
 	if err != nil {
+		log.LogError("bt-dht: Announce failed: %v", err)
 		return fmt.Errorf("DHT announce: %w", err)
 	}
 	ann.Close()
 
-	logf("announced %s on BT DHT", hash)
+	log.LogInfo("bt-dht: announced %s on BT DHT", hash)
 	return nil
 }
 
 // FindProviders looks up providers for the given hash on the BitTorrent DHT
 // and returns peer addresses as "ip:port" strings.
 func (s *BTDHTService) FindProviders(hash string) ([]string, error) {
+	defer log.LogDuration("BTDHT.FindProviders")()
+	log.LogDebug("bt-dht: FindProviders hash=%s", hash)
+
 	if s.Server == nil {
-		return nil, fmt.Errorf("DHT server not available")
+		err := fmt.Errorf("DHT server not available")
+		log.LogError("bt-dht: FindProviders failed: %v", err)
+		return nil, err
 	}
 	ih, err := infoHashFromHex(hash)
 	if err != nil {
+		log.LogError("bt-dht: FindProviders invalid hash: %v", err)
 		return nil, err
 	}
 	var infoHash [20]byte
@@ -111,6 +129,7 @@ func (s *BTDHTService) FindProviders(hash string) ([]string, error) {
 
 	ann, err := s.Server.AnnounceTraversal(infoHash)
 	if err != nil {
+		log.LogError("bt-dht: FindProviders traversal failed: %v", err)
 		return nil, fmt.Errorf("DHT find: %w", err)
 	}
 	defer ann.Close()
@@ -125,6 +144,7 @@ func (s *BTDHTService) FindProviders(hash string) ([]string, error) {
 		select {
 		case pv, ok := <-ann.Peers:
 			if !ok {
+				log.LogInfo("bt-dht: FindProviders done for %s, found %d peers", hash, len(peers))
 				return peers, nil
 			}
 			for _, p := range pv.Peers {
@@ -135,8 +155,10 @@ func (s *BTDHTService) FindProviders(hash string) ([]string, error) {
 				}
 			}
 		case <-ann.Finished():
+			log.LogInfo("bt-dht: FindProviders finished for %s, found %d peers", hash, len(peers))
 			return peers, nil
 		case <-timeout:
+			log.LogInfo("bt-dht: FindProviders timeout for %s, found %d peers", hash, len(peers))
 			return peers, nil
 		}
 	}
@@ -155,7 +177,7 @@ func (s *BTDHTService) Close() error {
 	if s.Server == nil {
 		return nil
 	}
-	logf("shutting down BT DHT server")
+	log.LogInfo("bt-dht: shutting down BT DHT server")
 	s.Server.Close()
 	return nil
 }
@@ -172,9 +194,4 @@ func infoHashFromHex(hash string) ([]byte, error) {
 	}
 	// SHA256 produces 32 bytes; BitTorrent uses 160-bit (20-byte) infohashes.
 	return raw[:20], nil
-}
-
-func logf(format string, args ...interface{}) {
-	full := fmt.Sprintf("[bt-dht] "+format, args...)
-	os.Stderr.WriteString(full + "\n")
 }

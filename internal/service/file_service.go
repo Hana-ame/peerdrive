@@ -12,12 +12,13 @@ import (
 	"path/filepath"
 
 	"peerdrive/internal/config"
+	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 )
 
 var (
-	ErrStorageDisabled  = errors.New("storage is disabled")
+	ErrStorageDisabled   = errors.New("storage is disabled")
 	ErrFileAlreadyExists = errors.New("file already exists")
 )
 
@@ -34,8 +35,13 @@ func NewFileService(cfg *config.Config) *FileService {
 }
 
 func (s *FileService) RegisterLocal(path, filename string) (string, error) {
+	defer log.LogDuration("FileService.RegisterLocal")()
+	log.LogDebug("file-svc: RegisterLocal path=%s filename=%s", path, filename)
+
 	if !s.storageEnable {
-		return "", ErrStorageDisabled
+		err := ErrStorageDisabled
+		log.LogError("file-svc: RegisterLocal storage disabled")
+		return "", err
 	}
 
 	absPath := path
@@ -45,18 +51,21 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 
 	f, err := os.Open(absPath)
 	if err != nil {
+		log.LogError("file-svc: RegisterLocal open %s failed: %v", absPath, err)
 		return "", err
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
+		log.LogError("file-svc: RegisterLocal stat %s failed: %v", absPath, err)
 		return "", err
 	}
 	size := info.Size()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
+		log.LogError("file-svc: RegisterLocal hash %s failed: %v", absPath, err)
 		return "", err
 	}
 	hash := hex.EncodeToString(h.Sum(nil))
@@ -85,12 +94,18 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 
 	_ = repository.InsertFileProvider(hash, "local", absPath)
 
+	log.LogInfo("file-svc: RegisterLocal %s -> hash=%s size=%d", absPath, hash, size)
 	return hash, nil
 }
 
 func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, error) {
+	defer log.LogDuration("FileService.RegisterFolder")()
+	log.LogDebug("file-svc: RegisterFolder folderPath=%s", folderPath)
+
 	if !s.storageEnable {
-		return nil, ErrStorageDisabled
+		err := ErrStorageDisabled
+		log.LogError("file-svc: RegisterFolder storage disabled")
+		return nil, err
 	}
 
 	absDir := folderPath
@@ -116,16 +131,29 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 		})
 		return nil
 	})
-	return results, err
+
+	if err != nil {
+		log.LogError("file-svc: RegisterFolder walk %s failed: %v", absDir, err)
+		return results, err
+	}
+
+	log.LogInfo("file-svc: RegisterFolder %s registered %d files", folderPath, len(results))
+	return results, nil
 }
 
 func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta, error) {
+	defer log.LogDuration("FileService.Upload")()
+	log.LogDebug("file-svc: Upload filename=%s", filename)
+
 	if !s.storageEnable {
-		return nil, ErrStorageDisabled
+		err := ErrStorageDisabled
+		log.LogError("file-svc: Upload storage disabled")
+		return nil, err
 	}
 
 	tmpFile, err := os.CreateTemp("", "peerdrive-upload-*")
 	if err != nil {
+		log.LogError("file-svc: Upload create temp file failed: %v", err)
 		return nil, fmt.Errorf("create temp file: %w", err)
 	}
 	tmpName := tmpFile.Name()
@@ -136,6 +164,7 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 	size, err := io.Copy(tmpFile, tee)
 	if err != nil {
 		tmpFile.Close()
+		log.LogError("file-svc: Upload write temp file failed: %v", err)
 		return nil, fmt.Errorf("write temp file: %w", err)
 	}
 	hash := hex.EncodeToString(hasher.Sum(nil))
@@ -152,6 +181,7 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 	tmpFile.Close()
 
 	if existing, _ := repository.GetFileMeta(hash); existing != nil {
+		log.LogInfo("file-svc: Upload %s already exists (hash=%s)", filename, hash)
 		return existing, ErrFileAlreadyExists
 	}
 
@@ -162,6 +192,7 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 	if err := os.Rename(tmpName, fullPath); err != nil {
 		// Fallback: cross-device link, use copy instead
 		if err := copyFile(tmpName, fullPath); err != nil {
+			log.LogError("file-svc: Upload move to storage failed: %v", err)
 			return nil, fmt.Errorf("move to storage: %w", err)
 		}
 	}
@@ -176,23 +207,44 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 		Type:     repository.FileTypeBlob,
 	}
 	if err := repository.InsertFileMeta(meta); err != nil {
+		log.LogError("file-svc: Upload insert meta failed: %v", err)
 		return nil, fmt.Errorf("insert meta: %w", err)
 	}
 
 	if err := repository.InsertFileProvider(hash, "local", relPath); err != nil {
+		log.LogError("file-svc: Upload insert provider failed: %v", err)
 		return nil, fmt.Errorf("insert provider: %w", err)
 	}
 
+	log.LogInfo("file-svc: Upload %s completed (hash=%s, size=%d)", filename, hash, size)
 	return meta, nil
 }
 
 func (s *FileService) Verify(hash string) (*model.FileMeta, error) {
-	return repository.GetFileMeta(hash)
+	defer log.LogDuration("FileService.Verify")()
+	log.LogDebug("file-svc: Verify hash=%s", hash)
+
+	meta, err := repository.GetFileMeta(hash)
+	if err != nil {
+		log.LogError("file-svc: Verify %s failed: %v", hash, err)
+		return nil, err
+	}
+	if meta != nil {
+		log.LogInfo("file-svc: Verify %s found (size=%d)", hash, meta.Size)
+	} else {
+		log.LogInfo("file-svc: Verify %s not found", hash)
+	}
+	return meta, nil
 }
 
 func (s *FileService) Delete(hash string) error {
+	defer log.LogDuration("FileService.Delete")()
+	log.LogDebug("file-svc: Delete hash=%s", hash)
+
 	if !s.storageEnable {
-		return ErrStorageDisabled
+		err := ErrStorageDisabled
+		log.LogError("file-svc: Delete storage disabled")
+		return err
 	}
 	providers, _ := repository.GetFileProviders(hash)
 	for _, p := range providers {
@@ -202,12 +254,18 @@ func (s *FileService) Delete(hash string) error {
 	}
 	repository.DB.Exec(`DELETE FROM file_providers WHERE hash = ?`, hash)
 	repository.DB.Exec(`DELETE FROM file_meta WHERE hash = ?`, hash)
+	log.LogInfo("file-svc: Delete %s completed", hash)
 	return nil
 }
 
 func (s *FileService) BrowseDir(dirPath string) ([]model.DirEntry, error) {
+	defer log.LogDuration("FileService.BrowseDir")()
+	log.LogDebug("file-svc: BrowseDir dirPath=%s", dirPath)
+
 	if !s.storageEnable {
-		return nil, ErrStorageDisabled
+		err := ErrStorageDisabled
+		log.LogError("file-svc: BrowseDir storage disabled")
+		return nil, err
 	}
 
 	absDir := dirPath
@@ -217,6 +275,7 @@ func (s *FileService) BrowseDir(dirPath string) ([]model.DirEntry, error) {
 
 	entries, err := os.ReadDir(absDir)
 	if err != nil {
+		log.LogError("file-svc: BrowseDir read %s failed: %v", absDir, err)
 		return nil, err
 	}
 
@@ -236,6 +295,7 @@ func (s *FileService) BrowseDir(dirPath string) ([]model.DirEntry, error) {
 		}
 		result = append(result, entry)
 	}
+	log.LogInfo("file-svc: BrowseDir %s found %d entries", absDir, len(result))
 	return result, nil
 }
 

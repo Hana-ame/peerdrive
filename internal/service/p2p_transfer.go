@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"peerdrive/internal/log"
+
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -97,8 +99,13 @@ func (ct *ChunkedTransfer) GetProgress(hash string) *TransferProgress {
 
 // DownloadFile downloads a file from P2P network using chunked parallel transfer.
 func (ct *ChunkedTransfer) DownloadFile(ctx context.Context, hash string, targetPath string, onProgress func(float64)) (*TransferProgress, error) {
+	defer log.LogDuration("ChunkedTransfer.DownloadFile")()
+	log.LogDebug("p2p-transfer: DownloadFile hash=%s target=%s", hash, targetPath)
+
 	if !ct.svc.IsEnabled() {
-		return nil, fmt.Errorf("p2p not enabled")
+		err := fmt.Errorf("p2p not enabled")
+		log.LogError("p2p-transfer: DownloadFile failed: %v", err)
+		return nil, err
 	}
 
 	// Find providers
@@ -111,8 +118,12 @@ func (ct *ChunkedTransfer) DownloadFile(ctx context.Context, hash string, target
 		}
 	}
 	if len(providers) == 0 {
-		return nil, fmt.Errorf("no providers found for %s", hash)
+		err := fmt.Errorf("no providers found for %s", hash)
+		log.LogError("p2p-transfer: DownloadFile: %v", err)
+		return nil, err
 	}
+
+	log.LogInfo("p2p-transfer: found %d providers for %s", len(providers), hash)
 
 	// First, get total size from any peer
 	var totalSize int64
@@ -124,6 +135,7 @@ func (ct *ChunkedTransfer) DownloadFile(ctx context.Context, hash string, target
 		}
 	}
 	if metaErr != nil {
+		log.LogError("p2p-transfer: cannot determine file size: %v", metaErr)
 		return nil, fmt.Errorf("cannot determine file size: %w", metaErr)
 	}
 
@@ -147,10 +159,12 @@ func (ct *ChunkedTransfer) DownloadFile(ctx context.Context, hash string, target
 
 	// Prepare output file
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		log.LogError("p2p-transfer: create target dir failed: %v", err)
 		return nil, fmt.Errorf("create target dir: %w", err)
 	}
 	outFile, err := os.Create(targetPath)
 	if err != nil {
+		log.LogError("p2p-transfer: create output file failed: %v", err)
 		return nil, fmt.Errorf("create output file: %w", err)
 	}
 	defer outFile.Close()
@@ -229,6 +243,7 @@ func (ct *ChunkedTransfer) DownloadFile(ctx context.Context, hash string, target
 		progress.Error = firstErr
 		progress.Done = true
 		os.Remove(targetPath)
+		log.LogError("p2p-transfer: DownloadFile %s failed: %v", hash, firstErr)
 		return progress, firstErr
 	}
 
@@ -241,10 +256,12 @@ func (ct *ChunkedTransfer) DownloadFile(ctx context.Context, hash string, target
 		progress.Error = fmt.Errorf("hash verification failed")
 		progress.Done = true
 		os.Remove(targetPath)
+		log.LogError("p2p-transfer: hash verification failed for %s", hash)
 		return progress, progress.Error
 	}
 
 	progress.Done = true
+	log.LogInfo("p2p-transfer: DownloadFile %s completed (%d bytes, %d chunks)", hash, totalSize, progress.ChunksTotal)
 	return progress, nil
 }
 
@@ -268,8 +285,12 @@ func (ct *ChunkedTransfer) requestFileSize(ctx context.Context, peerID peer.ID, 
 }
 
 func (ct *ChunkedTransfer) requestChunk(ctx context.Context, peerID peer.ID, hash string, offset int64, size int) ([]byte, error) {
+	defer log.LogDuration("ChunkedTransfer.requestChunk")()
+	log.LogDebug("p2p-transfer: requestChunk peer=%s hash=%s offset=%d size=%d", peerID.String(), hash, offset, size)
+
 	stream, err := ct.svc.Host.NewStream(ctx, peerID, protocol.ID(ProtocolChunk))
 	if err != nil {
+		log.LogError("p2p-transfer: requestChunk open stream failed: %v", err)
 		return nil, fmt.Errorf("open chunk stream: %w", err)
 	}
 	defer stream.Close()
@@ -279,23 +300,29 @@ func (ct *ChunkedTransfer) requestChunk(ctx context.Context, peerID peer.ID, has
 
 	data := make([]byte, size)
 	if _, err := io.ReadFull(stream, data); err != nil {
+		log.LogError("p2p-transfer: requestChunk read failed: %v", err)
 		return nil, fmt.Errorf("read chunk: %w", err)
 	}
+
+	log.LogInfo("p2p-transfer: requestChunk from %s returned %d bytes", peerID.String(), len(data))
 	return data, nil
 }
 
 func (ct *ChunkedTransfer) handleChunkRequest(stream network.Stream) {
+	log.LogDebug("p2p-transfer: handleChunkRequest from %s", stream.Conn().RemotePeer().String())
 	defer stream.Close()
 
 	var hash string
 	var offset int64
 	var size int
 	if _, err := fmt.Fscanf(stream, "CHUNK %s %d %d\n", &hash, &offset, &size); err != nil {
+		log.LogWarn("p2p-transfer: handleChunkRequest bad request: %v", err)
 		fmt.Fprintf(stream, "ERR bad request\n")
 		return
 	}
 
 	if size > ChunkSize {
+		log.LogWarn("p2p-transfer: chunk too large from %s: %d (max %d)", stream.Conn().RemotePeer().String(), size, ChunkSize)
 		fmt.Fprintf(stream, "ERR chunk too large (max %d)\n", ChunkSize)
 		return
 	}
@@ -304,11 +331,13 @@ func (ct *ChunkedTransfer) handleChunkRequest(stream network.Stream) {
 	filePath := filepath.Join(ct.svc.storageDir, hash[:2], hash)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
+		log.LogWarn("p2p-transfer: handleChunkRequest file not found: %s", hash)
 		fmt.Fprintf(stream, "ERR not found\n")
 		return
 	}
 
 	if int(offset) >= len(data) {
+		log.LogWarn("p2p-transfer: handleChunkRequest offset out of range: %d >= %d", offset, len(data))
 		fmt.Fprintf(stream, "ERR offset out of range\n")
 		return
 	}
@@ -318,6 +347,7 @@ func (ct *ChunkedTransfer) handleChunkRequest(stream network.Stream) {
 		end = len(data)
 	}
 
+	log.LogInfo("p2p-transfer: sending chunk %s offset=%d size=%d to %s", hash, offset, end-int(offset), stream.Conn().RemotePeer().String())
 	stream.Write(data[offset:end])
 }
 

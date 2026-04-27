@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"peerdrive/internal/config"
+	"peerdrive/internal/log"
 	"peerdrive/internal/p2p_bt"
 )
 
@@ -38,6 +39,9 @@ func NewDualP2PService(cfg *config.Config, ipfsSvc *P2PService, btSvc *p2p_bt.BT
 // Announce announces the given hash on both the IPFS/libp2p DHT and the
 // BitTorrent DHT (if available).
 func (d *DualP2PService) Announce(hash string) error {
+	defer log.LogDuration("DualP2PService.Announce")()
+	log.LogDebug("p2p-dual: Announce hash=%s", hash)
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -46,7 +50,7 @@ func (d *DualP2PService) Announce(hash string) error {
 
 	if d.IPFS != nil && d.IPFS.IsEnabled() {
 		if err := d.IPFS.AnnounceHash(hash); err != nil {
-			logf("dual announce on IPFS failed: %v", err)
+			log.LogWarn("p2p-dual: announce on IPFS failed: %v", err)
 			lastErr = err
 		} else {
 			hasAny = true
@@ -55,7 +59,7 @@ func (d *DualP2PService) Announce(hash string) error {
 
 	if d.BT != nil {
 		if err := d.BT.Announce(hash); err != nil {
-			logf("dual announce on BT DHT failed: %v", err)
+			log.LogWarn("p2p-dual: announce on BT DHT failed: %v", err)
 			lastErr = err
 		} else {
 			hasAny = true
@@ -64,18 +68,25 @@ func (d *DualP2PService) Announce(hash string) error {
 
 	if !hasAny {
 		if lastErr != nil {
-			return fmt.Errorf("dual announce failed on all networks: %w", lastErr)
+			err := fmt.Errorf("dual announce failed on all networks: %w", lastErr)
+			log.LogError("p2p-dual: %v", err)
+			return err
 		}
-		return fmt.Errorf("dual announce: no network available")
+		err := fmt.Errorf("dual announce: no network available")
+		log.LogError("p2p-dual: %v", err)
+		return err
 	}
 
-	logf("dual announced %s on IPFS + BT DHT", hash)
+	log.LogInfo("p2p-dual: announced %s on IPFS + BT DHT", hash)
 	return nil
 }
 
 // FindProviders searches both the IPFS/libp2p DHT and the BitTorrent DHT for
 // providers of the given hash and returns merged results.
 func (d *DualP2PService) FindProviders(hash string) (*DualFindResult, error) {
+	defer log.LogDuration("DualP2PService.FindProviders")()
+	log.LogDebug("p2p-dual: FindProviders hash=%s", hash)
+
 	result := &DualFindResult{}
 
 	var wg sync.WaitGroup
@@ -87,7 +98,7 @@ func (d *DualP2PService) FindProviders(hash string) (*DualFindResult, error) {
 			defer wg.Done()
 			providers, err := d.IPFS.FindProviders(hash)
 			if err != nil {
-				logf("dual find on IPFS for %s: %v", hash, err)
+				log.LogWarn("p2p-dual: find on IPFS for %s: %v", hash, err)
 				return
 			}
 			for _, pi := range providers {
@@ -109,7 +120,7 @@ func (d *DualP2PService) FindProviders(hash string) (*DualFindResult, error) {
 			defer wg.Done()
 			btPeers, err := d.BT.FindProviders(hash)
 			if err != nil {
-				logf("dual find on BT DHT for %s: %v", hash, err)
+				log.LogWarn("p2p-dual: find on BT DHT for %s: %v", hash, err)
 				return
 			}
 			result.BTPeers = btPeers
@@ -118,6 +129,7 @@ func (d *DualP2PService) FindProviders(hash string) (*DualFindResult, error) {
 
 	wg.Wait()
 
+	log.LogInfo("p2p-dual: FindProviders for %s: %d IPFS peers, %d BT peers", hash, len(result.IPFSPeers), len(result.BTPeers))
 	return result, nil
 }
 
@@ -125,14 +137,17 @@ func (d *DualP2PService) FindProviders(hash string) (*DualFindResult, error) {
 // (with all its peer discovery), and falls back to the BitTorrent DHT if
 // IPFS did not yield a result.
 func (d *DualP2PService) FetchFile(ctx context.Context, hash string) ([]byte, error) {
+	defer log.LogDuration("DualP2PService.FetchFile")()
+	log.LogDebug("p2p-dual: FetchFile hash=%s", hash)
+
 	// Try IPFS first.
 	if d.IPFS != nil && d.IPFS.IsEnabled() {
 		data, err := d.IPFS.FetchFile(ctx, hash, nil)
 		if err == nil {
-			logf("dual fetch: got %s from IPFS", hash)
+			log.LogInfo("p2p-dual: got %s from IPFS", hash)
 			return data, nil
 		}
-		logf("dual fetch: IPFS failed for %s: %v", hash, err)
+		log.LogWarn("p2p-dual: IPFS failed for %s: %v", hash, err)
 	}
 
 	// Fall back to BT DHT (HTTP-based fetch).
@@ -140,12 +155,13 @@ func (d *DualP2PService) FetchFile(ctx context.Context, hash string) ([]byte, er
 		bridge := p2p_bt.NewBTBridge(d.BT, d.cfg.StorageDir)
 		data, err := bridge.FetchFile(ctx, hash)
 		if err == nil {
-			logf("dual fetch: got %s from BT DHT fallback", hash)
+			log.LogInfo("p2p-dual: got %s from BT DHT fallback", hash)
 			return data, nil
 		}
-		logf("dual fetch: BT DHT fallback failed for %s: %v", hash, err)
+		log.LogWarn("p2p-dual: BT DHT fallback failed for %s: %v", hash, err)
 	}
 
-	return nil, fmt.Errorf("could not fetch %s from any network", hash)
+	err := fmt.Errorf("could not fetch %s from any network", hash)
+	log.LogError("p2p-dual: %v", err)
+	return nil, err
 }
-

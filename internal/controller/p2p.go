@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/p2p_bt"
 	"peerdrive/internal/service"
@@ -20,35 +21,43 @@ var btSvc *p2p_bt.BTDHTService
 var dualSvc *service.DualP2PService
 
 func InitP2PController(svc *service.P2PService) {
+	log.LogDebug("ctrl-p2p: InitP2PController")
 	p2pSvc = svc
 }
 
 func InitBTController(svc *p2p_bt.BTDHTService) {
+	log.LogDebug("ctrl-p2p: InitBTController")
 	btSvc = svc
 }
 
 func InitDualController(svc *service.DualP2PService) {
+	log.LogDebug("ctrl-p2p: InitDualController")
 	dualSvc = svc
 }
 
 func GetNodeInfo(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: GetNodeInfo")
 	id, addrs := p2pSvc.GetNodeInfo()
 	c.JSON(http.StatusOK, gin.H{
 		"peer_id": id.String(),
 		"addrs":   addrs,
 	})
+	log.LogInfo("ctrl-p2p: GetNodeInfo peerID=%s, addrs=%d", id.String(), len(addrs))
 }
 
 func GetPeers(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: GetPeers")
 	peers := p2pSvc.GetConnectedPeers()
 	strs := make([]string, len(peers))
 	for i, p := range peers {
 		strs[i] = p.String()
 	}
 	c.JSON(http.StatusOK, gin.H{"peers": strs})
+	log.LogInfo("ctrl-p2p: GetPeers count=%d", len(peers))
 }
 
 func GetDiscoveredPeers(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: GetDiscoveredPeers")
 	peers := p2pSvc.GetDiscoveredPeers()
 	result := make([]gin.H, len(peers))
 	for i, pi := range peers {
@@ -62,58 +71,73 @@ func GetDiscoveredPeers(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"peers": result})
+	log.LogInfo("ctrl-p2p: GetDiscoveredPeers count=%d", len(peers))
 }
 
 func PingPeer(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: PingPeer")
 	raw := c.Param("peer_id")
 	pid, err := peer.Decode(raw)
 	if err != nil {
+		log.LogWarn("ctrl-p2p: PingPeer invalid peer id: %s", raw)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid peer id"})
 		return
 	}
 	rtt, err := p2pSvc.PingPeer(c.Request.Context(), pid)
 	if err != nil {
+		log.LogError("ctrl-p2p: PingPeer failed for %s: %v", raw, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.LogInfo("ctrl-p2p: PingPeer %s RTT=%s", raw, rtt.String())
 	c.JSON(http.StatusOK, gin.H{"peer": raw, "rtt": rtt.String()})
 }
 
 func ConnectPeer(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: ConnectPeer")
 	var req struct {
 		Addr string `json:"addr"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: ConnectPeer invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 	if err := p2pSvc.ConnectByAddr(c.Request.Context(), req.Addr); err != nil {
+		log.LogError("ctrl-p2p: ConnectPeer to %s failed: %v", req.Addr, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.LogInfo("ctrl-p2p: ConnectPeer to %s successful", req.Addr)
 	c.JSON(http.StatusOK, gin.H{"status": "connected"})
 }
 
 func AnnounceHash(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: AnnounceHash")
 	var req struct {
 		Hash string `json:"hash"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: AnnounceHash invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 	if err := p2pSvc.AnnounceHash(req.Hash); err != nil {
+		log.LogError("ctrl-p2p: AnnounceHash %s failed: %v", req.Hash, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.LogInfo("ctrl-p2p: AnnounceHash %s successful", req.Hash)
 	c.JSON(http.StatusOK, gin.H{"status": "announced"})
 }
 
 func FetchCollection(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: FetchCollection")
 	var req struct {
 		Hash string `json:"hash"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: FetchCollection invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
@@ -123,14 +147,17 @@ func FetchCollection(c *gin.Context) {
 
 	coll, err := p2pSvc.FetchCollection(ctx, req.Hash, nil)
 	if err != nil {
+		log.LogError("ctrl-p2p: FetchCollection %s failed: %v", req.Hash, err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found on p2p: " + err.Error()})
 		return
 	}
 
+	log.LogInfo("ctrl-p2p: FetchCollection %s successful", req.Hash)
 	c.JSON(http.StatusOK, coll)
 }
 
 func SyncFromPeer(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: SyncFromPeer")
 	var req struct {
 		PeerID     string   `json:"peer_id"`
 		Hash       string   `json:"hash"`
@@ -138,12 +165,14 @@ func SyncFromPeer(c *gin.Context) {
 		TargetDir  string   `json:"target_dir"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: SyncFromPeer invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
 	pid, err := peer.Decode(req.PeerID)
 	if err != nil {
+		log.LogWarn("ctrl-p2p: SyncFromPeer invalid peer id: %s", req.PeerID)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid peer id"})
 		return
 	}
@@ -153,6 +182,7 @@ func SyncFromPeer(c *gin.Context) {
 		defer cancel()
 		coll, err := p2pSvc.FetchCollection(ctx, req.Hash, []peer.AddrInfo{{ID: pid}})
 		if err != nil {
+			log.LogError("ctrl-p2p: SyncFromPeer fetch collection %s failed: %v", req.Hash, err)
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
@@ -164,6 +194,7 @@ func SyncFromPeer(c *gin.Context) {
 	}
 
 	if len(req.FileHashes) == 0 {
+		log.LogWarn("ctrl-p2p: SyncFromPeer no files to sync")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "no files to sync"})
 		return
 	}
@@ -177,10 +208,12 @@ func SyncFromPeer(c *gin.Context) {
 
 	synced, err := p2pSvc.SyncFiles(ctx, pid, req.FileHashes, req.TargetDir)
 	if err != nil {
+		log.LogError("ctrl-p2p: SyncFromPeer failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	log.LogInfo("ctrl-p2p: SyncFromPeer synced %d files from %s to %s", len(synced), req.PeerID, req.TargetDir)
 	c.JSON(http.StatusOK, gin.H{
 		"synced":   synced,
 		"count":    len(synced),
@@ -189,6 +222,7 @@ func SyncFromPeer(c *gin.Context) {
 }
 
 func P2PStatus(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: P2PStatus")
 	enabled := p2pSvc.IsEnabled()
 	resp := gin.H{"enabled": enabled}
 	if enabled {
@@ -229,12 +263,14 @@ func P2PStatus(c *gin.Context) {
 }
 
 func PushSync(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: PushSync")
 	var req struct {
 		Hash      string                      `json:"hash"`
 		Entries   []model.AnonCollectionEntry `json:"entries"`
 		TargetDir string                      `json:"target_dir"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: PushSync invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
@@ -242,6 +278,7 @@ func PushSync(c *gin.Context) {
 	if req.Hash != "" {
 		coll, err := anonSvc.GetCollectionByHash(req.Hash)
 		if err != nil {
+			log.LogError("ctrl-p2p: PushSync collection %s not found: %v", req.Hash, err)
 			c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 			return
 		}
@@ -256,6 +293,7 @@ func PushSync(c *gin.Context) {
 	}
 
 	if len(req.Entries) == 0 {
+		log.LogWarn("ctrl-p2p: PushSync no entries to sync")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "no entries to sync"})
 		return
 	}
@@ -272,6 +310,7 @@ func PushSync(c *gin.Context) {
 		targetDir = "./" + targetDir
 	}
 
+	log.LogInfo("ctrl-p2p: PushSync %d entries target=%s", len(req.Entries), targetDir)
 	c.JSON(http.StatusOK, gin.H{
 		"entries":    req.Entries,
 		"target_dir": targetDir,
@@ -280,11 +319,13 @@ func PushSync(c *gin.Context) {
 }
 
 func RequestFile(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: RequestFile")
 	var req struct {
 		Hash    string   `json:"hash"`
 		PeerIDs []string `json:"peer_ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: RequestFile invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
@@ -293,6 +334,7 @@ func RequestFile(c *gin.Context) {
 	for i, s := range req.PeerIDs {
 		pid, err := peer.Decode(s)
 		if err != nil {
+			log.LogWarn("ctrl-p2p: RequestFile invalid peer id: %s", s)
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid peer id: %s", s)})
 			return
 		}
@@ -301,6 +343,7 @@ func RequestFile(c *gin.Context) {
 
 	results, err := p2pSvc.BroadcastRequest(req.Hash, pids)
 	if err != nil {
+		log.LogError("ctrl-p2p: RequestFile %s failed: %v", req.Hash, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -316,6 +359,7 @@ func RequestFile(c *gin.Context) {
 		responses[i] = info
 	}
 
+	log.LogInfo("ctrl-p2p: RequestFile %s got %d responses", req.Hash, len(results))
 	c.JSON(http.StatusOK, gin.H{
 		"hash":       req.Hash,
 		"requested":  len(pids),
@@ -325,6 +369,7 @@ func RequestFile(c *gin.Context) {
 }
 
 func WSInfo(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: WSInfo")
 	c.JSON(http.StatusOK, gin.H{
 		"ws_connections": p2pSvc.WSCount(),
 		"ws_endpoint":    "/ws/transfer",
@@ -335,7 +380,9 @@ func WSInfo(c *gin.Context) {
 // --- BitTorrent DHT handlers ---
 
 func BTDHTStatus(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTDHTStatus")
 	if btSvc == nil || btSvc.Server == nil {
+		log.LogInfo("ctrl-p2p: BTDHTStatus disabled")
 		c.JSON(http.StatusOK, gin.H{"enabled": false})
 		return
 	}
@@ -347,7 +394,9 @@ func BTDHTStatus(c *gin.Context) {
 }
 
 func BTAnnounce(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTAnnounce")
 	if btSvc == nil || btSvc.Server == nil {
+		log.LogError("ctrl-p2p: BTAnnounce BT DHT not enabled")
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
 		return
 	}
@@ -355,18 +404,23 @@ func BTAnnounce(c *gin.Context) {
 		Hash string `json:"hash"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: BTAnnounce invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 	if err := btSvc.Announce(req.Hash); err != nil {
+		log.LogError("ctrl-p2p: BTAnnounce %s failed: %v", req.Hash, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.LogInfo("ctrl-p2p: BTAnnounce %s successful", req.Hash)
 	c.JSON(http.StatusOK, gin.H{"status": "announced on BT DHT"})
 }
 
 func BTFindProviders(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTFindProviders")
 	if btSvc == nil || btSvc.Server == nil {
+		log.LogError("ctrl-p2p: BTFindProviders BT DHT not enabled")
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
 		return
 	}
@@ -374,14 +428,17 @@ func BTFindProviders(c *gin.Context) {
 		Hash string `json:"hash"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: BTFindProviders invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 	peers, err := btSvc.FindProviders(req.Hash)
 	if err != nil {
+		log.LogError("ctrl-p2p: BTFindProviders %s failed: %v", req.Hash, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.LogInfo("ctrl-p2p: BTFindProviders %s found %d peers", req.Hash, len(peers))
 	c.JSON(http.StatusOK, gin.H{
 		"hash":   req.Hash,
 		"peers":  peers,
@@ -392,7 +449,9 @@ func BTFindProviders(c *gin.Context) {
 // --- Dual P2P (IPFS + BT DHT) handlers ---
 
 func DualAnnounce(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: DualAnnounce")
 	if dualSvc == nil {
+		log.LogError("ctrl-p2p: DualAnnounce dual P2P not available")
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Dual P2P not available"})
 		return
 	}
@@ -400,18 +459,23 @@ func DualAnnounce(c *gin.Context) {
 		Hash string `json:"hash"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: DualAnnounce invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 	if err := dualSvc.Announce(req.Hash); err != nil {
+		log.LogError("ctrl-p2p: DualAnnounce %s failed: %v", req.Hash, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.LogInfo("ctrl-p2p: DualAnnounce %s successful", req.Hash)
 	c.JSON(http.StatusOK, gin.H{"status": "announced on both networks"})
 }
 
 func DualFindProviders(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: DualFindProviders")
 	if dualSvc == nil {
+		log.LogError("ctrl-p2p: DualFindProviders dual P2P not available")
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Dual P2P not available"})
 		return
 	}
@@ -419,14 +483,17 @@ func DualFindProviders(c *gin.Context) {
 		Hash string `json:"hash"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: DualFindProviders invalid request")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 	result, err := dualSvc.FindProviders(req.Hash)
 	if err != nil {
+		log.LogError("ctrl-p2p: DualFindProviders %s failed: %v", req.Hash, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	log.LogInfo("ctrl-p2p: DualFindProviders %s: %d IPFS peers, %d BT peers", req.Hash, len(result.IPFSPeers), len(result.BTPeers))
 	c.JSON(http.StatusOK, gin.H{
 		"hash":       req.Hash,
 		"ipfs_peers": result.IPFSPeers,

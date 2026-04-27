@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"peerdrive/internal/log"
 	"peerdrive/internal/repository"
 
 	"github.com/gorilla/websocket"
@@ -86,7 +87,7 @@ func (p *P2PService) WSHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		conn, err := wsUpgrader.Upgrade(w, r, nil)
 		if err != nil {
-			logf("ws upgrade failed: %v", err)
+			log.LogDebug("ws upgrade failed: %v", err)
 			return
 		}
 
@@ -114,7 +115,7 @@ func (p *P2PService) WSHandler() http.HandlerFunc {
 					continue
 				}
 
-				logf("ws request: hash=%s", msg.Hash)
+				log.LogDebug("ws request: hash=%s", msg.Hash)
 				data := p.lookupFile(msg.Hash)
 				if data == nil {
 					if peers := p.GetConnectedPeers(); len(peers) > 0 {

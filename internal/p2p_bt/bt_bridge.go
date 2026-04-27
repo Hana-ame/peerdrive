@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"peerdrive/internal/log"
 )
 
 // BTBridge connects Peerdrive's FileService with the BitTorrent DHT.
@@ -34,16 +36,22 @@ func NewBTBridge(dhtSvc *BTDHTService, storageDir string) *BTBridge {
 // ShareFile announces the given 64-char hex hash on the BitTorrent DHT and
 // records it in the local shared set.
 func (b *BTBridge) ShareFile(hash string) error {
+	defer log.LogDuration("BTBridge.ShareFile")()
+	log.LogDebug("bt-bridge: ShareFile hash=%s", hash)
+
 	if b.DHT == nil {
-		return fmt.Errorf("BT DHT not available")
+		err := fmt.Errorf("BT DHT not available")
+		log.LogError("bt-bridge: ShareFile failed: %v", err)
+		return err
 	}
 	if err := b.DHT.Announce(hash); err != nil {
+		log.LogError("bt-bridge: ShareFile announce failed: %v", err)
 		return fmt.Errorf("share announce: %w", err)
 	}
 	b.mu.Lock()
 	b.shared[hash] = struct{}{}
 	b.mu.Unlock()
-	logf("shared file %s on BT DHT", hash)
+	log.LogInfo("bt-bridge: shared file %s on BT DHT", hash)
 	return nil
 }
 
@@ -51,17 +59,26 @@ func (b *BTBridge) ShareFile(hash string) error {
 // attempts to download the file via HTTP from discovered peers. It returns
 // the file content from the first successful peer.
 func (b *BTBridge) FetchFile(ctx context.Context, hash string) ([]byte, error) {
+	defer log.LogDuration("BTBridge.FetchFile")()
+	log.LogDebug("bt-bridge: FetchFile hash=%s", hash)
+
 	if b.DHT == nil {
-		return nil, fmt.Errorf("BT DHT not available")
+		err := fmt.Errorf("BT DHT not available")
+		log.LogError("bt-bridge: FetchFile failed: %v", err)
+		return nil, err
 	}
 
 	peers, err := b.DHT.FindProviders(hash)
 	if err != nil {
+		log.LogError("bt-bridge: FetchFile find providers failed: %v", err)
 		return nil, fmt.Errorf("find providers: %w", err)
 	}
 	if len(peers) == 0 {
+		log.LogInfo("bt-bridge: no BT DHT providers found for %s", hash)
 		return nil, fmt.Errorf("no BT DHT providers found for %s", hash)
 	}
+
+	log.LogInfo("bt-bridge: found %d BT DHT providers for %s, attempting fetch", len(peers), hash)
 
 	// Try each peer via HTTP. We assume peers serve files on the same port as
 	// their DHT listen port (or an adjacent HTTP port).
@@ -76,27 +93,29 @@ func (b *BTBridge) FetchFile(ctx context.Context, hash string) ([]byte, error) {
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			logf("HTTP fetch from %s failed: %v", peerAddr, err)
+			log.LogWarn("bt-bridge: HTTP fetch from %s failed: %v", peerAddr, err)
 			continue
 		}
 
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			logf("HTTP read from %s failed: %v", peerAddr, err)
+			log.LogWarn("bt-bridge: HTTP read from %s failed: %v", peerAddr, err)
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			logf("HTTP %d from %s", resp.StatusCode, peerAddr)
+			log.LogWarn("bt-bridge: HTTP %d from %s", resp.StatusCode, peerAddr)
 			continue
 		}
 
-		logf("fetched %s from %s (%d bytes)", hash, peerAddr, len(data))
+		log.LogInfo("bt-bridge: fetched %s from %s (%d bytes)", hash, peerAddr, len(data))
 		return data, nil
 	}
 
-	return nil, fmt.Errorf("could not fetch %s from any BT DHT peer", hash)
+	err = fmt.Errorf("could not fetch %s from any BT DHT peer", hash)
+	log.LogError("bt-bridge: %v", err)
+	return nil, err
 }
 
 // ListShared returns all currently shared hashes.

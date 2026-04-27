@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"peerdrive/internal/log"
+
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -70,8 +72,13 @@ func (cm *ConnectionManager) GetKnownPeers() []peer.AddrInfo {
 
 // ConnectToPeer attempts to connect to a peer with retry logic.
 func (cm *ConnectionManager) ConnectToPeer(ctx context.Context, info peer.AddrInfo) error {
+	defer log.LogDuration("ConnectionManager.ConnectToPeer")()
+	log.LogDebug("p2p-conn: ConnectToPeer %s", info.ID.String())
+
 	if !cm.svc.IsEnabled() {
-		return fmt.Errorf("p2p not enabled")
+		err := fmt.Errorf("p2p not enabled")
+		log.LogError("p2p-conn: ConnectToPeer failed: %v", err)
+		return err
 	}
 
 	connectCtx, cancel := context.WithTimeout(ctx, connectionTimeout)
@@ -81,6 +88,7 @@ func (cm *ConnectionManager) ConnectToPeer(ctx context.Context, info peer.AddrIn
 		cm.mu.Lock()
 		cm.failedConns++
 		cm.mu.Unlock()
+		log.LogError("p2p-conn: connect to %s failed: %v", info.ID.String(), err)
 		return fmt.Errorf("connect to %s: %w", info.ID, err)
 	}
 
@@ -89,29 +97,33 @@ func (cm *ConnectionManager) ConnectToPeer(ctx context.Context, info peer.AddrIn
 	cm.successfulConns++
 	cm.mu.Unlock()
 
-	logf("connected to peer: %s", info.ID)
+	log.LogInfo("p2p-conn: connected to peer: %s", info.ID.String())
 	return nil
 }
 
 // StartHeartbeat begins periodic health checks on connected peers.
 func (cm *ConnectionManager) StartHeartbeat() {
+	log.LogDebug("p2p-conn: StartHeartbeat beginning")
 	go cm.heartbeatLoop()
 }
 
 // StopHeartbeat stops the heartbeat goroutine.
 func (cm *ConnectionManager) StopHeartbeat() {
+	log.LogDebug("p2p-conn: StopHeartbeat")
 	if cm.heartbeatCan != nil {
 		cm.heartbeatCan()
 	}
 }
 
 func (cm *ConnectionManager) heartbeatLoop() {
+	log.LogDebug("p2p-conn: heartbeatLoop started")
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-cm.heartbeatCtx.Done():
+			log.LogDebug("p2p-conn: heartbeatLoop stopped")
 			return
 		case <-ticker.C:
 			cm.checkAndReconnect()
@@ -134,17 +146,18 @@ func (cm *ConnectionManager) checkAndReconnect() {
 	for _, info := range peers {
 		connState := cm.svc.Host.Network().Connectedness(info.ID)
 		if connState != network.Connected {
-			logf("reconnecting to peer: %s", info.ID)
+			log.LogWarn("p2p-conn: reconnecting to peer: %s", info.ID)
 			ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
 			if err := cm.svc.Host.Connect(ctx, info); err != nil {
 				cm.mu.Lock()
 				cm.reconnectAttempts++
 				cm.mu.Unlock()
-				logf("reconnect failed to %s: %v", info.ID, err)
+				log.LogWarn("p2p-conn: reconnect failed to %s: %v", info.ID, err)
 			} else {
 				cm.mu.Lock()
 				cm.successfulConns++
 				cm.mu.Unlock()
+				log.LogInfo("p2p-conn: reconnect successful to %s", info.ID)
 			}
 			cancel()
 		}
@@ -153,11 +166,16 @@ func (cm *ConnectionManager) checkAndReconnect() {
 
 // AutoConnectFromDiscovered connects to all currently discovered peers.
 func (cm *ConnectionManager) AutoConnectFromDiscovered() {
+	defer log.LogDuration("ConnectionManager.AutoConnectFromDiscovered")()
+	log.LogDebug("p2p-conn: AutoConnectFromDiscovered starting")
+
 	if !cm.svc.IsEnabled() {
+		log.LogDebug("p2p-conn: AutoConnectFromDiscovered skipped (P2P disabled)")
 		return
 	}
 
 	discovered := cm.svc.GetDiscoveredPeers()
+	log.LogInfo("p2p-conn: AutoConnectFromDiscovered found %d peers", len(discovered))
 	for _, info := range discovered {
 		if cm.svc.Host.Network().Connectedness(info.ID) == network.Connected {
 			continue
@@ -184,11 +202,11 @@ func (cm *ConnectionManager) Stats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"known_peers":       len(cm.knownPeers),
-		"connected_peers":   connectedCount,
+		"known_peers":        len(cm.knownPeers),
+		"connected_peers":    connectedCount,
 		"reconnect_attempts": cm.reconnectAttempts,
-		"successful_conns":  cm.successfulConns,
-		"failed_conns":      cm.failedConns,
+		"successful_conns":   cm.successfulConns,
+		"failed_conns":       cm.failedConns,
 	}
 }
 
