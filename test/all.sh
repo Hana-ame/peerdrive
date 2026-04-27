@@ -35,10 +35,12 @@ fi
 # ── 3. Frontend Vitest ──
 echo ""
 echo "── 3. Frontend Vitest ──"
-if npm run --prefix /mnt/d/WorkPlace/peerdrive/react test 2>&1 | grep -q "Tests.*passed"; then
+VITEST_OUT=$(npm run --prefix /mnt/d/WorkPlace/peerdrive/react test 2>&1)
+if echo "$VITEST_OUT" | grep -qE "Tests\s+[0-9]+\s+passed"; then
   pass "vitest"
 else
   fail "vitest"
+  echo "$VITEST_OUT" | tail -5
 fi
 
 # ── 4. Frontend Build ──
