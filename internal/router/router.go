@@ -109,6 +109,14 @@ func SetupRouter(
 		p2pSvc.SetPeerTracker(peerTracker)
 	}
 
+	// Create and start the PeerScanner when P2P is enabled for proactive
+	// peer discovery and outbound connection maintenance.
+	if p2pSvc != nil && p2pSvc.IsEnabled() {
+		scanner := service.NewPeerScanner(p2pSvc, peerTracker, cfg.RegServerURL)
+		scanner.Start()
+		controller.InitPeerScanner(scanner)
+	}
+
 	// Sync controller initialization
 	syncRepo := repository.NewSyncRepository()
 	syncSvc := service.NewSyncService(syncRepo, downloader)
@@ -124,6 +132,7 @@ func SetupRouter(
 		p2p.GET("/node", controller.GetNodeInfo)
 		p2p.GET("/peers", controller.GetPeers)
 		p2p.GET("/discovered", controller.GetDiscoveredPeers)
+		p2p.GET("/connections", controller.GetConnections)
 		p2p.GET("/ping/:peer_id", controller.PingPeer)
 		p2p.POST("/connect", controller.ConnectPeer)
 		p2p.POST("/announce", controller.AnnounceHash)

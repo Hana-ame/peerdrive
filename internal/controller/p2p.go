@@ -21,6 +21,14 @@ var btSvc *p2p_bt.BTDHTService
 var dualSvc *service.DualP2PService
 
 var peerTracker *service.PeerTracker
+var peerScanner *service.PeerScanner
+
+// InitPeerScanner injects the PeerScanner singleton into the controller
+// package so that handlers can query scanner stats.
+func InitPeerScanner(s *service.PeerScanner) {
+	log.LogDebug("ctrl-p2p: InitPeerScanner")
+	peerScanner = s
+}
 
 func InitP2PController(svc *service.P2PService) {
 	log.LogDebug("ctrl-p2p: InitP2PController")
@@ -554,4 +562,32 @@ func GetP2PStats(c *gin.Context) {
 	stats := peerTracker.GetStats()
 	log.LogInfo("ctrl-p2p: GetP2PStats peers=%v", stats["total_peers_seen"])
 	c.JSON(http.StatusOK, stats)
+}
+
+// GetConnections returns connection counts by direction and scanner status.
+//   GET /p2p/connections
+func GetConnections(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: GetConnections")
+
+	if peerScanner == nil || peerTracker == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"inbound":         0,
+			"outbound":        0,
+			"total":           0,
+			"active_scanners": []string{},
+			"last_scan_times": map[string]string{},
+		})
+		return
+	}
+
+	inbound, outbound := peerTracker.ConnectionCounts()
+
+	c.JSON(http.StatusOK, gin.H{
+		"inbound":         inbound,
+		"outbound":        outbound,
+		"total":           inbound + outbound,
+		"active_scanners": peerScanner.ActiveScanners(),
+		"last_scan_times": peerScanner.LastScanTimes(),
+	})
+	log.LogInfo("ctrl-p2p: GetConnections inbound=%d outbound=%d total=%d", inbound, outbound, inbound+outbound)
 }

@@ -66,16 +66,18 @@ func (t *PeerTracker) RecordConnection(peerID string, addrs []string, userAgent 
 	if existing, ok := t.peers[peerID]; ok {
 		existing.LastSeen = now
 		existing.Addrs = addrs
+		existing.ConnectedAt = now
 		if userAgent != "" {
 			existing.UserAgent = userAgent
 		}
 	} else {
 		t.peers[peerID] = &model.PeerInfo{
-			PeerID:    peerID,
-			Addrs:     addrs,
-			FirstSeen: now,
-			LastSeen:  now,
-			UserAgent: userAgent,
+			PeerID:      peerID,
+			Addrs:       addrs,
+			FirstSeen:   now,
+			LastSeen:    now,
+			ConnectedAt: now,
+			UserAgent:   userAgent,
 		}
 	}
 	t.connectionStart[peerID] = now
@@ -89,6 +91,7 @@ func (t *PeerTracker) RecordDisconnect(peerID string) {
 
 	if existing, ok := t.peers[peerID]; ok {
 		existing.LastSeen = time.Now()
+		existing.DisconnectReason = "remote close"
 		if start, ok := t.connectionStart[peerID]; ok {
 			existing.ConnectionDur = time.Since(start).Round(time.Millisecond).String()
 			delete(t.connectionStart, peerID)
@@ -250,4 +253,36 @@ func (t *PeerTracker) RegServerConnected() bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.regServerConnected
+}
+
+// SetDirection sets the connection direction ("inbound" or "outbound") for a
+// tracked peer. If the peer is not yet tracked this is a no-op.
+func (t *PeerTracker) SetDirection(peerID, direction string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if existing, ok := t.peers[peerID]; ok {
+		existing.Direction = direction
+	}
+}
+
+// ConnectionCounts returns the number of tracked peers by direction. Only
+// peers whose DisconnectReason is empty (i.e. still considered active) are
+// counted.
+func (t *PeerTracker) ConnectionCounts() (inbound, outbound int) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	for _, p := range t.peers {
+		if p.DisconnectReason != "" {
+			continue
+		}
+		switch p.Direction {
+		case "inbound":
+			inbound++
+		case "outbound":
+			outbound++
+		default:
+			outbound++
+		}
+	}
+	return
 }

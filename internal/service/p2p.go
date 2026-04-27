@@ -729,6 +729,11 @@ func (p *P2PService) SetPeerTracker(t *PeerTracker) {
 				if p.tracker != nil {
 					addrs := []string{c.RemoteMultiaddr().String()}
 					p.tracker.RecordConnection(c.RemotePeer().String(), addrs, "")
+					direction := "inbound"
+					if c.Stat().Direction == network.DirOutbound {
+						direction = "outbound"
+					}
+					p.tracker.SetDirection(c.RemotePeer().String(), direction)
 				}
 			},
 			DisconnectedF: func(n network.Network, c network.Conn) {
