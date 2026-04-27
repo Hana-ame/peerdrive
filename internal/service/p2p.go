@@ -167,6 +167,10 @@ func logf(format string, args ...interface{}) {
 	os.Stderr.WriteString(full + "\n")
 }
 
+func (p *P2PService) CfgP2PEnabled() bool {
+	return p.cfg != nil && p.cfg.P2PEnable
+}
+
 func (p *P2PService) IsEnabled() bool {
 	return p.cfg != nil && p.cfg.P2PEnable && p.Host != nil
 }
