@@ -1,27 +1,49 @@
 const STORAGE_KEY = 'peerdrive_api_base';
+const AUTH_TOKEN_KEY = 'peerdrive_auth_token';
 const DEFAULT_API = 'https://wsl-3000.moonchan.xyz';
 
 function getApiBase() {
   return localStorage.getItem(STORAGE_KEY) || DEFAULT_API;
 }
 
+// When user sets API endpoint like "http://host:3000#token123"
+// Extract the token from the URL fragment and store separately.
+// The stored base URL is always the clean URL without fragment.
 function setApiBase(url) {
-  localStorage.setItem(STORAGE_KEY, url);
+  const hashIdx = url.indexOf('#');
+  if (hashIdx >= 0) {
+    const token = url.slice(hashIdx + 1);
+    const baseUrl = url.slice(0, hashIdx);
+    localStorage.setItem(STORAGE_KEY, baseUrl);
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+  } else {
+    localStorage.setItem(STORAGE_KEY, url);
+  }
 }
 
 function getApiBaseUrl() {
   return getApiBase();
 }
 
+// Returns the auth token from URL fragment or settings page, or empty string.
+// URL fragment token (peerdrive_auth_token) is always sent when present.
+// Legacy settings token (peerdrive_auth_key) requires the toggle to be enabled.
+function getAuthToken() {
+  const fragmentToken = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (fragmentToken) return fragmentToken;
+  if (localStorage.getItem('peerdrive_auth_header_enabled') === 'true') {
+    return localStorage.getItem('peerdrive_auth_key') || '';
+  }
+  return '';
+}
+
 async function request(method, path, body = null) {
   const opts = { method, headers: {} };
+  const token = getAuthToken();
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
   if (body) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
-  }
-  if (localStorage.getItem('peerdrive_auth_header_enabled') === 'true') {
-    const token = localStorage.getItem('peerdrive_auth_key');
-    if (token) opts.headers['Authorization'] = `Bearer ${token}`;
   }
   const url = `${getApiBase()}${path}`;
   const res = await fetch(url, opts);
@@ -37,6 +59,8 @@ export const verifyFile = (hash) => request('GET', `/files/verify/${hash}`);
 export const getDownloadUrl = (hash) => `${getApiBase()}/sha256sum/${hash}`;
 export const registerLocalFile = (path, filename) =>
   request('POST', '/files/register_local', { path, filename: filename || path.split('/').pop() });
+export const registerURL = (url, filename = '') =>
+  request('POST', '/files/register_url', { url, filename });
 export const registerFolder = (folderPath) =>
   request('POST', '/files/register_folder', { folder_path: folderPath });
 
@@ -136,7 +160,10 @@ export const setCollectionVisibility = (username, coll, visibility) =>
 export const uploadFile = (file) => {
   const fd = new FormData();
   fd.append('file', file);
-  return fetch(`${getApiBase()}/files/upload`, { method: 'POST', body: fd }).then(r => {
+  const token = getAuthToken();
+  const headers = {};
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  return fetch(`${getApiBase()}/files/upload`, { method: 'POST', body: fd, headers }).then(r => {
     if (!r.ok) throw new Error(`Upload failed: ${r.status}`);
     return r.json();
   });
@@ -151,7 +178,7 @@ export const getTaskStatus = (id) => request('GET', `/tasks/${id}`);
 export const ping = () => request('GET', '/ping');
 
 /* ---- settings ---- */
-export { getApiBase, setApiBase, DEFAULT_API };
+export { getApiBase, setApiBase, getAuthToken, DEFAULT_API };
 
 /* ---- llm ---- */
 const LLM_ENDPOINT_KEY = 'peerdrive_llm_endpoint';
@@ -185,6 +212,11 @@ export function setDataConsent(v) { localStorage.setItem(DATA_CONSENT_KEY, v ? '
 const AUTH_HEADER_KEY = 'peerdrive_auth_header_enabled';
 export function getAuthHeaderEnabled() { return localStorage.getItem(AUTH_HEADER_KEY) === 'true'; }
 export function setAuthHeaderEnabled(v) { localStorage.setItem(AUTH_HEADER_KEY, v ? 'true' : 'false'); }
+
+/* ---- follow redirects ---- */
+const FOLLOW_REDIRECTS_KEY = 'peerdrive_follow_redirects';
+export function getFollowRedirects() { return localStorage.getItem(FOLLOW_REDIRECTS_KEY) !== 'false'; }
+export function setFollowRedirects(v) { localStorage.setItem(FOLLOW_REDIRECTS_KEY, v ? 'true' : 'false'); }
 
 /* ---- p2p network config (frontend-only) ---- */
 const BOOTSTRAP_PEER_KEY = 'peerdrive_bootstrap_peer';

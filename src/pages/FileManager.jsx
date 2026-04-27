@@ -38,6 +38,14 @@ export default function FileManager() {
   const [selectedFiles, setSelectedFiles] = useState({});
   const [browseLoading, setBrowseLoading] = useState(false);
 
+  // URL registration
+  const [addFileTab, setAddFileTab] = useState('local');
+  const [urlInput, setUrlInput] = useState('');
+  const [urlFilename, setUrlFilename] = useState('');
+  const [urlResult, setUrlResult] = useState(null);
+  const [urlLoading, setUrlLoading] = useState(false);
+  const [urlError, setUrlError] = useState('');
+
   const [swarmData, setSwarmData] = useState({});
   const [notification, setNotification] = useState('');
 
@@ -266,6 +274,24 @@ export default function FileManager() {
       alert(`注册完成: ${registered.length} 个文件`);
       loadFiles();
     } catch (e) { alert(`注册失败: ${e.message}`); }
+  };
+
+  const handleRegisterUrl = async () => {
+    const url = urlInput.trim();
+    if (!url) return;
+    setUrlLoading(true);
+    setUrlResult(null);
+    setUrlError('');
+    try {
+      const result = await api.registerURL(url, urlFilename.trim());
+      setUrlResult(result);
+      setUrlInput('');
+      setUrlFilename('');
+      loadFiles();
+    } catch (e) {
+      setUrlError(e.message);
+    }
+    setUrlLoading(false);
   };
 
   const formatSize = (bytes) => {
@@ -587,43 +613,121 @@ export default function FileManager() {
       </div>
 
       {showFileBrowser && (
-        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-xl w-[680px] border border-gray-600 shadow-2xl flex flex-col max-h-[85vh]">
+        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowFileBrowser(false)}>
+          <div className="bg-gray-800 p-6 rounded-xl w-[680px] border border-gray-600 shadow-2xl flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold mb-1">添加文件</h3>
-            <p className="text-xs text-gray-400 mb-4">浏览节点文件系统。选中文件夹注册后自动创建为匿名合集。</p>
+            <p className="text-xs text-gray-400 mb-4">浏览节点文件系统或从 URL 注册文件。</p>
 
-            <div className="flex items-center space-x-2 mb-3">
-              <button onClick={handleRegParent} disabled={currentDir === '/'} className="px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-30 text-xs">←</button>
-              <code className="text-gray-300 text-xs truncate flex-1">{currentDir}</code>
-              <button onClick={() => browseDir('/')} className="px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 text-xs">/</button>
+            {/* Tabs */}
+            <div className="flex space-x-1 mb-4 border-b border-gray-700">
+              <button
+                onClick={() => setAddFileTab('local')}
+                className={`px-4 py-2 text-sm rounded-t transition-colors ${addFileTab === 'local' ? 'bg-gray-700 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:text-white hover:bg-gray-700/50'}`}
+              >
+                本地文件
+              </button>
+              <button
+                onClick={() => setAddFileTab('url')}
+                className={`px-4 py-2 text-sm rounded-t transition-colors ${addFileTab === 'url' ? 'bg-gray-700 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:text-white hover:bg-gray-700/50'}`}
+              >
+                URL 注册
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto bg-gray-900 rounded mb-4 min-h-[200px]">
-              {browseLoading ? (
-                <div className="p-4 text-center text-gray-500">加载中...</div>
-              ) : dirEntries.length === 0 ? (
-                <div className="p-4 text-center text-gray-500">空目录</div>
-              ) : dirEntries.map(e => (
-                <div
-                  key={e.path}
-                  onClick={() => handleRegEnter(e)}
-                  className={`flex items-center px-3 py-2 cursor-pointer hover:bg-gray-800 ${e.is_dir ? 'text-yellow-400' : ''} ${selectedFiles[e.path] ? 'bg-blue-900/30 border-l-2 border-blue-500' : ''}`}
-                >
-                  <span className="mr-2 text-base">{e.is_dir ? '📁' : '📄'}</span>
-                  <span className="flex-1 text-sm truncate">{e.name}</span>
-                  {!e.is_dir && <span className="text-xs text-gray-500 ml-2">{formatSize(e.size)}</span>}
+            {addFileTab === 'local' ? (
+              <>
+                <div className="flex items-center space-x-2 mb-3">
+                  <button onClick={handleRegParent} disabled={currentDir === '/'} className="px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-30 text-xs">←</button>
+                  <code className="text-gray-300 text-xs truncate flex-1">{currentDir}</code>
+                  <button onClick={() => browseDir('/')} className="px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 text-xs">/</button>
                 </div>
-              ))}
-            </div>
 
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-gray-500">{Object.values(selectedFiles).filter(Boolean).length} 个已选</span>
-              <div className="flex space-x-3">
-                <button onClick={handleRegisterCurrentFolder} className="px-3 py-1.5 bg-indigo-700 hover:bg-indigo-600 rounded text-xs">注册当前目录</button>
-                <button onClick={handleRegisterSelected} className="px-3 py-1.5 bg-green-600 hover:bg-green-700 rounded text-xs font-medium">注册选中文件</button>
-                <button onClick={() => setShowFileBrowser(false)} className="px-3 py-1.5 bg-gray-600 rounded text-xs">取消</button>
-              </div>
-            </div>
+                <div className="flex-1 overflow-y-auto bg-gray-900 rounded mb-4 min-h-[200px]">
+                  {browseLoading ? (
+                    <div className="p-4 text-center text-gray-500">加载中...</div>
+                  ) : dirEntries.length === 0 ? (
+                    <div className="p-4 text-center text-gray-500">空目录</div>
+                  ) : dirEntries.map(e => (
+                    <div
+                      key={e.path}
+                      onClick={() => handleRegEnter(e)}
+                      className={`flex items-center px-3 py-2 cursor-pointer hover:bg-gray-800 ${e.is_dir ? 'text-yellow-400' : ''} ${selectedFiles[e.path] ? 'bg-blue-900/30 border-l-2 border-blue-500' : ''}`}
+                    >
+                      <span className="mr-2 text-base">{e.is_dir ? '📁' : '📄'}</span>
+                      <span className="flex-1 text-sm truncate">{e.name}</span>
+                      {!e.is_dir && <span className="text-xs text-gray-500 ml-2">{formatSize(e.size)}</span>}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-gray-500">{Object.values(selectedFiles).filter(Boolean).length} 个已选</span>
+                  <div className="flex space-x-3">
+                    <button onClick={handleRegisterCurrentFolder} className="px-3 py-1.5 bg-indigo-700 hover:bg-indigo-600 rounded text-xs">注册当前目录</button>
+                    <button onClick={handleRegisterSelected} className="px-3 py-1.5 bg-green-600 hover:bg-green-700 rounded text-xs font-medium">注册选中文件</button>
+                    <button onClick={() => setShowFileBrowser(false)} className="px-3 py-1.5 bg-gray-600 rounded text-xs">取消</button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex-1 flex flex-col bg-gray-900 rounded mb-4 p-4 min-h-[200px]">
+                  <div className="mb-3">
+                    <label className="block text-xs text-gray-400 mb-1">URL</label>
+                    <input
+                      type="url"
+                      value={urlInput}
+                      onChange={(e) => setUrlInput(e.target.value)}
+                      placeholder="https://example.com/file.zip"
+                      onKeyDown={(e) => e.key === 'Enter' && handleRegisterUrl()}
+                      className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
+                    />
+                  </div>
+                  <div className="mb-3">
+                    <label className="block text-xs text-gray-400 mb-1">
+                      文件名
+                      <span className="text-gray-600 ml-1">（可选，留空自动从 URL 提取）</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={urlFilename}
+                      onChange={(e) => setUrlFilename(e.target.value)}
+                      placeholder="optional-filename.ext"
+                      onKeyDown={(e) => e.key === 'Enter' && handleRegisterUrl()}
+                      className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
+                    />
+                  </div>
+
+                  {urlError && (
+                    <div className="text-xs text-red-400 mb-3 bg-red-900/20 px-3 py-2 rounded">
+                      {urlError}
+                    </div>
+                  )}
+
+                  {urlResult && (
+                    <div className="text-xs bg-green-900/20 border border-green-800/30 rounded px-3 py-2 mb-3 space-y-1">
+                      <p className="text-green-400 font-medium">注册成功</p>
+                      <p className="text-gray-300">哈希: <span className="font-mono text-gray-400">{urlResult.hash}</span></p>
+                      <p className="text-gray-300">大小: <span className="text-gray-400">{formatSize(urlResult.size)}</span></p>
+                      {urlResult.filename && <p className="text-gray-300">文件名: <span className="text-gray-400">{urlResult.filename}</span></p>}
+                    </div>
+                  )}
+
+                  <div className="flex-1" />
+                </div>
+
+                <div className="flex justify-end items-center space-x-3">
+                  <button
+                    onClick={handleRegisterUrl}
+                    disabled={urlLoading || !urlInput.trim()}
+                    className="px-4 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed rounded text-xs font-medium"
+                  >
+                    {urlLoading ? '注册中...' : '注册 URL'}
+                  </button>
+                  <button onClick={() => { setShowFileBrowser(false); setUrlResult(null); setUrlError(''); setUrlInput(''); }} className="px-3 py-1.5 bg-gray-600 rounded text-xs">取消</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

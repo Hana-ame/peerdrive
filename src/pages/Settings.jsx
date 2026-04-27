@@ -8,6 +8,7 @@ const SECTIONS = [
   { id: 'auth', label: '认证' },
   { id: 'storage', label: '存储管理' },
   { id: 'llm', label: 'LLM 配置' },
+  { id: 'webdav', label: 'WebDAV' },
   { id: 'about', label: '关于' },
 ];
 
@@ -20,6 +21,13 @@ function formatBytes(bytes) {
   let v = bytes;
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
   return `${v.toFixed(1)} ${units[i]}`;
+}
+
+function formatLimit(bytes) {
+  if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(0) + 'GB';
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(0) + 'MB';
+  if (bytes >= 1024) return (bytes / 1024).toFixed(0) + 'KB';
+  return bytes + 'B';
 }
 
 export default function Settings({ dataConsent, setDataConsent }) {
@@ -35,6 +43,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
   const [stunUrl, setStunUrl] = useState(api.getStunUrl());
   const [turnUrl, setTurnUrl] = useState(api.getTurnUrl());
   const [turnCredential, setTurnCredential] = useState(api.getTurnCredential());
+  const [followRedirects, setFollowRedirects] = useState(api.getFollowRedirects());
 
   // ─── Auth ────────────────────────────────────────────
   const [regServer, setRegServer] = useState(localStorage.getItem('peerdrive_reg_server') || '');
@@ -369,6 +378,29 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
               />
             </div>
+
+            {/* Follow Redirects Toggle */}
+            <div className="flex items-center gap-3 pt-2">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={followRedirects}
+                  onChange={() => {
+                    const v = !followRedirects;
+                    setFollowRedirects(v);
+                    api.setFollowRedirects(v);
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
+              </label>
+              <div>
+                <p className="text-sm text-gray-300">跟随重定向</p>
+                <p className="text-[10px] text-gray-500">
+                  下载 URL 文件时自动跟随 301/302 重定向
+                </p>
+              </div>
+            </div>
           </SettingsSection>
 
           {/* ==============================================
@@ -470,6 +502,33 @@ export default function Settings({ dataConsent, setDataConsent }) {
                     : '未启用'}
                 </p>
               </div>
+            </div>
+
+            {/* Auth Status */}
+            <div className="border-t border-gray-700/50 pt-3 mt-2">
+              <p className="text-xs text-gray-400 mb-2">节点身份</p>
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${api.getAuthToken() ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                <span className="text-sm text-gray-200">
+                  {api.getAuthToken() ? 'Node Owner (已认证)' : '匿名用户 (未认证)'}
+                </span>
+              </div>
+              {api.getAuthToken() && (
+                <p className="text-[10px] text-gray-500 mt-1 font-mono truncate">
+                  Token: {api.getAuthToken().slice(0, 20)}...
+                </p>
+              )}
+            </div>
+
+            {/* Upload Limits */}
+            <div className="border-t border-gray-700/50 pt-3 mt-2">
+              <p className="text-xs text-gray-400 mb-2">上传限制</p>
+              <p className="text-sm text-gray-200">
+                {formatLimit(100 * 1024 * 1024)} (已认证) / {formatLimit(10 * 1024 * 1024)} (匿名)
+              </p>
+              <p className="text-[10px] text-gray-500 mt-1">
+                通过注册服务器认证后可获得更大的上传限额
+              </p>
             </div>
           </SettingsSection>
 
@@ -626,7 +685,73 @@ export default function Settings({ dataConsent, setDataConsent }) {
           </SettingsSection>
 
           {/* ==============================================
-              5. 关于
+              5. WebDAV
+              ============================================== */}
+          <SettingsSection id="webdav" title="WebDAV 网络驱动器" description="将 Peerdrive 存储挂载为本地网络驱动器">
+            {/* Status */}
+            <div className="flex items-center gap-3 pt-1">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-green-500" />
+                <span className="text-sm text-gray-200">已启用</span>
+              </div>
+            </div>
+
+            {/* Mount URL */}
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">挂载地址</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={window.location.origin + '/webdav/'}
+                  readOnly
+                  className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none border border-gray-600 opacity-80 cursor-default"
+                />
+                <button
+                  onClick={() => {
+                    try {
+                      navigator.clipboard.writeText(window.location.origin + '/webdav/');
+                    } catch {}
+                  }}
+                  className="bg-gray-600 hover:bg-gray-500 px-3 py-2 rounded text-sm transition-colors whitespace-nowrap"
+                >
+                  复制
+                </button>
+              </div>
+            </div>
+
+            {/* OS Instructions */}
+            <div className="border-t border-gray-700/50 pt-3 mt-2">
+              <p className="text-xs text-gray-400 mb-2">操作系统挂载方法</p>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-sm text-gray-300 font-medium mb-1">Windows</p>
+                  <code className="block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono select-all">
+                    net use Z: {window.location.origin + '/webdav/'}
+                  </code>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-300 font-medium mb-1">macOS</p>
+                  <p className="text-xs text-gray-400">Finder &rarr; Go &rarr; Connect to Server &rarr; 输入地址</p>
+                  <code className="block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono select-all mt-1">
+                    {window.location.origin + '/webdav/'}
+                  </code>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-300 font-medium mb-1">Linux</p>
+                  <code className="block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono select-all">
+                    mount -t davfs {window.location.origin + '/webdav/'} /mnt/peerdrive
+                  </code>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-[10px] text-gray-600 mt-3">
+              结合端口转发可透过 P2P 网络远程共享 WebDAV 存储。
+            </p>
+          </SettingsSection>
+
+          {/* ==============================================
+              6. 关于
               ============================================== */}
           <SettingsSection id="about" title="关于" description="版本信息和数据管理">
             {/* Version */}

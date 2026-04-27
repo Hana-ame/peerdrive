@@ -15,7 +15,7 @@ function relTime(ts) {
 
 function collName(c) {
   return c.collection_name || c.friendly_name || c.name_preview ||
-    (c.entries ? `${c.entries.length} 个文件` : (c.entry_count ? `${c.entry_count} 个文件` : '未命名合集'));
+    (c.entries?.length ? `${c.entries.length} 个文件` : (c.entry_count != null ? `${c.entry_count} 个文件` : (c.hash ? c.hash.substring(0,12)+'...' : '未命名合集')));
 }
 
 function collFileCount(c) {
