@@ -1,0 +1,325 @@
+package service
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
+)
+
+const (
+	ChunkSize            = 256 * 1024 // 256KB chunks
+	MaxParallelChunks    = 8
+	TransferTimeout      = 5 * time.Minute
+	ChunkRequestTimeout  = 30 * time.Second
+	ProtocolChunk        = "/peerdrive/chunk/1.0.0"
+)
+
+// TransferProgress tracks the progress of a file transfer.
+type TransferProgress struct {
+	Hash         string
+	TotalSize    int64
+	ReceivedSize int64
+	ChunksTotal  int
+	ChunksDone   int
+	Peers        []peer.ID
+	StartTime    time.Time
+	Done         bool
+	Error        error
+	mu           sync.Mutex
+	onUpdate     func(progress float64)
+}
+
+func (tp *TransferProgress) Update(bytesReceived int64) {
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+	tp.ReceivedSize += bytesReceived
+	if tp.onUpdate != nil && tp.TotalSize > 0 {
+		pct := float64(tp.ReceivedSize) / float64(tp.TotalSize) * 100
+		tp.onUpdate(pct)
+	}
+}
+
+func (tp *TransferProgress) Progress() float64 {
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+	if tp.TotalSize == 0 {
+		return 0
+	}
+	return float64(tp.ReceivedSize) / float64(tp.TotalSize) * 100
+}
+
+// ChunkedTransfer handles chunked file transfers with progress tracking.
+type ChunkedTransfer struct {
+	svc        *P2PService
+	activeJobs map[string]*TransferProgress
+	jobsMu     sync.RWMutex
+}
+
+// NewChunkedTransfer creates a new chunked transfer handler.
+func NewChunkedTransfer(svc *P2PService) *ChunkedTransfer {
+	ct := &ChunkedTransfer{
+		svc:        svc,
+		activeJobs: make(map[string]*TransferProgress),
+	}
+	if svc.IsEnabled() {
+		svc.Host.SetStreamHandler(protocol.ID(ProtocolChunk), ct.handleChunkRequest)
+	}
+	return ct
+}
+
+// ActiveJobs returns all active transfer jobs.
+func (ct *ChunkedTransfer) ActiveJobs() map[string]*TransferProgress {
+	ct.jobsMu.RLock()
+	defer ct.jobsMu.RUnlock()
+	result := make(map[string]*TransferProgress)
+	for k, v := range ct.activeJobs {
+		result[k] = v
+	}
+	return result
+}
+
+// GetProgress returns the progress for a transfer job.
+func (ct *ChunkedTransfer) GetProgress(hash string) *TransferProgress {
+	ct.jobsMu.RLock()
+	defer ct.jobsMu.RUnlock()
+	return ct.activeJobs[hash]
+}
+
+// DownloadFile downloads a file from P2P network using chunked parallel transfer.
+func (ct *ChunkedTransfer) DownloadFile(ctx context.Context, hash string, targetPath string, onProgress func(float64)) (*TransferProgress, error) {
+	if !ct.svc.IsEnabled() {
+		return nil, fmt.Errorf("p2p not enabled")
+	}
+
+	// Find providers
+	providers, err := ct.svc.FindProviders(hash)
+	if err != nil || len(providers) == 0 {
+		// Try connected peers
+		connected := ct.svc.GetConnectedPeers()
+		for _, pid := range connected {
+			providers = append(providers, peer.AddrInfo{ID: pid})
+		}
+	}
+	if len(providers) == 0 {
+		return nil, fmt.Errorf("no providers found for %s", hash)
+	}
+
+	// First, get total size from any peer
+	var totalSize int64
+	var metaErr error
+	for _, pi := range providers {
+		totalSize, metaErr = ct.requestFileSize(ctx, pi.ID, hash)
+		if metaErr == nil {
+			break
+		}
+	}
+	if metaErr != nil {
+		return nil, fmt.Errorf("cannot determine file size: %w", metaErr)
+	}
+
+	progress := &TransferProgress{
+		Hash:      hash,
+		TotalSize: totalSize,
+		ChunksTotal: int((totalSize + ChunkSize - 1) / ChunkSize),
+		Peers:     make([]peer.ID, 0),
+		StartTime: time.Now(),
+		onUpdate:  onProgress,
+	}
+
+	ct.jobsMu.Lock()
+	ct.activeJobs[hash] = progress
+	ct.jobsMu.Unlock()
+
+	// Download chunks in parallel
+	var wg sync.WaitGroup
+	chunkCh := make(chan int, progress.ChunksTotal)
+	errCh := make(chan error, progress.ChunksTotal)
+
+	// Prepare output file
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		return nil, fmt.Errorf("create target dir: %w", err)
+	}
+	outFile, err := os.Create(targetPath)
+	if err != nil {
+		return nil, fmt.Errorf("create output file: %w", err)
+	}
+	defer outFile.Close()
+
+	// Pre-allocate file
+	outFile.Truncate(totalSize)
+
+	// Launch workers
+	numWorkers := MaxParallelChunks
+	if numWorkers > progress.ChunksTotal {
+		numWorkers = progress.ChunksTotal
+	}
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for chunkIdx := range chunkCh {
+				offset := int64(chunkIdx) * ChunkSize
+				size := ChunkSize
+				if offset+int64(size) > totalSize {
+					size = int(totalSize - offset)
+				}
+
+				// Try each peer for this chunk
+				var chunkData []byte
+				var lastErr error
+				for _, pi := range providers {
+					if ct.svc.Host.Network().Connectedness(pi.ID) != network.Connected {
+						connCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+						ct.svc.Host.Connect(connCtx, pi)
+						cancel()
+					}
+					chunkData, lastErr = ct.requestChunk(ctx, pi.ID, hash, offset, size)
+					if lastErr == nil {
+						progress.Peers = append(progress.Peers, pi.ID)
+						break
+					}
+				}
+				if lastErr != nil {
+					errCh <- fmt.Errorf("chunk %d: %w", chunkIdx, lastErr)
+					return
+				}
+
+				// Write chunk at correct offset
+				if _, err := outFile.WriteAt(chunkData, offset); err != nil {
+					errCh <- fmt.Errorf("write chunk %d: %w", chunkIdx, err)
+					return
+				}
+
+				progress.Update(int64(len(chunkData)))
+				progress.mu.Lock()
+				progress.ChunksDone++
+				progress.mu.Unlock()
+			}
+		}()
+	}
+
+	// Queue all chunks
+	for i := 0; i < progress.ChunksTotal; i++ {
+		chunkCh <- i
+	}
+	close(chunkCh)
+
+	wg.Wait()
+	close(errCh)
+
+	// Check for errors
+	var firstErr error
+	for e := range errCh {
+		if firstErr == nil {
+			firstErr = e
+		}
+	}
+
+	if firstErr != nil {
+		progress.Error = firstErr
+		progress.Done = true
+		os.Remove(targetPath)
+		return progress, firstErr
+	}
+
+	// Verify hash
+	outFile.Sync()
+	outFile.Seek(0, 0)
+	hasher := sha256.New()
+	io.Copy(hasher, outFile)
+	if hex.EncodeToString(hasher.Sum(nil)) != hash {
+		progress.Error = fmt.Errorf("hash verification failed")
+		progress.Done = true
+		os.Remove(targetPath)
+		return progress, progress.Error
+	}
+
+	progress.Done = true
+	return progress, nil
+}
+
+func (ct *ChunkedTransfer) requestFileSize(ctx context.Context, peerID peer.ID, hash string) (int64, error) {
+	stream, err := ct.svc.Host.NewStream(ctx, peerID, protocol.ID(ProtocolExchange))
+	if err != nil {
+		return 0, err
+	}
+	defer stream.Close()
+
+	fmt.Fprintf(stream, "SIZE %s\n", hash)
+	var status string
+	var size int64
+	if _, err := fmt.Fscanf(stream, "%s %d\n", &status, &size); err != nil {
+		return 0, fmt.Errorf("read size response: %w", err)
+	}
+	if status != "OK" {
+		return 0, fmt.Errorf("peer error: %s", status)
+	}
+	return size, nil
+}
+
+func (ct *ChunkedTransfer) requestChunk(ctx context.Context, peerID peer.ID, hash string, offset int64, size int) ([]byte, error) {
+	stream, err := ct.svc.Host.NewStream(ctx, peerID, protocol.ID(ProtocolChunk))
+	if err != nil {
+		return nil, fmt.Errorf("open chunk stream: %w", err)
+	}
+	defer stream.Close()
+
+	stream.SetReadDeadline(time.Now().Add(ChunkRequestTimeout))
+	fmt.Fprintf(stream, "CHUNK %s %d %d\n", hash, offset, size)
+
+	data := make([]byte, size)
+	if _, err := io.ReadFull(stream, data); err != nil {
+		return nil, fmt.Errorf("read chunk: %w", err)
+	}
+	return data, nil
+}
+
+func (ct *ChunkedTransfer) handleChunkRequest(stream network.Stream) {
+	defer stream.Close()
+
+	var hash string
+	var offset int64
+	var size int
+	if _, err := fmt.Fscanf(stream, "CHUNK %s %d %d\n", &hash, &offset, &size); err != nil {
+		fmt.Fprintf(stream, "ERR bad request\n")
+		return
+	}
+
+	if size > ChunkSize {
+		fmt.Fprintf(stream, "ERR chunk too large (max %d)\n", ChunkSize)
+		return
+	}
+
+	// Look up file
+	filePath := filepath.Join(ct.svc.storageDir, hash[:2], hash)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Fprintf(stream, "ERR not found\n")
+		return
+	}
+
+	if int(offset) >= len(data) {
+		fmt.Fprintf(stream, "ERR offset out of range\n")
+		return
+	}
+
+	end := int(offset) + size
+	if end > len(data) {
+		end = len(data)
+	}
+
+	stream.Write(data[offset:end])
+}
+
+// handleExchange (updated) now also handles SIZE requests
+// We need to update the original handleExchange to support this

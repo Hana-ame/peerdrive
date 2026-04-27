@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,6 +49,9 @@ type P2PService struct {
 	wsHub       *wsHub
 	requestCh   chan fileRequest
 	responseCh  chan fileResponse
+
+	ConnMgr    *ConnectionManager
+	Transfer   *ChunkedTransfer
 }
 
 type fileRequest struct {
@@ -146,6 +150,14 @@ func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error)
 	}
 
 	go svc.processWSRequests()
+
+	// Initialize connection manager and chunked transfer
+	svc.ConnMgr = NewConnectionManager(svc)
+	svc.Transfer = NewChunkedTransfer(svc)
+
+	// Start auto-connect and heartbeat
+	svc.ConnMgr.AutoConnectFromDiscovered()
+	svc.ConnMgr.StartHeartbeat()
 
 	return svc, nil
 }
@@ -411,6 +423,23 @@ func (p *P2PService) handleExchange(stream network.Stream) {
 	}
 	hash := trimNewline(hashLine)
 
+	// handle SIZE command for chunked transfer
+	if strings.HasPrefix(hash, "SIZE ") {
+		hash = strings.TrimPrefix(hash, "SIZE ")
+		if len(hash) != 64 {
+			fmt.Fprintf(stream, "ERR invalid hash length %d\n", len(hash))
+			return
+		}
+		filePath := filepath.Join(p.storageDir, hash[:2], hash)
+		info, err := os.Stat(filePath)
+		if err != nil {
+			fmt.Fprintf(stream, "ERR not found\n")
+			return
+		}
+		fmt.Fprintf(stream, "OK %d\n", info.Size())
+		return
+	}
+
 	if len(hash) != 64 {
 		fmt.Fprintf(stream, "ERR invalid hash length %d\n", len(hash))
 		return
@@ -582,6 +611,9 @@ func (p *P2PService) connectToBootstrap(ctx context.Context, addr string) error 
 }
 
 func (p *P2PService) Close() error {
+	if p.ConnMgr != nil {
+		p.ConnMgr.StopHeartbeat()
+	}
 	if p.requestCh != nil {
 		close(p.requestCh)
 	}

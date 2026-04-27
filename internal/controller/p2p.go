@@ -191,6 +191,25 @@ func P2PStatus(c *gin.Context) {
 		resp["relay_mode"] = p2pSvc.RelayMode()
 		resp["hole_punch"] = p2pSvc.HolePunchEnabled()
 		resp["ws_connections"] = p2pSvc.WSCount()
+		// Connection manager stats
+		if p2pSvc.ConnMgr != nil {
+			resp["conn_stats"] = p2pSvc.ConnMgr.Stats()
+		}
+		// Active transfer jobs
+		if p2pSvc.Transfer != nil {
+			jobs := make([]gin.H, 0)
+			for hash, tp := range p2pSvc.Transfer.ActiveJobs() {
+				jobs = append(jobs, gin.H{
+					"hash":      hash,
+					"progress":  tp.Progress(),
+					"total_mb":  float64(tp.TotalSize) / 1048576.0,
+					"done":      tp.Done,
+					"peers":     len(tp.Peers),
+					"elapsed":   time.Since(tp.StartTime).String(),
+				})
+			}
+			resp["active_transfers"] = jobs
+		}
 	}
 	c.JSON(http.StatusOK, resp)
 }

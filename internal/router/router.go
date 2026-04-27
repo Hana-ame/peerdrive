@@ -49,14 +49,17 @@ func SetupRouter(
 
 	r.Use(func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
+		allowed := "*"
 		if origin != "" {
-			c.Header("Access-Control-Allow-Origin", origin)
-			c.Header("Vary", "Origin")
-		} else {
-			c.Header("Access-Control-Allow-Origin", "*")
+			if cfg.IsOriginAllowed(origin) {
+				allowed = origin
+				c.Header("Vary", "Origin")
+			}
 		}
+		c.Header("Access-Control-Allow-Origin", allowed)
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 		c.Header("Access-Control-Allow-Headers", c.Request.Header.Get("Access-Control-Request-Headers"))
+		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Max-Age", "86400")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
