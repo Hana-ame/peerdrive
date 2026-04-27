@@ -79,12 +79,17 @@ export default function FileManager() {
     })();
   }, []);
 
+  const [loadingProgress, setLoadingProgress] = useState('');
   const loadFiles = async () => {
     setLoading(true);
+    setLoadingProgress('加载中...');
+    const start = Date.now();
     try {
       const data = await api.listFiles('path');
+      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
       setFiles(data || []);
-    } catch (e) { console.error(e); setFiles([]); }
+      setLoadingProgress(`已加载 ${data?.length || 0} 个文件 (${elapsed}s)`);
+    } catch (e) { console.error(e); setFiles([]); setLoadingProgress(''); }
     setLoading(false);
   };
 
