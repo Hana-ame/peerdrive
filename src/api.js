@@ -19,6 +19,10 @@ async function request(method, path, body = null) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
+  if (localStorage.getItem('peerdrive_auth_header_enabled') === 'true') {
+    const token = localStorage.getItem('peerdrive_auth_key');
+    if (token) opts.headers['Authorization'] = `Bearer ${token}`;
+  }
   const url = `${getApiBase()}${path}`;
   const res = await fetch(url, opts);
   if (!res.ok) {
@@ -92,6 +96,16 @@ export const p2pPush = (peerId, collectionName) =>
   request('POST', '/p2p/push', { peer_id: peerId, collection_name: collectionName });
 export const p2pRequestFile = (hash) => request('POST', '/p2p/request-file', { hash });
 export const getWSInfo = () => request('GET', '/p2p/ws/info');
+export const getSignalPeers = () => request('GET', '/p2p/status').then(r => r.signal_peers || []);
+
+/* ---- P2P BT ---- */
+export const getBTStatus = () => request('GET', '/p2p/bt/status');
+export const btAnnounce = (hash) => request('POST', '/p2p/bt/announce', { hash });
+export const btFind = (hash) => request('POST', '/p2p/bt/find', { hash });
+
+/* ---- P2P Dual ---- */
+export const dualAnnounce = (hash) => request('POST', '/p2p/dual/announce', { hash });
+export const dualFind = (hash) => request('POST', '/p2p/dual/find', { hash });
 
 export { getApiBaseUrl as WS_TRANSFER_URL_BASE };
 export const WS_TRANSFER_URL = getApiBase().replace(/^http/, 'ws') + '/ws/transfer';
@@ -160,6 +174,30 @@ export function getLlmBodyTemplate() { return localStorage.getItem(LLM_BODY_KEY)
 export function setLlmBodyTemplate(v) { localStorage.setItem(LLM_BODY_KEY, v); }
 export function getDataConsent() { return localStorage.getItem(DATA_CONSENT_KEY) === 'true'; }
 export function setDataConsent(v) { localStorage.setItem(DATA_CONSENT_KEY, v ? 'true' : 'false'); }
+
+/* ---- auth header toggle ---- */
+const AUTH_HEADER_KEY = 'peerdrive_auth_header_enabled';
+export function getAuthHeaderEnabled() { return localStorage.getItem(AUTH_HEADER_KEY) === 'true'; }
+export function setAuthHeaderEnabled(v) { localStorage.setItem(AUTH_HEADER_KEY, v ? 'true' : 'false'); }
+
+/* ---- p2p network config (frontend-only) ---- */
+const BOOTSTRAP_PEER_KEY = 'peerdrive_bootstrap_peer';
+const RELAY_SERVER_KEY = 'peerdrive_relay_server';
+const STUN_URL_KEY = 'peerdrive_stun_url';
+const TURN_URL_KEY = 'peerdrive_turn_url';
+const TURN_CREDENTIAL_KEY = 'peerdrive_turn_credential';
+
+export function getBootstrapPeer() { return localStorage.getItem(BOOTSTRAP_PEER_KEY) || ''; }
+export function setBootstrapPeer(v) { localStorage.setItem(BOOTSTRAP_PEER_KEY, v); }
+export function getRelayServer() { return localStorage.getItem(RELAY_SERVER_KEY) || ''; }
+export function setRelayServer(v) { localStorage.setItem(RELAY_SERVER_KEY, v); }
+export function getStunUrl() { return localStorage.getItem(STUN_URL_KEY) || 'stun:stun.l.google.com:19302'; }
+export function setStunUrl(v) { localStorage.setItem(STUN_URL_KEY, v); }
+export function getTurnUrl() { return localStorage.getItem(TURN_URL_KEY) || ''; }
+export function setTurnUrl(v) { localStorage.setItem(TURN_URL_KEY, v); }
+export function getTurnCredential() { return localStorage.getItem(TURN_CREDENTIAL_KEY) || ''; }
+export function setTurnCredential(v) { localStorage.setItem(TURN_CREDENTIAL_KEY, v); }
+
 const FREE_LLM_MODELS = [
   'Qwen/Qwen3-8B',
   'Qwen/Qwen3.5-4B',
