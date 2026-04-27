@@ -8,6 +8,7 @@ import AnonExplorer from './pages/AnonExplorer';
 import Settings from './pages/Settings';
 import P2PDashboard from './pages/P2PDashboard';
 import Navbar from './components/Navbar';
+import MobileNav from './components/MobileNav';
 import LLMAssistant from './components/LLMAssistant';
 import { getDataConsent } from './api';
 
@@ -31,7 +32,7 @@ export default function App() {
         <BrowserRouter>
           <div className="flex flex-col h-screen bg-gray-950 text-gray-200">
             <Navbar />
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-hidden pb-[72px] md:pb-0">
               <Routes>
                 <Route path="/" element={<Plaza />} />
                 <Route path="/files" element={<FileManager />} />
@@ -43,6 +44,7 @@ export default function App() {
                 <Route path="/settings" element={<Settings dataConsent={dataConsent} setDataConsent={setDataConsent} />} />
               </Routes>
             </div>
+            <MobileNav />
             <LLMAssistant />
           </div>
         </BrowserRouter>

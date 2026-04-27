@@ -80,6 +80,12 @@ export const pullUserCollection = (username, coll) =>
 export const getUserFileDownloadUrl = (username, coll, filepath) =>
   `${getApiBase()}/${username}/${coll}/${filepath}`;
 
+/* ---- P2P Detail + Stats ---- */
+export const getPeersDetail = () => request('GET', '/p2p/peers/detail');
+export const getPeerDetail = (peerId) => request('GET', `/p2p/peers/detail/${peerId}`);
+export const getP2PStats = () => request('GET', '/p2p/stats');
+export const getConnections = () => request('GET', '/p2p/connections');
+
 /* ---- P2P ---- */
 export const getP2PStatus = () => request('GET', '/p2p/status');
 export const getP2PNode = () => request('GET', '/p2p/node');
@@ -241,3 +247,85 @@ export const saveLocal = (body) => request('POST', '/local/save', body);
 export const getLocalStatus = (hash) => request('GET', `/local/status/${hash}`);
 
 export const listFiles = (sort = 'time') => request('GET', `/files?sort=${sort}`);
+
+/* ---- service status dashboard ---- */
+const REG_SERVER_KEY = 'peerdrive_reg_server_url';
+
+export function getRegServerUrl() {
+  return localStorage.getItem(REG_SERVER_KEY) || '';
+}
+
+export function setRegServerUrl(url) {
+  localStorage.setItem(REG_SERVER_KEY, url);
+}
+
+export async function getServiceStats({ regServerUrl } = {}) {
+  const results = {
+    relay: { ok: false, data: null, error: null },
+    reg: { ok: false, data: null, error: null },
+    storage: { ok: false, data: null, error: null },
+    bt: { ok: false, data: null, error: null },
+    ws: { ok: false, data: null, error: null },
+  };
+
+  try {
+    const data = await getP2PStatus();
+    results.relay = { ok: true, data, error: null };
+  } catch (e) {
+    results.relay = { ok: false, data: null, error: e.message };
+  }
+
+  try {
+    const data = await getBTStatus();
+    results.bt = { ok: true, data, error: null };
+  } catch (e) {
+    results.bt = { ok: false, data: null, error: e.message };
+  }
+
+  try {
+    const files = await listFiles();
+    const totalFiles = files.length;
+    const totalSize = files.reduce((sum, f) => sum + (f.size || 0), 0);
+    results.storage = { ok: true, data: { totalFiles, totalSize, files }, error: null };
+  } catch (e) {
+    results.storage = { ok: false, data: null, error: e.message };
+  }
+
+  if (regServerUrl) {
+    try {
+      const res = await fetch(`${regServerUrl}/ping`);
+      let pingData;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('json')) {
+        pingData = await res.json();
+      } else {
+        pingData = { raw: await res.text() };
+      }
+
+      let jwtData = null;
+      const authEnabled = localStorage.getItem('peerdrive_auth_header_enabled') === 'true';
+      const token = localStorage.getItem('peerdrive_auth_key');
+      if (authEnabled && token) {
+        try {
+          const jwtRes = await fetch(`${regServerUrl}/auth/whoami`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (jwtRes.ok) jwtData = await jwtRes.json();
+        } catch { /* ignore JWT errors */ }
+      }
+
+      results.reg = { ok: true, data: { ping: pingData, jwt: jwtData }, error: null };
+    } catch (e) {
+      results.reg = { ok: false, data: null, error: e.message };
+    }
+  }
+
+  try {
+    const data = await getWSInfo();
+    results.ws = { ok: true, data, error: null };
+  } catch (e) {
+    results.ws = { ok: false, data: null, error: e.message };
+  }
+
+  return results;
+}
