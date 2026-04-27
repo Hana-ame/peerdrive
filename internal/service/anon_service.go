@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"peerdrive/internal/config"
+	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 )
@@ -41,12 +42,19 @@ func sha256Hex(data []byte) string {
 }
 
 func (s *AnonService) CreateCollection(name string, entries []model.AnonCollectionEntry, tags []string) (string, error) {
+	defer log.LogDuration("AnonService.CreateCollection")()
+	log.LogDebug("anon-svc: CreateCollection name=%s entries=%d", name, len(entries))
+
 	for _, e := range entries {
 		if e.Path == "" || !isRelativePath(e.Path) || strings.Contains(e.Path, "..") {
-			return "", fmt.Errorf("invalid path: %s", e.Path)
+			err := fmt.Errorf("invalid path: %s", e.Path)
+			log.LogError("anon-svc: CreateCollection invalid path: %s", e.Path)
+			return "", err
 		}
 		if !isValidHash(e.Hash) {
-			return "", fmt.Errorf("invalid hash: %s", e.Hash)
+			err := fmt.Errorf("invalid hash: %s", e.Hash)
+			log.LogError("anon-svc: CreateCollection invalid hash: %s", e.Hash)
+			return "", err
 		}
 	}
 
@@ -57,6 +65,7 @@ func (s *AnonService) CreateCollection(name string, entries []model.AnonCollecti
 	coll := model.NewAnonCollection(name, entries, tags)
 	jsonBytes, err := json.MarshalIndent(coll, "", "  ")
 	if err != nil {
+		log.LogError("anon-svc: CreateCollection marshal failed: %v", err)
 		return "", err
 	}
 
@@ -64,10 +73,12 @@ func (s *AnonService) CreateCollection(name string, entries []model.AnonCollecti
 
 	targetDir := filepath.Join(s.config.StorageDir, hash[:2])
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		log.LogError("anon-svc: CreateCollection mkdir failed: %v", err)
 		return "", err
 	}
 	targetPath := filepath.Join(targetDir, hash)
 	if err := os.WriteFile(targetPath, jsonBytes, 0644); err != nil {
+		log.LogError("anon-svc: CreateCollection write failed: %v", err)
 		return "", err
 	}
 
@@ -82,22 +93,30 @@ func (s *AnonService) CreateCollection(name string, entries []model.AnonCollecti
 	})
 	_ = repository.InsertFileProvider(hash, "local", relPath)
 
+	log.LogInfo("anon-svc: CreateCollection %s -> hash=%s", name, hash)
 	return hash, nil
 }
 
 func (s *AnonService) GetCollectionByHash(hash string) (*model.AnonCollection, error) {
+	defer log.LogDuration("AnonService.GetCollectionByHash")()
+	log.LogDebug("anon-svc: GetCollectionByHash hash=%s", hash)
+
 	filePath := filepath.Join(s.config.StorageDir, hash[:2], hash)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
+		log.LogError("anon-svc: GetCollectionByHash %s not found: %v", hash, err)
 		return nil, fmt.Errorf("collection not found")
 	}
 	var coll model.AnonCollection
 	if err := json.Unmarshal(data, &coll); err != nil {
+		log.LogError("anon-svc: GetCollectionByHash %s invalid JSON: %v", hash, err)
 		return nil, fmt.Errorf("invalid collection json")
 	}
 	if coll.Version < 1 {
+		log.LogError("anon-svc: GetCollectionByHash %s unsupported version: %d", hash, coll.Version)
 		return nil, fmt.Errorf("unsupported version: %d", coll.Version)
 	}
+	log.LogInfo("anon-svc: GetCollectionByHash %s found (version=%d, entries=%d)", hash, coll.Version, len(coll.Entries))
 	return &coll, nil
 }
 
@@ -110,17 +129,25 @@ func (s *AnonService) CommitCollection(
 	entries []model.AnonCollectionEntry,
 	commitMessage string,
 ) (string, error) {
+	defer log.LogDuration("AnonService.CommitCollection")()
+	log.LogDebug("anon-svc: CommitCollection sourceHash=%s entries=%d", sourceHash, len(entries))
+
 	src, err := s.GetCollectionByHash(sourceHash)
 	if err != nil {
+		log.LogError("anon-svc: CommitCollection source %s not found: %v", sourceHash, err)
 		return "", fmt.Errorf("source collection not found: %w", err)
 	}
 
 	for _, e := range entries {
 		if e.Path == "" || !isRelativePath(e.Path) || strings.Contains(e.Path, "..") {
-			return "", fmt.Errorf("invalid path: %s", e.Path)
+			err := fmt.Errorf("invalid path: %s", e.Path)
+			log.LogError("anon-svc: CommitCollection invalid path: %s", e.Path)
+			return "", err
 		}
 		if !isValidHash(e.Hash) {
-			return "", fmt.Errorf("invalid hash: %s", e.Hash)
+			err := fmt.Errorf("invalid hash: %s", e.Hash)
+			log.LogError("anon-svc: CommitCollection invalid hash: %s", e.Hash)
+			return "", err
 		}
 	}
 

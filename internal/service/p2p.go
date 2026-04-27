@@ -53,6 +53,8 @@ type P2PService struct {
 
 	ConnMgr    *ConnectionManager
 	Transfer   *ChunkedTransfer
+
+	tracker *PeerTracker
 }
 
 type fileRequest struct {
@@ -242,6 +244,14 @@ func (p *P2PService) Connect(ctx context.Context, addrInfo peer.AddrInfo) error 
 	if err := p.Host.Connect(ctx, addrInfo); err != nil {
 		log.LogError("p2p: Connect to %s failed: %v", addrInfo.ID.String(), err)
 		return err
+	}
+
+	if p.tracker != nil {
+		addrs := make([]string, len(addrInfo.Addrs))
+		for i, a := range addrInfo.Addrs {
+			addrs[i] = a.String()
+		}
+		p.tracker.RecordConnection(addrInfo.ID.String(), addrs, "")
 	}
 
 	log.LogInfo("p2p: Connect to %s successful", addrInfo.ID.String())
@@ -474,6 +484,10 @@ func (p *P2PService) requestData(ctx context.Context, peerID peer.ID, hash strin
 		return nil, fmt.Errorf("read data: %w", err)
 	}
 
+	if p.tracker != nil {
+		p.tracker.RecordBytesRecv(peerID.String(), int64(len(data)))
+	}
+
 	return data, nil
 }
 
@@ -539,6 +553,10 @@ func (p *P2PService) handleExchange(stream network.Stream) {
 	log.LogInfo("p2p: handleExchange serving %s to %s (%d bytes)", hash, stream.Conn().RemotePeer().String(), len(data))
 	fmt.Fprintf(stream, "OK %d\n", len(data))
 	stream.Write(data)
+
+	if p.tracker != nil {
+		p.tracker.RecordBytesSent(stream.Conn().RemotePeer().String(), int64(len(data)))
+	}
 }
 
 func (p *P2PService) handleAnnounce(stream network.Stream) {
@@ -672,6 +690,14 @@ func (p *P2PService) HandlePeerFound(pi peer.AddrInfo) {
 	p.discovered[pi.ID] = pi
 	p.mu.Unlock()
 	log.LogInfo("p2p: discovered peer: %s", pi.ID.String())
+
+	if p.tracker != nil {
+		addrs := make([]string, len(pi.Addrs))
+		for i, a := range pi.Addrs {
+			addrs[i] = a.String()
+		}
+		p.tracker.RecordConnection(pi.ID.String(), addrs, "")
+	}
 }
 
 func (p *P2PService) RelayMode() string {
@@ -691,6 +717,27 @@ func (p *P2PService) connectToBootstrap(ctx context.Context, addr string) error 
 		return err
 	}
 	return p.Host.Connect(ctx, *info)
+}
+
+// SetPeerTracker injects a PeerTracker into the service and registers
+// network notifiees for connect / disconnect events.
+func (p *P2PService) SetPeerTracker(t *PeerTracker) {
+	p.tracker = t
+	if p.Host != nil {
+		p.Host.Network().Notify(&network.NotifyBundle{
+			ConnectedF: func(n network.Network, c network.Conn) {
+				if p.tracker != nil {
+					addrs := []string{c.RemoteMultiaddr().String()}
+					p.tracker.RecordConnection(c.RemotePeer().String(), addrs, "")
+				}
+			},
+			DisconnectedF: func(n network.Network, c network.Conn) {
+				if p.tracker != nil {
+					p.tracker.RecordDisconnect(c.RemotePeer().String())
+				}
+			},
+		})
+	}
 }
 
 func (p *P2PService) Close() error {

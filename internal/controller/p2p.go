@@ -20,6 +20,8 @@ var p2pSvc *service.P2PService
 var btSvc *p2p_bt.BTDHTService
 var dualSvc *service.DualP2PService
 
+var peerTracker *service.PeerTracker
+
 func InitP2PController(svc *service.P2PService) {
 	log.LogDebug("ctrl-p2p: InitP2PController")
 	p2pSvc = svc
@@ -33,6 +35,13 @@ func InitBTController(svc *p2p_bt.BTDHTService) {
 func InitDualController(svc *service.DualP2PService) {
 	log.LogDebug("ctrl-p2p: InitDualController")
 	dualSvc = svc
+}
+
+// InitPeerTracker injects the PeerTracker singleton into the controller
+// package so that handlers can query peer metadata and record events.
+func InitPeerTracker(t *service.PeerTracker) {
+	log.LogDebug("ctrl-p2p: InitPeerTracker")
+	peerTracker = t
 }
 
 func GetNodeInfo(c *gin.Context) {
@@ -90,6 +99,11 @@ func PingPeer(c *gin.Context) {
 		return
 	}
 	log.LogInfo("ctrl-p2p: PingPeer %s RTT=%s", raw, rtt.String())
+
+	if peerTracker != nil {
+		peerTracker.RecordLatency(raw, rtt)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"peer": raw, "rtt": rtt.String()})
 }
 
@@ -499,4 +513,45 @@ func DualFindProviders(c *gin.Context) {
 		"ipfs_peers": result.IPFSPeers,
 		"bt_peers":   result.BTPeers,
 	})
+}
+
+// GetPeersDetail returns detailed metadata for all tracked peers.
+func GetPeersDetail(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: GetPeersDetail")
+	if peerTracker == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "peer tracker not available"})
+		return
+	}
+	peers := peerTracker.GetAllPeers()
+	log.LogInfo("ctrl-p2p: GetPeersDetail count=%d", len(peers))
+	c.JSON(http.StatusOK, peers)
+}
+
+// GetPeerDetail returns detailed metadata for a single peer by peer_id.
+func GetPeerDetail(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: GetPeerDetail")
+	if peerTracker == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "peer tracker not available"})
+		return
+	}
+	peerID := c.Param("peer_id")
+	peer := peerTracker.GetPeer(peerID)
+	if peer == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "peer not found"})
+		return
+	}
+	log.LogInfo("ctrl-p2p: GetPeerDetail peer=%s", peerID)
+	c.JSON(http.StatusOK, peer)
+}
+
+// GetP2PStats returns global P2P statistics.
+func GetP2PStats(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: GetP2PStats")
+	if peerTracker == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "peer tracker not available"})
+		return
+	}
+	stats := peerTracker.GetStats()
+	log.LogInfo("ctrl-p2p: GetP2PStats peers=%v", stats["total_peers_seen"])
+	c.JSON(http.StatusOK, stats)
 }

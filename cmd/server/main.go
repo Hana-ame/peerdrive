@@ -12,13 +12,14 @@ package main
 
 import (
 	"context"
-	"log"
+	stdlog "log"
 	"os"
 	"os/signal"
 	"syscall"
 
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
+	"peerdrive/internal/log"
 	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
@@ -32,29 +33,35 @@ import (
 // @BasePath /
 
 func main() {
+	log.LogInfo("main: Peerdrive server starting")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	cfg := config.Load()
 	storageDir := cfg.StorageDir
+	log.LogInfo("main: config loaded, storageDir=%s, port=%s", storageDir, cfg.Port)
 
 	// 初始化 DB（含迁移）
+	log.LogInfo("main: initializing database")
 	if err := repository.InitDB("./peerdrive.db"); err != nil {
-		log.Fatalf("数据库初始化失败: %v", err)
+		stdlog.Fatalf("数据库初始化失败: %v", err)
 	}
+	log.LogInfo("main: database initialized")
 
 	// 初始化 P2P
+	log.LogInfo("main: initializing P2P service")
 	p2pSvc, err := service.NewP2PService(ctx, cfg)
 	if err != nil {
-		log.Fatalf("libp2p 节点启动失败: %v", err)
+		stdlog.Fatalf("libp2p 节点启动失败: %v", err)
 	}
 	defer p2pSvc.Close()
 	id, addrs := p2pSvc.GetNodeInfo()
 	if id != "" {
-		log.Printf("libp2p 节点已启动: PeerID=%s, 监听地址=%v", id, addrs)
+		log.LogInfo("main: libp2p node started, PeerID=%s, addrs=%v", id, addrs)
 	}
 
 	// 初始化存储
+	log.LogInfo("main: initializing provider manager and downloader")
 	providerMgr := provider.NewManager(storageDir)
 	downloader := service.NewDownloader(providerMgr, p2pSvc, storageDir)
 
@@ -65,18 +72,20 @@ func main() {
 	if cfg.RegistrationServer != "" {
 		router.SetRegServer(cfg.RegistrationServer)
 	}
+	log.LogInfo("main: setting up HTTP router")
 	r := router.SetupRouter(downloader, p2pSvc, cfg)
 
 	port := ":" + cfg.Port
 
 	go func() {
+		log.LogInfo("main: starting HTTP server on %s", port)
 		if err := r.Run(port); err != nil {
-			log.Fatalf("Gin 服务器启动失败: %v", err)
+			stdlog.Fatalf("Gin 服务器启动失败: %v", err)
 		}
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Println("正在关闭服务器...")
+	log.LogInfo("main: shutting down server")
 }

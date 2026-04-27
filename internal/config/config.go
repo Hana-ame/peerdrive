@@ -40,6 +40,8 @@ type Config struct {
 	BTDHTEnabled    bool
 	BTDHTListenAddr string
 
+	RegServerURL string
+
 	STUNServer string
 	TURNServer string
 	TURNUser   string
@@ -89,6 +91,7 @@ func Load() *Config {
 		P2PRelayMode:        parseRelayMode(getEnv("PEERDRIVE_RELAY_MODE", "client")),
 		P2PStaticRelays:     getEnv("PEERDRIVE_STATIC_RELAYS", ""),
 		P2PHolePunch:        getEnvBool("PEERDRIVE_HOLE_PUNCH", true),
+		RegServerURL:        getEnv("PEERDRIVE_REG_SERVER_URL", ""),
 		P2PPublicReachable:  getEnvBool("PEERDRIVE_PUBLIC_REACHABLE", false),
 		P2PAutoNAT:          getEnvBool("PEERDRIVE_AUTO_NAT", true),
 		P2PNATPortMap:       getEnvBool("PEERDRIVE_NAT_PORTMAP", false),

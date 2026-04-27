@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
@@ -38,16 +39,22 @@ func NewDownloader(manager *provider.Manager, p2pSvc *P2PService, storageDir str
 }
 
 func (d *Downloader) GetFileStream(hash string) (io.ReadCloser, string, bool, error) {
+	defer log.LogDuration("Downloader.GetFileStream")()
+	log.LogDebug("downloader: GetFileStream hash=%s", hash)
+
 	meta, err := repository.GetFileMeta(hash)
 	if err != nil {
+		log.LogError("downloader: GetFileStream meta lookup failed: %v", err)
 		return nil, "", false, err
 	}
 	if meta == nil {
+		log.LogWarn("downloader: GetFileStream %s not found locally, trying P2P fallback", hash)
 		return d.p2pFallback(hash)
 	}
 
 	providers, err := repository.GetFileProviders(hash)
 	if err != nil {
+		log.LogError("downloader: GetFileStream providers lookup failed: %v", err)
 		return nil, "", false, err
 	}
 
@@ -61,11 +68,13 @@ func (d *Downloader) GetFileStream(hash string) (io.ReadCloser, string, bool, er
 			if fn == "" {
 				fn = hint
 			}
+			log.LogInfo("downloader: GetFileStream %s found via provider %s", hash, p.ProviderType)
 			return reader, fn, meta.Gziped, nil
 		}
 		repository.MarkProviderUnavailable(p.ID)
 	}
 
+	log.LogWarn("downloader: GetFileStream %s no available provider, trying P2P fallback", hash)
 	return d.p2pFallback(hash)
 }
 
@@ -96,5 +105,6 @@ func (d *Downloader) p2pFallback(hash string) (io.ReadCloser, string, bool, erro
 	})
 	repository.InsertFileProvider(hash, "local", relPath)
 
+	log.LogInfo("downloader: p2pFallback fetched %s (%d bytes)", hash, len(data))
 	return io.NopCloser(bytes.NewReader(data)), hash, false, nil
 }

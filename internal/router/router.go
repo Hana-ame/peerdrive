@@ -19,12 +19,12 @@
 package router
 
 import (
-	"fmt"
 	"net/http"
-	"os"
+	"strings"
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/controller"
+	"peerdrive/internal/log"
 	"peerdrive/internal/p2p_bt"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
@@ -34,16 +34,12 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
-func logf(format string, args ...interface{}) {
-	full := fmt.Sprintf("[router] "+format, args...)
-	os.Stderr.WriteString(full + "\n")
-}
-
 func SetupRouter(
 	downloader *service.Downloader,
 	p2pSvc *service.P2PService,
 	cfg *config.Config,
 ) *gin.Engine {
+	log.LogInfo("router: SetupRouter starting")
 	r := gin.Default()
 	r.RedirectTrailingSlash = false
 	r.RedirectFixedPath = false
@@ -86,7 +82,7 @@ func SetupRouter(
 		var err error
 		btSvc, err = p2p_bt.NewBTDHT(cfg.BTDHTListenAddr)
 		if err != nil {
-			logf("BT DHT init warning: %v", err)
+			log.LogWarn("router: BT DHT init warning: %v", err)
 		}
 	}
 	controller.InitBTController(btSvc)
@@ -95,6 +91,23 @@ func SetupRouter(
 	dualSvc := service.NewDualP2PService(cfg, p2pSvc, btSvc)
 	controller.InitDualController(dualSvc)
 	controller.InitAnonController(service.NewAnonService(cfg))
+
+	// Create peer tracker and wire it into both the P2P service and
+	// controller handlers so that connections, transfers, and pings
+	// are automatically recorded.
+	peerTracker := service.NewPeerTracker()
+	transports := []string{"tcp"}
+	if strings.Contains(cfg.P2PListenAddr, "quic") || strings.Contains(cfg.P2PListenAddrV6, "quic") {
+		transports = append(transports, "quic")
+	}
+	peerTracker.SetTransports(transports)
+	if cfg.RegistrationServer != "" {
+		peerTracker.SetRegServerConnected(true)
+	}
+	controller.InitPeerTracker(peerTracker)
+	if p2pSvc != nil {
+		p2pSvc.SetPeerTracker(peerTracker)
+	}
 
 	// Sync controller initialization
 	syncRepo := repository.NewSyncRepository()
@@ -224,5 +237,8 @@ func SetupRouter(
 		controller.GetSignalHub().HandleConnection(c.Writer, c.Request)
 	})
 
+	// Count routes
+	routes := r.Routes()
+	log.LogInfo("router: SetupRouter completed with %d routes", len(routes))
 	return r
 }
