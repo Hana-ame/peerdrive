@@ -32,7 +32,16 @@ else
   fail "go test"
 fi
 
-# ── 3. Frontend Build ──
+# ── 3. Frontend Vitest ──
+echo ""
+echo "── 3. Frontend Vitest ──"
+if npm run --prefix /mnt/d/WorkPlace/peerdrive/react test 2>&1 | grep -q "Tests.*passed"; then
+  pass "vitest"
+else
+  fail "vitest"
+fi
+
+# ── 4. Frontend Build ──
 echo ""
 echo "── 3. Frontend Build ──"
 if npm run --prefix /mnt/d/WorkPlace/peerdrive/react build 2>&1 | tail -1 | grep -q "built"; then
@@ -41,7 +50,7 @@ else
   fail "frontend build"
 fi
 
-# ── 4. Playwright Smoke Tests ──
+# ── 5. Playwright Smoke Tests ──
 echo ""
 echo "── 4. Playwright Smoke Tests ──"
 SMOKE_OUT=$(node /home/lumin/.claude/skills/playwright-test/scripts/test-runner.mjs \
@@ -53,7 +62,7 @@ else
   echo "$SMOKE_OUT" | grep "FAIL\|Pass\|Fail"
 fi
 
-# ── 5. Playwright Functional Tests ──
+# ── 6. Playwright Functional Tests ──
 echo ""
 echo "── 5. Playwright Functional Tests ──"
 FUNC_OUT=$(node /home/lumin/.claude/skills/playwright-test/scripts/test-runner.mjs \
