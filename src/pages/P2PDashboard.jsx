@@ -49,7 +49,7 @@ export default function P2PDashboard() {
         api.getSignalPeers(),
       ]);
       setStatus(s);
-      setPeers(p || []);
+      setPeers(p?.peers || p || []);
       setDiscovered(d || []);
       setSignalPeers(sp || []);
       setLastRefresh(new Date());
