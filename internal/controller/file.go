@@ -223,6 +223,46 @@ func DeleteFile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
+// CopyFile godoc
+// POST /files/copy
+// Body: {"hash": "<sha256>", "dest_path": "<destination path within storage>"}
+// Copies a file within storage (for WebDAV MOVE equivalent).
+func CopyFile(c *gin.Context) {
+	log.LogDebug("ctrl-file: CopyFile")
+	var req struct {
+		Hash     string `json:"hash"`
+		DestPath string `json:"dest_path"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-file: CopyFile invalid request")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if req.Hash == "" || req.DestPath == "" {
+		log.LogWarn("ctrl-file: CopyFile missing hash or dest_path")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "hash and dest_path are required"})
+		return
+	}
+	if !hashutil.IsValidSHA256(req.Hash) {
+		log.LogWarn("ctrl-file: CopyFile invalid hash: %s", req.Hash)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
+		return
+	}
+
+	dest, err := fileSvc.CopyFile(req.Hash, req.DestPath)
+	if err != nil {
+		log.LogError("ctrl-file: CopyFile %s -> %s failed: %v", req.Hash, req.DestPath, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-file: CopyFile %s -> %s", req.Hash, dest)
+	c.JSON(http.StatusCreated, gin.H{
+		"hash":      req.Hash,
+		"dest_path": dest,
+	})
+}
+
 // DiffVersions godoc
 func DiffVersions(c *gin.Context) {
 	log.LogDebug("ctrl-file: DiffVersions")

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"peerdrive/internal/config"
@@ -143,5 +144,34 @@ func TestUploadFile_NoFile(t *testing.T) {
 
 	if w.Code != 400 {
 		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestCopyFile_MissingParams(t *testing.T) {
+	r := setupFileTestRouter(t)
+	r.POST("/files/copy", CopyFile)
+
+	// Test missing hash (valid JSON but empty hash)
+	w := httptest.NewRecorder()
+	body := `{}`
+	req := httptest.NewRequest("POST", "/files/copy", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("expected 400 for missing params, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCopyFile_InvalidHash(t *testing.T) {
+	r := setupFileTestRouter(t)
+	r.POST("/files/copy", CopyFile)
+
+	w := httptest.NewRecorder()
+	body := `{"hash":"invalid","dest_path":"/tmp/copy.txt"}`
+	req := httptest.NewRequest("POST", "/files/copy", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("expected 400 for invalid hash, got %d: %s", w.Code, w.Body.String())
 	}
 }

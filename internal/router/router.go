@@ -312,6 +312,7 @@ func SetupRouter(
 		files.GET("/verify/:hash", controller.VerifyFile)
 		files.GET("/browse", controller.BrowseDir)
 		files.DELETE("/:hash", controller.DeleteFile)
+		files.POST("/copy", controller.CopyFile)
 		files.POST("/diff", controller.DiffVersions)
 	}
 

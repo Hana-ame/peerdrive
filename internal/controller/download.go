@@ -17,6 +17,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"strconv"
 	"time"
 
 	"peerdrive/internal/log"
@@ -89,15 +91,7 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 		}
 		// Handle Range requests for chunked download
 		if rng := c.GetHeader("Range"); rng != "" {
-			var start, end int64
-			if _, err := fmt.Sscanf(rng, "bytes=%d-%d", &start, &end); err == nil && start >= 0 && end >= start {
-				total := int64(len(data))
-				if end == 0 || end >= total {
-					end = total - 1
-				}
-				c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
-				c.Status(http.StatusPartialContent)
-				c.Writer.Write(data[start : end+1])
+			if handled := handleRangeRequest(c, data, rng); handled {
 				return
 			}
 		}
@@ -182,6 +176,87 @@ func DownloadByCID(c *gin.Context) {
 	DownloadBySHA256Internal(c, meta.Hash)
 }
 
+// handleRangeRequest handles HTTP Range requests including:
+//   - Standard range: bytes=START-END
+//   - Suffix range: bytes=-N
+//   - 0-byte file: returns full file (no partial)
+//   - Open-ended range: bytes=N- (returns from N to end)
+// Returns true if the range was handled (response already written).
+func handleRangeRequest(c *gin.Context, data []byte, rangeHeader string) bool {
+	total := int64(len(data))
+
+	// 0-byte files cannot be served as partial
+	if total == 0 {
+		return false
+	}
+
+	// Suffix range: bytes=-N  (last N bytes)
+	if strings.HasPrefix(rangeHeader, "bytes=-") {
+		suffixStr := strings.TrimPrefix(rangeHeader, "bytes=-")
+		suffix, err := strconv.ParseInt(suffixStr, 10, 64)
+		if err != nil || suffix <= 0 {
+			return false
+		}
+		if suffix > total {
+			suffix = total
+		}
+		start := total - suffix
+		c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, total-1, total))
+		c.Header("Content-Length", fmt.Sprintf("%d", suffix))
+		c.Status(http.StatusPartialContent)
+		c.Writer.Write(data[start:])
+		return true
+	}
+
+	// Standard range: bytes=START-END or bytes=START- (open-ended)
+	// Parse manually because Sscanf cannot handle open-ended ranges (bytes=N-).
+	rangeBody := strings.TrimPrefix(rangeHeader, "bytes=")
+	if rangeBody == rangeHeader {
+		// No "bytes=" prefix
+		return false
+	}
+	parts := strings.SplitN(rangeBody, "-", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	if parts[0] == "" {
+		// This is a suffix range which should have been caught above
+		return false
+	}
+	start, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || start < 0 {
+		return false
+	}
+	if start >= total {
+		c.Header("Content-Range", fmt.Sprintf("bytes */%d", total))
+		c.Status(http.StatusRequestedRangeNotSatisfiable)
+		return true
+	}
+	var end int64
+	if parts[1] == "" {
+		// Open-ended: bytes=N-
+		end = total - 1
+	} else {
+		end, err = strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || end < start {
+			end = total - 1
+		}
+	}
+	if end >= total {
+		end = total - 1
+	}
+	if end < start {
+		return false
+	}
+	length := end - start + 1
+	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
+	c.Header("Content-Length", fmt.Sprintf("%d", length))
+	c.Status(http.StatusPartialContent)
+	c.Writer.Write(data[start : end+1])
+	return true
+}
+
+// ─── Universal download endpoint ───────────────────────────────────────────
 // ─── Universal download endpoint ───────────────────────────────────────────
 
 // UniversalDownload 处理 GET /download/:hash，使用通用下载器跨协议获取文件。
