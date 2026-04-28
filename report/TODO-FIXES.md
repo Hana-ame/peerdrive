@@ -36,3 +36,35 @@
 - [x] CF Tunnel wsl-3000 在线
 - [x] 合集名 "未命名" bug 修复
 - [x] announce 500 改为 200+WARN
+
+## P2P Module Status (2026-04-28)
+- ✅ libp2p host (TCP/QUIC/WS)
+- ✅ DHT + mDNS
+- ✅ Exchange protocol
+- ✅ Relay server/client
+- ✅ Connection manager (heartbeat/reconnect)
+- ✅ Topology + quality metrics
+- ✅ P2P topology visualization frontend
+- Test results: 35/35 pass
+
+## Auth Module Status (2026-04-28)
+- ✅ User register/login
+- ✅ JWT token validation
+- ✅ Relay registration/heartbeat/list
+- ✅ Group management
+- ✅ Comment system (per collection)
+- ✅ Registration server stats
+- ✅ Auth middleware (Bearer token)
+- ✅ Navbar identity indicator
+- Test results: 20/20 pass
+
+## Storage Module Status (2026-04-28)
+- ✅ SHA256 content-addressed storage
+- ✅ CID dual-indexing
+- ✅ File upload/register/delete/verify
+- ✅ Range (HTTP 206) download
+- ✅ URL file registration
+- ✅ WebDAV mount
+- ✅ File copy
+- ✅ Universal downloader (local->ipfs->btdht->http)
+- Test results: 28/28 pass
