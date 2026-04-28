@@ -1,0 +1,5 @@
+*.db
+storage/
+server
+peerdrive-server
+downloads/
