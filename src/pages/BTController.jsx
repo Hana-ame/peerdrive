@@ -29,7 +29,7 @@ function formatETA(remainingBytes, speedBytesPerSec) {
   return Math.floor(secs / 86400) + 'd ' + Math.floor((secs % 86400) / 3600) + 'h';
 }
 
-function statusBadge(status) {
+function statusBadge(status, errorMsg) {
   const map = {
     downloading: { label: '下载中', cls: 'bg-blue-600/30 text-blue-300 border-blue-700/40' },
     seeding:     { label: '做种中', cls: 'bg-emerald-600/30 text-emerald-300 border-emerald-700/40' },
@@ -41,7 +41,8 @@ function statusBadge(status) {
   };
   const entry = map[status] || { label: status || '未知', cls: 'bg-gray-600/30 text-gray-300 border-gray-700/40' };
   return (
-    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-medium border ${entry.cls}`}>
+    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-medium border cursor-help ${entry.cls}`}
+      title={status === 'error' && errorMsg ? `错误详情: ${errorMsg}` : entry.label}>
       {entry.label}
     </span>
   );
@@ -66,6 +67,31 @@ export default function BTController() {
   const [statusMsg, setStatusMsg] = useState(null);
   const fileRef = useRef(null);
   const pollRef = useRef(null);
+
+  // Node status for banner + relay tags
+  const [nodeStatus, setNodeStatus] = useState({ online: false, p2p: false, relay: false, btNodes: 0, checking: true });
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const apiBase = localStorage.getItem('peerdrive_api_base');
+        if (!apiBase) { setNodeStatus({ online: false, p2p: false, relay: false, btNodes: 0, checking: false }); return; }
+        const [ping, p2p, bt] = await Promise.all([
+          fetch(apiBase + '/ping').then(r => r.ok).catch(() => false),
+          api.getP2PStatus().catch(() => null),
+          api.getBTStatus().catch(() => null),
+        ]);
+        setNodeStatus({
+          online: ping,
+          p2p: p2p?.enabled || false,
+          relay: p2p?.relay_mode === 'server',
+          btNodes: bt?.num_nodes || 0,
+          peers: p2p?.connected_count || 0,
+          checking: false,
+        });
+      } catch { setNodeStatus({ online: false, p2p: false, relay: false, btNodes: 0, checking: false }); }
+    })();
+  }, []);
 
   /* ---- Poll downloads every 2s ---- */
   const fetchDownloads = useCallback(async (showLoading) => {
@@ -197,10 +223,34 @@ export default function BTController() {
       {/* ===== Top: Add Torrent Section ===== */}
       <div className="shrink-0 border-b border-gray-800 bg-gray-900/60 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-4">
+          {/* Node status banner */}
+          {!nodeStatus.checking && !nodeStatus.online && (
+            <div className="mb-3 px-4 py-3 bg-amber-900/20 border border-amber-800/40 rounded-lg text-sm text-amber-300 flex items-center gap-2">
+              <span>⚠️</span>
+              <span>未连接到本地节点。在 Settings 填入节点 API 地址后可使用本地文件功能和 P2P 下载。</span>
+            </div>
+          )}
+
+          {/* No-node info banner */}
+          {!nodeStatus.checking && nodeStatus.online && !nodeStatus.p2p && (
+            <div className="mb-3 px-4 py-3 bg-blue-900/20 border border-blue-800/40 rounded-lg text-sm text-blue-300 flex items-center gap-2">
+              <span>ℹ️</span>
+              <span>P2P 未启用。文件将从 BT DHT 和 IPFS 网关拉取，无法使用本地交换。</span>
+            </div>
+          )}
+
           <div className="flex items-center justify-between mb-3">
             <h1 className="text-lg md:text-xl font-bold text-gray-100 flex items-center gap-2">
               <span>BT 下载控制器</span>
-              <span className="text-xs text-gray-500 font-normal">qBittorrent-style</span>
+              {/* Connection tags */}
+              {!nodeStatus.checking && (
+                <span className="flex items-center gap-1.5">
+                  {nodeStatus.online && <span className="text-[10px] bg-emerald-900/40 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-700/30">节点在线</span>}
+                  {nodeStatus.p2p && <span className="text-[10px] bg-blue-900/40 text-blue-400 px-2 py-0.5 rounded-full border border-blue-700/30">P2P {nodeStatus.peers > 0 ? `${nodeStatus.peers} peer` : '可用'}</span>}
+                  {nodeStatus.relay && <span className="text-[10px] bg-purple-900/40 text-purple-400 px-2 py-0.5 rounded-full border border-purple-700/30">Relay</span>}
+                  {nodeStatus.btNodes > 0 && <span className="text-[10px] bg-amber-900/40 text-amber-400 px-2 py-0.5 rounded-full border border-amber-700/30">DHT {nodeStatus.btNodes} 节点</span>}
+                </span>
+              )}
             </h1>
             <button
               onClick={() => fetchDownloads(true)}
