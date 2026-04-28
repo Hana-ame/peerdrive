@@ -10,6 +10,7 @@ import Settings from './pages/Settings';
 import P2PDashboard from './pages/P2PDashboard';
 import IPFSPanel from './pages/IPFSPanel';
 import BTPanel from './pages/BTPanel';
+import BTController from './pages/BTController';
 import P2PPanel from './pages/P2PPanel';
 import Navbar from './components/Navbar';
 import MobileNav from './components/MobileNav';
@@ -48,6 +49,7 @@ export default function App() {
                 <Route path="/p2p" element={<P2PPanel />} />
                 <Route path="/p2p/ipfs" element={<IPFSPanel />} />
                 <Route path="/p2p/bt" element={<BTPanel />} />
+                <Route path="/p2p/bt/controller" element={<BTController />} />
                 <Route path="/p2p/dashboard" element={<P2PDashboard />} />
                 <Route path="/settings" element={<Settings dataConsent={dataConsent} setDataConsent={setDataConsent} />} />
               </Routes>

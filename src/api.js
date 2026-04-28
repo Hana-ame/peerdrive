@@ -136,6 +136,25 @@ export const getBTStatus = () => request('GET', '/p2p/bt/status');
 export const btAnnounce = (hash) => request('POST', '/p2p/bt/announce', { hash });
 export const btFind = (hash) => request('POST', '/p2p/bt/find', { hash });
 
+/* ---- BT Controller (download management) ---- */
+export const btGetDownloads = () => request('GET', '/p2p/bt/downloads');
+export const btGetDownload = (infohash) => request('GET', `/p2p/bt/download/${infohash}`);
+export const btMagnetResolve = (uri) => request('POST', '/p2p/bt/magnet', { uri });
+export const btTorrentUpload = (file) => {
+  const fd = new FormData();
+  fd.append('torrent', file);
+  const token = getAuthToken();
+  const headers = {};
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  return fetch(`${getApiBase()}/p2p/bt/torrent`, { method: 'POST', body: fd, headers }).then(r => {
+    if (!r.ok) throw new Error(`Torrent upload failed: ${r.status}`);
+    return r.json();
+  });
+};
+export const btRemoveDownload = (infohash) => request('DELETE', `/p2p/bt/download/${infohash}`);
+export const btPauseDownload = (infohash) => request('POST', `/p2p/bt/download/${infohash}/pause`);
+export const btResumeDownload = (infohash) => request('POST', `/p2p/bt/download/${infohash}/resume`);
+
 /* ---- P2P Dual ---- */
 export const dualAnnounce = (hash) => request('POST', '/p2p/dual/announce', { hash });
 export const dualFind = (hash) => request('POST', '/p2p/dual/find', { hash });
