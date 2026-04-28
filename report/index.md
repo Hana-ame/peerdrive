@@ -4,10 +4,17 @@
 
 ---
 
+## 总览
+
+**[REPORT-OVERVIEW.md](REPORT-OVERVIEW.md)** — 项目报告总览，含模块闭环状态、演进时间线、剩余工作清单。**推荐首先阅读。**
+
+---
+
 ## 最新（活跃维护中）
 
 | 文件 | 日期 | 说明 |
 |------|------|------|
+| [REPORT-OVERVIEW.md](REPORT-OVERVIEW.md) | 04-29 | **报告总览**，项目全貌、时间线、状态汇总 |
 | [TODO-FIXES.md](TODO-FIXES.md) | 04-29 | **当前任务追踪**，P0/P1/P2 优先级，修复状态实时更新 |
 | [TASK-COMPLETION-2026-04-29.md](TASK-COMPLETION-2026-04-29.md) | 04-29 | **6项任务完成报告**：BEP44 / 断点续传 / 前端合集 / 文件浏览 / WebRTC / BT端到端 |
 | [SECURITY-REVIEW.md](SECURITY-REVIEW.md) | 04-28 | **安全审查**：路径穿越、CORS、认证、P2P 攻击面 |
@@ -42,4 +49,4 @@
 
 ---
 
-**阅读顺序建议**: DASHBOARD → TODO-FIXES → TASK-COMPLETION → SECURITY-REVIEW → DEVELOPMENT_PLAN
+**阅读顺序建议**: [REPORT-OVERVIEW](REPORT-OVERVIEW.md) → [DASHBOARD](../DASHBOARD.md) → [TODO-FIXES](TODO-FIXES.md) → [TASK-COMPLETION](TASK-COMPLETION-2026-04-29.md) → [SECURITY-REVIEW](SECURITY-REVIEW.md) → [DEVELOPMENT_PLAN](DEVELOPMENT_PLAN.md)

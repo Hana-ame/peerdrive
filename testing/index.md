@@ -1,322 +1,91 @@
-# Peerdrive 测试说明
+# Peerdrive 测试文档索引
 
-## 环境
-
-| 组件 | 技术栈 | 端口 |
-|------|--------|------|
-| **后端** | Go + Gin + libp2p + SQLite3 | `:3000` |
-| **前端** | React 19 + Vite + TypeScript | `:5173` (dev) |
-| **API 代理** | Cloudflare Tunnel → `wsl-3000.moonchan.xyz` (可选) |
+> 面向测试人员和开发者的测试文档门户
+> 更新: 2026-04-29
 
 ---
 
-## 1. 启动后端
+## 核心文档
 
-```bash
-cd go/
-
-# 安装依赖（首次）
-go mod tidy
-
-# 启动服务
-go run ./cmd/server/main.go
-
-# 或指定端口、存储目录与 P2P 模式
-PORT=3000 PEERDRIVE_STORAGE=./storage PEERDRIVE_RELAY_MODE=server go run ./cmd/server/main.go
-```
-
-启动后应看到：
-```
-libp2p 节点已启动: PeerID=12D3KooW..., 监听地址=[/ip4/...], relay=server, hole_punch=true
-```
+| 文件 | 说明 |
+|------|------|
+| [TESTING-HANDBOOK.md](TESTING-HANDBOOK.md) | **测试手册** — 完整测试指南：环境搭建、测试运行、手动流程、故障排查、混沌测试 |
+| [TEST-MATRIX.md](TEST-MATRIX.md) | **测试矩阵** — 109 项测试用例，覆盖全部功能点 |
+| [TESTING-METHODOLOGY.md](TESTING-METHODOLOGY.md) | **测试方法详解** — 9 个 Phase 的测试方法论，含 VPS 真实环境测试 |
 
 ---
 
-## 2. 快速测试（自动化脚本）
+## 测试运行指南
 
-```bash
-cd go/
+### 按角色分类
 
-# 注册 + 下载全链路测试
-bash test/register.sh
+| 角色 | 推荐阅读 | 推荐运行 |
+|------|----------|----------|
+| **新加入的测试人员** | [TESTING-HANDBOOK.md](TESTING-HANDBOOK.md) 第1-3节 | `go test ./...` → `e2e-all.sh` |
+| **功能验证** | [TEST-MATRIX.md](TEST-MATRIX.md) 相关章节 | 对应模块专项测试 |
+| **P2P/BT 专项测试** | [TESTING-METHODOLOGY.md](TESTING-METHODOLOGY.md) Phase 2-7 | `p2p.sh`, `relay.sh`, `bt-full-test.sh` |
+| **前端测试** | [TESTING-METHODOLOGY.md](TESTING-METHODOLOGY.md) Phase 8 | `npx playwright test` |
+| **安全测试** | [../report/SECURITY-REVIEW.md](../report/SECURITY-REVIEW.md) | 手动验证 path traversal / auth bypass |
+| **混沌测试** | [CHAOS_TESTING.md](CHAOS_TESTING.md) | `chaos-net.sh start` → `test-under-chaos.sh` |
 
-# 上传功能测试（新文件、重复文件）
-bash test/upload.sh
+### 按测试类型分类
 
-# 匿名合集测试
-bash test/anon-collection.sh
-
-# P2P Stage 2 双节点集成测试
-bash test/p2p.sh
-
-# P2P Stage 3 中继 + WS 测试
-bash test/relay.sh
-```
-
-脚本覆盖：
-- `/ping` 健康检查
-- `/p2p/node` P2P 节点信息
-- 文件上传 → 元数据校验 → 下载对比
-- 重复上传幂等性（`already_exists` 检测）
-- 注册本地绝对路径文件
-- 注册文件夹（递归）
-- 元数据校验（size, mime, hash）
-- 合集创建 → 添加条目 → Commit → 版本日志 → Rollback
-- Fork 合集 → Merge 合集 → Pull
-- 边界情况（无效 hash、重复合集、不存在的任务）
-- 清理临时文件
+| 类型 | 运行命令 | 耗时 | 需要服务 |
+|------|----------|------|----------|
+| Go 单元测试 | `go test ./... -count=1` | ~1s | 否 |
+| E2E 全端点 | `bash test/e2e-all.sh` | ~30s | 否（自包含） |
+| BT 全功能 | `bash test/bt-full-test.sh` | ~60s | 是 :3000 |
+| IPFS 全功能 | `bash test/ipfs-full-test.sh` | ~30s | 是 :3000 |
+| P2P 全功能 | `bash test/p2p-full-test.sh` | ~30s | 是 :3000 |
+| Storage 全功能 | `bash test/storage-full-test.sh` | ~30s | 是 :3000 |
+| Auth 全功能 | `bash test/auth-full-test.sh` | ~20s | 是 :4000 |
+| WebRTC 信令 | `bash test/webrtc_signal_test.sh` | ~15s | 是 :3000 |
+| P2P 双节点 | `bash test/p2p.sh` | ~30s | 否（自包含） |
+| Relay 穿透 | `bash test/relay.sh` | ~30s | 否（自包含） |
+| 一键全模块 | `bash test/all.sh` | ~2min | 是 :3000 |
+| 前端 | `npx playwright test` | ~30s | 是 :5173 |
 
 ---
 
-## 3. 手动测试（curl 逐项）
+## 专项文档
 
-### 3.1 基础
+| 文件 | 说明 |
+|------|------|
+| [test-steps.md](test-steps.md) | **P2P 测试实录** — VPS 双节点部署、连接、文件交换、Relay 完整步骤日志 |
+| [test-case-spec.md](test-case-spec.md) | **测试用例规格** — sha256/匿名合集/P2P Stage 2/3 的需求级测试说明 |
+| [register.md](register.md) | **注册与下载测试** — RegisterLocal + SHA256 下载的集成测试说明 |
+| [test-peers.md](test-peers.md) | **Peer 测试** — 多节点互联测试 |
+| [p2p-stage2-report.md](p2p-stage2-report.md) | **P2P Stage 2 测试报告** — mDNS/DHT/Exchange 测试结果 |
+| [CHAOS_TESTING.md](CHAOS_TESTING.md) | **混沌测试** — tc/iptables 模拟恶劣网络条件，完整使用指南 |
+| [README.md](README.md) | **旧版测试概述** — 测试分类和 CI 配置说明 |
+
+---
+
+## 测试环境
+
+| 环境 | 地址 | 端口 | 说明 |
+|------|------|------|------|
+| 本地开发 | localhost | 3000 | WSL Go 服务 |
+| 本地前端 | localhost | 5173 | Vite dev server |
+| VPS | bwh.moonchan.xyz | 3000 | 公网 P2P Relay |
+| VPS | bwh.moonchan.xyz | 4000 | Registration Server |
+| CF Tunnel | wsl-3000.moonchan.xyz | 443 | WSL 穿透到公网 |
+| CF Pages | peerdrive.pages.dev | 443 | 前端生产部署 |
+
+---
+
+## 快速入口
 
 ```bash
-# 健康检查
+# 最简验证 — 确认服务活着
 curl -x "" http://localhost:3000/ping
 
-# P2P 节点信息
-curl -x "" http://localhost:3000/p2p/node
+# 全部单元测试 — 1 秒出结果
+cd go && go test ./... -count=1
 
-# P2P 对等点列表
-curl -x "" http://localhost:3000/p2p/peers
+# 完整 E2E — 覆盖所有 HTTP 端点
+cd go && bash test/e2e-all.sh
+
+# BT 38 项测试 — 需服务在 :3000
+cd go && bash test/bt-full-test.sh
 ```
-
-### 3.2 文件管理
-
-```bash
-# 上传文件
-echo "hello world" > /tmp/test.txt
-curl -x "" -F "file=@/tmp/test.txt" http://localhost:3000/files/upload
-# → {"hash":"...sha256...","filename":"test.txt"}
-
-# 验证文件（用上面的 hash）
-curl -x "" http://localhost:3000/files/verify/<HASH>
-# → {"hash":"...","filename":"test.txt","size":...,"mime":"text/plain; charset=utf-8"}
-
-# 通过 SHA256 下载
-curl -x "" -o /tmp/downloaded http://localhost:3000/sha256sum/<HASH>
-
-# 注册本地文件（绝对路径）
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"path":"/tmp/test.txt","filename":"test.txt"}' \
-  http://localhost:3000/files/register_local
-
-# 注册文件夹（绝对路径，递归）
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"folder_path":"/tmp/somedir"}' \
-  http://localhost:3000/files/register_folder
-
-# 删除文件
-curl -x "" -X DELETE http://localhost:3000/files/<HASH>
-```
-
-### 3.3 合集管理
-
-```bash
-# 创建合集
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"username":"alice","collection_name":"music"}' \
-  -X POST http://localhost:3000/collections
-
-# 列出用户的合集
-curl -x "" http://localhost:3000/collections/alice
-
-# 获取合集详情（含条目）
-curl -x "" http://localhost:3000/collections/alice/music
-
-# 添加条目（path=合集内路径, hash=文件SHA256）
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"path":"songs/hello.mp3","hash":"<HASH>"}' \
-  -X POST http://localhost:3000/collections/alice/music/entries
-
-# 从合集下载文件
-curl -x "" -o /tmp/song http://localhost:3000/alice/music/songs/hello.mp3
-
-# 删除条目
-curl -x "" -X DELETE "http://localhost:3000/collections/alice/music/entries/songs%2Fhello.mp3"
-```
-
-### 3.4 版本管理
-
-```bash
-# Commit 当前状态
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"commit_message":"first version"}' \
-  -X POST http://localhost:3000/collections/alice/music/commit
-
-# 查看版本日志
-curl -x "" http://localhost:3000/collections/alice/music/log
-
-# Rollback（用日志中的 version_id）
-curl -x "" -X POST http://localhost:3000/collections/alice/music/rollback/<VERSION_ID>
-```
-
-### 3.5 Fork / Merge / Pull
-
-```bash
-# Fork（克隆别的合集到自己的名下）
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"username":"bob","collection_name":"music-fork","source_username":"alice","source_coll_name":"music"}' \
-  -X POST http://localhost:3000/actions/fork
-
-# Merge（从源合集合并到本地）
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"username":"alice","collection_name":"music","source_username":"bob","source_coll_name":"music-fork","strategy":"theirs"}' \
-  -X POST http://localhost:3000/actions/merge
-# strategy: "ours" = 本地优先, "theirs" = 源优先, "manual" = 返回冲突列表
-
-# Pull（简单占位，v2 实现上游同步）
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"username":"alice","collection_name":"music"}' \
-  -X POST http://localhost:3000/actions/pull
-```
-
-### 3.7 匿名合集
-
-```bash
-# 创建匿名合集
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"friendly_name":"my-collection","entries":[{"path":"test.txt","hash":"<HASH>"}]}' \
-  -X POST http://localhost:3000/anon/collections
-
-# 获取合集 JSON
-curl -x "" http://localhost:3000/anon/collections/<COLLECTION_HASH>
-
-# 从合集下载文件
-curl -x "" -o /tmp/downloaded http://localhost:3000/anon/collections/<HASH>/entries/test.txt
-
-# Fork 匿名合集
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"source_hash":"<HASH>","friendly_name":"forked","add_entries":[],"remove_paths":[]}' \
-  -X POST http://localhost:3000/anon/collections/fork
-```
-
-### 3.8 P2P 操作
-
-```bash
-# P2P 状态（含 relay_mode / hole_punch / ws_connections）
-curl -x "" http://localhost:3000/p2p/status
-
-# 发现的节点（mDNS + DHT）
-curl -x "" http://localhost:3000/p2p/discovered
-
-# 手动连接节点
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"peer_id":"<PEER_ID>","addrs":["/ip4/127.0.0.1/tcp/43001"]}' \
-  -X POST http://localhost:3000/p2p/connect
-
-# Ping 对等点
-curl -x "" http://localhost:3000/p2p/ping/<PEER_ID>
-
-# 拉取匿名合集
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"peer_id":"<PEER_ID>","hash":"<COLLECTION_HASH>"}' \
-  -X POST http://localhost:3000/p2p/fetch
-
-# 向对等点请求文件（广播）
-curl -x "" -H "Content-Type: application/json" \
-  -d '{"hash":"<FILE_HASH>"}' \
-  -X POST http://localhost:3000/p2p/request-file
-
-# WebSocket 连接信息
-curl -x "" http://localhost:3000/p2p/ws/info
-```
-
-### 3.9 任务系统
-
-```bash
-# 查看任务
-curl -x "" http://localhost:3000/tasks
-
-# 查询具体任务
-curl -x "" http://localhost:3000/tasks/1
-```
-
----
-
-## 4. 前端测试
-
-### 4.1 启动
-
-```bash
-cd react/
-npm run dev
-```
-
-浏览器打开 `http://localhost:5173`
-
-### 4.2 测试步骤
-
-| 步骤 | 操作 | 预期 |
-|------|------|------|
-| 1 | 在输入框输入用户名（如 `alice`），点击 **Set** | 顶部显示用户名 |
-| 2 | 在 "New collection name" 输入 `my-coll`，点击 **Create** | 下方出现合集卡片 |
-| 3 | 点击合集卡片进入详情页 | 看到空条目表 |
-| 4 | 在 Path 输入 `test.txt`，选择文件上传 | 文件上传成功，hash 填入 |
-| 5 | 点击 **Add** | 条目表出现一行 |
-| 6 | 输入 Commit message，点击 **Commit** | 版本历史出现 v1 |
-| 7 | 再 Commit 一次 | 出现 v2 |
-| 8 | 点击 v1 的 **Rollback** | 条目表恢复 v1 状态 |
-| 9 | 回到首页，点 **Fork** 链接 | 进入 Fork 页面 |
-| 10 | 填写本地方名 `my-coll-fork`，源用户 `alice`，源合集 `my-coll`，点 Fork | 跳转到新合集页 |
-| 11 | 点 **P2P** 导航链接 | 可查看节点信息和对等点 |
-
----
-
-## 5. 清理
-
-```bash
-# 删除数据库（重置环境）
-rm go/peerdrive.db
-
-# 删除上传文件
-rm -rf go/storage/
-```
-
----
-
-## 6. API 端点一览
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/ping` | 健康检查 |
-| GET | `/sha256sum/:sha256` | 按 hash 下载文件 |
-| GET | `/p2p/status` | P2P 状态（relay/hole_punch/ws） |
-| GET | `/p2p/node` | P2P 节点信息 |
-| GET | `/p2p/peers` | 连接的对等点 |
-| GET | `/p2p/discovered` | mDNS/DHT 发现的节点 |
-| GET | `/p2p/ping/:peer_id` | Ping 对等点 |
-| POST | `/p2p/connect` | 手动连接对等点 |
-| POST | `/p2p/announce` | 声明拥有文件 hash |
-| POST | `/p2p/fetch` | 从 P2P 拉取匿名合集 |
-| POST | `/p2p/sync` | 从对等点全量同步 |
-| POST | `/p2p/push` | 向对等点推送合集 |
-| POST | `/p2p/request-file` | 广播文件请求（P2P） |
-| GET | `/p2p/ws/info` | WebSocket 连接信息 |
-| GET | `/ws/transfer` | WebSocket 文件传输 |
-| POST | `/files/upload` | 上传文件 |
-| POST | `/files/register_local` | 注册本地文件 |
-| POST | `/files/register_folder` | 注册文件夹 |
-| GET | `/files/verify/:hash` | 验证文件 |
-| DELETE | `/files/:hash` | 删除文件 |
-| POST | `/files/diff` | 版本差异比较 |
-| POST | `/anon/collections` | 创建匿名合集 |
-| GET | `/anon/collections/:hash` | 获取匿名合集 JSON |
-| GET | `/anon/collections/:hash/entries/*path` | 从匿名合集下载文件 |
-| POST | `/anon/collections/fork` | Fork 匿名合集 |
-| POST | `/collections` | 创建合集 |
-| GET | `/collections/:username` | 列出合集 |
-| GET | `/collections/:username/:coll` | 获取合集详情 |
-| POST | `/collections/:username/:coll/entries` | 添加条目 |
-| DELETE | `/collections/:username/:coll/entries/:path` | 删除条目 |
-| POST | `/collections/:username/:coll/commit` | Commit 版本 |
-| GET | `/collections/:username/:coll/log` | 版本日志 |
-| POST | `/collections/:username/:coll/rollback/:vid` | Rollback |
-| GET | `/:username/:coll/*filepath` | 从合集下载文件 |
-| POST | `/actions/merge` | 合并合集 |
-| POST | `/actions/fork` | Fork 合集 |
-| POST | `/actions/pull` | Pull 更新 |
-| GET | `/tasks` | 任务列表 |
-| GET | `/tasks/:id` | 任务状态 |

@@ -22,20 +22,23 @@
 ## testing — 测试
 | 文件 | 内容 |
 |------|------|
-| [TESTING-METHODOLOGY.md](testing/TESTING-METHODOLOGY.md) | 测试方法详解 |
-| [test-steps.md](testing/test-steps.md) | 测试步骤记录 |
-| [index.md](testing/index.md) | 测试索引 |
+| [index.md](testing/index.md) | **测试文档门户** — 角色分类、按类型速查 |
+| [TESTING-HANDBOOK.md](testing/TESTING-HANDBOOK.md) | **测试手册** — 完整测试指南：环境搭建、测试运行、手动流程、故障排查（840行） |
+| [TEST-MATRIX.md](testing/TEST-MATRIX.md) | 测试矩阵 — 109 项测试用例 |
+| [TESTING-METHODOLOGY.md](testing/TESTING-METHODOLOGY.md) | 测试方法详解 — 9 Phase 方法论 |
+| [test-steps.md](testing/test-steps.md) | P2P 测试实录 — VPS 完整步骤日志 |
+| [CHAOS_TESTING.md](testing/CHAOS_TESTING.md) | 混沌测试 — 恶劣网络模拟 |
 
 ## report — 报告
 | 文件 | 内容 |
 |------|------|
-| [ROADMAP.md](report/ROADMAP.md) | 路线图 |
-| [TODO-FIXES.md](report/TODO-FIXES.md) | 待修复项 |
-| [TODO-P2P-DUAL-STACK.md](report/TODO-P2P-DUAL-STACK.md) | P2P双栈TODO |
-| [SECURITY-REVIEW.md](report/SECURITY-REVIEW.md) | 安全审查 |
-| [grid.md](report/grid.md) | 测试网格 |
-| [MILESTONE-P2P.md](report/MILESTONE-P2P.md) | P2P里程碑 |
-| [DEVELOPMENT_PLAN.md](report/DEVELOPMENT_PLAN.md) | 开发计划 |
+| [index.md](report/index.md) | **报告目录索引** — 按活跃/参考/完成/过时分类 |
+| [REPORT-OVERVIEW.md](report/REPORT-OVERVIEW.md) | **报告总览** — 项目全貌、模块状态、时间线 |
+| [TODO-FIXES.md](report/TODO-FIXES.md) | 当前任务追踪 — P0/P1/P2 |
+| [TASK-COMPLETION-2026-04-29.md](report/TASK-COMPLETION-2026-04-29.md) | 6项任务完成报告 |
+| [SECURITY-REVIEW.md](report/SECURITY-REVIEW.md) | 安全审查 — 14 项发现 |
+| [DEVELOPMENT_PLAN.md](report/DEVELOPMENT_PLAN.md) | Phase 2 开发计划 |
+| [ROADMAP.md](report/ROADMAP.md) | v3.0 路线图 |
 
 ## archive — 归档
 | 文件 | 内容 |
