@@ -51,6 +51,13 @@
   - "保存到我的node"按钮(合集级+文件级+批量选择模式)
   - 双击防抖(500ms) + 移动端适配(sm断点)
   - 选择模式：批量选中文件→保存为新合集
+- [x] ./todo.txt 代码重构+文档体系 ✅ (2026-04-29)
+  - Go base 分支创建（1025b78）：gin+node+sha256 基座
+  - 模块划分文档：CODE-DOC-MAPPING.md（代码↔文档双向映射）
+  - 测试管线文档：TEST-PIPELINE.md（14脚本，预期/错误/排错）
+  - API 文档：API-REFERENCE.md 已含 105 端点
+  - Swagger：96 路径 docs/docs.go 已生成
+  - base 分支已 push origin
 
 ## 🔵 已验证
 
