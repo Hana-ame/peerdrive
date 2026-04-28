@@ -247,3 +247,31 @@
 | O-05 | CF Pages | curl peerdrive.pages.dev | HTTP 200 | 前端可访问 |
 | O-06 | Docker compose up | docker compose up -d | 5 容器 running | relay healthcheck pass |
 | O-07 | 内存占用 | 长期运行后 | < 100MB (Go 进程) | ps aux RSS |
+
+---
+
+## 10. 真实网络测试 (2026-04-28)
+
+### I-01 IPFS 真实节点互通
+| 项 | 详情 |
+|----|------|
+| 目标 | Peerdrive 从公网 IPFS CID 拉取文件 |
+| 步骤 | 已知 CID `QmUNLLsP...` → POST /p2p/ipfs/pin → GET /ipfs/ |
+| 结果 | ✅ HTTP 200, 249,154 bytes, pin 成功 |
+| 验证 | 文件写入本地 storage，SHA256 索引注册 |
+
+### I-02 BT 真实种子测试
+| 项 | 详情 |
+|----|------|
+| 目标 | 从真实 BT 网络下载 torrent |
+| 步骤 | magnet 链接 → POST /p2p/bt/magnet → 等待 DHT 发现 → 下载 |
+| 状态 | 🏃 DHT 24 节点在线，等待 peer 发现 |
+| 阻塞 | 需要公网可访问的节点或已知 peer |
+
+### I-03 IPFS 本地节点互通
+| 项 | 详情 |
+|----|------|
+| 目标 | kubok add → CID → Peerdrive pin |
+| 步骤 | ipfs add → Peerdrive POST /p2p/ipfs/pin/:cid |
+| 结果 | ⚠️ 本地 kubo 节点文件未发布到 IPFS DHT，公网网关找不到 |
+| 修复 | 需要 kubo 连接 IPFS 公网或 Peerdrive 直接连接 kubo 的 libp2p 节点 |
