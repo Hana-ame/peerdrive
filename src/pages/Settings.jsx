@@ -1,4 +1,4 @@
-// 设置页：节点连接 / 认证 / 存储 / LLM / WebDAV / 关于，六个配置分区
+// 设置页：节点连接 / 认证 / 存储 / LLM / WebDAV / 关于，七个配置分区
 import React, { useState, useEffect, useCallback } from 'react';
 import * as api from '../api';
 import { useNavigate } from 'react-router-dom';
@@ -9,6 +9,7 @@ const SECTIONS = [
   { id: 'node', label: '节点连接' },
   { id: 'auth', label: '认证' },
   { id: 'storage', label: '存储管理' },
+  { id: 'ipfs', label: 'IPFS 兼容' },
   { id: 'llm', label: 'LLM 配置' },
   { id: 'webdav', label: 'WebDAV' },
   { id: 'about', label: '关于' },
@@ -46,6 +47,8 @@ export default function Settings({ dataConsent, setDataConsent }) {
   const [turnUrl, setTurnUrl] = useState(api.getTurnUrl());
   const [turnCredential, setTurnCredential] = useState(api.getTurnCredential());
   const [followRedirects, setFollowRedirects] = useState(api.getFollowRedirects());
+  const [ipfsEnabled, setIpfsEnabled] = useState(api.getIPFSEnabled());
+  const [btDhtEnabled, setBtDhtEnabled] = useState(localStorage.getItem('peerdrive_bt_dht_enabled') !== 'false');
 
   // ─── Auth ────────────────────────────────────────────
   const [regServer, setRegServer] = useState(localStorage.getItem('peerdrive_reg_server') || '');
@@ -71,6 +74,11 @@ export default function Settings({ dataConsent, setDataConsent }) {
   // ─── About ───────────────────────────────────────────
   const [consentUploading, setConsentUploading] = useState(false);
   const [consentMsg, setConsentMsg] = useState('');
+
+  // ─── IPFS Compat ─────────────────────────────────────
+  const [ipfsBlockCount, setIpfsBlockCount] = useState(0);
+  const [ipfsLoading, setIpfsLoading] = useState(false);
+  const [ipfsToggling, setIpfsToggling] = useState(false);
 
   // ─── Ping ────────────────────────────────────────────
   const testPing = useCallback(async () => {
@@ -195,6 +203,38 @@ export default function Settings({ dataConsent, setDataConsent }) {
   }, []);
 
   useEffect(() => { loadFileStats(); }, [loadFileStats]);
+
+  // ─── IPFS compat effect ─────────────────────────
+  const loadIPFSStatus = useCallback(async () => {
+    setIpfsLoading(true);
+    try {
+      const data = await api.getIPFSCompatStatus();
+      setIpfsEnabled(data.enabled);
+      setIpfsBlockCount(data.block_count || 0);
+    } catch {
+      setIpfsEnabled(false);
+      setIpfsBlockCount(0);
+    }
+    setIpfsLoading(false);
+  }, []);
+
+  useEffect(() => { loadIPFSStatus(); }, [loadIPFSStatus]);
+
+  const handleIPFSToggle = async () => {
+    setIpfsToggling(true);
+    try {
+      const data = await api.setIPFSCompatEnabled(!ipfsEnabled);
+      setIpfsEnabled(data.enabled);
+      if (data.enabled) {
+        await loadIPFSStatus();
+      } else {
+        setIpfsBlockCount(0);
+      }
+    } catch {
+      alert('切换 IPFS 兼容模式失败');
+    }
+    setIpfsToggling(false);
+  };
 
   const handleGC = () => {
     alert('垃圾回收功能即将推出');
@@ -379,6 +419,57 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 placeholder="username:credential"
                 className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
               />
+            </div>
+
+            {/* IPFS Gateway + BT DHT Toggles */}
+            <div className="border-t border-gray-700/50 pt-3 mt-2 space-y-3">
+              <p className="text-xs text-gray-400 mb-1">网络协议</p>
+
+              {/* IPFS Gateway Toggle */}
+              <div className="flex items-center gap-3">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={ipfsEnabled}
+                    onChange={() => {
+                      const v = !ipfsEnabled;
+                      setIpfsEnabled(v);
+                      api.setIPFSEnabled(v);
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
+                </label>
+                <div>
+                  <p className="text-sm text-gray-300">IPFS 网络</p>
+                  <p className="text-[10px] text-gray-500">
+                    {ipfsEnabled ? 'IPFS 网关: 已启用 (3 个可用)' : 'IPFS 网关: 已关闭'}
+                  </p>
+                </div>
+              </div>
+
+              {/* BT DHT Toggle */}
+              <div className="flex items-center gap-3">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={btDhtEnabled}
+                    onChange={() => {
+                      const v = !btDhtEnabled;
+                      setBtDhtEnabled(v);
+                      localStorage.setItem('peerdrive_bt_dht_enabled', v ? 'true' : 'false');
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
+                </label>
+                <div>
+                  <p className="text-sm text-gray-300">BT DHT 网络</p>
+                  <p className="text-[10px] text-gray-500">
+                    {btDhtEnabled ? 'BT DHT 已启用' : 'BT DHT 已关闭'}
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Follow Redirects Toggle */}
@@ -578,7 +669,55 @@ export default function Settings({ dataConsent, setDataConsent }) {
           </SettingsSection>
 
           {/* ==============================================
-              4. LLM 配置
+              4. IPFS 兼容
+              ============================================== */}
+          <SettingsSection
+            id="ipfs"
+            title="IPFS 兼容模式"
+            description="将文件同步到 IPFS 块存储，使文件可通过 IPFS 网络被其他节点访问"
+          >
+            <div className="flex items-center gap-3 pt-1">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={ipfsEnabled}
+                  onChange={handleIPFSToggle}
+                  disabled={ipfsToggling}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
+              </label>
+              <div>
+                <p className="text-sm text-gray-300">
+                  {ipfsEnabled ? '已启用' : '未启用'}
+                </p>
+                <p className="text-[10px] text-gray-500">
+                  开启后文件可以通过 IPFS 网络被其他节点访问
+                </p>
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 gap-4 mt-3">
+              <div className="bg-gray-900 rounded-lg p-4 text-center">
+                <p className="text-2xl font-mono text-blue-400">
+                  {ipfsLoading ? '...' : ipfsBlockCount}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">IPFS 块数</p>
+              </div>
+              <div className="bg-gray-900 rounded-lg p-4 text-center">
+                <p className="text-sm font-mono text-gray-400">{ipfsEnabled ? '活跃' : '未激活'}</p>
+                <p className="text-xs text-gray-500 mt-1">状态</p>
+              </div>
+            </div>
+
+            {ipfsToggling && (
+              <p className="text-[10px] text-gray-400 mt-2">处理中...</p>
+            )}
+          </SettingsSection>
+
+          {/* ==============================================
+              5. LLM 配置
               ============================================== */}
           <SettingsSection
             id="llm"
@@ -687,7 +826,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
           </SettingsSection>
 
           {/* ==============================================
-              5. WebDAV
+              6. WebDAV
               ============================================== */}
           <SettingsSection id="webdav" title="WebDAV 网络驱动器" description="将 Peerdrive 存储挂载为本地网络驱动器">
             {/* Status */}
@@ -753,7 +892,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
           </SettingsSection>
 
           {/* ==============================================
-              6. 关于
+              7. 关于
               ============================================== */}
           <SettingsSection id="about" title="关于" description="版本信息和数据管理">
             {/* Version */}

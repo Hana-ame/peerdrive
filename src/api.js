@@ -258,6 +258,26 @@ export function setTurnUrl(v) { localStorage.setItem(TURN_URL_KEY, v); }
 export function getTurnCredential() { return localStorage.getItem(TURN_CREDENTIAL_KEY) || ''; }
 export function setTurnCredential(v) { localStorage.setItem(TURN_CREDENTIAL_KEY, v); }
 
+/* ---- ipfs gateway config (frontend-only) ---- */
+const IPFS_ENABLED_KEY = 'peerdrive_ipfs_enabled';
+
+export function getIPFSEnabled() { return localStorage.getItem(IPFS_ENABLED_KEY) !== 'false'; }
+export function setIPFSEnabled(v) { localStorage.setItem(IPFS_ENABLED_KEY, v ? 'true' : 'false'); }
+
+/* ---- IPFS compat layer (server-side) ---- */
+
+// getIPFSCompatStatus 查询服务器 IPFS 兼容层状态。
+export async function getIPFSCompatStatus() {
+  const data = await request('GET', '/p2p/ipfs');
+  return data;
+}
+
+// setIPFSCompatEnabled 通过服务器 API 启用或禁用 IPFS 兼容模式。
+export async function setIPFSCompatEnabled(enabled) {
+  const data = await request('POST', '/p2p/ipfs/toggle', { enabled });
+  return data;
+}
+
 const FREE_LLM_MODELS = [
   'Qwen/Qwen3-8B',
   'Qwen/Qwen3.5-4B',
