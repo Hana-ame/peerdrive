@@ -95,6 +95,11 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 		}
 	}
 
+	// Derive filename from path if not provided
+	if filename == "" {
+		filename = filepath.Base(absPath)
+	}
+
 	existing, _ := repository.GetFileMeta(hash)
 	if existing == nil {
 		_ = repository.InsertFileMeta(&model.FileMeta{
@@ -164,20 +169,20 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 }
 
 // RegisterURL 从 URL 获取文件，计算 SHA256 并注册（provider_type="http"），自动跟随 301/302 重定向。
-func (s *FileService) RegisterURL(url string, filename string) (*model.FileMeta, error) {
+func (s *FileService) RegisterURL(rawURL string, filename string) (*model.FileMeta, error) {
 	defer log.LogDuration("FileService.RegisterURL")()
-	log.LogDebug("file-svc: RegisterURL url=%s filename=%s", url, filename)
+	log.LogDebug("file-svc: RegisterURL url=%s filename=%s", rawURL, filename)
 
 	// 1. HTTP GET the URL (http.Get auto-follows 301/302)
-	resp, err := http.Get(url)
+	resp, err := http.Get(rawURL)
 	if err != nil {
-		log.LogError("file-svc: RegisterURL GET %s failed: %v", url, err)
+		log.LogError("file-svc: RegisterURL GET %s failed: %v", rawURL, err)
 		return nil, fmt.Errorf("http get: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.LogWarn("file-svc: RegisterURL %s returned status %d", url, resp.StatusCode)
+		log.LogWarn("file-svc: RegisterURL %s returned status %d", rawURL, resp.StatusCode)
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
@@ -202,13 +207,29 @@ func (s *FileService) RegisterURL(url string, filename string) (*model.FileMeta,
 	// Derive filename from Content-Disposition or URL if not provided
 	if filename == "" {
 		if cd := resp.Header.Get("Content-Disposition"); cd != "" {
-			if _, f, ok := strings.Cut(cd, "filename="); ok {
-				filename = strings.Trim(f, "\" ")
+			// Try RFC 5987 format first: filename*=UTF-8''encoded-name
+			if _, encoded, ok := strings.Cut(cd, "filename*="); ok {
+				if idx := strings.Index(encoded, "''"); idx > 0 && idx+2 < len(encoded) {
+					part := encoded[idx+2:]
+					if end := strings.IndexByte(part, ';'); end > 0 {
+						part = part[:end]
+					}
+					decoded, err := percentUnescape(strings.TrimSpace(part))
+					if err == nil && decoded != "" {
+						filename = decoded
+					}
+				}
+			}
+			// Fallback to standard filename=
+			if filename == "" {
+				if _, f, ok := strings.Cut(cd, "filename="); ok {
+					filename = strings.Trim(f, "\" ")
+				}
 			}
 		}
 	}
 	if filename == "" {
-		filename = path.Base(url)
+		filename = path.Base(rawURL)
 	}
 
 	// 3. Insert into file_meta (skip if already exists)
@@ -229,7 +250,7 @@ func (s *FileService) RegisterURL(url string, filename string) (*model.FileMeta,
 	}
 
 	// Insert file_provider (type "http", path = url)
-	err = repository.InsertFileProvider(hash, "http", url)
+	err = repository.InsertFileProvider(hash, "http", rawURL)
 	if err != nil {
 		log.LogError("file-svc: RegisterURL insert provider failed: %v", err)
 		return nil, fmt.Errorf("insert provider: %w", err)
@@ -260,8 +281,40 @@ func (s *FileService) RegisterURL(url string, filename string) (*model.FileMeta,
 		Type:     repository.FileTypeBlob,
 	}
 
-	log.LogInfo("file-svc: RegisterURL %s -> hash=%s size=%d", url, hash, size)
+	log.LogInfo("file-svc: RegisterURL %s -> hash=%s size=%d", rawURL, hash, size)
 	return meta, nil
+}
+
+// percentUnescape decodes percent-encoded sequences (e.g. %20 -> space).
+func percentUnescape(s string) (string, error) {
+	var buf strings.Builder
+	buf.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) {
+			hi, err1 := hexDecodeNibble(s[i+1])
+			lo, err2 := hexDecodeNibble(s[i+2])
+			if err1 == nil && err2 == nil {
+				buf.WriteByte(hi<<4 | lo)
+				i += 2
+				continue
+			}
+		}
+		buf.WriteByte(s[i])
+	}
+	return buf.String(), nil
+}
+
+func hexDecodeNibble(c byte) (byte, error) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', nil
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, nil
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, nil
+	default:
+		return 0, fmt.Errorf("invalid hex nibble: %c", c)
+	}
 }
 
 // Upload 上传文件到 content-addressed 存储，计算 SHA256 并注册元数据和 provider。
@@ -449,6 +502,100 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return d.Sync()
+}
+
+// CopyFile copies a file identified by hash to a destination path within storage
+// and registers the copy in file_providers. Returns the destination path.
+func (s *FileService) CopyFile(hash string, destPath string) (string, error) {
+	defer log.LogDuration("FileService.CopyFile")()
+	log.LogDebug("file-svc: CopyFile hash=%s dest=%s", hash, destPath)
+
+	if !s.storageEnable {
+		return "", ErrStorageDisabled
+	}
+
+	// Verify source exists and get its data
+	meta, err := repository.GetFileMeta(hash)
+	if err != nil {
+		return "", fmt.Errorf("lookup source meta: %w", err)
+	}
+	if meta == nil {
+		return "", fmt.Errorf("source hash %s not found", hash)
+	}
+
+	// Resolve full destination path
+	absDest := destPath
+	if !filepath.IsAbs(destPath) {
+		absDest = filepath.Join(s.storageDir, destPath)
+	}
+
+	// Get source data via the download pipeline
+	body, err := s.ReadFile(hash)
+	if err != nil {
+		return "", fmt.Errorf("read source file: %w", err)
+	}
+
+	// Write to destination
+	if err := os.MkdirAll(filepath.Dir(absDest), 0755); err != nil {
+		return "", fmt.Errorf("create dest dir: %w", err)
+	}
+	if err := os.WriteFile(absDest, body, 0644); err != nil {
+		return "", fmt.Errorf("write dest file: %w", err)
+	}
+
+	// Register the copy as a local provider
+	relPath, _ := filepath.Rel(s.storageDir, absDest)
+	if relPath == "" || strings.HasPrefix(relPath, "..") {
+		relPath = absDest
+	}
+	_ = repository.InsertFileProvider(hash, "local", relPath)
+
+	log.LogInfo("file-svc: CopyFile hash=%s -> %s (rel=%s)", hash, absDest, relPath)
+	return absDest, nil
+}
+
+// ReadFile reads a file's bytes from content-addressed storage or via providers.
+func (s *FileService) ReadFile(hash string) ([]byte, error) {
+	// Try content-addressed paths first
+	candidates := []string{
+		filepath.Join(s.storageDir, hash[:2], hash),
+		filepath.Join(s.storageDir, "p2p", hash[:2], hash),
+	}
+	for _, p := range candidates {
+		data, err := os.ReadFile(p)
+		if err == nil {
+			return data, nil
+		}
+	}
+
+	// Fallback to DB providers
+	providers, err := repository.GetFileProviders(hash)
+	if err != nil {
+		return nil, fmt.Errorf("db lookup: %w", err)
+	}
+	for _, p := range providers {
+		if p.ProviderType == "local" && p.Available {
+			path := p.Path
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(s.storageDir, path)
+			}
+			data, err := os.ReadFile(path)
+			if err == nil {
+				return data, nil
+			}
+		}
+		if p.ProviderType == "http" && p.Available {
+			resp, err := http.Get(p.Path)
+			if err == nil {
+				data, readErr := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if readErr == nil {
+					return data, nil
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("file %s not found", hash)
 }
 
 // MaxUploadBytes 根据认证状态返回最大上传字节数（认证用户使用 cfg.MaxUploadBytes，匿名用户使用 cfg.MaxUploadBytesAnon）。

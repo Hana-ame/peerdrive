@@ -34,6 +34,18 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// Timing metrics
+// ---------------------------------------------------------------------------
+
+// FetcherMetric records the result and duration of a single fetcher attempt.
+type FetcherMetric struct {
+	Name     string        `json:"name"`
+	Duration time.Duration `json:"duration"`
+	Success  bool          `json:"success"`
+	Error    string        `json:"error,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
 // ProtocolFetcher interface
 // ---------------------------------------------------------------------------
 
@@ -240,6 +252,7 @@ type UniversalDownloader struct {
 	fetchers     []ProtocolFetcher
 	timeout      time.Duration
 	ipfsProvider *provider.IPFSProvider
+	lastMetrics  []FetcherMetric
 }
 
 // NewUniversalDownloader 创建通用下载器，支持按优先级顺序尝试多种协议。
@@ -310,32 +323,67 @@ func (d *UniversalDownloader) buildFetchers(order string, p2pSvc *P2PService, bt
 }
 
 // Download 按优先级顺序尝试各协议下载文件，成功后缓存到本地存储。
-func (d *UniversalDownloader) Download(ctx context.Context, hash string) ([]byte, string, error) {
+// 每次尝试都会记录 timing metrics，可通过 LastMetrics() 获取。
+func (d *UniversalDownloader) Download(ctx context.Context, hash string) (data []byte, protocol string, err error) {
+	metrics := make([]FetcherMetric, 0, len(d.fetchers))
+	defer func() {
+		d.lastMetrics = metrics
+	}()
+
 	for _, fetcher := range d.fetchers {
 		if !fetcher.IsAvailable() {
 			log.LogDebug("downloader: %s not available, skipping", fetcher.Name())
+			metrics = append(metrics, FetcherMetric{
+				Name:    fetcher.Name(),
+				Success: false,
+				Error:   "not available",
+			})
 			continue
 		}
 
+		start := time.Now()
 		fetchCtx, cancel := context.WithTimeout(ctx, d.timeout)
-		data, err := fetcher.Fetch(fetchCtx, hash)
+		fetchData, fetchErr := fetcher.Fetch(fetchCtx, hash)
 		cancel()
+		elapsed := time.Since(start)
 
-		if err == nil {
+		if fetchErr == nil {
 			// Verify SHA-256 hash matches.
-			h := sha256.Sum256(data)
+			h := sha256.Sum256(fetchData)
 			if hex.EncodeToString(h[:]) != hash {
 				log.LogWarn("downloader: %s returned hash mismatch for %s", fetcher.Name(), hash)
+				metrics = append(metrics, FetcherMetric{
+					Name:     fetcher.Name(),
+					Duration: elapsed,
+					Success:  false,
+					Error:    "hash mismatch",
+				})
 				continue
 			}
 			// Cache to local storage so subsequent requests are instant.
-			d.cacheToLocal(hash, data)
-			log.LogInfo("downloader: fetched %s via %s (%d bytes)", hash, fetcher.Name(), len(data))
-			return data, fetcher.Name(), nil
+			d.cacheToLocal(hash, fetchData)
+			log.LogInfo("downloader: fetched %s via %s (%d bytes, %v)", hash, fetcher.Name(), len(fetchData), elapsed)
+			metrics = append(metrics, FetcherMetric{
+				Name:     fetcher.Name(),
+				Duration: elapsed,
+				Success:  true,
+			})
+			return fetchData, fetcher.Name(), nil
 		}
-		log.LogDebug("downloader: %s failed for %s: %v", fetcher.Name(), hash, err)
+		log.LogDebug("downloader: %s failed for %s: %v (%v)", fetcher.Name(), hash, fetchErr, elapsed)
+		metrics = append(metrics, FetcherMetric{
+			Name:     fetcher.Name(),
+			Duration: elapsed,
+			Success:  false,
+			Error:    fetchErr.Error(),
+		})
 	}
 	return nil, "", fmt.Errorf("file not found on any protocol")
+}
+
+// LastMetrics 返回最近一次 Download 调用的各协议尝试记录（含耗时）。
+func (d *UniversalDownloader) LastMetrics() []FetcherMetric {
+	return d.lastMetrics
 }
 
 // cacheToLocal writes the data to content-addressed storage and registers it
