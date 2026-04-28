@@ -57,6 +57,17 @@ type BTDownload struct {
 	speed      float64
 	err        error
 	files      []CompletedFile
+	cancel     context.CancelFunc // called to cancel/download the download
+}
+
+// cancelDownload calls the cancel function if set, to abort the download.
+func (dl *BTDownload) cancelDownload() {
+	dl.mu.RLock()
+	cancel := dl.cancel
+	dl.mu.RUnlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // BTClient 管理 BitTorrent 下载任务，封装底层 BitTorrent 协议细节。
@@ -168,27 +179,40 @@ func (c *BTClient) downloadTorrent(dl *BTDownload) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Use our existing BTDHT service for peer discovery if available.
+	// Store cancel so PauseDownload/RemoveDownload can abort.
+	dl.mu.Lock()
+	dl.cancel = cancel
+	dl.mu.Unlock()
+
+	// 1. Announce ourselves on DHT for this infohash.
+	if globalDHT != nil {
+		log.LogInfo("[bt-wire] announcing infohash on DHT: %s", dl.InfoHash)
+		if err := globalDHT.Announce(dl.InfoHash); err != nil {
+			log.LogWarn("[bt-wire] DHT announce failed (non-fatal): %v", err)
+		}
+	}
+
+	// 2. Find peers via DHT.
 	var peerAddrs []string
 	if globalDHT != nil {
-		log.LogInfo("bt-client: discovering peers via DHT for %s", dl.InfoHash)
+		log.LogInfo("[bt-wire] discovering peers via DHT for %s", dl.InfoHash)
 		peers, err := globalDHT.FindProviders(dl.InfoHash)
 		if err != nil {
-			log.LogWarn("bt-client: DHT peer discovery failed: %v", err)
+			log.LogWarn("[bt-wire] DHT peer discovery failed: %v", err)
 		} else {
 			peerAddrs = peers
-			log.LogInfo("bt-client: DHT found %d peers for %s", len(peers), dl.InfoHash)
+			log.LogInfo("[bt-wire] DHT found %d peers for %s", len(peers), dl.InfoHash)
 		}
 	}
 
 	if len(peerAddrs) == 0 {
-		log.LogWarn("bt-client: no peers found for %s via DHT", dl.InfoHash)
+		log.LogWarn("[bt-wire] no peers found for %s via DHT", dl.InfoHash)
 		// Try to use trackers if available.
-		if len(dl.Meta.AnnounceList) > 0 {
-			log.LogInfo("bt-client: trying tracker-based peer discovery for %s", dl.InfoHash)
+		if dl.Meta != nil && len(dl.Meta.AnnounceList) > 0 {
+			log.LogInfo("[bt-wire] trying tracker-based peer discovery for %s", dl.InfoHash)
 			peers, err := discoverPeersFromTrackers(dl.InfoHash, dl.Meta.AnnounceList)
 			if err != nil {
-				log.LogWarn("bt-client: tracker discovery failed: %v", err)
+				log.LogWarn("[bt-wire] tracker discovery failed: %v", err)
 			} else {
 				peerAddrs = peers
 			}
@@ -198,17 +222,19 @@ func (c *BTClient) downloadTorrent(dl *BTDownload) {
 	if len(peerAddrs) == 0 {
 		dl.mu.Lock()
 		dl.Status = "error"
-		dl.err = fmt.Errorf("no peers found")
+		dl.err = fmt.Errorf("no peers found via DHT or trackers")
 		dl.mu.Unlock()
 		close(dl.DoneCh)
-		log.LogError("bt-client: no peers found for %s", dl.InfoHash)
+		log.LogError("[bt-wire] no peers found for %s", dl.InfoHash)
 		return
 	}
 
+	log.LogInfo("[bt-wire] found %d peers for %s, proceeding with download", len(peerAddrs), dl.InfoHash)
+
 	// If the torrent metadata is incomplete (e.g., from magnet), try to fetch
 	// metadata from peers first.
-	if len(dl.Meta.Pieces) == 0 {
-		log.LogInfo("bt-client: fetching metadata from peers for %s", dl.InfoHash)
+	if dl.Meta != nil && len(dl.Meta.Pieces) == 0 {
+		log.LogInfo("[bt-wire] fetching metadata from peers for %s", dl.InfoHash)
 		err := c.fetchMetadata(ctx, dl, peerAddrs)
 		if err != nil {
 			dl.mu.Lock()
@@ -216,11 +242,22 @@ func (c *BTClient) downloadTorrent(dl *BTDownload) {
 			dl.err = fmt.Errorf("metadata fetch: %w", err)
 			dl.mu.Unlock()
 			close(dl.DoneCh)
-			log.LogError("bt-client: metadata fetch failed for %s: %v", dl.InfoHash, err)
+			log.LogError("[bt-wire] metadata fetch failed for %s: %v", dl.InfoHash, err)
 			return
 		}
-		log.LogInfo("bt-client: metadata fetched for %s (%d pieces, %d files)",
+		log.LogInfo("[bt-wire] metadata fetched for %s (%d pieces, %d files)",
 			dl.InfoHash, len(dl.Meta.Pieces), len(dl.Meta.Files))
+	}
+
+	// If there's no metadata (nil or empty), we can't proceed.
+	if dl.Meta == nil || len(dl.Meta.Pieces) == 0 {
+		dl.mu.Lock()
+		dl.Status = "error"
+		dl.err = fmt.Errorf("no torrent metadata available")
+		dl.mu.Unlock()
+		close(dl.DoneCh)
+		log.LogError("[bt-wire] no metadata for %s", dl.InfoHash)
+		return
 	}
 
 	// Try to download from peers.
@@ -253,23 +290,28 @@ func (c *BTClient) downloadTorrent(dl *BTDownload) {
 
 	var pieceErrors int
 	var pieceErrMu sync.Mutex
+	var wg sync.WaitGroup
 
 	for pieceIdx := 0; pieceIdx < numPieces; pieceIdx++ {
 		pieceIdx := pieceIdx
 		sem <- struct{}{}
+		wg.Add(1)
 
 		go func() {
-			defer func() { <-sem }()
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
 
-			// Pick a peer for this piece.
+			// Pick a peer for this piece (round-robin).
 			peerAddr := peerAddrs[pieceIdx%len(peerAddrs)]
 
 			var expectedHash [20]byte
 			copy(expectedHash[:], dl.Meta.Pieces[pieceIdx])
 
 			pieceLen := dl.Meta.PieceLength
-			if int64(pieceIdx) == dl.Meta.TotalSize/dl.Meta.PieceLength &&
-				dl.Meta.TotalSize%dl.Meta.PieceLength != 0 {
+			lastPieceIdx := dl.Meta.TotalSize / dl.Meta.PieceLength
+			if int64(pieceIdx) == lastPieceIdx && dl.Meta.TotalSize%dl.Meta.PieceLength != 0 {
 				pieceLen = dl.Meta.TotalSize % dl.Meta.PieceLength
 			}
 
@@ -279,7 +321,10 @@ func (c *BTClient) downloadTorrent(dl *BTDownload) {
 				pieceErrMu.Lock()
 				pieceErrors++
 				pieceErrMu.Unlock()
-				log.LogWarn("bt-client: piece %d failed: %v", pieceIdx, err)
+				log.LogWarn("[bt-wire] piece %d from %s failed: %v", pieceIdx, peerAddr, err)
+			} else {
+				log.LogDebug("[bt-wire] piece %d downloaded successfully from %s (%d bytes)",
+					pieceIdx, peerAddr, pieceLen)
 			}
 
 			dl.mu.Lock()
@@ -291,12 +336,9 @@ func (c *BTClient) downloadTorrent(dl *BTDownload) {
 		}()
 	}
 
-	// Close progress channel when all pieces are done.
+	// Close progress channel after all piece goroutines finish.
 	go func() {
-		// Wait for all semaphore slots to be released.
-		for i := 0; i < concurrency; i++ {
-			sem <- struct{}{}
-		}
+		wg.Wait()
 		close(progressCh)
 	}()
 
@@ -501,24 +543,6 @@ func (c *BTClient) Close() {
 	close(c.stopCh)
 }
 
-// --- Tracker-based peer discovery ---
-
-// discoverPeersFromTrackers performs HTTP tracker announces to find peers.
-func discoverPeersFromTrackers(infohash string, trackers []string) ([]string, error) {
-	defer log.LogDuration("BT.discoverPeersFromTrackers")()
-	log.LogDebug("bt-client: tracker discovery for %s (%d trackers)", infohash, len(trackers))
-
-	// The anacrolix/torrent client handles tracker communication internally.
-	// When a tracker is an HTTP(S) URL, we can use the standard tracker protocol
-	// to get a peer list.
-
-	// For simplicity, we return an empty list here and rely on DHT instead.
-	// A full implementation would perform HTTP tracker announces.
-
-	log.LogWarn("bt-client: tracker-based discovery not yet implemented, relying on DHT")
-	return nil, nil
-}
-
 // --- DHT service integration ---
 
 // globalDHT is set by the router to allow BTClient to discover peers.
@@ -546,4 +570,125 @@ func (c *BTClient) ListDownloadFiles(infohash string) ([]CompletedFile, bool) {
 // ReadFileReader 返回已完成下载中指定文件的 io.ReadCloser。
 func (c *BTClient) ReadFileReader(filePath string) (io.ReadCloser, error) {
 	return os.Open(filePath)
+}
+
+// PauseDownload pauses an active download by canceling its context.
+// The download status is set to "paused". It can be resumed with ResumeDownload.
+func (c *BTClient) PauseDownload(infohash string) error {
+	c.mu.Lock()
+	dl, ok := c.downloads[infohash]
+	c.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("download %s not found", infohash)
+	}
+
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+
+	if dl.Status != "downloading" {
+		return fmt.Errorf("download %s is not in progress (status=%s)", infohash, dl.Status)
+	}
+
+	// Cancel the download context to abort in-flight piece downloads.
+	if dl.cancel != nil {
+		dl.cancel()
+		dl.cancel = nil
+	}
+	dl.Status = "paused"
+	log.LogInfo("bt-client: paused download %s (%s)", infohash, dl.Name)
+	return nil
+}
+
+// ResumeDownload resumes a previously paused download.
+// It starts the download loop again from scratch (re-discovering peers).
+func (c *BTClient) ResumeDownload(infohash string) error {
+	c.mu.Lock()
+	dl, ok := c.downloads[infohash]
+	c.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("download %s not found", infohash)
+	}
+
+	dl.mu.Lock()
+	if dl.Status != "paused" {
+		dl.mu.Unlock()
+		return fmt.Errorf("download %s is not paused (status=%s)", infohash, dl.Status)
+	}
+	dl.Status = "downloading"
+	// Create a new DoneCh for the restarted download.
+	dl.DoneCh = make(chan struct{})
+	dl.mu.Unlock()
+
+	log.LogInfo("bt-client: resuming download %s (%s)", infohash, dl.Name)
+	go c.downloadTorrent(dl)
+	return nil
+}
+
+// RemoveDownload removes a download from the client and deletes its data directory.
+// If the download is active, it is cancelled first.
+func (c *BTClient) RemoveDownload(infohash string) error {
+	c.mu.Lock()
+	dl, ok := c.downloads[infohash]
+	if !ok {
+		c.mu.Unlock()
+		return fmt.Errorf("download %s not found", infohash)
+	}
+	delete(c.downloads, infohash)
+	c.mu.Unlock()
+
+	// Cancel in-flight pieces.
+	dl.cancelDownload()
+
+	// Remove data directory.
+	dataDir := dl.DataDir
+	if dataDir != "" {
+		if err := os.RemoveAll(dataDir); err != nil {
+			log.LogWarn("bt-client: remove data dir %s: %v", dataDir, err)
+		}
+	}
+
+	log.LogInfo("bt-client: removed download %s (%s)", infohash, dl.Name)
+	return nil
+}
+
+// GlobalStats holds global BitTorrent client statistics.
+type GlobalStats struct {
+	TotalUp       int64  `json:"total_up_bytes"`
+	TotalDown     int64  `json:"total_down_bytes"`
+	ActiveTorrents int   `json:"active_torrents"`
+	PausedTorrents int   `json:"paused_torrents"`
+	Completed     int    `json:"completed"`
+	Errors        int    `json:"errors"`
+	DHTNodes      int    `json:"dht_nodes"`
+}
+
+// GetGlobalStats returns global BT client statistics.
+func (c *BTClient) GetGlobalStats() *GlobalStats {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	stats := &GlobalStats{}
+	if globalDHT != nil {
+		stats.DHTNodes = globalDHT.NumNodes()
+	}
+
+	for _, dl := range c.downloads {
+		dl.mu.RLock()
+		switch dl.Status {
+		case "downloading":
+			stats.ActiveTorrents++
+		case "paused":
+			stats.PausedTorrents++
+		case "completed":
+			stats.Completed++
+		case "error":
+			stats.Errors++
+		default:
+			stats.ActiveTorrents++
+		}
+		stats.TotalDown += dl.downloaded
+		dl.mu.RUnlock()
+	}
+
+	return stats
 }

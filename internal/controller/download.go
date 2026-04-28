@@ -10,12 +10,18 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"peerdrive/internal/log"
+	"peerdrive/internal/model"
+	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 	"peerdrive/pkg/hashutil"
@@ -25,6 +31,7 @@ import (
 
 var downloader *service.Downloader
 var universalDownloader *service.UniversalDownloader
+var ipfsGatewayProvider *provider.IPFSProvider
 
 // InitDownloader 注入 Downloader 实例供下载处理函数使用。
 func InitDownloader(s *service.Downloader) {
@@ -34,6 +41,12 @@ func InitDownloader(s *service.Downloader) {
 // InitUniversalDownloader 注入 UniversalDownloader 实例供多协议下载端点使用。
 func InitUniversalDownloader(d *service.UniversalDownloader) {
 	universalDownloader = d
+}
+
+// InitIPFSProvider 注入 IPFS 网关提供者供 DownloadByCID 回退使用。
+// 当 IPFS 网关被禁用或未配置时传入 nil。
+func InitIPFSProvider(p *provider.IPFSProvider) {
+	ipfsGatewayProvider = p
 }
 
 // DownloadBySHA256 处理 GET /sha256sum/:sha256，优先使用 UniversalDownloader 多协议下载，否则回退到原始逻辑。
@@ -118,7 +131,8 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 }
 
 // DownloadByCID handles GET /ipfs/:cid, looking up the file by its IPFS CID and
-// streaming it back with an X-CID header.
+// streaming it back with an X-CID header.  Falls back to public IPFS gateways
+// when the CID is not in local storage and IPFS gateway fetching is enabled.
 func DownloadByCID(c *gin.Context) {
 	searchCID := c.Param("cid")
 	meta, err := repository.GetFileMetaByCID(searchCID)
@@ -127,6 +141,39 @@ func DownloadByCID(c *gin.Context) {
 		return
 	}
 	if meta == nil {
+		// IPFS gateway fallback: try fetching from public gateways.
+		if ipfsGatewayProvider != nil && len(ipfsGatewayProvider.Gateways) > 0 {
+			ctx := c.Request.Context()
+			data, fetchErr := ipfsGatewayProvider.FetchByCID(ctx, searchCID)
+			if fetchErr == nil {
+				// Compute SHA256 and cache locally.
+				h := sha256.Sum256(data)
+				hashStr := hex.EncodeToString(h[:])
+
+				storageDir := ""
+				if d, ok := c.Get("storageDir"); ok {
+					storageDir, _ = d.(string)
+				}
+				if storageDir != "" {
+					relPath := filepath.Join(hashStr[:2], hashStr)
+					fullPath := filepath.Join(storageDir, relPath)
+					_ = os.MkdirAll(filepath.Dir(fullPath), 0755)
+					_ = os.WriteFile(fullPath, data, 0644)
+
+					_ = repository.InsertFileMeta(&model.FileMeta{
+						Hash:     hashStr,
+						Size:     int64(len(data)),
+						Filename: searchCID,
+						Type:     repository.FileTypeBlob,
+					})
+					_ = repository.InsertFileProvider(hashStr, "local", relPath)
+				}
+
+				c.Header("X-CID", searchCID)
+				DownloadBySHA256Internal(c, hashStr)
+				return
+			}
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found by cid"})
 		return
 	}

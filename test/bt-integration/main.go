@@ -217,7 +217,7 @@ func startServer() (string, func()) {
 
 	// Setup router
 	gin.SetMode(gin.ReleaseMode)
-	r := router.SetupRouter(downloader, p2pSvc, cfg)
+	r := router.SetupRouter(downloader, p2pSvc, cfg, nil)
 
 	// Start on random port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

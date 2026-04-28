@@ -33,6 +33,7 @@ import (
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/p2p_bt"
+	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 
@@ -48,6 +49,7 @@ func SetupRouter(
 	downloader *service.Downloader,
 	p2pSvc *service.P2PService,
 	cfg *config.Config,
+	ipfsCompat *service.IPFSCompatLayer,
 ) *gin.Engine {
 	log.LogInfo("router: SetupRouter starting")
 	r := gin.Default()
@@ -92,7 +94,10 @@ func SetupRouter(
 
 	controller.InitDownloader(downloader)
 	controller.InitP2PController(p2pSvc)
-	controller.InitFileController(service.NewFileService(cfg))
+	fileSvc := service.NewFileService(cfg)
+	fileSvc.SetIPFSCompat(ipfsCompat)
+	controller.InitFileController(fileSvc)
+	controller.InitIPFSCompatController(ipfsCompat)
 
 	// Initialize the port forwarding service.
 	var forwardSvc *service.ForwardService
@@ -159,6 +164,19 @@ func SetupRouter(
 	}
 	controller.InitBTClient(btClient)
 
+	// Initialize the IPFS gateway provider.
+	var ipfsProv *provider.IPFSProvider
+	if cfg.IPFSGatewayEnable {
+		gateways := strings.Split(cfg.IPFSGateways, ",")
+		for i := range gateways {
+			gateways[i] = strings.TrimSpace(gateways[i])
+		}
+		if len(gateways) > 0 {
+			ipfsProv = &provider.IPFSProvider{Gateways: gateways}
+		}
+	}
+	controller.InitIPFSProvider(ipfsProv)
+
 	// Initialize the universal multi-protocol downloader.
 	downloadTimeout := time.Duration(cfg.DownloadTimeoutSecs) * time.Second
 	uniDownloader := service.NewUniversalDownloader(
@@ -167,6 +185,7 @@ func SetupRouter(
 		cfg.StorageDir,
 		cfg.DownloadOrder,
 		downloadTimeout,
+		ipfsProv,
 	)
 	controller.InitUniversalDownloader(uniDownloader)
 
@@ -252,6 +271,10 @@ func SetupRouter(
 		p2p.POST("/bt/magnet", controller.BTMagnetResolve)
 		p2p.GET("/bt/download/:infohash", controller.BTDownloadProgress)
 		p2p.GET("/bt/downloads", controller.BTDownloadList)
+		p2p.POST("/bt/download/:infohash/pause", controller.BTPauseDownload)
+		p2p.POST("/bt/download/:infohash/resume", controller.BTResumeDownload)
+		p2p.DELETE("/bt/download/:infohash", controller.BTRemoveDownload)
+		p2p.GET("/bt/stats", controller.BTGlobalStats)
 
 		// Dual P2P (IPFS + BT DHT) routes
 		p2p.POST("/dual/announce", controller.DualAnnounce)
@@ -261,6 +284,10 @@ func SetupRouter(
 		p2p.POST("/forward/connect", controller.ConnectForwardSession)
 		p2p.GET("/forward/list", controller.ListForwardSessions)
 		p2p.POST("/forward/close", controller.CloseForwardSession)
+
+		// IPFS compat routes
+		p2p.GET("/ipfs", controller.IPFSCompatStatus)
+		p2p.POST("/ipfs/toggle", controller.IPFSCompatToggle)
 	}
 
 	// Anonymous Collection routes (public)

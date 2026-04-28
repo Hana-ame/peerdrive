@@ -226,7 +226,7 @@ func TestHTTPURLFetcher_NoProvider(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNewUniversalDownloader_DefaultOrder(t *testing.T) {
-	d := NewUniversalDownloader(nil, nil, "/tmp", "", 30*time.Second)
+	d := NewUniversalDownloader(nil, nil, "/tmp", "", 30*time.Second, nil)
 	fetchers := d.Fetchers()
 	if len(fetchers) == 0 {
 		t.Fatal("expected at least one fetcher")
@@ -248,7 +248,7 @@ func TestNewUniversalDownloader_DefaultOrder(t *testing.T) {
 }
 
 func TestNewUniversalDownloader_CustomOrder(t *testing.T) {
-	d := NewUniversalDownloader(nil, nil, "/tmp", "http,local", 30*time.Second)
+	d := NewUniversalDownloader(nil, nil, "/tmp", "http,local", 30*time.Second, nil)
 	fetchers := d.Fetchers()
 	if len(fetchers) != 2 {
 		t.Fatalf("expected 2 fetchers, got %d", len(fetchers))
@@ -277,7 +277,7 @@ func TestDownload_LocalFile(t *testing.T) {
 	repository.InsertFileMeta(&model.FileMeta{Hash: hashStr, Size: int64(len(data)), Filename: hashStr, Type: repository.FileTypeBlob})
 	repository.InsertFileProvider(hashStr, "local", filepath.Join(hashStr[:2], hashStr))
 
-	d := NewUniversalDownloader(nil, nil, dir, "local", 30*time.Second)
+	d := NewUniversalDownloader(nil, nil, dir, "local", 30*time.Second, nil)
 	result, protocol, err := d.Download(context.Background(), hashStr)
 	if err != nil {
 		t.Fatalf("Download failed: %v", err)
@@ -310,7 +310,7 @@ func TestDownload_Fallback(t *testing.T) {
 	repository.InsertFileProvider(hashStr, "http", server.URL)
 
 	// Create downloader with order that forces fallback: local first (no file), then http.
-	d := NewUniversalDownloader(nil, nil, dir, "local,http", 30*time.Second)
+	d := NewUniversalDownloader(nil, nil, dir, "local,http", 30*time.Second, nil)
 
 	result, protocol, err := d.Download(context.Background(), hashStr)
 	if err != nil {
@@ -329,7 +329,7 @@ func TestDownload_AllProtocolsFail(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
 
-	d := NewUniversalDownloader(nil, nil, dir, "local,http", 5*time.Second)
+	d := NewUniversalDownloader(nil, nil, dir, "local,http", 5*time.Second, nil)
 	_, _, err := d.Download(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	if err == nil {
 		t.Error("expected error when all protocols fail")
@@ -345,7 +345,7 @@ func TestCacheToLocal(t *testing.T) {
 	hash := sha256.Sum256(data)
 	hashStr := hex.EncodeToString(hash[:])
 
-	d := NewUniversalDownloader(nil, nil, dir, "local", 30*time.Second)
+	d := NewUniversalDownloader(nil, nil, dir, "local", 30*time.Second, nil)
 	d.cacheToLocal(hashStr, data)
 
 	// Verify file exists on disk.
@@ -390,7 +390,7 @@ func TestCheckSources(t *testing.T) {
 	repository.InsertFileMeta(&model.FileMeta{Hash: hashStr, Size: int64(len(data)), Filename: hashStr, Type: repository.FileTypeBlob})
 	repository.InsertFileProvider(hashStr, "local", filepath.Join(hashStr[:2], hashStr))
 
-	d := NewUniversalDownloader(nil, nil, dir, "local,http", 30*time.Second)
+	d := NewUniversalDownloader(nil, nil, dir, "local,http", 30*time.Second, nil)
 	sources := d.CheckSources(context.Background(), hashStr)
 
 	if !sources["local"] {
@@ -405,7 +405,7 @@ func TestCheckSources(t *testing.T) {
 }
 
 func TestDownload_FetchersMatchOrder(t *testing.T) {
-	d := NewUniversalDownloader(nil, nil, "/tmp", "btdht,webrtc,local", 30*time.Second)
+	d := NewUniversalDownloader(nil, nil, "/tmp", "btdht,webrtc,local", 30*time.Second, nil)
 	fetchers := d.Fetchers()
 	if len(fetchers) != 3 {
 		t.Fatalf("expected 3 fetchers, got %d", len(fetchers))
@@ -423,7 +423,7 @@ func TestDownload_FetchersMatchOrder(t *testing.T) {
 
 func TestBuildFetchers_UnknownProtocol(t *testing.T) {
 	// Should not panic and should skip unknown protocol names.
-	d := NewUniversalDownloader(nil, nil, "/tmp", "local,fake,http", 30*time.Second)
+	d := NewUniversalDownloader(nil, nil, "/tmp", "local,fake,http", 30*time.Second, nil)
 	fetchers := d.Fetchers()
 	if len(fetchers) != 2 {
 		t.Fatalf("expected 2 fetchers (unknown skipped), got %d", len(fetchers))

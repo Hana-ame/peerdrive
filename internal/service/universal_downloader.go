@@ -28,7 +28,9 @@ import (
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/p2p_bt"
+	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
+	"peerdrive/pkg/hashutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -204,15 +206,40 @@ func (f *HTTPURLFetcher) Fetch(ctx context.Context, hash string) ([]byte, error)
 }
 
 // ---------------------------------------------------------------------------
+// IPFSGatewayFetcher
+// ---------------------------------------------------------------------------
+
+// IPFSGatewayFetcher converts a SHA-256 hash to an IPFS CID and fetches
+// the content from public IPFS gateways.
+type IPFSGatewayFetcher struct {
+	provider *provider.IPFSProvider
+}
+
+func (f *IPFSGatewayFetcher) Name() string { return "ipfsgw" }
+
+func (f *IPFSGatewayFetcher) IsAvailable() bool {
+	return f.provider != nil && len(f.provider.Gateways) > 0
+}
+
+func (f *IPFSGatewayFetcher) Fetch(ctx context.Context, hash string) ([]byte, error) {
+	cid := hashutil.SHA256ToCID(hash)
+	if cid == "" {
+		return nil, fmt.Errorf("ipfsgw: failed to convert hash to CID")
+	}
+	return f.provider.FetchByCID(ctx, cid)
+}
+
+// ---------------------------------------------------------------------------
 // UniversalDownloader
 // ---------------------------------------------------------------------------
 
 // UniversalDownloader tries every registered protocol in priority order and
 // caches successfully downloaded files to local storage.
 type UniversalDownloader struct {
-	storageDir string
-	fetchers   []ProtocolFetcher
-	timeout    time.Duration
+	storageDir   string
+	fetchers     []ProtocolFetcher
+	timeout      time.Duration
+	ipfsProvider *provider.IPFSProvider
 }
 
 // NewUniversalDownloader 创建通用下载器，支持按优先级顺序尝试多种协议。
@@ -222,10 +249,12 @@ func NewUniversalDownloader(
 	storageDir string,
 	order string,
 	timeout time.Duration,
+	ipfsProvider *provider.IPFSProvider,
 ) *UniversalDownloader {
 	d := &UniversalDownloader{
-		storageDir: storageDir,
-		timeout:    timeout,
+		storageDir:   storageDir,
+		timeout:      timeout,
+		ipfsProvider: ipfsProvider,
 	}
 	d.fetchers = d.buildFetchers(order, p2pSvc, btSvc)
 	return d
@@ -254,6 +283,9 @@ func (d *UniversalDownloader) buildFetchers(order string, p2pSvc *P2PService, bt
 		},
 		"ipfs": func() ProtocolFetcher {
 			return &IPFSFetcher{p2pSvc: p2pSvc}
+		},
+		"ipfsgw": func() ProtocolFetcher {
+			return &IPFSGatewayFetcher{provider: d.ipfsProvider}
 		},
 		"btdht": func() ProtocolFetcher {
 			return NewBTDHTFetcher(btSvc, d.storageDir)

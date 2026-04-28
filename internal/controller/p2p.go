@@ -29,6 +29,8 @@ var peerScanner *service.PeerScanner
 
 var forwardSvc *service.ForwardService
 
+var ipfsCompatLayer *service.IPFSCompatLayer
+
 var resumeMgr *service.ResumeManager
 var multiPeerDl *service.MultiPeerDownloader
 
@@ -313,12 +315,12 @@ func P2PStatus(c *gin.Context) {
 			jobs := make([]gin.H, 0)
 			for hash, tp := range p2pSvc.Transfer.ActiveJobs() {
 				jobs = append(jobs, gin.H{
-					"hash":      hash,
-					"progress":  tp.Progress(),
-					"total_mb":  float64(tp.TotalSize) / 1048576.0,
-					"done":      tp.Done,
-					"peers":     len(tp.Peers),
-					"elapsed":   time.Since(tp.StartTime).String(),
+					"hash":     hash,
+					"progress": tp.Progress(),
+					"total_mb": float64(tp.TotalSize) / 1048576.0,
+					"done":     tp.Done,
+					"peers":    len(tp.Peers),
+					"elapsed":  time.Since(tp.StartTime).String(),
 				})
 			}
 			resp["active_transfers"] = jobs
@@ -428,10 +430,10 @@ func RequestFile(c *gin.Context) {
 
 	log.LogInfo("ctrl-p2p: RequestFile %s got %d responses", req.Hash, len(results))
 	c.JSON(http.StatusOK, gin.H{
-		"hash":       req.Hash,
-		"requested":  len(pids),
-		"responses":  len(results),
-		"details":    responses,
+		"hash":      req.Hash,
+		"requested": len(pids),
+		"responses": len(results),
+		"details":   responses,
 	})
 }
 
@@ -456,9 +458,9 @@ func BTDHTStatus(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"enabled":      true,
-		"listen_addr":  btSvc.Server.Addr().String(),
-		"num_nodes":    btSvc.NumNodes(),
+		"enabled":     true,
+		"listen_addr": btSvc.Server.Addr().String(),
+		"num_nodes":   btSvc.NumNodes(),
 	})
 }
 
@@ -511,9 +513,9 @@ func BTFindProviders(c *gin.Context) {
 	}
 	log.LogInfo("ctrl-p2p: BTFindProviders %s found %d peers", req.Hash, len(peers))
 	c.JSON(http.StatusOK, gin.H{
-		"hash":   req.Hash,
-		"peers":  peers,
-		"count":  len(peers),
+		"hash":  req.Hash,
+		"peers": peers,
+		"count": len(peers),
 	})
 }
 
@@ -642,7 +644,6 @@ func GetConnections(c *gin.Context) {
 	log.LogInfo("ctrl-p2p: GetConnections inbound=%d outbound=%d total=%d", inbound, outbound, inbound+outbound)
 }
 
-
 // --- BEP 44 (Arbitrary DHT Data Storage) ---
 
 // BEP44Put 处理 POST /p2p/bt/bep44/put，通过 BEP 44 将不可变数据存储到 BT DHT。
@@ -675,7 +676,7 @@ func BEP44Put(c *gin.Context) {
 	if req.Mutable {
 		log.LogInfo("ctrl-p2p: BEP44Put mutable requested but requires key via API; returning stub")
 		c.JSON(http.StatusNotImplemented, gin.H{
-			"error":   "mutable put via API requires key management; use Go API directly",
+			"error": "mutable put via API requires key management; use Go API directly",
 		})
 		return
 	}
@@ -805,12 +806,12 @@ func BTTorrentUpload(c *gin.Context) {
 
 	log.LogInfo("ctrl-p2p: BTTorrentUpload started %q (infohash=%s)", meta.Name, meta.InfoHashHex)
 	c.JSON(http.StatusOK, gin.H{
-		"infohash":  meta.InfoHashHex,
-		"name":      meta.Name,
-		"files":     len(meta.Files),
-		"total":     meta.TotalSize,
-		"pieces":    len(meta.Pieces),
-		"status":    "downloading",
+		"infohash": meta.InfoHashHex,
+		"name":     meta.Name,
+		"files":    len(meta.Files),
+		"total":    meta.TotalSize,
+		"pieces":   len(meta.Pieces),
+		"status":   "downloading",
 	})
 }
 
@@ -870,6 +871,87 @@ func BTDownloadProgress(c *gin.Context) {
 
 	log.LogInfo("ctrl-p2p: BTDownloadProgress %s: %s (%d/%d pieces)", infohash, status.Status, status.PiecesDone, status.PiecesTotal)
 	c.JSON(http.StatusOK, status)
+}
+
+// BTPauseDownload 处理 POST /p2p/bt/download/:infohash/pause，暂停指定下载任务。
+func BTPauseDownload(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTPauseDownload")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	infohash := c.Param("infohash")
+	if err := btClient.PauseDownload(infohash); err != nil {
+		log.LogWarn("ctrl-p2p: BTPauseDownload %s failed: %v", infohash, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-p2p: BTPauseDownload %s paused", infohash)
+	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "paused"})
+}
+
+// BTResumeDownload 处理 POST /p2p/bt/download/:infohash/resume，恢复暂停的下载任务。
+func BTResumeDownload(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTResumeDownload")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	infohash := c.Param("infohash")
+	if err := btClient.ResumeDownload(infohash); err != nil {
+		log.LogWarn("ctrl-p2p: BTResumeDownload %s failed: %v", infohash, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-p2p: BTResumeDownload %s resumed", infohash)
+	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "downloading"})
+}
+
+// BTRemoveDownload 处理 DELETE /p2p/bt/download/:infohash，删除下载任务及其文件。
+func BTRemoveDownload(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTRemoveDownload")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	infohash := c.Param("infohash")
+	if err := btClient.RemoveDownload(infohash); err != nil {
+		log.LogWarn("ctrl-p2p: BTRemoveDownload %s failed: %v", infohash, err)
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-p2p: BTRemoveDownload %s removed", infohash)
+	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "removed"})
+}
+
+// BTGlobalStats 处理 GET /p2p/bt/stats，返回全局 BT 客户端统计信息。
+func BTGlobalStats(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTGlobalStats")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	stats := btClient.GetGlobalStats()
+	minimal := gin.H{
+		"total_up_bytes":   stats.TotalUp,
+		"total_down_bytes": stats.TotalDown,
+		"active_torrents":  stats.ActiveTorrents,
+		"paused_torrents":  stats.PausedTorrents,
+		"completed":        stats.Completed,
+		"errors":           stats.Errors,
+		"dht_nodes":        stats.DHTNodes,
+	}
+
+	log.LogInfo("ctrl-p2p: BTGlobalStats active=%d paused=%d completed=%d dht_nodes=%d",
+		stats.ActiveTorrents, stats.PausedTorrents, stats.Completed, stats.DHTNodes)
+	c.JSON(http.StatusOK, minimal)
 }
 
 // BTDownloadList 处理 GET /p2p/bt/downloads，返回所有活跃和已完成的 BT 下载任务。
@@ -1016,4 +1098,61 @@ func CloseForwardSession(c *gin.Context) {
 	}
 	log.LogInfo("ctrl-p2p: CloseForwardSession closed")
 	c.JSON(http.StatusOK, gin.H{"status": "closed"})
+}
+
+// ─── IPFS Compat Handlers ─────────────────────────────────────────
+
+// InitIPFSCompatController 注入 IPFSCompatLayer 实例供 IPFS 兼容端点使用。
+func InitIPFSCompatController(layer *service.IPFSCompatLayer) {
+	log.LogDebug("ctrl-p2p: InitIPFSCompatController")
+	ipfsCompatLayer = layer
+}
+
+// IPFSCompatStatus 处理 GET /p2p/ipfs，返回 IPFS 兼容层的状态信息。
+func IPFSCompatStatus(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: IPFSCompatStatus")
+	if ipfsCompatLayer == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"enabled":     false,
+			"block_count": 0,
+			"blockstore":  "",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"enabled":     ipfsCompatLayer.Enabled(),
+		"block_count": ipfsCompatLayer.BlockCount(),
+		"blockstore":  ipfsCompatLayer.BlockstorePath(),
+	})
+}
+
+// IPFSCompatToggle 处理 POST /p2p/ipfs/toggle，启用或禁用 IPFS 兼容模式。
+func IPFSCompatToggle(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: IPFSCompatToggle")
+	if ipfsCompatLayer == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IPFS compat not initialized"})
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.LogWarn("ctrl-p2p: IPFSCompatToggle invalid request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	if req.Enabled {
+		if err := ipfsCompatLayer.Enable(); err != nil {
+			log.LogError("ctrl-p2p: IPFSCompatToggle enable failed: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		ipfsCompatLayer.Disable()
+	}
+
+	log.LogInfo("ctrl-p2p: IPFSCompatToggle enabled=%v", ipfsCompatLayer.Enabled())
+	c.JSON(http.StatusOK, gin.H{"enabled": ipfsCompatLayer.Enabled()})
 }

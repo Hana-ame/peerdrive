@@ -1,4 +1,5 @@
-// BitTorrent 线缆协议实现 — 握手、消息读取/发送、单文件分片下载（含 SHA1 校验）。
+// BitTorrent wire protocol implementation -- handshake, message read/write,
+// single piece download (with SHA1 verification), and multi-piece download.
 package p2p_bt
 
 import (
@@ -43,14 +44,14 @@ const (
 // Bitfield tracks which pieces a peer has.
 type Bitfield []byte
 
-// HasPiece 判断 bitfield 中指定索引的分片是否存在。
+// HasPiece checks if the bitfield indicates the given piece index is present.
 func (bf Bitfield) HasPiece(index int) bool {
 	byteIdx := index / 8
 	bitIdx := 7 - uint(index%8) // big-endian bit ordering
 	return byteIdx < len(bf) && (bf[byteIdx]>>bitIdx)&1 == 1
 }
 
-// SetPiece 将 bitfield 中指定索引的分片标记为存在。
+// SetPiece marks the given piece index as present in the bitfield.
 func (bf Bitfield) SetPiece(index int) {
 	byteIdx := index / 8
 	if byteIdx >= len(bf) {
@@ -60,12 +61,12 @@ func (bf Bitfield) SetPiece(index int) {
 	bf[byteIdx] |= 1 << bitIdx
 }
 
-// NumPieces 返回 bitfield 中的位数（分片总数）。
+// NumPieces returns the number of bits (pieces) in the bitfield.
 func (bf Bitfield) NumPieces() int {
 	return len(bf) * 8
 }
 
-// NewBitfield 创建指定分片数的 bitfield。
+// NewBitfield creates a bitfield for the given number of pieces.
 func NewBitfield(numPieces int) Bitfield {
 	return make(Bitfield, (numPieces+7)/8)
 }
@@ -78,10 +79,10 @@ func btPeerID() [20]byte {
 }
 
 // btHandshake performs the BitTorrent handshake over an existing TCP connection.
-// It returns the peer's bitfield message (if any) and the peer's 20-byte ID.
+// It validates the peer's response and returns the peer's 20-byte ID.
 func btHandshake(conn net.Conn, infoHash [20]byte) (peerID [20]byte, err error) {
 	defer log.LogDuration("BT.btHandshake")()
-	log.LogDebug("bt-piece: handshake with infohash=%s", hex.EncodeToString(infoHash[:]))
+	log.LogDebug("[bt-wire] handshake begin: sending infohash=%s", hex.EncodeToString(infoHash[:]))
 
 	_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
 
@@ -89,7 +90,7 @@ func btHandshake(conn net.Conn, infoHash [20]byte) (peerID [20]byte, err error) 
 	hs := make([]byte, 68)
 	hs[0] = 19
 	copy(hs[1:20], btProtocolName)
-	// Reserved bytes (bytes 20-27) — all zero is fine for basic protocol.
+	// Reserved bytes (bytes 20-27) -- all zero is fine for basic protocol.
 	// Byte 20 bit 5 (DHT support) could be set: hs[27] |= 0x01
 	hs[27] |= 0x01 // support DHT
 	copy(hs[28:48], infoHash[:])
@@ -97,16 +98,18 @@ func btHandshake(conn net.Conn, infoHash [20]byte) (peerID [20]byte, err error) 
 	copy(hs[48:68], pid[:])
 
 	if _, err := conn.Write(hs); err != nil {
-		log.LogError("bt-piece: handshake write failed: %v", err)
+		log.LogError("[bt-wire] handshake write failed: %v", err)
 		return peerID, fmt.Errorf("handshake write: %w", err)
 	}
+	log.LogDebug("[bt-wire] handshake sent %d bytes, waiting for response", len(hs))
 
 	// Read response: 68 bytes.
 	resp := make([]byte, 68)
 	if _, err := io.ReadFull(conn, resp); err != nil {
-		log.LogError("bt-piece: handshake read failed: %v", err)
+		log.LogError("[bt-wire] handshake read failed: %v", err)
 		return peerID, fmt.Errorf("handshake read: %w", err)
 	}
+	log.LogDebug("[bt-wire] handshake response received %d bytes", len(resp))
 
 	// Validate protocol string.
 	if resp[0] != 19 || string(resp[1:20]) != btProtocolName {
@@ -117,17 +120,19 @@ func btHandshake(conn net.Conn, infoHash [20]byte) (peerID [20]byte, err error) 
 	var respInfoHash [20]byte
 	copy(respInfoHash[:], resp[28:48])
 	if respInfoHash != infoHash {
-		return peerID, fmt.Errorf("handshake: infohash mismatch (got %s)",
+		return peerID, fmt.Errorf("handshake: infohash mismatch (sent %s, got %s)",
+			hex.EncodeToString(infoHash[:]),
 			hex.EncodeToString(respInfoHash[:]))
 	}
+	log.LogInfo("[bt-wire] handshake infohash verified OK: %s", hex.EncodeToString(respInfoHash[:]))
 
 	copy(peerID[:], resp[48:68])
-	log.LogInfo("bt-piece: handshake successful with peer=%s", hex.EncodeToString(peerID[:]))
+	log.LogInfo("[bt-wire] handshake successful with peer=%s", hex.EncodeToString(peerID[:]))
 	return peerID, nil
 }
 
 // btReadMessage reads a single BT wire protocol message from the connection.
-// Returns (messageID, payload, error).
+// Returns (messageID, payload, error). msgID 255 indicates a keep-alive.
 func btReadMessage(conn net.Conn) (uint8, []byte, error) {
 	// 4-byte length prefix (big-endian), excluding the length field itself.
 	var lenBuf [4]byte
@@ -137,7 +142,7 @@ func btReadMessage(conn net.Conn) (uint8, []byte, error) {
 	msgLen := binary.BigEndian.Uint32(lenBuf[:])
 
 	if msgLen == 0 {
-		// Keep-alive — no message ID, no payload.
+		// Keep-alive -- no message ID, no payload.
 		return 255, nil, nil // 255 indicates keep-alive
 	}
 
@@ -178,7 +183,9 @@ func btSendRequest(conn net.Conn, pieceIndex, offset, length uint32) error {
 	return btSendMessage(conn, msgRequest, payload)
 }
 
-// DownloadPiece 从指定对端下载单个分片，通过 BitTorrent 线缆协议连接、握手、请求块并校验 SHA1。
+// DownloadPiece downloads a single piece from the given peer over the BT wire
+// protocol. It connects to the peer, performs the handshake, waits to be
+// unchoked, requests blocks, reassembles them, and verifies the SHA1 hash.
 func DownloadPiece(
 	ctx context.Context,
 	peerAddr string,
@@ -188,27 +195,28 @@ func DownloadPiece(
 	expectedHash [20]byte,
 ) ([]byte, error) {
 	defer log.LogDuration("BT.DownloadPiece")()
-	log.LogDebug("bt-piece: DownloadPiece peer=%s piece=%d len=%d",
+	log.LogDebug("[bt-wire] DownloadPiece peer=%s piece=%d len=%d",
 		peerAddr, pieceIndex, pieceLength)
 
 	// Dial peer with context.
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", peerAddr)
 	if err != nil {
-		log.LogError("bt-piece: dial %s failed: %v", peerAddr, err)
+		log.LogError("[bt-wire] dial %s failed: %v", peerAddr, err)
 		return nil, fmt.Errorf("dial peer %s: %w", peerAddr, err)
 	}
 	defer conn.Close()
+	log.LogDebug("[bt-wire] connected to %s", peerAddr)
 
 	// Handshake.
 	peerID, err := btHandshake(conn, infoHash)
 	if err != nil {
-		log.LogError("bt-piece: handshake with %s failed: %v", peerAddr, err)
+		log.LogError("[bt-wire] handshake with %s failed: %v", peerAddr, err)
 		return nil, fmt.Errorf("handshake %s: %w", peerAddr, err)
 	}
 	_ = peerID // peer identity available if needed
 
-	// Message loop — wait for unchoke.
+	// Message loop -- wait for unchoke.
 	unchoked := false
 	interested := false
 
@@ -223,29 +231,30 @@ func DownloadPiece(
 		switch msgID {
 		case msgUnchoke:
 			unchoked = true
-			log.LogDebug("bt-piece: unchoked by %s", peerAddr)
+			log.LogDebug("[bt-wire] unchoked by %s", peerAddr)
 		case msgChoke:
 			// Peer choked us. If we haven't sent interested yet, we can wait.
 			unchoked = false
 		case msgBitfield:
-			log.LogDebug("bt-piece: bitfield from %s (%d bytes)", peerAddr, len(payload))
+			log.LogDebug("[bt-wire] bitfield from %s (%d bytes)", peerAddr, len(payload))
 			// Check if peer has this piece.
 			bf := Bitfield(payload)
 			if !bf.HasPiece(pieceIndex) {
 				return nil, fmt.Errorf("peer %s does not have piece %d", peerAddr, pieceIndex)
 			}
+			log.LogDebug("[bt-wire] peer %s has piece %d (from bitfield)", peerAddr, pieceIndex)
 		case msgHave:
 			if len(payload) >= 4 {
 				idx := binary.BigEndian.Uint32(payload[:4])
 				if int(idx) == pieceIndex && !unchoked {
-					log.LogDebug("bt-piece: peer %s has piece %d (from have msg)", peerAddr, pieceIndex)
+					log.LogDebug("[bt-wire] peer %s has piece %d (from have msg)", peerAddr, pieceIndex)
 				}
 			}
 		case 255: // keep-alive
 			_ = conn.SetDeadline(time.Now().Add(pieceTimeout))
 			continue
 		default:
-			log.LogDebug("bt-piece: msg %d from %s (%d bytes)", msgID, peerAddr, len(payload))
+			log.LogDebug("[bt-wire] msg %d from %s (%d bytes)", msgID, peerAddr, len(payload))
 		}
 
 		// After we've read initial messages, send interested.
@@ -254,7 +263,7 @@ func DownloadPiece(
 				return nil, fmt.Errorf("send interested: %w", err)
 			}
 			interested = true
-			log.LogDebug("bt-piece: sent interested to %s", peerAddr)
+			log.LogDebug("[bt-wire] sent interested to %s", peerAddr)
 		}
 	}
 
@@ -262,6 +271,7 @@ func DownloadPiece(
 	data := make([]byte, pieceLength)
 	var offset int64
 	blockSize := int64(defaultBlockSize)
+	blockNum := 0
 
 	for offset < pieceLength {
 		// Determine block size for this request.
@@ -279,8 +289,11 @@ func DownloadPiece(
 			return nil, fmt.Errorf("send request piece=%d offset=%d: %w",
 				pieceIndex, offset, err)
 		}
+		log.LogDebug("[bt-wire] sent request piece=%d offset=%d len=%d (block %d)",
+			pieceIndex, offset, blockLen, blockNum)
+		blockNum++
 
-		// Read piece message(s). We may get multiple messages — handle other
+		// Read piece message(s). We may get multiple messages -- handle other
 		// message types in between.
 		received := false
 		for !received {
@@ -301,11 +314,11 @@ func DownloadPiece(
 				blockData := payload[8:]
 
 				if int(idx) != pieceIndex {
-					log.LogWarn("bt-piece: got piece %d, expected %d", idx, pieceIndex)
+					log.LogWarn("[bt-wire] got piece %d, expected %d", idx, pieceIndex)
 					continue
 				}
 				if int64(beg) != offset {
-					log.LogWarn("bt-piece: got offset %d, expected %d", beg, offset)
+					log.LogWarn("[bt-wire] got offset %d, expected %d", beg, offset)
 					continue
 				}
 
@@ -313,8 +326,8 @@ func DownloadPiece(
 				offset += int64(len(blockData))
 				received = true
 
-				log.LogDebug("bt-piece: received block piece=%d offset=%d size=%d",
-					pieceIndex, beg, len(blockData))
+				log.LogInfo("[bt-wire] received block piece=%d offset=%d size=%d (total received=%d/%d)",
+					pieceIndex, beg, len(blockData), offset, pieceLength)
 
 			case msgChoke:
 				return nil, fmt.Errorf("peer choked us mid-download")
@@ -332,7 +345,7 @@ func DownloadPiece(
 				continue
 
 			default:
-				log.LogDebug("bt-piece: ignoring msg %d during piece download", msgID)
+				log.LogDebug("[bt-wire] ignoring msg %d during piece download", msgID)
 			}
 		}
 	}
@@ -347,12 +360,13 @@ func DownloadPiece(
 		)
 	}
 
-	log.LogInfo("bt-piece: downloaded piece %d from %s (%d bytes, SHA1 verified)",
+	log.LogInfo("[bt-wire] downloaded piece %d from %s (%d bytes, SHA1 verified)",
 		pieceIndex, peerAddr, len(data))
 	return data, nil
 }
 
-// DownloadAllPieces 从指定对端下载所有分片，每片校验 SHA1，返回文件名到数据的映射。
+// DownloadAllPieces downloads all pieces from the given peer, verifying each
+// piece's SHA1 hash. Returns a map of file path to data bytes.
 func DownloadAllPieces(
 	ctx context.Context,
 	peerAddr string,
@@ -361,7 +375,7 @@ func DownloadAllPieces(
 	concurrency int,
 ) (map[string][]byte, error) {
 	defer log.LogDuration("BT.DownloadAllPieces")()
-	log.LogInfo("bt-piece: DownloadAllPieces peer=%s name=%s pieces=%d concurrency=%d",
+	log.LogInfo("[bt-wire] DownloadAllPieces peer=%s name=%s pieces=%d concurrency=%d",
 		peerAddr, meta.Name, len(meta.Pieces), concurrency)
 
 	if concurrency <= 0 {
@@ -424,8 +438,7 @@ func DownloadAllPieces(
 		}
 		result[meta.Name] = fullData
 	} else {
-		// For multi-file, we need to map piece boundaries to file boundaries.
-		// This is complex — we reconstruct the full data and then split by files.
+		// For multi-file, reconstruct full data and then split by file boundaries.
 		var fullData []byte
 		for _, p := range pieces {
 			fullData = append(fullData, p...)
@@ -437,6 +450,30 @@ func DownloadAllPieces(
 		}
 	}
 
-	log.LogInfo("bt-piece: DownloadAllPieces completed for %s (%d files)", meta.Name, len(result))
+	log.LogInfo("[bt-wire] DownloadAllPieces completed for %s (%d files)", meta.Name, len(result))
 	return result, nil
+}
+
+// connectToPeer opens a TCP connection to a peer address.
+func connectToPeer(addr string) (net.Conn, error) {
+	log.LogDebug("[bt-wire] connecting to peer %s", addr)
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := dialer.Dial("tcp", addr)
+	if err != nil {
+		log.LogError("[bt-wire] connect to %s failed: %v", addr, err)
+		return nil, fmt.Errorf("connect to %s: %w", addr, err)
+	}
+	log.LogDebug("[bt-wire] connected to %s", addr)
+	return conn, nil
+}
+
+// doHandshake performs a BT handshake over an existing connection with the
+// given infohash. It logs the process with [bt-wire] prefix.
+func doHandshake(conn net.Conn, infoHash [20]byte) error {
+	peerID, err := btHandshake(conn, infoHash)
+	if err != nil {
+		return fmt.Errorf("handshake: %w", err)
+	}
+	log.LogDebug("[bt-wire] handshake done, peer id=%s", hex.EncodeToString(peerID[:]))
+	return nil
 }

@@ -75,12 +75,21 @@ func main() {
 	// 初始化匿名存储目录（与普通文件同一目录）
 	repository.SetAnonStorageDir(storageDir)
 
+	// 初始化 IPFS 兼容层（可选，默认关闭）
+	log.LogInfo("main: initializing IPFS compat layer (enabled=%v)", cfg.IPFSCompatEnable)
+	ipfsCompatLayer := service.NewIPFSCompatLayer(storageDir, cfg.IPFSBlockstore, p2pSvc)
+	if cfg.IPFSCompatEnable {
+		if err := ipfsCompatLayer.Enable(); err != nil {
+			log.LogWarn("main: IPFS compat enable failed (non-fatal): %v", err)
+		}
+	}
+
 	// 设置路由（内部注入 storageDir/downloader 到 context）
 	if cfg.RegistrationServer != "" {
 		router.SetRegServer(cfg.RegistrationServer)
 	}
 	log.LogInfo("main: setting up HTTP router")
-	r := router.SetupRouter(downloader, p2pSvc, cfg)
+	r := router.SetupRouter(downloader, p2pSvc, cfg, ipfsCompatLayer)
 
 	port := ":" + cfg.Port
 
