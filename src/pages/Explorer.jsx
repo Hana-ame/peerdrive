@@ -165,11 +165,11 @@ export default function Explorer() {
 
         {/* commit bar */}
         <div className="h-12 bg-gray-850 border-b border-gray-800 flex items-center px-6 gap-3 shrink-0">
-          <input type="text" placeholder="提交信息..."
+          <input type="text" placeholder="提交信息（保存版本快照）..."
             value={commitMsg} onChange={(e) => setCommitMsg(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleCommit(); }}
             className="bg-gray-800 border border-gray-700 px-3 py-1.5 rounded text-sm flex-1 max-w-md focus:outline-none focus:border-blue-500" />
-          <button onClick={handleCommit} className="bg-green-600 hover:bg-green-700 px-4 py-1.5 rounded text-sm font-medium">
+          <button onClick={handleCommit} className="bg-green-600 hover:bg-green-700 px-4 py-1.5 rounded text-sm font-medium" title="将当前工作区保存为一个版本快照，之后可回滚到此版本">
             提交
           </button>
         </div>

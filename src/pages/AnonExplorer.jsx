@@ -76,9 +76,19 @@ export default function AnonExplorer() {
     api.listAnonCollections().then(l => setIsLocal(Array.isArray(l) && l.some(c => c.hash === h))).catch(() => {});
   };
 
-  // 跳转到创建页进行 Fork 或编辑
-  const handleFork = () => navigate('/anon/create', { state: { forkFrom: collection, sourceHash: searchHash } });
-  const handleCommit = () => navigate('/anon/create', { state: { editFrom: collection, savedHash: searchHash } });
+  // 保存合集副本到本机后进行编辑
+  const handleSaveAndEdit = async () => {
+    if (!collection?.entries?.length) return;
+    try {
+      const name = (collection.friendly_name || '合集') + ' (副本)';
+      const res = await api.createAnonCollection(collection.entries, name);
+      setToastMsg('已保存到本机，可前往创建页编辑');
+      setToastErr(false);
+      setTimeout(() => setToastMsg(''), 3000);
+      setIsLocal(true);
+      navigate(`/anon/collections/${res.hash}`);
+    } catch(e) { setToastMsg('保存失败: ' + e.message); setToastErr(true); }
+  };
 
   const entries = collection?.entries || [];
   const fname = collection?.friendly_name || '';
@@ -171,7 +181,6 @@ export default function AnonExplorer() {
               <div className="flex-1 min-w-0" />
               <span className="text-xs text-gray-600 shrink-0">{currentItems.totalFiles} 项</span>
               <div className="flex items-center gap-1 shrink-0">
-                <button onClick={handleFork} className="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs">📋 Fork</button>
                 <button onClick={async () => {
                   try {
                     const share = await api.createShare(searchHash, 'collection', fname || '合集');
@@ -192,20 +201,10 @@ export default function AnonExplorer() {
                     } catch(e) { setToastMsg('广播失败: ' + e.message); setToastErr(true); }
                   }
                 }} className="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs">📡 广播</button>
-                {isLocal ? (
-                  <span className="text-xs text-green-500/70 bg-green-500/10 px-3 py-1 rounded-full">✓ 已保存到本机</span>
-                ) : (
-                  <button onClick={async () => {
-                    if (!collection?.entries?.length) return;
-                    const selected = confirm('将合集副本保存到本机？');
-                    if (!selected) return;
-                    try {
-                      const name = collection.friendly_name || collection.name_preview || '合集副本';
-                      const res = await api.createAnonCollection(collection.entries, name + ' (副本)');
-                      navigate(`/anon/collections/${res.hash}`);
-                    } catch(e) { setToastMsg('保存失败: ' + e.message); setToastErr(true); }
-                  }} className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-xs">💾 保存到本机</button>
-                )}
+                <button onClick={handleSaveAndEdit}
+                  className={`px-3 py-1 rounded text-xs ${isLocal ? 'bg-green-500/20 text-green-400' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
+                  {isLocal ? '✓ 已保存' : '💾 保存到本机'}
+                </button>
               </div>
             </div>
 
