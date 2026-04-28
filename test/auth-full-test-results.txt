@@ -1,0 +1,117 @@
+
+━━━ 0. Registration Server ━━━
+  → Starting registration server from /mnt/d/WorkPlace/peerdrive/registration-server/reg-server...
+[GIN-debug] [WARNING] Creating an Engine instance with the Logger and Recovery middleware already attached.
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] GET    /ping                     --> peerdrive-registration/internal/controller.(*AuthController).Ping-fm (3 handlers)
+[GIN-debug] POST   /auth/register            --> peerdrive-registration/internal/controller.(*AuthController).Register-fm (3 handlers)
+[GIN-debug] POST   /auth/login               --> peerdrive-registration/internal/controller.(*AuthController).Login-fm (3 handlers)
+[GIN-debug] GET    /auth/whoami              --> peerdrive-registration/internal/controller.(*AuthController).WhoAmI-fm (4 handlers)
+[GIN-debug] GET    /auth/list                --> peerdrive-registration/internal/controller.(*AuthController).ListUsers-fm (5 handlers)
+[GIN-debug] GET    /auth/group/:username     --> peerdrive-registration/internal/controller.(*AuthController).GetUserGroups-fm (4 handlers)
+[GIN-debug] POST   /auth/group/:username     --> peerdrive-registration/internal/controller.(*AuthController).AddUserToGroup-fm (4 handlers)
+[GIN-debug] GET    /api/health               --> peerdrive-registration/internal/router.SetupRouter.func1 (4 handlers)
+[GIN-debug] POST   /p2p/relay/register       --> peerdrive-registration/internal/controller.(*AuthController).RegisterRelay-fm (3 handlers)
+[GIN-debug] GET    /p2p/relay/list           --> peerdrive-registration/internal/controller.(*AuthController).ListRelays-fm (3 handlers)
+[GIN-debug] POST   /p2p/relay/heartbeat      --> peerdrive-registration/internal/controller.(*AuthController).RelayHeartbeat-fm (3 handlers)
+[GIN-debug] GET    /comments/:hash           --> peerdrive-registration/internal/controller.(*AuthController).GetComments-fm (3 handlers)
+[GIN-debug] POST   /comments/:hash           --> peerdrive-registration/internal/controller.(*AuthController).PostComment-fm (4 handlers)
+[GIN-debug] GET    /stats                    --> peerdrive-registration/internal/controller.(*AuthController).GetStats-fm (3 handlers)
+2026/04/28 19:47:07 Registration server starting on :4000
+[GIN-debug] [WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.
+Please check https://github.com/gin-gonic/gin/blob/master/docs/doc.md#dont-trust-all-proxies for details.
+[GIN-debug] Listening and serving HTTP on :4000
+[GIN] 2026/04/28 - 19:47:07 | 200 | 237.749µs |             ::1 | GET      "/ping"
+  → Registration server started (PID 3225454)
+[GIN] 2026/04/28 - 19:47:07 | 200 |   8.33ms |             ::1 | GET      "/ping"
+
+━━━ 1. Ping (GET /ping) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 200 |  76.16µs |             ::1 | GET      "/ping"
+  ✓ GET /ping returns status
+
+━━━ 2. Register User (POST /auth/register) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 201 |   59.7ms |             ::1 | POST     "/auth/register"
+  ✓ Register new user (authtest_1777376826)
+  → Token: eyJhbGciOiJIUzI1NiIsInR5cCI6Ik...
+
+━━━ 3. Login (POST /auth/login) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 200 |  55.88ms |             ::1 | POST     "/auth/login"
+  ✓ Login returns token
+  → Token refreshed: eyJhbGciOiJIUzI1NiIsInR5cCI6Ik...
+
+━━━ 4. WhoAmI (GET /auth/whoami) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 200 |  98.41µs |             ::1 | GET      "/auth/whoami"
+  ✓ GET /auth/whoami returns correct username
+
+━━━ 5. WhoAmI without Token (expect 401) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 401 | 46.829µs |             ::1 | GET      "/auth/whoami"
+  ✓ GET /auth/whoami returns 401 without token
+
+━━━ 6. WhoAmI with Invalid Token (expect 401) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 401 |  49.47µs |             ::1 | GET      "/auth/whoami"
+  ✓ GET /auth/whoami returns 401 with invalid token
+
+━━━ 7. Register Admin User (POST /auth/register) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 201 |  56.71ms |             ::1 | POST     "/auth/register"
+  ✓ Register admin user (testadmin_1777376826)
+
+━━━ 8. List Users (GET /auth/list) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 200 | 277.178µs |             ::1 | GET      "/auth/list"
+  ✓ GET /auth/list returns user list
+  → Total registered users: 2
+
+━━━ 9. List Users with Regular Token (expect 403) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 403 | 141.426µs |             ::1 | GET      "/auth/list"
+  ✓ GET /auth/list returns 403 for non-admin user
+
+━━━ 10. Add User to Group (POST /auth/group/:user) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 200 | 404.866µs |             ::1 | POST     "/auth/group/authtest_1777376826"
+  ✓ POST /auth/group/authtest_1777376826 adds user to group
+
+━━━ 11. Get User Groups (GET /auth/group/:user) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 200 | 445.653µs |             ::1 | GET      "/auth/group/authtest_1777376826"
+  ✓ GET /auth/group/authtest_1777376826 returns group membership
+
+━━━ 12. Register Relay Node (POST /p2p/relay/register) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 200 | 355.547µs |             ::1 | POST     "/p2p/relay/register"
+  ✓ POST /p2p/relay/register registers relay node
+
+━━━ 13. List Relay Nodes (GET /p2p/relay/list) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 200 | 293.935µs |             ::1 | GET      "/p2p/relay/list"
+  ✓ GET /p2p/relay/list includes registered relay
+
+━━━ 14. Relay Heartbeat (POST /p2p/relay/heartbeat) ━━━
+[GIN] 2026/04/28 - 19:47:07 | 200 | 336.62µs |             ::1 | POST     "/p2p/relay/heartbeat"
+  ✓ POST /p2p/relay/heartbeat updates relay timestamp
+
+━━━ 15. Post Comment (POST /comments/:hash) ━━━
+[GIN] 2026/04/28 - 19:47:08 | 201 | 453.242µs |             ::1 | POST     "/comments/testcoll_1777376826_abcdef1234567890"
+  ✓ POST /comments/testcoll_1777376826_... creates comment
+
+━━━ 16. Get Comments (GET /comments/:hash) ━━━
+[GIN] 2026/04/28 - 19:47:08 | 200 | 189.724µs |             ::1 | GET      "/comments/testcoll_1777376826_abcdef1234567890"
+  ✓ GET /comments/testcoll_1777376826_... returns comments
+  → Comments count: 1
+
+━━━ 17. Post Comment without Auth (expect 401) ━━━
+[GIN] 2026/04/28 - 19:47:08 | 401 | 50.678µs |             ::1 | POST     "/comments/testcoll_1777376826_abcdef1234567890"
+  ✓ POST /comments/:hash returns 401 without auth
+
+━━━ 18. Stats (GET /stats) ━━━
+[GIN] 2026/04/28 - 19:47:08 | 200 | 212.246µs |             ::1 | GET      "/stats"
+  ✓ GET /stats returns server statistics
+  → Users=2 Relays=1 Comments=1
+
+━━━ 19. P2P Auth Status (GET /p2p/auth/status) ━━━
+  → Peerdrive node not reachable at http://localhost:3000; skipping P2P auth status test
+  ✓ (skipped) Peerdrive node not available
+  ✓ (skipped) Peerdrive node not available
+
+═══════════════════════════════════════════════
+  Results: 20 pass, 0 fail (20 total)
+═══════════════════════════════════════════════
+  ALL TESTS PASSED

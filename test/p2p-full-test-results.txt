@@ -1,0 +1,328 @@
+
+[1m============================================================[0m
+[1m  P2P Full Integration Test Suite[0m
+[1m============================================================[0m
+  Root:   /mnt/d/WorkPlace/peerdrive/worktrees/p2p-agent
+  Base:   /tmp/peerdrive_p2p_full_test
+  Port A: 3091
+  Port B: 3092
+
+[1m[0/15] Building server binary...[0m
+[32m  Build OK[0m
+[1m[1/15] Starting Node A (port 3091)...[0m
+[GIN-debug] [WARNING] Creating an Engine instance with the Logger and Recovery middleware already attached.
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] GET    /ping                     --> peerdrive/internal/controller.Ping (5 handlers)
+[GIN-debug] GET    /sha256sum/:sha256        --> peerdrive/internal/controller.DownloadBySHA256 (5 handlers)
+[GIN-debug] GET    /ipfs/:cid                --> peerdrive/internal/controller.DownloadByCID (5 handlers)
+[GIN-debug] GET    /download/:hash           --> peerdrive/internal/controller.UniversalDownload (5 handlers)
+[GIN-debug] GET    /download/:hash/sources   --> peerdrive/internal/controller.UniversalDownloadSources (5 handlers)
+[GIN-debug] POST   /download/:hash/refresh   --> peerdrive/internal/controller.UniversalDownloadRefresh (5 handlers)
+[GIN-debug] GET    /p2p/status               --> peerdrive/internal/controller.P2PStatus (5 handlers)
+[GIN-debug] GET    /p2p/node                 --> peerdrive/internal/controller.GetNodeInfo (5 handlers)
+[GIN-debug] GET    /p2p/peers                --> peerdrive/internal/controller.GetPeers (5 handlers)
+[GIN-debug] GET    /p2p/discovered           --> peerdrive/internal/controller.GetDiscoveredPeers (5 handlers)
+[GIN-debug] GET    /p2p/connections          --> peerdrive/internal/controller.GetConnections (5 handlers)
+[GIN-debug] GET    /p2p/peers/detail         --> peerdrive/internal/controller.GetPeersDetail (5 handlers)
+[GIN-debug] GET    /p2p/peers/detail/:peer_id --> peerdrive/internal/controller.GetPeerDetail (5 handlers)
+[GIN-debug] GET    /p2p/stats                --> peerdrive/internal/controller.GetP2PStats (5 handlers)
+[GIN-debug] GET    /p2p/topology             --> peerdrive/internal/controller.GetTopology (5 handlers)
+[GIN-debug] GET    /p2p/quality              --> peerdrive/internal/controller.GetConnectionQuality (5 handlers)
+[GIN-debug] GET    /p2p/ping/:peer_id        --> peerdrive/internal/controller.PingPeer (5 handlers)
+[GIN-debug] POST   /p2p/connect              --> peerdrive/internal/controller.ConnectPeer (5 handlers)
+[GIN-debug] POST   /p2p/announce             --> peerdrive/internal/controller.AnnounceHash (5 handlers)
+[GIN-debug] POST   /p2p/fetch                --> peerdrive/internal/controller.FetchCollection (5 handlers)
+[GIN-debug] POST   /p2p/sync                 --> peerdrive/internal/controller.SyncFromPeer (5 handlers)
+[GIN-debug] POST   /p2p/push                 --> peerdrive/internal/controller.PushSync (5 handlers)
+[GIN-debug] POST   /p2p/request-file         --> peerdrive/internal/controller.RequestFile (5 handlers)
+[GIN-debug] GET    /p2p/ws/info              --> peerdrive/internal/controller.WSInfo (5 handlers)
+[GIN-debug] GET    /p2p/webrtc/info          --> peerdrive/internal/router.SetupRouter.WebRTCInfoHandler.func8 (5 handlers)
+[GIN-debug] GET    /p2p/bt/status            --> peerdrive/internal/controller.BTDHTStatus (5 handlers)
+[GIN-debug] POST   /p2p/bt/announce          --> peerdrive/internal/controller.BTAnnounce (5 handlers)
+[GIN-debug] POST   /p2p/bt/find              --> peerdrive/internal/controller.BTFindProviders (5 handlers)
+[GIN-debug] POST   /p2p/bt/bep44/put         --> peerdrive/internal/controller.BEP44Put (5 handlers)
+[GIN-debug] POST   /p2p/bt/bep44/get         --> peerdrive/internal/controller.BEP44Get (5 handlers)
+[GIN-debug] GET    /p2p/bt/bep51/sample      --> peerdrive/internal/controller.BEP51Sample (5 handlers)
+[GIN-debug] POST   /p2p/bt/torrent           --> peerdrive/internal/controller.BTTorrentUpload (5 handlers)
+[GIN-debug] POST   /p2p/bt/magnet            --> peerdrive/internal/controller.BTMagnetResolve (5 handlers)
+[GIN-debug] GET    /p2p/bt/download/:infohash --> peerdrive/internal/controller.BTDownloadProgress (5 handlers)
+[GIN-debug] GET    /p2p/bt/downloads         --> peerdrive/internal/controller.BTDownloadList (5 handlers)
+[GIN-debug] POST   /p2p/bt/download/:infohash/pause --> peerdrive/internal/controller.BTPauseDownload (5 handlers)
+[GIN-debug] POST   /p2p/bt/download/:infohash/resume --> peerdrive/internal/controller.BTResumeDownload (5 handlers)
+[GIN-debug] DELETE /p2p/bt/download/:infohash --> peerdrive/internal/controller.BTRemoveDownload (5 handlers)
+[GIN-debug] GET    /p2p/bt/stats             --> peerdrive/internal/controller.BTGlobalStats (5 handlers)
+[GIN-debug] POST   /p2p/dual/announce        --> peerdrive/internal/controller.DualAnnounce (5 handlers)
+[GIN-debug] POST   /p2p/dual/find            --> peerdrive/internal/controller.DualFindProviders (5 handlers)
+[GIN-debug] POST   /p2p/forward/create       --> peerdrive/internal/controller.CreateForwardSession (5 handlers)
+[GIN-debug] POST   /p2p/forward/connect      --> peerdrive/internal/controller.ConnectForwardSession (5 handlers)
+[GIN-debug] GET    /p2p/forward/list         --> peerdrive/internal/controller.ListForwardSessions (5 handlers)
+[GIN-debug] POST   /p2p/forward/close        --> peerdrive/internal/controller.CloseForwardSession (5 handlers)
+[GIN-debug] GET    /p2p/ipfs                 --> peerdrive/internal/controller.IPFSCompatStatus (5 handlers)
+[GIN-debug] POST   /p2p/ipfs/toggle          --> peerdrive/internal/controller.IPFSCompatToggle (5 handlers)
+[GIN-debug] POST   /anon/collections         --> peerdrive/internal/controller.CreateAnonCollection (5 handlers)
+[GIN-debug] GET    /anon/collections         --> peerdrive/internal/controller.ListAnonCollections (5 handlers)
+[GIN-debug] POST   /anon/collections/commit  --> peerdrive/internal/controller.CommitAnonCollection (5 handlers)
+[GIN-debug] GET    /anon/collections/:hash   --> peerdrive/internal/controller.GetAnonCollection (5 handlers)
+[GIN-debug] GET    /anon/collections/:hash/*filepath --> peerdrive/internal/controller.DownloadAnonFile (5 handlers)
+[GIN-debug] POST   /anon/collections/fork    --> peerdrive/internal/controller.ForkAnonCollection (5 handlers)
+[GIN-debug] GET    /files                    --> peerdrive/internal/controller.ListFiles (5 handlers)
+[GIN-debug] POST   /files/upload             --> peerdrive/internal/controller.UploadFile (5 handlers)
+[GIN-debug] POST   /files/register_local     --> peerdrive/internal/controller.RegisterLocalFile (5 handlers)
+[GIN-debug] POST   /files/register_url       --> peerdrive/internal/controller.RegisterURL (5 handlers)
+[GIN-debug] POST   /files/register_folder    --> peerdrive/internal/controller.RegisterFolder (5 handlers)
+[GIN-debug] GET    /files/verify/:hash       --> peerdrive/internal/controller.VerifyFile (5 handlers)
+[GIN-debug] GET    /files/browse             --> peerdrive/internal/controller.BrowseDir (5 handlers)
+[GIN-debug] DELETE /files/:hash              --> peerdrive/internal/controller.DeleteFile (5 handlers)
+[GIN-debug] POST   /files/diff               --> peerdrive/internal/controller.DiffVersions (5 handlers)
+[GIN-debug] POST   /collections              --> peerdrive/internal/controller.CreateCollection (5 handlers)
+[GIN-debug] GET    /collections/public       --> peerdrive/internal/controller.ListPublicCollections (5 handlers)
+[GIN-debug] GET    /collections/search       --> peerdrive/internal/controller.SearchCollections (5 handlers)
+[GIN-debug] GET    /collections/:username    --> peerdrive/internal/controller.ListCollections (5 handlers)
+[GIN-debug] GET    /collections/:username/:collection_name --> peerdrive/internal/controller.GetCollection (5 handlers)
+[GIN-debug] POST   /collections/:username/:collection_name/entries --> peerdrive/internal/controller.AddEntry (5 handlers)
+[GIN-debug] DELETE /collections/:username/:collection_name/entries/*path --> peerdrive/internal/controller.RemoveEntry (5 handlers)
+[GIN-debug] POST   /collections/:username/:collection_name/commit --> peerdrive/internal/controller.CommitCollection (5 handlers)
+[GIN-debug] GET    /collections/:username/:collection_name/log --> peerdrive/internal/controller.GetVersionLog (5 handlers)
+[GIN-debug] POST   /collections/:username/:collection_name/rollback/:version_id --> peerdrive/internal/controller.RollbackCollection (5 handlers)
+[GIN-debug] POST   /collections/:username/:collection_name/visibility --> peerdrive/internal/controller.SetCollectionVisibility (5 handlers)
+[GIN-debug] POST   /collections/:username/:collection_name/tags --> peerdrive/internal/controller.UpdateCollectionTags (5 handlers)
+[GIN-debug] POST   /local/save               --> peerdrive/internal/controller.(*SyncController).SaveLocal-fm (5 handlers)
+[GIN-debug] GET    /local/status/:hash       --> peerdrive/internal/controller.(*SyncController).GetStatus-fm (5 handlers)
+[GIN-debug] POST   /actions/merge            --> peerdrive/internal/controller.MergeFromSource (5 handlers)
+[GIN-debug] POST   /actions/fork             --> peerdrive/internal/controller.ForkCollection (5 handlers)
+[GIN-debug] POST   /actions/pull             --> peerdrive/internal/controller.PullCollection (5 handlers)
+[GIN-debug] GET    /:username/:collection_name/*filepath --> peerdrive/internal/controller.DownloadCollectionFile (5 handlers)
+[GIN-debug] GET    /tasks                    --> peerdrive/internal/controller.ListTasks (5 handlers)
+[GIN-debug] GET    /tasks/:id                --> peerdrive/internal/controller.GetTaskStatus (5 handlers)
+[GIN-debug] POST   /shares                   --> peerdrive/internal/controller.CreateShare (5 handlers)
+[GIN-debug] GET    /shares                   --> peerdrive/internal/controller.ListShares (5 handlers)
+[GIN-debug] GET    /s/:token                 --> peerdrive/internal/controller.AccessShare (5 handlers)
+[GIN-debug] GET    /swagger/*any             --> github.com/swaggo/gin-swagger.CustomWrapHandler.func1 (5 handlers)
+[GIN-debug] GET    /ws/transfer              --> peerdrive/internal/router.SetupRouter.func4 (5 handlers)
+[GIN-debug] GET    /relay/proxy              --> peerdrive/internal/service.(*RelayService).ProxyDownload-fm (5 handlers)
+[GIN-debug] GET    /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] POST   /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] PUT    /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] PATCH  /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] HEAD   /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] OPTIONS /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] DELETE /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] CONNECT /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] TRACE  /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] GET    /ws/signal                --> peerdrive/internal/router.SetupRouter.func6 (5 handlers)
+[GIN-debug] [WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.
+Please check https://github.com/gin-gonic/gin/blob/master/docs/doc.md#dont-trust-all-proxies for details.
+[GIN-debug] Listening and serving HTTP on :3091
+[GIN] 2026/04/28 - 19:46:15 | 200 | 16.014µs |             ::1 | GET      "/ping"
+[GIN] 2026/04/28 - 19:46:15 | 200 | 40.416µs |             ::1 | GET      "/ping"
+[32m  [PASS] Node A ping[0m
+[1m[2/15] Starting Node B (port 3092)...[0m
+[GIN-debug] [WARNING] Creating an Engine instance with the Logger and Recovery middleware already attached.
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] GET    /ping                     --> peerdrive/internal/controller.Ping (5 handlers)
+[GIN-debug] GET    /sha256sum/:sha256        --> peerdrive/internal/controller.DownloadBySHA256 (5 handlers)
+[GIN-debug] GET    /ipfs/:cid                --> peerdrive/internal/controller.DownloadByCID (5 handlers)
+[GIN-debug] GET    /download/:hash           --> peerdrive/internal/controller.UniversalDownload (5 handlers)
+[GIN-debug] GET    /download/:hash/sources   --> peerdrive/internal/controller.UniversalDownloadSources (5 handlers)
+[GIN-debug] POST   /download/:hash/refresh   --> peerdrive/internal/controller.UniversalDownloadRefresh (5 handlers)
+[GIN-debug] GET    /p2p/status               --> peerdrive/internal/controller.P2PStatus (5 handlers)
+[GIN-debug] GET    /p2p/node                 --> peerdrive/internal/controller.GetNodeInfo (5 handlers)
+[GIN-debug] GET    /p2p/peers                --> peerdrive/internal/controller.GetPeers (5 handlers)
+[GIN-debug] GET    /p2p/discovered           --> peerdrive/internal/controller.GetDiscoveredPeers (5 handlers)
+[GIN-debug] GET    /p2p/connections          --> peerdrive/internal/controller.GetConnections (5 handlers)
+[GIN-debug] GET    /p2p/peers/detail         --> peerdrive/internal/controller.GetPeersDetail (5 handlers)
+[GIN-debug] GET    /p2p/peers/detail/:peer_id --> peerdrive/internal/controller.GetPeerDetail (5 handlers)
+[GIN-debug] GET    /p2p/stats                --> peerdrive/internal/controller.GetP2PStats (5 handlers)
+[GIN-debug] GET    /p2p/topology             --> peerdrive/internal/controller.GetTopology (5 handlers)
+[GIN-debug] GET    /p2p/quality              --> peerdrive/internal/controller.GetConnectionQuality (5 handlers)
+[GIN-debug] GET    /p2p/ping/:peer_id        --> peerdrive/internal/controller.PingPeer (5 handlers)
+[GIN-debug] POST   /p2p/connect              --> peerdrive/internal/controller.ConnectPeer (5 handlers)
+[GIN-debug] POST   /p2p/announce             --> peerdrive/internal/controller.AnnounceHash (5 handlers)
+[GIN-debug] POST   /p2p/fetch                --> peerdrive/internal/controller.FetchCollection (5 handlers)
+[GIN-debug] POST   /p2p/sync                 --> peerdrive/internal/controller.SyncFromPeer (5 handlers)
+[GIN-debug] POST   /p2p/push                 --> peerdrive/internal/controller.PushSync (5 handlers)
+[GIN-debug] POST   /p2p/request-file         --> peerdrive/internal/controller.RequestFile (5 handlers)
+[GIN-debug] GET    /p2p/ws/info              --> peerdrive/internal/controller.WSInfo (5 handlers)
+[GIN-debug] GET    /p2p/webrtc/info          --> peerdrive/internal/router.SetupRouter.WebRTCInfoHandler.func8 (5 handlers)
+[GIN-debug] GET    /p2p/bt/status            --> peerdrive/internal/controller.BTDHTStatus (5 handlers)
+[GIN-debug] POST   /p2p/bt/announce          --> peerdrive/internal/controller.BTAnnounce (5 handlers)
+[GIN-debug] POST   /p2p/bt/find              --> peerdrive/internal/controller.BTFindProviders (5 handlers)
+[GIN-debug] POST   /p2p/bt/bep44/put         --> peerdrive/internal/controller.BEP44Put (5 handlers)
+[GIN-debug] POST   /p2p/bt/bep44/get         --> peerdrive/internal/controller.BEP44Get (5 handlers)
+[GIN-debug] GET    /p2p/bt/bep51/sample      --> peerdrive/internal/controller.BEP51Sample (5 handlers)
+[GIN-debug] POST   /p2p/bt/torrent           --> peerdrive/internal/controller.BTTorrentUpload (5 handlers)
+[GIN-debug] POST   /p2p/bt/magnet            --> peerdrive/internal/controller.BTMagnetResolve (5 handlers)
+[GIN-debug] GET    /p2p/bt/download/:infohash --> peerdrive/internal/controller.BTDownloadProgress (5 handlers)
+[GIN-debug] GET    /p2p/bt/downloads         --> peerdrive/internal/controller.BTDownloadList (5 handlers)
+[GIN-debug] POST   /p2p/bt/download/:infohash/pause --> peerdrive/internal/controller.BTPauseDownload (5 handlers)
+[GIN-debug] POST   /p2p/bt/download/:infohash/resume --> peerdrive/internal/controller.BTResumeDownload (5 handlers)
+[GIN-debug] DELETE /p2p/bt/download/:infohash --> peerdrive/internal/controller.BTRemoveDownload (5 handlers)
+[GIN-debug] GET    /p2p/bt/stats             --> peerdrive/internal/controller.BTGlobalStats (5 handlers)
+[GIN-debug] POST   /p2p/dual/announce        --> peerdrive/internal/controller.DualAnnounce (5 handlers)
+[GIN-debug] POST   /p2p/dual/find            --> peerdrive/internal/controller.DualFindProviders (5 handlers)
+[GIN-debug] POST   /p2p/forward/create       --> peerdrive/internal/controller.CreateForwardSession (5 handlers)
+[GIN-debug] POST   /p2p/forward/connect      --> peerdrive/internal/controller.ConnectForwardSession (5 handlers)
+[GIN-debug] GET    /p2p/forward/list         --> peerdrive/internal/controller.ListForwardSessions (5 handlers)
+[GIN-debug] POST   /p2p/forward/close        --> peerdrive/internal/controller.CloseForwardSession (5 handlers)
+[GIN-debug] GET    /p2p/ipfs                 --> peerdrive/internal/controller.IPFSCompatStatus (5 handlers)
+[GIN-debug] POST   /p2p/ipfs/toggle          --> peerdrive/internal/controller.IPFSCompatToggle (5 handlers)
+[GIN-debug] POST   /anon/collections         --> peerdrive/internal/controller.CreateAnonCollection (5 handlers)
+[GIN-debug] GET    /anon/collections         --> peerdrive/internal/controller.ListAnonCollections (5 handlers)
+[GIN-debug] POST   /anon/collections/commit  --> peerdrive/internal/controller.CommitAnonCollection (5 handlers)
+[GIN-debug] GET    /anon/collections/:hash   --> peerdrive/internal/controller.GetAnonCollection (5 handlers)
+[GIN-debug] GET    /anon/collections/:hash/*filepath --> peerdrive/internal/controller.DownloadAnonFile (5 handlers)
+[GIN-debug] POST   /anon/collections/fork    --> peerdrive/internal/controller.ForkAnonCollection (5 handlers)
+[GIN-debug] GET    /files                    --> peerdrive/internal/controller.ListFiles (5 handlers)
+[GIN-debug] POST   /files/upload             --> peerdrive/internal/controller.UploadFile (5 handlers)
+[GIN-debug] POST   /files/register_local     --> peerdrive/internal/controller.RegisterLocalFile (5 handlers)
+[GIN-debug] POST   /files/register_url       --> peerdrive/internal/controller.RegisterURL (5 handlers)
+[GIN-debug] POST   /files/register_folder    --> peerdrive/internal/controller.RegisterFolder (5 handlers)
+[GIN-debug] GET    /files/verify/:hash       --> peerdrive/internal/controller.VerifyFile (5 handlers)
+[GIN-debug] GET    /files/browse             --> peerdrive/internal/controller.BrowseDir (5 handlers)
+[GIN-debug] DELETE /files/:hash              --> peerdrive/internal/controller.DeleteFile (5 handlers)
+[GIN-debug] POST   /files/diff               --> peerdrive/internal/controller.DiffVersions (5 handlers)
+[GIN-debug] POST   /collections              --> peerdrive/internal/controller.CreateCollection (5 handlers)
+[GIN-debug] GET    /collections/public       --> peerdrive/internal/controller.ListPublicCollections (5 handlers)
+[GIN-debug] GET    /collections/search       --> peerdrive/internal/controller.SearchCollections (5 handlers)
+[GIN-debug] GET    /collections/:username    --> peerdrive/internal/controller.ListCollections (5 handlers)
+[GIN-debug] GET    /collections/:username/:collection_name --> peerdrive/internal/controller.GetCollection (5 handlers)
+[GIN-debug] POST   /collections/:username/:collection_name/entries --> peerdrive/internal/controller.AddEntry (5 handlers)
+[GIN-debug] DELETE /collections/:username/:collection_name/entries/*path --> peerdrive/internal/controller.RemoveEntry (5 handlers)
+[GIN-debug] POST   /collections/:username/:collection_name/commit --> peerdrive/internal/controller.CommitCollection (5 handlers)
+[GIN-debug] GET    /collections/:username/:collection_name/log --> peerdrive/internal/controller.GetVersionLog (5 handlers)
+[GIN-debug] POST   /collections/:username/:collection_name/rollback/:version_id --> peerdrive/internal/controller.RollbackCollection (5 handlers)
+[GIN-debug] POST   /collections/:username/:collection_name/visibility --> peerdrive/internal/controller.SetCollectionVisibility (5 handlers)
+[GIN-debug] POST   /collections/:username/:collection_name/tags --> peerdrive/internal/controller.UpdateCollectionTags (5 handlers)
+[GIN-debug] POST   /local/save               --> peerdrive/internal/controller.(*SyncController).SaveLocal-fm (5 handlers)
+[GIN-debug] GET    /local/status/:hash       --> peerdrive/internal/controller.(*SyncController).GetStatus-fm (5 handlers)
+[GIN-debug] POST   /actions/merge            --> peerdrive/internal/controller.MergeFromSource (5 handlers)
+[GIN-debug] POST   /actions/fork             --> peerdrive/internal/controller.ForkCollection (5 handlers)
+[GIN-debug] POST   /actions/pull             --> peerdrive/internal/controller.PullCollection (5 handlers)
+[GIN-debug] GET    /:username/:collection_name/*filepath --> peerdrive/internal/controller.DownloadCollectionFile (5 handlers)
+[GIN-debug] GET    /tasks                    --> peerdrive/internal/controller.ListTasks (5 handlers)
+[GIN-debug] GET    /tasks/:id                --> peerdrive/internal/controller.GetTaskStatus (5 handlers)
+[GIN-debug] POST   /shares                   --> peerdrive/internal/controller.CreateShare (5 handlers)
+[GIN-debug] GET    /shares                   --> peerdrive/internal/controller.ListShares (5 handlers)
+[GIN-debug] GET    /s/:token                 --> peerdrive/internal/controller.AccessShare (5 handlers)
+[GIN-debug] GET    /swagger/*any             --> github.com/swaggo/gin-swagger.CustomWrapHandler.func1 (5 handlers)
+[GIN-debug] GET    /ws/transfer              --> peerdrive/internal/router.SetupRouter.func4 (5 handlers)
+[GIN-debug] GET    /relay/proxy              --> peerdrive/internal/service.(*RelayService).ProxyDownload-fm (5 handlers)
+[GIN-debug] GET    /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] POST   /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] PUT    /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] PATCH  /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] HEAD   /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] OPTIONS /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] DELETE /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] CONNECT /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] TRACE  /webdav/*path             --> peerdrive/internal/router.SetupRouter.func5 (5 handlers)
+[GIN-debug] GET    /ws/signal                --> peerdrive/internal/router.SetupRouter.func6 (5 handlers)
+[GIN-debug] [WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.
+Please check https://github.com/gin-gonic/gin/blob/master/docs/doc.md#dont-trust-all-proxies for details.
+[GIN-debug] Listening and serving HTTP on :3092
+[GIN] 2026/04/28 - 19:46:16 | 200 | 17.701µs |             ::1 | GET      "/ping"
+[GIN] 2026/04/28 - 19:46:16 | 200 |    4.8ms |             ::1 | GET      "/ping"
+[32m  [PASS] Node B ping[0m
+[1m[3/15] Checking /p2p/status...[0m
+[GIN] 2026/04/28 - 19:46:16 | 200 |   1.77ms |             ::1 | GET      "/p2p/status"
+[32m  [PASS] Node A enabled[0m
+[32m  [PASS] Node A peer_id non-empty[0m
+[GIN] 2026/04/28 - 19:46:16 | 200 | 203.38µs |             ::1 | GET      "/p2p/status"
+[32m  [PASS] Node B enabled[0m
+[32m  [PASS] Node B peer_id non-empty[0m
+  Node A PeerID: 12D3KooWEU5Hg4AckAR1...
+  Node B PeerID: 12D3KooWJE4p12DVjJPE...
+[1m[4/15] Checking /p2p/node...[0m
+[GIN] 2026/04/28 - 19:46:16 | 200 | 128.205µs |             ::1 | GET      "/p2p/node"
+[32m  [PASS] Node A node peer_id[0m
+[32m  [PASS] Node A node addrs[0m
+[GIN] 2026/04/28 - 19:46:16 | 200 | 150.938µs |             ::1 | GET      "/p2p/node"
+[32m  [PASS] Node B node peer_id[0m
+[1m[5/15] Checking /p2p/peers...[0m
+[GIN] 2026/04/28 - 19:46:16 | 200 | 97.322µs |             ::1 | GET      "/p2p/peers"
+[32m  [PASS] Node A peers list[0m
+[GIN] 2026/04/28 - 19:46:16 | 200 | 85.213µs |             ::1 | GET      "/p2p/peers"
+[32m  [PASS] Node B peers list[0m
+[1m[6/15] Waiting for mDNS discovery (8s)...[0m
+[GIN] 2026/04/28 - 19:46:27 | 200 | 162.478µs |             ::1 | GET      "/p2p/discovered"
+[32m  [PASS] Node A discovered peers[0m
+[GIN] 2026/04/28 - 19:46:27 | 200 | 123.067µs |             ::1 | GET      "/p2p/discovered"
+[32m  [PASS] Node B discovered peers[0m
+[1m[7/15] Connecting Node B to Node A...[0m
+[GIN] 2026/04/28 - 19:46:27 | 200 | 827.299µs |             ::1 | POST     "/p2p/connect"
+[32m  Connected via /ip4/127.0.0.1/tcp/40979[0m
+[32m  [PASS] Node B connected to Node A[0m
+[1m[8/15] Verifying bidirectional connection...[0m
+[GIN] 2026/04/28 - 19:46:29 | 200 |  97.02µs |             ::1 | GET      "/p2p/peers"
+[32m  [PASS] Node A sees Node B[0m
+[GIN] 2026/04/28 - 19:46:29 | 200 |  71.83µs |             ::1 | GET      "/p2p/peers"
+[32m  [PASS] Node B sees Node A[0m
+[1m[9/15] Pinging Node B from Node A...[0m
+[GIN] 2026/04/28 - 19:46:29 | 200 | 776.616µs |             ::1 | GET      "/p2p/ping/12D3KooWJE4p12DVjJPE6U1iAAds6VxSFZgwquTzJw4ahNMxhWZb"
+[32m  [PASS] Ping response peer[0m
+[32m  [PASS] Ping response rtt[0m
+[1m[10/15] Creating test data on Node A...[0m
+[GIN] 2026/04/28 - 19:46:29 | 200 |  189.4ms |             ::1 | POST     "/files/register_local"
+[32m  [PASS] File registered with hash[0m
+  File hash: 09201d181f1cd22fdcf1b310793525ff33d39eadd9a66b5d5e48a6a992cf8475
+[GIN] 2026/04/28 - 19:46:29 | 201 | 194.14ms |             ::1 | POST     "/anon/collections"
+[32m  [PASS] Collection created[0m
+  Collection hash: 14e35c1e90c89f000cbc353216bcdf25ccdebe38220b3d5ae446ed1d7d77d0b0
+[1m[11/15] Announcing hash on Node A...[0m
+[GIN] 2026/04/28 - 19:46:29 | 200 | 917.215µs |             ::1 | POST     "/p2p/announce"
+[32m  [PASS] Announce response[0m
+[1m[12/15] Fetching collection via P2P exchange (Node B)...[0m
+[GIN] 2026/04/28 - 19:46:29 | 200 |   1.88ms |             ::1 | POST     "/p2p/fetch"
+[32m  [PASS] Fetch friendly name[0m
+[32m  [PASS] Fetch entries[0m
+[32m  [PASS] Fetch response contains name[0m
+[1m[13/15] Syncing files via P2P (Node B <- Node A)...[0m
+[GIN] 2026/04/28 - 19:46:29 | 200 | 144.17ms |             ::1 | POST     "/p2p/sync"
+[32m  [PASS] Sync response count[0m
+[32m  [PASS] Files synced: 1[0m
+total 12
+drwxr-xr-x 2 lumin lumin 4096  4月 28 19:46 .
+drwxr-xr-x 4 lumin lumin 4096  4月 28 19:46 ..
+-rw-r--r-- 1 lumin lumin   77  4月 28 19:46 09201d181f1cd22fdcf1b310793525ff33d39eadd9a66b5d5e48a6a992cf8475
+[1m[14/15] Topology, quality, connections, and stats endpoints...[0m
+[GIN] 2026/04/28 - 19:46:29 | 200 | 434.472µs |             ::1 | GET      "/p2p/topology"
+[32m  [PASS] Topology local_peer_id[0m
+[32m  [PASS] Topology edges[0m
+[GIN] 2026/04/28 - 19:46:30 | 200 | 127.408µs |             ::1 | GET      "/p2p/quality"
+[32m  [PASS] Quality endpoint returns valid data[0m
+[GIN] 2026/04/28 - 19:46:30 | 200 | 75.185µs |             ::1 | GET      "/p2p/connections"
+[32m  [PASS] Connections inbound[0m
+[32m  [PASS] Connections outbound[0m
+[32m  [PASS] Connections total[0m
+[GIN] 2026/04/28 - 19:46:30 | 200 | 71.271µs |             ::1 | GET      "/p2p/stats"
+[32m  [PASS] Stats total_peers_seen[0m
+[32m  All four structural endpoints returned valid JSON[0m
+[1m[15/15] Peer detail endpoints...[0m
+[GIN] 2026/04/28 - 19:46:30 | 200 | 243.998µs |             ::1 | GET      "/p2p/peers/detail"
+[32m  [PASS] Peers detail endpoint returns valid data[0m
+[GIN] 2026/04/28 - 19:46:30 | 200 | 89.842µs |             ::1 | GET      "/p2p/peers/detail/12D3KooWJE4p12DVjJPE6U1iAAds6VxSFZgwquTzJw4ahNMxhWZb"
+[32m  [PASS] Single peer detail[0m
+
+[1m============================================================[0m
+[1m  P2P Full Integration Test Results[0m
+[1m============================================================[0m
+[32m  Passed: 35[0m
+[32m  Failed: 0[0m
+[1m  Total:  35[0m
+
+  Node A PeerID: 12D3KooWEU5Hg4AckAR1s3RvmYW9uLhc1cReVFGuk29knzrMCZqu
+  Node B PeerID: 12D3KooWJE4p12DVjJPE6U1iAAds6VxSFZgwquTzJw4ahNMxhWZb
+  Collection:    14e35c1e90c89f000cbc353216bcdf25ccdebe38220b3d5ae446ed1d7d77d0b0
+  File hash:     09201d181f1cd22fdcf1b310793525ff33d39eadd9a66b5d5e48a6a992cf8475
+
+[32m  OVERALL: ALL TESTS PASSED[0m
+
+--- Cleaning up ---

@@ -66,7 +66,12 @@ func AnnounceHTTP(announceURL string, ih [20]byte, port int, uploaded, downloade
 
 	log.LogDebug("[bt-wire] tracker request: %s", fullURL)
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		Transport: &http.Transport{
+			Proxy: func(req *http.Request) (*url.URL, error) { return nil, nil },
+		},
+	}
 	resp, err := client.Get(fullURL)
 	if err != nil {
 		log.LogWarn("[bt-wire] tracker request failed: %v", err)

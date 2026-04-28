@@ -122,6 +122,13 @@ func SetupRouter(
 	// Initialize dual P2P service (IPFS + BT DHT).
 	dualSvc := service.NewDualP2PService(cfg, p2pSvc, btSvc)
 	controller.InitDualController(dualSvc)
+
+	// Initialize resume manager and multi-peer downloader for resume-able downloads.
+	resumeMgr := service.NewResumeManager(cfg, p2pSvc, btSvc, dualSvc)
+	controller.InitResumeManager(resumeMgr)
+	multiPeerDl := service.NewMultiPeerDownloader(cfg, p2pSvc, btSvc, dualSvc)
+	controller.InitMultiPeerDownloader(multiPeerDl)
+
 	controller.InitAnonController(service.NewAnonService(cfg))
 
 	// Initialize BitTorrent client for torrent/magnet downloads.
@@ -299,6 +306,16 @@ func SetupRouter(
 			p2p.GET("/ipfs/pins", controller.ListPins)
 			// IPFS gateway status
 			p2p.GET("/ipfs/gateways", controller.IPFSGatewayStatus)
+
+			// Resume-able P2P download routes
+			p2p.POST("/download/resume", controller.ResumeDownload)
+			p2p.GET("/download/progress/:hash", controller.DownloadProgress)
+			p2p.POST("/download/cancel/:hash", controller.CancelDownload)
+
+			// Multi-peer download routes
+			p2p.POST("/download/multipeer", controller.MultiPeerDownload)
+			p2p.GET("/download/sources/:hash", controller.DownloadSources)
+			p2p.GET("/download/multipeer/progress/:hash", controller.MultiPeerProgress)
 		}
 
 	// Anonymous Collection routes (public)

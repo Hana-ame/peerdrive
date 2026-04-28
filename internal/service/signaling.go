@@ -135,7 +135,7 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 				Type:   "registered",
 				PeerID: msg.PeerID,
 			})
-			h.broadcast(SignalingMessage{Type: "peer_joined", PeerID: msg.PeerID})
+			h.broadcast(SignalingMessage{Type: "peer_joined", PeerID: msg.PeerID}, msg.PeerID)
 			log.LogInfo("signal: peer registered: %s", msg.PeerID[:min(len(msg.PeerID), 12)])
 
 		case "join":
@@ -156,7 +156,11 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 			if len(shortID) > 12 {
 				shortID = shortID[:12]
 			}
-			log.LogInfo("signal: peer %s joined room %s", shortID, msg.Hash[:16])
+			shortHash := msg.Hash
+				if len(shortHash) > 16 {
+					shortHash = shortHash[:16]
+				}
+				log.LogInfo("signal: peer %s joined room %s", shortID, shortHash)
 
 			// Notify the joining peer of existing room occupants.
 			roomPeers := h.RoomPeers(msg.Hash)
@@ -223,7 +227,11 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 			h.mu.Lock()
 			h.files[msg.Hash] = appendIfMissing(h.files[msg.Hash], msg.PeerID)
 			h.mu.Unlock()
-			log.LogInfo("signal: file announced: %s by %s", msg.Hash[:16], msg.PeerID[:min(len(msg.PeerID), 12)])
+			shortHash := msg.Hash
+				if len(shortHash) > 16 {
+					shortHash = shortHash[:16]
+				}
+				log.LogInfo("signal: file announced: %s by %s", shortHash, msg.PeerID[:min(len(msg.PeerID), 12)])
 
 		case "find_file":
 			if msg.Hash == "" {
@@ -314,10 +322,17 @@ func (h *SignalingHub) relay(msg SignalingMessage) {
 	target.send(msg)
 }
 
-func (h *SignalingHub) broadcast(msg SignalingMessage) {
+func (h *SignalingHub) broadcast(msg SignalingMessage, excludePeerIDs ...string) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for _, p := range h.peers {
+	exclude := make(map[string]struct{}, len(excludePeerIDs))
+	for _, id := range excludePeerIDs {
+		exclude[id] = struct{}{}
+	}
+	for pid, p := range h.peers {
+		if _, ok := exclude[pid]; ok {
+			continue
+		}
 		p.send(msg)
 	}
 }

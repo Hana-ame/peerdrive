@@ -1,0 +1,115 @@
+========================================
+  Peerdrive Storage Module Test
+  API_BASE = http://localhost:3002
+  Date: 2026-04-28 19:48:22
+========================================
+
+══════════════════════════════════════════════
+  1. Health Check
+══════════════════════════════════════════════
+  ✓ GET /ping → pong
+
+══════════════════════════════════════════════
+  2. File Upload
+══════════════════════════════════════════════
+  ✓ POST /files/upload → hash=deeaa2575349c149d5634e2dc99a9f48f94ab4019f386994cd9bbabc35fc1719 matches expected
+
+══════════════════════════════════════════════
+  3. Duplicate Upload (idempotent)
+══════════════════════════════════════════════
+  ✓ POST /files/upload (duplicate) → HTTP 200
+  ✓ Duplicate upload → already_exists=true
+
+══════════════════════════════════════════════
+  4. Register Local File
+══════════════════════════════════════════════
+  ✓ POST /files/register_local → hash=5d3b22a58d2bee9f21f337f32ff2c379b14cb1d24e40c4fe6651c5fbb3d05a52
+
+══════════════════════════════════════════════
+  5. Register Folder
+══════════════════════════════════════════════
+  ✓ POST /files/register_folder → 2 files registered
+
+══════════════════════════════════════════════
+  6. Register URL
+══════════════════════════════════════════════
+  ✓ POST /files/register_url → hash=d80c5b9c2b9f374d3f5d0d1978196a0b5ad9a3c54a9457c79b00c98e6a038e12 size=512
+
+══════════════════════════════════════════════
+  7. SHA256 Download
+══════════════════════════════════════════════
+  ✓ GET /sha256sum/deeaa2575349c149d5634e2dc99a9f48f94ab4019f386994cd9bbabc35fc1719 → HTTP 200, content matches
+
+══════════════════════════════════════════════
+  8. CID Download (dual-indexing)
+══════════════════════════════════════════════
+  ✓ GET /ipfs/badcid → HTTP 404 (expected for unknown CID)
+
+══════════════════════════════════════════════
+  9. Range Download (HTTP 206)
+══════════════════════════════════════════════
+  ✓ GET /sha256sum with Range: bytes=0-99 → HTTP 206, 100 bytes
+  ✓ GET /sha256sum with Range: bytes=-20 → HTTP 206, 20 bytes (suffix)
+
+══════════════════════════════════════════════
+  10. Verify File by Hash
+══════════════════════════════════════════════
+  ✓ GET /files/verify/deeaa2575349c149d5634e2dc99a9f48f94ab4019f386994cd9bbabc35fc1719 → hash=deeaa2575349c149d5634e2dc99a9f48f94ab4019f386994cd9bbabc35fc1719 size=224
+  ✓ GET /files/verify/bogushash → HTTP 404 (correct)
+
+══════════════════════════════════════════════
+  11. Browse Directory
+══════════════════════════════════════════════
+  ✓ GET /files/browse → 8 entries
+
+══════════════════════════════════════════════
+  12. List Files
+══════════════════════════════════════════════
+  ✓ GET /files → 9 files listed
+
+══════════════════════════════════════════════
+  13. File Copy
+══════════════════════════════════════════════
+  ✓ POST /files/copy → dest=/tmp/tmp.nKYKuPDg92/copied_file.txt
+  ✓ File copy → content matches original hash
+
+══════════════════════════════════════════════
+  14. Anonymous Collection
+══════════════════════════════════════════════
+  ✓ POST /anon/collections → hash=5223e401f40a42343c45600ff34d22de1e37b494e6865d931141fa6025bb5c96
+  ✓ GET /anon/collections → found our collection
+  ✓ GET /anon/collections/5223e401f40a42343c45600ff34d22de1e37b494e6865d931141fa6025bb5c96 → version=1 entries=2
+  ✓ GET /anon/collections/5223e401f40a42343c45600ff34d22de1e37b494e6865d931141fa6025bb5c96/test.txt → content matches
+
+══════════════════════════════════════════════
+  15. Share Links
+══════════════════════════════════════════════
+  ✓ POST /shares → token=d073bc2d0c24e31609f3f468dc103568 url=/s/d073bc2d0c24e31609f3f468dc103568
+  ✓ GET /shares → 3 shares listed
+  ✓ GET /s/d073bc2d0c24e31609f3f468dc103568 → HTTP 302 (redirect to content)
+
+══════════════════════════════════════════════
+  16. WebDAV
+══════════════════════════════════════════════
+  ✓ OPTIONS /webdav/ → HTTP 204 (WebDAV mounted)
+
+══════════════════════════════════════════════
+  17. Delete File
+══════════════════════════════════════════════
+  ✓ DELETE /files/deeaa2575349c149d5634e2dc99a9f48f94ab4019f386994cd9bbabc35fc1719 → message='deleted'
+  ✓ Verify after delete → HTTP 404 (confirmed deletion)
+
+══════════════════════════════════════════════
+  18. List Files (post-delete)
+══════════════════════════════════════════════
+  ✓ GET /files → 8 files remaining
+
+══════════════════════════════════════════════
+  Results Summary
+══════════════════════════════════════════════
+  Passed: 28
+  Failed: 0
+  Total:  28
+
+  Date: 2026-04-28 19:48:36
+  ALL TESTS PASSED

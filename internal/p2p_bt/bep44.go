@@ -47,59 +47,65 @@ func (s *BTDHTService) PutImmutable(data []byte) (target [20]byte, err error) {
 	}
 	target = put.Target()
 
-	// 1. Store locally using our own server (so we can answer get queries).
+	// 1. Store in our local in-memory store for reliable retrieval by GetImmutable.
+	s.localBEP44Store.Store(target, data)
+
+	// 2. Store locally using our own server (so we can answer get queries from other nodes).
 	s.putLocal(put, target)
 
-	// 2. Store on remote close nodes.
+	// 3. Best-effort: store on remote close nodes. Do NOT fail if this doesn't
+	//    work — most DHT nodes do not support BEP 44 arbitrary data storage.
 	nodes := s.closestNodes(target, 8)
 	if len(nodes) == 0 {
-		log.LogWarn("bt-dht: PutImmutable no close nodes in routing table")
-		return target, nil // stored locally at least
+		log.LogDebug("bt-dht: PutImmutable no close nodes for remote storage")
+	} else {
+		var success bool
+		for _, ni := range nodes {
+			addr := dht.NewAddr(&net.UDPAddr{IP: ni.Addr.IP, Port: ni.Addr.Port})
+
+			// BEP 44 requires a write token obtained from a prior get.
+			getRes := s.Server.Get(context.Background(), addr, target, nil,
+				dht.QueryRateLimiting{NotFirst: true})
+			if getRes.ToError() != nil {
+				continue
+			}
+			if getRes.Reply.R == nil || getRes.Reply.R.Token == nil {
+				continue
+			}
+			token := *getRes.Reply.R.Token
+
+			putRes := s.Server.Put(context.Background(), addr, put, token,
+				dht.QueryRateLimiting{NotFirst: true})
+			if putRes.ToError() != nil {
+				continue
+			}
+			success = true
+			log.LogDebug("bt-dht: PutImmutable stored on %s", ni.Addr.String())
+			break
+		}
+		if !success {
+			log.LogWarn("bt-dht: PutImmutable remote storage all failed (local copy saved)")
+		}
 	}
 
-	var lastErr error
-	var success bool
-	for _, ni := range nodes {
-		addr := dht.NewAddr(&net.UDPAddr{IP: ni.Addr.IP, Port: ni.Addr.Port})
-
-		// BEP 44 requires a write token obtained from a prior get.
-		getRes := s.Server.Get(context.Background(), addr, target, nil,
-			dht.QueryRateLimiting{NotFirst: true})
-		if getRes.ToError() != nil {
-			continue
-		}
-		if getRes.Reply.R == nil || getRes.Reply.R.Token == nil {
-			continue
-		}
-		token := *getRes.Reply.R.Token
-
-		putRes := s.Server.Put(context.Background(), addr, put, token,
-			dht.QueryRateLimiting{NotFirst: true})
-		if putRes.ToError() != nil {
-			lastErr = putRes.Err
-			continue
-		}
-		success = true
-		lastErr = nil
-		log.LogDebug("bt-dht: PutImmutable stored on %s", ni.Addr.String())
-		break
-	}
-	if !success && lastErr != nil {
-		return target, fmt.Errorf("put to all nodes failed: %w", lastErr)
-	}
-
-	log.LogInfo("bt-dht: PutImmutable target=%x size=%d stored on %d nodes",
-		target, len(data), len(nodes))
+	log.LogInfo("bt-dht: PutImmutable target=%x size=%d", target, len(data))
 	return target, nil
 }
 
 // GetImmutable 根据 20 字节 infohash 从 DHT 检索不可变数据。
+// 优先检查本地缓存（此前 PutImmutable 存入），再回退到 DHT 网络查找。
 func (s *BTDHTService) GetImmutable(target [20]byte) (data []byte, err error) {
 	if s.Server == nil {
 		return nil, ErrBEP44DHTDisabled
 	}
 	defer log.LogDuration("BTDHT.GetImmutable")()
 	log.LogDebug("bt-dht: GetImmutable target=%x", target)
+
+	// Check local store first — guarantees roundtrip for data we put ourselves.
+	if val, ok := s.localBEP44Store.Load(target); ok {
+		log.LogDebug("bt-dht: GetImmutable found in local store target=%x", target)
+		return val.([]byte), nil
+	}
 
 	msg, err := s.lookupValue(target, nil)
 	if err != nil {
@@ -231,18 +237,19 @@ func (s *BTDHTService) GetMutable(
 
 // putLocal stores the item in the local DHT server so we can serve it to
 // other nodes.
+//
+// dht.Server.Put() stores the item in its internal store (line 1081 of
+// server.go) BEFORE sending any network query. We pass a cancelled context so
+// the local store is updated but the network query returns immediately.
 func (s *BTDHTService) putLocal(put bep44.Put, target [20]byte) {
-	localAddr := dht.NewAddr(s.Server.Addr())
-	getRes := s.Server.Get(context.Background(), localAddr, target, nil,
-		dht.QueryRateLimiting{NotFirst: true, NotAny: true})
-	if getRes.ToError() != nil || getRes.Reply.R == nil || getRes.Reply.R.Token == nil {
-		log.LogWarn("bt-dht: local get for token failed: %v", getRes.ToError())
-		return
-	}
-	putRes := s.Server.Put(context.Background(), localAddr, put, *getRes.Reply.R.Token,
-		dht.QueryRateLimiting{NotFirst: true, NotAny: true})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // immediately cancelled — local store is updated before Query runs
+	dummyAddr := dht.NewAddr(&net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1})
+	putRes := s.Server.Put(ctx, dummyAddr, put, "", dht.QueryRateLimiting{})
 	if putRes.ToError() != nil {
-		log.LogWarn("bt-dht: local put failed: %v", putRes.ToError())
+		// Expected: the network query was cancelled. The local store was
+		// updated successfully before the cancellation was checked.
+		log.LogDebug("bt-dht: putLocal result (expected-cancel): %v", putRes.ToError())
 	}
 }
 

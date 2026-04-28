@@ -73,13 +73,14 @@ func (dl *BTDownload) cancelDownload() {
 
 // BTClient 管理 BitTorrent 下载任务，封装底层 BitTorrent 协议细节。
 type BTClient struct {
-	dataDir    string
-	downloads  map[string]*BTDownload
-	seeders    map[string]*BTSeeder
-	onComplete OnTorrentComplete
-	mu         sync.RWMutex
-	stopCh     chan struct{}
-	seederMu   sync.Mutex
+	dataDir     string
+	downloads   map[string]*BTDownload
+	seeders     map[string]*BTSeeder
+	onComplete  OnTorrentComplete
+	mu          sync.RWMutex
+	stopCh      chan struct{}
+	seederMu    sync.Mutex
+	customPeers map[string][]string // manually added peers per infohash
 }
 
 // NewBTClient 创建 BT 客户端实例，指定下载文件存储目录。
@@ -90,10 +91,11 @@ func NewBTClient(dataDir string) *BTClient {
 	os.MkdirAll(dataDir, 0755)
 
 	client := &BTClient{
-		dataDir:   dataDir,
-		downloads: make(map[string]*BTDownload),
-		seeders:   make(map[string]*BTSeeder),
-		stopCh:    make(chan struct{}),
+		dataDir:     dataDir,
+		downloads:   make(map[string]*BTDownload),
+		seeders:     make(map[string]*BTSeeder),
+		stopCh:      make(chan struct{}),
+		customPeers: make(map[string][]string),
 	}
 	log.LogInfo("bt-client: created, dataDir=%s", dataDir)
 	return client
@@ -211,14 +213,26 @@ func (c *BTClient) downloadTorrent(dl *BTDownload) {
 
 	if len(peerAddrs) == 0 {
 		log.LogWarn("[bt-wire] no peers found for %s via DHT", dl.InfoHash)
-		// Try to use trackers if available.
-		if dl.Meta != nil && len(dl.Meta.AnnounceList) > 0 {
-			log.LogInfo("[bt-wire] trying tracker-based peer discovery for %s", dl.InfoHash)
-			peers, err := discoverPeersFromTrackers(dl.InfoHash, dl.Meta.AnnounceList)
-			if err != nil {
-				log.LogWarn("[bt-wire] tracker discovery failed: %v", err)
-			} else {
-				peerAddrs = peers
+	}
+
+	// Always try tracker-based discovery (in addition to DHT).
+	if dl.Meta != nil && len(dl.Meta.AnnounceList) > 0 {
+		log.LogInfo("[bt-wire] trying tracker-based peer discovery for %s", dl.InfoHash)
+		trackerPeers, err := discoverPeersFromTrackers(dl.InfoHash, dl.Meta.AnnounceList)
+		if err != nil {
+			log.LogWarn("[bt-wire] tracker discovery failed: %v", err)
+		} else {
+			for _, tp := range trackerPeers {
+				found := false
+				for _, p := range peerAddrs {
+					if p == tp {
+						found = true
+						break
+					}
+				}
+				if !found {
+					peerAddrs = append(peerAddrs, tp)
+				}
 			}
 		}
 	}
@@ -546,6 +560,40 @@ func (c *BTClient) ListDownloads() []DownloadStatus {
 // GetDownloadDir 返回下载存储目录。
 func (c *BTClient) GetDownloadDir() string {
 	return c.dataDir
+}
+
+// AddPeer 手动添加一个 peer 地址到指定下载任务，用于连接本地 seeder 或已知节点。
+func (c *BTClient) AddPeer(infohash, addr string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.customPeers[infohash] = append(c.customPeers[infohash], addr)
+	log.LogInfo("bt-client: AddPeer infohash=%s addr=%s (total custom peers: %d)", infohash, addr, len(c.customPeers[infohash]))
+
+	// If the download is in error state, restart it
+	if dl, ok := c.downloads[infohash]; ok {
+		dl.mu.RLock()
+		status := dl.Status
+		dl.mu.RUnlock()
+		if status == "error" {
+			log.LogInfo("bt-client: restarting failed download %s with new peer", infohash)
+			dl.mu.Lock()
+			dl.Status = "downloading"
+			dl.DoneCh = make(chan struct{})
+			dl.err = nil
+			dl.mu.Unlock()
+			go c.downloadTorrent(dl)
+		}
+	}
+}
+
+// GetCustomPeers 返回指定下载任务的手动添加 peer 列表。
+func (c *BTClient) GetCustomPeers(infohash string) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	peers := c.customPeers[infohash]
+	result := make([]string, len(peers))
+	copy(result, peers)
+	return result
 }
 
 // Close 关闭 BT 客户端并停止所有活跃下载任务。

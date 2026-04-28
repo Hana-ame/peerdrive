@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"peerdrive/internal/log"
@@ -19,6 +20,11 @@ import (
 type BTDHTService struct {
 	Server     *dht.Server
 	listenAddr string
+
+	// localBEP44Store holds BEP 44 items we have put ourselves, indexed by
+	// target hash. This guarantees Put/Get roundtrips succeed without depending
+	// on remote DHT storage (which most DHT nodes do not support).
+	localBEP44Store sync.Map
 }
 
 // NewBTDHT 创建 UDP DHT 服务器，从公共 BitTorrent 引导节点启动。
