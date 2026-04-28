@@ -177,11 +177,20 @@ func (s *BTDHTService) Close() error {
 	return nil
 }
 
-// infoHashFromHex converts a 64-char hex SHA256 string into a 32-byte SHA256
-// value, then returns the first 20 bytes suitable for a BitTorrent infohash.
+// infoHashFromHex converts a hex string into a 20-byte BitTorrent infohash.
+// It accepts both 40-char hex (already a BT infohash) and 64-char hex (SHA256,
+// from which it takes the first 20 bytes).
 func infoHashFromHex(hash string) ([]byte, error) {
+	if len(hash) == 40 {
+		// Already a BT infohash (20 bytes).
+		raw, err := hex.DecodeString(hash)
+		if err != nil {
+			return nil, fmt.Errorf("decode hex: %w", err)
+		}
+		return raw, nil
+	}
 	if len(hash) != 64 {
-		return nil, fmt.Errorf("expected 64-char hex hash, got %d chars", len(hash))
+		return nil, fmt.Errorf("expected 40-char (infohash) or 64-char (SHA256) hex hash, got %d chars", len(hash))
 	}
 	raw, err := hex.DecodeString(hash)
 	if err != nil {
