@@ -228,3 +228,8 @@
 | 13.6 | BEP 51 infohash 采样 — 发现 BT 网络上的内容 | 🚧 |
 | 13.7 | IPFS provider 发现 — 查找谁有某个 CID | 🚧 |
 | 13.8 | 用户可手动触发 DHT crawl/scan | 📋 |
+
+| 2.17 | 私人合集 (visibility=private) | ✅ |
+| 2.18 | 非公开合集 (visibility=unlisted) | ✅ |
+| 2.19 | 公开合集 (visibility=public) | ✅ |
+
