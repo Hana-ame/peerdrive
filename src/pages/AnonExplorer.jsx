@@ -3,6 +3,7 @@ import React, { useContext, useState, useEffect, useMemo, useRef } from 'react';
 import * as api from '../api';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PageContext } from '../App';
+import CommentSection from '../components/CommentSection';
 
 const SHA256_RE = /\b([a-f0-9]{64})\b/i;
 function extractHash(text) { const m = (text || '').match(SHA256_RE); return m ? m[1].toLowerCase() : null; }
@@ -218,6 +219,12 @@ export default function AnonExplorer() {
             )}
 
             <div className="flex-1 overflow-y-auto">
+              {/* Comment section at top when not viewing single file */}
+              {!isSingleFile && !loading && collection && !navPath && (
+                <div className="px-4 pt-2">
+                  <CommentSection hash={searchHash} />
+                </div>
+              )}
               {isSingleFile && !navPath ? (
                 allCollHashes.has(entries[0].hash) ? (
                   <div className="flex flex-col items-center justify-center py-16 px-8 cursor-pointer"
@@ -306,6 +313,13 @@ export default function AnonExplorer() {
                 </div>
               )}
             </div>
+
+            {/* Comment section at bottom of all collection views */}
+            {collection && (
+              <div className="px-4 pb-4 border-t border-gray-800/50">
+                <CommentSection hash={searchHash} />
+              </div>
+            )}
           </div>
         )}
 

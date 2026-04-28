@@ -1,6 +1,7 @@
 // 顶部导航栏 + 全局搜索面板（Ctrl+K 打开）
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import * as api from '../api';
 import { listAnonCollections, searchCollections, listFiles } from '../api';
 
 // 全局搜索面板：搜索合集和文件，键盘导航选择
@@ -159,6 +160,27 @@ function SearchPanel({ open, onClose }) {
 export default function Navbar() {
   const nav = useNavigate();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [authStatus, setAuthStatus] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem('peerdrive_auth_key');
+    const headerEnabled = localStorage.getItem('peerdrive_auth_header_enabled') === 'true';
+    if (!token || !headerEnabled) {
+      setAuthStatus({ authenticated: false, username: '' });
+      setAuthLoading(false);
+      return;
+    }
+    (async () => {
+      try {
+        const status = await api.getAuthStatus();
+        setAuthStatus(status);
+      } catch {
+        setAuthStatus({ authenticated: false, username: '' });
+      }
+      setAuthLoading(false);
+    })();
+  }, []);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -200,6 +222,15 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center space-x-3">
+          {/* Auth Status Indicator */}
+          {!authLoading && (
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-800/60 border border-gray-700/50 text-xs">
+              <span className={`w-1.5 h-1.5 rounded-full ${authStatus?.authenticated ? 'bg-green-400' : 'bg-yellow-500'}`} />
+              <span className="text-gray-400">
+                {authStatus?.authenticated ? `👤 ${authStatus.username || '已认证'}` : '👤 匿名'}
+              </span>
+            </div>
+          )}
           <button
             onClick={() => setSearchOpen(true)}
             className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded-md text-xs text-gray-400 min-w-[200px]"

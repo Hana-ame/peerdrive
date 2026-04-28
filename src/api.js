@@ -130,6 +130,8 @@ export const p2pPush = (peerId, collectionName) =>
 export const p2pRequestFile = (hash) => request('POST', '/p2p/request-file', { hash });
 export const getWSInfo = () => request('GET', '/p2p/ws/info');
 export const getSignalPeers = () => request('GET', '/p2p/status').then(r => r.signal_peers || []);
+export const getP2PTopology = () => request('GET', '/p2p/topology');
+export const getP2PQuality = () => request('GET', '/p2p/quality');
 
 /* ---- P2P BT ---- */
 export const getBTStatus = () => request('GET', '/p2p/bt/status');
@@ -154,6 +156,9 @@ export const btTorrentUpload = (file) => {
 export const btRemoveDownload = (infohash) => request('DELETE', `/p2p/bt/download/${infohash}`);
 export const btPauseDownload = (infohash) => request('POST', `/p2p/bt/download/${infohash}/pause`);
 export const btResumeDownload = (infohash) => request('POST', `/p2p/bt/download/${infohash}/resume`);
+export const btSeedDownload = (infohash) => request('POST', `/p2p/bt/download/${infohash}/seed`);
+export const btStopSeed = (infohash) => request('POST', `/p2p/bt/download/${infohash}/unseed`);
+export const btGetStats = () => request('GET', '/p2p/bt/stats');
 
 /* ---- P2P Dual ---- */
 export const dualAnnounce = (hash) => request('POST', '/p2p/dual/announce', { hash });
@@ -278,6 +283,32 @@ export async function setIPFSCompatEnabled(enabled) {
   return data;
 }
 
+/* ---- IPFS pin & gateway ---- */
+
+// pinCID 固定指定 CID（从 IPFS 网关下载并永久缓存）。
+export async function pinCID(cid) {
+  const data = await request('POST', `/p2p/ipfs/pin/${cid}`);
+  return data;
+}
+
+// unpinCID 取消固定指定 CID。
+export async function unpinCID(cid) {
+  const data = await request('DELETE', `/p2p/ipfs/pin/${cid}`);
+  return data;
+}
+
+// listPins 列出所有已固定的 CID。
+export async function listPins() {
+  const data = await request('GET', '/p2p/ipfs/pins');
+  return data;
+}
+
+// getIPFSGatewayStatus 检查所有 IPFS 网关的健康状况。
+export async function getIPFSGatewayStatus() {
+  const data = await request('GET', '/p2p/ipfs/gateways');
+  return data;
+}
+
 const FREE_LLM_MODELS = [
   'Qwen/Qwen3-8B',
   'Qwen/Qwen3.5-4B',
@@ -321,6 +352,51 @@ export const saveLocal = (body) => request('POST', '/local/save', body);
 export const getLocalStatus = (hash) => request('GET', `/local/status/${hash}`);
 
 export const listFiles = (sort = 'time') => request('GET', `/files?sort=${sort}`);
+
+/* ---- auth status ---- */
+export const getAuthStatus = () => request('GET', '/p2p/auth/status');
+
+/* ---- group management (registration server) ---- */
+export async function getUserGroups(regServerUrl, username, token) {
+  const res = await fetch(`${regServerUrl}/auth/group/${encodeURIComponent(username)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function addUserToGroup(regServerUrl, username, groupName, token) {
+  const res = await fetch(`${regServerUrl}/auth/group/${encodeURIComponent(username)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ group_name: groupName }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/* ---- comments ---- */
+export async function getComments(regServerUrl, hash) {
+  const res = await fetch(`${regServerUrl}/comments/${encodeURIComponent(hash)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function postComment(regServerUrl, hash, content, token) {
+  const res = await fetch(`${regServerUrl}/comments/${encodeURIComponent(hash)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function getRegServerStats(regServerUrl) {
+  const res = await fetch(`${regServerUrl}/stats`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
 
 /* ---- service status dashboard ---- */
 const REG_SERVER_KEY = 'peerdrive_reg_server_url';

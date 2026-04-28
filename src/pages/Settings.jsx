@@ -60,6 +60,62 @@ export default function Settings({ dataConsent, setDataConsent }) {
   const [authHeaderEnabled, setAuthHeaderEnabled] = useState(api.getAuthHeaderEnabled());
   const [copied, setCopied] = useState(false);
 
+  // ─── Group Management ───────────────────────────────
+  const [groups, setGroups] = useState([]);
+  const [groupsLoading, setGroupsLoading] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupError, setGroupError] = useState('');
+
+  // ─── Group Management ────────────────────────────────
+  const getAuthTokenForReg = () => {
+    const ft = localStorage.getItem('peerdrive_auth_token');
+    if (ft) return ft;
+    if (localStorage.getItem('peerdrive_auth_header_enabled') === 'true') {
+      return localStorage.getItem('peerdrive_auth_key') || '';
+    }
+    return '';
+  };
+
+  const loadGroups = async () => {
+    const token = getAuthTokenForReg();
+    const username = regUsername || localStorage.getItem('peerdrive_username');
+    if (!regServer || !token || !username) {
+      setGroups([]);
+      return;
+    }
+    setGroupsLoading(true);
+    setGroupError('');
+    try {
+      const data = await api.getUserGroups(regServer, username, token);
+      setGroups(data.groups || []);
+    } catch (e) {
+      setGroupError('获取分组失败: ' + e.message);
+      setGroups([]);
+    }
+    setGroupsLoading(false);
+  };
+
+  const handleJoinGroup = async () => {
+    const gn = groupName.trim();
+    if (!gn) return;
+    const token = getAuthTokenForReg();
+    const username = regUsername || localStorage.getItem('peerdrive_username');
+    if (!regServer || !token || !username) {
+      setGroupError('请先登录');
+      return;
+    }
+    setGroupsLoading(true);
+    setGroupError('');
+    try {
+      await api.addUserToGroup(regServer, username, gn, token);
+      setGroupName('');
+      await loadGroups();
+    } catch (e) {
+      setGroupError('加入分组失败: ' + e.message);
+    }
+    setGroupsLoading(false);
+  };
+
   // ─── Storage ─────────────────────────────────────────
   const [fileStats, setFileStats] = useState(null);
   const [storageLoading, setStorageLoading] = useState(false);
@@ -611,6 +667,51 @@ export default function Settings({ dataConsent, setDataConsent }) {
                   Token: {api.getAuthToken().slice(0, 20)}...
                 </p>
               )}
+            </div>
+
+            {/* Group Management */}
+            <div className="border-t border-gray-700/50 pt-3 mt-2">
+              <p className="text-xs text-gray-400 mb-2">分组管理</p>
+              <div className="flex gap-2 mb-2">
+                <input
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleJoinGroup()}
+                  placeholder="输入分组名称"
+                  className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm focus:outline-none focus:border-blue-500 border border-gray-600"
+                />
+                <button
+                  onClick={handleJoinGroup}
+                  disabled={groupsLoading || !groupName.trim()}
+                  className="bg-green-600 hover:bg-green-700 disabled:opacity-40 px-3 py-2 rounded text-sm transition-colors"
+                >
+                  加入
+                </button>
+                <button
+                  onClick={loadGroups}
+                  disabled={groupsLoading}
+                  className="bg-gray-600 hover:bg-gray-500 disabled:opacity-40 px-3 py-2 rounded text-sm transition-colors"
+                >
+                  刷新
+                </button>
+              </div>
+              {groupError && <p className="text-xs text-red-400 mb-1">{groupError}</p>}
+              {groupsLoading ? (
+                <p className="text-xs text-gray-500">加载中...</p>
+              ) : groups.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {groups.map((g, i) => (
+                    <span key={i} className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-1 rounded-full border border-blue-800/30">
+                      {g.group_name}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500">暂无分组</p>
+              )}
+              <p className="text-[10px] text-gray-600 mt-1">
+                分组允许您与其他用户共享集合访问权限
+              </p>
             </div>
 
             {/* Upload Limits */}
