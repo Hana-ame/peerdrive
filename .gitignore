@@ -1,5 +1,5 @@
 *.db
 storage/
-server
-peerdrive-server
+/server
+/peerdrive-server
 downloads/
