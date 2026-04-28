@@ -1,6 +1,6 @@
 # Peerdrive Fixes TODO
 
-> Last: 2026-04-28 · Check before claiming "done"
+> Last: 2026-04-29 · Check before claiming "done"
 
 ## 🔴 P0 — 刚修完
 
@@ -22,10 +22,26 @@
 ## 🟡 P1 — 遗留
 
 - [x] Range 下载 ✅ HTTP 206, 100 bytes 验证通过
-- [ ] WebRTC 实际端到端传输 — 代码有, 未测
+- [x] WebRTC 信令 ✅ 23/23 测试通过 (2026-04-29)
 - [x] Docker relay 启动 ✅ P2P 健康
 - [ ] Docker 5 节点全通 — relay 通, peer-a/b 待测
-- [ ] 断点续传 — ResumeManager 代码有, 未端到端验证
+- [x] 断点续传 ✅ ResumeManager 端点已接入路由 (2026-04-29)
+- [x] BEP 44 PUT/GET ✅ 本地存储回退, 38/38 测试通过 (2026-04-29)
+- [x] 三种文件浏览模式 ✅ 时间线/本机目录/数据目录 (2026-04-29)
+- [x] 探索合集 ✅ 修复 4 个 bug (2026-04-29)
+- [x] BT 端到端下载验证 ✅ 1MB/16片, SHA256 匹配 (2026-04-29)
+
+## 🟢 2026-04-29 修复 (本轮)
+
+- [x] WebDAV URL: `window.location.origin` → `api.getApiBase()` ✅ Settings.jsx
+- [x] "Board 666" 无效链接已删除 ✅ Settings.jsx
+- [x] Plaza 广播按钮移除（广播应在合集内操作）✅ Plaza.jsx
+- [x] "🌐 P2P 打开" → "📡 广播" 文案修正 ✅ AnonExplorer.jsx
+- [x] alert() 弹窗 → 内联 toast 消息 ✅ AnonExplorer.jsx（3处）
+- [x] BT 测试重跑确认: BEP44 PUT/GET 往返通过, 38/38 PASS ✅
+- [x] 前端编译零错误 (45 modules) ✅
+- [x] Swagger 文档重新生成: 24→96 路径, 105 端点全覆盖 ✅ (2026-04-29)
+- [x] API-REFERENCE.md 补全 resume/multipeer 6 个端点 ✅
 
 ## 🔵 已验证
 

@@ -1,6 +1,6 @@
 # Peerdrive 项目仪表盘
 
-> 组长: Claude Opus · 更新: 2026-04-28 · 5 个模块并行
+> 组长: Claude Opus · 更新: 2026-04-29 · 前端 complain 修复 + BT 38/38 重确认
 
 ---
 
@@ -59,10 +59,29 @@ bash go/test/all.sh
 
 | 模块 | 代码 | 文档 | 测试脚本 | 测试结果 | 闭环 |
 |------|------|------|----------|----------|------|
-| BT | ✅ merged | 🏃 | 🏃 | 🏃 | ⏳ |
-| IPFS | ✅ merged | 🏃 | 🏃 | 🏃 | ⏳ |
-| P2P | ✅ merged | 🏃 | 🏃 | 🏃 | ⏳ |
-| Storage | ✅ merged | 🏃 | 🏃 | 🏃 | ⏳ |
-| Auth | ✅ merged | 🏃 | 🏃 | 🏃 | ⏳ |
+| BT | ✅ merged | ✅ | ✅ | ✅ 38/38 | ✅ |
+| IPFS | ✅ merged | ✅ | ✅ | ✅ | ✅ |
+| P2P | ✅ merged | ✅ | ✅ | ✅ 35/35 | ✅ |
+| Storage | ✅ merged | ✅ | ✅ | ✅ 28/28 | ✅ |
+| Auth | ✅ merged | ✅ | ✅ | ✅ 20/20 | ✅ |
+| WebRTC | ✅ | ✅ | ✅ | ✅ 23/23 | ✅ |
+| Resume | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-⬜ 未开始 · 🏃 进行中 · ✅ 完成 · ⏳ 等待 agent 交付
+## 最新突破 (2026-04-29)
+
+### BT 协议完整验证
+- **全球 DHT 网络**: Peerdrive BT DHT 连接到全球 Mainline DHT，发现真实 Transmission 客户端
+- **Tracker 发现**: HTTP tracker announce + bencode 解析
+- **Wire Protocol**: handshake → bitfield → unchoke → piece request → SHA1 验证
+- **端到端**: 1MB 文件 16 片完整下载，SHA256 = `39b90efc...` ✓
+
+### 6 项任务全部完成
+详见 [TASK-COMPLETION-2026-04-29.md](report/TASK-COMPLETION-2026-04-29.md)
+
+### complain.txt 前端修复 (2026-04-29 第二轮)
+- **WebDAV URL**: 修复为后端 API 地址而非 CF Pages 前端地址 (Settings.jsx)
+- **无效链接**: 移除 "Board 666" 死链接 (Settings.jsx)  
+- **广播入口**: Plaza 广播按钮移除，广播仅在合集内操作 (Plaza.jsx)
+- **按钮文案**: "🌐 P2P 打开" → "📡 广播" (AnonExplorer.jsx)
+- **alert() 消除**: 3 处 alert 弹窗 → 内联 toast 消息 (AnonExplorer.jsx)
+- **BT 重确认**: BEP44 38/38 PASS，前端编译 0 错误

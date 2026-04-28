@@ -432,6 +432,187 @@ curl -X POST http://127.0.0.1:3000/download/abc123.../refresh
 
 ---
 
+### `POST /p2p/download/resume`
+Start or resume a download. Supports pause/resume via SQLite-backed progress tracking.
+
+```bash
+curl -X POST http://127.0.0.1:3000/p2p/download/resume \
+  -H "Content-Type: application/json" \
+  -d '{"hash": "abc123...", "peer_id": "12D3KooW..."}'
+```
+
+**Request Body** (JSON):
+```json
+{
+  "hash": "abc123...",
+  "peer_id": "12D3KooW..."
+}
+```
+
+**Response** (JSON):
+```json
+{
+  "hash": "abc123...",
+  "status": "resumed",
+  "progress": 45.2,
+  "bytes_downloaded": 473920,
+  "total_bytes": 1048576,
+  "peer_id": "12D3KooW..."
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `hash` | string | 64-character SHA256 hash |
+| `status` | string | `resumed` / `new` / `completed` |
+| `progress` | float | Download progress percentage (0-100) |
+| `bytes_downloaded` | int | Bytes downloaded so far |
+| `total_bytes` | int | Total file size in bytes |
+| `peer_id` | string | Peer ID providing the file |
+
+---
+
+### `GET /p2p/download/progress/:hash`
+Query download progress for a specific hash.
+
+```bash
+curl http://127.0.0.1:3000/p2p/download/progress/abc123...
+```
+
+**Response** (JSON):
+```json
+{
+  "hash": "abc123...",
+  "status": "downloading",
+  "progress": 67.8,
+  "bytes_downloaded": 710934,
+  "total_bytes": 1048576,
+  "peers_connected": 2,
+  "speed_bps": 524288
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | string | `queued` / `downloading` / `paused` / `completed` / `failed` |
+| `peers_connected` | int | Number of active peer connections |
+| `speed_bps` | int | Current download speed in bytes/sec |
+
+---
+
+### `POST /p2p/download/cancel/:hash`
+Cancel an active or paused download.
+
+```bash
+curl -X POST http://127.0.0.1:3000/p2p/download/cancel/abc123...
+```
+
+**Response** (JSON):
+```json
+{
+  "hash": "abc123...",
+  "status": "cancelled",
+  "message": "download cancelled"
+}
+```
+
+---
+
+### `POST /p2p/download/multipeer`
+Start a multi-peer parallel download for maximum speed.
+
+```bash
+curl -X POST http://127.0.0.1:3000/p2p/download/multipeer \
+  -H "Content-Type: application/json" \
+  -d '{"hash": "abc123...", "peer_ids": ["12D3A...", "12D3B..."]}'
+```
+
+**Request Body** (JSON):
+```json
+{
+  "hash": "abc123...",
+  "peer_ids": ["12D3KooWA...", "12D3KooWB..."]
+}
+```
+
+**Response** (JSON):
+```json
+{
+  "hash": "abc123...",
+  "status": "downloading",
+  "active_sources": 3,
+  "total_sources": 5,
+  "progress": 12.0,
+  "bytes_downloaded": 125829,
+  "total_bytes": 1048576
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `active_sources` | int | Number of peers actively transferring |
+| `total_sources` | int | Total available peers for this hash |
+
+---
+
+### `GET /p2p/download/sources/:hash`
+List available download sources (peers) for a file hash.
+
+```bash
+curl http://127.0.0.1:3000/p2p/download/sources/abc123...
+```
+
+**Response** (JSON):
+```json
+{
+  "hash": "abc123...",
+  "sources": [
+    {
+      "peer_id": "12D3KooWA...",
+      "addrs": ["/ip4/192.168.1.5/tcp/4001", "/ip4/10.0.0.3/tcp/4001"],
+      "protocol": "libp2p",
+      "latency_ms": 12,
+      "connected": true
+    },
+    {
+      "peer_id": "",
+      "addrs": ["https://ipfs.io/ipfs/QmUNLLsP..."],
+      "protocol": "ipfs-gateway",
+      "latency_ms": 371,
+      "connected": false
+    }
+  ],
+  "count": 2
+}
+```
+
+---
+
+### `GET /p2p/download/multipeer/progress/:hash`
+Query multi-peer download progress.
+
+```bash
+curl http://127.0.0.1:3000/p2p/download/multipeer/progress/abc123...
+```
+
+**Response** (JSON):
+```json
+{
+  "hash": "abc123...",
+  "status": "downloading",
+  "progress": 88.5,
+  "bytes_downloaded": 927989,
+  "total_bytes": 1048576,
+  "sources": [
+    {"peer_id": "12D3A...", "progress": 100, "bytes": 524288, "status": "completed"},
+    {"peer_id": "12D3B...", "progress": 77, "bytes": 403701, "status": "downloading"}
+  ],
+  "speed_bps": 1048576
+}
+```
+
+---
+
 ### `GET /:username/:collection_name/*filepath`
 Download a file from within a user collection by username, collection name, and file path.
 

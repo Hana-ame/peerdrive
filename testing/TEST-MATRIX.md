@@ -263,10 +263,19 @@
 ### I-02 BT 真实种子测试
 | 项 | 详情 |
 |----|------|
-| 目标 | 从真实 BT 网络下载 torrent |
-| 步骤 | magnet 链接 → POST /p2p/bt/magnet → 等待 DHT 发现 → 下载 |
-| 状态 | 🏃 DHT 24 节点在线，等待 peer 发现 |
-| 阻塞 | 需要公网可访问的节点或已知 peer |
+| 目标 | Peerdrive BT 客户端通过 Tracker+DHT 发现 peer 并下载 |
+| 步骤 | .torrent → POST /p2p/bt/torrent → Tracker 发现 → Wire Protocol |
+| 结果 | ✅ 2026-04-29: 16/16 pieces, 1,048,576 bytes, SHA256 验证通过 |
+| 详情 | Peerdrive ←Tracker→ Python seeder → Wire Protocol 16片下载 |
+| 验证 | sha256sum 与原文件完全一致: `39b90efc...` |
+
+### I-04 BT 全球 DHT 连通性 (NEW)
+| 项 | 详情 |
+|----|------|
+| 目标 | Peerdrive BT DHT 接入全球 Mainline DHT 网络 |
+| 结果 | ✅ DHT 13+ 节点，发现 Transmission 客户端 (-TR2210-) |
+| 握手 | ✅ BT wire protocol handshake 成功 |
+| 日期 | 2026-04-29 |
 
 ### I-03 IPFS 本地节点互通
 | 项 | 详情 |
