@@ -1,5 +1,0 @@
-后端增加一个配置，允许怎么样的origin进行访问
-
-默认peerdrive.moonchan.xyz, peerdrive.pages.dev这两个。
-
-还有localhost之类的。
