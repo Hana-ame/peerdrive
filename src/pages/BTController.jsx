@@ -40,9 +40,12 @@ function statusBadge(status, errorMsg) {
     checking:    { label: '校验中', cls: 'bg-purple-600/30 text-purple-300 border-purple-700/40' },
   };
   const entry = map[status] || { label: status || '未知', cls: 'bg-gray-600/30 text-gray-300 border-gray-700/40' };
+  const tooltip = status === 'error' && errorMsg
+    ? '错误详情: ' + errorMsg
+    : entry.label;
   return (
-    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-medium border cursor-help ${entry.cls}`}
-      title={status === 'error' && errorMsg ? `错误详情: ${errorMsg}` : entry.label}>
+    <span className={'inline-block px-2 py-0.5 rounded text-[10px] font-medium border cursor-help ' + entry.cls}
+      title={tooltip}>
       {entry.label}
     </span>
   );
@@ -53,6 +56,23 @@ function progressFillCls(status) {
   if (status === 'paused') return 'bg-yellow-500';
   if (status === 'error') return 'bg-red-500';
   return 'bg-blue-500';
+}
+
+function SpeedSparkline({ history, color }) {
+  if (!history || history.length < 2) return null;
+  const max = Math.max(...history, 1);
+  const h = 24;
+  const w = 48;
+  const pts = history.map((v, i) => {
+    const x = (i / (history.length - 1)) * w;
+    const y = h - (v / max) * h;
+    return x + ',' + y;
+  }).join(' ');
+  return (
+    <svg width={w} height={h} viewBox={'0 0 ' + w + ' ' + h} className="shrink-0 opacity-70">
+      <polyline fill="none" stroke={color || '#60a5fa'} strokeWidth="1.5" points={pts} />
+    </svg>
+  );
 }
 
 /* ============ Main Component ============ */
@@ -68,8 +88,14 @@ export default function BTController() {
   const fileRef = useRef(null);
   const pollRef = useRef(null);
 
+  // Speed history: map of infohash -> array of last 10 speed readings
+  const [speedHistory, setSpeedHistory] = useState({});
+
   // Node status for banner + relay tags
   const [nodeStatus, setNodeStatus] = useState({ online: false, p2p: false, relay: false, btNodes: 0, checking: true });
+
+  // Peer connection detail cache: map of infohash -> { peers: [], lastUpdated: timestamp }
+  const [peerDetails, setPeerDetails] = useState({});
 
   useEffect(() => {
     (async () => {
@@ -98,20 +124,70 @@ export default function BTController() {
     if (showLoading) setLoading(true);
     try {
       const data = await api.btGetDownloads();
-      setDownloads(Array.isArray(data) ? data : (data.downloads || []));
+      const list = Array.isArray(data) ? data : (data.downloads || []);
+      setDownloads(list);
       setError(null);
+
+      // Update speed history for each download
+      setSpeedHistory(prev => {
+        const next = { ...prev };
+        for (const d of list) {
+          const speed = d.speed_bytes_per_sec || d.download_speed || 0;
+          const prevArr = prev[d.infohash] || [];
+          next[d.infohash] = [...prevArr, speed].slice(-10);
+        }
+        return next;
+      });
+
+      // Auto-refresh peer details for expanded items
+      setPeerDetails(prev => {
+        const next = { ...prev };
+        const now = Date.now();
+        // Remove stale entries for items no longer expanded
+        for (const ih of Object.keys(next)) {
+          if (!expanded[ih] || now - (next[ih]?.lastUpdated || 0) > 30000) {
+            delete next[ih];
+          }
+        }
+        return next;
+      });
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [expanded]);
 
   useEffect(() => {
     fetchDownloads(true);
     pollRef.current = setInterval(() => fetchDownloads(false), 2000);
     return () => clearInterval(pollRef.current);
   }, [fetchDownloads]);
+
+  // Fetch peer details when a download is expanded
+  useEffect(() => {
+    const expandedIhs = Object.keys(expanded).filter(ih => expanded[ih]);
+    if (expandedIhs.length === 0) return;
+    const timer = setInterval(async () => {
+      for (const ih of expandedIhs) {
+        try {
+          const status = await api.btGetDownload(ih);
+          if (status && status.peers > 0) {
+            setPeerDetails(prev => ({
+              ...prev,
+              [ih]: { peers: [{ ip: '127.0.0.1', client: 'Peerdrive BT', pieces: status.pieces_done || 0, piecesTotal: status.pieces_total || 0 }], lastUpdated: Date.now() }
+            }));
+          } else {
+            setPeerDetails(prev => ({
+              ...prev,
+              [ih]: { peers: [], lastUpdated: Date.now() }
+            }));
+          }
+        } catch {}
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [expanded]);
 
   /* ---- Add torrent ---- */
   const handleAdd = async () => {
@@ -126,14 +202,14 @@ export default function BTController() {
       } else if (v.startsWith('http://') || v.startsWith('https://')) {
         // Fetch .torrent URL and upload
         const resp = await fetch(v);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const blob = await resp.blob();
         const file = new File([blob], 'torrent.torrent', { type: 'application/x-bittorrent' });
         await api.btTorrentUpload(file);
         setStatusMsg({ type: 'success', text: '种子 URL 已添加' });
       } else if (/^[0-9a-fA-F]{40}$/.test(v)) {
         // Plain infohash — wrap as magnet
-        await api.btMagnetResolve(`magnet:?xt=urn:btih:${v}`);
+        await api.btMagnetResolve('magnet:?xt=urn:btih:' + v);
         setStatusMsg({ type: 'success', text: 'Infohash 已添加' });
       } else {
         setStatusMsg({ type: 'error', text: '无法识别的输入。请输入 magnet 链接、种子 URL 或 40 位 infohash' });
@@ -156,7 +232,7 @@ export default function BTController() {
     setStatusMsg(null);
     try {
       await api.btTorrentUpload(f);
-      setStatusMsg({ type: 'success', text: `种子文件 "${f.name}" 已添加` });
+      setStatusMsg({ type: 'success', text: '种子文件 "' + f.name + '" 已添加' });
       setTimeout(() => fetchDownloads(false), 500);
     } catch (e) {
       setStatusMsg({ type: 'error', text: '上传失败: ' + e.message });
@@ -180,10 +256,32 @@ export default function BTController() {
     try { await api.btRemoveDownload(ih); fetchDownloads(false); }
     catch (e) { setStatusMsg({ type: 'error', text: e.message }); }
   };
+  const handleSeed = async (ih) => {
+    try { await api.btSeedDownload(ih); fetchDownloads(false); }
+    catch (e) { setStatusMsg({ type: 'error', text: e.message }); }
+  };
+  const handleUnseed = async (ih) => {
+    try { await api.btStopSeed(ih); fetchDownloads(false); }
+    catch (e) { setStatusMsg({ type: 'error', text: e.message }); }
+  };
 
   /* ---- Expand / Collapse ---- */
   const toggleExpand = (ih) => {
-    setExpanded(prev => ({ ...prev, [ih]: !prev[ih] }));
+    setExpanded(prev => {
+      const nowExpanded = !prev[ih];
+      if (nowExpanded) {
+        // Trigger initial peer fetch
+        api.btGetDownload(ih).then(status => {
+          if (status) {
+            setPeerDetails(pd => ({
+              ...pd,
+              [ih]: { peers: [], lastUpdated: Date.now() }
+            }));
+          }
+        }).catch(() => {});
+      }
+      return { ...prev, [ih]: nowExpanded };
+    });
   };
 
   /* ---- Footer stats ---- */
@@ -208,16 +306,6 @@ export default function BTController() {
     if (e.key === 'Enter') handleAdd();
   };
 
-  /* ---- Paste detection for infohash ---- */
-  const handlePaste = (e) => {
-    const text = (e.clipboardData || window.clipboardData).getData('text');
-    // Auto-trim if pasted content is a raw infohash or magnet
-    const trimmed = text.trim();
-    if (trimmed.startsWith('magnet:') || /^[0-9a-fA-F]{40}$/.test(trimmed)) {
-      // Don't hijack the paste, just let it flow to the input; the button handler will process it
-    }
-  };
-
   return (
     <div className="h-full flex flex-col bg-gray-950 text-gray-200 overflow-hidden">
       {/* ===== Top: Add Torrent Section ===== */}
@@ -226,16 +314,16 @@ export default function BTController() {
           {/* Node status banner */}
           {!nodeStatus.checking && !nodeStatus.online && (
             <div className="mb-3 px-4 py-3 bg-amber-900/20 border border-amber-800/40 rounded-lg text-sm text-amber-300 flex items-center gap-2">
-              <span>⚠️</span>
-              <span>未连接到本地节点。在 Settings 填入节点 API 地址后可使用本地文件功能和 P2P 下载。</span>
+              <span>{'⚠️'}</span>
+              <span>{'未连接到本地节点。在 Settings 填入节点 API 地址后可使用本地文件功能和 P2P 下载。'}</span>
             </div>
           )}
 
           {/* No-node info banner */}
           {!nodeStatus.checking && nodeStatus.online && !nodeStatus.p2p && (
             <div className="mb-3 px-4 py-3 bg-blue-900/20 border border-blue-800/40 rounded-lg text-sm text-blue-300 flex items-center gap-2">
-              <span>ℹ️</span>
-              <span>P2P 未启用。文件将从 BT DHT 和 IPFS 网关拉取，无法使用本地交换。</span>
+              <span>{'ℹ️'}</span>
+              <span>{'P2P 未启用。文件将从 BT DHT 和 IPFS 网关拉取，无法使用本地交换。'}</span>
             </div>
           )}
 
@@ -245,10 +333,10 @@ export default function BTController() {
               {/* Connection tags */}
               {!nodeStatus.checking && (
                 <span className="flex items-center gap-1.5">
-                  {nodeStatus.online && <span className="text-[10px] bg-emerald-900/40 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-700/30">节点在线</span>}
-                  {nodeStatus.p2p && <span className="text-[10px] bg-blue-900/40 text-blue-400 px-2 py-0.5 rounded-full border border-blue-700/30">P2P {nodeStatus.peers > 0 ? `${nodeStatus.peers} peer` : '可用'}</span>}
+                  {nodeStatus.online && <span className="text-[10px] bg-emerald-900/40 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-700/30">{'节点在线'}</span>}
+                  {nodeStatus.p2p && <span className="text-[10px] bg-blue-900/40 text-blue-400 px-2 py-0.5 rounded-full border border-blue-700/30">{'P2P ' + (nodeStatus.peers > 0 ? nodeStatus.peers + ' peer' : '可用')}</span>}
                   {nodeStatus.relay && <span className="text-[10px] bg-purple-900/40 text-purple-400 px-2 py-0.5 rounded-full border border-purple-700/30">Relay</span>}
-                  {nodeStatus.btNodes > 0 && <span className="text-[10px] bg-amber-900/40 text-amber-400 px-2 py-0.5 rounded-full border border-amber-700/30">DHT {nodeStatus.btNodes} 节点</span>}
+                  {nodeStatus.btNodes > 0 && <span className="text-[10px] bg-amber-900/40 text-amber-400 px-2 py-0.5 rounded-full border border-amber-700/30">{'DHT ' + nodeStatus.btNodes + ' 节点'}</span>}
                 </span>
               )}
             </h1>
@@ -256,7 +344,7 @@ export default function BTController() {
               onClick={() => fetchDownloads(true)}
               className="text-xs text-gray-500 hover:text-gray-300 px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors"
             >
-              刷新
+              {'刷新'}
             </button>
           </div>
 
@@ -267,8 +355,7 @@ export default function BTController() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-                placeholder="magnet:?xt=urn:btih:... 或 .torrent URL 或 Infohash"
+                placeholder={'magnet:?xt=urn:btih:... 或 .torrent URL 或 Infohash'}
                 className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono
                            focus:outline-none focus:border-blue-500 placeholder:text-gray-600 transition-colors"
               />
@@ -277,7 +364,7 @@ export default function BTController() {
                   onClick={() => setInput('')}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400 text-sm"
                 >
-                  &#x2715;
+                  {'✕'}
                 </button>
               )}
             </div>
@@ -291,18 +378,18 @@ export default function BTController() {
             </button>
             <label className="px-4 py-2 rounded-lg text-xs font-medium bg-gray-800 text-gray-300 hover:bg-gray-700
                               border border-gray-700 cursor-pointer transition-colors whitespace-nowrap">
-              选择种子文件
+              {'选择种子文件'}
               <input ref={fileRef} type="file" accept=".torrent,application/x-bittorrent" onChange={handleFileUpload} className="hidden" />
             </label>
           </div>
           {statusMsg && (
-            <div className={`mt-2 px-3 py-1.5 rounded-lg text-xs border transition-opacity ${
+            <div className={'mt-2 px-3 py-1.5 rounded-lg text-xs border transition-opacity ' + (
               statusMsg.type === 'error'
                 ? 'bg-red-900/20 border-red-900/40 text-red-400'
                 : 'bg-emerald-900/20 border-emerald-900/40 text-emerald-300'
-            }`}>
+            )}>
               {statusMsg.text}
-              <button onClick={() => setStatusMsg(null)} className="ml-2 opacity-60 hover:opacity-100">&#x2715;</button>
+              <button onClick={() => setStatusMsg(null)} className="ml-2 opacity-60 hover:opacity-100">{'✕'}</button>
             </div>
           )}
         </div>
@@ -318,34 +405,34 @@ export default function BTController() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                加载中...
+                {'加载中...'}
               </div>
             </div>
           ) : error && downloads.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-gray-500 gap-3">
-              <p className="text-sm text-red-400">无法获取下载列表: {error}</p>
-              <button onClick={() => fetchDownloads(true)} className="text-xs text-blue-400 hover:text-blue-300 underline">重试</button>
+              <p className="text-sm text-red-400">{'无法获取下载列表: ' + error}</p>
+              <button onClick={() => fetchDownloads(true)} className="text-xs text-blue-400 hover:text-blue-300 underline">{'重试'}</button>
             </div>
           ) : downloads.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-gray-500 gap-2">
-              <span className="text-3xl">&#x1F4E5;</span>
-              <p className="text-sm">没有活动的下载任务</p>
-              <p className="text-xs text-gray-600">输入 magnet 链接、种子 URL 或上传 .torrent 文件开始下载</p>
+              <span className="text-3xl">{'📥'}</span>
+              <p className="text-sm">{'没有活动的下载任务'}</p>
+              <p className="text-xs text-gray-600">{'输入 magnet 链接、种子 URL 或上传 .torrent 文件开始下载'}</p>
             </div>
           ) : (
             <div className="p-4 md:p-6">
               {/* Table header - hidden on very small screens */}
               <div className="hidden md:flex items-center text-[10px] text-gray-500 uppercase tracking-wider px-4 py-2 border-b border-gray-800">
                 <div className="w-[6px] shrink-0" />
-                <div className="flex-1 min-w-0 pl-2">名称</div>
-                <div className="w-20 text-right">大小</div>
-                <div className="w-40">进度</div>
-                <div className="w-20 text-right">下载</div>
-                <div className="w-20 text-right">上传</div>
-                <div className="w-24 text-right">剩余时间</div>
-                <div className="w-24 text-center">种子/对等</div>
-                <div className="w-20 text-center">状态</div>
-                <div className="w-20 text-right">操作</div>
+                <div className="flex-1 min-w-0 pl-2">{'名称'}</div>
+                <div className="w-20 text-right">{'大小'}</div>
+                <div className="w-44">{'进度'}</div>
+                <div className="w-20 text-right">{'下载'}</div>
+                <div className="w-20 text-right">{'上传'}</div>
+                <div className="w-24 text-right">{'剩余时间'}</div>
+                <div className="w-24 text-center">{'种子/对等'}</div>
+                <div className="w-20 text-center">{'状态'}</div>
+                <div className="w-28 text-right">{'操作'}</div>
               </div>
 
               {/* Table rows */}
@@ -359,6 +446,9 @@ export default function BTController() {
                   const seeds = d.seeds ?? d.connected_seeds ?? 0;
                   const isExpanded = expanded[d.infohash];
                   const hasFiles = d.files && d.files.length > 0;
+                  const isCompleted = d.status === 'completed' || d.status === 'seeding';
+                  const seedingActive = d.seeding === true;
+                  const speedHist = speedHistory[d.infohash] || [];
 
                   return (
                     <div key={d.infohash || d.name} className="group">
@@ -379,14 +469,14 @@ export default function BTController() {
                         {/* Name */}
                         <div className="flex-1 min-w-0 md:pl-2">
                           <div className="text-sm font-medium text-gray-200 truncate" title={d.name}>
-                            {d.name || d.infohash?.substring(0, 16) + '...' || '未命名'}
+                            {d.name || (d.infohash ? d.infohash.substring(0, 16) + '...' : '未命名')}
                           </div>
                           {/* Mobile-only info row */}
                           <div className="flex md:hidden flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[10px] text-gray-500">
                             <span>{formatSize(d.total_size)}</span>
-                            <span>{statusBadge(d.status)}</span>
-                            <span>DL: {formatSpeed(downSpeed)}</span>
-                            <span>UL: {formatSpeed(upSpeed)}</span>
+                            <span>{statusBadge(d.status, d.error)}</span>
+                            <span>{'DL: ' + formatSpeed(downSpeed)}</span>
+                            <span>{'UL: ' + formatSpeed(upSpeed)}</span>
                           </div>
                         </div>
 
@@ -395,21 +485,27 @@ export default function BTController() {
                           {formatSize(d.total_size)}
                         </div>
 
-                        {/* Progress */}
-                        <div className="w-full md:w-40 order-last md:order-none mt-1 md:mt-0">
+                        {/* Progress with sparkline */}
+                        <div className="w-full md:w-44 order-last md:order-none mt-1 md:mt-0">
                           <div className="flex items-center gap-2">
                             <div className="flex-1 bg-gray-700 rounded-full h-2 overflow-hidden">
                               <div
-                                className={`h-full rounded-full transition-all duration-500 ${progressFillCls(d.status)}`}
-                                style={{ width: `${pct}%` }}
+                                className={'h-full rounded-full transition-all duration-500 ' + progressFillCls(d.status)}
+                                style={{ width: pct + '%' }}
                               />
                             </div>
-                            <span className="text-[10px] text-gray-400 whitespace-nowrap w-20 text-right">
-                              {pct.toFixed(1)}%
+                            <span className="text-[10px] text-gray-400 whitespace-nowrap w-16 text-right">
+                              {pct.toFixed(1) + '%'}
                             </span>
                           </div>
-                          <div className="text-[9px] text-gray-600 mt-0.5">
-                            {(d.pieces_done ?? 0)}/{d.pieces_total ?? '?'} pieces
+                          <div className="flex items-center justify-between mt-0.5">
+                            <span className="text-[9px] text-gray-600">
+                              {(d.pieces_done ?? 0) + '/' + (d.pieces_total ?? '?') + ' pieces'}
+                            </span>
+                            {/* Speed sparkline for downloading items */}
+                            {d.status === 'downloading' && speedHist.length > 1 && (
+                              <SpeedSparkline history={speedHist} color="#60a5fa" />
+                            )}
                           </div>
                         </div>
 
@@ -441,15 +537,39 @@ export default function BTController() {
 
                         {/* Status badge */}
                         <div className="hidden md:block w-20 text-center">
-                          {statusBadge(d.status)}
+                          {statusBadge(d.status, d.error)}
                         </div>
 
                         {/* Actions */}
-                        <div className="hidden md:flex w-20 items-center justify-end gap-1.5">
+                        <div className="hidden md:flex w-28 items-center justify-end gap-1">
+                          {/* Seed toggle for completed downloads */}
+                          {isCompleted && (
+                            seedingActive ? (
+                              <button
+                                onClick={() => handleUnseed(d.infohash)}
+                                title={'停止做种'}
+                                className="p-1.5 rounded text-emerald-400 hover:text-red-400 hover:bg-gray-800 transition-colors"
+                              >
+                                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                                </svg>
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleSeed(d.infohash)}
+                                title={'开始做种'}
+                                className="p-1.5 rounded text-gray-500 hover:text-emerald-400 hover:bg-gray-800 transition-colors"
+                              >
+                                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                                </svg>
+                              </button>
+                            )
+                          )}
                           {(d.status === 'downloading' || d.status === 'seeding') ? (
                             <button
                               onClick={() => handlePause(d.infohash)}
-                              title="暂停"
+                              title={'暂停'}
                               className="p-1.5 rounded text-gray-500 hover:text-yellow-400 hover:bg-gray-800 transition-colors"
                             >
                               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
@@ -457,7 +577,7 @@ export default function BTController() {
                           ) : (
                             <button
                               onClick={() => handleResume(d.infohash)}
-                              title="继续"
+                              title={'继续'}
                               className="p-1.5 rounded text-gray-500 hover:text-emerald-400 hover:bg-gray-800 transition-colors"
                             >
                               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><polygon points="8,5 19,12 8,19" /></svg>
@@ -465,7 +585,7 @@ export default function BTController() {
                           )}
                           <button
                             onClick={() => handleRemove(d.infohash)}
-                            title="移除"
+                            title={'移除'}
                             className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-gray-800 transition-colors"
                           >
                             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>
@@ -474,31 +594,102 @@ export default function BTController() {
 
                         {/* Mobile actions */}
                         <div className="flex md:hidden items-center gap-2 ml-auto">
-                          {(d.status === 'downloading' || d.status === 'seeding') ? (
-                            <button onClick={() => handlePause(d.infohash)} className="text-yellow-400 text-xs px-2 py-1 rounded bg-gray-800">暂停</button>
-                          ) : (
-                            <button onClick={() => handleResume(d.infohash)} className="text-emerald-400 text-xs px-2 py-1 rounded bg-gray-800">继续</button>
+                          {isCompleted && (
+                            seedingActive ? (
+                              <button onClick={() => handleUnseed(d.infohash)} className="text-emerald-400 text-xs px-2 py-1 rounded bg-gray-800">{'停止做种'}</button>
+                            ) : (
+                              <button onClick={() => handleSeed(d.infohash)} className="text-emerald-400 text-xs px-2 py-1 rounded bg-gray-800">{'做种'}</button>
+                            )
                           )}
-                          <button onClick={() => handleRemove(d.infohash)} className="text-red-400 text-xs px-2 py-1 rounded bg-gray-800">移除</button>
+                          {(d.status === 'downloading' || d.status === 'seeding') ? (
+                            <button onClick={() => handlePause(d.infohash)} className="text-yellow-400 text-xs px-2 py-1 rounded bg-gray-800">{'暂停'}</button>
+                          ) : (
+                            <button onClick={() => handleResume(d.infohash)} className="text-emerald-400 text-xs px-2 py-1 rounded bg-gray-800">{'继续'}</button>
+                          )}
+                          <button onClick={() => handleRemove(d.infohash)} className="text-red-400 text-xs px-2 py-1 rounded bg-gray-800">{'移除'}</button>
                         </div>
                       </div>
 
-                      {/* Expanded file list */}
-                      {isExpanded && hasFiles && (
+                      {/* Expanded file list + peer details */}
+                      {isExpanded && (
                         <div className="bg-gray-900/40 border-t border-gray-800/30 px-4 py-2">
-                          <div className="text-[10px] text-gray-500 mb-1.5 pl-1">
-                            文件列表 ({d.files.length})
-                          </div>
-                          <div className="max-h-48 overflow-y-auto space-y-0.5">
-                            {d.files.map((f, i) => (
-                              <div key={i} className="flex items-center gap-3 px-3 py-1.5 rounded hover:bg-gray-800/50 text-xs">
-                                <span className="text-gray-600 w-5 text-right shrink-0">{i + 1}</span>
-                                <span className="text-gray-400 truncate flex-1 font-mono text-[11px]" title={f.path}>
-                                  {f.path}
-                                </span>
-                                <span className="text-gray-500 shrink-0">{formatSize(f.size)}</span>
+                          {/* File list */}
+                          {hasFiles && (
+                            <>
+                              <div className="text-[10px] text-gray-500 mb-1.5 pl-1">
+                                {'文件列表 (' + d.files.length + ')'}
                               </div>
-                            ))}
+                              <div className="max-h-48 overflow-y-auto space-y-0.5 mb-2">
+                                {d.files.map((f, i) => (
+                                  <div key={i} className="flex items-center gap-3 px-3 py-1.5 rounded hover:bg-gray-800/50 text-xs">
+                                    <span className="text-gray-600 w-5 text-right shrink-0">{i + 1}</span>
+                                    <span className="text-gray-400 truncate flex-1 font-mono text-[11px]" title={f.path}>
+                                      {f.path}
+                                    </span>
+                                    <span className="text-gray-500 shrink-0">{formatSize(f.size)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          )}
+
+                          {/* Peer details */}
+                          <div className="text-[10px] text-gray-500 mb-1.5 pl-1">
+                            {'对等连接详情'}
+                          </div>
+                          <div className="space-y-0.5">
+                            {d.error && (
+                              <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-900/20 text-xs text-red-400">
+                                <span className="font-medium">{'错误: '}</span>
+                                <span className="font-mono text-[11px]">{d.error}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-3 px-3 py-1.5 rounded bg-gray-800/30 text-xs">
+                              <span className="text-gray-500 w-16 shrink-0">{'状态'}</span>
+                              <span className={'font-medium ' + (d.status === 'downloading' ? 'text-blue-400' : d.status === 'seeding' ? 'text-emerald-400' : d.status === 'error' ? 'text-red-400' : 'text-gray-400')}>
+                                {d.status}
+                              </span>
+                              {d.seeding && <span className="text-[10px] bg-emerald-900/30 text-emerald-400 px-1.5 py-0.5 rounded">{'做种中'}</span>}
+                            </div>
+                            <div className="flex items-center gap-3 px-3 py-1.5 rounded bg-gray-800/30 text-xs">
+                              <span className="text-gray-500 w-16 shrink-0">{'下载速度'}</span>
+                              <span className="text-blue-400">{formatSpeed(downSpeed)}</span>
+                            </div>
+                            <div className="flex items-center gap-3 px-3 py-1.5 rounded bg-gray-800/30 text-xs">
+                              <span className="text-gray-500 w-16 shrink-0">{'上传速度'}</span>
+                              <span className="text-emerald-400">{formatSpeed(upSpeed)}</span>
+                            </div>
+                            <div className="flex items-center gap-3 px-3 py-1.5 rounded bg-gray-800/30 text-xs">
+                              <span className="text-gray-500 w-16 shrink-0">{'剩余时间'}</span>
+                              <span className="text-gray-400">
+                                {d.status === 'completed' || d.status === 'seeding'
+                                  ? '∞'
+                                  : formatETA(remaining, downSpeed)}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 px-3 py-1.5 rounded bg-gray-800/30 text-xs">
+                              <span className="text-gray-500 w-16 shrink-0">{'对等节点'}</span>
+                              <span className="text-gray-400">{'已连接: ' + peers + ' 个'}</span>
+                            </div>
+                            {/* Speed sparkline (larger) */}
+                            {d.status === 'downloading' && speedHist.length > 1 && (
+                              <div className="flex items-center gap-3 px-3 py-2 rounded bg-gray-800/30 text-xs">
+                                <span className="text-gray-500 w-16 shrink-0">{'速率图'}</span>
+                                <div className="flex-1 flex items-center gap-2">
+                                  <svg width="120" height="28" viewBox="0 0 120 28" className="opacity-80">
+                                    <polyline fill="none" stroke="#60a5fa" strokeWidth="1.5"
+                                      points={speedHist.map((v, i) => {
+                                        const x = (i / (speedHist.length - 1)) * 120;
+                                        const maxV = Math.max(...speedHist, 1);
+                                        const y = 28 - (v / maxV) * 28;
+                                        return x.toFixed(1) + ',' + y.toFixed(1);
+                                      }).join(' ')}
+                                    />
+                                  </svg>
+                                  <span className="text-[10px] text-gray-500 whitespace-nowrap">{'最后 ' + speedHist.length + ' 次读数'}</span>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -517,22 +708,23 @@ export default function BTController() {
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1.5 text-xs">
             <div className="flex items-center gap-4 text-gray-400">
               <span>
-                总计: <span className="text-gray-200 font-medium">{stats.total}</span> 个任务
+                {'总计: '}<span className="text-gray-200 font-medium">{stats.total}</span>{' 个任务'}
               </span>
-              {stats.dling > 0 && <span className="text-blue-400">{stats.dling} 下载中</span>}
+              {stats.dling > 0 && <span className="text-blue-400">{stats.dling + ' 下载中'}</span>}
               {(stats.seeding + stats.completed) > 0 && (
-                <span className="text-emerald-400">{stats.seeding + stats.completed} 已完成</span>
+                <span className="text-emerald-400">{stats.seeding + stats.completed + ' 已完成'}</span>
               )}
-              {stats.queued > 0 && <span className="text-gray-500">{stats.queued} 排队中</span>}
-              {stats.paused > 0 && <span className="text-yellow-400">{stats.paused} 已暂停</span>}
-              {stats.errored > 0 && <span className="text-red-400">{stats.errored} 错误</span>}
+              {stats.seeding > 0 && <span className="text-emerald-300">{stats.seeding + ' 做种中'}</span>}
+              {stats.queued > 0 && <span className="text-gray-500">{stats.queued + ' 排队中'}</span>}
+              {stats.paused > 0 && <span className="text-yellow-400">{stats.paused + ' 已暂停'}</span>}
+              {stats.errored > 0 && <span className="text-red-400">{stats.errored + ' 错误'}</span>}
             </div>
             <div className="flex items-center gap-4 text-gray-400">
               <span>
-                <span className="text-gray-500">全局: </span>
-                <span className="text-blue-400">&#x2193; {formatSpeed(stats.downSpeed)}</span>
+                <span className="text-gray-500">{'全局: '}</span>
+                <span className="text-blue-400">{'↓ ' + formatSpeed(stats.downSpeed)}</span>
                 <span className="mx-1.5 text-gray-600">/</span>
-                <span className="text-emerald-400">&#x2191; {formatSpeed(stats.upSpeed)}</span>
+                <span className="text-emerald-400">{'↑ ' + formatSpeed(stats.upSpeed)}</span>
               </span>
             </div>
           </div>
