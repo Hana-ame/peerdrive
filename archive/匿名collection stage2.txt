@@ -1,0 +1,12 @@
+匿名collection stage2是关于如何从其他peer拖取collection的。
+
+如果运行了一个节点，可以在这个节点中输入hash，通过p2p网络寻找collection json
+如果是从别的节点访问到，可以点击那个页面的同步到我的节点，然后返回一个callback url，来下载。
+
+在正式下载前，会提示说需要选中哪些文件进行下载。
+并且提示需要下载到什么文件夹。
+
+PS：回到collection json，需要添加一个friendly name，作为默认的文件夹名称。
+
+PSS：p2p网络可靠吗，从来没测试过，因为我没用过这个包，我之前都是手动写udp conn自己打洞的。
+PSSS：这次有做超级节点中继节点，公网辅助节点的计划，会在config中进行enable配置

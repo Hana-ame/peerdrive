@@ -1,0 +1,17 @@
+某个版本的匿名collection是anon/:hash
+如果是这样的话
+正式的collection是:username/:collection name 
+
+这个collection即可fork,clone,merge就像git一样操作。
+
+username是中心化服务器注册的，唯一。
+
+这个中心化服务器是要求我们来写，我们来host的。
+与peer分开。后端是go。只暴漏api。
+
+
+collection应该能够由用户设置是否允许在p2p网络分发。
+是否可以被查询，是否可以被匿名下载，如何进行鉴权
+
+鉴权该怎么做，必须中心化吗？
+在中心鉴权服务器上写这样的功能。
