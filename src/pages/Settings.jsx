@@ -944,14 +944,14 @@ export default function Settings({ dataConsent, setDataConsent }) {
               <div className="flex gap-2">
                 <input
                   type="text"
-                  value={window.location.origin + '/webdav/'}
+                  value={api.getApiBase() + '/webdav/'}
                   readOnly
                   className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none border border-gray-600 opacity-80 cursor-default"
                 />
                 <button
                   onClick={() => {
                     try {
-                      navigator.clipboard.writeText(window.location.origin + '/webdav/');
+                      navigator.clipboard.writeText(api.getApiBase() + '/webdav/');
                     } catch {}
                   }}
                   className="bg-gray-600 hover:bg-gray-500 px-3 py-2 rounded text-sm transition-colors whitespace-nowrap"
@@ -968,20 +968,20 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 <div>
                   <p className="text-sm text-gray-300 font-medium mb-1">Windows</p>
                   <code className="block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono select-all">
-                    net use Z: {window.location.origin + '/webdav/'}
+                    net use Z: {api.getApiBase() + '/webdav/'}
                   </code>
                 </div>
                 <div>
                   <p className="text-sm text-gray-300 font-medium mb-1">macOS</p>
                   <p className="text-xs text-gray-400">Finder &rarr; Go &rarr; Connect to Server &rarr; 输入地址</p>
                   <code className="block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono select-all mt-1">
-                    {window.location.origin + '/webdav/'}
+                    {api.getApiBase() + '/webdav/'}
                   </code>
                 </div>
                 <div>
                   <p className="text-sm text-gray-300 font-medium mb-1">Linux</p>
                   <code className="block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono select-all">
-                    mount -t davfs {window.location.origin + '/webdav/'} /mnt/peerdrive
+                    mount -t davfs {api.getApiBase() + '/webdav/'} /mnt/peerdrive
                   </code>
                 </div>
               </div>
@@ -1013,14 +1013,6 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 className="text-xs text-blue-400 hover:underline"
               >
                 GitHub
-              </a>
-              <a
-                href="https://vps.moonchan.xyz"
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs text-blue-400 hover:underline"
-              >
-                Board 666
               </a>
             </div>
 

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listAnonCollections, listPublicCollections, getP2PStatus, createShare, getShareUrl } from '../api';
+import * as api from '../api';
 import CollectionCard from '../components/CollectionCard';
 
 // 从文本中提取 SHA256 哈希
@@ -62,11 +63,11 @@ export default function Plaza() {
     setLoading(false);
   };
 
-  // 搜索/跳转：输入 Hash 或关键字导航到合集
+  // 搜索/跳转：输入 Hash 导航到合集
   const handleSearch = () => {
-    const h = extractHash(searchInput) || searchInput.trim().toLowerCase();
+    const h = extractHash(searchInput);
     if (h && h.length === 64) navigate(`/anon/collections/${h}`);
-    else if (h) navigate(`/anon/collections/${h}`);
+    else if (searchInput.trim()) alert('请输入有效的 64 位 SHA256 Hash');
   };
 
   const collId = (c) => c.id || c.hash || c.collection_name;
@@ -165,10 +166,10 @@ export default function Plaza() {
         <div className="mb-6">
           <div className="flex gap-2">
             <input type="text" value={searchInput}
-              onChange={e => { setSearchInput(e.target.value); const h = extractHash(e.target.value); if (h) { navigate(`/anon/collections/${h}`); } }}
+              onChange={e => { setSearchInput(e.target.value); }}
               onPaste={e => { const h = extractHash(e.clipboardData.getData('text')); if (h) { e.preventDefault(); setSearchInput(h); navigate(`/anon/collections/${h}`); } }}
               onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
-              placeholder="输入 SHA256 Hash / URL 打开合集，或搜索 P2P 网络..."
+              placeholder="输入 SHA256 Hash / URL 打开合集"
               className="flex-1 bg-gray-800 border border-gray-600 px-4 py-2.5 rounded-lg text-sm font-mono focus:outline-none focus:border-blue-500" />
             <button onClick={handleSearch} className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium">查看</button>
           </div>
@@ -181,25 +182,11 @@ export default function Plaza() {
               <button onClick={() => setShowShare(null)} className="text-gray-500 hover:text-white px-2">✕</button>
             </div>
           )}
-          {/* 标签切换：本机 / P2P 网络 / 广播 */}
+          {/* 标签切换：本机 / P2P 网络 / 天线 */}
           <div className="flex gap-1 mt-3">
             <button onClick={() => setPlazaTab('local')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='local'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>💻 本机 ({localColls.length})</button>
             <button onClick={() => setPlazaTab('p2p')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='p2p'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>🌐 P2P 网络 ({p2pColls.length})</button>
             <button onClick={() => setPlazaTab('antenna')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='antenna'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>📡 天线 ({antennaHashes.length})</button>
-            <button onClick={async () => {
-              const h = searchInput.trim();
-              if (!h || h.length < 64) return alert('请输入有效的 64 位 SHA256 Hash');
-              try {
-                // 创建单文件匿名合集，以文件 hash 作为文件名
-                const filename = h.substring(0, 12);
-                const coll = await api.createAnonCollection([{path: filename, hash: h}], filename);
-                // 双网宣告
-                await api.dualAnnounce(h);
-                // 刷新列表并导航到新合集
-                loadAll();
-                navigate(`/anon/collections/${coll.hash}`);
-              } catch(e) { alert('广播失败: ' + e.message); }
-            }} className="px-4 py-1.5 text-sm rounded bg-amber-700 hover:bg-amber-600 text-white">📡 天线</button>
           </div>
         </div>
 

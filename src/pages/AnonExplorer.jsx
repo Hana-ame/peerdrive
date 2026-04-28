@@ -50,6 +50,8 @@ export default function AnonExplorer() {
   const [navPath, setNavPath] = useState('');
   const [isLocal, setIsLocal] = useState(false);
   const [allCollHashes, setAllCollHashes] = useState(new Set());
+  const [toastMsg, setToastMsg] = useState('');
+  const [toastErr, setToastErr] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => { if (paramHash) { setInputVal(paramHash); setSearchHash(paramHash); } }, [paramHash]);
@@ -112,7 +114,7 @@ export default function AnonExplorer() {
   };
   const handleSearch = () => {
     const h = extractHash(inputVal) || inputVal.trim().toLowerCase();
-    if (h.length !== 64) return alert('请输入有效的 SHA256 Hash');
+    if (h.length !== 64) { setToastMsg('请输入有效的 SHA256 Hash'); setToastErr(true); return; }
     setSearchHash(h); setNavPath(''); navigate(`/anon/collections/${h}`);
   };
 
@@ -175,17 +177,21 @@ export default function AnonExplorer() {
                     const share = await api.createShare(searchHash, 'collection', fname || '合集');
                     const url = api.getShareUrl(share.token);
                     await navigator.clipboard.writeText(url);
-                    alert(`分享链接已复制: ${url}`);
-                  } catch(e) { alert('分享失败: ' + e.message); }
+                    setToastMsg('分享链接已复制: ' + url);
+                    setToastErr(false);
+                    setTimeout(() => setToastMsg(''), 4000);
+                  } catch(e) { setToastMsg('分享失败: ' + e.message); setToastErr(true); }
                 }} className="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-xs">🔗 分享</button>
                 <button onClick={async () => {
                   if (searchHash) {
                     try {
                       await api.p2pAnnounce(searchHash);
-                      alert('已在 P2P 网络广播此合集');
-                    } catch(e) { alert('P2P 广播失败: ' + e.message); }
+                      setToastMsg('广播成功');
+                      setToastErr(false);
+                      setTimeout(() => setToastMsg(''), 2500);
+                    } catch(e) { setToastMsg('广播失败: ' + e.message); setToastErr(true); }
                   }
-                }} className="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs">🌐 P2P 打开</button>
+                }} className="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs">📡 广播</button>
                 {isLocal ? (
                   <span className="text-xs text-green-500/70 bg-green-500/10 px-3 py-1 rounded-full">✓ 已保存到本机</span>
                 ) : (
@@ -197,11 +203,15 @@ export default function AnonExplorer() {
                       const name = collection.friendly_name || collection.name_preview || '合集副本';
                       const res = await api.createAnonCollection(collection.entries, name + ' (副本)');
                       navigate(`/anon/collections/${res.hash}`);
-                    } catch(e) { alert('保存失败: ' + e.message); }
+                    } catch(e) { setToastMsg('保存失败: ' + e.message); setToastErr(true); }
                   }} className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-xs">💾 保存到本机</button>
                 )}
               </div>
             </div>
+
+            {toastMsg && (
+              <div className={`px-4 py-1.5 text-xs shrink-0 ${toastErr ? 'text-red-400 bg-red-500/10' : 'text-green-400 bg-green-500/10'}`}>{toastMsg}</div>
+            )}
 
             {navPath && (
               <div className="flex items-center gap-1 px-4 py-2 bg-gray-800/80 border-b border-gray-700/50 text-xs shrink-0">
