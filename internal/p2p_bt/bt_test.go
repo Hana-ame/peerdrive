@@ -787,3 +787,116 @@ func TestBTClientPauseResume(t *testing.T) {
 	t.Logf("global stats: active=%d paused=%d completed=%d errors=%d dht_nodes=%d",
 		stats.ActiveTorrents, stats.PausedTorrents, stats.Completed, stats.Errors, stats.DHTNodes)
 }
+
+// TestSeeder tests the BTSeeder: it creates and starts a seeder, then connects
+// as a BT peer and downloads a piece to verify the seeder serves data correctly.
+func TestSeeder(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create test data and torrent meta.
+	data := make([]byte, 50000)
+	for i := range data {
+		data[i] = byte(i * 7 % 256)
+	}
+	infoHash := sha1.Sum(data)
+
+	// Build minimal TorrentMeta.
+	pieceLen := int64(16384)
+	numPieces := (len(data) + 16383) / 16384
+	pieces := make([][]byte, numPieces)
+	for i := 0; i < numPieces; i++ {
+		start := i * 16384
+		end := start + 16384
+		if end > len(data) {
+			end = len(data)
+		}
+		h := sha1.Sum(data[start:end])
+		pieces[i] = h[:]
+	}
+
+	meta := &TorrentMeta{
+		Name:         "seedtest.dat",
+		PieceLength:  pieceLen,
+		Pieces:       pieces,
+		TotalSize:    int64(len(data)),
+		IsSingleFile: true,
+		Files:        []TorrentFile{{Path: "seedtest.dat", Size: int64(len(data))}},
+		InfoHash:     infoHash[:],
+		InfoHashHex:  hex.EncodeToString(infoHash[:]),
+	}
+
+	// Write test data as a file (simulating completed download).
+	filePath := filepath.Join(dir, meta.Name)
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	// Create and start seeder.
+	seeder := NewSeeder(infoHash, meta, dir)
+	if err := seeder.Start(); err != nil {
+		t.Fatalf("seeder start: %v", err)
+	}
+	defer seeder.Stop()
+
+	if !seeder.IsActive() {
+		t.Fatal("seeder should be active after Start")
+	}
+
+	seederPort := seeder.Port()
+	if seederPort == 0 {
+		t.Fatal("seeder port should be non-zero")
+	}
+	t.Logf("seeder listening on port %d", seederPort)
+
+	// Connect as a BT peer and download piece 0.
+	peerAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(seederPort))
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	piece0Len := int64(16384)
+	var expectedHash [20]byte
+	copy(expectedHash[:], pieces[0])
+
+	downloaded, err := DownloadPiece(ctx, peerAddr, infoHash, 0, piece0Len, expectedHash)
+	if err != nil {
+		t.Fatalf("DownloadPiece from seeder: %v", err)
+	}
+
+	if len(downloaded) != int(piece0Len) {
+		t.Fatalf("expected %d bytes from piece 0, got %d", piece0Len, len(downloaded))
+	}
+	if !bytes.Equal(downloaded, data[:16384]) {
+		t.Fatal("piece 0 data mismatch")
+	}
+	t.Logf("seeder served piece 0: %d bytes, SHA1 verified", len(downloaded))
+
+	// Download the last piece (which may be shorter).
+	lastPieceIdx := numPieces - 1
+	lastPieceLen := int64(len(data)) % pieceLen
+	if lastPieceLen == 0 {
+		lastPieceLen = pieceLen
+	}
+	var lastExpectedHash [20]byte
+	copy(lastExpectedHash[:], pieces[lastPieceIdx])
+
+	lastPiece, err := DownloadPiece(ctx, peerAddr, infoHash, lastPieceIdx, lastPieceLen, lastExpectedHash)
+	if err != nil {
+		t.Fatalf("DownloadPiece last piece from seeder: %v", err)
+	}
+	start := lastPieceIdx * 16384
+	end := start + int(lastPieceLen)
+	if end > len(data) {
+		end = len(data)
+	}
+	if !bytes.Equal(lastPiece, data[start:end]) {
+		t.Fatal("last piece data mismatch")
+	}
+	t.Logf("seeder served last piece %d: %d bytes, SHA1 verified", lastPieceIdx, len(lastPiece))
+
+	// Stop seeder and verify it's no longer active.
+	seeder.Stop()
+	if seeder.IsActive() {
+		t.Fatal("seeder should not be active after Stop")
+	}
+	t.Log("seeder stopped successfully")
+}

@@ -273,6 +273,8 @@ func SetupRouter(
 		p2p.GET("/bt/downloads", controller.BTDownloadList)
 		p2p.POST("/bt/download/:infohash/pause", controller.BTPauseDownload)
 		p2p.POST("/bt/download/:infohash/resume", controller.BTResumeDownload)
+		p2p.POST("/bt/download/:infohash/seed", controller.BTSeedTorrent)
+		p2p.POST("/bt/download/:infohash/unseed", controller.BTStopSeed)
 		p2p.DELETE("/bt/download/:infohash", controller.BTRemoveDownload)
 		p2p.GET("/bt/stats", controller.BTGlobalStats)
 

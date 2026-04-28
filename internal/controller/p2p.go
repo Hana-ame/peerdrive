@@ -939,6 +939,7 @@ func BTGlobalStats(c *gin.Context) {
 	}
 
 	stats := btClient.GetGlobalStats()
+	seeders := btClient.ListSeeders()
 	minimal := gin.H{
 		"total_up_bytes":   stats.TotalUp,
 		"total_down_bytes": stats.TotalDown,
@@ -947,11 +948,51 @@ func BTGlobalStats(c *gin.Context) {
 		"completed":        stats.Completed,
 		"errors":           stats.Errors,
 		"dht_nodes":        stats.DHTNodes,
+		"seeding":          len(seeders),
+		"seeding_hashes":   seeders,
 	}
 
-	log.LogInfo("ctrl-p2p: BTGlobalStats active=%d paused=%d completed=%d dht_nodes=%d",
-		stats.ActiveTorrents, stats.PausedTorrents, stats.Completed, stats.DHTNodes)
+	log.LogInfo("ctrl-p2p: BTGlobalStats active=%d paused=%d completed=%d seeding=%d dht_nodes=%d",
+		stats.ActiveTorrents, stats.PausedTorrents, stats.Completed, len(seeders), stats.DHTNodes)
 	c.JSON(http.StatusOK, minimal)
+}
+
+// BTSeedTorrent 处理 POST /p2p/bt/seed/:infohash，开始为已完成的下载做种。
+func BTSeedTorrent(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTSeedTorrent")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	infohash := c.Param("infohash")
+	if err := btClient.StartSeed(infohash); err != nil {
+		log.LogWarn("ctrl-p2p: BTSeedTorrent %s failed: %v", infohash, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-p2p: BTSeedTorrent %s started", infohash)
+	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "seeding"})
+}
+
+// BTStopSeed 处理 POST /p2p/bt/download/:infohash/unseed，停止为指定下载做种。
+func BTStopSeed(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTStopSeed")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	infohash := c.Param("infohash")
+	if err := btClient.StopSeed(infohash); err != nil {
+		log.LogWarn("ctrl-p2p: BTStopSeed %s failed: %v", infohash, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-p2p: BTStopSeed %s stopped", infohash)
+	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "stopped"})
 }
 
 // BTDownloadList 处理 GET /p2p/bt/downloads，返回所有活跃和已完成的 BT 下载任务。

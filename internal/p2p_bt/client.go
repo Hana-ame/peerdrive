@@ -27,6 +27,7 @@ type DownloadStatus struct {
 	Speed       float64 `json:"speed_bytes_per_sec"`
 	Status      string  `json:"status"`  // "downloading", "seeding", "completed", "error"
 	Error       string  `json:"error,omitempty"`
+	Seeding     bool    `json:"seeding"`
 }
 
 // CompletedFile holds information about a completed torrent file.
@@ -74,9 +75,11 @@ func (dl *BTDownload) cancelDownload() {
 type BTClient struct {
 	dataDir    string
 	downloads  map[string]*BTDownload
+	seeders    map[string]*BTSeeder
 	onComplete OnTorrentComplete
 	mu         sync.RWMutex
 	stopCh     chan struct{}
+	seederMu   sync.Mutex
 }
 
 // NewBTClient 创建 BT 客户端实例，指定下载文件存储目录。
@@ -89,6 +92,7 @@ func NewBTClient(dataDir string) *BTClient {
 	client := &BTClient{
 		dataDir:   dataDir,
 		downloads: make(map[string]*BTDownload),
+		seeders:   make(map[string]*BTSeeder),
 		stopCh:    make(chan struct{}),
 	}
 	log.LogInfo("bt-client: created, dataDir=%s", dataDir)
@@ -309,10 +313,13 @@ func (c *BTClient) downloadTorrent(dl *BTDownload) {
 			var expectedHash [20]byte
 			copy(expectedHash[:], dl.Meta.Pieces[pieceIdx])
 
+			// Calculate piece length. The last piece may be shorter.
 			pieceLen := dl.Meta.PieceLength
-			lastPieceIdx := dl.Meta.TotalSize / dl.Meta.PieceLength
-			if int64(pieceIdx) == lastPieceIdx && dl.Meta.TotalSize%dl.Meta.PieceLength != 0 {
-				pieceLen = dl.Meta.TotalSize % dl.Meta.PieceLength
+			if pieceIdx == numPieces-1 {
+				lastPieceSize := dl.Meta.TotalSize % dl.Meta.PieceLength
+				if lastPieceSize > 0 {
+					pieceLen = lastPieceSize
+				}
 			}
 
 			data, err := DownloadPiece(ctx, peerAddr, infoHash, pieceIdx,
@@ -322,17 +329,19 @@ func (c *BTClient) downloadTorrent(dl *BTDownload) {
 				pieceErrors++
 				pieceErrMu.Unlock()
 				log.LogWarn("[bt-wire] piece %d from %s failed: %v", pieceIdx, peerAddr, err)
-			} else {
-				log.LogDebug("[bt-wire] piece %d downloaded successfully from %s (%d bytes)",
-					pieceIdx, peerAddr, pieceLen)
+				progressCh <- progressUpdate{pieceIdx: pieceIdx, err: err}
+				return
 			}
+
+			log.LogDebug("[bt-wire] piece %d downloaded successfully from %s (%d bytes)",
+				pieceIdx, peerAddr, len(data))
 
 			dl.mu.Lock()
 			dl.piecesDone++
-			dl.downloaded += pieceLen
+			dl.downloaded += int64(len(data))
 			dl.mu.Unlock()
 
-			progressCh <- progressUpdate{pieceIdx: pieceIdx, data: data, err: err}
+			progressCh <- progressUpdate{pieceIdx: pieceIdx, data: data}
 		}()
 	}
 
@@ -497,6 +506,7 @@ func (c *BTClient) GetDownload(infohash string) *DownloadStatus {
 		Peers:       dl.peers,
 		Speed:       dl.speed,
 		Status:      dl.Status,
+		Seeding:     c.IsSeeding(dl.InfoHash),
 	}
 	if dl.err != nil {
 		status.Error = dl.err.Error()
@@ -522,6 +532,7 @@ func (c *BTClient) ListDownloads() []DownloadStatus {
 			Peers:       dl.peers,
 			Speed:       dl.speed,
 			Status:      dl.Status,
+			Seeding:     c.IsSeeding(dl.InfoHash),
 		}
 		if dl.err != nil {
 			status.Error = dl.err.Error()
@@ -541,6 +552,103 @@ func (c *BTClient) GetDownloadDir() string {
 func (c *BTClient) Close() {
 	log.LogInfo("bt-client: closing")
 	close(c.stopCh)
+}
+
+// StartSeed begins seeding a completed torrent download. It starts a TCP listener
+// that responds to BT wire protocol piece requests, and re-announces on the DHT.
+// The infohash must correspond to a previously completed download.
+func (c *BTClient) StartSeed(infohash string) error {
+	c.mu.RLock()
+	dl, ok := c.downloads[infohash]
+	c.mu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("download %s not found", infohash)
+	}
+
+	dl.mu.RLock()
+	if dl.Status != "completed" {
+		dl.mu.RUnlock()
+		return fmt.Errorf("download %s has status %q, need 'completed' to seed", infohash, dl.Status)
+	}
+	meta := dl.Meta
+	dataDir := dl.DataDir
+	dl.mu.RUnlock()
+
+	// Check if already seeding.
+	c.seederMu.Lock()
+	if _, exists := c.seeders[infohash]; exists {
+		c.seederMu.Unlock()
+		return fmt.Errorf("already seeding %s", infohash)
+	}
+
+	// Compute the 20-byte infohash.
+	raw, err := hex.DecodeString(infohash)
+	if err != nil {
+		c.seederMu.Unlock()
+		return fmt.Errorf("decode infohash: %w", err)
+	}
+	var infoHash [20]byte
+	copy(infoHash[:], raw)
+
+	seeder := NewSeeder(infoHash, meta, dataDir)
+	if err := seeder.Start(); err != nil {
+		c.seederMu.Unlock()
+		return fmt.Errorf("start seeder: %w", err)
+	}
+	c.seeders[infohash] = seeder
+	c.seederMu.Unlock()
+
+	// Re-announce on DHT so others can find us.
+	if globalDHT != nil {
+		go func() {
+			for i := 0; i < 3; i++ {
+				if err := globalDHT.Announce(infohash); err != nil {
+					log.LogWarn("[bt-seeder] DHT re-announce failed: %v", err)
+				}
+				time.Sleep(30 * time.Second)
+			}
+		}()
+	}
+
+	log.LogInfo("bt-client: started seeding %s (%s) on port %d", infohash, dl.Name, seeder.Port())
+	return nil
+}
+
+// StopSeed stops seeding a completed torrent download.
+// It shuts down the TCP listener and removes the seeder from the active seeders map.
+func (c *BTClient) StopSeed(infohash string) error {
+	c.seederMu.Lock()
+	seeder, ok := c.seeders[infohash]
+	if !ok {
+		c.seederMu.Unlock()
+		return fmt.Errorf("not currently seeding %s", infohash)
+	}
+	delete(c.seeders, infohash)
+	c.seederMu.Unlock()
+
+	seeder.Stop()
+	log.LogInfo("bt-client: stopped seeding %s", infohash)
+	return nil
+}
+
+// IsSeeding returns true if the given infohash is currently being seeded.
+func (c *BTClient) IsSeeding(infohash string) bool {
+	c.seederMu.Lock()
+	defer c.seederMu.Unlock()
+	_, ok := c.seeders[infohash]
+	return ok
+}
+
+// ListSeeders returns the list of currently active seeding infohashes.
+func (c *BTClient) ListSeeders() []string {
+	c.seederMu.Lock()
+	defer c.seederMu.Unlock()
+	keys := make([]string, 0, len(c.seeders))
+	for k := range c.seeders {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // --- DHT service integration ---
