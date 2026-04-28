@@ -648,6 +648,47 @@ func GetConnections(c *gin.Context) {
 	log.LogInfo("ctrl-p2p: GetConnections inbound=%d outbound=%d total=%d", inbound, outbound, inbound+outbound)
 }
 
+// GetTopology 处理 GET /p2p/topology，返回连接拓扑图。
+func GetTopology(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: GetTopology")
+	if p2pSvc == nil || !p2pSvc.IsEnabled() {
+		c.JSON(http.StatusOK, service.TopologyGraph{
+			LocalPeerID: "",
+			Edges:       []service.TopologyEdge{},
+		})
+		return
+	}
+	topo := p2pSvc.GetTopology()
+	log.LogInfo("ctrl-p2p: GetTopology local=%s edges=%d", topo.LocalPeerID, len(topo.Edges))
+	c.JSON(http.StatusOK, topo)
+}
+
+// GetConnectionQuality 处理 GET /p2p/quality，返回所有对端的连接质量指标。
+func GetConnectionQuality(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: GetConnectionQuality")
+	if p2pSvc == nil || !p2pSvc.IsEnabled() || p2pSvc.ConnMgr == nil {
+		c.JSON(http.StatusOK, []service.ConnectionQuality{})
+		return
+	}
+
+	// If a specific peer is requested
+	peerID := c.Query("peer_id")
+	if peerID != "" {
+		pid, err := peer.Decode(peerID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid peer id"})
+			return
+		}
+		quality := p2pSvc.ConnMgr.GetConnectionQuality(pid)
+		c.JSON(http.StatusOK, quality)
+		return
+	}
+
+	qualities := p2pSvc.ConnMgr.GetAllConnectionQualities()
+	log.LogInfo("ctrl-p2p: GetConnectionQuality peers=%d", len(qualities))
+	c.JSON(http.StatusOK, qualities)
+}
+
 // --- BEP 44 (Arbitrary DHT Data Storage) ---
 
 // BEP44Put 处理 POST /p2p/bt/bep44/put，通过 BEP 44 将不可变数据存储到 BT DHT。

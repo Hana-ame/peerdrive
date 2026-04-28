@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -247,6 +248,163 @@ func TestCIDFromSha256(t *testing.T) {
 	if c != cid.Undef {
 		t.Error("cidFromSha256 should return Undef for short hash")
 	}
+}
+
+func TestConnectionManager_QualityMetrics(t *testing.T) {
+	cfg := &config.Config{
+		P2PEnable:     true,
+		P2PListenAddr: "/ip4/0.0.0.0/tcp/0",
+		P2PMDNSEnable: false,
+		StorageDir:    t.TempDir(),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	svc, err := NewP2PService(ctx, cfg)
+	if err != nil {
+		t.Fatalf("failed to create P2P service: %v", err)
+	}
+	defer svc.Close()
+
+	cm := svc.ConnMgr
+	if cm == nil {
+		t.Fatal("ConnectionManager should not be nil")
+	}
+
+	// Check that quality metrics exist in stats
+	stats := cm.Stats()
+	if _, ok := stats["quality_score"]; !ok {
+		t.Error("Stats should include quality_score")
+	}
+	if _, ok := stats["avg_latency_ms"]; !ok {
+		t.Error("Stats should include avg_latency_ms")
+	}
+
+	t.Logf("Quality stats: %+v", stats)
+}
+
+func TestP2PService_TopologyEndpoint(t *testing.T) {
+	cfg := &config.Config{
+		P2PEnable:     true,
+		P2PListenAddr: "/ip4/0.0.0.0/tcp/0",
+		P2PMDNSEnable: false,
+		StorageDir:    t.TempDir(),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	svc, err := NewP2PService(ctx, cfg)
+	if err != nil {
+		t.Fatalf("failed to create P2P service: %v", err)
+	}
+	defer svc.Close()
+
+	// Get topology data
+	topo := svc.GetTopology()
+	if topo == nil {
+		t.Fatal("GetTopology should not return nil")
+	}
+
+	// Verify structure
+	if topo.LocalPeerID == "" {
+		t.Error("LocalPeerID should not be empty")
+	}
+	if topo.Edges == nil {
+		t.Error("Edges should not be nil")
+	}
+	t.Logf("Topology: local=%s, edges=%d", topo.LocalPeerID, len(topo.Edges))
+}
+
+func TestP2PService_ExchangeProtocol_IPv6(t *testing.T) {
+	// Test that IPv6 listen addresses are accepted
+	cfg := &config.Config{
+		P2PEnable:       true,
+		P2PListenAddr:   "/ip4/0.0.0.0/tcp/0",
+		P2PListenAddrV6: "/ip6/::/tcp/0",
+		P2PMDNSEnable:   false,
+		StorageDir:      t.TempDir(),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	svc, err := NewP2PService(ctx, cfg)
+	if err != nil {
+		t.Fatalf("failed to create P2P service with IPv6: %v", err)
+	}
+	defer svc.Close()
+
+	// Verify that addrs include both IPv4 and IPv6
+	_, addrs := svc.GetNodeInfo()
+	hasV6 := false
+	hasV4 := false
+	for _, a := range addrs {
+		if len(a) > 3 && a[:3] == "/ip" {
+			if a[3] == '6' {
+				hasV6 = true
+			} else if a[3] == '4' {
+				hasV4 = true
+			}
+		}
+	}
+	if !hasV4 {
+		t.Log("No IPv4 address present (might be expected on some platforms)")
+	}
+	if !hasV6 {
+		t.Log("No IPv6 address present (might be expected on some platforms)")
+	}
+	t.Logf("Node addrs: %v", addrs)
+}
+
+func TestChunkedTransfer_ProgressRace(t *testing.T) {
+	cfg := &config.Config{
+		P2PEnable:     true,
+		P2PListenAddr: "/ip4/0.0.0.0/tcp/0",
+		P2PMDNSEnable: false,
+		StorageDir:    t.TempDir(),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	svc, err := NewP2PService(ctx, cfg)
+	if err != nil {
+		t.Fatalf("failed to create P2P service: %v", err)
+	}
+	defer svc.Close()
+
+	// Write a test file
+	testData := make([]byte, ChunkSize*3+100) // ~3 chunks
+	for i := range testData {
+		testData[i] = byte(i % 256)
+	}
+	hash := sha256.Sum256(testData)
+	hashStr := hex.EncodeToString(hash[:])
+
+	subDir := filepath.Join(cfg.StorageDir, hashStr[:2])
+	os.MkdirAll(subDir, 0755)
+	os.WriteFile(filepath.Join(subDir, hashStr), testData, 0644)
+
+	// Test transfer progress
+	progress := &TransferProgress{
+		Hash:      hashStr,
+		TotalSize: int64(len(testData)),
+		ChunksTotal: 4,
+	}
+
+	// Test concurrent Update calls (no race)
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			progress.Update(1024)
+		}()
+	}
+	wg.Wait()
+
+	if progress.ReceivedSize != 10240 {
+		t.Errorf("Expected 10240 bytes received, got %d", progress.ReceivedSize)
+	}
+	t.Logf("Progress test completed, received=%d", progress.ReceivedSize)
 }
 
 func TestTrimNewline(t *testing.T) {

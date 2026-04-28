@@ -214,6 +214,93 @@ func (p *P2PService) GetConnectedPeers() []peer.ID {
 	return p.Host.Network().Peers()
 }
 
+// TopologyEdge represents a single connection edge in the topology graph.
+type TopologyEdge struct {
+	PeerID        string `json:"peer_id"`
+	Latency       string `json:"latency,omitempty"`
+	Direction     string `json:"direction"`
+	BytesSent     int64  `json:"bytes_sent"`
+	BytesRecv     int64  `json:"bytes_recv"`
+	ConnectedSince string `json:"connected_since,omitempty"`
+	Transport     string `json:"transport,omitempty"`
+}
+
+// TopologyGraph 返回当前 P2P 拓扑图。
+type TopologyGraph struct {
+	LocalPeerID  string         `json:"local_peer_id"`
+	LocalAddrs   []string       `json:"local_addrs"`
+	Edges        []TopologyEdge `json:"edges"`
+	TotalPeers   int            `json:"total_peers"`
+}
+
+// GetTopology 构建并返回当前连接的拓扑图数据。
+func (p *P2PService) GetTopology() *TopologyGraph {
+	if !p.IsEnabled() {
+		return &TopologyGraph{
+			LocalPeerID: "",
+			Edges:       []TopologyEdge{},
+		}
+	}
+
+	localID := p.Host.ID().String()
+	addrs := make([]string, 0)
+	for _, addr := range p.Host.Addrs() {
+		addrs = append(addrs, addr.String())
+	}
+
+	peers := p.Host.Network().Peers()
+	edges := make([]TopologyEdge, 0, len(peers))
+
+	for _, pid := range peers {
+		conns := p.Host.Network().ConnsToPeer(pid)
+		direction := "inbound"
+		transport := "unknown"
+		if len(conns) > 0 {
+			if conns[0].Stat().Direction == network.DirOutbound {
+				direction = "outbound"
+			}
+				transport = "tcp"
+			// Extract transport from multiaddr
+			addrStr := conns[0].RemoteMultiaddr().String()
+			if len(addrStr) > 0 {
+				parts := addrStr[1:] // skip leading /
+				transport = parts[:3]
+			}
+		}
+
+		edge := TopologyEdge{
+			PeerID:    pid.String(),
+			Direction: direction,
+			Transport: transport,
+		}
+
+		// Get tracker data if available
+		if p.tracker != nil {
+			info := p.tracker.GetPeer(pid.String())
+			if info != nil {
+				edge.Latency = info.Latency
+				edge.BytesSent = info.BytesSent
+				edge.BytesRecv = info.BytesRecv
+				if !info.ConnectedAt.IsZero() {
+					edge.ConnectedSince = info.ConnectedAt.Format(time.RFC3339)
+				}
+			}
+		}
+
+		// Get real latency if tracker doesn't have it (ping is expensive, skip for now)
+		// but we already have latency from tracker if ping was done before
+
+		edges = append(edges, edge)
+	}
+
+	return &TopologyGraph{
+		LocalPeerID: localID,
+		LocalAddrs:  addrs,
+		Edges:       edges,
+		TotalPeers:  len(edges),
+	}
+}
+
 // GetDiscoveredPeers 返回通过 mDNS 等方式发现的所有对端信息。
 func (p *P2PService) GetDiscoveredPeers() []peer.AddrInfo {
 	p.mu.RLock()
@@ -478,19 +565,25 @@ func (p *P2PService) requestData(ctx context.Context, peerID peer.ID, hash strin
 	}
 	defer stream.Close()
 
-	stream.SetReadDeadline(time.Now().Add(FileReadTimeout))
+	stream.SetWriteDeadline(time.Now().Add(FileReadTimeout))
 	if _, err := fmt.Fprintf(stream, "%s\n", hash); err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 
+	stream.SetReadDeadline(time.Now().Add(FileReadTimeout))
 	reader := bufio.NewReader(stream)
 	statusLine, err := reader.ReadString('\n')
 	if err != nil {
 		return nil, fmt.Errorf("read status: %w", err)
 	}
 
+	statusLine = trimNewline(statusLine)
+	if strings.HasPrefix(statusLine, "ERR ") {
+		return nil, fmt.Errorf("peer error: %s", strings.TrimPrefix(statusLine, "ERR "))
+	}
+
 	var status int
-	if _, scanErr := fmt.Sscanf(statusLine, "OK %d\n", &status); scanErr != nil || status <= 0 {
+	if _, scanErr := fmt.Sscanf(statusLine, "OK %d", &status); scanErr != nil || status <= 0 {
 		return nil, fmt.Errorf("peer returned error: %s", statusLine)
 	}
 
@@ -529,15 +622,36 @@ func (p *P2PService) handleExchange(stream network.Stream) {
 		filePath := filepath.Join(p.storageDir, hash[:2], hash)
 		info, err := os.Stat(filePath)
 		if err != nil {
-			log.LogDebug("p2p: handleExchange SIZE not found for %s", hash)
-			fmt.Fprintf(stream, "ERR not found\n")
+			// Try alternate lookup via repository
+			found := false
+			meta, _ := repository.GetFileMeta(hash)
+			if meta != nil {
+				providers, _ := repository.GetFileProviders(hash)
+				for _, prov := range providers {
+					if prov.ProviderType == "local" {
+						absInfo, statErr := os.Stat(prov.Path)
+						if statErr == nil {
+							stream.SetWriteDeadline(time.Now().Add(FileReadTimeout))
+							fmt.Fprintf(stream, "OK %d\n", absInfo.Size())
+							found = true
+							break
+						}
+					}
+				}
+			}
+			if !found {
+				log.LogDebug("p2p: handleExchange SIZE not found for %s", hash)
+				fmt.Fprintf(stream, "ERR not found\n")
+			}
 			return
 		}
+		stream.SetWriteDeadline(time.Now().Add(FileReadTimeout))
 		fmt.Fprintf(stream, "OK %d\n", info.Size())
 		return
 	}
 
 	if len(hash) != 64 {
+		stream.SetWriteDeadline(time.Now().Add(FileReadTimeout))
 		fmt.Fprintf(stream, "ERR invalid hash length %d\n", len(hash))
 		return
 	}
@@ -561,11 +675,13 @@ func (p *P2PService) handleExchange(stream network.Stream) {
 	}
 	if err != nil || data == nil {
 		log.LogDebug("p2p: handleExchange file not found for %s", hash)
+		stream.SetWriteDeadline(time.Now().Add(FileReadTimeout))
 		fmt.Fprintf(stream, "ERR not found\n")
 		return
 	}
 
 	log.LogInfo("p2p: handleExchange serving %s to %s (%d bytes)", hash, stream.Conn().RemotePeer().String(), len(data))
+	stream.SetWriteDeadline(time.Now().Add(FileReadTimeout))
 	fmt.Fprintf(stream, "OK %d\n", len(data))
 	stream.Write(data)
 

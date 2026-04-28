@@ -13,6 +13,17 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
+// ConnectionQuality 表示对指定 P2P 对端的连接质量评估。
+type ConnectionQuality struct {
+	PeerID        string  `json:"peer_id"`
+	AvgLatencyMs  float64 `json:"avg_latency_ms"`
+	JitterMs      float64 `json:"jitter_ms"`
+	PacketLossPct float64 `json:"packet_loss_pct"`
+	Score         float64 `json:"score"` // 0-100, higher is better
+	LastUpdated   string  `json:"last_updated"`
+	Samples       int     `json:"samples"`
+}
+
 // ConnectionManager handles auto-connection, heartbeat, and reconnection to peers.
 type ConnectionManager struct {
 	svc *P2PService
@@ -26,23 +37,30 @@ type ConnectionManager struct {
 	reconnectAttempts int64
 	successfulConns   int64
 	failedConns       int64
+
+	// Quality metrics
+	latencyHistory   map[peer.ID][]time.Duration
+	maxLatencySamples int
 }
 
 const (
-	heartbeatInterval   = 30 * time.Second
-	reconnectInterval   = 10 * time.Second
-	maxReconnectBackoff = 5 * time.Minute
-	connectionTimeout   = 15 * time.Second
+	heartbeatInterval    = 30 * time.Second
+	reconnectInterval    = 10 * time.Second
+	maxReconnectBackoff  = 5 * time.Minute
+	connectionTimeout    = 15 * time.Second
+	maxLatencySamples    = 10
 )
 
 // NewConnectionManager 创建一个 P2P 连接管理器实例。
 func NewConnectionManager(svc *P2PService) *ConnectionManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ConnectionManager{
-		svc:          svc,
-		knownPeers:   make(map[peer.ID]peer.AddrInfo),
-		heartbeatCtx: ctx,
-		heartbeatCan: cancel,
+		svc:               svc,
+		knownPeers:        make(map[peer.ID]peer.AddrInfo),
+		heartbeatCtx:      ctx,
+		heartbeatCan:      cancel,
+		latencyHistory:    make(map[peer.ID][]time.Duration),
+		maxLatencySamples: maxLatencySamples,
 	}
 }
 
@@ -200,23 +218,171 @@ func (cm *ConnectionManager) GetPeerLatency(ctx context.Context, peerID peer.ID)
 	return cm.svc.PingPeer(ctx, peerID)
 }
 
+// RecordLatencySample records a latency measurement for a peer and updates
+// quality metrics. RecordLatencySample 记录一次对端的延迟测量样本。
+func (cm *ConnectionManager) RecordLatencySample(peerID peer.ID, rtt time.Duration) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	history := cm.latencyHistory[peerID]
+	history = append(history, rtt)
+	if len(history) > cm.maxLatencySamples {
+		history = history[len(history)-cm.maxLatencySamples:]
+	}
+	cm.latencyHistory[peerID] = history
+}
+
+// GetConnectionQuality returns the computed connection quality for a peer.
+// GetConnectionQuality 返回指定对端的连接质量评估。
+func (cm *ConnectionManager) GetConnectionQuality(peerID peer.ID) *ConnectionQuality {
+	cm.mu.Lock()
+	history := make([]time.Duration, len(cm.latencyHistory[peerID]))
+	copy(history, cm.latencyHistory[peerID])
+	cm.mu.Unlock()
+
+	if len(history) == 0 {
+		return &ConnectionQuality{
+			PeerID:  peerID.String(),
+			Score:   50.0,
+			Samples: 0,
+		}
+	}
+
+	var sum float64
+	for _, rtt := range history {
+		sum += float64(rtt.Microseconds())
+	}
+	avg := sum / float64(len(history))
+
+	// Calculate jitter (mean absolute deviation)
+	var devSum float64
+	for _, rtt := range history {
+		dev := float64(rtt.Microseconds()) - avg
+		if dev < 0 {
+			dev = -dev
+		}
+		devSum += dev
+	}
+	jitter := devSum / float64(len(history))
+
+	// Estimate packet loss: if we have gaps in history, that suggests loss
+	lossPct := 0.0
+	if len(history) < cm.maxLatencySamples && len(history) > 0 {
+		// Fewer samples than expected suggests some pings were lost
+		expected := cm.maxLatencySamples
+		lossPct = float64(expected-len(history)) / float64(expected) * 100
+	}
+
+	// Score: 100 = perfect, 0 = unusable
+	// Based on avg latency and jitter
+	latencyScore := 100.0
+	if avg > 1000 {
+		latencyScore = 10.0
+	} else if avg > 500 {
+		latencyScore = 25.0
+	} else if avg > 200 {
+		latencyScore = 50.0
+	} else if avg > 100 {
+		latencyScore = 70.0
+	} else if avg > 50 {
+		latencyScore = 85.0
+	}
+
+	jitterScore := 100.0
+	if jitter > 500 {
+		jitterScore = 20.0
+	} else if jitter > 200 {
+		jitterScore = 40.0
+	} else if jitter > 100 {
+		jitterScore = 60.0
+	} else if jitter > 50 {
+		jitterScore = 80.0
+	}
+
+	lossScore := 100.0 - lossPct*10
+	if lossScore < 0 {
+		lossScore = 0
+	}
+
+	score := latencyScore*0.5 + jitterScore*0.3 + lossScore*0.2
+
+	return &ConnectionQuality{
+		PeerID:        peerID.String(),
+		AvgLatencyMs:  avg / 1000.0,
+		JitterMs:      jitter / 1000.0,
+		PacketLossPct: lossPct,
+		Score:         score,
+		LastUpdated:   time.Now().Format(time.RFC3339),
+		Samples:       len(history),
+	}
+}
+
+// GetAllConnectionQualities returns quality metrics for all tracked peers.
+// GetAllConnectionQualities 返回所有已知对端的连接质量。
+func (cm *ConnectionManager) GetAllConnectionQualities() []ConnectionQuality {
+	cm.mu.Lock()
+	peers := make([]peer.ID, 0, len(cm.latencyHistory))
+	for pid := range cm.latencyHistory {
+		peers = append(peers, pid)
+	}
+	cm.mu.Unlock()
+
+	qualities := make([]ConnectionQuality, 0, len(peers))
+	for _, pid := range peers {
+		q := cm.GetConnectionQuality(pid)
+		if q != nil {
+			qualities = append(qualities, *q)
+		}
+	}
+	return qualities
+}
+
 // Stats returns connection manager statistics.
 // Stats 返回连接管理器的统计信息（重连次数、成功/失败连接数等）。
 func (cm *ConnectionManager) Stats() map[string]interface{} {
 	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	knownCount := len(cm.knownPeers)
+	reconnAttempts := cm.reconnectAttempts
+	succConns := cm.successfulConns
+	failConns := cm.failedConns
+	// Collect peer IDs for quality calculation (outside lock)
+	qualityPeers := make([]peer.ID, 0, len(cm.latencyHistory))
+	for pid := range cm.latencyHistory {
+		qualityPeers = append(qualityPeers, pid)
+	}
+	cm.mu.Unlock()
 
 	connectedCount := 0
 	if cm.svc.IsEnabled() {
 		connectedCount = len(cm.svc.GetConnectedPeers())
 	}
 
+	// Calculate average quality scores
+	var totalScore float64
+	var scoredPeers int
+	var avgLatency float64
+	for _, pid := range qualityPeers {
+		q := cm.GetConnectionQuality(pid)
+		if q != nil && q.Samples > 0 {
+			totalScore += q.Score
+			avgLatency += q.AvgLatencyMs
+			scoredPeers++
+		}
+	}
+	avgQuality := 50.0
+	if scoredPeers > 0 {
+		avgQuality = totalScore / float64(scoredPeers)
+		avgLatency = avgLatency / float64(scoredPeers)
+	}
+
 	return map[string]interface{}{
-		"known_peers":        len(cm.knownPeers),
+		"known_peers":        knownCount,
 		"connected_peers":    connectedCount,
-		"reconnect_attempts": cm.reconnectAttempts,
-		"successful_conns":   cm.successfulConns,
-		"failed_conns":       cm.failedConns,
+		"reconnect_attempts": reconnAttempts,
+		"successful_conns":   succConns,
+		"failed_conns":       failConns,
+		"quality_score":      avgQuality,
+		"avg_latency_ms":     avgLatency,
 	}
 }
 

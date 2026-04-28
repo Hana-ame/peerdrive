@@ -244,6 +244,8 @@ func SetupRouter(
 		p2p.GET("/peers/detail", controller.GetPeersDetail)
 		p2p.GET("/peers/detail/:peer_id", controller.GetPeerDetail)
 		p2p.GET("/stats", controller.GetP2PStats)
+			p2p.GET("/topology", controller.GetTopology)
+			p2p.GET("/quality", controller.GetConnectionQuality)
 		p2p.GET("/ping/:peer_id", controller.PingPeer)
 		p2p.POST("/connect", controller.ConnectPeer)
 		p2p.POST("/announce", controller.AnnounceHash)
