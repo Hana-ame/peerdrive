@@ -147,5 +147,14 @@ func InitDB(dbPath string) error {
 	DB.Exec(`ALTER TABLE collections ADD COLUMN follow_redirects INTEGER DEFAULT 1`)
 	DB.Exec(`ALTER TABLE file_meta ADD COLUMN cid TEXT DEFAULT ''`)
 	InitShareTable()
+
+	// Migration: create ipfs_pins table for pinned CIDs.
+	DB.Exec(`CREATE TABLE IF NOT EXISTS ipfs_pins (
+		cid TEXT PRIMARY KEY,
+		hash TEXT NOT NULL DEFAULT '',
+		size INTEGER DEFAULT 0,
+		filename TEXT DEFAULT '',
+		pinned_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
 	return nil
 }
