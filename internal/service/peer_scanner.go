@@ -161,6 +161,11 @@ func (ps *PeerScanner) runDHTScanner() {
 	defer ps.wg.Done()
 	log.LogDebug("peer-scanner: DHT scanner started")
 
+	if !ps.svc.IsEnabled() || ps.svc.DHT == nil {
+		log.LogDebug("peer-scanner: DHT not available, scanner idle")
+		return
+	}
+
 	// Run once immediately, then on tick.
 	ps.scanDHT()
 
@@ -189,6 +194,11 @@ func (ps *PeerScanner) scanDHT() {
 	hashes := ps.collectStorageHashes()
 	log.LogDebug("peer-scanner: DHT scan checking %d hashes", len(hashes))
 
+	if len(hashes) == 0 {
+		log.LogDebug("peer-scanner: no local hashes to search, DHT scan skipped")
+		return
+	}
+
 	for _, hash := range hashes {
 		if ps.shouldStop() {
 			return
@@ -196,7 +206,7 @@ func (ps *PeerScanner) scanDHT() {
 
 		providers, err := ps.svc.FindProviders(hash)
 		if err != nil {
-			log.LogWarn("peer-scanner: DHT FindProviders for %s failed: %v", hash[:16], err)
+			log.LogWarn("peer-scanner: DHT FindProviders for %s failed: %v", safePrefix(hash, 16), err)
 			continue
 		}
 
@@ -453,4 +463,12 @@ func (ps *PeerScanner) maintainBootstrap() {
 // String returns a human-readable representation of the scanner state.
 func (ps *PeerScanner) String() string {
 	return fmt.Sprintf("PeerScanner(regURL=%q, active=%v)", ps.regURL, ps.active)
+}
+
+// safePrefix returns the first n characters of s, or the whole string if shorter.
+func safePrefix(s string, n int) string {
+	if len(s) < n {
+		return s
+	}
+	return s[:n]
 }

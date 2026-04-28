@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"peerdrive/internal/log"
+	"peerdrive/internal/repository"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -154,6 +155,7 @@ func (ct *ChunkedTransfer) DownloadFile(ctx context.Context, hash string, target
 		StartTime: time.Now(),
 		onUpdate:  onProgress,
 	}
+	progress.mu = sync.Mutex{}
 
 	ct.jobsMu.Lock()
 	ct.activeJobs[hash] = progress
@@ -204,11 +206,13 @@ func (ct *ChunkedTransfer) DownloadFile(ctx context.Context, hash string, target
 						ct.svc.Host.Connect(connCtx, pi)
 						cancel()
 					}
-					chunkData, lastErr = ct.requestChunk(ctx, pi.ID, hash, offset, size)
-					if lastErr == nil {
-						progress.Peers = append(progress.Peers, pi.ID)
-						break
-					}
+				chunkData, lastErr = ct.requestChunk(ctx, pi.ID, hash, offset, size)
+				if lastErr == nil {
+					progress.mu.Lock()
+					progress.Peers = append(progress.Peers, pi.ID)
+					progress.mu.Unlock()
+					break
+				}
 				}
 				if lastErr != nil {
 					errCh <- fmt.Errorf("chunk %d: %w", chunkIdx, lastErr)
@@ -319,6 +323,8 @@ func (ct *ChunkedTransfer) handleChunkRequest(stream network.Stream) {
 	log.LogDebug("p2p-transfer: handleChunkRequest from %s", stream.Conn().RemotePeer().String())
 	defer stream.Close()
 
+	stream.SetReadDeadline(time.Now().Add(ChunkRequestTimeout))
+
 	var hash string
 	var offset int64
 	var size int
@@ -328,34 +334,84 @@ func (ct *ChunkedTransfer) handleChunkRequest(stream network.Stream) {
 		return
 	}
 
-	if size > ChunkSize {
+	if size > ChunkSize*2 {
 		log.LogWarn("p2p-transfer: chunk too large from %s: %d (max %d)", stream.Conn().RemotePeer().String(), size, ChunkSize)
 		fmt.Fprintf(stream, "ERR chunk too large (max %d)\n", ChunkSize)
 		return
 	}
 
-	// Look up file
+	if offset < 0 || size <= 0 {
+		log.LogWarn("p2p-transfer: invalid range from %s: offset=%d size=%d", stream.Conn().RemotePeer().String(), offset, size)
+		fmt.Fprintf(stream, "ERR invalid range\n")
+		return
+	}
+
+	// Look up file using efficient file open for Range support
 	filePath := filepath.Join(ct.svc.storageDir, hash[:2], hash)
-	data, err := os.ReadFile(filePath)
+	f, err := os.Open(filePath)
+	if err != nil {
+		// Try alternate lookup via repository
+		meta, _ := repository.GetFileMeta(hash)
+		if meta != nil {
+			providers, _ := repository.GetFileProviders(hash)
+			for _, prov := range providers {
+				if prov.ProviderType == "local" {
+					f, err = os.Open(prov.Path)
+					if err == nil {
+						break
+					}
+				}
+			}
+		}
+	}
 	if err != nil {
 		log.LogWarn("p2p-transfer: handleChunkRequest file not found: %s", hash)
 		fmt.Fprintf(stream, "ERR not found\n")
 		return
 	}
+	defer f.Close()
 
-	if int(offset) >= len(data) {
-		log.LogWarn("p2p-transfer: handleChunkRequest offset out of range: %d >= %d", offset, len(data))
+	// Stat to get file size for range validation
+	info, err := f.Stat()
+	if err != nil {
+		log.LogWarn("p2p-transfer: handleChunkRequest stat failed: %s", hash)
+		fmt.Fprintf(stream, "ERR internal error\n")
+		return
+	}
+
+	if offset >= info.Size() {
+		log.LogWarn("p2p-transfer: handleChunkRequest offset out of range: %d >= %d", offset, info.Size())
 		fmt.Fprintf(stream, "ERR offset out of range\n")
 		return
 	}
 
-	end := int(offset) + size
-	if end > len(data) {
-		end = len(data)
+	// Calculate actual bytes to send
+	actualSize := int64(size)
+	if offset+actualSize > info.Size() {
+		actualSize = info.Size() - offset
 	}
 
-	log.LogInfo("p2p-transfer: sending chunk %s offset=%d size=%d to %s", hash, offset, end-int(offset), stream.Conn().RemotePeer().String())
-	stream.Write(data[offset:end])
+	// Use Range read via io.ReadSeeker for memory efficiency
+	if _, err := f.Seek(offset, 0); err != nil {
+		log.LogWarn("p2p-transfer: handleChunkRequest seek failed: %v", err)
+		fmt.Fprintf(stream, "ERR internal error\n")
+		return
+	}
+
+	stream.SetWriteDeadline(time.Now().Add(ChunkRequestTimeout))
+
+	// Stream the chunk directly (don't load entire file into memory)
+	n, err := io.CopyN(stream, f, actualSize)
+	if err != nil {
+		log.LogWarn("p2p-transfer: handleChunkRequest write failed: %v", err)
+		return
+	}
+
+	if ct.svc.tracker != nil {
+		ct.svc.tracker.RecordBytesSent(stream.Conn().RemotePeer().String(), n)
+	}
+
+	log.LogInfo("p2p-transfer: sent chunk %s offset=%d size=%d to %s", hash, offset, n, stream.Conn().RemotePeer().String())
 }
 
 // handleExchange (updated) now also handles SIZE requests

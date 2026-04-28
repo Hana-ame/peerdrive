@@ -97,6 +97,7 @@ func (h *SignalingHub) RoomPeers(hash string) []string {
 }
 
 // HandleConnection 处理 WebSocket 信令连接，负责注册、房间管理、offer/answer/ICE 转发等。
+// 支持 browser-to-browser 和 browser-to-node 信令。
 func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -105,11 +106,12 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var peer *peerConn
+	peerID := ""
 	defer func() {
-		if peer != nil && peer.PeerID != "" {
-			h.unregister(peer.PeerID)
-			h.broadcast(SignalingMessage{Type: "peer_left", PeerID: peer.PeerID})
-			log.LogInfo("signal: peer left: %s", peer.PeerID)
+		if peerID != "" {
+			h.unregister(peerID)
+			h.broadcast(SignalingMessage{Type: "peer_left", PeerID: peerID})
+			log.LogInfo("signal: peer left: %s", peerID)
 		}
 		conn.Close()
 	}()
@@ -122,11 +124,19 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 
 		switch msg.Type {
 		case "register":
+			if msg.PeerID == "" {
+				conn.WriteJSON(SignalingMessage{Type: "error", Message: "peer_id is required"})
+				continue
+			}
+			peerID = msg.PeerID
 			peer = &peerConn{PeerID: msg.PeerID, Conn: conn}
 			h.register(msg.PeerID, peer)
-			conn.WriteJSON(SignalingMessage{Type: "registered", PeerID: msg.PeerID})
+			conn.WriteJSON(SignalingMessage{
+				Type:   "registered",
+				PeerID: msg.PeerID,
+			})
 			h.broadcast(SignalingMessage{Type: "peer_joined", PeerID: msg.PeerID})
-			log.LogInfo("signal: peer registered: %s", msg.PeerID)
+			log.LogInfo("signal: peer registered: %s", msg.PeerID[:min(len(msg.PeerID), 12)])
 
 		case "join":
 			// Room-based join: peer joins a room identified by file hash.
@@ -138,17 +148,22 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 				conn.WriteJSON(SignalingMessage{Type: "error", Message: "hash is required for join"})
 				continue
 			}
+			peerID = msg.PeerID
 			peer = &peerConn{PeerID: msg.PeerID, Conn: conn}
 			h.register(msg.PeerID, peer)
 			h.joinRoom(msg.PeerID, msg.Hash)
-			log.LogInfo("signal: peer %s joined room %s", msg.PeerID[:8], msg.Hash[:16])
+			shortID := msg.PeerID
+			if len(shortID) > 12 {
+				shortID = shortID[:12]
+			}
+			log.LogInfo("signal: peer %s joined room %s", shortID, msg.Hash[:16])
 
 			// Notify the joining peer of existing room occupants.
 			roomPeers := h.RoomPeers(msg.Hash)
 			conn.WriteJSON(SignalingMessage{
-				Type:  "room_joined",
-				Hash:  msg.Hash,
-				Peers: roomPeers,
+				Type:   "room_joined",
+				Hash:   msg.Hash,
+				Peers:  roomPeers,
 				PeerID: msg.PeerID,
 			})
 
@@ -174,15 +189,33 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 			conn.WriteJSON(SignalingMessage{Type: "peers", Peers: h.GetPeers()})
 
 		case "offer", "answer":
+			if msg.To == "" {
+				conn.WriteJSON(SignalingMessage{Type: "error", Message: "target peer_id is required"})
+				continue
+			}
+			// Browser-to-node support: if target starts with "node:", route to the specified node
+			if msg.PeerID == "" {
+				msg.PeerID = peerID
+			}
 			h.relay(msg)
 
 		case "ice_candidate", "ice":
+			if msg.To == "" {
+				conn.WriteJSON(SignalingMessage{Type: "error", Message: "target peer_id is required"})
+				continue
+			}
 			// Support both "ice_candidate" (legacy) and "ice" (new protocol).
 			relayMsg := msg
 			relayMsg.Type = "ice_candidate"
+			if msg.PeerID == "" {
+				relayMsg.PeerID = peerID
+			}
 			h.relay(relayMsg)
 
 		case "announce_file":
+			if msg.PeerID == "" {
+				msg.PeerID = peerID
+			}
 			if msg.PeerID == "" || msg.Hash == "" {
 				conn.WriteJSON(SignalingMessage{Type: "error", Message: "peer_id and hash required"})
 				continue
@@ -190,9 +223,13 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 			h.mu.Lock()
 			h.files[msg.Hash] = appendIfMissing(h.files[msg.Hash], msg.PeerID)
 			h.mu.Unlock()
-			log.LogInfo("signal: file announced: %s by %s", msg.Hash[:16], msg.PeerID[:8])
+			log.LogInfo("signal: file announced: %s by %s", msg.Hash[:16], msg.PeerID[:min(len(msg.PeerID), 12)])
 
 		case "find_file":
+			if msg.Hash == "" {
+				conn.WriteJSON(SignalingMessage{Type: "error", Message: "hash is required"})
+				continue
+			}
 			h.mu.RLock()
 			providers := h.files[msg.Hash]
 			h.mu.RUnlock()
@@ -202,10 +239,29 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 				Peers: providers,
 			})
 
+		case "direct_message":
+			// Direct message support for node-to-browser signaling
+			if msg.To == "" {
+				conn.WriteJSON(SignalingMessage{Type: "error", Message: "target peer_id is required"})
+				continue
+			}
+			if msg.PeerID == "" {
+				msg.PeerID = peerID
+			}
+			h.relay(msg)
+
 		default:
 			log.LogDebug("signal: unknown message type: %s", msg.Type)
 		}
 	}
+}
+
+// min returns the smaller of a and b (avoids needing Go 1.21+ builtin).
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (h *SignalingHub) register(peerID string, pc *peerConn) {
