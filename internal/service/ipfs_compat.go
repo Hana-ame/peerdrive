@@ -39,8 +39,13 @@ const (
 
 	// Entry 的字段编号
 	entryFieldBlock    = 1 // Entry.block (CID bytes)
-	entryFieldCancel   = 3 // Entry.cancel
-	entryFieldWantType = 4 // Entry.wantType (0=Have, 1=Block)
+	entryFieldCancel   = 2 // Entry.cancel
+	entryFieldWantType = 3 // Entry.wantType (0=Have, 1=Block)
+	entryFieldSendDontHave = 4 // Entry.sendDontHave
+
+	// Want type constants
+	wantTypeHave  = 0
+	wantTypeBlock = 1
 
 	// Payload.Block 的字段编号
 	payloadFieldPrefix = 1 // Block.prefix
@@ -280,17 +285,29 @@ func (l *IPFSCompatLayer) handleBitswap(stream network.Stream) {
 		return
 	}
 
-	// 解析 Wantlist，提取所有请求的 CID
-	wantedCIDs := parseBitswapWantlist(data)
-	if len(wantedCIDs) == 0 {
+	// 解析 Wantlist，提取所有请求的条目
+	entries := parseBitswapWantlist(data)
+	if len(entries) == 0 {
 		log.LogDebug("%s: no wanted CIDs in request from %s", l.logPrefix, peerID)
 		return
 	}
 
-	log.LogDebug("%s: peer %s wants %d CIDs", l.logPrefix, peerID, len(wantedCIDs))
+	// 统计非 cancel 的条目数
+	activeCount := 0
+	for _, e := range entries {
+		if !e.Cancel {
+			activeCount++
+		}
+	}
+	log.LogDebug("%s: peer %s wants %d entries (%d active)", l.logPrefix, peerID, len(entries), activeCount)
+
+	if activeCount == 0 {
+		log.LogDebug("%s: all entries cancelled from %s", l.logPrefix, peerID)
+		return
+	}
 
 	// 构建响应 payload
-	response := l.buildPayloadResponse(wantedCIDs)
+	response := l.buildPayloadResponse(entries)
 	if len(response) == 0 {
 		log.LogDebug("%s: no blocks to send to %s", l.logPrefix, peerID)
 		return
@@ -302,12 +319,20 @@ func (l *IPFSCompatLayer) handleBitswap(stream network.Stream) {
 		return
 	}
 
-	log.LogInfo("%s: sent %d blocks to %s", l.logPrefix, len(wantedCIDs), peerID)
+	log.LogInfo("%s: sent response to %s (%d bytes)", l.logPrefix, peerID, len(response))
 }
 
-// parseBitswapWantlist 从 Bitswap protobuf 消息中提取所有请求的 CID。
-func parseBitswapWantlist(data []byte) []cid.Cid {
-	var cids []cid.Cid
+// bitswapEntry represents a parsed Bitswap wantlist entry.
+type bitswapEntry struct {
+	CID          cid.Cid
+	Cancel       bool
+	WantType     int32 // 0=Have, 1=Block
+	SendDontHave bool
+}
+
+// parseBitswapWantlist 从 Bitswap protobuf 消息中提取所有请求的条目。
+func parseBitswapWantlist(data []byte) []bitswapEntry {
+	var entries []bitswapEntry
 	for len(data) > 0 {
 		num, wtype, n := protowire.ConsumeTag(data)
 		if n < 0 {
@@ -324,8 +349,8 @@ func parseBitswapWantlist(data []byte) []cid.Cid {
 			data = data[n:]
 
 			// 解析 Wantlist 中的 entries
-			entries := parseWantlistEntries(wantlistData)
-			cids = append(cids, entries...)
+			parsed := parseWantlistEntries(wantlistData)
+			entries = append(entries, parsed...)
 		} else {
 			// 跳过其他字段
 			n = skipField(wtype, data)
@@ -335,12 +360,12 @@ func parseBitswapWantlist(data []byte) []cid.Cid {
 			data = data[n:]
 		}
 	}
-	return cids
+	return entries
 }
 
 // parseWantlistEntries 从 Wantlist 子消息中解析 entries 列表。
-func parseWantlistEntries(data []byte) []cid.Cid {
-	var cids []cid.Cid
+func parseWantlistEntries(data []byte) []bitswapEntry {
+	var entries []bitswapEntry
 	for len(data) > 0 {
 		num, wtype, n := protowire.ConsumeTag(data)
 		if n < 0 {
@@ -356,12 +381,9 @@ func parseWantlistEntries(data []byte) []cid.Cid {
 			}
 			data = data[n:]
 
-			// 解析 Entry 中的 block/CID 字段
-			if cidBytes := parseEntryBlock(entryData); cidBytes != nil {
-				_, c, err := cid.CidFromBytes(cidBytes)
-				if err == nil {
-					cids = append(cids, c)
-				}
+			// 解析 Entry 中的所有字段
+			if entry := parseEntry(entryData); entry != nil {
+				entries = append(entries, *entry)
 			}
 		} else {
 			n = skipField(wtype, data)
@@ -371,11 +393,13 @@ func parseWantlistEntries(data []byte) []cid.Cid {
 			data = data[n:]
 		}
 	}
-	return cids
+	return entries
 }
 
-// parseEntryBlock 从 Entry 子消息中提取 block/CID 字段。
-func parseEntryBlock(data []byte) []byte {
+// parseEntry 从 Entry 子消息中提取所有字段。
+func parseEntry(data []byte) *bitswapEntry {
+	var entry bitswapEntry
+	var cidBytes []byte
 	for len(data) > 0 {
 		num, wtype, n := protowire.ConsumeTag(data)
 		if n < 0 {
@@ -383,52 +407,94 @@ func parseEntryBlock(data []byte) []byte {
 		}
 		data = data[n:]
 
-		if num == entryFieldBlock && wtype == protowire.BytesType {
+		switch {
+		case num == entryFieldBlock && wtype == protowire.BytesType:
 			// Field 1 = block (CID bytes)
 			val, n := protowire.ConsumeBytes(data)
+			if n >= 0 {
+				cidBytes = val
+			}
+		case num == entryFieldCancel && wtype == protowire.VarintType:
+			// Field 2 = cancel (bool)
+			val, n := protowire.ConsumeVarint(data)
+			if n >= 0 {
+				entry.Cancel = val != 0
+			}
+		case num == entryFieldWantType && wtype == protowire.VarintType:
+			// Field 3 = wantType (int32)
+			val, n := protowire.ConsumeVarint(data)
+			if n >= 0 {
+				entry.WantType = int32(val)
+			}
+		case num == entryFieldSendDontHave && wtype == protowire.VarintType:
+			// Field 4 = sendDontHave (bool)
+			val, n := protowire.ConsumeVarint(data)
+			if n >= 0 {
+				entry.SendDontHave = val != 0
+			}
+		default:
+			n = skipField(wtype, data)
 			if n < 0 {
 				break
 			}
-			return val
 		}
 
-		n = skipField(wtype, data)
 		if n < 0 {
 			break
 		}
 		data = data[n:]
 	}
-	return nil
+
+	if cidBytes == nil {
+		return nil
+	}
+	_, c, err := cid.CidFromBytes(cidBytes)
+	if err != nil {
+		return nil
+	}
+	entry.CID = c
+	return &entry
 }
 
-// buildPayloadResponse 根据请求的 CID 列表构建 Bitswap 响应 payload。
-// 只包含块存储中存在的块。
-func (l *IPFSCompatLayer) buildPayloadResponse(cids []cid.Cid) []byte {
+// buildPayloadResponse 根据请求的 entries 列表构建 Bitswap 响应 payload。
+// 跳过 cancelled 条目。如果是 WANT_HAVE，只发送 prefix 表示 HAVE 确认；
+// 如果是 WANT_BLOCK，发送完整的 prefix + data。
+// 对于 HAVE 请求但块不存在，如果 SendDontHave 为 true，发送 empty 块表示 DONT_HAVE。
+func (l *IPFSCompatLayer) buildPayloadResponse(entries []bitswapEntry) []byte {
 	var msg []byte
 
-	for _, c := range cids {
-		cidStr := c.String()
-		if !l.blockExists(cidStr) {
+	for _, e := range entries {
+		if e.Cancel {
 			continue
 		}
 
-		data, err := os.ReadFile(l.blockPath(cidStr))
-		if err != nil {
-			continue
+		cidStr := e.CID.String()
+		haveBlock := l.blockExists(cidStr)
+
+		if !haveBlock {
+			if !e.SendDontHave {
+				continue
+			}
+			// Send DONT_HAVE: block with prefix only (no data)
 		}
 
 		// 构建 Block 子消息（payload 中的每个元素）
 		var block []byte
 
 		// Field 1: prefix (CID prefix bytes)
-		prefix := c.Prefix()
+		prefix := e.CID.Prefix()
 		prefixBytes := prefix.Bytes()
 		block = protowire.AppendTag(block, payloadFieldPrefix, protowire.BytesType)
 		block = protowire.AppendBytes(block, prefixBytes)
 
-		// Field 2: data (raw block bytes)
-		block = protowire.AppendTag(block, payloadFieldData, protowire.BytesType)
-		block = protowire.AppendBytes(block, data)
+		// Field 2: data (raw block bytes) — only for WANT_BLOCK when we have the data
+		if haveBlock && e.WantType == wantTypeBlock {
+			data, err := os.ReadFile(l.blockPath(cidStr))
+			if err == nil {
+				block = protowire.AppendTag(block, payloadFieldData, protowire.BytesType)
+				block = protowire.AppendBytes(block, data)
+			}
+		}
 
 		// 追加到 payload 字段 (field 3)
 		msg = protowire.AppendTag(msg, bitswapFieldPayload, protowire.BytesType)

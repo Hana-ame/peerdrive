@@ -288,7 +288,13 @@ func SetupRouter(
 		// IPFS compat routes
 		p2p.GET("/ipfs", controller.IPFSCompatStatus)
 		p2p.POST("/ipfs/toggle", controller.IPFSCompatToggle)
-	}
+			// IPFS pin routes
+			p2p.POST("/ipfs/pin/:cid", controller.PinCID)
+			p2p.DELETE("/ipfs/pin/:cid", controller.UnpinCID)
+			p2p.GET("/ipfs/pins", controller.ListPins)
+			// IPFS gateway status
+			p2p.GET("/ipfs/gateways", controller.IPFSGatewayStatus)
+		}
 
 	// Anonymous Collection routes (public)
 	anon := r.Group("/anon")

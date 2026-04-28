@@ -6,13 +6,17 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"crypto/sha256"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/p2p_bt"
+	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -1156,3 +1160,169 @@ func IPFSCompatToggle(c *gin.Context) {
 	log.LogInfo("ctrl-p2p: IPFSCompatToggle enabled=%v", ipfsCompatLayer.Enabled())
 	c.JSON(http.StatusOK, gin.H{"enabled": ipfsCompatLayer.Enabled()})
 }
+
+
+// --- IPFS Pin & Gateway Handlers ------------------------------------
+
+// PinCID handles POST /p2p/ipfs/pin/:cid, downloads CID from IPFS gateway and caches permanently.
+func PinCID(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: PinCID")
+	cidParam := c.Param("cid")
+	if cidParam == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cid is required"})
+		return
+	}
+
+	if ipfsGatewayProvider == nil || len(ipfsGatewayProvider.Gateways) == 0 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "IPFS gateway not configured"})
+		return
+	}
+
+	// Check if already pinned.
+	existing, _ := repository.GetPin(cidParam)
+	if existing != nil {
+		c.JSON(http.StatusOK, gin.H{"status": "already_pinned", "pin": existing})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+
+	data, err := ipfsGatewayProvider.FetchByCID(ctx, cidParam)
+	if err != nil {
+		log.LogError("ctrl-p2p: PinCID fetch %s failed: %v", cidParam, err)
+		c.JSON(http.StatusNotFound, gin.H{"error": "failed to fetch CID from gateways: " + err.Error()})
+		return
+	}
+
+	// Compute SHA256 and cache locally.
+	h := sha256.Sum256(data)
+	hashStr := hex.EncodeToString(h[:])
+
+	// Get storage dir from context.
+	storageDir := ""
+	if d, ok := c.Get("storageDir"); ok {
+		storageDir, _ = d.(string)
+	}
+
+	if storageDir != "" {
+		relPath := filepath.Join(hashStr[:2], hashStr)
+		fullPath := filepath.Join(storageDir, relPath)
+		_ = os.MkdirAll(filepath.Dir(fullPath), 0755)
+		_ = os.WriteFile(fullPath, data, 0644)
+
+		_ = repository.InsertFileMeta(&model.FileMeta{
+			Hash:     hashStr,
+			Size:     int64(len(data)),
+			Filename: cidParam,
+			Type:     repository.FileTypeBlob,
+		})
+		_ = repository.InsertFileProvider(hashStr, "local", relPath)
+
+		// Also add to IPFS blockstore if IPFS compat is enabled.
+		if ipfsCompatLayer != nil && ipfsCompatLayer.Enabled() {
+			_ = ipfsCompatLayer.AddFile(hashStr)
+		}
+	}
+
+	// Record the pin.
+	_ = repository.InsertPin(cidParam, hashStr, cidParam, int64(len(data)))
+
+	log.LogInfo("ctrl-p2p: PinCID %s -> hash=%s size=%d", cidParam, hashStr, len(data))
+	c.JSON(http.StatusOK, gin.H{
+		"status": "pinned",
+		"cid":    cidParam,
+		"hash":   hashStr,
+		"size":   len(data),
+	})
+}
+
+// UnpinCID handles DELETE /p2p/ipfs/pin/:cid, unpins a CID.
+func UnpinCID(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: UnpinCID")
+	cidParam := c.Param("cid")
+	if cidParam == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cid is required"})
+		return
+	}
+
+	pin, err := repository.GetPin(cidParam)
+	if err != nil {
+		log.LogError("ctrl-p2p: UnpinCID lookup failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if pin == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "pin not found"})
+		return
+	}
+
+	if err := repository.RemovePin(cidParam); err != nil {
+		log.LogError("ctrl-p2p: UnpinCID remove failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-p2p: UnpinCID %s removed", cidParam)
+	c.JSON(http.StatusOK, gin.H{"status": "unpinned", "cid": cidParam})
+}
+
+// ListPins handles GET /p2p/ipfs/pins, lists all pinned CIDs.
+func ListPins(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: ListPins")
+	pins, err := repository.ListPins()
+	if err != nil {
+		log.LogError("ctrl-p2p: ListPins failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if pins == nil {
+		pins = []repository.IPFSPin{}
+	}
+	c.JSON(http.StatusOK, gin.H{"pins": pins, "count": len(pins)})
+}
+
+// gwStatus reports the health of an IPFS gateway.
+type gwStatus struct {
+	URL     string `json:"url"`
+	Healthy bool   `json:"healthy"`
+	Latency string `json:"latency,omitempty"`
+}
+
+// IPFSGatewayStatus handles GET /p2p/ipfs/gateways, checks health of each configured gateway.
+func IPFSGatewayStatus(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: IPFSGatewayStatus")
+	if ipfsGatewayProvider == nil || len(ipfsGatewayProvider.Gateways) == 0 {
+		c.JSON(http.StatusOK, gin.H{"gateways": []interface{}{}})
+		return
+	}
+
+	results := make([]gwStatus, len(ipfsGatewayProvider.Gateways))
+	for i, gw := range ipfsGatewayProvider.Gateways {
+		results[i] = checkGateway(gw)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"gateways": results})
+}
+
+// checkGateway pings a single IPFS gateway to check its health.
+func checkGateway(gw string) gwStatus {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, strings.TrimRight(gw, "/")+"/ipfs/QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn", nil)
+	if err != nil {
+		return gwStatus{URL: gw, Healthy: false}
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return gwStatus{URL: gw, Healthy: false}
+	}
+	resp.Body.Close()
+
+	latency := time.Since(start)
+	healthy := resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound
+	return gwStatus{URL: gw, Healthy: healthy, Latency: latency.String()}
+}
+
