@@ -80,3 +80,13 @@ func (r *RelayRepository) UpdateHeartbeat(peerID string, loadPct float64) error 
 	`, loadPct, peerID)
 	return err
 }
+
+// CountActive returns the number of relays with heartbeat in the last 5 minutes.
+func (r *RelayRepository) CountActive() (int, error) {
+	var count int
+	err := r.db.QueryRow(`
+		SELECT COUNT(*) FROM relay_nodes
+		WHERE last_heartbeat >= datetime('now', '-5 minutes')
+	`).Scan(&count)
+	return count, err
+}

@@ -48,3 +48,36 @@ type TokenResponse struct {
 	Username string `json:"username"`
 	Role     string `json:"role"`
 }
+
+// Group represents a named group that users can belong to.
+type Group struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// UserGroup is a join between users and groups.
+type UserGroup struct {
+	UserID    int64     `json:"user_id"`
+	GroupID   int64     `json:"group_id"`
+	Username  string    `json:"username"`
+	GroupName string    `json:"group_name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Comment represents a user comment on a collection (identified by hash).
+type Comment struct {
+	ID        int64     `json:"id"`
+	Hash      string    `json:"hash"`
+	Username  string    `json:"username"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Stats holds aggregate registration server statistics.
+type Stats struct {
+	TotalUsers    int `json:"total_users"`
+	ActiveRelays  int `json:"active_relays"`
+	TotalComments int `json:"total_comments"`
+}

@@ -42,7 +42,19 @@ func main() {
 
 	authSvc := service.NewAuthService(userRepo)
 	relaySvc := service.NewRelayService(relayRepo)
+
+	commentRepo := repository.NewCommentRepository(db)
+	if err := commentRepo.InitSchema(); err != nil {
+		log.Fatalf("failed to init comment schema: %v", err)
+	}
+	commentSvc := service.NewCommentService(commentRepo)
+
 	authCtrl := controller.NewAuthController(authSvc, relaySvc)
+	authCtrl.SetCommentService(commentSvc)
+
+	if err := userRepo.InitGroupSchema(); err != nil {
+		log.Fatalf("failed to init group schema: %v", err)
+	}
 
 	r := router.SetupRouter(authCtrl, authSvc)
 

@@ -19,6 +19,10 @@ func SetupRouter(authCtrl *controller.AuthController, authSvc *service.AuthServi
 		auth.POST("/login", authCtrl.Login)
 		auth.GET("/whoami", middleware.AuthRequired(authSvc), authCtrl.WhoAmI)
 		auth.GET("/list", middleware.AuthRequired(authSvc), middleware.AdminRequired(), authCtrl.ListUsers)
+
+		// Group membership
+		auth.GET("/group/:username", middleware.AuthRequired(authSvc), authCtrl.GetUserGroups)
+		auth.POST("/group/:username", middleware.AuthRequired(authSvc), authCtrl.AddUserToGroup)
 	}
 
 	protected := r.Group("/api")
@@ -36,6 +40,16 @@ func SetupRouter(authCtrl *controller.AuthController, authSvc *service.AuthServi
 		p2pRelay.GET("/list", authCtrl.ListRelays)
 		p2pRelay.POST("/heartbeat", authCtrl.RelayHeartbeat)
 	}
+
+	// Comments on collections
+	comments := r.Group("/comments")
+	{
+		comments.GET("/:hash", authCtrl.GetComments)
+		comments.POST("/:hash", middleware.AuthRequired(authSvc), authCtrl.PostComment)
+	}
+
+	// Stats
+	r.GET("/stats", authCtrl.GetStats)
 
 	return r
 }

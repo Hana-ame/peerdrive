@@ -10,12 +10,17 @@ import (
 )
 
 type AuthController struct {
-	svc      *service.AuthService
-	relaySvc *service.RelayService
+	svc          *service.AuthService
+	relaySvc     *service.RelayService
+	commentSvc   *service.CommentService
 }
 
 func NewAuthController(svc *service.AuthService, relaySvc *service.RelayService) *AuthController {
 	return &AuthController{svc: svc, relaySvc: relaySvc}
+}
+
+func (c *AuthController) SetCommentService(cs *service.CommentService) {
+	c.commentSvc = cs
 }
 
 // Register godoc
@@ -179,4 +184,151 @@ func (c *AuthController) RelayHeartbeat(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// ──────────────────────────────
+//  Group membership
+// ──────────────────────────────
+
+// GetUserGroups handles GET /auth/group/:username
+func (c *AuthController) GetUserGroups(ctx *gin.Context) {
+	username := ctx.Param("username")
+	if username == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
+		return
+	}
+
+	groups, err := c.svc.GetGroups(username)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if groups == nil {
+		groups = []model.UserGroup{}
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"username": username,
+		"groups":   groups,
+	})
+}
+
+// AddUserToGroup handles POST /auth/group/:username
+func (c *AuthController) AddUserToGroup(ctx *gin.Context) {
+	username := ctx.Param("username")
+	if username == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
+		return
+	}
+
+	var req struct {
+		GroupName string `json:"group_name" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := c.svc.AddToGroup(username, req.GroupName); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "added to group", "username": username, "group": req.GroupName})
+}
+
+// ──────────────────────────────
+//  Comments
+// ──────────────────────────────
+
+type postCommentRequest struct {
+	Content string `json:"content" binding:"required"`
+}
+
+// PostComment handles POST /comments/:hash
+func (c *AuthController) PostComment(ctx *gin.Context) {
+	hash := ctx.Param("hash")
+	if hash == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "hash is required"})
+		return
+	}
+
+	// Require authentication
+	username, exists := ctx.Get("username")
+	if !exists || username == "" {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	var req postCommentRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	comment, err := c.commentSvc.Post(hash, username.(string), req.Content)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, comment)
+}
+
+// GetComments handles GET /comments/:hash (no auth required)
+func (c *AuthController) GetComments(ctx *gin.Context) {
+	hash := ctx.Param("hash")
+	if hash == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "hash is required"})
+		return
+	}
+
+	comments, err := c.commentSvc.ListByHash(hash)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if comments == nil {
+		comments = []model.Comment{}
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"hash":     hash,
+		"comments": comments,
+		"total":    len(comments),
+	})
+}
+
+// ──────────────────────────────
+//  Stats
+// ──────────────────────────────
+
+// GetStats handles GET /stats
+func (c *AuthController) GetStats(ctx *gin.Context) {
+	totalUsers, err := c.svc.CountUsers()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count users: " + err.Error()})
+		return
+	}
+
+	activeRelays, err := c.relaySvc.CountActive()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count relays: " + err.Error()})
+		return
+	}
+
+	totalComments := 0
+	if c.commentSvc != nil {
+		totalComments, err = c.commentSvc.CountAll()
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count comments: " + err.Error()})
+			return
+		}
+	}
+
+	ctx.JSON(http.StatusOK, model.Stats{
+		TotalUsers:    totalUsers,
+		ActiveRelays:  activeRelays,
+		TotalComments: totalComments,
+	})
 }

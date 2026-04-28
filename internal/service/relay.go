@@ -24,3 +24,7 @@ func (s *RelayService) ListActive() ([]model.RelayNode, error) {
 func (s *RelayService) Heartbeat(peerID string, loadPct float64) error {
 	return s.repo.UpdateHeartbeat(peerID, loadPct)
 }
+
+func (s *RelayService) CountActive() (int, error) {
+	return s.repo.CountActive()
+}

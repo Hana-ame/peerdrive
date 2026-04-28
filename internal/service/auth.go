@@ -81,6 +81,22 @@ func (s *AuthService) ListUsers() ([]model.User, error) {
 	return s.repo.ListAll()
 }
 
+func (s *AuthService) GetGroups(username string) ([]model.UserGroup, error) {
+	return s.repo.GetGroupsByUsername(username)
+}
+
+func (s *AuthService) AddToGroup(username, groupName string) error {
+	return s.repo.AddUserToGroup(username, groupName)
+}
+
+func (s *AuthService) RemoveFromGroup(username, groupName string) error {
+	return s.repo.RemoveUserFromGroup(username, groupName)
+}
+
+func (s *AuthService) CountUsers() (int, error) {
+	return s.repo.CountUsers()
+}
+
 func (s *AuthService) Login(req model.LoginRequest) (*model.TokenResponse, error) {
 	user, err := s.repo.GetByUsername(req.Username)
 	if err != nil {
