@@ -215,3 +215,16 @@
 | 12.8 | 用户群组查询 | 📋 |
 | 12.9 | Relay/P2P 服务根据用户信息判断 | 📋 |
 | 12.10 | Node 运行者账户信息查询接口 | 📋 |
+
+## 13. DHT 哈希表查询服务 (2026-04-28)
+
+| # | 需求 | 状态 |
+|---|------|------|
+| 13.1 | 统一 DHT 查询面板 (webapp) — 输入 hash, 同时查 IPFS+BT | 📋 |
+| 13.2 | IPFS DHT 查询: /p2p/announce, /p2p/dual/find | ✅ |
+| 13.3 | BT DHT 查询: /p2p/bt/announce, /p2p/bt/find, /p2p/bt/bep51/sample | ✅ |
+| 13.4 | 双栈查询: /p2p/dual/announce, /p2p/dual/find | ✅ |
+| 13.5 | 前端 DHT Explorer 页面 — 输入 hash, 显示两边结果 | 📋 |
+| 13.6 | BEP 51 infohash 采样 — 发现 BT 网络上的内容 | 🚧 |
+| 13.7 | IPFS provider 发现 — 查找谁有某个 CID | 🚧 |
+| 13.8 | 用户可手动触发 DHT crawl/scan | 📋 |
