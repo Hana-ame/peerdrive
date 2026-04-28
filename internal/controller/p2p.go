@@ -1186,6 +1186,34 @@ func CloseForwardSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "closed"})
 }
 
+// AuthStatus 处理 GET /p2p/auth/status，返回当前节点的认证状态。
+func AuthStatus(c *gin.Context) {
+	authenticated, _ := c.Get("authenticated")
+	username, _ := c.Get("username")
+	role, _ := c.Get("role")
+
+	isAuth := false
+	if a, ok := authenticated.(bool); ok {
+		isAuth = a
+	}
+
+	uname := ""
+	if u, ok := username.(string); ok {
+		uname = u
+	}
+
+	r := ""
+	if rl, ok := role.(string); ok {
+		r = rl
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"authenticated": isAuth,
+		"username":      uname,
+		"role":          r,
+	})
+}
+
 // ─── IPFS Compat Handlers ─────────────────────────────────────────
 
 // InitIPFSCompatController 注入 IPFSCompatLayer 实例供 IPFS 兼容端点使用。

@@ -17,7 +17,7 @@ func SetRegServer(url string) {
 	regServerURL = url
 }
 
-// AuthOptional 验证 Bearer 令牌（如存在），在 Gin 上下文中设置 authenticated 和 username。
+// AuthOptional 验证 Bearer 令牌（如存在），在 Gin 上下文中设置 authenticated、username 和 role。
 func AuthOptional() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")
@@ -32,10 +32,11 @@ func AuthOptional() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		username := validateToken(parts[1])
+		username, role := validateToken(parts[1])
 		if username != "" {
 			c.Set("authenticated", true)
 			c.Set("username", username)
+			c.Set("role", role)
 		} else {
 			c.Set("authenticated", false)
 		}
@@ -56,36 +57,38 @@ func AuthRequired() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format"})
 			return
 		}
-		username := validateToken(parts[1])
+		username, role := validateToken(parts[1])
 		if username == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
 			return
 		}
 		c.Set("username", username)
+		c.Set("role", role)
 		c.Next()
 	}
 }
 
-func validateToken(token string) string {
+func validateToken(token string) (string, string) {
 	if regServerURL == "" {
-		return "" // no reg server configured, auth disabled
+		return "", "" // no reg server configured, auth disabled
 	}
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", regServerURL+"/auth/whoami", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := client.Do(req)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return ""
+		return "", ""
 	}
 	var result struct {
 		Username string `json:"username"`
+		Role     string `json:"role"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return ""
+		return "", ""
 	}
-	return result.Username
+	return result.Username, result.Role
 }
