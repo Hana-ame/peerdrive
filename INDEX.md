@@ -9,6 +9,7 @@
 | [backend/](spec/backend/) | 后端 API/数据库/设计规范 |
 | [frontend/](spec/frontend/) | 前端 API 文档 |
 | [p2p/](spec/p2p/) | P2P/BT/IPFS 协议规范 |
+| [CODE-DOC-MAPPING.md](CODE-DOC-MAPPING.md) | **代码↔文档映射表** — 每个文档对应哪些代码文件 |
 
 ## guide — 操作指南
 | 文件 | 内容 |
@@ -24,6 +25,7 @@
 |------|------|
 | [index.md](testing/index.md) | **测试文档门户** — 角色分类、按类型速查 |
 | [TESTING-HANDBOOK.md](testing/TESTING-HANDBOOK.md) | **测试手册** — 完整测试指南：环境搭建、测试运行、手动流程、故障排查（840行） |
+| [TEST-PIPELINE.md](testing/TEST-PIPELINE.md) | **测试管线文档** — 每个测试脚本的流程、预期行为、错误分析、是否需要改代码 |
 | [TEST-MATRIX.md](testing/TEST-MATRIX.md) | 测试矩阵 — 109 项测试用例 |
 | [TESTING-METHODOLOGY.md](testing/TESTING-METHODOLOGY.md) | 测试方法详解 — 9 Phase 方法论 |
 | [test-steps.md](testing/test-steps.md) | P2P 测试实录 — VPS 完整步骤日志 |
