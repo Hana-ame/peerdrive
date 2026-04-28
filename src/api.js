@@ -403,3 +403,4 @@ export async function getServiceStats({ regServerUrl } = {}) {
 
   return results;
 }
+export const getBEP51Sample = () => request('GET', '/p2p/bt/bep51/sample');

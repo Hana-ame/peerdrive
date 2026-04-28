@@ -37,6 +37,11 @@ export default function Plaza() {
   const [viewMode, setViewMode] = useState('grid');
   const navigate = useNavigate();
 
+  // 天线：实时发现的合集
+  const [antennaHashes, setAntennaHashes] = useState([]);
+  const [antennaFilter, setAntennaFilter] = useState('');
+  const [antennaPolling, setAntennaPolling] = useState(false);
+
   // 首次加载时拉取合集列表和 P2P 状态
   useEffect(() => { loadAll(); getP2PStatus().then(s => setP2pOnline(s?.enabled && s?.connected_count > 0)).catch(()=>{}); }, []);
 
@@ -91,11 +96,50 @@ export default function Plaza() {
     else if (c.username && c.collection_name) navigate(`/${c.username}/${c.collection_name}`);
   };
 
-  const showDummies = collections.length === 0 && !loading;
+  const showDummies = collections.length === 0 && !loading && plazaTab !== 'antenna';
   const display = showDummies ? DUMMY_COLLECTIONS : collections;
   const localColls = display.filter(c => c._type === 'anon' || c.isDummy);
   const p2pColls = display.filter(c => c._type === 'public');
-  const activeColls = plazaTab === 'p2p' ? p2pColls : localColls;
+  const activeColls = plazaTab === 'p2p' ? p2pColls : plazaTab === 'antenna' ? antennaHashes : localColls;
+
+  // 天线：轮询 P2P 网络发现新合集
+  const startAntenna = async () => {
+    setAntennaPolling(true);
+    const poll = async () => {
+      try {
+        // BEP 51: sample infohashes from BT DHT
+        const btSamples = await api.getBEP51Sample().catch(() => ({ samples: [] }));
+        // 将发现的 hash 转为合集卡片
+        const found = (btSamples.samples || []).slice(0, 20).map((h, i) => ({
+          hash: h,
+          friendly_name: null,
+          name_preview: h?.substring(0, 12) + '...',
+          entry_count: 0,
+          _type: 'antenna',
+          _foundAt: new Date().toISOString(),
+          _source: 'BT DHT',
+        }));
+        if (found.length > 0) {
+          setAntennaHashes(prev => {
+            const existing = new Set(prev.map(c => c.hash));
+            const merged = [...found.filter(f => !existing.has(f.hash)), ...prev];
+            return merged.slice(0, 50);
+          });
+        }
+      } catch {}
+    };
+    poll();
+    const interval = setInterval(poll, 15000);
+    return () => clearInterval(interval);
+  };
+
+  useEffect(() => {
+    let cleanup;
+    if (plazaTab === 'antenna') {
+      startAntenna().then(fn => { cleanup = fn; });
+    }
+    return () => { if (cleanup) cleanup(); };
+  }, [plazaTab]);
 
   return (
     <div className="p-8 overflow-y-auto h-full">
@@ -141,15 +185,21 @@ export default function Plaza() {
           <div className="flex gap-1 mt-3">
             <button onClick={() => setPlazaTab('local')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='local'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>💻 本机 ({localColls.length})</button>
             <button onClick={() => setPlazaTab('p2p')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='p2p'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>🌐 P2P 网络 ({p2pColls.length})</button>
+            <button onClick={() => setPlazaTab('antenna')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='antenna'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>📡 天线 ({antennaHashes.length})</button>
             <button onClick={async () => {
               const h = searchInput.trim();
-              if (!h) return alert('输入文件 hash 进行广播');
+              if (!h || h.length < 64) return alert('请输入有效的 64 位 SHA256 Hash');
               try {
-                await api.createAnonCollection([{path:'broadcast',hash:h}], '广播 '+h.substring(0,8));
+                // 创建单文件匿名合集，以文件 hash 作为文件名
+                const filename = h.substring(0, 12);
+                const coll = await api.createAnonCollection([{path: filename, hash: h}], filename);
+                // 双网宣告
                 await api.dualAnnounce(h);
-                setShowShare({url: h, name: '广播: '+h.substring(0,12)});
-              } catch(e) { alert('广播失败: '+e.message); }
-            }} className="px-4 py-1.5 text-sm rounded bg-amber-700 hover:bg-amber-600 text-white">📡 广播</button>
+                // 刷新列表并导航到新合集
+                loadAll();
+                navigate(`/anon/collections/${coll.hash}`);
+              } catch(e) { alert('广播失败: ' + e.message); }
+            }} className="px-4 py-1.5 text-sm rounded bg-amber-700 hover:bg-amber-600 text-white">📡 天线</button>
           </div>
         </div>
 
