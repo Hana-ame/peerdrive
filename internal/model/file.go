@@ -13,6 +13,7 @@ type FileMeta struct {
 	Gziped    bool   `db:"gziped"`
 	Filename  string `db:"filename"`
 	Type      string `db:"type"`
+	CID       string `db:"cid" json:"cid"`
 }
 
 type FileProvider struct {

@@ -145,6 +145,7 @@ func InitDB(dbPath string) error {
 	DB.Exec(`ALTER TABLE collections ADD COLUMN visibility TEXT DEFAULT 'public'`)
 	DB.Exec(`ALTER TABLE collections ADD COLUMN tags TEXT DEFAULT ''`)
 	DB.Exec(`ALTER TABLE collections ADD COLUMN follow_redirects INTEGER DEFAULT 1`)
+	DB.Exec(`ALTER TABLE file_meta ADD COLUMN cid TEXT DEFAULT ''`)
 	InitShareTable()
 	return nil
 }

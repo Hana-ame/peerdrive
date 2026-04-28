@@ -7,6 +7,7 @@ package repository
 import (
 	"database/sql"
 	"peerdrive/internal/model"
+	"peerdrive/pkg/hashutil"
 )
 
 // ─── file_meta ──────────────────────────────────────────
@@ -15,9 +16,9 @@ import (
 func GetFileMeta(hash string) (*model.FileMeta, error) {
 	var m model.FileMeta
 	err := DB.QueryRow(
-		`SELECT hash, size, created_at, mime_type, gziped, filename, type FROM file_meta WHERE hash = ?`,
+		`SELECT hash, size, created_at, mime_type, gziped, filename, type, cid FROM file_meta WHERE hash = ?`,
 		hash,
-	).Scan(&m.Hash, &m.Size, &m.CreatedAt, &m.MimeType, &m.Gziped, &m.Filename, &m.Type)
+	).Scan(&m.Hash, &m.Size, &m.CreatedAt, &m.MimeType, &m.Gziped, &m.Filename, &m.Type, &m.CID)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -27,11 +28,28 @@ func GetFileMeta(hash string) (*model.FileMeta, error) {
 	return &m, nil
 }
 
-// InsertFileMeta 插入一条新的文件元数据记录。
+// GetFileMetaByCID 按 CID 查询文件元数据；未找到时返回 (nil, nil)。
+func GetFileMetaByCID(cid string) (*model.FileMeta, error) {
+	var m model.FileMeta
+	err := DB.QueryRow(
+		`SELECT hash, size, created_at, mime_type, gziped, filename, type, cid FROM file_meta WHERE cid = ?`,
+		cid,
+	).Scan(&m.Hash, &m.Size, &m.CreatedAt, &m.MimeType, &m.Gziped, &m.Filename, &m.Type, &m.CID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// InsertFileMeta 插入一条新的文件元数据记录，自动计算并存储 CID。
 func InsertFileMeta(meta *model.FileMeta) error {
+	cid := hashutil.SHA256ToCID(meta.Hash)
 	_, err := DB.Exec(
-		`INSERT INTO file_meta (hash, size, mime_type, gziped, filename, type) VALUES (?, ?, ?, ?, ?, ?)`,
-		meta.Hash, meta.Size, meta.MimeType, meta.Gziped, meta.Filename, meta.Type,
+		`INSERT INTO file_meta (hash, size, mime_type, gziped, filename, type, cid) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		meta.Hash, meta.Size, meta.MimeType, meta.Gziped, meta.Filename, meta.Type, cid,
 	)
 	return err
 }

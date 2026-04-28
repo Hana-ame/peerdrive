@@ -207,6 +207,7 @@ func SetupRouter(
 
 	r.GET("/ping", controller.Ping)
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256)
+	r.GET("/ipfs/:cid", controller.DownloadByCID)
 
 	// Universal multi-protocol download endpoints.
 	r.GET("/download/:hash", controller.UniversalDownload)

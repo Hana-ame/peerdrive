@@ -117,6 +117,24 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 	c.DataFromReader(http.StatusOK, -1, "application/octet-stream", reader, nil)
 }
 
+// DownloadByCID handles GET /ipfs/:cid, looking up the file by its IPFS CID and
+// streaming it back with an X-CID header.
+func DownloadByCID(c *gin.Context) {
+	searchCID := c.Param("cid")
+	meta, err := repository.GetFileMetaByCID(searchCID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		return
+	}
+	if meta == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found by cid"})
+		return
+	}
+
+	c.Header("X-CID", searchCID)
+	DownloadBySHA256Internal(c, meta.Hash)
+}
+
 // ─── Universal download endpoint ───────────────────────────────────────────
 
 // UniversalDownload 处理 GET /download/:hash，使用通用下载器跨协议获取文件。
