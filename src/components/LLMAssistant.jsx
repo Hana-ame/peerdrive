@@ -535,23 +535,39 @@ export default function LLMAssistant() {
     abortRef.current = null;
   };
 
+  const [skin, setSkin] = useState(() => localStorage.getItem('peerdrive_skin') || 'clippy');
+
+  const skins = {
+    clippy: { icon: '📎', label: 'Clippy', btn: 'bg-amber-500 hover:bg-amber-400' },
+    minimal: { icon: '💬', label: 'Minimal', btn: 'bg-blue-600 hover:bg-blue-700' },
+  };
+  const activeSkin = skins[skin] || skins.clippy;
+
   return (
     <>
       {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          className="fixed bottom-6 right-6 w-14 h-14 bg-blue-600 hover:bg-blue-700 rounded-full shadow-lg flex items-center justify-center text-2xl z-40 transition-transform hover:scale-110"
-          title="AI 助手"
-        >
-          🤖
-        </button>
+        <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2">
+          <button
+            onClick={() => setOpen(true)}
+            className={`w-14 h-14 ${activeSkin.btn} rounded-full shadow-lg flex items-center justify-center text-2xl transition-transform hover:scale-110 animate-bounce`}
+            title={`AI 助手 (${activeSkin.label})`}
+          >
+            {activeSkin.icon}
+          </button>
+          <button
+            onClick={() => { const s = skin === 'clippy' ? 'minimal' : 'clippy'; setSkin(s); localStorage.setItem('peerdrive_skin', s); }}
+            className="text-[10px] text-gray-600 hover:text-gray-400 bg-gray-900/80 px-2 py-0.5 rounded-full"
+          >
+            {skin === 'clippy' ? '💬' : '📎'}
+          </button>
+        </div>
       )}
       {open && (
         <div className="fixed bottom-6 right-6 w-96 h-[560px] max-h-[75vh] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col z-40">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 shrink-0">
             <div className="flex items-center gap-2">
-              <span className="text-lg">🤖</span>
-              <span className="font-bold text-sm">AI 助手</span>
+              <span className="text-lg">{activeSkin.icon}</span>
+              <span className="font-bold text-sm">{activeSkin.label}</span>
               <span className="text-[10px] text-gray-500">{api.getLlmModel()}</span>
             </div>
             <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-white text-xl leading-none">&times;</button>
@@ -559,9 +575,11 @@ export default function LLMAssistant() {
 
           <div ref={chatRef} className="flex-1 overflow-y-auto p-4 space-y-3">
             {messages.length === 0 && (
-              <div className="text-center pt-10">
-                <p className="text-gray-500 text-sm">你好！我是 PeerDrive 的 AI 助手。</p>
-                <p className="text-gray-600 text-xs mt-1">我能看到你当前页面的状态，还可以执行操作：导航页面、管理合集、注册文件等。</p>
+              <div className="text-center pt-10 px-4">
+                <p className="text-4xl mb-3">{activeSkin.icon}</p>
+                <p className="text-gray-300 text-sm font-medium">看起来你想管理文件？</p>
+                <p className="text-gray-500 text-xs mt-2">我可以帮你：创建合集、注册文件、搜索 P2P 网络、管理 BT 下载。</p>
+                <p className="text-gray-600 text-[10px] mt-3">直接告诉我你想做什么就行。</p>
               </div>
             )}
             {messages.map((m, i) => {
