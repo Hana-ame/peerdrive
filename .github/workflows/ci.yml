@@ -46,7 +46,7 @@ jobs:
       - name: Anon collection test
         run: |
           mkdir -p /tmp/peerdrive_test
-          PEERDRIVE_P2P_ENABLE=false ./peerdrive-server &
+                    PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false ./peerdrive-server &
           PID=$!
           sleep 3
           chmod +x test/anon-collection.sh
@@ -58,7 +58,7 @@ jobs:
 
       - name: File upload test
         run: |
-          PEERDRIVE_P2P_ENABLE=false ./peerdrive-server &
+                    PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false ./peerdrive-server &
           PID=$!
           sleep 3
           chmod +x test/upload.sh
@@ -70,7 +70,7 @@ jobs:
 
       - name: Register test
         run: |
-          PEERDRIVE_P2P_ENABLE=false ./peerdrive-server &
+                    PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false ./peerdrive-server &
           PID=$!
           sleep 3
           chmod +x test/register.sh

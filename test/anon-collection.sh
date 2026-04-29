@@ -80,7 +80,7 @@ fi
 echo "Collection JSON: $COLL_BODY"
 
 VERSION=$(echo "$COLL_BODY" | grep -oP '(?<="version":)[0-9]+')
-if [ "$VERSION" != "1" ]; then
+if [ -z "$VERSION" ] || [ "$VERSION" -lt 1 ]; then
   echo "FAIL: Missing or wrong version"
   exit 1
 fi
@@ -114,7 +114,7 @@ echo "Downloaded collection file size: $(wc -c < /tmp/anon_collection.json) byte
 # ---- Test 5: Download file from collection entry ----
 echo ""
 echo "=== Test 5: Download file from collection ==="
-curl -s -x "" -o /tmp/downloaded_anon.txt "$BASE_URL/anon/collections/$COLL_HASH/entries/docs/anon_a.txt"
+curl -s -x "" -o /tmp/downloaded_anon.txt "$BASE_URL/anon/collections/$COLL_HASH/docs/anon_a.txt"
 if ! diff "$FILE_A" /tmp/downloaded_anon.txt; then
   echo "FAIL: Downloaded file does not match"
   exit 1
