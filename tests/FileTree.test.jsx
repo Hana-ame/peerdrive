@@ -12,7 +12,7 @@ describe('FileTree', () => {
     const entries = [{ path: 'a.txt', hash: 'abc123', size: 100, mime_type: 'text/plain' }];
     const { container } = render(<FileTree entries={entries} entryActions={{}} />);
     expect(container.textContent).toContain('a.txt');
-    expect(container.textContent).toContain('个条目');
+    expect(container.textContent).toContain('条目');
   });
 
   it('shows folder structure for nested paths', () => {

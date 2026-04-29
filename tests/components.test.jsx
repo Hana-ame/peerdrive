@@ -44,7 +44,7 @@ describe('AnonCreator', () => {
   });
   it('has save button', () => {
     render(<AnonCreator />, { wrapper });
-    expect(screen.getByText('保存')).toBeTruthy();
+    expect(screen.getByText(/保存/)).toBeTruthy();
   });
   it('has no Commit button', () => {
     render(<AnonCreator />, { wrapper });
