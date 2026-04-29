@@ -13,6 +13,7 @@ package model
 import (
 	"database/sql"
 	"encoding/json"
+	"time"
 )
 
 type Collection struct {
@@ -116,4 +117,22 @@ type VersionEntry struct {
 	Path          string `db:"path" json:"path"`
 	FileHash      string `db:"file_hash" json:"file_hash"`
 	ProvidersJSON string `db:"providers_json" json:"-"`
+}
+
+// ─── Share (merged from share.go) ───
+
+type ShareLink struct {
+	ID        int64      `json:"id"`
+	Token     string     `json:"token"`
+	Hash      string     `json:"hash"`
+	Type      string     `json:"type"` // "file" or "collection"
+	Filename  string     `json:"filename,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+type CreateShareRequest struct {
+	Hash     string `json:"hash" binding:"required"`
+	Type     string `json:"type" binding:"required"` // file | collection
+	Filename string `json:"filename,omitempty"`
 }

@@ -28,11 +28,22 @@ type SaveLocalRequest struct {
 }
 
 type SyncStatusResponse struct {
-	CollectionHash string             `json:"collection_hash"`
-	LocalPath      string             `json:"local_path"`
-	TotalFiles     int                `json:"total_files"`
-	SavedFiles     int                `json:"saved_files"`
-	MissingFiles   []LocalSyncFile    `json:"missing_files"`
-	LastSynced     time.Time          `json:"last_synced"`
+	CollectionHash string          `json:"collection_hash"`
+	LocalPath      string          `json:"local_path"`
+	TotalFiles     int             `json:"total_files"`
+	SavedFiles     int             `json:"saved_files"`
+	MissingFiles   []LocalSyncFile `json:"missing_files"`
+	LastSynced     time.Time       `json:"last_synced"`
 }
 
+// ─── TransferTask (merged from transfer_task.go) ───
+
+type TransferTask struct {
+	ID        int    `db:"id"`
+	Type      string `db:"type"`
+	Status    string `db:"status"`
+	Params    string `db:"params"`
+	Result    string `db:"result"`
+	CreatedAt string `db:"created_at"`
+	UpdatedAt string `db:"updated_at"`
+}
