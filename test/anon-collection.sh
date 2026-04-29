@@ -9,6 +9,7 @@ FOLDER_DIR="$TEST_DIR/folder"
 echo "=== Anonymous Collection: Stage 1 Tests ==="
 
 echo "--- Preparing test files ---"
+mkdir -p "$TEST_DIR"
 FILE_A="$TEST_DIR/anon_a.txt"
 FILE_B="$TEST_DIR/anon_b.txt"
 echo "Anonymous File A" > "$FILE_A"
