@@ -17,3 +17,6 @@ Thumbs.db
 server
 main
 downloads/
+
+*.bin
+bt-integration
