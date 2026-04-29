@@ -16,8 +16,9 @@ import (
 	"time"
 
 	"peerdrive/internal/log"
+	"peerdrive/internal/config"
 	"peerdrive/internal/model"
-	"peerdrive/internal/nodestate"
+	"peerdrive/internal/service/nodestate"
 	"peerdrive/internal/p2p_bt"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
@@ -1586,4 +1587,29 @@ func IPFSDHTGet(c *gin.Context) {
 		result[i] = p.ID.String()
 	}
 	c.JSON(http.StatusOK, gin.H{"cid": req.CID, "providers": result})
+}
+
+var signalHub *service.SignalingHub
+
+// InitSignalHub 注入 SignalingHub 实例供 WebRTC 信令使用。
+func InitSignalHub(hub *service.SignalingHub) {
+	signalHub = hub
+}
+
+// GetSignalHub 返回全局 SignalingHub 单例。
+func GetSignalHub() *service.SignalingHub {
+	return signalHub
+}
+
+// WebRTCInfoHandler 返回 GET /p2p/webrtc/info 的 Gin 处理函数，提供 STUN/TURN 配置。
+func WebRTCInfoHandler(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		resp := gin.H{
+			"stun_server": cfg.WebRTCSTUNServer,
+		}
+		if cfg.WebRTCTURNServer != "" {
+			resp["turn_server"] = cfg.WebRTCTURNServer
+		}
+		c.JSON(http.StatusOK, resp)
+	}
 }
