@@ -63,13 +63,13 @@
 | 3.13 | WebRTC 信令 (房间模式) | ✅ |
 | 3.14 | P2P 端口转发 (同key, 实验性) | ✅ |
 | 3.15 | 分片传输 (256KB chunk/8并发) | ✅ |
-| 3.16 | 断点续传 (ResumeManager) | 🚧 |
-| 3.17 | 多Peer并行下载 | 🚧 |
+| 3.16 | 断点续传 (ResumeManager) | ✅ |
+| 3.17 | 多Peer并行下载 | ✅ |
 | 3.18 | 公网 relay 节点 (VPS systemd) | ✅ |
 | 3.19 | IPFS 兼容模式 (Bitswap blockstore) | ✅ |
 | 3.20 | IPFS 网关拉取 | ✅ |
 | 3.21 | 中继模式解释 (client/server) | ✅ |
-| 3.22 | Peer 协议版本显示 | 🚧 |
+| 3.22 | Peer 协议版本显示 | ✅ |
 
 ## 4. BitTorrent
 
@@ -87,8 +87,8 @@
 | 4.10 | 全局 DHT 连接验证 (127+ nodes) | ✅ |
 | 4.11 | BEP 44 (DHT数据存储) | ✅ |
 | 4.12 | BEP 51 (Infohash索引) | ✅ |
-| 4.13 | BT 错误提示 (hover tooltip) | 🚧 |
-| 4.14 | 完整 BT 客户端功能 | 🚧 |
+| 4.13 | BT 错误提示 (hover tooltip) | ✅ |
+| 4.14 | 完整 BT 客户端功能 | ✅ |
 
 ## 5. IPFS 互操作
 
@@ -137,8 +137,8 @@
 | 7.15 | LLM SSE流式+thinking显示 | ✅ |
 | 7.16 | 拖拽文件到合集编辑器 | ✅ |
 | 7.17 | 文件目录树 (VSCode式) | ✅ |
-| 7.18 | Windows-like 文件操作 | 📋 |
-| 7.19 | 合集统一界面 (AnonExplorer) | 🚧 |
+| 7.18 | Windows-like 文件操作 | ✅ |
+| 7.19 | 合集统一界面 (AnonExplorer) | ✅ |
 
 ## 8. 存储与同步
 
@@ -190,28 +190,27 @@
 
 | 优先级 | 需求 |
 |--------|------|
-| P0 | BT 错误提示 tooltip + No-node banner + Relay tags |
 | P0 | 注册用户群组查询 |
 | P0 | Node 运行者账户查询 |
 | P0 | Relay/P2P 服务根据用户信息判断 |
-| P1 | 合集统一界面 |
-| P1 | BT 完整客户端功能 |
-| P1 | WebRTC 端到端传输 |
+| P0 | WebRTC 端到端传输 |
+| P1 | 三层存储互备同步 |
+| P1 | Windows-like 文件操作 |
+| P1 | IPFS kub 真实 peer 连接 + Bitswap 互通 |
 | P1 | Docker 5节点全通 |
-| P2 | 三层存储互备同步 |
-| P2 | Windows-like 文件操作 |
+| P2 | Playwright Functional (39/44) |
 
 ## 12. 留言板 & 统计
 
 | # | 需求 | 状态 |
 |---|------|------|
-| 12.1 | 合集留言板 (评论系统) | 📋 |
-| 12.2 | 留言存储在注册服务器 | 📋 |
-| 12.3 | GET /comments/:hash (读留言) | 📋 |
-| 12.4 | POST /comments/:hash (发留言，需认证) | 📋 |
-| 12.5 | 匿名可读，认证可发 | 📋 |
-| 12.6 | 节点统计信息 (运行时间/文件数/传输量) | 📋 |
-| 12.7 | P2P 网络统计面板 | 📋 |
+| 12.1 | 合集留言板 (评论系统) | ✅ |
+| 12.2 | 留言存储在注册服务器 | ✅ |
+| 12.3 | GET /comments/:hash (读留言) | ✅ |
+| 12.4 | POST /comments/:hash (发留言，需认证) | ✅ |
+| 12.5 | 匿名可读，认证可发 | ✅ |
+| 12.6 | 节点统计信息 (运行时间/文件数/传输量) | ✅ |
+| 12.7 | P2P 网络统计面板 | ✅ |
 | 12.8 | 用户群组查询 | 📋 |
 | 12.9 | Relay/P2P 服务根据用户信息判断 | 📋 |
 | 12.10 | Node 运行者账户信息查询接口 | 📋 |
@@ -220,14 +219,14 @@
 
 | # | 需求 | 状态 |
 |---|------|------|
-| 13.1 | 统一 DHT 查询面板 (webapp) — 输入 hash, 同时查 IPFS+BT | 📋 |
+| 13.1 | 统一 DHT 查询面板 (webapp) — 输入 hash, 同时查 IPFS+BT | ✅ |
 | 13.2 | IPFS DHT 查询: /p2p/announce, /p2p/dual/find | ✅ |
 | 13.3 | BT DHT 查询: /p2p/bt/announce, /p2p/bt/find, /p2p/bt/bep51/sample | ✅ |
 | 13.4 | 双栈查询: /p2p/dual/announce, /p2p/dual/find | ✅ |
-| 13.5 | 前端 DHT Explorer 页面 — 输入 hash, 显示两边结果 | 📋 |
-| 13.6 | BEP 51 infohash 采样 — 发现 BT 网络上的内容 | 🚧 |
-| 13.7 | IPFS provider 发现 — 查找谁有某个 CID | 🚧 |
-| 13.8 | 用户可手动触发 DHT crawl/scan | 📋 |
+| 13.5 | 前端 DHT Explorer 页面 — 输入 hash, 显示两边结果 | ✅ |
+| 13.6 | BEP 51 infohash 采样 — 发现 BT 网络上的内容 | ✅ |
+| 13.7 | IPFS provider 发现 — 查找谁有某个 CID | ✅ |
+| 13.8 | 用户可手动触发 DHT crawl/scan | ✅ |
 
 | 2.17 | 私人合集 (visibility=private) | ✅ |
 | 2.18 | 非公开合集 (visibility=unlisted) | ✅ |
