@@ -1,0 +1,87 @@
+https://peerdrive.pages.dev/settings
+WebDAV 网络驱动器
+将 Peerdrive 存储挂载为本地网络驱动器
+
+已启用
+挂载地址
+https://peerdrive.pages.dev/webdav/
+复制
+操作系统挂载方法
+
+Windows
+
+net use Z: https://peerdrive.pages.dev/webdav/
+macOS
+
+Finder → Go → Connect to Server → 输入地址
+
+https://peerdrive.pages.dev/webdav/
+Linux
+
+mount -t davfs https://peerdrive.pages.dev/webdav/ /mnt/peerdrive
+结合端口转发可透过 P2P 网络远程共享 WebDAV 存储。
+
+
+===== 1 =====
+https://peerdrive.pages.dev/webdav/明显是个纯前端，怎么能挂这里。
+
+
+https://peerdrive.pages.dev/settings
+关于
+版本信息和数据管理
+
+Peerdrive Web
+v0.0.1
+GitHub
+Board 666
+
+我同意采集
+
+===== 2 =====
+这里两个链接是谁啊😅
+
+
+https://peerdrive.pages.dev/
+合集
+≡ 列表
++ 创建合集
+输入 SHA256 Hash / URL 打开合集，或搜索 P2P 网络...
+查看
+💻 本机 (1)
+🌐 P2P 网络 (0)
+📡 广播
+P2P 网络暂无公开合集
+
+从文件管理器注册文件并自动创建匿名合集，或手动创建
+
++ 创建合集
+浏览文件管理器
+
+===== 3 =====
+为什么能添加啊，本地合集广播到p2p网络当然是合集里面操作啊。
+还有前端path你动一下啊，别什么都不改好吗。你用的是react router吗，不是的话改过去。
+
+
+https://peerdrive.pages.dev/
+输入文件 hash 进行广播
+===== 4 =====
+他妈的我说多少次了，不要输hash，他妈的谁给你输入啊，你把用户当人了吗。
+探索和首页怎么还是一样的，我不是给你说了这里怎么改吗，历史记录里找
+
+
+https://peerdrive.pages.dev/anon/collections/f9d61896d78f8ff60b93c8640abc6dea1e29198d7c5366e657540fc03e62438e
+←
+f9d61896d78f8ff60b93c8640abc6dea1e29198d7c5366e657540fc03e62438e
+查看
+📄 t.txt
+单文件
+1 项
+📋 Fork
+🔗 分享
+🌐 P2P 打开
+✓ 已保存到本机
+t.txt
+81c663ca36e2
+test 2026年 04月 28日 星期二 20:20:28 CST
+===== 5 =====
+p2p打开是个毛啊。写的字别人看的懂吗，点一下说是广播出去了，打开和广播是一个意思吗？
