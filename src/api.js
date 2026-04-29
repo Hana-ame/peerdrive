@@ -72,12 +72,12 @@ export const browseDir = (dirPath = '/') =>
   request('GET', `/files/browse?path=${encodeURIComponent(dirPath)}`);
 
 /* ---- anon collections ---- */
-export const createAnonCollection = (entries, friendly_name = '', tags = []) => {
+export const createAnonCollection = (entries, friendly_name = '', tags = [], visibility = '', access_list_hash = '') => {
   const normalized = entries.map(e => ({
     path: e.path,
     providers: e.providers || [{ type: "sha256", value: e.hash, mime_type: e.mime_type || '' }],
   }));
-  return request('POST', '/anon/collections', { entries: normalized, friendly_name, tags });
+  return request('POST', '/anon/collections', { entries: normalized, friendly_name, tags, visibility, access_list_hash });
 };
 export const getAnonCollection = (hash) => request('GET', `/anon/collections/${hash}`);
 export const getAnonFileDownloadUrl = (hash, p) => `${getApiBase()}/anon/collections/${hash}/${p}`;
@@ -346,10 +346,15 @@ export const downloadFileByPath = getUserFileDownloadUrl;
 export const mergeCollection = mergeUserCollection;
 export const getNodeInfo = getP2PNode;
 
-/* ---- share ---- */
-export const createShare = (hash, type, filename) => request('POST', '/shares', { hash, type, filename });
-export const listShares = () => request('GET', '/shares');
-export const getShareUrl = (token) => `${getApiBase()}/s/${token}`;
+/* ---- access list ---- */
+export const createAccessList = (users, groups) =>
+  request('POST', '/access/list', { users: users || [], groups: groups || [] });
+export const getAccessList = (hash) => request('GET', `/access/list/${hash}`);
+
+/* ---- regserver proxy ---- */
+export const listRegUsers = () => request('GET', '/reg/users');
+export const listRegGroups = () => request('GET', '/reg/groups');
+export const getGroupMembers = (name) => request('GET', `/reg/groups/${encodeURIComponent(name)}/members`);
 
 /* ---- local sync ---- */
 export const saveLocal = (body) => request('POST', '/local/save', body);

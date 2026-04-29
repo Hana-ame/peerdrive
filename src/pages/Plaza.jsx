@@ -1,7 +1,7 @@
-// 合集广场：浏览/搜索本机匿名合集和 P2P 公开合集，支持 Fork/分享/下载
+// 合集广场：浏览/搜索本机匿名合集和 P2P 公开合集
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listAnonCollections, listPublicCollections, getP2PStatus, createShare, getShareUrl } from '../api';
+import { listAnonCollections, listPublicCollections, getP2PStatus } from '../api';
 import * as api from '../api';
 import CollectionCard from '../components/CollectionCard';
 
@@ -71,18 +71,6 @@ export default function Plaza() {
   };
 
   const collId = (c) => c.id || c.hash || c.collection_name;
-
-  const [showShare, setShowShare] = useState(null); // {url, name}
-
-  // 生成分享链接并复制到剪贴板
-  const handleShare = async (c) => {
-    try {
-      const share = await createShare(c.hash || c.id, 'collection', c.friendly_name || c.name_preview || '合集');
-      const url = getShareUrl(share.token);
-      setShowShare({ url, name: c.friendly_name || c.name_preview || '合集' });
-      navigator.clipboard.writeText(url).catch(()=>{});
-    } catch(e) { alert('分享失败: ' + e.message); }
-  };
 
   // 跳转到创建页并携带 Fork 源数据
   const handleFork = (c) => {
@@ -173,15 +161,6 @@ export default function Plaza() {
               className="flex-1 bg-gray-800 border border-gray-600 px-4 py-2.5 rounded-lg text-sm font-mono focus:outline-none focus:border-blue-500" />
             <button onClick={handleSearch} className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium">查看</button>
           </div>
-          {showShare && (
-            <div className="flex gap-2 mt-2 p-2 bg-gray-800 rounded-lg border border-gray-700">
-              <input type="text" readOnly value={showShare.url} onClick={e => e.target.select()}
-                className="flex-1 bg-gray-900 text-xs font-mono px-3 py-2 rounded border border-gray-700 text-blue-300" />
-              <button onClick={() => { navigator.clipboard.writeText(showShare.url); setShowShare(null); }}
-                className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-xs">已复制</button>
-              <button onClick={() => setShowShare(null)} className="text-gray-500 hover:text-white px-2">✕</button>
-            </div>
-          )}
           {/* 标签切换：本机 / P2P 网络 / 天线 */}
           <div className="flex gap-1 mt-3">
             <button onClick={() => setPlazaTab('local')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='local'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>💻 本机 ({localColls.length})</button>
@@ -215,7 +194,6 @@ export default function Plaza() {
                 collection={c}
                 viewMode="list"
                 onFork={handleFork}
-                onShare={handleShare}
                 onDownload={handleDownload}
               />
             ))}
@@ -228,7 +206,6 @@ export default function Plaza() {
                 collection={c}
                 viewMode="grid"
                 onFork={handleFork}
-                onShare={handleShare}
                 onDownload={handleDownload}
               />
             ))}

@@ -107,6 +107,7 @@ export default function AnonExplorer() {
               tags={collection.tags} isSingleFile={isSingleFile}
               totalFiles={totalFiles} isLocal={isLocal}
               searchHash={searchHash}
+              visibility={collection.visibility || 'public'}
               onBack={navBack} onSave={handleSaveAndEdit} onToast={showToast} />
 
             <Toast message={toastMsg} isError={toastErr} />

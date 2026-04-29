@@ -1,4 +1,4 @@
-// 文件管理器：浏览/搜索/筛选注册文件，支持多选创建合集和分享
+// 文件管理器：浏览/搜索/筛选注册文件，支持多选创建合集
 // 支持三种浏览模式：时间线、本机目录、数据目录
 import React, { useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -281,36 +281,6 @@ export default function FileManager() {
 
   const handleCreateFromFile = (file) => {
     navigate('/anon/create', { state: { draftFrom: { entries: [{ path: file.filename, hash: file.hash }], friendlyName: file.filename } } });
-  };
-
-  const handleShare = async (file, e) => {
-    e.stopPropagation();
-    try {
-      const share = await api.createShare(file.hash, 'file', file.filename);
-      const url = api.getShareUrl(share.token);
-      await navigator.clipboard.writeText(url);
-      setNotification(`分享链接已复制: ${file.filename}`);
-    } catch (e) {
-      alert(`分享失败: ${e.message}`);
-    }
-  };
-
-  const handleShareSelected = async () => {
-    const links = [];
-    for (const hash of selectedHashes) {
-      try {
-        const file = files.find(f => f.hash === hash);
-        const share = await api.createShare(hash, 'file', file?.filename || '');
-        links.push(api.getShareUrl(share.token));
-      } catch (e) {
-        console.error(`分享失败: ${hash}`, e);
-      }
-    }
-    if (links.length > 0) {
-      await navigator.clipboard.writeText(links.join('\n'));
-      setNotification(`${links.length} 个分享链接已复制`);
-      setSelected({});
-    }
   };
 
   const handleDeleteSelected = async () => {
@@ -738,9 +708,6 @@ export default function FileManager() {
                       🌱 {swarmData[f.hash]}
                     </span>
                   )}
-                  <button onClick={(e) => handleShare(f, e)} className="text-xs px-1.5 py-0.5 rounded hover:bg-gray-700 text-gray-400 hover:text-yellow-400 transition-colors" title="分享此文件">
-                    📤
-                  </button>
                   <button onClick={(e) => { e.stopPropagation(); handleCreateFromFile(f); }} className="text-[10px] bg-teal-600 hover:bg-teal-500 px-2 py-0.5 rounded whitespace-nowrap transition-colors">创建合集</button>
                 </div>
               </div>
@@ -1138,9 +1105,6 @@ export default function FileManager() {
             <div className="flex items-center space-x-3">
               <button onClick={handleCreateCollection} className="bg-teal-600 hover:bg-teal-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                 创建合集 ({selCount})
-              </button>
-              <button onClick={handleShareSelected} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                分享选中 ({selCount})
               </button>
               <button onClick={handleDeleteSelected} className="bg-red-700 hover:bg-red-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                 删除选中 ({selCount})

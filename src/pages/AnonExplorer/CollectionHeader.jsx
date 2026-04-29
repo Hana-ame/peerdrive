@@ -1,15 +1,8 @@
 import * as api from '../../api';
 
-export default function CollectionHeader({ navPath, fname, entries, tags, isSingleFile, totalFiles, isLocal, searchHash, onBack, onSave, onToast }) {
-  const handleShare = async () => {
-    try {
-      const share = await api.createShare(searchHash, 'collection', fname || '合集');
-      const url = api.getShareUrl(share.token);
-      await navigator.clipboard.writeText(url);
-      onToast('分享链接已复制: ' + url, false);
-    } catch(e) { onToast('分享失败: ' + e.message, true); }
-  };
+const VIS_LABELS = { public: '🌐 公开', restricted: '👥 受限', private: '🔒 私密' };
 
+export default function CollectionHeader({ navPath, fname, entries, tags, isSingleFile, totalFiles, isLocal, searchHash, visibility, onBack, onSave, onToast }) {
   const handleBroadcast = async () => {
     if (!searchHash) return;
     try {
@@ -22,6 +15,8 @@ export default function CollectionHeader({ navPath, fname, entries, tags, isSing
     if (isLocal) return;
     onSave();
   };
+
+  const visLabel = VIS_LABELS[visibility] || '';
 
   return (
     <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-800 shrink-0 flex-wrap">
@@ -44,9 +39,11 @@ export default function CollectionHeader({ navPath, fname, entries, tags, isSing
       )}
       <div className="flex-1 min-w-0" />
       <span className="text-xs text-gray-600 shrink-0">{totalFiles} 项</span>
+      {visLabel && <span className="text-[10px] text-gray-500 shrink-0">{visLabel}</span>}
       <div className="flex items-center gap-1 shrink-0">
-        <button onClick={handleShare} className="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-xs">🔗 分享</button>
-        <button onClick={handleBroadcast} className="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs">📡 广播</button>
+        {visibility === 'public' && (
+          <button onClick={handleBroadcast} className="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs">📡 广播</button>
+        )}
         <button onClick={handleSave}
           className={`px-3 py-1 rounded text-xs ${isLocal ? 'bg-green-500/20 text-green-400' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
           {isLocal ? '✓ 已保存' : '💾 保存到本机'}
