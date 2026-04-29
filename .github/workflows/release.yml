@@ -15,6 +15,8 @@ jobs:
           - { os: macos-latest,   goos: darwin,  goarch: arm64, ext: '' }
 
     runs-on: ${{ matrix.os }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +36,8 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/download-artifact@v4
 

@@ -13,6 +13,8 @@ jobs:
           - { os: macos-latest,   goos: darwin,  goarch: arm64 }
 
     runs-on: ${{ matrix.os }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - uses: actions/checkout@v4
