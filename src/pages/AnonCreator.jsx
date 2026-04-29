@@ -574,9 +574,11 @@ export default function AnonCreator() {
       </div>
 
       {/* ===== RIGHT PANEL — 文件源 + 编辑区 ===== */}
-      <div style={{ width: `${100 - split}%` }} className="h-full flex flex-col">
-        {/* 文件源标签栏 */}
-        <div className="flex bg-gray-800 rounded mx-2 mt-2 shrink-0">
+      <div style={{ width: `${100 - split}%` }} className="h-full flex flex-row">
+        {/* 文件源 — 左半部分 */}
+        <div className="w-1/2 flex flex-col overflow-hidden border-r border-gray-700">
+          {/* 文件源标签栏 */}
+          <div className="flex bg-gray-800 rounded mx-2 mt-2 shrink-0">
           <button onClick={() => setSrcTab('timeline')} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'timeline' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>🕐 时间线</button>
           <button onClick={() => setSrcTab('registered')} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'registered' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>📁 已注册</button>
           <button onClick={() => { setSrcTab('system'); setSysPath('/'); }} className={`flex-1 px-3 py-2 text-sm rounded ${srcTab === 'system' ? 'bg-blue-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}>🖥️ 本机</button>
@@ -600,7 +602,7 @@ export default function AnonCreator() {
         )}
 
         {/* 文件源内容区（可滚动） */}
-        <div className={`flex-1 overflow-y-auto ${srcTab === 'system' ? '' : 'max-h-[45%]'}`}>
+        <div className="flex-1 overflow-y-auto">
           {/* TIMELINE */}
           {srcTab === 'timeline' && (
             filtered.length === 0 ? <p className="p-4 text-gray-600 text-xs">无匹配文件</p> :
@@ -684,8 +686,10 @@ export default function AnonCreator() {
           )}
         </div>
 
-        {/* 编辑区 — 合集草稿 */}
-        <div className="border-t border-gray-700 flex-1 flex flex-col min-h-[200px]">
+        </div>
+
+        {/* 编辑区 — 合集草稿 · 右半部分 */}
+        <div className="w-1/2 flex flex-col min-h-[200px]">
           {/* Toast 消息 */}
           {toastMsg && (
             <div className={`px-3 py-1 text-xs shrink-0 ${toastErr ? 'text-red-400 bg-red-500/10' : 'text-green-400 bg-green-500/10'}`}>{toastMsg}</div>
