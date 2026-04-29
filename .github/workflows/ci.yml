@@ -41,12 +41,12 @@ jobs:
         continue-on-error: true
         run: |
           chmod +x test/p2p.sh
-          bash test/p2p.sh || echo "P2P test skipped (no network environment)"
+          bash test/p2p.sh || echo "P2P test skipped"
 
       - name: Anon collection test
         run: |
           mkdir -p /tmp/peerdrive_test
-                    PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false ./peerdrive-server &
+          PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false ./peerdrive-server &
           PID=$!
           sleep 3
           chmod +x test/anon-collection.sh
@@ -58,7 +58,7 @@ jobs:
 
       - name: File upload test
         run: |
-                    PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false ./peerdrive-server &
+          PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false ./peerdrive-server &
           PID=$!
           sleep 3
           chmod +x test/upload.sh
@@ -70,7 +70,7 @@ jobs:
 
       - name: Register test
         run: |
-                    PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false ./peerdrive-server &
+          PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false ./peerdrive-server &
           PID=$!
           sleep 3
           chmod +x test/register.sh
@@ -84,19 +84,15 @@ jobs:
         continue-on-error: true
         run: |
           chmod +x test/relay.sh
-          bash test/relay.sh || echo "Relay test skipped (no network environment)"
+          bash test/relay.sh || echo "Relay test skipped"
 
       - name: Generate test report
         if: always()
         run: |
           echo "# Peerdrive CI Test Report" > TEST_REPORT.md
-          echo "" >> TEST_REPORT.md
-          echo "## Build & Unit Tests" >> TEST_REPORT.md
           echo "- **Status**: ${{ job.status }}" >> TEST_REPORT.md
-          echo "" >> TEST_REPORT.md
-          echo "## Notes" >> TEST_REPORT.md
-          echo "- P2P/Relay tests: soft-fail (continue-on-error), skipped if no network" >> TEST_REPORT.md
-          echo "- Non-P2P tests run with PEERDRIVE_P2P_ENABLE=false" >> TEST_REPORT.md
+          echo "- P2P/Relay: soft-fail (continue-on-error)" >> TEST_REPORT.md
+          echo "- Non-P2P tests: PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false" >> TEST_REPORT.md
           cat TEST_REPORT.md
 
       - name: Upload test report
