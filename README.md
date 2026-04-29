@@ -241,8 +241,6 @@ go test ./...
 
 ## 前端界面
 
-![Peerdrive UI](react/screenshot.png)
-
 - **侧边栏**：节点管理、合集切换、Fork/Pull/GC
 - **文件列表**：条目展示、状态图标、上传/下载
 - **版本历史**：Commit 日志、合并来源展示
@@ -257,9 +255,9 @@ go test ./...
 
 ## 详细文档
 
-参见 `go/docs/` 目录：
-- [设计文档](go/docs/design.md) — 系统架构与核心设计
-- [API 接口](go/docs/api.md) — 完整 REST API 参考
-- [数据库设计](go/docs/database.md) — 表结构与索引
-- [服务层文档](go/docs/services.md) — Service 层详解
-- [测试文档](go/docs/testing.md) — 测试用例与运行方式
+参见 `docs/` 目录：
+- [文档索引](INDEX.md) — 全部文档导航
+- [API 参考](spec/API-REFERENCE.md) — 完整 REST API + Swagger
+- [数据库设计](spec/backend/database.md) — 表结构与索引
+- [测试文档](testing/index.md) — 测试文档门户
+- [操作指南](guide/操作说明.md) — 使用说明

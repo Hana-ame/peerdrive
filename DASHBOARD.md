@@ -37,13 +37,16 @@ go/test/<module>-full-test.sh
 go/test/<module>-full-test-results.txt
 
 # 代码
-worktrees/<module>-agent/    (Go 后端)
-frontend-worktrees/<module>-frontend/  (React 前端)
+internal/<module>/    (Go 后端)
+react/src/            (React 前端)
 ```
 
 ## 运行测试
 
 ```bash
+# 从项目根目录运行：
+cd /mnt/d/WorkPlace/peerdrive
+
 # 全部模块
 bash go/test/bt-full-test.sh
 bash go/test/ipfs-full-test.sh

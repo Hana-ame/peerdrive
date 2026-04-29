@@ -3,6 +3,7 @@
 ## spec — 技术规范
 | 文件 | 内容 |
 |------|------|
+| [API-REFERENCE.md](spec/API-REFERENCE.md) | 完整 API 参考 (105 端点 + Swagger) |
 | [REQUIREMENTS.md](spec/REQUIREMENTS.md) | 全部需求总表 (130+ 项) |
 | [COLLECTION-LOGIC.md](spec/COLLECTION-LOGIC.md) | 合集逻辑完整追踪 |
 | [USER-ROLES.md](spec/USER-ROLES.md) | 用户角色模型 |
@@ -28,7 +29,8 @@
 | [TEST-PIPELINE.md](testing/TEST-PIPELINE.md) | **测试管线文档** — 每个测试脚本的流程、预期行为、错误分析、是否需要改代码 |
 | [TEST-MATRIX.md](testing/TEST-MATRIX.md) | 测试矩阵 — 109 项测试用例 |
 | [TESTING-METHODOLOGY.md](testing/TESTING-METHODOLOGY.md) | 测试方法详解 — 9 Phase 方法论 |
-| [test-steps.md](testing/test-steps.md) | P2P 测试实录 — VPS 完整步骤日志 |
+| [如何测试.md](testing/如何测试.md) | 中文测试操作指南 |
+| [测试方案.md](testing/测试方案.md) | 测试体系总览、分类、运行方式 |
 | [CHAOS_TESTING.md](testing/CHAOS_TESTING.md) | 混沌测试 — 恶劣网络模拟 |
 
 ## report — 报告

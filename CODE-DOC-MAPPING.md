@@ -35,7 +35,7 @@
 - **[spec/backend/upload.md](spec/backend/upload.md)** — 上传流程
 - **[spec/backend/register.md](spec/backend/register.md)** — 注册流程
 - **[spec/backend/sha256-download.md](spec/backend/sha256-download.md)** — 下载流程
-- **[testing/register.md](testing/register.md)** — 注册测试说明
+- **[testing/archive/register.md](testing/archive/register.md)** — 注册测试说明
 
 ### internal/controller/download.go (329行) — 下载
 - **[spec/backend/sha256-download.md](spec/backend/sha256-download.md)** — SHA256 下载
@@ -45,7 +45,7 @@
 - **[modules/p2p/README.md](modules/p2p/README.md)** — P2P 模块概述
 - **[modules/p2p/API-DESIGN.md](modules/p2p/API-DESIGN.md)** — P2P API
 - **[spec/p2p/p2p.md](spec/p2p/p2p.md)** — 协议细节
-- **[testing/test-steps.md](testing/test-steps.md)** — P2P 实测步骤
+- **[testing/archive/test-steps.md](testing/archive/test-steps.md)** — P2P 实测步骤
 
 ### internal/p2p_bt/ (4328行, 完全解耦) — BitTorrent
 - **[modules/bt/README.md](modules/bt/README.md)** — BT 模块概述
@@ -137,8 +137,8 @@
 | [TESTING-HANDBOOK.md](testing/TESTING-HANDBOOK.md) | `go/test/*.sh`, `go/*_test.go` |
 | [TEST-MATRIX.md](testing/TEST-MATRIX.md) | `go/test/*.sh` (每个测试ID对应脚本) |
 | [TESTING-METHODOLOGY.md](testing/TESTING-METHODOLOGY.md) | `go/test/p2p.sh`, `go/test/relay.sh` |
-| [test-steps.md](testing/test-steps.md) | `go/test/p2p.sh` Phase 1-7 |
-| [register.md](testing/register.md) | `go/test/register.sh` |
+| [test-steps.md](testing/archive/test-steps.md) | `go/test/p2p.sh` Phase 1-7 |
+| [register.md](testing/archive/register.md) | `go/test/register.sh` |
 | [CHAOS_TESTING.md](testing/CHAOS_TESTING.md) | `go/test/chaos-net.sh`, `go/test/test-under-chaos.sh` |
 
 ---
