@@ -87,7 +87,7 @@ func (s *AnonService) CreateCollection(name string, entries []model.AnonCollecti
 			log.LogError("anon-svc: CreateCollection invalid path: %s", e.Path)
 			return "", err
 		}
-		if !isValidProviders(e.Providers) {
+		if !strings.HasSuffix(e.Path, "/") && !isValidProviders(e.Providers) {
 			err := fmt.Errorf("invalid providers for path: %s", e.Path)
 			log.LogError("anon-svc: CreateCollection invalid providers for path: %s", e.Path)
 			return "", err
@@ -184,7 +184,7 @@ func (s *AnonService) CommitCollection(
 			log.LogError("anon-svc: CommitCollection invalid path: %s", e.Path)
 			return "", err
 		}
-		if !isValidProviders(e.Providers) {
+		if !strings.HasSuffix(e.Path, "/") && !isValidProviders(e.Providers) {
 			err := fmt.Errorf("invalid providers for path: %s", e.Path)
 			log.LogError("anon-svc: CommitCollection invalid providers for path: %s", e.Path)
 			return "", err
