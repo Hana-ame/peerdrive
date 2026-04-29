@@ -13,15 +13,18 @@ package controller
 import (
 	"net/http"
 
+	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 
 	"github.com/gin-gonic/gin"
 )
 
 type Conflict struct {
-	Path       string `json:"path"`
-	LocalHash  string `json:"local_hash"`
-	SourceHash string `json:"source_hash"`
+	Path           string           `json:"path"`
+	LocalHash      string           `json:"local_hash"`
+	SourceHash     string           `json:"source_hash"`
+	LocalProviders []model.Provider `json:"local_providers,omitempty"`
+	SourceProviders []model.Provider `json:"source_providers,omitempty"`
 }
 
 // MergeFromSource godoc
@@ -79,20 +82,38 @@ func MergeFromSource(c *gin.Context) {
 		return
 	}
 
-	localMap := make(map[string]string)
+	localMap := make(map[string][]model.Provider)
 	for _, e := range localEntries {
-		localMap[e.Path] = e.FileHash
+		localMap[e.Path] = e.BuildProviders()
 	}
-	sourceMap := make(map[string]string)
+	sourceMap := make(map[string][]model.Provider)
 	for _, e := range sourceEntries {
-		sourceMap[e.Path] = e.FileHash
+		sourceMap[e.Path] = e.BuildProviders()
+	}
+
+	// 提取主 hash 用于冲突检测
+	primaryHash := func(providers []model.Provider) string {
+		for _, p := range providers {
+			if p.Type == "sha256" && p.Value != "" {
+				return p.Value
+			}
+		}
+		return ""
 	}
 
 	var conflicts []Conflict
-	for path, sourceHash := range sourceMap {
-		if localHash, ok := localMap[path]; ok {
-			if localHash != sourceHash {
-				conflicts = append(conflicts, Conflict{Path: path, LocalHash: localHash, SourceHash: sourceHash})
+	for path, sourceProviders := range sourceMap {
+		if localProviders, ok := localMap[path]; ok {
+			localH := primaryHash(localProviders)
+			sourceH := primaryHash(sourceProviders)
+			if localH != sourceH {
+				conflicts = append(conflicts, Conflict{
+					Path:            path,
+					LocalHash:       localH,
+					SourceHash:      sourceH,
+					LocalProviders:  localProviders,
+					SourceProviders: sourceProviders,
+				})
 			}
 		}
 	}
@@ -102,22 +123,22 @@ func MergeFromSource(c *gin.Context) {
 		return
 	}
 
-	merged := make(map[string]string)
+	merged := make(map[string][]model.Provider)
 	for k, v := range localMap {
 		merged[k] = v
 	}
-	for path, sourceHash := range sourceMap {
+	for path, sourceProviders := range sourceMap {
 		if _, exists := localMap[path]; !exists {
-			merged[path] = sourceHash
-		} else if localMap[path] != sourceHash {
+			merged[path] = sourceProviders
+		} else if primaryHash(localMap[path]) != primaryHash(sourceProviders) {
 			if req.Strategy == "theirs" {
-				merged[path] = sourceHash
+				merged[path] = sourceProviders
 			}
 		}
 	}
 
-	for path, hash := range merged {
-		if err := repository.AddCollectionEntry(local.ID, path, hash); err != nil {
+	for path, providers := range merged {
+		if err := repository.AddProviderCollectionEntry(local.ID, path, providers); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

@@ -43,8 +43,9 @@ func CreateAnonCollection(c *gin.Context) {
 
 	hash, err := anonSvc.CreateCollection(req.FriendlyName, req.Entries, req.Tags)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid path") || strings.Contains(err.Error(), "invalid hash") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		msg := err.Error()
+		if strings.Contains(msg, "invalid path") || strings.Contains(msg, "invalid hash") || strings.Contains(msg, "invalid providers") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -121,27 +122,40 @@ func DownloadAnonFile(c *gin.Context) {
 		return
 	}
 
-	reader, filename, gziped, err := downloader.GetFileStream(targetEntry.Hash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "file data not available"})
-		return
+	// 按 provider 顺序尝试下载：sha256 优先，url 兜底
+	primaryHash := targetEntry.GetPrimaryHash()
+	if primaryHash != "" {
+		reader, filename, gziped, err := downloader.GetFileStream(primaryHash)
+		if err == nil {
+			defer reader.Close()
+			downloadFilename := filename
+			if downloadFilename == "" {
+				downloadFilename = filepath.Base(filePath)
+			}
+			mimeType := targetEntry.GetPrimaryMime()
+			if mimeType == "" {
+				mimeType = "application/octet-stream"
+			}
+			if c.Query("inline") == "1" {
+				c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, downloadFilename))
+			} else {
+				c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, downloadFilename))
+			}
+			if gziped {
+				c.Header("Content-Encoding", "gzip")
+			}
+			c.DataFromReader(http.StatusOK, -1, mimeType, reader, nil)
+			return
+		}
 	}
-	defer reader.Close()
-
-	downloadFilename := filename
-	if downloadFilename == "" {
-		downloadFilename = filepath.Base(filePath)
+	// fallback: URL providers
+	for _, p := range targetEntry.Providers {
+		if p.Type == "url" && p.Value != "" {
+			c.Redirect(http.StatusFound, p.Value)
+			return
+		}
 	}
-
-	if c.Query("inline") == "1" {
-		c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, downloadFilename))
-	} else {
-		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, downloadFilename))
-	}
-	if gziped {
-		c.Header("Content-Encoding", "gzip")
-	}
-	c.DataFromReader(http.StatusOK, -1, "application/octet-stream", reader, nil)
+	c.JSON(http.StatusNotFound, gin.H{"error": "no usable provider found for this file"})
 }
 
 // ForkAnonCollection godoc

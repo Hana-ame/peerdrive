@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -43,10 +44,42 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-// CreateCollection 创建匿名集合，验证条目路径和 hash，写入 content-addressed 存储并返回 SHA256。
+func isValidProviders(providers []model.Provider) bool {
+	if len(providers) == 0 {
+		return false
+	}
+	hasValid := false
+	for _, p := range providers {
+		if p.Type == "" && p.Value == "" {
+			continue
+		}
+		hasValid = true
+		switch p.Type {
+		case "sha256":
+			if !isValidHash(p.Value) {
+				return false
+			}
+		case "url":
+			u, err := url.ParseRequestURI(p.Value)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return hasValid
+}
+
+// CreateCollection 创建匿名集合，验证条目路径和 providers，写入 content-addressed 存储并返回 SHA256。
 func (s *AnonService) CreateCollection(name string, entries []model.AnonCollectionEntry, tags []string) (string, error) {
 	defer log.LogDuration("AnonService.CreateCollection")()
 	log.LogDebug("anon-svc: CreateCollection name=%s entries=%d", name, len(entries))
+
+	// 规范化：struct literal 可能直接设置 Hash 但没设 Providers
+	for i := range entries {
+		entries[i].Normalize()
+	}
 
 	for _, e := range entries {
 		if e.Path == "" || !isRelativePath(e.Path) || strings.Contains(e.Path, "..") {
@@ -54,9 +87,9 @@ func (s *AnonService) CreateCollection(name string, entries []model.AnonCollecti
 			log.LogError("anon-svc: CreateCollection invalid path: %s", e.Path)
 			return "", err
 		}
-		if !isValidHash(e.Hash) {
-			err := fmt.Errorf("invalid hash: %s", e.Hash)
-			log.LogError("anon-svc: CreateCollection invalid hash: %s", e.Hash)
+		if !isValidProviders(e.Providers) {
+			err := fmt.Errorf("invalid providers for path: %s", e.Path)
+			log.LogError("anon-svc: CreateCollection invalid providers for path: %s", e.Path)
 			return "", err
 		}
 	}
@@ -120,6 +153,7 @@ func (s *AnonService) GetCollectionByHash(hash string) (*model.AnonCollection, e
 		log.LogError("anon-svc: GetCollectionByHash %s unsupported version: %d", hash, coll.Version)
 		return nil, fmt.Errorf("unsupported version: %d", coll.Version)
 	}
+	coll.NormalizeEntries()
 	log.LogInfo("anon-svc: GetCollectionByHash %s found (version=%d, entries=%d)", hash, coll.Version, len(coll.Entries))
 	return &coll, nil
 }
@@ -150,29 +184,30 @@ func (s *AnonService) CommitCollection(
 			log.LogError("anon-svc: CommitCollection invalid path: %s", e.Path)
 			return "", err
 		}
-		if !isValidHash(e.Hash) {
-			err := fmt.Errorf("invalid hash: %s", e.Hash)
-			log.LogError("anon-svc: CommitCollection invalid hash: %s", e.Hash)
+		if !isValidProviders(e.Providers) {
+			err := fmt.Errorf("invalid providers for path: %s", e.Path)
+			log.LogError("anon-svc: CommitCollection invalid providers for path: %s", e.Path)
 			return "", err
 		}
 	}
 
-	entryMap := map[string]string{}
+	// 用 providers 合并源条目和新条目
+	entryMap := map[string][]model.Provider{}
 	for _, e := range src.Entries {
-		entryMap[e.Path] = e.Hash
+		entryMap[e.Path] = e.Providers
 	}
 	for _, e := range entries {
-		entryMap[e.Path] = e.Hash
+		entryMap[e.Path] = e.Providers
 	}
 
 	sortedEntries := make([]model.AnonCollectionEntry, 0, len(entryMap))
 	removeEmpty := false
-	for path, hash := range entryMap {
-		if hash == "" {
+	for path, providers := range entryMap {
+		if len(providers) == 0 {
 			removeEmpty = true
 			continue
 		}
-		sortedEntries = append(sortedEntries, model.AnonCollectionEntry{Path: path, Hash: hash})
+		sortedEntries = append(sortedEntries, model.AnonCollectionEntry{Path: path, Providers: providers})
 	}
 	if removeEmpty {
 		coll := newAnonCollectionWithVersion(src.FriendlyName, sortedEntries, src.Version+1, src.Tags)

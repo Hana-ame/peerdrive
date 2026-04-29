@@ -16,6 +16,8 @@ package repository
 
 import (
 	"database/sql"
+	"encoding/json"
+
 	"peerdrive/internal/model"
 )
 
@@ -157,11 +159,32 @@ func SearchCollections(query string) ([]model.Collection, error) {
 	return cols, nil
 }
 
-// AddCollectionEntry 插入或更新集合中的一条 path->fileHash 映射（upsert 语义）。
+// AddCollectionEntry 插入或更新集合中的一条 path->fileHash 映射（upsert 语义），同时存储 providers_json。
 func AddCollectionEntry(collectionID int, path, fileHash string) error {
-	_, err := DB.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash) VALUES (?, ?, ?)
-		ON CONFLICT(collection_id, path) DO UPDATE SET file_hash = excluded.file_hash`,
-		collectionID, path, fileHash)
+	providers := []model.Provider{{Type: "sha256", Value: fileHash}}
+	providersJSON, _ := json.Marshal(providers)
+	_, err := DB.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash, providers_json) VALUES (?, ?, ?, ?)
+		ON CONFLICT(collection_id, path) DO UPDATE SET file_hash = excluded.file_hash, providers_json = excluded.providers_json`,
+		collectionID, path, fileHash, string(providersJSON))
+	return err
+}
+
+// AddProviderCollectionEntry 插入或更新集合条目，附带完整的 providers 数组。
+func AddProviderCollectionEntry(collectionID int, path string, providers []model.Provider) error {
+	primaryHash := ""
+	for _, p := range providers {
+		if p.Type == "sha256" && p.Value != "" {
+			primaryHash = p.Value
+			break
+		}
+	}
+	if providers == nil {
+		providers = []model.Provider{}
+	}
+	providersJSON, _ := json.Marshal(providers)
+	_, err := DB.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash, providers_json) VALUES (?, ?, ?, ?)
+		ON CONFLICT(collection_id, path) DO UPDATE SET file_hash = excluded.file_hash, providers_json = excluded.providers_json`,
+		collectionID, path, primaryHash, string(providersJSON))
 	return err
 }
 
@@ -175,20 +198,24 @@ func RemoveCollectionEntry(collectionID int, path string) error {
 // GetCollectionEntry 查询集合中指定 path 的条目；未找到时返回 (nil, nil)。
 func GetCollectionEntry(collectionID int, path string) (*model.CollectionEntry, error) {
 	var e model.CollectionEntry
-	err := DB.QueryRow(`SELECT id, collection_id, path, file_hash FROM collection_entries WHERE collection_id = ? AND path = ?`,
-		collectionID, path).Scan(&e.ID, &e.CollectionID, &e.Path, &e.FileHash)
+	var pj sql.NullString
+	err := DB.QueryRow(`SELECT id, collection_id, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ? AND path = ?`,
+		collectionID, path).Scan(&e.ID, &e.CollectionID, &e.Path, &e.FileHash, &pj)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	if pj.Valid {
+		e.ProvidersJSON = pj.String
+	}
 	return &e, nil
 }
 
-// ListCollectionEntries 查询集合中的所有条目。
+// ListCollectionEntries 查询集合中的所有条目，包含 providers_json。
 func ListCollectionEntries(collectionID int) ([]model.CollectionEntry, error) {
-	rows, err := DB.Query(`SELECT id, collection_id, path, file_hash FROM collection_entries WHERE collection_id = ?`, collectionID)
+	rows, err := DB.Query(`SELECT id, collection_id, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ?`, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -196,9 +223,11 @@ func ListCollectionEntries(collectionID int) ([]model.CollectionEntry, error) {
 	var entries []model.CollectionEntry
 	for rows.Next() {
 		var e model.CollectionEntry
-		if err := rows.Scan(&e.ID, &e.CollectionID, &e.Path, &e.FileHash); err != nil {
+		var pj string
+		if err := rows.Scan(&e.ID, &e.CollectionID, &e.Path, &e.FileHash, &pj); err != nil {
 			return nil, err
 		}
+		e.ProvidersJSON = pj
 		entries = append(entries, e)
 	}
 	return entries, nil
@@ -228,9 +257,9 @@ func CreateVersion(collectionID int, commitMsg string, parentVersionID *int) (in
 	return int(id), newVer, nil
 }
 
-// SnapshotVersionEntries 将集合当前条目快照复制到指定版本的 version_entries 表中。
+// SnapshotVersionEntries 将集合当前条目快照（含 providers_json）复制到 version_entries。
 func SnapshotVersionEntries(versionID, collectionID int) error {
-	_, err := DB.Exec(`INSERT INTO version_entries (version_id, path, file_hash) SELECT ?, path, file_hash FROM collection_entries WHERE collection_id = ?`,
+	_, err := DB.Exec(`INSERT INTO version_entries (version_id, path, file_hash, providers_json) SELECT ?, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ?`,
 		versionID, collectionID)
 	return err
 }
@@ -253,9 +282,9 @@ func GetVersionLog(collectionID int) ([]model.CollectionVersion, error) {
 	return versions, nil
 }
 
-// GetVersionEntries 查询指定版本快照中的全部条目列表。
+// GetVersionEntries 查询指定版本快照中的全部条目列表（含 providers_json）。
 func GetVersionEntries(versionID int) ([]model.VersionEntry, error) {
-	rows, err := DB.Query(`SELECT id, version_id, path, file_hash FROM version_entries WHERE version_id = ?`, versionID)
+	rows, err := DB.Query(`SELECT id, version_id, path, file_hash, COALESCE(providers_json, '') FROM version_entries WHERE version_id = ?`, versionID)
 	if err != nil {
 		return nil, err
 	}
@@ -263,15 +292,17 @@ func GetVersionEntries(versionID int) ([]model.VersionEntry, error) {
 	var entries []model.VersionEntry
 	for rows.Next() {
 		var e model.VersionEntry
-		if err := rows.Scan(&e.ID, &e.VersionID, &e.Path, &e.FileHash); err != nil {
+		var pj string
+		if err := rows.Scan(&e.ID, &e.VersionID, &e.Path, &e.FileHash, &pj); err != nil {
 			return nil, err
 		}
+		e.ProvidersJSON = pj
 		entries = append(entries, e)
 	}
 	return entries, nil
 }
 
-// RestoreVersionEntries 在事务内将集合条目回滚到指定版本的快照内容（先删后插）。
+// RestoreVersionEntries 在事务内将集合条目回滚到指定版本的快照内容（先删后插，含 providers_json）。
 func RestoreVersionEntries(versionID, collectionID int) error {
 	entries, err := GetVersionEntries(versionID)
 	if err != nil {
@@ -287,8 +318,8 @@ func RestoreVersionEntries(versionID, collectionID int) error {
 		return err
 	}
 	for _, e := range entries {
-		_, err = tx.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash) VALUES (?, ?, ?)`,
-			collectionID, e.Path, e.FileHash)
+		_, err = tx.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash, providers_json) VALUES (?, ?, ?, ?)`,
+			collectionID, e.Path, e.FileHash, e.ProvidersJSON)
 		if err != nil {
 			return err
 		}

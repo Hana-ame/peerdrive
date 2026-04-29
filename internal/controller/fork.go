@@ -63,9 +63,17 @@ func ForkCollection(c *gin.Context) {
 		return
 	}
 	for _, e := range entries {
-		if err := repository.AddCollectionEntry(localID, e.Path, e.FileHash); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+		providers := e.BuildProviders()
+		if len(providers) > 0 && e.ProvidersJSON != "" {
+			if err := repository.AddProviderCollectionEntry(localID, e.Path, providers); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		} else {
+			if err := repository.AddCollectionEntry(localID, e.Path, e.FileHash); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 		}
 	}
 

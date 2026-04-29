@@ -80,10 +80,25 @@ func MarshalTags(tags []string) string {
 }
 
 type CollectionEntry struct {
-	ID           int    `db:"id" json:"id"`
-	CollectionID int    `db:"collection_id" json:"collection_id"`
-	Path         string `db:"path" json:"path"`
-	FileHash     string `db:"file_hash" json:"file_hash"`
+	ID             int    `db:"id" json:"id"`
+	CollectionID   int    `db:"collection_id" json:"collection_id"`
+	Path           string `db:"path" json:"path"`
+	FileHash       string `db:"file_hash" json:"file_hash"`
+	ProvidersJSON  string `db:"providers_json" json:"-"`
+}
+
+// BuildProviders 从 file_hash 和 providers_json 重建完整 providers 数组。
+func (e *CollectionEntry) BuildProviders() []Provider {
+	if e.ProvidersJSON != "" {
+		var providers []Provider
+		if err := json.Unmarshal([]byte(e.ProvidersJSON), &providers); err == nil && len(providers) > 0 {
+			return providers
+		}
+	}
+	if e.FileHash != "" {
+		return []Provider{{Type: "sha256", Value: e.FileHash}}
+	}
+	return []Provider{}
 }
 
 type CollectionVersion struct {
@@ -96,8 +111,9 @@ type CollectionVersion struct {
 }
 
 type VersionEntry struct {
-	ID        int    `db:"id" json:"id"`
-	VersionID int    `db:"version_id" json:"version_id"`
-	Path      string `db:"path" json:"path"`
-	FileHash  string `db:"file_hash" json:"file_hash"`
+	ID            int    `db:"id" json:"id"`
+	VersionID     int    `db:"version_id" json:"version_id"`
+	Path          string `db:"path" json:"path"`
+	FileHash      string `db:"file_hash" json:"file_hash"`
+	ProvidersJSON string `db:"providers_json" json:"-"`
 }

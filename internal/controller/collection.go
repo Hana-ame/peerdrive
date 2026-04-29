@@ -25,6 +25,7 @@ package controller
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -148,11 +149,14 @@ func GetCollection(c *gin.Context) {
 		storageDir := c.MustGet("storageDir").(string)
 		anonColl, err := repository.GetAnonCollectionByHash(*col.CurrentHash, storageDir)
 		if err == nil {
+			anonColl.NormalizeEntries()
 			entries = make([]model.CollectionEntry, 0, len(anonColl.Entries))
 			for _, ae := range anonColl.Entries {
+				pj, _ := json.Marshal(ae.Providers)
 				entries = append(entries, model.CollectionEntry{
-					Path: ae.Path,
-					FileHash: ae.Hash,
+					Path:          ae.Path,
+					FileHash:      ae.GetPrimaryHash(),
+					ProvidersJSON: string(pj),
 				})
 			}
 		}
@@ -186,8 +190,9 @@ func AddEntry(c *gin.Context) {
 	username := c.Param("username")
 	collectionName := c.Param("collection_name")
 	var req struct {
-		Path string `json:"path"`
-		Hash string `json:"hash"`
+		Path      string           `json:"path"`
+		Hash      string           `json:"hash"`
+		Providers []model.Provider `json:"providers,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -198,7 +203,15 @@ func AddEntry(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if err := repository.AddCollectionEntry(collID, req.Path, req.Hash); err != nil {
+	if len(req.Providers) > 0 {
+		err = repository.AddProviderCollectionEntry(collID, req.Path, req.Providers)
+	} else if req.Hash != "" {
+		err = repository.AddCollectionEntry(collID, req.Path, req.Hash)
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "must provide hash or providers"})
+		return
+	}
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -250,7 +263,7 @@ func RemoveEntry(c *gin.Context) {
 func DownloadCollectionFile(c *gin.Context) {
 	username := c.Param("username")
 	collectionName := c.Param("collection_name")
-	filepath := strings.TrimPrefix(c.Param("filepath"), "/")
+	filePath := strings.TrimPrefix(c.Param("filepath"), "/")
 	col, err := repository.GetCollection(username, collectionName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -260,7 +273,7 @@ func DownloadCollectionFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
 	}
-	entry, err := repository.GetCollectionEntry(col.ID, filepath)
+	entry, err := repository.GetCollectionEntry(col.ID, filePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -269,7 +282,26 @@ func DownloadCollectionFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found in collection"})
 		return
 	}
-	DownloadBySHA256Internal(c, entry.FileHash)
+	providers := entry.BuildProviders()
+	// 按 provider 顺序尝试：sha256 优先
+	for _, p := range providers {
+		if p.Type == "sha256" && p.Value != "" {
+			DownloadBySHA256Internal(c, p.Value)
+			return
+		}
+	}
+	// fallback: URL providers
+	for _, p := range providers {
+		if p.Type == "url" && p.Value != "" {
+			if !col.FollowRedirects {
+				c.JSON(http.StatusOK, gin.H{"url": p.Value, "follow_redirects": false})
+				return
+			}
+			c.Redirect(http.StatusFound, p.Value)
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "no usable provider found"})
 }
 
 // CommitCollection godoc
@@ -312,12 +344,12 @@ func CommitCollection(c *gin.Context) {
 		return
 	}
 
-	// 2. 转换为匿名集合的 entries
+	// 2. 转换为匿名集合的 entries（含 providers）
 	anonEntries := make([]model.AnonCollectionEntry, 0, len(entries))
 	for _, e := range entries {
 		anonEntries = append(anonEntries, model.AnonCollectionEntry{
-			Path: e.Path,
-			Hash: e.FileHash,
+			Path:      e.Path,
+			Providers: e.BuildProviders(),
 		})
 	}
 

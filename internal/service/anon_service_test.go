@@ -70,7 +70,7 @@ func TestCreateCollection_InvalidHash(t *testing.T) {
 	hash, err := svc.CreateCollection("bad-hash", entries, nil)
 	assert.Error(t, err)
 	assert.Empty(t, hash)
-	assert.Contains(t, err.Error(), "invalid hash")
+	assert.Contains(t, err.Error(), "invalid providers")
 }
 
 func TestCreateCollection_EmptyEntries(t *testing.T) {
@@ -102,7 +102,7 @@ func TestGetCollection_ByHash(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, coll)
 	assert.Equal(t, "my-collection", coll.FriendlyName)
-	assert.Equal(t, 1, coll.Version)
+	assert.Equal(t, 2, coll.Version)
 	assert.Len(t, coll.Entries, 1)
 	assert.Equal(t, "docs/readme.md", coll.Entries[0].Path)
 }
@@ -183,7 +183,7 @@ func TestDownloadFile_FromCollectionEntry(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, coll.Entries, 1)
 
-	entryHash := coll.Entries[0].Hash
+	entryHash := coll.Entries[0].GetPrimaryHash()
 	assert.Equal(t, fileHash, entryHash)
 
 	data, err := os.ReadFile(filepath.Join(tmpDir, entryHash[:2], entryHash))

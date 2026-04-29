@@ -146,6 +146,8 @@ func InitDB(dbPath string) error {
 	DB.Exec(`ALTER TABLE collections ADD COLUMN tags TEXT DEFAULT ''`)
 	DB.Exec(`ALTER TABLE collections ADD COLUMN follow_redirects INTEGER DEFAULT 1`)
 	DB.Exec(`ALTER TABLE file_meta ADD COLUMN cid TEXT DEFAULT ''`)
+	DB.Exec(`ALTER TABLE collection_entries ADD COLUMN providers_json TEXT DEFAULT ''`)
+	DB.Exec(`ALTER TABLE version_entries ADD COLUMN providers_json TEXT DEFAULT ''`)
 	InitShareTable()
 
 	// Migration: create ipfs_pins table for pinned CIDs.

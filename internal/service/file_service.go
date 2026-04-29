@@ -168,68 +168,88 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 	return results, nil
 }
 
-// RegisterURL 从 URL 获取文件，计算 SHA256 并注册（provider_type="http"），自动跟随 301/302 重定向。
-func (s *FileService) RegisterURL(rawURL string, filename string) (*model.FileMeta, error) {
-	defer log.LogDuration("FileService.RegisterURL")()
-	log.LogDebug("file-svc: RegisterURL url=%s filename=%s", rawURL, filename)
+// ResolveURL 从 URL 获取文件，计算 SHA256、检测 MIME 类型，不写入存储/DB。
+// followRedirects=false 时拒绝 301/302 重定向。
+func (s *FileService) ResolveURL(rawURL string, followRedirects bool) (hash string, mimeType string, size int64, body []byte, filename string, err error) {
+	defer log.LogDuration("FileService.ResolveURL")()
+	log.LogDebug("file-svc: ResolveURL url=%s followRedirects=%v", rawURL, followRedirects)
 
-	// 1. HTTP GET the URL (http.Get auto-follows 301/302)
-	resp, err := http.Get(rawURL)
+	client := http.DefaultClient
+	if !followRedirects {
+		client = &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+	}
+
+	resp, err := client.Get(rawURL)
 	if err != nil {
-		log.LogError("file-svc: RegisterURL GET %s failed: %v", rawURL, err)
-		return nil, fmt.Errorf("http get: %w", err)
+		log.LogError("file-svc: ResolveURL GET %s failed: %v", rawURL, err)
+		return "", "", 0, nil, "", fmt.Errorf("http get: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.LogWarn("file-svc: RegisterURL %s returned status %d", rawURL, resp.StatusCode)
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+		log.LogWarn("file-svc: ResolveURL %s returned status %d", rawURL, resp.StatusCode)
+		return "", "", 0, nil, "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
-	// 2. Read body and compute SHA256
-	body, err := io.ReadAll(resp.Body)
+	body, err = io.ReadAll(resp.Body)
 	if err != nil {
-		log.LogError("file-svc: RegisterURL read body failed: %v", err)
-		return nil, fmt.Errorf("read body: %w", err)
+		log.LogError("file-svc: ResolveURL read body failed: %v", err)
+		return "", "", 0, nil, "", fmt.Errorf("read body: %w", err)
 	}
 
 	h := sha256.Sum256(body)
-	hash := hex.EncodeToString(h[:])
-	size := int64(len(body))
+	hash = hex.EncodeToString(h[:])
+	size = int64(len(body))
 
-	// Detect MIME type
-	mimeType := http.DetectContentType(body[:min(len(body), 512)])
-	// Prefer Content-Type response header when available
+	// MIME 检测：魔数嗅探优先，Content-Type 回退
+	mimeType = http.DetectContentType(body[:min(len(body), 512)])
 	if ct := resp.Header.Get("Content-Type"); ct != "" && mimeType == "application/octet-stream" {
 		mimeType = ct
 	}
 
-	// Derive filename from Content-Disposition or URL if not provided
-	if filename == "" {
-		if cd := resp.Header.Get("Content-Disposition"); cd != "" {
-			// Try RFC 5987 format first: filename*=UTF-8''encoded-name
-			if _, encoded, ok := strings.Cut(cd, "filename*="); ok {
-				if idx := strings.Index(encoded, "''"); idx > 0 && idx+2 < len(encoded) {
-					part := encoded[idx+2:]
-					if end := strings.IndexByte(part, ';'); end > 0 {
-						part = part[:end]
-					}
-					decoded, err := percentUnescape(strings.TrimSpace(part))
-					if err == nil && decoded != "" {
-						filename = decoded
-					}
+	// 文件名提取：Content-Disposition → URL basename
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+		if _, encoded, ok := strings.Cut(cd, "filename*="); ok {
+			if idx := strings.Index(encoded, "''"); idx > 0 && idx+2 < len(encoded) {
+				part := encoded[idx+2:]
+				if end := strings.IndexByte(part, ';'); end > 0 {
+					part = part[:end]
+				}
+				decoded, decErr := percentUnescape(strings.TrimSpace(part))
+				if decErr == nil && decoded != "" {
+					filename = decoded
 				}
 			}
-			// Fallback to standard filename=
-			if filename == "" {
-				if _, f, ok := strings.Cut(cd, "filename="); ok {
-					filename = strings.Trim(f, "\" ")
-				}
+		}
+		if filename == "" {
+			if _, f, ok := strings.Cut(cd, "filename="); ok {
+				filename = strings.Trim(f, "\" ")
 			}
 		}
 	}
 	if filename == "" {
 		filename = path.Base(rawURL)
+	}
+
+	log.LogInfo("file-svc: ResolveURL %s -> hash=%s mime=%s size=%d", rawURL, hash, mimeType, size)
+	return hash, mimeType, size, body, filename, nil
+}
+
+// RegisterURL 从 URL 获取文件，计算 SHA256 并注册（provider_type="http"），自动跟随 301/302 重定向。
+func (s *FileService) RegisterURL(rawURL string, filename string) (*model.FileMeta, error) {
+	defer log.LogDuration("FileService.RegisterURL")()
+	log.LogDebug("file-svc: RegisterURL url=%s filename=%s", rawURL, filename)
+
+	hash, mimeType, size, body, autoFilename, err := s.ResolveURL(rawURL, true)
+	if err != nil {
+		return nil, err
+	}
+	if filename == "" {
+		filename = autoFilename
 	}
 
 	// 3. Insert into file_meta (skip if already exists)
