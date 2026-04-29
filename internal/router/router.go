@@ -246,8 +246,6 @@ func SetupRouter(
 		p2p.GET("/status", controller.P2PStatus)
 		p2p.GET("/auth/status", controller.AuthStatus)
 		p2p.GET("/node", controller.GetNodeInfo)
-		p2p.GET("/node/operator", controller.GetNodeOperator)
-		p2p.POST("/node/register", controller.RegisterNode)
 		p2p.GET("/peers", controller.GetPeers)
 		p2p.GET("/discovered", controller.GetDiscoveredPeers)
 		p2p.GET("/connections", controller.GetConnections)
@@ -297,6 +295,8 @@ func SetupRouter(
 		bt.POST("/bep44/put", controller.BEP44Put)
 		bt.POST("/bep44/get", controller.BEP44Get)
 		bt.GET("/bep51/sample", controller.BEP51Sample)
+		// Simple DHT key-value query (alias for BEP44 get)
+		bt.POST("/dht/get", controller.BTDHTGet)
 		bt.POST("/torrent", controller.BTTorrentUpload)
 		bt.POST("/magnet", controller.BTMagnetResolve)
 		bt.GET("/download/:infohash", controller.BTDownloadProgress)
@@ -309,6 +309,13 @@ func SetupRouter(
 		bt.GET("/stats", controller.BTGlobalStats)
 	}
 
+	// Node identity routes
+	node := r.Group("/node")
+	{
+		node.GET("/operator", controller.GetNodeOperator)
+		node.POST("/register", controller.RegisterNode)
+	}
+
 	// IPFS compat routes
 	ipfs := r.Group("/ipfs")
 	{
@@ -318,6 +325,8 @@ func SetupRouter(
 		ipfs.DELETE("/pin/:cid", controller.UnpinCID)
 		ipfs.GET("/pins", controller.ListPins)
 		ipfs.GET("/gateways", controller.IPFSGatewayStatus)
+		// DHT key-value query
+		ipfs.POST("/dht/get", controller.IPFSDHTGet)
 	}
 
 	// Anonymous Collection routes (public)

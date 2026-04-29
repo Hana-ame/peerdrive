@@ -1527,3 +1527,63 @@ func registerWithRegServer(token, peerID string, addrs []string) error {
 	resp.Body.Close()
 	return nil
 }
+
+
+// ─── DHT key-value query ───
+
+// BTDHTGet handles POST /bt/dht/get — simple BEP44 immutable get.
+func BTDHTGet(c *gin.Context) {
+	var req struct {
+		Target string `json:"target" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target is required (40-char hex)"})
+		return
+	}
+	if len(req.Target) != 40 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target must be 40-char hex"})
+		return
+	}
+	if btSvc == nil || btSvc.Server == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
+		return
+	}
+	raw, err := hex.DecodeString(req.Target)
+	if err != nil || len(raw) != 20 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid hex encoding"})
+		return
+	}
+	var target [20]byte
+	copy(target[:], raw)
+	data, err := btSvc.GetImmutable(target)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"target": req.Target, "value": hex.EncodeToString(data)})
+}
+
+// IPFSDHTGet handles POST /ipfs/dht/get — IPFS DHT provider lookup by CID.
+func IPFSDHTGet(c *gin.Context) {
+	var req struct {
+		CID string `json:"cid" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cid is required"})
+		return
+	}
+	if p2pSvc == nil || !p2pSvc.IsEnabled() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "P2P not enabled"})
+		return
+	}
+	peers, err := p2pSvc.FindProviders(req.CID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	result := make([]string, len(peers))
+	for i, p := range peers {
+		result[i] = p.ID.String()
+	}
+	c.JSON(http.StatusOK, gin.H{"cid": req.CID, "providers": result})
+}
