@@ -246,6 +246,8 @@ func SetupRouter(
 		p2p.GET("/status", controller.P2PStatus)
 		p2p.GET("/auth/status", controller.AuthStatus)
 		p2p.GET("/node", controller.GetNodeInfo)
+		p2p.GET("/node/operator", controller.GetNodeOperator)
+		p2p.POST("/node/register", controller.RegisterNode)
 		p2p.GET("/peers", controller.GetPeers)
 		p2p.GET("/discovered", controller.GetDiscoveredPeers)
 		p2p.GET("/connections", controller.GetConnections)
@@ -264,29 +266,6 @@ func SetupRouter(
 		p2p.GET("/ws/info", controller.WSInfo)
 		p2p.GET("/webrtc/info", controller.WebRTCInfoHandler(cfg))
 
-		// BitTorrent DHT routes
-		p2p.GET("/bt/status", controller.BTDHTStatus)
-		p2p.POST("/bt/announce", controller.BTAnnounce)
-		p2p.POST("/bt/find", controller.BTFindProviders)
-
-		// BEP 44 (arbitrary DHT data storage)
-		p2p.POST("/bt/bep44/put", controller.BEP44Put)
-		p2p.POST("/bt/bep44/get", controller.BEP44Get)
-
-		// BEP 51 (infohash indexing)
-		p2p.GET("/bt/bep51/sample", controller.BEP51Sample)
-
-		// BitTorrent download routes (torrent files, magnet links)
-		p2p.POST("/bt/torrent", controller.BTTorrentUpload)
-		p2p.POST("/bt/magnet", controller.BTMagnetResolve)
-		p2p.GET("/bt/download/:infohash", controller.BTDownloadProgress)
-		p2p.GET("/bt/downloads", controller.BTDownloadList)
-		p2p.POST("/bt/download/:infohash/pause", controller.BTPauseDownload)
-		p2p.POST("/bt/download/:infohash/resume", controller.BTResumeDownload)
-		p2p.POST("/bt/download/:infohash/seed", controller.BTSeedTorrent)
-		p2p.POST("/bt/download/:infohash/unseed", controller.BTStopSeed)
-		p2p.DELETE("/bt/download/:infohash", controller.BTRemoveDownload)
-		p2p.GET("/bt/stats", controller.BTGlobalStats)
 
 		// Dual P2P (IPFS + BT DHT) routes
 		p2p.POST("/dual/announce", controller.DualAnnounce)
@@ -297,15 +276,6 @@ func SetupRouter(
 		p2p.GET("/forward/list", controller.ListForwardSessions)
 		p2p.POST("/forward/close", controller.CloseForwardSession)
 
-		// IPFS compat routes
-		p2p.GET("/ipfs", controller.IPFSCompatStatus)
-		p2p.POST("/ipfs/toggle", controller.IPFSCompatToggle)
-			// IPFS pin routes
-			p2p.POST("/ipfs/pin/:cid", controller.PinCID)
-			p2p.DELETE("/ipfs/pin/:cid", controller.UnpinCID)
-			p2p.GET("/ipfs/pins", controller.ListPins)
-			// IPFS gateway status
-			p2p.GET("/ipfs/gateways", controller.IPFSGatewayStatus)
 
 			// Resume-able P2P download routes
 			p2p.POST("/download/resume", controller.ResumeDownload)
@@ -317,6 +287,38 @@ func SetupRouter(
 			p2p.GET("/download/sources/:hash", controller.DownloadSources)
 			p2p.GET("/download/multipeer/progress/:hash", controller.MultiPeerProgress)
 		}
+
+	// BitTorrent routes
+	bt := r.Group("/bt")
+	{
+		bt.GET("/status", controller.BTDHTStatus)
+		bt.POST("/announce", controller.BTAnnounce)
+		bt.POST("/find", controller.BTFindProviders)
+		bt.POST("/bep44/put", controller.BEP44Put)
+		bt.POST("/bep44/get", controller.BEP44Get)
+		bt.GET("/bep51/sample", controller.BEP51Sample)
+		bt.POST("/torrent", controller.BTTorrentUpload)
+		bt.POST("/magnet", controller.BTMagnetResolve)
+		bt.GET("/download/:infohash", controller.BTDownloadProgress)
+		bt.GET("/downloads", controller.BTDownloadList)
+		bt.POST("/download/:infohash/pause", controller.BTPauseDownload)
+		bt.POST("/download/:infohash/resume", controller.BTResumeDownload)
+		bt.POST("/download/:infohash/seed", controller.BTSeedTorrent)
+		bt.POST("/download/:infohash/unseed", controller.BTStopSeed)
+		bt.DELETE("/download/:infohash", controller.BTRemoveDownload)
+		bt.GET("/stats", controller.BTGlobalStats)
+	}
+
+	// IPFS compat routes
+	ipfs := r.Group("/ipfs")
+	{
+		ipfs.GET("", controller.IPFSCompatStatus)
+		ipfs.POST("/toggle", controller.IPFSCompatToggle)
+		ipfs.POST("/pin/:cid", controller.PinCID)
+		ipfs.DELETE("/pin/:cid", controller.UnpinCID)
+		ipfs.GET("/pins", controller.ListPins)
+		ipfs.GET("/gateways", controller.IPFSGatewayStatus)
+	}
 
 	// Anonymous Collection routes (public)
 	anon := r.Group("/anon")

@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"crypto/sha256"
 	"net/http"
@@ -15,6 +17,7 @@ import (
 
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
+	"peerdrive/internal/nodestate"
 	"peerdrive/internal/p2p_bt"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
@@ -1436,3 +1439,91 @@ func checkGateway(gw string) gwStatus {
 	return gwStatus{URL: gw, Healthy: healthy, Latency: latency.String()}
 }
 
+
+// ─── Node identity ───
+
+const defaultRegServer = "http://bwh.moonchan.xyz:4000"
+
+// GetNodeOperator handles GET /p2p/node/operator
+func GetNodeOperator(c *gin.Context) {
+	op := nodestate.GetOperator()
+	if op == "" {
+		c.JSON(http.StatusOK, gin.H{"operator": nil, "note": "anonymous node"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"operator": op})
+}
+
+// RegisterNode handles POST /p2p/node/register
+// User sends {"token":"<jwt>"} to register this node with the central server.
+func RegisterNode(c *gin.Context) {
+	var req struct {
+		Token string `json:"token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token is required"})
+		return
+	}
+
+	// 1. Validate token against hardcoded central registration server
+	username, err := validateTokenAgainstRegServer(req.Token)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token: " + err.Error()})
+		return
+	}
+
+	// 2. Register this node with the central server
+	peerID, addrs := p2pSvc.GetNodeInfo()
+	if err := registerWithRegServer(req.Token, peerID.String(), addrs); err != nil {
+		log.LogWarn("ctrl-p2p: RegisterNode server registration failed (non-fatal): %v", err)
+	}
+
+	// 3. Set local operator
+	nodestate.SetOperator(username)
+	log.LogInfo("ctrl-p2p: RegisterNode node registered as %s (peer=%s)", username, peerID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":   "registered",
+		"username": username,
+		"peer_id":  peerID.String(),
+	})
+}
+
+func validateTokenAgainstRegServer(token string) (string, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, _ := http.NewRequest("GET", defaultRegServer+"/auth/whoami", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("cannot reach registration server: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("token validation returned %d", resp.StatusCode)
+	}
+	var result struct {
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+	return result.Username, nil
+}
+
+func registerWithRegServer(token, peerID string, addrs []string) error {
+	body, _ := json.Marshal(map[string]interface{}{
+		"peer_id": peerID,
+		"addrs":   addrs,
+		"version": "peerdrive-dev",
+	})
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, _ := http.NewRequest("POST", defaultRegServer+"/auth/node/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
