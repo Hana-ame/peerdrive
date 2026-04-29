@@ -144,8 +144,8 @@ export default function LeftPanel({
         </div>
       )}
 
-      {/* 非合集模式：排序 + 类型筛选 */}
-      {!isCollectionsTab && (
+      {/* 非合集、非本地模式：排序 + 类型筛选 */}
+      {!isCollectionsTab && sourceTab !== 'local' && (
         <div className="shrink-0 bg-gray-900/50 border-b border-gray-800">
           {/* 第二排：排序选项 */}
           <div className="flex items-center justify-between p-2 pb-1">
@@ -238,16 +238,15 @@ export default function LeftPanel({
             onNavTo={onSysNav} onAdd={onSysAdd} onDragStart={onDragStart} />
         )}
 
-        {/* 所有文件 / 已注册 模式 */}
-        {(sourceTab === 'all' || sourceTab === 'registered') && (
+        {/* 所有文件：按时间分组 */}
+        {sourceTab === 'all' && (
           filteredFiles.length === 0 ? (
             <p className="p-4 text-gray-600 text-xs text-center">无匹配文件</p>
           ) : (
             (() => {
-              // 按日期分组（类似 TimelineView）
-              const sorted = [...filteredFiles].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+              const byDate = [...filteredFiles].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
               let lastDate = '';
-              return sorted.map(f => {
+              return byDate.map(f => {
                 const d = f.created_at ? f.created_at.split('T')[0] : '';
                 const showDate = d !== lastDate;
                 lastDate = d;
@@ -259,6 +258,39 @@ export default function LeftPanel({
                   </div>
                 );
               });
+            })()
+          )
+        )}
+
+        {/* 已注册：按目录分组（同旧 RegisteredView） */}
+        {sourceTab === 'registered' && (
+          filteredFiles.length === 0 ? (
+            <p className="p-4 text-gray-600 text-xs text-center">无匹配文件</p>
+          ) : (
+            (() => {
+              const dirs = new Set();
+              const rootFiles = [];
+              for (const f of filteredFiles) {
+                const rel = (f.provider_path || f.filename || '').replace(/^\//, '');
+                const slash = rel.indexOf('/');
+                if (slash === -1) rootFiles.push(f);
+                else if (rel.slice(0, slash)) dirs.add(rel.slice(0, slash));
+              }
+              return (
+                <>
+                  {Array.from(dirs).sort().map(dir => (
+                    <div key={dir} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm">
+                      <span className="text-lg">📁</span>
+                      <span className="text-yellow-400 font-mono truncate flex-1 text-xs">{dir}</span>
+                      <span className="text-gray-600 text-xs">文件夹</span>
+                    </div>
+                  ))}
+                  {rootFiles.map(f => (
+                    <FileSourceRow key={f.hash || f.filename} file={f} onAdd={onFileAdd} onDragStart={onDragStart}
+                      onSelect={() => onFileSelect({ hash: f.hash, path: f.filename, filename: f.filename, mime_type: f.mime_type, size: f.size })} />
+                  ))}
+                </>
+              );
             })()
           )
         )}

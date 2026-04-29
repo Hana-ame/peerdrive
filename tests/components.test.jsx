@@ -36,9 +36,9 @@ describe('Plaza', () => {
 describe('AnonCreator', () => {
   it('renders 4-tab bar', () => {
     render(<AnonCreator />, { wrapper });
-    expect(screen.getByText(/时间线/)).toBeTruthy();
+    expect(screen.getByText(/所有文件/)).toBeTruthy();
     expect(screen.getByText(/已注册/)).toBeTruthy();
-    expect(screen.getByText(/本机/)).toBeTruthy();
+    expect(screen.getByText(/本地电脑/)).toBeTruthy();
     const allText = document.body.textContent;
     expect(allText).toContain('合集');
   });

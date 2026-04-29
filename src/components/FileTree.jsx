@@ -24,14 +24,15 @@ function buildTree(entries) {
   if (!entries || entries.length === 0) return [];
   const node = {};
   for (const e of entries) {
-    const parts = (e.path || '').split('/');
+    const isDirEntry = (e.path || '').endsWith('/');
+    const parts = (e.path || '').replace(/\/$/, '').split('/');
     let cur = node;
     for (let i = 0; i < parts.length; i++) {
       const seg = parts[i];
       if (!seg) continue;
       const isLast = i === parts.length - 1;
       if (!cur[seg]) cur[seg] = { _children: {}, _files: [] };
-      if (isLast) cur[seg]._files.push({ name: seg, hash: e.hash || e.providers?.[0]?.value || '', path: e.path, size: e.size, mime_type: e.mime_type, providers: e.providers });
+      if (isLast) cur[seg]._files.push({ name: seg, hash: e.hash || e.providers?.[0]?.value || '', path: e.path, size: e.size, mime_type: e.mime_type, providers: e.providers, isDirEntry });
       cur = cur[seg]._children;
     }
   }
@@ -41,8 +42,9 @@ function buildTree(entries) {
       const item = obj[key];
       const fullPath = prefix ? `${prefix}/${key}` : key;
       const hasChildren = Object.keys(item._children).length > 0;
-      if (!hasChildren && item._files.every(f => f.name === key)) {
-        for (const f of item._files) result.push({ name: key, path: fullPath, isDir: false, ...f });
+      const allFilesMatchKey = item._files.length > 0 && item._files.every(f => f.name === key);
+      if (!hasChildren && allFilesMatchKey) {
+        for (const f of item._files) result.push({ name: key, path: fullPath, isDir: f.isDirEntry || false, ...f });
       } else {
         result.push({ name: key, path: fullPath, isDir: true, children: toArray(item._children, fullPath), files: item._files });
       }
