@@ -35,6 +35,13 @@ npm test           # Run Vitest test suite
 | `/anon/collections/:hash` | AnonExplorer | View anonymous collection by SHA256 hash |
 | `/anon` | AnonExplorer | Anonymous collection explorer (empty state) |
 | `/settings` | Settings | API endpoint, auth, LLM configuration |
+| `/p2p` | P2PPanel | P2P dual-stack control (IPFS + BT unified) |
+| `/p2p/ipfs` | IPFSPanel | IPFS / libp2p network panel |
+| `/p2p/bt` | BTPanel | BT DHT network panel |
+| `/p2p/bt/controller` | BTController | BT downloader with pause/resume/remove |
+| `/p2p/dashboard` | P2PDashboard | P2P network dashboard (peers, topology, latency) |
+| `/p2p/topology` | P2PTopology | P2P network topology visualization |
+| `/p2p/dht` | DHTExplorer | Unified DHT query panel (IPFS + BT dual lookup) |
 
 ---
 
@@ -44,9 +51,9 @@ npm test           # Run Vitest test suite
 
 | Property | Detail |
 |----------|--------|
-| **File** | `src/components/Navbar.jsx` (202 lines) |
-| **Purpose** | Top navigation bar with links and global search overlay |
-| **Sub-components** | `SearchPanel` (inline in same file, lines 5-155) |
+| **File** | `src/components/Navbar.jsx` (251 lines) |
+| **Purpose** | Top navigation bar with auth indicator, links, global search overlay |
+| **Sub-components** | `SearchPanel` (inline in same file, lines 5-155), Auth status indicator (inline) |
 
 **Props:** None (uses `useNavigate` internally)
 
@@ -76,8 +83,8 @@ npm test           # Run Vitest test suite
 
 | Property | Detail |
 |----------|--------|
-| **File** | `src/components/FileTree.jsx` (190 lines) |
-| **Purpose** | Recursive directory tree renderer with drag-and-drop, rename, new folder |
+| **File** | `src/components/FileTree.jsx` (332 lines) |
+| **Purpose** | Recursive directory tree renderer with drag-drop, rename, move-to, context menu, new folder |
 | **Exports** | `FileTree` (default), `buildFlatTree` (named) |
 
 **Props:**
@@ -98,6 +105,8 @@ npm test           # Run Vitest test suite
 - `renaming: string | null` — path currently being renamed
 - `dragOverPath: string | null` — highlight target for drop
 - `showNewFolder: boolean`, `newFolderName: string` — inline folder creation
+- `showMoveModal: { path, isDir } | null` — "move to" modal for moving entries between directories
+- `contextMenu: { x, y, node } | null` — right-click context menu (rename, move, delete)
 
 **Drag MIME Types Used:**
 - `application/peerdrive-path` — for directory drag
@@ -453,6 +462,64 @@ accent-cyan-500  /* Required for visibility on dark bg-gray-800/900 */
 **Known Issues:**
 - Settings saved to localStorage immediately; no "discard changes" capability after save
 - Auth key stored in localStorage as plaintext
+
+---
+
+### 3.7 P2P Network Pages
+
+Seven P2P-related pages are accessible from the Navbar P2P dropdown or via direct routes.
+
+#### P2PPanel (`/p2p`)
+
+| Property | Detail |
+|----------|--------|
+| **File** | `src/pages/P2PPanel.jsx` |
+| **Purpose** | Dual-stack overview — unified view of IPFS (libp2p) and BT (Mainline) DHT status, peer counts, connection stats, and recent events |
+
+#### IPFSPanel (`/p2p/ipfs`)
+
+| Property | Detail |
+|----------|--------|
+| **File** | `src/pages/IPFSPanel.jsx` |
+| **Purpose** | IPFS/libp2p network panel — toggle IPFS compat mode, view DHT peers, CID lookup, Bitswap blockstore stats |
+| **API** | `GET /p2p/ipfs`, `POST /p2p/ipfs/toggle` |
+
+#### BTPanel (`/p2p/bt`)
+
+| Property | Detail |
+|----------|--------|
+| **File** | `src/pages/BTPanel.jsx` |
+| **Purpose** | BT DHT network panel — view Mainline DHT peers, infohash operations, BEP44 data store |
+| **API** | `POST /p2p/bt/announce`, `POST /p2p/bt/find`, `GET /p2p/bt/bep51/sample` |
+
+#### BTController (`/p2p/bt/controller`)
+
+| Property | Detail |
+|----------|--------|
+| **File** | `src/pages/BTController.jsx` |
+| **Purpose** | BT download manager — add torrent/magnet, pause/resume/remove downloads, progress tracking |
+
+#### P2PDashboard (`/p2p/dashboard`)
+
+| Property | Detail |
+|----------|--------|
+| **File** | `src/pages/P2PDashboard.jsx` |
+| **Purpose** | Network dashboard — connected peers table, latency ping, connection stats, transport types |
+
+#### P2PTopology (`/p2p/topology`)
+
+| Property | Detail |
+|----------|--------|
+| **File** | `src/pages/P2PTopology.jsx` |
+| **Purpose** | Network topology visualization — graph view of peer connections and quality metrics |
+
+#### DHTExplorer (`/p2p/dht`)
+
+| Property | Detail |
+|----------|--------|
+| **File** | `src/pages/DHTExplorer.jsx` |
+| **Purpose** | Unified DHT query panel — enter SHA256/InfoHash/CID, simultaneously query IPFS DHT + BT DHT, display results side-by-side; BEP51 infohash sampling for content discovery |
+| **API** | `POST /p2p/dual/find`, `GET /p2p/bt/bep51/sample` |
 - LLM body template must be valid JSON; parsing failure silently falls back to a minimal body
 
 ---
@@ -711,13 +778,15 @@ This runs `vitest run` (single pass, non-watch mode).
 
 ## 8. Additional Components
 
-These components exist in `src/components/` but are not rendered in the current App.jsx route tree:
+These components exist in `src/components/` but are not directly rendered as routes in App.jsx:
 
 | Component | File | Lines | Purpose | Note |
 |-----------|------|-------|---------|------|
 | `VersionLog` | `VersionLog.jsx` | 53 | Rendered inside Explorer page, shows commit history + rollback | Used by Explorer |
-| `CollectionBuilder` | `CollectionBuilder.jsx` | 551 | Full anon collection build + browse + fork UI | Standalone, not in current App routes |
-| `AnonCollectionManager` | `AnonCollectionManager.jsx` | 225 | Browse + create + fork anon collections | Standalone, not in current App routes |
-| `P2PStatus` | `P2PStatus.jsx` | 474 | Full P2P network status dashboard with WebSocket | Standalone, not in current App routes |
-| `Sha256Manager` | `Sha256Manager.jsx` | 79 | SHA256 hash lookup + metadata display | Standalone, not in current App routes |
-| `PathRegistrar` | `PathRegistrar.jsx` | 107 | Register local file/folder paths | Standalone, not in current App routes |
+| `CollectionBuilder` | `CollectionBuilder.jsx` | 551 | Full anon collection build + browse + fork UI | Used by AnonCreator |
+| `AnonCollectionManager` | `AnonCollectionManager.jsx` | 225 | Browse + create + fork anon collections | Used by AnonCreator |
+| `P2PStatus` | `P2PStatus.jsx` | 474 | Full P2P network status dashboard with WebSocket | Used by P2P pages |
+| `PeerDetailPanel` | `PeerDetailPanel.jsx` | — | Peer detail table with protocol version, transports, latency | Used by P2PDashboard |
+| `Sha256Manager` | `Sha256Manager.jsx` | 79 | SHA256 hash lookup + metadata display | Used by FileManager |
+| `PathRegistrar` | `PathRegistrar.jsx` | 107 | Register local file/folder paths | Used by FileManager |
+| `MobileNav` | `MobileNav.jsx` | — | Bottom navigation bar for mobile (md+ hidden) | App.jsx global |
