@@ -122,7 +122,7 @@ export default function AnonCreator() {
     if (navState.forkFrom) {
       const c = navState.forkFrom;
       setEntries(c.entries || []);
-      setFname((c.friendly_name || '') + ' (fork)');
+      setFname((c.friendly_name || '') + ' (副本)');
       nav('/anon/create', { replace: true });
     } else if (navState.draftFrom) {
       setEntries(navState.draftFrom.entries || []);
@@ -215,7 +215,7 @@ export default function AnonCreator() {
 
   // 保存合集
   const handleSave = async (useAI = false) => {
-    const valid = entries.filter(e => e.path?.trim() && (e.hash || e.providers?.[0]?.value));
+    const valid = entries.filter(e => e.path?.trim() && (e.path.endsWith('/') || e.hash || e.providers?.[0]?.value));
     if (!valid.length) { showToast('请先添加文件', true); return; }
     if (useAI) {
       try {
@@ -703,8 +703,8 @@ export default function AnonCreator() {
               } catch(e) {}
             }} className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded shrink-0" title="AI 推荐名称">🤖</button>
             <div className="flex-1" />
-            <span className="text-[10px] text-gray-500">{entries.filter(e => e.path && (e.hash || e.providers?.[0]?.value)).length} 个文件</span>
-            <button onClick={() => handleSave(false)} disabled={saving || !entries.filter(e => e.path && (e.hash || e.providers?.[0]?.value)).length}
+            <span className="text-[10px] text-gray-500">{entries.filter(e => e.path?.trim() && (e.path.endsWith('/') || e.hash || e.providers?.[0]?.value)).length} 个文件</span>
+            <button onClick={() => handleSave(false)} disabled={saving || !entries.filter(e => e.path?.trim() && (e.path.endsWith('/') || e.hash || e.providers?.[0]?.value)).length}
               className="bg-green-600 hover:bg-green-700 disabled:opacity-40 text-sm px-3 py-1.5 rounded font-medium">💾 保存</button>
           </div>
 

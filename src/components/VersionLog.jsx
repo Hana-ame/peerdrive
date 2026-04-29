@@ -16,7 +16,7 @@ export default function VersionLog({ username, collName, triggerRefresh }) {
   };
 
   const handleRollback = async (vid) => {
-    if(!window.confirm(`回滚到 v${vid}？这将覆盖当前未提交的工作区。`)) return;
+    if(!window.confirm(`回滚到 v${vid}？这将覆盖当前未保存的更改。`)) return;
     try {
       await rollbackVersion(username, collName, vid);
       alert('回滚成功！'); window.location.reload();

@@ -76,7 +76,7 @@ const isSingleFile = count === 1;
           {isP2PAvailable ? '🔵 P2P可用' : '⚪ 仅本地'}
         </span>
         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-          {onFork && <button onClick={(e) => { e.stopPropagation(); onFork(c); }} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded">📋 Fork</button>}
+          {onFork && <button onClick={(e) => { e.stopPropagation(); onFork(c); }} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded">📋 创建副本</button>}
           {onShare && <button onClick={(e) => { e.stopPropagation(); onShare(c); }} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded">🔗 分享</button>}
           {onDownload && <button onClick={(e) => { e.stopPropagation(); onDownload(c); }} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded">⬇ 下载</button>}
         </div>
@@ -108,7 +108,7 @@ const isSingleFile = count === 1;
         </div>
       )}
       <div className="flex gap-2 mt-4 pt-3 border-t border-gray-700/50 opacity-0 group-hover:opacity-100 transition-opacity">
-        {onFork && <button onClick={(e) => { e.stopPropagation(); onFork(c); }} className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1.5 rounded">📋 Fork</button>}
+        {onFork && <button onClick={(e) => { e.stopPropagation(); onFork(c); }} className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1.5 rounded">📋 创建副本</button>}
         {onShare && <button onClick={(e) => { e.stopPropagation(); onShare(c); }} className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1.5 rounded">🔗 分享</button>}
         {onDownload && <button onClick={(e) => { e.stopPropagation(); onDownload(c); }} className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1.5 rounded">⬇ 下载</button>}
       </div>

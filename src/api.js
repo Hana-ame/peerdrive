@@ -139,31 +139,31 @@ export const getP2PTopology = () => request('GET', '/p2p/topology');
 export const getP2PQuality = () => request('GET', '/p2p/quality');
 
 /* ---- P2P BT ---- */
-export const getBTStatus = () => request('GET', '/p2p/bt/status');
-export const btAnnounce = (hash) => request('POST', '/p2p/bt/announce', { hash });
-export const btFind = (hash) => request('POST', '/p2p/bt/find', { hash });
+export const getBTStatus = () => request('GET', '/bt/status');
+export const btAnnounce = (hash) => request('POST', '/bt/announce', { hash });
+export const btFind = (hash) => request('POST', '/bt/find', { hash });
 
 /* ---- BT Controller (download management) ---- */
-export const btGetDownloads = () => request('GET', '/p2p/bt/downloads');
-export const btGetDownload = (infohash) => request('GET', `/p2p/bt/download/${infohash}`);
-export const btMagnetResolve = (uri) => request('POST', '/p2p/bt/magnet', { uri });
+export const btGetDownloads = () => request('GET', '/bt/downloads');
+export const btGetDownload = (infohash) => request('GET', `/bt/download/${infohash}`);
+export const btMagnetResolve = (uri) => request('POST', '/bt/magnet', { uri });
 export const btTorrentUpload = (file) => {
   const fd = new FormData();
   fd.append('torrent', file);
   const token = getAuthToken();
   const headers = {};
   if (token) headers['Authorization'] = 'Bearer ' + token;
-  return fetch(`${getApiBase()}/p2p/bt/torrent`, { method: 'POST', body: fd, headers }).then(r => {
+  return fetch(`${getApiBase()}/bt/torrent`, { method: 'POST', body: fd, headers }).then(r => {
     if (!r.ok) throw new Error(`Torrent upload failed: ${r.status}`);
     return r.json();
   });
 };
-export const btRemoveDownload = (infohash) => request('DELETE', `/p2p/bt/download/${infohash}`);
-export const btPauseDownload = (infohash) => request('POST', `/p2p/bt/download/${infohash}/pause`);
-export const btResumeDownload = (infohash) => request('POST', `/p2p/bt/download/${infohash}/resume`);
-export const btSeedDownload = (infohash) => request('POST', `/p2p/bt/download/${infohash}/seed`);
-export const btStopSeed = (infohash) => request('POST', `/p2p/bt/download/${infohash}/unseed`);
-export const btGetStats = () => request('GET', '/p2p/bt/stats');
+export const btRemoveDownload = (infohash) => request('DELETE', `/bt/download/${infohash}`);
+export const btPauseDownload = (infohash) => request('POST', `/bt/download/${infohash}/pause`);
+export const btResumeDownload = (infohash) => request('POST', `/bt/download/${infohash}/resume`);
+export const btSeedDownload = (infohash) => request('POST', `/bt/download/${infohash}/seed`);
+export const btStopSeed = (infohash) => request('POST', `/bt/download/${infohash}/unseed`);
+export const btGetStats = () => request('GET', '/bt/stats');
 
 /* ---- P2P Dual ---- */
 export const dualAnnounce = (hash) => request('POST', '/p2p/dual/announce', { hash });
@@ -278,13 +278,13 @@ export function setIPFSEnabled(v) { localStorage.setItem(IPFS_ENABLED_KEY, v ? '
 
 // getIPFSCompatStatus 查询服务器 IPFS 兼容层状态。
 export async function getIPFSCompatStatus() {
-  const data = await request('GET', '/p2p/ipfs');
+  const data = await request('GET', '/ipfs');
   return data;
 }
 
 // setIPFSCompatEnabled 通过服务器 API 启用或禁用 IPFS 兼容模式。
 export async function setIPFSCompatEnabled(enabled) {
-  const data = await request('POST', '/p2p/ipfs/toggle', { enabled });
+  const data = await request('POST', '/ipfs/toggle', { enabled });
   return data;
 }
 
@@ -292,25 +292,25 @@ export async function setIPFSCompatEnabled(enabled) {
 
 // pinCID 固定指定 CID（从 IPFS 网关下载并永久缓存）。
 export async function pinCID(cid) {
-  const data = await request('POST', `/p2p/ipfs/pin/${cid}`);
+  const data = await request('POST', `/ipfs/pin/${cid}`);
   return data;
 }
 
 // unpinCID 取消固定指定 CID。
 export async function unpinCID(cid) {
-  const data = await request('DELETE', `/p2p/ipfs/pin/${cid}`);
+  const data = await request('DELETE', `/ipfs/pin/${cid}`);
   return data;
 }
 
 // listPins 列出所有已固定的 CID。
 export async function listPins() {
-  const data = await request('GET', '/p2p/ipfs/pins');
+  const data = await request('GET', '/ipfs/pins');
   return data;
 }
 
 // getIPFSGatewayStatus 检查所有 IPFS 网关的健康状况。
 export async function getIPFSGatewayStatus() {
-  const data = await request('GET', '/p2p/ipfs/gateways');
+  const data = await request('GET', '/ipfs/gateways');
   return data;
 }
 
@@ -484,4 +484,4 @@ export async function getServiceStats({ regServerUrl } = {}) {
 
   return results;
 }
-export const getBEP51Sample = () => request('GET', '/p2p/bt/bep51/sample');
+export const getBEP51Sample = () => request('GET', '/bt/bep51/sample');

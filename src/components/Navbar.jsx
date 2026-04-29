@@ -145,7 +145,7 @@ function SearchPanel({ open, onClose }) {
                     className={`flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-gray-700 ${activeIdx === idx ? 'bg-gray-700' : ''}`}>
                     <span>📄</span>
                     <span className="text-blue-300 truncate">{f.filename}</span>
-                    <span className="text-gray-600 text-[10px] ml-auto">{f.mime_type}</span>
+                    <span className="text-gray-600 text-[10px] ml-auto shrink-0 overflow-hidden text-ellipsis whitespace-nowrap">{(f.mime_type || '').split(';')[0].split('/').pop() || '-'}</span>
                   </div>
                 );
               })}

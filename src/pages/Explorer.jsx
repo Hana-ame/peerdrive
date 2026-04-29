@@ -72,12 +72,12 @@ export default function Explorer() {
   };
 
   const handleCommit = async () => {
-    if (!commitMsg) return alert("请输入提交信息");
+    if (!commitMsg) return alert("请输入版本说明");
     try {
       await api.commitVersion(username, collName, commitMsg);
       setCommitMsg('');
       setRefreshTrigger(prev => prev + 1);
-    } catch (e) { alert(`提交失败: ${e.message}`); }
+    } catch (e) { alert(`保存失败: ${e.message}`); }
   };
 
   const handleDelete = async (path) => {
@@ -117,7 +117,7 @@ export default function Explorer() {
   const handleSaveLocal = async () => {
     try {
       const col = await api.getCollection(username, collName);
-      if (!col.current_hash) return alert("此合集尚未提交任何版本，无法保存快照到本地");
+      if (!col.current_hash) return alert("此合集尚未保存任何版本，无法保存快照到本地");
       await api.saveLocal({
         collection_hash: col.current_hash,
         local_path: syncConfig.path,
@@ -165,12 +165,12 @@ export default function Explorer() {
 
         {/* commit bar */}
         <div className="h-12 bg-gray-850 border-b border-gray-800 flex items-center px-6 gap-3 shrink-0">
-          <input type="text" placeholder="提交信息（保存版本快照）..."
+          <input type="text" placeholder="版本说明（可选）..."
             value={commitMsg} onChange={(e) => setCommitMsg(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleCommit(); }}
             className="bg-gray-800 border border-gray-700 px-3 py-1.5 rounded text-sm flex-1 max-w-md focus:outline-none focus:border-blue-500" />
-          <button onClick={handleCommit} className="bg-green-600 hover:bg-green-700 px-4 py-1.5 rounded text-sm font-medium" title="将当前工作区保存为一个版本快照，之后可回滚到此版本">
-            提交
+          <button onClick={handleCommit} className="bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded text-sm font-medium" title="保存当前版本，之后可恢复到此状态">
+            保存
           </button>
         </div>
 

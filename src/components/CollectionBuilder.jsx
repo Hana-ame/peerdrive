@@ -228,7 +228,7 @@ export default function CollectionBuilder() {
       setForkAddPath(''); setForkAddHash(''); setForkRemovePath('')
       fetchCollection(res.hash)
     } catch (err) {
-      alert('Fork 失败: ' + err.message)
+      alert('创建副本失败: ' + err.message)
     }
   }
 
@@ -390,7 +390,7 @@ export default function CollectionBuilder() {
       {/* ===================== BROWSE ===================== */}
       <section className="border-t border-zinc-800 pt-10">
         <h2 className="text-xl font-semibold mb-2">浏览合集</h2>
-        <p className="text-zinc-400 text-sm mb-5">通过哈希值查看合集内容或 Fork 已有合集。</p>
+        <p className="text-zinc-400 text-sm mb-5">通过哈希值查看合集内容或创建已有合集的副本。</p>
 
         <form onSubmit={e => { e.preventDefault(); fetchCollection(viewHash) }} className="flex gap-2">
           <input
@@ -516,7 +516,7 @@ export default function CollectionBuilder() {
           <div className="mt-4">
             <details className="group">
               <summary className="cursor-pointer text-sm text-zinc-400 hover:text-zinc-200 transition-colors select-none">
-                Fork 此合集
+                创建副本
               </summary>
               <form onSubmit={handleFork} className="mt-3 bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3">
                 <div className="grid grid-cols-2 gap-3">
@@ -541,7 +541,7 @@ export default function CollectionBuilder() {
                 </div>
                 <button type="submit"
                   className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-purple-500 transition-colors">
-                  执行 Fork
+                  创建副本
                 </button>
               </form>
             </details>
