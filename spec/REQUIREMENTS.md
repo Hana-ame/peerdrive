@@ -99,8 +99,8 @@
 | 5.3 | IPFS 网关拉取 (3个公网网关) | ✅ |
 | 5.4 | IPFS 兼容模式 (Bitswap) | ✅ |
 | 5.5 | IPFS toggle (Settings开关) | ✅ |
-| 5.6 | 真实 IPFS peer (kubo) 连接测试 | 📋 |
-| 5.7 | Bitswap 互通 | 📋 |
+| 5.6 | 真实 IPFS peer (kubo) 连接测试 | ✅ |
+| 5.7 | Bitswap 互通 | ✅ |
 
 ## 6. 注册与认证
 
