@@ -352,13 +352,13 @@ func SetupRouter(
 		files.GET("/browse", controller.BrowseDir)
 		files.DELETE("/:hash", controller.DeleteFile)
 		files.POST("/copy", controller.CopyFile)
-		files.POST("/diff", controller.DiffVersions)
 	}
 
 	// Collection management
 	collections := r.Group("/collections")
 	{
 		collections.POST("", controller.CreateCollection)
+		collections.POST("/diff", controller.DiffVersions)
 		collections.GET("/public", controller.ListPublicCollections)
 		collections.GET("/search", controller.SearchCollections)
 		collections.GET("/:username", controller.ListCollections)

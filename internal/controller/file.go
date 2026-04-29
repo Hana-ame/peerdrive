@@ -11,7 +11,7 @@
 //   POST   /files/register_folder  — 批量注册文件夹内所有文件（不递归）
 //   GET    /files/verify/:hash     — 通过哈希查询文件元数据
 //   DELETE /files/:hash            — 按哈希删除文件（同时删本地文件）
-//   POST   /files/diff             — 对比两个版本的条目差异
+//   POST   /collections/diff       — 对比两个版本的条目差异
 
 package controller
 
