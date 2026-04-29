@@ -49,9 +49,9 @@ export default function App() {
                 <Route path="/anon/collections/:hash" element={<AnonExplorer />} />
                 <Route path="/anon" element={<AnonExplorer />} />
                 <Route path="/p2p" element={<P2PPanel />} />
-                <Route path="/p2p/ipfs" element={<IPFSPanel />} />
-                <Route path="/p2p/bt" element={<BTPanel />} />
-                <Route path="/p2p/bt/controller" element={<BTController />} />
+                <Route path="/ipfs" element={<IPFSPanel />} />
+                <Route path="/bt" element={<BTPanel />} />
+                <Route path="/bt/controller" element={<BTController />} />
                 <Route path="/p2p/dashboard" element={<P2PDashboard />} />
                 <Route path="/p2p/topology" element={<P2PTopology />} />
                 <Route path="/p2p/dht" element={<DHTExplorer />} />
