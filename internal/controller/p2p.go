@@ -15,6 +15,7 @@ import (
 
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
+	"peerdrive/internal/nodestate"
 	"peerdrive/internal/p2p_bt"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
@@ -1436,3 +1437,19 @@ func checkGateway(gw string) gwStatus {
 	return gwStatus{URL: gw, Healthy: healthy, Latency: latency.String()}
 }
 
+// ─── Node Operator (who runs this node) ───
+
+// GetNodeOperator handles GET /p2p/node/operator
+func GetNodeOperator(ctx *gin.Context) {
+	op := nodestate.GetOperator()
+	if op == "" {
+		ctx.JSON(http.StatusOK, gin.H{
+			"operator": nil,
+			"note":     "anonymous node",
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"operator": op,
+	})
+}

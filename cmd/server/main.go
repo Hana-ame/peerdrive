@@ -61,6 +61,15 @@ func main() {
 		log.LogInfo("main: libp2p node started, PeerID=%s, addrs=%v", id, addrs)
 	}
 
+	// 启动节点身份注册（如果配置了 auth token + 注册服务器）
+	// 注意：节点身份独立于 P2P，P2P 禁用时也应当能注册
+	if cfg.NodeAuthToken != "" && cfg.RegistrationServer != "" {
+		nodeReg := service.NewNodeRegistrar(p2pSvc, cfg.RegistrationServer, cfg.NodeAuthToken, "peerdrive-dev")
+		if nodeReg != nil {
+			nodeReg.Start()
+		}
+	}
+
 	// 启动中继注册（如果配置了注册服务器 URL）
 	if cfg.RegServerURL != "" && p2pSvc.IsEnabled() {
 		registry := service.NewRelayRegistry(p2pSvc, cfg.RegServerURL, cfg.RelayStorageMB, cfg.RelayVersion)

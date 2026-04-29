@@ -25,6 +25,7 @@ type Config struct {
 	AllowedOrigins     string
 	PublicAccessDomain string
 	RegistrationServer string
+	NodeAuthToken      string // persistent auth token for node identity
 
 	P2PEnable          bool
 	P2PListenAddr      string
@@ -110,6 +111,7 @@ func Load() *Config {
 		AllowedOrigins:     getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev"),
 		PublicAccessDomain: getEnv("PEERDRIVE_PUBLIC_DOMAIN", ""),
 		RegistrationServer: getEnv("PEERDRIVE_REG_SERVER", ""),
+		NodeAuthToken:      getEnv("PEERDRIVE_AUTH_TOKEN", ""),
 		P2PEnable:          getEnvBool("PEERDRIVE_P2P_ENABLE", true),
 		P2PListenAddr:      getEnv("PEERDRIVE_P2P_LISTEN", "/ip4/0.0.0.0/tcp/0"),
 		P2PListenAddrV6:    getEnv("PEERDRIVE_P2P_LISTEN_V6", "/ip6/::/tcp/0"),

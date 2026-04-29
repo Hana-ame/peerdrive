@@ -246,6 +246,7 @@ func SetupRouter(
 		p2p.GET("/status", controller.P2PStatus)
 		p2p.GET("/auth/status", controller.AuthStatus)
 		p2p.GET("/node", controller.GetNodeInfo)
+		p2p.GET("/node/operator", controller.GetNodeOperator)
 		p2p.GET("/peers", controller.GetPeers)
 		p2p.GET("/discovered", controller.GetDiscoveredPeers)
 		p2p.GET("/connections", controller.GetConnections)
