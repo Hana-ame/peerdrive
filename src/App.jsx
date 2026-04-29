@@ -13,6 +13,7 @@ import BTPanel from './pages/BTPanel';
 import BTController from './pages/BTController';
 import P2PPanel from './pages/P2PPanel';
 import P2PTopology from './pages/P2PTopology';
+import DHTExplorer from './pages/DHTExplorer';
 import Navbar from './components/Navbar';
 import MobileNav from './components/MobileNav';
 import LLMAssistant from './components/LLMAssistant';
@@ -53,6 +54,7 @@ export default function App() {
                 <Route path="/p2p/bt/controller" element={<BTController />} />
                 <Route path="/p2p/dashboard" element={<P2PDashboard />} />
                 <Route path="/p2p/topology" element={<P2PTopology />} />
+                <Route path="/p2p/dht" element={<DHTExplorer />} />
                 <Route path="/settings" element={<Settings dataConsent={dataConsent} setDataConsent={setDataConsent} />} />
               </Routes>
             </div>

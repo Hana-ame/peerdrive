@@ -217,6 +217,7 @@ export default function PeerDetailPanel() {
                 <Th sort="bytes_sent">Sent</Th>
                 <Th sort="bytes_recv">Recv</Th>
                 <Th sort={null} className="cursor-default">Transports</Th>
+                <Th sort={null} className="cursor-default">Ver</Th>
                 <Th sort="latency">Latency</Th>
                 <Th sort={null} className="cursor-default">Reg</Th>
                 <Th sort={null} className="cursor-default">Duration</Th>
@@ -285,6 +286,13 @@ export default function PeerDetailPanel() {
                           : <span className="text-zinc-600 text-[10px]">-</span>
                         }
                       </div>
+                    </td>
+
+                    {/* UserAgent / Protocol Version */}
+                    <td className="px-2 py-2.5 max-w-[120px]">
+                      <span className="text-zinc-400 text-[10px] font-mono truncate block" title={p.user_agent || ''}>
+                        {p.user_agent ? p.user_agent.replace(/^peerdrive[/ ]/i, '').slice(0, 16) : '-'}
+                      </span>
                     </td>
 
                     {/* Latency */}

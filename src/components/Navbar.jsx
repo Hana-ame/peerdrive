@@ -214,6 +214,7 @@ export default function Navbar() {
               <div className="absolute top-full left-0 mt-1 w-44 bg-gray-800 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
                 <Link to="/p2p" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-t-lg">双栈总控</Link>
                 <Link to="/p2p/ipfs" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700">IPFS / libp2p</Link>
+                <Link to="/p2p/dht" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700">DHT 查询</Link>
                 <Link to="/p2p/topology" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700">网络拓扑</Link>
                 <Link to="/p2p/bt/controller" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700">📥 BT 下载器</Link>
                 <Link to="/p2p/bt" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-b-lg">BT DHT</Link>

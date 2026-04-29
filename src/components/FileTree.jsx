@@ -1,5 +1,5 @@
 // 文件树组件：将合集条目渲染为可拖拽/展开/重命名/移动到/新建文件夹的目录树
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 function fileIcon(mime) {
   if (!mime) return '📄';
@@ -63,7 +63,21 @@ export default function FileTree({ entries, entryActions }) {
   const [newFolderName, setNewFolderName] = useState('');
   const [showMoveModal, setShowMoveModal] = useState(null); // { path, isDir }
   const [moveTarget, setMoveTarget] = useState('');
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, node }
   const newFolderRef = useRef(null);
+  const ctxMenuRef = useRef(null);
+
+  // Close context menu on outside click or Escape
+  useEffect(() => {
+    const close = () => setContextMenu(null);
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    const onClick = (e) => { if (ctxMenuRef.current && !ctxMenuRef.current.contains(e.target)) close(); };
+    if (contextMenu) {
+      document.addEventListener('click', onClick);
+      document.addEventListener('keydown', onKey);
+      return () => { document.removeEventListener('click', onClick); document.removeEventListener('keydown', onKey); };
+    }
+  }, [contextMenu]);
 
   const toggle = (path) => setExpanded(prev => { const n = new Set(prev); n.has(path) ? n.delete(path) : n.add(path); return n; });
   const submitNewFolder = () => {
@@ -111,6 +125,7 @@ export default function FileTree({ entries, entryActions }) {
               try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry') || e.dataTransfer.getData('text/plain'); if (d) { const parsed = d.startsWith('{') ? JSON.parse(d) : { hash: '', name: d, path: d }; entryActions?.onDrop?.({ ...parsed }); } } catch (e) { console.error('FileTree drop error:', e); }
             }}
             onDoubleClick={(e) => { e.stopPropagation(); if (entryActions?.onRename) setRenaming(node.path); }}
+            onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, node }); }}
           >
             <span className="w-4 shrink-0" />
             <span className="text-base">{fileIcon(node.mime_type)}</span>
@@ -177,6 +192,7 @@ export default function FileTree({ entries, entryActions }) {
                   className={`flex items-center gap-2 py-2 px-2 hover:bg-gray-800/50 group text-sm ${dragOverPath === f.path ? 'bg-blue-900/40 ring-1 ring-blue-500/50' : ''}`}
                   style={{ paddingLeft: `${(depth + 1) * 20 + 8}px` }}
                   onDoubleClick={(e) => { e.stopPropagation(); if (entryActions?.onRename) setRenaming(f.path); }}
+                  onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, node: f }); }}
                   draggable
                   onDragStart={(e) => { e.dataTransfer.setData('application/peerdrive-entry', JSON.stringify({ hash: f.hash || f.providers?.[0]?.value || '', path: f.path, name: f.name, mime_type: f.mime_type, size: f.size, providers: f.providers })); e.dataTransfer.effectAllowed = 'move'; }}
                   onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragOverPath(f.path); }}
@@ -283,6 +299,33 @@ export default function FileTree({ entries, entryActions }) {
         }}>
         {renderEntries(tree, 0, '')}
       </div>
+
+      {/* 右键菜单 */}
+      {contextMenu && (
+        <div ref={ctxMenuRef}
+          className="absolute z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 min-w-[140px]"
+          style={{ left: contextMenu.x, top: contextMenu.y, position: 'fixed' }}>
+          <button
+            onClick={() => { setRenaming(contextMenu.node.path); setContextMenu(null); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700 flex items-center gap-2">
+            ✏️ 重命名
+          </button>
+          {entryActions?.onRename && (
+            <button
+              onClick={() => { setShowMoveModal({ path: contextMenu.node.path, isDir: contextMenu.node.isDir }); setContextMenu(null); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700 flex items-center gap-2">
+              →📁 移动到...
+            </button>
+          )}
+          {entryActions?.onRemove && (
+            <button
+              onClick={() => { entryActions.onRemove(contextMenu.node); setContextMenu(null); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-700 flex items-center gap-2">
+              🗑️ 删除
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
