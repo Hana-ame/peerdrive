@@ -32,7 +32,7 @@ function buildTree(entries) {
       if (!seg) continue;
       const isLast = i === parts.length - 1;
       if (!cur[seg]) cur[seg] = { _children: {}, _files: [] };
-      if (isLast) cur[seg]._files.push({ name: seg, hash: e.hash || e.providers?.[0]?.value || '', path: e.path, size: e.size, mime_type: e.mime_type, providers: e.providers, isDirEntry });
+      if (isLast && !isDirEntry) cur[seg]._files.push({ name: seg, hash: e.hash || e.providers?.[0]?.value || '', path: e.path, size: e.size, mime_type: e.mime_type, providers: e.providers });
       cur = cur[seg]._children;
     }
   }
@@ -44,7 +44,7 @@ function buildTree(entries) {
       const hasChildren = Object.keys(item._children).length > 0;
       const allFilesMatchKey = item._files.length > 0 && item._files.every(f => f.name === key);
       if (!hasChildren && allFilesMatchKey) {
-        for (const f of item._files) result.push({ name: key, path: fullPath, isDir: f.isDirEntry || false, ...f });
+        for (const f of item._files) result.push({ name: key, path: fullPath, isDir: false, ...f });
       } else {
         result.push({ name: key, path: fullPath, isDir: true, children: toArray(item._children, fullPath), files: item._files });
       }
