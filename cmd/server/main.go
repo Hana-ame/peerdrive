@@ -49,8 +49,15 @@ func main() {
 	}
 	commentSvc := service.NewCommentService(commentRepo)
 
+	nodeRepo := repository.NewNodeRepository(db)
+	if err := nodeRepo.InitSchema(); err != nil {
+		log.Fatalf("failed to init node schema: %v", err)
+	}
+	nodeSvc := service.NewNodeService(nodeRepo)
+
 	authCtrl := controller.NewAuthController(authSvc, relaySvc)
 	authCtrl.SetCommentService(commentSvc)
+	authCtrl.SetNodeService(nodeSvc)
 
 	if err := userRepo.InitGroupSchema(); err != nil {
 		log.Fatalf("failed to init group schema: %v", err)

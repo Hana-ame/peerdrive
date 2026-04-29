@@ -10,9 +10,10 @@ import (
 )
 
 type AuthController struct {
-	svc          *service.AuthService
-	relaySvc     *service.RelayService
-	commentSvc   *service.CommentService
+	svc        *service.AuthService
+	relaySvc   *service.RelayService
+	commentSvc *service.CommentService
+	nodeSvc    *service.NodeService
 }
 
 func NewAuthController(svc *service.AuthService, relaySvc *service.RelayService) *AuthController {
@@ -21,6 +22,10 @@ func NewAuthController(svc *service.AuthService, relaySvc *service.RelayService)
 
 func (c *AuthController) SetCommentService(cs *service.CommentService) {
 	c.commentSvc = cs
+}
+
+func (c *AuthController) SetNodeService(ns *service.NodeService) {
+	c.nodeSvc = ns
 }
 
 // Register godoc
@@ -326,9 +331,15 @@ func (c *AuthController) GetStats(ctx *gin.Context) {
 		}
 	}
 
-	ctx.JSON(http.StatusOK, model.Stats{
+	activeNodes := 0
+	if c.nodeSvc != nil {
+		activeNodes, _ = c.nodeSvc.CountActive()
+	}
+
+	ctx.JSON(http.StatusOK, model.StatsExt{
 		TotalUsers:    totalUsers,
 		ActiveRelays:  activeRelays,
+		ActiveNodes:   activeNodes,
 		TotalComments: totalComments,
 	})
 }
@@ -582,4 +593,124 @@ func (c *AuthController) SetRelayOperator(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"status": "operator set", "peer_id": peerID, "username": req.Username})
+}
+
+// ──────────────────────────────
+//  Node registration & operator query
+// ──────────────────────────────
+
+type nodeRegisterRequest struct {
+	PeerID  string   `json:"peer_id" binding:"required"`
+	Addrs   []string `json:"addrs"`
+	Version string   `json:"version"`
+}
+
+// RegisterNode handles POST /auth/node/register (authenticated)
+func (c *AuthController) RegisterNode(ctx *gin.Context) {
+	username, _ := ctx.Get("username")
+	if username == "" {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	var req nodeRegisterRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := c.nodeSvc.Register(model.PeerNode{
+		PeerID:   req.PeerID,
+		Username: username.(string),
+		Addrs:    req.Addrs,
+		Version:  req.Version,
+	}); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "registered", "peer_id": req.PeerID, "username": username})
+}
+
+// NodeHeartbeat handles POST /auth/node/heartbeat
+func (c *AuthController) NodeHeartbeat(ctx *gin.Context) {
+	var req struct {
+		PeerID string `json:"peer_id" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := c.nodeSvc.Heartbeat(req.PeerID); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// ReportNodeStats handles POST /auth/node/stats
+func (c *AuthController) ReportNodeStats(ctx *gin.Context) {
+	var req struct {
+		PeerID        string `json:"peer_id" binding:"required"`
+		UploadBytes   int64  `json:"upload_bytes"`
+		DownloadBytes int64  `json:"download_bytes"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := c.nodeSvc.AddTransferStats(req.PeerID, req.UploadBytes, req.DownloadBytes); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "stats recorded"})
+}
+
+// GetNodeOperator handles GET /p2p/node/:peer_id/operator (public)
+func (c *AuthController) GetNodeOperator(ctx *gin.Context) {
+	peerID := ctx.Param("peer_id")
+	if peerID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "peer_id is required"})
+		return
+	}
+
+	info, err := c.nodeSvc.GetByPeerID(peerID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if info == nil {
+		ctx.JSON(http.StatusOK, gin.H{"peer_id": peerID, "operator": nil, "note": "anonymous node"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"peer_id": peerID, "operator": info})
+}
+
+// ListUserNodes handles GET /auth/nodes/:username
+func (c *AuthController) ListUserNodes(ctx *gin.Context) {
+	username := ctx.Param("username")
+	if username == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
+		return
+	}
+
+	nodes, err := c.nodeSvc.ListByUsername(username)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if nodes == nil {
+		nodes = []model.UserNodeInfo{}
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"username": username,
+		"nodes":    nodes,
+		"total":    len(nodes),
+	})
 }

@@ -37,6 +37,12 @@ func SetupRouter(authCtrl *controller.AuthController, authSvc *service.AuthServi
 
 		// User's operated relay nodes
 		auth.GET("/relays/:username", middleware.AuthRequired(authSvc), authCtrl.ListUserRelays)
+
+		// Node registration (user binds their node to their account)
+		auth.POST("/node/register", middleware.AuthRequired(authSvc), authCtrl.RegisterNode)
+		auth.POST("/node/heartbeat", middleware.AuthRequired(authSvc), authCtrl.NodeHeartbeat)
+		auth.POST("/node/stats", middleware.AuthRequired(authSvc), authCtrl.ReportNodeStats)
+		auth.GET("/nodes/:username", middleware.AuthRequired(authSvc), authCtrl.ListUserNodes)
 	}
 
 	protected := r.Group("/api")
@@ -55,6 +61,12 @@ func SetupRouter(authCtrl *controller.AuthController, authSvc *service.AuthServi
 		p2pRelay.POST("/heartbeat", authCtrl.RelayHeartbeat)
 		p2pRelay.GET("/:peer_id/operator", middleware.AuthRequired(authSvc), authCtrl.GetRelayOperator)
 		p2pRelay.POST("/:peer_id/operator", middleware.AuthRequired(authSvc), authCtrl.SetRelayOperator)
+	}
+
+	// Node operator query (public — anyone can check who operates a node)
+	p2pNode := r.Group("/p2p/node")
+	{
+		p2pNode.GET("/:peer_id/operator", authCtrl.GetNodeOperator)
 	}
 
 	// Comments on collections

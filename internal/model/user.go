@@ -118,3 +118,41 @@ type RelayNodeDetail struct {
 	RegisteredAt     time.Time `json:"registered_at"`
 	LastHeartbeat    time.Time `json:"last_heartbeat"`
 }
+
+// PeerNode represents a Peerdrive node registered by an authenticated user.
+// Anonymous nodes are NOT registered here — registration is optional.
+type PeerNode struct {
+	PeerID      string   `json:"peer_id"`
+	Username    string   `json:"username"`
+	Addrs       []string `json:"addrs"`
+	Version     string   `json:"version"`
+	FirstSeen   time.Time `json:"first_seen"`
+	LastSeen    time.Time `json:"last_seen"`
+}
+
+// PeerNodeStats holds transfer statistics reported by a node.
+type PeerNodeStats struct {
+	PeerID        string `json:"peer_id"`
+	UploadBytes   int64  `json:"upload_bytes"`   // delta since last report
+	DownloadBytes int64  `json:"download_bytes"` // delta since last report
+}
+
+// UserNodeInfo is returned for node operator queries.
+type UserNodeInfo struct {
+	PeerID        string    `json:"peer_id"`
+	Username      string    `json:"username"`
+	Addrs         []string  `json:"addrs"`
+	Version       string    `json:"version"`
+	FirstSeen     time.Time `json:"first_seen"`
+	LastSeen      time.Time `json:"last_seen"`
+	TotalUpload   int64     `json:"total_upload_bytes"`
+	TotalDownload int64     `json:"total_download_bytes"`
+}
+
+// StatsExt extends Stats with node count.
+type StatsExt struct {
+	TotalUsers    int `json:"total_users"`
+	ActiveRelays  int `json:"active_relays"`
+	ActiveNodes   int `json:"active_nodes"`
+	TotalComments int `json:"total_comments"`
+}
