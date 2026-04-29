@@ -3,6 +3,7 @@
 ## spec — 技术规范
 | 文件 | 内容 |
 |------|------|
+| [API-USAGE.md](API-USAGE.md) | **API 使用手册** — 按模块分章，调用顺序/目的/条件 |
 | [API-REFERENCE.md](spec/API-REFERENCE.md) | 完整 API 参考 (105 端点 + Swagger) |
 | [REQUIREMENTS.md](spec/REQUIREMENTS.md) | 全部需求总表 (130+ 项) |
 | [COLLECTION-LOGIC.md](spec/COLLECTION-LOGIC.md) | 合集逻辑完整追踪 |
