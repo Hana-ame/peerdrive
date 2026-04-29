@@ -5,7 +5,7 @@ import Plaza from './pages/Plaza';
 import Explorer from './pages/Explorer';
 import FileManager from './pages/FileManager';
 import AnonCreator from './pages/AnonCreator';
-import AnonExplorer from './pages/AnonExplorer';
+import AnonExplorer from './pages/AnonExplorer/index';
 import Settings from './pages/Settings';
 import P2PDashboard from './pages/P2PDashboard';
 import IPFSPanel from './pages/IPFSPanel';
