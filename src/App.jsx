@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Plaza from './pages/Plaza';
 import Explorer from './pages/Explorer';
 import FileManager from './pages/FileManager';
-import AnonCreator from './pages/AnonCreator';
+import AnonCreator from './pages/AnonCreator/index';
 import AnonExplorer from './pages/AnonExplorer/index';
 import Settings from './pages/Settings';
 import P2PDashboard from './pages/P2PDashboard';
