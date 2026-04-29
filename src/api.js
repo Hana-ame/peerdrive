@@ -72,8 +72,13 @@ export const browseDir = (dirPath = '/') =>
   request('GET', `/files/browse?path=${encodeURIComponent(dirPath)}`);
 
 /* ---- anon collections ---- */
-export const createAnonCollection = (entries, friendly_name = '', tags = []) =>
-  request('POST', '/anon/collections', { entries, friendly_name, tags });
+export const createAnonCollection = (entries, friendly_name = '', tags = []) => {
+  const normalized = entries.map(e => ({
+    path: e.path,
+    providers: e.providers || [{ type: "sha256", value: e.hash, mime_type: e.mime_type || '' }],
+  }));
+  return request('POST', '/anon/collections', { entries: normalized, friendly_name, tags });
+};
 export const getAnonCollection = (hash) => request('GET', `/anon/collections/${hash}`);
 export const getAnonFileDownloadUrl = (hash, p) => `${getApiBase()}/anon/collections/${hash}/${p}`;
 export const forkAnonCollection = (source_hash, add_entries, remove_paths, friendly_name = '') =>

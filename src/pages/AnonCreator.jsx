@@ -199,10 +199,15 @@ export default function AnonCreator() {
     const now = Date.now();
     if (now - lastClick.current < 500) return;
     lastClick.current = now;
-    setEntries(prev => [...prev, { hash, path, mime_type, size }]);
+    const providers = hash ? [{ type: "sha256", value: hash, mime_type: mime_type || '' }] : [];
+    setEntries(prev => [...prev, { hash, path, providers, mime_type, size }]);
   };
   const removeEntry = (entry) => {
-    setEntries(prev => prev.filter(e => !(e.path === entry.path && e.hash === entry.hash)));
+    setEntries(prev => prev.filter(e => {
+      const eh = e.hash || e.providers?.[0]?.value;
+      const th = entry.hash || entry.providers?.[0]?.value;
+      return !(e.path === entry.path && eh === th);
+    }));
   };
   const renameEntry = (oldPath, newPath) => {
     setEntries(prev => prev.map(e => e.path === oldPath ? { ...e, path: newPath } : e));
@@ -210,7 +215,7 @@ export default function AnonCreator() {
 
   // 保存合集
   const handleSave = async (useAI = false) => {
-    const valid = entries.filter(e => e.path?.trim() && e.hash);
+    const valid = entries.filter(e => e.path?.trim() && (e.hash || e.providers?.[0]?.value));
     if (!valid.length) { showToast('请先添加文件', true); return; }
     if (useAI) {
       try {
@@ -253,7 +258,7 @@ export default function AnonCreator() {
     if (!selectedEntries.length) { showToast('请选择文件', true); return; }
     try {
       const name = (enteredColl?.friendly_name || '选集') + ' (选集)';
-      const res = await api.createAnonCollection(selectedEntries.map(e => ({ path: e.path, hash: e.hash })), name);
+      const res = await api.createAnonCollection(selectedEntries.map(e => ({ path: e.path, hash: e.hash, providers: e.providers })), name);
       showToast(`已保存 ${selectedEntries.length} 个文件`);
       loadCollections();
       nav(`/anon/collections/${res.hash}`);
@@ -698,8 +703,8 @@ export default function AnonCreator() {
               } catch(e) {}
             }} className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded shrink-0" title="AI 推荐名称">🤖</button>
             <div className="flex-1" />
-            <span className="text-[10px] text-gray-500">{entries.filter(e => e.path && e.hash).length} 个文件</span>
-            <button onClick={() => handleSave(false)} disabled={saving || !entries.filter(e => e.path && e.hash).length}
+            <span className="text-[10px] text-gray-500">{entries.filter(e => e.path && (e.hash || e.providers?.[0]?.value)).length} 个文件</span>
+            <button onClick={() => handleSave(false)} disabled={saving || !entries.filter(e => e.path && (e.hash || e.providers?.[0]?.value)).length}
               className="bg-green-600 hover:bg-green-700 disabled:opacity-40 text-sm px-3 py-1.5 rounded font-medium">💾 保存</button>
           </div>
 

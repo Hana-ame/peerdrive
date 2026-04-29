@@ -31,7 +31,7 @@ function buildTree(entries) {
       if (!seg) continue;
       const isLast = i === parts.length - 1;
       if (!cur[seg]) cur[seg] = { _children: {}, _files: [] };
-      if (isLast) cur[seg]._files.push({ name: seg, hash: e.hash, path: e.path, size: e.size, mime_type: e.mime_type });
+      if (isLast) cur[seg]._files.push({ name: seg, hash: e.hash || e.providers?.[0]?.value || '', path: e.path, size: e.size, mime_type: e.mime_type, providers: e.providers });
       cur = cur[seg]._children;
     }
   }
@@ -103,7 +103,7 @@ export default function FileTree({ entries, entryActions }) {
             className={`flex items-center gap-2 py-2 px-2 hover:bg-gray-800/50 group text-sm ${isDragging ? 'bg-blue-900/40 ring-1 ring-blue-500/50' : ''}`}
             style={{ paddingLeft: `${depth * 20 + 8}px` }}
             draggable
-            onDragStart={(e) => { e.dataTransfer.setData('application/peerdrive-entry', JSON.stringify({ hash: node.hash, path: node.path, name: node.name, mime_type: node.mime_type, size: node.size })); e.dataTransfer.effectAllowed = 'move'; }}
+            onDragStart={(e) => { e.dataTransfer.setData('application/peerdrive-entry', JSON.stringify({ hash: node.hash || node.providers?.[0]?.value || '', path: node.path, name: node.name, mime_type: node.mime_type, size: node.size, providers: node.providers })); e.dataTransfer.effectAllowed = 'move'; }}
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragOverPath(node.path); }}
             onDragLeave={() => setDragOverPath(null)}
             onDrop={(e) => {
@@ -178,7 +178,7 @@ export default function FileTree({ entries, entryActions }) {
                   style={{ paddingLeft: `${(depth + 1) * 20 + 8}px` }}
                   onDoubleClick={(e) => { e.stopPropagation(); if (entryActions?.onRename) setRenaming(f.path); }}
                   draggable
-                  onDragStart={(e) => { e.dataTransfer.setData('application/peerdrive-entry', JSON.stringify({ hash: f.hash, path: f.path, name: f.name, mime_type: f.mime_type, size: f.size })); e.dataTransfer.effectAllowed = 'move'; }}
+                  onDragStart={(e) => { e.dataTransfer.setData('application/peerdrive-entry', JSON.stringify({ hash: f.hash || f.providers?.[0]?.value || '', path: f.path, name: f.name, mime_type: f.mime_type, size: f.size, providers: f.providers })); e.dataTransfer.effectAllowed = 'move'; }}
                   onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragOverPath(f.path); }}
                   onDragLeave={() => setDragOverPath(null)}
                   onDrop={(e) => {
@@ -197,7 +197,7 @@ export default function FileTree({ entries, entryActions }) {
                     <span className="text-blue-300 font-mono truncate flex-1 text-xs">{f.name}</span>
                   )}
                   <span className="text-gray-500 text-[10px] shrink-0 hidden sm:inline">{fmtSize(f.size)}</span>
-                  <span className="text-gray-500 text-[10px] font-mono shrink-0 max-w-[80px] truncate hidden md:inline">{(f.hash || '').substring(0, 8)}</span>
+                  <span className="text-gray-500 text-[10px] font-mono shrink-0 max-w-[80px] truncate hidden md:inline">{(f.hash || f.providers?.[0]?.value || '').substring(0, 8)}</span>
                   <button onClick={(e) => { e.stopPropagation(); setShowMoveModal({ path: f.path, isDir: false }); }}
                     className="text-gray-600 hover:text-yellow-400 opacity-0 group-hover:opacity-100 text-xs px-1 shrink-0 hidden sm:inline" title="移动到...">→📁</button>
                   {entryActions?.onRemove && (
