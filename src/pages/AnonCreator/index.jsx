@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { PageContext } from '../../App';
 import { llmSuggest, loadSearchHistory } from './utils';
 import LeftPanel from './LeftPanel';
-import SplitHandle from './SplitHandle';
+import MiddlePanel from './MiddlePanel';
 import RightPanel from './RightPanel';
 
 export default function AnonCreator() {
@@ -12,21 +12,27 @@ export default function AnonCreator() {
   const { setPageContext } = useContext(PageContext);
   const navState = useLocation().state || {};
 
-  const [split, setSplit] = useState(35);
-  const [dragging, setDragging] = useState(false);
+  // ===== 数据 =====
   const [files, setFiles] = useState([]);
   const [fLoading, setFLoading] = useState(true);
-  const [sort, setSort] = useState('time');
-  const [search, setSearch] = useState('');
-  const [typeF, setTypeF] = useState('');
-  const [srcTab, setSrcTab] = useState('timeline');
   const [collections, setCollections] = useState([]);
+
+  // ===== 左侧筛选 =====
+  const [leftSourceTab, setLeftSourceTab] = useState('all');
+  const [leftSortKey, setLeftSortKey] = useState('created_at');
+  const [leftSortOrder, setLeftSortOrder] = useState('desc');
+  const [leftTypeFilters, setLeftTypeFilters] = useState([]);
+  const [search, setSearch] = useState('');
+
+  // ===== 合集管理 =====
   const [collSort, setCollSort] = useState('time');
   const [collSearch, setCollSearch] = useState('');
   const [collTagFilter, setCollTagFilter] = useState('');
   const [enteredColl, setEnteredColl] = useState(null);
   const [enteredCollFiles, setEnteredCollFiles] = useState(null);
   const [collViewPath, setCollViewPath] = useState('');
+
+  // ===== 编辑器 =====
   const [fname, setFname] = useState('');
   const [tags, setTags] = useState('');
   const [entries, setEntries] = useState([]);
@@ -36,27 +42,33 @@ export default function AnonCreator() {
   const [toastErr, setToastErr] = useState(false);
   const lastClick = useRef(0);
 
+  // ===== 选择模式 =====
   const [selectMode, setSelectMode] = useState(false);
   const [selectedColls, setSelectedColls] = useState(new Set());
   const [selectedFiles, setSelectedFiles] = useState(new Set());
 
+  // ===== 搜索历史 =====
   const [searchHistory, setSearchHistory] = useState(loadSearchHistory());
-  const [showHistory, setShowHistory] = useState(false);
 
+  // ===== 系统浏览 =====
   const [sysPath, setSysPath] = useState('/');
   const [sysEntries, setSysEntries] = useState([]);
   const [sysLoading, setSysLoading] = useState(false);
 
-  useEffect(() => { loadFiles(); loadCollections(); }, [sort]);
+  // ===== 预览选中 =====
+  const [selectedFile, setSelectedFile] = useState(null);
+
+  // ===== 副作用 =====
+  useEffect(() => { loadFiles(); loadCollections(); }, []);
   useEffect(() => {
-    if (srcTab === 'system') {
+    if (leftSourceTab === 'local') {
       setSysLoading(true);
       api.browseDir(sysPath).then(res => {
-        res.sort((a,b) => (a.is_dir === b.is_dir) ? a.name.localeCompare(b.name) : (a.is_dir ? -1 : 1));
+        res.sort((a, b) => (a.is_dir === b.is_dir) ? a.name.localeCompare(b.name) : (a.is_dir ? -1 : 1));
         setSysEntries(res);
       }).catch(() => setSysEntries([])).finally(() => setSysLoading(false));
     }
-  }, [srcTab, sysPath]);
+  }, [leftSourceTab, sysPath]);
   useEffect(() => {
     if (navState.forkFrom) {
       const c = navState.forkFrom;
@@ -78,19 +90,82 @@ export default function AnonCreator() {
     setPageContext({ type: 'anonCreator', fileCount: files.length, entryCount: entries.length, friendlyName: fname });
   }, [files, entries, fname]);
 
+  // ===== 数据加载 =====
   const loadFiles = async () => {
     setFLoading(true);
-    try { setFiles(await api.listFiles(sort) || []); } catch { setFiles([]); }
+    try { setFiles(await api.listFiles('time') || []); } catch { setFiles([]); }
     setFLoading(false);
   };
   const loadCollections = async () => {
     try { setCollections(await api.listAnonCollections() || []); } catch { setCollections([]); }
   };
 
+  // ===== 过滤 & 排序 =====
+  const filteredFiles = useMemo(() => {
+    let result = [...files];
+
+    // 来源过滤
+    if (leftSourceTab === 'registered') {
+      result = result.filter(f => f.providers?.length > 0);
+    }
+
+    // 文本搜索（仅 all / registered 模式）
+    if (search && (leftSourceTab === 'all' || leftSourceTab === 'registered')) {
+      const q = search.toLowerCase();
+      result = result.filter(f => (f.filename || '').toLowerCase().includes(q));
+    }
+
+    // 类型筛选（多选）
+    if (leftTypeFilters.length > 0 && (leftSourceTab === 'all' || leftSourceTab === 'registered')) {
+      result = result.filter(f => {
+        const mime = f.mime_type || '';
+        const ext = (f.filename || '').split('.').pop()?.toLowerCase() || '';
+        if (leftTypeFilters.includes('document')) {
+          if (mime === 'application/pdf' || ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)) return true;
+        }
+        return leftTypeFilters.some(t => mime.startsWith(t));
+      });
+    }
+
+    // 排序
+    result.sort((a, b) => {
+      let cmp = 0;
+      switch (leftSortKey) {
+        case 'name': cmp = (a.filename || '').localeCompare(b.filename || ''); break;
+        case 'size': cmp = (a.size || 0) - (b.size || 0); break;
+        case 'modified_at': cmp = (a.modified_at || '').localeCompare(b.modified_at || ''); break;
+        default: cmp = (a.created_at || '').localeCompare(b.created_at || ''); break;
+      }
+      return leftSortOrder === 'asc' ? cmp : -cmp;
+    });
+
+    return result;
+  }, [files, leftSourceTab, search, leftTypeFilters, leftSortKey, leftSortOrder]);
+
+  const filteredCollections = useMemo(() => {
+    return collections.filter(c => {
+      if (collSearch && !(c.friendly_name || c.name_preview || '').toLowerCase().includes(collSearch.toLowerCase())) return false;
+      if (collTagFilter && !(c.tags || []).some(t => t.toLowerCase().includes(collTagFilter.toLowerCase()))) return false;
+      return true;
+    }).sort((a, b) => {
+      switch (collSort) {
+        case 'name': return (a.friendly_name || a.name_preview || '').localeCompare(b.friendly_name || b.name_preview || '');
+        case 'count': return (b.entry_count || 0) - (a.entry_count || 0);
+        default: return (b.created_at || '').localeCompare(a.created_at || '');
+      }
+    });
+  }, [collections, collSearch, collTagFilter, collSort]);
+
+  const allCollTags = useMemo(() =>
+    [...new Set(collections.flatMap(c => c.tags || []))].sort()
+  , [collections]);
+
+  // ===== 提示 =====
   const showToast = (msg, err = false) => {
     setToastMsg(msg); setToastErr(err); setTimeout(() => setToastMsg(''), 3000);
   };
 
+  // ===== 合集浏览 =====
   const enterCollection = async (hash) => {
     try {
       const c = await api.getAnonCollection(hash);
@@ -112,6 +187,7 @@ export default function AnonCreator() {
 
   const navIntoDir = (dir) => setCollViewPath(prev => prev ? `${prev}/${dir}` : dir);
 
+  // ===== 条目操作 =====
   const addEntry = (hash, path, mime_type, size) => {
     const now = Date.now();
     if (now - lastClick.current < 500) return;
@@ -130,6 +206,12 @@ export default function AnonCreator() {
     setEntries(prev => prev.map(e => e.path === oldPath ? { ...e, path: newPath } : e));
   };
 
+  const handleFileAdd = (hash, path, mime_type, size) => {
+    addEntry(hash, path, mime_type, size);
+    showToast(`已添加: ${(path || '').split('/').pop()}`);
+  };
+
+  // ===== 保存合集 =====
   const handleSave = async (useAI = false) => {
     const valid = entries.filter(e => e.path?.trim() && (e.path.endsWith('/') || e.hash || e.providers?.[0]?.value));
     if (!valid.length) { showToast('请先添加文件', true); return; }
@@ -194,46 +276,20 @@ export default function AnonCreator() {
     } catch(e) { showToast('批量保存失败: ' + e.message, true); }
   };
 
+  // ===== 选择切换 =====
   const toggleCollSelect = (hash) => {
     setSelectedColls(prev => { const n = new Set(prev); n.has(hash) ? n.delete(hash) : n.add(hash); return n; });
   };
   const toggleFileSelect = (path) => {
     setSelectedFiles(prev => { const n = new Set(prev); n.has(path) ? n.delete(path) : n.add(path); return n; });
   };
-
-  const filtered = files.filter(f => {
-    if (search && !(f.filename || '').toLowerCase().includes(search.toLowerCase())) return false;
-    if (typeF && !(f.mime_type || '').startsWith(typeF)) return false;
-    return true;
-  });
-
-  const filteredCollections = useMemo(() => {
-    return collections.filter(c => {
-      if (collSearch && !(c.friendly_name || c.name_preview || '').toLowerCase().includes(collSearch.toLowerCase())) return false;
-      if (collTagFilter && !(c.tags || []).some(t => t.toLowerCase().includes(collTagFilter.toLowerCase()))) return false;
-      return true;
-    }).sort((a, b) => {
-      switch (collSort) {
-        case 'name': return (a.friendly_name || a.name_preview || '').localeCompare(b.friendly_name || b.name_preview || '');
-        case 'count': return (b.entry_count || 0) - (a.entry_count || 0);
-        default: return (b.created_at || '').localeCompare(a.created_at || '');
-      }
-    });
-  }, [collections, collSearch, collTagFilter, collSort]);
-
-  const allCollTags = useMemo(() =>
-    [...new Set(collections.flatMap(c => c.tags || []))].sort()
-  , [collections]);
-
-  const onSplitMouseDown = (e) => {
-    e.preventDefault(); setDragging(true);
-    const sx = e.clientX, ss = split;
-    const onMove = (ev) => setSplit(Math.max(20, Math.min(80, ss + (ev.clientX - sx) / window.innerWidth * 100)));
-    const onUp = () => { setDragging(false); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+  const toggleSelectMode = () => {
+    setSelectMode(!selectMode);
+    setSelectedColls(new Set());
+    setSelectedFiles(new Set());
   };
 
+  // ===== 拖拽 =====
   const onDragStartFile = (e, f) => {
     const payload = JSON.stringify({
       hash: f.hash || '',
@@ -248,6 +304,7 @@ export default function AnonCreator() {
     e.dataTransfer.effectAllowed = 'copy';
   };
 
+  // ===== 条目操作集合 =====
   const entryActions = {
     onRemove: removeEntry,
     onRename: renameEntry,
@@ -267,17 +324,6 @@ export default function AnonCreator() {
     },
   };
 
-  const toggleSelectMode = () => {
-    setSelectMode(!selectMode);
-    setSelectedColls(new Set());
-    setSelectedFiles(new Set());
-  };
-
-  const toggleFileSelectMode = () => {
-    setSelectMode(!selectMode);
-    setSelectedFiles(new Set());
-  };
-
   const handleAiName = async () => {
     try {
       const names = entries.slice(0, 20).map(e => e.path).join(', ');
@@ -286,49 +332,72 @@ export default function AnonCreator() {
     } catch {}
   };
 
-  const handleSrcTabChange = (tab) => {
-    setSrcTab(tab);
-    if (tab === 'system') setSysPath('/');
+  const handleSourceTabChange = (tab) => {
+    setLeftSourceTab(tab);
+    if (tab === 'local') setSysPath('/');
   };
 
-  const handleFileAdd = (hash, path, mime_type, size) => {
-    addEntry(hash, path, mime_type, size);
-    showToast(`已添加: ${(path || '').split('/').pop()}`);
+  const handleFileSelect = (file) => {
+    setSelectedFile(file);
   };
 
   return (
-    <div className={`flex flex-1 overflow-hidden h-full bg-gray-950 ${dragging ? 'select-none' : ''}`}>
-      <LeftPanel width={split} collections={collections} filteredCollections={filteredCollections}
-        collSearch={collSearch} collTagFilter={collTagFilter} collSort={collSort}
-        selectMode={selectMode} selectedColls={selectedColls} allCollTags={allCollTags}
-        searchHistory={searchHistory} showHistory={showHistory}
-        enteredColl={enteredColl} collViewPath={collViewPath}
-        enteredCollFiles={enteredCollFiles} selectedFiles={selectedFiles}
-        onSearch={setCollSearch} onTag={setCollTagFilter} onSort={setCollSort}
-        onSelectToggle={toggleSelectMode} onToggleCollSelect={toggleCollSelect}
-        onBatchSaveColls={batchSaveColls}
-        onSearchHistorySelect={(q) => { setCollSearch(q); }}
-        onSearchHistoryShow={setShowHistory}
-        onEnterColl={enterCollection} onLeaveColl={leaveCollection}
-        onPathNav={setCollViewPath} onNavIntoDir={navIntoDir}
-        onSaveToNode={saveCollToNode}
-        onToggleFileSelect={toggleFileSelect} onBatchSaveFiles={batchSaveFiles}
-        onFileAdd={handleFileAdd} />
+    <div className="flex flex-1 overflow-hidden h-full bg-gray-950">
+      {/* 左列：筛选 + 文件列表 */}
+      <div className="w-[380px] shrink-0 flex flex-col overflow-hidden border-r border-gray-800">
+        <LeftPanel
+          sourceTab={leftSourceTab} sortKey={leftSortKey} sortOrder={leftSortOrder}
+          typeFilters={leftTypeFilters} search={search}
+          files={files} filteredFiles={filteredFiles}
+          collections={collections} filteredCollections={filteredCollections}
+          collSearch={collSearch} collTagFilter={collTagFilter} collSort={collSort}
+          allCollTags={allCollTags}
+          enteredColl={enteredColl} collViewPath={collViewPath}
+          enteredCollFiles={enteredCollFiles}
+          selectMode={selectMode} selectedColls={selectedColls}
+          selectedFiles={selectedFiles}
+          sysPath={sysPath} sysEntries={sysEntries} sysLoading={sysLoading}
+          searchHistory={searchHistory}
+          onSourceTab={handleSourceTabChange}
+          onSortKey={setLeftSortKey}
+          onSortOrder={() => setLeftSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+          onTypeFilter={setLeftTypeFilters}
+          onSearch={setSearch}
+          onFileSelect={handleFileSelect}
+          onFileAdd={handleFileAdd}
+          onDragStart={onDragStartFile}
+          onCollSearch={setCollSearch} onCollTag={setCollTagFilter}
+          onCollSort={setCollSort}
+          onEnterColl={enterCollection} onLeaveColl={leaveCollection}
+          onPathNav={setCollViewPath} onNavIntoDir={navIntoDir}
+          onSaveToNode={saveCollToNode}
+          onSelectToggle={toggleSelectMode}
+          onToggleCollSelect={toggleCollSelect}
+          onToggleFileSelect={toggleFileSelect}
+          onBatchSaveColls={batchSaveColls}
+          onBatchSaveFiles={batchSaveFiles}
+          onSysNav={setSysPath} onSysAdd={addEntry}
+          onSearchHistorySelect={(q) => { setCollSearch(q); }}
+          onSearchHistoryUpdate={setSearchHistory}
+        />
+      </div>
 
-      <SplitHandle onMouseDown={onSplitMouseDown} />
+      {/* 中列：文件预览 */}
+      <div className="flex-1 flex flex-col overflow-hidden bg-gray-950">
+        <MiddlePanel selectedFile={selectedFile} />
+      </div>
 
-      <RightPanel width={split} srcTab={srcTab} sort={sort} typeF={typeF}
-        search={search} filtered={filtered}
-        sysPath={sysPath} sysEntries={sysEntries} sysLoading={sysLoading}
-        onSrcTab={handleSrcTabChange} onSort={setSort} onType={setTypeF} onSearch={setSearch}
-        onAdd={handleFileAdd} onDragStart={onDragStartFile}
-        onSysNav={setSysPath} onSysAdd={addEntry}
-        fname={fname} tags={tags} entries={entries} saving={saving}
-        showNamePrompt={showNamePrompt} toastMsg={toastMsg} toastErr={toastErr}
-        entryActions={entryActions}
-        onFname={setFname} onTags={setTags} onSave={handleSave}
-        onAiName={handleAiName}
-        onCloseNamePrompt={() => setShowNamePrompt(false)} />
+      {/* 右列：编辑器 */}
+      <div className="w-[420px] shrink-0 border-l border-gray-800 bg-gray-900 flex flex-col overflow-hidden">
+        <RightPanel
+          fname={fname} tags={tags} entries={entries} saving={saving}
+          showNamePrompt={showNamePrompt} toastMsg={toastMsg} toastErr={toastErr}
+          entryActions={entryActions}
+          onFname={setFname} onTags={setTags} onSave={handleSave}
+          onAiName={handleAiName}
+          onCloseNamePrompt={() => setShowNamePrompt(false)}
+        />
+      </div>
     </div>
   );
 }

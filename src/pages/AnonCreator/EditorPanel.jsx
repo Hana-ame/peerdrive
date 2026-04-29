@@ -6,7 +6,7 @@ export default function EditorPanel({ fname, tags, entries, saving, showNameProm
   const validCount = entries.filter(e => e.path?.trim() && (e.path.endsWith('/') || e.hash || e.providers?.[0]?.value)).length;
 
   return (
-    <div className="w-1/2 flex flex-col min-h-[200px]">
+    <div className="flex-1 flex flex-col min-h-[200px]">
       {toastMsg && (
         <div className={`px-3 py-1 text-xs shrink-0 ${toastErr ? 'text-red-400 bg-red-500/10' : 'text-green-400 bg-green-500/10'}`}>{toastMsg}</div>
       )}

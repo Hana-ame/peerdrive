@@ -3,7 +3,7 @@ import { fileIcon } from './utils';
 import CollBrowserNav from './CollBrowserNav';
 import CollFileRow from './CollFileRow';
 
-export default function CollBrowser({ coll, collViewPath, selectMode, selectedFiles, onLeave, onPathNav, onNavIntoDir, onSaveToNode, onSelectToggle, onToggleFileSelect, onBatchSaveFiles, onFileAdd }) {
+export default function CollBrowser({ coll, collViewPath, selectMode, selectedFiles, onLeave, onPathNav, onNavIntoDir, onSaveToNode, onSelectToggle, onToggleFileSelect, onBatchSaveFiles, onFileAdd, onFileSelect }) {
   const currentCollView = useMemo(() => {
     if (!coll?.entries) return { dirs: [], files: [], total: 0 };
     const dirs = new Set();
@@ -35,7 +35,8 @@ export default function CollBrowser({ coll, collViewPath, selectMode, selectedFi
                 <CollFileRow key={e.path} entry={e} selectMode={selectMode}
                   isSelected={selectedFiles.has(e.path)}
                   onClick={(entry) => { onFileAdd(entry.hash, entry.path, entry.mime_type, entry.size); }}
-                  onToggleSelect={onToggleFileSelect} />
+                  onToggleSelect={onToggleFileSelect}
+                  onSelect={(entry) => onFileSelect?.({ hash: entry.hash, path: entry.path, filename: entry.path.split('/').pop(), mime_type: entry.mime_type, size: entry.size })} />
               ))
             )}
           </div>
@@ -53,7 +54,8 @@ export default function CollBrowser({ coll, collViewPath, selectMode, selectedFi
               <CollFileRow key={e.path} entry={e} selectMode={selectMode}
                 isSelected={selectedFiles.has(e.path)}
                 onClick={(entry) => { onFileAdd(entry.hash, entry.path, entry.mime_type, entry.size); }}
-                onToggleSelect={onToggleFileSelect} />
+                onToggleSelect={onToggleFileSelect}
+                onSelect={(entry) => onFileSelect?.({ hash: entry.hash, path: entry.path, filename: entry.path.split('/').pop(), mime_type: entry.mime_type, size: entry.size })} />
             ))}
           </>
         )}
