@@ -263,7 +263,7 @@ curl -X POST http://97.64.30.221:3000/files/register_folder \
 **测试目标**: `enabled: true`, `num_nodes > 0`（证明连上了全球 BT 网络）
 
 ```bash
-curl http://97.64.30.221:3000/p2p/bt/status
+curl http://97.64.30.221:3000/bt/status
 # → {"enabled":true,"listen_addr":"0.0.0.0:6881","num_nodes":127}
 ```
 
@@ -272,7 +272,7 @@ curl http://97.64.30.221:3000/p2p/bt/status
 **测试目标**: 返回 `"status":"announced on BT DHT"`
 
 ```bash
-curl -X POST http://97.64.30.221:3000/p2p/bt/announce \
+curl -X POST http://97.64.30.221:3000/bt/announce \
   -H 'Content-Type: application/json' \
   -d '{"hash":"eafb6f737b516be4c8899299b4732f3d54ea5d119ce0571ce6f5cd2d55735275"}'
 # → {"status":"announced on BT DHT"}
@@ -284,12 +284,12 @@ curl -X POST http://97.64.30.221:3000/p2p/bt/announce \
 
 ```bash
 # Node A 宣告
-curl -X POST http://127.0.0.1:3000/p2p/bt/announce \
+curl -X POST http://127.0.0.1:3000/bt/announce \
   -d '{"hash":"FILE_HASH"}'
 
 # Node B 查找（wait for DHT propagation）
 sleep 3
-curl -X POST http://127.0.0.1:3001/p2p/bt/find \
+curl -X POST http://127.0.0.1:3001/bt/find \
   -d '{"hash":"FILE_HASH"}'
 # → {"count":1,"peers":["31.200.249.231:31934"]}
 ```

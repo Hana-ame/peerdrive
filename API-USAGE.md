@@ -19,6 +19,8 @@
 
 ## 1. 认证与身份
 
+> 相关源码: [controller/p2p.go#L1449-L1530](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1449) (Node), [service/auth_service.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/service/auth_service.go) (Auth), [router/auth_middleware.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/router/auth_middleware.go) (JWT)
+
 ### 1.1 注册用户
 
 ```
@@ -120,6 +122,8 @@ Authorization: Bearer <token>
 
 ## 2. 文件管理
 
+> 相关源码: [controller/file.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/file.go), [controller/download.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/download.go), [service/file_service.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/service/file_service.go)
+
 ### 2.1 上传文件
 
 ```
@@ -191,6 +195,8 @@ DELETE /files/:hash
 ---
 
 ## 3. 合集系统
+
+> 相关源码: [controller/anon.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/anon.go), [controller/collection.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go), [controller/fork.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/fork.go), [controller/merge.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/merge.go), [service/anon_service.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/service/anon_service.go)
 
 合集是文件的逻辑分组，支持版本管理和 P2P 共享。
 
@@ -291,6 +297,8 @@ POST /shares
 
 ## 4. P2P 网络
 
+> 相关源码: [controller/p2p.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go), [controller/p2p_download.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p_download.go), [service/p2p.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/service/p2p.go)
+
 ### 4.1 查看节点信息
 
 ```
@@ -355,6 +363,8 @@ POST /p2p/fetch
 ---
 
 ## 5. BT DHT
+
+> 相关源码: [controller/p2p.go#L461-L1050](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L461) (BT handlers), [p2p_bt/bt_dht.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/p2p_bt/bt_dht.go) (DHT), [p2p_bt/bt_client.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/p2p_bt/bt_client.go) (Client)
 
 BT DHT 运行独立的 Mainline Kademlia 网络，与 IPFS DHT 并行工作。
 
@@ -454,6 +464,8 @@ POST /bt/dht/get
 
 ## 6. IPFS
 
+> 相关源码: [controller/p2p.go#L1224-L1430](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1224) (IPFS handlers), [service/ipfs_compat.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/service/ipfs_compat.go) (Bitswap)
+
 IPFS 兼容层使用 libp2p Kademlia DHT 和 Bitswap 协议。
 
 ### 6.1 查看 IPFS 状态
@@ -524,6 +536,8 @@ POST /p2p/dual/find        ← 同时在两个 DHT 查找
 
 ## 7. 中继 Relay
 
+> 相关源码: [service/relay.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/service/relay.go), [service/relay_registry.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/service/relay_registry.go)
+
 Relay 是网络中继节点，帮助 NAT 后的节点互联。Relay 集成在 Peerdrive Node 中。
 
 ### 7.1 Node 注册为 Relay
@@ -566,6 +580,8 @@ POST /p2p/relay/:peer_id/operator   ← 绑定 relay 到用户
 
 ## 8. 评论系统
 
+> 相关源码: [controller/p2p.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go) (comments via P2P protocol)
+
 ### 8.1 读取评论
 
 ```
@@ -589,6 +605,8 @@ Authorization: Bearer <token>
 ---
 
 ## 9. WebDAV
+
+> 相关源码: [service/webdav.go](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/service/webdav.go), [router/router.go#L423-L430](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/router/router.go#L423)
 
 ### 9.1 挂载 Peerdrive 为网络驱动器
 

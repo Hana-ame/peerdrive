@@ -9,30 +9,28 @@ Peerdrive is a P2P file-sharing server with content-addressable storage, BitTorr
 ## Table of Contents
 
 1. [System](#1-system)
-2. [File Management](#2-file-management)
-3. [Downloads](#3-downloads)
-4. [Anonymous Collections](#4-anonymous-collections)
-5. [User Collections](#5-user-collections)
-6. [Collaboration Actions](#6-collaboration-actions)
-7. [P2P Network](#7-p2p-network)
-8. [BitTorrent DHT](#8-bitTorrent-dht)
-9. [Dual-Stack P2P](#9-dual-stack-p2p)
+2. [Files](#2-files)
+3. [Collections](#3-collections)
+4. [P2P Network](#4-p2p-network)
+5. [BitTorrent DHT](#5-bittorrent-dht)
+6. [IPFS Compat](#6-ipfs-compat)
+7. [Dual-Stack P2P](#7-dual-stack-p2p)
+8. [Node Identity](#8-node-identity)
+9. [WebRTC & Signaling](#9-webrtc--signaling)
 10. [Port Forwarding](#10-port-forwarding)
-11. [IPFS Compat](#11-ipfs-compat)
-12. [Authentication](#12-authentication)
-13. [Share Links](#13-share-links)
-14. [Tasks](#14-tasks)
-15. [Local Sync](#15-local-sync)
-16. [WebDAV](#16-webdav)
-17. [WebRTC & Signaling](#17-webrtc--signaling)
-18. [Relay Proxy](#18-relay-proxy)
-19. [Swagger UI](#19-swagger-ui)
+11. [Authentication](#11-authentication)
+12. [Share Links](#12-share-links)
+13. [Local Sync](#13-local-sync)
+14. [WebDAV](#14-webdav)
+15. [Relay Proxy](#15-relay-proxy)
+16. [Tasks](#16-tasks)
+17. [Swagger UI](#17-swagger-ui)
 
 ---
 
 ## 1. System
-
 ### `GET /ping`
+> Source: [ping.go:24](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/ping.go#L24)
 Health check. Returns `"pong"` when the server is running.
 
 ```bash
@@ -46,9 +44,12 @@ pong
 
 ---
 
-## 2. File Management
+## 2. Files
+
+File upload, registration, download, and management operations.
 
 ### `GET /files`
+> Source: [file.go:329](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/file.go#L329)
 List all registered files.
 
 ```bash
@@ -87,6 +88,7 @@ curl 'http://127.0.0.1:3000/files?sort=time'
 ---
 
 ### `POST /files/upload`
+> Source: [file.go:41](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/file.go#L41)
 Upload a file. Returns the SHA256 hash. Duplicate uploads return the existing hash with `already_exists: true`.
 
 **Request**: `multipart/form-data`, field `file`
@@ -116,6 +118,7 @@ curl -X POST http://127.0.0.1:3000/files/upload -F "file=@document.pdf"
 ---
 
 ### `POST /files/register_local`
+> Source: [file.go:129](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/file.go#L129)
 Register a local file by path. Computes SHA256 and records metadata without uploading.
 
 ```bash
@@ -143,6 +146,7 @@ curl -X POST http://127.0.0.1:3000/files/register_local \
 ---
 
 ### `POST /files/register_folder`
+> Source: [file.go:153](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/file.go#L153)
 Recursively register all files in a folder. Returns an array of `{filename, hash}` for each file.
 
 ```bash
@@ -170,6 +174,7 @@ curl -X POST http://127.0.0.1:3000/files/register_folder \
 ---
 
 ### `POST /files/register_url`
+> Source: [file.go:95](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/file.go#L95)
 Register a file from a URL. Fetches the remote file, computes SHA256, and stores it. Follows HTTP redirects.
 
 ```bash
@@ -201,6 +206,7 @@ curl -X POST http://127.0.0.1:3000/files/register_url \
 ---
 
 ### `GET /files/verify/:hash`
+> Source: [file.go:176](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/file.go#L176)
 Verify a file exists by its SHA256 hash. Returns metadata if found.
 
 ```bash
@@ -231,6 +237,7 @@ curl http://127.0.0.1:3000/files/verify/abc123...
 ---
 
 ### `GET /files/browse`
+> Source: [file.go:345](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/file.go#L345)
 Browse the server's file system (relative to storage directory).
 
 ```bash
@@ -270,6 +277,7 @@ curl 'http://127.0.0.1:3000/files/browse?path=/'
 ---
 
 ### `DELETE /files/:hash`
+> Source: [file.go:207](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/file.go#L207)
 Delete a file by its SHA256 hash. Removes local storage, metadata, and provider records.
 
 ```bash
@@ -284,6 +292,7 @@ curl -X DELETE http://127.0.0.1:3000/files/abc123...
 ---
 
 ### `POST /files/copy`
+> Source: [file.go:230](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/file.go#L230)
 Copy a file within storage (similar to a WebDAV MOVE equivalent). Creates a duplicate at `dest_path`.
 
 ```bash
@@ -310,44 +319,10 @@ curl -X POST http://127.0.0.1:3000/files/copy \
 
 ---
 
-### `POST /files/diff`
-Compare two committed versions and return added, removed, and modified entries.
-
-```bash
-curl -X POST http://127.0.0.1:3000/files/diff \
-  -H "Content-Type: application/json" \
-  -d '{"version_a": 1, "version_b": 2}'
-```
-
-**Request Body**:
-- `version_a` (required): Source version ID
-- `version_b` (required): Target version ID
-
-**Response**:
-```json
-{
-  "added": [
-    {"path": "new_file.txt", "hash": "abc..."}
-  ],
-  "removed": [
-    {"path": "old_file.txt", "hash": "def..."}
-  ],
-  "modified": [
-    {"path": "changed_file.txt", "old_hash": "ghi...", "new_hash": "jkl..."}
-  ]
-}
-```
-
-**Fields**:
-- `added`: Array of `{path, hash}` for entries present in B but not A
-- `removed`: Array of `{path, hash}` for entries present in A but not B
-- `modified`: Array of `{path, old_hash, new_hash}` for entries whose hash changed between A and B
-
----
-
-## 3. Downloads
+### Downloads
 
 ### `GET /sha256sum/:hash`
+> Source: [download.go:55](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/download.go#L55)
 Download a file by SHA256 hash. Uses multi-protocol resolution (local, P2P, IPFS gateways) automatically.
 
 ```bash
@@ -370,6 +345,7 @@ curl -o document.pdf http://127.0.0.1:3000/sha256sum/abc123...
 ---
 
 ### `GET /ipfs/:cid`
+> Source: [download.go:130](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/download.go#L130)
 Download a file by IPFS CID. Tries local storage first, then falls back to public IPFS gateways. On successful gateway fetch, the file is cached locally.
 
 ```bash
@@ -384,6 +360,7 @@ curl -o photo.jpg http://127.0.0.1:3000/ipfs/QmXoypizjW3WknFiJnKLwHCnL72vedxjQkD
 ---
 
 ### `GET /download/:hash`
+> Source: [download.go:263](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/download.go#L263)
 Universal multi-protocol download. Similar to `/sha256sum/:hash` but without Content-Disposition headers.
 
 ```bash
@@ -398,6 +375,7 @@ curl -o data.bin http://127.0.0.1:3000/download/abc123...
 ---
 
 ### `GET /download/:hash/sources`
+> Source: [download.go:286](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/download.go#L286)
 List all available protocol sources for a given hash.
 
 ```bash
@@ -422,6 +400,7 @@ curl http://127.0.0.1:3000/download/abc123.../sources
 ---
 
 ### `POST /download/:hash/refresh`
+> Source: [download.go:305](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/download.go#L305)
 Clear local cache for a hash and re-run the download pipeline from scratch.
 
 ```bash
@@ -433,6 +412,7 @@ curl -X POST http://127.0.0.1:3000/download/abc123.../refresh
 ---
 
 ### `POST /p2p/download/resume`
+> Source: [p2p_download.go:19](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p_download.go#L19)
 Start or resume a download. Supports pause/resume via SQLite-backed progress tracking.
 
 ```bash
@@ -473,6 +453,7 @@ curl -X POST http://127.0.0.1:3000/p2p/download/resume \
 ---
 
 ### `GET /p2p/download/progress/:hash`
+> Source: [p2p_download.go:59](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p_download.go#L59)
 Query download progress for a specific hash.
 
 ```bash
@@ -501,6 +482,7 @@ curl http://127.0.0.1:3000/p2p/download/progress/abc123...
 ---
 
 ### `POST /p2p/download/cancel/:hash`
+> Source: [p2p_download.go:100](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p_download.go#L100)
 Cancel an active or paused download.
 
 ```bash
@@ -519,6 +501,7 @@ curl -X POST http://127.0.0.1:3000/p2p/download/cancel/abc123...
 ---
 
 ### `POST /p2p/download/multipeer`
+> Source: [p2p_download.go:129](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p_download.go#L129)
 Start a multi-peer parallel download for maximum speed.
 
 ```bash
@@ -556,6 +539,7 @@ curl -X POST http://127.0.0.1:3000/p2p/download/multipeer \
 ---
 
 ### `GET /p2p/download/sources/:hash`
+> Source: [p2p_download.go:169](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p_download.go#L169)
 List available download sources (peers) for a file hash.
 
 ```bash
@@ -589,6 +573,7 @@ curl http://127.0.0.1:3000/p2p/download/sources/abc123...
 ---
 
 ### `GET /p2p/download/multipeer/progress/:hash`
+> Source: [p2p_download.go:215](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p_download.go#L215)
 Query multi-peer download progress.
 
 ```bash
@@ -614,6 +599,7 @@ curl http://127.0.0.1:3000/p2p/download/multipeer/progress/abc123...
 ---
 
 ### `GET /:username/:collection_name/*filepath`
+> Source: [collection.go:263](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L263)
 Download a file from within a user collection by username, collection name, and file path.
 
 ```bash
@@ -624,11 +610,14 @@ curl -o doc.txt http://127.0.0.1:3000/alice/my-collection/docs/readme.txt
 
 ---
 
-## 4. Anonymous Collections
+## 3. Collections
+
+Anonymous and user-owned collections with versioning and collaboration.
 
 Anonymous collections are immutable, content-addressed collections of `{path, hash}` entries, identified by their SHA256 hash.
 
 ### `POST /anon/collections`
+> Source: [anon.go:33](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/anon.go#L33)
 Create an immutable anonymous collection.
 
 ```bash
@@ -660,6 +649,7 @@ curl -X POST http://127.0.0.1:3000/anon/collections \
 ---
 
 ### `GET /anon/collections`
+> Source: [anon.go:65](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/anon.go#L65)
 List all anonymous collections stored on this node.
 
 ```bash
@@ -693,6 +683,7 @@ curl http://127.0.0.1:3000/anon/collections
 ---
 
 ### `GET /anon/collections/:hash`
+> Source: [anon.go:83](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/anon.go#L83)
 Retrieve an anonymous collection's metadata and entries.
 
 ```bash
@@ -723,6 +714,7 @@ curl http://127.0.0.1:3000/anon/collections/abc123...
 ---
 
 ### `GET /anon/collections/:hash/*filepath`
+> Source: [anon.go:103](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/anon.go#L103)
 Download a specific file from an anonymous collection by collection hash and file path.
 
 ```bash
@@ -737,6 +729,7 @@ curl -o beach.jpg http://127.0.0.1:3000/anon/collections/abc123.../vacation/beac
 ---
 
 ### `POST /anon/collections/fork`
+> Source: [anon.go:172](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/anon.go#L172)
 Create a new anonymous collection as a variant of an existing one, with added and/or removed entries.
 
 ```bash
@@ -769,6 +762,7 @@ curl -X POST http://127.0.0.1:3000/anon/collections/fork \
 ---
 
 ### `POST /anon/collections/commit`
+> Source: [anon.go:237](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/anon.go#L237)
 Commit modifications to an existing anonymous collection. Creates a new version with a content hash.
 
 ```bash
@@ -796,11 +790,10 @@ curl -X POST http://127.0.0.1:3000/anon/collections/commit \
 
 ---
 
-## 5. User Collections
-
 User collections are named, versioned `path->hash` mappings owned by a username. They support commit/rollback/log, visibility control, and tagging.
 
 ### `POST /collections`
+> Source: [collection.go:50](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L50)
 Create a new named collection for a user.
 
 ```bash
@@ -840,6 +833,7 @@ curl -X POST http://127.0.0.1:3000/collections \
 ---
 
 ### `GET /collections/:username`
+> Source: [collection.go:86](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L86)
 List all collections owned by a username.
 
 ```bash
@@ -877,6 +871,7 @@ curl http://127.0.0.1:3000/collections/alice
 ---
 
 ### `GET /collections/:username/:coll`
+> Source: [collection.go:134](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L134)
 Get collection details with all entries.
 
 ```bash
@@ -910,6 +905,7 @@ curl http://127.0.0.1:3000/collections/alice/my-documents
 ---
 
 ### `POST /collections/:username/:coll/entries`
+> Source: [collection.go:189](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L189)
 Add a `path -> hash` entry to a collection. Creates the collection if it doesn't exist.
 
 ```bash
@@ -930,6 +926,7 @@ curl -X POST http://127.0.0.1:3000/collections/alice/my-documents/entries \
 ---
 
 ### `DELETE /collections/:username/:coll/entries/*path`
+> Source: [collection.go:232](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L232)
 Remove a `path -> hash` entry from a collection.
 
 ```bash
@@ -944,6 +941,7 @@ curl -X DELETE http://127.0.0.1:3000/collections/alice/my-documents/entries/docs
 ---
 
 ### `POST /collections/:username/:coll/commit`
+> Source: [collection.go:320](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L320)
 Snapshot all current entries as a new version with a commit message. Generates an anonymous collection JSON snapshot and updates `current_hash`.
 
 ```bash
@@ -971,6 +969,7 @@ curl -X POST http://127.0.0.1:3000/collections/alice/my-documents/commit \
 ---
 
 ### `GET /collections/:username/:coll/log`
+> Source: [collection.go:403](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L403)
 Get version history, newest first.
 
 ```bash
@@ -1012,6 +1011,7 @@ curl http://127.0.0.1:3000/collections/alice/my-documents/log
 ---
 
 ### `POST /collections/:username/:coll/rollback/:vid`
+> Source: [collection.go:438](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L438)
 Rollback collection entries to a specific version. Replaces all current entries with that version's snapshot.
 
 ```bash
@@ -1029,6 +1029,7 @@ curl -X POST http://127.0.0.1:3000/collections/alice/my-documents/rollback/1
 ---
 
 ### `POST /collections/:username/:coll/visibility`
+> Source: [collection.go:491](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L491)
 Set a collection's visibility.
 
 ```bash
@@ -1048,6 +1049,7 @@ curl -X POST http://127.0.0.1:3000/collections/alice/my-documents/visibility \
 ---
 
 ### `POST /collections/:username/:coll/tags`
+> Source: [collection.go:565](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L565)
 Replace the tag list for a collection.
 
 ```bash
@@ -1067,6 +1069,7 @@ curl -X POST http://127.0.0.1:3000/collections/alice/my-documents/tags \
 ---
 
 ### `GET /collections/public`
+> Source: [collection.go:525](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L525)
 List all public collections. Optionally filtered by search query.
 
 ```bash
@@ -1097,6 +1100,7 @@ curl 'http://127.0.0.1:3000/collections/public?q=documents'
 ---
 
 ### `GET /collections/search`
+> Source: [collection.go:107](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/collection.go#L107)
 Search collections by username or collection name.
 
 ```bash
@@ -1126,9 +1130,8 @@ curl 'http://127.0.0.1:3000/collections/search?q=alice'
 
 ---
 
-## 6. Collaboration Actions
-
 ### `POST /actions/merge`
+> Source: [merge.go:41](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/merge.go#L41)
 Merge a source collection into the local collection. Supports three conflict resolution strategies.
 
 ```bash
@@ -1179,6 +1182,7 @@ curl -X POST http://127.0.0.1:3000/actions/merge \
 ---
 
 ### `POST /actions/fork`
+> Source: [fork.go:32](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/fork.go#L32)
 Copy all entries from a source collection into a new collection owned by a different user.
 
 ```bash
@@ -1216,6 +1220,7 @@ curl -X POST http://127.0.0.1:3000/actions/fork \
 ---
 
 ### `POST /actions/pull`
+> Source: [fork.go:98](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/fork.go#L98)
 Placeholder for syncing upstream changes from a forked source. Currently creates a no-op completed task.
 
 ```bash
@@ -1235,9 +1240,46 @@ curl -X POST http://127.0.0.1:3000/actions/pull \
 
 ---
 
-## 7. P2P Network
+### `POST /collections/diff`
+> Source: [file.go:267](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/file.go#L267)
 
+Compare two committed versions and return added, removed, and modified entries.
+
+```bash
+curl -X POST http://127.0.0.1:3000/collections/diff \
+  -H "Content-Type: application/json" \
+  -d '{"version_a": 1, "version_b": 2}'
+```
+
+**Request Body**:
+- `version_a` (required): Source version ID
+- `version_b` (required): Target version ID
+
+**Response**:
+```json
+{
+  "added": [
+    {"path": "new_file.txt", "hash": "abc..."}
+  ],
+  "removed": [
+    {"path": "old_file.txt", "hash": "def..."}
+  ],
+  "modified": [
+    {"path": "changed_file.txt", "old_hash": "ghi...", "new_hash": "jkl..."}
+  ]
+}
+```
+
+**Fields**:
+- `added`: Array of `{path, hash}` for entries present in B but not A
+- `removed`: Array of `{path, hash}` for entries present in A but not B
+- `modified`: Array of `{path, old_hash, new_hash}` for entries whose hash changed between A and B
+
+---
+
+## 4. P2P Network
 ### `GET /p2p/status`
+> Source: [p2p.go:299](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L299)
 Get P2P node comprehensive status.
 
 ```bash
@@ -1294,6 +1336,7 @@ curl http://127.0.0.1:3000/p2p/status
 ---
 
 ### `GET /p2p/node`
+> Source: [p2p.go:100](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L100)
 Get local node info (peer ID and addresses).
 
 ```bash
@@ -1314,6 +1357,7 @@ curl http://127.0.0.1:3000/p2p/node
 ---
 
 ### `GET /p2p/peers`
+> Source: [p2p.go:111](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L111)
 List connected peer IDs.
 
 ```bash
@@ -1333,6 +1377,7 @@ curl http://127.0.0.1:3000/p2p/peers
 ---
 
 ### `GET /p2p/peers/detail`
+> Source: [p2p.go:588](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L588)
 Get detailed metadata for all tracked peers.
 
 ```bash
@@ -1379,6 +1424,7 @@ curl http://127.0.0.1:3000/p2p/peers/detail
 ---
 
 ### `GET /p2p/peers/detail/:peer_id`
+> Source: [p2p.go:600](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L600)
 Get detailed metadata for a specific peer.
 
 ```bash
@@ -1390,6 +1436,7 @@ curl http://127.0.0.1:3000/p2p/peers/detail/12D3KooWAbc...
 ---
 
 ### `GET /p2p/discovered`
+> Source: [p2p.go:123](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L123)
 List mDNS-discovered LAN peers.
 
 ```bash
@@ -1411,6 +1458,7 @@ curl http://127.0.0.1:3000/p2p/discovered
 ---
 
 ### `GET /p2p/ping/:peer_id`
+> Source: [p2p.go:142](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L142)
 Ping a remote peer and return RTT.
 
 ```bash
@@ -1432,6 +1480,7 @@ curl http://127.0.0.1:3000/p2p/ping/12D3KooWAbc...
 ---
 
 ### `POST /p2p/connect`
+> Source: [p2p.go:167](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L167)
 Connect to a remote peer by multiaddr.
 
 ```bash
@@ -1451,6 +1500,7 @@ curl -X POST http://127.0.0.1:3000/p2p/connect \
 ---
 
 ### `POST /p2p/announce`
+> Source: [p2p.go:187](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L187)
 Announce that this node holds a specific hash on the IPFS DHT (libp2p provide).
 
 ```bash
@@ -1470,6 +1520,7 @@ curl -X POST http://127.0.0.1:3000/p2p/announce \
 ---
 
 ### `POST /p2p/fetch`
+> Source: [p2p.go:207](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L207)
 Fetch an anonymous collection from the P2P network by its hash.
 
 ```bash
@@ -1486,6 +1537,7 @@ curl -X POST http://127.0.0.1:3000/p2p/fetch \
 ---
 
 ### `POST /p2p/sync`
+> Source: [p2p.go:233](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L233)
 Sync files from a specific peer to a local directory.
 
 ```bash
@@ -1516,6 +1568,7 @@ curl -X POST http://127.0.0.1:3000/p2p/sync \
 ---
 
 ### `POST /p2p/push`
+> Source: [p2p.go:341](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L341)
 Push collection entries to a target directory for a peer to fetch.
 
 ```bash
@@ -1544,6 +1597,7 @@ curl -X POST http://127.0.0.1:3000/p2p/push \
 ---
 
 ### `POST /p2p/request-file`
+> Source: [p2p.go:398](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L398)
 Broadcast a file request to specific peers.
 
 ```bash
@@ -1575,6 +1629,7 @@ curl -X POST http://127.0.0.1:3000/p2p/request-file \
 ---
 
 ### `GET /p2p/connections`
+> Source: [p2p.go:629](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L629)
 Get connection counts and scanner status.
 
 ```bash
@@ -1598,6 +1653,7 @@ curl http://127.0.0.1:3000/p2p/connections
 ---
 
 ### `GET /p2p/stats`
+> Source: [p2p.go:617](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L617)
 Get global P2P statistics.
 
 ```bash
@@ -1619,6 +1675,7 @@ curl http://127.0.0.1:3000/p2p/stats
 ---
 
 ### `GET /p2p/topology`
+> Source: [p2p.go:656](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L656)
 Get the P2P connection topology graph.
 
 ```bash
@@ -1648,6 +1705,7 @@ curl http://127.0.0.1:3000/p2p/topology
 ---
 
 ### `GET /p2p/quality`
+> Source: [p2p.go:671](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L671)
 Get connection quality metrics for all peers, or a specific peer.
 
 ```bash
@@ -1678,6 +1736,7 @@ curl http://127.0.0.1:3000/p2p/quality?peer_id=12D3KooWAbc...
 ---
 
 ### `GET /p2p/ws/info`
+> Source: [p2p.go:449](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L449)
 Get WebSocket transport information.
 
 ```bash
@@ -1696,6 +1755,7 @@ curl http://127.0.0.1:3000/p2p/ws/info
 ---
 
 ### `GET /p2p/webrtc/info`
+> Source: [p2p.go:1605](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1605)
 Get WebRTC STUN/TURN configuration.
 
 ```bash
@@ -1712,13 +1772,13 @@ curl http://127.0.0.1:3000/p2p/webrtc/info
 
 ---
 
-## 8. BitTorrent DHT
-
-### `GET /p2p/bt/status`
+## 5. BitTorrent DHT
+### `GET /bt/status`
+> Source: [p2p.go:461](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L461)
 Get BitTorrent DHT node status.
 
 ```bash
-curl http://127.0.0.1:3000/p2p/bt/status
+curl http://127.0.0.1:3000/bt/status
 ```
 
 **Response**:
@@ -1737,11 +1797,12 @@ curl http://127.0.0.1:3000/p2p/bt/status
 
 ---
 
-### `POST /p2p/bt/announce`
+### `POST /bt/announce`
+> Source: [p2p.go:476](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L476)
 Announce a hash on the BitTorrent DHT network.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/announce \
+curl -X POST http://127.0.0.1:3000/bt/announce \
   -H "Content-Type: application/json" \
   -d '{"hash": "abc123..."}'
 ```
@@ -1756,11 +1817,12 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/announce \
 
 ---
 
-### `POST /p2p/bt/find`
+### `POST /bt/find`
+> Source: [p2p.go:501](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L501)
 Find providers for a hash on the BitTorrent DHT.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/find \
+curl -X POST http://127.0.0.1:3000/bt/find \
   -H "Content-Type: application/json" \
   -d '{"hash": "abc123..."}'
 ```
@@ -1779,11 +1841,12 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/find \
 
 ---
 
-### `POST /p2p/bt/torrent`
+### `POST /bt/torrent`
+> Source: [p2p.go:821](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L821)
 Upload a `.torrent` file and start downloading.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/torrent \
+curl -X POST http://127.0.0.1:3000/bt/torrent \
   -F "torrent=@ubuntu-24.04-desktop-amd64.iso.torrent"
 ```
 
@@ -1811,11 +1874,12 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/torrent \
 
 ---
 
-### `POST /p2p/bt/magnet`
+### `POST /bt/magnet`
+> Source: [p2p.go:868](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L868)
 Resolve a magnet URI and start BitTorrent download.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/magnet \
+curl -X POST http://127.0.0.1:3000/bt/magnet \
   -H "Content-Type: application/json" \
   -d '{"uri": "magnet:?xt=urn:btih:a1b2c3d4e5f6...&dn=ubuntu-24.04"}'
 ```
@@ -1835,11 +1899,12 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/magnet \
 
 ---
 
-### `GET /p2p/bt/download/:infohash`
+### `GET /bt/download/:infohash`
+> Source: [p2p.go:907](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L907)
 Get download progress for a specific infohash.
 
 ```bash
-curl http://127.0.0.1:3000/p2p/bt/download/a1b2c3d4e5f6...
+curl http://127.0.0.1:3000/bt/download/a1b2c3d4e5f6...
 ```
 
 **Response**:
@@ -1862,11 +1927,12 @@ curl http://127.0.0.1:3000/p2p/bt/download/a1b2c3d4e5f6...
 
 ---
 
-### `GET /p2p/bt/downloads`
+### `GET /bt/downloads`
+> Source: [p2p.go:1048](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1048)
 List all BitTorrent downloads (active and completed).
 
 ```bash
-curl http://127.0.0.1:3000/p2p/bt/downloads
+curl http://127.0.0.1:3000/bt/downloads
 ```
 
 **Response**:
@@ -1886,11 +1952,12 @@ curl http://127.0.0.1:3000/p2p/bt/downloads
 
 ---
 
-### `POST /p2p/bt/download/:infohash/pause`
+### `POST /bt/download/:infohash/pause`
+> Source: [p2p.go:926](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L926)
 Pause a BitTorrent download.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../pause
+curl -X POST http://127.0.0.1:3000/bt/download/a1b2c3.../pause
 ```
 
 **Response**:
@@ -1900,11 +1967,12 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../pause
 
 ---
 
-### `POST /p2p/bt/download/:infohash/resume`
+### `POST /bt/download/:infohash/resume`
+> Source: [p2p.go:945](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L945)
 Resume a paused BitTorrent download.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../resume
+curl -X POST http://127.0.0.1:3000/bt/download/a1b2c3.../resume
 ```
 
 **Response**:
@@ -1914,11 +1982,12 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../resume
 
 ---
 
-### `POST /p2p/bt/download/:infohash/seed`
+### `POST /bt/download/:infohash/seed`
+> Source: [p2p.go:1010](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1010)
 Start seeding a completed download.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../seed
+curl -X POST http://127.0.0.1:3000/bt/download/a1b2c3.../seed
 ```
 
 **Response**:
@@ -1928,11 +1997,12 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../seed
 
 ---
 
-### `POST /p2p/bt/download/:infohash/unseed`
+### `POST /bt/download/:infohash/unseed`
+> Source: [p2p.go:1029](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1029)
 Stop seeding a download.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../unseed
+curl -X POST http://127.0.0.1:3000/bt/download/a1b2c3.../unseed
 ```
 
 **Response**:
@@ -1942,11 +2012,12 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../unseed
 
 ---
 
-### `DELETE /p2p/bt/download/:infohash`
+### `DELETE /bt/download/:infohash`
+> Source: [p2p.go:964](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L964)
 Remove a download and its files.
 
 ```bash
-curl -X DELETE http://127.0.0.1:3000/p2p/bt/download/a1b2c3...
+curl -X DELETE http://127.0.0.1:3000/bt/download/a1b2c3...
 ```
 
 **Response**:
@@ -1956,11 +2027,12 @@ curl -X DELETE http://127.0.0.1:3000/p2p/bt/download/a1b2c3...
 
 ---
 
-### `GET /p2p/bt/stats`
+### `GET /bt/stats`
+> Source: [p2p.go:983](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L983)
 Get global BitTorrent client statistics.
 
 ```bash
-curl http://127.0.0.1:3000/p2p/bt/stats
+curl http://127.0.0.1:3000/bt/stats
 ```
 
 **Response**:
@@ -1990,11 +2062,12 @@ curl http://127.0.0.1:3000/p2p/bt/stats
 
 ---
 
-### `POST /p2p/bt/bep44/put`
+### `POST /bt/bep44/put`
+> Source: [p2p.go:699](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L699)
 Store immutable data on the BitTorrent DHT using BEP 44.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/bep44/put \
+curl -X POST http://127.0.0.1:3000/bt/bep44/put \
   -H "Content-Type: application/json" \
   -d '{"data": "SGVsbG8gV29ybGQ=", "mutable": false}'
 ```
@@ -2020,11 +2093,12 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/bep44/put \
 
 ---
 
-### `POST /p2p/bt/bep44/get`
+### `POST /bt/bep44/get`
+> Source: [p2p.go:750](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L750)
 Read immutable data from the BitTorrent DHT using BEP 44.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/bep44/get \
+curl -X POST http://127.0.0.1:3000/bt/bep44/get \
   -H "Content-Type: application/json" \
   -d '{"target": "a1b2c3d4e5f6..."}'
 ```
@@ -2046,11 +2120,33 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/bep44/get \
 
 ---
 
-### `GET /p2p/bt/bep51/sample`
+### `POST /bt/dht/get`
+> Source: [p2p.go:1536](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1536)
+
+Direct DHT key-value query. Simplified alias for BEP44 get — looks up a target key on the BT DHT.
+
+```bash
+curl -X POST http://127.0.0.1:3000/bt/dht/get \
+  -H "Content-Type: application/json" \
+  -d '{"target": "a1b2c3d4e5f6..."}'
+```
+
+**Request Body**:
+- `target` (required): 40-character hex target key
+
+**Response**:
+```json
+{"data": "SGVsbG8gV29ybGQ=", "size": 11}
+```
+
+---
+
+### `GET /bt/bep51/sample`
+> Source: [p2p.go:792](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L792)
 Sample infohashes from the DHT using BEP 51.
 
 ```bash
-curl http://127.0.0.1:3000/p2p/bt/bep51/sample
+curl http://127.0.0.1:3000/bt/bep51/sample
 ```
 
 **Response**:
@@ -2070,9 +2166,174 @@ curl http://127.0.0.1:3000/p2p/bt/bep51/sample
 
 ---
 
-## 9. Dual-Stack P2P
+## 6. IPFS Compat
+### `GET /ipfs`
+> Source: [p2p.go:1230](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1230)
+Get IPFS compatibility layer status.
 
+```bash
+curl http://127.0.0.1:3000/ipfs
+```
+
+**Response**:
+```json
+{
+  "enabled": false,
+  "block_count": 0,
+  "blockstore": "/mnt/d/WorkPlace/peerdrive/storage/ipfs-blocks"
+}
+```
+
+**Fields**:
+- `enabled`: Whether the IPFS compat layer is active
+- `block_count`: Number of blocks cached in the blockstore
+- `blockstore`: Path to the IPFS block storage directory
+
+---
+
+### `POST /ipfs/toggle`
+> Source: [p2p.go:1248](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1248)
+Enable or disable the IPFS compatibility layer.
+
+```bash
+curl -X POST http://127.0.0.1:3000/ipfs/toggle \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true}'
+```
+
+**Request Body**:
+- `enabled` (required): `true` to enable, `false` to disable
+
+**Response**:
+```json
+{"enabled": true}
+```
+
+---
+
+### `POST /ipfs/pin/:cid`
+> Source: [p2p.go:1282](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1282)
+Pin an IPFS CID. Downloads from public IPFS gateways and caches permanently in local storage.
+
+```bash
+curl -X POST http://127.0.0.1:3000/ipfs/pin/QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco
+```
+
+**Response**:
+```json
+{
+  "status": "pinned",
+  "cid": "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco",
+  "hash": "abc123...",
+  "size": 1048576
+}
+```
+
+**Fields**:
+- `status`: `"pinned"` or `"already_pinned"`
+- `cid`: The IPFS CID
+- `hash`: Corresponding SHA256 hash
+- `size`: File size in bytes
+
+---
+
+### `DELETE /ipfs/pin/:cid`
+> Source: [p2p.go:1355](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1355)
+Unpin an IPFS CID. Removes the pin record (local data may remain).
+
+```bash
+curl -X DELETE http://127.0.0.1:3000/ipfs/pin/QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco
+```
+
+**Response**:
+```json
+{"status": "unpinned", "cid": "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco"}
+```
+
+---
+
+### `GET /ipfs/pins`
+> Source: [p2p.go:1385](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1385)
+List all pinned CIDs.
+
+```bash
+curl http://127.0.0.1:3000/ipfs/pins
+```
+
+**Response**:
+```json
+{
+  "pins": [
+    {
+      "cid": "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco",
+      "hash": "abc123...",
+      "size": 1048576,
+      "filename": "QmXoypizj...",
+      "pinned_at": "2026-04-28T12:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Fields** (per pin):
+- `cid`: IPFS CID
+- `hash`: SHA256 hash of the content
+- `size`: File size in bytes
+- `filename`: Filename (typically the CID if no explicit filename)
+- `pinned_at`: ISO 8601 pin timestamp
+
+---
+
+### `GET /ipfs/gateways`
+> Source: [p2p.go:1407](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1407)
+Check health of all configured IPFS gateways.
+
+```bash
+curl http://127.0.0.1:3000/ipfs/gateways
+```
+
+**Response**:
+```json
+{
+  "gateways": [
+    {"url": "https://ipfs.io", "healthy": true, "latency": "150ms"},
+    {"url": "https://cloudflare-ipfs.com", "healthy": true, "latency": "80ms"}
+  ]
+}
+```
+
+**Fields** (per gateway):
+- `url`: Gateway URL
+- `healthy`: Whether the gateway responded successfully
+- `latency`: Response time string
+
+---
+
+### `POST /ipfs/dht/get`
+> Source: [p2p.go:1568](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1568)
+
+Direct DHT key-value query on the IPFS Kademlia DHT. Looks up a CID or key via the libp2p DHT.
+
+```bash
+curl -X POST http://127.0.0.1:3000/ipfs/dht/get \
+  -H "Content-Type: application/json" \
+  -d '{"cid": "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco"}'
+```
+
+**Request Body**:
+- `cid` (required): IPFS CIDv1 string to look up on the DHT
+
+**Response** (200 OK):
+```json
+{"cid": "QmXoypizj...", "providers": ["12D3KooW..."], "count": 1}
+```
+
+---
+
+## 7. Dual-Stack P2P
 ### `POST /p2p/dual/announce`
+> Source: [p2p.go:533](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L533)
 Announce a hash simultaneously on both IPFS DHT and BitTorrent DHT.
 
 ```bash
@@ -2092,6 +2353,7 @@ curl -X POST http://127.0.0.1:3000/p2p/dual/announce \
 ---
 
 ### `POST /p2p/dual/find`
+> Source: [p2p.go:558](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L558)
 Find providers for a hash on both IPFS DHT and BitTorrent DHT simultaneously.
 
 ```bash
@@ -2118,9 +2380,74 @@ curl -X POST http://127.0.0.1:3000/p2p/dual/find \
 
 ---
 
-## 10. Port Forwarding
+## 8. Node Identity
 
+### `GET /node/operator`
+> Source: [p2p.go:1449](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1449)
+Query this node's operator. Returns `null` for anonymous nodes.
+
+```bash
+curl http://127.0.0.1:3000/node/operator
+```
+
+**Response** (200 OK):
+```json
+{"operator": "alice"}
+```
+
+**Anonymous node**:
+```json
+{"operator": null, "note": "anonymous node"}
+```
+
+---
+
+### `POST /node/register`
+> Source: [p2p.go:1460](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1460)
+Register this node with the central registration server. Requires a valid JWT token obtained from `POST /auth/register` on the registration server.
+
+```bash
+curl -X POST http://127.0.0.1:3000/node/register \
+  -H "Content-Type: application/json" \
+  -d '{"token": "eyJ..."}'
+```
+
+**Request Body**:
+- `token` (required): JWT token from registration server
+
+**Response** (200 OK):
+```json
+{"status": "registered", "username": "alice", "peer_id": "12D3Koo..."}
+```
+
+---
+
+## 9. WebRTC & Signaling
+### `GET /ws/signal`
+WebRTC signaling endpoint (WebSocket). Used for establishing direct browser-to-browser connections.
+
+```bash
+# Connect via WebSocket
+ws ws://127.0.0.1:3000/ws/signal
+```
+
+This is a WebSocket endpoint, not a REST API. Messages are JSON-encoded signaling frames (offer, answer, ICE candidates).
+
+### `GET /ws/transfer`
+WebSocket endpoint for P2P file transfers.
+
+```bash
+# Connect via WebSocket
+ws ws://127.0.0.1:3000/ws/transfer
+```
+
+Message types: `request`, `response`, `ping`, `pong`.
+
+---
+
+## 10. Port Forwarding
 ### `POST /p2p/forward/create`
+> Source: [p2p.go:1066](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1066)
 Register a local service port for remote forwarding via P2P.
 
 ```bash
@@ -2141,6 +2468,7 @@ curl -X POST http://127.0.0.1:3000/p2p/forward/create \
 ---
 
 ### `POST /p2p/forward/connect`
+> Source: [p2p.go:1100](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1100)
 Connect to a remote peer's forwarded port.
 
 ```bash
@@ -2166,6 +2494,7 @@ curl -X POST http://127.0.0.1:3000/p2p/forward/connect \
 ---
 
 ### `GET /p2p/forward/list`
+> Source: [p2p.go:1143](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1143)
 List all active port forwarding sessions.
 
 ```bash
@@ -2197,6 +2526,7 @@ curl http://127.0.0.1:3000/p2p/forward/list
 ---
 
 ### `POST /p2p/forward/close`
+> Source: [p2p.go:1165](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1165)
 Close a port forwarding session by key.
 
 ```bash
@@ -2215,148 +2545,9 @@ curl -X POST http://127.0.0.1:3000/p2p/forward/close \
 
 ---
 
-## 11. IPFS Compat
-
-### `GET /p2p/ipfs`
-Get IPFS compatibility layer status.
-
-```bash
-curl http://127.0.0.1:3000/p2p/ipfs
-```
-
-**Response**:
-```json
-{
-  "enabled": false,
-  "block_count": 0,
-  "blockstore": "/mnt/d/WorkPlace/peerdrive/storage/ipfs-blocks"
-}
-```
-
-**Fields**:
-- `enabled`: Whether the IPFS compat layer is active
-- `block_count`: Number of blocks cached in the blockstore
-- `blockstore`: Path to the IPFS block storage directory
-
----
-
-### `POST /p2p/ipfs/toggle`
-Enable or disable the IPFS compatibility layer.
-
-```bash
-curl -X POST http://127.0.0.1:3000/p2p/ipfs/toggle \
-  -H "Content-Type: application/json" \
-  -d '{"enabled": true}'
-```
-
-**Request Body**:
-- `enabled` (required): `true` to enable, `false` to disable
-
-**Response**:
-```json
-{"enabled": true}
-```
-
----
-
-### `POST /p2p/ipfs/pin/:cid`
-Pin an IPFS CID. Downloads from public IPFS gateways and caches permanently in local storage.
-
-```bash
-curl -X POST http://127.0.0.1:3000/p2p/ipfs/pin/QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco
-```
-
-**Response**:
-```json
-{
-  "status": "pinned",
-  "cid": "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco",
-  "hash": "abc123...",
-  "size": 1048576
-}
-```
-
-**Fields**:
-- `status`: `"pinned"` or `"already_pinned"`
-- `cid`: The IPFS CID
-- `hash`: Corresponding SHA256 hash
-- `size`: File size in bytes
-
----
-
-### `DELETE /p2p/ipfs/pin/:cid`
-Unpin an IPFS CID. Removes the pin record (local data may remain).
-
-```bash
-curl -X DELETE http://127.0.0.1:3000/p2p/ipfs/pin/QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco
-```
-
-**Response**:
-```json
-{"status": "unpinned", "cid": "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco"}
-```
-
----
-
-### `GET /p2p/ipfs/pins`
-List all pinned CIDs.
-
-```bash
-curl http://127.0.0.1:3000/p2p/ipfs/pins
-```
-
-**Response**:
-```json
-{
-  "pins": [
-    {
-      "cid": "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco",
-      "hash": "abc123...",
-      "size": 1048576,
-      "filename": "QmXoypizj...",
-      "pinned_at": "2026-04-28T12:00:00Z"
-    }
-  ],
-  "count": 1
-}
-```
-
-**Fields** (per pin):
-- `cid`: IPFS CID
-- `hash`: SHA256 hash of the content
-- `size`: File size in bytes
-- `filename`: Filename (typically the CID if no explicit filename)
-- `pinned_at`: ISO 8601 pin timestamp
-
----
-
-### `GET /p2p/ipfs/gateways`
-Check health of all configured IPFS gateways.
-
-```bash
-curl http://127.0.0.1:3000/p2p/ipfs/gateways
-```
-
-**Response**:
-```json
-{
-  "gateways": [
-    {"url": "https://ipfs.io", "healthy": true, "latency": "150ms"},
-    {"url": "https://cloudflare-ipfs.com", "healthy": true, "latency": "80ms"}
-  ]
-}
-```
-
-**Fields** (per gateway):
-- `url`: Gateway URL
-- `healthy`: Whether the gateway responded successfully
-- `latency`: Response time string
-
----
-
-## 12. Authentication
-
+## 11. Authentication
 ### `GET /p2p/auth/status`
+> Source: [p2p.go:1194](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/p2p.go#L1194)
 Get current authentication status.
 
 ```bash
@@ -2384,9 +2575,9 @@ curl -H "Authorization: Bearer <token>" http://127.0.0.1:3000/p2p/auth/status
 
 ---
 
-## 13. Share Links
-
+## 12. Share Links
 ### `POST /shares`
+> Source: [share.go:14](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/share.go#L14)
 Create a share link for a file or collection.
 
 ```bash
@@ -2423,6 +2614,7 @@ curl -X POST http://127.0.0.1:3000/shares \
 ---
 
 ### `GET /shares`
+> Source: [share.go:70](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/share.go#L70)
 List all active (non-expired) share links.
 
 ```bash
@@ -2449,6 +2641,7 @@ curl http://127.0.0.1:3000/shares
 ---
 
 ### `GET /s/:token`
+> Source: [share.go:46](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/share.go#L46)
 Access a share link by token. Redirects to the file download or collection view.
 
 ```bash
@@ -2459,57 +2652,9 @@ curl -L http://127.0.0.1:3000/s/a1b2c3d4e5f6...
 
 ---
 
-## 14. Tasks
-
-### `GET /tasks`
-List all async tasks (currently returns an empty stub array).
-
-```bash
-curl http://127.0.0.1:3000/tasks
-```
-
-**Response**:
-```json
-{"tasks": []}
-```
-
----
-
-### `GET /tasks/:id`
-Get the status and result of an async task.
-
-```bash
-curl http://127.0.0.1:3000/tasks/1
-```
-
-**Response**:
-```json
-{
-  "task": {
-    "id": 1,
-    "type": "pull",
-    "status": "completed",
-    "params": "",
-    "result": "{\"note\":\"pull no-op\"}",
-    "created_at": "2026-04-28T12:00:00Z",
-    "updated_at": "2026-04-28T12:00:01Z"
-  }
-}
-```
-
-**Fields**:
-- `id`: Task ID
-- `type`: Task type (`pull`, `merge`, etc.)
-- `status`: `pending` | `completed` | `failed`
-- `params`: JSON string of task parameters
-- `result`: JSON string of task result
-- `created_at` / `updated_at`: ISO 8601 timestamps
-
----
-
-## 15. Local Sync
-
+## 13. Local Sync
 ### `POST /local/save`
+> Source: [sync.go:19](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/sync.go#L19)
 Save collection files to local disk.
 
 ```bash
@@ -2537,6 +2682,7 @@ curl -X POST http://127.0.0.1:3000/local/save \
 ---
 
 ### `GET /local/status/:hash`
+> Source: [sync.go:19](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/sync.go#L19)
 Get sync status for a collection.
 
 ```bash
@@ -2571,8 +2717,7 @@ curl http://127.0.0.1:3000/local/status/abc123...
 
 ---
 
-## 16. WebDAV
-
+## 14. WebDAV
 ### `GET/PUT/DELETE/PROPFIND /webdav/*path`
 Mount the entire content-addressed storage as a WebDAV network drive.
 
@@ -2592,32 +2737,7 @@ WebDAV exposes the storage directory as a standard WebDAV filesystem, compatible
 
 ---
 
-## 17. WebRTC & Signaling
-
-### `GET /ws/signal`
-WebRTC signaling endpoint (WebSocket). Used for establishing direct browser-to-browser connections.
-
-```bash
-# Connect via WebSocket
-ws ws://127.0.0.1:3000/ws/signal
-```
-
-This is a WebSocket endpoint, not a REST API. Messages are JSON-encoded signaling frames (offer, answer, ICE candidates).
-
-### `GET /ws/transfer`
-WebSocket endpoint for P2P file transfers.
-
-```bash
-# Connect via WebSocket
-ws ws://127.0.0.1:3000/ws/transfer
-```
-
-Message types: `request`, `response`, `ping`, `pong`.
-
----
-
-## 18. Relay Proxy
-
+## 15. Relay Proxy
 ### `GET /relay/proxy`
 P2P relay proxy endpoint for proxied downloads through connected relay nodes.
 
@@ -2629,8 +2749,56 @@ curl http://127.0.0.1:3000/relay/proxy
 
 ---
 
-## 19. Swagger UI
+## 16. Tasks
+### `GET /tasks`
+> Source: [sync.go:95](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/sync.go#L95)
+List all async tasks (currently returns an empty stub array).
 
+```bash
+curl http://127.0.0.1:3000/tasks
+```
+
+**Response**:
+```json
+{"tasks": []}
+```
+
+---
+
+### `GET /tasks/:id`
+> Source: [sync.go:69](https://github.com/Hana-ame/peerdrive/blob/feat/node-auth/go/internal/controller/sync.go#L69)
+Get the status and result of an async task.
+
+```bash
+curl http://127.0.0.1:3000/tasks/1
+```
+
+**Response**:
+```json
+{
+  "task": {
+    "id": 1,
+    "type": "pull",
+    "status": "completed",
+    "params": "",
+    "result": "{\"note\":\"pull no-op\"}",
+    "created_at": "2026-04-28T12:00:00Z",
+    "updated_at": "2026-04-28T12:00:01Z"
+  }
+}
+```
+
+**Fields**:
+- `id`: Task ID
+- `type`: Task type (`pull`, `merge`, etc.)
+- `status`: `pending` | `completed` | `failed`
+- `params`: JSON string of task parameters
+- `result`: JSON string of task result
+- `created_at` / `updated_at`: ISO 8601 timestamps
+
+---
+
+## 17. Swagger UI
 ### `GET /swagger/*any`
 Swagger UI documentation page.
 
@@ -2640,6 +2808,8 @@ open http://127.0.0.1:3000/swagger/index.html
 ```
 
 ---
+
+
 
 ## Error Responses
 

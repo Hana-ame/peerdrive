@@ -126,10 +126,10 @@
 | 7.4 | FileManager (复选框/多选/分享) | ✅ |
 | 7.5 | Explorer (用户合集) | ✅ |
 | 7.6 | P2PDashboard (网络仪表板) | ✅ |
-| 7.7 | IPFS 面板 (/p2p/ipfs) | ✅ |
+| 7.7 | IPFS 面板 (/ipfs) | ✅ |
 | 7.8 | BT DHT 面板 (/p2p/bt) | ✅ |
 | 7.9 | P2P 双栈面板 (/p2p) | ✅ |
-| 7.10 | BT 下载器 (/p2p/bt/controller) | ✅ |
+| 7.10 | BT 下载器 (/bt/controller) | ✅ |
 | 7.11 | Settings (LLM/P2P/IPFS/BT/WebDAV配置) | ✅ |
 | 7.12 | PWA (manifest/service-worker/移动端导航) | ✅ |
 | 7.13 | LLM 助手 (function calling) | ✅ |
@@ -216,7 +216,7 @@
 |---|------|------|
 | 13.1 | 统一 DHT 查询面板 (webapp) — 输入 hash, 同时查 IPFS+BT | ✅ |
 | 13.2 | IPFS DHT 查询: /p2p/announce, /p2p/dual/find | ✅ |
-| 13.3 | BT DHT 查询: /p2p/bt/announce, /p2p/bt/find, /p2p/bt/bep51/sample | ✅ |
+| 13.3 | BT DHT 查询: /bt/announce, /bt/find, /bt/bep51/sample | ✅ |
 | 13.4 | 双栈查询: /p2p/dual/announce, /p2p/dual/find | ✅ |
 | 13.5 | 前端 DHT Explorer 页面 — 输入 hash, 显示两边结果 | ✅ |
 | 13.6 | BEP 51 infohash 采样 — 发现 BT 网络上的内容 | ✅ |

@@ -67,7 +67,7 @@ HTTP API (Gin) → Service → Provider / Repository (SQLite)
 | `POST /api/v1/actions/merge` | 三路合并 |
 | `GET /p2p/node` | 本节点信息 |
 | `GET /p2p/peers` | 已连接节点 |
-| `POST /p2p/bt/bep44/get` | BT DHT BEP44 查询 |
+| `POST /bt/bep44/get` | BT DHT BEP44 查询 |
 | `GET /p2p/ws/info` | WebSocket 传输信息 |
 | `GET /p2p/webrtc/info` | WebRTC 信令信息 |
 | `GET /swagger/*any` | Swagger UI |

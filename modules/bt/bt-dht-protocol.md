@@ -249,7 +249,7 @@ Uploader Node                    BT DHT Network
      │                                │
      │  2. infohash = sha256[0:20]    │
      │                                │
-     │  3. POST /p2p/bt/announce      │
+     │  3. POST /bt/announce      │
      │     {"hash": "<sha256_hex>"}   │
      │                                │
      │         ────────────────────── │
@@ -298,7 +298,7 @@ func (bt *BTDHT) Announce(ctx context.Context, infoHash [20]byte) (int, error) {
 ```
 Seeker Node                      BT DHT Network
      │                                │
-     │  1. POST /p2p/bt/find          │
+     │  1. POST /bt/find          │
      │     {"hash": "<sha256_hex>"}   │
      │                                │
      │  2. infohash = sha256[0:20]    │
@@ -323,9 +323,9 @@ Seeker Node                      BT DHT Network
 
 ## 7. Peerdrive BT DHT API Endpoints
 
-All endpoints are registered under the `/p2p/bt/` prefix on the Peerdrive Gin router.
+All endpoints are registered under the `/bt/` prefix on the Peerdrive Gin router.
 
-### 7.1 `GET /p2p/bt/status`
+### 7.1 `GET /bt/status`
 
 Returns the current state of the BT DHT node.
 
@@ -353,7 +353,7 @@ Returns the current state of the BT DHT node.
 | `announced` | int | Count of infohashes announced by this node |
 | `listening_addr` | string | Local UDP listen address |
 
-### 7.2 `POST /p2p/bt/announce`
+### 7.2 `POST /bt/announce`
 
 Announce a SHA256 hash to the BT DHT network.
 
@@ -388,7 +388,7 @@ Announce a SHA256 hash to the BT DHT network.
 }
 ```
 
-### 7.3 `POST /p2p/bt/find`
+### 7.3 `POST /bt/find`
 
 Find peers for a given SHA256 hash via the BT DHT network.
 
@@ -460,7 +460,7 @@ Peerdrive server start
   │         ├─ Periodic routing table refresh (every 15 min)
   │         └─ Node expiry / bucket splitting
   │
-  └─ Register /p2p/bt/* routes on Gin router
+  └─ Register /bt/* routes on Gin router
 ```
 
 ---
@@ -510,9 +510,9 @@ Tokens are validated within a 10-minute window (current + previous secret).
 BT DHT discovery feeds into Peerdrive's unified provider lookup:
 
 ```
-/p2p/bt/announce  ──┐
+/bt/announce  ──┐
                      ├─► Peerdrive Provider Registry ──► /p2p/fetch
-/p2p/bt/find     ───┘                                    /p2p/sync
+/bt/find     ───┘                                    /p2p/sync
 ```
 
 When both libp2p DHT and BT DHT are enabled, a `/p2p/dual/find` endpoint queries both networks in parallel and merges results.

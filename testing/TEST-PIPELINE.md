@@ -193,7 +193,7 @@ bash test/bt-full-test.sh
 | `SHA1 mismatch` | Piece 下载损坏 | 是，检查 piece.go 验证逻辑 |
 
 ### 排错步骤
-1. 确认服务运行: `curl localhost:3000/p2p/bt/status`
+1. 确认服务运行: `curl localhost:3000/bt/status`
 2. 确认 DHT 有节点: 等 60 秒后重查 `num_nodes`
 3. BEP44 问题: 检查 `internal/p2p_bt/bep44.go` 的 `localBEP44Store`
 4. Wire 问题: 启动 Python seeder: `python3 test/bt-integration/bt-listener.py`

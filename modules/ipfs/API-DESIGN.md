@@ -10,12 +10,12 @@
 
 1. [Endpoint Overview](#1-endpoint-overview)
 2. [GET /ipfs/:cid -- Download by CID](#2-get-ipfscid-download-by-cid)
-3. [GET /p2p/ipfs -- IPFS Compat Status](#3-get-p2pipfs-ipfs-compat-status)
-4. [POST /p2p/ipfs/toggle -- Toggle IPFS Compat](#4-post-p2pipfstoggle-toggle-ipfs-compat)
-5. [POST /p2p/ipfs/pin/:cid -- Pin CID](#5-post-p2pipfspincid-pin-cid)
-6. [DELETE /p2p/ipfs/pin/:cid -- Unpin CID](#6-delete-p2pipfspincid-unpin-cid)
-7. [GET /p2p/ipfs/pins -- List Pins](#7-get-p2pipfspins-list-pins)
-8. [GET /p2p/ipfs/gateways -- Gateway Health Check](#8-get-p2pipfsgateways-gateway-health-check)
+3. [GET /ipfs -- IPFS Compat Status](#3-get-p2pipfs-ipfs-compat-status)
+4. [POST /ipfs/toggle -- Toggle IPFS Compat](#4-post-p2pipfstoggle-toggle-ipfs-compat)
+5. [POST /ipfs/pin/:cid -- Pin CID](#5-post-p2pipfspincid-pin-cid)
+6. [DELETE /ipfs/pin/:cid -- Unpin CID](#6-delete-p2pipfspincid-unpin-cid)
+7. [GET /ipfs/pins -- List Pins](#7-get-p2pipfspins-list-pins)
+8. [GET /ipfs/gateways -- Gateway Health Check](#8-get-p2pipfsgateways-gateway-health-check)
 9. [Common Response Patterns](#9-common-response-patterns)
 
 ---
@@ -25,12 +25,12 @@
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/ipfs/:cid` | Download a file by its IPFS CID (local DB lookup, fallback to public gateways) |
-| GET | `/p2p/ipfs` | Get IPFS compatibility layer status (enabled/disabled, block count) |
-| POST | `/p2p/ipfs/toggle` | Enable or disable the IPFS compatibility layer |
-| POST | `/p2p/ipfs/pin/:cid` | Pin a CID: download from gateway, cache permanently in local storage |
-| DELETE | `/p2p/ipfs/pin/:cid` | Unpin a CID: remove the pin record (local cached data is preserved) |
-| GET | `/p2p/ipfs/pins` | List all pinned CIDs with metadata |
-| GET | `/p2p/ipfs/gateways` | Check health and latency of all configured IPFS gateways |
+| GET | `/ipfs` | Get IPFS compatibility layer status (enabled/disabled, block count) |
+| POST | `/ipfs/toggle` | Enable or disable the IPFS compatibility layer |
+| POST | `/ipfs/pin/:cid` | Pin a CID: download from gateway, cache permanently in local storage |
+| DELETE | `/ipfs/pin/:cid` | Unpin a CID: remove the pin record (local cached data is preserved) |
+| GET | `/ipfs/pins` | List all pinned CIDs with metadata |
+| GET | `/ipfs/gateways` | Check health and latency of all configured IPFS gateways |
 
 ---
 
@@ -146,14 +146,14 @@ curl -s http://localhost:3000/ipfs/QmInvalid123
 
 ---
 
-## 3. GET /p2p/ipfs -- IPFS Compat Status
+## 3. GET /ipfs -- IPFS Compat Status
 
 Returns the current status of the IPFS compatibility layer, which provides a Bitswap protocol handler for compatibility with standard IPFS nodes.
 
 ### Request
 
 ```
-GET /p2p/ipfs
+GET /ipfs
 ```
 
 **Headers:** None required.
@@ -187,19 +187,19 @@ When the compat layer is not initialized:
 ### curl Example
 
 ```bash
-curl -s http://localhost:3000/p2p/ipfs | jq
+curl -s http://localhost:3000/ipfs | jq
 ```
 
 ---
 
-## 4. POST /p2p/ipfs/toggle -- Toggle IPFS Compat
+## 4. POST /ipfs/toggle -- Toggle IPFS Compat
 
 Enables or disables the IPFS compatibility layer. When enabled, the server registers Bitswap protocol handlers (`/ipfs/bitswap/1.0.0`, `/ipfs/bitswap/1.1.0`, `/ipfs/bitswap/1.2.0`) on the libp2p host and copies pinned files into the IPFS blockstore.
 
 ### Request
 
 ```
-POST /p2p/ipfs/toggle
+POST /ipfs/toggle
 Content-Type: application/json
 ```
 
@@ -235,26 +235,26 @@ Content-Type: application/json
 
 ```bash
 # Enable IPFS compat
-curl -s -X POST http://localhost:3000/p2p/ipfs/toggle \
+curl -s -X POST http://localhost:3000/ipfs/toggle \
   -H "Content-Type: application/json" \
   -d '{"enabled": true}' | jq
 
 # Disable IPFS compat
-curl -s -X POST http://localhost:3000/p2p/ipfs/toggle \
+curl -s -X POST http://localhost:3000/ipfs/toggle \
   -H "Content-Type: application/json" \
   -d '{"enabled": false}' | jq
 ```
 
 ---
 
-## 5. POST /p2p/ipfs/pin/:cid -- Pin CID
+## 5. POST /ipfs/pin/:cid -- Pin CID
 
 Downloads a CID from the configured IPFS gateways, computes its SHA256 hash, stores the file permanently in content-addressed storage, and records the pin in the `ipfs_pins` database table. If the IPFS compat layer is enabled, also adds the file to the blockstore.
 
 ### Request
 
 ```
-POST /p2p/ipfs/pin/:cid
+POST /ipfs/pin/:cid
 ```
 
 **Path Parameters:**
@@ -317,7 +317,7 @@ POST /p2p/ipfs/pin/:cid
 ```
 Client                  Peerdrive Server
   |                            |
-  | POST /p2p/ipfs/pin/:cid   |
+  | POST /ipfs/pin/:cid   |
   |--------------------------->|
   |                            |
   |  1. Check if already       |
@@ -347,23 +347,23 @@ Client                  Peerdrive Server
 
 ```bash
 # Pin a CID (downloads and caches permanently)
-curl -s -X POST http://localhost:3000/p2p/ipfs/pin/QmT5NvUtoP5fCaYby8TAGLJSWzLrA6nbgmFZBp9jNV7FdG | jq
+curl -s -X POST http://localhost:3000/ipfs/pin/QmT5NvUtoP5fCaYby8TAGLJSWzLrA6nbgmFZBp9jNV7FdG | jq
 
 # Pin a CID that is already pinned
-curl -s -X POST http://localhost:3000/p2p/ipfs/pin/QmT5NvUtoP5fCaYby8TAGLJSWzLrA6nbgmFZBp9jNV7FdG | jq
+curl -s -X POST http://localhost:3000/ipfs/pin/QmT5NvUtoP5fCaYby8TAGLJSWzLrA6nbgmFZBp9jNV7FdG | jq
 # => {"status":"already_pinned","pin":{...}}
 ```
 
 ---
 
-## 6. DELETE /p2p/ipfs/pin/:cid -- Unpin CID
+## 6. DELETE /ipfs/pin/:cid -- Unpin CID
 
 Removes the pin record for a CID from the `ipfs_pins` database table. The cached file data in content-addressed storage and blockstore is **not** deleted -- only the pin metadata is removed.
 
 ### Request
 
 ```
-DELETE /p2p/ipfs/pin/:cid
+DELETE /ipfs/pin/:cid
 ```
 
 **Path Parameters:**
@@ -393,23 +393,23 @@ DELETE /p2p/ipfs/pin/:cid
 
 ```bash
 # Unpin a CID
-curl -s -X DELETE http://localhost:3000/p2p/ipfs/pin/QmT5NvUtoP5fCaYby8TAGLJSWzLrA6nbgmFZBp9jNV7FdG | jq
+curl -s -X DELETE http://localhost:3000/ipfs/pin/QmT5NvUtoP5fCaYby8TAGLJSWzLrA6nbgmFZBp9jNV7FdG | jq
 
 # Unpin a CID that is not pinned
-curl -s -X DELETE http://localhost:3000/p2p/ipfs/pin/QmDoesNotExist | jq
+curl -s -X DELETE http://localhost:3000/ipfs/pin/QmDoesNotExist | jq
 # => {"error":"pin not found"}
 ```
 
 ---
 
-## 7. GET /p2p/ipfs/pins -- List Pins
+## 7. GET /ipfs/pins -- List Pins
 
 Returns all pinned CIDs with metadata, ordered by most recently pinned first.
 
 ### Request
 
 ```
-GET /p2p/ipfs/pins
+GET /ipfs/pins
 ```
 
 **Headers:** None required.
@@ -454,19 +454,19 @@ When no pins exist:
 
 ```bash
 # List all pinned CIDs
-curl -s http://localhost:3000/p2p/ipfs/pins | jq
+curl -s http://localhost:3000/ipfs/pins | jq
 ```
 
 ---
 
-## 8. GET /p2p/ipfs/gateways -- Gateway Health Check
+## 8. GET /ipfs/gateways -- Gateway Health Check
 
 Checks the health and latency of all configured IPFS gateways by sending a HEAD request for a well-known CID (`QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn`, the empty directory CID). This endpoint does **not** require or set up any gateways -- it reports the status of whatever gateways are currently configured.
 
 ### Request
 
 ```
-GET /p2p/ipfs/gateways
+GET /ipfs/gateways
 ```
 
 **Headers:** None required.
@@ -514,7 +514,7 @@ When no gateways are configured:
 
 ```bash
 # Check gateway health
-curl -s http://localhost:3000/p2p/ipfs/gateways | jq
+curl -s http://localhost:3000/ipfs/gateways | jq
 ```
 
 ---

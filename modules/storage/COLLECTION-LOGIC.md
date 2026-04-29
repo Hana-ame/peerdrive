@@ -136,7 +136,7 @@ POST /p2p/announce → p2pSvc.AnnounceHash(hash)
   → DHT.Provide(CID) → IPFS网络
   → 失败返回200+WARN (单节点DHT孤立) ✅
 
-POST /p2p/bt/announce → btSvc.Announce(hash)
+POST /bt/announce → btSvc.Announce(hash)
   → SHA256 → infohash(前20字节) → DHT.Announce
   → 成功返回 "announced on BT DHT" ✅
 
@@ -147,7 +147,7 @@ POST /p2p/dual/announce → dualSvc.Announce(hash)
 ### 4.2 查找
 
 ```
-POST /p2p/bt/find → btSvc.FindProviders(hash)
+POST /bt/find → btSvc.FindProviders(hash)
   → DHT遍历 → get_peers → 收集IP:port
   → 跨节点测试: Node B查Node A宣告的文件 → count=1 ✅
 
