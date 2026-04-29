@@ -81,3 +81,40 @@ type Stats struct {
 	ActiveRelays  int `json:"active_relays"`
 	TotalComments int `json:"total_comments"`
 }
+
+// ServicePolicy controls whether a user is allowed to use relay and/or P2P services.
+type ServicePolicy struct {
+	Username   string `json:"username"`
+	AllowRelay bool   `json:"allow_relay"`
+	AllowP2P   bool   `json:"allow_p2p"`
+	Notes      string `json:"notes,omitempty"`
+}
+
+// UserStorage tracks per-user file storage usage on the registration server.
+type UserStorage struct {
+	Username   string `json:"username"`
+	UsedBytes  int64  `json:"used_bytes"`
+	LimitBytes int64  `json:"limit_bytes"`
+}
+
+// GroupDetail includes group metadata plus member list.
+type GroupDetail struct {
+	ID          int64       `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	CreatedAt   time.Time   `json:"created_at"`
+	Members     []string    `json:"members"`
+	MemberCount int         `json:"member_count"`
+}
+
+// RelayNodeDetail extends RelayNode with operator username.
+type RelayNodeDetail struct {
+	PeerID           string    `json:"peer_id"`
+	Addrs            []string  `json:"addrs"`
+	StorageMB        int       `json:"storage_mb"`
+	LoadPct          float64   `json:"load_pct"`
+	Version          string    `json:"version"`
+	OperatorUsername string    `json:"operator_username,omitempty"`
+	RegisteredAt     time.Time `json:"registered_at"`
+	LastHeartbeat    time.Time `json:"last_heartbeat"`
+}

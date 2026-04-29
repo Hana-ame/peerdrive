@@ -55,6 +55,12 @@ func main() {
 	if err := userRepo.InitGroupSchema(); err != nil {
 		log.Fatalf("failed to init group schema: %v", err)
 	}
+	if err := userRepo.InitServicePolicySchema(); err != nil {
+		log.Fatalf("failed to init service policy schema: %v", err)
+	}
+	if err := userRepo.InitStorageSchema(); err != nil {
+		log.Fatalf("failed to init storage schema: %v", err)
+	}
 
 	r := router.SetupRouter(authCtrl, authSvc)
 

@@ -21,8 +21,22 @@ func SetupRouter(authCtrl *controller.AuthController, authSvc *service.AuthServi
 		auth.GET("/list", middleware.AuthRequired(authSvc), middleware.AdminRequired(), authCtrl.ListUsers)
 
 		// Group membership
+		auth.GET("/groups", middleware.AuthRequired(authSvc), authCtrl.GetAllGroups)
 		auth.GET("/group/:username", middleware.AuthRequired(authSvc), authCtrl.GetUserGroups)
 		auth.POST("/group/:username", middleware.AuthRequired(authSvc), authCtrl.AddUserToGroup)
+		auth.DELETE("/group/:username/:groupname", middleware.AuthRequired(authSvc), authCtrl.RemoveUserFromGroup)
+		auth.GET("/groups/:groupname/members", middleware.AuthRequired(authSvc), authCtrl.GetGroupMembers)
+
+		// Service policy
+		auth.GET("/service-policy/:username", middleware.AuthRequired(authSvc), authCtrl.GetServicePolicy)
+		auth.POST("/service-policy/:username", middleware.AuthRequired(authSvc), authCtrl.SetServicePolicy)
+
+		// Storage tracking
+		auth.GET("/storage/:username", middleware.AuthRequired(authSvc), authCtrl.GetStorage)
+		auth.POST("/storage/:username", middleware.AuthRequired(authSvc), authCtrl.UpdateStorage)
+
+		// User's operated relay nodes
+		auth.GET("/relays/:username", middleware.AuthRequired(authSvc), authCtrl.ListUserRelays)
 	}
 
 	protected := r.Group("/api")
@@ -39,6 +53,8 @@ func SetupRouter(authCtrl *controller.AuthController, authSvc *service.AuthServi
 		p2pRelay.POST("/register", authCtrl.RegisterRelay)
 		p2pRelay.GET("/list", authCtrl.ListRelays)
 		p2pRelay.POST("/heartbeat", authCtrl.RelayHeartbeat)
+		p2pRelay.GET("/:peer_id/operator", middleware.AuthRequired(authSvc), authCtrl.GetRelayOperator)
+		p2pRelay.POST("/:peer_id/operator", middleware.AuthRequired(authSvc), authCtrl.SetRelayOperator)
 	}
 
 	// Comments on collections

@@ -97,6 +97,42 @@ func (s *AuthService) CountUsers() (int, error) {
 	return s.repo.CountUsers()
 }
 
+// ──────────────────────────────
+//  Group management (extended)
+// ──────────────────────────────
+
+func (s *AuthService) GetAllGroups() ([]model.GroupDetail, error) {
+	return s.repo.GetAllGroups()
+}
+
+func (s *AuthService) GetGroupMembers(groupName string) ([]string, error) {
+	return s.repo.GetGroupMembers(groupName)
+}
+
+// ──────────────────────────────
+//  Service policy
+// ──────────────────────────────
+
+func (s *AuthService) GetServicePolicy(username string) (*model.ServicePolicy, error) {
+	return s.repo.GetServicePolicy(username)
+}
+
+func (s *AuthService) SetServicePolicy(policy *model.ServicePolicy) error {
+	return s.repo.SetServicePolicy(policy)
+}
+
+// ──────────────────────────────
+//  Storage tracking
+// ──────────────────────────────
+
+func (s *AuthService) GetStorage(username string) (*model.UserStorage, error) {
+	return s.repo.GetStorage(username)
+}
+
+func (s *AuthService) UpdateStorage(username string, usedBytes, limitBytes int64) error {
+	return s.repo.UpdateStorage(username, usedBytes, limitBytes)
+}
+
 func (s *AuthService) Login(req model.LoginRequest) (*model.TokenResponse, error) {
 	user, err := s.repo.GetByUsername(req.Username)
 	if err != nil {

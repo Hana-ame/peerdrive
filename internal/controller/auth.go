@@ -332,3 +332,254 @@ func (c *AuthController) GetStats(ctx *gin.Context) {
 		TotalComments: totalComments,
 	})
 }
+
+// ──────────────────────────────
+//  Extended group management
+// ──────────────────────────────
+
+// GetAllGroups handles GET /auth/groups
+func (c *AuthController) GetAllGroups(ctx *gin.Context) {
+	groups, err := c.svc.GetAllGroups()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if groups == nil {
+		groups = []model.GroupDetail{}
+	}
+	ctx.JSON(http.StatusOK, gin.H{"groups": groups})
+}
+
+// GetGroupMembers handles GET /auth/groups/:groupname/members
+func (c *AuthController) GetGroupMembers(ctx *gin.Context) {
+	groupName := ctx.Param("groupname")
+	if groupName == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "group name is required"})
+		return
+	}
+
+	members, err := c.svc.GetGroupMembers(groupName)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if members == nil {
+		members = []string{}
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"group":   groupName,
+		"members": members,
+		"total":   len(members),
+	})
+}
+
+// RemoveUserFromGroup handles DELETE /auth/group/:username/:groupname
+func (c *AuthController) RemoveUserFromGroup(ctx *gin.Context) {
+	username := ctx.Param("username")
+	groupName := ctx.Param("groupname")
+	if username == "" || groupName == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "username and group name are required"})
+		return
+	}
+
+	if err := c.svc.RemoveFromGroup(username, groupName); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "removed from group", "username": username, "group": groupName})
+}
+
+// ──────────────────────────────
+//  Service policy
+// ──────────────────────────────
+
+// GetServicePolicy handles GET /auth/service-policy/:username
+func (c *AuthController) GetServicePolicy(ctx *gin.Context) {
+	username := ctx.Param("username")
+	if username == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
+		return
+	}
+
+	policy, err := c.svc.GetServicePolicy(username)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, policy)
+}
+
+// SetServicePolicy handles POST /auth/service-policy/:username
+func (c *AuthController) SetServicePolicy(ctx *gin.Context) {
+	username := ctx.Param("username")
+	if username == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
+		return
+	}
+
+	var req struct {
+		AllowRelay *bool  `json:"allow_relay"`
+		AllowP2P   *bool  `json:"allow_p2p"`
+		Notes      string `json:"notes"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	policy := &model.ServicePolicy{Username: username, AllowRelay: true, AllowP2P: true, Notes: ""}
+	if req.AllowRelay != nil {
+		policy.AllowRelay = *req.AllowRelay
+	}
+	if req.AllowP2P != nil {
+		policy.AllowP2P = *req.AllowP2P
+	}
+	if req.Notes != "" {
+		policy.Notes = req.Notes
+	}
+
+	if err := c.svc.SetServicePolicy(policy); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, policy)
+}
+
+// ──────────────────────────────
+//  Storage tracking
+// ──────────────────────────────
+
+// GetStorage handles GET /auth/storage/:username
+func (c *AuthController) GetStorage(ctx *gin.Context) {
+	username := ctx.Param("username")
+	if username == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
+		return
+	}
+
+	storage, err := c.svc.GetStorage(username)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, storage)
+}
+
+// UpdateStorage handles POST /auth/storage/:username
+func (c *AuthController) UpdateStorage(ctx *gin.Context) {
+	username := ctx.Param("username")
+	if username == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
+		return
+	}
+
+	var req struct {
+		UsedBytes  *int64 `json:"used_bytes"`
+		LimitBytes *int64 `json:"limit_bytes"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Fetch current values to merge with request
+	current, err := c.svc.GetStorage(username)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	used := current.UsedBytes
+	limit := current.LimitBytes
+	if req.UsedBytes != nil {
+		used = *req.UsedBytes
+	}
+	if req.LimitBytes != nil {
+		limit = *req.LimitBytes
+	}
+
+	if err := c.svc.UpdateStorage(username, used, limit); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, &model.UserStorage{
+		Username:   username,
+		UsedBytes:  used,
+		LimitBytes: limit,
+	})
+}
+
+// ──────────────────────────────
+//  Relay operator info
+// ──────────────────────────────
+
+// GetRelayOperator handles GET /p2p/relay/:peer_id/operator
+func (c *AuthController) GetRelayOperator(ctx *gin.Context) {
+	peerID := ctx.Param("peer_id")
+	if peerID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "peer_id is required"})
+		return
+	}
+
+	node, err := c.relaySvc.GetByPeerID(peerID)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "relay node not found"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, node)
+}
+
+// ListUserRelays handles GET /auth/relays/:username
+func (c *AuthController) ListUserRelays(ctx *gin.Context) {
+	username := ctx.Param("username")
+	if username == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
+		return
+	}
+
+	nodes, err := c.relaySvc.ListByOperator(username)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if nodes == nil {
+		nodes = []model.RelayNodeDetail{}
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"username": username,
+		"relays":   nodes,
+		"total":    len(nodes),
+	})
+}
+
+// SetRelayOperator handles POST /p2p/relay/:peer_id/operator
+func (c *AuthController) SetRelayOperator(ctx *gin.Context) {
+	peerID := ctx.Param("peer_id")
+	if peerID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "peer_id is required"})
+		return
+	}
+
+	var req struct {
+		Username string `json:"username" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := c.relaySvc.SetOperator(peerID, req.Username); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "operator set", "peer_id": peerID, "username": req.Username})
+}

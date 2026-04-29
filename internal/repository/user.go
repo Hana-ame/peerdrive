@@ -200,3 +200,146 @@ func (r *UserRepository) CountUsers() (int, error) {
 	err := r.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
 	return count, err
 }
+
+// ──────────────────────────────
+//  Service policy
+// ──────────────────────────────
+
+func (r *UserRepository) InitServicePolicySchema() error {
+	_, err := r.db.Exec(`
+		CREATE TABLE IF NOT EXISTS user_profiles (
+			username TEXT PRIMARY KEY,
+			allow_relay INTEGER NOT NULL DEFAULT 1,
+			allow_p2p INTEGER NOT NULL DEFAULT 1,
+			notes TEXT DEFAULT '',
+			FOREIGN KEY (username) REFERENCES users(username)
+		)
+	`)
+	return err
+}
+
+func (r *UserRepository) GetServicePolicy(username string) (*model.ServicePolicy, error) {
+	p := &model.ServicePolicy{Username: username, AllowRelay: true, AllowP2P: true}
+	err := r.db.QueryRow(
+		"SELECT allow_relay, allow_p2p, notes FROM user_profiles WHERE username = ?",
+		username,
+	).Scan(&p.AllowRelay, &p.AllowP2P, &p.Notes)
+	if err == sql.ErrNoRows {
+		return p, nil // defaults if no explicit policy
+	}
+	return p, err
+}
+
+func (r *UserRepository) SetServicePolicy(policy *model.ServicePolicy) error {
+	allowRelay := 0
+	if policy.AllowRelay {
+		allowRelay = 1
+	}
+	allowP2P := 0
+	if policy.AllowP2P {
+		allowP2P = 1
+	}
+	_, err := r.db.Exec(`
+		INSERT INTO user_profiles (username, allow_relay, allow_p2p, notes)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(username) DO UPDATE SET
+			allow_relay = excluded.allow_relay,
+			allow_p2p = excluded.allow_p2p,
+			notes = excluded.notes
+	`, policy.Username, allowRelay, allowP2P, policy.Notes)
+	return err
+}
+
+// ──────────────────────────────
+//  Storage tracking
+// ──────────────────────────────
+
+func (r *UserRepository) InitStorageSchema() error {
+	_, err := r.db.Exec(`
+		CREATE TABLE IF NOT EXISTS user_storage (
+			username TEXT PRIMARY KEY,
+			used_bytes INTEGER NOT NULL DEFAULT 0,
+			limit_bytes INTEGER NOT NULL DEFAULT 0,
+			FOREIGN KEY (username) REFERENCES users(username)
+		)
+	`)
+	return err
+}
+
+func (r *UserRepository) GetStorage(username string) (*model.UserStorage, error) {
+	s := &model.UserStorage{Username: username}
+	err := r.db.QueryRow(
+		"SELECT used_bytes, limit_bytes FROM user_storage WHERE username = ?",
+		username,
+	).Scan(&s.UsedBytes, &s.LimitBytes)
+	if err == sql.ErrNoRows {
+		return s, nil
+	}
+	return s, err
+}
+
+func (r *UserRepository) UpdateStorage(username string, usedBytes, limitBytes int64) error {
+	_, err := r.db.Exec(`
+		INSERT INTO user_storage (username, used_bytes, limit_bytes)
+		VALUES (?, ?, ?)
+		ON CONFLICT(username) DO UPDATE SET
+			used_bytes = excluded.used_bytes,
+			limit_bytes = excluded.limit_bytes
+	`, username, usedBytes, limitBytes)
+	return err
+}
+
+// ──────────────────────────────
+//  Group queries (extended)
+// ──────────────────────────────
+
+// GetAllGroups returns all groups with member counts.
+func (r *UserRepository) GetAllGroups() ([]model.GroupDetail, error) {
+	rows, err := r.db.Query(`
+		SELECT g.id, g.name, g.description, g.created_at,
+			COUNT(ug.user_id) as member_count
+		FROM groups g
+		LEFT JOIN user_groups ug ON ug.group_id = g.id
+		GROUP BY g.id
+		ORDER BY g.name
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var groups []model.GroupDetail
+	for rows.Next() {
+		var g model.GroupDetail
+		if err := rows.Scan(&g.ID, &g.Name, &g.Description, &g.CreatedAt, &g.MemberCount); err != nil {
+			return nil, err
+		}
+		groups = append(groups, g)
+	}
+	return groups, nil
+}
+
+// GetGroupMembers returns the list of usernames in a group.
+func (r *UserRepository) GetGroupMembers(groupName string) ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT u.username FROM users u
+		JOIN user_groups ug ON ug.user_id = u.id
+		JOIN groups g ON g.id = ug.group_id
+		WHERE g.name = ?
+		ORDER BY u.username
+	`, groupName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var members []string
+	for rows.Next() {
+		var username string
+		if err := rows.Scan(&username); err != nil {
+			return nil, err
+		}
+		members = append(members, username)
+	}
+	return members, nil
+}
