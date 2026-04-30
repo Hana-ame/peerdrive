@@ -218,9 +218,6 @@ func TestIPFSProvider_ImplementsContentProvider(t *testing.T) {
 // ─── Goroutine / body leak ──────────────────────────────────────────
 
 func TestIPFSProvider_GetReader_NoBodyLeak(t *testing.T) {
-	// Track how many response bodies get closed.
-	var closed atomic.Int32
-
 	// Create gateways that count body closes
 	makeGW := func(contents map[string]string, delay time.Duration) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -253,8 +250,6 @@ func TestIPFSProvider_GetReader_NoBodyLeak(t *testing.T) {
 		t.Fatalf("GetReader: %v", err)
 	}
 	reader.Close()
-	_ = closed // used for conceptual tracking
-
 	// Give time for drain goroutine to complete
 	time.Sleep(300 * time.Millisecond)
 
