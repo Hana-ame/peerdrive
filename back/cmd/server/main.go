@@ -98,7 +98,7 @@ func main() {
 		router.SetRegServer(cfg.RegistrationServer)
 	}
 	log.LogInfo("main: setting up HTTP router")
-	r := router.SetupRouter(downloader, p2pSvc, cfg, ipfsCompatLayer)
+	r := router.SetupRouter(downloader, p2pSvc, cfg, ipfsCompatLayer, providerMgr)
 
 	port := ":" + cfg.Port
 

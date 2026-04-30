@@ -27,6 +27,11 @@ func NewManager(localBaseDir string) *Manager {
 	return m
 }
 
+// Register 注册一个命名的内容提供者。
+func (m *Manager) Register(name string, p ContentProvider) {
+	m.providers[name] = p
+}
+
 // GetReader 根据 providerType 将请求路由到对应提供者并获取文件读取器。
 func (m *Manager) GetReader(providerType, path string) (io.ReadCloser, string, error) {
 	p, ok := m.providers[providerType]

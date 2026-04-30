@@ -50,6 +50,7 @@ func SetupRouter(
 	p2pSvc *service.P2PService,
 	cfg *config.Config,
 	ipfsCompat *service.IPFSCompatLayer,
+	providerMgr *provider.Manager,
 ) *gin.Engine {
 	log.LogInfo("router: SetupRouter starting")
 	r := gin.Default()
@@ -171,7 +172,7 @@ func SetupRouter(
 	}
 	controller.InitBTClient(btClient)
 
-	// Initialize the IPFS gateway provider.
+	// Initialize the IPFS gateway provider and register with manager.
 	var ipfsProv *provider.IPFSProvider
 	if cfg.IPFSGatewayEnable {
 		gateways := strings.Split(cfg.IPFSGateways, ",")
@@ -179,7 +180,10 @@ func SetupRouter(
 			gateways[i] = strings.TrimSpace(gateways[i])
 		}
 		if len(gateways) > 0 {
-			ipfsProv = &provider.IPFSProvider{Gateways: gateways}
+			ipfsProv = provider.NewIPFSProvider(gateways)
+			if providerMgr != nil {
+				providerMgr.Register("ipfsgw", ipfsProv)
+			}
 		}
 	}
 	controller.InitIPFSProvider(ipfsProv)
