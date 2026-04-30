@@ -9,7 +9,7 @@
 | 模块 | Agent | Worktree | 文档 | API 设计 | 测试脚本 | 测试结果 |
 |------|-------|----------|------|----------|----------|----------|
 | 📥 BT | bt-agent | worktrees/bt-agent | modules/bt/ | API-DESIGN.md | bt-full-test.sh | bt-full-test-results.txt |
-| 🌐 IPFS | ipfs-agent | worktrees/ipfs-agent | modules/ipfs/ | API-DESIGN.md | ipfs-full-test.sh | ipfs-full-test-results.txt |
+| 🌐 IPFS | ipfs-agent | worktrees/ipfs-agent | modules/ipfs/ | API-DESIGN.md | ipfs-full-test.sh, ipfs-integration/ | ipfs-full-test-results.txt, ipfs-integration-test-results.txt |
 | 🔗 P2P | p2p-agent | worktrees/p2p-agent | modules/p2p/ | API-DESIGN.md | p2p-full-test.sh | p2p-full-test-results.txt |
 | 💾 Storage | storage-agent | worktrees/storage-agent | modules/storage/ | API-DESIGN.md | storage-full-test.sh | storage-full-test-results.txt |
 | 🔐 Auth | auth-agent | worktrees/auth-agent | modules/auth/ | API-DESIGN.md | auth-full-test.sh | auth-full-test-results.txt |
@@ -33,8 +33,11 @@ TODO-FIXES.md 状态更新 (完成情况)
 docs/modules/<module>/
 
 # 测试脚本 + 结果
-go/test/<module>-full-test.sh
-go/test/<module>-full-test-results.txt
+back/test/<module>-full-test.sh
+back/test/<module>-full-test-results.txt
+
+# IPFS 网关集成测试 (无需外部服务)
+back/test/ipfs-integration/
 
 # 代码
 internal/<module>/    (Go 后端)
@@ -63,7 +66,7 @@ bash back/test/all.sh
 | 模块 | 代码 | 文档 | 测试脚本 | 测试结果 | 闭环 |
 |------|------|------|----------|----------|------|
 | BT | ✅ merged | ✅ | ✅ | ✅ 38/38 | ✅ |
-| IPFS | ✅ merged | ✅ | ✅ | ✅ | ✅ |
+| IPFS | ✅ merged | ✅ | ✅ | ✅ 9/9 + 17 UT | ✅ |
 | P2P | ✅ merged | ✅ | ✅ | ✅ 35/35 | ✅ |
 | Storage | ✅ merged | ✅ | ✅ | ✅ 28/28 | ✅ |
 | Auth | ✅ merged | ✅ | ✅ | ✅ 20/20 | ✅ |

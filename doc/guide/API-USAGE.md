@@ -455,6 +455,8 @@ POST /bt/dht/get
 ## 6. IPFS
 
 IPFS 兼容层使用 libp2p Kademlia DHT 和 Bitswap 协议。
+通过 `provider/ipfs.go` 实现 ContentProvider 接口，
+在 Manager 中注册为 `"ipfsgw"` provider，下载优先级通过 `PEERDRIVE_DOWNLOAD_ORDER` 配置（默认 `local,ipfs,ipfsgw,btdht,http`）。
 
 ### 6.1 查看 IPFS 状态
 

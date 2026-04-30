@@ -1,0 +1,37 @@
+=== RUN   TestIPFSProvider_GetReader_Success
+--- PASS: TestIPFSProvider_GetReader_Success (0.01s)
+=== RUN   TestIPFSProvider_GetReader_NoGateways
+--- PASS: TestIPFSProvider_GetReader_NoGateways (0.00s)
+=== RUN   TestIPFSProvider_GetReader_NotFound
+--- PASS: TestIPFSProvider_GetReader_NotFound (1.47s)
+=== RUN   TestIPFSProvider_GetReader_RaceWinner
+--- PASS: TestIPFSProvider_GetReader_RaceWinner (2.00s)
+=== RUN   TestIPFSProvider_GetReader_AllFail
+--- PASS: TestIPFSProvider_GetReader_AllFail (1.46s)
+=== RUN   TestIPFSProvider_FetchByCID_Success
+--- PASS: TestIPFSProvider_FetchByCID_Success (0.00s)
+=== RUN   TestIPFSProvider_FetchByCID_NoGateways
+--- PASS: TestIPFSProvider_FetchByCID_NoGateways (0.00s)
+=== RUN   TestIPFSProvider_FetchByCID_ContextCancel
+--- PASS: TestIPFSProvider_FetchByCID_ContextCancel (5.00s)
+=== RUN   TestIPFSProvider_FetchByCID_NotFound
+--- PASS: TestIPFSProvider_FetchByCID_NotFound (1.68s)
+=== RUN   TestIPFSProvider_FetchByCID_RaceWinner
+--- PASS: TestIPFSProvider_FetchByCID_RaceWinner (3.00s)
+=== RUN   TestIPFSProvider_GetFilenameHint
+--- PASS: TestIPFSProvider_GetFilenameHint (0.00s)
+=== RUN   TestIPFSProvider_ImplementsContentProvider
+--- PASS: TestIPFSProvider_ImplementsContentProvider (1.55s)
+=== RUN   TestIPFSProvider_GetReader_NoBodyLeak
+    ipfs_test.go:262: no body leak detected
+--- PASS: TestIPFSProvider_GetReader_NoBodyLeak (2.00s)
+=== RUN   TestIPFSProvider_GetReader_ManyGateways
+--- PASS: TestIPFSProvider_GetReader_ManyGateways (0.90s)
+=== RUN   TestIPFSProvider_RetryOnError
+--- PASS: TestIPFSProvider_RetryOnError (1.70s)
+=== RUN   TestIPFSProvider_RetryExhausted
+--- PASS: TestIPFSProvider_RetryExhausted (1.61s)
+=== RUN   TestIPFSProvider_FetchByCID_ParentContextCancel
+--- PASS: TestIPFSProvider_FetchByCID_ParentContextCancel (5.00s)
+PASS
+ok  	peerdrive/internal/provider	(cached)

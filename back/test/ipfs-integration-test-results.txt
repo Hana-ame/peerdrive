@@ -1,0 +1,35 @@
+==============================================
+  Peerdrive IPFS Gateway Integration Test
+==============================================
+
+--- Step 1: Check prerequisites ---
+  OK: ipfs version 0.34.1
+--- Step 2: Init IPFS node ---
+  IPFS_PATH=/tmp/ipfs-integration-3669090971/repo
+  OK
+
+--- Step 3: Start IPFS daemon ---
+  waiting for daemon....
+  OK
+
+--- Step 4: Add test file ---
+  OK: CID=QmSrgAixGGAdYicPcaqsonbMTjatTGvUmPGNsGJdwcECtK (48 bytes)
+
+--- Step 5: FetchByCID ---
+  PASS: 48 bytes, content matches
+
+--- Step 6: GetReader ---
+  PASS: 48 bytes via ReadCloser
+
+--- Step 7: Race gateways ---
+  PASS: good gateway won in 1ms
+
+--- Step 8: Context timeout ---
+  PASS: ipfs: all 1 gateways failed: context deadline exceeded
+
+--- Step 9: Non-existent CID ---
+  PASS: ipfs: all 1 gateways failed: gateway http://127.0.0.1:28080 failed after 3 retries: HTTP 400
+
+==============================================
+  ALL IPFS INTEGRATION TESTS PASSED
+==============================================
