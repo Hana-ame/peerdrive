@@ -59,6 +59,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
   const [regError, setRegError] = useState('');
   const [authHeaderEnabled, setAuthHeaderEnabled] = useState(api.getAuthHeaderEnabled());
   const [copied, setCopied] = useState(false);
+  const [copiedBlock, setCopiedBlock] = useState(null);
 
   // ─── Group Management ───────────────────────────────
   const [groups, setGroups] = useState([]);
@@ -963,24 +964,48 @@ export default function Settings({ dataConsent, setDataConsent }) {
 
             {/* OS Instructions */}
             <div className="border-t border-gray-700/50 pt-3 mt-2">
-              <p className="text-xs text-gray-400 mb-2">操作系统挂载方法</p>
+              <p className="text-xs text-gray-400 mb-2">操作系统挂载方法（点击即复制）</p>
               <div className="space-y-3">
                 <div>
                   <p className="text-sm text-gray-300 font-medium mb-1">Windows</p>
-                  <code className="block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono select-all">
+                  <code
+                    onClick={() => {
+                      navigator.clipboard.writeText(`net use Z: ${api.getApiBase() + '/webdav/'}`);
+                      setCopiedBlock('windows');
+                      setTimeout(() => setCopiedBlock(null), 1500);
+                    }}
+                    className={`block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono cursor-pointer border transition-colors ${copiedBlock === 'windows' ? 'border-green-500' : 'border-transparent hover:border-gray-600'}`}
+                    title="点击复制"
+                  >
                     net use Z: {api.getApiBase() + '/webdav/'}
                   </code>
                 </div>
                 <div>
                   <p className="text-sm text-gray-300 font-medium mb-1">macOS</p>
                   <p className="text-xs text-gray-400">Finder &rarr; Go &rarr; Connect to Server &rarr; 输入地址</p>
-                  <code className="block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono select-all mt-1">
+                  <code
+                    onClick={() => {
+                      navigator.clipboard.writeText(api.getApiBase() + '/webdav/');
+                      setCopiedBlock('macos');
+                      setTimeout(() => setCopiedBlock(null), 1500);
+                    }}
+                    className={`block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono cursor-pointer border transition-colors mt-1 ${copiedBlock === 'macos' ? 'border-green-500' : 'border-transparent hover:border-gray-600'}`}
+                    title="点击复制"
+                  >
                     {api.getApiBase() + '/webdav/'}
                   </code>
                 </div>
                 <div>
                   <p className="text-sm text-gray-300 font-medium mb-1">Linux</p>
-                  <code className="block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono select-all">
+                  <code
+                    onClick={() => {
+                      navigator.clipboard.writeText(`mount -t davfs ${api.getApiBase() + '/webdav/'} /mnt/peerdrive`);
+                      setCopiedBlock('linux');
+                      setTimeout(() => setCopiedBlock(null), 1500);
+                    }}
+                    className={`block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono cursor-pointer border transition-colors ${copiedBlock === 'linux' ? 'border-green-500' : 'border-transparent hover:border-gray-600'}`}
+                    title="点击复制"
+                  >
                     mount -t davfs {api.getApiBase() + '/webdav/'} /mnt/peerdrive
                   </code>
                 </div>
