@@ -44,15 +44,16 @@ HTTP API (Gin Router)
       → Provider (数据源: local / http / ipfsgw)
       → Repository (SQLite)
       → P2P (libp2p / BT DHT / WebRTC)
+      → IPFSService (boxo Bitswap + DHT)  ← 新增
 ```
 
 | 层 | 位置 | 职责 |
 |----|------|------|
 | Router | `back/internal/router/` | 路由注册、CORS、Auth 中间件 |
 | Controller | `back/internal/controller/` | HTTP 处理、参数解析 |
-| Service | `back/internal/service/` | 核心逻辑：文件注册/下载、合集 CRUD/版本、P2P 传输/信令 |
+| Service | `back/internal/service/` | 核心逻辑：文件注册/下载、合集 CRUD/版本、P2P 传输/信令、**IPFSService (boxo Bitswap)** |
 | Repository | `back/internal/repository/` | SQLite CRUD |
-| Provider | `back/internal/provider/` | 数据源接口：`local` / `http` / `ipfsgw` |
+| Provider | `back/internal/provider/` | 数据源接口：`local` / `http` / `ipfsgw`（IPFS 优先走 Bitswap） |
 | P2P BT | `back/internal/p2p_bt/` | Mainline DHT、BEP44/BEP51、torrent/magnet |
 
 ## 端口

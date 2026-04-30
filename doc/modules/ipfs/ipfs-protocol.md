@@ -589,3 +589,152 @@ Example:
 - **Peer identity**: Verified via Ed25519 signatures during the Noise handshake.
 - **Data integrity**: All transferred files are verified against their SHA256 hash before use.
 - **Path traversal prevention**: AnonCollection entry paths are validated to prevent directory traversal.
+
+---
+
+## 20. Bitswap Protocol (Standard IPFS)
+
+Peerdrive integrates standard IPFS Bitswap via the **boxo** library (`github.com/ipfs/boxo` v0.37). This enables full interoperability with the IPFS network — Peerdrive nodes can fetch from and serve to standard IPFS nodes.
+
+### 20.1 Bitswap Components
+
+| Component | Implementation | Purpose |
+|-----------|---------------|---------|
+| Bitswap Client | `bitswap.New()` via boxo | Request blocks from IPFS peers via DHT discovery |
+| Bitswap Server | `bsnet.NewFromIpfsHost()` via boxo | Serve blocks to IPFS peers (auto-registers `/ipfs/bitswap/*` handlers) |
+| Blockstore | `peerdriveBlockstore` (custom) | CID → SHA-256 content-addressed storage, zero file duplication |
+| Content Routing | `dht.IpfsDHT` (shared from P2PService) | DHT provider lookup and announcement |
+
+### 20.2 Bitswap Stream Handlers
+
+Registered automatically by boxo on the shared libp2p host:
+
+```
+/ipfs/bitswap/1.0.0  (legacy)
+/ipfs/bitswap/1.1.0
+/ipfs/bitswap/1.2.0  (with payload extension)
+```
+
+These replace the hand-rolled protobuf parsing previously in `IPFSCompatLayer`.
+
+### 20.3 Blockstore Architecture
+
+```
+Request: GetBlock(CID)
+    │
+    ▼
+peerdriveBlockstore.Has(CID)
+    │
+    ▼
+CID → Multihash → SHA-256 digest (32 bytes)
+    │
+    ▼
+storage/<sha256[:2]>/<sha256>
+    │
+    ├── exists? → blocks.NewBlockWithCid(data, cid) → return
+    └──不存在? → Bitswap client → DHT FindProviders → 从 IPFS 节点拉取
+```
+
+**关键设计:** Blockstore 不复制文件。CID 对应的数据直接从 SHA-256 内容寻址存储读取。文件在 Peerdrive collection 中存在即自动成为 IPFS 可提供的内容。
+
+### 20.4 Bitswap 操作
+
+```
+// 获取块 (本地优先，再网络)
+blk := bitswap.GetBlock(ctx, cid)
+    ├── 本地 blockstore.Has(cid)? → 直接返回
+    └── 通过 DHT 查找提供者 → 连接 → 请求块 → Put 到 blockstore → 返回
+```
+
+### 20.5 与旧 IPFSCompatLayer 的关系
+
+| 功能 | 旧 (IPFSCompatLayer) | 新 (IPFSService + boxo) |
+|------|---------------------|------------------------|
+| Bitswap 解析 | 手动 protobuf (`protowire`) | boxo 自动处理 |
+| AddFile | 复制文件到 `ipfs-blocks/` | 不复制，CID 直接映射 SHA-256 路径 |
+| Stream handlers | 手动 `SetStreamHandler` | boxo `NewFromIpfsHost` 自动注册 |
+| Pin | 无 | 文件在 storage 即 pinned |
+
+---
+
+## 21. IPFSService (boxo 集成层)
+
+### 21.1 结构
+
+```go
+type IPFSService struct {
+    host       host.Host          // 复用 P2PService.Host
+    dht        *dht.IpfsDHT       // 复用 P2PService.DHT
+    storageDir string             // SHA-256 内容寻址存储根目录
+    blockstore blockstore.Blockstore  // peerdriveBlockstore
+    bswap      *bitswap.Bitswap   // boxo Bitswap 客户端 + 服务端
+}
+```
+
+### 21.2 初始化流程
+
+```
+NewIPFSService(ctx, p2p, storageDir)
+    │
+    ├── 1. newPeerdriveBlockstore(storageDir)
+    │      CID → SHA-256 路径映射
+    │
+    ├── 2. bsnet.NewFromIpfsHost(p2p.Host)
+    │      注册 /ipfs/bitswap/* stream handlers
+    │
+    ├── 3. bitswap.New(ctx, network, dht, blockstore)
+    │      Bitswap 客户端 + 服务端启动
+    │
+    └── 4. network.Start(bitswap)
+           开始接收和处理 Bitswap 请求
+```
+
+### 21.3 公开方法
+
+| 方法 | 说明 |
+|------|------|
+| `FetchByCID(ctx, cid)` | Bitswap 获取（本地 → DHT → P2P） |
+| `Provide(ctx, sha256)` | 通过 DHT 宣布提供 SHA-256 文件的 CID |
+| `ProvideAll(ctx)` | 遍历所有本地文件并 announce 到 DHT |
+| `FindProviders(ctx, cid, n)` | DHT 查找 CID 提供者 |
+| `HasCID(cid)` | 检查 CID 是否在本地存储中 |
+| `GetBlock(cid)` | 读取 CID 的原始块数据 |
+| `AddToBlockstore(sha256)` | 将 SHA-256 文件注册为 IPFS 块 |
+| `BlockCount()` | 本地可提供的文件数 |
+
+### 21.4 CID ↔ SHA-256 双向转换
+
+```go
+// SHA-256 → CID (pkg/hashutil)
+SHA256ToCID("e3b0c442...855")  → "bafkreihk7nxx..."
+
+// CID → SHA-256 (pkg/hashutil, 新增)
+CIDToSHA256("bafkreihk7nxx...") → "e3b0c442...855"
+```
+
+---
+
+## 22. IPFS Provider (下载策略)
+
+### 22.1 两层获取
+
+```
+IPFSProvider.GetReader(cid)
+    │
+    ├── 1. BitswapFetcher (IPFSService.FetchByCID)
+    │      ├── 本地 blockstore → 命中则返回
+    │      └── DHT + Bitswap 网络获取
+    │
+    └── 2. HTTP 网关回退 (fallback)
+           ├── 多个网关并发竞速
+           ├── 指数退避重试 (3次, 500ms→5s)
+           └── 第一个成功者胜出
+```
+
+### 22.2 配置
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `PEERDRIVE_IPFS_GATEWAY_ENABLE` | `true` | 是否启用 IPFS 网关回退 |
+| `PEERDRIVE_IPFS_GATEWAYS` | `ipfs.io,cloudflare-ipfs.com,dweb.link` | 网关 URL 列表 |
+| `PEERDRIVE_IPFS_COMPAT` | `false` | 启用 IPFS 兼容层（Bitswap 服务端） |

@@ -66,7 +66,7 @@ bash back/test/all.sh
 | 模块 | 代码 | 文档 | 测试脚本 | 测试结果 | 闭环 |
 |------|------|------|----------|----------|------|
 | BT | ✅ merged | ✅ | ✅ | ✅ 38/38 | ✅ |
-| IPFS | ✅ merged | ✅ | ✅ | ✅ 9/9 + 17 UT | ✅ |
+| IPFS | ✅ merged (v2: boxo Bitswap) | ✅ | ✅ | ✅ 9/9 + 17 UT | ✅ |
 | P2P | ✅ merged | ✅ | ✅ | ✅ 35/35 | ✅ |
 | Storage | ✅ merged | ✅ | ✅ | ✅ 28/28 | ✅ |
 | Auth | ✅ merged | ✅ | ✅ | ✅ 20/20 | ✅ |

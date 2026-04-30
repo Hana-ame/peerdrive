@@ -69,7 +69,8 @@
 | `back/internal/service/file_service.go` | 文件服务 — 存储/索引/去重/SHA256 校验 |
 | `back/internal/service/file_service_test.go` | 文件服务测试 |
 | `back/internal/service/forward.go` | 请求转发 — 中继节点透明转发 |
-| `back/internal/service/ipfs_compat.go` | IPFS CID 兼容层 — CID ↔ SHA256 映射 |
+| `back/internal/service/ipfs_compat.go` | IPFS CID 兼容层 — CID ↔ SHA256 映射，boxo/IPFSService 回退 |
+| `back/internal/service/ipfs_service.go` | **IPFSService** — boxo Bitswap 客户端/服务端 + peerdriveBlockstore + DHT 提供/查询 |
 | `back/internal/service/node_registrar.go` | 节点注册 — 向 registration-server 注册与发现 |
 | `back/internal/service/p2p.go` | P2P 传输核心 — 双栈协调 (libp2p + BT DHT) |
 | `back/internal/service/p2p_connection.go` | P2P 连接管理 — 建立/维持/超时/重连 |

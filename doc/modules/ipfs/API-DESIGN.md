@@ -36,7 +36,7 @@
 
 ## 2. GET /ipfs/:cid -- Download by CID
 
-Downloads a file by its IPFS Content Identifier (CIDv1). The handler first looks up the CID in the local database's CID-to-SHA256 index. If found, it streams the local file. If not found and IPFS gateways are configured, it falls back to fetching from public IPFS gateways (ipfs.io, cloudflare-ipfs.com, dweb.link), caches the result locally, and streams it back.
+Downloads a file by its IPFS Content Identifier (CIDv1). The handler first tries **Bitswap** (local blockstore → DHT discovery → P2P fetch via boxo). If Bitswap fails and IPFS gateways are configured, it falls back to HTTP gateway racing (ipfs.io, cloudflare-ipfs.com, dweb.link), caches the result locally, and streams it back.
 
 ### Request
 
@@ -114,15 +114,22 @@ Client                  Peerdrive Server
   |  2a. Found? Stream local   |
   |      file by SHA256        |
   |  2b. Not found?            |
-  |      Try gateways:         |
-  |      - ipfs.io             |
-  |      - cloudflare-ipfs.com |
-  |      - dweb.link           |
+  |      Try Bitswap (boxo):   |
+  |      - local blockstore    |
+  |      - DHT FindProviders   |
+  |      - Bitswap GetBlock    |
+  |      If success:           |
+  |        Store to SHA-256    |
+  |        Stream file         |
+  |  2c. Bitswap failed?       |
+  |      Try HTTP gateways:    |
+  |      - 并发竞速多网关      |
+  |      - 指数退避重试        |
   |      If success:           |
   |        Compute SHA256      |
   |        Cache to storage    |
   |        Stream file         |
-  |  2c. All fail? Return 404  |
+  |  2d. All fail? Return 404  |
   |                            |
   |  <-- file data / 404 ------|
 ```
@@ -148,7 +155,7 @@ curl -s http://localhost:3000/ipfs/QmInvalid123
 
 ## 3. GET /p2p/ipfs -- IPFS Compat Status
 
-Returns the current status of the IPFS compatibility layer, which provides a Bitswap protocol handler for compatibility with standard IPFS nodes.
+Returns the current status of the IPFS compatibility layer. When the **IPFSService** (boxo-based) is active, Bitswap is handled via the standard boxo library. Otherwise, a manual protobuf-based fallback is used.
 
 ### Request
 
@@ -194,7 +201,7 @@ curl -s http://localhost:3000/p2p/ipfs | jq
 
 ## 4. POST /p2p/ipfs/toggle -- Toggle IPFS Compat
 
-Enables or disables the IPFS compatibility layer. When enabled, the server registers Bitswap protocol handlers (`/ipfs/bitswap/1.0.0`, `/ipfs/bitswap/1.1.0`, `/ipfs/bitswap/1.2.0`) on the libp2p host and copies pinned files into the IPFS blockstore.
+Enables or disables the IPFS compatibility layer. When enabled and IPFSService (boxo) is active, Bitswap uses the standard boxo library (registered via `bsnet.NewFromIpfsHost`). When boxo is unavailable, falls back to manual protobuf-based Bitswap handlers (`/ipfs/bitswap/1.0.0`, `/ipfs/bitswap/1.1.0`, `/ipfs/bitswap/1.2.0`). Files are served from the SHA-256 content-addressed storage without duplication.
 
 ### Request
 

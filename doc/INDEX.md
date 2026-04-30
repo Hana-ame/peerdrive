@@ -69,6 +69,7 @@
 | [report/DEVELOPMENT_PLAN.md](report/DEVELOPMENT_PLAN.md) | 开发计划 |
 | [report/TODO-FIXES.md](report/TODO-FIXES.md) | 当前任务 |
 | [report/changelog.md](report/changelog.md) | 变更日志 |
+| [report/GIT-ANALYSIS.md](report/GIT-ANALYSIS.md) | Git 记录分析 — 328 提交的开发模式、高频 Bug、经验教训 |
 
 ## archive — 归档
 
