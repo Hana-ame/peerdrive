@@ -9,7 +9,7 @@ mkdir -p "$BASE_DIR/client/sync"
 SERVER_BIN="$(pwd)/main"
 if [ ! -f "$SERVER_BIN" ]; then
   echo "Building server binary..."
-  http_proxy="" https_proxy="" go build -o "$SERVER_BIN" ./cmd/server/main.go
+  http_proxy="" https_proxy="" go build -tags nosqlite -o "$SERVER_BIN" ./cmd/server/main.go
 fi
 
 cleanup() {

@@ -24,7 +24,7 @@ echo "=== 认证系统测试 ==="
 
 echo ""; echo "[0] Build"
 cd "$(dirname "$0")/../../registration-server" && go build -o /tmp/reg-server ./cmd/server/ 2>/dev/null && pass "reg-server" || { fail "reg-server"; exit 1; }
-cd "$(dirname "$0")/.." && go build -o /tmp/pd-node ./cmd/server/ 2>/dev/null && pass "pd-node" || { fail "pd-node"; exit 1; }
+cd "$(dirname "$0")/.." && go build -tags nosqlite -o /tmp/pd-node ./cmd/server/ 2>/dev/null && pass "pd-node" || { fail "pd-node"; exit 1; }
 
 echo ""; echo "[1] Start reg server"
 rm -f /tmp/regsvr_at.db; mkdir -p /tmp/pd_at_s1 /tmp/pd_at_s2

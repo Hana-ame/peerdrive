@@ -40,7 +40,7 @@ trap cleanup EXIT
 # --- build ---
 info "Building server"
 cd "$SCRIPT_DIR/.."
-go build -o "$SERVER_BIN" ./cmd/server/main.go
+go build -tags nosqlite -o "$SERVER_BIN" ./cmd/server/main.go
 cd -
 
 # --- start server ---

@@ -58,7 +58,7 @@ fi
 echo ""; echo "[3] 启动 Peerdrive"
 rm -f /tmp/peerdrive_ipfs_test.db
 mkdir -p /tmp/peerdrive_ipfs_storage
-go build -o /tmp/peerdrive-test-server ./cmd/server/ 2>&1
+go build -tags nosqlite -o /tmp/peerdrive-test-server ./cmd/server/ 2>&1
 /tmp/peerdrive-test-server &
 SERVER_PID=$!
 for i in $(seq 1 60); do curl -s "http://localhost:$PORT/ping" >/dev/null 2>&1 && break; sleep 0.5; done
@@ -71,8 +71,8 @@ PEER_ID=$(echo "$NODE" | python3 -c "import sys,json; print(json.load(sys.stdin)
 echo "    peer: ${PEER_ID:0:20}..."
 
 # Toggle ON (needs JSON body)
-curl -s -X POST "http://localhost:$PORT/p2p/ipfs/toggle" -H 'Content-Type: application/json' -d '{"enabled":true}' >/dev/null
-IPFS_ON=$(curl -s "http://localhost:$PORT/p2p/ipfs" | python3 -c "import sys,json; print(json.load(sys.stdin)['enabled'])")
+curl -s -X POST "http://localhost:$PORT/ipfs/toggle" -H 'Content-Type: application/json' -d '{"enabled":true}' >/dev/null
+IPFS_ON=$(curl -s "http://localhost:$PORT/ipfs" | python3 -c "import sys,json; print(json.load(sys.stdin)['enabled'])")
 [ "$IPFS_ON" = "True" ] && pass "IPFS compat enabled" || fail "IPFS compat: $IPFS_ON"
 
 # [5] Upload file + verify CID download

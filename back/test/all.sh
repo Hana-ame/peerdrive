@@ -17,7 +17,7 @@ GO_DIR="$(dirname "$0")/.."
 # ── 1. Go Build ──
 echo ""
 echo "── 1. Go Build ──"
-if (cd "$GO_DIR" && go build ./... 2>&1); then
+if (cd "$GO_DIR" && go build -tags nosqlite ./... 2>&1); then
   pass "go build"
 else
   fail "go build"
@@ -26,7 +26,7 @@ fi
 # ── 2. Go Unit Tests ──
 echo ""
 echo "── 2. Go Unit Tests ──"
-if (cd "$GO_DIR" && go test ./... 2>&1); then
+if (cd "$GO_DIR" && go test -tags nosqlite ./... 2>&1); then
   pass "go test"
 else
   fail "go test"
