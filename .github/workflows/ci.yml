@@ -2,104 +2,49 @@ name: Peerdrive CI
 
 on:
   push:
-    branches: [main, feat/*]
+    branches: [main, feat/*, module/*]
   pull_request:
     branches: [main]
 
 jobs:
-  build-and-test:
+  backend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: back
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
-
       - name: Cache Go modules
         uses: actions/cache@v4
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          key: ${{ runner.os }}-go-${{ hashFiles('back/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
+      - run: go mod download
+      - run: go vet ./...
+      - run: go test ./... -count=1
+      - run: go build -o peerdrive-server ./cmd/server/
 
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Go unit tests
-        run: go test ./... -count=1
-
-      - name: Build server
-        run: go build -o peerdrive-server ./cmd/server/
-
-      - name: P2P integration test
-        continue-on-error: true
-        run: |
-          chmod +x test/p2p.sh
-          bash test/p2p.sh || echo "P2P test skipped"
-
-      - name: Anon collection test
-        run: |
-          mkdir -p /tmp/peerdrive_test
-          PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false ./peerdrive-server &
-          PID=$!
-          sleep 3
-          chmod +x test/anon-collection.sh
-          bash test/anon-collection.sh
-          EXIT_CODE=$?
-          kill $PID 2>/dev/null || true
-          wait $PID 2>/dev/null || true
-          exit $EXIT_CODE
-
-      - name: File upload test
-        run: |
-          PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false ./peerdrive-server &
-          PID=$!
-          sleep 3
-          chmod +x test/upload.sh
-          bash test/upload.sh
-          EXIT_CODE=$?
-          kill $PID 2>/dev/null || true
-          wait $PID 2>/dev/null || true
-          exit $EXIT_CODE
-
-      - name: Register test
-        run: |
-          PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false ./peerdrive-server &
-          PID=$!
-          sleep 3
-          chmod +x test/register.sh
-          bash test/register.sh
-          EXIT_CODE=$?
-          kill $PID 2>/dev/null || true
-          wait $PID 2>/dev/null || true
-          exit $EXIT_CODE
-
-      - name: Relay test
-        continue-on-error: true
-        run: |
-          chmod +x test/relay.sh
-          bash test/relay.sh || echo "Relay test skipped"
-
-      - name: Generate test report
-        if: always()
-        run: |
-          echo "# Peerdrive CI Test Report" > TEST_REPORT.md
-          echo "- **Status**: ${{ job.status }}" >> TEST_REPORT.md
-          echo "- P2P/Relay: soft-fail (continue-on-error)" >> TEST_REPORT.md
-          echo "- Non-P2P tests: PEERDRIVE_P2P_ENABLE=false PEERDRIVE_BT_DHT_ENABLE=false" >> TEST_REPORT.md
-          cat TEST_REPORT.md
-
-      - name: Upload test report
-        if: always()
-        uses: actions/upload-artifact@v4
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: front
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          name: test-report
-          path: TEST_REPORT.md
+          node-version: 22
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
