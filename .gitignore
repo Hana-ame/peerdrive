@@ -19,4 +19,27 @@ main
 downloads/
 
 *.bin
-bt-integration
+
+# Node
+node_modules/
+dist/
+
+# Archives
+*.zip
+
+# Claude config (personal)
+.claude/
+
+# Git worktrees
+worktrees/
+frontend-worktrees/
+
+# Separate services (not in this repo)
+registration-server/
+p2p-dual-stack/
+
+# Root temp files
+*.txt
+react/
+go/
+docs/
