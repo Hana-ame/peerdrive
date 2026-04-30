@@ -22,7 +22,7 @@
 
 ### 验证
 ```bash
-bash go/test/bt-full-test.sh
+bash back/test/bt-full-test.sh
 # 结果: 38/38 PASS, 0 FAIL
 ```
 
@@ -118,7 +118,7 @@ curl http://127.0.0.1:3000/p2p/download/sources/<hash>  # 正常响应
 
 ### 验证
 ```bash
-bash go/test/webrtc_signal_test.sh
+bash back/test/webrtc_signal_test.sh
 # 结果: 23/23 PASS
 ```
 

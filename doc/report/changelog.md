@@ -129,7 +129,7 @@ path := strings.TrimPrefix(c.Param("path"), "/")
 
 ## 3. E2E 测试脚本
 
-**文件**：`go/test/e2e-all.sh`
+**文件**：`back/test/e2e-all.sh`
 
 ### 3.1 设计原则
 - **自包含**：自己 `go build`，自己启动 server，自己清理
@@ -157,7 +157,7 @@ path := strings.TrimPrefix(c.Param("path"), "/")
 ### 3.3 运行方式
 ```bash
 cd /mnt/d/WorkPlace/peerdrive
-bash go/test/e2e-all.sh
+bash back/test/e2e-all.sh
 ```
 
 ### 3.4 当前结果
@@ -206,6 +206,6 @@ go/
 - `go/test/upload.sh`
 - `go/test/register.sh`
 - `go/test/anon-collection.sh`
-- `go/test/p2p.sh`
+- `back/test/p2p.sh`
 
-**建议**：将 `go/test/e2e-all.sh` 加入 CI pipeline。
+**建议**：将 `back/test/e2e-all.sh` 加入 CI pipeline。

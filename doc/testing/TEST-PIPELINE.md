@@ -30,7 +30,7 @@
 
 ### 运行
 ```bash
-cd go && go test ./... -count=1
+cd back && go test ./... -count=1
 ```
 
 ### 测试段
@@ -73,7 +73,7 @@ ok  peerdrive/internal/service     0.314s
 
 ### 运行
 ```bash
-cd go && bash test/e2e-all.sh
+cd back && bash test/e2e-all.sh
 ```
 
 ### 测试流程
@@ -204,7 +204,7 @@ bash test/bt-full-test.sh
 
 ### 运行
 ```bash
-cd go && bash test/p2p.sh
+cd back && bash test/p2p.sh
 ```
 
 ### 测试流程
@@ -232,7 +232,7 @@ cd go && bash test/p2p.sh
 
 ### 运行
 ```bash
-cd go && bash test/relay.sh
+cd back && bash test/relay.sh
 ```
 
 ### 测试流程

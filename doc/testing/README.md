@@ -20,10 +20,10 @@
 
 运行方式：
 ```bash
-cd go && go test ./... -count=1
+cd back && go test ./... -count=1
 ```
 
-### 2. E2E 测试 (`go/test/e2e-all.sh`)
+### 2. E2E 测试 (`back/test/e2e-all.sh`)
 
 自包含脚本，覆盖全部 HTTP API 端点。85 条断言，12 个测试段。
 
@@ -31,7 +31,7 @@ cd go && go test ./... -count=1
 ```bash
 cd /mnt/d/WorkPlace/peerdrive
 rm -f peerdrive.db
-bash go/test/e2e-all.sh
+bash back/test/e2e-all.sh
 ```
 
 **要求**：
@@ -72,8 +72,8 @@ PASS: 84  FAIL: 0  WARN: 1  TOTAL: 85
 | `go/test/upload.sh` | 文件上传测试 | 同上 |
 | `go/test/register.sh` | 文件注册测试 | 同上 |
 | `go/test/anon-collection.sh` | 匿名合集测试 | 同上 |
-| `go/test/p2p.sh` | P2P 双节点测试 | 自包含（自己 build 并启动 2 节点） |
-| `go/test/relay.sh` | Relay + NAT 穿透测试 | 自包含 |
+| `back/test/p2p.sh` | P2P 双节点测试 | 自包含（自己 build 并启动 2 节点） |
+| `back/test/relay.sh` | Relay + NAT 穿透测试 | 自包含 |
 
 ### 4. React 前端测试
 
@@ -94,11 +94,11 @@ npm run build        # 生产构建
 - go/test/upload.sh
 - go/test/register.sh
 - go/test/anon-collection.sh
-- go/test/p2p.sh
+- back/test/p2p.sh
 ```
 
 建议加入：
 ```yaml
-- go/test/e2e-all.sh
+- back/test/e2e-all.sh
 - go test ./...
 ```

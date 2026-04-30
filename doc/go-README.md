@@ -120,15 +120,15 @@ NAT 穿透：Relay 服务器模式 / Hole Punching / AutoNAT / mDNS 局域网发
 ## 技术架构
 
 ```
-cmd/server/main.go
-  ├── repository/db.go          → SQLite (peerdrive.db)
-  ├── service/p2p.go            → libp2p (DHT + Relay + WS)
-  ├── service/downloader.go     → 本地 → P2P 回退
-  ├── service/anon_service.go   → 匿名合集 CRUD + Commit + Fork
-  ├── service/file_service.go   → 文件注册/上传/删除
-  ├── service/sync_service.go   → 本地同步 + 过滤器
-  ├── provider/manager.go       → 存储后端抽象
-  └── router/router.go          → Gin HTTP 路由
+back/cmd/server/main.go
+  ├── internal/repository/db.go          → SQLite (peerdrive.db)
+  ├── internal/service/p2p.go            → libp2p (DHT + Relay + WS)
+  ├── internal/service/downloader.go     → 本地 → P2P 回退
+  ├── internal/service/anon_service.go   → 匿名合集 CRUD + Commit + Fork
+  ├── internal/service/file_service.go   → 文件注册/上传/删除
+  ├── internal/service/sync_service.go   → 本地同步 + 过滤器
+  ├── internal/provider/manager.go       → 存储后端抽象
+  └── internal/router/router.go          → Gin HTTP 路由
 ```
 
 数据库：SQLite（`peerdrive.db`），表结构 `file_meta` + `file_providers` + `collections` + `collection_entries` + `collection_versions`
@@ -141,20 +141,20 @@ cmd/server/main.go
 
 ```bash
 # 后端
-cd go
+cd back
 go build -o peerdrive-server ./cmd/server/
 PORT=3000 PEERDRIVE_STORAGE=./storage PEERDRIVE_P2P_ENABLE=false ./peerdrive-server
 
 # 前端
-cd react
+cd front
 npm run dev      # Vite dev server → http://localhost:5173
 
 # E2E 测试
-bash go/test/e2e-all.sh
+bash back/test/e2e-all.sh
 
 # 单元测试
-cd go && go test ./...
-cd react && npm test
+cd back && go test ./... -count=1
+cd front && npm test
 ```
 
 ## 环境变量

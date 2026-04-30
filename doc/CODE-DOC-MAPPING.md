@@ -136,8 +136,8 @@
 |------|-------------------|
 | [TESTING-HANDBOOK.md](testing/TESTING-HANDBOOK.md) | `go/test/*.sh`, `go/*_test.go` |
 | [TEST-MATRIX.md](testing/TEST-MATRIX.md) | `go/test/*.sh` (每个测试ID对应脚本) |
-| [TESTING-METHODOLOGY.md](testing/TESTING-METHODOLOGY.md) | `go/test/p2p.sh`, `go/test/relay.sh` |
-| [test-steps.md](testing/archive/test-steps.md) | `go/test/p2p.sh` Phase 1-7 |
+| [TESTING-METHODOLOGY.md](testing/TESTING-METHODOLOGY.md) | `back/test/p2p.sh`, `back/test/relay.sh` |
+| [test-steps.md](testing/archive/test-steps.md) | `back/test/p2p.sh` Phase 1-7 |
 | [register.md](testing/archive/register.md) | `go/test/register.sh` |
 | [CHAOS_TESTING.md](testing/CHAOS_TESTING.md) | `go/test/chaos-net.sh`, `go/test/test-under-chaos.sh` |
 

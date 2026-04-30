@@ -48,14 +48,14 @@ react/src/            (React 前端)
 cd /mnt/d/WorkPlace/peerdrive
 
 # 全部模块
-bash go/test/bt-full-test.sh
-bash go/test/ipfs-full-test.sh
-bash go/test/p2p-full-test.sh
-bash go/test/storage-full-test.sh
-bash go/test/auth-full-test.sh
+bash back/test/bt-full-test.sh
+bash back/test/ipfs-full-test.sh
+bash back/test/p2p-full-test.sh
+bash back/test/storage-full-test.sh
+bash back/test/auth-full-test.sh
 
 # 一键全部
-bash go/test/all.sh
+bash back/test/all.sh
 ```
 
 ## 当前状态
