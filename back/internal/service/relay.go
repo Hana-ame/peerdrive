@@ -251,7 +251,7 @@ func (r *RelayService) RelayFileToHTTP(w http.ResponseWriter, hash string, targe
 
 	// Handle HTTP range request.
 	if rangeHeader != "" {
-		start, end, ok := parseRange(rangeHeader, fileSize)
+		start, end, ok := ParseRange(rangeHeader, fileSize)
 		if ok {
 			return r.serveRange(ctx, w, targetPeerID, hash, start, end, fileSize, contentType)
 		}
@@ -366,7 +366,7 @@ func detectContentType(hash string) string {
 	return "application/octet-stream"
 }
 
-// parseRange parses an HTTP Range header value and returns the
+// ParseRange parses an HTTP Range header value and returns the
 // 0-indexed inclusive byte range (start, end) plus a boolean indicating
 // success.
 //
@@ -380,7 +380,9 @@ func detectContentType(hash string) string {
 // If the range is unsatisfiable (start beyond file size, etc.) the
 // function returns ok=false, allowing the caller to serve the full
 // entity instead.
-func parseRange(rangeVal string, fileSize int64) (start, end int64, ok bool) {
+// ParseRange 解析 HTTP Range 头并返回起止字节索引和总大小。
+// 支持标准 range (bytes=N-M)、开放式 (bytes=N-)、后缀式 (bytes=-N)。
+func ParseRange(rangeVal string, fileSize int64) (start, end int64, ok bool) {
 	if fileSize <= 0 {
 		return 0, 0, false
 	}

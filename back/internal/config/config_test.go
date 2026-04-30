@@ -29,10 +29,6 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, true, cfg.P2PAutoNAT)
 	assert.Equal(t, false, cfg.P2PNATPortMap)
 
-	assert.Equal(t, "stun:stun.moonchan.xyz:3478", cfg.STUNServer)
-	assert.Equal(t, "", cfg.TURNServer)
-	assert.Equal(t, "", cfg.TURNUser)
-	assert.Equal(t, "", cfg.TURNPass)
 	assert.Equal(t, "stun:stun.l.google.com:19302", cfg.WebRTCSTUNServer)
 	assert.Equal(t, "", cfg.WebRTCTURNServer)
 }

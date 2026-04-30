@@ -51,11 +51,6 @@ type Config struct {
 	MaxUploadBytes     int64 // 0 = unlimited
 	MaxUploadBytesAnon int64
 
-	STUNServer string
-	TURNServer string
-	TURNUser   string
-	TURNPass   string
-
 	WebRTCSTUNServer string
 	WebRTCTURNServer string
 
@@ -132,12 +127,6 @@ func Load() *Config {
 		BTDHTListenAddr:   getEnv("PEERDRIVE_BT_DHT_LISTEN", ":6881"),
 		IPFSGatewayEnable: getEnvBool("PEERDRIVE_IPFS_GATEWAY_ENABLE", true),
 		IPFSGateways:      getEnv("PEERDRIVE_IPFS_GATEWAYS", "https://ipfs.io,https://cloudflare-ipfs.com,https://dweb.link"),
-
-		STUNServer: getEnv("PEERDRIVE_STUN_SERVER", "stun:stun.moonchan.xyz:3478"),
-
-		TURNServer: getEnv("PEERDRIVE_TURN_SERVER", ""),
-		TURNUser:   getEnv("PEERDRIVE_TURN_USER", ""),
-		TURNPass:   getEnv("PEERDRIVE_TURN_PASS", ""),
 
 		WebRTCSTUNServer: getEnv("PEERDRIVE_WEBRTC_STUN", "stun:stun.l.google.com:19302"),
 		WebRTCTURNServer: getEnv("PEERDRIVE_WEBRTC_TURN", ""),

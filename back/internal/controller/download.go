@@ -184,70 +184,28 @@ func DownloadByCID(c *gin.Context) {
 // Returns true if the range was handled (response already written).
 func handleRangeRequest(c *gin.Context, data []byte, rangeHeader string) bool {
 	total := int64(len(data))
-
-	// 0-byte files cannot be served as partial
 	if total == 0 {
 		return false
 	}
 
-	// Suffix range: bytes=-N  (last N bytes)
-	if strings.HasPrefix(rangeHeader, "bytes=-") {
-		suffixStr := strings.TrimPrefix(rangeHeader, "bytes=-")
-		suffix, err := strconv.ParseInt(suffixStr, 10, 64)
-		if err != nil || suffix <= 0 {
-			return false
+	// Quick check for unsatisfiable range before handing off to ParseRange
+	rangeBody := strings.TrimPrefix(rangeHeader, "bytes=")
+	if rangeBody != rangeHeader {
+		parts := strings.SplitN(rangeBody, "-", 2)
+		if len(parts) == 2 && parts[0] != "" {
+			if start, err := strconv.ParseInt(parts[0], 10, 64); err == nil && start >= total {
+				c.Header("Content-Range", fmt.Sprintf("bytes */%d", total))
+				c.Status(http.StatusRequestedRangeNotSatisfiable)
+				return true
+			}
 		}
-		if suffix > total {
-			suffix = total
-		}
-		start := total - suffix
-		c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, total-1, total))
-		c.Header("Content-Length", fmt.Sprintf("%d", suffix))
-		c.Status(http.StatusPartialContent)
-		c.Writer.Write(data[start:])
-		return true
 	}
 
-	// Standard range: bytes=START-END or bytes=START- (open-ended)
-	// Parse manually because Sscanf cannot handle open-ended ranges (bytes=N-).
-	rangeBody := strings.TrimPrefix(rangeHeader, "bytes=")
-	if rangeBody == rangeHeader {
-		// No "bytes=" prefix
+	start, end, ok := service.ParseRange(rangeHeader, total)
+	if !ok {
 		return false
 	}
-	parts := strings.SplitN(rangeBody, "-", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	if parts[0] == "" {
-		// This is a suffix range which should have been caught above
-		return false
-	}
-	start, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || start < 0 {
-		return false
-	}
-	if start >= total {
-		c.Header("Content-Range", fmt.Sprintf("bytes */%d", total))
-		c.Status(http.StatusRequestedRangeNotSatisfiable)
-		return true
-	}
-	var end int64
-	if parts[1] == "" {
-		// Open-ended: bytes=N-
-		end = total - 1
-	} else {
-		end, err = strconv.ParseInt(parts[1], 10, 64)
-		if err != nil || end < start {
-			end = total - 1
-		}
-	}
-	if end >= total {
-		end = total - 1
-	}
-	if end < start {
-		return false
-	}
+
 	length := end - start + 1
 	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
 	c.Header("Content-Length", fmt.Sprintf("%d", length))
