@@ -1,12 +1,33 @@
+import { useState, useMemo } from 'react';
 import * as api from '../../api';
 
 const VIS_LABELS = { public: '🌐 公开', restricted: '👥 受限', private: '🔒 私密' };
+const BC_PREFIX = 'peerdrive_last_bc_';
+
+function getLastBroadcast(hash) {
+  const v = localStorage.getItem(BC_PREFIX + hash);
+  return v ? new Date(v) : null;
+}
+
+function fmtDate(d) {
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
 
 export default function CollectionHeader({ navPath, fname, entries, tags, isSingleFile, totalFiles, isLocal, searchHash, visibility, onBack, onSave, onToast }) {
+  const [lastBc, setLastBc] = useState(() => getLastBroadcast(searchHash));
+
+  const bcTitle = useMemo(() => {
+    const d = lastBc || getLastBroadcast(searchHash);
+    return d ? `上次广播日期：${fmtDate(d)}` : '上次广播日期：从未';
+  }, [searchHash, lastBc]);
+
   const handleBroadcast = async () => {
     if (!searchHash) return;
     try {
       await api.p2pAnnounce(searchHash);
+      const now = new Date();
+      localStorage.setItem(BC_PREFIX + searchHash, now.toISOString());
+      setLastBc(now);
       onToast('广播成功', false);
     } catch(e) { onToast('广播失败: ' + e.message, true); }
   };
@@ -42,7 +63,7 @@ export default function CollectionHeader({ navPath, fname, entries, tags, isSing
       {visLabel && <span className="text-[10px] text-gray-500 shrink-0">{visLabel}</span>}
       <div className="flex items-center gap-1 shrink-0">
         {visibility === 'public' && (
-          <button onClick={handleBroadcast} className="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs">📡 广播</button>
+          <button onClick={handleBroadcast} title={bcTitle} className="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs">📡 广播</button>
         )}
         <button onClick={handleSave}
           className={`px-3 py-1 rounded text-xs ${isLocal ? 'bg-green-500/20 text-green-400' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>

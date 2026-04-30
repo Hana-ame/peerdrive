@@ -2,7 +2,7 @@ import React, { useContext, useState, useEffect, useRef, useMemo } from 'react';
 import * as api from '../../api';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { PageContext } from '../../App';
-import { llmSuggest, loadSearchHistory } from './utils';
+import { loadSearchHistory } from './utils';
 import LeftPanel from './LeftPanel';
 import MiddlePanel from './MiddlePanel';
 import RightPanel from './RightPanel';
@@ -212,17 +212,10 @@ export default function AnonCreator() {
   };
 
   // ===== 保存合集 =====
-  const handleSave = async (useAI = false) => {
+  const handleSave = async () => {
     const valid = entries.filter(e => e.path?.trim() && (e.path.endsWith('/') || e.hash || e.providers?.[0]?.value));
     if (!valid.length) { showToast('请先添加文件', true); return; }
-    if (useAI) {
-      try {
-        const names = valid.slice(0, 20).map(e => e.path).join(', ');
-        const name = await llmSuggest(names);
-        if (name) setFname(name);
-      } catch {}
-    }
-    if (!fname.trim() && !useAI && !showNamePrompt) {
+    if (!fname.trim() && !showNamePrompt) {
       setShowNamePrompt(true);
       return;
     }
@@ -324,14 +317,6 @@ export default function AnonCreator() {
     },
   };
 
-  const handleAiName = async () => {
-    try {
-      const names = entries.slice(0, 20).map(e => e.path).join(', ');
-      const name = await llmSuggest(names);
-      if (name) setFname(name);
-    } catch {}
-  };
-
   const handleSourceTabChange = (tab) => {
     setLeftSourceTab(tab);
     if (tab === 'local') setSysPath('/');
@@ -394,7 +379,6 @@ export default function AnonCreator() {
           showNamePrompt={showNamePrompt} toastMsg={toastMsg} toastErr={toastErr}
           entryActions={entryActions}
           onFname={setFname} onTags={setTags} onSave={handleSave}
-          onAiName={handleAiName}
           onCloseNamePrompt={() => setShowNamePrompt(false)}
         />
       </div>

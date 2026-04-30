@@ -2,7 +2,7 @@ import FileTree from '../../components/FileTree';
 import EditorToolbar from './EditorToolbar';
 import NamePrompt from './NamePrompt';
 
-export default function EditorPanel({ fname, tags, entries, saving, showNamePrompt, toastMsg, toastErr, entryActions, onFname, onTags, onSave, onAiName, onCloseNamePrompt }) {
+export default function EditorPanel({ fname, tags, entries, saving, showNamePrompt, toastMsg, toastErr, entryActions, onFname, onTags, onSave, onCloseNamePrompt }) {
   const validCount = entries.filter(e => e.path?.trim() && (e.path.endsWith('/') || e.hash || e.providers?.[0]?.value)).length;
 
   return (
@@ -13,10 +13,10 @@ export default function EditorPanel({ fname, tags, entries, saving, showNameProm
 
       <EditorToolbar fname={fname} tags={tags} entryCount={entries.length}
         validCount={validCount} saving={saving}
-        onFname={onFname} onTags={onTags} onAiName={onAiName} onSave={() => onSave(false)} />
+        onFname={onFname} onTags={onTags} onSave={onSave} />
 
       {showNamePrompt && (
-        <NamePrompt onAiName={() => onSave(true)} onSkip={() => onSave(false)} onClose={onCloseNamePrompt} />
+        <NamePrompt onSkip={onSave} onClose={onCloseNamePrompt} />
       )}
 
       <div className="flex-1 overflow-hidden">
