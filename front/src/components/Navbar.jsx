@@ -285,11 +285,10 @@ export default function Navbar() {
 
   return (
     <>
-      <nav className="h-14 bg-gray-800 border-b border-gray-700 flex items-center px-6 shrink-0 overflow-visible">
-        {/* 左侧可滚动导航区（窄屏时横向拖动） */}
-        <div className="flex items-center gap-4 flex-1 min-w-0 overflow-x-auto scrollbar-hide mr-4">
-          <Link to="/" className="text-xl font-bold text-blue-400 hover:text-blue-300 inline-flex items-center flex-shrink-0">Peerdrive</Link>
-          <div className="flex items-center flex-shrink-0">
+      <nav className="h-14 bg-gray-800 border-b border-gray-700 flex items-center px-6 gap-4 overflow-x-auto shrink-0 scrollbar-hide">
+        <div className="flex items-center gap-4 flex-shrink-0">
+          <Link to="/" className="text-xl font-bold text-blue-400 hover:text-blue-300 inline-flex items-center">Peerdrive</Link>
+          <div className="flex items-center">
             <Link to="/files" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">本地文件管理</Link>
             <Link to="/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">创建合集</Link>
             <NavDropdown label="P2P 网络" to="/p2p" items={p2pItems} />
@@ -298,8 +297,7 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* 右侧操作区（始终可见，不参与滚动） */}
-        <div className="flex items-center space-x-3 flex-shrink-0">
+        <div className="flex items-center space-x-3 flex-shrink-0 ml-auto">
           {!authLoading && (
             <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-800/60 border border-gray-700/50 text-xs">
               <span className={`w-1.5 h-1.5 rounded-full ${authStatus?.authenticated ? 'bg-green-400' : 'bg-yellow-500'}`} />
