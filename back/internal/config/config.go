@@ -67,6 +67,8 @@ type Config struct {
 
 	IPFSCompatEnable bool   // PEERDRIVE_IPFS_COMPAT, 默认 false（opt-in）
 	IPFSBlockstore   string // PEERDRIVE_IPFS_BLOCKSTORE, 默认 "<storageDir>/ipfs-blocks"
+
+	P2PKeyFile string // libp2p 私钥持久化路径；空且有 AuthToken 时默认 <StorageDir>/libp2p.key
 }
 
 // IsOriginAllowed 检查给定的 Origin 是否在允许列表中，支持通配符（*）和子域名通配（*.example.com）。
@@ -145,6 +147,7 @@ func Load() *Config {
 
 		IPFSCompatEnable: getEnvBool("PEERDRIVE_IPFS_COMPAT", false),
 		IPFSBlockstore:   getEnv("PEERDRIVE_IPFS_BLOCKSTORE", ""),
+		P2PKeyFile:       getEnv("PEERDRIVE_P2P_KEY_FILE", ""),
 	}
 }
 

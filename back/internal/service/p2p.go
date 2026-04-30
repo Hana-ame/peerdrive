@@ -117,6 +117,13 @@ func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error)
 		opts = append(opts, libp2p.EnableAutoNATv2())
 	}
 
+	privKey, err := loadOrCreateKey(cfg)
+	if err != nil {
+		log.LogWarn("p2p: key persistence init failed, falling back to ephemeral: %v", err)
+	} else if privKey != nil {
+		opts = append(opts, libp2p.Identity(privKey))
+	}
+
 	h, err := libp2p.New(opts...)
 	if err != nil {
 		log.LogError("p2p: NewP2PService libp2p host creation failed: %v", err)
