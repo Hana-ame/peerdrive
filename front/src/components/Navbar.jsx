@@ -212,8 +212,7 @@ export default function Navbar() {
               </Link>
               <div className="absolute top-full left-0 mt-1 w-36 bg-gray-800 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
                 <Link to="/p2p" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-t-lg">网络总览</Link>
-                <Link to="/p2p/topology" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700">网络拓扑</Link>
-                <Link to="/p2p/dht" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-b-lg">DHT 查询</Link>
+                <Link to="/p2p/topology" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-b-lg">网络拓扑</Link>
               </div>
             </div>
             <div className="relative group">
@@ -223,10 +222,20 @@ export default function Navbar() {
               </Link>
               <div className="absolute top-full left-0 mt-1 w-36 bg-gray-800 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
                 <Link to="/bt/controller" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-t-lg">BT 下载器</Link>
-                <Link to="/bt" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-b-lg">BT DHT</Link>
+                <Link to="/bt" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700">BT DHT 状态</Link>
+                <Link to="/bt/dht" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-b-lg">BT DHT 查询</Link>
               </div>
             </div>
-            <Link to="/ipfs" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">IPFS</Link>
+            <div className="relative group">
+              <Link to="/ipfs" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center gap-1">
+                IPFS
+                <svg className="w-3 h-3 text-gray-500 group-hover:text-gray-300 transition-transform group-hover:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              </Link>
+              <div className="absolute top-full left-0 mt-1 w-36 bg-gray-800 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
+                <Link to="/ipfs" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-t-lg">IPFS 总览</Link>
+                <Link to="/ipfs/dht" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-b-lg">IPFS DHT 查询</Link>
+              </div>
+            </div>
           </div>
         </div>
 

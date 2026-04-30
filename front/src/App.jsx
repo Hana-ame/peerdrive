@@ -52,9 +52,10 @@ export default function App() {
                 <Route path="/ipfs" element={<IPFSPanel />} />
                 <Route path="/bt" element={<BTPanel />} />
                 <Route path="/bt/controller" element={<BTController />} />
+                <Route path="/bt/dht" element={<DHTExplorer />} />
                 <Route path="/p2p/dashboard" element={<P2PDashboard />} />
                 <Route path="/p2p/topology" element={<P2PTopology />} />
-                <Route path="/p2p/dht" element={<DHTExplorer />} />
+                <Route path="/ipfs/dht" element={<DHTExplorer />} />
                 <Route path="/settings" element={<Settings dataConsent={dataConsent} setDataConsent={setDataConsent} />} />
               </Routes>
             </div>
