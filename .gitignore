@@ -42,4 +42,4 @@ p2p-dual-stack/
 *.txt
 react/
 go/
-docs/
+/docs/
