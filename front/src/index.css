@@ -97,6 +97,15 @@ body {
   padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
 }
 
+/* ── Hide scrollbar for horizontal-scroll containers ── */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* ── Hide desktop-only elements on mobile ── */
 @media (max-width: 768px) {
   .hide-on-mobile {

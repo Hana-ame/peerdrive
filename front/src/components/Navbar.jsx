@@ -199,8 +199,8 @@ export default function Navbar() {
 
   return (
     <>
-      <nav className="h-14 bg-gray-800 border-b border-gray-700 flex items-center px-6 justify-between shrink-0">
-        <div className="flex items-center space-x-4">
+      <nav className="h-14 bg-gray-800 border-b border-gray-700 flex items-center px-6 gap-4 overflow-x-auto shrink-0 scrollbar-hide">
+        <div className="flex items-center space-x-4 flex-shrink-0">
           <Link to="/" className="text-xl font-bold text-blue-400 hover:text-blue-300">Peerdrive</Link>
           <div className="flex items-center space-x-1">
             <Link to="/files" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">本地文件管理</Link>
@@ -239,7 +239,7 @@ export default function Navbar() {
           </div>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-3 flex-shrink-0 ml-auto">
           {/* Auth Status Indicator */}
           {!authLoading && (
             <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-800/60 border border-gray-700/50 text-xs">
