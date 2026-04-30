@@ -15,6 +15,9 @@ jobs:
           - { os: macos-latest,   goos: darwin,  goarch: arm64, ext: '' }
 
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: back
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -31,7 +34,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: peerdrive-server${{ matrix.ext }}
+          path: back/peerdrive-server${{ matrix.ext }}
 
   release:
     needs: build
