@@ -4,7 +4,7 @@
 // PEERDRIVE_STORAGE（存储目录，默认 ./storage）。
 // 使用方式：go run ./cmd/server/main.go
 //   PORT=3000 PEERDRIVE_STORAGE=./storage go run ./cmd/server/main.go
-// 内部流程：InitDB → NewP2PService → NewManager → NewDownloader → SetAnonStorageDir → SetupRouter
+// 内部流程：InitDB → NewP2PService → IPFSService → UniversalDownloader → SetupRouter
 //
 // storageDir 注入到 Gin Context，供 controller/anon.go 等使用。
 
@@ -21,7 +21,6 @@ import (
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
 	"peerdrive/internal/log"
-	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
 	"peerdrive/internal/service"
@@ -77,11 +76,6 @@ func main() {
 		registry.Start()
 	}
 
-	// 初始化存储
-	log.LogInfo("main: initializing provider manager and downloader")
-	providerMgr := provider.NewManager(storageDir)
-	downloader := service.NewDownloader(providerMgr, p2pSvc, storageDir)
-
 	// 初始化匿名存储目录（与普通文件同一目录）
 	repository.SetAnonStorageDir(storageDir)
 
@@ -119,7 +113,7 @@ func main() {
 		router.SetRegServer(cfg.RegistrationServer)
 	}
 	log.LogInfo("main: setting up HTTP router")
-	r := router.SetupRouter(downloader, p2pSvc, cfg, ipfsCompatLayer, providerMgr, ipfsSvc)
+	r := router.SetupRouter(p2pSvc, cfg, ipfsCompatLayer, ipfsSvc)
 
 	port := ":" + cfg.Port
 

@@ -1,15 +1,7 @@
 // IPFS 网关提供者 — 通过公共 IPFS 网关按 CID 获取文件内容。
-// 实现 ContentProvider 接口，通过 Manager 注册为 provider_type "ipfsgw"。
 // GetReader 并发尝试所有网关，返回第一个成功的响应体；
 // 一旦某个网关成功，取消其余请求，避免 goroutine 泄漏。
-//
-// 配置示例：
-//
-//	provider.NewIPFSProvider([]string{
-//	    "https://ipfs.io",
-//	    "https://cloudflare-ipfs.com",
-//	    "https://dweb.link",
-//	})
+// BitswapFetcher 回调可注入 boxo Bitswap 作为第一优先级。
 
 package provider
 
@@ -60,7 +52,7 @@ func (p *IPFSProvider) SetBitswapFetcher(f BitswapFetcher) {
 	p.bitswapFetcher = f
 }
 
-// GetReader 实现 ContentProvider 接口。
+// GetReader 按 CID 获取文件内容。
 // 优先尝试 Bitswap 网络获取，失败后回退到 HTTP 网关竞速。
 func (p *IPFSProvider) GetReader(cid string) (io.ReadCloser, error) {
 	// 1. Bitswap 优先
@@ -119,7 +111,7 @@ func (p *IPFSProvider) GetReader(cid string) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("ipfs: all %d gateways failed: %w", len(p.Gateways), firstErr)
 }
 
-// GetFilenameHint 实现 ContentProvider 接口。
+// GetFilenameHint 返回文件名提示。
 func (p *IPFSProvider) GetFilenameHint(cid, originalFilename string) string {
 	if originalFilename != "" {
 		return originalFilename

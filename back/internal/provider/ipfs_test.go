@@ -197,21 +197,28 @@ func TestIPFSProvider_GetFilenameHint(t *testing.T) {
 	}
 }
 
-// ─── ContentProvider interface ──────────────────────────────────────
+// ─── BitswapFetcher integration ──────────────────────────────────────
 
-func TestIPFSProvider_ImplementsContentProvider(t *testing.T) {
-	p := NewIPFSProvider([]string{"http://localhost"})
-	var _ ContentProvider = p // compile-time check
+func TestIPFSProvider_SetBitswapFetcher(t *testing.T) {
+	p := NewIPFSProvider([]string{})
+	// Without gateways and without bitswap, GetReader should fail
+	_, err := p.GetReader("QmTest")
+	if err == nil {
+		t.Error("expected error with no gateways or bitswap fetcher")
+	}
 
-	// Also test via Manager
-	mgr := NewManager(t.TempDir())
-	mgr.Register("ipfsgw", p)
-
-	// Verify it's findable by name
-	_, _, err := mgr.GetReader("ipfsgw", "QmTest")
-	// Will fail because localhost doesn't respond, but should NOT be "unknown provider"
-	if err != nil && strings.Contains(err.Error(), "unknown provider") {
-		t.Errorf("ipfsgw provider not registered in manager: %v", err)
+	// With a bitswap fetcher, it should be tried first
+	p.SetBitswapFetcher(func(ctx context.Context, cid string) ([]byte, error) {
+		return []byte("bitswap-data"), nil
+	})
+	reader, err := p.GetReader("QmTest")
+	if err != nil {
+		t.Fatalf("GetReader with bitswap fetcher failed: %v", err)
+	}
+	defer reader.Close()
+	data, _ := io.ReadAll(reader)
+	if string(data) != "bitswap-data" {
+		t.Errorf("expected bitswap-data, got %q", string(data))
 	}
 }
 

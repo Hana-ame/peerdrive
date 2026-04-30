@@ -46,11 +46,9 @@ import (
 
 // SetupRouter 创建 Gin 引擎并注册全部路由（健康检查、文件下载、P2P、集合、WebDAV、信令等）。
 func SetupRouter(
-	downloader *service.Downloader,
 	p2pSvc *service.P2PService,
 	cfg *config.Config,
 	ipfsCompat *service.IPFSCompatLayer,
-	providerMgr *provider.Manager,
 	ipfsSvc *service.IPFSService,
 ) *gin.Engine {
 	log.LogInfo("router: SetupRouter starting")
@@ -61,7 +59,6 @@ func SetupRouter(
 	// inject shared deps into context (must register before any routes)
 	r.Use(func(c *gin.Context) {
 		c.Set("storageDir", cfg.StorageDir)
-		c.Set("downloader", downloader)
 		c.Next()
 	})
 
@@ -94,7 +91,6 @@ func SetupRouter(
 		r.Use(AuthOptional())
 	}
 
-	controller.InitDownloader(downloader)
 	controller.InitP2PController(p2pSvc)
 	fileSvc := service.NewFileService(cfg)
 	fileSvc.SetIPFSCompat(ipfsCompat)
@@ -182,12 +178,8 @@ func SetupRouter(
 		}
 		if len(gateways) > 0 {
 			ipfsProv = provider.NewIPFSProvider(gateways)
-			// Bitswap 优先，HTTP 网关回退
 			if ipfsSvc != nil && ipfsSvc.Enabled() {
 				ipfsProv.SetBitswapFetcher(ipfsSvc.FetchByCID)
-			}
-			if providerMgr != nil {
-				providerMgr.Register("ipfsgw", ipfsProv)
 			}
 		}
 	}
@@ -237,7 +229,7 @@ func SetupRouter(
 
 	// Sync controller initialization
 	syncRepo := repository.NewSyncRepository()
-	syncSvc := service.NewSyncService(syncRepo, downloader)
+	syncSvc := service.NewSyncService(syncRepo, uniDownloader, cfg.StorageDir)
 	syncCtrl := controller.NewSyncController(syncSvc)
 
 	r.GET("/ping", controller.Ping)

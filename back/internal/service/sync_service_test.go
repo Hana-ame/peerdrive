@@ -18,12 +18,7 @@ func TestSyncService_PathTraversal(t *testing.T) {
 	repository.InitDB(":memory:") // Use in-memory DB for tests
 	syncRepo := repository.NewSyncRepository()
 	
-	// Mock downloader
-	downloader := &Downloader{
-		storageDir: tmpDir,
-	}
-	
-	svc := NewSyncService(syncRepo, downloader)
+	svc := NewSyncService(syncRepo, nil, tmpDir)
 
 	tests := []struct {
 		name     string
@@ -57,7 +52,7 @@ func TestSyncService_PathTraversal(t *testing.T) {
 }
 
 func TestSyncService_Filtering(t *testing.T) {
-	svc := NewSyncService(nil, nil)
+	svc := NewSyncService(nil, nil, "")
 	entries := []model.AnonCollectionEntry{
 		{Path: "main.go", Hash: "h1"},
 		{Path: "utils.go", Hash: "h2"},

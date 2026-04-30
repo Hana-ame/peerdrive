@@ -125,27 +125,24 @@ func DownloadAnonFile(c *gin.Context) {
 	// 按 provider 顺序尝试下载：sha256 优先，url 兜底
 	primaryHash := targetEntry.GetPrimaryHash()
 	if primaryHash != "" {
-		reader, filename, gziped, err := downloader.GetFileStream(primaryHash)
-		if err == nil {
-			defer reader.Close()
-			downloadFilename := filename
-			if downloadFilename == "" {
-				downloadFilename = filepath.Base(filePath)
+		if universalDownloader != nil {
+			ctx := c.Request.Context()
+			data, protocol, err := universalDownloader.Download(ctx, primaryHash)
+			if err == nil {
+				c.Header("X-Protocol", protocol)
+				downloadFilename := filepath.Base(filePath)
+				mimeType := targetEntry.GetPrimaryMime()
+				if mimeType == "" {
+					mimeType = "application/octet-stream"
+				}
+				if c.Query("inline") == "1" {
+					c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, downloadFilename))
+				} else {
+					c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, downloadFilename))
+				}
+				c.Data(http.StatusOK, mimeType, data)
+				return
 			}
-			mimeType := targetEntry.GetPrimaryMime()
-			if mimeType == "" {
-				mimeType = "application/octet-stream"
-			}
-			if c.Query("inline") == "1" {
-				c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, downloadFilename))
-			} else {
-				c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, downloadFilename))
-			}
-			if gziped {
-				c.Header("Content-Encoding", "gzip")
-			}
-			c.DataFromReader(http.StatusOK, -1, mimeType, reader, nil)
-			return
 		}
 	}
 	// fallback: URL providers

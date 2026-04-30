@@ -21,7 +21,6 @@ import (
 	peerdrive_log "peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/p2p_bt"
-	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
 	"peerdrive/internal/service"
@@ -210,14 +209,12 @@ func startServer() (string, func()) {
 		os.Exit(1)
 	}
 
-	// Init provider manager and downloader
-	providerMgr := provider.NewManager(storageDir)
-	downloader := service.NewDownloader(providerMgr, p2pSvc, storageDir)
+	// Init storage
 	repository.SetAnonStorageDir(storageDir)
 
 	// Setup router
 	gin.SetMode(gin.ReleaseMode)
-	r := router.SetupRouter(downloader, p2pSvc, cfg, nil, providerMgr, nil)
+	r := router.SetupRouter(p2pSvc, cfg, nil, nil)
 
 	// Start on random port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

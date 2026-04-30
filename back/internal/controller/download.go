@@ -31,14 +31,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var downloader *service.Downloader
 var universalDownloader *service.UniversalDownloader
 var ipfsGatewayProvider *provider.IPFSProvider
-
-// InitDownloader 注入 Downloader 实例供下载处理函数使用。
-func InitDownloader(s *service.Downloader) {
-	downloader = s
-}
 
 // InitUniversalDownloader 注入 UniversalDownloader 实例供多协议下载端点使用。
 func InitUniversalDownloader(d *service.UniversalDownloader) {
@@ -99,29 +93,7 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 		return
 	}
 
-	// Legacy path — no universal downloader.
-	reader, filename, gziped, err := downloader.GetFileStream(hash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	}
-	defer reader.Close()
-
-	if c.Query("inline") == "1" {
-		c.Header("Content-Disposition", "inline; filename="+filename)
-	} else {
-		c.Header("Content-Disposition", "attachment; filename="+filename)
-	}
-	if gziped {
-		c.Header("Content-Encoding", "gzip")
-	}
-
-	meta, _ := repository.GetFileMeta(hash)
-	if meta != nil && meta.Type == repository.FileTypeAnonCollection {
-		c.Header("X-Peerdrive-Collection", "true")
-	}
-
-	c.DataFromReader(http.StatusOK, -1, "application/octet-stream", reader, nil)
+	c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 }
 
 // DownloadByCID handles GET /ipfs/:cid, looking up the file by its IPFS CID and

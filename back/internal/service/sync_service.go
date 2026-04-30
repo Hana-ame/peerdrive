@@ -2,8 +2,8 @@
 package service
 
 import (
+	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,14 +13,16 @@ import (
 )
 
 type SyncService struct {
-	syncRepo   *repository.SyncRepository
-	downloader *Downloader
+	syncRepo          *repository.SyncRepository
+	universalDownloader *UniversalDownloader
+	storageDir        string
 }
 
-func NewSyncService(syncRepo *repository.SyncRepository, downloader *Downloader) *SyncService {
+func NewSyncService(syncRepo *repository.SyncRepository, uniDl *UniversalDownloader, storageDir string) *SyncService {
 	return &SyncService{
-		syncRepo:   syncRepo,
-		downloader: downloader,
+		syncRepo:          syncRepo,
+		universalDownloader: uniDl,
+		storageDir:        storageDir,
 	}
 }
 
@@ -37,8 +39,7 @@ func (s *SyncService) SaveToDisk(req model.SaveLocalRequest) error {
 	}
 
 	// 2. Get Collection Content
-	storageDir := s.downloader.storageDir
-	anonColl, err := repository.GetAnonCollectionByHash(req.CollectionHash, storageDir)
+	anonColl, err := repository.GetAnonCollectionByHash(req.CollectionHash, s.storageDir)
 	if err != nil {
 		return fmt.Errorf("failed to get collection metadata: %w", err)
 	}
@@ -125,22 +126,15 @@ func (s *SyncService) saveFile(hash, targetDir, relPath, fileHash string) error 
 		return err
 	}
 
-	// Download from CAS
-	reader, _, _, err := s.downloader.GetFileStream(fileHash)
+	// Download from CAS via UniversalDownloader
+	ctx := context.Background()
+	data, _, err := s.universalDownloader.Download(ctx, fileHash)
 	if err != nil {
 		return err
 	}
-	defer reader.Close()
 
 	// Write to disk
-	f, err := os.Create(fullPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	_, err = io.Copy(f, reader)
-	return err
+	return os.WriteFile(fullPath, data, 0644)
 }
 
 func (s *SyncService) filterFiles(entries []model.AnonCollectionEntry, include, exclude []string) []model.AnonCollectionEntry {
