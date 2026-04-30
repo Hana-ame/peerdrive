@@ -41,8 +41,7 @@
 | [guide/VPS_DEPLOY.md](guide/VPS_DEPLOY.md) | VPS 部署指南 |
 | [guide/docker.md](guide/docker.md) | Docker 部署 |
 | [guide/siliconflow-setup.md](guide/siliconflow-setup.md) | LLM 配置 |
-| [guide/FRONTEND.md](guide/FRONTEND.md) | 前端界面说明 — 技术栈、路由、组件树、工作流 |
-| [FRONTEND-CODE-MAP.md](FRONTEND-CODE-MAP.md) | 前端代码地图 — 每个 UI 模块对应的源文件位置 |
+| [guide/FRONTEND.md](guide/FRONTEND.md) | 前端界面说明 — 技术栈、路由、组件树、工作流、代码地图 |
 | [guide/操作说明.md](guide/操作说明.md) | 中文操作说明 |
 
 ## testing — 测试
