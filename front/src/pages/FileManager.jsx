@@ -645,21 +645,21 @@ export default function FileManager() {
   const renderTimelineView = () => {
     if (filtered.length === 0) {
       return files.length === 0 ? (
-        <div className="mx-6 my-6">
-          <div className="flex flex-col items-center justify-center py-20 border-2 border-dashed border-gray-700 rounded-xl bg-gray-800/20">
-            <div className="text-6xl mb-4 opacity-30">📂</div>
-            <p className="text-gray-400 text-lg mb-2">拖拽文件到这里或点击添加</p>
-            <p className="text-gray-600 text-sm mb-6">支持从本地文件系统浏览和注册文件</p>
-            <button onClick={handleOpenFileBrowser} className="bg-indigo-600 hover:bg-indigo-500 px-6 py-2.5 rounded-lg text-sm font-medium transition-colors">
+        <div className="mx-4 md:mx-6 my-6">
+          <div className="flex flex-col items-center justify-center py-12 md:py-20 px-4 border-2 border-dashed border-gray-700 rounded-xl bg-gray-800/20">
+            <div className="text-5xl md:text-6xl mb-4 opacity-30">📂</div>
+            <p className="text-gray-400 text-base md:text-lg mb-2 text-center">拖拽文件到这里或点击添加</p>
+            <p className="text-gray-600 text-xs md:text-sm mb-6 text-center">支持从本地文件系统浏览和注册文件</p>
+            <button onClick={handleOpenFileBrowser} className="bg-indigo-600 hover:bg-indigo-500 px-5 md:px-6 py-2.5 rounded-lg text-sm font-medium transition-colors">
               + 添加文件
             </button>
           </div>
         </div>
       ) : (
-        <div className="mx-6 my-6">
-          <div className="text-center text-gray-500 py-20 border-2 border-dashed border-gray-700 rounded-xl">
-            <p className="text-gray-400 text-lg mb-1">没有匹配的文件</p>
-            <p className="text-gray-600 text-sm">尝试调整搜索条件或分类筛选</p>
+        <div className="mx-4 md:mx-6 my-6">
+          <div className="text-center text-gray-500 py-16 md:py-20 px-4 border-2 border-dashed border-gray-700 rounded-xl">
+            <p className="text-gray-400 text-base md:text-lg mb-1">没有匹配的文件</p>
+            <p className="text-gray-600 text-xs md:text-sm">尝试调整搜索条件或分类筛选</p>
           </div>
         </div>
       );
@@ -690,19 +690,40 @@ export default function FileManager() {
               <span className="text-xs text-gray-600 ml-2">({group.files.length} 个文件)</span>
             </div>
             {group.files.map(f => (
-              <div key={f.hash} onClick={() => toggleFile(f.hash)} className={`flex items-center px-6 py-3 border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors group cursor-pointer ${selected[f.hash] ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : ''}`}>
-                <label className="flex items-center gap-2 cursor-pointer mr-3 shrink-0" onClick={e => e.stopPropagation()}>
-                  <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded accent-cyan-500 w-5 h-5 cursor-pointer" />
-                </label>
-                <span className="mr-3 text-xl shrink-0">{extIcon(f.mime_type)}</span>
-                <div className="flex items-center gap-1 flex-1 min-w-0">
-                  {getProviderBadge(f)}
-                  <a href={api.getDownloadUrl(f.hash)} onClick={e => e.stopPropagation()} className="text-sm text-blue-300 truncate min-w-0 hover:text-blue-100 hover:underline cursor-pointer" title={`下载 ${f.filename}`}>{f.filename}</a>
+              <div key={f.hash} onClick={() => toggleFile(f.hash)} className={`flex flex-col md:flex-row md:items-center px-4 md:px-6 py-3 border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors group cursor-pointer ${selected[f.hash] ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : ''}`}>
+                {/* Row 1: checkbox + icon + filename + actions */}
+                <div className="flex items-center flex-1 min-w-0">
+                  <label className="flex items-center gap-2 cursor-pointer mr-2 md:mr-3 shrink-0" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded accent-cyan-500 w-5 h-5 cursor-pointer" />
+                  </label>
+                  <span className="mr-2 md:mr-3 text-xl shrink-0">{extIcon(f.mime_type)}</span>
+                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                    {getProviderBadge(f)}
+                    <a href={api.getDownloadUrl(f.hash)} onClick={e => e.stopPropagation()} className="text-sm text-blue-300 truncate min-w-0 hover:text-blue-100 hover:underline cursor-pointer" title={`下载 ${f.filename}`}>{f.filename}</a>
+                  </div>
+                  <div className="flex items-center space-x-1 shrink-0 ml-1">
+                    {swarmData[f.hash] > 0 && (
+                      <span className="text-[10px] text-emerald-400 bg-emerald-900/30 px-1.5 py-0.5 rounded-full shrink-0" title={`${swarmData[f.hash]} 个节点有此文件`}>
+                        🌱 {swarmData[f.hash]}
+                      </span>
+                    )}
+                    <button onClick={(e) => { e.stopPropagation(); handleCreateFromFile(f); }} className="text-[10px] bg-teal-600 hover:bg-teal-500 px-2 py-0.5 rounded whitespace-nowrap transition-colors">创建合集</button>
+                  </div>
                 </div>
-                <span className="text-sm text-gray-400 w-24 text-right shrink-0 mr-8">{formatSize(f.size)}</span>
-                <span className="text-xs text-gray-500 w-24 text-right shrink-0 mr-8 overflow-hidden text-ellipsis whitespace-nowrap">{(f.mime_type || '').split(';')[0].split('/').pop() || '-'}</span>
-                <span className="text-xs text-gray-500 w-40 text-right shrink-0 mr-6">{(f.created_at || '').replace('T', ' ').substring(0, 16)}</span>
-                <div className="flex items-center space-x-1 shrink-0">
+                {/* Row 2: meta info (mobile only) + desktop meta */}
+                <div className="flex md:hidden items-center gap-2 text-[11px] text-gray-500 mt-0.5 ml-9 pl-1">
+                  <span>{formatSize(f.size)}</span>
+                  <span>·</span>
+                  <span className="truncate">{(f.mime_type || '').split(';')[0].split('/').pop() || '-'}</span>
+                  <span>·</span>
+                  <span className="whitespace-nowrap">{(f.created_at || '').replace('T', ' ').substring(0, 16)}</span>
+                </div>
+                {/* Desktop meta columns */}
+                <span className="hidden md:block text-sm text-gray-400 w-24 text-right shrink-0 mr-8">{formatSize(f.size)}</span>
+                <span className="hidden md:block text-xs text-gray-500 w-24 text-right shrink-0 mr-8 overflow-hidden text-ellipsis whitespace-nowrap">{(f.mime_type || '').split(';')[0].split('/').pop() || '-'}</span>
+                <span className="hidden md:block text-xs text-gray-500 w-40 text-right shrink-0 mr-6">{(f.created_at || '').replace('T', ' ').substring(0, 16)}</span>
+                {/* Desktop actions */}
+                <div className="hidden md:flex items-center space-x-1 shrink-0">
                   {swarmData[f.hash] > 0 && (
                     <span className="text-[10px] text-emerald-400 bg-emerald-900/30 px-1.5 py-0.5 rounded-full mr-1 shrink-0" title={`${swarmData[f.hash]} 个节点有此文件`}>
                       🌱 {swarmData[f.hash]}
@@ -724,12 +745,12 @@ export default function FileManager() {
       return <div className="text-center text-gray-500 py-20">加载中...</div>;
     }
     if (localDirEntries.length === 0) {
-      return <div className="mx-6 my-6"><div className="text-center text-gray-500 py-20 border-2 border-dashed border-gray-700 rounded-xl"><p className="text-gray-400 text-lg">空目录</p></div></div>;
+      return <div className="mx-4 md:mx-6 my-6"><div className="text-center text-gray-500 py-16 md:py-20 px-4 border-2 border-dashed border-gray-700 rounded-xl"><p className="text-gray-400 text-base md:text-lg">空目录</p></div></div>;
     }
     return (
       <div>
         {/* column header */}
-        <div className="flex items-center text-xs text-gray-500 px-6 py-3 border-b border-gray-800 sticky top-0 bg-gray-900 z-10">
+        <div className="hidden md:flex items-center text-xs text-gray-500 px-6 py-3 border-b border-gray-800 sticky top-0 bg-gray-900 z-10">
           <label className="flex items-center gap-2 cursor-pointer mr-3 shrink-0" onClick={e => e.stopPropagation()}>
             <input type="checkbox" checked={localDirEntries.filter(e => !e.is_dir).length > 0 && localDirEntries.filter(e => !e.is_dir).every(e => localSelected[e.path])}
               onChange={handleLocalSelectAll}
@@ -744,7 +765,7 @@ export default function FileManager() {
           <div
             key={entry.path}
             onClick={() => handleLocalDirEnter(entry)}
-            className={`flex items-center px-6 py-3 border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors group cursor-pointer ${
+            className={`flex flex-col md:flex-row md:items-center px-4 md:px-6 py-3 border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors group cursor-pointer ${
               entry.is_dir
                 ? ''
                 : localSelected[entry.path]
@@ -754,24 +775,40 @@ export default function FileManager() {
           >
             {entry.is_dir ? (
               <>
-                <span className="mr-3 text-xl shrink-0">📁</span>
-                <span className="text-sm text-yellow-400 truncate flex-1">{entry.name}</span>
-                <span className="text-sm text-gray-500 w-24 text-right shrink-0 mr-8">-</span>
-                <span className="text-xs text-gray-600 w-24 text-right shrink-0 mr-8">目录</span>
-                <div className="flex items-center space-x-1 shrink-0">
+                <div className="flex items-center flex-1 min-w-0">
+                  <span className="mr-2 md:mr-3 text-xl shrink-0">📁</span>
+                  <span className="text-sm text-yellow-400 truncate flex-1">{entry.name}</span>
+                  <span className="text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded shrink-0">点击进入</span>
+                </div>
+                <div className="flex md:hidden items-center gap-2 text-[11px] text-gray-500 mt-0.5 ml-8">
+                  <span>目录</span>
+                </div>
+                <span className="hidden md:block text-sm text-gray-500 w-24 text-right shrink-0 mr-8">-</span>
+                <span className="hidden md:block text-xs text-gray-600 w-24 text-right shrink-0 mr-8">目录</span>
+                <div className="hidden md:flex items-center space-x-1 shrink-0">
                   <span className="text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded">点击进入</span>
                 </div>
               </>
             ) : (
               <>
-                <label className="flex items-center gap-2 cursor-pointer mr-3 shrink-0" onClick={e => e.stopPropagation()}>
-                  <input type="checkbox" checked={!!localSelected[entry.path]} onChange={() => handleLocalDirEnter(entry)} className="rounded accent-cyan-500 w-5 h-5 cursor-pointer" />
-                </label>
-                <span className="mr-3 text-xl shrink-0">{extIconFromName(entry.name)}</span>
-                <span className="text-sm text-gray-200 truncate flex-1">{entry.name}</span>
-                <span className="text-sm text-gray-400 w-24 text-right shrink-0 mr-8">{formatSize(entry.size)}</span>
-                <span className="text-xs text-gray-500 w-24 text-right shrink-0 mr-8 overflow-hidden text-ellipsis whitespace-nowrap">{getExtFromName(entry.name)}</span>
-                <div className="flex items-center space-x-1 shrink-0 w-16 justify-end">
+                <div className="flex items-center flex-1 min-w-0">
+                  <label className="flex items-center gap-2 cursor-pointer mr-2 md:mr-3 shrink-0" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={!!localSelected[entry.path]} onChange={() => handleLocalDirEnter(entry)} className="rounded accent-cyan-500 w-5 h-5 cursor-pointer" />
+                  </label>
+                  <span className="mr-2 md:mr-3 text-xl shrink-0">{extIconFromName(entry.name)}</span>
+                  <span className="text-sm text-gray-200 truncate flex-1">{entry.name}</span>
+                  <div className="md:hidden shrink-0 ml-1">
+                    {localSelected[entry.path] && <span className="text-[10px] text-blue-400">已选</span>}
+                  </div>
+                </div>
+                <div className="flex md:hidden items-center gap-2 text-[11px] text-gray-500 mt-0.5 ml-9 pl-1">
+                  <span>{formatSize(entry.size)}</span>
+                  <span>·</span>
+                  <span>{getExtFromName(entry.name)}</span>
+                </div>
+                <span className="hidden md:block text-sm text-gray-400 w-24 text-right shrink-0 mr-8">{formatSize(entry.size)}</span>
+                <span className="hidden md:block text-xs text-gray-500 w-24 text-right shrink-0 mr-8 overflow-hidden text-ellipsis whitespace-nowrap">{getExtFromName(entry.name)}</span>
+                <div className="hidden md:flex items-center space-x-1 shrink-0 w-16 justify-end">
                   {localSelected[entry.path] && <span className="text-[10px] text-blue-400">已选</span>}
                 </div>
               </>
@@ -811,12 +848,12 @@ export default function FileManager() {
       : dbFiles;
 
     if (!dbDirPath && subdirs.length === 0 && dbFiles.length === 0) {
-      return <div className="mx-6 my-6"><div className="text-center text-gray-500 py-20 border-2 border-dashed border-gray-700 rounded-xl"><p className="text-gray-400 text-lg">暂无注册文件</p></div></div>;
+      return <div className="mx-4 md:mx-6 my-6"><div className="text-center text-gray-500 py-16 md:py-20 px-4 border-2 border-dashed border-gray-700 rounded-xl"><p className="text-gray-400 text-base md:text-lg">暂无注册文件</p></div></div>;
     }
 
     return (
       <div>
-        <div className="flex items-center text-xs text-gray-500 px-6 py-3 border-b border-gray-800 sticky top-0 bg-gray-900 z-10">
+        <div className="hidden md:flex items-center text-xs text-gray-500 px-6 py-3 border-b border-gray-800 sticky top-0 bg-gray-900 z-10">
           <label className="flex items-center gap-2 cursor-pointer mr-3 shrink-0">
             <input type="checkbox"
               checked={filteredDbFiles.length > 0 && filteredDbFiles.every(f => selected[f.hash])}
@@ -841,32 +878,57 @@ export default function FileManager() {
           <div
             key={dir}
             onClick={() => handleDbDirEnter(dir)}
-            className="flex items-center px-6 py-3 border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors group cursor-pointer"
+            className="flex flex-col md:flex-row md:items-center px-4 md:px-6 py-3 border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors group cursor-pointer"
           >
-            <span className="mr-3 text-xl shrink-0">📁</span>
-            <span className="text-sm text-yellow-400 truncate flex-1">{dir}</span>
-            <span className="text-sm text-gray-500 w-24 text-right shrink-0 mr-8">-</span>
-            <span className="text-xs text-gray-600 w-24 text-right shrink-0 mr-8">目录</span>
-            <span className="text-xs text-gray-500 w-40 text-right shrink-0 mr-6">-</span>
-            <div className="flex items-center space-x-1 shrink-0">
+            <div className="flex items-center flex-1 min-w-0">
+              <span className="mr-2 md:mr-3 text-xl shrink-0">📁</span>
+              <span className="text-sm text-yellow-400 truncate flex-1">{dir}</span>
+              <span className="md:hidden text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded shrink-0">进入</span>
+            </div>
+            <div className="flex md:hidden items-center gap-2 text-[11px] text-gray-500 mt-0.5 ml-8">
+              <span>目录</span>
+            </div>
+            <span className="hidden md:block text-sm text-gray-500 w-24 text-right shrink-0 mr-8">-</span>
+            <span className="hidden md:block text-xs text-gray-600 w-24 text-right shrink-0 mr-8">目录</span>
+            <span className="hidden md:block text-xs text-gray-500 w-40 text-right shrink-0 mr-6">-</span>
+            <div className="hidden md:flex items-center space-x-1 shrink-0">
               <span className="text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded">点击进入</span>
             </div>
           </div>
         ))}
         {filteredDbFiles.map(f => (
-          <div key={f.hash} onClick={() => toggleFile(f.hash)} className={`flex items-center px-6 py-3 border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors group cursor-pointer ${selected[f.hash] ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : ''}`}>
-            <label className="flex items-center gap-2 cursor-pointer mr-3 shrink-0" onClick={e => e.stopPropagation()}>
-              <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded accent-cyan-500 w-5 h-5 cursor-pointer" />
-            </label>
-            <span className="mr-3 text-xl shrink-0">{extIcon(f.mime_type)}</span>
-            <div className="flex items-center gap-1 flex-1 min-w-0">
-              {getProviderBadge(f)}
-              <span className="text-sm text-blue-300 truncate min-w-0">{f.filename}</span>
+          <div key={f.hash} onClick={() => toggleFile(f.hash)} className={`flex flex-col md:flex-row md:items-center px-4 md:px-6 py-3 border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors group cursor-pointer ${selected[f.hash] ? 'bg-blue-900/20 border-l-2 border-l-blue-500' : ''}`}>
+            {/* Row 1: checkbox + icon + filename + actions (mobile) */}
+            <div className="flex items-center flex-1 min-w-0">
+              <label className="flex items-center gap-2 cursor-pointer mr-2 md:mr-3 shrink-0" onClick={e => e.stopPropagation()}>
+                <input type="checkbox" checked={!!selected[f.hash]} onChange={() => toggleFile(f.hash)} className="rounded accent-cyan-500 w-5 h-5 cursor-pointer" />
+              </label>
+              <span className="mr-2 md:mr-3 text-xl shrink-0">{extIcon(f.mime_type)}</span>
+              <div className="flex items-center gap-1 flex-1 min-w-0">
+                {getProviderBadge(f)}
+                <span className="text-sm text-blue-300 truncate min-w-0">{f.filename}</span>
+              </div>
+              <div className="flex md:hidden items-center space-x-1 shrink-0 ml-1">
+                <button onClick={(e) => handleShare(f, e)} className="text-xs px-1.5 py-0.5 rounded hover:bg-gray-700 text-gray-400 hover:text-yellow-400 transition-colors" title="分享此文件">
+                  📤
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); handleCreateFromFile(f); }} className="text-[10px] bg-teal-600 hover:bg-teal-500 px-2 py-0.5 rounded whitespace-nowrap transition-colors">创建合集</button>
+              </div>
             </div>
-            <span className="text-sm text-gray-400 w-24 text-right shrink-0 mr-8">{formatSize(f.size)}</span>
-            <span className="text-xs text-gray-500 w-24 text-right shrink-0 mr-8 overflow-hidden text-ellipsis whitespace-nowrap">{(f.mime_type || '').split(';')[0].split('/').pop() || '-'}</span>
-            <span className="text-xs text-gray-500 w-40 text-right shrink-0 mr-6">{(f.created_at || '').replace('T', ' ').substring(0, 16)}</span>
-            <div className="flex items-center space-x-1 shrink-0">
+            {/* Row 2: meta info (mobile) */}
+            <div className="flex md:hidden items-center gap-2 text-[11px] text-gray-500 mt-0.5 ml-9 pl-1">
+              <span>{formatSize(f.size)}</span>
+              <span>·</span>
+              <span className="truncate">{(f.mime_type || '').split(';')[0].split('/').pop() || '-'}</span>
+              <span>·</span>
+              <span className="whitespace-nowrap">{(f.created_at || '').replace('T', ' ').substring(0, 16)}</span>
+            </div>
+            {/* Desktop meta columns */}
+            <span className="hidden md:block text-sm text-gray-400 w-24 text-right shrink-0 mr-8">{formatSize(f.size)}</span>
+            <span className="hidden md:block text-xs text-gray-500 w-24 text-right shrink-0 mr-8 overflow-hidden text-ellipsis whitespace-nowrap">{(f.mime_type || '').split(';')[0].split('/').pop() || '-'}</span>
+            <span className="hidden md:block text-xs text-gray-500 w-40 text-right shrink-0 mr-6">{(f.created_at || '').replace('T', ' ').substring(0, 16)}</span>
+            {/* Desktop actions */}
+            <div className="hidden md:flex items-center space-x-1 shrink-0">
               <button onClick={(e) => handleShare(f, e)} className="text-xs px-1.5 py-0.5 rounded hover:bg-gray-700 text-gray-400 hover:text-yellow-400 transition-colors" title="分享此文件">
                 📤
               </button>
@@ -883,29 +945,29 @@ export default function FileManager() {
   // =============================================
   return (
     <div className="flex flex-1 overflow-hidden h-full">
-      <div className="flex-1 flex flex-col bg-gray-900">
+      <div className="flex-1 flex flex-col bg-gray-900 has-mobile-nav">
         {/* header */}
         <div className="bg-gray-800 border-b border-gray-700 shrink-0">
-          <div className="flex items-center px-6 py-3 justify-between">
-            <div className="flex items-center space-x-4">
-              <button onClick={() => navigate('/')} className="text-gray-400 hover:text-white text-sm">← 广场</button>
-              <h2 className="text-lg font-bold">文件管理</h2>
-              <span className="text-xs text-gray-500">{files.length} 个文件 · {formatSize(totalSize)}</span>
+          <div className="flex items-center px-4 md:px-6 py-3 justify-between gap-2">
+            <div className="flex items-center space-x-2 md:space-x-4 min-w-0">
+              <button onClick={() => navigate('/')} className="text-gray-400 hover:text-white text-sm shrink-0">← 广场</button>
+              <h2 className="text-base md:text-lg font-bold truncate">文件管理</h2>
+              <span className="text-xs text-gray-500 hidden sm:inline">{files.length} 个文件 · {formatSize(totalSize)}</span>
             </div>
-            <div className="flex items-center space-x-2">
-              <button onClick={handleOpenFileBrowser} className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded text-sm">
+            <div className="flex items-center space-x-2 shrink-0">
+              <button onClick={handleOpenFileBrowser} className="bg-indigo-600 hover:bg-indigo-500 px-2.5 md:px-3 py-1.5 rounded text-xs md:text-sm whitespace-nowrap">
                 + 添加文件
               </button>
             </div>
           </div>
 
           {/* mode switcher */}
-          <div className="flex px-6 pb-3 space-x-1">
+          <div className="flex px-4 md:px-6 pb-3 space-x-1 overflow-x-auto scrollbar-hide">
             {BROWSE_MODES.map(m => (
               <button
                 key={m.key}
                 onClick={() => setBrowseMode(m.key)}
-                className={`flex items-center px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                className={`flex items-center px-3 md:px-4 py-1.5 rounded-lg text-xs md:text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
                   browseMode === m.key
                     ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
                     : 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-white'
@@ -921,8 +983,8 @@ export default function FileManager() {
           {browseMode === 'timeline' && (
             <>
               {/* search + sort + view toggle */}
-              <div className="flex items-center px-6 pb-2 space-x-3">
-                <div className="relative flex-1 max-w-md">
+              <div className="flex flex-col md:flex-row items-stretch md:items-center px-4 md:px-6 pb-2 gap-2 md:space-x-3">
+                <div className="relative flex-1 md:max-w-md">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">🔍</span>
                   <input
                     type="text" placeholder="搜索文件..."
@@ -930,29 +992,31 @@ export default function FileManager() {
                     className="w-full bg-gray-700 pl-9 pr-3 py-1.5 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
-                <div className="flex bg-gray-800 rounded overflow-hidden border border-gray-600 shrink-0">
-                  {SORT_KEYS.map(s => (
+                <div className="flex items-center gap-2">
+                  <div className="flex bg-gray-800 rounded overflow-hidden border border-gray-600 shrink-0">
+                    {SORT_KEYS.map(s => (
+                      <button
+                        key={s.key}
+                        onClick={() => setSortBy(s.key)}
+                        className={`px-2.5 md:px-3 py-1.5 text-xs ${sortBy === s.key ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                      >{s.label}</button>
+                    ))}
+                  </div>
+                  <div className="flex bg-gray-800 rounded overflow-hidden border border-gray-600 shrink-0">
                     <button
-                      key={s.key}
-                      onClick={() => setSortBy(s.key)}
-                      className={`px-3 py-1.5 text-xs ${sortBy === s.key ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
-                    >{s.label}</button>
-                  ))}
-                </div>
-                <div className="flex bg-gray-800 rounded overflow-hidden border border-gray-600 shrink-0">
-                  <button
-                    onClick={() => setViewMode('list')}
-                    className={`px-3 py-1.5 text-xs ${viewMode === 'list' ? 'bg-gray-600 text-white' : 'text-gray-400'}`}
-                  >≡ 列表</button>
-                  <button
-                    onClick={() => setViewMode('tree')}
-                    className={`px-3 py-1.5 text-xs ${viewMode === 'tree' ? 'bg-gray-600 text-white' : 'text-gray-400'}`}
-                  >📁 目录树</button>
+                      onClick={() => setViewMode('list')}
+                      className={`px-2.5 md:px-3 py-1.5 text-xs ${viewMode === 'list' ? 'bg-gray-600 text-white' : 'text-gray-400'}`}
+                    >≡ 列表</button>
+                    <button
+                      onClick={() => setViewMode('tree')}
+                      className={`px-2.5 md:px-3 py-1.5 text-xs ${viewMode === 'tree' ? 'bg-gray-600 text-white' : 'text-gray-400'}`}
+                    >📁 目录树</button>
+                  </div>
                 </div>
               </div>
 
               {/* category chips */}
-              <div className="flex px-6 pb-3 space-x-2 overflow-x-auto scrollbar-thin">
+              <div className="flex px-4 md:px-6 pb-3 space-x-2 overflow-x-auto scrollbar-hide">
                 {CATEGORIES.map(c => {
                   const count = c.key === '' ? files.length : (categoryCounts[c.key] || 0);
                   return (
@@ -980,7 +1044,7 @@ export default function FileManager() {
 
           {/* local directory mode controls */}
           {browseMode === 'localDir' && (
-            <div className="px-6 pb-3 space-y-2">
+            <div className="px-4 md:px-6 pb-3 space-y-2">
               <div className="flex items-center space-x-2">
                 <button
                   onClick={handleLocalDirUp}
@@ -1027,7 +1091,7 @@ export default function FileManager() {
 
           {/* DB directory mode controls */}
           {browseMode === 'dbDir' && (
-            <div className="px-6 pb-3 space-y-2">
+            <div className="px-4 md:px-6 pb-3 space-y-2">
               <div className="flex items-center space-x-2">
                 <button
                   onClick={handleDbDirUp}
@@ -1098,7 +1162,7 @@ export default function FileManager() {
 
         {/* multi-select action bar (timeline + dbDir modes) */}
         {selCount > 0 && browseMode !== 'localDir' && (
-          <div className="fixed bottom-0 left-0 right-0 bg-gray-900/80 backdrop-blur-md border-t border-gray-700 z-50 px-6 py-3 flex items-center justify-between shadow-2xl">
+          <div className="fixed bottom-0 left-0 right-0 md:bottom-0 bg-gray-900/80 backdrop-blur-md border-t border-gray-700 z-50 px-4 md:px-6 py-3 flex items-center justify-between shadow-2xl mb-0 md:mb-0" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom, 0px))' }}>
             <span className="text-sm text-cyan-400 bg-cyan-400/10 px-3 py-1 rounded-full font-medium">
               已选择 {selCount} 个文件
             </span>
@@ -1125,7 +1189,7 @@ export default function FileManager() {
       {/* add-file modal (unchanged) */}
       {showFileBrowser && (
         <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowFileBrowser(false)}>
-          <div className="bg-gray-800 p-6 rounded-xl w-[680px] border border-gray-600 shadow-2xl flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+          <div className="bg-gray-800 p-4 md:p-6 rounded-xl w-full max-w-[680px] mx-4 border border-gray-600 shadow-2xl flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold mb-1">添加文件</h3>
             <p className="text-xs text-gray-400 mb-4">浏览节点文件系统或从 URL 注册文件。</p>
 
