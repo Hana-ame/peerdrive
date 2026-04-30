@@ -51,6 +51,7 @@ func SetupRouter(
 	cfg *config.Config,
 	ipfsCompat *service.IPFSCompatLayer,
 	providerMgr *provider.Manager,
+	ipfsSvc *service.IPFSService,
 ) *gin.Engine {
 	log.LogInfo("router: SetupRouter starting")
 	r := gin.Default()
@@ -181,6 +182,10 @@ func SetupRouter(
 		}
 		if len(gateways) > 0 {
 			ipfsProv = provider.NewIPFSProvider(gateways)
+			// Bitswap 优先，HTTP 网关回退
+			if ipfsSvc != nil && ipfsSvc.Enabled() {
+				ipfsProv.SetBitswapFetcher(ipfsSvc.FetchByCID)
+			}
 			if providerMgr != nil {
 				providerMgr.Register("ipfsgw", ipfsProv)
 			}

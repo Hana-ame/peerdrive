@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
@@ -84,9 +85,29 @@ func main() {
 	// 初始化匿名存储目录（与普通文件同一目录）
 	repository.SetAnonStorageDir(storageDir)
 
+	// 初始化 IPFS 服务（boxo Bitswap + Blockstore，复用 libp2p host + DHT）
+	log.LogInfo("main: initializing IPFS service (Bitswap+DHT)")
+	ipfsSvc, err := service.NewIPFSService(ctx, p2pSvc, storageDir)
+	if err != nil {
+		log.LogWarn("main: IPFSService init failed (non-fatal): %v", err)
+	}
+	if ipfsSvc != nil {
+		defer ipfsSvc.Close()
+		if ipfsSvc.Enabled() {
+			// 后台 announce 所有已有文件到 IPFS DHT
+			go func() {
+				time.Sleep(5 * time.Second) // 等 DHT bootstrap 完成
+				ipfsSvc.ProvideAll(ctx)
+			}()
+		}
+	}
+
 	// 初始化 IPFS 兼容层（可选，默认关闭）
 	log.LogInfo("main: initializing IPFS compat layer (enabled=%v)", cfg.IPFSCompatEnable)
 	ipfsCompatLayer := service.NewIPFSCompatLayer(storageDir, cfg.IPFSBlockstore, p2pSvc)
+	if ipfsSvc != nil {
+		ipfsCompatLayer.SetIPFSService(ipfsSvc)
+	}
 	if cfg.IPFSCompatEnable {
 		if err := ipfsCompatLayer.Enable(); err != nil {
 			log.LogWarn("main: IPFS compat enable failed (non-fatal): %v", err)
@@ -98,7 +119,7 @@ func main() {
 		router.SetRegServer(cfg.RegistrationServer)
 	}
 	log.LogInfo("main: setting up HTTP router")
-	r := router.SetupRouter(downloader, p2pSvc, cfg, ipfsCompatLayer, providerMgr)
+	r := router.SetupRouter(downloader, p2pSvc, cfg, ipfsCompatLayer, providerMgr, ipfsSvc)
 
 	port := ":" + cfg.Port
 

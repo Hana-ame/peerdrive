@@ -6,6 +6,7 @@
 |------|------|
 | [README.md](README.md) | 架构总览 — 分层、模块映射、数据流、快速开始 |
 | [DASHBOARD.md](DASHBOARD.md) | 项目仪表盘 |
+| [FILE-REFERENCE.md](FILE-REFERENCE.md) | 全部项目文件路径与说明手册 (~240 文件) |
 
 ## spec — 技术规范
 

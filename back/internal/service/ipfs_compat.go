@@ -56,18 +56,18 @@ const (
 const blockDirLen = 2
 
 // IPFSCompatLayer 管理 IPFS 兼容层：块存储和 Bitswap 处理器。
+// 当 IPFSService 可用时，Bitswap 由 boxo 处理；否则回退到手动 protobuf 解析。
 type IPFSCompatLayer struct {
 	enabled    bool
 	storageDir string // SHA256 内容寻址存储的根目录
 	blockstore string // IPFS 块存储根目录（storage/ipfs-blocks/）
 	p2p        *P2PService
+	ipfs       *IPFSService // boxo-based IPFS service (optional)
 	mu         sync.RWMutex
 	logPrefix  string
 }
 
 // NewIPFSCompatLayer 创建新的 IPFS 兼容层实例。
-// storageDir 是 SHA256 内容寻址存储的根目录。
-// blockstore 是 IPFS 块存储的根目录；若为空则默认 <storageDir>/ipfs-blocks。
 func NewIPFSCompatLayer(storageDir, blockstore string, p2p *P2PService) *IPFSCompatLayer {
 	if blockstore == "" {
 		blockstore = filepath.Join(storageDir, "ipfs-blocks")
@@ -80,6 +80,11 @@ func NewIPFSCompatLayer(storageDir, blockstore string, p2p *P2PService) *IPFSCom
 	}
 }
 
+// SetIPFSService 注入 boxo-based IPFS 服务，启用后 Bitswap 由 boxo 处理。
+func (l *IPFSCompatLayer) SetIPFSService(s *IPFSService) {
+	l.ipfs = s
+}
+
 // Enabled 返回 IPFS 兼容层是否已启用。
 func (l *IPFSCompatLayer) Enabled() bool {
 	l.mu.RLock()
@@ -87,8 +92,9 @@ func (l *IPFSCompatLayer) Enabled() bool {
 	return l.enabled
 }
 
-// Enable 启用 IPFS 兼容层：创建块存储目录，将已有文件拷贝到块存储，
-// 在 libp2p host 上注册 Bitswap 协议处理器。
+// Enable 启用 IPFS 兼容层。
+// 若 IPFSService 已注入，Bitswap 由 boxo 处理（通过 libp2p host），
+// 无需手动注册协议处理器。
 func (l *IPFSCompatLayer) Enable() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -98,18 +104,21 @@ func (l *IPFSCompatLayer) Enable() error {
 		return nil
 	}
 
-	// 1. 创建块存储根目录
+	// 创建块存储根目录（仅用于回退模式）
 	if err := os.MkdirAll(l.blockstore, 0755); err != nil {
 		return fmt.Errorf("%s: create blockstore dir: %w", l.logPrefix, err)
 	}
 	log.LogInfo("%s: blockstore dir ready at %s", l.logPrefix, l.blockstore)
 
-	// 2. 如果 P2P host 可用，注册 Bitswap 处理器
-	if l.p2p != nil && l.p2p.Host != nil {
+	// boxo Bitswap（通过 IPFSService）已自动注册 stream handlers
+	if l.ipfs != nil && l.ipfs.Enabled() {
+		log.LogInfo("%s: Bitswap handled by boxo IPFSService", l.logPrefix)
+	} else if l.p2p != nil && l.p2p.Host != nil {
+		// 回退模式：手动注册 Bitswap handler
 		l.p2p.Host.SetStreamHandler(protocol.ID(BitswapProtocolV12), l.handleBitswap)
 		l.p2p.Host.SetStreamHandler(protocol.ID(BitswapProtocolV11), l.handleBitswap)
 		l.p2p.Host.SetStreamHandler(protocol.ID(BitswapProtocolV10), l.handleBitswap)
-		log.LogInfo("%s: registered Bitswap handlers on libp2p host", l.logPrefix)
+		log.LogInfo("%s: registered Bitswap handlers (manual fallback)", l.logPrefix)
 	} else {
 		log.LogWarn("%s: no libp2p host available, Bitswap handler not registered", l.logPrefix)
 	}
@@ -141,9 +150,9 @@ func (l *IPFSCompatLayer) Disable() {
 	log.LogInfo("%s: disabled", l.logPrefix)
 }
 
-// AddFile 将指定 SHA256 哈希的文件拷贝到 IPFS 块存储。
-// 文件从 SHA256 内容寻址路径 <storageDir>/<hash[:2]>/<hash> 读取，
-// 写入到 <blockstore>/<cid[:2]>/<cid>.block。
+// AddFile 将 SHA256 文件注册到 IPFS 块存储。
+// IPFSService 可用时直接通过 blockstore（CID→SHA-256 映射，不复制文件）。
+// 否则回退到原来的文件复制方式。
 func (l *IPFSCompatLayer) AddFile(sha256hash string) error {
 	l.mu.RLock()
 	enabled := l.enabled
@@ -153,46 +162,49 @@ func (l *IPFSCompatLayer) AddFile(sha256hash string) error {
 		return nil
 	}
 
-	// 校验 SHA256 哈希
 	if len(sha256hash) != 64 {
 		return fmt.Errorf("%s: invalid sha256 hash length %d", l.logPrefix, len(sha256hash))
 	}
 
-	// 计算 CID
+	// boxo IPFSService：CID 直接映射 SHA-256 存储，无需复制
+	if l.ipfs != nil && l.ipfs.Enabled() {
+		return l.ipfs.AddToBlockstore(sha256hash)
+	}
+
+	// 回退：复制文件到 ipfs-blocks 目录
 	cidStr := hashutil.SHA256ToCID(sha256hash)
 	if cidStr == "" {
 		return fmt.Errorf("%s: failed to compute CID for hash %s", l.logPrefix, sha256hash)
 	}
-
-	// 如果块已存在，无需重复写入
 	if l.blockExists(cidStr) {
 		log.LogDebug("%s: block already exists for CID %s", l.logPrefix, cidStr)
 		return nil
 	}
-
-	// 读取源文件（SHA256 内容寻址存储）
 	srcPath := filepath.Join(l.storageDir, sha256hash[:2], sha256hash)
 	data, err := os.ReadFile(srcPath)
 	if err != nil {
 		return fmt.Errorf("%s: read source file %s: %w", l.logPrefix, srcPath, err)
 	}
-
-	// 写入块存储
 	if err := l.writeBlock(cidStr, data); err != nil {
 		return fmt.Errorf("%s: write block %s: %w", l.logPrefix, cidStr, err)
 	}
-
 	log.LogInfo("%s: added file %s -> CID %s (%d bytes)", l.logPrefix, sha256hash, cidStr, len(data))
 	return nil
 }
 
-// HasCID 检查指定 CID 的块是否存在于块存储中。
+// HasCID 检查指定 CID 的块是否存在于存储中。
 func (l *IPFSCompatLayer) HasCID(cidStr string) bool {
+	if l.ipfs != nil {
+		return l.ipfs.HasCID(cidStr)
+	}
 	return l.blockExists(cidStr)
 }
 
 // GetBlock 返回指定 CID 的原始块数据。
 func (l *IPFSCompatLayer) GetBlock(cidStr string) ([]byte, error) {
+	if l.ipfs != nil {
+		return l.ipfs.GetBlock(cidStr)
+	}
 	path := l.blockPath(cidStr)
 	if path == "" {
 		return nil, fmt.Errorf("%s: invalid CID: %s", l.logPrefix, cidStr)
@@ -204,8 +216,11 @@ func (l *IPFSCompatLayer) GetBlock(cidStr string) ([]byte, error) {
 	return data, nil
 }
 
-// BlockCount 返回块存储中当前缓存的块数量。
+// BlockCount 返回可提供的块数量。
 func (l *IPFSCompatLayer) BlockCount() int {
+	if l.ipfs != nil {
+		return l.ipfs.BlockCount()
+	}
 	count := 0
 	entries, err := os.ReadDir(l.blockstore)
 	if err != nil {
@@ -225,8 +240,11 @@ func (l *IPFSCompatLayer) BlockCount() int {
 	return count
 }
 
-// BlockstorePath 返回块存储的根目录路径。
+// BlockstorePath 返回存储根目录路径。
 func (l *IPFSCompatLayer) BlockstorePath() string {
+	if l.ipfs != nil {
+		return l.ipfs.BlockstorePath()
+	}
 	return l.blockstore
 }
 

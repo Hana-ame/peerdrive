@@ -39,3 +39,21 @@ func SHA256ToCID(sha256hex string) string {
 	c := cid.NewCidV1(cid.Raw, mhash)
 	return c.String()
 }
+
+// CIDToSHA256 将 CID 字符串（CIDv1/CIDv0）解析为 64 字符 SHA-256 十六进制摘要。
+// 只支持 sha2-256 multihash；不匹配时返回空字符串。
+func CIDToSHA256(cidStr string) string {
+	c, err := cid.Decode(cidStr)
+	if err != nil {
+		return ""
+	}
+	mhash := c.Hash()
+	dec, err := mh.Decode(mhash)
+	if err != nil {
+		return ""
+	}
+	if dec.Code != mh.SHA2_256 || dec.Length != 32 || len(dec.Digest) != 32 {
+		return ""
+	}
+	return hex.EncodeToString(dec.Digest)
+}

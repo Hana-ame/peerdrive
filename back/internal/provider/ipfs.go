@@ -14,6 +14,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -31,10 +32,17 @@ const (
 	defaultHTTPTimeout  = 30 * time.Second
 )
 
-// IPFSProvider 管理一组公共 IPFS 网关，按优先级依次尝试获取文件。
+// BitswapFetcher 尝试通过 Bitswap/DHT 获取 CID 对应的数据，
+// 失败时返回 nil, nil；调用方应回退到其他方式（如 HTTP 网关）。
+type BitswapFetcher func(ctx context.Context, cid string) ([]byte, error)
+
+// IPFSProvider 管理一组公共 IPFS 网关。
+// 如果设置了 BitswapFetcher，GetReader/FetchByCID 会先尝试 Bitswap，
+// 失败后再回退到 HTTP 网关竞速。
 type IPFSProvider struct {
-	Gateways []string
-	client   *http.Client
+	Gateways       []string
+	bitswapFetcher BitswapFetcher
+	client         *http.Client
 }
 
 // NewIPFSProvider 创建 IPFS 网关提供者。
@@ -47,11 +55,27 @@ func NewIPFSProvider(gateways []string) *IPFSProvider {
 	}
 }
 
+// SetBitswapFetcher 设置 Bitswap 获取回调，使 Provider 优先走 Bitswap 网络。
+func (p *IPFSProvider) SetBitswapFetcher(f BitswapFetcher) {
+	p.bitswapFetcher = f
+}
+
 // GetReader 实现 ContentProvider 接口。
-// 并发尝试所有网关，返回第一个成功的响应体。其余请求会被取消并关闭。
+// 优先尝试 Bitswap 网络获取，失败后回退到 HTTP 网关竞速。
 func (p *IPFSProvider) GetReader(cid string) (io.ReadCloser, error) {
+	// 1. Bitswap 优先
+	if p.bitswapFetcher != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		data, err := p.bitswapFetcher(ctx, cid)
+		cancel()
+		if err == nil && data != nil {
+			return io.NopCloser(bytes.NewReader(data)), nil
+		}
+	}
+
+	// 2. HTTP 网关回退
 	if len(p.Gateways) == 0 {
-		return nil, fmt.Errorf("ipfs: no gateways configured")
+		return nil, fmt.Errorf("ipfs: no gateways configured and Bitswap unavailable")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -103,11 +127,20 @@ func (p *IPFSProvider) GetFilenameHint(cid, originalFilename string) string {
 	return cid
 }
 
-// FetchByCID 通过 IPFS 网关获取指定 CID 的完整字节数据。
-// 支持 context 取消/超时控制。
+// FetchByCID 获取指定 CID 的完整数据。
+// 优先 Bitswap 网络，失败后回退到 HTTP 网关竞速。
 func (p *IPFSProvider) FetchByCID(ctx context.Context, cid string) ([]byte, error) {
+	// 1. Bitswap 优先
+	if p.bitswapFetcher != nil {
+		data, err := p.bitswapFetcher(ctx, cid)
+		if err == nil && data != nil {
+			return data, nil
+		}
+	}
+
+	// 2. HTTP 网关回退
 	if len(p.Gateways) == 0 {
-		return nil, fmt.Errorf("ipfs: no gateways configured")
+		return nil, fmt.Errorf("ipfs: no gateways configured and Bitswap unavailable")
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
