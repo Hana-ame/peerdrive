@@ -203,23 +203,30 @@ export default function Navbar() {
         <div className="flex items-center space-x-4">
           <Link to="/" className="text-xl font-bold text-blue-400 hover:text-blue-300">Peerdrive</Link>
           <div className="flex items-center space-x-1">
-            <Link to="/files" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">文件管理</Link>
-            <button onClick={() => { if (window.location.pathname === '/') { window.location.reload(); } else { nav('/'); } }} className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">探索合集</button>
-            <Link to="/anon/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">创建合集</Link>
+            <Link to="/files" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">本地文件管理</Link>
+            <Link to="/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">创建合集</Link>
             <div className="relative group">
               <Link to="/p2p" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center gap-1">
                 P2P 网络
                 <svg className="w-3 h-3 text-gray-500 group-hover:text-gray-300 transition-transform group-hover:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
               </Link>
-              <div className="absolute top-full left-0 mt-1 w-44 bg-gray-800 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
-                <Link to="/p2p" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-t-lg">双栈总控</Link>
-                <Link to="/ipfs" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700">IPFS / libp2p</Link>
-                <Link to="/p2p/dht" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700">DHT 查询</Link>
+              <div className="absolute top-full left-0 mt-1 w-36 bg-gray-800 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
+                <Link to="/p2p" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-t-lg">网络总览</Link>
                 <Link to="/p2p/topology" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700">网络拓扑</Link>
-                <Link to="/bt/controller" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700">📥 BT 下载器</Link>
+                <Link to="/p2p/dht" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-b-lg">DHT 查询</Link>
+              </div>
+            </div>
+            <div className="relative group">
+              <Link to="/bt" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center gap-1">
+                BT
+                <svg className="w-3 h-3 text-gray-500 group-hover:text-gray-300 transition-transform group-hover:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              </Link>
+              <div className="absolute top-full left-0 mt-1 w-36 bg-gray-800 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
+                <Link to="/bt/controller" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-t-lg">BT 下载器</Link>
                 <Link to="/bt" className="block px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded-b-lg">BT DHT</Link>
               </div>
             </div>
+            <Link to="/ipfs" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700">IPFS</Link>
           </div>
         </div>
 

@@ -74,16 +74,16 @@ export default function AnonCreator() {
       const c = navState.forkFrom;
       setEntries(c.entries || []);
       setFname((c.friendly_name || '') + ' (副本)');
-      nav('/anon/create', { replace: true });
+      nav('/create', { replace: true });
     } else if (navState.draftFrom) {
       setEntries(navState.draftFrom.entries || []);
       setFname(navState.draftFrom.friendlyName || '');
-      nav('/anon/create', { replace: true });
+      nav('/create', { replace: true });
     } else if (navState.editFrom) {
       const c = navState.editFrom;
       setEntries(c.entries || []);
       setFname(c.friendly_name || '');
-      nav('/anon/create', { replace: true });
+      nav('/create', { replace: true });
     }
   }, []);
   useEffect(() => {

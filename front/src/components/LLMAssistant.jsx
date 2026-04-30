@@ -32,7 +32,7 @@ const TOOLS = [
         properties: {
           route: {
             type: 'string',
-            description: 'Route to navigate to. Common routes: / (home), /explorer, /plaza, /filemanager, /settings, /anon/create, /anon/explorer',
+            description: 'Route to navigate to. Common routes: / (home), /files, /create, /p2p, /bt, /ipfs, /settings',
           },
         },
         required: ['route'],

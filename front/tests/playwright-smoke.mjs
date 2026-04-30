@@ -4,7 +4,7 @@ export const tests = [
   {
     name: '1. 三列布局加载',
     fn: async ({ page, ok }) => {
-      await page.goto(baseURL + '/anon/create', { waitUntil: 'networkidle' });
+      await page.goto(baseURL + '/create', { waitUntil: 'networkidle' });
       await page.waitForTimeout(1000);
 
       // 左侧面板——检查四个来源 tab
@@ -24,7 +24,7 @@ export const tests = [
   {
     name: '2. 四个来源Tab',
     fn: async ({ page, ok }) => {
-      await page.goto(baseURL + '/anon/create', { waitUntil: 'networkidle' });
+      await page.goto(baseURL + '/create', { waitUntil: 'networkidle' });
       await page.waitForTimeout(800);
 
       const bodyText = await page.textContent('body');
@@ -37,7 +37,7 @@ export const tests = [
   {
     name: '3. 本地电脑 tab 隐藏筛选栏',
     fn: async ({ page, ok }) => {
-      await page.goto(baseURL + '/anon/create', { waitUntil: 'networkidle' });
+      await page.goto(baseURL + '/create', { waitUntil: 'networkidle' });
       await page.waitForTimeout(800);
 
       // 点击"本地电脑" tab
@@ -58,7 +58,7 @@ export const tests = [
   {
     name: '4. 已注册 tab 目录分组',
     fn: async ({ page, ok }) => {
-      await page.goto(baseURL + '/anon/create', { waitUntil: 'networkidle' });
+      await page.goto(baseURL + '/create', { waitUntil: 'networkidle' });
       await page.waitForTimeout(800);
 
       // 点击"已注册" tab
@@ -75,7 +75,7 @@ export const tests = [
   {
     name: '5. 编辑器区域完整',
     fn: async ({ page, ok }) => {
-      await page.goto(baseURL + '/anon/create', { waitUntil: 'networkidle' });
+      await page.goto(baseURL + '/create', { waitUntil: 'networkidle' });
       await page.waitForTimeout(800);
 
       const nameInput = await page.$('input[placeholder="合集名称"]');
@@ -91,7 +91,7 @@ export const tests = [
   {
     name: '6. 新建文件夹',
     fn: async ({ page, ok }) => {
-      await page.goto(baseURL + '/anon/create', { waitUntil: 'networkidle' });
+      await page.goto(baseURL + '/create', { waitUntil: 'networkidle' });
       await page.waitForTimeout(2000);
 
       const bodyText = await page.textContent('body');

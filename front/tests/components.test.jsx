@@ -84,8 +84,10 @@ describe('VersionLog', () => {
 describe('Navbar', () => {
   it('renders nav links', () => {
     render(<Navbar />, { wrapper });
-    expect(screen.getByText('文件管理')).toBeTruthy();
+    expect(screen.getByText('本地文件管理')).toBeTruthy();
     expect(screen.getByText('创建合集')).toBeTruthy();
+    expect(screen.getByText('BT')).toBeTruthy();
+    expect(screen.getByText('IPFS')).toBeTruthy();
   });
 });
 

@@ -45,7 +45,7 @@ export default function App() {
                 <Route path="/" element={<Plaza />} />
                 <Route path="/files" element={<FileManager />} />
                 <Route path="/:username/:collName" element={<Explorer />} />
-                <Route path="/anon/create" element={<AnonCreator />} />
+                <Route path="/create" element={<AnonCreator />} />
                 <Route path="/anon/collections/:hash" element={<AnonExplorer />} />
                 <Route path="/anon" element={<AnonExplorer />} />
                 <Route path="/p2p" element={<P2PPanel />} />

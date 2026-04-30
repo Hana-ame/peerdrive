@@ -275,12 +275,12 @@ export default function FileManager() {
   const handleCreateCollection = () => {
     if (selectedEntries.length === 0) return alert('请先选择文件');
     const name = selectedEntries[0].path || 'collection';
-    navigate('/anon/create', { state: { draftFrom: { entries: selectedEntries, friendlyName: name } } });
+    navigate('/create', { state: { draftFrom: { entries: selectedEntries, friendlyName: name } } });
     setSelected({});
   };
 
   const handleCreateFromFile = (file) => {
-    navigate('/anon/create', { state: { draftFrom: { entries: [{ path: file.filename, hash: file.hash }], friendlyName: file.filename } } });
+    navigate('/create', { state: { draftFrom: { entries: [{ path: file.filename, hash: file.hash }], friendlyName: file.filename } } });
   };
 
   const handleDeleteSelected = async () => {
@@ -417,7 +417,7 @@ export default function FileManager() {
     setNotification(`已注册 ${entries.length} 个文件`);
     loadFiles();
     // Navigate to collection creation
-    navigate('/anon/create', { state: { draftFrom: { entries, friendlyName: entries[0]?.path || 'collection' } } });
+    navigate('/create', { state: { draftFrom: { entries, friendlyName: entries[0]?.path || 'collection' } } });
   };
 
   const handleLocalRegisterOnly = async () => {
@@ -592,7 +592,7 @@ export default function FileManager() {
 
   const handleCreateFromDir = (dirName, dirFiles) => {
     const entries = dirFiles.map(f => ({ path: f.filename, hash: f.hash }));
-    navigate('/anon/create', { state: { draftFrom: { entries, friendlyName: dirName } } });
+    navigate('/create', { state: { draftFrom: { entries, friendlyName: dirName } } });
   };
 
   const tree = buildTree(files);

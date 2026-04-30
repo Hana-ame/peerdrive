@@ -74,7 +74,7 @@ export default function Plaza() {
 
   // 跳转到创建页并携带 Fork 源数据
   const handleFork = (c) => {
-    if (c.hash) navigate('/anon/create', { state: { forkFrom: c, sourceHash: c.hash } });
+    if (c.hash) navigate('/create', { state: { forkFrom: c, sourceHash: c.hash } });
   };
 
   // 点击合集卡片跳转到详情页
@@ -147,7 +147,7 @@ export default function Plaza() {
             >
               {viewMode === 'grid' ? '≡ 列表' : '⊞ 网格'}
             </button>
-            <button onClick={() => navigate('/anon/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">+ 创建合集</button>
+            <button onClick={() => navigate('/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">+ 创建合集</button>
           </div>
         </div>
         {/* 搜索栏：输入 Hash / URL 直接跳转 */}
@@ -178,7 +178,7 @@ export default function Plaza() {
             <p className="mb-3">{plazaTab === 'p2p' ? 'P2P 网络暂无公开合集' : '还没有创建任何合集'}</p>
             <p className="text-xs text-gray-600 mb-4">从文件管理器注册文件并自动创建匿名合集，或手动创建</p>
             <div className="flex justify-center gap-3">
-              <button onClick={() => navigate('/anon/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">
+              <button onClick={() => navigate('/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">
                 + 创建合集
               </button>
               <button onClick={() => navigate('/files')} className="bg-gray-700 hover:bg-gray-600 text-gray-300 px-4 py-2 rounded text-sm">
