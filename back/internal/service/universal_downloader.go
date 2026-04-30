@@ -4,11 +4,11 @@
 //
 //	local  → reads from content-addressed storage on disk
 //	ipfs   → libp2p DHT + exchange
+//	ipfsgw → IPFS HTTP gateway racing (fallback after Bitswap)
 //	btdht  → BitTorrent Mainline DHT HTTP bridge
-//	webrtc → WebRTC data channel (placeholder)
 //	http   → HTTP URL registered in file_providers
 //
-// On success the file is cached to local storage so the next request
+// On success the file is cached to local storage, so the next request
 // is served instantly by the LocalFetcher.
 
 package service
@@ -152,29 +152,6 @@ func (f *BTDHTFetcher) Fetch(ctx context.Context, hash string) ([]byte, error) {
 }
 
 // ---------------------------------------------------------------------------
-// WebRTCFetcher (placeholder)
-// ---------------------------------------------------------------------------
-
-// WebRTCFetcher is a placeholder for WebRTC data channel downloads.
-// It always reports unavailable until the backend is implemented.
-type WebRTCFetcher struct {
-	enabled bool
-}
-
-// NewWebRTCFetcher 创建 WebRTC 获取器（当前为占位实现）。
-func NewWebRTCFetcher(enabled bool) *WebRTCFetcher {
-	return &WebRTCFetcher{enabled: enabled}
-}
-
-func (f *WebRTCFetcher) Name() string { return "webrtc" }
-
-func (f *WebRTCFetcher) IsAvailable() bool { return f.enabled }
-
-func (f *WebRTCFetcher) Fetch(_ context.Context, _ string) ([]byte, error) {
-	return nil, fmt.Errorf("webrtc: not yet implemented")
-}
-
-// ---------------------------------------------------------------------------
 // HTTPURLFetcher
 // ---------------------------------------------------------------------------
 
@@ -302,9 +279,6 @@ func (d *UniversalDownloader) buildFetchers(order string, p2pSvc *P2PService, bt
 		},
 		"btdht": func() ProtocolFetcher {
 			return NewBTDHTFetcher(btSvc, d.storageDir)
-		},
-		"webrtc": func() ProtocolFetcher {
-			return NewWebRTCFetcher(false)
 		},
 		"http": func() ProtocolFetcher {
 			return &HTTPURLFetcher{}

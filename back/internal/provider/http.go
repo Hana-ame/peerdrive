@@ -6,6 +6,7 @@
 package provider
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"path"
@@ -21,7 +22,7 @@ func (p *HTTPProvider) GetReader(url string) (io.ReadCloser, error) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return nil, err
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return resp.Body, nil
 }

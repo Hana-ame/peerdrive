@@ -142,32 +142,6 @@ func TestBTDHTFetcher_Name(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// WebRTCFetcher tests
-// ---------------------------------------------------------------------------
-
-func TestWebRTCFetcher_NotAvailable(t *testing.T) {
-	f := NewWebRTCFetcher(false)
-	if f.IsAvailable() {
-		t.Error("expected webrtc unavailable by default")
-	}
-}
-
-func TestWebRTCFetcher_FetchFails(t *testing.T) {
-	f := NewWebRTCFetcher(true)
-	_, err := f.Fetch(context.Background(), "somehash")
-	if err == nil {
-		t.Error("expected webrtc fetch to return error (placeholder)")
-	}
-}
-
-func TestWebRTCFetcher_Name(t *testing.T) {
-	f := NewWebRTCFetcher(false)
-	if f.Name() != "webrtc" {
-		t.Errorf("expected 'webrtc', got %q", f.Name())
-	}
-}
-
-// ---------------------------------------------------------------------------
 // HTTPURLFetcher tests
 // ---------------------------------------------------------------------------
 
@@ -405,7 +379,7 @@ func TestCheckSources(t *testing.T) {
 }
 
 func TestDownload_FetchersMatchOrder(t *testing.T) {
-	d := NewUniversalDownloader(nil, nil, "/tmp", "btdht,webrtc,local", 30*time.Second, nil)
+	d := NewUniversalDownloader(nil, nil, "/tmp", "btdht,http,local", 30*time.Second, nil)
 	fetchers := d.Fetchers()
 	if len(fetchers) != 3 {
 		t.Fatalf("expected 3 fetchers, got %d", len(fetchers))
@@ -413,8 +387,8 @@ func TestDownload_FetchersMatchOrder(t *testing.T) {
 	if fetchers[0].Name() != "btdht" {
 		t.Errorf("expected first 'btdht', got %q", fetchers[0].Name())
 	}
-	if fetchers[1].Name() != "webrtc" {
-		t.Errorf("expected second 'webrtc', got %q", fetchers[1].Name())
+	if fetchers[1].Name() != "http" {
+		t.Errorf("expected second 'http', got %q", fetchers[1].Name())
 	}
 	if fetchers[2].Name() != "local" {
 		t.Errorf("expected third 'local', got %q", fetchers[2].Name())

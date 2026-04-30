@@ -40,12 +40,23 @@ type collectionRow struct {
 // ScanRow 从数据库扫描器读取集合字段，填充 Collection 结构体。
 func (c *Collection) ScanRow(s Scanner, columns ...string) error {
 	var r collectionRow
-	v := &r
-	v.ID = c.ID
-	v.Username = c.Username
-	v.CurrentHash = c.CurrentHash
-	v.Visibility = c.Visibility
-	v.CreatedAt = c.CreatedAt
+	if err := s.Scan(&r.ID, &r.Username, &r.CollectionName, &r.CurrentHash,
+		&r.Visibility, &r.FollowRedirects, &r.Tags, &r.CreatedAt); err != nil {
+		return err
+	}
+	c.ID = r.ID
+	c.Username = r.Username
+	c.CollectionName = r.CollectionName
+	c.CurrentHash = r.CurrentHash
+	c.Visibility = r.Visibility
+	c.FollowRedirects = r.FollowRedirects
+	c.CreatedAt = r.CreatedAt
+	if r.Tags.Valid && r.Tags.String != "" {
+		json.Unmarshal([]byte(r.Tags.String), &c.Tags)
+	}
+	if c.Tags == nil {
+		c.Tags = []string{}
+	}
 	return nil
 }
 
