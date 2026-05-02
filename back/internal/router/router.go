@@ -308,12 +308,15 @@ func SetupRouter(
 		bt.POST("/torrent", controller.BTTorrentUpload)
 		bt.POST("/magnet", controller.BTMagnetResolve)
 		bt.GET("/download/:infohash", controller.BTDownloadProgress)
+			bt.GET("/download/:infohash/torrent", controller.BTDownloadTorrent)
+			bt.GET("/download/:infohash/magnet", controller.BTDownloadMagnet)
 		bt.GET("/downloads", controller.BTDownloadList)
 		bt.POST("/download/:infohash/pause", controller.BTPauseDownload)
 		bt.POST("/download/:infohash/resume", controller.BTResumeDownload)
 		bt.POST("/download/:infohash/seed", controller.BTSeedTorrent)
 		bt.POST("/download/:infohash/unseed", controller.BTStopSeed)
 		bt.DELETE("/download/:infohash", controller.BTRemoveDownload)
+			bt.POST("/seed-collection", controller.BTSeedCollection)
 		bt.GET("/stats", controller.BTGlobalStats)
 	}
 

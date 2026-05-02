@@ -2,6 +2,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
@@ -20,6 +21,8 @@ import (
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/gin-gonic/gin"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -1042,6 +1045,172 @@ func BTDownloadList(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"downloads": downloads,
 		"count":     len(downloads),
+	})
+}
+
+// BTDownloadTorrent 处理 GET /bt/download/:infohash/torrent，返回 .torrent 文件下载。
+func BTDownloadTorrent(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTDownloadTorrent")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	infohash := c.Param("infohash")
+	data, err := btClient.GetTorrentBytes(infohash)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	status := btClient.GetDownload(infohash)
+	filename := "torrent.torrent"
+	if status != nil && status.Name != "" {
+		safe := strings.Map(func(r rune) rune {
+			if r == '/' || r == '\\' || r == ':' || r == '"' || r == '<' || r == '>' || r == '|' || r == '?' || r == '*' {
+				return '_'
+			}
+			return r
+		}, status.Name)
+		filename = safe + ".torrent"
+	}
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Data(http.StatusOK, "application/x-bittorrent", data)
+}
+
+// BTDownloadMagnet 处理 GET /bt/download/:infohash/magnet，返回磁力链接。
+func BTDownloadMagnet(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTDownloadMagnet")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	infohash := c.Param("infohash")
+	uri := btClient.GetMagnetURI(infohash)
+	if uri == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "download not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"magnet_uri": uri})
+}
+
+// BTSeedCollection 处理 POST /bt/seed-collection，从合集创建种子并开始做种。
+func BTSeedCollection(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: BTSeedCollection")
+	if btClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT client not available"})
+		return
+	}
+
+	var req struct {
+		CollectionHash string `json:"collection_hash"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.CollectionHash == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "collection_hash is required"})
+		return
+	}
+
+	storageDir := c.MustGet("storageDir").(string)
+	coll, err := repository.GetAnonCollectionByHash(req.CollectionHash, storageDir)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found: " + err.Error()})
+		return
+	}
+
+	// 创建临时目录，写入合集文件供 BuildFromFilePath 使用。
+	tmpDir, err := os.MkdirTemp("", "peerdrive-seed-")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create temp dir"})
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+
+	name := coll.FriendlyName
+	if name == "" {
+		name = req.CollectionHash[:12]
+	}
+	rootDir := filepath.Join(tmpDir, name)
+	if err := os.MkdirAll(rootDir, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create seed dir"})
+		return
+	}
+
+	for _, entry := range coll.Entries {
+		srcPath := filepath.Join(storageDir, entry.Hash[:2], entry.Hash)
+		dstPath := filepath.Join(rootDir, entry.Path)
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create dir: " + err.Error()})
+			return
+		}
+		src, err := os.ReadFile(srcPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file " + entry.Path})
+			return
+		}
+		if err := os.WriteFile(dstPath, src, 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write file " + entry.Path})
+			return
+		}
+	}
+
+	// 从文件结构创建 torrent metainfo
+	info := &metainfo.Info{
+		PieceLength: 256 * 1024,
+	}
+	if err := info.BuildFromFilePath(rootDir); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build torrent info: " + err.Error()})
+		return
+	}
+
+	mi := metainfo.MetaInfo{
+		InfoBytes: bencode.MustMarshal(info),
+	}
+	var buf bytes.Buffer
+	if err := mi.Write(&buf); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode torrent: " + err.Error()})
+		return
+	}
+	torrentBytes := buf.Bytes()
+	ih := mi.HashInfoBytes().HexString()
+
+	// 将文件写入 BT 数据目录，使库能立即验证并完成
+	dataRoot := filepath.Join(btClient.GetDownloadDir(), name)
+	if err := os.MkdirAll(dataRoot, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create bt data dir"})
+		return
+	}
+	for _, entry := range coll.Entries {
+		srcPath := filepath.Join(storageDir, entry.Hash[:2], entry.Hash)
+		dstPath := filepath.Join(dataRoot, entry.Path)
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create bt dir: " + err.Error()})
+			return
+		}
+		src, _ := os.ReadFile(srcPath)
+		if err := os.WriteFile(dstPath, src, 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to copy to bt dir: " + err.Error()})
+			return
+		}
+	}
+
+	// 添加种子（库会验证已存在的文件后标记完成）
+	btClient.SetAutoSeed(ih)
+	meta, err := btClient.AddTorrentBytes(torrentBytes)
+	if err != nil {
+		btClient.SetAutoSeed(ih) // 可能重复但无害，cleanup 在 handler 层面没有单独处理
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.LogInfo("ctrl-p2p: BTSeedCollection created torrent %s (%s) from collection %s, auto-seeding",
+		ih, meta.Name, req.CollectionHash)
+	c.JSON(http.StatusOK, gin.H{
+		"infohash": ih,
+		"name":     meta.Name,
+		"files":    len(meta.Files),
+		"total":    meta.TotalSize,
+		"status":   "seeding",
 	})
 }
 

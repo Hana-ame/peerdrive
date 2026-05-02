@@ -53,6 +53,8 @@ type BTClient struct {
 	mu          sync.RWMutex
 	downloads   map[string]*downloadState
 	customPeers map[string][]string
+	torrentData map[string][]byte // infohash -> raw .torrent bytes
+	autoSeed    map[string]bool   // infohashes to auto-start seeding on completion
 }
 
 // NewBTClient 创建 BT 客户端实例。
@@ -79,6 +81,8 @@ func NewBTClient(dataDir string) *BTClient {
 		dataDir:     dataDir,
 		downloads:   make(map[string]*downloadState),
 		customPeers: make(map[string][]string),
+		torrentData: make(map[string][]byte),
+		autoSeed:    make(map[string]bool),
 	}
 	log.LogInfo("bt-client: created, dataDir=%s", dataDir)
 	return client
@@ -131,6 +135,7 @@ func (c *BTClient) AddTorrentBytes(data []byte) (*TorrentMeta, error) {
 
 	c.mu.Lock()
 	c.downloads[ih] = ds
+	c.torrentData[ih] = data
 	c.mu.Unlock()
 
 	t.DownloadAll()
@@ -311,6 +316,17 @@ func (c *BTClient) finalizeDownload(ds *downloadState) {
 	}
 
 	if c.onComplete != nil && len(completedFiles) > 0 {
+
+		// 检查自动做种标记
+		c.mu.RLock()
+		shouldAutoSeed := c.autoSeed[ds.infoHashHex]
+		c.mu.RUnlock()
+		if shouldAutoSeed {
+			log.LogInfo("bt-client: auto-seeding %s", ds.infoHashHex)
+			ds.t.AllowDataUpload()
+			ds.seeding = true
+			ds.status = "seeding"
+		}
 		log.LogInfo("bt-client: firing onComplete for %s (%d files)", ds.infoHashHex, len(completedFiles))
 		c.onComplete(ds.infoHashHex, completedFiles)
 	}
@@ -420,6 +436,8 @@ func (c *BTClient) RemoveDownload(infohash string) error {
 		return fmt.Errorf("download %s not found", infohash)
 	}
 	delete(c.downloads, infohash)
+	delete(c.torrentData, infohash)
+	delete(c.autoSeed, infohash)
 	c.mu.Unlock()
 
 	ds.t.Drop()
@@ -434,6 +452,74 @@ func (c *BTClient) RemoveDownload(infohash string) error {
 
 	log.LogInfo("bt-client: removed download %s (%s)", infohash, ds.name)
 	return nil
+}
+
+// ---- Torrent 数据和 Magnet ----
+
+// GetTorrentBytes 返回原始 .torrent 文件字节。对于从磁力链接添加的下载，若元数据已就绪则从库导出。
+func (c *BTClient) GetTorrentBytes(infohash string) ([]byte, error) {
+	c.mu.RLock()
+	data, ok := c.torrentData[infohash]
+	c.mu.RUnlock()
+	if ok {
+		return data, nil
+	}
+
+	c.mu.RLock()
+	ds, dsOk := c.downloads[infohash]
+	c.mu.RUnlock()
+	if !dsOk {
+		return nil, fmt.Errorf("download not found: %s", infohash)
+	}
+
+	mi := ds.t.Metainfo()
+	if len(mi.InfoBytes) == 0 {
+		return nil, fmt.Errorf("metadata not yet available for %s", infohash)
+	}
+	var buf bytes.Buffer
+	if err := mi.Write(&buf); err != nil {
+		return nil, fmt.Errorf("failed to encode torrent: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// GetMagnetURI 为指定下载生成磁力链接 URI。
+func (c *BTClient) GetMagnetURI(infohash string) string {
+	c.mu.RLock()
+	ds, ok := c.downloads[infohash]
+	c.mu.RUnlock()
+	if !ok {
+		return ""
+	}
+
+	uri := fmt.Sprintf("magnet:?xt=urn:btih:%s", ds.infoHashHex)
+	if ds.name != "" && ds.name != ds.infoHashHex {
+		uri += "&dn=" + ds.name
+	}
+	mi := ds.t.Metainfo()
+	if len(mi.InfoBytes) > 0 {
+		for _, tier := range mi.UpvertedAnnounceList() {
+			for _, tr := range tier {
+				uri += "&tr=" + tr
+			}
+		}
+	}
+	return uri
+}
+
+// SetAutoSeed 标记指定 infohash 在下载完成后自动开始做种。
+func (c *BTClient) SetAutoSeed(infohash string) {
+	c.mu.Lock()
+	c.autoSeed[infohash] = true
+	c.mu.Unlock()
+}
+
+// HasTorrentBytes 检查是否存储了指定 infohash 的 torrent 字节。
+func (c *BTClient) HasTorrentBytes(infohash string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	_, ok := c.torrentData[infohash]
+	return ok
 }
 
 // ---- 做种 ----

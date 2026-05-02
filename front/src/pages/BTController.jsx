@@ -94,6 +94,10 @@ export default function BTController() {
   // Node status for banner + relay tags
   const [nodeStatus, setNodeStatus] = useState({ online: false, p2p: false, relay: false, btNodes: 0, checking: true });
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [showSeedModal, setShowSeedModal] = useState(false);
+  const [availableCollections, setAvailableCollections] = useState([]);
+  const [seedLoading, setSeedLoading] = useState(false);
+  const [collectionsLoading, setCollectionsLoading] = useState(false);
 
   // Peer connection detail cache: map of infohash -> { peers: [], lastUpdated: timestamp }
   const [peerDetails, setPeerDetails] = useState({});
@@ -266,6 +270,34 @@ export default function BTController() {
     catch (e) { setStatusMsg({ type: 'error', text: e.message }); }
   };
 
+  /* ---- Seed Collection ---- */
+  const loadCollections = async () => {
+    setCollectionsLoading(true);
+    try {
+      const list = await api.listAnonCollections();
+      setAvailableCollections(Array.isArray(list) ? list : []);
+    } catch (e) {
+      setStatusMsg({ type: 'error', text: '加载合集列表失败: ' + e.message });
+    } finally {
+      setCollectionsLoading(false);
+    }
+  };
+
+  const handleSeedCollection = async (hash) => {
+    setSeedLoading(true);
+    setStatusMsg(null);
+    try {
+      const result = await api.btSeedCollection(hash);
+      setShowSeedModal(false);
+      setStatusMsg({ type: 'success', text: '合集做种已启动: ' + (result.name || result.infohash) });
+      setTimeout(() => fetchDownloads(false), 1000);
+    } catch (e) {
+      setStatusMsg({ type: 'error', text: '合集做种失败: ' + e.message });
+    } finally {
+      setSeedLoading(false);
+    }
+  };
+
   /* ---- Expand / Collapse ---- */
   const toggleExpand = (ih) => {
     setExpanded(prev => {
@@ -348,12 +380,20 @@ export default function BTController() {
                 </span>
               )}
             </h1>
-            <button
-              onClick={() => fetchDownloads(true)}
-              className="text-xs text-gray-500 hover:text-gray-300 px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors"
-            >
-              {'刷新'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setShowSeedModal(true); loadCollections(); }}
+                className="text-xs text-emerald-400 hover:text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-800 hover:border-emerald-600 transition-colors"
+              >
+                {'合集做种'}
+              </button>
+              <button
+                onClick={() => fetchDownloads(true)}
+                className="text-xs text-gray-500 hover:text-gray-300 px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors"
+              >
+                {'刷新'}
+              </button>
+            </div>
           </div>
 
           {/* Input row */}
@@ -440,7 +480,7 @@ export default function BTController() {
                 <div className="w-24 text-right">{'剩余时间'}</div>
                 <div className="w-24 text-center">{'种子/对等'}</div>
                 <div className="w-20 text-center">{'状态'}</div>
-                <div className="w-28 text-right">{'操作'}</div>
+                <div className="w-40 text-right">{'操作'}</div>
               </div>
 
               {/* Table rows */}
@@ -549,7 +589,7 @@ export default function BTController() {
                         </div>
 
                         {/* Actions */}
-                        <div className="hidden md:flex w-28 items-center justify-end gap-1">
+                        <div className="hidden md:flex w-40 items-center justify-end gap-1">
                           {/* Seed toggle for completed downloads */}
                           {isCompleted && (
                             seedingActive ? (
@@ -598,6 +638,36 @@ export default function BTController() {
                           >
                             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>
                           </button>
+                          {/* Download .torrent file */}
+                          <a
+                            href={api.btGetTorrentUrl(d.infohash)}
+                            download
+                            title={'下载种子文件'}
+                            className="p-1.5 rounded text-gray-500 hover:text-blue-400 hover:bg-gray-800 transition-colors"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                            </svg>
+                          </a>
+                          {/* Copy magnet link */}
+                          <button
+                            onClick={async () => {
+                              try {
+                                const { magnet_uri } = await api.btGetMagnetUri(d.infohash);
+                                await navigator.clipboard.writeText(magnet_uri);
+                                setStatusMsg({ type: 'success', text: '磁力链接已复制到剪贴板' });
+                              } catch (e) {
+                                setStatusMsg({ type: 'error', text: '获取磁力链接失败: ' + e.message });
+                              }
+                            }}
+                            title={'复制磁力链接'}
+                            className="p-1.5 rounded text-gray-500 hover:text-purple-400 hover:bg-gray-800 transition-colors"
+                          >
+                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+                            </svg>
+                          </button>
                         </div>
 
                         {/* Mobile actions */}
@@ -615,6 +685,28 @@ export default function BTController() {
                             <button onClick={() => handleResume(d.infohash)} className="text-emerald-400 text-xs px-2 py-1 rounded bg-gray-800">{'继续'}</button>
                           )}
                           <button onClick={() => handleRemove(d.infohash)} className="text-red-400 text-xs px-2 py-1 rounded bg-gray-800">{'移除'}</button>
+                          <a
+                            href={api.btGetTorrentUrl(d.infohash)}
+                            download
+                            className="text-blue-400 text-xs px-2 py-1 rounded bg-gray-800"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {'.torrent'}
+                          </a>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const { magnet_uri } = await api.btGetMagnetUri(d.infohash);
+                                await navigator.clipboard.writeText(magnet_uri);
+                                setStatusMsg({ type: 'success', text: '磁力已复制' });
+                              } catch (e) {
+                                setStatusMsg({ type: 'error', text: '获取失败: ' + e.message });
+                              }
+                            }}
+                            className="text-purple-400 text-xs px-2 py-1 rounded bg-gray-800"
+                          >
+                            {'Magnet'}
+                          </button>
                         </div>
                       </div>
 
@@ -709,6 +801,60 @@ export default function BTController() {
           )}
         </div>
       </div>
+
+      {/* ===== Collection Seed Modal ===== */}
+      {showSeedModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowSeedModal(false)}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-lg mx-4 max-h-[70vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+              <h2 className="text-base font-semibold text-gray-200">{'选择合集做种'}</h2>
+              <button onClick={() => setShowSeedModal(false)} className="text-gray-500 hover:text-gray-300 text-lg leading-none">{'✕'}</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5">
+              {collectionsLoading ? (
+                <div className="flex items-center justify-center py-12 text-gray-500 text-sm gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  {'加载合集列表...'}
+                </div>
+              ) : availableCollections.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-gray-500 gap-2">
+                  <span className="text-2xl">{'📭'}</span>
+                  <p className="text-sm">{'没有可用的匿名合集'}</p>
+                  <p className="text-xs text-gray-600">{'请先在文件管理器中创建合集'}</p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {availableCollections.map((col) => (
+                    <div
+                      key={col.hash}
+                      className="flex items-center gap-3 px-4 py-3 rounded-lg border border-gray-800 hover:border-emerald-700/50 hover:bg-gray-800/50 transition-colors cursor-pointer"
+                      onClick={() => handleSeedCollection(col.hash)}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-200 truncate">
+                          {col.friendly_name || col.name_preview || col.hash.substring(0, 16) + '...'}
+                        </div>
+                        <div className="text-[10px] text-gray-500 mt-0.5">
+                          {col.hash.substring(0, 12) + '...'} {(col.entry_count ?? col.entryCount ?? 0) > 0 ? (' · ' + (col.entry_count ?? col.entryCount) + ' 个文件') : ''}
+                        </div>
+                      </div>
+                      <button
+                        className="text-xs text-emerald-400 hover:text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-800/50 hover:border-emerald-600 transition-colors whitespace-nowrap"
+                        disabled={seedLoading}
+                      >
+                        {seedLoading ? '处理中...' : '做种'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ===== Bottom: Stats Footer ===== */}
       <div className="shrink-0 border-t border-gray-800 bg-gray-900/80 backdrop-blur-sm">

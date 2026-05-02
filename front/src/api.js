@@ -164,6 +164,9 @@ export const btResumeDownload = (infohash) => request('POST', `/bt/download/${in
 export const btSeedDownload = (infohash) => request('POST', `/bt/download/${infohash}/seed`);
 export const btStopSeed = (infohash) => request('POST', `/bt/download/${infohash}/unseed`);
 export const btGetStats = () => request('GET', '/bt/stats');
+export const btGetTorrentUrl = (infohash) => `${getApiBase()}/bt/download/${infohash}/torrent`;
+export const btGetMagnetUri = (infohash) => request('GET', `/bt/download/${infohash}/magnet`);
+export const btSeedCollection = (collectionHash) => request('POST', '/bt/seed-collection', { collection_hash: collectionHash });
 
 /* ---- P2P Dual ---- */
 export const dualAnnounce = (hash) => request('POST', '/p2p/dual/announce', { hash });
