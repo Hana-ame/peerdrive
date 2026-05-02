@@ -345,8 +345,8 @@ export default function Settings({ dataConsent, setDataConsent }) {
 
   return (
     <div className="flex flex-1 h-full bg-gray-950" style={{ overflow: 'hidden' }}>
-      {/* ─── Left Sidebar ─── */}
-      <aside className="w-48 lg:w-56 shrink-0 border-r border-gray-800 flex flex-col bg-gray-900/30">
+      {/* ─── Left Sidebar (desktop only) ─── */}
+      <aside className="hidden md:flex w-48 lg:w-56 shrink-0 border-r border-gray-800 flex-col bg-gray-900/30">
         <div className="p-4 border-b border-gray-800">
           <div className="flex items-center gap-2">
             <button
@@ -380,8 +380,37 @@ export default function Settings({ dataConsent, setDataConsent }) {
       </aside>
 
       {/* ─── Right Content ─── */}
-      <main className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-2xl mx-auto space-y-6">
+      <main className="flex-1 overflow-y-auto">
+        {/* ─── Mobile section nav ─── */}
+        <div className="md:hidden sticky top-0 z-10 bg-gray-950/95 backdrop-blur border-b border-gray-800 overflow-x-auto scrollbar-hide">
+          <div className="flex items-center gap-1 p-2">
+            <button
+              onClick={() => navigate(-1)}
+              className="shrink-0 text-gray-400 hover:text-white px-2 py-1.5 text-sm transition-colors"
+            >
+              &larr;
+            </button>
+            <span className="shrink-0 text-sm font-bold text-gray-200 mr-1">设置</span>
+            {SECTIONS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => {
+                  document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className={`shrink-0 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+                  activeSection === s.id
+                    ? 'text-white bg-blue-600/30'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-3 md:p-6">
+          <div className="max-w-2xl mx-auto space-y-3 md:space-y-6">
 
           {/* ==============================================
               1. 节点连接
@@ -1072,6 +1101,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
             </div>
           </SettingsSection>
 
+          </div>
         </div>
       </main>
     </div>

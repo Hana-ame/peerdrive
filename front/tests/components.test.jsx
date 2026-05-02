@@ -69,7 +69,7 @@ describe('FileManager', () => {
 describe('Settings', () => {
   it('renders page', () => {
     render(<Settings dataConsent={false} setDataConsent={() => {}} />, { wrapper });
-    expect(screen.getByText('设置')).toBeTruthy();
+    expect(screen.getAllByText('设置').length).toBeGreaterThanOrEqual(1);
   });
 });
 
