@@ -93,6 +93,7 @@ export default function BTController() {
 
   // Node status for banner + relay tags
   const [nodeStatus, setNodeStatus] = useState({ online: false, p2p: false, relay: false, btNodes: 0, checking: true });
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   // Peer connection detail cache: map of infohash -> { peers: [], lastUpdated: timestamp }
   const [peerDetails, setPeerDetails] = useState({});
@@ -312,10 +313,17 @@ export default function BTController() {
       <div className="shrink-0 border-b border-gray-800 bg-gray-900/60 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-4">
           {/* Node status banner */}
-          {!nodeStatus.checking && !nodeStatus.online && (
+          {!nodeStatus.checking && !nodeStatus.online && !bannerDismissed && (
             <div className="mb-3 px-4 py-3 bg-amber-900/20 border border-amber-800/40 rounded-lg text-sm text-amber-300 flex items-center gap-2">
               <span>{'⚠️'}</span>
-              <span>{'未连接到本地节点。在 Settings 填入节点 API 地址后可使用本地文件功能和 P2P 下载。'}</span>
+              <span className="flex-1">{'未连接到本地节点。在 Settings 填入节点 API 地址后可使用本地文件功能和 P2P 下载。'}</span>
+              <button
+                onClick={() => setBannerDismissed(true)}
+                className="text-amber-500 hover:text-amber-300 text-base leading-none px-1 transition-colors"
+                title="关闭提示"
+              >
+                {'✕'}
+              </button>
             </div>
           )}
 
