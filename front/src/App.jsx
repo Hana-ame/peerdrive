@@ -1,6 +1,6 @@
 // 应用根组件：全局状态 (AppContext/PageContext) + 路由定义
 import React, { useState, createContext } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Plaza from './pages/Plaza';
 import Explorer from './pages/Explorer';
 import FileManager from './pages/FileManager';
@@ -50,8 +50,9 @@ export default function App() {
                 <Route path="/anon" element={<AnonExplorer />} />
                 <Route path="/p2p" element={<P2PPanel />} />
                 <Route path="/ipfs" element={<IPFSPanel />} />
-                <Route path="/bt" element={<BTPanel />} />
-                <Route path="/bt/controller" element={<BTController />} />
+                <Route path="/bt" element={<BTController />} />
+                <Route path="/bt/controller" element={<Navigate to="/bt" replace />} />
+                <Route path="/bt/status" element={<BTPanel />} />
                 <Route path="/bt/dht" element={<DHTExplorer />} />
                 <Route path="/p2p/dashboard" element={<P2PDashboard />} />
                 <Route path="/p2p/topology" element={<P2PTopology />} />

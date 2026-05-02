@@ -274,8 +274,8 @@ export default function Navbar() {
     { to: '/p2p/topology', label: '网络拓扑' },
   ];
   const btItems = [
-    { to: '/bt/controller', label: 'BT 下载器' },
-    { to: '/bt', label: 'BT DHT 状态' },
+    { to: '/bt', label: 'BT 下载器' },
+    { to: '/bt/status', label: 'BT DHT 状态' },
     { to: '/bt/dht', label: 'BT DHT 查询' },
   ];
   const ipfsItems = [
