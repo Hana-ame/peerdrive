@@ -62,7 +62,7 @@ Hardcoded weak JWT signing key in the registration server.
 Anyone on the IPFS public DHT can discover or announce files from this node.
 
 - **File**: `/mnt/d/WorkPlace/peerdrive/go/internal/service/p2p.go`, line 123
-- **Detail**: The Kademlia DHT is created with `dht.Mode(dht.ModeServer)` which makes this node a full DHT server on the public IPFS network. Combined with the unauthenticated `/p2p/announce`, `/p2p/bt/announce`, and `/p2p/dual/announce` endpoints (router.go lines 199, 208, 218), any remote caller can announce hashes to the public DHT. The stream handlers (`handleExchange`, `handleAnnounce`, `handleRequest` at lines 494-605) accept requests from any peer and will serve files if they exist locally.
+- **Detail**: The Kademlia DHT is created with `dht.Mode(dht.ModeServer)` which makes this node a full DHT server on the public IPFS network. Combined with the unauthenticated `/p2p/announce`, `/bt/announce`, and `/p2p/dual/announce` endpoints (router.go lines 199, 208, 218), any remote caller can announce hashes to the public DHT. The stream handlers (`handleExchange`, `handleAnnounce`, `handleRequest` at lines 494-605) accept requests from any peer and will serve files if they exist locally.
 - **Fix**: The DHT exposure itself is expected for a P2P file-sharing app, but the node should not be a `ModeServer` unless explicitly configured. Consider `dht.Mode(dht.ModeClient)` by default. Add an opt-in `PEERDRIVE_DHT_SERVER_MODE` env var. Additionally, rate-limit the stream handlers and consider requiring a capability token for announce operations.
 
 ### M-3: No rate limiting on any endpoint

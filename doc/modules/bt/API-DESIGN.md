@@ -2,7 +2,7 @@
 
 Base URL: `http://<host>:<port>` (default port `3000`, configurable via `PORT` env var)
 
-All endpoints are under the `/p2p/bt/` prefix (mounted on the `/p2p` Gin group).
+All endpoints are under the `/bt/` prefix (mounted on the `/p2p` Gin group).
 
 ---
 
@@ -10,7 +10,7 @@ All endpoints are under the `/p2p/bt/` prefix (mounted on the `/p2p` Gin group).
 
 ### 1. BT DHT Status
 
-**`GET /p2p/bt/status`**
+**`GET /bt/status`**
 
 Returns the BitTorrent DHT node status.
 
@@ -27,14 +27,14 @@ Returns the BitTorrent DHT node status.
 **Example:**
 
 ```bash
-curl -s http://localhost:3000/p2p/bt/status | python3 -m json.tool
+curl -s http://localhost:3000/bt/status | python3 -m json.tool
 ```
 
 ---
 
 ### 2. Announce on BT DHT
 
-**`POST /p2p/bt/announce`**
+**`POST /bt/announce`**
 
 Announce an infohash on the BitTorrent Mainline DHT. The server will register itself as a potential provider for the given hash.
 
@@ -57,7 +57,7 @@ Announce an infohash on the BitTorrent Mainline DHT. The server will register it
 **Example:**
 
 ```bash
-curl -s -X POST http://localhost:3000/p2p/bt/announce \
+curl -s -X POST http://localhost:3000/bt/announce \
   -H "Content-Type: application/json" \
   -d '{"hash":"0123456789abcdef0123456789abcdef01234567"}' | python3 -m json.tool
 ```
@@ -66,7 +66,7 @@ curl -s -X POST http://localhost:3000/p2p/bt/announce \
 
 ### 3. Find Providers on BT DHT
 
-**`POST /p2p/bt/find`**
+**`POST /bt/find`**
 
 Query the BitTorrent DHT for peers that have announced the given infohash.
 
@@ -91,7 +91,7 @@ Query the BitTorrent DHT for peers that have announced the given infohash.
 **Example:**
 
 ```bash
-curl -s -X POST http://localhost:3000/p2p/bt/find \
+curl -s -X POST http://localhost:3000/bt/find \
   -H "Content-Type: application/json" \
   -d '{"hash":"0123456789abcdef0123456789abcdef01234567"}' | python3 -m json.tool
 ```
@@ -100,7 +100,7 @@ curl -s -X POST http://localhost:3000/p2p/bt/find \
 
 ### 4. Upload Torrent File
 
-**`POST /p2p/bt/torrent`**
+**`POST /bt/torrent`**
 
 Upload a `.torrent` file to start downloading. The torrent is parsed (bencode), and download begins asynchronously via DHT peer discovery and wire-protocol piece exchange.
 
@@ -126,7 +126,7 @@ Upload a `.torrent` file to start downloading. The torrent is parsed (bencode), 
 **Example:**
 
 ```bash
-curl -s -X POST http://localhost:3000/p2p/bt/torrent \
+curl -s -X POST http://localhost:3000/bt/torrent \
   -F "torrent=@/path/to/file.torrent" | python3 -m json.tool
 ```
 
@@ -134,7 +134,7 @@ curl -s -X POST http://localhost:3000/p2p/bt/torrent \
 
 ### 5. Resolve Magnet URI
 
-**`POST /p2p/bt/magnet`**
+**`POST /bt/magnet`**
 
 Resolve a magnet URI and start downloading. Supports both 40-char hex and 32-char base32 infohash formats.
 
@@ -160,7 +160,7 @@ Resolve a magnet URI and start downloading. Supports both 40-char hex and 32-cha
 **Example:**
 
 ```bash
-curl -s -X POST http://localhost:3000/p2p/bt/magnet \
+curl -s -X POST http://localhost:3000/bt/magnet \
   -H "Content-Type: application/json" \
   -d '{"uri":"magnet:?xt=urn:btih:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0&dn=test.txt&tr=udp://tracker.opentrackr.org:1337"}' | python3 -m json.tool
 ```
@@ -169,7 +169,7 @@ curl -s -X POST http://localhost:3000/p2p/bt/magnet \
 
 ### 6. Download Progress
 
-**`GET /p2p/bt/download/:infohash`**
+**`GET /bt/download/:infohash`**
 
 Query the download progress for a specific infohash.
 
@@ -201,14 +201,14 @@ Query the download progress for a specific infohash.
 **Example:**
 
 ```bash
-curl -s http://localhost:3000/p2p/bt/download/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 | python3 -m json.tool
+curl -s http://localhost:3000/bt/download/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 | python3 -m json.tool
 ```
 
 ---
 
 ### 7. List All Downloads
 
-**`GET /p2p/bt/downloads`**
+**`GET /bt/downloads`**
 
 Returns all active, paused, completed, and failed BT downloads.
 
@@ -237,14 +237,14 @@ Returns all active, paused, completed, and failed BT downloads.
 **Example:**
 
 ```bash
-curl -s http://localhost:3000/p2p/bt/downloads | python3 -m json.tool
+curl -s http://localhost:3000/bt/downloads | python3 -m json.tool
 ```
 
 ---
 
 ### 8. Global BT Statistics
 
-**`GET /p2p/bt/stats`**
+**`GET /bt/stats`**
 
 Returns global BitTorrent client statistics (also includes the seeding list).
 
@@ -267,14 +267,14 @@ Returns global BitTorrent client statistics (also includes the seeding list).
 **Example:**
 
 ```bash
-curl -s http://localhost:3000/p2p/bt/stats | python3 -m json.tool
+curl -s http://localhost:3000/bt/stats | python3 -m json.tool
 ```
 
 ---
 
 ### 9. Pause Download
 
-**`POST /p2p/bt/download/:infohash/pause`**
+**`POST /bt/download/:infohash/pause`**
 
 Pause an active download.
 
@@ -290,14 +290,14 @@ Pause an active download.
 **Example:**
 
 ```bash
-curl -s -X POST http://localhost:3000/p2p/bt/download/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/pause | python3 -m json.tool
+curl -s -X POST http://localhost:3000/bt/download/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/pause | python3 -m json.tool
 ```
 
 ---
 
 ### 10. Resume Download
 
-**`POST /p2p/bt/download/:infohash/resume`**
+**`POST /bt/download/:infohash/resume`**
 
 Resume a paused download.
 
@@ -313,14 +313,14 @@ Resume a paused download.
 **Example:**
 
 ```bash
-curl -s -X POST http://localhost:3000/p2p/bt/download/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/resume | python3 -m json.tool
+curl -s -X POST http://localhost:3000/bt/download/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/resume | python3 -m json.tool
 ```
 
 ---
 
 ### 11. Remove Download
 
-**`DELETE /p2p/bt/download/:infohash`**
+**`DELETE /bt/download/:infohash`**
 
 Remove a download task and its data directory.
 
@@ -336,18 +336,18 @@ Remove a download task and its data directory.
 **Example:**
 
 ```bash
-curl -s -X DELETE http://localhost:3000/p2p/bt/download/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 | python3 -m json.tool
+curl -s -X DELETE http://localhost:3000/bt/download/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 | python3 -m json.tool
 ```
 
 ---
 
 ### 12. Start Seeding
 
-**`POST /p2p/bt/download/:infohash/seed`**
+**`POST /bt/download/:infohash/seed`**
 
 Start seeding a completed download. The server listens on a TCP port and responds to BitTorrent wire-protocol piece requests.
 
-**Note:** The canonical path is `POST /p2p/bt/download/:infohash/seed`. A shorthand form `/p2p/bt/seed/:ih` may be added in future releases.
+**Note:** The canonical path is `POST /bt/download/:infohash/seed`. A shorthand form `/bt/seed/:ih` may be added in future releases.
 
 **Response `200 OK`:**
 
@@ -361,14 +361,14 @@ Start seeding a completed download. The server listens on a TCP port and respond
 **Example:**
 
 ```bash
-curl -s -X POST http://localhost:3000/p2p/bt/download/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/seed | python3 -m json.tool
+curl -s -X POST http://localhost:3000/bt/download/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/seed | python3 -m json.tool
 ```
 
 ---
 
 ### 13. Stop Seeding
 
-**`POST /p2p/bt/download/:infohash/unseed`**
+**`POST /bt/download/:infohash/unseed`**
 
 Stop seeding a completed download.
 
@@ -384,14 +384,14 @@ Stop seeding a completed download.
 **Example:**
 
 ```bash
-curl -s -X POST http://localhost:3000/p2p/bt/download/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/unseed | python3 -m json.tool
+curl -s -X POST http://localhost:3000/bt/download/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/unseed | python3 -m json.tool
 ```
 
 ---
 
 ### 14. BEP 44 Put
 
-**`POST /p2p/bt/bep44/put`**
+**`POST /bt/bep44/put`**
 
 Store immutable data on the BitTorrent DHT (BEP 44). Data is base64-encoded. Maximum value size: 1000 bytes (bencoded).
 
@@ -420,7 +420,7 @@ Store immutable data on the BitTorrent DHT (BEP 44). Data is base64-encoded. Max
 # Encode "Hello, BT DHT!" as base64
 DATA=$(echo -n "Hello, BT DHT!" | base64)
 
-curl -s -X POST http://localhost:3000/p2p/bt/bep44/put \
+curl -s -X POST http://localhost:3000/bt/bep44/put \
   -H "Content-Type: application/json" \
   -d "{\"data\":\"$DATA\",\"mutable\":false}" | python3 -m json.tool
 ```
@@ -437,7 +437,7 @@ curl -s -X POST http://localhost:3000/p2p/bt/bep44/put \
 
 ### 15. BEP 44 Get
 
-**`POST /p2p/bt/bep44/get`**
+**`POST /bt/bep44/get`**
 
 Retrieve immutable data from the BitTorrent DHT (BEP 44) by its 40-char hex target hash.
 
@@ -461,7 +461,7 @@ Retrieve immutable data from the BitTorrent DHT (BEP 44) by its 40-char hex targ
 **Example:**
 
 ```bash
-curl -s -X POST http://localhost:3000/p2p/bt/bep44/get \
+curl -s -X POST http://localhost:3000/bt/bep44/get \
   -H "Content-Type: application/json" \
   -d '{"target":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"}' | python3 -m json.tool
 ```
@@ -470,7 +470,7 @@ curl -s -X POST http://localhost:3000/p2p/bt/bep44/get \
 
 ### 16. BEP 51 Sample Infohashes
 
-**`GET /p2p/bt/bep51/sample`**
+**`GET /bt/bep51/sample`**
 
 Collect infohash samples from the DHT routing table using BEP 51 (`sample_infohashes` query). Returns up to 200 unique infohashes.
 
@@ -489,7 +489,7 @@ Collect infohash samples from the DHT routing table using BEP 51 (`sample_infoha
 **Example:**
 
 ```bash
-curl -s http://localhost:3000/p2p/bt/bep51/sample | python3 -m json.tool
+curl -s http://localhost:3000/bt/bep51/sample | python3 -m json.tool
 ```
 
 ---
@@ -498,22 +498,22 @@ curl -s http://localhost:3000/p2p/bt/bep51/sample | python3 -m json.tool
 
 | Method   | Path                                     | Handler              | Description                       |
 |----------|------------------------------------------|----------------------|-----------------------------------|
-| `GET`    | `/p2p/bt/status`                         | BTDHTStatus          | DHT node status                   |
-| `POST`   | `/p2p/bt/announce`                       | BTAnnounce           | Announce on BT DHT                |
-| `POST`   | `/p2p/bt/find`                           | BTFindProviders      | Find providers on BT DHT          |
-| `POST`   | `/p2p/bt/torrent`                        | BTTorrentUpload      | Upload .torrent file              |
-| `POST`   | `/p2p/bt/magnet`                         | BTMagnetResolve      | Resolve magnet URI                |
-| `GET`    | `/p2p/bt/download/:infohash`             | BTDownloadProgress   | Download progress                 |
-| `GET`    | `/p2p/bt/downloads`                      | BTDownloadList       | List all downloads                |
-| `GET`    | `/p2p/bt/stats`                          | BTGlobalStats        | Global BT statistics              |
-| `POST`   | `/p2p/bt/download/:infohash/pause`       | BTPauseDownload      | Pause download                    |
-| `POST`   | `/p2p/bt/download/:infohash/resume`      | BTResumeDownload     | Resume download                   |
-| `DELETE` | `/p2p/bt/download/:infohash`             | BTRemoveDownload     | Remove download                   |
-| `POST`   | `/p2p/bt/download/:infohash/seed`        | BTSeedTorrent        | Start seeding                     |
-| `POST`   | `/p2p/bt/download/:infohash/unseed`      | BTStopSeed           | Stop seeding                      |
-| `POST`   | `/p2p/bt/bep44/put`                      | BEP44Put             | BEP 44 immutable put              |
-| `POST`   | `/p2p/bt/bep44/get`                      | BEP44Get             | BEP 44 immutable get              |
-| `GET`    | `/p2p/bt/bep51/sample`                   | BEP51Sample          | BEP 51 infohash sample            |
+| `GET`    | `/bt/status`                         | BTDHTStatus          | DHT node status                   |
+| `POST`   | `/bt/announce`                       | BTAnnounce           | Announce on BT DHT                |
+| `POST`   | `/bt/find`                           | BTFindProviders      | Find providers on BT DHT          |
+| `POST`   | `/bt/torrent`                        | BTTorrentUpload      | Upload .torrent file              |
+| `POST`   | `/bt/magnet`                         | BTMagnetResolve      | Resolve magnet URI                |
+| `GET`    | `/bt/download/:infohash`             | BTDownloadProgress   | Download progress                 |
+| `GET`    | `/bt/downloads`                      | BTDownloadList       | List all downloads                |
+| `GET`    | `/bt/stats`                          | BTGlobalStats        | Global BT statistics              |
+| `POST`   | `/bt/download/:infohash/pause`       | BTPauseDownload      | Pause download                    |
+| `POST`   | `/bt/download/:infohash/resume`      | BTResumeDownload     | Resume download                   |
+| `DELETE` | `/bt/download/:infohash`             | BTRemoveDownload     | Remove download                   |
+| `POST`   | `/bt/download/:infohash/seed`        | BTSeedTorrent        | Start seeding                     |
+| `POST`   | `/bt/download/:infohash/unseed`      | BTStopSeed           | Stop seeding                      |
+| `POST`   | `/bt/bep44/put`                      | BEP44Put             | BEP 44 immutable put              |
+| `POST`   | `/bt/bep44/get`                      | BEP44Get             | BEP 44 immutable get              |
+| `GET`    | `/bt/bep51/sample`                   | BEP51Sample          | BEP 51 infohash sample            |
 
 ---
 

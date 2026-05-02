@@ -91,7 +91,7 @@ fi
 # Build server from worktree
 echo "  Building server..."
 cd "$SCRIPT_DIR/.."
-go build -o "$SERVER_BIN" ./cmd/server/main.go
+go build -tags nosqlite -o "$SERVER_BIN" ./cmd/server/main.go
 echo "  Build complete: $SERVER_BIN"
 
 # Start server
@@ -137,8 +137,8 @@ assert_contains "$RESP" "pong" "GET /ping returns pong"
 # ============================================================
 info "2. BT DHT STATUS"
 # ============================================================
-RESP=$(curl -sf "$API/p2p/bt/status")
-assert_json "$RESP" "GET /p2p/bt/status returns valid JSON"
+RESP=$(curl -sf "$API/bt/status")
+assert_json "$RESP" "GET /bt/status returns valid JSON"
 assert_contains "$RESP" '"enabled":true' "BT DHT is enabled"
 
 # Extract num_nodes
@@ -243,11 +243,11 @@ echo "  Torrent infohash: $TORRENT_IH"
 # ============================================================
 info "4. UPLOAD TORRENT VIA API"
 # ============================================================
-UP=$(curl -s -w '\n%{http_code}' -X POST "$API/p2p/bt/torrent" -F "torrent=@$TORRENT_FILE")
+UP=$(curl -s -w '\n%{http_code}' -X POST "$API/bt/torrent" -F "torrent=@$TORRENT_FILE")
 UP_BODY=$(echo "$UP" | head -n -1)
 UP_CODE=$(echo "$UP" | tail -n 1)
-assert_status "$UP_CODE" "200" "POST /p2p/bt/torrent returns 200"
-assert_json "$UP_BODY" "POST /p2p/bt/torrent returns valid JSON"
+assert_status "$UP_CODE" "200" "POST /bt/torrent returns 200"
+assert_json "$UP_BODY" "POST /bt/torrent returns valid JSON"
 assert_contains "$UP_BODY" '"infohash"' "Response has infohash"
 assert_contains "$UP_BODY" '"name"' "Response has name"
 assert_contains "$UP_BODY" '"status"' "Response has status"
@@ -259,20 +259,20 @@ echo "  Download infohash: $IH"
 # ============================================================
 info "5. ANNOUNCE VIA BT DHT"
 # ============================================================
-ANNOUNCE_RESP=$(curl -s -w '\n%{http_code}' -X POST "$API/p2p/bt/announce" \
+ANNOUNCE_RESP=$(curl -s -w '\n%{http_code}' -X POST "$API/bt/announce" \
   -H "Content-Type: application/json" \
   -d "{\"hash\":\"$IH\"}")
 ANNOUNCE_BODY=$(echo "$ANNOUNCE_RESP" | head -n -1)
 ANNOUNCE_CODE=$(echo "$ANNOUNCE_RESP" | tail -n 1)
-assert_status "$ANNOUNCE_CODE" "200" "POST /p2p/bt/announce returns 200"
-assert_json "$ANNOUNCE_BODY" "POST /p2p/bt/announce returns valid JSON"
+assert_status "$ANNOUNCE_CODE" "200" "POST /bt/announce returns 200"
+assert_json "$ANNOUNCE_BODY" "POST /bt/announce returns valid JSON"
 assert_contains "$ANNOUNCE_BODY" '"status"' "Announce response has status"
 echo "  Announce: $ANNOUNCE_BODY"
 
 # ============================================================
 info "6. FIND PROVIDERS VIA BT DHT"
 # ============================================================
-FIND_RESP=$(curl -s -w '\n%{http_code}' -X POST "$API/p2p/bt/find" \
+FIND_RESP=$(curl -s -w '\n%{http_code}' -X POST "$API/bt/find" \
   -H "Content-Type: application/json" \
   -d "{\"hash\":\"$IH\"}")
 FIND_BODY=$(echo "$FIND_RESP" | head -n -1)
@@ -280,38 +280,38 @@ FIND_CODE=$(echo "$FIND_RESP" | tail -n 1)
 
 # Find may succeed with 200 even if no peers found (that's expected for a new infohash)
 if [ "$FIND_CODE" = "200" ]; then
-  assert_json "$FIND_BODY" "POST /p2p/bt/find returns valid JSON"
+  assert_json "$FIND_BODY" "POST /bt/find returns valid JSON"
   assert_contains "$FIND_BODY" '"peers"' "Find response has peers field"
   assert_contains "$FIND_BODY" '"hash"' "Find response has hash field"
-  pass "POST /p2p/bt/find returns 200"
+  pass "POST /bt/find returns 200"
 else
   # If DHT find timed out or failed, warn but don't fail
   echo "  WARN: find returned HTTP $FIND_CODE (DHT may not be fully bootstrapped)"
-  assert_json "$FIND_BODY" "POST /p2p/bt/find returned JSON even on error"
+  assert_json "$FIND_BODY" "POST /bt/find returned JSON even on error"
 fi
 
 # ============================================================
 info "7. CHECK DOWNLOAD PROGRESS"
 # ============================================================
-DL_RESP=$(curl -s -w '\n%{http_code}' "$API/p2p/bt/download/$IH")
+DL_RESP=$(curl -s -w '\n%{http_code}' "$API/bt/download/$IH")
 DL_BODY=$(echo "$DL_RESP" | head -n -1)
 DL_CODE=$(echo "$DL_RESP" | tail -n 1)
 if [ "$DL_CODE" = "200" ]; then
-  assert_json "$DL_BODY" "GET /p2p/bt/download/:ih returns valid JSON"
+  assert_json "$DL_BODY" "GET /bt/download/:ih returns valid JSON"
   assert_contains "$DL_BODY" '"status"' "Download progress has status"
   echo "  Download status: $(echo "$DL_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))")"
-  pass "GET /p2p/bt/download/:ih returns 200"
+  pass "GET /bt/download/:ih returns 200"
 else
   # Download may have already errored out (no real peers) — that's OK for API test
   echo "  Note: Download progress returned HTTP $DL_CODE (expected for no-peers environment)"
-  assert_json "$DL_BODY" "GET /p2p/bt/download/:ih returned JSON"
+  assert_json "$DL_BODY" "GET /bt/download/:ih returned JSON"
 fi
 
 # ============================================================
 info "8. LIST DOWNLOADS"
 # ============================================================
-LIST_RESP=$(curl -sf "$API/p2p/bt/downloads")
-assert_json "$LIST_RESP" "GET /p2p/bt/downloads returns valid JSON"
+LIST_RESP=$(curl -sf "$API/bt/downloads")
+assert_json "$LIST_RESP" "GET /bt/downloads returns valid JSON"
 assert_contains "$LIST_RESP" '"downloads"' "List response has downloads array"
 assert_contains "$LIST_RESP" '"count"' "List response has count"
 
@@ -323,29 +323,29 @@ info "9. BEP 44 PUT/GET ROUNDTRIP"
 TEST_MSG="BEP44 test message $(date -u +%s)"
 B64_DATA=$(echo -n "$TEST_MSG" | base64)
 
-PUT_RESP=$(curl -s -w '\n%{http_code}' -X POST "$API/p2p/bt/bep44/put" \
+PUT_RESP=$(curl -s -w '\n%{http_code}' -X POST "$API/bt/bep44/put" \
   -H "Content-Type: application/json" \
   -d "{\"data\":\"$B64_DATA\",\"mutable\":false}")
 PUT_BODY=$(echo "$PUT_RESP" | head -n -1)
 PUT_CODE=$(echo "$PUT_RESP" | tail -n 1)
 
 if [ "$PUT_CODE" = "200" ]; then
-  assert_json "$PUT_BODY" "POST /p2p/bt/bep44/put returns valid JSON"
+  assert_json "$PUT_BODY" "POST /bt/bep44/put returns valid JSON"
   assert_contains "$PUT_BODY" '"target"' "BEP44 put response has target"
   BEP44_TARGET=$(echo "$PUT_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['target'])")
   echo "  BEP44 target: $BEP44_TARGET"
-  pass "POST /p2p/bt/bep44/put returns 200"
+  pass "POST /bt/bep44/put returns 200"
 
   # Now GET it back
   sleep 1
-  GET_RESP=$(curl -s -w '\n%{http_code}' -X POST "$API/p2p/bt/bep44/get" \
+  GET_RESP=$(curl -s -w '\n%{http_code}' -X POST "$API/bt/bep44/get" \
     -H "Content-Type: application/json" \
     -d "{\"target\":\"$BEP44_TARGET\"}")
   GET_BODY=$(echo "$GET_RESP" | head -n -1)
   GET_CODE=$(echo "$GET_RESP" | tail -n 1)
 
   if [ "$GET_CODE" = "200" ]; then
-    assert_json "$GET_BODY" "POST /p2p/bt/bep44/get returns valid JSON"
+    assert_json "$GET_BODY" "POST /bt/bep44/get returns valid JSON"
     assert_contains "$GET_BODY" '"data"' "BEP44 get response has data"
     # Decode and verify
     ROUNDTRIP=$(echo "$GET_BODY" | python3 -c "import sys,json,base64; print(base64.b64decode(json.load(sys.stdin)['data']).decode())" 2>/dev/null || echo "")
@@ -358,37 +358,37 @@ if [ "$PUT_CODE" = "200" ]; then
     fi
   else
     echo "  BEP44 get returned HTTP $GET_CODE (may not propagate DHT fast enough)"
-    assert_json "$GET_BODY" "POST /p2p/bt/bep44/get returned JSON"
+    assert_json "$GET_BODY" "POST /bt/bep44/get returned JSON"
   fi
 else
   echo "  BEP44 put returned HTTP $PUT_CODE (DHT may not be fully bootstrapped)"
-  assert_json "$PUT_BODY" "POST /p2p/bt/bep44/put returned JSON"
+  assert_json "$PUT_BODY" "POST /bt/bep44/put returned JSON"
 fi
 
 # ============================================================
 info "10. BEP 51 SAMPLE INFOHASHES"
 # ============================================================
-SAMPLE_RESP=$(curl -s -w '\n%{http_code}' "$API/p2p/bt/bep51/sample")
+SAMPLE_RESP=$(curl -s -w '\n%{http_code}' "$API/bt/bep51/sample")
 SAMPLE_BODY=$(echo "$SAMPLE_RESP" | head -n -1)
 SAMPLE_CODE=$(echo "$SAMPLE_RESP" | tail -n 1)
 
 if [ "$SAMPLE_CODE" = "200" ]; then
-  assert_json "$SAMPLE_BODY" "GET /p2p/bt/bep51/sample returns valid JSON"
+  assert_json "$SAMPLE_BODY" "GET /bt/bep51/sample returns valid JSON"
   assert_contains "$SAMPLE_BODY" '"samples"' "BEP51 response has samples array"
   assert_contains "$SAMPLE_BODY" '"count"' "BEP51 response has count"
   SAMPLE_COUNT=$(echo "$SAMPLE_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('count', 0))")
   echo "  BEP51 samples collected: $SAMPLE_COUNT"
-  pass "GET /p2p/bt/bep51/sample returns 200"
+  pass "GET /bt/bep51/sample returns 200"
 else
   echo "  BEP51 sample returned HTTP $SAMPLE_CODE (DHT may not have enough peers)"
-  assert_json "$SAMPLE_BODY" "GET /p2p/bt/bep51/sample returned JSON"
+  assert_json "$SAMPLE_BODY" "GET /bt/bep51/sample returned JSON"
 fi
 
 # ============================================================
 info "11. BT GLOBAL STATS"
 # ============================================================
-STATS_RESP=$(curl -sf "$API/p2p/bt/stats")
-assert_json "$STATS_RESP" "GET /p2p/bt/stats returns valid JSON"
+STATS_RESP=$(curl -sf "$API/bt/stats")
+assert_json "$STATS_RESP" "GET /bt/stats returns valid JSON"
 assert_contains "$STATS_RESP" '"active_torrents"' "Stats has active_torrents"
 assert_contains "$STATS_RESP" '"dht_nodes"' "Stats has dht_nodes"
 assert_contains "$STATS_RESP" '"seeding"' "Stats has seeding"

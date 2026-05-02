@@ -382,7 +382,7 @@ curl -x "" http://localhost:3000/p2p/status | jq
 # → {"enabled":true, "peer_id":"12D3KooW...", "relay_mode":"..."}
 
 # 3. 确认 BT DHT 运行
-curl -x "" http://localhost:3000/p2p/bt/status | jq
+curl -x "" http://localhost:3000/bt/status | jq
 # → {"enabled":true, "listen_addr":"0.0.0.0:6881", "num_nodes":127}
 ```
 
@@ -513,31 +513,31 @@ curl -s -x "" -X POST http://localhost:3002/p2p/request-file \
 
 ```bash
 # 1. 查看 BT DHT 状态
-curl -s -x "" http://localhost:3000/p2p/bt/status | jq
+curl -s -x "" http://localhost:3000/bt/status | jq
 
 # 2. 宣告一个 hash
 HASH="eafb6f737b516be4c8899299b4732f3d54ea5d119ce0571ce6f5cd2d55735275"
-curl -s -x "" -X POST http://localhost:3000/p2p/bt/announce \
+curl -s -x "" -X POST http://localhost:3000/bt/announce \
   -H "Content-Type: application/json" \
   -d "{\"hash\":\"$HASH\"}" | jq
 
 # 3. BEP 44 Put
-curl -s -x "" -X POST http://localhost:3000/p2p/bt/bep44/put \
+curl -s -x "" -X POST http://localhost:3000/bt/bep44/put \
   -H "Content-Type: application/json" \
   -d '{"v":"SGVsbG8gV29ybGQ="}' | jq
 # → {"target":"...","status":"stored locally"}
 
 # 4. BEP 44 Get (用上面返回的 target)
-TARGET=$(curl -s -x "" -X POST http://localhost:3000/p2p/bt/bep44/put \
+TARGET=$(curl -s -x "" -X POST http://localhost:3000/bt/bep44/put \
   -H "Content-Type: application/json" \
   -d '{"v":"SGVsbG8gV29ybGQ="}' | jq -r .target)
-curl -s -x "" -X POST http://localhost:3000/p2p/bt/bep44/get \
+curl -s -x "" -X POST http://localhost:3000/bt/bep44/get \
   -H "Content-Type: application/json" \
   -d "{\"target\":\"$TARGET\"}" | jq
 # → {"v":"SGVsbG8gV29ybGQ="}
 
 # 5. BEP 51 Sample
-curl -s -x "" http://localhost:3000/p2p/bt/bep51/sample | jq
+curl -s -x "" http://localhost:3000/bt/bep51/sample | jq
 ```
 
 ### 5.7 WebRTC 信令手动测试
@@ -615,14 +615,14 @@ curl -x "" -X POST http://localhost:3000/p2p/connect \
 
 ```bash
 # 1. 确认 BT DHT 已启用
-curl -x "" http://localhost:3000/p2p/bt/status | jq .enabled
+curl -x "" http://localhost:3000/bt/status | jq .enabled
 
 # 2. 检查网络连接
 # BT DHT 使用 UDP 6881，确保出站 UDP 未被阻止
 
 # 3. 等待引导（DHT 加入网络需要 1-2 分钟）
 sleep 60
-curl -x "" http://localhost:3000/p2p/bt/status | jq .num_nodes
+curl -x "" http://localhost:3000/bt/status | jq .num_nodes
 
 # 4. 如果仍然 0，检查系统代理是否拦截了 UDP
 # Privoxy 只代理 HTTP，一般不影响 UDP
@@ -803,7 +803,7 @@ ssh -p26275 root@bwh.moonchan.xyz
 systemctl status peerdrive-relay
 curl http://127.0.0.1:3000/ping
 curl http://127.0.0.1:3000/p2p/status | python3 -m json.tool
-curl http://127.0.0.1:3000/p2p/bt/status | python3 -m json.tool
+curl http://127.0.0.1:3000/bt/status | python3 -m json.tool
 
 # 查看日志
 journalctl -u peerdrive-relay -n 50 --no-pager

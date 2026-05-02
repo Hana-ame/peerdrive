@@ -6,11 +6,11 @@
 #   - Server health (/ping)
 #   - CID download (/ipfs/:cid)
 #   - CID not found
-#   - IPFS gateway health (/p2p/ipfs/gateways)
-#   - Pin CID (/p2p/ipfs/pin/:cid)
-#   - List pins (/p2p/ipfs/pins)
-#   - Unpin CID (DELETE /p2p/ipfs/pin/:cid)
-#   - IPFS compat status (/p2p/ipfs)
+#   - IPFS gateway health (/ipfs/gateways)
+#   - Pin CID (/ipfs/pin/:cid)
+#   - List pins (/ipfs/pins)
+#   - Unpin CID (DELETE /ipfs/pin/:cid)
+#   - IPFS compat status (/ipfs)
 #
 # Usage: ./ipfs-full-test.sh [port]
 #   Default port: 3002
@@ -165,13 +165,13 @@ fi
 # =============================================================================
 # 3. IPFS GATEWAY HEALTH
 # =============================================================================
-header "3. IPFS Gateway Health (/p2p/ipfs/gateways)"
+header "3. IPFS Gateway Health (/ipfs/gateways)"
 
-GW_RESP=$(get_json "${BASE}/p2p/ipfs/gateways" GET "" 30)
+GW_RESP=$(get_json "${BASE}/ipfs/gateways" GET "" 30)
 GW_COUNT=$(echo "$GW_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('gateways',[])))" 2>/dev/null || echo "0")
 
 if [ "$GW_COUNT" -gt 0 ]; then
-  pass "GET /p2p/ipfs/gateways -- ${GW_COUNT} configured gateways"
+  pass "GET /ipfs/gateways -- ${GW_COUNT} configured gateways"
   # Show individual gateway health
   echo "$GW_RESP" | python3 -c "
 import sys, json
@@ -195,57 +195,57 @@ print(sum(1 for g in data.get('gateways', []) if g.get('healthy')))
     warn "IPFS gateways -- 0/${GW_COUNT} healthy (all failed)"
   fi
 else
-  fail "GET /p2p/ipfs/gateways -- no gateways configured"
+  fail "GET /ipfs/gateways -- no gateways configured"
 fi
 
 # =============================================================================
 # 4. IPFS COMPAT STATUS
 # =============================================================================
-header "4. IPFS Compat Status (/p2p/ipfs)"
+header "4. IPFS Compat Status (/ipfs)"
 
-COMPAT_RESP=$(get_json "${BASE}/p2p/ipfs")
+COMPAT_RESP=$(get_json "${BASE}/ipfs")
 COMPAT_ENABLED=$(echo "$COMPAT_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('enabled', False))" 2>/dev/null || echo "false")
 BLOCK_COUNT=$(echo "$COMPAT_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('block_count', 0))" 2>/dev/null || echo "0")
 
 if [ "$COMPAT_ENABLED" = "True" ] || [ "$COMPAT_ENABLED" = "true" ]; then
-  pass "GET /p2p/ipfs -- compat enabled, ${BLOCK_COUNT} blocks"
+  pass "GET /ipfs -- compat enabled, ${BLOCK_COUNT} blocks"
 else
-  pass "GET /p2p/ipfs -- compat disabled, ${BLOCK_COUNT} blocks" \
-       "(enable via POST /p2p/ipfs/toggle if needed)"
+  pass "GET /ipfs -- compat disabled, ${BLOCK_COUNT} blocks" \
+       "(enable via POST /ipfs/toggle if needed)"
 fi
 
 # =============================================================================
 # 5. PIN CID
 # =============================================================================
-header "5. Pin CID (/p2p/ipfs/pin/:cid)"
+header "5. Pin CID (/ipfs/pin/:cid)"
 
 echo "  Attempting to pin: ${CID_EMPTY_DIR} ..."
-PIN_RESP=$(get_json "${BASE}/p2p/ipfs/pin/${CID_EMPTY_DIR}" POST "" 60)
+PIN_RESP=$(get_json "${BASE}/ipfs/pin/${CID_EMPTY_DIR}" POST "" 60)
 PIN_STATUS=$(echo "$PIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "error")
 
 if [ "$PIN_STATUS" = "pinned" ]; then
   PIN_CID=$(echo "$PIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('cid',''))" 2>/dev/null)
   PIN_SIZE=$(echo "$PIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('size',0))" 2>/dev/null)
-  pass "POST /p2p/ipfs/pin/${CID_EMPTY_DIR} -- pinned" "CID=${PIN_CID}, size=${PIN_SIZE}B"
+  pass "POST /ipfs/pin/${CID_EMPTY_DIR} -- pinned" "CID=${PIN_CID}, size=${PIN_SIZE}B"
 elif [ "$PIN_STATUS" = "already_pinned" ]; then
-  pass "POST /p2p/ipfs/pin/${CID_EMPTY_DIR} -- already_pinned"
+  pass "POST /ipfs/pin/${CID_EMPTY_DIR} -- already_pinned"
 elif [ "$PIN_STATUS" = "error" ]; then
   ERR_MSG=$(echo "$PIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error','unknown error'))" 2>/dev/null || echo "parse error")
-  warn "POST /p2p/ipfs/pin/${CID_EMPTY_DIR} -- fetch failed" "${ERR_MSG}"
+  warn "POST /ipfs/pin/${CID_EMPTY_DIR} -- fetch failed" "${ERR_MSG}"
 else
-  warn "POST /p2p/ipfs/pin/${CID_EMPTY_DIR} -- unexpected status" "${PIN_STATUS}"
+  warn "POST /ipfs/pin/${CID_EMPTY_DIR} -- unexpected status" "${PIN_STATUS}"
 fi
 
 # =============================================================================
 # 6. LIST PINS
 # =============================================================================
-header "6. List Pins (/p2p/ipfs/pins)"
+header "6. List Pins (/ipfs/pins)"
 
-PINS_RESP=$(get_json "${BASE}/p2p/ipfs/pins")
+PINS_RESP=$(get_json "${BASE}/ipfs/pins")
 PIN_COUNT=$(echo "$PINS_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
 
 if [ "$PIN_COUNT" -ge 0 ]; then
-  pass "GET /p2p/ipfs/pins -- ${PIN_COUNT} pins listed"
+  pass "GET /ipfs/pins -- ${PIN_COUNT} pins listed"
   if [ "$PIN_COUNT" -gt 0 ]; then
     echo "$PINS_RESP" | python3 -c "
 import sys, json
@@ -255,42 +255,42 @@ for p in data.get('pins', []):
 " 2>/dev/null || true
   fi
 else
-  fail "GET /p2p/ipfs/pins -- could not parse response"
+  fail "GET /ipfs/pins -- could not parse response"
 fi
 
 # =============================================================================
 # 7. UNPIN CID
 # =============================================================================
-header "7. Unpin CID (DELETE /p2p/ipfs/pin/:cid)"
+header "7. Unpin CID (DELETE /ipfs/pin/:cid)"
 
 # If we pinned earlier, unpin the same CID
 if [ "$PIN_STATUS" = "pinned" ] || [ "$PIN_STATUS" = "already_pinned" ]; then
   echo "  Unpinning: ${CID_EMPTY_DIR} ..."
-  UNPIN_RESP=$(get_json "${BASE}/p2p/ipfs/pin/${CID_EMPTY_DIR}" DELETE "" 10)
+  UNPIN_RESP=$(get_json "${BASE}/ipfs/pin/${CID_EMPTY_DIR}" DELETE "" 10)
   UNPIN_STATUS=$(echo "$UNPIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "error")
   if [ "$UNPIN_STATUS" = "unpinned" ]; then
-    pass "DELETE /p2p/ipfs/pin/${CID_EMPTY_DIR} -- unpinned"
+    pass "DELETE /ipfs/pin/${CID_EMPTY_DIR} -- unpinned"
   elif [ "$UNPIN_STATUS" = "error" ]; then
     ERR_MSG=$(echo "$UNPIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error','unknown error'))" 2>/dev/null)
-    fail "DELETE /p2p/ipfs/pin/${CID_EMPTY_DIR}" "${ERR_MSG}"
+    fail "DELETE /ipfs/pin/${CID_EMPTY_DIR}" "${ERR_MSG}"
   else
-    fail "DELETE /p2p/ipfs/pin/${CID_EMPTY_DIR}" "unexpected: ${UNPIN_STATUS}"
+    fail "DELETE /ipfs/pin/${CID_EMPTY_DIR}" "unexpected: ${UNPIN_STATUS}"
   fi
 else
   echo "  Pin CID test did not succeed in Step 5, skipping unpin test."
   echo "  Trying unpin of known non-pinned CID instead..."
-  UNPIN_RESP=$(get_json "${BASE}/p2p/ipfs/pin/${CID_INVALID}" DELETE "" 10)
+  UNPIN_RESP=$(get_json "${BASE}/ipfs/pin/${CID_INVALID}" DELETE "" 10)
   UNPIN_STATUS=$(echo "$UNPIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','error'))" 2>/dev/null || echo "error")
   UNPIN_ERR=$(echo "$UNPIN_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error',''))" 2>/dev/null || echo "")
   if [ "$UNPIN_STATUS" = "error" ] && echo "$UNPIN_ERR" | grep -qi "not.found"; then
-    pass "DELETE /p2p/ipfs/pin/${CID_INVALID} -- correctly rejected" "pin not found"
+    pass "DELETE /ipfs/pin/${CID_INVALID} -- correctly rejected" "pin not found"
   else
-    warn "DELETE /p2p/ipfs/pin/${CID_INVALID}" "response: ${UNPIN_RESP}"
+    warn "DELETE /ipfs/pin/${CID_INVALID}" "response: ${UNPIN_RESP}"
   fi
 fi
 
 # Verify pins reflect the unpin
-PINS_AFTER=$(get_json "${BASE}/p2p/ipfs/pins")
+PINS_AFTER=$(get_json "${BASE}/ipfs/pins")
 PIN_COUNT_AFTER=$(echo "$PINS_AFTER" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
 echo "  Remaining pins after unpin: ${PIN_COUNT_AFTER}"
 

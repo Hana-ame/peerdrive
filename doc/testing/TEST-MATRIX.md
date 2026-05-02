@@ -142,9 +142,9 @@
 
 | 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
 |--------|--------|------|----------|----------|
-| B-01 | BT DHT 启动 | PEERDRIVE_BT_DHT_ENABLE=true | num_nodes > 0 | GET /p2p/bt/status |
+| B-01 | BT DHT 启动 | PEERDRIVE_BT_DHT_ENABLE=true | num_nodes > 0 | GET /bt/status |
 | B-02 | BT DHT 禁用 | PEERDRIVE_BT_DHT_ENABLE=false | enabled:false | 其他功能正常 |
-| B-03 | BT Announce | POST /p2p/bt/announce {hash} | status:"announced on BT DHT" | 64 位 hex hash |
+| B-03 | BT Announce | POST /bt/announce {hash} | status:"announced on BT DHT" | 64 位 hex hash |
 | B-04 | BT Find (跨节点) | A announce, B find | count >= 1 | B 找到 A 宣告的 peer |
 | B-05 | BT Find (自查找) | 查找自己宣告的 hash | count >= 0 | 不报错 |
 | B-06 | 无效 hash (BT) | 40 字符 hash | 正确处理 | 接受 40 位 infohash |
@@ -155,8 +155,8 @@
 |--------|--------|------|----------|----------|
 | B-07 | 解析 .torrent | ParseTorrent(bencode) | 返回 name/pieces/size/infohash | infohash 20 字节 |
 | B-08 | 解析 Magnet | ParseMagnet("magnet:?xt=urn:btih:...") | 返回 infohash/name/trackers | 支持 hex 和 base32 |
-| B-09 | 上传 .torrent | POST /p2p/bt/torrent (multipart) | 200, 返回 files/infohash/status | status:"downloading" |
-| B-10 | 添加 Magnet | POST /p2p/bt/magnet {uri} | 200, 同上 | infohash 正确 |
+| B-09 | 上传 .torrent | POST /bt/torrent (multipart) | 200, 返回 files/infohash/status | status:"downloading" |
+| B-10 | 添加 Magnet | POST /bt/magnet {uri} | 200, 同上 | infohash 正确 |
 
 ### 4.3 Wire Protocol
 
@@ -172,7 +172,7 @@
 |--------|--------|------|----------|----------|
 | B-14 | BEP 44 Put | 存储 immutable 数据 | 返回 target hash | 数据存入 DHT |
 | B-15 | BEP 44 Get | 获取已存储数据 | 返回原数据 | base64 编码一致 |
-| B-16 | BEP 51 Sample | GET /p2p/bt/bep51/sample | 返回 samples 数组 | 每个 40 位 hex |
+| B-16 | BEP 51 Sample | GET /bt/bep51/sample | 返回 samples 数组 | 每个 40 位 hex |
 
 ---
 
@@ -210,8 +210,8 @@
 | UI-01 | Plaza 首页 | 打开 / | 显示合集卡片/搜索栏/标签页 | Playwright |
 | UI-02 | AnonCreator | 打开 /anon/create | 4-tab 平铺, 时间线默认 | 可见时间线/已注册/本机/合集 |
 | UI-03 | FileManager | 打开 /files | 文件列表+复选框+排序 | 复选框可见, 排序按钮有效 |
-| UI-04 | P2P 面板 | 打开 /p2p/ipfs, /p2p/bt, /p2p | 各面板正确渲染 | Playwright |
-| UI-05 | BT 控制器 | 打开 /p2p/bt/controller | 磁力输入+下载列表+统计栏 | 刷新按钮有效 |
+| UI-04 | P2P 面板 | 打开 /ipfs, /bt, /p2p | 各面板正确渲染 | Playwright |
+| UI-05 | BT 控制器 | 打开 /bt/controller | 磁力输入+下载列表+统计栏 | 刷新按钮有效 |
 | UI-06 | Settings | 打开 /settings | IPFS/BT/WebDAV/LLM 配置节 | 设置持久化 |
 | UI-07 | PWA | 移动端打开 | manifest + service worker | 可添加到主屏幕 |
 
@@ -256,7 +256,7 @@
 | 项 | 详情 |
 |----|------|
 | 目标 | Peerdrive 从公网 IPFS CID 拉取文件 |
-| 步骤 | 已知 CID `QmUNLLsP...` → POST /p2p/ipfs/pin → GET /ipfs/ |
+| 步骤 | 已知 CID `QmUNLLsP...` → POST /ipfs/pin → GET /ipfs/ |
 | 结果 | ✅ HTTP 200, 249,154 bytes, pin 成功 |
 | 验证 | 文件写入本地 storage，SHA256 索引注册 |
 
@@ -264,7 +264,7 @@
 | 项 | 详情 |
 |----|------|
 | 目标 | Peerdrive BT 客户端通过 Tracker+DHT 发现 peer 并下载 |
-| 步骤 | .torrent → POST /p2p/bt/torrent → Tracker 发现 → Wire Protocol |
+| 步骤 | .torrent → POST /bt/torrent → Tracker 发现 → Wire Protocol |
 | 结果 | ✅ 2026-04-29: 16/16 pieces, 1,048,576 bytes, SHA256 验证通过 |
 | 详情 | Peerdrive ←Tracker→ Python seeder → Wire Protocol 16片下载 |
 | 验证 | sha256sum 与原文件完全一致: `39b90efc...` |
@@ -281,6 +281,6 @@
 | 项 | 详情 |
 |----|------|
 | 目标 | kubok add → CID → Peerdrive pin |
-| 步骤 | ipfs add → Peerdrive POST /p2p/ipfs/pin/:cid |
+| 步骤 | ipfs add → Peerdrive POST /ipfs/pin/:cid |
 | 结果 | ⚠️ 本地 kubo 节点文件未发布到 IPFS DHT，公网网关找不到 |
 | 修复 | 需要 kubo 连接 IPFS 公网或 Peerdrive 直接连接 kubo 的 libp2p 节点 |

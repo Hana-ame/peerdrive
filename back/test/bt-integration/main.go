@@ -17,6 +17,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/metainfo"
+
 	"peerdrive/internal/config"
 	peerdrive_log "peerdrive/internal/log"
 	"peerdrive/internal/model"
@@ -331,10 +334,41 @@ func stepParseTorrent(torrentPath string) *p2p_bt.TorrentMeta {
 		return nil
 	}
 
-	meta, err := p2p_bt.ParseTorrent(data)
+	mi, err := metainfo.Load(bytes.NewReader(data))
 	if err != nil {
 		reportFail("parse .torrent file", fmt.Sprintf("parse: %v", err))
 		return nil
+	}
+
+	// Unmarshal Info dictionary from bencoded bytes.
+	info, err := mi.UnmarshalInfo()
+	if err != nil {
+		reportFail("parse .torrent file", fmt.Sprintf("unmarshal info: %v", err))
+		return nil
+	}
+
+	ih := mi.HashInfoBytes().HexString()
+	meta := &p2p_bt.TorrentMeta{
+		Name:        info.Name,
+		PieceLength: info.PieceLength,
+		InfoHashHex: ih,
+		TotalSize:   info.TotalLength(),
+	}
+	if len(info.Files) == 0 {
+		meta.IsSingleFile = true
+		meta.Files = []p2p_bt.TorrentFile{{Path: info.Name, Size: info.Length}}
+	} else {
+		for _, f := range info.Files {
+			path := strings.Join(f.Path, "/")
+			meta.Files = append(meta.Files, p2p_bt.TorrentFile{Path: path, Size: f.Length})
+		}
+	}
+	numPieces := len(info.Pieces) / 20
+	meta.Pieces = make([][]byte, numPieces)
+	meta.PiecesHex = make([]string, numPieces)
+	for i := 0; i < numPieces; i++ {
+		meta.Pieces[i] = info.Pieces[i*20 : i*20+20]
+		meta.PiecesHex[i] = hex.EncodeToString(meta.Pieces[i])
 	}
 
 	detail := fmt.Sprintf("name=%q infohash=%s files=%d size=%d pieces=%d",
@@ -381,12 +415,12 @@ func stepParseMagnet() {
 	}
 
 	for _, tc := range testCases {
-		m, err := p2p_bt.ParseMagnet(tc.uri)
+		_, err := torrent.TorrentSpecFromMagnetUri(tc.uri)
 		if tc.expectOK {
 			if err != nil {
 				reportFail("parse magnet: "+tc.desc, fmt.Sprintf("error: %v", err))
 			} else {
-				reportPass("parse magnet: "+tc.desc, fmt.Sprintf("infohash=%s", m.InfoHash))
+				reportPass("parse magnet: "+tc.desc, "parsed OK")
 			}
 		} else {
 			if err == nil {
@@ -425,7 +459,7 @@ func stepUploadTorrent(torrentPath string) {
 	part.Write(torrentData)
 	writer.Close()
 
-	resp, err := httpClient.Post(serverBaseURL+"/p2p/bt/torrent", writer.FormDataContentType(), body)
+	resp, err := httpClient.Post(serverBaseURL+"/bt/torrent", writer.FormDataContentType(), body)
 	if err != nil {
 		reportFail("upload torrent", fmt.Sprintf("http: %v", err))
 		return
@@ -465,7 +499,7 @@ func stepDownloadStatus(infohash string) {
 		return
 	}
 
-	resp, err := httpGet("/p2p/bt/download/" + infohash)
+	resp, err := httpGet("/bt/download/" + infohash)
 	if err != nil {
 		reportFail("download status", fmt.Sprintf("http get: %v", err))
 		return
@@ -495,7 +529,7 @@ func stepDownloadStatus(infohash string) {
 	reportPass("download status", detail)
 
 	// List all downloads
-	resp2, err := httpGet("/p2p/bt/downloads")
+	resp2, err := httpGet("/bt/downloads")
 	if err != nil {
 		reportFail("list downloads", fmt.Sprintf("http: %v", err))
 		return
@@ -527,7 +561,7 @@ func stepMagnetResolveAPI() {
 	magnetURI := "magnet:?xt=urn:btih:10c3063874f2d6020f362388874a9d16a185ccec&dn=test.txt"
 
 	reqBody := fmt.Sprintf(`{"uri":"%s"}`, magnetURI)
-	resp, err := httpPost("/p2p/bt/magnet", "application/json", strings.NewReader(reqBody))
+	resp, err := httpPost("/bt/magnet", "application/json", strings.NewReader(reqBody))
 	if err != nil {
 		reportFail("magnet resolve", fmt.Sprintf("http: %v", err))
 		return
@@ -572,7 +606,7 @@ func stepBEP44() {
 
 	// PUT
 	putBody := fmt.Sprintf(`{"data":"%s","mutable":false}`, encodedData)
-	resp, err := slowPost("/p2p/bt/bep44/put", "application/json", strings.NewReader(putBody))
+	resp, err := slowPost("/bt/bep44/put", "application/json", strings.NewReader(putBody))
 	if err != nil {
 		reportFail("BEP44 put", fmt.Sprintf("http: %v", err))
 		return
@@ -605,7 +639,7 @@ func stepBEP44() {
 
 	// GET with the target from PUT
 	getBody := fmt.Sprintf(`{"target":"%s"}`, putResult.Target)
-	resp2, err := slowPost("/p2p/bt/bep44/get", "application/json", strings.NewReader(getBody))
+	resp2, err := slowPost("/bt/bep44/get", "application/json", strings.NewReader(getBody))
 	if err != nil {
 		reportFail("BEP44 get", fmt.Sprintf("http: %v", err))
 		return
@@ -654,7 +688,7 @@ func stepBEP44() {
 // ---------------------------------------------------------------------------
 
 func stepBEP51() {
-	resp, err := httpGet("/p2p/bt/bep51/sample")
+	resp, err := httpGet("/bt/bep51/sample")
 	if err != nil {
 		reportFail("BEP51 sample", fmt.Sprintf("http: %v", err))
 		return
@@ -816,7 +850,7 @@ func stepServerHealth() {
 // ---------------------------------------------------------------------------
 
 func stepBTDHTStatus() {
-	resp, err := httpGet("/p2p/bt/status")
+	resp, err := httpGet("/bt/status")
 	if err != nil {
 		reportFail("BT DHT status", fmt.Sprintf("http: %v", err))
 		return

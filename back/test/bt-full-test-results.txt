@@ -47,22 +47,22 @@
 [GIN-debug] POST   /p2p/request-file         --> peerdrive/internal/controller.RequestFile (5 handlers)
 [GIN-debug] GET    /p2p/ws/info              --> peerdrive/internal/controller.WSInfo (5 handlers)
 [GIN-debug] GET    /p2p/webrtc/info          --> peerdrive/internal/router.SetupRouter.WebRTCInfoHandler.func8 (5 handlers)
-[GIN-debug] GET    /p2p/bt/status            --> peerdrive/internal/controller.BTDHTStatus (5 handlers)
-[GIN-debug] POST   /p2p/bt/announce          --> peerdrive/internal/controller.BTAnnounce (5 handlers)
-[GIN-debug] POST   /p2p/bt/find              --> peerdrive/internal/controller.BTFindProviders (5 handlers)
-[GIN-debug] POST   /p2p/bt/bep44/put         --> peerdrive/internal/controller.BEP44Put (5 handlers)
-[GIN-debug] POST   /p2p/bt/bep44/get         --> peerdrive/internal/controller.BEP44Get (5 handlers)
-[GIN-debug] GET    /p2p/bt/bep51/sample      --> peerdrive/internal/controller.BEP51Sample (5 handlers)
-[GIN-debug] POST   /p2p/bt/torrent           --> peerdrive/internal/controller.BTTorrentUpload (5 handlers)
-[GIN-debug] POST   /p2p/bt/magnet            --> peerdrive/internal/controller.BTMagnetResolve (5 handlers)
-[GIN-debug] GET    /p2p/bt/download/:infohash --> peerdrive/internal/controller.BTDownloadProgress (5 handlers)
-[GIN-debug] GET    /p2p/bt/downloads         --> peerdrive/internal/controller.BTDownloadList (5 handlers)
-[GIN-debug] POST   /p2p/bt/download/:infohash/pause --> peerdrive/internal/controller.BTPauseDownload (5 handlers)
-[GIN-debug] POST   /p2p/bt/download/:infohash/resume --> peerdrive/internal/controller.BTResumeDownload (5 handlers)
-[GIN-debug] POST   /p2p/bt/download/:infohash/seed --> peerdrive/internal/controller.BTSeedTorrent (5 handlers)
-[GIN-debug] POST   /p2p/bt/download/:infohash/unseed --> peerdrive/internal/controller.BTStopSeed (5 handlers)
-[GIN-debug] DELETE /p2p/bt/download/:infohash --> peerdrive/internal/controller.BTRemoveDownload (5 handlers)
-[GIN-debug] GET    /p2p/bt/stats             --> peerdrive/internal/controller.BTGlobalStats (5 handlers)
+[GIN-debug] GET    /bt/status            --> peerdrive/internal/controller.BTDHTStatus (5 handlers)
+[GIN-debug] POST   /bt/announce          --> peerdrive/internal/controller.BTAnnounce (5 handlers)
+[GIN-debug] POST   /bt/find              --> peerdrive/internal/controller.BTFindProviders (5 handlers)
+[GIN-debug] POST   /bt/bep44/put         --> peerdrive/internal/controller.BEP44Put (5 handlers)
+[GIN-debug] POST   /bt/bep44/get         --> peerdrive/internal/controller.BEP44Get (5 handlers)
+[GIN-debug] GET    /bt/bep51/sample      --> peerdrive/internal/controller.BEP51Sample (5 handlers)
+[GIN-debug] POST   /bt/torrent           --> peerdrive/internal/controller.BTTorrentUpload (5 handlers)
+[GIN-debug] POST   /bt/magnet            --> peerdrive/internal/controller.BTMagnetResolve (5 handlers)
+[GIN-debug] GET    /bt/download/:infohash --> peerdrive/internal/controller.BTDownloadProgress (5 handlers)
+[GIN-debug] GET    /bt/downloads         --> peerdrive/internal/controller.BTDownloadList (5 handlers)
+[GIN-debug] POST   /bt/download/:infohash/pause --> peerdrive/internal/controller.BTPauseDownload (5 handlers)
+[GIN-debug] POST   /bt/download/:infohash/resume --> peerdrive/internal/controller.BTResumeDownload (5 handlers)
+[GIN-debug] POST   /bt/download/:infohash/seed --> peerdrive/internal/controller.BTSeedTorrent (5 handlers)
+[GIN-debug] POST   /bt/download/:infohash/unseed --> peerdrive/internal/controller.BTStopSeed (5 handlers)
+[GIN-debug] DELETE /bt/download/:infohash --> peerdrive/internal/controller.BTRemoveDownload (5 handlers)
+[GIN-debug] GET    /bt/stats             --> peerdrive/internal/controller.BTGlobalStats (5 handlers)
 [GIN-debug] POST   /p2p/dual/announce        --> peerdrive/internal/controller.DualAnnounce (5 handlers)
 [GIN-debug] POST   /p2p/dual/find            --> peerdrive/internal/controller.DualFindProviders (5 handlers)
 [GIN-debug] POST   /p2p/forward/create       --> peerdrive/internal/controller.CreateForwardSession (5 handlers)
@@ -70,11 +70,11 @@
 [GIN-debug] GET    /p2p/forward/list         --> peerdrive/internal/controller.ListForwardSessions (5 handlers)
 [GIN-debug] POST   /p2p/forward/close        --> peerdrive/internal/controller.CloseForwardSession (5 handlers)
 [GIN-debug] GET    /p2p/ipfs                 --> peerdrive/internal/controller.IPFSCompatStatus (5 handlers)
-[GIN-debug] POST   /p2p/ipfs/toggle          --> peerdrive/internal/controller.IPFSCompatToggle (5 handlers)
-[GIN-debug] POST   /p2p/ipfs/pin/:cid        --> peerdrive/internal/controller.PinCID (5 handlers)
-[GIN-debug] DELETE /p2p/ipfs/pin/:cid        --> peerdrive/internal/controller.UnpinCID (5 handlers)
-[GIN-debug] GET    /p2p/ipfs/pins            --> peerdrive/internal/controller.ListPins (5 handlers)
-[GIN-debug] GET    /p2p/ipfs/gateways        --> peerdrive/internal/controller.IPFSGatewayStatus (5 handlers)
+[GIN-debug] POST   /ipfs/toggle          --> peerdrive/internal/controller.IPFSCompatToggle (5 handlers)
+[GIN-debug] POST   /ipfs/pin/:cid        --> peerdrive/internal/controller.PinCID (5 handlers)
+[GIN-debug] DELETE /ipfs/pin/:cid        --> peerdrive/internal/controller.UnpinCID (5 handlers)
+[GIN-debug] GET    /ipfs/pins            --> peerdrive/internal/controller.ListPins (5 handlers)
+[GIN-debug] GET    /ipfs/gateways        --> peerdrive/internal/controller.IPFSGatewayStatus (5 handlers)
 [GIN-debug] POST   /p2p/download/resume      --> peerdrive/internal/controller.ResumeDownload (5 handlers)
 [GIN-debug] GET    /p2p/download/progress/:hash --> peerdrive/internal/controller.DownloadProgress (5 handlers)
 [GIN-debug] POST   /p2p/download/cancel/:hash --> peerdrive/internal/controller.CancelDownload (5 handlers)
@@ -147,8 +147,8 @@ Please check https://github.com/gin-gonic/gin/blob/master/docs/doc.md#dont-trust
 [GIN] 2026/04/29 - 00:58:23 | 200 | 27.916µs |             ::1 | GET      "/ping"
   [0;32mPASS[0m GET /ping returns pong
 [0;36m--- 2. BT DHT STATUS ---[0m
-[GIN] 2026/04/29 - 00:58:23 | 200 | 99.704µs |             ::1 | GET      "/p2p/bt/status"
-  [0;32mPASS[0m GET /p2p/bt/status returns valid JSON
+[GIN] 2026/04/29 - 00:58:23 | 200 | 99.704µs |             ::1 | GET      "/bt/status"
+  [0;32mPASS[0m GET /bt/status returns valid JSON
   [0;32mPASS[0m BT DHT is enabled
   DHT nodes: 27
   [0;32mPASS[0m DHT has at least 1 node in routing table
@@ -166,12 +166,12 @@ Created /tmp/peerdrive_bt_test_3496024/test.torrent
 2026/04/29 00:58:23 [INFO ] client.go:114 bt-client: AddTorrent infohash=81131b56af2d1106da9a528b2e776ea031ec3c3d name="test.txt"
 2026/04/29 00:58:23 [INFO ] p2p.go:852 ctrl-p2p: BTTorrentUpload started "test.txt" (infohash=81131b56af2d1106da9a528b2e776ea031ec3c3d)
 2026/04/29 00:58:23 [INFO ] client.go:183 bt-client: starting download infohash=81131b56af2d1106da9a528b2e776ea031ec3c3d name="test.txt"
-[GIN] 2026/04/29 - 00:58:23 | 200 | 589.225µs |             ::1 | POST     "/p2p/bt/torrent"
+[GIN] 2026/04/29 - 00:58:23 | 200 | 589.225µs |             ::1 | POST     "/bt/torrent"
 2026/04/29 00:58:23 [INFO ] client.go:195 [bt-wire] announcing infohash on DHT: 81131b56af2d1106da9a528b2e776ea031ec3c3d
 2026/04/29 00:58:23 [INFO ] bt_dht.go:109 bt-dht: announced 81131b56af2d1106da9a528b2e776ea031ec3c3d on BT DHT
 2026/04/29 00:58:23 [INFO ] client.go:204 [bt-wire] discovering peers via DHT for 81131b56af2d1106da9a528b2e776ea031ec3c3d
-  [0;32mPASS[0m POST /p2p/bt/torrent returns 200
-  [0;32mPASS[0m POST /p2p/bt/torrent returns valid JSON
+  [0;32mPASS[0m POST /bt/torrent returns 200
+  [0;32mPASS[0m POST /bt/torrent returns valid JSON
   [0;32mPASS[0m Response has infohash
   [0;32mPASS[0m Response has name
   [0;32mPASS[0m Response has status
@@ -179,30 +179,30 @@ Created /tmp/peerdrive_bt_test_3496024/test.torrent
 [0;36m--- 5. ANNOUNCE VIA BT DHT ---[0m
 2026/04/29 00:58:24 [INFO ] bt_dht.go:109 bt-dht: announced 81131b56af2d1106da9a528b2e776ea031ec3c3d on BT DHT
 2026/04/29 00:58:24 [INFO ] p2p.go:492 ctrl-p2p: BTAnnounce 81131b56af2d1106da9a528b2e776ea031ec3c3d successful
-[GIN] 2026/04/29 - 00:58:24 | 200 | 419.516µs |             ::1 | POST     "/p2p/bt/announce"
-  [0;32mPASS[0m POST /p2p/bt/announce returns 200
-  [0;32mPASS[0m POST /p2p/bt/announce returns valid JSON
+[GIN] 2026/04/29 - 00:58:24 | 200 | 419.516µs |             ::1 | POST     "/bt/announce"
+  [0;32mPASS[0m POST /bt/announce returns 200
+  [0;32mPASS[0m POST /bt/announce returns valid JSON
   [0;32mPASS[0m Announce response has status
   Announce: {"status":"announced on BT DHT"}
 [0;36m--- 6. FIND PROVIDERS VIA BT DHT ---[0m
 2026/04/29 00:58:31 [INFO ] bt_dht.go:148 bt-dht: FindProviders done for 81131b56af2d1106da9a528b2e776ea031ec3c3d, found 2 peers
 2026/04/29 00:58:31 [INFO ] p2p.go:518 ctrl-p2p: BTFindProviders 81131b56af2d1106da9a528b2e776ea031ec3c3d found 2 peers
-[GIN] 2026/04/29 - 00:58:31 | 200 |    5.25s |             ::1 | POST     "/p2p/bt/find"
-  [0;32mPASS[0m POST /p2p/bt/find returns valid JSON
+[GIN] 2026/04/29 - 00:58:31 | 200 |    5.25s |             ::1 | POST     "/bt/find"
+  [0;32mPASS[0m POST /bt/find returns valid JSON
   [0;32mPASS[0m Find response has peers field
   [0;32mPASS[0m Find response has hash field
-  [0;32mPASS[0m POST /p2p/bt/find returns 200
+  [0;32mPASS[0m POST /bt/find returns 200
 [0;36m--- 7. CHECK DOWNLOAD PROGRESS ---[0m
 2026/04/29 00:58:31 [INFO ] p2p.go:917 ctrl-p2p: BTDownloadProgress 81131b56af2d1106da9a528b2e776ea031ec3c3d: downloading (0/1 pieces)
-[GIN] 2026/04/29 - 00:58:31 | 200 | 174.741µs |             ::1 | GET      "/p2p/bt/download/81131b56af2d1106da9a528b2e776ea031ec3c3d"
-  [0;32mPASS[0m GET /p2p/bt/download/:ih returns valid JSON
+[GIN] 2026/04/29 - 00:58:31 | 200 | 174.741µs |             ::1 | GET      "/bt/download/81131b56af2d1106da9a528b2e776ea031ec3c3d"
+  [0;32mPASS[0m GET /bt/download/:ih returns valid JSON
   [0;32mPASS[0m Download progress has status
   Download status: downloading
-  [0;32mPASS[0m GET /p2p/bt/download/:ih returns 200
+  [0;32mPASS[0m GET /bt/download/:ih returns 200
 [0;36m--- 8. LIST DOWNLOADS ---[0m
 2026/04/29 00:58:31 [INFO ] p2p.go:1052 ctrl-p2p: BTDownloadList count=1
-[GIN] 2026/04/29 - 00:58:31 | 200 | 97.183µs |             ::1 | GET      "/p2p/bt/downloads"
-  [0;32mPASS[0m GET /p2p/bt/downloads returns valid JSON
+[GIN] 2026/04/29 - 00:58:31 | 200 | 97.183µs |             ::1 | GET      "/bt/downloads"
+  [0;32mPASS[0m GET /bt/downloads returns valid JSON
   [0;32mPASS[0m List response has downloads array
   [0;32mPASS[0m List response has count
 [0;36m--- 9. BEP 44 PUT/GET ROUNDTRIP ---[0m
@@ -218,29 +218,29 @@ Created /tmp/peerdrive_bt_test_3496024/test.torrent
 2026/04/29 00:58:45 [WARN ] bep44.go:87 bt-dht: PutImmutable remote storage all failed (local copy saved)
 2026/04/29 00:58:45 [INFO ] bep44.go:91 bt-dht: PutImmutable target=ad13e6a85188e5ca27744c30a14c2970c5bdefee size=29
 2026/04/29 00:58:45 [INFO ] p2p.go:737 ctrl-p2p: BEP44Put immutable target=ad13e6a85188e5ca27744c30a14c2970c5bdefee size=29
-[GIN] 2026/04/29 - 00:58:45 | 200 |   13.63s |             ::1 | POST     "/p2p/bt/bep44/put"
-  [0;32mPASS[0m POST /p2p/bt/bep44/put returns valid JSON
+[GIN] 2026/04/29 - 00:58:45 | 200 |   13.63s |             ::1 | POST     "/bt/bep44/put"
+  [0;32mPASS[0m POST /bt/bep44/put returns valid JSON
   [0;32mPASS[0m BEP44 put response has target
   BEP44 target: ad13e6a85188e5ca27744c30a14c2970c5bdefee
-  [0;32mPASS[0m POST /p2p/bt/bep44/put returns 200
+  [0;32mPASS[0m POST /bt/bep44/put returns 200
 2026/04/29 00:58:46 [INFO ] p2p.go:778 ctrl-p2p: BEP44Get target=ad13e6a85188e5ca27744c30a14c2970c5bdefee size=29
-[GIN] 2026/04/29 - 00:58:46 | 200 | 187.261µs |             ::1 | POST     "/p2p/bt/bep44/get"
-  [0;32mPASS[0m POST /p2p/bt/bep44/get returns valid JSON
+[GIN] 2026/04/29 - 00:58:46 | 200 | 187.261µs |             ::1 | POST     "/bt/bep44/get"
+  [0;32mPASS[0m POST /bt/bep44/get returns valid JSON
   [0;32mPASS[0m BEP44 get response has data
   [0;32mPASS[0m BEP44 put/get roundtrip data matches
 [0;36m--- 10. BEP 51 SAMPLE INFOHASHES ---[0m
 2026/04/29 00:58:48 [INFO ] bep51.go:230 bt-dht: DiscoverInfohashes collected 88 unique infohashes
 2026/04/29 00:58:48 [INFO ] p2p.go:807 ctrl-p2p: BEP51Sample collected 88 infohashes
-[GIN] 2026/04/29 - 00:58:48 | 200 |       2s |             ::1 | GET      "/p2p/bt/bep51/sample"
-  [0;32mPASS[0m GET /p2p/bt/bep51/sample returns valid JSON
+[GIN] 2026/04/29 - 00:58:48 | 200 |       2s |             ::1 | GET      "/bt/bep51/sample"
+  [0;32mPASS[0m GET /bt/bep51/sample returns valid JSON
   [0;32mPASS[0m BEP51 response has samples array
   [0;32mPASS[0m BEP51 response has count
   BEP51 samples collected: 88
-  [0;32mPASS[0m GET /p2p/bt/bep51/sample returns 200
+  [0;32mPASS[0m GET /bt/bep51/sample returns 200
 [0;36m--- 11. BT GLOBAL STATS ---[0m
 2026/04/29 00:58:48 [INFO ] p2p.go:1000 ctrl-p2p: BTGlobalStats active=0 paused=0 completed=0 seeding=0 dht_nodes=39
-[GIN] 2026/04/29 - 00:58:48 | 200 | 108.713µs |             ::1 | GET      "/p2p/bt/stats"
-  [0;32mPASS[0m GET /p2p/bt/stats returns valid JSON
+[GIN] 2026/04/29 - 00:58:48 | 200 | 108.713µs |             ::1 | GET      "/bt/stats"
+  [0;32mPASS[0m GET /bt/stats returns valid JSON
   [0;32mPASS[0m Stats has active_torrents
   [0;32mPASS[0m Stats has dht_nodes
   [0;32mPASS[0m Stats has seeding

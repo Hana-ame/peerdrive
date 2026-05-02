@@ -94,7 +94,7 @@ Content-Type: application/json
 | Endpoint | Network | Error on missing route |
 |----------|---------|----------------------|
 | `POST /p2p/announce` | IPFS/libp2p only | Returns 500 if P2P disabled |
-| `POST /p2p/bt/announce` | BT DHT only | Returns 503 if BT DHT disabled |
+| `POST /bt/announce` | BT DHT only | Returns 503 if BT DHT disabled |
 | `POST /p2p/dual/announce` | Both | Returns 503 if dual not available |
 
 ---
@@ -233,9 +233,9 @@ GET /sha256sum/:sha256
 | `GET` | `/p2p/peers` | Connected peers |
 | `POST` | `/p2p/announce` | Announce on IPFS/libp2p only |
 | `POST` | `/p2p/connect` | Connect to a peer by multiaddr |
-| `GET` | `/p2p/bt/status` | BT DHT node status |
-| `POST` | `/p2p/bt/announce` | Announce on BT DHT only |
-| `POST` | `/p2p/bt/find` | Find providers on BT DHT only |
+| `GET` | `/bt/status` | BT DHT node status |
+| `POST` | `/bt/announce` | Announce on BT DHT only |
+| `POST` | `/bt/find` | Find providers on BT DHT only |
 | `POST` | `/files/upload` | Upload file, returns SHA256 hash |
 
 ---

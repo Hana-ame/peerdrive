@@ -17,9 +17,9 @@ Started: 2026年 04月 28日 星期二 19:48:43 CST
   [0;32m[PASS][0m GET /ipfs/QmInvalid00000000000000000000000000000000000000 -- expected not found (HTTP 404)
 
 [0;36m[1m============================================[0m
-[0;36m[1m  3. IPFS Gateway Health (/p2p/ipfs/gateways)[0m
+[0;36m[1m  3. IPFS Gateway Health (/ipfs/gateways)[0m
 [0;36m[1m============================================[0m
-  [0;32m[PASS][0m GET /p2p/ipfs/gateways -- 3 configured gateways 
+  [0;32m[PASS][0m GET /ipfs/gateways -- 3 configured gateways 
   [PASS] https://ipfs.io | healthy=True | latency=371.019035ms
   [WARN] https://cloudflare-ipfs.com | healthy=False | latency=N/A
   [PASS] https://dweb.link | healthy=True | latency=803.483065ms
@@ -28,25 +28,25 @@ Started: 2026年 04月 28日 星期二 19:48:43 CST
 [0;36m[1m============================================[0m
 [0;36m[1m  4. IPFS Compat Status (/p2p/ipfs)[0m
 [0;36m[1m============================================[0m
-  [0;32m[PASS][0m GET /p2p/ipfs -- compat disabled, 0 blocks ((enable via POST /p2p/ipfs/toggle if needed))
+  [0;32m[PASS][0m GET /p2p/ipfs -- compat disabled, 0 blocks ((enable via POST /ipfs/toggle if needed))
 
 [0;36m[1m============================================[0m
-[0;36m[1m  5. Pin CID (/p2p/ipfs/pin/:cid)[0m
+[0;36m[1m  5. Pin CID (/ipfs/pin/:cid)[0m
 [0;36m[1m============================================[0m
   Attempting to pin: QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn ...
-  [0;32m[PASS][0m POST /p2p/ipfs/pin/QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn -- pinned (CID=QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn, size=249230B)
+  [0;32m[PASS][0m POST /ipfs/pin/QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn -- pinned (CID=QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn, size=249230B)
 
 [0;36m[1m============================================[0m
-[0;36m[1m  6. List Pins (/p2p/ipfs/pins)[0m
+[0;36m[1m  6. List Pins (/ipfs/pins)[0m
 [0;36m[1m============================================[0m
-  [0;32m[PASS][0m GET /p2p/ipfs/pins -- 1 pins listed 
+  [0;32m[PASS][0m GET /ipfs/pins -- 1 pins listed 
   CID=QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn | hash=10964e05686378f0... | size=249230B | pinned_at=2026-04-28T11:48:56Z
 
 [0;36m[1m============================================[0m
-[0;36m[1m  7. Unpin CID (DELETE /p2p/ipfs/pin/:cid)[0m
+[0;36m[1m  7. Unpin CID (DELETE /ipfs/pin/:cid)[0m
 [0;36m[1m============================================[0m
   Unpinning: QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn ...
-  [0;32m[PASS][0m DELETE /p2p/ipfs/pin/QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn -- unpinned 
+  [0;32m[PASS][0m DELETE /ipfs/pin/QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn -- unpinned 
   Remaining pins after unpin: 0
 
 [0;36m[1m============================================[0m

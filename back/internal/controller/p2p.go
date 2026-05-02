@@ -454,7 +454,7 @@ func WSInfo(c *gin.Context) {
 
 // --- BitTorrent DHT handlers ---
 
-// BTDHTStatus 处理 GET /p2p/bt/status，返回 BitTorrent DHT 节点状态。
+// BTDHTStatus 处理 GET /bt/status，返回 BitTorrent DHT 节点状态。
 func BTDHTStatus(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTDHTStatus")
 	if btSvc == nil || btSvc.Server == nil {
@@ -469,7 +469,7 @@ func BTDHTStatus(c *gin.Context) {
 	})
 }
 
-// BTAnnounce 处理 POST /p2p/bt/announce，在 BitTorrent DHT 上 announce 指定 hash。
+// BTAnnounce 处理 POST /bt/announce，在 BitTorrent DHT 上 announce 指定 hash。
 func BTAnnounce(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTAnnounce")
 	if btSvc == nil || btSvc.Server == nil {
@@ -494,7 +494,7 @@ func BTAnnounce(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "announced on BT DHT"})
 }
 
-// BTFindProviders 处理 POST /p2p/bt/find，在 BitTorrent DHT 上查找持有指定 hash 的对端。
+// BTFindProviders 处理 POST /bt/find，在 BitTorrent DHT 上查找持有指定 hash 的对端。
 func BTFindProviders(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTFindProviders")
 	if btSvc == nil || btSvc.Server == nil {
@@ -692,7 +692,7 @@ func GetConnectionQuality(c *gin.Context) {
 
 // --- BEP 44 (Arbitrary DHT Data Storage) ---
 
-// BEP44Put 处理 POST /p2p/bt/bep44/put，通过 BEP 44 将不可变数据存储到 BT DHT。
+// BEP44Put 处理 POST /bt/bep44/put，通过 BEP 44 将不可变数据存储到 BT DHT。
 func BEP44Put(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BEP44Put")
 	if btSvc == nil || btSvc.Server == nil {
@@ -743,7 +743,7 @@ func BEP44Put(c *gin.Context) {
 	})
 }
 
-// BEP44Get 处理 POST /p2p/bt/bep44/get，通过 BEP 44 从 BT DHT 读取不可变数据。
+// BEP44Get 处理 POST /bt/bep44/get，通过 BEP 44 从 BT DHT 读取不可变数据。
 func BEP44Get(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BEP44Get")
 	if btSvc == nil || btSvc.Server == nil {
@@ -785,7 +785,7 @@ func BEP44Get(c *gin.Context) {
 
 // --- BEP 51 (Infohash Indexing) ---
 
-// BEP51Sample 处理 GET /p2p/bt/bep51/sample，通过 BEP 51 采集 DHT 中的 infohash 样本。
+// BEP51Sample 处理 GET /bt/bep51/sample，通过 BEP 51 采集 DHT 中的 infohash 样本。
 func BEP51Sample(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BEP51Sample")
 	if btSvc == nil || btSvc.Server == nil {
@@ -814,7 +814,7 @@ func BEP51Sample(c *gin.Context) {
 
 // --- BitTorrent Download Handlers ---
 
-// BTTorrentUpload 处理 POST /p2p/bt/torrent，接受 .torrent 文件上传并启动下载。
+// BTTorrentUpload 处理 POST /bt/torrent，接受 .torrent 文件上传并启动下载。
 func BTTorrentUpload(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTTorrentUpload")
 	if btClient == nil {
@@ -837,16 +837,10 @@ func BTTorrentUpload(c *gin.Context) {
 		return
 	}
 
-	meta, err := p2p_bt.ParseTorrent(data)
+	meta, err := btClient.AddTorrentBytes(data)
 	if err != nil {
-		log.LogError("ctrl-p2p: BTTorrentUpload parse failed: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid torrent file: " + err.Error()})
-		return
-	}
-
-	if err := btClient.AddTorrent(meta); err != nil {
-		log.LogError("ctrl-p2p: BTTorrentUpload add torrent failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.LogError("ctrl-p2p: BTTorrentUpload failed: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -861,7 +855,7 @@ func BTTorrentUpload(c *gin.Context) {
 	})
 }
 
-// BTMagnetResolve 处理 POST /p2p/bt/magnet，解析 magnet URI 并启动 BitTorrent 下载。
+// BTMagnetResolve 处理 POST /bt/magnet，解析 magnet URI 并启动 BitTorrent 下载。
 func BTMagnetResolve(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTMagnetResolve")
 	if btClient == nil {
@@ -878,29 +872,23 @@ func BTMagnetResolve(c *gin.Context) {
 		return
 	}
 
-	magnet, err := p2p_bt.ParseMagnet(req.URI)
+	meta, err := btClient.AddMagnetURI(req.URI)
 	if err != nil {
-		log.LogError("ctrl-p2p: BTMagnetResolve parse failed: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid magnet URI: " + err.Error()})
+		log.LogError("ctrl-p2p: BTMagnetResolve failed: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := btClient.AddMagnet(magnet); err != nil {
-		log.LogError("ctrl-p2p: BTMagnetResolve add magnet failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	log.LogInfo("ctrl-p2p: BTMagnetResolve started %q (infohash=%s)", magnet.DisplayName, magnet.InfoHash)
+	log.LogInfo("ctrl-p2p: BTMagnetResolve started %q (infohash=%s)", meta.Name, meta.InfoHashHex)
 	c.JSON(http.StatusOK, gin.H{
-		"infohash":     magnet.InfoHash,
-		"display_name": magnet.DisplayName,
-		"trackers":     magnet.Trackers,
+		"infohash":     meta.InfoHashHex,
+		"display_name": meta.Name,
+		"trackers":     meta.AnnounceList,
 		"status":       "downloading",
 	})
 }
 
-// BTDownloadProgress 处理 GET /p2p/bt/download/:infohash，查询指定 infohash 的下载进度。
+// BTDownloadProgress 处理 GET /bt/download/:infohash，查询指定 infohash 的下载进度。
 func BTDownloadProgress(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTDownloadProgress")
 	if btClient == nil {
@@ -919,7 +907,7 @@ func BTDownloadProgress(c *gin.Context) {
 	c.JSON(http.StatusOK, status)
 }
 
-// BTPauseDownload 处理 POST /p2p/bt/download/:infohash/pause，暂停指定下载任务。
+// BTPauseDownload 处理 POST /bt/download/:infohash/pause，暂停指定下载任务。
 func BTPauseDownload(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTPauseDownload")
 	if btClient == nil {
@@ -938,7 +926,7 @@ func BTPauseDownload(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "paused"})
 }
 
-// BTResumeDownload 处理 POST /p2p/bt/download/:infohash/resume，恢复暂停的下载任务。
+// BTResumeDownload 处理 POST /bt/download/:infohash/resume，恢复暂停的下载任务。
 func BTResumeDownload(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTResumeDownload")
 	if btClient == nil {
@@ -957,7 +945,7 @@ func BTResumeDownload(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "downloading"})
 }
 
-// BTRemoveDownload 处理 DELETE /p2p/bt/download/:infohash，删除下载任务及其文件。
+// BTRemoveDownload 处理 DELETE /bt/download/:infohash，删除下载任务及其文件。
 func BTRemoveDownload(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTRemoveDownload")
 	if btClient == nil {
@@ -976,7 +964,7 @@ func BTRemoveDownload(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "removed"})
 }
 
-// BTGlobalStats 处理 GET /p2p/bt/stats，返回全局 BT 客户端统计信息。
+// BTGlobalStats 处理 GET /bt/stats，返回全局 BT 客户端统计信息。
 func BTGlobalStats(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTGlobalStats")
 	if btClient == nil {
@@ -1003,7 +991,7 @@ func BTGlobalStats(c *gin.Context) {
 	c.JSON(http.StatusOK, minimal)
 }
 
-// BTSeedTorrent 处理 POST /p2p/bt/seed/:infohash，开始为已完成的下载做种。
+// BTSeedTorrent 处理 POST /bt/seed/:infohash，开始为已完成的下载做种。
 func BTSeedTorrent(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTSeedTorrent")
 	if btClient == nil {
@@ -1022,7 +1010,7 @@ func BTSeedTorrent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "seeding"})
 }
 
-// BTStopSeed 处理 POST /p2p/bt/download/:infohash/unseed，停止为指定下载做种。
+// BTStopSeed 处理 POST /bt/download/:infohash/unseed，停止为指定下载做种。
 func BTStopSeed(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTStopSeed")
 	if btClient == nil {
@@ -1041,7 +1029,7 @@ func BTStopSeed(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "stopped"})
 }
 
-// BTDownloadList 处理 GET /p2p/bt/downloads，返回所有活跃和已完成的 BT 下载任务。
+// BTDownloadList 处理 GET /bt/downloads，返回所有活跃和已完成的 BT 下载任务。
 func BTDownloadList(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTDownloadList")
 	if btClient == nil {
@@ -1223,7 +1211,7 @@ func InitIPFSCompatController(layer *service.IPFSCompatLayer) {
 	ipfsCompatLayer = layer
 }
 
-// IPFSCompatStatus 处理 GET /p2p/ipfs，返回 IPFS 兼容层的状态信息。
+// IPFSCompatStatus 处理 GET /ipfs，返回 IPFS 兼容层的状态信息。
 func IPFSCompatStatus(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: IPFSCompatStatus")
 	if ipfsCompatLayer == nil {
@@ -1241,7 +1229,7 @@ func IPFSCompatStatus(c *gin.Context) {
 	})
 }
 
-// IPFSCompatToggle 处理 POST /p2p/ipfs/toggle，启用或禁用 IPFS 兼容模式。
+// IPFSCompatToggle 处理 POST /ipfs/toggle，启用或禁用 IPFS 兼容模式。
 func IPFSCompatToggle(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: IPFSCompatToggle")
 	if ipfsCompatLayer == nil {
@@ -1275,7 +1263,7 @@ func IPFSCompatToggle(c *gin.Context) {
 
 // --- IPFS Pin & Gateway Handlers ------------------------------------
 
-// PinCID handles POST /p2p/ipfs/pin/:cid, downloads CID from IPFS gateway and caches permanently.
+// PinCID handles POST /ipfs/pin/:cid, downloads CID from IPFS gateway and caches permanently.
 func PinCID(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: PinCID")
 	cidParam := c.Param("cid")
@@ -1348,7 +1336,7 @@ func PinCID(c *gin.Context) {
 	})
 }
 
-// UnpinCID handles DELETE /p2p/ipfs/pin/:cid, unpins a CID.
+// UnpinCID handles DELETE /ipfs/pin/:cid, unpins a CID.
 func UnpinCID(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: UnpinCID")
 	cidParam := c.Param("cid")
@@ -1378,7 +1366,7 @@ func UnpinCID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "unpinned", "cid": cidParam})
 }
 
-// ListPins handles GET /p2p/ipfs/pins, lists all pinned CIDs.
+// ListPins handles GET /ipfs/pins, lists all pinned CIDs.
 func ListPins(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: ListPins")
 	pins, err := repository.ListPins()
@@ -1400,7 +1388,7 @@ type gwStatus struct {
 	Latency string `json:"latency,omitempty"`
 }
 
-// IPFSGatewayStatus handles GET /p2p/ipfs/gateways, checks health of each configured gateway.
+// IPFSGatewayStatus handles GET /ipfs/gateways, checks health of each configured gateway.
 func IPFSGatewayStatus(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: IPFSGatewayStatus")
 	if ipfsGatewayProvider == nil || len(ipfsGatewayProvider.Gateways) == 0 {

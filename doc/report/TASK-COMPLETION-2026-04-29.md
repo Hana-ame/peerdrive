@@ -7,7 +7,7 @@
 ## 任务1: 修复 BEP 44 PUT 500 错误
 
 ### 问题
-`POST /p2p/bt/bep44/put` 返回 HTTP 500。根因：
+`POST /bt/bep44/put` 返回 HTTP 500。根因：
 1. DHT 远程节点不支持 BEP 44 任意数据存储
 2. `GetImmutable` 仅做 DHT 查询，无本地回退
 3. `putLocal` 使用自指 UDP 查询 (127.0.0.1)，事务匹配超时

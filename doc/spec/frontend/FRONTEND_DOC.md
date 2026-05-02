@@ -36,9 +36,9 @@ npm test           # Run Vitest test suite
 | `/anon` | AnonExplorer | Anonymous collection explorer (empty state) |
 | `/settings` | Settings | API endpoint, auth, LLM configuration |
 | `/p2p` | P2PPanel | P2P dual-stack control (IPFS + BT unified) |
-| `/p2p/ipfs` | IPFSPanel | IPFS / libp2p network panel |
-| `/p2p/bt` | BTPanel | BT DHT network panel |
-| `/p2p/bt/controller` | BTController | BT downloader with pause/resume/remove |
+| `/ipfs` | IPFSPanel | IPFS / libp2p network panel |
+| `/bt` | BTPanel | BT DHT network panel |
+| `/bt/controller` | BTController | BT downloader with pause/resume/remove |
 | `/p2p/dashboard` | P2PDashboard | P2P network dashboard (peers, topology, latency) |
 | `/p2p/topology` | P2PTopology | P2P network topology visualization |
 | `/p2p/dht` | DHTExplorer | Unified DHT query panel (IPFS + BT dual lookup) |
@@ -476,23 +476,23 @@ Seven P2P-related pages are accessible from the Navbar P2P dropdown or via direc
 | **File** | `src/pages/P2PPanel.jsx` |
 | **Purpose** | Dual-stack overview — unified view of IPFS (libp2p) and BT (Mainline) DHT status, peer counts, connection stats, and recent events |
 
-#### IPFSPanel (`/p2p/ipfs`)
+#### IPFSPanel (`/ipfs`)
 
 | Property | Detail |
 |----------|--------|
 | **File** | `src/pages/IPFSPanel.jsx` |
 | **Purpose** | IPFS/libp2p network panel — toggle IPFS compat mode, view DHT peers, CID lookup, Bitswap blockstore stats |
-| **API** | `GET /p2p/ipfs`, `POST /p2p/ipfs/toggle` |
+| **API** | `GET /ipfs`, `POST /ipfs/toggle` |
 
-#### BTPanel (`/p2p/bt`)
+#### BTPanel (`/bt`)
 
 | Property | Detail |
 |----------|--------|
 | **File** | `src/pages/BTPanel.jsx` |
 | **Purpose** | BT DHT network panel — view Mainline DHT peers, infohash operations, BEP44 data store |
-| **API** | `POST /p2p/bt/announce`, `POST /p2p/bt/find`, `GET /p2p/bt/bep51/sample` |
+| **API** | `POST /bt/announce`, `POST /bt/find`, `GET /bt/bep51/sample` |
 
-#### BTController (`/p2p/bt/controller`)
+#### BTController (`/bt/controller`)
 
 | Property | Detail |
 |----------|--------|
@@ -519,7 +519,7 @@ Seven P2P-related pages are accessible from the Navbar P2P dropdown or via direc
 |----------|--------|
 | **File** | `src/pages/DHTExplorer.jsx` |
 | **Purpose** | Unified DHT query panel — enter SHA256/InfoHash/CID, simultaneously query IPFS DHT + BT DHT, display results side-by-side; BEP51 infohash sampling for content discovery |
-| **API** | `POST /p2p/dual/find`, `GET /p2p/bt/bep51/sample` |
+| **API** | `POST /p2p/dual/find`, `GET /bt/bep51/sample` |
 - LLM body template must be valid JSON; parsing failure silently falls back to a minimal body
 
 ---

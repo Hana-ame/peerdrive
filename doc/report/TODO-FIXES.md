@@ -4,8 +4,8 @@
 
 ## 🔴 P0 — 刚修完
 
-- [x] IPFS 控制面板 → `/p2p/ipfs` ✅
-- [x] BT DHT 控制面板 → `/p2p/bt` ✅
+- [x] IPFS 控制面板 → `/ipfs` ✅
+- [x] BT DHT 控制面板 → `/bt` ✅
 - [x] P2P 双栈页面 → `/p2p` ✅
 - [x] Navbar P2P 下拉 ✅
 - [x] 单文件合集显示文件图标+文件名 ✅

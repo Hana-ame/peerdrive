@@ -1714,11 +1714,11 @@ curl http://127.0.0.1:3000/p2p/webrtc/info
 
 ## 8. BitTorrent DHT
 
-### `GET /p2p/bt/status`
+### `GET /bt/status`
 Get BitTorrent DHT node status.
 
 ```bash
-curl http://127.0.0.1:3000/p2p/bt/status
+curl http://127.0.0.1:3000/bt/status
 ```
 
 **Response**:
@@ -1737,11 +1737,11 @@ curl http://127.0.0.1:3000/p2p/bt/status
 
 ---
 
-### `POST /p2p/bt/announce`
+### `POST /bt/announce`
 Announce a hash on the BitTorrent DHT network.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/announce \
+curl -X POST http://127.0.0.1:3000/bt/announce \
   -H "Content-Type: application/json" \
   -d '{"hash": "abc123..."}'
 ```
@@ -1756,11 +1756,11 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/announce \
 
 ---
 
-### `POST /p2p/bt/find`
+### `POST /bt/find`
 Find providers for a hash on the BitTorrent DHT.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/find \
+curl -X POST http://127.0.0.1:3000/bt/find \
   -H "Content-Type: application/json" \
   -d '{"hash": "abc123..."}'
 ```
@@ -1779,11 +1779,11 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/find \
 
 ---
 
-### `POST /p2p/bt/torrent`
+### `POST /bt/torrent`
 Upload a `.torrent` file and start downloading.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/torrent \
+curl -X POST http://127.0.0.1:3000/bt/torrent \
   -F "torrent=@ubuntu-24.04-desktop-amd64.iso.torrent"
 ```
 
@@ -1811,11 +1811,11 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/torrent \
 
 ---
 
-### `POST /p2p/bt/magnet`
+### `POST /bt/magnet`
 Resolve a magnet URI and start BitTorrent download.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/magnet \
+curl -X POST http://127.0.0.1:3000/bt/magnet \
   -H "Content-Type: application/json" \
   -d '{"uri": "magnet:?xt=urn:btih:a1b2c3d4e5f6...&dn=ubuntu-24.04"}'
 ```
@@ -1835,11 +1835,11 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/magnet \
 
 ---
 
-### `GET /p2p/bt/download/:infohash`
+### `GET /bt/download/:infohash`
 Get download progress for a specific infohash.
 
 ```bash
-curl http://127.0.0.1:3000/p2p/bt/download/a1b2c3d4e5f6...
+curl http://127.0.0.1:3000/bt/download/a1b2c3d4e5f6...
 ```
 
 **Response**:
@@ -1862,11 +1862,11 @@ curl http://127.0.0.1:3000/p2p/bt/download/a1b2c3d4e5f6...
 
 ---
 
-### `GET /p2p/bt/downloads`
+### `GET /bt/downloads`
 List all BitTorrent downloads (active and completed).
 
 ```bash
-curl http://127.0.0.1:3000/p2p/bt/downloads
+curl http://127.0.0.1:3000/bt/downloads
 ```
 
 **Response**:
@@ -1886,11 +1886,11 @@ curl http://127.0.0.1:3000/p2p/bt/downloads
 
 ---
 
-### `POST /p2p/bt/download/:infohash/pause`
+### `POST /bt/download/:infohash/pause`
 Pause a BitTorrent download.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../pause
+curl -X POST http://127.0.0.1:3000/bt/download/a1b2c3.../pause
 ```
 
 **Response**:
@@ -1900,11 +1900,11 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../pause
 
 ---
 
-### `POST /p2p/bt/download/:infohash/resume`
+### `POST /bt/download/:infohash/resume`
 Resume a paused BitTorrent download.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../resume
+curl -X POST http://127.0.0.1:3000/bt/download/a1b2c3.../resume
 ```
 
 **Response**:
@@ -1914,11 +1914,11 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../resume
 
 ---
 
-### `POST /p2p/bt/download/:infohash/seed`
+### `POST /bt/download/:infohash/seed`
 Start seeding a completed download.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../seed
+curl -X POST http://127.0.0.1:3000/bt/download/a1b2c3.../seed
 ```
 
 **Response**:
@@ -1928,11 +1928,11 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../seed
 
 ---
 
-### `POST /p2p/bt/download/:infohash/unseed`
+### `POST /bt/download/:infohash/unseed`
 Stop seeding a download.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../unseed
+curl -X POST http://127.0.0.1:3000/bt/download/a1b2c3.../unseed
 ```
 
 **Response**:
@@ -1942,11 +1942,11 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/download/a1b2c3.../unseed
 
 ---
 
-### `DELETE /p2p/bt/download/:infohash`
+### `DELETE /bt/download/:infohash`
 Remove a download and its files.
 
 ```bash
-curl -X DELETE http://127.0.0.1:3000/p2p/bt/download/a1b2c3...
+curl -X DELETE http://127.0.0.1:3000/bt/download/a1b2c3...
 ```
 
 **Response**:
@@ -1956,11 +1956,11 @@ curl -X DELETE http://127.0.0.1:3000/p2p/bt/download/a1b2c3...
 
 ---
 
-### `GET /p2p/bt/stats`
+### `GET /bt/stats`
 Get global BitTorrent client statistics.
 
 ```bash
-curl http://127.0.0.1:3000/p2p/bt/stats
+curl http://127.0.0.1:3000/bt/stats
 ```
 
 **Response**:
@@ -1990,11 +1990,11 @@ curl http://127.0.0.1:3000/p2p/bt/stats
 
 ---
 
-### `POST /p2p/bt/bep44/put`
+### `POST /bt/bep44/put`
 Store immutable data on the BitTorrent DHT using BEP 44.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/bep44/put \
+curl -X POST http://127.0.0.1:3000/bt/bep44/put \
   -H "Content-Type: application/json" \
   -d '{"data": "SGVsbG8gV29ybGQ=", "mutable": false}'
 ```
@@ -2020,11 +2020,11 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/bep44/put \
 
 ---
 
-### `POST /p2p/bt/bep44/get`
+### `POST /bt/bep44/get`
 Read immutable data from the BitTorrent DHT using BEP 44.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/bt/bep44/get \
+curl -X POST http://127.0.0.1:3000/bt/bep44/get \
   -H "Content-Type: application/json" \
   -d '{"target": "a1b2c3d4e5f6..."}'
 ```
@@ -2046,11 +2046,11 @@ curl -X POST http://127.0.0.1:3000/p2p/bt/bep44/get \
 
 ---
 
-### `GET /p2p/bt/bep51/sample`
+### `GET /bt/bep51/sample`
 Sample infohashes from the DHT using BEP 51.
 
 ```bash
-curl http://127.0.0.1:3000/p2p/bt/bep51/sample
+curl http://127.0.0.1:3000/bt/bep51/sample
 ```
 
 **Response**:
@@ -2217,11 +2217,11 @@ curl -X POST http://127.0.0.1:3000/p2p/forward/close \
 
 ## 11. IPFS Compat
 
-### `GET /p2p/ipfs`
+### `GET /ipfs`
 Get IPFS compatibility layer status.
 
 ```bash
-curl http://127.0.0.1:3000/p2p/ipfs
+curl http://127.0.0.1:3000/ipfs
 ```
 
 **Response**:
@@ -2240,11 +2240,11 @@ curl http://127.0.0.1:3000/p2p/ipfs
 
 ---
 
-### `POST /p2p/ipfs/toggle`
+### `POST /ipfs/toggle`
 Enable or disable the IPFS compatibility layer.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/ipfs/toggle \
+curl -X POST http://127.0.0.1:3000/ipfs/toggle \
   -H "Content-Type: application/json" \
   -d '{"enabled": true}'
 ```
@@ -2259,11 +2259,11 @@ curl -X POST http://127.0.0.1:3000/p2p/ipfs/toggle \
 
 ---
 
-### `POST /p2p/ipfs/pin/:cid`
+### `POST /ipfs/pin/:cid`
 Pin an IPFS CID. Downloads from public IPFS gateways and caches permanently in local storage.
 
 ```bash
-curl -X POST http://127.0.0.1:3000/p2p/ipfs/pin/QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco
+curl -X POST http://127.0.0.1:3000/ipfs/pin/QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco
 ```
 
 **Response**:
@@ -2284,11 +2284,11 @@ curl -X POST http://127.0.0.1:3000/p2p/ipfs/pin/QmXoypizjW3WknFiJnKLwHCnL72vedxj
 
 ---
 
-### `DELETE /p2p/ipfs/pin/:cid`
+### `DELETE /ipfs/pin/:cid`
 Unpin an IPFS CID. Removes the pin record (local data may remain).
 
 ```bash
-curl -X DELETE http://127.0.0.1:3000/p2p/ipfs/pin/QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco
+curl -X DELETE http://127.0.0.1:3000/ipfs/pin/QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco
 ```
 
 **Response**:
@@ -2298,11 +2298,11 @@ curl -X DELETE http://127.0.0.1:3000/p2p/ipfs/pin/QmXoypizjW3WknFiJnKLwHCnL72ved
 
 ---
 
-### `GET /p2p/ipfs/pins`
+### `GET /ipfs/pins`
 List all pinned CIDs.
 
 ```bash
-curl http://127.0.0.1:3000/p2p/ipfs/pins
+curl http://127.0.0.1:3000/ipfs/pins
 ```
 
 **Response**:
@@ -2330,11 +2330,11 @@ curl http://127.0.0.1:3000/p2p/ipfs/pins
 
 ---
 
-### `GET /p2p/ipfs/gateways`
+### `GET /ipfs/gateways`
 Check health of all configured IPFS gateways.
 
 ```bash
-curl http://127.0.0.1:3000/p2p/ipfs/gateways
+curl http://127.0.0.1:3000/ipfs/gateways
 ```
 
 **Response**:

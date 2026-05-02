@@ -14,7 +14,7 @@ export const tests = [
   {
     name: 'P2P Panel — IPFS sub-page loads',
     fn: async ({ page, ok }) => {
-      await page.goto(`${baseURL}/p2p/ipfs`, { waitUntil: 'networkidle' });
+      await page.goto(`${baseURL}/ipfs`, { waitUntil: 'networkidle' });
       const text = await page.evaluate(() => document.body.innerText);
       ok('IPFS page renders', text.includes('IPFS') || text.includes('libp2p') || text.includes('Peer') || text.includes('节点') || text.includes('地址'));
     }
@@ -22,7 +22,7 @@ export const tests = [
   {
     name: 'P2P Panel — BT DHT sub-page loads',
     fn: async ({ page, ok }) => {
-      await page.goto(`${baseURL}/p2p/bt`, { waitUntil: 'networkidle' });
+      await page.goto(`${baseURL}/bt`, { waitUntil: 'networkidle' });
       const text = await page.evaluate(() => document.body.innerText);
       ok('BT page renders', text.includes('BT') || text.includes('DHT') || text.includes('BitTorrent') || text.includes('节点'));
     }

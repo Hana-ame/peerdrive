@@ -95,4 +95,4 @@ Anon Browser                    Node Owner
   ├── URL 注册        → /files/register_url
   ├── P2P 分享        → /p2p/announce + /p2p/dual/announce
   ├── 合集创建        → /anon/collections
-  └── 节点管理        → /p2p/status, /p2p/bt/status, etc.
+  └── 节点管理        → /p2p/status, /bt/status, etc.

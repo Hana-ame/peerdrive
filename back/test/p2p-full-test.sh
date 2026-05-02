@@ -90,7 +90,7 @@ echo ""
 bold "[0/15] Building server binary..."
 mkdir -p "$BASE_DIR/node_a/storage" "$BASE_DIR/node_b/storage"
 cd "$ROOT_DIR"
-http_proxy="" https_proxy="" go build -o "$SERVER_BIN" ./cmd/server/main.go
+http_proxy="" https_proxy="" go build -tags nosqlite -o "$SERVER_BIN" ./cmd/server/main.go
 green "  Build OK"
 
 # ──────────────────────────────────────────────

@@ -512,9 +512,9 @@ Example:
 | POST | `/p2p/push` | Push collection to peers |
 | POST | `/p2p/request-file` | Broadcast file request to connected peers |
 | GET | `/p2p/ws/info` | WebSocket connection info |
-| GET | `/p2p/bt/status` | BitTorrent DHT status |
-| POST | `/p2p/bt/announce` | Announce on BitTorrent DHT |
-| POST | `/p2p/bt/find` | Find providers via BitTorrent DHT |
+| GET | `/bt/status` | BitTorrent DHT status |
+| POST | `/bt/announce` | Announce on BitTorrent DHT |
+| POST | `/bt/find` | Find providers via BitTorrent DHT |
 | POST | `/p2p/dual/announce` | Announce on both IPFS and BT DHT |
 | POST | `/p2p/dual/find` | Find providers on both networks |
 
