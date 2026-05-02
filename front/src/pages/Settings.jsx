@@ -925,28 +925,30 @@ export default function Settings({ dataConsent, setDataConsent }) {
               <textarea
                 value={llmBody}
                 onChange={(e) => setLlmBody(e.target.value)}
-                rows={6}
+                rows={4}
                 spellCheck={false}
                 className="w-full bg-gray-700 px-3 py-2 rounded text-xs font-mono focus:outline-none focus:border-blue-500 border border-gray-600 resize-y"
               />
             </div>
 
             {/* Extra actions */}
-            <div className="flex items-center gap-3 pt-1">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 pt-1">
               <a
                 href="https://cloud.siliconflow.cn/i/sRO0U8o0"
                 target="_blank"
                 rel="noreferrer"
-                className="text-[10px] text-blue-400 hover:underline"
+                className="text-[10px] text-blue-400 hover:underline shrink-0"
               >
                 硅基流动注册 &rarr;
               </a>
-              <button
-                onClick={handleResetLlm}
-                className="bg-gray-600 hover:bg-gray-500 px-3 py-2 rounded text-sm transition-colors ml-auto"
-              >
-                恢复默认
-              </button>
+              <div className="flex items-center gap-2 sm:ml-auto">
+                <button
+                  onClick={handleResetLlm}
+                  className="bg-gray-600 hover:bg-gray-500 px-3 py-1.5 sm:py-2 rounded text-xs sm:text-sm transition-colors"
+                >
+                  恢复默认
+                </button>
+              </div>
             </div>
             <p className="text-[10px] text-gray-600">
               Body JSON 请求体模版，填写{' '}
