@@ -14,6 +14,9 @@ export default function MobileNav() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // 设置页面全屏显示，隐藏底部导航
+  if (location.pathname.startsWith('/settings')) return null;
+
   const isActive = (tabPath) => {
     if (tabPath === '/') return location.pathname === '/';
     return location.pathname.startsWith(tabPath);

@@ -1,6 +1,6 @@
 // 应用根组件：全局状态 (AppContext/PageContext) + 路由定义
 import React, { useState, createContext } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Plaza from './pages/Plaza';
 import Explorer from './pages/Explorer';
 import FileManager from './pages/FileManager';
@@ -38,33 +38,42 @@ export default function App() {
     <AppContext.Provider value={{ username, setUsername: handleUsernameChange, nodeInfo, setNodeInfo }}>
       <PageContext.Provider value={{ pageContext, setPageContext }}>
         <BrowserRouter>
-          <div className="flex flex-col h-screen bg-gray-950 text-gray-200">
-            <Navbar />
-            <div className="flex-1 overflow-hidden pb-[72px] md:pb-0">
-              <Routes>
-                <Route path="/" element={<Plaza />} />
-                <Route path="/files" element={<FileManager />} />
-                <Route path="/:username/:collName" element={<Explorer />} />
-                <Route path="/create" element={<AnonCreator />} />
-                <Route path="/anon/collections/:hash" element={<AnonExplorer />} />
-                <Route path="/anon" element={<AnonExplorer />} />
-                <Route path="/p2p" element={<P2PPanel />} />
-                <Route path="/ipfs" element={<IPFSPanel />} />
-                <Route path="/bt" element={<BTController />} />
-                <Route path="/bt/controller" element={<Navigate to="/bt" replace />} />
-                <Route path="/bt/status" element={<BTPanel />} />
-                <Route path="/bt/dht" element={<DHTExplorer />} />
-                <Route path="/p2p/dashboard" element={<P2PDashboard />} />
-                <Route path="/p2p/topology" element={<P2PTopology />} />
-                <Route path="/ipfs/dht" element={<DHTExplorer />} />
-                <Route path="/settings" element={<Settings dataConsent={dataConsent} setDataConsent={setDataConsent} />} />
-              </Routes>
-            </div>
-            <MobileNav />
-            <LLMAssistant />
-          </div>
+          <MainContent dataConsent={dataConsent} setDataConsent={setDataConsent} />
         </BrowserRouter>
       </PageContext.Provider>
     </AppContext.Provider>
+  );
+}
+
+function MainContent({ dataConsent, setDataConsent }) {
+  const location = useLocation();
+  const isSettings = location.pathname.startsWith('/settings');
+
+  return (
+    <div className="flex flex-col h-screen bg-gray-950 text-gray-200">
+      <Navbar />
+      <div className={`flex-1 overflow-hidden ${isSettings ? '' : 'pb-[72px]'} md:pb-0`}>
+        <Routes>
+          <Route path="/" element={<Plaza />} />
+          <Route path="/files" element={<FileManager />} />
+          <Route path="/:username/:collName" element={<Explorer />} />
+          <Route path="/create" element={<AnonCreator />} />
+          <Route path="/anon/collections/:hash" element={<AnonExplorer />} />
+          <Route path="/anon" element={<AnonExplorer />} />
+          <Route path="/p2p" element={<P2PPanel />} />
+          <Route path="/ipfs" element={<IPFSPanel />} />
+          <Route path="/bt" element={<BTController />} />
+          <Route path="/bt/controller" element={<Navigate to="/bt" replace />} />
+          <Route path="/bt/status" element={<BTPanel />} />
+          <Route path="/bt/dht" element={<DHTExplorer />} />
+          <Route path="/p2p/dashboard" element={<P2PDashboard />} />
+          <Route path="/p2p/topology" element={<P2PTopology />} />
+          <Route path="/ipfs/dht" element={<DHTExplorer />} />
+          <Route path="/settings" element={<Settings dataConsent={dataConsent} setDataConsent={setDataConsent} />} />
+        </Routes>
+      </div>
+      <MobileNav />
+      <LLMAssistant />
+    </div>
   );
 }

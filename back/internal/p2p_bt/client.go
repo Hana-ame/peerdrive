@@ -57,8 +57,13 @@ type BTClient struct {
 	autoSeed    map[string]bool   // infohashes to auto-start seeding on completion
 }
 
-// NewBTClient 创建 BT 客户端实例。
+// NewBTClient 创建 BT 客户端实例（默认监听端口）。
 func NewBTClient(dataDir string) *BTClient {
+	return newBTClient(dataDir, "")
+}
+
+// newBTClient 创建 BT 客户端实例，可指定监听地址（":0" = 随机端口）。
+func newBTClient(dataDir string, listenAddr string) *BTClient {
 	if dataDir == "" {
 		dataDir = filepath.Join(os.TempDir(), "peerdrive-bt")
 	}
@@ -66,6 +71,9 @@ func NewBTClient(dataDir string) *BTClient {
 
 	cfg := torrent.NewDefaultClientConfig()
 	cfg.DataDir = dataDir
+	if listenAddr != "" {
+		cfg.SetListenAddr(listenAddr)
+	}
 	cfg.Seed = false
 	cfg.NoUpload = true
 	cfg.DisableUTP = true

@@ -95,9 +95,9 @@ func TestParseTorrent(t *testing.T) {
 	t.Logf("Parsed: name=%q size=%d pieces=%d infoHash=%s", parsed.Name, parsed.Length, numPieces, ih)
 
 	// Test via our AddTorrentBytes wrapper.
-	btClient := NewBTClient(filepath.Join(tmpDir, "bt"))
+	btClient := newBTClient(filepath.Join(tmpDir, "bt"), ":0")
 	if btClient == nil {
-		t.Fatal("NewBTClient returned nil")
+		t.Fatal("newBTClient returned nil")
 	}
 	defer btClient.Close()
 
@@ -136,9 +136,9 @@ func TestParseMagnet(t *testing.T) {
 
 	// Via our AddMagnetURI wrapper.
 	tmpDir := t.TempDir()
-	btClient := NewBTClient(filepath.Join(tmpDir, "bt"))
+	btClient := newBTClient(filepath.Join(tmpDir, "bt"), ":0")
 	if btClient == nil {
-		t.Fatal("NewBTClient returned nil")
+		t.Fatal("newBTClient returned nil")
 	}
 	defer btClient.Close()
 
@@ -166,9 +166,9 @@ func TestBTClientPauseResume(t *testing.T) {
 	torrentPath := filepath.Join(tmpDir, "test.torrent")
 	torrentData, _ := createTestTorrentFile(t, dataPath, torrentPath)
 
-	btClient := NewBTClient(filepath.Join(tmpDir, "bt"))
+	btClient := newBTClient(filepath.Join(tmpDir, "bt"), ":0")
 	if btClient == nil {
-		t.Fatal("NewBTClient returned nil")
+		t.Fatal("newBTClient returned nil")
 	}
 	defer btClient.Close()
 
@@ -275,9 +275,9 @@ func TestFullBTDownload(t *testing.T) {
 	t.Logf("Seeder ready: infohash=%s port=%d", seederTorrent.InfoHash().HexString(), seeder.LocalPort())
 
 	// ---- Downloader via our BTClient ----
-	btClient := NewBTClient(filepath.Join(tmpDir, "downloader"))
+	btClient := newBTClient(filepath.Join(tmpDir, "downloader"), ":0")
 	if btClient == nil {
-		t.Fatal("NewBTClient returned nil")
+		t.Fatal("newBTClient returned nil")
 	}
 	defer btClient.Close()
 
@@ -322,9 +322,9 @@ func TestFullBTDownload(t *testing.T) {
 
 func TestAddMagnetBackwardCompat(t *testing.T) {
 	tmpDir := t.TempDir()
-	btClient := NewBTClient(filepath.Join(tmpDir, "bt"))
+	btClient := newBTClient(filepath.Join(tmpDir, "bt"), ":0")
 	if btClient == nil {
-		t.Fatal("NewBTClient returned nil")
+		t.Fatal("newBTClient returned nil")
 	}
 	defer btClient.Close()
 
@@ -344,9 +344,9 @@ func TestAddMagnetBackwardCompat(t *testing.T) {
 
 func TestAddTorrentBackwardCompat(t *testing.T) {
 	tmpDir := t.TempDir()
-	btClient := NewBTClient(filepath.Join(tmpDir, "bt"))
+	btClient := newBTClient(filepath.Join(tmpDir, "bt"), ":0")
 	if btClient == nil {
-		t.Fatal("NewBTClient returned nil")
+		t.Fatal("newBTClient returned nil")
 	}
 	defer btClient.Close()
 
@@ -362,9 +362,9 @@ func TestAddTorrentBackwardCompat(t *testing.T) {
 
 func TestGlobalStats(t *testing.T) {
 	tmpDir := t.TempDir()
-	btClient := NewBTClient(filepath.Join(tmpDir, "bt"))
+	btClient := newBTClient(filepath.Join(tmpDir, "bt"), ":0")
 	if btClient == nil {
-		t.Fatal("NewBTClient returned nil")
+		t.Fatal("newBTClient returned nil")
 	}
 	defer btClient.Close()
 
