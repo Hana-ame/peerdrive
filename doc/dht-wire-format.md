@@ -259,3 +259,159 @@ SHA256 hex (64 chars)
 | DHT 库 | anacrolix/dht/v2 | go-libp2p-kad-dht |
 | 本地端口 | 可配置 UDP (:6881) | libp2p 监听端口 |
 | 引导 | router.bittorrent.com + transmissionbt.com | libp2p 默认引导节点 / 静态配置 |
+
+---
+
+## 附录：BT DHT 验证方法
+
+以下操作在本地 node (port 3001) 或 VPS relay (port 3000) 上執行，均使用 `--noproxy` 避免代理干擾。
+
+### 1. 確認 BT DHT 已啟用 + 路由表大小
+
+```bash
+curl -s --noproxy '*' http://localhost:3001/bt/status | python3 -m json.tool
+```
+
+**預期輸出**:
+```json
+{
+    "enabled": true,
+    "listen_addr": "0.0.0.0:6881",
+    "num_nodes": 28
+}
+```
+
+- `num_nodes` > 0 表示節點已成功引導進入 Mainline DHT
+- 初始為 0，bootstrap 後通常 10-60 秒內增長到 8-40+
+- 值越大，路由表越完善
+
+### 2. BT DHT 全局狀態 (含更多統計)
+
+```bash
+curl -s --noproxy '*' http://localhost:3001/bt/stats | python3 -m json.tool
+```
+
+```json
+{
+    "dht_nodes": 28,
+    "active_torrents": 0,
+    "paused_torrents": 0,
+    "completed": 0,
+    "seeding": 0
+}
+```
+
+### 3. 在 BT DHT 上 Announce 一個 hash
+
+```bash
+curl -s --noproxy '*' -X POST http://localhost:3001/bt/announce \
+  -H 'Content-Type: application/json' \
+  -d '{"hash":"59ea11d9aaec055a68eeb42cdad638fd8c9745a699be3e70a5197b524bfc0abb"}'
+```
+
+**預期**: `{"status":"announced on BT DHT"}`
+
+底層流程:
+1. 取 SHA256 前 20 bytes 作為 BT infohash
+2. 調用 `dht.Server.Announce(infoHash, port, false)`
+3. KRPC `get_peers` → 獲得 token → KRPC `announce_peer` 向最近 K 個節點註冊
+
+### 4. 在 BT DHT 上查找 providers
+
+```bash
+curl -s --noproxy '*' -X POST http://localhost:3001/bt/find \
+  -H 'Content-Type: application/json' \
+  -d '{"hash":"59ea11d9aaec055a68eeb42cdad638fd8c9745a699be3e70a5197b524bfc0abb"}'
+```
+
+**預期**:
+```json
+{
+    "hash": "59ea11d9aaec055a68eeb42cdad638fd8c9745a699be3e70a5197b524bfc0abb",
+    "peers": ["1.2.3.4:6881", "5.6.7.8:6881"],
+    "count": 2
+}
+```
+
+- 內部調用 `s.Server.AnnounceTraversal(infoHash)` 遍歷 DHT
+- 超時 15 秒
+- 如果無人 announce 該 hash，`peers` 為空數組
+
+### 5. 雙網同時 Announce (BT + IPFS)
+
+```bash
+curl -s --noproxy '*' -X POST http://localhost:3001/p2p/dual/announce \
+  -H 'Content-Type: application/json' \
+  -d '{"hash":"59ea11d9aaec055a68eeb42cdad638fd8c9745a699be3e70a5197b524bfc0abb"}'
+```
+
+```json
+{"status":"announced on both networks"}
+```
+
+### 6. 雙網同時查找 (BT + IPFS)
+
+```bash
+curl -s --noproxy '*' -X POST http://localhost:3001/p2p/dual/find \
+  -H 'Content-Type: application/json' \
+  -d '{"hash":"59ea11d9aaec055a68eeb42cdad638fd8c9745a699be3e70a5197b524bfc0abb"}'
+```
+
+```json
+{
+    "hash": "59ea11d9aaec055a68eeb42cdad638fd8c9745a699be3e70a5197b524bfc0abb",
+    "ipfs_peers": [],
+    "bt_peers": ["1.2.3.4:6881"]
+}
+```
+
+### 7. BEP 44 不可變項存儲測試
+
+```bash
+# 寫入
+DATA=$(echo -n "Hello DHT from peerdrive" | base64 -w0)
+RESP=$(curl -s --noproxy '*' -X POST http://localhost:3001/bt/bep44/put \
+  -H 'Content-Type: application/json' \
+  -d "{\"data\":\"$DATA\",\"mutable\":false}")
+echo "$RESP" | python3 -m json.tool
+TARGET=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['target'])")
+
+# 讀取
+curl -s --noproxy '*' -X POST http://localhost:3001/bt/bep44/get \
+  -H 'Content-Type: application/json' \
+  -d "{\"target\":\"$TARGET\"}" | python3 -m json.tool
+```
+
+### 8. BEP 51 infohash 採樣
+
+```bash
+curl -s --noproxy '*' http://localhost:3001/bt/bep51/sample | python3 -m json.tool
+```
+
+```json
+{
+    "samples": ["<40-char-hex>", ...],
+    "count": 8
+}
+```
+
+查詢路由表中最近 K 個節點的 infohash 樣本，用於觀察 DHT 網絡中活躍的內容。
+
+### 驗證判斷標準
+
+| 指標 | 健康 | 異常 |
+|------|------|------|
+| `num_nodes` | > 0 且持續增長 | = 0 或停滯，表示 bootstrap 失敗或被防火牆阻擋 |
+| Announce 響應 | `"status": "announced on BT DHT"` | 報錯或超時 |
+| Find 響應 | 返回 200，`peers` 可能有/空 | HTTP 錯誤 |
+| BEP 44 round-trip | put 後 get 返回相同數據 | 數據不匹配 |
+| BEP 51 sample | 返回 samples 列表 | 空數組或錯誤 |
+| 端口 | UDP 6881 可外部訪問 | 防火牆阻擋 UDP |
+
+### 注意事項
+
+- BT DHT 使用 **UDP**，需要防火牆放行 UDP 端口（默認 6881）
+- NAT/防火牆會影響 DHT bootstrap：如果 UDP 被阻擋，`num_nodes` 會一直為 0
+- 引導節點是公共的 `router.bittorrent.com:6881` 和 `dht.transmissionbt.com:6881`
+- 路由表填充需要時間：bootstrap 後等 30-60 秒再查 `num_nodes`
+- `/p2p/status` 只顯示 IPFS/libp2p 信息，BT DHT 專用端點在 `/bt/` 路徑下
