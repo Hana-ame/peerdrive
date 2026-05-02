@@ -30,9 +30,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
       - run: go mod download
-      - run: go vet ./...
-      - run: go test ./... -count=1
-      - run: go build -o peerdrive-server ./cmd/server/
+      - run: go vet -tags nosqlite ./...
+      - run: go test -tags nosqlite ./... -count=1
+      - run: go build -tags nosqlite -o peerdrive-server ./cmd/server/
 
   frontend:
     runs-on: ubuntu-latest
