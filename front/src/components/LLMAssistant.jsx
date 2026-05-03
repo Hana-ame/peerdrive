@@ -549,7 +549,7 @@ export default function LLMAssistant() {
         <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2">
           <button
             onClick={() => setOpen(true)}
-            className={`w-14 h-14 ${activeSkin.btn} rounded-full shadow-lg flex items-center justify-center text-2xl transition-transform hover:scale-110 animate-bounce`}
+            className={`w-14 h-14 ${activeSkin.btn} rounded-full shadow-lg flex items-center justify-center text-2xl transition-transform hover:scale-110 animate-bounce shrink-0`}
             title={`AI 助手 (${activeSkin.label})`}
           >
             {activeSkin.icon}
@@ -563,7 +563,7 @@ export default function LLMAssistant() {
         </div>
       )}
       {open && (
-        <div className="fixed bottom-6 right-6 w-96 h-[560px] max-h-[75vh] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col z-40">
+        <div className="fixed bottom-6 right-3 md:right-6 w-[calc(100vw-1.5rem)] md:w-96 h-[560px] max-h-[75vh] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col z-40">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 shrink-0">
             <div className="flex items-center gap-2">
               <span className="text-lg">{activeSkin.icon}</span>
