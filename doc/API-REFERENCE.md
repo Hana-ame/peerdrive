@@ -30,7 +30,16 @@
 | `/anon/collections/commit` | POST | 提交合集版本 `{ source_hash, entries, commit_message }` |
 | `/anon/collections/fork` | POST | Fork 合集 `{ source_hash, add_entries, remove_paths, friendly_name }` |
 
-entry 格式: `{ path, providers: [{ type: "sha256", value: hash, mime_type }] }`
+Entry 格式:
+
+```json
+// SHA256 provider（已注册到存储的文件）
+{"path":"readme.txt","providers":[{"type":"sha256","value":"<64-hex>"}]}
+// URL provider（外部链接，无需下载到本地存储）
+{"path":"readme.txt","providers":[{"type":"url","value":"https://example.com/readme.txt"}]}
+// 目录条目（不需要 providers）
+{"path":"images/"}
+```
 
 ## 3. 用户合集 (User Collections)
 
@@ -165,7 +174,7 @@ entry 格式: `{ path, providers: [{ type: "sha256", value: hash, mime_type }] }
 |-----------|------|---------------|
 | `/` | Plaza | `listAnonCollections`, `searchCollections`, `listPublicCollections`, `getBEP51Sample` |
 | `/files` | FileManager | `listFiles`, `registerLocalFile`, `registerFolder`, `deleteFile`, `browseDir`, `uploadFile` |
-| `/create` | AnonCreator | `createAnonCollection`, `commitAnonCollection`, `listFiles`, `saveLocal` |
+| `/create` | AnonCreator | `createAnonCollection`, `commitAnonCollection`, `listFiles`, `registerLocalFile`, `registerURL`, `browseDir`, `saveLocal` |
 | `/anon/collections/:hash` | AnonExplorer | `getAnonCollection`, `forkAnonCollection` |
 | `/:username/:collName` | Explorer | `getUserCollection`, `getVersionLog`, `commitCollection`, `rollbackVersion` |
 | `/p2p` | P2PPanel | `getP2PStatus`, `getConnections`, `getP2PPeers`, `getWSInfo` |
@@ -196,3 +205,68 @@ entry 格式: `{ path, providers: [{ type: "sha256", value: hash, mime_type }] }
 | `peerdrive_llm_apikey` | API Key |
 | `peerdrive_llm_body_template` | 请求体模板 (JSON) |
 | `peerdrive_data_consent` | 数据许可 |
+
+---
+
+## 补充路由
+
+### P2P 可续传 / 多源下载
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/p2p/download/resume` | 可续传下载 |
+| GET | `/p2p/download/progress/:hash` | 下载进度 |
+| POST | `/p2p/download/cancel/:hash` | 取消下载 |
+| POST | `/p2p/download/multipeer` | 多 peer 并发下载 |
+| GET | `/p2p/download/sources/:hash` | 下载源列表 |
+| GET | `/p2p/download/multipeer/progress/:hash` | 多源下载进度 |
+
+### 端口转发
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/p2p/forward/create` | 创建转发会话 |
+| POST | `/p2p/forward/connect` | 连接转发会话 |
+| GET | `/p2p/forward/list` | 列出活跃转发 |
+| POST | `/p2p/forward/close` | 关闭转发会话 |
+
+### BT 额外端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/bt/stats` | BT 全局统计 |
+| GET | `/bt/download/:infohash/torrent` | 下载 .torrent 文件 |
+| GET | `/bt/download/:infohash/magnet` | 获取 magnet URI |
+| POST | `/bt/seed-collection` | 将匿名合集作为 BT 做种 |
+
+### IPFS CID 下载
+
+| 方法 | 路径 |
+|------|------|
+| GET | `/ipfs/:cid` |
+
+### 分享
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/shares` | 创建分享 |
+| GET | `/shares` | 列表 |
+| GET | `/s/:token` | 访问 |
+
+### WebDAV
+
+| 方法 | 路径 |
+|------|------|
+| ANY | `/webdav/*path` |
+
+### Relay 代理
+
+| 方法 | 路径 |
+|------|------|
+| GET | `/relay/proxy` |
+
+### Swagger UI
+
+| 方法 | 路径 |
+|------|------|
+| GET | `/swagger/*any` |
