@@ -134,13 +134,6 @@ func NewAnonCollection(name string, entries []AnonCollectionEntry, tags []string
 	}
 }
 
-// AnonEntry 遗留兼容 — sync 和 collection 模块仍在使用
-type AnonEntry struct {
-	Path string  `json:"path"`
-	Hash string  `json:"hash"`
-	URL  *string `json:"url,omitempty"`
-}
-
 type AnonCollectionSummary struct {
 	Hash         string   `json:"hash"`
 	FriendlyName string   `json:"friendly_name,omitempty"`
