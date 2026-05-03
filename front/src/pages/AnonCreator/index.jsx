@@ -322,14 +322,46 @@ export default function AnonCreator() {
     if (tab === 'local') setSysPath('/');
   };
 
+  // 移动端面板切换
+  const [mobilePanel, setMobilePanel] = useState('files');
+
   const handleFileSelect = (file) => {
     setSelectedFile(file);
   };
 
+  // 选择文件后自动切换到预览面板（移动端）
+  useEffect(() => {
+    if (selectedFile && window.innerWidth < 768) {
+      setMobilePanel('preview');
+    }
+  }, [selectedFile]);
+
   return (
     <div className="flex flex-1 overflow-hidden h-full bg-gray-950">
+      {/* ── 移动端面板切换标签 ── */}
+      <div className="md:hidden sticky top-0 z-10 bg-gray-950/95 backdrop-blur border-b border-gray-800">
+        <div className="flex p-1 gap-1">
+          {[
+            { id: 'files', label: '📁 文件', count: files.length },
+            { id: 'preview', label: '👁 预览' },
+            { id: 'editor', label: '✏️ 编辑器', count: entries.length },
+          ].map(tab => (
+            <button key={tab.id} onClick={() => setMobilePanel(tab.id)}
+              className={`flex-1 text-xs py-2 rounded transition-colors ${
+                mobilePanel === tab.id
+                  ? 'bg-blue-600 text-white font-medium'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+              }`}>
+              {tab.label}{tab.count !== undefined ? ` (${tab.count})` : ''}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* 左列：筛选 + 文件列表 */}
-      <div className="w-[380px] shrink-0 flex flex-col overflow-hidden border-r border-gray-800">
+      <div className={`w-[380px] shrink-0 flex-col overflow-hidden border-r border-gray-800 ${
+        mobilePanel === 'files' ? 'flex' : 'hidden'
+      } md:flex`}>
         <LeftPanel
           sourceTab={leftSourceTab} sortKey={leftSortKey} sortOrder={leftSortOrder}
           typeFilters={leftTypeFilters} search={search}
@@ -368,12 +400,16 @@ export default function AnonCreator() {
       </div>
 
       {/* 中列：文件预览 */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-gray-950">
+      <div className={`flex-1 flex-col overflow-hidden bg-gray-950 ${
+        mobilePanel === 'preview' ? 'flex' : 'hidden'
+      } md:flex`}>
         <MiddlePanel selectedFile={selectedFile} />
       </div>
 
       {/* 右列：编辑器 */}
-      <div className="w-[420px] shrink-0 border-l border-gray-800 bg-gray-900 flex flex-col overflow-hidden">
+      <div className={`w-[420px] shrink-0 border-l border-gray-800 bg-gray-900 flex-col overflow-hidden ${
+        mobilePanel === 'editor' ? 'flex' : 'hidden'
+      } md:flex`}>
         <RightPanel
           fname={fname} tags={tags} entries={entries} saving={saving}
           showNamePrompt={showNamePrompt} toastMsg={toastMsg} toastErr={toastErr}

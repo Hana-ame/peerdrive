@@ -6,6 +6,7 @@ import * as api from '../api';
 import { listAnonCollections, searchCollections, listFiles } from '../api';
 
 // ── 下拉菜单组件（Portal 到 body，避免被 overflow 容器裁剪）──
+// 支持 hover（桌面）和 click（触摸）两种交互
 function NavDropdown({ label, to, items }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef(null);
@@ -19,6 +20,7 @@ function NavDropdown({ label, to, items }) {
     }
   }, []);
 
+  // 桌面端 hover
   const handleEnter = () => {
     clearTimeout(timerRef.current);
     updatePos();
@@ -27,6 +29,28 @@ function NavDropdown({ label, to, items }) {
   const handleLeave = () => {
     timerRef.current = setTimeout(() => setOpen(false), 150);
   };
+
+  // 触摸端/桌面端 click 切换
+  const handleToggle = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    clearTimeout(timerRef.current);
+    updatePos();
+    setOpen(prev => !prev);
+  };
+
+  // 点击外部关闭
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e) => {
+      if (triggerRef.current && !triggerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    // 延迟添加，避免触发当前点击
+    const id = setTimeout(() => document.addEventListener('click', handleClick), 0);
+    return () => { clearTimeout(id); document.removeEventListener('click', handleClick); };
+  }, [open]);
 
   // 窗口滚动/resize 时更新菜单位置
   useEffect(() => {
@@ -40,25 +64,24 @@ function NavDropdown({ label, to, items }) {
     };
   }, [open, updatePos]);
 
-  const chevron = (
-    <svg className="w-3 h-3 text-gray-500 group-hover:text-gray-300 transition-transform group-hover:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-    </svg>
-  );
-
   return (
     <>
-      <div ref={triggerRef} className="relative group flex-shrink-0" onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
-        <Link to={to} className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center gap-1">
+      <div ref={triggerRef} className="relative group flex items-center flex-shrink-0" onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
+        <Link to={to} onClick={() => setOpen(false)}
+          className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center gap-1">
           {label}
-          {chevron}
         </Link>
+        <button onClick={handleToggle}
+          className="text-gray-500 hover:text-gray-300 p-1 rounded hover:bg-gray-700 transition-colors"
+          aria-label={`${label} 子菜单`}>
+          <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
       </div>
       {open &&
         createPortal(
           <div
-            onMouseEnter={() => { clearTimeout(timerRef.current); setOpen(true); }}
-            onMouseLeave={handleLeave}
             className="fixed z-[100] w-36 bg-gray-800 border border-gray-700 rounded-lg shadow-xl"
             style={{ top: pos.top, left: pos.left }}
           >
@@ -308,11 +331,11 @@ export default function Navbar() {
           )}
           <button
             onClick={() => setSearchOpen(true)}
-            className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded-md text-xs text-gray-400 min-w-[200px]"
+            className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded-md text-xs text-gray-400 min-w-0 md:min-w-[200px]"
           >
             <span>🔍</span>
-            <span>搜索...</span>
-            <kbd className="ml-auto text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded">Ctrl+K</kbd>
+            <span className="hidden md:inline">搜索...</span>
+            <kbd className="ml-auto text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded hidden md:inline">Ctrl+K</kbd>
           </button>
           <Link to="/settings" className="text-gray-500 hover:text-gray-300 text-sm inline-flex items-center flex-shrink-0" title="设置">⚙</Link>
         </div>
