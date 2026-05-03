@@ -344,6 +344,10 @@ func SetupRouter(
 			coll.POST("/fork", controller.ForkAnonCollection)
 			coll.POST("/merge", controller.MergeFromSource)
 			coll.POST("/pull", controller.PullCollection)
+			coll.POST("/upload", controller.UploadFile)
+			coll.POST("/register-local", controller.RegisterLocalFile)
+			coll.POST("/register-url", controller.RegisterURL)
+			coll.POST("/register-folder", controller.RegisterFolder)
 		}
 
 		// 向后兼容 redirects

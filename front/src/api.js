@@ -161,11 +161,11 @@ async function request(method, path, body = null) {
 export const verifyFile = (hash) => request('GET', `/files/verify/${hash}`);
 export const getDownloadUrl = (hash) => `${getApiBase()}/sha256sum/${hash}`;
 export const registerLocalFile = (path, filename) =>
-  request('POST', '/files/register_local', { path, filename: filename || path.split('/').pop() });
+  request('POST', '/collections/register-local', { path, filename: filename || path.split('/').pop() });
 export const registerURL = (url, filename = '') =>
-  request('POST', '/files/register_url', { url, filename });
+  request('POST', '/collections/register-url', { url, filename });
 export const registerFolder = (folderPath) =>
-  request('POST', '/files/register_folder', { folder_path: folderPath });
+  request('POST', '/collections/register-folder', { folder_path: folderPath });
 
 /* ---- file system browse ---- */
 export const browseDir = (dirPath = '/') =>
@@ -177,10 +177,10 @@ export const createAnonCollection = (entries, friendly_name = '', tags = [], vis
     path: e.path,
     providers: e.providers || [{ type: "sha256", value: e.hash, mime_type: e.mime_type || '' }],
   }));
-  return request('POST', '/anon/collections', { entries: normalized, friendly_name, tags, visibility, access_list_hash });
+  return request('POST', '/collections', { entries: normalized, friendly_name, tags, visibility, access_list_hash });
 };
-export const getAnonCollection = (hash) => request('GET', `/anon/collections/${hash}`);
-export const getAnonFileDownloadUrl = (hash, p) => `${getApiBase()}/anon/collections/${hash}/${p}`;
+export const getAnonCollection = (hash) => request('GET', `/collections/${hash}`);
+export const getAnonFileDownloadUrl = (hash, p) => `${getApiBase()}/collections/${hash}/${p}`;
 export const forkAnonCollection = (source_hash, add_entries, remove_paths, friendly_name = '') =>
   request('POST', '/anon/collections/fork', { source_hash, add_entries, remove_paths, friendly_name });
 
@@ -443,9 +443,9 @@ export function uploadConsent() {
 // 统一 Collection API（替代旧的 createUserCollection/createAnonCollection 等）
 // 一切皆 collection，entry 的 provider 可为 sha256 或 url
 export const createCollection = (entries, name = '', tags = []) =>
-  request('POST', '/anon/collections', { name, entries, tags });
-export const listCollections = () => request('GET', '/anon/collections');
-export const getCollection = (id) => request('GET', `/anon/collections/${id}`);
+  request('POST', '/collections', { name, entries, tags });
+export const listCollections = () => request('GET', '/collections');
+export const getCollection = (id) => request('GET', `/collections/${id}`);
 export const addEntry = addCollectionEntry;
 export const deleteEntry = removeCollectionEntry;
 export const commitVersion = commitCollection;
