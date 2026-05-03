@@ -16,10 +16,8 @@ export const COLL_SORT_OPTS = [
   { v: 'time', l: '时间' }, { v: 'name', l: '名称' }, { v: 'count', l: '文件数' },
 ];
 
-// 三列布局 - 左侧面板来源标签
+// 三列布局 - 左侧面板来源标签（简化：一切皆合集+provider）
 export const SOURCE_TABS = [
-  { id: 'all', label: '所有文件' },
-  { id: 'registered', label: '已注册' },
   { id: 'local', label: '本地电脑' },
   { id: 'collections', label: '合集' },
 ];
