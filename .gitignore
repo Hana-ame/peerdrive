@@ -39,6 +39,9 @@ frontend-worktrees/
 registration-server/
 p2p-dual-stack/
 
+# Upload state
+.last_upload_url
+
 # Root temp files
 *.txt
 react/

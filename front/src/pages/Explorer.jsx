@@ -139,25 +139,27 @@ export default function Explorer() {
   return (
     <div className="flex flex-1 overflow-hidden relative h-full">
       <div className="flex-1 flex flex-col bg-gray-900">
-        <div className="h-16 bg-gray-800 border-b border-gray-700 flex items-center px-6 justify-between shrink-0">
-          <div className="flex items-center space-x-4">
-            <button onClick={() => navigate('/')} className="text-gray-400 hover:text-white">
-              ← 返回广场
+        <div className="h-16 bg-gray-800 border-b border-gray-700 flex items-center px-4 md:px-6 justify-between shrink-0 gap-2">
+          <div className="flex items-center space-x-2 md:space-x-4 min-w-0">
+            <button onClick={() => navigate('/')} className="text-gray-400 hover:text-white shrink-0 text-sm md:text-base">
+              ←
             </button>
-            <div className="h-6 w-px bg-gray-700"></div>
-            <h2 className="text-base font-bold text-gray-200">
+            <div className="h-6 w-px bg-gray-700 shrink-0 hidden md:block"></div>
+            <span className="hidden md:block text-gray-400 hover:text-white shrink-0 text-sm" onClick={() => navigate('/')}>返回广场</span>
+            <div className="h-6 w-px bg-gray-700 shrink-0"></div>
+            <h2 className="text-sm md:text-base font-bold text-gray-200 truncate">
               {username}/{collName}
             </h2>
           </div>
 
-          <div className="flex items-center space-x-3">
-            <button onClick={() => setShowSyncModal(true)} className="bg-indigo-600 hover:bg-indigo-500 px-4 py-1.5 rounded text-sm">
-              保存到本地
+          <div className="flex items-center gap-1.5 md:gap-3 shrink-0">
+            <button onClick={() => setShowSyncModal(true)} className="bg-indigo-600 hover:bg-indigo-500 px-2.5 md:px-4 py-1.5 rounded text-xs md:text-sm whitespace-nowrap">
+              保存
             </button>
-            <label className="bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded text-sm cursor-pointer flex items-center">
-              上传文件 <input type="file" className="hidden" onChange={handleUpload} />
+            <label className="bg-blue-600 hover:bg-blue-700 px-2.5 md:px-4 py-1.5 rounded text-xs md:text-sm cursor-pointer flex items-center whitespace-nowrap">
+              上传 <input type="file" className="hidden" onChange={handleUpload} />
             </label>
-            <button onClick={() => { setShowMergeModal(true); loadMergeSources(); }} className="bg-gray-700 hover:bg-gray-600 px-4 py-1.5 rounded text-sm">
+            <button onClick={() => { setShowMergeModal(true); loadMergeSources(); }} className="bg-gray-700 hover:bg-gray-600 px-2.5 md:px-4 py-1.5 rounded text-xs md:text-sm whitespace-nowrap">
               合并
             </button>
           </div>
@@ -227,7 +229,7 @@ export default function Explorer() {
         </div>
       </div>
 
-      <div className="w-80 bg-gray-800 border-l border-gray-700 overflow-y-auto shrink-0">
+      <div className="w-80 bg-gray-800 border-l border-gray-700 overflow-y-auto shrink-0 hidden md:block">
         <VersionLog username={username} collName={collName} triggerRefresh={refreshTrigger} />
       </div>
 
