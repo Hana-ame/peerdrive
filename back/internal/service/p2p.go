@@ -194,6 +194,11 @@ func (p *P2PService) CfgP2PEnabled() bool {
 	return p.cfg != nil && p.cfg.P2PEnable
 }
 
+// IsReadOnly 返回 P2P 是否处于只读模式（不提供数据，仅下载）。
+func (p *P2PService) IsReadOnly() bool {
+	return p.cfg != nil && p.cfg.P2PReadOnly
+}
+
 // IsEnabled 返回 P2P 服务是否已启用且 host 已初始化。
 func (p *P2PService) IsEnabled() bool {
 	enabled := p.cfg != nil && p.cfg.P2PEnable && p.Host != nil
@@ -380,12 +385,15 @@ func (p *P2PService) ConnectByAddr(ctx context.Context, addrStr string) error {
 	return p.Host.Connect(ctx, *info)
 }
 
-// AnnounceHash 在 libp2p DHT 上 announce 指定文件哈希。
 func (p *P2PService) AnnounceHash(hash string) error {
 	defer log.LogDuration("P2PService.AnnounceHash")()
 	log.LogDebug("p2p: AnnounceHash hash=%s", hash)
 
 	if !p.IsEnabled() || p.DHT == nil {
+		return nil
+	}
+	if p.IsReadOnly() {
+		log.LogDebug("p2p: AnnounceHash skipped (read-only mode)")
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -400,7 +408,6 @@ func (p *P2PService) AnnounceHash(hash string) error {
 
 // FindProviders 通过 DHT 查找指定哈希的文件提供者。
 func (p *P2PService) FindProviders(hash string) ([]peer.AddrInfo, error) {
-	defer log.LogDuration("P2PService.FindProviders")()
 	log.LogDebug("p2p: FindProviders hash=%s", hash)
 
 	if !p.IsEnabled() || p.DHT == nil {

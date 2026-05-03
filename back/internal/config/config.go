@@ -37,6 +37,7 @@ type Config struct {
 	P2PStaticRelays    string
 	P2PHolePunch       bool
 	P2PPublicReachable bool
+		P2PReadOnly bool
 	P2PAutoNAT         bool
 	P2PNATPortMap      bool
 
@@ -148,6 +149,7 @@ func Load() *Config {
 		IPFSCompatEnable: getEnvBool("PEERDRIVE_IPFS_COMPAT", false),
 		IPFSBlockstore:   getEnv("PEERDRIVE_IPFS_BLOCKSTORE", ""),
 		P2PKeyFile:       getEnv("PEERDRIVE_P2P_KEY_FILE", ""),
+		P2PReadOnly: getEnvBool("PEERDRIVE_P2P_READ_ONLY", false),
 	}
 }
 
