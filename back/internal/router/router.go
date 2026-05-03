@@ -238,12 +238,13 @@ func SetupRouter(
 
 	r.GET("/ping", controller.Ping)
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256)
+	r.GET("/sha256sum/:sha256/:filename", controller.DownloadBySHA256)
 	r.GET("/ipfs/:cid", controller.DownloadByCID)
 
 	// Universal multi-protocol download endpoints.
-	r.GET("/download/:hash", controller.UniversalDownload)
-	r.GET("/download/:hash/sources", controller.UniversalDownloadSources)
-	r.POST("/download/:hash/refresh", controller.UniversalDownloadRefresh)
+	r.GET("/download/:sha256", controller.DownloadBySHA256)
+	r.GET("/download/:sha256/sources", controller.UniversalDownloadSources)
+	r.POST("/download/:sha256/refresh", controller.UniversalDownloadRefresh)
 
 	// P2P routes (public)
 	p2p := r.Group("/p2p")

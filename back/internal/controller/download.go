@@ -191,7 +191,7 @@ func handleRangeRequest(c *gin.Context, data []byte, rangeHeader string) bool {
 
 // UniversalDownload 处理 GET /download/:hash，使用通用下载器跨协议获取文件。
 func UniversalDownload(c *gin.Context) {
-	hash := c.Param("hash")
+	hash := c.Param("sha256"); if hash == "" { hash = c.Param("hash") }
 	if !hashutil.IsValidSHA256(hash) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
 		return
@@ -214,7 +214,7 @@ func UniversalDownload(c *gin.Context) {
 
 // UniversalDownloadSources 处理 GET /download/:hash/sources，列出所有可用协议源。
 func UniversalDownloadSources(c *gin.Context) {
-	hash := c.Param("hash")
+	hash := c.Param("sha256"); if hash == "" { hash = c.Param("hash") }
 	if !hashutil.IsValidSHA256(hash) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
 		return
@@ -233,7 +233,7 @@ func UniversalDownloadSources(c *gin.Context) {
 
 // UniversalDownloadRefresh 处理 POST /download/:hash/refresh，清除本地缓存后重新执行下载流水线。
 func UniversalDownloadRefresh(c *gin.Context) {
-	hash := c.Param("hash")
+	hash := c.Param("sha256"); if hash == "" { hash = c.Param("hash") }
 	if !hashutil.IsValidSHA256(hash) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
 		return
