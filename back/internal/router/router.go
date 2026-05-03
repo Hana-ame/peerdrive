@@ -3,7 +3,7 @@
 // P2PService、storageDir）。
 // 路由分组：
 //   /ping              — 健康检查（GET）
-//   /sha256sum/:sha256 — 通过 SHA256 哈希下载文件（GET，含 P2P 回退）
+//   /sha256sum/:sha256 — 通过 SHA256 哈希下载文件（仅本地存储，无 P2P 回退）
 //   /auth/*           — 用户注册、登录、登出（POST/POST/POST/GET）
 //   /p2p/*             — P2P 节点信息、对等列表、Ping（GET）
 //   /anon/*            — 匿名合集创建/读取/Fork（POST/GET）
@@ -237,14 +237,14 @@ func SetupRouter(
 	syncCtrl := controller.NewSyncController(syncSvc)
 
 	r.GET("/ping", controller.Ping)
-	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256)
-	r.GET("/sha256sum/:sha256/:filename", controller.DownloadBySHA256)
+	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256Local)
+	r.GET("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
 	r.GET("/ipfs/:cid", controller.DownloadByCID)
 
 	// Universal multi-protocol download endpoints.
-	r.GET("/download/:sha256", controller.DownloadBySHA256)
-	r.GET("/download/:sha256/sources", controller.UniversalDownloadSources)
-	r.POST("/download/:sha256/refresh", controller.UniversalDownloadRefresh)
+	r.GET("/download/:hash", controller.UniversalDownload)
+	r.GET("/download/:hash/sources", controller.UniversalDownloadSources)
+	r.POST("/download/:hash/refresh", controller.UniversalDownloadRefresh)
 
 	// P2P routes (public)
 	p2p := r.Group("/p2p")

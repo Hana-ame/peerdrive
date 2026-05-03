@@ -96,6 +96,41 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 }
 
+// DownloadBySHA256Local 处理 GET /sha256sum/:sha256，仅从本地存储读取，不含 P2P 回退。
+func DownloadBySHA256Local(c *gin.Context) {
+	hash := c.Param("sha256")
+	if !hashutil.IsValidSHA256(hash) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256 format"})
+		return
+	}
+	meta, err := repository.GetFileMeta(hash)
+	if err != nil || meta == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		return
+	}
+	sd, _ := c.Get("storageDir")
+	storageDir, _ := sd.(string)
+	path := filepath.Join(storageDir, hash[:2], hash)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found on disk"})
+		return
+	}
+	fn := hash
+	if meta.Filename != "" {
+		fn = meta.Filename
+	}
+	if c.Query("inline") == "1" {
+		c.Header("Content-Disposition", "inline; filename="+fn)
+	} else {
+		c.Header("Content-Disposition", "attachment; filename="+fn)
+	}
+	if meta.Gziped {
+		c.Header("Content-Encoding", "gzip")
+	}
+	c.Data(http.StatusOK, "application/octet-stream", data)
+}
+
 // DownloadByCID handles GET /ipfs/:cid, looking up the file by its IPFS CID and
 // streaming it back with an X-CID header.  Falls back to public IPFS gateways
 // when the CID is not in local storage and IPFS gateway fetching is enabled.
@@ -191,7 +226,7 @@ func handleRangeRequest(c *gin.Context, data []byte, rangeHeader string) bool {
 
 // UniversalDownload 处理 GET /download/:hash，使用通用下载器跨协议获取文件。
 func UniversalDownload(c *gin.Context) {
-	hash := c.Param("sha256"); if hash == "" { hash = c.Param("hash") }
+	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
 		return
@@ -214,7 +249,7 @@ func UniversalDownload(c *gin.Context) {
 
 // UniversalDownloadSources 处理 GET /download/:hash/sources，列出所有可用协议源。
 func UniversalDownloadSources(c *gin.Context) {
-	hash := c.Param("sha256"); if hash == "" { hash = c.Param("hash") }
+	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
 		return
@@ -233,7 +268,7 @@ func UniversalDownloadSources(c *gin.Context) {
 
 // UniversalDownloadRefresh 处理 POST /download/:hash/refresh，清除本地缓存后重新执行下载流水线。
 func UniversalDownloadRefresh(c *gin.Context) {
-	hash := c.Param("sha256"); if hash == "" { hash = c.Param("hash") }
+	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256"})
 		return
