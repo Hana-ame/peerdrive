@@ -284,3 +284,82 @@
 | 步骤 | ipfs add → Peerdrive POST /ipfs/pin/:cid |
 | 结果 | ⚠️ 本地 kubo 节点文件未发布到 IPFS DHT，公网网关找不到 |
 | 修复 | 需要 kubo 连接 IPFS 公网或 Peerdrive 直接连接 kubo 的 libp2p 节点 |
+
+---
+
+## 11. 前端 UI 移动端适配
+
+### 11.1 创建页 (AnonCreator)
+
+| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
+|--------|--------|------|----------|----------|
+| UI-01 | 移动端三栏切换 | 375px 视口打开 /create | 显示「文件」「预览」「编辑器」标签 | 一次只显示一个面板 |
+| UI-02 | 桌面端三栏布局 | >768px 视口打开 /create | 左中右三栏同时可见 | md:flex 生效 |
+| UI-03 | 选择文件自动切预览 | 点击左侧文件 | 自动切换到预览面板 | mobilePanel → 'preview' |
+| UI-04 | 本地电脑文件添加 | 本地电脑 tab → 文件 "+" | 自动注册文件再添加到合集 | 条目有 hash/provider |
+| UI-05 | 本地电脑文件夹添加 | 本地电脑 tab → 文件夹 "+" | 展开文件夹注册文件后添加，空文件夹忽略 | 条目带 foldername/ 前缀 |
+| UI-06 | 保存按钮禁用/启用 | 无条目/有条目时 | 无条目时 disabled=true | 按钮 disabled 属性 |
+| UI-07 | 标签独立行 | 编辑器工具栏 | 标签输入在名称下方的独立行 | DOM 结构验证 |
+| UI-08 | 内联新建文件夹 | 点击"+ 新建文件夹" | 文件树中出现内联输入框 | Enter 确认, Escape 取消 |
+| UI-09 | 文件夹右键重命名 | 右击文件夹 → 重命名 | 进入内联编辑模式 | path + '/' 传入 rename |
+
+### 11.2 设置页 (Settings)
+
+| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
+|--------|--------|------|----------|----------|
+| UI-10 | 移动端标签栏 | 375px 视口打开 /settings | 水平滚动标签栏可见 | 节点连接/认证/存储管理等 |
+| UI-11 | 桌面端侧边栏 | 375px 视口 | 左侧导航 aside 不可见 | hidden md:flex |
+| UI-12 | LLM 面板宽度自适应 | 375px 视口打开 LLM 面板 | w-[calc(100vw-1.5rem)] 且不溢出 | 面板在视口内 |
+
+### 11.3 导航栏 (Navbar)
+
+| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
+|--------|--------|------|----------|----------|
+| UI-13 | 汉堡菜单按钮 | 375px 视口，任意页 | 左上角汉堡按钮可见 | aria-label="菜单" |
+| UI-14 | 汉堡菜单展开 | 点击汉堡按钮 | 下拉菜单显示导航项 | 含本地文件管理、创建合集等 |
+| UI-15 | 桌面端下拉菜单 | >768px 视口 hover P2P/BT/IPFS | 下拉菜单展开 | 子菜单项可见 |
+| UI-16 | 触摸端下拉菜单 | 点击下拉箭头按钮 | 菜单 toggle 展开/收起 | 点击外部关闭 |
+| UI-17 | 搜索按钮紧凑 | 375px 视口 | 仅显示 🔍 图标，隐藏文字和快捷键 | 移动端无"搜索..."文字 |
+
+### 11.4 合集浏览 (Explorer/AnonExplorer)
+
+| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
+|--------|--------|------|----------|----------|
+| UI-18 | Explorer VersionLog 隐藏 | 375px 视口打开 /:user/:coll | 右侧 VersionLog 面板不可见 | hidden md:block |
+| UI-19 | Explorer 顶栏紧凑 | 375px 视口 | 按钮文字缩短，不溢出 | "保存"代替"保存到本地" |
+
+### 11.5 其他
+
+| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
+|--------|--------|------|----------|----------|
+| UI-20 | DHT 输入框自适应 | 375px 视口 | 输入框 min-w=0，按钮自动换行 | flex-wrap 生效 |
+| UI-21 | LLM 面板视口适配 | 375px 视口打开 LLM | 面板不超出屏幕右侧 | w-[calc(100vw-1.5rem)] |
+
+---
+
+## 附录 A: 测试环境
+
+| 项 | 值 |
+|----|-----|
+| Playwright 浏览器 | Edge via CDP (port 9222) |
+| 移动端视口 | 375×667 (iPhone SE) |
+| 桌面端断点 | md: 768px |
+| 被测 URL | peerdrive.pages.dev (生产) 或 *.peerdrive.pages.dev (预览) |
+| 网络限制 | Host 浏览器无法直接访问 WSL2 localhost，需用 *.moonchan.xyz 或已部署的 cloudflare pages |
+
+## 附录 B: 运行方式
+
+```bash
+# Go 单元测试
+cd back && go test -tags nosqlite ./internal/service/ -run "TestCreateCollection" -v
+
+# 前端单元测试
+cd front && npx vitest run
+
+# Playwright 移动端测试（需要 host Edge 打开 9222）
+cd /home/lumin/.claude/skills/playwright-test
+node scripts/test-runner.mjs /tmp/pw-mobile-final.mjs
+
+# 前端编译
+cd front && npx vite build
+```
