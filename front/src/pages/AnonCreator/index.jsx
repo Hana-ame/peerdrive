@@ -27,7 +27,7 @@ export default function AnonCreator() {
   // ===== 合集管理 =====
   const [collSort, setCollSort] = useState('time');
   const [collSearch, setCollSearch] = useState('');
-  const [collTagFilter, setCollTagFilter] = useState('');
+  const [collTagFilter, setCollTagFilter] = useState([]);
   const [enteredColl, setEnteredColl] = useState(null);
   const [enteredCollFiles, setEnteredCollFiles] = useState(null);
   const [collViewPath, setCollViewPath] = useState('');
@@ -145,7 +145,7 @@ export default function AnonCreator() {
   const filteredCollections = useMemo(() => {
     return collections.filter(c => {
       if (collSearch && !(c.friendly_name || c.name_preview || '').toLowerCase().includes(collSearch.toLowerCase())) return false;
-      if (collTagFilter && !(c.tags || []).some(t => t.toLowerCase().includes(collTagFilter.toLowerCase()))) return false;
+      if (collTagFilter.length > 0 && !collTagFilter.some(f => (c.tags || []).some(t => t.toLowerCase().includes(f.toLowerCase())))) return false;
       return true;
     }).sort((a, b) => {
       switch (collSort) {

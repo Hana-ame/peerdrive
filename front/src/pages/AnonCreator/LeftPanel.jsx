@@ -123,12 +123,15 @@ export default function LeftPanel({
             </div>
             {allCollTags.length > 0 && (
               <div className="flex gap-0.5 flex-wrap">
-                <button onClick={() => onCollTag('')}
-                  className={`text-[10px] px-1.5 py-0.5 rounded-full ${!collTagFilter ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>全部</button>
-                {allCollTags.map(t => (
-                  <button key={t} onClick={() => onCollTag(t === collTagFilter ? '' : t)}
-                    className={`text-[10px] px-1.5 py-0.5 rounded-full ${collTagFilter===t?'bg-blue-600 text-white':'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>{t}</button>
-                ))}
+                <button onClick={() => onCollTag([])}
+                  className={`text-[10px] px-1.5 py-0.5 rounded-full ${collTagFilter.length === 0 ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>全部</button>
+                {allCollTags.map(t => {
+                  const active = collTagFilter.includes(t);
+                  return (
+                    <button key={t} onClick={() => onCollTag(active ? collTagFilter.filter(x => x !== t) : [...collTagFilter, t])}
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full ${active ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>{t}</button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -160,7 +163,7 @@ export default function LeftPanel({
             <>
               {filteredCollections.length === 0 ? (
                 <p className="p-4 text-gray-600 text-xs text-center">
-                  {collSearch || collTagFilter ? '无匹配合集' : '暂无合集，创建第一个吧 →'}
+                  {collSearch || collTagFilter.length > 0 ? '无匹配合集' : '暂无合集，创建第一个吧 →'}
                 </p>
               ) : (
                 filteredCollections.map(c => (
