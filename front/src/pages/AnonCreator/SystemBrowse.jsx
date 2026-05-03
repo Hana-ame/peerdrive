@@ -26,9 +26,10 @@ export default function SystemBrowse({ sysPath, sysEntries, sysLoading, onNavTo,
             <span className="text-lg">{e.is_dir ? '📁' : '📄'}</span>
             <span className={`font-mono truncate flex-1 text-xs ${e.is_dir ? 'text-yellow-400' : 'text-blue-300'}`}>{e.name}</span>
             {e.is_dir ? (
-              <span className="text-gray-600 text-xs">文件夹</span>
+              <button onClick={(ev) => { ev.stopPropagation(); onAdd('', e.name + '/', '', 0); }}
+                className="text-green-400 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-green-600/20 hover:bg-green-600/40 shrink-0" title="添加整个文件夹">+</button>
             ) : (
-              <button onClick={(ev) => { ev.stopPropagation(); onAdd('', e.path, '', e.size || 0); }}
+              <button onClick={(ev) => { ev.stopPropagation(); onAdd('', e.name, '', e.size || 0); }}
                 className="text-blue-400 opacity-0 group-hover:opacity-100 text-sm px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 shrink-0">+</button>
             )}
           </div>
