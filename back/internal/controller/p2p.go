@@ -469,6 +469,7 @@ func BTDHTStatus(c *gin.Context) {
 		"enabled":     true,
 		"listen_addr": btSvc.Server.Addr().String(),
 		"num_nodes":   btSvc.NumNodes(),
+			"node_id":    fmt.Sprintf("%x", btSvc.NodeID),
 	})
 }
 

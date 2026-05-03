@@ -4,6 +4,7 @@
 package p2p_bt
 
 import (
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -13,13 +14,23 @@ import (
 	"peerdrive/internal/log"
 
 	dht "github.com/anacrolix/dht/v2"
+	"github.com/anacrolix/dht/v2/krpc"
 )
+
+// PeerdriveDHTNodePrefix is the first 2 bytes of a Peerdrive node's DHT ID.
+var PeerdriveDHTNodePrefix = [2]byte{0x70, 0x64} // "pd"
+
+// IsPeerdriveNodeID checks if a 20-byte DHT node ID belongs to a Peerdrive node.
+func IsPeerdriveNodeID(id krpc.ID) bool {
+	return id[0] == PeerdriveDHTNodePrefix[0] && id[1] == PeerdriveDHTNodePrefix[1]
+}
 
 // BTDHTService wraps a BitTorrent Mainline DHT server for announcing and
 // discovering file hashes.
 type BTDHTService struct {
 	Server     *dht.Server
 	listenAddr string
+	NodeID     krpc.ID // Peerdrive DHT node ID with prefix
 
 	// localBEP44Store holds BEP 44 items we have put ourselves, indexed by
 	// target hash. This guarantees Put/Get roundtrips succeed without depending
@@ -39,6 +50,10 @@ func NewBTDHT(listenAddr string) (*BTDHTService, error) {
 			"dht.transmissionbt.com:6881",
 		})
 	}
+
+	// Set Peerdrive node ID prefix for identification
+		myID := generatePeerdriveNodeID()
+		cfg.NodeId = myID
 
 	if listenAddr != "" {
 		udpAddr, err := net.ResolveUDPAddr("udp4", listenAddr)
@@ -72,6 +87,7 @@ func NewBTDHT(listenAddr string) (*BTDHTService, error) {
 	svc := &BTDHTService{
 		Server:     srv,
 		listenAddr: listenAddr,
+		NodeID:     myID,
 	}
 
 	log.LogInfo("bt-dht: server listening on %s (%d nodes)", srv.Addr().String(), srv.NumNodes())
@@ -204,4 +220,13 @@ func infoHashFromHex(hash string) ([]byte, error) {
 	}
 	// SHA256 produces 32 bytes; BitTorrent uses 160-bit (20-byte) infohashes.
 	return raw[:20], nil
+}
+
+// generatePeerdriveNodeID creates a 20-byte DHT node ID with a Peerdrive prefix.
+func generatePeerdriveNodeID() krpc.ID {
+	var id krpc.ID
+	id[0] = PeerdriveDHTNodePrefix[0]
+	id[1] = PeerdriveDHTNodePrefix[1]
+	rand.Read(id[2:])
+	return id
 }
