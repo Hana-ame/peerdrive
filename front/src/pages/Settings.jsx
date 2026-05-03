@@ -58,6 +58,10 @@ export default function Settings({ dataConsent, setDataConsent }) {
       const newUrl = api.getApiBase();
       setApiBase(newUrl);
       setActiveBackendId(id);
+      // 从后端加载 STUN/TURN
+      setStunUrl(api.getBackendField(id, 'stun_url', api.getStunUrl()));
+      setTurnUrl(api.getBackendField(id, 'turn_url', api.getTurnUrl()));
+      setTurnCredential(api.getBackendField(id, 'turn_credential', api.getTurnCredential()));
       // ping will auto-trigger via useEffect
     }
   }, []);
@@ -67,7 +71,11 @@ export default function Settings({ dataConsent, setDataConsent }) {
     const url = newBackendUrl.trim();
     if (!name || !url) return;
     const formattedUrl = url.startsWith('http') ? url : 'https://' + url;
-    api.addBackend(name, formattedUrl);
+    const id = api.addBackend(name, formattedUrl);
+    // 添加后自动切换到新后端，带上 STUN/TURN
+    api.updateBackendField(id, 'stun_url', stunUrl.trim());
+    api.updateBackendField(id, 'turn_url', turnUrl.trim());
+    api.updateBackendField(id, 'turn_credential', turnCredential.trim());
     setShowAddBackend(false);
     setNewBackendName('');
     setNewBackendUrl('');
@@ -236,6 +244,12 @@ export default function Settings({ dataConsent, setDataConsent }) {
     api.setStunUrl(stunUrl.trim());
     api.setTurnUrl(turnUrl.trim());
     api.setTurnCredential(turnCredential.trim());
+    // 同步到当前后端
+    if (activeBackendId) {
+      api.updateBackendField(activeBackendId, 'stun_url', stunUrl.trim());
+      api.updateBackendField(activeBackendId, 'turn_url', turnUrl.trim());
+      api.updateBackendField(activeBackendId, 'turn_credential', turnCredential.trim());
+    }
     testPing();
   };
 

@@ -8,8 +8,8 @@ const BACKENDS_KEY = 'peerdrive_backends';
 const CURRENT_BACKEND_KEY = 'peerdrive_current_backend_id';
 
 const DEFAULT_BACKENDS = [
-  { id: 'wsl', name: 'WSL', url: 'https://wsl-3000.moonchan.xyz' },
-  { id: 'bwh', name: 'BWH', url: 'http://97.64.30.221:3000' },
+  { id: 'wsl', name: 'WSL', url: 'https://wsl-3000.moonchan.xyz', stun_url: 'stun:stun.l.google.com:19302', turn_url: '', turn_credential: '' },
+  { id: 'bwh', name: 'BWH', url: 'http://97.64.30.221:3000', stun_url: 'stun:stun.l.google.com:19302', turn_url: '', turn_credential: '' },
 ];
 
 function getBackends() {
@@ -43,6 +43,28 @@ function switchBackend(id) {
   if (!target) return false;
   setCurrentBackendId(id);
   localStorage.setItem(STORAGE_KEY, target.url);
+  // 同步 STUN/TURN 配置到全局
+  if (target.stun_url !== undefined) localStorage.setItem(STUN_URL_KEY, target.stun_url);
+  if (target.turn_url !== undefined) localStorage.setItem(TURN_URL_KEY, target.turn_url);
+  if (target.turn_credential !== undefined) localStorage.setItem(TURN_CREDENTIAL_KEY, target.turn_credential);
+  return true;
+}
+
+// 读取当前后端的某个字段，fallback 到全局值或默认值
+function getBackendField(id, key, fallback) {
+  const backends = getBackends();
+  const target = backends.find(b => b.id === id);
+  if (target && target[key] !== undefined) return target[key];
+  return fallback;
+}
+
+// 更新当前后端的字段并落盘
+function updateBackendField(id, key, value) {
+  const backends = getBackends();
+  const idx = backends.findIndex(b => b.id === id);
+  if (idx === -1) return false;
+  backends[idx] = { ...backends[idx], [key]: value };
+  setBackends(backends);
   return true;
 }
 
@@ -292,7 +314,7 @@ export const ping = () => request('GET', '/ping');
 
 /* ---- settings ---- */
 export { getApiBase, setApiBase, getAuthToken, DEFAULT_API };
-export { getBackends, setBackends, getCurrentBackendId, setCurrentBackendId, switchBackend, addBackend, removeBackend, updateBackend, DEFAULT_BACKENDS };
+export { getBackends, setBackends, getCurrentBackendId, setCurrentBackendId, switchBackend, addBackend, removeBackend, updateBackend, getBackendField, updateBackendField, DEFAULT_BACKENDS };
 
 /* ---- llm ---- */
 const LLM_ENDPOINT_KEY = 'peerdrive_llm_endpoint';
