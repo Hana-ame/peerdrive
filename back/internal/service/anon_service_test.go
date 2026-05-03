@@ -204,6 +204,48 @@ func TestCreateCollection_EmptyPath(t *testing.T) {
 	assert.Empty(t, hash)
 }
 
+func TestCreateCollection_DirEntryWithoutProvider(t *testing.T) {
+	tmpDir, svc := setupAnonServiceTest(t)
+	defer os.RemoveAll(tmpDir)
+
+	// Directory entry (path ends with /) should not require providers
+	entries := []model.AnonCollectionEntry{
+		{Path: "images/"},
+		{Path: "docs/readme.md", Hash: "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"},
+	}
+
+	hash, err := svc.CreateCollection("dir-entry", entries, nil)
+	assert.NoError(t, err)
+	assert.Len(t, hash, 64)
+
+	coll, err := svc.GetCollectionByHash(hash)
+	assert.NoError(t, err)
+	assert.Len(t, coll.Entries, 2)
+
+	// Verify dir entry is stored without hash
+	for _, e := range coll.Entries {
+		if e.Path == "images/" {
+			assert.Empty(t, e.Hash)
+			assert.Empty(t, e.Providers)
+		}
+	}
+}
+
+func TestCreateCollection_FileWithoutProvider(t *testing.T) {
+	tmpDir, svc := setupAnonServiceTest(t)
+	defer os.RemoveAll(tmpDir)
+
+	// File entry (path without /) without providers should still fail
+	entries := []model.AnonCollectionEntry{
+		{Path: "file.txt"},
+	}
+
+	hash, err := svc.CreateCollection("no-provider", entries, nil)
+	assert.Error(t, err)
+	assert.Empty(t, hash)
+	assert.Contains(t, err.Error(), "invalid providers")
+}
+
 func TestCreateCollection_AbsolutePath(t *testing.T) {
 	tmpDir, svc := setupAnonServiceTest(t)
 	defer os.RemoveAll(tmpDir)
