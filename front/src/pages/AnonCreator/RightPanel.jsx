@@ -2,7 +2,7 @@ import EditorPanel from './EditorPanel';
 
 export default function RightPanel({
   fname, tags, entries, saving, showNamePrompt, toastMsg, toastErr,
-  entryActions, onFname, onTags, onSave, onCloseNamePrompt,
+  entryActions, onFname, onTags, onSave, onAddUrl, onCloseNamePrompt,
 }) {
   return (
     <div className="h-full flex flex-col">
@@ -10,7 +10,7 @@ export default function RightPanel({
         showNamePrompt={showNamePrompt} toastMsg={toastMsg} toastErr={toastErr}
         entryActions={entryActions}
         onFname={onFname} onTags={onTags} onSave={onSave}
-        onCloseNamePrompt={onCloseNamePrompt} />
+        onAddUrl={onAddUrl} onCloseNamePrompt={onCloseNamePrompt} />
     </div>
   );
 }

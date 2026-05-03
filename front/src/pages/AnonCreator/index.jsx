@@ -211,6 +211,26 @@ export default function AnonCreator() {
     showToast(`已添加: ${(path || '').split('/').pop()}`);
   };
 
+  // 添加 URL 条目：可选择是否注册（下载文件获取 sha256）
+  const handleAddUrl = async (url, filename, shouldRegister) => {
+    const name = filename || url.split('/').pop() || 'url-file';
+    if (shouldRegister) {
+      try {
+        const res = await api.registerURL(url, name);
+        if (res?.hash) {
+          addEntry(res.hash, name, res.mime_type || '', res.size || 0);
+          showToast(`已注册 URL: ${name}`);
+        }
+      } catch (e) {
+        showToast(`URL 注册失败: ${e.message}`, true);
+      }
+    } else {
+      const providers = [{ type: "url", value: url }];
+      setEntries(prev => [...prev, { hash: '', path: name, providers, mime_type: '', size: 0 }]);
+      showToast(`已添加 URL: ${name}`);
+    }
+  };
+
   // 从本地电脑添加文件：先注册再添加
   const handleSysAddFile = async (sysPath, name, size) => {
     try {
@@ -457,6 +477,7 @@ export default function AnonCreator() {
           showNamePrompt={showNamePrompt} toastMsg={toastMsg} toastErr={toastErr}
           entryActions={entryActions}
           onFname={setFname} onTags={setTags} onSave={handleSave}
+          onAddUrl={handleAddUrl}
           onCloseNamePrompt={() => setShowNamePrompt(false)}
         />
       </div>

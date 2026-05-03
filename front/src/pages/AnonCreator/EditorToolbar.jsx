@@ -4,7 +4,7 @@ function parseTags(s) {
   return (s || '').split(/[,;]/).map(t => t.trim()).filter(Boolean);
 }
 
-export default function EditorToolbar({ fname, tags, entryCount, validCount, saving, onFname, onTags, onSave }) {
+export default function EditorToolbar({ fname, tags, entryCount, validCount, saving, onFname, onTags, onSave, onShowUrlInput }) {
   const [inputVal, setInputVal] = useState('');
   const tagList = parseTags(tags);
   const inputRef = useRef(null);
@@ -39,9 +39,12 @@ export default function EditorToolbar({ fname, tags, entryCount, validCount, sav
 
   return (
     <div className="px-3 py-1.5 border-b border-gray-800 shrink-0 space-y-1">
-      {/* 第一行：合集名称 + 统计 + 保存 */}
+      {/* 第一行：合集名称 + 统计 + 操作 + 保存 */}
       <div className="flex items-center gap-2">
         <input value={fname} onChange={e => onFname(e.target.value)} placeholder="合集名称" className="bg-gray-800 text-xs px-2 py-1.5 rounded border border-gray-700 w-28 focus:outline-none focus:border-blue-500" />
+        {onShowUrlInput && (
+          <button onClick={onShowUrlInput} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded shrink-0" title="添加 URL 条目">+ URL</button>
+        )}
         <span className="text-[10px] text-gray-500 ml-auto shrink-0">{validCount} 个文件</span>
         <button onClick={onSave} disabled={saving || !validCount}
           className="bg-green-600 hover:bg-green-700 disabled:opacity-40 text-sm px-3 py-1.5 rounded font-medium shrink-0">💾 保存</button>
