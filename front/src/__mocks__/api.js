@@ -105,6 +105,22 @@ export const getApiBaseUrl = () => ''
 export const WS_TRANSFER_URL_BASE = 'http://localhost:3000'
 export const WS_TRANSFER_URL = 'ws://localhost:3000/ws/transfer'
 
+// Backend switching (mocks)
+export const DEFAULT_BACKENDS = [
+  { id: 'wsl', name: 'WSL', url: 'https://wsl-3000.moonchan.xyz', stun_url: 'stun:stun.l.google.com:19302', turn_url: '', turn_credential: '' },
+  { id: 'bwh', name: 'BWH', url: 'http://97.64.30.221:3000', stun_url: 'stun:stun.l.google.com:19302', turn_url: '', turn_credential: '' },
+]
+export const getBackends = () => DEFAULT_BACKENDS
+export const setBackends = () => {}
+export const getCurrentBackendId = () => 'wsl'
+export const setCurrentBackendId = () => {}
+export const switchBackend = () => true
+export const addBackend = () => 'mock-id'
+export const removeBackend = () => true
+export const updateBackend = () => true
+export const getBackendField = () => ''
+export const updateBackendField = () => true
+
 // LLM
 export const getLlmEndpoint = () => ''
 export const setLlmEndpoint = () => {}
