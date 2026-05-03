@@ -333,6 +333,21 @@ func SetupRouter(
 		ipfs.GET("/gateways", controller.IPFSGatewayStatus)
 	}
 
+		// ── 统一 Collection 路由（新代码使用这些） ──
+		coll := r.Group("/collections")
+		{
+			coll.POST("", controller.CreateAnonCollection)
+			coll.GET("", controller.ListAnonCollections)
+			coll.GET("/:hash", controller.GetAnonCollection)
+			coll.GET("/:hash/*filepath", controller.DownloadAnonFile)
+		}
+
+		// 向后兼容 redirects
+		r.GET("/files", func(c *gin.Context) { c.Redirect(http.StatusMovedPermanently, "/collections") })
+		r.GET("/anon/collections", func(c *gin.Context) { c.Redirect(http.StatusMovedPermanently, "/collections") })
+		r.POST("/anon/collections", func(c *gin.Context) { c.Redirect(http.StatusPermanentRedirect, "/collections") })
+		r.GET("/anon/collections/:hash", func(c *gin.Context) { c.Redirect(http.StatusMovedPermanently, "/collections/"+c.Param("hash")) })
+		r.GET("/anon/collections/:hash/*filepath", func(c *gin.Context) { c.Redirect(http.StatusMovedPermanently, "/collections/"+c.Param("hash")+c.Param("filepath")) })
 	// Anonymous Collection routes (public)
 	anon := r.Group("/anon")
 	{
