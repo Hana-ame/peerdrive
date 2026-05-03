@@ -236,7 +236,7 @@ function SearchPanel({ open, onClose }) {
               {results.files.map((f, i) => {
                 const idx = results.anon.length + results.public.length + i;
                 return (
-                  <div key={f.hash} onClick={() => { nav('/files'); onClose(); }}
+                  <div key={f.hash} onClick={() => { nav('/'); onClose(); }}
                     className={`flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-gray-700 ${activeIdx === idx ? 'bg-gray-700' : ''}`}>
                     <span>📄</span>
                     <span className="text-blue-300 truncate">{f.filename}</span>
@@ -307,7 +307,7 @@ export default function Navbar() {
   ];
 
   const allNavItems = [
-    { to: '/files', label: '本地文件管理' },
+    { to: '/', label: '合集' },
     { to: '/create', label: '创建合集' },
     { label: 'P2P 网络', children: p2pItems },
     { label: 'BT', children: btItems },
@@ -341,7 +341,7 @@ export default function Navbar() {
 
         {/* 桌面端导航链接 */}
         <div className="hidden md:flex items-center">
-          <Link to="/files" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">本地文件管理</Link>
+          <Link to="/" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">合集</Link>
           <Link to="/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">创建合集</Link>
           <NavDropdown label="P2P 网络" to="/p2p" items={p2pItems} />
           <NavDropdown label="BT" to="/bt" items={btItems} />

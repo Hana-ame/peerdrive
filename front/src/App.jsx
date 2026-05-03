@@ -3,7 +3,6 @@ import React, { useState, createContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Plaza from './pages/Plaza';
 import Explorer from './pages/Explorer';
-import FileManager from './pages/FileManager';
 import AnonCreator from './pages/AnonCreator/index';
 import AnonExplorer from './pages/AnonExplorer/index';
 import Settings from './pages/Settings';
@@ -43,7 +42,7 @@ export default function App() {
             <div className="flex-1 overflow-hidden">
               <Routes>
                 <Route path="/" element={<Plaza />} />
-                <Route path="/files" element={<FileManager />} />
+                <Route path="/files" element={<Navigate to="/" replace />} />
                 <Route path="/:username/:collName" element={<Explorer />} />
                 <Route path="/create" element={<AnonCreator />} />
                 <Route path="/anon/collections/:hash" element={<AnonExplorer />} />
