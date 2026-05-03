@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import * as api from '../api';
-import { listAnonCollections, searchCollections, listFiles } from '../api';
+import { listAnonCollections, searchCollections } from '../api';
 
 // ── 下拉菜单组件（Portal 到 body，避免被 overflow 容器裁剪）──
 // 支持 hover（桌面）和 click（触摸）两种交互
@@ -102,7 +102,7 @@ function NavDropdown({ label, to, items }) {
 // 全局搜索面板：搜索合集和文件，键盘导航选择
 function SearchPanel({ open, onClose }) {
   const [q, setQ] = useState('');
-  const [results, setResults] = useState({ anon: [], public: [], files: [] });
+  const [results, setResults] = useState({ anon: [], public: [] });
   const [loading, setLoading] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const inputRef = useRef(null);
@@ -111,28 +111,25 @@ function SearchPanel({ open, onClose }) {
   useEffect(() => {
     if (open) {
       setQ('');
-      setResults({ anon: [], public: [], files: [] });
+      setResults({ anon: [], public: [] });
       setActiveIdx(0);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open]);
 
   useEffect(() => {
-    if (!q.trim()) { setResults({ anon: [], public: [], files: [] }); return; }
+    if (!q.trim()) { setResults({ anon: [], public: [] }); return; }
     const t = setTimeout(async () => {
       setLoading(true);
       try {
-        const [anon, pub, flist] = await Promise.all([
+        const [anon, pub] = await Promise.all([
           listAnonCollections().then(d => (d || []).filter(c =>
             (c.friendly_name || '').toLowerCase().includes(q.toLowerCase()) ||
             (c.hash || '').toLowerCase().includes(q.toLowerCase())
           ).slice(0, 3)),
           searchCollections(q).then(d => (d.collections || d.data || []).slice(0, 3)),
-          listFiles('time').then(d => (d || []).filter(f =>
-            (f.filename || '').toLowerCase().includes(q.toLowerCase())
-          ).slice(0, 3)),
         ]);
-        setResults({ anon, public: pub, files: flist });
+        setResults({ anon, public: pub });
       } catch { setResults({ anon: [], public: [], files: [] }); }
       setLoading(false);
     }, 200);
@@ -160,11 +157,10 @@ function SearchPanel({ open, onClose }) {
 
   if (!open) return null;
 
-  const all = [...results.anon, ...results.public, ...results.files];
+  const all = [...results.anon, ...results.public];
   const hasAnon = results.anon.length > 0;
   const hasPublic = results.public.length > 0;
-  const hasFiles = results.files.length > 0;
-  const hasAny = hasAnon || hasPublic || hasFiles;
+  const hasAny = hasAnon || hasPublic;
 
   return (
     <>
@@ -176,7 +172,7 @@ function SearchPanel({ open, onClose }) {
             ref={inputRef}
             value={q}
             onChange={e => { setQ(e.target.value); setActiveIdx(0); }}
-            placeholder="搜索合集、文件..."
+            placeholder="搜索合集..."
             className="flex-1 bg-transparent text-sm outline-none text-gray-200 placeholder-gray-500"
           />
           <kbd className="text-[10px] text-gray-500 bg-gray-700 px-1.5 py-0.5 rounded">Esc</kbd>
@@ -191,7 +187,7 @@ function SearchPanel({ open, onClose }) {
 
           {!q && !loading && (
             <div className="px-4 py-8 text-center text-gray-600 text-xs">
-              <p>输入关键词搜索合集或文件</p>
+              <p>输入关键词搜索合集</p>
               <p className="mt-1 text-gray-700">Ctrl+K 快速打开 · ↑↓ 选择 · Enter 打开 · Esc 关闭</p>
             </div>
           )}
