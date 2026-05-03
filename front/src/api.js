@@ -440,9 +440,12 @@ export function uploadConsent() {
 }
 
 /* ---- alias exports for legacy usage ---- */
-export const createCollection = createUserCollection;
-export const listCollections = getUserCollections;
-export const getCollection = getUserCollection;
+// 统一 Collection API（替代旧的 createUserCollection/createAnonCollection 等）
+// 一切皆 collection，entry 的 provider 可为 sha256 或 url
+export const createCollection = (entries, name = '', tags = []) =>
+  request('POST', '/anon/collections', { name, entries, tags });
+export const listCollections = () => request('GET', '/anon/collections');
+export const getCollection = (id) => request('GET', `/anon/collections/${id}`);
 export const addEntry = addCollectionEntry;
 export const deleteEntry = removeCollectionEntry;
 export const commitVersion = commitCollection;
