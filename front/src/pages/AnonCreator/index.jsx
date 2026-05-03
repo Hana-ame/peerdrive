@@ -224,30 +224,33 @@ export default function AnonCreator() {
     }
   };
 
-  // 从本地电脑添加文件夹：列出文件后逐一注册添加
+  // 从本地电脑添加文件夹：递归列出文件后逐一注册添加
   const handleSysAddFolder = async (dirPath, dirName) => {
-    try {
-      const entries = await api.browseDir(dirPath);
-      if (!entries || entries.length === 0) {
-        showToast(`空文件夹已忽略: ${dirName}`, true);
-        return;
-      }
-      let added = 0;
+    let added = 0;
+    const walkDir = async (path, prefix) => {
+      let entries;
+      try {
+        entries = await api.browseDir(path);
+      } catch { return; }
+      if (!entries || entries.length === 0) return;
       for (const e of entries) {
-        if (e.is_dir) continue; // 不嵌套处理子目录
-        try {
-          const res = await api.registerLocalFile(e.path, e.name);
-          if (res?.hash) {
-            addEntry(res.hash, dirName + '/' + e.name, res.mime_type || '', e.size || 0);
-            added++;
-          }
-        } catch {}
+        const relPath = prefix ? prefix + '/' + e.name : e.name;
+        if (e.is_dir) {
+          await walkDir(e.path, relPath);
+        } else {
+          try {
+            const res = await api.registerLocalFile(e.path, relPath);
+            if (res?.hash) {
+              addEntry(res.hash, dirName + '/' + relPath, res.mime_type || '', e.size || 0);
+              added++;
+            }
+          } catch {}
+        }
       }
-      if (added > 0) showToast(`已添加 ${added} 个文件到 ${dirName}/`);
-      else showToast(`空文件夹已忽略: ${dirName}`, true);
-    } catch (e) {
-      showToast(`添加文件夹失败: ${e.message}`, true);
-    }
+    };
+    await walkDir(dirPath, '');
+    if (added > 0) showToast(`已添加 ${added} 个文件到 ${dirName}/`);
+    else showToast(`空文件夹已忽略: ${dirName}`, true);
   };
 
   // ===== 保存合集 =====
