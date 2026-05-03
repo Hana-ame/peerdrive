@@ -306,21 +306,49 @@ export default function Navbar() {
     { to: '/ipfs/dht', label: 'IPFS DHT 查询' },
   ];
 
+  const allNavItems = [
+    { to: '/files', label: '本地文件管理' },
+    { to: '/create', label: '创建合集' },
+    { label: 'P2P 网络', children: p2pItems },
+    { label: 'BT', children: btItems },
+    { label: 'IPFS', children: ipfsItems },
+  ];
+
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // 移动端菜单点击后导航并关闭
+  const handleMobileNav = (to) => {
+    nav(to);
+    setMobileMenuOpen(false);
+  };
+
   return (
     <>
-      <nav className="h-14 bg-gray-800 border-b border-gray-700 flex items-center px-6 gap-4 overflow-x-auto shrink-0 scrollbar-hide">
-        <div className="flex items-center gap-4 flex-shrink-0">
-          <Link to="/" className="text-xl font-bold text-blue-400 hover:text-blue-300 inline-flex items-center">Peerdrive</Link>
-          <div className="flex items-center">
-            <Link to="/files" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">本地文件管理</Link>
-            <Link to="/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">创建合集</Link>
-            <NavDropdown label="P2P 网络" to="/p2p" items={p2pItems} />
-            <NavDropdown label="BT" to="/bt" items={btItems} />
-            <NavDropdown label="IPFS" to="/ipfs" items={ipfsItems} />
-          </div>
+      <nav className="h-14 bg-gray-800 border-b border-gray-700 flex items-center px-3 md:px-6 gap-2 md:gap-4 shrink-0">
+        {/* 汉堡菜单按钮（移动端） */}
+        <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="md:hidden text-gray-400 hover:text-white p-1.5 rounded hover:bg-gray-700 transition-colors"
+          aria-label="菜单">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {mobileMenuOpen
+              ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            }
+          </svg>
+        </button>
+
+        <Link to="/" className="text-lg md:text-xl font-bold text-blue-400 hover:text-blue-300 inline-flex items-center shrink-0">Peerdrive</Link>
+
+        {/* 桌面端导航链接 */}
+        <div className="hidden md:flex items-center">
+          <Link to="/files" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">本地文件管理</Link>
+          <Link to="/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">创建合集</Link>
+          <NavDropdown label="P2P 网络" to="/p2p" items={p2pItems} />
+          <NavDropdown label="BT" to="/bt" items={btItems} />
+          <NavDropdown label="IPFS" to="/ipfs" items={ipfsItems} />
         </div>
 
-        <div className="flex items-center space-x-3 flex-shrink-0 ml-auto">
+        <div className="flex items-center space-x-2 md:space-x-3 shrink-0 ml-auto">
           {!authLoading && (
             <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-800/60 border border-gray-700/50 text-xs">
               <span className={`w-1.5 h-1.5 rounded-full ${authStatus?.authenticated ? 'bg-green-400' : 'bg-yellow-500'}`} />
@@ -340,6 +368,38 @@ export default function Navbar() {
           <Link to="/settings" className="text-gray-500 hover:text-gray-300 text-sm inline-flex items-center flex-shrink-0" title="设置">⚙</Link>
         </div>
       </nav>
+
+      {/* ── 移动端抽屉菜单 ── */}
+      {mobileMenuOpen && createPortal(
+        <div className="md:hidden fixed inset-0 z-30" onClick={() => setMobileMenuOpen(false)}>
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="absolute top-14 left-0 right-0 bg-gray-800 border-b border-gray-700 shadow-xl"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="py-2">
+              {allNavItems.map((item, i) => (
+                item.children ? (
+                  <div key={i}>
+                    <div className="px-4 py-2 text-[10px] text-gray-500 uppercase tracking-wider">{item.label}</div>
+                    {item.children.map((child, j) => (
+                      <button key={j} onClick={() => handleMobileNav(child.to)}
+                        className="w-full text-left px-6 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-gray-700/50 transition-colors">
+                        {child.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <button key={i} onClick={() => handleMobileNav(item.to)}
+                    className="w-full text-left px-4 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-gray-700/50 transition-colors">
+                    {item.label}
+                  </button>
+                )
+              ))}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       <SearchPanel open={searchOpen} onClose={() => setSearchOpen(false)} />
     </>
   );

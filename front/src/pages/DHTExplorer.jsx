@@ -54,7 +54,7 @@ export default function DHTExplorer() {
           onChange={e => setHash(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') doDualFind(); }}
           placeholder="SHA256 / InfoHash / CID..."
-          className="flex-1 min-w-[300px] bg-gray-900 border border-gray-600 px-4 py-2.5 rounded text-sm text-gray-200 font-mono focus:outline-none focus:border-blue-500"
+          className="flex-1 min-w-0 md:min-w-[300px] bg-gray-900 border border-gray-600 px-4 py-2.5 rounded text-sm text-gray-200 font-mono focus:outline-none focus:border-blue-500"
         />
         <button
           onClick={doDualFind}
