@@ -277,6 +277,15 @@
 | 握手 | ✅ BT wire protocol handshake 成功 |
 | 日期 | 2026-04-29 |
 
+### I-05 P2P Collection 跨服务器同步 (NEW)
+| 项 | 详情 |
+|----|------|
+| 目标 | BWH 创建合集 → P2P announce → WSL 发现并拉取 |
+| 操作 | BWH: upload → create → dual announce; WSL: dual find → fetch → save → download |
+| 节点 | BWH (relay server) ↔ WSL (relay client) |
+| 结果 | ✅ 合集数据完整同步，文件内容端到端一致 |
+| 日期 | 2026-05-03 |
+
 ### I-03 IPFS 本地节点互通
 | 项 | 详情 |
 |----|------|
