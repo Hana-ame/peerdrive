@@ -340,6 +340,9 @@ func SetupRouter(
 			coll.GET("", controller.ListAnonCollections)
 			coll.GET("/:hash", controller.GetAnonCollection)
 			coll.GET("/:hash/*filepath", controller.DownloadAnonFile)
+			coll.POST("/fork", controller.ForkAnonCollection)
+			coll.POST("/merge", controller.MergeFromSource)
+			coll.POST("/pull", controller.PullCollection)
 		}
 
 		// 向后兼容 redirects
@@ -397,6 +400,10 @@ func SetupRouter(
 		sync.POST("/save", syncCtrl.SaveLocal)
 		sync.GET("/status/:hash", syncCtrl.GetStatus)
 	}
+	// 向后兼容 redirects: /actions/* → /collections/*
+	r.POST("/actions/fork", func(c *gin.Context) { c.Redirect(http.StatusPermanentRedirect, "/collections/fork") })
+	r.POST("/actions/merge", func(c *gin.Context) { c.Redirect(http.StatusPermanentRedirect, "/collections/merge") })
+	r.POST("/actions/pull", func(c *gin.Context) { c.Redirect(http.StatusPermanentRedirect, "/collections/pull") })
 
 	// Collaboration actions
 	actions := r.Group("/actions")
