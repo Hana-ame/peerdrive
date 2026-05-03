@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -32,11 +33,12 @@ import (
 )
 
 const (
-	ProtocolExchange    = "/peerdrive/exchange/1.0.0"
-	ProtocolAnnounce    = "/peerdrive/announce/1.0.0"
-	ProtocolRequest     = "/peerdrive/request/1.0.0"
-	DiscoveryServiceTag = "peerdrive-mdns"
-	FileReadTimeout     = 30 * time.Second
+	ProtocolExchange       = "/peerdrive/exchange/1.0.0"
+	ProtocolAnnounce       = "/peerdrive/announce/1.0.0"
+	ProtocolRequest        = "/peerdrive/request/1.0.0"
+	ProtocolCollectionList = "/peerdrive/collections/list/1.0.0"
+	DiscoveryServiceTag    = "peerdrive-mdns"
+	FileReadTimeout        = 30 * time.Second
 )
 
 type P2PService struct {
@@ -159,6 +161,7 @@ func NewP2PService(ctx context.Context, cfg *config.Config) (*P2PService, error)
 
 	h.SetStreamHandler(protocol.ID(ProtocolExchange), svc.handleExchange)
 	h.SetStreamHandler(protocol.ID(ProtocolAnnounce), svc.handleAnnounce)
+	h.SetStreamHandler(protocol.ID(ProtocolCollectionList), svc.handleCollectionList)
 	h.SetStreamHandler(protocol.ID(ProtocolRequest), svc.handleRequest)
 
 	if cfg.P2PMDNSEnable {
@@ -565,6 +568,44 @@ func (p *P2PService) SyncFiles(ctx context.Context, peerID peer.ID, hashes []str
 	return synced, nil
 }
 
+
+// RequestCollectionList 向指定对端查询公开集合列表，返回 JSON 编码的 []model.Collection。
+func (p *P2PService) RequestCollectionList(ctx context.Context, peerID peer.ID, query string) ([]byte, error) {
+	stream, err := p.Host.NewStream(ctx, peerID, protocol.ID(ProtocolCollectionList))
+	if err != nil {
+		return nil, fmt.Errorf("open stream: %w", err)
+	}
+	defer stream.Close()
+
+	stream.SetWriteDeadline(time.Now().Add(FileReadTimeout))
+	if _, err := fmt.Fprintf(stream, "%s\n", query); err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+
+	stream.SetReadDeadline(time.Now().Add(FileReadTimeout))
+	reader := bufio.NewReader(stream)
+	statusLine, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, fmt.Errorf("read status: %w", err)
+	}
+
+	statusLine = strings.TrimSpace(statusLine)
+	if strings.HasPrefix(statusLine, "ERR ") {
+		return nil, fmt.Errorf("peer error: %s", strings.TrimPrefix(statusLine, "ERR "))
+	}
+
+	var size int
+	if _, scanErr := fmt.Sscanf(statusLine, "OK %d", &size); scanErr != nil || size <= 0 {
+		return nil, fmt.Errorf("peer returned error: %s", statusLine)
+	}
+
+	data := make([]byte, size)
+	if _, err := io.ReadFull(reader, data); err != nil {
+		return nil, fmt.Errorf("read data: %w", err)
+	}
+
+	return data, nil
+}
 func (p *P2PService) requestData(ctx context.Context, peerID peer.ID, hash string) ([]byte, error) {
 	stream, err := p.Host.NewStream(ctx, peerID, protocol.ID(ProtocolExchange))
 	if err != nil {
@@ -908,4 +949,74 @@ func trimNewline(s string) string {
 		return s[:len(s)-1]
 	}
 	return s
+}
+
+type collectionListResponse struct {
+	UserCollections []model.Collection          `json:"user_collections"`
+	AnonCollections []model.AnonCollectionSummary `json:"anon_collections"`
+}
+
+func (p *P2PService) handleCollectionList(stream network.Stream) {
+	log.LogDebug("p2p: handleCollectionList from %s", stream.Conn().RemotePeer().String())
+	defer stream.Close()
+
+	reader := bufio.NewReader(stream)
+	queryLine, err := reader.ReadString('\n')
+	if err != nil {
+		log.LogWarn("p2p: handleCollectionList read error from %s: %v", stream.Conn().RemotePeer().String(), err)
+		fmt.Fprintf(stream, "ERR bad request\n")
+		return
+	}
+	q := strings.TrimSpace(queryLine)
+
+	resp := collectionListResponse{}
+
+	// Query public user collections
+	if repository.DB != nil {
+		var rows *sql.Rows
+		if q != "" {
+			rows, err = repository.DB.Query(
+				`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at
+				 FROM collections WHERE visibility = 'public' AND (username LIKE ? OR collection_name LIKE ?)
+				 ORDER BY created_at DESC`, "%"+q+"%", "%"+q+"%")
+		} else {
+			rows, err = repository.DB.Query(
+				`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at
+				 FROM collections WHERE visibility = 'public' ORDER BY created_at DESC`)
+		}
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				col, scanErr := model.ScanCollection(rows)
+				if scanErr == nil {
+					resp.UserCollections = append(resp.UserCollections, *col)
+				}
+			}
+		}
+	}
+	if resp.UserCollections == nil {
+		resp.UserCollections = []model.Collection{}
+	}
+
+	// Query anonymous collections (always public)
+	anonCols, err := repository.ListAnonCollections(p.storageDir)
+	if err == nil {
+		resp.AnonCollections = anonCols
+	}
+	if resp.AnonCollections == nil {
+		resp.AnonCollections = []model.AnonCollectionSummary{}
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		log.LogWarn("p2p: handleCollectionList marshal error: %v", err)
+		fmt.Fprintf(stream, "ERR marshal error\n")
+		return
+	}
+
+	stream.SetWriteDeadline(time.Now().Add(FileReadTimeout))
+	fmt.Fprintf(stream, "OK %d\n", len(data))
+	stream.Write(data)
+	log.LogInfo("p2p: handleCollectionList sent %d user + %d anon collections to %s",
+		len(resp.UserCollections), len(resp.AnonCollections), stream.Conn().RemotePeer().String())
 }
