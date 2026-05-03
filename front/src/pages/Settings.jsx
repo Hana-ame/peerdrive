@@ -37,6 +37,63 @@ export default function Settings({ dataConsent, setDataConsent }) {
   const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState('node');
 
+  // ─── Backend Switching ──────────────────────────────
+  const DEFAULT_BACKEND_IDS = api.DEFAULT_BACKENDS.map(b => b.id);
+  const [backends, setBackendsState] = useState(api.getBackends());
+  const [activeBackendId, setActiveBackendId] = useState(api.getCurrentBackendId());
+  const [showAddBackend, setShowAddBackend] = useState(false);
+  const [newBackendName, setNewBackendName] = useState('');
+  const [newBackendUrl, setNewBackendUrl] = useState('');
+  const [showCustomConnect, setShowCustomConnect] = useState(false);
+  const [customConnectUrl, setCustomConnectUrl] = useState('');
+  const activeBackendName = backends.find(b => b.id === activeBackendId)?.name || '';
+
+  const refreshBackends = useCallback(() => {
+    setBackendsState(api.getBackends());
+    setActiveBackendId(api.getCurrentBackendId());
+  }, []);
+
+  const handleSwitchBackend = useCallback((id) => {
+    if (api.switchBackend(id)) {
+      const newUrl = api.getApiBase();
+      setApiBase(newUrl);
+      setActiveBackendId(id);
+      // ping will auto-trigger via useEffect
+    }
+  }, []);
+
+  const handleAddBackend = () => {
+    const name = newBackendName.trim();
+    const url = newBackendUrl.trim();
+    if (!name || !url) return;
+    const formattedUrl = url.startsWith('http') ? url : 'https://' + url;
+    api.addBackend(name, formattedUrl);
+    setShowAddBackend(false);
+    setNewBackendName('');
+    setNewBackendUrl('');
+    refreshBackends();
+  };
+
+  const handleCustomConnect = () => {
+    const url = customConnectUrl.trim();
+    if (!url) return;
+    const formatted = url.startsWith('http') ? url : 'https://' + url;
+    api.setApiBase(formatted);
+    setApiBase(formatted);
+    setActiveBackendId(null);
+    setCustomConnectUrl('');
+    setShowCustomConnect(false);
+  };
+
+  const handleRemoveBackend = (id) => {
+    if (confirm(`确定删除后端 "${backends.find(b => b.id === id)?.name || id}"？`)) {
+      api.removeBackend(id);
+      refreshBackends();
+      const newUrl = api.getApiBase();
+      if (newUrl !== apiBase) setApiBase(newUrl);
+    }
+  };
+
   // ─── Node Connection ─────────────────────────────────
   const [apiBase, setApiBase] = useState(api.getApiBase());
   const [pingOk, setPingOk] = useState(null);
@@ -421,19 +478,86 @@ export default function Settings({ dataConsent, setDataConsent }) {
             description="配置 API 端点、P2P 网络连接和中继服务器参数"
             onSave={handleSaveNode}
           >
-            {/* API Endpoint */}
+            {/* ─── 后端快速切换 ─── */}
             <div>
-              <label className="block text-xs text-gray-400 mb-1">API Endpoint</label>
-              <div className="flex gap-2">
-                <input
-                  value={apiBase}
-                  onChange={(e) => setApiBase(e.target.value)}
-                  placeholder="https://your-node.com"
-                  className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
-                />
-                <div className="flex items-center gap-1.5 px-2 shrink-0">
+              <label className="block text-xs text-gray-400 mb-2">后端快速切换</label>
+              <div className="flex flex-wrap gap-2">
+                {backends.map((b) => {
+                  const isActive = b.id === activeBackendId;
+                  return (
+                    <button
+                      key={b.id}
+                      onClick={() => handleSwitchBackend(b.id)}
+                      className={`group relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all border ${
+                        isActive
+                          ? 'bg-blue-600/20 border-blue-500/50 text-blue-300'
+                          : 'bg-gray-800/50 border-gray-700/50 text-gray-400 hover:border-gray-600 hover:text-gray-200'
+                      }`}
+                    >
+                      <span>{b.name}</span>
+                      <span className={`text-[10px] ${isActive ? 'text-blue-400' : 'text-gray-600'}`}>
+                        {isActive ? '✓' : ''}
+                      </span>
+                      {!isActive && !DEFAULT_BACKEND_IDS.includes(b.id) && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleRemoveBackend(b.id); }}
+                          className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500/80 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="删除"
+                        >×</button>
+                      )}
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={() => setShowAddBackend(true)}
+                  className="px-3 py-2 rounded-lg text-sm border border-dashed border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-500 transition-all"
+                  title="添加后端"
+                >+ 添加</button>
+              </div>
+            </div>
+
+            {/* ─── 添加后端弹窗 ─── */}
+            {showAddBackend && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowAddBackend(false)}>
+                <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 w-80 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                  <h3 className="text-sm font-bold text-gray-200 mb-3">添加后端</h3>
+                  <input
+                    value={newBackendName}
+                    onChange={(e) => setNewBackendName(e.target.value)}
+                    placeholder="名称（如：VPS）"
+                    className="w-full bg-gray-800 px-3 py-2 rounded text-sm mb-2 border border-gray-700 focus:outline-none focus:border-blue-500"
+                  />
+                  <input
+                    value={newBackendUrl}
+                    onChange={(e) => setNewBackendUrl(e.target.value)}
+                    placeholder="URL（如：http://host:3000）"
+                    className="w-full bg-gray-800 px-3 py-2 rounded text-sm mb-3 border border-gray-700 focus:outline-none focus:border-blue-500"
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => setShowAddBackend(false)}
+                      className="px-3 py-1.5 text-sm text-gray-400 hover:text-white"
+                    >取消</button>
+                    <button
+                      onClick={handleAddBackend}
+                      disabled={!newBackendName.trim() || !newBackendUrl.trim()}
+                      className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-40"
+                    >添加</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ─── 当前端点状态 ─── */}
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">
+                当前连接
+                {activeBackendName && <span className="text-blue-400 ml-1">({activeBackendName})</span>}
+              </label>
+              <div className="flex items-center gap-2 bg-gray-800/50 px-3 py-2.5 rounded-lg border border-gray-700/50">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <span
-                    className={`w-2 h-2 rounded-full ${
+                    className={`w-2.5 h-2.5 rounded-full ${
                       pingOk === null
                         ? 'bg-gray-500'
                         : pingOk
@@ -441,15 +565,70 @@ export default function Settings({ dataConsent, setDataConsent }) {
                           : 'bg-red-500'
                     }`}
                   />
-                  <span className="text-[10px] text-gray-500 whitespace-nowrap">
-                    {pingOk === null ? '检测中...' : pingOk ? '已连接' : '未连接'}
+                  <span className={`text-xs whitespace-nowrap ${
+                    pingOk === null ? 'text-gray-500' : pingOk ? 'text-green-400' : 'text-red-400'
+                  }`}>
+                    {pingOk === null ? '读取中...' : pingOk ? '已连接' : '连接失败'}
                   </span>
                 </div>
+                <span className="text-sm font-mono text-gray-300 truncate flex-1">{apiBase}</span>
               </div>
               {nodeInfo && (
-                <pre className="text-[10px] text-gray-500 bg-gray-900 p-2 rounded mt-2 overflow-x-auto max-h-24">
-                  {JSON.stringify(nodeInfo, null, 2)}
-                </pre>
+                <div className="mt-2 bg-gray-900/80 rounded-lg p-3 border border-gray-800">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                    {nodeInfo.peer_id && (
+                      <>
+                        <span className="text-gray-500">Peer ID</span>
+                        <span className="text-gray-300 font-mono truncate">{nodeInfo.peer_id}</span>
+                      </>
+                    )}
+                    {nodeInfo.p2p_enabled !== undefined && (
+                      <>
+                        <span className="text-gray-500">P2P</span>
+                        <span className={nodeInfo.p2p_enabled ? 'text-green-400' : 'text-red-400'}>
+                          {nodeInfo.p2p_enabled ? '启用' : '禁用'}
+                        </span>
+                      </>
+                    )}
+                    {nodeInfo.relay_mode && (
+                      <>
+                        <span className="text-gray-500">Relay</span>
+                        <span className="text-gray-300">{nodeInfo.relay_mode}</span>
+                      </>
+                    )}
+                    {nodeInfo.num_peers !== undefined && (
+                      <>
+                        <span className="text-gray-500">Peers</span>
+                        <span className="text-gray-300">{nodeInfo.num_peers}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ─── 临时连接 ─── */}
+            <div>
+              <button
+                onClick={() => setShowCustomConnect(!showCustomConnect)}
+                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                {showCustomConnect ? '▾ 收起临时连接' : '▸ 临时连接其他地址'}
+              </button>
+              {showCustomConnect && (
+                <div className="flex gap-2 mt-2">
+                  <input
+                    value={customConnectUrl}
+                    onChange={(e) => setCustomConnectUrl(e.target.value)}
+                    placeholder="http://host:3000"
+                    className="flex-1 bg-gray-700 px-3 py-1.5 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
+                  />
+                  <button
+                    onClick={handleCustomConnect}
+                    disabled={!customConnectUrl.trim()}
+                    className="px-3 py-1.5 text-sm bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 disabled:opacity-40"
+                  >连接</button>
+                </div>
               )}
             </div>
 

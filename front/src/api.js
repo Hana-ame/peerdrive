@@ -3,6 +3,84 @@ const STORAGE_KEY = 'peerdrive_api_base';
 const AUTH_TOKEN_KEY = 'peerdrive_auth_token';
 const DEFAULT_API = 'https://wsl-3000.moonchan.xyz';
 
+/* ---- 多后端管理 ---- */
+const BACKENDS_KEY = 'peerdrive_backends';
+const CURRENT_BACKEND_KEY = 'peerdrive_current_backend_id';
+
+const DEFAULT_BACKENDS = [
+  { id: 'wsl', name: 'WSL', url: 'https://wsl-3000.moonchan.xyz' },
+  { id: 'bwh', name: 'BWH', url: 'http://97.64.30.221:3000' },
+];
+
+function getBackends() {
+  try {
+    const raw = localStorage.getItem(BACKENDS_KEY);
+    if (raw) {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list) && list.length > 0) return list;
+    }
+  } catch {}
+  // 初始化默认后端
+  setBackends(DEFAULT_BACKENDS);
+  return DEFAULT_BACKENDS;
+}
+
+function setBackends(list) {
+  localStorage.setItem(BACKENDS_KEY, JSON.stringify(list));
+}
+
+function getCurrentBackendId() {
+  return localStorage.getItem(CURRENT_BACKEND_KEY) || 'wsl';
+}
+
+function setCurrentBackendId(id) {
+  localStorage.setItem(CURRENT_BACKEND_KEY, id);
+}
+
+function switchBackend(id) {
+  const backends = getBackends();
+  const target = backends.find(b => b.id === id);
+  if (!target) return false;
+  setCurrentBackendId(id);
+  localStorage.setItem(STORAGE_KEY, target.url);
+  return true;
+}
+
+function addBackend(name, url) {
+  const backends = getBackends();
+  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now();
+  backends.push({ id, name, url });
+  setBackends(backends);
+  return id;
+}
+
+function removeBackend(id) {
+  let backends = getBackends();
+  const defIds = DEFAULT_BACKENDS.map(b => b.id);
+  if (defIds.includes(id)) return false; // 默认后端不可删除
+  backends = backends.filter(b => b.id !== id);
+  setBackends(backends);
+  if (getCurrentBackendId() === id) {
+    // 切回第一个可用后端
+    if (backends.length > 0) {
+      switchBackend(backends[0].id);
+    }
+  }
+  return true;
+}
+
+function updateBackend(id, fields) {
+  const backends = getBackends();
+  const idx = backends.findIndex(b => b.id === id);
+  if (idx === -1) return false;
+  backends[idx] = { ...backends[idx], ...fields };
+  setBackends(backends);
+  if (fields.url && getCurrentBackendId() === id) {
+    localStorage.setItem(STORAGE_KEY, backends[idx].url);
+  }
+  return true;
+}
+
 // 获取 API 基础地址（从 localStorage 读取）
 function getApiBase() {
   return localStorage.getItem(STORAGE_KEY) || DEFAULT_API;
@@ -214,6 +292,7 @@ export const ping = () => request('GET', '/ping');
 
 /* ---- settings ---- */
 export { getApiBase, setApiBase, getAuthToken, DEFAULT_API };
+export { getBackends, setBackends, getCurrentBackendId, setCurrentBackendId, switchBackend, addBackend, removeBackend, updateBackend, DEFAULT_BACKENDS };
 
 /* ---- llm ---- */
 const LLM_ENDPOINT_KEY = 'peerdrive_llm_endpoint';
