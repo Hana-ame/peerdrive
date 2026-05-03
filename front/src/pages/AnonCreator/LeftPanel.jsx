@@ -34,7 +34,7 @@ export default function LeftPanel({
   onSaveToNode, onSelectToggle, onToggleCollSelect,
   onToggleFileSelect, onBatchSaveColls, onBatchSaveFiles,
   // 回调 - 系统浏览
-  onSysNav, onSysAdd,
+  onSysNav, onSysAdd, onSysAddFile, onSysAddFolder,
   // 回调 - 搜索历史
   onSearchHistorySelect, onSearchHistoryShow, onSearchHistoryUpdate,
 }) {
@@ -235,7 +235,7 @@ export default function LeftPanel({
         {/* 本地电脑模式 */}
         {sourceTab === 'local' && (
           <SystemBrowse sysPath={sysPath} sysEntries={sysEntries} sysLoading={sysLoading}
-            onNavTo={onSysNav} onAdd={onSysAdd} onDragStart={onDragStart} />
+            onNavTo={onSysNav} onAdd={onSysAdd} onAddFile={onSysAddFile} onAddFolder={onSysAddFolder} onDragStart={onDragStart} />
         )}
 
         {/* 所有文件：按时间分组 */}

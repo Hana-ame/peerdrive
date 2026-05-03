@@ -211,6 +211,45 @@ export default function AnonCreator() {
     showToast(`已添加: ${(path || '').split('/').pop()}`);
   };
 
+  // 从本地电脑添加文件：先注册再添加
+  const handleSysAddFile = async (sysPath, name, size) => {
+    try {
+      const res = await api.registerLocalFile(sysPath, name);
+      if (res?.hash) {
+        addEntry(res.hash, name, res.mime_type || '', size);
+        showToast(`已添加: ${name}`);
+      }
+    } catch (e) {
+      showToast(`注册失败: ${e.message}`, true);
+    }
+  };
+
+  // 从本地电脑添加文件夹：列出文件后逐一注册添加
+  const handleSysAddFolder = async (dirPath, dirName) => {
+    try {
+      const entries = await api.browseDir(dirPath);
+      if (!entries || entries.length === 0) {
+        showToast(`空文件夹已忽略: ${dirName}`, true);
+        return;
+      }
+      let added = 0;
+      for (const e of entries) {
+        if (e.is_dir) continue; // 不嵌套处理子目录
+        try {
+          const res = await api.registerLocalFile(e.path, e.name);
+          if (res?.hash) {
+            addEntry(res.hash, dirName + '/' + e.name, res.mime_type || '', e.size || 0);
+            added++;
+          }
+        } catch {}
+      }
+      if (added > 0) showToast(`已添加 ${added} 个文件到 ${dirName}/`);
+      else showToast(`空文件夹已忽略: ${dirName}`, true);
+    } catch (e) {
+      showToast(`添加文件夹失败: ${e.message}`, true);
+    }
+  };
+
   // ===== 保存合集 =====
   const handleSave = async () => {
     const valid = entries.filter(e => e.path?.trim() && (e.path.endsWith('/') || e.hash || e.providers?.[0]?.value));
@@ -393,7 +432,7 @@ export default function AnonCreator() {
           onToggleFileSelect={toggleFileSelect}
           onBatchSaveColls={batchSaveColls}
           onBatchSaveFiles={batchSaveFiles}
-          onSysNav={setSysPath} onSysAdd={addEntry}
+          onSysNav={setSysPath} onSysAdd={addEntry} onSysAddFile={handleSysAddFile} onSysAddFolder={handleSysAddFolder}
           onSearchHistorySelect={(q) => { setCollSearch(q); }}
           onSearchHistoryUpdate={setSearchHistory}
         />

@@ -63,11 +63,12 @@ export default function FileTree({ entries, entryActions }) {
   const [dragOverPath, setDragOverPath] = useState(null);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [inlineNewFolder, setInlineNewFolder] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(null); // { path, isDir }
-  const [moveTarget, setMoveTarget] = useState('');
   const [contextMenu, setContextMenu] = useState(null); // { x, y, node }
   const newFolderRef = useRef(null);
   const ctxMenuRef = useRef(null);
+  const inlineRef = useRef(null);
 
   // Close context menu on outside click or Escape
   useEffect(() => {
@@ -251,18 +252,8 @@ export default function FileTree({ entries, entryActions }) {
     <div className="flex flex-col h-full">
       {/* 工具栏 */}
       <div className="flex items-center gap-2 px-2 py-1.5 border-b border-gray-800 shrink-0 flex-wrap">
-        {showNewFolder ? (
-          <div className="flex items-center gap-1.5">
-            <input ref={newFolderRef} autoFocus value={newFolderName} onChange={e => setNewFolderName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') submitNewFolder(); if (e.key === 'Escape') { setShowNewFolder(false); setNewFolderName(''); } }}
-              placeholder="文件夹名称" className="bg-gray-700 px-2 py-1 rounded text-xs border border-blue-500 outline-none w-28" />
-            <button onClick={submitNewFolder} className="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-0.5 rounded">确定</button>
-            <button onClick={() => { setShowNewFolder(false); setNewFolderName(''); }} className="text-xs text-gray-500 hover:text-white">取消</button>
-          </div>
-        ) : (
-          <button onClick={() => setShowNewFolder(true)}
-            className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded">+ 新建文件夹</button>
-        )}
+        <button onClick={() => { setInlineNewFolder(true); setTimeout(() => inlineRef.current?.focus(), 50); }}
+          className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded">+ 新建文件夹</button>
         <span className="text-[10px] text-gray-500">{entries.length} 条目</span>
         <span className="text-[10px] text-gray-600 hidden sm:inline">| 双击重命名 | 拖拽移动</span>
       </div>
@@ -300,6 +291,26 @@ export default function FileTree({ entries, entryActions }) {
           try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry') || e.dataTransfer.getData('text/plain'); if (d) { const parsed = d.startsWith('{') ? JSON.parse(d) : { hash: '', name: d, path: d }; entryActions?.onDrop?.({ ...parsed, targetDir: '' }); } } catch (e) { console.error('FileTree drop error:', e); }
         }}>
         {renderEntries(tree, 0, '')}
+        {/* 内联新建文件夹 */}
+        {inlineNewFolder && (
+          <div className="flex items-center gap-2 py-2 px-2 text-sm" style={{ paddingLeft: '8px' }}>
+            <span className="w-4 text-center shrink-0 text-sm">▸</span>
+            <span className="text-base">📁</span>
+            <input ref={inlineRef} autoFocus
+              onBlur={() => setInlineNewFolder(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const n = e.target.value.trim();
+                  if (n) entryActions?.onNewFolder?.(n);
+                  setInlineNewFolder(false);
+                } else if (e.key === 'Escape') {
+                  setInlineNewFolder(false);
+                }
+              }}
+              className="flex-1 bg-gray-700 px-1.5 py-0.5 rounded text-xs font-mono border border-blue-500 outline-none text-gray-200"
+              placeholder="文件夹名称" />
+          </div>
+        )}
       </div>
 
       {/* 右键菜单 */}
@@ -308,7 +319,7 @@ export default function FileTree({ entries, entryActions }) {
           className="absolute z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 min-w-[140px]"
           style={{ left: contextMenu.x, top: contextMenu.y, position: 'fixed' }}>
           <button
-            onClick={() => { setRenaming(contextMenu.node.path); setContextMenu(null); }}
+            onClick={() => { const p = contextMenu.node.isDir ? contextMenu.node.path + '/' : contextMenu.node.path; setRenaming(p); setContextMenu(null); }}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700 flex items-center gap-2">
             ✏️ 重命名
           </button>
