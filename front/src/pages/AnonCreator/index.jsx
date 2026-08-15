@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect, useRef, useMemo } from 'react';
+import React, { useContext, useState, useEffect, useMemo } from 'react';
 import * as api from '../../api';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { PageContext } from '../../App';
@@ -18,7 +18,7 @@ export default function AnonCreator() {
   const [collections, setCollections] = useState([]);
 
   // ===== 左侧筛选 =====
-  const [leftSourceTab, setLeftSourceTab] = useState('all');
+  const [leftSourceTab, setLeftSourceTab] = useState('local');
   const [leftSortKey, setLeftSortKey] = useState('created_at');
   const [leftSortOrder, setLeftSortOrder] = useState('desc');
   const [leftTypeFilters, setLeftTypeFilters] = useState([]);
@@ -40,7 +40,6 @@ export default function AnonCreator() {
   const [showNamePrompt, setShowNamePrompt] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [toastErr, setToastErr] = useState(false);
-  const lastClick = useRef(0);
 
   // ===== 选择模式 =====
   const [selectMode, setSelectMode] = useState(false);
@@ -72,8 +71,17 @@ export default function AnonCreator() {
   useEffect(() => {
     if (navState.forkFrom) {
       const c = navState.forkFrom;
-      setEntries(c.entries || []);
+      // 坑：forkFrom 来自 Plaza 的 AnonCollectionSummary（/anon/collections），
+      // summary 只有 hash/friendly_name/entry_count，没有 entries 字段 → 直接 setEntries(c.entries||[]) 永远是空合集。
+      // 必须按 hash 拉取完整合集。
       setFname((c.friendly_name || '') + ' (副本)');
+      const loadFork = async () => {
+        try {
+          const full = await api.getAnonCollection(c.hash);
+          setEntries(full?.entries || []);
+        } catch (e) { console.error('fork load failed:', e); }
+      };
+      loadFork();
       nav('/create', { replace: true });
     } else if (navState.draftFrom) {
       setEntries(navState.draftFrom.entries || []);
@@ -189,11 +197,16 @@ export default function AnonCreator() {
 
   // ===== 条目操作 =====
   const addEntry = (hash, path, mime_type, size) => {
-    const now = Date.now();
-    if (now - lastClick.current < 500) return;
-    lastClick.current = now;
+    // 坑：旧实现有 500ms lastClick 防抖，handleSysAddFolder/拖拽等程序化批量 add 会被静默丢弃
+    //（walkDir 不重试，加了 N 个但实际只进 1-2 个）。改为在 reducer 内按 path+hash 去重，去掉时间闸。
     const providers = hash ? [{ type: "sha256", value: hash, mime_type: mime_type || '' }] : [];
-    setEntries(prev => [...prev, { hash, path, providers, mime_type, size }]);
+    setEntries(prev => {
+      const dup = prev.some(e =>
+        e.path === path && (e.hash || e.providers?.[0]?.value) === hash
+      );
+      if (dup) return prev;
+      return [...prev, { hash, path, providers, mime_type, size }];
+    });
   };
   const removeEntry = (entry) => {
     setEntries(prev => prev.filter(e => {

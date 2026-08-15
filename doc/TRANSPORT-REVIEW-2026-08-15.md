@@ -10,6 +10,34 @@
 
 ---
 
+## 修复状态 (2026-08-16 全部完成并验证)
+
+> 全部高危/中危/低危项已修复。验证：
+> - 单元测试（含新增回归用例）：`cd back && go test -tags nosqlite -race ./internal/... ./pkg/...` ✅
+> - peerjs 模块：`cd back/peerjs && go test ./... -count=1 -race` ✅
+> - 集成测试（真实公共信令 + 公共 broker，串行）：`go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1` ✅ 全过
+> - 构建：`go build -tags nosqlite ./...` + `go vet` ✅
+
+| 条目 | 修复要点 |
+|---|---|
+| H1 | `serveFile` 切片前 `isValidHash` 校验，非法回 err 帧（`peerjs_service.go`；回归测试 `TestServeFile_InvalidHashNoPanic`） |
+| H2 | `NewFileIndexService` 锚定 uploadDir 为安全根；`Create` 与 `serveFile` 均经 `IsPathAllowed`（Abs+EvalSymlinks 前缀判定）；越权 `fi.Path` 回退内容寻址存储（`file_index.go`/`peerjs_service.go`；测试 `TestFileIndex_CreateSymlinkEscape`/`IsPathAllowed`/`TestServeFile_IndexPathOutsideRoot`）。create 集成测试改用 DownloadDir 根内文件 |
+| H3 | libp2p `handleChunkRequest`/`processWSRequests` 补 `isValidHash`（`p2p_transfer.go`/`p2p.go`） |
+| H4 | `maxP2PListBytes`(256MB)/`maxP2PFileBytes`(8GB) 上限：`RequestCollectionList`/`requestData` 先校验再分配（`p2p.go`） |
+| H5 | 二进制帧路由决策留在消息泵（廉价 bookkeeping），`WriteAt`/`Complete` 移入连接级 `uploadWorker` goroutine（`binCh` 缓冲 16，`binDone` 关闭退出）——保序且不阻塞泵（`peerjs_service.go`；测试 `TestUploadWorker_WriteThenComplete`） |
+| H6 | `maxPeerFetchSize`=8GB 上限；done 校验 `len(f.got)==r.Size`（对照 done 帧 Size，非 meta.total——range 请求场景）；不满足走 errCh（测试 `TestRouteResponse_DataSizeCap/DoneSizeMismatch/DoneSizeMatch`） |
+| H7 | `Signaller.Done()`：readLoop 意外退出才关闭（显式 Close 置 nil 不触发）；startLoop `case <-p.Done()` 触发整轮重连（`peerjs/peer.go`+`peerjs_service.go`） |
+| M1 | `pipeBoth`：任一侧 Copy 返回即双向关闭，`forward.go` 两处替换 wg 模式 |
+| M2 | 流读超时：`forward.go` 三处 + `p2p_transfer.go` `requestFileSize` 均 `SetReadDeadline(now+30s)` |
+| M3 | `requestFileSize`/`DownloadFile` 对 `totalSize` 过 8GB 上限后再 `Truncate`/建 channel |
+| M4 | 部分：`p2p.go handleExchange`(io.Copy) 与 `p2p_ws.go` request 路径（NextWriter+sha256 流式）已流式；peerjs 拉取侧仍整文件驻留内存，由 H6 8GB 上限兜底（改 API 会破坏 `FetchFromPeer` 调用方，留待后续）；`file_service.go:585/602` 未动 |
+| M5 | `WSSession` `SetReadLimit(192KB)` + ping 30s/pong 90s 保活 heartbeatLoop（`ws_session.go`） |
+| M6 | `pendingUpload.created` + 30s 过期自动清空（`file_index_verbs.go`；测试 `TestServeUploadBegin_StalePendingCleared`） |
+| M7 | `UploadSession.aborted` 幂等中止；`reapUploads` 持 `sess.mu` 判 idle+置 aborted+摘句柄（与 WriteAt/Complete 串行）；`BeginUpload` 同名 size 不一致拒绝（`file_index.go`；测试 `TestFileIndex_BeginUploadSizeMismatch`/`AbortIdempotent`） |
+| 低危 1-7 | 全部处理：SendFrame 30s 等待上限；`peerMu` 保护 `s.peer`；connecting 去重；broadcast/FindProviders 快照后解锁；ReplyCh 阻塞+超时；MsgError/MsgIDTaken 记日志 |
+
+---
+
 ## 高危 (优先修, 按顺序)
 
 ### H1. 远程崩溃: `req.Hash[:2]` 切片 panic — `back/internal/service/peerjs_service.go:570`

@@ -153,6 +153,9 @@ cd front && npm run build
 | 文件 | 内容 |
 |------|------|
 | [DASHBOARD.md](DASHBOARD.md) | 项目仪表盘 |
+| [design/PEERDRIVE-DSH-INSPIRED.md](design/PEERDRIVE-DSH-INSPIRED.md) | 参考 dsh 的组合式架构设计（profile/bundle/patch） |
+| [design/FRONTEND-DSH-INSPIRED.md](design/FRONTEND-DSH-INSPIRED.md) | 前端参考 dsh 的组合式设计（bundle manifest + registry + profile） |
+| [design/FRONTEND-DSH-KERNEL.md](design/FRONTEND-DSH-KERNEL.md) | 前端参考 dsh 内核的引导/模块/slot/传输设计 |
 | [FILE-REFERENCE.md](FILE-REFERENCE.md) | 全部项目文件路径与说明手册 (~240 文件) |
 
 ### spec — 技术规范

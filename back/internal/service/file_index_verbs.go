@@ -10,6 +10,16 @@ import (
 // 全部经 Session 传输（WS/WebRTC 同一套），reqId 回显保持请求-响应配对。
 // 请求字段由 dcResp 通用结构承载（Hash/Offset/Size/ReqID/Path/Name/Seq）。
 
+// redactDisallowedPath 对外的文件信息做路径脱敏：create 已强制根目录内，
+// 但历史库/旧版本可能残留根目录外的 Path；serveFile 已回退 CAS，list/info/sync
+// 也不能再把这类绝对路径泄露给对端。
+func (s *PeerJSService) redactDisallowedPath(fi FileInfo) FileInfo {
+	if fi.Path != "" && !s.fileIndex.IsPathAllowed(fi.Path) {
+		fi.Path = ""
+	}
+	return fi
+}
+
 // serveCreate 处理 create：登记外部文件（sha256 → 绝对路径，不复制文件）。
 // 请求 {type:"create", path} → 响应 {type:"created", hash,size,name,path,seq} | err
 func (s *PeerJSService) serveCreate(c Session, r dcResp) {
@@ -83,7 +93,11 @@ func (s *PeerJSService) serveList(c Session, r dcResp) {
 	if files == nil {
 		files = []FileInfo{}
 	}
-	_ = c.SendJSON(dcResp{Type: "list-resp", Files: files, Total: int64(len(files)), ReqID: r.ReqID})
+	out := make([]FileInfo, 0, len(files))
+	for _, f := range files {
+		out = append(out, s.redactDisallowedPath(f))
+	}
+	_ = c.SendJSON(dcResp{Type: "list-resp", Files: out, Total: int64(len(out)), ReqID: r.ReqID})
 }
 
 // serveInfo 处理 info：按 hash 返回文件信息（download 前先查）。
@@ -94,7 +108,8 @@ func (s *PeerJSService) serveInfo(c Session, r dcResp) {
 		_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})
 		return
 	}
-	_ = c.SendJSON(dcResp{Type: "info-resp", Hash: fi.Hash, Total: fi.Size, Name: fi.Name, Path: fi.Path, Seq: fi.Seq, ReqID: r.ReqID})
+	safe := s.redactDisallowedPath(*fi)
+	_ = c.SendJSON(dcResp{Type: "info-resp", Hash: safe.Hash, Total: safe.Size, Name: safe.Name, Path: safe.Path, Seq: safe.Seq, ReqID: r.ReqID})
 }
 
 // serveDelete 处理 delete：逻辑删除映射（同步用 tombstone）。
@@ -118,5 +133,9 @@ func (s *PeerJSService) serveSync(c Session, r dcResp) {
 	if files == nil {
 		files = []FileInfo{}
 	}
-	_ = c.SendJSON(dcResp{Type: "sync-resp", Files: files, LastSeq: last, ReqID: r.ReqID})
+	out := make([]FileInfo, 0, len(files))
+	for _, f := range files {
+		out = append(out, s.redactDisallowedPath(f))
+	}
+	_ = c.SendJSON(dcResp{Type: "sync-resp", Files: out, LastSeq: last, ReqID: r.ReqID})
 }

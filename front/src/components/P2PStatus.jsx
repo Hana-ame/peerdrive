@@ -54,8 +54,9 @@ export default function P2PStatus() {
         api.getP2PDiscovered(),
       ])
       setStatus(s)
-      setPeers(p || [])
-      setDiscovered(d || [])
+      // GET /p2p/peers 返回 {peers:[...]} 包装对象（back p2p.go GetPeers），归一化避免下方 .map 崩溃
+      setPeers(Array.isArray(p) ? p : (p?.peers || []))
+      setDiscovered(Array.isArray(d) ? d : (d?.peers || []))
     } catch {}
   }, [])
 
@@ -162,7 +163,7 @@ export default function P2PStatus() {
   const connectWS = () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
     try {
-      const ws = new WebSocket(api.WS_TRANSFER_URL)
+      const ws = new WebSocket(api.getWSTransferURL())
       wsRef.current = ws
       ws.onopen = () => {
         setWsConnected(true)

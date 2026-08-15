@@ -87,8 +87,8 @@ export default function AnonExplorer() {
 
   const entries = collection?.entries || [];
   const fname = collection?.friendly_name || '';
-  const isSingleFile = entries.length === 1 && !entries[0].path.includes('/');
-  const totalFiles = navPath ? entries.filter(e => e.path.startsWith(navPath + '/')).length : entries.length;
+  const isSingleFile = entries.length === 1 && !((entries[0]?.path) || '').includes('/');
+  const totalFiles = navPath ? entries.filter(e => (e.path || '').startsWith(navPath + '/')).length : entries.length;
 
   return (
     <div className="flex flex-1 overflow-hidden h-full bg-gray-950">
@@ -115,11 +115,6 @@ export default function AnonExplorer() {
             <BreadcrumbNav navPath={navPath} fname={fname} onNavigate={setNavPath} />
 
             <div className="flex-1 overflow-y-auto">
-              {!isSingleFile && !loading && !navPath && (
-                <div className="px-4 pt-2">
-                  <CommentSection hash={searchHash} />
-                </div>
-              )}
               {isSingleFile && !navPath ? (
                 <SingleFilePreview entry={entries[0]} searchHash={searchHash}
                   collection={collection} allCollHashes={allCollHashes} />

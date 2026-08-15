@@ -194,7 +194,6 @@ export default function Settings({ dataConsent, setDataConsent }) {
   const [showLlmKey, setShowLlmKey] = useState(false);
 
   // ─── About ───────────────────────────────────────────
-  const [consentUploading, setConsentUploading] = useState(false);
   const [consentMsg, setConsentMsg] = useState('');
 
   // ─── IPFS Compat ─────────────────────────────────────
@@ -402,13 +401,8 @@ export default function Settings({ dataConsent, setDataConsent }) {
     api.setDataConsent(v);
     setDataConsent(v);
     if (v) {
-      setConsentUploading(true);
-      setConsentMsg('');
-      api.uploadConsent().then(() => {
-        setConsentMsg('已上传同意记录');
-      }).catch(() => {
-        setConsentMsg('上传失败（设置已本地保存）');
-      }).finally(() => setConsentUploading(false));
+      api.saveConsentLocal();
+      setConsentMsg('已保存同意记录（本地）');
     } else {
       setConsentMsg('');
     }
@@ -1279,11 +1273,8 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 </span>
               </label>
               <p className="text-[10px] text-gray-500 mt-2 ml-7">
-                开启后会在每次操作时上传匿名使用统计到注册服务器，帮助改善产品体验。
+                开启后会在本地保存同意记录。当前版本不会上传匿名统计（后端暂无对应端点）。
               </p>
-              {consentUploading && (
-                <p className="text-[10px] text-gray-400 mt-1 ml-7">上传中...</p>
-              )}
               {consentMsg && (
                 <p
                   className={`text-[10px] mt-1 ml-7 ${

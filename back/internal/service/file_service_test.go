@@ -87,6 +87,63 @@ func TestRegisterLocalStorageDisabled(t *testing.T) {
 	assert.Empty(t, hash)
 }
 
+// 发现背景（2026-08-16 传输层审阅 F2）：RegisterLocal 此前接受任意绝对路径，
+// 配合 LocalFetcher 的 provider 回读 = 匿名任意文件读取（可读 /etc/shadow 等）。
+// 修复：锚定 storage 根目录（Abs + EvalSymlinks 前缀判定）。此测试保护该边界。
+func TestRegisterLocalOutsideStorageRootRejected(t *testing.T) {
+	tmpDir, svc := setupFileServiceTest()
+	defer os.RemoveAll(tmpDir)
+
+	outside := os.TempDir() // storage 根目录之外
+	outFile := filepath.Join(outside, "peerdrive_root_escape_test.txt")
+	err := os.WriteFile(outFile, []byte("secret"), 0644)
+	assert.NoError(t, err)
+	defer os.Remove(outFile)
+
+	hash, err := svc.RegisterLocal(outFile, "x.txt")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "outside storage root")
+	assert.Empty(t, hash)
+}
+
+// 发现背景（2026-08-16 传输层审阅 F3）：CopyFile 目标路径此前可写任意位置
+// （绝对路径原样采用 / 相对路径 ../ 逃逸）。修复：写盘前校验目标在 storage 根内。
+func TestCopyFileOutsideStorageRootRejected(t *testing.T) {
+	tmpDir, svc := setupFileServiceTest()
+	defer os.RemoveAll(tmpDir)
+
+	src := filepath.Join(tmpDir, "src.txt")
+	err := os.WriteFile(src, []byte("hello"), 0644)
+	assert.NoError(t, err)
+	hash, err := svc.RegisterLocal(src, "src.txt")
+	assert.NoError(t, err)
+
+	// ../ 逃逸目标
+	_, err = svc.CopyFile(hash, filepath.Join("..", "..", "escape_me.txt"))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "outside storage root")
+}
+
+// 发现背景（2026-08-16 传输层审阅 H1 同类）：Delete 此前对任意 hash 直接 os.Remove
+// provider 路径。修复：先校验 hash，再确认路径在 storage 根内。
+func TestDeleteInvalidHashRejected(t *testing.T) {
+	_, svc := setupFileServiceTest()
+
+	err := svc.Delete("not-a-hash")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid hash")
+}
+
+// 发现背景（2026-08-16 传输层审阅 H6）：BrowseDir 此前接受任意绝对路径 → 任意目录列举。
+// 修复：锚定 storage 根。
+func TestBrowseDirOutsideStorageRootRejected(t *testing.T) {
+	_, svc := setupFileServiceTest()
+
+	_, err := svc.BrowseDir("/etc")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "outside storage root")
+}
+
 func TestRegisterFolder(t *testing.T) {
 	tmpDir, svc := setupFileServiceTest()
 	defer os.RemoveAll(tmpDir)

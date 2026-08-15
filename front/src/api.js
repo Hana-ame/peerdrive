@@ -162,8 +162,12 @@ export const verifyFile = (hash) => request('GET', `/files/verify/${hash}`);
 export const getDownloadUrl = (hash) => `${getApiBase()}/sha256sum/${hash}`;
 export const registerLocalFile = (path, filename) =>
   request('POST', '/collections/register-local', { path, filename: filename || path.split('/').pop() });
-export const registerURL = (url, filename = '') =>
-  request('POST', '/collections/register-url', { url, filename });
+export const registerURL = async (url, filename = '') => {
+  // 后端 RegisterURL 返回 {hash,size,mime,filename}（back file.go:120），字段是 mime 不是 mime_type；
+  // RegisterLocalFile 只返回 {hash,filename}。统一补 mime_type/size 兼容旧调用方。
+  const res = await request('POST', '/collections/register-url', { url, filename });
+  return { ...res, mime_type: res.mime_type || res.mime || '', size: res.size || 0 };
+};
 export const registerFolder = (folderPath) =>
   request('POST', '/collections/register-folder', { folder_path: folderPath });
 
@@ -199,7 +203,7 @@ export const updateCollectionTags = (username, coll, tags) =>
 export const addCollectionEntry = (username, coll, path, hash) =>
   request('POST', `/collections/${username}/${coll}/entries`, { path, hash });
 export const removeCollectionEntry = (username, coll, path) =>
-  request('DELETE', `/collections/${username}/${coll}/entries/${path}`);
+  request('DELETE', `/collections/${username}/${coll}/entries/${encodePath(path)}`);
 export const commitCollection = (username, coll, commit_message = '') =>
   request('POST', `/collections/${username}/${coll}/commit`, { commit_message });
 export const getVersionLog = (username, coll) =>
@@ -227,14 +231,24 @@ export const getP2PNode = () => request('GET', '/p2p/node');
 export const getP2PPeers = () => request('GET', '/p2p/peers');
 export const getP2PDiscovered = () => request('GET', '/p2p/discovered');
 export const pingPeer = (peerId) => request('GET', `/p2p/ping/${peerId}`);
-export const connectPeer = (peerId, addrs) =>
-  request('POST', '/p2p/connect', { peer_id: peerId, addrs });
+// 后端 POST /p2p/connect 绑定 {addr}，要求完整 multiaddr（含 /p2p/<peer_id>，见 back p2p.go ConnectPeer）。
+// 坑：旧实现发 {peer_id, addrs} 与后端字段不匹配，req.Addr 为空串导致每次连接都 500。
+export const connectPeer = (peerId, addrs = []) => {
+  const list = Array.isArray(addrs) ? addrs : [addrs];
+  const withPeer = list.filter(Boolean).map(a =>
+    a.includes('/p2p/') ? a : `${a}/p2p/${peerId}`);
+  if (withPeer.length === 0) return request('POST', '/p2p/connect', { addr: `/p2p/${peerId}` });
+  return request('POST', '/p2p/connect', { addr: withPeer[0] });
+};
 export const p2pAnnounce = (hash) => request('POST', '/p2p/announce', { hash });
 export const p2pFetch = (peerId, hash) => request('POST', '/p2p/fetch', { peer_id: peerId, hash });
-export const p2pSync = (peerId, collectionName) =>
-  request('POST', '/p2p/sync', { peer_id: peerId, collection_name: collectionName });
-export const p2pPush = (peerId, collectionName) =>
-  request('POST', '/p2p/push', { peer_id: peerId, collection_name: collectionName });
+// 后端 POST /p2p/sync 绑定 {peer_id, hash, file_hashes, target_dir}（back p2p.go SyncFromPeer），
+// 旧实现发 collection_name 被忽略 → 400 "no files to sync"。
+export const p2pSync = (peerId, hash) =>
+  request('POST', '/p2p/sync', { peer_id: peerId, hash });
+// 后端 POST /p2p/push 绑定 {hash, entries, target_dir}（PushSync），old collection_name 同理失效。
+export const p2pPush = (peerId, hash) =>
+  request('POST', '/p2p/push', { peer_id: peerId, hash });
 export const p2pRequestFile = (hash) => request('POST', '/p2p/request-file', { hash });
 export const getWSInfo = () => request('GET', '/p2p/ws/info');
 export const getSignalPeers = () => request('GET', '/p2p/status').then(r => r.signal_peers || []);
@@ -276,7 +290,12 @@ export const dualAnnounce = (hash) => request('POST', '/p2p/dual/announce', { ha
 export const dualFind = (hash) => request('POST', '/p2p/dual/find', { hash });
 
 export { getApiBaseUrl as WS_TRANSFER_URL_BASE };
-export const WS_TRANSFER_URL = getApiBase().replace(/^http/, 'ws') + '/ws/transfer';
+// 运行时计算 WS 地址：后端可在设置页切换，避免模块加载时固化的旧地址。
+export function getWSTransferURL() {
+  return getApiBase().replace(/^http/, 'ws') + '/ws/transfer';
+}
+// 兼容旧代码（注意：这是模块加载时的快照，切换后端后不刷新；新代码请用 getWSTransferURL()）。
+export const WS_TRANSFER_URL = getWSTransferURL();
 
 /* ---- anon collection commit ---- */
 export const commitAnonCollection = (source_hash, entries, commit_message = '') =>
@@ -438,9 +457,14 @@ const FREE_LLM_MODELS = [
 ];
 export { DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_MODEL, DEFAULT_LLM_BODY, FREE_LLM_MODELS };
 
-export async function uploadConsent() {
+// 保存数据同意到本地。
+// 注意：旧名称 uploadConsent 容易让人误以为会上传服务器，但后端没有 /consent 端点；
+// 这里只做本地记录，避免「已上传同意记录」这类误导性状态。
+export async function saveConsentLocal() {
   localStorage.setItem('peerdrive_consent', JSON.stringify({ agreed: true, timestamp: Date.now() }));
 }
+// 兼容旧调用（保留别名，但新代码应使用 saveConsentLocal）。
+export const uploadConsent = saveConsentLocal;
 
 /* ---- alias exports for legacy usage ---- */
 // 统一 Collection API（替代旧的 createUserCollection/createAnonCollection 等）

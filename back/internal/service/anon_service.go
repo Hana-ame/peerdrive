@@ -138,6 +138,13 @@ func (s *AnonService) GetCollectionByHash(hash string) (*model.AnonCollection, e
 	defer log.LogDuration("AnonService.GetCollectionByHash")()
 	log.LogDebug("anon-svc: GetCollectionByHash hash=%s", hash)
 
+	// 防御：hash 来自 URL 路径/请求体/远端 P2P sync，无长度校验时 hash[:2] 会切片越界 panic；
+	// 非 64 位 hex（如 ".."）还会让 filepath.Join 逃逸 storage 目录。非法直接返回 not-found。
+	if !isValidHash(hash) {
+		log.LogWarn("anon-svc: GetCollectionByHash invalid hash=%q", hash)
+		return nil, fmt.Errorf("collection not found")
+	}
+
 	filePath := filepath.Join(s.config.StorageDir, hash[:2], hash)
 	data, err := os.ReadFile(filePath)
 	if err != nil {

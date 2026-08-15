@@ -158,7 +158,7 @@ export default function LeftPanel({
               onLeave={onLeaveColl} onPathNav={onPathNav} onNavIntoDir={onNavIntoDir}
               onSaveToNode={onSaveToNode} onSelectToggle={onSelectToggle}
               onToggleFileSelect={onToggleFileSelect} onBatchSaveFiles={onBatchSaveFiles}
-              onFileAdd={onFileAdd} />
+              onFileAdd={onFileAdd} onFileSelect={onFileSelect} />
           ) : (
             <>
               {filteredCollections.length === 0 ? (

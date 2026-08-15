@@ -119,6 +119,21 @@ func TestGetCollection_NonexistentHash(t *testing.T) {
 	assert.Contains(t, err.Error(), "collection not found")
 }
 
+// 发现背景（2026-08-16 传输层审阅 H1）：GetCollectionByHash 未校验 hash 就做 hash[:2] 切片，
+// 短 hash（0/1 字符）→ 越界 panic 杀进程；".." 类值还逃逸 storage 目录。
+// 修复：入口校验 isValidHash。此前无此测试，非法 hash 直接 panic。
+func TestGetCollection_InvalidHashNoPanic(t *testing.T) {
+	tmpDir, svc := setupAnonServiceTest(t)
+	defer os.RemoveAll(tmpDir)
+
+	for _, bad := range []string{"", "a", "..", "A7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"} {
+		coll, err := svc.GetCollectionByHash(bad)
+		assert.Error(t, err, "hash %q should be rejected", bad)
+		assert.Nil(t, coll)
+		assert.Contains(t, err.Error(), "collection not found")
+	}
+}
+
 func TestForkCollection(t *testing.T) {
 	tmpDir, svc := setupAnonServiceTest(t)
 	defer os.RemoveAll(tmpDir)

@@ -102,8 +102,9 @@ export const setApiBase = () => {}
 export const getAuthToken = () => ''
 export const DEFAULT_API = 'http://localhost:3000'
 export const getApiBaseUrl = () => ''
+export const getWSTransferURL = () => 'ws://localhost:3000/ws/transfer'
 export const WS_TRANSFER_URL_BASE = 'http://localhost:3000'
-export const WS_TRANSFER_URL = 'ws://localhost:3000/ws/transfer'
+export const WS_TRANSFER_URL = getWSTransferURL()
 
 // Backend switching (mocks)
 export const DEFAULT_BACKENDS = [

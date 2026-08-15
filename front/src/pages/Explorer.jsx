@@ -36,7 +36,7 @@ export default function Explorer() {
   const loadEntries = async () => {
     setLoading(true);
     try {
-      const col = await api.getCollection(username, collName);
+      const col = await api.getUserCollection(username, collName);
       setEntries(col.entries || []);
     } catch (e) { console.error(e); setEntries([]); }
     setLoading(false);
@@ -51,7 +51,7 @@ export default function Explorer() {
     const files = [];
     const prefix = navPath ? navPath + '/' : '';
     for (const e of entries) {
-      if (e.path.startsWith(prefix)) {
+      if ((e.path || '').startsWith(prefix)) {
         const rest = e.path.slice(prefix.length);
         const slash = rest.indexOf('/');
         if (slash === -1) files.push(e);
@@ -116,7 +116,7 @@ export default function Explorer() {
 
   const handleSaveLocal = async () => {
     try {
-      const col = await api.getCollection(username, collName);
+      const col = await api.getUserCollection(username, collName);
       if (!col.current_hash) return alert("此合集尚未保存任何版本，无法保存快照到本地");
       await api.saveLocal({
         collection_hash: col.current_hash,

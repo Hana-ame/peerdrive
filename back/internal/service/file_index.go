@@ -341,6 +341,14 @@ var _ = uploadChunkSize
 
 // List 列出全部未删除映射。
 func (s *FileIndexService) List(offset, limit int) ([]FileInfo, error) {
+	// 防御：limit 来自远端 list verb（可任意大），直接进 SQL LIMIT 会全表物化 → 内存 DoS。
+	// repository 层只兜 limit<=0，这里 clamp 上限。
+	if limit <= 0 {
+		limit = 1000
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
 	rows, err := repository.ListFileIndex(offset, limit)
 	if err != nil {
 		return nil, err

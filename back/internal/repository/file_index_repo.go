@@ -89,9 +89,10 @@ func ListFileIndex(offset, limit int) ([]FileIndex, error) {
 }
 
 // ListFileIndexSince 增量同步：返回 seq 大于 since 的全部变更（含删除标记）。
+// 防御：since 来自远端 sync verb，变更记录无上限会全表扫描+物化；加 LIMIT 兜底（超过丢弃对端游标落后时的极端值）。
 func ListFileIndexSince(since int64) ([]FileIndex, error) {
 	rows, err := DB.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
-		FROM file_index WHERE seq > ? ORDER BY seq ASC`, since)
+		FROM file_index WHERE seq > ? ORDER BY seq ASC LIMIT 1000`, since)
 	if err != nil {
 		return nil, err
 	}

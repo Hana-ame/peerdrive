@@ -48,6 +48,35 @@ func NewFileService(cfg *config.Config) *FileService {
 	}
 }
 
+// isPathInStorage 校验 absPath 是否落在 storageDir 内（绝对路径 + 符号链接解析后）。
+// 防御：register_local/register_folder/browse/copy 都接受调用方路径，若不锚定根目录，
+// 任意绝对路径（如 /etc/shadow）会经 LocalFetcher 回读 / os.Remove 构成任意文件读写。
+// 与 FileIndexService.IsPathAllowed 同一模式（file_index.go:53）。
+func (s *FileService) isPathInStorage(absPath string) bool {
+	if s.storageDir == "" {
+		return false
+	}
+	root, err := filepath.Abs(s.storageDir)
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	abs, err := filepath.Abs(absPath)
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
+}
+
 // RegisterLocal 计算本地文件的 SHA256 哈希，注册到 file_meta 和 file_providers。
 func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	defer log.LogDuration("FileService.RegisterLocal")()
@@ -62,6 +91,13 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	absPath := path
 	if !filepath.IsAbs(path) {
 		absPath = filepath.Join(s.storageDir, path)
+	}
+
+	// 安全边界：只允许注册 storage 根目录内的文件。
+	// 坑：此前接受任意绝对路径，配合 LocalFetcher 的 provider 回读 = 匿名任意文件读取。
+	if !s.isPathInStorage(absPath) {
+		log.LogWarn("file-svc: RegisterLocal path outside storage root: %s", absPath)
+		return "", fmt.Errorf("path outside storage root")
 	}
 
 	f, err := os.Open(absPath)
@@ -138,6 +174,12 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 	absDir := folderPath
 	if !filepath.IsAbs(folderPath) {
 		absDir = filepath.Join(s.storageDir, folderPath)
+	}
+
+	// 安全边界：文件夹也必须锚定 storage 根目录内（否则批量读取任意目录）。
+	if !s.isPathInStorage(absDir) {
+		log.LogWarn("file-svc: RegisterFolder outside storage root: %s", absDir)
+		return nil, fmt.Errorf("path outside storage root")
 	}
 
 	var results []map[string]string
@@ -451,10 +493,18 @@ func (s *FileService) Delete(hash string) error {
 		log.LogError("file-svc: Delete storage disabled")
 		return err
 	}
+	// 防御：hash 未校验就进 provider 路径，配合 LocalFetcher 回读 = 任意文件删。
+	// 由于 RegisterLocal 现在已锚定 storage 根，这里再兜底防止历史数据里有根外 provider 路径。
+	if !isValidHash(hash) {
+		log.LogWarn("file-svc: Delete invalid hash %q", hash)
+		return fmt.Errorf("invalid hash")
+	}
 	providers, _ := repository.GetFileProviders(hash)
 	for _, p := range providers {
 		if p.ProviderType == "local" {
-			os.Remove(p.Path)
+			if s.isPathInStorage(p.Path) {
+				os.Remove(p.Path)
+			}
 		}
 	}
 	repository.DB.Exec(`DELETE FROM file_providers WHERE hash = ?`, hash)
@@ -477,6 +527,12 @@ func (s *FileService) BrowseDir(dirPath string) ([]model.DirEntry, error) {
 	absDir := dirPath
 	if !filepath.IsAbs(dirPath) {
 		absDir = filepath.Join(s.storageDir, dirPath)
+	}
+
+	// 安全边界：只允许浏览 storage 根目录内，拒绝任意目录列举（任意文件读取的前提）。
+	if !s.isPathInStorage(absDir) {
+		log.LogWarn("file-svc: BrowseDir outside storage root: %s", absDir)
+		return nil, fmt.Errorf("path outside storage root")
 	}
 
 	entries, err := os.ReadDir(absDir)
@@ -547,6 +603,17 @@ func (s *FileService) CopyFile(hash string, destPath string) (string, error) {
 	absDest := destPath
 	if !filepath.IsAbs(destPath) {
 		absDest = filepath.Join(s.storageDir, destPath)
+	}
+
+	// 安全边界：目标必须在 storage 根目录内，且 hash 必须合法。
+	// 坑：此前绝对路径原样采用 / 相对路径可 ../ 逃逸，配合公开 upload 可写任意文件（如 authorized_keys）。
+	// 写盘前的检查而不是写盘后的 Rel 判定（旧代码 615 行只在写完后改 DB 记录）。
+	if !isValidHash(hash) {
+		return "", fmt.Errorf("invalid source hash")
+	}
+	if !s.isPathInStorage(absDest) {
+		log.LogWarn("file-svc: CopyFile dest outside storage root: %s", absDest)
+		return "", fmt.Errorf("destination path outside storage root")
 	}
 
 	// Get source data via the download pipeline

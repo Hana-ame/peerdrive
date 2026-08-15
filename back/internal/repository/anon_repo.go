@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"peerdrive/internal/model"
+	"peerdrive/pkg/hashutil"
 )
 
 var anonStorageDir string
@@ -63,6 +64,11 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 func GetAnonCollectionByHash(hash, storageDir string) (*model.AnonCollection, error) {
 	if storageDir == "" {
 		storageDir = anonStorageDir
+	}
+	// 防御：hash 可能来自 URL/请求体/远端 sync，未校验时 hash[:2] 越界 panic、
+	// ".." 类值逃逸 storage 目录。与 anon_service.GetCollectionByHash 同一根因。
+	if !hashutil.IsValidSHA256(hash) {
+		return nil, fmt.Errorf("collection not found locally: invalid hash")
 	}
 	filePath := filepath.Join(storageDir, hash[:2], hash)
 	data, err := os.ReadFile(filePath)

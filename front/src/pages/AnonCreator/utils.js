@@ -20,7 +20,12 @@ export function fmtSize(b) {
 }
 
 export function loadSearchHistory() {
-  try { return JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || '[]'); } catch { return []; }
+  // 坑：旧版本可能写入过非数组 JSON（如对象），SearchHistory 组件会直接 .map 崩溃。
+  // 强制确保返回数组。
+  try {
+    const v = JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || '[]');
+    return Array.isArray(v) ? v.filter(i => typeof i === 'string') : [];
+  } catch { return []; }
 }
 export function saveSearchHistory(items) {
   try { localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(items.slice(0, MAX_HISTORY))); } catch {}

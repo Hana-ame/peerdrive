@@ -99,6 +99,23 @@ peerdrive/
 > profile 列出哪些 bundle，`cmd/peerdrive` 通过 import 这些 bundle 的注册函数，把它们链接进当前二进制；
 > `--patch` 只改配置行，不新增代码。这与 dsh 的“动态插拔“精神一致，但保持 Go 单二进制部署。
 
+### 3.1 与 REFACTOR.md 目标包结构的关系
+
+`doc/REFACTOR.md` 已经给出依赖分层，本设计不推翻它，而是把“包结构”进一步包装成“可组合 bundle”：
+
+| REFACTOR.md 目标层 | 在本设计中的归属 |
+|---|---|
+| `domain/`（零依赖领域模型） | `back/bundles/base` 或独立 `internal/domain`，是所有 bundle 的公共依赖 |
+| `config/`、`log/`（基础设施叶子） | `base` bundle 提供 |
+| `repository/`（持久化） | 按领域拆分：`auth` 拥有用户 repo，`storage` 拥有 file_index/collection repo，`sync` 拥有 sync repo |
+| `provider/`（文件获取抽象） | `storage` bundle 提供，`legacy` 可注册额外 provider（BT/IPFS/HTTP） |
+| `service/`（用例编排） | 各业务 bundle 内部持有自己的 service 目录 |
+| `transport/`（互联传输） | `transport` bundle |
+| `legacy/`（旧栈隔离） | `legacy` bundle，默认 disabled |
+| `api/`（HTTP 层） | `web`/`auth`/`storage` 等各自的 routes；由 `web` bundle 统一挂 gateway |
+
+这样既保留 REFACTOR 的分层纪律，又获得 dsh 的“按模块分支开发、按 profile 裁剪”能力。
+
 ---
 
 ## 4. 组合引擎（`internal/harness`）

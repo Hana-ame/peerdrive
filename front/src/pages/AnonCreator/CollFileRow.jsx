@@ -1,6 +1,8 @@
 import { fileIcon } from './utils';
 
 export default function CollFileRow({ entry, selectMode, isSelected, onClick, onToggleSelect, onSelect }) {
+  // 后端 AnonCollectionEntry 顶层没有 mime_type（在 providers[].mime_type），派生后再给图标用。
+  const mime = entry.mime_type || entry.providers?.[0]?.mime_type || '';
   const handleClick = () => {
     if (selectMode) { onToggleSelect(entry.path); return; }
     if (onSelect) onSelect(entry);
@@ -10,7 +12,7 @@ export default function CollFileRow({ entry, selectMode, isSelected, onClick, on
     <div className={`flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800/50 text-sm cursor-pointer`}
       onClick={handleClick}>
       {selectMode && <input type="checkbox" checked={isSelected} readOnly className="shrink-0" />}
-      <span className="text-lg">{fileIcon(entry.mime_type)}</span>
+      <span className="text-lg">{fileIcon(mime)}</span>
       <span className="text-blue-300 truncate flex-1 font-mono text-xs">{entry.path.split('/').pop()}</span>
       {!selectMode && (
         <button onClick={(e) => { e.stopPropagation(); onClick(entry); }}

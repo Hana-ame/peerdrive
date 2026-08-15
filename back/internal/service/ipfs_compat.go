@@ -555,6 +555,11 @@ func (r byteReader) ReadByte() (byte, error) {
 	return b[0], err
 }
 
+// maxBitswapMessageSize 限制单个 Bitswap 消息声明长度。
+// 坑：远端任意 varint（如 1<<40）会让 make([]byte, length) 直接 OOM 杀进程，
+// libp2p 流 handler 在 goroutine 里无 recover。boxo 默认 MaxBlockSize 也是 2MB。
+const maxBitswapMessageSize = 2 << 20
+
 // readVarintPrefixed 从 reader 中读取 varint 前缀的消息。
 // 格式：[varint-length][message-bytes]
 func readVarintPrefixed(r io.Reader) ([]byte, error) {
@@ -566,6 +571,9 @@ func readVarintPrefixed(r io.Reader) ([]byte, error) {
 
 	if length == 0 {
 		return nil, nil
+	}
+	if length > maxBitswapMessageSize {
+		return nil, fmt.Errorf("message too large: %d > %d", length, maxBitswapMessageSize)
 	}
 
 	data := make([]byte, length)
