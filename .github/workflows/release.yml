@@ -1,0 +1,52 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest,  goos: linux,   goarch: amd64, ext: '' }
+          - { os: ubuntu-latest,  goos: linux,   goarch: arm64, ext: '' }
+          - { os: windows-latest, goos: windows, goarch: amd64, ext: '.exe' }
+          - { os: macos-latest,   goos: darwin,  goarch: amd64, ext: '' }
+          - { os: macos-latest,   goos: darwin,  goarch: arm64, ext: '' }
+
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: back
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build
+        run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -ldflags="-s -w" -o peerdrive-server${{ matrix.ext }} ./cmd/server/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: back/peerdrive-server${{ matrix.ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: List artifacts
+        run: ls -R
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: '**/peerdrive-server*'

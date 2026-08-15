@@ -1,0 +1,49 @@
+# Database
+peerdrive.db
+*.db
+
+# Compiled binaries
+peerdrive-server
+peerdrive
+*.exe
+*.out
+
+# Compiled binaries (back)
+back/server
+back/bt-integration
+
+# OS files
+.DS_Store
+Thumbs.db
+/server
+/main
+downloads/
+
+*.bin
+
+# Node
+node_modules/
+dist/
+
+# Archives
+*.zip
+
+# Claude config (personal)
+.claude/
+
+# Git worktrees
+worktrees/
+frontend-worktrees/
+
+# Separate services (not in this repo)
+registration-server/
+p2p-dual-stack/
+
+# Upload state
+.last_upload_url
+
+# Root temp files
+*.txt
+react/
+go/
+/docs/

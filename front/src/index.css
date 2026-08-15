@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #52525b; border-radius: 3px; }
+
+/* ── Mobile-first touch targets ── */
+@media (max-width: 768px) {
+  button, a, input, select, textarea {
+    min-height: 44px;
+    font-size: 16px; /* prevent iOS zoom on focus */
+  }
+  .touch-friendly {
+    padding: 12px 16px;
+  }
+}
+
+/* ── PWA standalone mode / safe areas ── */
+@media (display-mode: standalone) {
+  .pwa-safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .pwa-safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+/* ── Pull-to-refresh indicator ── */
+.pull-indicator {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: #a1a1aa;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+  z-index: 100;
+}
+.pull-indicator.visible {
+  opacity: 1;
+}
+
+/* ── Smooth page transitions ── */
+.page-enter {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.page-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: all 0.2s ease;
+}
+
+/* ── Android-style ripple effect ── */
+.ripple {
+  position: relative;
+  overflow: hidden;
+}
+.ripple::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%), rgba(255,255,255,0.15) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.ripple:active::after {
+  opacity: 1;
+  transition: opacity 0s;
+}
+
+/* ── Raise AI assistant button above mobile bottom nav ── */
+@media (max-width: 768px) {
+  button.fixed.bottom-6.z-40 {
+    bottom: 80px !important;
+  }
+}
+
+/* ── Bottom safe area for mobile nav ── */
+.mobile-nav-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+}
+
+/* ── Hide scrollbar for horizontal-scroll containers ── */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Hide desktop-only elements on mobile ── */
+@media (max-width: 768px) {
+  .hide-on-mobile {
+    display: none !important;
+  }
+}
+
+/* ── Show mobile-only elements ── */
+.show-on-mobile {
+  display: none !important;
+}
+@media (max-width: 768px) {
+  .show-on-mobile {
+    display: flex !important;
+  }
+}
+
+/* ── Bottom padding for mobile content to avoid nav overlap ── */
+@media (max-width: 768px) {
+  .has-mobile-nav {
+    padding-bottom: 72px;
+  }
+}

@@ -1,0 +1,122 @@
+package service
+
+import (
+	"time"
+
+	"peerdrive/internal/log"
+)
+
+// 帧协议文件索引 verb 的服务端处理（create/upload/list/info/delete/sync）。
+// 全部经 Session 传输（WS/WebRTC 同一套），reqId 回显保持请求-响应配对。
+// 请求字段由 dcResp 通用结构承载（Hash/Offset/Size/ReqID/Path/Name/Seq）。
+
+// serveCreate 处理 create：登记外部文件（sha256 → 绝对路径，不复制文件）。
+// 请求 {type:"create", path} → 响应 {type:"created", hash,size,name,path,seq} | err
+func (s *PeerJSService) serveCreate(c Session, r dcResp) {
+	if r.Path == "" {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: "path required", ReqID: r.ReqID})
+		return
+	}
+	fi, err := s.fileIndex.Create(r.Path)
+	if err != nil {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})
+		return
+	}
+	_ = c.SendJSON(dcResp{Type: "created", Hash: fi.Hash, Total: fi.Size, Path: fi.Path, Name: fi.Name, Seq: fi.Seq, ReqID: r.ReqID})
+}
+
+// serveUploadBegin 处理 upload：开始流式接收（后续二进制帧写入 UploadSink）。
+// 请求 {type:"upload", name, size, reqId} → 响应 meta{total}；完成后 uploaded{hash,path}。
+// 注意：同一连接同时只有一个 upload 接收流（连接级 pendingUpload）。
+func (s *PeerJSService) serveUploadBegin(c Session, st *connState, r dcResp) {
+	if r.Size <= 0 || r.Size > 8*1024*1024*1024 {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: "invalid upload size", ReqID: r.ReqID})
+		return
+	}
+	offset := r.Offset
+	if offset < 0 || offset%uploadChunkSize != 0 {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: "offset must be chunk-aligned", ReqID: r.ReqID})
+		return
+	}
+	sess, err := s.fileIndex.BeginUpload(r.Name, r.Size)
+	if err != nil {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})
+		return
+	}
+	// 分片长度：单次 data 块 ≤ 一个 chunk（64KB）；尾部块自动截断
+	length := r.Size - offset
+	if length > uploadChunkSize {
+		length = uploadChunkSize
+	}
+	if length <= 0 {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: "offset beyond size", ReqID: r.ReqID})
+		return
+	}
+	st.mu.Lock()
+	if st.pendingUpload != nil {
+		// M6 修复：对端发 upload 头后不发数据块会永久占用槽位——之后该连接
+		// 所有 upload 全部 "already in progress"（连接级 DoS，重连才恢复）。
+		// 超时自动清空（会话本身留待 file_index 10 分钟 reap，不影响多 source）
+		if time.Since(st.pendingUpload.created) > 30*time.Second {
+			log.LogWarn("peerjs: stale pending upload cleared (reqId=%s)", st.pendingUpload.reqID)
+			st.pendingUpload = nil
+		} else {
+			// 上一个分片未完成（连接复用异常）：拒绝重入（多 source 走多连接）
+			_ = c.SendJSON(dcResp{Type: "err", Msg: "upload already in progress", ReqID: r.ReqID})
+			st.mu.Unlock()
+			return
+		}
+	}
+	st.pendingUpload = &uploadState{reqID: r.ReqID, offset: offset, size: length, sess: sess, created: time.Now()}
+	st.mu.Unlock()
+	_ = c.SendJSON(dcResp{Type: "meta", Total: r.Size, Offset: sess.ContiguousOffset(), ReqID: r.ReqID})
+}
+
+// serveList 处理 list：列出全部未删除映射。
+// 请求 {type:"list", offset?, size?} → 响应 {type:"list-resp", files, total}
+func (s *PeerJSService) serveList(c Session, r dcResp) {
+	files, err := s.fileIndex.List(int(r.Offset), int(r.Size))
+	if err != nil {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})
+		return
+	}
+	if files == nil {
+		files = []FileInfo{}
+	}
+	_ = c.SendJSON(dcResp{Type: "list-resp", Files: files, Total: int64(len(files)), ReqID: r.ReqID})
+}
+
+// serveInfo 处理 info：按 hash 返回文件信息（download 前先查）。
+// 请求 {type:"info", hash} → 响应 {type:"info-resp", hash,size,name,path,seq} | err
+func (s *PeerJSService) serveInfo(c Session, r dcResp) {
+	fi, err := s.fileIndex.Info(r.Hash)
+	if err != nil {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})
+		return
+	}
+	_ = c.SendJSON(dcResp{Type: "info-resp", Hash: fi.Hash, Total: fi.Size, Name: fi.Name, Path: fi.Path, Seq: fi.Seq, ReqID: r.ReqID})
+}
+
+// serveDelete 处理 delete：逻辑删除映射（同步用 tombstone）。
+// 请求 {type:"delete", hash} → 响应 {type:"deleted", hash, seq}
+func (s *PeerJSService) serveDelete(c Session, r dcResp) {
+	if err := s.fileIndex.Delete(r.Hash); err != nil {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})
+		return
+	}
+	_ = c.SendJSON(dcResp{Type: "deleted", Hash: r.Hash, ReqID: r.ReqID})
+}
+
+// serveSync 处理 sync：metadata 增量同步（seq 游标之后的所有变更含 tombstone）。
+// 请求 {type:"sync", seq} → 响应 {type:"sync-resp", files, lastSeq}
+func (s *PeerJSService) serveSync(c Session, r dcResp) {
+	files, last, err := s.fileIndex.SyncSince(r.Seq)
+	if err != nil {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})
+		return
+	}
+	if files == nil {
+		files = []FileInfo{}
+	}
+	_ = c.SendJSON(dcResp{Type: "sync-resp", Files: files, LastSeq: last, ReqID: r.ReqID})
+}
