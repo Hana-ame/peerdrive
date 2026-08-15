@@ -1,4 +1,4 @@
-package service
+package transport
 
 import (
 	"context"
@@ -306,7 +306,7 @@ func (s *PeerJSService) collectionHashes() []string {
 	var out []string
 	for _, h := range strings.Split(s.cfg.MQTTCollections, ",") {
 		h = strings.TrimSpace(h)
-		if isValidHash(h) && !seen[h] {
+		if hashutil.IsStrictSHA256(h) && !seen[h] {
 			seen[h] = true
 			out = append(out, h)
 		}
@@ -733,7 +733,7 @@ type dcResp struct {
 //
 // 优先查 file_index 映射（外部登记/上传的文件），其次内容寻址存储。
 func (s *PeerJSService) serveFile(c Session, req dcReq) {
-	if !isValidHash(req.Hash) {
+	if !hashutil.IsStrictSHA256(req.Hash) {
 		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "invalid hash", ReqID: req.ReqID})
 		return
 	}
@@ -803,7 +803,7 @@ func (s *PeerJSService) serveFile(c Session, req dcReq) {
 }
 
 func (s *PeerJSService) openFile(hash string) (*os.File, int64, error) {
-	if !isValidHash(hash) {
+	if !hashutil.IsStrictSHA256(hash) {
 		return nil, 0, fmt.Errorf("invalid hash %q", hash)
 	}
 	path := filepath.Join(s.storageDir, hash[:2], hash)

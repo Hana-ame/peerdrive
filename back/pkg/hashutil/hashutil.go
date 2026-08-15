@@ -57,3 +57,17 @@ func CIDToSHA256(cidStr string) string {
 	}
 	return hex.EncodeToString(dec.Digest)
 }
+// IsStrictSHA256 严格校验：仅接受 64 位小写十六进制 SHA256（传输层对端 hash
+// 用：允许大写会让查找小写表 miss 且行为变宽，等同放宽输入校验）。
+func IsStrictSHA256(s string) bool {
+	if s == "" || len(s) != 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}

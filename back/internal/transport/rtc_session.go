@@ -1,4 +1,4 @@
-package service
+package transport
 
 import (
 	peerjs "github.com/Hana-ame/go-peerjs"

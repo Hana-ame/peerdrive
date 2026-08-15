@@ -1,4 +1,4 @@
-package service
+package transport
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 
 	"peerdrive/internal/log"
+	"peerdrive/pkg/hashutil"
 )
 
 // MQTTDiscovery 基于公共 broker 的分片房间发现。
@@ -84,7 +85,7 @@ func (d *MQTTDiscovery) Start(collections []string) {
 			// 断线重连后重新订阅（paho 不保留旧订阅）
 			for _, h := range collections {
 				h = strings.TrimSpace(h)
-				if !isValidHash(h) {
+				if !hashutil.IsStrictSHA256(h) {
 					continue
 				}
 				c.Subscribe(d.nodeTopic(h), 0, d.onMessage)
@@ -118,7 +119,7 @@ func (d *MQTTDiscovery) onMessage(_ mqtt.Client, msg mqtt.Message) {
 func (d *MQTTDiscovery) Announce(peerID string, collections []string) {
 	for _, h := range collections {
 		h = strings.TrimSpace(h)
-		if !isValidHash(h) {
+		if !hashutil.IsStrictSHA256(h) {
 			continue
 		}
 		d.announceOnce(peerID, h)

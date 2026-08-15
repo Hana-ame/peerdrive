@@ -1,6 +1,8 @@
-package service
+package transport
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"sync"
@@ -335,4 +337,9 @@ func TestFileIndex_AbortIdempotent(t *testing.T) {
 	// 中止后写入必须报错（而非写已关闭句柄的莫名失败）
 	err = sess.WriteAt(0, []byte("x"))
 	assert.Error(t, err, "abort 后写入必须明确失败")
+}
+// sha256Hex 计算内容哈希（拆分到 transport 包后自带的测试辅助）。
+func sha256Hex(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
 }

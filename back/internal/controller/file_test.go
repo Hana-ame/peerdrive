@@ -134,6 +134,32 @@ func TestBrowseDir_SpecificPath(t *testing.T) {
 	}
 }
 
+// TestBrowseDir_SlashMeansStorageRoot 前端文件管理器用 "/" 表示 storage 根目录。
+// 发现背景：安全边界收紧后 BrowseDir 拒绝任何根目录外路径，但前端默认传 "/"，
+// 导致文件管理器/创建页的本地浏览一直 400。修复：空路径与 "/" 都映射为 storage 根。
+func TestBrowseDir_SlashMeansStorageRoot(t *testing.T) {
+	r, dir := setupFileTestRouter(t)
+	if err := os.WriteFile(filepath.Join(dir, "root.txt"), []byte("root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r.GET("/files/browse", BrowseDir)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/files/browse?path=/", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var entries []map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Error("storage 根目录应能列出文件")
+	}
+}
+
 func TestUploadFile_NoFile(t *testing.T) {
 	r, _ := setupFileTestRouter(t)
 	r.POST("/files/upload", UploadFile)

@@ -24,6 +24,7 @@ import (
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
 	"peerdrive/internal/service"
+	"peerdrive/internal/transport"
 )
 
 // @title Peerdrive API
@@ -113,10 +114,10 @@ func main() {
 	// 初始化 PeerJS 信令 + WebRTC 文件服务（Go 节点作为常驻 peer 提供文件，
 	// 与浏览器/其它节点经公共云信令 0.peerjs.com 互联）。
 	// 注意：SetPeerJSService 必须在 SetupRouter 之前调用，路由注册时读取。
-	var peerjsSvc *service.PeerJSService
+	var peerjsSvc *transport.PeerJSService
 	if cfg.PeerJSEnable {
 		log.LogInfo("main: initializing PeerJS WebRTC service")
-		peerjsSvc = service.NewPeerJSService(cfg, storageDir)
+		peerjsSvc = transport.NewPeerJSService(cfg, storageDir)
 		peerjsSvc.Start()
 		defer peerjsSvc.Close()
 		log.LogInfo("main: PeerJS node id=%s", peerjsSvc.ID())

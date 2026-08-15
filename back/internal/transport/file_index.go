@@ -1,4 +1,4 @@
-package service
+package transport
 
 import (
 	"crypto/sha256"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"peerdrive/internal/log"
+	"peerdrive/pkg/hashutil"
 	"peerdrive/internal/repository"
 )
 
@@ -362,7 +363,7 @@ func (s *FileIndexService) List(offset, limit int) ([]FileInfo, error) {
 
 // Info 按 hash 返回文件信息（download 前先 info 拿 name/path/size）。
 func (s *FileIndexService) Info(hash string) (*FileInfo, error) {
-	if !isValidHash(hash) {
+	if !hashutil.IsStrictSHA256(hash) {
 		return nil, fmt.Errorf("invalid hash %q", hash)
 	}
 	f, err := repository.GetFileIndex(hash)
@@ -385,7 +386,7 @@ func (s *FileIndexService) DownloadPath(hash string) (string, error) {
 // L6：seq 是增量同步游标——delete 的 tombstone 必须带序，对端 sync 才能
 // 跟踪到删除事件（原实现丢弃了 DeleteFileIndex 的 seq）。
 func (s *FileIndexService) Delete(hash string) (int64, error) {
-	if !isValidHash(hash) {
+	if !hashutil.IsStrictSHA256(hash) {
 		return 0, fmt.Errorf("invalid hash %q", hash)
 	}
 	return repository.DeleteFileIndex(hash)
@@ -415,7 +416,7 @@ func (s *FileIndexService) SyncSince(since int64) ([]FileInfo, int64, error) {
 func (s *FileIndexService) ApplySync(files []FileInfo) (int, error) {
 	n := 0
 	for _, f := range files {
-		if !isValidHash(f.Hash) {
+		if !hashutil.IsStrictSHA256(f.Hash) {
 			continue
 		}
 		if f.Delete {

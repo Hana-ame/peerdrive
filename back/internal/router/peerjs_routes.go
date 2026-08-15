@@ -9,17 +9,17 @@ import (
 	hashutil "peerdrive/pkg/hashutil"
 
 	"peerdrive/internal/config"
-	"peerdrive/internal/service"
+	"peerdrive/internal/transport"
 )
 
 // peerjsService 由 main 注入，暴露节点在 PeerJS 信令网络中的 ID 供前端发现。
-var peerjsService *service.PeerJSService
+var peerjsService *transport.PeerJSService
 
 // peerjsCfg WS 本地会话的 Origin 白名单（与 HTTP CORS 同一配置）。
 var peerjsCfg *config.Config
 
 // SetPeerJSService 注入 PeerJS WebRTC 服务（nil 则跳过节点信息路由）。
-func SetPeerJSService(svc *service.PeerJSService) {
+func SetPeerJSService(svc *transport.PeerJSService) {
 	peerjsService = svc
 }
 
@@ -113,7 +113,7 @@ func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "websocket upgrade failed"})
 			return
 		}
-		sess := service.NewWSSession("local", conn)
+		sess := transport.NewWSSession("local", conn)
 		peerjsService.BindLocal(sess)
 	})
 }

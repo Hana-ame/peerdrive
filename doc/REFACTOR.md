@@ -220,7 +220,19 @@ internal/
 
 迁移顺序：M0 依赖规则文档 → M1 legacy 隔离 → M2 收 controller 越层依赖 → M3 拆 transport → M4 provider 落地。
 
-**迁移状态（2026-08-16）**：M2 ✅ 完成 · M4 ✅（provider 已落地）· M1/M3 待做。
+**迁移状态（2026-08-16）**：M2 ✅ 完成 · M3 ✅ 完成 · M4 ✅（provider 已落地）· M1 待做。
+
+M3 收层要点（本次完成，transport 包落地）：
+- 新建 `internal/transport/`：PeerJS 文件服务子系统整体迁入——
+  `peerjs_service.go`（互联 + 帧协议服务端）、`file_index.go` + `file_index_verbs.go`
+  （sha256 文件索引 + req/meta/data/done/err 业务 verb）、`ws_session.go` + `rtc_session.go`
+  （Session 抽象：本地 WS / WebRTC DataChannel 双实现）、`mqtt_discovery.go` +
+  `http_discovery.go`（发现组件）。
+- transport 依赖面收敛到 `config/log/repository/pkg/hashutil`（层0/1），不再触碰
+  service 包；`pkg/hashutil` 新增 `IsStrictSHA256`（严格小写 64 hex，替代原
+  service 包 isValidHash 在传输层的使用）。
+- 外部装配（router/peerjs_routes、cmd/server main）改引用 `transport.*`；
+  测试随迁（file_index_test / peerjs_service_test），transport↔service 无循环依赖。
 
 M2 收层要点（本次完成）：
 - controller 不再 import repository：集合/分享/任务/pin 直调全部收编进 service——
