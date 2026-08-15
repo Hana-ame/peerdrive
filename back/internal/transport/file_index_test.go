@@ -117,6 +117,26 @@ func TestFileIndex_UploadStream(t *testing.T) {
 	assert.Equal(t, fi.Path, info.Path)
 }
 
+// TestFileIndex_UploadEmpty 空文件上传：size=0 也是合法内容寻址值。
+// 发现背景：拉取侧 hashMatchesSHA256 已支持空文件，但上传侧 BeginUpload(0)
+// 可以直接 Complete；serveUploadBegin 旧实现 size<=0 直接拒绝，两端不对称。
+func TestFileIndex_UploadEmpty(t *testing.T) {
+	initTestDB(t)
+	svc := NewFileIndexService(t.TempDir())
+
+	sess, err := svc.BeginUpload("empty.bin", 0)
+	require.NoError(t, err)
+	done, fi, err := sess.Complete()
+	require.NoError(t, err)
+	assert.True(t, done, "size=0 位图应天然全满")
+	assert.Equal(t, int64(0), fi.Size)
+	assert.Equal(t, sha256Hex([]byte{}), fi.Hash)
+
+	got, err := os.ReadFile(fi.Path)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
 // TestFileIndex_UploadSizeMismatch 声明大小与实际不符 → Commit 失败。
 // 发现背景：防御性测试——size 是协议信任边界，必须校验防半包/丢包残留。
 func TestFileIndex_UploadSizeMismatch(t *testing.T) {
@@ -338,6 +358,7 @@ func TestFileIndex_AbortIdempotent(t *testing.T) {
 	err = sess.WriteAt(0, []byte("x"))
 	assert.Error(t, err, "abort 后写入必须明确失败")
 }
+
 // sha256Hex 计算内容哈希（拆分到 transport 包后自带的测试辅助）。
 func sha256Hex(data []byte) string {
 	h := sha256.Sum256(data)

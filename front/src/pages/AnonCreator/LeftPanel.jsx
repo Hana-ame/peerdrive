@@ -1,7 +1,6 @@
 import { SOURCE_TABS, COLL_SORT_OPTS } from './constants';
 import CollectionRow from './CollectionRow';
 import CollBrowser from './CollBrowser';
-import FileSourceRow from './FileSourceRow';
 import SystemBrowse from './SystemBrowse';
 import SearchHistory from './SearchHistory';
 import { addSearchHistory, loadSearchHistory } from './utils';

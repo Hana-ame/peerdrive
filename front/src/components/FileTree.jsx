@@ -1,14 +1,22 @@
 // 文件树组件：将合集条目渲染为可拖拽/展开/重命名/移动到/新建文件夹的目录树
 import React, { useState, useRef, useEffect } from 'react';
 
-function fileIcon(mime) {
-  if (!mime) return '📄';
-  if (mime.startsWith('image/')) return '🖼️';
-  if (mime.startsWith('video/')) return '🎬';
-  if (mime.startsWith('audio/')) return '🎵';
-  if (mime.startsWith('text/')) return '📝';
-  if (mime.includes('pdf')) return '📕';
-  if (mime.includes('zip') || mime.includes('tar') || mime.includes('gzip') || mime.includes('rar')) return '📦';
+function fileIcon(mime, path) {
+  if (mime) {
+    if (mime.startsWith('image/')) return '🖼️';
+    if (mime.startsWith('video/')) return '🎬';
+    if (mime.startsWith('audio/')) return '🎵';
+    if (mime.startsWith('text/')) return '📝';
+    if (mime.includes('pdf')) return '📕';
+    if (mime.includes('zip') || mime.includes('tar') || mime.includes('gzip') || mime.includes('rar')) return '📦';
+  }
+  const ext = (path || '').split('.').pop()?.toLowerCase();
+  if (['png','jpg','jpeg','gif','webp','svg','bmp','ico'].includes(ext)) return '🖼️';
+  if (['mp4','avi','mkv','mov','webm'].includes(ext)) return '🎬';
+  if (['mp3','wav','flac','ogg'].includes(ext)) return '🎵';
+  if (['pdf'].includes(ext)) return '📕';
+  if (['zip','rar','7z','tar','gz','gzip'].includes(ext)) return '📦';
+  if (['txt','md','json','js','ts','jsx','tsx','css','html','xml','yaml','yml','py','go','rs','java','c','cpp','h','log','cfg','ini','conf','sh','bash'].includes(ext)) return '📝';
   return '📄';
 }
 
@@ -32,7 +40,7 @@ function buildTree(entries) {
       if (!seg) continue;
       const isLast = i === parts.length - 1;
       if (!cur[seg]) cur[seg] = { _children: {}, _files: [] };
-      if (isLast && !isDirEntry) cur[seg]._files.push({ name: seg, hash: e.hash || e.providers?.[0]?.value || '', path: e.path, size: e.size, mime_type: e.mime_type, providers: e.providers });
+      if (isLast && !isDirEntry) cur[seg]._files.push({ name: seg, hash: e.hash || e.providers?.[0]?.value || '', path: e.path, size: e.size, mime_type: e.mime_type || e.providers?.[0]?.mime_type || '', providers: e.providers });
       cur = cur[seg]._children;
     }
   }
@@ -144,7 +152,7 @@ export default function FileTree({ entries, entryActions }) {
             onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, node }); }}
           >
             <span className="w-4 shrink-0" />
-            <span className="text-base">{fileIcon(node.mime_type)}</span>
+            <span className="text-base">{fileIcon(node.mime_type, node.path)}</span>
             {renaming === node.path ? (
               <input autoFocus defaultValue={node.path}
                 onBlur={() => setRenaming(null)}
@@ -218,7 +226,7 @@ export default function FileTree({ entries, entryActions }) {
                   onDrop={(e) => { handleDrop(e, ''); }}
                 >
                   <span className="w-4 shrink-0" />
-                  <span className="text-base">{fileIcon(f.mime_type)}</span>
+                  <span className="text-base">{fileIcon(f.mime_type, f.path)}</span>
                   {renaming === f.path ? (
                     <input autoFocus defaultValue={f.path}
                       onBlur={() => setRenaming(null)}

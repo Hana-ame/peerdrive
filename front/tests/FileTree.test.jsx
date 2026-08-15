@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
-import FileTree from '../src/components/FileTree';
+import FileTree, { buildFlatTree } from '../src/components/FileTree';
 
 describe('FileTree', () => {
   it('renders empty state', () => {
@@ -24,5 +24,14 @@ describe('FileTree', () => {
   it('renders new folder button', () => {
     const { container } = render(<FileTree entries={[{ path: 'f.txt', hash: 'abc', size: 0, mime_type: '' }]} entryActions={{}} />);
     expect(container.textContent).toContain('新建文件夹');
+  });
+
+  // 发现背景：AnonCollectionEntry 的 MIME 只在 providers[].mime_type，
+  // 旧实现只读顶层 e.mime_type，合集条目在 FileTree 里图标永远回到默认 📄。
+  it('derives mime from providers when top-level mime_type is missing', () => {
+    const tree = buildFlatTree([
+      { path: 'pic.png', hash: 'abc', size: 1, providers: [{ type: 'sha256', value: 'abc', mime_type: 'image/png' }] },
+    ]);
+    expect(tree[0].mime_type).toBe('image/png');
   });
 });

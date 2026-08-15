@@ -15,8 +15,8 @@ export default function CollBrowser({ coll, collViewPath, selectMode, selectedFi
     const files = [];
     const prefix = collViewPath ? collViewPath + '/' : '';
     for (const e of coll.entries) {
-      if (!e.path.startsWith(prefix)) continue;
-      const rel = e.path.slice(prefix.length);
+      if (!(e.path || '').startsWith(prefix)) continue;
+      const rel = (e.path || '').slice(prefix.length);
       // 坑：编辑器的文件夹条目以 "/" 结尾（如 "dir/"），在浏览时前缀匹配会得到空名行，
       // 直接跳过（它作为目录由 dirs 呈现）。
       if (rel.endsWith('/')) { if (rel.slice(0, -1)) dirs.add(rel.slice(0, -1)); continue; }
@@ -24,14 +24,14 @@ export default function CollBrowser({ coll, collViewPath, selectMode, selectedFi
       if (slash === -1) files.push(e);
       else if (rel.slice(0, slash)) dirs.add(rel.slice(0, slash));
     }
-    const total = coll.entries.filter(e => e.path.startsWith(prefix)).length;
+    const total = coll.entries.filter(e => (e.path || '').startsWith(prefix)).length;
     return { dirs: Array.from(dirs).sort(), files, total };
   }, [coll, collViewPath]);
 
   const makeSelectPayload = (entry) => ({
     hash: entry.hash || entry.providers?.[0]?.value || '',
-    path: entry.path,
-    filename: entry.path.split('/').pop(),
+    path: entry.path || '',
+    filename: (entry.path || '').split('/').pop() || 'file',
     mime_type: entryMime(entry),
     size: entrySize(entry),
   });

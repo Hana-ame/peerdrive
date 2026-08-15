@@ -5,7 +5,10 @@ export default function TextPreview({ url, downloadUrl, filename, hash, created 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   useEffect(() => {
-    fetch(url).then(r => r.text()).then(t => { setContent(t.substring(0, 50000)); setLoading(false); }).catch(() => { setError('加载失败'); setLoading(false); });
+    fetch(url)
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(t => { setContent(t.substring(0, 50000)); setLoading(false); })
+      .catch(() => { setError('加载失败'); setLoading(false); });
   }, [url]);
   if (loading) return <div className="flex-1 flex items-center justify-center text-gray-600 text-sm">加载预览中...</div>;
   if (error) return <div className="flex-1 flex items-center justify-center text-red-400 text-sm">{error}</div>;

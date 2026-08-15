@@ -1,13 +1,21 @@
 import { LLM_CHAT, SEARCH_HISTORY_KEY, MAX_HISTORY } from './constants';
 
-export function fileIcon(m) {
-  if (!m) return '📄';
-  if (m.startsWith('image/')) return '🖼️';
-  if (m.startsWith('video/')) return '🎬';
-  if (m.startsWith('audio/')) return '🎵';
-  if (m.startsWith('text/')) return '📝';
-  if (m.includes('pdf')) return '📕';
-  if (m.includes('zip') || m.includes('tar') || m.includes('gzip') || m.includes('rar')) return '📦';
+export function fileIcon(m, p) {
+  if (m) {
+    if (m.startsWith('image/')) return '🖼️';
+    if (m.startsWith('video/')) return '🎬';
+    if (m.startsWith('audio/')) return '🎵';
+    if (m.startsWith('text/')) return '📝';
+    if (m.includes('pdf')) return '📕';
+    if (m.includes('zip') || m.includes('tar') || m.includes('gzip') || m.includes('rar')) return '📦';
+  }
+  const ext = (p || '').split('.').pop()?.toLowerCase();
+  if (['png','jpg','jpeg','gif','webp','svg','bmp','ico'].includes(ext)) return '🖼️';
+  if (['mp4','avi','mkv','mov','webm'].includes(ext)) return '🎬';
+  if (['mp3','wav','flac','ogg'].includes(ext)) return '🎵';
+  if (['pdf'].includes(ext)) return '📕';
+  if (['zip','rar','7z','tar','gz','gzip'].includes(ext)) return '📦';
+  if (['txt','md','json','js','ts','jsx','tsx','css','html','xml','yaml','yml','py','go','rs','java','c','cpp','h','log','cfg','ini','conf','sh','bash'].includes(ext)) return '📝';
   return '📄';
 }
 

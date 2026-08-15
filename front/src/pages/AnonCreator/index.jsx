@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect, useMemo } from 'react';
+import React, { useContext, useState, useEffect, useMemo, useRef } from 'react';
 import * as api from '../../api';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { PageContext } from '../../App';
@@ -169,8 +169,13 @@ export default function AnonCreator() {
   , [collections]);
 
   // ===== 提示 =====
+  const toastTimerRef = useRef(null);
+  // 坑：旧实现每次 toast 都开新 setTimeout，前一个 toast 的定时器可能在后一个
+  // toast 未到 3s 时清掉消息（快速连续操作时提示一闪而过）。
   const showToast = (msg, err = false) => {
-    setToastMsg(msg); setToastErr(err); setTimeout(() => setToastMsg(''), 3000);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToastMsg(msg); setToastErr(err);
+    toastTimerRef.current = setTimeout(() => setToastMsg(''), 3000);
   };
 
   // ===== 合集浏览 =====
@@ -223,7 +228,7 @@ export default function AnonCreator() {
     const oldPrefix = isDir ? oldPath : oldPath + '/';
     setEntries(prev => prev.map(e => {
       if (e.path === oldPath) return { ...e, path: newPath };
-      if (isDir && e.path.startsWith(oldPrefix)) return { ...e, path: newPath + e.path.slice(oldPath.length) };
+      if (isDir && (e.path || '').startsWith(oldPrefix)) return { ...e, path: newPath + (e.path || '').slice(oldPath.length) };
       return e;
     }));
   };
@@ -232,25 +237,25 @@ export default function AnonCreator() {
   // 坑：树内拖拽是"移动"语义（去源），不是 onDrop 的"添加"语义（复制）——
   // 旧实现拖进文件夹后源条目残留 = 重复副本。
   const moveEntry = (oldPath, targetDir) => {
-    setEntries(prev => {
-      const isDir = oldPath.endsWith('/');
-      const base = oldPath.replace(/\/$/, '');
-      const name = base.split('/').pop();
-      const newPath = (targetDir ? targetDir + '/' : '') + name;
-      const oldPrefix = isDir ? oldPath : oldPath + '/';
-      // 防呆：目标是自己或自己子目录 → 拒绝，避免把目录拖进自己怀里
-      if (targetDir && (targetDir === base || targetDir.startsWith(base + '/'))) {
-        showToast('不能移动到自身或其子目录', true);
-        return prev;
-      }
-      const dst = newPath + (isDir ? '/' : '');
-      if (dst === oldPath) return prev;
-      return prev.flatMap(e => {
-        if (e.path === oldPath) return [{ ...e, path: dst }];
-        if (isDir && e.path.startsWith(oldPrefix)) return [{ ...e, path: dst + e.path.slice(oldPath.length) }];
-        return [e];
-      });
-    });
+    const isDir = oldPath.endsWith('/');
+    const base = oldPath.replace(/\/$/, '');
+    const name = base.split('/').pop();
+    const newPath = (targetDir ? targetDir + '/' : '') + name;
+    const oldPrefix = isDir ? oldPath : oldPath + '/';
+    // 防呆：目标是自己或自己子目录 → 拒绝，避免把目录拖进自己怀里。
+    // 注意：检查必须放在 setEntries 回调外面，state updater 应保持纯函数，
+    // 不能在 updater 里做 showToast 这种副作用（StrictMode 下会重复触发）。
+    if (targetDir && (targetDir === base || targetDir.startsWith(base + '/'))) {
+      showToast('不能移动到自身或其子目录', true);
+      return;
+    }
+    const dst = newPath + (isDir ? '/' : '');
+    if (dst === oldPath) return;
+    setEntries(prev => prev.flatMap(e => {
+      if (e.path === oldPath) return [{ ...e, path: dst }];
+      if (isDir && (e.path || '').startsWith(oldPrefix)) return [{ ...e, path: dst + (e.path || '').slice(oldPath.length) }];
+      return [e];
+    }));
   };
 
   const handleFileAdd = (hash, path, mime_type, size) => {

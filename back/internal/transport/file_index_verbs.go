@@ -39,7 +39,8 @@ func (s *PeerJSService) serveCreate(c Session, r dcResp) {
 // 请求 {type:"upload", name, size, reqId} → 响应 meta{total}；完成后 uploaded{hash,path}。
 // 注意：同一连接同时只有一个 upload 接收流（连接级 pendingUpload）。
 func (s *PeerJSService) serveUploadBegin(c Session, st *connState, r dcResp) {
-	if r.Size <= 0 || r.Size > 8*1024*1024*1024 {
+	// 允许 size==0：空文件是合法内容寻址值（sha256(空)），与拉取侧空文件校验对称
+	if r.Size < 0 || r.Size > 8*1024*1024*1024 {
 		_ = c.SendJSON(dcResp{Type: "err", Msg: "invalid upload size", ReqID: r.ReqID})
 		return
 	}
@@ -51,6 +52,25 @@ func (s *PeerJSService) serveUploadBegin(c Session, st *connState, r dcResp) {
 	sess, err := s.fileIndex.BeginUpload(r.Name, r.Size)
 	if err != nil {
 		_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})
+		return
+	}
+	if r.Size == 0 {
+		// 空文件没有 data 帧可发，这里直接完成，避免连接级 pendingUpload 卡到
+		// 30s stale 清理（且旧实现 size<=0 直接把空文件上传拒之门外）
+		if offset != 0 {
+			_ = c.SendJSON(dcResp{Type: "err", Msg: "offset beyond size", ReqID: r.ReqID})
+			return
+		}
+		done, fi, err := sess.Complete()
+		if err != nil {
+			_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})
+			return
+		}
+		if !done {
+			_ = c.SendJSON(dcResp{Type: "err", Msg: "empty upload failed to complete", ReqID: r.ReqID})
+			return
+		}
+		_ = c.SendJSON(dcResp{Type: "uploaded", Hash: fi.Hash, Total: fi.Size, Path: fi.Path, ReqID: r.ReqID})
 		return
 	}
 	// 分片长度：单次 data 块 ≤ 一个 chunk（64KB）；尾部块自动截断

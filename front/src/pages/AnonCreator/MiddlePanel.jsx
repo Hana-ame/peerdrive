@@ -62,7 +62,7 @@ export default function MiddlePanel({ selectedFile }) {
     <div className="h-full flex flex-col bg-gray-950">
       {/* 文件标题栏 */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-800 bg-gray-900 shrink-0">
-        <span className="text-lg">{fileIcon(mime)}</span>
+        <span className="text-lg">{fileIcon(mime, fname)}</span>
         <span className="text-sm text-gray-200 truncate flex-1 font-mono">{fname}</span>
         {size > 0 && <span className="text-[10px] text-gray-500 shrink-0">{fmtSize(size)}</span>}
       </div>
@@ -130,7 +130,7 @@ export default function MiddlePanel({ selectedFile }) {
         {/* 默认：非可预览类型 */}
         {!isImage && !isVideo && !isAudio && !isPdf && !isText && (
           <div className="p-8 text-center">
-            <div className="text-5xl mb-4">{fileIcon(mime)}</div>
+            <div className="text-5xl mb-4">{fileIcon(mime, fname)}</div>
             <div className="text-sm font-medium text-gray-200">{fname}</div>
             <div className="text-xs text-gray-500 mt-3 space-y-1">
               <div>类型: {mime || '未知'}</div>

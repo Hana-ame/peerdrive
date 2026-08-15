@@ -35,11 +35,13 @@ export default function AnonExplorer() {
   useEffect(() => { if (searchHash) fetchCollection(searchHash); }, [searchHash]);
   useEffect(() => { api.listAnonCollections().then(l => { if (Array.isArray(l)) setAllCollHashes(new Set(l.map(c => c.hash))); }).catch(() => {}); }, [searchHash]);
 
+  const toastTimerRef = useRef(null);
   const showToast = (msg, isErr) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToastMsg(msg);
     setToastErr(isErr);
     const dur = isErr ? 3000 : (msg.startsWith('分享') ? 4000 : 2500);
-    setTimeout(() => setToastMsg(''), dur);
+    toastTimerRef.current = setTimeout(() => setToastMsg(''), dur);
   };
 
   const fetchCollection = async (h) => {

@@ -52,8 +52,9 @@ export default function Explorer() {
     const files = [];
     const prefix = navPath ? navPath + '/' : '';
     for (const e of entries) {
-      if ((e.path || '').startsWith(prefix)) {
-        const rest = e.path.slice(prefix.length);
+      const p = e.path || '';
+      if (p.startsWith(prefix)) {
+        const rest = p.slice(prefix.length);
         const slash = rest.indexOf('/');
         if (slash === -1) files.push(e);
         else dirs.add(rest.slice(0, slash));
@@ -265,7 +266,7 @@ export default function Explorer() {
             {currentItems.files.map(entry => (
               <div key={entry.id || entry.path} className="flex items-center px-6 py-3 border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors group">
                 <span className="mr-3 text-xl">📄</span>
-                <span className="font-mono text-sm text-blue-300 truncate flex-1">{entry.path.split('/').pop()}</span>
+                <span className="font-mono text-sm text-blue-300 truncate flex-1">{(entry.path || '').split('/').pop() || 'file'}</span>
                 <span className="text-xs text-gray-500 font-mono mr-4 truncate max-w-[120px]">{(entry.file_hash || '').substring(0, 12)}...</span>
                 <div className="flex space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
                   <a href={api.downloadFileByPath(username, collName, entry.path)} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline text-xs">下载</a>
