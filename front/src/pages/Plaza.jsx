@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listAnonCollections, listPublicCollections, getP2PStatus } from '../api';
-import * as api from '../api';
 import CollectionCard from '../components/CollectionCard';
 
 // 从文本中提取 SHA256 哈希
@@ -37,11 +36,6 @@ export default function Plaza() {
   const [plazaTab, setPlazaTab] = useState('local');
   const [viewMode, setViewMode] = useState('grid');
   const navigate = useNavigate();
-
-  // 天线：实时发现的合集
-  const [antennaHashes, setAntennaHashes] = useState([]);
-  const [antennaFilter, setAntennaFilter] = useState('');
-  const [antennaPolling, setAntennaPolling] = useState(false);
 
   // 首次加载时拉取合集列表和 P2P 状态
   useEffect(() => { loadAll(); getP2PStatus().then(s => setP2pOnline(s?.enabled && s?.connected_count > 0)).catch(()=>{}); }, []);
@@ -85,50 +79,13 @@ export default function Plaza() {
     else if (c.username && c.collection_name) navigate(`/${c.username}/${c.collection_name}`);
   };
 
-  const showDummies = collections.length === 0 && !loading && plazaTab !== 'antenna';
+  const showDummies = collections.length === 0 && !loading;
   const display = showDummies ? DUMMY_COLLECTIONS : collections;
   const localColls = display.filter(c => c._type === 'anon' || c.isDummy);
   const p2pColls = display.filter(c => c._type === 'public');
-  const activeColls = plazaTab === 'p2p' ? p2pColls : plazaTab === 'antenna' ? antennaHashes : localColls;
-
-  // 天线：轮询 P2P 网络发现新合集
-  const startAntenna = async () => {
-    setAntennaPolling(true);
-    const poll = async () => {
-      try {
-        // BEP 51: sample infohashes from BT DHT
-        const btSamples = await api.getBEP51Sample().catch(() => ({ samples: [] }));
-        // 将发现的 hash 转为合集卡片
-        const found = (btSamples.samples || []).slice(0, 20).map((h, i) => ({
-          hash: h,
-          friendly_name: null,
-          name_preview: h?.substring(0, 12) + '...',
-          entry_count: 0,
-          _type: 'antenna',
-          _foundAt: new Date().toISOString(),
-          _source: 'BT DHT',
-        }));
-        if (found.length > 0) {
-          setAntennaHashes(prev => {
-            const existing = new Set(prev.map(c => c.hash));
-            const merged = [...found.filter(f => !existing.has(f.hash)), ...prev];
-            return merged.slice(0, 50);
-          });
-        }
-      } catch {}
-    };
-    poll();
-    const interval = setInterval(poll, 15000);
-    return () => clearInterval(interval);
-  };
-
-  useEffect(() => {
-    let cleanup;
-    if (plazaTab === 'antenna') {
-      startAntenna().then(fn => { cleanup = fn; });
-    }
-    return () => { if (cleanup) cleanup(); };
-  }, [plazaTab]);
+  // 天线 tab 已删除：BEP51 只能采样 torrent DHT 的 20 字节 infohash，
+  // 永远取不到 peerdrive 合集 announce 的 hash，点击打开的闭环不可达（发现背景见 git log）
+  const activeColls = plazaTab === 'p2p' ? p2pColls : localColls;
 
   return (
     <div className="p-8 overflow-y-auto h-full">
@@ -161,11 +118,10 @@ export default function Plaza() {
               className="flex-1 bg-gray-800 border border-gray-600 px-4 py-2.5 rounded-lg text-sm font-mono focus:outline-none focus:border-blue-500" />
             <button onClick={handleSearch} className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium">查看</button>
           </div>
-          {/* 标签切换：本机 / P2P 网络 / 天线 */}
+          {/* 标签切换：本机 / P2P 网络 */}
           <div className="flex gap-1 mt-3">
             <button onClick={() => setPlazaTab('local')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='local'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>💻 本机 ({localColls.length})</button>
             <button onClick={() => setPlazaTab('p2p')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='p2p'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>🌐 P2P 网络 ({p2pColls.length})</button>
-            <button onClick={() => setPlazaTab('antenna')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='antenna'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>📡 天线 ({antennaHashes.length})</button>
           </div>
         </div>
 

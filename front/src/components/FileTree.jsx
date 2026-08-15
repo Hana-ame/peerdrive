@@ -61,12 +61,9 @@ export default function FileTree({ entries, entryActions }) {
   const [expanded, setExpanded] = useState(new Set());
   const [renaming, setRenaming] = useState(null);
   const [dragOverPath, setDragOverPath] = useState(null);
-  const [showNewFolder, setShowNewFolder] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
   const [inlineNewFolder, setInlineNewFolder] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(null); // { path, isDir }
   const [contextMenu, setContextMenu] = useState(null); // { x, y, node }
-  const newFolderRef = useRef(null);
   const ctxMenuRef = useRef(null);
   const inlineRef = useRef(null);
 
@@ -83,13 +80,6 @@ export default function FileTree({ entries, entryActions }) {
   }, [contextMenu]);
 
   const toggle = (path) => setExpanded(prev => { const n = new Set(prev); n.has(path) ? n.delete(path) : n.add(path); return n; });
-  const submitNewFolder = () => {
-    const n = newFolderName.trim();
-    if (n) entryActions?.onNewFolder?.(n);
-    setNewFolderName('');
-    setShowNewFolder(false);
-  };
-
   // 获取所有可用目录（用于移动到目标选择）
   const getAllDirs = (nodes, prefix = '') => {
     let dirs = [];
@@ -102,12 +92,38 @@ export default function FileTree({ entries, entryActions }) {
     return dirs;
   };
 
-  // 执行移动：重命名路径到目标目录下
+  // 执行移动：重命名路径到目标目录下。
+  // 坑：目录条目在 entries 里的 path 带尾随 '/'，而树节点 path 不带；
+  // 不给目录补 '/' 时 renameEntry 精确匹配永远不中，文件夹移动静默失效。
   const executeMove = (srcPath, targetDir) => {
-    const name = srcPath.split('/').pop();
+    const isDir = showMoveModal?.isDir || srcPath.endsWith('/');
+    const name = srcPath.replace(/\/$/, '').split('/').pop();
     const newPath = targetDir ? `${targetDir}/${name}` : name;
-    if (newPath !== srcPath) entryActions?.onRename?.(srcPath, newPath);
+    const src = isDir ? srcPath.replace(/\/$/, '') + '/' : srcPath;
+    const dst = newPath + (isDir ? '/' : '');
+    if (dst !== src) {
+      // 优先 onMove（移动语义：目录会连带子条目，且去除源条目），退回 onRename
+      if (entryActions?.onMove) entryActions.onMove(src, targetDir);
+      else entryActions?.onRename?.(src, dst);
+    }
     setShowMoveModal(null);
+  };
+
+  // 统一 drop 处理：内部条目拖拽（application/peerdrive-entry）= 移动（去源）；
+  // 外部面板拖拽（application/peerdrive-file/text）= 复制（add）。
+  // 坑：旧实现文件夹 onDragStart 只写 application/peerdrive-path，而所有 onDrop 只读
+  // entry/file/text → 文件夹拖动静默 no-op；文件拖进文件夹走 add 语义 → 源条目残留成副本。
+  const handleDrop = (e, targetDir) => {
+    e.preventDefault(); setDragOverPath(null);
+    const internal = e.dataTransfer.types.includes('application/peerdrive-entry');
+    const d = e.dataTransfer.getData('application/peerdrive-entry')
+      || e.dataTransfer.getData('application/peerdrive-file')
+      || e.dataTransfer.getData('text/plain');
+    if (!d) return;
+    let parsed;
+    try { parsed = d.startsWith('{') ? JSON.parse(d) : { hash: '', name: d, path: d }; } catch { return; }
+    if (internal) entryActions?.onMove?.(parsed.path || parsed.name, targetDir);
+    else entryActions?.onDrop?.({ ...parsed, targetDir });
   };
 
   const renderEntries = (nodes, depth, parentPath) => {
@@ -123,10 +139,7 @@ export default function FileTree({ entries, entryActions }) {
             onDragStart={(e) => { e.dataTransfer.setData('application/peerdrive-entry', JSON.stringify({ hash: node.hash || node.providers?.[0]?.value || '', path: node.path, name: node.name, mime_type: node.mime_type, size: node.size, providers: node.providers })); e.dataTransfer.effectAllowed = 'move'; }}
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragOverPath(node.path); }}
             onDragLeave={() => setDragOverPath(null)}
-            onDrop={(e) => {
-              e.preventDefault(); setDragOverPath(null);
-              try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry') || e.dataTransfer.getData('text/plain'); if (d) { const parsed = d.startsWith('{') ? JSON.parse(d) : { hash: '', name: d, path: d }; entryActions?.onDrop?.({ ...parsed }); } } catch (e) { console.error('FileTree drop error:', e); }
-            }}
+            onDrop={(e) => { handleDrop(e, ''); }}
             onDoubleClick={(e) => { e.stopPropagation(); if (entryActions?.onRename) setRenaming(node.path); }}
             onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, node }); }}
           >
@@ -163,15 +176,17 @@ export default function FileTree({ entries, entryActions }) {
             onClick={() => toggle(node.path)}
             onDoubleClick={(e) => { e.stopPropagation(); if (entryActions?.onRename) setRenaming(node.path + '/'); }}
             draggable={node.isDir}
-            onDragStart={(e) => { e.dataTransfer.setData('application/peerdrive-path', node.path); e.dataTransfer.effectAllowed = 'move'; }}
+            onDragStart={(e) => {
+              // 目录也放入 entry 数据（path 带尾随 '/' 标记是目录），
+              // 这样目录可被拖到其他目录/根目录（移动）；旧实现只写
+              // application/peerdrive-path，drop 侧从不读 → 目录拖动永远无效
+              e.dataTransfer.setData('application/peerdrive-entry', JSON.stringify({ hash: '', path: node.path + '/', name: node.name, mime_type: '', size: 0, isDir: true }));
+              e.dataTransfer.setData('application/peerdrive-path', node.path);
+              e.dataTransfer.effectAllowed = 'move';
+            }}
             onDragOver={(e) => { if (node.isDir) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragOverPath(node.path); } }}
             onDragLeave={() => setDragOverPath(null)}
-            onDrop={(e) => {
-              e.preventDefault(); setDragOverPath(null);
-              if (node.isDir) {
-                try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry') || e.dataTransfer.getData('text/plain'); if (d) { const parsed = d.startsWith('{') ? JSON.parse(d) : { hash: '', name: d, path: d }; entryActions?.onDrop?.({ ...parsed, targetDir: node.path }); } } catch (e) { console.error('FileTree drop error:', e); }
-              }
-            }}
+            onDrop={(e) => { if (node.isDir) handleDrop(e, node.path); }}
           >
             <span className="w-4 text-center shrink-0 text-sm">{isExp ? '▾' : '▸'}</span>
             <span className="text-base">{isExp ? '📂' : '📁'}</span>
@@ -200,10 +215,7 @@ export default function FileTree({ entries, entryActions }) {
                   onDragStart={(e) => { e.dataTransfer.setData('application/peerdrive-entry', JSON.stringify({ hash: f.hash || f.providers?.[0]?.value || '', path: f.path, name: f.name, mime_type: f.mime_type, size: f.size, providers: f.providers })); e.dataTransfer.effectAllowed = 'move'; }}
                   onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragOverPath(f.path); }}
                   onDragLeave={() => setDragOverPath(null)}
-                  onDrop={(e) => {
-                    e.preventDefault(); setDragOverPath(null);
-                    try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry') || e.dataTransfer.getData('text/plain'); if (d) { const parsed = d.startsWith('{') ? JSON.parse(d) : { hash: '', name: d, path: d }; entryActions?.onDrop?.({ ...parsed }); } } catch (e) { console.error('FileTree drop error:', e); }
-                  }}
+                  onDrop={(e) => { handleDrop(e, ''); }}
                 >
                   <span className="w-4 shrink-0" />
                   <span className="text-base">{fileIcon(f.mime_type)}</span>
@@ -241,10 +253,7 @@ export default function FileTree({ entries, entryActions }) {
     return (
       <div className="flex items-center justify-center h-full text-gray-600 text-xs"
         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
-        onDrop={(e) => {
-          e.preventDefault();
-          try { const raw = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry') || e.dataTransfer.getData('text/plain'); if (raw) { const data = raw.startsWith('{') ? JSON.parse(raw) : { hash: '', name: raw, path: raw }; entryActions?.onDrop?.({ ...data, targetDir: '' }); } } catch (e) { console.error('FileTree drop error:', e); }
-        }}>拖拽文件到此处 — 从左侧拖拽或点击 + 添加文件</div>
+        onDrop={(e) => { handleDrop(e, ''); }}>拖拽文件到此处 — 从左侧拖拽或点击 + 添加文件</div>
     );
   }
 
@@ -286,10 +295,7 @@ export default function FileTree({ entries, entryActions }) {
       {/* 树形视图 */}
       <div className="overflow-y-auto flex-1 select-none"
         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
-        onDrop={(e) => {
-          e.preventDefault();
-          try { const d = e.dataTransfer.getData('application/peerdrive-file') || e.dataTransfer.getData('application/peerdrive-entry') || e.dataTransfer.getData('text/plain'); if (d) { const parsed = d.startsWith('{') ? JSON.parse(d) : { hash: '', name: d, path: d }; entryActions?.onDrop?.({ ...parsed, targetDir: '' }); } } catch (e) { console.error('FileTree drop error:', e); }
-        }}>
+        onDrop={(e) => { handleDrop(e, ''); }}>
         {renderEntries(tree, 0, '')}
         {/* 内联新建文件夹 */}
         {inlineNewFolder && (

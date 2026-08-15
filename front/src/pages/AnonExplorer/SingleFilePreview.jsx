@@ -8,11 +8,12 @@ import GenericFilePreview from './GenericFilePreview';
 
 export default function SingleFilePreview({ entry, searchHash, collection, allCollHashes }) {
   const navigate = useNavigate();
-  const mime = entry.mime_type || '';
+  // 后端 AnonCollectionEntry JSON 不返回顶层 mime_type/size，MIME 在 providers[].mime_type 里
+  const mime = entry.mime_type || entry.providers?.[0]?.mime_type || '';
   const ext = (entry.path || '').split('.').pop()?.toLowerCase();
   const url = api.getAnonFileDownloadUrl(searchHash, entry.path) + '?inline=1';
   const dlUrl = api.getAnonFileDownloadUrl(searchHash, entry.path);
-  const filename = entry.path.split('/').pop() || 'file';
+  const filename = (entry.path || '').split('/').pop() || 'file';
 
   // 嵌套合集
   if (allCollHashes.has(entry.hash)) {

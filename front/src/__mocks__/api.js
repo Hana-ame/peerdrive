@@ -202,7 +202,8 @@ export const getRegServerStats = () => EMPTY_PROMISE
 export const getServiceStats = () => EMPTY_PROMISE
 
 // Consent
-export const uploadConsent = () => {}
+export const saveConsentLocal = () => {}
+export const uploadConsent = saveConsentLocal
 
 // Alias
 export const createCollection = createUserCollection

@@ -151,8 +151,14 @@ async function request(method, path, body = null) {
   const url = `${getApiBase()}${path}`;
   const res = await fetch(url, opts);
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(err.error || err.message);
+    // 挂 status/data 到 Error：调用方需要区分 409 冲突清单等结构化错误体
+    //（发现背景：manual 合并策略 409 返回 {conflicts}，旧实现只 alert 消息文本，
+    //  冲突数据丢失，无法展示/重试）
+    const body = await res.json().catch(() => null);
+    const err = new Error(body?.error || body?.message || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.data = body;
+    throw err;
   }
   return res.json();
 }

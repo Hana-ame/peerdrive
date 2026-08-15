@@ -219,6 +219,7 @@ cd front && npm run build
 | [report/ROADMAP.md](report/ROADMAP.md) | 路线图 |
 | [report/SECURITY-REVIEW.md](report/SECURITY-REVIEW.md) | 安全审查 |
 | [report/DEVELOPMENT_PLAN.md](report/DEVELOPMENT_PLAN.md) | 开发计划 |
+| [REVIEW-FIX-2026-08-16.md](REVIEW-FIX-2026-08-16.md) | 2026-08-16 充分 review 修复清单（前端假上传/重复评论/WS 地址 + 后端 BrowseDir/路径脱敏/空文件/信令并发写） |
 | [report/TODO-FIXES.md](report/TODO-FIXES.md) | 当前任务 |
 | [report/changelog.md](report/changelog.md) | 变更日志 |
 | [report/GIT-ANALYSIS.md](report/GIT-ANALYSIS.md) | Git 记录分析 — 328 提交的开发模式、高频 Bug、经验教训 |

@@ -19,9 +19,10 @@ export default function Explorer() {
 
   const [commitMsg, setCommitMsg] = useState('');
   const [showMergeModal, setShowMergeModal] = useState(false);
-  const [mergeSrc, setMergeSrc] = useState({ user: '', coll: '', strategy: 'ours' });
+  const [mergeSrc, setMergeSrc] = useState({ user: '', coll: '', hash: '', strategy: 'ours' });
   const [mergeCollections, setMergeCollections] = useState([]);
   const [mergeCustom, setMergeCustom] = useState(false);
+  const [mergeConflicts, setMergeConflicts] = useState(null);
 
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [syncConfig, setSyncConfig] = useState({ path: '', include: '', exclude: '' });
@@ -90,6 +91,7 @@ export default function Explorer() {
 
   const loadMergeSources = async () => {
     setMergeCustom(false);
+    setMergeConflicts(null);
     try {
       const [anon, pub] = await Promise.all([
         api.listAnonCollections().catch(() => []),
@@ -101,17 +103,64 @@ export default function Explorer() {
         { label: '自定义...', user: '', coll: '', hash: '' },
       ];
       setMergeCollections(merged);
-      setMergeSrc(prev => ({ ...prev, user: '', coll: '' }));
+      setMergeSrc(prev => ({ ...prev, user: '', coll: '', hash: '' }));
     } catch (e) { console.error(e); }
   };
 
-  const handleMerge = async () => {
+  // 匿名合集合并（客户端实现）：后端 /actions/merge 只接受用户合集对（source_username/
+  // source_coll_name），没有匿名源端点（发现背景：合并弹窗把匿名合集也列入源下拉，选中后
+  // onChange 按 "user/coll" 匹配永远落空 → 静默失败，什么都合并不了）。
+  // 语义对齐后端：ours=冲突保留本地，theirs=冲突采用源，manual=先列出冲突 409 让用户选。
+  const mergeAnonIntoLocal = async (hash, strategy) => {
+    const coll = await api.getAnonCollection(hash);
+    const anonEntries = coll.entries || [];
+    const local = await api.getUserCollection(username, collName);
+    const localMap = {};
+    for (const e of local.entries || []) {
+      localMap[e.path] = e.file_hash || e.providers?.[0]?.value || '';
+    }
+    const conflicts = [];
+    let added = 0;
+    for (const e of anonEntries) {
+      const p = e.path;
+      const h = e.hash || e.providers?.[0]?.value || '';
+      // url 型 provider 条目：addCollectionEntry 端点只接受 sha256，无法老式添加，跳过
+      if (!h) continue;
+      if (localMap[p] === h) continue;
+      if (localMap[p] && localMap[p] !== h) {
+        if (strategy === 'manual') { conflicts.push({ path: p, local_hash: localMap[p], source_hash: h }); continue; }
+        if (strategy === 'ours') continue;
+      }
+      await api.addCollectionEntry(username, collName, p, h);
+      added++;
+    }
+    if (strategy === 'manual' && conflicts.length) {
+      const err = new Error('合并冲突，请选择解决策略');
+      err.status = 409;
+      err.data = { conflicts };
+      throw err;
+    }
+    return { total_entries: added };
+  };
+
+  const handleMerge = async (strategy = mergeSrc.strategy) => {
     try {
-      const res = await api.mergeCollection(username, mergeSrc.user, collName, mergeSrc.coll, mergeSrc.strategy);
-      alert(`合并成功! 总条目: ${res.total_entries || Object.keys(res.entries || {}).length}`);
+      const res = mergeSrc.hash
+        ? await mergeAnonIntoLocal(mergeSrc.hash, strategy)
+        : await api.mergeCollection(username, mergeSrc.user, collName, mergeSrc.coll, strategy);
+      alert(`合并成功! 总条目: ${res.total_entries || 0}`);
       setShowMergeModal(false);
+      setMergeConflicts(null);
       loadEntries();
-    } catch(e) { alert(`合并失败: ${e.message}`); }
+    } catch (e) {
+      // A4: manual 策略后端返回 409 + 冲突清单，旧实现只 alert 错误消息，
+      // 冲突无处展示、无法转换策略重试 → 在弹窗内展示冲突并支持 ours/theirs 重试
+      if (e.status === 409 && e.data?.conflicts?.length) {
+        setMergeConflicts(e.data.conflicts);
+        return;
+      }
+      alert(`合并失败: ${e.message}`);
+    }
   };
 
   const handleSaveLocal = async () => {
@@ -154,7 +203,7 @@ export default function Explorer() {
 
           <div className="flex items-center gap-1.5 md:gap-3 shrink-0">
             <button onClick={() => setShowSyncModal(true)} className="bg-indigo-600 hover:bg-indigo-500 px-2.5 md:px-4 py-1.5 rounded text-xs md:text-sm whitespace-nowrap">
-              保存
+              同步到本地
             </button>
             <label className="bg-blue-600 hover:bg-blue-700 px-2.5 md:px-4 py-1.5 rounded text-xs md:text-sm cursor-pointer flex items-center whitespace-nowrap">
               上传 <input type="file" className="hidden" onChange={handleUpload} />
@@ -172,7 +221,7 @@ export default function Explorer() {
             onKeyDown={e => { if (e.key === 'Enter') handleCommit(); }}
             className="bg-gray-800 border border-gray-700 px-3 py-1.5 rounded text-sm flex-1 max-w-md focus:outline-none focus:border-blue-500" />
           <button onClick={handleCommit} className="bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded text-sm font-medium" title="保存当前版本，之后可恢复到此状态">
-            保存
+            提交版本
           </button>
         </div>
 
@@ -241,11 +290,17 @@ export default function Explorer() {
             <div className="mb-3">
               <label className="block text-xs text-gray-500 mb-1">源合集</label>
               <select
-                value={mergeSrc.user && mergeSrc.coll ? `${mergeSrc.user}/${mergeSrc.coll}` : (mergeCustom ? '__custom__' : '')}
+                value={mergeSrc.user && mergeSrc.coll ? `${mergeSrc.user}/${mergeSrc.coll}` : (mergeSrc.hash || (mergeCustom ? '__custom__' : ''))}
                 onChange={(e) => {
                   const val = e.target.value;
-                  if (val === '__custom__') { setMergeCustom(true); setMergeSrc(prev => ({ ...prev, user: '', coll: '' })); }
-                  else { setMergeCustom(false); const item = mergeCollections.find(c => `${c.user}/${c.coll}` === val); if (item) setMergeSrc(prev => ({ ...prev, user: item.user, coll: item.coll })); }
+                  if (val === '__custom__') { setMergeCustom(true); setMergeSrc(prev => ({ ...prev, user: '', coll: '', hash: '' })); }
+                  else {
+                    setMergeCustom(false); setMergeConflicts(null);
+                    // 坑：匿名合集选项 value 是 hash（user/coll 为空），旧实现
+                    // 只按 "user/coll" 查找 → 永远匹配不到 → 合并源为空、静默失败
+                    const item = mergeCollections.find(c => (c.user && c.coll) ? `${c.user}/${c.coll}` === val : c.hash === val);
+                    if (item) setMergeSrc(prev => ({ ...prev, user: item.user || '', coll: item.coll || '', hash: item.hash || '' }));
+                  }
                 }}
                 className="w-full bg-gray-700 p-2 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
@@ -268,9 +323,30 @@ export default function Explorer() {
               <option value="theirs">冲突采用远端</option>
               <option value="manual">冲突时报错</option>
             </select>
+
+            {mergeConflicts && (
+              <div className="mb-4 bg-gray-900 p-3 rounded border border-yellow-700/60">
+                <p className="text-xs font-bold text-yellow-400 mb-2">合并冲突 ({mergeConflicts.length})：请选择解决策略后重试</p>
+                <div className="max-h-40 overflow-y-auto space-y-1 mb-3">
+                  {mergeConflicts.map((cf, i) => (
+                    <div key={i} className="text-[11px] font-mono text-gray-400 flex justify-between gap-2">
+                      <span className="truncate">{cf.path}</span>
+                      <span className="shrink-0">{(cf.local_hash || '').substring(0, 8)} → {(cf.source_hash || '').substring(0, 8)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => handleMerge('ours')} className="flex-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs">保留本地重试</button>
+                  <button onClick={() => handleMerge('theirs')} className="flex-1 px-3 py-1.5 bg-teal-700 hover:bg-teal-600 rounded text-xs">采用远端重试</button>
+                </div>
+              </div>
+            )}
             <div className="flex justify-end space-x-3">
               <button onClick={() => setShowMergeModal(false)} className="px-4 py-2 bg-gray-600 rounded text-sm">取消</button>
-              <button onClick={handleMerge} className="px-4 py-2 bg-teal-600 hover:bg-teal-700 rounded text-sm">执行合并</button>
+              <button onClick={() => handleMerge()} disabled={!mergeSrc.user && !mergeSrc.hash}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 rounded text-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                执行合并
+              </button>
             </div>
           </div>
         </div>

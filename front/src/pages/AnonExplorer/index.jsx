@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect } from 'react';
+import React, { useContext, useState, useEffect, useRef } from 'react';
 import * as api from '../../api';
 import { useNavigate, useParams } from 'react-router-dom';
 import { PageContext } from '../../App';
@@ -26,6 +26,10 @@ export default function AnonExplorer() {
   const [toastMsg, setToastMsg] = useState('');
   const [toastErr, setToastErr] = useState(false);
   const navigate = useNavigate();
+  // 请求序号守卫：快速切换 hash 时，旧请求的慢响应不得覆盖当前合集（发现背景：
+  // 打字即跳转/粘贴/卡片点击快速切换，hash A 的响应晚于 hash B 到达时展示错误合集，
+  // 代码审阅时发现无任何 in-flight 丢弃机制）
+  const fetchSeqRef = useRef(0);
 
   useEffect(() => { if (paramHash) { setInputVal(paramHash); setSearchHash(paramHash); } }, [paramHash]);
   useEffect(() => { if (searchHash) fetchCollection(searchHash); }, [searchHash]);
@@ -40,17 +44,20 @@ export default function AnonExplorer() {
 
   const fetchCollection = async (h) => {
     if (!h) return;
+    const seq = ++fetchSeqRef.current;
     setLoading(true); setError(''); setCollection(null);
     try {
       const coll = await api.getAnonCollection(h);
+      if (seq !== fetchSeqRef.current) return; // 已有更新的请求，丢弃本次响应
+      // 坑：不要在这里 api.deleteFile 自动删除空合集——读接口带写副作用，
+      // 无注册服务器时会真实删除存储文件，有注册服务器时 401 后消息与实际不符
       if (!coll.entries || coll.entries.length === 0) {
-        await api.deleteFile(h).catch(() => {});
-        setError('空合集，已自动删除');
+        setError('空合集：请确认 hash 是否正确，或让创建者补全内容');
         setLoading(false);
         return;
       }
       setCollection(coll);
-    } catch { setError('合集未找到'); }
+    } catch { if (seq === fetchSeqRef.current) setError('合集未找到'); }
     setLoading(false); setNavPath('');
     api.listAnonCollections().then(l => setIsLocal(Array.isArray(l) && l.some(c => c.hash === h))).catch(() => {});
   };
@@ -106,9 +113,8 @@ export default function AnonExplorer() {
               navPath={navPath} fname={fname} entries={entries}
               tags={collection.tags} isSingleFile={isSingleFile}
               totalFiles={totalFiles} isLocal={isLocal}
-              searchHash={searchHash}
               visibility={collection.visibility || 'public'}
-              onBack={navBack} onSave={handleSaveAndEdit} onToast={showToast} />
+              onBack={navBack} onSave={handleSaveAndEdit} />
 
             <Toast message={toastMsg} isError={toastErr} />
 

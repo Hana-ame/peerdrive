@@ -1,36 +1,6 @@
-import { useState, useMemo } from 'react';
-import * as api from '../../api';
-
 const VIS_LABELS = { public: '🌐 公开', restricted: '👥 受限', private: '🔒 私密' };
-const BC_PREFIX = 'peerdrive_last_bc_';
 
-function getLastBroadcast(hash) {
-  const v = localStorage.getItem(BC_PREFIX + hash);
-  return v ? new Date(v) : null;
-}
-
-function fmtDate(d) {
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
-}
-
-export default function CollectionHeader({ navPath, fname, entries, tags, isSingleFile, totalFiles, isLocal, searchHash, visibility, onBack, onSave, onToast }) {
-  const [lastBc, setLastBc] = useState(() => getLastBroadcast(searchHash));
-
-  const bcTitle = useMemo(() => {
-    const d = lastBc || getLastBroadcast(searchHash);
-    return d ? `上次广播日期：${fmtDate(d)}` : '上次广播日期：从未';
-  }, [searchHash, lastBc]);
-
-  const handleBroadcast = async () => {
-    if (!searchHash) return;
-    try {
-      await api.p2pAnnounce(searchHash);
-      const now = new Date();
-      localStorage.setItem(BC_PREFIX + searchHash, now.toISOString());
-      setLastBc(now);
-      onToast('广播成功', false);
-    } catch(e) { onToast('广播失败: ' + e.message, true); }
-  };
+export default function CollectionHeader({ navPath, fname, entries, tags, isSingleFile, totalFiles, isLocal, visibility, onBack, onSave }) {
 
   const handleSave = async () => {
     if (isLocal) return;
@@ -46,7 +16,7 @@ export default function CollectionHeader({ navPath, fname, entries, tags, isSing
       ) : (
         <div className="flex items-center gap-2 min-w-0">
           {entries.length === 1 ? (
-            <h2 className="text-base font-bold truncate">📄 {isSingleFile ? entries[0].path.split('/').pop() : (fname || '合集')}</h2>
+            <h2 className="text-base font-bold truncate">📄 {isSingleFile ? ((entries[0].path || '').split('/').pop() || fname || '合集') : (fname || '合集')}</h2>
           ) : (
             <h2 className="text-base font-bold truncate">📦 {fname || '合集'}</h2>
           )}
@@ -62,9 +32,9 @@ export default function CollectionHeader({ navPath, fname, entries, tags, isSing
       <span className="text-xs text-gray-600 shrink-0">{totalFiles} 项</span>
       {visLabel && <span className="text-[10px] text-gray-500 shrink-0">{visLabel}</span>}
       <div className="flex items-center gap-1 shrink-0">
-        {visibility === 'public' && (
-          <button onClick={handleBroadcast} title={bcTitle} className="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1 rounded text-xs">📡 广播</button>
-        )}
+        {/* 坑：旧实现有「📡 广播」按钮（POST /p2p/announce → 旧 BT DHT），
+            但没有任何读取端能在该空间取回合集 hash（BEP51 采样的是 torrent
+            infohash，与合集 announce 语义错配），广播是死操作，已随天线 tab 移除 */}
         <button onClick={handleSave}
           className={`px-3 py-1 rounded text-xs ${isLocal ? 'bg-green-500/20 text-green-400' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
           {isLocal ? '✓ 已保存' : '💾 保存到本机'}

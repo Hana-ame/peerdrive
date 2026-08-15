@@ -216,7 +216,41 @@ export default function AnonCreator() {
     }));
   };
   const renameEntry = (oldPath, newPath) => {
-    setEntries(prev => prev.map(e => e.path === oldPath ? { ...e, path: newPath } : e));
+    // 坑：旧实现只改 path 精确相等的条目 → 重命名文件夹（dir/ → newdir/）时
+    // dir/a.txt 等子条目路径不变，合集内容损坏（孤儿条目浮到根部）。
+    // 目录重命名必须把子路径前缀一并改掉。
+    const isDir = oldPath.endsWith('/');
+    const oldPrefix = isDir ? oldPath : oldPath + '/';
+    setEntries(prev => prev.map(e => {
+      if (e.path === oldPath) return { ...e, path: newPath };
+      if (isDir && e.path.startsWith(oldPrefix)) return { ...e, path: newPath + e.path.slice(oldPath.length) };
+      return e;
+    }));
+  };
+
+  // 移动条目到目标目录（含目录本身：连带子条目）。用于 FileTree 树内拖拽/移动弹窗。
+  // 坑：树内拖拽是"移动"语义（去源），不是 onDrop 的"添加"语义（复制）——
+  // 旧实现拖进文件夹后源条目残留 = 重复副本。
+  const moveEntry = (oldPath, targetDir) => {
+    setEntries(prev => {
+      const isDir = oldPath.endsWith('/');
+      const base = oldPath.replace(/\/$/, '');
+      const name = base.split('/').pop();
+      const newPath = (targetDir ? targetDir + '/' : '') + name;
+      const oldPrefix = isDir ? oldPath : oldPath + '/';
+      // 防呆：目标是自己或自己子目录 → 拒绝，避免把目录拖进自己怀里
+      if (targetDir && (targetDir === base || targetDir.startsWith(base + '/'))) {
+        showToast('不能移动到自身或其子目录', true);
+        return prev;
+      }
+      const dst = newPath + (isDir ? '/' : '');
+      if (dst === oldPath) return prev;
+      return prev.flatMap(e => {
+        if (e.path === oldPath) return [{ ...e, path: dst }];
+        if (isDir && e.path.startsWith(oldPrefix)) return [{ ...e, path: dst + e.path.slice(oldPath.length) }];
+        return [e];
+      });
+    });
   };
 
   const handleFileAdd = (hash, path, mime_type, size) => {
@@ -376,6 +410,7 @@ export default function AnonCreator() {
   const entryActions = {
     onRemove: removeEntry,
     onRename: renameEntry,
+    onMove: moveEntry,
     onNewFolder: (name) => addEntry('', name + '/'),
     onDrop: async (data) => {
       const d = data.targetDir || '';
