@@ -1,5 +1,5 @@
 // Package service 的辅助函数 — SHA256 转 CID、multiaddr 解析、peer addr 和静态中继地址解析。
-package service
+package legacy
 
 import (
 	"encoding/hex"

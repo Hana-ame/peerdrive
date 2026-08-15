@@ -21,7 +21,7 @@
 //	curl -o file.bin -H "Range: bytes=0-1048575" \
 //	  "http://localhost:3000/relay/proxy?hash=<sha256>&peer=<peerID>"
 
-package service
+package legacy
 
 import (
 	"bufio"

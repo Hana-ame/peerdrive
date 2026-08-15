@@ -12,7 +12,7 @@
 //	    registry.Start()
 //	}
 
-package service
+package legacy
 
 import (
 	"bytes"

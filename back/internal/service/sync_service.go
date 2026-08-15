@@ -8,17 +8,18 @@ import (
 	"path/filepath"
 	"strings"
 
+	"peerdrive/internal/legacy"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 )
 
 type SyncService struct {
 	syncRepo            *repository.SyncRepository
-	universalDownloader *UniversalDownloader
+	universalDownloader *legacy.UniversalDownloader
 	storageDir          string
 }
 
-func NewSyncService(syncRepo *repository.SyncRepository, uniDl *UniversalDownloader, storageDir string) *SyncService {
+func NewSyncService(syncRepo *repository.SyncRepository, uniDl *legacy.UniversalDownloader, storageDir string) *SyncService {
 	return &SyncService{
 		syncRepo:            syncRepo,
 		universalDownloader: uniDl,
@@ -126,7 +127,7 @@ func (s *SyncService) saveFile(hash, targetDir, relPath, fileHash string) error 
 		return err
 	}
 
-	// Download from CAS via UniversalDownloader
+	// Download from CAS via legacy.UniversalDownloader
 	ctx := context.Background()
 	data, _, err := s.universalDownloader.Download(ctx, fileHash)
 	if err != nil {

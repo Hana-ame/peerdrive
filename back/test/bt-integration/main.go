@@ -26,7 +26,7 @@ import (
 	"peerdrive/internal/p2p_bt"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
-	"peerdrive/internal/service"
+	"peerdrive/internal/legacy"
 
 	"github.com/gin-gonic/gin"
 )
@@ -206,7 +206,7 @@ func startServer() (string, func()) {
 
 	// Init P2P service (disabled for test)
 	ctx := context.Background()
-	p2pSvc, err := service.NewP2PService(ctx, cfg)
+	p2pSvc, err := legacy.NewP2PService(ctx, cfg)
 	if err != nil {
 		peerdrive_log.LogError("bt-test: p2p init: %v", err)
 		os.Exit(1)

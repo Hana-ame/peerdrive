@@ -1,5 +1,5 @@
 // PeerTracker 记录所有 P2P 对端的元数据（连接时间、传输量、延迟、方向），支持并发读写和统计查询。
-package service
+package legacy
 
 import (
 	"sort"

@@ -7,7 +7,7 @@
 // Once two peers are in the same room, the hub relays signaling messages
 // (offer, answer, ice) between them so they can establish a direct
 // RTCPeerConnection.
-package service
+package legacy
 
 import (
 	"net/http"

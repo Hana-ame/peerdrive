@@ -22,17 +22,17 @@ import (
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/provider"
-	"peerdrive/internal/service"
+	"peerdrive/internal/legacy"
 	"peerdrive/pkg/hashutil"
 
 	"github.com/gin-gonic/gin"
 )
 
-var universalDownloader *service.UniversalDownloader
+var universalDownloader *legacy.UniversalDownloader
 var ipfsGatewayProvider *provider.IPFSProvider
 
 // InitUniversalDownloader 注入 UniversalDownloader 实例供多协议下载端点使用。
-func InitUniversalDownloader(d *service.UniversalDownloader) {
+func InitUniversalDownloader(d *legacy.UniversalDownloader) {
 	universalDownloader = d
 }
 
@@ -187,7 +187,7 @@ func handleRangeRequest(c *gin.Context, data []byte, rangeHeader string) bool {
 		}
 	}
 
-	start, end, ok := service.ParseRange(rangeHeader, total)
+	start, end, ok := legacy.ParseRange(rangeHeader, total)
 	if !ok {
 		return false
 	}

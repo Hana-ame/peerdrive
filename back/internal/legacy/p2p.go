@@ -1,6 +1,6 @@
 // P2PService 封装 libp2p host、DHT、mDNS 发现和流式文件交换协议。
 // 支持 announce、find providers、fetch file、sync files 及 WebSocket 文件请求。
-package service
+package legacy
 
 import (
 	"bufio"
@@ -19,6 +19,7 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/log"
+	"peerdrive/pkg/hashutil"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 
@@ -827,7 +828,7 @@ func (p *P2PService) processWSRequests() {
 		// H3 修复：hash 未校验就切片 [:2]——空/短 hash 越界 panic 杀进程；
 		// hash 形如 "../secret" 时 Join 解析到存储目录外 → 任意文件读取
 		// （对比 p2p.go:672/707 两处有 64 位校验，唯独这条路径漏了）
-		if !isValidHash(req.Hash) {
+		if !hashutil.IsStrictSHA256(req.Hash) {
 			log.LogWarn("p2p: invalid hash requested: %q", req.Hash)
 			continue
 		}

@@ -1,5 +1,5 @@
 // PeerScanner 后台主动扫描并连接 P2P 对端，支持 DHT 扫描、注册服务器扫描、LAN（mDNS）扫描和引导节点维护。
-package service
+package legacy
 
 import (
 	"context"

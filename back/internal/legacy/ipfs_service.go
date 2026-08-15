@@ -1,7 +1,7 @@
 // IPFSService 封装 boxo Bitswap 客户端/服务端，复用 P2PService 的 libp2p host 和 DHT。
 // Blockstore 直接映射 SHA-256 内容寻址存储，不复制文件。
 // Pin = 文件在 content-addressed storage 中存在。
-package service
+package legacy
 
 import (
 	"context"

@@ -7,7 +7,7 @@
 //   - Peer A calls CreateForward(key, port) to expose a local service.
 //   - Peer B calls ConnectForward(ctx, peerA, key, localPort) to access it.
 //   - Data flows: TCP client ↔ B's local listener ↔ libp2p stream ↔ A's handler ↔ A's local service.
-package service
+package legacy
 
 import (
 	"bufio"

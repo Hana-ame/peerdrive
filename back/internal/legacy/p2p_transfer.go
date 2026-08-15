@@ -1,5 +1,5 @@
 // ChunkedTransfer 实现 P2P 分片传输协议，支持并行分片下载、进度回调和服务端分片请求处理。
-package service
+package legacy
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"peerdrive/internal/log"
+	"peerdrive/pkg/hashutil"
 	"peerdrive/internal/repository"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -363,7 +364,7 @@ func (ct *ChunkedTransfer) handleChunkRequest(stream network.Stream) {
 
 	// H3 修复：hash 未校验就切片 [:2] 会越界 panic（空/短 hash）；hash 形如
 	// "../secret" 时 Join 解析到存储目录外 → 任意文件读取（≤256KB/次）
-	if !isValidHash(hash) {
+	if !hashutil.IsStrictSHA256(hash) {
 		log.LogWarn("p2p-transfer: invalid hash from %s: %q", stream.Conn().RemotePeer().String(), hash)
 		fmt.Fprintf(stream, "ERR invalid hash\n")
 		return

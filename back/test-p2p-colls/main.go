@@ -9,7 +9,7 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/model"
-	"peerdrive/internal/service"
+	"peerdrive/internal/legacy"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -34,7 +34,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	p2pSvc, err := service.NewP2PService(ctx, cfg)
+	p2pSvc, err := legacy.NewP2PService(ctx, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
 		os.Exit(1)

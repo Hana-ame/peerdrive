@@ -23,7 +23,7 @@ import (
 	"peerdrive/internal/log"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
-	"peerdrive/internal/service"
+	"peerdrive/internal/legacy"
 	"peerdrive/internal/transport"
 )
 
@@ -52,7 +52,7 @@ func main() {
 
 	// 初始化 P2P
 	log.LogInfo("main: initializing P2P service")
-	p2pSvc, err := service.NewP2PService(ctx, cfg)
+	p2pSvc, err := legacy.NewP2PService(ctx, cfg)
 	if err != nil {
 		stdlog.Fatalf("libp2p 节点启动失败: %v", err)
 	}
@@ -65,7 +65,7 @@ func main() {
 	// 启动节点身份注册（如果配置了 auth token + 注册服务器）
 	// 注意：节点身份独立于 P2P，P2P 禁用时也应当能注册
 	if cfg.NodeAuthToken != "" && cfg.RegistrationServer != "" {
-		nodeReg := service.NewNodeRegistrar(p2pSvc, cfg.RegistrationServer, cfg.NodeAuthToken, "peerdrive-dev")
+		nodeReg := legacy.NewNodeRegistrar(p2pSvc, cfg.RegistrationServer, cfg.NodeAuthToken, "peerdrive-dev")
 		if nodeReg != nil {
 			nodeReg.Start()
 			defer nodeReg.Stop() // L5:退出时停止心跳 goroutine
@@ -74,7 +74,7 @@ func main() {
 
 	// 启动中继注册（如果配置了注册服务器 URL）
 	if cfg.RegServerURL != "" && p2pSvc.IsEnabled() {
-		registry := service.NewRelayRegistry(p2pSvc, cfg.RegServerURL, cfg.RelayStorageMB, cfg.RelayVersion)
+		registry := legacy.NewRelayRegistry(p2pSvc, cfg.RegServerURL, cfg.RelayStorageMB, cfg.RelayVersion)
 		registry.Start()
 		defer registry.Stop() // L5:退出时停止心跳 goroutine
 	}
@@ -84,7 +84,7 @@ func main() {
 
 	// 初始化 IPFS 服务（boxo Bitswap + Blockstore，复用 libp2p host + DHT）
 	log.LogInfo("main: initializing IPFS service (Bitswap+DHT)")
-	ipfsSvc, err := service.NewIPFSService(ctx, p2pSvc, storageDir)
+	ipfsSvc, err := legacy.NewIPFSService(ctx, p2pSvc, storageDir)
 	if err != nil {
 		log.LogWarn("main: IPFSService init failed (non-fatal): %v", err)
 	}
@@ -101,7 +101,7 @@ func main() {
 
 	// 初始化 IPFS 兼容层（可选，默认关闭）
 	log.LogInfo("main: initializing IPFS compat layer (enabled=%v)", cfg.IPFSCompatEnable)
-	ipfsCompatLayer := service.NewIPFSCompatLayer(storageDir, cfg.IPFSBlockstore, p2pSvc)
+	ipfsCompatLayer := legacy.NewIPFSCompatLayer(storageDir, cfg.IPFSBlockstore, p2pSvc)
 	if ipfsSvc != nil {
 		ipfsCompatLayer.SetIPFSService(ipfsSvc)
 	}

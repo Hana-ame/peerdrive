@@ -2,7 +2,7 @@
 // 启用后，已存储的文件会额外拷贝一份到 IPFS 块存储（按 CID 键值），
 // 并在 libp2p host 上注册 Bitswap 协议处理器，使外部 IPFS 节点
 // 能通过标准 IPFS 协议（Bitswap / HTTP Gateway）获取文件。
-package service
+package legacy
 
 import (
 	"encoding/binary"

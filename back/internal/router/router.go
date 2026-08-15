@@ -31,6 +31,7 @@ import (
 	"peerdrive/internal/p2p_bt"
 	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
+	"peerdrive/internal/legacy"
 	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -42,10 +43,10 @@ import (
 
 // SetupRouter 创建 Gin 引擎并注册全部路由（健康检查、文件下载、P2P、集合、WebDAV、信令等）。
 func SetupRouter(
-	p2pSvc *service.P2PService,
+	p2pSvc *legacy.P2PService,
 	cfg *config.Config,
-	ipfsCompat *service.IPFSCompatLayer,
-	ipfsSvc *service.IPFSService,
+	ipfsCompat *legacy.IPFSCompatLayer,
+	ipfsSvc *legacy.IPFSService,
 ) *gin.Engine {
 	log.LogInfo("router: SetupRouter starting")
 	r := gin.Default()
@@ -110,11 +111,11 @@ func SetupRouter(
 	controller.InitPinController(service.NewPinService())
 
 	// Initialize the port forwarding service.
-	var forwardSvc *service.ForwardService
+	var forwardSvc *legacy.ForwardService
 	if p2pSvc != nil && p2pSvc.Host != nil {
-		forwardSvc = service.NewForwardService(p2pSvc.Host, cfg.ForwardEnable)
+		forwardSvc = legacy.NewForwardService(p2pSvc.Host, cfg.ForwardEnable)
 	} else {
-		forwardSvc = service.NewForwardService(nil, false)
+		forwardSvc = legacy.NewForwardService(nil, false)
 	}
 	controller.InitForwardController(forwardSvc)
 
@@ -130,13 +131,13 @@ func SetupRouter(
 	controller.InitBTController(btSvc)
 
 	// Initialize dual P2P service (IPFS + BT DHT).
-	dualSvc := service.NewDualP2PService(cfg, p2pSvc, btSvc)
+	dualSvc := legacy.NewDualP2PService(cfg, p2pSvc, btSvc)
 	controller.InitDualController(dualSvc)
 
 	// Initialize resume manager and multi-peer downloader for resume-able downloads.
-	resumeMgr := service.NewResumeManager(cfg, p2pSvc, btSvc, dualSvc)
+	resumeMgr := legacy.NewResumeManager(cfg, p2pSvc, btSvc, dualSvc)
 	controller.InitResumeManager(resumeMgr)
-	multiPeerDl := service.NewMultiPeerDownloader(cfg, p2pSvc, btSvc, dualSvc)
+	multiPeerDl := legacy.NewMultiPeerDownloader(cfg, p2pSvc, btSvc, dualSvc)
 	controller.InitMultiPeerDownloader(multiPeerDl)
 
 	controller.InitAnonController(service.NewAnonService(cfg))
@@ -187,7 +188,7 @@ func SetupRouter(
 
 	// Initialize the universal multi-protocol downloader.
 	downloadTimeout := time.Duration(cfg.DownloadTimeoutSecs) * time.Second
-	uniDownloader := service.NewUniversalDownloader(
+	uniDownloader := legacy.NewUniversalDownloader(
 		p2pSvc,
 		btSvc,
 		cfg.StorageDir,
@@ -200,7 +201,7 @@ func SetupRouter(
 	// Create peer tracker and wire it into both the P2P service and
 	// controller handlers so that connections, transfers, and pings
 	// are automatically recorded.
-	peerTracker := service.NewPeerTracker()
+	peerTracker := legacy.NewPeerTracker()
 	transports := []string{"tcp"}
 	if strings.Contains(cfg.P2PListenAddr, "quic") || strings.Contains(cfg.P2PListenAddrV6, "quic") {
 		transports = append(transports, "quic")
@@ -217,7 +218,7 @@ func SetupRouter(
 	// Create and start the PeerScanner when P2P is enabled for proactive
 	// peer discovery and outbound connection maintenance.
 	if p2pSvc != nil && p2pSvc.IsEnabled() {
-		scanner := service.NewPeerScanner(p2pSvc, peerTracker, cfg.RegServerURL)
+		scanner := legacy.NewPeerScanner(p2pSvc, peerTracker, cfg.RegServerURL)
 		scanner.Start()
 		controller.InitPeerScanner(scanner)
 	}
@@ -437,13 +438,13 @@ func SetupRouter(
 	}
 
 	// P2P relay proxy
-	relaySvc := service.NewRelayService(p2pSvc)
+	relaySvc := legacy.NewRelayService(p2pSvc)
 	r.GET("/relay/proxy", relaySvc.ProxyDownload)
 
 	// WebDAV endpoint — mount as network drive
 	// M12：WebDAV 写/删此前无任何认证 → 挂 AuthRequired（未配置注册服务器时放行，本地模式不受影响）
 	if cfg.WebDAVEnable {
-		webdavSvc := service.NewWebDAVService(cfg.StorageDir)
+		webdavSvc := legacy.NewWebDAVService(cfg.StorageDir)
 		// WebDAV uses wildcard path: all /webdav/* requests go to WebDAV handler
 		r.Any("/webdav/*path", authRequired, func(c *gin.Context) {
 			c.Request.URL.Path = c.Param("path")
@@ -452,7 +453,7 @@ func SetupRouter(
 	}
 
 	// WebRTC signaling
-	controller.InitSignalHub(service.NewSignalingHub())
+	controller.InitSignalHub(legacy.NewSignalingHub())
 	r.GET("/ws/signal", func(c *gin.Context) {
 		controller.GetSignalHub().HandleConnection(c.Writer, c.Request)
 	})
@@ -474,7 +475,7 @@ func SetupRouter(
 // registration server and attempts to connect to each one.  This allows
 // new nodes to discover and connect to publicly reachable relay nodes
 // without hardcoded bootstrap addresses.
-func bootstrapFromRelayList(regURL string, p2pSvc *service.P2PService) {
+func bootstrapFromRelayList(regURL string, p2pSvc *legacy.P2PService) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(regURL + "/p2p/relay/list")
 	if err != nil {

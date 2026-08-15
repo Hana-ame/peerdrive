@@ -1,7 +1,7 @@
 // NodeRegistrar 在 Peerdrive 节点启动时向注册服务器登记节点身份。
 // 匿名节点不调用此功能 — 仅当 PEERDRIVE_AUTH_TOKEN 配置后才启用。
 // 注册服务器通过此绑定知道 "peer X 属于用户 Y"。
-package service
+package legacy
 
 import (
 	"bytes"

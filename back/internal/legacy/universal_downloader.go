@@ -11,7 +11,7 @@
 // On success the file is cached to local storage, so the next request
 // is served instantly by the LocalFetcher.
 
-package service
+package legacy
 
 import (
 	"context"
@@ -326,7 +326,7 @@ func (d *UniversalDownloader) buildFetchers(order string, p2pSvc *P2PService, bt
 func (d *UniversalDownloader) Download(ctx context.Context, hash string) (data []byte, protocol string, err error) {
 	// 防御：hash 来自 anon collection entry 的远端输入（sync/serve 路径），
 	// 未校验就进 LocalFetcher 会触发 hash[:2] 越界 panic。本地下载端点已前置校验，这里是最后防线。
-	if !isValidHash(hash) {
+	if !hashutil.IsStrictSHA256(hash) {
 		return nil, "", fmt.Errorf("download: invalid hash %q", hash)
 	}
 	metrics := make([]FetcherMetric, 0, len(d.fetchers))

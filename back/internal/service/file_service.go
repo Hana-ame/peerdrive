@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"peerdrive/internal/config"
+	"peerdrive/internal/legacy"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
@@ -31,11 +32,11 @@ type FileService struct {
 	storageDir    string
 	storageEnable bool
 	cfg           *config.Config
-	ipfsCompat    *IPFSCompatLayer
+	ipfsCompat    *legacy.IPFSCompatLayer
 }
 
 // SetIPFSCompat 注入 IPFS 兼容层实例，用于在文件注册/上传时自动创建 IPFS 块副本。
-func (s *FileService) SetIPFSCompat(layer *IPFSCompatLayer) {
+func (s *FileService) SetIPFSCompat(layer *legacy.IPFSCompatLayer) {
 	s.ipfsCompat = layer
 }
 

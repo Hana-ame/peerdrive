@@ -220,7 +220,19 @@ internal/
 
 迁移顺序：M0 依赖规则文档 → M1 legacy 隔离 → M2 收 controller 越层依赖 → M3 拆 transport → M4 provider 落地。
 
-**迁移状态（2026-08-16）**：M2 ✅ 完成 · M3 ✅ 完成 · M4 ✅（provider 已落地）· M1 待做。
+**迁移状态（2026-08-16）**：M2 ✅ 完成 · M3 ✅ 完成 · M4 ✅（provider 已落地）· M1 ✅ 完成（p2p_bt 拆独立库另计）。
+
+M1 legacy 隔离要点（本次完成，internal/legacy/ 落地）：
+- 22 个文件从 service 迁入 legacy 包：libp2p 栈（p2p.go/transfer/resume/multipeer/dual/ws/
+  helpers/connection/key + 测试）、信令（signaling.go）、中继（relay + relay_registry）、
+  注册（node_registrar）、扫描（peer_scanner/peer_tracker）、IPFS（ipfs_service/ipfs_compat）、
+  webdav、forward、universal_downloader（依赖 P2PService 的下载栈核心）。
+- legacy 依赖面收敛到 config/log/model/nodestate/p2p_bt/provider/repository/hashutil
+  （层0/1），service 包零 legacy 反向引用之外的循环依赖。
+- 过渡期残留：service/file_service + sync_service、controller/{p2p,signal,download}、
+  router、cmd/server 仍引用 legacy（旧栈端点保留至删除决策）；
+  test-p2p-colls / test/bt-integration 旧工具已改引用。
+- 待办：p2p_bt 拆独立库（README"可独立使用"断言错误问题）；webdav/forward 高危删除决策。
 
 M3 收层要点（本次完成，transport 包落地）：
 - 新建 `internal/transport/`：PeerJS 文件服务子系统整体迁入——

@@ -18,6 +18,7 @@ import (
 	"peerdrive/internal/model"
 	"peerdrive/internal/nodestate"
 	"peerdrive/internal/p2p_bt"
+	"peerdrive/internal/legacy"
 	"peerdrive/internal/service"
 
 	"github.com/anacrolix/torrent/bencode"
@@ -26,24 +27,24 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-var p2pSvc *service.P2PService
+var p2pSvc *legacy.P2PService
 var btSvc *p2p_bt.BTDHTService
 var btClient *p2p_bt.BTClient
-var dualSvc *service.DualP2PService
+var dualSvc *legacy.DualP2PService
 
-var peerTracker *service.PeerTracker
-var peerScanner *service.PeerScanner
+var peerTracker *legacy.PeerTracker
+var peerScanner *legacy.PeerScanner
 
 var pinSvc *service.PinService
-var forwardSvc *service.ForwardService
+var forwardSvc *legacy.ForwardService
 
-var ipfsCompatLayer *service.IPFSCompatLayer
+var ipfsCompatLayer *legacy.IPFSCompatLayer
 
-var resumeMgr *service.ResumeManager
-var multiPeerDl *service.MultiPeerDownloader
+var resumeMgr *legacy.ResumeManager
+var multiPeerDl *legacy.MultiPeerDownloader
 
 // InitPeerScanner 注入 PeerScanner 实例供 P2P 扫描状态查询使用。
-func InitPeerScanner(s *service.PeerScanner) {
+func InitPeerScanner(s *legacy.PeerScanner) {
 	log.LogDebug("ctrl-p2p: InitPeerScanner")
 	peerScanner = s
 }
@@ -54,13 +55,13 @@ func InitPinController(svc *service.PinService) {
 	pinSvc = svc
 }
 
-func InitForwardController(svc *service.ForwardService) {
+func InitForwardController(svc *legacy.ForwardService) {
 	log.LogDebug("ctrl-p2p: InitForwardController")
 	forwardSvc = svc
 }
 
 // InitP2PController 注入 P2PService 实例供 P2P 处理函数使用。
-func InitP2PController(svc *service.P2PService) {
+func InitP2PController(svc *legacy.P2PService) {
 	log.LogDebug("ctrl-p2p: InitP2PController")
 	p2pSvc = svc
 }
@@ -72,13 +73,13 @@ func InitBTController(svc *p2p_bt.BTDHTService) {
 }
 
 // InitResumeManager 注入 ResumeManager 实例供断点续传端点使用。
-func InitResumeManager(mgr *service.ResumeManager) {
+func InitResumeManager(mgr *legacy.ResumeManager) {
 	log.LogDebug("ctrl-p2p: InitResumeManager")
 	resumeMgr = mgr
 }
 
 // InitMultiPeerDownloader 注入 MultiPeerDownloader 实例供多源并行下载端点使用。
-func InitMultiPeerDownloader(mp *service.MultiPeerDownloader) {
+func InitMultiPeerDownloader(mp *legacy.MultiPeerDownloader) {
 	log.LogDebug("ctrl-p2p: InitMultiPeerDownloader")
 	multiPeerDl = mp
 }
@@ -90,13 +91,13 @@ func InitBTClient(c *p2p_bt.BTClient) {
 }
 
 // InitDualController 注入 DualP2PService 实例供双网络（IPFS+BT）操作端点使用。
-func InitDualController(svc *service.DualP2PService) {
+func InitDualController(svc *legacy.DualP2PService) {
 	log.LogDebug("ctrl-p2p: InitDualController")
 	dualSvc = svc
 }
 
 // InitPeerTracker 注入 PeerTracker 实例供对端元数据和统计查询使用。
-func InitPeerTracker(t *service.PeerTracker) {
+func InitPeerTracker(t *legacy.PeerTracker) {
 	log.LogDebug("ctrl-p2p: InitPeerTracker")
 	peerTracker = t
 }
@@ -662,9 +663,9 @@ func GetConnections(c *gin.Context) {
 func GetTopology(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: GetTopology")
 	if p2pSvc == nil || !p2pSvc.IsEnabled() {
-		c.JSON(http.StatusOK, service.TopologyGraph{
+		c.JSON(http.StatusOK, legacy.TopologyGraph{
 			LocalPeerID: "",
-			Edges:       []service.TopologyEdge{},
+			Edges:       []legacy.TopologyEdge{},
 		})
 		return
 	}
@@ -677,7 +678,7 @@ func GetTopology(c *gin.Context) {
 func GetConnectionQuality(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: GetConnectionQuality")
 	if p2pSvc == nil || !p2pSvc.IsEnabled() || p2pSvc.ConnMgr == nil {
-		c.JSON(http.StatusOK, []service.ConnectionQuality{})
+		c.JSON(http.StatusOK, []legacy.ConnectionQuality{})
 		return
 	}
 
@@ -1381,7 +1382,7 @@ func AuthStatus(c *gin.Context) {
 // ─── IPFS Compat Handlers ─────────────────────────────────────────
 
 // InitIPFSCompatController 注入 IPFSCompatLayer 实例供 IPFS 兼容端点使用。
-func InitIPFSCompatController(layer *service.IPFSCompatLayer) {
+func InitIPFSCompatController(layer *legacy.IPFSCompatLayer) {
 	log.LogDebug("ctrl-p2p: InitIPFSCompatController")
 	ipfsCompatLayer = layer
 }
