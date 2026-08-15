@@ -220,6 +220,19 @@ internal/
 
 迁移顺序：M0 依赖规则文档 → M1 legacy 隔离 → M2 收 controller 越层依赖 → M3 拆 transport → M4 provider 落地。
 
+**迁移状态（2026-08-16）**：M2 ✅ 完成 · M4 ✅（provider 已落地）· M1/M3 待做。
+
+M2 收层要点（本次完成）：
+- controller 不再 import repository：集合/分享/任务/pin 直调全部收编进 service——
+  `CollectionService`（collection_service.go，含 fork/merge/版本/匿名集合）、
+  `ShareService`、`TaskService`、`PinService`；download/file 控制器改走 FileService
+  （新增 GetMeta/GetMetaByCID/ListAll/ImportGatewayData/RegisterBTFile）。
+- 领域类型上移 model：`FileTypeBlob/FileTypeAnonCollection`、`IPFSPin`；
+  repository 保留别名兼容。
+- router 不再内联写库（BT onComplete 回调收敛进 FileService.RegisterBTFile）；
+  router 仅保留 SyncRepository 等 DI 装配。
+- collection.go 中直写 SQL 的 ListPublicCollections 收敛为 repository.ListPublicCollections。
+
 ## 8. 环境与验证
 
 ```bash

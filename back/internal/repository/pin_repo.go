@@ -5,16 +5,11 @@ package repository
 
 import (
 	"database/sql"
+
+	"peerdrive/internal/model"
 )
 
-// IPFSPin represents a pinned CID record in the ipfs_pins table.
-type IPFSPin struct {
-	CID      string `json:"cid"`
-	Hash     string `json:"hash"`
-	Size     int64  `json:"size"`
-	Filename string `json:"filename"`
-	PinnedAt string `json:"pinned_at"`
-}
+// IPFSPin 已上移 model 包（M2 收层：领域类型归 domain）。此处用别名保持引用不变。
 
 // InsertPin inserts a new pin record (or replaces an existing one).
 func InsertPin(cid, hash, filename string, size int64) error {
@@ -33,7 +28,7 @@ func InsertPin(cid, hash, filename string, size int64) error {
 
 // ListPins returns all pinned CIDs, most recently pinned first.
 // M11：无 LIMIT → 大量 pin 时全表物化；pin 数无业务上限，加 LIMIT 兜底。
-func ListPins() ([]IPFSPin, error) {
+func ListPins() ([]model.IPFSPin, error) {
 	rows, err := DB.Query(
 		`SELECT cid, hash, size, filename, pinned_at
 		 FROM ipfs_pins ORDER BY pinned_at DESC LIMIT 1000`,
@@ -43,9 +38,9 @@ func ListPins() ([]IPFSPin, error) {
 	}
 	defer rows.Close()
 
-	var pins []IPFSPin
+	var pins []model.IPFSPin
 	for rows.Next() {
-		var p IPFSPin
+		var p model.IPFSPin
 		if err := rows.Scan(&p.CID, &p.Hash, &p.Size, &p.Filename, &p.PinnedAt); err != nil {
 			return nil, err
 		}
@@ -55,8 +50,8 @@ func ListPins() ([]IPFSPin, error) {
 }
 
 // GetPin retrieves a single pin by CID.
-func GetPin(cid string) (*IPFSPin, error) {
-	var p IPFSPin
+func GetPin(cid string) (*model.IPFSPin, error) {
+	var p model.IPFSPin
 	err := DB.QueryRow(
 		`SELECT cid, hash, size, filename, pinned_at
 		 FROM ipfs_pins WHERE cid = ?`, cid,

@@ -48,6 +48,85 @@ func NewFileService(cfg *config.Config) *FileService {
 	}
 }
 
+// GetMeta 按 hash 查文件元数据（M2 收层：download 控制器此前直调 repository.GetFileMeta）。
+func (s *FileService) GetMeta(hash string) (*model.FileMeta, error) {
+	return repository.GetFileMeta(hash)
+}
+
+// GetMetaByCID 按 IPFS CID 查文件元数据（M2 收层：download 控制器 DownloadByCID）。
+func (s *FileService) GetMetaByCID(cid string) (*model.FileMeta, error) {
+	return repository.GetFileMetaByCID(cid)
+}
+
+// ImportGatewayData 把从 IPFS 公共网关拉取的数据落盘 + 登记元数据/provider。
+// M2 收层：原逻辑内联在 download 控制器 DownloadByCID 的网关 fallback 分支
+// （写盘 + InsertFileMeta + InsertFileProvider 三连）。返回内容 hash。
+func (s *FileService) ImportGatewayData(cid string, data []byte) (string, error) {
+	h := sha256.Sum256(data)
+	hashStr := hex.EncodeToString(h[:])
+	relPath := filepath.Join(hashStr[:2], hashStr)
+	fullPath := filepath.Join(s.storageDir, relPath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(fullPath, data, 0644); err != nil {
+		return "", err
+	}
+	_ = repository.InsertFileMeta(&model.FileMeta{
+		Hash:     hashStr,
+		Size:     int64(len(data)),
+		Filename: cid,
+		Type:     model.FileTypeBlob,
+	})
+	_ = repository.InsertFileProvider(hashStr, "local", relPath)
+	return hashStr, nil
+}
+
+// RegisterBTFile 登记 BT 下载完成的文件：写入存储目录 + 元数据/provider 登记。
+// M2 收层：原逻辑内联在 router.go BT onComplete 回调（InsertFileMeta +
+// InsertFileProvider + 文件复制三连）。返回错误（原内联全忽略错误，这里
+// 至少把存储失败暴露出来）。
+func (s *FileService) RegisterBTFile(sha256hex string, size int64, srcPath string) error {
+	if !isValidHash(sha256hex) {
+		return fmt.Errorf("invalid sha256 %q", sha256hex)
+	}
+	relPath := filepath.Join(sha256hex[:2], sha256hex)
+	destPath := filepath.Join(s.storageDir, relPath)
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return err
+	}
+	input, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	output, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer output.Close()
+	if _, err := io.Copy(output, input); err != nil {
+		return err
+	}
+	if err := repository.InsertFileMeta(&model.FileMeta{
+		Hash:     sha256hex,
+		Size:     size,
+		Filename: filepath.Base(srcPath),
+		Type:     model.FileTypeBlob,
+	}); err != nil {
+		log.LogWarn("file-svc: RegisterBTFile InsertFileMeta: %v", err)
+	}
+	if err := repository.InsertFileProvider(sha256hex, "local", relPath); err != nil {
+		log.LogWarn("file-svc: RegisterBTFile InsertFileProvider: %v", err)
+	}
+	return nil
+}
+
+// ListAll 列出全部 blob 文件（M2 收层：file 控制器 ListFiles 此前直调 repository.ListAllFiles）。
+func (s *FileService) ListAll(sortBy string) ([]model.FileListItem, error) {
+	return repository.ListAllFiles(sortBy)
+}
+
 // isPathInStorage 校验 absPath 是否落在 storageDir 内（绝对路径 + 符号链接解析后）。
 // 防御：register_local/register_folder/browse/copy 都接受调用方路径，若不锚定根目录，
 // 任意绝对路径（如 /etc/shadow）会经 LocalFetcher 回读 / os.Remove 构成任意文件读写。

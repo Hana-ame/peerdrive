@@ -24,17 +24,24 @@
 package controller
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"peerdrive/internal/model"
-	"peerdrive/internal/repository"
+	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
+
+// collSvc 集合域服务（M2 收层后 controller 不再直调 repository）。
+var collSvc *service.CollectionService
+
+// InitCollectionController 注入 CollectionService 实例（由 router 装配时调用）。
+func InitCollectionController(svc *service.CollectionService) {
+	collSvc = svc
+}
 
 // CreateCollection godoc
 // @Summary Create a new collection
@@ -62,11 +69,11 @@ func CreateCollection(c *gin.Context) {
 	var id int
 	var err error
 	if req.FollowRedirects != nil {
-		id, err = repository.CreateCollectionWithFull(req.Username, req.CollectionName, req.Visibility, *req.FollowRedirects, req.Tags)
+		id, err = collSvc.Create(req.Username, req.CollectionName, req.Visibility, req.FollowRedirects, req.Tags)
 	} else if len(req.Tags) > 0 {
-		id, err = repository.CreateCollectionWithTags(req.Username, req.CollectionName, req.Visibility, req.Tags)
+		id, err = collSvc.Create(req.Username, req.CollectionName, req.Visibility, nil, req.Tags)
 	} else {
-		id, err = repository.CreateCollectionWithVisibility(req.Username, req.CollectionName, req.Visibility)
+		id, err = collSvc.Create(req.Username, req.CollectionName, req.Visibility, nil, nil)
 	}
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -85,7 +92,7 @@ func CreateCollection(c *gin.Context) {
 // @Router /collections/{username} [get]
 func ListCollections(c *gin.Context) {
 	username := c.Param("username")
-	cols, err := repository.ListCollections(username)
+	cols, err := collSvc.List(username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -110,7 +117,7 @@ func SearchCollections(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"data": []model.Collection{}})
 		return
 	}
-	cols, err := repository.SearchCollections(q)
+	cols, err := collSvc.Search(q)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -134,7 +141,7 @@ func SearchCollections(c *gin.Context) {
 func GetCollection(c *gin.Context) {
 	username := c.Param("username")
 	collectionName := c.Param("collection_name")
-	col, err := repository.GetCollection(username, collectionName)
+	col, err := collSvc.Get(username, collectionName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -147,7 +154,7 @@ func GetCollection(c *gin.Context) {
 	var entries []model.CollectionEntry
 	if col.CurrentHash != nil && *col.CurrentHash != "" {
 		storageDir := c.MustGet("storageDir").(string)
-		anonColl, err := repository.GetAnonCollectionByHash(*col.CurrentHash, storageDir)
+		anonColl, err := collSvc.GetAnonByHash(*col.CurrentHash, storageDir)
 		if err == nil {
 			anonColl.NormalizeEntries()
 			entries = make([]model.CollectionEntry, 0, len(anonColl.Entries))
@@ -162,7 +169,7 @@ func GetCollection(c *gin.Context) {
 		}
 	}
 	if entries == nil {
-		entries, err = repository.ListCollectionEntries(col.ID)
+		entries, err = collSvc.ListEntries(col.ID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -198,15 +205,15 @@ func AddEntry(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
-	collID, err := repository.GetOrCreateCollection(username, collectionName)
+	collID, err := collSvc.GetOrCreate(username, collectionName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if len(req.Providers) > 0 {
-		err = repository.AddProviderCollectionEntry(collID, req.Path, req.Providers)
+		err = collSvc.AddProviderEntry(collID, req.Path, req.Providers)
 	} else if req.Hash != "" {
-		err = repository.AddCollectionEntry(collID, req.Path, req.Hash)
+		err = collSvc.AddEntry(collID, req.Path, req.Hash)
 	} else {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "must provide hash or providers"})
 		return
@@ -233,7 +240,7 @@ func RemoveEntry(c *gin.Context) {
 	username := c.Param("username")
 	collectionName := c.Param("collection_name")
 	path := strings.TrimPrefix(c.Param("path"), "/")
-	col, err := repository.GetCollection(username, collectionName)
+	col, err := collSvc.Get(username, collectionName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -242,7 +249,7 @@ func RemoveEntry(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
 	}
-	if err := repository.RemoveCollectionEntry(col.ID, path); err != nil {
+	if err := collSvc.RemoveEntry(col.ID, path); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -264,7 +271,7 @@ func DownloadCollectionFile(c *gin.Context) {
 	username := c.Param("username")
 	collectionName := c.Param("collection_name")
 	filePath := strings.TrimPrefix(c.Param("filepath"), "/")
-	col, err := repository.GetCollection(username, collectionName)
+	col, err := collSvc.Get(username, collectionName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -273,7 +280,7 @@ func DownloadCollectionFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
 	}
-	entry, err := repository.GetCollectionEntry(col.ID, filePath)
+	entry, err := collSvc.GetEntry(col.ID, filePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -329,7 +336,7 @@ func CommitCollection(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
-	col, err := repository.GetCollection(username, collectionName)
+	col, err := collSvc.Get(username, collectionName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -340,7 +347,7 @@ func CommitCollection(c *gin.Context) {
 	}
 
 	// 1. 获取当前工作区条目
-	entries, err := repository.ListCollectionEntries(col.ID)
+	entries, err := collSvc.ListEntries(col.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -358,20 +365,20 @@ func CommitCollection(c *gin.Context) {
 	// 3. 构造匿名集合并保存
 	anonColl := model.NewAnonCollection("", anonEntries, nil)
 	storageDir := c.MustGet("storageDir").(string)
-	hash, err := repository.SaveCollection(anonColl, storageDir)
+	hash, err := collSvc.SaveAnon(anonColl, storageDir)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create snapshot: " + err.Error()})
 		return
 	}
 
 	// 4. 更新 current_hash
-	if err := repository.UpdateCurrentHash(col.ID, hash); err != nil {
+	if err := collSvc.UpdateCurrentHash(col.ID, hash); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update current hash: " + err.Error()})
 		return
 	}
 
 	// 5. 原有版本快照逻辑 (保留历史)
-	versions, err := repository.GetVersionLog(col.ID)
+	versions, err := collSvc.VersionLog(col.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -380,12 +387,12 @@ func CommitCollection(c *gin.Context) {
 	if len(versions) > 0 {
 		parentID = &versions[0].ID
 	}
-	verID, verNum, err := repository.CreateVersion(col.ID, req.CommitMessage, parentID)
+	verID, verNum, err := collSvc.CreateVersion(col.ID, req.CommitMessage, parentID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if err := repository.SnapshotVersionEntries(verID, col.ID); err != nil {
+	if err := collSvc.SnapshotEntries(verID, col.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -406,7 +413,7 @@ func CommitCollection(c *gin.Context) {
 func GetVersionLog(c *gin.Context) {
 	username := c.Param("username")
 	collectionName := c.Param("collection_name")
-	col, err := repository.GetCollection(username, collectionName)
+	col, err := collSvc.Get(username, collectionName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -415,7 +422,7 @@ func GetVersionLog(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
 	}
-	versions, err := repository.GetVersionLog(col.ID)
+	versions, err := collSvc.VersionLog(col.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -447,7 +454,7 @@ func RollbackCollection(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid version_id"})
 		return
 	}
-	col, err := repository.GetCollection(username, collectionName)
+	col, err := collSvc.Get(username, collectionName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -456,13 +463,13 @@ func RollbackCollection(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
 	}
-	if err := repository.RestoreVersionEntries(vid, col.ID); err != nil {
+	if err := collSvc.RestoreVersion(vid, col.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// 重新生成 CID
-	entries, err := repository.ListCollectionEntries(col.ID)
+	entries, err := collSvc.ListEntries(col.ID)
 	if err == nil {
 		anonEntries := make([]model.AnonCollectionEntry, 0, len(entries))
 		for _, e := range entries {
@@ -470,9 +477,9 @@ func RollbackCollection(c *gin.Context) {
 		}
 		anonColl := model.NewAnonCollection("", anonEntries, nil)
 		storageDir := c.MustGet("storageDir").(string)
-		hash, err := repository.SaveCollection(anonColl, storageDir)
+		hash, err := collSvc.SaveAnon(anonColl, storageDir)
 		if err == nil {
-			repository.UpdateCurrentHash(col.ID, hash)
+			collSvc.UpdateCurrentHash(col.ID, hash)
 		}
 	}
 
@@ -505,12 +512,12 @@ func SetCollectionVisibility(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "visibility must be public, unlisted, or private"})
 		return
 	}
-	col, err := repository.GetCollection(username, collectionName)
+	col, err := collSvc.Get(username, collectionName)
 	if err != nil || col == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
 	}
-	if err := repository.SetCollectionVisibility(username, collectionName, req.Visibility); err != nil {
+	if err := collSvc.SetVisibility(username, collectionName, req.Visibility); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -527,25 +534,10 @@ func SetCollectionVisibility(c *gin.Context) {
 // @Router /collections/public [get]
 func ListPublicCollections(c *gin.Context) {
 	q := c.Query("q")
-	var rows *sql.Rows
-	var err error
-	if q != "" {
-		rows, err = repository.DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE visibility = 'public' AND (username LIKE ? OR collection_name LIKE ?) ORDER BY created_at DESC`, "%"+q+"%", "%"+q+"%")
-	} else {
-		rows, err = repository.DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE visibility = 'public' ORDER BY created_at DESC`)
-	}
+	cols, err := collSvc.ListPublic(q)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-	defer rows.Close()
-	var cols []model.Collection
-	for rows.Next() {
-		col, err := model.ScanCollection(rows)
-		if err != nil {
-			continue
-		}
-		cols = append(cols, *col)
 	}
 	if cols == nil {
 		cols = []model.Collection{}
@@ -575,7 +567,7 @@ func UpdateCollectionTags(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
-	if err := repository.UpdateCollectionTags(username, collectionName, req.Tags); err != nil {
+	if err := collSvc.UpdateTags(username, collectionName, req.Tags); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

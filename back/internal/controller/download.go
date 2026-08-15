@@ -11,8 +11,6 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
@@ -24,7 +22,6 @@ import (
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/provider"
-	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 	"peerdrive/pkg/hashutil"
 
@@ -67,7 +64,7 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 		}
 		c.Header("X-Protocol", protocol)
 
-		meta, _ := repository.GetFileMeta(hash)
+		meta, _ := fileSvc.GetMeta(hash)
 		fn := hash
 		if meta != nil && meta.Filename != "" {
 			fn = meta.Filename
@@ -80,7 +77,7 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 		if meta != nil && meta.Gziped {
 			c.Header("Content-Encoding", "gzip")
 		}
-		if meta != nil && meta.Type == repository.FileTypeAnonCollection {
+		if meta != nil && meta.Type == model.FileTypeAnonCollection {
 			c.Header("X-Peerdrive-Collection", "true")
 		}
 		// Handle Range requests for chunked download
@@ -103,7 +100,7 @@ func DownloadBySHA256Local(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256 format"})
 		return
 	}
-	meta, err := repository.GetFileMeta(hash)
+	meta, err := fileSvc.GetMeta(hash)
 	if err != nil || meta == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
@@ -136,7 +133,7 @@ func DownloadBySHA256Local(c *gin.Context) {
 // when the CID is not in local storage and IPFS gateway fetching is enabled.
 func DownloadByCID(c *gin.Context) {
 	searchCID := c.Param("cid")
-	meta, err := repository.GetFileMetaByCID(searchCID)
+	meta, err := fileSvc.GetMetaByCID(searchCID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
 		return
@@ -147,32 +144,13 @@ func DownloadByCID(c *gin.Context) {
 			ctx := c.Request.Context()
 			data, fetchErr := ipfsGatewayProvider.FetchByCID(ctx, searchCID)
 			if fetchErr == nil {
-				// Compute SHA256 and cache locally.
-				h := sha256.Sum256(data)
-				hashStr := hex.EncodeToString(h[:])
-
-				storageDir := ""
-				if d, ok := c.Get("storageDir"); ok {
-					storageDir, _ = d.(string)
+				// 落盘 + 登记元数据/provider（M2 收层：原内联 repository 三连）
+				hashStr, err := fileSvc.ImportGatewayData(searchCID, data)
+				if err == nil {
+					c.Header("X-CID", searchCID)
+					DownloadBySHA256Internal(c, hashStr)
+					return
 				}
-				if storageDir != "" {
-					relPath := filepath.Join(hashStr[:2], hashStr)
-					fullPath := filepath.Join(storageDir, relPath)
-					_ = os.MkdirAll(filepath.Dir(fullPath), 0755)
-					_ = os.WriteFile(fullPath, data, 0644)
-
-					_ = repository.InsertFileMeta(&model.FileMeta{
-						Hash:     hashStr,
-						Size:     int64(len(data)),
-						Filename: searchCID,
-						Type:     repository.FileTypeBlob,
-					})
-					_ = repository.InsertFileProvider(hashStr, "local", relPath)
-				}
-
-				c.Header("X-CID", searchCID)
-				DownloadBySHA256Internal(c, hashStr)
-				return
 			}
 		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found by cid"})

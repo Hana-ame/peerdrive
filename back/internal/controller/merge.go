@@ -14,7 +14,6 @@ import (
 	"net/http"
 
 	"peerdrive/internal/model"
-	"peerdrive/internal/repository"
 
 	"github.com/gin-gonic/gin"
 )
@@ -51,7 +50,7 @@ func MergeFromSource(c *gin.Context) {
 		return
 	}
 
-	local, err := repository.GetCollection(req.Username, req.CollectionName)
+	local, err := collSvc.Get(req.Username, req.CollectionName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -61,7 +60,7 @@ func MergeFromSource(c *gin.Context) {
 		return
 	}
 
-	source, err := repository.GetCollection(req.SourceUsername, req.SourceCollName)
+	source, err := collSvc.Get(req.SourceUsername, req.SourceCollName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -71,12 +70,12 @@ func MergeFromSource(c *gin.Context) {
 		return
 	}
 
-	localEntries, err := repository.ListCollectionEntries(local.ID)
+	localEntries, err := collSvc.ListEntries(local.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	sourceEntries, err := repository.ListCollectionEntries(source.ID)
+	sourceEntries, err := collSvc.ListEntries(source.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -138,7 +137,7 @@ func MergeFromSource(c *gin.Context) {
 	}
 
 	for path, providers := range merged {
-		if err := repository.AddProviderCollectionEntry(local.ID, path, providers); err != nil {
+		if err := collSvc.AddProviderEntry(local.ID, path, providers); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -233,4 +235,13 @@ func TestUploadWorker_WriteThenComplete(t *testing.T) {
 
 	require.Len(t, types, 1)
 	assert.Equal(t, "uploaded", types[0], "分片收齐应回 uploaded")
+}
+
+// TestHashMatchesSHA256_AllowsEmptyFile 空文件也可通过内容寻址校验。
+// 发现背景：代码审阅——原实现 `len(data)==0` 直接 return false，导致
+// sha256(空)（e3b0c442...）这类合法空文件永远无法从对端拉取。
+// 修复：移除空数据特判，空文件只校验其真实 sha256。
+func TestHashMatchesSHA256_AllowsEmptyFile(t *testing.T) {
+	emptyHash := sha256.Sum256([]byte{})
+	assert.True(t, hashMatchesSHA256(hex.EncodeToString(emptyHash[:]), []byte{}), "空文件的 sha256 应被接受")
 }

@@ -21,17 +21,13 @@ package router
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/controller"
 	"peerdrive/internal/log"
-	"peerdrive/internal/model"
 	"peerdrive/internal/p2p_bt"
 	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
@@ -107,6 +103,11 @@ func SetupRouter(
 	fileSvc.SetIPFSCompat(ipfsCompat)
 	controller.InitFileController(fileSvc)
 	controller.InitIPFSCompatController(ipfsCompat)
+	// M2 收层装配：集合/分享/任务/pin 服务注入 controller（替代原先的 repository 直调）
+	controller.InitCollectionController(service.NewCollectionService())
+	controller.InitShareController(service.NewShareService())
+	controller.InitTaskController(service.NewTaskService())
+	controller.InitPinController(service.NewPinService())
 
 	// Initialize the port forwarding service.
 	var forwardSvc *service.ForwardService
@@ -154,27 +155,11 @@ func SetupRouter(
 					if f.SHA256 == "" {
 						continue
 					}
-					_ = repository.InsertFileMeta(&model.FileMeta{
-						Hash:     f.SHA256,
-						Size:     f.Size,
-						Filename: filepath.Base(f.Path),
-						Type:     repository.FileTypeBlob,
-					})
-					relPath := filepath.Join(f.SHA256[:2], f.SHA256)
-					_ = repository.InsertFileProvider(f.SHA256, "local", relPath)
-					// Copy to storage directory.
-					dataDir := filepath.Join(cfg.StorageDir, f.SHA256[:2])
-					_ = os.MkdirAll(dataDir, 0755)
-					destPath := filepath.Join(dataDir, f.SHA256)
-					input, err := os.Open(f.Path)
-					if err == nil {
-						output, err := os.Create(destPath)
-						if err == nil {
-							_, _ = io.Copy(output, input)
-							_ = output.Close()
-							log.LogInfo("router: registered BT file %s -> %s", f.SHA256, destPath)
-						}
-						_ = input.Close()
+					// M2 收层：登记逻辑收敛进 FileService.RegisterBTFile（原内联写库）
+					if err := fileSvc.RegisterBTFile(f.SHA256, f.Size, f.Path); err != nil {
+						log.LogWarn("router: register BT file %s failed: %v", f.SHA256, err)
+					} else {
+						log.LogInfo("router: registered BT file %s -> storage", f.SHA256)
 					}
 				}
 			})

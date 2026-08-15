@@ -21,7 +21,6 @@ import (
 
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
-	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 	"peerdrive/pkg/hashutil"
 
@@ -274,13 +273,13 @@ func DiffVersions(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
-	entriesA, err := repository.GetVersionEntries(req.VersionA)
+	entriesA, err := collSvc.VersionEntries(req.VersionA)
 	if err != nil {
 		log.LogError("ctrl-file: DiffVersions version A %d: %v", req.VersionA, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	entriesB, err := repository.GetVersionEntries(req.VersionB)
+	entriesB, err := collSvc.VersionEntries(req.VersionB)
 	if err != nil {
 		log.LogError("ctrl-file: DiffVersions version B %d: %v", req.VersionB, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -328,7 +327,7 @@ func DiffVersions(c *gin.Context) {
 func ListFiles(c *gin.Context) {
 	sortBy := c.DefaultQuery("sort", "time")
 	log.LogDebug("ctrl-file: ListFiles sort=%s", sortBy)
-	items, err := repository.ListAllFiles(sortBy)
+	items, err := fileSvc.ListAll(sortBy)
 	if err != nil {
 		log.LogError("ctrl-file: ListFiles failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

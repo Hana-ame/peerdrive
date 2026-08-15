@@ -5,10 +5,18 @@ import (
 	"net/http"
 
 	"peerdrive/internal/model"
-	"peerdrive/internal/repository"
+	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
+
+// shareSvc 分享服务（M2 收层：不再直调 repository）。
+var shareSvc *service.ShareService
+
+// InitShareController 注入 ShareService 实例。
+func InitShareController(svc *service.ShareService) {
+	shareSvc = svc
+}
 
 // CreateShare 处理 POST /shares，创建文件或集合的分享链接。
 func CreateShare(c *gin.Context) {
@@ -26,7 +34,7 @@ func CreateShare(c *gin.Context) {
 		return
 	}
 
-	share, err := repository.CreateShare(req.Hash, req.Type, req.Filename)
+	share, err := shareSvc.Create(req.Hash, req.Type, req.Filename)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -50,7 +58,7 @@ func AccessShare(c *gin.Context) {
 		return
 	}
 
-	share, err := repository.GetShareByToken(token)
+	share, err := shareSvc.GetByToken(token)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "share not found or expired"})
 		return
@@ -68,7 +76,7 @@ func AccessShare(c *gin.Context) {
 
 // ListShares 处理 GET /shares，列出所有未过期的分享链接。
 func ListShares(c *gin.Context) {
-	shares, err := repository.ListShares()
+	shares, err := shareSvc.List()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

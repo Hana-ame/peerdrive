@@ -13,8 +13,6 @@ package controller
 import (
 	"net/http"
 
-	"peerdrive/internal/repository"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -41,7 +39,7 @@ func ForkCollection(c *gin.Context) {
 		return
 	}
 
-	source, err := repository.GetCollection(req.SourceUsername, req.SourceCollName)
+	source, err := collSvc.Get(req.SourceUsername, req.SourceCollName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -51,13 +49,13 @@ func ForkCollection(c *gin.Context) {
 		return
 	}
 
-	localID, err := repository.CreateCollection(req.Username, req.CollectionName)
+	localID, err := collSvc.CreatePlain(req.Username, req.CollectionName)
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
 
-	entries, err := repository.ListCollectionEntries(source.ID)
+	entries, err := collSvc.ListEntries(source.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -65,12 +63,12 @@ func ForkCollection(c *gin.Context) {
 	for _, e := range entries {
 		providers := e.BuildProviders()
 		if len(providers) > 0 && e.ProvidersJSON != "" {
-			if err := repository.AddProviderCollectionEntry(localID, e.Path, providers); err != nil {
+			if err := collSvc.AddProviderEntry(localID, e.Path, providers); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 		} else {
-			if err := repository.AddCollectionEntry(localID, e.Path, e.FileHash); err != nil {
+			if err := collSvc.AddEntry(localID, e.Path, e.FileHash); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
@@ -107,9 +105,9 @@ func PullCollection(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "pull not implemented (upstream sync coming in v2)"})
 
-	taskID, err := repository.CreateTask("pull", "")
+	taskID, err := taskSvc.Create("pull", "")
 	if err == nil {
-		repository.UpdateTaskStatus(taskID, "completed", `{"note":"pull no-op"}`)
+		taskSvc.UpdateStatus(taskID, "completed", `{"note":"pull no-op"}`)
 	}
 	_ = taskID
 }

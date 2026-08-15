@@ -12,10 +12,18 @@ import (
 	"net/http"
 	"strconv"
 
-	"peerdrive/internal/repository"
+	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
+
+// taskSvc 任务服务（M2 收层：不再直调 repository）。
+var taskSvc *service.TaskService
+
+// InitTaskController 注入 TaskService 实例。
+func InitTaskController(svc *service.TaskService) {
+	taskSvc = svc
+}
 
 // GetTaskStatus godoc
 // @Summary Get task status by ID
@@ -34,7 +42,7 @@ func GetTaskStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid task id"})
 		return
 	}
-	task, err := repository.GetTask(id)
+	task, err := taskSvc.Get(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

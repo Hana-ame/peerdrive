@@ -18,11 +18,14 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"peerdrive/internal/log"
+	"peerdrive/internal/model"
 )
 
+// FileType* 常量已上移到 model 包（M2 收层：领域常量归 domain），
+// 此处保留别名避免 diff 爆炸，repository 内部引用走常量。新代码直接用 model.FileType*。
 const (
-	FileTypeBlob           = "blob"
-	FileTypeAnonCollection = "anon_collection"
+	FileTypeBlob           = model.FileTypeBlob
+	FileTypeAnonCollection = model.FileTypeAnonCollection
 )
 
 var DB *sql.DB

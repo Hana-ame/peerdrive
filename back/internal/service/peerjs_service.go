@@ -62,8 +62,8 @@ type PeerJSService struct {
 
 	// peerMu 保护 peer/httpDisc/discovery 的读写（低危 2 修复）：
 	// startLoop 写（重连时替换指针），Close 读——之前无锁，关停期 data race
-	peerMu   sync.Mutex
-	httpDisc *HTTPDiscovery
+	peerMu    sync.Mutex
+	httpDisc  *HTTPDiscovery
 	discovery *MQTTDiscovery
 
 	// connecting 去重：同一 peerID 可能被多个来源（配置 PEERS、MQTT/HTTP 发现、
@@ -132,17 +132,17 @@ func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &PeerJSService{
-		cfg:         cfg,
-		storageDir:  storageDir,
-		id:          id,
-		iceServers:  parseICEServers(cfg.WebRTCSTUNServer, cfg.WebRTCTURNServer),
-		conns:       make(map[string]Session),
-		pending:     make(map[Session]*connState),
-		connecting:  make(map[string]struct{}),
-		fileIndex:   NewFileIndexService(cfg.DownloadDir),
-		closed:      make(chan struct{}),
-		ctx:         ctx,
-		cancel:      cancel,
+		cfg:        cfg,
+		storageDir: storageDir,
+		id:         id,
+		iceServers: parseICEServers(cfg.WebRTCSTUNServer, cfg.WebRTCTURNServer),
+		conns:      make(map[string]Session),
+		pending:    make(map[Session]*connState),
+		connecting: make(map[string]struct{}),
+		fileIndex:  NewFileIndexService(cfg.DownloadDir),
+		closed:     make(chan struct{}),
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 }
 
@@ -683,8 +683,9 @@ func (s *PeerJSService) requestFile(c Session, hash string, offset, size int64) 
 // hashMatchesSHA256 校验 data 的 sha256 是否等于期望哈希。
 // 注意：hash 是用户输入，必须确保本身是合法 64 位 hex（否则比较恒失败）；
 // 调用方（FetchFromPeer 入口）已保证，防御性再判一次。
+// 空文件不做特判：sha256(空) 是合法内容寻址值，len(data)==0 不应被直接拒绝。
 func hashMatchesSHA256(hash string, data []byte) bool {
-	if len(data) == 0 || len(hash) != 64 || !hashutil.IsValidSHA256(hash) {
+	if len(hash) != 64 || !hashutil.IsValidSHA256(hash) {
 		return false
 	}
 	sum := sha256.Sum256(data)
@@ -729,6 +730,7 @@ type dcResp struct {
 //     （公共信令网络上任意节点一行 JSON 就能打崩全节点）
 //   - file_index 命中的路径必须落在允许根目录内——之前直接 os.Open(fi.Path)，
 //     对端 create 任意绝对路径后可 req 读取（/etc/shadow 攻击链）
+//
 // 优先查 file_index 映射（外部登记/上传的文件），其次内容寻址存储。
 func (s *PeerJSService) serveFile(c Session, req dcReq) {
 	if !isValidHash(req.Hash) {

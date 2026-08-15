@@ -131,6 +131,32 @@ func ListCollections(username string) ([]model.Collection, error) {
 	return cols, nil
 }
 
+// ListPublicCollections 列出全部公开集合，q 非空时按用户名/集合名模糊过滤。
+// M2 收层：原逻辑写在 controller（collection.go ListPublicCollections 直跑 SQL），
+// 收敛进 repository，controller 只依赖 service。
+func ListPublicCollections(q string) ([]model.Collection, error) {
+	var rows *sql.Rows
+	var err error
+	if q != "" {
+		rows, err = DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE visibility = 'public' AND (username LIKE ? OR collection_name LIKE ?) ORDER BY created_at DESC LIMIT 1000`, "%"+q+"%", "%"+q+"%")
+	} else {
+		rows, err = DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE visibility = 'public' ORDER BY created_at DESC LIMIT 1000`)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cols []model.Collection
+	for rows.Next() {
+		col, err := model.ScanCollection(rows)
+		if err != nil {
+			continue
+		}
+		cols = append(cols, *col)
+	}
+	return cols, rows.Err()
+}
+
 // GetCollection 按用户名和集合名查询单个集合；未找到时返回 (nil, nil)。
 func GetCollection(username, collectionName string) (*model.Collection, error) {
 	c, err := model.ScanCollection(DB.QueryRow(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? AND collection_name = ?`,

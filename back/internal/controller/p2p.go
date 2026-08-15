@@ -18,7 +18,6 @@ import (
 	"peerdrive/internal/model"
 	"peerdrive/internal/nodestate"
 	"peerdrive/internal/p2p_bt"
-	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 
 	"github.com/anacrolix/torrent/bencode"
@@ -35,6 +34,7 @@ var dualSvc *service.DualP2PService
 var peerTracker *service.PeerTracker
 var peerScanner *service.PeerScanner
 
+var pinSvc *service.PinService
 var forwardSvc *service.ForwardService
 
 var ipfsCompatLayer *service.IPFSCompatLayer
@@ -49,6 +49,11 @@ func InitPeerScanner(s *service.PeerScanner) {
 }
 
 // InitForwardController 注入 ForwardService 实例供端口转发端点使用。
+// InitPinController 注入 PinService（M2 收层：pin 端点不再直调 repository）。
+func InitPinController(svc *service.PinService) {
+	pinSvc = svc
+}
+
 func InitForwardController(svc *service.ForwardService) {
 	log.LogDebug("ctrl-p2p: InitForwardController")
 	forwardSvc = svc
@@ -1113,7 +1118,7 @@ func BTSeedCollection(c *gin.Context) {
 	}
 
 	storageDir := c.MustGet("storageDir").(string)
-	coll, err := repository.GetAnonCollectionByHash(req.CollectionHash, storageDir)
+	coll, err := collSvc.GetAnonByHash(req.CollectionHash, storageDir)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found: " + err.Error()})
 		return
@@ -1447,7 +1452,7 @@ func PinCID(c *gin.Context) {
 	}
 
 	// Check if already pinned.
-	existing, _ := repository.GetPin(cidParam)
+	existing, _ := pinSvc.Get(cidParam)
 	if existing != nil {
 		c.JSON(http.StatusOK, gin.H{"status": "already_pinned", "pin": existing})
 		return
@@ -1479,13 +1484,7 @@ func PinCID(c *gin.Context) {
 		_ = os.MkdirAll(filepath.Dir(fullPath), 0755)
 		_ = os.WriteFile(fullPath, data, 0644)
 
-		_ = repository.InsertFileMeta(&model.FileMeta{
-			Hash:     hashStr,
-			Size:     int64(len(data)),
-			Filename: cidParam,
-			Type:     repository.FileTypeBlob,
-		})
-		_ = repository.InsertFileProvider(hashStr, "local", relPath)
+		_ = pinSvc.InsertMeta(hashStr, cidParam, int64(len(data)), relPath)
 
 		// Also add to IPFS blockstore if IPFS compat is enabled.
 		if ipfsCompatLayer != nil && ipfsCompatLayer.Enabled() {
@@ -1494,7 +1493,7 @@ func PinCID(c *gin.Context) {
 	}
 
 	// Record the pin.
-	_ = repository.InsertPin(cidParam, hashStr, cidParam, int64(len(data)))
+	_ = pinSvc.Insert(cidParam, hashStr, cidParam, int64(len(data)))
 
 	log.LogInfo("ctrl-p2p: PinCID %s -> hash=%s size=%d", cidParam, hashStr, len(data))
 	c.JSON(http.StatusOK, gin.H{
@@ -1514,7 +1513,7 @@ func UnpinCID(c *gin.Context) {
 		return
 	}
 
-	pin, err := repository.GetPin(cidParam)
+	pin, err := pinSvc.Get(cidParam)
 	if err != nil {
 		log.LogError("ctrl-p2p: UnpinCID lookup failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1525,7 +1524,7 @@ func UnpinCID(c *gin.Context) {
 		return
 	}
 
-	if err := repository.RemovePin(cidParam); err != nil {
+	if err := pinSvc.Remove(cidParam); err != nil {
 		log.LogError("ctrl-p2p: UnpinCID remove failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -1538,14 +1537,14 @@ func UnpinCID(c *gin.Context) {
 // ListPins handles GET /ipfs/pins, lists all pinned CIDs.
 func ListPins(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: ListPins")
-	pins, err := repository.ListPins()
+	pins, err := pinSvc.List()
 	if err != nil {
 		log.LogError("ctrl-p2p: ListPins failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if pins == nil {
-		pins = []repository.IPFSPin{}
+		pins = []model.IPFSPin{}
 	}
 	c.JSON(http.StatusOK, gin.H{"pins": pins, "count": len(pins)})
 }

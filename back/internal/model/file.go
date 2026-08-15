@@ -5,6 +5,13 @@
 
 package model
 
+// 文件类型常量（领域常量，原定义在 repository 包——M2 收层时上移到 domain，
+// 让 repository/controller 统一依赖 model 而非互相/反向引用）。
+const (
+	FileTypeBlob           = "blob"
+	FileTypeAnonCollection = "anon_collection"
+)
+
 type FileMeta struct {
 	Hash      string `db:"hash"`
 	Size      int64  `db:"size"`
@@ -41,4 +48,13 @@ type DirEntry struct {
 	IsDir   bool   `json:"is_dir"`
 	Size    int64  `json:"size"`
 	ModTime string `json:"mod_time"`
+}
+
+// IPFSPin 表示 ipfs_pins 表中的一条 pin 记录（M2 收层：原定义在 repository，上移 domain）。
+type IPFSPin struct {
+	CID      string `json:"cid"`
+	Hash     string `json:"hash"`
+	Size     int64  `json:"size"`
+	Filename string `json:"filename"`
+	PinnedAt string `json:"pinned_at"`
 }
