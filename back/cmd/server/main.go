@@ -67,6 +67,7 @@ func main() {
 		nodeReg := service.NewNodeRegistrar(p2pSvc, cfg.RegistrationServer, cfg.NodeAuthToken, "peerdrive-dev")
 		if nodeReg != nil {
 			nodeReg.Start()
+			defer nodeReg.Stop() // L5:退出时停止心跳 goroutine
 		}
 	}
 
@@ -74,6 +75,7 @@ func main() {
 	if cfg.RegServerURL != "" && p2pSvc.IsEnabled() {
 		registry := service.NewRelayRegistry(p2pSvc, cfg.RegServerURL, cfg.RelayStorageMB, cfg.RelayVersion)
 		registry.Start()
+		defer registry.Stop() // L5:退出时停止心跳 goroutine
 	}
 
 	// 初始化匿名存储目录（与普通文件同一目录）

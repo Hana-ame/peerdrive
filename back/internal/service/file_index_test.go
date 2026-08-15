@@ -154,7 +154,9 @@ func TestFileIndex_ListAndDelete(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, files, 3)
 
-	require.NoError(t, svc.Delete(hashes[0]))
+	// L6：delete 返回新 seq（tombstone 同步游标）
+	_, err = svc.Delete(hashes[0])
+	require.NoError(t, err)
 	files, err = svc.List(0, 0)
 	require.NoError(t, err)
 	assert.Len(t, files, 2)
@@ -187,8 +189,9 @@ func TestFileIndex_SyncSince(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, p1, got.Path)
 
-	// 删除 → tombstone 同步
-	require.NoError(t, svcA.Delete(fi1.Hash))
+	// 删除 → tombstone 同步（L6：delete 返回 seq，对端 sync 才跟踪得到删除）
+	_, err = svcA.Delete(fi1.Hash)
+	require.NoError(t, err)
 	files, _, err = svcA.SyncSince(last)
 	require.NoError(t, err)
 	require.Len(t, files, 1)

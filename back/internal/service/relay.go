@@ -59,6 +59,12 @@ const (
 	// relayCopyBufSize is the buffer size used when copying stream data
 	// to the HTTP response writer.
 	relayCopyBufSize = 32 * 1024
+
+	// maxRelayFileSize relay 远端声明的文件大小上限（M3 修复）。
+	// 坑：恶意对端在 exchange 握手里声明 1<<60 → 假 Content-Length，
+	// HTTP 客户端傻等永远不会到达的字节，且 closeWatcher/流控都按此上限分配。
+	// 与上传上限（8GB）一致，超限直接拒绝。
+	maxRelayFileSize = 8 * 1024 * 1024 * 1024
 )
 
 // RelayService forwards file requests from HTTP clients to P2P peers
@@ -153,6 +159,11 @@ func (r *RelayService) openExchangeStream(ctx context.Context, peerID peer.ID, h
 		stream.Close()
 		return nil, 0, fmt.Errorf("peer %s exchange error: %s", peerID, strings.TrimSpace(statusLine))
 	}
+	// M3：远端声明的文件大小必须在上限内，否则拒绝（防假 Content-Length + 客户端挂起）
+	if fileSize > maxRelayFileSize {
+		stream.Close()
+		return nil, 0, fmt.Errorf("peer %s declared file size %d exceeds limit %d", peerID, fileSize, maxRelayFileSize)
+	}
 
 	// Extend deadline for the full data-transfer phase.
 	stream.SetReadDeadline(time.Now().Add(RelayTransferTimeout))
@@ -214,6 +225,10 @@ func (r *RelayService) requestFileSize(ctx context.Context, peerID peer.ID, hash
 	}
 	if status != "OK" {
 		return 0, fmt.Errorf("peer size error: %s", status)
+	}
+	// M3：同上，requestFileSize 也校验上限（RelayFileToHTTP 据此设 Content-Length）
+	if size > maxRelayFileSize {
+		return 0, fmt.Errorf("peer declared file size %d exceeds limit %d", size, maxRelayFileSize)
 	}
 	return size, nil
 }

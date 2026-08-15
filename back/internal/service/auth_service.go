@@ -25,6 +25,11 @@ func NewAuthService(userRepo *repository.UserRepository) *AuthService {
 
 // Register 注册新用户，使用 bcrypt 哈希密码并生成 authkey。
 func (s *AuthService) Register(req model.RegisterRequest) (*model.AuthResponse, error) {
+	// L1：bcrypt 只取前 72 字节，超长密码的尾部被静默忽略——不同密码可能
+	// 哈希相同（截断熵损失）。超限直接拒绝，避免"看似设置了强密码实际等效短密码"。
+	if len(req.Password) > 72 {
+		return nil, errors.New("password too long (bcrypt limit 72 bytes)")
+	}
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, fmt.Errorf("failed to hash password: %w", err)

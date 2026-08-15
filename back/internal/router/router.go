@@ -63,18 +63,25 @@ func SetupRouter(
 	})
 
 	r.Use(func(c *gin.Context) {
+		// L8：原实现非白名单 Origin 也回 `Allow-Origin: *` + `Allow-Credentials: true`——
+		// 恶意网页（无凭据）仍能跨域读取本机 API 响应，白名单形同虚设。
+		// 现在：仅白名单 Origin 回显 origin（+credentials 才合法）；其余不设
+		// Allow-Origin（浏览器阻止读取响应）。无 Origin（同源/curl）不设 CORS 头，
+		// 同源请求本来就不需要 CORS 授权。
 		origin := c.Request.Header.Get("Origin")
-		allowed := "*"
+		allowOrigin := ""
 		if origin != "" {
 			if cfg.IsOriginAllowed(origin) {
-				allowed = origin
+				allowOrigin = origin
 				c.Header("Vary", "Origin")
 			}
 		}
-		c.Header("Access-Control-Allow-Origin", allowed)
+		if allowOrigin != "" {
+			c.Header("Access-Control-Allow-Origin", allowOrigin)
+			c.Header("Access-Control-Allow-Credentials", "true")
+		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 		c.Header("Access-Control-Allow-Headers", c.Request.Header.Get("Access-Control-Request-Headers"))
-		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Max-Age", "86400")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
@@ -90,6 +97,10 @@ func SetupRouter(
 		SetRegServer(cfg.RegistrationServer)
 		r.Use(AuthOptional())
 	}
+	// 挂载到所有 mutating/admin 路由：未配置注册服务器时 AuthRequired 内部放行
+	// （本地单机模式），配置后则要求 Bearer token（F1：此前 AuthRequired 0 调用点，
+	// 任意文件读写/删除接口全部匿名可达）。
+	authRequired := AuthRequired()
 
 	controller.InitP2PController(p2pSvc)
 	fileSvc := service.NewFileService(cfg)
@@ -244,7 +255,7 @@ func SetupRouter(
 	// Universal multi-protocol download endpoints.
 	r.GET("/download/:hash", controller.UniversalDownload)
 	r.GET("/download/:hash/sources", controller.UniversalDownloadSources)
-	r.POST("/download/:hash/refresh", controller.UniversalDownloadRefresh)
+	r.POST("/download/:hash/refresh", authRequired, controller.UniversalDownloadRefresh)
 
 	// P2P routes (public)
 	p2p := r.Group("/p2p")
@@ -262,31 +273,32 @@ func SetupRouter(
 		p2p.GET("/topology", controller.GetTopology)
 		p2p.GET("/quality", controller.GetConnectionQuality)
 		p2p.GET("/ping/:peer_id", controller.PingPeer)
-		p2p.POST("/connect", controller.ConnectPeer)
-		p2p.POST("/announce", controller.AnnounceHash)
-		p2p.POST("/fetch", controller.FetchCollection)
-		p2p.POST("/sync", controller.SyncFromPeer)
-		p2p.POST("/push", controller.PushSync)
-		p2p.POST("/request-file", controller.RequestFile)
+		// 以下均为 mutating 操作（连对端/拉取/同步/转发/下载控制），挂认证
+		p2p.POST("/connect", authRequired, controller.ConnectPeer)
+		p2p.POST("/announce", authRequired, controller.AnnounceHash)
+		p2p.POST("/fetch", authRequired, controller.FetchCollection)
+		p2p.POST("/sync", authRequired, controller.SyncFromPeer)
+		p2p.POST("/push", authRequired, controller.PushSync)
+		p2p.POST("/request-file", authRequired, controller.RequestFile)
 		p2p.GET("/ws/info", controller.WSInfo)
 		p2p.GET("/webrtc/info", controller.WebRTCInfoHandler(cfg))
 
 		// Dual P2P (IPFS + BT DHT) routes
-		p2p.POST("/dual/announce", controller.DualAnnounce)
-		p2p.POST("/dual/find", controller.DualFindProviders)
+		p2p.POST("/dual/announce", authRequired, controller.DualAnnounce)
+		p2p.POST("/dual/find", authRequired, controller.DualFindProviders)
 		// Port forwarding routes
-		p2p.POST("/forward/create", controller.CreateForwardSession)
-		p2p.POST("/forward/connect", controller.ConnectForwardSession)
+		p2p.POST("/forward/create", authRequired, controller.CreateForwardSession)
+		p2p.POST("/forward/connect", authRequired, controller.ConnectForwardSession)
 		p2p.GET("/forward/list", controller.ListForwardSessions)
-		p2p.POST("/forward/close", controller.CloseForwardSession)
+		p2p.POST("/forward/close", authRequired, controller.CloseForwardSession)
 
 		// Resume-able P2P download routes
-		p2p.POST("/download/resume", controller.ResumeDownload)
+		p2p.POST("/download/resume", authRequired, controller.ResumeDownload)
 		p2p.GET("/download/progress/:hash", controller.DownloadProgress)
-		p2p.POST("/download/cancel/:hash", controller.CancelDownload)
+		p2p.POST("/download/cancel/:hash", authRequired, controller.CancelDownload)
 
 		// Multi-peer download routes
-		p2p.POST("/download/multipeer", controller.MultiPeerDownload)
+		p2p.POST("/download/multipeer", authRequired, controller.MultiPeerDownload)
 		p2p.GET("/download/sources/:hash", controller.DownloadSources)
 		p2p.GET("/download/multipeer/progress/:hash", controller.MultiPeerProgress)
 	}
@@ -295,26 +307,26 @@ func SetupRouter(
 	bt := r.Group("/bt")
 	{
 		bt.GET("/status", controller.BTDHTStatus)
-		bt.POST("/announce", controller.BTAnnounce)
-		bt.POST("/find", controller.BTFindProviders)
+		bt.POST("/announce", authRequired, controller.BTAnnounce)
+		bt.POST("/find", authRequired, controller.BTFindProviders)
 		// BEP 44 (arbitrary DHT data storage)
-		bt.POST("/bep44/put", controller.BEP44Put)
-		bt.POST("/bep44/get", controller.BEP44Get)
+		bt.POST("/bep44/put", authRequired, controller.BEP44Put)
+		bt.POST("/bep44/get", authRequired, controller.BEP44Get)
 		// BEP 51 (infohash indexing)
 		bt.GET("/bep51/sample", controller.BEP51Sample)
 		// BitTorrent download routes (torrent files, magnet links)
-		bt.POST("/torrent", controller.BTTorrentUpload)
-		bt.POST("/magnet", controller.BTMagnetResolve)
+		bt.POST("/torrent", authRequired, controller.BTTorrentUpload)
+		bt.POST("/magnet", authRequired, controller.BTMagnetResolve)
 		bt.GET("/download/:infohash", controller.BTDownloadProgress)
 		bt.GET("/download/:infohash/torrent", controller.BTDownloadTorrent)
 		bt.GET("/download/:infohash/magnet", controller.BTDownloadMagnet)
 		bt.GET("/downloads", controller.BTDownloadList)
-		bt.POST("/download/:infohash/pause", controller.BTPauseDownload)
-		bt.POST("/download/:infohash/resume", controller.BTResumeDownload)
-		bt.POST("/download/:infohash/seed", controller.BTSeedTorrent)
-		bt.POST("/download/:infohash/unseed", controller.BTStopSeed)
-		bt.DELETE("/download/:infohash", controller.BTRemoveDownload)
-		bt.POST("/seed-collection", controller.BTSeedCollection)
+		bt.POST("/download/:infohash/pause", authRequired, controller.BTPauseDownload)
+		bt.POST("/download/:infohash/resume", authRequired, controller.BTResumeDownload)
+		bt.POST("/download/:infohash/seed", authRequired, controller.BTSeedTorrent)
+		bt.POST("/download/:infohash/unseed", authRequired, controller.BTStopSeed)
+		bt.DELETE("/download/:infohash", authRequired, controller.BTRemoveDownload)
+		bt.POST("/seed-collection", authRequired, controller.BTSeedCollection)
 		bt.GET("/stats", controller.BTGlobalStats)
 	}
 
@@ -322,10 +334,10 @@ func SetupRouter(
 	ipfs := r.Group("/ipfs")
 	{
 		ipfs.GET("", controller.IPFSCompatStatus)
-		ipfs.POST("/toggle", controller.IPFSCompatToggle)
+		ipfs.POST("/toggle", authRequired, controller.IPFSCompatToggle)
 		// IPFS pin routes
-		ipfs.POST("/pin/:cid", controller.PinCID)
-		ipfs.DELETE("/pin/:cid", controller.UnpinCID)
+		ipfs.POST("/pin/:cid", authRequired, controller.PinCID)
+		ipfs.DELETE("/pin/:cid", authRequired, controller.UnpinCID)
 		ipfs.GET("/pins", controller.ListPins)
 		// IPFS gateway status
 		ipfs.GET("/gateways", controller.IPFSGatewayStatus)
@@ -339,65 +351,65 @@ func SetupRouter(
 	coll := r.Group("/collections")
 	{
 		// POST /collections 分派：body 带 username 走用户体系，否则匿名集合
-		coll.POST("", dispatchCreateCollection)
+		coll.POST("", authRequired, dispatchCreateCollection)
 		coll.GET("", controller.ListAnonCollections)
 		// GET /collections/:id 分派：64 位 hex 为匿名集合 hash，否则按 username 列出
 		coll.GET("/:id", dispatchGetCollection)
 		// GET /collections/:id/*filepath 分派 anon 文件下载与用户集合子路由
 		//（gin 不允许 :param 与 *wildcard 共存，统一走分派器）
 		coll.GET("/:id/*filepath", dispatchGetTree)
-		coll.POST("/fork", controller.ForkAnonCollection)
-		coll.POST("/merge", controller.MergeFromSource)
-		coll.POST("/pull", controller.PullCollection)
-		coll.POST("/upload", controller.UploadFile)
-		coll.POST("/register-local", controller.RegisterLocalFile)
-		coll.POST("/register-url", controller.RegisterURL)
-		coll.POST("/register-folder", controller.RegisterFolder)
+		coll.POST("/fork", authRequired, controller.ForkAnonCollection)
+		coll.POST("/merge", authRequired, controller.MergeFromSource)
+		coll.POST("/pull", authRequired, controller.PullCollection)
+		coll.POST("/upload", authRequired, controller.UploadFile)
+		coll.POST("/register-local", authRequired, controller.RegisterLocalFile)
+		coll.POST("/register-url", authRequired, controller.RegisterURL)
+		coll.POST("/register-folder", authRequired, controller.RegisterFolder)
 	}
 
-	// Anonymous Collection routes (public)
+	// Anonymous Collection routes (public read；创建/提交/fork 为写操作挂认证)
 	anon := r.Group("/anon")
 	{
-		anon.POST("/collections", controller.CreateAnonCollection)
+		anon.POST("/collections", authRequired, controller.CreateAnonCollection)
 		anon.GET("/collections", controller.ListAnonCollections)
-		anon.POST("/collections/commit", controller.CommitAnonCollection)
+		anon.POST("/collections/commit", authRequired, controller.CommitAnonCollection)
 		anon.GET("/collections/:hash", controller.GetAnonCollection)
 		anon.GET("/collections/:hash/*filepath", controller.DownloadAnonFile)
-		anon.POST("/collections/fork", controller.ForkAnonCollection)
+		anon.POST("/collections/fork", authRequired, controller.ForkAnonCollection)
 	}
 
-	// File management
+	// File management（browse/list/verify 只读开放；写操作挂认证）
 	files := r.Group("/files")
 	{
 		files.GET("", controller.ListFiles)
-		files.POST("/upload", controller.UploadFile)
-		files.POST("/register_local", controller.RegisterLocalFile)
-		files.POST("/register_url", controller.RegisterURL)
-		files.POST("/register_folder", controller.RegisterFolder)
+		files.POST("/upload", authRequired, controller.UploadFile)
+		files.POST("/register_local", authRequired, controller.RegisterLocalFile)
+		files.POST("/register_url", authRequired, controller.RegisterURL)
+		files.POST("/register_folder", authRequired, controller.RegisterFolder)
 		files.GET("/verify/:hash", controller.VerifyFile)
 		files.GET("/browse", controller.BrowseDir)
-		files.DELETE("/:hash", controller.DeleteFile)
-		files.POST("/copy", controller.CopyFile)
-		files.POST("/diff", controller.DiffVersions)
+		files.DELETE("/:hash", authRequired, controller.DeleteFile)
+		files.POST("/copy", authRequired, controller.CopyFile)
+		files.POST("/diff", authRequired, controller.DiffVersions)
 	}
 
-	// Collection management
+	// Collection management（写操作挂认证）
 	collections := r.Group("/collections")
 	{
 		collections.GET("/public", controller.ListPublicCollections)
 		collections.GET("/search", controller.SearchCollections)
-		collections.POST("/:id/:collection_name/entries", controller.AddEntry)
-		collections.DELETE("/:id/:collection_name/entries/*path", controller.RemoveEntry)
-		collections.POST("/:id/:collection_name/commit", controller.CommitCollection)
-		collections.POST("/:id/:collection_name/rollback/:version_id", controller.RollbackCollection)
-		collections.POST("/:id/:collection_name/visibility", controller.SetCollectionVisibility)
-		collections.POST("/:id/:collection_name/tags", controller.UpdateCollectionTags)
+		collections.POST("/:id/:collection_name/entries", authRequired, controller.AddEntry)
+		collections.DELETE("/:id/:collection_name/entries/*path", authRequired, controller.RemoveEntry)
+		collections.POST("/:id/:collection_name/commit", authRequired, controller.CommitCollection)
+		collections.POST("/:id/:collection_name/rollback/:version_id", authRequired, controller.RollbackCollection)
+		collections.POST("/:id/:collection_name/visibility", authRequired, controller.SetCollectionVisibility)
+		collections.POST("/:id/:collection_name/tags", authRequired, controller.UpdateCollectionTags)
 	}
 
-	// Local sync
+	// Local sync（写挂认证，读开放）
 	sync := r.Group("/local")
 	{
-		sync.POST("/save", syncCtrl.SaveLocal)
+		sync.POST("/save", authRequired, syncCtrl.SaveLocal)
 		sync.GET("/status/:hash", syncCtrl.GetStatus)
 	}
 	// 向后兼容 redirects: /actions/* → /collections/*
@@ -406,9 +418,9 @@ func SetupRouter(
 	// Collaboration actions
 	actions := r.Group("/actions")
 	{
-		actions.POST("/merge", controller.MergeFromSource)
-		actions.POST("/fork", controller.ForkCollection)
-		actions.POST("/pull", controller.PullCollection)
+		actions.POST("/merge", authRequired, controller.MergeFromSource)
+		actions.POST("/fork", authRequired, controller.ForkCollection)
+		actions.POST("/pull", authRequired, controller.PullCollection)
 	}
 
 	// Public collection file download
@@ -421,11 +433,11 @@ func SetupRouter(
 		tasks.GET("/:id", controller.GetTaskStatus)
 	}
 
-	// Share links
+	// Share links（创建挂认证；读取 token 公开）
 	shares := r.Group("/shares")
 	{
-		shares.POST("", controller.CreateShare)
-		shares.GET("", controller.ListShares)
+		shares.POST("", authRequired, controller.CreateShare)
+		shares.GET("", authRequired, controller.ListShares)
 	}
 	r.GET("/s/:token", controller.AccessShare)
 
@@ -444,10 +456,11 @@ func SetupRouter(
 	r.GET("/relay/proxy", relaySvc.ProxyDownload)
 
 	// WebDAV endpoint — mount as network drive
+	// M12：WebDAV 写/删此前无任何认证 → 挂 AuthRequired（未配置注册服务器时放行，本地模式不受影响）
 	if cfg.WebDAVEnable {
 		webdavSvc := service.NewWebDAVService(cfg.StorageDir)
 		// WebDAV uses wildcard path: all /webdav/* requests go to WebDAV handler
-		r.Any("/webdav/*path", func(c *gin.Context) {
+		r.Any("/webdav/*path", authRequired, func(c *gin.Context) {
 			c.Request.URL.Path = c.Param("path")
 			webdavSvc.ServeHTTP(c)
 		})
@@ -460,7 +473,7 @@ func SetupRouter(
 	})
 
 	// PeerJS 节点发现
-	registerPeerJSRoutes(r)
+	registerPeerJSRoutes(r, authRequired)
 
 	// Count routes
 	routes := r.Routes()

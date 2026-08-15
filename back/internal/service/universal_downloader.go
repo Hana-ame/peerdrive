@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"peerdrive/internal/log"
@@ -157,7 +158,16 @@ func (f *BTDHTFetcher) Fetch(ctx context.Context, hash string) ([]byte, error) {
 
 // HTTPURLFetcher checks file_providers for "http"-type entries and fetches
 // from the registered URL.
-type HTTPURLFetcher struct{}
+type HTTPURLFetcher struct {
+	// httpClient 带超时（M5）：原实现用 http.DefaultClient 无 timeout，
+	// 慢速 URL provider 会永久挂住 Download（下载端点随之挂死）。
+	// Fetch 整体受 Download 的 per-fetcher context 限制，这里再加一重保险。
+	httpClient *http.Client
+}
+
+// maxURLFetchSize URL provider 单次拉取上限（M5）：
+// 与 peerjs 上传上限一致（8GB），防恶意/失控 URL 返回无限流。
+const maxURLFetchSize = 8 * 1024 * 1024 * 1024
 
 func (f *HTTPURLFetcher) Name() string { return "http" }
 
@@ -168,6 +178,10 @@ func (f *HTTPURLFetcher) Fetch(ctx context.Context, hash string) ([]byte, error)
 	if err != nil {
 		return nil, fmt.Errorf("http: db lookup failed: %w", err)
 	}
+	client := f.httpClient
+	if client == nil {
+		client = http.DefaultClient // 防御：NewUniversalDownloader 未注入时的兜底
+	}
 	for _, p := range providers {
 		if p.ProviderType != "http" || !p.Available {
 			continue
@@ -176,7 +190,7 @@ func (f *HTTPURLFetcher) Fetch(ctx context.Context, hash string) ([]byte, error)
 		if err != nil {
 			continue
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			continue
 		}
@@ -184,9 +198,14 @@ func (f *HTTPURLFetcher) Fetch(ctx context.Context, hash string) ([]byte, error)
 			resp.Body.Close()
 			continue
 		}
-		data, err := io.ReadAll(resp.Body)
+		// M5：LimitReader 限流，超上限即视为异常 provider
+		data, err := io.ReadAll(io.LimitReader(resp.Body, maxURLFetchSize+1))
 		resp.Body.Close()
 		if err != nil {
+			continue
+		}
+		if len(data) > maxURLFetchSize {
+			log.LogWarn("downloader: http provider %s returned oversized payload for %s", p.Path, hash)
 			continue
 		}
 		return data, nil
@@ -229,7 +248,11 @@ type UniversalDownloader struct {
 	fetchers     []ProtocolFetcher
 	timeout      time.Duration
 	ipfsProvider *provider.IPFSProvider
-	lastMetrics  []FetcherMetric
+
+	// M5：lastMetrics 读写竞态（Download 并发写 vs LastMetrics 读，
+	// /download/:hash/sources 端点高频调用）→ 互斥保护。
+	metricsMu   sync.Mutex
+	lastMetrics []FetcherMetric
 }
 
 // NewUniversalDownloader 创建通用下载器，支持按优先级顺序尝试多种协议。
@@ -281,7 +304,9 @@ func (d *UniversalDownloader) buildFetchers(order string, p2pSvc *P2PService, bt
 			return NewBTDHTFetcher(btSvc, d.storageDir)
 		},
 		"http": func() ProtocolFetcher {
-			return &HTTPURLFetcher{}
+			// M5：URL provider 用带超时的 client（Download 的 per-fetcher
+			// context 兜底整体耗时，client timeout 防单请求悬挂）
+			return &HTTPURLFetcher{httpClient: &http.Client{Timeout: d.timeout}}
 		},
 	}
 
@@ -306,7 +331,9 @@ func (d *UniversalDownloader) Download(ctx context.Context, hash string) (data [
 	}
 	metrics := make([]FetcherMetric, 0, len(d.fetchers))
 	defer func() {
+		d.metricsMu.Lock()
 		d.lastMetrics = metrics
+		d.metricsMu.Unlock()
 	}()
 
 	for _, fetcher := range d.fetchers {
@@ -362,6 +389,8 @@ func (d *UniversalDownloader) Download(ctx context.Context, hash string) (data [
 
 // LastMetrics 返回最近一次 Download 调用的各协议尝试记录（含耗时）。
 func (d *UniversalDownloader) LastMetrics() []FetcherMetric {
+	d.metricsMu.Lock()
+	defer d.metricsMu.Unlock()
 	return d.lastMetrics
 }
 

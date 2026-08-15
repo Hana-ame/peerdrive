@@ -27,9 +27,14 @@ type Connection struct {
 	Label   string
 	Offered bool // 本端是否为 offerer
 
-	pc  *webrtc.PeerConnection
-	dc  DataChannel
-	ice []webrtc.ICEServer
+	// M9：dc 在 attach（pion OnDataChannel 回调/本地 CreateDataChannel 后）
+	// 无锁写入，而 Open/Send/SendFrame/Close 从任意 goroutine 并发读——
+	// 数据竞争（-race 必现，极端下读到 nil 半初始化）。dcMu 保护 dc 的读写；
+	// attach 只调用一次，锁开销可忽略。
+	dcMu sync.RWMutex
+	pc   *webrtc.PeerConnection
+	dc   DataChannel
+	ice  []webrtc.ICEServer
 
 	sendMu sync.Mutex // 保证 data 头与二进制块连续发送（SendFrame）
 
@@ -58,26 +63,36 @@ func (c *Connection) OnMessage(f func(Frame)) { c.onMessage = f }
 func (c *Connection) OnClose(f func(*Connection)) { c.onClose = f }
 
 // Open 返回 DataChannel 是否已就绪。
-func (c *Connection) Open() bool { return c.dc != nil && c.dc.Open() }
+func (c *Connection) Open() bool {
+	c.dcMu.RLock()
+	defer c.dcMu.RUnlock()
+	return c.dc != nil && c.dc.Open()
+}
 
 // Send 发送二进制数据。
 // 注意：pion 的 dc.Send([]byte) 发送的是二进制帧（SCTP PPID 53），
 // 与文本帧（PPID 51）在接收端可区分——协议依赖此区分「数据块 vs 控制头」。
 func (c *Connection) Send(data []byte) error {
-	if !c.Open() {
+	c.dcMu.RLock()
+	dc := c.dc
+	c.dcMu.RUnlock()
+	if dc == nil || !dc.Open() {
 		return fmt.Errorf("peerjs: connection not open")
 	}
-	return c.dc.Send(data)
+	return dc.Send(data)
 }
 
 // SendText 发送文本帧（JSON 控制头专用）。
 // 坑：必须用文本帧。若用 Send([]byte) 发送 JSON 头，对端（peerjs 浏览器端
 // / 本库对端）会把头误判为二进制数据块而丢弃/错配。
 func (c *Connection) SendText(s string) error {
-	if !c.Open() {
+	c.dcMu.RLock()
+	dc := c.dc
+	c.dcMu.RUnlock()
+	if dc == nil || !dc.Open() {
 		return fmt.Errorf("peerjs: connection not open")
 	}
-	return c.dc.SendText(s)
+	return dc.SendText(s)
 }
 
 // SendJSON 发送 JSON 文本消息（等价 SendText(json(v))）。
@@ -103,10 +118,14 @@ func (c *Connection) SendFrame(header any, body []byte) error {
 	}
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
-	if !c.Open() {
+	// M9：持 sendMu 期间读一次 dc 快照，后续全部用局部变量（避免每次取锁）
+	c.dcMu.RLock()
+	dc := c.dc
+	c.dcMu.RUnlock()
+	if dc == nil || !dc.Open() {
 		return fmt.Errorf("peerjs: connection not open")
 	}
-	if err := c.dc.SendText(string(hb)); err != nil {
+	if err := dc.SendText(string(hb)); err != nil {
 		return err
 	}
 	if len(body) == 0 {
@@ -116,7 +135,7 @@ func (c *Connection) SendFrame(header any, body []byte) error {
 	// 慢消费者时依赖 ICE disconnected（~30s）兜底。有界但不快，现在显式封顶
 	flowWait := time.NewTimer(30 * time.Second)
 	defer flowWait.Stop()
-	for c.dc.BufferedAmount() > defaultBufferLowThreshold {
+	for dc.BufferedAmount() > defaultBufferLowThreshold {
 		select {
 		case <-c.lowWater:
 		case <-c.done: // 连接关闭：立即退出，不悬挂调用方
@@ -125,20 +144,29 @@ func (c *Connection) SendFrame(header any, body []byte) error {
 			return fmt.Errorf("peerjs: flow control timeout (slow consumer)")
 		}
 	}
-	return c.dc.Send(body)
+	return dc.Send(body)
 }
 
 // DataChannel 返回底层数据通道（高级用法：流控、关闭等）。
-func (c *Connection) DataChannel() DataChannel { return c.dc }
+func (c *Connection) DataChannel() DataChannel {
+	c.dcMu.RLock()
+	defer c.dcMu.RUnlock()
+	return c.dc
+}
 
 // Close 关闭连接并从信令层注销。
+// M9：Close 可能被 pion 内部回调（OnDataChannel 的 OnClose）触发，与 attach
+// 写入 dc 并发——读取 dc 需持 dcMu。
 func (c *Connection) Close() {
 	c.closeOnce.Do(func() {
 		if c.pc != nil {
 			_ = c.pc.Close()
 		}
-		if c.dc != nil {
-			c.dc.Close()
+		c.dcMu.RLock()
+		dc := c.dc
+		c.dcMu.RUnlock()
+		if dc != nil {
+			dc.Close()
 		}
 		c.peer.forgetConnection(c.ID)
 		close(c.done)
@@ -240,7 +268,11 @@ func (p *Peer) newConnection(dst, label string, offered bool, iceServers []webrt
 // offerer 侧在 CreateDataChannel 后立即调用（状态为 connecting），
 // answerer 侧在对端 offer 触发 pc.OnDataChannel 时调用。
 func (c *Connection) attach(dc DataChannel) {
+	// M9：dc 写入持锁（Close/Send/Open 并发读；pion 的 OnDataChannel 回调
+	// 在 PC goroutine，可能刚好与首次 Send 竞争）。
+	c.dcMu.Lock()
 	c.dc = dc
+	c.dcMu.Unlock()
 	// 流控回调全局注册一次（替换式回调，多个发送方各自注册会互相覆盖→死等）
 	dc.SetBufferedAmountLowThreshold(defaultBufferLowThreshold)
 	dc.OnBufferedAmountLow(func() {

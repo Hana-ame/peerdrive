@@ -381,13 +381,14 @@ func (s *FileIndexService) DownloadPath(hash string) (string, error) {
 	return f.Path, nil
 }
 
-// Delete 逻辑删除映射（同步用 tombstone）。
-func (s *FileIndexService) Delete(hash string) error {
+// Delete 逻辑删除映射（同步用 tombstone），返回新 seq。
+// L6：seq 是增量同步游标——delete 的 tombstone 必须带序，对端 sync 才能
+// 跟踪到删除事件（原实现丢弃了 DeleteFileIndex 的 seq）。
+func (s *FileIndexService) Delete(hash string) (int64, error) {
 	if !isValidHash(hash) {
-		return fmt.Errorf("invalid hash %q", hash)
+		return 0, fmt.Errorf("invalid hash %q", hash)
 	}
-	_, err := repository.DeleteFileIndex(hash)
-	return err
+	return repository.DeleteFileIndex(hash)
 }
 
 // SyncSince 增量同步：返回 seq 之后的全部变更（含删除 tombstone）。

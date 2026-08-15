@@ -35,18 +35,23 @@ func createFileIndexTable() {
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_seq ON file_index(seq)`)
 }
 
-// nextFileIndexSeq 取下一个同步游标值。
-func nextFileIndexSeq() int64 {
+// UpsertFileIndex 登记/更新映射（create/upload 成功后调用），返回新 seq。
+// M10：原实现 nextFileIndexSeq() 是 SELECT MAX+1 再单独 INSERT——database/sql
+// 连接池多连接并发写时，两个请求可能同时读到相同 MAX → seq 重复，sync 游标错乱。
+// 合并进同一事务：SELECT 与 INSERT 在同一写事务内原子完成（SQLite 串行写保证单调）。
+func UpsertFileIndex(hash, path, name string, size int64, deleted bool) (int64, error) {
+	tx, err := DB.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin file_index tx: %w", err)
+	}
+	defer tx.Rollback()
 	var last sql.NullInt64
 	// 注意：seq 单调性依赖事务串行；SQLite 单写者下安全
-	DB.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM file_index`).Scan(&last)
-	return last.Int64 + 1
-}
-
-// UpsertFileIndex 登记/更新映射（create/upload 成功后调用），返回新 seq。
-func UpsertFileIndex(hash, path, name string, size int64, deleted bool) (int64, error) {
-	seq := nextFileIndexSeq()
-	_, err := DB.Exec(`INSERT INTO file_index (hash, path, name, size, deleted, seq)
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM file_index`).Scan(&last); err != nil {
+		return 0, fmt.Errorf("read file_index max seq: %w", err)
+	}
+	seq := last.Int64 + 1
+	_, err = tx.Exec(`INSERT INTO file_index (hash, path, name, size, deleted, seq)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(hash) DO UPDATE SET
 			path=excluded.path, name=excluded.name, size=excluded.size,
@@ -55,6 +60,9 @@ func UpsertFileIndex(hash, path, name string, size int64, deleted bool) (int64, 
 		hash, path, name, size, boolToInt(deleted), seq)
 	if err != nil {
 		return 0, fmt.Errorf("upsert file_index: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit file_index tx: %w", err)
 	}
 	return seq, nil
 }

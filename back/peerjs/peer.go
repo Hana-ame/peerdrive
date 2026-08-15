@@ -426,6 +426,9 @@ func (s *peerJSSignaller) dialWS(ctx context.Context) error {
 
 // readLoop 读取服务端消息并分发给 route。
 func (s *peerJSSignaller) readLoop(conn *websocket.Conn) {
+	// M7：信令消息（SDP/ICE 文案）很小，1MB 上限足以覆盖合法负载；
+	// 云端信令若被攻破回超大帧，不设限会直接 OOM。
+	conn.SetReadLimit(1 << 20)
 	defer func() {
 		s.mu.Lock()
 		matches := s.conn == conn

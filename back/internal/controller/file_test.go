@@ -17,7 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func setupFileTestRouter(t *testing.T) *gin.Engine {
+func setupFileTestRouter(t *testing.T) (*gin.Engine, string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -30,11 +30,11 @@ func setupFileTestRouter(t *testing.T) *gin.Engine {
 		c.Next()
 	})
 	InitFileController(service.NewFileService(cfg))
-	return r
+	return r, dir
 }
 
 func TestListFiles_Empty(t *testing.T) {
-	r := setupFileTestRouter(t)
+	r, _ := setupFileTestRouter(t)
 	r.GET("/files", ListFiles)
 
 	w := httptest.NewRecorder()
@@ -51,7 +51,7 @@ func TestListFiles_Empty(t *testing.T) {
 }
 
 func TestListFiles_WithSort(t *testing.T) {
-	r := setupFileTestRouter(t)
+	r, _ := setupFileTestRouter(t)
 	r.GET("/files", ListFiles)
 
 	for _, sort := range []string{"time", "name", "size", "type", "path"} {
@@ -65,7 +65,7 @@ func TestListFiles_WithSort(t *testing.T) {
 }
 
 func TestVerifyFile_NotFound(t *testing.T) {
-	r := setupFileTestRouter(t)
+	r, _ := setupFileTestRouter(t)
 	r.GET("/files/verify/:hash", VerifyFile)
 
 	w := httptest.NewRecorder()
@@ -86,7 +86,7 @@ func TestVerifyFile_NotFound(t *testing.T) {
 }
 
 func TestVerifyFile_InvalidHash(t *testing.T) {
-	r := setupFileTestRouter(t)
+	r, _ := setupFileTestRouter(t)
 	r.GET("/files/verify/:hash", VerifyFile)
 
 	w := httptest.NewRecorder()
@@ -99,7 +99,7 @@ func TestVerifyFile_InvalidHash(t *testing.T) {
 }
 
 func TestBrowseDir_DefaultRoot(t *testing.T) {
-	r := setupFileTestRouter(t)
+	r, _ := setupFileTestRouter(t)
 	r.GET("/files/browse", BrowseDir)
 
 	w := httptest.NewRecorder()
@@ -116,8 +116,7 @@ func TestBrowseDir_DefaultRoot(t *testing.T) {
 }
 
 func TestBrowseDir_SpecificPath(t *testing.T) {
-	r := setupFileTestRouter(t)
-	dir := t.TempDir()
+	r, dir := setupFileTestRouter(t)
 	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0644)
 
 	r.GET("/files/browse", BrowseDir)
@@ -136,7 +135,7 @@ func TestBrowseDir_SpecificPath(t *testing.T) {
 }
 
 func TestUploadFile_NoFile(t *testing.T) {
-	r := setupFileTestRouter(t)
+	r, _ := setupFileTestRouter(t)
 	r.POST("/files/upload", UploadFile)
 
 	w := httptest.NewRecorder()
@@ -150,7 +149,7 @@ func TestUploadFile_NoFile(t *testing.T) {
 }
 
 func TestCopyFile_MissingParams(t *testing.T) {
-	r := setupFileTestRouter(t)
+	r, _ := setupFileTestRouter(t)
 	r.POST("/files/copy", CopyFile)
 
 	// Test missing hash (valid JSON but empty hash)
@@ -165,7 +164,7 @@ func TestCopyFile_MissingParams(t *testing.T) {
 }
 
 func TestCopyFile_InvalidHash(t *testing.T) {
-	r := setupFileTestRouter(t)
+	r, _ := setupFileTestRouter(t)
 	r.POST("/files/copy", CopyFile)
 
 	w := httptest.NewRecorder()

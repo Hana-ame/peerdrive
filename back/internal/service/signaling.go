@@ -12,6 +12,7 @@ package service
 import (
 	"net/http"
 	"sync"
+	"time"
 
 	"peerdrive/internal/log"
 
@@ -45,6 +46,8 @@ type peerConn struct {
 func (p *peerConn) send(msg SignalingMessage) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// M2：写 deadline 防止对端不读时 WriteJSON 永久阻塞（gorilla 默认无超时）。
+	_ = p.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	return p.Conn.WriteJSON(msg)
 }
 
@@ -96,20 +99,27 @@ func (h *SignalingHub) RoomPeers(hash string) []string {
 	return result
 }
 
-// HandleConnection 处理 WebSocket 信令连接，负责注册、房间管理、offer/answer/ICE 转发等。
-// 支持 browser-to-browser 和 browser-to-node 信令。
+// M2 修复：处理 WebSocket 信令连接的入口。
+// - SetReadLimit：信令消息（SDP/ICE 文案）很小，单帧上限 40KB 防恶意超大 payload
+// - 读超时 + PongHandler：对端断连/不活跃时不再被它无限挂住
 func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.LogError("signal: upgrade error: %v", err)
 		return
 	}
+	conn.SetReadLimit(40 << 10)
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	})
 
 	var peer *peerConn
 	peerID := ""
 	defer func() {
 		if peerID != "" {
-			h.unregister(peerID)
+			// L4：带连接身份 unregister，避免旧连接/重复注册的断开误删新连接
+			h.unregister(peerID, peer)
 			h.broadcast(SignalingMessage{Type: "peer_left", PeerID: peerID})
 			log.LogInfo("signal: peer left: %s", peerID)
 		}
@@ -130,7 +140,11 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 			}
 			peerID = msg.PeerID
 			peer = &peerConn{PeerID: msg.PeerID, Conn: conn}
-			h.register(msg.PeerID, peer)
+			// L4：同 ID 已有连接（重复注册）→ 顶替并关闭旧连接，防幽灵 goroutine 误清理
+			if old := h.register(msg.PeerID, peer); old != nil && old.Conn != conn {
+				log.LogWarn("signal: peer %s re-registered, closing old connection", msg.PeerID[:min(len(msg.PeerID), 12)])
+				_ = old.Conn.Close()
+			}
 			conn.WriteJSON(SignalingMessage{
 				Type:   "registered",
 				PeerID: msg.PeerID,
@@ -150,7 +164,11 @@ func (h *SignalingHub) HandleConnection(w http.ResponseWriter, r *http.Request) 
 			}
 			peerID = msg.PeerID
 			peer = &peerConn{PeerID: msg.PeerID, Conn: conn}
-			h.register(msg.PeerID, peer)
+			// L4：同 ID 已有连接 → 顶替并关闭旧连接
+			if old := h.register(msg.PeerID, peer); old != nil && old.Conn != conn {
+				log.LogWarn("signal: peer %s joined with existing connection, closing old", msg.PeerID[:min(len(msg.PeerID), 12)])
+				_ = old.Conn.Close()
+			}
 			h.joinRoom(msg.PeerID, msg.Hash)
 			shortID := msg.PeerID
 			if len(shortID) > 12 {
@@ -272,14 +290,27 @@ func min(a, b int) int {
 	return b
 }
 
-func (h *SignalingHub) register(peerID string, pc *peerConn) {
+// register 登记 peerID→连接。返回被顶替的旧连接（若有）。
+// L4：重复 peerID 注册（同 ID 重连/两个连接抢注）时，旧连接必须被主动关闭，
+// 否则它留在 map 外的幽灵 goroutine 里，断开时 unregister 会误删新连接。
+func (h *SignalingHub) register(peerID string, pc *peerConn) *peerConn {
 	h.mu.Lock()
+	old := h.peers[peerID]
 	h.peers[peerID] = pc
 	h.mu.Unlock()
+	return old
 }
 
-func (h *SignalingHub) unregister(peerID string) {
+// unregister 移除 peerID 的注册。pc 为身份凭据：仅当 h.peers[peerID] 仍指向
+// 该连接时才真正清理——旧连接迟到的断开不能清掉已顶替它的新连接（L4）。
+// 注意：旧连接在 rooms/files 里遗留的同 ID 条目保留（新连接 join 时覆盖），
+// 因为 peerID 相同意味着「该节点仍在线」，条目语义不失效。
+func (h *SignalingHub) unregister(peerID string, pc *peerConn) {
 	h.mu.Lock()
+	if pc != nil && h.peers[peerID] != pc {
+		h.mu.Unlock()
+		return
+	}
 	delete(h.peers, peerID)
 	// Remove from all rooms.
 	for hash, room := range h.rooms {
@@ -311,6 +342,8 @@ func (h *SignalingHub) joinRoom(peerID, hash string) {
 }
 
 func (h *SignalingHub) relay(msg SignalingMessage) {
+	// M2 修复：原先在 RLock 内直接 target.send —— 对端写阻塞会卡住整个 hub。
+	// 改为锁内只查引用（锁外调用 send，写方向 peerConn 自带互斥与 deadline）。
 	h.mu.RLock()
 	target, ok := h.peers[msg.To]
 	h.mu.RUnlock()
@@ -323,32 +356,42 @@ func (h *SignalingHub) relay(msg SignalingMessage) {
 }
 
 func (h *SignalingHub) broadcast(msg SignalingMessage, excludePeerIDs ...string) {
+	// M2：快照目标列表后锁外逐个 send，避免持锁调用阻塞式网络写。
 	h.mu.RLock()
-	defer h.mu.RUnlock()
 	exclude := make(map[string]struct{}, len(excludePeerIDs))
 	for _, id := range excludePeerIDs {
 		exclude[id] = struct{}{}
 	}
+	targets := make([]*peerConn, 0, len(h.peers))
 	for pid, p := range h.peers {
 		if _, ok := exclude[pid]; ok {
 			continue
 		}
+		targets = append(targets, p)
+	}
+	h.mu.RUnlock()
+	for _, p := range targets {
 		p.send(msg)
 	}
 }
 
 // broadcastRoom sends a message to all peers in a room except the sender.
 func (h *SignalingHub) broadcastRoom(hash string, msg SignalingMessage, excludePeerID string) {
+	// M2：同 broadcast，快照后锁外发送。
 	h.mu.RLock()
-	defer h.mu.RUnlock()
 	room := h.rooms[hash]
+	targets := make([]*peerConn, 0, len(room))
 	for pid := range room {
 		if pid == excludePeerID {
 			continue
 		}
 		if p, ok := h.peers[pid]; ok {
-			p.send(msg)
+			targets = append(targets, p)
 		}
+	}
+	h.mu.RUnlock()
+	for _, p := range targets {
+		p.send(msg)
 	}
 }
 

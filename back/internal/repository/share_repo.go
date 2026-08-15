@@ -3,6 +3,7 @@ package repository
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"time"
 
@@ -37,16 +38,19 @@ func CreateShare(hash, shareType, filename string) (*model.ShareLink, error) {
 }
 
 // GetShareByToken 按 token 查询未过期的分享链接。
+// L7：原实现 Scan 进 *any——driver 返回类型不确定（time.Time 或 string），
+// 类型断言失败时 ExpiresAt 静默为空。用 sql.NullTime 显式处理 NULL/时间。
 func GetShareByToken(token string) (*model.ShareLink, error) {
 	var s model.ShareLink
-	var exp any
+	var exp sql.NullTime
 	err := DB.QueryRow(`SELECT id, token, hash, type, COALESCE(filename,''), created_at, expires_at
 		FROM share_links WHERE token = ? AND (expires_at IS NULL OR expires_at > datetime('now'))`,
 		token).Scan(&s.ID, &s.Token, &s.Hash, &s.Type, &s.Filename, &s.CreatedAt, &exp)
 	if err != nil {
 		return nil, err
 	}
-	if t, ok := exp.(time.Time); ok {
+	if exp.Valid {
+		t := exp.Time
 		s.ExpiresAt = &t
 	}
 	return &s, nil
@@ -65,11 +69,12 @@ func ListShares() ([]model.ShareLink, error) {
 	var shares []model.ShareLink
 	for rows.Next() {
 		var s model.ShareLink
-		var exp any
+		var exp sql.NullTime
 		if err := rows.Scan(&s.ID, &s.Token, &s.Hash, &s.Type, &s.Filename, &s.CreatedAt, &exp); err != nil {
 			continue
 		}
-		if t, ok := exp.(time.Time); ok {
+		if exp.Valid {
+			t := exp.Time
 			s.ExpiresAt = &t
 		}
 		shares = append(shares, s)

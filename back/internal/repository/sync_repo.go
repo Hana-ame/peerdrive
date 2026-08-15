@@ -62,8 +62,9 @@ func (r *SyncRepository) UpsertFileSyncState(hash, path string, isSaved bool) er
 }
 
 // GetSyncFiles 查询指定集合的所有文件同步状态记录。
+// M11：无 LIMIT 全表物化；限 1000 条（本地同步状态记录通常远小于此）。
 func (r *SyncRepository) GetSyncFiles(hash string) ([]model.LocalSyncFile, error) {
-	rows, err := DB.Query(`SELECT id, collection_hash, file_path, is_saved, last_modified FROM local_sync_files WHERE collection_hash = ?`, hash)
+	rows, err := DB.Query(`SELECT id, collection_hash, file_path, is_saved, last_modified FROM local_sync_files WHERE collection_hash = ? LIMIT 1000`, hash)
 	if err != nil {
 		return nil, err
 	}

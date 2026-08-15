@@ -32,10 +32,11 @@ func InsertPin(cid, hash, filename string, size int64) error {
 }
 
 // ListPins returns all pinned CIDs, most recently pinned first.
+// M11：无 LIMIT → 大量 pin 时全表物化；pin 数无业务上限，加 LIMIT 兜底。
 func ListPins() ([]IPFSPin, error) {
 	rows, err := DB.Query(
 		`SELECT cid, hash, size, filename, pinned_at
-		 FROM ipfs_pins ORDER BY pinned_at DESC`,
+		 FROM ipfs_pins ORDER BY pinned_at DESC LIMIT 1000`,
 	)
 	if err != nil {
 		return nil, err

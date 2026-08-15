@@ -33,6 +33,17 @@ type DownloadProgress struct {
 	PeersUsed    []string `json:"peers_used"`
 	StartedAt    string   `json:"started_at"`
 	UpdatedAt    string   `json:"updated_at"`
+
+	// M1：downloadChunks 多 goroutine 并发写 ReceivedSize/ChunksDone/LastChunk/PeersUsed，
+	// 而 saveProgress/GetProgress 同时读——-race 必炸。所有字段写操作经 Update() 加锁。
+	mu sync.Mutex
+}
+
+// Update 持锁执行 mutate：多 chunk worker 并发推进进度时保证原子。
+func (p *DownloadProgress) Update(mutate func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	mutate()
 }
 
 // ResumeManager handles resume-able downloads with SQLite-backed progress tracking.
@@ -234,16 +245,20 @@ func (rm *ResumeManager) saveProgress(p *DownloadProgress) {
 	if repository.DB == nil {
 		return
 	}
-	p.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	if p.StartedAt == "" {
-		p.StartedAt = p.UpdatedAt
-	}
-	peersStr := strings.Join(p.PeersUsed, ",")
-	repository.DB.Exec(`INSERT OR REPLACE INTO download_progress
-		(hash, total_size, received_size, last_chunk, chunks_total, chunks_done, peers_used, started_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.Hash, p.TotalSize, p.ReceivedSize, p.LastChunk,
-		p.ChunksTotal, p.ChunksDone, peersStr, p.StartedAt, p.UpdatedAt)
+	// M1：downloadChunks 并发 worker 各自调 saveProgress，字段读取需持锁
+	//（Update 锁内完成 DB 写，避免把 JSON 字段读到一半）
+	p.Update(func() {
+		p.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		if p.StartedAt == "" {
+			p.StartedAt = p.UpdatedAt
+		}
+		peersStr := strings.Join(p.PeersUsed, ",")
+		repository.DB.Exec(`INSERT OR REPLACE INTO download_progress
+			(hash, total_size, received_size, last_chunk, chunks_total, chunks_done, peers_used, started_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.Hash, p.TotalSize, p.ReceivedSize, p.LastChunk,
+			p.ChunksTotal, p.ChunksDone, peersStr, p.StartedAt, p.UpdatedAt)
+	})
 }
 
 func (rm *ResumeManager) removeProgress(hash string) {
@@ -344,7 +359,15 @@ func (rm *ResumeManager) downloadChunks(ctx context.Context, file *os.File, hash
 					if rm.p2p != nil && rm.p2p.IsEnabled() && pi.ID != "" {
 						chunkData, lastErr = rm.p2p.Transfer.requestChunk(ctx, pi.ID, hash, offset, size)
 						if lastErr == nil {
-							progress.PeersUsed = append(progress.PeersUsed, pi.ID.String())
+							// M1：PeersUsed 多 worker 并发 append 需持锁
+							progress.Update(func() {
+								for _, used := range progress.PeersUsed {
+									if used == pi.ID.String() {
+										return
+									}
+								}
+								progress.PeersUsed = append(progress.PeersUsed, pi.ID.String())
+							})
 							break
 						}
 					}
@@ -357,9 +380,11 @@ func (rm *ResumeManager) downloadChunks(ctx context.Context, file *os.File, hash
 					errCh <- fmt.Errorf("write chunk %d: %w", chunkIdx, err)
 					return
 				}
-				progress.ReceivedSize += int64(size)
-				progress.ChunksDone++
-				progress.LastChunk = chunkIdx
+				progress.Update(func() {
+					progress.ReceivedSize += int64(size)
+					progress.ChunksDone++
+					progress.LastChunk = chunkIdx
+				})
 				rm.saveProgress(progress)
 				log.LogDebug("p2p-resume: chunk %d done (offset=%d)", chunkIdx, offset)
 			}
@@ -430,5 +455,13 @@ func (rm *ResumeManager) fetchChunkBT(ctx context.Context, addr, hash string, of
 	if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	// M4：同多源下载器——LimitReader 限到请求范围+1 字节，超限报错防无界读。
+	data, err := io.ReadAll(io.LimitReader(resp.Body, int64(size)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > size {
+		return nil, fmt.Errorf("BT chunk from %s too large: expected %d bytes, got %d", addr, size, len(data))
+	}
+	return data, nil
 }

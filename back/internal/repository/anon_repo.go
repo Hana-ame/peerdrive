@@ -86,12 +86,14 @@ func GetAnonCollectionByHash(hash, storageDir string) (*model.AnonCollection, er
 }
 
 // ListAnonCollections 返回所有已注册的匿名集合摘要（含名称预览和标签），按创建时间倒序。
+// M11：无 LIMIT → 千级集合时全表物化 + 每行 os.ReadFile（文件 IO × N）。
+// 前端只展示最近集合，1000 条上限足够。
 func ListAnonCollections(storageDir string) ([]model.AnonCollectionSummary, error) {
 	if storageDir == "" {
 		storageDir = anonStorageDir
 	}
 	rows, err := DB.Query(
-		`SELECT hash, created_at FROM file_meta WHERE type = ? ORDER BY created_at DESC`,
+		`SELECT hash, created_at FROM file_meta WHERE type = ? ORDER BY created_at DESC LIMIT 1000`,
 		FileTypeAnonCollection,
 	)
 	if err != nil {

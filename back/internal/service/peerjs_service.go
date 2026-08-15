@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/Hana-ame/go-peerjs"
 	"peerdrive/internal/config"
 	"peerdrive/internal/log"
+	hashutil "peerdrive/pkg/hashutil"
 )
 
 // chunkSize DataChannel 单块传输大小（pion SCTP 单消息上限约 256KB，64KB 兼顾流控粒度）。
@@ -633,6 +635,9 @@ func (s *PeerJSService) FetchFromPeer(peerID, hash string, offset, size int64) (
 }
 
 // requestFile 发送 req 帧并收集 meta/data/done 直到完成。
+// H5：返回前校验内容 sha256 == 请求 hash（全量请求时）。恶意/被攻破对端
+// 对任意 hash 回任意字节会被当作内容寻址文件——下载器校验也只到字节数，
+// 这里做内容寻址的完整性兜底。range 请求只返回一段，无法校验全文件，跳过。
 func (s *PeerJSService) requestFile(c Session, hash string, offset, size int64) ([]byte, error) {
 	// 指令 UUID：reqId 是响应路由键，UUID v4 保证跨连接唯一（randHex8 仅 32bit，并发高时可能碰撞）
 	reqID := uuid.NewString()
@@ -660,6 +665,11 @@ func (s *PeerJSService) requestFile(c Session, hash string, offset, size int64) 
 
 	select {
 	case data := <-f.done:
+		// H5：全量请求（offset==0 且 size<0 表示整文件）→ 校验 sha256 与请求 hash 一致。
+		// 不一致说明对端返回了错误内容（恶意或被攻破），拒绝使用它冒充内容寻址文件。
+		if offset == 0 && size < 0 && !hashMatchesSHA256(hash, data) {
+			return nil, fmt.Errorf("peerjs: content hash mismatch for %s", hash)
+		}
 		return data, nil
 	case err := <-f.errCh:
 		return nil, err
@@ -668,6 +678,17 @@ func (s *PeerJSService) requestFile(c Session, hash string, offset, size int64) 
 	case <-s.ctx.Done():
 		return nil, s.ctx.Err()
 	}
+}
+
+// hashMatchesSHA256 校验 data 的 sha256 是否等于期望哈希。
+// 注意：hash 是用户输入，必须确保本身是合法 64 位 hex（否则比较恒失败）；
+// 调用方（FetchFromPeer 入口）已保证，防御性再判一次。
+func hashMatchesSHA256(hash string, data []byte) bool {
+	if len(data) == 0 || len(hash) != 64 || !hashutil.IsValidSHA256(hash) {
+		return false
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]) == hash
 }
 
 func (s *PeerJSService) stateFor(c Session) *connState {

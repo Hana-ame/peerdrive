@@ -6,6 +6,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
+	hashutil "peerdrive/pkg/hashutil"
+
 	"peerdrive/internal/config"
 	"peerdrive/internal/service"
 )
@@ -29,7 +31,10 @@ func SetPeerJSConfig(cfg *config.Config) {
 // registerPeerJSRoutes 注册 PeerJS 节点发现与互联路由。
 // 背景：peerjsService 由 main 在 SetupRouter 之前注入（包级变量，与
 // SetRegServer 同模式）；发现端点供前端/MQTT 房间解析节点 ID。
-func registerPeerJSRoutes(r *gin.Engine) {
+// auth 参数：SetupRouter 的 authRequired（无注册服务器时放行的认证中间件），
+// 用于保护写/拉取端点（F1/H4）。发现与本地 WS 会话保持匿名（/ws/peer 起帧协议，
+// 拉取经 req 帧 peerjs 层自行校验）。
+func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 	if peerjsService == nil {
 		return
 	}
@@ -47,7 +52,10 @@ func registerPeerJSRoutes(r *gin.Engine) {
 	})
 
 	// POST /peerjs/fetch {peer, hash, offset?, size?} 从对端节点拉取 sha256 内容
-	r.POST("/peerjs/fetch", func(c *gin.Context) {
+	// H4：此端点把整个响应 buffer 驻留内存（service 内 8GB cap 只防溢出，不防慢读客户端
+	// 长时间持有内存）。收紧：挂认证 + 单次拉取上限 64MB；超大文件应走 /ws/peer 分片。
+	// 前端未使用此端点（集成测试直接调 service.FetchFromPeer），收紧无兼容影响。
+	r.POST("/peerjs/fetch", auth, func(c *gin.Context) {
 		var body struct {
 			Peer   string `json:"peer"`
 			Hash   string `json:"hash"`
@@ -58,12 +66,26 @@ func registerPeerJSRoutes(r *gin.Engine) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "peer and hash required"})
 			return
 		}
-		if body.Size == 0 {
-			body.Size = -1
+		const maxPeerjsHTTPFetch = 64 << 20
+		if body.Size <= 0 {
+			body.Size = -1 // 全文件 → 由 service 侧 cap，但 HTTP 端点还要再限一次
+		}
+		if body.Size > maxPeerjsHTTPFetch {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "requested size exceeds 64MB limit; use /ws/peer chunked transfer"})
+			return
+		}
+		if !hashutil.IsValidSHA256(body.Hash) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256 hash"})
+			return
 		}
 		data, err := peerjsService.FetchFromPeer(body.Peer, body.Hash, body.Offset, body.Size)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		// 防御：对端声明的文件比请求 size 大时 service 已拒绝；这里兜底防内存超限
+		if int64(len(data)) > maxPeerjsHTTPFetch {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "peer returned oversized data"})
 			return
 		}
 		c.Data(http.StatusOK, "application/octet-stream", data)

@@ -33,6 +33,12 @@ type ConnectionManager struct {
 	heartbeatCtx context.Context
 	heartbeatCan context.CancelFunc
 
+	// L3：重连指数退避状态——peer 宕机时若每心跳都立即重连，会持续占用
+	// 连接 goroutine 与带宽（connect 超时 15s × 断线 peer 数 × 每 30s 一次）。
+	// per-peer 记录 lastAttempt + 连续失败次数：失败次数翻倍间隔，成功即重置。
+	reconnectLast map[peer.ID]time.Time
+	reconnectFail map[peer.ID]int
+
 	// Stats
 	reconnectAttempts int64
 	successfulConns   int64
@@ -59,6 +65,8 @@ func NewConnectionManager(svc *P2PService) *ConnectionManager {
 		knownPeers:        make(map[peer.ID]peer.AddrInfo),
 		heartbeatCtx:      ctx,
 		heartbeatCan:      cancel,
+		reconnectLast:     make(map[peer.ID]time.Time),
+		reconnectFail:     make(map[peer.ID]int),
 		latencyHistory:    make(map[peer.ID][]time.Duration),
 		maxLatencySamples: maxLatencySamples,
 	}
@@ -166,25 +174,45 @@ func (cm *ConnectionManager) checkAndReconnect() {
 	for _, info := range cm.knownPeers {
 		peers = append(peers, info)
 	}
+	now := time.Now()
+	// L3：每一心跳周期只重连「退避窗口已到」的 peer（首次立即，之后 10s→20s→…→5min 封顶）
+	due := make([]peer.AddrInfo, 0, len(peers))
+	for _, info := range peers {
+		last, hasLast := cm.reconnectLast[info.ID]
+		if !hasLast {
+			due = append(due, info)
+			continue
+		}
+		backoff := reconnectInterval << min(cm.reconnectFail[info.ID], 4) // 10s<<4=160s 附近封顶波动
+		if backoff > maxReconnectBackoff {
+			backoff = maxReconnectBackoff
+		}
+		if now.Sub(last) >= backoff {
+			due = append(due, info)
+		}
+	}
 	cm.mu.Unlock()
 
-	for _, info := range peers {
+	for _, info := range due {
 		connState := cm.svc.Host.Network().Connectedness(info.ID)
 		if connState != network.Connected {
 			log.LogWarn("p2p-conn: reconnecting to peer: %s", info.ID)
 			ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
-			if err := cm.svc.Host.Connect(ctx, info); err != nil {
-				cm.mu.Lock()
+			err := cm.svc.Host.Connect(ctx, info)
+			cancel()
+			cm.mu.Lock()
+			cm.reconnectLast[info.ID] = time.Now()
+			if err != nil {
 				cm.reconnectAttempts++
-				cm.mu.Unlock()
+				cm.reconnectFail[info.ID]++
 				log.LogWarn("p2p-conn: reconnect failed to %s: %v", info.ID, err)
 			} else {
-				cm.mu.Lock()
 				cm.successfulConns++
-				cm.mu.Unlock()
+				// 重连成功：重置退避，下次断线立即重连
+				delete(cm.reconnectFail, info.ID)
 				log.LogInfo("p2p-conn: reconnect successful to %s", info.ID)
 			}
-			cancel()
+			cm.mu.Unlock()
 		}
 	}
 }

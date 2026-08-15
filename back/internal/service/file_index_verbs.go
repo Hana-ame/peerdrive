@@ -114,12 +114,14 @@ func (s *PeerJSService) serveInfo(c Session, r dcResp) {
 
 // serveDelete 处理 delete：逻辑删除映射（同步用 tombstone）。
 // 请求 {type:"delete", hash} → 响应 {type:"deleted", hash, seq}
+// L6：响应补 seq（REFACTOR §4 协议要求 deleted{hash,seq}），对端 sync 游标跟踪删除。
 func (s *PeerJSService) serveDelete(c Session, r dcResp) {
-	if err := s.fileIndex.Delete(r.Hash); err != nil {
+	seq, err := s.fileIndex.Delete(r.Hash)
+	if err != nil {
 		_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})
 		return
 	}
-	_ = c.SendJSON(dcResp{Type: "deleted", Hash: r.Hash, ReqID: r.ReqID})
+	_ = c.SendJSON(dcResp{Type: "deleted", Hash: r.Hash, Seq: seq, ReqID: r.ReqID})
 }
 
 // serveSync 处理 sync：metadata 增量同步（seq 游标之后的所有变更含 tombstone）。

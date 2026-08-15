@@ -150,7 +150,7 @@ func (s *SyncService) filterFiles(entries []model.AnonCollectionEntry, include, 
 	}
 	return result
 }
-
+// isExcluded 检查路径是否匹配任一排除模式。
 func (s *SyncService) isExcluded(path string, exclude []string) bool {
 	for _, pattern := range exclude {
 		if s.matchPattern(path, pattern) {
@@ -160,6 +160,7 @@ func (s *SyncService) isExcluded(path string, exclude []string) bool {
 	return false
 }
 
+// isIncluded 检查路径是否匹配任一包含模式。
 func (s *SyncService) isIncluded(path string, include []string) bool {
 	for _, pattern := range include {
 		if s.matchPattern(path, pattern) {
@@ -169,6 +170,11 @@ func (s *SyncService) isIncluded(path string, include []string) bool {
 	return false
 }
 
+// matchPattern 判断 path 是否匹配 pattern（shell 风格 + 目录前缀 + 子串回退）。
+// L2：原 fallback strings.Contains 无路径边界——排除 "tmp/foo" 会把
+// "tmp/foobar" 也排除（用户想排除单个目录却误伤相邻文件）。
+// 子串回退加边界：要么 pattern 以 "/" 结尾（明确想匹配整个目录前缀），
+// 要么子串前后必须是路径分隔符或文件边界。
 func (s *SyncService) matchPattern(path, pattern string) bool {
 	if pattern == "*" {
 		return true
@@ -185,6 +191,17 @@ func (s *SyncService) matchPattern(path, pattern string) bool {
 			return true
 		}
 	}
-	// Fallback to simple contains if not a formal pattern
-	return strings.Contains(path, pattern)
+	// Fallback：子串匹配必须有路径边界（pattern 以 / 结尾 = 目录前缀；
+	// 否则前后边界必须是 '/' 或字符串端），防止 /tmp/foo 误匹配 /tmp/foobar
+	if strings.HasSuffix(pattern, "/") {
+		return strings.HasPrefix(path, pattern)
+	}
+	idx := strings.Index(path, pattern)
+	if idx < 0 {
+		return false
+	}
+	leftOK := idx == 0 || path[idx-1] == '/'
+	right := idx + len(pattern)
+	rightOK := right >= len(path) || path[right] == '/'
+	return leftOK && rightOK
 }

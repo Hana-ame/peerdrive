@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"peerdrive/internal/log"
@@ -44,6 +45,8 @@ type NodeRegistrar struct {
 	peerID    string
 	addrs     []string
 	username  string
+	stop      chan struct{} // L5:心跳 goroutine 停止信号
+	stopOnce  sync.Once
 }
 
 // NewNodeRegistrar 创建节点注册器。如果 regURL 或 authToken 为空，返回 nil。
@@ -60,6 +63,7 @@ func NewNodeRegistrar(p2pSvc *P2PService, regURL, authToken, version string) *No
 		client:    localHTTPClient(),
 		peerID:    id.String(),
 		addrs:     addrs,
+		stop:      make(chan struct{}),
 	}
 }
 
@@ -85,12 +89,22 @@ func (r *NodeRegistrar) Start() {
 	go func() {
 		ticker := time.NewTicker(120 * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			if r.peerID != "" {
-				r.heartbeat()
+		for {
+			select {
+			case <-r.stop:
+				return
+			case <-ticker.C:
+				if r.peerID != "" {
+					r.heartbeat()
+				}
 			}
 		}
 	}()
+}
+
+// Stop 停止心跳 goroutine（L5：原实现无停止机制，进程关闭时泄漏 goroutine）。
+func (r *NodeRegistrar) Stop() {
+	r.stopOnce.Do(func() { close(r.stop) })
 }
 
 func (r *NodeRegistrar) whoami() (string, error) {

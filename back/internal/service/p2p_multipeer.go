@@ -275,11 +275,15 @@ func (md *MultiPeerDownloader) MultiPeerDownload(ctx context.Context, hash, targ
 		return "", fmt.Errorf("hash mismatch for %s", hash)
 	}
 
+	// M13：完成段更新必须持锁——worker 内的 progress 写都有 md.mu 保护，
+	// 这里若不加锁，GetProgress 并发 RLock 读会读到半更新状态（-race 报错）。
+	md.mu.Lock()
 	progress.Done = true
 	progress.Received = totalSize
 	progress.ChunksDone = int32(chunksTotal)
 	progress.Percent = 100
 	progress.Elapsed = time.Since(progress.startTime).Round(time.Second).String()
+	md.mu.Unlock()
 	log.LogInfo("p2p-multipeer: %s completed (%d bytes from %d sources)", hash, totalSize, len(sources))
 	return targetPath, nil
 }
@@ -386,7 +390,16 @@ func (md *MultiPeerDownloader) fetchBTChunk(ctx context.Context, source MultiPee
 	if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	// M4：远端返回的 body 无界 → LimitReader 限到请求范围+1 字节，
+	// 超限说明对端响应异常（Range 被忽略返回全文件 / 恶意超大包），直接报错。
+	data, err := io.ReadAll(io.LimitReader(resp.Body, int64(size)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > size {
+		return nil, fmt.Errorf("BT chunk from %s too large: expected %d bytes, got %d", source.Address, size, len(data))
+	}
+	return data, nil
 }
 
 func (md *MultiPeerDownloader) singleFallback(ctx context.Context, hash, targetPath string) (string, error) {

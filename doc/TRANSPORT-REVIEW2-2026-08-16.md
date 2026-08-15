@@ -138,3 +138,34 @@
 2. **H1** (`hash[:2]` panic) — 复用 `isValidHash`, 覆盖所有 anon/p2p sync 入口。
 3. **H2** (Bitswap varint OOM)、**H3** (信令队列无界)、**H6** (SQL LIMIT)。
 4. **M 类**竞态/超时/泄漏按 M1 → M15 顺序。
+---
+
+## Round-3 修复记录 (2026-08-16, 全部 F/H/M/L 清零)
+
+用户指令"你继续修，全部 / review and fix all"后，补齐剩余全部高危/中危/低危项。验证：`go build -tags nosqlite ./...` 干净；`go test -tags nosqlite ./internal/service/ ./internal/repository/ ./internal/signalserver/` 全过；`back/peerjs go test -race` 全过。
+
+### F1 认证挂载（本轮完成，非"不修"）
+- `auth_middleware.go`：新增 `authDisabled() == (regServerURL == "")`；`AuthRequired()` 在未配置注册服务器时**透传放行**（本地单机模式），配置后强制 Bearer，行为由部署决定。
+- `router.go`：`authRequired` 挂到全部 mutating/admin 路由（`/download/:hash/refresh`、p2p/bt/ipfs 变更操作、collections 全部写操作、anon POST、files 全部写操作、/local/save、/actions、/shares POST+GET、**WebDAV `/webdav/*`（M12）**）。读接口（GET/download、anon GET、/files GET、WS/信令）保持公开——前端 `getAuthToken()` 的 token 来源（URL fragment / legacy authkey toggle）与 Bearer 头兼容。
+- **前端不需要改动**：token 存在即自动带。
+
+### 本轮修复明细
+| 项 | 修复 |
+|---|---|
+| M10 | `UpsertFileIndex` MAX+1 与 INSERT 合并进同一事务（防并发 seq 重复）；删除 `nextFileIndexSeq` |
+| M11 | 全部无 LIMIT 列表查询加限：anon 1000（每行读文件）、collections 1000、搜索 100、entries/version_entries 10000、versions 1000、files 1000、pins 1000、sync_files 1000 |
+| M14 | `peerdriveBlockstore.Get` 先 stat，超 `maxIPFSBlockSize`(8GB) 拒绝，再 ReadFile |
+| M15 | mqtt `onMessage` payload ≤64KB + peerID ≤128；http `discover` 响应 `io.LimitReader(256KB)` + peerID ≤128；signalserver 部分上一轮已做（read limit + announce cap） |
+| L1 | Register 拒绝 >72 字节密码（bcrypt 截断熵损失） |
+| L2 | `matchPattern` fallback 子串匹配加路径边界（`/` 结尾=目录前缀；否则边界须为 `/` 或字符串端），`/tmp/foo` 不再误匹配 `/tmp/foobar` |
+| L3 | `checkAndReconnect` per-peer 指数退避：10s→20s→…→160s 封顶 5min，成功重置（常量此前从未被使用） |
+| L4 | `register` 返回被顶替的旧连接并主动关闭；`unregister(peerID, pc)` 带身份凭据，仅当 map 仍指向自己才清理——旧连接迟到断开不再误删新连接 |
+| L5 | `NodeRegistrar` / `RelayRegistry` 加 `stop chan` + `Stop()`（sync.Once），`cmd/server/main.go` defer 调用 |
+| L6 | `FileIndexService.Delete` 返回 seq；`serveDelete` 响应带 `seq`（协议要求 `deleted{hash,seq}`）；测试同步更新 |
+| L7 | `share_repo.go` 两处 `*any` 改 `sql.NullTime`（driver 返回类型不定导致 ExpiresAt 静默为空的坑） |
+| L8 | CORS：非白名单 Origin 不再给 `Allow-Origin: *`+credentials；仅白名单回显 origin+Vary；无 Origin 不设 CORS 头（同源不需要） |
+| L9 | 7 条 ALTER 迁移收敛到 `migrationExec`：duplicate column 记 debug（幂等预期），其他错误记 warn 留痕 |
+
+### 遗留
+- M6（signalserver token 不校验）：peerjs 协议 token 由客户端生成、无服务器侧验证手段，维持现状（上一轮已以读限/announce cap 缓解）。
+- 全部 M/L 清单清零；前端 26/26 用例 + vite build（上一轮）未受影响。

@@ -98,9 +98,15 @@ func (d *MQTTDiscovery) Start(collections []string) {
 }
 
 // onMessage 收到对端 announce 后回调 onPeer。
+// M15：公共 broker 上任何人都能发任意 payload——限制 payload 大小（64KB）
+// 与 peerID 长度（128），防异常大消息/超长 id 打爆内存或污染互联状态。
 func (d *MQTTDiscovery) onMessage(_ mqtt.Client, msg mqtt.Message) {
+	raw := msg.Payload()
+	if len(raw) > 64<<10 {
+		return
+	}
 	var a announceMsg
-	if err := json.Unmarshal(msg.Payload(), &a); err != nil || a.PeerID == "" {
+	if err := json.Unmarshal(raw, &a); err != nil || a.PeerID == "" || len(a.PeerID) > 128 {
 		return
 	}
 	// 迟到 announce（peer id 未知归属集合）也上报，由调用方去重

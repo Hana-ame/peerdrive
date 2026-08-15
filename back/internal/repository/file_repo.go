@@ -115,7 +115,8 @@ func ListAllFiles(sortBy string) ([]model.FileListItem, error) {
 		LEFT JOIN file_providers p ON p.hash = m.hash AND p.available = 1
 		WHERE m.type = 'blob'
 		GROUP BY m.hash
-		ORDER BY ` + orderCol + ` DESC`
+		ORDER BY ` + orderCol + ` DESC
+		LIMIT 1000` // M11：无 LIMIT 全表物化 → 文件多时内存 DoS（前端分页未实现）
 
 	rows, err := DB.Query(query)
 	if err != nil {

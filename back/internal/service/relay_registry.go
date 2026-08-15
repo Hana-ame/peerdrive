@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"sync"
 	"time"
 
 	"peerdrive/internal/log"
@@ -33,6 +34,8 @@ type RelayRegistry struct {
 	client    *http.Client
 	peerID    string
 	addrs     []string
+	stop      chan struct{} // L5:心跳 goroutine 停止信号
+	stopOnce  sync.Once
 }
 
 // NewRelayRegistry 创建中继注册器实例，P2P 未启用时注册器为空操作。
@@ -46,6 +49,7 @@ func NewRelayRegistry(p2pSvc *P2PService, regURL string, storageMB int, version 
 		client:    &http.Client{Timeout: 30 * time.Second},
 		peerID:    id.String(),
 		addrs:     addrs,
+		stop:      make(chan struct{}),
 	}
 }
 
@@ -61,10 +65,20 @@ func (r *RelayRegistry) Start() {
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			r.heartbeat()
+		for {
+			select {
+			case <-r.stop:
+				return
+			case <-ticker.C:
+				r.heartbeat()
+			}
 		}
 	}()
+}
+
+// Stop 停止心跳 goroutine（L5：原实现无停止机制，进程关闭时泄漏 goroutine）。
+func (r *RelayRegistry) Stop() {
+	r.stopOnce.Do(func() { close(r.stop) })
 }
 
 // register sends a POST request to the registration server to register

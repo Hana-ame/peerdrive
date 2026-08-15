@@ -13,7 +13,11 @@ package repository
 
 import (
 	"database/sql"
+	"strings"
+
 	_ "github.com/mattn/go-sqlite3"
+
+	"peerdrive/internal/log"
 )
 
 const (
@@ -140,14 +144,17 @@ func InitDB(dbPath string) error {
 		return err
 	}
 
-	// 迁移：从旧 files 表迁移到新表（忽略错误）
-	DB.Exec(`ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`)
-	DB.Exec(`ALTER TABLE collections ADD COLUMN visibility TEXT DEFAULT 'public'`)
-	DB.Exec(`ALTER TABLE collections ADD COLUMN tags TEXT DEFAULT ''`)
-	DB.Exec(`ALTER TABLE collections ADD COLUMN follow_redirects INTEGER DEFAULT 1`)
-	DB.Exec(`ALTER TABLE file_meta ADD COLUMN cid TEXT DEFAULT ''`)
-	DB.Exec(`ALTER TABLE collection_entries ADD COLUMN providers_json TEXT DEFAULT ''`)
-	DB.Exec(`ALTER TABLE version_entries ADD COLUMN providers_json TEXT DEFAULT ''`)
+	// 迁移：从旧 files 表迁移到新表。
+	// L9：原实现静默忽略所有 ALTER 错误——重复迁移时 duplicate column 是预期
+	// 幂等行为，但真实错误（表缺失、磁盘故障）也被吞掉，迁移失败无从排查。
+	// 现在统一走 migrationExec：duplicate column 仅记 debug，其他错误记 warn。
+	migrationExec(`ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`)
+	migrationExec(`ALTER TABLE collections ADD COLUMN visibility TEXT DEFAULT 'public'`)
+	migrationExec(`ALTER TABLE collections ADD COLUMN tags TEXT DEFAULT ''`)
+	migrationExec(`ALTER TABLE collections ADD COLUMN follow_redirects INTEGER DEFAULT 1`)
+	migrationExec(`ALTER TABLE file_meta ADD COLUMN cid TEXT DEFAULT ''`)
+	migrationExec(`ALTER TABLE collection_entries ADD COLUMN providers_json TEXT DEFAULT ''`)
+	migrationExec(`ALTER TABLE version_entries ADD COLUMN providers_json TEXT DEFAULT ''`)
 	InitShareTable()
 
 	// Migration: create ipfs_pins table for pinned CIDs.
@@ -161,4 +168,16 @@ func InitDB(dbPath string) error {
 	// 文件索引表：sha256 → 绝对路径映射 + 同步游标（独立于旧 file_meta）
 	createFileIndexTable()
 	return nil
+}
+
+// migrationExec 执行幂等迁移语句。duplicate column name 是重跑迁移的预期结果，
+// 只记 debug；其余错误（表缺失、IO 故障等真实问题）记 warn 留痕（L9）。
+func migrationExec(stmt string) {
+	if _, err := DB.Exec(stmt); err != nil {
+		if strings.Contains(err.Error(), "duplicate column") {
+			log.LogDebug("db: migration skipped (already applied): %s", err)
+		} else {
+			log.LogWarn("db: migration failed: %v (stmt: %s)", err, stmt)
+		}
+	}
 }

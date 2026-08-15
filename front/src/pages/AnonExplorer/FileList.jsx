@@ -7,8 +7,9 @@ export default function FileList({ entries, navPath, allCollHashes, searchHash, 
     const files = [];
     const prefix = navPath ? navPath + '/' : '';
     for (const e of entries) {
-      if (e.path.startsWith(prefix)) {
-        const rest = e.path.slice(prefix.length);
+      const p = e.path || '';
+      if (p.startsWith(prefix)) {
+        const rest = p.slice(prefix.length);
         const slash = rest.indexOf('/');
         if (slash === -1) files.push(e);
         else dirs.add(rest.slice(0, slash));

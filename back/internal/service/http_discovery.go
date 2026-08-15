@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -99,13 +100,14 @@ func (d *HTTPDiscovery) discover() {
 				PeerID string `json:"peerId"`
 			} `json:"nodes"`
 		}
-		decErr := json.NewDecoder(resp.Body).Decode(&out)
+		// M15：解码响应限 256KB——被攻破/异常的发现服务器回巨大 JSON 时不整包入内存
+		decErr := json.NewDecoder(io.LimitReader(resp.Body, 256<<10)).Decode(&out)
 		resp.Body.Close()
 		if decErr != nil {
 			continue
 		}
 		for _, n := range out.Nodes {
-			if n.PeerID == "" || n.PeerID == d.peerID {
+			if n.PeerID == "" || n.PeerID == d.peerID || len(n.PeerID) > 128 {
 				continue
 			}
 			d.mu.Lock()

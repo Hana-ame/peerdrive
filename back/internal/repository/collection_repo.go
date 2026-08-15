@@ -113,8 +113,9 @@ func UpdateCurrentHash(collectionID int, hash string) error {
 }
 
 // ListCollections 查询指定用户的所有集合，按创建时间倒序排列。
+// M11：无 LIMIT 全表物化 → LIMIT 1000。
 func ListCollections(username string) ([]model.Collection, error) {
-	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? ORDER BY created_at DESC`, username)
+	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? ORDER BY created_at DESC LIMIT 1000`, username)
 	if err != nil {
 		return nil, err
 	}
@@ -141,8 +142,9 @@ func GetCollection(username, collectionName string) (*model.Collection, error) {
 }
 
 // SearchCollections 在公开集合中按用户名或集合名模糊搜索。
+// M11：LIKE %q% 无 LIMIT → 全表扫描 + 物化；限 100 条结果（搜索场景足够）。
 func SearchCollections(query string) ([]model.Collection, error) {
-	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE (username LIKE ? OR collection_name LIKE ?) AND visibility = 'public' ORDER BY created_at DESC`,
+	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE (username LIKE ? OR collection_name LIKE ?) AND visibility = 'public' ORDER BY created_at DESC LIMIT 100`,
 		"%"+query+"%", "%"+query+"%")
 	if err != nil {
 		return nil, err
@@ -214,8 +216,10 @@ func GetCollectionEntry(collectionID int, path string) (*model.CollectionEntry, 
 }
 
 // ListCollectionEntries 查询集合中的所有条目，包含 providers_json。
+// M11：条目数是集合数据本体，理论上必须全量……但恶意构造大集合会全表物化。
+// 限 10000（正常集合同步批次远小于此；异常大集合走分页重构而非全量爆内存）。
 func ListCollectionEntries(collectionID int) ([]model.CollectionEntry, error) {
-	rows, err := DB.Query(`SELECT id, collection_id, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ?`, collectionID)
+	rows, err := DB.Query(`SELECT id, collection_id, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ? LIMIT 10000`, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -265,8 +269,9 @@ func SnapshotVersionEntries(versionID, collectionID int) error {
 }
 
 // GetVersionLog 返回集合的版本历史，按版本号倒序排列。
+// M11：无 LIMIT → 无限版本历史全表物化；限 1000（历史回滚 UI 展示最近版本即可）。
 func GetVersionLog(collectionID int) ([]model.CollectionVersion, error) {
-	rows, err := DB.Query(`SELECT id, collection_id, version_number, commit_message, created_at, parent_version_id FROM collection_versions WHERE collection_id = ? ORDER BY version_number DESC`, collectionID)
+	rows, err := DB.Query(`SELECT id, collection_id, version_number, commit_message, created_at, parent_version_id FROM collection_versions WHERE collection_id = ? ORDER BY version_number DESC LIMIT 1000`, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -283,8 +288,9 @@ func GetVersionLog(collectionID int) ([]model.CollectionVersion, error) {
 }
 
 // GetVersionEntries 查询指定版本快照中的全部条目列表（含 providers_json）。
+// M11：同 ListCollectionEntries，限 10000。
 func GetVersionEntries(versionID int) ([]model.VersionEntry, error) {
-	rows, err := DB.Query(`SELECT id, version_id, path, file_hash, COALESCE(providers_json, '') FROM version_entries WHERE version_id = ?`, versionID)
+	rows, err := DB.Query(`SELECT id, version_id, path, file_hash, COALESCE(providers_json, '') FROM version_entries WHERE version_id = ? LIMIT 10000`, versionID)
 	if err != nil {
 		return nil, err
 	}

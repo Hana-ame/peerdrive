@@ -39,6 +39,42 @@ type Server struct {
 	disc    map[string]map[string]time.Time // collection → peerId → lastSeen
 }
 
+// 离线队列限制（H3 修复）：每 dst 最多缓存 maxQueuedPerDst 条消息。
+// 坑：原实现无上限——dst 永不连接时队列无限增长（每个恶意客户端可对任意随机 ID
+// 发 OFFER 把服务器内存打爆）。超限丢最旧（信令消息过期即失效，丢旧比丢新合理）。
+const maxQueuedPerDst = 100
+
+// Start 启动后台 sweeper：定期清理已过期队列项与空队列。
+// 背景：过期清理原只在 flushQueue（dst 上线）时做，dst 永不连接则过期消息堆积。
+func (s *Server) Start() {
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			s.sweepQueues()
+		}
+	}()
+}
+
+func (s *Server) sweepQueues() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for dst, q := range s.queues {
+		kept := q[:0]
+		for _, qm := range q {
+			if qm.expire.After(now) && s.clients[dst] == nil {
+				kept = append(kept, qm)
+			}
+		}
+		if len(kept) == 0 {
+			delete(s.queues, dst)
+		} else {
+			s.queues[dst] = kept
+		}
+	}
+}
+
 // client 一条在线信令连接。
 type client struct {
 	id     string
@@ -105,6 +141,10 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	// 读限制：信令消息很小（SDP/ICE 文案），40KB 足够；防恶意客户端塞超大 payload。
+	// 同时设 60s 读超时兜底——readLoop 里靠 HEARTBEAT 刷新，断连客户端不再占资源。
+	conn.SetReadLimit(40 << 10)
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 	s.mu.Lock()
 	// ID 占用：token 匹配则复用连接，否则拒绝
@@ -121,7 +161,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	s.clients[id] = cl
 	s.mu.Unlock()
 
-	_ = conn.WriteJSON(Message{Type: "OPEN"})
+	_ = cl.send(Message{Type: "OPEN"})
 	s.flushQueue(cl)
 
 	go s.readLoop(cl)
@@ -131,7 +171,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 func (s *Server) readLoop(cl *client) {
 	defer func() {
 		s.removeClient(cl)
-		_ = cl.conn.Close()
+		cl.closeConn()
 	}()
 	for {
 		var m Message
@@ -141,6 +181,8 @@ func (s *Server) readLoop(cl *client) {
 		m.Src = cl.id // 服务端覆盖 src
 		s.mu.Lock()
 		cl.last = time.Now()
+		// 收到消息即视为活跃，续读超时（配合 HandleWS 的 SetReadDeadline）
+		_ = cl.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		s.mu.Unlock()
 		s.route(m)
 	}
@@ -162,7 +204,12 @@ func (s *Server) route(m Message) {
 		return
 	}
 	// 入队：目标上线后补发（OFFER/ANSWER/CANDIDATE）
-	s.queues[m.Dst] = append(s.queues[m.Dst], queuedMsg{msg: m, expire: time.Now().Add(s.queueTTL)})
+	// H3：队列无上限 → OOM。超 maxQueuedPerDst 丢最旧。
+	q := append(s.queues[m.Dst], queuedMsg{msg: m, expire: time.Now().Add(s.queueTTL)})
+	if len(q) > maxQueuedPerDst {
+		q = q[len(q)-maxQueuedPerDst:]
+	}
+	s.queues[m.Dst] = q
 }
 
 // flushQueue 客户端上线后补发离线队列（含过期清理）。
@@ -206,13 +253,21 @@ func (s *Server) removeClient(cl *client) {
 
 // HandleAnnounce POST /discover/announce {peerId, collections[]} 节点登记房间。
 // 与信令连接解耦（节点可通过任意 HTTP 入口上报），lastSeen 由心跳刷新。
+// M15：无界 decode 风险——限制 body 大小（1KB 足够：peerId + 少量 collection hash）
+// 与 collection 数量（单节点关注房间数有限）。
 func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<10)
 	var body struct {
 		PeerID      string   `json:"peerId"`
 		Collections []string `json:"collections"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.PeerID == "" {
 		http.Error(w, "peerId required", http.StatusBadRequest)
+		return
+	}
+	const maxCollectionsPerAnnounce = 64
+	if len(body.Collections) > maxCollectionsPerAnnounce {
+		http.Error(w, "too many collections", http.StatusBadRequest)
 		return
 	}
 	now := time.Now()

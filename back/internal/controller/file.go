@@ -19,7 +19,6 @@ import (
 	"errors"
 	"net/http"
 
-	"peerdrive/internal/config"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
@@ -345,8 +344,8 @@ func ListFiles(c *gin.Context) {
 func BrowseDir(c *gin.Context) {
 	log.LogDebug("ctrl-file: BrowseDir")
 	dirPath := c.Query("path")
-	if dirPath == "" {
-		dirPath = config.DefaultRootPath()
+	if dirPath == "" || dirPath == "/" {
+		dirPath = "." // 空路径和 "/" 都表示 storage 根目录，而不是系统 /（安全边界外）
 	}
 
 	entries, err := fileSvc.BrowseDir(dirPath)

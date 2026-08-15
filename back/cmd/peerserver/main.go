@@ -20,6 +20,7 @@ func main() {
 	flag.Parse()
 
 	srv := signalserver.NewServer(*key)
+	srv.Start() // 后台 sweeper：清理过期离线队列（H3）
 
 	mux := http.NewServeMux()
 	// PeerJS 兼容信令端点

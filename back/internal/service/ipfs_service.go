@@ -28,6 +28,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
+// maxIPFSBlockSize blockstore 单 block 读取上限（M14 修复）：与全站上传上限一致。
+const maxIPFSBlockSize = 8 * 1024 * 1024 * 1024
+
 // IPFSService 管理 IPFS Bitswap 客户端、服务端、DHT 提供/查询。
 type IPFSService struct {
 	host       host.Host
@@ -256,6 +259,17 @@ func (bs *peerdriveBlockstore) Get(ctx context.Context, c cid.Cid) (blocks.Block
 	p := bs.cidToPath(c)
 	if p == "" {
 		return nil, fmt.Errorf("unsupported CID hash type: %v", c)
+	}
+	// M14：os.ReadFile 整文件驻留内存——超大文件（数十 GB）被远端 CID 请求
+	// 时内存直接爆。blockstore 语义本就不适合大 block：加 8GB 上限（与全站一致），
+	// 超限拒绝（bitswap 规范 MaxBlockSize 更小，但 peerdrive 一文件一 block 的
+	// 用法允许大 block；保 8GB 与上传上限对齐）。
+	info, err := os.Stat(p)
+	if err != nil {
+		return nil, fmt.Errorf("block not found: %s", c)
+	}
+	if info.Size() > maxIPFSBlockSize {
+		return nil, fmt.Errorf("block %s exceeds size limit %d", c, maxIPFSBlockSize)
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
