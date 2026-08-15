@@ -220,6 +220,19 @@ internal/
 
 迁移顺序：M0 依赖规则文档 → M1 legacy 隔离 → M2 收 controller 越层依赖 → M3 拆 transport → M4 provider 落地。
 
+
+### §8 依赖规则（M0，2026-08-16 立）
+
+硬性规则（代码评审 + 文档双通道执行）：
+1. **禁止 import `internal/legacy`、`internal/p2p_bt`（除 legacy 包自身与 cmd/test 入口）**。
+   legacy 只出不进：新功能缺失依赖时，在 service/transport 侧抽象，不反向依赖旧栈。
+2. 包层级单向：`model ← repository ← provider ← service ← controller ← router ← cmd`，
+   `transport` 与 `provider` 同级（可被 service/controller 引用，不反向）。
+3. `service` 包内不直接 import `transport`；跨层一律经 controller 装配注入。
+4. 准出条件：所有新包测试通过；`go build -tags nosqlite ./...` 全绿。
+5. legacy 存量引用（file_service/sync_service/controller-p2p/router/main）为过渡期残留，
+   目标随旧栈删除（webdav/forward/p2p 端点）清零；删除决策见 LEGACY.md。
+
 **迁移状态（2026-08-16）**：M2 ✅ 完成 · M3 ✅ 完成 · M4 ✅（provider 已落地）· M1 ✅ 完成（p2p_bt 拆独立库另计）。
 
 M1 legacy 隔离要点（本次完成，internal/legacy/ 落地）：
