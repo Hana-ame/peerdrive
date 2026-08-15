@@ -7,6 +7,8 @@ import CollFileRow from './CollFileRow';
 // mime 在 providers[].mime_type 里（back model/anon.go）。这里统一派生，避免调用方读到 undefined。
 const entryMime = (e) => e.mime_type || e.providers?.[0]?.mime_type || '';
 const entrySize = (e) => e.size || 0;
+// 匿名条目可能只有 URL provider；加进编辑器时优先用 sha256，否则用第一个 url。
+const entryHashOrUrl = (e) => e.hash || e.providers?.find(p => p.type === 'sha256')?.value || e.providers?.find(p => p.type === 'url')?.value || '';
 
 export default function CollBrowser({ coll, collViewPath, selectMode, selectedFiles, onLeave, onPathNav, onNavIntoDir, onSaveToNode, onSelectToggle, onToggleFileSelect, onBatchSaveFiles, onFileAdd, onFileSelect }) {
   const currentCollView = useMemo(() => {
@@ -29,7 +31,7 @@ export default function CollBrowser({ coll, collViewPath, selectMode, selectedFi
   }, [coll, collViewPath]);
 
   const makeSelectPayload = (entry) => ({
-    hash: entry.hash || entry.providers?.[0]?.value || '',
+    hash: entry.hash || entry.providers?.find(p => p.type === 'sha256')?.value || '',
     path: entry.path || '',
     filename: (entry.path || '').split('/').pop() || 'file',
     mime_type: entryMime(entry),
@@ -50,7 +52,7 @@ export default function CollBrowser({ coll, collViewPath, selectMode, selectedFi
               coll.entries?.map(e => (
                 <CollFileRow key={e.path} entry={e} selectMode={selectMode}
                   isSelected={selectedFiles.has(e.path)}
-                  onClick={(entry) => { onFileAdd(entry.hash || entry.providers?.[0]?.value, entry.path, entryMime(entry), entrySize(entry)); }}
+                  onClick={(entry) => { onFileAdd(entryHashOrUrl(entry), entry.path, entryMime(entry), entrySize(entry)); }}
                   onToggleSelect={onToggleFileSelect}
                   onSelect={(entry) => onFileSelect?.(makeSelectPayload(entry))} />
               ))
@@ -69,7 +71,7 @@ export default function CollBrowser({ coll, collViewPath, selectMode, selectedFi
             {currentCollView.files.map(e => (
               <CollFileRow key={e.path} entry={e} selectMode={selectMode}
                 isSelected={selectedFiles.has(e.path)}
-                onClick={(entry) => { onFileAdd(entry.hash || entry.providers?.[0]?.value, entry.path, entryMime(entry), entrySize(entry)); }}
+                onClick={(entry) => { onFileAdd(entryHashOrUrl(entry), entry.path, entryMime(entry), entrySize(entry)); }}
                 onToggleSelect={onToggleFileSelect}
                 onSelect={(entry) => onFileSelect?.(makeSelectPayload(entry))} />
             ))}

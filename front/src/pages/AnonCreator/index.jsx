@@ -204,13 +204,17 @@ export default function AnonCreator() {
   const addEntry = (hash, path, mime_type, size) => {
     // 坑：旧实现有 500ms lastClick 防抖，handleSysAddFolder/拖拽等程序化批量 add 会被静默丢弃
     //（walkDir 不重试，加了 N 个但实际只进 1-2 个）。改为在 reducer 内按 path+hash 去重，去掉时间闸。
-    const providers = hash ? [{ type: "sha256", value: hash, mime_type: mime_type || '' }] : [];
+    // 坑：合集条目可能只有 URL provider（没有 sha256）。旧实现把 CollBrowser 传进来的
+    // providers[0].value 一律当成 sha256，URL-only 条目会生成非法 64 位 hash 被后端拒绝。
+    // 这里按形态识别 URL，存成 url provider。
+    const isUrl = typeof hash === 'string' && /^https?:\/\//i.test(hash);
+    const providers = hash ? [{ type: isUrl ? 'url' : 'sha256', value: hash, mime_type: mime_type || '' }] : [];
     setEntries(prev => {
       const dup = prev.some(e =>
         e.path === path && (e.hash || e.providers?.[0]?.value) === hash
       );
       if (dup) return prev;
-      return [...prev, { hash, path, providers, mime_type, size }];
+      return [...prev, { hash: isUrl ? '' : hash, path, providers, mime_type, size }];
     });
   };
   const removeEntry = (entry) => {

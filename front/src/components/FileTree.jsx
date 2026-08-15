@@ -40,7 +40,14 @@ function buildTree(entries) {
       if (!seg) continue;
       const isLast = i === parts.length - 1;
       if (!cur[seg]) cur[seg] = { _children: {}, _files: [] };
-      if (isLast && !isDirEntry) cur[seg]._files.push({ name: seg, hash: e.hash || e.providers?.[0]?.value || '', path: e.path, size: e.size, mime_type: e.mime_type || e.providers?.[0]?.mime_type || '', providers: e.providers });
+      if (isLast && !isDirEntry) cur[seg]._files.push({
+        name: seg,
+        hash: e.hash || e.providers?.find(p => p.type === 'sha256')?.value || e.providers?.find(p => p.type === 'url')?.value || '',
+        path: e.path,
+        size: e.size,
+        mime_type: e.mime_type || e.providers?.[0]?.mime_type || '',
+        providers: e.providers,
+      });
       cur = cur[seg]._children;
     }
   }
