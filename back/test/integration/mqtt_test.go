@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"peerdrive/internal/service"
+	"peerdrive/internal/transport"
 )
 
 // TestMQTTDiscovery 两个节点通过 MQTT 分片房间互相发现（无任何静态配置）。
@@ -18,8 +18,8 @@ func TestMQTTDiscovery(t *testing.T) {
 
 	gotA := make(chan string, 4)
 	gotB := make(chan string, 4)
-	discA := service.NewMQTTDiscovery("tcp://broker.emqx.io:1883", "peerdrive/v1/test", "pd-disc-a-"+randSuffix(), func(id string) { gotA <- id })
-	discB := service.NewMQTTDiscovery("tcp://broker.emqx.io:1883", "peerdrive/v1/test", "pd-disc-b-"+randSuffix(), func(id string) { gotB <- id })
+	discA := transport.NewMQTTDiscovery("tcp://broker.emqx.io:1883", "peerdrive/v1/test", "pd-disc-a-"+randSuffix(), func(id string) { gotA <- id })
+	discB := transport.NewMQTTDiscovery("tcp://broker.emqx.io:1883", "peerdrive/v1/test", "pd-disc-b-"+randSuffix(), func(id string) { gotB <- id })
 
 	idA := "mqtt-node-a-" + randSuffix()
 	idB := "mqtt-node-b-" + randSuffix()

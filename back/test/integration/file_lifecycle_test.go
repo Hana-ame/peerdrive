@@ -15,7 +15,7 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/repository"
-	"peerdrive/internal/service"
+	"peerdrive/internal/transport"
 	"peerdrive/internal/signalserver"
 )
 
@@ -41,7 +41,7 @@ func TestFileLifecycleEndToEnd(t *testing.T) {
 	defer hs.Close()
 
 	idA, idB := randID("fl-a"), randID("fl-b")
-	newNode := func(id, storage string, peers []string) *service.PeerJSService {
+	newNode := func(id, storage string, peers []string) *transport.PeerJSService {
 		if err := repository.InitDB(":memory:"); err != nil {
 			t.Fatal(err)
 		}
@@ -56,21 +56,21 @@ func TestFileLifecycleEndToEnd(t *testing.T) {
 		cfg.PeerJSPeers = join(peers)
 		// H2：create 只允许 DownloadDir 根内文件；测试根 = storage
 		cfg.DownloadDir = storage
-		svc := service.NewPeerJSService(cfg, storage)
+		svc := transport.NewPeerJSService(cfg, storage)
 		svc.Start()
 		t.Cleanup(svc.Close)
 		return svc
 	}
 
 	// 每个节点挂自己的本地 WS 会话（文件 verb 入口）
-	bindWS := func(svc *service.PeerJSService) *wsVerbClient {
+	bindWS := func(svc *transport.PeerJSService) *wsVerbClient {
 		upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
 				return
 			}
-			svc.BindLocal(service.NewWSSession("local", conn))
+			svc.BindLocal(transport.NewWSSession("local", conn))
 		}))
 		t.Cleanup(srv.Close)
 		return newWSVerbClient(t, srv.URL)
@@ -103,7 +103,7 @@ func TestFileLifecycleEndToEnd(t *testing.T) {
 	}
 
 	// ③ B upload fileB（分片上传）
-	fileB := make([]byte, 2*service.UploadChunkSizeForTest()+7777)
+	fileB := make([]byte, 2*transport.UploadChunkSizeForTest()+7777)
 	for i := range fileB {
 		fileB[i] = byte(i * 31)
 	}
@@ -160,7 +160,7 @@ func TestFileLifecycleWS(t *testing.T) {
 		if err != nil {
 			return
 		}
-		svc.BindLocal(service.NewWSSession("local", conn))
+		svc.BindLocal(transport.NewWSSession("local", conn))
 	}))
 	defer srv.Close()
 	c := newWSVerbClient(t, srv.URL)
@@ -187,7 +187,7 @@ func TestFileLifecycleWS(t *testing.T) {
 	}
 
 	// ④ upload
-	contentB := make([]byte, 3*service.UploadChunkSizeForTest())
+	contentB := make([]byte, 3*transport.UploadChunkSizeForTest())
 	for i := range contentB {
 		contentB[i] = byte(i * 29)
 	}

@@ -24,6 +24,7 @@ import (
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
 	"peerdrive/internal/legacy"
+	"peerdrive/internal/source"
 	"peerdrive/internal/transport"
 )
 
@@ -130,6 +131,22 @@ func main() {
 	if peerjsSvc != nil {
 		router.SetPeerJSService(peerjsSvc)
 		router.SetPeerJSConfig(cfg)
+		// 统一 source 体系装配：本地磁盘（file_index + CAS）→ p2p 透传 → URL 源。
+		// 路由语义：本地优先命中即返回，未命中降级 peer；URL 源经模板注册
+		// （PEERDRIVE_URL_SOURCE_TEMPLATE），可为空。管理面 GET /sources。
+		mgr := source.New()
+		if err := mgr.Register(source.NewLocalSource(storageDir, peerjsSvc.FileIndex())); err != nil {
+			log.LogWarn("main: register local source: %v", err)
+		}
+		if err := mgr.Register(source.NewPeerSource(peerjsSvc)); err != nil {
+			log.LogWarn("main: register peer source: %v", err)
+		}
+		if cfg.URLSourceTemplate != "" {
+			if err := mgr.Register(source.NewURLSource(cfg.URLSourceTemplate, nil)); err != nil {
+				log.LogWarn("main: register url source: %v", err)
+			}
+		}
+		router.SetSourceManager(mgr)
 	}
 	log.LogInfo("main: setting up HTTP router")
 	r := router.SetupRouter(p2pSvc, cfg, ipfsCompatLayer, ipfsSvc)

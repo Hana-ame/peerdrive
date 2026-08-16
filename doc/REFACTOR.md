@@ -106,7 +106,6 @@ vps 上跑：peerserver -addr :9000 -key <key>
 - 安全：信令自有后无公共云 MITM 面；后续可在服务器加 token 白名单
 
 ### 3.6.1 线上部署（cloudcone）
-
 ```
 peersignal.moonchan.xyz ──CF 灰云 A 记录──▶ 117.55.237.217（cloudcone nginx）
         │ wss + https
@@ -116,6 +115,62 @@ peersignal.moonchan.xyz ──CF 灰云 A 记录──▶ 117.55.237.217（cloud
 - 部署细节与运维命令见项目 AGENTS.md「线上部署」节
 - 线上验证：`PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestLive -v`
   （TestLiveSignal_DiscoveryAndInterop：线上信令+发现+拉文件全链路；TestLiveSignal_ProtocolCompat：客户端协议兼容）
+
+### 3.7 transport 包 inbound/outbound 角色拆分（2026-08-16）
+
+按帧角色把 `transport/` 拆成两角色 + 共享核心（对齐 Xray/sing-box 心智模型，
+但**只切角色不切连接**——WebRTC 连接全双工对称，同一条 Session 同时承载两角色）：
+
+```
+conn.go          ← 共享连接核心（禁止复制）：dcReq/dcResp、connState（fetches/expect 归
+                    outbound，pendingUpload/binCh 归 inbound，平铺共享）、bindConn 分派
+inbound.go       ← 入站角色 = 应答对端 verb 全集：serveFile/openFile、
+                    create/upload/list/info/delete/sync 服务端（原 file_index_verbs.go 并入）、
+                    uploadWorker（上传落盘）
+outbound.go      ← 出站角色 = 本端发起 verb 全集：FetchFromPeer/requestFile/routeResponse/
+                    stateFor + maxPeerFetchSize
+peerjs_service.go← 瘦身为装配层（854 → 420 行）：信令生命周期、连接建立
+                    （connectLoop 拨号 / onIncomingConnection 接受）、BindLocal、
+                    发现装配——连接建立只是创建全双工 Session，随后 bindConn 挂双角色
+```
+
+- 纯代码归位（剪切+重建文件），行为零变化；`file_index_verbs.go` 删除并入 inbound.go
+- 验证：`go build -tags nosqlite ./...` + `go test -tags nosqlite ./internal/transport/ -race` 全绿
+- 预留（未做）：outbound 侧 `Fetcher` 接口（localFetcher/peerFetcher/未来 httpFetcher）
+  实现「任意入口请求 → 任意出口」路由矩阵，有新传输需求时再落地
+
+### 3.8 统一 source 体系（2026-08-16）
+
+统一文件管理：多后端（本地磁盘 / p2p 透传 / URL 模板）抽象为 `Source`，由
+`SourceManager` 统一路由（优先级）、统计（Snapshot）、运行时调整（SetPriority）。
+
+```
+internal/source/
+  source.go   ← Source 接口 + Capability(CapFile=1 整体拉取 / CapStream=2 流式分片)
+                + FileMeta/Stats/SourceStatus
+  manager.go  ← 注册/反注册、优先级升序路由：命中即返回、Available()==false 跳过、
+                全失败返回汇总错误；record() 记成功/失败/字节/最近错误
+  local.go    ← LocalSource：resolvePath 复刻 serveFile（file_index 优先 + IsPathAllowed
+                防御 + CAS 兜底），CapStream
+  peer.go     ← PeerSource：Connections 枚举 + per-peer Mutex.TryLock 串行尝试
+                （连接级 expect 单槽约束：同一 peer 同时只允许一个 fetch 流）
+  url.go      ← URLSource：fmt 模板（%s=hash，含 %d 声明 CapStream）→ Range 分片；
+                全量请求读取后 sha256 校验（内容寻址兜底）；可注入 http.Client
+                指向 ech-proxy 等出口（wintools cmd/ech-proxy），不建独立 source 类型
+```
+
+- **路由语义**：本地命中即返回，未命中降级 peer，URL 源最后兜底；大文件只走
+  CapStream（OpenRange 拒绝 CapFile 源——防 8GB 全量 buffer OOM），OpenAny 可降级整体
+- **装配**（cmd/server/main.go）：local → peer → url(可选, `PEERDRIVE_URL_SOURCE_TEMPLATE`)
+- **管理面**：`GET /sources`（状态+统计）、`POST /sources/:name/priority`（运行时调整）
+- **边界**：serveFile 保持本地语义不接 manager（避免入站→出站透传递归环）；
+  /peerjs/fetch 仍直调 FetchFromPeer（保持语义，未切 Manager）
+- 配套：`requestFile` 流式化（fetchState 加 `q chan []byte` 块队列 + pump 投递，
+  OpenStream 流式读；FetchFromPeer 保留 []byte 兼容签名）；修复 cleanup 双 close panic、
+  fetchReader drain 循环 buf 覆盖丢块两个 bug
+- 验证：`go test -tags nosqlite ./internal/source/ -race` + transport 全绿；
+  集成测试引用 `service.*` 的 M3 遗留已改 `transport.*`
+
 
 ## 4. 帧协议（DataChannel 上，go↔go 与 go↔web 共用）
 

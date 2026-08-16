@@ -12,7 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"peerdrive/internal/service"
+	"peerdrive/internal/transport"
 )
 
 // TestLocalWSSessionFetch 本地 WebSocket 会话：浏览器直连本节点，
@@ -37,7 +37,7 @@ func TestLocalWSSessionFetch(t *testing.T) {
 		if err != nil {
 			return
 		}
-		svc.BindLocal(service.NewWSSession("local", conn))
+		svc.BindLocal(transport.NewWSSession("local", conn))
 	}))
 	defer srv.Close()
 
@@ -106,7 +106,7 @@ func TestLocalWSSession_FetchFromPeerReuse(t *testing.T) {
 		if err != nil {
 			return
 		}
-		svc.BindLocal(service.NewWSSession("local", conn))
+		svc.BindLocal(transport.NewWSSession("local", conn))
 	}))
 	defer srv.Close()
 

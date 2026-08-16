@@ -16,7 +16,7 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/repository"
-	"peerdrive/internal/service"
+	"peerdrive/internal/transport"
 	"peerdrive/internal/signalserver"
 )
 
@@ -60,7 +60,7 @@ func TestSelfHostedSignalAndDiscover(t *testing.T) {
 	idB := randID("sh-b")
 
 	// newService 默认连公共云；这里手工构造指向自托管
-	newSelfHosted := func(id, storage string) *service.PeerJSService {
+	newSelfHosted := func(id, storage string) *transport.PeerJSService {
 		requireInitDB(t)
 		cfg := config.Load()
 		cfg.PeerJSEnable = true
@@ -72,7 +72,7 @@ func TestSelfHostedSignalAndDiscover(t *testing.T) {
 		cfg.BTDHTEnabled = false
 		cfg.DiscoverURL = hs.URL
 		cfg.MQTTCollections = hash
-		svc := service.NewPeerJSService(cfg, storage)
+		svc := transport.NewPeerJSService(cfg, storage)
 		svc.Start()
 		t.Cleanup(svc.Close)
 		return svc

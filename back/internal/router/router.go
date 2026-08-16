@@ -461,6 +461,9 @@ func SetupRouter(
 	// PeerJS 节点发现
 	registerPeerJSRoutes(r, authRequired)
 
+	// 统一 source 管理（source 体系管理面）
+	registerSourceRoutes(r)
+
 	// Count routes
 	routes := r.Routes()
 	log.LogInfo("router: SetupRouter completed with %d routes", len(routes))

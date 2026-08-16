@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"peerdrive/internal/service"
+	"peerdrive/internal/transport"
 )
 
 // TestTwoNodesInterop 双节点互通：B 经公共云信令 + WebRTC 直连 A 拉文件，
@@ -95,7 +95,7 @@ func TestThreeNodesInterop(t *testing.T) {
 	waitConnections(t, svcB, map[string]bool{svcA.ID(): true, svcC.ID(): true}, 90*time.Second)
 	waitConnections(t, svcC, map[string]bool{svcA.ID(): true, svcB.ID(): true}, 90*time.Second)
 
-	for name, svc := range map[string]*service.PeerJSService{"B": svcB, "C": svcC} {
+	for name, svc := range map[string]*transport.PeerJSService{"B": svcB, "C": svcC} {
 		data, err := svc.FetchFromPeer(svcA.ID(), hash, 0, -1)
 		if err != nil {
 			t.Fatalf("%s 从 A 拉取失败: %v", name, err)
@@ -126,7 +126,7 @@ func TestFourNodesStar(t *testing.T) {
 
 	idA := randID("it-4a")
 	svcA := newService(t, idA, storageA, false, nil)
-	var others []*service.PeerJSService
+	var others []*transport.PeerJSService
 	for i := 0; i < 3; i++ {
 		svc := newService(t, randID("it-4x"), t.TempDir(), false, []string{idA})
 		others = append(others, svc)
@@ -140,7 +140,7 @@ func TestFourNodesStar(t *testing.T) {
 	// 并发从 A 拉取
 	done := make(chan error, len(others))
 	for _, s := range others {
-		go func(s *service.PeerJSService) {
+		go func(s *transport.PeerJSService) {
 			data, err := s.FetchFromPeer(svcA.ID(), hash, 0, -1)
 			if err != nil {
 				done <- err
@@ -180,7 +180,7 @@ func TestConcurrentLargeFetches(t *testing.T) {
 
 	idA := randID("it-ca")
 	newService(t, idA, storageA, false, nil) // svcA：文件源，无需直接引用
-	var clients []*service.PeerJSService
+	var clients []*transport.PeerJSService
 	for i := 0; i < 4; i++ {
 		svc := newService(t, randID("it-cx"), t.TempDir(), false, []string{idA})
 		clients = append(clients, svc)
@@ -191,7 +191,7 @@ func TestConcurrentLargeFetches(t *testing.T) {
 
 	done := make(chan error, len(clients))
 	for _, s := range clients {
-		go func(s *service.PeerJSService) {
+		go func(s *transport.PeerJSService) {
 			data, err := s.FetchFromPeer(idA, hash, 0, -1)
 			if err != nil {
 				done <- err

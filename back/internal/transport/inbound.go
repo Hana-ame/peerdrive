@@ -1,12 +1,132 @@
 package transport
 
+// inbound.go：入站角色 = 应答对端发来的 verb 全集（「别人问我答」）。
+// 归属：req（serveFile）、create/upload/list/info/delete/sync（serve* 索引 verb）、
+// 上传分片落盘 worker（uploadWorker）。共享连接机制在 conn.go，本文件只放
+// 对端驱动的处理逻辑——与 outbound.go（本端发起）相对，两条路径在同一连接上
+// 双工并发复用，不共享任何可变状态（除 connState 内各自的槽位）。
+
 import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"time"
 
 	"peerdrive/internal/log"
+	hashutil "peerdrive/pkg/hashutil"
 )
 
-// 帧协议文件索引 verb 的服务端处理（create/upload/list/info/delete/sync）。
+// chunkSize DataChannel 单块传输大小（pion SCTP 单消息上限约 256KB，64KB 兼顾流控粒度）。
+// 写缓冲流控已下沉到 peerjs.Connection.SendFrame（连接级全局回调），此处只定块大小。
+const chunkSize = 64 * 1024
+
+// ---- 文件服务（对端请求本节点文件） ----
+
+// serveFile 打开内容寻址文件并按请求发送分块，带写缓冲流控。
+// 安全（H1/H2 修复）：
+//   - hash 必须 64 位 hex 才切片——之前直接 req.Hash[:2]，对端发空/短 hash
+//     越界 panic，serveFile 在 goroutine 里 panic 直接杀死整个进程
+//     （公共信令网络上任意节点一行 JSON 就能打崩全节点）
+//   - file_index 命中的路径必须落在允许根目录内——之前直接 os.Open(fi.Path)，
+//     对端 create 任意绝对路径后可 req 读取（/etc/shadow 攻击链）
+//
+// 优先查 file_index 映射（外部登记/上传的文件），其次内容寻址存储。
+func (s *PeerJSService) serveFile(c Session, req dcReq) {
+	if !hashutil.IsStrictSHA256(req.Hash) {
+		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "invalid hash", ReqID: req.ReqID})
+		return
+	}
+	path := filepath.Join(s.storageDir, req.Hash[:2], req.Hash)
+	if fi, err := s.fileIndex.Info(req.Hash); err == nil && fi.Path != "" {
+		if s.fileIndex.IsPathAllowed(fi.Path) {
+			path = fi.Path
+		} else {
+			// 索引命中但路径越权（历史脏数据/恶意登记）：回退内容寻址存储，
+			// 不回传根目录外文件（H2）
+			log.LogWarn("peerjs: index path outside allowed root, serving content-addressed: %s", fi.Path)
+		}
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "not found", ReqID: req.ReqID})
+		return
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "stat failed", ReqID: req.ReqID})
+		return
+	}
+	total := st.Size()
+
+	offset := req.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > total {
+		offset = total
+	}
+	limit := req.Size
+	if limit < 0 || offset+limit > total {
+		limit = total - offset
+	}
+
+	if err := c.SendJSON(dcResp{Type: "meta", Hash: req.Hash, Total: total, ReqID: req.ReqID}); err != nil {
+		return
+	}
+
+	// 写缓冲流控已下沉到 peerjs.Connection.SendFrame（连接级、全局回调一次）：
+	// 并发 serveFile 经 sendMu 串行发送 + lowWater 广播，不再各自注册
+	// OnBufferedAmountLow（替换式回调会被覆盖 → 死等，曾导致并发请求卡死）。
+
+	buf := make([]byte, chunkSize)
+	sent := int64(0)
+	for sent < limit {
+		n, err := f.ReadAt(buf[:min64(chunkSize, limit-sent)], offset+sent)
+		if n > 0 {
+			if err := c.SendFrame(dcResp{Type: "data", Hash: req.Hash, Offset: offset + sent, Size: int64(n), ReqID: req.ReqID}, buf[:n]); err != nil {
+				return
+			}
+			sent += int64(n)
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.LogWarn("peerjs: read file %s: %v", req.Hash, err)
+			_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "read failed", ReqID: req.ReqID})
+			return
+		}
+	}
+	_ = c.SendJSON(dcResp{Type: "done", Hash: req.Hash, Offset: offset, Size: sent, ReqID: req.ReqID})
+}
+
+func (s *PeerJSService) openFile(hash string) (*os.File, int64, error) {
+	if !hashutil.IsStrictSHA256(hash) {
+		return nil, 0, fmt.Errorf("invalid hash %q", hash)
+	}
+	path := filepath.Join(s.storageDir, hash[:2], hash)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, 0, err
+	}
+	return f, st.Size(), nil
+}
+
+func min64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// ---- 文件索引 verb 服务端处理（create/upload/list/info/delete/sync） ----
 // 全部经 Session 传输（WS/WebRTC 同一套），reqId 回显保持请求-响应配对。
 // 请求字段由 dcResp 通用结构承载（Hash/Offset/Size/ReqID/Path/Name/Seq）。
 
@@ -160,4 +280,38 @@ func (s *PeerJSService) serveSync(c Session, r dcResp) {
 		out = append(out, s.redactDisallowedPath(f))
 	}
 	_ = c.SendJSON(dcResp{Type: "sync-resp", Files: out, LastSeq: last, ReqID: r.ReqID})
+}
+
+// ---- 上传落盘 worker（入站角色） ----
+
+// uploadWorker 连接级上传落盘 worker（H5 修复）：消费消息泵投递的分片，
+// 执行 WriteAt/Complete（fsync + 全文件 hashFile 是慢操作，之前同步跑在
+// pion 消息泵上，一个 8GB 上传完成的瞬间整条连接的其他帧全部冻结）。
+// 单 worker 保序（分片按到达顺序落盘，与帧协议顺序一致）；连接关闭经
+// binDone 退出（不悬挂）；写失败回 err 帧。
+func (s *PeerJSService) uploadWorker(c Session, st *connState) {
+	for {
+		select {
+		case ch := <-st.binCh:
+			if err := ch.up.sess.WriteAt(ch.offset, ch.data); err != nil {
+				_ = c.SendJSON(dcResp{Type: "err", Msg: "upload write failed: " + err.Error(), ReqID: ch.up.reqID})
+				continue
+			}
+			if ch.last {
+				done, fi, err := ch.up.sess.Complete()
+				if err != nil {
+					_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: ch.up.reqID})
+					continue
+				}
+				if done {
+					_ = c.SendJSON(dcResp{Type: "uploaded", Hash: fi.Hash, Total: fi.Size, Path: fi.Path, ReqID: ch.up.reqID})
+				} else {
+					// 分片已写，整体未完成：ack 告知客户端可继续下一分片
+					_ = c.SendJSON(dcResp{Type: "ack", Offset: ch.offset, ReqID: ch.up.reqID})
+				}
+			}
+		case <-st.binDone:
+			return
+		}
+	}
 }

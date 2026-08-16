@@ -23,7 +23,7 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/repository"
-	"peerdrive/internal/service"
+	"peerdrive/internal/transport"
 )
 
 // randID 生成唯一节点 ID（避免公共信令上 ID 冲突）。
@@ -59,7 +59,7 @@ func sha256Hex(b []byte) string {
 
 // newService 构造启用 PeerJS 的 service（P2P/BT 关闭加速）。
 // peers：静态对端列表（不设则仅被动接收/靠 MQTT 发现）。
-func newService(t *testing.T, id, storageDir string, mqtt bool, peers []string, collections ...string) *service.PeerJSService {
+func newService(t *testing.T, id, storageDir string, mqtt bool, peers []string, collections ...string) *transport.PeerJSService {
 	t.Helper()
 	// 文件索引等需要 repository.DB；集成测试每个 service 用独立内存库
 	// （InitDB 重新 Open 覆盖全局单例——防止上一测试留下的 file_index 行
@@ -85,14 +85,14 @@ func newService(t *testing.T, id, storageDir string, mqtt bool, peers []string, 
 	// H2：create 只允许 DownloadDir 根内的文件；测试统一把根指到 storageDir，
 	// 需要 create 的测试把源文件写进 storageDir 即可。
 	cfg.DownloadDir = storageDir
-	svc := service.NewPeerJSService(cfg, storageDir)
+	svc := transport.NewPeerJSService(cfg, storageDir)
 	svc.Start()
 	t.Cleanup(svc.Close)
 	return svc
 }
 
 // waitConnections 轮询等待与指定节点的连接建立。
-func waitConnections(t *testing.T, svc *service.PeerJSService, want map[string]bool, timeout time.Duration) {
+func waitConnections(t *testing.T, svc *transport.PeerJSService, want map[string]bool, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

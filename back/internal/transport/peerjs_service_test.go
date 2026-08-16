@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,11 +19,14 @@ import (
 	"peerdrive/internal/repository"
 )
 
-// fakeSession 内存版 Session：记录发送的 JSON 帧（H1/H6/M6 单元测试用）。
+// fakeSession 内存版 Session：记录发送的 JSON 帧，可捕获 OnMessage 回调
+// 并手动注入帧（H1/H6/M6 单元测试 + 流式 OpenStream 测试用）。
 type fakeSession struct {
 	id   string
 	mu   sync.Mutex
 	sent []map[string]any
+
+	onMessage func(peerjs.Frame)
 }
 
 func (f *fakeSession) ID() string { return f.id }
@@ -36,9 +40,23 @@ func (f *fakeSession) SendJSON(v any) error {
 	return nil
 }
 func (f *fakeSession) SendFrame(header any, body []byte) error { return f.SendJSON(header) }
-func (f *fakeSession) OnMessage(fn func(peerjs.Frame))         {}
-func (f *fakeSession) OnClose(fn func())                       {}
-func (f *fakeSession) Close()                                  {}
+func (f *fakeSession) OnMessage(fn func(peerjs.Frame)) {
+	f.mu.Lock()
+	f.onMessage = fn
+	f.mu.Unlock()
+}
+func (f *fakeSession) OnClose(fn func()) {}
+func (f *fakeSession) Close()            {}
+
+// feed 手动注入一帧到 OnMessage 回调（模拟对端到达的帧）。
+func (f *fakeSession) feed(frame peerjs.Frame) {
+	f.mu.Lock()
+	fn := f.onMessage
+	f.mu.Unlock()
+	if fn != nil {
+		fn(frame)
+	}
+}
 
 // sentTypes 返回已发送帧的 type 序列。
 func (f *fakeSession) sentTypes() []string {
@@ -59,6 +77,7 @@ func newTestPeerJSService(t *testing.T) *PeerJSService {
 		cfg:        &config.Config{},
 		storageDir: t.TempDir(),
 		fileIndex:  NewFileIndexService(t.TempDir()),
+		ctx:        context.Background(),
 	}
 }
 
@@ -113,7 +132,7 @@ func TestServeFile_IndexPathOutsideRoot(t *testing.T) {
 func TestRouteResponse_DataSizeCap(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	st := &connState{fetches: make(map[string]*fetchState)}
-	f := &fetchState{reqID: "r1", done: make(chan []byte, 1), errCh: make(chan error, 1)}
+	f := newTestFetchState("r1")
 	st.fetches["r1"] = f
 
 	svc.routeResponse(st, dcResp{Type: "data", ReqID: "r1", Size: 1 << 62})
@@ -127,11 +146,11 @@ func TestRouteResponse_DataSizeCap(t *testing.T) {
 
 // TestRouteResponse_DoneSizeMismatch 对端提前 done（截断文件当成功）→ errCh（H6）。
 // 发现背景：H6——done 不校验实收字节，对端只发 meta+done 就把空/截断数据
-// 当成功返回 → 静默数据损坏。修复：done.Size 与 len(f.got) 对比。
+// 当成功返回 → 静默数据损坏。修复：done.Size 与实收字节对比。
 func TestRouteResponse_DoneSizeMismatch(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	st := &connState{fetches: make(map[string]*fetchState)}
-	f := &fetchState{reqID: "r1", done: make(chan []byte, 1), errCh: make(chan error, 1)}
+	f := newTestFetchState("r1")
 	st.fetches["r1"] = f
 
 	// 声明发送 100 字节，实际 0 字节（无 data 帧）→ 必须报错
@@ -153,17 +172,28 @@ func TestRouteResponse_DoneSizeMismatch(t *testing.T) {
 func TestRouteResponse_DoneSizeMatch(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	st := &connState{fetches: make(map[string]*fetchState)}
-	f := &fetchState{reqID: "r1", done: make(chan []byte, 1), errCh: make(chan error, 1)}
+	f := newTestFetchState("r1")
 	st.fetches["r1"] = f
 
 	svc.routeResponse(st, dcResp{Type: "data", ReqID: "r1", Size: 3})
-	f.got = []byte("abc")
+	f.received = 3
 	svc.routeResponse(st, dcResp{Type: "done", ReqID: "r1", Size: 3})
 	select {
-	case data := <-f.done:
-		assert.Equal(t, "abc", string(data))
+	case <-f.done:
+		// done 已 close = 传输完成（流式语义：数据经 f.q 消费）
 	case <-time.After(time.Second):
 		t.Fatal("匹配的 done 应成功返回")
+	}
+}
+
+// newTestFetchState 构造测试用 fetchState（流式字段全初始化）。
+func newTestFetchState(reqID string) *fetchState {
+	return &fetchState{
+		reqID:  reqID,
+		q:      make(chan []byte, 8),
+		done:   make(chan struct{}),
+		errCh:  make(chan error, 1),
+		closed: make(chan struct{}),
 	}
 }
 

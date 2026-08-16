@@ -69,6 +69,12 @@ type Config struct {
 	MQTTCollections string // PEERDRIVE_MQTT_COLLECTIONS, 逗号分隔关注的 collection hash 分片
 	DiscoverURL     string // PEERDRIVE_DISCOVER_URL, 自托管信令服务器的发现 API（设置后优先于 MQTT）
 
+	// URLSourceTemplate 统一 source 体系的 URL 源模板（PEERDRIVE_URL_SOURCE_TEMPLATE）。
+	// 空则不注册 url source。%s = sha256 hash；含 %d 时（%d 依次为 offset,size）
+	// 声明 CapStream（Range 分片），否则 CapFile（整体拉取）。
+	// 示例: https://example.com/ipfs/%s 或 https://example.com/f/%s?off=%d&size=%d
+	URLSourceTemplate string
+
 	DownloadDir         string
 	MaxPeers            int
 	DownloadOrder       string
@@ -161,6 +167,7 @@ func Load() *Config {
 		MQTTTopicPref:   getEnv("PEERDRIVE_MQTT_TOPIC_PREFIX", "peerdrive/v1"),
 		MQTTCollections: getEnv("PEERDRIVE_MQTT_COLLECTIONS", ""),
 		DiscoverURL:     getEnv("PEERDRIVE_DISCOVER_URL", ""),
+		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
 
 		DownloadDir: getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
 		MaxPeers:    getEnvInt("PEERDRIVE_MAX_PEERS", 8),

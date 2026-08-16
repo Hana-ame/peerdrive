@@ -13,7 +13,7 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/repository"
-	"peerdrive/internal/service"
+	"peerdrive/internal/transport"
 )
 
 // 线上部署验证：以 peersignal.moonchan.xyz（cloudcone 自托管信令 + 发现）为
@@ -40,7 +40,7 @@ func TestLiveSignal_DiscoveryAndInterop(t *testing.T) {
 	idA := randID("live-a")
 	idB := randID("live-b")
 
-	newLive := func(id, storage string) *service.PeerJSService {
+	newLive := func(id, storage string) *transport.PeerJSService {
 		if err := repository.InitDB(":memory:"); err != nil {
 			t.Fatal(err)
 		}
@@ -55,7 +55,7 @@ func TestLiveSignal_DiscoveryAndInterop(t *testing.T) {
 		cfg.BTDHTEnabled = false
 		cfg.DiscoverURL = liveDiscover
 		cfg.MQTTCollections = hash
-		svc := service.NewPeerJSService(cfg, storage)
+		svc := transport.NewPeerJSService(cfg, storage)
 		svc.Start()
 		t.Cleanup(svc.Close)
 		return svc

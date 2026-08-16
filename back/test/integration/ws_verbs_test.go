@@ -14,7 +14,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"peerdrive/internal/service"
+	"peerdrive/internal/transport"
 )
 
 // wsVerbClient 帧协议客户端（模拟浏览器）：发 JSON 帧 + 收集二进制，按 reqId 配对。
@@ -128,7 +128,7 @@ func TestFrameVerbs_CreateListInfoDownload(t *testing.T) {
 		if err != nil {
 			return
 		}
-		svc.BindLocal(service.NewWSSession("local", conn))
+		svc.BindLocal(transport.NewWSSession("local", conn))
 	}))
 	defer srv.Close()
 	c := newWSVerbClient(t, srv.URL)
@@ -183,7 +183,7 @@ func TestFrameVerbs_UploadAndSync(t *testing.T) {
 		if err != nil {
 			return
 		}
-		svc.BindLocal(service.NewWSSession("local", conn))
+		svc.BindLocal(transport.NewWSSession("local", conn))
 	}))
 	defer srv.Close()
 	c := newWSVerbClient(t, srv.URL)
@@ -284,12 +284,12 @@ func TestFrameVerbs_UploadSharded(t *testing.T) {
 		if err != nil {
 			return
 		}
-		svc.BindLocal(service.NewWSSession("local", conn))
+		svc.BindLocal(transport.NewWSSession("local", conn))
 	}))
 	defer srv.Close()
 	c := newWSVerbClient(t, srv.URL)
 
-	content := make([]byte, 3*service.UploadChunkSizeForTest())
+	content := make([]byte, 3*transport.UploadChunkSizeForTest())
 	for i := range content {
 		content[i] = byte(i * 3)
 	}
@@ -363,12 +363,12 @@ func TestFrameVerbs_UploadResumeOverWS(t *testing.T) {
 		if err != nil {
 			return
 		}
-		svc.BindLocal(service.NewWSSession("local", conn))
+		svc.BindLocal(transport.NewWSSession("local", conn))
 	}))
 	defer srv.Close()
 	c := newWSVerbClient(t, srv.URL)
 
-	content := make([]byte, 4*service.UploadChunkSizeForTest())
+	content := make([]byte, 4*transport.UploadChunkSizeForTest())
 	for i := range content {
 		content[i] = byte(i * 9)
 	}
