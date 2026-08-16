@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"peerdrive/internal/log"
 
 	dht "github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/dht/v2/krpc"
@@ -40,8 +39,8 @@ type BTDHTService struct {
 
 // NewBTDHT 创建 UDP DHT 服务器，从公共 BitTorrent 引导节点启动。
 func NewBTDHT(listenAddr string) (*BTDHTService, error) {
-	defer log.LogDuration("BTDHT.NewBTDHT")()
-	log.LogDebug("bt-dht: NewBTDHT listenAddr=%s", listenAddr)
+	defer LogDuration("BTDHT.NewBTDHT")()
+	LogDebug("bt-dht: NewBTDHT listenAddr=%s", listenAddr)
 
 	cfg := dht.NewDefaultServerConfig()
 	cfg.StartingNodes = func() ([]dht.Addr, error) {
@@ -69,16 +68,16 @@ func NewBTDHT(listenAddr string) (*BTDHTService, error) {
 
 	srv, err := dht.NewServer(cfg)
 	if err != nil {
-		log.LogError("bt-dht: NewBTDHT server creation failed: %v", err)
+		LogError("bt-dht: NewBTDHT server creation failed: %v", err)
 		return nil, fmt.Errorf("dht new server: %w", err)
 	}
 
 	// Bootstrap the routing table.
 	bootstrapStats, err := srv.Bootstrap()
 	if err != nil {
-		log.LogWarn("bt-dht: bootstrap warning: %v", err)
+		LogWarn("bt-dht: bootstrap warning: %v", err)
 	} else {
-		log.LogInfo("bt-dht: bootstrap complete: %d nodes contacted", bootstrapStats.NumResponses)
+		LogInfo("bt-dht: bootstrap complete: %d nodes contacted", bootstrapStats.NumResponses)
 	}
 
 	// Allow a moment for the routing table to populate.
@@ -90,23 +89,23 @@ func NewBTDHT(listenAddr string) (*BTDHTService, error) {
 		NodeID:     myID,
 	}
 
-	log.LogInfo("bt-dht: server listening on %s (%d nodes)", srv.Addr().String(), srv.NumNodes())
+	LogInfo("bt-dht: server listening on %s (%d nodes)", srv.Addr().String(), srv.NumNodes())
 	return svc, nil
 }
 
 // Announce 在 BitTorrent DHT 上 announce 指定的 SHA256 哈希（截取前 20 字节为 infohash）。
 func (s *BTDHTService) Announce(hash string) error {
-	defer log.LogDuration("BTDHT.Announce")()
-	log.LogDebug("bt-dht: Announce hash=%s", hash)
+	defer LogDuration("BTDHT.Announce")()
+	LogDebug("bt-dht: Announce hash=%s", hash)
 
 	if s.Server == nil {
 		err := fmt.Errorf("DHT server not available")
-		log.LogError("bt-dht: Announce failed: %v", err)
+		LogError("bt-dht: Announce failed: %v", err)
 		return err
 	}
 	ih, err := infoHashFromHex(hash)
 	if err != nil {
-		log.LogError("bt-dht: Announce invalid hash: %v", err)
+		LogError("bt-dht: Announce invalid hash: %v", err)
 		return err
 	}
 	var infoHash [20]byte
@@ -117,28 +116,28 @@ func (s *BTDHTService) Announce(hash string) error {
 
 	ann, err := s.Server.Announce(infoHash, dhtPort, false)
 	if err != nil {
-		log.LogError("bt-dht: Announce failed: %v", err)
+		LogError("bt-dht: Announce failed: %v", err)
 		return fmt.Errorf("DHT announce: %w", err)
 	}
 	ann.Close()
 
-	log.LogInfo("bt-dht: announced %s on BT DHT", hash)
+	LogInfo("bt-dht: announced %s on BT DHT", hash)
 	return nil
 }
 
 // FindProviders 在 BitTorrent DHT 上查找指定哈希的提供者，返回 "ip:port" 格式的地址列表。
 func (s *BTDHTService) FindProviders(hash string) ([]string, error) {
-	defer log.LogDuration("BTDHT.FindProviders")()
-	log.LogDebug("bt-dht: FindProviders hash=%s", hash)
+	defer LogDuration("BTDHT.FindProviders")()
+	LogDebug("bt-dht: FindProviders hash=%s", hash)
 
 	if s.Server == nil {
 		err := fmt.Errorf("DHT server not available")
-		log.LogError("bt-dht: FindProviders failed: %v", err)
+		LogError("bt-dht: FindProviders failed: %v", err)
 		return nil, err
 	}
 	ih, err := infoHashFromHex(hash)
 	if err != nil {
-		log.LogError("bt-dht: FindProviders invalid hash: %v", err)
+		LogError("bt-dht: FindProviders invalid hash: %v", err)
 		return nil, err
 	}
 	var infoHash [20]byte
@@ -146,7 +145,7 @@ func (s *BTDHTService) FindProviders(hash string) ([]string, error) {
 
 	ann, err := s.Server.AnnounceTraversal(infoHash)
 	if err != nil {
-		log.LogError("bt-dht: FindProviders traversal failed: %v", err)
+		LogError("bt-dht: FindProviders traversal failed: %v", err)
 		return nil, fmt.Errorf("DHT find: %w", err)
 	}
 	defer ann.Close()
@@ -161,7 +160,7 @@ func (s *BTDHTService) FindProviders(hash string) ([]string, error) {
 		select {
 		case pv, ok := <-ann.Peers:
 			if !ok {
-				log.LogInfo("bt-dht: FindProviders done for %s, found %d peers", hash, len(peers))
+				LogInfo("bt-dht: FindProviders done for %s, found %d peers", hash, len(peers))
 				return peers, nil
 			}
 			for _, p := range pv.Peers {
@@ -172,10 +171,10 @@ func (s *BTDHTService) FindProviders(hash string) ([]string, error) {
 				}
 			}
 		case <-ann.Finished():
-			log.LogInfo("bt-dht: FindProviders finished for %s, found %d peers", hash, len(peers))
+			LogInfo("bt-dht: FindProviders finished for %s, found %d peers", hash, len(peers))
 			return peers, nil
 		case <-timeout:
-			log.LogInfo("bt-dht: FindProviders timeout for %s, found %d peers", hash, len(peers))
+			LogInfo("bt-dht: FindProviders timeout for %s, found %d peers", hash, len(peers))
 			return peers, nil
 		}
 	}
@@ -194,7 +193,7 @@ func (s *BTDHTService) Close() error {
 	if s.Server == nil {
 		return nil
 	}
-	log.LogInfo("bt-dht: shutting down BT DHT server")
+	LogInfo("bt-dht: shutting down BT DHT server")
 	s.Server.Close()
 	return nil
 }

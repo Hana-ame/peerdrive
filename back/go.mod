@@ -3,8 +3,8 @@ module peerdrive
 go 1.26.2
 
 require (
+	github.com/Hana-ame/go-peerdrive-bt v0.0.0
 	github.com/Hana-ame/go-peerjs v0.0.0
-	github.com/anacrolix/dht/v2 v2.23.0
 	github.com/anacrolix/torrent v1.61.0
 	github.com/eclipse/paho.mqtt.golang v1.4.3
 	github.com/gin-gonic/gin v1.12.0
@@ -36,6 +36,7 @@ require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/anacrolix/btree v0.0.0-20251201064447-d86c3fa41bd8 // indirect
 	github.com/anacrolix/chansync v0.7.0 // indirect
+	github.com/anacrolix/dht/v2 v2.23.0 // indirect
 	github.com/anacrolix/envpprof v1.4.0 // indirect
 	github.com/anacrolix/generics v0.1.1-0.20251125230353-15d98d46693b // indirect
 	github.com/anacrolix/go-libutp v1.3.2 // indirect
@@ -217,3 +218,5 @@ require (
 )
 
 replace github.com/Hana-ame/go-peerjs => ./peerjs
+
+replace github.com/Hana-ame/go-peerdrive-bt => ./p2p_bt

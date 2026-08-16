@@ -23,7 +23,7 @@ import (
 	"peerdrive/internal/config"
 	peerdrive_log "peerdrive/internal/log"
 	"peerdrive/internal/model"
-	"peerdrive/internal/p2p_bt"
+	"github.com/Hana-ame/go-peerdrive-bt"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
 	"peerdrive/internal/legacy"

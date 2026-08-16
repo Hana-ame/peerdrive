@@ -1,7 +1,7 @@
 import * as api from '../../api';
-import { fileIcon, relTime } from './utils';
+import { fileIcon } from './utils';
 
-export default function FileRow({ file, isNestedColl, searchHash, collection, onNestedCollClick }) {
+export default function FileRow({ file, isNestedColl, searchHash, onNestedCollClick }) {
   if (isNestedColl) {
     return (
       <div onClick={() => onNestedCollClick(file.hash)}
@@ -20,7 +20,8 @@ export default function FileRow({ file, isNestedColl, searchHash, collection, on
       className="flex items-center gap-3 px-5 py-3 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm block">
       <span className="text-xl">{fileIcon(mime, file.path)}</span>
       <span className="text-blue-300 font-mono truncate flex-1">{displayName}</span>
-      <span className="text-gray-600 text-xs">{relTime(collection.created_at)}</span>
+      {/* 坑：旧实现显示 relTime(collection.created_at) —— 匿名条目（path+providers）
+          无逐文件时间字段，每行都渲染成合集创建时间，纯误导，已移除 */}
     </a>
   );
 }

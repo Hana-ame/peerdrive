@@ -17,7 +17,6 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 
-	"peerdrive/internal/log"
 )
 
 // globalDHT 保留给 BEP 44/51 及 GetGlobalStats().DHTNodes 使用。
@@ -80,7 +79,7 @@ func newBTClient(dataDir string, listenAddr string) *BTClient {
 
 	cl, err := torrent.NewClient(cfg)
 	if err != nil {
-		log.LogError("bt-client: failed to create torrent client: %v", err)
+		LogError("bt-client: failed to create torrent client: %v", err)
 		return nil
 	}
 
@@ -92,7 +91,7 @@ func newBTClient(dataDir string, listenAddr string) *BTClient {
 		torrentData: make(map[string][]byte),
 		autoSeed:    make(map[string]bool),
 	}
-	log.LogInfo("bt-client: created, dataDir=%s", dataDir)
+	LogInfo("bt-client: created, dataDir=%s", dataDir)
 	return client
 }
 
@@ -149,7 +148,7 @@ func (c *BTClient) AddTorrentBytes(data []byte) (*TorrentMeta, error) {
 	t.DownloadAll()
 	go c.watchDownload(ds)
 
-	log.LogInfo("bt-client: AddTorrentBytes infohash=%s name=%q", ih, meta.Name)
+	LogInfo("bt-client: AddTorrentBytes infohash=%s name=%q", ih, meta.Name)
 	return meta, nil
 }
 
@@ -198,14 +197,14 @@ func (c *BTClient) AddMagnetURI(uri string) (*TorrentMeta, error) {
 		case <-t.GotInfo():
 			t.DownloadAll()
 		case <-time.After(5 * time.Minute):
-			log.LogWarn("bt-client: magnet metadata timeout for %s", ih)
+			LogWarn("bt-client: magnet metadata timeout for %s", ih)
 			return
 		}
 	}()
 
 	go c.watchDownload(ds)
 
-	log.LogInfo("bt-client: AddMagnetURI infohash=%s name=%q", ih, name)
+	LogInfo("bt-client: AddMagnetURI infohash=%s name=%q", ih, name)
 
 	meta := &TorrentMeta{
 		InfoHashHex: ih,
@@ -298,13 +297,13 @@ func (c *BTClient) finalizeDownload(ds *downloadState) {
 
 		fi, err := os.Stat(absPath)
 		if err != nil {
-			log.LogWarn("bt-client: stat completed file %q: %v", absPath, err)
+			LogWarn("bt-client: stat completed file %q: %v", absPath, err)
 			continue
 		}
 
 		data, err := os.ReadFile(absPath)
 		if err != nil {
-			log.LogWarn("bt-client: read completed file %q: %v", absPath, err)
+			LogWarn("bt-client: read completed file %q: %v", absPath, err)
 			continue
 		}
 
@@ -330,16 +329,16 @@ func (c *BTClient) finalizeDownload(ds *downloadState) {
 		shouldAutoSeed := c.autoSeed[ds.infoHashHex]
 		c.mu.RUnlock()
 		if shouldAutoSeed {
-			log.LogInfo("bt-client: auto-seeding %s", ds.infoHashHex)
+			LogInfo("bt-client: auto-seeding %s", ds.infoHashHex)
 			ds.t.AllowDataUpload()
 			ds.seeding = true
 			ds.status = "seeding"
 		}
-		log.LogInfo("bt-client: firing onComplete for %s (%d files)", ds.infoHashHex, len(completedFiles))
+		LogInfo("bt-client: firing onComplete for %s (%d files)", ds.infoHashHex, len(completedFiles))
 		c.onComplete(ds.infoHashHex, completedFiles)
 	}
 
-	log.LogInfo("bt-client: download completed infohash=%s name=%q files=%d",
+	LogInfo("bt-client: download completed infohash=%s name=%q files=%d",
 		ds.infoHashHex, ds.name, len(completedFiles))
 }
 
@@ -412,7 +411,7 @@ func (c *BTClient) PauseDownload(infohash string) error {
 
 	ds.t.DisallowDataDownload()
 	ds.status = "paused"
-	log.LogInfo("bt-client: paused download %s (%s)", infohash, ds.name)
+	LogInfo("bt-client: paused download %s (%s)", infohash, ds.name)
 	return nil
 }
 
@@ -430,7 +429,7 @@ func (c *BTClient) ResumeDownload(infohash string) error {
 
 	ds.t.AllowDataDownload()
 	ds.status = "downloading"
-	log.LogInfo("bt-client: resumed download %s (%s)", infohash, ds.name)
+	LogInfo("bt-client: resumed download %s (%s)", infohash, ds.name)
 	return nil
 }
 
@@ -454,11 +453,11 @@ func (c *BTClient) RemoveDownload(infohash string) error {
 	dataDir := filepath.Join(c.dataDir, ds.name)
 	if dataDir != "" && dataDir != c.dataDir {
 		if err := os.RemoveAll(dataDir); err != nil {
-			log.LogWarn("bt-client: remove data dir %s: %v", dataDir, err)
+			LogWarn("bt-client: remove data dir %s: %v", dataDir, err)
 		}
 	}
 
-	log.LogInfo("bt-client: removed download %s (%s)", infohash, ds.name)
+	LogInfo("bt-client: removed download %s (%s)", infohash, ds.name)
 	return nil
 }
 
@@ -550,7 +549,7 @@ func (c *BTClient) StartSeed(infohash string) error {
 	ds.t.AllowDataUpload()
 	ds.seeding = true
 
-	log.LogInfo("bt-client: started seeding %s (%s)", infohash, ds.name)
+	LogInfo("bt-client: started seeding %s (%s)", infohash, ds.name)
 	return nil
 }
 
@@ -569,7 +568,7 @@ func (c *BTClient) StopSeed(infohash string) error {
 	ds.t.DisallowDataUpload()
 	ds.seeding = false
 
-	log.LogInfo("bt-client: stopped seeding %s", infohash)
+	LogInfo("bt-client: stopped seeding %s", infohash)
 	return nil
 }
 
@@ -600,7 +599,7 @@ func (c *BTClient) AddPeer(infohash, addr string) {
 	c.customPeers[infohash] = append(c.customPeers[infohash], addr)
 	c.mu.Unlock()
 
-	log.LogInfo("bt-client: AddPeer infohash=%s addr=%s", infohash, addr)
+	LogInfo("bt-client: AddPeer infohash=%s addr=%s", infohash, addr)
 }
 
 func (c *BTClient) GetCustomPeers(infohash string) []string {
@@ -646,7 +645,7 @@ func (c *BTClient) GetGlobalStats() *GlobalStats {
 // ---- 生命周期 ----
 
 func (c *BTClient) Close() {
-	log.LogInfo("bt-client: closing")
+	LogInfo("bt-client: closing")
 	c.cl.Close()
 }
 

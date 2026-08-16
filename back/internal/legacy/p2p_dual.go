@@ -8,7 +8,7 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/log"
-	"peerdrive/internal/p2p_bt"
+	"github.com/Hana-ame/go-peerdrive-bt"
 )
 
 // DualFindResult holds merged results from both the IPFS/libp2p and

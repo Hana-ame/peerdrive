@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"peerdrive/internal/log"
 
 	dht "github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/dht/v2/bep44"
@@ -34,8 +33,8 @@ func (s *BTDHTService) PutImmutable(data []byte) (target [20]byte, err error) {
 	if s.Server == nil {
 		return target, ErrBEP44DHTDisabled
 	}
-	defer log.LogDuration("BTDHT.PutImmutable")()
-	log.LogDebug("bt-dht: PutImmutable data=%d bytes", len(data))
+	defer LogDuration("BTDHT.PutImmutable")()
+	LogDebug("bt-dht: PutImmutable data=%d bytes", len(data))
 
 	// Wrap raw bytes as a bencode byte string.
 	put := bep44.Put{V: bencode.Bytes(data)}
@@ -57,7 +56,7 @@ func (s *BTDHTService) PutImmutable(data []byte) (target [20]byte, err error) {
 	//    work — most DHT nodes do not support BEP 44 arbitrary data storage.
 	nodes := s.closestNodes(target, 8)
 	if len(nodes) == 0 {
-		log.LogDebug("bt-dht: PutImmutable no close nodes for remote storage")
+		LogDebug("bt-dht: PutImmutable no close nodes for remote storage")
 	} else {
 		var success bool
 		for _, ni := range nodes {
@@ -80,15 +79,15 @@ func (s *BTDHTService) PutImmutable(data []byte) (target [20]byte, err error) {
 				continue
 			}
 			success = true
-			log.LogDebug("bt-dht: PutImmutable stored on %s", ni.Addr.String())
+			LogDebug("bt-dht: PutImmutable stored on %s", ni.Addr.String())
 			break
 		}
 		if !success {
-			log.LogWarn("bt-dht: PutImmutable remote storage all failed (local copy saved)")
+			LogWarn("bt-dht: PutImmutable remote storage all failed (local copy saved)")
 		}
 	}
 
-	log.LogInfo("bt-dht: PutImmutable target=%x size=%d", target, len(data))
+	LogInfo("bt-dht: PutImmutable target=%x size=%d", target, len(data))
 	return target, nil
 }
 
@@ -98,12 +97,12 @@ func (s *BTDHTService) GetImmutable(target [20]byte) (data []byte, err error) {
 	if s.Server == nil {
 		return nil, ErrBEP44DHTDisabled
 	}
-	defer log.LogDuration("BTDHT.GetImmutable")()
-	log.LogDebug("bt-dht: GetImmutable target=%x", target)
+	defer LogDuration("BTDHT.GetImmutable")()
+	LogDebug("bt-dht: GetImmutable target=%x", target)
 
 	// Check local store first — guarantees roundtrip for data we put ourselves.
 	if val, ok := s.localBEP44Store.Load(target); ok {
-		log.LogDebug("bt-dht: GetImmutable found in local store target=%x", target)
+		LogDebug("bt-dht: GetImmutable found in local store target=%x", target)
 		return val.([]byte), nil
 	}
 
@@ -127,8 +126,8 @@ func (s *BTDHTService) PutMutable(
 	if s.Server == nil {
 		return target, ErrBEP44DHTDisabled
 	}
-	defer log.LogDuration("BTDHT.PutMutable")()
-	log.LogDebug("bt-dht: PutMutable seq=%d salt=%x data=%d bytes", seq, salt, len(data))
+	defer LogDuration("BTDHT.PutMutable")()
+	LogDebug("bt-dht: PutMutable seq=%d salt=%x data=%d bytes", seq, salt, len(data))
 
 	// Build the mutable put.
 	v := bencode.Bytes(data)
@@ -162,7 +161,7 @@ func (s *BTDHTService) PutMutable(
 	// Store on remote close nodes.
 	nodes := s.closestNodes(target, 8)
 	if len(nodes) == 0 {
-		log.LogWarn("bt-dht: PutMutable no close nodes found")
+		LogWarn("bt-dht: PutMutable no close nodes found")
 		return target, nil
 	}
 
@@ -188,14 +187,14 @@ func (s *BTDHTService) PutMutable(
 		}
 		success = true
 		lastErr = nil
-		log.LogDebug("bt-dht: PutMutable stored on %s", ni.Addr.String())
+		LogDebug("bt-dht: PutMutable stored on %s", ni.Addr.String())
 		break
 	}
 	if !success && lastErr != nil {
 		return target, fmt.Errorf("put to all nodes failed: %w", lastErr)
 	}
 
-	log.LogInfo("bt-dht: PutMutable target=%x seq=%d stored on %d nodes",
+	LogInfo("bt-dht: PutMutable target=%x seq=%d stored on %d nodes",
 		target, seq, len(nodes))
 	return target, nil
 }
@@ -208,8 +207,8 @@ func (s *BTDHTService) GetMutable(
 	if s.Server == nil {
 		return nil, 0, ErrBEP44DHTDisabled
 	}
-	defer log.LogDuration("BTDHT.GetMutable")()
-	log.LogDebug("bt-dht: GetMutable pubkey=%x salt=%x", pubKey, salt)
+	defer LogDuration("BTDHT.GetMutable")()
+	LogDebug("bt-dht: GetMutable pubkey=%x salt=%x", pubKey, salt)
 
 	// Build target: SHA1(pubkey || salt).
 	var pk [32]byte
@@ -249,7 +248,7 @@ func (s *BTDHTService) putLocal(put bep44.Put, target [20]byte) {
 	if putRes.ToError() != nil {
 		// Expected: the network query was cancelled. The local store was
 		// updated successfully before the cancellation was checked.
-		log.LogDebug("bt-dht: putLocal result (expected-cancel): %v", putRes.ToError())
+		LogDebug("bt-dht: putLocal result (expected-cancel): %v", putRes.ToError())
 	}
 }
 
@@ -268,7 +267,7 @@ func (s *BTDHTService) lookupValue(target [20]byte, seq *int64) (*krpc.Msg, erro
 	// Collect initial candidates from the routing table.
 	startNodes, err := s.Server.TraversalStartingNodes()
 	if err != nil {
-		log.LogDebug("bt-dht: no starting nodes from routing table: %v", err)
+		LogDebug("bt-dht: no starting nodes from routing table: %v", err)
 		startNodes = nil
 	}
 

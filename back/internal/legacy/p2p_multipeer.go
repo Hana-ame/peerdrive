@@ -16,7 +16,7 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/log"
-	"peerdrive/internal/p2p_bt"
+	"github.com/Hana-ame/go-peerdrive-bt"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"

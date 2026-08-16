@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import FileRow from './FileRow';
 
-export default function FileList({ entries, navPath, allCollHashes, searchHash, collection, onNavIn, onNestedCollClick }) {
+export default function FileList({ entries, navPath, allCollHashes, searchHash, onNavIn, onNestedCollClick }) {
   const currentItems = useMemo(() => {
     const dirs = new Set();
     const files = [];
@@ -34,7 +34,7 @@ export default function FileList({ entries, navPath, allCollHashes, searchHash, 
       ))}
       {currentItems.files.map(f => (
         <FileRow key={f.path} file={f} isNestedColl={allCollHashes.has(f.hash)}
-          searchHash={searchHash} collection={collection} onNestedCollClick={onNestedCollClick} />
+          searchHash={searchHash} onNestedCollClick={onNestedCollClick} />
       ))}
     </div>
   );

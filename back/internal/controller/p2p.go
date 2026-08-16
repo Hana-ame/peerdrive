@@ -17,7 +17,7 @@ import (
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/nodestate"
-	"peerdrive/internal/p2p_bt"
+	"github.com/Hana-ame/go-peerdrive-bt"
 	"peerdrive/internal/legacy"
 	"peerdrive/internal/service"
 

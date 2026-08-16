@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"peerdrive/internal/log"
 
 	dht "github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/dht/v2/krpc"
@@ -31,8 +30,8 @@ func (s *BTDHTService) SampleInfohashes(target [20]byte) (samples [][20]byte, er
 	if s.Server == nil {
 		return nil, ErrBEP51DHTDisabled
 	}
-	defer log.LogDuration("BTDHT.SampleInfohashes")()
-	log.LogDebug("bt-dht: SampleInfohashes target=%x", target)
+	defer LogDuration("BTDHT.SampleInfohashes")()
+	LogDebug("bt-dht: SampleInfohashes target=%x", target)
 
 	// Get a set of nodes from our routing table to query.
 	nodes := s.closestNodes(target, 8)
@@ -53,7 +52,7 @@ func (s *BTDHTService) SampleInfohashes(target [20]byte) (samples [][20]byte, er
 			addr := dht.NewAddr(&net.UDPAddr{IP: ni.Addr.IP, Port: ni.Addr.Port})
 			samples, err := s.queryNodeForSamples(addr, target)
 			if err != nil {
-				log.LogDebug("bt-dht: SampleInfohashes query to %s failed: %v",
+				LogDebug("bt-dht: SampleInfohashes query to %s failed: %v",
 					ni.Addr.String(), err)
 				resultCh <- sampleResult{err: err}
 				return
@@ -102,7 +101,7 @@ func (s *BTDHTService) SampleInfohashes(target [20]byte) (samples [][20]byte, er
 		return nil, ErrBEP51NoSamples
 	}
 
-	log.LogInfo("bt-dht: SampleInfohashes collected %d unique samples from %d nodes",
+	LogInfo("bt-dht: SampleInfohashes collected %d unique samples from %d nodes",
 		len(allSamples), len(nodes))
 	return allSamples, nil
 }
@@ -148,8 +147,8 @@ func (s *BTDHTService) DiscoverInfohashes(maxResults int) ([][20]byte, error) {
 	if s.Server == nil {
 		return nil, ErrBEP51DHTDisabled
 	}
-	defer log.LogDuration("BTDHT.DiscoverInfohashes")()
-	log.LogDebug("bt-dht: DiscoverInfohashes max=%d", maxResults)
+	defer LogDuration("BTDHT.DiscoverInfohashes")()
+	LogDebug("bt-dht: DiscoverInfohashes max=%d", maxResults)
 
 	return s.crawlInfohashes(maxResults)
 }
@@ -227,7 +226,7 @@ func (s *BTDHTService) crawlInfohashes(maxResults int) ([][20]byte, error) {
 		results = results[:maxResults]
 	}
 
-	log.LogInfo("bt-dht: DiscoverInfohashes collected %d unique infohashes",
+	LogInfo("bt-dht: DiscoverInfohashes collected %d unique infohashes",
 		len(results))
 	return results, nil
 }
