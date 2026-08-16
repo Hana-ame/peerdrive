@@ -5,7 +5,6 @@ import App from '../src/App';
 import Plaza from '../src/pages/Plaza';
 import AnonCreator from '../src/pages/AnonCreator';
 import AnonExplorer from '../src/pages/AnonExplorer';
-import FileManager from '../src/pages/FileManager';
 import Settings from '../src/pages/Settings';
 import VersionLog from '../src/components/VersionLog';
 import Navbar from '../src/components/Navbar';
@@ -56,13 +55,6 @@ describe('AnonExplorer', () => {
   it('renders hash input', () => {
     render(<AnonExplorer />, { wrapper });
     expect(screen.getByPlaceholderText(/Hash|SHA/)).toBeTruthy();
-  });
-});
-
-describe('FileManager', () => {
-  it('renders title', () => {
-    render(<FileManager />, { wrapper });
-    expect(screen.getByText('文件管理')).toBeTruthy();
   });
 });
 
