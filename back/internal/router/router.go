@@ -436,17 +436,6 @@ func SetupRouter(
 	relaySvc := legacy.NewRelayService(p2pSvc)
 	r.GET("/relay/proxy", relaySvc.ProxyDownload)
 
-	// WebDAV endpoint — mount as network drive
-	// M12：WebDAV 写/删此前无任何认证 → 挂 AuthRequired（未配置注册服务器时放行，本地模式不受影响）
-	if cfg.WebDAVEnable {
-		webdavSvc := legacy.NewWebDAVService(cfg.StorageDir)
-		// WebDAV uses wildcard path: all /webdav/* requests go to WebDAV handler
-		r.Any("/webdav/*path", authRequired, func(c *gin.Context) {
-			c.Request.URL.Path = c.Param("path")
-			webdavSvc.ServeHTTP(c)
-		})
-	}
-
 	// WebRTC signaling
 	controller.InitSignalHub(legacy.NewSignalingHub())
 	r.GET("/ws/signal", func(c *gin.Context) {

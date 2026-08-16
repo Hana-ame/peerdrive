@@ -40,7 +40,7 @@
 |---|---|---|---|
 | `service/ipfs_service.go` / `ipfs_compat.go` / `ipfs.go` | Bitswap/网关 | 保留 | 默认关闭，opt-in |
 | `service/universal_downloader.go` | 多协议回退下载 | 保留 | 核心下载链路 |
-| `service/webdav.go` | WebDAV | **可删** | 无认证任意读写删，高危；新架构无位置 |
+| `service/webdav.go` | WebDAV | ✅ 已删（2026-08-16） | 无认证任意读写删，高危；新架构无位置 |
 | `service/sync_service.go` / `controller/sync.go` | 本地同步 | 保留 | |
 
 ### D. 已修/清理（本次重构顺带处理）
@@ -116,7 +116,7 @@
 ## 三、删除顺序建议（依赖优先）
 
 1. **M1**：前端 F 组死组件（无依赖，-4000 行）+ `webdav.go` + `forward.go`（高危）
-   - ✅ 前端 F 组已删（2026-08-16，见 F 节勘误）；`forward.go` ✅ 已删（v2 重建于 transport，§3.9）；`webdav.go` 待办
+   - ✅ 前端 F 组已删（2026-08-16，见 F 节勘误）；`forward.go` ✅ 已删（v2 重建于 transport，§3.9）；`webdav.go` ✅ 已删（2026-08-16，连同 PEERDRIVE_WEBDAV_ENABLE 与 /webdav 路由）
 2. **M2**：后端 A 组 libp2p 栈（先确认 `controller/p2p.go` 中哪些端点还有前端调用）
 3. **M3**：BT 栈（拆 `p2p_bt/` 为独立库后从主模块移除）
 4. **M4**：杂项（cmd/p2p-test、manual-tests、peerdrive.db、auth 死代码）
