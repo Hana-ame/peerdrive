@@ -32,7 +32,7 @@
 |---|---|---|---|
 | `p2p_bt/`（bep44、client、dht、bt_bridge 等） | BT DHT + 下载客户端 | 待迁移 | 有价值（纯 Go BEP44），建议拆独立库而非删除 |
 | `controller/bt.go` | BT HTTP 控制器 | 待迁移 | 前端 BTPanel 仍用 |
-| `service/forward.go` | 端口转发 | 待迁移 | 高危（匿名转发本地端口），建议直接删或加认证 |
+| `service/forward.go` | 端口转发 | ✅ 已删（2026-08-16） | libp2p 版删除；重建为 PeerJS DataChannel 版（REFACTOR §3.9，带 HMAC 质询认证+端口白名单） |
 
 ### C. IPFS 栈 — **保留**（独立功能，与互联层无关）
 
@@ -116,7 +116,7 @@
 ## 三、删除顺序建议（依赖优先）
 
 1. **M1**：前端 F 组死组件（无依赖，-4000 行）+ `webdav.go` + `forward.go`（高危）
-   - ✅ 前端 F 组已删（2026-08-16，见 F 节勘误）；`webdav.go` / `forward.go` 待办
+   - ✅ 前端 F 组已删（2026-08-16，见 F 节勘误）；`forward.go` ✅ 已删（v2 重建于 transport，§3.9）；`webdav.go` 待办
 2. **M2**：后端 A 组 libp2p 栈（先确认 `controller/p2p.go` 中哪些端点还有前端调用）
 3. **M3**：BT 栈（拆 `p2p_bt/` 为独立库后从主模块移除）
 4. **M4**：杂项（cmd/p2p-test、manual-tests、peerdrive.db、auth 死代码）

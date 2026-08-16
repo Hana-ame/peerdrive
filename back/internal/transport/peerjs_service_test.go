@@ -19,14 +19,22 @@ import (
 	"peerdrive/internal/repository"
 )
 
-// fakeSession 内存版 Session：记录发送的 JSON 帧，可捕获 OnMessage 回调
-// 并手动注入帧（H1/H6/M6 单元测试 + 流式 OpenStream 测试用）。
+// fakeSession 内存版 Session：记录发送的 JSON 帧（头+体），可捕获 OnMessage
+// 回调并手动注入帧（H1/H6/M6 单元测试 + 流式 OpenStream + forward 测试用）。
 type fakeSession struct {
 	id   string
 	mu   sync.Mutex
 	sent []map[string]any
+	// frames 完整帧记录（含 SendFrame 的二进制体）——forward 数据透传断言用
+	frames []fakeFrame
 
 	onMessage func(peerjs.Frame)
+}
+
+// fakeFrame 一帧的完整记录（头 JSON + 可选二进制体）。
+type fakeFrame struct {
+	header map[string]any
+	body   []byte
 }
 
 func (f *fakeSession) ID() string { return f.id }
@@ -36,10 +44,20 @@ func (f *fakeSession) SendJSON(v any) error {
 	_ = json.Unmarshal(b, &m)
 	f.mu.Lock()
 	f.sent = append(f.sent, m)
+	f.frames = append(f.frames, fakeFrame{header: m})
 	f.mu.Unlock()
 	return nil
 }
-func (f *fakeSession) SendFrame(header any, body []byte) error { return f.SendJSON(header) }
+func (f *fakeSession) SendFrame(header any, body []byte) error {
+	b, _ := json.Marshal(header)
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	f.mu.Lock()
+	f.sent = append(f.sent, m)
+	f.frames = append(f.frames, fakeFrame{header: m, body: body})
+	f.mu.Unlock()
+	return nil
+}
 func (f *fakeSession) OnMessage(fn func(peerjs.Frame)) {
 	f.mu.Lock()
 	f.onMessage = fn
@@ -58,6 +76,25 @@ func (f *fakeSession) feed(frame peerjs.Frame) {
 	}
 }
 
+// sentFrames 返回已发送帧（含 body）副本。
+func (f *fakeSession) sentFrames() []fakeFrame {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]fakeFrame(nil), f.frames...)
+}
+
+func (f *fakeSession) sentFrameTypes() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.frames))
+	for _, fr := range f.frames {
+		if t, ok := fr.header["type"].(string); ok {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // sentTypes 返回已发送帧的 type 序列。
 func (f *fakeSession) sentTypes() []string {
 	f.mu.Lock()
@@ -74,10 +111,15 @@ func (f *fakeSession) sentTypes() []string {
 func newTestPeerJSService(t *testing.T) *PeerJSService {
 	t.Helper()
 	return &PeerJSService{
-		cfg:        &config.Config{},
-		storageDir: t.TempDir(),
-		fileIndex:  NewFileIndexService(t.TempDir()),
-		ctx:        context.Background(),
+		cfg:          &config.Config{},
+		storageDir:   t.TempDir(),
+		conns:        map[string]Session{},
+		pending:      map[Session]*connState{},
+		connecting:   map[string]struct{}{},
+		forwardRules: map[string][]int{},
+		fwNonces:     map[string]*fwdNonce{},
+		fileIndex:    NewFileIndexService(t.TempDir()),
+		ctx:          context.Background(),
 	}
 }
 

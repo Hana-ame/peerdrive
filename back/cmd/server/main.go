@@ -15,15 +15,17 @@ import (
 	stdlog "log"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
+	"peerdrive/internal/legacy"
 	"peerdrive/internal/log"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
-	"peerdrive/internal/legacy"
 	"peerdrive/internal/source"
 	"peerdrive/internal/transport"
 )
@@ -131,6 +133,28 @@ func main() {
 	if peerjsSvc != nil {
 		router.SetPeerJSService(peerjsSvc)
 		router.SetPeerJSConfig(cfg)
+		// 端口转发授权规则（forward v2）：PEERDRIVE_FORWARD_RULES="key:port,key2:port2"。
+		// key 即凭证（服务端 HMAC 验证用原文）——配置为敏感文件，建议 chmod 600。
+		if cfg.ForwardRules != "" {
+			rules := map[string][]int{}
+			for _, pair := range strings.Split(cfg.ForwardRules, ",") {
+				kv := strings.SplitN(pair, ":", 2)
+				if len(kv) != 2 || kv[0] == "" {
+					log.LogWarn("main: ignore bad forward rule %q", pair)
+					continue
+				}
+				port, err := strconv.Atoi(kv[1])
+				if err != nil || port <= 0 || port > 65535 {
+					log.LogWarn("main: ignore bad forward rule port %q", pair)
+					continue
+				}
+				rules[kv[0]] = append(rules[kv[0]], port)
+			}
+			if len(rules) > 0 {
+				peerjsSvc.SetForwardRules(rules)
+				log.LogInfo("main: forward rules loaded (%d keys)", len(rules))
+			}
+		}
 		// 统一 source 体系装配：本地磁盘（file_index + CAS）→ p2p 透传 → URL 源。
 		// 路由语义：本地优先命中即返回，未命中降级 peer；URL 源经模板注册
 		// （PEERDRIVE_URL_SOURCE_TEMPLATE），可为空。管理面 GET /sources。

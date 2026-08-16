@@ -172,6 +172,32 @@ internal/source/
   集成测试引用 `service.*` 的 M3 遗留已改 `transport.*`
 
 
+### 3.9 端口转发 forward v2（2026-08-16，inbound 一环重建）
+
+legacy 的 libp2p 流转发（`/peerdrive/forward/1.0.0`，明文 `KEY xxx` 单行认证、无
+白名单）已删除，改为 PeerJS DataChannel 上的 TCP 隧道（`internal/transport/forward.go`，
+约 470 行 + 8 个单测）：
+
+```
+client ──fwd-open {port, reqId}──────────────▶ server   申请转发目标端口
+client ◀──fwd-challenge {nonce, reqId}────────  server   一次性随机数(5min TTL, 上限64防洪水)
+client ──fwd-auth {hmac, reqId}──────────────▶ server   HMAC-SHA256(key, nonce)
+client ◀──fwd-ok / fwd-err────────────────────  server
+之后: fwd-data 头+二进制块双向透传（复用 SendFrame 原子头-块约束）; fwd-close 收尾
+```
+
+- **权限控制**：规则表 `key → 端口白名单`（配置 `PEERDRIVE_FORWARD_RULES="key:port,..."`
+  或运行时 `POST /p2p/forward/create` 动态登记）；端口越权 → fwd-err，不泄露规则
+- **密钥交换**：质询-响应（nonce 一次性+过期），key 明文永不落线；服务端验证需
+  key 原文（=凭证，配置 chmod 600）
+- **SSRF 防护**：服务端只 dial `127.0.0.1`；握手不占隧道槽，隧道建立才占连接级单槽
+- **API**：`PeerJSService.OpenForward(ctx, peerID, key, port)`（net.Conn）；HTTP 端点
+  4 个保留（create=登记规则 / connect=本地监听代理 / list / close）
+- 转发块写经连接级 worker（fwdCh，H5 同款）——TCP 背压不卡消息泵；
+  CloseForwardStream 主动断开即释放单槽
+- 验证：8 个单测（握手全流程/坏 key/端口越权/重放/超时/无隧道防御/数据透传）
+  + `-race` 全绿
+
 ## 4. 帧协议（DataChannel 上，go↔go 与 go↔web 共用）
 
 ```jsonc

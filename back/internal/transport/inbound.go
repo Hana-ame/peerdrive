@@ -310,6 +310,13 @@ func (s *PeerJSService) uploadWorker(c Session, st *connState) {
 					_ = c.SendJSON(dcResp{Type: "ack", Offset: ch.offset, ReqID: ch.up.reqID})
 				}
 			}
+		case ch := <-st.fwdCh:
+			// 转发块写隧道（H5 同款：IO 移出消息泵——对端 TCP 背压不卡泵）。
+			// 写失败（隧道已关/对端断开）静默丢弃：转发是尽力而为的流。
+			if _, err := ch.fw.out.Write(ch.data); err != nil {
+				log.LogDebug("peerjs: fwd write drop: %v", err)
+				ch.fw.out.Close()
+			}
 		case <-st.binDone:
 			return
 		}

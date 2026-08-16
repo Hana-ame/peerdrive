@@ -83,8 +83,8 @@ type Config struct {
 	RelayStorageMB int
 	RelayVersion   string
 
-	WebDAVEnable  bool
-	ForwardEnable bool
+	WebDAVEnable bool
+	ForwardRules string // PEERDRIVE_FORWARD_RULES: "key1:8080,key2:8443"（转发授权白名单,key 即凭证,配置文件建议 chmod 600）
 
 	IPFSCompatEnable bool   // PEERDRIVE_IPFS_COMPAT, 默认 false（opt-in）
 	IPFSBlockstore   string // PEERDRIVE_IPFS_BLOCKSTORE, 默认 "<storageDir>/ipfs-blocks"
@@ -162,11 +162,11 @@ func Load() *Config {
 		PeerJSSecure: getEnvBool("PEERDRIVE_PEERJS_SECURE", true),
 		PeerJSPeers:  getEnv("PEERDRIVE_PEERJS_PEERS", ""),
 
-		MQTTEnable:      getEnvBool("PEERDRIVE_MQTT_ENABLE", false),
-		MQTTBroker:      getEnv("PEERDRIVE_MQTT_BROKER", "tcp://broker.emqx.io:1883"),
-		MQTTTopicPref:   getEnv("PEERDRIVE_MQTT_TOPIC_PREFIX", "peerdrive/v1"),
-		MQTTCollections: getEnv("PEERDRIVE_MQTT_COLLECTIONS", ""),
-		DiscoverURL:     getEnv("PEERDRIVE_DISCOVER_URL", ""),
+		MQTTEnable:        getEnvBool("PEERDRIVE_MQTT_ENABLE", false),
+		MQTTBroker:        getEnv("PEERDRIVE_MQTT_BROKER", "tcp://broker.emqx.io:1883"),
+		MQTTTopicPref:     getEnv("PEERDRIVE_MQTT_TOPIC_PREFIX", "peerdrive/v1"),
+		MQTTCollections:   getEnv("PEERDRIVE_MQTT_COLLECTIONS", ""),
+		DiscoverURL:       getEnv("PEERDRIVE_DISCOVER_URL", ""),
 		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
 
 		DownloadDir: getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
@@ -178,8 +178,8 @@ func Load() *Config {
 		RelayStorageMB: getEnvInt("PEERDRIVE_RELAY_STORAGE_MB", 0),
 		RelayVersion:   getEnv("PEERDRIVE_RELAY_VERSION", "peerdrive/1.0.0"),
 
-		WebDAVEnable:  getEnvBool("PEERDRIVE_WEBDAV_ENABLE", true),
-		ForwardEnable: getEnvBool("PEERDRIVE_FORWARD_ENABLE", false),
+		WebDAVEnable: getEnvBool("PEERDRIVE_WEBDAV_ENABLE", true),
+		ForwardRules: getEnv("PEERDRIVE_FORWARD_RULES", ""),
 
 		IPFSCompatEnable: getEnvBool("PEERDRIVE_IPFS_COMPAT", false),
 		IPFSBlockstore:   getEnv("PEERDRIVE_IPFS_BLOCKSTORE", ""),

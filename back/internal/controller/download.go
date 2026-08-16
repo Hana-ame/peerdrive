@@ -19,10 +19,10 @@ import (
 	"strings"
 	"time"
 
+	"peerdrive/internal/legacy"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/provider"
-	"peerdrive/internal/legacy"
 	"peerdrive/pkg/hashutil"
 
 	"github.com/gin-gonic/gin"

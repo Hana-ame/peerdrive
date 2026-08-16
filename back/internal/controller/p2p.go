@@ -8,18 +8,22 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/Hana-ame/go-peerdrive-bt"
+	"peerdrive/internal/legacy"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/nodestate"
-	"github.com/Hana-ame/go-peerdrive-bt"
-	"peerdrive/internal/legacy"
 	"peerdrive/internal/service"
+	"peerdrive/internal/transport"
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
@@ -36,7 +40,7 @@ var peerTracker *legacy.PeerTracker
 var peerScanner *legacy.PeerScanner
 
 var pinSvc *service.PinService
-var forwardSvc *legacy.ForwardService
+var forwardPeer *transport.PeerJSService // PeerJS 版端口转发（forward v2，见 transport/forward.go）
 
 var ipfsCompatLayer *legacy.IPFSCompatLayer
 
@@ -49,15 +53,18 @@ func InitPeerScanner(s *legacy.PeerScanner) {
 	peerScanner = s
 }
 
-// InitForwardController 注入 ForwardService 实例供端口转发端点使用。
+// InitForwardController 注入 PeerJS 服务供端口转发端点使用（forward v2）。
+// 转发语义：本节点经 PeerJS DataChannel 把远端 peer 的本地端口暴露给自己——
+// create 端点登记本节点授权规则（key→端口白名单），connect 端点建立本地
+// loopback 监听并逐连接开隧道。legacy 的 libp2p ForwardService 已删除。
 // InitPinController 注入 PinService（M2 收层：pin 端点不再直调 repository）。
 func InitPinController(svc *service.PinService) {
 	pinSvc = svc
 }
 
-func InitForwardController(svc *legacy.ForwardService) {
+func InitForwardController(svc *transport.PeerJSService) {
 	log.LogDebug("ctrl-p2p: InitForwardController")
-	forwardSvc = svc
+	forwardPeer = svc
 }
 
 // InitP2PController 注入 P2PService 实例供 P2P 处理函数使用。
@@ -1221,22 +1228,34 @@ func BTSeedCollection(c *gin.Context) {
 	})
 }
 
-// --- Port Forwarding ---
+// --- Port Forwarding（forward v2：PeerJS DataChannel 隧道，见 transport/forward.go）---
 
-// CreateForwardSession 处理 POST /p2p/forward/create，注册本地服务端口供远程转发。
+// fwdListener 本端代理监听（connect 端点建立）：本地 loopback 端口收到的每条
+// TCP 连接 → 一条转发隧道（OpenForward）。
+type fwdListener struct {
+	key        string
+	targetPeer string
+	ln         net.Listener
+}
+
+var (
+	fwdListenersMu sync.Mutex
+	fwdListeners   = map[string]*fwdListener{} // key: "<target_peer>:<local_port>"
+)
+
+// CreateForwardSession 处理 POST /p2p/forward/create，登记本节点转发授权规则
+// （key → 端口白名单，运行时内存表；静态规则走配置 PEERDRIVE_FORWARD_RULES）。
 func CreateForwardSession(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: CreateForwardSession")
-	if forwardSvc == nil || !forwardSvc.IsEnabled() {
+	if forwardPeer == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "forward service not enabled"})
 		return
 	}
-
 	var req struct {
 		Key  string `json:"key"`
 		Port int    `json:"port"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		log.LogWarn("ctrl-p2p: CreateForwardSession invalid request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
@@ -1244,111 +1263,158 @@ func CreateForwardSession(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "key is required"})
 		return
 	}
-	if req.Port <= 0 || req.Port > 65535 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid port"})
-		return
-	}
-	if err := forwardSvc.CreateForward(req.Key, req.Port); err != nil {
+	if err := forwardPeer.AddForwardRule(req.Key, req.Port); err != nil {
 		log.LogError("ctrl-p2p: CreateForwardSession failed: %v", err)
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	log.LogInfo("ctrl-p2p: CreateForwardSession port=%d", req.Port)
-	c.JSON(http.StatusOK, gin.H{"status": "listening", "port": req.Port})
+	log.LogInfo("ctrl-p2p: CreateForwardSession rule added port=%d", req.Port)
+	c.JSON(http.StatusOK, gin.H{"status": "rule-added", "port": req.Port})
 }
 
-// ConnectForwardSession 处理 POST /p2p/forward/connect，连接远程对端并转发本地端口。
+// ConnectForwardSession 处理 POST /p2p/forward/connect：本地 loopback 起监听，
+// 每条本地 TCP 经一条转发隧道打到目标 peer 的授权端口（port=0 时目标按规则决定）。
 func ConnectForwardSession(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: ConnectForwardSession")
-	if forwardSvc == nil || !forwardSvc.IsEnabled() {
+	if forwardPeer == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "forward service not enabled"})
 		return
 	}
-
 	var req struct {
 		Key        string `json:"key"`
 		TargetPeer string `json:"target_peer"`
 		LocalPort  int    `json:"local_port"`
+		Port       int    `json:"port"` // 目标端口（可选：0 = 目标节点按规则唯一端口）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.LogWarn("ctrl-p2p: ConnectForwardSession invalid request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
-	if req.Key == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "key is required"})
+	if req.Key == "" || req.TargetPeer == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "key and target_peer are required"})
 		return
 	}
 	if req.LocalPort <= 0 || req.LocalPort > 65535 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid local_port"})
 		return
 	}
-	pid, err := peer.Decode(req.TargetPeer)
-	if err != nil {
-		log.LogWarn("ctrl-p2p: ConnectForwardSession invalid peer: %s", req.TargetPeer)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid target_peer"})
+	if req.Port != 0 && (req.Port <= 0 || req.Port > 65535) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid port"})
 		return
 	}
+	// 幂等：同 key+端口已有监听则直接返回（前端重试/重复点击不炸）
+	key2 := fmt.Sprintf("%s:%d", req.TargetPeer, req.LocalPort)
+	fwdListenersMu.Lock()
+	if _, ok := fwdListeners[key2]; ok {
+		fwdListenersMu.Unlock()
+		c.JSON(http.StatusOK, gin.H{"status": "connected", "local_port": req.LocalPort})
+		return
+	}
+	fwdListenersMu.Unlock()
 
-	ctx := c.Request.Context()
-	if err := forwardSvc.ConnectForward(ctx, pid, req.Key, req.LocalPort); err != nil {
-		log.LogError("ctrl-p2p: ConnectForwardSession failed: %v", err)
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", req.LocalPort))
+	if err != nil {
+		log.LogWarn("ctrl-p2p: ConnectForwardSession listen failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	log.LogInfo("ctrl-p2p: ConnectForwardSession target=%s local_port=%d", req.TargetPeer, req.LocalPort)
+	fl := &fwdListener{key: req.Key, targetPeer: req.TargetPeer, ln: ln}
+	fwdListenersMu.Lock()
+	fwdListeners[key2] = fl
+	fwdListenersMu.Unlock()
+	go acceptForwardTunnels(fl, req.Port)
+	log.LogInfo("ctrl-p2p: ConnectForwardSession listening 127.0.0.1:%d -> %s", req.LocalPort, req.TargetPeer)
 	c.JSON(http.StatusOK, gin.H{"status": "connected", "local_port": req.LocalPort})
 }
 
-// ListForwardSessions 处理 GET /p2p/forward/list，返回所有活跃的端口转发会话。
-func ListForwardSessions(c *gin.Context) {
-	log.LogDebug("ctrl-p2p: ListForwardSessions")
-	if forwardSvc == nil || !forwardSvc.IsEnabled() {
-		c.JSON(http.StatusOK, gin.H{"sessions": []interface{}{}})
-		return
-	}
-	sessions := forwardSvc.ListSessions()
-	items := make([]gin.H, len(sessions))
-	for i, s := range sessions {
-		items[i] = gin.H{
-			"key":         s.Key,
-			"source_peer": s.SourcePeer.String(),
-			"local_port":  s.LocalPort,
-			"created_at":  s.CreatedAt,
-			"clients":     s.Clients,
+// acceptForwardTunnels 为每个本地 TCP 连接开一条转发隧道并双向透传。
+// 语义：连接建立失败（坏 key/端口越权/隧道占用）只断这一条，监听继续。
+func acceptForwardTunnels(fl *fwdListener, targetPort int) {
+	defer fl.ln.Close()
+	for {
+		tcp, err := fl.ln.Accept()
+		if err != nil {
+			return // 监听关闭
 		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			tun, err := forwardPeer.OpenForward(ctx, fl.targetPeer, fl.key, targetPort)
+			if err != nil {
+				log.LogWarn("ctrl-p2p: forward tunnel to %s failed: %v", fl.targetPeer, err)
+				tcp.Close()
+				return
+			}
+			go pipeTCPForward(tcp, tun)
+		}()
 	}
-	log.LogInfo("ctrl-p2p: ListForwardSessions count=%d", len(items))
-	c.JSON(http.StatusOK, gin.H{"sessions": items})
 }
 
-// CloseForwardSession 处理 POST /p2p/forward/close，关闭指定 key 的端口转发会话。
+// pipeTCPForward 双向透传本地 TCP ↔ 转发隧道。任一侧 EOF/错误即双向关闭：
+// 隧道侧关闭会触发 pump 的 fwd-close 通知对端清槽（见 transport/forward.go）。
+func pipeTCPForward(tcp net.Conn, tun net.Conn) {
+	done := make(chan struct{}, 2)
+	go func() {
+		io.Copy(tcp, tun)
+		done <- struct{}{}
+	}()
+	io.Copy(tun, tcp)
+	done <- struct{}{}
+	<-done
+	tcp.Close()
+	tun.Close()
+}
+
+// ListForwardSessions 处理 GET /p2p/forward/list，返回本端活跃监听与隧道。
+func ListForwardSessions(c *gin.Context) {
+	log.LogDebug("ctrl-p2p: ListForwardSessions")
+	listeners := []gin.H{}
+	fwdListenersMu.Lock()
+	for k, fl := range fwdListeners {
+		listeners = append(listeners, gin.H{"id": k, "target_peer": fl.targetPeer, "local_port": fl.ln.Addr().String()})
+	}
+	fwdListenersMu.Unlock()
+	tunnels := []gin.H{}
+	if forwardPeer != nil {
+		for _, t := range forwardPeer.ListForwardStreams() {
+			tunnels = append(tunnels, gin.H{"peer_id": t.PeerID, "port": t.Port, "key_id": t.KeyID})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"listeners": listeners, "tunnels": tunnels})
+}
+
+// CloseForwardSession 处理 POST /p2p/forward/close，关闭指定 key 的本端监听
+// （活跃隧道由隧道两端自然收尾；断开指定 peer 的全部隧道可用 peer_id）。
 func CloseForwardSession(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: CloseForwardSession")
-	if forwardSvc == nil || !forwardSvc.IsEnabled() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "forward service not enabled"})
-		return
-	}
-
 	var req struct {
-		Key string `json:"key"`
+		Key    string `json:"key"`
+		PeerID string `json:"peer_id,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		log.LogWarn("ctrl-p2p: CloseForwardSession invalid request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
-	if req.Key == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "key is required"})
+	closed := 0
+	fwdListenersMu.Lock()
+	for k, fl := range fwdListeners {
+		if req.Key != "" && fl.key != req.Key {
+			continue
+		}
+		fl.ln.Close()
+		delete(fwdListeners, k)
+		closed++
+	}
+	fwdListenersMu.Unlock()
+	if forwardPeer != nil && req.PeerID != "" {
+		forwardPeer.CloseForwardStream(req.PeerID)
+	}
+	if closed == 0 && req.PeerID == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no matching forward session"})
 		return
 	}
-	if err := forwardSvc.CloseForward(req.Key); err != nil {
-		log.LogWarn("ctrl-p2p: CloseForwardSession not found")
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	}
-	log.LogInfo("ctrl-p2p: CloseForwardSession closed")
-	c.JSON(http.StatusOK, gin.H{"status": "closed"})
+	c.JSON(http.StatusOK, gin.H{"status": "closed", "closed_listeners": closed})
 }
 
 // AuthStatus 处理 GET /p2p/auth/status，返回当前节点的认证状态。

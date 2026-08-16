@@ -28,6 +28,7 @@ package transport
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -60,6 +61,9 @@ type dcResp struct {
 	Seq     int64      `json:"seq,omitempty"`
 	Files   []FileInfo `json:"files"`
 	LastSeq int64      `json:"lastSeq,omitempty"`
+	Nonce   string     `json:"nonce,omitempty"` // fwd-challenge：一次性质询（forward.go）
+	Hmac    string     `json:"hmac,omitempty"`  // fwd-auth：HMAC-SHA256(key, nonce)
+	Port    int        `json:"port,omitempty"`  // fwd-open：客户端声明的目标端口
 }
 
 // connState 记录一条连接上的请求状态机与响应路由。
@@ -79,6 +83,19 @@ type connState struct {
 	// 内完成（廉价），worker 只做 IO，保序由单 worker 保证。
 	binCh   chan binaryChunk
 	binDone chan struct{}
+
+	// forward 转发隧道（单槽，forward.go）：同一连接同时一条活跃转发流。
+	// fwdHandshake 是握手等待状态（fwd-open 发出 → ok/err 到达前占位）。
+	fwd   *fwdStream
+	fwdHs *fwdHandshake
+	fwdCh chan fwdChunk // fwd 块 → 连接级 worker 写隧道（有界背压，同 binCh）
+}
+
+// fwdChunk 一块待写入隧道的转发数据（归属随块携带——隧道可能已换/已关，
+// worker 写已关 out 报错即丢弃，符合「转发是尽力而为的流」语义）。
+type fwdChunk struct {
+	fw   *fwdStream
+	data []byte
 }
 
 // binaryChunk 一个待落盘的上传分片（路由已在消息泵确定，worker 只做 IO）。
@@ -128,6 +145,7 @@ func (s *PeerJSService) bindConn(c Session) {
 		fetches: make(map[string]*fetchState),
 		binCh:   make(chan binaryChunk, 16),
 		binDone: make(chan struct{}),
+		fwdCh:   make(chan fwdChunk, 16),
 	}
 	s.pendingMu.Lock()
 	s.pending[c] = st
@@ -165,6 +183,25 @@ func (s *PeerJSService) bindConn(c Session) {
 				go s.serveDelete(c, r)
 			case "sync":
 				go s.serveSync(c, r)
+			case "fwd-open":
+				go s.serveForwardOpen(c, st, r)
+			case "fwd-auth":
+				go s.serveForwardAuth(c, st, r)
+			case "fwd-data":
+				// 转发数据头（forward.go）：声明「下一个二进制块归转发隧道」。
+				// 头-块连续约束与文件传输一致（SendFrame 原子发送），泵内按帧序
+				// 处理故无竞态；非法（无隧道/已关）时静默丢弃并清 pending。
+				st.mu.Lock()
+				fw := st.fwd
+				if fw != nil && !fw.closed {
+					fw.pending = true
+				}
+				st.mu.Unlock()
+			case "fwd-close":
+				go s.serveForwardClose(c, st, r)
+			case "fwd-challenge", "fwd-ok", "fwd-err":
+				// 客户端侧握手响应（OpenForward 等待中）——与文件拉取响应同槽路由
+				s.routeForwardResponse(st, r)
 			default:
 				s.routeResponse(st, r)
 			}
@@ -173,6 +210,17 @@ func (s *PeerJSService) bindConn(c Session) {
 		// 二进制数据块：路由决策在泵内（廉价、保持与文本帧的顺序一致性），
 		// 落盘 IO（WriteAt/Complete）交给连接级 worker（H5）
 		st.mu.Lock()
+		fw := st.fwd
+		if fw != nil && fw.pending && !fw.closed {
+			// 转发块：投递到 fwdCh（有界背压，worker 写隧道；连接关闭放行）
+			fw.pending = false
+			select {
+			case st.fwdCh <- fwdChunk{fw: fw, data: msg.Data}:
+			case <-st.binDone:
+			}
+			st.mu.Unlock()
+			return
+		}
 		up := st.pendingUpload
 		if up != nil {
 			up.got += int64(len(msg.Data))
@@ -214,6 +262,7 @@ func (s *PeerJSService) bindConn(c Session) {
 		delete(s.pending, c)
 		s.pendingMu.Unlock()
 		if st != nil {
+			var fwdOut net.Conn
 			st.mu.Lock()
 			for _, f := range st.fetches {
 				// 连接关闭：通知 fetch reader 退出（errCh），并放行 pump 投递阻塞
@@ -228,10 +277,18 @@ func (s *PeerJSService) bindConn(c Session) {
 					close(f.closed)
 				}
 			}
+			// forward：隧道随之死亡——关 out 释放读侧（forwardPump 退出），
+			// 调用方（OpenForward 返回的 net.Conn）读侧随即 EOF
+			if st.fwd != nil {
+				fwdOut = st.fwd.out
+			}
 			st.mu.Unlock()
 			// H5：通知上传 worker 退出（未消费的分片直接丢弃——连接已死，
 			// 会话残留由 file_index 的 10 分钟 reap 清理）
 			close(st.binDone)
+			if fwdOut != nil {
+				fwdOut.Close()
+			}
 		}
 		log.LogInfo("peerjs: connection closed from %s", c.ID())
 	})

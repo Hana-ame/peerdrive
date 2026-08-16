@@ -25,13 +25,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Hana-ame/go-peerdrive-bt"
 	"peerdrive/internal/config"
 	"peerdrive/internal/controller"
+	"peerdrive/internal/legacy"
 	"peerdrive/internal/log"
-	"github.com/Hana-ame/go-peerdrive-bt"
 	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
-	"peerdrive/internal/legacy"
 	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -110,14 +110,9 @@ func SetupRouter(
 	controller.InitTaskController(service.NewTaskService())
 	controller.InitPinController(service.NewPinService())
 
-	// Initialize the port forwarding service.
-	var forwardSvc *legacy.ForwardService
-	if p2pSvc != nil && p2pSvc.Host != nil {
-		forwardSvc = legacy.NewForwardService(p2pSvc.Host, cfg.ForwardEnable)
-	} else {
-		forwardSvc = legacy.NewForwardService(nil, false)
-	}
-	controller.InitForwardController(forwardSvc)
+	// 端口转发服务（PeerJS DataChannel 版，forward.go）：规则表由 main 装配时
+	// SetForwardRules 注入（配置 PEERDRIVE_FORWARD_RULES），运行时端点可动态追加。
+	controller.InitForwardController(peerjsService)
 
 	// Initialize BitTorrent DHT service if enabled.
 	var btSvc *p2p_bt.BTDHTService

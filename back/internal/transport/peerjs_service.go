@@ -63,6 +63,13 @@ type PeerJSService struct {
 
 	fileIndex *FileIndexService // sha256 → 绝对路径 索引（create/upload/list/info/sync）
 
+	// forward 转发授权规则（key 原文 → 端口白名单）与待验证质询（forward.go）。
+	// 规则即凭证：运行时动态增删（端点）与配置装载（SetForwardRules）共用同一锁。
+	forwardMu    sync.Mutex
+	forwardRules map[string][]int
+	nonceMu      sync.Mutex
+	fwNonces     map[string]*fwdNonce // reqId → 质询（取出即标 used，防重放）
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -76,17 +83,19 @@ func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &PeerJSService{
-		cfg:        cfg,
-		storageDir: storageDir,
-		id:         id,
-		iceServers: parseICEServers(cfg.WebRTCSTUNServer, cfg.WebRTCTURNServer),
-		conns:      make(map[string]Session),
-		pending:    make(map[Session]*connState),
-		connecting: make(map[string]struct{}),
-		fileIndex:  NewFileIndexService(cfg.DownloadDir),
-		closed:     make(chan struct{}),
-		ctx:        ctx,
-		cancel:     cancel,
+		cfg:          cfg,
+		storageDir:   storageDir,
+		id:           id,
+		iceServers:   parseICEServers(cfg.WebRTCSTUNServer, cfg.WebRTCTURNServer),
+		conns:        make(map[string]Session),
+		pending:      make(map[Session]*connState),
+		connecting:   make(map[string]struct{}),
+		fileIndex:    NewFileIndexService(cfg.DownloadDir),
+		forwardRules: make(map[string][]int),
+		fwNonces:     make(map[string]*fwdNonce),
+		closed:       make(chan struct{}),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 }
 

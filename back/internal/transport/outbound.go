@@ -121,10 +121,10 @@ type fetchReader struct {
 	verify  bool
 	cleanup func()
 
-	buf    []byte
-	h      hash.Hash
-	eof    bool
-	err    error
+	buf []byte
+	h   hash.Hash
+	eof bool
+	err error
 }
 
 func (r *fetchReader) Read(p []byte) (int, error) {

@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"peerdrive/internal/log"
-	"peerdrive/pkg/hashutil"
 	"peerdrive/internal/repository"
+	"peerdrive/pkg/hashutil"
 )
 
 // FileIndexService 本地文件索引服务：sha256 → 绝对路径 映射（SQLite 持久化）。
