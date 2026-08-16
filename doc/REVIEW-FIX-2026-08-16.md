@@ -57,3 +57,41 @@
 ### 6. 迁移遗留测试文件归位
 - **问题**：`internal/service` 中 `p2p_test.go`、`universal_downloader_test.go` 仍引用已迁到 `internal/legacy` 的符号，导致 `go test ./internal/...` 编译失败。
 - **修复**：把两个测试移到 `internal/legacy` 并改包名。
+
+---
+
+## 第二轮：前端活跃代码 bug 修复（2026-08-16）
+
+针对活跃主链路（AnonExplorer/AnonCreator/Explorer/Plaza/FileTree）的专项排查修复。
+
+### 高严重度
+
+1. **AnonExplorer 竞态：陈旧响应覆盖当前合集**
+   - 切 hash 时旧请求慢响应会覆盖新合集内容。修复：`fetchSeqRef` 序号守卫，序号不匹配的响应直接丢弃（`AnonExplorer/index.jsx`）。
+
+2. **重命名/移动文件夹产生孤儿子条目**
+   - 旧 `renameEntry` 只改精确匹配条目；文件夹改名后子条目路径不变、浮到根部。修复：`renameEntry` 支持目录前缀级联；新增 `moveEntry`（目录连带子条目、防拖进自己子目录），FileTree 树内拖拽统一走 `onMove`（移动语义去源），外部面板拖拽才走 `onDrop`（复制语义）；文件夹拖动补写 `application/peerdrive-entry` 数据（旧只有无人读的 `peerdrive-path`）。
+
+3. **合并弹窗匿名合集无法作为合并源**
+   - 选项 value 是 hash 而匹配键是 "user/coll" → 永远匹配不到、静默失败。修复：匹配键支持 hash；后端无匿名合并端点，前端用 `addCollectionEntry` 逐条实现匿名合并，语义对齐后端 strategy（ours/theirs/manual）。
+
+4. **合并 manual 策略 409 无冲突 UI**
+   - 后端 409 返回 `{conflicts}`，旧实现只 alert。修复：`api.js` 把 `status/data` 挂到 Error；Explorer 弹窗内展示冲突清单并支持「保留本地/采用远端」重试。
+
+5. **Plaza 天线 tab 是死胡同**
+   - BEP51 采样的是 torrent DHT 的 20 字节 infohash，永远取不到 peerdrive 合集 announce 的 256 位 hash → 打开的闭环不可达。修复：删除天线 tab 及轮询；同步删除 AnonExplorer「📡 广播」按钮（广播端无读取端）。
+
+6. **查看空合集触发删除副作用**
+   - GET 流程里 `deleteFile(h)` 会真实删除存储，401 被吞后提示语与事实不符。修复：只展示错误提示，不自动删除。
+
+### 中严重度
+
+7. `TextPreview` 加 `res.ok` 校验（错误体不再当文本展示）
+8. `FileRow` 移除误导性的合集创建时间戳（anon 条目无逐文件时间）
+9. `Explorer` 两个「保存」按钮语义区分：头部改名「同步到本地」、commit 栏改名「提交版本」
+10. Settings 双 IPFS 开关（localStorage 假开关 vs 后端真开关共享同一 state）→ 删除假开关区
+11. `LLMAssistant` 每轮清空对话 → 携带最近 20 条历史，UI 追加而非替换
+12. `Navbar` 搜索结果空时 activeIdx 置 -1 → 钳到 0
+13. AnonExplorer 返回按钮 `navigate(-1)` 无历史时直接离开 SPA → 历史不足回首页
+14. `CommentSection` 拉评论无竞态保护 → seq 守卫（同 AnonExplorer 模式）
+15. Settings 自定义连接后 `activeBackendId=null` → 改为落成正式后端（同 URL 复用 / 新建「自定义」）

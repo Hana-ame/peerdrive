@@ -66,21 +66,34 @@
 
 ## 二、前端旧代码（front/src）
 
-### F. 死代码组件（无任何 import）— **可删**，约 4000 行
+### F. 死代码组件（无任何 import）— ✅ 已删（2026-08-16 前端重构批次）
 
 | 文件 | 行数 | 备注 |
 |---|---|---|
-| `pages/FileManager.jsx` | 1311 | 路由 `/files` 被重定向，永不可达；内含 rules-of-hooks 违规 + 未定义函数 |
+| `pages/FileManager.jsx` | 1311 | 路由 `/files` 已从 App.jsx 移除 |
 | `components/ServiceStatus.jsx` | 699 | |
-| `components/P2PStatus.jsx` | 658 | 无 import 引用 |
-| `components/WebRTCTransfer.jsx` | 588 | 旧自建 WebRTC，被 peerjs 方案取代；含 stale closure 等雷 |
-| `components/WebRTCPeer.jsx` | 191 | 同上，连接泄漏 |
+| `components/P2PStatus.jsx` | 658 | |
+| `components/WebRTCTransfer.jsx` | 588 | |
+| `components/WebRTCPeer.jsx` | 191 | |
 | `components/UserGroupPicker.jsx` | 145 | |
 | `components/PathRegistrar.jsx` | 107 | |
 | `components/Sha256Manager.jsx` | 79 | |
 | `components/VisibilityPicker.jsx` | 31 | |
-| `components/MobileNav.jsx` | 15 | 被 App.jsx import 但恒渲染 null |
-| `pages/AnonCreator/{TimelineView, RegisteredView, SourceFilters, SourceTabs, SplitHandle, Toast, CollectionHeader, CollBrowserNav}.jsx` | ~218 | 无 import |
+| `components/MobileNav.jsx` | 15 | 原被 App.jsx import 但恒渲染 null，已随路由清理移除 |
+| `pages/AnonCreator/{TimelineView, RegisteredView, SourceFilters, SourceTabs, SplitHandle, Toast, CollectionHeader}.jsx` | ~200 | |
+| `components/ActiveConnPanel.jsx`、`PeerDetailPanel.jsx` | ~200 | 仅被 P2PStatus 引用，随之一并删除 |
+| `storage/localDB.js` + `syncManager.js` | ~350 | 无任何 import 的孤儿 |
+
+**注意（原清单勘误）**：`pages/AnonCreator/CollBrowserNav.jsx` 曾被列为死代码，实际被活跃的
+`CollBrowser.jsx` import，**保留未删**。相关清理同步完成：
+- 路由移除 `/files`；Plaza 空状态「浏览文件管理器」按钮随之删除
+- api.js 死导出删除：`WS_TRANSFER_URL*` / `getWSTransferURL` / `forkAnonCollection` /
+  `commitAnonCollection` / `uploadConsent`（保留 saveConsentLocal）/ `setIPFSEnabled` /
+  `setCollectionVisibility` / `getTaskStatus` / `getRegServerStats` / `getServiceStats` /
+  `getRegServerUrl` / `p2pFetch` / `p2pSync` / `p2pPush` / `getPeersDetail` / `getPeerDetail` /
+  `getP2PStats` / `getConnections` / `btGetStats` / `updateCollectionTags` / `pullUserCollection`
+- Settings「网络协议」区的 IPFS 网络 / BT DHT 网络两个假开关（只写死 localStorage，无读取端）已删除
+- 测试与删除对象对齐（smoke/components 测试移除死组件用例）
 
 ### G. 旧 API 调用（api.js 中指向被删/被替代后端）
 
@@ -103,6 +116,7 @@
 ## 三、删除顺序建议（依赖优先）
 
 1. **M1**：前端 F 组死组件（无依赖，-4000 行）+ `webdav.go` + `forward.go`（高危）
+   - ✅ 前端 F 组已删（2026-08-16，见 F 节勘误）；`webdav.go` / `forward.go` 待办
 2. **M2**：后端 A 组 libp2p 栈（先确认 `controller/p2p.go` 中哪些端点还有前端调用）
 3. **M3**：BT 栈（拆 `p2p_bt/` 为独立库后从主模块移除）
 4. **M4**：杂项（cmd/p2p-test、manual-tests、peerdrive.db、auth 死代码）
