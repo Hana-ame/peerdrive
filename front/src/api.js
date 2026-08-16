@@ -123,10 +123,6 @@ function setApiBase(url) {
   }
 }
 
-function getApiBaseUrl() {
-  return getApiBase();
-}
-
 // Returns the auth token from URL fragment or settings page, or empty string.
 // URL fragment token (peerdrive_auth_token) is always sent when present.
 // Legacy settings token (peerdrive_auth_key) requires the toggle to be enabled.
@@ -194,8 +190,6 @@ export const getAnonCollection = (hash) => request('GET', `/collections/${hash}`
 // 不编码会破坏 URL；后端 gin *filepath 已对 URL.Path 解码，编码后服务端比对仍正确）
 const encodePath = (p) => (p || '').split('/').map(encodeURIComponent).join('/');
 export const getAnonFileDownloadUrl = (hash, p) => `${getApiBase()}/collections/${encodeURIComponent(hash)}/${encodePath(p)}`;
-export const forkAnonCollection = (source_hash, add_entries, remove_paths, friendly_name = '') =>
-  request('POST', '/anon/collections/fork', { source_hash, add_entries, remove_paths, friendly_name });
 
 /* ---- user collections ---- */
 export const createUserCollection = (username, collection_name, visibility = 'public', tags = []) =>
@@ -204,8 +198,6 @@ export const getUserCollections = (username) =>
   request('GET', `/collections/${username}`);
 export const getUserCollection = (username, coll) =>
   request('GET', `/collections/${username}/${coll}`);
-export const updateCollectionTags = (username, coll, tags) =>
-  request('POST', `/collections/${username}/${coll}/tags`, { tags });
 export const addCollectionEntry = (username, coll, path, hash) =>
   request('POST', `/collections/${username}/${coll}/entries`, { path, hash });
 export const removeCollectionEntry = (username, coll, path) =>
@@ -220,16 +212,8 @@ export const forkUserCollection = (username, source_username, coll, source_coll)
   request('POST', '/actions/fork', { username, source_username, collection_name: coll, source_coll_name: source_coll });
 export const mergeUserCollection = (username, source_username, coll, source_coll, strategy = 'ours') =>
   request('POST', '/actions/merge', { username, source_username, collection_name: coll, source_coll_name: source_coll, strategy });
-export const pullUserCollection = (username, coll) =>
-  request('POST', '/actions/pull', { username, collection_name: coll });
 export const getUserFileDownloadUrl = (username, coll, filepath) =>
   `${getApiBase()}/${encodeURIComponent(username)}/${encodeURIComponent(coll)}/${encodePath(filepath)}`;
-
-/* ---- P2P Detail + Stats ---- */
-export const getPeersDetail = () => request('GET', '/p2p/peers/detail');
-export const getPeerDetail = (peerId) => request('GET', `/p2p/peers/detail/${peerId}`);
-export const getP2PStats = () => request('GET', '/p2p/stats');
-export const getConnections = () => request('GET', '/p2p/connections');
 
 /* ---- P2P ---- */
 export const getP2PStatus = () => request('GET', '/p2p/status');
@@ -247,14 +231,6 @@ export const connectPeer = (peerId, addrs = []) => {
   return request('POST', '/p2p/connect', { addr: withPeer[0] });
 };
 export const p2pAnnounce = (hash) => request('POST', '/p2p/announce', { hash });
-export const p2pFetch = (peerId, hash) => request('POST', '/p2p/fetch', { peer_id: peerId, hash });
-// 后端 POST /p2p/sync 绑定 {peer_id, hash, file_hashes, target_dir}（back p2p.go SyncFromPeer），
-// 旧实现发 collection_name 被忽略 → 400 "no files to sync"。
-export const p2pSync = (peerId, hash) =>
-  request('POST', '/p2p/sync', { peer_id: peerId, hash });
-// 后端 POST /p2p/push 绑定 {hash, entries, target_dir}（PushSync），old collection_name 同理失效。
-export const p2pPush = (peerId, hash) =>
-  request('POST', '/p2p/push', { peer_id: peerId, hash });
 export const p2pRequestFile = (hash) => request('POST', '/p2p/request-file', { hash });
 export const getWSInfo = () => request('GET', '/p2p/ws/info');
 export const getSignalPeers = () => request('GET', '/p2p/status').then(r => r.signal_peers || []);
@@ -286,7 +262,6 @@ export const btPauseDownload = (infohash) => request('POST', `/bt/download/${inf
 export const btResumeDownload = (infohash) => request('POST', `/bt/download/${infohash}/resume`);
 export const btSeedDownload = (infohash) => request('POST', `/bt/download/${infohash}/seed`);
 export const btStopSeed = (infohash) => request('POST', `/bt/download/${infohash}/unseed`);
-export const btGetStats = () => request('GET', '/bt/stats');
 export const btGetTorrentUrl = (infohash) => `${getApiBase()}/bt/download/${infohash}/torrent`;
 export const btGetMagnetUri = (infohash) => request('GET', `/bt/download/${infohash}/magnet`);
 export const btSeedCollection = (collectionHash) => request('POST', '/bt/seed-collection', { collection_hash: collectionHash });
@@ -295,18 +270,7 @@ export const btSeedCollection = (collectionHash) => request('POST', '/bt/seed-co
 export const dualAnnounce = (hash) => request('POST', '/p2p/dual/announce', { hash });
 export const dualFind = (hash) => request('POST', '/p2p/dual/find', { hash });
 
-export { getApiBaseUrl as WS_TRANSFER_URL_BASE };
-// 运行时计算 WS 地址：后端可在设置页切换，避免模块加载时固化的旧地址。
-export function getWSTransferURL() {
-  return getApiBase().replace(/^http/, 'ws') + '/ws/transfer';
-}
-// 兼容旧代码（注意：这是模块加载时的快照，切换后端后不刷新；新代码请用 getWSTransferURL()）。
-export const WS_TRANSFER_URL = getWSTransferURL();
-
 /* ---- anon collection commit ---- */
-export const commitAnonCollection = (source_hash, entries, commit_message = '') =>
-  request('POST', '/anon/collections/commit', { source_hash, entries, commit_message });
-
 export const listAnonCollections = () => request('GET', '/anon/collections');
 
 /* ---- search ---- */
@@ -315,9 +279,6 @@ export const searchCollections = (q) =>
 
 export const listPublicCollections = (q = '') =>
   request('GET', `/collections/public${q ? '?q=' + encodeURIComponent(q) : ''}`);
-
-export const setCollectionVisibility = (username, coll, visibility) =>
-  request('POST', `/collections/${username}/${coll}/visibility`, { visibility });
 
 /* ---- file upload/delete ---- */
 export const uploadFile = (file) => {
@@ -335,7 +296,6 @@ export const deleteFile = (hash) => request('DELETE', `/files/${hash}`);
 
 /* ---- task status ---- */
 export const getTasks = () => request('GET', '/tasks');
-export const getTaskStatus = (id) => request('GET', `/tasks/${id}`);
 
 /* ---- health ---- */
 export const ping = () => request('GET', '/ping');
@@ -404,7 +364,6 @@ export function setTurnCredential(v) { localStorage.setItem(TURN_CREDENTIAL_KEY,
 const IPFS_ENABLED_KEY = 'peerdrive_ipfs_enabled';
 
 export function getIPFSEnabled() { return localStorage.getItem(IPFS_ENABLED_KEY) !== 'false'; }
-export function setIPFSEnabled(v) { localStorage.setItem(IPFS_ENABLED_KEY, v ? 'true' : 'false'); }
 
 /* ---- IPFS compat layer (server-side) ---- */
 
@@ -469,8 +428,6 @@ export { DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_MODEL, DEFAULT_LLM_BODY, FREE_LLM_MOD
 export async function saveConsentLocal() {
   localStorage.setItem('peerdrive_consent', JSON.stringify({ agreed: true, timestamp: Date.now() }));
 }
-// 兼容旧调用（保留别名，但新代码应使用 saveConsentLocal）。
-export const uploadConsent = saveConsentLocal;
 
 /* ---- alias exports for legacy usage ---- */
 // 统一 Collection API（替代旧的 createUserCollection/createAnonCollection 等）
@@ -542,91 +499,10 @@ export async function postComment(regServerUrl, hash, content, token) {
   return res.json();
 }
 
-export async function getRegServerStats(regServerUrl) {
-  const res = await fetch(`${regServerUrl}/stats`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-/* ---- service status dashboard ---- */
 const REG_SERVER_KEY = 'peerdrive_reg_server_url';
-
-export function getRegServerUrl() {
-  return localStorage.getItem(REG_SERVER_KEY) || '';
-}
 
 export function setRegServerUrl(url) {
   localStorage.setItem(REG_SERVER_KEY, url);
 }
 
-export async function getServiceStats({ regServerUrl } = {}) {
-  const results = {
-    relay: { ok: false, data: null, error: null },
-    reg: { ok: false, data: null, error: null },
-    storage: { ok: false, data: null, error: null },
-    bt: { ok: false, data: null, error: null },
-    ws: { ok: false, data: null, error: null },
-  };
-
-  try {
-    const data = await getP2PStatus();
-    results.relay = { ok: true, data, error: null };
-  } catch (e) {
-    results.relay = { ok: false, data: null, error: e.message };
-  }
-
-  try {
-    const data = await getBTStatus();
-    results.bt = { ok: true, data, error: null };
-  } catch (e) {
-    results.bt = { ok: false, data: null, error: e.message };
-  }
-
-  try {
-    const files = await listFiles();
-    const totalFiles = files.length;
-    const totalSize = files.reduce((sum, f) => sum + (f.size || 0), 0);
-    results.storage = { ok: true, data: { totalFiles, totalSize, files }, error: null };
-  } catch (e) {
-    results.storage = { ok: false, data: null, error: e.message };
-  }
-
-  if (regServerUrl) {
-    try {
-      const res = await fetch(`${regServerUrl}/ping`);
-      let pingData;
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('json')) {
-        pingData = await res.json();
-      } else {
-        pingData = { raw: await res.text() };
-      }
-
-      let jwtData = null;
-      const authEnabled = localStorage.getItem('peerdrive_auth_header_enabled') === 'true';
-      const token = localStorage.getItem('peerdrive_auth_key');
-      if (authEnabled && token) {
-        try {
-          const jwtRes = await fetch(`${regServerUrl}/auth/whoami`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (jwtRes.ok) jwtData = await jwtRes.json();
-        } catch { /* ignore JWT errors */ }
-      }
-
-      results.reg = { ok: true, data: { ping: pingData, jwt: jwtData }, error: null };
-    } catch (e) {
-      results.reg = { ok: false, data: null, error: e.message };
-    }
-  }
-
-  try {
-    const data = await getWSInfo();
-    results.ws = { ok: true, data, error: null };
-  } catch (e) {
-    results.ws = { ok: false, data: null, error: e.message };
-  }
-
-  return results;
-}
 export const getBEP51Sample = () => request('GET', '/bt/bep51/sample');

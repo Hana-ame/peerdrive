@@ -13,9 +13,7 @@ import BTController from './pages/BTController';
 import P2PPanel from './pages/P2PPanel';
 import P2PTopology from './pages/P2PTopology';
 import DHTExplorer from './pages/DHTExplorer';
-import FileManager from './pages/FileManager';
 import Navbar from './components/Navbar';
-import MobileNav from './components/MobileNav';
 import LLMAssistant from './components/LLMAssistant';
 import { getDataConsent } from './api';
 
@@ -97,7 +95,6 @@ export default function App() {
             <div className="flex-1 overflow-hidden">
               <Routes>
                 <Route path="/" element={<Plaza />} />
-                <Route path="/files" element={<FileManager />} />
                 <Route path="/:username/:collName" element={
                   // 64 位 hex → 视为合集 hash，转统一路由
                   <HashRedirect><Explorer /></HashRedirect>
@@ -121,7 +118,6 @@ export default function App() {
               </Routes>
             </div>
             <LLMAssistant />
-            <MobileNav />
           </div>
         </BrowserRouter>
           </AppErrorBoundary>

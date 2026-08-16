@@ -137,9 +137,6 @@ export default function Plaza() {
               <button onClick={() => navigate('/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">
                 + 创建合集
               </button>
-              <button onClick={() => navigate('/files')} className="bg-gray-700 hover:bg-gray-600 text-gray-300 px-4 py-2 rounded text-sm">
-                浏览文件管理器
-              </button>
             </div>
           </div>
         ) : viewMode === 'list' ? (
