@@ -1,5 +1,5 @@
 // 合集评论组件：查看和发布评论
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import * as api from '../api';
 
 function formatTime(ts) {
@@ -27,14 +27,20 @@ export default function CommentSection({ hash }) {
     setRegServerUrl(url);
   }, []);
 
+  // 请求序号守卫：hash 快速切换（AnonExplorer 打字即跳转）时，慢响应
+  // 不得覆盖新 hash 的评论（发现背景：review 指出无任何取消/丢弃机制）
+  const fetchSeqRef = useRef(0);
   const fetchComments = async () => {
     if (!regServerUrl || !hash) return;
+    const seq = ++fetchSeqRef.current;
     setLoading(true);
     setError('');
     try {
       const data = await api.getComments(regServerUrl, hash);
+      if (seq !== fetchSeqRef.current) return;
       setComments(data.comments || []);
     } catch (e) {
+      if (seq !== fetchSeqRef.current) return;
       setError(e.message);
       setComments([]);
     }

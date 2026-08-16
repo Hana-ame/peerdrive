@@ -104,7 +104,13 @@ export default function AnonExplorer() {
       <div className="flex-1 flex flex-col max-w-3xl mx-auto w-full">
         <SearchBar inputVal={inputVal} loading={loading}
           onChange={handleInputChange} onSearch={handleSearch}
-          onBack={() => { setCollection(null); navigate(-1); }} />
+          onBack={() => {
+            setCollection(null);
+            // 坑：无历史时 navigate(-1) 会直接离开 SPA（新标签直接打开的深链）。
+            // history.length≈1 时回退到首页。
+            if (window.history.length > 1) navigate(-1);
+            else navigate('/');
+          }} />
 
         {error && <div className="px-4 py-3"><p className="text-red-400 text-sm">{error}</p></div>}
         {loading && !collection && <div className="flex-1 flex items-center justify-center text-gray-600">加载中...</div>}

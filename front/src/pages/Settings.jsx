@@ -86,9 +86,18 @@ export default function Settings({ dataConsent, setDataConsent }) {
     const url = customConnectUrl.trim();
     if (!url) return;
     const formatted = url.startsWith('http') ? url : 'https://' + url;
-    api.setApiBase(formatted);
-    setApiBase(formatted);
-    setActiveBackendId(null);
+    // 坑：旧实现 setApiBase 后把 activeBackendId 置 null——后续按 id 查后端
+    // 的操作全部落回 fallback，且切换不持久化（重载后回到旧后端）。
+    // 改为落成正式后端：已有同 URL 后端直接切换，否则新建「自定义」后端。
+    const dup = api.getBackends().find(b => b.url === formatted);
+    if (dup) {
+      api.switchBackend(dup.id);
+    } else {
+      const id = api.addBackend('自定义', formatted);
+      api.switchBackend(id);
+    }
+    refreshBackends();
+    setApiBase(api.getApiBase());
     setCustomConnectUrl('');
     setShowCustomConnect(false);
   };
@@ -113,7 +122,6 @@ export default function Settings({ dataConsent, setDataConsent }) {
   const [turnCredential, setTurnCredential] = useState(api.getTurnCredential());
   const [followRedirects, setFollowRedirects] = useState(api.getFollowRedirects());
   const [ipfsEnabled, setIpfsEnabled] = useState(api.getIPFSEnabled());
-  const [btDhtEnabled, setBtDhtEnabled] = useState(localStorage.getItem('peerdrive_bt_dht_enabled') !== 'false');
 
   // ─── Auth ────────────────────────────────────────────
   const [regServer, setRegServer] = useState(localStorage.getItem('peerdrive_reg_server') || '');
@@ -694,56 +702,11 @@ export default function Settings({ dataConsent, setDataConsent }) {
               />
             </div>
 
-            {/* IPFS Gateway + BT DHT Toggles */}
+            {/* 网络协议区已删除：原「IPFS 网络」/「BT DHT 网络」两个开关只写死
+                localStorage（btDht 无任何读取端；ipfs 与下方后端开关共用同一 state，
+                重载后漂移出两个互相矛盾的开关）。IPFS 开关见「IPFS 兼容模式」区。
+                Follow Redirects 保留 */}
             <div className="border-t border-gray-700/50 pt-3 mt-2 space-y-3">
-              <p className="text-xs text-gray-400 mb-1">网络协议</p>
-
-              {/* IPFS Gateway Toggle */}
-              <div className="flex items-center gap-3">
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={ipfsEnabled}
-                    onChange={() => {
-                      const v = !ipfsEnabled;
-                      setIpfsEnabled(v);
-                      api.setIPFSEnabled(v);
-                    }}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
-                </label>
-                <div>
-                  <p className="text-sm text-gray-300">IPFS 网络</p>
-                  <p className="text-[10px] text-gray-500">
-                    {ipfsEnabled ? 'IPFS 网关: 已启用 (3 个可用)' : 'IPFS 网关: 已关闭'}
-                  </p>
-                </div>
-              </div>
-
-              {/* BT DHT Toggle */}
-              <div className="flex items-center gap-3">
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={btDhtEnabled}
-                    onChange={() => {
-                      const v = !btDhtEnabled;
-                      setBtDhtEnabled(v);
-                      localStorage.setItem('peerdrive_bt_dht_enabled', v ? 'true' : 'false');
-                    }}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
-                </label>
-                <div>
-                  <p className="text-sm text-gray-300">BT DHT 网络</p>
-                  <p className="text-[10px] text-gray-500">
-                    {btDhtEnabled ? 'BT DHT 已启用' : 'BT DHT 已关闭'}
-                  </p>
-                </div>
-              </div>
-            </div>
 
             {/* Follow Redirects Toggle */}
             <div className="flex items-center gap-3 pt-2">
@@ -766,6 +729,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                   下载 URL 文件时自动跟随 301/302 重定向
                 </p>
               </div>
+            </div>
             </div>
           </SettingsSection>
 

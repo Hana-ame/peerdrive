@@ -462,12 +462,17 @@ export default function LLMAssistant() {
 
     const systemContent = SYSTEM_PROMPT + '\n\nCurrent page context:\n```json\n' + JSON.stringify(buildContext(), null, 2) + '\n```';
 
+    // 坑：旧实现每轮 setMessages([userMsg]) / displayMessages=[userMsg] ——
+    // 上一轮对话被清空，助手无跨轮记忆。改为携带最近 20 条历史（角色仅 user/assistant，
+    // 不含 system，可安全回放），同时在 UI 中追加而非替换。
+    const historyMessages = messages.slice(-20);
     const accMessages = [
       { role: 'system', content: systemContent },
+      ...historyMessages,
       userMsg,
     ];
-    let displayMessages = [userMsg];
-    setMessages([userMsg]);
+    let displayMessages = [...historyMessages, userMsg];
+    setMessages(displayMessages);
 
     let turns = 0;
     const MAX_TURNS = 5;

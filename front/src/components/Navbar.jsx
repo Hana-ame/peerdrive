@@ -130,7 +130,8 @@ function SearchPanel({ open, onClose }) {
           searchCollections(q).then(d => (d.collections || d.data || []).slice(0, 3)),
         ]);
         setResults({ anon, public: pub });
-      } catch { setResults({ anon: [], public: [] }); }
+        if (anon.length + pub.length === 0) setActiveIdx(0);
+      } catch { setResults({ anon: [], public: [] }); setActiveIdx(0); }
       setLoading(false);
     }, 200);
     return () => clearTimeout(t);
@@ -142,7 +143,9 @@ function SearchPanel({ open, onClose }) {
       if (!open) return;
       const all = [...results.anon, ...results.public];
       const total = all.length;
-      if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, total - 1)); }
+      // 坑：total=0 时旧实现 Math.min(i+1, total-1) → -1，activeIdx 变负（高亮无意义）。
+      // 空结果时钳到 0；结果变化后也重置回顶部。
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx(i => total === 0 ? 0 : Math.min(i + 1, total - 1)); }
       if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, 0)); }
       if (e.key === 'Enter' && all[activeIdx]) {
         const r = all[activeIdx];
