@@ -34,7 +34,16 @@
 | `controller/bt.go` | BT HTTP 控制器 | 待迁移 | 前端 BTPanel 仍用 |
 | `service/forward.go` | 端口转发 | ✅ 已删（2026-08-16） | libp2p 版删除；重建为 PeerJS DataChannel 版（REFACTOR §3.9，带 HMAC 质询认证+端口白名单） |
 
-### C. IPFS 栈 — **保留**（独立功能，与互联层无关）
+### C. IPFS 栈 — ✅ 已删（2026-08-16，批2）
+- `ipfs_service.go`（libp2p host+DHT+Bitswap）与 `ipfs_compat.go`（兼容层）已随
+  libp2p 互联层一并删除：它们复用 P2PService 的 host/DHT，无法独立存活；
+  前端无 IPFS 组件、`PEERDRIVE_IPFS_COMPAT` 默认关闭。
+- **保留的 IPFS 相关能力**：HTTP gateway 抓取（`provider.IPFSProvider` +
+  `PEERDRIVE_IPFS_GATEWAYS`，ipfsgw fetcher + `GET /ipfs/:cid` 回退）+ pin 管理
+  （`POST/DELETE /ipfs/pin/:cid`）+ `GET /ipfs/gateways` 健康检查。
+- 配置已删：`PEERDRIVE_IPFS_COMPAT`、`PEERDRIVE_IPFS_BLOCKSTORE`、全部
+  `PEERDRIVE_P2P_*`/`PEERDRIVE_RELAY_*`/`PEERDRIVE_MDNS_*`/`PEERDRIVE_NAT_*`、
+  `PEERDRIVE_BOOTSTRAP_PEER`、`PEERDRIVE_STATIC_RELAYS`、`PEERDRIVE_P2P_KEY_FILE`。
 
 | 文件/目录 | 职责 | 状态 | 说明 |
 |---|---|---|---|

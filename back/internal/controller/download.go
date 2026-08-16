@@ -187,7 +187,7 @@ func handleRangeRequest(c *gin.Context, data []byte, rangeHeader string) bool {
 		}
 	}
 
-	start, end, ok := legacy.ParseRange(rangeHeader, total)
+	start, end, ok := parseRangeHeader(rangeHeader, total)
 	if !ok {
 		return false
 	}
@@ -270,4 +270,57 @@ func UniversalDownloadRefresh(c *gin.Context) {
 
 	c.Header("X-Protocol", protocol)
 	c.Data(http.StatusOK, "application/octet-stream", data)
+}
+
+// parseRangeHeader 解析 HTTP Range 头并返回起止字节索引和总大小。
+// 支持标准 range (bytes=N-M)、开放式 (bytes=N-)、后缀式 (bytes=-N)。
+// 源：legacy/relay.go ParseRange（批2 迁移，纯函数无外部依赖）。
+func parseRangeHeader(rangeVal string, fileSize int64) (start, end int64, ok bool) {
+	if fileSize <= 0 {
+		return 0, 0, false
+	}
+	if !strings.HasPrefix(rangeVal, "bytes=") {
+		return 0, 0, false
+	}
+	rangeVal = strings.TrimPrefix(rangeVal, "bytes=")
+
+	parts := strings.SplitN(rangeVal, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+
+	startStr := strings.TrimSpace(parts[0])
+	endStr := strings.TrimSpace(parts[1])
+
+	// Suffix range: "bytes=-500" → last 500 bytes.
+	if startStr == "" {
+		suffix, err := strconv.ParseInt(endStr, 10, 64)
+		if err != nil || suffix <= 0 {
+			return 0, 0, false
+		}
+		if suffix > fileSize {
+			suffix = fileSize
+		}
+		return fileSize - suffix, fileSize - 1, true
+	}
+
+	start, err := strconv.ParseInt(startStr, 10, 64)
+	if err != nil || start < 0 || start >= fileSize {
+		return 0, 0, false
+	}
+
+	// Open-ended range: "bytes=500-" → from start to end of file.
+	if endStr == "" {
+		return start, fileSize - 1, true
+	}
+
+	end, err = strconv.ParseInt(endStr, 10, 64)
+	if err != nil || end < start {
+		return 0, 0, false
+	}
+	if end >= fileSize {
+		end = fileSize - 1
+	}
+
+	return start, end, true
 }

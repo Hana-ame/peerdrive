@@ -151,6 +151,7 @@ func (s *SyncService) filterFiles(entries []model.AnonCollectionEntry, include, 
 	}
 	return result
 }
+
 // isExcluded 检查路径是否匹配任一排除模式。
 func (s *SyncService) isExcluded(path string, exclude []string) bool {
 	for _, pattern := range exclude {

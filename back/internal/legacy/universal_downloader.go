@@ -3,10 +3,12 @@
 // UniversalDownloader tries every available protocol in priority order:
 //
 //	local  → reads from content-addressed storage on disk
-//	ipfs   → libp2p DHT + exchange
-//	ipfsgw → IPFS HTTP gateway racing (fallback after Bitswap)
-//	btdht  → BitTorrent Mainline DHT HTTP bridge
+//	ipfsgw → IPFS HTTP gateway (via provider.IPFSProvider, public/set gateways)
+//	btdht  → BitTorrent Mainline DHT HTTP bridge (independent go-peerdrive-bt)
 //	http   → HTTP URL registered in file_providers
+//
+// 批2 (2026-08-16): 删除 IPFSFetcher（libp2p DHT+Bitswap 栈随旧互联层移除；
+// IPFS 兼容 API/Bitswap 不再提供，仅保留 HTTP gateway 抓取）。
 //
 // On success the file is cached to local storage, so the next request
 // is served instantly by the LocalFetcher.
@@ -26,9 +28,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Hana-ame/go-peerdrive-bt"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
-	"github.com/Hana-ame/go-peerdrive-bt"
 	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
 	"peerdrive/pkg/hashutil"
@@ -102,25 +104,6 @@ func (f *LocalFetcher) Fetch(_ context.Context, hash string) ([]byte, error) {
 		}
 	}
 	return nil, fmt.Errorf("local: file not found")
-}
-
-// ---------------------------------------------------------------------------
-// IPFSFetcher
-// ---------------------------------------------------------------------------
-
-// IPFSFetcher uses the libp2p DHT + exchange protocol to fetch files.
-type IPFSFetcher struct {
-	p2pSvc *P2PService
-}
-
-func (f *IPFSFetcher) Name() string { return "ipfs" }
-
-func (f *IPFSFetcher) IsAvailable() bool {
-	return f.p2pSvc != nil && f.p2pSvc.IsEnabled()
-}
-
-func (f *IPFSFetcher) Fetch(ctx context.Context, hash string) ([]byte, error) {
-	return f.p2pSvc.FetchFile(ctx, hash, nil)
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +240,6 @@ type UniversalDownloader struct {
 
 // NewUniversalDownloader 创建通用下载器，支持按优先级顺序尝试多种协议。
 func NewUniversalDownloader(
-	p2pSvc *P2PService,
 	btSvc *p2p_bt.BTDHTService,
 	storageDir string,
 	order string,
@@ -269,12 +251,12 @@ func NewUniversalDownloader(
 		timeout:      timeout,
 		ipfsProvider: ipfsProvider,
 	}
-	d.fetchers = d.buildFetchers(order, p2pSvc, btSvc)
+	d.fetchers = d.buildFetchers(order, btSvc)
 	return d
 }
 
 // buildFetchers builds the ordered fetcher list from a comma-separated string.
-func (d *UniversalDownloader) buildFetchers(order string, p2pSvc *P2PService, btSvc *p2p_bt.BTDHTService) []ProtocolFetcher {
+func (d *UniversalDownloader) buildFetchers(order string, btSvc *p2p_bt.BTDHTService) []ProtocolFetcher {
 	names := strings.Split(order, ",")
 	for i := range names {
 		names[i] = strings.TrimSpace(names[i])
@@ -287,15 +269,12 @@ func (d *UniversalDownloader) buildFetchers(order string, p2pSvc *P2PService, bt
 		}
 	}
 	if len(filtered) == 0 {
-		filtered = []string{"local", "ipfs", "btdht", "http"}
+		filtered = []string{"local", "ipfsgw", "btdht", "http"}
 	}
 
 	registry := map[string]func() ProtocolFetcher{
 		"local": func() ProtocolFetcher {
 			return &LocalFetcher{storageDir: d.storageDir}
-		},
-		"ipfs": func() ProtocolFetcher {
-			return &IPFSFetcher{p2pSvc: p2pSvc}
 		},
 		"ipfsgw": func() ProtocolFetcher {
 			return &IPFSGatewayFetcher{provider: d.ipfsProvider}

@@ -11,18 +11,15 @@
 package main
 
 import (
-	"context"
 	stdlog "log"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
-	"peerdrive/internal/legacy"
 	"peerdrive/internal/log"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
@@ -39,8 +36,6 @@ import (
 // main 是 Peerdrive 服务器入口，初始化 DB、P2P、HTTP 路由并监听端口。
 func main() {
 	log.LogInfo("main: Peerdrive server starting")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	cfg := config.Load()
 	storageDir := cfg.StorageDir
@@ -53,66 +48,8 @@ func main() {
 	}
 	log.LogInfo("main: database initialized")
 
-	// 初始化 P2P
-	log.LogInfo("main: initializing P2P service")
-	p2pSvc, err := legacy.NewP2PService(ctx, cfg)
-	if err != nil {
-		stdlog.Fatalf("libp2p 节点启动失败: %v", err)
-	}
-	defer p2pSvc.Close()
-	id, addrs := p2pSvc.GetNodeInfo()
-	if id != "" {
-		log.LogInfo("main: libp2p node started, PeerID=%s, addrs=%v", id, addrs)
-	}
-
-	// 启动节点身份注册（如果配置了 auth token + 注册服务器）
-	// 注意：节点身份独立于 P2P，P2P 禁用时也应当能注册
-	if cfg.NodeAuthToken != "" && cfg.RegistrationServer != "" {
-		nodeReg := legacy.NewNodeRegistrar(p2pSvc, cfg.RegistrationServer, cfg.NodeAuthToken, "peerdrive-dev")
-		if nodeReg != nil {
-			nodeReg.Start()
-			defer nodeReg.Stop() // L5:退出时停止心跳 goroutine
-		}
-	}
-
-	// 启动中继注册（如果配置了注册服务器 URL）
-	if cfg.RegServerURL != "" && p2pSvc.IsEnabled() {
-		registry := legacy.NewRelayRegistry(p2pSvc, cfg.RegServerURL, cfg.RelayStorageMB, cfg.RelayVersion)
-		registry.Start()
-		defer registry.Stop() // L5:退出时停止心跳 goroutine
-	}
-
 	// 初始化匿名存储目录（与普通文件同一目录）
 	repository.SetAnonStorageDir(storageDir)
-
-	// 初始化 IPFS 服务（boxo Bitswap + Blockstore，复用 libp2p host + DHT）
-	log.LogInfo("main: initializing IPFS service (Bitswap+DHT)")
-	ipfsSvc, err := legacy.NewIPFSService(ctx, p2pSvc, storageDir)
-	if err != nil {
-		log.LogWarn("main: IPFSService init failed (non-fatal): %v", err)
-	}
-	if ipfsSvc != nil {
-		defer ipfsSvc.Close()
-		if ipfsSvc.Enabled() {
-			// 后台 announce 所有已有文件到 IPFS DHT
-			go func() {
-				time.Sleep(5 * time.Second) // 等 DHT bootstrap 完成
-				ipfsSvc.ProvideAll(ctx)
-			}()
-		}
-	}
-
-	// 初始化 IPFS 兼容层（可选，默认关闭）
-	log.LogInfo("main: initializing IPFS compat layer (enabled=%v)", cfg.IPFSCompatEnable)
-	ipfsCompatLayer := legacy.NewIPFSCompatLayer(storageDir, cfg.IPFSBlockstore, p2pSvc)
-	if ipfsSvc != nil {
-		ipfsCompatLayer.SetIPFSService(ipfsSvc)
-	}
-	if cfg.IPFSCompatEnable {
-		if err := ipfsCompatLayer.Enable(); err != nil {
-			log.LogWarn("main: IPFS compat enable failed (non-fatal): %v", err)
-		}
-	}
 
 	// 初始化 PeerJS 信令 + WebRTC 文件服务（Go 节点作为常驻 peer 提供文件，
 	// 与浏览器/其它节点经公共云信令 0.peerjs.com 互联）。
@@ -173,7 +110,7 @@ func main() {
 		router.SetSourceManager(mgr)
 	}
 	log.LogInfo("main: setting up HTTP router")
-	r := router.SetupRouter(p2pSvc, cfg, ipfsCompatLayer, ipfsSvc)
+	r := router.SetupRouter(cfg)
 
 	port := ":" + cfg.Port
 

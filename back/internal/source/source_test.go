@@ -157,8 +157,8 @@ type stubSource struct {
 	calls []string
 }
 
-func (s *stubSource) Name() string            { return s.name }
-func (s *stubSource) Type() string            { return "stub" }
+func (s *stubSource) Name() string             { return s.name }
+func (s *stubSource) Type() string             { return "stub" }
 func (s *stubSource) Capabilities() Capability { return s.caps }
 func (s *stubSource) Priority() int            { return s.priority }
 func (s *stubSource) SetPriority(p int)        { s.priority = p }

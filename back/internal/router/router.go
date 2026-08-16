@@ -19,8 +19,6 @@
 package router
 
 import (
-	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -35,19 +33,12 @@ import (
 	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/multiformats/go-multiaddr"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // SetupRouter 创建 Gin 引擎并注册全部路由（健康检查、文件下载、P2P、集合、WebDAV、信令等）。
-func SetupRouter(
-	p2pSvc *legacy.P2PService,
-	cfg *config.Config,
-	ipfsCompat *legacy.IPFSCompatLayer,
-	ipfsSvc *legacy.IPFSService,
-) *gin.Engine {
+func SetupRouter(cfg *config.Config) *gin.Engine {
 	log.LogInfo("router: SetupRouter starting")
 	r := gin.Default()
 	r.RedirectTrailingSlash = false
@@ -99,11 +90,8 @@ func SetupRouter(
 	// 任意文件读写/删除接口全部匿名可达）。
 	authRequired := AuthRequired()
 
-	controller.InitP2PController(p2pSvc)
 	fileSvc := service.NewFileService(cfg)
-	fileSvc.SetIPFSCompat(ipfsCompat)
 	controller.InitFileController(fileSvc)
-	controller.InitIPFSCompatController(ipfsCompat)
 	// M2 收层装配：集合/分享/任务/pin 服务注入 controller（替代原先的 repository 直调）
 	controller.InitCollectionController(service.NewCollectionService())
 	controller.InitShareController(service.NewShareService())
@@ -124,16 +112,6 @@ func SetupRouter(
 		}
 	}
 	controller.InitBTController(btSvc)
-
-	// Initialize dual P2P service (IPFS + BT DHT).
-	dualSvc := legacy.NewDualP2PService(cfg, p2pSvc, btSvc)
-	controller.InitDualController(dualSvc)
-
-	// Initialize resume manager and multi-peer downloader for resume-able downloads.
-	resumeMgr := legacy.NewResumeManager(cfg, p2pSvc, btSvc, dualSvc)
-	controller.InitResumeManager(resumeMgr)
-	multiPeerDl := legacy.NewMultiPeerDownloader(cfg, p2pSvc, btSvc, dualSvc)
-	controller.InitMultiPeerDownloader(multiPeerDl)
 
 	controller.InitAnonController(service.NewAnonService(cfg))
 
@@ -174,9 +152,6 @@ func SetupRouter(
 		}
 		if len(gateways) > 0 {
 			ipfsProv = provider.NewIPFSProvider(gateways)
-			if ipfsSvc != nil && ipfsSvc.Enabled() {
-				ipfsProv.SetBitswapFetcher(ipfsSvc.FetchByCID)
-			}
 		}
 	}
 	controller.InitIPFSProvider(ipfsProv)
@@ -184,7 +159,6 @@ func SetupRouter(
 	// Initialize the universal multi-protocol downloader.
 	downloadTimeout := time.Duration(cfg.DownloadTimeoutSecs) * time.Second
 	uniDownloader := legacy.NewUniversalDownloader(
-		p2pSvc,
 		btSvc,
 		cfg.StorageDir,
 		cfg.DownloadOrder,
@@ -192,36 +166,6 @@ func SetupRouter(
 		ipfsProv,
 	)
 	controller.InitUniversalDownloader(uniDownloader)
-
-	// Create peer tracker and wire it into both the P2P service and
-	// controller handlers so that connections, transfers, and pings
-	// are automatically recorded.
-	peerTracker := legacy.NewPeerTracker()
-	transports := []string{"tcp"}
-	if strings.Contains(cfg.P2PListenAddr, "quic") || strings.Contains(cfg.P2PListenAddrV6, "quic") {
-		transports = append(transports, "quic")
-	}
-	peerTracker.SetTransports(transports)
-	if cfg.RegistrationServer != "" {
-		peerTracker.SetRegServerConnected(true)
-	}
-	controller.InitPeerTracker(peerTracker)
-	if p2pSvc != nil {
-		p2pSvc.SetPeerTracker(peerTracker)
-	}
-
-	// Create and start the PeerScanner when P2P is enabled for proactive
-	// peer discovery and outbound connection maintenance.
-	if p2pSvc != nil && p2pSvc.IsEnabled() {
-		scanner := legacy.NewPeerScanner(p2pSvc, peerTracker, cfg.RegServerURL)
-		scanner.Start()
-		controller.InitPeerScanner(scanner)
-	}
-
-	// Bootstrap from registration server relay list.
-	if cfg.RegServerURL != "" && p2pSvc != nil && p2pSvc.IsEnabled() {
-		go bootstrapFromRelayList(cfg.RegServerURL, p2pSvc)
-	}
 
 	// Sync controller initialization
 	syncRepo := repository.NewSyncRepository()
@@ -238,50 +182,16 @@ func SetupRouter(
 	r.GET("/download/:hash/sources", controller.UniversalDownloadSources)
 	r.POST("/download/:hash/refresh", authRequired, controller.UniversalDownloadRefresh)
 
-	// P2P routes (public)
+	// P2P routes（批2 精简：libp2p 旧栈端点已删，保留认证状态/WebRTC 信息/端口转发）
 	p2p := r.Group("/p2p")
 	{
-		p2p.GET("/status", controller.P2PStatus)
 		p2p.GET("/auth/status", controller.AuthStatus)
-		p2p.GET("/node", controller.GetNodeInfo)
-		p2p.GET("/node/operator", controller.GetNodeOperator)
-		p2p.GET("/peers", controller.GetPeers)
-		p2p.GET("/discovered", controller.GetDiscoveredPeers)
-		p2p.GET("/connections", controller.GetConnections)
-		p2p.GET("/peers/detail", controller.GetPeersDetail)
-		p2p.GET("/peers/detail/:peer_id", controller.GetPeerDetail)
-		p2p.GET("/stats", controller.GetP2PStats)
-		p2p.GET("/topology", controller.GetTopology)
-		p2p.GET("/quality", controller.GetConnectionQuality)
-		p2p.GET("/ping/:peer_id", controller.PingPeer)
-		// 以下均为 mutating 操作（连对端/拉取/同步/转发/下载控制），挂认证
-		p2p.POST("/connect", authRequired, controller.ConnectPeer)
-		p2p.POST("/announce", authRequired, controller.AnnounceHash)
-		p2p.POST("/fetch", authRequired, controller.FetchCollection)
-		p2p.POST("/sync", authRequired, controller.SyncFromPeer)
-		p2p.POST("/push", authRequired, controller.PushSync)
-		p2p.POST("/request-file", authRequired, controller.RequestFile)
-		p2p.GET("/ws/info", controller.WSInfo)
 		p2p.GET("/webrtc/info", controller.WebRTCInfoHandler(cfg))
-
-		// Dual P2P (IPFS + BT DHT) routes
-		p2p.POST("/dual/announce", authRequired, controller.DualAnnounce)
-		p2p.POST("/dual/find", authRequired, controller.DualFindProviders)
-		// Port forwarding routes
+		// Port forwarding routes（forward v2，PeerJS DataChannel）
 		p2p.POST("/forward/create", authRequired, controller.CreateForwardSession)
 		p2p.POST("/forward/connect", authRequired, controller.ConnectForwardSession)
 		p2p.GET("/forward/list", controller.ListForwardSessions)
 		p2p.POST("/forward/close", authRequired, controller.CloseForwardSession)
-
-		// Resume-able P2P download routes
-		p2p.POST("/download/resume", authRequired, controller.ResumeDownload)
-		p2p.GET("/download/progress/:hash", controller.DownloadProgress)
-		p2p.POST("/download/cancel/:hash", authRequired, controller.CancelDownload)
-
-		// Multi-peer download routes
-		p2p.POST("/download/multipeer", authRequired, controller.MultiPeerDownload)
-		p2p.GET("/download/sources/:hash", controller.DownloadSources)
-		p2p.GET("/download/multipeer/progress/:hash", controller.MultiPeerProgress)
 	}
 
 	// BitTorrent routes
@@ -311,11 +221,9 @@ func SetupRouter(
 		bt.GET("/stats", controller.BTGlobalStats)
 	}
 
-	// IPFS compat routes
+	// IPFS 路由（批2 精简：Bitswap 兼容层已删；保留 HTTP 网关 pin/查询）
 	ipfs := r.Group("/ipfs")
 	{
-		ipfs.GET("", controller.IPFSCompatStatus)
-		ipfs.POST("/toggle", authRequired, controller.IPFSCompatToggle)
 		// IPFS pin routes
 		ipfs.POST("/pin/:cid", authRequired, controller.PinCID)
 		ipfs.DELETE("/pin/:cid", authRequired, controller.UnpinCID)
@@ -425,23 +333,6 @@ func SetupRouter(
 	// Swagger
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	// WebSocket file transfer
-	if p2pSvc != nil {
-		r.GET("/ws/transfer", func(c *gin.Context) {
-			p2pSvc.WSHandler()(c.Writer, c.Request)
-		})
-	}
-
-	// P2P relay proxy
-	relaySvc := legacy.NewRelayService(p2pSvc)
-	r.GET("/relay/proxy", relaySvc.ProxyDownload)
-
-	// WebRTC signaling
-	controller.InitSignalHub(legacy.NewSignalingHub())
-	r.GET("/ws/signal", func(c *gin.Context) {
-		controller.GetSignalHub().HandleConnection(c.Writer, c.Request)
-	})
-
 	// PeerJS 节点发现
 	registerPeerJSRoutes(r, authRequired)
 
@@ -452,71 +343,4 @@ func SetupRouter(
 	routes := r.Routes()
 	log.LogInfo("router: SetupRouter completed with %d routes", len(routes))
 	return r
-}
-
-// ──────────────────────────────────────────────
-//  Relay bootstrap helpers
-// ──────────────────────────────────────────────
-
-// bootstrapFromRelayList fetches the list of active relay nodes from the
-// registration server and attempts to connect to each one.  This allows
-// new nodes to discover and connect to publicly reachable relay nodes
-// without hardcoded bootstrap addresses.
-func bootstrapFromRelayList(regURL string, p2pSvc *legacy.P2PService) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(regURL + "/p2p/relay/list")
-	if err != nil {
-		log.LogWarn("router: relay list fetch failed: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	var listResp struct {
-		Relays []struct {
-			PeerID string   `json:"peer_id"`
-			Addrs  []string `json:"addrs"`
-		} `json:"relays"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
-		log.LogWarn("router: relay list decode failed: %v", err)
-		return
-	}
-
-	connected := 0
-	for _, relay := range listResp.Relays {
-		pid, err := peer.Decode(relay.PeerID)
-		if err != nil {
-			log.LogWarn("router: invalid relay peer id %s: %v", relay.PeerID, err)
-			continue
-		}
-
-		if pid == p2pSvc.Host.ID() {
-			continue
-		}
-
-		var maddrs []multiaddr.Multiaddr
-		for _, addrStr := range relay.Addrs {
-			maddr, err := multiaddr.NewMultiaddr(addrStr)
-			if err != nil {
-				continue
-			}
-			maddrs = append(maddrs, maddr)
-		}
-
-		if len(maddrs) == 0 {
-			continue
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		if err := p2pSvc.Host.Connect(ctx, peer.AddrInfo{ID: pid, Addrs: maddrs}); err != nil {
-			log.LogWarn("router: connect to relay %s failed: %v", relay.PeerID, err)
-		} else {
-			log.LogInfo("router: connected to relay %s", relay.PeerID)
-			connected++
-		}
-		cancel()
-	}
-
-	log.LogInfo("router: bootstrap from relay list completed (%d connected out of %d)",
-		connected, len(listResp.Relays))
 }

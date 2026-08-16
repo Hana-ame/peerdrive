@@ -108,24 +108,6 @@ func TestLocalFetcher_IsAvailable(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// IPFSFetcher tests
-// ---------------------------------------------------------------------------
-
-func TestIPFSFetcher_NotAvailable(t *testing.T) {
-	f := &IPFSFetcher{p2pSvc: nil}
-	if f.IsAvailable() {
-		t.Error("expected unavailable when p2pSvc is nil")
-	}
-}
-
-func TestIPFSFetcher_Name(t *testing.T) {
-	f := &IPFSFetcher{}
-	if f.Name() != "ipfs" {
-		t.Errorf("expected 'ipfs', got %q", f.Name())
-	}
-}
-
-// ---------------------------------------------------------------------------
 // BTDHTFetcher tests
 // ---------------------------------------------------------------------------
 
@@ -202,17 +184,17 @@ func TestHTTPURLFetcher_NoProvider(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNewUniversalDownloader_DefaultOrder(t *testing.T) {
-	d := NewUniversalDownloader(nil, nil, "/tmp", "", 30*time.Second, nil)
+	d := NewUniversalDownloader(nil, "/tmp", "", 30*time.Second, nil)
 	fetchers := d.Fetchers()
 	if len(fetchers) == 0 {
 		t.Fatal("expected at least one fetcher")
 	}
-	// Default order: local, ipfs, btdht, http
+	// Default order: local, ipfsgw, btdht, http
 	names := make([]string, len(fetchers))
 	for i, f := range fetchers {
 		names[i] = f.Name()
 	}
-	expected := []string{"local", "ipfs", "btdht", "http"}
+	expected := []string{"local", "ipfsgw", "btdht", "http"}
 	for i, name := range expected {
 		if i >= len(names) {
 			t.Fatalf("expected %q at index %d, but got fewer fetchers", name, i)
@@ -224,7 +206,7 @@ func TestNewUniversalDownloader_DefaultOrder(t *testing.T) {
 }
 
 func TestNewUniversalDownloader_CustomOrder(t *testing.T) {
-	d := NewUniversalDownloader(nil, nil, "/tmp", "http,local", 30*time.Second, nil)
+	d := NewUniversalDownloader(nil, "/tmp", "http,local", 30*time.Second, nil)
 	fetchers := d.Fetchers()
 	if len(fetchers) != 2 {
 		t.Fatalf("expected 2 fetchers, got %d", len(fetchers))
@@ -253,7 +235,7 @@ func TestDownload_LocalFile(t *testing.T) {
 	repository.InsertFileMeta(&model.FileMeta{Hash: hashStr, Size: int64(len(data)), Filename: hashStr, Type: repository.FileTypeBlob})
 	repository.InsertFileProvider(hashStr, "local", filepath.Join(hashStr[:2], hashStr))
 
-	d := NewUniversalDownloader(nil, nil, dir, "local", 30*time.Second, nil)
+	d := NewUniversalDownloader(nil, dir, "local", 30*time.Second, nil)
 	result, protocol, err := d.Download(context.Background(), hashStr)
 	if err != nil {
 		t.Fatalf("Download failed: %v", err)
@@ -286,7 +268,7 @@ func TestDownload_Fallback(t *testing.T) {
 	repository.InsertFileProvider(hashStr, "http", server.URL)
 
 	// Create downloader with order that forces fallback: local first (no file), then http.
-	d := NewUniversalDownloader(nil, nil, dir, "local,http", 30*time.Second, nil)
+	d := NewUniversalDownloader(nil, dir, "local,http", 30*time.Second, nil)
 
 	result, protocol, err := d.Download(context.Background(), hashStr)
 	if err != nil {
@@ -305,7 +287,7 @@ func TestDownload_AllProtocolsFail(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
 
-	d := NewUniversalDownloader(nil, nil, dir, "local,http", 5*time.Second, nil)
+	d := NewUniversalDownloader(nil, dir, "local,http", 5*time.Second, nil)
 	_, _, err := d.Download(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	if err == nil {
 		t.Error("expected error when all protocols fail")
@@ -321,7 +303,7 @@ func TestCacheToLocal(t *testing.T) {
 	hash := sha256.Sum256(data)
 	hashStr := hex.EncodeToString(hash[:])
 
-	d := NewUniversalDownloader(nil, nil, dir, "local", 30*time.Second, nil)
+	d := NewUniversalDownloader(nil, dir, "local", 30*time.Second, nil)
 	d.cacheToLocal(hashStr, data)
 
 	// Verify file exists on disk.
@@ -366,7 +348,7 @@ func TestCheckSources(t *testing.T) {
 	repository.InsertFileMeta(&model.FileMeta{Hash: hashStr, Size: int64(len(data)), Filename: hashStr, Type: repository.FileTypeBlob})
 	repository.InsertFileProvider(hashStr, "local", filepath.Join(hashStr[:2], hashStr))
 
-	d := NewUniversalDownloader(nil, nil, dir, "local,http", 30*time.Second, nil)
+	d := NewUniversalDownloader(nil, dir, "local,http", 30*time.Second, nil)
 	sources := d.CheckSources(context.Background(), hashStr)
 
 	if !sources["local"] {
@@ -381,7 +363,7 @@ func TestCheckSources(t *testing.T) {
 }
 
 func TestDownload_FetchersMatchOrder(t *testing.T) {
-	d := NewUniversalDownloader(nil, nil, "/tmp", "btdht,http,local", 30*time.Second, nil)
+	d := NewUniversalDownloader(nil, "/tmp", "btdht,http,local", 30*time.Second, nil)
 	fetchers := d.Fetchers()
 	if len(fetchers) != 3 {
 		t.Fatalf("expected 3 fetchers, got %d", len(fetchers))
@@ -399,7 +381,7 @@ func TestDownload_FetchersMatchOrder(t *testing.T) {
 
 func TestBuildFetchers_UnknownProtocol(t *testing.T) {
 	// Should not panic and should skip unknown protocol names.
-	d := NewUniversalDownloader(nil, nil, "/tmp", "local,fake,http", 30*time.Second, nil)
+	d := NewUniversalDownloader(nil, "/tmp", "local,fake,http", 30*time.Second, nil)
 	fetchers := d.Fetchers()
 	if len(fetchers) != 2 {
 		t.Fatalf("expected 2 fetchers (unknown skipped), got %d", len(fetchers))

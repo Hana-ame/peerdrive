@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"peerdrive/internal/config"
-	"peerdrive/internal/legacy"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
@@ -32,12 +31,6 @@ type FileService struct {
 	storageDir    string
 	storageEnable bool
 	cfg           *config.Config
-	ipfsCompat    *legacy.IPFSCompatLayer
-}
-
-// SetIPFSCompat 注入 IPFS 兼容层实例，用于在文件注册/上传时自动创建 IPFS 块副本。
-func (s *FileService) SetIPFSCompat(layer *legacy.IPFSCompatLayer) {
-	s.ipfsCompat = layer
 }
 
 // NewFileService 创建一个新的文件服务实例。
@@ -229,12 +222,6 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	}
 
 	_ = repository.InsertFileProvider(hash, "local", absPath)
-	// IPFS 兼容：如果启用，将文件拷贝到 IPFS 块存储
-	if s.ipfsCompat != nil && s.ipfsCompat.Enabled() {
-		if err := s.ipfsCompat.AddFile(hash); err != nil {
-			log.LogWarn("file-svc: RegisterLocal ipfs compat AddFile failed (non-fatal): %v", err)
-		}
-	}
 
 	log.LogInfo("file-svc: RegisterLocal %s -> hash=%s size=%d", absPath, hash, size)
 	return hash, nil
@@ -407,12 +394,6 @@ func (s *FileService) RegisterURL(rawURL string, filename string) (*model.FileMe
 			log.LogWarn("file-svc: RegisterURL save to storage failed (non-fatal): %v", err)
 		}
 	}
-	// IPFS 兼容：如果启用，将文件拷贝到 IPFS 块存储
-	if s.ipfsCompat != nil && s.ipfsCompat.Enabled() {
-		if err := s.ipfsCompat.AddFile(hash); err != nil {
-			log.LogWarn("file-svc: RegisterURL ipfs compat AddFile failed (non-fatal): %v", err)
-		}
-	}
 
 	meta := &model.FileMeta{
 		Hash:     hash,
@@ -533,12 +514,6 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 	if err := repository.InsertFileProvider(hash, "local", relPath); err != nil {
 		log.LogError("file-svc: Upload insert provider failed: %v", err)
 		return nil, fmt.Errorf("insert provider: %w", err)
-	}
-	// IPFS 兼容：如果启用，将文件拷贝到 IPFS 块存储
-	if s.ipfsCompat != nil && s.ipfsCompat.Enabled() {
-		if err := s.ipfsCompat.AddFile(meta.Hash); err != nil {
-			log.LogWarn("file-svc: Upload ipfs compat AddFile failed (non-fatal): %v", err)
-		}
 	}
 
 	log.LogInfo("file-svc: Upload %s completed (hash=%s, size=%d)", filename, hash, size)
