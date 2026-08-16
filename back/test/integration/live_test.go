@@ -51,7 +51,6 @@ func TestLiveSignal_DiscoveryAndInterop(t *testing.T) {
 		cfg.PeerJSPort = "443"
 		cfg.PeerJSSecure = true
 		cfg.PeerJSKey = liveSignalKey
-		cfg.P2PEnable = false
 		cfg.BTDHTEnabled = false
 		cfg.DiscoverURL = liveDiscover
 		cfg.MQTTCollections = hash

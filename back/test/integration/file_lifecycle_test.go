@@ -51,7 +51,6 @@ func TestFileLifecycleEndToEnd(t *testing.T) {
 		cfg.PeerJSHost, cfg.PeerJSPort = splitHostPort(hs.URL)
 		cfg.PeerJSSecure = false
 		cfg.PeerJSKey = "testkey"
-		cfg.P2PEnable = false
 		cfg.BTDHTEnabled = false
 		cfg.PeerJSPeers = join(peers)
 		// H2：create 只允许 DownloadDir 根内文件；测试根 = storage

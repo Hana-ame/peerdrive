@@ -68,7 +68,6 @@ func TestSelfHostedSignalAndDiscover(t *testing.T) {
 		cfg.PeerJSHost, cfg.PeerJSPort = splitHostPort(hs.URL)
 		cfg.PeerJSSecure = false
 		cfg.PeerJSKey = "testkey"
-		cfg.P2PEnable = false
 		cfg.BTDHTEnabled = false
 		cfg.DiscoverURL = hs.URL
 		cfg.MQTTCollections = hash

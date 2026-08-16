@@ -74,7 +74,6 @@ func newService(t *testing.T, id, storageDir string, mqtt bool, peers []string, 
 	cfg.PeerJSPort = "443"
 	cfg.PeerJSSecure = true
 	cfg.PeerJSKey = "peerjs"
-	cfg.P2PEnable = false
 	cfg.BTDHTEnabled = false
 	cfg.PeerJSPeers = join(peers)
 	cfg.MQTTEnable = mqtt
