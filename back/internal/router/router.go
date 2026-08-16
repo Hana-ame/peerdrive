@@ -26,7 +26,7 @@ import (
 	"github.com/Hana-ame/go-peerdrive-bt"
 	"peerdrive/internal/config"
 	"peerdrive/internal/controller"
-	"peerdrive/internal/legacy"
+	"peerdrive/internal/downloader"
 	"peerdrive/internal/log"
 	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
@@ -158,7 +158,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 	// Initialize the universal multi-protocol downloader.
 	downloadTimeout := time.Duration(cfg.DownloadTimeoutSecs) * time.Second
-	uniDownloader := legacy.NewUniversalDownloader(
+	uniDownloader := downloader.NewUniversalDownloader(
 		btSvc,
 		cfg.StorageDir,
 		cfg.DownloadOrder,

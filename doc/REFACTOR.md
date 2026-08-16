@@ -297,8 +297,10 @@ internal/
 ├── provider/      层1 文件获取抽象（把 service 里复制 6 遍的本地查找收敛进来）
 ├── service/       层2 用例编排（只依赖 domain/repository/provider/transport）
 ├── transport/     层2 互联传输（peerjs_service + discovery/ 迁入）
-├── legacy/        旧栈隔离（p2p_bt + libp2p 归拢，新代码禁止 import）
 └── api/           层3 HTTP（原 controller 只依赖 service）+ router 装配
+```
+> ✅ 2026-08-16 批1/批2 后：`legacy/` 已全部删除（webdav/forward→v2/测试工具/批2 整栈）。
+> `internal/downloader/`（原 universal_downloader）为独立下载器（local/ipfsgw/btdht/http）。
 ```
 
 迁移顺序：M0 依赖规则文档 → M1 legacy 隔离 → M2 收 controller 越层依赖 → M3 拆 transport → M4 provider 落地。
@@ -307,14 +309,13 @@ internal/
 ### §8 依赖规则（M0，2026-08-16 立）
 
 硬性规则（代码评审 + 文档双通道执行）：
-1. **禁止 import `internal/legacy`、`internal/p2p_bt`（除 legacy 包自身与 cmd/test 入口）**。
-   legacy 只出不进：新功能缺失依赖时，在 service/transport 侧抽象，不反向依赖旧栈。
+1. **禁止 import `internal/p2p_bt`**（除 p2p_bt 库自身与 cmd/test 入口；`internal/legacy`
+   已于 2026-08-16 批2 删除，此规则自动升级为「legacy 已不存在」）。
 2. 包层级单向：`model ← repository ← provider ← service ← controller ← router ← cmd`，
    `transport` 与 `provider` 同级（可被 service/controller 引用，不反向）。
 3. `service` 包内不直接 import `transport`；跨层一律经 controller 装配注入。
 4. 准出条件：所有新包测试通过；`go build -tags nosqlite ./...` 全绿。
-5. legacy 存量引用（file_service/sync_service/controller-p2p/router/main）为过渡期残留，
-   目标随旧栈删除（webdav/forward/p2p 端点）清零；删除决策见 LEGACY.md。
+5. ✅ 已达成：legacy 存量引用于 2026-08-16 批2 清零（webdav/forward/libp2p 端点已删）。
 
 **迁移状态（2026-08-16）**：M2 ✅ 完成 · M3 ✅ 完成 · M4 ✅（provider 已落地）· M1 ✅ 完成（p2p_bt 拆独立库另计）。
 
@@ -328,7 +329,8 @@ M1 legacy 隔离要点（本次完成，internal/legacy/ 落地）：
 - 过渡期残留：service/file_service + sync_service、controller/{p2p,signal,download}、
   router、cmd/server 仍引用 legacy（旧栈端点保留至删除决策）；
   test-p2p-colls / test/bt-integration 旧工具已改引用。
-- 待办：p2p_bt 拆独立库（README"可独立使用"断言错误问题）；webdav/forward 高危删除决策。
+- ✅ 后续：p2p_bt 拆独立库（5fb1193，README 断言成立）；webdav/forward 删除（6bfc000/e030216）；
+  libp2p+IPFS 整栈删除（a5b090d）；legacy 包清零（下载器迁 internal/downloader）。
 
 M3 收层要点（本次完成，transport 包落地）：
 - 新建 `internal/transport/`：PeerJS 文件服务子系统整体迁入——

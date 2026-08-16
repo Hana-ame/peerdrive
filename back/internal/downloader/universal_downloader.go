@@ -13,7 +13,7 @@
 // On success the file is cached to local storage, so the next request
 // is served instantly by the LocalFetcher.
 
-package legacy
+package downloader
 
 import (
 	"context"

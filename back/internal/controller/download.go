@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"peerdrive/internal/legacy"
+	"peerdrive/internal/downloader"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/provider"
@@ -28,11 +28,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var universalDownloader *legacy.UniversalDownloader
+var universalDownloader *downloader.UniversalDownloader
 var ipfsGatewayProvider *provider.IPFSProvider
 
 // InitUniversalDownloader 注入 UniversalDownloader 实例供多协议下载端点使用。
-func InitUniversalDownloader(d *legacy.UniversalDownloader) {
+func InitUniversalDownloader(d *downloader.UniversalDownloader) {
 	universalDownloader = d
 }
 

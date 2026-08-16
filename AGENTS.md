@@ -18,7 +18,7 @@
 - **帧协议 verb**（WS/WebRTC 同一套）：`req/meta/data/done/err`（文件拉取）+ `create/upload/list/info/delete/sync`
   （文件索引：SQLite `file_index` 表持久化 sha256→绝对路径 + seq 游标增量同步）+ `fwd-open/challenge/auth/ok/err/data/close`
   （端口转发 v2，HMAC 质询认证 + 端口白名单，见 REFACTOR.md 第 3.9 节），详见 REFACTOR.md 第 4 节
-- 旧的 libp2p/BT DHT 栈是 legacy（待迁移/删除），**新代码禁止 import**
+- 旧的 libp2p/BT DHT 栈已于 2026-08-16 全部删除（REFACTOR §8），**新代码禁止 import**；BT 能力经独立库 `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt）
 - 编码规范：关键/易错/非显然代码旁必须写「为什么这么写」的注释；测试函数必须标注「发现背景」（全局 AGENTS.md 硬性要求）
 
 ## 构建与验证
@@ -60,4 +60,4 @@ cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 
 - 部署更新：构建 `GOOS=linux CGO_ENABLED=0 go build -tags nosqlite -o /tmp/peerserver ./cmd/peerserver/`，
   上传 `bash ~/script/ssh/cloudcone.sh "cat > /root/peerserver.new" < /tmp/peerserver`，
   `mv` 后 `systemctl restart peerserver`（避免 Text file busy）
-| `PEERDRIVE_P2P_ENABLE` | true | 旧 libp2p 栈（legacy，测试时设 false 加速） |
+| `PEERDRIVE_P2P_ENABLE` | - | 已删除（2026-08-16 批2，libp2p 栈移除） |
