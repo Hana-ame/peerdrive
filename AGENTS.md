@@ -17,7 +17,10 @@
   `PEERDRIVE_DISCOVER_URL` 设置后优先于 MQTT）
 - **帧协议 verb**（WS/WebRTC 同一套）：`req/meta/data/done/err`（文件拉取）+ `create/upload/list/info/delete/sync`
   （文件索引：SQLite `file_index` 表持久化 sha256→绝对路径 + seq 游标增量同步）+ `fwd-open/challenge/auth/ok/err/data/close`
-  （端口转发 v2，HMAC 质询认证 + 端口白名单，见 REFACTOR.md 第 3.9 节），详见 REFACTOR.md 第 4 节
+  （端口转发 v2，HMAC 质询认证 + 端口白名单，见 REFACTOR.md 第 3.9 节）+ **`admin/admin-resp/admin-bin`**
+  （管理面 verb，2026-08-17 起前端全面迁移至此：**仅本地 WS 会话**可用，内部转发 gin engine
+  复用全部 HTTP controller；WebRTC 不实现管理 verb 防权限暴露；二进制上传=声明帧+后续二进制帧，
+  文件流响应=admin-bin 头+单二进制帧，详见 REFACTOR.md 第 3.10 节与 NODE-API.md §2.4），详见 REFACTOR.md 第 4 节
 - 旧的 libp2p/BT DHT 栈已于 2026-08-16 全部删除（REFACTOR §8），**新代码禁止 import**；BT 能力经独立库 `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt）
 - 编码规范：关键/易错/非显然代码旁必须写「为什么这么写」的注释；测试函数必须标注「发现背景」（全局 AGENTS.md 硬性要求）
 
