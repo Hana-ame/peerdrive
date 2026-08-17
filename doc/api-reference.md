@@ -1,5 +1,10 @@
 # PeerDrive 后端 API 参考
 
+> ⚠️ **2026-08-17 起前端已全面迁移到 `/ws/peer` 的 admin 帧**（见 REFACTOR §3.10、
+> NODE-API §2.4）：`front/src/api.js` 的 `request()` 全部走 WS，HTTP 路由保留但标注
+> legacy（router.go LEGACY 区），仅兼容旧前端/curl/集成测试。下表仍是路由与请求/响应
+> 结构的权威参考（admin 帧内部转发到同一 controller，行为一致）。
+>
 > 面向前端开发，按 `front/src/api.js` 整理。API Base 可配置，默认 `https://wsl-3000.moonchan.xyz`。
 > Auth: `Authorization: Bearer <token>`，token 来源于 URL fragment (`#token`) 或设置页手动输入。
 

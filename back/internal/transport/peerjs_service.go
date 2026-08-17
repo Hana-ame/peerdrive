@@ -70,6 +70,12 @@ type PeerJSService struct {
 	nonceMu      sync.Mutex
 	fwNonces     map[string]*fwdNonce // reqId → 质询（取出即标 used，防重放）
 
+	// admin 管理面内部转发 handler（admin.go）：由 router.SetupRouter 注入，
+	// 包装 gin engine 复用全部 controller。adminMu 保护装配期写入与并发读取
+	// （serveAdmin 是连接 goroutine，装配完成后并发调用）。
+	adminMu      sync.Mutex
+	adminHandler AdminHandler
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }

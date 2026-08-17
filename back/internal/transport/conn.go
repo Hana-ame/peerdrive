@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -84,6 +85,12 @@ type connState struct {
 	binCh   chan binaryChunk
 	binDone chan struct{}
 
+	// adminUp 管理面二进制上传收集槽（单槽，admin.go）：浏览器发 admin 帧
+	// binary=true 声明后，泵内把后续二进制帧路由到这里（写临时文件），收齐
+	// 后触发 serveAdminUploadComplete（multipart 内部转发）。与 pendingUpload
+	// （文件索引上传）互斥独立：同一连接同时最多一个上传收集者。
+	adminUp *adminUploadState
+
 	// forward 转发隧道（单槽，forward.go）：同一连接同时一条活跃转发流。
 	// fwdHandshake 是握手等待状态（fwd-open 发出 → ok/err 到达前占位）。
 	fwd   *fwdStream
@@ -99,8 +106,11 @@ type fwdChunk struct {
 }
 
 // binaryChunk 一个待落盘的上传分片（路由已在消息泵确定，worker 只做 IO）。
+// up 为 fileIndex 上传（inbound.go uploadWorker 写 UploadSession）；
+// au 为 admin 管理面上传（admin.go 写临时文件，multipart 转发前收集）。
 type binaryChunk struct {
 	up     *uploadState
+	au     *adminUploadState // admin 上传分片（与 up 互斥，一帧只归一类）
 	offset int64
 	data   []byte
 	last   bool // 本分片收齐 → 触发 Complete（位图全满才登记）
@@ -183,6 +193,14 @@ func (s *PeerJSService) bindConn(c Session) {
 				go s.serveDelete(c, r)
 			case "sync":
 				go s.serveSync(c, r)
+			case "admin":
+				// 管理面 verb（admin.go）：仅本地 WS 会话（浏览器）使用，
+				// 内部转发 gin engine 复用全部 HTTP controller。WebRTC 连接
+				// 收到 admin 帧在 serveAdmin 内被拒绝（ID!="local"）。
+				// 同步执行：binary 上传声明的 adminUp 占槽必须在泵内完成，
+				// 否则后续二进制帧先到泵时 adminUp 仍为空 → 数据块丢失
+				// （发现背景：初版 go 异步，上传分片全部丢失）。
+				s.serveAdmin(c, st, msg.Data)
 			case "fwd-open":
 				go s.serveForwardOpen(c, st, r)
 			case "fwd-auth":
@@ -228,6 +246,28 @@ func (s *PeerJSService) bindConn(c Session) {
 				st.pendingUpload = nil
 			}
 		}
+		// 管理面上传收集（admin.go）：pendingUpload 之后的第二优先级。
+		// 块投递到 binCh（复用 H5 worker，写盘移出泵）；收齐（got>=size）
+		// 触发内部 multipart 转发。
+		au := st.adminUp
+		if au != nil {
+			au.got += int64(len(msg.Data))
+			// 防御：声明 size 与实际不符 / 对端多发 → 中止并清理
+			abort := au.got > au.size || time.Since(au.created) > adminUploadTimeout
+			last := false
+			if abort {
+				st.adminUp = nil
+				au.aborted = true
+				last = true // 空块也投递：worker 收到 aborted 即清理回 err
+			} else if au.got >= au.size {
+				st.adminUp = nil
+				last = true
+			}
+			select {
+			case st.binCh <- binaryChunk{au: au, data: msg.Data, last: last}:
+			case <-st.binDone:
+			}
+		}
 		f := st.expect
 		if up == nil && f != nil {
 			// 数据块投递到 fetch 队列（有界背压）；本地已取消（closed）则丢弃。
@@ -264,6 +304,12 @@ func (s *PeerJSService) bindConn(c Session) {
 		if st != nil {
 			var fwdOut net.Conn
 			st.mu.Lock()
+			// 管理面上传收集（admin.go）：连接关闭 → 中止并清理临时文件
+			if au := st.adminUp; au != nil {
+				st.adminUp = nil
+				os.Remove(au.path)
+				au.f.Close()
+			}
 			for _, f := range st.fetches {
 				// 连接关闭：通知 fetch reader 退出（errCh），并放行 pump 投递阻塞
 				// （close(f.closed) 幂等检查——reader 可能已自行清理）

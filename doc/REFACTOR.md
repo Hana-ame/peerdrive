@@ -198,6 +198,28 @@ client ◀──fwd-ok / fwd-err────────────────
 - 验证：8 个单测（握手全流程/坏 key/端口越权/重放/超时/无隧道防御/数据透传）
   + `-race` 全绿
 
+### 3.10 前端全面迁移到 WS + admin 管理 verb（2026-08-17）
+
+前端从 HTTP API 全面迁移到本地 WS 会话（`/ws/peer` 帧协议），HTTP 路由全部保留
+（`router.go` 标注 LEGACY 注释区）。用户决策：**管理面只走本地 WS**，WebRTC 连接
+不实现管理 verb（防权限面暴露给公共信令上的未知节点）；数据面仍走原 `req` verb。
+
+- **admin verb**（`internal/transport/admin.go`，约 300 行 + 6 个单测）：浏览器经
+  本地会话发 `{"type":"admin","method","path","body","token","reqId"}`，内部构造
+  *http.Request → 注入 gin engine 的 ServeHTTP（`httptest.NewRecorder`，router 经
+  `SetAdminHandler` 装配）→ **复用全部 HTTP controller，零重复实现**
+- **二进制上传**：admin 帧 `binary:true` + filename/field/size 声明，后续二进制帧
+  收集到临时文件 → multipart 重包转发（controller 的 FormFile 无感知）。field 默认
+  `file`，BT torrent 用 `torrent` + `path=/bt/torrent`（reqPath 由声明帧决定，
+  **坑**：初版硬编码 `/files/upload` 导致 torrent 打错路由，见 admin_test.go）
+- **二进制响应**：文件流 → `admin-bin` 头 + 单二进制帧（≤64MB；大文件走 req verb）
+- **认证**：admin 帧 token 字段 → 转发时注入 `Authorization: Bearer`，与 HTTP 一致
+- **前端**：`front/src/ws.js`（新，admin/upload/download/downloadToFile，reqId pending
+  map + 单槽 binaryExpect）+ `api.js` 全部 request 走 WS；页面下载/预览改 Blob
+  方式（`getBlobUrl`/`downloadFileToDisk`）；`__mocks__/api.js` 同步
+- 验证：后端 6 个 admin 单测 + 前端 `tests/ws.test.js` 7 个单测（reqId 乱序路由/
+  409 透传/token/分块收集/err/admin-bin/断线）+ 全量单测 + build 全绿
+
 ## 4. 帧协议（DataChannel 上，go↔go 与 go↔web 共用）
 
 ```jsonc
@@ -235,6 +257,20 @@ sync     {type:"sync", seq}                 → sync-resp {files,lastSeq}（meta
 1. JSON 控制头必须是**文本帧**（`SendText`），数据块是**二进制帧**（`Send`）——发反了对端把控制头当数据块吞掉
 2. data 头与数据块必须**原子连续**（`SendFrame` 的 sendMu），接收端按连接级 expect 状态机路由
 3. 浏览器端可不传 reqId（向后兼容），Go 端始终携带（UUID v4）
+
+**admin 管理 verb**（§3.10，仅本地 WS 会话，`admin.go`）：
+
+```jsonc
+// 普通请求 → admin-resp（4xx/5xx 也走 admin-resp，body 为结构化错误体，409 含 conflicts）
+{"type":"admin","method":"GET|POST|DELETE","path":"/files?x=1","body":<JSON>,"token":"<可选>","reqId"}
+{"type":"admin-resp","status":200,"body":<原始 JSON>,"reqId"}
+
+// 二进制上传：声明帧 + 后续二进制帧（收齐 multipart 重包转发；field 默认 "file"）
+{"type":"admin","method":"POST","path":"/files/upload","binary":true,"filename":"a.bin","field":"file","size":N,"reqId"} + N 字节二进制帧
+
+// 二进制响应（文件流，≤64MB）：admin-bin 头 + 单二进制帧
+{"type":"admin-bin","status":200,"size":N,"reqId"} + 二进制帧
+```
 
 ## 5. E2E 踩过的坑（全部已修）
 
@@ -364,6 +400,9 @@ go test -tags nosqlite ./...
 # E2E 手动验证（需外网）：
 #   A/B 节点各设 PEERDRIVE_PEERJS_ID，B 设 PEERDRIVE_PEERJS_PEERS=pd-node-a
 #   curl -X POST localhost:PORT/peerjs/fetch -d '{"peer":"pd-node-a","hash":"<64hex>"}'
+# admin verb 冒烟（无需外网，本地起服即可）：
+#   PEERDRIVE_STORAGE=/tmp/pd-storage PORT=3000 go run ./cmd/server/ &
+#   node front/tests/e2e-admin-smoke.mjs   # 连接 /ws/peer 走 admin 全链路（ping/上传/下载/集合/404）
 ```
 
 **构建环境坑**：go 命令需 `HTTPS_PROXY=http://172.29.80.1:10809 GOPROXY=https://goproxy.cn,direct`

@@ -10,6 +10,8 @@ export default function MiddlePanel({ selectedFile }) {
   const [textContent, setTextContent] = useState(null);
   const [textLoading, setTextLoading] = useState(false);
   const [textError, setTextError] = useState('');
+  // 预览 blob URL（WS 下载 → objectURL；替代旧 HTTP getDownloadUrl 直连）
+  const [blobUrl, setBlobUrl] = useState(null);
 
   useEffect(() => {
     setTextContent(null);
@@ -23,12 +25,25 @@ export default function MiddlePanel({ selectedFile }) {
        'lua', 'pl', 'vim', 'zsh', 'fish'].includes(ext(selectedFile.filename || selectedFile.path));
     if (isText && selectedFile.hash) {
       setTextLoading(true);
-      const url = api.getDownloadUrl(selectedFile.hash) + '?inline=1';
-      fetch(url)
-        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-        .then(t => { setTextContent(t); setTextLoading(false); })
+      // 文本预览改走 WS 拉取（fetch HTTP 是 legacy）
+      api.downloadFile(selectedFile.hash)
+        .then(buf => {
+          setTextContent(new TextDecoder().decode(buf));
+          setTextLoading(false);
+        })
         .catch(e => { setTextError(e.message); setTextLoading(false); });
     }
+    // 非文本可预览类型：拉 blob URL 给 <img>/<video>/<audio>/<iframe>
+    const isPreview = mime.startsWith('image/') || mime.startsWith('video/') ||
+      mime.startsWith('audio/') || mime === 'application/pdf';
+    if (isPreview && selectedFile.hash) {
+      let cancelled = false;
+      api.getBlobUrl(selectedFile.hash, mime)
+        .then(url => { if (!cancelled) setBlobUrl(url); })
+        .catch(() => {});
+      return () => { cancelled = true; };
+    }
+    setBlobUrl(null);
   }, [selectedFile?.hash, selectedFile?.filename, selectedFile?.path]);
 
   if (!selectedFile) {
@@ -46,8 +61,7 @@ export default function MiddlePanel({ selectedFile }) {
   const fname = filename || (path || '').split('/').pop() || '未知文件';
   const mime = mime_type || '';
   const e = ext(fname);
-  const dlUrl = hash ? api.getDownloadUrl(hash) : null;
-  const inlineUrl = dlUrl ? dlUrl + '?inline=1' : null;
+  const inlineUrl = blobUrl;
 
   const isImage = mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(e);
   const isVideo = mime.startsWith('video/') || ['mp4', 'avi', 'mkv', 'mov', 'webm'].includes(e);

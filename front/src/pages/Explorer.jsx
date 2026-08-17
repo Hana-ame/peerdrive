@@ -269,7 +269,21 @@ export default function Explorer() {
                 <span className="font-mono text-sm text-blue-300 truncate flex-1">{(entry.path || '').split('/').pop() || 'file'}</span>
                 <span className="text-xs text-gray-500 font-mono mr-4 truncate max-w-[120px]">{(entry.file_hash || '').substring(0, 12)}...</span>
                 <div className="flex space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <a href={api.downloadFileByPath(username, collName, entry.path)} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline text-xs">下载</a>
+                  <a href="#" onClick={e => {
+                    e.preventDefault();
+                    // 迁移后集合文件下载走 WS（旧 downloadFileByPath HTTP URL 是 legacy）
+                    api.downloadUserFile(username, collName, entry.path).then(buf => {
+                      const blob = new Blob([buf]);
+                      const u = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = u;
+                      a.download = (entry.path || '').split('/').pop() || 'file';
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      setTimeout(() => URL.revokeObjectURL(u), 5000);
+                    }).catch(err => alert('下载失败: ' + err.message));
+                  }} className="text-blue-400 hover:underline text-xs">下载</a>
                   <button onClick={() => handleDelete(entry.path)} className="text-red-400 hover:underline text-xs">移除</button>
                 </div>
               </div>

@@ -20,6 +20,7 @@ package router
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"time"
 
@@ -171,6 +172,16 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	syncRepo := repository.NewSyncRepository()
 	syncSvc := service.NewSyncService(syncRepo, uniDownloader, cfg.StorageDir)
 	syncCtrl := controller.NewSyncController(syncSvc)
+
+// ── LEGACY HTTP 路由区（保留原路径，注释标记） ──
+// 背景：前端已全面迁移到 /ws/peer 的 admin 帧（transport/admin.go 内部转发
+// 到本 engine，覆盖以下全部 controller）。这些 HTTP 端点保留原路径且继续
+// 工作：① 兼容旧版前端/curl/外部脚本；② 集成测试直接走 HTTP。
+// 前端新代码禁止直接 fetch 以下端点（除 /ws/peer 升级外）。
+// 迁移日期：2026-08-17（前端 api.js 改走 ws.js 客户端后完成）。
+//
+// 注意：admin 内部转发复用本 engine，因此这些路由同时服务「浏览器 admin 帧」
+// 与「直接 HTTP 调用」两条入口——行为一致，无需维护两份。
 
 	r.GET("/ping", controller.Ping)
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256Local)
@@ -335,6 +346,20 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 	// PeerJS 节点发现
 	registerPeerJSRoutes(r, authRequired)
+
+	// admin 管理面内部转发（transport/admin.go）：浏览器经 /ws/peer 发 admin
+	// 帧 → 这里包装 gin engine 复用全部 HTTP controller（零重复实现）。
+	// 为什么这样做：帧协议原有 verb 只覆盖文件数据面（req/upload/index），
+	// 集合/认证/BT/IPFS/任务等管理面若逐个写 verb 是巨大重复劳动，且 WebRTC
+	// 连接不处理 admin（serveAdmin 按会话 ID 拒绝），管理面只暴露给本地 WS。
+	// 前端 api.js 迁移后不再直接 fetch HTTP，全部走 /ws/peer admin 帧。
+	if peerjsService != nil {
+		peerjsService.SetAdminHandler(func(req *http.Request) (int, []byte, string, error) {
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			return rec.Code, rec.Body.Bytes(), rec.Header().Get("Content-Type"), nil
+		})
+	}
 
 	// 统一 source 管理（source 体系管理面）
 	registerSourceRoutes(r)

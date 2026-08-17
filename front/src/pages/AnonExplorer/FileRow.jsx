@@ -12,11 +12,24 @@ export default function FileRow({ file, isNestedColl, searchHash, onNestedCollCl
       </div>
     );
   }
-  const url = api.getAnonFileDownloadUrl(searchHash, file.path);
   const mime = file.mime_type || file.providers?.[0]?.mime_type || '';
   const displayName = (file.path || '').split('/').pop() || file.hash || 'file';
   return (
-    <a key={file.path} href={url} target="_blank" rel="noreferrer"
+    <a key={file.path} href="#" onClick={(e) => {
+      e.preventDefault();
+      // 迁移后集合文件下载走 WS（旧 getAnonFileDownloadUrl HTTP 是 legacy）
+      api.downloadAnonFile(searchHash, file.path).then(buf => {
+        const blob = new Blob([buf], mime ? { type: mime } : undefined);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = displayName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      }).catch(err => alert('下载失败: ' + err.message));
+    }}
       className="flex items-center gap-3 px-5 py-3 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm block">
       <span className="text-xl">{fileIcon(mime, file.path)}</span>
       <span className="text-blue-300 font-mono truncate flex-1">{displayName}</span>

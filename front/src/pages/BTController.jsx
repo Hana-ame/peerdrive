@@ -105,10 +105,9 @@ export default function BTController() {
   useEffect(() => {
     (async () => {
       try {
-        const apiBase = localStorage.getItem('peerdrive_api_base');
-        if (!apiBase) { setNodeStatus({ online: false, p2p: false, relay: false, btNodes: 0, checking: false }); return; }
         const [ping, p2p, bt] = await Promise.all([
-          fetch(apiBase + '/ping').then(r => r.ok).catch(() => false),
+          // 节点健康检查走 WS admin（旧 fetch(apiBase+'/ping') HTTP 是 legacy）
+          api.ping().then(() => true).catch(() => false),
           api.getP2PStatus().catch(() => null),
           api.getBTStatus().catch(() => null),
         ]);
@@ -638,13 +637,26 @@ export default function BTController() {
                           >
                             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>
                           </button>
-                          {/* Download .torrent file */}
+                          {/* Download .torrent file（迁移后走 WS admin，旧 HTTP URL 是 legacy） */}
                           <a
-                            href={api.btGetTorrentUrl(d.infohash)}
-                            download
+                            href="#"
                             title={'下载种子文件'}
                             className="p-1.5 rounded text-gray-500 hover:text-blue-400 hover:bg-gray-800 transition-colors"
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              api.downloadTorrentFile(d.infohash).then(buf => {
+                                const blob = new Blob([buf], { type: 'application/x-bittorrent' });
+                                const u = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = u;
+                                a.download = `${d.infohash}.torrent`;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                setTimeout(() => URL.revokeObjectURL(u), 5000);
+                              }).catch(err => setStatusMsg({ type: 'error', text: '下载种子失败: ' + err.message }));
+                            }}
                           >
                             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
@@ -686,10 +698,23 @@ export default function BTController() {
                           )}
                           <button onClick={() => handleRemove(d.infohash)} className="text-red-400 text-xs px-2 py-1 rounded bg-gray-800">{'移除'}</button>
                           <a
-                            href={api.btGetTorrentUrl(d.infohash)}
-                            download
+                            href="#"
                             className="text-blue-400 text-xs px-2 py-1 rounded bg-gray-800"
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              api.downloadTorrentFile(d.infohash).then(buf => {
+                                const blob = new Blob([buf], { type: 'application/x-bittorrent' });
+                                const u = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = u;
+                                a.download = `${d.infohash}.torrent`;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                setTimeout(() => URL.revokeObjectURL(u), 5000);
+                              }).catch(err => setStatusMsg({ type: 'error', text: '下载种子失败: ' + err.message }));
+                            }}
                           >
                             {'.torrent'}
                           </a>

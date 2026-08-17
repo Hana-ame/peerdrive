@@ -433,8 +433,11 @@ export default function P2PPanel() {
               )}
               {lifecycle.step === 'done' && (
                 <div className="flex gap-2 mt-2">
-                  <a href={api.getDownloadUrl(lifecycle.hash)}
-                    target="_blank" rel="noopener noreferrer"
+                  <a href="#" onClick={e => {
+                    e.preventDefault();
+                    // 迁移后下载走 WS（旧 getDownloadUrl HTTP URL 是 legacy）
+                    api.downloadFileToDisk(lifecycle.hash);
+                  }}
                     className="text-[10px] text-blue-400 hover:text-blue-300 underline">
                     下载链接
                   </a>

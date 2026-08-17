@@ -1,15 +1,19 @@
 import React, { useState, useEffect } from 'react';
 
-export default function TextPreview({ url, downloadUrl, filename, hash, created }) {
+export default function TextPreview({ buf, onLoad, downloadUrl, filename, hash, created, onDownload }) {
   const [content, setContent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   useEffect(() => {
-    fetch(url)
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-      .then(t => { setContent(t.substring(0, 50000)); setLoading(false); })
-      .catch(() => { setError('加载失败'); setLoading(false); });
-  }, [url]);
+    // 文本预览改走 WS 拉取（旧 fetch(url) HTTP 是 legacy；url 参数已移除）
+    if (onLoad && typeof onLoad.then === 'function') {
+      onLoad
+        .then(b => { setContent(new TextDecoder().decode(b).substring(0, 50000)); setLoading(false); })
+        .catch(() => { setError('加载失败'); setLoading(false); });
+    } else {
+      setLoading(false);
+    }
+  }, []);
   if (loading) return <div className="flex-1 flex items-center justify-center text-gray-600 text-sm">加载预览中...</div>;
   if (error) return <div className="flex-1 flex items-center justify-center text-red-400 text-sm">{error}</div>;
   return (
@@ -20,7 +24,8 @@ export default function TextPreview({ url, downloadUrl, filename, hash, created 
         {content && content.length >= 50000 && <span className="text-amber-500">（截断至前 50KB）</span>}
       </div>
       <pre className="flex-1 overflow-auto bg-gray-900 border border-gray-800 rounded-lg p-4 text-xs font-mono text-gray-300 whitespace-pre-wrap break-all">{content}</pre>
-      <a href={downloadUrl || url} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline mt-2 self-end">⬇ 下载</a>
+      <a href="#" onClick={e => { e.preventDefault(); if (onDownload) onDownload(); }}
+        className="text-xs text-blue-400 hover:underline mt-2 self-end">⬇ 下载</a>
     </div>
   );
 }

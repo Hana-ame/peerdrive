@@ -205,6 +205,16 @@ export const getServiceStats = () => EMPTY_PROMISE
 export const saveConsentLocal = () => {}
 export const uploadConsent = saveConsentLocal
 
+// WS 下载/预览（迁移后的新 API，全部 mock 成空 Promise——测试不触发真实 WS）
+export const downloadFile = () => Promise.resolve(new Uint8Array(0))
+export const downloadFileToDisk = () => Promise.resolve()
+export const downloadAnonFile = () => Promise.resolve(new Uint8Array(0))
+export const downloadUserFile = () => Promise.resolve(new Uint8Array(0))
+export const downloadTorrentFile = () => Promise.resolve(new Uint8Array(0))
+export const getBlobUrl = () => ''
+export const revokeBlobUrl = () => {}
+export const btGetMagnetUri = () => EMPTY_PROMISE
+
 // Alias
 export const createCollection = createUserCollection
 export const listCollections = getUserCollections
@@ -212,7 +222,7 @@ export const getCollection = getUserCollection
 export const addEntry = addCollectionEntry
 export const deleteEntry = removeCollectionEntry
 export const commitVersion = commitCollection
-export const downloadFileByPath = getUserFileDownloadUrl
+export const downloadFileByPath = downloadUserFile
 export const mergeCollection = mergeUserCollection
 export const getNodeInfo = getP2PNode
 

@@ -1,4 +1,11 @@
-// API 请求模块：封装与后端的所有 HTTP 通信和本地存储配置
+// API 请求模块：封装与后端的所有通信和本地存储配置。
+// 迁移说明（2026-08-17）：后端通信全面走本地 WS 会话 /ws/peer 的 admin 帧
+// （ws.js），不再直接 fetch HTTP——管理面只暴露给本地 WS（WebRTC/peerjs
+// 不实现管理 verb，防权限面漏洞）。HTTP 端点保留原路径作 legacy（兼容旧
+// 客户端/curl/集成测试，见 back/internal/router/router.go 标记）。
+// 调用方（页面）无感：request() 签名不变，错误语义与 fetch 版一致
+// （Error.status/Error.data 结构化 body，409 冲突清单等）。
+import * as ws from './ws.js';
 const STORAGE_KEY = 'peerdrive_api_base';
 const AUTH_TOKEN_KEY = 'peerdrive_auth_token';
 const DEFAULT_API = 'https://wsl-3000.moonchan.xyz';
@@ -135,33 +142,40 @@ function getAuthToken() {
   return '';
 }
 
-// 通用 HTTP 请求封装，自动注入 Auth Token
+// 通用请求封装：走本地 WS 会话 admin 帧（ws.js 内部转发 gin engine）。
+// 语义与旧 fetch 版完全一致：status>=400 → Error(err.status/err.data)
+// （409 冲突清单等结构化错误体，见 ws.js handleText admin-resp 分支）。
 async function request(method, path, body = null) {
-  const opts = { method, headers: {} };
-  const token = getAuthToken();
-  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
-  if (body) {
-    opts.headers['Content-Type'] = 'application/json';
-    opts.body = JSON.stringify(body);
-  }
-  const url = `${getApiBase()}${path}`;
-  const res = await fetch(url, opts);
-  if (!res.ok) {
-    // 挂 status/data 到 Error：调用方需要区分 409 冲突清单等结构化错误体
-    //（发现背景：manual 合并策略 409 返回 {conflicts}，旧实现只 alert 消息文本，
-    //  冲突数据丢失，无法展示/重试）
-    const body = await res.json().catch(() => null);
-    const err = new Error(body?.error || body?.message || `HTTP ${res.status}`);
-    err.status = res.status;
-    err.data = body;
-    throw err;
-  }
-  return res.json();
+  return ws.admin(method, path, body);
 }
 
 /* ---- file ---- */
 export const verifyFile = (hash) => request('GET', `/files/verify/${hash}`);
-export const getDownloadUrl = (hash) => `${getApiBase()}/sha256sum/${hash}`;
+// downloadFile 经 WS req verb 拉取 sha256 内容（ws.js download，返回 Uint8Array）。
+// 旧 getDownloadUrl(hash) 返回 HTTP URL 已废弃（HTTP 是 legacy）；调用方需改
+// 用本函数或 downloadFileToDisk。
+export const downloadFile = (hash) => ws.download(hash);
+export const downloadFileToDisk = (hash, filename) => ws.downloadToFile(hash, filename);
+
+// getBlobUrl 经 WS 拉取文件 → objectURL（图片/视频/PDF 预览用），带缓存。
+// 旧做法直接 <img src={getDownloadUrl(hash)}> 走 HTTP（legacy）；迁移后预览
+// 资源也走 WS。objectURL 生命周期由调用方 revoke（或页面卸载时清理）。
+const blobUrlCache = new Map();
+export async function getBlobUrl(hash, mime = '') {
+  if (blobUrlCache.has(hash)) return blobUrlCache.get(hash);
+  const data = await ws.download(hash);
+  const blob = new Blob([data], mime ? { type: mime } : undefined);
+  const url = URL.createObjectURL(blob);
+  blobUrlCache.set(hash, url);
+  return url;
+}
+export const revokeBlobUrl = (hash) => {
+  const url = blobUrlCache.get(hash);
+  if (url) {
+    URL.revokeObjectURL(url);
+    blobUrlCache.delete(hash);
+  }
+};
 export const registerLocalFile = (path, filename) =>
   request('POST', '/collections/register-local', { path, filename: filename || path.split('/').pop() });
 export const registerURL = async (url, filename = '') => {
@@ -189,7 +203,10 @@ export const getAnonCollection = (hash) => request('GET', `/collections/${hash}`
 // 下载 URL 的虚拟路径必须逐段 encodeURIComponent（文件名可能含空格/#/? 等，
 // 不编码会破坏 URL；后端 gin *filepath 已对 URL.Path 解码，编码后服务端比对仍正确）
 const encodePath = (p) => (p || '').split('/').map(encodeURIComponent).join('/');
-export const getAnonFileDownloadUrl = (hash, p) => `${getApiBase()}/collections/${encodeURIComponent(hash)}/${encodePath(p)}`;
+// downloadAnonFile 经 WS admin GET 拉集合内文件（后端返回文件流 → admin-bin
+// 二进制帧）。旧 getAnonFileDownloadUrl(hash, p) 返回 HTTP URL 已废弃。
+export const downloadAnonFile = (hash, p) =>
+  ws.admin('GET', `/collections/${encodeURIComponent(hash)}/${encodePath(p)}`);
 
 /* ---- user collections ---- */
 export const createUserCollection = (username, collection_name, visibility = 'public', tags = []) =>
@@ -212,8 +229,10 @@ export const forkUserCollection = (username, source_username, coll, source_coll)
   request('POST', '/actions/fork', { username, source_username, collection_name: coll, source_coll_name: source_coll });
 export const mergeUserCollection = (username, source_username, coll, source_coll, strategy = 'ours') =>
   request('POST', '/actions/merge', { username, source_username, collection_name: coll, source_coll_name: source_coll, strategy });
-export const getUserFileDownloadUrl = (username, coll, filepath) =>
-  `${getApiBase()}/${encodeURIComponent(username)}/${encodeURIComponent(coll)}/${encodePath(filepath)}`;
+// downloadUserFile 经 WS admin GET 拉用户集合内文件（同 downloadAnonFile）。
+// 旧 getUserFileDownloadUrl(username, coll, filepath) 返回 HTTP URL 已废弃。
+export const downloadUserFile = (username, coll, filepath) =>
+  ws.admin('GET', `/${encodeURIComponent(username)}/${encodeURIComponent(coll)}/${encodePath(filepath)}`);
 
 /* ---- P2P ---- */
 export const getP2PStatus = () => request('GET', '/p2p/status');
@@ -246,24 +265,20 @@ export const btFind = (hash) => request('POST', '/bt/find', { hash });
 export const btGetDownloads = () => request('GET', '/bt/downloads');
 export const btGetDownload = (infohash) => request('GET', `/bt/download/${infohash}`);
 export const btMagnetResolve = (uri) => request('POST', '/bt/magnet', { uri });
-export const btTorrentUpload = (file) => {
-  const fd = new FormData();
-  fd.append('torrent', file);
-  const token = getAuthToken();
-  const headers = {};
-  if (token) headers['Authorization'] = 'Bearer ' + token;
-  return fetch(`${getApiBase()}/bt/torrent`, { method: 'POST', body: fd, headers }).then(r => {
-    if (!r.ok) throw new Error(`Torrent upload failed: ${r.status}`);
-    return r.json();
-  });
-};
+export const btTorrentUpload = (file) =>
+  // admin 二进制上传：/bt/torrent + multipart 字段名 "torrent"
+  // （后端 BTTorrentUpload 读 FormFile("torrent")，与 /files/upload 的 "file" 不同）
+  ws.upload(file, file?.name, 'torrent', '/bt/torrent');
 export const btRemoveDownload = (infohash) => request('DELETE', `/bt/download/${infohash}`);
 export const btPauseDownload = (infohash) => request('POST', `/bt/download/${infohash}/pause`);
 export const btResumeDownload = (infohash) => request('POST', `/bt/download/${infohash}/resume`);
 export const btSeedDownload = (infohash) => request('POST', `/bt/download/${infohash}/seed`);
 export const btStopSeed = (infohash) => request('POST', `/bt/download/${infohash}/unseed`);
-export const btGetTorrentUrl = (infohash) => `${getApiBase()}/bt/download/${infohash}/torrent`;
 export const btGetMagnetUri = (infohash) => request('GET', `/bt/download/${infohash}/magnet`);
+// downloadTorrentFile 经 WS admin GET 拉 .torrent 文件（二进制响应 → admin-bin）。
+// 旧 btGetTorrentUrl(infohash) 返回 HTTP URL 已废弃。
+export const downloadTorrentFile = (infohash) =>
+  ws.admin('GET', `/bt/download/${infohash}/torrent`);
 export const btSeedCollection = (collectionHash) => request('POST', '/bt/seed-collection', { collection_hash: collectionHash });
 
 /* ---- P2P Dual ---- */
@@ -281,17 +296,8 @@ export const listPublicCollections = (q = '') =>
   request('GET', `/collections/public${q ? '?q=' + encodeURIComponent(q) : ''}`);
 
 /* ---- file upload/delete ---- */
-export const uploadFile = (file) => {
-  const fd = new FormData();
-  fd.append('file', file);
-  const token = getAuthToken();
-  const headers = {};
-  if (token) headers['Authorization'] = 'Bearer ' + token;
-  return fetch(`${getApiBase()}/files/upload`, { method: 'POST', body: fd, headers }).then(r => {
-    if (!r.ok) throw new Error(`Upload failed: ${r.status}`);
-    return r.json();
-  });
-};
+// uploadFile 走 admin 二进制分片上传（ws.upload，multipart 字段 "file"）。
+export const uploadFile = (file) => ws.upload(file, file?.name, 'file');
 export const deleteFile = (hash) => request('DELETE', `/files/${hash}`);
 
 /* ---- task status ---- */
@@ -439,7 +445,7 @@ export const getCollection = (id) => request('GET', `/collections/${id}`);
 export const addEntry = addCollectionEntry;
 export const deleteEntry = removeCollectionEntry;
 export const commitVersion = commitCollection;
-export const downloadFileByPath = getUserFileDownloadUrl;
+export const downloadFileByPath = downloadUserFile;
 export const mergeCollection = mergeUserCollection;
 export const getNodeInfo = getP2PNode;
 

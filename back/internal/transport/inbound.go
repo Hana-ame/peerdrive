@@ -293,6 +293,12 @@ func (s *PeerJSService) uploadWorker(c Session, st *connState) {
 	for {
 		select {
 		case ch := <-st.binCh:
+			if ch.au != nil {
+				// admin 管理面上传（admin.go）：块写临时文件（收集），
+				// 收齐/中止 → 清理 + 回帧（复用 H5 架构：IO 移出消息泵）。
+				s.adminUploadChunk(c, ch.au, ch.data, ch.last)
+				continue
+			}
 			if err := ch.up.sess.WriteAt(ch.offset, ch.data); err != nil {
 				_ = c.SendJSON(dcResp{Type: "err", Msg: "upload write failed: " + err.Error(), ReqID: ch.up.reqID})
 				continue
