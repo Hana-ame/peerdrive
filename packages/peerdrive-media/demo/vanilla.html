@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <title>peerdrive-media vanilla demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; }
+    h2 { margin-top: 0; }
+    video { width: 100%; background: #000; }
+    img { max-width: 100%; border-radius: 6px; }
+    .err { color: #c0392b; }
+    .ok { color: #27ae60; }
+  </style>
+</head>
+<body>
+  <h1>peerdrive-media · vanilla demo</h1>
+  <p>
+    通过 peerjs 从 Node 端（<code>demo-node</code>）经 WebRTC DataChannel
+    加载图片/视频。先启动：
+    <code>npm run demo:signal</code> + <code>npm run demo:server</code>
+  </p>
+
+  <div class="card">
+    <h2>PeerMedia.mount() 便捷加载</h2>
+    <div id="mount-box" class="err">加载中…</div>
+  </div>
+
+  <div class="card">
+    <h2>PeerMedia.load() + 手动挂载</h2>
+    <div id="load-box" class="err">加载中…</div>
+  </div>
+
+  <div class="card">
+    <h2>视频（4MB 流式传输）</h2>
+    <div id="video-box" class="err">加载中…</div>
+  </div>
+
+  <div class="card">
+    <h2>白名单拒绝（安全边界演示）</h2>
+    <div id="deny-box" class="err">加载中…</div>
+  </div>
+
+  <!-- IIFE 构建产物：npm run build 后引用 -->
+  <script src="../dist/vanilla/peerdrive-media.iife.js"></script>
+  <script>
+    const SIGNAL = { host: '127.0.0.1', port: 9100, secure: false, key: 'peerjs', path: '/' }
+    const PEER = 'demo-node'
+    const base = 'http://127.0.0.1:9090'
+
+    // 1) mount()：自动创建 img/video 元素
+    PeerMedia.mount({ peer: PEER, signaling: SIGNAL, url: `${base}/img/red.svg`, container: document.getElementById('mount-box') })
+      .then(() => { document.getElementById('mount-box').classList.remove('err') })
+      .catch((e) => { document.getElementById('mount-box').textContent = '失败: ' + e.message })
+
+    // 2) load()：拿到 blobUrl 自行挂载（注意用完 revoke）
+    PeerMedia.load({ peer: PEER, signaling: SIGNAL, url: `${base}/img/green.svg` })
+      .then(({ blobUrl, mime, size }) => {
+        const box = document.getElementById('load-box')
+        box.classList.remove('err')
+        box.innerHTML = `<span class="ok">${mime} ${(size / 1024).toFixed(1)}KB</span>`
+        const img = document.createElement('img')
+        img.src = blobUrl
+        box.appendChild(img)
+      })
+      .catch((e) => { document.getElementById('load-box').textContent = '失败: ' + e.message })
+
+    // 3) 视频
+    PeerMedia.mount({ peer: PEER, signaling: SIGNAL, url: `${base}/video/fake.mp4`, container: document.getElementById('video-box') })
+      .then(() => { document.getElementById('video-box').classList.remove('err') })
+      .catch((e) => { document.getElementById('video-box').textContent = '失败: ' + e.message })
+
+    // 4) 白名单外 URL 应被 Node 端拒绝
+    PeerMedia.load({ peer: PEER, signaling: SIGNAL, url: 'https://example.com/secret.png' })
+      .then(() => { document.getElementById('deny-box').textContent = '异常：不应成功' })
+      .catch((e) => { document.getElementById('deny-box').textContent = '符合预期拒绝: ' + e.message })
+  </script>
+</body>
+</html>

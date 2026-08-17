@@ -1,0 +1,48 @@
+{
+  "name": "peerdrive-media",
+  "version": "0.1.0",
+  "description": "PeerJS-powered media loading: load a URL resource from a Node.js peer over WebRTC DataChannel and render it as <img>/<video> in React or vanilla JS.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["peerjs", "webrtc", "p2p", "media", "react", "img", "video", "datachannel"],
+  "exports": {
+    ".": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js",
+      "default": "./dist/react/index.js"
+    },
+    "./react": "./dist/react/index.js",
+    "./vanilla": {
+      "import": "./dist/vanilla/peerdrive-media.es.js",
+      "default": "./dist/vanilla/peerdrive-media.iife.js"
+    },
+    "./node": "./src/node/server.js"
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "vite build --config vite.react.config.js && vite build --config vite.vanilla.config.js && cp src/react/index.d.ts dist/react/index.d.ts",
+    "test": "node --test 'test/*.test.mjs'",
+    "demo:signal": "peerjs --port 9100 --path /",
+    "demo:server": "node demo/node-server.mjs",
+    "demo:serve": "vite demo --port 5175"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "react-dom": { "optional": true }
+  },
+  "dependencies": {
+    "peerjs": "^1.5.5"
+  },
+  "optionalDependencies": {
+    "@roamhq/wrtc": "^0.10.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.1",
+    "peerjs-server": "^0.2.9",
+    "vite": "^8.0.10"
+  }
+}
