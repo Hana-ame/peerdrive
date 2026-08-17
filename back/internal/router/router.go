@@ -173,15 +173,15 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	syncSvc := service.NewSyncService(syncRepo, uniDownloader, cfg.StorageDir)
 	syncCtrl := controller.NewSyncController(syncSvc)
 
-// ── LEGACY HTTP 路由区（保留原路径，注释标记） ──
-// 背景：前端已全面迁移到 /ws/peer 的 admin 帧（transport/admin.go 内部转发
-// 到本 engine，覆盖以下全部 controller）。这些 HTTP 端点保留原路径且继续
-// 工作：① 兼容旧版前端/curl/外部脚本；② 集成测试直接走 HTTP。
-// 前端新代码禁止直接 fetch 以下端点（除 /ws/peer 升级外）。
-// 迁移日期：2026-08-17（前端 api.js 改走 ws.js 客户端后完成）。
-//
-// 注意：admin 内部转发复用本 engine，因此这些路由同时服务「浏览器 admin 帧」
-// 与「直接 HTTP 调用」两条入口——行为一致，无需维护两份。
+	// ── LEGACY HTTP 路由区（保留原路径，注释标记） ──
+	// 背景：前端已全面迁移到 /ws/peer 的 admin 帧（transport/admin.go 内部转发
+	// 到本 engine，覆盖以下全部 controller）。这些 HTTP 端点保留原路径且继续
+	// 工作：① 兼容旧版前端/curl/外部脚本；② 集成测试直接走 HTTP。
+	// 前端新代码禁止直接 fetch 以下端点（除 /ws/peer 升级外）。
+	// 迁移日期：2026-08-17（前端 api.js 改走 ws.js 客户端后完成）。
+	//
+	// 注意：admin 内部转发复用本 engine，因此这些路由同时服务「浏览器 admin 帧」
+	// 与「直接 HTTP 调用」两条入口——行为一致，无需维护两份。
 
 	r.GET("/ping", controller.Ping)
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256Local)

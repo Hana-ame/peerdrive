@@ -152,11 +152,11 @@ func (s *PeerJSService) serveAdmin(c Session, st *connState, raw []byte) {
 			// 传 path=/bt/torrent。旧实现硬编码 /files/upload，导致 torrent
 			// 上传打到 /files/upload 且 field=torrent 不被接受（发现背景：
 			// 前端 btTorrentUpload 迁移时核对 admin 帧与后端转发路径）。
-			reqPath:  ar.Path,
-			size:     ar.Size,
-			f:        f,
-			path:     f.Name(),
-			created:  time.Now(),
+			reqPath: ar.Path,
+			size:    ar.Size,
+			f:       f,
+			path:    f.Name(),
+			created: time.Now(),
 		}
 		st.adminUp = au
 		st.mu.Unlock()
