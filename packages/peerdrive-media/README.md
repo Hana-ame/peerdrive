@@ -20,10 +20,24 @@ Node 端 peer（createPeerMediaServer）
 ## 安装
 
 ```bash
-npm install peerdrive-media
+# 首选：GitHub 独立仓库（dist 已入库，装完即用，无需构建）
+npm install github:Hana-ame/peerdrive-media
+
+# 固定版本（tag 与 package.json 的 version 同步维护）
+npm install github:Hana-ame/peerdrive-media#v0.1.0
+
+# npm registry 发布后即可：npm install peerdrive-media
 ```
 
+> 为什么没有 `github:Hana-ame/peerdrive#path:packages/peerdrive-media`：npm 不支持 git 依赖的子目录语法（pnpm/yarn 才支持 `#path:`），故包独立成仓。
+
 React 入口还需要 `react` / `react-dom`（peerDependencies）。Node 端使用需要 **Node >= 22** 与 `@roamhq/wrtc`（本包 optionalDependencies，安装失败时 Node 端不可用）。
+
+Vanilla `<script>` 免安装直引（jsDelivr CDN，需外网）：
+
+```html
+<script src="https://cdn.jsdelivr.net/gh/Hana-ame/peerdrive-media@v0.1.0/dist/vanilla/peerdrive-media.iife.js"></script>
+```
 
 ## 快速开始
 

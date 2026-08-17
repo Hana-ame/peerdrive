@@ -220,6 +220,31 @@ client ◀──fwd-ok / fwd-err────────────────
 - 验证：后端 6 个 admin 单测 + 前端 `tests/ws.test.js` 7 个单测（reqId 乱序路由/
   409 透传/token/分块收集/err/admin-bin/断线）+ 全量单测 + build 全绿
 
+### 3.11 standalone 包 peerdrive-media（2026-08-18，独立 repo）
+
+`packages/peerdrive-media/` 是给第三方用的独立 npm 包：浏览器经 PeerJS 信令 +
+WebRTC DataChannel 从 Node 端加载 URL 资源并渲染 `<img>`/`<video>`。
+**独立托管于 github.com/Hana-ame/peerdrive-media**（tag 与 version 同步），原因：
+npm 不支持 git 依赖的 `#path:` 子目录语法（pnpm/yarn 才支持），主 repo 根目录
+也无 package.json，无法整体当 git 依赖。
+
+- **三入口**：`peerdrive-media`（React 组件 PeerImage/PeerVideo/PeerMedia +
+  Provider/usePeerMedia）、`peerdrive-media/vanilla`（IIFE/ESM `<script>` 直引，
+  另有 jsDelivr CDN 直链）、`peerdrive-media/node`（createPeerMediaServer 提供者）
+- **帧协议**：peerjs `serialization:'raw'`——文本帧=JSON 头（url/meta/done/err），
+  二进制帧=64KB 数据块；连接级串行（一个连接同时只服务一个请求）、
+  `bufferedAmount > 4MB` 背压暂停读上游
+- **dist 入库**：主 repo 根 .gitignore 的 `dist/` 会吞掉包内 dist/（git 父目录排除
+  不下钻，`!dist/` 反制无效），用 `git add -f` 强加；独立 repo 无此问题直接提交
+- **peer 安装**：npm 7+ 对 `peerDependenciesMeta optional` 标记的依赖不自动安装，
+  会 `Cannot find package 'react'`（e2e 测试发现）→ 移除 meta，react/react-dom
+  随装
+- **验证**：包内单测+E2E 13/13（帧协议 6 + 本地信令全链路 7）；消费者场景
+  复验——临时项目 `npm i github:Hana-ame/peerdrive-media` 后三入口 import 冒烟 +
+  e2e.test.mjs（改包名导入）7/7
+- 浏览器端 E2E（playwright 连宿主 Edge CDP 9222）已备 `test/e2e-browser.mjs`
+  但未执行（当时用户选择跳过）
+
 ## 4. 帧协议（DataChannel 上，go↔go 与 go↔web 共用）
 
 ```jsonc

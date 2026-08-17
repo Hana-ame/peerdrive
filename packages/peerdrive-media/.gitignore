@@ -1,7 +1,6 @@
 # 本包的忽略规则（相对本目录）。
-# 重要：!dist/ 反父级根 .gitignore 的 dist/ 忽略——构建产物必须进 repo，
-# 否则 git 依赖引用方（npm install github:Hana-ame/peerdrive#path:...）拿不到
-# dist，装完即不可用（prepare 兜底在 devDeps 缺失时会失败）。
+# dist/ 构建产物必须进 repo：本 repo 用 git add -f 强加；独立镜像 repo
+# （github.com/Hana-ame/peerdrive-media）无任何忽略规则，直接提交即可。
+# 消费者经 npm git 依赖安装后立即可用，无需 prepare/构建。
 node_modules/
 *.log
-!dist/

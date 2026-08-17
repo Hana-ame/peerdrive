@@ -30,10 +30,6 @@
     "react": ">=18",
     "react-dom": ">=18"
   },
-  "peerDependenciesMeta": {
-    "react": { "optional": true },
-    "react-dom": { "optional": true }
-  },
   "dependencies": {
     "peerjs": "^1.5.5"
   },
