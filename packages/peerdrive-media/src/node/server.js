@@ -88,7 +88,8 @@ export async function createPeerMediaServer({
     secure: signaling.secure,
     key: signaling.key,
     path: signaling.path || '/',
-    debug: 0,
+    // 诊断：PEERDRIVE_MEDIA_DEBUG=1 时输出 peerjs ICE/信令日志
+    debug: process.env.PEERDRIVE_MEDIA_DEBUG ? 3 : 0,
   })
 
   await new Promise((resolve, reject) => {

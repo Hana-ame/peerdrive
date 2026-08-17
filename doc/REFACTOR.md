@@ -242,8 +242,27 @@ npm 不支持 git 依赖的 `#path:` 子目录语法（pnpm/yarn 才支持），
 - **验证**：包内单测+E2E 13/13（帧协议 6 + 本地信令全链路 7）；消费者场景
   复验——临时项目 `npm i github:Hana-ame/peerdrive-media` 后三入口 import 冒烟 +
   e2e.test.mjs（改包名导入）7/7
-- 浏览器端 E2E（playwright 连宿主 Edge CDP 9222）已备 `test/e2e-browser.mjs`
-  但未执行（当时用户选择跳过）
+- **浏览器 E2E（8/8，2026-08-18 补做）**：playwright 本机 Firefox headless
+  （`~/.claude/skills/playwright-test/` 已弃 CDP 9222 改 local firefox；需
+  `playwright-core/cli.js install firefox` 走代理补装），demo 页用 node 原生静态
+  服务器（`scripts/static-serve.mjs`，vite dev 会 transform IIFE 破坏 `PeerMedia`
+  全局 + 陈旧缓存）。踩坑五连（均已修进 core.js）：
+  1. **peerjs 双构建 default export 语义不同**：`main`(cjs) default=module.exports
+     （含 Peer），`module`(esm) default=内部 util 对象（无 Peer）→ 三路兜底
+     `NS.Peer || pkg.Peer || pkg.default?.Peer`
+  2. **peerjs-server 0.2.9 无 retrieveId 端点**：浏览器端 Peer 必须显式随机 id
+     （`pd-b-` 前缀），否则信令 404 → ServerError
+  3. **默认 STUN 卡 gathering**：无外网 UDP 环境（WSL）peerjs 默认 stun.l.google.com
+     卡 ICE → `config: { iceServers: [] }`（内网 host candidate 足够）
+  4. **Firefox mDNS 混淆**：`media.peerconnection.ice.obfuscate_host_addresses=false`
+     （runner firefoxUserPrefs）
+  5. **core.js 三个自身 bug**：conn error 无条件 teardown（DC open 瞬间 flush 触发
+     peerjs NotOpenYet 竞态 → 拆掉刚建好的连接，真断线由 close 事件兜底）；
+     每次排队请求都 open()（4 个组件并发 = 4 条 Peer 连接，Node 端 busy 拒绝）；
+     客户端未按 Node 端「连接级串行」自排队（并发请求被 `another request in
+     flight` 拒绝）→ opening 守卫 + flush() 队列
+- 遗留：`test/e2e-browser.mjs` 的 readyState≥1 断言对无容器假视频字节不适用
+  （demo fake.mp4 无合法容器），改为只验元素挂载
 
 ## 4. 帧协议（DataChannel 上，go↔go 与 go↔web 共用）
 

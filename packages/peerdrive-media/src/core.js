@@ -9,10 +9,16 @@
 // 见 doc/layers/L2-transport/conn.md）。Node 端按请求顺序逐块回数据，
 // 一请求完成（done/err）后才处理下一个，因此块归属无歧义。
 // peerjs 是 CJS 包（无 exports 字段）——Node 原生 ESM 无法静态解析 named
-// export，必须 default import 后解构；vite 构建对 CJS 的 interop 同样走
-// default（module.exports 对象），此写法两端兼容。
+// export，必须 default import 后解构。但坑：peerjs 的 main(bundler.cjs) 与
+// module(bundler.mjs) 两个构建 default export 语义不同——Node 解析 CJS 时
+// default = module.exports（含 Peer）；vite 构建解析 ESM 时 default 是内部
+// util 对象（无 Peer），Peer 只挂在命名导出上。实测（2026-08-18 浏览器 E2E
+// 暴露）：IIFE 里 Peer 解构出 undefined → "yt is not a constructor"。
+// 三路兜底：namespace 命名导出（vite/ESM）→ CJS default（Node）→ default.default。
 import peerjsPkg from 'peerjs'
-const { Peer } = peerjsPkg
+import * as peerjsNS from 'peerjs'
+const Peer =
+  peerjsNS.Peer || peerjsPkg.Peer || (peerjsPkg.default && peerjsPkg.default.Peer)
 import {
   makeUrlRequest, parseFrame, isBinaryFrame, toUint8Array, nextReqId,
 } from './protocol.js'
@@ -51,19 +57,49 @@ class ConnectionSlot {
   // 见 handleData 的 curReqId 覆盖注释，Node 端逐请求串行所以实际不会错乱）。
   request(url, resolve, reject, signal) {
     const entry = { url, resolve, reject, signal }
-    if (!this.ready || this.closed) {
+    // 两个条件都排队：(1) 连接未就绪；(2) 已有在途请求——Node 端协议是
+    // 连接级串行（一次只服务一个 url 请求，并发回 err 'another request in
+    // flight'，见 server.js busy 标志），客户端必须自排队等 done/err 再发。
+    // 浏览器 E2E 2026-08-18 暴露：4 个组件并发 load → 3 个被 Node 拒绝。
+    if (!this.ready || this.closed || this.pending.size > 0) {
       this.queue.push(entry)
-      if (!this.closed) this.open()
+      // 守卫 opening：并发多个请求排队时只建一次连接（第一个请求触发
+      // open，其余等待 ready 后统一 flush）——否则 N 个请求 = N 个 Peer
+      // 实例，Node 端收到 N 条 DataConnection（浏览器 E2E 2026-08-18 暴露：
+      // 4 个 box 建了 4 条连接，且竞态下请求乱发）。
+      if (!this.opening && !this.closed) {
+        this.opening = true
+        this.open()
+      }
       return
     }
     this.send(entry)
   }
 
+  // flush 按序发送排队请求；有在途请求时停下（串行协议）。
+  flush() {
+    if (!this.ready || this.closed) return
+    while (this.queue.length && this.pending.size === 0) {
+      this.send(this.queue.shift())
+    }
+  }
+
+  // open 建立到 Node 端 peer 的完整链路（Peer 信令 + DataConnection）。
+  // 必须传显式随机 id：peerjs-server 0.2.9 无 HTTP GET /:key/id（retrieveId
+  // 404 → ServerError）；带 id 直接走 WS 注册。随机前缀避免与信令上其他
+  // 节点撞 id（浏览器 E2E 2026-08-18 暴露，见 test/e2e.test.mjs connectClient）。
+  // debug 可经全局 __PDM_DEBUG 提到 3（输出 ICE/信令日志，排查连接问题）。
+  // config：默认空 iceServers——本包典型场景是浏览器↔Node 本地/内网互联，
+  // host candidate 即可连通；peerjs 默认 STUN(stun.l.google.com) 在无外网
+  // UDP 环境（如 WSL 直连/企业网）会卡 gathering 导致 ICE 永远连不上
+  // （2026-08-18 浏览器 E2E 暴露）。需要公网穿透时经 signaling.config 传入。
   open() {
     const sig = this.signaling
-    const peer = new Peer({
+    const dbg = typeof window !== 'undefined' && window.__PDM_DEBUG ? 3 : 0
+    const peer = new Peer(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
       host: sig.host, port: sig.port, secure: sig.secure, key: sig.key, path: sig.path,
-      debug: 0,
+      config: sig.config || { iceServers: [] },
+      debug: dbg,
     })
     this.peer = peer
     const timeout = setTimeout(() => {
@@ -82,14 +118,20 @@ class ConnectionSlot {
       this.conn = conn
       conn.on('open', () => {
         clearTimeout(timeout)
+        this.opening = false
         this.ready = true
-        for (const q of this.queue.splice(0)) this.send(q)
+        this.flush()
       })
       conn.on('data', (data) => this.handleData(data))
       conn.on('close', () => this.teardown('connection closed'))
       conn.on('error', (err) => {
-        if (!this.ready) this.failAll(`connection error: ${err?.type || err}`)
-        this.teardown('connection error')
+        // 只处理「未就绪」时的连接错误；ready 后连接级 error 多为瞬态
+        //（典型：DC open 瞬间 flush 队列触发 peerjs NotOpenYet 竞态），
+        // 若此处无条件 teardown 会把刚建立的连接拆掉——浏览器 E2E
+        // 2026-08-18 实测：Firefox 端 DC open 后立即 error → teardown →
+        // destroy → 'connection closed'，实际 ICE/DC 均已连通。
+        // 真断线由 close 事件兜底。
+        if (!this.ready && !this.closed) this.failAll(`connection error: ${err?.type || err}`)
       })
     })
   }
@@ -160,12 +202,14 @@ class ConnectionSlot {
         const blob = new Blob(p.chunks, { type: p.mime })
         p.cleanup()
         p.resolve({ blob, blobUrl: URL.createObjectURL(blob), mime: p.mime, size: p.got })
+        this.flush() // 串行协议：上一个完成，发下一个排队请求
         break
       case 'err':
         this.pending.delete(msg.reqId)
         if (this.curReqId === msg.reqId) this.curReqId = null
         p.cleanup()
         p.reject(new Error(`peerdrive-media: ${msg.msg || 'request failed'}`))
+        this.flush()
         break
       default:
         break
@@ -175,6 +219,7 @@ class ConnectionSlot {
   failAll(msg) {
     // 连接级失败：reject 全部在途请求与排队等待者，然后清理槽位。
     this.closed = true
+    this.opening = false
     const err = new Error(`peerdrive-media: ${msg}`)
     for (const [, p] of this.pending) { p.cleanup(); p.reject(err) }
     this.pending.clear()

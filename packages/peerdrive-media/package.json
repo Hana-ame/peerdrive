@@ -24,7 +24,7 @@
     "test": "node --test 'test/*.test.mjs'",
     "demo:signal": "peerjs --port 9100 --path /",
     "demo:server": "node demo/node-server.mjs",
-    "demo:serve": "vite demo --port 5175"
+    "demo:serve": "node scripts/static-serve.mjs"
   },
   "peerDependencies": {
     "react": ">=18",
