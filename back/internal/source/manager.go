@@ -202,6 +202,17 @@ func (m *Manager) Info(ctx context.Context, hash string) (*FileMeta, error) {
 	return nil, lastErr
 }
 
+// InfoSize 文件大小查询（transport.FileRouter 适配，2026-08-18 第 3 项
+// 优化）：serveFile 的 meta 帧需要 total，但传输层不能依赖 source 包的
+// FileMeta 类型（import 环）——接口收敛为标量 size。
+func (m *Manager) InfoSize(ctx context.Context, hash string) (int64, error) {
+	fi, err := m.Info(ctx, hash)
+	if err != nil || fi == nil {
+		return 0, err
+	}
+	return fi.Size, nil
+}
+
 // Snapshot 管理快照：每个 source 的状态 + 统计（GET /sources 数据源）。
 func (m *Manager) Snapshot() []SourceStatus {
 	m.mu.RLock()

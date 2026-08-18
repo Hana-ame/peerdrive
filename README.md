@@ -53,16 +53,32 @@ cd front && npx vitest run
 
 ## 环境变量
 
+> 完整配置见 `back/internal/config/config.go`（`PEERDRIVE_*` 前缀，未设置用默认值）。
+
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `PORT` | 3000 | HTTP 端口 |
-| `PEERDRIVE_P2P_ENABLE` | true | P2P 网络 |
-| `PEERDRIVE_P2P_READ_ONLY` | false | 只读模式（不提供数据） |
-| `PEERDRIVE_BT_DHT_ENABLE` | true | BT DHT 网络 |
-| `PEERDRIVE_IPFS_COMPAT` | false | IPFS 兼容模式 |
-| `PEERDRIVE_RELAY_MODE` | client | 中继模式 |
-| `PEERDRIVE_WEBDAV_ENABLE` | true | WebDAV 挂载 |
-| `PEERDRIVE_STORAGE` | ./storage | 存储目录 |
+| `PEERDRIVE_STORAGE` | ./storage | 存储目录（内容寻址文件） |
+| `PEERDRIVE_STORAGE_ENABLE` | true | 存储启用 |
+| `PEERDRIVE_AUTH_TOKEN` | - | 节点认证 token（HTTP 管理面） |
+| `PEERDRIVE_MAX_UPLOAD_BYTES` | 100MB | 单文件上传上限 |
+| `PEERDRIVE_MAX_UPLOAD_ANON_BYTES` | 10MB | 匿名上传上限 |
+| `PEERDRIVE_BT_DHT_ENABLE` / `PEERDRIVE_BT_DHT_LISTEN` | true / :6881 | BT DHT（独立库 go-peerdrive-bt） |
+| `PEERDRIVE_IPFS_GATEWAY_ENABLE` / `PEERDRIVE_IPFS_GATEWAYS` | true / 三网关 | IPFS 网关兜底 |
+| `PEERDRIVE_WEBRTC_STUN` / `PEERDRIVE_WEBRTC_TURN` | stun.l.google.com / - | ICE 服务器 |
+| `PEERDRIVE_PEERJS_ENABLE` | true | PeerJS 信令（互联层） |
+| `PEERDRIVE_PEERJS_HOST/PORT/KEY` | 0.peerjs.com/443/peerjs | 信令服务器（可指向自托管 peerserver） |
+| `PEERDRIVE_PEERJS_ID` | 随机生成 | 节点 peer id |
+| `PEERDRIVE_PEERJS_SECURE` | true | 信令 wss |
+| `PEERDRIVE_PEERJS_PEERS` | - | 逗号分隔对端自动互联 |
+| `PEERDRIVE_MQTT_ENABLE` / `PEERDRIVE_MQTT_BROKER` | false / tcp://broker.emqx.io:1883 | MQTT 分片房间发现 |
+| `PEERDRIVE_MQTT_TOPIC_PREFIX` / `PEERDRIVE_MQTT_COLLECTIONS` | peerdrive/v1 / - | MQTT topic 前缀 / 关注集合 |
+| `PEERDRIVE_DISCOVER_URL` | - | 自托管发现 API（优先于 MQTT） |
+| `PEERDRIVE_URL_SOURCE_TEMPLATE` | - | URL 源模板（%s=hash，多源兜底） |
+| `PEERDRIVE_DOWNLOAD_DIR` | ./downloads | 下载/登记目录（file_index 根） |
+| `PEERDRIVE_MAX_PEERS` | 8 | 互联对端上限 |
+| `PEERDRIVE_DOWNLOAD_ORDER` / `PEERDRIVE_DOWNLOAD_TIMEOUT` | local,ipfs,ipfsgw,btdht,http / 30s | 下载器路由顺序 / 超时 |
+| `PEERDRIVE_FORWARD_RULES` | - | 端口转发规则（`key:port,...`，chmod 600） |
 
 ---
 

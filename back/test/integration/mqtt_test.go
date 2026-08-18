@@ -3,17 +3,29 @@
 package integration
 
 import (
+	"os"
 	"testing"
 	"time"
 
 	"peerdrive/internal/transport"
 )
 
+// requireMQTTEnv 外网测试门控（第 6 项优化 2026-08-18）：MQTT 公共 broker
+// 测试需要外网+代理，默认集成测试已脱外网（自托管信令）——这里加
+// PEERDRIVE_MQTT_TEST=1 显式门控，避免无网环境全量跑挂。
+func requireMQTTEnv(t *testing.T) {
+	t.Helper()
+	if os.Getenv("PEERDRIVE_MQTT_TEST") != "1" {
+		t.Skip("MQTT 公共 broker 测试需 PEERDRIVE_MQTT_TEST=1（外网）")
+	}
+}
+
 // TestMQTTDiscovery 两个节点通过 MQTT 分片房间互相发现（无任何静态配置）。
 // 覆盖：announce 发布、分片 topic 订阅、onPeer 回调、心跳幂等。
 //
 // 发现背景：功能测试——MQTT 分片房间互相发现（announce/订阅/心跳兜底）
 func TestMQTTDiscovery(t *testing.T) {
+	requireMQTTEnv(t)
 	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 	gotA := make(chan string, 4)
@@ -57,6 +69,7 @@ func TestMQTTDiscovery(t *testing.T) {
 //
 // 发现背景：功能测试——MQTT 发现 → PeerJS 互联 → 拉文件全链路
 func TestMQTTDiscoverThenPeerJSInterop(t *testing.T) {
+	requireMQTTEnv(t)
 	storageA := t.TempDir()
 	content := []byte("mqtt-discovered-peerjs-transfer")
 	hash := writeTestFile(t, storageA, content)

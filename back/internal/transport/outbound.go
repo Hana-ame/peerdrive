@@ -30,13 +30,20 @@ const maxPeerFetchSize = 8 * 1024 * 1024 * 1024
 // source 体系的 peerSource 适配入口）。返回的 reader 在全量请求读完时
 // 自动校验 sha256（内容寻址兜底）；Close 可提前取消（本地丢弃，不断连）。
 func (s *PeerJSService) OpenStream(peerID, hash string, offset, size int64) (io.ReadCloser, error) {
+	return s.OpenStreamFrom(peerID, hash, offset, size, nil)
+}
+
+// OpenStreamFrom 与 OpenStream 同语义，额外携带回源链路 trace（防环，
+// 2026-08-18 第 3 项优化，见 dcReq.Trace 注释）。根请求 trace 为 nil；
+// serveFile 回源时由 PeerSource 从 ctx 取出传入（source/peer.go）。
+func (s *PeerJSService) OpenStreamFrom(peerID, hash string, offset, size int64, trace []string) (io.ReadCloser, error) {
 	s.mu.Lock()
 	conn := s.conns[peerID]
 	s.mu.Unlock()
 	if conn == nil {
 		return nil, fmt.Errorf("peerjs: no connection to %s", peerID)
 	}
-	return s.openStream(conn, hash, offset, size)
+	return s.openStream(conn, hash, offset, size, trace)
 }
 
 // FetchFromPeer 兼容封装：[]byte 整体拉取（现有调用方/集成测试用）。
@@ -55,7 +62,7 @@ func (s *PeerJSService) FetchFromPeer(peerID, hash string, offset, size int64) (
 // fetchState.q（有界队列），reader 消费；done/err 经 done/errCh 通知。
 // 清理（cleanup）：EOF/错误/取消时从 fetches 路由表删除 + close(f.closed)
 // 放行 pump 投递阻塞——只执行一次。
-func (s *PeerJSService) openStream(c Session, hash string, offset, size int64) (*fetchReader, error) {
+func (s *PeerJSService) openStream(c Session, hash string, offset, size int64, trace []string) (*fetchReader, error) {
 	// 指令 UUID：reqId 是响应路由键，UUID v4 保证跨连接唯一（randHex8 仅 32bit，并发高时可能碰撞）
 	reqID := uuid.NewString()
 	f := &fetchState{
@@ -88,7 +95,7 @@ func (s *PeerJSService) openStream(c Session, hash string, offset, size int64) (
 		})
 	}
 
-	if err := c.SendJSON(dcReq{Type: "req", Hash: hash, Offset: offset, Size: size, ReqID: reqID}); err != nil {
+	if err := c.SendJSON(dcReq{Type: "req", Hash: hash, Offset: offset, Size: size, ReqID: reqID, Trace: trace}); err != nil {
 		cleanup()
 		return nil, err
 	}

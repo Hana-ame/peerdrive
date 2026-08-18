@@ -285,6 +285,35 @@ npm 不支持 git 依赖的 `#path:` 子目录语法（pnpm/yarn 才支持），
 - 断线感知提示：WebRTC 无 STUN 时 keepalive 超时可达数十秒，断线后请求会
   在 teardown 前发到死连接而报错（正确行为）；需即时失败用 client.dispose()
 
+### 3.12 优化批次 1-10（2026-08-18）
+
+代码审阅 + 架构巡检产出的 10 项优化（全部落地并验证）：
+
+| # | 优化 | 落点 | 验证 |
+|---|---|---|---|
+| 1 | 前端大文件下载全量内存组装（OOM 风险） | `front/src/ws.js` `downloadStream`（ReadableStream 边收边 enqueue）+ `downloadToFile`（File System Access API 流式落盘，回退 Blob）+ `stat`；`api.js` getBlobUrl 200MB 阈值（`err.code='TOO_LARGE'`） | ws.test.js +4；前端 36/36 |
+| 2 | uploadWorker 单 worker 串行阻塞（8GB 上传卡转发隧道） | `inbound.go` `fwdWorker` 拆出（与 uploadWorker 共用 binDone 退出），conn.go bindConn 双 worker | transport `TestFwd/TestUpload -race` |
+| 3 | serveFile 未接多源路由（§3.8 Source 体系预留未接线）+ 回源防环 | `inbound.go` `FileRouter` 接口（OpenRange/InfoSize）+ `serveFile` 路由分支（meta.total 来自 InfoSize，未命中 err not found，nil 回退本地语义）；`dcReq.Trace` 节点链防环（omitempty 兼容旧对端）；`outbound.go` `OpenStreamFrom` 传播点；`peerjs_service.go` `SetFileRouter`；`source/manager.go` `InfoSize` 适配；`cmd/server/main.go` 装配 | servefile_router_test.go（loop/router/fallback/trace 4 测试） |
+| 4 | core.js 断线感知慢（无 STUN 时超时数十秒） | `packages/peerdrive-media/src/core.js` keepalive（`KEEPALIVE_INTERVAL=5000`/`KEEPALIVE_TIMEOUT=15000`，超时 teardown 并重建；Node 端 serveConnection 对称） | core.test.mjs +2；npm test 20/20 |
+| 5 | core.js 排队中 abort 不立即 settle | core.js `request()` 排队分支挂 abort 监听，abort 即出队 reject（AbortError），移除监听防泄漏 | core.test.mjs +1 |
+| 6 | 集成测试依赖真实公共信令（需外网+代理，并行互扰） | TestMain 起全局自托管 signalserver（httptest），newService 全指向它；MQTT 公共 broker 测试 `PEERDRIVE_MQTT_TEST=1` 门控；顺带修复 go-peerjs `Connection` 回调注册 data race（handlerMu，独立库已同步） | 集成测试 13.7s 脱外网全绿 |
+| 7 | getBlobUrl 同 hash 并发双下载竞态 | `front/src/api.js` `blobUrlInflight` Map in-flight 去重 | 前端 36/36 |
+| 8 | signalserver token 白名单 | `signalserver.go` `WithTokenWhitelist`（空=不限制）+ `cmd/peerserver` `-tokens` flag | TestSignal_TokenWhitelist |
+| 9 | README env 表过时（残留已删的 P2P_ENABLE/WEBDAV/IPFS_COMPAT/RELAY_MODE） | README.md env 表对齐 config.go | — |
+| 10 | 文档行号引用易漂移 | 本节约定（见下）：长期文档函数名优先；本次改动文档（conn.md/ws-client.md/README）全部去行号 | — |
+
+**文档引用约定（第 10 项落地）**：长期维护文档（REFACTOR.md、doc/layers/*、README、
+AGENTS.md）引用代码一律用 **`文件路径:函数名`**（如 `inbound.go serveFile`），禁止
+行号（代码改动即漂移，历史文档的准确行号也早已失效）。一次性审阅文档
+（HTTP-REVIEW/FRONTEND-FIX 等）是当时快照，允许保留行号。行数标注（「xxx 行」）
+同样禁止——用文件清单说明职责即可。
+
+**第 6 项细节**：集成测试数据面仍是真实 WebRTC（同机 host candidate 直连，无需
+STUN）——无 UDP 的沙箱（docker 默认）会连不上，互联类测试可用 `PEERDRIVE_SKIP_RTC=1`
+跳过（本地 WS/admin 类不受影响）。go-peerjs 的 race 修复（`connection.go` handlerMu
+保护 onOpen/onMessage/onClose 回调注册与触发并发）是 -race 连跑自托管测试时暴露的
+真 bug，真实网络下同样存在（时序慢不易触发）。
+
 ## 4. 帧协议（DataChannel 上，go↔go 与 go↔web 共用）
 
 ```jsonc
@@ -463,6 +492,12 @@ M2 收层要点（本次完成）：
 cd back
 go build -tags nosqlite ./...          # 必须带 nosqlite（双 SQLite 驱动 CGO 冲突）
 go test -tags nosqlite ./...
+# 集成测试（3.12 第 6 项起脱外网：全局自托管信令 + 同机 WebRTC；必须 -p 1 串行）：
+go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1
+#   外网测试显式门控：
+#   PEERDRIVE_MQTT_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestMQTT -v
+#   PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestLive -v（无代理跑）
+# 无 UDP 沙箱（docker 默认）跳过互联类：PEERDRIVE_SKIP_RTC=1
 # E2E 手动验证（需外网）：
 #   A/B 节点各设 PEERDRIVE_PEERJS_ID，B 设 PEERDRIVE_PEERJS_PEERS=pd-node-a
 #   curl -X POST localhost:PORT/peerjs/fetch -d '{"peer":"pd-node-a","hash":"<64hex>"}'
@@ -472,4 +507,4 @@ go test -tags nosqlite ./...
 ```
 
 **构建环境坑**：go 命令需 `HTTPS_PROXY=http://172.29.80.1:10809 GOPROXY=https://goproxy.cn,direct`
-（WSL 出网走宿主机代理，opencode 环境 unset 了代理）。
+（WSL 出网走宿主机代理，opencode 环境 unset 了代理）。cloudcone 443 例外（直连）。

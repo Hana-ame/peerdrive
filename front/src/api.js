@@ -164,7 +164,16 @@ export const downloadFileToDisk = (hash, filename) => ws.downloadToFile(hash, fi
 // 每个不重复 hash 的预览各占一个 Blob 内存 + objectURL，长时间浏览累积）：
 // LRU 上限 + 淘汰即 revoke。Map 迭代序 = 插入序，重读 delete+set 刷新位置。
 const BLOB_URL_CACHE_MAX = 50;
+// 大文件预览防护（发现背景：代码审阅 2026-08-18——download 全量内存
+// 组装，超大型文件预览会 OOM）。超过阈值拒绝预览并抛 err.code==='TOO_LARGE'，
+// 调用方应提示走 downloadFileToDisk 流式保存。
+const BLOB_URL_MAX_BYTES = 200 * 1024 * 1024;
 const blobUrlCache = new Map();
+// 并发去重（发现背景：代码审阅 2026-08-18——同 hash 并发两次 getBlobUrl
+// 会发两次 WS 下载，后完成的覆盖先完成的缓存项，先完成的 objectURL 永久
+// 泄漏且白耗带宽）。blobUrlInflight 存进行中的 Promise，命中即共享同一次
+// 下载；失败会 settle 后从 map 移除，下次调用自然重试。
+const blobUrlInflight = new Map();
 export async function getBlobUrl(hash, mime = '') {
   if (blobUrlCache.has(hash)) {
     const url = blobUrlCache.get(hash);
@@ -172,18 +181,30 @@ export async function getBlobUrl(hash, mime = '') {
     blobUrlCache.set(hash, url);
     return url;
   }
-  const data = await ws.download(hash);
-  const blob = new Blob([data], mime ? { type: mime } : undefined);
-  const url = URL.createObjectURL(blob);
-  blobUrlCache.set(hash, url);
-  if (blobUrlCache.size > BLOB_URL_CACHE_MAX) {
-    // 逐出最久未用的：正在屏幕上预览的必然近期被 get（位置靠后），
-    // 最旧项最可能已离开视图，revoke 其 objectURL 释放 Blob 内存。
-    const oldest = blobUrlCache.keys().next().value;
-    URL.revokeObjectURL(blobUrlCache.get(oldest));
-    blobUrlCache.delete(oldest);
-  }
-  return url;
+  if (blobUrlInflight.has(hash)) return blobUrlInflight.get(hash);
+  const p = (async () => {
+    // stat 只探大小不发数据（req offset=0 size=0 → meta{total}）
+    const total = await ws.stat(hash);
+    if (total > BLOB_URL_MAX_BYTES) {
+      const err = new Error(`file too large for preview (>${BLOB_URL_MAX_BYTES / 1024 / 1024}MB)`);
+      err.code = 'TOO_LARGE';
+      throw err;
+    }
+    const data = await ws.download(hash);
+    const blob = new Blob([data], mime ? { type: mime } : undefined);
+    const url = URL.createObjectURL(blob);
+    blobUrlCache.set(hash, url);
+    if (blobUrlCache.size > BLOB_URL_CACHE_MAX) {
+      // 逐出最久未用的：正在屏幕上预览的必然近期被 get（位置靠后），
+      // 最旧项最可能已离开视图，revoke 其 objectURL 释放 Blob 内存。
+      const oldest = blobUrlCache.keys().next().value;
+      URL.revokeObjectURL(blobUrlCache.get(oldest));
+      blobUrlCache.delete(oldest);
+    }
+    return url;
+  })().finally(() => blobUrlInflight.delete(hash));
+  blobUrlInflight.set(hash, p);
+  return p;
 }
 export const revokeBlobUrl = (hash) => {
   const url = blobUrlCache.get(hash);

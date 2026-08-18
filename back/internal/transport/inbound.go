@@ -7,6 +7,7 @@ package transport
 // 双工并发复用，不共享任何可变状态（除 connState 内各自的槽位）。
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -23,7 +24,18 @@ const chunkSize = 64 * 1024
 
 // ---- 文件服务（对端请求本节点文件） ----
 
-// serveFile 打开内容寻址文件并按请求发送分块，带写缓冲流控。
+// FileRouter 文件路由接口（source.Manager 实现；传输层只依赖接口避免
+// import 环——source 包引 transport，transport 不能再引 source）。
+// serveFile 经此路由「本地 → 对端 → URL 模板」多源获取（第 3 项优化，
+// 2026-08-18）；未装配时（nil）退回本地语义（openFile）。
+type FileRouter interface {
+	// OpenRange 流式打开 hash 的分片（offset<0→0；size<0→到文件尾）。
+	OpenRange(ctx context.Context, hash string, offset, size int64) (io.ReadCloser, error)
+	// InfoSize 查询文件总大小（meta 帧用；不支持元数据的源返回 err）。
+	InfoSize(ctx context.Context, hash string) (int64, error)
+}
+
+// serveFile 打开文件（内容寻址/file_index）并按请求发送分块，带写缓冲流控。
 // 安全（H1/H2 修复）：
 //   - hash 必须 64 位 hex 才切片——之前直接 req.Hash[:2]，对端发空/短 hash
 //     越界 panic，serveFile 在 goroutine 里 panic 直接杀死整个进程
@@ -32,44 +44,83 @@ const chunkSize = 64 * 1024
 //     对端 create 任意绝对路径后可 req 读取（/etc/shadow 攻击链）
 //
 // 优先查 file_index 映射（外部登记/上传的文件），其次内容寻址存储。
+// 2026-08-18（第 3 项优化）：打开改为多源路由（装配了 FileRouter 时）——
+// 本地权威优先，未命中回源对端/URL 模板（原 openFile 语义与
+// source.LocalSource.resolvePath 一致，收敛到一处）。回源环由 Trace
+// 防环（本节点 ID 已在链路中 → 拒绝，见 dcReq.Trace 注释）。
 func (s *PeerJSService) serveFile(c Session, req dcReq) {
 	if !hashutil.IsStrictSHA256(req.Hash) {
 		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "invalid hash", ReqID: req.ReqID})
 		return
 	}
-	path := filepath.Join(s.storageDir, req.Hash[:2], req.Hash)
-	if fi, err := s.fileIndex.Info(req.Hash); err == nil && fi.Path != "" {
-		if s.fileIndex.IsPathAllowed(fi.Path) {
-			path = fi.Path
-		} else {
-			// 索引命中但路径越权（历史脏数据/恶意登记）：回退内容寻址存储，
-			// 不回传根目录外文件（H2）
-			log.LogWarn("peerjs: index path outside allowed root, serving content-addressed: %s", fi.Path)
+	// trace 防环：本节点已在请求链路上 → 拒绝（防 A←→B 互连回源死循环）
+	if s.ID() != "" {
+		for _, id := range req.Trace {
+			if id == s.ID() {
+				_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "loop detected", ReqID: req.ReqID})
+				return
+			}
 		}
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "not found", ReqID: req.ReqID})
-		return
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "stat failed", ReqID: req.ReqID})
-		return
-	}
-	total := st.Size()
+	// 转发给下游的链路：追加本节点（本节点不在链中才走到这）
+	fwdTrace := append(append([]string{}, req.Trace...), s.ID())
+	ctx := context.WithValue(context.Background(), TraceKey, fwdTrace)
 
-	offset := req.Offset
-	if offset < 0 {
-		offset = 0
-	}
-	if offset > total {
-		offset = total
-	}
-	limit := req.Size
-	if limit < 0 || offset+limit > total {
-		limit = total - offset
+	total := int64(-1) // -1 = 未知（对端 fetchReader 的 total>0 上限校验会跳过）
+	var r io.Reader
+	if s.router != nil {
+		// 元数据：local 源可查（file_index/CAS stat）；peer/url 源无 Info → -1
+		if size, err := s.router.InfoSize(ctx, req.Hash); err == nil && size >= 0 {
+			total = size
+		}
+		f, err := s.router.OpenRange(ctx, req.Hash, req.Offset, req.Size)
+		if err != nil {
+			_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "not found", ReqID: req.ReqID})
+			return
+		}
+		defer f.Close()
+		r = f
+	} else {
+		// 未装配 router（测试/独立模式）：本地语义（file_index 优先 + CAS 兜底）
+		path := filepath.Join(s.storageDir, req.Hash[:2], req.Hash)
+		if fi, err := s.fileIndex.Info(req.Hash); err == nil && fi.Path != "" {
+			if s.fileIndex.IsPathAllowed(fi.Path) {
+				path = fi.Path
+			} else {
+				// 索引命中但路径越权（历史脏数据/恶意登记）：回退内容寻址存储，
+				// 不回传根目录外文件（H2）
+				log.LogWarn("peerjs: index path outside allowed root, serving content-addressed: %s", fi.Path)
+			}
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "not found", ReqID: req.ReqID})
+			return
+		}
+		defer f.Close()
+		st, err := f.Stat()
+		if err != nil {
+			_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "stat failed", ReqID: req.ReqID})
+			return
+		}
+		total = st.Size()
+		// 原 clamp 语义（LocalSource 内部等价 clamp，此处只为对齐旧行为）
+		offset := req.Offset
+		if offset < 0 {
+			offset = 0
+		}
+		if offset > total {
+			offset = total
+		}
+		limit := req.Size
+		if limit < 0 || offset+limit > total {
+			limit = total - offset
+		}
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "seek failed", ReqID: req.ReqID})
+			return
+		}
+		r = io.LimitReader(f, limit)
 	}
 
 	if err := c.SendJSON(dcResp{Type: "meta", Hash: req.Hash, Total: total, ReqID: req.ReqID}); err != nil {
@@ -82,10 +133,10 @@ func (s *PeerJSService) serveFile(c Session, req dcReq) {
 
 	buf := make([]byte, chunkSize)
 	sent := int64(0)
-	for sent < limit {
-		n, err := f.ReadAt(buf[:min64(chunkSize, limit-sent)], offset+sent)
+	for {
+		n, err := r.Read(buf)
 		if n > 0 {
-			if err := c.SendFrame(dcResp{Type: "data", Hash: req.Hash, Offset: offset + sent, Size: int64(n), ReqID: req.ReqID}, buf[:n]); err != nil {
+			if err := c.SendFrame(dcResp{Type: "data", Hash: req.Hash, Offset: req.Offset + sent, Size: int64(n), ReqID: req.ReqID}, buf[:n]); err != nil {
 				return
 			}
 			sent += int64(n)
@@ -99,7 +150,7 @@ func (s *PeerJSService) serveFile(c Session, req dcReq) {
 			return
 		}
 	}
-	_ = c.SendJSON(dcResp{Type: "done", Hash: req.Hash, Offset: offset, Size: sent, ReqID: req.ReqID})
+	_ = c.SendJSON(dcResp{Type: "done", Hash: req.Hash, Offset: req.Offset, Size: sent, ReqID: req.ReqID})
 }
 
 func (s *PeerJSService) openFile(hash string) (*os.File, int64, error) {
@@ -289,6 +340,8 @@ func (s *PeerJSService) serveSync(c Session, r dcResp) {
 // pion 消息泵上，一个 8GB 上传完成的瞬间整条连接的其他帧全部冻结）。
 // 单 worker 保序（分片按到达顺序落盘，与帧协议顺序一致）；连接关闭经
 // binDone 退出（不悬挂）；写失败回 err 帧。
+// 注意：转发块（fwdCh）2026-08-18 起由独立 fwdWorker 消费（见下），
+// 上传 Complete 不再阻塞同连接的转发隧道。
 func (s *PeerJSService) uploadWorker(c Session, st *connState) {
 	for {
 		select {
@@ -316,8 +369,21 @@ func (s *PeerJSService) uploadWorker(c Session, st *connState) {
 					_ = c.SendJSON(dcResp{Type: "ack", Offset: ch.offset, ReqID: ch.up.reqID})
 				}
 			}
+		case <-st.binDone:
+			return
+		}
+	}
+}
+
+// fwdWorker 连接级转发写 worker（2026-08-18 拆出，发现背景：代码审阅——
+// 转发块原本由 uploadWorker 的 select 共用消费，一个 8GB 上传的 Complete
+// （fsync + 全文件 hashFile，慢磁盘可达秒级）期间同连接所有转发隧道冻结，
+// 交互式隧道（SSH 等）整条卡死）。独立 worker 让转发 IO 不受上传影响。
+// 单 worker 保序；与 uploadWorker 共用 binDone 退出信号。
+func (s *PeerJSService) fwdWorker(c Session, st *connState) {
+	for {
+		select {
 		case ch := <-st.fwdCh:
-			// 转发块写隧道（H5 同款：IO 移出消息泵——对端 TCP 背压不卡泵）。
 			// 写失败（隧道已关/对端断开）静默丢弃：转发是尽力而为的流。
 			if _, err := ch.fw.out.Write(ch.data); err != nil {
 				log.LogDebug("peerjs: fwd write drop: %v", err)

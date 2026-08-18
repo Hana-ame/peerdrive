@@ -145,6 +145,35 @@ func TestSignal_InvalidKey(t *testing.T) {
 	_ = resp
 }
 
+// TestSignal_TokenWhitelist token 白名单：名单外拒绝升级，名单内正常 OPEN。
+//
+// 发现背景：代码审阅 2026-08-18——token 原本只做 ID 占用保护，任意客户端
+// 可自定 token 连接并注册任意 ID，冒充节点收信令/诱导 OFFER；白名单让
+// 自托管部署只信任已知节点（修复：WithTokenWhitelist + HandleWS 校验）。
+func TestSignal_TokenWhitelist(t *testing.T) {
+	srv := NewServer("testkey", WithTokenWhitelist([]string{"tok-a", "tok-b"}))
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv.HandleWS(w, r)
+	}))
+	defer hs.Close()
+
+	// 名单外 token → 拒绝（HTTP 400，无 OPEN）
+	conn, resp, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(hs.URL, "http")+"/peerjs?key=testkey&id=evil&token=not-in-list", nil)
+	if err == nil {
+		conn.Close()
+		t.Fatal("白名单外 token 应拒绝升级")
+	}
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	// 名单内 token → 正常 OPEN
+	a := dialWS(t, hs, "node-a", "tok-a")
+	defer a.Close()
+	m := readMsg(t, a)
+	assert.Equal(t, "OPEN", m.Type)
+}
+
 // TestDiscover_AnnounceAndQuery 节点 announce 房间 → 查询返回在线节点（心跳过期剔除）。
 // 发现背景：自托管后房间发现并入信令服务器（替代 MQTT 广播）。
 func TestDiscover_AnnounceAndQuery(t *testing.T) {

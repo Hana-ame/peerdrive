@@ -52,6 +52,13 @@ export const DEFAULT_SIGNALING = {
 // 大文件会把全部块塞进 SCTP 缓冲，内存无界增长。
 const LOW_WATER = 4 * 1024 * 1024
 
+// keepalive 参数（与 core.js 同协议）：Node 端每 5s 发 ping 制造流量，
+// 任何帧（含浏览器端 ping）刷新活跃；15s 无帧 → 主动 close 连接——
+// 网页端崩溃/断网时 Node 端不悬挂（此前只能等 SCTP 超时，无 STUN 环境
+// 可达数十秒）。发现背景：代码审阅 2026-08-18（第 4 项优化）。
+const KEEPALIVE_INTERVAL = 5000
+const KEEPALIVE_TIMEOUT = 15000
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // createPeerMediaServer 启动 Node 端资源提供者。
@@ -104,7 +111,18 @@ export async function createPeerMediaServer({
   // 处理多请求，块会交叉错配，因此用 busy 标志拒绝并发请求。
   const serveConnection = (conn) => {
     let busy = false
+    let lastActive = Date.now()
+    // keepalive：发 ping 制造流量 + 超时主动断开（见文件头 KEEPALIVE 注释）
+    const ka = setInterval(() => {
+      if (Date.now() - lastActive > KEEPALIVE_TIMEOUT) {
+        clearInterval(ka)
+        try { conn.close() } catch { /* 幂等 */ }
+        return
+      }
+      try { conn.send(JSON.stringify({ type: 'ping' })) } catch { /* 连接已死 */ }
+    }, KEEPALIVE_INTERVAL)
     conn.on('data', (data) => {
+      lastActive = Date.now() // 任何帧都刷新活跃（含浏览器端 ping）
       if (typeof data !== 'string') return // 二进制帧不应由网页端发出
       const msg = parseFrame(data)
       if (!msg || msg.type !== 'url') return
@@ -115,7 +133,7 @@ export async function createPeerMediaServer({
       busy = true
       handleUrlRequest(conn, msg).finally(() => { busy = false })
     })
-    conn.on('close', () => { busy = false })
+    conn.on('close', () => { clearInterval(ka); busy = false })
   }
   peer.on('connection', serveConnection)
 

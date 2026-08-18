@@ -1636,7 +1636,7 @@ function k(e, t, n, r) {
 		configurable: !0
 	});
 }
-var Je = class {
+var A = class {
 	constructor() {
 		this.chunkedMTU = 16300, this._dataCount = 1, this.chunk = (e) => {
 			let t = [], n = e.byteLength, r = Math.ceil(n / this.chunkedMTU), i = 0, a = 0;
@@ -1653,14 +1653,14 @@ var Je = class {
 		};
 	}
 };
-function Ye(e) {
+function Je(e) {
 	let t = 0;
 	for (let n of e) t += n.byteLength;
 	let n = new Uint8Array(t), r = 0;
 	for (let t of e) n.set(t, r), r += t.byteLength;
 	return n;
 }
-var A = qe.default || qe, j = new class {
+var j = qe.default || qe, M = new class {
 	isWebRTCSupported() {
 		return typeof RTCPeerConnection < "u";
 	}
@@ -1669,13 +1669,13 @@ var A = qe.default || qe, j = new class {
 		return this.supportedBrowsers.includes(e) ? e === "chrome" ? t >= this.minChromeVersion : e === "firefox" ? t >= this.minFirefoxVersion : e === "safari" && !this.isIOS && t >= this.minSafariVersion : !1;
 	}
 	getBrowser() {
-		return A.browserDetails.browser;
+		return j.browserDetails.browser;
 	}
 	getVersion() {
-		return A.browserDetails.version || 0;
+		return j.browserDetails.version || 0;
 	}
 	isUnifiedPlanSupported() {
-		let e = this.getBrowser(), t = A.browserDetails.version || 0;
+		let e = this.getBrowser(), t = j.browserDetails.version || 0;
 		if (e === "chrome" && t < this.minChromeVersion) return !1;
 		if (e === "firefox" && t >= this.minFirefoxVersion) return !0;
 		if (!window.RTCRtpTransceiver || !("currentDirection" in RTCRtpTransceiver.prototype)) return !1;
@@ -1707,14 +1707,14 @@ var A = qe.default || qe, j = new class {
 			"safari"
 		], this.minFirefoxVersion = 59, this.minChromeVersion = 72, this.minSafariVersion = 605;
 	}
-}(), Xe = (e) => !e || /^[A-Za-z0-9]+(?:[ _-][A-Za-z0-9]+)*$/.test(e), Ze = () => Math.random().toString(36).slice(2), Qe = {
+}(), Ye = (e) => !e || /^[A-Za-z0-9]+(?:[ _-][A-Za-z0-9]+)*$/.test(e), Xe = () => Math.random().toString(36).slice(2), Ze = {
 	iceServers: [{ urls: "stun:stun.l.google.com:19302" }, {
 		urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"],
 		username: "peerjs",
 		credential: "peerjsp"
 	}],
 	sdpSemantics: "unified-plan"
-}, M = new class extends Je {
+}, N = new class extends A {
 	noop() {}
 	blobToArrayBuffer(e, t) {
 		let n = new FileReader();
@@ -1734,10 +1734,10 @@ var A = qe.default || qe, j = new class {
 		super(...e), this.CLOUD_HOST = "0.peerjs.com", this.CLOUD_PORT = 443, this.chunkedBrowsers = {
 			Chrome: 1,
 			chrome: 1
-		}, this.defaultConfig = Qe, this.browser = j.getBrowser(), this.browserVersion = j.getVersion(), this.pack = ee, this.unpack = f, this.supports = function() {
+		}, this.defaultConfig = Ze, this.browser = M.getBrowser(), this.browserVersion = M.getVersion(), this.pack = ee, this.unpack = f, this.supports = function() {
 			let e = {
-				browser: j.isBrowserSupported(),
-				webRTC: j.isWebRTCSupported(),
+				browser: M.isBrowserSupported(),
+				webRTC: M.isWebRTCSupported(),
 				audioVideo: !1,
 				data: !1,
 				binaryBlob: !1,
@@ -1746,12 +1746,12 @@ var A = qe.default || qe, j = new class {
 			if (!e.webRTC) return e;
 			let t;
 			try {
-				t = new RTCPeerConnection(Qe), e.audioVideo = !0;
+				t = new RTCPeerConnection(Ze), e.audioVideo = !0;
 				let n;
 				try {
 					n = t.createDataChannel("_PEERJSTEST", { ordered: !0 }), e.data = !0, e.reliable = !!n.ordered;
 					try {
-						n.binaryType = "blob", e.binaryBlob = !j.isIOS;
+						n.binaryType = "blob", e.binaryBlob = !M.isIOS;
 					} catch {}
 				} catch {} finally {
 					n && n.close();
@@ -1760,9 +1760,9 @@ var A = qe.default || qe, j = new class {
 				t && t.close();
 			}
 			return e;
-		}(), this.validateId = Xe, this.randomToken = Ze;
+		}(), this.validateId = Ye, this.randomToken = Xe;
 	}
-}(), $e = "PeerJS: ", N = new class {
+}(), Qe = "PeerJS: ", P = new class {
 	get logLevel() {
 		return this._logLevel;
 	}
@@ -1782,46 +1782,46 @@ var A = qe.default || qe, j = new class {
 		this._print = e;
 	}
 	_print(e, ...t) {
-		let n = [$e, ...t];
+		let n = [Qe, ...t];
 		for (let e in n) n[e] instanceof Error && (n[e] = "(" + n[e].name + ") " + n[e].message);
 		e >= 3 ? console.log(...n) : e >= 2 ? console.warn("WARNING", ...n) : e >= 1 && console.error("ERROR", ...n);
 	}
 	constructor() {
 		this._logLevel = 0;
 	}
-}(), P = {}, et = Object.prototype.hasOwnProperty, F = "~";
-function I() {}
-Object.create && (I.prototype = Object.create(null), new I().__proto__ || (F = !1));
-function tt(e, t, n) {
+}(), F = {}, $e = Object.prototype.hasOwnProperty, I = "~";
+function L() {}
+Object.create && (L.prototype = Object.create(null), new L().__proto__ || (I = !1));
+function et(e, t, n) {
 	this.fn = e, this.context = t, this.once = n || !1;
 }
-function nt(e, t, n, r, i) {
+function tt(e, t, n, r, i) {
 	if (typeof n != "function") throw TypeError("The listener must be a function");
-	var a = new tt(n, r || e, i), o = F ? F + t : t;
+	var a = new et(n, r || e, i), o = I ? I + t : t;
 	return e._events[o] ? e._events[o].fn ? e._events[o] = [e._events[o], a] : e._events[o].push(a) : (e._events[o] = a, e._eventsCount++), e;
 }
-function L(e, t) {
-	--e._eventsCount === 0 ? e._events = new I() : delete e._events[t];
+function R(e, t) {
+	--e._eventsCount === 0 ? e._events = new L() : delete e._events[t];
 }
-function R() {
-	this._events = new I(), this._eventsCount = 0;
+function z() {
+	this._events = new L(), this._eventsCount = 0;
 }
-R.prototype.eventNames = function() {
+z.prototype.eventNames = function() {
 	var e = [], t, n;
 	if (this._eventsCount === 0) return e;
-	for (n in t = this._events) et.call(t, n) && e.push(F ? n.slice(1) : n);
+	for (n in t = this._events) $e.call(t, n) && e.push(I ? n.slice(1) : n);
 	return Object.getOwnPropertySymbols ? e.concat(Object.getOwnPropertySymbols(t)) : e;
-}, R.prototype.listeners = function(e) {
-	var t = F ? F + e : e, n = this._events[t];
+}, z.prototype.listeners = function(e) {
+	var t = I ? I + e : e, n = this._events[t];
 	if (!n) return [];
 	if (n.fn) return [n.fn];
 	for (var r = 0, i = n.length, a = Array(i); r < i; r++) a[r] = n[r].fn;
 	return a;
-}, R.prototype.listenerCount = function(e) {
-	var t = F ? F + e : e, n = this._events[t];
+}, z.prototype.listenerCount = function(e) {
+	var t = I ? I + e : e, n = this._events[t];
 	return n ? n.fn ? 1 : n.length : 0;
-}, R.prototype.emit = function(e, t, n, r, i, a) {
-	var o = F ? F + e : e;
+}, z.prototype.emit = function(e, t, n, r, i, a) {
+	var o = I ? I + e : e;
 	if (!this._events[o]) return !1;
 	var s = this._events[o], c = arguments.length, l, u;
 	if (s.fn) {
@@ -1856,42 +1856,42 @@ R.prototype.eventNames = function() {
 		}
 	}
 	return !0;
-}, R.prototype.on = function(e, t, n) {
-	return nt(this, e, t, n, !1);
-}, R.prototype.once = function(e, t, n) {
-	return nt(this, e, t, n, !0);
-}, R.prototype.removeListener = function(e, t, n, r) {
-	var i = F ? F + e : e;
+}, z.prototype.on = function(e, t, n) {
+	return tt(this, e, t, n, !1);
+}, z.prototype.once = function(e, t, n) {
+	return tt(this, e, t, n, !0);
+}, z.prototype.removeListener = function(e, t, n, r) {
+	var i = I ? I + e : e;
 	if (!this._events[i]) return this;
-	if (!t) return L(this, i), this;
+	if (!t) return R(this, i), this;
 	var a = this._events[i];
-	if (a.fn) a.fn === t && (!r || a.once) && (!n || a.context === n) && L(this, i);
+	if (a.fn) a.fn === t && (!r || a.once) && (!n || a.context === n) && R(this, i);
 	else {
 		for (var o = 0, s = [], c = a.length; o < c; o++) (a[o].fn !== t || r && !a[o].once || n && a[o].context !== n) && s.push(a[o]);
-		s.length ? this._events[i] = s.length === 1 ? s[0] : s : L(this, i);
+		s.length ? this._events[i] = s.length === 1 ? s[0] : s : R(this, i);
 	}
 	return this;
-}, R.prototype.removeAllListeners = function(e) {
+}, z.prototype.removeAllListeners = function(e) {
 	var t;
-	return e ? (t = F ? F + e : e, this._events[t] && L(this, t)) : (this._events = new I(), this._eventsCount = 0), this;
-}, R.prototype.off = R.prototype.removeListener, R.prototype.addListener = R.prototype.on, R.prefixed = F, R.EventEmitter = R, P = R;
-var z = {};
-k(z, "ConnectionType", () => B), k(z, "PeerErrorType", () => V), k(z, "BaseConnectionErrorType", () => H), k(z, "DataConnectionErrorType", () => U), k(z, "SerializationType", () => W), k(z, "SocketEventType", () => G), k(z, "ServerMessageType", () => K);
-var B = /*#__PURE__*/ function(e) {
+	return e ? (t = I ? I + e : e, this._events[t] && R(this, t)) : (this._events = new L(), this._eventsCount = 0), this;
+}, z.prototype.off = z.prototype.removeListener, z.prototype.addListener = z.prototype.on, z.prefixed = I, z.EventEmitter = z, F = z;
+var B = {};
+k(B, "ConnectionType", () => V), k(B, "PeerErrorType", () => H), k(B, "BaseConnectionErrorType", () => U), k(B, "DataConnectionErrorType", () => W), k(B, "SerializationType", () => G), k(B, "SocketEventType", () => K), k(B, "ServerMessageType", () => q);
+var V = /*#__PURE__*/ function(e) {
 	return e.Data = "data", e.Media = "media", e;
-}({}), V = /*#__PURE__*/ function(e) {
-	return e.BrowserIncompatible = "browser-incompatible", e.Disconnected = "disconnected", e.InvalidID = "invalid-id", e.InvalidKey = "invalid-key", e.Network = "network", e.PeerUnavailable = "peer-unavailable", e.SslUnavailable = "ssl-unavailable", e.ServerError = "server-error", e.SocketError = "socket-error", e.SocketClosed = "socket-closed", e.UnavailableID = "unavailable-id", e.WebRTC = "webrtc", e;
 }({}), H = /*#__PURE__*/ function(e) {
-	return e.NegotiationFailed = "negotiation-failed", e.ConnectionClosed = "connection-closed", e;
+	return e.BrowserIncompatible = "browser-incompatible", e.Disconnected = "disconnected", e.InvalidID = "invalid-id", e.InvalidKey = "invalid-key", e.Network = "network", e.PeerUnavailable = "peer-unavailable", e.SslUnavailable = "ssl-unavailable", e.ServerError = "server-error", e.SocketError = "socket-error", e.SocketClosed = "socket-closed", e.UnavailableID = "unavailable-id", e.WebRTC = "webrtc", e;
 }({}), U = /*#__PURE__*/ function(e) {
-	return e.NotOpenYet = "not-open-yet", e.MessageToBig = "message-too-big", e;
+	return e.NegotiationFailed = "negotiation-failed", e.ConnectionClosed = "connection-closed", e;
 }({}), W = /*#__PURE__*/ function(e) {
-	return e.Binary = "binary", e.BinaryUTF8 = "binary-utf8", e.JSON = "json", e.None = "raw", e;
+	return e.NotOpenYet = "not-open-yet", e.MessageToBig = "message-too-big", e;
 }({}), G = /*#__PURE__*/ function(e) {
-	return e.Message = "message", e.Disconnected = "disconnected", e.Error = "error", e.Close = "close", e;
+	return e.Binary = "binary", e.BinaryUTF8 = "binary-utf8", e.JSON = "json", e.None = "raw", e;
 }({}), K = /*#__PURE__*/ function(e) {
+	return e.Message = "message", e.Disconnected = "disconnected", e.Error = "error", e.Close = "close", e;
+}({}), q = /*#__PURE__*/ function(e) {
 	return e.Heartbeat = "HEARTBEAT", e.Candidate = "CANDIDATE", e.Offer = "OFFER", e.Answer = "ANSWER", e.Open = "OPEN", e.Error = "ERROR", e.IdTaken = "ID-TAKEN", e.InvalidKey = "INVALID-KEY", e.Leave = "LEAVE", e.Expire = "EXPIRE", e;
-}({}), rt = "1.5.5", it = class extends P.EventEmitter {
+}({}), nt = "1.5.5", rt = class extends F.EventEmitter {
 	constructor(e, t, n, r, i, a = 5e3) {
 		super(), this.pingInterval = a, this._disconnected = !0, this._messagesQueue = [];
 		let o = e ? "wss://" : "ws://";
@@ -1903,16 +1903,16 @@ var B = /*#__PURE__*/ function(e) {
 		this._socket || !this._disconnected || (this._socket = new WebSocket(n + "&version=1.5.5"), this._disconnected = !1, this._socket.onmessage = (e) => {
 			let t;
 			try {
-				t = JSON.parse(e.data), N.log("Server message received:", t);
+				t = JSON.parse(e.data), P.log("Server message received:", t);
 			} catch {
-				N.log("Invalid server message", e.data);
+				P.log("Invalid server message", e.data);
 				return;
 			}
-			this.emit(G.Message, t);
+			this.emit(K.Message, t);
 		}, this._socket.onclose = (e) => {
-			this._disconnected || (N.log("Socket closed.", e), this._cleanup(), this._disconnected = !0, this.emit(G.Disconnected));
+			this._disconnected || (P.log("Socket closed.", e), this._cleanup(), this._disconnected = !0, this.emit(K.Disconnected));
 		}, this._socket.onopen = () => {
-			this._disconnected || (this._sendQueuedMessages(), N.log("Socket open"), this._scheduleHeartbeat());
+			this._disconnected || (this._sendQueuedMessages(), P.log("Socket open"), this._scheduleHeartbeat());
 		});
 	}
 	_scheduleHeartbeat() {
@@ -1922,10 +1922,10 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	_sendHeartbeat() {
 		if (!this._wsOpen()) {
-			N.log("Cannot send heartbeat, because socket closed");
+			P.log("Cannot send heartbeat, because socket closed");
 			return;
 		}
-		let e = JSON.stringify({ type: K.Heartbeat });
+		let e = JSON.stringify({ type: q.Heartbeat });
 		this._socket.send(e), this._scheduleHeartbeat();
 	}
 	_wsOpen() {
@@ -1943,7 +1943,7 @@ var B = /*#__PURE__*/ function(e) {
 			return;
 		}
 		if (!e.type) {
-			this.emit(G.Error, "Invalid message");
+			this.emit(K.Error, "Invalid message");
 			return;
 		}
 		if (!this._wsOpen()) return;
@@ -1956,27 +1956,27 @@ var B = /*#__PURE__*/ function(e) {
 	_cleanup() {
 		this._socket &&= (this._socket.onopen = this._socket.onmessage = this._socket.onclose = null, this._socket.close(), void 0), clearTimeout(this._wsPingTimer);
 	}
-}, at = class {
+}, it = class {
 	constructor(e) {
 		this.connection = e;
 	}
 	startConnection(e) {
 		let t = this._startPeerConnection();
-		if (this.connection.peerConnection = t, this.connection.type === B.Media && e._stream && this._addTracksToConnection(e._stream, t), e.originator) {
+		if (this.connection.peerConnection = t, this.connection.type === V.Media && e._stream && this._addTracksToConnection(e._stream, t), e.originator) {
 			let n = this.connection, r = { ordered: !!e.reliable }, i = t.createDataChannel(n.label, r);
 			n._initializeDataChannel(i), this._makeOffer();
 		} else this.handleSDP("OFFER", e.sdp);
 	}
 	_startPeerConnection() {
-		N.log("Creating RTCPeerConnection.");
+		P.log("Creating RTCPeerConnection.");
 		let e = new RTCPeerConnection(this.connection.provider.options.config);
 		return this._setupListeners(e), e;
 	}
 	_setupListeners(e) {
 		let t = this.connection.peer, n = this.connection.connectionId, r = this.connection.type, i = this.connection.provider;
-		N.log("Listening for ICE candidates."), e.onicecandidate = (e) => {
-			!e.candidate || !e.candidate.candidate || (N.log(`Received ICE candidates for ${t}:`, e.candidate), i.socket.send({
-				type: K.Candidate,
+		P.log("Listening for ICE candidates."), e.onicecandidate = (e) => {
+			!e.candidate || !e.candidate.candidate || (P.log(`Received ICE candidates for ${t}:`, e.candidate), i.socket.send({
+				type: q.Candidate,
 				payload: {
 					candidate: e.candidate,
 					type: r,
@@ -1987,32 +1987,32 @@ var B = /*#__PURE__*/ function(e) {
 		}, e.oniceconnectionstatechange = () => {
 			switch (e.iceConnectionState) {
 				case "failed":
-					N.log("iceConnectionState is failed, closing connections to " + t), this.connection.emitError(H.NegotiationFailed, "Negotiation of connection to " + t + " failed."), this.connection.close();
+					P.log("iceConnectionState is failed, closing connections to " + t), this.connection.emitError(U.NegotiationFailed, "Negotiation of connection to " + t + " failed."), this.connection.close();
 					break;
 				case "closed":
-					N.log("iceConnectionState is closed, closing connections to " + t), this.connection.emitError(H.ConnectionClosed, "Connection to " + t + " closed."), this.connection.close();
+					P.log("iceConnectionState is closed, closing connections to " + t), this.connection.emitError(U.ConnectionClosed, "Connection to " + t + " closed."), this.connection.close();
 					break;
 				case "disconnected":
-					N.log("iceConnectionState changed to disconnected on the connection with " + t);
+					P.log("iceConnectionState changed to disconnected on the connection with " + t);
 					break;
 				case "completed": e.onicecandidate = () => {};
 			}
 			this.connection.emit("iceStateChanged", e.iceConnectionState);
-		}, N.log("Listening for data channel"), e.ondatachannel = (e) => {
-			N.log("Received data channel");
+		}, P.log("Listening for data channel"), e.ondatachannel = (e) => {
+			P.log("Received data channel");
 			let r = e.channel;
 			i.getConnection(t, n)._initializeDataChannel(r);
-		}, N.log("Listening for remote stream"), e.ontrack = (e) => {
-			N.log("Received remote stream");
+		}, P.log("Listening for remote stream"), e.ontrack = (e) => {
+			P.log("Received remote stream");
 			let r = e.streams[0], a = i.getConnection(t, n);
-			if (a.type === B.Media) {
+			if (a.type === V.Media) {
 				let e = a;
 				this._addStreamToMediaConnection(r, e);
 			}
 		};
 	}
 	cleanup() {
-		N.log("Cleaning up PeerConnection to " + this.connection.peer);
+		P.log("Cleaning up PeerConnection to " + this.connection.peer);
 		let e = this.connection.peerConnection;
 		if (!e) return;
 		this.connection.peerConnection = null, e.onicecandidate = e.oniceconnectionstatechange = e.ondatachannel = e.ontrack = () => {};
@@ -2023,16 +2023,16 @@ var B = /*#__PURE__*/ function(e) {
 		let e = this.connection.peerConnection, t = this.connection.provider;
 		try {
 			let n = await e.createOffer(this.connection.options.constraints);
-			N.log("Created offer."), this.connection.options.sdpTransform && typeof this.connection.options.sdpTransform == "function" && (n.sdp = this.connection.options.sdpTransform(n.sdp) || n.sdp);
+			P.log("Created offer."), this.connection.options.sdpTransform && typeof this.connection.options.sdpTransform == "function" && (n.sdp = this.connection.options.sdpTransform(n.sdp) || n.sdp);
 			try {
-				await e.setLocalDescription(n), N.log("Set localDescription:", n, `for:${this.connection.peer}`);
+				await e.setLocalDescription(n), P.log("Set localDescription:", n, `for:${this.connection.peer}`);
 				let r = {
 					sdp: n,
 					type: this.connection.type,
 					connectionId: this.connection.connectionId,
 					metadata: this.connection.metadata
 				};
-				if (this.connection.type === B.Data) {
+				if (this.connection.type === V.Data) {
 					let e = this.connection;
 					r = {
 						...r,
@@ -2042,25 +2042,25 @@ var B = /*#__PURE__*/ function(e) {
 					};
 				}
 				t.socket.send({
-					type: K.Offer,
+					type: q.Offer,
 					payload: r,
 					dst: this.connection.peer
 				});
 			} catch (e) {
-				e != "OperationError: Failed to set local offer sdp: Called in wrong state: kHaveRemoteOffer" && (t.emitError(V.WebRTC, e), N.log("Failed to setLocalDescription, ", e));
+				e != "OperationError: Failed to set local offer sdp: Called in wrong state: kHaveRemoteOffer" && (t.emitError(H.WebRTC, e), P.log("Failed to setLocalDescription, ", e));
 			}
 		} catch (e) {
-			t.emitError(V.WebRTC, e), N.log("Failed to createOffer, ", e);
+			t.emitError(H.WebRTC, e), P.log("Failed to createOffer, ", e);
 		}
 	}
 	async _makeAnswer() {
 		let e = this.connection.peerConnection, t = this.connection.provider;
 		try {
 			let n = await e.createAnswer();
-			N.log("Created answer."), this.connection.options.sdpTransform && typeof this.connection.options.sdpTransform == "function" && (n.sdp = this.connection.options.sdpTransform(n.sdp) || n.sdp);
+			P.log("Created answer."), this.connection.options.sdpTransform && typeof this.connection.options.sdpTransform == "function" && (n.sdp = this.connection.options.sdpTransform(n.sdp) || n.sdp);
 			try {
-				await e.setLocalDescription(n), N.log("Set localDescription:", n, `for:${this.connection.peer}`), t.socket.send({
-					type: K.Answer,
+				await e.setLocalDescription(n), P.log("Set localDescription:", n, `for:${this.connection.peer}`), t.socket.send({
+					type: q.Answer,
 					payload: {
 						sdp: n,
 						type: this.connection.type,
@@ -2069,59 +2069,59 @@ var B = /*#__PURE__*/ function(e) {
 					dst: this.connection.peer
 				});
 			} catch (e) {
-				t.emitError(V.WebRTC, e), N.log("Failed to setLocalDescription, ", e);
+				t.emitError(H.WebRTC, e), P.log("Failed to setLocalDescription, ", e);
 			}
 		} catch (e) {
-			t.emitError(V.WebRTC, e), N.log("Failed to create answer, ", e);
+			t.emitError(H.WebRTC, e), P.log("Failed to create answer, ", e);
 		}
 	}
 	async handleSDP(e, t) {
 		t = new RTCSessionDescription(t);
 		let n = this.connection.peerConnection, r = this.connection.provider;
-		N.log("Setting remote description", t);
+		P.log("Setting remote description", t);
 		let i = this;
 		try {
-			await n.setRemoteDescription(t), N.log(`Set remoteDescription:${e} for:${this.connection.peer}`), e === "OFFER" && await i._makeAnswer();
+			await n.setRemoteDescription(t), P.log(`Set remoteDescription:${e} for:${this.connection.peer}`), e === "OFFER" && await i._makeAnswer();
 		} catch (e) {
-			r.emitError(V.WebRTC, e), N.log("Failed to setRemoteDescription, ", e);
+			r.emitError(H.WebRTC, e), P.log("Failed to setRemoteDescription, ", e);
 		}
 	}
 	async handleCandidate(e) {
-		N.log("handleCandidate:", e);
+		P.log("handleCandidate:", e);
 		try {
-			await this.connection.peerConnection.addIceCandidate(e), N.log(`Added ICE candidate for:${this.connection.peer}`);
+			await this.connection.peerConnection.addIceCandidate(e), P.log(`Added ICE candidate for:${this.connection.peer}`);
 		} catch (e) {
-			this.connection.provider.emitError(V.WebRTC, e), N.log("Failed to handleCandidate, ", e);
+			this.connection.provider.emitError(H.WebRTC, e), P.log("Failed to handleCandidate, ", e);
 		}
 	}
 	_addTracksToConnection(e, t) {
-		if (N.log(`add tracks from stream ${e.id} to peer connection`), !t.addTrack) return N.error("Your browser does't support RTCPeerConnection#addTrack. Ignored.");
+		if (P.log(`add tracks from stream ${e.id} to peer connection`), !t.addTrack) return P.error("Your browser does't support RTCPeerConnection#addTrack. Ignored.");
 		e.getTracks().forEach((n) => {
 			t.addTrack(n, e);
 		});
 	}
 	_addStreamToMediaConnection(e, t) {
-		N.log(`add stream ${e.id} to media connection ${t.connectionId}`), t.addStream(e);
+		P.log(`add stream ${e.id} to media connection ${t.connectionId}`), t.addStream(e);
 	}
-}, ot = class extends P.EventEmitter {
+}, at = class extends F.EventEmitter {
 	emitError(e, t) {
-		N.error("Error:", t), this.emit("error", new st(`${e}`, t));
+		P.error("Error:", t), this.emit("error", new ot(`${e}`, t));
 	}
-}, st = class extends Error {
+}, ot = class extends Error {
 	constructor(e, t) {
 		typeof t == "string" ? super(t) : (super(), Object.assign(this, t)), this.type = e;
 	}
-}, ct = class extends ot {
+}, st = class extends at {
 	get open() {
 		return this._open;
 	}
 	constructor(e, t, n) {
 		super(), this.peer = e, this.provider = t, this.options = n, this._open = !1, this.metadata = n.metadata;
 	}
-}, lt = class e extends ct {
+}, ct = class e extends st {
 	static #e = this.ID_PREFIX = "mc_";
 	get type() {
-		return B.Media;
+		return V.Media;
 	}
 	get localStream() {
 		return this._localStream;
@@ -2130,36 +2130,36 @@ var B = /*#__PURE__*/ function(e) {
 		return this._remoteStream;
 	}
 	constructor(t, n, r) {
-		super(t, n, r), this._localStream = this.options._stream, this.connectionId = this.options.connectionId || e.ID_PREFIX + M.randomToken(), this._negotiator = new at(this), this._localStream && this._negotiator.startConnection({
+		super(t, n, r), this._localStream = this.options._stream, this.connectionId = this.options.connectionId || e.ID_PREFIX + N.randomToken(), this._negotiator = new it(this), this._localStream && this._negotiator.startConnection({
 			_stream: this._localStream,
 			originator: !0
 		});
 	}
 	_initializeDataChannel(e) {
 		this.dataChannel = e, this.dataChannel.onopen = () => {
-			N.log(`DC#${this.connectionId} dc connection success`), this.emit("willCloseOnRemote");
+			P.log(`DC#${this.connectionId} dc connection success`), this.emit("willCloseOnRemote");
 		}, this.dataChannel.onclose = () => {
-			N.log(`DC#${this.connectionId} dc closed for:`, this.peer), this.close();
+			P.log(`DC#${this.connectionId} dc closed for:`, this.peer), this.close();
 		};
 	}
 	addStream(e) {
-		N.log("Receiving stream", e), this._remoteStream = e, super.emit("stream", e);
+		P.log("Receiving stream", e), this._remoteStream = e, super.emit("stream", e);
 	}
 	handleMessage(e) {
 		let t = e.type, n = e.payload;
 		switch (e.type) {
-			case K.Answer:
+			case q.Answer:
 				this._negotiator.handleSDP(t, n.sdp), this._open = !0;
 				break;
-			case K.Candidate:
+			case q.Candidate:
 				this._negotiator.handleCandidate(n.candidate);
 				break;
-			default: N.warn(`Unrecognized message type:${t} from peer:${this.peer}`);
+			default: P.warn(`Unrecognized message type:${t} from peer:${this.peer}`);
 		}
 	}
 	answer(e, t = {}) {
 		if (this._localStream) {
-			N.warn("Local stream already exists on this MediaConnection. Are you answering a call twice?");
+			P.warn("Local stream already exists on this MediaConnection. Are you answering a call twice?");
 			return;
 		}
 		this._localStream = e, t && t.sdpTransform && (this.options.sdpTransform = t.sdpTransform), this._negotiator.startConnection({
@@ -2173,13 +2173,13 @@ var B = /*#__PURE__*/ function(e) {
 	close() {
 		this._negotiator &&= (this._negotiator.cleanup(), null), this._localStream = null, this._remoteStream = null, this.provider &&= (this.provider._removeConnection(this), null), this.options && this.options._stream && (this.options._stream = null), this.open && (this._open = !1, super.emit("close"));
 	}
-}, ut = class {
+}, lt = class {
 	constructor(e) {
 		this._options = e;
 	}
 	_buildRequest(e) {
 		let t = this._options.secure ? "https" : "http", { host: n, port: r, path: i, key: a } = this._options, o = new URL(`${t}://${n}:${r}${i}${a}/${e}`);
-		return o.searchParams.set("ts", `${Date.now()}${Math.random()}`), o.searchParams.set("version", rt), fetch(o.href, { referrerPolicy: this._options.referrerPolicy });
+		return o.searchParams.set("ts", `${Date.now()}${Math.random()}`), o.searchParams.set("version", nt), fetch(o.href, { referrerPolicy: this._options.referrerPolicy });
 	}
 	async retrieveId() {
 		try {
@@ -2187,9 +2187,9 @@ var B = /*#__PURE__*/ function(e) {
 			if (e.status !== 200) throw Error(`Error. Status:${e.status}`);
 			return e.text();
 		} catch (e) {
-			N.error("Error retrieving ID", e);
+			P.error("Error retrieving ID", e);
 			let t = "";
-			throw this._options.path === "/" && this._options.host !== M.CLOUD_HOST && (t = " If you passed in a `path` to your self-hosted PeerServer, you'll also need to pass in that same path when creating a new Peer."), Error("Could not get an ID from the server." + t);
+			throw this._options.path === "/" && this._options.host !== N.CLOUD_HOST && (t = " If you passed in a `path` to your self-hosted PeerServer, you'll also need to pass in that same path when creating a new Peer."), Error("Could not get an ID from the server." + t);
 		}
 	}
 	async listAllPeers() {
@@ -2198,34 +2198,34 @@ var B = /*#__PURE__*/ function(e) {
 			if (e.status !== 200) {
 				if (e.status === 401) {
 					let e = "";
-					throw e = this._options.host === M.CLOUD_HOST ? "It looks like you're using the cloud server. You can email team@peerjs.com to enable peer listing for your API key." : "You need to enable `allow_discovery` on your self-hosted PeerServer to use this feature.", Error("It doesn't look like you have permission to list peers IDs. " + e);
+					throw e = this._options.host === N.CLOUD_HOST ? "It looks like you're using the cloud server. You can email team@peerjs.com to enable peer listing for your API key." : "You need to enable `allow_discovery` on your self-hosted PeerServer to use this feature.", Error("It doesn't look like you have permission to list peers IDs. " + e);
 				}
 				throw Error(`Error. Status:${e.status}`);
 			}
 			return e.json();
 		} catch (e) {
-			throw N.error("Error retrieving list peers", e), Error("Could not get list peers from the server." + e);
+			throw P.error("Error retrieving list peers", e), Error("Could not get list peers from the server." + e);
 		}
 	}
-}, q = class e extends ct {
+}, ut = class e extends st {
 	static #e = this.ID_PREFIX = "dc_";
 	static #t = this.MAX_BUFFERED_AMOUNT = 8388608;
 	get type() {
-		return B.Data;
+		return V.Data;
 	}
 	constructor(t, n, r) {
-		super(t, n, r), this.connectionId = this.options.connectionId || e.ID_PREFIX + Ze(), this.label = this.options.label || this.connectionId, this.reliable = !!this.options.reliable, this._negotiator = new at(this), this._negotiator.startConnection(this.options._payload || {
+		super(t, n, r), this.connectionId = this.options.connectionId || e.ID_PREFIX + Xe(), this.label = this.options.label || this.connectionId, this.reliable = !!this.options.reliable, this._negotiator = new it(this), this._negotiator.startConnection(this.options._payload || {
 			originator: !0,
 			reliable: this.reliable
 		});
 	}
 	_initializeDataChannel(e) {
 		this.dataChannel = e, this.dataChannel.onopen = () => {
-			N.log(`DC#${this.connectionId} dc connection success`), this._open = !0, this.emit("open");
+			P.log(`DC#${this.connectionId} dc connection success`), this._open = !0, this.emit("open");
 		}, this.dataChannel.onmessage = (e) => {
-			N.log(`DC#${this.connectionId} dc onmessage:`, e.data);
+			P.log(`DC#${this.connectionId} dc onmessage:`, e.data);
 		}, this.dataChannel.onclose = () => {
-			N.log(`DC#${this.connectionId} dc closed for:`, this.peer), this.close();
+			P.log(`DC#${this.connectionId} dc closed for:`, this.peer), this.close();
 		};
 	}
 	close(e) {
@@ -2237,7 +2237,7 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	send(e, t = !1) {
 		if (!this.open) {
-			this.emitError(U.NotOpenYet, "Connection is not open. You should listen for the `open` event before sending messages.");
+			this.emitError(W.NotOpenYet, "Connection is not open. You should listen for the `open` event before sending messages.");
 			return;
 		}
 		return this._send(e, t);
@@ -2245,16 +2245,16 @@ var B = /*#__PURE__*/ function(e) {
 	async handleMessage(e) {
 		let t = e.payload;
 		switch (e.type) {
-			case K.Answer:
+			case q.Answer:
 				await this._negotiator.handleSDP(e.type, t.sdp);
 				break;
-			case K.Candidate:
+			case q.Candidate:
 				await this._negotiator.handleCandidate(t.candidate);
 				break;
-			default: N.warn("Unrecognized message type:", e.type, "from peer:", this.peer);
+			default: P.warn("Unrecognized message type:", e.type, "from peer:", this.peer);
 		}
 	}
-}, J = class extends q {
+}, J = class extends ut {
 	get bufferSize() {
 		return this._bufferSize;
 	}
@@ -2266,13 +2266,13 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	_trySend(e) {
 		if (!this.open) return !1;
-		if (this.dataChannel.bufferedAmount > q.MAX_BUFFERED_AMOUNT) return this._buffering = !0, setTimeout(() => {
+		if (this.dataChannel.bufferedAmount > ut.MAX_BUFFERED_AMOUNT) return this._buffering = !0, setTimeout(() => {
 			this._buffering = !1, this._tryBuffer();
 		}, 50), !1;
 		try {
 			this.dataChannel.send(e);
 		} catch (e) {
-			return N.error(`DC#:${this.connectionId} Error when sending:`, e), this._buffering = !0, this.close(), !1;
+			return P.error(`DC#:${this.connectionId} Error when sending:`, e), this._buffering = !0, this.close(), !1;
 		}
 		return !0;
 	}
@@ -2296,7 +2296,7 @@ var B = /*#__PURE__*/ function(e) {
 		super.close(e), this._chunkedData = {};
 	}
 	constructor(e, t, n) {
-		super(e, t, n), this.chunker = new Je(), this.serialization = W.Binary, this._chunkedData = {};
+		super(e, t, n), this.chunker = new A(), this.serialization = G.Binary, this._chunkedData = {};
 	}
 	_handleDataMessage({ data: e }) {
 		let t = f(e), n = t.__peerData;
@@ -2318,7 +2318,7 @@ var B = /*#__PURE__*/ function(e) {
 		};
 		if (n.data[e.n] = new Uint8Array(e.data), n.count++, this._chunkedData[t] = n, n.total === n.count) {
 			delete this._chunkedData[t];
-			let e = Ye(n.data);
+			let e = Je(n.data);
 			this._handleDataMessage({ data: e });
 		}
 	}
@@ -2341,7 +2341,7 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	_sendChunks(e) {
 		let t = this.chunker.chunk(e);
-		N.log(`DC#${this.connectionId} Try to send ${t.length} chunks...`);
+		P.log(`DC#${this.connectionId} Try to send ${t.length} chunks...`);
 		for (let e of t) this.send(e, !0);
 	}
 }, dt = class extends J {
@@ -2352,7 +2352,7 @@ var B = /*#__PURE__*/ function(e) {
 		this._bufferedSend(e);
 	}
 	constructor(...e) {
-		super(...e), this.serialization = W.None;
+		super(...e), this.serialization = G.None;
 	}
 }, ft = class extends J {
 	_handleDataMessage({ data: e }) {
@@ -2365,16 +2365,16 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	_send(e, t) {
 		let n = this.encoder.encode(this.stringify(e));
-		if (n.byteLength >= M.chunkedMTU) {
-			this.emitError(U.MessageToBig, "Message too big for JSON channel");
+		if (n.byteLength >= N.chunkedMTU) {
+			this.emitError(W.MessageToBig, "Message too big for JSON channel");
 			return;
 		}
 		this._bufferedSend(n);
 	}
 	constructor(...e) {
-		super(...e), this.serialization = W.JSON, this.encoder = new TextEncoder(), this.decoder = new TextDecoder(), this.stringify = JSON.stringify, this.parse = JSON.parse;
+		super(...e), this.serialization = G.JSON, this.encoder = new TextEncoder(), this.decoder = new TextDecoder(), this.stringify = JSON.stringify, this.parse = JSON.parse;
 	}
-}, pt = class e extends ot {
+}, pt = class e extends at {
 	static #e = this.DEFAULT_KEY = "peerjs";
 	get id() {
 		return this._id;
@@ -2410,38 +2410,38 @@ var B = /*#__PURE__*/ function(e) {
 		let r;
 		if (t && t.constructor == Object ? n = t : t && (r = t.toString()), n = {
 			debug: 0,
-			host: M.CLOUD_HOST,
-			port: M.CLOUD_PORT,
+			host: N.CLOUD_HOST,
+			port: N.CLOUD_PORT,
 			path: "/",
 			key: e.DEFAULT_KEY,
-			token: M.randomToken(),
-			config: M.defaultConfig,
+			token: N.randomToken(),
+			config: N.defaultConfig,
 			referrerPolicy: "strict-origin-when-cross-origin",
 			serializers: {},
 			...n
 		}, this._options = n, this._serializers = {
 			...this._serializers,
 			...this.options.serializers
-		}, this._options.host === "/" && (this._options.host = window.location.hostname), this._options.path && (this._options.path[0] !== "/" && (this._options.path = "/" + this._options.path), this._options.path[this._options.path.length - 1] !== "/" && (this._options.path += "/")), this._options.secure === void 0 && this._options.host !== M.CLOUD_HOST ? this._options.secure = M.isSecure() : this._options.host == M.CLOUD_HOST && (this._options.secure = !0), this._options.logFunction && N.setLogFunction(this._options.logFunction), N.logLevel = this._options.debug || 0, this._api = new ut(n), this._socket = this._createServerConnection(), !M.supports.audioVideo && !M.supports.data) {
-			this._delayedAbort(V.BrowserIncompatible, "The current browser does not support WebRTC");
+		}, this._options.host === "/" && (this._options.host = window.location.hostname), this._options.path && (this._options.path[0] !== "/" && (this._options.path = "/" + this._options.path), this._options.path[this._options.path.length - 1] !== "/" && (this._options.path += "/")), this._options.secure === void 0 && this._options.host !== N.CLOUD_HOST ? this._options.secure = N.isSecure() : this._options.host == N.CLOUD_HOST && (this._options.secure = !0), this._options.logFunction && P.setLogFunction(this._options.logFunction), P.logLevel = this._options.debug || 0, this._api = new lt(n), this._socket = this._createServerConnection(), !N.supports.audioVideo && !N.supports.data) {
+			this._delayedAbort(H.BrowserIncompatible, "The current browser does not support WebRTC");
 			return;
 		}
-		if (r && !M.validateId(r)) {
-			this._delayedAbort(V.InvalidID, `ID "${r}" is invalid`);
+		if (r && !N.validateId(r)) {
+			this._delayedAbort(H.InvalidID, `ID "${r}" is invalid`);
 			return;
 		}
-		r ? this._initialize(r) : this._api.retrieveId().then((e) => this._initialize(e)).catch((e) => this._abort(V.ServerError, e));
+		r ? this._initialize(r) : this._api.retrieveId().then((e) => this._initialize(e)).catch((e) => this._abort(H.ServerError, e));
 	}
 	_createServerConnection() {
-		let e = new it(this._options.secure, this._options.host, this._options.port, this._options.path, this._options.key, this._options.pingInterval);
-		return e.on(G.Message, (e) => {
+		let e = new rt(this._options.secure, this._options.host, this._options.port, this._options.path, this._options.key, this._options.pingInterval);
+		return e.on(K.Message, (e) => {
 			this._handleMessage(e);
-		}), e.on(G.Error, (e) => {
-			this._abort(V.SocketError, e);
-		}), e.on(G.Disconnected, () => {
-			this.disconnected || (this.emitError(V.Network, "Lost connection to server."), this.disconnect());
-		}), e.on(G.Close, () => {
-			this.disconnected || this._abort(V.SocketClosed, "Underlying socket is already closed.");
+		}), e.on(K.Error, (e) => {
+			this._abort(H.SocketError, e);
+		}), e.on(K.Disconnected, () => {
+			this.disconnected || (this.emitError(H.Network, "Lost connection to server."), this.disconnect());
+		}), e.on(K.Close, () => {
+			this.disconnected || this._abort(H.SocketClosed, "Underlying socket is already closed.");
 		}), e;
 	}
 	_initialize(e) {
@@ -2450,34 +2450,34 @@ var B = /*#__PURE__*/ function(e) {
 	_handleMessage(e) {
 		let t = e.type, n = e.payload, r = e.src;
 		switch (t) {
-			case K.Open:
+			case q.Open:
 				this._lastServerId = this.id, this._open = !0, this.emit("open", this.id);
 				break;
-			case K.Error:
-				this._abort(V.ServerError, n.msg);
+			case q.Error:
+				this._abort(H.ServerError, n.msg);
 				break;
-			case K.IdTaken:
-				this._abort(V.UnavailableID, `ID "${this.id}" is taken`);
+			case q.IdTaken:
+				this._abort(H.UnavailableID, `ID "${this.id}" is taken`);
 				break;
-			case K.InvalidKey:
-				this._abort(V.InvalidKey, `API KEY "${this._options.key}" is invalid`);
+			case q.InvalidKey:
+				this._abort(H.InvalidKey, `API KEY "${this._options.key}" is invalid`);
 				break;
-			case K.Leave:
-				N.log(`Received leave message from ${r}`), this._cleanupPeer(r), this._connections.delete(r);
+			case q.Leave:
+				P.log(`Received leave message from ${r}`), this._cleanupPeer(r), this._connections.delete(r);
 				break;
-			case K.Expire:
-				this.emitError(V.PeerUnavailable, `Could not connect to peer ${r}`);
+			case q.Expire:
+				this.emitError(H.PeerUnavailable, `Could not connect to peer ${r}`);
 				break;
-			case K.Offer: {
+			case q.Offer: {
 				let e = n.connectionId, t = this.getConnection(r, e);
-				if (t && (t.close(), N.warn(`Offer received for existing Connection ID:${e}`)), n.type === B.Media) {
-					let i = new lt(r, this, {
+				if (t && (t.close(), P.warn(`Offer received for existing Connection ID:${e}`)), n.type === V.Media) {
+					let i = new ct(r, this, {
 						connectionId: e,
 						_payload: n,
 						metadata: n.metadata
 					});
 					t = i, this._addConnection(r, t), this.emit("call", i);
-				} else if (n.type === B.Data) {
+				} else if (n.type === V.Data) {
 					let i = new this._serializers[n.serialization](r, this, {
 						connectionId: e,
 						_payload: n,
@@ -2488,7 +2488,7 @@ var B = /*#__PURE__*/ function(e) {
 					});
 					t = i, this._addConnection(r, t), this.emit("connection", i);
 				} else {
-					N.warn(`Received malformed connection type:${n.type}`);
+					P.warn(`Received malformed connection type:${n.type}`);
 					return;
 				}
 				let i = this._getMessages(e);
@@ -2497,11 +2497,11 @@ var B = /*#__PURE__*/ function(e) {
 			}
 			default: {
 				if (!n) {
-					N.warn(`You received a malformed message from ${r} of type ${t}`);
+					P.warn(`You received a malformed message from ${r} of type ${t}`);
 					return;
 				}
 				let i = n.connectionId, a = this.getConnection(r, i);
-				a && a.peerConnection ? a.handleMessage(e) : i ? this._storeMessage(i, e) : N.warn("You received an unrecognized message:", e);
+				a && a.peerConnection ? a.handleMessage(e) : i ? this._storeMessage(i, e) : P.warn("You received an unrecognized message:", e);
 				break;
 			}
 		}
@@ -2518,7 +2518,7 @@ var B = /*#__PURE__*/ function(e) {
 			serialization: "default",
 			...t
 		}, this.disconnected) {
-			N.warn("You cannot connect to a new Peer because you called .disconnect() on this Peer and ended your connection with the server. You can create a new Peer to reconnect, or call reconnect on this peer if you believe its ID to still be available."), this.emitError(V.Disconnected, "Cannot connect to new Peer after disconnecting from server.");
+			P.warn("You cannot connect to a new Peer because you called .disconnect() on this Peer and ended your connection with the server. You can create a new Peer to reconnect, or call reconnect on this peer if you believe its ID to still be available."), this.emitError(H.Disconnected, "Cannot connect to new Peer after disconnecting from server.");
 			return;
 		}
 		let n = new this._serializers[t.serialization](e, this, t);
@@ -2526,21 +2526,21 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	call(e, t, n = {}) {
 		if (this.disconnected) {
-			N.warn("You cannot connect to a new Peer because you called .disconnect() on this Peer and ended your connection with the server. You can create a new Peer to reconnect."), this.emitError(V.Disconnected, "Cannot connect to new Peer after disconnecting from server.");
+			P.warn("You cannot connect to a new Peer because you called .disconnect() on this Peer and ended your connection with the server. You can create a new Peer to reconnect."), this.emitError(H.Disconnected, "Cannot connect to new Peer after disconnecting from server.");
 			return;
 		}
 		if (!t) {
-			N.error("To call a peer, you must provide a stream from your browser's `getUserMedia`.");
+			P.error("To call a peer, you must provide a stream from your browser's `getUserMedia`.");
 			return;
 		}
-		let r = new lt(e, this, {
+		let r = new ct(e, this, {
 			...n,
 			_stream: t
 		});
 		return this._addConnection(e, r), r;
 	}
 	_addConnection(e, t) {
-		N.log(`add connection ${t.type}:${t.connectionId} to peerId:${e}`), this._connections.has(e) || this._connections.set(e, []), this._connections.get(e).push(t);
+		P.log(`add connection ${t.type}:${t.connectionId} to peerId:${e}`), this._connections.has(e) || this._connections.set(e, []), this._connections.get(e).push(t);
 	}
 	_removeConnection(e) {
 		let t = this._connections.get(e.peer);
@@ -2562,10 +2562,10 @@ var B = /*#__PURE__*/ function(e) {
 		}, 0);
 	}
 	_abort(e, t) {
-		N.error("Aborting!"), this.emitError(e, t), this._lastServerId ? this.disconnect() : this.destroy();
+		P.error("Aborting!"), this.emitError(e, t), this._lastServerId ? this.disconnect() : this.destroy();
 	}
 	destroy() {
-		this.destroyed || (N.log(`Destroy peer with ID:${this.id}`), this.disconnect(), this._cleanup(), this._destroyed = !0, this.emit("close"));
+		this.destroyed || (P.log(`Destroy peer with ID:${this.id}`), this.disconnect(), this._cleanup(), this._destroyed = !0, this.emit("close"));
 	}
 	_cleanup() {
 		for (let e of this._connections.keys()) this._cleanupPeer(e), this._connections.delete(e);
@@ -2578,16 +2578,16 @@ var B = /*#__PURE__*/ function(e) {
 	disconnect() {
 		if (this.disconnected) return;
 		let e = this.id;
-		N.log(`Disconnect peer with ID:${e}`), this._disconnected = !0, this._open = !1, this.socket.close(), this._lastServerId = e, this._id = null, this.emit("disconnected", e);
+		P.log(`Disconnect peer with ID:${e}`), this._disconnected = !0, this._open = !1, this.socket.close(), this._lastServerId = e, this._id = null, this.emit("disconnected", e);
 	}
 	reconnect() {
-		if (this.disconnected && !this.destroyed) N.log(`Attempting reconnection to server with ID ${this._lastServerId}`), this._disconnected = !1, this._initialize(this._lastServerId);
+		if (this.disconnected && !this.destroyed) P.log(`Attempting reconnection to server with ID ${this._lastServerId}`), this._disconnected = !1, this._initialize(this._lastServerId);
 		else if (this.destroyed) throw Error("This peer cannot reconnect to the server. It has already been destroyed.");
-		else if (!this.disconnected && !this.open) N.error("In a hurry? We're still trying to make the initial connection!");
+		else if (!this.disconnected && !this.open) P.error("In a hurry? We're still trying to make the initial connection!");
 		else throw Error(`Peer ${this.id} cannot reconnect because it is not disconnected from the server!`);
 	}
 	listAllPeers(e = (e) => {}) {
-		this._api.listAllPeers().then((t) => e(t)).catch((e) => this._abort(V.ServerError, e));
+		this._api.listAllPeers().then((t) => e(t)).catch((e) => this._abort(H.ServerError, e));
 	}
 }, X = pt;
 function mt(e, t) {
@@ -2625,13 +2625,13 @@ var yt = pt || X.Peer || X.default && X.default.Peer, Z = {
 	secure: !0,
 	key: "peerjs",
 	path: "/"
-};
-function bt(e) {
+}, bt = 5e3;
+function xt(e) {
 	return `${e.host}:${e.port}:${e.key}:${e.path || "/"}`;
 }
-var xt = class {
+var St = class {
 	constructor(e, t) {
-		this.peerId = e, this.signaling = t, this.peer = null, this.conn = null, this.ready = !1, this.closed = !1, this.queue = [], this.pending = /* @__PURE__ */ new Map(), this.curReqId = null;
+		this.peerId = e, this.signaling = t, this.peer = null, this.conn = null, this.ready = !1, this.closed = !1, this.queue = [], this.pending = /* @__PURE__ */ new Map(), this.curReqId = null, this.lastActive = 0, this.kaTimer = null;
 	}
 	request(e, t, n, r) {
 		let i = {
@@ -2641,7 +2641,17 @@ var xt = class {
 			signal: r
 		};
 		if (!this.ready || this.closed || this.pending.size > 0) {
-			this.queue.push(i), !this.opening && !this.closed && (this.opening = !0, this.open());
+			if (this.queue.push(i), !this.opening && !this.closed && (this.opening = !0, this.open()), r) {
+				if (r.aborted) {
+					this.queue.pop(), n(new DOMException("aborted", "AbortError"));
+					return;
+				}
+				let e = () => {
+					let t = this.queue.indexOf(i);
+					t >= 0 && (this.queue.splice(t, 1), n(new DOMException("aborted", "AbortError"))), r.removeEventListener("abort", e);
+				};
+				r.addEventListener("abort", e);
+			}
 			return;
 		}
 		this.send(i);
@@ -2671,11 +2681,26 @@ var xt = class {
 				serialization: "raw"
 			});
 			this.conn = e, e.on("open", () => {
-				clearTimeout(r), this.opening = !1, this.ready = !0, this.flush();
+				clearTimeout(r), this.opening = !1, this.ready = !0, this.startKeepalive(), this.flush();
 			}), e.on("data", (e) => this.handleData(e)), e.on("close", () => this.teardown("connection closed")), e.on("error", (e) => {
 				!this.ready && !this.closed && this.failAll(`connection error: ${e?.type || e}`);
 			});
 		});
+	}
+	startKeepalive() {
+		this.lastActive = Date.now(), this.kaTimer = setInterval(() => {
+			if (this.closed) {
+				clearInterval(this.kaTimer);
+				return;
+			}
+			if (Date.now() - this.lastActive > 15e3) {
+				clearInterval(this.kaTimer), this.teardown("keepalive timeout");
+				return;
+			}
+			try {
+				this.conn.send(JSON.stringify({ type: "ping" }));
+			} catch {}
+		}, bt);
 	}
 	send(e) {
 		if (this.closed) {
@@ -2709,7 +2734,7 @@ var xt = class {
 		}
 	}
 	handleData(e) {
-		if (gt(e)) {
+		if (this.lastActive = Date.now(), gt(e)) {
 			let t = this.curReqId ? this.pending.get(this.curReqId) : null;
 			if (!t) return;
 			let n = _t(e);
@@ -2717,7 +2742,7 @@ var xt = class {
 			return;
 		}
 		let t = ht(e);
-		if (!t) return;
+		if (!t || t.type === "ping") return;
 		let n = this.pending.get(t.reqId);
 		if (!n) {
 			this.flush();
@@ -2741,7 +2766,7 @@ var xt = class {
 		}
 	}
 	failAll(e) {
-		this.closed = !0, this.opening = !1;
+		this.closed = !0, this.opening = !1, this.kaTimer &&= (clearInterval(this.kaTimer), null);
 		let t = /* @__PURE__ */ Error(`peerdrive-media: ${e}`);
 		for (let [, e] of this.pending) e.cleanup(), e.reject(t);
 		this.pending.clear();
@@ -2764,14 +2789,14 @@ var xt = class {
 	async load(e, { peer: t, signaling: n = Z, signal: r } = {}) {
 		if (!t) throw Error("peerdrive-media: peer (node peer id) is required");
 		if (!e || typeof e != "string") throw Error("peerdrive-media: url is required");
-		let i = `${bt(n)}|${t}`, a = this.slots.get(i);
-		if ((!a || a.closed) && (a = new xt(t, n), this.slots.set(i, a)), r?.aborted) throw new DOMException("aborted", "AbortError");
+		let i = `${xt(n)}|${t}`, a = this.slots.get(i);
+		if ((!a || a.closed) && (a = new St(t, n), this.slots.set(i, a)), r?.aborted) throw new DOMException("aborted", "AbortError");
 		return new Promise((t, n) => {
 			a.request(e, t, n, r);
 		});
 	}
 	dispose(e, t = Z) {
-		let n = `${bt(t)}|${e}`, r = this.slots.get(n);
+		let n = `${xt(t)}|${e}`, r = this.slots.get(n);
 		r && (r.failAll("disposed"), this.slots.delete(n));
 	}
 }();
@@ -2784,7 +2809,7 @@ function $({ url: e, peer: t, signaling: n = Z, signal: r } = {}) {
 		signal: r
 	});
 }
-function St({ url: e, peer: t, signaling: n, signal: r, container: i, props: a = {} } = {}) {
+function Ct({ url: e, peer: t, signaling: n, signal: r, container: i, props: a = {} } = {}) {
 	let o = i || document.body;
 	return $({
 		url: e,
@@ -2803,11 +2828,11 @@ function St({ url: e, peer: t, signaling: n, signal: r, container: i, props: a =
 		};
 	});
 }
-var Ct = {
+var wt = {
 	load: $,
-	mount: St,
+	mount: Ct,
 	client: Q,
 	DEFAULT_SIGNALING: Z
 };
 //#endregion
-export { Z as DEFAULT_SIGNALING, Q as client, Ct as default, $ as load, St as mount };
+export { Z as DEFAULT_SIGNALING, Q as client, wt as default, $ as load, Ct as mount };

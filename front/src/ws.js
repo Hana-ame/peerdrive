@@ -138,23 +138,36 @@ function handleText(text) {
       // 下载数据块头：声明「下一二进制帧归本次下载，大小 size」
       // （与服务端连接级 expect 语义一致；data 头+块原子连续）
       const p = pending.get(msg.reqId)
-      if (!p || p.kind !== 'download') return
-      binaryExpect = { type: 'download', reqId: msg.reqId, size: msg.size || 0, got: 0, chunks: [] }
+      if (!p || (p.kind !== 'download' && p.kind !== 'stream')) return
+      binaryExpect = { type: p.kind, reqId: msg.reqId, size: msg.size || 0, got: 0, chunks: [] }
       if (binaryExpect.size === 0) {
         // 空块（罕见）：直接清期待，等下一帧
         binaryExpect = null
       }
       return
     }
-    case 'meta':
+    case 'meta': {
+      // req 拉取响应头。download/stream 忽略（大小由 data 头 + done 保证）；
+      // stat 请求（offset=0 size=0，只探大小不发数据）取 total 即 resolve
+      const p = pending.get(msg.reqId)
+      if (!p || p.kind !== 'stat') return
+      pending.delete(msg.reqId)
+      p.resolve(msg.total || 0)
+      return
+    }
     case 'done': {
       const p = pending.get(msg.reqId)
-      if (!p || p.kind !== 'download') return
+      if (!p || (p.kind !== 'download' && p.kind !== 'stream')) return
       if (msg.type === 'done') {
         // done 帧：传输完成，收集齐的数据已在上一个 data 头声明 size
         pending.delete(msg.reqId)
         binaryExpect = null
-        p.resolve(assemble(p))
+        if (p.kind === 'stream') {
+          // 流式下载：所有块已 enqueue，关闭流
+          p.controller.close()
+        } else {
+          p.resolve(assemble(p))
+        }
       }
       return
     }
@@ -184,6 +197,9 @@ function handleBinary(data) {
     if (!p) return
     if (e.type === 'admin') {
       finishBinaryExpect(p, e)
+    } else if (e.type === 'stream') {
+      // 流式下载：块收齐（一个二进制帧 = 一个块）即 enqueue，不缓存累计
+      p.controller.enqueue(assemble(e))
     } else {
       // download：块收齐，等待下一个 data 头或 done 帧
       p.chunks.push(...e.chunks)
@@ -305,6 +321,7 @@ function pumpBinary(file, reqId) {
 
 // download 经 req verb 拉取文件（sha256 内容寻址），返回 Uint8Array。
 // 服务端按 64KB 块发 data 头+二进制帧；前端按 data 头声明 size 收集。
+// 注意：全量内存组装，大文件用 downloadStream（边收边吐）或 downloadToFile。
 export function download(hash, offset = 0, size = -1) {
   connect()
   if (!sock || sock.readyState !== WebSocket.OPEN) {
@@ -318,14 +335,79 @@ export function download(hash, offset = 0, size = -1) {
   })
 }
 
-// downloadToFile 下载并触发浏览器保存（<a download> 模拟）。
+// downloadStream：流式下载（ReadableStream）。数据块边收边吐（每 64KB 块
+// enqueue 一次），全量数据不落内存；大文件保存/传输用（downloadToFile 的
+// FS Access API 路径、未来流水线消费）。服务端帧序列与 download 相同
+// （meta → data 头+块… → done），只差收集侧语义。
+// 消费者 cancel（如保存对话框被取消）→ 立刻清理 pending + binaryExpect，
+// 防止 pending 泄漏与迟到帧污染后续请求（与上传 abort 同源的泄漏防护，
+// 发现背景：代码审阅 2026-08-18）。
+export function downloadStream(hash, offset = 0, size = -1) {
+  connect()
+  if (!sock || sock.readyState !== WebSocket.OPEN) {
+    return Promise.reject(new Error('ws: not connected'))
+  }
+  const reqId = nextReqId()
+  return new ReadableStream({
+    start(controller) {
+      pending.set(reqId, {
+        kind: 'stream',
+        controller,
+        resolve: () => {},
+        // stream 的 reject = 把错误灌进流（await reader.read() 抛错）
+        reject: (err) => controller.error(err),
+      })
+      sock.send(JSON.stringify({ type: 'req', hash, offset, size, reqId }))
+    },
+    cancel() {
+      const p = pending.get(reqId)
+      if (p && p.kind === 'stream') pending.delete(reqId)
+      if (binaryExpect && binaryExpect.reqId === reqId) binaryExpect = null
+    },
+  })
+}
+
+// stat 查询文件总大小：发 req 请求 0 字节（offset=0 size=0），服务端回
+// meta{total} 后不发数据直接 done（见 back inbound.go 的 size 语义）。
+// 下载前探大小用（如 getBlobUrl 的大文件预览阈值）。本地 WS 连接是
+// reqId 并发路由，与后续 download 互不干扰。
+export function stat(hash) {
+  connect()
+  if (!sock || sock.readyState !== WebSocket.OPEN) {
+    return Promise.reject(new Error('ws: not connected'))
+  }
+  const reqId = nextReqId()
+  return new Promise((resolve, reject) => {
+    pending.set(reqId, { kind: 'stat', resolve, reject })
+    sock.send(JSON.stringify({ type: 'req', hash, offset: 0, size: 0, reqId }))
+  })
+}
+
+// downloadToFile 下载并触发浏览器保存。优先 File System Access API
+// （showSaveFilePicker → createWritable，流式边收边写，全量不占内存）；
+// 不支持时回退 <a download>（全量内存 Blob，中小文件够用）。
+// 发现背景：代码审阅 2026-08-18——原实现 download() 全量组装内存，
+// 8GB 上传上限下大文件保存直接 OOM。
 export async function downloadToFile(hash, filename) {
+  const name = filename || hash
+  if (window.showSaveFilePicker) {
+    const handle = await window.showSaveFilePicker({ suggestedName: name })
+    const writable = await handle.createWritable()
+    try {
+      for await (const chunk of downloadStream(hash)) {
+        await writable.write(chunk)
+      }
+    } finally {
+      await writable.close()
+    }
+    return
+  }
   const data = await download(hash)
   const blob = new Blob([data])
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = filename || hash
+  a.download = name
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)

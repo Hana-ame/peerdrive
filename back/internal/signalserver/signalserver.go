@@ -32,11 +32,35 @@ type Server struct {
 	path         string
 	queueTTL     time.Duration // 离线队列存活时间（OFFER 过期用）
 	heartbeatTTL time.Duration // 发现的心跳过期时间
+	tokenWhitelist map[string]bool // 允许的信令 token（nil/空 = 不限制）
 
 	mu      sync.Mutex
 	clients map[string]*client              // id → 在线连接
 	queues  map[string][]queuedMsg          // dst → 待转发消息
 	disc    map[string]map[string]time.Time // collection → peerId → lastSeen
+}
+
+// Option 信令服务器配置项。
+type Option func(*Server)
+
+// WithTokenWhitelist 设置信令 token 白名单：WS 连接的 token 必须在名单内，
+// 否则拒绝升级（"Invalid token provided"）。空名单 = 不限制（默认，兼容
+// 公共部署现状）。
+// 坑（2026-08-18 代码审阅）：token 原本只是 ID 占用保护——任意客户端可自定
+// token 连接，攻击者可注册任意 ID 冒充在线节点收信令（配合其自选 ID 可以
+// 对任何节点发起 OFFER 诱导连向攻击者）；白名单让自托管部署只信任已知节点。
+// 注意：发现端点（announce/nodes）保持公开——发现的目的就是让任何人找到
+// 节点，白名单只约束信令面。
+func WithTokenWhitelist(tokens []string) Option {
+	return func(s *Server) {
+		if len(tokens) == 0 {
+			return
+		}
+		s.tokenWhitelist = make(map[string]bool, len(tokens))
+		for _, t := range tokens {
+			s.tokenWhitelist[t] = true
+		}
+	}
 }
 
 // 离线队列限制（H3 修复）：每 dst 最多缓存 maxQueuedPerDst 条消息。
@@ -99,11 +123,11 @@ type Message struct {
 }
 
 // NewServer 创建信令服务器。
-func NewServer(key string) *Server {
+func NewServer(key string, opts ...Option) *Server {
 	if key == "" {
 		key = "peerjs"
 	}
-	return &Server{
+	s := &Server{
 		key:          key,
 		path:         "",
 		queueTTL:     30 * time.Second,
@@ -112,6 +136,10 @@ func NewServer(key string) *Server {
 		queues:       make(map[string][]queuedMsg),
 		disc:         make(map[string]map[string]time.Time),
 	}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 // HandleID GET /{path}{key}/id → 随机 id（peerjs API 兼容）。
@@ -131,6 +159,12 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	if key != s.key {
 		s.wsError(w, "Invalid key provided")
+		return
+	}
+	// token 白名单：空名单 = 不限制（默认）；非空则 token 必须在名单内。
+	// 见 WithTokenWhitelist 的坑说明（任意 token 可冒充节点收信令）。
+	if len(s.tokenWhitelist) > 0 && !s.tokenWhitelist[token] {
+		s.wsError(w, "Invalid token provided")
 		return
 	}
 

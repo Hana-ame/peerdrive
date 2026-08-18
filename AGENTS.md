@@ -11,8 +11,10 @@
 ## 核心事实（30 秒版）
 
 - **互联层 = PeerJS 信令 + WebRTC DataChannel**：`back/peerjs/` 是独立模块
-  （`github.com/Hana-ame/go-peerjs`，主 go.mod `replace` 引用）；`internal/service/peerjs_service.go`
-  是业务用法（文件服务 + 节点互联）；发现：`service/mqtt_discovery.go`（公共 broker）或
+  （module 路径 `github.com/Hana-ame/go-peerjs`，主 go.mod `replace` 指向本地
+  `./peerjs`；独立 repo 未创建，改动随主 repo 提交即可）；`internal/service/peerjs_service.go`
+  是业务用法（文件服务 + 节点互联，`internal/transport/peerjs_service.go`）；发现：
+  `service/mqtt_discovery.go`（公共 broker）或
   `service/http_discovery.go` + `internal/signalserver/`（自托管，`cmd/peerserver` 独立二进制，
   `PEERDRIVE_DISCOVER_URL` 设置后优先于 MQTT）
 - **帧协议 verb**（WS/WebRTC 同一套）：`req/meta/data/done/err`（文件拉取）+ `create/upload/list/info/delete/sync`
@@ -27,11 +29,12 @@
   WebRTC DataChannel 从 Node 端加载 URL 资源渲染 img/video。三入口：react / vanilla
   （IIFE+CDN）/ node（createPeerMediaServer）。npm 依赖用 `github:Hana-ame/peerdrive-media#v0.1.0`
   （`@v0.1.0` 语法 npm 不认）。**改动后必须**：`npm run build`（dist 入库）+
-  `npm test`（17）+ 浏览器 E2E（`node ~/.claude/skills/playwright-test/scripts/test-runner.mjs
+  `npm test`（20）+ 浏览器 E2E（`node ~/.claude/skills/playwright-test/scripts/test-runner.mjs
   test/e2e-browser.mjs`，10 项，本机 Firefox）+ 同步独立 repo 镜像
   （`/tmp/opencode/peerdrive-media`，cp 后 commit+push+`git tag -f v0.1.0`）。
   协议：connection 级串行、raw 序列化、64KB 块、背压 4MB。坑与浏览器 E2E
-  七连（含串行槽空占三入口）见 REFACTOR.md §3.11。
+  七连（含串行槽空占三入口）见 REFACTOR.md §3.11；keepalive（断线 5s/15s
+  阈值）与排队 abort 立即 settle 见 REFACTOR.md §3.12 第 4/5 项。
 - 编码规范：关键/易错/非显然代码旁必须写「为什么这么写」的注释；测试函数必须标注「发现背景」（全局 AGENTS.md 硬性要求）
 
 ## 构建与验证
@@ -40,11 +43,14 @@
 cd back
 go build -tags nosqlite ./...     # 必须 -tags nosqlite（双 SQLite 驱动 CGO 冲突）
 go test -tags nosqlite ./...      # 单元/包测试
-cd peerjs && go test ./... -count=1 -race   # peerjs 模块（独立 go.mod）
-# 集成测试（真实公共信令 0.peerjs.com + 公共 broker，需外网+代理）：
-cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1 -v
-#   ⚠️ 必须 -p 1 串行：公共信令上多组测试并行会互相干扰
+cd peerjs && go test ./... -count=1 -race   # peerjs 模块（独立 go.mod，改动需同步独立 repo）
+# 集成测试（脱外网：TestMain 起全局自托管信令 + 同机 WebRTC，无需代理）：
+cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1
+#   ⚠️ 必须 -p 1 串行：多组测试共享全局自托管信令，并行会互相干扰
+#   外网测试显式门控：PEERDRIVE_MQTT_TEST=1（公共 broker）/ PEERDRIVE_LIVE_TEST=1（线上）
+#   无 UDP 沙箱（docker 默认）跳过互联类：PEERDRIVE_SKIP_RTC=1
 # go 命令需代理：HTTPS_PROXY=http://172.29.80.1:10809 GOPROXY=https://goproxy.cn,direct
+# （cloudcone 443 例外：直连）
 ```
 
 ## 关键配置（env）

@@ -42,7 +42,7 @@ class MockPeer {
 
 mock.module('peerjs', { namedExports: { Peer: MockPeer } })
 
-const { PeerMediaClient } = await import('../src/core.js')
+const { PeerMediaClient, KEEPALIVE_TIMEOUT } = await import('../src/core.js')
 // Node 无 URL.createObjectURL（浏览器 API），resolve 路径需 stub
 globalThis.URL.createObjectURL = () => 'blob:mock'
 
@@ -151,4 +151,75 @@ test('abort 的监听在触发后即移除（防 listener 泄漏）', async () =
   // abort 触发后监听应已移除：再 abort 一次不应报错/重复触发
   ac.abort() // 二次 abort：no-op，不抛异常即通过
   assert.equal(MockPeer.last.conns.length, 1)
+})
+
+test('排队中 abort 立即 reject，不等待前面请求完成（串行槽不被空占）', async () => {
+  // 发现背景（代码审阅 2026-08-18 第 5 项优化）：排队条目不挂 abort
+  // 监听，signal 取消后 Promise 要等 flush 到该条目才 settle——串行
+  // 协议下前面的大文件请求可能让取消的组件等很久。
+  const { client, openConn, getConn } = makeClient()
+  const ac = new AbortController()
+  const pA = client.load('http://x/a', { peer: 'n' })      // 触发连接建立
+  const pB = client.load('http://x/b', { peer: 'n', signal: ac.signal }) // 排队
+  openConn() // 连接就绪 → flush → A 发出，B 仍排队（A 在途）
+  const conn = getConn()
+  assert.equal(conn.sent.length, 1, 'A 在途，B 排队')
+  const reqA = JSON.parse(conn.sent[0]).reqId
+
+  ac.abort() // B 在排队中取消：必须立即 settle
+  await assert.rejects(pB, (e) => e.name === 'AbortError')
+  assert.equal(conn.sent.length, 1, 'B 取消后不得发出（队列已移除）')
+
+  // A 正常完成，后续请求不受影响
+  respondOk(conn, reqA, [new Uint8Array([1])])
+  const res = await pA
+  assert.equal(res.size, 1)
+})
+
+test('keepalive：ping 帧不干扰业务，收到任何帧刷新活跃', async () => {
+  // 发现背景（代码审阅 2026-08-18 第 4 项优化）：keepalive 帧是连接级
+  // 流量（无 reqId），不得被当作业务响应处理（pending 查不到 → 误 flush）。
+  const { client, openConn, getConn } = makeClient()
+  const pA = client.load('http://x/a', { peer: 'n' })
+  openConn()
+  const conn = getConn()
+  const reqA = JSON.parse(conn.sent[0]).reqId
+
+  // Node 端 ping 到达：只刷新活跃，业务请求照常
+  conn.emit('data', JSON.stringify({ type: 'ping' }))
+  respondOk(conn, reqA, [new Uint8Array([5, 6])])
+  const res = await pA
+  assert.equal(res.size, 2)
+  // 浏览器侧发出的第一帧应是 url 请求（keepalive 定时器 5s 后才发 ping，
+  // 测试不驱动定时器，因此 sent 里不应出现 ping）
+  assert.ok(!conn.sent.some((s) => typeof s === 'string' && s.includes('ping')))
+})
+
+test('keepalive：超时无帧 → teardown（closed），下次 load 重建连接', async () => {
+  // 发现背景（代码审阅 2026-08-18 第 4 项优化）：无 STUN 时断线靠 close
+  // 事件兜底可达数十秒；keepalive 15s 超时主动 teardown 加速失败感知。
+  // 用 mock.timers 驱动 setInterval + Date（tick 会推进 Date.now()，
+  // keepalive 判活依赖它）。注意：mock.timers 必须在 openConn（start
+  // keepalive 的 setInterval）之前启用，否则定时器是真实的、tick 无效。
+  const { client, openConn, getConn } = makeClient()
+  mock.timers.enable()
+  try {
+    const pA = client.load('http://x/a', { peer: 'n' })
+    openConn()
+    const conn = getConn()
+    // 推进 16s：期间无任何帧到达 → keepalive 超时 → teardown
+    mock.timers.tick(KEEPALIVE_TIMEOUT + 1000)
+    await assert.rejects(pA, /keepalive timeout/)
+  } finally {
+    mock.timers.reset()
+  }
+  // teardown 置 closed → 再次 load 必须重建连接（新 Peer + 新 conn）
+  const pB = client.load('http://x/b', { peer: 'n' })
+  assert.ok(MockPeer.last, 'closed 槽位重建应 new Peer')
+  MockPeer.last.emit('open')
+  const conn2 = MockPeer.last.conns[0]
+  conn2.emit('open')
+  respondOk(conn2, JSON.parse(conn2.sent[0]).reqId, [new Uint8Array([3])])
+  const res = await pB
+  assert.equal(res.size, 1)
 })

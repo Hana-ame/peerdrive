@@ -4,9 +4,6 @@ package integration
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +14,6 @@ import (
 	"peerdrive/internal/config"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/transport"
-	"peerdrive/internal/signalserver"
 )
 
 // requireInitDB 内存 DB 初始化（每次调用重置，防跨测试污染）。
@@ -29,28 +25,13 @@ func requireInitDB(t *testing.T) {
 }
 
 // TestSelfHostedSignalAndDiscover 自托管信令 + 内置发现全链路：
-//   - 本地起信号服务器（PeerJS 协议 + /discover API，替代 0.peerjs.com + MQTT）
+//   - 全局自托管信号服务器（PeerJS 协议 + /discover API，见 integration_test.go
+//     TestMain，替代 0.peerjs.com + MQTT）
 //   - 两个节点信令指向自托管，发现走 HTTP（无任何外部服务）
 //   - B 仅靠发现互联 A 并拉文件
 //
 // 发现背景：功能需求——自托管后 PeerJS 信令与房间发现都归自己管。
 func TestSelfHostedSignalAndDiscover(t *testing.T) {
-	// 自托管信令服务器
-	ss := signalserver.NewServer("testkey")
-	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/peerjs"):
-			ss.HandleWS(w, r)
-		case strings.HasSuffix(r.URL.Path, "/announce"):
-			ss.HandleAnnounce(w, r)
-		case strings.HasSuffix(r.URL.Path, "/nodes"):
-			ss.HandleNodes(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer hs.Close()
-
 	// 测试文件
 	storageA := t.TempDir()
 	content := []byte("self-hosted-signal-and-discover")
@@ -59,17 +40,17 @@ func TestSelfHostedSignalAndDiscover(t *testing.T) {
 	idA := randID("sh-a")
 	idB := randID("sh-b")
 
-	// newService 默认连公共云；这里手工构造指向自托管
+	// newService 指向全局自托管信令；这里手工构造指向自托管发现 API
 	newSelfHosted := func(id, storage string) *transport.PeerJSService {
 		requireInitDB(t)
 		cfg := config.Load()
 		cfg.PeerJSEnable = true
 		cfg.PeerJSID = id
-		cfg.PeerJSHost, cfg.PeerJSPort = splitHostPort(hs.URL)
+		cfg.PeerJSHost, cfg.PeerJSPort = splitHostPort(selfHostedURL)
 		cfg.PeerJSSecure = false
 		cfg.PeerJSKey = "testkey"
 		cfg.BTDHTEnabled = false
-		cfg.DiscoverURL = hs.URL
+		cfg.DiscoverURL = selfHostedURL
 		cfg.MQTTCollections = hash
 		svc := transport.NewPeerJSService(cfg, storage)
 		svc.Start()
@@ -96,18 +77,7 @@ func TestSelfHostedSignalAndDiscover(t *testing.T) {
 // 连自托管服务器完成 WebRTC 数据面互通（协议与公共云一致）。
 // 发现背景：功能需求——节点端零改动（仅改 host 配置）切到自托管。
 func TestSelfHostedPeerJSSignal(t *testing.T) {
-	ss := signalserver.NewServer("testkey")
-	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/peerjs"):
-			ss.HandleWS(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer hs.Close()
-
-	host, port := splitHostPort(hs.URL)
+	host, port := splitHostPort(selfHostedURL)
 	// 两个 peerjs 客户端连自托管（协议兼容性验证）
 	pA := peerjs.NewPeer("sp-a", peerjsOptions(host, port))
 	pB := peerjs.NewPeer("sp-b", peerjsOptions(host, port))
@@ -146,11 +116,4 @@ func peerjsOptions(host, port string) peerjs.Options {
 	opts.Secure = false
 	opts.Key = "testkey"
 	return opts
-}
-
-// splitHostPort 从 httptest URL 拆 host/port。
-func splitHostPort(url string) (string, string) {
-	trimmed := strings.TrimPrefix(url, "http://")
-	i := strings.LastIndex(trimmed, ":")
-	return trimmed[:i], trimmed[i+1:]
 }

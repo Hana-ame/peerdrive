@@ -39,13 +39,27 @@ import (
 )
 
 // dcReq 文件拉取请求帧（出站角色发起，入站角色应答）。
+// Trace 为回源链路（2026-08-18，防环）：serveFile 经多源路由回源到其它
+// 节点时带上「已经过的节点链」，转发路径上的节点发现自己在链中即拒绝
+// （A←→B 互连时 B 请求 A 没有的文件 → A 回源 B → B 回源 A 死循环）。
+// 根请求（HTTP 下载/浏览器拉取）trace 为空；旧对端忽略该字段（omitempty
+// 兼容）。传播：serveFile 用 context 携带（TraceKey），PeerSource.Open
+// 从 ctx 取出追加到 OpenStreamFrom 的请求帧。
 type dcReq struct {
-	Type   string `json:"type"`
-	Hash   string `json:"hash"`
-	Offset int64  `json:"offset"`
-	Size   int64  `json:"size"`
-	ReqID  string `json:"reqId,omitempty"`
+	Type   string   `json:"type"`
+	Hash   string   `json:"hash"`
+	Offset int64    `json:"offset"`
+	Size   int64    `json:"size"`
+	ReqID  string   `json:"reqId,omitempty"`
+	Trace  []string `json:"trace,omitempty"`
 }
+
+// traceCtxKey context key（导出 TraceKey 供 source 包读取，类型私有防误用）。
+type traceCtxKey struct{}
+
+// TraceKey 回源链路 context key：值为 []string（已经过的节点 id 链，
+// 不含当前节点——当前节点由调用方 append 后传给下游）。
+var TraceKey = traceCtxKey{}
 
 // dcResp 通用响应帧：拉取响应（meta/data/done/err）与文件索引 verb 响应
 // （created/uploaded/ack/list-resp/info-resp/deleted/sync-resp）共用。
@@ -161,6 +175,9 @@ func (s *PeerJSService) bindConn(c Session) {
 	s.pending[c] = st
 	s.pendingMu.Unlock()
 	go s.uploadWorker(c, st)
+	// 转发写 worker 与上传 worker 分离（2026-08-18）：大上传 Complete
+	// （fsync + hashFile）不再阻塞同连接转发隧道，见 inbound.go fwdWorker。
+	go s.fwdWorker(c, st)
 
 	c.OnMessage(func(msg peerjs.Frame) {
 		if msg.IsText {

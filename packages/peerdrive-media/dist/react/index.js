@@ -48,13 +48,13 @@ var _ = o.Peer || s.Peer || s.default && s.default.Peer, v = {
 	secure: !0,
 	key: "peerjs",
 	path: "/"
-};
-function y(e) {
+}, y = 5e3;
+function b(e) {
 	return `${e.host}:${e.port}:${e.key}:${e.path || "/"}`;
 }
-var b = class {
+var x = class {
 	constructor(e, t) {
-		this.peerId = e, this.signaling = t, this.peer = null, this.conn = null, this.ready = !1, this.closed = !1, this.queue = [], this.pending = /* @__PURE__ */ new Map(), this.curReqId = null;
+		this.peerId = e, this.signaling = t, this.peer = null, this.conn = null, this.ready = !1, this.closed = !1, this.queue = [], this.pending = /* @__PURE__ */ new Map(), this.curReqId = null, this.lastActive = 0, this.kaTimer = null;
 	}
 	request(e, t, n, r) {
 		let i = {
@@ -64,7 +64,17 @@ var b = class {
 			signal: r
 		};
 		if (!this.ready || this.closed || this.pending.size > 0) {
-			this.queue.push(i), !this.opening && !this.closed && (this.opening = !0, this.open());
+			if (this.queue.push(i), !this.opening && !this.closed && (this.opening = !0, this.open()), r) {
+				if (r.aborted) {
+					this.queue.pop(), n(new DOMException("aborted", "AbortError"));
+					return;
+				}
+				let e = () => {
+					let t = this.queue.indexOf(i);
+					t >= 0 && (this.queue.splice(t, 1), n(new DOMException("aborted", "AbortError"))), r.removeEventListener("abort", e);
+				};
+				r.addEventListener("abort", e);
+			}
 			return;
 		}
 		this.send(i);
@@ -94,11 +104,26 @@ var b = class {
 				serialization: "raw"
 			});
 			this.conn = e, e.on("open", () => {
-				clearTimeout(r), this.opening = !1, this.ready = !0, this.flush();
+				clearTimeout(r), this.opening = !1, this.ready = !0, this.startKeepalive(), this.flush();
 			}), e.on("data", (e) => this.handleData(e)), e.on("close", () => this.teardown("connection closed")), e.on("error", (e) => {
 				!this.ready && !this.closed && this.failAll(`connection error: ${e?.type || e}`);
 			});
 		});
+	}
+	startKeepalive() {
+		this.lastActive = Date.now(), this.kaTimer = setInterval(() => {
+			if (this.closed) {
+				clearInterval(this.kaTimer);
+				return;
+			}
+			if (Date.now() - this.lastActive > 15e3) {
+				clearInterval(this.kaTimer), this.teardown("keepalive timeout");
+				return;
+			}
+			try {
+				this.conn.send(JSON.stringify({ type: "ping" }));
+			} catch {}
+		}, y);
 	}
 	send(e) {
 		if (this.closed) {
@@ -132,7 +157,7 @@ var b = class {
 		}
 	}
 	handleData(e) {
-		if (m(e)) {
+		if (this.lastActive = Date.now(), m(e)) {
 			let t = this.curReqId ? this.pending.get(this.curReqId) : null;
 			if (!t) return;
 			let n = h(e);
@@ -140,7 +165,7 @@ var b = class {
 			return;
 		}
 		let t = p(e);
-		if (!t) return;
+		if (!t || t.type === "ping") return;
 		let n = this.pending.get(t.reqId);
 		if (!n) {
 			this.flush();
@@ -164,7 +189,7 @@ var b = class {
 		}
 	}
 	failAll(e) {
-		this.closed = !0, this.opening = !1;
+		this.closed = !0, this.opening = !1, this.kaTimer &&= (clearInterval(this.kaTimer), null);
 		let t = /* @__PURE__ */ Error(`peerdrive-media: ${e}`);
 		for (let [, e] of this.pending) e.cleanup(), e.reject(t);
 		this.pending.clear();
@@ -180,27 +205,27 @@ var b = class {
 		} catch {}
 		this.peer = null, this.conn = null;
 	}
-}, x = new class {
+}, S = new class {
 	constructor() {
 		this.slots = /* @__PURE__ */ new Map();
 	}
 	async load(e, { peer: t, signaling: n = v, signal: r } = {}) {
 		if (!t) throw Error("peerdrive-media: peer (node peer id) is required");
 		if (!e || typeof e != "string") throw Error("peerdrive-media: url is required");
-		let i = `${y(n)}|${t}`, a = this.slots.get(i);
-		if ((!a || a.closed) && (a = new b(t, n), this.slots.set(i, a)), r?.aborted) throw new DOMException("aborted", "AbortError");
+		let i = `${b(n)}|${t}`, a = this.slots.get(i);
+		if ((!a || a.closed) && (a = new x(t, n), this.slots.set(i, a)), r?.aborted) throw new DOMException("aborted", "AbortError");
 		return new Promise((t, n) => {
 			a.request(e, t, n, r);
 		});
 	}
 	dispose(e, t = v) {
-		let n = `${y(t)}|${e}`, r = this.slots.get(n);
+		let n = `${b(t)}|${e}`, r = this.slots.get(n);
 		r && (r.failAll("disposed"), this.slots.delete(n));
 	}
 }();
 //#endregion
 //#region src/react/usePeerMedia.js
-function S({ url: e, peer: t, signaling: n } = {}) {
+function C({ url: e, peer: t, signaling: n } = {}) {
 	let o = d(), s = t || o.peer, c = n || o.signaling, [l, u] = a({
 		status: "idle",
 		src: null,
@@ -223,7 +248,7 @@ function S({ url: e, peer: t, signaling: n } = {}) {
 			src: null,
 			mime: null,
 			error: null
-		}), x.load(e, {
+		}), S.load(e, {
 			peer: s,
 			signaling: c,
 			signal: t.signal
@@ -260,13 +285,13 @@ function S({ url: e, peer: t, signaling: n } = {}) {
 }
 //#endregion
 //#region src/react/components.jsx
-function C(e) {
+function w(e) {
 	return typeof e == "string" && e.startsWith("image/");
 }
-function w(e) {
+function T(e) {
 	return typeof e == "string" && e.startsWith("video/");
 }
-function T(e, { loading: t, error: n }) {
+function E(e, { loading: t, error: n }) {
 	return e.status === "loading" ? t ?? /* @__PURE__ */ c("span", {
 		className: "pm-loading",
 		children: "loading…"
@@ -275,8 +300,8 @@ function T(e, { loading: t, error: n }) {
 		children: String(e.error?.message || e.error)
 	}) : null;
 }
-function E({ url: e, peer: t, signaling: n, alt: r = "", loading: i, error: a, ...o }) {
-	let s = S({
+function D({ url: e, peer: t, signaling: n, alt: r = "", loading: i, error: a, ...o }) {
+	let s = C({
 		url: e,
 		peer: t,
 		signaling: n
@@ -285,13 +310,13 @@ function E({ url: e, peer: t, signaling: n, alt: r = "", loading: i, error: a, .
 		src: s.src,
 		alt: r,
 		...o
-	}) : T(s, {
+	}) : E(s, {
 		loading: i,
 		error: a
 	});
 }
-function D({ url: e, peer: t, signaling: n, controls: r = !0, loading: i, error: a, ...o }) {
-	let s = S({
+function O({ url: e, peer: t, signaling: n, controls: r = !0, loading: i, error: a, ...o }) {
+	let s = C({
 		url: e,
 		peer: t,
 		signaling: n
@@ -300,22 +325,22 @@ function D({ url: e, peer: t, signaling: n, controls: r = !0, loading: i, error:
 		src: s.src,
 		controls: r,
 		...o
-	}) : T(s, {
+	}) : E(s, {
 		loading: i,
 		error: a
 	});
 }
-function O({ url: e, peer: t, signaling: n, loading: r, error: i, imgProps: a = {}, videoProps: o = {} }) {
-	let s = S({
+function k({ url: e, peer: t, signaling: n, loading: r, error: i, imgProps: a = {}, videoProps: o = {} }) {
+	let s = C({
 		url: e,
 		peer: t,
 		signaling: n
 	});
-	return s.status === "ready" ? C(s.mime) ? /* @__PURE__ */ c("img", {
+	return s.status === "ready" ? w(s.mime) ? /* @__PURE__ */ c("img", {
 		src: s.src,
 		alt: "",
 		...a
-	}) : w(s.mime) ? /* @__PURE__ */ c("video", {
+	}) : T(s.mime) ? /* @__PURE__ */ c("video", {
 		src: s.src,
 		controls: !0,
 		...o
@@ -325,10 +350,10 @@ function O({ url: e, peer: t, signaling: n, loading: r, error: i, imgProps: a = 
 		target: "_blank",
 		rel: "noreferrer",
 		children: e
-	}) : T(s, {
+	}) : E(s, {
 		loading: r,
 		error: i
 	});
 }
 //#endregion
-export { v as DEFAULT_SIGNALING, E as PeerImage, O as PeerMedia, l as PeerMediaContext, u as PeerMediaProvider, D as PeerVideo, x as defaultClient, S as usePeerMedia };
+export { v as DEFAULT_SIGNALING, D as PeerImage, k as PeerMedia, l as PeerMediaContext, u as PeerMediaProvider, O as PeerVideo, S as defaultClient, C as usePeerMedia };

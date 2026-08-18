@@ -108,6 +108,10 @@ func main() {
 			}
 		}
 		router.SetSourceManager(mgr)
+		// serveFile 多源路由（第 3 项优化 2026-08-18）：对端 req 未命中本地
+		// 时回源对端/URL 模板（trace 防环见 dcReq.Trace）。HTTP 下载等根
+		// 请求已走 mgr，这里复用同一实例保持路由顺序一致。
+		peerjsSvc.SetFileRouter(mgr)
 	}
 	log.LogInfo("main: setting up HTTP router")
 	r := router.SetupRouter(cfg)

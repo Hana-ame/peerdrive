@@ -31,6 +31,15 @@ export const DEFAULT_SIGNALING = {
   path: '/',
 }
 
+// keepalive 参数：无 STUN 环境下 WebRTC 断线无 close 事件（连接级 error
+// 在 ready 后被忽略，见 open() 注释），真断线要等 SCTP 超时（数十秒）。
+// 两端（浏览器/Node）每 KEEPALIVE_INTERVAL 发一次 ping 帧制造流量；
+// 收到**任何**帧（含 ping）刷新 lastActive；超过 KEEPALIVE_TIMEOUT 无帧
+// → teardown（槽位 closed，下次 load 重建，失败感知从数十秒降到秒级）。
+// 发现背景：代码审阅 2026-08-18（第 4 项优化）。
+export const KEEPALIVE_INTERVAL = 5000
+export const KEEPALIVE_TIMEOUT = 15000
+
 // signalingKey 连接缓存键：同信令配置 + 同 peerId 共享一条连接。
 function signalingKey(sig) {
   return `${sig.host}:${sig.port}:${sig.key}:${sig.path || '/'}`
@@ -48,6 +57,8 @@ class ConnectionSlot {
     this.queue = []           // 连接就绪前的 load 等待者（{url, resolve, reject}）
     this.pending = new Map()  // reqId → { resolve, reject, chunks, mime, size, current }
     this.curReqId = null      // 最近 meta 帧的 reqId（二进制块归属）
+    this.lastActive = 0       // 最近收到帧的时间（keepalive 判活）
+    this.kaTimer = null       // keepalive 定时器（conn open 后启动）
   }
 
   // request 在连接上发起一次加载。连接未就绪时排队，就绪后按序发送。
@@ -70,6 +81,25 @@ class ConnectionSlot {
       if (!this.opening && !this.closed) {
         this.opening = true
         this.open()
+      }
+      // 排队中 abort：立即从队列移除并 reject——否则条目在队列里要等
+      // 前面的请求完成才被 send() 检查到 signal.aborted，Promise 悬挂到
+      // 上游处理完（串行协议下可能很久）。发现背景：代码审阅 2026-08-18。
+      if (signal) {
+        if (signal.aborted) {
+          this.queue.pop()
+          reject(new DOMException('aborted', 'AbortError'))
+          return
+        }
+        const onAbort = () => {
+          const i = this.queue.indexOf(entry)
+          if (i >= 0) {
+            this.queue.splice(i, 1)
+            reject(new DOMException('aborted', 'AbortError'))
+          }
+          signal.removeEventListener('abort', onAbort)
+        }
+        signal.addEventListener('abort', onAbort)
       }
       return
     }
@@ -120,6 +150,7 @@ class ConnectionSlot {
         clearTimeout(timeout)
         this.opening = false
         this.ready = true
+        this.startKeepalive()
         this.flush()
       })
       conn.on('data', (data) => this.handleData(data))
@@ -134,6 +165,22 @@ class ConnectionSlot {
         if (!this.ready && !this.closed) this.failAll(`connection error: ${err?.type || err}`)
       })
     })
+  }
+
+  // startKeepalive 启动断线感知定时器（conn open 后调用）。
+  // 见 KEEPALIVE_INTERVAL/TIMEOUT 注释：任何帧（含 Node 端 ping）刷新
+  // lastActive；无帧超时 → teardown。定时器在 failAll/teardown 里清理。
+  startKeepalive() {
+    this.lastActive = Date.now()
+    this.kaTimer = setInterval(() => {
+      if (this.closed) { clearInterval(this.kaTimer); return }
+      if (Date.now() - this.lastActive > KEEPALIVE_TIMEOUT) {
+        clearInterval(this.kaTimer)
+        this.teardown('keepalive timeout')
+        return
+      }
+      try { this.conn.send(JSON.stringify({ type: 'ping' })) } catch { /* 连接已死，超时兜底 */ }
+    }, KEEPALIVE_INTERVAL)
   }
 
   send(entry) {
@@ -185,6 +232,8 @@ class ConnectionSlot {
   }
 
   handleData(data) {
+    // 任何帧都刷新 keepalive 活跃度（含 ping——对端活着即视为活跃）
+    this.lastActive = Date.now()
     if (isBinaryFrame(data)) {
       // 二进制块：属于最近 meta 帧的请求（Node 端逐请求串行回块）
       const p = this.curReqId ? this.pending.get(this.curReqId) : null
@@ -196,6 +245,7 @@ class ConnectionSlot {
     }
     const msg = parseFrame(data)
     if (!msg) return
+    if (msg.type === 'ping') return // keepalive 帧：只刷新活跃，无业务语义
     const p = this.pending.get(msg.reqId)
     if (!p) {
       // 响应迟到（已 abort/清理）：串行槽仍被本请求占用（curReqId 可能
@@ -241,6 +291,7 @@ class ConnectionSlot {
     // 连接级失败：reject 全部在途请求与排队等待者，然后清理槽位。
     this.closed = true
     this.opening = false
+    if (this.kaTimer) { clearInterval(this.kaTimer); this.kaTimer = null }
     const err = new Error(`peerdrive-media: ${msg}`)
     for (const [, p] of this.pending) { p.cleanup(); p.reject(err) }
     this.pending.clear()

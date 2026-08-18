@@ -71,9 +71,16 @@ func (s *PeerSource) Available(ctx context.Context) bool {
 }
 
 // Open 依次尝试在线对端，第一个成功的流返回。
+// ctx 可携带回源链路（transport.TraceKey，serveFile 回源时注入）——
+// 透传给 OpenStreamFrom 防环（A←→B 互连回源死循环，2026-08-18 第 3 项
+// 优化）。根请求（HTTP 下载等）ctx 无该值 → trace 为 nil。
 func (s *PeerSource) Open(ctx context.Context, hash string, offset, size int64) (io.ReadCloser, error) {
 	if err := validHash(hash); err != nil {
 		return nil, err
+	}
+	var trace []string
+	if t, ok := ctx.Value(transport.TraceKey).([]string); ok {
+		trace = t
 	}
 	conns := s.svc.Connections()
 	var lastErr error
@@ -87,7 +94,7 @@ func (s *PeerSource) Open(ctx context.Context, hash string, offset, size int64) 
 			// 该 peer 已有流在进行（连接级 expect 单槽）——跳过，试下一个
 			continue
 		}
-		r, err := s.svc.OpenStream(pid, hash, offset, size)
+		r, err := s.svc.OpenStreamFrom(pid, hash, offset, size, trace)
 		if err == nil {
 			// 流结束才解锁（reader.Close 或读完）——包装一层
 			return &peerReadCloser{r: r, mu: mu}, nil

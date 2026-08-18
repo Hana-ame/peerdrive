@@ -42,6 +42,12 @@ type Connection struct {
 
 	peer *Peer
 
+	// handlerMu 保护 onOpen/onMessage/onClose：注册方（业务 goroutine 调
+	// OnOpen/OnMessage/OnClose）与触发方（attach 注册的 pion 回调闭包在
+	// PC goroutine 读）并发——-race 必现的读写竞争（发现背景：自托管集成
+	// 测试 -race 连跑必挂，真实网络下时序慢不易暴露）。回调体直接调用，
+	// 闭包内只取快照。
+	handlerMu sync.Mutex
 	onOpen    func(*Connection)
 	onMessage func(Frame)
 	onClose   func(*Connection)
@@ -54,13 +60,25 @@ type Connection struct {
 func (c *Connection) Done() <-chan struct{} { return c.done }
 
 // OnOpen 注册连接就绪（DataChannel open）回调。
-func (c *Connection) OnOpen(f func(*Connection)) { c.onOpen = f }
+func (c *Connection) OnOpen(f func(*Connection)) {
+	c.handlerMu.Lock()
+	c.onOpen = f
+	c.handlerMu.Unlock()
+}
 
 // OnMessage 注册数据消息回调（Frame：文本/二进制帧）。
-func (c *Connection) OnMessage(f func(Frame)) { c.onMessage = f }
+func (c *Connection) OnMessage(f func(Frame)) {
+	c.handlerMu.Lock()
+	c.onMessage = f
+	c.handlerMu.Unlock()
+}
 
 // OnClose 注册连接关闭回调。
-func (c *Connection) OnClose(f func(*Connection)) { c.onClose = f }
+func (c *Connection) OnClose(f func(*Connection)) {
+	c.handlerMu.Lock()
+	c.onClose = f
+	c.handlerMu.Unlock()
+}
 
 // Open 返回 DataChannel 是否已就绪。
 func (c *Connection) Open() bool {
@@ -170,8 +188,11 @@ func (c *Connection) Close() {
 		}
 		c.peer.forgetConnection(c.ID)
 		close(c.done)
-		if c.onClose != nil {
-			c.onClose(c)
+		c.handlerMu.Lock()
+		h := c.onClose
+		c.handlerMu.Unlock()
+		if h != nil {
+			h(c)
 		}
 	})
 }
@@ -282,13 +303,21 @@ func (c *Connection) attach(dc DataChannel) {
 		}
 	})
 	dc.OnOpen(func() {
-		if c.onOpen != nil {
-			c.onOpen(c)
+		// 快照后回调：onOpen 可能晚于 open 事件注册（attach 时仍为 nil），
+		// 只读快照避免与 OnOpen 注册并发写（handlerMu 保护）。
+		c.handlerMu.Lock()
+		h := c.onOpen
+		c.handlerMu.Unlock()
+		if h != nil {
+			h(c)
 		}
 	})
 	dc.OnMessage(func(f Frame) {
-		if c.onMessage != nil {
-			c.onMessage(f)
+		c.handlerMu.Lock()
+		h := c.onMessage
+		c.handlerMu.Unlock()
+		if h != nil {
+			h(f)
 		}
 	})
 	// 远端主动关闭 dc 时清理本端（Close 幂等）：否则本端连接悬挂，

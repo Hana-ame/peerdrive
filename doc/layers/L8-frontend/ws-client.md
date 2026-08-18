@@ -146,7 +146,7 @@ pumpBinary（ws.js:257）：
 - 中途断开：`send` 抛 `Error('ws: closed during upload')` → `fail()` 删 pending 并 reject。
 - `field`/`path` 可换：BT torrent 上传用 `field='torrent'` + `path='/bt/torrent'`。
 
-### 下载帧序列（download，ws.js:308）
+### 下载帧序列（download/downloadStream/stat，ws.js）
 
 `download(hash, offset=0, size=-1)` 发送 `{type:'req', hash, offset, size, reqId}`，
 pending 记录 `kind:'download'`；服务端按 64KB 块回（与 WebRTC DataChannel 同一套）：
@@ -164,8 +164,18 @@ pending 记录 `kind:'download'`；服务端按 64KB 块回（与 WebRTC DataCha
 ```
 
 - 前端按 data 头声明 size 收集（handleBinary），**done 帧才 resolve** 为 Uint8Array。
-- `downloadToFile(hash, filename)`：download → Blob → `<a download>` 模拟点击 →
-  5s 后 `revokeObjectURL`（延迟 revoke 防下载中断）。
+- **`downloadStream(hash, offset, size)`（2026-08-18，第 1 项优化）**：返回
+  ReadableStream（pending 记 `kind:'stream'`）——data 块边收边 `controller.enqueue`
+  （每块完成即投递，不等 done），done → `controller.close()`，err → `controller.error()`
+  （未完成即异常），cancel → 清 pending + 清 binaryExpect。大文件**零全量内存**：
+  旧 download() 把全部块组装成单个 Uint8Array（8GB 文件 OOM），流式 API 是
+  downloadToFile 的落盘通道。
+- **`stat(hash)`（2026-08-18）**：发 `req`（offset=0, size=0）→ meta 帧的 `total`
+  即文件大小（size=0 语义=只回 meta 不发 data，服务端约定）。用于预览前探大小。
+- **`downloadToFile(hash, filename)`（2026-08-18 重写）**：优先 File System Access
+  API（`showSaveFilePicker` + `createWritable` + `for await (downloadStream)` 流式写，
+  边下边落盘）；无 API（非 Chromium）回退旧 Blob + `<a download>`（5s 后 revoke）。
+  前端预览（api.js getBlobUrl）>200MB 抛 `TOO_LARGE` 不再整读进内存。
 
 ### __test 测试钩子（ws.js:337）
 
@@ -232,10 +242,15 @@ ws.js ──WebSocket──▶ back/internal/transport/ws_session.go（/ws/peer�
 9. **token 双来源**：URL fragment token（`peerdrive_auth_token`）恒生效；设置页
    legacy token（`peerdrive_auth_key`）需开关 `peerdrive_auth_header_enabled`——
    两者同时存在时 fragment 优先（api.js getAuthToken 同语义）。
+10. **downloadStream 的 cancel 必须清理 pending + binaryExpect**（2026-08-18）：
+    reader.cancel() 时服务端仍在发后续块——不清理会让迟到帧挂到下一个请求头上
+    （单槽 binaryExpect 被旧请求占据）。测试：ws.test.js「stream cancel 清理」。
+11. **getBlobUrl 200MB 预览阈值**（2026-08-18，api.js）：预览 objectURL 全量组装，
+    大文件先 `ws.stat` 探大小，>200MB 抛 `err.code='TOO_LARGE'`（页面回退到下载
+    提示）；同 hash 并发预览请求 in-flight 去重（blobUrlInflight Map，共享一次
+    下载）。测试：ws.test.js stat 探大小 + api 侧阈值。
 
-## 测试（8 单测，`scripts/test-layers.sh` L8 段；前端整体 32 项 × 4 文件）
-
-> 命令：`cd front && npm test`
+## 测试（`cd front && npm test`，全量 36 项 × 4 文件）
 
 ### 单元测试（front/tests/ws.test.js）
 
@@ -253,6 +268,10 @@ Mock socket 直接注入 `ws.__test._setSock`，`feedText` 手动喂文本帧、
 | `admin-bin：二进制文件流响应收集为 Uint8Array` | 文件流响应 |
 | `连接关闭 → 全部 pending reject` | 断线清理（先挂 catch 再 onclose，避免 unhandled rejection） |
 | `upload：声明帧 + 二进制块按 BIN_CHUNK 切片上传（FileReader 回退路径）` | 150KB 文件分 3 块（64+64+22KB），FileReader 回退分支回归（BIN_CHUNK ReferenceError 修复） |
+| `stat：size=0 请求回 meta.total`（2026-08-18） | stat 探大小语义（预览阈值前置） |
+| `downloadStream：多块边收边 enqueue + done close`（2026-08-18） | 流式下载分块投递（零全量内存） |
+| `downloadStream：err 帧 → controller.error`（2026-08-18） | 流式异常路径 |
+| `downloadStream：cancel 清理 pending + binaryExpect`（2026-08-18） | cancel 后迟到帧不污染下一请求 |
 
 **发现背景**（文件头注释）：ws.js 是「前端全面迁移到 ws/peerjs」的核心客户端，帧
 路由正确性直接决定页面能否工作——单槽 binaryExpect 必须与后端连接级 expect 语义
@@ -275,8 +294,11 @@ ws.js 同一帧协议（实现独立复刻，二进制用 Buffer 收集）。
 
 ## 文件清单
 
-- `front/src/ws.js`（346 行）—— 本文档主体
-- `front/tests/ws.test.js`（177 行）—— 帧路由 + upload 单测
-- `front/tests/e2e-admin-smoke.mjs`（121 行）—— admin verb E2E 冒烟（需本地起服）
+> 引用一律函数名（行号易漂移，见 REFACTOR.md §10 约定）。
+
+- `front/src/ws.js` —— 本文档主体（download/downloadStream/stat/downloadToFile）
+- `front/tests/ws.test.js` —— 帧路由 + upload + 流式下载单测
+- `front/tests/e2e-admin-smoke.mjs` —— admin verb E2E 冒烟（需本地起服）
+- `front/src/api.js` —— getBlobUrl（200MB 阈值 + in-flight 去重）消费方
 - 相关后端（协议对端，非本模块）：`back/internal/transport/admin.go`（admin verb 服务端）、
   `back/internal/transport/ws_session.go`（WSSession 会话实现）

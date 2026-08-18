@@ -61,6 +61,12 @@ type PeerJSService struct {
 	connectingMu sync.Mutex
 	connecting   map[string]struct{}
 
+	// router 多源文件路由（source.Manager，第 3 项优化 2026-08-18）：
+	// serveFile 接本地→对端→URL 模板路由；nil = 退回本地语义（openFile）。
+	// 装配在 cmd/server/main.go（SetFileRouter）。接口解耦避免 import 环
+	// （source 包引 transport）。
+	router FileRouter
+
 	fileIndex *FileIndexService // sha256 → 绝对路径 索引（create/upload/list/info/sync）
 
 	// forward 转发授权规则（key 原文 → 端口白名单）与待验证质询（forward.go）。
@@ -370,6 +376,10 @@ func (s *PeerJSService) Connections() map[string]Session {
 // FileIndex 暴露本地文件索引（source 体系的 LocalSource 装配用：
 // 统一文件管理需要复用同一份 file_index 的路径决策与元数据）。
 func (s *PeerJSService) FileIndex() *FileIndexService { return s.fileIndex }
+
+// SetFileRouter 装配多源文件路由（source.Manager，第 3 项优化 2026-08-18）：
+// serveFile 由此路由「本地 → 对端 → URL 模板」。nil 可清除（退回本地语义）。
+func (s *PeerJSService) SetFileRouter(r FileRouter) { s.router = r }
 
 func sleepCtx(ctx context.Context, d time.Duration) bool {
 	select {

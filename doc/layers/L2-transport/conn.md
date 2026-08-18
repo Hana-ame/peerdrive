@@ -53,11 +53,12 @@ conn.go 把所有**连接级**机制收成单点（conn.go:3-11 头注释明示�
 
 ## 关键机制
 
-### 1. 帧类型（conn.go:42-68）
+### 1. 帧类型（conn.go dcReq/dcResp）
 
 ```go
 type dcReq struct {   // 出站发起、入站应答的请求帧
     Type/ Hash / Offset / Size / ReqID
+    Trace []string  // 可选（omitempty）：回源链路节点链（serveFile 多源路由防环）
 }
 type dcResp struct {  // 通用响应帧：拉取响应 + 索引 verb 响应 + forward 握手
     Type/ Hash / Total / Offset / Size / Msg / ReqID
@@ -72,6 +73,11 @@ type dcResp struct {  // 通用响应帧：拉取响应 + 索引 verb 响应 + f
   list-resp/info-resp/deleted/sync-resp（索引）共用，fwd 握手字段（Nonce/Hmac/Port）
   也并入——避免为每个 verb 造结构，分派时只按 `Type` 区分。
 - 请求方 reqId 必填（Go 端 UUID v4），浏览器可不传（向后兼容，REFACTOR.md §4 约束 3）。
+- **Trace（2026-08-18 新增，回源防环）**：serveFile 多源路由后对端请求可能回源到
+  其它节点（A↔B 互连时 B 请求 A 没有的文件 → A→B→A 无限递归）。req 帧带 trace
+  （经过的节点链），转发路径节点发现自己在链中即回 `err "loop detected"`（拒绝）。
+  根请求不带该字段（omitempty，旧对端兼容）；`serveFile` 经 context 传播
+  （transport.TraceKey，OpenStreamFrom 携带），OpenStreamFrom 是传播点。
 
 ### 2. connState：平铺共享的连接级状态（conn.go:74-99）
 
@@ -248,20 +254,21 @@ conn.go ◀──绑定──        peerjs_service.go  connectLoop/onIncomingCo
 
 | # | 坑 | 设计/修复 | 来源 |
 |---|---|---|---|
-| 1 | 旧实现 `serveFile` 直接 `req.Hash[:2]`，对端发空/短 hash 越界 panic，**在 goroutine 里 panic 直接杀死整个进程**（公共信令上任意节点一行 JSON 打崩全节点） | serveFile 先 `hashutil.IsStrictSHA256` 校验（H1）；测试 TestServeFile_InvalidHashNoPanic | inbound.go:28-30, 36-39；peerjs_service_test.go:127-139 |
-| 2 | 对端 create 任意绝对路径后可 req 读取（/etc/shadow 攻击链） | file_index 命中路径必须 `IsPathAllowed` 落在允许根内，否则回退内容寻址存储（H2）；测试 TestServeFile_IndexPathOutsideRoot | inbound.go:31-33, 41-49；peerjs_service_test.go:141-169 |
-| 3 | 8GB 上传 Complete（fsync+hash）同步跑在消息泵 → 整条连接头-of-line 冻结 | WriteAt/Complete 移出泵到连接级 worker（H5），泵内只做路由决策；测试 TestUploadWorker_WriteThenComplete + 集成 TestConcurrentLargeFetches | conn.go:80-84；inbound.go:287-291；REFACTOR.md §5 |
-| 4 | 对端发 upload 头后不发数据块 → pendingUpload 永久占位，之后该连接所有 upload 全 "already in progress"（连接级 DoS，重连才恢复） | 30s stale 自动清空（M6）；测试 TestServeUploadBegin_StalePendingCleared | conn.go:127；inbound.go:205-219；peerjs_service_test.go:242-264 |
-| 5 | 恶意对端声明超大 data size / 提前 done（meta+done 截断数据当成功）→ 无界分配 OOM / 静默数据损坏 | `maxPeerFetchSize` 8GB 上限 + done.Size 与实收字节比对（H6）；测试 TestRouteResponse_DataSizeCap / DoneSizeMismatch | outbound.go:24-27, 253-280；peerjs_service_test.go:171-211 |
-| 6 | `f.size = r.Size` 后 expect 由 done 帧 close——重复 done 或 err 后到达会双重 close(f.done) panic | routeResponse 幂等检查（done 已 close 即忽略） | outbound.go:240-251, 267-273 |
-| 7 | admin 声明帧初版 `go` 异步 → 后续二进制帧先到泵时 `adminUp` 仍为空，**上传分片全部丢失** | `case "admin"` 泵内**同步**执行 serveAdmin（占槽必须在泵内完成）；测试 admin_test.go | conn.go:196-203；admin.go:108-111 |
-| 8 | 持锁调用 `conn.Close()` 死锁（Go mutex 非重入） | bindConn OnClose 锁内只收集、解锁后 Close | conn.go:305-337；REFACTOR.md §5 |
-| 9 | 并发 serveFile 各自注册 `OnBufferedAmountLow`（pion 替换式回调）→ 只有最后注册者能收到低水位事件，其余死等（4 并发 × 2MB 复现卡死） | 流控下沉 peerjs.SendFrame（全局注册一次 + lowWater 广播），serveFile 零流控代码 | inbound.go:79-81；REFACTOR.md §5 末条 |
-| 10 | 连接关闭时 fetch 投递阻塞悬挂 | errCh 投递（非阻塞）+ 幂等 close(f.closed) 放行泵；测试 TestOpenStream_ConnClosed / CloseCancel | conn.go:313-325；stream_test.go:131-171 |
-| 11 | 对端只发 meta+done 不校验实收字节 → 截断文件当成功 | done.Size 完整性校验（H6） | outbound.go:274-280 |
-| 12 | 非法 admin 帧 / 无 type 文本帧 | 泵内静默丢弃（不 panic、不回帧） | conn.go:167-170 |
+| 1 | 旧实现 `serveFile` 直接 `req.Hash[:2]`，对端发空/短 hash 越界 panic，**在 goroutine 里 panic 直接杀死整个进程**（公共信令上任意节点一行 JSON 打崩全节点） | serveFile 先 `hashutil.IsStrictSHA256` 校验（H1）；测试 TestServeFile_InvalidHashNoPanic | inbound.go serveFile 开头；peerjs_service_test.go TestServeFile_InvalidHashNoPanic |
+| 2 | 对端 create 任意绝对路径后可 req 读取（/etc/shadow 攻击链） | file_index 命中路径必须 `IsPathAllowed` 落在允许根内，否则回退内容寻址存储（H2）；测试 TestServeFile_IndexPathOutsideRoot | inbound.go serveFile fallback 分支；peerjs_service_test.go TestServeFile_IndexPathOutsideRoot |
+| 2a | 多源路由后回源死循环：A↔B 互连，B 请求 A 没有的文件 → A 回源 B → B 回源 A → 无限递归 | req 帧 trace 节点链，节点发现自己已在链中即拒（`err "loop detected"`）；根请求不带 trace（omitempty 兼容旧对端），OpenStreamFrom 是传播点；测试 TestServeFile_LoopDetected / TestOpenStreamFrom_TracePropagation | inbound.go serveFile 开头；conn.go dcReq.Trace；outbound.go OpenStreamFrom（2026-08-18） |
+| 3 | 8GB 上传 Complete（fsync+hash）同步跑在消息泵 → 整条连接头-of-line 冻结 | WriteAt/Complete 移出泵到连接级 worker（H5），泵内只做路由决策；2026-08-18 上传与转发拆成 uploadWorker/fwdWorker 双 worker（8GB 上传不再阻塞转发隧道）；测试 TestUploadWorker_WriteThenComplete + 集成 TestConcurrentLargeFetches | conn.go bindConn（双 worker）；inbound.go uploadWorker/fwdWorker；REFACTOR.md §5 |
+| 4 | 对端发 upload 头后不发数据块 → pendingUpload 永久占位，之后该连接所有 upload 全 "already in progress"（连接级 DoS，重连才恢复） | 30s stale 自动清空（M6）；测试 TestServeUploadBegin_StalePendingCleared | conn.go connState.pendingUpload；inbound.go serveUploadBegin；peerjs_service_test.go TestServeUploadBegin_StalePendingCleared |
+| 5 | 恶意对端声明超大 data size / 提前 done（meta+done 截断数据当成功）→ 无界分配 OOM / 静默数据损坏 | `maxPeerFetchSize` 8GB 上限 + done.Size 与实收字节比对（H6）；测试 TestRouteResponse_DataSizeCap / DoneSizeMismatch | outbound.go fetchReader/routeResponse；peerjs_service_test.go TestRouteResponse_* |
+| 6 | `f.size = r.Size` 后 expect 由 done 帧 close——重复 done 或 err 后到达会双重 close(f.done) panic | routeResponse 幂等检查（done 已 close 即忽略） | outbound.go routeResponse |
+| 7 | admin 声明帧初版 `go` 异步 → 后续二进制帧先到泵时 `adminUp` 仍为空，**上传分片全部丢失** | `case "admin"` 泵内**同步**执行 serveAdmin（占槽必须在泵内完成）；测试 admin_test.go | conn.go bindConn；admin.go serveAdmin |
+| 8 | 持锁调用 `conn.Close()` 死锁（Go mutex 非重入） | bindConn OnClose 锁内只收集、解锁后 Close | conn.go bindConn OnClose；REFACTOR.md §5 |
+| 9 | 并发 serveFile 各自注册 `OnBufferedAmountLow`（pion 替换式回调）→ 只有最后注册者能收到低水位事件，其余死等（4 并发 × 2MB 复现卡死） | 流控下沉 peerjs.SendFrame（全局注册一次 + lowWater 广播），serveFile 零流控代码 | inbound.go serveFile；REFACTOR.md §5 末条 |
+| 10 | 连接关闭时 fetch 投递阻塞悬挂 | errCh 投递（非阻塞）+ 幂等 close(f.closed) 放行泵；测试 TestOpenStream_ConnClosed / CloseCancel | conn.go bindConn OnClose；stream_test.go TestOpenStream_* |
+| 11 | 对端只发 meta+done 不校验实收字节 → 截断文件当成功 | done.Size 完整性校验（H6） | outbound.go routeResponse |
+| 12 | 非法 admin 帧 / 无 type 文本帧 | 泵内静默丢弃（不 panic、不回帧） | conn.go bindConn |
 
-## 测试（32 单测，`scripts/test-layers.sh` L2 段）
+## 测试（transport 包全量，`scripts/test-layers.sh` L2 段）
 
 ### 单元测试（无网络，`go test -tags nosqlite ./internal/transport/ -count=1 -skip "^TestAdmin"`）
 
@@ -281,7 +288,12 @@ conn.go ◀──绑定──        peerjs_service.go  connectLoop/onIncomingCo
 | └ TestOpenStream_ConnClosed | 连接关闭 reader 报错不悬挂 | 防御性（关闭时序） |
 | forward_test.go | fwd 握手/越权/重放/数据透传（8 个单测） | REFACTOR.md §3.9 |
 
-### 集成测试（`-tags "nosqlite integration" ./test/integration/ -p 1`）
+### 集成测试（`-tags "nosqlite integration" ./test/integration/ -count=1 -p 1`，脱外网）
+
+> 2026-08-18（第 6 项优化）：集成测试信令默认指向 TestMain 起的**全局自托管
+> signalserver**（httptest 内存服务），数据面为同机真实 WebRTC（host candidate
+> 直连，无 STUN）——不再依赖 0.peerjs.com 公共云（无需代理/外网）。
+> MQTT 公共 broker 测试需 `PEERDRIVE_MQTT_TEST=1`；线上全链路需 `PEERDRIVE_LIVE_TEST=1`。
 
 | 测试 | 覆盖 | 发现背景 |
 |---|---|---|
@@ -290,21 +302,26 @@ conn.go ◀──绑定──        peerjs_service.go  connectLoop/onIncomingCo
 | file_lifecycle_test.go TestFileLifecycleEndToEnd | create/req/upload/download/sync 跨节点闭环 | 功能验收 |
 | ws_verbs_test.go TestFrameVerbs_* | 分片上传/断点续传/同步链路 | 功能需求 |
 | ws_test.go TestLocalWSSessionFetch 等 | 本地 WS 会话 + FetchFromPeer("local") 复用 | 架构决策（§3.5） |
-| live_test.go TestLive* | 线上信令+发现+拉文件全链路 | 线上验证（AGENTS.md 部署节） |
+| selfhosted_test.go TestSelfHosted* | 自托管信令协议兼容 + 发现 API 全链路 | 功能需求（§3.6） |
+| live_test.go TestLive* | 线上信令+发现+拉文件全链路（`PEERDRIVE_LIVE_TEST=1`） | 线上验证（AGENTS.md 部署节） |
 
-> ⚠️ 集成测试必须 `-p 1` 串行：公共信令上并行会互相干扰（REFACTOR.md §5.1）。
+> ⚠️ 集成测试必须 `-p 1` 串行：多组测试共享全局自托管信令，并行会互相干扰。
+> 数据面是真实 WebRTC——无 UDP 的沙箱环境（docker 默认）会连不上，可用
+> `PEERDRIVE_SKIP_RTC=1` 跳过互联类测试（本地/WS 类不受影响）。
 
 ## 文件清单
 
+> 引用一律函数名（行号易漂移，见 REFACTOR.md §10 约定）。
+
 | 文件 | 说明 |
 |---|---|
-| `conn.go`（341 行） | 本文：帧类型、connState、bindConn 分派泵、OnClose 清理 |
-| `inbound.go`（330 行） | 入站角色：serveFile/serve* 索引 verb/uploadWorker（泵的叶节点） |
-| `outbound.go`（285 行） | 出站角色：OpenStream/FetchFromPeer/routeResponse/fetchReader |
-| `ws_session.go`（149 行） | WSSession：本地 WS 适配（见 sessions.md） |
-| `rtc_session.go`（35 行） | rtcSession：DataChannel 适配（见 sessions.md） |
-| `peerjs_service.go`（399 行） | 装配层：信令生命周期、连接建立、BindLocal、Connect 去重 |
-| `admin.go`（327 行） | admin verb（conn.go 同步分派 + adminUp 单槽收集） |
-| `forward.go`（~470 行） | fwd-* verb（fwd 单槽 + fwdCh worker 写隧道） |
-| `file_index.go`（~380 行） | SQLite sha256→路径索引（inbound 读写） |
-| 测试：`peerjs_service_test.go` / `stream_test.go` / `forward_test.go` / `file_index_test.go` / `admin_test.go` | 各模块单元测试（发现背景见上表） |
+| `conn.go` | 本文：帧类型、connState、bindConn 分派泵、OnClose 清理 |
+| `inbound.go` | 入站角色：serveFile（多源路由 FileRouter）/serve* 索引 verb/uploadWorker+fwdWorker（泵的叶节点） |
+| `outbound.go` | 出站角色：OpenStream/OpenStreamFrom/FetchFromPeer/routeResponse/fetchReader |
+| `ws_session.go` | WSSession：本地 WS 适配（见 sessions.md） |
+| `rtc_session.go` | rtcSession：DataChannel 适配（见 sessions.md） |
+| `peerjs_service.go` | 装配层：信令生命周期、连接建立、BindLocal、Connect 去重、SetFileRouter |
+| `admin.go` | admin verb（conn.go 同步分派 + adminUp 单槽收集） |
+| `forward.go` | fwd-* verb（fwd 单槽 + fwdCh worker 写隧道） |
+| `file_index.go` | SQLite sha256→路径索引（inbound 读写） |
+| 测试：`peerjs_service_test.go` / `stream_test.go` / `forward_test.go` / `file_index_test.go` / `admin_test.go` / `servefile_router_test.go` | 各模块单元测试（发现背景见上表） |

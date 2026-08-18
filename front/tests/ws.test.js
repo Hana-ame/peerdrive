@@ -104,6 +104,74 @@ describe('ws.js client', () => {
     await expect(p).rejects.toThrow('file not found')
   })
 
+  it('stat：req size=0 探大小，meta 帧 total resolve', async () => {
+    const sock = makeMockSock()
+    ws.__test._setSock(sock)
+    const p = ws.stat('c'.repeat(64))
+    const req = JSON.parse(sock.sent[0])
+    expect(req.type).toBe('req')
+    expect(req.offset).toBe(0)
+    expect(req.size).toBe(0)
+    // 服务端 meta 帧带 total（不发数据直接 done）
+    feedText(sock, { type: 'meta', total: 4096, reqId: req.reqId })
+    await expect(p).resolves.toBe(4096)
+    // 迟到的 done 帧不得影响（pending 已删）
+    feedText(sock, { type: 'done', offset: 0, size: 0, reqId: req.reqId })
+  })
+
+  it('downloadStream：块边收边吐，done 帧 close 流', async () => {
+    // 发现背景：代码审阅 2026-08-18——download 全量内存组装，大文件
+    // 保存/预览 OOM；downloadStream 提供边收边吐路径（FS Access API 保存用）。
+    const sock = makeMockSock()
+    ws.__test._setSock(sock)
+    const stream = ws.downloadStream('d'.repeat(64))
+    const reader = stream.getReader()
+    const req = JSON.parse(sock.sent[0])
+    expect(req.type).toBe('req')
+    // meta → data 头 + 块1 → data 头 + 块2 → done
+    feedText(sock, { type: 'meta', total: 6, reqId: req.reqId })
+    feedText(sock, { type: 'data', offset: 0, size: 3, reqId: req.reqId })
+    sock.onmessage({ data: new Uint8Array([1, 2, 3]).buffer })
+    const r1 = await reader.read()
+    expect(Array.from(r1.value)).toEqual([1, 2, 3])
+    expect(r1.done).toBe(false)
+    feedText(sock, { type: 'data', offset: 3, size: 3, reqId: req.reqId })
+    sock.onmessage({ data: new Uint8Array([4, 5, 6]).buffer })
+    const r2 = await reader.read()
+    expect(Array.from(r2.value)).toEqual([4, 5, 6])
+    feedText(sock, { type: 'done', offset: 0, size: 6, reqId: req.reqId })
+    const r3 = await reader.read()
+    expect(r3.done).toBe(true)
+  })
+
+  it('downloadStream：err 帧灌进流（read 抛错）', async () => {
+    const sock = makeMockSock()
+    ws.__test._setSock(sock)
+    const stream = ws.downloadStream('e'.repeat(64))
+    const reader = stream.getReader()
+    const req = JSON.parse(sock.sent[0])
+    feedText(sock, { type: 'err', msg: 'peer fetch failed', reqId: req.reqId })
+    await expect(reader.read()).rejects.toThrow('peer fetch failed')
+  })
+
+  it('downloadStream：消费者 cancel 清理 pending 与 binaryExpect（防迟到帧污染）', async () => {
+    // 发现背景：代码审阅 2026-08-18——abort/cancel 不清理会留下 pending
+    // 泄漏，且迟到 data 帧继续写入已放弃的流。
+    const sock = makeMockSock()
+    ws.__test._setSock(sock)
+    const stream = ws.downloadStream('f'.repeat(64))
+    const reader = stream.getReader()
+    const req = JSON.parse(sock.sent[0])
+    feedText(sock, { type: 'data', offset: 0, size: 3, reqId: req.reqId })
+    sock.onmessage({ data: new Uint8Array([1, 2, 3]).buffer })
+    // 消费者放弃
+    await reader.cancel()
+    expect(ws.__test.pending.has(req.reqId)).toBe(false)
+    // 迟到帧到达：binaryExpect 已清，静默丢弃不抛错
+    sock.onmessage({ data: new Uint8Array([4, 5, 6]).buffer })
+    feedText(sock, { type: 'done', offset: 0, size: 3, reqId: req.reqId })
+  })
+
   it('admin-bin：二进制文件流响应收集为 Uint8Array', async () => {
     const sock = makeMockSock()
     ws.__test._setSock(sock)
