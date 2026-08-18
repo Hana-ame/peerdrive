@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"strings"
 
-	"peerdrive/internal/signalserver"
+	"github.com/Hana-ame/go-peerserver"
 )
 
 func main() {

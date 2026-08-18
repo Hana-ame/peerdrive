@@ -18,10 +18,12 @@ require (
 	github.com/swaggo/files v1.0.1
 	github.com/swaggo/gin-swagger v1.6.1
 	github.com/swaggo/swag v1.16.6
-	golang.org/x/crypto v0.50.0
 )
 
+require golang.org/x/crypto v0.50.0 // indirect
+
 require (
+	github.com/Hana-ame/go-peerserver v0.0.0
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/RoaringBitmap/roaring v1.2.3 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
@@ -149,3 +151,5 @@ require (
 replace github.com/Hana-ame/go-peerjs => ./peerjs
 
 replace github.com/Hana-ame/go-peerdrive-bt => ./p2p_bt
+
+replace github.com/Hana-ame/go-peerserver => ./signalserver

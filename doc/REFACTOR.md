@@ -409,6 +409,36 @@ sync     {type:"sync", seq}                 → sync-resp {files,lastSeq}（meta
 {"type":"admin-bin","status":200,"size":N,"reqId"} + 二进制帧
 ```
 
+### 3.14 独立 repo 镜像：go-peerjs / go-peerserver（2026-08-19）
+
+模块闭合性审阅后，将两个零内部依赖的模块镜像为独立 repo（主仓库双份维护，
+模式同 peerdrive-media：**主 go.mod 保持 replace 指向本地目录**，改动随主 repo
+提交后镜像同步）：
+
+| 独立 repo | 本地位置 | tag |
+|---|---|---|
+| `github.com/Hana-ame/go-peerjs` | `back/peerjs/` | v0.1.0 |
+| `github.com/Hana-ame/go-peerserver` | `back/signalserver/` | v0.1.0 |
+
+**go-peerserver 拆分细节**（本次主仓库结构变更）：
+- `back/internal/signalserver/` + `back/cmd/peerserver/` → `back/signalserver/`
+  （独立 go.mod `github.com/Hana-ame/go-peerserver`，含 signalserver 包 +
+  `cmd/peerserver` 独立二进制）
+- 主 go.mod：`require ... v0.0.0` + `replace => ./signalserver`（本地双份维护）
+- 集成测试 import 改 `github.com/Hana-ame/go-peerserver`（TestMain 自托管信令不变）
+- 独立模块零 peerdrive 依赖（仅 gorilla/websocket + stdlib），可单独 `go build ./cmd/peerserver`
+
+**为什么保留 replace 本地而非切远程依赖**：保证 `back/peerjs`、`back/signalserver`
+改动可随主 repo 直接构建验证，无需先推独立 repo——开发零卡顿；外部使用者
+`go get github.com/Hana-ame/go-peerjs@v0.1.0` 不受影响。
+
+**为什么 go-peerjs 未删 go.mod 原版本前缀**：本 repo 内同时存在主模块与独立模块，
+模块名即 `github.com/Hana-ame/go-peerjs`，replace 用本地路径，无需 version designator。
+
+拆分的判断标准（记录取舍）：forward 引擎（transport/forward.go 仅依赖 log）与
+文件数据面引擎（req/索引 verb 耦合 file_index 存储 + config/log）**暂不独立**——均无
+仓库外使用者，拆分是负收益；待出现第二个使用者再拆。
+
 ## 5. E2E 踩过的坑（全部已修）
 
 | 坑 | 修复 |

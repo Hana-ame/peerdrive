@@ -16,7 +16,7 @@ import (
 	"peerdrive/internal/config"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/transport"
-	"peerdrive/internal/signalserver"
+	"github.com/Hana-ame/go-peerserver"
 )
 
 // TestFileLifecycleEndToEnd 文件生命周期双节点闭环（自托管信令 + 静态互联）：

@@ -29,7 +29,7 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/repository"
-	"peerdrive/internal/signalserver"
+	"github.com/Hana-ame/go-peerserver"
 	"peerdrive/internal/transport"
 )
 
