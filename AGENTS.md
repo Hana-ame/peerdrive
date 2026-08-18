@@ -72,11 +72,14 @@ cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 
   无影响（心跳 5s 保活）。踩坑记录：加 A 记录前 peersignal 橙云路径下实测 404（nginx/1.18.0，
   非 cloudcone 的 1.22.1）——当时回源目标不确定，A 记录建立后回源即正确。
   **注意：cloudcone.moonchan.xyz 被 livekit 占用**（livekit.conf → 127.0.0.1:7880），不能复用。
-- **代理注意**：cloudcone 443 **不走宿主机代理**（代理连 cloudcone 超时）——curl/测试无代理直连；
-  0.peerjs.com 等公共服务则必须走代理。两者按目标域名区分。
-- 线上测试：`PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestLive -v`（无代理跑）
+- **代理注意（2026-08-18 更新）**：WSL 直连 cloudcone 全堵（curl 000），SOCKS 10808 隧道
+  banner 超时——HTTP 代理 127.0.1.4:7890 可到 cloudcone 22/443（SSH 经 `ssh-http-proxy.py`，
+  curl 直接走 HTTPS_PROXY env）；0.peerjs.com 等公共服务同样走代理。两者统一走
+  HTTP 代理即可，不再按目标域名区分。
+- 线上测试：`HTTPS_PROXY=http://127.0.1.4:7890 PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestLive -v`（已验证跑通，2026-08-18）
 - 节点配置：`PEERDRIVE_PEERJS_HOST=peersignal.moonchan.xyz PEERDRIVE_PEERJS_KEY=<key> PEERDRIVE_DISCOVER_URL=https://peersignal.moonchan.xyz`
 - 部署更新：构建 `GOOS=linux CGO_ENABLED=0 go build -tags nosqlite -o /tmp/peerserver ./cmd/peerserver/`，
   上传 `bash ~/script/ssh/cloudcone.sh "cat > /root/peerserver.new" < /tmp/peerserver`，
-  `mv` 后 `systemctl restart peerserver`（避免 Text file busy）
+  `mv` 后 `systemctl restart peerserver`（避免 Text file busy）。当前线上为 2026-08-18
+  版（含 `-tokens` 信令 token 白名单 flag，未启用保持行为不变）
 | `PEERDRIVE_P2P_ENABLE` | - | 已删除（2026-08-16 批2，libp2p 栈移除） |
