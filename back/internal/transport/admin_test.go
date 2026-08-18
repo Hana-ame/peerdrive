@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -335,5 +336,76 @@ func TestAdminRejectedOnNonLocal(t *testing.T) {
 	types := sess.sentTypes()
 	if len(types) != 1 || types[0] != "err" {
 		t.Fatalf("应返回 err 拒绝帧, got %v", types)
+	}
+}
+
+// TestAdminUploadChunkWriteFail 写临时文件失败（已关闭文件 → os.ErrClosed）
+// 必须清理临时文件与句柄，并回 err 帧——此前该路径只 return 不清理，
+// 文件 + fd 永久泄漏（代码审阅 2026-08-18 发现）。
+// 防御意义：磁盘满/写入错误时不留残留，与 aborted 分支清理语义一致。
+func TestAdminUploadChunkWriteFail(t *testing.T) {
+	svc := testAdminSvc(t, nil)
+	sess := &fakeSession{id: "local"}
+
+	// 构造一个「已关闭」的临时文件：Write 必然返回错误（os.ErrClosed）
+	f, err := os.CreateTemp("", "peerdrive-admin-upload-fail-*")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	path := f.Name()
+	f.Close() // 关键：关闭后 Write 失败
+
+	au := &adminUploadState{
+		reqID:   "fail-1",
+		size:    10, // 声明 10 字节，下面只写 4 字节
+		f:       f,
+		path:    path,
+		created: time.Now(),
+	}
+
+	// 写失败路径：非 last 块也应清理（Write 失败立即 return 清理）
+	svc.adminUploadChunk(sess, au, []byte("data"), false)
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("写失败后临时文件应被清理, 仍存在: %s", path)
+	}
+	// 已关闭的文件句柄应被 Close 过（再次 Close 报错；此处只需验证没 panic）
+	types := sess.sentTypes()
+	if len(types) != 1 || types[0] != "err" {
+		t.Fatalf("应回 err 帧, got %v", types)
+	}
+}
+
+// TestAdminUploadAbortedCleansTemp 上传中止（size 超限/超时标记 aborted）：
+// 最后一帧（空块）到达时清理临时文件并回 err——上传收集失败不留残留。
+func TestAdminUploadAbortedCleansTemp(t *testing.T) {
+	svc := testAdminSvc(t, nil)
+	sess := &fakeSession{id: "local"}
+
+	f, err := os.CreateTemp("", "peerdrive-admin-upload-abort-*")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	path := f.Name()
+
+	au := &adminUploadState{
+		reqID:   "abort-1",
+		size:    10,
+		got:     4, // 只收到 4 字节
+		f:       f,
+		path:    path,
+		aborted: true, // 泵内判定超限/超时后置位
+		created: time.Now(),
+	}
+
+	// last=true（空块投递触发清理，见 conn.go abort 分支）
+	svc.adminUploadChunk(sess, au, nil, true)
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("aborted 后临时文件应被清理, 仍存在: %s", path)
+	}
+	types := sess.sentTypes()
+	if len(types) != 1 || types[0] != "err" {
+		t.Fatalf("应回 err 帧, got %v", types)
 	}
 }

@@ -126,4 +126,52 @@ describe('ws.js client', () => {
     await vi.waitFor(() => { expect(caught).toBeInstanceOf(Error) })
     expect(caught.message).toBe('ws: connection closed')
   })
+
+  it('upload：声明帧 + 二进制块按 BIN_CHUNK 切片上传（FileReader 回退路径）', async () => {
+    // 发现背景（2026-08-18 代码审阅）：FileReader 回退分支引用未定义常量
+    // BIN_CHUNK → ReferenceError 上传直接失败（现代浏览器走 Streams API 分支
+    // 所以线上未触发）。本测试强制走回退分支（file 无 stream() 方法 + mock
+    // FileReader），验证声明帧 + 按 64KB 切片发送 + admin-resp resolve。
+    const CHUNK = 64 * 1024
+    const total = CHUNK * 2 + 22 // 150KB → 3 块：64KB + 64KB + 22KB
+    const file = {
+      name: 'big.bin',
+      size: total,
+      slice: (a, b) => new Uint8Array(Math.min(b, total) - a), // 真实 File.slice 会截到文件末尾，mock 需同样行为
+    }
+    // FileReader mock：readAsArrayBuffer 同步触发 onload（真实为异步，
+    // 同步触发对「切块数量/大小」断言无影响）
+    const reads = []
+    class FakeFileReader {
+      readAsArrayBuffer(slice) {
+        reads.push(slice.length)
+        this.result = slice // 真实 FileReader 的 result 是 ArrayBuffer，这里直接给 slice
+        this.onload({})
+      }
+    }
+    vi.stubGlobal('FileReader', FakeFileReader)
+
+    const sock = makeMockSock()
+    ws.__test._setSock(sock)
+    const p = ws.upload(file, 'big.bin')
+
+    // 第 1 帧：声明帧（admin binary）
+    const decl = JSON.parse(sock.sent[0])
+    expect(decl.type).toBe('admin')
+    expect(decl.binary).toBe(true)
+    expect(decl.filename).toBe('big.bin')
+    expect(decl.size).toBe(total)
+    expect(decl.field).toBe('file')
+    expect(decl.path).toBe('/files/upload')
+    // 后续帧：二进制块（64KB × 2 + 22B）
+    expect(sock.sent.length).toBe(4)
+    expect(sock.sent[1].byteLength).toBe(CHUNK)
+    expect(sock.sent[2].byteLength).toBe(CHUNK)
+    expect(sock.sent[3].byteLength).toBe(22)
+    // 服务端回 admin-resp → resolve
+    feedText(sock, { type: 'admin-resp', status: 200, body: { hash: 'h' }, reqId: decl.reqId })
+    await expect(p).resolves.toEqual({ hash: 'h' })
+
+    vi.unstubAllGlobals()
+  })
 })

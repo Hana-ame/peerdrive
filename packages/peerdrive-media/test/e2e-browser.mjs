@@ -59,4 +59,34 @@ export const tests = [
       ok('白名单外 URL 被 Node 端拒绝', true)
     },
   },
+  {
+    name: '连接释放后重建（dispose → 再次 load 成功）',
+    fn: async ({ page, ok }) => {
+      // 发现背景（2026-08-18 代码审阅 + 实测）：teardown 置 closed 后槽位仍在
+      // client 缓存，若 load() 沿用 closed 槽位，request() 的「closed 不再
+      // open()」守卫让新请求永久排队、Promise 永不 settle（加载中无错误）。
+      // 修复：load() 检测 slot.closed 即重建。本测试验证修复：加载成功 →
+      // 主动 dispose（模拟断线清理）→ 再次加载必须成功。
+      await page.goto(baseURL)
+      const sig = { host: '127.0.0.1', port: 9100, secure: false, key: 'peerjs', path: '/' }
+      const url = 'http://127.0.0.1:9090/img/red.svg'
+      const loadArg = { sig, url }
+      const first = await page.evaluate(
+        (a) => PeerMedia.load({ peer: 'demo-node', signaling: a.sig, url: a.url })
+          .then((x) => 'OK ' + x.size, (e) => 'ERR ' + e.message.slice(0, 80)),
+        loadArg,
+      )
+      ok('首次加载成功', first.startsWith('OK'))
+      await page.evaluate(
+        (a) => { PeerMedia.client.dispose('demo-node', a.sig); return true },
+        loadArg,
+      )
+      const second = await page.evaluate(
+        (a) => PeerMedia.load({ peer: 'demo-node', signaling: a.sig, url: a.url })
+          .then((x) => 'OK ' + x.size, (e) => 'ERR ' + e.message.slice(0, 80)),
+        loadArg,
+      )
+      ok('dispose 后重建连接并加载成功', second.startsWith('OK'))
+    },
+  },
 ]
