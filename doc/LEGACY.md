@@ -7,31 +7,31 @@
 
 ## 一、后端旧代码（back/internal）
 
-### A. libp2p 栈（被 PeerJS 互联取代）— 整体 **待迁移**
+### A. libp2p 栈（被 PeerJS 互联取代）— ✅ 已删（2026-08-16，批2）
 
 | 文件/目录 | 职责 | 状态 | 说明 |
 |---|---|---|---|
-| `service/p2p.go` | libp2p 节点、DHT、流协议 | 待迁移 | 原 P2P 核心；PeerJS 后不再需要，但 `p2p.go` 内含 PeerJS 未覆盖的「端口转发」逻辑（见 F） |
-| `service/p2p_transfer.go` | 文件分块传输（chunk 协议） | 可删 | 帧协议被 `peerjs_service.go` 取代 |
-| `service/p2p_resume.go` | 断点续传 | 可删 | 未迁移到 PeerJS |
-| `service/p2p_multipeer.go` | 多 peer 并行下载 | 可删 | 同上 |
-| `service/p2p_dual.go` | 双 DHT（IPFS+BT）编排 | 可删 | 双 DHT 发现被 MQTT/静态配置取代 |
-| `service/p2p_ws.go` | WS 传输通道 | 可删 | CSWSH 漏洞源，PeerJS 无此问题 |
-| `service/p2p_helpers.go` | hash/CID 工具 | 待迁移 | 少量工具函数可并入 `pkg/hashutil` |
-| `service/p2p_connection.go` | 连接管理 | 可删 | |
-| `service/signaling.go` | 自建 WS 信令 hub | 可删 | 被公共云信令取代（`internal/peerjs/`） |
-| `service/relay.go` | 中继服务 | 可删 | PeerJS 走 TURN |
-| `service/relay_registry.go` | 中继注册 | 可删 | |
-| `service/node_registrar.go` | 节点注册 | 可删 | 节点 ID 由 PeerJS 信令承担 |
-| `service/peer_scanner.go` / `peer_tracker.go` | 对端扫描 | 可删 | 被 `PEERDRIVE_PEERJS_PEERS` + 发现端点取代 |
-| `controller/p2p.go` | P2P HTTP 控制器 | 待迁移 | 大部分端点可删；`p2p_download` 相关保留至迁移完成 |
+| `service/p2p.go` | libp2p 节点、DHT、流协议 | ✅ 已删 | 原 P2P 核心；其中的「端口转发」逻辑重建为 PeerJS 版（见 F） |
+| `service/p2p_transfer.go` | 文件分块传输（chunk 协议） | ✅ 已删 | 帧协议被 `peerjs_service.go` 取代 |
+| `service/p2p_resume.go` | 断点续传 | ✅ 已删 | 未迁移到 PeerJS |
+| `service/p2p_multipeer.go` | 多 peer 并行下载 | ✅ 已删 | 同上 |
+| `service/p2p_dual.go` | 双 DHT（IPFS+BT）编排 | ✅ 已删 | 双 DHT 发现被 MQTT/静态配置取代 |
+| `service/p2p_ws.go` | WS 传输通道 | ✅ 已删 | CSWSH 漏洞源，PeerJS 无此问题 |
+| `service/p2p_helpers.go` | hash/CID 工具 | ✅ 已删 | 少量工具函数并入 `pkg/hashutil` |
+| `service/p2p_connection.go` | 连接管理 | ✅ 已删 | |
+| `service/signaling.go` | 自建 WS 信令 hub | ✅ 已删 | 被公共云信令取代（`internal/peerjs/`） |
+| `service/relay.go` | 中继服务 | ✅ 已删 | PeerJS 走 TURN |
+| `service/relay_registry.go` | 中继注册 | ✅ 已删 | |
+| `service/node_registrar.go` | 节点注册 | ✅ 已删 | 节点 ID 由 PeerJS 信令承担 |
+| `service/peer_scanner.go` / `peer_tracker.go` | 对端扫描 | ✅ 已删 | 被 `PEERDRIVE_PEERJS_PEERS` + 发现端点取代 |
+| `controller/p2p.go` | P2P HTTP 控制器 | 保留 | 现承载端口转发 v2 端点（fwd-*，见 REFACTOR §3.9）与 webrtc 信息端点 |
 
-### B. BT 栈（BT DHT 下载/做种）— **待迁移**（README 定位为可独立成库）
+### B. BT 栈（BT DHT 下载/做种）— ✅ 已独立成库（2026-08-16 起）
 
 | 文件/目录 | 职责 | 状态 | 说明 |
 |---|---|---|---|
-| `p2p_bt/`（bep44、client、dht、bt_bridge 等） | BT DHT + 下载客户端 | 待迁移 | 有价值（纯 Go BEP44），建议拆独立库而非删除 |
-| `controller/bt.go` | BT HTTP 控制器 | 待迁移 | 前端 BTPanel 仍用 |
+| `p2p_bt/`（bep44、client、dht、bt_bridge 等） | BT DHT + 下载客户端 | ✅ 独立库 | 拆为 `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt 即其源码，go.mod replace 引用） |
+| `controller/bt.go` | BT HTTP 控制器 | 已不存在 | BT 端点实际在 `controller/p2p.go`（BTDHTStatus/BTAnnounce/BTDownload* 等），前端 BTPanel 仍用 |
 | `service/forward.go` | 端口转发 | ✅ 已删（2026-08-16） | libp2p 版删除；重建为 PeerJS DataChannel 版（REFACTOR §3.9，带 HMAC 质询认证+端口白名单） |
 
 ### C. IPFS 栈 — ✅ 已删（2026-08-16，批2）
