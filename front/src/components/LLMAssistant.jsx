@@ -209,22 +209,6 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'get_tasks',
-      description: 'List currently running background tasks on the node.',
-      parameters: { type: 'object', properties: {}, required: [] },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_p2p_status',
-      description: 'Get the P2P network status including connected peers.',
-      parameters: { type: 'object', properties: {}, required: [] },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'create_anon_collection',
       description: 'Create a new anonymous collection. entries are { path, hash } objects.',
       parameters: {
@@ -263,7 +247,8 @@ async function executeTool(name, args, navigate) {
       }
       case 'get_node_info': {
         await api.ping();
-        const info = await api.getNodeInfo();
+        // 2026-08-19：旧 getNodeInfo（/p2p/node libp2p 端点）已删，改查 /peerjs/node
+        const info = await api.getPeerjsNode();
         return JSON.stringify(info);
       }
       case 'list_collections': {
@@ -313,14 +298,6 @@ async function executeTool(name, args, navigate) {
       case 'register_folder': {
         const result = await api.registerFolder(args.folder_path);
         return JSON.stringify(result);
-      }
-      case 'get_tasks': {
-        const tasks = await api.getTasks();
-        return JSON.stringify(tasks);
-      }
-      case 'get_p2p_status': {
-        const status = await api.getP2PStatus();
-        return JSON.stringify(status);
       }
       case 'create_anon_collection': {
         const result = await api.createAnonCollection(args.entries || [], args.friendly_name || '');

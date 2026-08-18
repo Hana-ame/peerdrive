@@ -4,16 +4,15 @@
 // 路由分组：
 //   /ping              — 健康检查（GET）
 //   /sha256sum/:sha256 — 通过 SHA256 哈希下载文件（仅本地存储，无 P2P 回退）
-//   /auth/*           — 用户注册、登录、登出（POST/POST/POST/GET）
-//   /p2p/*             — P2P 节点信息、对等列表、Ping（GET）
+//   /p2p/*             — 端口转发 v2 + 认证状态 + WebRTC 信息（GET/POST）
 //   /anon/*            — 匿名合集创建/读取/Fork（POST/GET）
 //   /files/*           — 文件上传/注册/验证/删除/版本差异（POST/POST/POST/GET/DELETE）
 //   /collections/*     — 集合 CRUD + 条目管理 + 版本控制（POST/GET）
 //   /local/*           — 本地同步状态管理（POST/GET）
-//   /actions/*         — 合并/复刻/拉取（POST）
-//   /tasks/*           — 异步任务状态查询（GET）
+//   /actions/*         — 合并/复刻（POST；/actions/pull 已随 TaskService 删除 2026-08-19）
 //   /:user/:coll/*     — 从集合条目中下载文件（GET）
 //   /collections/search — 公开搜索合集（GET）
+//   /peerjs/*          — PeerJS 节点发现 + /ws/peer 本地会话
 //   /swagger/*         — Swagger UI 页面（GET）
 
 package router
@@ -93,10 +92,9 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 	fileSvc := service.NewFileService(cfg)
 	controller.InitFileController(fileSvc)
-	// M2 收层装配：集合/分享/任务/pin 服务注入 controller（替代原先的 repository 直调）
+	// M2 收层装配：集合/分享/pin 服务注入 controller（替代原先的 repository 直调）
 	controller.InitCollectionController(service.NewCollectionService())
 	controller.InitShareController(service.NewShareService())
-	controller.InitTaskController(service.NewTaskService())
 	controller.InitPinController(service.NewPinService())
 
 	// 端口转发服务（PeerJS DataChannel 版，forward.go）：规则表由 main 装配时
@@ -260,7 +258,6 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		coll.GET("/:id/*filepath", dispatchGetTree)
 		coll.POST("/fork", authRequired, controller.ForkAnonCollection)
 		coll.POST("/merge", authRequired, controller.MergeFromSource)
-		coll.POST("/pull", authRequired, controller.PullCollection)
 		coll.POST("/upload", authRequired, controller.UploadFile)
 		coll.POST("/register-local", authRequired, controller.RegisterLocalFile)
 		coll.POST("/register-url", authRequired, controller.RegisterURL)
@@ -320,18 +317,10 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	{
 		actions.POST("/merge", authRequired, controller.MergeFromSource)
 		actions.POST("/fork", authRequired, controller.ForkCollection)
-		actions.POST("/pull", authRequired, controller.PullCollection)
 	}
 
 	// Public collection file download
 	r.GET("/:username/:collection_name/*filepath", controller.DownloadCollectionFile)
-
-	// Task status
-	tasks := r.Group("/tasks")
-	{
-		tasks.GET("", controller.ListTasks)
-		tasks.GET("/:id", controller.GetTaskStatus)
-	}
 
 	// Share links（创建挂认证；读取 token 公开）
 	shares := r.Group("/shares")

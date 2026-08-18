@@ -1,13 +1,14 @@
 // Package repository 提供 SQLite 数据库操作层。
 // 使用 mattn/go-sqlite3 驱动。必须先调用 InitDB(dbPath) 初始化全局 DB 连接。
-// 七张表：
+// 表清单：
 //   file_meta       — 文件内容元数据（hash PK：size / mime_type / gziped / filename / type）
 //   file_providers  — 文件存储位置（hash → provider_type + path，多副本可用）
 //   collections     — 注册用户合集（current_hash 指向最新快照）
 //   collection_entries  — 合集工作区条目
 //   collection_versions — 版本快照记录
 //   version_entries     — 版本快照内容
-//   transfer_tasks      — 异步任务跟踪
+// 注：users / transfer_tasks 表曾由本地 AuthService 与 TaskService 使用
+// （2026-08-19 随死代码删除）。已存在数据库中的旧表无读写端，保留无害。
 
 package repository
 
@@ -30,7 +31,7 @@ const (
 
 var DB *sql.DB
 
-// InitDB 初始化 SQLite 数据库连接并执行全部建表 DDL，包括 file_meta、file_providers、collections 等七张表。
+// InitDB 初始化 SQLite 数据库连接并执行全部建表 DDL，包括 file_meta、file_providers、collections 等表。
 func InitDB(dbPath string) error {
 	var err error
 	DB, err = sql.Open("sqlite3", dbPath)
@@ -38,15 +39,6 @@ func InitDB(dbPath string) error {
 		return err
 	}
 	schema := `
-	CREATE TABLE IF NOT EXISTS users (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		username TEXT NOT NULL UNIQUE,
-		password_hash TEXT NOT NULL,
-		authkey TEXT UNIQUE,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-
 	CREATE TABLE IF NOT EXISTS local_collection_sync (
 		collection_hash TEXT PRIMARY KEY,
 		local_path TEXT NOT NULL,
@@ -120,18 +112,7 @@ func InitDB(dbPath string) error {
 		FOREIGN KEY (version_id) REFERENCES collection_versions(id) ON DELETE CASCADE
 	);
 
-	CREATE TABLE IF NOT EXISTS transfer_tasks (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		type TEXT NOT NULL,
-		status TEXT NOT NULL DEFAULT 'pending',
-		params TEXT DEFAULT '',
-		result TEXT DEFAULT '',
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-
-
-		CREATE TABLE IF NOT EXISTS download_progress (
+	CREATE TABLE IF NOT EXISTS download_progress (
 			hash TEXT PRIMARY KEY,
 			total_size INTEGER DEFAULT 0,
 			received_size INTEGER DEFAULT 0,

@@ -271,29 +271,13 @@ export const mergeUserCollection = (username, source_username, coll, source_coll
 export const downloadUserFile = (username, coll, filepath) =>
   ws.admin('GET', `/${encodeURIComponent(username)}/${encodeURIComponent(coll)}/${encodePath(filepath)}`);
 
-/* ---- P2P ---- */
-export const getP2PStatus = () => request('GET', '/p2p/status');
-export const getP2PNode = () => request('GET', '/p2p/node');
-export const getP2PPeers = () => request('GET', '/p2p/peers');
-export const getP2PDiscovered = () => request('GET', '/p2p/discovered');
-export const pingPeer = (peerId) => request('GET', `/p2p/ping/${peerId}`);
-// 后端 POST /p2p/connect 绑定 {addr}，要求完整 multiaddr（含 /p2p/<peer_id>，见 back p2p.go ConnectPeer）。
-// 坑：旧实现发 {peer_id, addrs} 与后端字段不匹配，req.Addr 为空串导致每次连接都 500。
-export const connectPeer = (peerId, addrs = []) => {
-  const list = Array.isArray(addrs) ? addrs : [addrs];
-  const withPeer = list.filter(Boolean).map(a =>
-    a.includes('/p2p/') ? a : `${a}/p2p/${peerId}`);
-  if (withPeer.length === 0) return request('POST', '/p2p/connect', { addr: `/p2p/${peerId}` });
-  return request('POST', '/p2p/connect', { addr: withPeer[0] });
-};
-export const p2pAnnounce = (hash) => request('POST', '/p2p/announce', { hash });
-export const p2pRequestFile = (hash) => request('POST', '/p2p/request-file', { hash });
-export const getWSInfo = () => request('GET', '/p2p/ws/info');
-export const getSignalPeers = () => request('GET', '/p2p/status').then(r => r.signal_peers || []);
-export const getP2PTopology = () => request('GET', '/p2p/topology');
-export const getP2PQuality = () => request('GET', '/p2p/quality');
+// 注意：旧 libp2p 双栈面板（P2PPanel/P2PDashboard/P2PTopology/DHTExplorer 双栈查询）
+// 及其 api 导出（getP2PStatus/getP2PPeers/dualAnnounce/dualFind 等）已于 2026-08-19
+// 随 libp2p 端点删除一并清理——后端 /p2p/* 只剩 forward/auth-status/webrtc-info。
 
 /* ---- P2P BT ---- */
+// PeerJS 节点状态（GET /peerjs/node，2026-08-19 起替代已删的 /p2p/status 供前端面板用）。
+export const getPeerjsNode = () => request('GET', '/peerjs/node');
 export const getBTStatus = () => request('GET', '/bt/status');
 export const btAnnounce = (hash) => request('POST', '/bt/announce', { hash });
 export const btFind = (hash) => request('POST', '/bt/find', { hash });
@@ -318,10 +302,6 @@ export const downloadTorrentFile = (infohash) =>
   ws.admin('GET', `/bt/download/${infohash}/torrent`);
 export const btSeedCollection = (collectionHash) => request('POST', '/bt/seed-collection', { collection_hash: collectionHash });
 
-/* ---- P2P Dual ---- */
-export const dualAnnounce = (hash) => request('POST', '/p2p/dual/announce', { hash });
-export const dualFind = (hash) => request('POST', '/p2p/dual/find', { hash });
-
 /* ---- anon collection commit ---- */
 export const listAnonCollections = () => request('GET', '/anon/collections');
 
@@ -336,9 +316,6 @@ export const listPublicCollections = (q = '') =>
 // uploadFile 走 admin 二进制分片上传（ws.upload，multipart 字段 "file"）。
 export const uploadFile = (file) => ws.upload(file, file?.name, 'file');
 export const deleteFile = (hash) => request('DELETE', `/files/${hash}`);
-
-/* ---- task status ---- */
-export const getTasks = () => request('GET', '/tasks');
 
 /* ---- health ---- */
 export const ping = () => request('GET', '/ping');
@@ -484,7 +461,6 @@ export const deleteEntry = removeCollectionEntry;
 export const commitVersion = commitCollection;
 export const downloadFileByPath = downloadUserFile;
 export const mergeCollection = mergeUserCollection;
-export const getNodeInfo = getP2PNode;
 
 /* ---- access list ---- */
 export const createAccessList = (users, groups) =>

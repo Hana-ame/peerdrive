@@ -1,12 +1,11 @@
 # Peerdrive
 
-> **2026-05-04 · 项目封印**
+> **2026-08-13 起已解封重构**（PeerJS/WebRTC 互联层，见 `doc/REFACTOR.md`）。
+> 本文档主体已随重构更新；正文下方保留 2026-05 封印期的设计记录供参考。
 
 [![Peerdrive CI](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml/badge.svg)](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml)
 
-Peerdrive 是一个多协议文件集合管理器，支持 SHA256 内容寻址存储、URL 引用、P2P 传输和 BitTorrent 下载。通过 **Collection + Provider** 的统一抽象，将本地文件、HTTP 资源、IPFS DHT 和 BT DHT 整合到一个系统中。
-
-**项目已封印。** 以下记录设计思路、架构决策和教训。
+Peerdrive 是一个多协议文件集合管理器，支持 SHA256 内容寻址存储、URL 引用、P2P 传输和 BitTorrent 下载。通过 **Collection + Provider** 的统一抽象，将本地文件、HTTP 资源、PeerJS/WebRTC 互联整合到一个系统中。
 
 ---
 
@@ -83,7 +82,7 @@ cd front && npx vitest run
 
 ---
 
-## 为什么封印
+## 历史：为什么封印（2026-05）
 
 ### 1. 经济模型缺失
 

@@ -274,24 +274,20 @@ export default function Navbar() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const p2pItems = [
-    { to: '/p2p', label: '网络总览' },
-    { to: '/p2p/topology', label: '网络拓扑' },
-  ];
+  // 2026-08-19：P2P 网络下拉（/p2p 系列旧 libp2p 面板）已随 libp2p 端点删除移除——
+  // 节点互联状态改看设置页/后端 /peerjs/node；BT/IPFS 面板后端仍在，保留。
   const btItems = [
     { to: '/bt', label: 'BT 下载器' },
     { to: '/bt/status', label: 'BT DHT 状态' },
-    { to: '/bt/dht', label: 'BT DHT 查询' },
+    { to: '/bt/dht', label: 'BT DHT 采样' },
   ];
   const ipfsItems = [
     { to: '/ipfs', label: 'IPFS 总览' },
-    { to: '/ipfs/dht', label: 'IPFS DHT 查询' },
   ];
 
   const allNavItems = [
     { to: '/', label: '合集' },
     { to: '/create', label: '创建合集' },
-    { label: 'P2P 网络', children: p2pItems },
     { label: 'BT', children: btItems },
     { label: 'IPFS', children: ipfsItems },
   ];
@@ -325,7 +321,6 @@ export default function Navbar() {
         <div className="hidden md:flex items-center">
           <Link to="/" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">合集</Link>
           <Link to="/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">创建合集</Link>
-          <NavDropdown label="P2P 网络" to="/p2p" items={p2pItems} />
           <NavDropdown label="BT" to="/bt" items={btItems} />
           <NavDropdown label="IPFS" to="/ipfs" items={ipfsItems} />
         </div>

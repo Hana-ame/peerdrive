@@ -1,12 +1,10 @@
-// 复刻/拉取控制器 — 将源集合的所有条目复制到新集合（Fork），
-// 或同步上游更新（Pull，当前为占位实现）。
+// 复刻控制器 — 将源集合的所有条目复制到新集合（Fork）。
 // Fork 流程：查询源集合 → GetOrCreate 目标集合 → 逐条复制
 //   collection_entries 内容。
-// Pull 流程：验证请求 → 返回 "not implemented" 消息 → 创建
-//   transfer_tasks 记录并标记为 completed。
 // 路由：
 //   POST /actions/fork — 将源集合条目复制到新本地集合
-//   POST /actions/pull — 拉取上游更新（占位，v2 实现）
+// 注：PullCollection 占位（no-op + 假任务）已于 2026-08-19 删除
+// （TaskService 同批删除，/tasks 与 /pull 路由一并移除）。
 
 package controller
 
@@ -82,32 +80,4 @@ func ForkCollection(c *gin.Context) {
 		"collection_name": req.CollectionName,
 		"entries_count":   len(entries),
 	})
-}
-
-// PullCollection godoc
-// @Summary Pull upstream updates (placeholder)
-// @Description Placeholder for syncing upstream changes from a forked source. Currently returns a no-op task.
-// @Tags actions
-// @Accept json
-// @Produce json
-// @Param body body object{username=string,collection_name=string} true "Pull request"
-// @Success 200 {object} map[string]string "message"
-// @Router /actions/pull [post]
-func PullCollection(c *gin.Context) {
-	var req struct {
-		Username       string `json:"username"`
-		CollectionName string `json:"collection_name"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "pull not implemented (upstream sync coming in v2)"})
-
-	taskID, err := taskSvc.Create("pull", "")
-	if err == nil {
-		taskSvc.UpdateStatus(taskID, "completed", `{"note":"pull no-op"}`)
-	}
-	_ = taskID
 }

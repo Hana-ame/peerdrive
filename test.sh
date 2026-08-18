@@ -37,7 +37,7 @@ section "1. 基础健康检查"
 
 DATA=$($CURL "$API_BASE/ping") && pass "/ping → $DATA" || fail "/ping" "$DATA"
 
-DATA=$($CURL "$API_BASE/p2p/node") && pass "/p2p/node → $(echo $DATA | head -c 60)" || fail "/p2p/node" "$DATA"
+DATA=$($CURL "$API_BASE/peerjs/node") && pass "/peerjs/node → $(echo $DATA | head -c 60)" || fail "/peerjs/node" "$DATA"
 
 # ─────── 2. 文件上传与校验 ───────
 section "2. 文件上传与校验"
@@ -231,19 +231,7 @@ else
   fail "Merge collection" "$DATA"
 fi
 
-# ─────── 10. Pull ───────
-section "10. Pull"
-
-DATA=$($CURL -H 'Content-Type: application/json' \
-  -d '{"username":"tester","collection_name":"test-coll"}' \
-  -X POST "$API_BASE/actions/pull")
-if echo "$DATA" | grep -q "task_id\|message"; then
-  pass "Pull collection → OK"
-else
-  fail "Pull collection" "$DATA"
-fi
-
-# ─────── 11. 删除 ───────
+# ─────── 10. 删除 ───────
 section "11. 删除文件"
 
 DATA=$($CURL -X DELETE "$API_BASE/files/$TMP_HASH")
@@ -253,27 +241,15 @@ else
   fail "Delete file" "$DATA"
 fi
 
-# ─────── 12. 任务系统 ───────
-section "12. 任务系统"
-
-DATA=$($CURL "$API_BASE/tasks")
-if echo "$DATA" | grep -q "tasks"; then
-  pass "List tasks → OK"
-else
-  fail "List tasks" "$DATA"
-fi
-
-DATA=$($CURL "$API_BASE/tasks/99999") && fail "Get nonexistent task should fail" "got 200" || pass "Get nonexistent task → 4xx"
-
-# ─────── 13. 重复创建合集 ───────
-section "13. 重复操作"
+# ─────── 11. 重复创建合集 ───────
+section "11. 重复操作"
 
 DATA=$($CURL -H 'Content-Type: application/json' \
   -d '{"username":"tester","collection_name":"test-coll"}' \
   -X POST "$API_BASE/collections") && fail "Duplicate collection should fail" "got 200" || pass "Duplicate collection → 4xx/409"
 
-# ─────── 14. 上传同名文件 ───────
-section "14. 重复文件上传"
+# ─────── 12. 重复文件上传 ───────
+section "12. 重复文件上传"
 
 DATA=$($CURL -F "file=@$TMPFILE" "$API_BASE/files/upload") && pass "Re-upload same file → still OK" || fail "Re-upload" "$DATA"
 

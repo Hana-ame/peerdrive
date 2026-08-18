@@ -38,29 +38,9 @@ export const mergeUserCollection = () => EMPTY_PROMISE
 export const pullUserCollection = () => EMPTY_PROMISE
 export const getUserFileDownloadUrl = () => ''
 
-// P2P
-export const getP2PStatus = () => EMPTY_PROMISE
-export const getP2PNode = () => EMPTY_PROMISE
-export const getP2PPeers = () => EMPTY_ARRAY_PROMISE
-export const getP2PDiscovered = () => EMPTY_ARRAY_PROMISE
-export const pingPeer = () => EMPTY_PROMISE
-export const connectPeer = () => EMPTY_PROMISE
-export const p2pAnnounce = () => EMPTY_PROMISE
-export const p2pFetch = () => EMPTY_PROMISE
-export const p2pSync = () => EMPTY_PROMISE
-export const p2pPush = () => EMPTY_PROMISE
-export const p2pRequestFile = () => EMPTY_PROMISE
-export const getWSInfo = () => EMPTY_PROMISE
-export const getSignalPeers = () => EMPTY_ARRAY_PROMISE
-export const getP2PTopology = () => EMPTY_ARRAY_PROMISE
-export const getP2PQuality = () => EMPTY_PROMISE
-export const getPeersDetail = () => EMPTY_ARRAY_PROMISE
-export const getPeerDetail = () => EMPTY_PROMISE
-export const getP2PStats = () => EMPTY_PROMISE
-export const getConnections = () => EMPTY_ARRAY_PROMISE
-
 // BT
 export const getBTStatus = () => EMPTY_PROMISE
+export const getPeerjsNode = () => EMPTY_PROMISE
 export const btAnnounce = () => EMPTY_PROMISE
 export const btFind = () => EMPTY_PROMISE
 export const btGetDownloads = () => EMPTY_ARRAY_PROMISE
@@ -73,10 +53,6 @@ export const btResumeDownload = () => EMPTY_PROMISE
 export const btSeedDownload = () => EMPTY_PROMISE
 export const btStopSeed = () => EMPTY_PROMISE
 export const btGetStats = () => EMPTY_PROMISE
-
-// Dual
-export const dualAnnounce = () => EMPTY_PROMISE
-export const dualFind = () => EMPTY_PROMISE
 
 // Anon commit
 export const commitAnonCollection = () => EMPTY_PROMISE
@@ -91,9 +67,7 @@ export const setCollectionVisibility = () => EMPTY_PROMISE
 export const uploadFile = () => EMPTY_PROMISE
 export const deleteFile = () => EMPTY_PROMISE
 
-// Tasks & health
-export const getTasks = () => EMPTY_ARRAY_PROMISE
-export const getTaskStatus = () => EMPTY_PROMISE
+// Health
 export const ping = () => EMPTY_PROMISE
 
 // Settings
@@ -224,6 +198,5 @@ export const deleteEntry = removeCollectionEntry
 export const commitVersion = commitCollection
 export const downloadFileByPath = downloadUserFile
 export const mergeCollection = mergeUserCollection
-export const getNodeInfo = getP2PNode
 
 export const getBEP51Sample = () => EMPTY_ARRAY_PROMISE

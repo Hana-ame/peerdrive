@@ -58,9 +58,9 @@
 |---|---|---|
 | `router.go` 355-358、409-411 | legacy redirect（/anon/*、/actions/*）与真实路由重复注册 → 启动 panic | ✅ 已删 |
 | `router.go` | `/collections/:username` 与 `:hash` 通配符冲突 | ✅ 合并为分派器 |
-| `controller/auth.go` / `service/auth_service.go` | Auth 子系统（无路由注册的死代码） | 可删 |
-| `controller/task.go` `ListTasks` | 恒返回空 | 可删 |
-| `service/fork.go` `PullCollection` | 写假完成任务的 no-op | 可删 |
+| `controller/auth.go` / `service/auth_service.go` / `model/user.go` / `repository/user_repo.go` | Auth 子系统（无路由注册的死代码，router 认证走远程 reg server） | ✅ 已删（2026-08-19，连同 users 表 DDL） |
+| `controller/task.go` `ListTasks` | 恒返回空 | ✅ 已删（2026-08-19，连同 TaskService/transfer_tasks 表 DDL 与 /tasks 路由） |
+| `service/fork.go` `PullCollection` | 写假完成任务的 no-op | ✅ 已删（2026-08-19，/actions/pull 与 /collections/pull 路由同步移除） |
 
 ### E. 测试/杂项目录
 
@@ -108,8 +108,8 @@
 
 | api.js 函数 | 旧后端端点 | 状态 |
 |---|---|---|
-| `getP2PStatus` / P2P 面板系列 | `/p2p/*` | 待迁移（改查 `/peerjs/node`） |
-| `bt*`（BTController/BTPanel 用） | `/bt/*` | 保留至 BT 栈迁移决定 |
+| `getP2PStatus` / P2P 面板系列 | `/p2p/*` | ✅ 已删（2026-08-19）：P2PPanel/P2PDashboard/P2PTopology 页面与全部死导出移除，状态改查 `/peerjs/node`（`getPeerjsNode`） |
+| `bt*`（BTController/BTPanel 用） | `/bt/*` | 保留（BT 栈端点存在） |
 | `sync*` | `/local/*` | 保留 |
 | `registerLocal/URL/Folder` | `/files/register_*` | 保留（重复注册于 /collections/register-*） |
 
@@ -117,7 +117,8 @@
 
 | 页面 | 依赖 | 状态 |
 |---|---|---|
-| `P2PPanel` / `P2PDashboard` / `P2PTopology` / `DHTExplorer` / `IPFSPanel` / `BTPanel` / `BTController` | libp2p/BT 栈 | 待迁移：改为 PeerJS 节点面板（在线节点/连接/拉取）或删 |
+| `P2PPanel` / `P2PDashboard` / `P2PTopology` / `DHTExplorer`（双栈查询） | libp2p/BT 栈 | ✅ 已删（2026-08-19，端点已删无法迁移；DHTExplorer 保留 BEP51 采样） |
+| `IPFSPanel` | libp2p 状态 + IPFS HTTP | ✅ 已清理（2026-08-19）：删 libp2p 区段，保留 CID pin + 网关状态 |
 | `AnonExplorer` / `AnonCreator` / `Plaza` / `Explorer` | HTTP 集合 API | ✅ 保留（新架构主链路） |
 
 ---
@@ -129,3 +130,5 @@
 2. **M2**：后端 A 组 libp2p 栈（先确认 `controller/p2p.go` 中哪些端点还有前端调用）
 3. **M3**：BT 栈（拆 `p2p_bt/` 为独立库后从主模块移除）
 4. **M4**：杂项（cmd/p2p-test、manual-tests、peerdrive.db、auth 死代码）
+   - ✅ 2026-08-19：cmd/p2p-test、manual-tests、back/test 旧目录已不存在；
+     peerdrive.db 已 gitignore；auth/task/pull 死代码已删（见 D 节）

@@ -6,12 +6,9 @@ import Explorer from './pages/Explorer';
 import AnonCreator from './pages/AnonCreator/index';
 import AnonExplorer from './pages/AnonExplorer/index';
 import Settings from './pages/Settings';
-import P2PDashboard from './pages/P2PDashboard';
 import IPFSPanel from './pages/IPFSPanel';
 import BTPanel from './pages/BTPanel';
 import BTController from './pages/BTController';
-import P2PPanel from './pages/P2PPanel';
-import P2PTopology from './pages/P2PTopology';
 import DHTExplorer from './pages/DHTExplorer';
 import Navbar from './components/Navbar';
 import LLMAssistant from './components/LLMAssistant';
@@ -103,15 +100,13 @@ export default function App() {
                 <Route path="/c/:hash" element={<AnonExplorer />} />
                 <Route path="/anon/collections/:hash" element={<AnonExplorer />} />
                 <Route path="/anon" element={<AnonExplorer />} />
-                <Route path="/p2p" element={<P2PPanel />} />
+                {/* 旧 libp2p P2P 面板路由（/p2p、/p2p/dashboard、/p2p/topology）2026-08-19 随
+                    libp2p 端点删除移除；/ipfs/dht 并入 /bt/dht（DHTExplorer 现仅 BEP51 采样） */}
                 <Route path="/ipfs" element={<IPFSPanel />} />
                 <Route path="/bt" element={<BTController />} />
                 <Route path="/bt/controller" element={<Navigate to="/bt" replace />} />
                 <Route path="/bt/status" element={<BTPanel />} />
                 <Route path="/bt/dht" element={<DHTExplorer />} />
-                <Route path="/p2p/dashboard" element={<P2PDashboard />} />
-                <Route path="/p2p/topology" element={<P2PTopology />} />
-                <Route path="/ipfs/dht" element={<DHTExplorer />} />
                 <Route path="/settings" element={<Settings dataConsent={dataConsent} setDataConsent={setDataConsent} />} />
                 {/* 未知路径兜底回首页，避免空白页 */}
                 <Route path="*" element={<Navigate to="/" replace />} />

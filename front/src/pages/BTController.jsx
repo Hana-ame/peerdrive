@@ -108,15 +108,16 @@ export default function BTController() {
         const [ping, p2p, bt] = await Promise.all([
           // 节点健康检查走 WS admin（旧 fetch(apiBase+'/ping') HTTP 是 legacy）
           api.ping().then(() => true).catch(() => false),
-          api.getP2PStatus().catch(() => null),
+          // P2P 状态改查 /peerjs/node（旧 /p2p/status 已随 libp2p 栈删除）
+          api.getPeerjsNode().catch(() => null),
           api.getBTStatus().catch(() => null),
         ]);
         setNodeStatus({
           online: ping,
-          p2p: p2p?.enabled || false,
-          relay: p2p?.relay_mode === 'server',
+          p2p: p2p?.online || false,
+          relay: false,
           btNodes: bt?.num_nodes || 0,
-          peers: p2p?.connected_count || 0,
+          peers: p2p?.peers?.length || 0,
           checking: false,
         });
       } catch { setNodeStatus({ online: false, p2p: false, relay: false, btNodes: 0, checking: false }); }

@@ -1,7 +1,7 @@
 // 合集广场：浏览/搜索本机匿名合集和 P2P 公开合集
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listAnonCollections, listPublicCollections, getP2PStatus } from '../api';
+import { listAnonCollections, listPublicCollections, getPeerjsNode } from '../api';
 import CollectionCard from '../components/CollectionCard';
 
 // 从文本中提取 SHA256 哈希
@@ -38,7 +38,7 @@ export default function Plaza() {
   const navigate = useNavigate();
 
   // 首次加载时拉取合集列表和 P2P 状态
-  useEffect(() => { loadAll(); getP2PStatus().then(s => setP2pOnline(s?.enabled && s?.connected_count > 0)).catch(()=>{}); }, []);
+  useEffect(() => { loadAll(); getPeerjsNode().then(s => setP2pOnline(s?.online && (s?.peers?.length || 0) > 0)).catch(()=>{}); }, []);
 
   const loadAll = async () => {
     // 加载本机 + 公开合集

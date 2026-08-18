@@ -328,7 +328,36 @@ STUN）——无 UDP 的沙箱（docker 默认）会连不上，互联类测试�
 验证基线更新：前端 41/41（36+5）、peerjs `-race` 绿、transport `-race` 绿、
 集成 `-race -p 1` 脱外网 18.9s 绿。
 
-## 4. 帧协议（DataChannel 上，go↔go 与 go↔web 共用）
+### 3.13 死代码清理批次（2026-08-19，审阅后清理）
+
+代码审阅发现「LEGACY.md 标注可删/待迁移但未落地」的存量全部处理：
+
+**后端（-8 文件）**：
+- Auth 子系统整套（`controller/auth.go`、`service/auth_service.go`、`model/user.go`、
+  `repository/user_repo.go`）：`NewAuthController` 零调用点、无 `/auth/*` 路由
+  （router 认证走远程 reg server 的 `AuthRequired()`，与本地这套无关）
+- Task 子系统整套（`controller/task.go`、`service/task_service.go`、
+  `model/transfer_task.go`、`repository/task_repo.go`）：`ListTasks` 恒返空占位，
+  TaskService 唯一写入方是 PullCollection
+- `fork.go` `PullCollection`：no-op + 写假 completed 任务；`/tasks` 路由、
+  `/collections/pull`、`/actions/pull` 同步移除；db.go 的 `users`/`transfer_tasks`
+  建表 DDL 删除（存量库旧表无读写端，保留无害）
+- `p2p.go` 顶部 ~30 行描述已删函数的过时注释（GetNodeInfo/GetPeers/P2PStatus 等）清除
+
+**前端（-4 文件 + 重写 2 页 + 死导出清理）**：
+- P2PPanel / P2PDashboard / P2PTopology 删除：全部调用已删端点
+  （/p2p/status、/p2p/peers、/p2p/dual/* 等）；App.jsx 路由（/p2p、/p2p/dashboard、
+  /p2p/topology）与 Navbar「P2P 网络」下拉同步移除
+- `api.js` 死导出清理（14 个）：getP2PStatus/getP2PNode/getP2PPeers/getP2PDiscovered/
+  pingPeer/connectPeer/p2pAnnounce/p2pRequestFile/getWSInfo/getSignalPeers/
+  getP2PTopology/getP2PQuality/dualAnnounce/dualFind/getTasks + getNodeInfo 别名
+- 新增 `getPeerjsNode`（GET /peerjs/node，替代旧 /p2p/status 的在线状态查询），
+  Plaza「P2P 在线」徽标与 BTController 状态横幅改用它
+- DHTExplorer 重写为仅 BEP51 采样（/bt/bep51/sample 存活；双栈查询已死），
+  /ipfs/dht 路由并入 /bt/dht；IPFSPanel 重写为仅 CID pin + 网关状态
+- LLMAssistant 移除 get_tasks/get_p2p_status 两个死端点工具
+
+验证：back 全包 + 集成（-p 1 脱外网）全绿；前端 41/41；`go vet` 干净。
 
 ```jsonc
 // 请求（任意端）；reqId 为指令 UUID v4（服务端生成，保证跨连接唯一）

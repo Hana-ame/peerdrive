@@ -50,51 +50,17 @@ func InitForwardController(svc *transport.PeerJSService) {
 	forwardPeer = svc
 }
 
-// InitP2PController 注入 P2PService 实例供 P2P 处理函数使用。
-
 // InitBTController 注入 BTDHTService 实例供 BitTorrent DHT 处理函数使用。
 func InitBTController(svc *p2p_bt.BTDHTService) {
 	log.LogDebug("ctrl-p2p: InitBTController")
 	btSvc = svc
 }
 
-// InitResumeManager 注入 ResumeManager 实例供断点续传端点使用。
-
-// InitMultiPeerDownloader 注入 MultiPeerDownloader 实例供多源并行下载端点使用。
-
 // InitBTClient 注入 BTClient 实例供 BitTorrent 下载处理函数使用。
 func InitBTClient(c *p2p_bt.BTClient) {
 	log.LogDebug("ctrl-p2p: InitBTClient")
 	btClient = c
 }
-
-// InitDualController 注入 DualP2PService 实例供双网络（IPFS+BT）操作端点使用。
-
-// InitPeerTracker 注入 PeerTracker 实例供对端元数据和统计查询使用。
-
-// GetNodeInfo 处理 GET /p2p/node，返回本地节点 ID 和监听地址列表。
-
-// GetPeers 处理 GET /p2p/peers，返回当前已连接的对端 ID 列表。
-
-// GetDiscoveredPeers 处理 GET /p2p/discovered，返回 mDNS 发现的局域网对端列表。
-
-// PingPeer 处理 GET /p2p/ping/:peer_id，向指定对端发送 ping 并返回 RTT。
-
-// ConnectPeer 处理 POST /p2p/connect，通过 multiaddr 连接到远程对端。
-
-// AnnounceHash 处理 POST /p2p/announce，在 IPFS DHT 上宣布本节点持有指定 hash。
-
-// FetchCollection 处理 POST /p2p/fetch，从 P2P 网络获取匿名集合。
-
-// SyncFromPeer 处理 POST /p2p/sync，从指定对端同步文件到本地目录。
-
-// P2PStatus 处理 GET /p2p/status，返回 P2P 节点综合状态信息（连接数、传输任务、中继模式等）。
-
-// PushSync 处理 POST /p2p/push，推送集合条目到目标目录供对端获取。
-
-// RequestFile 处理 POST /p2p/request-file，向指定对端列表广播文件请求。
-
-// WSInfo 处理 GET /p2p/ws/info，返回 WebSocket 传输端点信息和消息类型。
 
 // --- BitTorrent DHT handlers ---
 
