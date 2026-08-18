@@ -409,3 +409,60 @@ func TestAdminUploadAbortedCleansTemp(t *testing.T) {
 		t.Fatalf("应回 err 帧, got %v", types)
 	}
 }
+
+// TestAdminUploadReplacedErrsOld 旧上传槽被新声明替换时，旧 reqId 必须收到
+// err 帧且旧临时文件被清理——此前替换静默清文件不回帧，旧上传的浏览器
+// Promise 永久挂起（pending 条目直到连接断开才清），且旧上传迟到块混入新
+// au 的 got 计数导致新上传被误判 size 超限中止、err 指向新 reqId（误导排查）。
+// 发现背景：代码审阅 2026-08-18（serveAdmin 重复声明上传路径）。
+func TestAdminUploadReplacedErrsOld(t *testing.T) {
+	// 需要非 nil handler：serveAdmin 在 binary 分支前有 adminHandler==nil 检查
+	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
+		return http.StatusOK, []byte(`{"ok":true}`), "application/json", nil
+	})
+	sess := &fakeSession{id: "local"}
+	svc.BindLocal(sess)
+	st := svc.pending[sess]
+	if st == nil {
+		t.Fatal("BindLocal 后应有 connState")
+	}
+
+	decl := func(reqID string) []byte {
+		raw, _ := json.Marshal(map[string]any{
+			"type": "admin", "method": "POST", "path": "/files/upload",
+			"binary": true, "filename": "a.bin", "size": 10, "reqId": reqID,
+		})
+		return raw
+	}
+
+	// 第一次声明：占槽（创建临时文件）
+	svc.serveAdmin(sess, st, decl("up-old"))
+	st.mu.Lock()
+	old := st.adminUp
+	st.mu.Unlock()
+	if old == nil {
+		t.Fatal("第一次声明应占槽")
+	}
+
+	// 第二次声明：替换 → 旧 reqId 回 err + 旧临时文件清理，新声明占槽
+	svc.serveAdmin(sess, st, decl("up-new"))
+	frames := sess.sentFrames()
+	if len(frames) != 1 || frames[0].header["type"] != "err" {
+		t.Fatalf("应给旧 reqId 回 err 帧, got %v", sess.sentTypes())
+	}
+	if reqID, _ := frames[0].header["reqId"].(string); reqID != "up-old" {
+		t.Fatalf("err 帧应带旧 reqId up-old, got %q", reqID)
+	}
+	if _, err := os.Stat(old.path); !os.IsNotExist(err) {
+		t.Fatalf("旧临时文件应被清理, 仍存在: %s", old.path)
+	}
+	st.mu.Lock()
+	if st.adminUp == nil || st.adminUp.reqID != "up-new" {
+		t.Fatalf("新声明应占槽")
+	}
+	au := st.adminUp
+	st.mu.Unlock()
+	// 收尾：清掉新槽的临时文件（测试不留残留）
+	os.Remove(au.path)
+	au.f.Close()
+}

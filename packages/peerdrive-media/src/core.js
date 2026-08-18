@@ -172,8 +172,15 @@ class ConnectionSlot {
     try {
       this.conn.send(makeUrlRequest(entry.url, reqId))
     } catch (err) {
+      // conn.send 抛异常（连接未就绪竞态/已死）：除删除 pending 外必须
+      // (1) 移除 abort 监听（否则 closure 持住 slot 与连接泄漏）、
+      // (2) flush——若 send 失败是瞬态（NotOpenYet 竞态），排队请求仍应继续。
+      // 与 abort 分支（上方的 cleanup+flush）语义对齐。
+      // 发现背景：代码审阅 2026-08-18（abort 分支已补 cleanup，send 失败路径遗漏）。
       this.pending.delete(reqId)
+      rec.cleanup()
       entry.reject(err)
+      this.flush()
     }
   }
 

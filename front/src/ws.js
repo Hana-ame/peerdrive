@@ -231,8 +231,14 @@ export function admin(method, path, body = null) {
 // upload 分片上传：admin binary 声明帧 + 连续二进制块（复用同一 WS 连接）。
 // field：multipart 字段名（默认 "file"）；path：上传端点（默认 /files/upload；
 // BT torrent 上传用 /bt/torrent + field "torrent"）。
+// readyState 守卫与 admin()/download() 一致：CONNECTING 下 sock.send 同步抛
+// InvalidStateError，executor 内 throw 虽会 reject 但 pending 条目泄漏到
+// onclose 才清（发现背景：代码审阅 2026-08-18，三入口守卫不齐）。
 export function upload(file, fileName, field = 'file', path = '/files/upload') {
   connect()
+  if (!sock || sock.readyState !== WebSocket.OPEN) {
+    return Promise.reject(new Error('ws: not connected'))
+  }
   const reqId = nextReqId()
   const name = fileName || (file && file.name) || 'file'
   return new Promise((resolve, reject) => {

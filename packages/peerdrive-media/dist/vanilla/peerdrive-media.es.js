@@ -2697,15 +2697,15 @@ var xt = class {
 				return;
 			}
 			let r = () => {
-				this.pending.delete(t), e.reject(new DOMException("aborted", "AbortError"));
+				this.pending.delete(t), n.cleanup(), e.reject(new DOMException("aborted", "AbortError")), this.flush();
 			};
 			n.cleanup = () => e.signal.removeEventListener("abort", r), e.signal.addEventListener("abort", r);
 		}
 		this.pending.set(t, n);
 		try {
 			this.conn.send(mt(e.url, t));
-		} catch (n) {
-			this.pending.delete(t), e.reject(n);
+		} catch (r) {
+			this.pending.delete(t), n.cleanup(), e.reject(r), this.flush();
 		}
 	}
 	handleData(e) {
@@ -2719,9 +2719,13 @@ var xt = class {
 		let t = ht(e);
 		if (!t) return;
 		let n = this.pending.get(t.reqId);
-		if (n) switch (t.type) {
+		if (!n) {
+			this.flush();
+			return;
+		}
+		switch (t.type) {
 			case "meta":
-				n.mime = t.mime || "application/octet-stream", n.size = t.size || 0, this.curReqId = t.reqId, t.status >= 400 && (this.pending.delete(t.reqId), this.curReqId === t.reqId && (this.curReqId = null), n.cleanup(), n.reject(/* @__PURE__ */ Error(`peerdrive-media: upstream ${t.status}`)));
+				n.mime = t.mime || "application/octet-stream", n.size = t.size || 0, this.curReqId = t.reqId, t.status >= 400 && (this.pending.delete(t.reqId), this.curReqId === t.reqId && (this.curReqId = null), n.cleanup(), n.reject(/* @__PURE__ */ Error(`peerdrive-media: upstream ${t.status}`)), this.flush());
 				break;
 			case "done":
 				this.pending.delete(t.reqId), this.curReqId === t.reqId && (this.curReqId = null);

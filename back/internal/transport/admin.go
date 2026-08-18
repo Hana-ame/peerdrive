@@ -140,9 +140,16 @@ func (s *PeerJSService) serveAdmin(c Session, st *connState, raw []byte) {
 		st.mu.Lock()
 		// 防御：上一槽未收齐（浏览器放弃/异常）——直接替换并清旧文件。
 		// 浏览器串行声明上传，不会出现两个并发声明；恶意重复声明只清临时文件。
+		// 必须给旧 reqId 回 err：否则其浏览器 Promise 永久挂起（pending 条目
+		// 直到连接断开才清），且旧上传的迟到块会混入新 au 的 got 计数导致新
+		// 上传被误判 size 超限中止、err 指向新 reqId（误导排查）。
+		// 发现背景：代码审阅 2026-08-18。
 		if old := st.adminUp; old != nil {
 			os.Remove(old.path)
 			old.f.Close()
+			st.mu.Unlock()
+			_ = c.SendJSON(dcResp{Type: "err", Msg: "admin upload replaced by new declaration", ReqID: old.reqID})
+			st.mu.Lock()
 		}
 		au := &adminUploadState{
 			reqID:    ar.ReqID,
