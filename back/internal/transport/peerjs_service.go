@@ -200,18 +200,35 @@ func (s *PeerJSService) startLoop() {
 			go s.connectLoop(pid)
 		}
 
-		// 房间发现（多路并取）：自托管信令服务器的发现 API 优先，否则 MQTT
-		if s.httpDisc == nil && s.cfg.DiscoverURL != "" {
+		// 房间发现（多路并取）：自托管信令服务器的发现 API 优先，否则 MQTT。
+		// peerMu 保护 httpDisc/discovery 的读写（低危 2 修复的补齐）：Close
+		// 并发置 nil，无锁快照是 data race（-race 集成测试连跑暴露，2026-08-18）。
+		// 重建前查 ctx：Close 已 cancel 时不再启动新发现（防清理竞态泄漏
+		// goroutine——Close 置 nil 后本循环仍可能走到这里）。
+		s.peerMu.Lock()
+		httpDisc := s.httpDisc
+		disc := s.discovery
+		s.peerMu.Unlock()
+		if s.ctx.Err() != nil {
+			return
+		}
+		if httpDisc == nil && s.cfg.DiscoverURL != "" {
 			cols := s.collectionHashes()
-			s.httpDisc = NewHTTPDiscovery(s.cfg.DiscoverURL, s.id, cols, s.onDiscoveredPeer)
-			s.httpDisc.Start()
+			httpDisc = NewHTTPDiscovery(s.cfg.DiscoverURL, s.id, cols, s.onDiscoveredPeer)
+			httpDisc.Start()
+			s.peerMu.Lock()
+			s.httpDisc = httpDisc
+			s.peerMu.Unlock()
 			log.LogInfo("peerjs: http discovery enabled url=%s collections=%d", s.cfg.DiscoverURL, len(cols))
-		} else if s.discovery == nil && s.cfg.MQTTEnable {
+		} else if disc == nil && s.cfg.MQTTEnable {
 			cols := s.collectionHashes()
-			s.discovery = NewMQTTDiscovery(s.cfg.MQTTBroker, s.cfg.MQTTTopicPref,
+			disc = NewMQTTDiscovery(s.cfg.MQTTBroker, s.cfg.MQTTTopicPref,
 				"pd-node-"+s.id, s.onDiscoveredPeer)
-			s.discovery.Start(cols)
-			s.discovery.Announce(s.id, cols)
+			disc.Start(cols)
+			disc.Announce(s.id, cols)
+			s.peerMu.Lock()
+			s.discovery = disc
+			s.peerMu.Unlock()
 			log.LogInfo("peerjs: mqtt discovery enabled broker=%s collections=%d", s.cfg.MQTTBroker, len(cols))
 		}
 
