@@ -184,7 +184,7 @@ var b = class {
 		if (!t) throw Error("peerdrive-media: peer (node peer id) is required");
 		if (!e || typeof e != "string") throw Error("peerdrive-media: url is required");
 		let i = `${y(n)}|${t}`, a = this.slots.get(i);
-		if (a || (a = new b(t, n), this.slots.set(i, a)), r?.aborted) throw new DOMException("aborted", "AbortError");
+		if ((!a || a.closed) && (a = new b(t, n), this.slots.set(i, a)), r?.aborted) throw new DOMException("aborted", "AbortError");
 		return new Promise((t, n) => {
 			a.request(e, t, n, r);
 		});

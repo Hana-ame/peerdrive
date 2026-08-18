@@ -256,7 +256,11 @@ export class PeerMediaClient {
     if (!url || typeof url !== 'string') throw new Error('peerdrive-media: url is required')
     const key = `${signalingKey(signaling)}|${peer}`
     let slot = this.slots.get(key)
-    if (!slot) {
+    // 断线后重建：teardown/failAll 置 closed=true 但槽位仍在缓存中，
+    // 若沿用 closed 槽位，request() 的「closed 不再 open()」守卫会让新请求
+    // 永久排队、Promise 永不 settle（加载中无错误）。
+    // 发现背景：代码审阅 2026-08-18（Node 端重启/断网后页面恢复场景）。
+    if (!slot || slot.closed) {
       slot = new ConnectionSlot(peer, signaling)
       this.slots.set(key, slot)
     }

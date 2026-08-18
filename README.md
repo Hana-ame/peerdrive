@@ -29,8 +29,9 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 | 层 | 技术 |
 |----|------|
 | HTTP | Gin |
-| P2P | libp2p + Kademlia DHT |
-| BT | anacrolix/dht/v2 |
+| P2P | PeerJS 信令 + WebRTC DataChannel（`back/peerjs/` go-peerjs；发现：MQTT / 自托管 HTTP） |
+| BT | `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt，独立库） |
+| 管理面 | 本地 WS admin verb（前端全走 `front/src/ws.js`） |
 | 存储 | SQLite + 内容寻址文件系统 |
 | 前端 | React 19 + Vite 8 + TailwindCSS 3 |
 
@@ -87,11 +88,14 @@ DHT 节点从千万级降到百万级。流媒体时代种子分享本身在萎�
 
 ## 留下的东西
 
+> 注意：本段描述的是 2026-05 封印时的历史模块。**libp2p 栈已于 2026-08-16
+> 全部删除**（`back/internal/service/p2p.go`、`p2p_dual.go` 等已不存在），当前
+> 互联层为 PeerJS/WebRTC，见 `doc/REFACTOR.md`。
+
 | 模块 | 价值 |
 |------|------|
-| `back/internal/p2p_bt/` | 纯 Go BT DHT 实现，可独立使用 |
-| `back/internal/provider/` | 多协议文件获取抽象 |
+| `back/p2p_bt/` | BT DHT 能力（独立库 `github.com/Hana-ame/go-peerdrive-bt`；**README 旧断言「可独立使用」是错的**——依赖桥接层，以 REFACTOR.md 第 6 节为准） |
+| `back/internal/provider/` | 多协议文件获取抽象（下载管线） |
 | `back/internal/model/anon.go` | Content-addressed collection JSON 格式 |
-| `back/internal/service/p2p.go` | libp2p 实际集成参考 |
-| `back/internal/service/p2p_dual.go` | 双 DHT 编排模式 |
+| `back/internal/transport/peerjs_service.go` | 当前互联层：PeerJS 信令 + WebRTC DataChannel |
 | `doc/` | 完整的架构决策和测试记录 |
