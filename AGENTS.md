@@ -6,7 +6,7 @@
 
 1. **`doc/REFACTOR.md`** ← 重构记录：**所有新做的东西、架构决策、坑、帧协议、E2E 验证方式都在这**。动代码前必读。
 2. `doc/LEGACY.md` — 旧代码清单（libp2p/BT/WebDAV/前端死代码，标注可删/待迁移/保留）
-3. `README.md` — 项目概览（注意：**README 关于 p2p_bt "可独立使用" 的断言是错的**，以 REFACTOR.md 第 6 节为准）
+3. `README.md` — 项目概览（注意：README 的 p2p_bt 旧断言「可独立使用」已于 2026-08-18 修正——依赖桥接层，以 REFACTOR.md 第 6 节为准）
 
 ## 核心事实（30 秒版）
 

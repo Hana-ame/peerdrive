@@ -261,8 +261,14 @@ npm 不支持 git 依赖的 `#path:` 子目录语法（pnpm/yarn 才支持），
      每次排队请求都 open()（4 个组件并发 = 4 条 Peer 连接，Node 端 busy 拒绝）；
      客户端未按 Node 端「连接级串行」自排队（并发请求被 `another request in
      flight` 拒绝）→ opening 守卫 + flush() 队列
+  6. **closed slot 复用挂死**：teardown 置 `closed=true` 但槽位仍在 client 缓存中，
+     后续 load() 沿用 closed 槽位时 request() 的「closed 不再 open()」守卫让新请求
+     永久排队、Promise 永不 settle（加载中无错误）。修复：load() 检测 slot.closed
+     即重建；浏览器实测 dispose → 再 load 成功。发现背景：代码审阅 2026-08-18
 - 遗留：`test/e2e-browser.mjs` 的 readyState≥1 断言对无容器假视频字节不适用
   （demo fake.mp4 无合法容器），改为只验元素挂载
+- 断线感知提示：WebRTC 无 STUN 时 keepalive 超时可达数十秒，断线后请求会
+  在 teardown 前发到死连接而报错（正确行为）；需即时失败用 client.dispose()
 
 ## 4. 帧协议（DataChannel 上，go↔go 与 go↔web 共用）
 
