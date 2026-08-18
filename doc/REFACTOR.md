@@ -314,6 +314,20 @@ STUN）——无 UDP 的沙箱（docker 默认）会连不上，互联类测试�
 保护 onOpen/onMessage/onClose 回调注册与触发并发）是 -race 连跑自托管测试时暴露的
 真 bug，真实网络下同样存在（时序慢不易触发）。
 
+**测试补全批次（2026-08-18，77cff65）**：1-10 项全部落地后，按「保证 test 全面」
+补的回归测试，覆盖此前未锁定的行为：
+
+| 测试 | 锁定目标 |
+|---|---|
+| `front/tests/api.test.js`（新文件，5 项） | getBlobUrl 200MB TOO_LARGE 阈值、同 hash 并发 in-flight 去重（第 7 项）、失败后重试、缓存命中刷新 LRU、LRU 逐出 revoke（第 1 项） |
+| `peerjs` peer_test.go `TestConnection_CallbackRegistration_Concurrent` | handlerMu 修复的 -race 回归：50 轮并发「注册 vs 触发」，并验证快照读不破坏注册语义 |
+| transport peerjs_service_test.go `TestServeFile_IndexPathAllowed` | fallback 分支 file_index 命中合法路径必须回传（第 3 项重写时丢分支的回归——集成测试报 not found 暴露） |
+| transport servefile_router_test.go `TestServeFile_RouterInfoSizeFail` | InfoSize 失败 → meta.total=-1（协议约定，数据流不受影响）；`infoFailRouter` 对齐 PeerSource/URLSource 无元数据场景 |
+| integration selfhosted_test.go `TestStartClose_RacePressure` | 30 轮 Start/Close + 50ms 命中竞态窗口：锁死 startLoop 发现组件 peerMu 快照 + ctx.Err() 守卫（dfd4acb 修复的 -race 回归） |
+
+验证基线更新：前端 41/41（36+5）、peerjs `-race` 绿、transport `-race` 绿、
+集成 `-race -p 1` 脱外网 18.9s 绿。
+
 ## 4. 帧协议（DataChannel 上，go↔go 与 go↔web 共用）
 
 ```jsonc
@@ -393,19 +407,24 @@ SendFrame 并发原子性（8×50 轮验证头体不交织）、**SendFrame 内�
 （高水位阻塞 → 低水位恢复；连接关闭退出不悬挂）**、文本/二进制帧类型、
 远端关闭清理、ICE 配置入口。
 
-集成测试（真实公共信令 0.peerjs.com + 公共 broker broker.emqx.io，需外网+代理）：
+集成测试（脱外网，全局自托管信令——见 §3.12 第 6 项；race 下跑）：
 
 ```bash
-cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1 -v
+cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1 -race
 ```
 
-**必须 `-p 1` 串行**：公共信令上多组测试并行会互相干扰（发现：默认并行时
-ThreeNodes/MQTT 偶发失败，串行全绿）。集成测试依赖真实外部服务，天然不可并行。
+**必须 `-p 1` 串行**：多组测试共享全局自托管信令服务器，并行会互相干扰（信令
+注册的 ID/房间互相可见）。MQTT 公共 broker 测试需 `PEERDRIVE_MQTT_TEST=1` 显式
+门控（默认跳过，脱外网）；线上环境测试 `PEERDRIVE_LIVE_TEST=1`；无 UDP 沙箱
+（docker 默认）用 `PEERDRIVE_SKIP_RTC=1` 跳过 WebRTC 互联类（本地 WS/admin 类
+不受影响）。
 
 覆盖：双节点互通+range 拉取、3 节点两两互联、4 节点星型一对多并发拉取、
 **4 并发 × 2MB 大文件拉取（流控死锁回归，修复前卡到超时）**、
-MQTT 分片互相发现（含 60s 心跳兜底时序）、MQTT 发现→PeerJS 互联→拉文件全链路、
-本地 WS 会话拉取 + FetchFromPeer("local") 双向复用。
+MQTT 分片互相发现（含 60s 心跳兜底时序，门控外网）、MQTT 发现→PeerJS 互联→
+拉文件全链路（门控外网）、本地 WS 会话拉取 + FetchFromPeer("local") 双向复用、
+自托管信令协议兼容（peerjs 客户端模块直连）、自托管发现 API 互联拉文件、
+Start/Close 竞态压力（30 轮，-race 回归）。
 
 ## 6. 旧代码处置（详见 doc/LEGACY.md）
 

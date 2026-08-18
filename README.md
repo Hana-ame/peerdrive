@@ -48,6 +48,7 @@ cd front && npm run dev
 
 # 测试
 cd back && go test -tags nosqlite ./... -count=1
+cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1   # 脱外网（自托管信令）
 cd front && npx vitest run
 ```
 
