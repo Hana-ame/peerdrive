@@ -397,8 +397,8 @@ controller（本层）
 7. **BTSeedCollection 的全量内存/磁盘拷贝**（p2p.go:615-709）：合集条目逐个 ReadFile +
    WriteFile 两次（临时目录 + BT 数据目录）——大合集内存峰值高，属已知局限（TODO 可
    流式化）。
-8. **p2p.go 整体属 legacy 残留**（LEGACY.md 第 27 行「待迁移」）：libp2p 时代端点已删
-   （REFACTOR.md §8 批2），剩 BT/IPFS/forward 三个子组；其中 forward 是新实现
+8. **p2p.go 承载 legacy 端点**（LEGACY.md A 段）：libp2p 时代端点已删（REFACTOR.md §8
+   批2，2026-08-16），现 p2p.go 保留 BT/IPFS/forward 三个子组；其中 forward 是新实现
    （REFACTOR.md §3.9），BT/IPFS 依赖外部能力切面 ⑦。
 9. **auth.go/task.go ListTasks 无路由注册/恒空**（LEGACY.md 第 61-62 行）：保留占位。
 

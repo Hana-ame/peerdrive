@@ -365,10 +365,11 @@ MQTT 分片互相发现（含 60s 心跳兜底时序）、MQTT 发现→PeerJS �
 
 ## 6. 旧代码处置（详见 doc/LEGACY.md）
 
-- libp2p 栈（p2p.go/transfer/resume/multipeer/dual/ws/signaling/relay...）：**待迁移**（被 PeerJS 取代）
-- BT 栈（p2p_bt/）：**待迁移成独立库**——但注意 README 说"可独立使用"是**错的**：
-  它依赖 `internal/log`，`PutImmutable` 本地 store 优先掩盖网络失败，`putLocal` 依赖 anacrolix 内部行为
-- WebDAV/forward/auth 死代码：**可删**（高危）
+- libp2p 栈（p2p.go/transfer/resume/multipeer/dual/ws/signaling/relay...）：✅ **已删**（2026-08-16 批2，被 PeerJS 取代）
+- BT 栈（p2p_bt/）：✅ **已独立成库** `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt 即其源码，go.mod replace 引用）。
+  原 README 说"可独立使用"是**错的**（依赖 `internal/log`，`PutImmutable` 本地 store 优先掩盖网络失败，
+  `putLocal` 依赖 anacrolix 内部行为）——该断言已于 2026-08-18 修正
+- WebDAV/forward/auth 死代码：✅ **已删**（2026-08-16，WebDAV 无认证任意读写删；forward 重建为 PeerJS 版）
 - 前端 ~4000 行死组件：✅ **已删**（2026-08-16，见 LEGACY.md F 节；含 FileManager/WebRTCTransfer/
   旧 P2P 状态面板/localDB 等 21 文件 + api.js 死导出清理；CollBrowserNav 勘误保留）
   同步修复一批活跃主链路 bug（合并/移动语义/竞态守卫等，见 doc/REVIEW-FIX-2026-08-16.md 第二轮）

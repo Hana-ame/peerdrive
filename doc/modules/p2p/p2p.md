@@ -210,6 +210,6 @@ PEERDRIVE_PORT=3001 go run ./cmd/server/main.go
 PEERDRIVE_PORT=3002 PEERDRIVE_P2P_LISTEN=/ip4/0.0.0.0/tcp/0 \
 go run ./cmd/server/main.go
 
-# 运行 P2P 测试脚本
-bash test/p2p_transfer.sh
+# 运行 P2P 测试（注意：本文档描述的是 2026-08-16 已删除的 libp2p 栈，
+# 当前互联层为 PeerJS/WebRTC，见 doc/REFACTOR.md；test/p2p_transfer.sh 已随栈删除）
 ```
