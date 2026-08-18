@@ -1,5 +1,9 @@
 # P2P 网络架构
 
+> **⚠️ 过时文档（历史存档）**：本文档描述的 libp2p 栈已于 2026-08-16 全部删除
+> （REFACTOR.md §8）。当前互联层 = PeerJS 信令 + WebRTC DataChannel
+> （`back/internal/transport/peerjs_service.go` + `back/peerjs/`），以下内容仅作历史参考。
+
 > **最后修改**: 2026-04-27 · **版本**: v2.0
 > **上一版本**: v1.0 (2026-04-26) — 基础 libp2p 节点、mDNS 发现、Exchange 协议
 > **本版新增**: 连接管理器（心跳/重连）、分片传输（256KB chunk/8并发）、STUN 配置、SIZE 协议
