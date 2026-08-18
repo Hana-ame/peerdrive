@@ -80,16 +80,19 @@ func dispatchGetTree(c *gin.Context) {
 	}
 }
 
-// withParams 复制 gin context 并追加 URL 参数。
+// withParams 在原 context 上追加 URL 参数并返回原 c。
 // 背景：gin 的 c.Param 只读注册时的参数名，分派器合并了不同语义的路由
-// （:id → :hash/:username/:collection_name），用 Copy + 追加 Params 补齐，
-// 让底层 controller 无需改动。Copy 会复制 Keys 与 ResponseWriter，handler 内串行使用安全。
+// （:id → :hash/:username/:collection_name），用追加 Params 补齐，
+// 让底层 controller 无需改动。
+// 坑：不能用 c.Copy()——gin v1.8+ 的 Context.Copy 不复制 ResponseWriter，
+// 下游 c.JSON 必然 nil-pointer panic（2026-08-19 test.sh 6b GET
+// /collections/tester 暴露 500）。dispatcher 单请求串行调用，append 原
+// context 安全；handler 返回后请求即结束，无需恢复 Params。
 func withParams(c *gin.Context, kv ...string) *gin.Context {
-	cp := c.Copy()
 	for i := 0; i+1 < len(kv); i += 2 {
-		cp.Params = append(cp.Params, gin.Param{Key: kv[i], Value: kv[i+1]})
+		c.Params = append(c.Params, gin.Param{Key: kv[i], Value: kv[i+1]})
 	}
-	return cp
+	return c
 }
 
 func splitPath(p string) []string {

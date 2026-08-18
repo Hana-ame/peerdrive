@@ -43,6 +43,21 @@ func InitCollectionController(svc *service.CollectionService) {
 	collSvc = svc
 }
 
+// collectionUsername 读取集合路由的 username 参数。
+// 背景：collections 组子路由（entries/commit/rollback/visibility/tags）注册的
+// 参数名是 :id（gin 同一前缀只允许一组 param 段），但 handler 统一读
+// :username——grep 不出任何调用点，运行时恒空，导致 GetOrCreate("") 创建空
+// 用户名脏行、条目挂错集合（2026-08-19 test.sh 7d/7e 暴露：Add entry OK 但
+// Get entries 空）。分派器（dispatchGet*）走 withParams 补齐 username，
+// 直接挂载的 handler 需此兜底。
+func collectionUsername(c *gin.Context) string {
+	username := c.Param("username")
+	if username == "" {
+		return c.Param("id")
+	}
+	return username
+}
+
 // CreateCollection godoc
 // @Summary Create a new collection
 // @Description Create a named collection for a user. Duplicate (username, collection_name) returns 409.
@@ -194,7 +209,7 @@ func GetCollection(c *gin.Context) {
 // @Failure 400 {object} map[string]string "Invalid request"
 // @Router /collections/{username}/{collection_name}/entries [post]
 func AddEntry(c *gin.Context) {
-	username := c.Param("username")
+	username := collectionUsername(c)
 	collectionName := c.Param("collection_name")
 	var req struct {
 		Path      string           `json:"path"`
@@ -237,7 +252,7 @@ func AddEntry(c *gin.Context) {
 // @Failure 404 {object} map[string]string "Collection not found"
 // @Router /collections/{username}/{collection_name}/entries/{path} [delete]
 func RemoveEntry(c *gin.Context) {
-	username := c.Param("username")
+	username := collectionUsername(c)
 	collectionName := c.Param("collection_name")
 	path := strings.TrimPrefix(c.Param("path"), "/")
 	col, err := collSvc.Get(username, collectionName)
@@ -327,7 +342,7 @@ func DownloadCollectionFile(c *gin.Context) {
 // @Failure 404 {object} map[string]string "Collection not found"
 // @Router /collections/{username}/{collection_name}/commit [post]
 func CommitCollection(c *gin.Context) {
-	username := c.Param("username")
+	username := collectionUsername(c)
 	collectionName := c.Param("collection_name")
 	var req struct {
 		CommitMessage string `json:"commit_message"`
@@ -446,7 +461,7 @@ func GetVersionLog(c *gin.Context) {
 // @Failure 404 {object} map[string]string "Collection not found"
 // @Router /collections/{username}/{collection_name}/rollback/{version_id} [post]
 func RollbackCollection(c *gin.Context) {
-	username := c.Param("username")
+	username := collectionUsername(c)
 	collectionName := c.Param("collection_name")
 	versionID := c.Param("version_id")
 	var vid int
@@ -499,7 +514,7 @@ func RollbackCollection(c *gin.Context) {
 // @Failure 400,404 {object} map[string]string "error"
 // @Router /collections/{username}/{collection_name}/visibility [post]
 func SetCollectionVisibility(c *gin.Context) {
-	username := c.Param("username")
+	username := collectionUsername(c)
 	collectionName := c.Param("collection_name")
 	var req struct {
 		Visibility string `json:"visibility"`
@@ -558,7 +573,7 @@ func ListPublicCollections(c *gin.Context) {
 // @Failure 400,404 {object} map[string]string "error"
 // @Router /collections/{username}/{collection_name}/tags [post]
 func UpdateCollectionTags(c *gin.Context) {
-	username := c.Param("username")
+	username := collectionUsername(c)
 	collectionName := c.Param("collection_name")
 	var req struct {
 		Tags []string `json:"tags"`
