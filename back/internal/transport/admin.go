@@ -186,6 +186,11 @@ func (s *PeerJSService) serveAdmin(c Session, st *connState, raw []byte) {
 func (s *PeerJSService) adminUploadChunk(c Session, au *adminUploadState, data []byte, last bool) {
 	if len(data) > 0 {
 		if _, err := au.f.Write(data); err != nil {
+			// 写失败：必须清理临时文件与句柄，否则泄漏（文件 + fd 常驻）。
+			// 与 aborted 分支的清理语义一致；aborted 分支在下方。
+			// 发现背景：代码审阅 2026-08-18（此前仅 aborted 分支清理）。
+			os.Remove(au.path)
+			au.f.Close()
 			_ = c.SendJSON(dcResp{Type: "err", Msg: "admin upload write failed: " + err.Error(), ReqID: au.reqID})
 			return
 		}
