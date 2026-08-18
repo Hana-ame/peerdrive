@@ -160,13 +160,29 @@ export const downloadFileToDisk = (hash, filename) => ws.downloadToFile(hash, fi
 // getBlobUrl 经 WS 拉取文件 → objectURL（图片/视频/PDF 预览用），带缓存。
 // 旧做法直接 <img src={getDownloadUrl(hash)}> 走 HTTP（legacy）；迁移后预览
 // 资源也走 WS。objectURL 生命周期由调用方 revoke（或页面卸载时清理）。
+// 内存泄漏防御（发现背景：代码审阅 2026-08-18——blobUrlCache 只增不减，
+// 每个不重复 hash 的预览各占一个 Blob 内存 + objectURL，长时间浏览累积）：
+// LRU 上限 + 淘汰即 revoke。Map 迭代序 = 插入序，重读 delete+set 刷新位置。
+const BLOB_URL_CACHE_MAX = 50;
 const blobUrlCache = new Map();
 export async function getBlobUrl(hash, mime = '') {
-  if (blobUrlCache.has(hash)) return blobUrlCache.get(hash);
+  if (blobUrlCache.has(hash)) {
+    const url = blobUrlCache.get(hash);
+    blobUrlCache.delete(hash); // 重读 → 刷新 LRU 位置（set 后位于末尾）
+    blobUrlCache.set(hash, url);
+    return url;
+  }
   const data = await ws.download(hash);
   const blob = new Blob([data], mime ? { type: mime } : undefined);
   const url = URL.createObjectURL(blob);
   blobUrlCache.set(hash, url);
+  if (blobUrlCache.size > BLOB_URL_CACHE_MAX) {
+    // 逐出最久未用的：正在屏幕上预览的必然近期被 get（位置靠后），
+    // 最旧项最可能已离开视图，revoke 其 objectURL 释放 Blob 内存。
+    const oldest = blobUrlCache.keys().next().value;
+    URL.revokeObjectURL(blobUrlCache.get(oldest));
+    blobUrlCache.delete(oldest);
+  }
   return url;
 }
 export const revokeBlobUrl = (hash) => {

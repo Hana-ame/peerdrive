@@ -155,8 +155,15 @@ class ConnectionSlot {
       }
       const onAbort = () => {
         // 中止：删除 pending（迟到帧被 handleData 丢弃）并 reject。
+        // 必须同时 (1) 移除自身监听（否则 listener 随 signal 常驻泄漏）、
+        // (2) flush 队列——Node 端无法取消已发出的请求，仍会处理完并回
+        // done/err，handleData 因 pending 不存在直接 return 不 flush，
+        // 排队中的下一个请求将永远不发（串行槽被空占）。
+        // 发现背景：代码审阅 2026-08-18（组件卸载中止 + 后续排队请求场景）。
         this.pending.delete(reqId)
+        rec.cleanup()
         entry.reject(new DOMException('aborted', 'AbortError'))
+        this.flush()
       }
       rec.cleanup = () => entry.signal.removeEventListener('abort', onAbort)
       entry.signal.addEventListener('abort', onAbort)
@@ -183,7 +190,13 @@ class ConnectionSlot {
     const msg = parseFrame(data)
     if (!msg) return
     const p = this.pending.get(msg.reqId)
-    if (!p) return // 响应迟到（已 abort）：忽略
+    if (!p) {
+      // 响应迟到（已 abort/清理）：串行槽仍被本请求占用（curReqId 可能
+      // 还指向它或已清空），必须 flush 让排队请求继续——否则队列永久卡死。
+      // 发现背景：代码审阅 2026-08-18（abort 后 Node 端仍回 done 的场景）。
+      this.flush()
+      return
+    }
     switch (msg.type) {
       case 'meta':
         p.mime = msg.mime || 'application/octet-stream'
@@ -194,6 +207,7 @@ class ConnectionSlot {
           if (this.curReqId === msg.reqId) this.curReqId = null
           p.cleanup()
           p.reject(new Error(`peerdrive-media: upstream ${msg.status}`))
+          this.flush() // 与 done/err 分支一致：腾出串行槽发排队请求
         }
         break
       case 'done':
