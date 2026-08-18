@@ -22,6 +22,16 @@
   复用全部 HTTP controller；WebRTC 不实现管理 verb 防权限暴露；二进制上传=声明帧+后续二进制帧，
   文件流响应=admin-bin 头+单二进制帧，详见 REFACTOR.md 第 3.10 节与 NODE-API.md §2.4），详见 REFACTOR.md 第 4 节
 - 旧的 libp2p/BT DHT 栈已于 2026-08-16 全部删除（REFACTOR §8），**新代码禁止 import**；BT 能力经独立库 `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt）
+- **第三方独立包 `peerdrive-media`**（`packages/peerdrive-media/`，独立 repo
+  `github.com/Hana-ame/peerdrive-media`，tag=version 同步）：浏览器经 PeerJS 信令 +
+  WebRTC DataChannel 从 Node 端加载 URL 资源渲染 img/video。三入口：react / vanilla
+  （IIFE+CDN）/ node（createPeerMediaServer）。npm 依赖用 `github:Hana-ame/peerdrive-media#v0.1.0`
+  （`@v0.1.0` 语法 npm 不认）。**改动后必须**：`npm run build`（dist 入库）+
+  `npm test`（13）+ 浏览器 E2E（`node ~/.claude/skills/playwright-test/scripts/test-runner.mjs
+  test/e2e-browser.mjs`，8 项，本机 Firefox）+ 同步独立 repo 镜像
+  （`/tmp/opencode/peerdrive-media`，cp 后 commit+push+`git tag -f v0.1.0`）。
+  协议：connection 级串行、raw 序列化、64KB 块、背压 4MB。坑与浏览器 E2E
+  五连见 REFACTOR.md §3.11。
 - 编码规范：关键/易错/非显然代码旁必须写「为什么这么写」的注释；测试函数必须标注「发现背景」（全局 AGENTS.md 硬性要求）
 
 ## 构建与验证

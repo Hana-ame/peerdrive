@@ -39,6 +39,13 @@ let sock = null
 let reqSeq = 0
 const pending = new Map() // reqId → 请求状态（resolve/reject + 下载收集态）
 
+// BIN_CHUNK 上传二进制分块大小：与后端协议一致（uploadChunkSize / inbound
+// chunkSize 均 64KB，见 back/internal/transport/{file_index,inbound}.go）。
+// 发现背景：FileReader 回退路径（旧浏览器无 stream() API）引用未定义常量
+// → ReferenceError，上传直接失败（代码审阅 2026-08-18 发现；现代浏览器走
+// Streams API 分支所以线上未触发）。WS 读限 3*64KB 之上，64KB 块安全。
+const BIN_CHUNK = 64 * 1024
+
 // binaryExpect 「最近二进制声明头」单槽：一个二进制帧必属于最近声明的
 // admin-bin 或 data 头（后端 SendFrame 原子连续保证，勿改）。
 let binaryExpect = null
