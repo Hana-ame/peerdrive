@@ -24,7 +24,7 @@ bash scripts/test-layers.sh --integration   # 追加真实信令集成段
 |----|------|-------------------|--------|--------------|
 | L1 | 信令/传输原语 | `cd back/peerjs && go test ./... -count=1 -race` | 21 | flowcontrol_test.go、peer_test.go |
 | L2 | 帧协议 | `go test -tags nosqlite ./internal/transport/ -count=1 -skip "^TestAdmin"` | 32 | conn/stream/forward/file_index/peerjs_service_test.go |
-| L3 | 管理面 | `go test -tags nosqlite ./internal/transport/ -count=1 -run "^TestAdmin"` | 9 | admin_test.go（含上传写失败/中止清理回归） |
+| L3 | 管理面 | `go test -tags nosqlite ./internal/transport/ -count=1 -run "^TestAdmin"` | 10 | admin_test.go（含上传写失败/中止清理/槽替换回归） |
 | L4 | 业务核心 | `go test -tags nosqlite ./internal/controller/... ./internal/service/... ./internal/source/... ./internal/downloader/...` | 94 | controller/*_test.go、service/*_test.go |
 | L5 | 数据 | `go test -tags nosqlite ./internal/repository/...` | 11 | file_repo/collection_repo_test.go |
 | L6 | 发现 | `go test -tags nosqlite ./internal/signalserver/...` | 6 | signalserver_test.go |
@@ -50,7 +50,7 @@ node ~/.claude/skills/playwright-test/scripts/test-runner.mjs test/e2e-browser.m
 - e2e.test.mjs：协议 E2E 7 项（分块/流式背压/MIME/404/白名单/连接串行复用）
 - e2e-browser.mjs：浏览器 E2E 10 断言（mount/load/视频/白名单/dispose 重建）
 - core.test.mjs：mock peerjs 的队列/中止边界 4 项（确定性，不用真实信令）
-- 坑与浏览器 E2E 五连见 `doc/REFACTOR.md` §3.11
+- 坑与浏览器 E2E 七连（含串行槽空占三入口）见 `doc/REFACTOR.md` §3.11
 
 ## 线上验证（可选）
 

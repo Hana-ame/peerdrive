@@ -214,11 +214,17 @@ client ◀──fwd-ok / fwd-err────────────────
   **坑**：初版硬编码 `/files/upload` 导致 torrent 打错路由，见 admin_test.go）
 - **二进制响应**：文件流 → `admin-bin` 头 + 单二进制帧（≤64MB；大文件走 req verb）
 - **认证**：admin 帧 token 字段 → 转发时注入 `Authorization: Bearer`，与 HTTP 一致
+- **上传槽替换坑（2026-08-18 审阅修复）**：重复声明上传时替换旧槽，必须给旧 reqId
+  回 err 帧——否则旧上传浏览器 Promise 永久挂起（pending 直到断连才清），且旧上传
+  迟到块混入新 au 的 got 计数导致新上传被误判 size 超限中止、err 指向新 reqId
 - **前端**：`front/src/ws.js`（新，admin/upload/download/downloadToFile，reqId pending
   map + 单槽 binaryExpect）+ `api.js` 全部 request 走 WS；页面下载/预览改 Blob
-  方式（`getBlobUrl`/`downloadFileToDisk`）；`__mocks__/api.js` 同步
-- 验证：后端 6 个 admin 单测 + 前端 `tests/ws.test.js` 7 个单测（reqId 乱序路由/
-  409 透传/token/分块收集/err/admin-bin/断线）+ 全量单测 + build 全绿
+  方式（`getBlobUrl`/`downloadFileToDisk`）；`__mocks__/api.js` 同步。
+  **getBlobUrl 缓存泄漏坑（2026-08-18 审阅修复）**：blobUrlCache 只增不减（每个
+  预览 hash 各占一个 Blob + objectURL）→ LRU 上限 50，淘汰即 revoke
+- 验证：后端 10 个 admin 单测 + 前端 `tests/ws.test.js` 8 个单测（reqId 乱序路由/
+  409 透传/token/分块收集/err/admin-bin/断线/upload FileReader 回退）+ 全量单测 +
+  build 全绿
 
 ### 3.11 standalone 包 peerdrive-media（2026-08-18，独立 repo）
 
@@ -239,10 +245,11 @@ npm 不支持 git 依赖的 `#path:` 子目录语法（pnpm/yarn 才支持），
 - **peer 安装**：npm 7+ 对 `peerDependenciesMeta optional` 标记的依赖不自动安装，
   会 `Cannot find package 'react'`（e2e 测试发现）→ 移除 meta，react/react-dom
   随装
-- **验证**：包内单测+E2E 13/13（帧协议 6 + 本地信令全链路 7）；消费者场景
+- **验证**：包内单测+E2E 17/17（帧协议 6 + 本地信令全链路 7 + core 串行队列 4）；
+  消费者场景
   复验——临时项目 `npm i github:Hana-ame/peerdrive-media` 后三入口 import 冒烟 +
   e2e.test.mjs（改包名导入）7/7
-- **浏览器 E2E（8/8，2026-08-18 补做）**：playwright 本机 Firefox headless
+- **浏览器 E2E（10/10，2026-08-18 补做）**：playwright 本机 Firefox headless
   （`~/.claude/skills/playwright-test/` 已弃 CDP 9222 改 local firefox；需
   `playwright-core/cli.js install firefox` 走代理补装），demo 页用 node 原生静态
   服务器（`scripts/static-serve.mjs`，vite dev 会 transform IIFE 破坏 `PeerMedia`
@@ -265,6 +272,14 @@ npm 不支持 git 依赖的 `#path:` 子目录语法（pnpm/yarn 才支持），
      后续 load() 沿用 closed 槽位时 request() 的「closed 不再 open()」守卫让新请求
      永久排队、Promise 永不 settle（加载中无错误）。修复：load() 检测 slot.closed
      即重建；浏览器实测 dispose → 再 load 成功。发现背景：代码审阅 2026-08-18
+  7. **串行槽空占三入口（2026-08-18 审阅修复）**：abort/迟到帧/conn.send 异常三类
+     路径都可能让「连接级串行槽」被空占——abort 只删 pending 不 flush（Node 端
+     处理完仍回 done/err，handleData 因 pending 不存在直接 return，排队请求永久
+     不发）；meta>=400 分支 delete+reject 但同样不 flush；conn.send 抛异常路径不
+     cleanup（abort 监听器泄漏，closure 持住 slot 与连接）。修复：三处统一补
+     cleanup+flush（flush 有 pending.size==0 守卫，不会过度发送）。core.test.mjs
+     4 项 mock 驱动事件流回归。发现背景：代码审阅 2026-08-18（组件卸载中止 +
+     后续排队请求场景）
 - 遗留：`test/e2e-browser.mjs` 的 readyState≥1 断言对无容器假视频字节不适用
   （demo fake.mp4 无合法容器），改为只验元素挂载
 - 断线感知提示：WebRTC 无 STUN 时 keepalive 超时可达数十秒，断线后请求会

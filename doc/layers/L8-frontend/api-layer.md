@@ -60,30 +60,33 @@ fragment 存 token、base 存干净 URL——**token 永不混入 API base**。
 
 | 函数 | 走 ws.js 的 | 后端端点语义 |
 |---|---|---|
-| `uploadFile(file)`（api.js:300） | `upload`（field `file`） | `POST /files/upload` multipart |
-| `btTorrentUpload(file)`（api.js:268） | `upload`（field `torrent`，path `/bt/torrent`） | `POST /bt/torrent` multipart |
+| `uploadFile(file)`（api.js:316） | `upload`（field `file`） | `POST /files/upload` multipart |
+| `btTorrentUpload(file)`（api.js:284） | `upload`（field `torrent`，path `/bt/torrent`） | `POST /bt/torrent` multipart |
 | `downloadFile(hash)`（api.js:157） | `download`（req verb） | sha256 内容寻址拉取 |
 | `downloadFileToDisk(hash, filename)` | `downloadToFile` | 同上 + `<a download>` 落盘 |
-| `downloadAnonFile(hash, p)`（api.js:208） | `admin GET`（admin-bin 响应） | 集合文件流 |
-| `downloadUserFile(username, coll, filepath)`（api.js:234） | `admin GET` | 用户集合文件流 |
-| `downloadTorrentFile(infohash)`（api.js:280） | `admin GET` | `.torrent` 文件流 |
+| `downloadAnonFile(hash, p)`（api.js:224） | `admin GET`（admin-bin 响应） | 集合文件流 |
+| `downloadUserFile(username, coll, filepath)`（api.js:250） | `admin GET` | 用户集合文件流 |
+| `downloadTorrentFile(infohash)`（api.js:296） | `admin GET` | `.torrent` 文件流 |
 
-- **encodePath**（api.js:205）：下载路径的虚拟路径逐段 `encodeURIComponent`
+- **encodePath**（api.js:221）：下载路径的虚拟路径逐段 `encodeURIComponent`
   （文件名可能含空格/`#`/`?` 等，不编码会破坏 URL；后端 gin `*filepath` 已对
   URL.Path 解码，编码后比对仍正确）。
-- **getBlobUrl**（api.js:164）：经 WS 拉取 → Blob → objectURL，`blobUrlCache`
-  Map 按 hash 缓存；`revokeBlobUrl` 由调用方在页面卸载时清理。
+- **getBlobUrl**（api.js:168）：经 WS 拉取 → Blob → objectURL，`blobUrlCache`
+  Map 按 hash 缓存；`revokeBlobUrl` 由调用方在页面卸载时清理。**LRU 上限 50**
+  （2026-08-18 审阅修复）：缓存只增不减时每个不重复 hash 的预览各占一个 Blob +
+  objectURL，长时间浏览累积；超限逐出最久未用项并 revoke（Map 迭代序=插入序，
+  重读 delete+set 刷新位置）。
 - 集合下载虚拟路径含 64 位 hash 时先 `encodeURIComponent(hash)` 再拼路径
-  （api.js:209）。
+  （api.js:225）。
 
 ### 数据形态兼容层
 
-- `registerURL`（api.js:181）：后端 `RegisterURL` 返回 `{hash,size,mime,filename}`
+- `registerURL`（api.js:197）：后端 `RegisterURL` 返回 `{hash,size,mime,filename}`
   （back file.go:120），`RegisterLocalFile` 只返回 `{hash,filename}`——统一补
   `mime_type`/`size` 兼容旧调用方。
-- `createAnonCollection`（api.js:195）：entries 归一化为
+- `createAnonCollection`（api.js:211）：entries 归一化为
   `{path, providers:[{type:'sha256'|'url', value, mime_type}]}`。
-- `connectPeer`（api.js:245）：后端 `POST /p2p/connect` 绑定 `{addr}` 要求完整
+- `connectPeer`（api.js:261）：后端 `POST /p2p/connect` 绑定 `{addr}` 要求完整
   multiaddr（含 `/p2p/<peer_id>`）——自动补 `/p2p/` 后缀。
 
 ### 直连 regserver 的例外（api.js:473-506）
@@ -122,15 +125,15 @@ api.js ──直接 fetch──▶ regServerUrl（组管理/评论，例外）
    「HTTP URL 直链」（`getDownloadUrl`/`getAnonFileDownloadUrl`/`getUserFileDownloadUrl`/
    `btGetTorrentUrl`）全部废弃，预览/下载改 Blob 方式（api.js 注释逐处标注）。
 2. **connectPeer 字段坑**：旧实现发 `{peer_id, addrs}` 与后端 `{addr}` 不匹配，
-   `req.Addr` 空串导致每次连接都 500——现在自动补完整 multiaddr（api.js:243-244）。
+   `req.Addr` 空串导致每次连接都 500——现在自动补完整 multiaddr（api.js:259-260）。
 3. **getBlobUrl 缓存**：同 hash 只拉一次；objectURL 生命周期由调用方 revoke，
-   否则内存泄漏（api.js:163）。
+   否则内存泄漏（api.js:157）。
 4. **saveConsentLocal 命名误导**：旧名 `uploadConsent` 让人误以为上传服务器，
    但后端没有 `/consent` 端点——只做本地记录（api.js:431-436）。
 5. **token 双来源优先级**：URL fragment token 恒生效，legacy 设置 token 需开关；
    两者并存时 fragment 优先（api.js:136-143）。
 6. **registerURL 字段差异**：`mime` vs `mime_type` 后端返回不一致，统一归一
-   （api.js:181-186），页面只认 `mime_type`。
+   （api.js:197-202），页面只认 `mime_type`。
 7. **直连第三方与 WS 并存**：regserver 接口不走 WS 是刻意的（不在本地节点上），
    新增「第三方服务」接口时沿此例，不要硬塞进 request()。
 

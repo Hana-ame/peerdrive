@@ -27,11 +27,11 @@
   WebRTC DataChannel 从 Node 端加载 URL 资源渲染 img/video。三入口：react / vanilla
   （IIFE+CDN）/ node（createPeerMediaServer）。npm 依赖用 `github:Hana-ame/peerdrive-media#v0.1.0`
   （`@v0.1.0` 语法 npm 不认）。**改动后必须**：`npm run build`（dist 入库）+
-  `npm test`（13）+ 浏览器 E2E（`node ~/.claude/skills/playwright-test/scripts/test-runner.mjs
-  test/e2e-browser.mjs`，8 项，本机 Firefox）+ 同步独立 repo 镜像
+  `npm test`（17）+ 浏览器 E2E（`node ~/.claude/skills/playwright-test/scripts/test-runner.mjs
+  test/e2e-browser.mjs`，10 项，本机 Firefox）+ 同步独立 repo 镜像
   （`/tmp/opencode/peerdrive-media`，cp 后 commit+push+`git tag -f v0.1.0`）。
   协议：connection 级串行、raw 序列化、64KB 块、背压 4MB。坑与浏览器 E2E
-  五连见 REFACTOR.md §3.11。
+  七连（含串行槽空占三入口）见 REFACTOR.md §3.11。
 - 编码规范：关键/易错/非显然代码旁必须写「为什么这么写」的注释；测试函数必须标注「发现背景」（全局 AGENTS.md 硬性要求）
 
 ## 构建与验证

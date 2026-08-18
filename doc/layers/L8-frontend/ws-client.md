@@ -7,15 +7,15 @@
 
 ## 职责
 
-- **管理面**：`admin(method, path, body)`（ws.js:211）→ 后端 admin verb 内部转发
+- **管理面**：`admin(method, path, body)`（ws.js:218）→ 后端 admin verb 内部转发
   gin engine → `admin-resp`（JSON）或 `admin-bin`（二进制文件流，如集合文件/.torrent）。
   覆盖集合/认证/BT/IPFS/任务/文件管理等全部 HTTP 语义端点。
-- **二进制上传**：`upload(file, fileName, field, path)`（ws.js:227）→ admin 声明帧 +
+- **二进制上传**：`upload(file, fileName, field, path)`（ws.js:237）→ admin 声明帧 +
   连续二进制块（文件分片上传、BT torrent 上传），后端收齐后 multipart 重包转发。
-- **数据面拉取**：`download(hash, offset, size)`（ws.js:295）→ `req` verb，与
+- **数据面拉取**：`download(hash, offset, size)`（ws.js:308）→ `req` verb，与
   WebRTC DataChannel 同一套帧协议（64KB 块 + data 头 + done 收尾）。
 - **连接生命周期**：单连接复用、断线 reject 全部 pending 并置空等重连、token 注入。
-- **下载落盘**：`downloadToFile(hash, filename)`（ws.js:309）→ Blob + `<a download>` 模拟保存。
+- **下载落盘**：`downloadToFile(hash, filename)`（ws.js:322）→ Blob + `<a download>` 模拟保存。
 
 **为什么存在**：帧协议（REFACTOR.md §4）只覆盖文件数据面（req 拉取 + create/upload/
 list/info/delete/sync 索引 + fwd-* 转发），不覆盖集合/认证/BT/IPFS/任务等管理面。后端
@@ -28,10 +28,10 @@ engine 复用全部 HTTP controller（零重复实现）——浏览器经此通
 ### 连接生命周期
 
 **wsUrl 转换**（ws.js:34）：`http://` → `ws://`、`https://` → `wss://`，与 api.js
-`getApiBase()` 同源。`getWsBase()`（ws.js:56）读 `localStorage['peerdrive_api_base']`，
+`getApiBase()` 同源。`getWsBase()`（ws.js:63）读 `localStorage['peerdrive_api_base']`，
 缺省 `https://wsl-3000.moonchan.xyz`。
 
-**幂等 connect**（ws.js:62）：
+**幂等 connect**（ws.js:69）：
 
 ```js
 function connect() {
@@ -46,7 +46,7 @@ function connect() {
   socket 也能走同一初始化路径）。
 - **单连接复用，无连接池**：浏览器与本地节点只有一条会话，所有请求并发经 reqId 路由。
 
-**断线处理**（ws.js:77）：`onclose` → reject 全部 pending（`Error('ws: connection
+**断线处理**（ws.js:84）：`onclose` → reject 全部 pending（`Error('ws: connection
 closed')`）、清空 pending、`binaryExpect = null`、`sock = null`；下一请求前自动重连。
 `onerror` → 主动 `close()` 走同一清理路径。
 
@@ -55,11 +55,11 @@ closed')`）、清空 pending、`binaryExpect = null`、`sock = null`；下一�
 
 ### reqId 路由（pending Map）
 
-`nextReqId()`（ws.js:89）= `'w' + Date.now().toString(36) + '-' + seq.toString(36)`；
+`nextReqId()`（ws.js:96）= `'w' + Date.now().toString(36) + '-' + seq.toString(36)`；
 `pending` Map 存放 resolve/reject（download 型还有 `chunks`/`total` 收集态）。响应帧
 回显 reqId 配对，**乱序安全**（单测覆盖：先回第二个请求）。
 
-### 文本帧分发（handleText，ws.js:96）
+### 文本帧分发（handleText，ws.js:103）
 
 JSON.parse 后按 `msg.type` 分发（解析失败/无 type 直接丢弃）：
 
@@ -71,7 +71,7 @@ JSON.parse 后按 `msg.type` 分发（解析失败/无 type 直接丢弃）：
 | `meta` / `done` | 仅 download 型 pending；`done` → 删除 pending、清 binaryExpect、`resolve(assemble(p))` |
 | `err` | 按 reqId reject（`msg.msg` 或 'peer fetch failed'） |
 
-### binaryExpect 单槽（ws.js:44、169）
+### binaryExpect 单槽（ws.js:51、176）
 
 「最近二进制声明头」单槽：一个二进制帧必属于最近的 admin-bin 或 data 头。
 
@@ -80,14 +80,14 @@ JSON.parse 后按 `msg.type` 分发（解析失败/无 type 直接丢弃）：
 块」的窗口，前端单槽与后端连接级 expect 状态机语义一致。若改成多槽（按 reqId 缓冲
 块）会破坏「块归属最近声明头」的隐含序，且协议上无法区分「块属于谁」。
 
-handleBinary（ws.js:169）：
+handleBinary（ws.js:176）：
 - 无 `binaryExpect` → 丢弃（脏块）。
 - 累计 `got`，`got >= size` 时：
   - admin 型 → `finishBinaryExpect`（组装 Uint8Array 并 resolve）
   - download 型 → 块并入 `p.chunks`，**不 resolve**——完整性由 done 帧保证
     （data 头可多次出现，每块收齐后等下一个 data 头或 done 帧）
 
-### token 注入（readToken，ws.js:47）
+### token 注入（readToken，ws.js:54）
 
 `peerdrive_auth_token`（URL fragment `#token` 导入，见 api.js `setApiBase`）优先；
 否则 `peerdrive_auth_header_enabled==='true'`（设置页开关）时用
@@ -99,7 +99,7 @@ handleBinary（ws.js:169）：
 普通 JSON 请求（与后端约定，ws.js:10-16）：
 
 ```jsonc
-// 浏览器 → 后端（发送，ws.js:217）
+// 浏览器 → 后端（发送，ws.js:224）
 {"type":"admin","method":"GET","path":"/files?sort=time","body":null,
  "token":"<可选>","reqId":"w-m4f3a-1"}
 
@@ -119,7 +119,7 @@ handleBinary（ws.js:169）：
 <紧随的 N 字节二进制帧（单块，后端 SendFrame 原子连续）>
 ```
 
-### 二进制上传帧序列（upload/pumpBinary，ws.js:227）
+### 二进制上传帧序列（upload/pumpBinary，ws.js:237）
 
 `upload(file, fileName, field='file', path='/files/upload')` 的完整帧序列：
 
@@ -138,7 +138,7 @@ handleBinary（ws.js:169）：
 声明与块之间不允许插入其他帧，否则会打断 multipart 收集（e2e smoke 里同样注释
 「声明帧不能 await」——响应要等二进制块收齐才回）。
 
-pumpBinary（ws.js:244）：
+pumpBinary（ws.js:257）：
 - **Streams API 优先**：`file.stream().getReader()` 逐块 `reader.read()` →
   `sock.send(value)`。大文件零拷贝、背压友好，不整读进内存。
 - **FileReader 回退**（无 stream 的文件对象）：`BIN_CHUNK` 分片 `file.slice(off, off+CH)`
@@ -146,7 +146,7 @@ pumpBinary（ws.js:244）：
 - 中途断开：`send` 抛 `Error('ws: closed during upload')` → `fail()` 删 pending 并 reject。
 - `field`/`path` 可换：BT torrent 上传用 `field='torrent'` + `path='/bt/torrent'`。
 
-### 下载帧序列（download，ws.js:295）
+### 下载帧序列（download，ws.js:308）
 
 `download(hash, offset=0, size=-1)` 发送 `{type:'req', hash, offset, size, reqId}`，
 pending 记录 `kind:'download'`；服务端按 64KB 块回（与 WebRTC DataChannel 同一套）：
@@ -167,7 +167,7 @@ pending 记录 `kind:'download'`；服务端按 64KB 块回（与 WebRTC DataCha
 - `downloadToFile(hash, filename)`：download → Blob → `<a download>` 模拟点击 →
   5s 后 `revokeObjectURL`（延迟 revoke 防下载中断）。
 
-### __test 测试钩子（ws.js:324）
+### __test 测试钩子（ws.js:337）
 
 生产不导出，仅 vitest 单测使用：
 - `connect` / `readToken` / `getWsBase` / `handleText` / `handleBinary` / `pending`
@@ -205,25 +205,31 @@ ws.js ──WebSocket──▶ back/internal/transport/ws_session.go（/ws/peer�
 ## 坑与设计决策
 
 1. **data/admin-bin 头与二进制块必须原子连续**（后端 SendFrame 保证）——前端单槽
-   binaryExpect 与之配套，勿改成多槽（ws.js:23, 42）。
+   binaryExpect 与之配套，勿改成多槽（ws.js:23, 51）。
 2. **admin 响应 status>=400 的语义**：reject 的 Error 带 `err.status`/`err.data`，
    与 api.js 旧 fetch 版一致，409 冲突清单等结构化错误体依赖它（ws.js:26；
    Explorer 合并冲突弹窗直接消费 `e.data.conflicts`）。
 3. **连接断开必须 reject 全部 pending**：否则挂起 Promise 永不 settle，调用方无法
-   区分「慢」与「死」（ws.js:78）。
+   区分「慢」与「死」（ws.js:84）。
 4. **管理面只走本地 WS**：peerjs/WebRTC 不实现管理 verb（防权限面漏洞；后端
    serveAdmin 按会话 ID 拒绝非本地连接，ws.js:30）。
 5. **上传声明帧必须与二进制块连续发送**：中间插入任何帧都会打乱后端 multipart
-   收集；且**不能 await 声明帧的响应再发块**——响应要等块收齐才回（ws.js:227、
+   收集；且**不能 await 声明帧的响应再发块**——响应要等块收齐才回（ws.js:237、
    e2e-admin-smoke.mjs 注释）。
 6. **下载 resolve 时机**：块收齐不清期待不等于完成，必须等 done 帧——data 头可
-   多次出现，done 才是完整性信号（ws.js:168）。
-7. **⚠️ BIN_CHUNK 未定义（潜在 bug）**：pumpBinary 的 FileReader 回退分支（ws.js:272）
-   引用未定义的常量 `BIN_CHUNK`——`File` 对象带 `.stream()` 时走 Streams API 不会
-   触发；一旦遇到无 stream 的文件对象（如 mock/老环境）会抛 ReferenceError 且
-   pending 永不 settle。修复方式：定义 `const BIN_CHUNK = 64 * 1024` 或直接删回退
-   分支。**发现背景**：写本文档核对代码时 grep 全 front/src 仅一处引用、无定义。
-8. **token 双来源**：URL fragment token（`peerdrive_auth_token`）恒生效；设置页
+   多次出现，done 才是完整性信号（ws.js:175）。
+7. **BIN_CHUNK 缺失（已修复，382b74c）**：pumpBinary 的 FileReader 回退分支曾引用
+   未定义的 `BIN_CHUNK`——现代浏览器带 `.stream()` 走 Streams API 不触发，一旦遇到
+   无 stream 的文件对象会抛 ReferenceError 且 pending 永不 settle。修复：定义
+   `const BIN_CHUNK = 64 * 1024`（与后端 uploadChunkSize/chunkSize 一致，WS 读限
+   3×64KB 之上安全）。发现背景：代码审阅 2026-08-18（grep 全 front/src 仅一处引用、
+   无定义）；回归测试：ws.test.js「upload FileReader 回退」150KB 分 3 块。
+8. **upload() 缺 readyState 守卫（已修复，1992406）**：admin()/download() 都先查
+   `sock.readyState !== OPEN` 再 reject，upload() 原没有——CONNECTING 状态（页面刚
+   加载立即上传）下 `sock.send` 同步抛 InvalidStateError，executor 内 throw 虽会
+   reject 但 pending 条目泄漏到 onclose 才清，且错误类型与其他路径不一致。修复：
+   三入口统一守卫。发现背景：代码审阅 2026-08-18（三入口守卫不齐）。
+9. **token 双来源**：URL fragment token（`peerdrive_auth_token`）恒生效；设置页
    legacy token（`peerdrive_auth_key`）需开关 `peerdrive_auth_header_enabled`——
    两者同时存在时 fragment 优先（api.js getAuthToken 同语义）。
 
@@ -269,7 +275,7 @@ ws.js 同一帧协议（实现独立复刻，二进制用 Buffer 收集）。
 
 ## 文件清单
 
-- `front/src/ws.js`（333 行）—— 本文档主体
+- `front/src/ws.js`（346 行）—— 本文档主体
 - `front/tests/ws.test.js`（177 行）—— 帧路由 + upload 单测
 - `front/tests/e2e-admin-smoke.mjs`（121 行）—— admin verb E2E 冒烟（需本地起服）
 - 相关后端（协议对端，非本模块）：`back/internal/transport/admin.go`（admin verb 服务端）、

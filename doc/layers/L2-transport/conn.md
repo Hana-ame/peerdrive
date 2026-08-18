@@ -304,7 +304,7 @@ conn.go ◀──绑定──        peerjs_service.go  connectLoop/onIncomingCo
 | `ws_session.go`（149 行） | WSSession：本地 WS 适配（见 sessions.md） |
 | `rtc_session.go`（35 行） | rtcSession：DataChannel 适配（见 sessions.md） |
 | `peerjs_service.go`（399 行） | 装配层：信令生命周期、连接建立、BindLocal、Connect 去重 |
-| `admin.go`（315 行） | admin verb（conn.go 同步分派 + adminUp 单槽收集） |
+| `admin.go`（327 行） | admin verb（conn.go 同步分派 + adminUp 单槽收集） |
 | `forward.go`（~470 行） | fwd-* verb（fwd 单槽 + fwdCh worker 写隧道） |
 | `file_index.go`（~380 行） | SQLite sha256→路径索引（inbound 读写） |
 | 测试：`peerjs_service_test.go` / `stream_test.go` / `forward_test.go` / `file_index_test.go` / `admin_test.go` | 各模块单元测试（发现背景见上表） |

@@ -38,7 +38,7 @@ if c.ID() != "local" {  // WebRTC/PeerJS 连接一律拒绝
 
 **为什么**：WebRTC 连接可能来自公共信令上的任意节点——若管理 verb 同样实现，等于把本节点管理口（认证 token、文件读写、集合变更）开放给未知对端。管理面固定走本地 WS 会话（`id="local"`，Origin 白名单校验，见 peerjs_routes.go `registerPeerJSRoutes`）。
 
-### 3. 内部转发（dispatchAdmin, admin.go:272-305）
+### 3. 内部转发（dispatchAdmin, admin.go:284-317）
 
 ```
 admin 帧 → buildAdminRequest(method, path, body, contentType, token)
@@ -49,18 +49,19 @@ admin 帧 → buildAdminRequest(method, path, body, contentType, token)
              其余二进制（文件流）           → admin-bin 头 + SendFrame 二进制体
 ```
 
-**响应分类坑（admin.go:280-282，发现背景：E2E 冒烟 /ping 返回 Buffer）**：初版按 respBody 是否以 `{` 开头判断——`text/plain` 响应（如 /ping 的 "pong"）被误判为二进制 → 前端收到 Uint8Array 而非字符串，且 admin-bin 占用 binaryExpect 槽。修复：`json.Valid` 优先，非 JSON 时再按 status/content-type 判断。
+**响应分类坑（admin.go:290-292，发现背景：E2E 冒烟 /ping 返回 Buffer）**：初版按 respBody 是否以 `{` 开头判断——`text/plain` 响应（如 /ping 的 "pong"）被误判为二进制 → 前端收到 Uint8Array 而非字符串，且 admin-bin 占用 binaryExpect 槽。修复：`json.Valid` 优先，非 JSON 时再按 status/content-type 判断。
 
 **二进制上限（admin.go:43-45）**：`adminBinMax = 64MB`——内部转发已把整个响应驻留内存（httptest recorder），大文件应走 req verb 分片拉取（前端 ws.js 下载路径）。响应超限返回 413 提示走 req verb。
 
-### 4. 二进制上传（admin.go:130-165, 186-250）
+### 4. 二进制上传（admin.go:130-172, 186-262）
 
 - 声明帧同步占槽（`st.adminUp`，**必须在消息泵内同步设置**——否则泵已路由后续二进制帧时 adminUp 仍为空 → 数据块丢失。发现背景：初版 case "admin" 全部 go 异步，上传分片先于 adminUp 到达，上传永远收不齐，admin.go:109-111）
 - 块写入走 worker goroutine（`adminUploadChunk`，IO 移出消息泵，与 H5 对 fileIndex 上传一致）；last 块触发 `serveAdminUploadComplete`
-- **上传转发路径坑（admin.go:150-155）**：声明帧的 path 即转发目标——BT torrent 上传传 `path=/bt/torrent`（field=torrent）；旧实现硬编码 /files/upload 导致 torrent 上传打错端点（发现背景：前端 btTorrentUpload 迁移时核对 admin 帧与后端转发路径）
-- **Seek(0) 坑（admin.go:216-217）**：au.f 的写 offset 已在文件末尾，必须 `Seek(0)` 从头读，否则 io.Copy 读到 0 字节（发现背景：admin 上传测试 got 0 bytes）
-- 超时防护（admin.go:47-49）：`adminUploadTimeout = 30s`——浏览器声明后不发数据块会永久占位（同 M6 对 upload verb 的修复）；防御替换旧槽（`os.Remove` 清临时文件）
-- 临时文件必清：`defer os.Remove(au.path)`（正常/异常路径都覆盖）
+- **上传转发路径坑（admin.go:158-167）**：声明帧的 path 即转发目标——BT torrent 上传传 `path=/bt/torrent`（field=torrent）；旧实现硬编码 /files/upload 导致 torrent 上传打错端点（发现背景：前端 btTorrentUpload 迁移时核对 admin 帧与后端转发路径）
+- **Seek(0) 坑（admin.go:227-228）**：au.f 的写 offset 已在文件末尾，必须 `Seek(0)` 从头读，否则 io.Copy 读到 0 字节（发现背景：admin 上传测试 got 0 bytes）
+- 超时防护（admin.go:47-49）：`adminUploadTimeout = 30s`——浏览器声明后不发数据块会永久占位（同 M6 对 upload verb 的修复）
+- **槽替换坑（admin.go:140-153，发现背景：代码审阅 2026-08-18）**：重复声明上传时替换旧槽（`os.Remove` 清旧临时文件），**必须给旧 reqId 回 err 帧**——否则旧上传的浏览器 Promise 永久挂起（pending 条目直到连接断开才清），且旧上传迟到块会混入新 au 的 got 计数导致新上传被误判 size 超限中止、err 指向新 reqId（误导排查）
+- 临时文件必清：`defer os.Remove(au.path)`（正常/异常路径都覆盖）；写失败/中止路径同样清理（adminUploadChunk 三个出口统一）
 
 ### 5. 装配（router.go:350-362）
 
@@ -99,13 +100,14 @@ peerjsService.SetAdminHandler(func(req *http.Request) (int, []byte, string, erro
 | — | multipart 转发未 Seek(0) → 上传 0 字节 | Seek(0) 从头读 |
 | — | BT torrent 上传硬编码 /files/upload | 声明帧 path 即转发目标 |
 | — | 声明后不发块 → 永久占位 | 30s 超时 + 槽替换清理 |
+| — | 槽替换静默清旧文件 → 旧 reqId Promise 永久挂起 + 迟到块污染新上传计数 | 替换时给旧 reqId 回 err 帧（2026-08-18） |
 | — | 大文件响应驻留内存 | adminBinMax 64MB + 413 提示走 req verb |
 
-## 测试（9 单测，`scripts/test-layers.sh` L3 段）
+## 测试（10 单测，`scripts/test-layers.sh` L3 段）
 
 - `admin_test.go`（`back/internal/transport/`）：admin 帧协议单测——JSON 响应分类、
-  二进制上传收齐/写失败清理/中止清理、token 注入 Authorization、非 local 会话拒绝、
-  文本响应分类
+  二进制上传收齐/写失败清理/中止清理/**槽替换通知旧 reqId**、token 注入 Authorization、
+  非 local 会话拒绝、文本响应分类
   （`go test -tags nosqlite ./internal/transport/ -count=1 -run "^TestAdmin"`）
 - 发现背景均标注在测试 doc comment（全局 AGENTS.md 硬性要求）
 
@@ -113,7 +115,7 @@ peerjsService.SetAdminHandler(func(req *http.Request) (int, []byte, string, erro
 
 | 文件 | 说明 |
 |---|---|
-| `back/internal/transport/admin.go` | 本模块（315 行：协议结构体 + serveAdmin + 上传收集 + 转发 + 响应分类） |
+| `back/internal/transport/admin.go` | 本模块（~325 行：协议结构体 + serveAdmin + 上传收集 + 转发 + 响应分类） |
 | `back/internal/transport/admin_test.go` | 单测 |
 | `back/internal/router/router.go:350-362` | SetAdminHandler 装配（httptest recorder 包装 gin engine） |
 | `back/internal/router/peerjs_routes.go` | /ws/peer 本地会话路由（Origin 白名单） |
