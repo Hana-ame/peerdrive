@@ -117,3 +117,29 @@ func peerjsOptions(host, port string) peerjs.Options {
 	opts.Key = "testkey"
 	return opts
 }
+
+// TestStartClose_RacePressure 循环 Start/Close 竞争：-race 下验证 startLoop
+// 房间发现组件读写（peerMu 快照）与 Close 清理无竞态、Close 后无 goroutine
+// 泄漏重建（ctx.Err() 守卫）。
+//
+// 发现背景：2026-08-18 -race 集成测试连跑暴露——Close（持 peerMu 置 nil
+// httpDisc/discovery）vs startLoop 无锁快照读竞争；修复（peerMu + ctx
+// 守卫）后本测试作压力回归。sleep 50ms 让 startLoop 走完发现路径再 Close，
+// 命中竞态窗口。
+func TestStartClose_RacePressure(t *testing.T) {
+	for i := 0; i < 30; i++ {
+		requireInitDB(t)
+		cfg := config.Load()
+		cfg.PeerJSEnable = true
+		cfg.PeerJSID = randID("rc")
+		cfg.PeerJSHost, cfg.PeerJSPort = splitHostPort(selfHostedURL)
+		cfg.PeerJSSecure = false
+		cfg.PeerJSKey = "testkey"
+		cfg.BTDHTEnabled = false
+		cfg.DiscoverURL = selfHostedURL
+		svc := transport.NewPeerJSService(cfg, t.TempDir())
+		svc.Start()
+		time.Sleep(50 * time.Millisecond)
+		svc.Close()
+	}
+}

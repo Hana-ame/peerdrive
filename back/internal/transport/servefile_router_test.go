@@ -175,6 +175,56 @@ func TestOpenStreamFrom_TracePropagation(t *testing.T) {
 	r2.Close()
 }
 
+// TestServeFile_RouterInfoSizeFail InfoSize 失败（peer/url 源无元数据）
+// → meta.total=-1（协议约定：fetchReader 对 total>0 才做上限校验），但
+// 数据流正常发送。
+//
+// 发现背景：代码审阅 2026-08-18——多源路由下 peer/url 源拿不到文件大小，
+// 若 InfoSize 失败直接 err 会导致有数据的源不可用；约定 total=-1 表示
+// 「未知大小，流式发送」。
+func TestServeFile_RouterInfoSizeFail(t *testing.T) {
+	svc := newTestPeerJSService(t)
+	content := []byte("no-info-size stream")
+	hash := hashOf(string(content))
+	svc.SetFileRouter(&infoFailRouter{content: content, hash: hash})
+
+	sess := &fakeSession{id: "remote"}
+	svc.serveFile(sess, dcReq{Type: "req", Hash: hash, Size: -1, ReqID: "r1"})
+	frames := sess.sentFrames()
+	require.Equal(t, []string{"meta", "data", "done"}, sess.sentFrameTypes())
+	assert.Equal(t, float64(-1), frames[0].header["total"], "InfoSize 失败必须 total=-1")
+	assert.Equal(t, content, frames[1].body, "数据流不受 InfoSize 失败影响")
+}
+
+// infoFailRouter OpenRange 可用但 InfoSize 报错（对齐 PeerSource/URLSource：
+// 无元数据缓存、只有流）。
+type infoFailRouter struct {
+	content []byte
+	hash    string
+}
+
+func (f *infoFailRouter) OpenRange(ctx context.Context, hash string, offset, size int64) (io.ReadCloser, error) {
+	if hash != f.hash {
+		return nil, fmt.Errorf("not found")
+	}
+	off := offset
+	if off < 0 {
+		off = 0
+	}
+	if off > int64(len(f.content)) {
+		off = int64(len(f.content))
+	}
+	length := size
+	if length < 0 || off+length > int64(len(f.content)) {
+		length = int64(len(f.content)) - off
+	}
+	return io.NopCloser(bytes.NewReader(f.content[off : off+length])), nil
+}
+
+func (f *infoFailRouter) InfoSize(ctx context.Context, hash string) (int64, error) {
+	return 0, fmt.Errorf("no info size for %s", hash)
+}
+
 // 测试用 os 工具（避免本文件顶部 import os/path 噪音）。
 func osMkdirAll(t *testing.T, dir string) error {
 	t.Helper()

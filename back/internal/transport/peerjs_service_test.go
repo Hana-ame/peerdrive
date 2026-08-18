@@ -168,6 +168,29 @@ func TestServeFile_IndexPathOutsideRoot(t *testing.T) {
 	assert.Equal(t, "err", types[0], "根外路径不得回传")
 }
 
+// TestServeFile_IndexPathAllowed fallback 分支 file_index 命中合法路径 →
+// 服务该路径文件（内容寻址只是兜底，create 的文件只有绝对路径 + 索引）。
+// 发现背景：2026-08-18 serveFile 多源路由重写时丢了 file_index 分支
+// （路由未命中时只查 CAS），集成测试 TestFrameVerbs_CreateListInfoDownload
+// 报 not found；恢复后本测试锁定「索引命中合法路径必须回传」。
+func TestServeFile_IndexPathAllowed(t *testing.T) {
+	initTestDB(t)
+	svc := newTestPeerJSService(t)
+	content := []byte("indexed-path-content")
+	inRoot := filepath.Join(svc.fileIndex.uploadDir, "in.bin")
+	require.NoError(t, os.MkdirAll(svc.fileIndex.uploadDir, 0o755))
+	require.NoError(t, os.WriteFile(inRoot, content, 0o644))
+	fi, err := svc.fileIndex.Create(inRoot)
+	require.NoError(t, err)
+
+	sess := &fakeSession{id: "remote"}
+	svc.serveFile(sess, dcReq{Type: "req", Hash: fi.Hash, Size: -1, ReqID: "r1"})
+	frames := sess.sentFrames()
+	require.Equal(t, []string{"meta", "data", "done"}, sess.sentFrameTypes())
+	assert.Equal(t, float64(len(content)), frames[0].header["total"])
+	assert.Equal(t, content, frames[1].body)
+}
+
 // TestRouteResponse_DataSizeCap 恶意 data 帧声明超大 size → errCh（H6）。
 // 发现背景：H6——f.size = r.Size 无上限，恶意对端声明 1<<62 并持续发
 // data 帧 → f.got 无界 append OOM。修复：≤8GB 上限。

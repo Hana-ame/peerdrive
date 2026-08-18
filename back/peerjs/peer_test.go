@@ -448,3 +448,49 @@ func TestConnection_OnMessage_RoutesFrames(t *testing.T) {
 	assert.True(t, gotText)
 	assert.True(t, gotBin)
 }
+
+// TestConnection_CallbackRegistration_Concurrent 回归：OnOpen/OnMessage/OnClose
+// 的注册（业务 goroutine 调用 setter）与 attach 回调触发（pion 回调
+// goroutine 读快照）并发执行——handlerMu 保护，-race 下验证无竞态。
+//
+// 发现背景：-race 集成测试连跑必挂（自托管信令 + 同机 WebRTC 时序快，
+// connectLoop 的 OnOpen 注册与 DataChannel open 回调竞争读写 c.onOpen）；
+// 真实网络下同样存在（时序慢不易触发）。修复：handlerMu 保护三字段，
+// 触发侧取快照再回调。
+func TestConnection_CallbackRegistration_Concurrent(t *testing.T) {
+	p, _ := newTestPeer()
+	c, dc := newTestConn(p, "c1")
+	openFake(dc)
+
+	const rounds = 50
+	var wg sync.WaitGroup
+	for i := 0; i < rounds; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			c.OnOpen(func(*Connection) {})
+			c.OnMessage(func(Frame) {})
+			c.OnClose(func(*Connection) {})
+		}()
+		go func() {
+			defer wg.Done()
+			// 触发 attach 注册的闭包（内部读快照，与上面的 setter 竞争）
+			if dc.onOpen != nil {
+				dc.onOpen()
+			}
+			if dc.onMsg != nil {
+				dc.onMsg(Frame{IsText: true, Data: []byte("x")})
+			}
+			if dc.onCls != nil {
+				dc.onCls()
+			}
+		}()
+	}
+	wg.Wait()
+
+	// 快照读不破坏注册语义：触发后仍能收到最新注册的回调
+	var got bool
+	c.OnMessage(func(f Frame) { got = string(f.Data) == "y" })
+	dc.onMsg(Frame{IsText: true, Data: []byte("y")})
+	assert.True(t, got, "并发后注册的回调必须仍生效")
+}
