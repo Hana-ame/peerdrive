@@ -180,7 +180,9 @@ peersignal.moonchan.xyz ──CF 橙云 A 记录──▶ 117.55.237.217（cloud
 | 协议细节 | answerer 新生成 connectionId → ANSWER 路由不到 | 服务端只管按 dst 转发，connectionId 沿用由客户端保证（REFACTOR §5 E2E 坑） |
 | 部署 | cloudcone.moonchan.xyz 被 livekit 占用（:7880） | peerserver 走独立域名 peersignal.moonchan.xyz（橙云 A 记录 → cloudcone nginx → 127.0.0.1:9000）；443 直连不走代理（代理连 cloudcone 超时） |
 
-## 测试
+## 测试（6 单测，`scripts/test-layers.sh` L6 段）
+
+> 命令：`go test -tags nosqlite ./internal/signalserver/...`
 
 ### `signalserver_test.go`（单测，全部内存 httptest + gorilla 客户端）
 

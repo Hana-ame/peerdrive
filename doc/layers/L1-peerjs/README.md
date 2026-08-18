@@ -30,9 +30,10 @@ peerJSSignaller（WS 信令，H7 断线通知）    DataChannel 接口（pionCha
 - 流控三件套（BufferedAmount/LowThreshold/OnBufferedAmountLow）在此层暴露，上层 serveFile 水位流控依赖（sessions.md）
 - 无业务知识：不知道 req/upload/admin 等任何 verb
 
-## 测试
+## 测试（21 单测，独立 go.mod）
 
 - `peer_test.go`（内存信令桩，不依赖公网）+ `flowcontrol_test.go`（流控路径）
+- 层内：`cd back/peerjs && go test ./... -count=1 -race`（`scripts/test-layers.sh` L1 段）
 - 集成测试：`cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1 -v`（真实公共信令 0.peerjs.com，需代理，必须 `-p 1` 串行）
 
 ## 文件清单

@@ -1,104 +1,72 @@
-# Peerdrive 测试文档
+# 测试文档（2026-08-18 重写）
 
-## 测试分类
+> 入口 → [分层文档 doc/layers/README.md](../layers/README.md) ·
+> 一键分层测试 `bash scripts/test-layers.sh [--integration]`
+> 旧时代文档（libp2p 栈、e2e-all.sh 等）已移 [archive/](archive/)，仅历史参考。
 
-### 1. Go 单元测试 (`go test ./...`)
+---
 
-覆盖率 5 个包，66 个测试全部通过。
+## 一句话
 
-| 包 | 测试文件 | 测试数 | 覆盖内容 |
-|----|----------|--------|----------|
-| `internal/config` | `config_test.go` | 10 | Load() defaults, getEnv (default/set), getEnvBool (true/false/1/0), parseRelayMode |
-| `internal/model` | `anon_test.go` | 3 | NewAnonCollection (name+entries, nil→empty, empty name) |
-| | `collection_test.go` | 3 | Collection/CollectionEntry/CollectionVersion struct |
-| `internal/repository` | `file_repo_test.go` | 5 | InsertFileMeta + GetFileMeta, nonexistent, InsertFileProvider + GetFileProviders, MarkProviderUnavailable, empty providers |
-| `internal/service` | `file_service_test.go` | 9 | NewFileService, RegisterLocal (valid/nonexistent/disabled), RegisterFolder, Verify, Delete, DeleteStorageDisabled |
-| | `anon_service_test.go` | 10 | CreateCollection (valid/traversal/invalid hash/empty/empty path/absolute path), GetCollection, ForkCollection, DownloadFile |
-| | `sync_service_test.go` | 10 | PathTraversal, Filtering |
-| `internal/controller` | `ping_test.go` | 1 | Ping 返回 pong |
-| | `collection_test.go` | 16 | CreateCollection (valid/duplicate/invalidBody), ListCollections, GetCollection, AddEntry, RemoveEntry, CommitCollection, GetVersionLog, SearchCollections, ForkCollection, RollbackCollection |
-
-运行方式：
-```bash
-cd back && go test ./... -count=1
-```
-
-### 2. E2E 测试 (`back/test/e2e-all.sh`)
-
-自包含脚本，覆盖全部 HTTP API 端点。85 条断言，12 个测试段。
-
-运行方式：
-```bash
-cd /mnt/d/WorkPlace/peerdrive
-rm -f peerdrive.db
-bash back/test/e2e-all.sh
-```
-
-**要求**：
-- Go 编译器（脚本自己 build）
-- `python3`（JSON 解析）
-- 端口 3999 空闲
-- 无 Privoxy 或已配置 `no_proxy='*'`（脚本自动设置）
-
-**测试段**：
-
-| # | 段名 | 断言数 | 覆盖端点 |
-|---|------|--------|----------|
-| 1 | Health | 2 | `GET /ping` |
-| 2 | File Upload | 10 | `POST /files/upload` (new/duplicate/2nd, on-disk verify) |
-| 3 | File Verify | 3 | `GET /files/verify/:hash` (valid + invalid) |
-| 4 | SHA256 Download | 3 | `GET /sha256sum/:hash` (valid + invalid + diff) |
-| 5 | Register Local File | 5 | `POST /files/register_local` (new + re-register + verify + download) |
-| 6 | Register Folder | 2 | `POST /files/register_folder` |
-| 7 | Anonymous Collections | 22 | Create, path traversal, friendly_name, GET + entries, sha256sum, entry download, fork, **commit** (versioning), nonexistent |
-| 8 | Named Collections | 22 | Create/duplicate/list/get/add entry/delete entry/download/commit/log/2nd commit/rollback |
-| 9 | Fork/Merge/Pull | 4 | `POST /actions/fork`, `/actions/merge`, `/actions/pull` |
-| 10 | File Delete | 2 | `DELETE /files/:hash` + verify deleted |
-| 11 | Tasks | 2 | `GET /tasks` + nonexistent task |
-| 12 | Edge Cases | 5 | Missing user, empty collection, invalid hash, missing fields |
-
-预期输出：
-```
-PASS: 84  FAIL: 0  WARN: 1  TOTAL: 85
-```
-
-### 3. 其他测试脚本
-
-这些脚本假设服务器已在端口 3000 运行：
-
-| 脚本 | 用途 | 运行方式 |
-|------|------|----------|
-| `go/test/test.sh` | 完整集成测试 | 需要先启 server: `PORT=3000 PEERDRIVE_P2P_ENABLE=false ./peerdrive-server` |
-| `go/test/upload.sh` | 文件上传测试 | 同上 |
-| `go/test/register.sh` | 文件注册测试 | 同上 |
-| `go/test/anon-collection.sh` | 匿名合集测试 | 同上 |
-| `back/test/p2p.sh` | P2P 双节点测试 | 自包含（自己 build 并启动 2 节点） |
-| `back/test/relay.sh` | Relay + NAT 穿透测试 | 自包含 |
-
-### 4. React 前端测试
+项目按 **AOP 切面（L1-L8）** 组织代码与文档，测试也按层独立跑——每层有自己的
+测试命令与测试集，依赖方向单向（下层不依赖上层），任一层可单独验证。
 
 ```bash
-cd react
-npm test             # 运行 vitest
-npm run dev          # 启动 Vite dev server (开发用)
-npm run build        # 生产构建
+bash scripts/test-layers.sh           # L1-L8 逐层跑，汇总结果
+bash scripts/test-layers.sh --integration   # 追加真实信令集成段
 ```
 
-### 5. CI 配置
+失败日志在每个 `/tmp/layer-test-<层>.log`；脚本内置 go 代理 env（AGENTS.md 约定）。
 
-**文件**：`go/.github/workflows/ci.yml`
+## 分层测试矩阵（2026-08-18 实测全绿）
 
-当前运行的测试：
-```yaml
-- go/test/test.sh
-- go/test/upload.sh
-- go/test/register.sh
-- go/test/anon-collection.sh
-- back/test/p2p.sh
+| 层 | 切面 | 测试命令（脚本内） | 测试数 | 关键测试文件 |
+|----|------|-------------------|--------|--------------|
+| L1 | 信令/传输原语 | `cd back/peerjs && go test ./... -count=1 -race` | 21 | flowcontrol_test.go、peer_test.go |
+| L2 | 帧协议 | `go test -tags nosqlite ./internal/transport/ -count=1 -skip "^TestAdmin"` | 32 | conn/stream/forward/file_index/peerjs_service_test.go |
+| L3 | 管理面 | `go test -tags nosqlite ./internal/transport/ -count=1 -run "^TestAdmin"` | 9 | admin_test.go（含上传写失败/中止清理回归） |
+| L4 | 业务核心 | `go test -tags nosqlite ./internal/controller/... ./internal/service/... ./internal/source/... ./internal/downloader/...` | 94 | controller/*_test.go、service/*_test.go |
+| L5 | 数据 | `go test -tags nosqlite ./internal/repository/...` | 11 | file_repo/collection_repo_test.go |
+| L6 | 发现 | `go test -tags nosqlite ./internal/signalserver/...` | 6 | signalserver_test.go |
+| L7 | 外部能力 | `cd back/p2p_bt && go test ./... -count=1` | 7 | bt_test.go（独立 go.mod） |
+| L8 | 前端 | `cd front && npm test` | 32（4 文件） | tests/ws.test.js 等（vitest） |
+| INT | 真实信令集成 | `go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1` | — | integration/ 7 文件（**必须 -p 1 串行**，公共信令互扰） |
+
+**必加 `-tags nosqlite`**：双 SQLite 驱动 CGO 冲突（AGENTS.md 硬性约束）。
+
+## 独立包 peerdrive-media（packages/peerdrive-media/）
+
+浏览器经 PeerJS 信令 + WebRTC DataChannel 从 Node 端加载 URL 资源。
+改包代码后的完整验证链（AGENTS.md 要求，同步独立 repo 镜像 + tag v0.1.0）：
+
+```bash
+cd packages/peerdrive-media
+npm run build        # dist 入库（IIFE/ESM/CJS 三构建）
+npm test             # node --test：17 项（e2e 协议 7 + core 队列 4 + 其余）
+# 浏览器 E2E（本机 Firefox，skill runner）：先起三服务再跑
+node ~/.claude/skills/playwright-test/scripts/test-runner.mjs test/e2e-browser.mjs
 ```
 
-建议加入：
-```yaml
-- back/test/e2e-all.sh
-- go test ./...
+- e2e.test.mjs：协议 E2E 7 项（分块/流式背压/MIME/404/白名单/连接串行复用）
+- e2e-browser.mjs：浏览器 E2E 10 断言（mount/load/视频/白名单/dispose 重建）
+- core.test.mjs：mock peerjs 的队列/中止边界 4 项（确定性，不用真实信令）
+- 坑与浏览器 E2E 五连见 `doc/REFACTOR.md` §3.11
+
+## 线上验证（可选）
+
+自托管信令连真实节点（无代理直连 cloudcone）：
+
+```bash
+cd back && PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestLive -v
 ```
+
+## 前端专项
+
+- vitest 单测：`cd front && npm test`（32 项：ws 协议/admin/upload 回退、路由表、工具函数）
+- 浏览器 E2E 另见独立包章节（公共信令 + 本机 Firefox，`scripts/static-serve.mjs` 起静态服务）
+
+## 更新约定
+
+- 改代码后行为变化 → 同步分层文档（doc/layers/，硬性要求）与该层测试
+- 测试函数必须标注「发现背景」（AGENTS.md 硬性要求）
+- 新增测试集时同步更新本矩阵与该层文档的测试小节

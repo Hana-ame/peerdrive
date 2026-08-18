@@ -101,10 +101,12 @@ peerjsService.SetAdminHandler(func(req *http.Request) (int, []byte, string, erro
 | — | 声明后不发块 → 永久占位 | 30s 超时 + 槽替换清理 |
 | — | 大文件响应驻留内存 | adminBinMax 64MB + 413 提示走 req verb |
 
-## 测试
+## 测试（9 单测，`scripts/test-layers.sh` L3 段）
 
-- `admin_test.go`（back/internal/transport/）：admin 帧协议单测——JSON 响应分类、二进制上传收齐/超时/中止、token 注入 Authorization、非 local 会话拒绝
-- E2E：`front/e2e-admin-smoke.mjs` 全链路（浏览器 → /ws/peer admin → gin controller → 响应帧）
+- `admin_test.go`（`back/internal/transport/`）：admin 帧协议单测——JSON 响应分类、
+  二进制上传收齐/写失败清理/中止清理、token 注入 Authorization、非 local 会话拒绝、
+  文本响应分类
+  （`go test -tags nosqlite ./internal/transport/ -count=1 -run "^TestAdmin"`）
 - 发现背景均标注在测试 doc comment（全局 AGENTS.md 硬性要求）
 
 ## 文件清单

@@ -88,6 +88,29 @@
 
 ---
 
+## 分层测试（scripts/test-layers.sh）
+
+每层一段独立跑、全跑汇总（任一层失败非零退出）：
+
+```bash
+bash scripts/test-layers.sh           # L1-L8（2026-08-18 实测 8/8 全绿）
+bash scripts/test-layers.sh --integration  # 追加真实信令集成段（-p 1 串行）
+```
+
+| 层 | 测试命令（脚本内） | 数 |
+|----|--------------------|----|
+| L1 | `cd back/peerjs && go test ./... -count=1 -race` | 21 |
+| L2 | `go test -tags nosqlite ./internal/transport/ -count=1 -skip "^TestAdmin"` | 32 |
+| L3 | `go test -tags nosqlite ./internal/transport/ -count=1 -run "^TestAdmin"` | 9 |
+| L4 | `go test -tags nosqlite ./internal/controller/... ./internal/service/... ./internal/source/... ./internal/downloader/...` | 94 |
+| L5 | `go test -tags nosqlite ./internal/repository/...` | 11 |
+| L6 | `go test -tags nosqlite ./internal/signalserver/...` | 6 |
+| L7 | `cd back/p2p_bt && go test ./... -count=1` | 7 |
+| L8 | `cd front && npm test`（vitest） | 32 |
+| INT | `go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1` | — |
+
+细节与独立包（peerdrive-media）验证链见 [doc/testing/README.md](../testing/README.md)。
+
 ## 维护约定
 
 - 每份文档保持「职责 → 关键机制 → 坑 → 测试 → 文件清单」结构

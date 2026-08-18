@@ -199,7 +199,11 @@ WebRTC）下文件互传已走帧协议，BT DHT 桥只作为 downloader 的 "bt
 | 全量读 | `FetchFile` 用 `io.ReadAll`——文件无限大时内存炸 | 桥是 legacy 回退路径（download 语义为全量缓存），新拉取走 PeerJS 流式；防御性上限未做（历史遗留） |
 | 测试超时 | `TestFullBTDownload` 30s 内未完成 | `t.Skip` 跳过而非失败（DHT 引导/对端连通性属环境问题） |
 
-## 测试（`bt_test.go`）
+## 测试（7 单测，独立 go.mod；`scripts/test-layers.sh` L7 段）
+
+> 命令：`cd back/p2p_bt && go test ./... -count=1`
+
+### `bt_test.go`
 
 > 注：legacy 代码测试（文件头声明），未逐一标注发现背景；「发现背景」规范
 > 对新代码生效。

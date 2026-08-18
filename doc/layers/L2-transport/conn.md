@@ -261,9 +261,9 @@ conn.go ◀──绑定──        peerjs_service.go  connectLoop/onIncomingCo
 | 11 | 对端只发 meta+done 不校验实收字节 → 截断文件当成功 | done.Size 完整性校验（H6） | outbound.go:274-280 |
 | 12 | 非法 admin 帧 / 无 type 文本帧 | 泵内静默丢弃（不 panic、不回帧） | conn.go:167-170 |
 
-## 测试
+## 测试（32 单测，`scripts/test-layers.sh` L2 段）
 
-### 单元测试（无网络，`go test -tags nosqlite ./internal/transport/ -race`）
+### 单元测试（无网络，`go test -tags nosqlite ./internal/transport/ -count=1 -skip "^TestAdmin"`）
 
 | 测试文件 | 覆盖 | 发现背景 |
 |---|---|---|

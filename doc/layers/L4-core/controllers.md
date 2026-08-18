@@ -402,7 +402,9 @@ controller（本层）
    （REFACTOR.md §3.9），BT/IPFS 依赖外部能力切面 ⑦。
 9. **auth.go/task.go ListTasks 无路由注册/恒空**（LEGACY.md 第 61-62 行）：保留占位。
 
-## 测试
+## 测试（94 单测，含 controller/service/source/downloader；`scripts/test-layers.sh` L4 段）
+
+> 命令：`go test -tags nosqlite ./internal/controller/... ./internal/service/... ./internal/source/... ./internal/downloader/...`
 
 > controller 测试除 `TestBrowseDir_SlashMeansStorageRoot` 外均属 legacy 标注
 > （文件头注释：「本文件属于 legacy 代码…未逐一标注发现背景」）。

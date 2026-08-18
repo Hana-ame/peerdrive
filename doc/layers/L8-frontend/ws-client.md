@@ -227,9 +227,11 @@ ws.js ──WebSocket──▶ back/internal/transport/ws_session.go（/ws/peer�
    legacy token（`peerdrive_auth_key`）需开关 `peerdrive_auth_header_enabled`——
    两者同时存在时 fragment 优先（api.js getAuthToken 同语义）。
 
-## 测试
+## 测试（8 单测，`scripts/test-layers.sh` L8 段；前端整体 32 项 × 4 文件）
 
-### 单元测试（front/tests/ws.test.js，129 行）
+> 命令：`cd front && npm test`
+
+### 单元测试（front/tests/ws.test.js）
 
 Mock socket 直接注入 `ws.__test._setSock`，`feedText` 手动喂文本帧、`onmessage` 喂
 二进制帧，验证纯帧路由逻辑。`beforeEach` 调 `_reset()` + `localStorage.clear()`
@@ -244,6 +246,7 @@ Mock socket 直接注入 `ws.__test._setSock`，`feedText` 手动喂文本帧、
 | `download：err 帧 reject` | err 帧语义 |
 | `admin-bin：二进制文件流响应收集为 Uint8Array` | 文件流响应 |
 | `连接关闭 → 全部 pending reject` | 断线清理（先挂 catch 再 onclose，避免 unhandled rejection） |
+| `upload：声明帧 + 二进制块按 BIN_CHUNK 切片上传（FileReader 回退路径）` | 150KB 文件分 3 块（64+64+22KB），FileReader 回退分支回归（BIN_CHUNK ReferenceError 修复） |
 
 **发现背景**（文件头注释）：ws.js 是「前端全面迁移到 ws/peerjs」的核心客户端，帧
 路由正确性直接决定页面能否工作——单槽 binaryExpect 必须与后端连接级 expect 语义
@@ -267,7 +270,7 @@ ws.js 同一帧协议（实现独立复刻，二进制用 Buffer 收集）。
 ## 文件清单
 
 - `front/src/ws.js`（333 行）—— 本文档主体
-- `front/tests/ws.test.js`（129 行）—— 帧路由单测
+- `front/tests/ws.test.js`（177 行）—— 帧路由 + upload 单测
 - `front/tests/e2e-admin-smoke.mjs`（121 行）—— admin verb E2E 冒烟（需本地起服）
 - 相关后端（协议对端，非本模块）：`back/internal/transport/admin.go`（admin verb 服务端）、
   `back/internal/transport/ws_session.go`（WSSession 会话实现）

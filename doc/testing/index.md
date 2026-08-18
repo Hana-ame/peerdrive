@@ -1,54 +1,28 @@
-# Peerdrive 测试文档
+# 测试文档入口
 
-> 入口 → [测试方案](测试方案.md) · 更新: 2026-04-29
+> 入口 → [README.md](README.md)（当前总纲）· 更新: 2026-08-18
 
 ---
 
-## 核心文档
+## 新架构
 
-| 文档 | 适合 | 内容 |
-|------|------|------|
-| [**测试方案**](测试方案.md) | 所有人 | 测试体系总览、分类、运行方式、文档导航 |
-| [**如何测试**](如何测试.md) | 开发者 | 每条测试的运行命令、预期输出、常见错误和排错 |
-| [**TEST-PIPELINE**](TEST-PIPELINE.md) | 排错 | 14 个测试脚本的流程、预期行为、错误原因分析 |
-| [**TEST-MATRIX**](TEST-MATRIX.md) | QA | 109 项测试用例的 ID、前置条件、步骤、预期结果 |
-| [**TESTING-HANDBOOK**](TESTING-HANDBOOK.md) | 入门 | 840 行完整手册：环境搭建、架构、手动流程、排错 |
-
-## 扩展
-
-| 文档 | 内容 |
-|------|------|
-| [TESTING-METHODOLOGY](TESTING-METHODOLOGY.md) | 9 Phase 测试方法论 |
-| [CHAOS_TESTING](CHAOS_TESTING.md) | 混沌测试——恶劣网络模拟 |
-| [README](README.md) | 原始 README |
+| 文档/脚本 | 内容 |
+|-----------|------|
+| [**README.md**](README.md) | 测试总纲：分层矩阵、命令、独立包验证链、线上测试 |
+| [**scripts/test-layers.sh**](../../scripts/test-layers.sh) | 一键按 AOP 分层（L1-L8 + 可选项）逐层跑测试 |
+| [**分层文档 ../layers/README.md**](../layers/README.md) | L1-L8 每层职责、关键机制、测试、文件清单 |
 
 ## 快速命令
 
 ```bash
-go test ./... -count=1              # 163 单元测试
-bash test/e2e-all.sh                # 85 E2E 断言（自包含）
-bash test/bt-full-test.sh           # 38 BT 专项
-bash test/webrtc_signal_test.sh     # 23 WebRTC
-bash test/p2p.sh                    # 13 P2P 双节点（自包含）
-bash test/all.sh                    # 一键全量
+bash scripts/test-layers.sh               # L1-L8 逐层（实测 9/9 全绿）
+bash scripts/test-layers.sh --integration # 追加真实信令集成段（-p 1 串行）
+cd packages/peerdrive-media && npm test   # 独立包 17 项
+cd packages/peerdrive-media && npx vitest 2>/dev/null   # （前端 vitest 见 front/）
+cd front && npm test                      # 前端 32 项 vitest
 ```
-
-## 测试环境
-
-| 环境 | 地址 | 端口 |
-|------|------|------|
-| 本地 | localhost | 3000 |
-| VPS Relay | bwh.moonchan.xyz | 3000 |
-| Reg Server | bwh.moonchan.xyz | 4000 |
-| CF Tunnel | wsl-3000.moonchan.xyz | 443 |
-
-## 报告
-
-| 文档 | 内容 |
-|------|------|
-| [../report/测试报告-2026-04-29.md](../report/测试报告-2026-04-29.md) | 最新测试报告 389+ PASS |
-| [../report/CI-FIXES.md](../report/CI-FIXES.md) | CI 修复记录 |
 
 ## 归档
 
-旧版测试文档移至 [archive/](archive/)，仅供参考。
+旧栈时代测试文档（2026-04~05，libp2p/e2e-all.sh/reg-server 等）已移
+[archive/](archive/)——仅历史参考，不再维护，以 README.md 为准。

@@ -212,7 +212,9 @@ controller ──（M2 收层后禁止直接 import repository，一律经 servi
 | 层归属 | controller 曾直写 SQL（ListPublicCollections） | M2 收层收敛进 repository，controller 只依赖 service |
 | 兼容 | FileType 常量迁移到 model 包 | repository 保留别名 `FileTypeBlob`/`FileTypeAnonCollection` 避免 diff 爆炸 |
 
-## 测试
+## 测试（11 单测，`scripts/test-layers.sh` L5 段）
+
+> 命令：`go test -tags nosqlite ./internal/repository/...`
 
 ### `collection_repo_test.go`
 
