@@ -226,6 +226,94 @@ func TestAdminBinaryUpload(t *testing.T) {
 	}
 }
 
+// TestAdminBinaryUploadToken 二进制上传声明帧携带 token 时，内部转发必须
+// 保留 Authorization 头；否则认证开启（有注册服务器）后前端所有上传都 401。
+// 发现背景：再 review 2026-08——adminUploadState 初版只存文件元数据，漏存
+// 声明帧的 token，serveAdminUploadComplete 用空 token 构造内部请求。
+func TestAdminBinaryUploadToken(t *testing.T) {
+	content := []byte("token-preserving-upload")
+
+	var mu sync.Mutex
+	var gotAuth string
+	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
+		file, _, err := req.FormFile("file")
+		if err != nil {
+			return http.StatusBadRequest, []byte(`{"error":"no file"}`), "application/json", nil
+		}
+		defer file.Close()
+		mu.Lock()
+		gotAuth = req.Header.Get("Authorization")
+		mu.Unlock()
+		return http.StatusCreated, []byte(`{"ok":true}`), "application/json", nil
+	})
+	conn, _ := wsPair(t, svc)
+
+	decl := map[string]any{
+		"type": "admin", "method": "POST", "path": "/files/upload",
+		"binary": true, "filename": "a.txt", "size": len(content),
+		"token": "tok-upload-123", "reqId": "up-token",
+	}
+	if err := conn.WriteJSON(decl); err != nil {
+		t.Fatalf("send decl: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, content); err != nil {
+		t.Fatalf("send bin: %v", err)
+	}
+	typ, status, _, _ := readAdminResp(t, conn)
+	if typ != "admin-resp" || status != http.StatusCreated {
+		t.Fatalf("want admin-resp 201, got %s %d", typ, status)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if gotAuth != "Bearer tok-upload-123" {
+		t.Fatalf("token 未透传到 multipart 内部请求: %q", gotAuth)
+	}
+}
+
+// TestAdminBinaryUploadEmpty 空文件上传（size=0）也应能完成 multipart 转发。
+// 发现背景：再 review 2026-08——serveAdmin 初版 size<=0 直接拒绝，前端
+// ws.upload 对空文件声明 size=0 后没有二进制帧，上传会 400；这与 fileIndex
+// upload verb 已支持空文件不对称。
+func TestAdminBinaryUploadEmpty(t *testing.T) {
+	var mu sync.Mutex
+	var got int
+	var gotFilename string
+	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
+		file, hdr, err := req.FormFile("file")
+		if err != nil {
+			return http.StatusBadRequest, []byte(`{"error":"no file"}`), "application/json", nil
+		}
+		defer file.Close()
+		b, _ := io.ReadAll(file)
+		mu.Lock()
+		got, gotFilename = len(b), hdr.Filename
+		mu.Unlock()
+		return http.StatusCreated, []byte(`{"hash":"empty-hash"}`), "application/json", nil
+	})
+	conn, _ := wsPair(t, svc)
+
+	decl := map[string]any{
+		"type": "admin", "method": "POST", "path": "/files/upload",
+		"binary": true, "filename": "empty.txt", "size": 0, "reqId": "up-empty",
+	}
+	if err := conn.WriteJSON(decl); err != nil {
+		t.Fatalf("send decl: %v", err)
+	}
+	// 空文件：不发送任何二进制帧，服务端应立即完成
+	typ, status, _, _ := readAdminResp(t, conn)
+	if typ != "admin-resp" || status != http.StatusCreated {
+		t.Fatalf("want admin-resp 201, got %s %d", typ, status)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got != 0 {
+		t.Fatalf("空文件内容应为 0 字节, got %d", got)
+	}
+	if gotFilename != "empty.txt" {
+		t.Fatalf("filename 错误: %q", gotFilename)
+	}
+}
+
 // TestAdminBinaryResponse 二进制响应（如集合文件流）：admin-bin 头 + 单个
 // 二进制帧，前端按 size 收集。
 func TestAdminBinaryResponse(t *testing.T) {

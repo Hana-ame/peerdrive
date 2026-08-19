@@ -229,10 +229,14 @@ export default function AnonCreator() {
     // dir/a.txt 等子条目路径不变，合集内容损坏（孤儿条目浮到根部）。
     // 目录重命名必须把子路径前缀一并改掉。
     const isDir = oldPath.endsWith('/');
+    // 目录路径统一补尾斜杠：外部调用（FileTree 已补，但其他调用方可能只传
+    // 纯目录名）若不带 '/'，会让子条目拼接成 "newdir" + "/a.txt" 而目录自身
+    // 变成 "newdir"（与集合内部目录约定不一致）。
+    const normalizedNewPath = isDir && newPath && !newPath.endsWith('/') ? newPath + '/' : newPath;
     const oldPrefix = isDir ? oldPath : oldPath + '/';
     setEntries(prev => prev.map(e => {
-      if (e.path === oldPath) return { ...e, path: newPath };
-      if (isDir && (e.path || '').startsWith(oldPrefix)) return { ...e, path: newPath + (e.path || '').slice(oldPath.length) };
+      if (e.path === oldPath) return { ...e, path: normalizedNewPath };
+      if (isDir && (e.path || '').startsWith(oldPrefix)) return { ...e, path: normalizedNewPath + (e.path || '').slice(oldPath.length) };
       return e;
     }));
   };

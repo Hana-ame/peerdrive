@@ -97,6 +97,7 @@ type adminUploadState struct {
 	filename string
 	field    string // multipart 字段名（默认 "file"；BT torrent 用 "torrent"）
 	reqPath  string // 转发目标路径（默认 /files/upload；BT torrent 走 /bt/torrent）
+	token    string // 声明帧携带的 Bearer token；上传收齐后随 multipart 内部请求一起转发
 	got      int64
 	size     int64
 	f        *os.File // 临时文件（body 收集），收齐后 multipart 转发
@@ -128,7 +129,9 @@ func (s *PeerJSService) serveAdmin(c Session, st *connState, raw []byte) {
 	// 二进制上传：同步占槽（泵内），收集由二进制帧路由（conn.go）驱动，
 	// 收齐后由泵触发 serveAdminUploadComplete
 	if ar.Binary {
-		if ar.Size <= 0 || ar.Size > adminBinMax {
+		// 允许 size==0（空文件上传），与 fileIndex upload verb 的空文件对称；
+		// 只有负数或超上限才拒绝。
+		if ar.Size < 0 || ar.Size > adminBinMax {
 			c.SendJSON(dcResp{Type: "err", Msg: "invalid admin upload size", ReqID: ar.ReqID})
 			return
 		}
@@ -160,6 +163,7 @@ func (s *PeerJSService) serveAdmin(c Session, st *connState, raw []byte) {
 			// 上传打到 /files/upload 且 field=torrent 不被接受（发现背景：
 			// 前端 btTorrentUpload 迁移时核对 admin 帧与后端转发路径）。
 			reqPath: ar.Path,
+			token:   ar.Token,
 			size:    ar.Size,
 			f:       f,
 			path:    f.Name(),
@@ -167,8 +171,19 @@ func (s *PeerJSService) serveAdmin(c Session, st *connState, raw []byte) {
 		}
 		st.adminUp = au
 		st.mu.Unlock()
+		if ar.Size == 0 {
+			// 空文件没有后续二进制帧；立即从单槽摘除并触发 multipart 转发，
+			// 否则 adminUp 会一直占着槽位（连接级单槽）直到被超时清理。
+			st.mu.Lock()
+			if st.adminUp == au {
+				st.adminUp = nil
+			}
+			st.mu.Unlock()
+			go s.serveAdminUploadComplete(c, au)
+			return
+		}
 		log.LogInfo("peerjs-admin: upload begin %s size=%d", ar.Filename, ar.Size)
-		return // 收齐后由泵触发 serveAdminUploadComplete
+		return // 非空：收齐后由泵触发 serveAdminUploadComplete
 	}
 
 	// 普通请求：JSON body → 内部 HTTP 转发。
@@ -252,7 +267,7 @@ func (s *PeerJSService) serveAdminUploadComplete(c Session, au *adminUploadState
 			return
 		}
 	}()
-	req, err := s.buildAdminRequest("POST", reqPath, pr, mw.FormDataContentType(), "")
+	req, err := s.buildAdminRequest("POST", reqPath, pr, mw.FormDataContentType(), au.token)
 	if err != nil {
 		pw.Close()
 		c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: au.reqID})

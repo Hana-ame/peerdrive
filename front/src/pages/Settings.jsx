@@ -214,7 +214,9 @@ export default function Settings({ dataConsent, setDataConsent }) {
     try {
       await api.ping();
       setPingOk(true);
-      const info = await api.getNodeInfo().catch(() => null);
+      // 2026-08-19：libp2p 端点删除，getNodeInfo（/p2p/node）已不存在；
+      // 节点状态改查 /peerjs/node（getPeerjsNode），否则这里拿到 undefined 函数直接崩。
+      const info = await api.getPeerjsNode().catch(() => null);
       setNodeInfo(info);
     } catch {
       setPingOk(false);

@@ -172,6 +172,23 @@ describe('ws.js client', () => {
     feedText(sock, { type: 'done', offset: 0, size: 3, reqId: req.reqId })
   })
 
+  it('admin-bin size=0 清空 binaryExpect（防残留单槽污染后续二进制帧）', async () => {
+    // 发现背景：再 review（2026-08）——空文件/空响应的 admin-bin 声明没有
+    // 后续二进制帧，旧实现未清 binaryExpect；万一后面来一个无关二进制帧，
+    // 会被误判为这个已完成请求的数据块（pending 已删，数据被静默丢弃）。
+    const sock = makeMockSock()
+    ws.__test._setSock(sock)
+    const p = ws.admin('GET', '/empty-file')
+    const f = JSON.parse(sock.sent[0])
+    feedText(sock, { type: 'admin-bin', status: 200, size: 0, reqId: f.reqId })
+    const data = await p
+    expect(data).toHaveLength(0)
+    expect(ws.__test._binaryExpect()).toBeNull()
+    // 随后到达的无主二进制帧不得被误归到已完成请求
+    sock.onmessage({ data: new Uint8Array([1]).buffer })
+    expect(ws.__test._binaryExpect()).toBeNull()
+  })
+
   it('admin-bin：二进制文件流响应收集为 Uint8Array', async () => {
     const sock = makeMockSock()
     ws.__test._setSock(sock)

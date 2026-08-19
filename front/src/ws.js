@@ -130,7 +130,10 @@ function handleText(text) {
       if (!p) return
       binaryExpect = { type: 'admin', reqId: msg.reqId, size: msg.size || 0, got: 0, chunks: [] }
       if (binaryExpect.size === 0) {
+        // 空文件/空响应没有后续二进制帧，必须立刻清 expect；
+        // 否则残留单槽会把下一次无关二进制帧误判给这个已完成请求。
         finishBinaryExpect(p, binaryExpect)
+        binaryExpect = null
       }
       return
     }
@@ -425,4 +428,5 @@ export const __test = {
   pending,
   _setSock: (s) => { sock = s },
   _reset: () => { sock = null; pending.clear(); binaryExpect = null },
+  _binaryExpect: () => binaryExpect,
 }

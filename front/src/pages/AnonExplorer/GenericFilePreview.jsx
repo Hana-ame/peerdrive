@@ -3,7 +3,7 @@ import { fileIcon, fmtSize, relTime } from './utils';
 export default function GenericFilePreview({ mime, filename, size, downloadUrl, createdAt, onDownload }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 px-8">
-      <span className="text-5xl mb-4">{fileIcon(mime)}</span>
+      <span className="text-5xl mb-4">{fileIcon(mime, filename)}</span>
       <h3 className="text-xl font-bold text-gray-200 mb-1">{filename}</h3>
       <p className="text-xs text-gray-500 font-mono mb-2">{fmtSize(size || 0)}</p>
       <a href="#" onClick={e => { e.preventDefault(); if (onDownload) onDownload(); }}
