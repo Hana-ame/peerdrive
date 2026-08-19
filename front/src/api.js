@@ -451,9 +451,12 @@ export async function saveConsentLocal() {
 
 /* ---- alias exports for legacy usage ---- */
 // 统一 Collection API（替代旧的 createUserCollection/createAnonCollection 等）
-// 一切皆 collection，entry 的 provider 可为 sha256 或 url
+// 一切皆 collection，entry 的 provider 可为 sha256 或 url。
+// 注意：匿名分派器（dispatchCreateCollection）按 body 里是否有 username 走
+// 用户体系，匿名创建字段是 friendly_name 不是 name（发现背景：再 review 2026-08
+// 发现此别名用 name 会导致匿名创建时后端收到空 friendly_name，合集名丢失）。
 export const createCollection = (entries, name = '', tags = []) =>
-  request('POST', '/collections', { name, entries, tags });
+  request('POST', '/collections', { friendly_name: name, entries, tags });
 export const listCollections = () => request('GET', '/collections');
 export const getCollection = (id) => request('GET', `/collections/${id}`);
 export const addEntry = addCollectionEntry;
