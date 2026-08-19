@@ -21,7 +21,13 @@ export default function SingleFilePreview({ entry, searchHash, collection, allCo
   // 不管 revoke，AnonExplorer 单文件预览会泄漏 objectURL）。
   const objectUrlRef = useRef(null);
 
+  // URL-only entry：没有 sha256 provider 时后端 WS 拉取只会得到 302 跳转 HTML，
+  // 预览/下载都应当直接打开外部链接，不走 WS（发现背景：再 review 2026-08）。
+  const shaHash = entry.hash || entry.providers?.find(p => p.type === 'sha256')?.value;
+  const urlProvider = entry.providers?.find(p => p.type === 'url');
+
   useEffect(() => {
+    if (!shaHash) return; // URL-only 或空 provider：不发起无效的 WS 拉取
     let cancelled = false;
     const load = async () => {
       try {
@@ -48,6 +54,21 @@ export default function SingleFilePreview({ entry, searchHash, collection, allCo
   // 嵌套合集
   if (allCollHashes.has(entry.hash)) {
     return <NestedCollectionLink filename={filename} onClick={() => navigate(`/anon/collections/${entry.hash}`)} />;
+  }
+
+  if (!shaHash && urlProvider?.value) {
+    return (
+      <div className="flex items-center justify-center min-h-[200px] p-8 text-center">
+        <div>
+          <div className="text-4xl mb-4">🔗</div>
+          <p className="text-sm text-gray-300 mb-2">此条目是外部链接，没有本地内容可预览</p>
+          <a href={urlProvider.value} target="_blank" rel="noreferrer"
+            className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+            打开外部链接 ↗
+          </a>
+        </div>
+      </div>
+    );
   }
 
   const isImage = mime.startsWith('image/') || ['png','jpg','jpeg','gif','webp','svg','bmp','ico'].includes(ext);

@@ -14,6 +14,20 @@ export default function FileRow({ file, isNestedColl, searchHash, onNestedCollCl
   }
   const mime = file.mime_type || file.providers?.[0]?.mime_type || '';
   const displayName = (file.path || '').split('/').pop() || file.hash || 'file';
+  // URL-only entry：没有 sha256 provider 时后端 WS 拉取会得到 302 跳转 HTML，
+  // 前端不应尝试下载，改为直接打开外部链接（发现背景：再 review 2026-08）。
+  const urlProvider = file.providers?.find(p => p.type === 'url');
+  const shaHash = file.hash || file.providers?.find(p => p.type === 'sha256')?.value;
+  if (!shaHash && urlProvider?.value) {
+    return (
+      <a key={file.path} href={urlProvider.value} target="_blank" rel="noreferrer"
+        className="flex items-center gap-3 px-5 py-3 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm block">
+        <span className="text-xl">{fileIcon(mime, file.path)}</span>
+        <span className="text-blue-300 font-mono truncate flex-1">{displayName}</span>
+        <span className="text-purple-400 text-xs">外部链接 ↗</span>
+      </a>
+    );
+  }
   return (
     <a key={file.path} href="#" onClick={(e) => {
       e.preventDefault();
