@@ -21,6 +21,8 @@ import (
 
 // fakeSession 内存版 Session：记录发送的 JSON 帧（头+体），可捕获 OnMessage
 // 回调并手动注入帧（H1/H6/M6 单元测试 + 流式 OpenStream + forward 测试用）。
+// Close 触发 OnClose 回调 + 标记 closed（模拟真实连接关闭的清理路径——
+// bindConn 同 peer 去重测试依赖此行为）。
 type fakeSession struct {
 	id   string
 	mu   sync.Mutex
@@ -29,6 +31,8 @@ type fakeSession struct {
 	frames []fakeFrame
 
 	onMessage func(peerjs.Frame)
+	onClose   func()
+	closed    bool
 }
 
 // fakeFrame 一帧的完整记录（头 JSON + 可选二进制体）。
@@ -63,8 +67,31 @@ func (f *fakeSession) OnMessage(fn func(peerjs.Frame)) {
 	f.onMessage = fn
 	f.mu.Unlock()
 }
-func (f *fakeSession) OnClose(fn func()) {}
-func (f *fakeSession) Close()            {}
+func (f *fakeSession) OnClose(fn func()) {
+	f.mu.Lock()
+	f.onClose = fn
+	f.mu.Unlock()
+}
+func (f *fakeSession) Close() {
+	f.mu.Lock()
+	if f.closed {
+		f.mu.Unlock()
+		return
+	}
+	f.closed = true
+	fn := f.onClose
+	f.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+// Closed 返回会话是否已被 Close（去重测试断言旧连接被关闭）。
+func (f *fakeSession) Closed() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.closed
+}
 
 // feed 手动注入一帧到 OnMessage 回调（模拟对端到达的帧）。
 func (f *fakeSession) feed(frame peerjs.Frame) {

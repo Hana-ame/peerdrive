@@ -439,6 +439,95 @@ sync     {type:"sync", seq}                 → sync-resp {files,lastSeq}（meta
 文件数据面引擎（req/索引 verb 耦合 file_index 存储 + config/log）**暂不独立**——均无
 仓库外使用者，拆分是负收益；待出现第二个使用者再拆。
 
+### 3.15 效率优化批次（2026-08-19）
+
+大文件传输路径代码审阅产出的 3 项效率优化（全部落地并验证）：
+
+| # | 优化 | 落点 | 验证 |
+|---|---|---|---|
+| 1 | **fetchReader 定时器泄漏**：`Read` 每消费一个数据块就 `time.After(fetchIdleTimeout)` 新建 5 分钟 timer——8GB 文件 = 13 万个 timer 常驻 runtime timer 堆直到到期（内存 + GC 双浪费，大文件传输时长期积累） | `outbound.go fetchReader.Read`：单次创建 timer + 每次收到块 `Reset`（Stop 后 drain C 再 Reset，防 Go timer 语义坑） | transport 全量 -race 绿 |
+| 2 | **serveFile 每请求分配 64KB 块缓冲**：并发 serveFile 各自 make，GC 压力 + 内存峰值 | `inbound.go` `chunkPool`（sync.Pool 64KB，SendFrame 同步复制后归还——pion Send 内部拷贝，归还安全） | transport 全量 -race 绿 |
+| 3 | **PeerSource 串行尝试对端**：第一个慢对端（远端磁盘慢/网络抖）卡住整个回源，注释里预留的并发竞速落地 | `source/peer.go Open`：多对端并发发起 OpenStreamFrom，**首个成功立即返回**（真竞速，慢对端不阻塞本调用）；迟到/失败结果由后台收割 goroutine Close（防输家流泄漏：对端流互斥锁永久占用 + 本端 fetch 状态悬挂）。单对端走原串行路径零开销；失败路径立即 Unlock | `source/peer_test.go` 新增 2 测试（先响应对端胜出 + 迟到帧静默忽略 + 全失败报错与锁释放，用真实 PeerJSService + BindLocal 内存会话全链路驱动）；新增 `transport file_index.go PendingFetchesForTest` 跨包观察辅助 |
+
+验证基线：back 全包 + peerjs -race + 集成 `-p 1` 脱外网 17.9s 全绿。
+
+**竞速测试补全批次（2026-08-19，第 3 项 PeerSource 竞速的回归覆盖）**：
+`source/peer_test.go` 扩到 8 项，用真实 PeerJSService + BindLocal 内存会话全链路驱动：
+
+| 测试 | 锁定目标 |
+|---|---|
+| `TestPeerSource_RaceWinsFastest` | 双端竞速：数据完整 + 输家收割（fetch 状态清理）+ 迟到帧静默忽略 |
+| `TestPeerSource_RaceThreePeers` | 三端竞速：全部对端并发收到 req；收割后第二轮竞速成功（锁无泄漏） |
+| `TestPeerSource_RaceMixedFailSuccess` | 部分失败 + 部分成功：失败路径立即释放锁，恢复后可再竞速 |
+| `TestPeerSource_RaceBusyPeerSkipped` | 忙对端（互斥锁被占）跳过不阻塞：不发 req 不占状态，其余对端正常胜出 |
+| `TestPeerSource_RaceAllFail` | 全失败报错 + 失败路径零残留（锁 + fetch 状态） |
+| `TestPeerSource_MultiBlockTransfer` | 胜者流 >64KB 三块重组按序完整 |
+| `TestPeerSource_WinnerPeerLockReleased` | 胜者 Close / 输家收割两条锁释放路径逐对端验证（failSend 收敛唯一胜者） |
+| `TestPeerSource_WinnerErrFrame` | 胜者流 err 帧读取期报错（不静默返回坏数据） |
+
+**测试设计坑（本批次记录）**：竞速胜负不确定（`Connections()` map 迭代随机 +
+goroutine 调度不定），依赖「喂给指定对端」的断言不可靠（一度写出 50% 概率
+超时的测试）——统一改为「响应喂给全部候选对端（输家迟到帧被忽略）」
+或「failSend 把竞争收敛到唯一对端」两种确定性写法。
+
+**失效回退批次（2026-08-19，第 3 项 PeerSource 的失效/回退路径覆盖）**：
+
+| 测试 | 锁定目标 |
+|---|---|
+| `TestPeerSource_NoConnections` | 无在线对端 → 明确报错（回退链末端的可诊断错误） |
+| `TestPeerSource_OpenAfterSvcClose` | 服务已关闭后再 Open → 报错不悬挂（连接全释放） |
+| `TestPeerSource_ReadAfterSvcClose` | 竞速建立后服务关闭 → 读取期 ctx 取消报错，不把已缓冲数据当完整结果 |
+| `TestPeerSource_WinnerPeerDropped` | 竞速胜出后对端传输中掉线（无 done 帧）→ 读取期报错，不返回截断数据（内容寻址语义） |
+| `TestPeerSource_AllFailErrorDetail` | 全失败错误聚合：每个对端失败原因进最终报错（实现改进：失败原因原串行版有、竞速版丢失，已补 `strings.Join` 聚合） |
+
+配套改动：`source/peer.go Open` 全失败报错从「all peers failed」升级为
+聚合各对端原因；`fakePeerSess` 补 `Close` 触发 `onClose`（模拟对端断连，
+与真实 `WSSession.Close` 语义一致——此前 Close 为空实现，断连类测试无法驱动
+bindConn 的 OnClose 清理路径）。
+
+**多连接批次（2026-08-19，同 peer 双连接去重 + 多连接测试）**：
+
+**问题**：双向互拨（A↔B 同时拨号对方，集成测试默认场景）或重连竞态会在
+同一 peerID 下留下两条 WebRTC 连接——`conns` map 按 peerID 键只保留一条，
+另一条成为孤儿：connState 常驻 pending map + uploadWorker/fwdWorker
+goroutine 泄漏 + 白占一条连接资源。
+
+**修复**（`transport/conn.go bindConn`）：
+1. 同 peer 双连接去重：`conns` 保留其一、锁外 `Close` 淘汰者（锁内 Close
+   死锁坑见 §5）；被淘汰连接的 OnClose 清理带 `s.conns[c.ID()] == c` 值
+   相等守卫，不会误删保留连接。
+2. **保留策略必须两端一致**：按连接级 UUID 字典序小者胜出
+   （`rtcSession.ConnID()` = peerjs `Connection.ID`，两端可见同一值）。
+   双向互拨两端各见 {自己拨出, 对方拨入}，若各留各的拨出连接，保留的
+   恰是对方已关闭的断链 → 拉取超时失败。**发现背景**：去重批次上线后
+   集成测试约 1/4 概率失败（`TestSelfHostedSignalAndDiscover` 10.5s 超时），
+   日志 `dedup connection ... closing stale` 成对出现——两端各关一条，
+   互留断链。修复后 6 连跑全绿。fakeSession 无连接 UUID（rank 相等）时
+   保留新连接（测试替身语义）。
+3. local WS 会话不去重：多浏览器标签页各一条本地会话，主动关闭旧标签页
+   连接会打断其进行中的入站服务。
+
+**测试**（`transport/conn_test.go` 新增 4 项 + `source/peer_test.go` 1 项）：
+
+| 测试 | 锁定目标 |
+|---|---|
+| `TestBindConn_SamePeerDedup` | 同 peer 双连接：新连接保留、旧连接被关、旧 OnClose 清理不误删新连接 |
+| `TestBindConn_ReplacedConnOldStreamErrors` | 连接被替换后旧连接上的进行中流必须报错结束（不悬挂不截断） |
+| `TestBindConn_LocalNoDedup` | 多 local 会话共存不互杀（多标签页场景） |
+| `TestBindConn_DedupFreesSlot` | 去重后资源完整释放，新连接可正常服务拉取（真实 pump 链路：meta/data 头/二进制块/done） |
+| `TestPeerSource_ParallelStreamsAcrossPeers` | 3 对端 3 条连接并行流：peer 流互斥锁按 peer 隔离互不阻塞，数据各自完整，结束零残留 |
+
+配套改动：`fakeSession` 补 `closed` 标志 + `Close` 触发 `onClose`（模拟
+真实连接关闭清理路径，去重测试依赖）；`rtcSession` 新增 `ConnID()` +
+`connRanker` 可选接口（Session 接口本体不动，WSSession 不受影响）。
+
+**测试设计坑（本批次记录）**：竞速 goroutine 是异步的——`Open` 返回
+≠ 所有候选 goroutine 已结束，失败对端解锁可能晚于返回；连续多轮竞速时
+下一轮 `TryLock` 会撞上未释放的锁（`-count=5` 偶发失败，错误
+「peer peerA: ...」表明上一轮失败者锁未释放）。修复：`waitLockFree` 用
+TryLock 探测 + 立即释放等待「本轮候选锁」空闲（不能等全部锁空闲——胜者
+锁被 reader 故意持有到测试结束）。
+
 ## 5. E2E 踩过的坑（全部已修）
 
 | 坑 | 修复 |

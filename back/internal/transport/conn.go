@@ -161,10 +161,52 @@ type fetchState struct {
 //   - 文本帧其它 type → 出站角色的响应，按 reqId 路由
 //   - 二进制帧 → 数据块，路由决策（归 upload 还是 expect）在泵内完成，
 //     落盘 IO 交给连接级 worker（H5，见 inbound.go 的 uploadWorker）
+// connRanker 连接级 UUID（rtcSession 实现；WSSession/fakeSession 无，
+// 返回 "" 表示不可比）。
+type connRanker interface{ ConnID() string }
+
+func sessionRank(s Session) string {
+	if r, ok := s.(connRanker); ok {
+		return r.ConnID()
+	}
+	return ""
+}
+
 func (s *PeerJSService) bindConn(c Session) {
 	s.mu.Lock()
+	old := s.conns[c.ID()]
 	s.conns[c.ID()] = c
 	s.mu.Unlock()
+	// 同 peer 双连接去重（2026-08-19）：双向互拨（A↔B 同时拨号对方）或
+	// 重连竞态会在同一 peerID 下留下两条连接——conns map 按 peerID 键只
+	// 保留一条，另一条成为孤儿：connState 常驻 pending map、
+	// uploadWorker/fwdWorker goroutine 泄漏、白占一条 WebRTC 连接资源。
+	// 锁外 Close 被淘汰的连接（持锁 Close 死锁坑见 REFACTOR §5）；
+	// 被淘汰连接的 OnClose 清理带 `s.conns[c.ID()] == c` 值相等守卫
+	// （见下），不会误删保留连接。
+	// 例外：local WS 会话不去重——多浏览器标签页各一条本地会话，主动
+	// 关闭旧标签页连接会打断其进行中的入站服务。
+	// ⚠️ 保留策略必须两端一致（连接级 UUID 字典序小的胜出）：双向互拨
+	// 时两端各见两条连接 {自己拨出, 对方拨入}，若各留各的拨出连接，
+	// 保留的恰是对方已关闭的断链（集成测试 TestSelfHostedSignalAndDiscover
+	// 偶发失败即此坑——发现背景：去重批次上线后集成测试 1/4 概率失败，
+	// 拉取超时 10.5s）。连接 UUID 两端可见同一值 → 同取字典序小者 →
+	// 两端保留同一条物理连接。fakeSession 无连接 UUID（rank 相等）时
+	// 保留新连接（测试替身语义）。
+	if old != nil && old != c && c.ID() != "local" {
+		if sessionRank(old) < sessionRank(c) {
+			// 旧连接 UUID 更小：conns 指回旧连接，关闭新连接；旧连接的
+			// connState/worker 已就位，直接返回不重建。
+			s.mu.Lock()
+			s.conns[c.ID()] = old
+			s.mu.Unlock()
+			log.LogInfo("peerjs: dedup connection to %s, closing newer", c.ID())
+			c.Close()
+			return
+		}
+		log.LogInfo("peerjs: dedup connection to %s, closing stale", c.ID())
+		old.Close()
+	}
 	st := &connState{
 		fetches: make(map[string]*fetchState),
 		binCh:   make(chan binaryChunk, 16),

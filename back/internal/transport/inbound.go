@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"peerdrive/internal/log"
@@ -21,6 +22,19 @@ import (
 // chunkSize DataChannel 单块传输大小（pion SCTP 单消息上限约 256KB，64KB 兼顾流控粒度）。
 // 写缓冲流控已下沉到 peerjs.Connection.SendFrame（连接级全局回调），此处只定块大小。
 const chunkSize = 64 * 1024
+
+// chunkPool 64KB 块缓冲池：并发 serveFile 各自 make 会重复分配 64KB
+// （GC 压力 + 内存峰值），池化复用（每请求一块，SendFrame 同步复制后归还
+// ——SendFrame 内部 marshal 与落线均不持有 buf）。
+var chunkPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, chunkSize)
+		return &b
+	},
+}
+
+func getChunk() []byte  { return *chunkPool.Get().(*[]byte) }
+func putChunk(b []byte) { chunkPool.Put(&b) }
 
 // ---- 文件服务（对端请求本节点文件） ----
 
@@ -131,7 +145,8 @@ func (s *PeerJSService) serveFile(c Session, req dcReq) {
 	// 并发 serveFile 经 sendMu 串行发送 + lowWater 广播，不再各自注册
 	// OnBufferedAmountLow（替换式回调会被覆盖 → 死等，曾导致并发请求卡死）。
 
-	buf := make([]byte, chunkSize)
+	buf := getChunk()
+	defer putChunk(buf)
 	sent := int64(0)
 	for {
 		n, err := r.Read(buf)

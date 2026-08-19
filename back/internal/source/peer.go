@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 
 	"peerdrive/internal/transport"
@@ -70,7 +71,11 @@ func (s *PeerSource) Available(ctx context.Context) bool {
 	return false
 }
 
-// Open 依次尝试在线对端，第一个成功的流返回。
+// Open 从在线对端拉取内容：多对端并发竞速，首个成功返回。
+// 为什么要竞速：串行尝试时第一个慢对端（远端磁盘慢/网络抖）会卡住整个
+// 回源直到失败/超时——透传场景多个对端在线时应选最快路径。竞速只到
+// 「首个流建立成功」，不等待其余对端返回（迟到/失败的流由收割 goroutine
+// Close，防 peer 流互斥锁泄漏和本端 fetch 状态悬挂）。
 // ctx 可携带回源链路（transport.TraceKey，serveFile 回源时注入）——
 // 透传给 OpenStreamFrom 防环（A←→B 互连回源死循环，2026-08-18 第 3 项
 // 优化）。根请求（HTTP 下载等）ctx 无该值 → trace 为 nil。
@@ -83,7 +88,8 @@ func (s *PeerSource) Open(ctx context.Context, hash string, offset, size int64) 
 		trace = t
 	}
 	conns := s.svc.Connections()
-	var lastErr error
+	var pids []string
+	var locks []*sync.Mutex
 	for pid := range conns {
 		if pid == s.svc.ID() {
 			continue
@@ -91,21 +97,74 @@ func (s *PeerSource) Open(ctx context.Context, hash string, offset, size int64) 
 		muI, _ := s.peerLocks.LoadOrStore(pid, &sync.Mutex{})
 		mu := muI.(*sync.Mutex)
 		if !mu.TryLock() {
-			// 该 peer 已有流在进行（连接级 expect 单槽）——跳过，试下一个
+			// 该 peer 已有流在进行（连接级 expect 单槽）——跳过，不等待
 			continue
 		}
-		r, err := s.svc.OpenStreamFrom(pid, hash, offset, size, trace)
-		if err == nil {
-			// 流结束才解锁（reader.Close 或读完）——包装一层
-			return &peerReadCloser{r: r, mu: mu}, nil
+		pids = append(pids, pid)
+		locks = append(locks, mu)
+	}
+	if len(pids) == 0 {
+		return nil, fmt.Errorf("no online peer available")
+	}
+	if len(pids) == 1 {
+		// 单对端：走原串行路径（无并发开销）
+		r, err := s.svc.OpenStreamFrom(pids[0], hash, offset, size, trace)
+		if err != nil {
+			locks[0].Unlock()
+			return nil, fmt.Errorf("peer %s: %w", pids[0], err)
 		}
-		mu.Unlock()
-		lastErr = fmt.Errorf("peer %s: %w", pid, err)
+		return &peerReadCloser{r: r, mu: locks[0]}, nil
 	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("no online peer available")
+	// 多对端并发竞速：channel 容量 = 候选数，输家 goroutine 永不阻塞
+	type res struct {
+		r   io.ReadCloser
+		mu  *sync.Mutex
+		err error // 失败原因（全失败时聚合进最终报错，可诊断）
 	}
-	return nil, lastErr
+	ch := make(chan res, len(pids))
+	for i := range pids {
+		go func(pid string, mu *sync.Mutex) {
+			r, err := s.svc.OpenStreamFrom(pid, hash, offset, size, trace)
+			if err != nil {
+				mu.Unlock() // 失败：立即释放该 peer 槽位
+				ch <- res{err: err}
+				return
+			}
+			ch <- res{r: r, mu: mu} // 成功：解锁权交给胜者/收割者
+		}(pids[i], locks[i])
+	}
+	// 首个成功立即返回（真竞速：慢对端不阻塞本调用）；
+	// 其余未决结果由后台收割 goroutine 关闭（r 泄漏 → 该对端流互斥锁
+	// 永久占用 + 本端 fetch 状态悬挂，慢对端晚到数秒即泄漏）
+	got := 0
+	var errs []string
+	for got < len(pids) {
+		rr := <-ch
+		got++
+		if rr.r == nil {
+			if rr.err != nil {
+				errs = append(errs, rr.err.Error())
+			}
+			continue
+		}
+		if got < len(pids) {
+			go func(n int) {
+				for j := n; j < len(pids); j++ {
+					x := <-ch
+					if x.r != nil {
+						x.r.Close()
+						x.mu.Unlock()
+					}
+				}
+			}(got)
+		}
+		return &peerReadCloser{r: rr.r, mu: rr.mu}, nil
+	}
+	// 全失败：聚合每个对端的原因（回退到上层 source 时的可诊断报错）
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("all peers failed: %s", strings.Join(errs, "; "))
+	}
+	return nil, fmt.Errorf("all peers failed")
 }
 
 // Fetch 整体获取（CapStream 已覆盖，防御性实现）。

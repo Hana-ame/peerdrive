@@ -135,6 +135,20 @@ type fetchReader struct {
 }
 
 func (r *fetchReader) Read(p []byte) (int, error) {
+	// 空闲超时定时器：只创建一次并复用（Reset），不能每次循环 time.After——
+	// 每消费一个块就创建 1 个 timer，8GB 大文件 = 13 万个 timer 常驻 runtime
+	// timer 堆直到 5 分钟到期（发现背景：代码审阅，内存+GC 双浪费）。
+	idle := time.NewTimer(fetchIdleTimeout)
+	defer idle.Stop()
+	idleReset := func() {
+		if !idle.Stop() {
+			select {
+			case <-idle.C:
+			default:
+			}
+		}
+		idle.Reset(fetchIdleTimeout)
+	}
 	for {
 		if len(r.buf) > 0 {
 			n := copy(p, r.buf)
@@ -146,6 +160,7 @@ func (r *fetchReader) Read(p []byte) (int, error) {
 		}
 		select {
 		case chunk := <-r.f.q:
+			idleReset() // 有数据活跃：重置空闲计时
 			if r.verify {
 				if r.h == nil {
 					r.h = sha256.New()
@@ -160,6 +175,7 @@ func (r *fetchReader) Read(p []byte) (int, error) {
 			// 循环里 buf 赋值会覆盖未消费的块（块1 丢失 bug，流式测试复现）。
 			select {
 			case chunk := <-r.f.q:
+				idleReset()
 				if r.verify {
 					if r.h == nil {
 						r.h = sha256.New()
@@ -181,7 +197,7 @@ func (r *fetchReader) Read(p []byte) (int, error) {
 		case err := <-r.f.errCh:
 			r.finish(err)
 			return 0, err
-		case <-time.After(fetchIdleTimeout):
+		case <-idle.C:
 			r.finish(fmt.Errorf("peerjs: fetch %s idle timeout", r.hash))
 			return 0, r.err
 		case <-r.ctx.Done():

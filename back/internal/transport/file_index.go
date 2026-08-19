@@ -460,3 +460,20 @@ func sanitizeName(name string) string {
 
 // UploadChunkSizeForTest 供集成测试引用分片粒度。
 func UploadChunkSizeForTest() int { return uploadChunkSize }
+
+// PendingFetchesForTest 返回某连接上残留的 fetch 状态 reqId（测试辅助：
+// source 包 PeerSource 竞速测试验证输家流被收割后状态清理，需要跨包观察
+// 内部 fetches map。生产路径不调用）。
+func (s *PeerJSService) PendingFetchesForTest(sess Session) []string {
+	st := s.stateFor(sess)
+	if st == nil {
+		return nil
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	out := make([]string, 0, len(st.fetches))
+	for id := range st.fetches {
+		out = append(out, id)
+	}
+	return out
+}

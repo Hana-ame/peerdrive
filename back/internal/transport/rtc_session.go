@@ -19,6 +19,10 @@ func newRTCSession(c *peerjs.Connection) *rtcSession {
 
 func (r *rtcSession) ID() string { return r.id }
 
+// ConnID 返回连接级 UUID（信令路由键，两端可见同一值）——bindConn 同
+// peer 去重按它做两端一致的保留决策（见 conn.go 去重注释）。
+func (r *rtcSession) ConnID() string { return r.c.ID }
+
 func (r *rtcSession) SendJSON(v any) error { return r.c.SendJSON(v) }
 
 func (r *rtcSession) SendFrame(header any, body []byte) error { return r.c.SendFrame(header, body) }
