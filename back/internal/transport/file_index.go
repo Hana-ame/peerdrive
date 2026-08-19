@@ -98,9 +98,6 @@ func (s *FileIndexService) reapUploads() {
 	}
 }
 
-// uploadSessions 键：文件名（sanitize 后），值：会话。
-var _ = uploadChunkSize
-
 // FileInfo 对外返回的文件信息。
 type FileInfo struct {
 	Hash   string `json:"hash"`
@@ -151,15 +148,16 @@ const uploadChunkSize = 64 * 1024
 //
 // 位图语义：chunk i 到位 = 字节 [i*64KB, (i+1)*64KB) 已写。Commit 仅在位图全满时进行。
 type UploadSession struct {
-	mu      sync.Mutex
-	name    string
-	path    string
-	file    *os.File
-	size    int64 // 声明总大小
-	bitmap  []uint64
-	seq     int64
-	last    time.Time // 最后活动时间（过期清理用）
-	aborted bool      // reap 摘除句柄后置位：WriteAt/Complete 见之即错（M7 竞态修复）
+	mu        sync.Mutex
+	name      string
+	path      string
+	file      *os.File
+	size      int64 // 声明总大小
+	bitmap    []uint64
+	fullWords int // 非末 word 中已满 64 chunk 的数量——Complete O(1) 判满
+	seq       int64
+	last      time.Time // 最后活动时间（过期清理用）
+	aborted   bool      // reap 摘除句柄后置位：WriteAt/Complete 见之即错（M7 竞态修复）
 }
 
 // DeclaredSize 返回声明总大小（BeginUpload 同名复用一致性校验用）。
@@ -271,25 +269,25 @@ func (u *UploadSession) Complete() (bool, *FileInfo, error) {
 	if u.aborted || u.file == nil {
 		return false, nil, fmt.Errorf("upload session aborted")
 	}
-	// 位图全满判定：除最后一个 word 外需全 64 位，末 word 只需
-	// (总 chunk 数 mod 64) 位——曾误判尾部块未满导致永不完成。
+	// 位图全满判定（O(1)）：非末 word 由增量 fullWords 计数（setBit 维护），
+	// 末 word 单独检查（其满阈值 = 尾部不足 64 的 chunk 数，<64）。曾按
+	// chunk 数分配位图导致末 word 判满逻辑失效、全扫 O(words) 每分片一次
+	// （8GB 上传 2.6 亿次比较），见 setBit 注释。
 	totalChunks := (u.size + uploadChunkSize - 1) / uploadChunkSize
-	full := true
-	for i, w := range u.bitmap {
+	if totalChunks > 0 {
+		words := len(u.bitmap)
+		if u.fullWords != words-1 {
+			return false, nil, nil
+		}
+		// 末 word：需要 bits 个低位 chunk（<64 时按位掩码；=64 时全满）
+		bits := totalChunks - int64(words-1)*64
 		want := uint64(^uint64(0))
-		if i == len(u.bitmap)-1 {
-			bits := totalChunks - int64(i)*64
-			if bits < 64 {
-				want = (1 << bits) - 1
-			}
+		if bits < 64 {
+			want = (1 << bits) - 1
 		}
-		if w != want {
-			full = false
-			break
+		if u.bitmap[words-1] != want {
+			return false, nil, nil
 		}
-	}
-	if !full {
-		return false, nil, nil
 	}
 	if err := u.file.Sync(); err != nil {
 		return false, nil, err
@@ -298,12 +296,10 @@ func (u *UploadSession) Complete() (bool, *FileInfo, error) {
 	if err != nil {
 		return false, nil, err
 	}
-	u.seq = 0
 	seq, err := repository.UpsertFileIndex(h, u.path, u.name, u.size, false)
 	if err != nil {
 		return false, nil, err
 	}
-	u.seq = seq
 	log.LogInfo("file-index: upload complete hash=%s size=%d path=%s", h, u.size, u.path)
 	return true, &FileInfo{Hash: h, Path: u.path, Name: u.name, Size: u.size, Seq: seq}, nil
 }
@@ -334,11 +330,24 @@ func (u *UploadSession) Close() {
 }
 
 func (u *UploadSession) setBit(i int64) {
-	u.bitmap[i/64] |= 1 << (i % 64)
+	w := i / 64
+	mask := uint64(1) << (i % 64)
+	if u.bitmap[w]&mask != 0 {
+		return // 已置位（重复分片）：不重复计数
+	}
+	before := u.bitmap[w] == ^uint64(0)
+	u.bitmap[w] |= mask
+	// 增量维护 fullWords（Complete 判满从 O(bitmap) 降到 O(1)——大文件
+	// 上传每分片一次 Complete，8GB = 13 万分片 × 2048 word 全扫 = 2.6 亿次
+	// 比较，全耗在单 worker 上。只对满阈值=64 的非末 word 计数；末 word 的
+	// 满阈值 <64（尾部不足一个 word 的 chunk），由 Complete 单独判定）
+	if !before && u.bitmap[w] == ^uint64(0) {
+		totalChunks := (u.size + uploadChunkSize - 1) / uploadChunkSize
+		if w < (totalChunks-1)/64 {
+			u.fullWords++
+		}
+	}
 }
-
-// uploadSessions 键：文件名（sanitize 后），值：会话。
-var _ = uploadChunkSize
 
 // List 列出全部未删除映射。
 func (s *FileIndexService) List(offset, limit int) ([]FileInfo, error) {

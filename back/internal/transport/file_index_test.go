@@ -359,6 +359,64 @@ func TestFileIndex_AbortIdempotent(t *testing.T) {
 	assert.Error(t, err, "abort 后写入必须明确失败")
 }
 
+// TestFileIndex_FullWordsIncrementalBoundaries 位图增量计数（fullWords）
+// 的边界回归：size 正好 64 chunk 倍数 / 非倍数 / 重复置位不重复计数 /
+// 空文件——Complete O(1) 判满重构的保护（发现背景：代码审阅——Complete
+// 每分片全扫位图，8GB 上传 = 13 万分片 × 2048 word，改为 setBit 增量
+// 计数后必须保证判满语义不变）。
+func TestFileIndex_FullWordsIncrementalBoundaries(t *testing.T) {
+	initTestDB(t)
+	svc := NewFileIndexService(t.TempDir())
+
+	// 1) 非 64 倍数 size：末 word 不足 64 chunk，Complete 判满正确
+	content := make([]byte, 2*uploadChunkSize+12345)
+	sess, err := svc.BeginUpload("incr1.bin", int64(len(content)))
+	require.NoError(t, err)
+	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize]))
+	done, _, err := sess.Complete()
+	require.NoError(t, err)
+	assert.False(t, done, "未写满不得完成")
+	require.NoError(t, sess.WriteAt(int64(uploadChunkSize), content[uploadChunkSize:]))
+	done, _, err = sess.Complete()
+	require.NoError(t, err)
+	assert.True(t, done, "全部写满必须完成")
+
+	// 2) 正好 64 chunk 倍数：全部 word 满阈值都是 64，末 word 判满不依赖
+	//    增量计数特判
+	content = make([]byte, 64*uploadChunkSize)
+	sess, err = svc.BeginUpload("incr2.bin", int64(len(content)))
+	require.NoError(t, err)
+	for i := 0; i < 64; i++ {
+		require.NoError(t, sess.WriteAt(int64(i*uploadChunkSize), content[i*uploadChunkSize:(i+1)*uploadChunkSize]))
+	}
+	done, _, err = sess.Complete()
+	require.NoError(t, err)
+	assert.True(t, done, "64 倍数 size 全部写满必须完成")
+
+	// 3) 重复置位（重复分片/续传重建）不破坏计数
+	content = make([]byte, 2*uploadChunkSize)
+	sess, err = svc.BeginUpload("incr3.bin", int64(len(content)))
+	require.NoError(t, err)
+	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize]))
+	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize])) // 重复写同一分片
+	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize])) // 再写一次
+	done, _, err = sess.Complete()
+	require.NoError(t, err)
+	assert.False(t, done, "重复置位不构成完成")
+	require.NoError(t, sess.WriteAt(int64(uploadChunkSize), content[uploadChunkSize:]))
+	done, _, err = sess.Complete()
+	require.NoError(t, err)
+	assert.True(t, done, "补全后必须完成")
+
+	// 4) 空文件：位图空，O(1) 判满路径直接通过（diff 于 size>0 路径）
+	sess, err = svc.BeginUpload("incr4.bin", 0)
+	require.NoError(t, err)
+	done, fi, err := sess.Complete()
+	require.NoError(t, err)
+	assert.True(t, done, "空文件必须直接判满")
+	assert.Equal(t, sha256Hex(nil), fi.Hash, "空文件 sha256 是合法内容寻址值")
+}
+
 // sha256Hex 计算内容哈希（拆分到 transport 包后自带的测试辅助）。
 func sha256Hex(data []byte) string {
 	h := sha256.Sum256(data)

@@ -250,7 +250,24 @@ func (s *PeerJSService) stateFor(c Session) *connState {
 	return s.pending[c]
 }
 
+// failFetch 给 fetch 状态投递失败（错误/上限/完整性拒绝）。闭包戒律：
+// 每来一个 data 帧调用一次 routeResponse，内联闭包 = 每 64KB 一次堆分配
+// （8GB 传输 13 万次），抽成包级函数零分配。
+// 已完成（done 已 close）后的迟到 err 帧忽略。
+func failFetch(f *fetchState, format string, args ...any) {
+	select {
+	case <-f.done:
+		return
+	default:
+	}
+	select {
+	case f.errCh <- fmt.Errorf(format, args...):
+	default:
+	}
+}
+
 // routeResponse 把响应帧路由到对应的 fetch 状态（出站角色的收集端）。
+// 持有 st.mu 期间完成（数据帧高频：泵内直接调用，不额外加锁层次）。
 func (s *PeerJSService) routeResponse(st *connState, r dcResp) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -261,28 +278,16 @@ func (s *PeerJSService) routeResponse(st *connState, r dcResp) {
 	if f == nil {
 		return
 	}
-	reject := func(format string, args ...any) {
-		// 已完成（done 已 close）后的迟到 err 帧忽略
-		select {
-		case <-f.done:
-			return
-		default:
-		}
-		select {
-		case f.errCh <- fmt.Errorf(format, args...):
-		default:
-		}
-	}
 	switch r.Type {
 	case "meta":
 		// total 为文件全量大小（range 请求时 ≠ 本次接收量），只做上限校验
 		if r.Total > maxPeerFetchSize {
-			reject("peerjs: declared file size %d exceeds limit", r.Total)
+			failFetch(f, "peerjs: declared file size %d exceeds limit", r.Total)
 		}
 	case "data":
 		// H6：块大小设上限且必须为正——恶意对端声明超大 size → 无界分配
 		if r.Size <= 0 || r.Size > maxPeerFetchSize {
-			reject("peerjs: invalid data size %d", r.Size)
+			failFetch(f, "peerjs: invalid data size %d", r.Size)
 			return
 		}
 		f.size = r.Size
@@ -298,11 +303,11 @@ func (s *PeerJSService) routeResponse(st *connState, r dcResp) {
 		// 当成功返回 → 静默数据损坏。done.Size = 对端声明的实际发送字节，
 		// 必须与已投递字节（received）一致才放行
 		if r.Size >= 0 && f.received != r.Size {
-			reject("peerjs: incomplete transfer: got %d bytes, peer sent %d", f.received, r.Size)
+			failFetch(f, "peerjs: incomplete transfer: got %d bytes, peer sent %d", f.received, r.Size)
 			return
 		}
 		close(f.done)
 	case "err":
-		reject("peerjs: %s", r.Msg)
+		failFetch(f, "peerjs: %s", r.Msg)
 	}
 }

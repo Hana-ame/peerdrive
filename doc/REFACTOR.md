@@ -528,6 +528,30 @@ goroutine 泄漏 + 白占一条连接资源。
 TryLock 探测 + 立即释放等待「本轮候选锁」空闲（不能等全部锁空闲——胜者
 锁被 reader 故意持有到测试结束）。
 
+**可读性与热点批次（2026-08-19，limb 2）**：
+
+可读性（已提交 806aff9）：
+- `transport/conn.go`：`bindConn` 130 行内联 `OnMessage` → `dispatchFrame`
+  方法（泵内同步语义注释保留：admin 占槽/fwd-data 帧序）；45 行 `OnClose`
+  → `cleanupConn`（fwdOut 锁外关闭的顺序敏感注释）；dedup 决策 → `dedupConn`
+  返回 `(loser, keepOld)`。`bindConn` 只剩编排。
+- `source/peer.go`：删过时注释「串行尝试，未来并发竞速」（竞速已上线）；
+  竞速逻辑拆 `collectPeers`（枚举+TryLock）与 `raceOpen`（竞速+收割），
+  `raceResult` 提为包级类型。
+
+热点（本次提交）：
+| # | 优化 | 落点 | 验证 |
+|---|---|---|---|
+| 1 | **Complete 位图判满 O(words)→O(1)**：上传每分片（64KB）调一次 Complete，每 8GB = 13 万分片 × 2048 word 全扫 = 2.6 亿次比较，全耗在单 worker goroutine 上（fsync+hashFile 的前置步骤） | `file_index.go UploadSession` 加 `fullWords` 增量计数（setBit 置位时 word 从非满变满即 +1，重复置位不重复计数）；Complete 只检查 fullWords 数 + 末 word 掩码（<64 chunk 特判，=64 全满），空文件特判 | 新增 `TestFileIndex_FullWordsIncrementalBoundaries`（非 64 倍数/正好 64 倍数 size/重复置位/空文件四边界）+ 全部 13 项既有 TestFileIndex 绿 |
+| 2 | **routeResponse 的 reject 闭包 → 包级 `failFetch`**：每 data 帧一次闭包堆分配（8GB 传输 13 万次） | `outbound.go` | transport/source -race 绿 |
+| 3 | 死代码清理：`var _ = uploadChunkSize` ×2（常量本可未用）、重复注释块 ×2、`UploadSession.seq` 字段（无读者） | `file_index.go` | 编译 + 全量测试绿 |
+
+**已知限制（不修，记录理由）**：`PeerSource.peerLocks`（sync.Map）只增不减
+——peer 永久离线后锁条目残留（~60B/peer）。删除需与并发 Open 的
+LoadOrStore+TryLock 竞争串行化（否则删除窗口内新流拿到旧锁、另一流拿新锁
+→ 破坏连接级 expect 单槽），复杂度与风险远超收益（私有节点网络 peer 量级
+几十个，残留几十 KB）。保持只增不减，无需清理。
+
 ## 5. E2E 踩过的坑（全部已修）
 
 | 坑 | 修复 |
