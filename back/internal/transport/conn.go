@@ -161,6 +161,7 @@ type fetchState struct {
 //   - 文本帧其它 type → 出站角色的响应，按 reqId 路由
 //   - 二进制帧 → 数据块，路由决策（归 upload 还是 expect）在泵内完成，
 //     落盘 IO 交给连接级 worker（H5，见 inbound.go 的 uploadWorker）
+//
 // connRanker 连接级 UUID（rtcSession 实现；WSSession/fakeSession 无，
 // 返回 "" 表示不可比）。
 type connRanker interface{ ConnID() string }
@@ -172,40 +173,48 @@ func sessionRank(s Session) string {
 	return ""
 }
 
+// dedupConn 同 peer 双连接去重决策（2026-08-19）：双向互拨（A↔B 同时
+// 拨号对方）或重连竞态会在同一 peerID 下留下两条连接——conns map 按
+// peerID 键只保留一条，另一条成为孤儿：connState 常驻 pending map、
+// uploadWorker/fwdWorker goroutine 泄漏、白占一条 WebRTC 连接资源。
+// 返回被淘汰连接（由调用方锁外 Close——持锁 Close 死锁坑见 REFACTOR §5；
+// 被淘汰连接的 OnClose 清理带 `s.conns[c.ID()] == c` 值相等守卫，不会
+// 误删保留连接）。keepOld=true 时 conns 已指回旧连接（旧 connState/worker
+// 已就位，调用方不得再为新连接建状态）。
+// 例外：local WS 会话不去重——多浏览器标签页各一条本地会话，主动关闭
+// 旧标签页连接会打断其进行中的入站服务。
+// ⚠️ 保留策略必须两端一致（连接级 UUID 字典序小的胜出）：双向互拨时
+// 两端各见两条连接 {自己拨出, 对方拨入}，若各留各的拨出连接，保留的
+// 恰是对方已关闭的断链（集成测试 TestSelfHostedSignalAndDiscover 偶发
+// 失败即此坑——发现背景：去重批次上线后集成测试 1/4 概率失败，拉取
+// 超时 10.5s）。连接 UUID 两端可见同一值 → 同取字典序小者 → 两端保留
+// 同一条物理连接。fakeSession 无连接 UUID（rank 相等）时保留新连接
+// （测试替身语义）。
+func (s *PeerJSService) dedupConn(c Session, old Session) (loser Session, keepOld bool) {
+	if old == nil || old == c || c.ID() == "local" {
+		return nil, false
+	}
+	if sessionRank(old) < sessionRank(c) {
+		s.mu.Lock()
+		s.conns[c.ID()] = old
+		s.mu.Unlock()
+		log.LogInfo("peerjs: dedup connection to %s, closing newer", c.ID())
+		return c, true
+	}
+	log.LogInfo("peerjs: dedup connection to %s, closing stale", c.ID())
+	return old, false
+}
+
 func (s *PeerJSService) bindConn(c Session) {
 	s.mu.Lock()
 	old := s.conns[c.ID()]
 	s.conns[c.ID()] = c
 	s.mu.Unlock()
-	// 同 peer 双连接去重（2026-08-19）：双向互拨（A↔B 同时拨号对方）或
-	// 重连竞态会在同一 peerID 下留下两条连接——conns map 按 peerID 键只
-	// 保留一条，另一条成为孤儿：connState 常驻 pending map、
-	// uploadWorker/fwdWorker goroutine 泄漏、白占一条 WebRTC 连接资源。
-	// 锁外 Close 被淘汰的连接（持锁 Close 死锁坑见 REFACTOR §5）；
-	// 被淘汰连接的 OnClose 清理带 `s.conns[c.ID()] == c` 值相等守卫
-	// （见下），不会误删保留连接。
-	// 例外：local WS 会话不去重——多浏览器标签页各一条本地会话，主动
-	// 关闭旧标签页连接会打断其进行中的入站服务。
-	// ⚠️ 保留策略必须两端一致（连接级 UUID 字典序小的胜出）：双向互拨
-	// 时两端各见两条连接 {自己拨出, 对方拨入}，若各留各的拨出连接，
-	// 保留的恰是对方已关闭的断链（集成测试 TestSelfHostedSignalAndDiscover
-	// 偶发失败即此坑——发现背景：去重批次上线后集成测试 1/4 概率失败，
-	// 拉取超时 10.5s）。连接 UUID 两端可见同一值 → 同取字典序小者 →
-	// 两端保留同一条物理连接。fakeSession 无连接 UUID（rank 相等）时
-	// 保留新连接（测试替身语义）。
-	if old != nil && old != c && c.ID() != "local" {
-		if sessionRank(old) < sessionRank(c) {
-			// 旧连接 UUID 更小：conns 指回旧连接，关闭新连接；旧连接的
-			// connState/worker 已就位，直接返回不重建。
-			s.mu.Lock()
-			s.conns[c.ID()] = old
-			s.mu.Unlock()
-			log.LogInfo("peerjs: dedup connection to %s, closing newer", c.ID())
-			c.Close()
+	if loser, keepOld := s.dedupConn(c, old); loser != nil {
+		loser.Close()
+		if keepOld {
 			return
 		}
-		log.LogInfo("peerjs: dedup connection to %s, closing stale", c.ID())
-		old.Close()
 	}
 	st := &connState{
 		fetches: make(map[string]*fetchState),
@@ -221,180 +230,196 @@ func (s *PeerJSService) bindConn(c Session) {
 	// （fsync + hashFile）不再阻塞同连接转发隧道，见 inbound.go fwdWorker。
 	go s.fwdWorker(c, st)
 
-	c.OnMessage(func(msg peerjs.Frame) {
-		if msg.IsText {
-			var r dcResp
-			if err := json.Unmarshal(msg.Data, &r); err != nil || r.Type == "" {
-				return
-			}
-			switch r.Type {
-			case "req":
-				// 对端请求本节点文件（download）
-				req := dcReq{
-					Type:   r.Type,
-					Hash:   r.Hash,
-					Offset: r.Offset,
-					Size:   r.Size,
-					ReqID:  r.ReqID,
-				}
-				go s.serveFile(c, req)
-			case "create":
-				// 对端登记外部文件（sha256 → 绝对路径）
-				go s.serveCreate(c, r)
-			case "upload":
-				// 对端流式上传：开始接收（后续 data 帧写入 UploadSink）
-				go s.serveUploadBegin(c, st, r)
-			case "list":
-				go s.serveList(c, r)
-			case "info":
-				go s.serveInfo(c, r)
-			case "delete":
-				go s.serveDelete(c, r)
-			case "sync":
-				go s.serveSync(c, r)
-			case "admin":
-				// 管理面 verb（admin.go）：仅本地 WS 会话（浏览器）使用，
-				// 内部转发 gin engine 复用全部 HTTP controller。WebRTC 连接
-				// 收到 admin 帧在 serveAdmin 内被拒绝（ID!="local"）。
-				// 同步执行：binary 上传声明的 adminUp 占槽必须在泵内完成，
-				// 否则后续二进制帧先到泵时 adminUp 仍为空 → 数据块丢失
-				// （发现背景：初版 go 异步，上传分片全部丢失）。
-				s.serveAdmin(c, st, msg.Data)
-			case "fwd-open":
-				go s.serveForwardOpen(c, st, r)
-			case "fwd-auth":
-				go s.serveForwardAuth(c, st, r)
-			case "fwd-data":
-				// 转发数据头（forward.go）：声明「下一个二进制块归转发隧道」。
-				// 头-块连续约束与文件传输一致（SendFrame 原子发送），泵内按帧序
-				// 处理故无竞态；非法（无隧道/已关）时静默丢弃并清 pending。
-				st.mu.Lock()
-				fw := st.fwd
-				if fw != nil && !fw.closed {
-					fw.pending = true
-				}
-				st.mu.Unlock()
-			case "fwd-close":
-				go s.serveForwardClose(c, st, r)
-			case "fwd-challenge", "fwd-ok", "fwd-err":
-				// 客户端侧握手响应（OpenForward 等待中）——与文件拉取响应同槽路由
-				s.routeForwardResponse(st, r)
-			default:
-				s.routeResponse(st, r)
-			}
+	c.OnMessage(func(msg peerjs.Frame) { s.dispatchFrame(c, st, msg) })
+	c.OnClose(func() { s.cleanupConn(c, st) })
+}
+
+// dispatchFrame 连接消息泵：解析 JSON 头按 reqId 路由，二进制块追加到
+// expect 状态。泵内处理必须保持帧序——部分 case 刻意同步执行：
+//   - admin（binary 上传声明）：adminUp 占槽必须在泵内完成，否则后续
+//     二进制帧先到泵时 adminUp 仍为空 → 数据块丢失（发现背景：初版 go
+//     异步，上传分片全部丢失）
+//   - fwd-data 头（转发块声明）：与文件传输一致的头-块连续约束，泵内按
+//     帧序处理故无竞态
+func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame) {
+	if msg.IsText {
+		var r dcResp
+		if err := json.Unmarshal(msg.Data, &r); err != nil || r.Type == "" {
 			return
 		}
-		// 二进制数据块：路由决策在泵内（廉价、保持与文本帧的顺序一致性），
-		// 落盘 IO（WriteAt/Complete）交给连接级 worker（H5）
-		st.mu.Lock()
-		fw := st.fwd
-		if fw != nil && fw.pending && !fw.closed {
-			// 转发块：投递到 fwdCh（有界背压，worker 写隧道；连接关闭放行）
-			fw.pending = false
-			select {
-			case st.fwdCh <- fwdChunk{fw: fw, data: msg.Data}:
-			case <-st.binDone:
+		switch r.Type {
+		case "req":
+			// 对端请求本节点文件（download）
+			req := dcReq{
+				Type:   r.Type,
+				Hash:   r.Hash,
+				Offset: r.Offset,
+				Size:   r.Size,
+				ReqID:  r.ReqID,
 			}
-			st.mu.Unlock()
-			return
-		}
-		up := st.pendingUpload
-		if up != nil {
-			up.got += int64(len(msg.Data))
-			if up.got >= up.size {
-				st.pendingUpload = nil
-			}
-		}
-		// 管理面上传收集（admin.go）：pendingUpload 之后的第二优先级。
-		// 块投递到 binCh（复用 H5 worker，写盘移出泵）；收齐（got>=size）
-		// 触发内部 multipart 转发。
-		au := st.adminUp
-		if au != nil {
-			au.got += int64(len(msg.Data))
-			// 防御：声明 size 与实际不符 / 对端多发 → 中止并清理
-			abort := au.got > au.size || time.Since(au.created) > adminUploadTimeout
-			last := false
-			if abort {
-				st.adminUp = nil
-				au.aborted = true
-				last = true // 空块也投递：worker 收到 aborted 即清理回 err
-			} else if au.got >= au.size {
-				st.adminUp = nil
-				last = true
-			}
-			select {
-			case st.binCh <- binaryChunk{au: au, data: msg.Data, last: last}:
-			case <-st.binDone:
-			}
-		}
-		f := st.expect
-		if up == nil && f != nil {
-			// 数据块投递到 fetch 队列（有界背压）；本地已取消（closed）则丢弃。
-			// 投递成功才计数（取消后不计数，expect 由调用方清理）。
-			select {
-			case f.q <- msg.Data:
-				f.received += int64(len(msg.Data))
-				if f.received >= f.size {
-					st.expect = nil
-				}
-			case <-f.closed:
-			}
-		}
-		last := up != nil && up.got >= up.size
-		st.mu.Unlock()
-		if up != nil {
-			select {
-			case st.binCh <- binaryChunk{up: up, offset: up.offset, data: msg.Data, last: last}:
-			case <-st.binDone: // 连接关闭：不再投递
-				return
-			}
-		}
-	})
-	c.OnClose(func() {
-		s.mu.Lock()
-		if s.conns[c.ID()] == c {
-			delete(s.conns, c.ID())
-		}
-		s.mu.Unlock()
-		s.pendingMu.Lock()
-		st := s.pending[c]
-		delete(s.pending, c)
-		s.pendingMu.Unlock()
-		if st != nil {
-			var fwdOut net.Conn
+			go s.serveFile(c, req)
+		case "create":
+			// 对端登记外部文件（sha256 → 绝对路径）
+			go s.serveCreate(c, r)
+		case "upload":
+			// 对端流式上传：开始接收（后续 data 帧写入 UploadSink）
+			go s.serveUploadBegin(c, st, r)
+		case "list":
+			go s.serveList(c, r)
+		case "info":
+			go s.serveInfo(c, r)
+		case "delete":
+			go s.serveDelete(c, r)
+		case "sync":
+			go s.serveSync(c, r)
+		case "admin":
+			// 管理面 verb（admin.go）：仅本地 WS 会话（浏览器）使用，
+			// 内部转发 gin engine 复用全部 HTTP controller。WebRTC 连接
+			// 收到 admin 帧在 serveAdmin 内被拒绝（ID!="local"）。
+			// 同步执行：binary 上传声明的 adminUp 占槽必须在泵内完成，
+			// 否则后续二进制帧先到泵时 adminUp 仍为空 → 数据块丢失
+			// （发现背景：初版 go 异步，上传分片全部丢失）。
+			s.serveAdmin(c, st, msg.Data)
+		case "fwd-open":
+			go s.serveForwardOpen(c, st, r)
+		case "fwd-auth":
+			go s.serveForwardAuth(c, st, r)
+		case "fwd-data":
+			// 转发数据头（forward.go）：声明「下一个二进制块归转发隧道」。
+			// 头-块连续约束与文件传输一致（SendFrame 原子发送），泵内按帧序
+			// 处理故无竞态；非法（无隧道/已关）时静默丢弃并清 pending。
 			st.mu.Lock()
-			// 管理面上传收集（admin.go）：连接关闭 → 中止并清理临时文件
-			if au := st.adminUp; au != nil {
-				st.adminUp = nil
-				os.Remove(au.path)
-				au.f.Close()
-			}
-			for _, f := range st.fetches {
-				// 连接关闭：通知 fetch reader 退出（errCh），并放行 pump 投递阻塞
-				// （close(f.closed) 幂等检查——reader 可能已自行清理）
-				select {
-				case f.errCh <- fmt.Errorf("peerjs: connection closed"):
-				default:
-				}
-				select {
-				case <-f.closed:
-				default:
-					close(f.closed)
-				}
-			}
-			// forward：隧道随之死亡——关 out 释放读侧（forwardPump 退出），
-			// 调用方（OpenForward 返回的 net.Conn）读侧随即 EOF
-			if st.fwd != nil {
-				fwdOut = st.fwd.out
+			fw := st.fwd
+			if fw != nil && !fw.closed {
+				fw.pending = true
 			}
 			st.mu.Unlock()
-			// H5：通知上传 worker 退出（未消费的分片直接丢弃——连接已死，
-			// 会话残留由 file_index 的 10 分钟 reap 清理）
-			close(st.binDone)
-			if fwdOut != nil {
-				fwdOut.Close()
-			}
+		case "fwd-close":
+			go s.serveForwardClose(c, st, r)
+		case "fwd-challenge", "fwd-ok", "fwd-err":
+			// 客户端侧握手响应（OpenForward 等待中）——与文件拉取响应同槽路由
+			s.routeForwardResponse(st, r)
+		default:
+			s.routeResponse(st, r)
 		}
-		log.LogInfo("peerjs: connection closed from %s", c.ID())
-	})
+		return
+	}
+	// 二进制数据块：路由决策在泵内（廉价、保持与文本帧的顺序一致性），
+	// 落盘 IO（WriteAt/Complete）交给连接级 worker（H5）
+	st.mu.Lock()
+	fw := st.fwd
+	if fw != nil && fw.pending && !fw.closed {
+		// 转发块：投递到 fwdCh（有界背压，worker 写隧道；连接关闭放行）
+		fw.pending = false
+		select {
+		case st.fwdCh <- fwdChunk{fw: fw, data: msg.Data}:
+		case <-st.binDone:
+		}
+		st.mu.Unlock()
+		return
+	}
+	up := st.pendingUpload
+	if up != nil {
+		up.got += int64(len(msg.Data))
+		if up.got >= up.size {
+			st.pendingUpload = nil
+		}
+	}
+	// 管理面上传收集（admin.go）：pendingUpload 之后的第二优先级。
+	// 块投递到 binCh（复用 H5 worker，写盘移出泵）；收齐（got>=size）
+	// 触发内部 multipart 转发。
+	au := st.adminUp
+	if au != nil {
+		au.got += int64(len(msg.Data))
+		// 防御：声明 size 与实际不符 / 对端多发 → 中止并清理
+		abort := au.got > au.size || time.Since(au.created) > adminUploadTimeout
+		last := false
+		if abort {
+			st.adminUp = nil
+			au.aborted = true
+			last = true // 空块也投递：worker 收到 aborted 即清理回 err
+		} else if au.got >= au.size {
+			st.adminUp = nil
+			last = true
+		}
+		select {
+		case st.binCh <- binaryChunk{au: au, data: msg.Data, last: last}:
+		case <-st.binDone:
+		}
+	}
+	f := st.expect
+	if up == nil && f != nil {
+		// 数据块投递到 fetch 队列（有界背压）；本地已取消（closed）则丢弃。
+		// 投递成功才计数（取消后不计数，expect 由调用方清理）。
+		select {
+		case f.q <- msg.Data:
+			f.received += int64(len(msg.Data))
+			if f.received >= f.size {
+				st.expect = nil
+			}
+		case <-f.closed:
+		}
+	}
+	last := up != nil && up.got >= up.size
+	st.mu.Unlock()
+	if up != nil {
+		select {
+		case st.binCh <- binaryChunk{up: up, offset: up.offset, data: msg.Data, last: last}:
+		case <-st.binDone: // 连接关闭：不再投递
+			return
+		}
+	}
+}
+
+// cleanupConn 连接关闭清理：注销连接、释放 fetch/forward/上传状态。
+// 顺序敏感：fwdOut 在锁内取出、锁外 Close（关 out 会触发读侧返回，
+// 不能在持 st.mu 时做——forwardPump 可能在读 out 的 goroutine 里等锁）。
+func (s *PeerJSService) cleanupConn(c Session, st *connState) {
+	s.mu.Lock()
+	// 值相等守卫：去重淘汰连接的清理不会误删保留连接
+	// （dedup 时 conns[c.ID()] 已被保留连接覆盖）。
+	if s.conns[c.ID()] == c {
+		delete(s.conns, c.ID())
+	}
+	s.mu.Unlock()
+	s.pendingMu.Lock()
+	delete(s.pending, c)
+	s.pendingMu.Unlock()
+	if st == nil {
+		return
+	}
+	var fwdOut net.Conn
+	st.mu.Lock()
+	// 管理面上传收集（admin.go）：连接关闭 → 中止并清理临时文件
+	if au := st.adminUp; au != nil {
+		st.adminUp = nil
+		os.Remove(au.path)
+		au.f.Close()
+	}
+	for _, f := range st.fetches {
+		// 连接关闭：通知 fetch reader 退出（errCh），并放行 pump 投递阻塞
+		// （close(f.closed) 幂等检查——reader 可能已自行清理）
+		select {
+		case f.errCh <- fmt.Errorf("peerjs: connection closed"):
+		default:
+		}
+		select {
+		case <-f.closed:
+		default:
+			close(f.closed)
+		}
+	}
+	// forward：隧道随之死亡——关 out 释放读侧（forwardPump 退出），
+	// 调用方（OpenForward 返回的 net.Conn）读侧随即 EOF
+	if st.fwd != nil {
+		fwdOut = st.fwd.out
+	}
+	st.mu.Unlock()
+	// H5：通知上传 worker 退出（未消费的分片直接丢弃——连接已死，
+	// 会话残留由 file_index 的 10 分钟 reap 清理）
+	close(st.binDone)
+	if fwdOut != nil {
+		fwdOut.Close()
+	}
+	log.LogInfo("peerjs: connection closed from %s", c.ID())
 }
