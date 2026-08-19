@@ -196,12 +196,20 @@ func (s *PeerSource) Info(ctx context.Context, hash string) (*FileMeta, error) {
 type peerReadCloser struct {
 	r  io.ReadCloser
 	mu *sync.Mutex
+	// 防调用方重复 Close：io.Reader 的使用约定允许 Close 多次（defer +
+	// 显式关闭），若每次都 Unlock 同一个 *sync.Mutex 会 panic。
+	// 发现背景：再 review 2026-08-19——竞速收割/失败路径与调用方 defer
+	// 叠加时，双 Close 解锁是潜在崩溃点。
+	once sync.Once
 }
 
 func (p *peerReadCloser) Read(b []byte) (int, error) { return p.r.Read(b) }
 
 func (p *peerReadCloser) Close() error {
-	err := p.r.Close()
-	p.mu.Unlock() // 流结束释放该 peer 槽位（TryLock 持有者才走到这）
+	var err error
+	p.once.Do(func() {
+		err = p.r.Close()
+		p.mu.Unlock() // 流结束释放该 peer 槽位（TryLock 持有者才走到这）
+	})
 	return err
 }

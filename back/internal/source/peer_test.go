@@ -646,3 +646,27 @@ func readAllTimeout(r io.ReadCloser) ([]byte, error) {
 		return nil, assert.AnError
 	}
 }
+
+// TestPeerReadCloserCloseIdempotent 验证 peerReadCloser.Close 可重复调用：
+// 底层 reader 只关闭一次，且 peer 流互斥锁不会二次 Unlock panic。
+// 发现背景：再 review 2026-08-19——调用方可能出现 defer Close + 显式 Close
+// 叠加；旧实现每次 Close 都 mu.Unlock()，第二次会 panic。
+func TestPeerReadCloserCloseIdempotent(t *testing.T) {
+	rc := &countingReadCloser{}
+	mu := &sync.Mutex{}
+	mu.Lock() // 模拟 TryLock 已持有（peerReadCloser 接管解锁权）
+	p := &peerReadCloser{r: rc, mu: mu}
+
+	require.NoError(t, p.Close())
+	require.NoError(t, p.Close())
+	require.Equal(t, 1, rc.closeCount, "底层 reader 必须只关闭一次")
+	require.True(t, mu.TryLock(), "双 Close 后锁应已释放且可再次获取")
+	mu.Unlock()
+}
+
+type countingReadCloser struct {
+	closeCount int
+}
+
+func (c *countingReadCloser) Read([]byte) (int, error) { return 0, io.EOF }
+func (c *countingReadCloser) Close() error             { c.closeCount++; return nil }
