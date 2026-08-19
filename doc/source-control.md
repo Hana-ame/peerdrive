@@ -1,0 +1,82 @@
+# Source 控制面设计（草案）
+
+> 2026-08-19 · 文档先行。目标：在现有“读取面 Source 接口”之外，
+> 增加每个 source 的**控制面**，让用户可以主动管理/写入/下载文件。
+> 当前只记录设计，不改代码。
+
+## 1. 为什么需要控制面
+
+现在的 `Source` 接口是**只读**的：
+
+- `Open`：按 hash 流式读取
+- `Fetch`：按 hash 整体读取
+- `Info`：查询元数据
+- `Available`：是否可用
+
+但实际使用还需要“写入/管理”能力，例如：
+
+- 把本地已有文件加入 local source
+- 直接写文件到 local source
+- BT 主动下载某个 torrent / magnet
+- IPFS 主动 pin / unpin / 下载 CID
+
+这些不属于“按 hash 读取”，而属于 **source 控制面**。
+
+## 2. 控制面原则
+
+- **读取面保持稳定**：现有 `Source` 接口不破坏。
+- **控制面作为可选能力**：不是所有 source 都必须实现。
+- **统一入口**：由 `SourceControl`/路由统一收口，避免每个 source 各搞一套 HTTP。
+- **一旦控制面写入完成**：文件进入内容寻址体系，之后仍通过读取面 `Open/Fetch` 获取。
+
+## 3. 控制面接口草案
+
+```go
+// Control 是 source 的可选控制能力。
+// 实现方可以只实现自己支持的子集；不支持的返回 ErrUnsupported。
+type Control interface {
+    // Local：把本地已有文件加入 source（计算 hash、登记索引）
+    AddLocalFile(path string) (*FileMeta, error)
+
+    // Local：直接写文件，写完后计算 hash 并登记
+    WriteFile(name string, r io.Reader) (*FileMeta, error)
+
+    // BT：下载 torrent / magnet 到本地存储，并登记结果文件
+    DownloadTorrent(location string, opts TorrentOptions) (*TorrentTask, error)
+
+    // BT：查询任务状态 / 取消任务 / 列表
+    TorrentStatus(taskID string) (*TorrentTask, error)
+    CancelTorrent(taskID string) error
+    ListTorrents() ([]TorrentTask, error)
+
+    // IPFS：主动 pin / unpin / 按 CID 下载
+    PinCID(cid string) (*FileMeta, error)
+    UnpinCID(cid string) error
+    ListPins() ([]PinInfo, error)
+}
+```
+
+> 具体方法名可以后续细化；这个草案先表达“每个 source 有什么控制能力”。
+
+## 4. 各 source 控制面现状
+
+| Source | 控制面能力 | 现有可复用代码 |
+|---|---|---|
+| Local | `AddLocalFile`、`WriteFile` | `transport.FileIndexService.Create`、`UploadSession` |
+| Peer | 暂不定义 | 暂无 |
+| URL | 暂不定义 | 暂无 |
+| IPFS | `PinCID`、`UnpinCID`、`ListPins` | `internal/controller/p2p.go` 已有 pin 端点、`internal/provider/ipfs.go` |
+| BT | `DownloadTorrent`、状态/取消/列表 | `back/p2p_bt` 已有 DHT 获取，torrent 主动下载待接入 |
+
+## 5. 推荐落点
+
+- 新建 `internal/source/control.go`：定义 `Control` 接口与 `TorrentOptions` 等模型。
+- `LocalSource` 实现 `AddLocalFile` / `WriteFile`，复用现有 file-index/upload 逻辑。
+- BT 控制面先包住 `back/p2p_bt`，任务状态存 `repository` 或内存表。
+- IPFS 控制面可以复用现有 controller 的 pin 逻辑，后续收编到统一 `SourceControl`。
+- 管理入口走 router/admin：例如
+  - `POST /sources/local/add`
+  - `POST /sources/local/upload`
+  - `POST /sources/bt/download`
+  - `GET /sources/bt/tasks`
+  - `POST /sources/ipfs/pin`
