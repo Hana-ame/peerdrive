@@ -127,9 +127,7 @@ transport 里 import controller），说明归错层了。
 
 | 分组 | 主要代码范围 | 对应 §1 分层 | 职责摘要 |
 |---|---|---|---|
-| **文件 Source 模块** | `internal/source`、`internal/downloader`、`internal/transport/file_index.go` | ② + ⑤ 为主 | 文件从哪来/去哪：本地、Peer、URL、统一管理器、下载、索引、上传会话 |
-| **IPFS 模块** | `internal/provider/ipfs.go`、`internal/service/pin_service.go`、`internal/controller/p2p.go` 的 pin 部分、`front/src/pages/IPFSPanel.jsx` | ⑦ 为主 | IPFS 网关/Bitswap 获取、CID pin 管理、IPFS 下载回退 |
-| **BT/外部能力模块** | `back/p2p_bt`、`internal/controller/p2p.go`/`download.go` 的 BT 分支、`front/src/pages/BTController.jsx`、`front/src/pages/DHTExplorer.jsx` | ⑦ | BT 网络、DHT/外部传输能力 |
+| **文件 Source 模块** | `internal/source`、`internal/downloader`、`internal/transport/file_index.go`；外部协议源：`internal/provider/ipfs.go`、`back/p2p_bt`、`internal/controller` 的下载/pin 分支、`front/src/pages/IPFSPanel.jsx`、`front/src/pages/BTController.jsx`、`front/src/pages/DHTExplorer.jsx` | ② + ⑤ + ⑦ | 文件从哪来/去哪：本地、Peer、URL、IPFS、BT、统一管理器、下载、索引、上传会话 |
 | **控制模块** | `internal/controller`、`internal/service`、`internal/repository`、`internal/model` | ④ + ⑤ | 业务控制、服务编排、持久化、模型定义；不感知自己是否被 WS 帧转发 |
 | **Peer 模块** | `internal/transport` 的 PeerJS 核心：`peerjs_service.go`、`conn.go`、`inbound.go`、`outbound.go`、`file_index.go` | ② | 节点身份、帧协议、入站/出站请求语义、文件索引同步 |
 | **网络连接模块** | `internal/transport` 的连接载体：`ws_session.go`、`rtc_session.go`、`http_discovery.go`、`mqtt_discovery.go`、`forward.go`；`back/peerjs`、`back/signalserver` | ① + ⑥ | 底层连接、信令、发现、端口转发隧道 |
@@ -139,6 +137,9 @@ transport 里 import controller），说明归错层了。
 
 - `file_index.go` 物理位于 `internal/transport`，但它语义上更偏文件 Source/存储索引；
   文档分组归到 Source，代码位置暂不迁移。
+- IPFS/BT 当前代码分散在 `provider`/`downloader`/`p2p_bt` 等外部能力包里，
+  尚未直接实现 `internal/source.Source` 接口；但语义上它们都是“文件从外部网络获取”
+  的 Source，所以文档按语义归入 Source 组。
 - `admin.go` 物理也在 `internal/transport`，但它是“管理操作通过本地 WS 收口到
   gin/controller”的横切面，文档分组归到路由/装配。
 - `Peer` 与 `网络连接` 的边界是：Peer 讲“协议和语义”，网络连接讲“底层连接和信令”。
