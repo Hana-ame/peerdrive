@@ -119,8 +119,9 @@ type IPFSControl interface {
 
 ## 7. BT / IPFS 做成可选 DLL/插件（架构偏好）
 
-用户偏好：BT 和 IPFS 都做成可选外部模块（Windows 下可叫 DLL），
+用户偏好：BT 和 IPFS 都做成可选外部模块（Windows 下可叫 DLL，**EXE 也可以接受**），
 **不需要时就不带这个模块**，核心 peerdrive 仍然可以工作。
+评判标准不是“必须 DLL 还是 EXE”，而是：**只要能控制、能当 Source 用**。
 
 ### 为什么合理
 
@@ -134,14 +135,24 @@ type IPFSControl interface {
 
 | 方案 | 说明 | 适合场景 |
 |---|---|---|
-| **独立进程/服务**（推荐首选） | BT/IPFS 各自做成独立可执行文件或本地服务，主程序通过 HTTP/gRPC 调用 | 跨平台最省事，不需要 CGO/DLL 加载 |
+| **独立进程/服务**（推荐首选） | BT/IPFS 各自做成独立 EXE/本地服务，主程序通过 HTTP/gRPC 调用；不需要时就不部署 | 跨平台最省事，不需要 CGO/DLL 加载，EXE 可接受 |
 | **c-shared DLL** | 用 cgo 把 BT/IPFS 编译成 Windows DLL / Linux .so，主程序动态加载 | 如果必须“一个 DLL 文件”形态 |
 | **Go plugin** | Go 官方 plugin（`.so`） | 仅 Linux，Windows 不支持 |
 | **build tags 可选编译** | `//go:build bt && ipfs`，不满足 tag 就不编译对应代码 | 构建期决定，不是运行期动态加载 |
 | **独立 go.mod** | 像现在的 `back/p2p_bt` 一样做成独立仓库/模块，主程序按需 replace | 已经具备类似结构 |
 
-> 考虑到项目在 Windows 下，如果坚持“DLL 形态”，建议用 **c-shared + 独立进程/服务** 二选一；
+> 考虑到项目在 Windows 下，DLL 和 EXE 都可接受；推荐优先 **独立 EXE/本地服务**，
+> 用稳定的本地接口（HTTP/gRPC/JSON）暴露“控制 + 当 Source 读取”的能力。
 > 如果只是“不需要就不带”，独立进程或 build tags 更简单可靠。
+
+外部模块只要满足以下条件，无论 DLL 还是 EXE 都算合格：
+
+```text
+1. 可被主程序控制：加载/卸载、启用/停用、pin/下载/任务管理等。
+2. 可当 Source 用：主程序能通过它按 hash/CID/磁力等获取文件内容。
+3. 未安装时主程序仍能正常工作，对应能力标记为“不可用”。
+```
+
 
 ### 预留接口
 
