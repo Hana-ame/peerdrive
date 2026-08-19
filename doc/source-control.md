@@ -65,10 +65,44 @@ type Control interface {
 | Local | `AddLocalFile`、`WriteFile` | `transport.FileIndexService.Create`、`UploadSession` |
 | Peer | 暂不定义 | 暂无 |
 | URL | 暂不定义 | 暂无 |
-| IPFS | `PinCID`、`UnpinCID`、`ListPins` | `internal/controller/p2p.go` 已有 pin 端点、`internal/provider/ipfs.go` |
+| IPFS | `PinCID`、`UnpinCID`、`ListPins`；单独 serve IPFS 协议；control 控制其行为 | `internal/controller/p2p.go` 已有 pin 端点、`internal/provider/ipfs.go`、`front/src/pages/IPFSPanel.jsx` |
 | BT | `DownloadTorrent`、状态/取消/列表 | `back/p2p_bt` 已有 DHT 获取，torrent 主动下载待接入 |
 
-## 5. 推荐落点
+## 5. IPFS 源的特殊性：自己 serve IPFS 协议
+
+IPFS 不只是“从公共网关拉取文件”的被动源，它还可以在本节点**单独 serve IPFS 协议**：
+
+- 对外提供 `/ipfs/:cid` 或 IPFS 兼容 API，让其他客户端/节点直接访问本节点上的 CID。
+- 内部通过 Bitswap / 网关 / DHT 回源。
+- 是否启用、开放哪条路径、是否允许 pin、哪些网关可用，都由 Control 面控制。
+
+因此 IPFS 的控制面设计分成两类：
+
+| 分类 | 能力 |
+|---|---|
+| 内容管理 | `PinCID`、`UnpinCID`、`ListPins`、按 CID 下载 |
+| 协议服务控制 | 启用/停用 IPFS serve、配置网关列表、切换 Bitswap/HTTP 模式、开放 `/ipfs/:cid` 路由、查看服务状态 |
+
+对应控制接口可以扩展成：
+
+```go
+type IPFSControl interface {
+    Control // 通用：AddLocalFile/WriteFile 等若适用
+
+    // 内容管理
+    PinCID(cid string) (*FileMeta, error)
+    UnpinCID(cid string) error
+    ListPins() ([]PinInfo, error)
+
+    // 协议服务控制
+    EnableIPFSServe(enable bool) error
+    IPFSServeStatus() (*IPFSServeStatus, error)
+    SetGateways(gateways []string) error
+    SetBitswapEnabled(enabled bool) error
+}
+```
+
+## 6. 推荐落点
 
 - 新建 `internal/source/control.go`：定义 `Control` 接口与 `TorrentOptions` 等模型。
 - `LocalSource` 实现 `AddLocalFile` / `WriteFile`，复用现有 file-index/upload 逻辑。
@@ -80,3 +114,5 @@ type Control interface {
   - `POST /sources/bt/download`
   - `GET /sources/bt/tasks`
   - `POST /sources/ipfs/pin`
+  - `POST /sources/ipfs/serve/enable`
+  - `GET /sources/ipfs/serve/status`
