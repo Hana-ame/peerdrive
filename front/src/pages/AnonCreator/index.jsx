@@ -73,11 +73,14 @@ export default function AnonCreator() {
       const c = navState.forkFrom;
       // 坑：forkFrom 来自 Plaza 的 AnonCollectionSummary（/anon/collections），
       // summary 只有 hash/friendly_name/entry_count，没有 entries 字段 → 直接 setEntries(c.entries||[]) 永远是空合集。
-      // 必须按 hash 拉取完整合集。
+      // 必须按哈希拉取完整合集；公开合集经 Plaza.handleFork 传 sourceHash=current_hash，
+      // 匿名合集传 sourceHash=hash（再 review 2026-08 补 current_hash 支持）。
+      const forkHash = navState.sourceHash || c.hash || c.current_hash;
       setFname((c.friendly_name || '') + ' (副本)');
       const loadFork = async () => {
+        if (!forkHash) return;
         try {
-          const full = await api.getAnonCollection(c.hash);
+          const full = await api.getAnonCollection(forkHash);
           setEntries(full?.entries || []);
         } catch (e) { console.error('fork load failed:', e); }
       };

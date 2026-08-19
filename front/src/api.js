@@ -445,8 +445,11 @@ export { DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_MODEL, DEFAULT_LLM_BODY, FREE_LLM_MOD
 // 保存数据同意到本地。
 // 注意：旧名称 uploadConsent 容易让人误以为会上传服务器，但后端没有 /consent 端点；
 // 这里只做本地记录，避免「已上传同意记录」这类误导性状态。
+// 再 review 2026-08：原实现写到 peerdrive_consent 这个没有任何读取方的键，
+// 而实际在设置页生效的是 DATA_CONSENT_KEY（peerdrive_data_consent）；统一改为
+// 委托 setDataConsent(true)，避免同意状态出现“已写但读不到”的分叉。
 export async function saveConsentLocal() {
-  localStorage.setItem('peerdrive_consent', JSON.stringify({ agreed: true, timestamp: Date.now() }));
+  setDataConsent(true);
 }
 
 /* ---- alias exports for legacy usage ---- */

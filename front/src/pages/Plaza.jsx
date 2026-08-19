@@ -67,8 +67,12 @@ export default function Plaza() {
   const collId = (c) => c.id || c.hash || c.collection_name;
 
   // 跳转到创建页并携带 Fork 源数据
+  // 注意：公开合集来自 /collections/public，列表项没有 hash 字段，只有
+  // current_hash；匿名合集列表才有 hash。两者都代表“合集内容快照”，创建副本
+  // 必须取其一传给 AnonCreator 去按哈希拉全量条目。
   const handleFork = (c) => {
-    if (c.hash) navigate('/create', { state: { forkFrom: c, sourceHash: c.hash } });
+    const h = c.hash || c.current_hash;
+    if (h) navigate('/create', { state: { forkFrom: c, sourceHash: h } });
   };
 
   // 点击合集卡片跳转到详情页
