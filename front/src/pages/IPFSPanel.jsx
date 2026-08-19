@@ -28,15 +28,18 @@ export default function IPFSPanel() {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => {
+  const refreshAll = useCallback(() => {
     refreshPins();
     refreshGateways();
-    const t = setInterval(() => {
-      refreshPins();
-      refreshGateways();
-    }, 5000);
-    return () => clearInterval(t);
+    // 头部“更新于”时间之前从未赋值，永远不显示（发现背景：再 review 2026-08-19）。
+    setLastRefresh(new Date());
   }, [refreshPins, refreshGateways]);
+
+  useEffect(() => {
+    refreshAll();
+    const t = setInterval(refreshAll, 5000);
+    return () => clearInterval(t);
+  }, [refreshAll]);
 
   /* ---- pin / unpin ---- */
   const handlePinCID = async (e) => {
@@ -87,7 +90,7 @@ export default function IPFSPanel() {
           </div>
           <div className="flex items-center gap-3 text-xs text-gray-500">
             {lastRefresh && <span>更新于 {lastRefresh.toLocaleTimeString()}</span>}
-            <button onClick={() => { refreshPins(); refreshGateways(); }}
+            <button onClick={refreshAll}
               className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors">
               刷新
             </button>
