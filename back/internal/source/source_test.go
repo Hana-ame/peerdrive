@@ -230,3 +230,101 @@ func TestLocalSourceControl(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, content2, string(got))
 }
+
+// TestLocalSourceControl_NilFileIndex 验证 fileIndex 为 nil 时
+// AddLocalFile / WriteFile 返回 ErrControlUnsupported（发现背景：
+// NewLocalSource 允许 fileIndex 为 nil，控制面应明确拒绝）。
+func TestLocalSourceControl_NilFileIndex(t *testing.T) {
+	s := NewLocalSource(t.TempDir(), nil)
+	_, err := s.AddLocalFile("/some/path")
+	assert.ErrorIs(t, err, ErrControlUnsupported)
+	_, err = s.WriteFile("x.bin", strings.NewReader("x"))
+	assert.ErrorIs(t, err, ErrControlUnsupported)
+}
+
+// TestLocalSourceControl_AddLocalFileOutsideRoot 添加根目录外文件 → 拒绝。
+func TestLocalSourceControl_AddLocalFileOutsideRoot(t *testing.T) {
+	require.NoError(t, repository.InitDB(":memory:"))
+	idxDir := t.TempDir()
+	idx := transport.NewFileIndexService(idxDir)
+	s := NewLocalSource(t.TempDir(), idx)
+
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	require.NoError(t, os.WriteFile(outside, []byte("x"), 0o644))
+	_, err := s.AddLocalFile(outside)
+	assert.Error(t, err, "根目录外文件必须拒绝")
+}
+
+// TestLocalSourceControl_AddLocalFileDuplicate 重复添加同一文件返回相同 hash。
+func TestLocalSourceControl_AddLocalFileDuplicate(t *testing.T) {
+	require.NoError(t, repository.InitDB(":memory:"))
+	idxDir := t.TempDir()
+	idx := transport.NewFileIndexService(idxDir)
+	s := NewLocalSource(t.TempDir(), idx)
+
+	inRoot := filepath.Join(idxDir, "dup.bin")
+	require.NoError(t, os.WriteFile(inRoot, []byte("dup"), 0o644))
+	meta1, err := s.AddLocalFile(inRoot)
+	require.NoError(t, err)
+	meta2, err := s.AddLocalFile(inRoot)
+	require.NoError(t, err)
+	assert.Equal(t, meta1.Hash, meta2.Hash, "重复添加同一文件返回相同 hash")
+}
+
+// TestLocalSourceControl_WriteFileEmptyReader 空 reader → 空文件可写入。
+func TestLocalSourceControl_WriteFileEmptyReader(t *testing.T) {
+	require.NoError(t, repository.InitDB(":memory:"))
+	idxDir := t.TempDir()
+	idx := transport.NewFileIndexService(idxDir)
+	s := NewLocalSource(t.TempDir(), idx)
+
+	meta, err := s.WriteFile("empty.bin", strings.NewReader(""))
+	require.NoError(t, err)
+	assert.Equal(t, testHash(""), meta.Hash)
+	assert.Equal(t, int64(0), meta.Size)
+}
+
+// TestLocalSourceControl_WriteFileNilReader nil reader → 报错。
+func TestLocalSourceControl_WriteFileNilReader(t *testing.T) {
+	require.NoError(t, repository.InitDB(":memory:"))
+	idxDir := t.TempDir()
+	idx := transport.NewFileIndexService(idxDir)
+	s := NewLocalSource(t.TempDir(), idx)
+
+	_, err := s.WriteFile("nil.bin", nil)
+	assert.Error(t, err, "nil reader 必须拒绝")
+}
+
+// TestManager_Get 验证 Manager.Get 按名字查找 source（发现背景：控制面路由需要）。
+func TestManager_Get(t *testing.T) {
+	m := New()
+	local := &stubSource{name: "local", priority: 0, caps: CapStream, ok: true}
+	peer := &stubSource{name: "peer", priority: 1, caps: CapStream, ok: false}
+	require.NoError(t, m.Register(local))
+	require.NoError(t, m.Register(peer))
+
+	got := m.Get("local")
+	require.NotNil(t, got)
+	assert.Equal(t, "local", got.Name())
+
+	got = m.Get("peer")
+	require.NotNil(t, got)
+	assert.Equal(t, "peer", got.Name())
+
+	got = m.Get("nonexistent")
+	assert.Nil(t, got, "不存在的 name 返回 nil")
+}
+
+// TestLocalControlOf_NonLocalSource 非 LocalSource 不应支持 LocalControl。
+func TestLocalControlOf_NonLocalSource(t *testing.T) {
+	dir := t.TempDir()
+	// URLSource 不支持 LocalControl
+	urlSrc := NewURLSource("https://example.com/%s", nil)
+	_, ok := LocalControlOf(urlSrc)
+	assert.False(t, ok, "URLSource 不应支持 LocalControl")
+
+	// LocalSource 应支持
+	ls := NewLocalSource(dir, nil)
+	_, ok = LocalControlOf(ls)
+	assert.True(t, ok, "LocalSource 应支持 LocalControl")
+}
