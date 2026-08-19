@@ -116,3 +116,57 @@ type IPFSControl interface {
   - `POST /sources/ipfs/pin`
   - `POST /sources/ipfs/serve/enable`
   - `GET /sources/ipfs/serve/status`
+
+## 7. BT / IPFS 做成可选 DLL/插件（架构偏好）
+
+用户偏好：BT 和 IPFS 都做成可选外部模块（Windows 下可叫 DLL），
+**不需要时就不带这个模块**，核心 peerdrive 仍然可以工作。
+
+### 为什么合理
+
+- BT/IPFS 涉及较重依赖、外部网络协议、open-source 库，不是人人需要。
+- 做成可选模块后：
+  - 主程序不强制引入 BT/IPFS 依赖。
+  - 只要系统里没有对应 DLL/插件，对应 source/control 就显示“不可用”。
+  - 需要时才部署对应 DLL/插件，不影响主程序升级。
+
+### Go 里的可选模块方案
+
+| 方案 | 说明 | 适合场景 |
+|---|---|---|
+| **独立进程/服务**（推荐首选） | BT/IPFS 各自做成独立可执行文件或本地服务，主程序通过 HTTP/gRPC 调用 | 跨平台最省事，不需要 CGO/DLL 加载 |
+| **c-shared DLL** | 用 cgo 把 BT/IPFS 编译成 Windows DLL / Linux .so，主程序动态加载 | 如果必须“一个 DLL 文件”形态 |
+| **Go plugin** | Go 官方 plugin（`.so`） | 仅 Linux，Windows 不支持 |
+| **build tags 可选编译** | `//go:build bt && ipfs`，不满足 tag 就不编译对应代码 | 构建期决定，不是运行期动态加载 |
+| **独立 go.mod** | 像现在的 `back/p2p_bt` 一样做成独立仓库/模块，主程序按需 replace | 已经具备类似结构 |
+
+> 考虑到项目在 Windows 下，如果坚持“DLL 形态”，建议用 **c-shared + 独立进程/服务** 二选一；
+> 如果只是“不需要就不带”，独立进程或 build tags 更简单可靠。
+
+### 预留接口
+
+在 Control 面上增加“能力探测”，让主程序知道哪些外部模块可用：
+
+```go
+type SourceControl interface {
+    // 检测外部模块是否已加载/可用
+    CapabilityStatus() map[string]CapabilityStatus
+}
+```
+
+每个可选 DLL/模块暴露同一套本地接口：
+
+- 加载时注册：`local` / `peer` / `url` 是核心，始终存在。
+- 可选模块：`ipfs` / `bt` 未加载时，`Available=false`，相关控制入口直接返回“模块未安装”。
+
+### 开源库参考（后续选型）
+
+- IPFS / Bitswap：
+  - `boxo`（IPFS 底层库，bitswap / gateway）
+  - `kubo` / `go-ipfs` RPC 或 HTTP API（作为独立进程接入）
+- BT / DHT：
+  - `github.com/anacrolix/torrent`
+  - `github.com/anacrolix/dht/v2`
+  - 现有 `back/p2p_bt` 已经是独立 go.mod，可以继续作为 BT 模块基础
+
+> 当前阶段只记录方向，不绑定具体库；实际接入时再根据许可证/体积/稳定性选择。
