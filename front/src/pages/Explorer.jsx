@@ -124,8 +124,11 @@ export default function Explorer() {
     let added = 0;
     for (const e of anonEntries) {
       const p = e.path;
-      const h = e.hash || e.providers?.[0]?.value || '';
-      // url 型 provider 条目：addCollectionEntry 端点只接受 sha256，无法老式添加，跳过
+      // 只取 sha256 provider 作为可添加的内容 hash；URL-only 条目无法写入
+      // 用户集合的 addCollectionEntry 端点（只接受 sha256），必须跳过。
+      // 坑：这里不能写 providers[0].value——若第一个 provider 是 url，会把
+      // URL 字符串当成 hash 提交给后端，后端校验失败且合并中途停止。
+      const h = e.hash || e.providers?.find(p => p.type === 'sha256')?.value || '';
       if (!h) continue;
       if (localMap[p] === h) continue;
       if (localMap[p] && localMap[p] !== h) {

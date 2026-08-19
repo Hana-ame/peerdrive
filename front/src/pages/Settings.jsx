@@ -594,30 +594,27 @@ export default function Settings({ dataConsent, setDataConsent }) {
               {nodeInfo && (
                 <div className="mt-2 bg-gray-900/80 rounded-lg p-3 border border-gray-800">
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                    {nodeInfo.peer_id && (
+                    {/* 2026-08-19：节点状态已从 libp2p /p2p/node（peer_id/p2p_enabled/
+                        relay_mode/num_peers）迁移到 /peerjs/node（id/online/peers）。
+                        旧字段在后端永久不存在，需要按新契约显示 */}
+                    {nodeInfo.id && (
                       <>
-                        <span className="text-gray-500">Peer ID</span>
-                        <span className="text-gray-300 font-mono truncate">{nodeInfo.peer_id}</span>
+                        <span className="text-gray-500">Node ID</span>
+                        <span className="text-gray-300 font-mono truncate">{nodeInfo.id}</span>
                       </>
                     )}
-                    {nodeInfo.p2p_enabled !== undefined && (
+                    {nodeInfo.online !== undefined && (
                       <>
-                        <span className="text-gray-500">P2P</span>
-                        <span className={nodeInfo.p2p_enabled ? 'text-green-400' : 'text-red-400'}>
-                          {nodeInfo.p2p_enabled ? '启用' : '禁用'}
+                        <span className="text-gray-500">在线</span>
+                        <span className={nodeInfo.online ? 'text-green-400' : 'text-red-400'}>
+                          {nodeInfo.online ? '在线' : '离线'}
                         </span>
                       </>
                     )}
-                    {nodeInfo.relay_mode && (
+                    {Array.isArray(nodeInfo.peers) && (
                       <>
-                        <span className="text-gray-500">Relay</span>
-                        <span className="text-gray-300">{nodeInfo.relay_mode}</span>
-                      </>
-                    )}
-                    {nodeInfo.num_peers !== undefined && (
-                      <>
-                        <span className="text-gray-500">Peers</span>
-                        <span className="text-gray-300">{nodeInfo.num_peers}</span>
+                        <span className="text-gray-500">当前 Peer 数</span>
+                        <span className="text-gray-300">{nodeInfo.peers.length}</span>
                       </>
                     )}
                   </div>
