@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -421,4 +422,24 @@ func TestFileIndex_FullWordsIncrementalBoundaries(t *testing.T) {
 func sha256Hex(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
+}
+
+// TestFileIndex_WriteFile 直接写文件：流式写入 uploadDir 并登记。
+// 发现背景：Source 控制面“直接写文件”的底层实现，2026-08-19。
+func TestFileIndex_WriteFile(t *testing.T) {
+	initTestDB(t)
+	svc := NewFileIndexService(t.TempDir())
+	content := []byte("file-index-write-file")
+	fi, err := svc.WriteFile("写入测试.bin", bytes.NewReader(content))
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(content)), fi.Size)
+	assert.Equal(t, "写入测试.bin", fi.Name)
+
+	got, err := os.ReadFile(fi.Path)
+	require.NoError(t, err)
+	assert.Equal(t, content, got)
+
+	info, err := svc.Info(fi.Hash)
+	require.NoError(t, err)
+	assert.Equal(t, fi.Path, info.Path)
 }

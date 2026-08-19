@@ -185,3 +185,48 @@ var errStub = &stubErr{}
 type stubErr struct{}
 
 func (e *stubErr) Error() string { return "stub source failed" }
+
+// TestLocalSourceControl 验证 LocalSource 的 Source 控制面：
+// AddLocalFile 添加本地文件、WriteFile 直接写文件（发现背景：控制面设计
+// doc/source-control.md，2026-08-19）。
+func TestLocalSourceControl(t *testing.T) {
+	require.NoError(t, repository.InitDB(":memory:"))
+	idxDir := t.TempDir()
+	storageDir := t.TempDir()
+	idx := transport.NewFileIndexService(idxDir)
+
+	s := NewLocalSource(storageDir, idx)
+
+	// 1. AddLocalFile：把已有文件加入 source
+	external := filepath.Join(idxDir, "existing.txt")
+	content := "control-add-local"
+	require.NoError(t, os.WriteFile(external, []byte(content), 0o644))
+	meta, err := s.AddLocalFile(external)
+	require.NoError(t, err)
+	assert.Equal(t, testHash(content), meta.Hash)
+	assert.Equal(t, int64(len(content)), meta.Size)
+	assert.Equal(t, "existing.txt", meta.Name)
+
+	// 加入后应能通过 local source 读取
+	r, err := s.Open(context.Background(), meta.Hash, 0, -1)
+	require.NoError(t, err)
+	got, err := io.ReadAll(r)
+	r.Close()
+	require.NoError(t, err)
+	assert.Equal(t, content, string(got))
+
+	// 2. WriteFile：直接写文件到 source
+	content2 := "control-write-file"
+	meta2, err := s.WriteFile("new.bin", strings.NewReader(content2))
+	require.NoError(t, err)
+	assert.Equal(t, testHash(content2), meta2.Hash)
+	assert.Equal(t, int64(len(content2)), meta2.Size)
+	assert.Equal(t, "new.bin", meta2.Name)
+
+	r, err = s.Open(context.Background(), meta2.Hash, 0, -1)
+	require.NoError(t, err)
+	got, err = io.ReadAll(r)
+	r.Close()
+	require.NoError(t, err)
+	assert.Equal(t, content2, string(got))
+}

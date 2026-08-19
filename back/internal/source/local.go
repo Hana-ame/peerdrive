@@ -148,6 +148,34 @@ func (s *LocalSource) Info(ctx context.Context, hash string) (*FileMeta, error) 
 	return &FileMeta{Hash: hash, Size: st.Size()}, nil
 }
 
+// AddLocalFile 把本地已有文件加入 local source（Source 控制面）。
+// 底层复用 FileIndexService.Create，安全边界、去重、索引语义与 create verb 一致。
+func (s *LocalSource) AddLocalFile(path string) (*FileMeta, error) {
+	if s.fileIndex == nil {
+		return nil, ErrControlUnsupported
+	}
+	fi, err := s.fileIndex.Create(path)
+	if err != nil {
+		return nil, err
+	}
+	log.LogInfo("source/local: add local file path=%s hash=%s size=%d", path, fi.Hash, fi.Size)
+	return &FileMeta{Hash: fi.Hash, Size: fi.Size, Name: fi.Name, Path: fi.Path}, nil
+}
+
+// WriteFile 直接写文件到 local source（Source 控制面）。
+// 底层复用 FileIndexService.WriteFile：流式写入索引导航目录，完成后登记。
+func (s *LocalSource) WriteFile(name string, r io.Reader) (*FileMeta, error) {
+	if s.fileIndex == nil {
+		return nil, ErrControlUnsupported
+	}
+	fi, err := s.fileIndex.WriteFile(name, r)
+	if err != nil {
+		return nil, err
+	}
+	log.LogInfo("source/local: write file name=%s hash=%s size=%d", name, fi.Hash, fi.Size)
+	return &FileMeta{Hash: fi.Hash, Size: fi.Size, Name: fi.Name, Path: fi.Path}, nil
+}
+
 // limitedReadCloser 限长读取 + 关闭底层文件。
 type limitedReadCloser struct {
 	r io.Reader

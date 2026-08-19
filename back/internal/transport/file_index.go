@@ -137,6 +137,40 @@ func (s *FileIndexService) Create(path string) (*FileInfo, error) {
 	return &FileInfo{Hash: h, Path: abs, Name: filepath.Base(path), Size: st.Size(), Seq: seq}, nil
 }
 
+// WriteFile 直接写文件到索引导航目录，并登记为本地文件。
+// 这是 Source 控制面“直接写文件”的底层实现：流式写入 uploadDir 下的目标
+// 文件，写完后复用 Create 计算 sha256 并登记映射（安全边界与 Create 一致，
+// 只允许 allowed root 内路径）。
+func (s *FileIndexService) WriteFile(name string, r io.Reader) (*FileInfo, error) {
+	if r == nil {
+		return nil, fmt.Errorf("reader is nil")
+	}
+	if err := os.MkdirAll(s.uploadDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create upload dir: %w", err)
+	}
+	path := filepath.Join(s.uploadDir, sanitizeName(name))
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open write target: %w", err)
+	}
+	if _, err := io.Copy(f, r); err != nil {
+		f.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("write file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("close file: %w", err)
+	}
+	fi, err := s.Create(path)
+	if err != nil {
+		_ = os.Remove(path)
+		return nil, err
+	}
+	log.LogInfo("file-index: write-file name=%s hash=%s size=%d path=%s", name, fi.Hash, fi.Size, fi.Path)
+	return fi, nil
+}
+
 // uploadChunkSize 上传位图粒度（分片对齐单位）。
 const uploadChunkSize = 64 * 1024
 

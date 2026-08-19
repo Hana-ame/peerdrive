@@ -21,7 +21,7 @@ func SetSourceManager(mgr *source.Manager) {
 }
 
 // registerSourceRoutes 注册 source 管理端点。
-func registerSourceRoutes(r *gin.Engine) {
+func registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFunc) {
 	if sourceManager == nil {
 		return
 	}
@@ -41,5 +41,68 @@ func registerSourceRoutes(r *gin.Engine) {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	// Source 控制面：Local 添加本地文件/直接写文件。
+	// 仅管理/认证路由开放（authRequired 与其它写操作一致）；这是把“文件如何
+	// 进本地 source”从分散 controller 收口到统一 source 管理面的第一步。
+	r.POST("/sources/local/add", authRequired, func(c *gin.Context) {
+		var body struct {
+			Path string `json:"path"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || body.Path == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
+			return
+		}
+		s := sourceManager.Get("local")
+		if s == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "local source not found"})
+			return
+		}
+		lc, ok := source.LocalControlOf(s)
+		if !ok {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "local source does not support control"})
+			return
+		}
+		meta, err := lc.AddLocalFile(body.Path)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{
+			"hash":     meta.Hash,
+			"size":     meta.Size,
+			"filename": meta.Name,
+			"path":     meta.Path,
+		})
+	})
+	r.POST("/sources/local/write", authRequired, func(c *gin.Context) {
+		file, header, err := c.Request.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+			return
+		}
+		defer file.Close()
+		s := sourceManager.Get("local")
+		if s == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "local source not found"})
+			return
+		}
+		lc, ok := source.LocalControlOf(s)
+		if !ok {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "local source does not support control"})
+			return
+		}
+		meta, err := lc.WriteFile(header.Filename, file)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{
+			"hash":     meta.Hash,
+			"size":     meta.Size,
+			"filename": meta.Name,
+			"path":     meta.Path,
+		})
 	})
 }

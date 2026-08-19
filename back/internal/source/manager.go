@@ -65,6 +65,18 @@ func (m *Manager) Unregister(name string) bool {
 	return false
 }
 
+// Get 按名字取 source（控制面/管理面入口用）。
+func (m *Manager) Get(name string) Source {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, s := range m.sources {
+		if s.Name() == name {
+			return s
+		}
+	}
+	return nil
+}
+
 // SetPriority 运行时调整 source 优先级（统一管理能力）。
 func (m *Manager) SetPriority(name string, p int) error {
 	m.mu.Lock()

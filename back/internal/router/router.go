@@ -351,7 +351,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	}
 
 	// 统一 source 管理（source 体系管理面）
-	registerSourceRoutes(r)
+	registerSourceRoutes(r, authRequired)
 
 	// Count routes
 	routes := r.Routes()
