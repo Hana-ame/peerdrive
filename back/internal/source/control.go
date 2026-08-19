@@ -75,3 +75,34 @@ type DownloadStatus struct {
 	DownloadSpeed float64
 	ErrorMessage  string `json:"error_message,omitempty"`
 }
+
+// IPFSControl IPFS 的控制能力。
+type IPFSControl interface {
+	// PinCID 下载 CID 并缓存到本地存储，返回 meta。
+	PinCID(cid string) (*PinInfo, error)
+
+	// UnpinCID 删除已 pin 的 CID。
+	UnpinCID(cid string) error
+
+	// ListPins 列出所有已 pin 的 CID。
+	ListPins() ([]PinInfo, error)
+
+	// GatewayStatus 返回各网关健康状态。
+	GatewayStatus() ([]GatewayStatus, error)
+}
+
+// PinInfo pin 条目信息。
+type PinInfo struct {
+	CID      string `json:"cid"`
+	Hash     string `json:"hash,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	Size     int64  `json:"size"`
+	PinnedAt string `json:"pinned_at,omitempty"`
+}
+
+// GatewayStatus 网关状态。
+type GatewayStatus struct {
+	URL     string `json:"url"`
+	Online  bool   `json:"online"`
+	Latency string `json:"latency,omitempty"`
+}

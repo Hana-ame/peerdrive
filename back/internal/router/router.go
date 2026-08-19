@@ -31,6 +31,7 @@ import (
 	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
+	"peerdrive/internal/source"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -116,6 +117,10 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 	// Initialize BitTorrent client for torrent/magnet downloads.
 	btClient := p2p_bt.NewBTClient(cfg.DownloadDir)
+	if sourceManager != nil && btClient != nil {
+		sourceManager.SetBTControl(source.NewBTControl(btClient))
+		log.LogInfo("router: BT control injected")
+	}
 	if btClient != nil {
 		if btSvc != nil && btSvc.Server != nil {
 			p2p_bt.SetGlobalDHT(btSvc)
@@ -151,6 +156,10 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		}
 		if len(gateways) > 0 {
 			ipfsProv = provider.NewIPFSProvider(gateways)
+			if sourceManager != nil && ipfsProv != nil {
+				sourceManager.SetIPFSControl(source.NewIPFSControl(ipfsProv, cfg.StorageDir))
+				log.LogInfo("router: IPFS control injected")
+			}
 		}
 	}
 	controller.InitIPFSProvider(ipfsProv)

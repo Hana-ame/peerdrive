@@ -78,6 +78,19 @@ func (m *Manager) GetBTControl() BTControl {
 	return btControl
 }
 
+// ipfsControl 可选 IPFS 控制面（nil 表示未配置）。
+var ipfsControl IPFSControl
+
+// SetIPFSControl 注入 IPFS 控制面实例（nil 表示未启用）。
+func (m *Manager) SetIPFSControl(ic IPFSControl) {
+	ipfsControl = ic
+}
+
+// GetIPFSControl 返回当前 IPFS 控制面实例（可能为 nil）。
+func (m *Manager) GetIPFSControl() IPFSControl {
+	return ipfsControl
+}
+
 // Get 按名字取 source（控制面/管理面入口用）。
 func (m *Manager) Get(name string) Source {
 	m.mu.RLock()

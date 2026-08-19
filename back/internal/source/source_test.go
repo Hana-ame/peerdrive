@@ -360,3 +360,16 @@ func TestBTControlOf_NonBTSource(t *testing.T) {
 	_, ok = any(bc).(BTControl)
 	assert.True(t, ok, "btController 应支持 BTControl")
 }
+
+// TestIPFSControl_NilProvider nil 提供者 → 所有方法返回 ErrControlUnsupported。
+func TestIPFSControl_NilProvider(t *testing.T) {
+	ctrl := NewIPFSControl(nil, t.TempDir())
+	_, err := ctrl.PinCID("QmTest")
+	assert.ErrorIs(t, err, ErrControlUnsupported)
+	err = ctrl.UnpinCID("QmTest")
+	assert.ErrorIs(t, err, ErrControlUnsupported)
+	_, err = ctrl.ListPins()
+	assert.ErrorIs(t, err, ErrControlUnsupported)
+	_, err = ctrl.GatewayStatus()
+	assert.ErrorIs(t, err, ErrControlUnsupported)
+}

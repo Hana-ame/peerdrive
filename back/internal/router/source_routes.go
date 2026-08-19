@@ -210,4 +210,57 @@ func registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFunc) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
+	// IPFS 控制面：pin / unpin / 列表 / 网关状态
+	r.POST("/sources/ipfs/pin/:cid", authRequired, func(c *gin.Context) {
+		ic := sourceManager.GetIPFSControl()
+		if ic == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "IPFS control not configured"})
+			return
+		}
+		pi, err := ic.PinCID(c.Param("cid"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, pi)
+	})
+	r.DELETE("/sources/ipfs/pin/:cid", authRequired, func(c *gin.Context) {
+		ic := sourceManager.GetIPFSControl()
+		if ic == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "IPFS control not configured"})
+			return
+		}
+		if err := ic.UnpinCID(c.Param("cid")); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	r.GET("/sources/ipfs/pins", authRequired, func(c *gin.Context) {
+		ic := sourceManager.GetIPFSControl()
+		if ic == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "IPFS control not configured"})
+			return
+		}
+		pins, err := ic.ListPins()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"pins": pins})
+	})
+	r.GET("/sources/ipfs/gateways", authRequired, func(c *gin.Context) {
+		ic := sourceManager.GetIPFSControl()
+		if ic == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "IPFS control not configured"})
+			return
+		}
+		status, err := ic.GatewayStatus()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"gateways": status})
+	})
+
 }
