@@ -5,6 +5,7 @@ package router
 // POST /sources/:name/priority   → 运行时调整路由优先级（body: {"priority": n}）
 
 import (
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -105,4 +106,108 @@ func registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFunc) {
 			"path":     meta.Path,
 		})
 	})
+
+	// BT 控制面：下载 torrent / magnet / 管理任务
+	r.POST("/sources/bt/torrent", authRequired, func(c *gin.Context) {
+		file, _, err := c.Request.FormFile("torrent")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "torrent file is required"})
+			return
+		}
+		defer file.Close()
+		data, err := io.ReadAll(file)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read torrent file"})
+			return
+		}
+		bc := sourceManager.GetBTControl()
+		if bc == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "BT control not configured"})
+			return
+		}
+		meta, err := bc.DownloadTorrent(data)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, meta)
+	})
+	r.POST("/sources/bt/magnet", authRequired, func(c *gin.Context) {
+		var body struct {
+			URI string `json:"uri"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || body.URI == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "uri is required"})
+			return
+		}
+		bc := sourceManager.GetBTControl()
+		if bc == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "BT control not configured"})
+			return
+		}
+		meta, err := bc.DownloadMagnet(body.URI)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, meta)
+	})
+	r.GET("/sources/bt/downloads", authRequired, func(c *gin.Context) {
+		bc := sourceManager.GetBTControl()
+		if bc == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "BT control not configured"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"downloads": bc.ListDownloads()})
+	})
+	r.GET("/sources/bt/download/:infohash", authRequired, func(c *gin.Context) {
+		bc := sourceManager.GetBTControl()
+		if bc == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "BT control not configured"})
+			return
+		}
+		ds := bc.GetDownload(c.Param("infohash"))
+		if ds == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "download not found"})
+			return
+		}
+		c.JSON(http.StatusOK, ds)
+	})
+	r.POST("/sources/bt/download/:infohash/pause", authRequired, func(c *gin.Context) {
+		bc := sourceManager.GetBTControl()
+		if bc == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "BT control not configured"})
+			return
+		}
+		if err := bc.PauseDownload(c.Param("infohash")); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	r.POST("/sources/bt/download/:infohash/resume", authRequired, func(c *gin.Context) {
+		bc := sourceManager.GetBTControl()
+		if bc == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "BT control not configured"})
+			return
+		}
+		if err := bc.ResumeDownload(c.Param("infohash")); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	r.DELETE("/sources/bt/download/:infohash", authRequired, func(c *gin.Context) {
+		bc := sourceManager.GetBTControl()
+		if bc == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "BT control not configured"})
+			return
+		}
+		if err := bc.RemoveDownload(c.Param("infohash")); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
 }

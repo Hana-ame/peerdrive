@@ -29,3 +29,49 @@ func LocalControlOf(s Source) (LocalControl, bool) {
 	lc, ok := s.(LocalControl)
 	return lc, ok
 }
+
+// BTControl 种子下载的控制能力。
+type BTControl interface {
+	// DownloadTorrent 从 .torrent 文件字节启动下载，返回元信息。
+	DownloadTorrent(data []byte) (*TorrentMeta, error)
+
+	// DownloadMagnet 从 magnet URI 启动下载，返回元信息。
+	DownloadMagnet(uri string) (*TorrentMeta, error)
+
+	// ListDownloads 列出所有下载任务状态。
+	ListDownloads() []DownloadStatus
+
+	// GetDownload 查询指定 infohash 的下载状态。
+	GetDownload(infohash string) *DownloadStatus
+
+	// PauseDownload 暂停下载。
+	PauseDownload(infohash string) error
+
+	// ResumeDownload 恢复下载。
+	ResumeDownload(infohash string) error
+
+	// RemoveDownload 删除下载任务（含已下载数据）。
+	RemoveDownload(infohash string) error
+}
+
+// TorrentMeta 种子元信息。
+type TorrentMeta struct {
+	InfoHash  string `json:"infohash"`
+	Name      string `json:"name"`
+	TotalSize int64  `json:"total_size"`
+	Files     int    `json:"files"`
+}
+
+// DownloadStatus 下载任务状态。
+type DownloadStatus struct {
+	InfoHash      string `json:"infohash"`
+	Name          string `json:"name"`
+	Status        string `json:"status"` // downloading / paused / completed / error / seeding
+	BytesDone     int64  `json:"bytes_done"`
+	BytesTotal    int64  `json:"bytes_total"`
+	Peers         int    `json:"peers"`
+	Seeders       int    `json:"seeders"`
+	Progress      float64
+	DownloadSpeed float64
+	ErrorMessage  string `json:"error_message,omitempty"`
+}

@@ -65,6 +65,19 @@ func (m *Manager) Unregister(name string) bool {
 	return false
 }
 
+// btControl 可选 BT 控制面（nil 表示未配置）。
+var btControl BTControl
+
+// SetBTControl 注入 BT 控制面实例（nil 表示未启用）。
+func (m *Manager) SetBTControl(bc BTControl) {
+	btControl = bc
+}
+
+// GetBTControl 返回当前 BT 控制面实例（可能为 nil）。
+func (m *Manager) GetBTControl() BTControl {
+	return btControl
+}
+
 // Get 按名字取 source（控制面/管理面入口用）。
 func (m *Manager) Get(name string) Source {
 	m.mu.RLock()

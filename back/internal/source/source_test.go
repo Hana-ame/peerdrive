@@ -328,3 +328,35 @@ func TestLocalControlOf_NonLocalSource(t *testing.T) {
 	_, ok = LocalControlOf(ls)
 	assert.True(t, ok, "LocalSource 应支持 LocalControl")
 }
+
+// TestBTControl_NilClient nil 客户端 → 所有方法返回 ErrControlUnsupported。
+func TestBTControl_NilClient(t *testing.T) {
+	ctrl := NewBTControl(nil)
+	_, err := ctrl.DownloadTorrent([]byte("data"))
+	assert.ErrorIs(t, err, ErrControlUnsupported)
+	_, err = ctrl.DownloadMagnet("magnet:?xt=urn:btih:xxx")
+	assert.ErrorIs(t, err, ErrControlUnsupported)
+	list := ctrl.ListDownloads()
+	assert.Nil(t, list, "nil 客户端返回 nil 列表")
+	ds := ctrl.GetDownload("xxx")
+	assert.Nil(t, ds, "nil 客户端返回 nil 状态")
+	err = ctrl.PauseDownload("xxx")
+	assert.ErrorIs(t, err, ErrControlUnsupported)
+	err = ctrl.ResumeDownload("xxx")
+	assert.ErrorIs(t, err, ErrControlUnsupported)
+	err = ctrl.RemoveDownload("xxx")
+	assert.ErrorIs(t, err, ErrControlUnsupported)
+}
+
+// TestBTControlOf_NonBTSource 非 BT source 不应支持 BTControl。
+func TestBTControlOf_NonBTSource(t *testing.T) {
+	dir := t.TempDir()
+	ls := NewLocalSource(dir, nil)
+	_, ok := any(ls).(BTControl)
+	assert.False(t, ok, "LocalSource 不应支持 BTControl")
+
+	// btController 应支持
+	bc := NewBTControl(nil)
+	_, ok = any(bc).(BTControl)
+	assert.True(t, ok, "btController 应支持 BTControl")
+}
