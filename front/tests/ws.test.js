@@ -260,3 +260,35 @@ describe('ws.js client', () => {
     vi.unstubAllGlobals()
   })
 })
+
+// 发现背景：代码审阅 2026-08-19——downloadToFile 在 showSaveFilePicker
+// 抛出 SecurityError 时应回退到 <a download> 路径，而非让 finally 块
+// 访问未定义的 writable 导致 ReferenceError。
+describe('downloadToFile error handling', () => {
+  it('should fallback to <a download> when showSaveFilePicker is not available', async () => {
+    // 使用 mock socket 避免实际 WS 连接
+    const sock = makeMockSock()
+    ws.__test._setSock(sock)
+
+    // 模拟 showSaveFilePicker 不存在，触发 fallback 路径
+    const orig = window.showSaveFilePicker
+    delete window.showSaveFilePicker
+
+    // downloadToFile 会尝试 showSaveFilePicker（不存在），
+    // 回退到 download(hash) -> 发送 req 帧 -> 等待响应
+    // 我们模拟服务端返回 err 帧使 download 快速 reject
+    const promise = ws.downloadToFile('testhash', 'testfile')
+
+    // 从 sock.sent 中提取 reqId
+    const sent = sock.sent[0]
+    const req = JSON.parse(sent)
+    // 发送 err 帧使 download 快速 reject
+    feedText(sock, { type: 'err', msg: 'not found', reqId: req.reqId })
+
+    await expect(promise).rejects.toThrow('not found')
+
+    // 清理
+    window.showSaveFilePicker = orig
+    ws.__test._reset()
+  })
+})

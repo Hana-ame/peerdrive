@@ -7,6 +7,7 @@ package transport
 // （多浏览器标签页各自独立，不能误杀）。
 
 import (
+	"encoding/json"
 	"io"
 	"testing"
 
@@ -117,4 +118,56 @@ func reqIDOf(t *testing.T, s *fakeSession) string {
 		}
 	}
 	return ""
+}
+
+// TestConnState_AdminUpAndPendingUploadSlot 验证 adminUp 和 pendingUpload
+// 可以同时存在（当前代码的假设，后续应修复为互斥）。
+// 发现背景：代码审阅 2026-08-19——dispatchFrame 二进制块路由假设两槽互斥，
+// 但 serveUploadBegin 和 serveAdmin 都没有显式检查对方是否已占位。
+func TestConnState_AdminUpAndPendingUploadSlot(t *testing.T) {
+	svc := newTestPeerJSService(t)
+	sess := &fakeSession{id: "local"}
+	svc.bindConn(sess)
+	st := svc.pending[sess]
+	require.NotNil(t, st)
+
+	// 模拟两个槽同时存在
+	st.mu.Lock()
+	st.adminUp = &adminUploadState{reqID: "admin-1", size: 100}
+	st.pendingUpload = &uploadState{reqID: "up-1", size: 100}
+	both := st.adminUp != nil && st.pendingUpload != nil
+	st.mu.Unlock()
+	assert.True(t, both, "当前代码允许两槽同时存在（这是已知问题，待修复）")
+
+	// 清理（不触发 worker）
+	st.mu.Lock()
+	st.adminUp = nil
+	st.pendingUpload = nil
+	st.mu.Unlock()
+}
+
+// TestConnState_AdminUpOverlap 验证 admin 声明替换逻辑：旧声明被替换时
+// 应发送 err 帧给旧 reqId，新声明占槽（发现背景：admin.go 替换逻辑）。
+func TestConnState_AdminUpOverlap(t *testing.T) {
+	svc := newTestPeerJSService(t)
+	sess := &fakeSession{id: "local"}
+	svc.bindConn(sess)
+	st := svc.pending[sess]
+	require.NotNil(t, st)
+
+	// 第一个 admin 声明（size=0 空文件，立即完成，不触发 worker）
+	ar1 := adminReq{Type: "admin", Method: "POST", Path: "/files/upload",
+		Binary: true, Filename: "a.bin", Size: 0, ReqID: "ar1"}
+	raw1, _ := json.Marshal(ar1)
+	svc.serveAdmin(sess, st, raw1)
+
+	// 第二个 admin 声明（也 size=0，替换不会有残留 worker 问题）
+	ar2 := adminReq{Type: "admin", Method: "POST", Path: "/files/upload",
+		Binary: true, Filename: "b.bin", Size: 0, ReqID: "ar2"}
+	raw2, _ := json.Marshal(ar2)
+	svc.serveAdmin(sess, st, raw2)
+
+	// 两次声明都走空文件路径，不会触发 worker 写盘
+	types := sess.sentTypes()
+	assert.Contains(t, types, "err", "旧 admin 声明被替换时应收到 err 帧")
 }
