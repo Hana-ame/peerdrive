@@ -95,3 +95,39 @@
 13. AnonExplorer 返回按钮 `navigate(-1)` 无历史时直接离开 SPA → 历史不足回首页
 14. `CommentSection` 拉评论无竞态保护 → seq 守卫（同 AnonExplorer 模式）
 15. Settings 自定义连接后 `activeBackendId=null` → 改为落成正式后端（同 URL 复用 / 新建「自定义」）
+
+---
+
+## 追加：再 review 2026-08-19（Peerdrive 本地 WS 管理面与前端展示修正）
+
+### 后端
+1. **admin 二进制上传丢失 token**
+   - 上传声明帧带 `token`，但 `adminUploadState` 未保存，内部 multipart 请求用空 token → 认证开启时上传 401。修复：状态保存 `ar.Token`，完成阶段回填；新增 `TestAdminBinaryUploadToken`。
+
+2. **admin 二进制上传拒绝空文件**
+   - 初版 `size <= 0` 直接拒绝；空文件声明 size=0 后没有二进制帧，永远收不齐。修复：允许 `size == 0`，立即从单槽摘除并触发 multipart 转发；新增 `TestAdminBinaryUploadEmpty`。
+
+### 前端
+3. **WS `admin-bin` 空响应残留 binaryExpect**
+   - `admin-bin size=0` 没有清单槽，后续无关二进制帧会被误归给已完成请求。修复：空响应立即 finish + 清 expect；新增 ws 测试。
+
+4. **预览 objectURL 泄漏**
+   - `SingleFilePreview` 切换合集时只处理 cancel 不 revoke，Blob 内存只增不减。修复：objectURL 随 effect cleanup / 卸载 revoke。
+
+5. **Settings 节点状态字段仍按 libp2p 旧契约**
+   - `getNodeInfo` 已删，改用 `getPeerjsNode` 后 UI 仍读 `peer_id/p2p_enabled/relay_mode/num_peers` → 全部空白。修复：按新契约显示 `id/online/peers`。
+
+6. **匿名合并把 URL-only 当 hash 提交**
+   - `mergeAnonIntoLocal` 用 `providers[0].value` 取主 hash，若 URL provider 在前会把 URL 当 sha256 提交给后端 → 校验失败。修复：只取 `type === 'sha256'` 的 provider，URL-only 跳过。
+
+7. **公开合集无法从广场创建副本**
+   - `/collections/public` 列表只有 `current_hash` 没有 `hash`，`handleFork` 只认 hash → 副本按钮无反应。修复：回退 `current_hash`；AnonCreator fork 也用 `sourceHash || hash || current_hash` 拉全量。
+
+8. **`createCollection` 别名匿名创建丢名字**
+   - 统一别名仍发 `name`，后端匿名分派读 `friendly_name` → 匿名合集名丢失。修复：别名改发 `friendly_name`。
+
+9. **数据同意记录写孤儿键**
+   - `saveConsentLocal` 写 `peerdrive_consent`，而设置页生效键是 `peerdrive_data_consent` → “已写但读不到”。修复：委托 `setDataConsent(true)` 统一键。
+
+10. **匿名合集 URL-only 条目下载到 HTML 错误页**
+    - 后端对 URL-only 返回 302，WS admin 内部转发不跟随跳转，前端会保存 302 页面。修复：FileRow / SingleFilePreview 检测无 sha256 时直接渲染外部链接。
