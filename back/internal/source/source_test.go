@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/transport"
 )
@@ -372,4 +373,65 @@ func TestIPFSControl_NilProvider(t *testing.T) {
 	assert.ErrorIs(t, err, ErrControlUnsupported)
 	_, err = ctrl.GatewayStatus()
 	assert.ErrorIs(t, err, ErrControlUnsupported)
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 模块级集成测试：Source 控制面子系统
+// ─────────────────────────────────────────────────────────────────
+
+// TestManager_ControlRegistration 验证 Manager 可以注册和获取控制面实例。
+func TestManager_ControlRegistration(t *testing.T) {
+	m := New()
+
+	// 注册 Local source（必须，因为控制面操作需要它）
+	local := NewLocalSource(t.TempDir(), nil)
+	require.NoError(t, m.Register(local))
+
+	// 注册 BTControl
+	btCtrl := NewBTControl(nil)
+	m.SetBTControl(btCtrl)
+	assert.NotNil(t, m.GetBTControl())
+
+	// 注册 IPFSControl
+	ipfsCtrl := NewIPFSControl(nil, t.TempDir())
+	m.SetIPFSControl(ipfsCtrl)
+	assert.NotNil(t, m.GetIPFSControl())
+
+	// 验证 source 仍然可以正常工作
+	ls := m.Get("local")
+	require.NotNil(t, ls)
+	assert.Equal(t, "local", ls.Name())
+
+	// 验证控制面各自独立
+	assert.NotNil(t, m.GetBTControl())
+	assert.NotNil(t, m.GetIPFSControl())
+}
+
+// TestManager_ControlNilDefault 验证未设置控制面时 Get 方法返回 nil。
+func TestManager_ControlNilDefault(t *testing.T) {
+	// 先清除全局控制面（之前测试可能已设置）
+	m := New()
+	m.SetBTControl(nil)
+	m.SetIPFSControl(nil)
+	assert.Nil(t, m.GetBTControl(), "未设置 BTControl 时应返回 nil")
+	assert.Nil(t, m.GetIPFSControl(), "未设置 IPFSControl 时应返回 nil")
+}
+
+// TestIPFSGatewayStatus_MockProvider 测试 GatewayStatus 使用 mock provider。
+// 不依赖真实 HTTP 请求（provider 本身带 HTTP 客户端，但测试可构造空 provider）。
+func TestIPFSGatewayStatus_MockProvider(t *testing.T) {
+	// 空 provider（无 gateways）→ GatewayStatus 返回 ErrControlUnsupported
+	prov := provider.NewIPFSProvider([]string{})
+	ctrl := NewIPFSControl(prov, t.TempDir())
+	_, err := ctrl.GatewayStatus()
+	assert.ErrorIs(t, err, ErrControlUnsupported, "空 gateways 应返回 ErrControlUnsupported")
+
+	// 有 gateways 但无网络连接 → 返回 offline 状态（不报错）
+	prov2 := provider.NewIPFSProvider([]string{"https://nonexistent-gateway.example.com"})
+	ctrl2 := NewIPFSControl(prov2, t.TempDir())
+	status, err := ctrl2.GatewayStatus()
+	// 即使网络不可达，也不应该返回错误（每个网关的状态是独立的）
+	require.NoError(t, err)
+	require.Len(t, status, 1)
+	assert.False(t, status[0].Online, "不存在的网关应标记为 offline")
 }
