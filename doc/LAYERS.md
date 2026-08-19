@@ -120,3 +120,23 @@ transport 里 import controller），说明归错层了。
 4. 若涉及管理面：admin 只做入口转发，数据流仍走 ②
 5. 测试与文档：对应层单测 + REFACTOR.md 补记录（坑/决策），本表如有新功能
    类型一并补录
+## 8. 维护者视角的五组模块（2026-08-19 文档分组）
+
+> 该分组不改变代码结构，也不改变 §1–§7 的分层规则；只用于日常讨论、
+> 仓库索引和 PR 归类时快速定位。它与 §1 的 8 个切面是“同一系统的两个视图”。
+
+| 分组 | 主要代码范围 | 对应 §1 分层 | 职责摘要 |
+|---|---|---|---|
+| **文件 Source 模块** | `internal/source`、`internal/downloader`、`internal/transport/file_index.go` | ② + ⑤ 为主 | 文件从哪来/去哪：本地、Peer、URL、统一管理器、下载、索引、上传会话 |
+| **控制模块** | `internal/controller`、`internal/service`、`internal/repository`、`internal/model` | ④ + ⑤ | 业务控制、服务编排、持久化、模型定义；不感知自己是否被 WS 帧转发 |
+| **Peer 模块** | `internal/transport` 的 PeerJS 核心：`peerjs_service.go`、`conn.go`、`inbound.go`、`outbound.go`、`file_index.go` | ② | 节点身份、帧协议、入站/出站请求语义、文件索引同步 |
+| **网络连接模块** | `internal/transport` 的连接载体：`ws_session.go`、`rtc_session.go`、`http_discovery.go`、`mqtt_discovery.go`、`forward.go`；`back/peerjs`、`back/signalserver` | ① + ⑥ | 底层连接、信令、发现、端口转发隧道 |
+| **路由（核心）** | `internal/router`、`internal/transport/admin.go` 的装配关系 | ③ + 路由本质 | 把所有模块组合起来：HTTP 路由、集合/文件分派、admin 内部转发、源路由装配 |
+
+边界备注：
+
+- `file_index.go` 物理位于 `internal/transport`，但它语义上更偏文件 Source/存储索引；
+  文档分组归到 Source，代码位置暂不迁移。
+- `admin.go` 物理也在 `internal/transport`，但它是“管理操作通过本地 WS 收口到
+  gin/controller”的横切面，文档分组归到路由/装配。
+- `Peer` 与 `网络连接` 的边界是：Peer 讲“协议和语义”，网络连接讲“底层连接和信令”。
