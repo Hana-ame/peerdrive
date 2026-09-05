@@ -75,8 +75,15 @@ func (c *Config) IsOriginAllowed(origin string) bool {
 		if o == "*" || strings.EqualFold(origin, o) {
 			return true
 		}
-		if strings.HasPrefix(o, "*.") && strings.HasSuffix(origin, o[1:]) {
-			return true
+		// 子域名通配：支持 "*.example.com" 和 "https://*.example.com" 两种写法
+		if strings.HasPrefix(o, "*.") || strings.Contains(o, "://*.") {
+			pattern := o
+			if idx := strings.Index(o, "://*"); idx >= 0 {
+				pattern = o[idx+3:] // "https://*.example.com" → "*.example.com"
+			}
+			if strings.HasSuffix(origin, pattern[1:]) {
+				return true
+			}
 		}
 	}
 	return false
@@ -96,7 +103,7 @@ func Load() *Config {
 		Port:               getEnv("PORT", "3000"),
 		StorageDir:         getEnv("PEERDRIVE_STORAGE", "./storage"),
 		StorageEnable:      getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
-		AllowedOrigins:     getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev"),
+		AllowedOrigins:     getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev"),
 		PublicAccessDomain: getEnv("PEERDRIVE_PUBLIC_DOMAIN", ""),
 		RegistrationServer: getEnv("PEERDRIVE_REG_SERVER", ""),
 		NodeAuthToken:      getEnv("PEERDRIVE_AUTH_TOKEN", ""),
