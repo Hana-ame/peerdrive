@@ -87,6 +87,23 @@ func (p *Peer) OnConnection(h ConnectionHandler) {
 	p.onConn = h
 }
 
+// ConnectedPeers 返回当前已建立（open）的 DataConnection 远端 peer id（去重、无序）。
+// 信令服务器 graph 依赖各节点上报这个列表，因此 Peer 需要暴露此查询。
+// 只计 open 连接：握手中的连接尚未真正建立，不应进入 graph。
+func (p *Peer) ConnectedPeers() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	seen := make(map[string]bool)
+	var out []string
+	for _, c := range p.conns {
+		if c.PeerID != "" && c.Open() && !seen[c.PeerID] {
+			seen[c.PeerID] = true
+			out = append(out, c.PeerID)
+		}
+	}
+	return out
+}
+
 // SetICEServers 设置 ICE 服务器（STUN/TURN）。
 // 注意：NewPeer 走 Options.ICEServers；NewPeerWithSignaller（自定义信令）
 // 必须调用本方法，否则 WebRTC 只有局域网 host 候选。

@@ -1,8 +1,4 @@
 # Peerdrive
-
-> **2026-08-13 起已解封重构**（PeerJS/WebRTC 互联层，见 `doc/REFACTOR.md`）。
-> 本文档主体已随重构更新；正文下方保留 2026-05 封印期的设计记录供参考。
-
 [![Peerdrive CI](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml/badge.svg)](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml)
 
 Peerdrive 是一个多协议文件集合管理器，支持 SHA256 内容寻址存储、URL 引用、P2P 传输和 BitTorrent 下载。通过 **Collection + Provider** 的统一抽象，将本地文件、HTTP 资源、PeerJS/WebRTC 互联整合到一个系统中。
@@ -51,6 +47,36 @@ cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 
 cd front && npx vitest run
 ```
 
+## 信令服务器实现方式
+
+> 信令服务器可以用**多种方式实现**，只要兼容 PeerJS 协议即可：
+> 公共 PeerJS 云、自托管 Go 信令（wintools / `back/signalserver`）、
+> Node.js `peerjs-server` 等。当前线上使用 wintools 维护的 Go 自托管信令，
+> peerdrive 通过 `PEERDRIVE_PEERJS_HOST/PORT/KEY` 和 `PEERDRIVE_DISCOVER_URL`
+> 连接信令；如果需要在 peerdrive 内嵌信令，`back/signalserver` 也是可用的 Go 实现。
+
+```
+wintools 或任何 PeerJS 兼容信令（独立部署）
+│  /peerjs            ← PeerJS 兼容 WS 信令
+│  /discover/announce ← Go/Web 节点上线自报
+│  /discover/nodes    ← 节点发现
+└───────────────┬────────────────────────────
+                │ 仅转发 SDP/ICE，不碰数据面
+┌───────────────▼────────────────────────────
+peerdrive
+│  back/peerjs  (Go PeerJS 客户端 + WebRTC DataChannel)
+│  back/internal/transport/peerjs_service.go (文件服务/节点互联)
+│  front        (浏览器 peerjs 消费者)
+```
+
+- Go 节点：用 `back/peerjs` 连接信令，常驻在线，提供本地文件 `list/read`。
+- Web 端：浏览器 `peerjs` 连接同一信令，按需连接 Go 节点，消费文件。
+- 信令实现选择：
+  1. 使用线上/本地 wintools Go 信令（当前默认）
+  2. 使用 peerdrive `back/signalserver` 内嵌或独立运行
+  3. 使用公共 PeerJS 云（`0.peerjs.com`）
+  4. 使用 Node.js 或其他 PeerJS 兼容信令
+
 ## 环境变量
 
 > 完整配置见 `back/internal/config/config.go`（`PEERDRIVE_*` 前缀，未设置用默认值）。
@@ -80,31 +106,10 @@ cd front && npx vitest run
 | `PEERDRIVE_DOWNLOAD_ORDER` / `PEERDRIVE_DOWNLOAD_TIMEOUT` | local,ipfs,ipfsgw,btdht,http / 30s | 下载器路由顺序 / 超时 |
 | `PEERDRIVE_FORWARD_RULES` | - | 端口转发规则（`key:port,...`，chmod 600） |
 
----
-
-## 历史：为什么封印（2026-05）
-
-### 1. 经济模型缺失
-
-P2P 网络的核心是激励。BT 靠"下载完自动做种"的互惠，Filecoin 靠合约。Peerdrive 没有激励机制——节点运行只有支出（带宽 + 电费 + 存储），没有回报。
-
-### 2. 运营商 QoS
-
-国内运营商对 P2P 上传有明确的限速和连接数限制。内容寻址 + P2P 传输在有 QoS 的环境里无法落地。
-
-### 3. 与 IPFS 高度重叠
-
-Peerdrive 的 Collection + Provider 抽象与 IPFS 的 CID + Pin 本质上同构。区别只是多了一个 `url` provider 类型——相当于承认了"P2P 不通就走 HTTP"。
-
-### 4. BT 生态式微
-
-DHT 节点从千万级降到百万级。流媒体时代种子分享本身在萎缩。
-
----
 
 ## 留下的东西
 
-> 注意：本段描述的是 2026-05 封印时的历史模块。**libp2p 栈已于 2026-08-16
+> 注意：以下列为早期遗留模块。**libp2p 栈已于 2026-08-16
 > 全部删除**（`back/internal/service/p2p.go`、`p2p_dual.go` 等已不存在），当前
 > 互联层为 PeerJS/WebRTC，见 `doc/REFACTOR.md`。
 

@@ -11,7 +11,6 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	// 确保测试的是默认值，不受外部环境变量影响
-	os.Unsetenv("PEERDRIVE_P2P_ENABLE")
 	os.Unsetenv("PEERDRIVE_BT_DHT_ENABLE")
 	os.Unsetenv("PEERDRIVE_STORAGE_ENABLE")
 	cfg := Load()

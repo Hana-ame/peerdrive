@@ -91,8 +91,9 @@ export default function BTController() {
   // Speed history: map of infohash -> array of last 10 speed readings
   const [speedHistory, setSpeedHistory] = useState({});
 
-  // Node status for banner + relay tags
-  const [nodeStatus, setNodeStatus] = useState({ online: false, p2p: false, relay: false, btNodes: 0, checking: true });
+  // Node status for banner tags（迁移记录 2026-08-20：relay 标志已删——relay
+  // 服务后端已删（doc/LEGACY.md §A），此前恒 false、Relay 徽章永不显示）
+  const [nodeStatus, setNodeStatus] = useState({ online: false, p2p: false, btNodes: 0, checking: true });
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [showSeedModal, setShowSeedModal] = useState(false);
   const [availableCollections, setAvailableCollections] = useState([]);
@@ -115,12 +116,11 @@ export default function BTController() {
         setNodeStatus({
           online: ping,
           p2p: p2p?.online || false,
-          relay: false,
           btNodes: bt?.num_nodes || 0,
           peers: p2p?.peers?.length || 0,
           checking: false,
         });
-      } catch { setNodeStatus({ online: false, p2p: false, relay: false, btNodes: 0, checking: false }); }
+      } catch { setNodeStatus({ online: false, p2p: false, btNodes: 0, checking: false }); }
     })();
   }, []);
 
@@ -375,7 +375,6 @@ export default function BTController() {
                 <span className="flex items-center gap-1.5">
                   {nodeStatus.online && <span className="text-[10px] bg-emerald-900/40 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-700/30">{'节点在线'}</span>}
                   {nodeStatus.p2p && <span className="text-[10px] bg-blue-900/40 text-blue-400 px-2 py-0.5 rounded-full border border-blue-700/30">{'P2P ' + (nodeStatus.peers > 0 ? nodeStatus.peers + ' peer' : '可用')}</span>}
-                  {nodeStatus.relay && <span className="text-[10px] bg-purple-900/40 text-purple-400 px-2 py-0.5 rounded-full border border-purple-700/30">Relay</span>}
                   {nodeStatus.btNodes > 0 && <span className="text-[10px] bg-amber-900/40 text-amber-400 px-2 py-0.5 rounded-full border border-amber-700/30">{'DHT ' + nodeStatus.btNodes + ' 节点'}</span>}
                 </span>
               )}

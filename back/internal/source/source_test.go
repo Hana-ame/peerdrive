@@ -407,14 +407,23 @@ func TestManager_ControlRegistration(t *testing.T) {
 	assert.NotNil(t, m.GetIPFSControl())
 }
 
-// TestManager_ControlNilDefault 验证未设置控制面时 Get 方法返回 nil。
+// TestManager_ControlNilDefault 验证未设置控制面时 Get 方法返回 nil，
+// 且各 Manager 实例的控制面状态互不共享（回归：此前用包级全局 var，
+// 一个测试 Set 后会污染下一个测试的 Get，必须防御性清 nil）。
 func TestManager_ControlNilDefault(t *testing.T) {
-	// 先清除全局控制面（之前测试可能已设置）
 	m := New()
-	m.SetBTControl(nil)
-	m.SetIPFSControl(nil)
+	// 新建实例默认即 nil（字段零值），无需继承上一轮残留
 	assert.Nil(t, m.GetBTControl(), "未设置 BTControl 时应返回 nil")
 	assert.Nil(t, m.GetIPFSControl(), "未设置 IPFSControl 时应返回 nil")
+
+	// 实例隔离：m1 设置控制面后，另一实例 m2 不受影响（全局 var 修法会漏）
+	m1 := New()
+	m1.SetBTControl(NewBTControl(nil))
+	m1.SetIPFSControl(NewIPFSControl(nil, t.TempDir()))
+	m2 := New()
+	assert.Nil(t, m2.GetBTControl(), "另一实例不应看到 m1 的 BTControl")
+	assert.Nil(t, m2.GetIPFSControl(), "另一实例不应看到 m1 的 IPFSControl")
+	assert.NotNil(t, m1.GetBTControl(), "m1 自身的 BTControl 仍有效")
 }
 
 // TestIPFSGatewayStatus_MockProvider 测试 GatewayStatus 使用 mock provider。

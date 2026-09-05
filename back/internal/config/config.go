@@ -58,9 +58,6 @@ type Config struct {
 	DownloadOrder       string
 	DownloadTimeoutSecs int
 
-	RelayStorageMB int
-	RelayVersion   string
-
 	ForwardRules string // PEERDRIVE_FORWARD_RULES: "key1:8080,key2:8443"（转发授权白名单,key 即凭证,配置文件建议 chmod 600）
 
 }
@@ -135,9 +132,6 @@ func Load() *Config {
 
 		DownloadOrder:       getEnv("PEERDRIVE_DOWNLOAD_ORDER", "local,ipfs,ipfsgw,btdht,http"),
 		DownloadTimeoutSecs: getEnvInt("PEERDRIVE_DOWNLOAD_TIMEOUT", 30),
-
-		RelayStorageMB: getEnvInt("PEERDRIVE_RELAY_STORAGE_MB", 0),
-		RelayVersion:   getEnv("PEERDRIVE_RELAY_VERSION", "peerdrive/1.0.0"),
 
 		ForwardRules: getEnv("PEERDRIVE_FORWARD_RULES", ""),
 	}

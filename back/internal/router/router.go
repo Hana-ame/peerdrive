@@ -1,6 +1,8 @@
 // Package router 将 Gin 路由注册到所有 Controller 处理函数。
-// 由 cmd/server/main.go 调用，传入已初始化的服务实例（Downloader、
-// P2PService、storageDir）。
+// 由 cmd/server/main.go 调用（仅传 cfg）；PeerJS/source 等服务实例由 main
+// 在调用 SetupRouter 前经 SetPeerJSService/SetSourceManager 等包级注入器
+// 装配，Downloader 在本函数内部按 cfg 构造（不再接收 P2PService——
+// libp2p 栈于 2026-08-16 全删，见 doc/LEGACY.md §A）。
 // 路由分组：
 //   /ping              — 健康检查（GET）
 //   /sha256sum/:sha256 — 通过 SHA256 哈希下载文件（仅本地存储，无 P2P 回退）

@@ -204,3 +204,247 @@ func TestDiscover_AnnounceAndQuery(t *testing.T) {
 	assert.True(t, ids["node-2"])
 	assert.False(t, ids["node-3"], "coll-b 节点不应出现")
 }
+
+// TestGraph_AnnouncePeersCreatesLinks 两个节点 announce peers 后 /nodes 返回对应边。
+func TestGraph_AnnouncePeersCreatesLinks(t *testing.T) {
+	_, hs := testServer(t)
+	announce := func(peerID string, peers []string) {
+		body, _ := json.Marshal(map[string]any{"peerId": peerID, "collections": []string{"media"}, "peers": peers})
+		resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+		require.NoError(t, err)
+		resp.Body.Close()
+	}
+	announce("node-1", []string{"node-2"})
+	announce("node-2", []string{"node-1"})
+
+	resp, err := http.Get(hs.URL + "/nodes")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	var out struct {
+		Nodes []NodeInfo  `json:"nodes"`
+		Links []GraphLink `json:"links"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	assert.Len(t, out.Nodes, 2)
+	require.Len(t, out.Links, 1, "A→B 和 B→A 应去重为一条边")
+	assert.Equal(t, "node-1", out.Links[0].Source)
+	assert.Equal(t, "node-2", out.Links[0].Target)
+}
+
+// TestGraph_EmptyPeersClearsLinks 再次 announce 空 peers 清空旧边。
+func TestGraph_EmptyPeersClearsLinks(t *testing.T) {
+	_, hs := testServer(t)
+	announce := func(peerID string, peers []string) {
+		body, _ := json.Marshal(map[string]any{"peerId": peerID, "collections": []string{"media"}, "peers": peers})
+		resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+		require.NoError(t, err)
+		resp.Body.Close()
+	}
+	announce("node-1", []string{"node-2"})
+	announce("node-2", []string{"node-1"})
+	// 两端都清空 peers，旧边才应消失（仅一端清空时另一端仍可能上报该边）
+	announce("node-1", []string{})
+	announce("node-2", []string{})
+
+	resp, err := http.Get(hs.URL + "/nodes")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	var out struct {
+		Links []GraphLink `json:"links"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	assert.Empty(t, out.Links, "两端空 peers 应清空旧边")
+}
+
+// TestGraph_LeaveRemovesLinks 节点 leave 后相关边消失。
+func TestGraph_LeaveRemovesLinks(t *testing.T) {
+	srv, hs := testServer(t)
+	announce := func(peerID string, peers []string) {
+		body, _ := json.Marshal(map[string]any{"peerId": peerID, "collections": []string{"media"}, "peers": peers})
+		resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+		require.NoError(t, err)
+		resp.Body.Close()
+	}
+	announce("node-1", []string{"node-2"})
+	announce("node-2", []string{"node-1"})
+
+	body, _ := json.Marshal(map[string]string{"peerId": "node-2"})
+	req := httptest.NewRequest(http.MethodPost, "/discover/leave", strings.NewReader(string(body)))
+	w := httptest.NewRecorder()
+	srv.HandleLeave(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	getResp, err := http.Get(hs.URL + "/nodes")
+	require.NoError(t, err)
+	defer getResp.Body.Close()
+	var out struct {
+		Nodes []NodeInfo  `json:"nodes"`
+		Links []GraphLink `json:"links"`
+	}
+	require.NoError(t, json.NewDecoder(getResp.Body).Decode(&out))
+	assert.Len(t, out.Nodes, 1, "node-2 下线后只剩 node-1")
+	assert.Empty(t, out.Links, "node-2 下线后边应消失")
+}
+
+// TestGraph_SelfPeerIgnored announce peers 包含自身 ID 时忽略。
+func TestGraph_SelfPeerIgnored(t *testing.T) {
+	_, hs := testServer(t)
+	announce := func(peerID string, peers []string) {
+		body, _ := json.Marshal(map[string]any{"peerId": peerID, "collections": []string{"media"}, "peers": peers})
+		resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+		require.NoError(t, err)
+		resp.Body.Close()
+	}
+	announce("node-1", []string{"node-1", "node-2"})
+	announce("node-2", []string{"node-1"})
+
+	getResp, err := http.Get(hs.URL + "/nodes")
+	require.NoError(t, err)
+	defer getResp.Body.Close()
+	var out struct {
+		Links []GraphLink `json:"links"`
+	}
+	require.NoError(t, json.NewDecoder(getResp.Body).Decode(&out))
+	require.Len(t, out.Links, 1)
+	assert.NotEqual(t, out.Links[0].Source, out.Links[0].Target, "自身边应被忽略")
+}
+
+// TestNodes_EmptyCollReturnsAll 空 coll 返回所有 collection 节点（行为与 wintools 对齐）。
+func TestNodes_EmptyCollReturnsAll(t *testing.T) {
+	_, hs := testServer(t)
+	announce := func(peerID, coll string) {
+		body, _ := json.Marshal(map[string]any{"peerId": peerID, "collections": []string{coll}})
+		resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+		require.NoError(t, err)
+		resp.Body.Close()
+	}
+	announce("node-1", "coll-a")
+	announce("node-2", "coll-b")
+
+	resp, err := http.Get(hs.URL + "/nodes")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	var out struct {
+		Nodes []NodeInfo `json:"nodes"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	assert.Len(t, out.Nodes, 2)
+}
+
+// TestNodes_TypeFilter 支持 ?type= 过滤节点类型（行为与 wintools 对齐）。
+func TestNodes_TypeFilter(t *testing.T) {
+	_, hs := testServer(t)
+	announce := func(peerID, nodeType string) {
+		body, _ := json.Marshal(map[string]any{"peerId": peerID, "collections": []string{"media"}, "nodeType": nodeType})
+		resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+		require.NoError(t, err)
+		resp.Body.Close()
+	}
+	announce("go-1", "go-persistent")
+	announce("web-1", "web-temp")
+
+	resp, err := http.Get(hs.URL + "/nodes?type=go-persistent")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	var out struct {
+		Nodes []NodeInfo `json:"nodes"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	require.Len(t, out.Nodes, 1)
+	assert.Equal(t, "go-1", out.Nodes[0].PeerID)
+}
+
+// TestNodes_IncludesNodeMetadata announce 上报 nodeType/collections/loadInfo 后 nodes 返回完整元数据。
+func TestNodes_IncludesNodeMetadata(t *testing.T) {
+	_, hs := testServer(t)
+	body, _ := json.Marshal(map[string]any{
+		"peerId": "node-1", "collections": []string{"media"}, "nodeType": "go-persistent",
+		"loadInfo": map[string]any{"connections": 3},
+	})
+	resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	getResp, err := http.Get(hs.URL + "/nodes")
+	require.NoError(t, err)
+	defer getResp.Body.Close()
+	var out struct {
+		Nodes []NodeInfo `json:"nodes"`
+	}
+	require.NoError(t, json.NewDecoder(getResp.Body).Decode(&out))
+	require.Len(t, out.Nodes, 1)
+	n := out.Nodes[0]
+	assert.Equal(t, "go-persistent", n.NodeType)
+	assert.Equal(t, []string{"media"}, n.Collections)
+	assert.Equal(t, float64(3), n.LoadInfo["connections"])
+}
+
+// TestGraph_TypeFilterLinksExcludeFilteredNodes 验证 type 过滤时，graph 边不会包含被过滤掉的节点。
+func TestGraph_TypeFilterLinksExcludeFilteredNodes(t *testing.T) {
+	_, hs := testServer(t)
+	announce := func(peerID, nodeType string, peers []string) {
+		body, _ := json.Marshal(map[string]any{"peerId": peerID, "collections": []string{"media"}, "nodeType": nodeType, "peers": peers})
+		resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+		require.NoError(t, err)
+		resp.Body.Close()
+	}
+	announce("go-1", "go-persistent", []string{"web-1"})
+	announce("web-1", "web-temp", []string{"go-1"})
+
+	// 只查 go-persistent 类型：nodes 只有 go-1，links 应为空（web-1 被过滤）
+	resp, err := http.Get(hs.URL + "/nodes?type=go-persistent")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	var out struct {
+		Nodes []NodeInfo  `json:"nodes"`
+		Links []GraphLink `json:"links"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	require.Len(t, out.Nodes, 1)
+	assert.Empty(t, out.Links, "被过滤节点不应出现在 graph 边中")
+}
+
+// TestNodes_EmptyReturnsEmptyArray 空节点/空边时 JSON 应返回 [] 而不是 null。
+func TestNodes_EmptyReturnsEmptyArray(t *testing.T) {
+	_, hs := testServer(t)
+	resp, err := http.Get(hs.URL + "/nodes")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&raw))
+	require.Contains(t, raw, "nodes")
+	require.Contains(t, raw, "links")
+	assert.True(t, len(raw["nodes"]) > 0 && raw["nodes"][0] == '[', "nodes 应为 JSON 数组")
+	assert.True(t, len(raw["links"]) > 0 && raw["links"][0] == '[', "links 应为 JSON 数组")
+}
+
+// TestSweepDiscovery_CleansExpiredNodes 过期节点应从 disc/peerLinks/peerStats/peerColls 清理。
+func TestSweepDiscovery_CleansExpiredNodes(t *testing.T) {
+	srv, hs := testServer(t)
+	// announce 一个节点，让它进入 disc/peerStats/peerColls
+	body, _ := json.Marshal(map[string]any{
+		"peerId": "node-1", "collections": []string{"media"}, "nodeType": "go-persistent",
+		"peers": []string{"node-2"}, "loadInfo": map[string]any{"connections": 1},
+	})
+	resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	// 把它的 lastSeen 改到心跳 TTL 之前
+	srv.mu.Lock()
+	srv.disc["media"]["node-1"] = time.Now().Add(-2 * srv.heartbeatTTL)
+	srv.mu.Unlock()
+
+	srv.sweepDiscovery()
+
+	srv.mu.Lock()
+	_, hasDisc := srv.disc["media"]["node-1"]
+	_, hasLinks := srv.peerLinks["node-1"]
+	_, hasStats := srv.peerStats["node-1"]
+	_, hasColls := srv.peerColls["node-1"]
+	srv.mu.Unlock()
+	assert.False(t, hasDisc, "过期节点应从 disc 清理")
+	assert.False(t, hasLinks, "过期节点应从 peerLinks 清理")
+	assert.False(t, hasStats, "过期节点应从 peerStats 清理")
+	assert.False(t, hasColls, "过期节点应从 peerColls 清理")
+}

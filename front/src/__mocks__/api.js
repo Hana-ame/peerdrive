@@ -82,8 +82,8 @@ export const WS_TRANSFER_URL = getWSTransferURL()
 
 // Backend switching (mocks)
 export const DEFAULT_BACKENDS = [
-  { id: 'wsl', name: 'WSL', url: 'https://wsl-3000.moonchan.xyz', stun_url: 'stun:stun.l.google.com:19302', turn_url: '', turn_credential: '' },
-  { id: 'bwh', name: 'BWH', url: 'http://97.64.30.221:3000', stun_url: 'stun:stun.l.google.com:19302', turn_url: '', turn_credential: '' },
+  { id: 'wsl', name: 'WSL', url: 'https://wsl-3000.moonchan.xyz' },
+  { id: 'bwh', name: 'BWH', url: 'http://97.64.30.221:3000' },
 ]
 export const getBackends = () => DEFAULT_BACKENDS
 export const setBackends = () => {}
@@ -120,17 +120,7 @@ export const setAuthHeaderEnabled = () => {}
 export const getFollowRedirects = () => true
 export const setFollowRedirects = () => {}
 
-// P2P network config
-export const getBootstrapPeer = () => ''
-export const setBootstrapPeer = () => {}
-export const getRelayServer = () => ''
-export const setRelayServer = () => {}
-export const getStunUrl = () => ''
-export const setStunUrl = () => {}
-export const getTurnUrl = () => ''
-export const setTurnUrl = () => {}
-export const getTurnCredential = () => ''
-export const setTurnCredential = () => {}
+// P2P network config（已删，见 src/api.js 迁移记录）
 
 // IPFS
 export const getIPFSEnabled = () => false

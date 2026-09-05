@@ -29,6 +29,13 @@ type Manager struct {
 	mu      sync.RWMutex
 	sources []Source // 按优先级升序（变更时重排）
 	stats   map[string]*Stats
+
+	// 可选控制面（nil 表示未配置）。按实例持有——多 Manager 互不共享。
+	// 历史背景：此前误用包级全局 var，多实例共享同一控制面 + 测试需防御性
+	// 清理上一轮残留（见 TestManager_ControlNilDefault 旧注释）；改为字段后
+	// 各 Manager 独立，Set/Get 在 m.mu 下访问，与并发 HTTP 请求安全共存。
+	btControl   BTControl
+	ipfsControl IPFSControl
 }
 
 // New 创建空 Manager。
@@ -65,30 +72,34 @@ func (m *Manager) Unregister(name string) bool {
 	return false
 }
 
-// btControl 可选 BT 控制面（nil 表示未配置）。
-var btControl BTControl
-
-// SetBTControl 注入 BT 控制面实例（nil 表示未启用）。
+// SetBTControl 注入 BT 控制面实例（nil 表示未启用）。按实例持有，多 Manager
+// 互不干扰；写锁保护，可与并发 Get 安全共存。
 func (m *Manager) SetBTControl(bc BTControl) {
-	btControl = bc
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.btControl = bc
 }
 
-// GetBTControl 返回当前 BT 控制面实例（可能为 nil）。
+// GetBTControl 返回当前 BT 控制面实例（可能为 nil）。读锁保护，与运行时
+// 注入互不阻塞。
 func (m *Manager) GetBTControl() BTControl {
-	return btControl
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.btControl
 }
 
-// ipfsControl 可选 IPFS 控制面（nil 表示未配置）。
-var ipfsControl IPFSControl
-
-// SetIPFSControl 注入 IPFS 控制面实例（nil 表示未启用）。
+// SetIPFSControl 注入 IPFS 控制面实例（nil 表示未启用）。按实例持有。
 func (m *Manager) SetIPFSControl(ic IPFSControl) {
-	ipfsControl = ic
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ipfsControl = ic
 }
 
 // GetIPFSControl 返回当前 IPFS 控制面实例（可能为 nil）。
 func (m *Manager) GetIPFSControl() IPFSControl {
-	return ipfsControl
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.ipfsControl
 }
 
 // Get 按名字取 source（控制面/管理面入口用）。

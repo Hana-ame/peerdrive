@@ -114,6 +114,13 @@ func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
 // ID 返回本节点在信令网络中的 peer id。
 func (s *PeerJSService) ID() string { return s.id }
 
+// currentPeer 返回当前信令 peer（受 peerMu 保护，供 HTTPDiscovery 等并发回调安全读取）。
+func (s *PeerJSService) currentPeer() *peerjs.Peer {
+	s.peerMu.Lock()
+	defer s.peerMu.Unlock()
+	return s.peer
+}
+
 // Start 注册到信令服务器；断线自动重连。异步，不阻塞调用方。
 func (s *PeerJSService) Start() {
 	go s.startLoop()
@@ -214,7 +221,12 @@ func (s *PeerJSService) startLoop() {
 		}
 		if httpDisc == nil && s.cfg.DiscoverURL != "" {
 			cols := s.collectionHashes()
-			httpDisc = NewHTTPDiscovery(s.cfg.DiscoverURL, s.id, cols, s.onDiscoveredPeer)
+			httpDisc = NewHTTPDiscovery(s.cfg.DiscoverURL, s.id, cols, s.onDiscoveredPeer, func() []string {
+				if p := s.currentPeer(); p != nil {
+					return p.ConnectedPeers()
+				}
+				return nil
+			})
 			httpDisc.Start()
 			s.peerMu.Lock()
 			s.httpDisc = httpDisc

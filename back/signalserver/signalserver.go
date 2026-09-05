@@ -17,27 +17,38 @@ package signalserver
 
 import (
 	"crypto/rand"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
+//go:embed dashboard.html
+var dashboardFS embed.FS
+
 type Server struct {
-	key          string
-	path         string
-	queueTTL     time.Duration // 离线队列存活时间（OFFER 过期用）
-	heartbeatTTL time.Duration // 发现的心跳过期时间
+	key            string
+	path           string
+	queueTTL       time.Duration   // 离线队列存活时间（OFFER 过期用）
+	heartbeatTTL   time.Duration   // 发现的心跳过期时间
 	tokenWhitelist map[string]bool // 允许的信令 token（nil/空 = 不限制）
 
-	mu      sync.Mutex
-	clients map[string]*client              // id → 在线连接
-	queues  map[string][]queuedMsg          // dst → 待转发消息
-	disc    map[string]map[string]time.Time // collection → peerId → lastSeen
+	startedAt time.Time // 服务器启动时间
+	msgCount  int64     // 总转发消息数（原子访问）
+
+	mu        sync.Mutex
+	clients   map[string]*client              // id → 在线连接
+	queues    map[string][]queuedMsg          // dst → 待转发消息
+	disc      map[string]map[string]time.Time // collection → peerId → lastSeen
+	peerLinks map[string]map[string]time.Time // peerId → 邻居 peerId → lastSeen（graph 用）
+	peerColls map[string][]string             // peerId -> collections
+	peerStats map[string]*PeerStats           // peerId -> stats
 }
 
 // Option 信令服务器配置项。
@@ -76,6 +87,7 @@ func (s *Server) Start() {
 		defer t.Stop()
 		for range t.C {
 			s.sweepQueues()
+			s.sweepDiscovery()
 		}
 	}()
 }
@@ -95,6 +107,54 @@ func (s *Server) sweepQueues() {
 			delete(s.queues, dst)
 		} else {
 			s.queues[dst] = kept
+		}
+	}
+}
+
+// sweepDiscovery 定期清理心跳过期的发现节点，并同步清理 graph/元数据，防止长期运行内存和 graph 残留。
+func (s *Server) sweepDiscovery() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	cutoff := now.Add(-s.heartbeatTTL)
+
+	active := make(map[string]bool)
+	for coll, peers := range s.disc {
+		for id, last := range peers {
+			if last.Before(cutoff) {
+				delete(peers, id)
+				continue
+			}
+			active[id] = true
+		}
+		if len(peers) == 0 {
+			delete(s.disc, coll)
+		}
+	}
+
+	// 清理不再活跃节点的 graph 起点
+	for id := range s.peerLinks {
+		if !active[id] {
+			delete(s.peerLinks, id)
+		}
+	}
+	// 清理指向不再活跃节点的边
+	for _, links := range s.peerLinks {
+		for nid := range links {
+			if !active[nid] {
+				delete(links, nid)
+			}
+		}
+	}
+	// 清理不再活跃节点的统计/集合
+	for id := range s.peerStats {
+		if !active[id] {
+			delete(s.peerStats, id)
+		}
+	}
+	for id := range s.peerColls {
+		if !active[id] {
+			delete(s.peerColls, id)
 		}
 	}
 }
@@ -132,9 +192,13 @@ func NewServer(key string, opts ...Option) *Server {
 		path:         "",
 		queueTTL:     30 * time.Second,
 		heartbeatTTL: 90 * time.Second,
+		startedAt:    time.Now(),
 		clients:      make(map[string]*client),
 		queues:       make(map[string][]queuedMsg),
 		disc:         make(map[string]map[string]time.Time),
+		peerLinks:    make(map[string]map[string]time.Time),
+		peerColls:    make(map[string][]string),
+		peerStats:    make(map[string]*PeerStats),
 	}
 	for _, o := range opts {
 		o(s)
@@ -223,27 +287,88 @@ func (s *Server) readLoop(cl *client) {
 }
 
 // route 路由消息：dst 在线转发，不在线入队（LEAVE/EXPIRE 除外）。
+//
+// 两处对标 peers/peerjs-server 的修复（src/messageHandler/handlers/transmission）：
+//
+//  1. send 失败不再静默丢弃。旧实现 `_ = dst.send(m)`：目标 socket 已半开但还
+//     没从 clients 表摘除时（对端崩溃、NAT 映射消失、连接半开未 FIN），
+//     OFFER/ANSWER/CANDIDATE 会被吞掉，发起方永久卡在等握手。这里摘除死连接
+//     并向发起方补发 LEAVE 让其停止重试。
+//  2. send 前释放 s.mu。send 内部 WriteJSON 带 10s 写超时，一个慢/死客户端
+//     会持锁 10s 卡死整个信令服务器的路由。因此出锁后再写。
 func (s *Server) route(m Message) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	dst := s.clients[m.Dst]
 	if dst != nil {
-		_ = dst.send(m)
+		s.mu.Unlock() // 出锁后再写，避免持 s.mu 阻塞在慢客户端上
+		if err := dst.send(m); err == nil {
+			atomic.AddInt64(&s.msgCount, 1)
+			return
+		}
+		s.handleDeadDst(dst, m)
 		return
 	}
-	if m.Type == "LEAVE" || m.Type == "EXPIRE" {
-		return
-	}
-	if m.Dst == "" {
+	s.mu.Unlock()
+
+	if m.Type == "LEAVE" || m.Type == "EXPIRE" || m.Dst == "" {
 		return
 	}
 	// 入队：目标上线后补发（OFFER/ANSWER/CANDIDATE）
 	// H3：队列无上限 → OOM。超 maxQueuedPerDst 丢最旧。
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	q := append(s.queues[m.Dst], queuedMsg{msg: m, expire: time.Now().Add(s.queueTTL)})
 	if len(q) > maxQueuedPerDst {
 		q = q[len(q)-maxQueuedPerDst:]
 	}
 	s.queues[m.Dst] = q
+	atomic.AddInt64(&s.msgCount, 1)
+}
+
+// handleDeadDst 处理"在 clients 表里但发送失败"的目标：摘除表项、关连接、
+// 广播 LEAVE。
+func (s *Server) handleDeadDst(dst *client, m Message) {
+	s.mu.Lock()
+	if cur, ok := s.clients[m.Dst]; !ok || cur != dst {
+		s.mu.Unlock()
+		return // 已被别的流程摘除/顶替，交给那边的清理
+	}
+	delete(s.clients, m.Dst)
+	var victims []*client
+	for _, c := range s.clients {
+		if c != dst {
+			victims = append(victims, c)
+		}
+	}
+	// 清理该死连接在发现/图/元数据中的残留（removeClient 因 clients 已摘除不会再来清理）
+	for coll, peers := range s.disc {
+		delete(peers, m.Dst)
+		if len(peers) == 0 {
+			delete(s.disc, coll)
+		}
+	}
+	delete(s.peerLinks, m.Dst)
+	for _, links := range s.peerLinks {
+		delete(links, m.Dst)
+	}
+	delete(s.peerStats, m.Dst)
+	delete(s.peerColls, m.Dst)
+	s.mu.Unlock()
+
+	dst.closeConn()
+	leave := Message{Type: "LEAVE", Src: m.Dst}
+	for _, c := range victims {
+		_ = c.send(leave)
+	}
+	if m.Src == "" || m.Src == m.Dst {
+		return
+	}
+	s.mu.Lock()
+	src := s.clients[m.Src]
+	s.mu.Unlock()
+	if src != nil {
+		_ = src.send(Message{Type: "LEAVE", Src: m.Dst, Dst: m.Src})
+	}
 }
 
 // flushQueue 客户端上线后补发离线队列（含过期清理）。
@@ -279,21 +404,30 @@ func (s *Server) removeClient(cl *client) {
 			delete(s.disc, coll)
 		}
 	}
+	delete(s.peerLinks, cl.id)
+	for _, links := range s.peerLinks {
+		delete(links, cl.id)
+	}
+	delete(s.peerStats, cl.id)
+	delete(s.peerColls, cl.id)
 	s.mu.Unlock()
 	for _, c := range victims {
 		_ = c.send(leave)
 	}
 }
 
-// HandleAnnounce POST /discover/announce {peerId, collections[]} 节点登记房间。
+// HandleAnnounce POST /discover/announce {peerId, collections[], nodeType, loadInfo, peers} 节点登记。
 // 与信令连接解耦（节点可通过任意 HTTP 入口上报），lastSeen 由心跳刷新。
-// M15：无界 decode 风险——限制 body 大小（1KB 足够：peerId + 少量 collection hash）
+// M15：无界 decode 风险——限制 body 大小（8KB 足够：peerId + collections + peers + loadInfo）
 // 与 collection 数量（单节点关注房间数有限）。
 func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<10)
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	var body struct {
-		PeerID      string   `json:"peerId"`
-		Collections []string `json:"collections"`
+		PeerID      string         `json:"peerId"`
+		Collections []string       `json:"collections"`
+		NodeType    string         `json:"nodeType,omitempty"`
+		LoadInfo    map[string]any `json:"loadInfo,omitempty"`
+		Peers       []string       `json:"peers,omitempty"` // 当前 WebRTC 直连的对端 peer id 列表
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.PeerID == "" {
 		http.Error(w, "peerId required", http.StatusBadRequest)
@@ -304,13 +438,20 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many collections", http.StatusBadRequest)
 		return
 	}
-	now := time.Now()
-	s.mu.Lock()
+	// 规范化 collection 列表：trim 并去掉空串，disc 与 peerColls 使用同一份数据。
+	cleanColls := make([]string, 0, len(body.Collections))
 	for _, coll := range body.Collections {
 		coll = strings.TrimSpace(coll)
-		if coll == "" {
-			continue
+		if coll != "" {
+			cleanColls = append(cleanColls, coll)
 		}
+	}
+
+	now := time.Now()
+	s.mu.Lock()
+	collSet := make(map[string]bool, len(cleanColls))
+	for _, coll := range cleanColls {
+		collSet[coll] = true
 		peers, ok := s.disc[coll]
 		if !ok {
 			peers = make(map[string]time.Time)
@@ -318,32 +459,269 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 		}
 		peers[body.PeerID] = now
 	}
+	// 立即从旧集合移除该节点（collections 变更后不用等 TTL）
+	for coll, peers := range s.disc {
+		if !collSet[coll] {
+			delete(peers, body.PeerID)
+			if len(peers) == 0 {
+				delete(s.disc, coll)
+			}
+		}
+	}
+	// 更新节点元数据（nodeType/collections/loadInfo），dashboard 与发现 API 共用。
+	stats := s.peerStats[body.PeerID]
+	if stats == nil {
+		stats = &PeerStats{}
+		s.peerStats[body.PeerID] = stats
+	}
+	stats.NodeType = body.NodeType
+	stats.LastSeen = now
+	stats.LoadInfo = body.LoadInfo
+	// 总是更新 collections（空也清空旧值），避免节点清空集合后旧集合残留。
+	s.peerColls[body.PeerID] = cleanColls
+	// 更新 graph 边：该节点当前直连的对端列表。
+	// 总是更新（即使 peers 为空/缺失也清空旧边），避免 graph 残留过期连接。
+	links := make(map[string]time.Time, len(body.Peers))
+	for _, nid := range body.Peers {
+		nid = strings.TrimSpace(nid)
+		if nid != "" && nid != body.PeerID {
+			links[nid] = now
+		}
+	}
+	s.peerLinks[body.PeerID] = links
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
-// HandleNodes GET /discover/nodes?coll= → 在线节点列表（心跳过期剔除）。
+// HandleLeave POST /discover/leave 节点优雅下线。
+func (s *Server) HandleLeave(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		PeerID string `json:"peerId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.PeerID == "" {
+		http.Error(w, "peerId required", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	// 从所有 collection 中移除
+	for _, peers := range s.disc {
+		delete(peers, body.PeerID)
+	}
+	delete(s.peerStats, body.PeerID)
+	delete(s.peerColls, body.PeerID)
+	delete(s.peerLinks, body.PeerID)
+	// 同时从其他节点的邻居列表中移除该节点
+	for _, links := range s.peerLinks {
+		delete(links, body.PeerID)
+	}
+	s.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// GraphLink graph 中的一条边（source ↔ target 已建立 WebRTC 连接）。
+type GraphLink struct {
+	Source   string `json:"source"`
+	Target   string `json:"target"`
+	LastSeen int64  `json:"lastSeen,omitempty"`
+}
+
+// HandleNodes GET /discover/nodes?coll=&type= → 在线节点列表（心跳过期剔除）+ graph 边。
+// 空 coll 表示返回所有 collection 的节点；type 可用于过滤节点类型。
 func (s *Server) HandleNodes(w http.ResponseWriter, r *http.Request) {
 	coll := r.URL.Query().Get("coll")
+	nodeType := r.URL.Query().Get("type")
 	cutoff := time.Now().Add(-s.heartbeatTTL)
 	s.mu.Lock()
-	peers := s.disc[coll]
-	out := make([]NodeInfo, 0, len(peers))
-	for id, last := range peers {
-		if last.After(cutoff) {
-			out = append(out, NodeInfo{PeerID: id, LastSeen: last.Unix()})
+	out := make([]NodeInfo, 0)
+	seen := make(map[string]bool)
+
+	if coll != "" {
+		// 指定 collection：只查这一个房间
+		peers := s.disc[coll]
+		out = make([]NodeInfo, 0, len(peers))
+		for id, last := range peers {
+			if last.After(cutoff) && !seen[id] {
+				info := s.nodeInfo(id, last)
+				// 类型过滤不通过时不标记 seen：允许该节点在其他 collection
+				// 再次被检查，同时 graph 边只基于实际返回的节点。
+				if nodeType != "" && info.NodeType != nodeType {
+					continue
+				}
+				seen[id] = true
+				out = append(out, info)
+			}
+		}
+	} else {
+		// 空 coll：遍历所有 collection，返回去重后的全部在线节点
+		for _, peers := range s.disc {
+			for id, last := range peers {
+				if last.After(cutoff) && !seen[id] {
+					info := s.nodeInfo(id, last)
+					if nodeType != "" && info.NodeType != nodeType {
+						continue
+					}
+					seen[id] = true
+					out = append(out, info)
+				}
+			}
+		}
+	}
+	// 收集 graph 边：仅保留两端都仍活跃的边，避免展示离线幽灵节点。
+	links := make([]GraphLink, 0)
+	linkSeen := make(map[string]bool)
+	for src, neighbors := range s.peerLinks {
+		if !seen[src] {
+			continue
+		}
+		for dst, last := range neighbors {
+			if !seen[dst] {
+				continue
+			}
+			a, b := src, dst
+			if a > b {
+				a, b = b, a
+			}
+			key := a + "\x00" + b
+			if linkSeen[key] {
+				continue
+			}
+			linkSeen[key] = true
+			links = append(links, GraphLink{Source: a, Target: b, LastSeen: last.Unix()})
 		}
 	}
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"nodes": out})
+	_ = json.NewEncoder(w).Encode(map[string]any{"nodes": out, "links": links})
+}
+
+// PeerStats 节点统计与负载信息。
+type PeerStats struct {
+	NodeType string         `json:"nodeType,omitempty"`
+	Uptime   int64          `json:"uptime,omitempty"`
+	LoadInfo map[string]any `json:"loadInfo,omitempty"`
+	LastSeen time.Time      `json:"-"`
+}
+
+// nodeInfo 从 peerStats/peerColls 组装发现响应条目。
+func (s *Server) nodeInfo(id string, last time.Time) NodeInfo {
+	info := NodeInfo{PeerID: id, LastSeen: last.Unix()}
+	if st := s.peerStats[id]; st != nil {
+		info.NodeType = st.NodeType
+		info.Uptime = st.Uptime
+		info.LoadInfo = st.LoadInfo
+	}
+	if colls := s.peerColls[id]; len(colls) > 0 {
+		info.Collections = colls
+	}
+	return info
 }
 
 // NodeInfo 发现响应条目。
 type NodeInfo struct {
-	PeerID   string `json:"peerId"`
-	LastSeen int64  `json:"lastSeen"`
+	PeerID      string         `json:"peerId"`
+	LastSeen    int64          `json:"lastSeen"`
+	NodeType    string         `json:"nodeType,omitempty"`
+	Collections []string       `json:"collections,omitempty"`
+	Uptime      int64          `json:"uptime,omitempty"`
+	LoadInfo    map[string]any `json:"loadInfo,omitempty"`
+}
+
+// HandleStatus GET /status → 服务器状态快照（dashboard 轮询用）。
+func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	clientCount := len(s.clients)
+	queueCount := len(s.queues)
+	totalQueued := 0
+	for _, q := range s.queues {
+		totalQueued += len(q)
+	}
+	// 收集活跃发现节点
+	discoveredNodes := make([]NodeInfo, 0)
+	seen := make(map[string]bool)
+	cutoff := time.Now().Add(-s.heartbeatTTL)
+	for _, peers := range s.disc {
+		for id, last := range peers {
+			if last.After(cutoff) && !seen[id] {
+				seen[id] = true
+				discoveredNodes = append(discoveredNodes, s.nodeInfo(id, last))
+			}
+		}
+	}
+	// 收集 graph 边：仅保留两端都仍活跃的边，避免展示离线幽灵节点。
+	links := make([]GraphLink, 0)
+	linkSeen := make(map[string]bool)
+	for src, neighbors := range s.peerLinks {
+		if !seen[src] {
+			continue
+		}
+		for dst, last := range neighbors {
+			if !seen[dst] {
+				continue
+			}
+			a, b := src, dst
+			if a > b {
+				a, b = b, a
+			}
+			key := a + "\x00" + b
+			if linkSeen[key] {
+				continue
+			}
+			linkSeen[key] = true
+			links = append(links, GraphLink{Source: a, Target: b, LastSeen: last.Unix()})
+		}
+	}
+	s.mu.Unlock()
+
+	uptime := time.Since(s.startedAt).Seconds()
+	resp := map[string]any{
+		"key":         s.key,
+		"uptimeSec":   int64(uptime),
+		"uptimeStr":   formatDuration(uptime),
+		"clients":     clientCount,
+		"queues":      queueCount,
+		"totalQueued": totalQueued,
+		"discovered":  len(discoveredNodes),
+		"nodes":       discoveredNodes,
+		"links":       links,
+		"msgCount":    atomic.LoadInt64(&s.msgCount),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// HandleDashboard GET / → dashboard HTML（内嵌）。
+func (s *Server) HandleDashboard(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	b, err := dashboardFS.ReadFile("dashboard.html")
+	if err != nil {
+		http.Error(w, "dashboard not found", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	_, _ = w.Write(b)
+}
+
+// formatDuration 秒数转人可读时长。
+func formatDuration(seconds float64) string {
+	d := time.Duration(seconds) * time.Second
+	if d < time.Minute {
+		return fmt.Sprintf("%.0fs", seconds)
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%.1fm", seconds/60)
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%.1fh", seconds/3600)
+	}
+	return fmt.Sprintf("%.1fd", seconds/86400)
 }
 
 // wsError 升级失败（HTTP 层）。

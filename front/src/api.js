@@ -15,8 +15,8 @@ const BACKENDS_KEY = 'peerdrive_backends';
 const CURRENT_BACKEND_KEY = 'peerdrive_current_backend_id';
 
 const DEFAULT_BACKENDS = [
-  { id: 'wsl', name: 'WSL', url: 'https://wsl-3000.moonchan.xyz', stun_url: 'stun:stun.l.google.com:19302', turn_url: '', turn_credential: '' },
-  { id: 'bwh', name: 'BWH', url: 'http://97.64.30.221:3000', stun_url: 'stun:stun.l.google.com:19302', turn_url: '', turn_credential: '' },
+  { id: 'wsl', name: 'WSL', url: 'https://wsl-3000.moonchan.xyz' },
+  { id: 'bwh', name: 'BWH', url: 'http://97.64.30.221:3000' },
 ];
 
 function getBackends() {
@@ -50,10 +50,10 @@ function switchBackend(id) {
   if (!target) return false;
   setCurrentBackendId(id);
   localStorage.setItem(STORAGE_KEY, target.url);
-  // 同步 STUN/TURN 配置到全局
-  if (target.stun_url !== undefined) localStorage.setItem(STUN_URL_KEY, target.stun_url);
-  if (target.turn_url !== undefined) localStorage.setItem(TURN_URL_KEY, target.turn_url);
-  if (target.turn_credential !== undefined) localStorage.setItem(TURN_CREDENTIAL_KEY, target.turn_credential);
+  // 迁移记录（2026-08-20）：原此处同步 STUN/TURN 到全局 localStorage——
+  // 已随 STUN/TURN 死配置一并删除：全前端无任何 RTCPeerConnection/iceServers
+  // 消费方（浏览器主应用只走 /ws/peer WS 会话；peerdrive-media 独立包自带
+  // 空 iceServers 默认，见其 core.js），这些设置是「设置页写→设置页读」闭环。
   return true;
 }
 
@@ -362,23 +362,17 @@ const FOLLOW_REDIRECTS_KEY = 'peerdrive_follow_redirects';
 export function getFollowRedirects() { return localStorage.getItem(FOLLOW_REDIRECTS_KEY) !== 'false'; }
 export function setFollowRedirects(v) { localStorage.setItem(FOLLOW_REDIRECTS_KEY, v ? 'true' : 'false'); }
 
-/* ---- p2p network config (frontend-only) ---- */
-const BOOTSTRAP_PEER_KEY = 'peerdrive_bootstrap_peer';
-const RELAY_SERVER_KEY = 'peerdrive_relay_server';
-const STUN_URL_KEY = 'peerdrive_stun_url';
-const TURN_URL_KEY = 'peerdrive_turn_url';
-const TURN_CREDENTIAL_KEY = 'peerdrive_turn_credential';
-
-export function getBootstrapPeer() { return localStorage.getItem(BOOTSTRAP_PEER_KEY) || ''; }
-export function setBootstrapPeer(v) { localStorage.setItem(BOOTSTRAP_PEER_KEY, v); }
-export function getRelayServer() { return localStorage.getItem(RELAY_SERVER_KEY) || ''; }
-export function setRelayServer(v) { localStorage.setItem(RELAY_SERVER_KEY, v); }
-export function getStunUrl() { return localStorage.getItem(STUN_URL_KEY) || 'stun:stun.l.google.com:19302'; }
-export function setStunUrl(v) { localStorage.setItem(STUN_URL_KEY, v); }
-export function getTurnUrl() { return localStorage.getItem(TURN_URL_KEY) || ''; }
-export function setTurnUrl(v) { localStorage.setItem(TURN_URL_KEY, v); }
-export function getTurnCredential() { return localStorage.getItem(TURN_CREDENTIAL_KEY) || ''; }
-export function setTurnCredential(v) { localStorage.setItem(TURN_CREDENTIAL_KEY, v); }
+/* ---- p2p network config（已整体删除，2026-08-20）----
+ * bootstrapPeer / relayServer / stunUrl / turnUrl / turnCredential 全部为
+ * 「设置页写 localStorage → 设置页读回显」的死闭环，无任何功能消费方：
+ * - bootstrap peer：libp2p 概念，后端 PEERDRIVE_BOOTSTRAP_PEER 已随 libp2p
+ *   栈删除（doc/LEGACY.md §C）
+ * - relay：relay 服务后端已删（doc/LEGACY.md §A），徽章恒 false
+ * - STUN/TURN：浏览器主应用不创建 RTCPeerConnection（全部通信走 /ws/peer
+ *   WS 会话）；peerdrive-media 独立包默认空 iceServers（浏览器↔Node 内网
+ *   场景 host candidate 即可）。未来若做跨网穿透，在 media 包 signaling.config
+ *   显式传 iceServers，而不是恢复这组设置页。
+ */
 
 /* ---- ipfs gateway config (frontend-only) ---- */
 const IPFS_ENABLED_KEY = 'peerdrive_ipfs_enabled';

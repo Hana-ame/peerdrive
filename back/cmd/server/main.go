@@ -1,12 +1,16 @@
 // Peerdrive 服务端入口点。
-// 启动 Gin HTTP 服务器，同时初始化 libp2p P2P 节点、SQLite 元数据库
-// 和内容寻址文件存储。支持环境变量 PORT（监听端口）和
-// PEERDRIVE_STORAGE（存储目录，默认 ./storage）。
-// 使用方式：go run ./cmd/server/main.go
-//   PORT=3000 PEERDRIVE_STORAGE=./storage go run ./cmd/server/main.go
-// 内部流程：InitDB → NewP2PService → IPFSService → UniversalDownloader → SetupRouter
+// 启动 Gin HTTP 服务器，初始化 SQLite 元数据库、内容寻址文件存储与
+// PeerJS 信令 + WebRTC 文件服务（Go 节点作为常驻 peer 提供文件）。
+// 支持环境变量 PORT（监听端口）和 PEERDRIVE_STORAGE（存储目录，默认 ./storage）。
+// 使用方式（必须 -tags nosqlite，双 SQLite 驱动 CGO 符号冲突）：
+//   go run -tags nosqlite ./cmd/server/main.go
+//   PORT=3000 PEERDRIVE_STORAGE=./storage go run -tags nosqlite ./cmd/server/main.go
+// 内部流程：InitDB → PeerJSService.Start → 注册 local/peer/url source → SetupRouter
 //
 // storageDir 注入到 Gin Context，供 controller/anon.go 等使用。
+// 历史背景：原 libp2p 互联层于 2026-08-16 全删（见 doc/LEGACY.md §A），
+// 本注释曾描述 "libp2p P2P 节点 / NewP2PService→IPFSService→UniversalDownloader"
+// 旧流程，与现状不符，本次校正为新流程。
 
 package main
 
@@ -52,7 +56,9 @@ func main() {
 	repository.SetAnonStorageDir(storageDir)
 
 	// 初始化 PeerJS 信令 + WebRTC 文件服务（Go 节点作为常驻 peer 提供文件，
-	// 与浏览器/其它节点经公共云信令 0.peerjs.com 互联）。
+	// 与浏览器/其它节点经 PeerJS 信令互联）。信令服务器默认公共云
+	// 0.peerjs.com，生产经 PEERDRIVE_PEERJS_HOST/KEY 指向自托管 peerserver
+	// （见 doc/PEERSIGNAL.md / AGENTS.md 线上部署）。
 	// 注意：SetPeerJSService 必须在 SetupRouter 之前调用，路由注册时读取。
 	var peerjsSvc *transport.PeerJSService
 	if cfg.PeerJSEnable {

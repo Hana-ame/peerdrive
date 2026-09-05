@@ -3,8 +3,9 @@
 // PEERDRIVE_PEERJS_HOST/PORT 指向本服务器，发现走内置 HTTP API。
 //
 // 用法：peerserver [-addr :9000] [-key peerjs] [-tokens tok1,tok2]
-//   -tokens 可选：信令 token 白名单（逗号分隔）。设置后 WS 连接的 token
-//   必须在名单内，否则拒绝升级（防止任意客户端冒充节点收信令）。
+//
+//	-tokens 可选：信令 token 白名单（逗号分隔）。设置后 WS 连接的 token
+//	必须在名单内，否则拒绝升级（防止任意客户端冒充节点收信令）。
 package main
 
 import (
@@ -36,7 +37,11 @@ func main() {
 	mux.HandleFunc("/peerjs/id", srv.HandleID)
 	// 内置房间发现（替代 MQTT）
 	mux.HandleFunc("/discover/announce", srv.HandleAnnounce)
+	mux.HandleFunc("/discover/leave", srv.HandleLeave)
 	mux.HandleFunc("/discover/nodes", srv.HandleNodes)
+	// 状态 API 与 dashboard（graph 可视化）
+	mux.HandleFunc("/status", srv.HandleStatus)
+	mux.HandleFunc("/", srv.HandleDashboard)
 
 	log.Printf("peerserver listening on %s (key=%s)", *addr, *key)
 	if err := http.ListenAndServe(*addr, mux); err != nil {

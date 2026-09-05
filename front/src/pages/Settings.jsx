@@ -58,10 +58,6 @@ export default function Settings({ dataConsent, setDataConsent }) {
       const newUrl = api.getApiBase();
       setApiBase(newUrl);
       setActiveBackendId(id);
-      // 从后端加载 STUN/TURN
-      setStunUrl(api.getBackendField(id, 'stun_url', api.getStunUrl()));
-      setTurnUrl(api.getBackendField(id, 'turn_url', api.getTurnUrl()));
-      setTurnCredential(api.getBackendField(id, 'turn_credential', api.getTurnCredential()));
       // ping will auto-trigger via useEffect
     }
   }, []);
@@ -72,10 +68,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
     if (!name || !url) return;
     const formattedUrl = url.startsWith('http') ? url : 'https://' + url;
     const id = api.addBackend(name, formattedUrl);
-    // 添加后自动切换到新后端，带上 STUN/TURN
-    api.updateBackendField(id, 'stun_url', stunUrl.trim());
-    api.updateBackendField(id, 'turn_url', turnUrl.trim());
-    api.updateBackendField(id, 'turn_credential', turnCredential.trim());
+    // 添加后自动切换到新后端
     setShowAddBackend(false);
     setNewBackendName('');
     setNewBackendUrl('');
@@ -115,11 +108,6 @@ export default function Settings({ dataConsent, setDataConsent }) {
   const [apiBase, setApiBase] = useState(api.getApiBase());
   const [pingOk, setPingOk] = useState(null);
   const [nodeInfo, setNodeInfo] = useState(null);
-  const [bootstrapPeer, setBootstrapPeer] = useState(api.getBootstrapPeer());
-  const [relayServer, setRelayServer] = useState(api.getRelayServer());
-  const [stunUrl, setStunUrl] = useState(api.getStunUrl());
-  const [turnUrl, setTurnUrl] = useState(api.getTurnUrl());
-  const [turnCredential, setTurnCredential] = useState(api.getTurnCredential());
   const [followRedirects, setFollowRedirects] = useState(api.getFollowRedirects());
   const [ipfsEnabled, setIpfsEnabled] = useState(api.getIPFSEnabled());
 
@@ -248,17 +236,6 @@ export default function Settings({ dataConsent, setDataConsent }) {
     if (url && !url.startsWith('http')) url = 'https://' + url;
     api.setApiBase(url);
     setApiBase(url);
-    api.setBootstrapPeer(bootstrapPeer.trim());
-    api.setRelayServer(relayServer.trim());
-    api.setStunUrl(stunUrl.trim());
-    api.setTurnUrl(turnUrl.trim());
-    api.setTurnCredential(turnCredential.trim());
-    // 同步到当前后端
-    if (activeBackendId) {
-      api.updateBackendField(activeBackendId, 'stun_url', stunUrl.trim());
-      api.updateBackendField(activeBackendId, 'turn_url', turnUrl.trim());
-      api.updateBackendField(activeBackendId, 'turn_credential', turnCredential.trim());
-    }
     testPing();
   };
 
@@ -645,60 +622,6 @@ export default function Settings({ dataConsent, setDataConsent }) {
                   >连接</button>
                 </div>
               )}
-            </div>
-
-            {/* Bootstrap Peer */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">
-                P2P Bootstrap Peer
-                <span className="text-gray-600 ml-1">（multiaddr)</span>
-              </label>
-              <input
-                value={bootstrapPeer}
-                onChange={(e) => setBootstrapPeer(e.target.value)}
-                placeholder="/ip4/.../tcp/.../p2p/..."
-                className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
-              />
-            </div>
-
-            {/* Relay Server */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Relay 服务器 URL</label>
-              <input
-                value={relayServer}
-                onChange={(e) => setRelayServer(e.target.value)}
-                placeholder="wss://relay.example.com"
-                className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
-              />
-            </div>
-
-            {/* STUN / TURN */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">STUN 服务器</label>
-              <input
-                value={stunUrl}
-                onChange={(e) => setStunUrl(e.target.value)}
-                placeholder="stun:stun.l.google.com:19302"
-                className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">TURN 服务器 URL</label>
-              <input
-                value={turnUrl}
-                onChange={(e) => setTurnUrl(e.target.value)}
-                placeholder="turn:turn.example.com:3478"
-                className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">TURN 凭据</label>
-              <input
-                value={turnCredential}
-                onChange={(e) => setTurnCredential(e.target.value)}
-                placeholder="username:credential"
-                className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
-              />
             </div>
 
             {/* 网络协议区已删除：原「IPFS 网络」/「BT DHT 网络」两个开关只写死

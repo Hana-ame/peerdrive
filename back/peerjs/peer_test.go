@@ -494,3 +494,49 @@ func TestConnection_CallbackRegistration_Concurrent(t *testing.T) {
 	dc.onMsg(Frame{IsText: true, Data: []byte("y")})
 	assert.True(t, got, "并发后注册的回调必须仍生效")
 }
+
+// TestConnectedPeers 验证 ConnectedPeers 只返回 open 连接且去重。
+func TestConnectedPeers(t *testing.T) {
+	p, _ := newTestPeer()
+
+	// 未 open 的连接不计入
+	c1, f1 := newTestConn(p, "conn-1")
+	c2, f2 := newTestConn(p, "conn-2")
+	assert.Empty(t, p.ConnectedPeers())
+
+	// open 后返回远端 id
+	openFake(f1)
+	openFake(f2)
+	got := p.ConnectedPeers()
+	assert.ElementsMatch(t, []string{"remote-conn-1", "remote-conn-2"}, got)
+
+	// 同一远端多条连接应去重
+	dup := &Connection{
+		ID:       "conn-dup",
+		PeerID:   "remote-conn-1",
+		peer:     p,
+		done:     make(chan struct{}),
+		lowWater: make(chan struct{}, 1),
+	}
+	fdup := newFakeDC()
+	dup.attach(fdup)
+	openFake(fdup)
+	p.registerConnection(dup)
+
+	got = p.ConnectedPeers()
+	assert.ElementsMatch(t, []string{"remote-conn-1", "remote-conn-2"}, got, "同一远端只应出现一次")
+
+	// 关闭 c1 后 remote-conn-1 仍有 dup 连接 open，因此仍应出现（去重按远端 ID）
+	c1.Close()
+	got = p.ConnectedPeers()
+	assert.ElementsMatch(t, []string{"remote-conn-1", "remote-conn-2"}, got)
+
+	// 关闭 c2 后只剩 remote-conn-1（dup 仍 open）
+	c2.Close()
+	got = p.ConnectedPeers()
+	assert.ElementsMatch(t, []string{"remote-conn-1"}, got)
+
+	// 全部关闭后为空
+	dup.Close()
+	assert.Empty(t, p.ConnectedPeers())
+}
