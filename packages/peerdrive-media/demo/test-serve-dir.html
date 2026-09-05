@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>serve-dir WebRTC 测试</title>
+<style>
+  body { font-family: sans-serif; max-width: 900px; margin: 20px auto; padding: 20px; }
+  h1 { color: #2c3e50; }
+  .card { background: #f8f9fa; border-radius: 8px; padding: 16px; margin: 12px 0; border: 1px solid #dee2e6; }
+  .card h3 { margin: 0 0 8px 0; }
+  .status { font-size: 13px; color: #6c757d; margin-top: 8px; }
+  .status.ok { color: #28a745; }
+  .status.err { color: #dc3545; }
+  img, video { max-width: 480px; display: block; margin-top: 8px; }
+  pre { background: #272822; color: #f8f8f2; padding: 12px; border-radius: 6px; font-size: 13px; white-space: pre-wrap; }
+  .badge { display: inline-block; background: #3498db; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-right: 6px; }
+</style>
+</head>
+<body>
+<h1>serve-dir WebRTC 加载测试</h1>
+<p><span class="badge">peerId</span>serve-test <span class="badge">signal</span>ws://127.0.0.1:9100/ <span class="badge">base</span>http://127.0.0.1:9091/</p>
+
+<div class="card">
+  <h3>1. 纯文本（hello.txt）</h3>
+  <div id="hello-box" class="err">加载中...</div>
+  <div id="hello-status" class="status">加载中...</div>
+</div>
+
+<div class="card">
+  <h3>2. SVG 图片（sample.svg）</h3>
+  <div id="svg-box" class="err">加载中...</div>
+  <div id="svg-status" class="status">加载中...</div>
+</div>
+
+<div class="card">
+  <h3>3. 子目录图片（img/logo.svg）</h3>
+  <div id="logo-box" class="err">加载中...</div>
+  <div id="logo-status" class="status">加载中...</div>
+</div>
+
+<div class="card">
+  <h3>4. JSON 文件（sample.json）</h3>
+  <pre id="json-box">加载中...</pre>
+  <div id="json-status" class="status">加载中...</div>
+</div>
+
+<div class="card">
+  <h3>5. Markdown（sample.md）</h3>
+  <pre id="md-box">加载中...</pre>
+  <div id="md-status" class="status">加载中...</div>
+</div>
+
+<div class="card">
+  <h3>6. 视频（sample.mp4, 6MB）</h3>
+  <div id="video-box" class="err">加载中...</div>
+  <div id="video-status" class="status">加载中...</div>
+</div>
+
+<script src="../dist/vanilla/peerdrive-media.iife.js"></script>
+<script>
+const PEER = 'serve-test'
+const SIGNAL = { host: '127.0.0.1', port: 9100, secure: false, key: 'peerjs', path: '/' }
+const BASE = 'http://127.0.0.1:9091'
+
+function setStatus(id, msg, ok) {
+  const el = document.getElementById(id)
+  el.textContent = msg
+  el.className = 'status ' + (ok ? 'ok' : 'err')
+}
+
+async function loadText(boxId, statusId, url) {
+  const t0 = performance.now()
+  try {
+    const { blobUrl, mime, size } = await PeerMedia.load({ peer: PEER, signaling: SIGNAL, url })
+    const text = await (await fetch(blobUrl)).text()
+    const box = document.getElementById(boxId)
+    if (box.tagName === 'PRE') box.textContent = text
+    else box.innerHTML = '<pre>' + text.replace(/</g, '&lt;') + '</pre>'
+    box.classList.remove('err')
+    const ms = Math.round(performance.now() - t0)
+    setStatus(statusId, `✅ ${mime} · ${(size/1024).toFixed(1)}KB · ${ms}ms · WebRTC`, true)
+  } catch (e) {
+    setStatus(statusId, `❌ ${e.message}`, false)
+  }
+}
+
+async function loadImage(boxId, statusId, url) {
+  const t0 = performance.now()
+  try {
+    const { blobUrl, mime, size } = await PeerMedia.load({ peer: PEER, signaling: SIGNAL, url })
+    const img = document.createElement('img')
+    img.src = blobUrl
+    img.onload = () => {
+      const box = document.getElementById(boxId)
+      box.innerHTML = ''
+      box.appendChild(img)
+      box.classList.remove('err')
+      const ms = Math.round(performance.now() - t0)
+      setStatus(statusId, `✅ ${mime} · ${(size/1024).toFixed(1)}KB · ${ms}ms · WebRTC`, true)
+    }
+    img.onerror = () => setStatus(statusId, `❌ 图片解码失败`, false)
+  } catch (e) {
+    setStatus(statusId, `❌ ${e.message}`, false)
+  }
+}
+
+async function loadVideo(boxId, statusId, url) {
+  const t0 = performance.now()
+  try {
+    const { blobUrl, mime, size } = await PeerMedia.load({ peer: PEER, signaling: SIGNAL, url })
+    const video = document.createElement('video')
+    video.src = blobUrl
+    video.controls = true
+    video.onloadedmetadata = () => {
+      const box = document.getElementById(boxId)
+      box.innerHTML = ''
+      box.appendChild(video)
+      box.classList.remove('err')
+      const ms = Math.round(performance.now() - t0)
+      setStatus(statusId, `✅ ${mime} · ${(size/1024/1024).toFixed(1)}MB · ${ms}ms · WebRTC`, true)
+    }
+    video.onerror = () => setStatus(statusId, `❌ 视频解码失败`, false)
+  } catch (e) {
+    setStatus(statusId, `❌ ${e.message}`, false)
+  }
+}
+
+// 启动加载（所有请求串行——peerdrive-media 是串行队列）
+loadText('hello-box', 'hello-status', `${BASE}/hello.txt`)
+  .then(() => loadImage('svg-box', 'svg-status', `${BASE}/sample.svg`))
+  .then(() => loadImage('logo-box', 'logo-status', `${BASE}/img/logo.svg`))
+  .then(() => loadText('json-box', 'json-status', `${BASE}/sample.json`))
+  .then(() => loadText('md-box', 'md-status', `${BASE}/sample.md`))
+  .then(() => loadVideo('video-box', 'video-status', `${BASE}/sample.mp4`))
+  .then(() => console.log('[test] all files loaded'))
+
+console.log('[test] starting WebRTC file loads...')
+</script>
+</body>
+</html>
