@@ -17,7 +17,7 @@ CLOUDCONE_HOST="127.26.9.5"          # cloudcone IP（或 SSH 别名）
 CLOUDCONE_USER="root"                 # SSH 用户
 CLOUDCONE_PORT="8080"                # peerserver 监听端口
 CLOUDCONE_SSH_PORT="22"              # SSH 端口
-DOMAIN="peersignal2.moonchan.xyz"     # 新域名
+DOMAIN="peersignal.moonchan.xyz"     # 域名
 KEY="pd-signal-$(openssl rand -hex 12)"  # API key（自动生成）
 BINARY="/tmp/peerserver-linux-amd64"
 REMOTE_DIR="/opt/peerserver"
@@ -140,7 +140,7 @@ setup_cloudflare() {
   cat <<EOF
   请在 Cloudflare 控制台为 ${DOMAIN} 添加 A 记录：
 
-  Name:    peersignal2
+  Name:    peersignal
   Type:    A
   Content: 127.26.9.5
   Proxy:   ✅ Proxied (橙云)
