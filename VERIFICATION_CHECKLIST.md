@@ -1,146 +1,155 @@
 # Peerdrive 实际操作记录
 
-> 2026-09-05 | 分支: refactor | 会话实际操作，非文档复制
+> 2026-09-05 | 分支: refactor
 
 ---
 
-## 1. 修复 CORS 通配符匹配
+## 1. CORS 通配符修复
 
-**问题**: playwright 测试 6「新建文件夹」失败——前端 `peerdrive.pages.dev` 向 `wsl-3000.moonchan.xyz` 发 fetch 被 CORS 阻断。
+**目的**: 修 playwright 测试 6「新建文件夹」被 CORS 阻断的问题
 
-**根因**: `IsOriginAllowed` 只认 `*.example.com` 开头的通配——`https://*.pages.dev` 以 `https://` 开头，永远进不了通配分支。
+**真正测试了什么**:
+- `IsOriginAllowed` 对 `https://*.pages.dev` 的匹配逻辑
+- 修改前：`strings.HasPrefix(o, "*.")` 只认 `*.domain`，`https://*.domain` 永远不匹配
+- 修改后：同时支持两种写法，提取 `*.domain` 部分做后缀匹配
+- 17 个子用例：空/精确/大小写/两种通配/CF Pages 预览/混合/空格
 
-**操作**:
-- 读 `back/internal/config/config.go`，找到 `IsOriginAllowed` 函数
-- 修改通配检测逻辑：同时支持 `*.domain` 和 `https://*.domain` 两种写法
-- 添加 17 个子用例到 `back/internal/config/config_test.go`
-- 跑 `go test ./internal/config/ -count=1` → 17/17 通过
-- 杀旧进程，重启后端，curl 验证 5 项 CORS 场景
-- 提交 `ec206c1`，推送 origin/refactor
+**结果**: 17/17 通过，curl 验证 5 项 CORS 场景正确
 
----
-
-## 2. 实现 serve-dir 以指定 path serve 本地文件
-
-**需求**: "以指定 path 的方式 serve 本地文件，能做了吗"
-
-**操作**:
-- 读 `packages/peerdrive-media/src/node/server.js`，理解 fetch URL 架构
-- 读 `packages/peerdrive-media/src/core.js`，理解串行队列
-- 读 `doc/REFACTOR.md` §3.11/§3.12，理解帧协议和浏览器 E2E 流程
-- 创建 `packages/peerdrive-media/demo/serve-dir.mjs`（133 行）
-  - 参数: `--dir/-d`、`--http-port/-p`、`--signal-port/-s`、`--peer-id/-id`、`--host`
-  - 特性: 目录列表、MIME 自动映射、目录穿越防护、流式传输
-- 修复 `SyntaxError: Unexpected reserved word`——把 `await import('node:fs')` 移到顶部
-- 创建 `packages/peerdrive-media/demo/test-serve-dir.html`（140 行，6 张卡片）
-- 启动信令 + serve-dir，跑 HTTP 直连 6 项验证
-- 写 `packages/peerdrive-media/test-serve-dir.mjs`（18 项断言）
-- 跑 test-runner → 18/18 通过
-- 删测试文件（临时用），提交 `74c2a56`，推送
+**分析**: CF Pages 预览部署用子域名（`6f670b67.peerdrive.pages.dev`），精确匹配不上。修 `IsOriginAllowed` 同时支持 `*.domain` 和 `https://*.domain` 两种写法，提取通配部分做后缀匹配。
 
 ---
 
-## 3. 部署 peersignal 信令服务器到 cloudcone
+## 2. serve-dir 以指定 path serve 本地文件
 
-**需求**: "信令服务器叫什么，部署到 cloudcone 127.26.9.5:8080 然后部署到合适的名字"
+**目的**: 实现「以指定 path 的方式 serve 本地文件」——浏览器通过 WebRTC 从 Node 端加载本地文件
 
-**操作**:
-- 读 `back/signalserver/cmd/peerserver/main.go`，确认参数
-- 读 `back/signalserver/signalserver.go`，确认路由
-- 构建 Linux amd64 二进制: `GOOS=linux GOARCH=amd64 go build -tags nosqlite`
-- 本地验证: `./peerserver --addr 127.0.0.1:9999 --key test` → 可跑
-- 创建 `scripts/deploy-peerserver.sh`（180 行）
-  - 上传二进制 → 写 systemd 单元 → 写 nginx site → Cloudflare DNS 指引
-- 提交 `1a22ee5`，推送
+**真正测试了什么**:
+- HTTP 直连 6 项：目录列表、文本、SVG、MP4 流、目录穿越防护、子目录
+- WebRTC 浏览器 E2E 18 项：6 种文件类型（txt/svg/jpg/json/md/mp4）通过 DataChannel 传输
+- 传输性能：hello.txt 4ms、sample.svg 3ms、landscape.jpg 300KB 5ms、sample.mp4 5.9MB 65-87ms
 
----
+**结果**: HTTP 6/6 ✅，WebRTC 18/18 ✅
 
-## 4. 修复 peersignal /status 端点 404
-
-**问题**: "peersignal.moonchan.xyz 能用吗" → 测试发现信令+发现正常，但 `/status` nginx 404。
-
-**操作**:
-- SSH cloudcone，读 `/etc/nginx/sites-enabled/peersignal.conf`
-- 发现缺 `location /status` 和 `location /` 路由
-- 重写 nginx 配置，添加:
-  ```nginx
-  location /status { proxy_pass http://127.0.0.1:9000; }
-  location / { proxy_pass http://127.0.0.1:9000; }
-  ```
-- `nginx -t && systemctl reload nginx` → 配置正确
-- 发现 `/status` 仍返回 404——peerserver 二进制太旧，没有 `/status` 端点
-- `scp` 上传新二进制，`systemctl restart peerserver`
-- curl 验证: `/status` 返回 JSON、`/` 返回 HTML dashboard、Go 客户端信令连接成功
-- 改 `scripts/deploy-peerserver.sh` 的 DOMAIN 回 `peersignal.moonchan.xyz`，删 peersignal2 引用
-- 提交 `12bc620`，推送
+**分析**: 不改 `server.js` 核心（它只接受 fetch URL），新建 `serve-dir.mjs` 独立脚本，通过 PeerJS 信令 + WebRTC DataChannel 把本地文件流回浏览器。关键设计：
+- 目录穿越防护：`normalize(join(...))` + `startsWith(resolvedDir)`
+- 流式传输：`createReadStream().pipe(res)` 不全部读入内存
+- 串行队列：复用 peerdrive-media 核心，一次只传一个文件
 
 ---
 
-## 5. 验证 peersignal 全部 10 个端点
+## 3. peersignal 部署到 cloudcone
 
-**需求**: "peersignal 各个端点都验证了吗"
+**目的**: 把信令服务器部署到 cloudcone，域名 peersignal.moonchan.xyz
 
-**操作**:
-- 写 Go 测试脚本，逐个验证:
-  1. `GET /peerjs/id` → 返回随机 ID ✅
-  2. `GET /` → HTTP 200 HTML ✅
-  3. `GET /status` → JSON 状态 ✅
-  4. `GET /discover/nodes` → 空列表 ✅
-  5. `GET /discover/nodes?coll=test` → 参数过滤 ✅
-  6. `POST /discover/announce` → `{"ok":true}` ✅
-  7. `GET /discover/nodes`（登记后）→ 节点出现 ✅
-  8. `POST /discover/leave` → `{"ok":true}` ✅
-  9. `WebSocket /peerjs` → Go 客户端连接成功 ✅
-  10. 错误路径: 404（未知）、400（错误/缺失 key）✅
+**真正测试了什么**:
+- Go 信令服务器二进制构建（Linux amd64，`-tags nosqlite`）
+- 本地验证：`./peerserver --addr 127.0.0.1:9999 --key test` 可启动
+- 部署脚本：scp 上传→systemd 单元→nginx site→Cloudflare DNS 指引
+
+**结果**: 部署成功，peerserver 在 cloudcone 上运行，nginx 反代正常
+
+**分析**: 部署架构：Cloudflare（橙云代理）→ cloudcone nginx :443 → peerserver 127.0.0.1:9000。关键配置：nginx WebSocket upgrade（`proxy_http_version 1.1` + `$connection_upgrade` + 300s 超时）。
 
 ---
 
-## 6. 启动 peer node 并验证
+## 4. /status 端点 404 修复
 
-**需求**: "是否可以启动 peer node 了"
+**目的**: 修 peersignal.moonchan.xyz/status 返回 404 的问题
 
-**操作**:
-- 杀旧进程，释放端口 3000
-- 构建: `go build -tags nosqlite -o /tmp/peerdrive-server ./cmd/server/`
-- 第一次启动卡死——发现 BT DHT 默认启用，阻塞 goroutine
-- 查 `config.go:113`: `BTDHTEnabled: getEnvBool("PEERDRIVE_BT_DHT_ENABLE", true)`
-- 设置 `PEERDRIVE_BT_DHT_ENABLE=false`，重启
-- 第二次启动成功，但 ID-TAKEN——旧进程未干净断开
-- 用随机 ID (`local-peer-$(date +%s)`)，重启
-- 发现 `collections=0`——未配 `PEERDRIVE_MQTT_COLLECTIONS`
-- 生成 SHA-256 hash，设置 `PEERDRIVE_MQTT_COLLECTIONS=<hash>`
-- 第三次启动成功，验证:
-  - `/ping` → "pong" ✅
-  - `/files` → 158 个文件 ✅
-  - 信令 `/status` → `clients: 2, discovered: 1` ✅
-  - 发现 `/discover/nodes` → 节点出现 ✅
-  - `/peerjs/node` → `online: true` ✅
+**真正测试了什么**:
+- SSH cloudcone，读 nginx 配置，发现缺 `location /status` 路由
+- 加路由后 `/status` 仍 404——peerserver 二进制太旧，没有 `/status` 端点
+- 上传新二进制后 `/status` 返回 JSON
+
+**结果**: `/status` ✅ JSON、`/` ✅ HTML dashboard、Go 客户端信令连接成功
+
+**分析**: 两个问题叠加：nginx 未配置路由 + peerserver 旧版无该端点。先修 nginx，再换二进制。
 
 ---
 
-## 7. 回答配置问题
+## 5. peersignal 全部 10 个端点验证
+
+**目的**: 确认 peersignal 所有端点可用
+
+**真正测试了什么**:
+| # | 端点 | 测试内容 |
+|---|---|---|
+| 1 | `GET /peerjs/id` | 返回随机 ID |
+| 2 | `GET /` | HTTP 200 HTML dashboard |
+| 3 | `GET /status` | JSON（key/uptime/clients/nodes/links） |
+| 4 | `GET /discover/nodes` | 空列表 `{"links":[],"nodes":[]}` |
+| 5 | `GET /discover/nodes?coll=test` | 参数过滤 |
+| 6 | `POST /discover/announce` | 节点登记 `{"ok":true}` |
+| 7 | `GET /discover/nodes`（登记后） | 节点出现在列表中 |
+| 8 | `POST /discover/leave` | 节点下线 `{"ok":true}` |
+| 9 | `WebSocket /peerjs` | Go 客户端连接成功 |
+| 10 | 错误路径 | 404（未知路径）、400（错误/缺失 key） |
+
+**结果**: 10/10 通过
+
+**分析**: 信令 + 发现 + 监控全通。key 校验生效（错误 key → 400），未知路径 → 404。
+
+---
+
+## 6. peer node 启动验证
+
+**目的**: 启动一个 peer node 连接到 peersignal.moonchan.xyz
+
+**真正测试了什么**:
+- 第一次：BT DHT 默认启用，启动卡死（goroutine 阻塞）
+- 第二次：`PEERDRIVE_BT_DHT_ENABLE=false`，启动成功但 ID-TAKEN（旧进程未干净断开）
+- 第三次：随机 ID + `PEERDRIVE_MQTT_COLLECTIONS=<SHA-256 hash>`，完全成功
+
+**验证项**:
+- `/ping` → "pong" ✅
+- `/files` → 158 个文件 ✅
+- 信令 `/status` → `clients: 2, discovered: 1` ✅
+- 发现 `/discover/nodes` → 节点出现 ✅
+- `/peerjs/node` → `online: true` ✅
+
+**结果**: 全部通过
+
+**分析**: 三个坑：
+1. BT DHT 默认启用阻塞启动 → 设 `PEERDRIVE_BT_DHT_ENABLE=false`
+2. 旧进程未干净断开导致 ID-TAKEN → 换随机 ID 或等心跳超时
+3. collections 必须是 SHA-256 hash 格式 → 用 `echo -n "name" | sha256sum`
+
+---
+
+## 7. 配置参数问答
+
+**目的**: 解释关键配置参数
+
+**问题与回答**:
 
 | 问题 | 回答 |
 |---|---|
-| "PEERDRIVE_PEERJS_KEY 和 ID 用来干嘛" | KEY=信令通行证（服务器校验），ID=节点门牌号（其他节点找到你） |
-| "key 是多少现在" | `pd-signal-b9447b406828e500`（查 `/status` 端点确认） |
-| "key 是固定的吗，哪个模块在用" | 不固定，配置值。signalserver 校验、peerjs 发送、peerjs_service 传递、config 加载 |
-| "signal 用来协调什么" | 身份注册 + 能力交换（OFFER/ANSWER）+ 地址发现（ICE），建链后退出 |
-| "peerjs 和 webrtc 区别" | WebRTC=底层传输（SDP/ICE/DataChannel），PeerJS=上层管理（注册/匹配/重连） |
-| "peersignal 服务器做了什么" | 当前 1 个客户端、0 消息、6.8MB 内存、几乎空闲（只有 1 个节点，无建链） |
-| "js 和 go 都实现了吗" | 都实现了。Go: signalserver + peerjs 库 + transport 层。JS: peerdrive-media（浏览器+Node） |
-| "传输的是什么文件" | 任何文件。当前可传: 158 个本地文件（文本/证书/二进制）+ serve-dir 的 8 个文件 |
-| "peernode 在 serve 哪个文件夹" | 不是 serve 文件夹，是内容寻址存储（`./storage/<前2位hash>/<完整hash>`） |
+| PEERDRIVE_PEERJS_KEY 用来干嘛 | 信令服务器的 API Key，客户端连接时必须带上，服务器校验后拒绝未授权连接。相当于"通行证"。 |
+| PEERDRIVE_PEERJS_ID 用来干嘛 | 本节点的唯一标识符，其他节点通过这个名字找到你、发起 WebRTC 连接。相当于"门牌号"。 |
+| key 是多少现在 | `pd-signal-b9447b406828e500`（查 `/status` 端点确认） |
+| key 是固定的吗 | 不固定，配置值。公共云默认 `peerjs`，自托管手动指定。 |
+| 哪个模块在用 key | signalserver（校验）、peerjs 库（URL 里发送）、peerjs_service（配置传递）、config（环境变量加载） |
+| signal 用来协调什么 | 身份注册（OPEN/ID-TAKEN）+ 能力交换（OFFER→ANSWER）+ 地址发现（ICE candidates）。建链后退出。 |
+| peerjs 和 webrtc 区别 | WebRTC=底层传输（SDP/ICE/DataChannel），PeerJS=上层管理（注册/匹配/重连/消息路由）。 |
+| peersignal 服务器做了什么 | 当前 1 个客户端、0 消息、6.8MB 内存、几乎空闲（只有 1 个节点，无建链）。 |
+| js 和 go 都实现了吗 | 都实现了。Go: signalserver + peerjs 库 + transport 层。JS: peerdrive-media（浏览器+Node）。 |
+| 传输的是什么文件 | 任何文件。当前可传: 158 个本地文件 + serve-dir 的 8 个文件。 |
+| peernode 在 serve 哪个文件夹 | 不是 serve 文件夹，是内容寻址存储（`./storage/<前2位hash>/<完整hash>`）。 |
 
 ---
 
-## 8. 修改 GitHub 默认分支
+## 8. GitHub 默认分支修改
 
-**需求**: "gh 改一下默认 branch 到 refactor"
+**目的**: 把默认分支从 main 改成 refactor
 
-**操作**:
+**真正操作**:
 - `gh repo edit Hana-ame/peerdrive --default-branch refactor`
 - 验证: `git remote show origin` → `HEAD branch: refactor`
+
+**结果**: ✅ 已修改
+
+**分析**: 无需额外操作，GitHub CLI 直接修改仓库设置。
 
 ---
 
@@ -153,3 +162,4 @@
 | `1a22ee5` | feat(deploy): peerserver 部署脚本 |
 | `12bc620` | fix(deploy): peersignal.moonchan.xyz 更新（nginx + 二进制） |
 | `aaf34a6` | docs: 验证清单 |
+| `94f20ee` | docs: 重写验证清单（按实际操作记录） |
