@@ -206,3 +206,33 @@ test('E2E: 连接串行复用（同一连接两请求）', async () => {
   assert.equal(r2.bytes.length, SMALL.length)
   peer.destroy()
 })
+
+test('E2E: 并发请求（两客户端同时加载，串行排队各得完整内容）', async () => {
+  // 发现背景：串行队列是协议约束（Node 端同连接逐条处理），
+  // 并发请求必须排队等待，各自收到完整响应、不串帧。
+  const { peer: p1, conn: c1 } = await connectClient()
+  const { peer: p2, conn: c2 } = await connectClient()
+
+  // 两个请求几乎同时发出（并发）
+  const [r1, r2] = await Promise.all([
+    requestOnce(c1, `http://127.0.0.1:${httpPort}/img.png`),
+    requestOnce(c2, `http://127.0.0.1:${httpPort}/small.bin`),
+  ])
+
+  // 各自拿到正确内容，无串帧
+  assert.equal(r1.error, null)
+  assert.ok(PNG_1x1.equals(r1.bytes), '客户端1 拿到 PNG')
+  assert.equal(r2.error, null)
+  assert.equal(r2.bytes.length, SMALL.length, '客户端2 拿到 small.bin')
+  assert.equal(hashOf(r2.bytes), hashOf(SMALL), '分块拼接后 hash 一致')
+
+  p1.destroy()
+  p2.destroy()
+})
+
+test('E2E: 上游 500 → err 帧', async () => {
+  const { peer, conn } = await connectClient()
+  const r = await requestOnce(conn, `http://127.0.0.1:${httpPort}/unknown`)
+  assert.match(r.error, /500/)
+  peer.destroy()
+})

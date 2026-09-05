@@ -1,5 +1,9 @@
 export const baseURL = 'https://peerdrive.pages.dev';
 
+// 测试期望与线上 peerdrive.pages.dev 当前 UI 对齐（2026-09-05 更新）。
+// 旧版四标签栏（所有文件/已注册/本地电脑/合集）已简化为两标签（本地电脑/合集），
+// 测试 1-2 同步更新；测试 4 原"已注册 tab 目录分组"因 tab 已删而重写为验证
+// 合集 tab 交互。
 export const tests = [
   {
     name: '1. 三列布局加载',
@@ -7,11 +11,10 @@ export const tests = [
       await page.goto(baseURL + '/create', { waitUntil: 'networkidle' });
       await page.waitForTimeout(1000);
 
-      // 左侧面板——检查四个来源 tab
+      // 左侧面板——检查两个来源 tab（本地电脑 + 合集，2026-09-05 UI 简化）
       const bodyText = await page.textContent('body');
-      const hasAllTabs = bodyText.includes('所有文件') && bodyText.includes('已注册') &&
-                         bodyText.includes('本地电脑') && bodyText.includes('合集');
-      ok('左侧面板-四标签栏', hasAllTabs);
+      const hasAllTabs = bodyText.includes('本地电脑') && bodyText.includes('合集');
+      ok('左侧面板-两标签栏', hasAllTabs);
 
       // 右侧编辑器存在 (合集名称输入框)
       const nameInput = await page.$('input[placeholder="合集名称"]');
@@ -22,14 +25,12 @@ export const tests = [
     }
   },
   {
-    name: '2. 四个来源Tab',
+    name: '2. 两个来源Tab',
     fn: async ({ page, ok }) => {
       await page.goto(baseURL + '/create', { waitUntil: 'networkidle' });
       await page.waitForTimeout(800);
 
       const bodyText = await page.textContent('body');
-      ok('所有文件 tab', bodyText.includes('所有文件'));
-      ok('已注册 tab', bodyText.includes('已注册'));
       ok('本地电脑 tab', bodyText.includes('本地电脑'));
       ok('合集 tab', bodyText.includes('合集'));
     }
@@ -56,20 +57,22 @@ export const tests = [
     }
   },
   {
-    name: '4. 已注册 tab 目录分组',
+    name: '4. 合集 tab 目录视图',
     fn: async ({ page, ok }) => {
       await page.goto(baseURL + '/create', { waitUntil: 'networkidle' });
       await page.waitForTimeout(800);
 
-      // 点击"已注册" tab
-      const regBtn = await page.locator('button', { hasText: '已注册' });
-      await regBtn.click();
+      // 点击"合集" tab
+      const collBtn = await page.locator('button', { hasText: '合集' });
+      await collBtn.click();
       await page.waitForTimeout(800);
 
-      // 应显示文件夹或"无匹配文件"
+      // 应显示合集面板（有内容或空状态提示）
       const bodyText = await page.textContent('body');
-      const hasDirOrEmpty = bodyText.includes('文件夹') || bodyText.includes('无匹配文件');
-      ok('已注册目录视图', hasDirOrEmpty);
+      const hasCollPanel = bodyText.includes('合集') &&
+                           (bodyText.includes('暂无合集') || bodyText.includes('创建第一个') ||
+                            bodyText.includes('文件数'));
+      ok('合集目录视图', hasCollPanel);
     }
   },
   {
@@ -120,7 +123,8 @@ export const tests = [
       }
 
       if (!(await newFolderBtn.count())) {
-        ok('新建文件夹按钮出现', false, '无法添加条目，跳过新建文件夹测试');
+        // CORS 阻后端时 FileTree 为空、"+" 点击无法加载条目——属环境问题非测试 bug。
+        ok('新建文件夹按钮出现', false, '后端 CORS 或条目加载失败，跳过');
         return;
       }
 

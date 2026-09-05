@@ -475,3 +475,59 @@ func TestFrameVerbs_UploadResumeOverWS(t *testing.T) {
 	}
 	t.Fatal("续传未完成")
 }
+
+// TestFrameVerbs_Delete Verb 删除文件索引条目：create → list(有) → delete → list(空)。
+//
+// 发现背景：delete verb 此前无集成测试覆盖（仅 ws_verbs_test.go 注释提及
+// create/list/info/download/sync 五类，漏了 delete）。补端到端验证索引清理。
+func TestFrameVerbs_Delete(t *testing.T) {
+	storage := t.TempDir()
+	svc := newService(t, randID("it-vd"), storage, false, nil)
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		svc.BindLocal(transport.NewWSSession("local", conn))
+	}))
+	defer srv.Close()
+	c := newWSVerbClient(t, srv.URL)
+
+	// 1. create：登记文件
+	src := filepath.Join(storage, "to-delete.bin")
+	content := []byte("frame-verbs-delete-test")
+	requireWrite(t, src, content)
+	created := c.call(map[string]any{"type": "create", "path": src, "reqId": "d1"})
+	if created["type"] != "created" {
+		t.Fatalf("create 失败: %v", created)
+	}
+	hash := created["hash"].(string)
+
+	// 2. list：确认在列
+	list := c.call(map[string]any{"type": "list", "reqId": "d2"})
+	files := list["files"].([]any)
+	if len(files) != 1 {
+		t.Fatalf("create 后 list 应有 1 条: %v", files)
+	}
+
+	// 3. delete：删除索引条目
+	del := c.call(map[string]any{"type": "delete", "hash": hash, "reqId": "d3"})
+	if del["type"] != "deleted" {
+		t.Fatalf("delete 失败: %v", del)
+	}
+
+	// 4. list：确认已清除
+	list2 := c.call(map[string]any{"type": "list", "reqId": "d4"})
+	files2 := list2["files"].([]any)
+	if len(files2) != 0 {
+		t.Fatalf("delete 后 list 应为空，实际 %d 条: %v", len(files2), files2)
+	}
+
+	// 5. info：已删文件 info 应返回 err
+	info := c.call(map[string]any{"type": "info", "hash": hash, "reqId": "d5"})
+	if info["type"] != "err" {
+		t.Fatalf("已删文件 info 应返回 err: %v", info)
+	}
+}

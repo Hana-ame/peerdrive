@@ -27,6 +27,10 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 			srv.HandleAnnounce(w, r)
 		case strings.HasSuffix(r.URL.Path, "/nodes"):
 			srv.HandleNodes(w, r)
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			srv.HandleStatus(w, r)
+		case r.URL.Path == "/":
+			srv.HandleDashboard(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -447,4 +451,156 @@ func TestSweepDiscovery_CleansExpiredNodes(t *testing.T) {
 	assert.False(t, hasLinks, "过期节点应从 peerLinks 清理")
 	assert.False(t, hasStats, "过期节点应从 peerStats 清理")
 	assert.False(t, hasColls, "过期节点应从 peerColls 清理")
+}
+
+// TestHandleStatus GET /status 返回服务器状态快照（含节点/图/计数）。
+//
+// 发现背景：2026-09-05 新增 dashboard/status/leave API 时未补测试；
+// 本测试验证响应结构、节点过滤（仅活跃）、去重边、msgCount。
+func TestHandleStatus(t *testing.T) {
+	_, hs := testServer(t)
+
+	// 注册两个节点 + 一条链接
+	announce := func(id string, peers []string) {
+		body, _ := json.Marshal(map[string]any{
+			"peerId": id, "collections": []string{"media"}, "nodeType": "go-persistent",
+			"peers": peers, "loadInfo": map[string]any{"connections": 1},
+		})
+		resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+		require.NoError(t, err)
+		resp.Body.Close()
+	}
+	announce("node-a", []string{"node-b"})
+	announce("node-b", []string{"node-a"})
+
+	resp, err := http.Get(hs.URL + "/status")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+	var st map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&st))
+
+	// 结构完整性
+	assert.Contains(t, st, "key")
+	assert.Contains(t, st, "uptimeSec")
+	assert.Contains(t, st, "uptimeStr")
+	assert.Contains(t, st, "clients")
+	assert.Contains(t, st, "queues")
+	assert.Contains(t, st, "discovered")
+	assert.Contains(t, st, "nodes")
+	assert.Contains(t, st, "links")
+	assert.Contains(t, st, "msgCount")
+
+	// 节点数：2 个活跃节点
+	assert.Equal(t, float64(2), st["discovered"])
+
+	// 边：去重后 1 条（a-b 或 b-a）
+	links, _ := st["links"].([]any)
+	assert.Len(t, links, 1, "双向链接应去重为 1 条")
+
+	// 节点元数据含 nodeType
+	nodes, _ := st["nodes"].([]any)
+	assert.Len(t, nodes, 2)
+	n0, _ := nodes[0].(map[string]any)
+	assert.Equal(t, "go-persistent", n0["nodeType"])
+	assert.Contains(t, n0, "collections")
+	assert.Contains(t, n0, "loadInfo")
+}
+
+// TestHandleDashboard GET / 返回内嵌 dashboard.html；非 / 路径 404。
+func TestHandleDashboard(t *testing.T) {
+	_, hs := testServer(t)
+
+	// 根路径返回 HTML
+	resp, err := http.Get(hs.URL + "/")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, resp.Header.Get("Content-Type"), "text/html")
+	assert.Contains(t, resp.Header.Get("Cache-Control"), "no-cache")
+
+	// 非根路径 404（防止 / 前缀误匹配）
+	resp2, err := http.Get(hs.URL + "/nonexistent")
+	require.NoError(t, err)
+	resp2.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp2.StatusCode)
+}
+
+// TestFormatDuration 秒数→人可读时长（dashboard uptime 显示用）。
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		seconds float64
+		want    string
+	}{
+		{0, "0s"},
+		{30, "30s"},
+		{59.9, "60s"},
+		{60, "1.0m"},
+		{120, "2.0m"},
+		{3599, "60.0m"},
+		{3600, "1.0h"},
+		{7200, "2.0h"},
+		{86399, "24.0h"},
+		{86400, "1.0d"},
+		{172800, "2.0d"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, formatDuration(tt.seconds), "formatDuration(%v)", tt.seconds)
+	}
+}
+
+// TestHandleDeadDst 发送失败的目标：从 clients/disc/peerLinks/peerStats/peerColls 摘除、
+// 广播 LEAVE 给其他存活节点、通知消息发起方。
+//
+// 发现背景：handleDeadDst 是 handleForward 错误路径的关键清理逻辑，
+// 此前无直接测试（仅通过 TestSignal_LeaveBroadcast 间接覆盖 LEAVE 广播）。
+func TestHandleDeadDst(t *testing.T) {
+	srv, hs := testServer(t)
+
+	// 注册 A 和 B（token 必须非空，HandleWS 强制校验）
+	connA := dialWS(t, hs, "dead-node", "tok-a")
+	defer connA.Close()
+	connB := dialWS(t, hs, "survivor", "tok-b")
+	defer connB.Close()
+	readMsg(t, connA) // OPEN
+	readMsg(t, connB) // OPEN
+
+	// A announce 自己 + 指向 B 的链接
+	body, _ := json.Marshal(map[string]any{
+		"peerId": "dead-node", "collections": []string{"media"}, "nodeType": "go-persistent",
+		"peers": []string{"survivor"},
+	})
+	resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	// 让 A 的连接断开（模拟死目标）
+	connA.Close()
+
+	// B 向 A 发消息 → 转发失败 → handleDeadDst 清理 A 的残留
+	connB.WriteJSON(Message{Type: "ICE", Dst: "dead-node"})
+	time.Sleep(200 * time.Millisecond)
+
+	// B 应收到 LEAVE（从 dead-node 方向，通知其他存活节点）
+	connB.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var m Message
+	require.NoError(t, connB.ReadJSON(&m))
+	assert.Equal(t, "LEAVE", m.Type)
+	assert.Equal(t, "dead-node", m.Src)
+
+	// A 的残留应从 disc/peerLinks/peerStats/peerColls 清理
+	srv.mu.Lock()
+	_, hasDisc := srv.disc["media"]["dead-node"]
+	_, hasLinks := srv.peerLinks["dead-node"]
+	_, hasStats := srv.peerStats["dead-node"]
+	_, hasColls := srv.peerColls["dead-node"]
+	_, hasClient := srv.clients["dead-node"]
+	srv.mu.Unlock()
+	assert.False(t, hasDisc, "dead-node 应从 disc 清理")
+	assert.False(t, hasLinks, "dead-node 应从 peerLinks 清理")
+	assert.False(t, hasStats, "dead-node 应从 peerStats 清理")
+	assert.False(t, hasColls, "dead-node 应从 peerColls 清理")
+	assert.False(t, hasClient, "dead-node 应从 clients 清理")
 }

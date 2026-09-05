@@ -5,7 +5,7 @@ export const tests = [
     name: 'Settings page mobile layout',
     fn: async ({ page, ok }) => {
       await page.setViewportSize({ width: 375, height: 667 });
-      await page.goto('/settings', { waitUntil: 'networkidle' });
+      await page.goto(baseURL + '/settings', { waitUntil: 'networkidle' });
       await page.waitForTimeout(1000);
       await page.screenshot({ path: '/tmp/pw-settings-mobile.png', fullPage: false });
       ok('screenshot taken', true);
@@ -15,7 +15,7 @@ export const tests = [
     name: 'LLM section on mobile',
     fn: async ({ page, ok }) => {
       await page.setViewportSize({ width: 375, height: 667 });
-      await page.goto('/settings', { waitUntil: 'networkidle' });
+      await page.goto(baseURL + '/settings', { waitUntil: 'networkidle' });
       // Scroll to LLM section
       await page.evaluate(() => {
         document.getElementById('llm')?.scrollIntoView({ behavior: 'instant' });
