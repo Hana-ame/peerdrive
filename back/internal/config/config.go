@@ -110,7 +110,7 @@ func Load() *Config {
 		RegServerURL:       getEnv("PEERDRIVE_REG_SERVER_URL", ""),
 		MaxUploadBytes:     getEnvInt64("PEERDRIVE_MAX_UPLOAD_BYTES", 100*1024*1024),     // 100MB default
 		MaxUploadBytesAnon: getEnvInt64("PEERDRIVE_MAX_UPLOAD_ANON_BYTES", 10*1024*1024), // 10MB for anonymous
-		BTDHTEnabled:       getEnvBool("PEERDRIVE_BT_DHT_ENABLE", true),
+		BTDHTEnabled:       getEnvBool("PEERDRIVE_BT_DHT_ENABLE", false), // 默认禁用：DHT 初始化阻塞启动，按需手动启用
 
 		BTDHTListenAddr:   getEnv("PEERDRIVE_BT_DHT_LISTEN", ":6881"),
 		IPFSGatewayEnable: getEnvBool("PEERDRIVE_IPFS_GATEWAY_ENABLE", true),
