@@ -12,7 +12,7 @@
 
 - **信令服务器实现方式（2026-09 决策）**：信令可以用**多种方式实现**，只要兼容
   PeerJS 协议即可——公共 PeerJS 云、wintools 自托管 Go 信令、peerdrive
-  `back/signalserver`（`github.com/Hana-ame/go-peerserver`）、Node.js `peerjs-server`
+  `back/signalserver`（`github.com/Hana-ame/go-peersignal`）、Node.js `peerjs-server`
   等。当前线上优先使用 wintools 维护的 Go 自托管信令，peerdrive 通过
   `PEERDRIVE_PEERJS_HOST/PORT/KEY` 和 `PEERDRIVE_DISCOVER_URL` 连接；
   如后续需要在 peerdrive 内嵌信令，`back/signalserver` 是现成的 Go 实现。
@@ -23,7 +23,7 @@
   是业务用法（文件服务 + 节点互联，`internal/transport/peerjs_service.go`）；发现：
   `service/mqtt_discovery.go`（公共 broker）或
   `service/http_discovery.go` + `back/signalserver/`（独立模块
-  `github.com/Hana-ame/go-peerserver`，tag=v0.1.0 同步，自托管信令 `cmd/peerserver` 独立二进制，
+  `github.com/Hana-ame/go-peersignal`，tag=v0.1.0 同步，自托管信令 `cmd/peersignal` 独立二进制，
   `PEERDRIVE_DISCOVER_URL` 设置后优先于 MQTT；当前线上/本地优先连 wintools 的信令）
 - **帧协议 verb**（WS/WebRTC 同一套）：`req/meta/data/done/err`（文件拉取）+ `create/upload/list/info/delete/sync`
   （文件索引：SQLite `file_index` 表持久化 sha256→绝对路径 + seq 游标增量同步）+ `fwd-open/challenge/auth/ok/err/data/close`
@@ -66,7 +66,7 @@ cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PEERDRIVE_PEERJS_ENABLE/ID/PEERS` | true/-/- | PeerJS 信令；PEERS 逗号分隔对端自动互联 |
-| `PEERDRIVE_PEERJS_HOST/PORT/KEY` | 0.peerjs.com/443/peerjs | 可指向自托管 peerserver |
+| `PEERDRIVE_PEERJS_HOST/PORT/KEY` | 0.peerjs.com/443/peerjs | 可指向自托管 peersignal |
 | `PEERDRIVE_DISCOVER_URL` | - | 自托管发现 API（优先于 MQTT） |
 | `PEERDRIVE_MQTT_ENABLE/BROKER/COLLECTIONS` | false/broker.emqx.io/- | MQTT 分片房间发现 |
 
@@ -76,7 +76,7 @@ cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 
 > 信令实现方式不限，部署时也可以选择 peerdrive `back/signalserver`
 > 或任何 PeerJS 兼容信令。
 
-- 服务：`peerserver`（systemd）监听 `127.0.0.1:9000`，nginx 反代
+- 服务：`peersignal`（systemd）监听 `127.0.0.1:9000`，nginx 反代
 - 域名：`wss://peersignal.moonchan.xyz/peerjs`（WS 信令）+ `https://peersignal.moonchan.xyz/discover/*`（发现 API）
 - key：`pd-signal-b9447b406828e500`
 - **DNS 决策（橙云，已用）**：peersignal.moonchan.xyz → 117.55.237.217 **proxied=true（橙云）**。
@@ -88,6 +88,6 @@ cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 
   0.peerjs.com 等公共服务则必须走代理。两者按目标域名区分。
 - 线上测试：`PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestLive -v`（无代理跑）
 - 节点配置：`PEERDRIVE_PEERJS_HOST=peersignal.moonchan.xyz PEERDRIVE_PEERJS_KEY=<key> PEERDRIVE_DISCOVER_URL=https://peersignal.moonchan.xyz`
-- 部署更新：当前从 wintools 仓库构建并部署 peerserver；若改用 peerdrive/back/signalserver，
+- 部署更新：当前从 wintools 仓库构建并部署 peersignal；若改用 peerdrive/back/signalserver，
   请同步更新本段并确保 `PEERDRIVE_DISCOVER_URL` 指向对应发现 API
 - `PEERDRIVE_P2P_ENABLE` 已删除（2026-08-16 批2，libp2p 栈移除）

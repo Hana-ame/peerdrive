@@ -1,4 +1,4 @@
-module github.com/Hana-ame/go-peerserver
+module github.com/Hana-ame/go-peersignal
 
 go 1.26.2
 

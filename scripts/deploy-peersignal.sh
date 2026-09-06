@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# deploy-peerserver.sh — 一键部署 peerserver 到 cloudcone + nginx + cloudflare
+# deploy-peersignal.sh — 一键部署 peersignal 到 cloudcone + nginx + cloudflare
 #
 # 用法：
-#   本地执行：bash deploy-peerserver.sh
-#   或在 cloudcone 上执行：bash deploy-peerserver.sh --remote
+#   本地执行：bash deploy-peersignal.sh
+#   或在 cloudcone 上执行：bash deploy-peersignal.sh --remote
 #
 # 前置：
 #   1. cloudcone 127.26.9.5 已可 SSH（root 或 sudo）
@@ -15,13 +15,13 @@ set -euo pipefail
 # ====== 配置 ======
 CLOUDCONE_HOST="127.26.9.5"          # cloudcone IP（或 SSH 别名）
 CLOUDCONE_USER="root"                 # SSH 用户
-CLOUDCONE_PORT="8080"                # peerserver 监听端口
+CLOUDCONE_PORT="9000"                # peersignal 监听端口
 CLOUDCONE_SSH_PORT="22"              # SSH 端口
 DOMAIN="peersignal.moonchan.xyz"     # 域名
 KEY="pd-signal-$(openssl rand -hex 12)"  # API key（自动生成）
-BINARY="/tmp/peerserver-linux-amd64"
-REMOTE_DIR="/opt/peerserver"
-SYSTEMD_SERVICE="peerserver"
+BINARY="/tmp/peersignal-linux-amd64"
+REMOTE_DIR="/opt/peersignal"
+SYSTEMD_SERVICE="peersignal"
 
 # ====== 检查前置 ======
 [ -f "$BINARY" ] || { echo "❌ 二进制不存在: $BINARY"; exit 1; }
@@ -38,7 +38,7 @@ fi
 deploy_files() {
   echo "── Step 1: 上传文件 ──"
   ssh "${CLOUDCONE_USER}@${CLOUDCONE_HOST}" -p "${CLOUDCONE_SSH_PORT}" "mkdir -p ${REMOTE_DIR}"
-  scp -P "${CLOUDCONE_SSH_PORT}" "$BINARY" "${CLOUDCONE_USER}@${CLOUDCONE_HOST}:${REMOTE_DIR}/peerserver"
+  scp -P "${CLOUDCONE_SSH_PORT}" "$BINARY" "${CLOUDCONE_USER}@${CLOUDCONE_HOST}:${REMOTE_DIR}/peersignal"
   echo "✅ 二进制已上传"
 }
 
@@ -46,16 +46,16 @@ deploy_files() {
 deploy_systemd() {
   echo "── Step 2: 安装 systemd 服务 ──"
   ssh "${CLOUDCONE_USER}@${CLOUDCONE_HOST}" -p "${CLOUDCONE_SSH_PORT}" bash -s <<'SYSTEMD_EOF'
-cat > /etc/systemd/system/peerserver.service << 'UNIT'
+cat > /etc/systemd/system/peersignal.service << 'UNIT'
 [Unit]
-Description=Peerdrive Peerserver (PeerJS Signaling + Discovery)
+Description=Peerdrive Peersignal (PeerJS Signaling + Discovery)
 After=network.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
-ExecStart=/opt/peerserver/peerserver --addr 127.0.0.1:8080 --key pd-signal-KEYPLACEHOLDER
+ExecStart=/opt/peersignal/peersignal --addr 127.0.0.1:9000 --key pd-signal-KEYPLACEHOLDER
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
@@ -68,14 +68,14 @@ WantedBy=multi-user.target
 UNIT
 
 # 替换 key
-KEY=$(grep "KEY=" /tmp/deploy-peerserver.sh | sed 's/.*="//;s/".*//')
-sed -i "s/pd-signal-KEYPLACEHOLDER/${KEY}/" /etc/systemd/system/peerserver.service
+KEY=$(grep "KEY=" /tmp/deploy-peersignal.sh | sed 's/.*="//;s/".*//')
+sed -i "s/pd-signal-KEYPLACEHOLDER/${KEY}/" /etc/systemd/system/peersignal.service
 
 systemctl daemon-reload
-systemctl enable peerserver
-systemctl start peerserver
+systemctl enable peersignal
+systemctl start peersignal
 sleep 2
-systemctl status peerserver --no-pager -l | head -10
+systemctl status peersignal --no-pager -l | head -10
 echo "✅ systemd 服务已启动"
 SYSTEMD_EOF
 }
@@ -91,7 +91,7 @@ server {
 
     # WebSocket 信令
     location /peerjs {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:9000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -104,7 +104,7 @@ server {
 
     # 发现 API
     location /discover/ {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:9000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -112,19 +112,19 @@ server {
 
     # 状态 + dashboard
     location /status {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:9000;
         proxy_set_header Host $host;
     }
 
     location / {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:9000;
         proxy_set_header Host $host;
     }
 }
 CONF
 
 # 替换域名
-DOMAIN=$(grep "DOMAIN=" /tmp/deploy-peerserver.sh | sed 's/.*="//;s/".*//')
+DOMAIN=$(grep "DOMAIN=" /tmp/deploy-peersignal.sh | sed 's/.*="//;s/".*//')
 sed -i "s/PEERSIGNAL_DOMAIN_PLACEHOLDER/${DOMAIN}/" /etc/nginx/sites-available/peersignal
 
 ln -sf /etc/nginx/sites-available/peersignal /etc/nginx/sites-enabled/peersignal

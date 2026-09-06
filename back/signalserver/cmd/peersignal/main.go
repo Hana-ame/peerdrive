@@ -1,8 +1,8 @@
-// Peerserver：自托管 PeerJS 信令服务器 + 内置房间发现。
+// Peersignal：自托管 PeerJS 信令服务器 + 内置房间发现。
 // 替代公共云信令（0.peerjs.com）与公共 MQTT broker——节点端只需把
 // PEERDRIVE_PEERJS_HOST/PORT 指向本服务器，发现走内置 HTTP API。
 //
-// 用法：peerserver [-addr :9000] [-key peerjs] [-tokens tok1,tok2]
+// 用法：peersignal [-addr :9000] [-key peerjs] [-tokens tok1,tok2]
 //
 //	-tokens 可选：信令 token 白名单（逗号分隔）。设置后 WS 连接的 token
 //	必须在名单内，否则拒绝升级（防止任意客户端冒充节点收信令）。
@@ -15,7 +15,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Hana-ame/go-peerserver"
+	"github.com/Hana-ame/go-peersignal"
 )
 
 func main() {
