@@ -7,10 +7,19 @@
 //   - 文本帧 = 控制头（JSON）
 //   - 二进制帧 = 紧跟最近一个声明的数据块
 //
-// 帧序列（一次资源拉取）：
+// 多 DataChannel 架构（2026-09-06）：
+//   - 控制通道（control）：keepalive ping/ping-ack
+//   - 文件通道（file-{reqId}）：每个文件请求一条独立通道，支持并发传输
+//   - 文件通道协议：url → meta → 块×N → done/err
+//
+// 控制帧序列（控制通道）：
+//   web → node:  {"type":"ping"}
+//   node → web:  {"type":"ping-ack"}
+//
+// 文件帧序列（文件通道）：
 //   web → node:  {"type":"url","url":"...","reqId":"..."}
 //   node → web:  {"type":"meta","status":200,"mime":"image/png","size":N,"reqId":"..."}
-//                二进制帧×N（每块 chunkSize，不声明单独头——块属于最近 meta）
+//                二进制帧×N（每块 chunkSize，不声明单独头——块属于本通道）
 //                {"type":"done","reqId":"..."}
 //   或失败:      {"type":"err","msg":"...","reqId":"..."}
 

@@ -10,6 +10,11 @@
 //
 // 安全边界：allow(url) 白名单必须显式配置（默认全拒）——本节点是任意
 // 网页端都能连的公共 peer，不设白名单等于开放任意 URL 抓取（SSRF）。
+//
+// 多 DataChannel 架构（2026-09-06）：
+//   - 控制通道（label='control'）：keepalive ping/ping-ack
+//   - 文件通道（label='file-{reqId}'）：每个文件请求一条独立通道
+//   - 并发：多条文件通道可同时传输，互不阻塞
 import wrtc from '@roamhq/wrtc'
 import { CHUNK_SIZE, guessMime, parseFrame } from '../protocol.js'
 
@@ -105,12 +110,9 @@ export async function createPeerMediaServer({
     peer.once('error', (err) => { clearTimeout(to); reject(new Error(`peerdrive-media: signaling error: ${err?.type || err}`)) })
   })
 
-  // serveConnection 处理一条网页端 DataConnection（raw 序列化）。
-  // 逐请求串行：一次只服务一个 url 请求——二进制块无头部标识，靠
-  // 「最近 meta」归属（与 peerdrive 后端连接级 expect 同语义）。若并发
-  // 处理多请求，块会交叉错配，因此用 busy 标志拒绝并发请求。
+  // serveConnection 处理一条网页端 DataConnection。
+  // 多 DataChannel 架构：每条连接独立处理一个文件请求，支持并发。
   const serveConnection = (conn) => {
-    let busy = false
     let lastActive = Date.now()
     // keepalive：发 ping 制造流量 + 超时主动断开（见文件头 KEEPALIVE 注释）
     const ka = setInterval(() => {
@@ -121,19 +123,24 @@ export async function createPeerMediaServer({
       }
       try { conn.send(JSON.stringify({ type: 'ping' })) } catch { /* 连接已死 */ }
     }, KEEPALIVE_INTERVAL)
+
     conn.on('data', (data) => {
-      lastActive = Date.now() // 任何帧都刷新活跃（含浏览器端 ping）
+      lastActive = Date.now() // 任何帧都刷新活跃
       if (typeof data !== 'string') return // 二进制帧不应由网页端发出
       const msg = parseFrame(data)
-      if (!msg || msg.type !== 'url') return
-      if (busy) {
-        conn.send(JSON.stringify({ type: 'err', msg: 'another request in flight', reqId: msg.reqId }))
-        return
+      if (!msg) return
+
+      // 控制帧：ping-ack（浏览器回复 Node 的 ping）
+      if (msg.type === 'ping-ack') return
+
+      // 文件请求：url
+      if (msg.type === 'url') {
+        handleUrlRequest(conn, msg).catch((err) => {
+          try { conn.send(JSON.stringify({ type: 'err', msg: err.message, reqId: msg.reqId })) } catch { /* 通道已死 */ }
+        })
       }
-      busy = true
-      handleUrlRequest(conn, msg).finally(() => { busy = false })
     })
-    conn.on('close', () => { clearInterval(ka); busy = false })
+    conn.on('close', () => { clearInterval(ka) })
   }
   peer.on('connection', serveConnection)
 

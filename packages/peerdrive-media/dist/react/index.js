@@ -54,33 +54,82 @@ function b(e) {
 }
 var x = class {
 	constructor(e, t) {
-		this.peerId = e, this.signaling = t, this.peer = null, this.conn = null, this.ready = !1, this.closed = !1, this.queue = [], this.pending = /* @__PURE__ */ new Map(), this.curReqId = null, this.lastActive = 0, this.kaTimer = null;
+		this.peerId = e, this.signaling = t, this.peer = null, this.controlConn = null, this.ready = !1, this.closed = !1, this.opening = !1, this.pending = /* @__PURE__ */ new Map(), this.lastActive = 0, this.kaTimer = null;
 	}
 	request(e, t, n, r) {
-		let i = {
-			url: e,
-			resolve: t,
-			reject: n,
-			signal: r
-		};
-		if (!this.ready || this.closed || this.pending.size > 0) {
-			if (this.queue.push(i), !this.opening && !this.closed && (this.opening = !0, this.open()), r) {
+		if (this.closed) {
+			n(/* @__PURE__ */ Error("peerdrive-media: connection closed"));
+			return;
+		}
+		if (!this.ready) {
+			this.opening || (this.opening = !0, this.open()), this._waitingForReady = this._waitingForReady || [];
+			let i = {
+				url: e,
+				resolve: t,
+				reject: n,
+				signal: r
+			};
+			if (this._waitingForReady.push(i), r) {
 				if (r.aborted) {
-					this.queue.pop(), n(new DOMException("aborted", "AbortError"));
+					let e = this._waitingForReady.findIndex((e) => e === i);
+					e >= 0 && this._waitingForReady.splice(e, 1), n(new DOMException("aborted", "AbortError"));
 					return;
 				}
 				let e = () => {
-					let t = this.queue.indexOf(i);
-					t >= 0 && (this.queue.splice(t, 1), n(new DOMException("aborted", "AbortError"))), r.removeEventListener("abort", e);
+					if (this._waitingForReady) {
+						let e = this._waitingForReady.findIndex((e) => e === i);
+						e >= 0 && (this._waitingForReady.splice(e, 1), n(new DOMException("aborted", "AbortError")));
+					}
+					r.removeEventListener("abort", e);
 				};
-				r.addEventListener("abort", e);
+				i._onAbort = e, r.addEventListener("abort", e);
 			}
 			return;
 		}
-		this.send(i);
+		this.sendFileRequest(e, t, n, r);
 	}
-	flush() {
-		if (!(!this.ready || this.closed)) for (; this.queue.length && this.pending.size === 0;) this.send(this.queue.shift());
+	sendFileRequest(e, t, n, r) {
+		let i = g(), a = this.peer.connect(this.peerId, {
+			reliable: !0,
+			serialization: "raw",
+			label: `file-${i}`
+		}), o = {
+			resolve: t,
+			reject: n,
+			chunks: [],
+			mime: null,
+			size: 0,
+			got: 0,
+			conn: a,
+			cleanup: () => {}
+		};
+		if (r) {
+			if (r.aborted) {
+				a.close(), n(new DOMException("aborted", "AbortError"));
+				return;
+			}
+			let e = () => {
+				this.pending.delete(i), o.cleanup();
+				try {
+					a.close();
+				} catch {}
+				n(new DOMException("aborted", "AbortError"));
+			};
+			o.cleanup = () => r.removeEventListener("abort", e), r.addEventListener("abort", e);
+		}
+		this.pending.set(i, o), a.on("open", () => {
+			try {
+				a.send(f(e, i));
+			} catch (e) {
+				this.pending.delete(i), o.cleanup(), n(e);
+			}
+		}), a.on("data", (e) => this.handleFileData(i, e)), a.on("close", () => {
+			let e = this.pending.get(i);
+			e && (this.pending.delete(i), e.cleanup(), e.reject(/* @__PURE__ */ Error("peerdrive-media: file channel closed")));
+		}), a.on("error", (e) => {
+			let t = this.pending.get(i);
+			t && (this.pending.delete(i), t.cleanup(), t.reject(/* @__PURE__ */ Error(`peerdrive-media: file channel error: ${e?.type || e}`)));
+		});
 	}
 	open() {
 		let e = this.signaling, t = typeof window < "u" && window.__PDM_DEBUG ? 3 : 0, n = new _(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
@@ -101,14 +150,68 @@ var x = class {
 		}), n.on("open", () => {
 			let e = n.connect(this.peerId, {
 				reliable: !0,
-				serialization: "raw"
+				serialization: "raw",
+				label: "control"
 			});
-			this.conn = e, e.on("open", () => {
-				clearTimeout(r), this.opening = !1, this.ready = !0, this.startKeepalive(), this.flush();
-			}), e.on("data", (e) => this.handleData(e)), e.on("close", () => this.teardown("connection closed")), e.on("error", (e) => {
-				!this.ready && !this.closed && this.failAll(`connection error: ${e?.type || e}`);
+			this.controlConn = e, e.on("open", () => {
+				if (clearTimeout(r), this.opening = !1, this.ready = !0, this.startKeepalive(), this._waitingForReady && this._waitingForReady.length) {
+					let e = this._waitingForReady;
+					this._waitingForReady = null;
+					for (let t of e) t.signal && t.signal.removeEventListener("abort", t._onAbort), this.sendFileRequest(t.url, t.resolve, t.reject, t.signal);
+				}
+			}), e.on("data", (e) => this.handleControlData(e)), e.on("close", () => this.teardown("control channel closed")), e.on("error", (e) => {
+				!this.ready && !this.closed && this.failAll(`control channel error: ${e?.type || e}`);
 			});
 		});
+	}
+	handleControlData(e) {
+		this.lastActive = Date.now(), typeof e != "string" || p(e)?.type;
+	}
+	handleFileData(e, t) {
+		this.lastActive = Date.now();
+		let n = this.pending.get(e);
+		if (!n) return;
+		if (m(t)) {
+			let e = h(t);
+			n.chunks.push(e), n.got += e.length;
+			return;
+		}
+		let r = p(t);
+		if (r) switch (r.type) {
+			case "meta":
+				if (n.mime = r.mime || "application/octet-stream", n.size = r.size || 0, r.status >= 400) {
+					this.pending.delete(e), n.cleanup();
+					try {
+						n.conn.close();
+					} catch {}
+					n.reject(/* @__PURE__ */ Error(`peerdrive-media: upstream ${r.status}`));
+				}
+				break;
+			case "done":
+				this.pending.delete(e);
+				let t = new Blob(n.chunks, { type: n.mime });
+				n.cleanup();
+				try {
+					n.conn.close();
+				} catch {}
+				n.resolve({
+					blob: t,
+					blobUrl: URL.createObjectURL(t),
+					mime: n.mime,
+					size: n.got
+				});
+				break;
+			case "err":
+				this.pending.delete(e), n.cleanup();
+				try {
+					n.conn.close();
+				} catch {}
+				n.reject(/* @__PURE__ */ Error(`peerdrive-media: ${r.msg || "request failed"}`));
+				break;
+			case "ping": try {
+				n.conn.send(JSON.stringify({ type: "ping-ack" }));
+			} catch {}
+		}
 	}
 	startKeepalive() {
 		this.lastActive = Date.now(), this.kaTimer = setInterval(() => {
@@ -121,80 +224,25 @@ var x = class {
 				return;
 			}
 			try {
-				this.conn.send(JSON.stringify({ type: "ping" }));
+				this.controlConn && this.controlConn.send(JSON.stringify({ type: "ping" }));
 			} catch {}
 		}, y);
-	}
-	send(e) {
-		if (this.closed) {
-			e.reject(/* @__PURE__ */ Error("peerdrive-media: connection closed"));
-			return;
-		}
-		let t = g(), n = {
-			resolve: e.resolve,
-			reject: e.reject,
-			chunks: [],
-			mime: null,
-			size: 0,
-			got: 0,
-			cleanup: () => {}
-		};
-		if (e.signal) {
-			if (e.signal.aborted) {
-				e.reject(new DOMException("aborted", "AbortError"));
-				return;
-			}
-			let r = () => {
-				this.pending.delete(t), n.cleanup(), e.reject(new DOMException("aborted", "AbortError")), this.flush();
-			};
-			n.cleanup = () => e.signal.removeEventListener("abort", r), e.signal.addEventListener("abort", r);
-		}
-		this.pending.set(t, n);
-		try {
-			this.conn.send(f(e.url, t));
-		} catch (r) {
-			this.pending.delete(t), n.cleanup(), e.reject(r), this.flush();
-		}
-	}
-	handleData(e) {
-		if (this.lastActive = Date.now(), m(e)) {
-			let t = this.curReqId ? this.pending.get(this.curReqId) : null;
-			if (!t) return;
-			let n = h(e);
-			t.chunks.push(n), t.got += n.length;
-			return;
-		}
-		let t = p(e);
-		if (!t || t.type === "ping") return;
-		let n = this.pending.get(t.reqId);
-		if (!n) {
-			this.flush();
-			return;
-		}
-		switch (t.type) {
-			case "meta":
-				n.mime = t.mime || "application/octet-stream", n.size = t.size || 0, this.curReqId = t.reqId, t.status >= 400 && (this.pending.delete(t.reqId), this.curReqId === t.reqId && (this.curReqId = null), n.cleanup(), n.reject(/* @__PURE__ */ Error(`peerdrive-media: upstream ${t.status}`)), this.flush());
-				break;
-			case "done":
-				this.pending.delete(t.reqId), this.curReqId === t.reqId && (this.curReqId = null);
-				let e = new Blob(n.chunks, { type: n.mime });
-				n.cleanup(), n.resolve({
-					blob: e,
-					blobUrl: URL.createObjectURL(e),
-					mime: n.mime,
-					size: n.got
-				}), this.flush();
-				break;
-			case "err": this.pending.delete(t.reqId), this.curReqId === t.reqId && (this.curReqId = null), n.cleanup(), n.reject(/* @__PURE__ */ Error(`peerdrive-media: ${t.msg || "request failed"}`)), this.flush();
-		}
 	}
 	failAll(e) {
 		this.closed = !0, this.opening = !1, this.kaTimer &&= (clearInterval(this.kaTimer), null);
 		let t = /* @__PURE__ */ Error(`peerdrive-media: ${e}`);
-		for (let [, e] of this.pending) e.cleanup(), e.reject(t);
-		this.pending.clear();
-		for (let e of this.queue.splice(0)) e.reject(t);
-		this.curReqId = null, this.closePeer();
+		for (let [, e] of this.pending) {
+			e.cleanup();
+			try {
+				e.conn?.close();
+			} catch {}
+			e.reject(t);
+		}
+		if (this.pending.clear(), this._waitingForReady) {
+			for (let e of this._waitingForReady) e.reject(t);
+			this._waitingForReady = null;
+		}
+		this.closePeer();
 	}
 	teardown(e) {
 		this.closed || this.failAll(e);
@@ -203,7 +251,7 @@ var x = class {
 		try {
 			this.peer?.destroy();
 		} catch {}
-		this.peer = null, this.conn = null;
+		this.peer = null, this.controlConn = null;
 	}
 }, S = new class {
 	constructor() {
