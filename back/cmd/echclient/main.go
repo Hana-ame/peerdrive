@@ -26,7 +26,7 @@ type Frame struct {
 }
 
 func main() {
-	urlFlag := flag.String("url", "https://pbs.twimg.com/profile_images/1/VdHcUJx9_normal.jpg", "要拉的 URL")
+	urlFlag := flag.String("url", "https://video-cf.twimg.com/ext_tw_video/example.mp4", "要拉的 URL（media-node 仅允许 video-cf.twimg.com）")
 	flag.Parse()
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
