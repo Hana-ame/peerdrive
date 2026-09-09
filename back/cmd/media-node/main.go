@@ -24,7 +24,8 @@
 //   node  → 浏览器: <二进制块 × N>
 //   node  → 浏览器: {"type":"done","reqId":"1"}
 //   node  → 浏览器: {"type":"err","msg":"...","reqId":"1"}
-//   keepalive：node 每 5s 发 {"type":"ping"}，浏览器回 {"type":"ping-ack"}
+//   keepalive：node **主动**每 5s 发 {"type":"ping"}（对所有连接），
+//   对端回 {"type":"ping-ack"}；15s 无任何帧 → node 主动断开。
 package main
 
 import (
@@ -38,6 +39,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -200,7 +202,38 @@ func main() {
 	peer.OnConnection(func(conn *peerjs.Connection) {
 		log.Printf("浏览器连接: %s (label=%s)", conn.PeerID, conn.Label)
 
+		// keepalive：本端**主动**发 ping（用户明确要求，对所有连接）。
+		// 每条 DataChannel 独立：每 5s 发 {"type":"ping"} 制造流量；
+		// 收到任何帧刷新 lastActive；超过 15s 无帧 → 主动断开
+		// （无 STUN 环境下 WebRTC 断线无 close 事件，必须靠超时感知）。
+		var lastActive atomic.Int64
+		lastActive.Store(time.Now().UnixMilli())
+		kaStop := make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-kaStop:
+					return
+				case <-ticker.C:
+				}
+				if time.Now().UnixMilli()-lastActive.Load() > 15000 {
+					log.Printf("keepalive 超时，断开 %s (label=%s)", conn.PeerID, conn.Label)
+					conn.Close()
+					return
+				}
+				// 主动发 ping（对端回 ping-ack 即刷新 lastActive）
+				if err := conn.SendJSON(Msg{Type: "ping"}); err != nil {
+					conn.Close()
+					return
+				}
+			}
+		}()
+
 		conn.OnMessage(func(frame peerjs.Frame) {
+			// 任何帧（文本/二进制）都刷新活跃——对端还在，连接未死
+			lastActive.Store(time.Now().UnixMilli())
 			if !frame.IsText {
 				return // 二进制帧由浏览器端发出（本模块只收文本）
 			}
@@ -212,11 +245,12 @@ func main() {
 			case "url":
 				go serveRequest(conn, msg, chunkSize)
 			case "ping-ack":
-				// keepalive 响应，忽略
+				// keepalive 响应（lastActive 已刷新）
 			}
 		})
 
 		conn.OnClose(func(*peerjs.Connection) {
+			close(kaStop)
 			log.Printf("浏览器连接关闭: %s", conn.PeerID)
 		})
 	})
