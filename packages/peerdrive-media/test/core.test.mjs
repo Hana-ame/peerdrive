@@ -22,6 +22,11 @@ class MockConn {
     this.closed = false
   }
   on(ev, fn) { (this._events[ev] ||= []).push(fn) }
+  removeListener(ev, fn) {
+    if (this._events[ev]) {
+      this._events[ev] = this._events[ev].filter(f => f !== fn)
+    }
+  }
   send(data) { if (!this.closed) this.sent.push(data) }
   close() { this.closed = true; this.emit('close') }
   emit(ev, ...args) { (this._events[ev] || []).forEach((fn) => fn(...args)) }
@@ -154,7 +159,8 @@ test('上游 500 拒绝：关闭通道，不影响其他请求', async () => {
   // A 收到 500
   connA.emit('data', JSON.stringify({ type: 'meta', status: 500, size: 0, reqId: reqA }))
   await assert.rejects(pA, /upstream 500/)
-  assert.ok(connA.closed, 'A 的通道应关闭')
+  // 通道归还池（不关闭），监听器已清理
+  assert.ok(!connA._events.data || connA._events.data.length === 0, 'A 的 data 监听器应移除')
 
   // B 正常完成
   respondOk(connB, reqB, [new Uint8Array([7, 8])])

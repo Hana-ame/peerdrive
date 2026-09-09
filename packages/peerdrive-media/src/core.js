@@ -62,6 +62,10 @@ class ConnectionSlot {
     this.pending = new Map()  // reqId → { resolve, reject, chunks, mime, size, got, conn, cleanup }
     this.lastActive = 0       // 最近收到帧的时间（keepalive 判活）
     this.kaTimer = null       // keepalive 定时器（controlConn open 后启动）
+    // 通道池：复用已建立的 DataChannel，预热降低首请求延迟
+    this.pool = []            // 空闲通道列表
+    this.inUse = new Set()    // 占用中的通道
+    this.poolSize = 2         // 预热数量
   }
 
   // request 在连接上发起一次加载。创建新的文件 DataChannel 并发传输。
@@ -107,15 +111,24 @@ class ConnectionSlot {
     this.sendFileRequest(url, resolve, reject, signal)
   }
 
-  // sendFileRequest 创建新的文件 DataChannel 并发送请求。
+  // sendFileRequest 从通道池获取 DataChannel（或创建新的）并发送请求。
   sendFileRequest(url, resolve, reject, signal) {
     const reqId = nextReqId()
-    // 创建新的文件通道
-    const conn = this.peer.connect(this.peerId, {
-      reliable: true,
-      serialization: 'raw',
-      label: `file-${reqId}`,
-    })
+    // 从池获取通道，无空闲则创建新的
+    let conn
+    let fromPool = false
+    if (this.pool.length > 0) {
+      conn = this.pool.shift()  // 复用空闲通道
+      fromPool = true
+    } else {
+      // 创建新通道
+      conn = this.peer.connect(this.peerId, {
+        reliable: true,
+        serialization: 'raw',
+        label: `file-${reqId}`,
+      })
+    }
+    this.inUse.add(conn)
 
     const rec = {
       resolve,
@@ -125,7 +138,27 @@ class ConnectionSlot {
       size: 0,
       got: 0,
       conn,
-      cleanup: () => {},
+      _listeners: {},  // 保存监听器引用，便于清理
+      cleanup: () => {
+        this.inUse.delete(conn)
+        // 移除监听器
+        if (rec._listeners.data) {
+          conn.removeListener('data', rec._listeners.data)
+        }
+        if (rec._listeners.close) {
+          conn.removeListener('close', rec._listeners.close)
+        }
+        if (rec._listeners.error) {
+          conn.removeListener('error', rec._listeners.error)
+        }
+        if (rec._listeners.open) {
+          conn.removeListener('open', rec._listeners.open)
+        }
+        // 通道归还池（如果没关闭）
+        if (!conn.closed) {
+          this.pool.push(conn)
+        }
+      },
     }
 
     if (signal) {
@@ -140,14 +173,14 @@ class ConnectionSlot {
         try { conn.close() } catch { /* 幂等 */ }
         reject(new DOMException('aborted', 'AbortError'))
       }
-      rec.cleanup = () => signal.removeEventListener('abort', onAbort)
       signal.addEventListener('abort', onAbort)
+      rec._onAbort = onAbort
     }
 
     this.pending.set(reqId, rec)
 
-    conn.on('open', () => {
-      // 发送 url 请求
+    // 如果是池中的通道，已经 open，直接发送请求
+    if (fromPool) {
       try {
         conn.send(makeUrlRequest(url, reqId))
       } catch (err) {
@@ -155,25 +188,49 @@ class ConnectionSlot {
         rec.cleanup()
         reject(err)
       }
-    })
-    conn.on('data', (data) => this.handleFileData(reqId, data))
-    conn.on('close', () => {
-      // 通道关闭：如果在途请求，reject
+    } else {
+      // 新通道，等待 open
+      const onOpen = () => {
+        try {
+          conn.send(makeUrlRequest(url, reqId))
+        } catch (err) {
+          this.pending.delete(reqId)
+          rec.cleanup()
+          reject(err)
+        }
+      }
+      conn.on('open', onOpen)
+      rec._listeners.open = onOpen
+    }
+
+    // 监听数据
+    const onData = (data) => this.handleFileData(reqId, data)
+    conn.on('data', onData)
+    rec._listeners.data = onData
+
+    // 监听关闭
+    const onClose = () => {
       const p = this.pending.get(reqId)
       if (p) {
         this.pending.delete(reqId)
         p.cleanup()
         p.reject(new Error('peerdrive-media: file channel closed'))
       }
-    })
-    conn.on('error', (err) => {
+    }
+    conn.on('close', onClose)
+    rec._listeners.close = onClose
+
+    // 监听错误
+    const onError = (err) => {
       const p = this.pending.get(reqId)
       if (p) {
         this.pending.delete(reqId)
         p.cleanup()
         p.reject(new Error(`peerdrive-media: file channel error: ${err?.type || err}`))
       }
-    })
+    }
+    conn.on('error', onError)
+    rec._listeners.error = onError
   }
 
   // open 建立到 Node 端 peer 的完整链路（Peer 信令 + 控制 DataChannel）。
@@ -218,6 +275,8 @@ class ConnectionSlot {
             this.sendFileRequest(entry.url, entry.resolve, entry.reject, entry.signal)
           }
         }
+        // 预热通道池（延迟一个 tick，确保请求通道先创建）
+        setTimeout(() => this.warmUp(), 0)
       })
       conn.on('data', (data) => this.handleControlData(data))
       conn.on('close', () => this.teardown('control channel closed'))
@@ -260,21 +319,18 @@ class ConnectionSlot {
         if (msg.status >= 400) {
           this.pending.delete(reqId)
           p.cleanup()
-          try { p.conn.close() } catch { /* 幂等 */ }
           p.reject(new Error(`peerdrive-media: upstream ${msg.status}`))
         }
         break
       case 'done':
         this.pending.delete(reqId)
         const blob = new Blob(p.chunks, { type: p.mime })
-        p.cleanup()
-        try { p.conn.close() } catch { /* 幂等 */ }
+        p.cleanup()  // 通道归还池
         p.resolve({ blob, blobUrl: URL.createObjectURL(blob), mime: p.mime, size: p.got })
         break
       case 'err':
         this.pending.delete(reqId)
-        p.cleanup()
-        try { p.conn.close() } catch { /* 幂等 */ }
+        p.cleanup()  // 通道归还池
         p.reject(new Error(`peerdrive-media: ${msg.msg || 'request failed'}`))
         break
       case 'ping':
@@ -304,6 +360,28 @@ class ConnectionSlot {
     }, KEEPALIVE_INTERVAL)
   }
 
+  // warmUp 预热通道池，降低首请求延迟。
+  warmUp() {
+    const promises = []
+    for (let i = 0; i < this.poolSize; i++) {
+      promises.push(new Promise((resolve) => {
+        const conn = this.peer.connect(this.peerId, {
+          reliable: true,
+          serialization: 'raw',
+          label: `file-pool-${Date.now()}-${i}`,
+        })
+        conn.on('open', () => {
+          this.pool.push(conn)
+          resolve()
+        })
+        conn.on('close', () => resolve())  // 失败也 resolve，避免阻塞
+        conn.on('error', () => resolve())
+      }))
+    }
+    // 不阻塞，后台预热
+    Promise.all(promises).then(() => {})
+  }
+
   failAll(msg) {
     // 连接级失败：reject 全部在途请求与排队等待者，然后清理槽位。
     this.closed = true
@@ -316,6 +394,12 @@ class ConnectionSlot {
       p.reject(err)
     }
     this.pending.clear()
+    // 清理池中的通道
+    for (const conn of this.pool) {
+      try { conn.close() } catch { /* 幂等 */ }
+    }
+    this.pool = []
+    this.inUse = new Set()
     if (this._waitingForReady) {
       for (const q of this._waitingForReady) q.reject(err)
       this._waitingForReady = null
