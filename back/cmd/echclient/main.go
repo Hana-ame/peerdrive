@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"time"
@@ -25,6 +26,8 @@ type Frame struct {
 }
 
 func main() {
+	urlFlag := flag.String("url", "https://pbs.twimg.com/profile_images/1/VdHcUJx9_normal.jpg", "要拉的 URL")
+	flag.Parse()
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 
@@ -53,7 +56,7 @@ func main() {
 		log.Fatalf("open timeout")
 	}
 
-	url := "https://pbs.twimg.com/profile_images/1/VdHcUJx9_normal.jpg"
+	url := *urlFlag
 	reqID := "t1"
 	conn.SendJSON(Frame{Type: "url", URL: url, ReqID: reqID})
 	log.Printf("sent url request %s -> %s", reqID, url)
