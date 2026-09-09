@@ -54,18 +54,6 @@ type Msg struct {
 	Msg    string `json:"msg,omitempty"`
 }
 
-// allowPrefix 检查 URL 是否在白名单内
-func allowPrefix(prefixes []string) func(string) bool {
-	return func(url string) bool {
-		for _, prefix := range prefixes {
-			if strings.HasPrefix(url, prefix) {
-				return true
-			}
-		}
-		return false
-	}
-}
-
 // guessMime 根据 URL 和 Content-Type 猜测 MIME（无 Content-Type 时按扩展名）。
 func guessMime(url, contentType string) string {
 	if contentType != "" {
@@ -171,13 +159,12 @@ func handleRequest(ctx context.Context, conn *peerjs.Connection, msg Msg, chunkS
 }
 
 func main() {
-	// 默认配置（生产默认：peersignal.moonchan.xyz + ECH 直连 twimg）
+	// 默认配置（生产默认：peersignal.moonchan.xyz + ECH 直连）
 	peerID := "media-node"
 	host := "peersignal.moonchan.xyz"
 	port := "443"
 	secure := true
 	key := "pd-signal-b9447b406828e500"
-	allowPrefixes := "https://video-cf.twimg.com/,https://pbs.twimg.com/,https://video.twimg.com/"
 	chunkSize := 64 * 1024 // 64KB
 	statusAddr := ":9001"
 	proxyURL := "" // 空则读 HTTPS_PROXY 环境变量（本地测试需要走代理）
@@ -188,13 +175,10 @@ func main() {
 	flag.StringVar(&port, "port", port, "Signaling port")
 	flag.BoolVar(&secure, "secure", secure, "Use HTTPS for signaling")
 	flag.StringVar(&key, "key", key, "PeerJS API key")
-	flag.StringVar(&allowPrefixes, "allow", allowPrefixes, "Allowed URL prefixes (comma-separated)")
 	flag.IntVar(&chunkSize, "chunk-size", chunkSize, "Chunk size in bytes")
 	flag.StringVar(&statusAddr, "status-addr", statusAddr, "Status API listen address")
 	flag.StringVar(&proxyURL, "proxy", proxyURL, "HTTP proxy for ECH (default: HTTPS_PROXY env)")
 	flag.Parse()
-
-	allow := allowPrefix(strings.Split(allowPrefixes, ","))
 
 	// 初始化 ECH 客户端（内置，不依赖外部 ech-proxy 进程）
 	echCfg := ech.Config{ProxyURL: proxyURL}
@@ -238,10 +222,7 @@ func main() {
 			}
 			switch msg.Type {
 			case "url":
-				if !allow(msg.URL) {
-					conn.SendJSON(Msg{Type: "err", ReqID: msg.ReqID, Msg: "url not allowed"})
-					return
-				}
+				// 直接访问，无白名单限制
 				go handleRequest(context.Background(), conn, msg, chunkSize)
 			case "ping-ack":
 				// keepalive 响应，忽略
