@@ -2207,7 +2207,7 @@ var B = /*#__PURE__*/ function(e) {
 			throw N.error("Error retrieving list peers", e), Error("Could not get list peers from the server." + e);
 		}
 	}
-}, q = class e extends ct {
+}, dt = class e extends ct {
 	static #e = this.ID_PREFIX = "dc_";
 	static #t = this.MAX_BUFFERED_AMOUNT = 8388608;
 	get type() {
@@ -2254,7 +2254,7 @@ var B = /*#__PURE__*/ function(e) {
 			default: N.warn("Unrecognized message type:", e.type, "from peer:", this.peer);
 		}
 	}
-}, J = class extends q {
+}, q = class extends dt {
 	get bufferSize() {
 		return this._bufferSize;
 	}
@@ -2266,7 +2266,7 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	_trySend(e) {
 		if (!this.open) return !1;
-		if (this.dataChannel.bufferedAmount > q.MAX_BUFFERED_AMOUNT) return this._buffering = !0, setTimeout(() => {
+		if (this.dataChannel.bufferedAmount > dt.MAX_BUFFERED_AMOUNT) return this._buffering = !0, setTimeout(() => {
 			this._buffering = !1, this._tryBuffer();
 		}, 50), !1;
 		try {
@@ -2291,7 +2291,7 @@ var B = /*#__PURE__*/ function(e) {
 	constructor(...e) {
 		super(...e), this._buffer = [], this._bufferSize = 0, this._buffering = !1;
 	}
-}, Y = class extends J {
+}, J = class extends q {
 	close(e) {
 		super.close(e), this._chunkedData = {};
 	}
@@ -2344,7 +2344,7 @@ var B = /*#__PURE__*/ function(e) {
 		N.log(`DC#${this.connectionId} Try to send ${t.length} chunks...`);
 		for (let e of t) this.send(e, !0);
 	}
-}, dt = class extends J {
+}, ft = class extends q {
 	_handleDataMessage({ data: e }) {
 		super.emit("data", e);
 	}
@@ -2354,7 +2354,7 @@ var B = /*#__PURE__*/ function(e) {
 	constructor(...e) {
 		super(...e), this.serialization = W.None;
 	}
-}, ft = class extends J {
+}, pt = class extends q {
 	_handleDataMessage({ data: e }) {
 		let t = this.parse(this.decoder.decode(e)), n = t.__peerData;
 		if (n && n.type === "close") {
@@ -2374,7 +2374,7 @@ var B = /*#__PURE__*/ function(e) {
 	constructor(...e) {
 		super(...e), this.serialization = W.JSON, this.encoder = new TextEncoder(), this.decoder = new TextDecoder(), this.stringify = JSON.stringify, this.parse = JSON.parse;
 	}
-}, pt = class e extends ot {
+}, mt = class e extends ot {
 	static #e = this.DEFAULT_KEY = "peerjs";
 	get id() {
 		return this._id;
@@ -2401,11 +2401,11 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	constructor(t, n) {
 		super(), this._serializers = {
-			raw: dt,
-			json: ft,
-			binary: Y,
-			"binary-utf8": Y,
-			default: Y
+			raw: ft,
+			json: pt,
+			binary: J,
+			"binary-utf8": J,
+			default: J
 		}, this._id = null, this._lastServerId = null, this._destroyed = !1, this._disconnected = !1, this._open = !1, this._connections = /* @__PURE__ */ new Map(), this._lostMessages = /* @__PURE__ */ new Map();
 		let r;
 		if (t && t.constructor == Object ? n = t : t && (r = t.toString()), n = {
@@ -2589,8 +2589,8 @@ var B = /*#__PURE__*/ function(e) {
 	listAllPeers(e = (e) => {}) {
 		this._api.listAllPeers().then((t) => e(t)).catch((e) => this._abort(V.ServerError, e));
 	}
-}, X = pt;
-function mt(e, t) {
+}, Y = mt;
+function ht(e, t) {
 	return JSON.stringify({
 		type: "url",
 		url: e,
@@ -2598,40 +2598,40 @@ function mt(e, t) {
 		v: 1
 	});
 }
-function ht(e) {
+function gt(e) {
 	try {
 		let t = JSON.parse(e);
 		if (typeof t == "object" && t && typeof t.type == "string") return t;
 	} catch {}
 	return null;
 }
-function gt(e) {
+function _t(e) {
 	return typeof e != "string" && !!(e instanceof ArrayBuffer || ArrayBuffer.isView(e) || typeof Blob < "u" && e instanceof Blob);
 }
-function _t(e) {
+function vt(e) {
 	if (e instanceof Uint8Array) return e;
 	if (e instanceof ArrayBuffer) return new Uint8Array(e);
 	if (ArrayBuffer.isView(e)) return new Uint8Array(e.buffer, e.byteOffset, e.byteLength);
 	throw Error("peerdrive-media: unsupported binary frame type");
 }
-function vt() {
+function yt() {
 	return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 //#endregion
 //#region src/core.js
-var yt = pt || X.Peer || X.default && X.default.Peer, Z = {
+var bt = mt || Y.Peer || Y.default && Y.default.Peer, X = {
 	host: "0.peerjs.com",
 	port: 443,
 	secure: !0,
 	key: "peerjs",
 	path: "/"
-}, bt = 5e3;
-function xt(e) {
+}, xt = 5e3;
+function St(e) {
 	return `${e.host}:${e.port}:${e.key}:${e.path || "/"}`;
 }
-var St = class {
+var Ct = class {
 	constructor(e, t) {
-		this.peerId = e, this.signaling = t, this.peer = null, this.controlConn = null, this.ready = !1, this.closed = !1, this.opening = !1, this.pending = /* @__PURE__ */ new Map(), this.lastActive = 0, this.kaTimer = null;
+		this.peerId = e, this.signaling = t, this.peer = null, this.controlConn = null, this.ready = !1, this.closed = !1, this.opening = !1, this.pending = /* @__PURE__ */ new Map(), this.lastActive = 0, this.kaTimer = null, this.pool = [], this.inUse = /* @__PURE__ */ new Set(), this.poolSize = 2;
 	}
 	request(e, t, n, r) {
 		if (this.closed) {
@@ -2666,11 +2666,13 @@ var St = class {
 		this.sendFileRequest(e, t, n, r);
 	}
 	sendFileRequest(e, t, n, r) {
-		let i = vt(), a = this.peer.connect(this.peerId, {
+		let i = yt(), a, o = !1;
+		this.pool.length > 0 ? (a = this.pool.shift(), o = !0) : a = this.peer.connect(this.peerId, {
 			reliable: !0,
 			serialization: "raw",
 			label: `file-${i}`
-		}), o = {
+		}), this.inUse.add(a);
+		let s = {
 			resolve: t,
 			reject: n,
 			chunks: [],
@@ -2678,7 +2680,10 @@ var St = class {
 			size: 0,
 			got: 0,
 			conn: a,
-			cleanup: () => {}
+			_listeners: {},
+			cleanup: () => {
+				this.inUse.delete(a), s._listeners.data && a.removeListener("data", s._listeners.data), s._listeners.close && a.removeListener("close", s._listeners.close), s._listeners.error && a.removeListener("error", s._listeners.error), s._listeners.open && a.removeListener("open", s._listeners.open), a.closed || this.pool.push(a);
+			}
 		};
 		if (r) {
 			if (r.aborted) {
@@ -2686,30 +2691,44 @@ var St = class {
 				return;
 			}
 			let e = () => {
-				this.pending.delete(i), o.cleanup();
+				this.pending.delete(i), s.cleanup();
 				try {
 					a.close();
 				} catch {}
 				n(new DOMException("aborted", "AbortError"));
 			};
-			o.cleanup = () => r.removeEventListener("abort", e), r.addEventListener("abort", e);
+			r.addEventListener("abort", e), s._onAbort = e;
 		}
-		this.pending.set(i, o), a.on("open", () => {
-			try {
-				a.send(mt(e, i));
-			} catch (e) {
-				this.pending.delete(i), o.cleanup(), n(e);
-			}
-		}), a.on("data", (e) => this.handleFileData(i, e)), a.on("close", () => {
+		if (this.pending.set(i, s), o) try {
+			a.send(ht(e, i));
+		} catch (e) {
+			this.pending.delete(i), s.cleanup(), n(e);
+		}
+		else {
+			let t = () => {
+				try {
+					a.send(ht(e, i));
+				} catch (e) {
+					this.pending.delete(i), s.cleanup(), n(e);
+				}
+			};
+			a.on("open", t), s._listeners.open = t;
+		}
+		let c = (e) => this.handleFileData(i, e);
+		a.on("data", c), s._listeners.data = c;
+		let l = () => {
 			let e = this.pending.get(i);
 			e && (this.pending.delete(i), e.cleanup(), e.reject(/* @__PURE__ */ Error("peerdrive-media: file channel closed")));
-		}), a.on("error", (e) => {
+		};
+		a.on("close", l), s._listeners.close = l;
+		let u = (e) => {
 			let t = this.pending.get(i);
 			t && (this.pending.delete(i), t.cleanup(), t.reject(/* @__PURE__ */ Error(`peerdrive-media: file channel error: ${e?.type || e}`)));
-		});
+		};
+		a.on("error", u), s._listeners.error = u;
 	}
 	open() {
-		let e = this.signaling, t = typeof window < "u" && window.__PDM_DEBUG ? 3 : 0, n = new yt(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
+		let e = this.signaling, t = typeof window < "u" && window.__PDM_DEBUG ? 3 : 0, n = new bt(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
 			host: e.host,
 			port: e.port,
 			secure: e.secure,
@@ -2736,42 +2755,33 @@ var St = class {
 					this._waitingForReady = null;
 					for (let t of e) t.signal && t.signal.removeEventListener("abort", t._onAbort), this.sendFileRequest(t.url, t.resolve, t.reject, t.signal);
 				}
+				setTimeout(() => this.warmUp(), 0);
 			}), e.on("data", (e) => this.handleControlData(e)), e.on("close", () => this.teardown("control channel closed")), e.on("error", (e) => {
 				!this.ready && !this.closed && this.failAll(`control channel error: ${e?.type || e}`);
 			});
 		});
 	}
 	handleControlData(e) {
-		this.lastActive = Date.now(), typeof e != "string" || ht(e)?.type;
+		this.lastActive = Date.now(), typeof e != "string" || gt(e)?.type;
 	}
 	handleFileData(e, t) {
 		this.lastActive = Date.now();
 		let n = this.pending.get(e);
 		if (!n) return;
-		if (gt(t)) {
-			let e = _t(t);
+		if (_t(t)) {
+			let e = vt(t);
 			n.chunks.push(e), n.got += e.length;
 			return;
 		}
-		let r = ht(t);
+		let r = gt(t);
 		if (r) switch (r.type) {
 			case "meta":
-				if (n.mime = r.mime || "application/octet-stream", n.size = r.size || 0, r.status >= 400) {
-					this.pending.delete(e), n.cleanup();
-					try {
-						n.conn.close();
-					} catch {}
-					n.reject(/* @__PURE__ */ Error(`peerdrive-media: upstream ${r.status}`));
-				}
+				n.mime = r.mime || "application/octet-stream", n.size = r.size || 0, r.status >= 400 && (this.pending.delete(e), n.cleanup(), n.reject(/* @__PURE__ */ Error(`peerdrive-media: upstream ${r.status}`)));
 				break;
 			case "done":
 				this.pending.delete(e);
 				let t = new Blob(n.chunks, { type: n.mime });
-				n.cleanup();
-				try {
-					n.conn.close();
-				} catch {}
-				n.resolve({
+				n.cleanup(), n.resolve({
 					blob: t,
 					blobUrl: URL.createObjectURL(t),
 					mime: n.mime,
@@ -2779,11 +2789,7 @@ var St = class {
 				});
 				break;
 			case "err":
-				this.pending.delete(e), n.cleanup();
-				try {
-					n.conn.close();
-				} catch {}
-				n.reject(/* @__PURE__ */ Error(`peerdrive-media: ${r.msg || "request failed"}`));
+				this.pending.delete(e), n.cleanup(), n.reject(/* @__PURE__ */ Error(`peerdrive-media: ${r.msg || "request failed"}`));
 				break;
 			case "ping": try {
 				n.conn.send(JSON.stringify({ type: "ping-ack" }));
@@ -2803,7 +2809,21 @@ var St = class {
 			try {
 				this.controlConn && this.controlConn.send(JSON.stringify({ type: "ping" }));
 			} catch {}
-		}, bt);
+		}, xt);
+	}
+	warmUp() {
+		let e = [];
+		for (let t = 0; t < this.poolSize; t++) e.push(new Promise((e) => {
+			let n = this.peer.connect(this.peerId, {
+				reliable: !0,
+				serialization: "raw",
+				label: `file-pool-${Date.now()}-${t}`
+			});
+			n.on("open", () => {
+				this.pool.push(n), e();
+			}), n.on("close", () => e()), n.on("error", () => e());
+		}));
+		Promise.all(e).then(() => {});
 	}
 	failAll(e) {
 		this.closed = !0, this.opening = !1, this.kaTimer &&= (clearInterval(this.kaTimer), null);
@@ -2815,7 +2835,11 @@ var St = class {
 			} catch {}
 			e.reject(t);
 		}
-		if (this.pending.clear(), this._waitingForReady) {
+		this.pending.clear();
+		for (let e of this.pool) try {
+			e.close();
+		} catch {}
+		if (this.pool = [], this.inUse = /* @__PURE__ */ new Set(), this._waitingForReady) {
 			for (let e of this._waitingForReady) e.reject(t);
 			this._waitingForReady = null;
 		}
@@ -2830,36 +2854,87 @@ var St = class {
 		} catch {}
 		this.peer = null, this.controlConn = null;
 	}
-}, Q = new class {
+}, Z = new class {
 	constructor() {
 		this.slots = /* @__PURE__ */ new Map();
 	}
-	async load(e, { peer: t, signaling: n = Z, signal: r } = {}) {
+	async load(e, { peer: t, signaling: n = X, signal: r } = {}) {
 		if (!t) throw Error("peerdrive-media: peer (node peer id) is required");
 		if (!e || typeof e != "string") throw Error("peerdrive-media: url is required");
-		let i = `${xt(n)}|${t}`, a = this.slots.get(i);
-		if ((!a || a.closed) && (a = new St(t, n), this.slots.set(i, a)), r?.aborted) throw new DOMException("aborted", "AbortError");
+		let i = `${St(n)}|${t}`, a = this.slots.get(i);
+		if ((!a || a.closed) && (a = new Ct(t, n), this.slots.set(i, a)), r?.aborted) throw new DOMException("aborted", "AbortError");
 		return new Promise((t, n) => {
 			a.request(e, t, n, r);
 		});
 	}
-	dispose(e, t = Z) {
-		let n = `${xt(t)}|${e}`, r = this.slots.get(n);
+	dispose(e, t = X) {
+		let n = `${St(t)}|${e}`, r = this.slots.get(n);
 		r && (r.failAll("disposed"), this.slots.delete(n));
 	}
-}();
+}(), Q = null, $ = null;
+async function wt({ peer: e, signaling: t = X, allow: n } = {}) {
+	if (!navigator.serviceWorker) throw Error("peerdrive-media: Service Worker not supported");
+	let r = await navigator.serviceWorker.register("/sw.js");
+	await navigator.serviceWorker.ready;
+	let i = new MessageChannel();
+	return i.port1.start(), Q = i.port1, $ = {
+		peer: e,
+		signaling: t,
+		allow: n
+	}, i.port2.postMessage({
+		type: "pdm-config",
+		config: {
+			peer: e,
+			signaling: t,
+			allow: n
+		}
+	}), i.port1.onmessage = (e) => {
+		let t = e.data || {};
+		t.type === "pdm-load-request" && Tt(t.url, t.reqId);
+	}, { unregister: async () => {
+		await r.unregister(), Q = null;
+	} };
+}
+async function Tt(e, t) {
+	try {
+		let n = await Z.load(e, {
+			peer: $.peer,
+			signaling: $.signaling
+		});
+		Q && Q.postMessage({
+			type: "pdm-load-response",
+			reqId: t,
+			blob: n.blob,
+			mime: n.mime,
+			size: n.size
+		});
+	} catch (e) {
+		Q && Q.postMessage({
+			type: "pdm-load-response",
+			reqId: t,
+			error: e.message
+		});
+	}
+}
 //#endregion
 //#region src/vanilla/main.js
-function $({ url: e, peer: t, signaling: n = Z, signal: r } = {}) {
-	return Q.load(e, {
+function Et({ url: e, peer: t, signaling: n = X, signal: r } = {}) {
+	return Z.load(e, {
 		peer: t,
 		signaling: n,
 		signal: r
 	});
 }
-function Ct({ url: e, peer: t, signaling: n, signal: r, container: i, props: a = {} } = {}) {
+async function Dt({ peer: e, signaling: t = X, allow: n } = {}) {
+	return wt({
+		peer: e,
+		signaling: t,
+		allow: n
+	});
+}
+function Ot({ url: e, peer: t, signaling: n, signal: r, container: i, props: a = {} } = {}) {
 	let o = i || document.body;
-	return $({
+	return Et({
 		url: e,
 		peer: t,
 		signaling: n,
@@ -2876,11 +2951,12 @@ function Ct({ url: e, peer: t, signaling: n, signal: r, container: i, props: a =
 		};
 	});
 }
-var wt = {
-	load: $,
-	mount: Ct,
-	client: Q,
-	DEFAULT_SIGNALING: Z
+var kt = {
+	load: Et,
+	mount: Ot,
+	setupSW: Dt,
+	client: Z,
+	DEFAULT_SIGNALING: X
 };
 //#endregion
-export { Z as DEFAULT_SIGNALING, Q as client, wt as default, $ as load, Ct as mount };
+export { X as DEFAULT_SIGNALING, Z as client, kt as default, Et as load, Ot as mount, wt as registerSW, Dt as setupSW };

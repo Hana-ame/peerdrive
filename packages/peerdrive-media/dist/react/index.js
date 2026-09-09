@@ -54,7 +54,7 @@ function b(e) {
 }
 var x = class {
 	constructor(e, t) {
-		this.peerId = e, this.signaling = t, this.peer = null, this.controlConn = null, this.ready = !1, this.closed = !1, this.opening = !1, this.pending = /* @__PURE__ */ new Map(), this.lastActive = 0, this.kaTimer = null;
+		this.peerId = e, this.signaling = t, this.peer = null, this.controlConn = null, this.ready = !1, this.closed = !1, this.opening = !1, this.pending = /* @__PURE__ */ new Map(), this.lastActive = 0, this.kaTimer = null, this.pool = [], this.inUse = /* @__PURE__ */ new Set(), this.poolSize = 2;
 	}
 	request(e, t, n, r) {
 		if (this.closed) {
@@ -89,11 +89,13 @@ var x = class {
 		this.sendFileRequest(e, t, n, r);
 	}
 	sendFileRequest(e, t, n, r) {
-		let i = g(), a = this.peer.connect(this.peerId, {
+		let i = g(), a, o = !1;
+		this.pool.length > 0 ? (a = this.pool.shift(), o = !0) : a = this.peer.connect(this.peerId, {
 			reliable: !0,
 			serialization: "raw",
 			label: `file-${i}`
-		}), o = {
+		}), this.inUse.add(a);
+		let s = {
 			resolve: t,
 			reject: n,
 			chunks: [],
@@ -101,7 +103,10 @@ var x = class {
 			size: 0,
 			got: 0,
 			conn: a,
-			cleanup: () => {}
+			_listeners: {},
+			cleanup: () => {
+				this.inUse.delete(a), s._listeners.data && a.removeListener("data", s._listeners.data), s._listeners.close && a.removeListener("close", s._listeners.close), s._listeners.error && a.removeListener("error", s._listeners.error), s._listeners.open && a.removeListener("open", s._listeners.open), a.closed || this.pool.push(a);
+			}
 		};
 		if (r) {
 			if (r.aborted) {
@@ -109,27 +114,41 @@ var x = class {
 				return;
 			}
 			let e = () => {
-				this.pending.delete(i), o.cleanup();
+				this.pending.delete(i), s.cleanup();
 				try {
 					a.close();
 				} catch {}
 				n(new DOMException("aborted", "AbortError"));
 			};
-			o.cleanup = () => r.removeEventListener("abort", e), r.addEventListener("abort", e);
+			r.addEventListener("abort", e), s._onAbort = e;
 		}
-		this.pending.set(i, o), a.on("open", () => {
-			try {
-				a.send(f(e, i));
-			} catch (e) {
-				this.pending.delete(i), o.cleanup(), n(e);
-			}
-		}), a.on("data", (e) => this.handleFileData(i, e)), a.on("close", () => {
+		if (this.pending.set(i, s), o) try {
+			a.send(f(e, i));
+		} catch (e) {
+			this.pending.delete(i), s.cleanup(), n(e);
+		}
+		else {
+			let t = () => {
+				try {
+					a.send(f(e, i));
+				} catch (e) {
+					this.pending.delete(i), s.cleanup(), n(e);
+				}
+			};
+			a.on("open", t), s._listeners.open = t;
+		}
+		let c = (e) => this.handleFileData(i, e);
+		a.on("data", c), s._listeners.data = c;
+		let l = () => {
 			let e = this.pending.get(i);
 			e && (this.pending.delete(i), e.cleanup(), e.reject(/* @__PURE__ */ Error("peerdrive-media: file channel closed")));
-		}), a.on("error", (e) => {
+		};
+		a.on("close", l), s._listeners.close = l;
+		let u = (e) => {
 			let t = this.pending.get(i);
 			t && (this.pending.delete(i), t.cleanup(), t.reject(/* @__PURE__ */ Error(`peerdrive-media: file channel error: ${e?.type || e}`)));
-		});
+		};
+		a.on("error", u), s._listeners.error = u;
 	}
 	open() {
 		let e = this.signaling, t = typeof window < "u" && window.__PDM_DEBUG ? 3 : 0, n = new _(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
@@ -159,6 +178,7 @@ var x = class {
 					this._waitingForReady = null;
 					for (let t of e) t.signal && t.signal.removeEventListener("abort", t._onAbort), this.sendFileRequest(t.url, t.resolve, t.reject, t.signal);
 				}
+				setTimeout(() => this.warmUp(), 0);
 			}), e.on("data", (e) => this.handleControlData(e)), e.on("close", () => this.teardown("control channel closed")), e.on("error", (e) => {
 				!this.ready && !this.closed && this.failAll(`control channel error: ${e?.type || e}`);
 			});
@@ -179,22 +199,12 @@ var x = class {
 		let r = p(t);
 		if (r) switch (r.type) {
 			case "meta":
-				if (n.mime = r.mime || "application/octet-stream", n.size = r.size || 0, r.status >= 400) {
-					this.pending.delete(e), n.cleanup();
-					try {
-						n.conn.close();
-					} catch {}
-					n.reject(/* @__PURE__ */ Error(`peerdrive-media: upstream ${r.status}`));
-				}
+				n.mime = r.mime || "application/octet-stream", n.size = r.size || 0, r.status >= 400 && (this.pending.delete(e), n.cleanup(), n.reject(/* @__PURE__ */ Error(`peerdrive-media: upstream ${r.status}`)));
 				break;
 			case "done":
 				this.pending.delete(e);
 				let t = new Blob(n.chunks, { type: n.mime });
-				n.cleanup();
-				try {
-					n.conn.close();
-				} catch {}
-				n.resolve({
+				n.cleanup(), n.resolve({
 					blob: t,
 					blobUrl: URL.createObjectURL(t),
 					mime: n.mime,
@@ -202,11 +212,7 @@ var x = class {
 				});
 				break;
 			case "err":
-				this.pending.delete(e), n.cleanup();
-				try {
-					n.conn.close();
-				} catch {}
-				n.reject(/* @__PURE__ */ Error(`peerdrive-media: ${r.msg || "request failed"}`));
+				this.pending.delete(e), n.cleanup(), n.reject(/* @__PURE__ */ Error(`peerdrive-media: ${r.msg || "request failed"}`));
 				break;
 			case "ping": try {
 				n.conn.send(JSON.stringify({ type: "ping-ack" }));
@@ -228,6 +234,20 @@ var x = class {
 			} catch {}
 		}, y);
 	}
+	warmUp() {
+		let e = [];
+		for (let t = 0; t < this.poolSize; t++) e.push(new Promise((e) => {
+			let n = this.peer.connect(this.peerId, {
+				reliable: !0,
+				serialization: "raw",
+				label: `file-pool-${Date.now()}-${t}`
+			});
+			n.on("open", () => {
+				this.pool.push(n), e();
+			}), n.on("close", () => e()), n.on("error", () => e());
+		}));
+		Promise.all(e).then(() => {});
+	}
 	failAll(e) {
 		this.closed = !0, this.opening = !1, this.kaTimer &&= (clearInterval(this.kaTimer), null);
 		let t = /* @__PURE__ */ Error(`peerdrive-media: ${e}`);
@@ -238,7 +258,11 @@ var x = class {
 			} catch {}
 			e.reject(t);
 		}
-		if (this.pending.clear(), this._waitingForReady) {
+		this.pending.clear();
+		for (let e of this.pool) try {
+			e.close();
+		} catch {}
+		if (this.pool = [], this.inUse = /* @__PURE__ */ new Set(), this._waitingForReady) {
 			for (let e of this._waitingForReady) e.reject(t);
 			this._waitingForReady = null;
 		}

@@ -464,3 +464,81 @@ export class PeerMediaClient {
 // client 模块级单例。
 export const client = new PeerMediaClient()
 export default client
+
+// ====== Service Worker 支持 ======
+
+// SW 消息处理：主线程 ↔ SW
+let swMessagePort = null
+let swConfig = null
+
+// registerSW 注册 Service Worker，启用媒体拦截。
+// 返回 Promise，SW 就绪后 resolve。
+export async function registerSW({ peer, signaling = DEFAULT_SIGNALING, allow } = {}) {
+  if (!navigator.serviceWorker) {
+    throw new Error('peerdrive-media: Service Worker not supported')
+  }
+  
+  // 注册 SW
+  const reg = await navigator.serviceWorker.register('/sw.js')
+  await navigator.serviceWorker.ready
+  
+  // 建立消息通道
+  const channel = new MessageChannel()
+  channel.port1.start()
+  swMessagePort = channel.port1
+  
+  // 设置 SW 配置
+  swConfig = { peer, signaling, allow }
+  
+  // 发送配置到 SW
+  channel.port2.postMessage({
+    type: 'pdm-config',
+    config: {
+      peer,
+      signaling,
+      allow,
+    },
+  })
+  
+  // 监听 SW 消息
+  channel.port1.onmessage = (event) => {
+    const data = event.data || {}
+    if (data.type === 'pdm-load-request') {
+      handleSWLoadRequest(data.url, data.reqId)
+    }
+  }
+  
+  return {
+    unregister: async () => {
+      await reg.unregister()
+      swMessagePort = null
+    },
+  }
+}
+
+// 处理 SW 的加载请求
+async function handleSWLoadRequest(url, reqId) {
+  try {
+    // 使用 client 加载资源
+    const result = await client.load(url, { peer: swConfig.peer, signaling: swConfig.signaling })
+    
+    // 返回结果到 SW
+    if (swMessagePort) {
+      swMessagePort.postMessage({
+        type: 'pdm-load-response',
+        reqId,
+        blob: result.blob,
+        mime: result.mime,
+        size: result.size,
+      })
+    }
+  } catch (err) {
+    if (swMessagePort) {
+      swMessagePort.postMessage({
+        type: 'pdm-load-response',
+        reqId,
+        error: err.message,
+      })
+    }
+  }
+}
