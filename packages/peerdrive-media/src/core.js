@@ -542,3 +542,124 @@ async function handleSWLoadRequest(url, reqId) {
     }
   }
 }
+
+// ====== Monkey-Patch 自动拦截 ======
+
+// 拦截 img/video src 设置，自动经 WebRTC 加载
+let mpConfig = null
+let mpOrigSetters = {}
+
+// setupMP 启用 monkey-patch 自动拦截。
+// 之后 JS 设置 img.src / video.src 会自动经 WebRTC 加载。
+export function setupMP({ peer, signaling = DEFAULT_SIGNALING, allow } = {}) {
+  if (!peer) throw new Error('peerdrive-media: peer is required for setupMP')
+  
+  mpConfig = { peer, signaling, allow }
+  
+  // 拦截 HTMLImageElement.src
+  if (!mpOrigSetters.img) {
+    const desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src')
+    mpOrigSetters.img = desc?.set
+    
+    Object.defineProperty(HTMLImageElement.prototype, 'src', {
+      get: desc?.get,
+      set: function(url) {
+        if (mpConfig && shouldInterceptMP(url)) {
+          loadAndSetSrc(this, url, mpConfig)
+        } else if (mpOrigSetters.img) {
+          mpOrigSetters.img.call(this, url)
+        }
+      },
+      configurable: true,
+    })
+  }
+  
+  // 拦截 HTMLVideoElement.src
+  if (!mpOrigSetters.video) {
+    const desc = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, 'src')
+    mpOrigSetters.video = desc?.set
+    
+    Object.defineProperty(HTMLVideoElement.prototype, 'src', {
+      get: desc?.get,
+      set: function(url) {
+        if (mpConfig && shouldInterceptMP(url)) {
+          loadAndSetSrc(this, url, mpConfig)
+        } else if (mpOrigSetters.video) {
+          mpOrigSetters.video.call(this, url)
+        }
+      },
+      configurable: true,
+    })
+  }
+  
+  // 拦截 HTMLAudioElement.src
+  if (typeof HTMLAudioElement !== 'undefined' && !mpOrigSetters.audio) {
+    const desc = Object.getOwnPropertyDescriptor(HTMLAudioElement.prototype, 'src')
+    mpOrigSetters.audio = desc?.set
+    
+    Object.defineProperty(HTMLAudioElement.prototype, 'src', {
+      get: desc?.get,
+      set: function(url) {
+        if (mpConfig && shouldInterceptMP(url)) {
+          loadAndSetSrc(this, url, mpConfig)
+        } else if (mpOrigSetters.audio) {
+          mpOrigSetters.audio.call(this, url)
+        }
+      },
+      configurable: true,
+    })
+  }
+  
+  return {
+    teardown: () => {
+      mpConfig = null
+      // 恢复原始 setter
+      for (const [type, setter] of Object.entries(mpOrigSetters)) {
+        if (setter) {
+          const proto = type === 'img' ? HTMLImageElement.prototype :
+                         type === 'video' ? HTMLVideoElement.prototype :
+                         HTMLAudioElement.prototype
+          const desc = Object.getOwnPropertyDescriptor(proto, 'src')
+          Object.defineProperty(proto, 'src', {
+            get: desc?.get,
+            set: setter,
+            configurable: true,
+          })
+        }
+      }
+      mpOrigSetters = {}
+    },
+  }
+}
+
+// 检查 URL 是否在白名单内
+function shouldInterceptMP(url) {
+  if (!mpConfig?.allow) return false
+  if (typeof mpConfig.allow === 'function') {
+    return mpConfig.allow(url)
+  }
+  if (Array.isArray(mpConfig.allow)) {
+    return mpConfig.allow.some(prefix => url.startsWith(prefix))
+  }
+  return false
+}
+
+// 加载资源并设置 src
+async function loadAndSetSrc(el, url, config) {
+  try {
+    const result = await client.load(url, { peer: config.peer, signaling: config.signaling })
+    if (mpOrigSetters[el.tagName?.toLowerCase()]) {
+      mpOrigSetters[el.tagName?.toLowerCase()].call(el, result.blobUrl)
+    } else {
+      el.src = result.blobUrl
+    }
+  } catch (err) {
+    console.error('peerdrive-media: load failed', err)
+    // 降级到原始 src
+    if (mpOrigSetters[el.tagName?.toLowerCase()]) {
+      mpOrigSetters[el.tagName?.toLowerCase()].call(el, url)
+    } else {
+      el.src = url
+    }
+  }
+}

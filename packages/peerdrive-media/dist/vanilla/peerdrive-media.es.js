@@ -488,14 +488,14 @@ function fe(e, t) {
 //#endregion
 //#region node_modules/webrtc-adapter/src/js/chrome/chrome_shim.js
 var pe = /* @__PURE__ */ s({
-	fixNegotiationNeeded: () => be,
+	fixNegotiationNeeded: () => xe,
 	shimAddTrackRemoveTrack: () => ye,
 	shimAddTrackRemoveTrackWithNative: () => ve,
 	shimGetSendersWithDtmf: () => ge,
 	shimGetUserMedia: () => fe,
 	shimMediaStream: () => me,
 	shimOnTrack: () => he,
-	shimPeerConnection: () => v,
+	shimPeerConnection: () => be,
 	shimSenderReceiverGetStats: () => _e
 });
 function me(e) {
@@ -747,7 +747,7 @@ function ye(e, t) {
 		}), t && (t.getTracks().length === 1 ? this.removeStream(this._reverseStreams[t.id]) : t.removeTrack(e.track), this.dispatchEvent(new Event("negotiationneeded")));
 	};
 }
-function v(e, t) {
+function be(e, t) {
 	!e.RTCPeerConnection && e.webkitRTCPeerConnection && (e.RTCPeerConnection = e.webkitRTCPeerConnection), e.RTCPeerConnection && t.version < 53 && [
 		"setLocalDescription",
 		"setRemoteDescription",
@@ -759,7 +759,7 @@ function v(e, t) {
 		e.RTCPeerConnection.prototype[t] = r[t];
 	});
 }
-function be(e, t) {
+function xe(e, t) {
 	t.version > 102 || m(e, "negotiationneeded", (e) => {
 		let n = e.target;
 		if (!((t.version < 72 || n.getConfiguration && n.getConfiguration().sdpSemantics === "plan-b") && n.signalingState !== "stable")) return e;
@@ -767,7 +767,7 @@ function be(e, t) {
 }
 //#endregion
 //#region node_modules/webrtc-adapter/src/js/firefox/getusermedia.js
-function xe(e, t) {
+function Se(e, t) {
 	let n = e && e.navigator;
 	if (!n.mediaDevices) return;
 	let r = e && e.MediaStreamTrack;
@@ -796,7 +796,7 @@ function xe(e, t) {
 }
 //#endregion
 //#region node_modules/webrtc-adapter/src/js/firefox/getdisplaymedia.js
-function Se(e, t) {
+function Ce(e, t) {
 	e.navigator.mediaDevices && (e.navigator.mediaDevices && "getDisplayMedia" in e.navigator.mediaDevices || (e.navigator.mediaDevices.getDisplayMedia = function(n) {
 		if (!(n && n.video)) {
 			let e = new DOMException("getDisplayMedia without video constraints is undefined");
@@ -807,27 +807,27 @@ function Se(e, t) {
 }
 //#endregion
 //#region node_modules/webrtc-adapter/src/js/firefox/firefox_shim.js
-var Ce = /* @__PURE__ */ s({
-	shimAddTransceiver: () => Ae,
-	shimCreateAnswer: () => Ne,
-	shimCreateOffer: () => Me,
-	shimGetDisplayMedia: () => Se,
-	shimGetParameters: () => je,
-	shimGetStats: () => Te,
-	shimGetUserMedia: () => xe,
-	shimOnTrack: () => we,
-	shimPeerConnection: () => y,
-	shimRTCDataChannel: () => ke,
-	shimReceiverGetStats: () => De,
-	shimRemoveStream: () => Oe,
-	shimSenderGetStats: () => Ee
+var we = /* @__PURE__ */ s({
+	shimAddTransceiver: () => je,
+	shimCreateAnswer: () => Pe,
+	shimCreateOffer: () => Ne,
+	shimGetDisplayMedia: () => Ce,
+	shimGetParameters: () => Me,
+	shimGetStats: () => Ee,
+	shimGetUserMedia: () => Se,
+	shimOnTrack: () => Te,
+	shimPeerConnection: () => v,
+	shimRTCDataChannel: () => Ae,
+	shimReceiverGetStats: () => Oe,
+	shimRemoveStream: () => ke,
+	shimSenderGetStats: () => De
 });
-function we(e) {
+function Te(e) {
 	typeof e == "object" && e.RTCTrackEvent && "receiver" in e.RTCTrackEvent.prototype && !("transceiver" in e.RTCTrackEvent.prototype) && Object.defineProperty(e.RTCTrackEvent.prototype, "transceiver", { get() {
 		return { receiver: this.receiver };
 	} });
 }
-function y(e, t) {
+function v(e, t) {
 	typeof e != "object" || !(e.RTCPeerConnection || e.mozRTCPeerConnection) || (!e.RTCPeerConnection && e.mozRTCPeerConnection && (e.RTCPeerConnection = e.mozRTCPeerConnection), t.version < 53 && [
 		"setLocalDescription",
 		"setRemoteDescription",
@@ -839,7 +839,7 @@ function y(e, t) {
 		e.RTCPeerConnection.prototype[t] = r[t];
 	}));
 }
-function Te(e, t) {
+function Ee(e, t) {
 	if (typeof e != "object" || !(e.RTCPeerConnection || e.mozRTCPeerConnection) || t.version >= 151) return;
 	let n = {
 		inboundrtp: "inbound-rtp",
@@ -865,7 +865,7 @@ function Te(e, t) {
 		}).then(i, a);
 	};
 }
-function Ee(e) {
+function De(e) {
 	if (!(typeof e == "object" && e.RTCPeerConnection && e.RTCRtpSender) || e.RTCRtpSender && "getStats" in e.RTCRtpSender.prototype) return;
 	let t = e.RTCPeerConnection.prototype.getSenders;
 	t && (e.RTCPeerConnection.prototype.getSenders = function() {
@@ -880,7 +880,7 @@ function Ee(e) {
 		return this.track ? this._pc.getStats(this.track) : Promise.resolve(/* @__PURE__ */ new Map());
 	};
 }
-function De(e) {
+function Oe(e) {
 	if (!(typeof e == "object" && e.RTCPeerConnection && e.RTCRtpSender) || e.RTCRtpSender && "getStats" in e.RTCRtpReceiver.prototype) return;
 	let t = e.RTCPeerConnection.prototype.getReceivers;
 	t && (e.RTCPeerConnection.prototype.getReceivers = function() {
@@ -890,17 +890,17 @@ function De(e) {
 		return this._pc.getStats(this.track);
 	};
 }
-function Oe(e) {
+function ke(e) {
 	!e.RTCPeerConnection || "removeStream" in e.RTCPeerConnection.prototype || (e.RTCPeerConnection.prototype.removeStream = function(e) {
 		g("removeStream", "removeTrack"), this.getSenders().forEach((t) => {
 			t.track && e.getTracks().includes(t.track) && this.removeTrack(t);
 		});
 	});
 }
-function ke(e) {
+function Ae(e) {
 	e.DataChannel && !e.RTCDataChannel && (e.RTCDataChannel = e.DataChannel);
 }
-function Ae(e, t) {
+function je(e, t) {
 	if (!(typeof e == "object" && e.RTCPeerConnection) || t.version >= 110) return;
 	let n = e.RTCPeerConnection.prototype.addTransceiver;
 	n && (e.RTCPeerConnection.prototype.addTransceiver = function() {
@@ -925,7 +925,7 @@ function Ae(e, t) {
 		return r;
 	});
 }
-function je(e, t) {
+function Me(e, t) {
 	if (!(typeof e == "object" && e.RTCRtpSender) || t.version >= 110) return;
 	let n = e.RTCRtpSender.prototype.getParameters;
 	n && (e.RTCRtpSender.prototype.getParameters = function() {
@@ -933,7 +933,7 @@ function je(e, t) {
 		return "encodings" in e || (e.encodings = [].concat(this.sendEncodings || [{}])), e;
 	});
 }
-function Me(e, t) {
+function Ne(e, t) {
 	if (!(typeof e == "object" && e.RTCPeerConnection) || t.version >= 110) return;
 	let n = e.RTCPeerConnection.prototype.createOffer;
 	e.RTCPeerConnection.prototype.createOffer = function() {
@@ -942,7 +942,7 @@ function Me(e, t) {
 		}) : n.apply(this, arguments);
 	};
 }
-function Ne(e, t) {
+function Pe(e, t) {
 	if (!(typeof e == "object" && e.RTCPeerConnection) || t.version >= 110) return;
 	let n = e.RTCPeerConnection.prototype.createAnswer;
 	e.RTCPeerConnection.prototype.createAnswer = function() {
@@ -953,18 +953,18 @@ function Ne(e, t) {
 }
 //#endregion
 //#region node_modules/webrtc-adapter/src/js/safari/safari_shim.js
-var Pe = /* @__PURE__ */ s({
-	shimAudioContext: () => Ue,
-	shimCallbacksAPI: () => Le,
-	shimConstraints: () => ze,
-	shimCreateOfferLegacy: () => He,
-	shimGetUserMedia: () => Re,
-	shimLocalStreamsAPI: () => Fe,
-	shimRTCIceServerUrls: () => Be,
-	shimRemoteStreamsAPI: () => Ie,
-	shimTrackEventTransceiver: () => Ve
+var Fe = /* @__PURE__ */ s({
+	shimAudioContext: () => We,
+	shimCallbacksAPI: () => Re,
+	shimConstraints: () => Be,
+	shimCreateOfferLegacy: () => Ue,
+	shimGetUserMedia: () => ze,
+	shimLocalStreamsAPI: () => Ie,
+	shimRTCIceServerUrls: () => Ve,
+	shimRemoteStreamsAPI: () => Le,
+	shimTrackEventTransceiver: () => He
 });
-function Fe(e) {
+function Ie(e) {
 	if (!(typeof e != "object" || !e.RTCPeerConnection)) {
 		if ("getLocalStreams" in e.RTCPeerConnection.prototype || (e.RTCPeerConnection.prototype.getLocalStreams = function() {
 			return this._localStreams ||= [], this._localStreams;
@@ -990,7 +990,7 @@ function Fe(e) {
 		});
 	}
 }
-function Ie(e) {
+function Le(e) {
 	if (!(typeof e != "object" || !e.RTCPeerConnection) && ("getRemoteStreams" in e.RTCPeerConnection.prototype || (e.RTCPeerConnection.prototype.getRemoteStreams = function() {
 		return this._remoteStreams ? this._remoteStreams : [];
 	}), !("onaddstream" in e.RTCPeerConnection.prototype))) {
@@ -1023,7 +1023,7 @@ function Ie(e) {
 		};
 	}
 }
-function Le(e) {
+function Re(e) {
 	if (typeof e != "object" || !e.RTCPeerConnection) return;
 	let t = e.RTCPeerConnection.prototype, n = t.createOffer, r = t.createAnswer, i = t.setLocalDescription, a = t.setRemoteDescription, o = t.addIceCandidate;
 	t.createOffer = function(e, t) {
@@ -1045,20 +1045,20 @@ function Le(e) {
 		return n ? (r.then(t, n), Promise.resolve()) : r;
 	}, t.addIceCandidate = s;
 }
-function Re(e) {
+function ze(e) {
 	let t = e && e.navigator;
 	if (t.mediaDevices && t.mediaDevices.getUserMedia) {
 		let e = t.mediaDevices, n = e.getUserMedia.bind(e);
-		t.mediaDevices.getUserMedia = (e) => n(ze(e));
+		t.mediaDevices.getUserMedia = (e) => n(Be(e));
 	}
 	!t.getUserMedia && t.mediaDevices && t.mediaDevices.getUserMedia && (t.getUserMedia = function(e, n, r) {
 		t.mediaDevices.getUserMedia(e).then(n, r);
 	}.bind(t));
 }
-function ze(e) {
+function Be(e) {
 	return e && e.video !== void 0 ? Object.assign({}, e, { video: le(e.video) }) : e;
 }
-function Be(e) {
+function Ve(e) {
 	if (!e.RTCPeerConnection) return;
 	let t = e.RTCPeerConnection;
 	e.RTCPeerConnection = function(e, n) {
@@ -1075,12 +1075,12 @@ function Be(e) {
 		return t.generateCertificate;
 	} });
 }
-function Ve(e) {
+function He(e) {
 	typeof e == "object" && e.RTCTrackEvent && "receiver" in e.RTCTrackEvent.prototype && !("transceiver" in e.RTCTrackEvent.prototype) && Object.defineProperty(e.RTCTrackEvent.prototype, "transceiver", { get() {
 		return { receiver: this.receiver };
 	} });
 }
-function He(e) {
+function Ue(e) {
 	let t = e.RTCPeerConnection.prototype.createOffer;
 	e.RTCPeerConnection.prototype.createOffer = function(e) {
 		if (e) {
@@ -1093,12 +1093,12 @@ function He(e) {
 		return t.apply(this, arguments);
 	};
 }
-function Ue(e) {
+function We(e) {
 	typeof e != "object" || e.AudioContext || (e.AudioContext = e.webkitAudioContext);
 }
 //#endregion
 //#region node_modules/sdp/sdp.js
-var We = /* @__PURE__ */ o(((e, t) => {
+var Ge = /* @__PURE__ */ o(((e, t) => {
 	var n = {};
 	n.generateIdentifier = function() {
 		return Math.random().toString(36).substring(2, 12);
@@ -1404,22 +1404,22 @@ var We = /* @__PURE__ */ o(((e, t) => {
 		for (let e = 0; e < t.length; e++) if (t[e].length < 2 || t[e].charAt(1) !== "=") return !1;
 		return !0;
 	}, typeof t == "object" && (t.exports = n);
-})), Ge = /* @__PURE__ */ s({
-	removeExtmapAllowMixed: () => E,
-	shimAddIceCandidateNullOrEmpty: () => D,
-	shimConnectionState: () => T,
-	shimMaxMessageSize: () => C,
-	shimParameterlessSetLocalDescription: () => O,
-	shimRTCIceCandidate: () => x,
-	shimRTCIceCandidateRelayProtocol: () => S,
-	shimSendThrowTypeError: () => w
-}), b = /* @__PURE__ */ l(We());
-function x(e) {
+})), Ke = /* @__PURE__ */ s({
+	removeExtmapAllowMixed: () => T,
+	shimAddIceCandidateNullOrEmpty: () => E,
+	shimConnectionState: () => w,
+	shimMaxMessageSize: () => S,
+	shimParameterlessSetLocalDescription: () => D,
+	shimRTCIceCandidate: () => b,
+	shimRTCIceCandidateRelayProtocol: () => x,
+	shimSendThrowTypeError: () => C
+}), y = /* @__PURE__ */ l(Ge());
+function b(e) {
 	if (!e.RTCIceCandidate || e.RTCIceCandidate && "foundation" in e.RTCIceCandidate.prototype) return;
 	let t = e.RTCIceCandidate;
 	e.RTCIceCandidate = function(e) {
 		if (typeof e == "object" && e.candidate && e.candidate.indexOf("a=") === 0 && (e = JSON.parse(JSON.stringify(e)), e.candidate = e.candidate.substring(2)), e.candidate && e.candidate.length) {
-			let n = new t(e), r = b.default.parseCandidate(e.candidate);
+			let n = new t(e), r = y.default.parseCandidate(e.candidate);
 			for (let e in r) e in n || Object.defineProperty(n, e, { value: r[e] });
 			return n.toJSON = function() {
 				return {
@@ -1436,10 +1436,10 @@ function x(e) {
 		writable: "false"
 	}), t));
 }
-function S(e) {
+function x(e) {
 	!e.RTCIceCandidate || e.RTCIceCandidate && "relayProtocol" in e.RTCIceCandidate.prototype || m(e, "icecandidate", (e) => {
 		if (e.candidate) {
-			let t = b.default.parseCandidate(e.candidate.candidate);
+			let t = y.default.parseCandidate(e.candidate.candidate);
 			t.type === "relay" && (e.candidate.relayProtocol = {
 				0: "tls",
 				1: "tcp",
@@ -1449,16 +1449,16 @@ function S(e) {
 		return e;
 	});
 }
-function C(e, t) {
+function S(e, t) {
 	if (!e.RTCPeerConnection || t.browser === "chrome" && t.version > 102 || t.browser === "firefox" && t.version >= 113) return;
 	"sctp" in e.RTCPeerConnection.prototype || Object.defineProperty(e.RTCPeerConnection.prototype, "sctp", { get() {
 		return this._sctp === void 0 ? null : this._sctp;
 	} });
 	let n = function(e) {
 		if (!e || !e.sdp) return !1;
-		let t = b.default.splitSections(e.sdp);
+		let t = y.default.splitSections(e.sdp);
 		return t.shift(), t.some((e) => {
-			let t = b.default.parseMLine(e);
+			let t = y.default.parseMLine(e);
 			return t && t.kind === "application" && t.protocol.indexOf("SCTP") !== -1;
 		});
 	}, r = function(e) {
@@ -1472,7 +1472,7 @@ function C(e, t) {
 	}, a = function(e, n) {
 		let r = 65536;
 		t.browser === "firefox" && t.version === 57 && (r = 65535);
-		let i = b.default.matchPrefix(e.sdp, "a=max-message-size:");
+		let i = y.default.matchPrefix(e.sdp, "a=max-message-size:");
 		return i.length > 0 ? r = parseInt(i[0].substring(19), 10) : t.browser === "firefox" && n !== -1 && (r = 2147483637), r;
 	}, o = e.RTCPeerConnection.prototype.setRemoteDescription;
 	e.RTCPeerConnection.prototype.setRemoteDescription = function() {
@@ -1497,7 +1497,7 @@ function C(e, t) {
 		return o.apply(this, arguments);
 	};
 }
-function w(e, t) {
+function C(e, t) {
 	if (!(e.RTCPeerConnection && "createDataChannel" in e.RTCPeerConnection.prototype) || t.browser === "chrome" && t.version >= 149 || t.browser === "firefox" && t.version > 60) return;
 	function n(e, t) {
 		let n = e.send;
@@ -1513,7 +1513,7 @@ function w(e, t) {
 		return n(e, this), e;
 	}, m(e, "datachannel", (e) => (n(e.channel, e.target), e));
 }
-function T(e) {
+function w(e) {
 	if (!e.RTCPeerConnection || "connectionState" in e.RTCPeerConnection.prototype) return;
 	let t = e.RTCPeerConnection.prototype;
 	Object.defineProperty(t, "connectionState", {
@@ -1549,7 +1549,7 @@ function T(e) {
 		};
 	});
 }
-function E(e, t) {
+function T(e, t) {
 	if (!e.RTCPeerConnection || t.browser === "chrome" && t.version >= 71 || t.browser === "safari" && t._safariVersion >= 13.1) return;
 	let n = e.RTCPeerConnection.prototype.setRemoteDescription;
 	e.RTCPeerConnection.prototype.setRemoteDescription = function(t) {
@@ -1563,14 +1563,14 @@ function E(e, t) {
 		return n.apply(this, arguments);
 	};
 }
-function D(e, t) {
+function E(e, t) {
 	if (!(e.RTCPeerConnection && e.RTCPeerConnection.prototype)) return;
 	let n = e.RTCPeerConnection.prototype.addIceCandidate;
 	!n || n.length === 0 || (e.RTCPeerConnection.prototype.addIceCandidate = function() {
 		return arguments[0] ? (t.browser === "chrome" && t.version < 78 || t.browser === "firefox" && t.version < 68 || t.browser === "safari") && arguments[0] && arguments[0].candidate === "" ? Promise.resolve() : n.apply(this, arguments) : (arguments[1] && arguments[1].apply(null), Promise.resolve());
 	});
 }
-function O(e, t) {
+function D(e, t) {
 	if (!(e.RTCPeerConnection && e.RTCPeerConnection.prototype)) return;
 	let n = e.RTCPeerConnection.prototype.setLocalDescription;
 	!n || n.length === 0 || (e.RTCPeerConnection.prototype.setLocalDescription = function() {
@@ -1592,32 +1592,32 @@ function O(e, t) {
 }
 //#endregion
 //#region node_modules/webrtc-adapter/src/js/adapter_factory.js
-function Ke({ window: e } = {}, t = {
+function qe({ window: e } = {}, t = {
 	shimChrome: !0,
 	shimFirefox: !0,
 	shimSafari: !0
 }) {
 	let n = h, r = se(e), i = {
 		browserDetails: r,
-		commonShim: Ge,
+		commonShim: Ke,
 		extractVersion: p,
 		disableLog: ae,
 		disableWarnings: oe,
-		sdp: b
+		sdp: y
 	};
 	switch (r.browser) {
 		case "chrome":
-			if (!pe || !v || !t.shimChrome) return n("Chrome shim is not included in this adapter release."), i;
+			if (!pe || !be || !t.shimChrome) return n("Chrome shim is not included in this adapter release."), i;
 			if (r.version === null) return n("Chrome shim can not determine version, not shimming."), i;
-			n("adapter.js shimming chrome."), i.browserShim = pe, D(e, r), O(e, r), fe(e, r), me(e, r), v(e, r), he(e, r), ye(e, r), ge(e, r), _e(e, r), be(e, r), x(e, r), S(e, r), T(e, r), C(e, r), w(e, r), E(e, r);
+			n("adapter.js shimming chrome."), i.browserShim = pe, E(e, r), D(e, r), fe(e, r), me(e, r), be(e, r), he(e, r), ye(e, r), ge(e, r), _e(e, r), xe(e, r), b(e, r), x(e, r), w(e, r), S(e, r), C(e, r), T(e, r);
 			break;
 		case "firefox":
-			if (!Ce || !y || !t.shimFirefox) return n("Firefox shim is not included in this adapter release."), i;
-			n("adapter.js shimming firefox."), i.browserShim = Ce, D(e, r), O(e, r), xe(e, r), y(e, r), Te(e, r), we(e, r), Oe(e, r), Ee(e, r), De(e, r), ke(e, r), Ae(e, r), je(e, r), Me(e, r), Ne(e, r), x(e, r), T(e, r), C(e, r), w(e, r);
+			if (!we || !v || !t.shimFirefox) return n("Firefox shim is not included in this adapter release."), i;
+			n("adapter.js shimming firefox."), i.browserShim = we, E(e, r), D(e, r), Se(e, r), v(e, r), Ee(e, r), Te(e, r), ke(e, r), De(e, r), Oe(e, r), Ae(e, r), je(e, r), Me(e, r), Ne(e, r), Pe(e, r), b(e, r), w(e, r), S(e, r), C(e, r);
 			break;
 		case "safari":
-			if (!Pe || !t.shimSafari) return n("Safari shim is not included in this adapter release."), i;
-			n("adapter.js shimming safari."), i.browserShim = Pe, D(e, r), O(e, r), Be(e, r), He(e, r), Le(e, r), Fe(e, r), Ie(e, r), Ve(e, r), Re(e, r), Ue(e, r), x(e, r), S(e, r), C(e, r), w(e, r), E(e, r);
+			if (!Fe || !t.shimSafari) return n("Safari shim is not included in this adapter release."), i;
+			n("adapter.js shimming safari."), i.browserShim = Fe, E(e, r), D(e, r), Ve(e, r), Ue(e, r), Re(e, r), Ie(e, r), Le(e, r), He(e, r), ze(e, r), We(e, r), b(e, r), x(e, r), S(e, r), C(e, r), T(e, r);
 			break;
 		default: n("Unsupported browser!");
 	}
@@ -1625,10 +1625,10 @@ function Ke({ window: e } = {}, t = {
 }
 //#endregion
 //#region node_modules/webrtc-adapter/src/js/adapter_core.js
-var qe = Ke({ window: typeof window > "u" ? void 0 : window });
+var Je = qe({ window: typeof window > "u" ? void 0 : window });
 //#endregion
 //#region node_modules/peerjs/dist/bundler.mjs
-function k(e, t, n, r) {
+function O(e, t, n, r) {
 	Object.defineProperty(e, t, {
 		get: n,
 		set: r,
@@ -1636,7 +1636,7 @@ function k(e, t, n, r) {
 		configurable: !0
 	});
 }
-var Je = class {
+var Ye = class {
 	constructor() {
 		this.chunkedMTU = 16300, this._dataCount = 1, this.chunk = (e) => {
 			let t = [], n = e.byteLength, r = Math.ceil(n / this.chunkedMTU), i = 0, a = 0;
@@ -1653,14 +1653,14 @@ var Je = class {
 		};
 	}
 };
-function Ye(e) {
+function Xe(e) {
 	let t = 0;
 	for (let n of e) t += n.byteLength;
 	let n = new Uint8Array(t), r = 0;
 	for (let t of e) n.set(t, r), r += t.byteLength;
 	return n;
 }
-var A = qe.default || qe, j = new class {
+var k = Je.default || Je, A = new class {
 	isWebRTCSupported() {
 		return typeof RTCPeerConnection < "u";
 	}
@@ -1669,13 +1669,13 @@ var A = qe.default || qe, j = new class {
 		return this.supportedBrowsers.includes(e) ? e === "chrome" ? t >= this.minChromeVersion : e === "firefox" ? t >= this.minFirefoxVersion : e === "safari" && !this.isIOS && t >= this.minSafariVersion : !1;
 	}
 	getBrowser() {
-		return A.browserDetails.browser;
+		return k.browserDetails.browser;
 	}
 	getVersion() {
-		return A.browserDetails.version || 0;
+		return k.browserDetails.version || 0;
 	}
 	isUnifiedPlanSupported() {
-		let e = this.getBrowser(), t = A.browserDetails.version || 0;
+		let e = this.getBrowser(), t = k.browserDetails.version || 0;
 		if (e === "chrome" && t < this.minChromeVersion) return !1;
 		if (e === "firefox" && t >= this.minFirefoxVersion) return !0;
 		if (!window.RTCRtpTransceiver || !("currentDirection" in RTCRtpTransceiver.prototype)) return !1;
@@ -1707,14 +1707,14 @@ var A = qe.default || qe, j = new class {
 			"safari"
 		], this.minFirefoxVersion = 59, this.minChromeVersion = 72, this.minSafariVersion = 605;
 	}
-}(), Xe = (e) => !e || /^[A-Za-z0-9]+(?:[ _-][A-Za-z0-9]+)*$/.test(e), Ze = () => Math.random().toString(36).slice(2), Qe = {
+}(), Ze = (e) => !e || /^[A-Za-z0-9]+(?:[ _-][A-Za-z0-9]+)*$/.test(e), Qe = () => Math.random().toString(36).slice(2), $e = {
 	iceServers: [{ urls: "stun:stun.l.google.com:19302" }, {
 		urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"],
 		username: "peerjs",
 		credential: "peerjsp"
 	}],
 	sdpSemantics: "unified-plan"
-}, M = new class extends Je {
+}, j = new class extends Ye {
 	noop() {}
 	blobToArrayBuffer(e, t) {
 		let n = new FileReader();
@@ -1734,10 +1734,10 @@ var A = qe.default || qe, j = new class {
 		super(...e), this.CLOUD_HOST = "0.peerjs.com", this.CLOUD_PORT = 443, this.chunkedBrowsers = {
 			Chrome: 1,
 			chrome: 1
-		}, this.defaultConfig = Qe, this.browser = j.getBrowser(), this.browserVersion = j.getVersion(), this.pack = ee, this.unpack = f, this.supports = function() {
+		}, this.defaultConfig = $e, this.browser = A.getBrowser(), this.browserVersion = A.getVersion(), this.pack = ee, this.unpack = f, this.supports = function() {
 			let e = {
-				browser: j.isBrowserSupported(),
-				webRTC: j.isWebRTCSupported(),
+				browser: A.isBrowserSupported(),
+				webRTC: A.isWebRTCSupported(),
 				audioVideo: !1,
 				data: !1,
 				binaryBlob: !1,
@@ -1746,12 +1746,12 @@ var A = qe.default || qe, j = new class {
 			if (!e.webRTC) return e;
 			let t;
 			try {
-				t = new RTCPeerConnection(Qe), e.audioVideo = !0;
+				t = new RTCPeerConnection($e), e.audioVideo = !0;
 				let n;
 				try {
 					n = t.createDataChannel("_PEERJSTEST", { ordered: !0 }), e.data = !0, e.reliable = !!n.ordered;
 					try {
-						n.binaryType = "blob", e.binaryBlob = !j.isIOS;
+						n.binaryType = "blob", e.binaryBlob = !A.isIOS;
 					} catch {}
 				} catch {} finally {
 					n && n.close();
@@ -1760,9 +1760,9 @@ var A = qe.default || qe, j = new class {
 				t && t.close();
 			}
 			return e;
-		}(), this.validateId = Xe, this.randomToken = Ze;
+		}(), this.validateId = Ze, this.randomToken = Qe;
 	}
-}(), $e = "PeerJS: ", N = new class {
+}(), et = "PeerJS: ", M = new class {
 	get logLevel() {
 		return this._logLevel;
 	}
@@ -1782,46 +1782,46 @@ var A = qe.default || qe, j = new class {
 		this._print = e;
 	}
 	_print(e, ...t) {
-		let n = [$e, ...t];
+		let n = [et, ...t];
 		for (let e in n) n[e] instanceof Error && (n[e] = "(" + n[e].name + ") " + n[e].message);
 		e >= 3 ? console.log(...n) : e >= 2 ? console.warn("WARNING", ...n) : e >= 1 && console.error("ERROR", ...n);
 	}
 	constructor() {
 		this._logLevel = 0;
 	}
-}(), P = {}, et = Object.prototype.hasOwnProperty, F = "~";
-function I() {}
-Object.create && (I.prototype = Object.create(null), new I().__proto__ || (F = !1));
-function tt(e, t, n) {
+}(), N = {}, tt = Object.prototype.hasOwnProperty, P = "~";
+function F() {}
+Object.create && (F.prototype = Object.create(null), new F().__proto__ || (P = !1));
+function nt(e, t, n) {
 	this.fn = e, this.context = t, this.once = n || !1;
 }
-function nt(e, t, n, r, i) {
+function rt(e, t, n, r, i) {
 	if (typeof n != "function") throw TypeError("The listener must be a function");
-	var a = new tt(n, r || e, i), o = F ? F + t : t;
+	var a = new nt(n, r || e, i), o = P ? P + t : t;
 	return e._events[o] ? e._events[o].fn ? e._events[o] = [e._events[o], a] : e._events[o].push(a) : (e._events[o] = a, e._eventsCount++), e;
 }
-function L(e, t) {
-	--e._eventsCount === 0 ? e._events = new I() : delete e._events[t];
+function I(e, t) {
+	--e._eventsCount === 0 ? e._events = new F() : delete e._events[t];
 }
-function R() {
-	this._events = new I(), this._eventsCount = 0;
+function L() {
+	this._events = new F(), this._eventsCount = 0;
 }
-R.prototype.eventNames = function() {
+L.prototype.eventNames = function() {
 	var e = [], t, n;
 	if (this._eventsCount === 0) return e;
-	for (n in t = this._events) et.call(t, n) && e.push(F ? n.slice(1) : n);
+	for (n in t = this._events) tt.call(t, n) && e.push(P ? n.slice(1) : n);
 	return Object.getOwnPropertySymbols ? e.concat(Object.getOwnPropertySymbols(t)) : e;
-}, R.prototype.listeners = function(e) {
-	var t = F ? F + e : e, n = this._events[t];
+}, L.prototype.listeners = function(e) {
+	var t = P ? P + e : e, n = this._events[t];
 	if (!n) return [];
 	if (n.fn) return [n.fn];
 	for (var r = 0, i = n.length, a = Array(i); r < i; r++) a[r] = n[r].fn;
 	return a;
-}, R.prototype.listenerCount = function(e) {
-	var t = F ? F + e : e, n = this._events[t];
+}, L.prototype.listenerCount = function(e) {
+	var t = P ? P + e : e, n = this._events[t];
 	return n ? n.fn ? 1 : n.length : 0;
-}, R.prototype.emit = function(e, t, n, r, i, a) {
-	var o = F ? F + e : e;
+}, L.prototype.emit = function(e, t, n, r, i, a) {
+	var o = P ? P + e : e;
 	if (!this._events[o]) return !1;
 	var s = this._events[o], c = arguments.length, l, u;
 	if (s.fn) {
@@ -1856,42 +1856,42 @@ R.prototype.eventNames = function() {
 		}
 	}
 	return !0;
-}, R.prototype.on = function(e, t, n) {
-	return nt(this, e, t, n, !1);
-}, R.prototype.once = function(e, t, n) {
-	return nt(this, e, t, n, !0);
-}, R.prototype.removeListener = function(e, t, n, r) {
-	var i = F ? F + e : e;
+}, L.prototype.on = function(e, t, n) {
+	return rt(this, e, t, n, !1);
+}, L.prototype.once = function(e, t, n) {
+	return rt(this, e, t, n, !0);
+}, L.prototype.removeListener = function(e, t, n, r) {
+	var i = P ? P + e : e;
 	if (!this._events[i]) return this;
-	if (!t) return L(this, i), this;
+	if (!t) return I(this, i), this;
 	var a = this._events[i];
-	if (a.fn) a.fn === t && (!r || a.once) && (!n || a.context === n) && L(this, i);
+	if (a.fn) a.fn === t && (!r || a.once) && (!n || a.context === n) && I(this, i);
 	else {
 		for (var o = 0, s = [], c = a.length; o < c; o++) (a[o].fn !== t || r && !a[o].once || n && a[o].context !== n) && s.push(a[o]);
-		s.length ? this._events[i] = s.length === 1 ? s[0] : s : L(this, i);
+		s.length ? this._events[i] = s.length === 1 ? s[0] : s : I(this, i);
 	}
 	return this;
-}, R.prototype.removeAllListeners = function(e) {
+}, L.prototype.removeAllListeners = function(e) {
 	var t;
-	return e ? (t = F ? F + e : e, this._events[t] && L(this, t)) : (this._events = new I(), this._eventsCount = 0), this;
-}, R.prototype.off = R.prototype.removeListener, R.prototype.addListener = R.prototype.on, R.prefixed = F, R.EventEmitter = R, P = R;
-var z = {};
-k(z, "ConnectionType", () => B), k(z, "PeerErrorType", () => V), k(z, "BaseConnectionErrorType", () => H), k(z, "DataConnectionErrorType", () => U), k(z, "SerializationType", () => W), k(z, "SocketEventType", () => G), k(z, "ServerMessageType", () => K);
-var B = /*#__PURE__*/ function(e) {
+	return e ? (t = P ? P + e : e, this._events[t] && I(this, t)) : (this._events = new F(), this._eventsCount = 0), this;
+}, L.prototype.off = L.prototype.removeListener, L.prototype.addListener = L.prototype.on, L.prefixed = P, L.EventEmitter = L, N = L;
+var R = {};
+O(R, "ConnectionType", () => z), O(R, "PeerErrorType", () => B), O(R, "BaseConnectionErrorType", () => V), O(R, "DataConnectionErrorType", () => H), O(R, "SerializationType", () => U), O(R, "SocketEventType", () => W), O(R, "ServerMessageType", () => G);
+var z = /*#__PURE__*/ function(e) {
 	return e.Data = "data", e.Media = "media", e;
-}({}), V = /*#__PURE__*/ function(e) {
+}({}), B = /*#__PURE__*/ function(e) {
 	return e.BrowserIncompatible = "browser-incompatible", e.Disconnected = "disconnected", e.InvalidID = "invalid-id", e.InvalidKey = "invalid-key", e.Network = "network", e.PeerUnavailable = "peer-unavailable", e.SslUnavailable = "ssl-unavailable", e.ServerError = "server-error", e.SocketError = "socket-error", e.SocketClosed = "socket-closed", e.UnavailableID = "unavailable-id", e.WebRTC = "webrtc", e;
-}({}), H = /*#__PURE__*/ function(e) {
+}({}), V = /*#__PURE__*/ function(e) {
 	return e.NegotiationFailed = "negotiation-failed", e.ConnectionClosed = "connection-closed", e;
-}({}), U = /*#__PURE__*/ function(e) {
+}({}), H = /*#__PURE__*/ function(e) {
 	return e.NotOpenYet = "not-open-yet", e.MessageToBig = "message-too-big", e;
-}({}), W = /*#__PURE__*/ function(e) {
+}({}), U = /*#__PURE__*/ function(e) {
 	return e.Binary = "binary", e.BinaryUTF8 = "binary-utf8", e.JSON = "json", e.None = "raw", e;
-}({}), G = /*#__PURE__*/ function(e) {
+}({}), W = /*#__PURE__*/ function(e) {
 	return e.Message = "message", e.Disconnected = "disconnected", e.Error = "error", e.Close = "close", e;
-}({}), K = /*#__PURE__*/ function(e) {
+}({}), G = /*#__PURE__*/ function(e) {
 	return e.Heartbeat = "HEARTBEAT", e.Candidate = "CANDIDATE", e.Offer = "OFFER", e.Answer = "ANSWER", e.Open = "OPEN", e.Error = "ERROR", e.IdTaken = "ID-TAKEN", e.InvalidKey = "INVALID-KEY", e.Leave = "LEAVE", e.Expire = "EXPIRE", e;
-}({}), rt = "1.5.5", it = class extends P.EventEmitter {
+}({}), it = "1.5.5", at = class extends N.EventEmitter {
 	constructor(e, t, n, r, i, a = 5e3) {
 		super(), this.pingInterval = a, this._disconnected = !0, this._messagesQueue = [];
 		let o = e ? "wss://" : "ws://";
@@ -1903,16 +1903,16 @@ var B = /*#__PURE__*/ function(e) {
 		this._socket || !this._disconnected || (this._socket = new WebSocket(n + "&version=1.5.5"), this._disconnected = !1, this._socket.onmessage = (e) => {
 			let t;
 			try {
-				t = JSON.parse(e.data), N.log("Server message received:", t);
+				t = JSON.parse(e.data), M.log("Server message received:", t);
 			} catch {
-				N.log("Invalid server message", e.data);
+				M.log("Invalid server message", e.data);
 				return;
 			}
-			this.emit(G.Message, t);
+			this.emit(W.Message, t);
 		}, this._socket.onclose = (e) => {
-			this._disconnected || (N.log("Socket closed.", e), this._cleanup(), this._disconnected = !0, this.emit(G.Disconnected));
+			this._disconnected || (M.log("Socket closed.", e), this._cleanup(), this._disconnected = !0, this.emit(W.Disconnected));
 		}, this._socket.onopen = () => {
-			this._disconnected || (this._sendQueuedMessages(), N.log("Socket open"), this._scheduleHeartbeat());
+			this._disconnected || (this._sendQueuedMessages(), M.log("Socket open"), this._scheduleHeartbeat());
 		});
 	}
 	_scheduleHeartbeat() {
@@ -1922,10 +1922,10 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	_sendHeartbeat() {
 		if (!this._wsOpen()) {
-			N.log("Cannot send heartbeat, because socket closed");
+			M.log("Cannot send heartbeat, because socket closed");
 			return;
 		}
-		let e = JSON.stringify({ type: K.Heartbeat });
+		let e = JSON.stringify({ type: G.Heartbeat });
 		this._socket.send(e), this._scheduleHeartbeat();
 	}
 	_wsOpen() {
@@ -1943,7 +1943,7 @@ var B = /*#__PURE__*/ function(e) {
 			return;
 		}
 		if (!e.type) {
-			this.emit(G.Error, "Invalid message");
+			this.emit(W.Error, "Invalid message");
 			return;
 		}
 		if (!this._wsOpen()) return;
@@ -1956,27 +1956,27 @@ var B = /*#__PURE__*/ function(e) {
 	_cleanup() {
 		this._socket &&= (this._socket.onopen = this._socket.onmessage = this._socket.onclose = null, this._socket.close(), void 0), clearTimeout(this._wsPingTimer);
 	}
-}, at = class {
+}, ot = class {
 	constructor(e) {
 		this.connection = e;
 	}
 	startConnection(e) {
 		let t = this._startPeerConnection();
-		if (this.connection.peerConnection = t, this.connection.type === B.Media && e._stream && this._addTracksToConnection(e._stream, t), e.originator) {
+		if (this.connection.peerConnection = t, this.connection.type === z.Media && e._stream && this._addTracksToConnection(e._stream, t), e.originator) {
 			let n = this.connection, r = { ordered: !!e.reliable }, i = t.createDataChannel(n.label, r);
 			n._initializeDataChannel(i), this._makeOffer();
 		} else this.handleSDP("OFFER", e.sdp);
 	}
 	_startPeerConnection() {
-		N.log("Creating RTCPeerConnection.");
+		M.log("Creating RTCPeerConnection.");
 		let e = new RTCPeerConnection(this.connection.provider.options.config);
 		return this._setupListeners(e), e;
 	}
 	_setupListeners(e) {
 		let t = this.connection.peer, n = this.connection.connectionId, r = this.connection.type, i = this.connection.provider;
-		N.log("Listening for ICE candidates."), e.onicecandidate = (e) => {
-			!e.candidate || !e.candidate.candidate || (N.log(`Received ICE candidates for ${t}:`, e.candidate), i.socket.send({
-				type: K.Candidate,
+		M.log("Listening for ICE candidates."), e.onicecandidate = (e) => {
+			!e.candidate || !e.candidate.candidate || (M.log(`Received ICE candidates for ${t}:`, e.candidate), i.socket.send({
+				type: G.Candidate,
 				payload: {
 					candidate: e.candidate,
 					type: r,
@@ -1987,32 +1987,32 @@ var B = /*#__PURE__*/ function(e) {
 		}, e.oniceconnectionstatechange = () => {
 			switch (e.iceConnectionState) {
 				case "failed":
-					N.log("iceConnectionState is failed, closing connections to " + t), this.connection.emitError(H.NegotiationFailed, "Negotiation of connection to " + t + " failed."), this.connection.close();
+					M.log("iceConnectionState is failed, closing connections to " + t), this.connection.emitError(V.NegotiationFailed, "Negotiation of connection to " + t + " failed."), this.connection.close();
 					break;
 				case "closed":
-					N.log("iceConnectionState is closed, closing connections to " + t), this.connection.emitError(H.ConnectionClosed, "Connection to " + t + " closed."), this.connection.close();
+					M.log("iceConnectionState is closed, closing connections to " + t), this.connection.emitError(V.ConnectionClosed, "Connection to " + t + " closed."), this.connection.close();
 					break;
 				case "disconnected":
-					N.log("iceConnectionState changed to disconnected on the connection with " + t);
+					M.log("iceConnectionState changed to disconnected on the connection with " + t);
 					break;
 				case "completed": e.onicecandidate = () => {};
 			}
 			this.connection.emit("iceStateChanged", e.iceConnectionState);
-		}, N.log("Listening for data channel"), e.ondatachannel = (e) => {
-			N.log("Received data channel");
+		}, M.log("Listening for data channel"), e.ondatachannel = (e) => {
+			M.log("Received data channel");
 			let r = e.channel;
 			i.getConnection(t, n)._initializeDataChannel(r);
-		}, N.log("Listening for remote stream"), e.ontrack = (e) => {
-			N.log("Received remote stream");
+		}, M.log("Listening for remote stream"), e.ontrack = (e) => {
+			M.log("Received remote stream");
 			let r = e.streams[0], a = i.getConnection(t, n);
-			if (a.type === B.Media) {
+			if (a.type === z.Media) {
 				let e = a;
 				this._addStreamToMediaConnection(r, e);
 			}
 		};
 	}
 	cleanup() {
-		N.log("Cleaning up PeerConnection to " + this.connection.peer);
+		M.log("Cleaning up PeerConnection to " + this.connection.peer);
 		let e = this.connection.peerConnection;
 		if (!e) return;
 		this.connection.peerConnection = null, e.onicecandidate = e.oniceconnectionstatechange = e.ondatachannel = e.ontrack = () => {};
@@ -2023,16 +2023,16 @@ var B = /*#__PURE__*/ function(e) {
 		let e = this.connection.peerConnection, t = this.connection.provider;
 		try {
 			let n = await e.createOffer(this.connection.options.constraints);
-			N.log("Created offer."), this.connection.options.sdpTransform && typeof this.connection.options.sdpTransform == "function" && (n.sdp = this.connection.options.sdpTransform(n.sdp) || n.sdp);
+			M.log("Created offer."), this.connection.options.sdpTransform && typeof this.connection.options.sdpTransform == "function" && (n.sdp = this.connection.options.sdpTransform(n.sdp) || n.sdp);
 			try {
-				await e.setLocalDescription(n), N.log("Set localDescription:", n, `for:${this.connection.peer}`);
+				await e.setLocalDescription(n), M.log("Set localDescription:", n, `for:${this.connection.peer}`);
 				let r = {
 					sdp: n,
 					type: this.connection.type,
 					connectionId: this.connection.connectionId,
 					metadata: this.connection.metadata
 				};
-				if (this.connection.type === B.Data) {
+				if (this.connection.type === z.Data) {
 					let e = this.connection;
 					r = {
 						...r,
@@ -2042,25 +2042,25 @@ var B = /*#__PURE__*/ function(e) {
 					};
 				}
 				t.socket.send({
-					type: K.Offer,
+					type: G.Offer,
 					payload: r,
 					dst: this.connection.peer
 				});
 			} catch (e) {
-				e != "OperationError: Failed to set local offer sdp: Called in wrong state: kHaveRemoteOffer" && (t.emitError(V.WebRTC, e), N.log("Failed to setLocalDescription, ", e));
+				e != "OperationError: Failed to set local offer sdp: Called in wrong state: kHaveRemoteOffer" && (t.emitError(B.WebRTC, e), M.log("Failed to setLocalDescription, ", e));
 			}
 		} catch (e) {
-			t.emitError(V.WebRTC, e), N.log("Failed to createOffer, ", e);
+			t.emitError(B.WebRTC, e), M.log("Failed to createOffer, ", e);
 		}
 	}
 	async _makeAnswer() {
 		let e = this.connection.peerConnection, t = this.connection.provider;
 		try {
 			let n = await e.createAnswer();
-			N.log("Created answer."), this.connection.options.sdpTransform && typeof this.connection.options.sdpTransform == "function" && (n.sdp = this.connection.options.sdpTransform(n.sdp) || n.sdp);
+			M.log("Created answer."), this.connection.options.sdpTransform && typeof this.connection.options.sdpTransform == "function" && (n.sdp = this.connection.options.sdpTransform(n.sdp) || n.sdp);
 			try {
-				await e.setLocalDescription(n), N.log("Set localDescription:", n, `for:${this.connection.peer}`), t.socket.send({
-					type: K.Answer,
+				await e.setLocalDescription(n), M.log("Set localDescription:", n, `for:${this.connection.peer}`), t.socket.send({
+					type: G.Answer,
 					payload: {
 						sdp: n,
 						type: this.connection.type,
@@ -2069,59 +2069,59 @@ var B = /*#__PURE__*/ function(e) {
 					dst: this.connection.peer
 				});
 			} catch (e) {
-				t.emitError(V.WebRTC, e), N.log("Failed to setLocalDescription, ", e);
+				t.emitError(B.WebRTC, e), M.log("Failed to setLocalDescription, ", e);
 			}
 		} catch (e) {
-			t.emitError(V.WebRTC, e), N.log("Failed to create answer, ", e);
+			t.emitError(B.WebRTC, e), M.log("Failed to create answer, ", e);
 		}
 	}
 	async handleSDP(e, t) {
 		t = new RTCSessionDescription(t);
 		let n = this.connection.peerConnection, r = this.connection.provider;
-		N.log("Setting remote description", t);
+		M.log("Setting remote description", t);
 		let i = this;
 		try {
-			await n.setRemoteDescription(t), N.log(`Set remoteDescription:${e} for:${this.connection.peer}`), e === "OFFER" && await i._makeAnswer();
+			await n.setRemoteDescription(t), M.log(`Set remoteDescription:${e} for:${this.connection.peer}`), e === "OFFER" && await i._makeAnswer();
 		} catch (e) {
-			r.emitError(V.WebRTC, e), N.log("Failed to setRemoteDescription, ", e);
+			r.emitError(B.WebRTC, e), M.log("Failed to setRemoteDescription, ", e);
 		}
 	}
 	async handleCandidate(e) {
-		N.log("handleCandidate:", e);
+		M.log("handleCandidate:", e);
 		try {
-			await this.connection.peerConnection.addIceCandidate(e), N.log(`Added ICE candidate for:${this.connection.peer}`);
+			await this.connection.peerConnection.addIceCandidate(e), M.log(`Added ICE candidate for:${this.connection.peer}`);
 		} catch (e) {
-			this.connection.provider.emitError(V.WebRTC, e), N.log("Failed to handleCandidate, ", e);
+			this.connection.provider.emitError(B.WebRTC, e), M.log("Failed to handleCandidate, ", e);
 		}
 	}
 	_addTracksToConnection(e, t) {
-		if (N.log(`add tracks from stream ${e.id} to peer connection`), !t.addTrack) return N.error("Your browser does't support RTCPeerConnection#addTrack. Ignored.");
+		if (M.log(`add tracks from stream ${e.id} to peer connection`), !t.addTrack) return M.error("Your browser does't support RTCPeerConnection#addTrack. Ignored.");
 		e.getTracks().forEach((n) => {
 			t.addTrack(n, e);
 		});
 	}
 	_addStreamToMediaConnection(e, t) {
-		N.log(`add stream ${e.id} to media connection ${t.connectionId}`), t.addStream(e);
+		M.log(`add stream ${e.id} to media connection ${t.connectionId}`), t.addStream(e);
 	}
-}, ot = class extends P.EventEmitter {
+}, st = class extends N.EventEmitter {
 	emitError(e, t) {
-		N.error("Error:", t), this.emit("error", new st(`${e}`, t));
+		M.error("Error:", t), this.emit("error", new ct(`${e}`, t));
 	}
-}, st = class extends Error {
+}, ct = class extends Error {
 	constructor(e, t) {
 		typeof t == "string" ? super(t) : (super(), Object.assign(this, t)), this.type = e;
 	}
-}, ct = class extends ot {
+}, lt = class extends st {
 	get open() {
 		return this._open;
 	}
 	constructor(e, t, n) {
 		super(), this.peer = e, this.provider = t, this.options = n, this._open = !1, this.metadata = n.metadata;
 	}
-}, lt = class e extends ct {
+}, ut = class e extends lt {
 	static #e = this.ID_PREFIX = "mc_";
 	get type() {
-		return B.Media;
+		return z.Media;
 	}
 	get localStream() {
 		return this._localStream;
@@ -2130,36 +2130,36 @@ var B = /*#__PURE__*/ function(e) {
 		return this._remoteStream;
 	}
 	constructor(t, n, r) {
-		super(t, n, r), this._localStream = this.options._stream, this.connectionId = this.options.connectionId || e.ID_PREFIX + M.randomToken(), this._negotiator = new at(this), this._localStream && this._negotiator.startConnection({
+		super(t, n, r), this._localStream = this.options._stream, this.connectionId = this.options.connectionId || e.ID_PREFIX + j.randomToken(), this._negotiator = new ot(this), this._localStream && this._negotiator.startConnection({
 			_stream: this._localStream,
 			originator: !0
 		});
 	}
 	_initializeDataChannel(e) {
 		this.dataChannel = e, this.dataChannel.onopen = () => {
-			N.log(`DC#${this.connectionId} dc connection success`), this.emit("willCloseOnRemote");
+			M.log(`DC#${this.connectionId} dc connection success`), this.emit("willCloseOnRemote");
 		}, this.dataChannel.onclose = () => {
-			N.log(`DC#${this.connectionId} dc closed for:`, this.peer), this.close();
+			M.log(`DC#${this.connectionId} dc closed for:`, this.peer), this.close();
 		};
 	}
 	addStream(e) {
-		N.log("Receiving stream", e), this._remoteStream = e, super.emit("stream", e);
+		M.log("Receiving stream", e), this._remoteStream = e, super.emit("stream", e);
 	}
 	handleMessage(e) {
 		let t = e.type, n = e.payload;
 		switch (e.type) {
-			case K.Answer:
+			case G.Answer:
 				this._negotiator.handleSDP(t, n.sdp), this._open = !0;
 				break;
-			case K.Candidate:
+			case G.Candidate:
 				this._negotiator.handleCandidate(n.candidate);
 				break;
-			default: N.warn(`Unrecognized message type:${t} from peer:${this.peer}`);
+			default: M.warn(`Unrecognized message type:${t} from peer:${this.peer}`);
 		}
 	}
 	answer(e, t = {}) {
 		if (this._localStream) {
-			N.warn("Local stream already exists on this MediaConnection. Are you answering a call twice?");
+			M.warn("Local stream already exists on this MediaConnection. Are you answering a call twice?");
 			return;
 		}
 		this._localStream = e, t && t.sdpTransform && (this.options.sdpTransform = t.sdpTransform), this._negotiator.startConnection({
@@ -2173,13 +2173,13 @@ var B = /*#__PURE__*/ function(e) {
 	close() {
 		this._negotiator &&= (this._negotiator.cleanup(), null), this._localStream = null, this._remoteStream = null, this.provider &&= (this.provider._removeConnection(this), null), this.options && this.options._stream && (this.options._stream = null), this.open && (this._open = !1, super.emit("close"));
 	}
-}, ut = class {
+}, dt = class {
 	constructor(e) {
 		this._options = e;
 	}
 	_buildRequest(e) {
 		let t = this._options.secure ? "https" : "http", { host: n, port: r, path: i, key: a } = this._options, o = new URL(`${t}://${n}:${r}${i}${a}/${e}`);
-		return o.searchParams.set("ts", `${Date.now()}${Math.random()}`), o.searchParams.set("version", rt), fetch(o.href, { referrerPolicy: this._options.referrerPolicy });
+		return o.searchParams.set("ts", `${Date.now()}${Math.random()}`), o.searchParams.set("version", it), fetch(o.href, { referrerPolicy: this._options.referrerPolicy });
 	}
 	async retrieveId() {
 		try {
@@ -2187,9 +2187,9 @@ var B = /*#__PURE__*/ function(e) {
 			if (e.status !== 200) throw Error(`Error. Status:${e.status}`);
 			return e.text();
 		} catch (e) {
-			N.error("Error retrieving ID", e);
+			M.error("Error retrieving ID", e);
 			let t = "";
-			throw this._options.path === "/" && this._options.host !== M.CLOUD_HOST && (t = " If you passed in a `path` to your self-hosted PeerServer, you'll also need to pass in that same path when creating a new Peer."), Error("Could not get an ID from the server." + t);
+			throw this._options.path === "/" && this._options.host !== j.CLOUD_HOST && (t = " If you passed in a `path` to your self-hosted PeerServer, you'll also need to pass in that same path when creating a new Peer."), Error("Could not get an ID from the server." + t);
 		}
 	}
 	async listAllPeers() {
@@ -2198,34 +2198,34 @@ var B = /*#__PURE__*/ function(e) {
 			if (e.status !== 200) {
 				if (e.status === 401) {
 					let e = "";
-					throw e = this._options.host === M.CLOUD_HOST ? "It looks like you're using the cloud server. You can email team@peerjs.com to enable peer listing for your API key." : "You need to enable `allow_discovery` on your self-hosted PeerServer to use this feature.", Error("It doesn't look like you have permission to list peers IDs. " + e);
+					throw e = this._options.host === j.CLOUD_HOST ? "It looks like you're using the cloud server. You can email team@peerjs.com to enable peer listing for your API key." : "You need to enable `allow_discovery` on your self-hosted PeerServer to use this feature.", Error("It doesn't look like you have permission to list peers IDs. " + e);
 				}
 				throw Error(`Error. Status:${e.status}`);
 			}
 			return e.json();
 		} catch (e) {
-			throw N.error("Error retrieving list peers", e), Error("Could not get list peers from the server." + e);
+			throw M.error("Error retrieving list peers", e), Error("Could not get list peers from the server." + e);
 		}
 	}
-}, dt = class e extends ct {
+}, ft = class e extends lt {
 	static #e = this.ID_PREFIX = "dc_";
 	static #t = this.MAX_BUFFERED_AMOUNT = 8388608;
 	get type() {
-		return B.Data;
+		return z.Data;
 	}
 	constructor(t, n, r) {
-		super(t, n, r), this.connectionId = this.options.connectionId || e.ID_PREFIX + Ze(), this.label = this.options.label || this.connectionId, this.reliable = !!this.options.reliable, this._negotiator = new at(this), this._negotiator.startConnection(this.options._payload || {
+		super(t, n, r), this.connectionId = this.options.connectionId || e.ID_PREFIX + Qe(), this.label = this.options.label || this.connectionId, this.reliable = !!this.options.reliable, this._negotiator = new ot(this), this._negotiator.startConnection(this.options._payload || {
 			originator: !0,
 			reliable: this.reliable
 		});
 	}
 	_initializeDataChannel(e) {
 		this.dataChannel = e, this.dataChannel.onopen = () => {
-			N.log(`DC#${this.connectionId} dc connection success`), this._open = !0, this.emit("open");
+			M.log(`DC#${this.connectionId} dc connection success`), this._open = !0, this.emit("open");
 		}, this.dataChannel.onmessage = (e) => {
-			N.log(`DC#${this.connectionId} dc onmessage:`, e.data);
+			M.log(`DC#${this.connectionId} dc onmessage:`, e.data);
 		}, this.dataChannel.onclose = () => {
-			N.log(`DC#${this.connectionId} dc closed for:`, this.peer), this.close();
+			M.log(`DC#${this.connectionId} dc closed for:`, this.peer), this.close();
 		};
 	}
 	close(e) {
@@ -2237,7 +2237,7 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	send(e, t = !1) {
 		if (!this.open) {
-			this.emitError(U.NotOpenYet, "Connection is not open. You should listen for the `open` event before sending messages.");
+			this.emitError(H.NotOpenYet, "Connection is not open. You should listen for the `open` event before sending messages.");
 			return;
 		}
 		return this._send(e, t);
@@ -2245,16 +2245,16 @@ var B = /*#__PURE__*/ function(e) {
 	async handleMessage(e) {
 		let t = e.payload;
 		switch (e.type) {
-			case K.Answer:
+			case G.Answer:
 				await this._negotiator.handleSDP(e.type, t.sdp);
 				break;
-			case K.Candidate:
+			case G.Candidate:
 				await this._negotiator.handleCandidate(t.candidate);
 				break;
-			default: N.warn("Unrecognized message type:", e.type, "from peer:", this.peer);
+			default: M.warn("Unrecognized message type:", e.type, "from peer:", this.peer);
 		}
 	}
-}, q = class extends dt {
+}, K = class extends ft {
 	get bufferSize() {
 		return this._bufferSize;
 	}
@@ -2266,13 +2266,13 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	_trySend(e) {
 		if (!this.open) return !1;
-		if (this.dataChannel.bufferedAmount > dt.MAX_BUFFERED_AMOUNT) return this._buffering = !0, setTimeout(() => {
+		if (this.dataChannel.bufferedAmount > ft.MAX_BUFFERED_AMOUNT) return this._buffering = !0, setTimeout(() => {
 			this._buffering = !1, this._tryBuffer();
 		}, 50), !1;
 		try {
 			this.dataChannel.send(e);
 		} catch (e) {
-			return N.error(`DC#:${this.connectionId} Error when sending:`, e), this._buffering = !0, this.close(), !1;
+			return M.error(`DC#:${this.connectionId} Error when sending:`, e), this._buffering = !0, this.close(), !1;
 		}
 		return !0;
 	}
@@ -2291,12 +2291,12 @@ var B = /*#__PURE__*/ function(e) {
 	constructor(...e) {
 		super(...e), this._buffer = [], this._bufferSize = 0, this._buffering = !1;
 	}
-}, J = class extends q {
+}, q = class extends K {
 	close(e) {
 		super.close(e), this._chunkedData = {};
 	}
 	constructor(e, t, n) {
-		super(e, t, n), this.chunker = new Je(), this.serialization = W.Binary, this._chunkedData = {};
+		super(e, t, n), this.chunker = new Ye(), this.serialization = U.Binary, this._chunkedData = {};
 	}
 	_handleDataMessage({ data: e }) {
 		let t = f(e), n = t.__peerData;
@@ -2318,7 +2318,7 @@ var B = /*#__PURE__*/ function(e) {
 		};
 		if (n.data[e.n] = new Uint8Array(e.data), n.count++, this._chunkedData[t] = n, n.total === n.count) {
 			delete this._chunkedData[t];
-			let e = Ye(n.data);
+			let e = Xe(n.data);
 			this._handleDataMessage({ data: e });
 		}
 	}
@@ -2341,10 +2341,10 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	_sendChunks(e) {
 		let t = this.chunker.chunk(e);
-		N.log(`DC#${this.connectionId} Try to send ${t.length} chunks...`);
+		M.log(`DC#${this.connectionId} Try to send ${t.length} chunks...`);
 		for (let e of t) this.send(e, !0);
 	}
-}, ft = class extends q {
+}, pt = class extends K {
 	_handleDataMessage({ data: e }) {
 		super.emit("data", e);
 	}
@@ -2352,9 +2352,9 @@ var B = /*#__PURE__*/ function(e) {
 		this._bufferedSend(e);
 	}
 	constructor(...e) {
-		super(...e), this.serialization = W.None;
+		super(...e), this.serialization = U.None;
 	}
-}, pt = class extends q {
+}, mt = class extends K {
 	_handleDataMessage({ data: e }) {
 		let t = this.parse(this.decoder.decode(e)), n = t.__peerData;
 		if (n && n.type === "close") {
@@ -2365,16 +2365,16 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	_send(e, t) {
 		let n = this.encoder.encode(this.stringify(e));
-		if (n.byteLength >= M.chunkedMTU) {
-			this.emitError(U.MessageToBig, "Message too big for JSON channel");
+		if (n.byteLength >= j.chunkedMTU) {
+			this.emitError(H.MessageToBig, "Message too big for JSON channel");
 			return;
 		}
 		this._bufferedSend(n);
 	}
 	constructor(...e) {
-		super(...e), this.serialization = W.JSON, this.encoder = new TextEncoder(), this.decoder = new TextDecoder(), this.stringify = JSON.stringify, this.parse = JSON.parse;
+		super(...e), this.serialization = U.JSON, this.encoder = new TextEncoder(), this.decoder = new TextDecoder(), this.stringify = JSON.stringify, this.parse = JSON.parse;
 	}
-}, mt = class e extends ot {
+}, ht = class e extends st {
 	static #e = this.DEFAULT_KEY = "peerjs";
 	get id() {
 		return this._id;
@@ -2401,47 +2401,47 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	constructor(t, n) {
 		super(), this._serializers = {
-			raw: ft,
-			json: pt,
-			binary: J,
-			"binary-utf8": J,
-			default: J
+			raw: pt,
+			json: mt,
+			binary: q,
+			"binary-utf8": q,
+			default: q
 		}, this._id = null, this._lastServerId = null, this._destroyed = !1, this._disconnected = !1, this._open = !1, this._connections = /* @__PURE__ */ new Map(), this._lostMessages = /* @__PURE__ */ new Map();
 		let r;
 		if (t && t.constructor == Object ? n = t : t && (r = t.toString()), n = {
 			debug: 0,
-			host: M.CLOUD_HOST,
-			port: M.CLOUD_PORT,
+			host: j.CLOUD_HOST,
+			port: j.CLOUD_PORT,
 			path: "/",
 			key: e.DEFAULT_KEY,
-			token: M.randomToken(),
-			config: M.defaultConfig,
+			token: j.randomToken(),
+			config: j.defaultConfig,
 			referrerPolicy: "strict-origin-when-cross-origin",
 			serializers: {},
 			...n
 		}, this._options = n, this._serializers = {
 			...this._serializers,
 			...this.options.serializers
-		}, this._options.host === "/" && (this._options.host = window.location.hostname), this._options.path && (this._options.path[0] !== "/" && (this._options.path = "/" + this._options.path), this._options.path[this._options.path.length - 1] !== "/" && (this._options.path += "/")), this._options.secure === void 0 && this._options.host !== M.CLOUD_HOST ? this._options.secure = M.isSecure() : this._options.host == M.CLOUD_HOST && (this._options.secure = !0), this._options.logFunction && N.setLogFunction(this._options.logFunction), N.logLevel = this._options.debug || 0, this._api = new ut(n), this._socket = this._createServerConnection(), !M.supports.audioVideo && !M.supports.data) {
-			this._delayedAbort(V.BrowserIncompatible, "The current browser does not support WebRTC");
+		}, this._options.host === "/" && (this._options.host = window.location.hostname), this._options.path && (this._options.path[0] !== "/" && (this._options.path = "/" + this._options.path), this._options.path[this._options.path.length - 1] !== "/" && (this._options.path += "/")), this._options.secure === void 0 && this._options.host !== j.CLOUD_HOST ? this._options.secure = j.isSecure() : this._options.host == j.CLOUD_HOST && (this._options.secure = !0), this._options.logFunction && M.setLogFunction(this._options.logFunction), M.logLevel = this._options.debug || 0, this._api = new dt(n), this._socket = this._createServerConnection(), !j.supports.audioVideo && !j.supports.data) {
+			this._delayedAbort(B.BrowserIncompatible, "The current browser does not support WebRTC");
 			return;
 		}
-		if (r && !M.validateId(r)) {
-			this._delayedAbort(V.InvalidID, `ID "${r}" is invalid`);
+		if (r && !j.validateId(r)) {
+			this._delayedAbort(B.InvalidID, `ID "${r}" is invalid`);
 			return;
 		}
-		r ? this._initialize(r) : this._api.retrieveId().then((e) => this._initialize(e)).catch((e) => this._abort(V.ServerError, e));
+		r ? this._initialize(r) : this._api.retrieveId().then((e) => this._initialize(e)).catch((e) => this._abort(B.ServerError, e));
 	}
 	_createServerConnection() {
-		let e = new it(this._options.secure, this._options.host, this._options.port, this._options.path, this._options.key, this._options.pingInterval);
-		return e.on(G.Message, (e) => {
+		let e = new at(this._options.secure, this._options.host, this._options.port, this._options.path, this._options.key, this._options.pingInterval);
+		return e.on(W.Message, (e) => {
 			this._handleMessage(e);
-		}), e.on(G.Error, (e) => {
-			this._abort(V.SocketError, e);
-		}), e.on(G.Disconnected, () => {
-			this.disconnected || (this.emitError(V.Network, "Lost connection to server."), this.disconnect());
-		}), e.on(G.Close, () => {
-			this.disconnected || this._abort(V.SocketClosed, "Underlying socket is already closed.");
+		}), e.on(W.Error, (e) => {
+			this._abort(B.SocketError, e);
+		}), e.on(W.Disconnected, () => {
+			this.disconnected || (this.emitError(B.Network, "Lost connection to server."), this.disconnect());
+		}), e.on(W.Close, () => {
+			this.disconnected || this._abort(B.SocketClosed, "Underlying socket is already closed.");
 		}), e;
 	}
 	_initialize(e) {
@@ -2450,34 +2450,34 @@ var B = /*#__PURE__*/ function(e) {
 	_handleMessage(e) {
 		let t = e.type, n = e.payload, r = e.src;
 		switch (t) {
-			case K.Open:
+			case G.Open:
 				this._lastServerId = this.id, this._open = !0, this.emit("open", this.id);
 				break;
-			case K.Error:
-				this._abort(V.ServerError, n.msg);
+			case G.Error:
+				this._abort(B.ServerError, n.msg);
 				break;
-			case K.IdTaken:
-				this._abort(V.UnavailableID, `ID "${this.id}" is taken`);
+			case G.IdTaken:
+				this._abort(B.UnavailableID, `ID "${this.id}" is taken`);
 				break;
-			case K.InvalidKey:
-				this._abort(V.InvalidKey, `API KEY "${this._options.key}" is invalid`);
+			case G.InvalidKey:
+				this._abort(B.InvalidKey, `API KEY "${this._options.key}" is invalid`);
 				break;
-			case K.Leave:
-				N.log(`Received leave message from ${r}`), this._cleanupPeer(r), this._connections.delete(r);
+			case G.Leave:
+				M.log(`Received leave message from ${r}`), this._cleanupPeer(r), this._connections.delete(r);
 				break;
-			case K.Expire:
-				this.emitError(V.PeerUnavailable, `Could not connect to peer ${r}`);
+			case G.Expire:
+				this.emitError(B.PeerUnavailable, `Could not connect to peer ${r}`);
 				break;
-			case K.Offer: {
+			case G.Offer: {
 				let e = n.connectionId, t = this.getConnection(r, e);
-				if (t && (t.close(), N.warn(`Offer received for existing Connection ID:${e}`)), n.type === B.Media) {
-					let i = new lt(r, this, {
+				if (t && (t.close(), M.warn(`Offer received for existing Connection ID:${e}`)), n.type === z.Media) {
+					let i = new ut(r, this, {
 						connectionId: e,
 						_payload: n,
 						metadata: n.metadata
 					});
 					t = i, this._addConnection(r, t), this.emit("call", i);
-				} else if (n.type === B.Data) {
+				} else if (n.type === z.Data) {
 					let i = new this._serializers[n.serialization](r, this, {
 						connectionId: e,
 						_payload: n,
@@ -2488,7 +2488,7 @@ var B = /*#__PURE__*/ function(e) {
 					});
 					t = i, this._addConnection(r, t), this.emit("connection", i);
 				} else {
-					N.warn(`Received malformed connection type:${n.type}`);
+					M.warn(`Received malformed connection type:${n.type}`);
 					return;
 				}
 				let i = this._getMessages(e);
@@ -2497,11 +2497,11 @@ var B = /*#__PURE__*/ function(e) {
 			}
 			default: {
 				if (!n) {
-					N.warn(`You received a malformed message from ${r} of type ${t}`);
+					M.warn(`You received a malformed message from ${r} of type ${t}`);
 					return;
 				}
 				let i = n.connectionId, a = this.getConnection(r, i);
-				a && a.peerConnection ? a.handleMessage(e) : i ? this._storeMessage(i, e) : N.warn("You received an unrecognized message:", e);
+				a && a.peerConnection ? a.handleMessage(e) : i ? this._storeMessage(i, e) : M.warn("You received an unrecognized message:", e);
 				break;
 			}
 		}
@@ -2518,7 +2518,7 @@ var B = /*#__PURE__*/ function(e) {
 			serialization: "default",
 			...t
 		}, this.disconnected) {
-			N.warn("You cannot connect to a new Peer because you called .disconnect() on this Peer and ended your connection with the server. You can create a new Peer to reconnect, or call reconnect on this peer if you believe its ID to still be available."), this.emitError(V.Disconnected, "Cannot connect to new Peer after disconnecting from server.");
+			M.warn("You cannot connect to a new Peer because you called .disconnect() on this Peer and ended your connection with the server. You can create a new Peer to reconnect, or call reconnect on this peer if you believe its ID to still be available."), this.emitError(B.Disconnected, "Cannot connect to new Peer after disconnecting from server.");
 			return;
 		}
 		let n = new this._serializers[t.serialization](e, this, t);
@@ -2526,21 +2526,21 @@ var B = /*#__PURE__*/ function(e) {
 	}
 	call(e, t, n = {}) {
 		if (this.disconnected) {
-			N.warn("You cannot connect to a new Peer because you called .disconnect() on this Peer and ended your connection with the server. You can create a new Peer to reconnect."), this.emitError(V.Disconnected, "Cannot connect to new Peer after disconnecting from server.");
+			M.warn("You cannot connect to a new Peer because you called .disconnect() on this Peer and ended your connection with the server. You can create a new Peer to reconnect."), this.emitError(B.Disconnected, "Cannot connect to new Peer after disconnecting from server.");
 			return;
 		}
 		if (!t) {
-			N.error("To call a peer, you must provide a stream from your browser's `getUserMedia`.");
+			M.error("To call a peer, you must provide a stream from your browser's `getUserMedia`.");
 			return;
 		}
-		let r = new lt(e, this, {
+		let r = new ut(e, this, {
 			...n,
 			_stream: t
 		});
 		return this._addConnection(e, r), r;
 	}
 	_addConnection(e, t) {
-		N.log(`add connection ${t.type}:${t.connectionId} to peerId:${e}`), this._connections.has(e) || this._connections.set(e, []), this._connections.get(e).push(t);
+		M.log(`add connection ${t.type}:${t.connectionId} to peerId:${e}`), this._connections.has(e) || this._connections.set(e, []), this._connections.get(e).push(t);
 	}
 	_removeConnection(e) {
 		let t = this._connections.get(e.peer);
@@ -2562,10 +2562,10 @@ var B = /*#__PURE__*/ function(e) {
 		}, 0);
 	}
 	_abort(e, t) {
-		N.error("Aborting!"), this.emitError(e, t), this._lastServerId ? this.disconnect() : this.destroy();
+		M.error("Aborting!"), this.emitError(e, t), this._lastServerId ? this.disconnect() : this.destroy();
 	}
 	destroy() {
-		this.destroyed || (N.log(`Destroy peer with ID:${this.id}`), this.disconnect(), this._cleanup(), this._destroyed = !0, this.emit("close"));
+		this.destroyed || (M.log(`Destroy peer with ID:${this.id}`), this.disconnect(), this._cleanup(), this._destroyed = !0, this.emit("close"));
 	}
 	_cleanup() {
 		for (let e of this._connections.keys()) this._cleanupPeer(e), this._connections.delete(e);
@@ -2578,19 +2578,19 @@ var B = /*#__PURE__*/ function(e) {
 	disconnect() {
 		if (this.disconnected) return;
 		let e = this.id;
-		N.log(`Disconnect peer with ID:${e}`), this._disconnected = !0, this._open = !1, this.socket.close(), this._lastServerId = e, this._id = null, this.emit("disconnected", e);
+		M.log(`Disconnect peer with ID:${e}`), this._disconnected = !0, this._open = !1, this.socket.close(), this._lastServerId = e, this._id = null, this.emit("disconnected", e);
 	}
 	reconnect() {
-		if (this.disconnected && !this.destroyed) N.log(`Attempting reconnection to server with ID ${this._lastServerId}`), this._disconnected = !1, this._initialize(this._lastServerId);
+		if (this.disconnected && !this.destroyed) M.log(`Attempting reconnection to server with ID ${this._lastServerId}`), this._disconnected = !1, this._initialize(this._lastServerId);
 		else if (this.destroyed) throw Error("This peer cannot reconnect to the server. It has already been destroyed.");
-		else if (!this.disconnected && !this.open) N.error("In a hurry? We're still trying to make the initial connection!");
+		else if (!this.disconnected && !this.open) M.error("In a hurry? We're still trying to make the initial connection!");
 		else throw Error(`Peer ${this.id} cannot reconnect because it is not disconnected from the server!`);
 	}
 	listAllPeers(e = (e) => {}) {
-		this._api.listAllPeers().then((t) => e(t)).catch((e) => this._abort(V.ServerError, e));
+		this._api.listAllPeers().then((t) => e(t)).catch((e) => this._abort(B.ServerError, e));
 	}
-}, Y = mt;
-function ht(e, t) {
+}, gt = ht;
+function _t(e, t) {
 	return JSON.stringify({
 		type: "url",
 		url: e,
@@ -2598,38 +2598,38 @@ function ht(e, t) {
 		v: 1
 	});
 }
-function gt(e) {
+function vt(e) {
 	try {
 		let t = JSON.parse(e);
 		if (typeof t == "object" && t && typeof t.type == "string") return t;
 	} catch {}
 	return null;
 }
-function _t(e) {
+function yt(e) {
 	return typeof e != "string" && !!(e instanceof ArrayBuffer || ArrayBuffer.isView(e) || typeof Blob < "u" && e instanceof Blob);
 }
-function vt(e) {
+function bt(e) {
 	if (e instanceof Uint8Array) return e;
 	if (e instanceof ArrayBuffer) return new Uint8Array(e);
 	if (ArrayBuffer.isView(e)) return new Uint8Array(e.buffer, e.byteOffset, e.byteLength);
 	throw Error("peerdrive-media: unsupported binary frame type");
 }
-function yt() {
+function xt() {
 	return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 //#endregion
 //#region src/core.js
-var bt = mt || Y.Peer || Y.default && Y.default.Peer, X = {
+var St = ht || gt.Peer || gt.default && gt.default.Peer, J = {
 	host: "0.peerjs.com",
 	port: 443,
 	secure: !0,
 	key: "peerjs",
 	path: "/"
-}, xt = 5e3;
-function St(e) {
+}, Ct = 5e3;
+function wt(e) {
 	return `${e.host}:${e.port}:${e.key}:${e.path || "/"}`;
 }
-var Ct = class {
+var Tt = class {
 	constructor(e, t) {
 		this.peerId = e, this.signaling = t, this.peer = null, this.controlConn = null, this.ready = !1, this.closed = !1, this.opening = !1, this.pending = /* @__PURE__ */ new Map(), this.lastActive = 0, this.kaTimer = null, this.pool = [], this.inUse = /* @__PURE__ */ new Set(), this.poolSize = 2;
 	}
@@ -2666,7 +2666,7 @@ var Ct = class {
 		this.sendFileRequest(e, t, n, r);
 	}
 	sendFileRequest(e, t, n, r) {
-		let i = yt(), a, o = !1;
+		let i = xt(), a, o = !1;
 		this.pool.length > 0 ? (a = this.pool.shift(), o = !0) : a = this.peer.connect(this.peerId, {
 			reliable: !0,
 			serialization: "raw",
@@ -2700,14 +2700,14 @@ var Ct = class {
 			r.addEventListener("abort", e), s._onAbort = e;
 		}
 		if (this.pending.set(i, s), o) try {
-			a.send(ht(e, i));
+			a.send(_t(e, i));
 		} catch (e) {
 			this.pending.delete(i), s.cleanup(), n(e);
 		}
 		else {
 			let t = () => {
 				try {
-					a.send(ht(e, i));
+					a.send(_t(e, i));
 				} catch (e) {
 					this.pending.delete(i), s.cleanup(), n(e);
 				}
@@ -2728,7 +2728,7 @@ var Ct = class {
 		a.on("error", u), s._listeners.error = u;
 	}
 	open() {
-		let e = this.signaling, t = typeof window < "u" && window.__PDM_DEBUG ? 3 : 0, n = new bt(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
+		let e = this.signaling, t = typeof window < "u" && window.__PDM_DEBUG ? 3 : 0, n = new St(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
 			host: e.host,
 			port: e.port,
 			secure: e.secure,
@@ -2762,18 +2762,18 @@ var Ct = class {
 		});
 	}
 	handleControlData(e) {
-		this.lastActive = Date.now(), typeof e != "string" || gt(e)?.type;
+		this.lastActive = Date.now(), typeof e != "string" || vt(e)?.type;
 	}
 	handleFileData(e, t) {
 		this.lastActive = Date.now();
 		let n = this.pending.get(e);
 		if (!n) return;
-		if (_t(t)) {
-			let e = vt(t);
+		if (yt(t)) {
+			let e = bt(t);
 			n.chunks.push(e), n.got += e.length;
 			return;
 		}
-		let r = gt(t);
+		let r = vt(t);
 		if (r) switch (r.type) {
 			case "meta":
 				n.mime = r.mime || "application/octet-stream", n.size = r.size || 0, r.status >= 400 && (this.pending.delete(e), n.cleanup(), n.reject(/* @__PURE__ */ Error(`peerdrive-media: upstream ${r.status}`)));
@@ -2809,7 +2809,7 @@ var Ct = class {
 			try {
 				this.controlConn && this.controlConn.send(JSON.stringify({ type: "ping" }));
 			} catch {}
-		}, xt);
+		}, Ct);
 	}
 	warmUp() {
 		let e = [];
@@ -2854,30 +2854,30 @@ var Ct = class {
 		} catch {}
 		this.peer = null, this.controlConn = null;
 	}
-}, Z = new class {
+}, Y = new class {
 	constructor() {
 		this.slots = /* @__PURE__ */ new Map();
 	}
-	async load(e, { peer: t, signaling: n = X, signal: r } = {}) {
+	async load(e, { peer: t, signaling: n = J, signal: r } = {}) {
 		if (!t) throw Error("peerdrive-media: peer (node peer id) is required");
 		if (!e || typeof e != "string") throw Error("peerdrive-media: url is required");
-		let i = `${St(n)}|${t}`, a = this.slots.get(i);
-		if ((!a || a.closed) && (a = new Ct(t, n), this.slots.set(i, a)), r?.aborted) throw new DOMException("aborted", "AbortError");
+		let i = `${wt(n)}|${t}`, a = this.slots.get(i);
+		if ((!a || a.closed) && (a = new Tt(t, n), this.slots.set(i, a)), r?.aborted) throw new DOMException("aborted", "AbortError");
 		return new Promise((t, n) => {
 			a.request(e, t, n, r);
 		});
 	}
-	dispose(e, t = X) {
-		let n = `${St(t)}|${e}`, r = this.slots.get(n);
+	dispose(e, t = J) {
+		let n = `${wt(t)}|${e}`, r = this.slots.get(n);
 		r && (r.failAll("disposed"), this.slots.delete(n));
 	}
-}(), Q = null, $ = null;
-async function wt({ peer: e, signaling: t = X, allow: n } = {}) {
+}(), X = null, Et = null;
+async function Dt({ peer: e, signaling: t = J, allow: n } = {}) {
 	if (!navigator.serviceWorker) throw Error("peerdrive-media: Service Worker not supported");
 	let r = await navigator.serviceWorker.register("/sw.js");
 	await navigator.serviceWorker.ready;
 	let i = new MessageChannel();
-	return i.port1.start(), Q = i.port1, $ = {
+	return i.port1.start(), X = i.port1, Et = {
 		peer: e,
 		signaling: t,
 		allow: n
@@ -2890,18 +2890,18 @@ async function wt({ peer: e, signaling: t = X, allow: n } = {}) {
 		}
 	}), i.port1.onmessage = (e) => {
 		let t = e.data || {};
-		t.type === "pdm-load-request" && Tt(t.url, t.reqId);
+		t.type === "pdm-load-request" && Ot(t.url, t.reqId);
 	}, { unregister: async () => {
-		await r.unregister(), Q = null;
+		await r.unregister(), X = null;
 	} };
 }
-async function Tt(e, t) {
+async function Ot(e, t) {
 	try {
-		let n = await Z.load(e, {
-			peer: $.peer,
-			signaling: $.signaling
+		let n = await Y.load(e, {
+			peer: Et.peer,
+			signaling: Et.signaling
 		});
-		Q && Q.postMessage({
+		X && X.postMessage({
 			type: "pdm-load-response",
 			reqId: t,
 			blob: n.blob,
@@ -2909,32 +2909,103 @@ async function Tt(e, t) {
 			size: n.size
 		});
 	} catch (e) {
-		Q && Q.postMessage({
+		X && X.postMessage({
 			type: "pdm-load-response",
 			reqId: t,
 			error: e.message
 		});
 	}
 }
+var Z = null, Q = {};
+function kt({ peer: e, signaling: t = J, allow: n } = {}) {
+	if (!e) throw Error("peerdrive-media: peer is required for setupMP");
+	if (Z = {
+		peer: e,
+		signaling: t,
+		allow: n
+	}, !Q.img) {
+		let e = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
+		Q.img = e?.set, Object.defineProperty(HTMLImageElement.prototype, "src", {
+			get: e?.get,
+			set: function(e) {
+				Z && At(e) ? jt(this, e, Z) : Q.img && Q.img.call(this, e);
+			},
+			configurable: !0
+		});
+	}
+	if (!Q.video) {
+		let e = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, "src");
+		Q.video = e?.set, Object.defineProperty(HTMLVideoElement.prototype, "src", {
+			get: e?.get,
+			set: function(e) {
+				Z && At(e) ? jt(this, e, Z) : Q.video && Q.video.call(this, e);
+			},
+			configurable: !0
+		});
+	}
+	if (typeof HTMLAudioElement < "u" && !Q.audio) {
+		let e = Object.getOwnPropertyDescriptor(HTMLAudioElement.prototype, "src");
+		Q.audio = e?.set, Object.defineProperty(HTMLAudioElement.prototype, "src", {
+			get: e?.get,
+			set: function(e) {
+				Z && At(e) ? jt(this, e, Z) : Q.audio && Q.audio.call(this, e);
+			},
+			configurable: !0
+		});
+	}
+	return { teardown: () => {
+		Z = null;
+		for (let [e, t] of Object.entries(Q)) if (t) {
+			let n = e === "img" ? HTMLImageElement.prototype : e === "video" ? HTMLVideoElement.prototype : HTMLAudioElement.prototype, r = Object.getOwnPropertyDescriptor(n, "src");
+			Object.defineProperty(n, "src", {
+				get: r?.get,
+				set: t,
+				configurable: !0
+			});
+		}
+		Q = {};
+	} };
+}
+function At(e) {
+	return Z?.allow ? typeof Z.allow == "function" ? Z.allow(e) : Array.isArray(Z.allow) ? Z.allow.some((t) => e.startsWith(t)) : !1 : !1;
+}
+async function jt(e, t, n) {
+	try {
+		let r = await Y.load(t, {
+			peer: n.peer,
+			signaling: n.signaling
+		});
+		Q[e.tagName?.toLowerCase()] ? Q[e.tagName?.toLowerCase()].call(e, r.blobUrl) : e.src = r.blobUrl;
+	} catch (n) {
+		console.error("peerdrive-media: load failed", n), Q[e.tagName?.toLowerCase()] ? Q[e.tagName?.toLowerCase()].call(e, t) : e.src = t;
+	}
+}
 //#endregion
 //#region src/vanilla/main.js
-function Et({ url: e, peer: t, signaling: n = X, signal: r } = {}) {
-	return Z.load(e, {
+function $({ url: e, peer: t, signaling: n = J, signal: r } = {}) {
+	return Y.load(e, {
 		peer: t,
 		signaling: n,
 		signal: r
 	});
 }
-async function Dt({ peer: e, signaling: t = X, allow: n } = {}) {
-	return wt({
+async function Mt({ peer: e, signaling: t = J, allow: n } = {}) {
+	return Dt({
 		peer: e,
 		signaling: t,
 		allow: n
 	});
 }
-function Ot({ url: e, peer: t, signaling: n, signal: r, container: i, props: a = {} } = {}) {
+function Nt({ peer: e, signaling: t = J, allow: n } = {}) {
+	return kt({
+		peer: e,
+		signaling: t,
+		allow: n
+	});
+}
+function Pt({ url: e, peer: t, signaling: n, signal: r, container: i, props: a = {} } = {}) {
 	let o = i || document.body;
-	return Et({
+	return $({
 		url: e,
 		peer: t,
 		signaling: n,
@@ -2951,12 +3022,13 @@ function Ot({ url: e, peer: t, signaling: n, signal: r, container: i, props: a =
 		};
 	});
 }
-var kt = {
-	load: Et,
-	mount: Ot,
-	setupSW: Dt,
-	client: Z,
-	DEFAULT_SIGNALING: X
+var Ft = {
+	load: $,
+	mount: Pt,
+	setupSW: Mt,
+	setupMonkeyPatch: Nt,
+	client: Y,
+	DEFAULT_SIGNALING: J
 };
 //#endregion
-export { X as DEFAULT_SIGNALING, Z as client, kt as default, Et as load, Ot as mount, wt as registerSW, Dt as setupSW };
+export { J as DEFAULT_SIGNALING, Y as client, Ft as default, $ as load, Pt as mount, Dt as registerSW, kt as setupMP, Nt as setupMonkeyPatch, Mt as setupSW };
