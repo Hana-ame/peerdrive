@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <title>media-node E2E 测试</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    img { max-width: 100%; border-radius: 6px; }
+    .err { color: #c0392b; }
+    .ok { color: #27ae60; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; }
+  </style>
+</head>
+<body>
+  <h1>media-node E2E（Go standalone → ECH → twimg）</h1>
+
+  <div class="card">
+    <h2>真实 twimg 图片（经 Go media-node ECH）</h2>
+    <div id="twimg-box" class="err">加载中…</div>
+  </div>
+
+  <script src="../dist/vanilla/peerdrive-media.iife.js"></script>
+  <script>
+    const SIGNAL = {
+      host: 'peersignal.moonchan.xyz',
+      port: 443,
+      secure: true,
+      key: 'pd-signal-b9447b406828e500',
+    }
+    const PEER = 'media-node'
+
+    // 真实存在的 twimg 资源（curl 验证过 200）
+    PeerMedia.load({ peer: PEER, signaling: SIGNAL, url: 'https://abs.twimg.com/favicons/twitter.2.ico' })
+      .then(({ blobUrl, mime, size }) => {
+        const box = document.getElementById('twimg-box')
+        box.classList.remove('err')
+        box.innerHTML = `<span class="ok">${mime} ${size}B ✅</span>`
+        const img = document.createElement('img')
+        img.src = blobUrl
+        box.appendChild(img)
+      })
+      .catch((e) => {
+        document.getElementById('twimg-box').textContent = '失败: ' + e.message
+      })
+  </script>
+</body>
+</html>

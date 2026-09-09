@@ -238,7 +238,7 @@ class ConnectionSlot {
     const sig = this.signaling
     const dbg = typeof window !== 'undefined' && window.__PDM_DEBUG ? 3 : 0
     const peer = new Peer(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
-      host: sig.host, port: sig.port, secure: sig.secure, key: sig.key, path: sig.path,
+      host: sig.host, port: sig.port, secure: sig.secure, key: sig.key, path: sig.path || '/',
       config: sig.config || { iceServers: [] },
       debug: dbg,
     })

@@ -2733,7 +2733,7 @@ var Tt = class {
 			port: e.port,
 			secure: e.secure,
 			key: e.key,
-			path: e.path,
+			path: e.path || "/",
 			config: e.config || { iceServers: [] },
 			debug: t
 		});
