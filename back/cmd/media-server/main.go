@@ -1,10 +1,17 @@
-// peerdrive-media 资源代理服务器（Go 版）
+// peerdrive-media 资源代理服务器（Go 版，集成 ECH 直接访问）
 //
 // 职责：
 //   1. 连接 PeerJS 信令服务器
 //   2. 接收浏览器 WebRTC 连接
-//   3. 接收 url 请求，fetch 文件
+//   3. 接收 url 请求，经 **ECH 域前置** 直接 fetch 目标文件
+//      （不依赖 ech-proxy 独立进程——本二进制内置 ECH 客户端）
 //   4. 通过 DataChannel 分块发送回浏览器
+//
+// ECH（Encrypted Client Hello）：
+//   浏览器请求的真实 URL（如 https://video-cf.twimg.com/xxx）原样发给本节点；
+//   TCP 连 cloudflare-ech.com 外壳（不被墙），TLS ECH 加密的 ClientHello
+//   内含真实目标域名（video-cf.twimg.com），Cloudflare 边缘路由过去。
+//   GFW 只看到外壳域名的明文 SNI，放行。
 //
 // 用法：
 //   go run ./cmd/media-server --peer-id media-node
@@ -33,17 +40,18 @@ import (
 	"time"
 
 	"github.com/Hana-ame/go-peerjs"
+	"peerdrive/ech"
 )
 
 // Msg 协议消息
 type Msg struct {
-	Type  string `json:"type"`
-	URL   string `json:"url,omitempty"`
-	ReqID string `json:"reqId,omitempty"`
-	Mime  string `json:"mime,omitempty"`
-	Size  int64  `json:"size,omitempty"`
-	Status int   `json:"status,omitempty"`
-	Msg   string `json:"msg,omitempty"`
+	Type   string `json:"type"`
+	URL    string `json:"url,omitempty"`
+	ReqID  string `json:"reqId,omitempty"`
+	Mime   string `json:"mime,omitempty"`
+	Size   int64  `json:"size,omitempty"`
+	Status int    `json:"status,omitempty"`
+	Msg    string `json:"msg,omitempty"`
 }
 
 // allowPrefix 检查 URL 是否在白名单内
@@ -58,7 +66,7 @@ func allowPrefix(prefixes []string) func(string) bool {
 	}
 }
 
-// guessMime 根据 URL 和 Content-Type 猜测 MIME
+// guessMime 根据 URL 和 Content-Type 猜测 MIME（无 Content-Type 时按扩展名）。
 func guessMime(url, contentType string) string {
 	if contentType != "" {
 		return contentType
@@ -91,14 +99,29 @@ func guessMime(url, contentType string) string {
 	return "application/octet-stream"
 }
 
+// fetchViaECH 经 ECH 域前置 fetch URL。
+// referer 非空时附加（防盗链，如 twitter 需要 https://x.com）。
+func fetchViaECH(url, referer string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+	// User-Agent：twitter CDN 有 UA 校验，填浏览器 UA
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	return ech.Do(req)
+}
+
 // handleRequest 处理文件请求
 func handleRequest(ctx context.Context, conn *peerjs.Connection, msg Msg, chunkSize int) error {
 	url := msg.URL
 	reqID := msg.ReqID
 	log.Printf("[req %s] url=%s", reqID, url)
 
-	// fetch 文件
-	resp, err := http.Get(url)
+	// 经 ECH 直接访问目标（video-cf.twimg.com 等 twitter CDN）
+	resp, err := fetchViaECH(url, "https://x.com")
 	if err != nil {
 		conn.SendJSON(Msg{Type: "err", ReqID: reqID, Msg: fmt.Sprintf("fetch failed: %v", err)})
 		return err
@@ -121,7 +144,7 @@ func handleRequest(ctx context.Context, conn *peerjs.Connection, msg Msg, chunkS
 		Size:   size,
 	})
 
-	// 分块发送数据
+	// 分块发送数据（64KB 块，对流式大文件友好）
 	buf := make([]byte, chunkSize)
 	totalSent := int64(0)
 	for {
@@ -148,15 +171,16 @@ func handleRequest(ctx context.Context, conn *peerjs.Connection, msg Msg, chunkS
 }
 
 func main() {
-	// 默认配置
+	// 默认配置（生产默认：peersignal.moonchan.xyz + ECH 直连 twimg）
 	peerID := "media-node"
 	host := "peersignal.moonchan.xyz"
 	port := "443"
 	secure := true
 	key := "pd-signal-b9447b406828e500"
-	allowPrefixes := "https://twimg.l.moonchan.xyz/"
+	allowPrefixes := "https://video-cf.twimg.com/,https://pbs.twimg.com/,https://video.twimg.com/"
 	chunkSize := 64 * 1024 // 64KB
 	statusAddr := ":9001"
+	proxyURL := "" // 空则读 HTTPS_PROXY 环境变量（本地测试需要走代理）
 
 	// 解析命令行参数
 	flag.StringVar(&peerID, "peer-id", peerID, "Peer ID")
@@ -167,26 +191,33 @@ func main() {
 	flag.StringVar(&allowPrefixes, "allow", allowPrefixes, "Allowed URL prefixes (comma-separated)")
 	flag.IntVar(&chunkSize, "chunk-size", chunkSize, "Chunk size in bytes")
 	flag.StringVar(&statusAddr, "status-addr", statusAddr, "Status API listen address")
+	flag.StringVar(&proxyURL, "proxy", proxyURL, "HTTP proxy for ECH (default: HTTPS_PROXY env)")
 	flag.Parse()
 
 	allow := allowPrefix(strings.Split(allowPrefixes, ","))
 
-	// 创建 PeerJS 客户端
-	opts := peerjs.Options{
-		ID:     peerID,
-		Host:   host,
-		Port:   port,
-		Secure: secure,
-		Key:    key,
-		PingInterval: 5 * time.Second,
+	// 初始化 ECH 客户端（内置，不依赖外部 ech-proxy 进程）
+	echCfg := ech.Config{ProxyURL: proxyURL}
+	if err := ech.InitDefault(echCfg); err != nil {
+		log.Printf("ECH init failed (将只用普通 fetch 兜底): %v", err)
+	} else {
+		log.Printf("ECH 客户端就绪（直接访问 twitter CDN，无需 ech-proxy）")
 	}
 
+	// 创建 PeerJS 客户端
+	opts := peerjs.Options{
+		ID:           peerID,
+		Host:         host,
+		Port:         port,
+		Secure:       secure,
+		Key:          key,
+		PingInterval: 5 * time.Second,
+	}
 	peer := peerjs.NewPeer(peerID, opts)
 
 	// 连接信令
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-
 	if err := peer.Dial(ctx); err != nil {
 		log.Fatalf("Failed to connect to signaling: %v", err)
 	}
@@ -196,18 +227,15 @@ func main() {
 	peer.OnConnection(func(conn *peerjs.Connection) {
 		log.Printf("New connection from %s", conn.PeerID)
 
-		// 处理消息
 		conn.OnMessage(func(frame peerjs.Frame) {
 			if !frame.IsText {
 				return // 忽略二进制帧（浏览器不应发送）
 			}
-
 			var msg Msg
 			if err := json.Unmarshal(frame.Data, &msg); err != nil {
 				log.Printf("Invalid frame: %s", string(frame.Data))
 				return
 			}
-
 			switch msg.Type {
 			case "url":
 				if !allow(msg.URL) {
@@ -220,19 +248,19 @@ func main() {
 			}
 		})
 
-		// 处理关闭
 		conn.OnClose(func(*peerjs.Connection) {
 			log.Printf("Connection closed from %s", conn.PeerID)
 		})
 	})
 
-	// 启动状态 API
+	// 状态 API
 	go func() {
 		http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"peerId": peerID,
 				"status": "running",
+				"ech":    true,
 			})
 		})
 		log.Printf("Status API listening on %s", statusAddr)
