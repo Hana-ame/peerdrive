@@ -215,6 +215,12 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		p2p.POST("/forward/connect", authRequired, controller.ConnectForwardSession)
 		p2p.GET("/forward/list", controller.ListForwardSessions)
 		p2p.POST("/forward/close", authRequired, controller.CloseForwardSession)
+		// 跨节点拉取保存（网盘目标 M3）：把对端的文件/合集拉到本节点落盘。
+		// 读列表只读开放（与其它状态端点一致），启动/取消是写操作挂认证。
+		p2p.GET("/pull", controller.ListPullJobs)
+		p2p.POST("/pull", authRequired, controller.StartPull)
+		p2p.POST("/pull/collection", authRequired, controller.StartPullCollection)
+		p2p.POST("/pull/cancel", authRequired, controller.CancelPull)
 	}
 
 	// BitTorrent routes
