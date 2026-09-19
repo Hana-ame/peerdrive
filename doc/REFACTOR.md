@@ -667,6 +667,52 @@ restricted 无名单报错、切档产生新 hash 且旧 hash 快照不变、Own
 `PeerSource.Open` 的竞速层做「零字节失败即重开一次」，留待后续（当前私有节点
 场景频率极低，且上层 HTTP 下载本身可重试）。
 
+### 3.18 互联层：节点级「存在房间」+ 发现拨号预算（2026-09-20）
+
+**背景**：用户重排了开发顺序（见 `doc/ROADMAP.md`），把「基于 PeerJS 的互联」放在第一位。
+按该顺序盘点互联层时发现一个阻塞性缺口，本批次修掉。
+
+**缺口（阻塞性）**：发现是**内容分片制** —— `HTTPDiscovery` 只 announce/查询
+`PEERDRIVE_MQTT_COLLECTIONS` 里声明的 collection hash 房间。默认配置下该变量为空，
+于是节点**既不 announce 也不查询任何房间**，发现完全空转：两个默认配置的节点永远
+看不见对方，只有手工配静态 `PEERDRIVE_PEERJS_PEERS` 才能互联。
+（集成测试之所以没暴露：`TestSelfHostedSignalAndDiscover` 给两端都设了同一个
+`MQTTCollections` hash，等于替测试手工铺好了房间。）
+
+**修法（客户端侧，不动信令服务器）**：
+- `transport/http_discovery.go` 新增 `PresenceRoom` 常量 = `sha256("peerdrive/presence/v1")`
+  = `405265e5…d15a`；HTTP 发现额外加入这个固定房间，使互联层独立于内容分片工作。
+- `transport/peerjs_service.go`：`collectionHashes()`（内容房间，仅配置）之上加
+  `discoveryRooms()` = 内容房间 + 存在房间；新增 `discoveryDialAllowed()` /
+  `maxPeers()`，发现触发的拨号受 `PEERDRIVE_MAX_PEERS`（此前**定义了但从未被使用**）约束。
+- 配置：新增 `PEERDRIVE_DISCOVER_PRESENCE`（默认 true）。
+- 新测试：`internal/transport/discovery_rooms_test.go`（5 组）、集成测试
+  `TestInterconnectViaPresenceRoom`（零共享 collection 的两个节点仅靠存在房间互联）。
+
+**为什么存在房间用 sha256 字面量而不是 `"_presence"` 这类可读名**（关键决策）：
+房间名会被塞进 announce 的 `collections` 字段。peerdrive 自己的 `signalserver` 对该字段
+只 trim 不校验，但**线上信令由 wintools 维护、实现未知**——一旦那侧做「必须 64hex」校验，
+可读名会让**整条 announce 被 400 拒掉**，连带内容分片房间一起登记不上，发现全断。
+代价（不可读）远小于风险。sha256 的原像不可求性同时保证它与任何真实内容/合集 hash
+不会碰撞。测试 `TestPresenceRoom_IsStrictSHA256` 把这个约束钉死。
+
+**为什么拨号要有上限**：内容分片制天然限流（只有同房间的节点才碰面）；存在房间让
+「任意节点都能发现任意节点」，发现即拨号会退化成 O(n²) 全互联。用闲置的
+`PEERDRIVE_MAX_PEERS` 兜住（默认 8；`<=0` 视为不限）。静态 `PEERDRIVE_PEERJS_PEERS`
+不受限 —— 那是运营者的显式声明。计预算时排除 `"local"`（浏览器直连本节点的本地
+WS 会话不是对端节点）。
+
+**MQTT 分支刻意不加存在房间**：公共 broker 上开全局房间等于向公网广播本节点在线，
+不做。存在房间只作用于自托管信令的 HTTP 发现。
+
+**有意保留的缺口**：`collectionHashes()` 只读配置、不读本地存储的合集（原注释误称
+「配置 + 本地存储」）。广播本地合集 hash 等于公开「本节点持有什么」，受限/私有合集
+更会直接泄露房间名 —— 要按可见性过滤（只广播 public）后才能做，留给「文件范围管理」
+阶段（`doc/ROADMAP.md` 第 5 阶段）。
+
+**未做（后续）**：连接健康度观测（每对端 RTT / 最后收帧 / 重连次数）、按能力筛选对端
+（announce 已有 `nodeType`/`loadInfo` 字段，节点端目前发常量）。
+
 ## 5. E2E 踩过的坑（全部已修）
 
 | 坑 | 修复 |

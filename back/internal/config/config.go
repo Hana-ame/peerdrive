@@ -47,6 +47,15 @@ type Config struct {
 	MQTTCollections string // PEERDRIVE_MQTT_COLLECTIONS, 逗号分隔关注的 collection hash 分片
 	DiscoverURL     string // PEERDRIVE_DISCOVER_URL, 自托管信令服务器的发现 API（设置后优先于 MQTT）
 
+	// DiscoverPresence 节点级「存在房间」发现（PEERDRIVE_DISCOVER_PRESENCE，默认 true）。
+	// 打开后节点额外加入一个固定的公共房间，使「没有任何共享 collection hash」的
+	// 两个节点也能互相发现并直连（互联层的基础能力）。
+	// 关闭后回归纯内容分片发现（只有声明了同一 collection 的节点才会碰面）。
+	// 隐私取舍：开 = 发现服务端与同房间节点能看到本节点在线及其 peerId；
+	// 关 = 仅在共享集合的房间里可见。仅对 HTTP 发现（自托管信令）生效，
+	// 公共 MQTT broker 不加存在房间（公共 broker 上做全局房间等于广播）。
+	DiscoverPresence bool
+
 	// URLSourceTemplate 统一 source 体系的 URL 源模板（PEERDRIVE_URL_SOURCE_TEMPLATE）。
 	// 空则不注册 url source。%s = sha256 hash；含 %d 时（%d 依次为 offset,size）
 	// 声明 CapStream（Range 分片），否则 CapFile（整体拉取）。
@@ -132,6 +141,7 @@ func Load() *Config {
 		MQTTTopicPref:     getEnv("PEERDRIVE_MQTT_TOPIC_PREFIX", "peerdrive/v1"),
 		MQTTCollections:   getEnv("PEERDRIVE_MQTT_COLLECTIONS", ""),
 		DiscoverURL:       getEnv("PEERDRIVE_DISCOVER_URL", ""),
+		DiscoverPresence:  getEnvBool("PEERDRIVE_DISCOVER_PRESENCE", true),
 		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
 
 		DownloadDir: getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),

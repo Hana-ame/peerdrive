@@ -4,6 +4,8 @@
 
 ## 先读这些文档（按顺序）
 
+0. **`doc/ROADMAP.md`** ← **开发顺序（用户定序）**：PeerJS 互联 → 文件 → 组合 → 管理链路 →
+   文件范围管理 → 上传下载保存 → **身份管理（最后）**。前 6 阶段不得引入账号依赖（用 peerId）。
 1. **`doc/REFACTOR.md`** ← 重构记录：**所有新做的东西、架构决策、坑、帧协议、E2E 验证方式都在这**。动代码前必读。
 2. `doc/LEGACY.md` — 旧代码清单（libp2p/BT/WebDAV/前端死代码，标注可删/待迁移/保留）
 3. `README.md` — 项目概览（注意：README 的 p2p_bt 旧断言「可独立使用」已于 2026-08-18 修正——依赖桥接层，以 REFACTOR.md 第 6 节为准）
@@ -21,10 +23,14 @@
   `./peerjs`；**独立 repo 已创建** `github.com/Hana-ame/go-peerjs`，tag=v0.1.0 同步，
   改动随主 repo 提交后需镜像同步）；`internal/service/peerjs_service.go`
   是业务用法（文件服务 + 节点互联，`internal/transport/peerjs_service.go`）；发现：
-  `service/mqtt_discovery.go`（公共 broker）或
-  `service/http_discovery.go` + `back/signalserver/`（独立模块
+  `transport/mqtt_discovery.go`（公共 broker）或
+  `transport/http_discovery.go` + `back/signalserver/`（独立模块
   `github.com/Hana-ame/go-peersignal`，tag=v0.1.0 同步，自托管信令 `cmd/peersignal` 独立二进制，
-  `PEERDRIVE_DISCOVER_URL` 设置后优先于 MQTT；当前线上/本地优先连 wintools 的信令）
+  `PEERDRIVE_DISCOVER_URL` 设置后优先于 MQTT；当前线上/本地优先连 wintools 的信令）。
+  **发现两层**：内容分片房间（配置 `MQTT_COLLECTIONS` 声明的 hash，
+  只有同房间的节点碰面）+ 节点级存在房间（`transport.PresenceRoom`，固定
+  `sha256("peerdrive/presence/v1")`，让零共享 collection 的节点也能互联，见 REFACTOR §3.18）。
+  存在房间名**必须保持合法 64hex**：线上信令实现若做 64hex 校验，可读名会让整条 announce 被拒。
 - **帧协议 verb**（WS/WebRTC 同一套）：`req/meta/data/done/err`（文件拉取）+ `create/upload/list/info/delete/sync`
   （文件索引：SQLite `file_index` 表持久化 sha256→绝对路径 + seq 游标增量同步）+ `fwd-open/challenge/auth/ok/err/data/close`
   （端口转发 v2，HMAC 质询认证 + 端口白名单，见 REFACTOR.md 第 3.9 节）+ **`admin/admin-resp/admin-bin`**
@@ -91,7 +97,9 @@ cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 
 | `PEERDRIVE_PEERJS_ENABLE/ID/PEERS` | true/-/- | PeerJS 信令；PEERS 逗号分隔对端自动互联 |
 | `PEERDRIVE_PEERJS_HOST/PORT/KEY` | 0.peerjs.com/443/peerjs | 可指向自托管 peersignal |
 | `PEERDRIVE_DISCOVER_URL` | - | 自托管发现 API（优先于 MQTT） |
-| `PEERDRIVE_MQTT_ENABLE/BROKER/COLLECTIONS` | false/broker.emqx.io/- | MQTT 分片房间发现 |
+| `PEERDRIVE_DISCOVER_PRESENCE` | true | 节点级「存在房间」：让**零共享 collection** 的节点也能互相发现。关掉退回纯内容分片发现 |
+| `PEERDRIVE_MAX_PEERS` | 8 | 发现触发的拨号上限（防存在房间退化成 O(n²) 全互联）。静态 `PEERJS_PEERS` 不受限 |
+| `PEERDRIVE_MQTT_ENABLE/BROKER/COLLECTIONS` | false/broker.emqx.io/- | MQTT 分片房间发现（公共 broker 不加存在房间） |
 
 ## 线上部署（cloudcone 自托管信令）
 

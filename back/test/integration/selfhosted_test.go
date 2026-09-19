@@ -73,6 +73,41 @@ func TestSelfHostedSignalAndDiscover(t *testing.T) {
 	}
 }
 
+// TestInterconnectViaPresenceRoom 零共享内容房间的两个节点靠「存在房间」互联。
+// 发现背景（互联层）：发现原本是内容分片制——节点只 announce/查询自己关注的
+// collection hash 房间。于是**没有共享 collection 的两个节点永远看不见对方**：
+// 默认配置下 PEERDRIVE_MQTT_COLLECTIONS 为空 → 既不 announce 也不查询任何房间，
+// 发现完全空转，只有静态 PEERDRIVE_PEERJS_PEERS 才能互联。
+// 修法：HTTP 发现额外加入固定存在房间（transport.PresenceRoom），让互联层
+// 独立于内容分片工作。本测试刻意不设任何共享 collection，只靠存在房间互联。
+func TestInterconnectViaPresenceRoom(t *testing.T) {
+	idA := randID("pr-a")
+	idB := randID("pr-b")
+
+	newPresenceNode := func(id string) *transport.PeerJSService {
+		requireInitDB(t)
+		cfg := config.Load()
+		cfg.PeerJSEnable = true
+		cfg.PeerJSID = id
+		cfg.PeerJSHost, cfg.PeerJSPort = splitHostPort(selfHostedURL)
+		cfg.PeerJSSecure = false
+		cfg.PeerJSKey = "testkey"
+		cfg.BTDHTEnabled = false
+		cfg.DiscoverURL = selfHostedURL
+		cfg.DiscoverPresence = true
+		cfg.MQTTCollections = "" // 刻意不设共享内容房间：只验证节点级互联
+		svc := transport.NewPeerJSService(cfg, t.TempDir())
+		svc.Start()
+		t.Cleanup(svc.Close)
+		return svc
+	}
+
+	newPresenceNode(idA) // 只作为对端存在，不需要显式引用
+	svcB := newPresenceNode(idB)
+
+	waitConnections(t, svcB, map[string]bool{idA: true}, 60*time.Second)
+}
+
 // TestSelfHostedPeerJSSignal 自托管信令协议兼容：直接用 peerjs 客户端模块
 // 连自托管服务器完成 WebRTC 数据面互通（协议与公共云一致）。
 // 发现背景：功能需求——节点端零改动（仅改 host 配置）切到自托管。

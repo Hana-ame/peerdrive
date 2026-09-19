@@ -220,7 +220,7 @@ func (s *PeerJSService) startLoop() {
 			return
 		}
 		if httpDisc == nil && s.cfg.DiscoverURL != "" {
-			cols := s.collectionHashes()
+			cols := s.discoveryRooms()
 			httpDisc = NewHTTPDiscovery(s.cfg.DiscoverURL, s.id, cols, s.onDiscoveredPeer, func() []string {
 				if p := s.currentPeer(); p != nil {
 					return p.ConnectedPeers()
@@ -280,7 +280,11 @@ func (s *PeerJSService) BindLocal(sess Session) {
 	log.LogInfo("peerjs: local session bound (id=%s)", sess.ID())
 }
 
-// onDiscoveredPeer MQTT 发现回调：对端节点在线，发起互联（已连接则跳过）。
+// onDiscoveredPeer 发现回调：对端节点在线，发起互联（已连接则跳过）。
+// 发现来源（内容分片房间 / 存在房间）在此合并，唯一区别是拨号预算：
+// 存在房间让「任意节点都能发现任意节点」，不加限制会退化成 O(n²) 全互联
+// ——所以发现触发的拨号受 PEERDRIVE_MAX_PEERS 约束（静态 PEERS 是运营者
+// 显式声明，不受限，见 startLoop）。
 func (s *PeerJSService) onDiscoveredPeer(peerID string) {
 	if peerID == "" || peerID == s.id {
 		return
@@ -291,10 +295,57 @@ func (s *PeerJSService) onDiscoveredPeer(peerID string) {
 	if ok {
 		return
 	}
+	if !s.discoveryDialAllowed() {
+		log.LogDebug("peerjs: discovery dial to %s skipped (max peers %d reached)", peerID, s.maxPeers())
+		return
+	}
 	go s.connectLoop(peerID)
 }
 
-// collectionHashes 返回本节点关注的集合 hash 分片（配置 + 本地存储）。
+// discoveryDialAllowed 是否还有发现拨号预算（对端节点数 < PEERDRIVE_MAX_PEERS）。
+// 计预算时排除 "local"：那是浏览器直连本节点的本地 WS 会话，不是对端节点。
+func (s *PeerJSService) discoveryDialAllowed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for id := range s.conns {
+		if id != "local" {
+			n++
+		}
+	}
+	return n < s.maxPeers()
+}
+
+// maxPeers 互联层拨号上限（配置 PEERDRIVE_MAX_PEERS，<=0 视为不限）。
+func (s *PeerJSService) maxPeers() int {
+	if s.cfg.MaxPeers <= 0 {
+		return 1 << 30
+	}
+	return s.cfg.MaxPeers
+}
+
+// discoveryRooms 返回 announce/查询用的房间列表 = 配置声明的内容分片房间
+// + （可选）节点级存在房间。仅 HTTP 发现使用：公共 MQTT broker 上开全局
+// 存在房间等于向公网广播本节点，不做。
+func (s *PeerJSService) discoveryRooms() []string {
+	rooms := s.collectionHashes()
+	if !s.cfg.DiscoverPresence {
+		return rooms
+	}
+	// 去重：理论上运营者可以把存在房间 hash 写进 PEERDRIVE_MQTT_COLLECTIONS
+	// （不可能猜中，但重复房间名会让 announce 出现无意义重复项）。
+	for _, r := range rooms {
+		if r == PresenceRoom {
+			return rooms
+		}
+	}
+	return append(rooms, PresenceRoom)
+}
+
+// collectionHashes 返回本节点声明关注的内容分片房间（仅配置 PEERDRIVE_MQTT_COLLECTIONS）。
+// 注意：这里**不含**本地存储里已有的合集——把本地合集 hash 广播出去等于公开
+// 「本节点持有这些内容」，受限/私有合集更会直接泄露房间名。本地合集进房间
+// 需要按可见性过滤（只广播 public），留给「文件范围管理」阶段。
 func (s *PeerJSService) collectionHashes() []string {
 	seen := map[string]bool{}
 	var out []string

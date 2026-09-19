@@ -145,6 +145,9 @@ cd front && npm run build
 | `PEERDRIVE_HOLE_PUNCH` | `true` | NAT 打洞 |
 | `CORS_MODE` | 白名单 | `all` / `localhost` |
 | `VITE_API_BASE` | `http://localhost:3000` | 前端 API 基地址 |
+| `PEERDRIVE_DISCOVER_URL` | 空 | 自托管信令的发现 API（设置后优先于 MQTT） |
+| `PEERDRIVE_DISCOVER_PRESENCE` | `true` | 节点级「存在房间」发现：零共享 collection 的节点也能互相发现（见 [ROADMAP.md](ROADMAP.md) 第 1 阶段、[REFACTOR.md](REFACTOR.md) §3.18） |
+| `PEERDRIVE_MAX_PEERS` | `8` | 发现触发的拨号上限（防全互联退化）；静态 `PEERDRIVE_PEERJS_PEERS` 不受限 |
 
 ## 文档索引
 
@@ -152,6 +155,7 @@ cd front && npm run build
 
 | 文件 | 内容 |
 |------|------|
+| [ROADMAP.md](ROADMAP.md) | **开发顺序（用户 2026-09 定序）**：PeerJS 互联 → 文件 → 组合 → 管理链路 → 文件范围管理 → 上传下载保存 → 身份管理（最后） |
 | [DASHBOARD.md](DASHBOARD.md) | 项目仪表盘 |
 | [design/PEERDRIVE-DSH-INSPIRED.md](design/PEERDRIVE-DSH-INSPIRED.md) | 参考 dsh 的组合式架构设计（profile/bundle/patch） |
 | [design/FRONTEND-DSH-INSPIRED.md](design/FRONTEND-DSH-INSPIRED.md) | 前端参考 dsh 的组合式设计（bundle manifest + registry + profile） |

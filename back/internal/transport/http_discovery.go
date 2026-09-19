@@ -13,6 +13,18 @@ import (
 	"peerdrive/internal/log"
 )
 
+// PresenceRoom 节点级「存在房间」——所有开启节点级互联的节点都加入它，
+// 从而在没有任何共享内容 hash 时也能互相发现（互联层的基础能力）。
+//
+// 为什么是 sha256 字面量而不是 "_presence" 这类可读名：
+// 发现服务端的 collection 字段在不同实现下可能做「必须 64hex」的校验——
+// peerdrive 自己的 signalserver 只 trim 不校验，但线上信令由 wintools 维护，
+// 不能假设其宽松。用可读名一旦被 400 拒掉，整条 announce 都会失败，连内容
+// 分片房间也一起登记不上（发现全断），代价远大于收益。
+// 该值 = sha256("peerdrive/presence/v1")：既是合法 64hex，又因 SHA256 的
+// 原像不可求性，与任何真实内容/合集 hash 碰撞在计算上不可能。
+const PresenceRoom = "405265e56dfcc1047e9fcd13125fd343d93214eb3219f7cd5bb8927a8994d15a"
+
 // HTTPDiscovery 自托管信令服务器的房间发现（替代 MQTT 公共 broker）。
 // 自托管服务器天然知道所有在线节点（都连着它做信令），发现变成 HTTP 查询：
 //   - announce：POST /discover/announce {peerId, collections, peers}（上线 + 30s 心跳）
