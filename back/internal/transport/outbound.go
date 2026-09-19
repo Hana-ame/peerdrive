@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"hash"
 	"io"
@@ -21,6 +22,92 @@ import (
 
 	hashutil "peerdrive/pkg/hashutil"
 )
+
+// verbWaitTimeout 一次性 verb（share/info 这类小 JSON 应答）的等待上限。
+// 响应本身是毫秒级；给到 15s 是为了覆盖"刚好在此时信令抖动重连"的情况——
+// 短了会在网络抖动时误报失败，长了用户点开节点详情要干等。
+const verbWaitTimeout = 15 * time.Second
+
+// requestVerb 向直连对端发起「请求-应答」型 verb，等待单个 JSON 响应原样返回。
+// 只用于小 JSON 响应（share 等）；文件内容必须走 OpenStream（流式，不吃内存）。
+//
+// 为什么返回值是 raw JSON 而不是 dcResp：share-resp 带 collections/files
+// 等 dcResp 没有的字段，解析成 dcResp 再 marshal 会丢掉它们。
+//
+// 失败路径：对端回 err 帧 → 返回该 err 文案；超时/连接关闭/服务关闭 →
+// 对应错误。连接关闭用 st.binDone（cleanupConn 会 close）感知，不需要
+// 等待槽里再挂一个 done channel。
+func (s *PeerJSService) requestVerb(peerID, reqType string, timeout time.Duration) ([]byte, error) {
+	s.mu.Lock()
+	conn := s.conns[peerID]
+	s.mu.Unlock()
+	if conn == nil {
+		return nil, fmt.Errorf("peerjs: no connection to %s", peerID)
+	}
+	st := s.stateFor(conn)
+	if st == nil {
+		return nil, fmt.Errorf("peerjs: connection not bound")
+	}
+	reqID := uuid.NewString()
+	ch := make(chan []byte, 1)
+	st.mu.Lock()
+	st.verbWaits[reqID] = ch
+	st.mu.Unlock()
+	cleanup := func() {
+		st.mu.Lock()
+		delete(st.verbWaits, reqID)
+		st.mu.Unlock()
+	}
+	if err := conn.SendJSON(dcReq{Type: reqType, ReqID: reqID}); err != nil {
+		cleanup()
+		return nil, err
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case raw := <-ch:
+		var r dcResp
+		if err := json.Unmarshal(raw, &r); err == nil && r.Type == "err" {
+			return nil, fmt.Errorf("peerjs: %s", r.Msg)
+		}
+		return raw, nil
+	case <-timer.C:
+		cleanup()
+		return nil, fmt.Errorf("peerjs: %s request to %s timed out", reqType, peerID)
+	case <-st.binDone:
+		cleanup()
+		return nil, fmt.Errorf("peerjs: connection closed")
+	case <-s.ctx.Done():
+		cleanup()
+		return nil, fmt.Errorf("peerjs: service closed")
+	}
+}
+
+// RequestShares 查询直连对端的共享清单（share 帧）。
+// 这是「市场/我的节点 → 对方节点详情页看到文件链接」的数据来源，
+// 也是跨节点拉取合集（M3）的入口：先拿清单，再按 entry hash 拉内容。
+func (s *PeerJSService) RequestShares(peerID string) (ShareSnapshot, error) {
+	raw, err := s.requestVerb(peerID, "share", verbWaitTimeout)
+	if err != nil {
+		return ShareSnapshot{}, err
+	}
+	var resp struct {
+		Type string `json:"type"`
+		ShareSnapshot
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return ShareSnapshot{}, fmt.Errorf("peerjs: bad share response: %w", err)
+	}
+	// 空数组兜底：对端可能回 null（旧版本/异常实现），前端不该为此崩
+	if resp.Collections == nil {
+		resp.Collections = []ShareCollectionInfo{}
+	}
+	if resp.Files == nil {
+		resp.Files = []ShareFileInfo{}
+	}
+	return resp.ShareSnapshot, nil
+}
 
 // maxPeerFetchSize 远端声明上限（H6 修复）：data 帧声明的块大小/文件大小
 // 无上限 → 恶意对端声明 1<<62 并持续发 data 帧 → f.got 无界增长 OOM。
@@ -316,10 +403,22 @@ func failFetch(f *fetchState, format string, args ...any) {
 
 // routeResponse 把响应帧路由到对应的 fetch 状态（出站角色的收集端）。
 // 持有 st.mu 期间完成（数据帧高频：泵内直接调用，不额外加锁层次）。
-func (s *PeerJSService) routeResponse(st *connState, r dcResp) {
+// raw 是原始帧字节：一次性 verb 等待槽（verbWaits）要原样交给请求方——
+// share-resp 等响应含 dcResp 没有的字段（collections/files），重新 marshal
+// 会丢。文件拉取路径不使用 raw（数据走二进制帧）。
+func (s *PeerJSService) routeResponse(st *connState, r dcResp, raw []byte) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if r.ReqID == "" {
+		return
+	}
+	// 一次性 verb 应答：先看等待槽（reqId 全局唯一，不会与 fetch 撞）
+	if ch, ok := st.verbWaits[r.ReqID]; ok {
+		delete(st.verbWaits, r.ReqID)
+		select {
+		case ch <- raw:
+		default: // 请求方已超时放弃：丢弃，不阻塞消息泵
+		}
 		return
 	}
 	f := st.fetches[r.ReqID]

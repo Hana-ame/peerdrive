@@ -91,6 +91,14 @@ type connState struct {
 	fetches       map[string]*fetchState // reqId → 下载请求
 	pendingUpload *uploadState           // 当前接收中的流式上传（同一连接同时只有一个）
 
+	// verbWaits 一次性 JSON 应答等待槽（share 等「请求-应答」型 verb）：
+	// reqId → 原始响应帧 bytes。与 fetches 分开的理由：文件拉取是**流式**的
+	// （数据走有界队列 + expect 状态机），而 share/info 这类只要一个 JSON
+	// 就结束；混进 fetchState 会让后者凭空多出"无数据块"的分支。
+	// 值是 raw JSON 而不是解析后的结构：share-resp 的字段（collections/files）
+	// 不在 dcResp 里，重新 marshal 会丢字段。
+	verbWaits map[string]chan []byte
+
 	// H5 修复：二进制数据块（上传分片）投递到连接级 worker（binCh/binDone），
 	// WriteAt/Complete（fsync + 全文件 hashFile）移出 pion 消息泵——之前 8GB
 	// 上传完成的瞬间，这条连接上的所有其他帧全部冻结到 Complete 结束
@@ -217,10 +225,11 @@ func (s *PeerJSService) bindConn(c Session) {
 		}
 	}
 	st := &connState{
-		fetches: make(map[string]*fetchState),
-		binCh:   make(chan binaryChunk, 16),
-		binDone: make(chan struct{}),
-		fwdCh:   make(chan fwdChunk, 16),
+		fetches:   make(map[string]*fetchState),
+		verbWaits: make(map[string]chan []byte),
+		binCh:     make(chan binaryChunk, 16),
+		binDone:   make(chan struct{}),
+		fwdCh:     make(chan fwdChunk, 16),
 	}
 	s.pendingMu.Lock()
 	s.pending[c] = st
@@ -266,6 +275,10 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 			go s.serveUploadBegin(c, st, r)
 		case "list":
 			go s.serveList(c, r)
+		case "share":
+			// 对端问"你共享了什么"（share.go，网盘目标 M2）：**仅返回显式
+			// 共享范围**，与 list（本地管理清单全量）严格区分。
+			go s.serveShare(c, r)
 		case "info":
 			go s.serveInfo(c, r)
 		case "delete":
@@ -300,7 +313,7 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 			// 客户端侧握手响应（OpenForward 等待中）——与文件拉取响应同槽路由
 			s.routeForwardResponse(st, r)
 		default:
-			s.routeResponse(st, r)
+			s.routeResponse(st, r, msg.Data)
 		}
 		return
 	}

@@ -103,6 +103,9 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	// 端口转发服务（PeerJS DataChannel 版，forward.go）：规则表由 main 装配时
 	// SetForwardRules 注入（配置 PEERDRIVE_FORWARD_RULES），运行时端点可动态追加。
 	controller.InitForwardController(peerjsService)
+	// 对方节点共享清单查询（网盘目标 M2）：/peerjs/nodes/:peer/shares 由
+	// controller 直接调 transport.RequestShares（share 帧的请求方）。
+	controller.InitPeerShareController(peerjsService)
 
 	// Initialize BitTorrent DHT service if enabled.
 	var btSvc *p2p_bt.BTDHTService

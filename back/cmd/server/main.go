@@ -82,6 +82,21 @@ func main() {
 		peerjsSvc.SetExtraPeers(nodeDir.JoinedPeerIDs)
 		router.SetNodeDirectory(nodeDir)
 		log.LogInfo("main: node directory ready (joined=%d)", len(nodeDir.JoinedPeerIDs()))
+
+		// 节点共享范围（doc/NETDISK.md M2）：share 帧的数据源 + announce 摘要。
+		// AnonService 是无状态读服务（只持 cfg），这里再建一个实例专供共享
+		// 解析用，不与 router 内部那个实例共享状态（也不需要共享）。
+		share := service.NewNodeShare(cfg)
+		anonReader := service.NewAnonService(cfg)
+		share.SetAnonAccess(anonReader.GetCollectionByHash, anonReader.ListCollections)
+		// 文件共享只按目录前缀过滤；List 内部上限 1000（repository 层 clamp），
+		// 共享清单超过 1000 个文件时按 seq 序取前 1000 —— 够市场展示与选择，
+		// 真正的批量拉取走合集（不依赖这份清单）。
+		share.SetFileLister(func() ([]transport.FileInfo, error) {
+			return peerjsSvc.FileIndex().List(0, 1000)
+		})
+		peerjsSvc.SetShareProvider(share.Snapshot)
+		nodeDir.SetShareSummary(share.Summary)
 	}
 
 	// 设置路由（内部注入 storageDir/downloader 到 context）
