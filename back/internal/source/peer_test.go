@@ -166,6 +166,40 @@ func setFailSends(sess ...*fakePeerSess) {
 	}
 }
 
+// waitPeersIdle 等到至少 want 个对端竞速锁空闲（可再次参与竞速）。
+//
+// 为什么必须等：raceOpen 胜出即返回，**输家候选 goroutine 可能仍在飞行**
+// （其流由后台收割 goroutine 关闭并释放锁，见 peer.go raceOpen 注释）。
+// 返回时启动下一轮竞速，输家对端会因 TryLock 失败被 collectPeers 跳过 →
+// 候选只剩一个 → 走单对端串行路径 → 若该对端恰被 failSend 置错，Open
+// 直接报 "peer <id>: ..."，与「锁是否已释放」的断言前提完全错位。
+//
+// 发现背景：本用例偶发失败（本地 -count=400 约 1%~2%，CI macOS/arm64
+// 因此约 1/4 概率红）——第二轮返回后直接开第三轮，而第二轮是竞速：
+// 第三轮 collectPeers 观测到 peerB 仍 BUSY → 单路径 peerA（已 failSend）
+// → 报 assert.AnError。第一轮原本靠固定 sleep(50ms) 掩盖，二/三轮没有。
+//
+// 为什么用 TryLock 探测而不是固定 sleep：拿到即释放，既确定性又不拖慢
+// 用例；真发生锁泄漏时会在 deadline 内等不到 → 明确 Fatal（正好是本用例
+// 想守住的语义：竞速结束后所有 peer 槽位最终必须释放）。
+func waitPeersIdle(t *testing.T, ps *PeerSource, want int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		pids, locks := ps.collectPeers()
+		for _, l := range locks {
+			l.Unlock() // 立即归还：本调用只探测空闲，不占用槽位
+		}
+		if len(pids) >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("peers not idle within deadline: %d idle, want %d（疑似 peer 槽位泄漏）", len(pids), want)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 // newRaceSvc 创建竞速测试的服务与一组对端。
 func newRaceSvc(t *testing.T, ids ...string) (*transport.PeerJSService, []*fakePeerSess, *PeerSource) {
 	t.Helper()
@@ -390,6 +424,9 @@ func TestPeerSource_MultiBlockTransfer(t *testing.T) {
 // 竞速建立后立即关闭（胜者锁由 Close 释放、输家锁由收割释放，两把锁
 // 各走一遍「占用→释放」）；随后用 failSend 把竞争收敛到唯一对端，
 // 逐对端验证锁已释放（若锁泄漏，TryLock 失败 → 该对端被跳过报错）。
+//
+// 每轮之间必须 waitPeersIdle：竞速返回时输家候选 goroutine 可能仍在飞行
+// 并持有该 peer 槽位（见 waitPeersIdle 注释与其中的发现背景）。
 func TestPeerSource_WinnerPeerLockReleased(t *testing.T) {
 	_, sess, ps := newRaceSvc(t, "peerA", "peerB")
 	a, b := sess[0], sess[1]
@@ -402,7 +439,7 @@ func TestPeerSource_WinnerPeerLockReleased(t *testing.T) {
 	require.NoError(t, err)
 	waitReqs(t, a, b)
 	require.NoError(t, r.Close())
-	time.Sleep(50 * time.Millisecond) // 等收割 goroutine 完成（输家锁释放）
+	waitPeersIdle(t, ps, 2) // 等收割 goroutine 完成（输家锁释放）
 
 	// 第二轮：A 单独（B failSend）→ 成功 ⇒ A 锁已释放（A 可能是胜者或输家）
 	setFailSends(b)
@@ -414,6 +451,7 @@ func TestPeerSource_WinnerPeerLockReleased(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, content, got, "A 的锁必须已释放（可单独竞速）")
 	require.NoError(t, r2.Close())
+	waitPeersIdle(t, ps, 2) // 第二轮同样是竞速：返回时输家候选可能仍在飞行
 
 	// 第三轮：B 单独（A failSend）→ 成功 ⇒ B 锁已释放
 	setFailSends(a)
