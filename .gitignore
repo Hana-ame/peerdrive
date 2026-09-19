@@ -19,6 +19,11 @@ Thumbs.db
 /main
 downloads/
 
+# 集成测试运行产物：config.Load() 默认 StorageDir=./storage，
+# 部分用例未覆盖该字段，于是按 cwd 落在包目录下生成内容寻址块。
+back/test/integration/storage/
+back/test/integration/downloads/
+
 *.bin
 
 # Node
