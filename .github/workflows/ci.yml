@@ -99,6 +99,21 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  # packages/peerdrive-client：纯 WebRTC 消费端（60 个用例，覆盖协议状态机 +
+  # 增量 SHA-256）。刻意零依赖——所以这里不需要 npm ci：没有 lock 文件、
+  # 没有网络安装步骤，CI 只跑 node --test。
+  client-package:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/peerdrive-client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

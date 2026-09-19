@@ -1,0 +1,24 @@
+{
+  "name": "peerdrive-client",
+  "version": "0.1.0",
+  "description": "Zero-dependency browser consumer for peerdrive: connect to a peerdrive node over WebRTC, list what it shares, and pull files. Transport-agnostic (PeerJS DataConnection or anything with on/send).",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["peerdrive", "peerjs", "webrtc", "p2p", "datachannel", "netdisk", "consumer"],
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./src/client.js",
+    "./protocol": "./src/protocol.js",
+    "./sha256": "./src/sha256.js"
+  },
+  "files": ["src", "demo", "scripts", "README.md"],
+  "sideEffects": false,
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "demo": "node scripts/serve.mjs",
+    "demo:signal": "peerjs --port 9100 --path /"
+  },
+  "devDependencies": {
+    "peerjs-server": "^0.2.9"
+  }
+}
