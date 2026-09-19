@@ -31,6 +31,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	peerjs "github.com/Hana-ame/go-peerjs"
@@ -156,6 +157,10 @@ type fetchState struct {
 	reqID    string
 	size     int64         // 期待中的 data 块大小（上限校验见 maxPeerFetchSize）
 	received int64         // 已投递队列的字节数
+	// total 对端 meta 帧声明的文件总大小（-1 = 未知，见 fetchReader.Total）。
+	// 用 atomic 而不是普通字段：写入发生在消息泵（routeResponse，持 st.mu），
+	// 读取发生在消费者 goroutine（reader.Total()），普通字段是 data race。
+	total    atomic.Int64
 	q        chan []byte   // 数据块队列（有界 8，消息泵投递 / fetchReader 消费）
 	done     chan struct{} // close → 对端 done 帧（传输完成；q 中剩余块仍可消费）
 	errCh    chan error    // 错误（含连接关闭）

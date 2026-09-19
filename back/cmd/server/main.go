@@ -97,6 +97,26 @@ func main() {
 		})
 		peerjsSvc.SetShareProvider(share.Snapshot)
 		nodeDir.SetShareSummary(share.Summary)
+
+		// 跨节点拉取保存（doc/NETDISK.md M3）：对端内容 → 本节点落盘 + 登记。
+		// downloadRoot 必须是 file_index 的允许根目录（cfg.DownloadDir），
+		// 否则登记会被 H2 安全边界拒绝（"path outside allowed root"）。
+		puller := service.NewPeerPuller(cfg.DownloadDir)
+		puller.SetSource(peerjsSvc)
+		puller.SetFileAccess(
+			func(hash string) bool {
+				fi, err := peerjsSvc.FileIndex().Info(hash)
+				return err == nil && fi != nil && fi.Path != "" && fi.Size > 0
+			},
+			func(path string) (string, int64, error) {
+				fi, err := peerjsSvc.FileIndex().Create(path)
+				if err != nil {
+					return "", 0, err
+				}
+				return fi.Hash, fi.Size, nil
+			},
+		)
+		router.SetPeerPuller(puller)
 	}
 
 	// 设置路由（内部注入 storageDir/downloader 到 context）

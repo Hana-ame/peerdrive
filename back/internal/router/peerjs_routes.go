@@ -34,6 +34,11 @@ func SetNodeDirectory(d *service.NodeDirectory) {
 	controller.InitNodeDirectory(d)
 }
 
+// SetPeerPuller 注入跨节点拉取服务（nil 则 /p2p/pull* 返回 503）。
+func SetPeerPuller(p *service.PeerPuller) {
+	controller.InitPeerPuller(p)
+}
+
 // SetPeerJSConfig 注入配置（WS 本地会话 Origin 白名单）。
 func SetPeerJSConfig(cfg *config.Config) {
 	peerjsCfg = cfg

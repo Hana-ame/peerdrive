@@ -207,6 +207,7 @@ func (s *PeerJSService) openStream(c Session, hash string, offset, size int64, t
 		errCh:  make(chan error, 1),
 		closed: make(chan struct{}),
 	}
+	f.total.Store(-1) // 未知：meta 到达前读到的是 -1（见 fetchReader.Total）
 	st := s.stateFor(c)
 	if st == nil {
 		return nil, fmt.Errorf("peerjs: connection not bound")
@@ -267,6 +268,23 @@ type fetchReader struct {
 	h   hash.Hash
 	eof bool
 	err error
+}
+
+// Total 对端在 meta 帧里声明的文件总大小；-1 = 尚未收到 meta / 对端未声明。
+//
+// 为什么是"当前已知"而不是建立 reader 时就绪：meta 是异步到达的帧，openStream
+// 返回时它可能还在路上。调用方（跨节点拉取保存的进度显示）应在读了几块之后再取，
+// 那时一定已确定；取到 -1 就按"未知大小"渲染（不阻塞、不猜测）。
+// 返回 io.ReadCloser 的地方（OpenStream）拿不到它——需要大小的调用方用类型
+// 断言：`if s, ok := r.(interface{ Total() int64 }); ok { ... }`。
+func (r *fetchReader) Total() int64 {
+	if r.f == nil {
+		return -1
+	}
+	if t := r.f.total.Load(); t > 0 {
+		return t
+	}
+	return -1
 }
 
 func (r *fetchReader) Read(p []byte) (int, error) {
@@ -344,8 +362,7 @@ func (r *fetchReader) Read(p []byte) (int, error) {
 
 // finish 幂等结束：标记 eof、记录错误、执行清理（delete 路由表 + close closed）。
 // 全量请求 EOF 时校验 sha256（H5 内容寻址兜底）。
-func (r *fetchReader) finish(err error) {
-	if r.eof {
+func (r *fetchReader) finish(err error) {	if r.eof {
 		return
 	}
 	r.eof = true
@@ -431,6 +448,8 @@ func (s *PeerJSService) routeResponse(st *connState, r dcResp, raw []byte) {
 		if r.Total > maxPeerFetchSize {
 			failFetch(f, "peerjs: declared file size %d exceeds limit", r.Total)
 		}
+		// 记下来给服务层用（跨节点拉取保存的进度分母，见 fetchReader.Total）
+		f.total.Store(r.Total)
 	case "data":
 		// H6：块大小设上限且必须为正——恶意对端声明超大 size → 无界分配
 		if r.Size <= 0 || r.Size > maxPeerFetchSize {
