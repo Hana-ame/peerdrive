@@ -846,6 +846,23 @@ npm 7+ 自动补装 peer 后算出的理想树含 `react@19.3.0`，而 lockfile 
 > 同理，`-race` 也会因时序变化而不复现（本次 -race 300 次全绿），
 > 不能拿"race 下没红"当作"没有竞态"的证据。
 
+#### (3) `.gitignore` 的 `react/` 吞掉了 media 包的 React 源码
+
+修好 (1) 之后 `npm ci` 过了，作业才走到 `npm run build`，随即报
+`[UNRESOLVED_ENTRY] Cannot resolve entry module src/react/index.js` —— 本地能
+构建、CI 全新 checkout 却找不到文件。原因是 `.gitignore` 「Root temp files」
+段写的是不带前导斜杠的 `react/` / `go/`，**匹配任意层级的同名目录**，于是
+`packages/peerdrive-media/src/react/` 被整体忽略，那 5 个源文件从未入库；
+本地磁盘上有文件所以一直没暴露。
+
+修法：锚定为 `/react/` 与 `/go/`（与同段 `/docs/` 一致）。`dist/react/` 仍由
+`dist/` 覆盖。
+
+> 教训：**红灯是会互相掩盖的**。一个作业卡在第一步时，后面的步骤可能早就坏了。
+> 修完一处要重跑整条链，别假设"剩下的本来就是好的"。
+> 另外 `.gitignore` 里写"根目录临时目录"务必加前导 `/`——不带 `/` 的
+> 目录规则是**任意层级**匹配。
+
 ## 5. E2E 踩过的坑（全部已修）
 
 | 坑 | 修复 |

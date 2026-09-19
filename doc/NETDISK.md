@@ -217,16 +217,19 @@ ROADMAP 顺序，而是它的"验收形态"：阶段 5（范围）与阶段 6（
   （Drive / 合集卡片 / 传输任务），但**做深**（目录树、批量重命名、重试策略等）仍待后续。
 - 阶段 7（身份管理）：仍未开始，硬约束保持——全链路不依赖账号，归属先用 peerId。
 
-### 6.4 CI 转绿：顺带修掉的两个既有红灯
+### 6.4 CI 转绿：顺带修掉的三个既有红灯
 
-合并后推 `refactor` 触发 CI，才发现仓库里有**两条** workflow，且各有一处红——
-两者都在 `9e4ede3`（网盘模块之前的基础提交）上就已存在，与本次目标无关，
+合并后推 `refactor` 触发 CI，才发现仓库里有**两条** workflow，且各有红灯——
+成因都在 `9e4ede3`（网盘模块之前的基础提交）上就已存在，与本次目标无关，
 但"验证（通过 gh ci）"要求主干是绿的，所以一并修掉。
+
+最终状态（`67a60b9`）：Peerdrive CI 六个 job + Go Build Matrix 五个平台**全绿**。
 
 | # | 红灯 | 根因 | 修法 | 提交 |
 |---|---|---|---|---|
 | 1 | Peerdrive CI → `media-package` | `packages/peerdrive-media` 把 react/react-dom 只声明为 **optional peerDependencies**，但 `@vitejs/plugin-react` 把 react 当**必需** peer → npm 7+ 自动补装 peer，理想树含 `react@19.3.0`，而旧 lockfile 没有 → `npm ci` 的同步检查报 EUSAGE | react/react-dom 补进 `devDependencies`，`npm install --package-lock-only` 重算锁文件（diff 仅 +react/react-dom/scheduler 三条，并清掉根部陈旧的 `peerDependenciesMeta`） | `4fce69f` |
 | 2 | Go Build Matrix → `macos-latest/darwin-arm64` | `internal/source` 的 `TestPeerSource_WinnerPeerLockReleased` 竞速轮次之间没等收割 goroutine 释放输家锁 | 新增 `waitPeersIdle()`（TryLock 探测 + deadline），替换原来只覆盖第一轮的固定 `sleep(50ms)`；**生产代码未改** | `ccd1af9` |
+| 3 | Peerdrive CI → `media-package`（修好 #1 后暴露） | `.gitignore` 的 `react/` 规则**不带前导斜杠**，匹配任意层级同名目录 → `packages/peerdrive-media/src/react/` 整个被忽略，5 个 React 源文件从未入库 → CI 全新 checkout 报 `Cannot resolve entry module src/react/index.js` | 规则锚定为 `/react/`（同段 `/go/` 一并锚定，与 `/docs/` 一致）；漏掉的 5 个源文件补入版本库 | `67a60b9` |
 
 第 2 项的定位过程值得记一笔：**它不是 macOS 专属** —— 本地 Linux
 `go test -count=400` 就能复现约 1%~2%（与 CI 报错同一行 `peer_test.go:424`），
