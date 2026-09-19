@@ -12,6 +12,13 @@ import BTController from './pages/BTController';
 import DHTExplorer from './pages/DHTExplorer';
 import Navbar from './components/Navbar';
 import LLMAssistant from './components/LLMAssistant';
+// 网盘主界面（M4）：我的网盘 / 节点市场 / 我的节点 / 对方节点详情 / 传输任务。
+// 信息架构与数据来源见 doc/NETDISK.md。
+import Drive from './pages/Drive';
+import Market from './pages/Market';
+import Peers from './pages/Peers';
+import PeerDetail from './pages/PeerDetail';
+import Transfers from './pages/Transfers';
 import { getDataConsent } from './api';
 
 export const AppContext = createContext();
@@ -30,6 +37,17 @@ function HashRedirect({ children }) {
     return <Navigate to={`/c/${collName}`} replace />;
   }
   return children;
+}
+
+// Fill 给网盘页面提供一个"确定高度 + 横向 flex"的容器。
+//
+// 为什么需要：网盘页自身是 `flex flex-1 min-h-0`（左侧栏 + 可滚动内容区），
+// 而 <Routes> 的父级 div 是块级容器——直接在块级里放 flex 行会让
+// overflow-y-auto 拿不到确定高度，内容被 overflow-hidden 裁掉而不是滚动。
+// 这里包一层 h-full 的 flex 行，让页面的 h-full/flex-1 有参照物。
+// 既有页面（Plaza/Explorer/Settings…）自带 h-full，不受影响，故不改造。
+function Fill({ children }) {
+  return <div className="h-full flex overflow-hidden">{children}</div>;
 }
 
 // 全局错误边界：避免单个页面/组件抛错导致整个 React 树白屏
@@ -92,6 +110,14 @@ export default function App() {
             <div className="flex-1 overflow-hidden">
               <Routes>
                 <Route path="/" element={<Plaza />} />
+                {/* ── 网盘主链路（M1-M3 的界面）──
+                    /peers/:peer 是两个静态+参数段，与下面的 /:username/:collName
+                    不冲突（react-router v6 按特异性排序，静态段优先）。 */}
+                <Route path="/drive" element={<Fill><Drive /></Fill>} />
+                <Route path="/market" element={<Fill><Market /></Fill>} />
+                <Route path="/peers" element={<Fill><Peers /></Fill>} />
+                <Route path="/peers/:peer" element={<Fill><PeerDetail /></Fill>} />
+                <Route path="/transfers" element={<Fill><Transfers /></Fill>} />
                 <Route path="/:username/:collName" element={
                   // 64 位 hex → 视为合集 hash，转统一路由
                   <HashRedirect><Explorer /></HashRedirect>
