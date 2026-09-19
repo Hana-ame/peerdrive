@@ -17,6 +17,7 @@ import (
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/service"
+	"peerdrive/internal/transport"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,6 +34,67 @@ func InitNodeDirectory(d *service.NodeDirectory) {
 // marketTimeout 发现服务器查询超时：市场列表是交互式请求，不能让前端
 // 长时间挂在"加载中"（发现服务器不可达时按空列表渲染已加入节点）。
 const marketTimeout = 6 * time.Second
+
+// peerShareSvc 提供"问对端要共享清单"能力（transport.PeerJSService）。
+// 单独注入而不是复用 forwardPeer：两者语义无关，共用一个包级变量会让
+// "改转发" 意外影响节点详情页。
+var peerShareSvc *transport.PeerJSService
+
+// InitPeerShareController 注入 PeerJS 服务供对方节点共享清单查询使用。
+func InitPeerShareController(svc *transport.PeerJSService) {
+	log.LogDebug("ctrl-node-market: InitPeerShareController")
+	peerShareSvc = svc
+}
+
+// shareWaitTimeout 等待"接入对方节点"的上限。
+// 用户点开对方节点详情时该节点可能还没直连（刚加入/刚重启），这里主动拨号
+// 并等一小会儿——比直接报"未连接"体验好，但不能久等（HTTP 请求会挂住）。
+const shareWaitTimeout = 8 * time.Second
+
+// GetPeerShares 处理 GET /peerjs/nodes/:peer/shares。
+// 返回对方节点的共享清单（合集 + 单文件），供前端渲染"文件链接"列表。
+func GetPeerShares(c *gin.Context) {
+	if peerShareSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "peerjs service not enabled"})
+		return
+	}
+	peer := c.Param("peer")
+	if peer == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "peer is required"})
+		return
+	}
+
+	// 未直连时先拨号（幂等），最多等 shareWaitTimeout
+	if !peerShareSvc.ConnectedPeerIDs()[peer] {
+		peerShareSvc.EnsureConnection(peer)
+		deadline := time.Now().Add(shareWaitTimeout)
+		for time.Now().Before(deadline) {
+			if peerShareSvc.ConnectedPeerIDs()[peer] {
+				break
+			}
+			select {
+			case <-c.Request.Context().Done():
+				c.JSON(http.StatusRequestTimeout, gin.H{"error": "cancelled"})
+				return
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+	}
+
+	snap, err := peerShareSvc.RequestShares(peer)
+	if err != nil {
+		log.LogWarn("ctrl-node-market: request shares from %s failed: %v", peer, err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"peer":        peer,
+		"collections": snap.Collections,
+		"files":       snap.Files,
+		"dirs":        snap.Dirs,
+		"total":       len(snap.Collections) + len(snap.Files),
+	})
+}
 
 // GetNodeMarket 处理 GET /peerjs/nodes。
 func GetNodeMarket(c *gin.Context) {

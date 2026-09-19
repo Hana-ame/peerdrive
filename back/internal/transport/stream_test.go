@@ -73,7 +73,7 @@ func TestOpenStream_StreamingRead(t *testing.T) {
 		_ = json.Unmarshal(msg.Data, &r)
 		pumpMu.Lock()
 		defer pumpMu.Unlock()
-		svc.routeResponse(svc.stateFor(sess), r)
+		svc.routeResponse(svc.stateFor(sess), r, nil)
 	})
 
 	// 发起流式请求

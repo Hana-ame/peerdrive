@@ -76,6 +76,13 @@ type PeerJSService struct {
 	// nil = 无额外对端。
 	extraPeers func() []string
 
+	// shareProvider 本节点对外共享范围（share.go，M2）。由 main 注入
+	// service.NodeShare.Snapshot；nil = 未启用共享，share 帧回空快照。
+	// 用独立锁而不是在装配期裸写：main 在 Start() 之后才注入（startLoop
+	// 已经在跑，发现组件可能已在 announce），裸写是 data race。
+	shareMu       sync.RWMutex
+	shareProvider func() ShareSnapshot
+
 	// forward 转发授权规则（key 原文 → 端口白名单）与待验证质询（forward.go）。
 	// 规则即凭证：运行时动态增删（端点）与配置装载（SetForwardRules）共用同一锁。
 	forwardMu    sync.Mutex
@@ -244,6 +251,9 @@ func (s *PeerJSService) startLoop() {
 				}
 				return nil
 			})
+			// 共享摘要随 announce 上报（只报数量，见 HTTPDiscovery.shareInfo 注释）。
+			// 无条件注册：shareLoadInfo 每次调用都重读 provider，晚注入也生效。
+			httpDisc.SetShareInfo(s.shareLoadInfo)
 			httpDisc.Start()
 			s.peerMu.Lock()
 			s.httpDisc = httpDisc

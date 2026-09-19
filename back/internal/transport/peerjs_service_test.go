@@ -227,7 +227,7 @@ func TestRouteResponse_DataSizeCap(t *testing.T) {
 	f := newTestFetchState("r1")
 	st.fetches["r1"] = f
 
-	svc.routeResponse(st, dcResp{Type: "data", ReqID: "r1", Size: 1 << 62})
+	svc.routeResponse(st, dcResp{Type: "data", ReqID: "r1", Size: 1 << 62}, nil)
 	select {
 	case err := <-f.errCh:
 		assert.Error(t, err)
@@ -246,7 +246,7 @@ func TestRouteResponse_DoneSizeMismatch(t *testing.T) {
 	st.fetches["r1"] = f
 
 	// 声明发送 100 字节，实际 0 字节（无 data 帧）→ 必须报错
-	svc.routeResponse(st, dcResp{Type: "done", ReqID: "r1", Size: 100})
+	svc.routeResponse(st, dcResp{Type: "done", ReqID: "r1", Size: 100}, nil)
 	select {
 	case err := <-f.errCh:
 		assert.Error(t, err)
@@ -267,9 +267,9 @@ func TestRouteResponse_DoneSizeMatch(t *testing.T) {
 	f := newTestFetchState("r1")
 	st.fetches["r1"] = f
 
-	svc.routeResponse(st, dcResp{Type: "data", ReqID: "r1", Size: 3})
+	svc.routeResponse(st, dcResp{Type: "data", ReqID: "r1", Size: 3}, nil)
 	f.received = 3
-	svc.routeResponse(st, dcResp{Type: "done", ReqID: "r1", Size: 3})
+	svc.routeResponse(st, dcResp{Type: "done", ReqID: "r1", Size: 3}, nil)
 	select {
 	case <-f.done:
 		// done 已 close = 传输完成（流式语义：数据经 f.q 消费）

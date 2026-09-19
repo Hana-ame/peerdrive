@@ -68,6 +68,7 @@ func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 	// 语义：市场 = 发现服务器在线节点 ∪ 本地已加入清单（离线也保留）。
 	r.GET("/peerjs/nodes", controller.GetNodeMarket)
 	r.GET("/peerjs/nodes/joined", controller.GetJoinedNodes)
+	r.GET("/peerjs/nodes/:peer/shares", controller.GetPeerShares)
 	r.POST("/peerjs/nodes/join", auth, controller.JoinNode)
 	r.DELETE("/peerjs/nodes/join", auth, controller.LeaveNode)
 

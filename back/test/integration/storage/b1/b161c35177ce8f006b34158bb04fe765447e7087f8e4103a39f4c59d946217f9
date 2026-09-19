@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "friendly_name": "契约合集",
+  "entries": [
+    {
+      "path": "docs/readme.txt",
+      "providers": [
+        {
+          "type": "sha256",
+          "value": "e08dfa376afc8066e3e9432935275c8df54c7b8efb3e930611248445d0adfc49",
+          "mime_type": "text/plain"
+        }
+      ],
+      "hash": "e08dfa376afc8066e3e9432935275c8df54c7b8efb3e930611248445d0adfc49"
+    }
+  ],
+  "tags": [
+    "contract"
+  ],
+  "created_at": "2026-09-19T16:26:46Z",
+  "visibility": "public"
+}

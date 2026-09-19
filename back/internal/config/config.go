@@ -69,6 +69,21 @@ type Config struct {
 
 	ForwardRules string // PEERDRIVE_FORWARD_RULES: "key1:8080,key2:8443"（转发授权白名单,key 即凭证,配置文件建议 chmod 600）
 
+	// ── 节点共享范围（PEERDRIVE_SHARE_*，doc/NETDISK.md M2 / ROADMAP 阶段 5）──
+	//
+	// ShareEnable 共享总开关（PEERDRIVE_SHARE_ENABLE，默认 **false**）。
+	// 为什么默认关：对端经 share 帧能列举本节点"提供了什么"，开启即等于对外
+	// 公开内容清单。默认全盘分享是隐私事故，必须运营者显式开启。
+	ShareEnable bool
+	// ShareCollections 对外共享的合集（PEERDRIVE_SHARE_COLLECTIONS，逗号分隔）：
+	// 64hex 合集 hash，或 "all" = 所有 public 合集。受限/私有合集即使写在这里
+	// 也会被跳过（无身份可校验，第 7 阶段前无法安全共享）。
+	ShareCollections string
+	// ShareDirs 对外共享的目录（PEERDRIVE_SHARE_DIRS，逗号分隔）。
+	// 语义：file_index 中路径落在这些目录下的文件进入共享清单。
+	// 空 = 不按目录共享（只有合集共享）。仅相对/绝对路径前缀匹配，
+	// 真正的越权读仍由 file_index.IsPathAllowed（上传根目录）兜底。
+	ShareDirs string
 }
 
 // IsOriginAllowed 检查给定的 Origin 是否在允许列表中，支持通配符（*）和子域名通配（*.example.com）。
@@ -146,6 +161,10 @@ func Load() *Config {
 
 		DownloadDir: getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
 		MaxPeers:    getEnvInt("PEERDRIVE_MAX_PEERS", 8),
+
+		ShareEnable:      getEnvBool("PEERDRIVE_SHARE_ENABLE", false),
+		ShareCollections: getEnv("PEERDRIVE_SHARE_COLLECTIONS", ""),
+		ShareDirs:        getEnv("PEERDRIVE_SHARE_DIRS", ""),
 
 		DownloadOrder:       getEnv("PEERDRIVE_DOWNLOAD_ORDER", "local,ipfs,ipfsgw,btdht,http"),
 		DownloadTimeoutSecs: getEnvInt("PEERDRIVE_DOWNLOAD_TIMEOUT", 30),

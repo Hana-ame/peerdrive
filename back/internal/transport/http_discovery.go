@@ -41,7 +41,15 @@ type HTTPDiscovery struct {
 	seen   map[string]bool // 已上报过的节点（去重，避免重复 onPeer）
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// shareInfo 本节点共享摘要（loadInfo.shares），供市场卡片显示"该节点
+	// 共享了 N 个合集/M 个文件"。**只报数量不报 hash**：announce 经发现
+	// 服务器广播，报 hash 等于公开"本节点持有什么"。nil = 未启用共享。
+	shareInfo func() map[string]any
 }
+
+// SetShareInfo 注入共享摘要读取器（必须在 Start 之前调用，首次 announce 就用）。
+func (d *HTTPDiscovery) SetShareInfo(fn func() map[string]any) { d.shareInfo = fn }
 
 // NewHTTPDiscovery 创建发现组件。
 func NewHTTPDiscovery(baseURL, peerID string, collections []string, onPeer func(peerID string), peers ...func() []string) *HTTPDiscovery {
@@ -98,6 +106,7 @@ func (d *HTTPDiscovery) announce() {
 		"collections": d.collections,
 		"peers":       d.peersList(),
 		"nodeType":    "go-persistent",
+		"loadInfo":    d.loadInfo(),
 	})
 	resp, err := d.client.Post(d.baseURL+"/discover/announce", "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -105,6 +114,15 @@ func (d *HTTPDiscovery) announce() {
 		return
 	}
 	_ = resp.Body.Close()
+}
+
+// loadInfo 上报本节点负载/能力信息（目前只有共享摘要）。
+// 返回 nil 时 JSON 里 loadInfo 为 null，发现服务器按"未上报"处理。
+func (d *HTTPDiscovery) loadInfo() map[string]any {
+	if d.shareInfo == nil {
+		return nil
+	}
+	return d.shareInfo()
 }
 
 func (d *HTTPDiscovery) peersList() []string {
