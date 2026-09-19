@@ -162,3 +162,58 @@ ROADMAP 顺序，而是它的"验收形态"：阶段 5（范围）与阶段 6（
 - 跨节点受限内容的身份传递（等阶段 7）。
 - BT/快播式的**分片并行 + 多源选择**（本轮是单源流式拉取；多源调度留待后续，
   当前 `source.Manager` 已具备多源骨架，接上即可）。
+
+## 6. 实施状态（2026-09-20，M1-M6 全部落地并合并回 `refactor`）
+
+各模块分支、提交与最终合并点：
+
+| 模块 | 分支 | 提交 |
+|---|---|---|
+| M1 节点市场与加入 | `module/node-market` | `feat(nodes): 节点市场与加入（网盘目标 M1）` |
+| M2 共享范围 + share 帧 | `module/node-share` | `feat(share): 节点共享范围 + share 帧（网盘目标 M2 / ROADMAP 阶段 5）` |
+| M3 跨节点拉取保存 | `module/peer-pull` | `feat(pull): 跨节点拉取保存（网盘目标 M3 / ROADMAP 阶段 6）` |
+| M4 网盘前端 | `module/netdisk-ui` | `feat(ui): 网盘前端界面 + 路由接线（网盘目标 M4）` |
+| M5 纯 WebRTC 消费端 | `module/peer-client` | `feat(client): 纯 WebRTC 消费端包（网盘目标 M5）` |
+| M6 文档与合并 | `refactor`（直接改） | merge 五个模块 + 本文档更新 |
+
+### 6.1 计划 vs 实际（有偏差的都写在这里）
+
+| 项 | 计划 | 实际 | 原因 |
+|---|---|---|---|
+| M3 落盘位置 | CAS `<storageDir>/<h[:2]>/<h>` | `<DownloadDir>/pulled/<相对路径>.part` → 校验 → rename → `file_index.Create` 登记 | 登记后既能出现在"我的文件"，也能被本节点继续 `serveFile` 服务给别的节点（集成测试验证了 C 从 B 拉取）。再写一份 CAS 是同一份内容的第二次落盘，没收益 |
+| M3 取消端点 | `POST /p2p/pull/:id/cancel` | `POST /p2p/pull/cancel {id}` | gin 不允许同级路由同时有静态段与参数段；改成静态路径 + body 传 id。同理 `GET/POST /p2p/pull` 不加 `:id` |
+| M3 并发 | 并发 3 | 并发 3（信号量）+ 任务表上限 200（只裁已结束的） | 长跑节点上任务表无界增长会吃内存 |
+| M4 组件 | `components/SideNav/FileTable/DriveToolbar/NodeCard/TransferRow` | 少 `DriveToolbar`（工具条内联进 Drive 页）；多 `format.js`（三处共用的展示规则） | 工具条只有一页用，抽出去反而多一层间接；展示规则散着写必然出现"文件页 1.5MB、传输页 1572864 字节" |
+| M4 预览 | 复用 `AnonExplorer/*Preview` | 复用 `api.getBlobUrl` + 新窗口打开 | 既有 Preview 组件与合集条目结构耦合；网盘的文件是 file_index 条目，形状不同，硬套要改造两处 |
+| M4 路由容器 | — | 新增 `Fill` 包裹层 | 网盘页是 `flex flex-1 min-h-0`，而 `<Routes>` 父级是块级容器——不加这层 `overflow-y-auto` 拿不到确定高度，内容会被裁掉而不是滚动（既有页面自带 `h-full`，故不改造） |
+| M5 keepalive | "控制通道 keepalive" | 不做 | 文件协议里没有 `ping` verb（心跳只在 `peerdrive-media` 那套 `url/meta` 协议里）；WebRTC 自身有 DTLS/SCTP 保活，应用层再加一层没有对应端点 |
+| M5 `list()` / `info()` | 计划实现 | **不做**，只实现 `share` + `req` | `list` 是节点的本地管理索引（含本机绝对路径），按设计只对可信对端开放，消费端不应有它；`info` 的用途（拿文件大小）已由 `meta` 帧的 `total` 覆盖 |
+| M5 `download()` / `saveToFile()` | `download()` 返回 Blob、`saveToFile()` 用 File System Access API | `saveAs()`（Blob + `<a download>`）+ `stream()`（异步迭代器，调用方自行落盘） | File System Access API 只有 Chromium 系支持，做成默认路径会在 Safari/Firefox 上直接不可用。把"流"暴露出来、让调用方选落盘方式更诚实（README 已写明这条限制） |
+| M5 SHA-256 | 未提及 | 新增 `src/sha256.js`（增量） | `crypto.subtle.digest()` 是一次性的，与流式拉取冲突（必须先攒满整份内容才能算摘要）。Go 侧对全量请求读完即校验 sha256，消费端要给出同样的保证就必须能边收边算 |
+| M5 内存 | 未提及 | `maxBytes` 默认 256MB | `fetch()/saveAs()` 是整体驻留内存的（浏览器 Blob 下载只能这样），2GB 文件会直接崩标签页。对端声明的大小时在 `meta` 阶段就拦 |
+| 测试基建 | 未提及 | 修 `front/src/__mocks__/api.js` 漂移（缺 8 个、多 18 个僵尸导出）+ 新增 `tests/api-mock-sync.test.js` 双向守卫 | 手写 mock 不同步会让页面在测试里拿到 `undefined`，死在离原因很远的调用点；这次就是被守卫测试揪出来的 |
+
+### 6.2 验证结果
+
+| 项 | 结果 |
+|---|---|
+| 后端单测 | `go test -tags nosqlite ./...` 全绿 |
+| 后端集成 | `go test -tags "nosqlite integration" ./test/integration/ -p 1` 全绿，新增 4 个：`TestNodeMarketListsDiscoveredPeer`、`TestShareProtocolContract`、`TestPeerPullSavesToLocalDrive`（M1/M2/M3 各一）+ 既有的自托管信令用例 |
+| 前端单测 | `vitest run` 88/88（新增 `netdisk.test.jsx` 34 个 + `api-mock-sync.test.js` 2 个） |
+| 前端构建 | `vite build` 成功 |
+| 消费端单测 | `node --test` 60/60（protocol / sha256 / client 三个文件） |
+| CI | `.github/workflows/ci.yml` 新增 `client-package` job；合并后 `refactor` 上五个 job 需全绿 |
+
+### 6.3 与 ROADMAP 的对应
+
+本目标的五个模块**不改** ROADMAP 顺序，而是把阶段 1/5/6 从"骨架"推到"用户可见"：
+
+- 阶段 1（互联）：M1 补上了"面向用户的节点目录 + 加入动作"，ROADMAP 里
+  "广播本地合集 hash 等于公开本节点持有什么"那条待办由 M2 的 `share` 帧定性解决
+  （只报数量、不报 hash；具体清单只在点对点直连后给）。
+- 阶段 5（文件范围管理）：M2。
+- 阶段 6（上传下载保存）：M3（跨节点）+ M4（界面）+ M5（无节点消费端）。
+- 阶段 2/3/4（文件 / 组合 / 管理链路）在 M4 里第一次有了界面承载
+  （Drive / 合集卡片 / 传输任务），但**做深**（目录树、批量重命名、重试策略等）仍待后续。
+- 阶段 7（身份管理）：仍未开始，硬约束保持——全链路不依赖账号，归属先用 peerId。
+

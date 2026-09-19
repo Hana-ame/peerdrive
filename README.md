@@ -27,8 +27,30 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 | P2P | PeerJS 信令 + WebRTC DataChannel（`back/peerjs/` go-peerjs；发现：MQTT / 自托管 HTTP） |
 | BT | `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt，独立库） |
 | 管理面 | 本地 WS admin verb（前端全走 `front/src/ws.js`） |
+| 消费端 | `packages/peerdrive-client`（零依赖纯浏览器消费端，走 `share`/`req` 帧；`packages/peerdrive-media` 面向 img/video 的 URL 代理） |
 | 存储 | SQLite + 内容寻址文件系统 |
 | 前端 | React 19 + Vite 8 + TailwindCSS 3 |
+
+---
+
+## 网盘链路（2026-09，`doc/NETDISK.md`）
+
+把「互联 + 文件」串成一条用户能看懂的链路，对应开发顺序里 ROADMAP 的阶段 5/6：
+
+```
+我的节点 ──加入──▶ 节点市场 ──直连──▶ 对方共享的"文件链接" ──选中保存──▶ 我的网盘
+                                                        （传输任务：进度 / 取消）
+```
+
+| 环节 | 实现 |
+|---|---|
+| 节点市场与加入 | `service.NodeDirectory` + `GET /peerjs/nodes*`；已加入清单持久化（`joined_nodes.json`）并成为常驻对端 |
+| 共享范围 | `share` 帧 + `PEERDRIVE_SHARE_ENABLE/COLLECTIONS/DIRS`（**默认全部关闭**，不声明就不对外暴露任何清单） |
+| 跨节点保存 | `service.PeerPuller` + `GET/POST /p2p/pull*`：流式拉取 → sha256 校验 → 落盘 → 登记文件索引，带进度/取消/去重跳过 |
+| 网盘界面 | `front/src/pages/{Drive,Market,Peers,PeerDetail,Transfers}`（信息架构参考 Nextcloud Files / Cloudreve / Alist） |
+| 无节点消费端 | `packages/peerdrive-client`：一个静态页面直连节点拉文件，不需要本地后端 |
+
+进度、模块拆分、**计划与实际偏差**、验证结果都在 `doc/NETDISK.md`；开发顺序见 `doc/ROADMAP.md`。
 
 ---
 
@@ -41,10 +63,14 @@ cd back && go run -tags nosqlite ./cmd/server/main.go
 # 前端
 cd front && npm run dev
 
+# 消费端 demo（无后端）
+cd packages/peerdrive-client && npm run demo   # http://127.0.0.1:8123/demo/consumer.html
+
 # 测试
 cd back && go test -tags nosqlite ./... -count=1
 cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1   # 脱外网（自托管信令）
 cd front && npx vitest run
+cd packages/peerdrive-client && npm test      # node --test（零依赖）
 ```
 
 ## 信令服务器实现方式
@@ -105,6 +131,10 @@ peerdrive
 | `PEERDRIVE_MAX_PEERS` | 8 | 互联对端上限 |
 | `PEERDRIVE_DOWNLOAD_ORDER` / `PEERDRIVE_DOWNLOAD_TIMEOUT` | local,ipfs,ipfsgw,btdht,http / 30s | 下载器路由顺序 / 超时 |
 | `PEERDRIVE_FORWARD_RULES` | - | 端口转发规则（`key:port,...`，chmod 600） |
+| `PEERDRIVE_DISCOVER_PRESENCE` | true | 节点级「存在房间」发现（零共享 collection 的节点也能互联） |
+| `PEERDRIVE_SHARE_ENABLE` | **false** | 对外共享总开关。默认关——不显式开启就不对外暴露任何清单 |
+| `PEERDRIVE_SHARE_COLLECTIONS` | - | 共享合集：逗号分隔 hash 或 `all`（受限/私有一律跳过） |
+| `PEERDRIVE_SHARE_DIRS` | - | 共享目录：逗号分隔。空 = 不共享文件（文件只回 basename，不回绝对路径） |
 
 
 ## 留下的东西

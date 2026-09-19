@@ -713,6 +713,89 @@ WS 会话不是对端节点）。
 **未做（后续）**：连接健康度观测（每对端 RTT / 最后收帧 / 重连次数）、按能力筛选对端
 （announce 已有 `nodeType`/`loadInfo` 字段，节点端目前发常量）。
 
+### 3.19 网盘链路：节点市场 / 共享范围 / 跨节点保存 / 网盘界面 / 纯消费端（2026-09-20）
+
+**背景**：用户给出目标形态（见 `doc/NETDISK.md`）：前端是普通网盘界面（自己的节点 / 别人的节点 /
+市场加入 / 看到对方的「文件链接」/ 选中保存）+ 一个纯 WebRTC 消费端。按模块分支实施（M1-M6），
+每个分支自己跑通 CI 后 merge 回 `refactor`。
+
+**新增的帧 verb：`share` / `share-resp`**
+
+```
+请求 {"type":"share","reqId":"…"}
+响应 {"type":"share-resp","collections":[…],"files":[…],"dirs":[…],"total":N,"reqId":"…"}
+```
+
+- **不复用 `list`**（关键决策）：`list` 是本地**管理**索引（file_index 全量、含本机绝对路径），
+  语义是「我在管理哪些文件」；`share` 是运营者**显式声明**的对外范围。混用等于默认全盘对外公开。
+- 未开启共享回**空数组**而不是 `err`：空态是合法业务状态（对方没共享），前端渲染"无内容"即可。
+- 不含请求者身份（ROADMAP 硬约束：第 7 阶段前不引入账号），因此只回本来就允许公开的内容
+  （受限/私有合集一律跳过——放出去等于公开）。
+- 响应帧字段（`collections/files/dirs`）不在 `dcResp` 里，所以 Go 侧一次性 verb 的等待槽
+  `connState.verbWaits` 存的是**原始 JSON bytes**、不是解析后的结构（重新 marshal 会丢字段）。
+  这也是「一次性 verb 等待槽」与「流式 fetch 状态机」分开的原因：后者要处理数据块，
+  前者只要一个 JSON 就结束。
+
+**announce 只报共享数量**：`loadInfo.shares = {collections,files,dirs}`（**只数量不 hash**）。
+announce 会经发现服务器广播给所有查询者，报 hash 等于公开「本节点持有什么」；数量足够支撑
+市场卡片的引导信息，具体清单只在点对点直连后走 `share` 帧拿。这条同时定性解决了
+§3.18 留下的「广播本地合集 hash」待办。
+
+**跨节点拉取保存（`service.PeerPuller`）**
+
+- 落盘位置：`<DownloadDir>/pulled/<相对路径>.part` → 校验 sha256 → rename → `file_index.Create` 登记。
+  **不写 CAS 副本**：登记后内容既能出现在"我的文件"，也能被本节点继续 `serveFile` 服务给别的节点
+  （集成测试 `TestPeerPullSavesToLocalDrive` 用 C 从 B 拉取验证了这点），再写一份 CAS 是同一份内容的
+  第二次落盘。
+- 端点全是**静态路径**：`GET/POST /p2p/pull`、`POST /p2p/pull/collection`、`POST /p2p/pull/cancel`。
+  坑：gin **不允许同级路由同时有静态段与参数段**（`/p2p/pull` 与 `/p2p/pull/:id` 会 panic），
+  取消因此改成 body 传 id 而不是 `:id`。
+- `fetchState.total` 改用 `atomic.Int64`：meta 帧由消息泵写、`fetchReader.Total()` 由消费者
+  goroutine 读，普通字段是 data race（`-race` 会报）。
+
+**前端（M4）**
+
+- 新增 `Fill` 容器（`App.jsx`）：网盘页是 `flex flex-1 min-h-0`，而 `<Routes>` 的父级是**块级**容器
+  ——不在中间加一层 `h-full flex` 的话，页内 `overflow-y-auto` 拿不到确定高度，内容会被
+  `overflow-hidden` 裁掉而不是滚动。既有页面自带 `h-full`，所以没有改造它们（只包新路由）。
+- `/peers/:peer` 与既有 `/:username/:collName` 不冲突：react-router v6 按特异性排序，静态段优先，
+  与声明顺序无关。
+- 预览不做大改造：既有 `AnonExplorer/*Preview` 组件与合集条目结构耦合，网盘的文件是 file_index
+  条目（形状不同），所以走 `api.getBlobUrl` + 新窗口打开，避免为一个入口改造两处。
+
+**测试基建修复（值得单独记）**
+
+- `front/src/__mocks__/api.js` 是**手写** mock（不是 automock），随 api.js 演进已漂移：
+  缺 8 个导出、多 18 个僵尸导出。表现是页面在测试里拿到 `undefined`，然后死在离原因很远的调用点
+  （`Cannot read properties of undefined`）。
+- 修法：补齐 + 清理，并新增 `front/tests/api-mock-sync.test.js` 做**双向**守卫
+  （真实模块的导出清单 vs 手写 mock；缺了/多了都红）。这条守卫在这次就抓出了 8 个缺失。
+- 需要断言"点了保存到底给后端发了什么"的测试，在文件级用 `vi.mock('../src/api.js', () => ({...vi.fn()}))`
+  覆盖 setup.js 的手写 mock（手写 mock 是普通函数，既不能断言也不能注入返回值）。
+
+**纯 WebRTC 消费端（`packages/peerdrive-client`）**
+
+- **传输无关**（关键决策）：`PeerDriveClient` 只要求传入 `{on(type,cb), send(data), open, close}`，
+  不认识 PeerJS。收益：包零依赖、不污染使用方打包体积；测试用假连接即可覆盖全部状态机
+  （不需要信令服务器与真 WebRTC）；将来换裸 `RTCPeerConnection`/WebTransport 不用改这个文件。
+- 逐条复刻 Go 侧的正确性约束：连接级 expect（二进制块挂到**最近一个** data 头所属请求，
+  块里不带 reqId —— 所以两个请求的块**不能交错发送**）、`done` 字节数比对（防截断静默损坏）、
+  块大小上限、hash 必须 64 位小写 hex（本地即拒，否则错误晚一个往返才出现）。
+- **自实现增量 SHA-256**（`src/sha256.js`）：`crypto.subtle.digest()` 是**一次性**的，必须先把
+  整份内容攒进内存才能算摘要——与流式拉取直接冲突。增量实现让"边收边算"成立，代价是纯 JS 约
+  30–80 MB/s；一次性路径 `sha256Hex()` 仍优先走 WebCrypto。副产物：纯 JS 不要求安全上下文。
+- **内存闸**：`fetch()/saveAs()` 整体驻留内存（浏览器 Blob 下载只能这样），默认 256MB，
+  超了抛 `TOO_LARGE` 并引导用 `stream()`；对端在 `meta` 里声明的大小时**在 meta 阶段就拦**，不白下。
+- 取消语义诚实标注：协议里**没有取消帧**（Go 侧也没有对应实现），提前 `break` 只是本地丢帧并
+  释放已缓存块，对端会把这次请求发完；要真正中断只能关连接。
+- 不做 `list` 帧：那是节点的本地管理索引，按设计只对可信对端开放。
+- `serialization` 必须是 `'raw'`（同 peerdrive-media 的踩坑）：否则数据块会被 peerjs 自己的
+  chunker 包装，对端解析不出来。
+
+**验证**：back 单测全绿；集成 `-p 1` 全绿（新增 `TestNodeMarketListsDiscoveredPeer` /
+`TestShareProtocolContract` / `TestPeerPullSavesToLocalDrive`）；前端 vitest 88/88 + `vite build`；
+消费端 `node --test` 60/60。计划与实际偏差的完整清单见 `doc/NETDISK.md` §6.1。
+
 ## 5. E2E 踩过的坑（全部已修）
 
 | 坑 | 修复 |
