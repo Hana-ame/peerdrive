@@ -315,6 +315,32 @@ export const downloadUserFile = (username, coll, filepath) =>
 /* ---- P2P BT ---- */
 // PeerJS 节点状态（GET /peerjs/node，2026-08-19 起替代已删的 /p2p/status 供前端面板用）。
 export const getPeerjsNode = () => request('GET', '/peerjs/node');
+
+/* ---- 节点市场 / 我的节点 / 对方节点（网盘目标 M1-M3，见 doc/NETDISK.md）----
+ * 信息架构对齐普通网盘："自己的节点 / 别人的节点 / 市场里加入节点"。
+ * 请求都经 /ws/peer 的 admin 帧（与其它 api 一致），后端路由见
+ * back/internal/router/peerjs_routes.go 与 router.go 的 /p2p/pull*。
+ */
+// 市场列表：发现服务器在线节点 ∪ 本地已加入清单（离线也保留，不会"消失"）。
+export const getNodeMarket = () => request('GET', '/peerjs/nodes');
+// 我加入的节点（列表页用；与市场列表相比只保留 joined=true 的条目）。
+export const getJoinedNodes = () => request('GET', '/peerjs/nodes/joined');
+// 加入/移出。加入是持久化的，且会让本节点在信令重连后自动连它。
+export const joinNode = (peer) => request('POST', '/peerjs/nodes/join', { peer });
+export const leaveNode = (peer) =>
+  request('DELETE', `/peerjs/nodes/join?peer=${encodeURIComponent(peer)}`);
+// 对方节点的共享清单：打包好的合集（含条目）与单独文件——即"文件链接"列表。
+// 未直连时后端会主动拨号并等一小会儿（见 controller.GetPeerShares）。
+export const getPeerShares = (peer) =>
+  request('GET', `/peerjs/nodes/${encodeURIComponent(peer)}/shares`);
+// 跨节点拉取保存（服务端任务式，带进度/取消）。
+export const getPullJobs = () => request('GET', '/p2p/pull');
+export const startPull = (peer, hash, name = '', path = '') =>
+  request('POST', '/p2p/pull', { peer, hash, name, path });
+export const startPullCollection = (peer, collection) =>
+  request('POST', '/p2p/pull/collection', { peer, collection });
+export const cancelPull = (id) => request('POST', '/p2p/pull/cancel', { id });
+
 export const getBTStatus = () => request('GET', '/bt/status');
 export const btAnnounce = (hash) => request('POST', '/bt/announce', { hash });
 export const btFind = (hash) => request('POST', '/bt/find', { hash });

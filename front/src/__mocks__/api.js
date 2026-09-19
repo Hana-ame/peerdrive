@@ -2,6 +2,10 @@
 // All async functions return promises that resolve to empty data.
 // This avoids happy-dom Fetch creating Node HTTP requests that
 // cause AbortError / socket hang up noise during window teardown.
+//
+// 这是**手写** mock（不是 automock）：新增 api 导出忘同步，页面在测试里会拿到
+// undefined，然后死在离原因很远的调用点。tests/api-mock-sync.test.js 拿真实
+// 模块的导出清单做双向守卫（缺了/多了都红），改 api.js 后跑一次就知道该改哪。
 
 const EMPTY_PROMISE = Promise.resolve({})
 const EMPTY_ARRAY_PROMISE = Promise.resolve([])
@@ -11,7 +15,6 @@ async function request() { return {} }
 
 // file
 export const verifyFile = () => EMPTY_PROMISE
-export const getDownloadUrl = () => ''
 export const registerLocalFile = () => EMPTY_PROMISE
 export const registerURL = () => EMPTY_PROMISE
 export const registerFolder = () => EMPTY_PROMISE
@@ -20,14 +23,16 @@ export const browseDir = () => EMPTY_ARRAY_PROMISE
 // anon collections
 export const createAnonCollection = () => EMPTY_PROMISE
 export const getAnonCollection = () => EMPTY_PROMISE
-export const getAnonFileDownloadUrl = () => ''
-export const forkAnonCollection = () => EMPTY_PROMISE
+// 可见性三档：常量直接转发真实定义（组件读的是值，不是函数）
+export { VISIBILITY, VISIBILITY_PUBLIC, VISIBILITY_RESTRICTED, VISIBILITY_PRIVATE } from '../constants.js'
+export const setAnonCollectionVisibility = () => EMPTY_PROMISE
+export const listKnownAccounts = () => EMPTY_ARRAY_PROMISE
+export const listKnownGroups = () => EMPTY_ARRAY_PROMISE
 
 // user collections
 export const createUserCollection = () => EMPTY_PROMISE
 export const getUserCollections = () => EMPTY_ARRAY_PROMISE
 export const getUserCollection = () => EMPTY_PROMISE
-export const updateCollectionTags = () => EMPTY_PROMISE
 export const addCollectionEntry = () => EMPTY_PROMISE
 export const removeCollectionEntry = () => EMPTY_PROMISE
 export const commitCollection = () => EMPTY_PROMISE
@@ -35,12 +40,21 @@ export const getVersionLog = () => EMPTY_ARRAY_PROMISE
 export const rollbackVersion = () => EMPTY_PROMISE
 export const forkUserCollection = () => EMPTY_PROMISE
 export const mergeUserCollection = () => EMPTY_PROMISE
-export const pullUserCollection = () => EMPTY_PROMISE
-export const getUserFileDownloadUrl = () => ''
 
 // BT
 export const getBTStatus = () => EMPTY_PROMISE
 export const getPeerjsNode = () => EMPTY_PROMISE
+
+// 网盘链路（M1-M3 的后端端点，界面见 src/pages/{Drive,Market,Peers,PeerDetail,Transfers}）
+export const getNodeMarket = () => EMPTY_PROMISE
+export const getJoinedNodes = () => EMPTY_PROMISE
+export const joinNode = () => EMPTY_PROMISE
+export const leaveNode = () => EMPTY_PROMISE
+export const getPeerShares = () => EMPTY_PROMISE
+export const getPullJobs = () => EMPTY_PROMISE
+export const startPull = () => EMPTY_PROMISE
+export const startPullCollection = () => EMPTY_PROMISE
+export const cancelPull = () => EMPTY_PROMISE
 export const btAnnounce = () => EMPTY_PROMISE
 export const btFind = () => EMPTY_PROMISE
 export const btGetDownloads = () => EMPTY_ARRAY_PROMISE
@@ -52,16 +66,14 @@ export const btPauseDownload = () => EMPTY_PROMISE
 export const btResumeDownload = () => EMPTY_PROMISE
 export const btSeedDownload = () => EMPTY_PROMISE
 export const btStopSeed = () => EMPTY_PROMISE
-export const btGetStats = () => EMPTY_PROMISE
+export const btSeedCollection = () => EMPTY_PROMISE
 
 // Anon commit
-export const commitAnonCollection = () => EMPTY_PROMISE
 export const listAnonCollections = () => EMPTY_ARRAY_PROMISE
 
 // Search
 export const searchCollections = () => EMPTY_ARRAY_PROMISE
 export const listPublicCollections = () => EMPTY_ARRAY_PROMISE
-export const setCollectionVisibility = () => EMPTY_PROMISE
 
 // File upload/delete
 export const uploadFile = () => EMPTY_PROMISE
@@ -75,10 +87,6 @@ export const getApiBase = () => ''
 export const setApiBase = () => {}
 export const getAuthToken = () => ''
 export const DEFAULT_API = 'http://localhost:3000'
-export const getApiBaseUrl = () => ''
-export const getWSTransferURL = () => 'ws://localhost:3000/ws/transfer'
-export const WS_TRANSFER_URL_BASE = 'http://localhost:3000'
-export const WS_TRANSFER_URL = getWSTransferURL()
 
 // Backend switching (mocks)
 export const DEFAULT_BACKENDS = [
@@ -124,7 +132,6 @@ export const setFollowRedirects = () => {}
 
 // IPFS
 export const getIPFSEnabled = () => false
-export const setIPFSEnabled = () => {}
 export const getIPFSCompatStatus = () => EMPTY_PROMISE
 export const setIPFSCompatEnabled = () => EMPTY_PROMISE
 export const pinCID = () => EMPTY_PROMISE
@@ -150,7 +157,6 @@ export const listFiles = () => EMPTY_ARRAY_PROMISE
 
 // Auth
 export const getAuthStatus = () => EMPTY_PROMISE
-export const getRegServerUrl = () => ''
 export const setRegServerUrl = () => {}
 
 // Groups (reg server)
@@ -161,13 +167,8 @@ export const addUserToGroup = () => EMPTY_PROMISE
 export const getComments = () => EMPTY_ARRAY_PROMISE
 export const postComment = () => EMPTY_PROMISE
 
-// Stats
-export const getRegServerStats = () => EMPTY_PROMISE
-export const getServiceStats = () => EMPTY_PROMISE
-
 // Consent
 export const saveConsentLocal = () => {}
-export const uploadConsent = saveConsentLocal
 
 // WS 下载/预览（迁移后的新 API，全部 mock 成空 Promise——测试不触发真实 WS）
 export const downloadFile = () => Promise.resolve(new Uint8Array(0))

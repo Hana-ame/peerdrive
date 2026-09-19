@@ -276,6 +276,15 @@ export default function Navbar() {
 
   // 2026-08-19：P2P 网络下拉（/p2p 系列旧 libp2p 面板）已随 libp2p 端点删除移除——
   // 节点互联状态改看设置页/后端 /peerjs/node；BT/IPFS 面板后端仍在，保留。
+  //
+  // 2026-09-20（M4）：新增「网盘」下拉——网盘是新的主链路（自己的文件 ↔ 别人的
+  // 节点），放在最左；顶栏空间有限，四个入口收进下拉，主入口指向 /drive。
+  const driveItems = [
+    { to: '/drive', label: '我的网盘' },
+    { to: '/market', label: '节点市场' },
+    { to: '/peers', label: '我的节点' },
+    { to: '/transfers', label: '传输任务' },
+  ];
   const btItems = [
     { to: '/bt', label: 'BT 下载器' },
     { to: '/bt/status', label: 'BT DHT 状态' },
@@ -286,6 +295,7 @@ export default function Navbar() {
   ];
 
   const allNavItems = [
+    { label: '网盘', children: driveItems },
     { to: '/', label: '合集' },
     { to: '/create', label: '创建合集' },
     { label: 'BT', children: btItems },
@@ -319,6 +329,7 @@ export default function Navbar() {
 
         {/* 桌面端导航链接 */}
         <div className="hidden md:flex items-center">
+          <NavDropdown label="网盘" to="/drive" items={driveItems} />
           <Link to="/" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">合集</Link>
           <Link to="/create" className="text-sm text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 inline-flex items-center">创建合集</Link>
           <NavDropdown label="BT" to="/bt" items={btItems} />
