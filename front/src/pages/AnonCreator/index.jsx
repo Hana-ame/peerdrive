@@ -3,9 +3,11 @@ import * as api from '../../api';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { PageContext } from '../../App';
 import { loadSearchHistory } from './utils';
+import { VISIBILITY } from '../../constants';
 import LeftPanel from './LeftPanel';
 import MiddlePanel from './MiddlePanel';
 import RightPanel from './RightPanel';
+import AccountPicker from './AccountPicker';
 
 export default function AnonCreator() {
   const nav = useNavigate();
@@ -23,6 +25,8 @@ export default function AnonCreator() {
   const [leftSortOrder, setLeftSortOrder] = useState('desc');
   const [leftTypeFilters, setLeftTypeFilters] = useState([]);
   const [search, setSearch] = useState('');
+  // 已注册·按目录 的下钻路径（'' = 根）。切换 tab 时重置，避免带着深层路径回来找不到内容。
+  const [regDirPath, setRegDirPath] = useState('');
 
   // ===== 合集管理 =====
   const [collSort, setCollSort] = useState('time');
@@ -40,6 +44,15 @@ export default function AnonCreator() {
   const [showNamePrompt, setShowNamePrompt] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [toastErr, setToastErr] = useState(false);
+
+  // ===== 广播权限（三选项）=====
+  // public 才能广播；restricted 必须真挑到人；private 依赖本节点 operator 账号。
+  const [visibility, setVisibility] = useState(VISIBILITY.PUBLIC);
+  const [accessList, setAccessList] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [operator, setOperator] = useState('');
+  const [showAccountPicker, setShowAccountPicker] = useState(false);
 
   // ===== 选择模式 =====
   const [selectMode, setSelectMode] = useState(false);
@@ -110,20 +123,41 @@ export default function AnonCreator() {
   const loadCollections = async () => {
     try { setCollections(await api.listAnonCollections() || []); } catch { setCollections([]); }
   };
+  // operator 是本节点登录 regserver 的账号（后端 nodestate.GetOperator()），
+  // 匿合集的 Owner 就取它 —— 没有 operator 时「仅自己」会生成谁都读不了的合集，
+  // 所以必须在 UI 之前拿到它。挂在首屏一次性拉取，不放进保存路径串行等待。
+  useEffect(() => {
+    api.getAuthStatus()
+      .then(res => setOperator(res?.operator || res?.username || ''))
+      .catch(() => setOperator(''));
+  }, []);
 
   // ===== 过滤 & 排序 =====
+  // 「已注册」口径：后端 ListAllFiles（repository/file_repo.go:96）LEFT JOIN file_providers，
+  // 本地注册过的文件才带 provider_path/provider_type，纯 URL/远端来源的条目这两个字段是空串。
+  // 坑：旧实现按 f.providers?.length > 0 过滤——FileListItem 根本没有 providers 字段，
+  // 结果恒为 false，整个「已注册」列表永远是空的。
+  const isRegisteredFile = (f) => !!(f?.provider_path || f?.provider_type);
+
+  // 时间比较必须转成数值：created_at 是 RFC3339 字符串，localeCompare 比较会把
+  // 时区后缀（+08:00 / Z）混在一起，跨时区写入的记录排出来顺序是乱的。
+  const parseTime = (s) => { const t = Date.parse(s || ''); return Number.isNaN(t) ? 0 : t; };
+
   const filteredFiles = useMemo(() => {
     let result = [...files];
 
     // 来源过滤
-    if (leftSourceTab === 'registered') {
-      result = result.filter(f => f.providers?.length > 0);
+    if (leftSourceTab === 'registered' || leftSourceTab === 'registered_dir') {
+      result = result.filter(isRegisteredFile);
     }
 
-    // 文本搜索（仅 all / registered 模式）
-    if (search && (leftSourceTab === 'all' || leftSourceTab === 'registered')) {
+    // 文本搜索（本地电脑模式由 SystemBrowse 就地过滤 browse 结果，不走这里）
+    if (search && leftSourceTab !== 'local' && leftSourceTab !== 'collections') {
       const q = search.toLowerCase();
-      result = result.filter(f => (f.filename || '').toLowerCase().includes(q));
+      result = result.filter(f =>
+        (f.filename || '').toLowerCase().includes(q) ||
+        (f.provider_path || '').toLowerCase().includes(q)
+      );
     }
 
     // 类型筛选（多选）
@@ -142,11 +176,13 @@ export default function AnonCreator() {
     result.sort((a, b) => {
       let cmp = 0;
       switch (leftSortKey) {
-        case 'name': cmp = (a.filename || '').localeCompare(b.filename || ''); break;
-        case 'size': cmp = (a.size || 0) - (b.size || 0); break;
-        case 'modified_at': cmp = (a.modified_at || '').localeCompare(b.modified_at || ''); break;
-        default: cmp = (a.created_at || '').localeCompare(b.created_at || ''); break;
+        // 坑：文件名必须 numeric 感知，否则 a2.png 会排到 a10.png 后面
+        case 'name': cmp = String(a.filename || '').localeCompare(String(b.filename || ''), undefined, { numeric: true, sensitivity: 'base' }); break;
+        case 'size': cmp = (Number(a.size) || 0) - (Number(b.size) || 0); break;
+        default: cmp = parseTime(a.created_at) - parseTime(b.created_at); break;
       }
+      // 次级键：主序相同时用文件名兜底，保证顺序稳定（否则并列项顺序随机跳动）
+      if (cmp === 0) cmp = String(a.filename || '').localeCompare(String(b.filename || ''), undefined, { numeric: true });
       return leftSortOrder === 'asc' ? cmp : -cmp;
     });
 
@@ -337,20 +373,57 @@ export default function AnonCreator() {
   };
 
   // ===== 保存合集 =====
-  const handleSave = async () => {
+  // 权限校验必须在前端先拦一道：restricted 没挑人会生成「谁都打不开」的合集，
+  // 后端也会 400，但本地提示比一轮往返后再报错清楚得多。
+  // 坑：accessList 和 visibility 必须同一个动作里改，否则「切到指定权限但名单还留着上一次的人」，
+  // 后端会收到旧名单；pick() 里切换时清空名单就是为此。
+  const pickVisibility = (v, list = []) => {
+    setVisibility(v);
+    setAccessList(v === VISIBILITY.RESTRICTED ? list : []);
+  };
+
+  const openAccountPicker = async () => {
+    // 账号目录来自 regserver 代理；服务缺席时拿到空数组，AccountPicker 走手动 @id 兜底
+    const [acc, grp] = await Promise.all([api.listKnownAccounts(), api.listKnownGroups()]);
+    setAccounts(acc);
+    setGroups(grp);
+    setShowAccountPicker(true);
+  };
+
+  const handleSave = async (broadcast = false) => {
     const valid = entries.filter(e => e.path?.trim() && (e.path.endsWith('/') || e.hash || e.providers?.[0]?.value));
     if (!valid.length) { showToast('请先添加文件', true); return; }
     if (!fname.trim() && !showNamePrompt) {
       setShowNamePrompt(true);
       return;
     }
+    if (visibility === VISIBILITY.RESTRICTED && accessList.length === 0) {
+      showToast('请至少选择一个可访问的账号', true);
+      setShowAccountPicker(true);
+      return;
+    }
+    if (visibility === VISIBILITY.PRIVATE && !operator) {
+      showToast('未绑定 regserver 账号，无法设为仅自己', true);
+      setVisibility(VISIBILITY.PUBLIC);
+      return;
+    }
     setShowNamePrompt(false);
     setSaving(true);
     try {
       const tagList = tags.split(/[,;]/).map(t => t.trim()).filter(Boolean);
-      const res = await api.createAnonCollection(valid, fname.trim(), tagList);
+      const res = await api.createAnonCollection(valid, fname.trim(), tagList, visibility, accessList);
       loadCollections();
-      showToast('合集创建成功');
+      if (broadcast) {
+        // 广播 = 存入 BT DHT/做种：DHT announce 让 Peerua 网络能查到这个 hash，
+        // seed-collection 让本节点挂着做种。任一失败都不算合集创建失败。
+        try { await api.btSeedCollection(res.hash); } catch {}
+        try {
+          await api.btAnnounce(res.hash);
+          showToast('合集已创建并广播');
+        } catch { showToast('合集已创建，广播未成功（P2P 未连接）', true); }
+      } else {
+        showToast('合集创建成功');
+      }
       nav(`/anon/collections/${res.hash}`);
     } catch (err) { showToast(`创建失败: ${err.message}`, true); }
     setSaving(false);
@@ -446,6 +519,7 @@ export default function AnonCreator() {
   const handleSourceTabChange = (tab) => {
     setLeftSourceTab(tab);
     if (tab === 'local') setSysPath('/');
+    if (tab === 'registered_dir') setRegDirPath('');
   };
 
   // 移动端面板切换
@@ -501,7 +575,9 @@ export default function AnonCreator() {
           selectedFiles={selectedFiles}
           sysPath={sysPath} sysEntries={sysEntries} sysLoading={sysLoading}
           searchHistory={searchHistory}
+          regDirPath={regDirPath}
           onSourceTab={handleSourceTabChange}
+          onRegDirPath={setRegDirPath}
           onSortKey={setLeftSortKey}
           onSortOrder={() => setLeftSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
           onTypeFilter={setLeftTypeFilters}
@@ -543,8 +619,24 @@ export default function AnonCreator() {
           onFname={setFname} onTags={setTags} onSave={handleSave}
           onAddUrl={handleAddUrl}
           onCloseNamePrompt={() => setShowNamePrompt(false)}
+          visibility={visibility} accessList={accessList} operator={operator}
+          onVisibilityChange={pickVisibility}
+          onRequestAccounts={openAccountPicker}
+          onBroadcast={() => handleSave(true)}
         />
       </div>
+
+      {/* 账号选择器（仅 restricted 档位用到；弹层放父层，避免编辑器重渲染丢状态） */}
+      {showAccountPicker && (
+        <AccountPicker accounts={accounts} groups={groups} selected={accessList}
+          onConfirm={(list) => {
+            setVisibility(VISIBILITY.RESTRICTED);
+            setAccessList(list);
+            setShowAccountPicker(false);
+            if (list.length === 0) setVisibility(VISIBILITY.PUBLIC);
+          }}
+          onClose={() => setShowAccountPicker(false)} />
+      )}
     </div>
   );
 }

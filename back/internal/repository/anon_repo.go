@@ -129,6 +129,11 @@ func ListAnonCollections(storageDir string) ([]model.AnonCollectionSummary, erro
 					preview = append(preview, e.Path)
 				}
 				summary.NamePreview = strings.Join(preview, ", ")
+				// 权限档位回填：列表页直接显示 公开/指定/仅自己，不用逐个拉详情。
+				// 坑：历史集合没有该字段 → EffectiveVisibility() 兜底成 public，
+				// 不要把空串直接透给前端，否则三选项 UI 没有可选项高亮。
+				summary.Visibility = coll.EffectiveVisibility()
+				summary.Owner = coll.Owner
 			}
 		}
 		results = append(results, summary)

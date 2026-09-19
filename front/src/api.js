@@ -229,14 +229,51 @@ export const browseDir = (dirPath = '/') =>
   request('GET', `/files/browse?path=${encodeURIComponent(dirPath)}`);
 
 /* ---- anon collections ---- */
-export const createAnonCollection = (entries, friendly_name = '', tags = [], visibility = '', access_list_hash = '') => {
+// createAnonCollection：visibility/access_list 对应后端 model.AnonCollection 的权限字段。
+// 坑：access_list 是账号名数组，不是 /access/list 产出的 hash —— 旧版曾传
+// access_list_hash，后端 CreateAnonCollection 只读 access_list 字段，导致
+// 「仅限指定权限」创建出来的合集名单为空 → 后端直接 400。
+export const createAnonCollection = (entries, friendly_name = '', tags = [], visibility = '', access_list = []) => {
   const normalized = entries.map(e => ({
     path: e.path,
     providers: e.providers || [{ type: "sha256", value: e.hash, mime_type: e.mime_type || '' }],
   }));
-  return request('POST', '/collections', { entries: normalized, friendly_name, tags, visibility, access_list_hash });
+  return request('POST', '/collections', { entries: normalized, friendly_name, tags, visibility, access_list });
 };
 export const getAnonCollection = (hash) => request('GET', `/collections/${hash}`);
+
+// 可见性三选项：常量定义在 src/constants.js（组件不能从本模块取常量——
+// tests/setup.js 对本模块做全量 automock，非函数导出会丢失；原因见 constants.js 注释）。
+// 这里只做转发，方便 `api.VISIBILITY` 这种老写法继续可用。
+export { VISIBILITY, VISIBILITY_PUBLIC, VISIBILITY_RESTRICTED, VISIBILITY_PRIVATE } from './constants.js';
+
+// 切换已存在集合的权限档位。
+// 坑：集合是内容寻址的，改权限会写新 JSON → 返回新的 hash，旧 hash 仍是旧权限的快照。
+// 调用方必须拿 res.hash 当集合的新身份，不能继续用老 hash 分享。
+export const setAnonCollectionVisibility = (hash, visibility, access_list = []) =>
+  request('PUT', `/anon/collections/${encodeURIComponent(hash)}/visibility`, { visibility, access_list });
+
+// 账号目录：优先 regserver 代理端点 /reg/users（含分组 /reg/groups）。
+// 背景：账号目录属于「注册认证服务」模块，还没落地前端点不存在，这里不能抛错 ——
+// 调用方拿到空数组后降级到手动输入 @id（AccountPicker 自带这条兜底路径）。
+export const listKnownAccounts = async () => {
+  try {
+    const res = await request('GET', '/reg/users');
+    const list = Array.isArray(res) ? res : (res?.users || []);
+    if (list.length > 0) return list;
+  } catch {}
+  return [];
+};
+
+// listKnownGroups：分组用于「快捷分享整组」，同样允许服务缺席 → 空数组。
+export const listKnownGroups = async () => {
+  try {
+    const res = await request('GET', '/reg/groups');
+    const list = Array.isArray(res) ? res : (res?.groups || []);
+    if (list.length > 0) return list;
+  } catch {}
+  return [];
+};
 // 下载 URL 的虚拟路径必须逐段 encodeURIComponent（文件名可能含空格/#/? 等，
 // 不编码会破坏 URL；后端 gin *filepath 已对 URL.Path 解码，编码后服务端比对仍正确）
 const encodePath = (p) => (p || '').split('/').map(encodeURIComponent).join('/');

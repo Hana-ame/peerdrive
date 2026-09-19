@@ -44,6 +44,30 @@
   阈值）与排队 abort 立即 settle 见 REFACTOR.md §3.12 第 4/5 项。
 - 编码规范：关键/易错/非显然代码旁必须写「为什么这么写」的注释；测试函数必须标注「发现背景」（全局 AGENTS.md 硬性要求）
 
+## 源码控制与 CI（单仓 + 基座 + 模块分支）
+
+> 背景（用户 2026-09 要求）：仓库是**单一仓库**，前后端同仓同 commit；第一个 commit 是
+> 单纯「基座」，之后按**模块分支**开发，最后 merge 回主干集成。**每个分支都要有
+> 自己的 test 任务，且必须跑通 CI/CD；merge 后的分支同样要再确认测试与 CI 通过。**
+
+- **目录形态（硬约束）**：`/front` + `/back` + `/doc` 平铺在仓库根。新增顶层目录
+  前先确认是否该并进这三者之一。
+- **分支模型**：
+  - 主干：`refactor`（当前开发主干）。
+  - `base`：基座分支（骨架 + 可构建的空跑通状态），模块分支都从它派生。
+  - 模块分支：`module/<name>`（如 `module/auth`、`module/p2p`、`module/sync`），
+    一个模块一条分支，模块自己要能独立构建 + 测试通过。
+  - 功能分支：`feat/<name>`、`fix/<name>`。
+  - 角色分支：`<role>-agent` / `<role>-frontend`（同一模块的前后端拆分开发）。
+  - **checkpoint**：跨模块重构或大型改动落地前，先把当前主干 push 成 checkpoint，
+    再开新分支动刀。
+- **CI 覆盖**（`.github/workflows/ci.yml`）：push 到上述任一类分支都会触发；
+  job 覆盖 back（vet/test/build）、integration（`-p 1` 串行）、peerjs 独立模块、
+  `packages/peerdrive-media`、front（test/build）。**只往主干 merge 前必须本地跑过
+  与 CI 相同的命令**（见「构建与验证」一节），否则等于让 CI 替你发现编译错误。
+- **merge 后动作**：主干上再跑一遍 `back` 全量测试 + 集成测试 + 前端测试/构建，
+  确认没有「各自分支绿、合起来红」的耦合问题。
+
 ## 构建与验证
 
 ```bash

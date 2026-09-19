@@ -2,8 +2,13 @@ import { useState } from 'react';
 import FileTree from '../../components/FileTree';
 import EditorToolbar from './EditorToolbar';
 import NamePrompt from './NamePrompt';
+import VisibilityPicker, { VISIBILITY_PUBLIC } from './VisibilityPicker';
 
-export default function EditorPanel({ fname, tags, entries, saving, showNamePrompt, toastMsg, toastErr, entryActions, onFname, onTags, onSave, onAddUrl, onCloseNamePrompt }) {
+export default function EditorPanel({
+  fname, tags, entries, saving, showNamePrompt, toastMsg, toastErr, entryActions,
+  visibility, accessList, operator, onFname, onTags, onSave, onAddUrl, onCloseNamePrompt,
+  onVisibilityChange, onRequestAccounts, onBroadcast,
+}) {
   const validCount = entries.filter(e => e.path?.trim() && (e.path.endsWith('/') || e.hash || e.providers?.[0]?.value)).length;
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [urlValue, setUrlValue] = useState('');
@@ -32,6 +37,23 @@ export default function EditorPanel({ fname, tags, entries, saving, showNameProm
         validCount={validCount} saving={saving}
         onFname={onFname} onTags={onTags} onSave={onSave}
         onShowUrlInput={() => setShowUrlInput(true)} />
+
+      {/* 广播权限三选项：只有 public 才允许广播（非公开的合集广播出去也没人能拉，
+          反而把 hash 泄露给 DHT 上的陌生人） */}
+      <div className="px-3 py-1.5 border-b border-gray-800 bg-gray-900/40 shrink-0">
+        <VisibilityPicker visibility={visibility} accessList={accessList}
+          operator={operator}
+          onChange={onVisibilityChange} onRequestAccounts={onRequestAccounts} />
+        {visibility === VISIBILITY_PUBLIC && (
+          <div className="flex items-center gap-2 mt-1.5">
+            <button onClick={onBroadcast} disabled={saving || validCount === 0}
+              className="text-[11px] px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-medium">
+              📡 保存并广播
+            </button>
+            <span className="text-[10px] text-gray-500">广播后网络上任何节点都能按 hash 拉取</span>
+          </div>
+        )}
+      </div>
 
       {/* URL 添加行 */}
       {showUrlInput && (

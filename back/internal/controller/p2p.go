@@ -20,6 +20,7 @@ import (
 	"github.com/Hana-ame/go-peerdrive-bt"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
+	"peerdrive/internal/nodestate"
 	"peerdrive/internal/service"
 	"peerdrive/internal/transport"
 
@@ -884,10 +885,14 @@ func AuthStatus(c *gin.Context) {
 		r = rl
 	}
 
+	// operator 与 username 不是一回事：username 来自请求上下文（本次请求的调用者），
+	// operator 是节点登录 regserver 后登记的运营者账号（匿合集 Owner 取这个值）。
+	// 前端需要它决定「仅自己」档位是否可用（Owner 为空 = 谁都读不了）。
 	c.JSON(http.StatusOK, gin.H{
 		"authenticated": isAuth,
 		"username":      uname,
 		"role":          r,
+		"operator":      nodestate.GetOperator(),
 	})
 }
 

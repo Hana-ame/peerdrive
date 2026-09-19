@@ -102,6 +102,64 @@ type AnonCollection struct {
 	Entries      []AnonCollectionEntry `json:"entries"`
 	Tags         []string              `json:"tags,omitempty"`
 	CreatedAt    string                `json:"created_at"`
+	// Visibility 可见性：public=公开可广播 / restricted=仅 AccessList 内账号 / private=仅 Owner。
+	// 背景：2026-09 前端「广播」改为三选项（公开访问 / 仅限指定权限 / 仅自己），
+	// 旧匿名集合没有任何权限字段，空值一律按 public 处理以保持向后兼容。
+	Visibility string `json:"visibility,omitempty"`
+	// AccessList 是 restricted 时放行的账号清单（regserver 侧唯一用户名）。
+	AccessList []string `json:"access_list,omitempty"`
+	// Owner 是发布者账号（节点 operator），private 集合只对它放行。
+	Owner string `json:"owner,omitempty"`
+}
+
+// visibility 取值常量：与前端三选项一一对应，后端只接受这三个字符串。
+const (
+	VisibilityPublic     = "public"
+	VisibilityRestricted = "restricted"
+	VisibilityPrivate    = "private"
+)
+
+// IsValidVisibility 校验可见性取值，空串视为未设置（合法，等价于 public）。
+func IsValidVisibility(v string) bool {
+	switch v {
+	case "", VisibilityPublic, VisibilityRestricted, VisibilityPrivate:
+		return true
+	}
+	return false
+}
+
+// EffectiveVisibility 返回兜底后的可见性：历史集合没有该字段 → public。
+func (c *AnonCollection) EffectiveVisibility() string {
+	if c == nil || c.Visibility == "" {
+		return VisibilityPublic
+	}
+	return c.Visibility
+}
+
+// CanView 判断某个请求者（账号名）能否查看该集合。
+// 语义：public 放行所有人；restricted 放行 Owner + AccessList；private 只放行 Owner。
+// 坑：requester 为空代表未认证请求，不能因此放行 private/restricted——
+// 否则任何没带身份的 P2P 同步都能拖走受限合集。
+func (c *AnonCollection) CanView(requester string) bool {
+	if c == nil {
+		return false
+	}
+	switch c.EffectiveVisibility() {
+	case VisibilityRestricted:
+		if requester != "" && requester == c.Owner {
+			return true
+		}
+		for _, a := range c.AccessList {
+			if requester != "" && a == requester {
+				return true
+			}
+		}
+		return false
+	case VisibilityPrivate:
+		return requester != "" && requester == c.Owner
+	default:
+		return true
+	}
 }
 
 // NormalizeEntries 将 Version=1 的旧格式条目升级为 providers 格式。
@@ -142,4 +200,7 @@ type AnonCollectionSummary struct {
 	Tags         []string `json:"tags,omitempty"`
 	EntryCount   int      `json:"entry_count"`
 	CreatedAt    string   `json:"created_at"`
+	// Visibility / Owner 供列表页在合集卡片上直接显示权限档位（前端三选项回填）。
+	Visibility string `json:"visibility,omitempty"`
+	Owner      string `json:"owner,omitempty"`
 }

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,13 +50,60 @@ func (s *PeerJSService) OpenStreamFrom(peerID, hash string, offset, size int64, 
 // FetchFromPeer 兼容封装：[]byte 整体拉取（现有调用方/集成测试用）。
 // 内部走流式 OpenStream + io.ReadAll——全量请求的 sha256 校验由 reader
 // 在 EOF 时完成，语义与旧实现一致。
+//
+// 连接 churn 兜底重试（2026-09-19，恒最多 2 次尝试）：
+// 发现阶段两端互相发现 → 双向互拨 → 同一 peerID 下两条连接，dedupConn 淘汰其一
+// （见 conn.go）。若请求恰好发在「连接已进 conns、去重尚未判定」的窗口里，
+// 它落在将被淘汰的那条连接上，读到一半报 "peerjs: connection closed"
+// ——**发现背景**：TestSelfHostedSignalAndDiscover 约 1/4 概率失败，日志
+// `dedup connection ... closing stale` 成对出现后紧接拉取失败。
+// 此时本端 conns[peerID] 已被去重改指向存活连接，重试一次即可成功。
+// 为什么整段重试（而非续传）：本函数语义是「取回完整内容」，返回单个 []byte，
+// 重来一次不会产生半截数据；分片请求（offset/size 非默认）重放同一范围也安全。
+// 为什么只重试一次：真断线时 conns 里没有可替换的连接，第二次会立刻以同样的
+// 错误失败，多试只是空等；一次足以覆盖去重窗口。
 func (s *PeerJSService) FetchFromPeer(peerID, hash string, offset, size int64) ([]byte, error) {
-	r, err := s.OpenStream(peerID, hash, offset, size)
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			// 让去重判定 + conns 改指完成（实测窗口远小于 150ms）；
+			// sleepCtx 保证服务关闭时立刻返回，不拖住 Close。
+			if !sleepCtx(s.ctx, 150*time.Millisecond) {
+				break
+			}
+		}
+		r, err := s.OpenStream(peerID, hash, offset, size)
+		if err != nil {
+			lastErr = err
+			if !isConnChurnErr(err) {
+				return nil, err
+			}
+			continue
+		}
+		data, err := io.ReadAll(r)
+		r.Close()
+		if err == nil {
+			return data, nil
+		}
+		lastErr = err
+		if !isConnChurnErr(err) {
+			return nil, err
+		}
 	}
-	defer r.Close()
-	return io.ReadAll(r)
+	return nil, lastErr
+}
+
+// isConnChurnErr 判定「换条连接就能好」瞬时错误：连接被去重淘汰/关闭、连接
+// 尚未绑定、peerID 当前无可用连接。内容类错误（哈希不匹配、上限拒绝、
+// 对端 err 帧）不在其中——那些重试也不会变好，必须原样上抛。
+func isConnChurnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "connection not bound") ||
+		strings.Contains(msg, "no connection to")
 }
 
 // openStream 发送 req 帧并返回流式 reader。数据块经连接级 pump 投递到

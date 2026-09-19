@@ -26,6 +26,14 @@ describe('FileTree', () => {
     expect(container.textContent).toContain('新建文件夹');
   });
 
+  // 发现背景：用户反馈「新建文件夹是 broken 的」——根源是空合集时 FileTree 提前 return
+  // 占位提示，工具栏（含新建文件夹按钮）根本没渲染，导致从零建合集时无法先建目录结构。
+  it('renders toolbar also when there are no entries', () => {
+    const { container } = render(<FileTree entries={[]} entryActions={{}} />);
+    expect(container.textContent).toContain('新建文件夹');
+    expect(container.textContent).toContain('0 条目');
+  });
+
   // 发现背景：AnonCollectionEntry 的 MIME 只在 providers[].mime_type，
   // 旧实现只读顶层 e.mime_type，合集条目在 FileTree 里图标永远回到默认 📄。
   it('derives mime from providers when top-level mime_type is missing', () => {

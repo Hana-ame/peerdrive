@@ -2,9 +2,21 @@ name: Peerdrive CI
 
 on:
   push:
-    branches: [main, feat/*, module/*]
+    # refactor 是当前主干开发分支（见 AGENTS.md 源码控制约定），必须带 CI。
+    # 模块分支与角色分支一并覆盖：每个分支都要能跑通自己的 CI/CD 再 merge。
+    branches:
+      - main
+      - master
+      - refactor
+      - base
+      - docs
+      - "feat/*"
+      - "fix/*"
+      - "module/*"
+      - "*-agent"
+      - "*-frontend"
   pull_request:
-    branches: [main]
+    branches: [main, master, refactor]
 
 jobs:
   backend:
@@ -33,6 +45,59 @@ jobs:
       - run: go vet -tags nosqlite ./...
       - run: go test -tags nosqlite ./... -count=1
       - run: go build -tags nosqlite -o peerdrive-server ./cmd/server/
+
+  # 集成测试：脱外网（TestMain 起全局自托管信令 + 同机 WebRTC），不需要任何代理/凭证。
+  # 必须 -p 1：多组测试共享同一个全局自托管信令服务，并行会互相干扰（见 AGENTS.md）。
+  integration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: back
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: back/go.sum
+      - run: go mod download
+      # 外网用例（公共 MQTT broker / 线上信令）在 CI 里显式不开门：默认门控关闭即跳过
+      - run: go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1 -timeout 10m
+
+  # back/peerjs 是独立 go.mod（模块 github.com/Hana-ame/go-peerjs，主仓 replace 指向本地），
+  # back 目录的 go test ./... 不会覆盖它，必须单独跑——否则改动只同步到主 repo 却从未 CI。
+  peerjs:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: back/peerjs
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - run: go vet ./...
+      - run: go test ./... -count=1
+
+  # packages/peerdrive-media：21 个用例（含 wrtc 的 node↔node E2E），dist 入库前必跑。
+  media-package:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/peerdrive-media
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/peerdrive-media/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
 
   frontend:
     runs-on: ubuntu-latest

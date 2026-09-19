@@ -16,16 +16,22 @@ export const COLL_SORT_OPTS = [
   { v: 'time', l: '时间' }, { v: 'name', l: '名称' }, { v: 'count', l: '文件数' },
 ];
 
-// 三列布局 - 左侧面板来源标签（简化：一切皆合集+provider）
+// 三列布局 - 左侧面板来源标签
+// 坑：曾一度精简成「本地电脑 / 合集」两项，导致中间两个文件视图失去入口——
+// LeftPanel 里只有注释占位、列表区什么都不渲染（用户看到「已注册(按目录)是空的」）。
+// 数据源口径见 index.jsx：registered = FileListItem.provider_path 非空。
 export const SOURCE_TABS = [
   { id: 'local', label: '本地电脑' },
+  { id: 'registered', label: '已注册·按文件' },
+  { id: 'registered_dir', label: '已注册·按目录' },
   { id: 'collections', label: '合集' },
 ];
 
 // 三列布局 - 左侧排序选项
+// 坑：旧表里有 modified_at，但后端 FileListItem 只有 created_at（back model/file.go:34），
+// 选「修改时间」时比较两侧都是 undefined → cmp 恒为 0，排序看起来完全失效。
 export const LEFT_SORT_OPTS = [
   { v: 'created_at', l: '创建时间' },
-  { v: 'modified_at', l: '修改时间' },
   { v: 'name', l: '按文件名' },
   { v: 'size', l: '按大小' },
 ];

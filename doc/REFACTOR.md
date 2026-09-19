@@ -552,6 +552,121 @@ LoadOrStore+TryLock 竞争串行化（否则删除窗口内新流拿到旧锁、
 → 破坏连接级 expect 单槽），复杂度与风险远超收益（私有节点网络 peer 量级
 几十个，残留几十 KB）。保持只增不减，无需清理。
 
+### 3.16 匿合集广播权限三档 + AnonCreator 面板回归修复（2026-09-19）
+
+**需求**：把匿合集的「广播」从二态改成三档 —— **公开访问 / 仅限指定权限 / 仅自己**；
+「仅限指定权限」弹 regserver 账号列表（头像 + 昵称 + @id，支持分组快捷分享）；
+公开档位才显示「保存并广播」按钮（走 BT DHT announce + 本地做种）。
+
+**语义（后端 model/anon.go）**：
+
+| visibility | 谁能看 | 空值兜底 |
+|---|---|---|
+| `public` | 所有人 | 历史集合无该字段 → 视作 public（向后兼容） |
+| `restricted` | Owner + `access_list` 内的账号 | 名单为空 → **创建时 400**，不静默生成「谁都打不开」的合集 |
+| `private` | 仅 `owner`（= 本节点 regserver operator） | 节点未登录 regserver（operator 空）时前端禁用该档 |
+
+**关键决策与坑**：
+
+1. **权限参与摘要 → 切档必然产生新 hash**。集合是 content-addressed，权限写在
+   JSON 里，`UpdateCollectionVisibility` 基于原集合复制一份写新文件并返回**新 hash**；
+   旧 hash 仍解析旧权限（快照语义，不是原地改）。前端拿新 hash 当集合的新身份。
+2. **`CanView("")` 必须为 false**（restricted/private）。未认证请求（空账号）不能
+   穿透受限档位，否则任何拿到 hash 的 P2P 同步都能拖走受限合集。这是本模块最
+   容易写错的一行。
+3. **越权一律表现成 404 而不是 403**（`GetCollectionVisibleTo`）——否则等于替攻击者
+   确认了「这个 hash 存在且属于别人」。
+4. **读写入口全部改走可见性版**：`GetAnonCollection` / `DownloadAnonFile` / `ForkAnonCollection`
+   从 `GetCollectionByHash` 换成 `GetCollectionVisibleTo(hash, nodestate.GetOperator())`。
+   本地会话注入本节点 operator，所以自己发的受限合集照常能读。
+   **为什么 fork 也要**：fork 会产出一份新合集，若源读取不设闸，拿到任意 hash 就能把
+   private 合集 fork 成一份 public 副本 → 三档权限被 fork 绕过。
+5. **派生路径必须继承权限**（这一条漏了会静默泄露）：
+   - `CommitCollection` 原来只复制 name/entries/tags → restricted/private 合集
+     **commit 一次就变回 public**；现在统一走 `inheritVisibility(dst, src)` 复制
+     Visibility/AccessList/Owner，且源集合按可见性读取（非可见者 commit 直接 not found）。
+   - `ForkAnonCollection` 产出的副本同样继承源的 visibility/access_list（Owner 延续源，
+     源无 Owner 时记为本机 operator），避免「同内容换 hash 即公开」。
+6. **`access_list` 是账号名扁平数组，不是 `/access/list` 的 hash**。早先 api.js 传的是
+   `access_list_hash`，后端只读 `access_list` 字段 → 受限合集名单为空 → 400。已修正。
+7. **切换档位时清空名单**（`pickVisibility`）：否则「切到受限但名单还留着上一次的人」，
+   后端会收到过期名单。
+8. `AuthStatus` 响应新增 `operator` 字段：`username` 是本次请求的调用者，
+   `operator` 是节点登录 regserver 后登记的账号（Owner 取它），二者不是一回事；
+   前端需要它判断「仅自己」档位是否可用。
+9. **账号目录服务缺席不阻塞功能**：`/reg/users`、`/reg/groups` 拿不到就返回空数组，
+   `AccountPicker` 降级到手动输入 `@id`（界面里明说「还没有可用账号」）。
+
+**落点**：
+
+| 层 | 文件 | 改动 |
+|---|---|---|
+| model | `back/internal/model/anon.go` | `Visibility`/`AccessList`/`Owner` 字段 + `IsValidVisibility`/`EffectiveVisibility`/`CanView`；`AnonCollectionSummary` 回填 visibility/owner |
+| service | `back/internal/service/anon_service.go` | `CreateCollectionWithVisibility`（restricted 无名单直接 400）、`GetCollectionVisibleTo`（越权→404）、`UpdateCollectionVisibility`（Owner 校验 + 新 hash）、`saveCollectionJSON` |
+| controller | `back/internal/controller/anon.go` | 创建/详情/下载/切档接可见性；`PUT /anon/collections/:hash/visibility`（挂 authRequired） |
+| controller | `back/internal/controller/p2p.go` | `AuthStatus` 增 `operator` |
+| repository | `back/internal/repository/anon_repo.go` | 列表摘要回填 `EffectiveVisibility()`（空串不能直接透给前端，否则三选项无高亮） |
+| router | `back/internal/router/router.go` | 新增 visibility 路由 |
+| 前端 | `front/src/api.js` | `createAnonCollection` 改传 `access_list` 数组；`listKnownAccounts`/`listKnownGroups`（可缺席降级） |
+| 前端 | `AnonCreator/index.jsx` | visibility/accessList/accounts/operator 状态；`pickVisibility`、`openAccountPicker`、`handleSave(broadcast)` 保存前校验 |
+| 前端 | `AnonCreator/VisibilityPicker.jsx` | 三档开关（private 在无 operator 时禁用 + 原因提示） |
+| 前端 | `AnonCreator/AccountPicker.jsx` | 昵称 + @id 列表、分组快捷分享、手动 @id 兜底 |
+| 前端 | `AnonCreator/EditorPanel.jsx` | 权限行 + 「📡 保存并广播」按钮（仅 public 显示） |
+
+**同批修掉的面板回归**（`😅.txt` 清单）：左侧来源标签补回「已注册·按目录」并新增
+`RegisteredDirView.jsx` 目录下钻视图；`FileTree` 空列表时也渲染工具栏（否则条目为 0
+时「新建文件夹」按钮整个消失）；「已注册（按文件）」口径修正为
+`provider_path || provider_type`（旧实现看 `f.providers.length`，`FileListItem` 没这个
+字段 → 列表恒空）；时间排序改 `Date.parse` 数值比较（RFC3339 字符串直接 localeCompare
+会把 `+08:00` 与 `Z` 混排）。
+
+**验证**：back `go build -tags nosqlite ./...` + `go vet` + 全包测试绿；
+`gofmt -l` 对改动文件无输出。新增测试
+`back/internal/service/anon_visibility_test.go`（CanView 全档位 + 未认证拒绝、
+restricted 无名单报错、切档产生新 hash 且旧 hash 快照不变、Owner 越权拒绝、
+越权表现为 not found）与 `front/tests/VisibilityPicker.test.jsx`。
+
+**已知限制**：P2P 同步路径（远端 peer 拉集合）尚未携带请求者身份，因此远端
+统一按 `requester=""` 处理 —— 受限/私有合集目前只能在本节点读到，跨节点分享
+受限合集要等「注册认证服务」上线后把账号带进同步请求（见 `doc/modules/auth`）。
+
+### 3.17 去重竞态的残留窗口：出站拉取补一次重试（2026-09-19）
+
+**症状**：`TestSelfHostedSignalAndDiscover` 约 1/4 概率失败，报
+`自托管发现后拉取失败: peerjs: connection closed`（10.05s，正好卡在 waitConnections
+返回后立刻拉取的瞬间）。
+
+**根因**（是 3.15/多连接批次的残留窗口，不是新 bug）：发现阶段两端互相发现 →
+双向互拨 → 同一 peerID 下两条连接。`dedupConn` 的保留策略两端一致（连接级 UUID
+字典序小者胜出），这解决的是「两端互留断链」；但仍有第三个窗口：
+`bindConn` 先把新连接写进 `conns[peerID]`、再去重判定淘汰谁。测试的
+`waitConnections` 只检查 `conns` 里有没有 key，一旦在「已进 conns、尚未判定」的
+窗口里返回，紧接着的拉取就发在**将被淘汰的那条连接**上，`cleanupConn` 一关它，
+在飞 fetch 立刻收到 `connection closed`。
+
+**修复**（`transport/outbound.go`）：`FetchFromPeer` 加一次条件重试 ——
+- 仅在错误属「连接 churn」时重试（`isConnChurnErr`：connection closed /
+  connection not bound / no connection to）；内容类错误（哈希不匹配、上限拒绝、
+  对端 err 帧）不重试，重试也不会变好。
+- 只重试一次：真断线时 `conns` 里没有可替换连接，第二次会以同样错误立刻失败。
+- 重试前等 150ms，让去重判定与 `conns` 改指完成；用 `sleepCtx` 保证服务关闭时
+  立刻返回，不拖住 `Close`。
+- 整段重试而不是续传：`FetchFromPeer` 语义是「取回完整内容」（返回单个 `[]byte`），
+  重来不会产生半截数据；带 offset/size 的分片请求重放同一范围同样安全。
+
+**为什么不改成「dedup 不关旧连接」**：设计上明确要求「连接被替换后旧连接上的
+进行中流必须报错结束」（`TestBindConn_ReplacedConnOldStreamErrors`，防悬挂），
+所以兜底责任在上层调用方 —— 换到存活连接重试即可。两条规则是互补的，不是矛盾。
+
+**验证**：`TestSelfHostedSignalAndDiscover -count=4 -p 1` 连续 4 次全绿（修复前
+单跑即复现）；`internal/transport`、`internal/source` 单测与 -race 全绿。
+
+**已知残留**：`source.PeerSource`（节点透传回源的分片读）走的是 `OpenStreamFrom`
+的流式 reader，中途失败时已消费的字节无法安全重放，因此**没有**加同样的重试；
+它的候选枚举来自 `conns`，同样可能撞上这个窗口。真要彻底消除需要在
+`PeerSource.Open` 的竞速层做「零字节失败即重开一次」，留待后续（当前私有节点
+场景频率极低，且上层 HTTP 下载本身可重试）。
+
 ## 5. E2E 踩过的坑（全部已修）
 
 | 坑 | 修复 |

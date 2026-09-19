@@ -1,6 +1,8 @@
-import { SOURCE_TABS, COLL_SORT_OPTS } from './constants';
+import { SOURCE_TABS, LEFT_SORT_OPTS, LEFT_TYPE_FILTERS } from './constants';
 import CollectionRow from './CollectionRow';
 import CollBrowser from './CollBrowser';
+import FileSourceRow from './FileSourceRow';
+import RegisteredDirView from './RegisteredDirView';
 import SystemBrowse from './SystemBrowse';
 import SearchHistory from './SearchHistory';
 import { addSearchHistory, loadSearchHistory } from './utils';
@@ -19,8 +21,8 @@ export default function LeftPanel({
   enteredColl, collViewPath, enteredCollFiles,
   // 选择模式
   selectMode, selectedColls, selectedFiles,
-  // 系统浏览
-  sysPath, sysEntries, sysLoading,
+  // 系统浏览 & 已注册目录
+  sysPath, sysEntries, sysLoading, regDirPath,
   // 搜索历史
   searchHistory, showHistory,
   // 回调 - 筛选
@@ -32,8 +34,8 @@ export default function LeftPanel({
   onEnterColl, onLeaveColl, onPathNav, onNavIntoDir,
   onSaveToNode, onSelectToggle, onToggleCollSelect,
   onToggleFileSelect, onBatchSaveColls, onBatchSaveFiles,
-  // 回调 - 系统浏览
-  onSysNav, onSysAdd, onSysAddFile, onSysAddFolder,
+  // 回调 - 系统浏览 / 已注册目录
+  onSysNav, onSysAdd, onSysAddFile, onSysAddFolder, onRegDirPath,
   // 回调 - 搜索历史
   onSearchHistorySelect, onSearchHistoryShow, onSearchHistoryUpdate,
 }) {
@@ -68,6 +70,13 @@ export default function LeftPanel({
   };
 
   const isCollectionsTab = sourceTab === 'collections';
+  const isDirTab = sourceTab === 'registered_dir';
+  const isFileTab = sourceTab === 'local' || sourceTab === 'registered' || isDirTab;
+
+  // 本地浏览：后端 /files/browse 不支持 query，就地按名字过滤
+  // （用户反馈「本地电脑的搜索框不是搜索本地电脑的」——之前搜索框只作用于已注册列表）。
+  const q = (search || '').toLowerCase();
+  const visibleSysEntries = q ? sysEntries.filter(e => (e.name || '').toLowerCase().includes(q)) : sysEntries;
 
   return (
     <div className="h-full flex flex-col bg-gray-900 border-r border-gray-800">
@@ -77,16 +86,52 @@ export default function LeftPanel({
           <button
             key={tab.id}
             onClick={() => onSourceTab(tab.id)}
-            className={`flex-1 text-xs px-2 py-1.5 rounded transition-colors ${
+            className={`flex-1 text-xs px-1.5 py-1.5 rounded transition-colors whitespace-nowrap ${
               sourceTab === tab.id
                 ? 'bg-blue-600 text-white font-medium'
                 : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700'
             }`}
+            title={tab.label}
           >
             {tab.label}
           </button>
         ))}
       </div>
+
+      {/* 文件类面板：搜索 + 排序 + 类型筛选 */}
+      {isFileTab && (
+        <div className="shrink-0 border-b border-gray-800 p-2 space-y-1.5">
+          <input
+            value={search}
+            onChange={e => onSearch(e.target.value)}
+            placeholder={sourceTab === 'local' ? '搜索本机当前目录的文件名...' : '搜索文件名 / 所在路径...'}
+            className="w-full bg-gray-800 text-xs px-3 py-1.5 rounded border border-gray-700 focus:outline-none focus:border-blue-600" />
+          <div className="flex items-center gap-1 flex-wrap">
+            {LEFT_SORT_OPTS.map(o => (
+              <button key={o.v} onClick={() => onSortKey(o.v)}
+                className={`text-[10px] px-2 py-0.5 rounded ${sortKey === o.v ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>
+            ))}
+            <button onClick={onSortOrder} title="切换升/降序"
+              className="text-[10px] px-2 py-0.5 rounded bg-gray-800 text-gray-400 hover:text-white">
+              {sortOrder === 'asc' ? '↑' : '↓'}
+            </button>
+          </div>
+          {/* 类型筛选只对文件列表有效；本地浏览走 browse 接口没有 mime 字段 */}
+          {sourceTab !== 'local' && (
+            <div className="flex gap-1 flex-wrap">
+              {LEFT_TYPE_FILTERS.map(t => {
+                const active = typeFilters.includes(t.id);
+                return (
+                  <button key={t.id} onClick={() => toggleType(t.id)}
+                    className={`text-[10px] px-1.5 py-0.5 rounded ${active ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>
+                    {t.icon} {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 合集模式：显示合集搜索/排序/标签筛选 */}
       {isCollectionsTab && (
@@ -115,9 +160,11 @@ export default function LeftPanel({
 
           <div className="px-2 pb-1.5 space-y-1">
             <div className="flex gap-0.5">
-              {COLL_SORT_OPTS.map(o => (
-                <button key={o.v} onClick={() => onCollSort(o.v)}
-                  className={`text-[10px] px-2 py-0.5 rounded ${collSort===o.v?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>
+              {['time', 'name', 'count'].map(v => (
+                <button key={v} onClick={() => onCollSort(v)}
+                  className={`text-[10px] px-2 py-0.5 rounded ${collSort === v ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>
+                  {v === 'time' ? '时间' : v === 'name' ? '名称' : '文件数'}
+                </button>
               ))}
             </div>
             {allCollTags.length > 0 && (
@@ -177,13 +224,29 @@ export default function LeftPanel({
 
         {/* 本地电脑模式 */}
         {sourceTab === 'local' && (
-          <SystemBrowse sysPath={sysPath} sysEntries={sysEntries} sysLoading={sysLoading}
+          <SystemBrowse sysPath={sysPath} sysEntries={visibleSysEntries} sysLoading={sysLoading}
             onNavTo={onSysNav} onAdd={onSysAdd} onAddFile={onSysAddFile} onAddFolder={onSysAddFolder} onDragStart={onDragStart} />
         )}
 
-        {/* 所有文件：按时间分组 */}
+        {/* 已注册：按文件 */}
+        {sourceTab === 'registered' && (
+          filteredFiles.length === 0 ? (
+            <p className="p-4 text-gray-600 text-xs text-center">
+              {search ? '无匹配文件' : '还没有注册过的文件 — 到「本地电脑」点 + 注册'}
+            </p>
+          ) : (
+            filteredFiles.map(f => (
+              <FileSourceRow key={f.hash} file={f} onAdd={onFileAdd} onDragStart={onDragStart}
+                onSelect={onFileSelect ? () => onFileSelect(f) : undefined} />
+            ))
+          )
+        )}
 
-        {/* 已注册：按目录分组（同旧 RegisteredView） */}
+        {/* 已注册：按目录 */}
+        {isDirTab && (
+          <RegisteredDirView files={filteredFiles} dirPath={regDirPath || ''} onDirPath={onRegDirPath}
+            onAdd={onFileAdd} onDragStart={onDragStart} onSelect={onFileSelect} />
+        )}
       </div>
     </div>
   );

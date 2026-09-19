@@ -153,6 +153,93 @@
 
 ---
 
+## 9. 匿合集广播权限三档（2026-09-19）
+
+**目的**: 「广播」从二态改成三档 —— 公开访问 / 仅限指定权限 / 仅自己；
+受限档弹 regserver 账号列表；公开档才显示「📡 保存并广播」。
+
+**真正操作**（Windows 侧改代码，WSL 侧跑构建/测试）：
+
+```
+# 后端（WSL，需代理）
+cd /mnt/d/WorkPlace/peerdrive/back
+export HTTPS_PROXY=http://172.29.80.1:10809 HTTP_PROXY=http://172.29.80.1:10809
+export GOPROXY=https://goproxy.cn,direct GOFLAGS=-mod=mod
+gofmt -l internal/model/anon.go internal/service/anon_service.go \
+        internal/controller/anon.go internal/controller/p2p.go \
+        internal/repository/anon_repo.go internal/service/anon_visibility_test.go
+go build -tags nosqlite ./...     # BUILD_EXIT=0
+go vet  -tags nosqlite ./internal/...
+go test -tags nosqlite ./...      # 全包 ok
+
+# 前端（WSL，node 经 nvm）
+cd /mnt/d/WorkPlace/peerdrive/front
+npx vitest run                    # 7 文件 / 54 项全绿
+npm run build                     # vite build 成功
+```
+
+**执行命令时踩的坑**（下次直接用）：
+- Windows 侧 bash 工具的 shell 已损坏（`ls/grep/sed/head` 全 `command not found`），
+  构建/测试一律走 `ssh -i ~/.ssh/id_rsa lumin@127.0.0.1 "bash -s"` 把脚本经 stdin 送进 WSL。
+- 脚本必须先去 CRLF（`-replace "\`r",""`），否则远端报 `$'\r': command not found`。
+- `npx vitest run --reporter=basic` 在本版本 vitest 里不存在（`Failed to load custom
+  Reporter from basic`），用默认 reporter。
+
+**结果**: ✅ 全绿
+
+**分析**:
+- 权限参与合集摘要（content-addressed）→ 切档必然产生**新 hash**，旧 hash 保持旧权限快照。
+- `CanView("")` 对 restricted/private 必须为 false，否则未认证的 P2P 同步能拖走受限合集。
+- 测试里 `vi.mock('../src/api.js')` 是**全量 automock**，非函数导出（如 `VISIBILITY`）
+  会丢失 → 组件从 `src/constants.js` 取常量，不走 api.js。
+- P2P 同步路径暂未携带请求者身份，受限合集目前仅本节点可读（等注册认证服务上线）。
+
+详见 `doc/REFACTOR.md` §3.16。
+
+---
+
+## 10. 去重竞态拉取失败 + 派生路径权限降级（2026-09-19 同批）
+
+**目的**: 把集成测试的偶发失败（`TestSelfHostedSignalAndDiscover` 1/4 概率
+`peerjs: connection closed`）与代码审查中发现的权限缺口一起收掉。
+
+**真正操作**（WSL，需代理）：
+
+```
+cd /mnt/d/WorkPlace/peerdrive/back
+export HTTPS_PROXY=http://172.29.80.1:10809 HTTP_PROXY=http://172.29.80.1:10809
+export GOPROXY=https://goproxy.cn,direct GOFLAGS=-mod=mod
+gofmt -l internal/transport/outbound.go internal/service/anon_service.go \
+        internal/controller/anon.go internal/service/anon_visibility_test.go   # 无输出
+go build -tags nosqlite ./... && go vet -tags nosqlite ./...                    # OK
+go test -tags nosqlite ./... -count=1                                           # 全包 ok
+go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1           # 全绿
+go test -tags "nosqlite integration" ./test/integration/ \
+        -run TestSelfHostedSignalAndDiscover -count=4 -p 1                       # 4 连全绿（修复前单跑即复现）
+```
+
+**结果**: ✅ 全绿（含 4 连跑去重竞态用例）
+
+**分析**:
+- 失败根因不是「两端互留断链」（那个已在多连接批次修掉），而是 `bindConn` 的第三个
+  窗口：连接**已进 `conns`、去重尚未判定**时 `waitConnections` 就返回，紧接着的拉取
+  发在将被淘汰的连接上。修法：`FetchFromPeer` 对「连接 churn」类错误重试一次
+  （等 150ms 让 `conns` 改指存活连接），内容类错误不重试。
+- 设计上旧连接的进行中流**必须**报错结束（`TestBindConn_ReplacedConnOldStreamErrors`），
+  所以兜底只能放上层调用方，不能改成「dedup 不关旧连接」。
+- `source.PeerSource` 的流式分片读没有同样重试（已消费字节无法安全重放），
+  残留在 REFACTOR §3.17 记录。
+- 权限缺口三处：`GetAnonCollection`（元数据裸读）、`ForkAnonCollection`（源不设闸 +
+  产物默认 public）、`CommitCollection`（新版本丢权限字段 → restricted/private 被
+  commit 一次就变回 public）。前两处改为走 `GetCollectionVisibleTo`，第三处新增
+  `inheritVisibility` 复制 Visibility/AccessList/Owner。
+- `CommitCollection` 的「空 hash = 删除条目」原本被 providers 校验挡住（`removeEmpty`
+  是死代码），一并修掉并补测试。
+
+详见 `doc/REFACTOR.md` §3.16 / §3.17。
+
+---
+
 ## 提交记录
 
 | 提交 | 说明 |

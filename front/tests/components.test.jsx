@@ -43,7 +43,10 @@ describe('AnonCreator', () => {
   });
   it('has save button', () => {
     render(<AnonCreator />, { wrapper });
-    expect(screen.getByText(/保存/)).toBeTruthy();
+    // 发现背景：编辑器新增了「📡 保存并广播」按钮（visibility=public 档位），
+    // 原来的 /保存/ 正则会同时命中两个元素（getByText 抛 multiple elements）。
+    // 这里精确锁工具栏那颗「💾 保存」——广播按钮是它的可选包装，不是替代品。
+    expect(screen.getByText('💾 保存')).toBeTruthy();
   });
   it('has no Commit button', () => {
     render(<AnonCreator />, { wrapper });

@@ -31,6 +31,9 @@ dist/
 # Claude config (personal)
 .claude/
 
+# Agent 工作区记忆/缓存（本地数据，不入库；与其他 agent 配置同类处理）
+.workbuddy/
+
 # Git worktrees
 worktrees/
 frontend-worktrees/

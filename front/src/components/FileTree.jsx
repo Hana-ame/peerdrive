@@ -264,23 +264,52 @@ export default function FileTree({ entries, entryActions }) {
   const allDirs = getAllDirs(tree);
   const moveItemName = showMoveModal?.path?.split('/').pop() || '';
 
+  // 坑：旧实现在空合集时直接 return 占位提示，工具栏（含「新建文件夹」）不渲染
+  // → 用户反馈「新建文件夹是 broken 的」：从零开始建合集时根本没有这个按钮。
+  const toolbar = (
+    <div className="flex items-center gap-2 px-2 py-1.5 border-b border-gray-800 shrink-0 flex-wrap">
+      <button onClick={() => { setInlineNewFolder(true); setTimeout(() => inlineRef.current?.focus(), 50); }}
+        className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded">+ 新建文件夹</button>
+      <span className="text-[10px] text-gray-500">{entries.length} 条目</span>
+      <span className="text-[10px] text-gray-600 hidden sm:inline">| 双击重命名 | 拖拽移动</span>
+    </div>
+  );
+
   if (entries.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-600 text-xs"
-        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
-        onDrop={(e) => { handleDrop(e, ''); }}>拖拽文件到此处 — 从左侧拖拽或点击 + 添加文件</div>
+      <div className="flex flex-col h-full">
+        {toolbar}
+        {/* 内联新建文件夹：空合集时输入框直接出现在占位提示上方 */}
+        {inlineNewFolder && (
+          <div className="flex items-center gap-2 py-2 px-2 text-sm" style={{ paddingLeft: '8px' }}>
+            <span className="w-4 text-center shrink-0 text-sm">▸</span>
+            <span className="text-base">📁</span>
+            <input ref={inlineRef} autoFocus
+              onBlur={() => setInlineNewFolder(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const n = e.target.value.trim();
+                  if (n) entryActions?.onNewFolder?.(n);
+                  setInlineNewFolder(false);
+                } else if (e.key === 'Escape') {
+                  setInlineNewFolder(false);
+                }
+              }}
+              className="flex-1 bg-gray-700 px-1.5 py-0.5 rounded text-xs font-mono border border-blue-500 outline-none text-gray-200"
+              placeholder="文件夹名称" />
+          </div>
+        )}
+        <div className="flex items-center justify-center flex-1 text-gray-600 text-xs"
+          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+          onDrop={(e) => { handleDrop(e, ''); }}>拖拽文件到此处 — 从左侧拖拽或点击 + 添加文件</div>
+      </div>
     );
   }
 
   return (
     <div className="flex flex-col h-full">
       {/* 工具栏 */}
-      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-gray-800 shrink-0 flex-wrap">
-        <button onClick={() => { setInlineNewFolder(true); setTimeout(() => inlineRef.current?.focus(), 50); }}
-          className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded">+ 新建文件夹</button>
-        <span className="text-[10px] text-gray-500">{entries.length} 条目</span>
-        <span className="text-[10px] text-gray-600 hidden sm:inline">| 双击重命名 | 拖拽移动</span>
-      </div>
+      {toolbar}
 
       {/* 移动到弹窗 */}
       {showMoveModal && (

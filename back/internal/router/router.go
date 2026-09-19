@@ -284,6 +284,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		anon.GET("/collections/:hash", controller.GetAnonCollection)
 		anon.GET("/collections/:hash/*filepath", controller.DownloadAnonFile)
 		anon.POST("/collections/fork", authRequired, controller.ForkAnonCollection)
+		// 权限切档：必须走 authRequired（裸 PUT 等于让任何人改写别人的可见性）
+		anon.PUT("/collections/:hash/visibility", authRequired, controller.SetAnonCollectionVisibility)
 	}
 
 	// File management（browse/list/verify 只读开放；写操作挂认证）

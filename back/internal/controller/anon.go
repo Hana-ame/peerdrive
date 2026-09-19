@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"peerdrive/internal/model"
+	"peerdrive/internal/nodestate"
 	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -35,16 +36,28 @@ func CreateAnonCollection(c *gin.Context) {
 		FriendlyName string                      `json:"friendly_name"`
 		Entries      []model.AnonCollectionEntry `json:"entries"`
 		Tags         []string                    `json:"tags"`
+		// Visibility/AccessList 对应前端「公开访问 / 仅限指定权限 / 仅自己」三选项。
+		// 旧前端不带这两个字段 → visibility 空串 → 服务层兜底为 public，行为不变。
+		Visibility string   `json:"visibility"`
+		AccessList []string `json:"access_list"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
-	hash, err := anonSvc.CreateCollection(req.FriendlyName, req.Entries, req.Tags)
+	// Owner 取本节点 operator：登录到 regserver 的节点才有账号，匿名节点是空串
+	// （private 合集在无主状态下无人能读，所以前端未登录时应禁掉「仅自己」选项）。
+	owner := nodestate.GetOperator()
+
+	hash, err := anonSvc.CreateCollectionWithVisibility(req.FriendlyName, req.Entries, req.Tags, req.Visibility, req.AccessList, owner)
 	if err != nil {
 		msg := err.Error()
-		if strings.Contains(msg, "invalid path") || strings.Contains(msg, "invalid hash") || strings.Contains(msg, "invalid providers") {
+		switch {
+		case strings.Contains(msg, "invalid visibility"), strings.Contains(msg, "access_list required"):
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		case strings.Contains(msg, "invalid path"), strings.Contains(msg, "invalid hash"), strings.Contains(msg, "invalid providers"):
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
@@ -52,7 +65,46 @@ func CreateAnonCollection(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"hash": hash})
+	c.JSON(http.StatusCreated, gin.H{"hash": hash, "visibility": req.Visibility, "owner": owner})
+}
+
+// SetAnonCollectionVisibility godoc
+// @Summary      Update visibility of an anonymous collection
+// @Description  Switch a collection between public / restricted (access_list) / private.
+//
+//	The collection is content-addressed: changing visibility writes a new JSON file,
+//	so the response carries the NEW hash — the old hash still resolves to the old setting.
+//
+// @Tags         anon
+// @Accept       json
+// @Produce      json
+// @Param        hash path string true "Collection SHA256 hash"
+// @Param        body body object{visibility=string,access_list=[]string} true "Visibility settings"
+// @Success      200 {object} map[string]string "hash, visibility"
+// @Failure      400 {object} map[string]string "Invalid visibility"
+// @Failure      404 {object} map[string]string "Not found or not owned by this operator"
+// @Router       /anon/collections/{hash}/visibility [put]
+func SetAnonCollectionVisibility(c *gin.Context) {
+	hash := c.Param("hash")
+	var req struct {
+		Visibility string   `json:"visibility"`
+		AccessList []string `json:"access_list"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	newHash, err := anonSvc.UpdateCollectionVisibility(hash, req.Visibility, req.AccessList, nodestate.GetOperator())
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "invalid visibility") || strings.Contains(msg, "access_list required") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": msg})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"hash": newHash, "previous_hash": hash, "visibility": req.Visibility})
 }
 
 // ListAnonCollections godoc
@@ -82,7 +134,11 @@ func ListAnonCollections(c *gin.Context) {
 // @Router       /anon/collections/{hash} [get]
 func GetAnonCollection(c *gin.Context) {
 	hash := c.Param("hash")
-	coll, err := anonSvc.GetCollectionByHash(hash)
+	// 可见性闸门：private/restricted 合集对无权请求者等价于「不存在」（404）。
+	// 坑：这里曾用 GetCollectionByHash 裸读——content-addressed 的 JSON 一旦
+	// 拿到 hash 谁都能取，权限三档就形同虚设（下载已走 DownloadAnonFile 的
+	// 可见性检查，元数据入口漏掉等于绕开）。本节点 operator 当作请求者身份。
+	coll, err := anonSvc.GetCollectionVisibleTo(hash, nodestate.GetOperator())
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
@@ -104,7 +160,7 @@ func DownloadAnonFile(c *gin.Context) {
 	hash := c.Param("hash")
 	filePath := strings.TrimPrefix(c.Param("filepath"), "/")
 
-	coll, err := anonSvc.GetCollectionByHash(hash)
+	coll, err := anonSvc.GetCollectionVisibleTo(hash, nodestate.GetOperator())
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
@@ -178,7 +234,10 @@ func ForkAnonCollection(c *gin.Context) {
 		return
 	}
 
-	src, err := anonSvc.GetCollectionByHash(req.SourceHash)
+	// 源集合按可见性读取（同 GetAnonCollection）：否则拿到任意 hash 就能把
+	// private/restricted 合集 fork 成一份 public 副本 —— 权限三档被 fork 绕过。
+	operator := nodestate.GetOperator()
+	src, err := anonSvc.GetCollectionVisibleTo(req.SourceHash, operator)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "source collection not found"})
 		return
@@ -212,9 +271,22 @@ func ForkAnonCollection(c *gin.Context) {
 	if friendlyName == "" {
 		friendlyName = src.FriendlyName
 	}
-	hash, err := anonSvc.CreateCollection(friendlyName, newEntries, src.Tags)
+	// fork 是本机新建的副本，但权限档位必须继承源集合：源为 restricted/private
+	// 时，副本若默认 public 等于把受限内容重新公开（同一份文件换个 hash 就绕过权限）。
+	// Owner 延续源集合（源无 Owner 时记为本机 operator，保证 private 副本仍可读）。
+	forkOwner := src.Owner
+	if forkOwner == "" {
+		forkOwner = operator
+	}
+	hash, err := anonSvc.CreateCollectionWithVisibility(
+		friendlyName, newEntries, src.Tags, src.Visibility, src.AccessList, forkOwner)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		msg := err.Error()
+		if strings.Contains(msg, "invalid visibility") || strings.Contains(msg, "access_list required") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"hash": hash})
@@ -242,7 +314,7 @@ func CommitAnonCollection(c *gin.Context) {
 		return
 	}
 
-	hash, err := anonSvc.CommitCollection(req.SourceHash, req.Entries, req.CommitMessage)
+	hash, err := anonSvc.CommitCollection(req.SourceHash, req.Entries, req.CommitMessage, nodestate.GetOperator())
 	if err != nil {
 		if strings.Contains(err.Error(), "source collection not found") {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
