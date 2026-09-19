@@ -9,6 +9,8 @@ import (
 	hashutil "peerdrive/pkg/hashutil"
 
 	"peerdrive/internal/config"
+	"peerdrive/internal/controller"
+	"peerdrive/internal/service"
 	"peerdrive/internal/transport"
 )
 
@@ -18,9 +20,18 @@ var peerjsService *transport.PeerJSService
 // peerjsCfg WS 本地会话的 Origin 白名单（与 HTTP CORS 同一配置）。
 var peerjsCfg *config.Config
 
+// nodeDirectory 节点市场目录（doc/NETDISK.md M1），由 main 注入。
+var nodeDirectory *service.NodeDirectory
+
 // SetPeerJSService 注入 PeerJS WebRTC 服务（nil 则跳过节点信息路由）。
 func SetPeerJSService(svc *transport.PeerJSService) {
 	peerjsService = svc
+}
+
+// SetNodeDirectory 注入节点市场目录（nil 则 /peerjs/nodes* 返回 503）。
+func SetNodeDirectory(d *service.NodeDirectory) {
+	nodeDirectory = d
+	controller.InitNodeDirectory(d)
 }
 
 // SetPeerJSConfig 注入配置（WS 本地会话 Origin 白名单）。
@@ -50,6 +61,15 @@ func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 			"peers":  peers,
 		})
 	})
+
+	// ── 节点市场（doc/NETDISK.md M1）──
+	// 列表只读开放（与 /peerjs/node 同级，属"发现"信息）；加入/移出是写操作
+	// → 挂 auth（无注册服务器时 AuthRequired 内部放行 = 单机模式）。
+	// 语义：市场 = 发现服务器在线节点 ∪ 本地已加入清单（离线也保留）。
+	r.GET("/peerjs/nodes", controller.GetNodeMarket)
+	r.GET("/peerjs/nodes/joined", controller.GetJoinedNodes)
+	r.POST("/peerjs/nodes/join", auth, controller.JoinNode)
+	r.DELETE("/peerjs/nodes/join", auth, controller.LeaveNode)
 
 	// POST /peerjs/fetch {peer, hash, offset?, size?} 从对端节点拉取 sha256 内容
 	// H4：此端点把整个响应 buffer 驻留内存（service 内 8GB cap 只防溢出，不防慢读客户端

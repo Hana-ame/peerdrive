@@ -27,6 +27,7 @@ import (
 	"peerdrive/internal/log"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
+	"peerdrive/internal/service"
 	"peerdrive/internal/source"
 	"peerdrive/internal/transport"
 )
@@ -67,6 +68,20 @@ func main() {
 		peerjsSvc.Start()
 		defer peerjsSvc.Close()
 		log.LogInfo("main: PeerJS node id=%s", peerjsSvc.ID())
+	}
+
+	// 节点市场目录（doc/NETDISK.md M1）：市场列表 = 发现服务器在线节点 ∪ 已加入清单。
+	// 注入顺序敏感：SetExtraPeers 让「市场里加入的节点」在每次信令重连后自动拨号
+	// （与配置 PEERDRIVE_PEERJS_PEERS 同等地位）；SetNodeDirectory 必须在
+	// SetupRouter 之前（路由注册时读取）。
+	if peerjsSvc != nil {
+		nodeDir := service.NewNodeDirectory(storageDir, cfg.DiscoverURL)
+		nodeDir.SetSelfID(peerjsSvc.ID)
+		nodeDir.SetConnected(peerjsSvc.ConnectedPeerIDs)
+		nodeDir.SetDial(peerjsSvc.EnsureConnection)
+		peerjsSvc.SetExtraPeers(nodeDir.JoinedPeerIDs)
+		router.SetNodeDirectory(nodeDir)
+		log.LogInfo("main: node directory ready (joined=%d)", len(nodeDir.JoinedPeerIDs()))
 	}
 
 	// 设置路由（内部注入 storageDir/downloader 到 context）

@@ -69,6 +69,13 @@ type PeerJSService struct {
 
 	fileIndex *FileIndexService // sha256 → 绝对路径 索引（create/upload/list/info/sync）
 
+	// extraPeers 运行时追加的常驻对端（节点市场「加入节点」的持久化清单，
+	// 由 service.NodeDirectory 提供）。与配置 PEERDRIVE_PEERJS_PEERS 同语义：
+	// 每次信令重连后自动拨号，且**不受 PEERDRIVE_MAX_PEERS 预算限制**
+	// （那是运营者显式加入的节点，不是发现撞见的陌生节点）。
+	// nil = 无额外对端。
+	extraPeers func() []string
+
 	// forward 转发授权规则（key 原文 → 端口白名单）与待验证质询（forward.go）。
 	// 规则即凭证：运行时动态增删（端点）与配置装载（SetForwardRules）共用同一锁。
 	forwardMu    sync.Mutex
@@ -205,6 +212,16 @@ func (s *PeerJSService) startLoop() {
 				continue
 			}
 			go s.connectLoop(pid)
+		}
+		// 连接「市场里加入」的常驻对端（与静态 PEERS 同等地位，见 extraPeers 注释）
+		if s.extraPeers != nil {
+			for _, pid := range s.extraPeers() {
+				pid = strings.TrimSpace(pid)
+				if pid == "" || pid == s.id {
+					continue
+				}
+				go s.connectLoop(pid)
+			}
 		}
 
 		// 房间发现（多路并取）：自托管信令服务器的发现 API 优先，否则 MQTT。
@@ -451,6 +468,43 @@ func (s *PeerJSService) Connections() map[string]Session {
 		out[k] = v
 	}
 	return out
+}
+
+// ConnectedPeerIDs 当前已直连对端的 id 集合（市场/我的节点页的"直连"状态）。
+// 与 Connections 的区别：只回 id、不拷 Session（避免调用方持有连接引用），
+// 且排除 "local"（浏览器本地 WS 会话不是对端节点）。
+func (s *PeerJSService) ConnectedPeerIDs() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]bool, len(s.conns))
+	for id := range s.conns {
+		if id == "local" {
+			continue
+		}
+		out[id] = true
+	}
+	return out
+}
+
+// SetExtraPeers 注入运行时追加的常驻对端（节点市场「加入节点」清单）。
+// 语义见 extraPeers 字段注释：重连后自动拨号，不受发现拨号预算限制。
+func (s *PeerJSService) SetExtraPeers(fn func() []string) { s.extraPeers = fn }
+
+// EnsureConnection 幂等拨号：已连接/正在连接则无事发生。
+// 供「加入节点」即时生效用——不等下一次发现轮询（最长 10s）+ 拨号，
+// 用户点"加入"后界面上的"直连"状态要尽快点亮。
+// 复用 connectLoop 的 connecting 去重（同一 peerID 不会开两条连接）。
+func (s *PeerJSService) EnsureConnection(peerID string) {
+	if peerID == "" || peerID == s.id {
+		return
+	}
+	s.mu.Lock()
+	_, connected := s.conns[peerID]
+	s.mu.Unlock()
+	if connected {
+		return
+	}
+	go s.connectLoop(peerID)
 }
 
 // FileIndex 暴露本地文件索引（source 体系的 LocalSource 装配用：
