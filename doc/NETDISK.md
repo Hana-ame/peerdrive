@@ -202,7 +202,7 @@ ROADMAP 顺序，而是它的"验收形态"：阶段 5（范围）与阶段 6（
 | 前端单测 | `vitest run` 88/88（新增 `netdisk.test.jsx` 34 个 + `api-mock-sync.test.js` 2 个） |
 | 前端构建 | `vite build` 成功 |
 | 消费端单测 | `node --test` 60/60（protocol / sha256 / client 三个文件） |
-| CI | `.github/workflows/ci.yml` 新增 `client-package` job；合并后 `refactor` 上五个 job 需全绿 |
+| CI | `.github/workflows/ci.yml` 新增 `client-package` job；`refactor` 上 Peerdrive CI 六个 job 与 Go Build Matrix 五个平台全绿（详见 §6.4） |
 
 ### 6.3 与 ROADMAP 的对应
 
@@ -216,4 +216,34 @@ ROADMAP 顺序，而是它的"验收形态"：阶段 5（范围）与阶段 6（
 - 阶段 2/3/4（文件 / 组合 / 管理链路）在 M4 里第一次有了界面承载
   （Drive / 合集卡片 / 传输任务），但**做深**（目录树、批量重命名、重试策略等）仍待后续。
 - 阶段 7（身份管理）：仍未开始，硬约束保持——全链路不依赖账号，归属先用 peerId。
+
+### 6.4 CI 转绿：顺带修掉的两个既有红灯
+
+合并后推 `refactor` 触发 CI，才发现仓库里有**两条** workflow，且各有一处红——
+两者都在 `9e4ede3`（网盘模块之前的基础提交）上就已存在，与本次目标无关，
+但"验证（通过 gh ci）"要求主干是绿的，所以一并修掉。
+
+| # | 红灯 | 根因 | 修法 | 提交 |
+|---|---|---|---|---|
+| 1 | Peerdrive CI → `media-package` | `packages/peerdrive-media` 把 react/react-dom 只声明为 **optional peerDependencies**，但 `@vitejs/plugin-react` 把 react 当**必需** peer → npm 7+ 自动补装 peer，理想树含 `react@19.3.0`，而旧 lockfile 没有 → `npm ci` 的同步检查报 EUSAGE | react/react-dom 补进 `devDependencies`，`npm install --package-lock-only` 重算锁文件（diff 仅 +react/react-dom/scheduler 三条，并清掉根部陈旧的 `peerDependenciesMeta`） | `4fce69f` |
+| 2 | Go Build Matrix → `macos-latest/darwin-arm64` | `internal/source` 的 `TestPeerSource_WinnerPeerLockReleased` 竞速轮次之间没等收割 goroutine 释放输家锁 | 新增 `waitPeersIdle()`（TryLock 探测 + deadline），替换原来只覆盖第一轮的固定 `sleep(50ms)`；**生产代码未改** | `ccd1af9` |
+
+第 2 项的定位过程值得记一笔：**它不是 macOS 专属** —— 本地 Linux
+`go test -count=400` 就能复现约 1%~2%（与 CI 报错同一行 `peer_test.go:424`），
+慢机器只是放大了概率。关键证据来自临时插桩取到的轨迹：
+
+```
+recv #1 pid=peerA success=true / winner=peerA returning      ← 第二轮胜出即返回
+collectPeers: peerB BUSY (lock held) -> skipped              ← 第三轮看到 peerB 仍被占
+Open collectPeers -> [peerA] / single-path peerA FAILED      ← 退化成单对端路径 → 报错
+candidate peerB ok                                            ← 晚到的第二轮候选，之后才被收割
+```
+
+即：`raceOpen` 胜出即返回、输家由后台收割 goroutine 关流释放锁（**刻意设计**，
+见 `peer.go` 注释），用例却在第二轮之后立刻开第三轮，于是断言前提被错位的
+"单对端路径"污染。插桩本身也有坑：往 stderr 打日志会改变 goroutine 调度，
+把 1~2% 的竞态直接掩盖（600 次全绿）——要改成**内存环形缓冲**、失败时再 dump。
+
+验证：`-count=2000` 全绿（旧失败率下期望 20~40 次失败）、`-race -count=300` 全绿；
+`npm ci` + `npm test` 21/21 + `npm run build` 全链通过。
 

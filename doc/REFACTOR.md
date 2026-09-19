@@ -796,6 +796,56 @@ announce 会经发现服务器广播给所有查询者，报 hash 等于公开�
 `TestShareProtocolContract` / `TestPeerPullSavesToLocalDrive`）；前端 vitest 88/88 + `vite build`；
 消费端 `node --test` 60/60。计划与实际偏差的完整清单见 `doc/NETDISK.md` §6.1。
 
+### 3.20 CI 转绿：两个既有红灯（2026-09-20）
+
+合并网盘模块后推 `refactor` 触发 CI，发现仓库有**两条** workflow
+（`ci.yml` 与 `go-build.yml`）且各有一处红。两者在 `9e4ede3` 上就已存在，
+与网盘改动无关，但主干必须是绿的才能算"验证通过"，故一并修。完整表格见
+`doc/NETDISK.md` §6.4，这里只记**可复用的经验**。
+
+#### (1) `media-package`：`npm ci` 报 lockfile 缺 react
+
+`react`/`react-dom` 在 `packages/peerdrive-media` 里只是 **optional
+peerDependencies**，但 `@vitejs/plugin-react` 把 react 当**必需** peer →
+npm 7+ 自动补装 peer 后算出的理想树含 `react@19.3.0`，而 lockfile 没有 →
+`npm ci` 的同步检查直接失败（EUSAGE）。
+
+修法是把它俩补进 `devDependencies`（带 peerDependencies 的库的常规做法：
+本地开发/构建要装，消费者仍走自己的 peer 声明），再
+`npm install --package-lock-only` 重算。
+
+> 坑：`npm install` 在本机代理下会**挂住十几分钟**（全量 reify 走几百次请求），
+> 但 `npm install --package-lock-only` 只解算元数据、几秒就完；
+> 之后再 `npm ci --dry-run` 验证同步、实跑一次 `npm ci` 验证产物。
+> 另：`npm run build` 本地报 "Cannot find native binding" 是 **npm optional
+> deps bug**（npm/cli#4828）导致 rolldown 的 14 个平台二进制一个都没装上，
+> 显式补 `@rolldown/binding-linux-x64-gnu` 即通过——非仓库缺陷。
+> 另注意 vite 8 要求 node `^20.19 || >=22.12`，本机 WSL 默认 22.9 会 EBADENGINE，
+> 用 nvm 的 22.23 复现 CI 的真实环境。
+
+#### (2) `internal/source` 竞速用例偶发失败
+
+`TestPeerSource_WinnerPeerLockReleased` 在 CI 的 macos/arm64 上约 1/4 概率红，
+一度被当成"平台专属"。**其实不是** —— 本地 Linux `go test -count=400` 就能
+复现约 1%~2%，慢机器只是把概率放大。
+
+根因（靠插桩轨迹坐实）：`raceOpen` 胜出即返回，**输家候选 goroutine 可能仍在
+飞行并持有该 peer 槽位**（锁由后台收割 goroutine 关流后释放——刻意设计）。
+用例第二轮之后直接开第三轮 → 第三轮 `collectPeers` 看到 peerB BUSY → 退化成
+单对端串行路径 → 而 peerA 已被 `failSend` → 报 `peer peerA: assert.AnError`，
+与"锁是否已释放"的断言前提完全错位。
+
+修法：新增 `waitPeersIdle(t, ps, want)`（TryLock 探测、拿到即释放、3s deadline），
+第一/二轮结束各等一次，替换原来只覆盖第一轮的固定 `sleep(50ms)`。
+**生产代码未改**——竞速"不等输家"是有意为之。真发生锁泄漏时会以明确 Fatal
+暴露，反而强化了用例语义。
+
+> 坑（重要）：**插桩别写 stderr**。`fmt.Fprintf(os.Stderr, ...)` 的 I/O 会改变
+> goroutine 调度，把 1~2% 的竞态直接掩盖（600 次全绿、查不到证据）。
+> 要改成**内存环形缓冲**（加锁 append，容量上限），失败时再 dump。
+> 同理，`-race` 也会因时序变化而不复现（本次 -race 300 次全绿），
+> 不能拿"race 下没红"当作"没有竞态"的证据。
+
 ## 5. E2E 踩过的坑（全部已修）
 
 | 坑 | 修复 |

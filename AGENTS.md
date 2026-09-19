@@ -86,10 +86,18 @@
   - 角色分支：`<role>-agent` / `<role>-frontend`（同一模块的前后端拆分开发）。
   - **checkpoint**：跨模块重构或大型改动落地前，先把当前主干 push 成 checkpoint，
     再开新分支动刀。
-- **CI 覆盖**（`.github/workflows/ci.yml`）：push 到上述任一类分支都会触发；
-  job 覆盖 back（vet/test/build）、integration（`-p 1` 串行）、peerjs 独立模块、
-  `packages/peerdrive-media`、`packages/peerdrive-client`、front（test/build）。**只往主干 merge 前必须本地跑过
-  与 CI 相同的命令**（见「构建与验证」一节），否则等于让 CI 替你发现编译错误。
+- **CI 覆盖（两条 workflow，都别漏）**：push 到上述任一类分支都会触发。
+  - `.github/workflows/ci.yml`：job 覆盖 back（vet/test/build）、integration
+    （`-p 1` 串行）、peerjs 独立模块、`packages/peerdrive-media`、
+    `packages/peerdrive-client`、front（test/build）。
+  - `.github/workflows/go-build.yml`：5 个平台交叉构建矩阵
+    （linux amd64/arm64、windows amd64、darwin amd64/arm64），
+    `go build -tags nosqlite ./cmd/server/` + 非 Windows 跑 `go test -tags nosqlite ./...`。
+    **跨平台的调度差异会放大时序敏感的竞态**，只在本机 Linux 跑通不代表这里绿——
+    2026-09-20 就是靠它暴露了 `internal/source` 一个 ~1% 的竞速用例偶发失败
+    （本机 `-count=400` 也能复现，见 REFACTOR §3.20）。
+  **只往主干 merge 前必须本地跑过与 CI 相同的命令**（见「构建与验证」一节），
+  否则等于让 CI 替你发现编译错误。
 - **merge 后动作**：主干上再跑一遍 `back` 全量测试 + 集成测试 + 前端测试/构建，
   确认没有「各自分支绿、合起来红」的耦合问题。
 
