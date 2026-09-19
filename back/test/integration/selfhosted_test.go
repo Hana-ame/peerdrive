@@ -12,7 +12,9 @@ import (
 	peerjs "github.com/Hana-ame/go-peerjs"
 
 	"peerdrive/internal/config"
+	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
+	"peerdrive/internal/service"
 	"peerdrive/internal/transport"
 )
 
@@ -140,6 +142,87 @@ func TestSelfHostedPeerJSSignal(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("自托管信令数据面未通")
+	}
+}
+
+// TestNodeMarketListsDiscoveredPeer 节点市场（doc/NETDISK.md M1）端到端：
+// 两个零共享 collection 的节点靠存在房间互相发现后，B 的市场列表里应出现 A，
+// 且 A 被标记为在线；加入 A 后 joined 清单里要有它。
+//
+// 发现背景（网盘目标）：用户要的是"有别人的节点，可以在市场里加入节点"。
+// 市场数据源 = 发现服务器的 /discover/nodes（空 coll = 全部在线节点）∪
+// 本地已加入清单。本测试同时覆盖「空 coll 查询在自托管信令上确实返回节点」
+// 这一前提（若不成立，市场页会静默空列表）。
+func TestNodeMarketListsDiscoveredPeer(t *testing.T) {
+	idA := randID("mk-a")
+	idB := randID("mk-b")
+
+	newPresenceNode := func(id string) *transport.PeerJSService {
+		requireInitDB(t)
+		cfg := config.Load()
+		cfg.PeerJSEnable = true
+		cfg.PeerJSID = id
+		cfg.PeerJSHost, cfg.PeerJSPort = splitHostPort(selfHostedURL)
+		cfg.PeerJSSecure = false
+		cfg.PeerJSKey = "testkey"
+		cfg.BTDHTEnabled = false
+		cfg.DiscoverURL = selfHostedURL
+		cfg.DiscoverPresence = true
+		cfg.MQTTCollections = ""
+		svc := transport.NewPeerJSService(cfg, t.TempDir())
+		svc.Start()
+		t.Cleanup(svc.Close)
+		return svc
+	}
+
+	newPresenceNode(idA)
+	svcB := newPresenceNode(idB)
+
+	dir := service.NewNodeDirectory(t.TempDir(), selfHostedURL)
+	dir.SetSelfID(svcB.ID)
+	dir.SetConnected(svcB.ConnectedPeerIDs)
+
+	// announce 心跳 30s 一次，但 HTTPDiscovery.loop 启动时立即 announce 一次；
+	// 这里等 B 发现 A（互联成功）后再查市场，避免等心跳。
+	waitConnections(t, svcB, map[string]bool{idA: true}, 60*time.Second)
+
+	var found *model.NodeSummary
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, n := range dir.Market(context.Background()) {
+			if n.PeerID == idA {
+				cp := n
+				found = &cp
+				break
+			}
+		}
+		if found != nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if found == nil {
+		t.Fatalf("市场列表里没有发现对端 %s", idA)
+	}
+	if !found.Online {
+		t.Fatalf("对端 %s 应为在线: %+v", idA, *found)
+	}
+	if !found.Connected {
+		t.Fatalf("对端 %s 已直连但未标记 connected: %+v", idA, *found)
+	}
+	// 自身不应出现在市场列表
+	for _, n := range dir.Market(context.Background()) {
+		if n.PeerID == idB {
+			t.Fatal("本节点不应出现在市场节点列表")
+		}
+	}
+	// 加入后应持久化并可查
+	if err := dir.Join(idA); err != nil {
+		t.Fatalf("join %s: %v", idA, err)
+	}
+	joined := dir.Joined(context.Background())
+	if len(joined) != 1 || joined[0].PeerID != idA || !joined[0].Joined {
+		t.Fatalf("joined 列表不符: %+v", joined)
 	}
 }
 
