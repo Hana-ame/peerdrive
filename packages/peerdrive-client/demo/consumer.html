@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>peerdrive 纯 WebRTC 消费端</title>
+<!--
+  consumer.html — 纯静态消费端演示（不需要任何构建、不需要本地后端）。
+
+  它做的事就是需求里那句「webrtc 纯 client 消费端，可以从这个 p2p 网络拉取文件」：
+    1. 用 PeerJS 连上信令服务器拿到自己的临时 id
+    2. 直连一个 peerdrive 节点的 peer id（WebRTC DataChannel）
+    3. 走 share 帧列出对方共享的合集/文件
+    4. 走 req 帧把内容拉下来（边收边校验 sha256，不匹配即报错）
+
+  依赖只有一项：CDN 上的 peerjs（本包自身零依赖）。要连自托管信令就把
+  host/port/path 填成 node 启动时用的 PEERDRIVE_PEERJS_* 配置。
+
+  起法：在 packages/peerdrive-client 下 `npm run demo`，然后开
+  http://127.0.0.1:8123/demo/consumer.html
+-->
+<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px; background: #0b0f14; color: #d7dee6;
+    font: 14px/1.55 ui-sans-serif, system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  h2 { font-size: 14px; margin: 22px 0 8px; color: #9fb0c0; font-weight: 600; }
+  .sub { color: #7b8b9a; font-size: 12px; margin-bottom: 16px; }
+  .card { background: #121820; border: 1px solid #1e2833; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  label { display: block; font-size: 12px; color: #7b8b9a; margin-bottom: 4px; }
+  input {
+    width: 100%; background: #0e141b; border: 1px solid #263241; border-radius: 6px;
+    padding: 7px 9px; color: #d7dee6; font: inherit; font-size: 13px;
+  }
+  input:focus { outline: none; border-color: #2f6fb0; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row > div { flex: 1 1 130px; min-width: 110px; }
+  button {
+    background: #1d4f7c; border: 1px solid #2f6fb0; color: #e6f0fa; border-radius: 6px;
+    padding: 8px 14px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #245d90; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.ghost { background: transparent; border-color: #2b3745; color: #9fb0c0; }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #1e2833; color: #9fb0c0; }
+  .ok { color: #6ee7a0; } .warn { color: #e7c76e; } .err { color: #f08a8a; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #1a222c; font-size: 13px; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #6b7a89; font-weight: 500; }
+  tr:hover td { background: #161e27; }
+  .empty { color: #6b7a89; padding: 14px 4px; font-size: 13px; }
+  details { margin: 4px 0 0; }
+  summary { cursor: pointer; color: #9fb0c0; font-size: 13px; }
+  progress { width: 100%; height: 6px; }
+  #log {
+    background: #0a0e13; border: 1px solid #1a222c; border-radius: 8px; padding: 10px;
+    height: 168px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px; white-space: pre-wrap;
+  }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid #263241; color: #9fb0c0; }
+</style>
+</head>
+<body>
+  <h1>peerdrive 纯 WebRTC 消费端</h1>
+  <div class="sub">
+    浏览器直连一个 peerdrive 节点，列出它共享的内容并拉取文件 —— 不需要本地跑任何后端。
+    <span class="badge">零依赖</span>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">1 · 信令</h2>
+    <div class="row">
+      <div style="flex:2 1 200px">
+        <label>host</label>
+        <input id="sig-host" value="0.peerjs.com">
+      </div>
+      <div style="flex:0 1 90px">
+        <label>port</label>
+        <input id="sig-port" value="443">
+      </div>
+      <div style="flex:0 1 90px">
+        <label>path</label>
+        <input id="sig-path" value="/">
+      </div>
+      <div style="flex:0 1 110px">
+        <label>key</label>
+        <input id="sig-key" value="peerjs">
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px; align-items:center">
+      <label style="margin:0; display:flex; align-items:center; gap:6px; flex:0 0 auto">
+        <input id="sig-secure" type="checkbox" checked style="width:auto"> https/wss
+      </label>
+      <div style="flex:2 1 240px">
+        <label>对方节点 peer id</label>
+        <input id="node-id" placeholder="peerdrive-xxxxxxxx">
+      </div>
+      <div style="flex:0 0 auto; align-self:flex-end">
+        <button id="btn-connect">连接并列出共享</button>
+      </div>
+      <div style="flex:0 0 auto; align-self:flex-end">
+        <button id="btn-disconnect" class="ghost" disabled>断开</button>
+      </div>
+    </div>
+    <div class="sub" style="margin:10px 0 0">
+      我的临时 id：<span class="mono" id="my-id">（未连接）</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">2 · 共享清单</h2>
+    <div id="shares"><div class="empty">还没连接。</div></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">3 · 按 hash 直接拉取</h2>
+    <div class="sub" style="margin:0 0 8px">知道 sha256 时不必先要清单（内容寻址网络的基本用法）。</div>
+    <div class="row">
+      <div style="flex:3 1 300px">
+        <input id="hash" class="mono" placeholder="64 位小写 hex sha256">
+      </div>
+      <div style="flex:0 1 160px">
+        <input id="filename" placeholder="保存文件名（可空）">
+      </div>
+      <div style="flex:0 0 auto">
+        <button id="btn-fetch">拉取</button>
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <progress id="bar" value="0" max="100" hidden></progress>
+      <div class="sub mono" id="progress" style="margin:6px 0 0"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">4 · 日志</h2>
+    <div id="log"></div>
+  </div>
+
+<script type="module">
+import { ERR, connectToPeer } from '../src/index.js'
+import { formatBytes, formatCount } from './format.js'
+
+const $ = (id) => document.getElementById(id)
+let client = null
+let busy = false
+
+function log(msg, cls = '') {
+  const el = document.createElement('div')
+  if (cls) el.className = cls
+  const t = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+  el.textContent = `[${t}] ${msg}`
+  $('log').appendChild(el)
+  $('log').scrollTop = $('log').scrollHeight
+}
+
+function setBusy(on) {
+  busy = on
+  $('btn-connect').disabled = on
+  $('btn-fetch').disabled = on || !client
+  $('btn-disconnect').disabled = on || !client
+}
+
+// peerOptions 必须把 secure 一起传：自托管信令常用 ws://（无证书），
+// 而 PeerJS 默认 secure=true 会去连 wss://，表现为"连不上但没报错"。
+function peerOptions() {
+  return {
+    host: $('sig-host').value.trim(),
+    port: Number($('sig-port').value.trim() || 443),
+    path: $('sig-path').value.trim() || '/',
+    key: $('sig-key').value.trim() || 'peerjs',
+    secure: $('sig-secure').checked,
+    debug: 1,
+  }
+}
+
+$('btn-connect').addEventListener('click', async () => {
+  const nodeId = $('node-id').value.trim()
+  if (!nodeId) { log('请先填对方节点 peer id', 'err'); return }
+  setBusy(true)
+  try {
+    log('连接信令并拨号 ' + nodeId + ' …')
+    client = await connectToPeer(Peer, nodeId, {
+      peerOptions: peerOptions(),
+      idleTimeoutMs: 60_000,
+    })
+    $('my-id').textContent = client.conn.peer || '（未知）'
+    $('my-id').className = 'mono ok'
+    log('已建立 WebRTC 直连，开始查询共享清单', 'ok')
+    await loadShares()
+  } catch (e) {
+    log(`连接失败：${e.message}${e.code ? `（${e.code}）` : ''}`, 'err')
+    if (e.code === ERR.TIMEOUT) log('提示：对方节点离线、peer id 写错，或信令配置不同（检查 host/port/path/key）', 'warn')
+    client = null
+  } finally {
+    setBusy(false)
+  }
+})
+
+$('btn-disconnect').addEventListener('click', () => {
+  if (client) client.close()
+  client = null
+  $('my-id').textContent = '（未连接）'
+  $('my-id').className = 'mono'
+  $('shares').innerHTML = '<div class="empty">已断开。</div>'
+  setBusy(false)
+  log('已断开')
+})
+
+async function loadShares() {
+  const box = $('shares')
+  box.innerHTML = '<div class="empty">加载中…</div>'
+  try {
+    const snap = await client.shares()
+    if (!snap.total) {
+      box.innerHTML = '<div class="empty">该节点没有共享内容（对方未开启对外共享，或未声明共享目录）。</div>'
+      log('共享清单为空（这是合法状态，不是错误）', 'warn')
+      return
+    }
+    log(`共享清单：${snap.collections.length} 个合集 · ${snap.files.length} 个单文件`, 'ok')
+    box.innerHTML = ''
+    box.appendChild(renderFiles(snap.files))
+    box.appendChild(renderCollections(snap.collections))
+  } catch (e) {
+    box.innerHTML = `<div class="empty err">获取共享清单失败：${e.message}</div>`
+    log(`获取共享清单失败：${e.message}（${e.code}）`, 'err')
+  }
+}
+
+function renderFiles(files) {
+  const wrap = document.createElement('div')
+  if (!files.length) return wrap
+  wrap.innerHTML = '<h2 style="margin-top:14px">单独文件</h2>'
+  const table = document.createElement('table')
+  table.innerHTML = '<thead><tr><th>名称</th><th>大小</th><th>hash</th><th></th></tr></thead>'
+  const tb = document.createElement('tbody')
+  for (const f of files) {
+    const tr = document.createElement('tr')
+    tr.innerHTML = `<td>${esc(f.path || f.name)}</td><td>${f.size ? formatBytes(f.size) : '—'}</td>
+      <td class="mono" style="color:#6b7a89">${esc(String(f.hash).slice(0, 12))}…</td>`
+    const td = document.createElement('td')
+    const btn = document.createElement('button')
+    btn.className = 'small'
+    btn.textContent = '保存'
+    btn.addEventListener('click', () => download(f, btn))
+    td.appendChild(btn)
+    tr.appendChild(td)
+    tb.appendChild(tr)
+  }
+  table.appendChild(tb)
+  wrap.appendChild(table)
+  return wrap
+}
+
+function renderCollections(colls) {
+  const wrap = document.createElement('div')
+  if (!colls.length) return wrap
+  wrap.innerHTML = '<h2 style="margin-top:18px">打包好的合集</h2>'
+  for (const c of colls) {
+    const entries = Array.isArray(c.entries) ? c.entries : []
+    const d = document.createElement('details')
+    const s = document.createElement('summary')
+    s.textContent = `${c.name || String(c.hash).slice(0, 12) + '…'}  ·  ${formatCount(entries.length)} 个条目`
+    d.appendChild(s)
+    const table = document.createElement('table')
+    table.innerHTML = '<thead><tr><th>路径</th><th>hash</th><th></th></tr></thead>'
+    const tb = document.createElement('tbody')
+    for (const e of entries) {
+      const tr = document.createElement('tr')
+      tr.innerHTML = `<td>${esc(e.path)}</td><td class="mono" style="color:#6b7a89">${esc(String(e.hash).slice(0, 12))}…</td>`
+      const td = document.createElement('td')
+      const btn = document.createElement('button')
+      btn.className = 'small'
+      btn.textContent = '保存'
+      btn.addEventListener('click', () => download(e, btn))
+      td.appendChild(btn)
+      tr.appendChild(td)
+      tb.appendChild(tr)
+    }
+    table.appendChild(tb)
+    d.appendChild(table)
+    wrap.appendChild(d)
+  }
+  return wrap
+}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]))
+
+async function download(item, btn) {
+  if (!client) { log('未连接', 'err'); return }
+  const name = String(item.name || item.path || item.hash || '').split('/').pop()
+  btn.disabled = true
+  const old = btn.textContent
+  btn.textContent = '拉取中…'
+  try {
+    log(`开始拉取 ${name || item.hash.slice(0, 12)} …`)
+    const size = await client.saveAs(item.hash, name, {
+      onProgress: (received, total) => {
+        if (total > 0) {
+          btn.textContent = `${Math.round((received / total) * 100)}%`
+        } else {
+          btn.textContent = formatBytes(received)
+        }
+      },
+    })
+    btn.textContent = '已保存'
+    log(`完成：${name || '文件'}（${formatBytes(size)}，sha256 已校验）`, 'ok')
+    setTimeout(() => { btn.textContent = old }, 2500)
+  } catch (e) {
+    btn.textContent = '失败'
+    log(`拉取失败：${e.message}（${e.code}）`, 'err')
+    if (e.code === ERR.HASH_MISMATCH) log('内容与 hash 不符——对端数据损坏或被篡改，已丢弃', 'err')
+    if (e.code === ERR.TOO_LARGE) log('文件超过内存闸（默认 256MB）。需要大文件请改用 stream() 流式落盘', 'warn')
+    setTimeout(() => { btn.textContent = old }, 2500)
+  } finally {
+    btn.disabled = false
+  }
+}
+
+$('btn-fetch').addEventListener('click', async () => {
+  if (!client) { log('未连接', 'err'); return }
+  const hash = $('hash').value.trim()
+  if (!hash) { log('请填 sha256 hash', 'err'); return }
+  const bar = $('bar')
+  const text = $('progress')
+  bar.hidden = false
+  bar.value = 0
+  setBusy(true)
+  try {
+    const size = await client.saveAs(hash, $('filename').value.trim(), {
+      onProgress: (received, total) => {
+        text.textContent = total > 0
+          ? `${formatBytes(received)} / ${formatBytes(total)}`
+          : formatBytes(received)
+        bar.value = total > 0 ? (received / total) * 100 : 0
+      },
+    })
+    text.textContent = `完成：${formatBytes(size)}（sha256 已校验）`
+    text.className = 'sub mono ok'
+    log(`按 hash 拉取完成：${formatBytes(size)}`, 'ok')
+  } catch (e) {
+    text.textContent = `失败：${e.message}（${e.code}）`
+    text.className = 'sub mono err'
+    log(`按 hash 拉取失败：${e.message}（${e.code}）`, 'err')
+  } finally {
+    setBusy(false)
+  }
+})
+
+log('就绪。填对方节点 id 后点「连接并列出共享」。')
+</script>
+</body>
+</html>

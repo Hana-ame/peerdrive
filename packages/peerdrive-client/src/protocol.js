@@ -1,0 +1,141 @@
+// protocol.js — peerdrive 节点帧协议的纯函数实现（零依赖，浏览器 / Node 通用）。
+//
+// 与 Go 侧 back/internal/transport/conn.go 的帧定义**逐字对齐**：
+//
+//	请求: {"type":"req","hash":"<64hex>","offset":0,"size":-1,"reqId":"..."}
+//	响应: {"type":"meta","hash","total","reqId"}
+//	      {"type":"data","hash","offset","size","reqId"} + 紧随 size 字节二进制块
+//	      {"type":"done","hash","offset","size","reqId"}
+//	      {"type":"err","msg","reqId"}
+//	共享: {"type":"share","reqId"}
+//	      → {"type":"share-resp","collections":[…],"files":[…],"dirs":[…],"total":N,"reqId"}
+//
+// 三条不能改的约束（破坏了不会报错，只会静默错位）：
+//  1. data 头是**文本帧**、数据块是**二进制帧**。raw 序列化下 string 走 PPID 51、
+//     ArrayBuffer 走 PPID 53，对端才能按类型区分；把数据块发成 JSON 数组之类
+//     会在对端被当成控制帧解析
+//  2. data 头与其数据块必须**连续**。接收端用的是"连接级 expect"——把二进制块
+//     挂到**最近一个** data 头所属的请求上，而不是在块里带 reqId。所以不能把
+//     两个请求的块交错发送（Go 侧 SendFrame 靠连接级 sendMu 保证原子性）
+//  3. 字段名逐字对齐。改 `reqId` → `req_id` 不会报错，只会让对端路由不到、
+//     请求一直挂到超时
+
+export const PROTOCOL_VERSION = 1
+
+// MAX_FILE_BYTES 与 Go 侧 maxPeerFetchSize 一致（8GB）：对端声明超过这个数
+// 直接拒绝，防"恶意对端声明 1<<62 再持续发块"把接收方撑爆。
+export const MAX_FILE_BYTES = 8 * 1024 * 1024 * 1024
+
+// DEFAULT_MAX_BUFFER_BYTES 浏览器侧的内存闸。
+// 与 8GB 的协议上限分开：协议上限是"服务端允许传多大"，这里是"本页面愿意
+// 在内存里攒多大"。消费端 fetch() 是整体驻留内存的，一个 2GB 的文件在手机上
+// 会直接崩标签页——默认 256MB，超了报 TOO_LARGE 并提示改用流式。
+export const DEFAULT_MAX_BUFFER_BYTES = 256 * 1024 * 1024
+
+// isValidHash 必须与 Go 侧 hashutil.IsStrictSHA256 同语义：**仅** 64 位小写 hex。
+// 为什么在本地就拦：大写 hex 在 Go 侧会被判 invalid hash 回 err 帧，错误信息
+// 出现在几百毫秒后的一次网络往返之后，排查时容易误判成"对端没这个文件"。
+const HASH_RE = /^[0-9a-f]{64}$/
+
+export function isValidHash(hash) {
+  return typeof hash === 'string' && HASH_RE.test(hash)
+}
+
+// nextReqId 生成请求 ID。Go 侧用 UUID v4；这里用"时间戳+随机"也能满足唯一性
+// 要求（reqId 只用于单条连接内的响应路由，不跨连接、不持久化）。
+export function nextReqId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+// reqFrame 构造文件拉取请求帧（出站角色发起）。
+// size 用 -1 表示"读到文件末尾"，与 Go 侧语义一致（负数即不限量）。
+export function reqFrame(hash, { offset = 0, size = -1, reqId } = {}) {
+  return JSON.stringify({ type: 'req', hash, offset, size, reqId, v: PROTOCOL_VERSION })
+}
+
+// shareFrame 构造共享清单查询帧（与 list 帧不同：list 是本地管理索引全量，
+// 只对可信对端开放；share 是运营者**显式声明**的对外共享范围）。
+export function shareFrame(reqId) {
+  return JSON.stringify({ type: 'share', reqId, v: PROTOCOL_VERSION })
+}
+
+// parseFrame 解析文本帧。返回 null 表示"不是本协议的控制帧"（非 JSON、
+// 或缺 type）——调用方应当忽略而不是报错：同一条连接上可能有别的用途的帧。
+export function parseFrame(text) {
+  if (typeof text !== 'string') return null
+  try {
+    const o = JSON.parse(text)
+    if (o && typeof o === 'object' && typeof o.type === 'string') return o
+  } catch {
+    /* 非 JSON：不是本协议帧 */
+  }
+  return null
+}
+
+// isBinaryFrame 判断收到的数据是不是数据块。
+// raw 序列化下浏览器端收到的是 ArrayBuffer（或 Blob，视 binaryType 而定），
+// Node 端可能是 Uint8Array/DataView——全部按二进制处理，字符串则是文本帧。
+export function isBinaryFrame(data) {
+  if (typeof data === 'string') return false
+  if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) return true
+  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(data)) return true
+  if (typeof Blob !== 'undefined' && data instanceof Blob) return true
+  return false
+}
+
+// toUint8Array 把任意二进制帧规整为 Uint8Array（要保留 byteOffset/byteLength，
+// 直接 new Uint8Array(view.buffer) 会把整个底层 buffer 带进来）。
+export function toUint8Array(data) {
+  if (data instanceof Uint8Array) return data
+  if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) return new Uint8Array(data)
+  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  }
+  throw new TypeError('peerdrive-client: unsupported binary frame type')
+}
+
+// concatChunks 按已知总长拼块。传 total 可以一次性分配（避免逐块扩容复制），
+// 但 total 未定时（对端 meta 里是 -1）必须走"先收集后合并"。
+export function concatChunks(chunks, total = -1) {
+  if (chunks.length === 1) return chunks[0]
+  let len = 0
+  for (const c of chunks) len += c.byteLength
+  const n = total >= 0 ? total : len
+  const out = new Uint8Array(n)
+  let off = 0
+  for (const c of chunks) {
+    if (off + c.byteLength > n) break // 对端多发了：按声明长度截断
+    out.set(c, off)
+    off += c.byteLength
+  }
+  return off === n ? out : out.subarray(0, off)
+}
+
+// sha256Hex 计算内容的 sha256 十六进制摘要（内容寻址校验用）。
+// 实现放在 sha256.js：一次性路径优先 WebCrypto，流式路径用纯 JS 增量实现——
+// 需要边收边算的调用方（流式拉取）直接用 Sha256 类。
+export { Sha256, sha256Hex } from './sha256.js'
+
+// guessMime 按文件名猜 MIME（meta 帧不带 mime，浏览器 Blob 需要它才能正确
+// 预览/播放）。猜错只影响预览体验，不影响内容正确性。
+const EXT_MIME = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp',
+  mp4: 'video/mp4', webm: 'video/webm', ogg: 'video/ogg', mov: 'video/quicktime',
+  mkv: 'video/x-matroska', mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac',
+  m4a: 'audio/mp4', pdf: 'application/pdf', zip: 'application/zip',
+  txt: 'text/plain;charset=utf-8', md: 'text/markdown;charset=utf-8',
+  json: 'application/json', csv: 'text/csv;charset=utf-8',
+}
+
+export function guessMime(name, fallback = 'application/octet-stream') {
+  const ext = String(name || '').split('?')[0].split('.').pop()?.toLowerCase()
+  return EXT_MIME[ext] || fallback
+}
+
+// baseName 从共享清单的 path 取文件名（对端给的是相对路径，可能带目录）。
+export function baseName(p) {
+  const s = String(p || '')
+  const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'))
+  return i >= 0 ? s.slice(i + 1) : s
+}
