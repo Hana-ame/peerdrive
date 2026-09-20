@@ -19,7 +19,7 @@ import (
 // 的说法都需要重新证明。
 func TestDataModelSeparationProof(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, InitDB(filepath.Join(dir, "proof.db")), "初始化独立库")
+	initTestDB(t)
 
 	// 造两个真实文件，各自算出 sha256（与真实登记路径同一算法）
 	mkfile := func(name, content string) (path, hash string, size int64) {

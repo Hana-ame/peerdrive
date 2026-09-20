@@ -3,12 +3,11 @@ package repository
 // 注：本文件属于 legacy 代码（见 doc/LEGACY.md，待删/待迁移）的测试，未逐一标注发现背景；「发现背景」规范对新代码生效。
 
 import (
-	"path/filepath"
 	"testing"
 )
 
 func TestCollectionRepo_GetOrCreate(t *testing.T) {
-	InitDB(filepath.Join(t.TempDir(), "test.db"))
+	initTestDB(t)
 
 	id, err := GetOrCreateCollection("testuser", "test-coll")
 	if err != nil {
@@ -29,7 +28,7 @@ func TestCollectionRepo_GetOrCreate(t *testing.T) {
 }
 
 func TestCollectionRepo_CreateWithVisibility(t *testing.T) {
-	InitDB(filepath.Join(t.TempDir(), "test.db"))
+	initTestDB(t)
 
 	id, err := CreateCollectionWithVisibility("vuser", "pub-coll", "public")
 	if err != nil {
@@ -49,7 +48,7 @@ func TestCollectionRepo_CreateWithVisibility(t *testing.T) {
 }
 
 func TestCollectionRepo_EntriesCRUD(t *testing.T) {
-	InitDB(filepath.Join(t.TempDir(), "test.db"))
+	initTestDB(t)
 	id, _ := GetOrCreateCollection("euser", "entries-coll")
 
 	err := AddCollectionEntry(id, "dir/file.txt", "abc123hash")
@@ -80,7 +79,7 @@ func TestCollectionRepo_EntriesCRUD(t *testing.T) {
 }
 
 func TestCollectionRepo_VersionFlow(t *testing.T) {
-	InitDB(filepath.Join(t.TempDir(), "test.db"))
+	initTestDB(t)
 	id, _ := GetOrCreateCollection("cuser", "version-coll")
 	AddCollectionEntry(id, "a.txt", "hash1")
 	AddCollectionEntry(id, "b.txt", "hash2")
@@ -103,7 +102,7 @@ func TestCollectionRepo_VersionFlow(t *testing.T) {
 }
 
 func TestCollectionRepo_ListAndSearch(t *testing.T) {
-	InitDB(filepath.Join(t.TempDir(), "test.db"))
+	initTestDB(t)
 	GetOrCreateCollection("lu", "alpha")
 	GetOrCreateCollection("lu", "beta")
 
@@ -125,7 +124,7 @@ func TestCollectionRepo_ListAndSearch(t *testing.T) {
 }
 
 func TestCollectionRepo_Tags(t *testing.T) {
-	InitDB(filepath.Join(t.TempDir(), "test.db"))
+	initTestDB(t)
 
 	id, err := CreateCollectionWithTags("tuser", "tagged", "public", []string{"demo", "test"})
 	if err != nil {

@@ -27,11 +27,33 @@ jobs:
           go-version: '1.26'
           cache-dependency-path: back/go.sum
 
+      # GOOS/GOARCH 必须走 env，不能写成 `GOOS=... go build`：windows-latest
+      # 的默认 shell 是 pwsh，前置赋值的 bash 语法会被当成命令名。
+      #
+      # CGO_ENABLED=0 的原因与 release.yml 一致：Windows runner 上没有 C 编译器，
+      # cgo 版 SQLite（mattn/go-sqlite3）编不过；关掉后走纯 Go 驱动
+      # （modernc.org/sqlite，见 back/internal/repository/db_driver_pure.go）。
+      # 副作用是好的：发布包同样是按 CGO_ENABLED=0 构建的，这条 CI 正好覆盖
+      # 发布出去的二进制实际用的那条驱动路径。
       - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
         run: go build -tags nosqlite -ldflags="-s -w" -o peerdrive-server${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/server/
 
+      # Windows 也跑测试，不再跳过（2026-09-20）。
+      #
+      # 之前 `if: matrix.goos != 'windows'` 的代价：路径边界这套判定里最有
+      # Windows 味的语义（盘符大小写折叠、`\\?\` 前缀、盘符相对写法 `D:`）
+      # 全部只在 Linux 上跑过，Windows 那一支在 CI 里等于从未执行。跳过只是把
+      # "没测过"包装成"绿"，不是真的没风险——真机 Windows 第一次跑就抓出
+      # 三个只在 Windows 上成立的 bug（详见 doc/NETDISK.md §11.3）。
+      # 保留 30 分钟超时：Windows runner 上的 go test 首次编译明显更慢。
       - name: Test
-        if: matrix.goos != 'windows'
+        timeout-minutes: 30
+        env:
+          CGO_ENABLED: 0
         run: go test -tags nosqlite ./...
 
       - uses: actions/upload-artifact@v4

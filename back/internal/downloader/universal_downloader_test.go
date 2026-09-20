@@ -64,6 +64,7 @@ func TestLocalFetcher_FileInP2PSubdir(t *testing.T) {
 func TestLocalFetcher_FileFromDBProvider(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
+	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
 
 	data := []byte("db provider test")
 	hash := sha256.Sum256(data)
@@ -89,6 +90,12 @@ func TestLocalFetcher_FileFromDBProvider(t *testing.T) {
 }
 
 func TestLocalFetcher_NotFound(t *testing.T) {
+	// 该用例会查 provider 表：以前全靠上一个用例漏下来的全局 DB（没关连接），
+	// 现在每个用例都 CloseDB 了，这里必须自己建库——测试之间不该靠泄漏共享状态。
+	if err := repository.InitDB(":memory:"); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+	t.Cleanup(func() { _ = repository.CloseDB() })
 	f := &LocalFetcher{storageDir: t.TempDir()}
 	_, err := f.Fetch(context.Background(), "0000000000000000000000000000000000000000000000000000000000000000")
 	if err == nil {
@@ -146,6 +153,7 @@ func TestHTTPURLFetcher_IsAvailable(t *testing.T) {
 func TestHTTPURLFetcher_FetchFromServer(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
+	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
 
 	data := []byte("http provider content")
 	hash := sha256.Sum256(data)
@@ -172,6 +180,10 @@ func TestHTTPURLFetcher_FetchFromServer(t *testing.T) {
 }
 
 func TestHTTPURLFetcher_NoProvider(t *testing.T) {
+	if err := repository.InitDB(":memory:"); err != nil { // 同上：不能靠别的用例漏下来的 DB
+		t.Fatalf("InitDB: %v", err)
+	}
+	t.Cleanup(func() { _ = repository.CloseDB() })
 	// Hash with no HTTP provider registered.
 	_, err := (&HTTPURLFetcher{}).Fetch(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	if err == nil {
@@ -223,6 +235,7 @@ func TestNewUniversalDownloader_CustomOrder(t *testing.T) {
 func TestDownload_LocalFile(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
+	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
 
 	data := []byte("full pipeline test")
 	hash := sha256.Sum256(data)
@@ -253,6 +266,7 @@ func TestDownload_LocalFile(t *testing.T) {
 func TestDownload_Fallback(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
+	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
 
 	data := []byte("http fallback test")
 	hash := sha256.Sum256(data)
@@ -286,6 +300,7 @@ func TestDownload_Fallback(t *testing.T) {
 func TestDownload_AllProtocolsFail(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
+	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
 
 	d := NewUniversalDownloader(nil, dir, "local,http", 5*time.Second, nil)
 	_, _, err := d.Download(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
@@ -298,6 +313,7 @@ func TestDownload_AllProtocolsFail(t *testing.T) {
 func TestCacheToLocal(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
+	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
 
 	data := []byte("cache test")
 	hash := sha256.Sum256(data)
@@ -336,6 +352,7 @@ func TestCacheToLocal(t *testing.T) {
 func TestCheckSources(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
+	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
 
 	data := []byte("sources check data")
 	hash := sha256.Sum256(data)

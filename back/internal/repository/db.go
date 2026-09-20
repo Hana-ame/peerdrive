@@ -1,5 +1,8 @@
 // Package repository 提供 SQLite 数据库操作层。
-// 使用 mattn/go-sqlite3 驱动。必须先调用 InitDB(dbPath) 初始化全局 DB 连接。
+// 驱动按 cgo 是否可用二选一（见 db_driver_cgo.go / db_driver_pure.go）：
+// 有 cgo 用 mattn/go-sqlite3，没有则退回纯 Go 的 modernc.org/sqlite——
+// 否则 CGO_ENABLED=0 构建出来的二进制（含全部发布包）会退化成 stub，一启动就挂。
+// 必须先调用 InitDB(dbPath) 初始化全局 DB 连接。
 // 表清单：
 //   file_meta       — 文件内容元数据（hash PK：size / mime_type / gziped / filename / type）
 //   file_providers  — 文件存储位置（hash → provider_type + path，多副本可用）
@@ -16,8 +19,6 @@ import (
 	"database/sql"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
-
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 )
@@ -31,10 +32,27 @@ const (
 
 var DB *sql.DB
 
+// CloseDB 关闭全局连接并把 DB 置空（幂等）。
+//
+// 为什么要有它：**打开着的库文件在 Windows 上删不掉**。测试用 t.TempDir()
+// 建库、结束时 testing 会 RemoveAll 整个目录，只要连接没关就报 "The process
+// cannot access the file because it is being used by another process"。
+// Linux 上 unlink 一个打开的文件是允许的，所以这条只有 Windows 能暴露
+// （2026-09-20 之前 Windows 那格 CI 只 build 不 test，一直没发现）。
+// 生产路径（进程退出）不调用它——进程一走句柄自然回收。
+func CloseDB() error {
+	if DB == nil {
+		return nil
+	}
+	err := DB.Close()
+	DB = nil
+	return err
+}
+
 // InitDB 初始化 SQLite 数据库连接并执行全部建表 DDL，包括 file_meta、file_providers、collections 等表。
 func InitDB(dbPath string) error {
 	var err error
-	DB, err = sql.Open("sqlite3", dbPath)
+	DB, err = sql.Open(sqliteDriver, dbPath)
 	if err != nil {
 		return err
 	}
