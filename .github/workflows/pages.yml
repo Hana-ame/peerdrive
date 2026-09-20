@@ -95,15 +95,28 @@ jobs:
           set -u
           SCRIPT="$GITHUB_WORKSPACE/packages/peerdrive-client/scripts/verify-pages.mjs"
 
-          # Pages 发布有传播延迟，先探测到新产物真的可访问再验，别把延迟当成失败
+          # 本次提交对应的产物指纹（构建零依赖，装完 node 就能跑）
+          cd "$GITHUB_WORKSPACE/packages/peerdrive-client"
+          npm run build:panel
+          WANT=$(sha256sum dist/panel.html | cut -d' ' -f1)
+          cd /tmp/pw
+
+          # 光探测「页面能打开」是不够的：Pages 传播有延迟，那样很可能一直在验上一版
+          # 页面，改坏了也照样绿。所以等到线上拿到的字节与本次产物一致才往下走。
+          fresh=0
           for i in $(seq 1 10); do
-            if curl -sfL "$PANEL_URL" -o /tmp/live.html && grep -q 'id="in-node"' /tmp/live.html; then
-              echo "线上已可访问（第 $i 次探测）"
+            GOT=$(curl -sfL "$PANEL_URL" | sha256sum | cut -d' ' -f1)
+            if [ "$GOT" = "$WANT" ]; then
+              echo "线上已是本次产物（第 $i 次探测，sha256 一致）"
+              fresh=1
               break
             fi
-            echo "还没传播到，等 30s（第 $i 次）"
+            echo "线上还不是本次产物，等 30s（第 $i 次）"
             sleep 30
           done
+          if [ "$fresh" != 1 ]; then
+            echo "::warning::等了 5 分钟线上仍是别的产物，下面的断言验的可能不是这次的部署"
+          fi
 
           # 只重试「整轮」，脚本内部任何一项断言失败都会 exit 1
           ok=0
