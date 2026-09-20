@@ -438,3 +438,58 @@ CI 和单元测试全绿，但真实跑起来 `files` 一直是空的。根因�
 全部测试组件（含怎么选、命令、CI 映射、盲区）见
 **[`doc/testing/README.md`](testing/README.md)**。
 
+---
+
+## 8. 现在能做到什么、怎么验证（2026-09-20 实测）
+
+这一节是**实测记录**，不是设计说明：下面每条都写了「用什么命令验」和「这次跑出来的结果」，
+换了机器/改了代码请照着命令重跑，别照着结论信。
+
+### 8.1 能力矩阵
+
+| # | 能力 | 验证方式 | 本次结果 |
+|---|---|---|---|
+| 1 | **公共面板在线可用**（GitHub Pages） | `node packages/peerdrive-client/scripts/verify-pages.mjs` | 5/5 PASS（骨架 / bundle 20 API / peerjs 取到 / 混合内容提示 / 无 JS 报错） |
+| 2 | **面板 file:// 直连节点拉文件** | `SIG_HOST=<IP> SIG_PORT=9100 NODE_ID=node-a node packages/peerdrive-client/scripts/verify-panel.mjs` | 9/9 PASS（连上 → 清单 2 项 → 点保存真下载 → 预览有内容 → sha256 一致） |
+| 3 | **wss 信令**（HTTPS 页面唯一可行路径） | 见 §8.3 | PASS（PeerJS 经 wss 完成握手拿到 id） |
+| 4 | **节点市场 / 加入 / 清单 / 拉取**（HTTP API） | `bash scripts/netdisk-local-demo.sh` | 8/8 PASS（市场 → 加入 → 清单 → 拉取 → sha256 校验），连跑两次都绿 |
+| 5 | **节点管理台 UI**（`front/`，需后端） | `curl http://<IP>:5173/` + §7.2.2 | 200；市场/清单/任务 API 均返回预期数据 |
+| 6 | 单元测试/分层回归 | `bash scripts/test-layers.sh` | 9 层全绿 / 43s |
+| 7 | CI | `gh run list` | 三条 workflow（CI / Go Build Matrix / Deploy Pages）全 success |
+| 8 | 发版门禁 | — | ❌ **没有**（`ci.yml` 不触发 tag，`release.yml` 不跑测试） |
+
+### 8.2 一键链路脚本的坑：重跑前必须先清干净
+
+`scripts/netdisk-local-demo.sh` 假设自己是 9100/3001/3002 的唯一主人。
+**如果上一次的进程还在跑**，脚本新起的 server 会因端口占用直接退出，而后面的
+curl 全部打到**旧进程**上 —— 于是你看到的现象是：
+
+- 市场里能看到 node-a（其实是旧进程），join 也"成功"；
+- 但共享清单是旧的（hash 对不上刚登记的文件）；
+- 拉取任务显示 `done 300000/300000`，落盘路径也打印了，**文件却不存在** → 脚本报「未落盘」。
+
+这种失败极具误导性（2026-09-20 实测踩到）。已在脚本开头加了端口清理，
+现在重跑是幂等的（连续两次全绿）；如果手写命令起环境，记得先 `scripts/netdisk-local-demo.sh --stop`。
+
+> 另一个坑：脚本用 `setsid nohup` 起的服务会**持有调用方的管道写端**，
+> 所以 `bash scripts/netdisk-local-demo.sh | tail` 这种写法可能到脚本跑完还不返回
+> （实测挂了 9 分钟才回显）。要拿到输出就重定向到文件：
+> `( bash scripts/netdisk-local-demo.sh > /tmp/demo.out 2>&1 </dev/null & )`。
+
+### 8.3 wss 怎么验
+
+```bash
+# 1) 自签证书 + 起 wss 信令（生产请用真证书或 TLS 反代）
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout key.pem -out cert.pem   -subj "/CN=<IP>" -addext "subjectAltName=IP:<IP>"
+peersignal -addr :9101 -key peerjs -tls-cert cert.pem -tls-key key.pem
+
+# 2) 浏览器侧探针（自签证书要 ignoreHTTPSErrors）
+#    断言 PeerJS 能经 wss 完成握手拿到 id —— 这一步通了，HTTPS 面板就能连自托管信令
+```
+
+### 8.4 明确的边界（做不到 / 未做）
+
+- **在线面板连不到 `ws://` 信令**：HTTPS 页面的混合内容规则，需 wss（§7.2.1 前提 3）。
+- **端到端脚本未进 CI**：只能在本地跑（§4 盲区清单里风险最高的一项）。
+- **发版无测试门禁**：打 tag 时 `ci.yml` 不触发。
+- `signalserver`(23) / `p2p_bt`(7) 是独立 go.mod 且无 CI job —— 改坏了 CI 照样绿。

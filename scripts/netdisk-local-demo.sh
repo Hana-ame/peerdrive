@@ -61,6 +61,15 @@ if [[ "${1:-}" == "--stop" ]]; then
   exit 0
 fi
 
+say "清理残留进程（端口 $SIG_PORT/$A_PORT/$B_PORT）"
+# 这个脚本假设自己是这三个端口的唯一主人。如果上一次的进程还在跑，新起的 server
+# 会因端口占用直接退出，而脚本后面的 curl 全打到**旧进程**上：于是能看到节点、
+# 也能 join，但共享清单是旧的、拉取落盘路径也是旧的 —— 表现为「任务 done 但文件
+# 没落盘」这种极误导人的失败（2026-09-20 实测踩到）。所以重跑前先清干净。
+fuser -k -n tcp $SIG_PORT $A_PORT $B_PORT 2>/dev/null
+sleep 2
+ok "已清理"
+
 say "准备目录 $DEMO_DIR"
 rm -rf "$DEMO_DIR"/a "$DEMO_DIR"/b
 mkdir -p "$DEMO_DIR"/a/root/downloads/shared "$DEMO_DIR"/a/run \
