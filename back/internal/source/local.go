@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"peerdrive/internal/log"
+	"peerdrive/internal/pathutil"
 	"peerdrive/internal/transport"
 )
 
@@ -66,19 +67,41 @@ func (s *LocalSource) Available(ctx context.Context) bool {
 	return true
 }
 
-// resolvePath 复刻 serveFile 的路径决策：file_index 优先（路径须在允许根内，
-// 否则回退 CAS——历史脏数据/恶意登记不回传根外文件，H2）。
+// resolvePath 复刻 serveFile 的路径决策：file_index 优先（路径须**可读**，否则
+// 回退 CAS——历史脏数据/恶意登记不回传根外文件，H2）。
+//
+// 注意用 IsPathReadable 而不是 IsPathAllowed：后者是登记/写入边界，只认下载目录；
+// 运营者把共享目录设在下载目录之外时，用它会把一份**正当**的文件判成越权，
+// 于是回退到并不存在的 CAS 副本 → 对端 "read failed"。
 func (s *LocalSource) resolvePath(hash string) string {
 	path := filepath.Join(s.storageDir, hash[:2], hash)
 	if s.fileIndex != nil {
 		if fi, err := s.fileIndex.Info(hash); err == nil && fi.Path != "" {
-			if s.fileIndex.IsPathAllowed(fi.Path) {
+			if s.fileIndex.IsPathReadable(fi.Path) {
 				return fi.Path
 			}
-			log.LogWarn("source/local: index path outside allowed root, serving content-addressed: %s", fi.Path)
+			log.LogWarn("source/local: index path not readable, serving content-addressed: %s", fi.Path)
 		}
 	}
 	return path
+}
+
+// open 安全地打开 resolvePath 的结果。
+//
+// 不走 os.Open：resolvePath 返回的索引路径是**登记时**校验过的，到此刻之间可能
+// 已被换成软链。走 pathutil.SafeOpen（os.Root）让内核在打开那一刻重新判定；
+// 共享根里的路径用 fileIndex.OpenReadable，CAS 副本锚定 storageDir。
+func (s *LocalSource) open(hash string) (*os.File, error) {
+	p := s.resolvePath(hash)
+	if s.fileIndex != nil && s.fileIndex.IsPathReadable(p) {
+		if f, err := s.fileIndex.OpenReadable(p); err == nil {
+			return f, nil
+		}
+	}
+	if s.storageDir == "" {
+		return os.Open(p) // 未配置 storageDir（纯测试装配），保持旧行为
+	}
+	return pathutil.SafeOpen(s.storageDir, p)
 }
 
 // Open 流式打开：offset<0 → 0；size<0 → 到文件尾。分片用 os.File.Seek 定位
@@ -87,7 +110,7 @@ func (s *LocalSource) Open(ctx context.Context, hash string, offset, size int64)
 	if err := validHash(hash); err != nil {
 		return nil, err
 	}
-	f, err := os.Open(s.resolvePath(hash))
+	f, err := s.open(hash)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +159,7 @@ func (s *LocalSource) Info(ctx context.Context, hash string) (*FileMeta, error) 
 			return &FileMeta{Hash: hash, Size: fi.Size, Name: fi.Name, Path: fi.Path}, nil
 		}
 	}
-	f, err := os.Open(s.resolvePath(hash))
+	f, err := s.open(hash)
 	if err != nil {
 		return nil, err
 	}

@@ -17,6 +17,7 @@ import (
 	"peerdrive/internal/config"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
+	"peerdrive/internal/pathutil"
 	"peerdrive/internal/repository"
 
 	"github.com/gin-gonic/gin"
@@ -121,33 +122,48 @@ func (s *FileService) ListAll(sortBy string) ([]model.FileListItem, error) {
 	return repository.ListAllFiles(sortBy)
 }
 
-// isPathInStorage 校验 absPath 是否落在 storageDir 内（绝对路径 + 符号链接解析后）。
+// isPathAllowed 校验 absPath 是否落在**运营者承认的根目录**内：
+// storage 根 ∪ PEERDRIVE_SHARE_DIRS 声明的目录 ∪ 下载目录。
+//
 // 防御：register_local/register_folder/browse/copy 都接受调用方路径，若不锚定根目录，
 // 任意绝对路径（如 /etc/shadow）会经 LocalFetcher 回读 / os.Remove 构成任意文件读写。
-// 与 FileIndexService.IsPathAllowed 同一模式（file_index.go:53）。
-func (s *FileService) isPathInStorage(absPath string) bool {
+//
+// 为什么现在不止看 storage 根：运营者把共享目录设在 storage 之外（例：挂载在
+// `/mnt/media` 的一块盘）是**完全正当**的用法，而旧的 storage 根判定会直接拒绝，
+// 于是 PEERDRIVE_SHARE_DIRS 只能配在 storage 内部——文档里被迫写成"共享目录必须
+// 放在 downloads 以下"，那条限制正是这里造成的。放宽的边界是"运营者自己声明过的
+// 目录"，不是"任意路径"：想在 /etc 上共享，得自己把 /etc 配进 SHARE_DIRS。
+// allowedRoots 运营者承认的全部根目录：storage 根 ∪ SHARE_DIRS ∪ 下载根。
+// 判定（isPathAllowed）与打开（openAllowed）必须共用同一份，否则会出现
+// "判定说行、打开走了另一套"的裂缝。
+func (s *FileService) allowedRoots() []string {
+	if s.storageDir == "" {
+		return nil
+	}
+	roots := []string{s.storageDir}
+	if s.cfg != nil {
+		roots = append(roots, pathutil.SplitList(s.cfg.ShareDirs)...)
+		if s.cfg.DownloadDir != "" {
+			roots = append(roots, s.cfg.DownloadDir)
+		}
+	}
+	return roots
+}
+
+func (s *FileService) isPathAllowed(absPath string) bool {
 	if s.storageDir == "" {
 		return false
 	}
-	root, err := filepath.Abs(s.storageDir)
-	if err != nil {
-		return false
+	return pathutil.WithinAny(s.allowedRoots(), absPath)
+}
+
+// openAllowed 在允许根内安全地打开 absPath（os.Root，解析与打开一次完成）。
+// 不要退回 os.Open：那会留下"校验之后、打开之前被换成软链"的 TOCTOU 窗口。
+func (s *FileService) openAllowed(absPath string) (*os.File, error) {
+	if s.storageDir == "" {
+		return nil, fmt.Errorf("path outside storage root")
 	}
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	abs, err := filepath.Abs(absPath)
-	if err != nil {
-		return false
-	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	}
-	rel, err := filepath.Rel(root, abs)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
+	return pathutil.SafeOpenAny(s.allowedRoots(), absPath)
 }
 
 // RegisterLocal 计算本地文件的 SHA256 哈希，注册到 file_meta 和 file_providers。
@@ -168,24 +184,35 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 
 	// 安全边界：只允许注册 storage 根目录内的文件。
 	// 坑：此前接受任意绝对路径，配合 LocalFetcher 的 provider 回读 = 匿名任意文件读取。
-	if !s.isPathInStorage(absPath) {
-		log.LogWarn("file-svc: RegisterLocal path outside storage root: %s", absPath)
+	if !s.isPathAllowed(absPath) {
+		log.LogWarn("file-svc: RegisterLocal path outside allowed roots (storage/share/download): %s", absPath)
 		return "", fmt.Errorf("path outside storage root")
 	}
 
-	f, err := os.Open(absPath)
+	f, err := s.openAllowed(absPath)
 	if err != nil {
 		log.LogError("file-svc: RegisterLocal open %s failed: %v", absPath, err)
 		return "", err
 	}
 	defer f.Close()
 
+	// 对**已打开的 fd** 取属性（fstat），不再按路径 stat 一次——少一次路径解析，
+	// 也就少一个"校验之后被换掉"的窗口。
 	info, err := f.Stat()
 	if err != nil {
 		log.LogError("file-svc: RegisterLocal stat %s failed: %v", absPath, err)
 		return "", err
 	}
 	size := info.Size()
+
+	// 硬链接（与对端 create 侧共用 pathutil 里那一份判定）：同一个 inode 在
+	// 允许根内有一个名字、在外面还有另一个，路径判定看不出来。只在 transport
+	// 侧判过一次的话，HTTP 的 register_local 就是敞开的另一条路。
+	// 传句柄不传 FileInfo：Windows 上只有句柄能问出 NumberOfLinks。
+	if err := pathutil.RejectHardlink(absPath, f); err != nil {
+		log.LogWarn("file-svc: RegisterLocal hard link rejected: %v", err)
+		return "", err
+	}
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
@@ -256,8 +283,8 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 	}
 
 	// 安全边界：文件夹也必须锚定 storage 根目录内（否则批量读取任意目录）。
-	if !s.isPathInStorage(absDir) {
-		log.LogWarn("file-svc: RegisterFolder outside storage root: %s", absDir)
+	if !s.isPathAllowed(absDir) {
+		log.LogWarn("file-svc: RegisterFolder outside allowed roots (storage/share/download): %s", absDir)
 		return nil, fmt.Errorf("path outside storage root")
 	}
 
@@ -401,8 +428,7 @@ func (s *FileService) RegisterURL(rawURL string, filename string) (*model.FileMe
 	if s.storageEnable {
 		relPath := hash[:2] + "/" + hash
 		fullPath := filepath.Join(s.storageDir, relPath)
-		os.MkdirAll(filepath.Dir(fullPath), 0755)
-		if err := os.WriteFile(fullPath, body, 0644); err != nil {
+		if err := pathutil.SafeWriteFileAny(s.allowedRoots(), fullPath, body, 0644); err != nil {
 			log.LogWarn("file-svc: RegisterURL save to storage failed (non-fatal): %v", err)
 		}
 	}
@@ -499,14 +525,12 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 
 	relPath := hash[:2] + "/" + hash
 	fullPath := filepath.Join(s.storageDir, relPath)
-	os.MkdirAll(filepath.Dir(fullPath), 0755)
-
-	if err := os.Rename(tmpName, fullPath); err != nil {
-		// Fallback: cross-device link, use copy instead
-		if err := copyFile(tmpName, fullPath); err != nil {
-			log.LogError("file-svc: Upload move to storage failed: %v", err)
-			return nil, fmt.Errorf("move to storage: %w", err)
-		}
+	// 不再 os.Rename(tmpName, fullPath)：源在系统临时目录，本来就在允许根之外，
+	// rename 那一步没法 Root 化（会跟着 dst 父目录上的软链走）。改成"在允许根内
+	// 打开目标 + 拷过去"，顺带也不再需要跨设备的兜底分支。
+	if err := s.copyInto(s.allowedRoots(), tmpName, fullPath); err != nil {
+		log.LogError("file-svc: Upload move to storage failed: %v", err)
+		return nil, fmt.Errorf("move to storage: %w", err)
 	}
 	tmpName = ""
 
@@ -569,7 +593,7 @@ func (s *FileService) Delete(hash string) error {
 	providers, _ := repository.GetFileProviders(hash)
 	for _, p := range providers {
 		if p.ProviderType == "local" {
-			if s.isPathInStorage(p.Path) {
+			if s.isPathAllowed(p.Path) {
 				os.Remove(p.Path)
 			}
 		}
@@ -597,7 +621,7 @@ func (s *FileService) BrowseDir(dirPath string) ([]model.DirEntry, error) {
 	}
 
 	// 安全边界：只允许浏览 storage 根目录内，拒绝任意目录列举（任意文件读取的前提）。
-	if !s.isPathInStorage(absDir) {
+	if !s.isPathAllowed(absDir) {
 		log.LogWarn("file-svc: BrowseDir outside storage root: %s", absDir)
 		return nil, fmt.Errorf("path outside storage root")
 	}
@@ -628,24 +652,33 @@ func (s *FileService) BrowseDir(dirPath string) ([]model.DirEntry, error) {
 	return result, nil
 }
 
-func copyFile(src, dst string) error {
-	s, err := os.Open(src)
+// copyInto 把 src 的内容写进允许根内的 dst（创建 + 写入在同一 Root 会话里）。
+//
+// 为什么不能用 os.Create(dst) / os.Rename：两者都会跟着 dst 父目录上的软链走，
+// 而**是否有软链这件事是在更早之前检查的**。这里是同一份 TOCTOU 的写路径版本。
+func (s *FileService) copyInto(roots []string, src, dst string) error {
+	input, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-
-	d, err := os.Create(dst)
+	defer input.Close()
+	output, err := pathutil.SafeOpenFileAny(roots, dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
-	defer d.Close()
-
-	if _, err := io.Copy(d, s); err != nil {
+	if _, err := io.Copy(output, input); err != nil {
+		output.Close()
 		return err
 	}
-	return d.Sync()
+	if err := output.Close(); err != nil {
+		return err
+	}
+	return nil
 }
+
+// 这里原先有个 copyFile(src, dst)：os.Create(dst) 会跟着 dst 父目录上的软链
+// 走到允许根之外，**所有调用点已迁到 copyInto**（2026-09-20 写路径 TOCTOU 收尾），
+// 函数随之删除——留一个"能打到任意文件"的旧函数在代码里，迟早有人再捡起来用。
 
 // CopyFile copies a file identified by hash to a destination path within storage
 // and registers the copy in file_providers. Returns the destination path.
@@ -657,6 +690,28 @@ func (s *FileService) CopyFile(hash string, destPath string) (string, error) {
 		return "", ErrStorageDisabled
 	}
 
+	// 安全边界：目标必须在 storage 根目录内，且 hash 必须合法。
+	// 坑：此前绝对路径原样采用 / 相对路径可 ../ 逃逸，配合公开 upload 可写任意文件（如 authorized_keys）。
+	// 写盘前的检查而不是写盘后的 Rel 判定（旧代码 615 行只在写完后改 DB 记录）。
+	//
+	// 为什么这两条必须排在**查源 meta 之前**（2026-09-20 穿透测试发现）：
+	// 原来先 GetFileMeta，越权 dest 于是返回 "source hash not found" ——
+	//   1. 拒绝原因被掩盖，运维照日志排查会当成数据问题；
+	//   2. 安全边界不是第一道门：将来谁在上面加一段"源不存在就自动去拉"的逻辑，
+	//      数据会在路径校验之前就备好，退化成任意文件写；
+	//   3. 顺带泄露"某个 hash 存不存在"。
+	absDest := destPath
+	if !filepath.IsAbs(destPath) {
+		absDest = filepath.Join(s.storageDir, destPath)
+	}
+	if !isValidHash(hash) {
+		return "", fmt.Errorf("invalid source hash")
+	}
+	if !s.isPathAllowed(absDest) {
+		log.LogWarn("file-svc: CopyFile dest outside storage root: %s", absDest)
+		return "", fmt.Errorf("destination path outside storage root")
+	}
+
 	// Verify source exists and get its data
 	meta, err := repository.GetFileMeta(hash)
 	if err != nil {
@@ -666,34 +721,20 @@ func (s *FileService) CopyFile(hash string, destPath string) (string, error) {
 		return "", fmt.Errorf("source hash %s not found", hash)
 	}
 
-	// Resolve full destination path
-	absDest := destPath
-	if !filepath.IsAbs(destPath) {
-		absDest = filepath.Join(s.storageDir, destPath)
-	}
-
-	// 安全边界：目标必须在 storage 根目录内，且 hash 必须合法。
-	// 坑：此前绝对路径原样采用 / 相对路径可 ../ 逃逸，配合公开 upload 可写任意文件（如 authorized_keys）。
-	// 写盘前的检查而不是写盘后的 Rel 判定（旧代码 615 行只在写完后改 DB 记录）。
-	if !isValidHash(hash) {
-		return "", fmt.Errorf("invalid source hash")
-	}
-	if !s.isPathInStorage(absDest) {
-		log.LogWarn("file-svc: CopyFile dest outside storage root: %s", absDest)
-		return "", fmt.Errorf("destination path outside storage root")
-	}
-
 	// Get source data via the download pipeline
 	body, err := s.ReadFile(hash)
 	if err != nil {
 		return "", fmt.Errorf("read source file: %w", err)
 	}
 
-	// Write to destination
-	if err := os.MkdirAll(filepath.Dir(absDest), 0755); err != nil {
-		return "", fmt.Errorf("create dest dir: %w", err)
-	}
-	if err := os.WriteFile(absDest, body, 0644); err != nil {
+	// Write to destination（只允许落在允许根内）。
+	//
+	// 不用 os.MkdirAll + os.WriteFile：那两步会跟着 dst 父目录上的软链走到根外，
+	// isPathAllowed 是在它们**之前**判的，中间是个 TOCTOU 窗口。
+	// SafeWriteFileAny 在允许根上开 os.Root，父目录补齐与写文件一次完成；
+	// 跟着软链逃逸的 dst 会在这一步直接失败。
+	if err := pathutil.SafeWriteFileAny(s.allowedRoots(), absDest, body, 0644); err != nil {
+		log.LogWarn("file-svc: CopyFile write %s rejected: %v", absDest, err)
 		return "", fmt.Errorf("write dest file: %w", err)
 	}
 

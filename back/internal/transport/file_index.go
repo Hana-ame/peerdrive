@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"peerdrive/internal/log"
+	"peerdrive/internal/pathutil"
 	"peerdrive/internal/repository"
 	"peerdrive/pkg/hashutil"
 )
@@ -28,6 +29,16 @@ import (
 type FileIndexService struct {
 	uploadDir string // upload 默认保存位置
 	rootDir   string // create 允许登记的文件根目录（绝对路径，构造时 EvalSymlinks 解析）
+
+	// readRoots 运营者额外声明的**可读**根目录（storage 根 + PEERDRIVE_SHARE_DIRS）。
+	//
+	// 为什么要和 rootDir 分开：rootDir 是**写/登记边界**——对端可以带任意 path 走
+	// create，绝不能让它登记到下载目录之外。而读取侧是另一回事：运营者自己声明
+	// 「/data/media 是我的共享目录」并登记了它，就该能对外提供。两套判定混用时
+	// 会出现「登记成功、清单列得出、对端一拉 read failed」——读取侧把它判成越权，
+	// 回退到并不存在的内容寻址副本。见 AddReadRoot / IsPathReadable。
+	rootMu    sync.RWMutex
+	readRoots []string
 
 	upMu    sync.Mutex
 	uploads map[string]*UploadSession // name → 分片上传会话（多 source/续传共用）
@@ -51,23 +62,78 @@ func NewFileIndexService(uploadDir string) *FileIndexService {
 	return svc
 }
 
-// IsPathAllowed 校验 path 是否位于允许根目录内（绝对路径 + 符号链接解析后）。
-// 安全边界（H2 任意文件读取修复）：create 登记与 serveFile 回传只允许根目录内
-// 文件——之前接受任意绝对路径，对端可 `create /etc/shadow` 拿 hash 后 `req`
-// 读取，info verb 还会泄露路径。符号链接解析防「根目录内软链 → 根外目标」。
+// IsPathAllowed 校验 path 是否位于**登记/写入**的允许根目录内。
+// 安全边界（H2 任意文件读取修复）：create 只允许登记根目录内文件——之前接受任意
+// 绝对路径，对端可 `create /etc/shadow` 拿 hash 后 `req` 读取，info verb 还会
+// 泄露路径。符号链接解析防「根目录内软链 → 根外目标」。
+//
+// 它同时也是**上传/落盘**的边界，因此不要把共享目录塞进来：那等于允许对端把
+// 文件写进你对外共享的目录。对外可读请看 IsPathReadable。
 func (s *FileIndexService) IsPathAllowed(path string) bool {
-	abs, err := filepath.Abs(path)
+	return pathutil.Within(s.rootDir, path)
+}
+
+// writeRoots 写/落盘边界：只有 rootDir 一个。
+//
+// 什么时候用它：任何**产生或改动文件**的动作（WriteFile / BeginUpload / 删临时
+// 文件）都得过这里。判定（IsPathAllowed）与落盘必须落在同一个根上，否则又会
+// 出现"判定按 A、写入按 B"的裂缝——历史上出过事的就是这种。
+func (s *FileIndexService) writeRoots() []string {
+	return []string{s.rootDir}
+}
+
+// AddReadRoot 追加一个运营者声明的可读根目录（storage 根、PEERDRIVE_SHARE_DIRS）。
+//
+// 语义：这些目录里的文件**可以对外提供**，但对端仍然**不能登记/写入**它们
+// （写边界仍只有 rootDir）。空串与非法路径直接忽略——配置写错时宁可少给。
+func (s *FileIndexService) AddReadRoot(dir string) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return
+	}
+	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return false
+		log.LogWarn("file-index: ignore invalid read root %q: %v", dir, err)
+		return
 	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	}
-	rel, err := filepath.Rel(s.rootDir, abs)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
+	s.rootMu.Lock()
+	s.readRoots = append(s.readRoots, abs)
+	s.rootMu.Unlock()
+	log.LogInfo("file-index: read root added %s", abs)
+}
+
+// IsPathReadable 校验 path 是否**允许对外读取**：下载根（写边界）之内，
+// 或运营者额外声明过的可读根之内。
+//
+// 用它取代读取侧的 IsPathAllowed（serveFile / LocalSource.resolvePath）。
+// 登记侧继续用 IsPathAllowed——两者不能合并，理由见 AddReadRoot 注释。
+func (s *FileIndexService) IsPathReadable(path string) bool {
+	return pathutil.WithinAny(s.readRootsAll(), path)
+}
+
+// readRootsAll 读取边界的全部根目录：下载根 + 运营者声明的可读根。
+func (s *FileIndexService) readRootsAll() []string {
+	s.rootMu.RLock()
+	defer s.rootMu.RUnlock()
+	roots := make([]string, 0, len(s.readRoots)+1)
+	roots = append(roots, s.rootDir)
+	roots = append(roots, s.readRoots...)
+	return roots
+}
+
+// OpenReadable 在**读取边界**内安全地打开 path。
+//
+// 用 pathutil.SafeOpen（os.Root）而不是 os.Open：后者是"先校验再打开"两步走，
+// 中间有 TOCTOU 窗口——能在共享目录里写文件的人可以把路径成分换成软链。
+// SafeOpen 把解析交给内核，打开与解析是同一次系统调用序列。
+func (s *FileIndexService) OpenReadable(path string) (*os.File, error) {
+	return pathutil.SafeOpenAny(s.readRootsAll(), path)
+}
+
+// OpenAllowed 在**登记/写入边界**（只有 rootDir）内安全地打开 path。
+// 与 IsPathAllowed 配套，语义一致：对端可写的范围不因可读根而扩大。
+func (s *FileIndexService) OpenAllowed(path string) (*os.File, error) {
+	return pathutil.SafeOpen(s.rootDir, path)
 }
 
 // reapUploads 过期会话清理：10 分钟无活动删除（含目标文件，防磁盘耗尽）。
@@ -76,6 +142,13 @@ func (s *FileIndexService) reapUploads() {
 		s.upMu.Lock()
 		for name, sess := range s.uploads {
 			sess.mu.Lock()
+			// 已完成的会话：句柄在 Complete 里就关掉了，文件必须留着（它已经
+			// 登记进索引，是对外提供的副本）。只摘除表项，绝不删文件。
+			if sess.done {
+				delete(s.uploads, name)
+				sess.mu.Unlock()
+				continue
+			}
 			idle := time.Since(sess.last) > 10*time.Minute
 			if idle {
 				// M7：持 sess.mu 判定 + 标记 aborted + 摘除句柄，与 WriteAt/Complete
@@ -98,6 +171,25 @@ func (s *FileIndexService) reapUploads() {
 	}
 }
 
+// Close 关掉全部进行中的上传会话（句柄 + 临时文件）。
+//
+// 未完成的分片上传按作废处理（续传语义只在进程存活期间有意义）。
+// 测试里**必须**调：Windows 上没关掉的句柄会让 t.TempDir() 清不掉——
+// "The process cannot access the file because it is being used by another
+// process"，Linux 上同样泄漏但完全看不见（2026-09-20 真机 Windows 才发现）。
+func (s *FileIndexService) Close() {
+	s.upMu.Lock()
+	sessions := make([]*UploadSession, 0, len(s.uploads))
+	for _, sess := range s.uploads {
+		sessions = append(sessions, sess)
+	}
+	s.uploads = make(map[string]*UploadSession)
+	s.upMu.Unlock()
+	for _, sess := range sessions {
+		sess.Abort() // 已完成的会话 Abort 直接返回（句柄在 Complete 里就关了）
+	}
+}
+
 // FileInfo 对外返回的文件信息。
 type FileInfo struct {
 	Hash   string `json:"hash"`
@@ -114,14 +206,28 @@ func (s *FileIndexService) Create(path string) (*FileInfo, error) {
 	if !s.IsPathAllowed(path) {
 		return nil, fmt.Errorf("path outside allowed root: %s", path)
 	}
-	st, err := os.Stat(path)
+	// 顺序要紧：**先打开**，再对已打开的 fd 取属性。
+	// 旧的写法是 os.Stat(path) 然后 hashFile(path) 再开一次——两次解析路径，
+	// 中间 anybody 能把成分换成软链（TOCTOU）。现在只解析一次（SafeOpen），
+	// 后续全部基于这个 fd。
+	f, err := s.OpenAllowed(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("stat %s: %w", path, err)
 	}
 	if st.IsDir() {
 		return nil, fmt.Errorf("%s is a directory", path)
 	}
-	h, err := hashFile(path)
+	// 硬链接判定放在 pathutil 里，HTTP 登记侧（service.RegisterLocal）共用同一份。
+	// 传句柄不传 FileInfo：Windows 要对着句柄才拿得到 NumberOfLinks。
+	if err := pathutil.RejectHardlink(path, f); err != nil {
+		return nil, err
+	}
+	h, err := hashReader(f)
 	if err != nil {
 		return nil, err
 	}
@@ -186,12 +292,15 @@ type UploadSession struct {
 	name      string
 	path      string
 	file      *os.File
-	size      int64 // 声明总大小
+	size      int64  // 声明总大小
+	roots     []string // 写边界（BeginUpload 时定下来，Abort/reap 删文件时共用）
 	bitmap    []uint64
 	fullWords int // 非末 word 中已满 64 chunk 的数量——Complete O(1) 判满
 	seq       int64
 	last      time.Time // 最后活动时间（过期清理用）
 	aborted   bool      // reap 摘除句柄后置位：WriteAt/Complete 见之即错（M7 竞态修复）
+	done      bool      // 已完成：句柄已关闭，重复 Complete 直接返回缓存结果
+	doneInfo  *FileInfo // done=true 时缓存的文件信息（多 source 各自 Complete 都要拿到）
 }
 
 // DeclaredSize 返回声明总大小（BeginUpload 同名复用一致性校验用）。
@@ -231,6 +340,7 @@ func (s *FileIndexService) BeginUpload(name string, size int64) (*UploadSession,
 		name:   name,
 		path:   path,
 		file:   f,
+		roots:  s.writeRoots(),
 		size:   size,
 		bitmap: make([]uint64, (totalChunks+63)/64),
 		last:   time.Now(),
@@ -296,12 +406,30 @@ func (u *UploadSession) ContiguousOffset() int64 {
 
 // Complete 检查位图是否全满；全满则计算 sha256、登记映射并返回文件信息。
 // 内容校验兜底：hash 与声明字节对不上视为失败（Abort）。
+//
+// 完成后**立刻关掉文件句柄**（句柄由调用方在锁外关闭）：以前句柄要留到 10 分钟
+// 后的 reap 才关。这在 Linux 上完全看不出来（打开的文件照样能删能移），
+// 在 Windows 上却是硬伤——文件被本进程占着，删不掉、移不动、覆盖不了，
+// 测试 TempDir 清理直接失败（2026-09-20 真机 Windows 跑出来的）。
+// 已完成的表项由 reap 摘除（不删文件，见 reapUploads 的 done 分支）。
 func (u *UploadSession) Complete() (bool, *FileInfo, error) {
+	done, fi, err, toClose := u.completeLocked()
+	if toClose != nil {
+		_ = toClose.Close()
+	}
+	return done, fi, err
+}
+
+// completeLocked 在 u.mu 下完成判定与登记，返回需要在**锁外**关闭的句柄。
+func (u *UploadSession) completeLocked() (bool, *FileInfo, error, *os.File) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.last = time.Now()
+	if u.done {
+		return true, u.doneInfo, nil, nil
+	}
 	if u.aborted || u.file == nil {
-		return false, nil, fmt.Errorf("upload session aborted")
+		return false, nil, fmt.Errorf("upload session aborted"), nil
 	}
 	// 位图全满判定（O(1)）：非末 word 由增量 fullWords 计数（setBit 维护），
 	// 末 word 单独检查（其满阈值 = 尾部不足 64 的 chunk 数，<64）。曾按
@@ -311,7 +439,7 @@ func (u *UploadSession) Complete() (bool, *FileInfo, error) {
 	if totalChunks > 0 {
 		words := len(u.bitmap)
 		if u.fullWords != words-1 {
-			return false, nil, nil
+			return false, nil, nil, nil
 		}
 		// 末 word：需要 bits 个低位 chunk（<64 时按位掩码；=64 时全满）
 		bits := totalChunks - int64(words-1)*64
@@ -320,28 +448,35 @@ func (u *UploadSession) Complete() (bool, *FileInfo, error) {
 			want = (1 << bits) - 1
 		}
 		if u.bitmap[words-1] != want {
-			return false, nil, nil
+			return false, nil, nil, nil
 		}
 	}
 	if err := u.file.Sync(); err != nil {
-		return false, nil, err
+		return false, nil, err, nil
 	}
 	h, err := hashFile(u.path)
 	if err != nil {
-		return false, nil, err
+		return false, nil, err, nil
 	}
 	seq, err := repository.UpsertFileIndex(h, u.path, u.name, u.size, false)
 	if err != nil {
-		return false, nil, err
+		return false, nil, err, nil
 	}
 	log.LogInfo("file-index: upload complete hash=%s size=%d path=%s", h, u.size, u.path)
-	return true, &FileInfo{Hash: h, Path: u.path, Name: u.name, Size: u.size, Seq: seq}, nil
+	fi := &FileInfo{Hash: h, Path: u.path, Name: u.name, Size: u.size, Seq: seq}
+	u.done, u.doneInfo = true, fi
+	// 句柄交回调用方在锁外关闭；置 nil 让后续 WriteAt/Complete 走 done/aborted 分支
+	f := u.file
+	u.file = nil
+	return true, fi, nil, f
 }
 
 // Abort 中止会话并删除目标文件（幂等；reap 摘除句柄后调用无副作用）。
 func (u *UploadSession) Abort() {
 	u.mu.Lock()
-	if u.aborted {
+	// 已完成的文件**不能**删：它已经登记进索引、可能正在对外提供服务。
+	// （句柄在 Complete 里关掉了，这里无事可做。）
+	if u.aborted || u.done {
 		u.mu.Unlock()
 		return
 	}
@@ -478,15 +613,22 @@ func (s *FileIndexService) ApplySync(files []FileInfo) (int, error) {
 	return n, nil
 }
 
-// hashFile 计算文件 sha256。
+// hashFile 计算文件 sha256（按路径打开）。
+//
+// 只对**上传会话自己落盘的文件**用（路径是 uploadDir 下自己拼出来的，不是对端
+// 给的）。对端可控路径一律走 Create → OpenAllowed，别用这个。
 func hashFile(path string) (string, error) {
-	f, err := os.Open(path)
+	f, err := pathutil.SafeOpen(filepath.Dir(path), path)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
+	return hashReader(f)
+}
+
+func hashReader(r io.Reader) (string, error) {
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, r); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
@@ -495,7 +637,13 @@ func hashFile(path string) (string, error) {
 // sanitizeName 文件名净化（防路径穿越）。
 func sanitizeName(name string) string {
 	name = filepath.Base(strings.ReplaceAll(name, "\\", "/"))
-	if name == "" || name == "." || name == "/" {
+	// ".." 必须一并挡掉：Base("../../etc/passwd") 是 "passwd" 没问题，但
+	// Base("..") 还是 ".."，Join 出来的路径会指到 uploadDir 的**父目录**。
+	// 虽然 Create 的边界检查会兜住，但那层依赖顺序太脆——落盘前就该掐掉。
+	// Windows 上 `filepath.Base("/")` 返回的是 **`\`**（分隔符），不是 "/" ——
+	// 只写 `name == "/"` 在 Windows 上漏掉，Join 出来的路径就是 uploadDir 自己
+	// （"is a directory"）。两种分隔符都算上（真机 Windows 跑出来的，2026-09-20）。
+	if name == "" || name == "." || name == ".." || name == "/" || name == `\` {
 		return "upload.bin"
 	}
 	return name

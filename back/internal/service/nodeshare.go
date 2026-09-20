@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"peerdrive/internal/pathutil"
+
 	"peerdrive/internal/config"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
@@ -61,11 +63,10 @@ func NewNodeShare(cfg *config.Config) *NodeShare {
 		}
 		s.collections = append(s.collections, strings.ToLower(h))
 	}
-	for _, d := range strings.Split(cfg.ShareDirs, ",") {
-		d = strings.TrimSpace(d)
-		if d == "" {
-			continue
-		}
+	// 与 main.go 注册可读根、FileService.isPathAllowed 用同一份拆分逻辑
+	// （pathutil.SplitList）：三处对「哪些目录算共享目录」的理解必须一致，
+	// 否则又会出现「清单列得出、拉不到」。
+	for _, d := range pathutil.SplitList(cfg.ShareDirs) {
 		abs, err := filepath.Abs(d)
 		if err != nil {
 			log.LogWarn("nodeshare: ignore invalid dir %q: %v", d, err)
@@ -219,17 +220,14 @@ func (s *NodeShare) filesSnapshot() []transport.ShareFileInfo {
 	return out
 }
 
+// underShareDir 判断已登记文件的路径是否落在某个共享目录内。
+//
+// 走 pathutil.Within 而不是手写前缀比较：手写的那份只认 `dir + 分隔符` 一种写法，
+// 在 Windows 上会漏（盘符大小写、`/` 与 `\` 混写），也拦不住 `/a/shared-secret`
+// 这类同名前缀目录。共享清单与读取侧必须用同一套判定，否则又会出现
+// "清单列得出、拉取失败" 的口径不一致。
 func (s *NodeShare) underShareDir(path string) bool {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	for _, d := range s.dirs {
-		if abs == d || strings.HasPrefix(abs, d+string(filepath.Separator)) {
-			return true
-		}
-	}
-	return false
+	return pathutil.WithinAny(s.dirs, path)
 }
 
 func containsToken(list []string, tok string) bool {

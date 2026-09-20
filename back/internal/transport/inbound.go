@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"peerdrive/internal/log"
+	"peerdrive/internal/pathutil"
 	hashutil "peerdrive/pkg/hashutil"
 )
 
@@ -97,16 +98,24 @@ func (s *PeerJSService) serveFile(c Session, req dcReq) {
 	} else {
 		// 未装配 router（测试/独立模式）：本地语义（file_index 优先 + CAS 兜底）
 		path := filepath.Join(s.storageDir, req.Hash[:2], req.Hash)
+		useIndex := false
 		if fi, err := s.fileIndex.Info(req.Hash); err == nil && fi.Path != "" {
-			if s.fileIndex.IsPathAllowed(fi.Path) {
+			// 读取侧用 IsPathReadable（下载根 ∪ 运营者声明的共享目录），
+			// 而不是登记侧的 IsPathAllowed：否则"共享目录在下载目录之外"会被
+			// 判成越权、回退到不存在的 CAS 副本，对端表现为 read failed。
+			if s.fileIndex.IsPathReadable(fi.Path) {
 				path = fi.Path
+				useIndex = true
 			} else {
-				// 索引命中但路径越权（历史脏数据/恶意登记）：回退内容寻址存储，
+				// 索引命中但路径不可读（历史脏数据/恶意登记）：回退内容寻址存储，
 				// 不回传根目录外文件（H2）
-				log.LogWarn("peerjs: index path outside allowed root, serving content-addressed: %s", fi.Path)
+				log.LogWarn("peerjs: index path not readable, serving content-addressed: %s", fi.Path)
 			}
 		}
-		f, err := os.Open(path)
+		// 打开也要走 pathutil.SafeOpen（os.Root），不能 os.Open：
+		// 索引里的 Path 是**登记时**校验过的，但登记之后到此刻之间文件可能被换成
+		// 软链（TOCTOU）。SafeOpen 让内核在打开那一刻重新判定，换过就打不开。
+		f, err := s.openForServe(path, useIndex)
 		if err != nil {
 			_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "not found", ReqID: req.ReqID})
 			return
@@ -190,6 +199,21 @@ func min64(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+// openForServe 打开待发送给对端的文件。useIndex 表示 path 来自 file_index
+// （可能落在共享根里），否则是 storageDir 下的内容寻址副本。
+//
+// 两条路都走 os.Root：对外发送是对端唯一能拿到内容的口子，
+// 这里的打开必须和路径判定是同一次解析，不能"先判再开"。
+func (s *PeerJSService) openForServe(path string, useIndex bool) (*os.File, error) {
+	if useIndex {
+		return s.fileIndex.OpenReadable(path)
+	}
+	if s.storageDir == "" {
+		return os.Open(path) // 未配置 storageDir（纯测试装配），保持旧行为
+	}
+	return pathutil.SafeOpen(s.storageDir, path)
 }
 
 // ---- 文件索引 verb 服务端处理（create/upload/list/info/delete/sync） ----

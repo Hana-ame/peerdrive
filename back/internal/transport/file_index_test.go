@@ -21,12 +21,24 @@ func initTestDB(t *testing.T) {
 	require.NoError(t, repository.InitDB(":memory:"))
 }
 
+// newTestIndex 建一个测试用的 FileIndexService，并**注册 Close**。
+//
+// 为什么不能直接 NewFileIndexService(t.TempDir())：上传会话持有文件句柄，
+// 没关掉的话 Windows 上 TempDir 清不掉（"being used by another process"），
+// Linux 上同样泄漏但看不见——只在 Windows 上真跑过测试才会发现（2026-09-20）。
+func newTestIndex(t *testing.T) *FileIndexService {
+	t.Helper()
+	svc := NewFileIndexService(t.TempDir())
+	t.Cleanup(svc.Close)
+	return svc
+}
+
 // TestFileIndex_CreateAndInfo 登记外部文件 → 可查信息。
 // 发现背景：功能测试——create 只索引绝对路径、不复制文件。
 // 注意：create 受 H2 根目录限制，登记文件必须位于服务 uploadDir 内。
 func TestFileIndex_CreateAndInfo(t *testing.T) {
 	initTestDB(t)
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 
 	content := []byte("file-index-create-test")
 	src := filepath.Join(t.TempDir(), "src.bin")
@@ -60,7 +72,7 @@ func TestFileIndex_CreateAndInfo(t *testing.T) {
 // 否则「根内软链 → 根外目标」绕过限制。
 func TestFileIndex_CreateSymlinkEscape(t *testing.T) {
 	initTestDB(t)
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 
 	outside := filepath.Join(t.TempDir(), "secret.txt")
 	require.NoError(t, os.WriteFile(outside, []byte("secret"), 0o644))
@@ -73,7 +85,7 @@ func TestFileIndex_CreateSymlinkEscape(t *testing.T) {
 
 // TestFileIndex_IsPathAllowed 根目录判定：目录内允许、根外拒绝。
 func TestFileIndex_IsPathAllowed(t *testing.T) {
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 	inRoot := filepath.Join(svc.uploadDir, "a.bin")
 	require.NoError(t, os.WriteFile(inRoot, []byte("x"), 0o644))
 	assert.True(t, svc.IsPathAllowed(inRoot))
@@ -82,12 +94,69 @@ func TestFileIndex_IsPathAllowed(t *testing.T) {
 	assert.False(t, svc.IsPathAllowed(outside))
 }
 
+// TestFileIndex_ReadRoot 登记边界与读取边界必须分开。
+//
+// 发现背景（真实故障）：运营者把共享目录设在下载目录之外（例：/mnt/media），
+// 登记成功、share 帧列得出文件，但对端一拉就是 read failed —— 读取侧用登记侧
+// 那套「只允许下载目录」的判定把它判成越权，回退到并不存在的内容寻址副本。
+// 修复口径：可读 = 下载根 ∪ 运营者声明的共享目录；可登记/可写入仍只有下载根。
+func TestFileIndex_ReadRoot(t *testing.T) {
+	initTestDB(t)
+	svc := newTestIndex(t)
+
+	share := t.TempDir() // 模拟 PEERDRIVE_SHARE_DIRS 指向的、下载目录之外的目录
+	shared := filepath.Join(share, "movie.mkv")
+	require.NoError(t, os.WriteFile(shared, []byte("movie"), 0o644))
+
+	// 1) 没声明之前：两边都不放行
+	assert.False(t, svc.IsPathReadable(shared), "未声明的目录不该对外可读")
+
+	// 2) 声明为可读根之后：读取放行
+	svc.AddReadRoot(share)
+	assert.True(t, svc.IsPathReadable(shared), "运营者声明过的共享目录必须可读")
+
+	// 3) 但登记/写入边界**不能**跟着放开：对端仍不能把文件写进我的共享目录
+	_, err := svc.Create(shared)
+	assert.Error(t, err, "共享目录可读 ≠ 可登记，写边界不许被带开")
+
+	// 4) 下载根内的文件两边都放行
+	inRoot := filepath.Join(svc.uploadDir, "a.bin")
+	require.NoError(t, os.WriteFile(inRoot, []byte("x"), 0o644))
+	assert.True(t, svc.IsPathAllowed(inRoot))
+	assert.True(t, svc.IsPathReadable(inRoot))
+
+	// 5) 空配置不能变成"全放行"
+	svc.AddReadRoot("")
+	svc.AddReadRoot("   ")
+	assert.False(t, svc.IsPathReadable(""), "空路径必须拒绝")
+	other := filepath.Join(t.TempDir(), "other.bin")
+	require.NoError(t, os.WriteFile(other, []byte("x"), 0o644))
+	assert.False(t, svc.IsPathReadable(other), "未声明的目录仍然不可读")
+}
+
+// TestFileIndex_ReadRootSiblingPrefix 同名前缀目录不能互相放行
+// （/media 与 /media-private 在朴素前缀匹配下会串）。
+func TestFileIndex_ReadRootSiblingPrefix(t *testing.T) {
+	svc := newTestIndex(t)
+	base := t.TempDir()
+	share := filepath.Join(base, "media")
+	require.NoError(t, os.MkdirAll(share, 0o755))
+	sibling := filepath.Join(base, "media-private")
+	require.NoError(t, os.MkdirAll(sibling, 0o755))
+
+	svc.AddReadRoot(share)
+	assert.True(t, svc.IsPathReadable(filepath.Join(share, "a.mkv")))
+	assert.False(t, svc.IsPathReadable(filepath.Join(sibling, "secret.txt")),
+		"同名前缀的兄弟目录不得被放行")
+}
+
 // TestFileIndex_UploadStream 分片上传（chunk 对齐块）→ 完成 → 映射可查 → 内容可读。
 // 发现背景：功能测试——WriteAt 分片 + 位图全满判定 + sha256 登记。
 func TestFileIndex_UploadStream(t *testing.T) {
 	initTestDB(t)
 	uploadDir := t.TempDir()
 	svc := NewFileIndexService(uploadDir)
+	t.Cleanup(svc.Close) // 同 newTestIndex：Windows 上不关句柄 TempDir 清不掉
 
 	content := make([]byte, 200*1024)
 	for i := range content {
@@ -123,7 +192,7 @@ func TestFileIndex_UploadStream(t *testing.T) {
 // 可以直接 Complete；serveUploadBegin 旧实现 size<=0 直接拒绝，两端不对称。
 func TestFileIndex_UploadEmpty(t *testing.T) {
 	initTestDB(t)
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 
 	sess, err := svc.BeginUpload("empty.bin", 0)
 	require.NoError(t, err)
@@ -142,7 +211,7 @@ func TestFileIndex_UploadEmpty(t *testing.T) {
 // 发现背景：防御性测试——size 是协议信任边界，必须校验防半包/丢包残留。
 func TestFileIndex_UploadSizeMismatch(t *testing.T) {
 	initTestDB(t)
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 
 	// 超上限拒绝
 	_, err := svc.BeginUpload("big.bin", 9*1024*1024*1024)
@@ -161,7 +230,7 @@ func TestFileIndex_UploadSizeMismatch(t *testing.T) {
 // 发现背景：功能测试——列表 + 逻辑删除（tombstone）语义
 func TestFileIndex_ListAndDelete(t *testing.T) {
 	initTestDB(t)
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 
 	dir := svc.uploadDir // H2：create 只允许根目录内文件
 	var hashes []string
@@ -189,8 +258,8 @@ func TestFileIndex_ListAndDelete(t *testing.T) {
 // 发现背景：功能测试——metadata 同步依赖单调 seq 游标；ApplySync 幂等合并。
 func TestFileIndex_SyncSince(t *testing.T) {
 	initTestDB(t)
-	svcA := NewFileIndexService(t.TempDir())
-	svcB := NewFileIndexService(t.TempDir()) // 对端
+	svcA := newTestIndex(t)
+	svcB := newTestIndex(t) // 对端
 
 	dir := svcA.uploadDir // H2：create 只允许根目录内文件
 	p1 := filepath.Join(dir, "a.bin")
@@ -242,7 +311,7 @@ func itoa(n int) string {
 // 发现背景：功能需求——多节点并行上传同一文件不同分片。
 func TestFileIndex_UploadMultiSource(t *testing.T) {
 	initTestDB(t)
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 
 	content := make([]byte, 4*uploadChunkSize) // 4 个 source 各一块
 	for i := range content {
@@ -286,7 +355,7 @@ func TestFileIndex_UploadMultiSource(t *testing.T) {
 // 发现背景：功能需求——上传中断后从已接收位置继续。
 func TestFileIndex_UploadResume(t *testing.T) {
 	initTestDB(t)
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 
 	content := make([]byte, 3*uploadChunkSize)
 	for i := range content {
@@ -316,7 +385,7 @@ func TestFileIndex_UploadResume(t *testing.T) {
 // 发现背景：防御性测试——缺分片时不得登记映射。
 func TestFileIndex_UploadPartialNotComplete(t *testing.T) {
 	initTestDB(t)
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 
 	content := make([]byte, 2*uploadChunkSize)
 	sess, err := svc.BeginUpload("partial.bin", int64(len(content)))
@@ -334,7 +403,7 @@ func TestFileIndex_UploadPartialNotComplete(t *testing.T) {
 // 错乱、末 chunk 判满错误（TRANSPORT-REVIEW M7）。
 func TestFileIndex_BeginUploadSizeMismatch(t *testing.T) {
 	initTestDB(t)
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 
 	_, err := svc.BeginUpload("same.bin", 100)
 	require.NoError(t, err)
@@ -349,7 +418,7 @@ func TestFileIndex_BeginUploadSizeMismatch(t *testing.T) {
 // 发现背景：M7 防御性测试——Abort 与 reap 摘除句柄可能竞争，必须幂等。
 func TestFileIndex_AbortIdempotent(t *testing.T) {
 	initTestDB(t)
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 
 	sess, err := svc.BeginUpload("abort.bin", 100)
 	require.NoError(t, err)
@@ -367,7 +436,7 @@ func TestFileIndex_AbortIdempotent(t *testing.T) {
 // 计数后必须保证判满语义不变）。
 func TestFileIndex_FullWordsIncrementalBoundaries(t *testing.T) {
 	initTestDB(t)
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 
 	// 1) 非 64 倍数 size：末 word 不足 64 chunk，Complete 判满正确
 	content := make([]byte, 2*uploadChunkSize+12345)
@@ -428,7 +497,7 @@ func sha256Hex(data []byte) string {
 // 发现背景：Source 控制面“直接写文件”的底层实现，2026-08-19。
 func TestFileIndex_WriteFile(t *testing.T) {
 	initTestDB(t)
-	svc := NewFileIndexService(t.TempDir())
+	svc := newTestIndex(t)
 	content := []byte("file-index-write-file")
 	fi, err := svc.WriteFile("写入测试.bin", bytes.NewReader(content))
 	require.NoError(t, err)

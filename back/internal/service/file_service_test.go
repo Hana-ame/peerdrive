@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"peerdrive/internal/config"
@@ -139,7 +140,16 @@ func TestDeleteInvalidHashRejected(t *testing.T) {
 func TestBrowseDirOutsideStorageRootRejected(t *testing.T) {
 	_, svc := setupFileServiceTest()
 
-	_, err := svc.BrowseDir("/etc")
+	// 必须是**目标平台上的绝对路径**：Windows 上 "/etc" 不是绝对路径
+	// （没有卷名），会被当成相对路径拼到 storage 根底下，于是判定放行、
+	// 失败原因是"文件不存在"而不是"越权"——断言就假绿了。
+	// （2026-09-20 真机 Windows 跑出来的，Linux CI 上永远暴露不了）
+	outside := "/etc"
+	if runtime.GOOS == "windows" {
+		outside = filepath.Join(filepath.VolumeName(svc.storageDir), `\Windows\System32\drivers\etc`)
+	}
+
+	_, err := svc.BrowseDir(outside)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "outside storage root")
 }

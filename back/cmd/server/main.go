@@ -15,6 +15,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	stdlog "log"
 	"os"
 	"os/signal"
@@ -25,6 +27,7 @@ import (
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
 	"peerdrive/internal/log"
+	"peerdrive/internal/pathutil"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
 	"peerdrive/internal/service"
@@ -46,6 +49,18 @@ func main() {
 	storageDir := cfg.StorageDir
 	log.LogInfo("main: config loaded, storageDir=%s, port=%s", storageDir, cfg.Port)
 
+	// 启动期拒绝"卷根"配置（doc/NETDISK.md §11.3）。
+	//
+	// pathutil.Within 是纯粹的包含判定：root 配成 `/`（Windows 的 `C:\`）时它
+	// 当然会放行 `/etc/passwd`，而且那不是 bug——那是配置字面上的意图。
+	// 但几乎没人真的想把整个盘共享出去，这种值基本都是配错（`PEERDRIVE_STORAGE=/`
+	// 常见于环境变量没展开）。与其让节点安静地全盘放行，不如启动就拒绝；
+	// 真要用的运营者自己设 PEERDRIVE_ALLOW_UNSAFE_ROOT=1。
+	if err := checkUnsafeRoots(cfg); err != nil {
+		stdlog.Fatalf("%v", err)
+	}
+	warnUnsupportedRoots(cfg)
+
 	// 初始化 DB（含迁移）
 	log.LogInfo("main: initializing database")
 	if err := repository.InitDB("./peerdrive.db"); err != nil {
@@ -65,6 +80,18 @@ func main() {
 	if cfg.PeerJSEnable {
 		log.LogInfo("main: initializing PeerJS WebRTC service")
 		peerjsSvc = transport.NewPeerJSService(cfg, storageDir)
+
+		// 对外**可读**的根目录（与"可登记/可写入"是两回事，见 AddReadRoot 注释）：
+		//   - storage 根：运营者经 HTTP API 登记的文件（register_local/folder）常在这里；
+		//   - PEERDRIVE_SHARE_DIRS：运营者自己声明要共享的目录，可能在任意挂载点。
+		// 少了这一步，共享目录不在下载目录下时会出现「清单列得出、对端一拉
+		// read failed」——登记侧放行了，读取侧却判它越权，回退到并不存在的
+		// 内容寻址副本。
+		peerjsSvc.FileIndex().AddReadRoot(storageDir)
+		for _, d := range pathutil.SplitList(cfg.ShareDirs) {
+			peerjsSvc.FileIndex().AddReadRoot(d)
+		}
+
 		peerjsSvc.Start()
 		defer peerjsSvc.Close()
 		log.LogInfo("main: PeerJS node id=%s", peerjsSvc.ID())
@@ -185,4 +212,74 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.LogInfo("main: shutting down server")
+}
+
+// checkUnsafeRoots 检查有没有目录被配成了卷根（`/`、`C:\`）。
+//
+// 为什么要单独检查：这类配置**过得了**所有运行时边界判定（root=`/` 时
+// `/etc/passwd` 确实"在根内"，判定没错），所以只能在启动期按配置意图拦。
+// 覆盖三个入口：storage（HTTP 登记 + 匿名上传落点）、download（对端写入）、
+// share dirs（对外共享清单，可位于任意挂载点）。
+//
+// 逃生阀：PEERDRIVE_ALLOW_UNSAFE_ROOT=1（真的要把整盘当存储跑时）。
+// configuredDirs 全部由配置指定的目录及其来源环境变量名。
+func configuredDirs(cfg *config.Config) []struct {
+	name string
+	val  string
+} {
+	candidates := []struct {
+		name string
+		val  string
+	}{
+		{"PEERDRIVE_STORAGE", cfg.StorageDir},
+		{"PEERDRIVE_DOWNLOAD_DIR", cfg.DownloadDir},
+	}
+	for i, d := range pathutil.SplitList(cfg.ShareDirs) {
+		candidates = append(candidates, struct {
+			name string
+			val  string
+		}{fmt.Sprintf("PEERDRIVE_SHARE_DIRS[%d]", i), d})
+	}
+	return candidates
+}
+
+func checkUnsafeRoots(cfg *config.Config) error {
+	if os.Getenv("PEERDRIVE_ALLOW_UNSAFE_ROOT") == "1" {
+		log.LogWarn("main: PEERDRIVE_ALLOW_UNSAFE_ROOT=1，跳过卷根配置检查")
+		return nil
+	}
+	var bad []string
+	for _, c := range configuredDirs(cfg) {
+		if pathutil.IsUnsafeRoot(c.val) {
+			bad = append(bad, fmt.Sprintf("%s=%q", c.name, c.val))
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	return fmt.Errorf("拒绝启动：目录被配成了文件系统卷根（%s）。这会让它下面的所有文件都对外可读/可写；"+
+		"请改成具体子目录。确认要这么跑请设 PEERDRIVE_ALLOW_UNSAFE_ROOT=1",
+		strings.Join(bad, ", "))
+}
+
+// warnUnsupportedRoots 启动自检：这些目录能不能用 os.Root 立起安全边界。
+//
+// 为什么要提前说：os.Root 建立失败时的表现很隐蔽——**那个目录里的文件就是共享
+// 不出去**，而日志只有一句 errno，运维会当成别的问题查半天（chmod/chown/重配
+// 路径，全都对不上病因）。这里在启动时就把每个目录的结论和下一步说清楚。
+func warnUnsupportedRoots(cfg *config.Config) {
+	for _, c := range configuredDirs(cfg) {
+		if strings.TrimSpace(c.val) == "" {
+			continue
+		}
+		if err := pathutil.ProbeRootSupport(c.val); err != nil {
+			// 首次启动时目录还没建出来是很正常的，别把它报成"配错了"
+			if errors.Is(err, os.ErrNotExist) {
+				log.LogInfo("main: %s=%s 尚不存在，首次写入时会自动创建", c.name, c.val)
+				continue
+			}
+			log.LogWarn("main: %s=%s 无法作为安全根目录：%s",
+				c.name, c.val, pathutil.ExplainRootFailure(c.val, err))
+		}
+	}
 }
