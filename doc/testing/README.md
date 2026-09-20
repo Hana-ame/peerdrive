@@ -31,7 +31,7 @@
 | `back/peerjs/**` | `cd back/peerjs && go test ./... -count=1 -race`（23） | — |
 | `back/signalserver/**`（peersignal） | `cd back/signalserver && go test ./...`（23） | ✅ `go-build` 的 `submodules` 格（2026-09-21 补） |
 | `back/p2p_bt/**` | `cd back/p2p_bt && go test ./...`（7） | ✅ 同上 |
-| `front/src/**` | `cd front && npm test`（88）+ `npm run build` | `front/tests/*.mjs` 手动脚本（视改动面） |
+| `front/src/**` | `cd front && npm test`（88）+ `npm run build` | `front/tests/e2e-admin-smoke.mjs`（管理面，CI 已跑）；另两个 `.mjs` 手动（视改动面） |
 | `packages/peerdrive-client/**` | `npm test`（98）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端）；合并后 `pages.yml` 会**自动**验线上（§2 第 11 项） |
 | `packages/peerdrive-media/**` | `npm test`（21）+ `npm run build` | `test/e2e-browser.mjs`、`test/media-node-e2e.mjs` |
 | 准备 merge 进 `refactor` | 上表全部必跑项全绿（= CI 的同款命令） | 合并后在主干再跑一遍 |
@@ -51,7 +51,8 @@
 | 5 | signalserver 模块 | `back/signalserver/`（独立 go.mod） | `go test ./... -count=1` | **23** | ✅ `go-build`·`submodules` | ❌ |
 | 6 | p2p_bt 模块 | `back/p2p_bt/`（独立 go.mod） | `go test ./... -count=1` | **7** | ✅ `go-build`·`submodules` | ❌ |
 | 7 | 前端 vitest | `front/tests/*.test.{js,jsx}` | `npm test` | **88**（9 文件） | ✅ `frontend`（含 build） | npm ci 需要 |
-| 8 | 前端手动脚本 | `front/tests/*.mjs`（3 个） | playwright / WS 冒烟 | — | ❌ **（盲区）** | ✅（线上站点） |
+| 8 | 前端管理面冒烟 | `front/tests/e2e-admin-smoke.mjs` | 本机起节点后 `node front/tests/e2e-admin-smoke.mjs`（打 `ws://localhost:3000/ws/peer`） | **7** 项断言 | ✅ `e2e.yml`（2026-09-21 补，脱外网） | ❌ |
+| 8b | 另两个前端手动脚本 | `front/tests/{playwright-smoke,pw-settings-mobile}.mjs` | playwright runner | — | ❌ **（盲区）** | ✅（打的是线上/preview 站点） |
 | 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **98** | ✅ `client-package` | ❌ |
 | 10 | client 公共面板 + 浏览器自检 | `packages/peerdrive-client/{dist,scripts}` | `npm run check:panel`·`node scripts/verify-panel.mjs` | 面板 8 项断言 | ✅ `check:panel`（产物一致性） | ❌（peerjs 取 CDN） |
 | 11 | 线上托管自检（Pages） | `packages/peerdrive-client/scripts/verify-pages.mjs` | `node scripts/verify-pages.mjs` | 线上 5 项断言 | ✅ `pages.yml`·`verify`（部署后回头验，2026-09-21 补） | ✅（验的就是线上） |
@@ -62,8 +63,8 @@
 | 16 | 面板浏览器端到端 | `packages/peerdrive-client/scripts/verify-panel.mjs` | 真实浏览器点面板 | 9 项断言 | ✅ **同 `e2e.yml`（复用上一套环境）** | ❌ |
 
 **覆盖范围合计**（2026-09-21 重测）：自动化（CI）覆盖 550 + 21 + 23 + 88 + 98 + 21 = **801**；
-同日补进 CI 的还有 signalserver（23）· p2p_bt（7）· Pages 线上自检（5）⇒ **836**。
-仍在 CI 外的：4 个外网门控用例、`front/tests/*.mjs`（3 个）· media 浏览器 E2E（2 个）·
+同日补进 CI 的还有 signalserver（23）· p2p_bt（7）· Pages 线上自检（5）· 管理面冒烟（7）⇒ **843**。
+仍在 CI 外的：4 个外网门控用例、`front/tests/*.mjs`（剩 2 个）· media 浏览器 E2E（2 个）·
 client demo 页面 —— 它们要么依赖外部站点、要么要人工先把服务起起来，见 §4。
 
 ---
@@ -125,11 +126,16 @@ PEERDRIVE_SKIP_RTC=1  ...                                                       
 - **⚠️ 只收 `*.test.{js,jsx}`**，`tests/` 下的 `.mjs` 不在 vitest 视野里（见 §3.8）。
 - **不要**加 `--reporter=basic`（此版本 vitest 没有该 reporter）。
 
-### 3.8 前端手动脚本（3 个 `.mjs`）— **CI 盲区**
+### 3.8 前端手动脚本（3 个 `.mjs`）— 1 个已进 CI、2 个仍是盲区
 
 | 脚本 | 做什么 | 前置 |
 |---|---|---|
-| `front/tests/e2e-admin-smoke.mjs` | Node 22 原生 WebSocket 打本地 `ws://localhost:3000/ws/peer`，走 admin verb 验证管理面全链路（含二进制帧，`binaryType='arraybuffer'`，15s 超时） | 本地起了后端在 `:3000` |
+| `front/tests/e2e-admin-smoke.mjs` | Node 22 原生 WebSocket 打本地 `ws://localhost:3000/ws/peer`，走 admin verb 验证管理面全链路（含二进制帧，`binaryType='arraybuffer'`，15s 超时）。
+  **2026-09-21 起由 `e2e.yml` 跑**（脱外网、不需要 `npm ci`）：ping / 二进制上传 / 按 hash 下载 /
+  匿名集合 / 文件列表 / 未知名路由 404，共 7 项。
+  ⚠️ `/ws/peer` 归 peerjs 路由组，`PEERDRIVE_PEERJS_ENABLE=false` 时该路径直接 404，
+  脚本会「静默 0 断言地退出」——起节点时必须开 peerjs。 | ✅ `e2e.yml`（端口写死 3000；
+  本机打别的端口用 `E2E_WS_URL` 覆盖） |
 | `front/tests/playwright-smoke.mjs` | 对**线上** `https://peerdrive.pages.dev` 跑 UI 断言（三列布局、标签栏、合集交互） | playwright runner |
 | `front/tests/pw-settings-mobile.mjs` | 对 preview 域名做移动端视口（375×667）截图/断言 | playwright runner |
 
@@ -271,8 +277,9 @@ gh run watch                                                 # gate 2m39s → bu
 | ~~端到端组合（登记→清单→拉取→校验）~~ | 2026-09-20 两个致命缺陷都藏在这里 | ✅ **已由 `e2e.yml` 覆盖**（链路 8 项 + 面板浏览器 9 项） |
 | ~~**`back/signalserver`**（23）~~ | 独立 go.mod + 无 CI job ⇒ 信令服务改坏了 CI 照样绿 | ✅ **2026-09-21 已补**：`go-build.yml` 新增 `submodules` 格 |
 | ~~**`back/p2p_bt`**（7）~~ | 同上（这个连发版门禁都没覆盖） | ✅ **2026-09-21 已补**：同上 |
+| ~~`front/tests/e2e-admin-smoke.mjs`~~ | 管理面（admin verb 转发 + 二进制帧）没人回归 | ✅ **2026-09-21 已补**：`e2e.yml` 起一个 `:3000` 节点后跑（7 项断言） |
 | **外网集成 4 用例** | 公共 broker / 线上信令的协议兼容性无人验证 | 门控手动 |
-| `front/tests/*.mjs`（3 个） | UI 冒烟依赖人工触发；`playwright-smoke` 断言的是线上站点 | 手动 |
+| `front/tests/*.mjs` 剩下 2 个 | 断言的是线上/preview 站点，CI 上跑等于给别人的部署做体检 | 手动 |
 | media 的两个非 `*.test.mjs` E2E | 浏览器真实渲染路径不在 `npm test` 里；且两个都吃外网（twimg 图 + peerjs CDN），还要先人工起 `media-node` | 手动（短期不进 CI） |
 | client demo 页面（:8123） | 消费端真人可用性的最后一道 | 手动 |
 | **公共面板的浏览器自检** | `dist/panel.html` 是 file:///静态托管的单文件，单元测试完全碰不到；peerjs CDN 加载、信令 CORS、真实点击保存都只能在这里验 | 手动 `scripts/verify-panel.mjs`（8 项断言，已跑通） |
@@ -307,7 +314,12 @@ export PATH="$HOME/.nvm/versions/node/v22.23.1/bin:$PATH"
 - 测试函数必须标注「发现背景」（全局 AGENTS.md 硬性要求）。
 - **新增/删除测试集时更新本文件的 §1 选表、§2 全景表、§3 对应小节。**
 - 用例数字会漂移：本表是 2026-09-20 的快照，重跑后如有出入以实测为准并顺手更新。
-- 想继续补，优先级：`front/tests/*.mjs` 三个 UI 冒烟（依赖线上站点，需先解决外网）>
+- **E2E 偶发红的排查顺序**：先看节点日志里有没有 `psk ok from <对端id>`。
+  没有、也没有 `psk mismatch` ⇒ 对端那帧**根本没被看见**（不是密钥不对），
+  查 `back/internal/transport/conn.go` 的 `bindConn`：`OnMessage` 必须挂在
+  任何发送之前（2026-09-21 修的那个坑，回归用例
+  `TestPSK_AuthArrivingDuringBindIsNotDropped`）。
+- 想继续补，优先级：`front/tests/*.mjs` 剩下 2 个 UI 冒烟（依赖线上站点，需先解决外网）>
   media 的两个非 `*.test.mjs` E2E（同样吃外网，且要人工先起 `media-node`）。
   这两个都**不是**"加个 job 就行"——真正的门槛是外网与人工起服务，不是没人写。
   （signalserver / p2p_bt 与发版门禁已于 2026-09-20/21 补齐；Pages 线上自检已于
