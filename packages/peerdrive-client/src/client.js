@@ -27,10 +27,14 @@ import {
   isValidHash,
   nextReqId,
   parseFrame,
+  pskAuthFrame,
   reqFrame,
   shareFrame,
   toUint8Array,
 } from './protocol.js'
+// 注意：不要在这里再 re-export PSK_REQUIRED —— index.js 是
+// `export * from './protocol.js'` + `export * from './client.js'`，同一个名字
+// 从两处 star-export 出来会变成"歧义导出"，反而从包入口消失。
 
 /** 错误码。UI 按 code 分支，不要去匹配 message 文案。 */
 export const ERR = {
@@ -43,6 +47,9 @@ export const ERR = {
   PROTOCOL: 'PROTOCOL', // 帧不合法（对端实现了别的协议）
   PEER: 'PEER', // 对端回了 err 帧（not found / 越权 / 读失败…）
   CANCELLED: 'CANCELLED', // 本地取消（abort / 迭代提前 break）
+  // PSK_REQUIRED：对端开了预共享密钥门禁，而我没有出示（或出示错了）。
+  // 单独成码是因为它的修复动作是"去填密钥"，跟"文件不存在"完全不同。
+  PSK_REQUIRED: 'PSK_REQUIRED',
 }
 
 export class PeerDriveError extends Error {
@@ -118,6 +125,14 @@ export class PeerDriveClient {
     this.peerId = conn.peer || conn.peerId || opts.peerId || ''
     this.stats = { requests: 0, chunks: 0, bytes: 0, failures: 0 }
 
+    // PSK 门禁状态（doc/NETDISK.md「PSK 门禁」）：
+    //   none = 没配密钥（对端若开了门禁，会收到 PSK_REQUIRED 错误）
+    //   sent = 已出示，等对端回执（不等它就开始发业务帧，靠 DataChannel 保序）
+    //   ok   = 对端认可；err = 对端拒绝（密钥不对），pskError 是它的 msg
+    this.psk = typeof opts.psk === 'string' ? opts.psk : ''
+    this.pskState = this.psk ? 'pending' : 'none'
+    this.pskError = null
+
     this._pend = new Map() // reqId → 拉取状态
     this._verbs = new Map() // reqId → 一次性应答等待槽（share 等）
     this._expect = null // 连接级 expect：下一个二进制块归谁（见 protocol.js 约束 2）
@@ -126,6 +141,22 @@ export class PeerDriveClient {
     this._openState = conn.open === true ? true : null // null = 未知
     this._ownedPeer = null
     this._bind()
+    // 传入时就已经打开的连接不会再来一次 'open' 事件，这里补发
+    if (conn.open === true) this._sendPskAuth()
+  }
+
+  /**
+   * _sendPskAuth 出示预共享密钥（配了才发，且必须是本端第一帧）。
+   * 见 protocol.js 的 pskAuthFrame 注释：靠 DataChannel 保序，不等回执。
+   */
+  _sendPskAuth() {
+    if (!this.psk || this.pskState !== 'pending') return
+    try {
+      this.conn.send(pskAuthFrame(this.psk))
+      this.pskState = 'sent'
+    } catch {
+      this.pskState = 'none' // 发不出去就当没配：让对端用 err 告诉我们
+    }
   }
 
   get isOpen() {
@@ -318,6 +349,10 @@ export class PeerDriveClient {
     }
     this._onOpen = () => {
       this._openState = true
+      // PSK：必须在**任何业务帧之前**出示（含 ready() 之后发的第一个请求）。
+      // 放在 flush 之前，是因为 flush 会 resolve 等待者，它们的后续 send
+      // 排在本次 send 之后 —— 顺序即门禁语义。
+      this._sendPskAuth()
       this._flushOpenWaiters(null)
     }
     this._onClose = () => this._failAll(new PeerDriveError('连接已关闭', ERR.CLOSED))
@@ -364,6 +399,14 @@ export class PeerDriveClient {
         return this._onErr(frame)
       case 'share-resp':
         return this._onVerbReply(frame)
+      case 'psk-ok':
+        this.pskState = 'ok'
+        this.pskError = null
+        return
+      case 'psk-err':
+        this.pskState = 'err'
+        this.pskError = frame.msg || 'psk: 对端拒绝了密钥'
+        return
       default:
         return // 未知帧类型：前向兼容，忽略
     }
@@ -461,11 +504,15 @@ export class PeerDriveClient {
 
   _onErr(frame) {
     const msg = frame.msg || '对端返回错误'
+    // err 帧可能带 code（Go 侧门禁回 PSK_REQUIRED）。按 code 而不是文案分类：
+    // 文案会随版本改，code 是协议的一部分。
+    const code = frame.code === ERR.PSK_REQUIRED ? ERR.PSK_REQUIRED : ERR.PEER
+    const err = () => new PeerDriveError(msg, code)
     // err 帧的 reqId 可能属于拉取，也可能属于一次性 verb
     const v = frame.reqId ? this._verbs.get(frame.reqId) : null
-    if (v) return this._settleVerb(frame.reqId, null, new PeerDriveError(msg, ERR.PEER))
+    if (v) return this._settleVerb(frame.reqId, null, err())
     const p = frame.reqId ? this._pend.get(frame.reqId) : null
-    if (p) return this._failPending(p, new PeerDriveError(msg, ERR.PEER))
+    if (p) return this._failPending(p, err())
   }
 
   _onVerbReply(frame) {

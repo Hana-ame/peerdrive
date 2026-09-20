@@ -25,14 +25,14 @@
 
 | 你改了 | 必跑 | 建议加跑 |
 |---|---|---|
-| `back/internal/**` 任意单包逻辑 | `cd back && go test -tags nosqlite ./... -count=1`（308） | `bash scripts/test-layers.sh` 可定位到具体层 |
-| `back/internal/transport/**` 帧协议 | 同上（transport 78） | 集成测试（21） |
+| `back/internal/**` 任意单包逻辑 | `cd back && go test -tags nosqlite ./... -count=1`（316） | `bash scripts/test-layers.sh` 可定位到具体层 |
+| `back/internal/transport/**` 帧协议 | 同上（transport 86） | 集成测试（21） |
 | **网盘链路**（`nodes/share/pull/RegisterLocal`） | 集成测试 + **`./scripts/netdisk-local-demo.sh`**（手工，必须跑一遍） | 浏览器 UI 手测（`NETDISK.md` §7.2） |
 | `back/peerjs/**` | `cd back/peerjs && go test ./... -count=1 -race`（23） | — |
 | `back/signalserver/**`（peersignal） | `cd back/signalserver && go test ./...`（23）· **CI 不管它** | — |
 | `back/p2p_bt/**` | `cd back/p2p_bt && go test ./...`（7）· **CI 不管它** | — |
 | `front/src/**` | `cd front && npm test`（88）+ `npm run build` | `front/tests/*.mjs` 手动脚本（视改动面） |
-| `packages/peerdrive-client/**` | `npm test`（61）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端） |
+| `packages/peerdrive-client/**` | `npm test`（70）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端） |
 | `packages/peerdrive-media/**` | `npm test`（21）+ `npm run build` | `test/e2e-browser.mjs`、`test/media-node-e2e.mjs` |
 | 准备 merge 进 `refactor` | 上表全部必跑项全绿（= CI 的同款命令） | 合并后在主干再跑一遍 |
 
@@ -44,7 +44,7 @@
 
 | # | 组件 | 位置 | 命令 | 用例 | 进 CI | 需外网 |
 |---|------|------|------|------|-------|--------|
-| 1 | 后端单元/包测试 | `back/`（主模块） | `go test -tags nosqlite ./... -count=1` | **308**（10 包） | ✅ `backend` + `go-build`×4 | ❌ |
+| 1 | 后端单元/包测试 | `back/`（主模块） | `go test -tags nosqlite ./... -count=1` | **316**（10 包） | ✅ `backend` + `go-build`×4 | ❌ |
 | 2 | 后端集成测试 | `back/test/integration/` | `go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1` | **21** 通过 / 4 跳过 | ✅ `integration` | ❌（自托管信令） |
 | 3 | 外网集成（手动门控） | 同 2 | `PEERDRIVE_MQTT_TEST=1` / `PEERDRIVE_LIVE_TEST=1` | 4 个用例 | ❌ | ✅（直连，不走代理） |
 | 4 | peerjs 模块 | `back/peerjs/`（独立 go.mod） | `go test ./... -count=1 -race` | **23** | ✅ `peerjs` | ❌ |
@@ -52,7 +52,7 @@
 | 6 | p2p_bt 模块 | `back/p2p_bt/`（独立 go.mod） | `go test ./... -count=1` | **7** | ❌ **（盲区）** | ❌ |
 | 7 | 前端 vitest | `front/tests/*.test.{js,jsx}` | `npm test` | **88**（9 文件） | ✅ `frontend`（含 build） | npm ci 需要 |
 | 8 | 前端手动脚本 | `front/tests/*.mjs`（3 个） | playwright / WS 冒烟 | — | ❌ **（盲区）** | ✅（线上站点） |
-| 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **61** | ✅ `client-package` | ❌ |
+| 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **70** | ✅ `client-package` | ❌ |
 | 10 | client 公共面板 + 浏览器自检 | `packages/peerdrive-client/{dist,scripts}` | `npm run check:panel`·`node scripts/verify-panel.mjs` | 面板 8 项断言 | ✅ `check:panel`（产物一致性） | ❌（peerjs 取 CDN） |
 | 11 | 线上托管自检（Pages） | `packages/peerdrive-client/scripts/verify-pages.mjs` | `node scripts/verify-pages.mjs` | 线上 5 项断言 | ❌ **（可考虑加 CI，见 §4）** | ✅（验的就是线上） |
 | 11 | media 包单测 | `packages/peerdrive-media/` | `npm test` + `npm run build` | **21** | ✅ `media-package` | npm ci 需要 |
@@ -61,7 +61,7 @@
 | 14 | 网盘端到端脚本 | `scripts/netdisk-local-demo.sh` | 起 3 进程跑全链路 | 8 项断言 | ✅ **`e2e.yml`** | ❌（脱外网，本机进程） |
 | 15 | 面板浏览器端到端 | `packages/peerdrive-client/scripts/verify-panel.mjs` | 真实浏览器点面板 | 9 项断言 | ✅ **同 `e2e.yml`（复用上一套环境）** | ❌ |
 
-**覆盖范围合计**：自动化（CI）覆盖 308 + 21 + 23 + 88 + 61 + 21 = **522**；
+**覆盖范围合计**：自动化（CI）覆盖 316 + 21 + 23 + 88 + 70 + 21 = **539**；
 另有 CI 之外的 23（signalserver）+ 7（p2p_bt）需手动，以及 4 个外网门控用例。
 
 ---
@@ -72,7 +72,7 @@
 
 - **职责**：单包行为正确性，依赖用注入/临时目录替身（如假 `fileList`、假 transport）。
 - **命令**：`cd back && go build -tags nosqlite ./... && go test -tags nosqlite ./... -count=1`
-- **包分布**：transport 78 · service 68 · controller 41 · source 32 · config 24 · model 13 · downloader 20 · provider 17 · repository 12 · router 3
+- **包分布**：transport 86 · service 68 · controller 41 · source 32 · config 24 · model 13 · downloader 20 · provider 17 · repository 12 · router 3
 - **前置**：`-tags nosqlite` 是硬约束（双 SQLite 驱动 CGO 冲突）。
 - **它证明不了什么**：注入的假依赖让「A 写完的索引正好是 B 读的那张表」这类**跨模块组合**失效 —— 这正是 `file_index` 缺陷逃逸的原因。
 
@@ -129,11 +129,15 @@ PEERDRIVE_SKIP_RTC=1  ...                                                       
 
 跑法：`node ~/.claude/skills/playwright-test/scripts/test-runner.mjs front/tests/<script>`（本机 Firefox）。
 
-### 3.9 `packages/peerdrive-client` 单测（61）
+### 3.9 `packages/peerdrive-client` 单测（70）
 
-- **命令**：`cd packages/peerdrive-client && npm test`（`node --test "test/*.test.mjs"`，24 个 suite）
+- **命令**：`cd packages/peerdrive-client && npm test`（`node --test "test/*.test.mjs"`，28 个 suite）
 - **零运行时依赖** ⇒ 不需要 `npm ci`，也不需要网络。覆盖：协议状态机 + 增量 SHA-256 + client API。
 - 自实现的**增量** SHA-256（`src/sha256.js`）别改成只用 `crypto.subtle.digest()`（一次性、与流式拉取冲突）。
+- **PSK 门禁**（`test/psk.test.mjs`，9 例）：钉的是「出示时机」—— `psk-auth` 必须是本端在该连接上的
+  **第一帧**（先于 `share`/`req`），以及 `psk-ok`/`psk-err` 的状态流转、`code=PSK_REQUIRED` 的错误分类。
+  门禁的失败模式是静默的（发晚了 = 对端什么都不回 = 只剩超时），所以这条必须钉死。
+  对端（Go）侧的镜像用例在 `back/internal/transport/psk_test.go`（8 例）。
 
 ### 3.10 公共面板（`dist/panel.html`）+ 浏览器自检
 
@@ -193,14 +197,14 @@ bash scripts/test-layers.sh --integration  # 追加真实信令集成段（-p 1 
 | 2 | **漏掉 57 个用例**：`config`(24) / `model`(13) / `provider`(17) / `router`(3) 不属于 L1-L8 任何一层，`go test ./...` 会跑而分层脚本不跑 | ✅ 新增 `LB-baseline` 层 |
 | 3 | **WSL 里 L8 假 FAIL**：脚本没注入 nvm 的 PATH，`node: command not found` | ✅ 脚本自动补最高版本 nvm node 到 PATH |
 
-修正后实测：**9 层全绿**（L1 23 / L2 66 / L3 12 / L4 161 / L5 12 / L6 21 / LB 57 / L7 7 / L8 88），1m20s。
+修正后实测：**9 层全绿**（L1 23 / L2 74 / L3 12 / L4 161 / L5 12 / L6 21 / LB 57 / L7 7 / L8 88），1m20s。
 
 当前分层规模（2026-09-20 实测）：
 
 | 层 | 切面 | 命令 | 用例 |
 |----|------|------|------|
 | L1 | 信令/传输原语 | `cd back/peerjs && go test ./... -count=1 -race` | 23 |
-| L2 | 帧协议 | `go test -tags nosqlite ./internal/transport/ -skip "^TestAdmin"` | 66 |
+| L2 | 帧协议 | `go test -tags nosqlite ./internal/transport/ -skip "^TestAdmin"` | 74 |
 | L3 | 管理面 | `go test -tags nosqlite ./internal/transport/ -run "^TestAdmin"` | 12 |
 | L4 | 业务核心 | `go test -tags nosqlite ./internal/{controller,service,source,downloader}/...` | 161 |
 | L5 | 数据 | `go test -tags nosqlite ./internal/repository/...` | 12 |
@@ -225,15 +229,27 @@ bash scripts/test-layers.sh --integration  # 追加真实信令集成段（-p 1 
 
 | workflow | 触发 | job | 覆盖的组件 |
 |---|---|---|---|
-| `ci.yml` | push 到 main/master/refactor/base/docs/`feat/*`/`fix/*`/`module/*`/`*-agent`/`*-frontend`；PR 到 main/master/refactor | 6 个 | ①后端单元（vet+test+build）②集成（`-p 1`）④peerjs（vet+test）⑦前端（test+build）⑨client ⑪media（ci+test+build） |
+| `ci.yml` | push 到 main/master/refactor/base/docs/`feat/*`/`fix/*`/`module/*`/`*-agent`/`*-frontend` **或 tag `v*`**；PR 到 main/master/refactor | 6 个 | ①后端单元（vet+test+build）②集成（`-p 1`）④peerjs（vet+test）⑦前端（test+build）⑨client ⑪media（ci+test+build） |
 | `go-build.yml` | push / PR（不限分支） | 5 平台矩阵 | ①后端单元×4（非 Windows 才跑 test）+ 交叉构建产物 |
-| `release.yml` | push tag `v*` | 2 个 | **只 build，不跑任何测试** |
+| `release.yml` | push tag `v*`；手动 dispatch（`dry_run` 默认开，只验门禁不发版） | 3 个 | **`gate`（后端 vet+test+build · 集成 · 信令 · peerjs · client+check:panel）→ build（5 平台）→ release** |
 | `e2e.yml` | push 到 `refactor` 且 `back/**`·`packages/peerdrive-client/**`·脚本/workflow 有变动；PR；手动 dispatch | 1 个（顺序复用同一套环境） | ⑭网盘端到端脚本（8 项）+ ⑮面板浏览器端到端（9 项，bundled chromium） |
 | `pages.yml` | push 到 `refactor` 且 `packages/peerdrive-client/**` 有变动；或手动 dispatch | 2 个 | **不是测试**：构建面板并部署到 GitHub Pages（<https://hana-ame.github.io/peerdrive/>）。它会顺带跑 `check:panel`，因此也拦「改了 `src/` 忘了重建产物」 |
 
-**⚠️ 打 tag 发版时 `ci.yml` 不会触发**（它的 `on.push` 只列了 branches，不含 tags），
-而 `release.yml` 又不跑测试 —— 也就是说**发版路径上没有任何测试门禁**。
-发版前请手动跑一遍 §1 选表里相关组件的全套命令。
+**发版门禁（2026-09-20 补）**：`ci.yml` 的 `on.push` 加了 `tags: ['v*']`（打 tag 也会跑
+全量 6 个 job），同时 `release.yml` 自己多了一个 `gate` job —— `build` 与 `release` 都
+`needs: gate`，**测试没过就不出包**。为什么两边都要：workflow 之间没有 `needs`，
+`ci.yml` 与 `release.yml` 是并行跑的，只有长在 release 自己身上的门禁才真拦得住。
+
+验证方式（不真发版，避免污染 tag/release 历史）：
+
+```bash
+gh workflow run release.yml --ref refactor -f dry_run=true   # dry_run 默认 true，release 那步会跳过
+gh run watch                                                 # gate 2m39s → build×5；实测 success
+```
+
+> 顺带修掉的既有红灯：windows 那格一直挂 —— 交叉编译写成 `GOOS=windows go build`，
+> 而 `windows-latest` 的默认 shell 是 PowerShell，前置赋值语法会被当成命令名。
+> 现已改成 `env:` 传 `GOOS/GOARCH/CGO_ENABLED`。
 
 ---
 
@@ -252,7 +268,8 @@ bash scripts/test-layers.sh --integration  # 追加真实信令集成段（-p 1 
 | client demo 页面（:8123） | 消费端真人可用性的最后一道 | 手动 |
 | **公共面板的浏览器自检** | `dist/panel.html` 是 file:///静态托管的单文件，单元测试完全碰不到；peerjs CDN 加载、信令 CORS、真实点击保存都只能在这里验 | 手动 `scripts/verify-panel.mjs`（8 项断言，已跑通） |
 | **线上托管本身**（Pages 部署） | 部署链路动过 `.nojekyll`/路径、或 peerjs CDN 在线上不可达时，本地 file:// 全绿也照样白屏 | 手动 `scripts/verify-pages.mjs`（5 项断言，已跑通） |
-| **打 tag 发版** | `ci.yml` 的 `on.push` 只列 branches、不含 tags，`release.yml` 又只构建 —— **发版没有任何测试门禁**，见 §3.15 | 需人工把关 |
+| ~~**打 tag 发版**~~ | 曾经：`ci.yml` 不含 tags、`release.yml` 只构建 ⇒ 发版无门禁 | ✅ **2026-09-20 已补**：`ci.yml` 加 tags 触发 + `release.yml` 自带 `gate`（见 §3.15） |
+| **PSK 门禁只在真实网络里才验得到** | 帧级行为有单测，但"带了/没带密钥在真实 WebRTC 上真的被拦/放行"必须跑链路 | 手动：`netdisk-local-demo.sh` 第 [6] 步（A 带密钥 → B 无密钥被拦 → B 带密钥恢复）；可考虑接进 `e2e.yml` |
 
 ---
 

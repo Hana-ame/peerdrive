@@ -143,8 +143,9 @@ cd ../../front && npm test && npm run build   # 前端：vitest 88 + vite build
 
 **端到端（改网盘链路必做）**：单元/集成绿不代表链路可用——
 `scripts/netdisk-local-demo.sh` 起自托管信令 + 两个节点，自动跑完
-市场 → 加入 → 清单 → 拉取 → sha256 校验。它覆盖的是单测与集成都没覆盖的
-组合（登记 → 共享清单 → 跨节点拉取），历史上两个运行时缺陷只有它能发现。
+市场 → 加入 → 清单 → 拉取 → sha256 校验 → **PSK 门禁**（A 带密钥重启 → B 无密钥
+被拦 → B 带同一把密钥恢复）。它覆盖的是单测与集成都没覆盖的组合
+（登记 → 共享清单 → 跨节点拉取 → 门禁），历史上两个运行时缺陷只有它能发现。
 
 **CI 已覆盖**：`.github/workflows/e2e.yml` 会起同一套环境，先跑链路 8 项断言，
 再装 bundled chromium 用真实浏览器点面板跑 9 项断言（连上 → 清单 → 点保存真下载
@@ -167,6 +168,7 @@ cd ../../front && npm test && npm run build   # 前端：vitest 88 + vite build
 | `PEERDRIVE_SHARE_ENABLE` | **false** | 对外共享总开关。**默认关**——不显式开启就不对外暴露任何清单（`share` 帧回空） |
 | `PEERDRIVE_SHARE_COLLECTIONS` | - | 共享的合集：逗号分隔 hash，或 `all`（= 所有 public 合集；受限/私有一律跳过） |
 | `PEERDRIVE_SHARE_DIRS` | - | 共享的目录：逗号分隔。空 = **不共享文件**（不是"共享全部"）。文件只回 basename，不回绝对路径 |
+| `PEERDRIVE_PSK` | - | 节点访问预共享密钥。空 = 开放（谁连上都服务）；设了 = 对端必须在连接上出示同一把密钥，否则回 `PSK_REQUIRED`。**只做准入，不做身份/分级**（详见 `doc/NETDISK.md` §9） |
 
 ## 线上部署（cloudcone 自托管信令）
 

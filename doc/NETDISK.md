@@ -467,7 +467,8 @@ CI 和单元测试全绿，但真实跑起来 `files` 一直是空的。根因�
 | 6 | 单元测试/分层回归 | `bash scripts/test-layers.sh` | 9 层全绿 / 43s |
 | 7 | **E2E CI** | `gh run list --workflow e2e.yml` | ✅ success（链路 8 项 + 面板浏览器 9 项，同一套环境顺序跑） |
 | 8 | CI | `gh run list` | 四条 workflow（CI / Go Build Matrix / E2E / Deploy Pages）全 success |
-| 9 | 发版门禁 | — | ❌ **没有**（`ci.yml` 不触发 tag，`release.yml` 不跑测试） |
+| 9 | **发版门禁** | `gh workflow run release.yml --ref refactor -f dry_run=true` | ✅ success（gate 2m39s → 5 平台构建；dry_run 不发 release） |
+| 10 | **PSK 门禁**（谁能连我的节点） | `bash scripts/netdisk-local-demo.sh`（第 [6] 步）+ `PSK=demo-psk ... verify-panel.mjs` | ✅ A 带密钥 → B 无密钥被拦 → B 带同一把密钥恢复；面板带密钥 9/9 |
 
 ### 8.2 一键链路脚本的坑：重跑前必须先清干净
 
@@ -503,5 +504,87 @@ peersignal -addr :9101 -key peerjs -tls-cert cert.pem -tls-key key.pem
 - **只有 HTTPS 托管的面板才需要 wss**：混合内容规则只拦 HTTPS 页面发起的 `ws://`。
   `file://`（已测 9/9）和 http 页面（已测 9/9）用 ws 完全没问题 —— 所以**内网/本机用 ws 就够**，
   公网 Pages 版（HTTPS）才必须 wss。
-- **发版无测试门禁**：打 tag 时 `ci.yml` 不触发。
-- `signalserver`(23) / `p2p_bt`(7) 是独立 go.mod 且无 CI job —— 改坏了 CI 照样绿。
+- `signalserver`(23) / `p2p_bt`(7) 是独立 go.mod，主 CI 无 job —— 改坏了 `Peerdrive CI` 照样绿。
+  （发版门禁 `release.yml` 的 gate 会跑 signalserver，算半覆盖；`p2p_bt` 仍无 CI。）
+
+## 9. PSK 门禁：谁能连我的节点（2026-09-20）
+
+### 9.1 为什么需要它
+
+面板是**公开的静态页面**（GitHub Pages / `file://`），信令只负责牵线、不做准入 ——
+任何人拿到节点 id + 同一个自托管信令就能握手上来问 `share`、拉文件。
+所以准入只能长在节点自己这条连接上，这就是 `PEERDRIVE_PSK`（预共享密钥）。
+
+### 9.2 语义（对称、两端各自独立判定）
+
+| 本节点 | 对端 | 结果 |
+|---|---|---|
+| 没配 | 没配 | 谁连上都服务（老行为，向后兼容，升级不会把存量对端全拒了） |
+| 配了 | 同一把密钥 | 正常服务 |
+| 配了 | 没配 / 错了 | 所有入站 verb 回 `err`，带 `code=PSK_REQUIRED` |
+| 没配 | 配了 | 本端照常服务它（它多带了密钥，忽略） |
+
+注意最后两行是**非对称**的：门禁保护的是「配了它的那个节点」的出站内容。
+我配了而对端没配时，**我自己发起的拉取不受影响**（对端是开放的，它照常服务我）。
+实现上只拦"对端要我干活"的 verb（`req/share/list/create/upload/…/fwd-*`），
+**不拦**"对端对我请求的应答"（`meta/data/done/err`）—— 连 default 分支也上锁会自伤：
+对端从没出示过密钥（它不需要），于是我自己的拉取被自己掐死，只剩超时，日志里看不出所以然。
+
+### 9.3 握手形状
+
+```
+连接建立 → 配了 PSK 的一端立刻发 {"type":"psk-auth","psk":"<密钥>"}
+          → 对端校验 → {"type":"psk-ok"} / {"type":"psk-err","code":"PSK_REQUIRED"}
+```
+
+两个刻意的选择：
+
+1. **明文传密钥**。DataChannel 强制 DTLS，密钥不会在链路上裸奔；服务端本来就要
+   存明文才能比对。要防的是"陌生人连上来"，不是窃听 —— 换挑战-应答只把明文挪出
+   信道，却要引入 nonce 状态与双端发起时机，不值。
+2. **不等 `psk-ok` 就发业务帧**。同一条 DataChannel 保序，出示方先发 auth 再发业务，
+   服务端按序必然先看到 auth —— 于是**不给每次连接多加一个 RTT**。
+   （这条是顺序契约，改实现时 auth 必须是本端第一帧。）
+
+### 9.4 怎么用
+
+```bash
+# 节点侧：mesh 内要互通的节点配同一把（不设 = 开放模式）
+PEERDRIVE_PSK=demo-psk ./peerdrive-server
+
+# 面板：连接表单的「预共享密钥」框；或用链接预填 ?psk=xxx
+#       —— 面板读入后立刻把 psk 从地址栏抹掉，不写回、也不进 localStorage
+#       （地址栏会被历史/截图/分享带走，localStorage 是明文且跨会话常驻）
+
+# 消费端包
+PD.connectToPeer(Peer, id, { psk: 'demo-psk' })
+```
+
+状态自查：`GET /peerjs/node` 现在回 `{"psk":true,"psk_peers":N}` —— "对端拉不到东西"
+时第一个该看的就是这里。
+
+### 9.5 怎么验（都实测过）
+
+```bash
+# 1) 真实网络（一键脚本第 [6] 步：A 带密钥重启 → B 无密钥被拦 → B 带密钥恢复）
+bash scripts/netdisk-local-demo.sh
+#   PASS A 报告已开启 PSK 门禁（/peerjs/node 里 psk:true）
+#   PASS B 没带密钥 → 被门禁拦下（error: peerjs: psk: 本节点需要预共享密钥…）
+#   PASS B 带同一把密钥 → 恢复（2 个文件）
+
+# 2) 浏览器（面板带密钥过门禁）：9/9 PASS
+SIG_HOST=<IP> SIG_PORT=9100 NODE_ID=node-a PSK=demo-psk node scripts/verify-panel.mjs
+#   反例（不带 PSK）：清单 0 行 + "psk: 本节点需要预共享密钥" —— 门禁确实拦住了
+
+# 3) 单元：back/internal/transport/psk_test.go（8 例）
+#          packages/peerdrive-client/test/psk.test.mjs（9 例，钉"auth 必须是第一帧"）
+```
+
+### 9.6 边界（它不是什么）
+
+- **不做身份、不做授权分级**：所有持钥者对这个节点有同等访问权。要按人区分权限
+  得走注册服务器鉴权（`doc/modules/auth`），不是这里。
+- **只管连接准入，不管信令准入**：谁都能在信令上看到这个节点的 id。
+  想让节点不出现在公共目录里，关 `PEERDRIVE_DISCOVER_PRESENCE`。
+- 密钥错了**不关连接**，而是每个 verb 都回一次 err —— 让对端能重发正确的密钥，
+  也让它看到明确原因（关连接只会变成超时，更难排查）。

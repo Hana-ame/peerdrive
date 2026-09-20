@@ -80,6 +80,8 @@ type dcResp struct {
 	Nonce   string     `json:"nonce,omitempty"` // fwd-challenge：一次性质询（forward.go）
 	Hmac    string     `json:"hmac,omitempty"`  // fwd-auth：HMAC-SHA256(key, nonce)
 	Port    int        `json:"port,omitempty"`  // fwd-open：客户端声明的目标端口
+	Psk     string     `json:"psk,omitempty"`   // psk-auth：对端出示的预共享密钥（psk.go）
+	Code    string     `json:"code,omitempty"`  // err 帧的机器可读错误码（消费端按 code 分支）
 }
 
 // connState 记录一条连接上的请求状态机与响应路由。
@@ -119,6 +121,11 @@ type connState struct {
 	fwd   *fwdStream
 	fwdHs *fwdHandshake
 	fwdCh chan fwdChunk // fwd 块 → 连接级 worker 写隧道（有界背压，同 binCh）
+
+	// pskOK 对端是否已通过本节点的预共享密钥校验（psk.go 门禁）。
+	// 只影响「本节点是否为它提供服务」，不影响它对我们自己请求的应答
+	// （应答走 routeResponse，我们没理由拦自己要的数据）。
+	pskOK bool
 }
 
 // fwdChunk 一块待写入隧道的转发数据（归属随块携带——隧道可能已换/已关，
@@ -244,6 +251,9 @@ func (s *PeerJSService) bindConn(c Session) {
 	// （fsync + hashFile）不再阻塞同连接转发隧道，见 inbound.go fwdWorker。
 	go s.fwdWorker(c, st)
 
+	// PSK 门禁：配了密钥就先出示（必须是本端第一帧，故在 OnMessage 之前）。
+	s.pskSendAuth(c)
+
 	c.OnMessage(func(msg peerjs.Frame) { s.dispatchFrame(c, st, msg) })
 	c.OnClose(func() { s.cleanupConn(c, st) })
 }
@@ -259,6 +269,18 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 	if msg.IsText {
 		var r dcResp
 		if err := json.Unmarshal(msg.Data, &r); err != nil || r.Type == "" {
+			return
+		}
+		// PSK 门禁：先处理握手帧，再用门禁过滤"要我干活"的入站 verb
+		// （psk.go）。对端出示前，这些 verb 一律回 err。
+		if r.Type == "psk-auth" {
+			s.servePskAuth(c, st, r.Psk)
+			return
+		}
+		if r.Type == "psk-ok" || r.Type == "psk-err" {
+			return // 客户端侧的握手回执：这里不需要（出示方不等回执，见 psk.go）
+		}
+		if s.pskGate(c, st, r) {
 			return
 		}
 		switch r.Type {

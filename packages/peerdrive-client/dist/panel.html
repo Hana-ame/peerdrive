@@ -156,7 +156,7 @@
     <h1>peerdrive panel</h1>
     <span class="tag">公共面板</span>
     <span class="tag">零后端</span>
-    <span class="tag mono" id="build-id">bundle eed78dee</span>
+    <span class="tag mono" id="build-id">bundle e3a71fb7</span>
     <span class="grow"></span>
     <span class="mono dim">我的临时 id：<span id="my-id">（未连接）</span></span>
   </header>
@@ -191,11 +191,19 @@
           <input id="in-secure" type="checkbox" checked> wss
         </label>
       </div>
+      <div class="f" style="flex:1 1 150px">
+        <label>预共享密钥（可留空）</label>
+        <input id="in-psk" type="password" autocomplete="off" placeholder="节点开了 PSK 才要填">
+      </div>
       <div class="f auto"><label>&nbsp;</label><button id="btn-connect">连接</button></div>
     </div>
     <div class="hint">
       自托管信令填节点启动时用的 PEERDRIVE_PEERJS_*，并取消勾选 wss（多为 ws://）。
       也可以用链接直接带参数：<span class="mono">?node=&lt;id&gt;&amp;host=&amp;port=&amp;secure=0</span>
+      <br>
+      <b>预共享密钥</b>：节点用 <span class="mono">PEERDRIVE_PSK</span> 开了门禁时才需要——
+      连上后如果提示 <span class="mono">psk required</span>，说明你没填或填错了。
+      密钥<b>不会</b>被写回地址栏、也不会存进「最近连接」，只留在这一页的输入框里。
     </div>
   </div>
 
@@ -415,6 +423,9 @@ async function sha256Hex(bytes) {
 //	      {"type":"err","msg","reqId"}
 //	共享: {"type":"share","reqId"}
 //	      → {"type":"share-resp","collections":[…],"files":[…],"dirs":[…],"total":N,"reqId"}
+//	门禁: {"type":"psk-auth","psk":"<密钥>"}
+//	      → {"type":"psk-ok"} / {"type":"psk-err","msg":"...","code":"PSK_REQUIRED"}
+//	      （节点设了 PEERDRIVE_PSK 才要；未设 = 开放模式，见 pskAuthFrame）
 //
 // 三条不能改的约束（破坏了不会报错，只会静默错位）：
 //  1. data 头是**文本帧**、数据块是**二进制帧**。raw 序列化下 string 走 PPID 51、
@@ -464,6 +475,26 @@ function reqFrame(hash, { offset = 0, size = -1, reqId } = {}) {
 function shareFrame(reqId) {
   return JSON.stringify({ type: 'share', reqId, v: PROTOCOL_VERSION })
 }
+
+// pskAuthFrame 构造预共享密钥帧（PSK 门禁，见 doc/NETDISK.md 的「PSK 门禁」）。
+//
+// 语义：节点可以设一个预共享密钥（PEERDRIVE_PSK），设了之后对端必须在**连接
+// 上的第一帧**出示同样的密钥，否则所有请求都回 err（code=PSK_REQUIRED）。
+// 没设密钥的节点是开放模式，不发这帧也照常服务（向后兼容）。
+//
+// 两个实现约定（与 Go 侧 back/internal/transport/psk.go 对齐）：
+//  1. **连接建立后立刻发，且必须是第一帧**。DataChannel 保序，服务端按序处理
+//     必然先看到 auth 再看到业务帧——所以本包**不等** psk-ok 就发业务请求，
+//     不给每次连接多加一个 RTT。
+//  2. **明文传密钥**。DataChannel 是强制 DTLS 的，密钥不会在链路上裸奔；
+//     而服务端本来就要存明文才能比对。要防的是"陌生人连上来"，不是窃听。
+function pskAuthFrame(psk) {
+  return JSON.stringify({ type: 'psk-auth', psk: String(psk ?? ''), v: PROTOCOL_VERSION })
+}
+
+// PSK_REQUIRED 是 Go 侧门禁在 err 帧里带的机器可读错误码。
+// UI 按它提示"请填密钥"，**不要**去匹配 err 的 msg 文案（文案会改）。
+const PSK_REQUIRED = 'PSK_REQUIRED'
 
 // parseFrame 解析文本帧。返回 null 表示"不是本协议的控制帧"（非 JSON、
 // 或缺 type）——调用方应当忽略而不是报错：同一条连接上可能有别的用途的帧。
@@ -564,6 +595,9 @@ function baseName(p) {
 //
 // 帧协议细节见 src/protocol.js 顶部注释（与 Go 侧 conn.go 逐字对齐）。
 
+// 注意：不要在这里再 re-export PSK_REQUIRED —— index.js 是
+// `export * from './protocol.js'` + `export * from './client.js'`，同一个名字
+// 从两处 star-export 出来会变成"歧义导出"，反而从包入口消失。
 
 /** 错误码。UI 按 code 分支，不要去匹配 message 文案。 */
 const ERR = {
@@ -576,6 +610,9 @@ const ERR = {
   PROTOCOL: 'PROTOCOL', // 帧不合法（对端实现了别的协议）
   PEER: 'PEER', // 对端回了 err 帧（not found / 越权 / 读失败…）
   CANCELLED: 'CANCELLED', // 本地取消（abort / 迭代提前 break）
+  // PSK_REQUIRED：对端开了预共享密钥门禁，而我没有出示（或出示错了）。
+  // 单独成码是因为它的修复动作是"去填密钥"，跟"文件不存在"完全不同。
+  PSK_REQUIRED: 'PSK_REQUIRED',
 }
 
 class PeerDriveError extends Error {
@@ -651,6 +688,14 @@ class PeerDriveClient {
     this.peerId = conn.peer || conn.peerId || opts.peerId || ''
     this.stats = { requests: 0, chunks: 0, bytes: 0, failures: 0 }
 
+    // PSK 门禁状态（doc/NETDISK.md「PSK 门禁」）：
+    //   none = 没配密钥（对端若开了门禁，会收到 PSK_REQUIRED 错误）
+    //   sent = 已出示，等对端回执（不等它就开始发业务帧，靠 DataChannel 保序）
+    //   ok   = 对端认可；err = 对端拒绝（密钥不对），pskError 是它的 msg
+    this.psk = typeof opts.psk === 'string' ? opts.psk : ''
+    this.pskState = this.psk ? 'pending' : 'none'
+    this.pskError = null
+
     this._pend = new Map() // reqId → 拉取状态
     this._verbs = new Map() // reqId → 一次性应答等待槽（share 等）
     this._expect = null // 连接级 expect：下一个二进制块归谁（见 protocol.js 约束 2）
@@ -659,6 +704,22 @@ class PeerDriveClient {
     this._openState = conn.open === true ? true : null // null = 未知
     this._ownedPeer = null
     this._bind()
+    // 传入时就已经打开的连接不会再来一次 'open' 事件，这里补发
+    if (conn.open === true) this._sendPskAuth()
+  }
+
+  /**
+   * _sendPskAuth 出示预共享密钥（配了才发，且必须是本端第一帧）。
+   * 见 protocol.js 的 pskAuthFrame 注释：靠 DataChannel 保序，不等回执。
+   */
+  _sendPskAuth() {
+    if (!this.psk || this.pskState !== 'pending') return
+    try {
+      this.conn.send(pskAuthFrame(this.psk))
+      this.pskState = 'sent'
+    } catch {
+      this.pskState = 'none' // 发不出去就当没配：让对端用 err 告诉我们
+    }
   }
 
   get isOpen() {
@@ -851,6 +912,10 @@ class PeerDriveClient {
     }
     this._onOpen = () => {
       this._openState = true
+      // PSK：必须在**任何业务帧之前**出示（含 ready() 之后发的第一个请求）。
+      // 放在 flush 之前，是因为 flush 会 resolve 等待者，它们的后续 send
+      // 排在本次 send 之后 —— 顺序即门禁语义。
+      this._sendPskAuth()
       this._flushOpenWaiters(null)
     }
     this._onClose = () => this._failAll(new PeerDriveError('连接已关闭', ERR.CLOSED))
@@ -897,6 +962,14 @@ class PeerDriveClient {
         return this._onErr(frame)
       case 'share-resp':
         return this._onVerbReply(frame)
+      case 'psk-ok':
+        this.pskState = 'ok'
+        this.pskError = null
+        return
+      case 'psk-err':
+        this.pskState = 'err'
+        this.pskError = frame.msg || 'psk: 对端拒绝了密钥'
+        return
       default:
         return // 未知帧类型：前向兼容，忽略
     }
@@ -994,11 +1067,15 @@ class PeerDriveClient {
 
   _onErr(frame) {
     const msg = frame.msg || '对端返回错误'
+    // err 帧可能带 code（Go 侧门禁回 PSK_REQUIRED）。按 code 而不是文案分类：
+    // 文案会随版本改，code 是协议的一部分。
+    const code = frame.code === ERR.PSK_REQUIRED ? ERR.PSK_REQUIRED : ERR.PEER
+    const err = () => new PeerDriveError(msg, code)
     // err 帧的 reqId 可能属于拉取，也可能属于一次性 verb
     const v = frame.reqId ? this._verbs.get(frame.reqId) : null
-    if (v) return this._settleVerb(frame.reqId, null, new PeerDriveError(msg, ERR.PEER))
+    if (v) return this._settleVerb(frame.reqId, null, err())
     const p = frame.reqId ? this._pend.get(frame.reqId) : null
-    if (p) return this._failPending(p, new PeerDriveError(msg, ERR.PEER))
+    if (p) return this._failPending(p, err())
   }
 
   _onVerbReply(frame) {
@@ -1213,7 +1290,7 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
 }
 
 // ---- 导出（对应 src/index.js 的 export *） ----
-  const api = { DEFAULT_MAX_BUFFER_BYTES, ERR, MAX_FILE_BYTES, PROTOCOL_VERSION, PeerDriveClient, PeerDriveError, Sha256, baseName, concatChunks, connect, connectToPeer, guessMime, isBinaryFrame, isValidHash, nextReqId, parseFrame, reqFrame, sha256Hex, shareFrame, toUint8Array }
+  const api = { DEFAULT_MAX_BUFFER_BYTES, ERR, MAX_FILE_BYTES, PROTOCOL_VERSION, PSK_REQUIRED, PeerDriveClient, PeerDriveError, Sha256, baseName, concatChunks, connect, connectToPeer, guessMime, isBinaryFrame, isValidHash, nextReqId, parseFrame, pskAuthFrame, reqFrame, sha256Hex, shareFrame, toUint8Array }
   if (typeof window !== 'undefined') { window.PeerDrive = api }
   if (typeof globalThis !== 'undefined') { globalThis.PeerDriveBuiltin = api }
 })()</script>
@@ -1304,6 +1381,16 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
     }
   }
 
+  // 预共享密钥：**不**进地址栏、**不**进 localStorage。
+  // 理由：地址栏会被历史记录/截图/分享带走，localStorage 是明文且跨会话常驻；
+  // 而密钥一旦泄露，等于这个节点对所有拿到它的人开门。所以它只活在当前页面的
+  // 输入框里，刷新即丢（真要长期保存请用密码管理器）。
+  // 反向是允许的：链接里带 psk= 可以预填（方便一次性分享），但读完立刻从
+  // URL 里抹掉，不让它在地址栏里停留。
+  function pskOfForm() {
+    return $('in-psk') ? $('in-psk').value : ''
+  }
+
   // 面板状态回写地址栏 —— 让用户能直接复制「连这个节点的面板」链接
   function syncURL() {
     var q = params()
@@ -1313,6 +1400,7 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
     q.set('path', sig.path)
     q.set('key', sig.key)
     q.set('secure', sig.secure ? '1' : '0')
+    q.delete('psk') // 密钥绝不回写地址栏（见 pskOfForm 注释）
     if ($('in-node').value.trim()) q.set('node', $('in-node').value.trim())
     else q.delete('node')
     try { history.replaceState(null, '', location.pathname + '?' + q.toString()) } catch (e) { /* file:// 下可能不让改 */ }
@@ -1510,6 +1598,15 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
       '自托管信令用 `peersignal -tls-cert cert.pem -tls-key key.pem`，或在信令前挂 TLS 反代。'
   }
 
+  // pskHint 门禁提示。对端回 PSK_REQUIRED 时，用户的修复动作是「去填密钥」，
+  // 而不是排查网络——不加这句，绝大多数人会以为是节点离线（典型误判）。
+  function pskHint(e) {
+    if (!e || e.code !== window.PeerDrive.ERR.PSK_REQUIRED) return null
+    return '该节点开了预共享密钥门禁（节点侧 PEERDRIVE_PSK）：在「预共享密钥」框里填' +
+      '同一个密钥再连一次。拿不到密钥就只能找节点运营者要——门禁本来就是为了' +
+      '拦住没钥匙的人。'
+  }
+
   async function connect() {
     if (!peerReady()) { log(peerMissingHint(), 'err'); return }
     var nodeId = $('in-node').value.trim()
@@ -1526,9 +1623,11 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
     updateShares()
     try {
       log('连接信令 ' + sig.host + ':' + sig.port + ' 并拨号 ' + nodeId + ' …')
+      var psk = pskOfForm()
       var client = await window.PeerDrive.connectToPeer(window.Peer, nodeId, {
         peerOptions: peerOptions(sig),
         idleTimeoutMs: 60 * 1000,
+        psk: psk, // 空串 = 不出示（对端没开门禁时完全无感）
       })
       s.client = client
       s.status = 'online'
@@ -1546,6 +1645,7 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
       if (e.code === window.PeerDrive.ERR.TIMEOUT) {
         log('提示：对方节点离线、peer id 写错，或信令配置不同（host/port/path/key/secure）', 'warn')
       }
+      if (pskHint(e)) log(pskHint(e), 'warn')
       renderNodes()
       updateShares()
     }
@@ -1572,6 +1672,7 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
     } catch (e) {
       s.error = e.message || String(e)
       log('获取清单失败：' + s.error + (e.code ? '（' + e.code + '）' : ''), 'err')
+      if (pskHint(e)) log(pskHint(e), 'warn')
       renderNodes()
       if (current === s.id) updateShares()
     }
@@ -1671,6 +1772,13 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
     if (q.get('key')) $('in-key').value = q.get('key')
     if (q.get('secure') !== null) $('in-secure').checked = q.get('secure') !== '0'
     if (q.get('node')) $('in-node').value = q.get('node')
+    // psk= 允许预填（一次性分享链接），但读完立即从地址栏抹掉
+    if (q.get('psk')) {
+      $('in-psk').value = q.get('psk')
+      q.delete('psk')
+      try { history.replaceState(null, '', location.pathname + '?' + q.toString()) } catch (e) { /* file:// 下可能不让改 */ }
+      log('已从链接读入预共享密钥，并将其从地址栏移除（不留在历史记录里）', 'warn')
+    }
 
     $('btn-connect').addEventListener('click', connect)
     $('in-node').addEventListener('keydown', function (e) { if (e.key === 'Enter') connect() })

@@ -78,6 +78,9 @@ jobs:
           SIG_PORT: 9100
           NODE_ID: node-a
           PW_CHANNEL: chromium
+          # 链路脚本第 [6] 步把 node-a 重启成了「带 PSK」的节点，所以面板必须
+          # 出示同一把密钥 —— 顺带把"浏览器带密钥过门禁"也纳进 E2E。
+          PSK: demo-psk
         run: node "$GITHUB_WORKSPACE/packages/peerdrive-client/scripts/verify-panel.mjs"
 
       - name: 收尾

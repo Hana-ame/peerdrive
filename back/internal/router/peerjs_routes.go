@@ -60,10 +60,16 @@ func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 		for pid := range conns {
 			peers = append(peers, pid)
 		}
+		// psk：本节点是否开了预共享密钥门禁（空 = 开放，谁连上都服务）；
+		// psk_peers：当前已通过门禁的连接数。给管理台/排查用——"对端拉不到"
+		// 的第一嫌疑就是它没出示密钥。
+		pskEnabled, pskOK := peerjsService.PSKState()
 		c.JSON(http.StatusOK, gin.H{
-			"id":     peerjsService.ID(),
-			"online": true,
-			"peers":  peers,
+			"id":        peerjsService.ID(),
+			"online":    true,
+			"peers":     peers,
+			"psk":       pskEnabled,
+			"psk_peers": pskOK,
 		})
 	})
 

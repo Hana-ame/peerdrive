@@ -9,6 +9,7 @@
 #   3. 共享清单：B 经 share 帧拿到 A 的文件列表（files 应非空）
 #   4. 跨节点拉取：B 逐个拉取并落盘
 #   5. 内容校验：落盘文件的 sha256 必须与源 hash 一致
+#   6. PSK 门禁：A 重启成「带密钥」→ 没密钥的 B 必须被拦；给 B 同一把钥匙 → 恢复
 #
 # 用法：
 #   ./scripts/netdisk-local-demo.sh            # 跑完自动验证，服务保留供手测
@@ -190,6 +191,53 @@ while read -r HASH NAME SIZE; do
   fi
 done < "$DEMO_DIR/targets.txt"
 
+say "[6] PSK 门禁（预共享密钥）"
+# 门禁只在真实网络里才有意义，所以这一步不 mock：把 A 重启成「带密钥」，
+# 先看没密钥的 B 是不是真被拦住，再给 B 同一把钥匙看是不是立刻恢复。
+# 注意 B 重启后 joined_nodes.json 还在（落盘校验已在 [2] 覆盖），会重连上来。
+PSK=demo-psk
+
+kill_port $A_PORT
+sleep 2
+( cd "$DEMO_DIR/a/run" && env PORT=$A_PORT \
+    PEERDRIVE_PEERJS_ID=node-a \
+    PEERDRIVE_STORAGE="$DEMO_DIR/a/root" \
+    PEERDRIVE_DOWNLOAD_DIR="$DEMO_DIR/a/root/downloads" \
+    PEERDRIVE_SHARE_ENABLE=true \
+    PEERDRIVE_SHARE_DIRS="$DEMO_DIR/a/root/downloads/shared" \
+    PEERDRIVE_PSK="$PSK" \
+    $COMMON_ENV setsid nohup "$BIN/server" > "$DEMO_DIR/a.log" 2>&1 < /dev/null & )
+wait_up "http://127.0.0.1:$A_PORT/ping" "node-a（带 PSK 重启）" || exit 1
+sleep 6
+
+NODE_A=$(curl -s -m 10 "http://127.0.0.1:$A_PORT/peerjs/node")
+echo "  $NODE_A" | head -c 200; echo
+echo "$NODE_A" | grep -q '"psk":true' && ok "A 报告已开启 PSK 门禁" || bad "A 没报告 PSK 开启（$NODE_A）"
+
+SH2=$(curl -s -m 30 "http://127.0.0.1:$B_PORT/peerjs/nodes/node-a/shares")
+echo "  $SH2" | head -c 300; echo
+if echo "$SH2" | grep -q '"files":\['; then
+  bad "B 没有密钥却拿到了清单 —— 门禁没生效"
+else
+  ok "B 没带密钥 → 被门禁拦下（$(echo "$SH2" | head -c 120)）"
+fi
+
+kill_port $B_PORT
+sleep 2
+( cd "$DEMO_DIR/b/run" && env PORT=$B_PORT \
+    PEERDRIVE_PEERJS_ID=node-b \
+    PEERDRIVE_STORAGE="$DEMO_DIR/b/root" \
+    PEERDRIVE_DOWNLOAD_DIR="$DEMO_DIR/b/root/downloads" \
+    PEERDRIVE_PSK="$PSK" \
+    $COMMON_ENV setsid nohup "$BIN/server" > "$DEMO_DIR/b.log" 2>&1 < /dev/null & )
+wait_up "http://127.0.0.1:$B_PORT/ping" "node-b（带同一把密钥重启）" || exit 1
+sleep 8
+
+SH3=$(curl -s -m 30 "http://127.0.0.1:$B_PORT/peerjs/nodes/node-a/shares")
+N3=$(echo "$SH3" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["files"]))' 2>/dev/null || echo 0)
+[ "$N3" -gt 0 ] && ok "B 带同一把密钥 → 恢复（$N3 个文件）" \
+                || bad "B 带了密钥仍拿不到清单（$SH3）"
+
 say "结果"
 if [ "$FAILED" -eq 0 ]; then
   ok "网盘链路全绿：市场 → 加入 → 清单 → 拉取 → 校验"
@@ -204,9 +252,12 @@ cat <<TIP
            : cd packages/peerdrive-client && npm run build:panel
              然后浏览器打开 dist/panel.html，或直接带参数打开：
              dist/panel.html?node=node-a&host=<本机IP>:$SIG_PORT&path=/&key=peerjs&secure=0&auto=1
+             ⚠️ 第 [6] 步把 A/B 都重启成了带 PSK 的节点，所以现在手测要在面板的
+             「预共享密钥」框里填 $PSK（或链接里带 &psk=$PSK），否则拿不到清单。
+             想回到无门禁状态：$0 --stop 再重跑本脚本的前 5 步。
              （面板与信令不同源，所以信令必须开 CORS —— 已在 back/signalserver 处理）
   面板自检 : cd packages/peerdrive-client
-             SIG_HOST=<本机IP> SIG_PORT=$SIG_PORT NODE_ID=node-a node scripts/verify-panel.mjs
+             SIG_HOST=<本机IP> SIG_PORT=$SIG_PORT NODE_ID=node-a PSK=$PSK node scripts/verify-panel.mjs
   节点管理台: cd front && npm run dev -- --host 0.0.0.0 --port 5173
              浏览器打开后在设置里把后端改成 http://<本机IP>:$B_PORT
   最小演示 : cd packages/peerdrive-client && npm run demo（需要 http 服务提供包目录）

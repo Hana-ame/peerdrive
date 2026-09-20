@@ -191,11 +191,19 @@
           <input id="in-secure" type="checkbox" checked> wss
         </label>
       </div>
+      <div class="f" style="flex:1 1 150px">
+        <label>预共享密钥（可留空）</label>
+        <input id="in-psk" type="password" autocomplete="off" placeholder="节点开了 PSK 才要填">
+      </div>
       <div class="f auto"><label>&nbsp;</label><button id="btn-connect">连接</button></div>
     </div>
     <div class="hint">
       自托管信令填节点启动时用的 PEERDRIVE_PEERJS_*，并取消勾选 wss（多为 ws://）。
       也可以用链接直接带参数：<span class="mono">?node=&lt;id&gt;&amp;host=&amp;port=&amp;secure=0</span>
+      <br>
+      <b>预共享密钥</b>：节点用 <span class="mono">PEERDRIVE_PSK</span> 开了门禁时才需要——
+      连上后如果提示 <span class="mono">psk required</span>，说明你没填或填错了。
+      密钥<b>不会</b>被写回地址栏、也不会存进「最近连接」，只留在这一页的输入框里。
     </div>
   </div>
 

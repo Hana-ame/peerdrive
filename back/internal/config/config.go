@@ -41,6 +41,17 @@ type Config struct {
 	PeerJSSecure bool   // PEERDRIVE_PEERJS_SECURE, 默认 true
 	PeerJSPeers  string // PEERDRIVE_PEERJS_PEERS, 逗号分隔对端节点 peer id，启动自动互联
 
+	// PeerPSK 节点访问预共享密钥（PEERDRIVE_PSK，默认空 = 开放模式）。
+	//
+	// 设了之后：任何对端必须先在这条连接上出示**同样的**密钥，本节点才会应答
+	// 它的数据请求（req/share/list/create/upload/info/delete/sync/转发）。
+	// 没设 = 完全向后兼容的老行为（谁连上都服务）。
+	//
+	// 边界：它验的是「对端知不知道这个密钥」，不是「对方是谁」——
+	// 不做身份、不做授权分级，所有持钥者对节点有同等访问权。
+	// 想按人区分权限得走注册服务器鉴权（doc/modules/auth），不是这里。
+	PeerPSK string
+
 	MQTTEnable      bool   // PEERDRIVE_MQTT_ENABLE, 默认 false（MQTT 分片房间发现）
 	MQTTBroker      string // PEERDRIVE_MQTT_BROKER, 默认 tcp://broker.emqx.io:1883
 	MQTTTopicPref   string // PEERDRIVE_MQTT_TOPIC_PREFIX, 默认 peerdrive/v1
@@ -150,6 +161,7 @@ func Load() *Config {
 		PeerJSID:     getEnv("PEERDRIVE_PEERJS_ID", ""),
 		PeerJSSecure: getEnvBool("PEERDRIVE_PEERJS_SECURE", true),
 		PeerJSPeers:  getEnv("PEERDRIVE_PEERJS_PEERS", ""),
+		PeerPSK:      getEnv("PEERDRIVE_PSK", ""),
 
 		MQTTEnable:        getEnvBool("PEERDRIVE_MQTT_ENABLE", false),
 		MQTTBroker:        getEnv("PEERDRIVE_MQTT_BROKER", "tcp://broker.emqx.io:1883"),

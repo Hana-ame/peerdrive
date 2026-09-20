@@ -9,6 +9,9 @@
 //	      {"type":"err","msg","reqId"}
 //	共享: {"type":"share","reqId"}
 //	      → {"type":"share-resp","collections":[…],"files":[…],"dirs":[…],"total":N,"reqId"}
+//	门禁: {"type":"psk-auth","psk":"<密钥>"}
+//	      → {"type":"psk-ok"} / {"type":"psk-err","msg":"...","code":"PSK_REQUIRED"}
+//	      （节点设了 PEERDRIVE_PSK 才要；未设 = 开放模式，见 pskAuthFrame）
 //
 // 三条不能改的约束（破坏了不会报错，只会静默错位）：
 //  1. data 头是**文本帧**、数据块是**二进制帧**。raw 序列化下 string 走 PPID 51、
@@ -58,6 +61,26 @@ export function reqFrame(hash, { offset = 0, size = -1, reqId } = {}) {
 export function shareFrame(reqId) {
   return JSON.stringify({ type: 'share', reqId, v: PROTOCOL_VERSION })
 }
+
+// pskAuthFrame 构造预共享密钥帧（PSK 门禁，见 doc/NETDISK.md 的「PSK 门禁」）。
+//
+// 语义：节点可以设一个预共享密钥（PEERDRIVE_PSK），设了之后对端必须在**连接
+// 上的第一帧**出示同样的密钥，否则所有请求都回 err（code=PSK_REQUIRED）。
+// 没设密钥的节点是开放模式，不发这帧也照常服务（向后兼容）。
+//
+// 两个实现约定（与 Go 侧 back/internal/transport/psk.go 对齐）：
+//  1. **连接建立后立刻发，且必须是第一帧**。DataChannel 保序，服务端按序处理
+//     必然先看到 auth 再看到业务帧——所以本包**不等** psk-ok 就发业务请求，
+//     不给每次连接多加一个 RTT。
+//  2. **明文传密钥**。DataChannel 是强制 DTLS 的，密钥不会在链路上裸奔；
+//     而服务端本来就要存明文才能比对。要防的是"陌生人连上来"，不是窃听。
+export function pskAuthFrame(psk) {
+  return JSON.stringify({ type: 'psk-auth', psk: String(psk ?? ''), v: PROTOCOL_VERSION })
+}
+
+// PSK_REQUIRED 是 Go 侧门禁在 err 帧里带的机器可读错误码。
+// UI 按它提示"请填密钥"，**不要**去匹配 err 的 msg 文案（文案会改）。
+export const PSK_REQUIRED = 'PSK_REQUIRED'
 
 // parseFrame 解析文本帧。返回 null 表示"不是本协议的控制帧"（非 JSON、
 // 或缺 type）——调用方应当忽略而不是报错：同一条连接上可能有别的用途的帧。

@@ -52,12 +52,16 @@ try {
 // PANEL_URL 给的是 http(s) 地址时走「托管模式」（例如 npm run serve:panel 起的内网服务）。
 // 这个模式的价值：http 页面发起 ws:// 不会被混合内容拦截，所以内网用 ws 信令就行，
 // 不必给信令配 TLS —— 只有 HTTPS 托管的面板（如 GitHub Pages）才必须 wss。
+// PSK：节点开了预共享密钥门禁时用它（面板会从链接读入，然后立刻从地址栏抹掉）。
+// 自检时带上它，就能顺带验证"带密钥能过门禁"这条路径。
+const PSK = process.env.PSK || ''
 const BASE = process.env.PANEL_URL || 'file://' + PANEL
 const url =
   BASE +
   (BASE.includes('?') ? '&' : '?') +
   `node=${NODE_ID}&host=${SIG.host}&port=${SIG.port}&path=${encodeURIComponent(SIG.path)}` +
-  `&key=${SIG.key}&secure=${SIG.secure ? 1 : 0}&auto=1`
+  `&key=${SIG.key}&secure=${SIG.secure ? 1 : 0}&auto=1` +
+  (PSK ? `&psk=${encodeURIComponent(PSK)}` : '')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 let failed = 0

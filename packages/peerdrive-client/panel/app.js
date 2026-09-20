@@ -85,6 +85,16 @@
     }
   }
 
+  // 预共享密钥：**不**进地址栏、**不**进 localStorage。
+  // 理由：地址栏会被历史记录/截图/分享带走，localStorage 是明文且跨会话常驻；
+  // 而密钥一旦泄露，等于这个节点对所有拿到它的人开门。所以它只活在当前页面的
+  // 输入框里，刷新即丢（真要长期保存请用密码管理器）。
+  // 反向是允许的：链接里带 psk= 可以预填（方便一次性分享），但读完立刻从
+  // URL 里抹掉，不让它在地址栏里停留。
+  function pskOfForm() {
+    return $('in-psk') ? $('in-psk').value : ''
+  }
+
   // 面板状态回写地址栏 —— 让用户能直接复制「连这个节点的面板」链接
   function syncURL() {
     var q = params()
@@ -94,6 +104,7 @@
     q.set('path', sig.path)
     q.set('key', sig.key)
     q.set('secure', sig.secure ? '1' : '0')
+    q.delete('psk') // 密钥绝不回写地址栏（见 pskOfForm 注释）
     if ($('in-node').value.trim()) q.set('node', $('in-node').value.trim())
     else q.delete('node')
     try { history.replaceState(null, '', location.pathname + '?' + q.toString()) } catch (e) { /* file:// 下可能不让改 */ }
@@ -291,6 +302,15 @@
       '自托管信令用 `peersignal -tls-cert cert.pem -tls-key key.pem`，或在信令前挂 TLS 反代。'
   }
 
+  // pskHint 门禁提示。对端回 PSK_REQUIRED 时，用户的修复动作是「去填密钥」，
+  // 而不是排查网络——不加这句，绝大多数人会以为是节点离线（典型误判）。
+  function pskHint(e) {
+    if (!e || e.code !== window.PeerDrive.ERR.PSK_REQUIRED) return null
+    return '该节点开了预共享密钥门禁（节点侧 PEERDRIVE_PSK）：在「预共享密钥」框里填' +
+      '同一个密钥再连一次。拿不到密钥就只能找节点运营者要——门禁本来就是为了' +
+      '拦住没钥匙的人。'
+  }
+
   async function connect() {
     if (!peerReady()) { log(peerMissingHint(), 'err'); return }
     var nodeId = $('in-node').value.trim()
@@ -307,9 +327,11 @@
     updateShares()
     try {
       log('连接信令 ' + sig.host + ':' + sig.port + ' 并拨号 ' + nodeId + ' …')
+      var psk = pskOfForm()
       var client = await window.PeerDrive.connectToPeer(window.Peer, nodeId, {
         peerOptions: peerOptions(sig),
         idleTimeoutMs: 60 * 1000,
+        psk: psk, // 空串 = 不出示（对端没开门禁时完全无感）
       })
       s.client = client
       s.status = 'online'
@@ -327,6 +349,7 @@
       if (e.code === window.PeerDrive.ERR.TIMEOUT) {
         log('提示：对方节点离线、peer id 写错，或信令配置不同（host/port/path/key/secure）', 'warn')
       }
+      if (pskHint(e)) log(pskHint(e), 'warn')
       renderNodes()
       updateShares()
     }
@@ -353,6 +376,7 @@
     } catch (e) {
       s.error = e.message || String(e)
       log('获取清单失败：' + s.error + (e.code ? '（' + e.code + '）' : ''), 'err')
+      if (pskHint(e)) log(pskHint(e), 'warn')
       renderNodes()
       if (current === s.id) updateShares()
     }
@@ -452,6 +476,13 @@
     if (q.get('key')) $('in-key').value = q.get('key')
     if (q.get('secure') !== null) $('in-secure').checked = q.get('secure') !== '0'
     if (q.get('node')) $('in-node').value = q.get('node')
+    // psk= 允许预填（一次性分享链接），但读完立即从地址栏抹掉
+    if (q.get('psk')) {
+      $('in-psk').value = q.get('psk')
+      q.delete('psk')
+      try { history.replaceState(null, '', location.pathname + '?' + q.toString()) } catch (e) { /* file:// 下可能不让改 */ }
+      log('已从链接读入预共享密钥，并将其从地址栏移除（不留在历史记录里）', 'warn')
+    }
 
     $('btn-connect').addEventListener('click', connect)
     $('in-node').addEventListener('keydown', function (e) { if (e.key === 'Enter') connect() })

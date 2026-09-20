@@ -56,8 +56,27 @@ const client = await connectToPeer(Peer, nodeId, {
   connOptions: {},              // 透传给 peer.connect，一般不用改
   idleTimeoutMs: 120_000,       // 多久没收到该请求的帧就判死
   maxBufferBytes: 256 << 20,    // fetch/saveAs 的内存闸
+  psk: '',                      // 节点开了 PSK 门禁时填同一把密钥（见下）
 })
 ```
+
+**预共享密钥（PSK）**：节点可以用 `PEERDRIVE_PSK` 设门禁，设了之后对端必须在连接上
+出示同一把密钥，否则所有请求都回 `err`（`code: 'PSK_REQUIRED'`）。给了 `psk` 时，
+本包会在连接建立后**立刻**把它作为第一帧发出（DataChannel 保序，所以不必等回执，
+也不给连接多加一个 RTT）。没给 = 不出示；对端没开门禁时两者都没区别。
+
+```js
+import { connectToPeer, ERR } from 'peerdrive-client'
+
+try {
+  const client = await connectToPeer(Peer, nodeId, { psk: 'demo-psk' })
+} catch (e) {
+  // 拿到清单/文件时如果被拦，e.code === ERR.PSK_REQUIRED，提示去填密钥
+}
+```
+
+`client.pskState` 反映握手状态：`none`（没配）/ `sent`（已出示，等回执）/
+`ok` / `err`（`client.pskError` 是对端的 msg）。
 
 内部等价于：建 Peer → 等信令 `open` → `peer.connect(nodeId, { serialization: 'raw' })` → 等 DataChannel `open`。
 
