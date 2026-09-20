@@ -65,7 +65,11 @@ const ok = (m) => console.log('  PASS ' + m)
 const bad = (m) => { console.log('  FAIL ' + m); failed++ }
 
 console.log('== 打开 ' + url)
-const browser = await chromium.launch({ channel: CHANNEL, headless: true })
+// PW_CHANNEL=default/none 时不传 channel，用 playwright 自带的 chromium
+// （CI 上装的是 bundled chromium，没有 Edge，写死 msedge 必然启动失败）
+const launchOpts = { headless: true }
+if (CHANNEL && CHANNEL !== 'default' && CHANNEL !== 'none') launchOpts.channel = CHANNEL
+const browser = await chromium.launch(launchOpts)
 const page = await browser.newPage({ acceptDownloads: true })
 const logs = []
 page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`))

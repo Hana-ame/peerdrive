@@ -53,9 +53,25 @@ wait_up() { # url label
   bad "$2 启动超时"; return 1
 }
 
+# 杀掉占用某端口的进程。fuser 属于 psmisc，不是每个环境都有（CI 镜像就未必装），
+# 所以先用 fuser，没有的话退回 ss 找 pid 再 kill，两者都没有就放弃（不致命）。
+kill_port() { # port...
+  local p
+  for p in "$@"; do
+    if command -v fuser >/dev/null 2>&1; then
+      fuser -k -n tcp "$p" 2>/dev/null
+    elif command -v ss >/dev/null 2>&1; then
+      ss -lntpH "sport = :$p" 2>/dev/null |
+        grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u |
+        while read -r pid; do kill "$pid" 2>/dev/null; done
+    fi
+  done
+  return 0
+}
+
 if [[ "${1:-}" == "--stop" ]]; then
   say "停止本地验收环境"
-  fuser -k -n tcp $A_PORT $B_PORT $SIG_PORT 2>/dev/null
+  kill_port $A_PORT $B_PORT $SIG_PORT
   sleep 1
   ok "已停止"
   exit 0
@@ -66,7 +82,7 @@ say "清理残留进程（端口 $SIG_PORT/$A_PORT/$B_PORT）"
 # 会因端口占用直接退出，而脚本后面的 curl 全打到**旧进程**上：于是能看到节点、
 # 也能 join，但共享清单是旧的、拉取落盘路径也是旧的 —— 表现为「任务 done 但文件
 # 没落盘」这种极误导人的失败（2026-09-20 实测踩到）。所以重跑前先清干净。
-fuser -k -n tcp $SIG_PORT $A_PORT $B_PORT 2>/dev/null
+kill_port $SIG_PORT $A_PORT $B_PORT
 sleep 2
 ok "已清理"
 

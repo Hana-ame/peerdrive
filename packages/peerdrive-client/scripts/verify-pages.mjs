@@ -41,7 +41,10 @@ let fail = 0
 const ok = (m) => { pass++; console.log('  PASS ' + m) }
 const bad = (m) => { fail++; console.log('  FAIL ' + m) }
 
-const browser = await chromium.launch({ channel: CHANNEL, headless: true })
+// PW_CHANNEL=default/none 时不传 channel，用 playwright 自带的 chromium
+const launchOpts = { headless: true }
+if (CHANNEL && CHANNEL !== 'default' && CHANNEL !== 'none') launchOpts.channel = CHANNEL
+const browser = await chromium.launch(launchOpts)
 try {
   const page = await browser.newPage()
   const errors = []

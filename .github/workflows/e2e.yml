@@ -1,0 +1,89 @@
+name: E2E
+
+# 端到端验收：真的起一个自托管信令 + 两个节点，把「市场 → 加入 → 清单 → 拉取 →
+# sha256 校验」跑一遍，再用真实浏览器打开面板点一遍。
+#
+# 为什么必须有它：单元/集成全绿不等于链路可用 —— 2026-09-20 那两个致命缺陷
+# （join 落盘 ENOENT、RegisterLocal 没写 file_index 导致共享清单恒为空）
+# 就是藏在这条组合路径里，所有单测照样是绿的。详见 doc/testing/README.md §4。
+on:
+  push:
+    branches: [refactor]
+    paths:
+      - 'back/**'
+      - 'packages/peerdrive-client/**'
+      - 'scripts/netdisk-local-demo.sh'
+      - '.github/workflows/e2e.yml'
+  pull_request:
+    branches: [main, master, refactor]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  netdisk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 预下载 go 依赖
+        working-directory: back
+        run: go mod download
+
+      - name: 构建面板产物
+        working-directory: packages/peerdrive-client
+        run: npm run build:panel && npm run check:panel
+
+      - name: 起链路环境并跑断言
+        # 注意这两点，都是本地实测踩出来的：
+        # 1) 脚本用 setsid nohup 起的服务会持有管道写端，直接 `bash ... | tail`
+        #    会一直不返回 ⇒ 输出重定向到文件并让它在后台跑，再轮询文件内容。
+        # 2) 判断结束不能只看进程退出，要看输出里出现了「== 结果 ==」。
+        run: |
+          set -uo pipefail
+          ( bash scripts/netdisk-local-demo.sh > /tmp/e2e-chain.out 2>&1 </dev/null & )
+          for i in $(seq 1 90); do
+            grep -q "== 结果 ==" /tmp/e2e-chain.out 2>/dev/null && break
+            sleep 2
+          done
+          cat /tmp/e2e-chain.out
+          grep -q "== 结果 ==" /tmp/e2e-chain.out || { echo "::error::链路脚本没跑完"; exit 1; }
+          if grep -q "FAIL" /tmp/e2e-chain.out; then echo "::error::链路断言失败"; exit 1; fi
+
+      - name: 装浏览器（面板 e2e 用）
+        run: |
+          mkdir -p /tmp/pw && cd /tmp/pw
+          npm init -y >/dev/null 2>&1
+          npm i playwright --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: 面板端到端（真实浏览器点一遍）
+        # 在同一个 runner 上复用上面那套环境：file:// 页面 + ws://127.0.0.1:9100
+        # （混合内容规则只拦 HTTPS 页面，file:// 不受限，所以 ws 就够）
+        working-directory: /tmp/pw
+        env:
+          SIG_HOST: 127.0.0.1
+          SIG_PORT: 9100
+          NODE_ID: node-a
+          PW_CHANNEL: chromium
+        run: node "$GITHUB_WORKSPACE/packages/peerdrive-client/scripts/verify-panel.mjs"
+
+      - name: 收尾
+        if: always()
+        run: |
+          bash scripts/netdisk-local-demo.sh --stop || true
+          echo "=== node-a.log ==="; tail -30 /tmp/pddemo/a.log 2>/dev/null || true
+          echo "=== node-b.log ==="; tail -30 /tmp/pddemo/b.log 2>/dev/null || true
+          echo "=== signal.log ==="; tail -20 /tmp/pddemo/signal.log 2>/dev/null || true
