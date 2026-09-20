@@ -141,10 +141,14 @@ cd ../../front && npm test && npm run build   # 前端：vitest 88 + vite build
 > Go 用 `go build/test -tags nosqlite`；前端 `npx vitest run`（**不要**加 `--reporter=basic`，
 > 该 reporter 在此版本不存在）。
 
-**端到端手测（改网盘链路必做）**：单元/集成绿不代表链路可用——
+**端到端（改网盘链路必做）**：单元/集成绿不代表链路可用——
 `scripts/netdisk-local-demo.sh` 起自托管信令 + 两个节点，自动跑完
 市场 → 加入 → 清单 → 拉取 → sha256 校验。它覆盖的是单测与集成都没覆盖的
 组合（登记 → 共享清单 → 跨节点拉取），历史上两个运行时缺陷只有它能发现。
+
+**CI 已覆盖**：`.github/workflows/e2e.yml` 会起同一套环境，先跑链路 8 项断言，
+再装 bundled chromium 用真实浏览器点面板跑 9 项断言（连上 → 清单 → 点保存真下载
+→ 预览 → sha256 一致）。本地仍可手工跑上面的脚本快速复现。
 两条配置陷阱：共享目录必须**同时**在 storage 根与 download 根内；
 同机多节点必须各自 cwd（`main.go` 硬编码 `InitDB("./peerdrive.db")`，
 同库会让拉取被判 `skipped: already local` 而假装成功）。

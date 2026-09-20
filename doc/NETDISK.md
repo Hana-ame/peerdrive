@@ -465,8 +465,9 @@ CI 和单元测试全绿，但真实跑起来 `files` 一直是空的。根因�
 | 4 | **节点市场 / 加入 / 清单 / 拉取**（HTTP API） | `bash scripts/netdisk-local-demo.sh` | 8/8 PASS（市场 → 加入 → 清单 → 拉取 → sha256 校验），连跑两次都绿 |
 | 5 | **节点管理台 UI**（`front/`，需后端） | `curl http://<IP>:5173/` + §7.2.2 | 200；市场/清单/任务 API 均返回预期数据 |
 | 6 | 单元测试/分层回归 | `bash scripts/test-layers.sh` | 9 层全绿 / 43s |
-| 7 | CI | `gh run list` | 三条 workflow（CI / Go Build Matrix / Deploy Pages）全 success |
-| 8 | 发版门禁 | — | ❌ **没有**（`ci.yml` 不触发 tag，`release.yml` 不跑测试） |
+| 7 | **E2E CI** | `gh run list --workflow e2e.yml` | ✅ success（链路 8 项 + 面板浏览器 9 项，同一套环境顺序跑） |
+| 8 | CI | `gh run list` | 四条 workflow（CI / Go Build Matrix / E2E / Deploy Pages）全 success |
+| 9 | 发版门禁 | — | ❌ **没有**（`ci.yml` 不触发 tag，`release.yml` 不跑测试） |
 
 ### 8.2 一键链路脚本的坑：重跑前必须先清干净
 
@@ -502,6 +503,5 @@ peersignal -addr :9101 -key peerjs -tls-cert cert.pem -tls-key key.pem
 - **只有 HTTPS 托管的面板才需要 wss**：混合内容规则只拦 HTTPS 页面发起的 `ws://`。
   `file://`（已测 9/9）和 http 页面（已测 9/9）用 ws 完全没问题 —— 所以**内网/本机用 ws 就够**，
   公网 Pages 版（HTTPS）才必须 wss。
-- **端到端脚本未进 CI**：只能在本地跑（§4 盲区清单里风险最高的一项）。
 - **发版无测试门禁**：打 tag 时 `ci.yml` 不触发。
 - `signalserver`(23) / `p2p_bt`(7) 是独立 go.mod 且无 CI job —— 改坏了 CI 照样绿。
