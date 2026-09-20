@@ -150,10 +150,51 @@ cd ../../front && npm test && npm run build   # 前端：vitest 88 + vite build
 **CI 已覆盖**：`.github/workflows/e2e.yml` 会起同一套环境，先跑链路 8 项断言，
 再装 bundled chromium 用真实浏览器点面板跑 9 项断言（连上 → 清单 → 点保存真下载
 → 预览 → sha256 一致）。本地仍可手工跑上面的脚本快速复现。
-两条配置陷阱：共享目录必须**同时**在 storage 根与 download 根内；
-同机多节点必须各自 cwd（`main.go` 硬编码 `InitDB("./peerdrive.db")`，
+两条配置陷阱：共享目录必须在 `PEERDRIVE_SHARE_DIRS` 里**声明过**（位置随意，
+storage 之外也行；未声明的目录一律拒绝）；同机多节点必须各自 cwd
+（`main.go` 硬编码 `InitDB("./peerdrive.db")`，
 同库会让拉取被判 `skipped: already local` 而假装成功）。
-详见 `doc/NETDISK.md` §7。
+
+**路径边界只有一套判定**：`back/internal/pathutil`（`Within` / `WithinAny`）。
+「写/登记边界」（storage 根 ∪ SHARE_DIRS ∪ download 根，`FileService.isPathAllowed`）
+与「读取边界」（storage 根 ∪ download 根 ∪ 声明过的共享目录，
+`FileIndexService.IsPathReadable`）是**两个不同的集合**，不要合并——合并会让对端
+能往你对外共享的目录里写文件，或者出现「清单列得出、一拉 `read failed`」。
+新增任何路径校验都必须走 `pathutil`，别再手写 `strings.HasPrefix(a+"/")`
+（Windows 分隔符是 `\`，且大小写不敏感）。
+`scripts/netdisk-sharedir-outside.sh` 专项验证共享目录放在 storage 之外。
+详见 `doc/NETDISK.md` §7.4。
+
+**改任何接受路径的入口，都要跑穿透矩阵**（`doc/NETDISK.md` §11）：
+`go test -tags nosqlite -run TestTraversal ./internal/...`（四层 162 条）
++ `./scripts/netdisk-traversal-probe.sh`（对着真节点打 payload + 磁盘复核）。
+新加 payload 就往对应层的表里加一行，别另起一套判定。
+
+**Windows 语义必须真在 Windows 上跑过**（2026-09-20 起的硬要求，§11.4）。CI 的
+Windows 那格不再跳过 `go test`；本机没装 Go 也能验：
+`GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -tags nosqlite -c -o x.test.exe <pkg>`
+把 `.test.exe` 拷到 Windows、cd 到该包目录执行。别再写死的 POSIX payload
+（`/etc/passwd` 在 Windows 上不是绝对路径，会被拼进 storage 根内 → 断言假绿），
+用 `systemAbsolutePath()` 这类按平台取值的写法。
+
+**打开就一定要关**（Windows 会惩罚）：库文件（新增 `repository.CloseDB()`）、
+上传会话（`FileIndexService.Close()`）、管理面上传临时文件
+（`adminUploadState.cleanupTemp()`，先 Close 再 Remove）。Windows 上打开着的
+文件删不掉，`os.Remove` 静默失败，Linux 上则毫无症状——所以只在 Windows
+跑测试才看得见。测试里统一用 `t.Cleanup`。
+
+**写路径和读路径同等对待**（2026-09-20 起的硬要求，§11.5）：任何**产生或改动
+文件**的动作（copy / delete / upload 落盘 / 分片上传的临时文件）都走
+`pathutil.Safe*`Any 系列，不许再裸写 `os.MkdirAll + os.WriteFile` /
+`os.Remove` / `os.Rename`——它们是"先判边界、再按路径落盘"的两步走，中间换一次
+软链就写到根外去了。简单记法：**任何 `filepath.Join` 出来的路径都不许直接喂给
+`os.WriteFile` / `os.OpenFile` / `os.Remove`**，中间必须过允许根的 `os.Root`。
+
+**Windows 上还有两个实测出来的语义差异**（2026-09-20）：① `filepath.Rel` 自己
+折叠大小写；② 8.3 短名（`C:\PROGRA~1`）是同一个目录的**另一个字符串名字**，而
+`EvalSymlinks` 只对**已存在**的路径还原它——"长名配的共享目录 + 短名访问"会被
+判成越权（文件在里面却读不到）。Windows 侧的归一化因此先过
+`pathutil.ExpandShortNames`（`normalize` 与写路径的 `pickRoot` 都已接好）。
 
 ## 关键配置（env）
 
@@ -169,6 +210,8 @@ cd ../../front && npm test && npm run build   # 前端：vitest 88 + vite build
 | `PEERDRIVE_SHARE_COLLECTIONS` | - | 共享的合集：逗号分隔 hash，或 `all`（= 所有 public 合集；受限/私有一律跳过） |
 | `PEERDRIVE_SHARE_DIRS` | - | 共享的目录：逗号分隔。空 = **不共享文件**（不是"共享全部"）。文件只回 basename，不回绝对路径 |
 | `PEERDRIVE_PSK` | - | 节点访问预共享密钥。空 = 开放（谁连上都服务）；设了 = 对端必须在连接上出示同一把密钥，否则回 `PSK_REQUIRED`。**只做准入，不做身份/分级**（详见 `doc/NETDISK.md` §9） |
+| `PEERDRIVE_ALLOW_HARDLINKS` | - | `=1` 放行有多个名字的文件（硬链接）。默认拒绝——硬链接没有方向，判不出它在允许根外还有没有别的名字。pnpm `node_modules` / `cp -l` 备份目录需要开 |
+| `PEERDRIVE_ALLOW_UNSAFE_ROOT` | - | `=1` 允许把 storage / download / share dir 配成**卷根**（`/`、`C:\`）。默认拒绝启动：那等于把整盘共享出去，几乎都是配错（env 没展开之类） |
 
 ## 线上部署（cloudcone 自托管信令）
 

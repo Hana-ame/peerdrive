@@ -68,7 +68,9 @@ ROADMAP 顺序，而是它的"验收形态"：阶段 5（范围）与阶段 6（
   `ShareCollection{Hash,Name,Size,Entries []ShareEntry}`。
 - **服务** `internal/service/nodeshare.go`：按配置 + 本地状态解析共享范围：
   - `PEERDRIVE_SHARE_COLLECTIONS`：逗号分隔的合集 hash（或 `all` = 所有 public 合集）；
-  - `PEERDRIVE_SHARE_DIRS`：逗号分隔目录，目录内的已登记文件进共享；
+  - `PEERDRIVE_SHARE_DIRS`：逗号分隔目录，目录内的已登记文件进共享。
+    **位置不受限**：可以在 storage 根之外、另一块盘、另一个挂载点；
+    反过来，没写进这里的目录一律拒绝（防任意文件读写）。见 §7.4；
   - `PEERDRIVE_SHARE_ENABLE`（默认 **false**）总开关——默认不共享任何东西。
 - **帧 verb** `share`（入站，`transport/share.go`）：
   `{type:"share"}` → `{type:"share-resp", collections:[...], files:[...], total}`
@@ -262,6 +264,9 @@ CI 绿 ≠ 链路可用。这一节是**真正把网盘跑起来**的手册，�
 ```bash
 ./scripts/netdisk-local-demo.sh          # 起信令 + node-a + node-b，自动跑一遍全链路
 ./scripts/netdisk-local-demo.sh --stop   # 停掉
+
+# 专项：共享目录放在 storage 根之外（另一块盘/另一个挂载点）也必须能访问
+./scripts/netdisk-sharedir-outside.sh
 ```
 
 脚本做的事：编译 `back/cmd/server` → 起自托管信令 `peersignal :9100` → 起
@@ -274,6 +279,7 @@ CI 绿 ≠ 链路可用。这一节是**真正把网盘跑起来**的手册，�
 peersignal :9100（信令 + 内置 /discover 发现，仅转发 SDP/ICE）
    ├── node-a :3001  storage=/tmp/pddemo/a/root  download=<root>/downloads
    │                 SHARE_DIRS=<root>/downloads/shared   ← 共享这一个目录
+   │                 （可换成任意路径，只要在 SHARE_DIRS 里声明过）
    └── node-b :3002  storage=/tmp/pddemo/b/root  download=<root>/downloads
         └── 市场发现 node-a → join → share 帧取清单 → pull 落盘到 <root>/downloads/pulled
 ```
@@ -405,12 +411,21 @@ CI 和单元测试全绿，但真实跑起来 `files` 一直是空的。根因�
 
 这两条来自代码里的安全边界，日志只有一行 WARN，很容易被当成噪音：
 
-1. **共享目录必须同时在 storage 根内 AND download 根内。**
-   `RegisterFolder` 校验 `cfg.StorageDir`（否则 `path outside storage root`）；
-   `serveFile` 经 local source 校验 allowed root（实际是 download 根，否则
-   `index path outside allowed root` → 回退按 hash 去内容寻址存储读 → 文件没
-   进过 content store → `peerjs: read failed`）。
-   所以把共享目录放在 `<download_root>/shared`，并让 storage 覆盖它。
+1. **共享目录必须在 `PEERDRIVE_SHARE_DIRS` 里声明过——位置则随意。**
+   登记侧（`FileService.isPathAllowed`）与读取侧（`FileIndexService.IsPathReadable`、
+   `NodeShare.underShareDir`）都只认「运营者声明过的根目录」：storage 根 ∪
+   `PEERDRIVE_SHARE_DIRS` ∪ `PEERDRIVE_DOWNLOAD_DIR`。没声明的目录 →
+   `path outside storage root`（HTTP 400）；声明过的目录在**任何位置**都行
+   ——storage 之外、另一块盘、另一个挂载点都可以。
+   想验证这条跑 `scripts/netdisk-sharedir-outside.sh`（它把共享目录放在 storage
+   根之外跑完整链路，并反向验证未声明目录仍被拒）。
+
+   > 历史坑（2026-09-20 已修）：曾经读取侧复用了**写/登记**边界，于是共享目录
+   > 不在下载目录下时会出现「登记成功、清单列得出、对端一拉 `read failed`」——
+   > 读取侧把它判成越权，回退到并不存在的内容寻址副本。根因是同一个"路径是否
+   > 越权"的判断在 `FileService` / `FileIndexService` / `NodeShare` 各写一份且
+   > 已经跑偏。现在三处统一到 `back/internal/pathutil`（跨平台：分隔符、
+   > Windows 大小写折叠、跨盘、符号链接），并把读/写两个边界显式拆开。
 
 2. **同一台机器上跑多个节点，必须给它们不同的 cwd。**
    `main.go:51` 硬编码 `repository.InitDB("./peerdrive.db")`，路径随进程 cwd
@@ -469,6 +484,9 @@ CI 和单元测试全绿，但真实跑起来 `files` 一直是空的。根因�
 | 8 | CI | `gh run list` | 四条 workflow（CI / Go Build Matrix / E2E / Deploy Pages）全 success |
 | 9 | **发版门禁** | `gh workflow run release.yml --ref refactor -f dry_run=true` | ✅ success（gate 2m39s → 5 平台构建；dry_run 不发 release） |
 | 10 | **PSK 门禁**（谁能连我的节点） | `bash scripts/netdisk-local-demo.sh`（第 [6] 步）+ `PSK=demo-psk ... verify-panel.mjs` | ✅ A 带密钥 → B 无密钥被拦 → B 带同一把密钥恢复；面板带密钥 9/9 |
+| 11 | **面板下指令：本地入库（`put`）** | `PSK=demo-psk SIG_HOST=<IP> SIG_PORT=9100 NODE_ID=<node> node scripts/verify-panel.mjs` | ✅ 14/14（含"入库 → sha256 一致 → 按 hash 取回校验通过"） |
+| 12 | **面板下指令：网络入库（`pull`）** | 同上，另给 `PULL_URL=<公网 URL>` | ✅ 公网 URL 抓回 75KB 并入库；内网地址被 SSRF 防护拒（`pull: 禁止拉向内网/本机地址`） |
+| 13 | **面板自动搜索在线节点（`discoverNodes`）** | 同上（脚本第 [8] 步自动跑） | ✅ 列出 3 个在线节点，含 nodeType/集合数/心跳时间；跨域没开时错误信息点名 CORS |
 
 ### 8.2 一键链路脚本的坑：重跑前必须先清干净
 
@@ -588,3 +606,202 @@ SIG_HOST=<IP> SIG_PORT=9100 NODE_ID=node-a PSK=demo-psk node scripts/verify-pane
   想让节点不出现在公共目录里，关 `PEERDRIVE_DISCOVER_PRESENCE`。
 - 密钥错了**不关连接**，而是每个 verb 都回一次 err —— 让对端能重发正确的密钥，
   也让它看到明确原因（关连接只会变成超时，更难排查）。
+
+---
+
+## 10. 面板"下指令"：把内容放进节点（2026-09-20）
+
+前九节讲的都是**读**（拉别人的东西）。这一节是反方向：面板在一条已建立的
+DataChannel 上向节点下三条指令 —— 自动搜索、本地入库、网络入库。
+
+### 10.1 三条指令走什么
+
+| 指令 | SDK 入口 | 协议动词 | 谁在干活 |
+|---|---|---|---|
+| 自动搜索在线节点 | `discoverNodes(sig)` | 无（信令 REST `GET /discover/nodes`） | 信令 —— 与 WebRTC 连接无关，**没连任何节点也能搜** |
+| 本地入库 | `client.put(file)` | `upload`（文本头 `upload` + 二进制分片，服务端回 `meta`/`ack`/`uploaded`） | 浏览器按 64KB 分片逐步推送，节奏由节点说了算 |
+| 网络入库 | `client.pull(url)` | `pull` → 应答 `pulled{hash,size,name,path}` | 节点替你去抓这个 URL 并入库 |
+
+三条都返回 `{hash,size,name,path}`：`hash` 是内容地址，之后在任何地方都能用它取回。
+`put` 失败时节点返回的 err 会原样透传（PSK 门禁没填密钥 → `PSK_REQUIRED`；
+`pull` 撞上层 SSRF 防护 → `PEER` + 具体原因）。
+
+### 10.2 两条硬约束（改之前先读）
+
+1. **自动搜索要求信令能跨域**。面板是公共静态页（`file://` 原点为 `null`，
+   托管在 Pages 又是另一域），而这一步是跨域 `fetch`。信令没回
+   `Access-Control-Allow-Origin`，浏览器会连响应一起吞掉，端到端只剩一句
+   `TypeError: Failed to fetch`（状态码根本拿不到）。面板的错误信息会直接点名这个头，
+   并说明在此之前"手填节点 id 连接"仍然可用。自托管信令请升到 2026-09-20
+   之后的 `go-peerserver`（已放开 CORS + OPTIONS 204）。
+2. **一条连接同时只能有一个上传流**。串行传多个文件；并行会在第二份的第一个
+   头就收到 `already in progress`。
+
+### 10.3 网络入库的安全边界（`pull` 不是"节点替你翻墙"）
+
+`pull` 是第一个"对外地址由别人指定"的动词，因此是默认最受管的一个：
+
+- 只放行 `http`/`https`；带用户名密码、非 http(s) 一律拒；
+- 拒绝 loopback / 私有网段 / link-local（含 IPv4-mapped IPv6 与 `169.254.169.254`）；
+- **重定向逐跳重新校验**（`CheckRedirect`），跳到内网的重定向同样被拒；
+- `Content-Length` 先行判断 + 写入侧长度上限（默认 100MB），超限是**报错**，
+  不是静默截断；入库前失败会清理掉半成品。
+
+所以"节点拒绝某个 URL"绝大多数是**策略性拒绝**，不是故障。面板会在这种情况
+额外提示一句，避免用户对着一个注定失败的地址反复重试。
+
+### 10.4 怎么验
+
+```bash
+# 前置：节点必须是**带 pull 的实现**（老二进制不认识这个动词，表现是不应答 →
+# 面板显示 TIMEOUT 而不是拒绝）。重编：
+#   cd back && go build -tags nosqlite -o /tmp/pddemo/bin/server-pull ./cmd/server
+
+cd packages/peerdrive-client
+npm test                 # 98/98（put/pull/discoverNodes 共 20 例）
+npm run build:panel      # 改了 src/ 或 panel/ 必须重建（CI 的 check:panel 会拦）
+
+# 端到端（真浏览器，点对点、node-c 这种开了 PSK 的节点要带密钥）
+PSK=demo-psk SIG_HOST=<IP> SIG_PORT=9100 SIG_SECURE=0 NODE_ID=node-c \
+  PULL_URL=https://hana-ame.github.io/peerdrive/ PW_CHANNEL=msedge \
+  node scripts/verify-panel.mjs
+# 断言：连上 → 清单 → 保存 → 预览 → sha256 一致
+#     → 自动搜索列节点 → 本地文件入库且 hash 与本地一致 → 按 hash 取回校验通过
+#     → 内网 pull 被 SSRF 拒 → 公网 pull 入库成功
+```
+
+### 10.5 边界
+
+- **`put` 会把整个内容读进浏览器内存**再分片上传（超过 256MB 面板会先警告）。
+  超大文件请自行切片。
+- **入库 ≠ 自动出现在别人的清单里**。共享清单是"已登记到共享范围内的文件"
+  （见 `nodeshare.filesSnapshot` 的前缀过滤），刚入库的内容未必在里面；
+  要证明它真的可取回，用任务里的「取回校验」按 hash 拉一次。
+
+---
+
+## 11. 路径边界与穿透测试（2026-09-20）
+
+节点对外暴露的接口里，**有五个入口接受调用方路径**，每一个都通向不同的系统调用：
+
+| 入口 | 谁可控 | 通向 | 漏了会怎样 |
+|---|---|---|---|
+| `create` verb（PeerJS/WebRTC） | 对端 | `os.Stat` + 登记索引 | 任意文件读（登记后经 `req` 取） |
+| `upload` / `write-file` 的 `name` | 对端 | `filepath.Join(uploadDir, ...)` 落盘 | 任意文件写 |
+| `POST /files/register_local` | HTTP 调用方 | `os.Open` | 任意文件读 |
+| `POST /files/register_folder` | HTTP 调用方 | `os.ReadDir` 遍历 | 任意目录列举 + 批量任意文件读 |
+| `GET /files/browse` | HTTP 调用方 | `os.ReadDir` | 任意目录列举 |
+| `POST /files/copy` 的 `dest_path` | HTTP 调用方 | `MkdirAll` + `WriteFile` | **任意文件写**（最危险） |
+
+五个共用**同一份判定**：`back/internal/pathutil`（`Within` / `WithinAny`）。
+判定集合分两套，不要合并：
+
+- **写/登记边界** `FileIndexService.IsPathAllowed` / `FileService.isPathAllowed`
+  = storage 根 ∪ `PEERDRIVE_SHARE_DIRS` ∪ `PEERDRIVE_DOWNLOAD_DIR`。
+  其中 `IsPathAllowed`（verb 侧）只有 download 根——对端不能往你对外共享的目录里写。
+- **读取边界** `FileIndexService.IsPathReadable` = download 根 ∪ storage 根 ∪
+  运营者声明过的共享目录。
+
+### 11.1 穿透测试怎么分布
+
+不是"加几个用例"，而是**四层各一份矩阵**，共 162 条断言：
+
+| 层 | 文件 | 覆盖 |
+|---|---|---|
+| 判定本身 | `internal/pathutil/traversal_test.go` | `..` 逃逸、兄弟目录同名前缀、NUL、软链（文件/目录/悬空/根自身）、跨盘、UNC、`\?\`、ADS、8.3 短名、`/proc/self/root`、空根、配置拆分 |
+| verb 层 | `internal/transport/traversal_test.go` | `create` 拒绝、`write-file` 的 `name` 必须落在 uploadDir 内、共享根目录里的软链逃逸、`redactDisallowedPath` 脱敏 |
+| service 层 | `internal/service/traversal_test.go` | 同一份 payload 打四个入口；`copy` 额外断言"磁盘上什么都没多出来" |
+| HTTP 层 | `internal/controller/traversal_test.go` | **编码形态**（`%2e%2e%2f`、`....//`、`..%5c`、`\u002f`） |
+| 真二进制 | `scripts/netdisk-traversal-probe.sh` | 对着跑起来的节点打 payload，含磁盘复核 |
+
+```bash
+cd back && go test -tags nosqlite -run TestTraversal ./internal/...
+./scripts/netdisk-traversal-probe.sh
+```
+
+### 11.2 测出来的两个真问题（都已修）
+
+1. **`CopyFile` 的边界不是第一道门。** 它先 `GetFileMeta(hash)` 再校验目标路径，
+   于是越权 `dest_path` 返回的是 `source hash ... not found`——
+   ① 拒绝原因被掩盖，运维照日志会当成数据问题；
+   ② 安全边界不在最前面，将来谁在上面加一段"源不存在就自动去拉"的逻辑就退化成任意文件写；
+   ③ 顺带泄露"某个 hash 存不存在"。
+   现在 `isValidHash` + `isPathAllowed` 提到最前。
+
+2. **`sanitizeName("..")` 返回 `..`**。`filepath.Base("../../x")` 是 `x` 没问题，
+   但 `Base("..")` 还是 `..`，`Join(uploadDir, "..")` 指到 **uploadDir 的父目录**。
+   靠 `Create` 的边界兜住了，但那层依赖顺序太脆——已在 `sanitizeName` 里直接挡掉。
+
+顺带加固：`pathutil.normalize` 显式拒绝含 NUL 的路径（Go 的 `os.Open` 也会拒，
+但纯字符串判定不认 NUL，不能让"碰巧靠系统调用挡住"成为唯一防线）。
+
+### 11.3 四条"已知没防住"——已修（2026-09-20）
+
+之前写在这里的四条，现已全部落地。**别再把它们当"没做"**：
+
+| 原来的缺口 | 现在怎么做 | 代码 |
+|---|---|---|
+| **TOCTOU**（`EvalSymlinks` 之后才 `os.Open`，中间能换软链） | 解析与打开合成一步：先 `normalize` 归一化，再用 **Go 1.24 的 `os.Root`** 打开（`openat2(RESOLVE_BENEATH)`，其它平台按目录 fd 逐个分量走 `O_NOFOLLOW`）——这就是当初说的"得上 `O_NOFOLLOW`/`openat`" | `pathutil.SafeOpen` / `SafeOpenAny`；四个读取入口全部改用它 |
+| **硬链接**（没有方向，`EvalSymlinks` 认不出来） | 拒绝"有多个名字"的普通文件（已开 fd 上的 `fstat` 取 `nlink > 1` 即拒）。登记入口有两个（对端 `create` 与 HTTP `register_local`），**两处共用 `pathutil.RejectHardlink`**，只判一处等于留口子 | `pathutil.RejectHardlink`；`PEERDRIVE_ALLOW_HARDLINKS=1` 放行（pnpm `node_modules`、`cp -l` 备份这类目录需要） |
+| **root 配成 `/`**（`Within("/", "/etc/passwd")` 是 true——那是配置意图，不是穿透） | 只能在**启动期**按配置意图拦：`checkUnsafeRoots` 检查 storage / download / 每个 share dir，配置成卷根就直接拒绝启动并点名是哪个环境变量 | `cmd/server/main.go` + `pathutil.IsUnsafeRoot`；`PEERDRIVE_ALLOW_UNSAFE_ROOT=1` 可越过 |
+| **Windows 专属 payload 在 Linux CI 上 `t.Skip`** | CI 的 Windows 那一格**不再跳过 `go test`**（`.github/workflows/go-build.yml`），并把写死的 POSIX payload（`/etc/passwd`）换成按平台取值——否则 Windows 上它不是绝对路径，会被拼进 storage 根内，判定放行、断言假绿 | `systemAbsolutePath()`（controller）、platform 分支（service） |
+
+> §11.3 那条硬链接防线后续又补了一刀：Windows 原先**没有**硬链接数可用（详见
+> §11.5 第一项），现已通过对打开句柄调 `GetFileInformationByHandle` 补齐。
+
+### 11.4 真机 Windows 第一次跑，挖出来的四个 bug
+
+Linux CI 全绿不代表 Windows 没事。把测试在 Windows 上真跑一遍，当天就抓出四个
+**只在 Windows 上成立**的问题（都是"Linux 上根本看不出症状"的类型）：
+
+1. **`filepath.Rel` 在 Windows 上自己就折叠大小写。** `path/filepath` 的
+   `sameWord` 在 Windows 上是 `strings.EqualFold`，逐分量比较时 `C:\Temp` 与
+   `c:\tEMP` 算同一个。所以"折叠大小写"这套逻辑在 Windows 上是 Rel 干的，
+   `foldCase` 取什么值都不改变结果（与 NTFS 一致，是正确的）。
+   原来那条断言"折叠关闭时不应放行"在 Windows 上永远不可能成立。
+2. **`filepath.Base("/")` 在 Windows 上返回 `\`，不是 `/`。** `sanitizeName`
+   只挡了 `"/"`，于是 `Join(uploadDir, "\")` = uploadDir 自己 → "is a directory"。
+   现在两种分隔符都挡（`pathutil` 之外还在 `sanitizeName` 里补了 `\`）。
+3. **删文件前没关句柄。** Windows 上打开着的文件删不掉
+   （"being used by another process"），`os.Remove` 静默失败：
+   - 管理面上传的临时文件：`os.Remove(au.path)` 写在 `au.f.Close()` **之前**
+     → 每个被中止的上传在磁盘上留一份垃圾（收口到 `adminUploadState.cleanupTemp`）；
+   - 分片上传 `Complete()` 之后句柄要留到 10 分钟后的 reap 才关 → 文件删不掉、
+     移不动。现在完成后立刻关句柄，并新增 `FileIndexService.Close()` 供测试收摊。
+4. **发布出去的二进制在 Windows/macOS 上一启动就死。** 发布流程对所有平台都
+   `CGO_ENABLED=0`，而 `mattn/go-sqlite3` 在无 cgo 时退化成 stub（第一次执行
+   SQL 才报错），于是 `InitDB` 建表失败、进程直接退出。现在按 cgo 是否可用
+   二选一：有 cgo 用 mattn，没有就用纯 Go 的 `modernc.org/sqlite`
+   （`repository/db_driver_cgo.go` / `db_driver_pure.go`，驱动名分别是
+   `sqlite3` / `sqlite`，所以 `sql.Open` 不能再写死）。
+   顺带：CI 的 Windows 那格也就不需要 mingw 了。
+
+Windows 上跑测试的方法（本机没装 Go 也能验：交叉编译出 `.test.exe` 直接跑）：
+
+```bash
+cd back
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -tags nosqlite -c -o /tmp/x.test.exe ./internal/pathutil/
+# 把 x.test.exe 拷到 Windows 上，cd 到该包目录后直接执行（测试里的相对路径依赖 cwd）
+```
+
+### 11.5 第二条没防住的清单——也已修（2026-09-20 晚）
+
+上一版写在这里的四条同样已经落地。**别再把它们当"没做"**：
+
+| 原来的缺口 | 现在怎么做 | 代码 / 怎么验 |
+|---|---|---|
+| **Windows 上拿不到硬链接数**（那条防线在 Windows 上是空的） | 不再从 `os.FileInfo` 取（`Win32FileAttributeData` 里根本没有 nlink），改成对**已打开的句柄**调 `GetFileInformationByHandle` 拿 `NumberOfLinks`。`RejectHardlink` 的入参由 `os.FileInfo` 换成 `*os.File`，两个登记入口本来就有开着的 fd，顺手还少一次路径解析 | `pathutil.NlinkOf` / `links_windows.go` / `links_unix.go`；Windows 真机 `TestTraversal_CreateHardlinkRejected`、`TestTraversal_RegisterLocalHardlinkRejected` 现在**不再 `t.Skip`** |
+| **写路径上的 TOCTOU**（copy / delete / upload 落盘仍按路径操作） | 写也 Root 化：新增 `SafeWriteFileAny` / `SafeOpenFileAny` / `SafeMkdirAllAny` / `SafeRemoveAny`，在允许根上开 `os.Root` 后**解析与落盘一次完成**；`FileService.Delete` 的 `os.Remove(p.Path)`、`CopyFile` 的 `MkdirAll+WriteFile`、`Upload` 的 `Rename`、分片上传的 `Abort/reap` 全部改用它 | `pathutil/safewrite.go`；`safeopen_write_test.go` 里每条都是**竞态形状**（先判合法 → 换成软链 → 再落盘），且都带一条**对照臂**证明旧的 `os.WriteFile` 确实会写穿软链 |
+| **8.3 短名没有专项用例** | 新增 Windows 专有用例，并顺手修出一个真 bug：Windows 的 `EvalSymlinks` 只会替**已存在**的路径还原短名，写操作的路径最后一段不存在 → `Within` 会把"同一个目录的另一个名字"判成越权（配长名共享目录、用短名访问时文件读不出来）。现由 `GetLongPathName`（逐段回退：最深的成功前缀用长名，后面不存在的部分原样保留）统一到长名 | `pathutil/shortname_windows.go` + `shortname_other.go`（非 Windows 恒等）；`shortname_windows_test.go`。本机实测 8.3 生成是开着的（`C:\Program Files → C:\PROGRA~1`） |
+| **`os.Root` 打不开 exotic 文件系统时静默 fail closed**（表现为"这个目录共享不了"） | 三件事：**分类**（ unsupported / 不存在 / 没权限，各自不同下一步）、**启动自检**（`warnUnsupportedRoots`，起不来/共享不了在日志里说清楚并给 remedy）、**显式的逃生阀** `PEERDRIVE_ROOT_FALLBACK=1`（默认关闭；开了会在日志里持续告警"已退回按路径判定，存在 TOCTOU 窗口"） | `pathutil/rootprobe.go` + `scoped.go`（Root 与降级两种模式统一成一个操作面）；`cmd/server/main.go` 启动自检 |
+
+关于最后一条的实测结论（本机 WSL2，2026-09-20）：`/tmp`、`/home`、DrvFs 的
+`/mnt/c`、`/mnt/d`、`/mnt/e`、procfs、sysfs、devtmpfs **全部**能建立 `os.Root`——
+唯一失败项是 `/root`（permission denied）。也就是说现实里最常见的"该目录共享不
+了"其实是**权限**问题，以前日志只有一句 `open root ...: permission denied`，
+现在会告诉你去查 owner/ACL。真正不支持的金属 host 请按上面的逃生阀处理。
+
+补一条务实的经验：**默认 fail closed 是对的**（宁可少给不能多给），但把"不支持"
+与"没权限/不存在"混为一谈才是排障成本的大头——`RootUnavailable` 只认
+`EINVAL`/`ENOSYS`/`ENOTSUP` 这一类，`ENOENT` 与 `EACCES` 都不许被归成
+"文件系统不支持"，否则运维会往 OS 兼容性方向白查半天。

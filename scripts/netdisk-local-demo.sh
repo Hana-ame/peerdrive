@@ -18,11 +18,15 @@
 #
 # 前置：Linux/macOS + Go（本仓库 back 模块）+ 端口 9100/3001/3002 空闲。
 #
-# 两个容易踩的配置约束（代码里有对应安全边界，配错了会静默失败）：
-#   - 共享目录必须在 storage 根内（RegisterFolder 的 storage root 校验）
-#   - 共享目录必须在 download 根内（serveFile 的 allowed root 校验）
-#   所以本脚本把共享目录放在 $DEMO_DIR/a/root/downloads/shared，
-#   并令 STORAGE=<...>/a/root、DOWNLOAD_DIR=<...>/a/root/downloads。
+# 配置约束（配错了会静默失败）：
+#   - 共享目录**必须在 PEERDRIVE_SHARE_DIRS 里声明过**——未声明的目录一律拒绝，
+#     这是防任意文件读写的边界，不会因为"目录存在"就放行。
+#   - 除此之外它可以在**任意位置**：storage 根之外、另一块盘、另一个挂载点都行。
+#     （2026-09-20 之前不行：读取侧复用了写/登记边界，共享目录不在下载目录下时
+#     会"清单列得出、一拉 read failed"。现在读/写边界已拆开，见
+#     internal/pathutil 与 FileIndexService.IsPathReadable。）
+#   - 本脚本仍把共享目录放在 $DEMO_DIR/a/root/downloads/shared（历史布局），
+#     想验证"放在外面"的极端情况跑 scripts/netdisk-sharedir-outside.sh。
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
