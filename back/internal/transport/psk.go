@@ -44,6 +44,8 @@ const pskErrCode = "PSK_REQUIRED"
 var servedVerbs = map[string]bool{
 	"req": true, "create": true, "upload": true, "list": true,
 	"share": true, "info": true, "delete": true, "sync": true,
+	"pull": true, // 网络入库（pull.go）：让节点替对端发一次 outbound 请求，
+	// 是所有 verb 里最该被门禁管住的一个
 	"fwd-open": true, "fwd-auth": true, "fwd-data": true, "fwd-close": true,
 }
 

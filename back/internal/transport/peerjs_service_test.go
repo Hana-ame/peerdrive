@@ -137,6 +137,12 @@ func (f *fakeSession) sentTypes() []string {
 
 func newTestPeerJSService(t *testing.T) *PeerJSService {
 	t.Helper()
+	return newTestPeerJSServiceWithIndex(t, NewFileIndexService(t.TempDir()))
+}
+
+func newTestPeerJSServiceWithIndex(t *testing.T, idx *FileIndexService) *PeerJSService {
+	t.Helper()
+	t.Cleanup(idx.Close) // Windows：上传会话的句柄不关，TempDir 清不掉
 	return &PeerJSService{
 		cfg:          &config.Config{},
 		storageDir:   t.TempDir(),
@@ -145,7 +151,7 @@ func newTestPeerJSService(t *testing.T) *PeerJSService {
 		connecting:   map[string]struct{}{},
 		forwardRules: map[string][]int{},
 		fwNonces:     map[string]*fwdNonce{},
-		fileIndex:    NewFileIndexService(t.TempDir()),
+		fileIndex:    idx,
 		ctx:          context.Background(),
 	}
 }

@@ -106,6 +106,28 @@ type adminUploadState struct {
 	aborted  bool // 泵内中止标记（size 超限/超时）→ worker 清理回 err
 }
 
+// cleanupTemp 关闭句柄**再**删临时文件（幂等）。
+//
+// 顺序不能反：Windows 上打开着的文件删不掉（"The process cannot access the
+// file because it is being used by another process"），os.Remove 会静默失败，
+// 临时文件就永久留在磁盘上（每个被中止的管理面上传留一份）。Linux 上顺序
+// 无所谓——打开的文件照样能 unlink——所以这个 bug 只有在 Windows 上真跑
+// 才看得见（2026-09-20 真机发现，之前 Linux CI 全绿）。
+// 收口到一个函数里，免得每处都靠人记得写对顺序。
+func (au *adminUploadState) cleanupTemp() {
+	if au == nil {
+		return
+	}
+	if au.f != nil {
+		_ = au.f.Close()
+		au.f = nil
+	}
+	if au.path != "" {
+		_ = os.Remove(au.path)
+		au.path = ""
+	}
+}
+
 // serveAdmin 处理管理面 admin 帧（仅本地会话；分派见 bindConn）。
 // 注意：binary 上传声明帧的 adminUp 设置必须发生在消息泵内（同步），
 // 否则泵已路由后续二进制帧时 adminUp 仍为空 → 数据块丢失（发现背景：
@@ -148,8 +170,7 @@ func (s *PeerJSService) serveAdmin(c Session, st *connState, raw []byte) {
 		// 上传被误判 size 超限中止、err 指向新 reqId（误导排查）。
 		// 发现背景：代码审阅 2026-08-18。
 		if old := st.adminUp; old != nil {
-			os.Remove(old.path)
-			old.f.Close()
+			old.cleanupTemp()
 			st.mu.Unlock()
 			_ = c.SendJSON(dcResp{Type: "err", Msg: "admin upload replaced by new declaration", ReqID: old.reqID})
 			st.mu.Lock()
@@ -211,8 +232,7 @@ func (s *PeerJSService) adminUploadChunk(c Session, au *adminUploadState, data [
 			// 写失败：必须清理临时文件与句柄，否则泄漏（文件 + fd 常驻）。
 			// 与 aborted 分支的清理语义一致；aborted 分支在下方。
 			// 发现背景：代码审阅 2026-08-18（此前仅 aborted 分支清理）。
-			os.Remove(au.path)
-			au.f.Close()
+			au.cleanupTemp()
 			_ = c.SendJSON(dcResp{Type: "err", Msg: "admin upload write failed: " + err.Error(), ReqID: au.reqID})
 			return
 		}
@@ -221,8 +241,7 @@ func (s *PeerJSService) adminUploadChunk(c Session, au *adminUploadState, data [
 		return
 	}
 	if au.aborted {
-		os.Remove(au.path)
-		au.f.Close()
+		au.cleanupTemp()
 		_ = c.SendJSON(dcResp{Type: "err", Msg: "upload aborted: size mismatch or timeout", ReqID: au.reqID})
 		return
 	}
@@ -232,8 +251,7 @@ func (s *PeerJSService) adminUploadChunk(c Session, au *adminUploadState, data [
 // serveAdminUploadComplete admin 上传收齐后的内部转发。
 // multipart 构造 + handler 调用都在 worker goroutine 里，不阻塞消息泵。
 func (s *PeerJSService) serveAdminUploadComplete(c Session, au *adminUploadState) {
-	defer os.Remove(au.path) // 临时文件必清（正常/异常路径都走到这里）
-	defer au.f.Close()
+	defer au.cleanupTemp() // 临时文件必清（正常/异常路径都走到这里）
 	if au.got < au.size {
 		c.SendJSON(dcResp{Type: "err", Msg: "upload aborted: incomplete", ReqID: au.reqID})
 		return

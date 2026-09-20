@@ -29,7 +29,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -80,6 +79,7 @@ type dcResp struct {
 	Nonce   string     `json:"nonce,omitempty"` // fwd-challenge：一次性质询（forward.go）
 	Hmac    string     `json:"hmac,omitempty"`  // fwd-auth：HMAC-SHA256(key, nonce)
 	Port    int        `json:"port,omitempty"`  // fwd-open：客户端声明的目标端口
+	URL     string     `json:"url,omitempty"`   // pull：让本节点去抓的地址（pull.go）
 	Psk     string     `json:"psk,omitempty"`   // psk-auth：对端出示的预共享密钥（psk.go）
 	Code    string     `json:"code,omitempty"`  // err 帧的机器可读错误码（消费端按 code 分支）
 }
@@ -300,6 +300,9 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 		case "upload":
 			// 对端流式上传：开始接收（后续 data 帧写入 UploadSink）
 			go s.serveUploadBegin(c, st, r)
+		case "pull":
+			// 对端给一个 URL，让本节点去抓（pull.go：网络入库，带 SSRF 防护）
+			go s.servePull(c, r)
 		case "list":
 			go s.serveList(c, r)
 		case "share":
@@ -433,8 +436,7 @@ func (s *PeerJSService) cleanupConn(c Session, st *connState) {
 	// 管理面上传收集（admin.go）：连接关闭 → 中止并清理临时文件
 	if au := st.adminUp; au != nil {
 		st.adminUp = nil
-		os.Remove(au.path)
-		au.f.Close()
+		au.cleanupTemp() // 顺序：先关句柄再删文件（Windows 上反了就删不掉）
 	}
 	for _, f := range st.fetches {
 		// 连接关闭：通知 fetch reader 退出（errCh），并放行 pump 投递阻塞
