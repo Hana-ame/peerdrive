@@ -177,3 +177,58 @@ func TestPSKState_ExposedForStatus(t *testing.T) {
 	assert.True(t, enabled)
 	assert.Equal(t, 1, n, "只有 a 通过了门禁，b 还没出示")
 }
+
+// messageHandler 取当前挂着的入站回调（nil = 还没挂；库在 nil 时会**丢弃**整帧）。
+func (f *fakeSession) messageHandler() func(peerjs.Frame) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.onMessage
+}
+
+// pskRaceSession 建模「入站帧与本端出示帧并发」这个真实形状：
+// 第一次 SendJSON（bindConn 里的 psk-auth）时，同步把对端的 psk-auth 投递给
+// 已注册的 OnMessage —— 真机上 dc.OnOpen（跑 bindConn）与 dc.OnMessage 是两条
+// 可并发的回调，发送又可能让出，所以对端在 open 那一刻发出的第一帧完全可能
+// 赶在注册之前到达。
+type pskRaceSession struct {
+	*fakeSession
+	fired     bool
+	delivered bool
+}
+
+func (s *pskRaceSession) SendJSON(v any) error {
+	err := s.fakeSession.SendJSON(v)
+	if !s.fired {
+		s.fired = true
+		if h := s.fakeSession.messageHandler(); h != nil {
+			s.delivered = true
+			b, _ := json.Marshal(map[string]any{"type": "psk-auth", "psk": "s3cret"})
+			h(peerjs.Frame{IsText: true, Data: b})
+		}
+	}
+	return err
+}
+
+// TestPSK_AuthArrivingDuringBindIsNotDropped 对端在 bindConn 期间送达的
+// psk-auth **不许被丢**。
+//
+// 发现背景（2026-09-21，CI 面板 E2E 偶发红）：现象是面板明明带了 psk 却一直
+// 收到「本节点需要预共享密钥」，节点日志里只有自己发出的 psk-auth，既没有
+// psk ok 也没有 mismatch —— 即对端那帧根本没被看见。根因是 bindConn 里
+// OnMessage 挂在 pskSendAuth **之后**，而库对 nil 回调的处理是静默丢弃。
+// 这个用例是竞态形状的：把 OnMessage 挪回发送之后，delivered 会是 false
+// 且整条连接永远卡在门禁上（后续 verb 全被拒，且不报错）。
+func TestPSK_AuthArrivingDuringBindIsNotDropped(t *testing.T) {
+	svc := newTestPeerJSService(t)
+	svc.cfg.PeerPSK = "s3cret"
+	inner := &fakeSession{id: "peer-x"}
+	sess := &pskRaceSession{fakeSession: inner}
+	svc.bindConn(sess)
+
+	require.True(t, sess.delivered,
+		"bindConn 期间送达的 psk-auth 必须被收到：OnMessage 要先于任何发送挂上，否则整帧被丢弃")
+
+	svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{"type": "share", "reqId": "r1"}))
+	_, ok := waitSent(inner, "share-resp", 2*time.Second)
+	assert.True(t, ok, "收到 auth 之后 share 必须被应答，而不是永远卡在门禁上")
+}

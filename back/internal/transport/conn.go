@@ -246,16 +246,26 @@ func (s *PeerJSService) bindConn(c Session) {
 	s.pendingMu.Lock()
 	s.pending[c] = st
 	s.pendingMu.Unlock()
+
+	// ⚠️ OnMessage 必须在**做任何可能让出的事之前**挂上。
+	// 发现背景：CI 的面板 E2E 偶发「psk: 本节点需要预共享密钥」（约 1/5），
+	// 节点日志里只有自己发出的 psk-auth，没有对端的 psk ok/mismatch ——
+	// 即对端的 auth 帧根本没被看见。根因是顺序：peerjs 库里 dc.OnMessage 在
+	// onMessage 为 nil 时**直接丢弃**该帧，而 dc.OnOpen（跑 bindConn 的就是它）
+	// 与 dc.OnMessage 是两条可并发的回调，下面的发送又可能让出；对端在 open
+	// 那一刻就发出的 psk-auth 完全可能赶在注册之前到达，然后被静默丢掉
+	// —— 门禁于是永远等不到出示，后续 verb 全被拒，且没有任何报错。
+	// 早挂只影响入站，不影响「psk-auth 是本端第一帧」这个出站语义。
+	c.OnMessage(func(msg peerjs.Frame) { s.dispatchFrame(c, st, msg) })
+	c.OnClose(func() { s.cleanupConn(c, st) })
+
 	go s.uploadWorker(c, st)
 	// 转发写 worker 与上传 worker 分离（2026-08-18）：大上传 Complete
 	// （fsync + hashFile）不再阻塞同连接转发隧道，见 inbound.go fwdWorker。
 	go s.fwdWorker(c, st)
 
-	// PSK 门禁：配了密钥就先出示（必须是本端第一帧，故在 OnMessage 之前）。
+	// PSK 门禁：配了密钥就出示（本端第一帧）。
 	s.pskSendAuth(c)
-
-	c.OnMessage(func(msg peerjs.Frame) { s.dispatchFrame(c, st, msg) })
-	c.OnClose(func() { s.cleanupConn(c, st) })
 }
 
 // dispatchFrame 连接消息泵：解析 JSON 头按 reqId 路由，二进制块追加到
