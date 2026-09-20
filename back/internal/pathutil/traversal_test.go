@@ -393,3 +393,43 @@ func TestTraversal_SplitListTraversal(t *testing.T) {
 		t.Fatalf("空项必须丢弃：%#v", SplitList("a,,b"))
 	}
 }
+
+// TestTraversal_SymlinkedRootMissingLeaf 根本身是软链、而 path 的最后一段还不存在时，
+// 两边必须解析到同一棵树。
+//
+// 这是 darwin 那格 CI 真红过一次的形状：macOS 的 t.TempDir() 是 /var/folders/...，
+// 而 /var 是 /private/var 的软链。root（存在）被 EvalSymlinks 解析成 /private/var/...，
+// path（叶子不存在）解析失败保持 /var/... → 同一目录的两个名字被当成两棵树，
+// 明明在根内的文件被判越权。修法是按最长存在前缀回退解析（resolveBestEffort）。
+func TestTraversal_SymlinkedRootMissingLeaf(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 上创建符号链接需要开发者模式/管理员，跳过")
+	}
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+
+	// 叶子还不存在：写目标/软链目标就是这个样子
+	missing := filepath.Join(link, "a.txt")
+	if !Within(link, missing) {
+		t.Fatalf("根是软链 + 叶子不存在时应判为根内：root=%q path=%q", link, missing)
+	}
+	if !Within(real, missing) {
+		t.Fatalf("用真实目录名配置的 root 也应认出这个路径：root=%q path=%q", real, missing)
+	}
+
+	// 对照：防御不能因此松掉，根外的东西仍然要拒
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if Within(link, filepath.Join(outside, "x.txt")) {
+		t.Fatal("根外的文件不能被判为根内")
+	}
+}

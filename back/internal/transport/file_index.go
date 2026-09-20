@@ -292,7 +292,7 @@ type UploadSession struct {
 	name      string
 	path      string
 	file      *os.File
-	size      int64  // 声明总大小
+	size      int64    // 声明总大小
 	roots     []string // 写边界（BeginUpload 时定下来，Abort/reap 删文件时共用）
 	bitmap    []uint64
 	fullWords int // 非末 word 中已满 64 chunk 的数量——Complete O(1) 判满

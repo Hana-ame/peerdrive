@@ -33,12 +33,12 @@ func TestSafeOpen_RejectsEscape(t *testing.T) {
 	require.NoError(t, os.WriteFile(secret, []byte("top secret"), 0o600))
 
 	for name, p := range map[string]string{
-		"向上逃逸":     filepath.Join(root, "..", filepath.Base(outside), "secret.txt"),
-		"根外绝对路径":   secret,
-		"系统文件":     "/etc/passwd",
-		"NUL":      filepath.Join(root, "a.txt") + "\x00",
-		"空路径":      "",
-		"空根":       "",
+		"向上逃逸":   filepath.Join(root, "..", filepath.Base(outside), "secret.txt"),
+		"根外绝对路径": secret,
+		"系统文件":   "/etc/passwd",
+		"NUL":    filepath.Join(root, "a.txt") + "\x00",
+		"空路径":    "",
+		"空根":     "",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := SafeOpen(root, p)

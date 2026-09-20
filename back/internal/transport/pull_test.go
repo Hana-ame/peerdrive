@@ -73,7 +73,7 @@ func TestPull_Success(t *testing.T) {
 func TestPull_RejectsNonHTTP(t *testing.T) {
 	for _, raw := range []string{"file:///etc/passwd", "gopher://example.com/1", "ftp://example.com/x"} {
 		initTestDB(t) // 内存 SQLite：WriteFile 最终要写 file_index 表
-	svc := newTestPeerJSService(t)
+		svc := newTestPeerJSService(t)
 		sess := &fakeSession{id: "peer-x"}
 		svc.bindConn(sess)
 
@@ -131,7 +131,7 @@ func TestPull_RejectsRedirectToInternal(t *testing.T) {
 	defer pub.Close()
 
 	allowOnly(t, pub.URL) // 只放行首跳；重定向目标仍走真判定
-	initTestDB(t) // 内存 SQLite：WriteFile 最终要写 file_index 表
+	initTestDB(t)         // 内存 SQLite：WriteFile 最终要写 file_index 表
 	svc := newTestPeerJSService(t)
 	sess := &fakeSession{id: "peer-x"}
 	svc.bindConn(sess)

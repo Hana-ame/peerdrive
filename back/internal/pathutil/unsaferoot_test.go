@@ -15,8 +15,8 @@ func TestIsUnsafeRoot(t *testing.T) {
 		{"//", true},
 		{"/tmp", false},
 		{"/tmp/", false},
-		{"", false},          // 空串由别的校验负责，这里不判
-		{"relative", false},  // 相对 cwd，不是卷根
+		{"", false},         // 空串由别的校验负责，这里不判
+		{"relative", false}, // 相对 cwd，不是卷根
 		{".", false},
 		{"/data/media", false},
 	}

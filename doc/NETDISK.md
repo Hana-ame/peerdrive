@@ -801,6 +801,23 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -tags nosqlite -c -o /tmp/x.test
 了"其实是**权限**问题，以前日志只有一句 `open root ...: permission denied`，
 现在会告诉你去查 owner/ACL。真正不支持的金属 host 请按上面的逃生阀处理。
 
+#### 11.5.1 软链根 + 叶子不存在（darwin 那格红出来的真 bug）
+
+`TestTraversal_RedactDisallowedPath` 在 `macos-latest/arm64` 上失败、其它平台全绿。
+根因不是 macOS 的判定语义不同，而是**它的临时目录本身是软链**：
+
+- macOS 的 `t.TempDir()` 是 `/var/folders/...`，而 `/var` → `/private/var` 是软链；
+- `normalize(root)`：root 存在 → `EvalSymlinks` 成功 → `/private/var/...`；
+- `normalize(path)`：path 的最后一段（`a.txt`）**还不存在** → `EvalSymlinks` 失败 →
+  保持 `/var/...` 原样；
+- 于是同一个目录被写成两种形式，`filepath.Rel` 算出一串 `..` → 判成越权。
+
+这在真实部署里也是 bug：共享目录配在软链路径下时，目录里的文件会"看得见却读不出来"。
+修法是按**最长存在前缀**解析（`pathutil.resolveBestEffort`）：能解析多深就解析多深，
+后面不存在的部分原样拼回，保证 root 与 path 永远落在同一套写法上。
+回归用例 `TestTraversal_SymlinkedRootMissingLeaf`（自建软链，Linux 上也能复现；
+摘掉修复它会红，已实测）。
+
 补一条务实的经验：**默认 fail closed 是对的**（宁可少给不能多给），但把"不支持"
 与"没权限/不存在"混为一谈才是排障成本的大头——`RootUnavailable` 只认
 `EINVAL`/`ENOSYS`/`ENOTSUP` 这一类，`ENOENT` 与 `EACCES` 都不许被归成

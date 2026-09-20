@@ -42,6 +42,44 @@ func SplitList(v string) []string {
 	return out
 }
 
+// resolveBestEffort 尽力解析软链：整条解析不了时，退而解析**最长存在前缀**
+// 再把剩下的部分原样拼回去。
+//
+// 为什么需要它（darwin 上真出过一次，CI 只有 macos 那格红）：`t.TempDir()` 在
+// macOS 上是 `/var/folders/...`，而 `/var` 是 `/private/var` 的软链。当 path 的
+// **最后一段还不存在**时（写目标、软链目标 —— 非常常见），`EvalSymlinks` 直接
+// 失败并原样返回 `/var/...`；而 root 那一侧是存在的，被解析成了 `/private/var/...`。
+// 于是明明在同一个目录里的两个路径被当成两棵树，`filepath.Rel` 算出一串 `..`
+// → 判成越权（表现为「共享目录里的文件读不出来」）。
+//
+// 修法是按前缀回退：能解析多深就解析多深，后面不存在的部分保持原样。
+// 这样 root 与 path 永远落在同一套写法上。
+func resolveBestEffort(abs string) string {
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	vol := filepath.VolumeName(abs)
+	sep := string(filepath.Separator)
+	rest := strings.Trim(strings.TrimPrefix(abs, vol), sep)
+	if rest == "" {
+		return abs
+	}
+	segs := strings.Split(rest, sep)
+	for i := len(segs) - 1; i >= 0; i-- {
+		prefix := vol + sep + strings.Join(segs[:i], sep)
+		resolved, err := filepath.EvalSymlinks(prefix)
+		if err != nil {
+			continue
+		}
+		tail := strings.Join(segs[i:], sep)
+		if tail == "" {
+			return resolved
+		}
+		return resolved + sep + tail
+	}
+	return abs
+}
+
 // Within 判断 path 是否位于 root 之内（root 自身算在内）。
 // root 或 path 为空 → false（不给默认值兜底：空根目录等于"全放行"）。
 func Within(root, path string) bool {
@@ -111,10 +149,7 @@ func normalize(p string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	abs = filepath.Clean(abs)
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = filepath.Clean(resolved)
-	}
+	abs = filepath.Clean(resolveBestEffort(abs))
 	if foldCase {
 		// Windows：同一个目录可能有 8.3 短名（`C:\PROGRA~1`）这个别名。不还原的
 		// 话，长名配的共享目录会用短名判成越权（文件确实在里面却读不到）。
