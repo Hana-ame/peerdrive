@@ -223,6 +223,18 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 
 	_ = repository.InsertFileProvider(hash, "local", absPath)
 
+	// 同步登记 file_index（hash → 绝对路径）：这份索引才是"本节点能对外提供
+	// 什么文件"的唯一真源——
+	//   - 对外共享清单（M2 的 share 帧，service/nodeshare.go 经
+	//     transport.FileIndexService.List 读取）按它过滤 ShareDirs 下的文件；
+	//   - 跨节点拉取（M3）用 Info(hash) 判断"本地已有"、用它的 path 落盘后登记。
+	// 缺了这一步的后果：运营者登记/上传的文件在自己的网盘 UI 里看得到，
+	// 对端问 share 帧时却永远拿到 files:[] —— 网盘链路在"清单"这一环断掉。
+	// 与 InsertFileProvider 同层写，失败只告警（不阻塞登记）。
+	if _, err := repository.UpsertFileIndex(hash, absPath, filename, size, false); err != nil {
+		log.LogWarn("file-svc: RegisterLocal upsert file_index %s failed: %v", hash, err)
+	}
+
 	log.LogInfo("file-svc: RegisterLocal %s -> hash=%s size=%d", absPath, hash, size)
 	return hash, nil
 }

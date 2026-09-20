@@ -147,6 +147,12 @@ func (d *NodeDirectory) saveLocked() error {
 	if err != nil {
 		return err
 	}
+	// storageDir 可能还没被创建（节点刚起、还没上传/拉取过任何文件），
+	// 此时 WriteFile 会 ENOENT → Join 被判失败（内存里已加入，但重启即丢）。
+	// 落盘前补一次 MkdirAll：这份清单很小，不该依赖存储目录已存在。
+	if err := os.MkdirAll(filepath.Dir(d.path), 0o755); err != nil {
+		return err
+	}
 	tmp := d.path + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return err
