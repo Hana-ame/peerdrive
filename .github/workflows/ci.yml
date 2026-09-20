@@ -15,6 +15,10 @@ on:
       - "module/*"
       - "*-agent"
       - "*-frontend"
+    # 打 tag 也要跑全量：以前只列 branches，push tag 触发不到本 workflow，
+    # 发版路径上等于没有 CI（2026-09-20 补）。branches 与 tags 是「或」关系，
+    # 满足任一即触发，不会互相排斥。
+    tags: ['v*']
   pull_request:
     branches: [main, master, refactor]
 

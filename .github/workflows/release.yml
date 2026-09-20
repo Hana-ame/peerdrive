@@ -2,9 +2,69 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # 手动跑一次门禁而不发版：改完 workflow 想验证「门禁会不会过」时用，
+  # dry_run 默认 true，所以 workflow_dispatch 时 release 那步会被跳过。
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '只跑门禁，不出包、不发 release'
+        type: boolean
+        default: true
 
 jobs:
+  # 发版门禁：打 tag 时先把核心测试跑一遍，红了就不出包、不发 release。
+  # 为什么 release 里要再跑一遍，而不是等 ci.yml：workflow 之间没有 needs，
+  # ci.yml 虽然也在 tags 上触发，但它和 release 是并行的、拦不住这里——
+  # 想要「测试没过就不发版」，门禁必须长在 release 自己身上。
+  # 范围取「核心且快」：后端（vet+测试+构建）、信令模块、peerjs 模块、
+  # 消费端包（含面板产物漂移）、脱外网的集成测试（唯一覆盖真实握手的用例）。
+  # media/frontend 的 npm 套件由 ci.yml 在 tags 上并行覆盖，不在这里重复。
+  gate:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: back/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 后端 vet + 测试 + 构建
+        working-directory: back
+        run: |
+          go vet -tags nosqlite ./...
+          go test -tags nosqlite ./... -count=1
+          go build -tags nosqlite -o peerdrive-server ./cmd/server/
+
+      # 集成测试：TestMain 起全局自托管信令 + 同机 WebRTC，脱外网。
+      # 必须 -p 1（多组测试共享同一个信令服务，并行会互相干扰）。
+      - name: 集成测试
+        working-directory: back
+        run: go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1 -timeout 10m
+
+      # 下面两个是独立 go.mod（主仓 replace 指向本地），back 的 ./... 覆盖不到。
+      - name: 自托管信令模块
+        working-directory: back/signalserver
+        run: go test ./... -count=1
+
+      - name: peerjs 模块
+        working-directory: back/peerjs
+        run: go test ./... -count=1
+
+      - name: 消费端包 + 面板产物一致性
+        working-directory: packages/peerdrive-client
+        run: |
+          npm test
+          npm run check:panel
+
   build:
+    needs: gate
     strategy:
       matrix:
         include:
@@ -38,6 +98,8 @@ jobs:
 
   release:
     needs: build
+    # tag 推送才发 release；手动 dispatch 默认 dry_run（只验证门禁跑得通）。
+    if: ${{ github.event_name == 'push' || !inputs.dry_run }}
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
