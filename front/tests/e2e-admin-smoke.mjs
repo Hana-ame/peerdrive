@@ -1,7 +1,9 @@
 // E2E 冒烟：连接本地 WS /ws/peer，走 admin verb 验证管理面全链路
 // （对应前端 ws.js admin/upload + 后端 admin.go 真实 gin 转发）。
 // Node 22 原生 WebSocket；二进制用 ArrayBuffer（binaryType 设为 'arraybuffer'）。
-const WS_URL = 'ws://localhost:3000/ws/peer'
+// 默认打本机默认端口（3000）；要打别的端口用 E2E_WS_URL 覆盖。
+const WS_URL = process.env.E2E_WS_URL || 'ws://localhost:3000/ws/peer'
+console.log('WS_URL =', WS_URL)
 const ws = new WebSocket(WS_URL)
 ws.binaryType = 'arraybuffer'
 const pending = new Map()

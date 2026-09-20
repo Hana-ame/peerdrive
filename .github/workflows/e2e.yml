@@ -62,6 +62,40 @@ jobs:
           grep -q "== 结果 ==" /tmp/e2e-chain.out || { echo "::error::链路脚本没跑完"; exit 1; }
           if grep -q "FAIL" /tmp/e2e-chain.out; then echo "::error::链路断言失败"; exit 1; fi
 
+      - name: 管理面冒烟（本地 WS admin 全链路）
+        # front/tests/e2e-admin-smoke.mjs 走 Node 22 原生 WebSocket 打本机
+        # :3000/ws/peer，验 admin verb 的转发（含二进制上传帧）——不需要外网、
+        # 不需要 npm ci，之前只是没人把它接进 CI（doc/testing/README.md §2 第 8 项）。
+        # ⚠️ /ws/peer 这段路由归 peerjs 路由组，所以 PEERDRIVE_PEERJS_ENABLE
+        #    必须是 true（关掉时该路径直接 404，脚本会静默 0 断言地退出）。
+        env:
+          PORT: "3000"
+          PEERDRIVE_STORAGE: /tmp/pdadmin/root
+          PEERDRIVE_DOWNLOAD_DIR: /tmp/pdadmin/root/downloads
+          PEERDRIVE_SHARE_ENABLE: "true"
+          PEERDRIVE_SHARE_DIRS: /tmp/pdadmin/root/downloads/shared
+          PEERDRIVE_PEERJS_ENABLE: "true"
+          PEERDRIVE_PEERJS_HOST: 127.0.0.1
+          PEERDRIVE_PEERJS_PORT: "9100"
+          PEERDRIVE_PEERJS_KEY: peerjs
+          PEERDRIVE_PEERJS_SECURE: "false"
+          PEERDRIVE_PEERJS_ID: admin-smoke
+          PEERDRIVE_BT_DHT_ENABLE: "false"
+          PEERDRIVE_IPFS_GATEWAY_ENABLE: "false"
+        run: |
+          set -u
+          mkdir -p /tmp/pdadmin/root/downloads/shared
+          ( setsid nohup /tmp/pddemo/bin/server > /tmp/pdadmin/admin.log 2>&1 </dev/null & echo $! > /tmp/pdadmin/pid )
+          for i in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:3000/ping > /tmp/pdadmin/ping.txt; then
+              echo "admin 节点就绪（第 $i 次探测）"; break
+            fi
+            sleep 2
+          done
+          cat /tmp/pdadmin/ping.txt
+          grep -q pong /tmp/pdadmin/ping.txt || { echo "::error::admin 节点没起来"; tail -30 /tmp/pdadmin/admin.log; exit 1; }
+          node front/tests/e2e-admin-smoke.mjs
+
       - name: 装浏览器（面板 e2e 用）
         run: |
           mkdir -p /tmp/pw && cd /tmp/pw
@@ -87,6 +121,8 @@ jobs:
         if: always()
         run: |
           bash scripts/netdisk-local-demo.sh --stop || true
+          kill "$(cat /tmp/pdadmin/pid 2>/dev/null)" 2>/dev/null || true
+          echo "=== admin.log ==="; tail -20 /tmp/pdadmin/admin.log 2>/dev/null || true
           echo "=== node-a.log ==="; tail -30 /tmp/pddemo/a.log 2>/dev/null || true
           echo "=== node-b.log ==="; tail -30 /tmp/pddemo/b.log 2>/dev/null || true
           echo "=== signal.log ==="; tail -20 /tmp/pddemo/signal.log 2>/dev/null || true
