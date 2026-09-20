@@ -64,3 +64,63 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # 部署完立刻回头验线上：Pages 的构建/发布链路自己动过 .nojekyll、路径，或者
+  # peerjs 的 CDN 在线上不可达时，本地 file:// 全绿也照样白屏 —— 这类问题只有
+  # 打到真实 HTTPS 源上才看得见（对应 doc/testing/README.md §4 的「线上托管本身」）。
+  verify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 装浏览器
+        run: |
+          mkdir -p /tmp/pw && cd /tmp/pw
+          npm init -y >/dev/null 2>&1
+          npm i playwright --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: 验线上站点
+        working-directory: /tmp/pw
+        env:
+          PANEL_URL: https://hana-ame.github.io/peerdrive/
+          PW_CHANNEL: chromium
+        run: |
+          set -u
+          SCRIPT="$GITHUB_WORKSPACE/packages/peerdrive-client/scripts/verify-pages.mjs"
+
+          # Pages 发布有传播延迟，先探测到新产物真的可访问再验，别把延迟当成失败
+          for i in $(seq 1 10); do
+            if curl -sfL "$PANEL_URL" -o /tmp/live.html && grep -q 'id="in-node"' /tmp/live.html; then
+              echo "线上已可访问（第 $i 次探测）"
+              break
+            fi
+            echo "还没传播到，等 30s（第 $i 次）"
+            sleep 30
+          done
+
+          # 只重试「整轮」，脚本内部任何一项断言失败都会 exit 1
+          ok=0
+          for attempt in 1 2 3; do
+            if node "$SCRIPT" "$PANEL_URL"; then ok=1; break; fi
+            echo "第 $attempt 次没过，等 45s 重试（可能是传播/CDN 抖动）"
+            sleep 45
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error::线上面板自检未通过"
+            exit 1
+          fi
+
+      - name: 留截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-verify
+          path: /tmp/pw/pages-verify.png
+          if-no-files-found: ignore
