@@ -49,9 +49,14 @@ try {
   }
 }
 
+// PANEL_URL 给的是 http(s) 地址时走「托管模式」（例如 npm run serve:panel 起的内网服务）。
+// 这个模式的价值：http 页面发起 ws:// 不会被混合内容拦截，所以内网用 ws 信令就行，
+// 不必给信令配 TLS —— 只有 HTTPS 托管的面板（如 GitHub Pages）才必须 wss。
+const BASE = process.env.PANEL_URL || 'file://' + PANEL
 const url =
-  'file://' + PANEL +
-  `?node=${NODE_ID}&host=${SIG.host}&port=${SIG.port}&path=${encodeURIComponent(SIG.path)}` +
+  BASE +
+  (BASE.includes('?') ? '&' : '?') +
+  `node=${NODE_ID}&host=${SIG.host}&port=${SIG.port}&path=${encodeURIComponent(SIG.path)}` +
   `&key=${SIG.key}&secure=${SIG.secure ? 1 : 0}&auto=1`
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

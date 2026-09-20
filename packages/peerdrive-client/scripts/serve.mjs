@@ -6,6 +6,11 @@
 // 三是本地演示建议走 http://localhost（安全上下文，crypto.subtle 可用）。
 //
 // 只服务包根目录，且拒绝跳出根目录的路径（../ 穿越）。
+//
+// --panel：把根路径指向 dist/panel.html（公共面板）而不是旧 demo。
+//   这个模式的用途是「内网多人用」：面板是 http 页面时，信令用普通 ws:// 就行
+//   ——浏览器的混合内容规则只拦 **HTTPS** 页面发起的 ws://，http 页面不受限。
+//   所以不需要给信令配 TLS，局域网里起这一个静态服务就够了。
 
 import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
@@ -15,6 +20,8 @@ import { fileURLToPath } from 'node:url'
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const PORT = Number(process.env.PORT || 8123)
 const HOST = process.env.HOST || '127.0.0.1'
+const PANEL = process.argv.includes('--panel')
+const INDEX = PANEL ? '/dist/panel.html' : '/demo/consumer.html'
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -31,7 +38,7 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`)
     let pathname = decodeURIComponent(url.pathname)
-    if (pathname === '/' || pathname === '') pathname = '/demo/consumer.html'
+    if (pathname === '/' || pathname === '') pathname = INDEX
     const target = resolve(join(ROOT, normalize(pathname)))
     if (!target.startsWith(ROOT)) {
       res.writeHead(403).end('forbidden')
@@ -58,6 +65,10 @@ const server = createServer(async (req, res) => {
 })
 
 server.listen(PORT, HOST, () => {
-  console.log(`peerdrive-client demo: http://${HOST}:${PORT}/demo/consumer.html`)
+  console.log(`peerdrive-client: http://${HOST}:${PORT}/  →  ${INDEX}`)
+  if (PANEL) {
+    console.log('内网给其他人用：HOST=0.0.0.0 npm run serve:panel，然后把 http://<本机IP>:<port>/ 发给他。')
+    console.log('http 页面 + ws:// 信令不会被混合内容拦截（只有 HTTPS 页面才会）。')
+  }
   console.log('按 Ctrl+C 停止。')
 })

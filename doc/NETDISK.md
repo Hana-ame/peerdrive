@@ -298,7 +298,16 @@ peersignal :9100（信令 + 内置 /discover 发现，仅转发 SDP/ICE）
 
 网盘的 UI **不是**一个需要你自己起 http 服务的前端工程，而是一个**公共静态面板**：
 
-**在线版（推荐直接用）**：<https://hana-ame.github.io/peerdrive/>
+**内网多人用（推荐，ws 就够）**：```npm run serve:panel``` 起一个静态服务，
+把 `http://<本机IP>:8124/` 发给同网段的人 —— **http 页面发起 `ws://` 不会被拦截**
+（浏览器的混合内容规则只管 HTTPS 页面），所以信令不用配 TLS。
+
+```bash
+cd packages/peerdrive-client
+PORT=8124 HOST=0.0.0.0 npm run serve:panel    # → http://<本机IP>:8124/
+```
+
+**在线版（公网，必须 wss）**：<https://hana-ame.github.io/peerdrive/>
 
 由 `.github/workflows/pages.yml` 在每次 push（且面板相关文件有变动）时自动构建部署，
 产物就是下面这个单文件面板。**注意在线版是 HTTPS，会触发下面的前提 3（信令必须 wss）。**
@@ -451,7 +460,8 @@ CI 和单元测试全绿，但真实跑起来 `files` 一直是空的。根因�
 |---|---|---|---|
 | 1 | **公共面板在线可用**（GitHub Pages） | `node packages/peerdrive-client/scripts/verify-pages.mjs` | 5/5 PASS（骨架 / bundle 20 API / peerjs 取到 / 混合内容提示 / 无 JS 报错） |
 | 2 | **面板 file:// 直连节点拉文件** | `SIG_HOST=<IP> SIG_PORT=9100 NODE_ID=node-a node packages/peerdrive-client/scripts/verify-panel.mjs` | 9/9 PASS（连上 → 清单 2 项 → 点保存真下载 → 预览有内容 → sha256 一致） |
-| 3 | **wss 信令**（HTTPS 页面唯一可行路径） | 见 §8.3 | PASS（PeerJS 经 wss 完成握手拿到 id） |
+| 3 | **面板 http 托管 + ws 信令**（内网多人用） | `PORT=8124 HOST=0.0.0.0 npm run serve:panel` 然后 `PANEL_URL=http://<IP>:8124/ ... node scripts/verify-panel.mjs` | 9/9 PASS（连上 → 清单 → 保存 → 预览 → sha256） |
+| 3b | **wss 信令**（仅在线 HTTPS 版需要） | 见 §8.3 | PASS（PeerJS 经 wss 完成握手拿到 id） |
 | 4 | **节点市场 / 加入 / 清单 / 拉取**（HTTP API） | `bash scripts/netdisk-local-demo.sh` | 8/8 PASS（市场 → 加入 → 清单 → 拉取 → sha256 校验），连跑两次都绿 |
 | 5 | **节点管理台 UI**（`front/`，需后端） | `curl http://<IP>:5173/` + §7.2.2 | 200；市场/清单/任务 API 均返回预期数据 |
 | 6 | 单元测试/分层回归 | `bash scripts/test-layers.sh` | 9 层全绿 / 43s |
@@ -489,7 +499,9 @@ peersignal -addr :9101 -key peerjs -tls-cert cert.pem -tls-key key.pem
 
 ### 8.4 明确的边界（做不到 / 未做）
 
-- **在线面板连不到 `ws://` 信令**：HTTPS 页面的混合内容规则，需 wss（§7.2.1 前提 3）。
+- **只有 HTTPS 托管的面板才需要 wss**：混合内容规则只拦 HTTPS 页面发起的 `ws://`。
+  `file://`（已测 9/9）和 http 页面（已测 9/9）用 ws 完全没问题 —— 所以**内网/本机用 ws 就够**，
+  公网 Pages 版（HTTPS）才必须 wss。
 - **端到端脚本未进 CI**：只能在本地跑（§4 盲区清单里风险最高的一项）。
 - **发版无测试门禁**：打 tag 时 `ci.yml` 不触发。
 - `signalserver`(23) / `p2p_bt`(7) 是独立 go.mod 且无 CI job —— 改坏了 CI 照样绿。
