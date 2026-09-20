@@ -202,17 +202,16 @@ cd front && npm run build
 
 | 文件 | 内容 |
 |------|------|
-| [testing/index.md](testing/index.md) | 测试文档门户 |
-| [testing/README.md](testing/README.md) | 测试总览 |
-| [testing/TESTING-HANDBOOK.md](testing/TESTING-HANDBOOK.md) | 测试手册 — 环境搭建、运行、故障排查 |
-| [testing/TEST-PIPELINE.md](testing/TEST-PIPELINE.md) | 测试管线 — 脚本流程和预期行为 |
-| [testing/TEST-MATRIX.md](testing/TEST-MATRIX.md) | 测试矩阵 — 109 用例 |
-| [testing/TESTING-METHODOLOGY.md](testing/TESTING-METHODOLOGY.md) | 测试方法论 |
-| [testing/CHAOS_TESTING.md](testing/CHAOS_TESTING.md) | 混沌测试 |
-| [testing/reg-server-test-plan.md](testing/reg-server-test-plan.md) | 注册服务器测试计划 |
-| [testing/如何测试.md](testing/如何测试.md) | 中文测试指南 |
-| [testing/FRONTEND-TESTING.md](testing/FRONTEND-TESTING.md) | 前端测试文档 — Vitest + Happy DOM + Testing Library |
-| [testing/测试方案.md](testing/测试方案.md) | 测试体系总览 |
+| [testing/README.md](testing/README.md) | **测试组件总览（入口）** — 14 个组件的选表/命令/规模/CI 映射/盲区清单（2026-09-20 实测：308+21+23+21+7+88+60+21） |
+| [testing/index.md](testing/index.md) | 测试文档门户（指向上面那份 + 分层文档） |
+| [testing/archive/](testing/archive/) | 旧栈时代测试文档（2026-04~05，libp2p / e2e-all.sh / reg-server），仅历史参考 |
+
+> 旧索引里列过一批 `TESTING-HANDBOOK.md` / `TEST-PIPELINE.md` / `TEST-MATRIX.md` /
+> `FRONTEND-TESTING.md` 等文件名，**当前目录下已不存在**（2026-08-18 重写后清理），
+> 内容统一并入 `testing/README.md`。测试现状以它为准，勿再引用旧文件名。
+>
+> 相关：[NETDISK.md §7 本地跑通手册](NETDISK.md#7-本地跑通怎么亲手测这几个功能)、
+> `scripts/test-layers.sh`（分层聚合）、`scripts/netdisk-local-demo.sh`（端到端）。
 
 ### report — 报告
 

@@ -352,3 +352,25 @@ CI 和单元测试全绿，但真实跑起来 `files` 一直是空的。根因�
 起两节点、跑断言、断言必须出现 `files` 非空与 sha256 一致。这样 §7.3 的两个
 缺陷下次会在 PR 阶段就红，而不是靠人跑一遍才发现。
 
+### 7.6 这几个功能各由哪些测试组件兜底
+
+上面每个功能点，对应仓库里的哪些自动化测试：
+
+| 功能（§7.2） | 兜底的测试组件 | 命令 / 文件 | 规模 |
+|---|---|---|---|
+| 节点市场（`GET /peerjs/nodes`） | service 单测 `node_directory_test.go` + 端到端脚本 | `go test -tags nosqlite ./internal/service/`、`scripts/netdisk-local-demo.sh` | service 68 / 脚本 8 断言 |
+| 加入节点（含 `joined_nodes.json` 持久化） | service 单测 + 端到端脚本 | 同上（`node_directory_test.go`） | 7 |
+| 我的节点 / 已加入列表 | 同上 | 同上 | — |
+| 对方文件清单（share 帧） | transport 单测 `share_test.go` + service `nodeshare_test.go` + 集成 `share_protocol_test.go` + 端到端脚本 | `go test -tags nosqlite ./internal/transport/`、`./test/integration/` | transport 78 · service 68 · 集成 21 |
+| 跨节点拉取（`POST /p2p/pull`） | service `peerpull_test.go` + 集成 `peer_pull_test.go` + **端到端脚本（含 sha256 校验）** | 同上 | — |
+| 传输任务 / 进度 / 取消 | controller 单测 + 集成 + 端到端 | `go test -tags nosqlite ./internal/controller/` | 41 |
+| 前端网盘界面 | front vitest `tests/netdisk.test.jsx` | `cd front && npm test` | 32（前端合计 88） |
+| 纯浏览器消费端 | `packages/peerdrive-client` node --test + demo 页面 | `npm test` / `npm run demo` | 60 |
+
+**关键提醒**：上表右边任何一列全绿，都**不等于**这个功能真的能用 ——
+「登记 → 清单 → 拉取」这条跨模块组合只有端到端脚本会跑（§7.3 就是这么漏的）。
+改这一条链路时，`scripts/netdisk-local-demo.sh` 是必跑项，不是可选项。
+
+全部测试组件（含怎么选、命令、CI 映射、盲区）见
+**[`doc/testing/README.md`](testing/README.md)**。
+

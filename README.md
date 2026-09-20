@@ -70,10 +70,15 @@ cd packages/peerdrive-client && npm run demo   # http://127.0.0.1:8123/demo/cons
 ./scripts/netdisk-local-demo.sh                # --stop 停止
 
 # 测试
-cd back && go test -tags nosqlite ./... -count=1
-cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1   # 脱外网（自托管信令）
-cd front && npx vitest run
-cd packages/peerdrive-client && npm test      # node --test（零依赖）
+cd back && go test -tags nosqlite ./... -count=1                                     # 308
+cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1    # 21（脱外网，自托管信令；必须 -p 1）
+cd back/signalserver && go test ./...            # 21（独立 go.mod，无 CI job）
+cd back/p2p_bt && go test ./...                  # 7（独立 go.mod，无 CI job）
+cd front && npx vitest run                       # 88
+cd packages/peerdrive-client && npm test         # node --test（零依赖）60
+bash scripts/test-layers.sh                      # 或按 AOP 分层（L1-L8 + LB）逐层跑
+
+# 全部 14 个测试组件的清单、选型与盲区：doc/testing/README.md
 ```
 
 ## 信令服务器实现方式

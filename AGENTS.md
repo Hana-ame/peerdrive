@@ -107,7 +107,12 @@
 cd back
 go build -tags nosqlite ./...     # 必须 -tags nosqlite（双 SQLite 驱动 CGO 冲突）
 go test -tags nosqlite ./...      # 单元/包测试
-cd peerjs && go test ./... -count=1 -race   # peerjs 模块（独立 go.mod，改动需同步独立 repo）
+cd peerjs && go test ./... -count=1 -race      # peerjs 模块（独立 go.mod，改动需同步独立 repo）
+cd ../signalserver && go test ./...            # peersignal 模块（独立 go.mod，**无 CI job**，改了 CI 不会红）
+cd ../p2p_bt && go test ./...                  # BT 模块（独立 go.mod，**无 CI job**）
+# 上面几个可以换成一条（仓库根执行）：bash scripts/test-layers.sh
+#   按 AOP 分层（L1-L8 + LB）逐层跑并汇总，失败日志在 /tmp/layer-test-<层>.log
+#   ⚠️ 它不等于 `go test -tags nosqlite ./...` 的全集，改后端建议两个都跑
 # 集成测试（脱外网：TestMain 起全局自托管信令 + 同机 WebRTC，无需代理）：
 cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1
 #   ⚠️ 必须 -p 1 串行：多组测试共享全局自托管信令，并行会互相干扰
@@ -117,8 +122,13 @@ cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 
 # （cloudcone 443 例外：直连）
 
 cd ../packages/peerdrive-client && npm test   # 消费端包：node --test，60 个用例，零依赖无需 npm ci
-cd ../../front && npm test && npm run build   # 前端：vitest + vite build
+cd ../../front && npm test && npm run build   # 前端：vitest 88 + vite build
 ```
+
+> **全部测试组件（14 个：命令、规模、CI 映射、哪些没被自动化覆盖）见
+> [`doc/testing/README.md`](doc/testing/README.md)。**
+> 选不出该跑哪个时先看它的 §1「我改了 X，该跑哪些」。
+> 网盘链路相关的分功能对照见 [`doc/NETDISK.md` §7.6](doc/NETDISK.md#76-这几个功能各由哪些测试组件兜底)。
 
 > 本机（Windows 侧）bash 工具受限时，改经 WSL 跑：
 > `ssh -i ~/.ssh/id_rsa lumin@127.0.0.1 "bash -s" < 脚本`，脚本必须先 `tr -d '\r'`
