@@ -25,14 +25,14 @@
 
 | 你改了 | 必跑 | 建议加跑 |
 |---|---|---|
-| `back/internal/**` 任意单包逻辑 | `cd back && go test -tags nosqlite ./... -count=1`（316） | `bash scripts/test-layers.sh` 可定位到具体层 |
+| `back/internal/**` 任意单包逻辑 | `cd back && go test -tags nosqlite ./... -count=1`（550） | `bash scripts/test-layers.sh` 可定位到具体层 |
 | `back/internal/transport/**` 帧协议 | 同上（transport 86） | 集成测试（21） |
 | **网盘链路**（`nodes/share/pull/RegisterLocal`） | 集成测试 + **`./scripts/netdisk-local-demo.sh`**（手工，必须跑一遍） | 浏览器 UI 手测（`NETDISK.md` §7.2） |
 | `back/peerjs/**` | `cd back/peerjs && go test ./... -count=1 -race`（23） | — |
-| `back/signalserver/**`（peersignal） | `cd back/signalserver && go test ./...`（23）· **CI 不管它** | — |
-| `back/p2p_bt/**` | `cd back/p2p_bt && go test ./...`（7）· **CI 不管它** | — |
+| `back/signalserver/**`（peersignal） | `cd back/signalserver && go test ./...`（23） | ✅ `go-build` 的 `submodules` 格（2026-09-21 补） |
+| `back/p2p_bt/**` | `cd back/p2p_bt && go test ./...`（7） | ✅ 同上 |
 | `front/src/**` | `cd front && npm test`（88）+ `npm run build` | `front/tests/*.mjs` 手动脚本（视改动面） |
-| `packages/peerdrive-client/**` | `npm test`（70）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端） |
+| `packages/peerdrive-client/**` | `npm test`（98）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端） |
 | `packages/peerdrive-media/**` | `npm test`（21）+ `npm run build` | `test/e2e-browser.mjs`、`test/media-node-e2e.mjs` |
 | 准备 merge 进 `refactor` | 上表全部必跑项全绿（= CI 的同款命令） | 合并后在主干再跑一遍 |
 
@@ -44,12 +44,12 @@
 
 | # | 组件 | 位置 | 命令 | 用例 | 进 CI | 需外网 |
 |---|------|------|------|------|-------|--------|
-| 1 | 后端单元/包测试 | `back/`（主模块） | `go test -tags nosqlite ./... -count=1` | **316**（10 包） | ✅ `backend` + `go-build`×4 | ❌ |
+| 1 | 后端单元/包测试 | `back/`（主模块） | `go test -tags nosqlite ./... -count=1` | **550**（12 包） | ✅ `backend` + `go-build`×4 | ❌ |
 | 2 | 后端集成测试 | `back/test/integration/` | `go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1` | **21** 通过 / 4 跳过 | ✅ `integration` | ❌（自托管信令） |
 | 3 | 外网集成（手动门控） | 同 2 | `PEERDRIVE_MQTT_TEST=1` / `PEERDRIVE_LIVE_TEST=1` | 4 个用例 | ❌ | ✅（直连，不走代理） |
 | 4 | peerjs 模块 | `back/peerjs/`（独立 go.mod） | `go test ./... -count=1 -race` | **23** | ✅ `peerjs` | ❌ |
-| 5 | signalserver 模块 | `back/signalserver/`（独立 go.mod） | `go test ./... -count=1` | **23** | ❌ **（盲区）** | ❌ |
-| 6 | p2p_bt 模块 | `back/p2p_bt/`（独立 go.mod） | `go test ./... -count=1` | **7** | ❌ **（盲区）** | ❌ |
+| 5 | signalserver 模块 | `back/signalserver/`（独立 go.mod） | `go test ./... -count=1` | **23** | ✅ `go-build`·`submodules` | ❌ |
+| 6 | p2p_bt 模块 | `back/p2p_bt/`（独立 go.mod） | `go test ./... -count=1` | **7** | ✅ `go-build`·`submodules` | ❌ |
 | 7 | 前端 vitest | `front/tests/*.test.{js,jsx}` | `npm test` | **88**（9 文件） | ✅ `frontend`（含 build） | npm ci 需要 |
 | 8 | 前端手动脚本 | `front/tests/*.mjs`（3 个） | playwright / WS 冒烟 | — | ❌ **（盲区）** | ✅（线上站点） |
 | 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **70** | ✅ `client-package` | ❌ |
@@ -61,18 +61,21 @@
 | 14 | 网盘端到端脚本 | `scripts/netdisk-local-demo.sh` | 起 3 进程跑全链路 | 8 项断言 | ✅ **`e2e.yml`** | ❌（脱外网，本机进程） |
 | 15 | 面板浏览器端到端 | `packages/peerdrive-client/scripts/verify-panel.mjs` | 真实浏览器点面板 | 9 项断言 | ✅ **同 `e2e.yml`（复用上一套环境）** | ❌ |
 
-**覆盖范围合计**：自动化（CI）覆盖 316 + 21 + 23 + 88 + 70 + 21 = **539**；
-另有 CI 之外的 23（signalserver）+ 7（p2p_bt）需手动，以及 4 个外网门控用例。
+**覆盖范围合计**（2026-09-21 重测）：自动化（CI）覆盖 550 + 21 + 23 + 88 + 98 + 21 = **801**；
+signalserver（23）与 p2p_bt（7）自 2026-09-21 起也进了 CI；
+另有 4 个外网门控用例与若干浏览器/线上脚本需手动。
 
 ---
 
 ## 3. 逐个组件说明
 
-### 3.1 后端单元/包测试（308）
+### 3.1 后端单元/包测试（550）
 
 - **职责**：单包行为正确性，依赖用注入/临时目录替身（如假 `fileList`、假 transport）。
 - **命令**：`cd back && go build -tags nosqlite ./... && go test -tags nosqlite ./... -count=1`
-- **包分布**：transport 86 · service 68 · controller 41 · source 32 · config 24 · model 13 · downloader 20 · provider 17 · repository 12 · router 3
+- **包分布**（2026-09-21 实测）：transport 119 · service 108 · controller 98 · pathutil 96 ·
+  source 32 · config 24 · downloader 20 · provider 17 · model 13 · repository 13 · server 7 · router 3
+  （pathutil 与四层穿透矩阵是 2026-09-20/21 新增的，所以它涨得最多）
 - **前置**：`-tags nosqlite` 是硬约束（双 SQLite 驱动 CGO 冲突）。
 - **它证明不了什么**：注入的假依赖让「A 写完的索引正好是 B 读的那张表」这类**跨模块组合**失效 —— 这正是 `file_index` 缺陷逃逸的原因。
 
@@ -100,16 +103,18 @@ PEERDRIVE_SKIP_RTC=1  ...                                                       
 - **主仓 `go test ./...` 扫不到它** —— 必须单独跑。CI 有专门 job，本地别忘。
 - 建议带 `-race`（流控/并发相关）。
 
-### 3.5 `back/signalserver`（23）— **CI 盲区**
+### 3.5 `back/signalserver`（23）
 
 - 独立 go.mod（`github.com/Hana-ame/go-peersignal`），自托管信令服务的本体（`peersignal` 命令的来源）。
-- 和 peerjs 一样被 `cd back && go test ./...` 跳过，但**没有对应的 CI job**。改了它 CI 不会红。
+- 被 `cd back && go test ./...` 跳过（主仓 pattern 扫不到），2026-09-21 起由
+  `go-build.yml` 的 `submodules` 格跑（此前只在发版门禁的 gate 里半覆盖）。
 - 本地：`cd back/signalserver && go test ./... -count=1`。
 
-### 3.6 `back/p2p_bt`（7）— **CI 盲区**
+### 3.6 `back/p2p_bt`（7）
 
 - 独立 go.mod（`github.com/Hana-ame/go-peerdrive-bt`），Mainline DHT / BEP44 / BEP51。
-- 同样没有 CI job。`scripts/test-layers.sh` 的 L7 会跑到它。
+- 曾经**完全没有 CI job**（改坏了也绿），2026-09-21 起同由 `submodules` 格覆盖。
+  `scripts/test-layers.sh` 的 L7 也会捎带跑到它。
 
 ### 3.7 前端 vitest（88 / 9 文件）
 
@@ -129,7 +134,7 @@ PEERDRIVE_SKIP_RTC=1  ...                                                       
 
 跑法：`node ~/.claude/skills/playwright-test/scripts/test-runner.mjs front/tests/<script>`（本机 Firefox）。
 
-### 3.9 `packages/peerdrive-client` 单测（70）
+### 3.9 `packages/peerdrive-client` 单测（98）
 
 - **命令**：`cd packages/peerdrive-client && npm test`（`node --test "test/*.test.mjs"`，28 个 suite）
 - **零运行时依赖** ⇒ 不需要 `npm ci`，也不需要网络。覆盖：协议状态机 + 增量 SHA-256 + client API。
@@ -260,8 +265,8 @@ gh run watch                                                 # gate 2m39s → bu
 | 盲区 | 为什么危险 | 现状 |
 |---|---|---|
 | ~~端到端组合（登记→清单→拉取→校验）~~ | 2026-09-20 两个致命缺陷都藏在这里 | ✅ **已由 `e2e.yml` 覆盖**（链路 8 项 + 面板浏览器 9 项） |
-| **`back/signalserver`**（23） | 独立 go.mod + 无 CI job ⇒ 信令服务改坏了 CI 照样绿 | 手动跑 |
-| **`back/p2p_bt`**（7） | 同上 | 手动跑（test-layers L7 会捎带） |
+| ~~**`back/signalserver`**（23）~~ | 独立 go.mod + 无 CI job ⇒ 信令服务改坏了 CI 照样绿 | ✅ **2026-09-21 已补**：`go-build.yml` 新增 `submodules` 格 |
+| ~~**`back/p2p_bt`**（7）~~ | 同上（这个连发版门禁都没覆盖） | ✅ **2026-09-21 已补**：同上 |
 | **外网集成 4 用例** | 公共 broker / 线上信令的协议兼容性无人验证 | 门控手动 |
 | `front/tests/*.mjs`（3 个） | UI 冒烟依赖人工触发；`playwright-smoke` 断言的是线上站点 | 手动 |
 | media 的两个非 `*.test.mjs` E2E | 浏览器真实渲染路径不在 `npm test` 里 | 手动 |
@@ -298,7 +303,7 @@ export PATH="$HOME/.nvm/versions/node/v22.23.1/bin:$PATH"
 - 测试函数必须标注「发现背景」（全局 AGENTS.md 硬性要求）。
 - **新增/删除测试集时更新本文件的 §1 选表、§2 全景表、§3 对应小节。**
 - 用例数字会漂移：本表是 2026-09-20 的快照，重跑后如有出入以实测为准并顺手更新。
-- 想继续补，优先级：**给 `release.yml` 的发版路径加测试门禁**（§3.15）>
-  给 signalserver / p2p_bt 各补一个 CI job（同 peerjs 那种做法）>
-  给 `release.yml` 的发版路径加一道测试门禁（见 §3.15）。
-  （`test-layers.sh` 自身的问题已于 2026-09-20 修完，见 §3.13。）
+- 想继续补，优先级：`front/tests/*.mjs` 三个 UI 冒烟（依赖线上站点，需先解决外网）>
+  media 的两个非 `*.test.mjs` E2E > `verify-pages.mjs`（验的是线上，跑失败未必是代码问题）。
+  （signalserver / p2p_bt 与发版门禁已于 2026-09-20/21 补齐；
+  `test-layers.sh` 自身的问题已于 2026-09-20 修完，见 §3.13。）
