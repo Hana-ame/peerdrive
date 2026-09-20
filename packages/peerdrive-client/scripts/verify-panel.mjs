@@ -3,10 +3,14 @@
 // 为什么需要它：面板是**单文件、file:// 打开**的形态，单元测试碰不到它；
 // 而它踩过的坑（peerjs CDN 没加载 / 信令没开 CORS / 把自己 id 显示成对端）
 // 全都只在真浏览器里才暴露。这个脚本用 file:// 打开产物、驱动真实点击，
-// 断言「连上 → 清单 → 保存 → 预览 → sha256 一致」全链路。
+// 断言全链路：
+//   读：连上 → 清单 → 保存 → 预览 → sha256 一致
+//   写：自动搜索在线节点 → 本地文件入库 → 按 hash 取回校验
+//       → 网络入库（内网地址必须被 SSRF 防护拒 / 给了 PULL_URL 就真抓一次）
 //
 // 前置：
 //   1. 一个在跑的 peerdrive 节点 + 自托管信令（推荐 ./scripts/netdisk-local-demo.sh）
+//      自动搜索这一步额外要求信令能回 CORS 头（不然只能是手工填 id）
 //   2. `npm run build:panel`（产物必须是最新的）
 //   3. playwright-core + 一个 Chromium 内核浏览器（默认复用本机 Edge）：
 //        npm i -D playwright-core        # 或全局装
@@ -15,9 +19,14 @@
 // 用法:
 //   SIG_HOST=172.29.89.192 SIG_PORT=9100 NODE_ID=node-a node scripts/verify-panel.mjs
 //   可选：SIG_PATH=/ SIG_KEY=peerjs SIG_SECURE=0 PW_CHANNEL=msedge PANEL_FILE=<绝对路径>
+//         PULL_URL=<一个节点能访问的公网 URL>  给了才会跑"真的抓一次网络入库"
+//         PUT_FILE=<一个本地文件>              不给就当场生成一份随机内容
 
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { writeFileSync, readFileSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SIG = {
@@ -55,6 +64,9 @@ try {
 // PSK：节点开了预共享密钥门禁时用它（面板会从链接读入，然后立刻从地址栏抹掉）。
 // 自检时带上它，就能顺带验证"带密钥能过门禁"这条路径。
 const PSK = process.env.PSK || ''
+// PULL_URL：给一个节点能访问的公网 URL 时，会真的跑一次「网络入库」并检查 hash。
+// 不写就只验 SSRF 拒绝路径（那条是确定性的，不需要外网）。
+const PULL_URL = process.env.PULL_URL || ''
 const BASE = process.env.PANEL_URL || 'file://' + PANEL
 const url =
   BASE +
@@ -67,6 +79,22 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 let failed = 0
 const ok = (m) => console.log('  PASS ' + m)
 const bad = (m) => { console.log('  FAIL ' + m); failed++ }
+const note = (m) => console.log('  note ' + m)
+
+/** logText 取日志全文；面板把每个动作的成败都写进了 #log，UI 之外的判断都看它。 */
+const logText = () => page.locator('#log').innerText()
+
+/** waitLog 轮询日志直到出现期望文本（比 sleep 死等稳，也比少给时间少错报）。 */
+async function waitLog(re, timeoutMs = 45000) {
+  const end = Date.now() + timeoutMs
+  for (;;) {
+    const txt = await logText().catch(() => '')
+    const m = txt.match(re)
+    if (m) return m
+    if (Date.now() > end) return null
+    await sleep(400)
+  }
+}
 
 console.log('== 打开 ' + url)
 // PW_CHANNEL=default/none 时不传 channel，用 playwright 自带的 chromium
@@ -153,8 +181,79 @@ pulled.err
     ? ok(`拉取 ${pulled.name}（${pulled.size}B）sha256 与清单一致${pulled.reused ? '（复用面板连接）' : '（新拨连接）'}`)
     : bad(`sha256 不一致 got=${pulled.got} want=${pulled.expect}`)
 
-console.log('\n== 页面日志（尾部）')
-for (const l of logs.slice(-10)) console.log('  ' + l)
+// [8] 自动搜索在线节点：向信令问「现在谁在线」，结果要渲染成可点的列表
+await page.locator('#btn-discover').click()
+let found = 0
+for (let i = 0; i < 40; i++) {
+  found = await page.locator('#discovered .node').count()
+  if (found) break
+  await sleep(400)
+}
+found > 0
+  ? ok(`自动搜索到 ${found} 个在线节点：${(await page.locator('#discovered').innerText()).replace(/\s+/g, ' ').slice(0, 90)}`)
+  : bad('自动搜索没有列出任何节点（日志：' + (await waitLog(/自动搜索/, 0) ? (await logText()).split('\n').filter((l) => /自动搜索/.test(l)).join(' | ') : '无') + '）')
+
+// [9] 本地入库：选一个本地文件 → upload 动词 → 拿回 sha256 → 按 hash 取回校验
+//     文件名带随机串，避免重复跑时撞上同名条目（内容寻址下同名不同内容是两份）。
+const putFile = process.env.PUT_FILE || (() => {
+  const dir = mkdtempSync(join(tmpdir(), 'pdput-'))
+  const p = join(dir, 'upload-' + Date.now().toString(36) + '.txt')
+  writeFileSync(p, 'peerdrive 面板本地入库自检内容 ' + Date.now() + '\n'.repeat(3))
+  return p
+})()
+const putBytes = readFileSync(putFile)
+const putExpect = createHash('sha256').update(putBytes).digest('hex')
+await page.setInputFiles('#in-file', putFile)
+await page.locator('#btn-put').click()
+const putDone = await waitLog(/入库完成：.*→ sha256 ([0-9a-f]{64})/, 60000)
+putDone
+  ? ok(`本地入库完成 ${putDone[1].slice(0, 12)}…（${putBytes.length}B，方才的文件选择器=${putFile.split(/[\\/]/).pop()}）`)
+  : bad('本地入库没有走到「入库完成」（见日志尾部）')
+if (putDone) {
+  putDone[1] === putExpect
+    ? ok('节点返回的 sha256 与本地内容 sha256 一致')
+    : bad(`节点返回的 sha256 与本地不一致 got=${putDone[1]} want=${putExpect}`)
+
+  // [9b] 取回校验：入库成功不等于能取回来——这一步才是闭环
+  const row = page.locator('#tasks tbody tr', { hasText: '本地入库' }).first()
+  await row.locator('button[data-verify]').click()
+  const verified = await waitLog(/取回校验(通过|失败)/, 60000)
+  verified && verified[1] === '通过'
+    ? ok('按 hash 取回校验通过（入库 → 内容寻址 → 取回 闭环成立）')
+    : bad('取回校验没有通过：' + (verified ? verified[0] : '无日志'))
+}
+
+// [10] 网络入库：挑自律的那一面——内网地址必须被节点拒
+//      这条是确定性的（不需要外网），验的是「pull 的 SSRF 防护真的长在节点上」，
+//      而不是「面板会不会报错」：如果节点照单全收，这个地址就是被打了。
+await page.fill('#in-url', 'http://127.0.0.1:' + SIG.port + '/status')
+await page.locator('#btn-pull').click()
+const rejected = await waitLog(/网络?入库失败|抓取 http:\/\/127\.0\.0\.1.*失败/, 45000)
+const whyBool = rejected ? /内网|本机|private|loopback/i.test(await logText()) : false
+rejected && whyBool
+  ? ok('网络入库对内网地址被节点拒绝（SSRF 防护生效）')
+  : bad(rejected ? '网络入库失败了，但不是 SSRF 拒绝（原因见日志）' : '网络入库既没成功也没报错')
+
+// [11] 给了 PULL_URL 就真抓一次公网内容，并校验 sha256
+if (PULL_URL) {
+  await page.fill('#in-url', PULL_URL)
+  await page.fill('#in-url-name', '')
+  await page.locator('#btn-pull').click()
+  const pulled2 = await waitLog(/网络入库完成：.*→ sha256 ([0-9a-f]{64})/, 90000)
+  pulled2 ? ok(`网络入库成功 ${pulled2[1].slice(0, 12)}…`) : bad('网络入库（公网 URL）未完成')
+} else {
+  note('未给 PULL_URL，跳过「真的抓一次公网 URL」（只验了 SSRF 拒绝路径）')
+}
+
+// [12] 全程不能有未捕获的页面异常（面板是给陌生人打开的，白屏最糟）
+const pageErrors = logs.filter((l) => /pageerror/.test(l))
+pageErrors.length === 0 ? ok('无未捕获页面异常') : bad('页面抛了异常：' + pageErrors.join(' | '))
+
+console.log('\n== 浏览器控制台日志（尾部）')
+for (const l of logs.slice(-8)) console.log('  ' + l)
+// 面板自己的 #log 才是"用户看到的那份真相"：控制台里不一定有，而断言都基于它
+console.log('== 面板 #log（尾部）')
+for (const l of (await logText()).split('\n').slice(-14)) console.log('  ' + l)
 
 await browser.close()
 console.log(failed === 0 ? '\nRESULT: ALL PASS' : `\nRESULT: ${failed} FAILED`)

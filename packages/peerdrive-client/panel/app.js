@@ -16,6 +16,15 @@
   var LS_KEY = 'peerdrive.panel.v1'
   var MAX_RECENT = 8
   var PREVIEW_MAX_BYTES = 2 * 1024 * 1024 // 预览只给小文件，大的直接存盘
+  // put() 会把整个内容读进浏览器内存再按 64KB 分片推出去——超过这个量要先提醒，
+  // 否则用户会在"大文件传到一半标签页崩了"之后才知道代价。
+  var PUT_WARN_BYTES = 256 * 1024 * 1024
+  // 入库一轮的分片绝大部分是毫秒级，但接收方要落盘；给足余量，别把慢当成死
+  var PUT_CHUNK_TIMEOUT_MS = 30 * 1000
+
+  // 任务类型。写方向（put/pull）和读方向（get）混在一张表里，必须能一眼分开——
+  // 它们的失败含义完全不同：下载失败是"拿不到"，入库失败是"写不进去"。
+  var KIND = { get: '下载', put: '本地入库', pull: '网络入库' }
 
   var sessions = new Map() // nodeId -> {id, client, status, snapshot, error}
 
@@ -27,6 +36,11 @@
       sessions: sessions,
       current: function () { return current },
       get: function (id) { return sessions.get(id) },
+      // 端到端自检用：让脚本能驱动这些动作，而不必依赖 DOM 点击的细节。
+      connect: connect,
+      discoverNow: discoverNow,
+      putFiles: putFiles,
+      pullUrl: pullUrl,
     }
   }
   var current = null // 当前选中的 nodeId
@@ -177,21 +191,30 @@
   function renderTasks() {
     var box = $('tasks')
     if (!tasks.length) { box.innerHTML = '<div class="empty">没有进行中的传输。</div>'; return }
-    var html = '<table><thead><tr><th>文件</th><th>来源</th><th class="num">进度</th><th class="num">速率</th><th>状态</th><th></th></tr></thead><tbody>'
+    var html = '<table><thead><tr><th>文件</th><th>类型</th><th>节点</th><th class="num">进度</th><th class="num">速率</th><th>状态</th><th></th></tr></thead><tbody>'
     tasks.forEach(function (t) {
       var pct = t.total > 0 ? Math.min(100, (t.received / t.total) * 100) : 0
+      // 写方向完成后的 hash 就是它的内容地址——显示出来，用户才知道接下来能拿什么取回
+      var addr = t.kind !== 'get' && t.hash
+        ? '<div class="faint mono" style="font-size:11px" title="' + esc(t.hash) + '">' + esc(t.hash.slice(0, 16)) + '…</div>'
+        : ''
       html += '<tr>' +
-        '<td class="mono">' + esc(t.name || t.hash.slice(0, 12)) + '</td>' +
-        '<td class="faint mono" style="font-size:11px">' + esc(t.from) + '</td>' +
+        '<td class="mono">' + esc(t.name || String(t.hash).slice(0, 12)) + addr + '</td>' +
+        '<td class="faint">' + esc(KIND[t.kind] || t.kind || '') + '</td>' +
+        '<td class="faint mono" style="font-size:11px">' + esc(t.node || t.from) + '</td>' +
         '<td class="num">' + (t.total > 0 ? fmtBytes(t.received) + ' / ' + fmtBytes(t.total) : fmtBytes(t.received)) +
         '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div></td>' +
         '<td class="num faint">' + (t.state === 'running' ? esc(fmtRate(t.rate)) : '—') + '</td>' +
         '<td class="' + (t.state === 'done' ? 'ok' : t.state === 'error' || t.state === 'cancelled' ? 'err' : 'dim') + '">' +
-        esc(t.state === 'done' ? '完成' : t.state === 'running' ? '传输中' : t.state === 'cancelled' ? '已取消' : t.state === 'error' ? '失败' : t.state) +
+        esc(t.state === 'done' ? '完成' : t.state === 'running' ? '进行中' : t.state === 'cancelled' ? '已取消' : t.state === 'error' ? '失败' : t.state) +
         (t.error ? '<div class="faint" style="font-size:11px">' + esc(t.error) + '</div>' : '') + '</td>' +
         '<td class="num">' + (t.state === 'running'
-          ? '<button class="tiny ghost" data-cancel="' + t.id + '">取消</button>'
-          : (t.state === 'done' ? '<span class="faint" style="font-size:11px">sha256 已校验</span>' : '')) + '</td>' +
+          ? (t.ctrl ? '<button class="tiny ghost" data-cancel="' + t.id + '">取消</button>' : '')
+          : (t.state === 'done'
+            ? (t.kind !== 'get' && t.hash
+              ? '<button class="tiny ghost" data-verify="' + t.id + '">取回校验</button>'
+              : '<span class="faint" style="font-size:11px">sha256 已校验</span>')
+            : '')) + '</td>' +
         '</tr>'
     })
     box.innerHTML = html + '</tbody></table>'
@@ -200,6 +223,62 @@
         var t = tasks.find(function (x) { return x.id === btn.getAttribute('data-cancel') })
         if (t && t.ctrl) t.ctrl.abort()
       })
+    })
+    Array.prototype.forEach.call(box.querySelectorAll('[data-verify]'), function (btn) {
+      btn.addEventListener('click', function () {
+        var t = tasks.find(function (x) { return x.id === btn.getAttribute('data-verify') })
+        if (t) verifyRoundTrip(t)
+      })
+    })
+  }
+
+  /**
+   * renderDiscovered 渲染「自动搜索」的结果。
+   *
+   * 失败也要渲染：搜索失败的三种原因（信令没开 CORS / 端点不可达 / 真的没节点）
+   * 在界面上长得一模一样——一个空列表。把它们拆成三句人话，用户才不用猜。
+   */
+  function renderDiscovered(nodes, err) {
+    var box = $('discovered')
+    if (err) {
+      var msg = err.message || String(err)
+      var cors = /Access-Control-Allow-Origin/.test(msg)
+      var hint = cors
+        ? '这一步是<b>跨域请求</b>（本页原点是 <span class="mono">' + esc(String(location.origin)) + '</span>），' +
+          '信令必须回 <span class="mono">Access-Control-Allow-Origin</span>，浏览器才会把响应交出来。' +
+          '自托管信令请升到 2026-09-20 之后的 go-peerserver（已放开 CORS），或在反代层补这个头。' +
+          '<b>在此之前自动发现用不了，但手动连节点完全不受影响</b>——只是在下面的「节点 peer id」里手填。'
+        : '信令 REST 端点没答上来。请确认 host/port 与节点配的信令一致；' +
+          '另外本页是 HTTPS 而信令是 <span class="mono">http://</span> 时，浏览器会按「混合内容」拦掉这次请求。'
+      box.innerHTML = '<div class="empty err">自动搜索失败：' + esc(msg) + '</div><div class="hint">' + hint + '</div>'
+      return
+    }
+    if (!nodes || !nodes.length) {
+      box.innerHTML = '<div class="empty">信令上没有在线节点。</div>' +
+        '<div class="hint">空的列表不代表信令坏了：节点要主动向信令 announce 才会出现在这里。' +
+        '确认节点配了 <span class="mono">PEERDRIVE_DISCOVERY_*</span>，且它确实连着这个信令。</div>'
+      return
+    }
+    box.innerHTML = ''
+    nodes.forEach(function (n) {
+      var row = document.createElement('div')
+      row.className = 'node'
+      var ago = n.lastSeen ? Math.max(0, Math.round(Date.now() / 1000 - Number(n.lastSeen))) : null
+      row.innerHTML =
+        '<span class="dot on"></span>' +
+        '<span class="nm mono" title="' + esc(n.peerId) + '">' + esc(n.peerId) + '</span>' +
+        '<span class="faint" style="font-size:11px">' +
+        (n.nodeType ? esc(n.nodeType) + ' · ' : '') +
+        (n.collections && n.collections.length ? n.collections.length + ' 集合 · ' : '') +
+        (ago == null ? '' : ago + 's 前') +
+        '</span>'
+      row.title = '点击连接该节点'
+      row.addEventListener('click', function () {
+        $('in-node').value = n.peerId
+        syncURL()
+        connect()
+      })
+      box.appendChild(row)
     })
   }
 
@@ -408,7 +487,7 @@
     var ctrl = new AbortController()
     var t = addTask({
       id: 't' + Date.now() + Math.random().toString(36).slice(2, 6),
-      hash: item.hash, name: name, from: s.id,
+      hash: item.hash, name: name, from: s.id, node: s.id, kind: 'get',
       received: 0, total: -1, rate: 0, state: 'running', ctrl: ctrl, error: null,
     })
     var tick = setInterval(function () {
@@ -467,6 +546,186 @@
     }
   }
 
+  // ── 写方向：自动搜索节点 / 本地入库 / 网络入库 ──────────────────────────
+
+  /**
+   * discoverNow 向信令问「现在谁在线」。
+   *
+   * 走的是信令的 REST 发现端点，跟 WebRTC 那条连接无关——所以**没连任何节点也能搜**，
+   * 这正是它存在的意义：先知道有哪些节点，才谈得上填 id 去连。
+   */
+  async function discoverNow() {
+    var sig = sigOfForm()
+    var btn = $('btn-discover')
+    btn.disabled = true
+    $('discovered').innerHTML = '<div class="empty">正在向 ' + esc(sig.host + ':' + sig.port) + ' 询问…</div>'
+    log('向信令询问在线节点：' + sig.host + ':' + sig.port)
+    try {
+      var nodes = await window.PeerDrive.discoverNodes(sig, { timeoutMs: 8000 })
+      renderDiscovered(nodes, null)
+      if (nodes.length) {
+        log('在线节点 ' + nodes.length + ' 个：' + nodes.map(function (n) { return n.peerId }).join('、'), 'ok')
+      } else {
+        log('信令上没有在线节点（空列表≠信令坏了：节点要主动 announce 才会出现）', 'warn')
+      }
+    } catch (e) {
+      renderDiscovered([], e)
+      log('自动搜索失败：' + (e.message || e) + (e.code ? '（' + e.code + '）' : ''), 'err')
+    } finally {
+      btn.disabled = false
+    }
+  }
+
+  /** activeNode 取出当前选中且确实在线的节点会话；不可用时给出明确原因。 */
+  function activeNode() {
+    var s = sessions.get(current)
+    if (!s) { log('先在左栏选中一个节点', 'err'); return null }
+    if (s.status !== 'online' || !s.client) {
+      log('节点 ' + s.id + ' 还不是在线状态（' + s.status + '）', 'err')
+      return null
+    }
+    return s
+  }
+
+  function newTask(s, name, kind, total) {
+    return addTask({
+      id: 't' + Date.now() + Math.random().toString(36).slice(2, 6),
+      hash: '', name: name, from: s.id, node: s.id, kind: kind,
+      received: 0, total: total || 0, rate: 0, state: 'running', ctrl: new AbortController(), error: null,
+    })
+  }
+
+  /** tickRate 每秒刷新任务行上的速率；返回清理函数。 */
+  function tickRate(t, started) {
+    var h = setInterval(function () {
+      if (t.state !== 'running') return
+      t.rate = Math.round(t.received / Math.max(1, (Date.now() - started) / 1000))
+      renderTasks()
+    }, 500)
+    return function () { clearInterval(h) }
+  }
+
+  /**
+   * settleWrite 统一的失败收尾：把 err 帧翻译成用户能执行的动作。
+   * 写操作失败的几种典型原因必须分开说——「填密钥」「节点不允许写」「写满/拒绝」
+   * 三种情况的处置完全不同，混成一句"入库失败"等于没说。
+   */
+  function settleWrite(t, e, what) {
+    t.state = (e && (e.name === 'AbortError' || e.code === window.PeerDrive.ERR.CANCELLED)) ? 'cancelled' : 'error'
+    t.error = (e && e.message) || String(e)
+    log(what + '失败：' + t.error + (e && e.code ? '（' + e.code + '）' : ''), t.state === 'cancelled' ? 'warn' : 'err')
+    if (!e || !e.code) return
+    if (pskHint(e)) log(pskHint(e), 'warn')
+    if (e.code === window.PeerDrive.ERR.TIMEOUT) {
+      log('节点在分片超时窗口内没回应。常见原因：它此刻正忙（磁盘/别的在传），或这条连接已经半死——重连一次最快。', 'warn')
+    }
+  }
+
+  /** putFiles 把选中的本地文件内容逐个送进节点。串行而非并行是有意的，见下方注释。 */
+  async function putFiles() {
+    var s = activeNode()
+    if (!s) return
+    var files = Array.prototype.slice.call($('in-file').files || [])
+    if (!files.length) { log('先选至少一个本地文件', 'err'); return }
+    // 串行执行：一条 DataChannel 上同时只能有一个 upload 流（服务端按连接级槽位
+    // 管理），并行会在第二份的第一帧就收到 "already in progress"。
+    for (var i = 0; i < files.length; i++) await putOne(s, files[i])
+    await loadShares(s)
+  }
+
+  async function putOne(s, file) {
+    var name = file.name || ('upload-' + Date.now())
+    var size = file.size || 0
+    var started = Date.now()
+    var t = newTask(s, name, 'put', size)
+    var stop = tickRate(t, started)
+    try {
+      if (size > PUT_WARN_BYTES) {
+        log(name + ' 有 ' + fmtBytes(size) + '：put 会先把整个内容读进浏览器内存，超大文件建议先本地切片', 'warn')
+      }
+      log('入库 ' + name + '（' + fmtBytes(size) + '）…')
+      var res = await s.client.put(file, {
+        name: name,
+        signal: t.ctrl.signal,
+        chunkTimeoutMs: PUT_CHUNK_TIMEOUT_MS,
+        onProgress: function (sent, total) {
+          t.received = sent
+          if (total > 0) t.total = total
+          renderTasks()
+        },
+      })
+      t.hash = res.hash
+      t.received = res.size
+      t.total = res.size
+      t.state = 'done'
+      log('入库完成：' + res.name + ' → sha256 ' + res.hash + '（' + fmtBytes(res.size) + '）', 'ok')
+      log('这条内容之后在任何地方都能用这个 hash 取回；要立刻验证，点任务里的「取回校验」。', 'ok')
+    } catch (e) {
+      settleWrite(t, e, '入库 ' + name)
+    } finally {
+      stop()
+      renderTasks()
+    }
+  }
+
+  /** pullUrl 让节点替自己去抓一个 URL 并入库。 */
+  async function pullUrl() {
+    var s = activeNode()
+    if (!s) return
+    var url = ($('in-url').value || '').trim()
+    if (!url) { log('先填一个 URL', 'err'); return }
+    if (!/^https?:\/\//i.test(url)) {
+      log('URL 必须是 http:// 或 https:// 开头——节点侧的 SSRF 防护也只放行这两种协议', 'err')
+      return
+    }
+    var want = ($('in-url-name').value || '').trim()
+    var started = Date.now()
+    var t = newTask(s, want || url.split('/').pop() || url, 'pull', 0)
+    var stop = tickRate(t, started)
+    try {
+      log('让节点抓取 ' + url + ' …')
+      var res = await s.client.pull(url, { name: want })
+      t.hash = res.hash
+      t.received = res.size
+      t.total = res.size
+      t.state = 'done'
+      log('网络入库完成：' + res.name + ' → sha256 ' + res.hash + '（' + fmtBytes(res.size) + '）', 'ok')
+    } catch (e) {
+      settleWrite(t, e, '抓取 ' + url)
+      // pull 的绝大多数 err 是节点主动拒绝（SSRF/超限/404）——那是节点在保护自己，
+      // 不是故障。把这句话说清楚，省得用户反复重试同一个注定失败的地址。
+      if (e && e.code === window.PeerDrive.ERR.PEER) {
+        log('这是节点的策略性拒绝（不是网络故障）：换一个公网可访问的地址再来。', 'warn')
+      }
+    } finally {
+      stop()
+      renderTasks()
+    }
+  }
+
+  /**
+   * verifyRoundTrip 把刚入库的内容按 hash 拉回来并复算 sha256。
+   *
+   * 为什么要有这一步：入库成功只说明节点收下了字节，不说明它真的能用那个地址
+   * 把内容还回来（落盘失败、索引没挂上，都会表现为"入库成功但取不回"）。取回
+   * 校验才是"进库了"的闭环证据。
+   */
+  async function verifyRoundTrip(t) {
+    var s = sessions.get(t.node)
+    if (!s || !s.client) { log('该节点已断开，无法取回校验', 'err'); return }
+    try {
+      log('取回校验 ' + t.hash.slice(0, 12) + '…')
+      var bytes = await s.client.fetch(t.hash)
+      var hex = await window.PeerDrive.sha256Hex(bytes)
+      hex === t.hash
+        ? log('取回校验通过：拉回 ' + fmtBytes(bytes.byteLength) + '，sha256 与入库返回值一致', 'ok')
+        : log('取回校验失败：期望 ' + t.hash + '，实得 ' + hex, 'err')
+    } catch (e) {
+      log('取回校验失败：' + (e.message || e) + (e.code ? '（' + e.code + '）' : ''), 'err')
+      if (pskHint(e)) log(pskHint(e), 'warn')
+    }
+  }
+
   // ── 启动 ──────────────────────────────────────────────────────────────
   function boot() {
     var q = params()
@@ -485,6 +744,10 @@
     }
 
     $('btn-connect').addEventListener('click', connect)
+    $('btn-discover').addEventListener('click', discoverNow)
+    $('btn-put').addEventListener('click', putFiles)
+    $('btn-pull').addEventListener('click', pullUrl)
+    $('in-url').addEventListener('keydown', function (e) { if (e.key === 'Enter') pullUrl() })
     $('in-node').addEventListener('keydown', function (e) { if (e.key === 'Enter') connect() })
     $('in-secure').addEventListener('change', function () {
       syncURL()

@@ -82,6 +82,30 @@ export function pskAuthFrame(psk) {
 // UI 按它提示"请填密钥"，**不要**去匹配 err 的 msg 文案（文案会改）。
 export const PSK_REQUIRED = 'PSK_REQUIRED'
 
+// UPLOAD_CHUNK 上传分片大小，必须与 Go 侧 uploadChunkSize（64KB）一致：
+// 服务端按这个粒度维护到位位图，粒度不一致会被判成非法偏移。
+export const UPLOAD_CHUNK = 64 * 1024
+
+// uploadFrame 构造上传头帧，请求服务端准备接收 offset 处的一个分片。
+//
+// 协议（与 Go 侧 inbound.go 的 serveUploadBegin 对齐）：每次只授权一个分片，
+// 所以上传是「发头 → 等 meta → 发二进制 → 等 ack/uploaded」的循环。
+// 看起来啰嗦，但这是服务端流控的方式：它决定每次收多少，调用方照做即可。
+export function uploadFrame(reqId, name, size, offset = 0) {
+  return JSON.stringify({
+    type: 'upload', name, size, offset, reqId, v: PROTOCOL_VERSION,
+  })
+}
+
+// pullFrame 构造「网络入库」请求帧：把 URL 交给节点，由它下载并登记。
+//
+// 与 upload 的分工：upload 是"我有内容推给你"，pull 是"我只有地址，你去取"。
+// 这是节点侧唯一一个由外部指定目标地址的动词，因此带 SSRF 防护（只走公网
+// http/https、大小上限），并且始终受 PSK 门禁约束（back/internal/transport/pull.go）。
+export function pullFrame(reqId, url, name = '') {
+  return JSON.stringify({ type: 'pull', url, name, reqId, v: PROTOCOL_VERSION })
+}
+
 // parseFrame 解析文本帧。返回 null 表示"不是本协议的控制帧"（非 JSON、
 // 或缺 type）——调用方应当忽略而不是报错：同一条连接上可能有别的用途的帧。
 export function parseFrame(text) {

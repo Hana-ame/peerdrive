@@ -109,6 +109,8 @@ const client = await connect(conn, { idleTimeoutMs: 60_000 })
 | `isOpen` | 是否已就绪 |
 | `peerId` | 对端 id（从连接上读） |
 | `shares({timeoutMs?})` | 查共享清单 → `{collections, files, dirs, total, peerId}` |
+| `put(data, opts?)` | **本地入库**：把内容送进节点 → `{hash,size,name,path}` |
+| `pull(url, opts?)` | **网络入库**：让节点替你抓这个 URL 并入库 → `{hash,size,name,path}` |
 | `stream(hash, opts?)` | **异步迭代器**，逐块产出 `Uint8Array`（不驻留内存） |
 | `fetch(hash, opts?)` | 整体取回 `Uint8Array`（受 `maxBytes` 限制） |
 | `fetchBlob(hash, opts?)` | 取回 `Blob`（按文件名猜 MIME） |
@@ -141,6 +143,49 @@ for await (const chunk of client.stream(hash)) {
 
 `stream()` 的块只进**有界队列**，消费端不取就自然形成背压；提前 `break` 会取消该请求
 （后续到达的帧被丢弃）。
+
+### 写方向：把内容放进节点
+
+```js
+// 本地入库（Uint8Array / ArrayBuffer / Blob / File / string）
+const { hash } = await client.put(fileInput.files[0], {
+  onProgress: (sent, total) => console.log(`${sent}/${total}`),
+  signal: abortCtrl.signal,   // 可取消：让在飞的那一轮立刻以 CANCELLED 结束
+})
+
+// 网络入库：让有网络能力的节点替你抓这个地址并入库
+const got = await client.pull('https://example.com/some.zip', { name: 'some.zip' })
+
+// 入库成功不等于能取回来——按 hash 拉一次并复算 sha256 才是闭环
+const bytes = await client.fetch(got.hash)
+console.log(await PeerDrive.sha256Hex(bytes) === got.hash) // true
+```
+
+两条硬约束：**一条连接同时只能有一个上传流**（多个文件请串行，并行会在第二份
+收到 `already in progress`）；`put` 会先把整个内容读进浏览器内存再分片，超大
+文件请自行切片。
+
+`pull` 是节点的对外出口，因此带了 SSRF 防护：只放行公网 `http/https`，内网/本机、
+带用户名密码的 URL、跳到内网的重定向一律拒，并有大小上限。这类拒绝是**预期行为**，
+会作为 `PEER` 错误把节点原话透传出来。
+
+### 自动搜索在线节点
+
+```js
+import { discoverNodes } from 'peerdrive-client'
+
+const nodes = await discoverNodes(
+  { host: 'signal.example', port: 443, secure: true },
+  { coll: '可选：只查某个集合', timeoutMs: 8000 },
+)
+// → [{peerId, lastSeen, nodeType?, collections?, uptime?, loadInfo?}, ...]
+```
+
+走信令的 REST 发现端点 `GET /discover/nodes`，**不占用也不依赖任何 WebRTC 连接**
+——没连节点也能搜。前提是信令愿意给跨域响应：`file://` 的页面原点是 `null`、
+托管出去又是另一个域，没有 `Access-Control-Allow-Origin` 时浏览器连状态码都不给，
+只剩 `TypeError: Failed to fetch`。`discoverNodes` 会把它判出来并在错误信息里点名
+这个响应头，而不是含糊地报"搜索失败"。
 
 ### 错误码
 
