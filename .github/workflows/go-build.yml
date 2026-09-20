@@ -60,3 +60,35 @@ jobs:
         with:
           name: peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}
           path: back/peerdrive-server*
+
+  # 独立 go.mod 的子模块（doc/testing 的盲区清单里有它们）：
+  # signalserver（信令，含 wss 与 CORS 用例）与 p2p_bt（BT/DHT）。
+  # 主 CI 只跑 back 主模块，这两个**改坏了 Peerdrive CI 照样绿**；
+  # 发版门禁的 gate 会跑 signalserver（半覆盖），p2p_bt 则完全没有 job。
+  # 这里一格把两个都跑掉：它们是纯 Go 逻辑，不占平台矩阵。
+  submodules:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: |
+            back/signalserver/go.sum
+            back/p2p_bt/go.sum
+
+      - name: Test signalserver
+        working-directory: back/signalserver
+        env:
+          CGO_ENABLED: 0
+        run: go test -count=1 ./...
+
+      - name: Test p2p_bt
+        working-directory: back/p2p_bt
+        env:
+          CGO_ENABLED: 0
+        run: go test -count=1 ./...
