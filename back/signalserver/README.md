@@ -11,13 +11,32 @@
 
 ```bash
 go build -o peerserver ./cmd/peerserver/
-./peerserver [-addr :9000] [-key peerjs] [-tokens tok1,tok2]
+./peerserver [-addr :9000] [-key peerjs] [-tokens tok1,tok2] [-tls-cert c.pem -tls-key k.pem]
 ```
 
 - `-addr` 监听地址（默认 `:9000`）
 - `-key` PeerJS API key（客户端必须一致，防无关客户端接入）
 - `-tokens` 可选：信令 token 白名单（逗号分隔）。设置后 WS 连接的
   token 必须在名单内，否则拒绝升级（防任意客户端冒充节点收信令）
+- `-tls-cert` / `-tls-key`：PEM 证书与私钥。**成对给出时以 HTTPS/WSS 提供服务**，
+  只给一个会直接报错退出（不静默降级——见下）
+
+### 什么时候必须开 TLS（wss）
+
+公共面板（`packages/peerdrive-client/dist/panel.html`，在线版跑在 GitHub Pages）是
+HTTPS 页面，浏览器会把 HTTPS 页面发起的 `ws://` 当**混合内容**直接拦掉，而 PeerJS
+侧只表现为"连不上"，没有任何提示。所以：
+
+- 面板用 `localhost` 形式的 ws 信令：多数浏览器网开一面，能用；
+- 面板要连局域网/公网上的自托管信令：**必须 wss**。
+
+```bash
+./peerserver -addr :9100 -tls-cert cert.pem -tls-key key.pem
+# 或者不在本进程开 TLS，而是在前面挂 caddy / nginx / Cloudflare Tunnel 反代
+```
+
+REST 端点（`/peerjs/id`、`/discover/*`、`/status`）一律返回 `Access-Control-Allow-Origin: *`
+并短路 OPTIONS 预检——公共面板在别的源上，跨域头是硬要求。
 
 ## 端点
 

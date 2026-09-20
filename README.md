@@ -60,10 +60,12 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 # 后端
 cd back && go run -tags nosqlite ./cmd/server/main.go
 
-# 网盘 UI = 公共面板（单文件，不需要任何服务器；双击 file:// 就能开）
-cd packages/peerdrive-client && npm run build:panel
-#   然后浏览器打开 dist/panel.html，或带参数直达某个节点：
-#   dist/panel.html?node=<节点 peer id>&host=<信令>&port=9100&path=/&key=peerjs&secure=0&auto=1
+# 网盘 UI = 公共面板（单文件，不需要任何服务器）
+#   在线版：https://hana-ame.github.io/peerdrive/   （push 后自动部署）
+#   本地版：npm run build:panel 生成 dist/panel.html，双击 file:// 就能开
+#   带参数直达某个节点：
+#   panel.html?node=<节点 peer id>&host=<信令>&port=9100&path=/&key=peerjs&secure=0&auto=1
+#   注意：HTTPS 页面（含在线版）只能用 wss 信令，否则浏览器按混合内容拦掉。
 
 # 节点管理台（给节点运营者：市场/我的节点/传输任务，需要后端在跑）
 cd front && npm run dev
@@ -81,7 +83,7 @@ SIG_HOST=<本机IP> SIG_PORT=9100 NODE_ID=node-a node scripts/verify-panel.mjs
 # 测试
 cd back && go test -tags nosqlite ./... -count=1                                     # 308
 cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1    # 21（脱外网，自托管信令；必须 -p 1）
-cd back/signalserver && go test ./...            # 21（独立 go.mod，无 CI job）
+cd back/signalserver && go test ./...            # 23（独立 go.mod，无 CI job，含 wss 用例）
 cd back/p2p_bt && go test ./...                  # 7（独立 go.mod，无 CI job）
 cd front && npx vitest run                       # 88
 cd packages/peerdrive-client && npm test         # node --test（零依赖）61

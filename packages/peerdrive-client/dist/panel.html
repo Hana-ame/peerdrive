@@ -1488,11 +1488,23 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
       : 'peerjs 还在加载中，稍等再点一次。'
   }
 
+  // 本页跑在 HTTPS（GitHub Pages 强制 HTTPS）时，浏览器会把 ws:// 当「混合内容」
+  // 直接拦掉，PeerJS 侧只表现为连不上、没有任何可用提示——这里提前说清楚。
+  function mixedContent() {
+    return location.protocol === 'https:' && !$('in-secure').checked
+  }
+  function mixedContentHint() {
+    return '本页是 HTTPS，浏览器会按「混合内容」拦掉 ws:// 信令（本机 localhost 的 ws:// ' +
+      '多数浏览器仍放行，局域网 IP 一律拦）。请改用 wss：勾选上面的 wss（或链接里 secure=1），' +
+      '自托管信令用 `peersignal -tls-cert cert.pem -tls-key key.pem`，或在信令前挂 TLS 反代。'
+  }
+
   async function connect() {
     if (!peerReady()) { log(peerMissingHint(), 'err'); return }
     var nodeId = $('in-node').value.trim()
     if (!nodeId) { log('请先填节点 peer id', 'err'); return }
     if (sessions.has(nodeId)) { select(nodeId); return }
+    if (mixedContent()) { log(mixedContentHint(), 'err'); return }
 
     var sig = sigOfForm()
     syncURL()
@@ -1651,13 +1663,19 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
 
     $('btn-connect').addEventListener('click', connect)
     $('in-node').addEventListener('keydown', function (e) { if (e.key === 'Enter') connect() })
-    ;['in-host', 'in-port', 'in-path', 'in-key', 'in-secure'].forEach(function (id) {
+    $('in-secure').addEventListener('change', function () {
+      syncURL()
+      if (!mixedContent()) log('信令走 wss，与 HTTPS 页面兼容', 'ok')
+    })
+    ;['in-host', 'in-port', 'in-path', 'in-key'].forEach(function (id) {
       $(id).addEventListener('change', syncURL)
     })
 
     renderRecent()
     renderTasks()
     log('就绪。本面板是单个静态文件，不需要本地后端。')
+    // HTTPS 托管（GitHub Pages）下 ws:// 必被拦，开局就讲明白，别等用户点了没反应
+    if (mixedContent()) log(mixedContentHint(), 'warn')
 
     window.addEventListener('peerjs-ready', function (e) {
       if (e.detail && e.detail.ok) log('peerjs 已加载（' + e.detail.src + '）', 'ok')

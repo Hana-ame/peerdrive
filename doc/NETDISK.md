@@ -297,7 +297,13 @@ peersignal :9100（信令 + 内置 /discover 发现，仅转发 SDP/ICE）
 ### 7.2.1 网盘 UI 的形态：**公共面板**（不是本地起的 web 服务）
 
 网盘的 UI **不是**一个需要你自己起 http 服务的前端工程，而是一个**公共静态面板**：
-`packages/peerdrive-client/dist/panel.html`（单文件，57 KB）。
+
+**在线版（推荐直接用）**：<https://hana-ame.github.io/peerdrive/>
+
+由 `.github/workflows/pages.yml` 在每次 push（且面板相关文件有变动）时自动构建部署，
+产物就是下面这个单文件面板。**注意在线版是 HTTPS，会触发下面的前提 3（信令必须 wss）。**
+
+本地也随时可以自己生成一份：`packages/peerdrive-client/dist/panel.html`（单文件，58 KB）。
 
 ```bash
 cd packages/peerdrive-client && npm run build:panel      # 生成产物
@@ -314,7 +320,7 @@ panel.html?node=node-a&host=<信令 host>&port=9100&path=/&key=peerjs&secure=0&a
 `auto=1` 打开即连。面板支持多节点并存、传输任务列表（进度/速率/取消）、
 图片/视频/文本预览、最近连接记录。
 
-两个必须知道的前提：
+三个必须知道的前提：
 
 1. **信令必须开 CORS**。面板多半以 `file://` 或别的域打开（origin 是 `null`／异构源），
    而它第一件事就是 `GET /peerjs/id` 取临时 id；信令不返回跨域头时浏览器直接吞掉响应，
@@ -323,6 +329,19 @@ panel.html?node=node-a&host=<信令 host>&port=9100&path=/&key=peerjs&secure=0&a
    加跨域头 + OPTIONS 预检短路）。
 2. **peerjs 走回退链加载**：同目录 `peerjs.min.js` → jsdelivr → unpkg。
    内网/离线先跑 `npm run vendor:peerjs` 把它下到 `dist/` 同目录，即可完全不联网。
+3. **HTTPS 页面只能用 wss 信令**（GitHub Pages 强制 HTTPS）。浏览器会把 HTTPS 页面发起的
+   `ws://` 当**混合内容**直接拦掉，PeerJS 侧只表现为"连不上"，没有任何提示。
+   - 信令在自己机器上、面板用 `localhost`：多数浏览器对 `ws://localhost` 网开一面；
+   - 信令在局域网 IP：一律被拦，必须 wss。
+   面板会在这种配置下直接拦住并给出提示。自托管信令开 wss 的方式：
+
+   ```bash
+   peersignal -addr :9100 -tls-cert cert.pem -tls-key key.pem
+   # 或在信令前挂一层 TLS 反代（caddy / nginx / Cloudflare Tunnel）
+   ```
+
+   只给 `-tls-cert`、`-tls-key` 其中一个会**直接报错退出**（不静默降级回 http——
+   那会让对面 HTTPS 面板被混合内容拦掉，而服务端日志看着一切正常，极难排查）。
 
 端到端自检（真实浏览器 + 真实点击，需要先起 §7.1 的环境）：
 

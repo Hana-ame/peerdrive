@@ -1,0 +1,66 @@
+name: Deploy Panel to Pages
+
+# 把 packages/peerdrive-client 的单文件公共面板部署成 GitHub Pages 站点。
+# 产物是纯静态单文件（dist/panel.html），构建零依赖（不需要 npm ci）。
+on:
+  push:
+    branches: [refactor]
+    paths:
+      - 'packages/peerdrive-client/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 只允许一个部署同时进行；排队中的运行不取消（避免把正在发布的部署掐断）
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build single-file panel
+        working-directory: packages/peerdrive-client
+        # --check 顺便再校验一次：CI 不该产出与 src/ 不一致的产物
+        run: npm run build:panel && npm run check:panel
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp packages/peerdrive-client/dist/panel.html _site/index.html
+          cp packages/peerdrive-client/dist/panel.html _site/panel.html
+          # Pages 默认不带 .nojekyll 会跑 Jekyll，我们的文件不含 front-matter，
+          # 但显式关掉更省心（也避免下划线开头的路径被吞）
+          touch _site/.nojekyll
+          printf 'User-agent: *\nDisallow: /\n' > _site/robots.txt
+          ls -la _site
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -10,7 +10,7 @@
 
 项目有 **14 个测试组件**，分布在 4 个 go 模块（back 主模块 + peerjs / signalserver / p2p_bt
 三个独立 go.mod）、3 个 npm 工程（front / peerdrive-client / peerdrive-media），
-外加 2 个本地脚本和 3 条 CI workflow（其中只有 2 条实际执行测试，见 §3.15）。
+外加 2 个本地脚本和 4 条 CI workflow（其中只有 2 条实际执行测试，见 §3.15）。
 它们是**不同层次的验证**，不能互相替代：单元测试普遍用注入的假依赖，
 真正把整条链路从头到尾连起来跑一遍的只有端到端脚本（§3.14）。
 
@@ -29,7 +29,7 @@
 | `back/internal/transport/**` 帧协议 | 同上（transport 78） | 集成测试（21） |
 | **网盘链路**（`nodes/share/pull/RegisterLocal`） | 集成测试 + **`./scripts/netdisk-local-demo.sh`**（手工，必须跑一遍） | 浏览器 UI 手测（`NETDISK.md` §7.2） |
 | `back/peerjs/**` | `cd back/peerjs && go test ./... -count=1 -race`（23） | — |
-| `back/signalserver/**`（peersignal） | `cd back/signalserver && go test ./...`（21）· **CI 不管它** | — |
+| `back/signalserver/**`（peersignal） | `cd back/signalserver && go test ./...`（23）· **CI 不管它** | — |
 | `back/p2p_bt/**` | `cd back/p2p_bt && go test ./...`（7）· **CI 不管它** | — |
 | `front/src/**` | `cd front && npm test`（88）+ `npm run build` | `front/tests/*.mjs` 手动脚本（视改动面） |
 | `packages/peerdrive-client/**` | `npm test`（61）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端） |
@@ -48,7 +48,7 @@
 | 2 | 后端集成测试 | `back/test/integration/` | `go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1` | **21** 通过 / 4 跳过 | ✅ `integration` | ❌（自托管信令） |
 | 3 | 外网集成（手动门控） | 同 2 | `PEERDRIVE_MQTT_TEST=1` / `PEERDRIVE_LIVE_TEST=1` | 4 个用例 | ❌ | ✅（直连，不走代理） |
 | 4 | peerjs 模块 | `back/peerjs/`（独立 go.mod） | `go test ./... -count=1 -race` | **23** | ✅ `peerjs` | ❌ |
-| 5 | signalserver 模块 | `back/signalserver/`（独立 go.mod） | `go test ./... -count=1` | **21** | ❌ **（盲区）** | ❌ |
+| 5 | signalserver 模块 | `back/signalserver/`（独立 go.mod） | `go test ./... -count=1` | **23** | ❌ **（盲区）** | ❌ |
 | 6 | p2p_bt 模块 | `back/p2p_bt/`（独立 go.mod） | `go test ./... -count=1` | **7** | ❌ **（盲区）** | ❌ |
 | 7 | 前端 vitest | `front/tests/*.test.{js,jsx}` | `npm test` | **88**（9 文件） | ✅ `frontend`（含 build） | npm ci 需要 |
 | 8 | 前端手动脚本 | `front/tests/*.mjs`（3 个） | playwright / WS 冒烟 | — | ❌ **（盲区）** | ✅（线上站点） |
@@ -60,7 +60,7 @@
 | 14 | 网盘端到端脚本 | `scripts/netdisk-local-demo.sh` | 起 3 进程跑全链路 | 8 项断言 | ❌ **（建议进 CI）** | ❌ |
 
 **覆盖范围合计**：自动化（CI）覆盖 308 + 21 + 23 + 88 + 61 + 21 = **522**；
-另有 CI 之外的 21（signalserver）+ 7（p2p_bt）需手动，以及 4 个外网门控用例。
+另有 CI 之外的 23（signalserver）+ 7（p2p_bt）需手动，以及 4 个外网门控用例。
 
 ---
 
@@ -98,7 +98,7 @@ PEERDRIVE_SKIP_RTC=1  ...                                                       
 - **主仓 `go test ./...` 扫不到它** —— 必须单独跑。CI 有专门 job，本地别忘。
 - 建议带 `-race`（流控/并发相关）。
 
-### 3.5 `back/signalserver`（21）— **CI 盲区**
+### 3.5 `back/signalserver`（23）— **CI 盲区**
 
 - 独立 go.mod（`github.com/Hana-ame/go-peersignal`），自托管信令服务的本体（`peersignal` 命令的来源）。
 - 和 peerjs 一样被 `cd back && go test ./...` 跳过，但**没有对应的 CI job**。改了它 CI 不会红。
@@ -201,7 +201,7 @@ bash scripts/test-layers.sh --integration  # 追加真实信令集成段（-p 1 
 | L3 | 管理面 | `go test -tags nosqlite ./internal/transport/ -run "^TestAdmin"` | 12 |
 | L4 | 业务核心 | `go test -tags nosqlite ./internal/{controller,service,source,downloader}/...` | 161 |
 | L5 | 数据 | `go test -tags nosqlite ./internal/repository/...` | 12 |
-| L6 | 发现 | `cd back/signalserver && go test ./...`（独立 go.mod，**cd 进去跑**） | 21 |
+| L6 | 发现 | `cd back/signalserver && go test ./...`（独立 go.mod，**cd 进去跑**） | 23 |
 | LB | 基础包 | `go test -tags nosqlite ./internal/{config,model,provider,router}/...` | 57 |
 | L7 | 外部能力 | `cd back/p2p_bt && go test ./...` | 7 |
 | L8 | 前端 | `cd front && npm test` | 88 |
@@ -225,6 +225,7 @@ bash scripts/test-layers.sh --integration  # 追加真实信令集成段（-p 1 
 | `ci.yml` | push 到 main/master/refactor/base/docs/`feat/*`/`fix/*`/`module/*`/`*-agent`/`*-frontend`；PR 到 main/master/refactor | 6 个 | ①后端单元（vet+test+build）②集成（`-p 1`）④peerjs（vet+test）⑦前端（test+build）⑨client ⑪media（ci+test+build） |
 | `go-build.yml` | push / PR（不限分支） | 5 平台矩阵 | ①后端单元×4（非 Windows 才跑 test）+ 交叉构建产物 |
 | `release.yml` | push tag `v*` | 2 个 | **只 build，不跑任何测试** |
+| `pages.yml` | push 到 `refactor` 且 `packages/peerdrive-client/**` 有变动；或手动 dispatch | 2 个 | **不是测试**：构建面板并部署到 GitHub Pages（<https://hana-ame.github.io/peerdrive/>）。它会顺带跑 `check:panel`，因此也拦「改了 `src/` 忘了重建产物」 |
 
 **⚠️ 打 tag 发版时 `ci.yml` 不会触发**（它的 `on.push` 只列了 branches，不含 tags），
 而 `release.yml` 又不跑测试 —— 也就是说**发版路径上没有任何测试门禁**。
@@ -239,7 +240,7 @@ bash scripts/test-layers.sh --integration  # 追加真实信令集成段（-p 1 
 | 盲区 | 为什么危险 | 现状 |
 |---|---|---|
 | **端到端组合**（登记→清单→拉取→校验） | 2026-09-20 两个致命缺陷都藏在这里，而所有单元/集成用例全绿 | 只有手工脚本 `netdisk-local-demo.sh`，**未进 CI** |
-| **`back/signalserver`**（21） | 独立 go.mod + 无 CI job ⇒ 信令服务改坏了 CI 照样绿 | 手动跑 |
+| **`back/signalserver`**（23） | 独立 go.mod + 无 CI job ⇒ 信令服务改坏了 CI 照样绿 | 手动跑 |
 | **`back/p2p_bt`**（7） | 同上 | 手动跑（test-layers L7 会捎带） |
 | **外网集成 4 用例** | 公共 broker / 线上信令的协议兼容性无人验证 | 门控手动 |
 | `front/tests/*.mjs`（3 个） | UI 冒烟依赖人工触发；`playwright-smoke` 断言的是线上站点 | 手动 |

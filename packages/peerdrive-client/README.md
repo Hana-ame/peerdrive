@@ -185,10 +185,13 @@ UI 请按 `err.code` 分支，不要去匹配 `message` 文案。
 
 ## 公共面板（网盘的 UI 形态：`dist/panel.html`）
 
-网盘**没有本地 HTTP 服务器式的 UI** —— UI 是一个**公共静态面板**，用 PeerJS 拨号进去：
+网盘**没有本地 HTTP 服务器式的 UI** —— UI 是一个**公共静态面板**，用 PeerJS 拨号进去。
+
+**在线版：<https://hana-ame.github.io/peerdrive/>**（`.github/workflows/pages.yml`
+在面板相关文件变动时自动构建部署）。
 
 ```bash
-npm run build:panel    # 生成 dist/panel.html（56 KB，单文件）
+npm run build:panel    # 生成 dist/panel.html（58 KB，单文件）
 ```
 
 `dist/panel.html` 是**自包含单文件**：client 源码已内联，`file://` 双击就能开，
@@ -210,6 +213,11 @@ panel.html?node=<peer id>&host=<信令>&port=&path=/&key=peerjs&secure=0&auto=1
 > 浏览器会拦掉 `GET /peerjs/id` 的响应，PeerJS 侧只报含混的 `server-error`。
 > 自托管信令 `back/signalserver` 已在 HandleID/HandleAnnounce/HandleLeave/HandleNodes/HandleStatus
 > 上加了跨域头与 OPTIONS 预检短路（`allowCORS`）。
+
+> **HTTPS 页面只能用 wss 信令**。在线版跑在 GitHub Pages（强制 HTTPS），浏览器会把
+> HTTPS 页面发起的 `ws://` 当混合内容拦掉，且没有任何提示 —— 面板检测到这种配置会
+> 直接拦住并说明怎么改。自托管信令开 wss：`peersignal -tls-cert cert.pem -tls-key key.pem`
+> （两个参数必须成对给，只给一个会报错退出），或在前面挂 TLS 反代。
 
 ## 演示（旧版 demo，需要本地静态服务）
 
