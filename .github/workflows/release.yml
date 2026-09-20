@@ -87,9 +87,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          cache-dependency-path: back/go.sum
 
       - name: Build
-        run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -ldflags="-s -w" -o peerdrive-server${{ matrix.ext }} ./cmd/server/
+        # GOOS/GOARCH 必须走 env，不能写成 `GOOS=... go build`：windows-latest
+        # 的默认 shell 是 pwsh，前置赋值的 bash 语法会被当成命令名
+        # （2026-09-20 用 workflow_dispatch 试跑时暴露：windows 那格一直红）。
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: go build -ldflags="-s -w" -o peerdrive-server${{ matrix.ext }} ./cmd/server/
 
       - uses: actions/upload-artifact@v4
         with:
