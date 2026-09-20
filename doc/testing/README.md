@@ -32,7 +32,7 @@
 | `back/signalserver/**`（peersignal） | `cd back/signalserver && go test ./...`（23） | ✅ `go-build` 的 `submodules` 格（2026-09-21 补） |
 | `back/p2p_bt/**` | `cd back/p2p_bt && go test ./...`（7） | ✅ 同上 |
 | `front/src/**` | `cd front && npm test`（88）+ `npm run build` | `front/tests/*.mjs` 手动脚本（视改动面） |
-| `packages/peerdrive-client/**` | `npm test`（98）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端） |
+| `packages/peerdrive-client/**` | `npm test`（98）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端）；合并后 `pages.yml` 会**自动**验线上（§2 第 11 项） |
 | `packages/peerdrive-media/**` | `npm test`（21）+ `npm run build` | `test/e2e-browser.mjs`、`test/media-node-e2e.mjs` |
 | 准备 merge 进 `refactor` | 上表全部必跑项全绿（= CI 的同款命令） | 合并后在主干再跑一遍 |
 
@@ -52,18 +52,19 @@
 | 6 | p2p_bt 模块 | `back/p2p_bt/`（独立 go.mod） | `go test ./... -count=1` | **7** | ✅ `go-build`·`submodules` | ❌ |
 | 7 | 前端 vitest | `front/tests/*.test.{js,jsx}` | `npm test` | **88**（9 文件） | ✅ `frontend`（含 build） | npm ci 需要 |
 | 8 | 前端手动脚本 | `front/tests/*.mjs`（3 个） | playwright / WS 冒烟 | — | ❌ **（盲区）** | ✅（线上站点） |
-| 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **70** | ✅ `client-package` | ❌ |
+| 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **98** | ✅ `client-package` | ❌ |
 | 10 | client 公共面板 + 浏览器自检 | `packages/peerdrive-client/{dist,scripts}` | `npm run check:panel`·`node scripts/verify-panel.mjs` | 面板 8 项断言 | ✅ `check:panel`（产物一致性） | ❌（peerjs 取 CDN） |
-| 11 | 线上托管自检（Pages） | `packages/peerdrive-client/scripts/verify-pages.mjs` | `node scripts/verify-pages.mjs` | 线上 5 项断言 | ❌ **（可考虑加 CI，见 §4）** | ✅（验的就是线上） |
-| 11 | media 包单测 | `packages/peerdrive-media/` | `npm test` + `npm run build` | **21** | ✅ `media-package` | npm ci 需要 |
-| 12 | media 浏览器/Node E2E | `packages/peerdrive-media/test/*.mjs`（非 `*.test.mjs`） | playwright runner / 直启 | 10 断言 + … | ❌ **（盲区）** | ❌ |
-| 13 | 分层汇总脚本 | `scripts/test-layers.sh` | `bash scripts/test-layers.sh [--integration]` | 聚合 1/4/5/6/7 | ❌（本地聚合） | — |
-| 14 | 网盘端到端脚本 | `scripts/netdisk-local-demo.sh` | 起 3 进程跑全链路 | 8 项断言 | ✅ **`e2e.yml`** | ❌（脱外网，本机进程） |
-| 15 | 面板浏览器端到端 | `packages/peerdrive-client/scripts/verify-panel.mjs` | 真实浏览器点面板 | 9 项断言 | ✅ **同 `e2e.yml`（复用上一套环境）** | ❌ |
+| 11 | 线上托管自检（Pages） | `packages/peerdrive-client/scripts/verify-pages.mjs` | `node scripts/verify-pages.mjs` | 线上 5 项断言 | ✅ `pages.yml`·`verify`（部署后回头验，2026-09-21 补） | ✅（验的就是线上） |
+| 12 | media 包单测 | `packages/peerdrive-media/` | `npm test` + `npm run build` | **21** | ✅ `media-package` | npm ci 需要 |
+| 13 | media 浏览器 E2E（2 个） | `packages/peerdrive-media/test/{e2e-browser,media-node-e2e}.mjs` | playwright runner | 10 断言 + … | ❌ **（盲区）** | ✅（twimg 图 + peerjs CDN，还要 media-node 在跑） |
+| 14 | 分层汇总脚本 | `scripts/test-layers.sh` | `bash scripts/test-layers.sh [--integration]` | 聚合 1/4/5/6/7 | ❌（本地聚合） | — |
+| 15 | 网盘端到端脚本 | `scripts/netdisk-local-demo.sh` | 起 3 进程跑全链路 | 8 项断言 | ✅ **`e2e.yml`** | ❌（脱外网，本机进程） |
+| 16 | 面板浏览器端到端 | `packages/peerdrive-client/scripts/verify-panel.mjs` | 真实浏览器点面板 | 9 项断言 | ✅ **同 `e2e.yml`（复用上一套环境）** | ❌ |
 
 **覆盖范围合计**（2026-09-21 重测）：自动化（CI）覆盖 550 + 21 + 23 + 88 + 98 + 21 = **801**；
-signalserver（23）与 p2p_bt（7）自 2026-09-21 起也进了 CI；
-另有 4 个外网门控用例与若干浏览器/线上脚本需手动。
+同日补进 CI 的还有 signalserver（23）· p2p_bt（7）· Pages 线上自检（5）⇒ **836**。
+仍在 CI 外的：4 个外网门控用例、`front/tests/*.mjs`（3 个）· media 浏览器 E2E（2 个）·
+client demo 页面 —— 它们要么依赖外部站点、要么要人工先把服务起起来，见 §4。
 
 ---
 
@@ -153,7 +154,7 @@ PEERDRIVE_SKIP_RTC=1  ...                                                       
 |------|--------|-------|
 | `npm run build:panel` / `check:panel` | 从 `src/` 内联生成 `dist/panel.html`；`--check` 校验产物与源码一致（防漂移） | ✅ `client-package` 跑 `check:panel` |
 | `node scripts/verify-panel.mjs` | 真实浏览器（默认复用本机 Edge）打开 `file://` 产物，断言：peerjs 加载 → 连上节点 → 清单 → 点「保存」真下载 → 点「预览」有内容 → sha256 与清单一致 | ❌ 手工 |
-| `node scripts/verify-pages.mjs` | 验**线上托管**（默认 <https://hana-ame.github.io/peerdrive/>）：面板骨架 / bundle 注入 / peerjs 可取到 / HTTPS+`ws://` 混合内容提示 / 无 JS 报错。与上一条互补——一个验功能、一个验部署 | ❌ 手工 |
+| `node scripts/verify-pages.mjs` | 验**线上托管**（默认 <https://hana-ame.github.io/peerdrive/>）：面板骨架 / bundle 注入 / peerjs 可取到 / HTTPS+`ws://` 混合内容提示 / 无 JS 报错。与上一条互补——一个验功能、一个验部署 | ✅ `pages.yml`·`verify`（部署后跑，2026-09-21 补） |
 
 - 前置：`./scripts/netdisk-local-demo.sh` 起的节点 + 信令；装 `playwright-core`（不在本包依赖里）。
 - 这两个坑只在真浏览器里暴露，所以必须用浏览器验：**peerjs CDN 加载失败**（已加多源回退 + `npm run vendor:peerjs` 离线化）、
@@ -178,7 +179,10 @@ npm run demo:signal # peerjs --port 9100（需要 devDependency 已安装才跑�
 ### 3.12 `packages/peerdrive-media` 手动 E2E（10+ 断言）
 
 - `test/e2e-browser.mjs`：mount/load/视频/白名单/dispose 重建，需本机 Firefox + playwright runner
-- `test/media-node-e2e.mjs`：Node 侧 E2E，**不符合 `*.test.mjs` glob**，所以 `npm test` 不跑它
+- `test/media-node-e2e.mjs`：**名字像 Node 侧，实际也是浏览器 E2E**（吃 playwright runner 传入的
+  `page`/`ok`）。前置：Go `media-node` 在跑 + 静态服务 :5176，并且要真的加载一张 twimg 图片
+  ⇒ 既不符合 `*.test.mjs` glob，**也吃外网**，所以短期不进 CI。
+  另有独立入口 `scripts/run-media-node-e2e.mjs`（带代理连远程 peersignal）
 - 坑与浏览器 E2E 七连（含串行槽空占三入口）见 `REFACTOR.md` §3.11
 
 ### 3.13 `scripts/test-layers.sh`（分层聚合）
@@ -269,10 +273,10 @@ gh run watch                                                 # gate 2m39s → bu
 | ~~**`back/p2p_bt`**（7）~~ | 同上（这个连发版门禁都没覆盖） | ✅ **2026-09-21 已补**：同上 |
 | **外网集成 4 用例** | 公共 broker / 线上信令的协议兼容性无人验证 | 门控手动 |
 | `front/tests/*.mjs`（3 个） | UI 冒烟依赖人工触发；`playwright-smoke` 断言的是线上站点 | 手动 |
-| media 的两个非 `*.test.mjs` E2E | 浏览器真实渲染路径不在 `npm test` 里 | 手动 |
+| media 的两个非 `*.test.mjs` E2E | 浏览器真实渲染路径不在 `npm test` 里；且两个都吃外网（twimg 图 + peerjs CDN），还要先人工起 `media-node` | 手动（短期不进 CI） |
 | client demo 页面（:8123） | 消费端真人可用性的最后一道 | 手动 |
 | **公共面板的浏览器自检** | `dist/panel.html` 是 file:///静态托管的单文件，单元测试完全碰不到；peerjs CDN 加载、信令 CORS、真实点击保存都只能在这里验 | 手动 `scripts/verify-panel.mjs`（8 项断言，已跑通） |
-| **线上托管本身**（Pages 部署） | 部署链路动过 `.nojekyll`/路径、或 peerjs CDN 在线上不可达时，本地 file:// 全绿也照样白屏 | 手动 `scripts/verify-pages.mjs`（5 项断言，已跑通） |
+| ~~**线上托管本身**（Pages 部署）~~ | 同上 | ✅ **2026-09-21 已补**：`pages.yml` 新增 `verify` job（`needs: deploy`，先探测发布传播再验，整轮失败重试 3 次） |
 | ~~**打 tag 发版**~~ | 曾经：`ci.yml` 不含 tags、`release.yml` 只构建 ⇒ 发版无门禁 | ✅ **2026-09-20 已补**：`ci.yml` 加 tags 触发 + `release.yml` 自带 `gate`（见 §3.15） |
 | **PSK 门禁只在真实网络里才验得到** | 帧级行为有单测，但"带了/没带密钥在真实 WebRTC 上真的被拦/放行"必须跑链路 | 手动：`netdisk-local-demo.sh` 第 [6] 步（A 带密钥 → B 无密钥被拦 → B 带密钥恢复）；可考虑接进 `e2e.yml` |
 
@@ -304,6 +308,7 @@ export PATH="$HOME/.nvm/versions/node/v22.23.1/bin:$PATH"
 - **新增/删除测试集时更新本文件的 §1 选表、§2 全景表、§3 对应小节。**
 - 用例数字会漂移：本表是 2026-09-20 的快照，重跑后如有出入以实测为准并顺手更新。
 - 想继续补，优先级：`front/tests/*.mjs` 三个 UI 冒烟（依赖线上站点，需先解决外网）>
-  media 的两个非 `*.test.mjs` E2E > `verify-pages.mjs`（验的是线上，跑失败未必是代码问题）。
-  （signalserver / p2p_bt 与发版门禁已于 2026-09-20/21 补齐；
-  `test-layers.sh` 自身的问题已于 2026-09-20 修完，见 §3.13。）
+  media 的两个非 `*.test.mjs` E2E（同样吃外网，且要人工先起 `media-node`）。
+  这两个都**不是**"加个 job 就行"——真正的门槛是外网与人工起服务，不是没人写。
+  （signalserver / p2p_bt 与发版门禁已于 2026-09-20/21 补齐；Pages 线上自检已于
+  2026-09-21 进 `pages.yml`；`test-layers.sh` 自身的问题已于 2026-09-20 修完，见 §3.13。）
