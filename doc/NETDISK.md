@@ -250,3 +250,105 @@ candidate peerB ok                                            ← 晚到的第�
 验证：`-count=2000` 全绿（旧失败率下期望 20~40 次失败）、`-race -count=300` 全绿；
 `npm ci` + `npm test` 21/21 + `npm run build` 全链通过。
 
+---
+
+## 7. 本地跑通：怎么亲手测这几个功能
+
+CI 绿 ≠ 链路可用。这一节是**真正把网盘跑起来**的手册，也是本次
+运行时缺陷被发现的地方（CI 全绿但 `files=[]`，见 §7.3）。
+
+### 7.1 一键起环境
+
+```bash
+./scripts/netdisk-local-demo.sh          # 起信令 + node-a + node-b，自动跑一遍全链路
+./scripts/netdisk-local-demo.sh --stop   # 停掉
+```
+
+脚本做的事：编译 `back/cmd/server` → 起自托管信令 `peersignal :9100` → 起
+`node-a`（`PEERDRIVE_SHARE_ENABLE=true`）和 `node-b`（纯消费）→ 依次验证
+市场/加入/清单/拉取/内容校验，逐步 PASS/FAIL。完全脱外网（不碰公共信令与 IPFS）。
+
+拓扑：
+
+```
+peersignal :9100（信令 + 内置 /discover 发现，仅转发 SDP/ICE）
+   ├── node-a :3001  storage=/tmp/pddemo/a/root  download=<root>/downloads
+   │                 SHARE_DIRS=<root>/downloads/shared   ← 共享这一个目录
+   └── node-b :3002  storage=/tmp/pddemo/b/root  download=<root>/downloads
+        └── 市场发现 node-a → join → share 帧取清单 → pull 落盘到 <root>/downloads/pulled
+```
+
+### 7.2 分功能手工测试清单
+
+设 `B=http://127.0.0.1:3002`（消费方视角）。
+
+| 功能 | 怎么测 | 期望 |
+|---|---|---|
+| 节点市场 | `curl $B/peerjs/nodes` | `nodes[]` 含 `node-a`，带 `online/connected/joined/shares` |
+| 加入节点 | `curl -X POST $B/peerjs/nodes/join -d '{"peer":"node-a"}'` | `{"status":"joined"}`；`<b-storage>/joined_nodes.json` 落盘，重启 node-b 后仍在 |
+| 我的节点 | `curl $B/peerjs/nodes/joined` | 含 `node-a`，`joined=true` |
+| 对方文件链接 | `curl $B/peerjs/nodes/node-a/shares` | `files[]` 非空（这是 share 帧，跨 WebRTC 取） |
+| 拉取单文件 | `curl -X POST $B/p2p/pull -d '{"peer":"node-a","hash":"<h>","name":"demo.txt"}'` | 返回 job，`status=running` |
+| 传输任务 | `curl $B/p2p/pull` | `status=done`、`received==total`、`saved_to` 指向 `downloads/pulled/<name>` |
+| 取消 | `curl -X POST $B/p2p/pull/cancel -d '{"id":"<job id>"}'` | 任务转 `canceled` |
+| 内容正确 | `sha256sum <saved_to>` | 与 share 帧里的 `hash` 完全一致 |
+| 本地已有 exemption | 重复 pull 同一 hash | `skipped:true`（不重复传，见 `peerpull.go:283`） |
+
+前端 UI：
+
+```bash
+cd front && npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+浏览器打开后在**设置里把后端改成 `http://<本机IP>:3002`**（默认后端是远端
+`wsl-3000.moonchan.xyz`，不是本地）。WSL 场景用 WSL 的 LAN IP 而不是
+`localhost`——本机回环到 WSL 的转发不一定通，而 LAN IP 稳定可达。
+然后按 我的网盘 → 节点市场（加入 node-a）→ 我的节点 → 点开 node-a →
+选中文件保存 → 传输任务 看进度。
+
+纯 client 消费端（M5，不需要本地后端）：
+
+```bash
+cd packages/peerdrive-client && npm run demo   # http://127.0.0.1:8123/demo/consumer.html
+```
+
+页面里填 node-a 的 peer id、信令 host=`127.0.0.1` port=`9100` key=`peerjs`
+并关掉 secure，即可直连拉取——验证"不跑节点也能从 P2P 网络取文件"。
+
+### 7.3 首次跑通时暴露的两个运行时缺陷（已修）
+
+CI 和单元测试全绿，但真实跑起来 `files` 一直是空的。根因不在命令而在代码：
+
+| # | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | `join` 返回 `{"error":"persist joined nodes: ... joined_nodes.json.tmp: no such file or directory"}`（内存里加了、重启即丢） | `saveLocked()` 直接 `WriteFile` 到 `<storageDir>/joined_nodes.json.tmp`，而 storageDir 在节点刚启动、还没上传/拉取过时**尚未创建** | `saveLocked()` 落盘前 `os.MkdirAll(filepath.Dir(d.path), 0o755)`（`back/internal/service/node_directory.go`） |
+| 2 | 对方 `shares` 永远 `files:[]`，登记/上传的文件在自己 UI 里看得到、对端看不到 | `FileService.RegisterLocal()` 只写 `file_meta` + `file_providers`，**从不写 `file_index`**；而共享清单（`nodeshare.filesSnapshot` → `transport.FileIndexService.List`）和 M3 拉取的"本地已有"判定都读 `file_index` —— 清单在这一环断掉 | `RegisterLocal()` 同步 `repository.UpsertFileIndex(hash, absPath, filename, size, false)`，失败只告警不阻塞登记（`back/internal/service/file_service.go`） |
+
+第 2 项尤值一提：它让"M2 共享清单"这条链路在**任何**部署下都拿不到文件，
+但单元测试用的是注入的假 `fileList`，集成测试也没走"登记 → 清单"这条组合，
+所以一直没红。**缺的是端到端组合覆盖，不是用例数量。**
+
+### 7.4 两条配置陷阱（配错了会静默失败）
+
+这两条来自代码里的安全边界，日志只有一行 WARN，很容易被当成噪音：
+
+1. **共享目录必须同时在 storage 根内 AND download 根内。**
+   `RegisterFolder` 校验 `cfg.StorageDir`（否则 `path outside storage root`）；
+   `serveFile` 经 local source 校验 allowed root（实际是 download 根，否则
+   `index path outside allowed root` → 回退按 hash 去内容寻址存储读 → 文件没
+   进过 content store → `peerjs: read failed`）。
+   所以把共享目录放在 `<download_root>/shared`，并让 storage 覆盖它。
+
+2. **同一台机器上跑多个节点，必须给它们不同的 cwd。**
+   `main.go:51` 硬编码 `repository.InitDB("./peerdrive.db")`，路径随进程 cwd
+   解析。两个节点同 cwd ⇒ 共用同一个 SQLite ⇒ file_index 互相可见 ⇒ 拉取被判
+   成 `skipped:true (already local)`，**看起来像"拉取成功"但其实没传数据**。
+   这也是 §7.1 脚本给 node-a / node-b 各建一个 `run/` 目录的原因。
+
+### 7.5 建议加入 CI 的部分
+
+`scripts/netdisk-local-demo.sh` 目前是手工/本地用的，但它覆盖的正是单元与集成
+测试都没覆盖的组合（登记 → 清单 → 拉取 → 校验）。下一步可以把它接到 CI：
+起两节点、跑断言、断言必须出现 `files` 非空与 sha256 一致。这样 §7.3 的两个
+缺陷下次会在 PR 阶段就红，而不是靠人跑一遍才发现。
+

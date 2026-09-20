@@ -66,6 +66,9 @@ cd front && npm run dev
 # 消费端 demo（无后端）
 cd packages/peerdrive-client && npm run demo   # http://127.0.0.1:8123/demo/consumer.html
 
+# 一键跑整套网盘链路（自托管信令 + 两个节点，自动验证市场/加入/清单/拉取/校验）
+./scripts/netdisk-local-demo.sh                # --stop 停止
+
 # 测试
 cd back && go test -tags nosqlite ./... -count=1
 cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1   # 脱外网（自托管信令）
