@@ -127,20 +127,26 @@ if (rows > 0) {
 }
 
 // [7] API 层独立再验一次 sha256（不经 UI）
+//   优先复用面板已建立的连接（window.__panel）；拿不到才自己拨一次。
+//   复用而非重拨的原因：CI 上同一台机器的第二次 WebRTC 握手并不总是成功，
+//   而这一步要验的是「取回来的内容 sha256 对不对」，不是「能不能再连一次」。
 const pulled = await page.evaluate(async (sig) => {
   const PD = window.PeerDrive
-  const c = await PD.connectToPeer(window.Peer, sig.node, { peerOptions: sig.opts, idleTimeoutMs: 60000 })
-  const snap = await c.shares()
+  const s = window.__panel && window.__panel.get(sig.node)
+  const c = (s && s.client) ||
+    (await PD.connectToPeer(window.Peer, sig.node, {
+      peerOptions: sig.opts, idleTimeoutMs: 60000, verbTimeoutMs: 45000,
+    }))
+  const snap = await c.shares({ timeoutMs: 45000 })
   const f = snap.files[0]
   const bytes = await c.fetch(f.hash)
   const hex = await PD.sha256Hex(bytes)
-  c.close()
-  return { name: f.name, size: bytes.byteLength, expect: f.hash, got: hex }
+  return { name: f.name, size: bytes.byteLength, expect: f.hash, got: hex, reused: !!(s && s.client) }
 }, { node: NODE_ID, opts: SIG }).catch((e) => ({ err: String(e && e.message || e) }))
 pulled.err
   ? bad('API 拉取失败：' + pulled.err)
   : pulled.got === pulled.expect
-    ? ok(`拉取 ${pulled.name}（${pulled.size}B）sha256 与清单一致`)
+    ? ok(`拉取 ${pulled.name}（${pulled.size}B）sha256 与清单一致${pulled.reused ? '（复用面板连接）' : '（新拨连接）'}`)
     : bad(`sha256 不一致 got=${pulled.got} want=${pulled.expect}`)
 
 console.log('\n== 页面日志（尾部）')

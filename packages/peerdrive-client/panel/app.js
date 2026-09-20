@@ -18,6 +18,17 @@
   var PREVIEW_MAX_BYTES = 2 * 1024 * 1024 // 预览只给小文件，大的直接存盘
 
   var sessions = new Map() // nodeId -> {id, client, status, snapshot, error}
+
+  // 端到端自检用的出口：让脚本能复用面板**已经建立**的那条连接，而不是再拨一次。
+  // 为什么要复用：第二次握手在部分环境（CI 的同机 loopback）并不总是成功，而
+  // 自检要验的是「sha256 是否与清单一致」，不是「能不能连第二次」。
+  if (typeof window !== 'undefined') {
+    window.__panel = {
+      sessions: sessions,
+      current: function () { return current },
+      get: function (id) { return sessions.get(id) },
+    }
+  }
   var current = null // 当前选中的 nodeId
   var tasks = [] // 传输任务（最新的在前）
 

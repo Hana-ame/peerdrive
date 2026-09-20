@@ -10,7 +10,7 @@
 
 项目有 **15 个测试组件**，分布在 4 个 go 模块（back 主模块 + peerjs / signalserver / p2p_bt
 三个独立 go.mod）、3 个 npm 工程（front / peerdrive-client / peerdrive-media），
-外加 2 个本地脚本和 4 条 CI workflow（其中只有 2 条实际执行测试，见 §3.15）。
+外加 2 个本地脚本和 5 条 CI workflow（其中 3 条执行测试，见 §3.15）。
 它们是**不同层次的验证**，不能互相替代：单元测试普遍用注入的假依赖，
 真正把整条链路从头到尾连起来跑一遍的只有端到端脚本（§3.14）。
 
@@ -58,7 +58,8 @@
 | 11 | media 包单测 | `packages/peerdrive-media/` | `npm test` + `npm run build` | **21** | ✅ `media-package` | npm ci 需要 |
 | 12 | media 浏览器/Node E2E | `packages/peerdrive-media/test/*.mjs`（非 `*.test.mjs`） | playwright runner / 直启 | 10 断言 + … | ❌ **（盲区）** | ❌ |
 | 13 | 分层汇总脚本 | `scripts/test-layers.sh` | `bash scripts/test-layers.sh [--integration]` | 聚合 1/4/5/6/7 | ❌（本地聚合） | — |
-| 14 | 网盘端到端脚本 | `scripts/netdisk-local-demo.sh` | 起 3 进程跑全链路 | 8 项断言 | ❌ **（建议进 CI）** | ❌ |
+| 14 | 网盘端到端脚本 | `scripts/netdisk-local-demo.sh` | 起 3 进程跑全链路 | 8 项断言 | ✅ **`e2e.yml`** | ❌（脱外网，本机进程） |
+| 15 | 面板浏览器端到端 | `packages/peerdrive-client/scripts/verify-panel.mjs` | 真实浏览器点面板 | 9 项断言 | ✅ **同 `e2e.yml`（复用上一套环境）** | ❌ |
 
 **覆盖范围合计**：自动化（CI）覆盖 308 + 21 + 23 + 88 + 61 + 21 = **522**；
 另有 CI 之外的 23（signalserver）+ 7（p2p_bt）需手动，以及 4 个外网门控用例。
@@ -227,6 +228,7 @@ bash scripts/test-layers.sh --integration  # 追加真实信令集成段（-p 1 
 | `ci.yml` | push 到 main/master/refactor/base/docs/`feat/*`/`fix/*`/`module/*`/`*-agent`/`*-frontend`；PR 到 main/master/refactor | 6 个 | ①后端单元（vet+test+build）②集成（`-p 1`）④peerjs（vet+test）⑦前端（test+build）⑨client ⑪media（ci+test+build） |
 | `go-build.yml` | push / PR（不限分支） | 5 平台矩阵 | ①后端单元×4（非 Windows 才跑 test）+ 交叉构建产物 |
 | `release.yml` | push tag `v*` | 2 个 | **只 build，不跑任何测试** |
+| `e2e.yml` | push 到 `refactor` 且 `back/**`·`packages/peerdrive-client/**`·脚本/workflow 有变动；PR；手动 dispatch | 1 个（顺序复用同一套环境） | ⑭网盘端到端脚本（8 项）+ ⑮面板浏览器端到端（9 项，bundled chromium） |
 | `pages.yml` | push 到 `refactor` 且 `packages/peerdrive-client/**` 有变动；或手动 dispatch | 2 个 | **不是测试**：构建面板并部署到 GitHub Pages（<https://hana-ame.github.io/peerdrive/>）。它会顺带跑 `check:panel`，因此也拦「改了 `src/` 忘了重建产物」 |
 
 **⚠️ 打 tag 发版时 `ci.yml` 不会触发**（它的 `on.push` 只列了 branches，不含 tags），
@@ -241,7 +243,7 @@ bash scripts/test-layers.sh --integration  # 追加真实信令集成段（-p 1 
 
 | 盲区 | 为什么危险 | 现状 |
 |---|---|---|
-| **端到端组合**（登记→清单→拉取→校验） | 2026-09-20 两个致命缺陷都藏在这里，而所有单元/集成用例全绿 | 只有手工脚本 `netdisk-local-demo.sh`，**未进 CI** |
+| ~~端到端组合（登记→清单→拉取→校验）~~ | 2026-09-20 两个致命缺陷都藏在这里 | ✅ **已由 `e2e.yml` 覆盖**（链路 8 项 + 面板浏览器 9 项） |
 | **`back/signalserver`**（23） | 独立 go.mod + 无 CI job ⇒ 信令服务改坏了 CI 照样绿 | 手动跑 |
 | **`back/p2p_bt`**（7） | 同上 | 手动跑（test-layers L7 会捎带） |
 | **外网集成 4 用例** | 公共 broker / 线上信令的协议兼容性无人验证 | 门控手动 |
@@ -279,7 +281,7 @@ export PATH="$HOME/.nvm/versions/node/v22.23.1/bin:$PATH"
 - 测试函数必须标注「发现背景」（全局 AGENTS.md 硬性要求）。
 - **新增/删除测试集时更新本文件的 §1 选表、§2 全景表、§3 对应小节。**
 - 用例数字会漂移：本表是 2026-09-20 的快照，重跑后如有出入以实测为准并顺手更新。
-- 想继续补，优先级：**把 `netdisk-local-demo.sh` 接进 CI**（`NETDISK.md` §7.5）>
+- 想继续补，优先级：**给 `release.yml` 的发版路径加测试门禁**（§3.15）>
   给 signalserver / p2p_bt 各补一个 CI job（同 peerjs 那种做法）>
   给 `release.yml` 的发版路径加一道测试门禁（见 §3.15）。
   （`test-layers.sh` 自身的问题已于 2026-09-20 修完，见 §3.13。）
