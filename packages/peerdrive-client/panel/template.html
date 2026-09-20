@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>peerdrive panel · 公共网盘面板</title>
+<!--
+  dist/panel.html — peerdrive 的**公共面板**（由 scripts/build-panel.mjs 生成，勿手改）。
+
+  形态：单个 HTML 文件，双击（file://）或丢到任意静态托管都能用，
+        **不需要本地起 http 服务、不需要自己的后端**。面板通过 PeerJS 拨号
+        直连 peerdrive 节点（浏览器 ↔ 节点之间是 WebRTC DataChannel），
+        走 share 帧看共享清单、走 req 帧拉内容并逐块校验 sha256。
+
+  常用 URL 参数（便于把「连某个节点的面板」当成链接发出去）：
+    ?node=<peer id>           要连的节点 id
+    &host=&port=&path=&key=    信令参数
+    &secure=0                 ws:// 自托管信令（默认 1 = wss）
+    &auto=1                   打开即自动连接
+
+  依赖只有一项：CDN 上的 peerjs（本包自身零依赖）。
+-->
+<!--
+  依赖：peerjs（本包自身零依赖，但要用 PeerJS 的信令与连接语义）。
+  这里按「同目录 vendored 副本 → jsdelivr → unpkg」顺序回退加载，
+  全部失败时面板仍会正常工作，只是点连接会给出明确提示。
+  想彻底离线：`npm run vendor:peerjs`（把 peerjs.min.js 下到 dist/ 同目录）。
+-->
+<script>
+// peerjs 加载器：多源回退。
+// 为什么要回退：unpkg 在国内常被墙/超时；只挂一个 CDN 会把「公用面板」变成
+// 「看运气的面板」。同目录副本优先是给离线/内网部署留的后路，**文件不存在时
+// 会因为 404 触发 onerror 而自动走下一个源**，不需要额外判断。
+;(function () {
+  var SOURCES = [
+    './peerjs.min.js',
+    'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js',
+    'https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js',
+  ]
+  var i = 0
+  function settle(ok, src) {
+    window.__peerjsOK = ok
+    window.__peerjsSrc = src
+    document.documentElement.setAttribute('data-peerjs', ok ? 'ready' : 'missing')
+    try { window.dispatchEvent(new CustomEvent('peerjs-ready', { detail: { ok: ok, src: src } })) } catch (e) {}
+  }
+  function next() {
+    if (i >= SOURCES.length) return settle(false, null)
+    var src = SOURCES[i++]
+    var el = document.createElement('script')
+    el.src = src
+    el.async = false
+    el.onload = function () { settle(true, src) }
+    el.onerror = function () { next() }
+    document.head.appendChild(el)
+  }
+  next()
+})()
+</script>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0e13; --panel: #11171f; --panel-2: #0d1319;
+    --line: #1e2833; --line-2: #26323f;
+    --fg: #dbe3ea; --fg-dim: #8b9aa8; --fg-faint: #63717e;
+    --accent: #3b82c4; --accent-2: #2a6ba0;
+    --ok: #5fd39a; --warn: #e3c26b; --err: #ef8b8b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.55 ui-sans-serif, system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  a { color: var(--accent); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 18px 18px 40px; }
+  header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { font-size: 17px; margin: 0; letter-spacing: .01em; }
+  .tag {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--line-2); color: var(--fg-dim);
+  }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .card > h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--fg-faint); font-weight: 600; margin: 0 0 10px;
+  }
+  label { display: block; font-size: 11px; color: var(--fg-dim); margin-bottom: 3px; }
+  input, select {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 7px;
+    padding: 7px 9px; color: var(--fg); font: inherit; font-size: 13px;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent-2); }
+  input[type=checkbox] { width: auto; }
+  button {
+    background: var(--accent-2); border: 1px solid var(--accent); color: #eaf4ff;
+    border-radius: 7px; padding: 8px 14px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.ghost { background: transparent; border-color: var(--line-2); color: var(--fg-dim); }
+  button.ghost:hover:not(:disabled) { background: #17202a; color: var(--fg); }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  button.tiny { padding: 2px 8px; font-size: 11px; border-radius: 6px; }
+  .grid { display: grid; gap: 10px; }
+  .g-main { display: grid; grid-template-columns: 300px 1fr; gap: 14px; align-items: start; }
+  @media (max-width: 860px) { .g-main { grid-template-columns: 1fr; } }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  .row > .f { flex: 1 1 130px; min-width: 110px; }
+  .row > .auto { flex: 0 0 auto; }
+  .grow { flex: 1 1 auto; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
+  .dim { color: var(--fg-dim); } .faint { color: var(--fg-faint); }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+  .empty { color: var(--fg-faint); padding: 16px 4px; font-size: 13px; text-align: center; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #172029; font-size: 13px; vertical-align: middle; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-faint); font-weight: 500; }
+  tbody tr:hover td { background: #141d26; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  .node {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 9px;
+    border: 1px solid transparent; cursor: pointer; margin-bottom: 4px; background: var(--panel-2);
+  }
+  .node:hover { border-color: var(--line-2); }
+  .node.sel { border-color: var(--accent); background: #14202c; }
+  .node .nm { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-faint); flex: 0 0 auto; }
+  .dot.on { background: var(--ok); } .dot.wait { background: var(--warn); animation: pulse 1.2s infinite; }
+  .dot.bad { background: var(--err); }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .bar { height: 5px; border-radius: 3px; background: #1a262f; overflow: hidden; margin-top: 4px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); transition: width .18s linear; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--fg-dim); font-size: 12px; }
+  #log {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 10px;
+    height: 150px; overflow: auto; white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
+  }
+  .preview { margin-top: 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 10px; }
+  .preview img, .preview video { max-width: 100%; max-height: 320px; border-radius: 6px; }
+  .preview pre { margin: 0; max-height: 260px; overflow: auto; font-size: 12px; }
+  .hint { font-size: 12px; color: var(--fg-faint); margin-top: 8px; }
+  #shares h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--fg-faint); font-weight: 600; margin: 12px 0 6px;
+  }
+  .sep { height: 1px; background: var(--line); margin: 12px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>peerdrive panel</h1>
+    <span class="tag">公共面板</span>
+    <span class="tag">零后端</span>
+    <span class="tag mono" id="build-id">__PANEL_BUILD_ID__</span>
+    <span class="grow"></span>
+    <span class="mono dim">我的临时 id：<span id="my-id">（未连接）</span></span>
+  </header>
+
+  <!-- 1 · 连接 -->
+  <div class="card">
+    <h2>连接节点</h2>
+    <div class="row">
+      <div class="f grow" style="flex:2 1 240px">
+        <label>节点 peer id</label>
+        <input id="in-node" class="mono" placeholder="peerdrive-xxxxxxxx">
+      </div>
+      <div class="f" style="flex:1 1 150px">
+        <label>信令 host</label>
+        <input id="in-host" value="0.peerjs.com">
+      </div>
+      <div class="f" style="flex:0 1 88px">
+        <label>port</label>
+        <input id="in-port" value="443" inputmode="numeric">
+      </div>
+      <div class="f" style="flex:0 1 80px">
+        <label>path</label>
+        <input id="in-path" value="/">
+      </div>
+      <div class="f" style="flex:0 1 92px">
+        <label>key</label>
+        <input id="in-key" value="peerjs">
+      </div>
+      <div class="f auto" style="flex:0 0 auto">
+        <label>&nbsp;</label>
+        <label style="display:flex;align-items:center;gap:6px;color:var(--fg-dim);font-size:12px;white-space:nowrap">
+          <input id="in-secure" type="checkbox" checked> wss
+        </label>
+      </div>
+      <div class="f auto"><label>&nbsp;</label><button id="btn-connect">连接</button></div>
+    </div>
+    <div class="hint">
+      自托管信令填节点启动时用的 PEERDRIVE_PEERJS_*，并取消勾选 wss（多为 ws://）。
+      也可以用链接直接带参数：<span class="mono">?node=&lt;id&gt;&amp;host=&amp;port=&amp;secure=0</span>
+    </div>
+  </div>
+
+  <div class="g-main">
+    <!-- 2 · 节点列表 -->
+    <div class="card">
+      <h2>节点</h2>
+      <div id="nodes"><div class="empty">还没有连接任何节点。</div></div>
+      <div class="sep"></div>
+      <h2>最近连接</h2>
+      <div id="recent"><div class="empty">暂无记录。</div></div>
+    </div>
+
+    <!-- 3 · 共享清单 -->
+    <div class="card">
+      <h2>共享清单</h2>
+      <div id="shares"><div class="empty">先在左侧选一个节点。</div></div>
+      <div id="preview"></div>
+    </div>
+  </div>
+
+  <!-- 4 · 传输任务 -->
+  <div class="card">
+    <h2>传输任务</h2>
+    <div id="tasks"><div class="empty">没有进行中的传输。</div></div>
+  </div>
+
+  <!-- 5 · 日志 -->
+  <div class="card">
+    <h2>日志</h2>
+    <div id="log"></div>
+  </div>
+
+</div>
+
+<script>/*__PANEL_BUNDLE__*/</script>
+<script>/*__PANEL_APP__*/</script>
+</body>
+</html>

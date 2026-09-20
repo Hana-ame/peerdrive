@@ -1,0 +1,1682 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>peerdrive panel · 公共网盘面板</title>
+<!--
+  dist/panel.html — peerdrive 的**公共面板**（由 scripts/build-panel.mjs 生成，勿手改）。
+
+  形态：单个 HTML 文件，双击（file://）或丢到任意静态托管都能用，
+        **不需要本地起 http 服务、不需要自己的后端**。面板通过 PeerJS 拨号
+        直连 peerdrive 节点（浏览器 ↔ 节点之间是 WebRTC DataChannel），
+        走 share 帧看共享清单、走 req 帧拉内容并逐块校验 sha256。
+
+  常用 URL 参数（便于把「连某个节点的面板」当成链接发出去）：
+    ?node=<peer id>           要连的节点 id
+    &host=&port=&path=&key=    信令参数
+    &secure=0                 ws:// 自托管信令（默认 1 = wss）
+    &auto=1                   打开即自动连接
+
+  依赖只有一项：CDN 上的 peerjs（本包自身零依赖）。
+-->
+<!--
+  依赖：peerjs（本包自身零依赖，但要用 PeerJS 的信令与连接语义）。
+  这里按「同目录 vendored 副本 → jsdelivr → unpkg」顺序回退加载，
+  全部失败时面板仍会正常工作，只是点连接会给出明确提示。
+  想彻底离线：`npm run vendor:peerjs`（把 peerjs.min.js 下到 dist/ 同目录）。
+-->
+<script>
+// peerjs 加载器：多源回退。
+// 为什么要回退：unpkg 在国内常被墙/超时；只挂一个 CDN 会把「公用面板」变成
+// 「看运气的面板」。同目录副本优先是给离线/内网部署留的后路，**文件不存在时
+// 会因为 404 触发 onerror 而自动走下一个源**，不需要额外判断。
+;(function () {
+  var SOURCES = [
+    './peerjs.min.js',
+    'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js',
+    'https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js',
+  ]
+  var i = 0
+  function settle(ok, src) {
+    window.__peerjsOK = ok
+    window.__peerjsSrc = src
+    document.documentElement.setAttribute('data-peerjs', ok ? 'ready' : 'missing')
+    try { window.dispatchEvent(new CustomEvent('peerjs-ready', { detail: { ok: ok, src: src } })) } catch (e) {}
+  }
+  function next() {
+    if (i >= SOURCES.length) return settle(false, null)
+    var src = SOURCES[i++]
+    var el = document.createElement('script')
+    el.src = src
+    el.async = false
+    el.onload = function () { settle(true, src) }
+    el.onerror = function () { next() }
+    document.head.appendChild(el)
+  }
+  next()
+})()
+</script>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0e13; --panel: #11171f; --panel-2: #0d1319;
+    --line: #1e2833; --line-2: #26323f;
+    --fg: #dbe3ea; --fg-dim: #8b9aa8; --fg-faint: #63717e;
+    --accent: #3b82c4; --accent-2: #2a6ba0;
+    --ok: #5fd39a; --warn: #e3c26b; --err: #ef8b8b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.55 ui-sans-serif, system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  a { color: var(--accent); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 18px 18px 40px; }
+  header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { font-size: 17px; margin: 0; letter-spacing: .01em; }
+  .tag {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--line-2); color: var(--fg-dim);
+  }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .card > h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--fg-faint); font-weight: 600; margin: 0 0 10px;
+  }
+  label { display: block; font-size: 11px; color: var(--fg-dim); margin-bottom: 3px; }
+  input, select {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 7px;
+    padding: 7px 9px; color: var(--fg); font: inherit; font-size: 13px;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent-2); }
+  input[type=checkbox] { width: auto; }
+  button {
+    background: var(--accent-2); border: 1px solid var(--accent); color: #eaf4ff;
+    border-radius: 7px; padding: 8px 14px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.ghost { background: transparent; border-color: var(--line-2); color: var(--fg-dim); }
+  button.ghost:hover:not(:disabled) { background: #17202a; color: var(--fg); }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  button.tiny { padding: 2px 8px; font-size: 11px; border-radius: 6px; }
+  .grid { display: grid; gap: 10px; }
+  .g-main { display: grid; grid-template-columns: 300px 1fr; gap: 14px; align-items: start; }
+  @media (max-width: 860px) { .g-main { grid-template-columns: 1fr; } }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  .row > .f { flex: 1 1 130px; min-width: 110px; }
+  .row > .auto { flex: 0 0 auto; }
+  .grow { flex: 1 1 auto; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
+  .dim { color: var(--fg-dim); } .faint { color: var(--fg-faint); }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+  .empty { color: var(--fg-faint); padding: 16px 4px; font-size: 13px; text-align: center; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #172029; font-size: 13px; vertical-align: middle; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-faint); font-weight: 500; }
+  tbody tr:hover td { background: #141d26; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  .node {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 9px;
+    border: 1px solid transparent; cursor: pointer; margin-bottom: 4px; background: var(--panel-2);
+  }
+  .node:hover { border-color: var(--line-2); }
+  .node.sel { border-color: var(--accent); background: #14202c; }
+  .node .nm { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-faint); flex: 0 0 auto; }
+  .dot.on { background: var(--ok); } .dot.wait { background: var(--warn); animation: pulse 1.2s infinite; }
+  .dot.bad { background: var(--err); }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .bar { height: 5px; border-radius: 3px; background: #1a262f; overflow: hidden; margin-top: 4px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); transition: width .18s linear; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--fg-dim); font-size: 12px; }
+  #log {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 10px;
+    height: 150px; overflow: auto; white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
+  }
+  .preview { margin-top: 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 10px; }
+  .preview img, .preview video { max-width: 100%; max-height: 320px; border-radius: 6px; }
+  .preview pre { margin: 0; max-height: 260px; overflow: auto; font-size: 12px; }
+  .hint { font-size: 12px; color: var(--fg-faint); margin-top: 8px; }
+  #shares h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--fg-faint); font-weight: 600; margin: 12px 0 6px;
+  }
+  .sep { height: 1px; background: var(--line); margin: 12px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>peerdrive panel</h1>
+    <span class="tag">公共面板</span>
+    <span class="tag">零后端</span>
+    <span class="tag mono" id="build-id">bundle eed78dee</span>
+    <span class="grow"></span>
+    <span class="mono dim">我的临时 id：<span id="my-id">（未连接）</span></span>
+  </header>
+
+  <!-- 1 · 连接 -->
+  <div class="card">
+    <h2>连接节点</h2>
+    <div class="row">
+      <div class="f grow" style="flex:2 1 240px">
+        <label>节点 peer id</label>
+        <input id="in-node" class="mono" placeholder="peerdrive-xxxxxxxx">
+      </div>
+      <div class="f" style="flex:1 1 150px">
+        <label>信令 host</label>
+        <input id="in-host" value="0.peerjs.com">
+      </div>
+      <div class="f" style="flex:0 1 88px">
+        <label>port</label>
+        <input id="in-port" value="443" inputmode="numeric">
+      </div>
+      <div class="f" style="flex:0 1 80px">
+        <label>path</label>
+        <input id="in-path" value="/">
+      </div>
+      <div class="f" style="flex:0 1 92px">
+        <label>key</label>
+        <input id="in-key" value="peerjs">
+      </div>
+      <div class="f auto" style="flex:0 0 auto">
+        <label>&nbsp;</label>
+        <label style="display:flex;align-items:center;gap:6px;color:var(--fg-dim);font-size:12px;white-space:nowrap">
+          <input id="in-secure" type="checkbox" checked> wss
+        </label>
+      </div>
+      <div class="f auto"><label>&nbsp;</label><button id="btn-connect">连接</button></div>
+    </div>
+    <div class="hint">
+      自托管信令填节点启动时用的 PEERDRIVE_PEERJS_*，并取消勾选 wss（多为 ws://）。
+      也可以用链接直接带参数：<span class="mono">?node=&lt;id&gt;&amp;host=&amp;port=&amp;secure=0</span>
+    </div>
+  </div>
+
+  <div class="g-main">
+    <!-- 2 · 节点列表 -->
+    <div class="card">
+      <h2>节点</h2>
+      <div id="nodes"><div class="empty">还没有连接任何节点。</div></div>
+      <div class="sep"></div>
+      <h2>最近连接</h2>
+      <div id="recent"><div class="empty">暂无记录。</div></div>
+    </div>
+
+    <!-- 3 · 共享清单 -->
+    <div class="card">
+      <h2>共享清单</h2>
+      <div id="shares"><div class="empty">先在左侧选一个节点。</div></div>
+      <div id="preview"></div>
+    </div>
+  </div>
+
+  <!-- 4 · 传输任务 -->
+  <div class="card">
+    <h2>传输任务</h2>
+    <div id="tasks"><div class="empty">没有进行中的传输。</div></div>
+  </div>
+
+  <!-- 5 · 日志 -->
+  <div class="card">
+    <h2>日志</h2>
+    <div id="log"></div>
+  </div>
+
+</div>
+
+<script>// ===== 以下由 scripts/build-panel.mjs 从 src/ 内联生成，勿手改 =====
+;(function () {
+'use strict'
+// ---- src/sha256.js ----
+// sha256.js — 零依赖 SHA-256（增量式），用于内容寻址校验。
+//
+// 为什么要自己实现而不只用 WebCrypto：`crypto.subtle.digest()` 是**一次性**的
+// ——必须先把整份内容攒在内存里才能算摘要，这与本包的流式接口直接冲突
+// （stream() 的卖点就是不驻留内存）。Go 侧 /peerjs/fetch 的语义是"全量请求读完后
+// 校验 sha256，不匹配即报错"，消费端要给出同样的保证，就必须能边收边算。
+//
+// 另一个副作用是省钱：WebCrypto 只在**安全上下文**（https / localhost）可用，
+// 纯 JS 实现在任意 http 页面都能跑（demo 直接 `python -m http.server` 就能验）。
+//
+// 性能：纯 JS 约 30–80 MB/s。一次性接口 sha256Hex() 优先走 WebCrypto（快一个
+// 数量级），流式接口走这里的增量实现；两条路径在测试里互相校验（含 63/64/65
+// 这类跨块边界长度）。
+
+const K = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+])
+
+const H0 = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
+
+/** 增量 SHA-256。update() 可任意次调用（块边界自动处理），digestHex() 可重复调用。 */
+class Sha256 {
+  constructor() {
+    this.h = Int32Array.from(H0)
+    this.buf = new Uint8Array(64)
+    this.bufLen = 0
+    this.total = 0 // 已 feed 的**字节**数（不是块数）
+    this._w = new Int32Array(64)
+  }
+
+  /** update 追加一段内容。接受 Uint8Array / ArrayBuffer / TypedArray。 */
+  update(data) {
+    const bytes = toBytes(data)
+    this.total += bytes.length
+    let off = 0
+    // 先把上次残留的半个块补满
+    if (this.bufLen > 0) {
+      const take = Math.min(64 - this.bufLen, bytes.length)
+      this.buf.set(bytes.subarray(0, take), this.bufLen)
+      this.bufLen += take
+      off = take
+      if (this.bufLen === 64) {
+        this._block(this.buf, 0)
+        this.bufLen = 0
+      }
+    }
+    // 整块直接算（不复制）
+    while (off + 64 <= bytes.length) {
+      this._block(bytes, off)
+      off += 64
+    }
+    // 尾巴留着
+    if (off < bytes.length) {
+      this.buf.set(bytes.subarray(off), 0)
+      this.bufLen = bytes.length - off
+    }
+    return this
+  }
+
+  /**
+   * digestHex 输出 64 位小写十六进制摘要。
+   * 可重复调用：内部先快照 h 再填充/压缩，调用后对象状态不变（调用方可能在
+   * 出错分支里重算一次用于日志）。
+   */
+  digestHex() {
+    const saved = this.h.slice()
+    const savedBufLen = this.bufLen
+    const savedTotal = this.total
+    try {
+      const bitLen = this.total * 8
+      // 补 0x80 + 长度：留 8 字节存 64 位长度。bufLen>=56 时不够放，需要两块
+      const padLen = this.bufLen < 56 ? 64 : 128
+      const pad = new Uint8Array(padLen)
+      pad.set(this.buf.subarray(0, this.bufLen), 0)
+      pad[this.bufLen] = 0x80
+      const dv = new DataView(pad.buffer)
+      // bitLen 用「高位 = floor(total / 2^29)」拆开，避免 total*8 溢出 2^53
+      dv.setUint32(padLen - 8, Math.floor(this.total / 536870912))
+      dv.setUint32(padLen - 4, bitLen >>> 0)
+      for (let i = 0; i < padLen; i += 64) this._block(pad, i)
+
+      let out = ''
+      for (let i = 0; i < 8; i++) out += (this.h[i] >>> 0).toString(16).padStart(8, '0')
+      return out
+    } finally {
+      this.h.set(saved)
+      this.bufLen = savedBufLen
+      this.total = savedTotal
+    }
+  }
+
+  _block(p, off) {
+    const w = this._w
+    for (let i = 0; i < 16; i++) {
+      w[i] = (p[off + 4 * i] << 24) | (p[off + 4 * i + 1] << 16) | (p[off + 4 * i + 2] << 8) | p[off + 4 * i + 3]
+    }
+    for (let i = 16; i < 64; i++) {
+      const x = w[i - 15]
+      const y = w[i - 2]
+      const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3)
+      const s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10)
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0
+    }
+    const h = this.h
+    let a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7]
+    for (let i = 0; i < 64; i++) {
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7))
+      const ch = (e & f) ^ (~e & g)
+      const t1 = (hh + S1 + ch + K[i] + w[i]) | 0
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10))
+      const maj = (a & b) ^ (a & c) ^ (b & c)
+      const t2 = (S0 + maj) | 0
+      hh = g
+      g = f
+      f = e
+      e = (d + t1) | 0
+      d = c
+      c = b
+      b = a
+      a = (t1 + t2) | 0
+    }
+    h[0] = (h[0] + a) | 0
+    h[1] = (h[1] + b) | 0
+    h[2] = (h[2] + c) | 0
+    h[3] = (h[3] + d) | 0
+    h[4] = (h[4] + e) | 0
+    h[5] = (h[5] + f) | 0
+    h[6] = (h[6] + g) | 0
+    h[7] = (h[7] + hh) | 0
+  }
+}
+
+function toBytes(data) {
+  if (data instanceof Uint8Array) return data
+  if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) return new Uint8Array(data)
+  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  }
+  throw new TypeError('peerdrive-client: sha256 expects bytes')
+}
+
+/**
+ * sha256Hex 一次性摘要：优先 WebCrypto（快），不可用时退回纯 JS。
+ * 两条路径在同一次调用里不会混用，结果一致（测试里逐长度比对过）。
+ */
+async function sha256Hex(bytes) {
+  const subtle = globalThis.crypto && globalThis.crypto.subtle
+  if (subtle && typeof subtle.digest === 'function') {
+    try {
+      const digest = await subtle.digest('SHA-256', toBytes(bytes))
+      const view = new Uint8Array(digest)
+      let out = ''
+      for (let i = 0; i < view.length; i++) out += view[i].toString(16).padStart(2, '0')
+      return out
+    } catch {
+      // 某些环境（老 Safari / 非安全上下文）会抛：静默退回纯 JS
+    }
+  }
+  return new Sha256().update(bytes).digestHex()
+}
+
+// ---- src/protocol.js ----
+// protocol.js — peerdrive 节点帧协议的纯函数实现（零依赖，浏览器 / Node 通用）。
+//
+// 与 Go 侧 back/internal/transport/conn.go 的帧定义**逐字对齐**：
+//
+//	请求: {"type":"req","hash":"<64hex>","offset":0,"size":-1,"reqId":"..."}
+//	响应: {"type":"meta","hash","total","reqId"}
+//	      {"type":"data","hash","offset","size","reqId"} + 紧随 size 字节二进制块
+//	      {"type":"done","hash","offset","size","reqId"}
+//	      {"type":"err","msg","reqId"}
+//	共享: {"type":"share","reqId"}
+//	      → {"type":"share-resp","collections":[…],"files":[…],"dirs":[…],"total":N,"reqId"}
+//
+// 三条不能改的约束（破坏了不会报错，只会静默错位）：
+//  1. data 头是**文本帧**、数据块是**二进制帧**。raw 序列化下 string 走 PPID 51、
+//     ArrayBuffer 走 PPID 53，对端才能按类型区分；把数据块发成 JSON 数组之类
+//     会在对端被当成控制帧解析
+//  2. data 头与其数据块必须**连续**。接收端用的是"连接级 expect"——把二进制块
+//     挂到**最近一个** data 头所属的请求上，而不是在块里带 reqId。所以不能把
+//     两个请求的块交错发送（Go 侧 SendFrame 靠连接级 sendMu 保证原子性）
+//  3. 字段名逐字对齐。改 `reqId` → `req_id` 不会报错，只会让对端路由不到、
+//     请求一直挂到超时
+
+const PROTOCOL_VERSION = 1
+
+// MAX_FILE_BYTES 与 Go 侧 maxPeerFetchSize 一致（8GB）：对端声明超过这个数
+// 直接拒绝，防"恶意对端声明 1<<62 再持续发块"把接收方撑爆。
+const MAX_FILE_BYTES = 8 * 1024 * 1024 * 1024
+
+// DEFAULT_MAX_BUFFER_BYTES 浏览器侧的内存闸。
+// 与 8GB 的协议上限分开：协议上限是"服务端允许传多大"，这里是"本页面愿意
+// 在内存里攒多大"。消费端 fetch() 是整体驻留内存的，一个 2GB 的文件在手机上
+// 会直接崩标签页——默认 256MB，超了报 TOO_LARGE 并提示改用流式。
+const DEFAULT_MAX_BUFFER_BYTES = 256 * 1024 * 1024
+
+// isValidHash 必须与 Go 侧 hashutil.IsStrictSHA256 同语义：**仅** 64 位小写 hex。
+// 为什么在本地就拦：大写 hex 在 Go 侧会被判 invalid hash 回 err 帧，错误信息
+// 出现在几百毫秒后的一次网络往返之后，排查时容易误判成"对端没这个文件"。
+const HASH_RE = /^[0-9a-f]{64}$/
+
+function isValidHash(hash) {
+  return typeof hash === 'string' && HASH_RE.test(hash)
+}
+
+// nextReqId 生成请求 ID。Go 侧用 UUID v4；这里用"时间戳+随机"也能满足唯一性
+// 要求（reqId 只用于单条连接内的响应路由，不跨连接、不持久化）。
+function nextReqId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+// reqFrame 构造文件拉取请求帧（出站角色发起）。
+// size 用 -1 表示"读到文件末尾"，与 Go 侧语义一致（负数即不限量）。
+function reqFrame(hash, { offset = 0, size = -1, reqId } = {}) {
+  return JSON.stringify({ type: 'req', hash, offset, size, reqId, v: PROTOCOL_VERSION })
+}
+
+// shareFrame 构造共享清单查询帧（与 list 帧不同：list 是本地管理索引全量，
+// 只对可信对端开放；share 是运营者**显式声明**的对外共享范围）。
+function shareFrame(reqId) {
+  return JSON.stringify({ type: 'share', reqId, v: PROTOCOL_VERSION })
+}
+
+// parseFrame 解析文本帧。返回 null 表示"不是本协议的控制帧"（非 JSON、
+// 或缺 type）——调用方应当忽略而不是报错：同一条连接上可能有别的用途的帧。
+function parseFrame(text) {
+  if (typeof text !== 'string') return null
+  try {
+    const o = JSON.parse(text)
+    if (o && typeof o === 'object' && typeof o.type === 'string') return o
+  } catch {
+    /* 非 JSON：不是本协议帧 */
+  }
+  return null
+}
+
+// isBinaryFrame 判断收到的数据是不是数据块。
+// raw 序列化下浏览器端收到的是 ArrayBuffer（或 Blob，视 binaryType 而定），
+// Node 端可能是 Uint8Array/DataView——全部按二进制处理，字符串则是文本帧。
+function isBinaryFrame(data) {
+  if (typeof data === 'string') return false
+  if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) return true
+  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(data)) return true
+  if (typeof Blob !== 'undefined' && data instanceof Blob) return true
+  return false
+}
+
+// toUint8Array 把任意二进制帧规整为 Uint8Array（要保留 byteOffset/byteLength，
+// 直接 new Uint8Array(view.buffer) 会把整个底层 buffer 带进来）。
+function toUint8Array(data) {
+  if (data instanceof Uint8Array) return data
+  if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) return new Uint8Array(data)
+  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  }
+  throw new TypeError('peerdrive-client: unsupported binary frame type')
+}
+
+// concatChunks 按已知总长拼块。传 total 可以一次性分配（避免逐块扩容复制），
+// 但 total 未定时（对端 meta 里是 -1）必须走"先收集后合并"。
+function concatChunks(chunks, total = -1) {
+  if (chunks.length === 1) return chunks[0]
+  let len = 0
+  for (const c of chunks) len += c.byteLength
+  const n = total >= 0 ? total : len
+  const out = new Uint8Array(n)
+  let off = 0
+  for (const c of chunks) {
+    if (off + c.byteLength > n) break // 对端多发了：按声明长度截断
+    out.set(c, off)
+    off += c.byteLength
+  }
+  return off === n ? out : out.subarray(0, off)
+}
+
+// sha256Hex 计算内容的 sha256 十六进制摘要（内容寻址校验用）。
+// 实现放在 sha256.js：一次性路径优先 WebCrypto，流式路径用纯 JS 增量实现——
+// 需要边收边算的调用方（流式拉取）直接用 Sha256 类。
+
+// guessMime 按文件名猜 MIME（meta 帧不带 mime，浏览器 Blob 需要它才能正确
+// 预览/播放）。猜错只影响预览体验，不影响内容正确性。
+const EXT_MIME = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp',
+  mp4: 'video/mp4', webm: 'video/webm', ogg: 'video/ogg', mov: 'video/quicktime',
+  mkv: 'video/x-matroska', mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac',
+  m4a: 'audio/mp4', pdf: 'application/pdf', zip: 'application/zip',
+  txt: 'text/plain;charset=utf-8', md: 'text/markdown;charset=utf-8',
+  json: 'application/json', csv: 'text/csv;charset=utf-8',
+}
+
+function guessMime(name, fallback = 'application/octet-stream') {
+  const ext = String(name || '').split('?')[0].split('.').pop()?.toLowerCase()
+  return EXT_MIME[ext] || fallback
+}
+
+// baseName 从共享清单的 path 取文件名（对端给的是相对路径，可能带目录）。
+function baseName(p) {
+  const s = String(p || '')
+  const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'))
+  return i >= 0 ? s.slice(i + 1) : s
+}
+
+// ---- src/client.js ----
+// client.js — peerdrive 纯浏览器消费端：连上一个 peerdrive 节点，列出它共享的
+// 内容并拉取文件。**零依赖**，不要求本地跑任何后端。
+//
+// 定位（与 back 的 /peerjs/* 客户端路径互补）：
+//   - 后端节点（Go）之间用同一套帧协议互联，是"生产方/持有方"；
+//   - 本包是**纯消费端**：一个浏览器页面（或任何有 WebRTC DataChannel 的环境）
+//     直连节点，走 share 帧看清单、走 req 帧拉内容。对应需求里那句
+//     "webrtc 纯 client 消费端，可以从这个 p2p 网络拉取文件"。
+//
+// 传输无关设计：本类不认识 PeerJS。它只要求传进来的对象满足
+//   { on(type, cb), send(data), open?: boolean, close?() }
+// —— PeerJS 的 DataConnection 天然满足。这样做的好处：
+//   1. 包本身零依赖，不把 peerjs 塞进使用方的打包体积；
+//   2. 测试用假连接即可覆盖全部状态机（不需要真 WebRTC/信令服务器）；
+//   3. 将来换传输（裸 RTCPeerConnection / WebTransport）不必改这个文件。
+//
+// 帧协议细节见 src/protocol.js 顶部注释（与 Go 侧 conn.go 逐字对齐）。
+
+
+/** 错误码。UI 按 code 分支，不要去匹配 message 文案。 */
+const ERR = {
+  INVALID_HASH: 'INVALID_HASH', // hash 不是 64 位小写 hex（本地就拦，不发请求）
+  TOO_LARGE: 'TOO_LARGE', // 超出 maxBufferBytes / 协议上限 8GB
+  HASH_MISMATCH: 'HASH_MISMATCH', // 内容与 hash 不符（对端数据损坏或被篡改）
+  INCOMPLETE: 'INCOMPLETE', // 对端 done 声明的字节数与实际收到的不一致
+  TIMEOUT: 'TIMEOUT', // 空闲超时（对端卡死/连接半死）
+  CLOSED: 'CLOSED', // 连接关闭
+  PROTOCOL: 'PROTOCOL', // 帧不合法（对端实现了别的协议）
+  PEER: 'PEER', // 对端回了 err 帧（not found / 越权 / 读失败…）
+  CANCELLED: 'CANCELLED', // 本地取消（abort / 迭代提前 break）
+}
+
+class PeerDriveError extends Error {
+  constructor(message, code = ERR.PROTOCOL, extra = {}) {
+    super(message)
+    this.name = 'PeerDriveError'
+    this.code = code
+    Object.assign(this, extra)
+  }
+}
+
+const DEFAULTS = {
+  // 空闲超时：多久没收到该请求的任何帧就判死。Go 侧是 5 分钟（服务端耐心），
+  // 消费端取小一些——用户盯着一个不动的进度条等 5 分钟是更差的体验。
+  idleTimeoutMs: 120_000,
+  openTimeoutMs: 20_000,
+  verbTimeoutMs: 15_000, // 与 Go 侧 verbWaitTimeout 一致（share 这类小 JSON 应答）
+  maxBufferBytes: DEFAULT_MAX_BUFFER_BYTES,
+}
+
+/**
+ * ChunkQueue 把「推模式」的帧回调桥接成「拉模式」的 async 迭代。
+ * stream() 用它做背压：消费端不取，块就停在队列里（而不是无限堆内存）。
+ */
+class ChunkQueue {
+  constructor() {
+    this.buf = []
+    this.pending = []
+    this.state = 'open'
+    this.err = null
+  }
+
+  push(v) {
+    if (this.state !== 'open') return
+    const w = this.pending.shift()
+    if (w) w({ value: v, done: false })
+    else this.buf.push(v)
+  }
+
+  close() {
+    this._settle(null)
+  }
+
+  abort(err) {
+    // 失败时把已缓存块丢掉：不会再有人消费它们，留着只会拖住内存
+    // （典型场景：TOO_LARGE 在中途触发，队列里可能已经压着几十 MB）
+    this.buf.length = 0
+    this._settle(err)
+  }
+
+  _settle(err) {
+    if (this.state !== 'open') return
+    this.state = err ? 'failed' : 'ended'
+    this.err = err
+    while (this.pending.length) this.pending.shift()({ value: undefined, done: true, err })
+  }
+
+  shift() {
+    if (this.buf.length) return Promise.resolve({ value: this.buf.shift(), done: false })
+    if (this.state !== 'open') return Promise.resolve({ value: undefined, done: true, err: this.err })
+    return new Promise((res) => this.pending.push(res))
+  }
+}
+
+/** 消费端客户端：一条连接一个实例。 */
+class PeerDriveClient {
+  constructor(conn, opts = {}) {
+    if (!conn || typeof conn.send !== 'function' || typeof conn.on !== 'function') {
+      throw new TypeError('peerdrive-client: conn 需实现 { on(type, cb), send(data) }')
+    }
+    this.conn = conn
+    this.opts = { ...DEFAULTS, ...opts }
+    this.peerId = conn.peer || conn.peerId || opts.peerId || ''
+    this.stats = { requests: 0, chunks: 0, bytes: 0, failures: 0 }
+
+    this._pend = new Map() // reqId → 拉取状态
+    this._verbs = new Map() // reqId → 一次性应答等待槽（share 等）
+    this._expect = null // 连接级 expect：下一个二进制块归谁（见 protocol.js 约束 2）
+    this._openWaiters = []
+    this._closeErr = null
+    this._openState = conn.open === true ? true : null // null = 未知
+    this._ownedPeer = null
+    this._bind()
+  }
+
+  get isOpen() {
+    return this._openState === true && !this._closeErr
+  }
+
+  /**
+   * localPeerId 本端在信令上的临时 id —— UI 显示"我是谁"要用这个。
+   *
+   * 发现背景：面板第一版把 `conn.peer` 当成自己的 id 显示，结果屏幕上写着对方的
+   * 节点名（DataConnection.peer 指的是**远端**）。用 connectToPeer 建连时本端 Peer
+   * 由本类持有，所以这里从它取；不是本类创建时（外部传入 conn）只能返回空串，
+   * 调用方应自行持有 Peer 实例。
+   */
+  get localPeerId() {
+    return (this._ownedPeer && this._ownedPeer.id) || ''
+  }
+
+  /** ready 等连接就绪。已就绪则立即 resolve。 */
+  ready(timeoutMs = this.opts.openTimeoutMs) {
+    if (this._closeErr) return Promise.reject(this._closeErr)
+    if (this._openState === true) return Promise.resolve(this)
+    return new Promise((resolve, reject) => {
+      const entry = { resolve, reject, timer: null }
+      this._openWaiters.push(entry)
+      if (timeoutMs > 0) {
+        entry.timer = setTimeout(() => {
+          this._openWaiters = this._openWaiters.filter((w) => w !== entry)
+          reject(new PeerDriveError(`连接未在 ${timeoutMs}ms 内建立`, ERR.TIMEOUT))
+        }, timeoutMs)
+      }
+    })
+  }
+
+  /**
+   * shares 查询对端的共享清单（「节点市场 → 加入节点 → 看到文件链接」里的
+   * 最后一步）。返回 {collections, files, dirs, total}。
+   *
+   * 语义提醒：空清单是**合法结果**（对方没开启共享 / 没声明任何目录），不是
+   * 错误——UI 应当渲染"该节点没有共享内容"。对端真的失败才走 PEER/TIMEOUT。
+   */
+  async shares({ timeoutMs = this.opts.verbTimeoutMs } = {}) {
+    const reqId = nextReqId()
+    const frame = await this._requestVerb(reqId, shareFrame(reqId), timeoutMs)
+    if (!frame || frame.type !== 'share-resp') {
+      throw new PeerDriveError('对端 share 应答格式异常（对端可能不是 peerdrive 节点）', ERR.PROTOCOL)
+    }
+    const collections = Array.isArray(frame.collections) ? frame.collections : []
+    const files = Array.isArray(frame.files) ? frame.files : []
+    return {
+      peerId: this.peerId,
+      collections,
+      files,
+      dirs: Array.isArray(frame.dirs) ? frame.dirs : [],
+      total: Number.isFinite(frame.total) ? frame.total : collections.length + files.length,
+    }
+  }
+
+  /**
+   * stream 流式拉取：逐个产出 Uint8Array 块，**不把整份内容驻留内存**。
+   * 适合大文件（配合 File System Access API / StreamSaver 直接落盘）。
+   *
+   * 全量请求（offset=0 且不指定 size）会在结束时校验 sha256，不匹配则抛
+   * HASH_MISMATCH——校验是增量的（见 sha256.js），不需要回看前面的块。
+   *
+   * opts: {offset, size, maxBytes, onProgress(received, total), signal}
+   * 消费端提前 break 会取消本请求（后续到达的块被丢弃）。
+   */
+  async *stream(hash, opts = {}) {
+    this._assertHash(hash)
+    const { offset = 0, size = -1, signal } = opts
+    // 已 abort 的 signal：在**发请求之前**就拒。先发后判会白白拉一次内容
+    // （而且对端会一直发到 done，白费带宽）。
+    if (signal && signal.aborted) throw new PeerDriveError('已取消', ERR.CANCELLED)
+    const reqId = nextReqId()
+    const p = this._startFetch(reqId, hash, { ...opts, offset, size })
+
+    if (signal) {
+      p.signal = signal
+      p.onAbort = () => this._cancel(reqId, new PeerDriveError('已取消', ERR.CANCELLED))
+      signal.addEventListener('abort', p.onAbort, { once: true })
+    }
+
+    try {
+      for (;;) {
+        const { value, done, err } = await p.queue.shift()
+        if (done) {
+          if (err) throw err
+          return
+        }
+        yield value
+      }
+    } finally {
+      // 正常结束/失败时 _pend 里已经没有它了，这里是幂等的兜底清理；
+      // 消费端提前 break 也会走到这，把那批已缓存块连同请求一起放掉。
+      // 失败计数由 _failPending 负责，这里不重复计（用户主动取消不算失败）。
+      this._cancel(reqId, new PeerDriveError('已取消', ERR.CANCELLED))
+    }
+  }
+
+  /**
+   * fetch 整体取回（Uint8Array）。等价于把 stream() 全收集起来。
+   * 有内存闸：超过 maxBytes（默认 256MB）抛 TOO_LARGE——大文件请用 stream()。
+   */
+  async fetch(hash, opts = {}) {
+    const chunks = []
+    let received = 0
+    for await (const chunk of this.stream(hash, opts)) {
+      chunks.push(chunk)
+      received += chunk.byteLength
+    }
+    return concatChunks(chunks, received)
+  }
+
+  /** fetchBlob 取回为 Blob（浏览器预览/播放用；MIME 可由 name 猜）。 */
+  async fetchBlob(hash, { name = '', mime = '', ...opts } = {}) {
+    const bytes = await this.fetch(hash, opts)
+    return new Blob([bytes], { type: mime || guessMime(name) })
+  }
+
+  /** fetchText 取回为文本（utf-8）。 */
+  async fetchText(hash, opts = {}) {
+    const bytes = await this.fetch(hash, opts)
+    return new TextDecoder('utf-8').decode(bytes)
+  }
+
+  /**
+   * saveAs 触发浏览器下载。走 Blob + <a download>，因此**整份内容在内存里**；
+   * 与 fetch 共用同一个 maxBytes 闸。超大文件请用 stream() 自己落盘。
+   */
+  async saveAs(hash, filename = '', opts = {}) {
+    if (typeof document === 'undefined') {
+      throw new PeerDriveError('saveAs 需要 DOM 环境', ERR.PROTOCOL)
+    }
+    const blob = await this.fetchBlob(hash, { name: filename, ...opts })
+    const url = URL.createObjectURL(blob)
+    try {
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename || hash.slice(0, 12)
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    } finally {
+      // 立刻 revoke 会让部分浏览器（Safari）取消下载：给一点余量
+      setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    }
+    return blob.size
+  }
+
+  /** 便捷方法：从共享清单里直接取某个 entry/file 并保存（自动取文件名）。 */
+  async saveShare(item, opts = {}) {
+    if (!item || !item.hash) throw new PeerDriveError('saveShare 需要带 hash 的条目', ERR.PROTOCOL)
+    const name = baseNameOf(item.name || item.path || '')
+    return this.saveAs(item.hash, name, opts)
+  }
+
+  /** close 关闭连接（若本实例自己创建了 Peer 对象，一并销毁）。 */
+  close() {
+    this._unbind()
+    this._failAll(new PeerDriveError('连接已关闭', ERR.CLOSED))
+    try {
+      if (typeof this.conn.close === 'function') this.conn.close()
+    } catch {
+      /* 连接已死 */
+    }
+    if (this._ownedPeer && typeof this._ownedPeer.destroy === 'function') {
+      try {
+        this._ownedPeer.destroy()
+      } catch {
+        /* 已销毁 */
+      }
+    }
+    this._openState = false
+  }
+
+  // ── 内部：连接绑定与帧分派 ────────────────────────────────────────────────
+
+  _bind() {
+    this._onData = (data) => {
+      // 帧顺序即协议语义（见 protocol.js 约束 2），必须同步处理、不排队
+      try {
+        if (isBinaryFrame(data)) this._onChunk(data)
+        else this._onText(data)
+      } catch (e) {
+        this.stats.failures++
+        this._failAll(e instanceof Error ? e : new Error(String(e)))
+      }
+    }
+    this._onOpen = () => {
+      this._openState = true
+      this._flushOpenWaiters(null)
+    }
+    this._onClose = () => this._failAll(new PeerDriveError('连接已关闭', ERR.CLOSED))
+    this._onError = (err) => {
+      const msg = err && (err.message || err.type) ? err.message || err.type : String(err)
+      this._failAll(new PeerDriveError(`连接错误：${msg}`, ERR.CLOSED))
+    }
+    this.conn.on('data', this._onData)
+    this.conn.on('open', this._onOpen)
+    this.conn.on('close', this._onClose)
+    this.conn.on('error', this._onError)
+  }
+
+  _unbind() {
+    const off = this.conn.off || this.conn.removeListener
+    if (typeof off !== 'function') return
+    off.call(this.conn, 'data', this._onData)
+    off.call(this.conn, 'open', this._onOpen)
+    off.call(this.conn, 'close', this._onClose)
+    off.call(this.conn, 'error', this._onError)
+  }
+
+  _flushOpenWaiters(err) {
+    const waiters = this._openWaiters
+    this._openWaiters = []
+    for (const w of waiters) {
+      if (w.timer) clearTimeout(w.timer)
+      if (err) w.reject(err)
+      else w.resolve(this)
+    }
+  }
+
+  _onText(text) {
+    const frame = parseFrame(text)
+    if (!frame) return // 非本协议帧：忽略（同连接可能有别的用途）
+    switch (frame.type) {
+      case 'meta':
+        return this._onMeta(frame)
+      case 'data':
+        return this._onDataHead(frame)
+      case 'done':
+        return this._onDone(frame)
+      case 'err':
+        return this._onErr(frame)
+      case 'share-resp':
+        return this._onVerbReply(frame)
+      default:
+        return // 未知帧类型：前向兼容，忽略
+    }
+  }
+
+  _onMeta(frame) {
+    const p = this._pend.get(frame.reqId)
+    if (!p) return
+    p.touch()
+    const total = Number(frame.total)
+    // total 为 -1 表示对端也无法确定大小（多源回源场景）——不是错误
+    if (Number.isFinite(total) && total > MAX_FILE_BYTES) {
+      return this._failPending(p, new PeerDriveError(`对端声明文件 ${total} 字节，超出协议上限`, ERR.TOO_LARGE))
+    }
+    if (Number.isFinite(total) && total > p.maxBytes) {
+      return this._failPending(
+        p,
+        new PeerDriveError(
+          `文件 ${total} 字节超过本地内存闸 ${p.maxBytes}（改用 stream() 流式落盘，或调大 maxBytes）`,
+          ERR.TOO_LARGE,
+        ),
+      )
+    }
+    p.total = Number.isFinite(total) ? total : -1
+    this._reportProgress(p)
+  }
+
+  _onDataHead(frame) {
+    const p = this._pend.get(frame.reqId)
+    if (!p) return // 迟到的帧（已取消/已结束）：丢弃
+    p.touch()
+    const size = Number(frame.size)
+    // 与 Go 侧 H6 同样设上限：块大小必须为正且不超过协议上限，否则是恶意/错协议
+    if (!Number.isFinite(size) || size <= 0 || size > MAX_FILE_BYTES) {
+      return this._failPending(p, new PeerDriveError(`非法数据块大小 ${frame.size}`, ERR.PROTOCOL))
+    }
+    p.blockSize = size
+    p.blockGot = 0
+    // 连接级 expect：把紧随其后的二进制块挂到这个请求上
+    this._expect = p
+  }
+
+  _onChunk(data) {
+    const p = this._expect
+    if (!p) return // 没有前置 data 头的数据块：非协议内内容，丢弃
+    const bytes = toUint8Array(data)
+    // 注意：这里**不**把块存到请求状态里。块只进有界队列（背压），由消费端
+    // 取走——"流式"的收益全在这；多存一份到 state 等于把它变回整体驻留内存。
+    p.queue.push(bytes)
+    p.received += bytes.byteLength
+    p.blockGot += bytes.byteLength
+    if (p.blockGot >= p.blockSize) this._expect = null
+    this.stats.chunks++
+    this.stats.bytes += bytes.byteLength
+    p.touch()
+    if (p.hasher) p.hasher.update(bytes)
+    this._reportProgress(p)
+    if (p.maxBytes > 0 && p.received > p.maxBytes) {
+      this._failPending(
+        p,
+        new PeerDriveError(`内容超过本地内存闸 ${p.maxBytes}（改用 stream()）`, ERR.TOO_LARGE),
+      )
+    }
+  }
+
+  _onDone(frame) {
+    const p = this._pend.get(frame.reqId)
+    if (!p) return
+    p.touch()
+    const declared = Number(frame.size)
+    // 与 Go 侧一致的完整性闸：对端提前 done 会把截断内容当成功返回（静默损坏）
+    if (Number.isFinite(declared) && declared >= 0 && p.received !== declared) {
+      return this._failPending(
+        p,
+        new PeerDriveError(`传输不完整：收到 ${p.received} 字节，对端声明 ${declared} 字节`, ERR.INCOMPLETE, {
+          received: p.received,
+          declared,
+        }),
+      )
+    }
+    if (p.verify && p.hasher) {
+      const got = p.hasher.digestHex()
+      if (got !== p.hash) {
+        return this._failPending(
+          p,
+          new PeerDriveError(`内容与 hash 不符（期望 ${p.hash}，实得 ${got}）`, ERR.HASH_MISMATCH, {
+            expected: p.hash,
+            actual: got,
+          }),
+        )
+      }
+    }
+    this._finishPending(p)
+  }
+
+  _onErr(frame) {
+    const msg = frame.msg || '对端返回错误'
+    // err 帧的 reqId 可能属于拉取，也可能属于一次性 verb
+    const v = frame.reqId ? this._verbs.get(frame.reqId) : null
+    if (v) return this._settleVerb(frame.reqId, null, new PeerDriveError(msg, ERR.PEER))
+    const p = frame.reqId ? this._pend.get(frame.reqId) : null
+    if (p) return this._failPending(p, new PeerDriveError(msg, ERR.PEER))
+  }
+
+  _onVerbReply(frame) {
+    if (!frame.reqId) return
+    this._settleVerb(frame.reqId, frame, null)
+  }
+
+  // ── 内部：请求生命周期 ───────────────────────────────────────────────────
+
+  _assertHash(hash) {
+    if (!isValidHash(hash)) {
+      throw new PeerDriveError(
+        `hash 必须是 64 位小写十六进制 sha256，收到 ${JSON.stringify(hash)}`,
+        ERR.INVALID_HASH,
+      )
+    }
+  }
+
+  _send(frameText) {
+    if (this._closeErr) throw this._closeErr
+    this.conn.send(frameText)
+  }
+
+  _startFetch(reqId, hash, opts) {
+    const { offset = 0, size = -1, maxBytes, onProgress } = opts
+    const p = {
+      reqId,
+      hash,
+      offset,
+      size,
+      queue: new ChunkQueue(),
+      received: 0,
+      total: -1,
+      blockSize: 0,
+      blockGot: 0,
+      // 只对"全量请求"做内容寻址校验：range 请求拿到的片段本来就不等于整份
+      // 内容的摘要（与 Go 侧 fetchReader.verify 同一条件）
+      verify: offset === 0 && size < 0,
+      hasher: null,
+      maxBytes: Number.isFinite(maxBytes) ? maxBytes : this.opts.maxBufferBytes,
+      onProgress,
+      idleTimer: null,
+      onAbort: null,
+      settledBy: null,
+    }
+    if (p.verify) p.hasher = new Sha256()
+    p.touch = () => this._armIdle(p)
+    this._pend.set(reqId, p)
+    this._armIdle(p)
+    this.stats.requests++
+    try {
+      this._send(reqFrame(hash, { offset, size, reqId }))
+    } catch (e) {
+      this._cancel(reqId, e instanceof Error ? e : new Error(String(e)))
+    }
+    return p
+  }
+
+  _armIdle(p) {
+    if (p.idleTimer) clearTimeout(p.idleTimer)
+    p.idleTimer = setTimeout(() => {
+      this._failPending(
+        p,
+        new PeerDriveError(`拉取 ${p.hash.slice(0, 12)}… 空闲超时（${this.opts.idleTimeoutMs}ms 无数据）`, ERR.TIMEOUT),
+      )
+    }, this.opts.idleTimeoutMs)
+  }
+
+  _reportProgress(p) {
+    if (typeof p.onProgress === 'function') {
+      try {
+        p.onProgress(p.received, p.total, p.hash)
+      } catch {
+        /* 进度回调抛错不该影响传输 */
+      }
+    }
+  }
+
+  _finishPending(p) {
+    if (p.settledBy) return
+    p.settledBy = 'done'
+    this._detach(p)
+    p.queue.close()
+  }
+
+  _failPending(p, err) {
+    if (p.settledBy) return
+    p.settledBy = 'fail'
+    this.stats.failures++
+    this._detach(p)
+    p.queue.abort(err)
+  }
+
+  _cancel(reqId, err) {
+    const p = this._pend.get(reqId)
+    if (!p) return
+    if (p.settledBy) return
+    p.settledBy = 'cancel'
+    this._detach(p)
+    p.queue.abort(err)
+  }
+
+  _detach(p) {
+    if (p.idleTimer) {
+      clearTimeout(p.idleTimer)
+      p.idleTimer = null
+    }
+    if (p.onAbort && p.signal) p.signal.removeEventListener('abort', p.onAbort)
+    // 坑：不等对端停止发送。协议里没有"取消"帧，对端会继续把这次请求发完，
+    // 我们只是丢掉后续帧（_expect/_pend 里已查不到它）。要真正中断只能关连接。
+    if (this._expect === p) this._expect = null
+    this._pend.delete(p.reqId)
+  }
+
+  _failAll(err) {
+    this._closeErr = this._closeErr || err
+    this._openState = false
+    this._flushOpenWaiters(err)
+    for (const [, v] of this._verbs) {
+      if (v.timer) clearTimeout(v.timer)
+      v.reject(err)
+    }
+    this._verbs.clear()
+    for (const p of [...this._pend.values()]) this._failPending(p, err)
+  }
+
+  _settleVerb(reqId, frame, err) {
+    const v = this._verbs.get(reqId)
+    if (!v) return
+    this._verbs.delete(reqId)
+    if (v.timer) clearTimeout(v.timer)
+    if (err) v.reject(err)
+    else v.resolve(frame)
+  }
+
+  _requestVerb(reqId, frameText, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const entry = { resolve, reject, timer: null }
+      this._verbs.set(reqId, entry)
+      entry.timer = setTimeout(() => {
+        this._verbs.delete(reqId)
+        reject(new PeerDriveError(`对端 ${timeoutMs}ms 内没有应答`, ERR.TIMEOUT))
+      }, timeoutMs)
+      try {
+        this._send(frameText)
+      } catch (e) {
+        this._verbs.delete(reqId)
+        clearTimeout(entry.timer)
+        reject(e instanceof Error ? e : new Error(String(e)))
+      }
+    })
+  }
+}
+
+/**
+ * connect 包装一个已建立的连接，等它就绪后返回客户端。
+ * 这是最常用的入口：`const client = await connect(dataConnection)`
+ */
+async function connect(conn, opts = {}) {
+  const client = new PeerDriveClient(conn, opts)
+  try {
+    await client.ready(opts.openTimeoutMs)
+  } catch (e) {
+    client.close()
+    throw e
+  }
+  return client
+}
+
+/**
+ * connectToPeer 便捷入口：给出 PeerJS 构造函数与对方节点 id，一步到位。
+ *
+ * 本包不 import peerjs（保持零依赖、不污染使用方打包体积），所以构造函数由
+ * 调用方传入——浏览器里就是全局的 `Peer`（CDN <script> 或 `import Peer from 'peerjs'`）。
+ *
+ * ⚠️ serialization 必须是 'raw'：只有 raw 模式下 string 走文本帧、ArrayBuffer
+ * 走二进制帧，才能复刻 Go 侧「文本帧=JSON 头 / 二进制帧=数据块」的语义
+ * （见 back/internal/transport/conn.go 顶部）。用默认的 binary 序列化会让
+ * 数据块被 peerjs 自己的 chunker 包装，对端解析不出来。
+ */
+async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions = {}, ...opts } = {}) {
+  if (typeof PeerCtor !== 'function') {
+    throw new TypeError('peerdrive-client: connectToPeer 需要 PeerJS 的 Peer 构造函数')
+  }
+  const peer = new PeerCtor(peerOptions)
+  try {
+    await new Promise((resolve, reject) => {
+      const onOpen = () => {
+        peer.off?.('error', onError)
+        resolve()
+      }
+      const onError = (e) => {
+        peer.off?.('open', onOpen)
+        reject(new PeerDriveError(`信令失败：${e?.message || e?.type || e}`, ERR.CLOSED))
+      }
+      peer.on('open', onOpen)
+      peer.on('error', onError)
+    })
+    const conn = peer.connect(peerId, { serialization: 'raw', reliable: true, ...connOptions })
+    const client = new PeerDriveClient(conn, { ...opts, peerId })
+    client._ownedPeer = peer
+    await client.ready(opts.openTimeoutMs)
+    return client
+  } catch (e) {
+    try {
+      peer.destroy()
+    } catch {
+      /* 已销毁 */
+    }
+    throw e
+  }
+}
+
+// ---- 导出（对应 src/index.js 的 export *） ----
+  const api = { DEFAULT_MAX_BUFFER_BYTES, ERR, MAX_FILE_BYTES, PROTOCOL_VERSION, PeerDriveClient, PeerDriveError, Sha256, baseName, concatChunks, connect, connectToPeer, guessMime, isBinaryFrame, isValidHash, nextReqId, parseFrame, reqFrame, sha256Hex, shareFrame, toUint8Array }
+  if (typeof window !== 'undefined') { window.PeerDrive = api }
+  if (typeof globalThis !== 'undefined') { globalThis.PeerDriveBuiltin = api }
+})()</script>
+<script>// app.js — 公共面板的 UI 逻辑（普通脚本，不是 module：产物要在 file:// 下能跑）。
+//
+// 依赖的全局：
+//   Peer     —— CDN 上的 peerjs
+//   PeerDrive —— 由同一个 HTML 里内联的 bundle 提供（connectToPeer / ERR / …）
+//
+// 设计要点：
+//   - 一个节点一个会话（各自的 Peer 实例 + DataConnection），可以并存多个节点；
+//   - 表单状态会写进 URL 查询串，浏览器地址栏里那条链接就是「这个面板现在的状态」，
+//     直接发给别人即可复现（配合 ?auto=1 打开即连）；
+//   - 最近连接存 localStorage，允许 dataset 为空的隐私模式下载 degrade。
+
+;(function () {
+  'use strict'
+
+  var LS_KEY = 'peerdrive.panel.v1'
+  var MAX_RECENT = 8
+  var PREVIEW_MAX_BYTES = 2 * 1024 * 1024 // 预览只给小文件，大的直接存盘
+
+  var sessions = new Map() // nodeId -> {id, client, status, snapshot, error}
+  var current = null // 当前选中的 nodeId
+  var tasks = [] // 传输任务（最新的在前）
+
+  // ── 小工具 ────────────────────────────────────────────────────────────
+  var $ = function (id) { return document.getElementById(id) }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+    })
+  }
+
+  function fmtBytes(n) {
+    n = Number(n) || 0
+    if (n < 1024) return n + ' B'
+    var units = ['KB', 'MB', 'GB', 'TB'], i = -1
+    do { n /= 1024; i++ } while (n >= 1024 && i < units.length - 1)
+    return n.toFixed(n < 10 ? 1 : 0) + ' ' + units[i]
+  }
+
+  function fmtRate(bytesPerSec) {
+    return fmtBytes(bytesPerSec) + '/s'
+  }
+
+  function log(msg, cls) {
+    var box = $('log')
+    if (!box) return
+    var el = document.createElement('div')
+    if (cls) el.className = cls
+    el.textContent = '[' + new Date().toLocaleTimeString('zh-CN', { hour12: false }) + '] ' + msg
+    box.appendChild(el)
+    box.scrollTop = box.scrollHeight
+  }
+
+  function lsRead() {
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}') } catch (e) { return {} }
+  }
+
+  function lsWrite(obj) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(obj)) } catch (e) { /* 隐私模式：忽略 */ }
+  }
+
+  function params() {
+    return new URLSearchParams(location.search)
+  }
+
+  function sigOfForm() {
+    return {
+      host: $('in-host').value.trim() || '0.peerjs.com',
+      port: Number($('in-port').value.trim() || 443),
+      path: $('in-path').value.trim() || '/',
+      key: $('in-key').value.trim() || 'peerjs',
+      secure: $('in-secure').checked,
+    }
+  }
+
+  // 面板状态回写地址栏 —— 让用户能直接复制「连这个节点的面板」链接
+  function syncURL() {
+    var q = params()
+    var sig = sigOfForm()
+    q.set('host', sig.host)
+    q.set('port', String(sig.port))
+    q.set('path', sig.path)
+    q.set('key', sig.key)
+    q.set('secure', sig.secure ? '1' : '0')
+    if ($('in-node').value.trim()) q.set('node', $('in-node').value.trim())
+    else q.delete('node')
+    try { history.replaceState(null, '', location.pathname + '?' + q.toString()) } catch (e) { /* file:// 下可能不让改 */ }
+  }
+
+  function remember(nodeId, sig) {
+    var st = lsRead()
+    var recent = (st.recent || []).filter(function (r) { return r.id !== nodeId })
+    recent.unshift({ id: nodeId, sig: sig, at: Date.now() })
+    st.recent = recent.slice(0, MAX_RECENT)
+    lsWrite(st)
+    renderRecent()
+  }
+
+  // ── 渲染 ──────────────────────────────────────────────────────────────
+  function statusClass(st) {
+    return st === 'online' ? 'on' : st === 'connecting' ? 'wait' : st === 'error' ? 'bad' : ''
+  }
+
+  function renderNodes() {
+    var box = $('nodes')
+    if (!sessions.size) { box.innerHTML = '<div class="empty">还没有连接任何节点。</div>'; return }
+    box.innerHTML = ''
+    sessions.forEach(function (s) {
+      var row = document.createElement('div')
+      row.className = 'node' + (s.id === current ? ' sel' : '')
+      var n = s.snapshot ? s.snapshot.total : null
+      row.innerHTML =
+        '<span class="dot ' + statusClass(s.status) + '"></span>' +
+        '<span class="nm mono" title="' + esc(s.id) + '">' + esc(s.id) + '</span>' +
+        '<span class="faint" style="font-size:11px">' + (n == null ? '' : n + ' 项') + '</span>'
+      row.addEventListener('click', function () { select(s.id) })
+
+      var close = document.createElement('button')
+      close.className = 'tiny ghost'
+      close.textContent = '×'
+      close.title = '断开'
+      close.addEventListener('click', function (ev) { ev.stopPropagation(); disconnect(s.id) })
+      row.appendChild(close)
+      box.appendChild(row)
+    })
+  }
+
+  function renderRecent() {
+    var box = $('recent')
+    var recent = (lsRead().recent || [])
+    if (!recent.length) { box.innerHTML = '<div class="empty">暂无记录。</div>'; return }
+    box.innerHTML = ''
+    recent.forEach(function (r) {
+      var row = document.createElement('div')
+      row.className = 'node'
+      row.innerHTML =
+        '<span class="nm mono" title="' + esc(r.id) + '">' + esc(r.id) + '</span>' +
+        '<span class="faint" style="font-size:11px">' + esc(r.sig.host || '') + '</span>'
+      row.addEventListener('click', function () {
+        $('in-node').value = r.id
+        if (r.sig) {
+          $('in-host').value = r.sig.host || ''
+          $('in-port').value = r.sig.port || 443
+          $('in-path').value = r.sig.path || '/'
+          $('in-key').value = r.sig.key || 'peerjs'
+          $('in-secure').checked = r.sig.secure !== false
+        }
+        connect()
+      })
+      box.appendChild(row)
+    })
+  }
+
+  function renderTasks() {
+    var box = $('tasks')
+    if (!tasks.length) { box.innerHTML = '<div class="empty">没有进行中的传输。</div>'; return }
+    var html = '<table><thead><tr><th>文件</th><th>来源</th><th class="num">进度</th><th class="num">速率</th><th>状态</th><th></th></tr></thead><tbody>'
+    tasks.forEach(function (t) {
+      var pct = t.total > 0 ? Math.min(100, (t.received / t.total) * 100) : 0
+      html += '<tr>' +
+        '<td class="mono">' + esc(t.name || t.hash.slice(0, 12)) + '</td>' +
+        '<td class="faint mono" style="font-size:11px">' + esc(t.from) + '</td>' +
+        '<td class="num">' + (t.total > 0 ? fmtBytes(t.received) + ' / ' + fmtBytes(t.total) : fmtBytes(t.received)) +
+        '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div></td>' +
+        '<td class="num faint">' + (t.state === 'running' ? esc(fmtRate(t.rate)) : '—') + '</td>' +
+        '<td class="' + (t.state === 'done' ? 'ok' : t.state === 'error' || t.state === 'cancelled' ? 'err' : 'dim') + '">' +
+        esc(t.state === 'done' ? '完成' : t.state === 'running' ? '传输中' : t.state === 'cancelled' ? '已取消' : t.state === 'error' ? '失败' : t.state) +
+        (t.error ? '<div class="faint" style="font-size:11px">' + esc(t.error) + '</div>' : '') + '</td>' +
+        '<td class="num">' + (t.state === 'running'
+          ? '<button class="tiny ghost" data-cancel="' + t.id + '">取消</button>'
+          : (t.state === 'done' ? '<span class="faint" style="font-size:11px">sha256 已校验</span>' : '')) + '</td>' +
+        '</tr>'
+    })
+    box.innerHTML = html + '</tbody></table>'
+    Array.prototype.forEach.call(box.querySelectorAll('[data-cancel]'), function (btn) {
+      btn.addEventListener('click', function () {
+        var t = tasks.find(function (x) { return x.id === btn.getAttribute('data-cancel') })
+        if (t && t.ctrl) t.ctrl.abort()
+      })
+    })
+  }
+
+
+  function updateShares() {
+    var s = sessions.get(current)
+    var box = $('shares')
+    $('preview').innerHTML = ''
+    if (!s) { box.innerHTML = '<div class="empty">先在左侧选一个节点。</div>'; return }
+    if (s.status === 'connecting') { box.innerHTML = '<div class="empty">连接中…</div>'; return }
+    if (s.status === 'error') { box.innerHTML = '<div class="empty err">连接失败：' + esc(s.error) + '</div>'; return }
+    if (!s.snapshot) { box.innerHTML = '<div class="empty">还没有清单。</div>'; return }
+
+    var snap = s.snapshot
+    if (!snap.total) {
+      box.innerHTML = '<div class="empty">该节点没有共享内容（未开启对外共享，或未声明共享目录）。</div>'
+      return
+    }
+
+    var html = ''
+    if (snap.files && snap.files.length) {
+      html += '<h2 style="margin-top:2px">单独文件</h2><table><thead><tr><th>名称</th><th class="num">大小</th><th>hash</th><th style="width:150px"></th></tr></thead><tbody>'
+      snap.files.forEach(function (f, i) {
+        html += '<tr>' +
+          '<td>' + esc(f.path || f.name) + '</td>' +
+          '<td class="num faint">' + (f.size ? esc(fmtBytes(f.size)) : '—') + '</td>' +
+          '<td class="mono faint" style="font-size:11px">' + esc(String(f.hash).slice(0, 12)) + '…</td>' +
+          '<td class="num">' +
+          '<button class="small" data-save="' + i + '">保存</button> ' +
+          '<button class="small ghost" data-peek="' + i + '">预览</button>' +
+          '</td></tr>'
+      })
+      html += '</tbody></table>'
+    }
+    if (snap.collections && snap.collections.length) {
+      html += '<h2 style="margin-top:16px">合集</h2>'
+      snap.collections.forEach(function (c, ci) {
+        var entries = Array.isArray(c.entries) ? c.entries : []
+        html += '<details><summary>' + esc(c.name || String(c.hash).slice(0, 12) + '…') + ' · ' + entries.length + ' 个条目</summary>'
+        html += '<table><thead><tr><th>路径</th><th class="num">大小</th><th style="width:150px"></th></tr></thead><tbody>'
+        entries.forEach(function (e, ei) {
+          html += '<tr>' +
+            '<td>' + esc(e.path) + '</td>' +
+            '<td class="num faint">' + (e.size ? esc(fmtBytes(e.size)) : '—') + '</td>' +
+            '<td class="num">' +
+            '<button class="small" data-csave="' + ci + ':' + ei + '">保存</button> ' +
+            '<button class="small ghost" data-cpeek="' + ci + ':' + ei + '">预览</button>' +
+            '</td></tr>'
+        })
+        html += '</tbody></table></details>'
+      })
+    }
+    box.innerHTML = html
+
+    var bind = function (attr, handler) {
+      Array.prototype.forEach.call(box.querySelectorAll('[' + attr + ']'), function (el) {
+        el.addEventListener('click', function () { handler(el.getAttribute(attr)) })
+      })
+    }
+    var findFile = function (i) { return snap.files[Number(i)] }
+    var findEntry = function (ref) {
+      var p = ref.split(':')
+      return (snap.collections[Number(p[0])].entries || [])[Number(p[1])]
+    }
+    bind('data-save', function (v) { download(s, findFile(v)) })
+    bind('data-peek', function (v) { preview(s, findFile(v)) })
+    bind('data-csave', function (v) { download(s, findEntry(v)) })
+    bind('data-cpeek', function (v) { preview(s, findEntry(v)) })
+  }
+
+  // ── 动作 ──────────────────────────────────────────────────────────────
+  function select(id) {
+    current = id
+    renderNodes()
+    updateShares()
+  }
+
+  function peerOptions(sig) {
+    // secure 必须显式传：自托管信令常用 ws://，peerjs 默认 secure=true 会去连 wss://，
+    // 表现为「连不上但不报错」——最常见的踩坑点。
+    return { host: sig.host, port: sig.port, path: sig.path, key: sig.key, secure: sig.secure, debug: 1 }
+  }
+
+  // peerjs 由加载器异步注入，可能还没到位；这里给出明确状态而不是「点了没反应」
+  function peerReady() { return typeof window.Peer !== 'undefined' }
+  function peerMissingHint() {
+    return window.__peerjsOK === false
+      ? 'peerjs 加载失败（同目录副本 / jsdelivr / unpkg 都没取到）。离线环境请先 `npm run vendor:peerjs` 把 peerjs.min.js 放到本页面同目录。'
+      : 'peerjs 还在加载中，稍等再点一次。'
+  }
+
+  async function connect() {
+    if (!peerReady()) { log(peerMissingHint(), 'err'); return }
+    var nodeId = $('in-node').value.trim()
+    if (!nodeId) { log('请先填节点 peer id', 'err'); return }
+    if (sessions.has(nodeId)) { select(nodeId); return }
+
+    var sig = sigOfForm()
+    syncURL()
+    var s = { id: nodeId, client: null, status: 'connecting', snapshot: null, error: null }
+    sessions.set(nodeId, s)
+    current = nodeId
+    renderNodes()
+    updateShares()
+    try {
+      log('连接信令 ' + sig.host + ':' + sig.port + ' 并拨号 ' + nodeId + ' …')
+      var client = await window.PeerDrive.connectToPeer(window.Peer, nodeId, {
+        peerOptions: peerOptions(sig),
+        idleTimeoutMs: 60 * 1000,
+      })
+      s.client = client
+      s.status = 'online'
+      // 注意用 localPeerId（本端）而不是 conn.peer（那是**对端**，第一版就错在这）
+      $('my-id').textContent = client.localPeerId || '（未知）'
+      $('my-id').className = 'ok'
+      log('已建立 WebRTC 直连', 'ok')
+      remember(nodeId, sig)
+      renderNodes()
+      await loadShares(s)
+    } catch (e) {
+      s.status = 'error'
+      s.error = e.message || String(e)
+      log('连接失败：' + s.error + (e.code ? '（' + e.code + '）' : ''), 'err')
+      if (e.code === window.PeerDrive.ERR.TIMEOUT) {
+        log('提示：对方节点离线、peer id 写错，或信令配置不同（host/port/path/key/secure）', 'warn')
+      }
+      renderNodes()
+      updateShares()
+    }
+  }
+
+  function disconnect(id) {
+    var s = sessions.get(id)
+    if (!s) return
+    if (s.client) { try { s.client.close() } catch (e) { /* 已关闭 */ } }
+    sessions.delete(id)
+    if (current === id) current = sessions.size ? sessions.keys().next().value : null
+    log('已断开 ' + id)
+    renderNodes()
+    updateShares()
+  }
+
+  async function loadShares(s) {
+    if (!s || !s.client) return
+    try {
+      s.snapshot = await s.client.shares()
+      log('清单：' + (s.snapshot.collections || []).length + ' 合集 · ' + (s.snapshot.files || []).length + ' 文件', 'ok')
+      renderNodes()
+      if (current === s.id) updateShares()
+    } catch (e) {
+      s.error = e.message || String(e)
+      log('获取清单失败：' + s.error + (e.code ? '（' + e.code + '）' : ''), 'err')
+      renderNodes()
+      if (current === s.id) updateShares()
+    }
+  }
+
+  function saveBlob(blob, name) {
+    var url = URL.createObjectURL(blob)
+    var a = document.createElement('a')
+    a.href = url
+    a.download = name || 'download'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    // 立刻 revoke 会让部分浏览器（Safari）取消下载，给足余量
+    setTimeout(function () { URL.revokeObjectURL(url) }, 30000)
+  }
+
+  function addTask(t) {
+    tasks.unshift(t)
+    renderTasks()
+    return t
+  }
+
+  async function download(s, item) {
+    if (!s || !s.client || !item || !item.hash) return
+    var name = String(item.name || item.path || item.hash).split('/').pop()
+    var started = Date.now()
+    var ctrl = new AbortController()
+    var t = addTask({
+      id: 't' + Date.now() + Math.random().toString(36).slice(2, 6),
+      hash: item.hash, name: name, from: s.id,
+      received: 0, total: -1, rate: 0, state: 'running', ctrl: ctrl, error: null,
+    })
+    var tick = setInterval(function () {
+      if (t.state !== 'running') return
+      t.rate = Math.round(t.received / Math.max(1, (Date.now() - started) / 1000))
+      renderTasks()
+    }, 500)
+    try {
+      log('拉取 ' + name + ' …')
+      var bytes = await s.client.fetch(item.hash, {
+        signal: ctrl.signal,
+        onProgress: function (received, total) {
+          t.received = received
+          t.total = total > 0 ? total : t.total
+          renderTasks()
+        },
+      })
+      t.received = bytes.byteLength
+      t.state = 'done'
+      saveBlob(new Blob([bytes], { type: (window.PeerDrive.guessMime || function () { return '' })(name) }), name)
+      log('完成：' + name + '（' + fmtBytes(bytes.byteLength) + '，sha256 已校验）', 'ok')
+    } catch (e) {
+      t.state = e.name === 'AbortError' || (e.code === window.PeerDrive.ERR.CANCELLED) ? 'cancelled' : 'error'
+      t.error = e.message || String(e)
+      log('拉取失败：' + t.error + (e.code ? '（' + e.code + '）' : ''), t.state === 'cancelled' ? 'warn' : 'err')
+      if (e.code === window.PeerDrive.ERR.HASH_MISMATCH) log('内容与 hash 不符——对端数据损坏或被篡改，已丢弃', 'err')
+      if (e.code === window.PeerDrive.ERR.TOO_LARGE) log('超过内存闸（默认 256MB）', 'warn')
+    } finally {
+      clearInterval(tick)
+      renderTasks()
+    }
+  }
+
+  async function preview(s, item) {
+    if (!s || !s.client || !item || !item.hash) return
+    var box = $('preview')
+    var name = String(item.name || item.path || item.hash).split('/').pop()
+    var mime = (window.PeerDrive.guessMime || function () { return '' })(name)
+    box.innerHTML = '<div class="preview faint">加载预览…</div>'
+    try {
+      if (/^image\//.test(mime)) {
+        var blob = await s.client.fetchBlob(item.hash, { name: name })
+        var url = URL.createObjectURL(blob)
+        box.innerHTML = '<div class="preview"><img src="' + esc(url) + '" alt="' + esc(name) + '"></div>'
+      } else if (/^video\//.test(mime) || /^audio\//.test(mime)) {
+        var vblob = await s.client.fetchBlob(item.hash, { name: name })
+        box.innerHTML = '<div class="preview"><video src="' + esc(URL.createObjectURL(vblob)) + '" controls></video></div>'
+      } else {
+        var text = await s.client.fetchText(item.hash, { maxBytes: PREVIEW_MAX_BYTES })
+        box.innerHTML = '<div class="preview mono"><pre>' + esc(text.slice(0, 200000)) + '</pre></div>'
+      }
+      log('预览 ' + name, 'ok')
+    } catch (e) {
+      box.innerHTML = '<div class="preview err">预览失败：' + esc(e.message || String(e)) + '</div>'
+      log('预览失败：' + (e.message || String(e)), 'err')
+    }
+  }
+
+  // ── 启动 ──────────────────────────────────────────────────────────────
+  function boot() {
+    var q = params()
+    if (q.get('host')) $('in-host').value = q.get('host')
+    if (q.get('port')) $('in-port').value = q.get('port')
+    if (q.get('path')) $('in-path').value = q.get('path')
+    if (q.get('key')) $('in-key').value = q.get('key')
+    if (q.get('secure') !== null) $('in-secure').checked = q.get('secure') !== '0'
+    if (q.get('node')) $('in-node').value = q.get('node')
+
+    $('btn-connect').addEventListener('click', connect)
+    $('in-node').addEventListener('keydown', function (e) { if (e.key === 'Enter') connect() })
+    ;['in-host', 'in-port', 'in-path', 'in-key', 'in-secure'].forEach(function (id) {
+      $(id).addEventListener('change', syncURL)
+    })
+
+    renderRecent()
+    renderTasks()
+    log('就绪。本面板是单个静态文件，不需要本地后端。')
+
+    window.addEventListener('peerjs-ready', function (e) {
+      if (e.detail && e.detail.ok) log('peerjs 已加载（' + e.detail.src + '）', 'ok')
+      else log(peerMissingHint(), 'err')
+    })
+
+    if (q.get('auto') === '1' && $('in-node').value.trim()) {
+      // auto=1 时页面可能还没拿到 peerjs，等它到位再连
+      if (peerReady()) connect()
+      else window.addEventListener('peerjs-ready', function once(e) {
+        window.removeEventListener('peerjs-ready', once)
+        if (e.detail && e.detail.ok) connect()
+      })
+    }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot)
+  else boot()
+})()
+</script>
+</body>
+</html>

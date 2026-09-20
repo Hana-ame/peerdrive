@@ -21,6 +21,9 @@ client.close()
 不想用打包器？直接把 `peerjs` 的 CDN `<script>` 放前面，然后在 `type="module"` 里用全局 `Peer`
 ——`demo/consumer.html` 就是这么做的。
 
+开箱即用的成品见 **[公共面板 `dist/panel.html`](#公共面板网盘的-ui-形态distpanelhtml)**：
+单文件、无需本地服务器，`file://` 双击即用，`npm run build:panel` 生成。
+
 ## 它解决的问题
 
 peerdrive 节点（`back/` 里的 Go 服务）既是持有方也是消费方：节点之间用同一套帧协议互联。
@@ -180,18 +183,45 @@ UI 请按 `err.code` 分支，不要去匹配 `message` 文案。
 **为什么 `shares()` 的空清单不是错误。** 对方没开启对外共享是合法业务状态
 （`PEERDRIVE_SHARE_ENABLE` 默认关闭），UI 应当渲染「该节点没有共享内容」而不是红色报错。
 
-## 演示
+## 公共面板（网盘的 UI 形态：`dist/panel.html`）
+
+网盘**没有本地 HTTP 服务器式的 UI** —— UI 是一个**公共静态面板**，用 PeerJS 拨号进去：
+
+```bash
+npm run build:panel    # 生成 dist/panel.html（56 KB，单文件）
+```
+
+`dist/panel.html` 是**自包含单文件**：client 源码已内联，`file://` 双击就能开，
+也可以丢到任意静态托管（Pages / CDN / OSS）当成一个公用网址。
+它不连你本地的后端 API，而是直接 WebRTC 连到节点。
+
+```text
+panel.html?node=<peer id>&host=<信令>&port=&path=/&key=peerjs&secure=0&auto=1
+```
+
+- `node/host/port/path/key/secure` 预填连接参数 —— 地址栏那条链接就是这个面板的完整状态，
+  可以直接发给别人；`auto=1` 表示打开即连。
+- 面板能力：多节点并存、共享清单（文件/合集）、按 hash 或点选拉取、
+  传输任务列表（进度/速率/取消）、预览（图片/视频/文本）。
+- peerjs 按「同目录 `peerjs.min.js` → jsdelivr → unpkg」回退加载；
+  离线/内网环境先 `npm run vendor:peerjs` 把它下到 `dist/` 同目录即可完全不联网。
+
+> **信令必须放开 CORS**，否则面板取不到临时 id：file:// 页面的 origin 是 `null`，
+> 浏览器会拦掉 `GET /peerjs/id` 的响应，PeerJS 侧只报含混的 `server-error`。
+> 自托管信令 `back/signalserver` 已在 HandleID/HandleAnnounce/HandleLeave/HandleNodes/HandleStatus
+> 上加了跨域头与 OPTIONS 预检短路（`allowCORS`）。
+
+## 演示（旧版 demo，需要本地静态服务）
 
 ```bash
 cd packages/peerdrive-client
 npm run demo      # http://127.0.0.1:8123/demo/consumer.html
 ```
 
-demo 是单个静态页面（`demo/consumer.html`）：填信令配置 + 对方节点 id → 连接 → 列出共享清单
-→ 逐个保存或按 hash 直接拉取。要连自托管信令就把 host/port/path/key 填成节点启动时的
-`PEERDRIVE_PEERJS_*` 配置（注意 `secure` 要和 `ws://`/`wss://` 对上）。
-
-> 本地直接 `file://` 打开不行：ESM 模块与 WebCrypto 都需要 http(s) 上下文。用 `npm run demo`。
+`demo/consumer.html` 是最早的最小演示：填信令配置 + 对方节点 id → 连接 → 列出共享清单
+→ 逐个保存或按 hash 直接拉取。它靠相对路径 `import '../src/index.js'`，
+所以**必须**由 HTTP 服务器提供整个包目录 —— 做不了「单文件公共面板」，
+公共形态请看上面 `dist/panel.html`。
 
 ## 测试
 

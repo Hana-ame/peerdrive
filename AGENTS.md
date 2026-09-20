@@ -53,8 +53,12 @@
 - **消费端包 `peerdrive-client`**（`packages/peerdrive-client/`，**零运行时依赖**）：纯浏览器
   从 peerdrive 节点拉文件（走 `share`/`req` 帧），不需要本地部署节点。**传输无关**设计——
   `PeerDriveClient` 只要求传入 `{on(type,cb),send(data),open,close}`（PeerJS DataConnection
-  天然满足），本包不 import peerjs，使用方注入构造函数。无构建步骤，直接发 ESM 源码。
-  **改动后必须**：`npm test`（`node --test`，60 个用例；零依赖所以不需要 npm ci）。
+  天然满足），本包不 import peerjs，使用方注入构造函数。包本身仍是 ESM 源码直发（不编译）。
+  **网盘 UI 的公共形态就是本包构建出的单文件面板** `dist/panel.html`（file:// 可直接打开、
+  可托管到任意静态空间，不需要本地 http 服务）——改 `src/` 或 `panel/` 后必须
+  `npm run build:panel` 重新生成产物（CI 的 `check:panel` 会拦漂移）；
+  改了面板行为请照 README「公共面板」一节手测（真实浏览器）。
+  **改动后必须**：`npm test`（`node --test`，61 个用例；零依赖所以不需要 npm ci）。
   自实现的**增量** SHA-256（`src/sha256.js`）是因为 `crypto.subtle.digest()` 一次性、
   与流式拉取冲突——别"优化"成只用 WebCrypto。协议约束（连接级 expect / 字段名逐字对齐 /
   raw 序列化）见其 README「协议」一节。

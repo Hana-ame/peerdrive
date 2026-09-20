@@ -11,10 +11,14 @@
     "./protocol": "./src/protocol.js",
     "./sha256": "./src/sha256.js"
   },
-  "files": ["src", "demo", "scripts", "README.md"],
+  "files": ["src", "demo", "dist", "panel", "scripts", "README.md"],
   "sideEffects": false,
   "scripts": {
     "test": "node --test \"test/*.test.mjs\"",
+    "build": "node scripts/build-panel.mjs",
+    "build:panel": "node scripts/build-panel.mjs",
+    "check:panel": "node scripts/build-panel.mjs --check",
+    "vendor:peerjs": "node scripts/vendor-peerjs.mjs",
     "demo": "node scripts/serve.mjs",
     "demo:signal": "peerjs --port 9100 --path /"
   },

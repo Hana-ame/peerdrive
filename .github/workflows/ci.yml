@@ -99,9 +99,11 @@ jobs:
       - run: npm test
       - run: npm run build
 
-  # packages/peerdrive-client：纯 WebRTC 消费端（60 个用例，覆盖协议状态机 +
+  # packages/peerdrive-client：纯 WebRTC 消费端（61 个用例，覆盖协议状态机 +
   # 增量 SHA-256）。刻意零依赖——所以这里不需要 npm ci：没有 lock 文件、
   # 没有网络安装步骤，CI 只跑 node --test。
+  # 另外校验公共面板产物 dist/panel.html 与 src/ 一致（它是内联单文件，
+  # 改了 src 忘了 build 就会发出过期的面板，这种漂移这里必须拦住）。
   client-package:
     runs-on: ubuntu-latest
     defaults:
@@ -113,6 +115,7 @@ jobs:
         with:
           node-version: 22
       - run: npm test
+      - run: npm run check:panel
 
   frontend:
     runs-on: ubuntu-latest

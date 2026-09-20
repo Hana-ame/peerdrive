@@ -29,6 +29,10 @@ back/test/integration/downloads/
 # Node
 node_modules/
 dist/
+# 例外：公共面板产物是**交付物**（单文件，用户直接双击/托管用），必须入库。
+# 其余 dist/ 仍然忽略（构建缓存、media 的打包产物等）。
+!packages/peerdrive-client/dist/
+!packages/peerdrive-client/dist/panel.html
 
 # Archives
 *.zip

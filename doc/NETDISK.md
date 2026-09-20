@@ -294,7 +294,51 @@ peersignal :9100（信令 + 内置 /discover 发现，仅转发 SDP/ICE）
 | 内容正确 | `sha256sum <saved_to>` | 与 share 帧里的 `hash` 完全一致 |
 | 本地已有 exemption | 重复 pull 同一 hash | `skipped:true`（不重复传，见 `peerpull.go:283`） |
 
-前端 UI：
+### 7.2.1 网盘 UI 的形态：**公共面板**（不是本地起的 web 服务）
+
+网盘的 UI **不是**一个需要你自己起 http 服务的前端工程，而是一个**公共静态面板**：
+`packages/peerdrive-client/dist/panel.html`（单文件，57 KB）。
+
+```bash
+cd packages/peerdrive-client && npm run build:panel      # 生成产物
+# 然后直接双击 dist/panel.html —— file:// 就能用，不需要任何服务器
+```
+
+它通过 PeerJS 拨号直连节点，走 share 帧看清单、走 req 帧拉内容（逐块校验 sha256）。
+把连接参数写进 URL 就能当"某个节点的面板"发出去：
+
+```
+panel.html?node=node-a&host=<信令 host>&port=9100&path=/&key=peerjs&secure=0&auto=1
+```
+
+`auto=1` 打开即连。面板支持多节点并存、传输任务列表（进度/速率/取消）、
+图片/视频/文本预览、最近连接记录。
+
+两个必须知道的前提：
+
+1. **信令必须开 CORS**。面板多半以 `file://` 或别的域打开（origin 是 `null`／异构源），
+   而它第一件事就是 `GET /peerjs/id` 取临时 id；信令不返回跨域头时浏览器直接吞掉响应，
+   PeerJS 只会报含混的 `server-error`，看不出是 CORS。
+   自托管信令 `back/signalserver` 已处理（`allowCORS`：HandleID / Announce / Leave / Nodes / Status
+   加跨域头 + OPTIONS 预检短路）。
+2. **peerjs 走回退链加载**：同目录 `peerjs.min.js` → jsdelivr → unpkg。
+   内网/离线先跑 `npm run vendor:peerjs` 把它下到 `dist/` 同目录，即可完全不联网。
+
+端到端自检（真实浏览器 + 真实点击，需要先起 §7.1 的环境）：
+
+```bash
+cd packages/peerdrive-client
+SIG_HOST=<WSL LAN IP> SIG_PORT=9100 NODE_ID=node-a node scripts/verify-panel.mjs
+# 断言：连上 → 清单 → 点「保存」真的下载 → 点「预览」渲染内容 → sha256 与清单一致
+```
+
+> 旧的 `npm run demo`（`demo/consumer.html`）还在，但它是**最小演示**：
+> 靠相对路径 `import '../src/index.js'`，必须有 HTTP 服务提供整个包目录，做不了单文件分享。
+
+### 7.2.2 节点管理台（`front/`，给节点运营者用）
+
+`front/` 是**节点自身的控制台**（我的网盘 / 节点市场 / 我的节点 / 传输任务），
+它调节点的 HTTP API（`/peerjs/nodes`、`/p2p/pull` …），因此需要后端在跑：
 
 ```bash
 cd front && npm run dev -- --host 0.0.0.0 --port 5173
@@ -306,14 +350,8 @@ cd front && npm run dev -- --host 0.0.0.0 --port 5173
 然后按 我的网盘 → 节点市场（加入 node-a）→ 我的节点 → 点开 node-a →
 选中文件保存 → 传输任务 看进度。
 
-纯 client 消费端（M5，不需要本地后端）：
-
-```bash
-cd packages/peerdrive-client && npm run demo   # http://127.0.0.1:8123/demo/consumer.html
-```
-
-页面里填 node-a 的 peer id、信令 host=`127.0.0.1` port=`9100` key=`peerjs`
-并关掉 secure，即可直连拉取——验证"不跑节点也能从 P2P 网络取文件"。
+> 这是「运营者视野」的界面：它能做的事（加入节点、看市场、管理本机共享）
+> 都建立在**本地有节点**之上。纯消费者不该被要求部署节点 —— 那是 §7.2.1 面板的职责。
 
 ### 7.3 首次跑通时暴露的两个运行时缺陷（已修）
 

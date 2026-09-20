@@ -32,7 +32,7 @@
 | `back/signalserver/**`（peersignal） | `cd back/signalserver && go test ./...`（21）· **CI 不管它** | — |
 | `back/p2p_bt/**` | `cd back/p2p_bt && go test ./...`（7）· **CI 不管它** | — |
 | `front/src/**` | `cd front && npm test`（88）+ `npm run build` | `front/tests/*.mjs` 手动脚本（视改动面） |
-| `packages/peerdrive-client/**` | `npm test`（60） | `npm run demo`（浏览器直连拉取） |
+| `packages/peerdrive-client/**` | `npm test`（61）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端） |
 | `packages/peerdrive-media/**` | `npm test`（21）+ `npm run build` | `test/e2e-browser.mjs`、`test/media-node-e2e.mjs` |
 | 准备 merge 进 `refactor` | 上表全部必跑项全绿（= CI 的同款命令） | 合并后在主干再跑一遍 |
 
@@ -52,14 +52,14 @@
 | 6 | p2p_bt 模块 | `back/p2p_bt/`（独立 go.mod） | `go test ./... -count=1` | **7** | ❌ **（盲区）** | ❌ |
 | 7 | 前端 vitest | `front/tests/*.test.{js,jsx}` | `npm test` | **88**（9 文件） | ✅ `frontend`（含 build） | npm ci 需要 |
 | 8 | 前端手动脚本 | `front/tests/*.mjs`（3 个） | playwright / WS 冒烟 | — | ❌ **（盲区）** | ✅（线上站点） |
-| 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **60** | ✅ `client-package` | ❌ |
-| 10 | client 浏览器 demo | `packages/peerdrive-client/demo/` | `npm run demo`（:8123） | 手工 | ❌ | ❌ |
+| 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **61** | ✅ `client-package` | ❌ |
+| 10 | client 公共面板 + 浏览器自检 | `packages/peerdrive-client/{dist,scripts}` | `npm run check:panel`·`node scripts/verify-panel.mjs` | 面板 8 项断言 | ✅ `check:panel`（产物一致性） | ❌（peerjs 取 CDN） |
 | 11 | media 包单测 | `packages/peerdrive-media/` | `npm test` + `npm run build` | **21** | ✅ `media-package` | npm ci 需要 |
 | 12 | media 浏览器/Node E2E | `packages/peerdrive-media/test/*.mjs`（非 `*.test.mjs`） | playwright runner / 直启 | 10 断言 + … | ❌ **（盲区）** | ❌ |
 | 13 | 分层汇总脚本 | `scripts/test-layers.sh` | `bash scripts/test-layers.sh [--integration]` | 聚合 1/4/5/6/7 | ❌（本地聚合） | — |
 | 14 | 网盘端到端脚本 | `scripts/netdisk-local-demo.sh` | 起 3 进程跑全链路 | 8 项断言 | ❌ **（建议进 CI）** | ❌ |
 
-**覆盖范围合计**：自动化（CI）覆盖 308 + 21 + 23 + 88 + 60 + 21 = **521**；
+**覆盖范围合计**：自动化（CI）覆盖 308 + 21 + 23 + 88 + 61 + 21 = **522**；
 另有 CI 之外的 21（signalserver）+ 7（p2p_bt）需手动，以及 4 个外网门控用例。
 
 ---
@@ -127,13 +127,28 @@ PEERDRIVE_SKIP_RTC=1  ...                                                       
 
 跑法：`node ~/.claude/skills/playwright-test/scripts/test-runner.mjs front/tests/<script>`（本机 Firefox）。
 
-### 3.9 `packages/peerdrive-client` 单测（60）
+### 3.9 `packages/peerdrive-client` 单测（61）
 
-- **命令**：`cd packages/peerdrive-client && npm test`（`node --test "test/*.test.mjs"`，23 个 suite）
+- **命令**：`cd packages/peerdrive-client && npm test`（`node --test "test/*.test.mjs"`，24 个 suite）
 - **零运行时依赖** ⇒ 不需要 `npm ci`，也不需要网络。覆盖：协议状态机 + 增量 SHA-256 + client API。
 - 自实现的**增量** SHA-256（`src/sha256.js`）别改成只用 `crypto.subtle.digest()`（一次性、与流式拉取冲突）。
 
-### 3.10 `packages/peerdrive-client` 浏览器 demo（手工）
+### 3.10 公共面板（`dist/panel.html`）+ 浏览器自检
+
+网盘 UI 的形态是**单文件公共面板**（file:// 或任意静态托管都能开，不需要本地服务器），
+所以它不在 `npm test` 的覆盖范围里，另有两条：
+
+| 命令 | 做什么 | 进 CI |
+|------|--------|-------|
+| `npm run build:panel` / `check:panel` | 从 `src/` 内联生成 `dist/panel.html`；`--check` 校验产物与源码一致（防漂移） | ✅ `client-package` 跑 `check:panel` |
+| `node scripts/verify-panel.mjs` | 真实浏览器（默认复用本机 Edge）打开 `file://` 产物，断言：peerjs 加载 → 连上节点 → 清单 → 点「保存」真下载 → 点「预览」有内容 → sha256 与清单一致 | ❌ 手工 |
+
+- 前置：`./scripts/netdisk-local-demo.sh` 起的节点 + 信令；装 `playwright-core`（不在本包依赖里）。
+- 这两个坑只在真浏览器里暴露，所以必须用浏览器验：**peerjs CDN 加载失败**（已加多源回退 + `npm run vendor:peerjs` 离线化）、
+  **信令没开 CORS**（file:// 的 origin 是 `null`，`GET /peerjs/id` 被吞，PeerJS 只报含混 `server-error`；
+  已由 `back/signalserver` 的 `allowCORS` 处理）。
+
+### 3.10.1 最小演示 `demo/consumer.html`（手工，需静态服务）
 
 ```bash
 npm run demo        # node scripts/serve.mjs → http://127.0.0.1:8123/demo/consumer.html
@@ -230,6 +245,7 @@ bash scripts/test-layers.sh --integration  # 追加真实信令集成段（-p 1 
 | `front/tests/*.mjs`（3 个） | UI 冒烟依赖人工触发；`playwright-smoke` 断言的是线上站点 | 手动 |
 | media 的两个非 `*.test.mjs` E2E | 浏览器真实渲染路径不在 `npm test` 里 | 手动 |
 | client demo 页面（:8123） | 消费端真人可用性的最后一道 | 手动 |
+| **公共面板的浏览器自检** | `dist/panel.html` 是 file:///静态托管的单文件，单元测试完全碰不到；peerjs CDN 加载、信令 CORS、真实点击保存都只能在这里验 | 手动 `scripts/verify-panel.mjs`（8 项断言，已跑通） |
 | **打 tag 发版** | `ci.yml` 的 `on.push` 只列 branches、不含 tags，`release.yml` 又只构建 —— **发版没有任何测试门禁**，见 §3.15 | 需人工把关 |
 
 ---

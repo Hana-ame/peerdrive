@@ -175,9 +175,15 @@ fi
 cat <<TIP
 
 服务保持运行，可以接着手测：
-  网盘 UI  : cd front && npm run dev -- --host 0.0.0.0 --port 5173
+  公共面板（推荐，不需要任何服务器）
+           : cd packages/peerdrive-client && npm run build:panel
+             然后浏览器打开 dist/panel.html，或直接带参数打开：
+             dist/panel.html?node=node-a&host=<本机IP>:$SIG_PORT&path=/&key=peerjs&secure=0&auto=1
+             （面板与信令不同源，所以信令必须开 CORS —— 已在 back/signalserver 处理）
+  面板自检 : cd packages/peerdrive-client
+             SIG_HOST=<本机IP> SIG_PORT=$SIG_PORT NODE_ID=node-a node scripts/verify-panel.mjs
+  节点管理台: cd front && npm run dev -- --host 0.0.0.0 --port 5173
              浏览器打开后在设置里把后端改成 http://<本机IP>:$B_PORT
-  消费端   : cd packages/peerdrive-client && npm run demo
-             页面里连 node-a（信令 127.0.0.1:$SIG_PORT / key=peerjs，注意关掉 secure）
+  最小演示 : cd packages/peerdrive-client && npm run demo（需要 http 服务提供包目录）
   停止环境 : $0 --stop
 TIP

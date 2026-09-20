@@ -604,3 +604,40 @@ func TestHandleDeadDst(t *testing.T) {
 	assert.False(t, hasColls, "dead-node 应从 peerColls 清理")
 	assert.False(t, hasClient, "dead-node 应从 clients 清理")
 }
+
+// TestHandleID_CORS — 浏览器直连消费端（公共静态面板）必须能跨域取 id。
+//
+// 发现背景：2026-09-20 做 packages/peerdrive-client 的单文件公共面板时发现，
+// file:// 打开的面板向自托管信令 "GET /peerjs/id" 要临时 id 会被同源策略拦掉
+// （页面 origin 为 null），PeerJS 侧只报含混的 server-error，看不出是 CORS。
+// 面板是「公用」的前提就是信令对所有来源开放这几个公开接口。
+func TestHandleID_CORS(t *testing.T) {
+	srv := NewServer("testkey")
+
+	// GET：响应必须带跨域头，且仍然正常返回随机 id
+	rec := httptest.NewRecorder()
+	srv.HandleID(rec, httptest.NewRequest(http.MethodGet, "/peerjs/id", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotEmpty(t, strings.TrimSpace(rec.Body.String()), "应返回随机 id")
+	assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
+	assert.NotEmpty(t, rec.Header().Get("Access-Control-Allow-Methods"))
+
+	// OPTIONS 预检：应短路为 204 且同样带跨域头（否则浏览器不会发真正的请求）
+	rec = httptest.NewRecorder()
+	srv.HandleID(rec, httptest.NewRequest(http.MethodOptions, "/peerjs/id", nil))
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
+	assert.Empty(t, rec.Body.String(), "预检不应返回正文")
+
+	// 发现相关的三个 REST 接口同样要放开：浏览器侧面板/分布式调试都要读发现结果
+	for name, h := range map[string]http.HandlerFunc{
+		"/discover/announce": srv.HandleAnnounce,
+		"/discover/leave":    srv.HandleLeave,
+		"/discover/nodes":    srv.HandleNodes,
+		"/status":            srv.HandleStatus,
+	} {
+		r := httptest.NewRecorder()
+		h(r, httptest.NewRequest(http.MethodGet, name, nil))
+		assert.Equal(t, "*", r.Header().Get("Access-Control-Allow-Origin"), name+" 缺跨域头")
+	}
+}

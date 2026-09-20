@@ -132,6 +132,18 @@ export class PeerDriveClient {
     return this._openState === true && !this._closeErr
   }
 
+  /**
+   * localPeerId 本端在信令上的临时 id —— UI 显示"我是谁"要用这个。
+   *
+   * 发现背景：面板第一版把 `conn.peer` 当成自己的 id 显示，结果屏幕上写着对方的
+   * 节点名（DataConnection.peer 指的是**远端**）。用 connectToPeer 建连时本端 Peer
+   * 由本类持有，所以这里从它取；不是本类创建时（外部传入 conn）只能返回空串，
+   * 调用方应自行持有 Peer 实例。
+   */
+  get localPeerId() {
+    return (this._ownedPeer && this._ownedPeer.id) || ''
+  }
+
   /** ready 等连接就绪。已就绪则立即 resolve。 */
   ready(timeoutMs = this.opts.openTimeoutMs) {
     if (this._closeErr) return Promise.reject(this._closeErr)

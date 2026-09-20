@@ -206,8 +206,38 @@ func NewServer(key string, opts ...Option) *Server {
 	return s
 }
 
+// allowCORS 放开跨域，并短路 OPTIONS 预检。
+//
+// 发现背景：peerdrive 的网盘 UI 形态是「一个公用静态面板（packages/peerdrive-client
+// 的 dist/panel.html，可以 file:// 双击打开或托管到任意静态空间），用 PeerJS 直连节点」。
+// 面板第一步就是 `GET /peerjs/id` 向信令要一个临时 id —— 而浏览器对该页面算出的
+// origin 是 `null`（file://）或面板自己的域，**与信令不同源**：不带 Access-Control-Allow-Origin
+// 的响应会被同源策略直接吞掉，客户端侧只表现为含混的
+// `server-error: Could not get an ID from the server`，看不出是 CORS。
+// 这些 REST 接口（取随机 id、发现）本来就是公开信息，没有凭据可被窃取，
+// 所以放开是安全的。WS 握手不走 CORS，不需要处理。
+func allowCORS(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("Access-Control-Allow-Headers", "Content-Type")
+	h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+}
+
+// handleCORS 写入跨域头并处理预检；返回 true 表示请求已处理完，调用方应直接返回。
+func handleCORS(w http.ResponseWriter, r *http.Request) bool {
+	allowCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return true
+	}
+	return false
+}
+
 // HandleID GET /{path}{key}/id → 随机 id（peerjs API 兼容）。
 func (s *Server) HandleID(w http.ResponseWriter, r *http.Request) {
+	if handleCORS(w, r) {
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain")
 	fmt.Fprint(w, randomID())
 }
@@ -421,6 +451,9 @@ func (s *Server) removeClient(cl *client) {
 // M15：无界 decode 风险——限制 body 大小（8KB 足够：peerId + collections + peers + loadInfo）
 // 与 collection 数量（单节点关注房间数有限）。
 func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
+	if handleCORS(w, r) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	var body struct {
 		PeerID      string         `json:"peerId"`
@@ -496,6 +529,9 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 
 // HandleLeave POST /discover/leave 节点优雅下线。
 func (s *Server) HandleLeave(w http.ResponseWriter, r *http.Request) {
+	if handleCORS(w, r) {
+		return
+	}
 	var body struct {
 		PeerID string `json:"peerId"`
 	}
@@ -532,6 +568,9 @@ type GraphLink struct {
 // HandleNodes GET /discover/nodes?coll=&type= → 在线节点列表（心跳过期剔除）+ graph 边。
 // 空 coll 表示返回所有 collection 的节点；type 可用于过滤节点类型。
 func (s *Server) HandleNodes(w http.ResponseWriter, r *http.Request) {
+	if handleCORS(w, r) {
+		return
+	}
 	coll := r.URL.Query().Get("coll")
 	nodeType := r.URL.Query().Get("type")
 	cutoff := time.Now().Add(-s.heartbeatTTL)
@@ -632,6 +671,9 @@ type NodeInfo struct {
 
 // HandleStatus GET /status → 服务器状态快照（dashboard 轮询用）。
 func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	if handleCORS(w, r) {
+		return
+	}
 	s.mu.Lock()
 	clientCount := len(s.clients)
 	queueCount := len(s.queues)

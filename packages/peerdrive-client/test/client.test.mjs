@@ -376,3 +376,19 @@ describe('client/空闲计时器不泄漏', () => {
     await sleep(5)
   })
 })
+
+describe('client/本端 id', () => {
+  // 发现背景：公共面板第一版把 conn.peer（远端）当成"我的临时 id"显示，
+  // 界面上写着对方节点名。这里钉住 localPeerId 的语义：只认本端 Peer，且
+  // 外部传入 conn 时返回空串（本类不持有 Peer，不该猜）。
+  it('connectToPeer 建连时暴露本端 id，不混淆远端 conn.peer', () => {
+    const conn = new FakeConnection()
+    const client = new PeerDriveClient(conn, { idleTimeoutMs: 5000 })
+    assert.equal(client.peerId, conn.peer, 'peerId 仍是远端（协议语义）')
+    assert.equal(client.localPeerId, '', '未持有本端 Peer 时为空串')
+
+    client._ownedPeer = { id: 'my-local-id' }
+    assert.equal(client.localPeerId, 'my-local-id')
+    conn.close()
+  })
+})

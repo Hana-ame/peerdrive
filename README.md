@@ -47,8 +47,8 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 | 节点市场与加入 | `service.NodeDirectory` + `GET /peerjs/nodes*`；已加入清单持久化（`joined_nodes.json`）并成为常驻对端 |
 | 共享范围 | `share` 帧 + `PEERDRIVE_SHARE_ENABLE/COLLECTIONS/DIRS`（**默认全部关闭**，不声明就不对外暴露任何清单） |
 | 跨节点保存 | `service.PeerPuller` + `GET/POST /p2p/pull*`：流式拉取 → sha256 校验 → 落盘 → 登记文件索引，带进度/取消/去重跳过 |
-| 网盘界面 | `front/src/pages/{Drive,Market,Peers,PeerDetail,Transfers}`（信息架构参考 Nextcloud Files / Cloudreve / Alist） |
-| 无节点消费端 | `packages/peerdrive-client`：一个静态页面直连节点拉文件，不需要本地后端 |
+| 网盘界面 | **公共面板** `packages/peerdrive-client/dist/panel.html`（单文件静态页，PeerJS 直连节点，无需服务器）＋ 节点管理台 `front/src/pages/{Drive,Market,Peers,PeerDetail,Transfers}` |
+| 无节点消费端 | `packages/peerdrive-client`：面板与 SDK 都源自它，不需要本地后端 |
 
 进度、模块拆分、**计划与实际偏差**、验证结果都在 `doc/NETDISK.md`；开发顺序见 `doc/ROADMAP.md`。
 
@@ -60,14 +60,23 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 # 后端
 cd back && go run -tags nosqlite ./cmd/server/main.go
 
-# 前端
+# 网盘 UI = 公共面板（单文件，不需要任何服务器；双击 file:// 就能开）
+cd packages/peerdrive-client && npm run build:panel
+#   然后浏览器打开 dist/panel.html，或带参数直达某个节点：
+#   dist/panel.html?node=<节点 peer id>&host=<信令>&port=9100&path=/&key=peerjs&secure=0&auto=1
+
+# 节点管理台（给节点运营者：市场/我的节点/传输任务，需要后端在跑）
 cd front && npm run dev
 
-# 消费端 demo（无后端）
+# 最小演示（需要 http 服务提供包目录，仅供参考）
 cd packages/peerdrive-client && npm run demo   # http://127.0.0.1:8123/demo/consumer.html
 
 # 一键跑整套网盘链路（自托管信令 + 两个节点，自动验证市场/加入/清单/拉取/校验）
 ./scripts/netdisk-local-demo.sh                # --stop 停止
+
+# 面板端到端自检（真实浏览器 + 真实点击，需先起上面的环境）
+cd packages/peerdrive-client
+SIG_HOST=<本机IP> SIG_PORT=9100 NODE_ID=node-a node scripts/verify-panel.mjs
 
 # 测试
 cd back && go test -tags nosqlite ./... -count=1                                     # 308
@@ -75,7 +84,7 @@ cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 
 cd back/signalserver && go test ./...            # 21（独立 go.mod，无 CI job）
 cd back/p2p_bt && go test ./...                  # 7（独立 go.mod，无 CI job）
 cd front && npx vitest run                       # 88
-cd packages/peerdrive-client && npm test         # node --test（零依赖）60
+cd packages/peerdrive-client && npm test         # node --test（零依赖）61
 bash scripts/test-layers.sh                      # 或按 AOP 分层（L1-L8 + LB）逐层跑
 
 # 全部 14 个测试组件的清单、选型与盲区：doc/testing/README.md
