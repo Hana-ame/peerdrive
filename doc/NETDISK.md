@@ -351,6 +351,13 @@ SIG_HOST=<WSL LAN IP> SIG_PORT=9100 NODE_ID=node-a node scripts/verify-panel.mjs
 # 断言：连上 → 清单 → 点「保存」真的下载 → 点「预览」渲染内容 → sha256 与清单一致
 ```
 
+线上托管自检（不需要节点，只验部署链路）：
+
+```bash
+node scripts/verify-pages.mjs                 # 默认验 https://hana-ame.github.io/peerdrive/
+# 断言：面板骨架 / bundle 注入 / peerjs 可取到 / HTTPS+ws:// 混内容提示 / 无 JS 报错
+```
+
 > 旧的 `npm run demo`（`demo/consumer.html`）还在，但它是**最小演示**：
 > 靠相对路径 `import '../src/index.js'`，必须有 HTTP 服务提供整个包目录，做不了单文件分享。
 

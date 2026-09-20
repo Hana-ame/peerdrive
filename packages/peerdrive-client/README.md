@@ -188,7 +188,12 @@ UI 请按 `err.code` 分支，不要去匹配 `message` 文案。
 网盘**没有本地 HTTP 服务器式的 UI** —— UI 是一个**公共静态面板**，用 PeerJS 拨号进去。
 
 **在线版：<https://hana-ame.github.io/peerdrive/>**（`.github/workflows/pages.yml`
-在面板相关文件变动时自动构建部署）。
+在面板相关文件变动时自动构建部署）。上线后它是不是还正常，一条命令可验：
+
+```bash
+node scripts/verify-pages.mjs                 # 默认验 peerdrive 的 Pages 地址，可传 URL
+# 面板骨架 / bundle 注入 / peerjs 可取到 / HTTPS+ws:// 混合内容提示 / 无 JS 报错
+```
 
 ```bash
 npm run build:panel    # 生成 dist/panel.html（58 KB，单文件）

@@ -8,7 +8,7 @@
 
 ## 0. 一句话
 
-项目有 **14 个测试组件**，分布在 4 个 go 模块（back 主模块 + peerjs / signalserver / p2p_bt
+项目有 **15 个测试组件**，分布在 4 个 go 模块（back 主模块 + peerjs / signalserver / p2p_bt
 三个独立 go.mod）、3 个 npm 工程（front / peerdrive-client / peerdrive-media），
 外加 2 个本地脚本和 4 条 CI workflow（其中只有 2 条实际执行测试，见 §3.15）。
 它们是**不同层次的验证**，不能互相替代：单元测试普遍用注入的假依赖，
@@ -54,6 +54,7 @@
 | 8 | 前端手动脚本 | `front/tests/*.mjs`（3 个） | playwright / WS 冒烟 | — | ❌ **（盲区）** | ✅（线上站点） |
 | 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **61** | ✅ `client-package` | ❌ |
 | 10 | client 公共面板 + 浏览器自检 | `packages/peerdrive-client/{dist,scripts}` | `npm run check:panel`·`node scripts/verify-panel.mjs` | 面板 8 项断言 | ✅ `check:panel`（产物一致性） | ❌（peerjs 取 CDN） |
+| 11 | 线上托管自检（Pages） | `packages/peerdrive-client/scripts/verify-pages.mjs` | `node scripts/verify-pages.mjs` | 线上 5 项断言 | ❌ **（可考虑加 CI，见 §4）** | ✅（验的就是线上） |
 | 11 | media 包单测 | `packages/peerdrive-media/` | `npm test` + `npm run build` | **21** | ✅ `media-package` | npm ci 需要 |
 | 12 | media 浏览器/Node E2E | `packages/peerdrive-media/test/*.mjs`（非 `*.test.mjs`） | playwright runner / 直启 | 10 断言 + … | ❌ **（盲区）** | ❌ |
 | 13 | 分层汇总脚本 | `scripts/test-layers.sh` | `bash scripts/test-layers.sh [--integration]` | 聚合 1/4/5/6/7 | ❌（本地聚合） | — |
@@ -142,6 +143,7 @@ PEERDRIVE_SKIP_RTC=1  ...                                                       
 |------|--------|-------|
 | `npm run build:panel` / `check:panel` | 从 `src/` 内联生成 `dist/panel.html`；`--check` 校验产物与源码一致（防漂移） | ✅ `client-package` 跑 `check:panel` |
 | `node scripts/verify-panel.mjs` | 真实浏览器（默认复用本机 Edge）打开 `file://` 产物，断言：peerjs 加载 → 连上节点 → 清单 → 点「保存」真下载 → 点「预览」有内容 → sha256 与清单一致 | ❌ 手工 |
+| `node scripts/verify-pages.mjs` | 验**线上托管**（默认 <https://hana-ame.github.io/peerdrive/>）：面板骨架 / bundle 注入 / peerjs 可取到 / HTTPS+`ws://` 混合内容提示 / 无 JS 报错。与上一条互补——一个验功能、一个验部署 | ❌ 手工 |
 
 - 前置：`./scripts/netdisk-local-demo.sh` 起的节点 + 信令；装 `playwright-core`（不在本包依赖里）。
 - 这两个坑只在真浏览器里暴露，所以必须用浏览器验：**peerjs CDN 加载失败**（已加多源回退 + `npm run vendor:peerjs` 离线化）、
@@ -247,6 +249,7 @@ bash scripts/test-layers.sh --integration  # 追加真实信令集成段（-p 1 
 | media 的两个非 `*.test.mjs` E2E | 浏览器真实渲染路径不在 `npm test` 里 | 手动 |
 | client demo 页面（:8123） | 消费端真人可用性的最后一道 | 手动 |
 | **公共面板的浏览器自检** | `dist/panel.html` 是 file:///静态托管的单文件，单元测试完全碰不到；peerjs CDN 加载、信令 CORS、真实点击保存都只能在这里验 | 手动 `scripts/verify-panel.mjs`（8 项断言，已跑通） |
+| **线上托管本身**（Pages 部署） | 部署链路动过 `.nojekyll`/路径、或 peerjs CDN 在线上不可达时，本地 file:// 全绿也照样白屏 | 手动 `scripts/verify-pages.mjs`（5 项断言，已跑通） |
 | **打 tag 发版** | `ci.yml` 的 `on.push` 只列 branches、不含 tags，`release.yml` 又只构建 —— **发版没有任何测试门禁**，见 §3.15 | 需人工把关 |
 
 ---

@@ -66,6 +66,7 @@ cd back && go run -tags nosqlite ./cmd/server/main.go
 #   带参数直达某个节点：
 #   panel.html?node=<节点 peer id>&host=<信令>&port=9100&path=/&key=peerjs&secure=0&auto=1
 #   注意：HTTPS 页面（含在线版）只能用 wss 信令，否则浏览器按混合内容拦掉。
+#   线上托管自检：node scripts/verify-pages.mjs
 
 # 节点管理台（给节点运营者：市场/我的节点/传输任务，需要后端在跑）
 cd front && npm run dev
