@@ -60,6 +60,13 @@ func pickRoot(roots []string, path string) (string, string, error) {
 			continue
 		}
 		cr = filepath.Clean(cr)
+		if foldCase {
+			// 与 cp 用同一套写法：允许根自己也可能是 8.3 短名（GitHub 的 Windows
+			// runner 上 t.TempDir() 就是 `C:\Users\RUNNER~1\...`）。只还原 path
+			// 不还原 root，两边会被算成两棵树 → 明明在根内的写被判越权
+			//（CI 上 windows 那格第一次真跑就红了三个用例）。
+			cr = filepath.Clean(ExpandShortNames(cr))
+		}
 		rel, err := filepath.Rel(cr, cp)
 		if err != nil {
 			continue // 跨盘/无法求相对路径：换下一个根

@@ -96,7 +96,9 @@ func TestExpandShortNames_NewFile(t *testing.T) {
 		t.Skip("本卷没有生成 8.3 短名")
 	}
 	got := ExpandShortNames(filepath.Join(shortDir, "not-created-yet.bin"))
-	assert.Equal(t, filepath.Join(dir, "not-created-yet.bin"), got,
+	// 注意基准也要还原：t.TempDir() 自身可能就是短名形态（CI 上是 RUNNER~1），
+	// 直接拿它拼期望值会在那台机器上恒红，而还原逻辑其实是对的。
+	assert.Equal(t, filepath.Join(ExpandShortNames(base), "Brand New Dir", "not-created-yet.bin"), got,
 		"目录段要还原成长名，文件名原样保留")
 
 	// 能写进去才算真的生效（写路径也走同一套还原）
@@ -110,6 +112,34 @@ func TestExpandShortNames_NewFile(t *testing.T) {
 // 拿不到长名就原样返回。
 func TestExpandShortNames_UnknownPath(t *testing.T) {
 	require.Equal(t, "windows", runtime.GOOS, "本用例只在 Windows 上有意义")
-	p := filepath.Join(t.TempDir(), "No Such Thing", "x.txt")
-	assert.Equal(t, filepath.Clean(p), ExpandShortNames(p))
+	base := t.TempDir()
+	p := filepath.Join(base, "No Such Thing", "x.txt")
+	// 同上：基准可能是短名形态，还原后才是可比较的长名写法
+	assert.Equal(t, filepath.Join(ExpandShortNames(base), "No Such Thing", "x.txt"), ExpandShortNames(p))
+}
+
+// TestSafeWriteFile_ShortNameRootAlias 允许根本身配成 8.3 短名时，写路径也得认。
+//
+// 真出过事：GitHub 的 Windows runner 上 t.TempDir() 是 `C:\Users\RUNNER~1\...`，
+// 而 pickRoot 只还原了 path 没还原 root → root 短名 + path 长名被算成两棵树 →
+// 明明在根内的写被判 "path outside allowed root"（本机用户名没有 8.3 别名，
+// 所以本地真机跑不出来，只能靠这里造形状）。
+func TestSafeWriteFile_ShortNameRootAlias(t *testing.T) {
+	require.Equal(t, "windows", runtime.GOOS, "本用例只在 Windows 上有意义")
+
+	base := t.TempDir()
+	dir := filepath.Join(base, "Shared Media Library")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+
+	short := ShortNameOf(dir)
+	if short == "" {
+		t.Skip("本卷没有生成 8.3 短名")
+	}
+	require.NotEqual(t, short, dir, "短名必须真的与长名不同，否则这个用例测不到东西")
+
+	// 允许根用短名、写入路径也用短名：两边混用不能产生"判不进去"的缝隙
+	require.NoError(t, SafeWriteFileAny([]string{short}, filepath.Join(short, "a.bin"), []byte("ok"), 0o644))
+	b, err := os.ReadFile(filepath.Join(dir, "a.bin"))
+	require.NoError(t, err)
+	assert.Equal(t, "ok", string(b))
 }

@@ -801,7 +801,12 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -tags nosqlite -c -o /tmp/x.test
 了"其实是**权限**问题，以前日志只有一句 `open root ...: permission denied`，
 现在会告诉你去查 owner/ACL。真正不支持的金属 host 请按上面的逃生阀处理。
 
-#### 11.5.1 软链根 + 叶子不存在（darwin 那格红出来的真 bug）
+#### 11.5.1 两个只在别人机器上才红的形状（darwin / windows runner）
+
+这类 bug 的共同点：**本机跑不出来，只有 CI 那格红**。两处都是"同一个目录被写成
+两种形式"，只是成因不同：
+
+**(a) 软链根 + 叶子不存在**（`macos-latest/arm64` 红）
 
 `TestTraversal_RedactDisallowedPath` 在 `macos-latest/arm64` 上失败、其它平台全绿。
 根因不是 macOS 的判定语义不同，而是**它的临时目录本身是软链**：
@@ -817,6 +822,21 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -tags nosqlite -c -o /tmp/x.test
 后面不存在的部分原样拼回，保证 root 与 path 永远落在同一套写法上。
 回归用例 `TestTraversal_SymlinkedRootMissingLeaf`（自建软链，Linux 上也能复现；
 摘掉修复它会红，已实测）。
+
+**(b) 允许根自己是 8.3 短名**（`windows-latest` 红 3 个用例）
+
+Windows runner 的 `t.TempDir()` 是 `C:\Users\RUNNER~1\AppData\Local\Temp\...`。
+写路径的 `pickRoot` 只还原了 **path** 的短名、没还原 **root** 的 →
+`RUNNER~1` 与 `runneradmin` 被当成两棵树 → 明明在根内的写被判
+`path outside allowed root`。修法：`pickRoot` 对允许根也做同样的短名还原
+（读路径 `SafeOpen` 两侧都走 `normalize`，本来就是一致的）。
+
+回归用例 `TestSafeWriteFile_ShortNameRootAlias`（自建"共享目录的短名"当允许根，
+本机用户名没有 8.3 别名也能复现；摘掉修复会红）。
+
+> 两条教训：① 跨平台判定要**自己造形状**（软链、短名），不能指望平台自带——
+> 本机恰好不具备那个条件时，用例会恒绿地测了个寂寞；② 修完一条要**看全部格子**，
+> 前面几格被 cancel 掩盖的失败会在下一次跑的时候才冒出来。
 
 补一条务实的经验：**默认 fail closed 是对的**（宁可少给不能多给），但把"不支持"
 与"没权限/不存在"混为一谈才是排障成本的大头——`RootUnavailable` 只认
