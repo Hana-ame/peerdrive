@@ -168,26 +168,26 @@ jobs:
     # tag 推送才发 release；手动 dispatch 默认 dry_run（只验证门禁跑得通）。
     if: ${{ github.event_name == 'push' || !inputs.dry_run }}
     runs-on: ubuntu-latest
+    # 建 release / 传资产需要 contents: write。仓库若把 GITHUB_TOKEN 的默认权限
+    # 设成只读（GitHub 2023 起新建仓库的默认），这一步会 403 而报错信息又不说
+    # 是权限问题——所以显式写出来，别依赖仓库级默认值。
+    permissions:
+      contents: write
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/download-artifact@v4
 
-      - name: List artifacts
-        run: ls -R
+      # 摊平后再发布：download-artifact 会把每个 artifact 放进以它名字命名的目录，
+      # 目录层级取决于上传时给的 path，写死 glob 很脆。这里按文件名捞出来放进
+      # dist/，既不依赖布局，日志里也能一眼看到最终会挂上去哪些资产。
+      - name: 摊平发布资产
+        run: |
+          set -eu
+          mkdir -p dist
+          find . -type f \( -name 'peerdrive-*' -o -name 'peersignal-*' \) -exec cp -v {} dist/ \;
+          ls -l dist
 
       - uses: softprops/action-gh-release@v2
         with:
-          # 与上面「按平台重命名」配套：逐个列出，5 个资产名在日志里一眼可见，
-          # 也避免宽 glob 把中间产物也捞进来。
-          files: |
-            **/peerdrive-linux-amd64
-            **/peerdrive-linux-arm64
-            **/peerdrive-windows-amd64.exe
-            **/peerdrive-darwin-amd64
-            **/peerdrive-darwin-arm64
-            **/peersignal-linux-amd64
-            **/peersignal-linux-arm64
-            **/peersignal-windows-amd64.exe
-            **/peersignal-darwin-amd64
-            **/peersignal-darwin-arm64
+          files: dist/*
