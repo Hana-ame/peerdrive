@@ -99,10 +99,21 @@ jobs:
           CGO_ENABLED: 0
         run: go build -ldflags="-s -w" -o peerdrive-server${{ matrix.ext }} ./cmd/server/
 
+      # 发布资产是按 basename 上传的：五个平台都叫 peerdrive-server（windows 多个
+      # .exe）会互相覆盖，release 里只剩一个、还看不出是哪个平台的。所以在上传前
+      # 就把平台名编进文件名。显式 shell: bash —— windows-latest 默认是 pwsh，
+      # `cp`/`mkdir -p` 在那里不是同一套语义。
+      - name: 按平台重命名
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p out
+          cp "peerdrive-server${{ matrix.ext }}" "out/peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+
       - uses: actions/upload-artifact@v4
         with:
           name: peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: back/peerdrive-server${{ matrix.ext }}
+          path: back/out/peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
 
   release:
     needs: build
@@ -119,4 +130,11 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: '**/peerdrive-server*'
+          # 与上面「按平台重命名」配套：逐个列出，5 个资产名在日志里一眼可见，
+          # 也避免宽 glob 把中间产物也捞进来。
+          files: |
+            **/peerdrive-linux-amd64
+            **/peerdrive-linux-arm64
+            **/peerdrive-windows-amd64.exe
+            **/peerdrive-darwin-amd64
+            **/peerdrive-darwin-arm64
