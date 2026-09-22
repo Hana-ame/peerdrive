@@ -209,6 +209,35 @@ func (p *PeerPuller) StartCollection(peer, coll string, entries []PullEntry) []*
 	return out
 }
 
+// FetchManifest 按 hash 从对端取回一份合集 manifest（**不落盘**）。
+//
+// 为什么需要它：合集 manifest 本身就是一份按内容寻址存的 JSON，hash 即其 sha256，
+// 所以"凭 hash 取回"对合集同样成立。而 **unlisted 合集按定义不在共享清单里**——
+// 只认清单的话，"凭链接保存整个合集"永远做不成（清单里找不到 → 404）。
+//
+// 级别不受影响：取回走的是同一条 req 通道，对端的 ShareGate 照样判——private
+// 合集的 manifest 取不到，这里就返回错误（调用方按"清单里没有"处理）。
+//
+// maxBytes 是硬上限：这条路的入参可能是用户随手填的一串 hash，指向的未必是
+// manifest（可能是个几 GB 的文件），不设限会把它整份读进内存再判断。
+func (p *PeerPuller) FetchManifest(peer, hash string, maxBytes int64) ([]byte, error) {
+	if p.source == nil {
+		return nil, errors.New("pull source not configured")
+	}
+	if !isSHA256Hex(strings.ToLower(hash)) {
+		return nil, fmt.Errorf("invalid sha256 hash %q", hash)
+	}
+	if maxBytes <= 0 {
+		maxBytes = 8 << 20 // 默认 8MB：manifest 通常几 KB
+	}
+	r, err := p.source.OpenStream(peer, strings.ToLower(hash), 0, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	return io.ReadAll(io.LimitReader(r, maxBytes))
+}
+
 // PullEntry 合集内一个待拉取条目。
 type PullEntry struct {
 	Path string

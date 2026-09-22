@@ -25,14 +25,14 @@
 
 | 你改了 | 必跑 | 建议加跑 |
 |---|---|---|
-| `back/internal/**` 任意单包逻辑 | `cd back && go test -tags nosqlite ./... -count=1`（550） | `bash scripts/test-layers.sh` 可定位到具体层 |
+| `back/internal/**` 任意单包逻辑 | `cd back && go test -tags nosqlite ./... -count=1`（551） | `bash scripts/test-layers.sh` 可定位到具体层 |
 | `back/internal/transport/**` 帧协议 | 同上（transport 86） | 集成测试（21） |
 | **网盘链路**（`nodes/share/pull/RegisterLocal`） | 集成测试 + **`./scripts/netdisk-local-demo.sh`**（手工，必须跑一遍） | 浏览器 UI 手测（`NETDISK.md` §7.2） |
 | `back/peerjs/**` | `cd back/peerjs && go test ./... -count=1 -race`（23） | — |
 | `back/signalserver/**`（peersignal） | `cd back/signalserver && go test ./...`（23） | ✅ `go-build` 的 `submodules` 格（2026-09-21 补） |
 | `back/p2p_bt/**` | `cd back/p2p_bt && go test ./...`（7） | ✅ 同上 |
 | `front/src/**` | `cd front && npm test`（101）+ `npm run build` | `front/tests/e2e-admin-smoke.mjs`（管理面，CI 已跑）；另两个 `.mjs` 手动（视改动面） |
-| `packages/peerdrive-client/**` | `npm test`（110）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端）；`scripts/verify-panel-share.mjs`（共享级别端到端，需节点+信令）；合并后 `pages.yml` 会**自动**验线上（§2 第 11 项） |
+| `packages/peerdrive-client/**` | `npm test`（115）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端）；`scripts/verify-panel-share.mjs`（共享级别端到端，需节点+信令）；合并后 `pages.yml` 会**自动**验线上（§2 第 11 项） |
 | `packages/peerdrive-media/**` | `npm test`（21）+ `npm run build` | `test/e2e-browser.mjs`、`test/media-node-e2e.mjs` |
 | 准备 merge 进 `refactor` | 上表全部必跑项全绿（= CI 的同款命令） | 合并后在主干再跑一遍 |
 
@@ -44,7 +44,7 @@
 
 | # | 组件 | 位置 | 命令 | 用例 | 进 CI | 需外网 |
 |---|------|------|------|------|-------|--------|
-| 1 | 后端单元/包测试 | `back/`（主模块） | `go test -tags nosqlite ./... -count=1` | **550**（12 包） | ✅ `backend` + `go-build`×4 | ❌ |
+| 1 | 后端单元/包测试 | `back/`（主模块） | `go test -tags nosqlite ./... -count=1` | **551**（12 包） | ✅ `backend` + `go-build`×4 | ❌ |
 | 2 | 后端集成测试 | `back/test/integration/` | `go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1` | **21** 通过 / 4 跳过 | ✅ `integration` | ❌（自托管信令） |
 | 3 | 外网集成（手动门控） | 同 2 | `PEERDRIVE_MQTT_TEST=1` / `PEERDRIVE_LIVE_TEST=1` | 4 个用例 | ❌ | ✅（直连，不走代理） |
 | 4 | peerjs 模块 | `back/peerjs/`（独立 go.mod） | `go test ./... -count=1 -race` | **23** | ✅ `peerjs` | ❌ |
@@ -53,17 +53,17 @@
 | 7 | 前端 vitest | `front/tests/*.test.{js,jsx}` | `npm test` | **101**（9 文件） | ✅ `frontend`（含 build） | npm ci 需要 |
 | 8 | 前端管理面冒烟 | `front/tests/e2e-admin-smoke.mjs` | 本机起节点后 `node front/tests/e2e-admin-smoke.mjs`（打 `ws://localhost:3000/ws/peer`） | **19** 项断言 | ✅ `e2e.yml`（2026-09-21 补，脱外网） | ❌ |
 | 8b | 另两个前端手动脚本 | `front/tests/{playwright-smoke,pw-settings-mobile}.mjs` | playwright runner | — | ❌ **（盲区）** | ✅（打的是线上/preview 站点） |
-| 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **110** | ✅ `client-package` | ❌ |
+| 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **115** | ✅ `client-package` | ❌ |
 | 10 | client 公共面板 + 浏览器自检 | `packages/peerdrive-client/{dist,scripts}` | `npm run check:panel`·`node scripts/verify-panel.mjs` | 面板 8 项断言 | ✅ `check:panel`（产物一致性） | ❌（peerjs 取 CDN） |
 | 11 | 线上托管自检（Pages） | `packages/peerdrive-client/scripts/verify-pages.mjs` | `node scripts/verify-pages.mjs` | 线上 5 项断言 | ✅ `pages.yml`·`verify`（部署后回头验，2026-09-21 补） | ✅（验的就是线上） |
 | 12 | media 包单测 | `packages/peerdrive-media/` | `npm test` + `npm run build` | **21** | ✅ `media-package` | npm ci 需要 |
 | 13 | media 浏览器 E2E（2 个） | `packages/peerdrive-media/test/{e2e-browser,media-node-e2e}.mjs` | playwright runner | 10 断言 + … | ❌ **（盲区）** | ✅（twimg 图 + peerjs CDN，还要 media-node 在跑） |
 | 14 | 分层汇总脚本 | `scripts/test-layers.sh` | `bash scripts/test-layers.sh [--integration]` | 聚合 1/4/5/6/7 | ❌（本地聚合） | — |
-| 15 | 网盘端到端脚本 | `scripts/netdisk-local-demo.sh` | 起 3 进程跑全链路 | 8 项断言 | ✅ **`e2e.yml`** | ❌（脱外网，本机进程） |
+| 15 | 网盘端到端脚本 | `scripts/netdisk-local-demo.sh` | 起 3 进程跑全链路 | 12 项断言 | ✅ **`e2e.yml`** | ❌（脱外网，本机进程） |
 | 16 | 面板浏览器端到端 | `packages/peerdrive-client/scripts/verify-panel.mjs` | 真实浏览器点面板 | 9 项断言 | ✅ **同 `e2e.yml`（复用上一套环境）** | ❌ |
 
-**覆盖范围合计**（2026-09-22 重测）：自动化（CI）覆盖 550 + 21 + 23 + 101 + 110 + 21 = **826**；
-此前补进 CI 的还有 signalserver（23）· p2p_bt（7）· Pages 线上自检（5）· 管理面冒烟（19）⇒ **880**。
+**覆盖范围合计**（2026-09-22 重测）：自动化（CI）覆盖 551 + 21 + 23 + 101 + 115 + 21 = **832**；
+此前补进 CI 的还有 signalserver（23）· p2p_bt（7）· Pages 线上自检（5）· 管理面冒烟（19）⇒ **886**。
 仍在 CI 外的：4 个外网门控用例、`front/tests/*.mjs`（剩 2 个）· media 浏览器 E2E（2 个）·
 client demo 页面 —— 它们要么依赖外部站点、要么要人工先把服务起起来，见 §4。
 
@@ -71,7 +71,7 @@ client demo 页面 —— 它们要么依赖外部站点、要么要人工先把
 
 ## 3. 逐个组件说明
 
-### 3.1 后端单元/包测试（550）
+### 3.1 后端单元/包测试（551）
 
 - **职责**：单包行为正确性，依赖用注入/临时目录替身（如假 `fileList`、假 transport）。
 - **命令**：`cd back && go build -tags nosqlite ./... && go test -tags nosqlite ./... -count=1`
@@ -141,7 +141,7 @@ PEERDRIVE_SKIP_RTC=1  ...                                                       
 
 跑法：`node ~/.claude/skills/playwright-test/scripts/test-runner.mjs front/tests/<script>`（本机 Firefox）。
 
-### 3.9 `packages/peerdrive-client` 单测（98）
+### 3.9 `packages/peerdrive-client` 单测（115）
 
 - **命令**：`cd packages/peerdrive-client && npm test`（`node --test "test/*.test.mjs"`，35 个 suite）
 - **零运行时依赖** ⇒ 不需要 `npm ci`，也不需要网络。覆盖：协议状态机 + 增量 SHA-256 + client API。
@@ -161,6 +161,7 @@ PEERDRIVE_SKIP_RTC=1  ...                                                       
 | `npm run build:panel` / `check:panel` | 从 `src/` 内联生成 `dist/panel.html`；`--check` 校验产物与源码一致（防漂移） | ✅ `client-package` 跑 `check:panel` |
 | `node scripts/verify-panel.mjs` | 真实浏览器（默认复用本机 Edge）打开 `file://` 产物，断言：peerjs 加载 → 连上节点 → 清单 → 点「保存」真下载 → 点「预览」有内容 → sha256 与清单一致 | ❌ 手工 |
 | `node scripts/verify-pages.mjs` | 验**线上托管**（默认 <https://hana-ame.github.io/peerdrive/>）：面板骨架 / bundle 注入 / peerjs 可取到 / HTTPS+`ws://` 混合内容提示 / 无 JS 报错。与上一条互补——一个验功能、一个验部署 | ✅ `pages.yml`·`verify`（部署后跑，2026-09-21 补） |
+| `node scripts/verify-panel-share.mjs` | **共享策略**的浏览器端到端（12 项，需节点+信令+playwright）：固定 id → unlisted 不在清单但链接可取 → private 拒陌生人 → 固定 id 进好友名单后同一页面立刻能取 → **合集整包链接**（清单里识别成合集并列出条目 / unlisted 凭 hash 取回 manifest / private 连 manifest 都不给）。⚠️ 断言数随合集那 4 项从 7 涨到 12 | ❌ 手工 |
 
 - 前置：`./scripts/netdisk-local-demo.sh` 起的节点 + 信令；装 `playwright-core`（不在本包依赖里）。
 - 这两个坑只在真浏览器里暴露，所以必须用浏览器验：**peerjs CDN 加载失败**（已加多源回退 + `npm run vendor:peerjs` 离线化）、

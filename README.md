@@ -35,9 +35,9 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 
 ## 功能介绍：现在能做什么
 
-> 以下能力都在本分支（`refactor`）实跑过：后端单测 550 · 集成 21 · 前端 101 · client 110 ·
-> 网盘端到端脚本 8 项断言 · 面板真实浏览器 9 项断言 · 共享级别端到端 7 项断言 ·
-> 管理面冒烟 19 项断言，CI 覆盖合计 880 个用例
+> 以下能力都在本分支（`refactor`）实跑过：后端单测 551 · 集成 21 · 前端 101 · client 115 ·
+> 网盘端到端脚本 12 项断言 · 面板真实浏览器 9 项断言 · 共享级别端到端 12 项断言 ·
+> 管理面冒烟 19 项断言，CI 覆盖合计 886 个用例
 > （逐项清单、命令与盲区见 `doc/testing/README.md`）。
 
 ### 不开节点也能用（公共面板 `dist/panel.html`）
@@ -150,11 +150,12 @@ cd packages/peerdrive-client && npm run demo   # http://127.0.0.1:8123/demo/cons
 cd packages/peerdrive-client
 SIG_HOST=<本机IP> SIG_PORT=9100 NODE_ID=node-a node scripts/verify-panel.mjs
 
-# 三档共享级别的端到端验证（固定 id / unlisted 不在清单但链接可取 / private 拒陌生人放好友）
+# 三档共享级别的端到端验证（固定 id / unlisted 不在清单但链接可取 / private 拒陌生人放好友
+# / 合集整包链接：清单里能识别 · unlisted 凭 hash 仍能取回 · private 连 manifest 都不给）
 NODE_PORT=3001 SIG_PORT=9100 NODE_ID=node-a PW_CHANNEL=default node scripts/verify-panel-share.mjs
 
 # 测试
-cd back && go test -tags nosqlite ./... -count=1                                     # 550（12 包）
+cd back && go test -tags nosqlite ./... -count=1                                     # 551（12 包）
 cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1    # 21 通过 / 4 跳过（脱外网，自托管信令；必须 -p 1）
 cd back/signalserver && go test ./...            # 23（独立 go.mod；✅ go-build·submodules 已覆盖）
 cd back/p2p_bt && go test ./...                  # 7（独立 go.mod；✅ 同上）

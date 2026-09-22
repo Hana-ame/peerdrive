@@ -94,6 +94,12 @@ ROADMAP 顺序，而是它的"验收形态"：阶段 5（范围）与阶段 6（
     `total` 从流的 meta 帧拿（`OpenStreamFrom` 的读侧首帧已含 total；取不到则 -1 未知）。
   - `StartCollection(peer, hash)`：拉 `share` 清单里的合集 → 展开 entries → 逐个 Start
     （并发 3），返回批量 job 列表。
+  - `FetchManifest(peer, hash, maxBytes)`：按 hash 取回一份合集 manifest（不落盘）。
+    清单里找不到合集时的兜底 —— **unlisted 合集按定义不在清单里**，只认清单的话
+    "给一条合集链接让对方整包存"永远做不成（清单里没有 → 404）。manifest 本身是
+    按内容寻址存的 JSON，凭 hash 能取；取回走同一条 `req` 通道，所以 private 合集
+    照样被对端 `ShareGate` 挡住。`maxBytes` 是硬上限（默认 8MB）：入参可能是随手
+    填的 hash，指向的未必是 manifest。
 - **端点**：`GET /p2p/pull`、`POST /p2p/pull`、`POST /p2p/pull/collection`、
   `POST /p2p/pull/:id/cancel`。
 - **保存位置约定**：CAS 即"已保存到我的网盘"（内容寻址去重，同 hash 只存一份）；
@@ -449,7 +455,7 @@ CI 和单元测试全绿，但真实跑起来 `files` 一直是空的。根因�
 
 | 功能（§7.2） | 兜底的测试组件 | 命令 / 文件 | 规模 |
 |---|---|---|---|
-| 节点市场（`GET /peerjs/nodes`） | service 单测 `node_directory_test.go` + 端到端脚本 | `go test -tags nosqlite ./internal/service/`、`scripts/netdisk-local-demo.sh` | service 68 / 脚本 8 断言 |
+| 节点市场（`GET /peerjs/nodes`） | service 单测 `node_directory_test.go` + 端到端脚本 | `go test -tags nosqlite ./internal/service/`、`scripts/netdisk-local-demo.sh` | service 68 / 脚本 12 断言 |
 | 加入节点（含 `joined_nodes.json` 持久化） | service 单测 + 端到端脚本 | 同上（`node_directory_test.go`） | 7 |
 | 我的节点 / 已加入列表 | 同上 | 同上 | — |
 | 对方文件清单（share 帧） | transport 单测 `share_test.go` + service `nodeshare_test.go` + 集成 `share_protocol_test.go` + 端到端脚本 | `go test -tags nosqlite ./internal/transport/`、`./test/integration/` | transport 78 · service 68 · 集成 21 |
@@ -957,6 +963,17 @@ POST /peerjs/share/files  {hashes:[...], shared:bool, level?}  单行勾选/改�
    收到链接的人连上后，这条内容单独列在共享清单**上方**——它**故意不依赖清单**
    （unlisted 按定义不在清单里，只在清单里找的话，用户看到"该节点没有共享内容"
    就走了，而东西一直拿得到）。链接里不含 PSK。
+3. **合集也能整包给一条链接**。合集 manifest 本身就是一份按内容寻址存的 JSON
+   （hash 即其 sha256），所以"凭 hash 取回"对合集同样成立——取回来的是**条目清单**。
+   面板识别方式：清单里命中这个合集 hash 就直接用；清单里没有（unlisted）就把
+   manifest 取回来，有 `entries` 数组即合集（取回有 `LINK_SNIFF_BYTES` 上限，否则
+   一个几 GB 的文件链接会先被整份拉进内存再判断）。取回失败一律按文件处理——那样
+   「取回」会把服务端的真实原因显示出来，比在客户端猜一个原因强。
+   面板只能逐条存到浏览器（一次触发多个下载会被浏览器拦），所以条目行下面明确
+   引到管理台的「保存整个合集」。
+   ⚠️ **private 合集连 manifest 都不给陌生人**（manifest 里是全部条目的路径与
+   hash，泄出去等于目录泄露）：`collectionHashesLocked` 因此把合集自身的 hash
+   也算进该合集的级别判定——漏了它，private 合集的 manifest 会被陌生人取走。
 
 ### 12.7 兜底测试
 
@@ -966,7 +983,9 @@ POST /peerjs/share/files  {hashes:[...], shared:bool, level?}  单行勾选/改�
 - `back/internal/service/nodeshare_level_test.go`：三档边界（public 列出 /
   unlisted 不列但能取 / private 挡陌生人、放好友与自己）、取最宽松、
   非法级别整批拒、级别与好友随重启保留、历史字符串条目读作 public、
-  合集 visibility 降级。
+  合集 visibility 降级；`TestNodeShareCollectionManifestFollowsLevel`：合集**自身
+  的 hash** 同样受该合集的级别管辖（private 时陌生人连 manifest 都取不到，
+  unlisted 时 manifest 与条目仍可取）。
 - `back/internal/transport/peerjs_service_test.go`
   `TestServeFile_PrivateDeniedToStrangers`：门禁接线在 `serveFile` 上真的生效
   （陌生人 err、好友与自己拿到数据）。
@@ -980,8 +999,21 @@ POST /peerjs/share/files  {hashes:[...], shared:bool, level?}  单行勾选/改�
 - `front/tests/e2e-admin-smoke.mjs`：真实节点上 读 → 勾 → 复核 → 改级别 →
   写好友 → 拒拼错的级别 → 拒卷根 → 共享目录往返（写/读回/清空）。
 - `packages/peerdrive-client/test/panel-contract.test.mjs`：面板的两条契约——
-  连出去必须带本端 id、分享链接绝不拼进 psk、复制要有降级路径、启动早期不碰 DOM。
+  连出去必须带本端 id、分享链接绝不拼进 psk、复制要有降级路径、启动早期不碰 DOM；
+  合集链接：标题行有整包「链接」按钮（且 `stopPropagation`，否则顺手展开 details）、
+  能识别合集（清单命中 + `Array.isArray(obj.entries)` + `LINK_SNIFF_BYTES` 上限）、
+  识别结果按 节点+hash 记账、占位在 `resolveLinked` 跑完后**二次判断**（同步命中
+  清单那条路已自己重画过一次，无条件写占位会把刚画好的表格盖掉——真踩过：
+  `linkedKind` 已是 `collection` 而 `#linked` 里 0 行）、条目可逐条保存/预览/再分享。
   （面板是 file:// 下的 IIFE，跑不起来，只能这样钉住"改坏了静默失效"的那几条。）
 - `packages/peerdrive-client/scripts/verify-panel-share.mjs`：真浏览器端到端
-  （需要节点 + 信令 + playwright）：固定 id → unlisted 不在清单但链接可取 →
-  private 拒陌生人 → 固定 id 进好友名单后同一个页面立刻能取。
+  （需要节点 + 信令 + playwright，12 项）：固定 id → unlisted 不在清单但链接可取 →
+  private 拒陌生人 → 固定 id 进好友名单后同一个页面立刻能取 → 合集整包链接
+  （清单里识别成合集并列出条目 / unlisted 凭 hash 取回 manifest 且不在清单里 /
+  private 连 manifest 都取不到）。
+- `scripts/netdisk-local-demo.sh` 第 [6] 步：真实两节点上跑 **unlisted 合集整包
+  保存**（建合集 → 设 unlisted → 断言它不在清单里 → `POST /p2p/pull/collection`
+  凭 manifest hash 建出任务 → 条目按目录结构落盘且 sha256 一致）。
+- `back/internal/service/peerpull_test.go` `TestFetchManifest`：兜底那条路本身——
+  manifest 取回、大小上限 `maxBytes` 生效、非法 hash 报错、**对端拒绝（private
+  被 ShareGate 挡）要透传**而不是吞成"空合集"。

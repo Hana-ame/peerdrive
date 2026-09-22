@@ -10,9 +10,11 @@
 package controller
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"peerdrive/internal/log"
+	"peerdrive/internal/model"
 	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -106,8 +108,55 @@ func StartPullCollection(c *gin.Context) {
 		return
 	}
 	if !found {
-		c.JSON(http.StatusNotFound, gin.H{"error": "collection not shared by peer"})
+		// 清单里没有 ≠ 不存在：unlisted 合集**按定义**就不在清单里，而它的 manifest
+		// 是按内容寻址存的一份 JSON，凭 hash 能直接取回。不兜这一步，"把一条合集
+		// 链接整包存进来"就永远做不成（清单里找不到 → 404）。
+		//
+		// 级别不受影响：取回走同一条 req 通道，对端的 ShareGate 照样判——private
+		// 合集的 manifest 取不到，这里同样回 404（清单里没有的东西，服务端不会
+		// 告诉你"它存在但不给你"）。
+		jobs, name, ok := startPullByManifest(req.Peer, req.Collection)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "collection not shared by peer"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"collection": req.Collection,
+			"name":       name,
+			"jobs":       jobs,
+			"count":      len(jobs),
+		})
 	}
+}
+
+// startPullByManifest 清单里找不到合集时，按 hash 把 manifest 取回来再建任务。
+//
+// 返回 (jobs, name, ok)；ok=false 表示这条路也不通（没这个 hash / 离线 / private
+// 被挡 / 取回来不是 manifest），调用方一律按 404 处理。
+func startPullByManifest(peer, hash string) ([]*service.PullJob, string, bool) {
+	raw, err := peerPuller.FetchManifest(peer, hash, 0)
+	if err != nil {
+		log.LogDebug("ctrl-peer-pull: fetch collection manifest %s failed: %v", hash, err)
+		return nil, "", false
+	}
+	var coll model.AnonCollection
+	if err := json.Unmarshal(raw, &coll); err != nil || len(coll.Entries) == 0 {
+		// 取回来了但不是合集（用户把某个文件的 hash 当合集 hash 传了）
+		log.LogDebug("ctrl-peer-pull: %s is not a collection manifest", hash)
+		return nil, "", false
+	}
+	entries := make([]service.PullEntry, 0, len(coll.Entries))
+	for _, e := range coll.Entries {
+		h := e.GetPrimaryHash()
+		if h == "" {
+			continue
+		}
+		entries = append(entries, service.PullEntry{Path: e.Path, Hash: h})
+	}
+	if len(entries) == 0 {
+		return nil, "", false
+	}
+	return peerPuller.StartCollection(peer, hash, entries), coll.FriendlyName, true
 }
 
 // CancelPull 处理 POST /p2p/pull/cancel {id}。

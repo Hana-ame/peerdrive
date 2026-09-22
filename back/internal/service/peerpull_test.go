@@ -316,6 +316,52 @@ func TestStartPullRejectsBadInput(t *testing.T) {
 	}
 }
 
+// TestFetchManifest 清单里没有的合集，按 hash 取回 manifest（unlisted 合集的出口）。
+//
+// 为什么必须支持：合集 manifest 本身就是按内容寻址存的一份 JSON，hash 即其
+// sha256，所以"凭 hash 取回"对合集同样成立；而 unlisted 合集按定义不在共享清单里
+// —— 只认清单的话，"给一条合集链接、让人整包存进自己的节点"永远做不成。
+// 级别不受影响：取回走同一条 req 通道，private 的 manifest 由对端 ShareGate 挡。
+func TestFetchManifest(t *testing.T) {
+	manifest := []byte(`{"version":2,"friendly_name":"c","entries":[{"path":"a.txt","hash":"` +
+		strings.Repeat("a", 64) + `"}]}`)
+	h := sha256.Sum256(manifest)
+	hash := hex.EncodeToString(h[:])
+
+	p := NewPeerPuller(t.TempDir())
+	if _, err := p.FetchManifest("peer-a", hash, 0); err == nil {
+		t.Fatal("未注入 source 时应报错")
+	}
+	p.SetSource(&fakePullSource{content: map[string][]byte{hash: manifest}})
+
+	got, err := p.FetchManifest("peer-a", hash, 0)
+	if err != nil {
+		t.Fatalf("取回 manifest 失败: %v", err)
+	}
+	if string(got) != string(manifest) {
+		t.Fatalf("manifest 内容不一致: %q", got)
+	}
+
+	// 上限：入参可能是用户随手填的一串 hash，指向的未必是 manifest（可能几 GB），
+	// 不设限会把它整份读进内存再判断。
+	trimmed, err := p.FetchManifest("peer-a", hash, 16)
+	if err != nil {
+		t.Fatalf("带上限取回失败: %v", err)
+	}
+	if len(trimmed) != 16 {
+		t.Fatalf("maxBytes 没生效: got %d bytes", len(trimmed))
+	}
+
+	if _, err := p.FetchManifest("peer-a", "short", 0); err == nil {
+		t.Fatal("非法 hash 应报错")
+	}
+	// 对端拒绝（private 被 ShareGate 挡下）要透传，不能吞成"空的合集"
+	p.SetSource(&fakePullSource{err: errors.New("err: private")})
+	if _, err := p.FetchManifest("peer-a", hash, 0); err == nil {
+		t.Fatal("对端拒绝时应返回错误")
+	}
+}
+
 // TestSanitizeRelPath 路径清洗规则表。
 // 发现背景：清洗是安全边界的第一道（第二道是 targetPath 的绝对路径前缀校验），
 // 行为必须明确可回归。

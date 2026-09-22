@@ -195,7 +195,50 @@ while read -r HASH NAME SIZE; do
   fi
 done < "$DEMO_DIR/targets.txt"
 
-say "[6] PSK 门禁（预共享密钥）"
+say "[6] unlisted 合集：清单里没有它，凭 hash 也能整包保存"
+# 合集 manifest 本身就是按内容寻址存的一份 JSON（hash 即其 sha256），所以"凭 hash
+# 取回"对合集同样成立。而 unlisted 合集**按定义**不在共享清单里 —— 这一步钉的是：
+# 即便清单里没有它，POST /p2p/pull/collection 也能把整包拉下来（只认清单的话，
+# "给一条合集链接、让对方整包存进自己的节点"永远做不成，清单里找不到就是 404）。
+# 级别不受影响：manifest 走同一条 req 通道，private 的由对端 ShareGate 挡。
+# 特意用一份 **B 还没有的**内容：合集里放 B 已拉过的 hash 会被"本地已有 → 跳过"
+# 去重掉（内容寻址的既有行为），那就验不出"整包真的存下来了"。
+printf 'collection entry payload\n' > "$DEMO_DIR/a/root/downloads/shared/coll-src.txt"
+curl -s -m 60 -X POST "http://127.0.0.1:$A_PORT/files/register_folder" \
+  -H 'Content-Type: application/json' \
+  -d "{\"folder_path\":\"$DEMO_DIR/a/root/downloads/shared\"}" >/dev/null
+FIRST_HASH=$(sha256sum "$DEMO_DIR/a/root/downloads/shared/coll-src.txt" | cut -d' ' -f1)
+COLL_JSON=$(curl -s -m 20 -X POST "http://127.0.0.1:$A_PORT/anon/collections" \
+      -H 'Content-Type: application/json' \
+      -d "{\"friendly_name\":\"demo-coll\",\"entries\":[{\"path\":\"coll/demo.txt\",\"hash\":\"$FIRST_HASH\"}]}")
+COLL_HASH=$(echo "$COLL_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin)["hash"])' 2>/dev/null || echo '')
+if [ -z "$COLL_HASH" ]; then
+  bad "建合集失败：$COLL_JSON"
+else
+  # 只发 collections：PUT 的"局部更新"是"传不传这个字段"，没传的 dirs/files 不动
+  curl -s -m 10 -X PUT "http://127.0.0.1:$A_PORT/peerjs/share" \
+    -H 'Content-Type: application/json' \
+    -d "{\"collections\":[{\"id\":\"$COLL_HASH\",\"level\":\"unlisted\"}]}" >/dev/null
+  SHC=$(curl -s -m 25 "http://127.0.0.1:$B_PORT/peerjs/nodes/node-a/shares")
+  echo "$SHC" | grep -q "$COLL_HASH" \
+    && bad "unlisted 合集却出现在共享清单里" \
+    || ok "unlisted 合集不在共享清单里"
+  PC=$(curl -s -m 60 -X POST "http://127.0.0.1:$B_PORT/p2p/pull/collection" \
+    -H 'Content-Type: application/json' \
+    -d "{\"peer\":\"node-a\",\"collection\":\"$COLL_HASH\"}")
+  NC=$(echo "$PC" | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("jobs",[])))' 2>/dev/null || echo 0)
+  [ "$NC" -gt 0 ] && ok "整包保存建了 $NC 个任务（清单里没有它，凭 manifest hash 取的）" \
+                  || bad "整包保存没建出任务：$PC"
+  sleep 5
+  F="$DEMO_DIR/b/root/downloads/pulled/coll/demo.txt"
+  if [ -f "$F" ] && [ "$(sha256sum "$F" | cut -d' ' -f1)" = "$FIRST_HASH" ]; then
+    ok "合集条目按目录结构落盘，sha256 与源一致"
+  else
+    bad "合集条目没落到 $F（或内容不一致）"
+  fi
+fi
+
+say "[7] PSK 门禁（预共享密钥）"
 # 门禁只在真实网络里才有意义，所以这一步不 mock：把 A 重启成「带密钥」，
 # 先看没密钥的 B 是不是真被拦住，再给 B 同一把钥匙看是不是立刻恢复。
 # 注意 B 重启后 joined_nodes.json 还在（落盘校验已在 [2] 覆盖），会重连上来。
@@ -256,7 +299,7 @@ cat <<TIP
            : cd packages/peerdrive-client && npm run build:panel
              然后浏览器打开 dist/panel.html，或直接带参数打开：
              dist/panel.html?node=node-a&host=<本机IP>:$SIG_PORT&path=/&key=peerjs&secure=0&auto=1
-             ⚠️ 第 [6] 步把 A/B 都重启成了带 PSK 的节点，所以现在手测要在面板的
+             ⚠️ 第 [7] 步把 A/B 都重启成了带 PSK 的节点，所以现在手测要在面板的
              「预共享密钥」框里填 $PSK（或链接里带 &psk=$PSK），否则拿不到清单。
              想回到无门禁状态：$0 --stop 再重跑本脚本的前 5 步。
              （面板与信令不同源，所以信令必须开 CORS —— 已在 back/signalserver 处理）
