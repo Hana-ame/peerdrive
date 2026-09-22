@@ -115,7 +115,21 @@ jobs:
           # 链路脚本第 [6] 步把 node-a 重启成了「带 PSK」的节点，所以面板必须
           # 出示同一把密钥 —— 顺带把"浏览器带密钥过门禁"也纳进 E2E。
           PSK: demo-psk
-        run: node "$GITHUB_WORKSPACE/packages/peerdrive-client/scripts/verify-panel.mjs"
+        # 输出同时落盘：这一步是全仓库最慢、也最容易偶发红的一步，而 Actions 的
+        # 日志**下载需要仓库 admin 权限**（匿名 API 拿不到）——留一份 artifact 才能
+        # 在红了之后看到面板自己的日志与断言，而不是只能看到"这步失败了"。
+        run: |
+          set -o pipefail
+          node "$GITHUB_WORKSPACE/packages/peerdrive-client/scripts/verify-panel.mjs" 2>&1 |
+            tee /tmp/panel-e2e.log
+
+      - name: 上传面板自检日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: panel-e2e-log
+          path: /tmp/panel-e2e.log
+          if-no-files-found: warn
 
       - name: 收尾
         if: always()
