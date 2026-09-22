@@ -111,7 +111,7 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 
 > 手把手教程（下载 → 起信令 → 起节点 → 用面板连上它 → 连不上怎么查）：
 > [`doc/tutorial/01-run-and-connect.md`](doc/tutorial/01-run-and-connect.md)
-> 要改代码 / 跑最新未发版的提交：[第二章 · 从源码编译](doc/tutorial/02-build-from-source.md)
+> 要改代码 / 跑最新未发版的提交（可跳过）：[附录 A · 从源码编译](doc/tutorial/appendix-build-from-source.md)
 
 ```bash
 # 后端（不用编译：下载发布好的二进制）
