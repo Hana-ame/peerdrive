@@ -233,3 +233,7 @@ curl http://127.0.0.1:3002/peerjs/nodes/my-node-1/shares
 | `psk: 本节点需要预共享密钥`（面板入库时） | 面板没填 / 填错 PSK | 面板 PSK 框填上节点那把；**HTTP 接口不受 PSK 影响**（它不走 WebRTC） |
 | 入库到一半超时 | 单轮 30 s 无应答（对端在落盘/卡住） | 重试；大于 256 MB 先别走面板 |
 | 硬链接文件登记被拒 | 防绕过边界的硬链接检查 | 复制一份再登记 |
+
+> 下一步：[第三章：共享级别 —— public / unlisted / private](03-share-levels.md)
+> （放进来的东西，将来给谁看）；再往后是
+> [第四章：自由选择共享什么](04-choose-what-to-share.md)（逐行勾选 + 设级别）。

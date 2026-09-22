@@ -394,31 +394,34 @@ describe('pages/Drive 共享勾选', () => {
   const H = 'a'.repeat(64);
   const files = [{ hash: H, filename: 'a.txt', size: 10 }];
 
-  const scopeOf = (shared) => ({
+  const scopeOf = (shared, level = 'public', friends = []) => ({
     enable: true,
     dirs: [],
     collections: [],
-    files: [{ hash: H, name: 'a.txt', size: 10, shared, by_dir: false }],
+    friends,
+    files: [{ hash: H, name: 'a.txt', size: 10, shared, by_dir: false, level }],
   });
 
   beforeEach(() => {
     api.listFiles.mockResolvedValue(files);
     api.listAnonCollections.mockResolvedValue([]);
-    api.setFilesShared.mockResolvedValue({ enable: true, files: [H] });
+    api.setFilesShared.mockResolvedValue({ enable: true, selected: [{ id: H, level: 'public' }] });
+    api.setShareScope.mockResolvedValue({ enable: true, friends: [] });
   });
 
   it('未共享的文件显示「共享」，点了发 hash 列表给后端', async () => {
     api.getShareScope.mockResolvedValue(scopeOf(false));
     render(<MemoryRouter><Drive /></MemoryRouter>);
     fireEvent.click(await screen.findByText('共享'));
-    expect(api.setFilesShared).toHaveBeenCalledWith([H], true);
+    // 第三参沿用当前级别：这是"共享/不共享"开关，不该顺手把级别改回 public
+    expect(api.setFilesShared).toHaveBeenCalledWith([H], true, 'public');
   });
 
   it('已共享的文件显示「取消共享」，点了发 shared=false', async () => {
     api.getShareScope.mockResolvedValue(scopeOf(true));
     render(<MemoryRouter><Drive /></MemoryRouter>);
     fireEvent.click(await screen.findByText('取消共享'));
-    expect(api.setFilesShared).toHaveBeenCalledWith([H], false);
+    expect(api.setFilesShared).toHaveBeenCalledWith([H], false, 'public');
   });
 
   it('总开关只发 enable 一个字段（不整份覆盖目录/文件选择）', async () => {
@@ -434,5 +437,58 @@ describe('pages/Drive 共享勾选', () => {
     render(<MemoryRouter><Drive /></MemoryRouter>);
     expect(await screen.findByText('a.txt')).toBeTruthy();
     expect(screen.queryByText(/对外共享/)).toBeNull();
+  });
+});
+
+// 共享级别（doc/NETDISK.md §12.6）：public 列出且可下载 / unlisted 不列出但可
+// 下载 / private 只给自己与好友。界面上最容易写错的是"级别"与"共享"两件事的
+// 耦合方式——没共享的东西不该出现级别下拉，否则用户会以为设了级别就等于共享了。
+describe('pages/Drive 共享级别', () => {
+  const H = 'b'.repeat(64);
+
+  const scopeOf = (shared, level = 'public') => ({
+    enable: true,
+    dirs: [],
+    collections: [],
+    friends: [],
+    files: [{ hash: H, name: 'b.txt', size: 3, shared, by_dir: false, level }],
+  });
+
+  beforeEach(() => {
+    api.listFiles.mockResolvedValue([{ hash: H, filename: 'b.txt', size: 3 }]);
+    api.listAnonCollections.mockResolvedValue([]);
+    api.setFilesShared.mockResolvedValue({ enable: true, selected: [{ id: H, level: 'private' }] });
+    api.setShareScope.mockResolvedValue({ enable: true, friends: ['pd-alpha'] });
+  });
+
+  it('已共享的文件才显示级别下拉（没共享就没有"给谁看"这回事）', async () => {
+    api.getShareScope.mockResolvedValue(scopeOf(false));
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    await screen.findByText('b.txt');
+    expect(screen.queryByDisplayValue('公开')).toBeNull();
+  });
+
+  it('改级别：带上 level 且保持 shared=true', async () => {
+    api.getShareScope.mockResolvedValue(scopeOf(true, 'public'));
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    const sel = await screen.findByDisplayValue('公开');
+    fireEvent.change(sel, { target: { value: 'private' } });
+    expect(api.setFilesShared).toHaveBeenCalledWith([H], true, 'private');
+  });
+
+  it('好友名单按逗号拆分后 PUT friends（不把空白项写进去）', async () => {
+    api.getShareScope.mockResolvedValue(scopeOf(true, 'private'));
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    const input = await screen.findByPlaceholderText(/用逗号分隔/);
+    fireEvent.change(input, { target: { value: ' pd-alpha , pd-beta ' } });
+    fireEvent.click(screen.getByText('保存好友'));
+    expect(api.setShareScope).toHaveBeenCalledWith({ friends: ['pd-alpha', 'pd-beta'] });
+  });
+
+  it('级别下拉里的三档顺序与文案（后端 model.Level* 一致）', async () => {
+    api.getShareScope.mockResolvedValue(scopeOf(true, 'unlisted'));
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    // 未共享时是"不列出"，下拉应回填 unlisted 而不是默认 public
+    expect(await screen.findByDisplayValue('不列出')).toBeTruthy();
   });
 });

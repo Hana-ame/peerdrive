@@ -13,12 +13,31 @@
 // 「自由选择共享内容」落在这一页：上传/登记进来只是"我持有"，是否对外提供是
 // 另一件事——逐行勾选（按 hash），或整目录共享（见 doc/NETDISK.md M2.6）。
 // 勾选即生效，不用重启节点；后端落在 storage/share_scope.json。
+//
+// 每条共享声明还带一个**级别**（doc/NETDISK.md §12.6）：
+//   public   列在共享清单里，谁都能下载
+//   unlisted 不列在清单里，但知道 hash 的人能下载
+//   private  不列在清单里，只有自己和好友能下载
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as api from '../../api';
 import SideNav, { MobileNav } from '../../components/netdisk/SideNav';
 import FileTable, { Btn } from '../../components/netdisk/FileTable';
 import { formatSize } from '../../components/netdisk/format';
+
+// LEVELS 三档共享级别（顺序 = 由宽到严，与后端 model.Level* 一致）。
+export const LEVELS = [
+  { v: 'public', label: '公开', hint: '列在共享清单里，谁都能下载' },
+  { v: 'unlisted', label: '不列出', hint: '不列在清单里，知道 hash 的人能下载' },
+  { v: 'private', label: '私密', hint: '不列在清单里，只有自己和好友能下载' },
+];
+
+export const labelOfLevel = (v) => (LEVELS.find((l) => l.v === v) || {}).label || v || '公开';
+
+// selectedIds 兼容两种返回形态：新后端回 [{id, level}]，老后端回 [hash]。
+export const selectedIds = (res) => (res?.selected || res?.files || []).map((it) => (
+  typeof it === 'string' ? it : it?.id
+)).filter(Boolean);
 
 export default function Drive() {
   const [files, setFiles] = useState([]);
@@ -31,6 +50,10 @@ export default function Drive() {
   // 拿不到就整块不渲染：不要让"共享设置加载失败"盖住文件列表本身。
   const [scope, setScope] = useState(null);
   const fileInput = useRef(null);
+  // friendDraft 好友名单的输入框草稿（private 内容放行给这些节点 ID）。
+  // 为什么要草稿而不是直接改：名单是多行的，每敲一个字就 PUT 一次既打后端，
+  // 也会在半截输入（"a,"）时把空项写进去。
+  const [friendDraft, setFriendDraft] = useState('');
 
   // load 拉取文件与合集。两处各自容错：文件列表失败不该让合集也空白。
   const load = useCallback(async () => {
@@ -51,7 +74,9 @@ export default function Drive() {
     }
     // 共享范围单独容错：没开 peerjs 的节点本来就没有"对外共享"这回事
     try {
-      setScope(await api.getShareScope());
+      const sc = await api.getShareScope();
+      setScope(sc);
+      setFriendDraft((sc?.friends || []).join(', '));
     } catch {
       setScope(null);
     }
@@ -117,8 +142,10 @@ export default function Drive() {
     setBusy('');
   };
 
-  // sharedMap：hash → { shared, by_dir }。后端算好共享状态（目录共享也算），
+  // sharedMap：hash → { shared, by_dir, level }。后端算好共享状态（目录共享也算），
   // 前端不自己比前缀——Windows 盘符大小写/分隔符混写会让两份实现跑偏。
+  // level 也是后端算的：同一文件被"目录 + 单文件"同时命中时取最宽松的那条，
+  // 前端再算一遍迟早和后端口径不一致。
   const sharedMap = useMemo(() => {
     const m = new Map();
     for (const f of scope?.files || []) m.set(f.hash, f);
@@ -137,10 +164,11 @@ export default function Drive() {
     setBusy(row.hash);
     setErr('');
     try {
-      const res = await api.setFilesShared([row.hash], want);
+      // 级别沿用当前值：这是"共享/不共享"开关，不该顺手把级别改回 public
+      const res = await api.setFilesShared([row.hash], want, cur?.level || '');
       // 后端返回更新后的完整勾选列表；目录共享带上的文件不在里面，
       // 因此以"请求意图 + by_dir"合并本地状态，避免勾选框闪回。
-      const picked = new Set(res?.files || []);
+      const picked = new Set(selectedIds(res));
       setScope((s) => (s ? {
         ...s,
         files: (s.files || []).map((f) => (
@@ -152,6 +180,38 @@ export default function Drive() {
       setNotice(want ? `已共享 ${row.name}` : `已取消共享 ${row.name}`);
     } catch (ex) {
       setErr(ex?.message || '共享设置失败');
+    }
+    setBusy('');
+  };
+
+  // onSetLevel 改单个文件的共享级别（三档，见 LEVELS）。
+  const onSetLevel = async (row, level) => {
+    setBusy(row.hash);
+    setErr('');
+    try {
+      await api.setFilesShared([row.hash], true, level);
+      setScope((s) => (s ? {
+        ...s,
+        files: (s.files || []).map((f) => (f.hash === row.hash ? { ...f, shared: true, level } : f)),
+      } : s));
+      setNotice(`${row.name}：${labelOfLevel(level)}`);
+    } catch (ex) {
+      setErr(ex?.message || '共享级别设置失败');
+    }
+    setBusy('');
+  };
+
+  // onSaveFriends 保存好友名单（private 内容放行给这些节点）。
+  const onSaveFriends = async () => {
+    const list = friendDraft.split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean);
+    setBusy('friends');
+    setErr('');
+    try {
+      const res = await api.setShareScope({ friends: list });
+      setScope((s) => (s ? { ...s, friends: res?.friends || list } : s));
+      setNotice(list.length ? `好友名单已保存（${list.length} 个）` : '好友名单已清空');
+    } catch (ex) {
+      setErr(ex?.message || '好友名单保存失败');
     }
     setBusy('');
   };
@@ -230,6 +290,36 @@ export default function Drive() {
             </div>
           )}
 
+          {/* 共享级别 + 好友名单：决定"给谁看"。
+              公开 = 列出来也给；不列出 = 不列但凭 hash 能给；私密 = 只给自己和好友。 */}
+          {scope && (
+            <div className="mb-3 rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                <span className="text-gray-300">共享级别</span>
+                {LEVELS.map((l) => (
+                  <span key={l.v} className="text-[11px] text-gray-500" title={l.hint}>
+                    {l.label}＝{l.hint}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <label className="text-xs text-gray-400" htmlFor="friends">好友节点 ID</label>
+                <input
+                  id="friends"
+                  value={friendDraft}
+                  onChange={(e) => setFriendDraft(e.target.value)}
+                  placeholder="用逗号分隔，例如 pd-alpha,pd-beta"
+                  className="min-w-[16rem] flex-1 rounded border border-gray-700 bg-gray-950 px-2 py-1 font-mono text-xs text-gray-200"
+                />
+                <Btn onClick={onSaveFriends} disabled={busy === 'friends'}>保存好友</Btn>
+              </div>
+              <div className="mt-1 text-[11px] text-gray-600">
+                「私密」的内容只放行给这些节点；自己的管理台/面板直连本机永远算自己。
+                节点 ID 由对端自报，所以名单只在设了 PSK 的网络里才可靠。
+              </div>
+            </div>
+          )}
+
           {notice && <div className="mb-3 text-xs text-green-400">{notice}</div>}
           {err && <div className="mb-3 text-xs text-red-400">{err}</div>}
 
@@ -252,6 +342,21 @@ export default function Drive() {
                     >
                       {sharedMap.get(row.hash)?.shared ? '取消共享' : '共享'}
                     </Btn>
+                  )}
+                  {/* 级别只在已共享时可选：没共享的东西谈"给谁看"没有意义
+                      （顺手避免"设了 private 但以为已经共享出去了"） */}
+                  {scope && sharedMap.get(row.hash)?.shared && (
+                    <select
+                      value={sharedMap.get(row.hash)?.level || 'public'}
+                      onChange={(e) => onSetLevel(row, e.target.value)}
+                      disabled={busy === row.hash}
+                      title={LEVELS.map((l) => `${l.label}：${l.hint}`).join('\n')}
+                      className="rounded border border-gray-700 bg-gray-900 px-1.5 py-1 text-xs text-gray-300"
+                    >
+                      {LEVELS.map((l) => (
+                        <option key={l.v} value={l.v}>{l.label}</option>
+                      ))}
+                    </select>
                   )}
                   <Btn tone="danger" onClick={() => onDelete(row)} disabled={busy === row.hash}>删除</Btn>
                 </>

@@ -59,6 +59,7 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 | 多协议取内容 | 下载器按 `local → ipfs → ipfsgw → btdht → http` 路由（顺序与超时可配） |
 | 节点市场与加入 | 信令上发现节点，加入后落 `joined_nodes.json` 并成为常驻对端 |
 | 对外共享范围 | `share` verb；**默认全关** —— 不显式声明就不对外暴露任何清单。范围可**运行时**改：按目录、按合集、或按 hash 勾单个文件（`GET/PUT /peerjs/share`、`POST /peerjs/share/files`），落盘 `storageDir/share_scope.json`，不用重启；环境变量只是首次启动的初值 |
+| 共享级别 | 每条共享声明带一档：`public` 列出且可下载 / `unlisted` 不列出但凭 hash 可下载 / `private` 只给自己与好友（`ShareScope.Friends`）。好友能看到 private 清单；下载门禁在 `transport.ShareGate`；peer id 自报，所以名单只在设了 PSK 时可靠（`doc/NETDISK.md` §12.6） |
 | 准入控制 | `PEERDRIVE_PSK`：设了之后对端必须在连接上出示同一把密钥，否则所有请求回 `PSK_REQUIRED` |
 | 管理面 | 本地 WS 的 `admin` verb，内部复用 gin 的全部 HTTP controller；WebRTC 侧刻意不实现，防权限暴露 |
 | 端口转发 | `fwd-open/challenge/auth/data/close`，HMAC 质询认证 + 端口白名单 |
@@ -75,7 +76,7 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 | 内容寻址落盘 | `service/anon_service.go` | `hash[:2]` 分目录；写入前校验 hash 长度（未校验时 `hash[:2]` 会越界 panic，已修） |
 | 文件索引 | `repository/file_index_repo.go` + `service/file_service.go` | SQLite 持久化 + seq 游标增量；`sync` verb 让对端只拉增量 |
 | 跨节点保存 | `service/peerpull.go` + `GET/POST /p2p/pull*` | 流式落盘 → 复算 sha256 → 登记索引，带进度 / 取消 / 去重跳过 |
-| 共享范围 | `service/nodeshare.go` + `share` verb + `GET/PUT /peerjs/share` | 与 `list` **严格区分**：`list` 是本地管理索引全量、只给可信对端；`share` 是运营者显式声明的对外范围。三条来源取并集（目录 / 单个文件 hash / 合集），运行时可改并落盘；卷根目录在入口被拒 |
+| 共享范围 | `service/nodeshare.go` + `share` verb + `GET/PUT /peerjs/share` | 与 `list` **严格区分**：`list` 是本地管理索引全量、只给可信对端；`share` 是运营者显式声明的对外范围。三条来源取并集（目录 / 单个文件 hash / 合集），运行时可改并落盘；卷根目录在入口被拒。每条带一档共享级别（`model.Level*`），多条命中取最宽松；`private` 在 `req` 上由 `ShareGate` 拦 |
 | 路径安全 | `back/internal/pathutil` | 判定只有这一份（`Within/WithinAny`）；**读边界 ≠ 写边界**；读走 `SafeOpen`（`os.Root`），写走 `SafeWriteFileAny` 等，杜绝「判完再按路径打开」的 TOCTOU；硬链接按**打开着的句柄**判 `nlink` |
 | 准入（PSK） | `transport/psk.go` | 连接建立后本端第一帧 `psk-auth`；只拦「对端要我干活」的 verb，**绝不拦应答帧**；`local` 会话豁免 |
 | 消费端 SDK | `packages/peerdrive-client/src/` | **传输无关**：只要求传入 `{on, send, open, close}`，本包不 import peerjs；自带**增量** sha256（WebCrypto 的 `digest()` 一次性，与流式拉取冲突） |
@@ -97,7 +98,7 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 | 环节 | 实现 |
 |---|---|
 | 节点市场与加入 | `service.NodeDirectory` + `GET /peerjs/nodes*`；已加入清单持久化（`joined_nodes.json`）并成为常驻对端 |
-| 共享范围 | `share` 帧 + `PEERDRIVE_SHARE_ENABLE/COLLECTIONS/DIRS`（**默认全部关闭**，不声明就不对外暴露任何清单）；这三个只是**初值**，运行时经 `/peerjs/share` 改，落盘 `share_scope.json` |
+| 共享范围 | `share` 帧 + `PEERDRIVE_SHARE_ENABLE/COLLECTIONS/DIRS/FRIENDS`（**默认全部关闭**，不声明就不对外暴露任何清单）；这几个只是**初值**，运行时经 `/peerjs/share` 改，落盘 `share_scope.json`。每条声明另有 `public/unlisted/private` 三档级别 |
 | 跨节点保存 | `service.PeerPuller` + `GET/POST /p2p/pull*`：流式拉取 → sha256 校验 → 落盘 → 登记文件索引，带进度/取消/去重跳过 |
 | 网盘界面 | **公共面板** `packages/peerdrive-client/dist/panel.html`（单文件静态页，PeerJS 直连节点，无需服务器）＋ 节点管理台 `front/src/pages/{Drive,Market,Peers,PeerDetail,Transfers}` |
 | 无节点消费端 | `packages/peerdrive-client`：面板与 SDK 都源自它，不需要本地后端 |
@@ -222,11 +223,12 @@ peerdrive
 | `PEERDRIVE_SHARE_ENABLE` | **false** | 对外共享总开关。默认关——不显式开启就不对外暴露任何清单 |
 | `PEERDRIVE_SHARE_COLLECTIONS` | - | 共享合集：逗号分隔 hash 或 `all`（受限/私有一律跳过） |
 | `PEERDRIVE_SHARE_DIRS` | - | 共享目录：逗号分隔。空 = 不共享文件（文件只回 basename，不回绝对路径） |
+| `PEERDRIVE_SHARE_FRIENDS` | - | 好友节点 ID：逗号分隔，`private` 级别的内容放行给它们（见 `model.LevelPrivate`） |
 
-> `PEERDRIVE_SHARE_*` 这三项只是**首次启动的初值**：启动后可经 `GET/PUT /peerjs/share`
+> `PEERDRIVE_SHARE_*` 这几项只是**首次启动的初值**：启动后可经 `GET/PUT /peerjs/share`
 > 与 `POST /peerjs/share/files` 随时改（按目录 / 合集 / 单个文件 hash），落在
 > `PEERDRIVE_STORAGE/share_scope.json`；之后以该文件为准，改环境变量不会再覆盖
-> 已经做出的选择（详见 `doc/NETDISK.md` §12、教程第三章）。
+> 已经做出的选择（详见 `doc/NETDISK.md` §12.6、教程第三、四章）。
 | `PEERDRIVE_PSK` | - | 节点访问预共享密钥。空 = 开放（谁连上都服务）；设了 = 对端必须出示同一把密钥才能拉东西（`doc/NETDISK.md` §9） |
 
 

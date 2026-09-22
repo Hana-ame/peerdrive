@@ -341,11 +341,16 @@ export const getPeerShares = (peer) =>
  */
 // 当前范围 + 可选文件清单（每行带 shared / by_dir，前端直接渲染勾选框）。
 export const getShareScope = () => request('GET', '/peerjs/share');
-// 局部更新：只传要改的字段（enable / dirs / files / collections），未传的保持原样。
+// 局部更新：只传要改的字段（enable / dirs / files / collections / friends），
+// 未传的保持原样。条目形如 {id, level}（也接受字符串，级别按 public）。
 export const setShareScope = (patch) => request('PUT', '/peerjs/share', patch || {});
-// 勾选/取消若干文件（按 hash）。单行勾选框走这条，避免全量 PUT 互相覆盖。
-export const setFilesShared = (hashes, shared = true) =>
-  request('POST', '/peerjs/share/files', { hashes, shared });
+// 勾选/取消若干文件（按 hash），可同时指定级别：
+//   public   列出在共享清单里，谁都能下载
+//   unlisted 不列出，但知道 hash 的人能下载
+//   private  不列出，只有自己和好友能下载
+// level 省略时后端沿用该 hash 已有的级别（没有就 public）。
+export const setFilesShared = (hashes, shared = true, level = '') =>
+  request('POST', '/peerjs/share/files', { hashes, shared, level });
 // 跨节点拉取保存（服务端任务式，带进度/取消）。
 export const getPullJobs = () => request('GET', '/p2p/pull');
 export const startPull = (peer, hash, name = '', path = '') =>

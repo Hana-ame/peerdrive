@@ -136,7 +136,11 @@ func main() {
 		// 按 hash 单查：索引超过 1000 条时，勾选过的文件靠它兜底（不然"我勾了
 		// 却没生效"）。见 service.NodeShare.resolveFiles。
 		share.SetFileInfoReader(peerjsSvc.FileIndex().Info)
-		peerjsSvc.SetShareProvider(share.Snapshot)
+		// SnapshotFor 带请求者 id：好友能看到 private 条目（否则给了权限
+		// 却没给目录）。share 帧走已建立的连接，对端 id 是已知的。
+		peerjsSvc.SetShareProvider(share.SnapshotFor)
+		// 下载门禁：private 的内容只给好友与自己（req 帧，见 ShareGate 注释）。
+		peerjsSvc.SetShareGate(share)
 		nodeDir.SetShareSummary(share.Summary)
 		// 管理端点 /peerjs/share*（GET/PUT/POST files）：让运营者在管理台上
 		// 勾选共享什么，不必改环境变量重启节点。

@@ -109,6 +109,13 @@ type Config struct {
 	// 空 = 不按目录共享（只有合集共享）。仅相对/绝对路径前缀匹配，
 	// 真正的越权读仍由 file_index.IsPathAllowed（上传根目录）兜底。
 	ShareDirs string
+	// ShareFriends 好友节点 ID（PEERDRIVE_SHARE_FRIENDS，逗号分隔）：
+	// private 级别的内容放行给这些节点（见 model.LevelPrivate）。
+	//
+	// 注意：peer id 由对端自报，信令不校验身份。好友名单只在**已通过 PSK 准入**
+	// 的连接上才有意义——没设 PSK 时任何人都能连上并自称是好友。要强身份得等
+	// 账号体系（ROADMAP 第 7 阶段）。这里只是运行时状态的初值，之后在管理台改。
+	ShareFriends string
 }
 
 // IsOriginAllowed 检查给定的 Origin 是否在允许列表中，支持通配符（*）和子域名通配（*.example.com）。
@@ -191,6 +198,7 @@ func Load() *Config {
 		ShareEnable:      getEnvBool("PEERDRIVE_SHARE_ENABLE", false),
 		ShareCollections: getEnv("PEERDRIVE_SHARE_COLLECTIONS", ""),
 		ShareDirs:        getEnv("PEERDRIVE_SHARE_DIRS", ""),
+		ShareFriends:     getEnv("PEERDRIVE_SHARE_FRIENDS", ""),
 
 		DownloadOrder:       getEnv("PEERDRIVE_DOWNLOAD_ORDER", "local,ipfs,ipfsgw,btdht,http"),
 		DownloadTimeoutSecs: getEnvInt("PEERDRIVE_DOWNLOAD_TIMEOUT", 30),

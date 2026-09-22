@@ -77,11 +77,19 @@ type PeerJSService struct {
 	extraPeers func() []string
 
 	// shareProvider 本节点对外共享范围（share.go，M2）。由 main 注入
-	// service.NodeShare.Snapshot；nil = 未启用共享，share 帧回空快照。
+	// service.NodeShare.SnapshotFor；nil = 未启用共享，share 帧回空快照。
 	// 用独立锁而不是在装配期裸写：main 在 Start() 之后才注入（startLoop
 	// 已经在跑，发现组件可能已在 announce），裸写是 data race。
+	//
+	// 入参是请求者的节点 ID：share 帧走的是已建立的连接，对端 id 是已知的，
+	// 所以"好友能看到 private 清单"可以实现（否则给了权限却没给目录）。
 	shareMu       sync.RWMutex
-	shareProvider func() ShareSnapshot
+	shareProvider func(peerID string) ShareSnapshot
+
+	// shareGate 下载门禁（share.go）：按 hash 判断请求者能否取回。
+	// 与 shareProvider 分开注入：清单（share 帧）与下载（req 帧）是两条路径，
+	// 门禁只在 req 上生效——unlisted 的内容不出现在清单里，但 req 要放行。
+	shareGate ShareGate
 
 	// forward 转发授权规则（key 原文 → 端口白名单）与待验证质询（forward.go）。
 	// 规则即凭证：运行时动态增删（端点）与配置装载（SetForwardRules）共用同一锁。

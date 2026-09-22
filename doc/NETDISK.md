@@ -878,10 +878,14 @@ M2 落地时共享范围只能靠 `PEERDRIVE_SHARE_*` 在启动时定死：想�
 ### 12.4 端点
 
 ```
-GET  /peerjs/share        当前范围 + 可选文件清单（每行带 shared / by_dir）
-PUT  /peerjs/share        局部更新 {enable?,dirs?,files?,collections?}（未传的保持原样）
-POST /peerjs/share/files  {hashes:[...], shared:bool}  单行勾选
+GET  /peerjs/share        当前范围 + 可选文件清单（每行带 shared / by_dir / level）
+PUT  /peerjs/share        局部更新 {enable?,dirs?,files?,collections?,friends?}（未传的保持原样）
+POST /peerjs/share/files  {hashes:[...], shared:bool, level?}  单行勾选/改级别
 ```
+
+条目形如 `{"id":"<目录路径|文件hash|合集hash>","level":"public|unlisted|private"}`；
+也接受纯字符串（级别按 public，兼容本次升级前落盘的 `share_scope.json`）。
+`GET` 额外回 `selected`（纯 id 列表，方便渲染）与 `levels`（三档取值）。
 
 三个端点都挂 `AuthRequired`（未配注册服务器时放行 = 单机模式）。命名与
 "问对端要清单"的 `GET /peerjs/nodes/:peer/shares` 刻意区分开。
@@ -894,11 +898,63 @@ POST /peerjs/share/files  {hashes:[...], shared:bool}  单行勾选
    `pathutil.Within` 会把 `/etc/passwd` 判成"在根内"——判定没错，是配置意图错了，
    而这里的值来自 HTTP 请求体，一次误填就是共享整个盘。
 
-### 12.6 兜底测试
+### 12.6 共享级别：public / unlisted / private（2026-09-22）
+
+每条共享声明（目录 / 单文件 / 合集）都带一档级别，回答"给谁"：
+
+| 级别 | 出现在共享清单里 | 谁能下载 |
+|---|---|---|
+| `public` | 是 | 连得上就行 |
+| `unlisted` | **否** | 连得上就行（知道 hash，即"链接分享"） |
+| `private` | 否（好友除外） | **只有自己和好友** |
+
+一句话记法：**public = 列出来也给；unlisted = 不列出来但给；private = 只给认识的人。**
+
+判定与接线：
+
+- 常量与合并规则在 `internal/model/share_level.go`；**多条来源命中同一内容时取
+  最宽松**（`LoosestLevel`）：目录 `unlisted` + 单文件 `public` ⇒ 该文件 `public`。
+  取最严会让"我特意放宽了这一个"静默失效。
+- 清单侧：`NodeShare.SnapshotFor(peerID)`。share 帧走的是已建立的连接，对端 id
+  已知，所以**好友能看到 private 条目**（否则给了权限却没给目录）。`unlisted`
+  永不列出。`announce` 上报的数量用匿名视角（`SnapshotFor("")`），别把"我有几个
+  只给好友的东西"广播出去。
+- 下载侧：`transport.ShareGate` → `serveFile` 里判。**只有 private 挡人**：
+  public / unlisted / **未声明** 一律放行。
+- "自己" = 不经 P2P 的本地通道（HTTP 管理 API / 本机 WS 直连，
+  `WSSession.IsLocal`）；"好友" = `ShareScope.Friends`（节点 ID 白名单，大小写不
+  敏感），环境变量 `PEERDRIVE_SHARE_FRIENDS` 只是初值。
+
+两条边界，别放宽：
+
+1. **peer id 是对端自报的，信令不校验**（第 7 阶段前没有账号体系）。所以好友名单
+   只在**设了 PSK** 的网络里才可靠——没设 PSK 时谁都能连上并自称是好友。PSK 是
+   准入门禁，级别是在进门之后的分级。
+2. **"未声明"仍可下载**：内容寻址取回（知道 hash 就能取）是这套系统的既有行为。
+   改成"必须声明才能取"会连"上传 → 按 hash 取回校验"这种基本自检都过不去。
+   `unlisted` 与"没声明"的差别是**它被显式声明了**：管理台看得见、能审计、能统计，
+   将来真要收紧下载时也不会被误伤。
+3. 级别写错（`"pubilc"`）**整批拒绝**（400），绝不兜成 public——那等于把本想限制
+   的内容公开出去。显式改级别是**覆盖**（`public → private` 必须改得动），
+   不是取并集。
+4. 合集自身的 `visibility` 非 public（restricted/private）时按 **private** 处理：
+   AccessList 是账号列表，无身份校验不了，只给好友。
+
+### 12.7 兜底测试
 
 - `back/internal/service/nodeshare_scope_test.go`：运行时选择压过环境变量、
   卷根/非法 hash 整批拒绝、单文件勾选与目录共享互不干扰、`by_dir` 标记、
   局部更新不改未传项、目录回调只通知新增、损坏文件回退配置。
+- `back/internal/service/nodeshare_level_test.go`：三档边界（public 列出 /
+  unlisted 不列但能取 / private 挡陌生人、放好友与自己）、取最宽松、
+  非法级别整批拒、级别与好友随重启保留、历史字符串条目读作 public、
+  合集 visibility 降级。
+- `back/internal/transport/peerjs_service_test.go`
+  `TestServeFile_PrivateDeniedToStrangers`：门禁接线在 `serveFile` 上真的生效
+  （陌生人 err、好友与自己拿到数据）。
 - `front/tests/netdisk.test.jsx` `pages/Drive 共享勾选`：勾一个文件发的是 hash
-  列表（不是整份范围）、总开关只发 `enable`、端点不可用时隐藏控件。
-- `front/tests/e2e-admin-smoke.mjs`：真实节点上 读 → 勾 → 复核 → 拒卷根。
+  列表（不是整份范围）、总开关只发 `enable`、端点不可用时隐藏控件；
+  `pages/Drive 共享级别`：未共享不显示下拉、改级别保持 `shared=true`、
+  好友名单按逗号拆分、下拉回填当前级别。
+- `front/tests/e2e-admin-smoke.mjs`：真实节点上 读 → 勾 → 复核 → 改级别 →
+  写好友 → 拒拼错的级别 → 拒卷根。

@@ -65,19 +65,61 @@ type shareResp struct {
 	ReqID string `json:"reqId,omitempty"`
 }
 
-// SetShareProvider 注入本节点共享范围读取器（main 装配 service.NodeShare.Snapshot）。
+// SetShareProvider 注入本节点共享范围读取器（main 装配
+// service.NodeShare.SnapshotFor）。入参是请求者节点 ID——好友能看到 private 条目。
 // nil = 未启用共享 → share 帧回空快照。可在 Start() 之后调用（见字段注释）。
-func (s *PeerJSService) SetShareProvider(p func() ShareSnapshot) {
+func (s *PeerJSService) SetShareProvider(p func(peerID string) ShareSnapshot) {
 	s.shareMu.Lock()
 	s.shareProvider = p
 	s.shareMu.Unlock()
 }
 
 // currentShareProvider 快照读取共享范围读取器（受锁保护）。
-func (s *PeerJSService) currentShareProvider() func() ShareSnapshot {
+func (s *PeerJSService) currentShareProvider() func(peerID string) ShareSnapshot {
 	s.shareMu.RLock()
 	defer s.shareMu.RUnlock()
 	return s.shareProvider
+}
+
+// ShareGate 下载门禁：判断某个 hash 能否发给请求者（doc/NETDISK.md §12.6）。
+//
+// 为什么清单与下载要分开：三档级别的本质区别就在"列不列"和"给不给"两件事上
+// （unlisted = 不列但给）。一个 provider 只能回答"清单里有什么"，答不了
+// "这个 hash 能不能取"。
+//
+// 只有 private 会挡人：public / unlisted / 未声明都放行——内容寻址取回是这套
+// 系统的既有行为，PSK 才是准入门禁。把"没声明"也挡掉会连"上传→按 hash 取回
+// 校验"这种基本自检都过不去。
+//
+// self = 本节点的本地通道（HTTP 管理 API / 本机 WS 直连），永远是"自己"。
+type ShareGate interface {
+	AllowsDownload(peerID, hash string, self bool) bool
+}
+
+// SetShareGate 注入下载门禁（main 装配 service.NodeShare）。nil = 不门禁。
+func (s *PeerJSService) SetShareGate(g ShareGate) {
+	s.shareMu.Lock()
+	s.shareGate = g
+	s.shareMu.Unlock()
+}
+
+// currentShareGate 快照读取下载门禁（受锁保护）。
+func (s *PeerJSService) currentShareGate() ShareGate {
+	s.shareMu.RLock()
+	defer s.shareMu.RUnlock()
+	return s.shareGate
+}
+
+// isSelfSession 判断会话是否来自"自己"（本机 WS 直连，即管理台/面板走
+// /ws/peer 的本地连接）。
+//
+// 为什么需要它：private 的语义是"只有自己和好友能下载"。P2P 连接上只有对端
+// 自报的 peer id，运营者自己的面板拿到的也是一个随机 id（每次可能不同），
+// 没法靠 id 认出"这是我"。而走本机 WS 进来的连接本来就是本节点的管理通道，
+// 它就是"自己"。
+func isSelfSession(c Session) bool {
+	ls, ok := c.(interface{ IsLocal() bool })
+	return ok && ls.IsLocal()
 }
 
 // shareLoadInfo announce 时上报的共享摘要（loadInfo.shares），只含**数量**。
@@ -87,12 +129,16 @@ func (s *PeerJSService) currentShareProvider() func() ShareSnapshot {
 //
 // 注意：本函数作为回调注册给 HTTPDiscovery（announce 心跳每 30s 调用），
 // 每次调用都重新读 provider —— 装配晚于 Start（main 的顺序）也能生效。
+//
+// 这里以**匿名视角**（空 peerID）统计：announce 的数量会被发现服务器广播给
+// 所有查询者，不能因为"某个查询者恰好是好友"就把 private 的条目数报出去——
+// 那等于把"我有 N 个只给好友的东西"公开了。
 func (s *PeerJSService) shareLoadInfo() map[string]any {
 	p := s.currentShareProvider()
 	if p == nil {
 		return nil
 	}
-	snap := p()
+	snap := p("")
 	return map[string]any{
 		"shares": map[string]any{
 			"collections": len(snap.Collections),
@@ -104,13 +150,14 @@ func (s *PeerJSService) shareLoadInfo() map[string]any {
 
 // serveShare 应答对端的 share 查询（入站角色）。
 //
-// 注意：不区分请求者身份（ROADMAP 硬约束：第 7 阶段前不引入账号依赖）。
-// 因此这里只会返回**本来就允许公开**的内容（public 合集 + 运营者显式声明的
-// 目录内文件），受限/私有的过滤在 service.NodeShare.Snapshot 内完成。
+// 请求者身份只有一个**自报的** peer id（ROADMAP 硬约束：第 7 阶段前不引入账号
+// 依赖，也没有签名可校验）。它能做的只有一件事：让好友名单里的人看到 private
+// 条目——再多就是假装自己有身份了。unlisted 永不列出，public 全部列出，
+// 这些过滤在 service.NodeShare.SnapshotFor 内完成。
 func (s *PeerJSService) serveShare(c Session, r dcResp) {
 	snap := ShareSnapshot{}
 	if p := s.currentShareProvider(); p != nil {
-		snap = p()
+		snap = p(c.ID())
 	}
 	// 保证 JSON 里是 [] 而不是 null：前端列表渲染不必判空
 	if snap.Collections == nil {

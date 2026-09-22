@@ -80,6 +80,13 @@ func (s *WSSession) heartbeatLoop() {
 // ID 返回会话标识（本地会话为 "local"）。
 func (s *WSSession) ID() string { return s.id }
 
+// IsLocal 本机 WS 会话（/ws/peer）视为"自己"（share.go 的 isSelfSession）。
+//
+// 它承载的是本节点的管理通道（管理台/面板直连本节点），不是某个远端节点的
+// P2P 连接，因此 private 共享内容对它一律放行——运营者总得能取回自己的东西，
+// 而不必先把自己加进好友名单。
+func (s *WSSession) IsLocal() bool { return true }
+
 // SendJSON 发送文本帧（JSON 控制头）。
 func (s *WSSession) SendJSON(v any) error {
 	s.sendMu.Lock()

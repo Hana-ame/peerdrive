@@ -68,6 +68,13 @@ func (s *PeerJSService) serveFile(c Session, req dcReq) {
 		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "invalid hash", ReqID: req.ReqID})
 		return
 	}
+	// 共享级别门禁（doc/NETDISK.md §12.6）：private 的内容只给好友和自己。
+	// 只挡 private——public / unlisted / 未声明都放行（理由见 ShareGate 注释）。
+	if g := s.currentShareGate(); g != nil && !g.AllowsDownload(c.ID(), req.Hash, isSelfSession(c)) {
+		log.LogInfo("peerjs: deny private download hash=%s peer=%s", req.Hash, c.ID())
+		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "private", ReqID: req.ReqID})
+		return
+	}
 	// trace 防环：本节点已在请求链路上 → 拒绝（防 A←→B 互连回源死循环）
 	if s.ID() != "" {
 		for _, id := range req.Trace {

@@ -110,15 +110,35 @@ ws.addEventListener('open', async () => {
     const scope = await send('admin', { method: 'GET', path: '/peerjs/share' })
     ok('admin GET /peerjs/share', scope.status === 200 && Array.isArray(scope.body.files) && Array.isArray(scope.body.selected), JSON.stringify(Object.keys(scope.body || {})))
 
-    const pick = await send('admin', { method: 'POST', path: '/peerjs/share/files', body: { hashes: [hash], shared: true } })
-    ok('admin POST /peerjs/share/files', pick.status === 200 && (pick.body.files || []).includes(hash), JSON.stringify(pick.body.files))
+    // 条目形如 {id, level}；selected 同时给一份纯 hash 列表方便前端渲染
+    const pick = await send('admin', { method: 'POST', path: '/peerjs/share/files', body: { hashes: [hash], shared: true, level: 'public' } })
+    const ids = (pick.body.selected || pick.body.files || []).map(it => (typeof it === 'string' ? it : it?.id))
+    ok('admin POST /peerjs/share/files', pick.status === 200 && ids.includes(hash), JSON.stringify(pick.body.selected))
 
     const scope2 = await send('admin', { method: 'GET', path: '/peerjs/share' })
-    ok('勾选后进入 selected', (scope2.body.selected || []).includes(hash), JSON.stringify(scope2.body.selected))
+    const ids2 = (scope2.body.selected || []).map(it => (typeof it === 'string' ? it : it?.id))
+    ok('勾选后进入 selected', ids2.includes(hash), JSON.stringify(scope2.body.selected))
     // 候选清单有 1000 条上限（索引很大时新文件可能不在那一页），但只要在页里
     // 就必须标成已共享——勾选本身由 selected 兜底，不受分页影响。
     const row = (scope2.body.files || []).find(f => f.hash === hash)
     ok('候选清单里标记为已共享', !row || row.shared === true, JSON.stringify(row))
+
+    // 9-10. 共享级别（doc/NETDISK.md §12.6）：三档可写可读；拼错的级别整批拒绝。
+    const lvl = await send('admin', { method: 'POST', path: '/peerjs/share/files', body: { hashes: [hash], shared: true, level: 'private' } })
+    const lv = ((lvl.body.selected || []).map(it => (typeof it === 'string' ? { id: it } : it))).find(it => it?.id === hash)
+    ok('级别可设为 private', lvl.status === 200 && lv?.level === 'private', JSON.stringify(lv))
+
+    ok('GET /peerjs/share 回三档级别取值', Array.isArray(scope2.body.levels) && scope2.body.levels.join(',') === 'public,unlisted,private', JSON.stringify(scope2.body.levels))
+
+    const fr = await send('admin', { method: 'PUT', path: '/peerjs/share', body: { friends: ['e2e-buddy'] } })
+    ok('好友名单可写', fr.status === 200 && (fr.body.friends || []).includes('e2e-buddy'), JSON.stringify(fr.body.friends))
+
+    try {
+      await send('admin', { method: 'POST', path: '/peerjs/share/files', body: { hashes: [hash], shared: true, level: 'pubilc' } })
+      ok('拼错的级别被拒（不兜成 public）', false, 'expected reject')
+    } catch (e) {
+      ok('拼错的级别被拒（不兜成 public）', e.message.includes('400'), e.message)
+    }
 
     try {
       await send('admin', { method: 'PUT', path: '/peerjs/share', body: { dirs: ['/'] } })

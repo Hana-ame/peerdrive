@@ -32,7 +32,7 @@ func newShareTestService(t *testing.T) *PeerJSService {
 // null（前端列表渲染不判空），空共享是合法业务状态（不是 err）。
 func TestServeShareResponseContract(t *testing.T) {
 	svc := newShareTestService(t)
-	svc.SetShareProvider(func() ShareSnapshot {
+	svc.SetShareProvider(func(peerID string) ShareSnapshot {
 		return ShareSnapshot{
 			Collections: []ShareCollectionInfo{{
 				Hash: "aa", Name: "合集", Size: 1, Tags: []string{"t"},
@@ -127,7 +127,7 @@ func TestServeShareWithoutProviderIsEmptyArrays(t *testing.T) {
 // loadInfo 就等于公开"本节点持有什么"（ROADMAP 里明确点名的泄露面）。
 func TestShareLoadInfoCountsOnly(t *testing.T) {
 	svc := newShareTestService(t)
-	svc.SetShareProvider(func() ShareSnapshot {
+	svc.SetShareProvider(func(peerID string) ShareSnapshot {
 		return ShareSnapshot{
 			Collections: []ShareCollectionInfo{{Hash: "secret-hash"}},
 			Files:       []ShareFileInfo{{Hash: "f1"}, {Hash: "f2"}},

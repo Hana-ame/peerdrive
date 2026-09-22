@@ -48,7 +48,7 @@ func TestNodeShareRuntimeChoiceBeatsEnvAfterRestart(t *testing.T) {
 	if _, err := s1.Update(ScopePatch{Enable: boolPtr(true)}); err != nil {
 		t.Fatalf("update enable: %v", err)
 	}
-	if _, err := s1.SetFilesShared([]string{h}, true); err != nil {
+	if _, err := s1.SetFilesShared([]string{h}, true, ""); err != nil {
 		t.Fatalf("share file: %v", err)
 	}
 
@@ -57,7 +57,7 @@ func TestNodeShareRuntimeChoiceBeatsEnvAfterRestart(t *testing.T) {
 	if !s2.Scope().Enable {
 		t.Fatal("runtime choice must survive restart (enable lost)")
 	}
-	if got := s2.Scope().Files; len(got) != 1 || got[0] != h {
+	if got := s2.Scope().Files; len(got) != 1 || got[0].ID != h {
 		t.Fatalf("runtime files = %v, want [%s]", got, h)
 	}
 	if got := len(s2.Snapshot().Files); got != 1 {
@@ -74,7 +74,7 @@ func TestNodeShareUpdateRejectsVolumeRoot(t *testing.T) {
 	dir := t.TempDir()
 	s := newScopeShare(t, dir, true, nil)
 	root := config.DefaultRootPath() // Unix "/" / Windows "C:\"
-	if _, err := s.Update(ScopePatch{Dirs: &[]string{root}}); err == nil {
+	if _, err := s.Update(ScopePatch{Dirs: &[]ShareItem{{ID: root}}}); err == nil {
 		t.Fatalf("volume root %q must be rejected", root)
 	}
 	if got := s.Scope().Dirs; len(got) != 0 {
@@ -86,7 +86,7 @@ func TestNodeShareUpdateRejectsVolumeRoot(t *testing.T) {
 func TestNodeShareUpdateRejectsInvalidHash(t *testing.T) {
 	dir := t.TempDir()
 	s := newScopeShare(t, dir, true, nil)
-	bad := []string{sha("aa"), "not-a-hash"}
+	bad := []ShareItem{{ID: sha("aa")}, {ID: "not-a-hash"}}
 	if _, err := s.Update(ScopePatch{Files: &bad}); err == nil {
 		t.Fatal("invalid hash must be rejected")
 	}
@@ -109,13 +109,13 @@ func TestNodeShareSingleFileOutsideDirs(t *testing.T) {
 		{Hash: h2, Name: "out.txt", Path: filepath.Join(other, "out.txt"), Size: 2},
 	}
 	s := newScopeShare(t, base, true, files)
-	if _, err := s.Update(ScopePatch{Dirs: &[]string{shared}}); err != nil {
+	if _, err := s.Update(ScopePatch{Dirs: &[]ShareItem{{ID: shared}}}); err != nil {
 		t.Fatalf("update dirs: %v", err)
 	}
 	if got := len(s.Snapshot().Files); got != 1 {
 		t.Fatalf("before: files = %d, want 1 (only the one under shared dir)", got)
 	}
-	if _, err := s.SetFilesShared([]string{h2}, true); err != nil {
+	if _, err := s.SetFilesShared([]string{h2}, true, ""); err != nil {
 		t.Fatalf("share file: %v", err)
 	}
 	snap := s.Snapshot()
@@ -123,7 +123,7 @@ func TestNodeShareSingleFileOutsideDirs(t *testing.T) {
 		t.Fatalf("after: files = %d, want 2 (dir + single pick): %+v", len(snap.Files), snap.Files)
 	}
 	// 取消勾选：目录带来的那份**勾不掉**（它属于目录共享，得去目录列表里改）
-	if _, err := s.SetFilesShared([]string{h2}, false); err != nil {
+	if _, err := s.SetFilesShared([]string{h2}, false, ""); err != nil {
 		t.Fatalf("unshare file: %v", err)
 	}
 	if got := len(s.Snapshot().Files); got != 1 {
@@ -144,7 +144,7 @@ func TestNodeShareCandidateFilesFlags(t *testing.T) {
 		{Hash: h2, Name: "out.txt", Path: filepath.Join(base, "out.txt"), Size: 2},
 	}
 	s := newScopeShare(t, base, true, files)
-	if _, err := s.Update(ScopePatch{Dirs: &[]string{shared}}); err != nil {
+	if _, err := s.Update(ScopePatch{Dirs: &[]ShareItem{{ID: shared}}}); err != nil {
 		t.Fatalf("update dirs: %v", err)
 	}
 	items := s.CandidateFiles()
@@ -172,10 +172,10 @@ func TestNodeShareUpdatePartialKeepsOthers(t *testing.T) {
 	shared := filepath.Join(dir, "shared")
 	h := sha("41")
 	s := newScopeShare(t, dir, true, []transport.FileInfo{{Hash: h, Name: "a", Path: filepath.Join(shared, "a")}})
-	if _, err := s.Update(ScopePatch{Dirs: &[]string{shared}}); err != nil {
+	if _, err := s.Update(ScopePatch{Dirs: &[]ShareItem{{ID: shared}}}); err != nil {
 		t.Fatalf("update dirs: %v", err)
 	}
-	if _, err := s.SetFilesShared([]string{h}, true); err != nil {
+	if _, err := s.SetFilesShared([]string{h}, true, ""); err != nil {
 		t.Fatalf("share file: %v", err)
 	}
 	// 只改 enable
@@ -205,14 +205,14 @@ func TestNodeShareDirHookFiresOncePerNewDir(t *testing.T) {
 	var got []string
 	s.SetDirHook(func(dirs []string) { got = append(got, dirs...) })
 
-	if _, err := s.Update(ScopePatch{Dirs: &[]string{a}}); err != nil {
+	if _, err := s.Update(ScopePatch{Dirs: &[]ShareItem{{ID: a}}}); err != nil {
 		t.Fatalf("update dirs: %v", err)
 	}
 	if len(got) != 1 || got[0] != a {
 		t.Fatalf("hook = %v, want [%s]", got, a)
 	}
 	// 追加 b：只通知 b（a 已经注册过）
-	if _, err := s.Update(ScopePatch{Dirs: &[]string{a, b}}); err != nil {
+	if _, err := s.Update(ScopePatch{Dirs: &[]ShareItem{{ID: a}, {ID: b}}}); err != nil {
 		t.Fatalf("update dirs: %v", err)
 	}
 	if len(got) != 2 || got[1] != b {
@@ -239,7 +239,7 @@ func TestNodeShareSelectedFileBeyondIndexPage(t *testing.T) {
 		}
 		return nil, fmt.Errorf("not found: %s", hash)
 	})
-	if _, err := s.SetFilesShared([]string{offPage}, true); err != nil {
+	if _, err := s.SetFilesShared([]string{offPage}, true, ""); err != nil {
 		t.Fatalf("share file: %v", err)
 	}
 	snap := s.Snapshot()

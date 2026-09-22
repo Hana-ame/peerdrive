@@ -30,10 +30,16 @@ type fakeSession struct {
 	// frames 完整帧记录（含 SendFrame 的二进制体）——forward 数据透传断言用
 	frames []fakeFrame
 
+	// local = 本机 WS 直连（"自己"），见 share.go 的 isSelfSession
+	local bool
+
 	onMessage func(peerjs.Frame)
 	onClose   func()
 	closed    bool
 }
+
+// IsLocal 实现 isSelfSession 识别的可选接口（本机 WS 会话才有）。
+func (f *fakeSession) IsLocal() bool { return f.local }
 
 // fakeFrame 一帧的完整记录（头 JSON + 可选二进制体）。
 type fakeFrame struct {
@@ -169,6 +175,55 @@ func TestServeFile_InvalidHashNoPanic(t *testing.T) {
 		require.Len(t, types, 1, "hash=%q 应恰好回一个 err 帧", bad)
 		assert.Equal(t, "err", types[0], "hash=%q", bad)
 	}
+}
+
+// TestServeFile_PrivateDeniedToStrangers private 内容：陌生人取不到，好友/自己能取
+// （doc/NETDISK.md §12.6）。
+//
+// 为什么钉在传输层而不是只测 service：门禁的接线在 serveFile 里（gate 为 nil 时
+// 放行），"装了 gate 却没在 req 上调用"是那种单看 service 全绿、线上全漏的错。
+func TestServeFile_PrivateDeniedToStrangers(t *testing.T) {
+	initTestDB(t)
+	svc := newTestPeerJSService(t)
+	content := []byte("private-content")
+	inRoot := filepath.Join(svc.fileIndex.uploadDir, "secret.bin")
+	require.NoError(t, os.MkdirAll(svc.fileIndex.uploadDir, 0o755))
+	require.NoError(t, os.WriteFile(inRoot, content, 0o644))
+	fi, err := svc.fileIndex.Create(inRoot)
+	require.NoError(t, err)
+
+	// 假门禁：只认 hash==fi.Hash 为 private，好友名单里只有 "buddy"
+	svc.SetShareGate(fakeShareGate{private: fi.Hash, friends: []string{"buddy"}})
+
+	stranger := &fakeSession{id: "stranger"}
+	svc.serveFile(stranger, dcReq{Type: "req", Hash: fi.Hash, Size: -1, ReqID: "r1"})
+	require.Equal(t, []string{"err"}, stranger.sentTypes(), "private 不得发给陌生人")
+
+	friend := &fakeSession{id: "buddy"}
+	svc.serveFile(friend, dcReq{Type: "req", Hash: fi.Hash, Size: -1, ReqID: "r1"})
+	require.Equal(t, []string{"meta", "data", "done"}, friend.sentFrameTypes(), "好友必须能取")
+
+	self := &fakeSession{id: "whatever", local: true}
+	svc.serveFile(self, dcReq{Type: "req", Hash: fi.Hash, Size: -1, ReqID: "r1"})
+	require.Equal(t, []string{"meta", "data", "done"}, self.sentFrameTypes(), "自己（本地通道）必须能取")
+}
+
+// fakeShareGate 下载门禁假实现（只认一个 private hash + 一份好友名单）。
+type fakeShareGate struct {
+	private string
+	friends []string
+}
+
+func (g fakeShareGate) AllowsDownload(peerID, hash string, self bool) bool {
+	if self || hash != g.private {
+		return true
+	}
+	for _, f := range g.friends {
+		if f == peerID {
+			return true
+		}
+	}
+	return false
 }
 
 // TestServeFile_IndexPathOutsideRoot 索引命中但路径越权 → err 帧，不回传
