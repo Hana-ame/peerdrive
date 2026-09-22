@@ -273,3 +273,47 @@ func TestNodeShareCollectionVisibilityDowngradesToPrivate(t *testing.T) {
 		t.Fatal("restricted collection entry must be allowed to friends (private fallback)")
 	}
 }
+
+// TestNodeShareCollectionManifestFollowsLevel 合集 manifest 自身也受级别约束。
+//
+// 背景：manifest 就是一份按内容寻址存的 JSON（hash 即它的 sha256），凭 hash 能
+// 直接 req 回条目清单——面板的「合集整包链接」正是靠这条。如果不把合集自身的
+// hash 也算进级别表，private 合集的 manifest 会被陌生人取走：文件内容仍被条目
+// 级别挡着，但条目路径与 hash 全泄了（等于把目录结构交出去）。
+func TestNodeShareCollectionManifestFollowsLevel(t *testing.T) {
+	base := t.TempDir()
+	h := sha("a1")
+	cid := sha("b2")
+	colls := map[string]*model.AnonCollection{
+		cid: {FriendlyName: "pkg", Entries: []model.AnonCollectionEntry{{Path: "a.txt", Hash: h}}},
+	}
+	for k := range colls {
+		for i := range colls[k].Entries {
+			colls[k].Entries[i].Normalize()
+		}
+	}
+	s := newScopeShare(t, base, true, nil)
+	s.SetAnonAccess(func(hash string) (*model.AnonCollection, error) { return colls[hash], nil },
+		func() ([]model.AnonCollectionSummary, error) { return nil, nil })
+
+	if _, err := s.Update(ScopePatch{Collections: &[]ShareItem{{ID: cid, Level: model.LevelPrivate}}}); err != nil {
+		t.Fatalf("collections: %v", err)
+	}
+	if s.AllowsDownload("stranger", cid, false) {
+		t.Fatal("private collection manifest must be denied to strangers")
+	}
+	if !s.AllowsDownload("stranger", cid, true) {
+		t.Fatal("self must always reach its own collection manifest")
+	}
+
+	// unlisted 合集：不列出，但 manifest 凭 hash 可取（否则整包链接就没有意义）
+	if _, err := s.Update(ScopePatch{Collections: &[]ShareItem{{ID: cid, Level: model.LevelUnlisted}}}); err != nil {
+		t.Fatalf("collections: %v", err)
+	}
+	if !s.AllowsDownload("stranger", cid, false) {
+		t.Fatal("unlisted collection manifest must still be fetchable by hash")
+	}
+	if !s.AllowsDownload("stranger", h, false) {
+		t.Fatal("unlisted collection entry must still be downloadable")
+	}
+}

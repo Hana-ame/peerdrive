@@ -1739,6 +1739,8 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
       // 稳定身份与分享链接（自检要能直接读到，而不是靠解析 DOM）
       myId: function () { return myId },
       shareLink: shareLink,
+      // 链接带来的那条内容识别结果（自检用：'file' / 'collection'）
+      linkedKind: function () { return linkedKind },
     }
   }
   var current = null // 当前选中的 nodeId
@@ -1746,6 +1748,15 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
   // pendingHash 由分享链接（?hash=<64hex>）带来。它特意**不**依赖清单：unlisted
   // 的内容按定义就不在清单里（见 renderLinked）。
   var pendingHash = ''
+  // 链接带来的那条到底是**文件**还是**合集**。
+  // 合集 manifest（entries 清单）本身就是按内容寻址存的一份 JSON，hash 就是它的
+  // sha256，所以合集 hash 同样能被 req 取回——取回来的就是条目清单。识别方式：
+  // 清单里命中就直接用，清单里没有（unlisted）就取回来看看是不是 manifest。
+  var linkedKind = '' // 'file' | 'collection'
+  var linkedColl = null // {name, entries:[{path,hash}], fromList}
+  var linkedFor = '' // 已识别过的 "<nodeId>:<hash>"，换节点或换链接才重来
+  var linkedBusy = false // 识别中（防止清单每刷新一次就重复取回）
+  var LINK_SNIFF_BYTES = 2 * 1024 * 1024 // 嗅探上限：manifest 通常几 KB
 
   // ── 小工具 ────────────────────────────────────────────────────────────
   var $ = function (id) { return document.getElementById(id) }
@@ -2101,7 +2112,9 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
       html += '<h2 style="margin-top:16px">合集</h2>'
       snap.collections.forEach(function (c, ci) {
         var entries = Array.isArray(c.entries) ? c.entries : []
-        html += '<details><summary>' + esc(c.name || String(c.hash).slice(0, 12) + '…') + ' · ' + entries.length + ' 个条目</summary>'
+        // 整包一条链接：合集 manifest 本身能凭 hash 取回，所以对方不在清单里也能拿到
+        html += '<details><summary>' + esc(c.name || String(c.hash).slice(0, 12) + '…') + ' · ' + entries.length + ' 个条目' +
+          ' <button class="small ghost" data-coll-link="' + ci + '" title="生成这个合集的分享链接（整包一条）">链接</button></summary>'
         html += '<table><thead><tr><th>路径</th><th class="num">大小</th><th style="width:210px"></th></tr></thead><tbody>'
         entries.forEach(function (e, ei) {
           html += '<tr>' +
@@ -2118,9 +2131,14 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
     }
     box.innerHTML = html
 
-    var bind = function (attr, handler) {
+    // stop=true 用于"按钮嵌在 <summary> 里"的情形：不拦住的话点按钮会顺手把
+    // details 展开/收起（合集标题行就是这种）。
+    var bind = function (attr, handler, stop) {
       Array.prototype.forEach.call(box.querySelectorAll('[' + attr + ']'), function (el) {
-        el.addEventListener('click', function () { handler(el.getAttribute(attr)) })
+        el.addEventListener('click', function (e) {
+          if (stop) { e.preventDefault(); e.stopPropagation() }
+          handler(el.getAttribute(attr))
+        })
       })
     }
     var findFile = function (i) { return snap.files[Number(i)] }
@@ -2140,6 +2158,10 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
       var e = findEntry(v)
       copyShareLink(s.id, e.hash, String(e.path || ''))
     })
+    bind('data-coll-link', function (v) {
+      var c = snap.collections[Number(v)]
+      copyShareLink(s.id, c.hash, String(c.name || c.hash))
+    }, true)
   }
 
   // renderLinked 渲染「分享链接带来的那一条内容」。
@@ -2158,6 +2180,23 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
         esc(short) + '</span>），连上节点后即可取回。</div>'
       return
     }
+    // 清单还没到就先别判断：此刻既不知道它是文件还是合集，判断了也不会重来
+    // （linkedFor 已记过账），会把"合集链接"误判成文件。
+    if (!s.snapshot) {
+      box.innerHTML = '<div class="empty">正在获取对方的共享清单…</div>'
+      return
+    }
+    var key = s.id + ':' + h
+    if (linkedFor !== key) {
+      if (!linkedBusy) { linkedBusy = true; resolveLinked(s, key) }
+      // 占位必须**在它跑完之后再判一次**：命中清单那条路是同步走完的（里面已经
+      // 自己重画过一次），无条件写占位会把刚画好的表格覆盖成"正在识别…"。
+      if (linkedFor !== key) {
+        box.innerHTML = '<div class="empty">正在识别链接里的内容…</div>'
+        return
+      }
+    }
+    if (linkedKind === 'collection' && linkedColl) { renderLinkedColl(s, h); return }
     var named = nameForHash(s, h)
     box.innerHTML =
       '<div class="hint">这条内容来自分享链接：<span class="mono">' + esc(short) + '</span>' +
@@ -2173,6 +2212,114 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
     $('btn-linked-copy').addEventListener('click', function () {
       copyShareLink(s.id, h, named || '')
     })
+  }
+
+  // resolveLinked 判断链接里那条是文件还是合集（结果写进 linkedKind/linkedColl）。
+  //
+  // 为什么"取回来看"是可行且必要的：合集 manifest 就是一份按内容寻址存的 JSON，
+  // 而 unlisted 合集按定义不在清单里——不取就永远只能说"清单里没有它"，拿到链接
+  // 的人依然什么都看不到。取回失败（private / 断线）一律按文件处理：那样「取回」
+  // 会把服务端的真实原因显示出来，比这里猜一个原因强。
+  async function resolveLinked(s, key) {
+    try {
+      var snap = s && s.snapshot
+      var cs = (snap && snap.collections) || []
+      for (var i = 0; i < cs.length; i++) {
+        if (cs[i].hash !== pendingHash) continue
+        linkedKind = 'collection'
+        linkedColl = {
+          name: cs[i].name || cs[i].friendly_name || '',
+          entries: (cs[i].entries || []).map(manifestEntry),
+          fromList: true,
+        }
+        linkedFor = key
+        return
+      }
+      var inFiles = ((snap && snap.files) || []).filter(function (f) { return f.hash === pendingHash })
+      if (inFiles.length) {
+        linkedKind = 'file'
+        linkedColl = null
+        linkedFor = key
+        return
+      }
+      var bytes = await s.client.fetch(pendingHash, { maxBytes: LINK_SNIFF_BYTES })
+      var obj = null
+      try { obj = JSON.parse(new TextDecoder().decode(bytes)) } catch (e) { obj = null }
+      if (obj && Array.isArray(obj.entries)) {
+        linkedKind = 'collection'
+        linkedColl = {
+          name: obj.friendly_name || '',
+          entries: obj.entries.map(manifestEntry).filter(function (e) { return e.hash }),
+          fromList: false,
+        }
+      } else {
+        linkedKind = 'file'
+        linkedColl = null
+      }
+      linkedFor = key
+    } catch (e) {
+      linkedKind = 'file'
+      linkedColl = null
+      // 也记上账：否则清单每刷新一次就重取一次，失败时会一直转圈
+      linkedFor = key
+    } finally {
+      linkedBusy = false
+      renderLinked(s)
+    }
+  }
+
+  // manifestEntry 把 manifest 的条目统一成 {path, hash}：新格式是 providers[]，
+  // 老格式直接给 hash（panel 侧两种都要认，链接可能是老节点生成的）。
+  function manifestEntry(e) {
+    var h = ''
+    if (e) h = e.hash || ((e.providers || [])[0] || {}).value || ''
+    return { path: (e && e.path) || '', hash: String(h || '') }
+  }
+
+  // renderLinkedColl 把链接带来的合集单独列在清单上方（条目可逐条保存/预览/再分享）。
+  function renderLinkedColl(s, h) {
+    var box = $('linked')
+    var entries = linkedColl.entries || []
+    var title = linkedColl.name || (h.slice(0, 12) + '…')
+    var html = '<div class="hint">这条链接指向一个<b>合集</b>：' + esc(title) +
+      '（' + entries.length + ' 个条目）'
+    if (!linkedColl.fromList) {
+      html += ' —— 它不在对方的共享清单里，是凭 hash 取到的（unlisted 就是这个意思：不列出，但知道 hash 就能取）'
+    }
+    html += '</div>'
+    if (!entries.length) {
+      html += '<div class="empty">这个合集没有条目。</div>'
+    } else {
+      html += '<table><thead><tr><th>路径</th><th style="width:210px"></th></tr></thead><tbody>'
+      entries.forEach(function (e, i) {
+        html += '<tr><td>' + esc(e.path || e.hash) + '</td>' +
+          '<td class="num">' +
+          '<button class="small" data-lsave="' + i + '">保存</button> ' +
+          '<button class="small ghost" data-lpeek="' + i + '">预览</button> ' +
+          '<button class="small ghost" data-llink="' + i + '">链接</button>' +
+          '</td></tr>'
+      })
+      html += '</tbody></table>'
+    }
+    html += '<div class="row">' +
+      '<button class="small ghost" id="btn-linked-copy">复制链接</button>' +
+      '</div>' +
+      '<div class="hint faint">面板只能逐条存到浏览器；要整包存进自己的节点，用管理台的「保存整个合集」（教程第五章）。</div>'
+    box.innerHTML = html
+
+    var at = function (i) { return (linkedColl.entries || [])[i] }
+    var bindL = function (attr, fn) {
+      Array.prototype.forEach.call(box.querySelectorAll('[' + attr + ']'), function (el) {
+        el.addEventListener('click', function () { fn(Number(el.getAttribute(attr))) })
+      })
+    }
+    bindL('data-lsave', function (i) { download(s, at(i)) })
+    bindL('data-lpeek', function (i) { preview(s, at(i)) })
+    bindL('data-llink', function (i) {
+      var e = at(i)
+      copyShareLink(s.id, e.hash, String(e.path || ''))
+    })
+    $('btn-linked-copy').addEventListener('click', function () { copyShareLink(s.id, h, title) })
   }
 
   // nameForHash 在已拿到的清单里找 hash 对应的名字（只为显示，找不到不算错）。

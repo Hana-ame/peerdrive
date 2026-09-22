@@ -84,6 +84,52 @@ describe('面板 / 分享链接（unlisted 的出口）', () => {
     assert.match(src, /\^\[0-9a-f\]\{64\}\$\/i/)
   })
 
+  // 合集整包一条链接：合集 manifest 本身就是按内容寻址存的一份 JSON（hash 即它的
+  // sha256），所以"凭 hash 取回"对合集同样成立——不列在清单里的合集也能这样给出去。
+  it('合集标题行有整包的「链接」按钮', () => {
+    assert.match(src, /data-coll-link=/)
+    // 按钮嵌在 <summary> 里：不拦住事件会顺手把 details 展开/收起
+    assert.match(src, /e\.stopPropagation\(\)/)
+  })
+
+  it('链接指向合集时能识别出是合集（清单命中，或取回来看是不是 manifest）', () => {
+    assert.match(src, /function resolveLinked\(/)
+    // ① 清单里就有这个合集 → 直接用，不用取
+    assert.match(src, /snap\.collections/)
+    assert.match(src, /linkedKind = 'collection'/)
+    // ② 清单里没有（unlisted）→ 取回来看是不是 manifest（有 entries 数组）
+    assert.match(src, /Array\.isArray\(obj\.entries\)/)
+    // 取回要有上限：否则一个几 GB 的文件链接会先被整份拉进内存再判断
+    assert.match(src, /LINK_SNIFF_BYTES/)
+  })
+
+  it('识别结果按 节点+hash 记账，失败也记账（否则会一直转圈重取）', () => {
+    const fn = src.slice(src.indexOf('async function resolveLinked('), src.indexOf('async function resolveLinked(') + 2200)
+    assert.match(fn, /linkedFor = key/)
+    assert.match(fn, /linkedBusy = false/)
+  })
+
+  it('占位在 resolveLinked 跑完之后再判一次（同步命中清单时别把表格覆盖掉）', () => {
+    // 真踩过：命中清单那条路没有 await，是同步走完的（里面已自己重画过一次），
+    // 调用方紧接着无条件写"正在识别…"就把刚画好的表格盖了 —— 表现是
+    // linkedKind 已经是 collection，而 #linked 里一行都没有。
+    const fn = src.slice(src.indexOf('function renderLinked('), src.indexOf('function renderLinked(') + 2600)
+    const kick = fn.indexOf('resolveLinked(s, key)')
+    const placeholder = fn.indexOf('正在识别链接里的内容')
+    const guard1 = fn.indexOf('linkedFor !== key')
+    const guard2 = fn.indexOf('linkedFor !== key', guard1 + 1)
+    assert.ok(kick > 0 && placeholder > kick, '占位必须写在启动识别之后')
+    assert.ok(guard2 > kick && guard2 < placeholder, '写占位前要再判一次 linkedFor')
+  })
+
+  it('合集链接的条目能逐条保存/预览/再分享', () => {
+    assert.match(src, /data-lsave=/)
+    assert.match(src, /data-lpeek=/)
+    assert.match(src, /data-llink=/)
+    // 面板没有"整包保存"（多次下载会被浏览器拦）：明确引到管理台
+    assert.match(src, /保存整个合集/)
+  })
+
   it('复制有降级路径（file:// 下剪贴板 API 常被拒）', () => {
     assert.match(src, /navigator\.clipboard/)
     assert.match(src, /execCommand\('copy'\)/)

@@ -70,6 +70,29 @@ async function waitLog(page, needle, ms = 40000) {
   return false
 }
 
+// linkURL 拼一条分享链接（与面板 shareLink() 同形：node + hash + auto=1）
+const linkURL = (hash) => `file://${PANEL}?node=${NODE}&host=127.0.0.1&port=${SIG_PORT}` +
+  `&path=/&key=${SIG_KEY}&secure=0&auto=1&hash=${hash}`
+
+// waitLinkedKind 等面板把链接里那条内容识别完（'file' / 'collection'）。
+// 识别是异步的：清单里命中就直接用，命中不了要真去取一次 manifest 才知道。
+async function waitLinkedKind(page, want, ms = 40000) {
+  const t0 = Date.now()
+  const read = () => page.evaluate(
+    () => (window.__panel && window.__panel.linkedKind) ? window.__panel.linkedKind() : '',
+  )
+  while (Date.now() - t0 < ms) {
+    const k = await read()
+    if (k === want) return k
+    await page.waitForTimeout(500)
+  }
+  return (await read()) || '（未就绪）'
+}
+
+const linkedRows = (page) => page.evaluate(
+  () => document.querySelectorAll('#linked table tbody tr').length,
+)
+
 const scope0 = await get()
 const target = (scope0.files || []).find((f) => String(f.name || '').includes(TARGET_NAME))
 if (!target) {
@@ -122,6 +145,52 @@ try {
   await page.click('#btn-linked-get')
   if (await waitLog(page, 'sha256 已校验')) ok('private：好友（固定 id 进了名单）能取回')
   else bad('好友仍取不到 private')
+
+  // 5-8. 合集整包链接。合集 manifest 本身就是一份按内容寻址存的 JSON（hash 即它的
+  //      sha256），所以"凭 hash 取回"对合集同样成立——**不在清单里的合集也能这样
+  //      给出去**，这正是 unlisted 合集唯一说得通的出口。
+  const COLL_NAME = 'e2e-coll-' + Date.now()
+  const created = await fetch(`${API}/anon/collections`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ friendly_name: COLL_NAME, entries: [{ path: 'in-coll.txt', hash: target.hash }] }),
+  }).then((r) => r.json())
+  const collHash = created && created.hash
+  if (!collHash) {
+    bad('创建测试合集失败：' + JSON.stringify(created))
+  } else {
+    const page2 = await browser.newPage({ acceptDownloads: true })
+    try {
+      // 5. public 合集：清单里就有它，链接直接列出条目
+      await put({ collections: [{ id: collHash, level: 'public' }] })
+      await page2.goto(linkURL(collHash), { waitUntil: 'load', timeout: 60000 })
+      const k1 = await waitLinkedKind(page2, 'collection')
+      if (k1 === 'collection') ok('合集链接被识别成合集（清单里有的）')
+      else bad('合集链接没识别成合集：' + k1)
+      const rows1 = await linkedRows(page2)
+      if (rows1 >= 1) ok('合集链接列出条目（' + rows1 + ' 行）')
+      else bad('合集链接没列出条目')
+
+      // 6-7. 改成 unlisted：不在清单里，但凭链接仍取得到（manifest 按 hash 可取）
+      await put({ collections: [{ id: collHash, level: 'unlisted' }] })
+      await page2.reload({ waitUntil: 'load' })
+      const k2 = await waitLinkedKind(page2, 'collection')
+      if (k2 === 'collection') ok('unlisted 合集：凭链接仍能取回（manifest 按 hash 可取）')
+      else bad('unlisted 合集取不回来：' + k2)
+      const listed = await page2.evaluate(() => document.querySelector('#shares')?.textContent || '')
+      if (!listed.includes(COLL_NAME)) ok('unlisted 合集不出现在共享清单里')
+      else bad('unlisted 合集却出现在清单里')
+
+      // 8. private 合集：连 manifest 也不给陌生人（否则条目路径与 hash 全泄）
+      await put({ collections: [{ id: collHash, level: 'private' }] })
+      await page2.reload({ waitUntil: 'load' })
+      const k3 = await waitLinkedKind(page2, 'file')
+      if (k3 === 'file') ok('private 合集：陌生人连 manifest 都取不到')
+      else bad('private 合集的 manifest 被陌生人拿到了：' + k3)
+    } finally {
+      await page2.close()
+    }
+  }
 } finally {
   await browser.close()
 }

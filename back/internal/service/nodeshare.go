@@ -698,6 +698,10 @@ func (s *NodeShare) collectionHashesLocked(id string) []string {
 		if err != nil || coll == nil {
 			continue
 		}
+		// 合集自身的 hash 也算进去：manifest 就是一份按内容寻址存的 JSON，凭
+		// hash 能直接取回（面板的合集链接正是靠它）。漏了它 → private 合集的
+		// manifest 会被陌生人取走：内容仍被条目级别挡着，但条目路径与 hash 全泄。
+		out = append(out, h)
 		for _, e := range coll.Entries {
 			if eh := e.GetPrimaryHash(); eh != "" {
 				out = append(out, eh)
