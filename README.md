@@ -33,6 +33,58 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 
 ---
 
+## 功能介绍：现在能做什么
+
+> 以下能力都在本分支（`refactor`）实跑过：后端单测 550 · 集成 21 · 网盘端到端脚本 8 项断言 ·
+> 面板真实浏览器 9 项断言 · 管理面冒烟 7 项断言，CI 覆盖合计 843 个用例
+> （逐项清单、命令与盲区见 `doc/testing/README.md`）。
+
+### 不开节点也能用（公共面板 `dist/panel.html`）
+
+| 能力 | 说明 |
+|------|------|
+| 连节点 | 填节点 peer id 直连，或「自动搜索」列出信令上在线的节点（打信令的 REST 接口，不占 WebRTC 连接） |
+| 看对方的共享文件链接 | 连上后自动拉 `share` 清单：合集 / 文件 / 目录。只显示对方**显式声明**开放的范围 |
+| 保存 · 预览 | 「保存」= 流式拉取 + 浏览器下载；≤2MB 可「预览」。任务行带进度与取消 |
+| 取回校验 | 任务行「取回校验」按 hash 重新拉一遍并复算 sha256 —— 入库成功 ≠ 能取回，这才是闭环证据 |
+| 本地入库 | 选本地文件分片上传（64KB/片，串行，一条连接一个上传流），节点算 sha256 存进 CAS 并返回 hash |
+| 网络入库 | 给一个 URL 让节点替自己去抓并入库；SSRF 防护只放行公网 http/https，内网/本机地址会被拒（**被拒是预期行为**） |
+
+### 节点运营者
+
+| 能力 | 说明 |
+|------|------|
+| 内容寻址存储 | 进来的内容一律按 sha256 落盘 `storageDir/<hash[0:2]>/<hash>`，天然去重 |
+| 文件索引 | `file_index` 表持久化 sha256 → 绝对路径，带 seq 游标做增量同步（`sync` verb） |
+| 多协议取内容 | 下载器按 `local → ipfs → ipfsgw → btdht → http` 路由（顺序与超时可配） |
+| 节点市场与加入 | 信令上发现节点，加入后落 `joined_nodes.json` 并成为常驻对端 |
+| 对外共享范围 | `share` verb；**默认全关** —— 不显式声明就不对外暴露任何清单 |
+| 准入控制 | `PEERDRIVE_PSK`：设了之后对端必须在连接上出示同一把密钥，否则所有请求回 `PSK_REQUIRED` |
+| 管理面 | 本地 WS 的 `admin` verb，内部复用 gin 的全部 HTTP controller；WebRTC 侧刻意不实现，防权限暴露 |
+| 端口转发 | `fwd-open/challenge/auth/data/close`，HMAC 质询认证 + 端口白名单 |
+
+---
+
+## 各功能是怎么实现的
+
+| 功能 | 代码位置 | 机制 |
+|------|----------|------|
+| 帧协议 | `back/internal/transport/conn.go` · `dispatchFrame`（L278） | **一份 verb 表同时服务 WS 与 WebRTC**：`req/meta/data/done/err` 拉文件；`create/upload/list/info/delete/sync` 文件索引；`share` 共享范围；`admin/admin-resp/admin-bin` 管理面；`fwd-*` 端口转发 |
+| 传输 | `back/peerjs/`（独立库 `github.com/Hana-ame/go-peerjs`） | PeerJS 信令只转发 SDP/ICE、不碰数据面；数据走 WebRTC DataChannel |
+| 发现 | `transport/http_discovery.go` / `mqtt_discovery.go` | 自托管 HTTP 发现优先于 MQTT；另有一个固定的节点级「存在房间」，让零共享内容的节点也能互联 |
+| 内容寻址落盘 | `service/anon_service.go` | `hash[:2]` 分目录；写入前校验 hash 长度（未校验时 `hash[:2]` 会越界 panic，已修） |
+| 文件索引 | `repository/file_index_repo.go` + `service/file_service.go` | SQLite 持久化 + seq 游标增量；`sync` verb 让对端只拉增量 |
+| 跨节点保存 | `service/peerpull.go` + `GET/POST /p2p/pull*` | 流式落盘 → 复算 sha256 → 登记索引，带进度 / 取消 / 去重跳过 |
+| 共享范围 | `service/nodeshare.go` + `share` verb | 与 `list` **严格区分**：`list` 是本地管理索引全量、只给可信对端；`share` 是运营者显式声明的对外范围 |
+| 路径安全 | `back/internal/pathutil` | 判定只有这一份（`Within/WithinAny`）；**读边界 ≠ 写边界**；读走 `SafeOpen`（`os.Root`），写走 `SafeWriteFileAny` 等，杜绝「判完再按路径打开」的 TOCTOU；硬链接按**打开着的句柄**判 `nlink` |
+| 准入（PSK） | `transport/psk.go` | 连接建立后本端第一帧 `psk-auth`；只拦「对端要我干活」的 verb，**绝不拦应答帧**；`local` 会话豁免 |
+| 消费端 SDK | `packages/peerdrive-client/src/` | **传输无关**：只要求传入 `{on, send, open, close}`，本包不 import peerjs；自带**增量** sha256（WebCrypto 的 `digest()` 一次性，与流式拉取冲突） |
+| 公共面板 | 同包 `panel/` → 构建产物 `dist/panel.html` | 单文件、源码内联、`file://` 可开、可托管到任意静态空间；改 `src/` 或 `panel/` 后**必须** `npm run build:panel`（CI `check:panel` 拦漂移） |
+| 节点管理台 | `front/src/pages/{Drive,Market,Peers,PeerDetail,Transfers}` | 运营者视野，调节点 HTTP API，**需要后端在跑** —— 与公共面板是两回事 |
+| 线上托管 | `https://hana-ame.github.io/peerdrive/` | push 后由 `pages.yml` 自动部署，并**部署后回头验线上**（比对本次产物指纹，防止验到上一版） |
+
+---
+
 ## 网盘链路（2026-09，`doc/NETDISK.md`）
 
 把「互联 + 文件」串成一条用户能看懂的链路，对应开发顺序里 ROADMAP 的阶段 5/6：
@@ -83,15 +135,16 @@ cd packages/peerdrive-client
 SIG_HOST=<本机IP> SIG_PORT=9100 NODE_ID=node-a node scripts/verify-panel.mjs
 
 # 测试
-cd back && go test -tags nosqlite ./... -count=1                                     # 308
-cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1    # 21（脱外网，自托管信令；必须 -p 1）
-cd back/signalserver && go test ./...            # 23（独立 go.mod，无 CI job，含 wss 用例）
-cd back/p2p_bt && go test ./...                  # 7（独立 go.mod，无 CI job）
+cd back && go test -tags nosqlite ./... -count=1                                     # 550（12 包）
+cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1    # 21 通过 / 4 跳过（脱外网，自托管信令；必须 -p 1）
+cd back/signalserver && go test ./...            # 23（独立 go.mod；✅ go-build·submodules 已覆盖）
+cd back/p2p_bt && go test ./...                  # 7（独立 go.mod；✅ 同上）
 cd front && npx vitest run                       # 88
-cd packages/peerdrive-client && npm test         # node --test（零依赖）61
+cd packages/peerdrive-client && npm test         # node --test（零依赖）98
 bash scripts/test-layers.sh                      # 或按 AOP 分层（L1-L8 + LB）逐层跑
+node front/tests/e2e-admin-smoke.mjs             # 管理面 7 项断言（需先起节点；CI 已跑）
 
-# 全部 14 个测试组件的清单、选型与盲区：doc/testing/README.md
+# 全部测试组件的清单、选型与盲区：doc/testing/README.md
 ```
 
 ## 信令服务器实现方式
