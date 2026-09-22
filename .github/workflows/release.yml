@@ -115,8 +115,56 @@ jobs:
           name: peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}
           path: back/out/peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
 
+  # 自托管信令同样要「下载即用」：教程第一章起本地信令不该先要求装 Go。
+  # 它是独立 go.mod（back/signalserver），所以单独一个 job 编，不能并进上面那个
+  # （上面 defaults.working-directory 是 back，./cmd/peersignal 不在主模块里）。
+  build-signalserver:
+    needs: gate
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest,  goos: linux,   goarch: amd64, ext: '' }
+          - { os: ubuntu-latest,  goos: linux,   goarch: arm64, ext: '' }
+          - { os: windows-latest, goos: windows, goarch: amd64, ext: '.exe' }
+          - { os: macos-latest,   goos: darwin,  goarch: amd64, ext: '' }
+          - { os: macos-latest,   goos: darwin,  goarch: arm64, ext: '' }
+
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: back/signalserver
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: back/signalserver/go.sum
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: go build -ldflags="-s -w" -o peersignal${{ matrix.ext }} ./cmd/peersignal/
+
+      - name: 按平台重命名
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p out
+          cp "peersignal${{ matrix.ext }}" "out/peersignal-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peersignal-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: back/signalserver/out/peersignal-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+
   release:
-    needs: build
+    needs: [build, build-signalserver]
     # tag 推送才发 release；手动 dispatch 默认 dry_run（只验证门禁跑得通）。
     if: ${{ github.event_name == 'push' || !inputs.dry_run }}
     runs-on: ubuntu-latest
@@ -138,3 +186,8 @@ jobs:
             **/peerdrive-windows-amd64.exe
             **/peerdrive-darwin-amd64
             **/peerdrive-darwin-arm64
+            **/peersignal-linux-amd64
+            **/peersignal-linux-arm64
+            **/peersignal-windows-amd64.exe
+            **/peersignal-darwin-amd64
+            **/peersignal-darwin-arm64
