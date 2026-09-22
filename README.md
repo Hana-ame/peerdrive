@@ -109,6 +109,9 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 
 ## 快速开始
 
+> 手把手教程（编译 → 起信令 → 起节点 → 用面板连上它 → 连不上怎么查）：
+> [`doc/tutorial/01-run-and-connect.md`](doc/tutorial/01-run-and-connect.md)
+
 ```bash
 # 后端
 cd back && go run -tags nosqlite ./cmd/server/main.go
