@@ -940,6 +940,24 @@ POST /peerjs/share/files  {hashes:[...], shared:bool, level?}  单行勾选/改�
 4. 合集自身的 `visibility` 非 public（restricted/private）时按 **private** 处理：
    AccessList 是账号列表，无身份校验不了，只给好友。
 
+### 12.6.1 消费者侧：固定身份与分享链接
+
+三档级别要有用，还得补两个"人能用得上手"的口子（2026-09-22）：
+
+1. **面板必须有固定 id**。好友名单认的是对端自报的 peer id，而 peerjs 默认每次
+   `new Peer` 都随机一个——名单里填一个明天就变的 id 等于没填，`private` 会退化成
+   "谁都拿不到，包括你答应给的那个人"。所以面板自己生成 `pd-panel-<随机>` 存进
+   localStorage，右上角可复制、可更换；id 撞车（同一浏览器开两页）时信令报
+   `unavailable-id`，面板换一个重试并在日志里说明原因。
+   ⚠️ 启动早期（`var $ = …` 还没赋值）**不能碰 DOM**：那时调 `renderMyId()`
+   会抛 `$ is not a function` 并中断整个 IIFE，面板整页失效。`persistMyId`（只落盘）
+   与 `saveMyId`（落盘 + 重画）因此分开。
+2. **unlisted 要有出口**。它的语义是"不列出、凭 hash 可取"，得有个把 hash 交出去
+   的动作：清单每行有「链接」按钮，生成 `?node=<id>&hash=<64hex>&auto=1`。
+   收到链接的人连上后，这条内容单独列在共享清单**上方**——它**故意不依赖清单**
+   （unlisted 按定义不在清单里，只在清单里找的话，用户看到"该节点没有共享内容"
+   就走了，而东西一直拿得到）。链接里不含 PSK。
+
 ### 12.7 兜底测试
 
 - `back/internal/service/nodeshare_scope_test.go`：运行时选择压过环境变量、
@@ -958,3 +976,9 @@ POST /peerjs/share/files  {hashes:[...], shared:bool, level?}  单行勾选/改�
   好友名单按逗号拆分、下拉回填当前级别。
 - `front/tests/e2e-admin-smoke.mjs`：真实节点上 读 → 勾 → 复核 → 改级别 →
   写好友 → 拒拼错的级别 → 拒卷根。
+- `packages/peerdrive-client/test/panel-contract.test.mjs`：面板的两条契约——
+  连出去必须带本端 id、分享链接绝不拼进 psk、复制要有降级路径、启动早期不碰 DOM。
+  （面板是 file:// 下的 IIFE，跑不起来，只能这样钉住"改坏了静默失效"的那几条。）
+- `packages/peerdrive-client/scripts/verify-panel-share.mjs`：真浏览器端到端
+  （需要节点 + 信令 + playwright）：固定 id → unlisted 不在清单但链接可取 →
+  private 拒陌生人 → 固定 id 进好友名单后同一个页面立刻能取。

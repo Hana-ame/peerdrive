@@ -36,7 +36,7 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 ## 功能介绍：现在能做什么
 
 > 以下能力都在本分支（`refactor`）实跑过：后端单测 550 · 集成 21 · 网盘端到端脚本 8 项断言 ·
-> 面板真实浏览器 9 项断言 · 管理面冒烟 7 项断言，CI 覆盖合计 843 个用例
+> 面板真实浏览器 9 项断言 · 共享级别端到端 7 项断言 · 管理面冒烟 7 项断言，CI 覆盖合计 843 个用例
 > （逐项清单、命令与盲区见 `doc/testing/README.md`）。
 
 ### 不开节点也能用（公共面板 `dist/panel.html`）
@@ -101,7 +101,7 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 | 共享范围 | `share` 帧 + `PEERDRIVE_SHARE_ENABLE/COLLECTIONS/DIRS/FRIENDS`（**默认全部关闭**，不声明就不对外暴露任何清单）；这几个只是**初值**，运行时经 `/peerjs/share` 改，落盘 `share_scope.json`。每条声明另有 `public/unlisted/private` 三档级别 |
 | 跨节点保存 | `service.PeerPuller` + `GET/POST /p2p/pull*`：流式拉取 → sha256 校验 → 落盘 → 登记文件索引，带进度/取消/去重跳过 |
 | 网盘界面 | **公共面板** `packages/peerdrive-client/dist/panel.html`（单文件静态页，PeerJS 直连节点，无需服务器）＋ 节点管理台 `front/src/pages/{Drive,Market,Peers,PeerDetail,Transfers}` |
-| 无节点消费端 | `packages/peerdrive-client`：面板与 SDK 都源自它，不需要本地后端 |
+| 无节点消费端 | `packages/peerdrive-client`：面板与 SDK 都源自它，不需要本地后端。面板有**固定 id**（`pd-panel-*`，存 localStorage）—— `private` 的好友名单认这个 id，随机 id 等于名单白填；清单每行可生成**分享链接**（`?node=&hash=&auto=1`），是 `unlisted` 的落地动作 |
 | 谁能连我的节点 | **PSK 门禁** `PEERDRIVE_PSK`（可选）：设了之后对端必须在连接上出示同一把密钥，否则所有请求回 `PSK_REQUIRED`（`doc/NETDISK.md` §9） |
 
 进度、模块拆分、**计划与实际偏差**、验证结果都在 `doc/NETDISK.md`；开发顺序见 `doc/ROADMAP.md`。
@@ -147,6 +147,9 @@ cd packages/peerdrive-client && npm run demo   # http://127.0.0.1:8123/demo/cons
 # 面板端到端自检（真实浏览器 + 真实点击，需先起上面的环境）
 cd packages/peerdrive-client
 SIG_HOST=<本机IP> SIG_PORT=9100 NODE_ID=node-a node scripts/verify-panel.mjs
+
+# 三档共享级别的端到端验证（固定 id / unlisted 不在清单但链接可取 / private 拒陌生人放好友）
+NODE_PORT=3001 SIG_PORT=9100 NODE_ID=node-a PW_CHANNEL=default node scripts/verify-panel-share.mjs
 
 # 测试
 cd back && go test -tags nosqlite ./... -count=1                                     # 550（12 包）

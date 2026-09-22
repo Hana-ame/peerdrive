@@ -32,7 +32,7 @@
 | `back/signalserver/**`（peersignal） | `cd back/signalserver && go test ./...`（23） | ✅ `go-build` 的 `submodules` 格（2026-09-21 补） |
 | `back/p2p_bt/**` | `cd back/p2p_bt && go test ./...`（7） | ✅ 同上 |
 | `front/src/**` | `cd front && npm test`（88）+ `npm run build` | `front/tests/e2e-admin-smoke.mjs`（管理面，CI 已跑）；另两个 `.mjs` 手动（视改动面） |
-| `packages/peerdrive-client/**` | `npm test`（98）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端）；合并后 `pages.yml` 会**自动**验线上（§2 第 11 项） |
+| `packages/peerdrive-client/**` | `npm test`（110）+ `npm run check:panel` | `node scripts/verify-panel.mjs`（真实浏览器端到端）；`scripts/verify-panel-share.mjs`（共享级别端到端，需节点+信令）；合并后 `pages.yml` 会**自动**验线上（§2 第 11 项） |
 | `packages/peerdrive-media/**` | `npm test`（21）+ `npm run build` | `test/e2e-browser.mjs`、`test/media-node-e2e.mjs` |
 | 准备 merge 进 `refactor` | 上表全部必跑项全绿（= CI 的同款命令） | 合并后在主干再跑一遍 |
 
@@ -53,7 +53,7 @@
 | 7 | 前端 vitest | `front/tests/*.test.{js,jsx}` | `npm test` | **88**（9 文件） | ✅ `frontend`（含 build） | npm ci 需要 |
 | 8 | 前端管理面冒烟 | `front/tests/e2e-admin-smoke.mjs` | 本机起节点后 `node front/tests/e2e-admin-smoke.mjs`（打 `ws://localhost:3000/ws/peer`） | **7** 项断言 | ✅ `e2e.yml`（2026-09-21 补，脱外网） | ❌ |
 | 8b | 另两个前端手动脚本 | `front/tests/{playwright-smoke,pw-settings-mobile}.mjs` | playwright runner | — | ❌ **（盲区）** | ✅（打的是线上/preview 站点） |
-| 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **98** | ✅ `client-package` | ❌ |
+| 9 | client 包单测 | `packages/peerdrive-client/` | `npm test`（零依赖） | **110** | ✅ `client-package` | ❌ |
 | 10 | client 公共面板 + 浏览器自检 | `packages/peerdrive-client/{dist,scripts}` | `npm run check:panel`·`node scripts/verify-panel.mjs` | 面板 8 项断言 | ✅ `check:panel`（产物一致性） | ❌（peerjs 取 CDN） |
 | 11 | 线上托管自检（Pages） | `packages/peerdrive-client/scripts/verify-pages.mjs` | `node scripts/verify-pages.mjs` | 线上 5 项断言 | ✅ `pages.yml`·`verify`（部署后回头验，2026-09-21 补） | ✅（验的就是线上） |
 | 12 | media 包单测 | `packages/peerdrive-media/` | `npm test` + `npm run build` | **21** | ✅ `media-package` | npm ci 需要 |
@@ -62,8 +62,8 @@
 | 15 | 网盘端到端脚本 | `scripts/netdisk-local-demo.sh` | 起 3 进程跑全链路 | 8 项断言 | ✅ **`e2e.yml`** | ❌（脱外网，本机进程） |
 | 16 | 面板浏览器端到端 | `packages/peerdrive-client/scripts/verify-panel.mjs` | 真实浏览器点面板 | 9 项断言 | ✅ **同 `e2e.yml`（复用上一套环境）** | ❌ |
 
-**覆盖范围合计**（2026-09-21 重测）：自动化（CI）覆盖 550 + 21 + 23 + 88 + 98 + 21 = **801**；
-同日补进 CI 的还有 signalserver（23）· p2p_bt（7）· Pages 线上自检（5）· 管理面冒烟（7）⇒ **843**。
+**覆盖范围合计**（2026-09-21 重测）：自动化（CI）覆盖 550 + 21 + 23 + 88 + 110 + 21 = **813**；
+同日补进 CI 的还有 signalserver（23）· p2p_bt（7）· Pages 线上自检（5）· 管理面冒烟（7）⇒ **855**。
 仍在 CI 外的：4 个外网门控用例、`front/tests/*.mjs`（剩 2 个）· media 浏览器 E2E（2 个）·
 client demo 页面 —— 它们要么依赖外部站点、要么要人工先把服务起起来，见 §4。
 
@@ -143,7 +143,7 @@ PEERDRIVE_SKIP_RTC=1  ...                                                       
 
 ### 3.9 `packages/peerdrive-client` 单测（98）
 
-- **命令**：`cd packages/peerdrive-client && npm test`（`node --test "test/*.test.mjs"`，28 个 suite）
+- **命令**：`cd packages/peerdrive-client && npm test`（`node --test "test/*.test.mjs"`，35 个 suite）
 - **零运行时依赖** ⇒ 不需要 `npm ci`，也不需要网络。覆盖：协议状态机 + 增量 SHA-256 + client API。
 - 自实现的**增量** SHA-256（`src/sha256.js`）别改成只用 `crypto.subtle.digest()`（一次性、与流式拉取冲突）。
 - **PSK 门禁**（`test/psk.test.mjs`，9 例）：钉的是「出示时机」—— `psk-auth` 必须是本端在该连接上的

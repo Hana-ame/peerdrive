@@ -158,7 +158,11 @@
     <span class="tag">零后端</span>
     <span class="tag mono" id="build-id">bundle d12b240d</span>
     <span class="grow"></span>
-    <span class="mono dim">我的临时 id：<span id="my-id">（未连接）</span></span>
+    <span class="mono dim" style="display:flex;align-items:center;gap:6px">
+      我的节点 id：<span id="my-id">（未连接）</span>
+      <button id="btn-copy-id" class="tiny ghost" title="复制给节点运营者，加进好友名单后才能拿到 private 内容">复制</button>
+      <button id="btn-new-id" class="tiny ghost" title="换一个 id（换了之后好友名单里的旧 id 就失效了）">换一个</button>
+    </span>
   </header>
 
   <!-- 1 · 连接 -->
@@ -209,6 +213,14 @@
       <b>预共享密钥</b>：节点用 <span class="mono">PEERDRIVE_PSK</span> 开了门禁时才需要——
       连上后如果提示 <span class="mono">psk required</span>，说明你没填或填错了。
       密钥<b>不会</b>被写回地址栏、也不会存进「最近连接」，只留在这一页的输入框里。
+      <br>
+      <b>我的节点 id</b>（右上角）：固定不变，存在这台浏览器里。节点运营者要把它填进
+      好友名单，你才拿得到 <span class="mono">private</span> 级别的内容 —— id 每次都随机的话，
+      名单等于没填。
+      <br>
+      <b>分享链接</b>：清单每行都有「链接」按钮，生成一条
+      <span class="mono">?node=&amp;hash=</span> 的链接，对应 <span class="mono">unlisted</span> 级别：
+      内容不出现在清单里，但拿到链接的人凭 hash 取得到。链接同样<b>不含</b>密钥。
     </div>
   </div>
 
@@ -228,6 +240,7 @@
     <!-- 3 · 共享清单 -->
     <div class="card">
       <h2>共享清单</h2>
+      <div id="linked"></div>
       <div id="shares"><div class="empty">先在左侧选一个节点。</div></div>
       <div id="preview"></div>
     </div>
@@ -1697,6 +1710,19 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
 
   var sessions = new Map() // nodeId -> {id, client, status, snapshot, error}
 
+  // 本面板的**稳定身份**。
+  //
+  // 为什么必须自己固定一个：节点侧的 private 级别按「对端 peer id 在不在好友
+  // 名单里」判，而 peerjs 默认每次 `new Peer` 都随机生成一个 id —— 运营者在名单
+  // 里填一个下次打开就变的 id 等于没填，private 会退化成"谁都拿不到，包括你
+  // 答应给的那个人"。所以这里生成一次、存进 localStorage：一个浏览器 = 一个
+  // 固定的来访者，名字才填得进去。
+  var myId = lsRead().myId || ''
+  // 这里只能用 persistMyId（不渲染）：`var $ = …` 还排在后面没赋值，此刻碰 DOM
+  // 会抛 "TypeError: $ is not a function" 并中断整个 IIFE —— 面板整页失效，
+  // 而错误信息跟"没有固定 id"完全看不出关系。
+  if (!myId) { myId = newPanelId(); persistMyId(myId) }
+
   // 端到端自检用的出口：让脚本能复用面板**已经建立**的那条连接，而不是再拨一次。
   // 为什么要复用：第二次握手在部分环境（CI 的同机 loopback）并不总是成功，而
   // 自检要验的是「sha256 是否与清单一致」，不是「能不能连第二次」。
@@ -1710,10 +1736,16 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
       discoverNow: discoverNow,
       putFiles: putFiles,
       pullUrl: pullUrl,
+      // 稳定身份与分享链接（自检要能直接读到，而不是靠解析 DOM）
+      myId: function () { return myId },
+      shareLink: shareLink,
     }
   }
   var current = null // 当前选中的 nodeId
   var tasks = [] // 传输任务（最新的在前）
+  // pendingHash 由分享链接（?hash=<64hex>）带来。它特意**不**依赖清单：unlisted
+  // 的内容按定义就不在清单里（见 renderLinked）。
+  var pendingHash = ''
 
   // ── 小工具 ────────────────────────────────────────────────────────────
   var $ = function (id) { return document.getElementById(id) }
@@ -1756,6 +1788,87 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
 
   function params() {
     return new URLSearchParams(location.search)
+  }
+
+  // 面板 id 用 pd-panel- 前缀：运营者在节点日志/好友名单里能一眼认出"这是个面板
+  // 而不是另一个节点"。字符集受 peerjs 的 id 校验约束（字母数字，分隔符只认 - 和 _）。
+  function newPanelId() {
+    return 'pd-panel-' + Math.random().toString(36).slice(2, 10)
+  }
+
+  // persistMyId 只落盘；saveMyId = 落盘 + 重画界面。分开是因为启动早期（$ 还没
+  // 赋值）只能做前者，见顶部 myId 初始化处的注释。
+  function persistMyId(id) {
+    myId = id
+    var st = lsRead()
+    st.myId = id
+    lsWrite(st)
+  }
+
+  function saveMyId(id) {
+    persistMyId(id)
+    renderMyId()
+  }
+
+  function renderMyId() {
+    var el = $('my-id')
+    if (!el) return
+    el.textContent = myId
+    el.className = 'ok'
+  }
+
+  // 分享链接 —— unlisted 的落地方式。
+  //
+  // unlisted 的语义是"不出现在共享清单里，但知道 hash 就能取回"。这句话要能被
+  // 用起来，就得有个"把 hash 交给别人"的动作，否则用户只能口头传一串 64 位
+  // 十六进制。链接里带 node + hash（外加当前信令参数，面板状态本来就在 URL 里），
+  // 对方打开即连（auto=1）、连上就能取。
+  //
+  // **绝不带 psk**：密钥不能被历史记录/分享目标带走（见 pskOfForm 注释）。
+  // 需要门禁的节点，收到链接的人得自己向运营者要密钥。
+  function shareLink(nodeId, hash) {
+    var q = params()
+    q.set('node', nodeId)
+    q.set('hash', hash)
+    q.set('auto', '1')
+    q.delete('psk')
+    // file:// 下 location.origin 是字符串 "null"，拼出来不能用，直接用 href 去参数
+    var base = String(location.href).split('#')[0].split('?')[0]
+    return base + '?' + q.toString()
+  }
+
+  // 复制链接。file:// 不是 secure context，navigator.clipboard 常常不存在或被拒，
+  // 所以留两级退路：剪贴板 API → execCommand → 把链接打进日志让用户自己复制。
+  // 不做退路的话，"点复制没反应"在 file:// 下是常态而不是意外。
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text)
+        return true
+      }
+    } catch (e) { /* 继续降级 */ }
+    try {
+      var ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.top = '-1000px'
+      document.body.appendChild(ta)
+      ta.select()
+      var done = document.execCommand('copy')
+      ta.remove()
+      if (done) return true
+    } catch (e) { /* 继续降级 */ }
+    return false
+  }
+
+  async function copyShareLink(nodeId, hash, label) {
+    var link = shareLink(nodeId, hash)
+    if (await copyText(link)) {
+      log('已复制' + (label ? '「' + label + '」的' : '') + '分享链接（不含密钥）', 'ok')
+    } else {
+      log('复制失败（file:// 下浏览器常不让访问剪贴板），链接如下，手动复制：', 'warn')
+      log(link, 'warn')
+    }
   }
 
   function sigOfForm() {
@@ -1956,6 +2069,7 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
     var s = sessions.get(current)
     var box = $('shares')
     $('preview').innerHTML = ''
+    renderLinked(s)
     if (!s) { box.innerHTML = '<div class="empty">先在左侧选一个节点。</div>'; return }
     if (s.status === 'connecting') { box.innerHTML = '<div class="empty">连接中…</div>'; return }
     if (s.status === 'error') { box.innerHTML = '<div class="empty err">连接失败：' + esc(s.error) + '</div>'; return }
@@ -1969,7 +2083,7 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
 
     var html = ''
     if (snap.files && snap.files.length) {
-      html += '<h2 style="margin-top:2px">单独文件</h2><table><thead><tr><th>名称</th><th class="num">大小</th><th>hash</th><th style="width:150px"></th></tr></thead><tbody>'
+      html += '<h2 style="margin-top:2px">单独文件</h2><table><thead><tr><th>名称</th><th class="num">大小</th><th>hash</th><th style="width:210px"></th></tr></thead><tbody>'
       snap.files.forEach(function (f, i) {
         html += '<tr>' +
           '<td>' + esc(f.path || f.name) + '</td>' +
@@ -1977,7 +2091,8 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
           '<td class="mono faint" style="font-size:11px">' + esc(String(f.hash).slice(0, 12)) + '…</td>' +
           '<td class="num">' +
           '<button class="small" data-save="' + i + '">保存</button> ' +
-          '<button class="small ghost" data-peek="' + i + '">预览</button>' +
+          '<button class="small ghost" data-peek="' + i + '">预览</button> ' +
+          '<button class="small ghost" data-link="' + i + '" title="生成一条分享链接：不在清单里也能凭 hash 取回（unlisted）">链接</button>' +
           '</td></tr>'
       })
       html += '</tbody></table>'
@@ -1987,14 +2102,15 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
       snap.collections.forEach(function (c, ci) {
         var entries = Array.isArray(c.entries) ? c.entries : []
         html += '<details><summary>' + esc(c.name || String(c.hash).slice(0, 12) + '…') + ' · ' + entries.length + ' 个条目</summary>'
-        html += '<table><thead><tr><th>路径</th><th class="num">大小</th><th style="width:150px"></th></tr></thead><tbody>'
+        html += '<table><thead><tr><th>路径</th><th class="num">大小</th><th style="width:210px"></th></tr></thead><tbody>'
         entries.forEach(function (e, ei) {
           html += '<tr>' +
             '<td>' + esc(e.path) + '</td>' +
             '<td class="num faint">' + (e.size ? esc(fmtBytes(e.size)) : '—') + '</td>' +
             '<td class="num">' +
             '<button class="small" data-csave="' + ci + ':' + ei + '">保存</button> ' +
-            '<button class="small ghost" data-cpeek="' + ci + ':' + ei + '">预览</button>' +
+            '<button class="small ghost" data-cpeek="' + ci + ':' + ei + '">预览</button> ' +
+            '<button class="small ghost" data-clink="' + ci + ':' + ei + '" title="生成一条分享链接：不在清单里也能凭 hash 取回（unlisted）">链接</button>' +
             '</td></tr>'
         })
         html += '</tbody></table></details>'
@@ -2016,6 +2132,61 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
     bind('data-peek', function (v) { preview(s, findFile(v)) })
     bind('data-csave', function (v) { download(s, findEntry(v)) })
     bind('data-cpeek', function (v) { preview(s, findEntry(v)) })
+    bind('data-link', function (v) {
+      var f = findFile(v)
+      copyShareLink(s.id, f.hash, String(f.path || f.name || ''))
+    })
+    bind('data-clink', function (v) {
+      var e = findEntry(v)
+      copyShareLink(s.id, e.hash, String(e.path || ''))
+    })
+  }
+
+  // renderLinked 渲染「分享链接带来的那一条内容」。
+  //
+  // unlisted 的定义就是**不出现在清单里**、但凭 hash 可取。所以拿到链接的人连上
+  // 节点后，清单里多半没有它——不给单独入口的话，他看到"该节点没有共享内容"
+  // 就走了，而东西其实一直拿得到。这条也正是"链接分享"这个语义的落点。
+  function renderLinked(s) {
+    var box = $('linked')
+    if (!box) return
+    if (!pendingHash) { box.innerHTML = ''; return }
+    var h = pendingHash
+    var short = h.slice(0, 16) + '…'
+    if (!s || s.status !== 'online') {
+      box.innerHTML = '<div class="empty">链接里带着一个 hash（<span class="mono">' +
+        esc(short) + '</span>），连上节点后即可取回。</div>'
+      return
+    }
+    var named = nameForHash(s, h)
+    box.innerHTML =
+      '<div class="hint">这条内容来自分享链接：<span class="mono">' + esc(short) + '</span>' +
+      (named ? '（清单里叫 ' + esc(named) + '）' : '（清单里没有它 —— unlisted 就是这个意思：不列出，但知道 hash 就能取）') +
+      '</div>' +
+      '<div class="row">' +
+      '<button class="small" id="btn-linked-get">取回</button> ' +
+      '<button class="small ghost" id="btn-linked-copy">复制链接</button>' +
+      '</div>'
+    $('btn-linked-get').addEventListener('click', function () {
+      download(s, { hash: h, name: named || h })
+    })
+    $('btn-linked-copy').addEventListener('click', function () {
+      copyShareLink(s.id, h, named || '')
+    })
+  }
+
+  // nameForHash 在已拿到的清单里找 hash 对应的名字（只为显示，找不到不算错）。
+  function nameForHash(s, h) {
+    var snap = s && s.snapshot
+    if (!snap) return ''
+    var f = (snap.files || []).filter(function (x) { return x.hash === h })[0]
+    if (f) return String(f.path || f.name || '')
+    var cs = snap.collections || []
+    for (var i = 0; i < cs.length; i++) {
+      var e = (cs[i].entries || []).filter(function (x) { return x.hash === h })[0]
+      if (e) return String(e.path || '')
+    }
+    return ''
   }
 
   // ── 动作 ──────────────────────────────────────────────────────────────
@@ -2028,7 +2199,19 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
   function peerOptions(sig) {
     // secure 必须显式传：自托管信令常用 ws://，peerjs 默认 secure=true 会去连 wss://，
     // 表现为「连不上但不报错」——最常见的踩坑点。
-    return { host: sig.host, port: sig.port, path: sig.path, key: sig.key, secure: sig.secure, debug: 1 }
+    // id 用固定的 myId（见顶部注释）：private 级别的好友名单是按这个 id 判的。
+    return {
+      host: sig.host, port: sig.port, path: sig.path,
+      key: sig.key, secure: sig.secure, debug: 1, id: myId,
+    }
+  }
+
+  // idTaken 判断「连不上」是不是因为本端 id 被占用。
+  // peerjs 报的类型是 unavailable-id（文案常是 ID "xxx" is taken）。不认出来的话
+  // 用户会往网络/信令方向排查，而真实原因多半是他自己另开了一个面板页。
+  function idTaken(e) {
+    var m = String((e && e.message) || '')
+    return /unavailable-id|is taken|already/i.test(m)
   }
 
   // peerjs 由加载器异步注入，可能还没到位；这里给出明确状态而不是「点了没反应」
@@ -2059,6 +2242,15 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
       '拦住没钥匙的人。'
   }
 
+  // dial 拨一次号。单独抽出来是为了 id 冲突时能原样重试一次（见 connect）。
+  function dial(nodeId, sig, psk) {
+    return window.PeerDrive.connectToPeer(window.Peer, nodeId, {
+      peerOptions: peerOptions(sig),
+      idleTimeoutMs: 60 * 1000,
+      psk: psk, // 空串 = 不出示（对端没开门禁时完全无感）
+    })
+  }
+
   async function connect() {
     if (!peerReady()) { log(peerMissingHint(), 'err'); return }
     var nodeId = $('in-node').value.trim()
@@ -2076,16 +2268,22 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
     try {
       log('连接信令 ' + sig.host + ':' + sig.port + ' 并拨号 ' + nodeId + ' …')
       var psk = pskOfForm()
-      var client = await window.PeerDrive.connectToPeer(window.Peer, nodeId, {
-        peerOptions: peerOptions(sig),
-        idleTimeoutMs: 60 * 1000,
-        psk: psk, // 空串 = 不出示（对端没开门禁时完全无感）
-      })
+      var client
+      try {
+        client = await dial(nodeId, sig, psk)
+      } catch (e) {
+        // 本端 id 撞了（自己另开一个面板页、或 localStorage 被复制到别处）：
+        // 换一个 id 重试一次。不重试的话界面上只有"信令失败"，指向完全错误的方向。
+        if (!idTaken(e)) throw e
+        log('我的节点 id ' + myId + ' 已被占用（多半是你自己另开了一个面板），换一个再连', 'warn')
+        saveMyId(newPanelId())
+        client = await dial(nodeId, sig, psk)
+      }
       s.client = client
       s.status = 'online'
-      // 注意用 localPeerId（本端）而不是 conn.peer（那是**对端**，第一版就错在这）
-      $('my-id').textContent = client.localPeerId || '（未知）'
-      $('my-id').className = 'ok'
+      // 我的 id 是**自己带上去**的固定 id，不从连接结果里取——连接结果里的
+      // localPeerId 只是"这次实际用上的"，冲突时会和保存的那个不一致。
+      renderMyId()
       log('已建立 WebRTC 直连', 'ok')
       remember(nodeId, sig)
       renderNodes()
@@ -2412,10 +2610,33 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
       log('已从链接读入预共享密钥，并将其从地址栏移除（不留在历史记录里）', 'warn')
     }
 
+    // 分享链接带来的 hash（unlisted 的取回入口）
+    var hq = (q.get('hash') || '').trim()
+    if (hq) {
+      if (/^[0-9a-f]{64}$/i.test(hq)) {
+        pendingHash = hq
+        log('链接里带着一个 hash（' + hq.slice(0, 16) + '…），连上节点后即可取回', 'ok')
+      } else {
+        log('链接里的 hash 不是 64 位十六进制，已忽略：' + hq.slice(0, 32), 'warn')
+      }
+    }
+
     $('btn-connect').addEventListener('click', connect)
     $('btn-discover').addEventListener('click', discoverNow)
     $('btn-put').addEventListener('click', putFiles)
     $('btn-pull').addEventListener('click', pullUrl)
+    if ($('btn-copy-id')) $('btn-copy-id').addEventListener('click', function () {
+      copyText(myId).then(function (done) {
+        done ? log('已复制我的节点 id：' + myId + ' —— 把它给节点运营者，加进好友名单就能拿到 private 内容', 'ok')
+          : log('复制失败，我的节点 id：' + myId, 'warn')
+      })
+    })
+    if ($('btn-new-id')) $('btn-new-id').addEventListener('click', function () {
+      var old = myId
+      saveMyId(newPanelId())
+      log('已更换我的节点 id：' + old + ' → ' + myId +
+        '（改了之后，运营者好友名单里的旧 id 就失效了，记得把新的给他）', 'warn')
+    })
     $('in-url').addEventListener('keydown', function (e) { if (e.key === 'Enter') pullUrl() })
     $('in-node').addEventListener('keydown', function (e) { if (e.key === 'Enter') connect() })
     $('in-secure').addEventListener('change', function () {
@@ -2428,6 +2649,8 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
 
     renderRecent()
     renderTasks()
+    renderMyId()
+    renderLinked(sessions.get(current))
     log('就绪。本面板是单个静态文件，不需要本地后端。')
     // HTTPS 托管（GitHub Pages）下 ws:// 必被拦，开局就讲明白，别等用户点了没反应
     if (mixedContent()) log(mixedContentHint(), 'warn')

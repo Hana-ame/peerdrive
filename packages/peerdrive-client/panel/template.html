@@ -158,7 +158,11 @@
     <span class="tag">零后端</span>
     <span class="tag mono" id="build-id">__PANEL_BUILD_ID__</span>
     <span class="grow"></span>
-    <span class="mono dim">我的临时 id：<span id="my-id">（未连接）</span></span>
+    <span class="mono dim" style="display:flex;align-items:center;gap:6px">
+      我的节点 id：<span id="my-id">（未连接）</span>
+      <button id="btn-copy-id" class="tiny ghost" title="复制给节点运营者，加进好友名单后才能拿到 private 内容">复制</button>
+      <button id="btn-new-id" class="tiny ghost" title="换一个 id（换了之后好友名单里的旧 id 就失效了）">换一个</button>
+    </span>
   </header>
 
   <!-- 1 · 连接 -->
@@ -209,6 +213,14 @@
       <b>预共享密钥</b>：节点用 <span class="mono">PEERDRIVE_PSK</span> 开了门禁时才需要——
       连上后如果提示 <span class="mono">psk required</span>，说明你没填或填错了。
       密钥<b>不会</b>被写回地址栏、也不会存进「最近连接」，只留在这一页的输入框里。
+      <br>
+      <b>我的节点 id</b>（右上角）：固定不变，存在这台浏览器里。节点运营者要把它填进
+      好友名单，你才拿得到 <span class="mono">private</span> 级别的内容 —— id 每次都随机的话，
+      名单等于没填。
+      <br>
+      <b>分享链接</b>：清单每行都有「链接」按钮，生成一条
+      <span class="mono">?node=&amp;hash=</span> 的链接，对应 <span class="mono">unlisted</span> 级别：
+      内容不出现在清单里，但拿到链接的人凭 hash 取得到。链接同样<b>不含</b>密钥。
     </div>
   </div>
 
@@ -228,6 +240,7 @@
     <!-- 3 · 共享清单 -->
     <div class="card">
       <h2>共享清单</h2>
+      <div id="linked"></div>
       <div id="shares"><div class="empty">先在左侧选一个节点。</div></div>
       <div id="preview"></div>
     </div>
