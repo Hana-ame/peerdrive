@@ -63,7 +63,7 @@ func TestShareProtocolContract(t *testing.T) {
 	svcA := transport.NewPeerJSService(cfgA, anonDir)
 	shareSvc := service.NewNodeShare(cfgA, "") // "" = 内存模式（集成测试不落盘）
 	shareSvc.SetAnonAccess(anonReader.GetCollectionByHash, anonReader.ListCollections)
-	svcA.SetShareProvider(shareSvc.Snapshot)
+	svcA.SetShareProvider(shareSvc.SnapshotFor)
 	svcA.Start()
 	t.Cleanup(svcA.Close)
 
