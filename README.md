@@ -109,11 +109,18 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 
 ## 快速开始
 
-> 手把手教程（编译 → 起信令 → 起节点 → 用面板连上它 → 连不上怎么查）：
+> 手把手教程（下载 → 起信令 → 起节点 → 用面板连上它 → 连不上怎么查）：
 > [`doc/tutorial/01-run-and-connect.md`](doc/tutorial/01-run-and-connect.md)
+> 要改代码 / 跑最新未发版的提交：[第二章 · 从源码编译](doc/tutorial/02-build-from-source.md)
 
 ```bash
-# 后端
+# 后端（不用编译：下载发布好的二进制）
+#   https://github.com/Hana-ame/peerdrive/releases/latest
+#   节点：peerdrive-<linux|darwin|windows>-<amd64|arm64>[.exe]
+#   自托管信令：peersignal-<goos>-<goarch>[.exe]
+gh release download --repo Hana-ame/peerdrive --pattern 'peerdrive-linux-amd64'
+
+# 想从源码跑（改代码时）
 cd back && go run -tags nosqlite ./cmd/server/main.go
 
 # 网盘 UI = 公共面板（单文件，不需要任何服务器）

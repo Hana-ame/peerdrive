@@ -1,6 +1,7 @@
 # 第一章：如何运行并连接自己的节点
 
-> 适用：分支 `refactor` · 版本 v0.1.0+（2026-09）。
+> 适用：分支 `refactor` · **v0.1.1 起的 release**（第一个真正带资产的发布；
+> `v0.1.0` 的 tag 打出来了但 release 那一步是红的，没有可下载的东西）。时间：2026-09。
 > **这一章不需要 Go、不需要编译** —— 直接下载发布好的二进制。
 > 想改代码 / 跑最新未发版的提交 / 跑测试，看[第二章：从源码编译](02-build-from-source.md)。
 > 端口约定：**信令 9100 / 节点 3001**。
@@ -269,6 +270,21 @@ npm run dev        # http://localhost:5173
 4. **清单拿得到**：`清单：N 合集 · M 文件`（`M>0` 才说明对端真的共享了东西）
 5. **能取回**：点「保存」落盘，或点任务行的「取回校验」—— 它按 hash 重新拉一遍并复算 sha256
 6. **端到端**（有 Go 时）：`./scripts/netdisk-local-demo.sh` 六项断言全 PASS，见第二章
+
+> 上面 1–3 步在 Windows 上用 v0.1.1 的发布包实测过，输出长这样：
+>
+> ```
+> $ curl -s http://127.0.0.1:9100/status
+> {"clients":1,"discovered":1,"key":"peerjs",...,"nodes":[{"peerId":"my-node-1",
+>  "nodeType":"go-persistent","loadInfo":{"shares":{"collections":0,"dirs":1,"files":0}}}]}
+>
+> $ curl -s http://127.0.0.1:3001/peerjs/node
+> {"id":"my-node-1","online":true,"peers":[],"psk":false,"psk_peers":0}
+> ```
+>
+> `status` 里出现你的 `peerId` = 节点已经在信令上登记成功（`clients` 是 WS 连接数）。
+> 这里 `files:0` 是正常的：共享目录刚声明、还没登记文件索引
+> （登记走 `POST /files/register_folder`，见 `doc/NETDISK.md`）。
 
 ---
 
