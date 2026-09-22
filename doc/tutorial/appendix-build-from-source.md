@@ -10,7 +10,7 @@
 
 | 你想做的事 | 需不需要编 | 用什么 |
 |---|---|---|
-| 跑一个节点 / 起信令 | ❌ | 第一章下载的 release 二进制 |
+| 跑一个节点 | ❌ | 第一章下载的 release 二进制（信令是公共的，不用起） |
 | 用面板连节点 | ❌ | 在线面板，或第一章的链接 |
 | 改 Go 代码并验证 | ✅ | §A.2 / §A.3 |
 | 跑最新未发版的 `refactor` | ✅ | 本章 |
@@ -49,7 +49,10 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags nosqlite -o peerdrive-ser
 
 ---
 
-## A.3 编译自托管信令
+## A.3 编译自托管信令（**只有想自建才需要**）
+
+默认情况下节点和面板连的是公共信令 `peersignal.moonchan.xyz`（第一章 §1.2），
+**这一节只在你要另起一套信令时才看**（内网离线、或想自己掌控）。
 
 它是**独立 go 模块**（`back/signalserver`，module `github.com/Hana-ame/go-peersignal`），
 所以不能在上一步的 `./...` 里顺带编出来：
@@ -57,9 +60,12 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags nosqlite -o peerdrive-ser
 ```bash
 cd back/signalserver
 go build -o /tmp/pd/bin/peersignal ./cmd/peersignal
-# 或者不落盘直接跑（第一章 §1.2 的等价写法）
 go run ./cmd/peersignal -addr :9100 -key peerjs
 ```
+
+起完之后，节点侧要把信令指过来（`PEERDRIVE_PEERJS_HOST/PORT/KEY/SECURE` 与
+`PEERDRIVE_DISCOVER_URL`），**面板上的 host/port/key 也要跟着改** —— 两边不一致
+就是"明明都在线却连不上"。开 TLS 时 `-tls-cert` / `-tls-key` 必须成对给。
 
 另外两个独立模块同理，改到它们时别只跑主模块的测试：
 `back/peerjs`（go-peerjs）、`back/p2p_bt`（go-peerdrive-bt）。

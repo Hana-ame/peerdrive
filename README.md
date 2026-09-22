@@ -109,15 +109,16 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 
 ## 快速开始
 
-> 手把手教程（下载 → 起信令 → 起节点 → 用面板连上它 → 连不上怎么查）：
+> 手把手教程（下载 → 起节点 → 用面板连上它 → 连不上怎么查）：
 > [`doc/tutorial/01-run-and-connect.md`](doc/tutorial/01-run-and-connect.md)
+> 信令不用自己部署：默认连公共信令 `peersignal.moonchan.xyz`（wss）。
 > 要改代码 / 跑最新未发版的提交（可跳过）：[附录 A · 从源码编译](doc/tutorial/appendix-build-from-source.md)
 
 ```bash
 # 后端（不用编译：下载发布好的二进制）
 #   https://github.com/Hana-ame/peerdrive/releases/latest
 #   节点：peerdrive-<linux|darwin|windows>-<amd64|arm64>[.exe]
-#   自托管信令：peersignal-<goos>-<goarch>[.exe]
+#   （peersignal-* 是自托管信令，只有想自建时才下，见教程附录 A）
 gh release download --repo Hana-ame/peerdrive --pattern 'peerdrive-linux-amd64'
 
 # 想从源码跑（改代码时）
@@ -127,7 +128,9 @@ cd back && go run -tags nosqlite ./cmd/server/main.go
 #   在线版：https://hana-ame.github.io/peerdrive/   （push 后自动部署）
 #   本地版：npm run build:panel 生成 dist/panel.html，双击 file:// 就能开
 #   带参数直达某个节点：
-#   panel.html?node=<节点 peer id>&host=<信令>&port=9100&path=/&key=peerjs&secure=0&auto=1
+#   panel.html?node=<节点 peer id>&host=peersignal.moonchan.xyz&port=443&path=/
+#              &key=pd-signal-b9447b406828e500&secure=1&auto=1
+#   信令 host/key 默认就是这样（面板已预填），一般不用写；
 #   注意：HTTPS 页面（含在线版）只能用 wss 信令，否则浏览器按混合内容拦掉。
 #   线上托管自检：node scripts/verify-pages.mjs
 
@@ -159,11 +162,11 @@ node front/tests/e2e-admin-smoke.mjs             # 管理面 7 项断言（需�
 
 ## 信令服务器实现方式
 
-> 信令服务器可以用**多种方式实现**，只要兼容 PeerJS 协议即可：
-> 公共 PeerJS 云、自托管 Go 信令（wintools / `back/signalserver`）、
-> Node.js `peerjs-server` 等。当前线上使用 wintools 维护的 Go 自托管信令，
-> peerdrive 通过 `PEERDRIVE_PEERJS_HOST/PORT/KEY` 和 `PEERDRIVE_DISCOVER_URL`
-> 连接信令；如果需要在 peerdrive 内嵌信令，`back/signalserver` 也是可用的 Go 实现。
+> **默认连项目公共信令 `peersignal.moonchan.xyz`（wss，key `pd-signal-b9447b406828e500`）**，
+> 节点与面板的默认值一致，所以开箱即用、不需要部署任何信令。
+> 它兼容 PeerJS 协议（`back/signalserver` 就是它的源码，可自行部署替换）：
+> 想自建时改 `PEERDRIVE_PEERJS_HOST/PORT/KEY` 与 `PEERDRIVE_DISCOVER_URL`，
+> 见教程附录 A。
 
 ```
 wintools 或任何 PeerJS 兼容信令（独立部署）
