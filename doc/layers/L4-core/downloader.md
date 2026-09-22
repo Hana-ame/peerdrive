@@ -1,7 +1,7 @@
 # downloader 层（back/internal/downloader/）
 
 > 层归属：AOP ④ 业务核心（见 doc/LAYERS.md §1）——多协议回退下载链路
-> （LEGACY.md 第 51 行「核心下载链路，保留」）。
+> （doc/archive/LEGACY.md 第 51 行「核心下载链路，保留」）。
 > 协议顺序（universal_downloader.go:3-8 头注释）：`local → ipfsgw → btdht → http`，
 > 成功后缓存到本地存储，下次请求由 LocalFetcher 直接命中。
 
@@ -172,7 +172,7 @@ downloader（本层）
 ## 测试
 
 > 本文件全部测试为 legacy 标注（universal_downloader_test.go:3：「本文件属于 legacy
-> 代码（见 doc/LEGACY.md，待删/待迁移）的测试，未逐一标注发现背景」），其中
+> 代码（见 doc/archive/LEGACY.md，待删/待迁移）的测试，未逐一标注发现背景」），其中
 > M5 相关修复（httpClient 超时/metrics 锁）的回归语义体现在 FetchFromServer 与
 > 顺序类测试。
 

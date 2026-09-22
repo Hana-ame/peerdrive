@@ -62,7 +62,7 @@ downloader 里，controller 只编排。
 
 路由（router.go 注册，注意：**此组未在 router.go 挂路由**——注册服务器是外部服务
 （RegistrationServer），authkey 由外部签发；本组 handler 由集成测试/外部装配直接调用，
-见 LEGACY.md 第 61 行「无路由注册」标注）：
+见 doc/archive/LEGACY.md 第 61 行「无路由注册」标注）：
 
 | 方法/路径 | handler | 说明 |
 |---|---|---|
@@ -190,7 +190,7 @@ Delete/CopyFile/ReadFile/MaxUploadBytes/ListAll/BrowseDir）+ `service.Collectio
 | 方法/路径 | handler | 说明 |
 |---|---|---|
 | POST /actions/fork | `ForkCollection` | 查源集合 → `CreatePlain` 目标 → 逐条 `AddProviderEntry`/`AddEntry` 复制；目标已存在 409 |
-| POST /actions/pull | `PullCollection` | 占位：返回 "not implemented"，随后建 transfer_tasks 记录标 completed（LEGACY.md 标注可删的 no-op） |
+| POST /actions/pull | `PullCollection` | 占位：返回 "not implemented"，随后建 transfer_tasks 记录标 completed（doc/archive/LEGACY.md 标注可删的 no-op） |
 
 调用关系：`service.CollectionService` + `service.TaskService`（PullCollection 的假任务）。
 
@@ -318,7 +318,7 @@ Delete/CopyFile/ReadFile/MaxUploadBytes/ListAll/BrowseDir）+ `service.Collectio
 
 | 方法/路径 | handler | 说明 |
 |---|---|---|
-| GET /tasks | `ListTasks` | 恒返回空数组（LEGACY.md 标注可删） |
+| GET /tasks | `ListTasks` | 恒返回空数组（doc/archive/LEGACY.md 标注可删） |
 | GET /tasks/:id | `GetTaskStatus` | `taskSvc.Get`（transfer_tasks 表） |
 
 调用关系：`service.TaskService`。
@@ -397,10 +397,10 @@ controller（本层）
 7. **BTSeedCollection 的全量内存/磁盘拷贝**（p2p.go:615-709）：合集条目逐个 ReadFile +
    WriteFile 两次（临时目录 + BT 数据目录）——大合集内存峰值高，属已知局限（TODO 可
    流式化）。
-8. **p2p.go 承载 legacy 端点**（LEGACY.md A 段）：libp2p 时代端点已删（REFACTOR.md §8
+8. **p2p.go 承载 legacy 端点**（doc/archive/LEGACY.md A 段）：libp2p 时代端点已删（REFACTOR.md §8
    批2，2026-08-16），现 p2p.go 保留 BT/IPFS/forward 三个子组；其中 forward 是新实现
    （REFACTOR.md §3.9），BT/IPFS 依赖外部能力切面 ⑦。
-9. **auth.go/task.go ListTasks 无路由注册/恒空**（LEGACY.md 第 61-62 行）：保留占位。
+9. **auth.go/task.go ListTasks 无路由注册/恒空**（doc/archive/LEGACY.md 第 61-62 行）：保留占位。
 
 ## 测试（94 单测，含 controller/service/source/downloader；`scripts/test-layers.sh` L4 段）
 

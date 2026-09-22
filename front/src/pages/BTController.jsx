@@ -92,7 +92,7 @@ export default function BTController() {
   const [speedHistory, setSpeedHistory] = useState({});
 
   // Node status for banner tags（迁移记录 2026-08-20：relay 标志已删——relay
-  // 服务后端已删（doc/LEGACY.md §A），此前恒 false、Relay 徽章永不显示）
+  // 服务后端已删（doc/archive/LEGACY.md §A），此前恒 false、Relay 徽章永不显示）
   const [nodeStatus, setNodeStatus] = useState({ online: false, p2p: false, btNodes: 0, checking: true });
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [showSeedModal, setShowSeedModal] = useState(false);

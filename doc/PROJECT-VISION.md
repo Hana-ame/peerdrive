@@ -57,7 +57,7 @@
 - ❌ 通用 P2P HTTP 代理(那是 wintools webrtc-proxy 的独立定位)—— peerdrive 只做
   **权限化、目标锚定自身**的节点管理隧道
 - ❌ 大而全多协议下载器(下载降级为可选 provider,不是卖点)
-- ❌ WebDAV / forward / 前端死组件(高危,LEGACY.md 已标删)
+- ❌ WebDAV / forward / 前端死组件(高危，doc/archive/LEGACY.md 已标删)
 
 ## 7. 对 HTTP 隧道整合的意义
 

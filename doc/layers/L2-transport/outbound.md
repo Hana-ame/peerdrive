@@ -248,4 +248,4 @@ fetches + close(closed)）经 sync.Once 只执行一次——与 bindConn OnClos
 - `back/internal/transport/peerjs_service_test.go` —— routeResponse 防御测试 + fakeSession 基础设施
 - `back/internal/source/peer.go` —— PeerSource（OpenStream 的业务消费方）
 - `doc/REFACTOR.md` §3.8（统一 source 体系、requestFile 流式化）、§4（帧协议）
-- `doc/TRANSPORT-REVIEW-2026-08-15.md` —— H5/H6 原始发现与修复记录
+- `doc/archive/TRANSPORT-REVIEW-2026-08-15.md` —— H5/H6 原始发现与修复记录

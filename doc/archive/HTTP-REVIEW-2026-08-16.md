@@ -1,7 +1,7 @@
 # HTTP 层审阅报告 — 对照 wintools/webrtc-proxy 修复清单 (2026-08-16)
 
 > 审阅时间: 2026-08-16
-> 背景: 沿用 `doc/TRANSPORT-REVIEW-2026-08-15.md` 的同一清单，审阅 peerdrive 的
+> 背景: 沿用 `doc/archive/TRANSPORT-REVIEW-2026-08-15.md` 的同一清单，审阅 peerdrive 的
 > **HTTP controller 层**（`back/internal/controller/` 全部 15 个文件 + `internal/router/`）。
 > 传输层（PeerJS/WebRTC/WS/libp2p）已在上轮审阅并修复，本轮只查 HTTP 面，
 > 服务层已有修复项（H1-H7）不重复报告，仅交叉引用。

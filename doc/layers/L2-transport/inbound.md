@@ -263,4 +263,4 @@ select {
 - `back/internal/transport/stream_test.go` —— 流式拉取测试（出站角色，但用同一 fakeSession）
 - `back/internal/transport/file_index_test.go` —— UploadSession 层测试
 - `doc/REFACTOR.md` §3.7（角色拆分）、§4（帧协议）、§5（E2E 坑）
-- `doc/TRANSPORT-REVIEW-2026-08-15.md` —— H1/H2/H5/H6/M6/M7 全部原始发现与修复记录
+- `doc/archive/TRANSPORT-REVIEW-2026-08-15.md` —— H1/H2/H5/H6/M6/M7 全部原始发现与修复记录

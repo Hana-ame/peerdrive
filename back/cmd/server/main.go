@@ -8,7 +8,7 @@
 // 内部流程：InitDB → PeerJSService.Start → 注册 local/peer/url source → SetupRouter
 //
 // storageDir 注入到 Gin Context，供 controller/anon.go 等使用。
-// 历史背景：原 libp2p 互联层于 2026-08-16 全删（见 doc/LEGACY.md §A），
+// 历史背景：原 libp2p 互联层于 2026-08-16 全删（见 doc/archive/LEGACY.md §A），
 // 本注释曾描述 "libp2p P2P 节点 / NewP2PService→IPFSService→UniversalDownloader"
 // 旧流程，与现状不符，本次校正为新流程。
 

@@ -73,9 +73,9 @@ service/downloader_test.go
 - `doc/modules/ipfs/ipfs-protocol.md` — +§20/21/22 Bitswap+IPFSService+Provider
 - `doc/modules/ipfs/API-DESIGN.md` — 更新流程
 - `doc/README.md` — 架构图添加 IPFSService
-- `doc/report/ARCHITECTURE-REVIEW.md` — 审视报告 (14 项)
-- `doc/report/FIX-RECORD.md` — 修复记录
-- `doc/report/TEST-REPORT.md` — 测试报告
+- `doc/archive/report/ARCHITECTURE-REVIEW.md` — 审视报告 (14 项)
+- `doc/archive/report/FIX-RECORD.md` — 修复记录
+- `doc/archive/report/TEST-REPORT.md` — 测试报告
 
 ---
 

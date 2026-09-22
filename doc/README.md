@@ -156,7 +156,17 @@ cd front && npm run build
 | 文件 | 内容 |
 |------|------|
 | [ROADMAP.md](ROADMAP.md) | **开发顺序（用户 2026-09 定序）**：PeerJS 互联 → 文件 → 组合 → 管理链路 → 文件范围管理 → 上传下载保存 → 身份管理（最后） |
-| [DASHBOARD.md](DASHBOARD.md) | 项目仪表盘 |
+| [REFACTOR.md](REFACTOR.md) | 重构手册：分层边界、迁移顺序、既有问题的修法 |
+| [NETDISK.md](NETDISK.md) | 网盘（PeerJS 节点 + 面板）使用与实现手册 |
+| [LAYERS.md](LAYERS.md) / [layers/](layers/) | 分层架构与逐层说明 |
+| [NODE.md](NODE.md) / [NODE-API.md](NODE-API.md) | 节点与节点 API |
+| [PEERSIGNAL.md](PEERSIGNAL.md) | 自托管信令（peersignal）部署与协议 |
+| [PROJECT-VISION.md](PROJECT-VISION.md) | 产品愿景 |
+| [HTTP_API_PROXY.md](HTTP_API_PROXY.md) | HTTP API 代理 |
+| [TODO-SIMPLIFY.md](TODO-SIMPLIFY.md) | 简化待办 |
+| [source-control.md](source-control.md) | 版本控制（合集 fork / merge） |
+| [dht-wire-format.md](dht-wire-format.md) | DHT 线格式 |
+| [api-reference.md](api-reference.md) | API 参考（简版） |
 | [design/PEERDRIVE-DSH-INSPIRED.md](design/PEERDRIVE-DSH-INSPIRED.md) | 参考 dsh 的组合式架构设计（profile/bundle/patch） |
 | [design/FRONTEND-DSH-INSPIRED.md](design/FRONTEND-DSH-INSPIRED.md) | 前端参考 dsh 的组合式设计（bundle manifest + registry + profile） |
 | [design/FRONTEND-DSH-KERNEL.md](design/FRONTEND-DSH-KERNEL.md) | 前端参考 dsh 内核的引导/模块/slot/传输设计 |
@@ -170,7 +180,6 @@ cd front && npm run build
 | [spec/REQUIREMENTS.md](spec/REQUIREMENTS.md) | 全部需求总表 (130+ 项) |
 | [spec/COLLECTION-LOGIC.md](spec/COLLECTION-LOGIC.md) | 合集逻辑完整追踪 |
 | [spec/USER-ROLES.md](spec/USER-ROLES.md) | 用户角色模型 |
-| [spec/CODE-DOC-MAPPING.md](spec/CODE-DOC-MAPPING.md) | 代码 ↔ 文档映射表 |
 | [spec/BACKEND_TASKS.md](spec/BACKEND_TASKS.md) | 后端任务清单 |
 | [spec/FRONTEND_TASKS.md](spec/FRONTEND_TASKS.md) | 前端任务清单 |
 | [spec/backend/](spec/backend/) | 后端 API / 数据库 / 设计规范 |
@@ -183,7 +192,7 @@ cd front && npm run build
 | [modules/auth/](modules/auth/) | 认证模块：API 设计、安全审查、用户角色 |
 | [modules/bt/](modules/bt/) | BT DHT 模块：协议、测试矩阵、API 设计 |
 | [modules/ipfs/](modules/ipfs/) | IPFS 模块：协议、WebRTC 架构 |
-| [modules/p2p/](modules/p2p/) | P2P 模块：双栈协议、网格拓扑 |
+| [modules/p2p/](modules/p2p/) | P2P 模块：当前互联框架（TRANSPORT）+ API 设计；旧栈文档见 [modules/p2p/archive/](modules/p2p/archive/) |
 | [modules/storage/](modules/storage/) | 存储模块：数据库、合集逻辑、API |
 
 ### guide — 操作指南
@@ -192,8 +201,6 @@ cd front && npm run build
 |------|------|
 | [guide/API-USAGE.md](guide/API-USAGE.md) | API 使用手册 — 调用顺序/目的/条件 |
 | [guide/USER_MANUAL.md](guide/USER_MANUAL.md) | 用户手册 |
-| [guide/VPS_DEPLOY.md](guide/VPS_DEPLOY.md) | VPS 部署指南 |
-| [guide/docker.md](guide/docker.md) | Docker 部署 |
 | [guide/siliconflow-setup.md](guide/siliconflow-setup.md) | LLM 配置 |
 | [guide/FRONTEND.md](guide/FRONTEND.md) | 前端界面说明 — 技术栈、路由、组件树、工作流、代码地图 |
 | [guide/操作说明.md](guide/操作说明.md) | 中文操作说明 |
@@ -213,20 +220,38 @@ cd front && npm run build
 > 相关：[NETDISK.md §7 本地跑通手册](NETDISK.md#7-本地跑通怎么亲手测这几个功能)、
 > `scripts/test-layers.sh`（分层聚合）、`scripts/netdisk-local-demo.sh`（端到端）。
 
-### report — 报告
+### tutorial — 教程（面向使用者的正路）
 
 | 文件 | 内容 |
 |------|------|
-| [report/index.md](report/index.md) | 报告目录 |
-| [report/REPORT-OVERVIEW.md](report/REPORT-OVERVIEW.md) | 项目全貌 |
-| [report/ROADMAP.md](report/ROADMAP.md) | 路线图 |
-| [report/SECURITY-REVIEW.md](report/SECURITY-REVIEW.md) | 安全审查 |
-| [report/DEVELOPMENT_PLAN.md](report/DEVELOPMENT_PLAN.md) | 开发计划 |
-| [REVIEW-FIX-2026-08-16.md](REVIEW-FIX-2026-08-16.md) | 2026-08-16 充分 review 修复清单（前端假上传/重复评论/WS 地址 + 后端 BrowseDir/路径脱敏/空文件/信令并发写） |
-| [report/TODO-FIXES.md](report/TODO-FIXES.md) | 当前任务 |
-| [report/changelog.md](report/changelog.md) | 变更日志 |
-| [report/GIT-ANALYSIS.md](report/GIT-ANALYSIS.md) | Git 记录分析 — 328 提交的开发模式、高频 Bug、经验教训 |
+| [tutorial/README.md](tutorial/README.md) | 教程总入口与阅读顺序 |
+| [tutorial/01-run-and-connect.md](tutorial/01-run-and-connect.md) | 跑起来 & 连上：装、启动、看到对方 |
+| [tutorial/02-add-local-files.md](tutorial/02-add-local-files.md) | 把本机文件放进网盘 |
+| [tutorial/03-share-levels.md](tutorial/03-share-levels.md) | 共享级别 public / unlisted / private |
+| [tutorial/04-choose-what-to-share.md](tutorial/04-choose-what-to-share.md) | 挑要共享的东西（目录 / 单文件 / 合集） |
+| [tutorial/05-save-from-other-nodes.md](tutorial/05-save-from-other-nodes.md) | 从别的节点保存内容 |
+| [tutorial/appendix-build-from-source.md](tutorial/appendix-build-from-source.md) | 附录：从源码构建 |
 
-### archive — 归档
+### archive — 归档（旧文档 / 旧结构，**不再维护**）
 
-历史设计草案和参考文档：[archive/](archive/)
+> 这里的文档描述的是**重构前的结构**（`registration-server/`、`go/cmd/server/`、
+> `p2p-dual-stack/`、`libp2p` 主栈、`e2e-all.sh` 等）。留着只为追溯决策与历史，
+> **不要照着做**——路径与端点现在都不存在。
+
+| 文件 / 目录 | 内容 |
+|------|------|
+| [archive/report/](archive/report/) | 旧「报告」目录（36 份：REPORT-OVERVIEW / ROADMAP / SECURITY-REVIEW / DEVELOPMENT_PLAN / TODO-FIXES / changelog / GIT-ANALYSIS / MILESTONE-* / 各次测试与修改报告） |
+| [archive/TUTORIAL.md](archive/TUTORIAL.md) | 旧教程（已被 [tutorial/](tutorial/README.md) 取代） |
+| [archive/DASHBOARD.md](archive/DASHBOARD.md) | 旧项目仪表盘 |
+| [archive/LEGACY.md](archive/LEGACY.md) | 旧栈遗留说明 |
+| [archive/VPS_DEPLOY.md](archive/VPS_DEPLOY.md) | 旧结构下的 VPS 部署（`registration-server/` 等路径已不存在） |
+| [archive/docker.md](archive/docker.md) | 旧结构下的 Docker 部署 |
+| [archive/p2p-discovery-flow.md](archive/p2p-discovery-flow.md) | 旧 libp2p 发现流程 |
+| [archive/TRANSPORT-REVIEW-2026-08-15.md](archive/TRANSPORT-REVIEW-2026-08-15.md)、[archive/TRANSPORT-REVIEW2-2026-08-16.md](archive/TRANSPORT-REVIEW2-2026-08-16.md) | 传输层两轮 review |
+| [archive/HTTP-REVIEW-2026-08-16.md](archive/HTTP-REVIEW-2026-08-16.md)、[archive/REVIEW-FIX-2026-08-16.md](archive/REVIEW-FIX-2026-08-16.md) | HTTP 层 review 与修复清单 |
+| [archive/FRONTEND-FIX-2026-08-16.md](archive/FRONTEND-FIX-2026-08-16.md)、[archive/FRONTEND-FIXES-2026-08-16.md](archive/FRONTEND-FIXES-2026-08-16.md) | 前端两次修复记录 |
+| [archive/SESSION-REPORT-20260503T135000.md](archive/SESSION-REPORT-20260503T135000.md) | 2026-05-03 会话报告 |
+| [archive/CODE-DOC-MAPPING.md](archive/CODE-DOC-MAPPING.md) | 2026-04 的代码 ↔ 文档映射表（多数目标文档现已不存在） |
+| [archive/AGENTS.md](archive/AGENTS.md)、[archive/方案.md](archive/方案.md)、[archive/测试方案.md](archive/测试方案.md)、[archive/知识库.md](archive/知识库.md)、[archive/reply.md](archive/reply.md) | 早期设计草案与参考资料 |
+| [modules/p2p/archive/](modules/p2p/archive/) | 旧 libp2p/BT-DHT 栈：p2p / dual-stack-protocol / grid |
+| [testing/archive/](testing/archive/) | 旧栈时代的测试文档（libp2p / e2e-all.sh / reg-server 测试） |

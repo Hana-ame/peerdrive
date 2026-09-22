@@ -164,5 +164,5 @@ ApplySync(files) → 逐条：Delete=true → DeleteFileIndex（tombstone）；
 - `back/internal/transport/inbound.go` —— verb 服务端（线上面）
 - `back/internal/transport/conn.go` —— connState.pendingUpload 槽位
 - `doc/REFACTOR.md` §4（文件索引 verb 定义）、§3.8（LocalSource 复刻逻辑）
-- `doc/TRANSPORT-REVIEW-2026-08-15.md` —— H2/M7 原始发现与修复记录
-- `doc/TRANSPORT-REVIEW2-2026-08-16.md` —— L6（delete 缺 seq）原始发现与修复记录
+- `doc/archive/TRANSPORT-REVIEW-2026-08-15.md` —— H2/M7 原始发现与修复记录
+- `doc/archive/TRANSPORT-REVIEW2-2026-08-16.md` —— L6（delete 缺 seq）原始发现与修复记录

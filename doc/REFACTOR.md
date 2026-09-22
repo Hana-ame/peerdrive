@@ -330,7 +330,7 @@ STUN）——无 UDP 的沙箱（docker 默认）会连不上，互联类测试�
 
 ### 3.13 死代码清理批次（2026-08-19，审阅后清理）
 
-代码审阅发现「LEGACY.md 标注可删/待迁移但未落地」的存量全部处理：
+代码审阅发现「doc/archive/LEGACY.md 标注可删/待迁移但未落地」的存量全部处理：
 
 **后端（-8 文件）**：
 - Auth 子系统整套（`controller/auth.go`、`service/auth_service.go`、`model/user.go`、
@@ -909,16 +909,16 @@ MQTT 分片互相发现（含 60s 心跳兜底时序，门控外网）、MQTT �
 自托管信令协议兼容（peerjs 客户端模块直连）、自托管发现 API 互联拉文件、
 Start/Close 竞态压力（30 轮，-race 回归）。
 
-## 6. 旧代码处置（详见 doc/LEGACY.md）
+## 6. 旧代码处置（详见 doc/archive/LEGACY.md）
 
 - libp2p 栈（p2p.go/transfer/resume/multipeer/dual/ws/signaling/relay...）：✅ **已删**（2026-08-16 批2，被 PeerJS 取代）
 - BT 栈（p2p_bt/）：✅ **已独立成库** `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt 即其源码，go.mod replace 引用）。
   原 README 说"可独立使用"是**错的**（依赖 `internal/log`，`PutImmutable` 本地 store 优先掩盖网络失败，
   `putLocal` 依赖 anacrolix 内部行为）——该断言已于 2026-08-18 修正
 - WebDAV/forward/auth 死代码：✅ **已删**（2026-08-16，WebDAV 无认证任意读写删；forward 重建为 PeerJS 版）
-- 前端 ~4000 行死组件：✅ **已删**（2026-08-16，见 LEGACY.md F 节；含 FileManager/WebRTCTransfer/
+- 前端 ~4000 行死组件：✅ **已删**（2026-08-16，见 doc/archive/LEGACY.md F 节；含 FileManager/WebRTCTransfer/
   旧 P2P 状态面板/localDB 等 21 文件 + api.js 死导出清理；CollBrowserNav 勘误保留）
-  同步修复一批活跃主链路 bug（合并/移动语义/竞态守卫等，见 doc/REVIEW-FIX-2026-08-16.md 第二轮）
+  同步修复一批活跃主链路 bug（合并/移动语义/竞态守卫等，见 doc/archive/REVIEW-FIX-2026-08-16.md 第二轮）
 
 ## 7. 目标包结构（依赖分层，渐进迁移）
 

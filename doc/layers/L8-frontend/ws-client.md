@@ -210,7 +210,7 @@ ws.js ──WebSocket──▶ back/internal/transport/ws_session.go（/ws/peer�
   `router.go` `SetAdminHandler` 装配。协议权威定义：REFACTOR.md §3.10/§4、NODE-API.md §2.4。
 - **非关系（重要）**：peerjs/WebRTC 连接**不实现管理 verb**（防权限面暴露给公共信令
   上的未知节点，用户决策）；前端也没有 peerjs/mqtt 依赖——peerjs 栈只存在于后端，
-  旧前端 P2P 客户端代码已删（LEGACY.md F 节）。
+  旧前端 P2P 客户端代码已删（doc/archive/LEGACY.md F 节）。
 
 ## 坑与设计决策
 

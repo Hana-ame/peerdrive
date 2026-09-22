@@ -218,7 +218,7 @@ controller ──（M2 收层后禁止直接 import repository，一律经 servi
 
 ### `collection_repo_test.go`
 
-> 注：legacy 代码测试（见 doc/LEGACY.md），未逐一标注发现背景；「发现背景」
+> 注：legacy 代码测试（见 doc/archive/LEGACY.md），未逐一标注发现背景；「发现背景」
 > 规范对新代码生效（文件头注释）。
 
 - `TestCollectionRepo_GetOrCreate`：GetOrCreate 幂等——同一用户名+集合名返回
@@ -254,5 +254,5 @@ controller ──（M2 收层后禁止直接 import repository，一律经 servi
 | `share_repo.go` | 分享链接（token + 过期） |
 | `sync_repo.go` | 本地同步状态 2 表 |
 | `task_repo.go` | 异步任务 CRUD |
-| `collection_repo_test.go` | legacy 测试（见 LEGACY.md） |
-| `file_repo_test.go` | legacy 测试（见 LEGACY.md） |
+| `collection_repo_test.go` | legacy 测试（见 doc/archive/LEGACY.md） |
+| `file_repo_test.go` | legacy 测试（见 doc/archive/LEGACY.md） |

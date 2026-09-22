@@ -161,7 +161,7 @@ fwd-auth:
 | `peerjs_service.go` | 规则/质询表挂在 PeerJSService 上（forwardMu/nonceMu/forwardRules/fwNonces） |
 | `internal/router/peerjs_routes.go` | HTTP 端点 4 个（create/connect/list/close） |
 | `config` | `PEERDRIVE_FORWARD_RULES` 环境变量装载 |
-| 旧实现 | legacy libp2p `/peerdrive/forward/1.0.0` 已删除（doc/LEGACY.md） |
+| 旧实现 | legacy libp2p `/peerdrive/forward/1.0.0` 已删除（doc/archive/LEGACY.md） |
 
 ## 坑与设计决策
 
@@ -218,4 +218,4 @@ fwd-auth:
 - `back/internal/router/peerjs_routes.go` —— HTTP 端点（create/connect/list/close）
 - `doc/REFACTOR.md` §3.9（forward v2 重建记录）、§4（帧协议）
 - `doc/LAYERS.md` §6（forward 边界说明：verb 语义属 ②，底层隧道实现可抽离）
-- `doc/LEGACY.md` —— legacy libp2p forward 处置记录
+- `doc/archive/LEGACY.md` —— legacy libp2p forward 处置记录

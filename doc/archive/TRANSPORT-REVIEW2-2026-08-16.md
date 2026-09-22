@@ -1,7 +1,7 @@
 # 传输层审阅报告 第二期 — controller HTTP / service 剩余 / repository / router / peerjs (2026-08-16)
 
 > 审阅时间: 2026-08-16
-> 背景: 第一轮 (`doc/TRANSPORT-REVIEW-2026-08-15.md`) 已覆盖 peerjs/WS/libp2p 服务层并全部修复。
+> 背景: 第一轮 (`doc/archive/TRANSPORT-REVIEW-2026-08-15.md`) 已覆盖 peerjs/WS/libp2p 服务层并全部修复。
 > 本轮扫未审阅面: controller HTTP 层 + service 剩余部分 + repository/router/peerjs 模块,
 > 同一清单 (远程输入 panic / 路径穿越 / 无界内存 / 热路径阻塞 / 无超时 / 泄漏 / 竞态 / 认证绕过)。
 > 结论: 发现 **2 个致命级 (任意文件读/写, 认证形同虚设)** + **1 个远程进程崩溃 panic** 等,

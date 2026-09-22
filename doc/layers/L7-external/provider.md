@@ -109,7 +109,7 @@ libp2p 栈删除后（批2），本包不内置任何 Bitswap 实现，回调完
    （doc/FILE-REFERENCE.md:115-121 有旧清单）。
 2. **批2 删栈**（2026-08-16）：libp2p host + DHT + Bitswap 随旧互联层整体
    删除——`ipfs_service.go`/`ipfs_compat.go` 无法独立存活（复用 P2PService
-   的 host/DHT）。**IPFS 能力收敛为仅存 HTTP gateway 抓取**（LEGACY.md C 节）。
+   的 host/DHT）。**IPFS 能力收敛为仅存 HTTP gateway 抓取**（doc/archive/LEGACY.md C 节）。
 3. **source 层接管**（2026-08-16）：「文件获取抽象」的完整愿景由
    `internal/source/` 的 `SourceManager` 承接（Capability/优先级路由/统计，
    见 L4-core/source.md）；本包保留单一职责：IPFS 网关。

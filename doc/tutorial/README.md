@@ -23,7 +23,7 @@
 > 附录是「想改代码 / 跑还没发版的提交 / 跑测试 / 自己出包」时才看的材料，
 > 只是要把项目跑起来的话，读完第一章就够了。章节号留给主线，附录不占位。
 
-> ⚠️ 仓库里另有一份 `doc/TUTORIAL.md`，写于 2026-05，讲的是当时的 libp2p 链路
+> ⚠️ 仓库里另有一份 `doc/archive/TUTORIAL.md`，写于 2026-05，讲的是当时的 libp2p 链路
 > （`p2p-test`、multiaddr、bootstrap peer）。**那些内容已随 libp2p 栈删除而失效**
-> （2026-08-16 全删，见 `doc/LEGACY.md`）。当前互联层是 PeerJS + WebRTC，
+> （2026-08-16 全删，见 `doc/archive/LEGACY.md`）。当前互联层是 PeerJS + WebRTC，
 > 请以本目录为准。

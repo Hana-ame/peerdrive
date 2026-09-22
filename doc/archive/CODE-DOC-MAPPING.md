@@ -13,8 +13,8 @@
 
 ### internal/config/config.go (206行)
 - **[spec/backend/BACKEND_DOC.md](spec/backend/BACKEND_DOC.md)** — 环境变量参考
-- **[guide/VPS_DEPLOY.md](guide/VPS_DEPLOY.md)** — 生产环境配置
-- **[guide/docker.md](guide/docker.md)** — Docker 环境变量
+- **[archive/VPS_DEPLOY.md](../archive/VPS_DEPLOY.md)** — 生产环境配置（已归档：指向重构前结构）
+- **[archive/docker.md](../archive/docker.md)** — Docker 环境变量（已归档：指向重构前结构）
 
 ### internal/router/router.go (498行)
 - **[spec/API-REFERENCE.md](spec/API-REFERENCE.md)** — 全部 105 端点文档
@@ -52,7 +52,7 @@
 - **[modules/bt/API-DESIGN.md](modules/bt/API-DESIGN.md)** — BT API 设计
 - **[modules/bt/bt-dht-protocol.md](modules/bt/bt-dht-protocol.md)** — BT DHT 协议
 - **[modules/bt/TEST-MATRIX.md](modules/bt/TEST-MATRIX.md)** — BT 测试矩阵
-- **[report/TASK-COMPLETION-2026-04-29.md](report/TASK-COMPLETION-2026-04-29.md)** 任务6 — BT 端到端
+- **[report/TASK-COMPLETION-2026-04-29.md](../archive/report/TASK-COMPLETION-2026-04-29.md)** 任务6 — BT 端到端
 
 ### internal/service/ipfs_compat.go (574行) — IPFS 兼容
 - **[modules/ipfs/README.md](modules/ipfs/README.md)** — IPFS 模块概述
@@ -81,11 +81,11 @@
 ### react/src/pages/AnonCreator.jsx (400行) — 合集创建器
 - **[spec/frontend/FRONTEND_DOC.md](spec/frontend/FRONTEND_DOC.md)** — 前端文档
 - **[spec/COLLECTION-LOGIC.md](spec/COLLECTION-LOGIC.md)** — 合集逻辑
-- **[report/TASK-COMPLETION-2026-04-29.md](report/TASK-COMPLETION-2026-04-29.md)** 任务3 — 前端修复
+- **[report/TASK-COMPLETION-2026-04-29.md](../archive/report/TASK-COMPLETION-2026-04-29.md)** 任务3 — 前端修复
 
 ### react/src/pages/FileManager.jsx (1283行) — 文件管理
 - **[spec/frontend/FRONTEND_DOC.md](spec/frontend/FRONTEND_DOC.md)** — 前端文档
-- **[report/TASK-COMPLETION-2026-04-29.md](report/TASK-COMPLETION-2026-04-29.md)** 任务4 — 三种浏览模式
+- **[report/TASK-COMPLETION-2026-04-29.md](../archive/report/TASK-COMPLETION-2026-04-29.md)** 任务4 — 三种浏览模式
 
 ---
 
@@ -122,14 +122,14 @@
 | [storage/README.md](modules/storage/README.md) | `internal/service/file_service.go`, `internal/repository/file_repo.go` |
 | [auth/README.md](modules/auth/README.md) | `internal/service/auth_service.go`, `internal/repository/user_repo.go` |
 
-### report/ 报告文档
+### archive/report/ 报告文档（已归档）
 | 文档 | 对应的代码文件 |
 |------|---------------|
-| [DASHBOARD.md](DASHBOARD.md) | 全部模块 |
-| [TODO-FIXES.md](report/TODO-FIXES.md) | 见每个条目的文件路径 |
-| [SECURITY-REVIEW.md](report/SECURITY-REVIEW.md) | 见每个漏洞的 File 字段 |
-| [DEVELOPMENT_PLAN.md](report/DEVELOPMENT_PLAN.md) | `internal/router/router.go`, `internal/service/auth_service.go` |
-| [TASK-COMPLETION-2026-04-29.md](report/TASK-COMPLETION-2026-04-29.md) | 见"修改文件清单"节 |
+| [DASHBOARD.md](../archive/DASHBOARD.md) | 全部模块 |
+| [TODO-FIXES.md](../archive/report/TODO-FIXES.md) | 见每个条目的文件路径 |
+| [SECURITY-REVIEW.md](../archive/report/SECURITY-REVIEW.md) | 见每个漏洞的 File 字段 |
+| [DEVELOPMENT_PLAN.md](../archive/report/DEVELOPMENT_PLAN.md) | `internal/router/router.go`, `internal/service/auth_service.go` |
+| [TASK-COMPLETION-2026-04-29.md](../archive/report/TASK-COMPLETION-2026-04-29.md) | 见"修改文件清单"节 |
 
 ### testing/ 测试文档
 | 文档 | 对应的测试脚本/代码 |

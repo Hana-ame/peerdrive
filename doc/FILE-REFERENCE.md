@@ -192,7 +192,7 @@
 | `back/test/peerdrive-new-features.mjs` | 新功能测试 (Node.js) |
 | `back/test/peerdrive-smoke.mjs` | 冒烟测试 (Node.js) |
 | `back/test/register.sh` | 注册流程测试 |
-| `back/test/reg-server-user-mgmt.sh` | 注册服务器用户管理测试 |
+| ~~`back/test/reg-server-user-mgmt.sh`~~ | 注册服务器用户管理测试（已随旧栈清理删除） |
 | `back/test/relay.sh` | 中继功能测试 |
 | `back/test/storage-full-test.sh` | 存储全量测试 |
 | `back/test/upload.sh` | 上传功能测试 |
@@ -371,7 +371,19 @@
 | 文件 | 说明 |
 |------|------|
 | `doc/README.md` | 文档总览 + 完整索引 — 架构、分层设计、模块映射、所有文档入口 |
-| `doc/DASHBOARD.md` | 项目仪表盘 — 进度/状态跟踪 |
+| `doc/ROADMAP.md` | 开发顺序排期（当前有效；与 `doc/archive/report/ROADMAP.md` 那份 v3.0 历史路线图区分） |
+| `doc/REFACTOR.md` | 重构手册 |
+| `doc/NETDISK.md` | 网盘（PeerJS 节点 + 面板）手册 |
+| `doc/LAYERS.md` | 分层架构说明 |
+| `doc/NODE.md` / `doc/NODE-API.md` | 节点 / 节点 API |
+| `doc/PEERSIGNAL.md` | 自托管信令 |
+| `doc/PROJECT-VISION.md` | 产品愿景 |
+| `doc/HTTP_API_PROXY.md` | HTTP API 代理 |
+| `doc/TODO-SIMPLIFY.md` | 简化待办 |
+| `doc/dht-wire-format.md` | DHT 线格式 |
+| `doc/source-control.md` | 版本控制（合集 fork/merge） |
+| `doc/api-reference.md` | API 参考（简版） |
+| `doc/tutorial/` | 教程（面向使用者） |
 
 ### spec/ — 技术规范
 
@@ -381,7 +393,6 @@
 | `doc/spec/API-REFERENCE.md` | 完整 API 参考 (105 端点) |
 | `doc/spec/COLLECTION-LOGIC.md` | 合集逻辑完整追踪 |
 | `doc/spec/USER-ROLES.md` | 用户角色模型 |
-| `doc/spec/CODE-DOC-MAPPING.md` | 代码 ↔ 文档映射表 |
 | `doc/spec/BACKEND_TASKS.md` | 后端任务清单 |
 | `doc/spec/FRONTEND_TASKS.md` | 前端任务清单 |
 
@@ -442,9 +453,7 @@
 |------|------|
 | `doc/modules/p2p/README.md` | P2P 模块总览 |
 | `doc/modules/p2p/API-DESIGN.md` | P2P API 设计 |
-| `doc/modules/p2p/p2p.md` | P2P 协议设计 |
-| `doc/modules/p2p/dual-stack-protocol.md` | 双栈协议设计 (libp2p + BT DHT) |
-| `doc/modules/p2p/grid.md` | P2P 网格拓扑设计 |
+| `doc/modules/p2p/TRANSPORT.md` | 当前互联框架（WS + PeerJS + Session 抽象） |
 
 #### modules/storage/ — 存储模块
 
@@ -462,35 +471,35 @@
 |------|------|
 | `doc/guide/API-USAGE.md` | API 使用手册 — 调用顺序/目的/条件 |
 | `doc/guide/USER_MANUAL.md` | 用户使用手册 |
-| `doc/guide/VPS_DEPLOY.md` | VPS 部署指南 |
-| `doc/guide/docker.md` | Docker 部署指南 |
+| `doc/archive/VPS_DEPLOY.md` | VPS 部署指南（已归档：指向重构前结构） |
+| `doc/archive/docker.md` | Docker 部署指南（已归档：指向重构前结构） |
 | `doc/guide/siliconflow-setup.md` | SiliconFlow LLM API 配置 |
 | `doc/guide/操作说明.md` | 中文操作说明 |
 
-### report/ — 项目报告
+### archive/report/ — 项目报告（2026-04~05 历史报告，已归档）
 
 | 文件 | 说明 |
 |------|------|
-| `doc/report/REPORT-OVERVIEW.md` | 报告总览 |
-| `doc/report/index.md` | 报告索引 |
-| `doc/report/DEVELOPMENT_PLAN.md` | 开发计划 |
-| `doc/report/ROADMAP.md` | 产品路线图 |
-| `doc/report/MILESTONE-P2P.md` | P2P 里程碑 |
-| `doc/report/MILESTONE-p2p-vps.md` | P2P VPS 部署里程碑 |
-| `doc/report/changelog.md` | 变更日志 |
-| `doc/report/refactor-report.md` | 重构报告 |
-| `doc/report/SECURITY-REVIEW.md` | 安全审查报告 |
-| `doc/report/grid.md` | 网格拓扑报告 |
-| `doc/report/TASK-COMPLETION-2026-04-29.md` | 2026-04-29 任务完成报告 |
-| `doc/report/测试报告-2026-04-29.md` | 2026-04-29 测试报告 |
-| `doc/report/TXT-REPLY.md` | TXT 回复记录 |
-| `doc/report/TXT-STATUS.md` | TXT 状态记录 |
-| `doc/report/MEMO.md` | 开发备忘录 |
-| `doc/report/memo-go.md` | Go 开发备忘录 |
-| `doc/report/ISSUES_FOR_GEMINI.md` | 待向 Gemini 反馈的问题 |
-| `doc/report/CI-FIXES.md` | CI 修复记录 |
-| `doc/report/TODO-FIXES.md` | 待修复问题清单 |
-| `doc/report/TODO-P2P-DUAL-STACK.md` | P2P 双栈待办 |
+| `doc/archive/report/REPORT-OVERVIEW.md` | 报告总览 |
+| `doc/archive/report/index.md` | 报告索引 |
+| `doc/archive/report/DEVELOPMENT_PLAN.md` | 开发计划 |
+| `doc/archive/report/ROADMAP.md` | 产品路线图 |
+| `doc/archive/report/MILESTONE-P2P.md` | P2P 里程碑 |
+| `doc/archive/report/MILESTONE-p2p-vps.md` | P2P VPS 部署里程碑 |
+| `doc/archive/report/changelog.md` | 变更日志 |
+| `doc/archive/report/refactor-report.md` | 重构报告 |
+| `doc/archive/report/SECURITY-REVIEW.md` | 安全审查报告 |
+| `doc/archive/report/grid.md` | 网格拓扑报告 |
+| `doc/archive/report/TASK-COMPLETION-2026-04-29.md` | 2026-04-29 任务完成报告 |
+| `doc/archive/report/测试报告-2026-04-29.md` | 2026-04-29 测试报告 |
+| `doc/archive/report/TXT-REPLY.md` | TXT 回复记录 |
+| `doc/archive/report/TXT-STATUS.md` | TXT 状态记录 |
+| `doc/archive/report/MEMO.md` | 开发备忘录 |
+| `doc/archive/report/memo-go.md` | Go 开发备忘录 |
+| `doc/archive/report/ISSUES_FOR_GEMINI.md` | 待向 Gemini 反馈的问题 |
+| `doc/archive/report/CI-FIXES.md` | CI 修复记录 |
+| `doc/archive/report/TODO-FIXES.md` | 待修复问题清单 |
+| `doc/archive/report/TODO-P2P-DUAL-STACK.md` | P2P 双栈待办 |
 
 ### testing/ — 测试文档
 
@@ -505,7 +514,7 @@
 | `doc/testing/CHAOS_TESTING.md` | 混沌测试方案 |
 | `doc/testing/测试方案.md` | 中文测试方案 |
 | `doc/testing/如何测试.md` | 中文测试指南 |
-| `doc/testing/reg-server-test-plan.md` | 注册服务器测试计划 |
+| `doc/testing/archive/reg-server-test-plan.md` | 注册服务器测试计划（已归档） |
 
 ### archive/ — 历史归档
 
@@ -516,6 +525,18 @@
 | `doc/archive/知识库.md` | 历史知识库 |
 | `doc/archive/AGENTS.md` | 历史 Agent 配置 |
 | `doc/archive/reply.md` | 历史回复记录 |
+| `doc/archive/DASHBOARD.md` | 项目仪表盘（旧结构快照） |
+| `doc/archive/LEGACY.md` | 旧栈（libp2p/BT/WebDAV/前端死代码）处置清单 |
+| `doc/archive/TUTORIAL.md` | 旧教程（libp2p 时代，已被 `doc/tutorial/` 取代） |
+| `doc/archive/CODE-DOC-MAPPING.md` | 代码 ↔ 文档映射表（2026-04 快照，多数目标文档已不存在） |
+| `doc/archive/VPS_DEPLOY.md` | VPS 部署（旧结构） |
+| `doc/archive/docker.md` | Docker 部署（旧结构） |
+| `doc/archive/p2p-discovery-flow.md` | 旧 libp2p 发现流程 |
+| `doc/archive/TRANSPORT-REVIEW-2026-08-15.md` / `-2-2026-08-16.md` | 传输层两轮 review |
+| `doc/archive/HTTP-REVIEW-2026-08-16.md` / `REVIEW-FIX-…` | HTTP 层 review 与修复清单 |
+| `doc/archive/FRONTEND-FIX-2026-08-16.md` / `FRONTEND-FIXES-…` | 前端修复记录 |
+| `doc/archive/SESSION-REPORT-20260503T135000.md` | 2026-05-03 会话报告 |
+| `doc/modules/p2p/archive/` | 旧 libp2p/BT-DHT 栈文档（p2p / dual-stack-protocol / grid） |
 
 ---
 

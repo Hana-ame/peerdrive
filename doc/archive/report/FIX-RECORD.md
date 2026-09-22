@@ -22,7 +22,7 @@
 
 | # | 文件 | 内容 |
 |---|------|------|
-| 5 | `doc/report/ARCHITECTURE-REVIEW.md` | 完整审视报告，含 14 项问题和优先级排序 |
+| 5 | `doc/archive/report/ARCHITECTURE-REVIEW.md` | 完整审视报告，含 14 项问题和优先级排序 |
 
 ## 后续 PR 建议
 

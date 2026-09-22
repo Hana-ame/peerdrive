@@ -447,8 +447,8 @@ export function setFollowRedirects(v) { localStorage.setItem(FOLLOW_REDIRECTS_KE
  * bootstrapPeer / relayServer / stunUrl / turnUrl / turnCredential 全部为
  * 「设置页写 localStorage → 设置页读回显」的死闭环，无任何功能消费方：
  * - bootstrap peer：libp2p 概念，后端 PEERDRIVE_BOOTSTRAP_PEER 已随 libp2p
- *   栈删除（doc/LEGACY.md §C）
- * - relay：relay 服务后端已删（doc/LEGACY.md §A），徽章恒 false
+ *   栈删除（doc/archive/LEGACY.md §C）
+ * - relay：relay 服务后端已删（doc/archive/LEGACY.md §A），徽章恒 false
  * - STUN/TURN：浏览器主应用不创建 RTCPeerConnection（全部通信走 /ws/peer
  *   WS 会话）；peerdrive-media 独立包默认空 iceServers（浏览器↔Node 内网
  *   场景 host candidate 即可）。未来若做跨网穿透，在 media 包 signaling.config
