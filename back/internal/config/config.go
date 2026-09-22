@@ -9,6 +9,18 @@ import (
 	"strings"
 )
 
+// 项目公共信令（所有人都连它，不需要自己部署）。
+// 环境变量可以覆盖（自托管 / 内网调试用），但**默认值必须是这一对**——
+// 早先默认是 PeerJS 公共云 0.peerjs.com/peerjs，导致"照默认跑"的节点和面板
+// 互相找不到（分属两个信令，discover 也拿不到任何节点）。
+const (
+	DefaultSignalHost = "peersignal.moonchan.xyz"
+	DefaultSignalPort = "443"
+	DefaultSignalKey  = "pd-signal-b9447b406828e500"
+	// DefaultDiscoverURL 公共信令的发现 API（announce + 节点列表）。
+	DefaultDiscoverURL = "https://peersignal.moonchan.xyz"
+)
+
 type Config struct {
 	Port          string
 	StorageDir    string
@@ -34,9 +46,11 @@ type Config struct {
 	WebRTCTURNServer string
 
 	PeerJSEnable bool   // PEERDRIVE_PEERJS_ENABLE, 默认 true
-	PeerJSHost   string // PEERDRIVE_PEERJS_HOST, 默认 0.peerjs.com（公共云信令）
+	// 默认指向项目自己的公共信令 peersignal.moonchan.xyz（不是 PeerJS 公共云）。
+	// 环境变量仍然可覆盖（自托管 / 内网调试），但教程不教改它。
+	PeerJSHost   string // PEERDRIVE_PEERJS_HOST, 默认 peersignal.moonchan.xyz
 	PeerJSPort   string // PEERDRIVE_PEERJS_PORT, 默认 443
-	PeerJSKey    string // PEERDRIVE_PEERJS_KEY, 默认 peerjs
+	PeerJSKey    string // PEERDRIVE_PEERJS_KEY, 默认 pd-signal-b9447b406828e500
 	PeerJSID     string // PEERDRIVE_PEERJS_ID, 空则生成 peerdrive-<random>
 	PeerJSSecure bool   // PEERDRIVE_PEERJS_SECURE, 默认 true
 	PeerJSPeers  string // PEERDRIVE_PEERJS_PEERS, 逗号分隔对端节点 peer id，启动自动互联
@@ -155,9 +169,9 @@ func Load() *Config {
 		WebRTCTURNServer: getEnv("PEERDRIVE_WEBRTC_TURN", ""),
 
 		PeerJSEnable: getEnvBool("PEERDRIVE_PEERJS_ENABLE", true),
-		PeerJSHost:   getEnv("PEERDRIVE_PEERJS_HOST", "0.peerjs.com"),
-		PeerJSPort:   getEnv("PEERDRIVE_PEERJS_PORT", "443"),
-		PeerJSKey:    getEnv("PEERDRIVE_PEERJS_KEY", "peerjs"),
+		PeerJSHost:   getEnv("PEERDRIVE_PEERJS_HOST", DefaultSignalHost),
+		PeerJSPort:   getEnv("PEERDRIVE_PEERJS_PORT", DefaultSignalPort),
+		PeerJSKey:    getEnv("PEERDRIVE_PEERJS_KEY", DefaultSignalKey),
 		PeerJSID:     getEnv("PEERDRIVE_PEERJS_ID", ""),
 		PeerJSSecure: getEnvBool("PEERDRIVE_PEERJS_SECURE", true),
 		PeerJSPeers:  getEnv("PEERDRIVE_PEERJS_PEERS", ""),
@@ -167,7 +181,7 @@ func Load() *Config {
 		MQTTBroker:        getEnv("PEERDRIVE_MQTT_BROKER", "tcp://broker.emqx.io:1883"),
 		MQTTTopicPref:     getEnv("PEERDRIVE_MQTT_TOPIC_PREFIX", "peerdrive/v1"),
 		MQTTCollections:   getEnv("PEERDRIVE_MQTT_COLLECTIONS", ""),
-		DiscoverURL:       getEnv("PEERDRIVE_DISCOVER_URL", ""),
+		DiscoverURL:       getEnv("PEERDRIVE_DISCOVER_URL", DefaultDiscoverURL),
 		DiscoverPresence:  getEnvBool("PEERDRIVE_DISCOVER_PRESENCE", true),
 		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
 

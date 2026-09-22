@@ -185,10 +185,13 @@ func (s *PeerJSService) startLoop() {
 		opts.Secure = s.cfg.PeerJSSecure
 		opts.Key = s.cfg.PeerJSKey
 		if opts.Host == "" {
-			opts.Host = "0.peerjs.com"
+			opts.Host = config.DefaultSignalHost
 		}
 		if opts.Port == "" {
-			opts.Port = "443"
+			opts.Port = config.DefaultSignalPort
+		}
+		if opts.Key == "" {
+			opts.Key = config.DefaultSignalKey
 		}
 		opts.ICEServers = s.iceServers
 		p := peerjs.NewPeer(s.id, opts)

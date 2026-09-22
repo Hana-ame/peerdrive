@@ -43,14 +43,15 @@ type Peer struct {
 	closed chan struct{}
 }
 
-// DefaultOptions 返回公共云信令（0.peerjs.com）默认配置。
+// DefaultOptions 返回项目公共信令（peersignal.moonchan.xyz）默认配置。
+// 不是 PeerJS 公共云：节点默认与面板默认必须是同一个信令，否则谁也找不到谁。
 func DefaultOptions() Options {
 	return Options{
-		Host:         "0.peerjs.com",
+		Host:         "peersignal.moonchan.xyz",
 		Port:         "443",
 		Secure:       true,
 		Path:         "/",
-		Key:          "peerjs",
+		Key:          "pd-signal-b9447b406828e500",
 		PingInterval: 5 * time.Second,
 	}
 }

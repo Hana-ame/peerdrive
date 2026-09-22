@@ -14,6 +14,15 @@
   'use strict'
 
   var LS_KEY = 'peerdrive.panel.v1'
+  // 项目公共信令：节点与面板的默认值必须一致，否则互相找不到
+  // （两个信令各是一张节点表，discover 也搜不到对方）。
+  var DEFAULT_SIG = {
+    host: 'peersignal.moonchan.xyz',
+    port: 443,
+    path: '/',
+    key: 'pd-signal-b9447b406828e500',
+    secure: true,
+  }
   var MAX_RECENT = 8
   var PREVIEW_MAX_BYTES = 2 * 1024 * 1024 // 预览只给小文件，大的直接存盘
   // put() 会把整个内容读进浏览器内存再按 64KB 分片推出去——超过这个量要先提醒，
@@ -91,10 +100,10 @@
 
   function sigOfForm() {
     return {
-      host: $('in-host').value.trim() || '0.peerjs.com',
-      port: Number($('in-port').value.trim() || 443),
-      path: $('in-path').value.trim() || '/',
-      key: $('in-key').value.trim() || 'peerjs',
+      host: $('in-host').value.trim() || DEFAULT_SIG.host,
+      port: Number($('in-port').value.trim() || DEFAULT_SIG.port),
+      path: $('in-path').value.trim() || DEFAULT_SIG.path,
+      key: $('in-key').value.trim() || DEFAULT_SIG.key,
       secure: $('in-secure').checked,
     }
   }
@@ -179,7 +188,7 @@
           $('in-host').value = r.sig.host || ''
           $('in-port').value = r.sig.port || 443
           $('in-path').value = r.sig.path || '/'
-          $('in-key').value = r.sig.key || 'peerjs'
+          $('in-key').value = r.sig.key || DEFAULT_SIG.key
           $('in-secure').checked = r.sig.secure !== false
         }
         connect()
