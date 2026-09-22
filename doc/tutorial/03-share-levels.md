@@ -174,7 +174,7 @@ curl -s http://127.0.0.1:3001/peerjs/share | python -m json.tool
 **本章自检清单**：
 
 1. 设成 `unlisted` 的文件，**不出现在**对端 `shares` 清单里；
-2. 但它用 hash 仍能取回（面板"取回校验"或另一节点 `POST /p2p/pull`）；
+2. 但它用 hash 仍能取回（面板"取回校验"或另一节点 `POST /p2p/pull`，见第五章）；
 3. 设成 `private` 后，不在好友名单的节点取它 → 报 `private`；
 4. 把自己加进好友名单后，同一个节点能取到，**并且**在 `shares` 里能看到它；
 5. 重启节点 → 级别和好友名单都还在（落在 `share_scope.json`）。
