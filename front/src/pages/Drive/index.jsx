@@ -54,6 +54,9 @@ export default function Drive() {
   // 为什么要草稿而不是直接改：名单是多行的，每敲一个字就 PUT 一次既打后端，
   // 也会在半截输入（"a,"）时把空项写进去。
   const [friendDraft, setFriendDraft] = useState('');
+  // dirDraft / dirLevel 待添加的共享目录（绝对路径）与它的级别。
+  const [dirDraft, setDirDraft] = useState('');
+  const [dirLevel, setDirLevel] = useState('public');
 
   // load 拉取文件与合集。两处各自容错：文件列表失败不该让合集也空白。
   const load = useCallback(async () => {
@@ -216,6 +219,56 @@ export default function Drive() {
     setBusy('');
   };
 
+  // dirsOf 把 GET 回的目录项统一成 {id, level}（旧落盘可能是纯字符串，
+  // 后端也接受字符串写法，但回给前端的一律是对象）。
+  const dirsOf = (sc) => (sc?.dirs || []).map((d) => (
+    typeof d === 'string' ? { id: d, level: 'public' } : { id: d?.id || '', level: d?.level || 'public' }
+  )).filter((d) => d.id);
+
+  // onPutDirs 写回**整份**目录列表。
+  // 为什么必须整份：PUT /peerjs/share 的"局部更新"只针对"传不传这个字段"，
+  // 传了 dirs 就是整体替换。所以增删一条、改一条级别，都要把原有的带上——
+  // 只发新增的那一条会静默清掉其它共享目录。
+  const onPutDirs = async (next, noticeText) => {
+    setBusy('dirs');
+    setErr('');
+    try {
+      const res = await api.setShareScope({ dirs: next });
+      // 后端会归一化（转绝对路径、去重、排序），以它回的为准
+      setScope((s) => (s ? { ...s, dirs: res?.dirs || next } : s));
+      setNotice(noticeText);
+    } catch (ex) {
+      // 卷根目录、非法级别会被后端整批拒绝（400），原话转给用户
+      setErr(ex?.message || '共享目录设置失败');
+    }
+    setBusy('');
+  };
+
+  const onAddDir = () => {
+    const p = dirDraft.trim();
+    if (!p) {
+      setErr('请填目录的绝对路径');
+      return;
+    }
+    const cur = dirsOf(scope);
+    if (cur.some((d) => d.id.toLowerCase() === p.toLowerCase())) {
+      setErr('这个目录已经在共享范围里了');
+      return;
+    }
+    setDirDraft('');
+    onPutDirs([...cur, { id: p, level: dirLevel }], `已共享目录 ${p}`);
+  };
+
+  const onRemoveDir = (id) => onPutDirs(
+    dirsOf(scope).filter((d) => d.id !== id),
+    `已移除共享目录 ${id}`,
+  );
+
+  const onSetDirLevel = (id, level) => onPutDirs(
+    dirsOf(scope).map((d) => (d.id === id ? { ...d, level } : d)),
+    `${id}：${labelOfLevel(level)}`,
+  );
+
   // onToggleEnable 总开关：关掉 = 对外完全不提供清单（已勾选的内容保留）。
   const onToggleEnable = async () => {
     const want = !scope?.enable;
@@ -320,6 +373,64 @@ export default function Drive() {
             </div>
           )}
 
+          {/* 共享目录：整目录共享（含以后新增的文件）。由目录带上的文件在下面
+              表格里标「由共享目录带上的」，逐行取消不了——要在这里改范围。 */}
+          {scope && (
+            <div className="mb-3 rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-gray-300">共享目录</span>
+                <input
+                  id="share-dir"
+                  value={dirDraft}
+                  onChange={(e) => setDirDraft(e.target.value)}
+                  placeholder="目录绝对路径，例如 /home/me/media 或 D:\Media"
+                  className="min-w-[16rem] flex-1 rounded border border-gray-700 bg-gray-950 px-2 py-1 font-mono text-xs text-gray-200"
+                />
+                <select
+                  value={dirLevel}
+                  onChange={(e) => setDirLevel(e.target.value)}
+                  aria-label="新目录的共享级别"
+                  title={LEVELS.map((l) => `${l.label}：${l.hint}`).join('\n')}
+                  className="rounded border border-gray-700 bg-gray-900 px-1.5 py-1 text-xs text-gray-300"
+                >
+                  {LEVELS.map((l) => (
+                    <option key={l.v} value={l.v}>{l.label}</option>
+                  ))}
+                </select>
+                <Btn tone="primary" onClick={onAddDir} disabled={busy === 'dirs'}>
+                  {busy === 'dirs' ? '保存中…' : '添加目录'}
+                </Btn>
+              </div>
+
+              {dirsOf(scope).length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {dirsOf(scope).map((d) => (
+                    <li key={d.id} className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="min-w-0 flex-1 truncate font-mono text-gray-300" title={d.id}>{d.id}</span>
+                      <select
+                        value={d.level}
+                        onChange={(e) => onSetDirLevel(d.id, e.target.value)}
+                        disabled={busy === 'dirs'}
+                        aria-label={`${d.id} 的共享级别`}
+                        className="rounded border border-gray-700 bg-gray-900 px-1.5 py-1 text-xs text-gray-300"
+                      >
+                        {LEVELS.map((l) => (
+                          <option key={l.v} value={l.v}>{l.label}</option>
+                        ))}
+                      </select>
+                      <Btn tone="danger" onClick={() => onRemoveDir(d.id)} disabled={busy === 'dirs'}>移除</Btn>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="mt-1 text-[11px] text-gray-600">
+                整目录共享会把目录下的文件（含以后新增的）都带上；带上的文件在下面表格里标
+                「由共享目录带上的」，要取消得在这里移除目录。卷根目录（<code>/</code>、<code>C:\</code>）会被后端拒绝。
+              </div>
+            </div>
+          )}
+
           {notice && <div className="mb-3 text-xs text-green-400">{notice}</div>}
           {err && <div className="mb-3 text-xs text-red-400">{err}</div>}
 
@@ -350,6 +461,7 @@ export default function Drive() {
                       value={sharedMap.get(row.hash)?.level || 'public'}
                       onChange={(e) => onSetLevel(row, e.target.value)}
                       disabled={busy === row.hash}
+                      aria-label={`${row.name} 的共享级别`}
                       title={LEVELS.map((l) => `${l.label}：${l.hint}`).join('\n')}
                       className="rounded border border-gray-700 bg-gray-900 px-1.5 py-1 text-xs text-gray-300"
                     >

@@ -1,3 +1,7 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
 // E2E 冒烟：连接本地 WS /ws/peer，走 admin verb 验证管理面全链路
 // （对应前端 ws.js admin/upload + 后端 admin.go 真实 gin 转发）。
 // Node 22 原生 WebSocket；二进制用 ArrayBuffer（binaryType 设为 'arraybuffer'）。
@@ -145,6 +149,25 @@ ws.addEventListener('open', async () => {
       ok('卷根目录作共享目录被拒', false, 'expected reject')
     } catch (e) {
       ok('卷根目录作共享目录被拒', e.message.includes('400'), e.message)
+    }
+
+    // 8b. 共享目录（管理台「共享目录」那一条的背后）：加一个真实目录 → GET 读回
+    //     → 清空恢复。PUT 的 dirs 是**整体替换**，这条只验往返，前端"加第二个要
+    //     带上第一个"的规则由 netdisk.test.jsx 断言。
+    const dirPath = path.join(os.tmpdir(), 'peerdrive-e2e-share-' + Date.now())
+    fs.mkdirSync(dirPath, { recursive: true })
+    const dirsOf = (body) => (body || []).map(it => (typeof it === 'string' ? { id: it, level: '' } : it))
+    try {
+      const put = await send('admin', { method: 'PUT', path: '/peerjs/share', body: { dirs: [{ id: dirPath, level: 'unlisted' }] } })
+      const got = dirsOf(put.body.dirs).find(it => it?.id === dirPath)
+      ok('共享目录可写且带级别', put.status === 200 && got?.level === 'unlisted', JSON.stringify(put.body.dirs))
+      const back = await send('admin', { method: 'GET', path: '/peerjs/share' })
+      ok('共享目录可读回', dirsOf(back.body.dirs).some(d => d?.id === dirPath), JSON.stringify(back.body.dirs))
+      const clr = await send('admin', { method: 'PUT', path: '/peerjs/share', body: { dirs: [] } })
+      ok('共享目录可清空（dirs 整体替换）', clr.status === 200 && dirsOf(clr.body.dirs).length === 0, JSON.stringify(clr.body.dirs))
+      fs.rmSync(dirPath, { recursive: true, force: true })
+    } catch (e) {
+      ok('共享目录往返', false, e.message)
     }
 
     // 9. 未知名路由 → admin-resp 404 透传（send 对 >=400 reject，这里直接捕获验证）

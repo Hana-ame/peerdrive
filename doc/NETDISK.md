@@ -973,9 +973,12 @@ POST /peerjs/share/files  {hashes:[...], shared:bool, level?}  单行勾选/改�
 - `front/tests/netdisk.test.jsx` `pages/Drive 共享勾选`：勾一个文件发的是 hash
   列表（不是整份范围）、总开关只发 `enable`、端点不可用时隐藏控件；
   `pages/Drive 共享级别`：未共享不显示下拉、改级别保持 `shared=true`、
-  好友名单按逗号拆分、下拉回填当前级别。
+  好友名单按逗号拆分、下拉回填当前级别；
+  `pages/Drive 共享目录`：加目录**带上原有目录一起发**（`PUT` 的 `dirs` 是整体
+  替换，只发新增那条会静默清掉别的）、新目录带选中级别、移除只发剩下的、
+  空输入不发请求。
 - `front/tests/e2e-admin-smoke.mjs`：真实节点上 读 → 勾 → 复核 → 改级别 →
-  写好友 → 拒拼错的级别 → 拒卷根。
+  写好友 → 拒拼错的级别 → 拒卷根 → 共享目录往返（写/读回/清空）。
 - `packages/peerdrive-client/test/panel-contract.test.mjs`：面板的两条契约——
   连出去必须带本端 id、分享链接绝不拼进 psk、复制要有降级路径、启动早期不碰 DOM。
   （面板是 file:// 下的 IIFE，跑不起来，只能这样钉住"改坏了静默失效"的那几条。）

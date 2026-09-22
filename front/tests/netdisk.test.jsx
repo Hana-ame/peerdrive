@@ -461,17 +461,19 @@ describe('pages/Drive 共享级别', () => {
     api.setShareScope.mockResolvedValue({ enable: true, friends: ['pd-alpha'] });
   });
 
+  // 注意：页面上还有"共享目录/好友"那几个下拉也带"公开"选项，所以这里必须按
+  // 文件行的 aria-label 定位，不能只按显示值找（否则多元素匹配、断言假通过）。
   it('已共享的文件才显示级别下拉（没共享就没有"给谁看"这回事）', async () => {
     api.getShareScope.mockResolvedValue(scopeOf(false));
     render(<MemoryRouter><Drive /></MemoryRouter>);
     await screen.findByText('b.txt');
-    expect(screen.queryByDisplayValue('公开')).toBeNull();
+    expect(screen.queryByLabelText('b.txt 的共享级别')).toBeNull();
   });
 
   it('改级别：带上 level 且保持 shared=true', async () => {
     api.getShareScope.mockResolvedValue(scopeOf(true, 'public'));
     render(<MemoryRouter><Drive /></MemoryRouter>);
-    const sel = await screen.findByDisplayValue('公开');
+    const sel = await screen.findByLabelText('b.txt 的共享级别');
     fireEvent.change(sel, { target: { value: 'private' } });
     expect(api.setFilesShared).toHaveBeenCalledWith([H], true, 'private');
   });
@@ -485,10 +487,85 @@ describe('pages/Drive 共享级别', () => {
     expect(api.setShareScope).toHaveBeenCalledWith({ friends: ['pd-alpha', 'pd-beta'] });
   });
 
-  it('级别下拉里的三档顺序与文案（后端 model.Level* 一致）', async () => {
+  it('级别下拉回填当前级别而不是默认 public', async () => {
     api.getShareScope.mockResolvedValue(scopeOf(true, 'unlisted'));
     render(<MemoryRouter><Drive /></MemoryRouter>);
-    // 未共享时是"不列出"，下拉应回填 unlisted 而不是默认 public
-    expect(await screen.findByDisplayValue('不列出')).toBeTruthy();
+    const sel = await screen.findByLabelText('b.txt 的共享级别');
+    expect(sel.value).toBe('unlisted');
+  });
+});
+
+// 共享目录（doc/NETDISK.md §12）：整目录共享是最常用的粒度（"把我这个照片目录
+// 给出去"），后端 PUT /peerjs/share 的 dirs 是**整体替换**——只发新增的那一条
+// 会静默清掉其它目录，这是这里最容易写错、且用户事后才发现的地方。
+describe('pages/Drive 共享目录', () => {
+  const H = 'c'.repeat(64);
+
+  const scopeOf = (dirs) => ({
+    enable: true,
+    dirs,
+    collections: [],
+    friends: [],
+    files: [{ hash: H, name: 'c.txt', size: 3, shared: false, by_dir: false, level: 'public' }],
+  });
+
+  beforeEach(() => {
+    api.listFiles.mockResolvedValue([{ hash: H, filename: 'c.txt', size: 3 }]);
+    api.listAnonCollections.mockResolvedValue([]);
+    api.setFilesShared.mockResolvedValue({ enable: true, selected: [] });
+    // 后端会归一化（绝对路径/去重/排序），回的是完整新范围
+    api.setShareScope.mockImplementation(async (patch) => ({
+      enable: true, dirs: patch.dirs || [], friends: [],
+    }));
+  });
+
+  it('添加目录时把已有目录一起发（dirs 是整体替换，不是追加）', async () => {
+    api.getShareScope.mockResolvedValue(scopeOf([{ id: '/media', level: 'public' }]));
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    fireEvent.change(await screen.findByPlaceholderText(/目录绝对路径/), { target: { value: '/photos' } });
+    fireEvent.click(screen.getByText('添加目录'));
+    await waitFor(() => expect(api.setShareScope).toHaveBeenCalled());
+    expect(api.setShareScope).toHaveBeenCalledWith({
+      dirs: [{ id: '/media', level: 'public' }, { id: '/photos', level: 'public' }],
+    });
+  });
+
+  it('新目录带上选中的级别，而不是一律 public', async () => {
+    api.getShareScope.mockResolvedValue(scopeOf([]));
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    fireEvent.change(await screen.findByPlaceholderText(/目录绝对路径/), { target: { value: '/private' } });
+    fireEvent.change(screen.getByLabelText('新目录的共享级别'), { target: { value: 'private' } });
+    fireEvent.click(screen.getByText('添加目录'));
+    await waitFor(() => expect(api.setShareScope).toHaveBeenCalled());
+    expect(api.setShareScope).toHaveBeenCalledWith({ dirs: [{ id: '/private', level: 'private' }] });
+  });
+
+  it('移除一条只发剩下的目录（不是发空列表）', async () => {
+    api.getShareScope.mockResolvedValue(scopeOf([
+      { id: '/media', level: 'public' },
+      { id: '/photos', level: 'unlisted' },
+    ]));
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    fireEvent.click(await screen.findByText('/photos')); // 目录行渲染出路径本身
+    const btns = screen.getAllByText('移除');
+    fireEvent.click(btns[1]); // 第二条 = /photos
+    await waitFor(() => expect(api.setShareScope).toHaveBeenCalled());
+    expect(api.setShareScope).toHaveBeenCalledWith({ dirs: [{ id: '/media', level: 'public' }] });
+  });
+
+  it('改目录级别：整份列表回写，只改那一条的 level', async () => {
+    api.getShareScope.mockResolvedValue(scopeOf([{ id: '/media', level: 'public' }]));
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    fireEvent.change(await screen.findByLabelText('/media 的共享级别'), { target: { value: 'unlisted' } });
+    await waitFor(() => expect(api.setShareScope).toHaveBeenCalled());
+    expect(api.setShareScope).toHaveBeenCalledWith({ dirs: [{ id: '/media', level: 'unlisted' }] });
+  });
+
+  it('空输入不发请求（别把空字符串写进共享范围）', async () => {
+    api.getShareScope.mockResolvedValue(scopeOf([]));
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    fireEvent.click(await screen.findByText('添加目录'));
+    expect(api.setShareScope).not.toHaveBeenCalled();
+    expect(await screen.findByText('请填目录的绝对路径')).toBeTruthy();
   });
 });

@@ -35,8 +35,9 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 
 ## 功能介绍：现在能做什么
 
-> 以下能力都在本分支（`refactor`）实跑过：后端单测 550 · 集成 21 · 网盘端到端脚本 8 项断言 ·
-> 面板真实浏览器 9 项断言 · 共享级别端到端 7 项断言 · 管理面冒烟 7 项断言，CI 覆盖合计 843 个用例
+> 以下能力都在本分支（`refactor`）实跑过：后端单测 550 · 集成 21 · 前端 101 · client 110 ·
+> 网盘端到端脚本 8 项断言 · 面板真实浏览器 9 项断言 · 共享级别端到端 7 项断言 ·
+> 管理面冒烟 19 项断言，CI 覆盖合计 880 个用例
 > （逐项清单、命令与盲区见 `doc/testing/README.md`）。
 
 ### 不开节点也能用（公共面板 `dist/panel.html`）
@@ -58,7 +59,7 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 | 文件索引 | `file_index` 表持久化 sha256 → 绝对路径，带 seq 游标做增量同步（`sync` verb） |
 | 多协议取内容 | 下载器按 `local → ipfs → ipfsgw → btdht → http` 路由（顺序与超时可配） |
 | 节点市场与加入 | 信令上发现节点，加入后落 `joined_nodes.json` 并成为常驻对端 |
-| 对外共享范围 | `share` verb；**默认全关** —— 不显式声明就不对外暴露任何清单。范围可**运行时**改：按目录、按合集、或按 hash 勾单个文件（`GET/PUT /peerjs/share`、`POST /peerjs/share/files`），落盘 `storageDir/share_scope.json`，不用重启；环境变量只是首次启动的初值 |
+| 对外共享范围 | `share` verb；**默认全关** —— 不显式声明就不对外暴露任何清单。范围可**运行时**改：按目录、按合集、或按 hash 勾单个文件（`GET/PUT /peerjs/share`、`POST /peerjs/share/files`），落盘 `storageDir/share_scope.json`，不用重启；环境变量只是首次启动的初值。管理台「我的网盘」里逐行勾选、**共享目录**增删与好友名单都走这套端点 |
 | 共享级别 | 每条共享声明带一档：`public` 列出且可下载 / `unlisted` 不列出但凭 hash 可下载 / `private` 只给自己与好友（`ShareScope.Friends`）。好友能看到 private 清单；下载门禁在 `transport.ShareGate`；peer id 自报，所以名单只在设了 PSK 时可靠（`doc/NETDISK.md` §12.6） |
 | 准入控制 | `PEERDRIVE_PSK`：设了之后对端必须在连接上出示同一把密钥，否则所有请求回 `PSK_REQUIRED` |
 | 管理面 | 本地 WS 的 `admin` verb，内部复用 gin 的全部 HTTP controller；WebRTC 侧刻意不实现，防权限暴露 |
@@ -114,6 +115,7 @@ SHA256 hash 转为 CIDv1 在 IPFS DHT 上 announce，同时作为 infohash 在 B
 > [`doc/tutorial/01-run-and-connect.md`](doc/tutorial/01-run-and-connect.md)
 > 信令不用自己部署：默认连公共信令 `peersignal.moonchan.xyz`（wss）。
 > 要改代码 / 跑最新未发版的提交（可跳过）：[附录 A · 从源码编译](doc/tutorial/appendix-build-from-source.md)
+> 完整教程目录（共享级别 · 选择共享什么 · 跨节点保存）：[`doc/tutorial/README.md`](doc/tutorial/README.md)
 
 ```bash
 # 后端（不用编译：下载发布好的二进制）
