@@ -24,6 +24,9 @@ vi.mock('../src/api.js', () => ({
   downloadFileToDisk: vi.fn(),
   getBlobUrl: vi.fn(),
   deleteFile: vi.fn(),
+  getShareScope: vi.fn(),
+  setShareScope: vi.fn(),
+  setFilesShared: vi.fn(),
 }));
 
 import {
@@ -35,6 +38,7 @@ import TransferRow from '../src/components/netdisk/TransferRow';
 import Market from '../src/pages/Market';
 import PeerDetail from '../src/pages/PeerDetail';
 import Transfers from '../src/pages/Transfers';
+import Drive from '../src/pages/Drive';
 
 // 网盘链路（M4）的界面契约测试。
 // 重点不在"渲染出像素"，而在几条容易静默写错、且错了之后用户完全看不出问题的规则：
@@ -42,6 +46,7 @@ import Transfers from '../src/pages/Transfers';
 //   · 对端未声明大小时不能画百分比进度条（假装有进度是骗人）
 //   · "保存选中"必须把 hash + 相对路径都传给后端（丢 path 会让合集条目散落根目录）
 //   · 传输页只在有 running 任务时轮询（否则长期空转打后端）
+//   · 「共享」是独立于「持有」的选择：勾一个文件发的是 hash 列表，不是整份范围
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -379,5 +384,55 @@ describe('pages/Transfers', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// 「自由选择共享内容」（doc/NETDISK.md M2.6）：
+// 上传/登记进来只是"我持有"，对外提供是另一件事——逐行勾选，按 hash 增量改，
+// 不整份重发（整份重发会让连点两下互相覆盖）。
+describe('pages/Drive 共享勾选', () => {
+  const H = 'a'.repeat(64);
+  const files = [{ hash: H, filename: 'a.txt', size: 10 }];
+
+  const scopeOf = (shared) => ({
+    enable: true,
+    dirs: [],
+    collections: [],
+    files: [{ hash: H, name: 'a.txt', size: 10, shared, by_dir: false }],
+  });
+
+  beforeEach(() => {
+    api.listFiles.mockResolvedValue(files);
+    api.listAnonCollections.mockResolvedValue([]);
+    api.setFilesShared.mockResolvedValue({ enable: true, files: [H] });
+  });
+
+  it('未共享的文件显示「共享」，点了发 hash 列表给后端', async () => {
+    api.getShareScope.mockResolvedValue(scopeOf(false));
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    fireEvent.click(await screen.findByText('共享'));
+    expect(api.setFilesShared).toHaveBeenCalledWith([H], true);
+  });
+
+  it('已共享的文件显示「取消共享」，点了发 shared=false', async () => {
+    api.getShareScope.mockResolvedValue(scopeOf(true));
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    fireEvent.click(await screen.findByText('取消共享'));
+    expect(api.setFilesShared).toHaveBeenCalledWith([H], false);
+  });
+
+  it('总开关只发 enable 一个字段（不整份覆盖目录/文件选择）', async () => {
+    api.getShareScope.mockResolvedValue(scopeOf(false));
+    api.setShareScope.mockResolvedValue({ enable: false });
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    fireEvent.click(await screen.findByText('对外共享：开'));
+    expect(api.setShareScope).toHaveBeenCalledWith({ enable: false });
+  });
+
+  it('共享范围拿不到（节点没开 peerjs）时不显示共享控件，文件列表照常', async () => {
+    api.getShareScope.mockRejectedValue(new Error('503'));
+    render(<MemoryRouter><Drive /></MemoryRouter>);
+    expect(await screen.findByText('a.txt')).toBeTruthy();
+    expect(screen.queryByText(/对外共享/)).toBeNull();
   });
 });

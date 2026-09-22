@@ -34,6 +34,12 @@ func SetNodeDirectory(d *service.NodeDirectory) {
 	controller.InitNodeDirectory(d)
 }
 
+// SetNodeShare 注入共享范围服务（nil 则 /peerjs/share* 返回 503）。
+// 共享范围是运行时可改的运营者选择（管理台勾选），落盘在 storage 下。
+func SetNodeShare(s *service.NodeShare) {
+	controller.InitNodeShareController(s)
+}
+
 // SetPeerPuller 注入跨节点拉取服务（nil 则 /p2p/pull* 返回 503）。
 func SetPeerPuller(p *service.PeerPuller) {
 	controller.InitPeerPuller(p)
@@ -82,6 +88,14 @@ func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 	r.GET("/peerjs/nodes/:peer/shares", controller.GetPeerShares)
 	r.POST("/peerjs/nodes/join", auth, controller.JoinNode)
 	r.DELETE("/peerjs/nodes/join", auth, controller.LeaveNode)
+
+	// ── 本节点共享范围（doc/NETDISK.md M2.6）──
+	// 读也挂 auth：响应里有机上文件的名字/大小，属管理面信息；未配注册服务器
+	// 时 AuthRequired 内部放行（单机模式）。
+	// 命名与「问对端要清单」的 /peerjs/nodes/:peer/shares 刻意区分开。
+	r.GET("/peerjs/share", auth, controller.GetNodeShare)
+	r.PUT("/peerjs/share", auth, controller.PutNodeShare)
+	r.POST("/peerjs/share/files", auth, controller.PostNodeShareFiles)
 
 	// POST /peerjs/fetch {peer, hash, offset?, size?} 从对端节点拉取 sha256 内容
 	// H4：此端点把整个响应 buffer 驻留内存（service 内 8GB cap 只防溢出，不防慢读客户端

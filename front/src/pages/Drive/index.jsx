@@ -8,7 +8,12 @@
 //   - 文件：GET /files（file_index 的本地管理清单；跨节点"保存"下来的文件
 //     也会出现在这里，因为 PeerPuller 保存后做了索引登记）
 //   - 合集：GET /anon/collections
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+//   - 共享范围：GET /peerjs/share（每行文件带是否已共享）
+//
+// 「自由选择共享内容」落在这一页：上传/登记进来只是"我持有"，是否对外提供是
+// 另一件事——逐行勾选（按 hash），或整目录共享（见 doc/NETDISK.md M2.6）。
+// 勾选即生效，不用重启节点；后端落在 storage/share_scope.json。
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as api from '../../api';
 import SideNav, { MobileNav } from '../../components/netdisk/SideNav';
@@ -22,6 +27,9 @@ export default function Drive() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
+  // scope = 本节点共享范围（null = 该端点不可用，例如节点没开 peerjs）。
+  // 拿不到就整块不渲染：不要让"共享设置加载失败"盖住文件列表本身。
+  const [scope, setScope] = useState(null);
   const fileInput = useRef(null);
 
   // load 拉取文件与合集。两处各自容错：文件列表失败不该让合集也空白。
@@ -40,6 +48,12 @@ export default function Drive() {
       setColls(Array.isArray(c) ? c : []);
     } catch {
       setColls([]);
+    }
+    // 共享范围单独容错：没开 peerjs 的节点本来就没有"对外共享"这回事
+    try {
+      setScope(await api.getShareScope());
+    } catch {
+      setScope(null);
     }
     setLoading(false);
   }, []);
@@ -103,6 +117,60 @@ export default function Drive() {
     setBusy('');
   };
 
+  // sharedMap：hash → { shared, by_dir }。后端算好共享状态（目录共享也算），
+  // 前端不自己比前缀——Windows 盘符大小写/分隔符混写会让两份实现跑偏。
+  const sharedMap = useMemo(() => {
+    const m = new Map();
+    for (const f of scope?.files || []) m.set(f.hash, f);
+    return m;
+  }, [scope]);
+
+  const sharedCount = useMemo(
+    () => (scope?.files || []).filter((f) => f.shared).length,
+    [scope],
+  );
+
+  // onToggleShare 单行勾选：立刻生效（后端落盘），失败则回滚提示。
+  const onToggleShare = async (row) => {
+    const cur = sharedMap.get(row.hash);
+    const want = !cur?.shared;
+    setBusy(row.hash);
+    setErr('');
+    try {
+      const res = await api.setFilesShared([row.hash], want);
+      // 后端返回更新后的完整勾选列表；目录共享带上的文件不在里面，
+      // 因此以"请求意图 + by_dir"合并本地状态，避免勾选框闪回。
+      const picked = new Set(res?.files || []);
+      setScope((s) => (s ? {
+        ...s,
+        files: (s.files || []).map((f) => (
+          f.hash === row.hash
+            ? { ...f, shared: want || f.by_dir, by_dir: f.by_dir }
+            : { ...f, shared: f.by_dir || picked.has(f.hash) }
+        )),
+      } : s));
+      setNotice(want ? `已共享 ${row.name}` : `已取消共享 ${row.name}`);
+    } catch (ex) {
+      setErr(ex?.message || '共享设置失败');
+    }
+    setBusy('');
+  };
+
+  // onToggleEnable 总开关：关掉 = 对外完全不提供清单（已勾选的内容保留）。
+  const onToggleEnable = async () => {
+    const want = !scope?.enable;
+    setBusy('enable');
+    setErr('');
+    try {
+      const res = await api.setShareScope({ enable: want });
+      setScope((s) => (s ? { ...s, enable: !!res?.enable } : s));
+      setNotice(want ? '已开启对外共享' : '已关闭对外共享（勾选保留）');
+    } catch (ex) {
+      setErr(ex?.message || '共享开关设置失败');
+    }
+    setBusy('');
+  };
+
   const rows = files.map((f) => ({
     key: f.hash,
     name: f.filename || f.hash,
@@ -136,6 +204,32 @@ export default function Drive() {
             </div>
           </div>
 
+          {/* 共享范围总开关：关 = 对外完全不提供清单；开 = 按下面逐行勾选给。
+              勾选状态本身保留，所以关了再开不用重选。 */}
+          {scope && (
+            <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+              <button
+                type="button"
+                onClick={onToggleEnable}
+                disabled={busy === 'enable'}
+                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                  scope.enable
+                    ? 'bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                {scope.enable ? '对外共享：开' : '对外共享：关'}
+              </button>
+              <span className="text-xs text-gray-500">
+                已共享 {sharedCount} / {scope.files?.length || 0} 个文件
+                {scope.dirs?.length ? ` · 另含 ${scope.dirs.length} 个共享目录` : ''}
+              </span>
+              <span className="text-[11px] text-gray-600">
+                想共享哪个就勾哪个，即时生效，不用重启节点
+              </span>
+            </div>
+          )}
+
           {notice && <div className="mb-3 text-xs text-green-400">{notice}</div>}
           {err && <div className="mb-3 text-xs text-red-400">{err}</div>}
 
@@ -148,6 +242,17 @@ export default function Drive() {
                 <>
                   <Btn onClick={() => onPreview(row)} disabled={busy === row.hash}>预览</Btn>
                   <Btn onClick={() => onDownload(row)} disabled={busy === row.hash}>下载</Btn>
+                  {/* 共享是独立于"持有"的选择：不勾就只是你自己能看 */}
+                  {scope && (
+                    <Btn
+                      tone={sharedMap.get(row.hash)?.shared ? 'primary' : undefined}
+                      onClick={() => onToggleShare(row)}
+                      disabled={busy === row.hash}
+                      title={sharedMap.get(row.hash)?.by_dir ? '由共享目录带上的，取消需改目录范围' : ''}
+                    >
+                      {sharedMap.get(row.hash)?.shared ? '取消共享' : '共享'}
+                    </Btn>
+                  )}
                   <Btn tone="danger" onClick={() => onDelete(row)} disabled={busy === row.hash}>删除</Btn>
                 </>
               )}

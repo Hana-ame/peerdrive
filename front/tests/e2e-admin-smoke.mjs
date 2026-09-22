@@ -105,7 +105,29 @@ ws.addEventListener('open', async () => {
     const files = await send('admin', { method: 'GET', path: '/files' })
     ok('admin GET /files', files.status === 200 && Array.isArray(files.body), JSON.stringify(files.body))
 
-    // 6. 未知名路由 → admin-resp 404 透传（send 对 >=400 reject，这里直接捕获验证）
+    // 6-8. 共享范围（doc/NETDISK.md M2.6）：读 → 勾一个文件 → 复核 → 拒卷根目录。
+    //     「持有」不等于「共享」：上传进来只是自己能看到，对外提供要另行勾选。
+    const scope = await send('admin', { method: 'GET', path: '/peerjs/share' })
+    ok('admin GET /peerjs/share', scope.status === 200 && Array.isArray(scope.body.files) && Array.isArray(scope.body.selected), JSON.stringify(Object.keys(scope.body || {})))
+
+    const pick = await send('admin', { method: 'POST', path: '/peerjs/share/files', body: { hashes: [hash], shared: true } })
+    ok('admin POST /peerjs/share/files', pick.status === 200 && (pick.body.files || []).includes(hash), JSON.stringify(pick.body.files))
+
+    const scope2 = await send('admin', { method: 'GET', path: '/peerjs/share' })
+    ok('勾选后进入 selected', (scope2.body.selected || []).includes(hash), JSON.stringify(scope2.body.selected))
+    // 候选清单有 1000 条上限（索引很大时新文件可能不在那一页），但只要在页里
+    // 就必须标成已共享——勾选本身由 selected 兜底，不受分页影响。
+    const row = (scope2.body.files || []).find(f => f.hash === hash)
+    ok('候选清单里标记为已共享', !row || row.shared === true, JSON.stringify(row))
+
+    try {
+      await send('admin', { method: 'PUT', path: '/peerjs/share', body: { dirs: ['/'] } })
+      ok('卷根目录作共享目录被拒', false, 'expected reject')
+    } catch (e) {
+      ok('卷根目录作共享目录被拒', e.message.includes('400'), e.message)
+    }
+
+    // 9. 未知名路由 → admin-resp 404 透传（send 对 >=400 reject，这里直接捕获验证）
     try {
       await send('admin', { method: 'GET', path: '/no-such-route' })
       ok('admin unknown route → 404', false, 'expected reject')

@@ -113,7 +113,18 @@ func main() {
 		// 节点共享范围（doc/NETDISK.md M2）：share 帧的数据源 + announce 摘要。
 		// AnonService 是无状态读服务（只持 cfg），这里再建一个实例专供共享
 		// 解析用，不与 router 内部那个实例共享状态（也不需要共享）。
-		share := service.NewNodeShare(cfg)
+		// storageDir 也传进去：共享范围是**运行时可改**的（管理台勾选 / PUT
+		// /peerjs/share），落在 storageDir/share_scope.json；环境变量只是首次
+		// 启动的初值（见 service.NodeShare 文件头注释）。
+		share := service.NewNodeShare(cfg, storageDir)
+		// 运行时新增的共享目录必须注册成可读根，否则会出现「清单列得出、
+		// 对端一拉 read failed」（读取侧判它越权）。启动时那批由上面
+		// AddReadRoot 循环注册，这里只补运行后新增的。
+		share.SetDirHook(func(dirs []string) {
+			for _, d := range dirs {
+				peerjsSvc.FileIndex().AddReadRoot(d)
+			}
+		})
 		anonReader := service.NewAnonService(cfg)
 		share.SetAnonAccess(anonReader.GetCollectionByHash, anonReader.ListCollections)
 		// 文件共享只按目录前缀过滤；List 内部上限 1000（repository 层 clamp），
@@ -122,8 +133,14 @@ func main() {
 		share.SetFileLister(func() ([]transport.FileInfo, error) {
 			return peerjsSvc.FileIndex().List(0, 1000)
 		})
+		// 按 hash 单查：索引超过 1000 条时，勾选过的文件靠它兜底（不然"我勾了
+		// 却没生效"）。见 service.NodeShare.resolveFiles。
+		share.SetFileInfoReader(peerjsSvc.FileIndex().Info)
 		peerjsSvc.SetShareProvider(share.Snapshot)
 		nodeDir.SetShareSummary(share.Summary)
+		// 管理端点 /peerjs/share*（GET/PUT/POST files）：让运营者在管理台上
+		// 勾选共享什么，不必改环境变量重启节点。
+		router.SetNodeShare(share)
 
 		// 跨节点拉取保存（doc/NETDISK.md M3）：对端内容 → 本节点落盘 + 登记。
 		// downloadRoot 必须是 file_index 的允许根目录（cfg.DownloadDir），

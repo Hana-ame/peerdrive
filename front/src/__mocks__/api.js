@@ -51,6 +51,10 @@ export const getJoinedNodes = () => EMPTY_PROMISE
 export const joinNode = () => EMPTY_PROMISE
 export const leaveNode = () => EMPTY_PROMISE
 export const getPeerShares = () => EMPTY_PROMISE
+// 本节点共享范围（M2.6）
+export const getShareScope = () => EMPTY_PROMISE
+export const setShareScope = () => EMPTY_PROMISE
+export const setFilesShared = () => EMPTY_PROMISE
 export const getPullJobs = () => EMPTY_PROMISE
 export const startPull = () => EMPTY_PROMISE
 export const startPullCollection = () => EMPTY_PROMISE

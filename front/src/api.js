@@ -333,6 +333,19 @@ export const leaveNode = (peer) =>
 // 未直连时后端会主动拨号并等一小会儿（见 controller.GetPeerShares）。
 export const getPeerShares = (peer) =>
   request('GET', `/peerjs/nodes/${encodeURIComponent(peer)}/shares`);
+
+/* ---- 本节点共享范围（doc/NETDISK.md M2.6）----
+ * 「我愿意把哪些内容给出去」是运营者的运行时选择：整个目录 / 单个文件 / 合集，
+ * 三条来源取并集。改它不用重启节点（后端落盘 storage/share_scope.json）。
+ * 注意与 getPeerShares 的区别：那是去问**对方**共享了什么，这是管理**自己**的。
+ */
+// 当前范围 + 可选文件清单（每行带 shared / by_dir，前端直接渲染勾选框）。
+export const getShareScope = () => request('GET', '/peerjs/share');
+// 局部更新：只传要改的字段（enable / dirs / files / collections），未传的保持原样。
+export const setShareScope = (patch) => request('PUT', '/peerjs/share', patch || {});
+// 勾选/取消若干文件（按 hash）。单行勾选框走这条，避免全量 PUT 互相覆盖。
+export const setFilesShared = (hashes, shared = true) =>
+  request('POST', '/peerjs/share/files', { hashes, shared });
 // 跨节点拉取保存（服务端任务式，带进度/取消）。
 export const getPullJobs = () => request('GET', '/p2p/pull');
 export const startPull = (peer, hash, name = '', path = '') =>

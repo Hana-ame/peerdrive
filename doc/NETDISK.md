@@ -72,6 +72,9 @@ ROADMAP 顺序，而是它的"验收形态"：阶段 5（范围）与阶段 6（
     **位置不受限**：可以在 storage 根之外、另一块盘、另一个挂载点；
     反过来，没写进这里的目录一律拒绝（防任意文件读写）。见 §7.4；
   - `PEERDRIVE_SHARE_ENABLE`（默认 **false**）总开关——默认不共享任何东西。
+  - 上面三项只是**首次启动的初值**：运行时可经 `GET/PUT /peerjs/share`、
+    `POST /peerjs/share/files` 改（按 hash 勾单个文件、按目录、按合集），
+    落盘 `storageDir/share_scope.json`，重启后仍在。见 §12。
 - **帧 verb** `share`（入站，`transport/share.go`）：
   `{type:"share"}` → `{type:"share-resp", collections:[...], files:[...], total}`
   - **不复用 `list`**：`list` 是本地管理清单（文件索引全量），语义是"我管理的"，
@@ -842,3 +845,60 @@ Windows runner 的 `t.TempDir()` 是 `C:\Users\RUNNER~1\AppData\Local\Temp\...`�
 与"没权限/不存在"混为一谈才是排障成本的大头——`RootUnavailable` 只认
 `EINVAL`/`ENOSYS`/`ENOTSUP` 这一类，`ENOENT` 与 `EACCES` 都不许被归成
 "文件系统不支持"，否则运维会往 OS 兼容性方向白查半天。
+
+## 12. 共享范围：自由选择共享什么（2026-09-22）
+
+M2 落地时共享范围只能靠 `PEERDRIVE_SHARE_*` 在启动时定死：想多共享一个文件，
+要么把它挪进共享目录，要么改环境变量**重启节点**。这节把它改成运行时可改。
+
+### 12.1 为什么必须能运行时改
+
+"我愿意把哪些内容给出去"本来就是随手的决定：刚上传一个文件想立刻给朋友、某
+个目录不想再给了。要求重启等于把这个决定变成一次运维动作，实际结果只有两种——
+长期共享一个过宽的目录（图省事），或者干脆不开共享（嫌麻烦）。两种都比"随手勾
+选"更糟。
+
+### 12.2 三条来源取并集
+
+| 来源 | 粒度 | 怎么选 |
+| --- | --- | --- |
+| `dirs` | 整个目录 | `PUT /peerjs/share {"dirs":[...]}`；file_index 里路径落在其中的文件全部共享 |
+| `files` | 单个文件（按 hash） | `POST /peerjs/share/files {"hashes":[...],"shared":true}`；**不必在任何共享目录里** |
+| `collections` | 合集 | 64hex 合集 hash，或 `all` = 全部 public 合集 |
+
+`enable` 是总开关：关 = 对外完全空清单（**已勾选的内容保留**，再开不用重选）。
+
+### 12.3 环境变量降为"初值"
+
+- 首次启动（storage 下没有 `share_scope.json`）时，环境变量播种进运行时状态并落盘；
+- 之后**以落盘状态为准**：运营者取消掉的共享项不会在重启后复活
+  （"我明明取消了共享"是最难自查的一类反馈）。
+- 落盘文件损坏：保留原文件（人工可查），按"没保存过"处理，不阻塞启动。
+
+### 12.4 端点
+
+```
+GET  /peerjs/share        当前范围 + 可选文件清单（每行带 shared / by_dir）
+PUT  /peerjs/share        局部更新 {enable?,dirs?,files?,collections?}（未传的保持原样）
+POST /peerjs/share/files  {hashes:[...], shared:bool}  单行勾选
+```
+
+三个端点都挂 `AuthRequired`（未配注册服务器时放行 = 单机模式）。命名与
+"问对端要清单"的 `GET /peerjs/nodes/:peer/shares` 刻意区分开。
+
+### 12.5 两个不改就会出事的点
+
+1. **新增的共享目录必须注册成 file_index 可读根**（`main.go` 的 `SetDirHook`）。
+   只进范围不注册可读根 → "清单列得出、对端一拉 read failed"，与 §11 那个坑同源。
+2. **卷根目录在入口就被拒**（`PUT {"dirs":["/"]}` → 400）。
+   `pathutil.Within` 会把 `/etc/passwd` 判成"在根内"——判定没错，是配置意图错了，
+   而这里的值来自 HTTP 请求体，一次误填就是共享整个盘。
+
+### 12.6 兜底测试
+
+- `back/internal/service/nodeshare_scope_test.go`：运行时选择压过环境变量、
+  卷根/非法 hash 整批拒绝、单文件勾选与目录共享互不干扰、`by_dir` 标记、
+  局部更新不改未传项、目录回调只通知新增、损坏文件回退配置。
+- `front/tests/netdisk.test.jsx` `pages/Drive 共享勾选`：勾一个文件发的是 hash
+  列表（不是整份范围）、总开关只发 `enable`、端点不可用时隐藏控件。
+- `front/tests/e2e-admin-smoke.mjs`：真实节点上 读 → 勾 → 复核 → 拒卷根。

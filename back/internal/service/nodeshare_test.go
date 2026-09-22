@@ -36,7 +36,9 @@ func testShareCfg(enable bool, colls, dirs string) *config.Config {
 // newShareWith 构造带假数据源的共享服务。
 func newShareWith(t *testing.T, cfg *config.Config, colls map[string]*model.AnonCollection, list []model.AnonCollectionSummary, files []transport.FileInfo) *NodeShare {
 	t.Helper()
-	s := NewNodeShare(cfg)
+	// storageDir 传空 = 内存模式（不落盘）：单测只关心解析语义，落盘由
+	// TestNodeSharePersist* 系列单独覆盖。
+	s := NewNodeShare(cfg, "")
 	s.SetAnonAccess(
 		func(h string) (*model.AnonCollection, error) {
 			if c, ok := colls[h]; ok {
@@ -165,8 +167,8 @@ func TestNodeShareAllTokenOnlyPublic(t *testing.T) {
 func TestNodeShareIgnoresInvalidCollectionHash(t *testing.T) {
 	cfg := testShareCfg(true, "not-a-hash,my-collection", "")
 	s := newShareWith(t, cfg, nil, nil, nil)
-	if got := len(s.collections); got != 0 {
-		t.Fatalf("invalid hashes must be ignored, got %v", s.collections)
+	if got := len(s.Scope().Collections); got != 0 {
+		t.Fatalf("invalid hashes must be ignored, got %v", s.Scope().Collections)
 	}
 	if len(s.Snapshot().Collections) != 0 {
 		t.Fatal("snapshot should be empty")
