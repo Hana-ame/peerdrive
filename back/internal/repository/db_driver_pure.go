@@ -15,3 +15,8 @@ package repository
 import _ "modernc.org/sqlite"
 
 const sqliteDriver = "sqlite"
+
+// dsnSuffix 见 db_driver_cgo.go 的同名函数注释（为什么需要 busy_timeout /
+// foreign_keys，以及为什么两个驱动各写一份）。
+// 语法差异：modernc 用 `_pragma=busy_timeout(5000)`，mattn 用 `_busy_timeout=5000`。
+func dsnSuffix() string { return "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)" }

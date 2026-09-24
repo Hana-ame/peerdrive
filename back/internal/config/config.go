@@ -3,6 +3,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"runtime"
 	"strconv"
@@ -22,7 +23,9 @@ const (
 )
 
 type Config struct {
-	Port          string
+	Port   string
+	DBPath string // PEERDRIVE_DB_PATH：SQLite 元数据库路径（默认 ./peerdrive.db）
+
 	StorageDir    string
 	StorageEnable bool
 
@@ -45,7 +48,7 @@ type Config struct {
 	WebRTCSTUNServer string
 	WebRTCTURNServer string
 
-	PeerJSEnable bool   // PEERDRIVE_PEERJS_ENABLE, 默认 true
+	PeerJSEnable bool // PEERDRIVE_PEERJS_ENABLE, 默认 true
 	// 默认指向项目自己的公共信令 peersignal.moonchan.xyz（不是 PeerJS 公共云）。
 	// 环境变量仍然可覆盖（自托管 / 内网调试），但教程不教改它。
 	PeerJSHost   string // PEERDRIVE_PEERJS_HOST, 默认 peersignal.moonchan.xyz
@@ -93,6 +96,32 @@ type Config struct {
 	DownloadTimeoutSecs int
 
 	ForwardRules string // PEERDRIVE_FORWARD_RULES: "key1:8080,key2:8443"（转发授权白名单,key 即凭证,配置文件建议 chmod 600）
+
+	// ── HTTP 加固（见 internal/router/middleware.go）──
+	// RateLimitRPS 每 IP 请求速率上限（PEERDRIVE_RATE_LIMIT_RPS，0 = 不限）。
+	// 默认 30：够管理台正常用（列表轮询 + 手动操作远不到这个量），又能挡住
+	// "一个脚本刷接口"。上传/跨节点拉取这类要真花带宽的口子也一并受它保护。
+	RateLimitRPS float64
+	// DisableCSP 关闭 Content-Security-Policy（PEERDRIVE_CSP=off）。
+	// 只在嵌入第三方页面/老浏览器兼容出问题时的逃生阀，默认开。
+	DisableCSP bool
+	// DisableSwagger 关闭 /swagger/*（PEERDRIVE_SWAGGER=off）。默认开：
+	// 它会把全部端点与参数结构公开出来，公网部署等于送一份攻击地图。
+	DisableSwagger bool
+	// Host 监听地址（PEERDRIVE_HOST，默认空 = 监听所有网卡）。
+	//
+	// 为什么值得配：管理面（/ws/peer）没有账号体系，边界就是"谁能连到这个
+	// 端口"。默认听 0.0.0.0 意味着同一局域网内的人都能连上并当管理员。
+	// 只在本机用管理台的话，设成 127.0.0.1 是成本最低的一道墙。
+	Host string
+
+	// TrustedProxies 可信反向代理（PEERDRIVE_TRUSTED_PROXIES，逗号分隔 IP/CIDR）。
+	//
+	// 为什么必须显式配：gin 默认**信任所有**代理，ClientIP() 直接取
+	// X-Forwarded-For——而这个头是客户端能伪造的，等于限流和日志里的 IP 全
+	// 由攻击者填。空 = 只认 RemoteAddr（直连部署的正确选择）；反代后面务必
+	// 填上那一跳的地址，否则所有人会被当成一个 IP 一起限流。
+	TrustedProxies string
 
 	// ── 节点共享范围（PEERDRIVE_SHARE_*，doc/NETDISK.md M2 / ROADMAP 阶段 5）──
 	//
@@ -157,6 +186,7 @@ func DefaultRootPath() string {
 func Load() *Config {
 	return &Config{
 		Port:               getEnv("PORT", "3000"),
+		DBPath:             getEnv("PEERDRIVE_DB_PATH", "./peerdrive.db"),
 		StorageDir:         getEnv("PEERDRIVE_STORAGE", "./storage"),
 		StorageEnable:      getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
 		AllowedOrigins:     getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev"),
@@ -166,7 +196,7 @@ func Load() *Config {
 		RegServerURL:       getEnv("PEERDRIVE_REG_SERVER_URL", ""),
 		MaxUploadBytes:     getEnvInt64("PEERDRIVE_MAX_UPLOAD_BYTES", 100*1024*1024),     // 100MB default
 		MaxUploadBytesAnon: getEnvInt64("PEERDRIVE_MAX_UPLOAD_ANON_BYTES", 10*1024*1024), // 10MB for anonymous
-		BTDHTEnabled:       getEnvBool("PEERDRIVE_BT_DHT_ENABLE", false), // 默认禁用：DHT 初始化阻塞启动，按需手动启用
+		BTDHTEnabled:       getEnvBool("PEERDRIVE_BT_DHT_ENABLE", false),                 // 默认禁用：DHT 初始化阻塞启动，按需手动启用
 
 		BTDHTListenAddr:   getEnv("PEERDRIVE_BT_DHT_LISTEN", ":6881"),
 		IPFSGatewayEnable: getEnvBool("PEERDRIVE_IPFS_GATEWAY_ENABLE", true),
@@ -204,7 +234,49 @@ func Load() *Config {
 		DownloadTimeoutSecs: getEnvInt("PEERDRIVE_DOWNLOAD_TIMEOUT", 30),
 
 		ForwardRules: getEnv("PEERDRIVE_FORWARD_RULES", ""),
+
+		RateLimitRPS:    getEnvFloat("PEERDRIVE_RATE_LIMIT_RPS", 30),
+		DisableCSP:      os.Getenv("PEERDRIVE_CSP") == "off",
+		DisableSwagger:  os.Getenv("PEERDRIVE_SWAGGER") == "off",
+		Host:            getEnv("PEERDRIVE_HOST", ""),
+		TrustedProxies:  getEnv("PEERDRIVE_TRUSTED_PROXIES", ""),
 	}
+}
+
+// Validate 在启动期把"配错了但不会报错"的配置挡掉。
+//
+// 为什么要它：环境变量是字符串，拼错一个字符不会让进程失败，只会让行为跑偏
+// （PORT=300o → 监听失败；PEERDRIVE_STORAGE= 空 → 文件落进当前工作目录），
+// 等到用户发现时，落点已经是一堆找不回来的文件了。
+// 原则是"快速失败"：启动期一次说清，好过运行期慢慢错。
+func Validate(c *Config) error {
+	var errs []string
+
+	if n, err := strconv.Atoi(c.Port); err != nil || n <= 0 || n > 65535 {
+		errs = append(errs, fmt.Sprintf("PORT=%q 不是合法端口（1-65535）", c.Port))
+	}
+	if strings.TrimSpace(c.DBPath) == "" {
+		errs = append(errs, "PEERDRIVE_DB_PATH 不能为空")
+	}
+	if strings.TrimSpace(c.StorageDir) == "" {
+		errs = append(errs, "PEERDRIVE_STORAGE 不能为空")
+	}
+	if strings.TrimSpace(c.DownloadDir) == "" {
+		errs = append(errs, "PEERDRIVE_DOWNLOAD_DIR 不能为空")
+	}
+	if p := strings.TrimSpace(c.PeerJSPort); p != "" {
+		if n, err := strconv.Atoi(p); err != nil || n <= 0 || n > 65535 {
+			errs = append(errs, fmt.Sprintf("PEERDRIVE_PEERJS_PORT=%q 不是合法端口", p))
+		}
+	}
+	if c.MaxPeers <= 0 {
+		errs = append(errs, fmt.Sprintf("PEERDRIVE_MAX_PEERS=%d 必须为正数", c.MaxPeers))
+	}
+
+	if len(errs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("配置校验失败：\n  - %s", strings.Join(errs, "\n  - "))
 }
 
 func getEnv(key, defaultVal string) string {
@@ -229,6 +301,16 @@ func getEnvInt64(key string, defaultVal int64) int64 {
 		n, err := strconv.ParseInt(val, 10, 64)
 		if err == nil && n > 0 {
 			return n
+		}
+	}
+	return defaultVal
+}
+
+func getEnvFloat(key string, defaultVal float64) float64 {
+	if val, ok := os.LookupEnv(key); ok {
+		f, err := strconv.ParseFloat(val, 64)
+		if err == nil && f >= 0 {
+			return f
 		}
 	}
 	return defaultVal

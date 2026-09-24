@@ -14,3 +14,16 @@ package repository
 import _ "github.com/mattn/go-sqlite3"
 
 const sqliteDriver = "sqlite3"
+
+// dsnSuffix 返回连接串后缀（写锁等待 + 外键约束），两种驱动的语法不同，
+// 所以各写一份——驱动是编译期二选一的，放错文件那份构建就静默失效。
+//
+// busy_timeout 为什么必须有：SQLite 默认在写锁冲突时**立刻**返回
+// "database is locked"。本进程是并发写的（HTTP 登记 / 上传落库 / BT 完成
+// 回调 / file_index 游标同步同时进行），没有它就靠运气：单跑永远不复现，
+// 并发一上来才偶发 500。5s 足够覆盖正常事务时长。
+//
+// foreign_keys 为什么显式开：SQLite 默认**关闭**外键，而 schema 里写了
+// ON DELETE CASCADE（collection_entries → collections 等）。不开这些级联
+// 全是纸面约束——删了合集，条目成孤儿，列表里出现指向不存在内容的行。
+func dsnSuffix() string { return "?_busy_timeout=5000&_foreign_keys=1" }

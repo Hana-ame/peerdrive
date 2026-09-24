@@ -2,6 +2,7 @@ package router
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -48,6 +49,20 @@ func SetPeerPuller(p *service.PeerPuller) {
 // SetPeerJSConfig 注入配置（WS 本地会话 Origin 白名单）。
 func SetPeerJSConfig(cfg *config.Config) {
 	peerjsCfg = cfg
+}
+
+// isLoopbackRemote 判断 TCP 对端是不是本机（RemoteAddr 形如 127.0.0.1:54321 / [::1]:54321）。
+//
+// 为什么只看 RemoteAddr 而不看 X-Forwarded-For：反代后面 XFF 由客户端可控部分
+// 决定信任（PEERDRIVE_TRUSTED_PROXIES），而这里是安全边界，宁可保守——反代后面
+// 部署的场景，浏览器请求一定带 Origin，走白名单那条路就行。
+func isLoopbackRemote(remote string) bool {
+	host := remote
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		host = host[:i] // IPv4: 去掉端口
+	}
+	host = strings.Trim(host, "[]") // IPv6: [::1] → ::1
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
 }
 
 // registerPeerJSRoutes 注册 PeerJS 节点发现与互联路由。
@@ -146,7 +161,12 @@ func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 				// 本地会话安全边界：仅放行配置的 Origin（同 HTTP CORS 白名单）
 				origin := r.Header.Get("Origin")
 				if origin == "" {
-					return true
+					// 没有 Origin 的大多不是浏览器（脚本 / curl / wscat）。
+					// 原来一律放行 = 只要端口可达就能拿到完整管理面，而且
+					// WSSession.IsLocal() 恒 true，它还被当成"自己"（private
+					// 共享内容也可见）。现在只放行确实来自本机的连接：
+					// 浏览器握手必带 Origin，所以正常前端不受影响。
+					return isLoopbackRemote(r.RemoteAddr)
 				}
 				if peerjsCfg == nil {
 					return true

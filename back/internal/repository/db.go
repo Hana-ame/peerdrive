@@ -17,7 +17,9 @@ package repository
 
 import (
 	"database/sql"
+	"errors"
 	"strings"
+	"time"
 
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
@@ -49,13 +51,67 @@ func CloseDB() error {
 	return err
 }
 
+// Ping 检查元数据库是否可连通（供 /ready 探针使用）。
+//
+// 为什么包一层而不是把 DB 暴露给 controller：DB 是包级变量，直接放出去等于
+// 让上层拿到整个数据库句柄，分层的口子一开就合不上。探针只需要一个是/否。
+func Ping() error {
+	if DB == nil {
+		return errors.New("database not initialized")
+	}
+	return DB.Ping()
+}
+
+// isMemoryDB 判断是否为进程内内存库（":memory:"）。
+//
+// 为什么单独判：内存库下**每个连接都是一份独立的空库**。一旦连接池开出第二条
+// 连接，或者旧连接被回收后重开，前面的表就"消失"了——表现为随机报
+// "no such table"。所以内存库必须强制单连接且连接永不过期。这条只对测试
+// 路径生效（测试用 :memory: 隔离），但它决定了下面两个开关怎么设。
+func isMemoryDB(dbPath string) bool {
+	return dbPath == ":memory:" || dbPath == "file::memory:"
+}
+
+// dsn 拼出最终连接串：普通文件路径追加驱动特定的 PRAGMA 参数。
+//
+// 为什么内存库 / 已是 URI（file: 前缀）的不追加：":memory:?_pragma=..." 会被
+// 当成一个普通文件名处理，测试直接连到一份文件库，表互相污染且清不掉。
+func dsn(dbPath string) string {
+	if dbPath == "" || isMemoryDB(dbPath) || strings.HasPrefix(dbPath, "file:") {
+		return dbPath
+	}
+	return dbPath + dsnSuffix()
+}
+
 // InitDB 初始化 SQLite 数据库连接并执行全部建表 DDL，包括 file_meta、file_providers、collections 等表。
 func InitDB(dbPath string) error {
 	var err error
-	DB, err = sql.Open(sqliteDriver, dbPath)
+	DB, err = sql.Open(sqliteDriver, dsn(dbPath))
 	if err != nil {
 		return err
 	}
+
+	// 连接池：默认（无限制）在 SQLite 上是不可用的——每个写事务都要独占库，
+	// 连接越多并发写冲突越频繁（症状是偶发 "database is locked"）。
+	// 这里显式收口：内存库 1 条（见 isMemoryDB），文件库 8 条（够并发读，
+	// 写冲突交给 busy_timeout 排队而不是直接报错）。
+	if isMemoryDB(dbPath) {
+		DB.SetMaxOpenConns(1)
+		DB.SetMaxIdleConns(1)
+		DB.SetConnMaxLifetime(0) // 连接一旦回收，内存库里的表就没了
+	} else {
+		DB.SetMaxOpenConns(8)
+		DB.SetMaxIdleConns(4)
+		DB.SetConnMaxLifetime(30 * time.Minute)
+	}
+
+	// 先 Ping 再建表：sql.Open 是惰性的（连错了也不报错），真正的失败发生在
+	// 第一次 Exec。启动期就把它变成明确的错误，否则运维看到的是"建表失败"
+	// 这类把病因藏在别处的报错（路径不可写 / 目录不存在 / 驱动退化成 stub）。
+	if err := DB.Ping(); err != nil {
+		return err
+	}
+
 	schema := `
 	CREATE TABLE IF NOT EXISTS local_collection_sync (
 		collection_hash TEXT PRIMARY KEY,

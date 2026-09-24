@@ -15,14 +15,18 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	stdlog "log"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
@@ -46,6 +50,11 @@ func main() {
 	log.LogInfo("main: Peerdrive server starting")
 
 	cfg := config.Load()
+	// 启动期校验：配错的环境变量不会让进程报错，只会让行为跑偏（文件落错地方、
+	// 端口起不来），等发现时已经晚了。这里一次说清（见 config.Validate 注释）。
+	if err := config.Validate(cfg); err != nil {
+		stdlog.Fatalf("%v", err)
+	}
 	storageDir := cfg.StorageDir
 	log.LogInfo("main: config loaded, storageDir=%s, port=%s", storageDir, cfg.Port)
 
@@ -61,11 +70,17 @@ func main() {
 	}
 	warnUnsupportedRoots(cfg)
 
-	// 初始化 DB（含迁移）
-	log.LogInfo("main: initializing database")
-	if err := repository.InitDB("./peerdrive.db"); err != nil {
+	// 初始化 DB（含迁移）。路径来自配置而不是写死：换部署目录/把库放到别的盘
+	// 是常见运维动作，写死 "./peerdrive.db" 就只能靠"记得先 cd 对目录"来兜。
+	log.LogInfo("main: initializing database at %s", cfg.DBPath)
+	if err := repository.InitDB(cfg.DBPath); err != nil {
 		stdlog.Fatalf("数据库初始化失败: %v", err)
 	}
+	defer func() {
+		if err := repository.CloseDB(); err != nil {
+			log.LogWarn("main: close db: %v", err)
+		}
+	}()
 	log.LogInfo("main: database initialized")
 
 	// 初始化匿名存储目录（与普通文件同一目录）
@@ -220,19 +235,53 @@ func main() {
 	log.LogInfo("main: setting up HTTP router")
 	r := router.SetupRouter(cfg)
 
-	port := ":" + cfg.Port
+	// 监听地址：PEERDRIVE_HOST 为空 = 监听所有网卡（历史行为）。
+	// 管理面没有账号体系，"谁能连到这个端口"就是它的全部边界——只在本机用
+	// 管理台的话，设 PEERDRIVE_HOST=127.0.0.1 是最省事的一道墙。
+	addr := net.JoinHostPort(cfg.Host, cfg.Port)
 
+	// 用显式 http.Server 而不是 r.Run()：
+	//   1. r.Run() 内部 Fatalf，一出错就 os.Exit——main 的 defer 全部不执行，
+	//      PeerJS 连接与数据库句柄全靠进程退出兜底（在 Windows 上数据库文件
+	//      句柄不关，下次启动可能打不开）；
+	//   2. 没法优雅停机：收到 SIGTERM 就直接走人，正在传的大文件被从中间掐断，
+	//      对端拿到一个长度不对的半成品且以为成功了。
+	// ReadHeaderTimeout 是防 Slowloris 的最低限度（gin 默认的 r.Run() 不设）。
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 15 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
 	go func() {
-		log.LogInfo("main: starting HTTP server on %s", port)
-		if err := r.Run(port); err != nil {
-			stdlog.Fatalf("Gin 服务器启动失败: %v", err)
+		log.LogInfo("main: starting HTTP server on %s", addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
 		}
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.LogInfo("main: shutting down server")
+	select {
+	case err := <-errCh:
+		log.LogError("main: HTTP server failed: %v", err)
+	case <-quit:
+		log.LogInfo("main: shutting down server")
+	}
+
+	// 优雅停机：先停止接收新请求，再给进行中的请求一段时间收尾（拉取/上传
+	// 正在写的那半个文件能不能写完，就看这 20 秒）。
+	// 超时后强制关闭——不能为了一次慢请求把停机无限期拖住（容器编排会 SIGKILL）。
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.LogWarn("main: graceful shutdown timed out, forcing close: %v", err)
+		if err := srv.Close(); err != nil {
+			log.LogWarn("main: force close: %v", err)
+		}
+	}
+	log.LogInfo("main: stopped")
 }
 
 // checkUnsafeRoots 检查有没有目录被配成了卷根（`/`、`C:\`）。

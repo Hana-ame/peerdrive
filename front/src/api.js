@@ -8,15 +8,25 @@
 import * as ws from './ws.js';
 const STORAGE_KEY = 'peerdrive_api_base';
 const AUTH_TOKEN_KEY = 'peerdrive_auth_token';
-const DEFAULT_API = 'https://wsl-3000.moonchan.xyz';
+// 默认后端地址：优先取构建期注入的 VITE_API_BASE，没有才用兜底值。
+//
+// 为什么不再写死一坨地址：后端地址属于部署配置，不是代码。写死意味着
+//   - 换部署要改源码重新构建；
+//   - 仓库里长期留着明文 http 的公网 IP（浏览器在 https 页面下会直接拦掉
+//     混合内容，那条默认后端其实从来没真正可用过）；
+// 构建时给 VITE_API_BASE（或部署一份 .env.production），运行期仍可在设置页改。
+const DEFAULT_API = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) || 'https://wsl-3000.moonchan.xyz';
 
 /* ---- 多后端管理 ---- */
 const BACKENDS_KEY = 'peerdrive_backends';
 const CURRENT_BACKEND_KEY = 'peerdrive_current_backend_id';
 
+// 预置后端列表（仅在没有本地记录时写入，之后以 localStorage 为准）。
+// 只留一条：那条明文 http 的公网 IP 已移除——它在 https 页面下会被浏览器按
+// 混合内容拦掉，留着只会让人以为"配好了但连不上"。需要多个后端的自己在
+// 设置页加，或者用 VITE_BACKENDS 构建期注入（JSON 数组）。
 const DEFAULT_BACKENDS = [
-  { id: 'wsl', name: 'WSL', url: 'https://wsl-3000.moonchan.xyz' },
-  { id: 'bwh', name: 'BWH', url: 'http://97.64.30.221:3000' },
+  { id: 'wsl', name: 'WSL', url: DEFAULT_API },
 ];
 
 function getBackends() {

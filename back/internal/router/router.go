@@ -43,9 +43,34 @@ import (
 // SetupRouter 创建 Gin 引擎并注册全部路由（健康检查、文件下载、P2P、集合、WebDAV、信令等）。
 func SetupRouter(cfg *config.Config) *gin.Engine {
 	log.LogInfo("router: SetupRouter starting")
-	r := gin.Default()
+	// 不用 gin.Default()：它自带的 Logger 是给人看的非结构化文本，而且和下面
+	// 的 AccessLog 重复输出两遍。这里显式组装：Recovery（最外层，panic 也要
+	// 能恢复）+ 请求 ID + 安全头 + 结构化访问日志 + 限流。
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(RequestID(), SecurityHeaders(cfg.DisableCSP), AccessLog(), RateLimit(cfg.RateLimitRPS, 0))
 	r.RedirectTrailingSlash = false
 	r.RedirectFixedPath = false
+
+	// 可信代理（见 config.TrustedProxies 注释）：默认一个都不信，ClientIP()
+	// 直接用 RemoteAddr。反代后面不配这一项，所有人会被算成同一个来源一起限流。
+	if tp := strings.TrimSpace(cfg.TrustedProxies); tp != "" {
+		if tp == "all" {
+			_ = r.SetTrustedProxies([]string{"0.0.0.0/0"})
+		} else {
+			list := []string{}
+			for _, p := range strings.Split(tp, ",") {
+				if s := strings.TrimSpace(p); s != "" {
+					list = append(list, s)
+				}
+			}
+			if err := r.SetTrustedProxies(list); err != nil {
+				log.LogWarn("router: bad PEERDRIVE_TRUSTED_PROXIES: %v", err)
+			}
+		}
+	} else {
+		_ = r.SetTrustedProxies(nil)
+	}
 
 	// inject shared deps into context (must register before any routes)
 	r.Use(func(c *gin.Context) {
@@ -95,6 +120,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 	fileSvc := service.NewFileService(cfg)
 	controller.InitFileController(fileSvc)
+	// 探针：注入"数据库能不能连"这一项依赖（controller 不直接碰 repository）。
+	controller.InitHealth(repository.Ping)
 	// M2 收层装配：集合/分享/pin 服务注入 controller（替代原先的 repository 直调）
 	controller.InitCollectionController(service.NewCollectionService())
 	controller.InitShareController(service.NewShareService())
@@ -196,6 +223,9 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	// 与「直接 HTTP 调用」两条入口——行为一致，无需维护两份。
 
 	r.GET("/ping", controller.Ping)
+	// 存活 / 就绪探针（见 controller/health.go 里两者语义的区别）
+	r.GET("/health", controller.Health)
+	r.GET("/ready", controller.Ready)
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256Local)
 	r.GET("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
 	r.GET("/ipfs/:cid", controller.DownloadByCID)
@@ -352,8 +382,13 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	}
 	r.GET("/s/:token", controller.AccessShare)
 
-	// Swagger
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// Swagger：默认开。它把全部端点（105 个）连同参数结构公开出来，对公网
+	// 部署等于免费送一份攻击地图——生产建议 PEERDRIVE_SWAGGER=off。
+	if !cfg.DisableSwagger {
+		r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	} else {
+		log.LogInfo("router: swagger disabled by PEERDRIVE_SWAGGER=off")
+	}
 
 	// PeerJS 节点发现
 	registerPeerJSRoutes(r, authRequired)
@@ -366,6 +401,13 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	// 前端 api.js 迁移后不再直接 fetch HTTP，全部走 /ws/peer admin 帧。
 	if peerjsService != nil {
 		peerjsService.SetAdminHandler(func(req *http.Request) (int, []byte, string, error) {
+			// 内部转发的请求没有 TCP 来源（它来自一条已建立的本地 WS 会话），
+			// 不写 RemoteAddr 的话 ClientIP() 是空串，限流会把所有管理请求算进
+			// 同一个"未知来源"桶，管理台点几下就 429。标成本机是语义正确的做法：
+			// 管理面本来就只服务本地 WS（serveAdmin 按会话 ID 拒绝远端）。
+			if req.RemoteAddr == "" {
+				req.RemoteAddr = "127.0.0.1:0"
+			}
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)
 			return rec.Code, rec.Body.Bytes(), rec.Header().Get("Content-Type"), nil

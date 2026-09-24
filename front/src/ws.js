@@ -64,17 +64,112 @@ function getWsBase() {
   return localStorage.getItem('peerdrive_api_base') || 'https://wsl-3000.moonchan.xyz'
 }
 
+/* ── 连接状态、心跳与自动重连 ──
+ *
+ * 为什么补这三样（原来都没有）：
+ *   1. 心跳：中间设备（NAT/反代/浏览器省电策略）会静默掐掉空闲连接，而 TCP
+ *      不保证让你立刻知道——浏览器可能几分钟都不触发 onclose。用户看到的是
+ *      "点了没反应"，其实是通道早就死了。定时发一条 admin /ping 既探活又保活。
+ *   2. 死连接检测：光发心跳不够，还得看有没有回来过。超过 STALE_MS 没收到
+ *      任何帧就主动 close()，走重连流程，而不是继续往黑洞里发请求。
+ *   3. 自动重连（指数退避）：原来 onclose 只把 sock 置空，等下一次请求才重连。
+ *      于是"节点重启了一下"会导致管理台整页卡死——没有任何请求在飞，就永远
+ *      没人去触发重连。退避上限 30s：既不会在节点真挂了时打爆日志，又能在
+ *      节点恢复后 30s 内自己回来。
+ *
+ * 为什么只对本模块自己 new 出来的连接生效（_wsOwned）：
+ *   单测注入的是 mock socket，它永远不会 onopen，也不该去连真实网络。
+ */
+const HEARTBEAT_MS = 25000 // 心跳间隔
+const STALE_MS = 60000 // 超过这么久没收到任何帧 → 判定连接已死
+const RETRY_MIN_MS = 1000
+const RETRY_MAX_MS = 30000
+
+let hbTimer = null
+let retryTimer = null
+let retryDelay = RETRY_MIN_MS
+let lastRecv = 0
+
+// 连接状态：idle / connecting / open / closed。UI 拿它显示"离线"，
+// 否则断线时用户只会看到按钮点了没反应，不知道是该等还是该刷新。
+let status = 'idle'
+const statusListeners = new Set()
+
+function setStatus(s) {
+  if (status === s) return
+  status = s
+  for (const cb of statusListeners) {
+    try { cb(s) } catch {}
+  }
+}
+
+export function getStatus() {
+  return status
+}
+
+// onStatus 订阅连接状态变化；立即回调一次当前状态，返回取消订阅函数。
+export function onStatus(cb) {
+  statusListeners.add(cb)
+  try { cb(status) } catch {}
+  return () => statusListeners.delete(cb)
+}
+
+function stopHeartbeat() {
+  if (hbTimer) {
+    clearInterval(hbTimer)
+    hbTimer = null
+  }
+}
+
+function startHeartbeat() {
+  if (!sock || !sock._wsOwned) return // 测试注入的 mock 不探活
+  stopHeartbeat()
+  lastRecv = Date.now()
+  hbTimer = setInterval(() => {
+    if (!sock || sock.readyState !== WebSocket.OPEN) return
+    if (Date.now() - lastRecv > STALE_MS) {
+      // 发了心跳却一直没回来：触发 close → 走重连
+      try { sock.close() } catch {}
+      return
+    }
+    // /ping 是最轻的管理端点（后端 controller/ping.go 返回 pong），
+    // 拿它当应用层 ping：既探活，也让中间设备看到这条连接是活的。
+    admin('GET', '/ping').catch(() => {})
+  }, HEARTBEAT_MS)
+}
+
+function scheduleReconnect() {
+  if (retryTimer) return
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    try {
+      connect()
+    } catch {}
+  }, retryDelay)
+  retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS)
+}
+
 // connect 建立 WS 连接（幂等：已有连接直接返回；已初始化 handlers 不重复挂）。
 // 单连接复用：浏览器与本地节点只有一条会话，所有请求并发经 reqId 路由。
 function connect() {
   if (!sock) {
     sock = new WebSocket(wsUrl(getWsBase()) + '/ws/peer')
+    // 自己创建的连接才需要心跳与自动重连（测试注入的 mock 不带这个标记）
+    sock._wsOwned = true
+    setStatus('connecting')
   }
   // handlers 幂等挂载：mock/已有 sock（测试注入）也能走同一初始化路径
   if (sock._wsHandlers) return
   sock._wsHandlers = true
 
+  sock.onopen = () => {
+    retryDelay = RETRY_MIN_MS
+    setStatus('open')
+    startHeartbeat()
+  }
+
   sock.onmessage = (ev) => {
+    lastRecv = Date.now()
     if (typeof ev.data === 'string') {
       handleText(ev.data)
     } else {
@@ -82,13 +177,20 @@ function connect() {
     }
   }
   sock.onclose = () => {
-    // 连接断开：reject 所有 pending（调用方按网络错误处理），sock 置空等重连
+    // 连接断开：reject 所有 pending（调用方按网络错误处理），sock 置空等重连。
+    // owned 必须在置空前取：只有自己创建的连接才排自动重连，测试注入的
+    // mock 断开后不该去连真实网络。
+    const owned = !!sock._wsOwned
+    stopHeartbeat()
     for (const [, p] of pending) p.reject(new Error('ws: connection closed'))
     pending.clear()
     binaryExpect = null
     sock = null
+    setStatus('closed')
+    if (owned) scheduleReconnect()
   }
   sock.onerror = () => {
+    // onerror 后浏览器一定会跟一个 onclose，重连逻辑统一放在那边，这里只收尾
     try { sock.close() } catch {}
   }
 }
@@ -427,6 +529,16 @@ export const __test = {
   handleBinary,
   pending,
   _setSock: (s) => { sock = s },
-  _reset: () => { sock = null; pending.clear(); binaryExpect = null },
+  // _reset 必须连心跳/重连定时器一起清：单测之间若留着它们，前一个用例注入的
+  // mock 断开后会排一次真实重连（连到默认后端），表现为测试结束时报连接错误。
+  _reset: () => {
+    stopHeartbeat()
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+    retryDelay = RETRY_MIN_MS
+    status = 'idle'
+    sock = null
+    pending.clear()
+    binaryExpect = null
+  },
   _binaryExpect: () => binaryExpect,
 }

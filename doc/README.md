@@ -148,6 +148,12 @@ cd front && npm run build
 | `PEERDRIVE_DISCOVER_URL` | 空 | 自托管信令的发现 API（设置后优先于 MQTT） |
 | `PEERDRIVE_DISCOVER_PRESENCE` | `true` | 节点级「存在房间」发现：零共享 collection 的节点也能互相发现（见 [ROADMAP.md](ROADMAP.md) 第 1 阶段、[REFACTOR.md](REFACTOR.md) §3.18） |
 | `PEERDRIVE_MAX_PEERS` | `8` | 发现触发的拨号上限（防全互联退化）；静态 `PEERDRIVE_PEERJS_PEERS` 不受限 |
+| `PEERDRIVE_DB_PATH` | `./peerdrive.db` | SQLite 元数据库路径（新，2026-09-23） |
+| `PEERDRIVE_RATE_LIMIT_RPS` | `30` | 每 IP 请求速率上限，0=不限（新） |
+| `PEERDRIVE_CSP` | 开 | 设为 `off` 关闭 Content-Security-Policy（新） |
+| `PEERDRIVE_TRUSTED_PROXIES` | 空 | 可信反向代理（IP/CIDR 逗号分隔或 `all`）；空=只认 RemoteAddr（新） |
+
+> 新增项的来龙去脉与未修项见 [FULLSTACK-AUDIT.md](FULLSTACK-AUDIT.md)。
 
 ## 文档索引
 
@@ -157,6 +163,7 @@ cd front && npm run build
 |------|------|
 | [ROADMAP.md](ROADMAP.md) | **开发顺序（用户 2026-09 定序）**：PeerJS 互联 → 文件 → 组合 → 管理链路 → 文件范围管理 → 上传下载保存 → 身份管理（最后） |
 | [REFACTOR.md](REFACTOR.md) | 重构手册：分层边界、迁移顺序、既有问题的修法 |
+| [FULLSTACK-AUDIT.md](FULLSTACK-AUDIT.md) | **全栈体检报告（2026-09-23）**：配置/日志/数据层/认证/加固的现状、已修 12 项与未修 7 项 |
 | [NETDISK.md](NETDISK.md) | 网盘（PeerJS 节点 + 面板）使用与实现手册 |
 | [LAYERS.md](LAYERS.md) / [layers/](layers/) | 分层架构与逐层说明 |
 | [NODE.md](NODE.md) / [NODE-API.md](NODE-API.md) | 节点与节点 API |
