@@ -1,37 +1,9 @@
 // 设置页：节点连接 / 认证 / 存储 / LLM / WebDAV / 关于，七个配置分区
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import Peer from 'peerjs';
+import React, { useState, useEffect, useCallback } from 'react';
 import * as api from '../api';
 import { useNavigate } from 'react-router-dom';
 import SettingsSection from '../components/SettingsSection';
-import { connectToPeer } from '../lib/pd-client';
-
-// 连接方式：PeerJS（信令拨号，消费端） / WebSocket-HTTP（管理面，直连后端）
-// 两者连接方式与连接 id 不是一套：PeerJS 用信令 host/key + peer id 拨号；
-// WebSocket 用后端地址直连（/ws/peer 管理面）。
-const DEFAULT_SIG = {
-  host: 'peersignal.moonchan.xyz',
-  port: 443,
-  path: '/',
-  key: 'pd-signal-b9447b406828e500',
-  secure: true,
-};
-
-// 稳定身份（与公共面板共用同 key：一个浏览器 = 一个固定的来访者 peer id，
-// 对方 private 级别的好友名单里才能写得住这个 id）。
-function getStableMyId() {
-  try {
-    const data = JSON.parse(localStorage.getItem('peerdrive.panel.v1') || '{}');
-    if (data.myId) return data.myId;
-  } catch (e) { /* 忽略损坏的 localStorage */ }
-  const id = 'pd-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
-  try {
-    const data = JSON.parse(localStorage.getItem('peerdrive.panel.v1') || '{}');
-    data.myId = id;
-    localStorage.setItem('peerdrive.panel.v1', JSON.stringify(data));
-  } catch (e) { /* 忽略 */ }
-  return id;
-}
+import PeerJSConnect from '../components/PeerJSConnect';
 
 // 侧边栏导航配置
 const SECTIONS = [
@@ -78,17 +50,6 @@ export default function Settings({ dataConsent, setDataConsent }) {
 
   // ─── 连接方式：PeerJS（信令拨号） / WebSocket-HTTP（管理面直连）───
   const [connMode, setConnMode] = useState('ws'); // 'ws' | 'peerjs'
-  const [sig, setSig] = useState(DEFAULT_SIG);
-  const [sigHost, setSigHost] = useState(DEFAULT_SIG.host);
-  const [sigPort, setSigPort] = useState(String(DEFAULT_SIG.port));
-  const [sigKey, setSigKey] = useState(DEFAULT_SIG.key);
-  const [sigSecure, setSigSecure] = useState(DEFAULT_SIG.secure);
-  const [targetPeerId, setTargetPeerId] = useState('');
-  const myIdRef = useRef(getStableMyId());
-  const [pdClient, setPdClient] = useState(null);
-  const [pdStatus, setPdStatus] = useState('idle'); // idle|connecting|online|error
-  const [pdError, setPdError] = useState('');
-  const [pdShare, setPdShare] = useState(null); // {peerId, files, collections, total}
   const activeBackendName = backends.find(b => b.id === activeBackendId)?.name || '';
 
   const refreshBackends = useCallback(() => {
@@ -144,53 +105,6 @@ export default function Settings({ dataConsent, setDataConsent }) {
       refreshBackends();
       const newUrl = api.getApiBase();
       if (newUrl !== apiBase) setApiBase(newUrl);
-    }
-  };
-
-  // ─── PeerJS 连接（消费端：信令拨号对端节点，看共享/保存）───
-  const handlePjConnect = async () => {
-    const target = targetPeerId.trim();
-    if (!target) return;
-    setPdStatus('connecting');
-    setPdError('');
-    setPdShare(null);
-    try {
-      const client = await connectToPeer(Peer, target, {
-        peerOptions: {
-          host: sigHost.trim() || DEFAULT_SIG.host,
-          port: Number(sigPort.trim()) || DEFAULT_SIG.port,
-          path: DEFAULT_SIG.path,
-          key: sigKey.trim() || DEFAULT_SIG.key,
-          secure: sigSecure,
-          id: myIdRef.current,
-        },
-        connOptions: { serialization: 'raw', reliable: true },
-        timeoutMs: 15000,
-      });
-      setPdClient(client);
-      // 连上后立刻拿对端共享清单
-      const snap = await client.shares();
-      setPdShare(snap);
-      setPdStatus('online');
-    } catch (e) {
-      setPdStatus('error');
-      setPdError(e?.message || String(e));
-    }
-  };
-
-  const handlePjDisconnect = () => {
-    try { pdClient?.close?.(); } catch (e) { /* 忽略 */ }
-    setPdClient(null);
-    setPdShare(null);
-    setPdStatus('idle');
-  };
-
-  const handlePjSave = async (item) => {
-    if (!pdClient) return;
-    try {
-      await pdClient.saveAs(item.hash, item.path || item.name || 'download');
-    } catch (e) {
-      alert('保存失败：' + (e?.message || String(e)));
     }
   };
 
@@ -658,87 +572,8 @@ export default function Settings({ dataConsent, setDataConsent }) {
             </div>
 
             {connMode === 'peerjs' && (
-              <div className="bg-white/[0.03] rounded-lg border border-white/[0.06] p-3 space-y-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[10px] text-gray-500 mb-1">信令 host</label>
-                    <input value={sigHost} onChange={e => setSigHost(e.target.value)}
-                      className="w-full bg-white/[0.06] px-2 py-1 text-xs font-mono rounded border border-white/[0.1] focus:outline-none focus:border-brand-500" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-gray-500 mb-1">信令 port</label>
-                    <input value={sigPort} onChange={e => setSigPort(e.target.value)}
-                      className="w-full bg-white/[0.06] px-2 py-1 text-xs font-mono rounded border border-white/[0.1] focus:outline-none focus:border-brand-500" />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="block text-[10px] text-gray-500 mb-1">信令 key</label>
-                    <input value={sigKey} onChange={e => setSigKey(e.target.value)}
-                      className="w-full bg-white/[0.06] px-2 py-1 text-xs font-mono rounded border border-white/[0.1] focus:outline-none focus:border-brand-500" />
-                  </div>
-                </div>
-                <label className="flex items-center gap-2 text-xs text-gray-400">
-                  <input type="checkbox" checked={sigSecure} onChange={e => setSigSecure(e.target.checked)}
-                    className="accent-brand-500" />
-                  HTTPS（secure）
-                </label>
-                <div>
-                  <label className="block text-[10px] text-gray-500 mb-1">目标节点 peer id（拨号对象）</label>
-                  <input value={targetPeerId} onChange={e => setTargetPeerId(e.target.value)} placeholder="peerdrive-xxxxxxxx"
-                    className="w-full bg-white/[0.06] px-2 py-1 text-xs font-mono rounded border border-white/[0.1] focus:outline-none focus:border-brand-500" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handlePjConnect}
-                    disabled={!targetPeerId.trim() || pdStatus === 'connecting'}
-                    className="px-3 py-1.5 text-xs bg-brand-600 text-white rounded-lg hover:bg-brand-500 disabled:opacity-40"
-                  >连接</button>
-                  {pdStatus === 'online' && (
-                    <button onClick={handlePjDisconnect}
-                      className="px-3 py-1.5 text-xs bg-white/[0.06] text-gray-300 rounded-lg hover:bg-white/[0.12]">断开</button>
-                  )}
-                  <span className="text-xs">
-                    {pdStatus === 'connecting' && <span className="text-yellow-400">连接中...</span>}
-                    {pdStatus === 'online' && <span className="text-green-400">已连接 ✓（本机 id：{myIdRef.current}）</span>}
-                    {pdStatus === 'error' && <span className="text-red-400">失败：{pdError}</span>}
-                  </span>
-                </div>
-
-                {pdStatus === 'online' && (
-                  <div className="border-t border-white/[0.06] pt-2">
-                    <p className="text-[10px] text-gray-500 mb-1.5">对端共享（{pdShare?.total ?? 0} 项）</p>
-                    {pdShare && pdShare.files?.length > 0 && (
-                      <div className="mb-2">
-                        <p className="text-[10px] text-gray-500 mb-1">单独文件</p>
-                        <ul className="space-y-1">
-                          {pdShare.files.map((f, i) => (
-                            <li key={i} className="flex items-center gap-2 text-xs">
-                              <span className="flex-1 truncate text-gray-300">{f.path || f.name}</span>
-                              <span className="text-gray-500 shrink-0">{f.size ? formatBytes(f.size) : '—'}</span>
-                              <span className="font-mono text-[10px] text-gray-600 shrink-0">{String(f.hash).slice(0, 8)}…</span>
-                              <button onClick={() => handlePjSave(f)}
-                                className="px-2 py-0.5 text-[10px] bg-white/[0.06] text-gray-300 rounded hover:bg-white/[0.12] shrink-0">保存</button>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {pdShare && pdShare.collections?.length > 0 && (
-                      <div>
-                        <p className="text-[10px] text-gray-500 mb-1">合集</p>
-                        <ul className="space-y-1">
-                          {pdShare.collections.map((c, i) => (
-                            <li key={i} className="text-xs text-gray-300">
-                              {c.name || String(c.hash).slice(0, 12) + '…'} · {c.entries?.length ?? 0} 条目
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {pdShare && (pdShare.total ?? 0) === 0 && (
-                      <p className="text-[10px] text-gray-600">该节点没有共享内容（未开启对外共享，或未声明共享目录）。</p>
-                    )}
-                  </div>
-                )}
+              <div className="bg-white/[0.03] rounded-lg border border-white/[0.06] p-3">
+                <PeerJSConnect />
               </div>
             )}
 

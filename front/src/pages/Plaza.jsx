@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listAnonCollections, listPublicCollections, getPeerjsNode } from '../api';
 import CollectionCard from '../components/CollectionCard';
+import PeerJSConnect from '../components/PeerJSConnect';
 
 // 从文本中提取 SHA256 哈希
 const SHA256_RE = /\b([a-f0-9]{64})\b/i;
@@ -111,6 +112,16 @@ export default function Plaza() {
             <button onClick={() => navigate('/create')} className="btn-brand">+ 创建合集</button>
           </div>
         </div>
+        {/* 连接节点（PeerJS 拨号对端，消费端）——默认展开，首页即可用 */}
+        <div className="mb-4">
+          <div className="bg-white/[0.03] rounded-card border border-white/[0.06] p-4">
+            <p className="text-xs text-gray-400 mb-2">
+              连接节点（PeerJS）<span className="text-gray-600">——填对端 peer id 经公共信令拨号，看对方共享的文件/合集并保存</span>
+            </p>
+            <PeerJSConnect compact />
+          </div>
+        </div>
+
         {/* 搜索栏：输入 Hash / URL 直接跳转 */}
         <div className="mb-6">
           <div className="flex gap-2">
