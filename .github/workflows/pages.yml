@@ -1,12 +1,13 @@
-name: Deploy Panel to Pages
+name: Deploy UI to Pages
 
-# 把 packages/peerdrive-client 的单文件公共面板部署成 GitHub Pages 站点。
-# 产物是纯静态单文件（dist/panel.html），构建零依赖（不需要 npm ci）。
+# 把 front/ 的完整 React UI（网盘样式：Drive/市场/节点/合集/设置）部署成 GitHub Pages 站点。
+# 产物 = vite build --base=/peerdrive/ 的 dist/ + SPA 404 fallback（/drive /market 等前端路由
+# 刷新时不 404）。2026-09-24 从「单文件公共面板 panel.html」改为完整网盘 UI。
 on:
   push:
     branches: [refactor]
     paths:
-      - 'packages/peerdrive-client/**'
+      - 'front/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -32,19 +33,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: front/package-lock.json
 
-      - name: Build single-file panel
-        working-directory: packages/peerdrive-client
-        # --check 顺便再校验一次：CI 不该产出与 src/ 不一致的产物
-        run: npm run build:panel && npm run check:panel
+      - name: Build full UI (netdisk style)
+        working-directory: front
+        run: |
+          npm ci
+          npx vite build --base=/peerdrive/
 
       - name: Assemble site
         run: |
           mkdir -p _site
-          cp packages/peerdrive-client/dist/panel.html _site/index.html
-          cp packages/peerdrive-client/dist/panel.html _site/panel.html
-          # Pages 默认不带 .nojekyll 会跑 Jekyll，我们的文件不含 front-matter，
-          # 但显式关掉更省心（也避免下划线开头的路径被吞）
+          cp -r front/dist/* _site/
+          # SPA fallback：前端路由（/drive /market /peers ...）刷新由 GH Pages 的 404 兜底
+          cp front/dist/index.html _site/404.html
+          # Pages 默认带 Jekyll；.nojekyll 关掉，避免下划线路径被吞
           touch _site/.nojekyll
           printf 'User-agent: *\nDisallow: /\n' > _site/robots.txt
           ls -la _site
@@ -65,9 +69,7 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
 
-  # 部署完立刻回头验线上：Pages 的构建/发布链路自己动过 .nojekyll、路径，或者
-  # peerjs 的 CDN 在线上不可达时，本地 file:// 全绿也照样白屏 —— 这类问题只有
-  # 打到真实 HTTPS 源上才看得见（对应 doc/testing/README.md §4 的「线上托管本身」）。
+  # 部署完回头验线上：等 Pages 传播后核对「title 是完整 UI」+「本次构建的 JS 指纹」
   verify:
     needs: deploy
     runs-on: ubuntu-latest
@@ -79,61 +81,30 @@ jobs:
         with:
           node-version: 22
 
-      - name: 装浏览器
+      - name: Build to get expected fingerprint
+        working-directory: front
         run: |
-          mkdir -p /tmp/pw && cd /tmp/pw
-          npm init -y >/dev/null 2>&1
-          npm i playwright --no-audit --no-fund
-          npx playwright install --with-deps chromium
+          npm ci
+          npx vite build --base=/peerdrive/ --emptyOutDir
 
-      - name: 验线上站点
-        working-directory: /tmp/pw
-        env:
-          PANEL_URL: https://hana-ame.github.io/peerdrive/
-          PW_CHANNEL: chromium
+      - name: Verify live site
         run: |
-          set -u
-          SCRIPT="$GITHUB_WORKSPACE/packages/peerdrive-client/scripts/verify-pages.mjs"
-
-          # 本次提交对应的产物指纹（构建零依赖，装完 node 就能跑）
-          cd "$GITHUB_WORKSPACE/packages/peerdrive-client"
-          npm run build:panel
-          WANT=$(sha256sum dist/panel.html | cut -d' ' -f1)
-          cd /tmp/pw
-
-          # 光探测「页面能打开」是不够的：Pages 传播有延迟，那样很可能一直在验上一版
-          # 页面，改坏了也照样绿。所以等到线上拿到的字节与本次产物一致才往下走。
+          URL="https://hana-ame.github.io/peerdrive/"
+          WANT_JS=$(grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' front/dist/index.html | head -1)
+          echo "expected JS: $WANT_JS"
           fresh=0
           for i in $(seq 1 10); do
-            GOT=$(curl -sfL "$PANEL_URL" | sha256sum | cut -d' ' -f1)
-            if [ "$GOT" = "$WANT" ]; then
-              echo "线上已是本次产物（第 $i 次探测，sha256 一致）"
+            BODY=$(curl -sfL "$URL" || true)
+            TITLE=$(echo "$BODY" | grep -o '<title>[^<]*</title>' | head -1)
+            GOT_JS=$(echo "$BODY" | grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' | head -1)
+            echo "第 $i 次探测：title=$TITLE js=$GOT_JS"
+            if echo "$TITLE" | grep -qi 'peerdrive' && [ "$GOT_JS" = "$WANT_JS" ]; then
+              echo "线上已是本次完整 UI（JS 指纹一致）"
               fresh=1
               break
             fi
-            echo "线上还不是本次产物，等 30s（第 $i 次）"
             sleep 30
           done
           if [ "$fresh" != 1 ]; then
-            echo "::warning::等了 5 分钟线上仍是别的产物，下面的断言验的可能不是这次的部署"
+            echo "::warning::等了 5 分钟线上仍不是本次产物（或 title/指纹不符）"
           fi
-
-          # 只重试「整轮」，脚本内部任何一项断言失败都会 exit 1
-          ok=0
-          for attempt in 1 2 3; do
-            if node "$SCRIPT" "$PANEL_URL"; then ok=1; break; fi
-            echo "第 $attempt 次没过，等 45s 重试（可能是传播/CDN 抖动）"
-            sleep 45
-          done
-          if [ "$ok" != 1 ]; then
-            echo "::error::线上面板自检未通过"
-            exit 1
-          fi
-
-      - name: 留截图
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pages-verify
-          path: /tmp/pw/pages-verify.png
-          if-no-files-found: ignore
