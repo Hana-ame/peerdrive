@@ -148,7 +148,7 @@ export default function FileTree({ entries, entryActions }) {
         const isDragging = dragOverPath === node.path;
         rows.push(
           <div key={node.path}
-            className={`flex items-center gap-2 py-2 px-2 hover:bg-gray-800/50 group text-sm ${isDragging ? 'bg-blue-900/40 ring-1 ring-blue-500/50' : ''}`}
+            className={`flex items-center gap-2 py-2 px-2 hover:bg-white/[0.06] group text-sm ${isDragging ? 'bg-brand-900/40 ring-1 ring-brand-500/50' : ''}`}
             style={{ paddingLeft: `${depth * 20 + 8}px` }}
             draggable
             onDragStart={(e) => { e.dataTransfer.setData('application/peerdrive-entry', JSON.stringify({ hash: node.hash || node.providers?.[0]?.value || '', path: node.path, name: node.name, mime_type: node.mime_type, size: node.size, providers: node.providers })); e.dataTransfer.effectAllowed = 'move'; }}
@@ -164,9 +164,9 @@ export default function FileTree({ entries, entryActions }) {
               <input autoFocus defaultValue={node.path}
                 onBlur={() => setRenaming(null)}
                 onKeyDown={(e) => { if (e.key === 'Enter') { let nv = e.target.value; entryActions?.onRename?.(node.path, nv); setRenaming(null); } else if (e.key === 'Escape') setRenaming(null); }}
-                className="flex-1 bg-gray-700 px-1.5 py-0.5 rounded text-xs font-mono border border-blue-500 outline-none" />
+                className="flex-1 bg-white/[0.06] px-1.5 py-0.5 rounded text-xs font-mono border border-brand-500 outline-none" />
             ) : (
-              <span className="text-blue-300 font-mono truncate flex-1 text-xs">{node.name}</span>
+              <span className="text-brand-300 font-mono truncate flex-1 text-xs">{node.name}</span>
             )}
             <span className="text-gray-500 text-[10px] shrink-0 hidden sm:inline">{fmtSize(node.size)}</span>
             {/* 移动到按钮 */}
@@ -186,7 +186,7 @@ export default function FileTree({ entries, entryActions }) {
       rows.push(
         <div key={node.path} className="flex flex-col">
           <div
-            className={`flex items-center gap-2 py-2 px-2 hover:bg-gray-800/50 cursor-pointer group text-sm ${dropOver ? 'bg-blue-900/40 ring-1 ring-blue-500/50' : ''}`}
+            className={`flex items-center gap-2 py-2 px-2 hover:bg-white/[0.06] cursor-pointer group text-sm ${dropOver ? 'bg-brand-900/40 ring-1 ring-brand-500/50' : ''}`}
             style={{ paddingLeft: `${depth * 20 + 8}px` }}
             onClick={() => toggle(node.path)}
             onDoubleClick={(e) => { e.stopPropagation(); if (entryActions?.onRename) setRenaming(node.path + '/'); }}
@@ -209,7 +209,7 @@ export default function FileTree({ entries, entryActions }) {
               <input autoFocus defaultValue={node.path + '/'}
                 onBlur={() => setRenaming(null)}
                 onKeyDown={(e) => { if (e.key === 'Enter') { let nv = e.target.value; entryActions?.onRename?.(node.path + '/', nv.endsWith('/') ? nv : nv + '/'); setRenaming(null); } else if (e.key === 'Escape') setRenaming(null); }}
-                className="flex-1 bg-gray-700 px-1.5 py-0.5 rounded text-xs font-mono border border-blue-500 outline-none" />
+                className="flex-1 bg-white/[0.06] px-1.5 py-0.5 rounded text-xs font-mono border border-brand-500 outline-none" />
             ) : (
               <span className="text-gray-200 font-mono truncate text-xs">{node.name}/</span>
             )}
@@ -222,7 +222,7 @@ export default function FileTree({ entries, entryActions }) {
               {renderEntries(node.children || [], depth + 1, node.path)}
               {node.files.map((f, i) => (
                 <div key={f.path + i}
-                  className={`flex items-center gap-2 py-2 px-2 hover:bg-gray-800/50 group text-sm ${dragOverPath === f.path ? 'bg-blue-900/40 ring-1 ring-blue-500/50' : ''}`}
+                  className={`flex items-center gap-2 py-2 px-2 hover:bg-white/[0.06] group text-sm ${dragOverPath === f.path ? 'bg-brand-900/40 ring-1 ring-brand-500/50' : ''}`}
                   style={{ paddingLeft: `${(depth + 1) * 20 + 8}px` }}
                   onDoubleClick={(e) => { e.stopPropagation(); if (entryActions?.onRename) setRenaming(f.path); }}
                   onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, node: f }); }}
@@ -238,9 +238,9 @@ export default function FileTree({ entries, entryActions }) {
                     <input autoFocus defaultValue={f.path}
                       onBlur={() => setRenaming(null)}
                       onKeyDown={(e) => { if (e.key === 'Enter') { let nv = e.target.value; entryActions?.onRename?.(f.path, nv); setRenaming(null); } else if (e.key === 'Escape') setRenaming(null); }}
-                      className="flex-1 bg-gray-700 px-1.5 py-0.5 rounded text-xs font-mono border border-blue-500 outline-none" />
+                      className="flex-1 bg-white/[0.06] px-1.5 py-0.5 rounded text-xs font-mono border border-brand-500 outline-none" />
                   ) : (
-                    <span className="text-blue-300 font-mono truncate flex-1 text-xs">{f.name}</span>
+                    <span className="text-brand-300 font-mono truncate flex-1 text-xs">{f.name}</span>
                   )}
                   <span className="text-gray-500 text-[10px] shrink-0 hidden sm:inline">{fmtSize(f.size)}</span>
                   <span className="text-gray-500 text-[10px] font-mono shrink-0 max-w-[80px] truncate hidden md:inline">{(f.hash || f.providers?.[0]?.value || '').substring(0, 8)}</span>
@@ -267,9 +267,9 @@ export default function FileTree({ entries, entryActions }) {
   // 坑：旧实现在空合集时直接 return 占位提示，工具栏（含「新建文件夹」）不渲染
   // → 用户反馈「新建文件夹是 broken 的」：从零开始建合集时根本没有这个按钮。
   const toolbar = (
-    <div className="flex items-center gap-2 px-2 py-1.5 border-b border-gray-800 shrink-0 flex-wrap">
+    <div className="flex items-center gap-2 px-2 py-1.5 border-b border-white/[0.04] shrink-0 flex-wrap">
       <button onClick={() => { setInlineNewFolder(true); setTimeout(() => inlineRef.current?.focus(), 50); }}
-        className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded">+ 新建文件夹</button>
+        className="text-xs bg-white/[0.06] hover:bg-white/[0.12] px-2 py-1 rounded">+ 新建文件夹</button>
       <span className="text-[10px] text-gray-500">{entries.length} 条目</span>
       <span className="text-[10px] text-gray-600 hidden sm:inline">| 双击重命名 | 拖拽移动</span>
     </div>
@@ -295,7 +295,7 @@ export default function FileTree({ entries, entryActions }) {
                   setInlineNewFolder(false);
                 }
               }}
-              className="flex-1 bg-gray-700 px-1.5 py-0.5 rounded text-xs font-mono border border-blue-500 outline-none text-gray-200"
+              className="flex-1 bg-white/[0.06] px-1.5 py-0.5 rounded text-xs font-mono border border-brand-500 outline-none text-gray-200"
               placeholder="文件夹名称" />
           </div>
         )}
@@ -314,16 +314,16 @@ export default function FileTree({ entries, entryActions }) {
       {/* 移动到弹窗 */}
       {showMoveModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowMoveModal(null)}>
-          <div className="bg-gray-800 p-4 rounded-xl border border-gray-600 shadow-2xl w-72" onClick={e => e.stopPropagation()}>
+          <div className="bg-white/[0.06] p-4 rounded-xl border border-white/[0.12] shadow-2xl w-72" onClick={e => e.stopPropagation()}>
             <h3 className="text-sm font-bold mb-2">移动 "{moveItemName}" 到</h3>
             <div className="max-h-48 overflow-y-auto space-y-0.5 mb-3">
               <button onClick={() => executeMove(showMoveModal.path, '')}
-                className="w-full text-left px-2 py-1 text-xs hover:bg-gray-700 rounded text-gray-300">
+                className="w-full text-left px-2 py-1 text-xs hover:bg-white/[0.08] rounded text-gray-300">
                 📂 / (根目录)
               </button>
               {allDirs.filter(d => d !== showMoveModal.path && !d.startsWith(showMoveModal.path + '/')).map(d => (
                 <button key={d} onClick={() => executeMove(showMoveModal.path, d)}
-                  className="w-full text-left px-2 py-1 text-xs hover:bg-gray-700 rounded text-gray-300">
+                  className="w-full text-left px-2 py-1 text-xs hover:bg-white/[0.08] rounded text-gray-300">
                   📁 {d}
                 </button>
               ))}
@@ -357,7 +357,7 @@ export default function FileTree({ entries, entryActions }) {
                   setInlineNewFolder(false);
                 }
               }}
-              className="flex-1 bg-gray-700 px-1.5 py-0.5 rounded text-xs font-mono border border-blue-500 outline-none text-gray-200"
+              className="flex-1 bg-white/[0.06] px-1.5 py-0.5 rounded text-xs font-mono border border-brand-500 outline-none text-gray-200"
               placeholder="文件夹名称" />
           </div>
         )}
@@ -366,24 +366,24 @@ export default function FileTree({ entries, entryActions }) {
       {/* 右键菜单 */}
       {contextMenu && (
         <div ref={ctxMenuRef}
-          className="absolute z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 min-w-[140px]"
+          className="absolute z-50 bg-white/[0.06] border border-white/[0.12] rounded-lg shadow-xl py-1 min-w-[140px]"
           style={{ left: contextMenu.x, top: contextMenu.y, position: 'fixed' }}>
           <button
             onClick={() => { const p = contextMenu.node.isDir ? contextMenu.node.path + '/' : contextMenu.node.path; setRenaming(p); setContextMenu(null); }}
-            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700 flex items-center gap-2">
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-white/[0.08] flex items-center gap-2">
             ✏️ 重命名
           </button>
           {entryActions?.onRename && (
             <button
               onClick={() => { setShowMoveModal({ path: contextMenu.node.path, isDir: contextMenu.node.isDir }); setContextMenu(null); }}
-              className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700 flex items-center gap-2">
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-white/[0.08] flex items-center gap-2">
               →📁 移动到...
             </button>
           )}
           {entryActions?.onRemove && (
             <button
               onClick={() => { entryActions.onRemove(contextMenu.node); setContextMenu(null); }}
-              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-700 flex items-center gap-2">
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-white/[0.08] flex items-center gap-2">
               🗑️ 删除
             </button>
           )}

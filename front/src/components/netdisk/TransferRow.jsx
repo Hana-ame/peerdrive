@@ -14,7 +14,7 @@ const STATUS_TEXT = {
 };
 
 const STATUS_TONE = {
-  running: 'text-blue-300',
+  running: 'text-brand-300',
   done: 'text-green-300',
   failed: 'text-red-300',
   cancelled: 'text-gray-400',
@@ -30,13 +30,13 @@ export default function TransferRow({ job, onCancel }) {
   const running = job.status === 'running';
 
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3">
+    <div className="rounded-lg border border-white/[0.04] bg-white/[0.08] p-3">
       <div className="flex items-center gap-2">
         <span className="truncate text-sm text-gray-200" title={job.path || job.name}>
           {job.name || baseName(job.path) || job.hash?.slice(0, 12)}
         </span>
         {job.skipped && (
-          <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-300">
+          <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-gray-300">
             本地已有
           </span>
         )}
@@ -47,16 +47,16 @@ export default function TransferRow({ job, onCancel }) {
           <button
             type="button"
             onClick={() => onCancel?.(job)}
-            className="shrink-0 text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:text-white hover:bg-gray-700"
+            className="shrink-0 text-xs px-2 py-1 rounded border border-white/[0.06] text-gray-300 hover:text-white hover:bg-white/[0.08]"
           >
             取消
           </button>
         )}
       </div>
 
-      <div className="mt-2 h-1.5 rounded bg-gray-800 overflow-hidden">
+      <div className="mt-2 h-1.5 rounded bg-white/[0.06] overflow-hidden">
         <div
-          className={`h-full transition-all ${job.status === 'failed' ? 'bg-red-600' : job.status === 'done' ? 'bg-green-600' : 'bg-blue-500'}`}
+          className={`h-full transition-all ${job.status === 'failed' ? 'bg-red-600' : job.status === 'done' ? 'bg-green-600' : 'bg-brand-500'}`}
           style={{ width: known ? `${pct}%` : running ? '15%' : '0%' }}
         />
       </div>

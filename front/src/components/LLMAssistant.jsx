@@ -521,7 +521,7 @@ export default function LLMAssistant() {
 
   const skins = {
     clippy: { icon: '📎', label: 'Clippy', btn: 'bg-amber-500 hover:bg-amber-400' },
-    minimal: { icon: '💬', label: 'Minimal', btn: 'bg-blue-600 hover:bg-blue-700' },
+    minimal: { icon: '💬', label: 'Minimal', btn: 'bg-brand-600 hover:bg-brand-700' },
   };
   const activeSkin = skins[skin] || skins.clippy;
 
@@ -538,15 +538,15 @@ export default function LLMAssistant() {
           </button>
           <button
             onClick={() => { const s = skin === 'clippy' ? 'minimal' : 'clippy'; setSkin(s); localStorage.setItem('peerdrive_skin', s); }}
-            className="text-[10px] text-gray-600 hover:text-gray-400 bg-gray-900/80 px-2 py-0.5 rounded-full"
+            className="text-[10px] text-gray-600 hover:text-gray-400 bg-white/[0.14] px-2 py-0.5 rounded-full"
           >
             {skin === 'clippy' ? '💬' : '📎'}
           </button>
         </div>
       )}
       {open && (
-        <div className="fixed bottom-6 right-3 md:right-6 w-[calc(100vw-1.5rem)] md:w-96 h-[560px] max-h-[75vh] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col z-40">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 shrink-0">
+        <div className="fixed bottom-6 right-3 md:right-6 w-[calc(100vw-1.5rem)] md:w-96 h-[560px] max-h-[75vh] bg-surface-card border border-white/[0.06] rounded-xl shadow-2xl flex flex-col z-40">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] shrink-0">
             <div className="flex items-center gap-2">
               <span className="text-lg">{activeSkin.icon}</span>
               <span className="font-bold text-sm">{activeSkin.label}</span>
@@ -570,8 +570,8 @@ export default function LLMAssistant() {
                 <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
                     m.role === 'user'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-800 text-gray-200 border border-gray-700'
+                      ? 'bg-brand-600 text-white'
+                      : 'bg-white/[0.06] text-gray-200 border border-white/[0.06]'
                   }`}>
                     <pre className="whitespace-pre-wrap font-sans break-words">{m.content}</pre>
                   </div>
@@ -580,21 +580,21 @@ export default function LLMAssistant() {
             })}
             {toolStatus && (
               <div className="flex justify-start">
-                <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-gray-800 text-yellow-400 border border-yellow-700/50">
+                <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-white/[0.06] text-yellow-400 border border-yellow-700/50">
                   {toolStatus}
                 </div>
               </div>
             )}
             {streamText && (
               <div className="flex justify-start">
-                <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-gray-800 text-gray-200 border border-gray-700">
+                <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-white/[0.06] text-gray-200 border border-white/[0.06]">
                   <pre className="whitespace-pre-wrap font-sans break-words">{streamText}<span className="animate-pulse">▊</span></pre>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="p-3 border-t border-gray-700 shrink-0">
+          <div className="p-3 border-t border-white/[0.06] shrink-0">
             <div className="flex gap-2">
               <input
                 value={input}
@@ -604,7 +604,7 @@ export default function LLMAssistant() {
                 }}
                 placeholder={streaming ? 'AI 回复中...' : '输入消息...'}
                 disabled={streaming}
-                className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                className="flex-1 bg-white/[0.06] border border-white/[0.12] rounded px-3 py-2 text-sm focus:outline-none focus:border-brand-500 disabled:opacity-50"
               />
               {streaming ? (
                 <button
@@ -617,7 +617,7 @@ export default function LLMAssistant() {
                 <button
                   onClick={handleSend}
                   disabled={!input.trim()}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded text-sm font-medium"
+                  className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded text-sm font-medium"
                 >
                   发送
                 </button>

@@ -31,7 +31,7 @@ export default function RegisteredDirView({ files, dirPath = '', onDirPath, onAd
 
   return (
     <>
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 text-xs">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.04] text-xs">
         <button onClick={goUp} disabled={!dirPath} className="text-gray-400 hover:text-white disabled:opacity-30">←</button>
         <span className="text-gray-300 font-mono text-xs truncate">/{dirPath}</span>
         <div className="flex-1" />
@@ -40,7 +40,7 @@ export default function RegisteredDirView({ files, dirPath = '', onDirPath, onAd
 
       {dirList.map(d => (
         <div key={d} onClick={() => onDirPath(d)}
-          className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm">
+          className="flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.06] cursor-pointer border-b border-white/[0.03] text-sm">
           <span className="text-lg">📁</span>
           {/* 只显示末级目录名，全路径塞进 title 便于悬停查看 */}
           <span className="text-yellow-400 font-mono truncate flex-1 text-xs" title={d}>

@@ -7,7 +7,7 @@ export default function GenericFilePreview({ mime, filename, size, downloadUrl, 
       <h3 className="text-xl font-bold text-gray-200 mb-1">{filename}</h3>
       <p className="text-xs text-gray-500 font-mono mb-2">{fmtSize(size || 0)}</p>
       <a href="#" onClick={e => { e.preventDefault(); if (onDownload) onDownload(); }}
-        className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium mb-3">
+        className="bg-brand-600 hover:bg-brand-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium mb-3">
         ⬇ 下载文件
       </a>
       <p className="text-xs text-gray-600">{relTime(createdAt)}</p>

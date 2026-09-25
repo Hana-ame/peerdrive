@@ -87,7 +87,7 @@ export default function BTPanel() {
   };
 
   return (
-    <div className="h-full overflow-y-auto bg-gray-950">
+    <div className="h-full overflow-y-auto bg-transparent">
       <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-4 md:space-y-6">
 
         {/* ===== HEADER ===== */}
@@ -102,17 +102,17 @@ export default function BTPanel() {
           <div className="flex items-center gap-3 text-xs text-gray-500">
             {lastRefresh && <span>更新于 {lastRefresh.toLocaleTimeString()}</span>}
             <button onClick={refresh}
-              className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors">
+              className="px-3 py-1.5 rounded-lg border border-white/[0.06] text-gray-400 hover:text-gray-200 hover:border-white/[0.16] transition-colors">
               刷新
             </button>
           </div>
         </div>
 
         {/* ===== STATUS CARD ===== */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className="bg-surface-card border border-white/[0.04] rounded-xl p-4">
           <h2 className="text-sm font-medium text-gray-300 mb-3">BT DHT 状态</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-            <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+            <div className="bg-white/[0.03] rounded-lg p-3 text-center">
               <div className="text-[10px] text-gray-500 mb-1">状态</div>
               <span className={`text-sm font-bold ${
                 status?.enabled ? 'text-emerald-400' : 'text-red-400'
@@ -120,31 +120,31 @@ export default function BTPanel() {
                 {status?.enabled ? '已启用' : '未启用'}
               </span>
             </div>
-            <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+            <div className="bg-white/[0.03] rounded-lg p-3 text-center">
               <div className="text-[10px] text-gray-500 mb-1">节点数</div>
-              <div className="text-lg font-bold text-blue-400">{status?.num_nodes ?? '-'}</div>
+              <div className="text-lg font-bold text-brand-400">{status?.num_nodes ?? '-'}</div>
             </div>
-            <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+            <div className="bg-white/[0.03] rounded-lg p-3 text-center">
               <div className="text-[10px] text-gray-500 mb-1">运行时间</div>
               <div className="text-lg font-bold text-amber-400">{formatUptime(status?.uptime)}</div>
             </div>
-            <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+            <div className="bg-white/[0.03] rounded-lg p-3 text-center">
               <div className="text-[10px] text-gray-500 mb-1">活跃查询</div>
               <div className="text-lg font-bold text-purple-400">{status?.active_queries ?? '-'}</div>
             </div>
           </div>
           {status?.listen_addr && (
-            <div className="bg-gray-950 rounded-lg px-3 py-2 border border-gray-800">
+            <div className="bg-surface-raised rounded-lg px-3 py-2 border border-white/[0.04]">
               <div className="text-[10px] text-gray-500 mb-0.5">监听地址</div>
               <div className="text-xs font-mono text-gray-400 break-all">{status.listen_addr}</div>
             </div>
           )}
           {status?.routing_table && (
-            <div className="mt-3 pt-3 border-t border-gray-800">
+            <div className="mt-3 pt-3 border-t border-white/[0.04]">
               <div className="text-[10px] text-gray-500 mb-1.5">路由表</div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 {Object.entries(status.routing_table).map(([k, v]) => (
-                  <div key={k} className="bg-gray-800/30 rounded px-2 py-1 text-center">
+                  <div key={k} className="bg-white/[0.02] rounded px-2 py-1 text-center">
                     <div className="text-[10px] text-gray-500">{k}</div>
                     <div className="text-xs font-bold text-gray-300">{String(v)}</div>
                   </div>
@@ -153,7 +153,7 @@ export default function BTPanel() {
             </div>
           )}
           {status?.buckets && (
-            <div className="mt-3 pt-3 border-t border-gray-800">
+            <div className="mt-3 pt-3 border-t border-white/[0.04]">
               <div className="text-[10px] text-gray-500 mb-1.5">K-Buckets</div>
               <div className="text-xs text-gray-400">{JSON.stringify(status.buckets).substring(0, 200)}</div>
             </div>
@@ -161,20 +161,20 @@ export default function BTPanel() {
         </div>
 
         {/* ===== ANNOUNCE ===== */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className="bg-surface-card border border-white/[0.04] rounded-xl p-4">
           <h2 className="text-sm font-medium text-gray-300 mb-3">宣布到 BT DHT</h2>
           <form onSubmit={handleAnnounce} className="flex gap-2">
             <input value={announceHash} onChange={e => setAnnounceHash(e.target.value)}
               placeholder="Infohash (十六进制)"
-              className="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono
-                         focus:outline-none focus:border-gray-500 placeholder:text-gray-600 transition-colors" />
+              className="flex-1 bg-surface-raised border border-white/[0.06] rounded-lg px-3 py-2 text-xs font-mono
+                         focus:outline-none focus:border-white/[0.16] placeholder:text-gray-600 transition-colors" />
             <button type="submit" disabled={announceLoading || !announceHash.trim()}
               className="px-4 py-2 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors whitespace-nowrap">
               {announceLoading ? '宣布中...' : '宣布'}
             </button>
           </form>
           {announceResult && (
-            <div className="mt-3 bg-gray-800/50 rounded-lg p-3 text-xs">
+            <div className="mt-3 bg-white/[0.03] rounded-lg p-3 text-xs">
               <div className="text-gray-500 mb-1">结果</div>
               <pre className="text-gray-300 font-mono text-[10px] whitespace-pre-wrap">
                 {JSON.stringify(announceResult, null, 2)}
@@ -184,15 +184,15 @@ export default function BTPanel() {
         </div>
 
         {/* ===== FIND ===== */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className="bg-surface-card border border-white/[0.04] rounded-xl p-4">
           <h2 className="text-sm font-medium text-gray-300 mb-3">在 BT DHT 中查找</h2>
           <form onSubmit={handleFind} className="flex gap-2">
             <input value={findHash} onChange={e => setFindHash(e.target.value)}
               placeholder="Infohash (十六进制)"
-              className="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono
-                         focus:outline-none focus:border-gray-500 placeholder:text-gray-600 transition-colors" />
+              className="flex-1 bg-surface-raised border border-white/[0.06] rounded-lg px-3 py-2 text-xs font-mono
+                         focus:outline-none focus:border-white/[0.16] placeholder:text-gray-600 transition-colors" />
             <button type="submit" disabled={findLoading || !findHash.trim()}
-              className="px-4 py-2 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-colors whitespace-nowrap">
+              className="px-4 py-2 rounded-lg text-xs font-medium bg-brand-600 text-white hover:bg-brand-500 disabled:opacity-40 transition-colors whitespace-nowrap">
               {findLoading ? '查找中...' : '查找'}
             </button>
           </form>
@@ -218,7 +218,7 @@ export default function BTPanel() {
                   ) : (
                     <div className="space-y-1.5 max-h-72 overflow-y-auto">
                       {peerList().map((peer, i) => (
-                        <div key={i} className="flex items-center gap-3 bg-gray-800/50 rounded-lg px-3 py-2 text-xs">
+                        <div key={i} className="flex items-center gap-3 bg-white/[0.03] rounded-lg px-3 py-2 text-xs">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
                           <span className="font-mono text-gray-300 truncate">
                             {peer.id || peer.peer_id || peer.node_id || `节点 ${i + 1}`}
@@ -239,14 +239,14 @@ export default function BTPanel() {
 
         {/* ===== ACTIVE DOWNLOADS ===== */}
         {status?.active_downloads?.length > 0 && (
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <div className="bg-surface-card border border-white/[0.04] rounded-xl p-4">
             <h2 className="text-sm font-medium text-gray-300 mb-3">
               活跃下载
               <span className="text-gray-500 font-normal ml-1.5">({status.active_downloads.length})</span>
             </h2>
             <div className="space-y-2">
               {status.active_downloads.map((d, i) => (
-                <div key={i} className="bg-gray-800/50 rounded-lg p-3">
+                <div key={i} className="bg-white/[0.03] rounded-lg p-3">
                   <div className="flex justify-between items-center text-xs mb-1.5">
                     <span className="font-mono text-gray-400 truncate">
                       {d.hash || d.name || '#' + i}
@@ -256,8 +256,8 @@ export default function BTPanel() {
                     </span>
                   </div>
                   {d.progress != null && (
-                    <div className="w-full bg-gray-700 rounded-full h-1.5 overflow-hidden">
-                      <div className="bg-gradient-to-r from-blue-500 to-cyan-400 h-1.5 rounded-full transition-all"
+                    <div className="w-full bg-white/[0.06] rounded-full h-1.5 overflow-hidden">
+                      <div className="bg-gradient-to-r from-brand-500 to-cyan-400 h-1.5 rounded-full transition-all"
                         style={{ width: `${Math.min(100, d.progress)}%` }} />
                     </div>
                   )}

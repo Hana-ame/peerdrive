@@ -41,7 +41,7 @@ export default function VisibilityPicker({ visibility, accessList = [], accounts
             <button key={o.v} onClick={() => pick(o.v)} disabled={disabled}
               title={disabled ? '未绑定 regserver 账号，无法使用「仅自己」' : o.hint}
               className={`flex-1 text-[11px] px-2 py-1 rounded transition-colors whitespace-nowrap ${
-                active ? 'bg-blue-600 text-white font-medium' : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700'
+                active ? 'bg-brand-600 text-white font-medium' : 'bg-white/[0.06] text-gray-400 hover:text-white hover:bg-white/[0.08]'
               } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}>
               {o.icon} {o.label}
             </button>
@@ -56,7 +56,7 @@ export default function VisibilityPicker({ visibility, accessList = [], accounts
               ? `已选 ${accessList.length} 人：${accessList.slice(0, 3).join('、@')}${accessList.length > 3 ? '…' : ''}`
               : '尚未选择账号'}
           </span>
-          <button onClick={() => onRequestAccounts?.()} className="text-[10px] px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-300">
+          <button onClick={() => onRequestAccounts?.()} className="text-[10px] px-2 py-0.5 rounded bg-white/[0.06] hover:bg-white/[0.12] text-gray-300">
             选择…
           </button>
         </div>

@@ -42,7 +42,7 @@ export default function DHTExplorer() {
       )}
 
       {bep51 && (
-        <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
+        <div className="bg-surface-card border border-white/[0.06] rounded-lg p-4">
           <h2 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
             <span>🔍</span> BEP51 Infohash 样本
             <span className="text-xs text-gray-500 font-normal">

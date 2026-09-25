@@ -100,7 +100,7 @@ export default function AnonExplorer() {
   const totalFiles = navPath ? entries.filter(e => (e.path || '').startsWith(navPath + '/')).length : entries.length;
 
   return (
-    <div className="flex flex-1 overflow-hidden h-full bg-gray-950">
+    <div className="flex flex-1 overflow-hidden h-full bg-transparent">
       <div className="flex-1 flex flex-col max-w-3xl mx-auto w-full">
         <SearchBar inputVal={inputVal} loading={loading}
           onChange={handleInputChange} onSearch={handleSearch}
@@ -141,7 +141,7 @@ export default function AnonExplorer() {
               )}
             </div>
 
-            <div className="px-4 pb-4 border-t border-gray-800/50">
+            <div className="px-4 pb-4 border-t border-white/[0.03]">
               <CommentSection hash={searchHash} />
             </div>
           </div>

@@ -93,7 +93,7 @@ export default function Market() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="按节点 id 筛选"
-                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-500 w-40"
+                className="bg-white/[0.06] border border-white/[0.06] rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-500 w-40"
               />
               <label className="flex items-center gap-1 text-xs text-gray-400">
                 <input type="checkbox" checked={onlyJoined} onChange={(e) => setOnlyJoined(e.target.checked)} />
@@ -104,8 +104,8 @@ export default function Market() {
           </div>
 
           {/* 本节点卡片：明确告诉用户"我在网络里是谁"，市场里的一切都是相对它而言 */}
-          <div className="mb-5 rounded-lg border border-blue-900/50 bg-blue-950/20 p-3">
-            <div className="text-[11px] uppercase tracking-wider text-blue-400/80 mb-1">我的节点</div>
+          <div className="mb-5 rounded-lg border border-brand-900/50 bg-brand-950/20 p-3">
+            <div className="text-[11px] uppercase tracking-wider text-brand-400/80 mb-1">我的节点</div>
             <div className="font-mono text-sm text-gray-100 break-all">
               {self?.peer_id || '（未启用 PeerJS，节点不在网络中）'}
             </div>
@@ -130,7 +130,7 @@ export default function Market() {
           {loading && !nodes.length ? (
             <div className="py-12 text-center text-sm text-gray-500">加载中…</div>
           ) : filtered.length === 0 ? (
-            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-4 py-12 text-center text-sm text-gray-500">
+            <div className="rounded-lg border border-white/[0.04] bg-white/[0.06] px-4 py-12 text-center text-sm text-gray-500">
               <div className="text-3xl mb-2 opacity-60">🏪</div>
               {nodes.length === 0
                 ? '当前没有发现其它节点。确认双方都开启了节点级发现（PEERDRIVE_DISCOVER_PRESENCE），或直接加入已知节点 id。'
@@ -190,14 +190,14 @@ function ManualJoin({ onJoined }) {
   };
 
   return (
-    <form onSubmit={submit} className="mt-6 rounded-lg border border-gray-800 bg-gray-900/40 p-3">
+    <form onSubmit={submit} className="mt-6 rounded-lg border border-white/[0.04] bg-white/[0.06] p-3">
       <div className="text-xs text-gray-400 mb-2">手动加入节点（知道对方 id 时不用等发现）</div>
       <div className="flex gap-2">
         <input
           value={peer}
           onChange={(e) => setPeer(e.target.value)}
           placeholder="peer id，例如 peerdrive-1a2b3c4d"
-          className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-500"
+          className="flex-1 bg-white/[0.06] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-gray-200 placeholder-gray-500"
         />
         <Btn tone="primary" disabled={busy || !peer.trim()}>{busy ? '加入中…' : '加入'}</Btn>
       </div>

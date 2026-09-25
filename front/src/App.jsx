@@ -70,13 +70,13 @@ class AppErrorBoundary extends React.Component {
   render() {
     if (this.state.error) {
       return (
-        <div className="flex h-screen items-center justify-center bg-gray-950 text-gray-200 p-6">
+        <div className="flex h-screen items-center justify-center bg-transparent text-gray-200 p-6">
           <div className="text-center">
             <p className="text-2xl mb-2">😵</p>
             <p className="text-sm mb-4">界面出错了，请重试或刷新页面</p>
             <button
               onClick={this.handleRetry}
-              className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded"
+              className="bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded"
             >
               重试
             </button>
@@ -105,7 +105,7 @@ export default function App() {
       <PageContext.Provider value={{ pageContext, setPageContext }}>
         <AppErrorBoundary>
           <BrowserRouter>
-          <div className="flex flex-col h-screen bg-gray-950 text-gray-200">
+          <div className="flex flex-col h-screen text-gray-200">
             <Navbar />
             <div className="flex-1 overflow-hidden">
               <Routes>

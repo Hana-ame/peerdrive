@@ -62,7 +62,7 @@ export default function CollBrowser({ coll, collViewPath, selectMode, selectedFi
           <>
             {currentCollView.dirs.map(dir => (
               <div key={dir} onClick={() => onNavIntoDir(dir)}
-                className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm">
+                className="flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.06] cursor-pointer border-b border-white/[0.03] text-sm">
                 <span className="text-lg">📁</span>
                 <span className="text-yellow-400 font-mono truncate flex-1 text-xs">{dir}</span>
                 <span className="text-gray-600 text-xs">文件夹</span>

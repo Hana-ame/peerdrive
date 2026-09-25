@@ -53,7 +53,7 @@ export default function FileTable({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-[11px] uppercase tracking-wider text-gray-500 border-b border-gray-800">
+          <tr className="text-left text-[11px] uppercase tracking-wider text-gray-500 border-b border-white/[0.04]">
             {selectable && <th className="w-8 px-3 py-2" />}
             <th className="px-3 py-2 font-normal">名称</th>
             {columns.includes('size') && <th className="w-24 px-3 py-2 font-normal">大小</th>}
@@ -65,7 +65,7 @@ export default function FileTable({
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.key || r.hash || r.name} className="border-b border-gray-800/60 hover:bg-gray-800/40">
+            <tr key={r.key || r.hash || r.name} className="border-b border-white/[0.05] hover:bg-white/[0.06]/40">
               {selectable && (
                 <td className="px-3 py-2">
                   <input
@@ -86,7 +86,7 @@ export default function FileTable({
                   <span className="shrink-0">{r.icon || fileIcon(r.name, r.mime)}</span>
                   <span className="truncate text-gray-200">{r.name}</span>
                   {r.badge && (
-                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-300">
+                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-gray-300">
                       {r.badge}
                     </span>
                   )}
@@ -118,8 +118,8 @@ export default function FileTable({
 // Btn 表格内的小按钮（统一尺寸与配色，避免每处各写一份 class）。
 export function Btn({ children, onClick, title, tone = 'default', disabled = false }) {
   const tones = {
-    default: 'text-gray-300 hover:text-white hover:bg-gray-700 border-gray-700',
-    primary: 'text-blue-300 hover:text-white hover:bg-blue-600/30 border-blue-700/50',
+    default: 'text-gray-300 hover:text-white hover:bg-white/[0.08] border-white/[0.06]',
+    primary: 'text-brand-300 hover:text-white hover:bg-brand-600/30 border-brand-700/50',
     danger: 'text-red-300 hover:text-white hover:bg-red-600/30 border-red-800/50',
   };
   return (

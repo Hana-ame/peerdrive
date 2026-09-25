@@ -10,7 +10,7 @@ export default function CollectionHeader({ navPath, fname, entries, tags, isSing
   const visLabel = VIS_LABELS[visibility] || '';
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-800 shrink-0 flex-wrap">
+    <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.04] shrink-0 flex-wrap">
       {navPath ? (
         <button onClick={onBack} className="text-gray-400 hover:text-white text-sm shrink-0">← 返回</button>
       ) : (
@@ -23,7 +23,7 @@ export default function CollectionHeader({ navPath, fname, entries, tags, isSing
           {entries.length === 1 && <span className="text-[10px] bg-amber-900/40 text-amber-400 px-1.5 py-0.5 rounded-full shrink-0">单文件</span>}
           {tags?.length > 0 && (
             <div className="flex gap-1">
-              {tags.map((t, i) => <span key={i} className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded-full">{t}</span>)}
+              {tags.map((t, i) => <span key={i} className="text-[10px] bg-brand-900/50 text-brand-300 px-2 py-0.5 rounded-full">{t}</span>)}
             </div>
           )}
         </div>
@@ -36,7 +36,7 @@ export default function CollectionHeader({ navPath, fname, entries, tags, isSing
             但没有任何读取端能在该空间取回合集 hash（BEP51 采样的是 torrent
             infohash，与合集 announce 语义错配），广播是死操作，已随天线 tab 移除 */}
         <button onClick={handleSave}
-          className={`px-3 py-1 rounded text-xs ${isLocal ? 'bg-green-500/20 text-green-400' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
+          className={`px-3 py-1 rounded text-xs ${isLocal ? 'bg-green-500/20 text-green-400' : 'bg-brand-600 hover:bg-brand-700 text-white'}`}>
           {isLocal ? '✓ 已保存' : '💾 保存到本机'}
         </button>
       </div>

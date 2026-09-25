@@ -320,7 +320,7 @@ export default function Drive() {
           {/* 共享范围总开关：关 = 对外完全不提供清单；开 = 按下面逐行勾选给。
               勾选状态本身保留，所以关了再开不用重选。 */}
           {scope && (
-            <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+            <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-white/[0.04] bg-white/[0.06] px-3 py-2">
               <button
                 type="button"
                 onClick={onToggleEnable}
@@ -328,7 +328,7 @@ export default function Drive() {
                 className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
                   scope.enable
                     ? 'bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                    : 'bg-white/[0.06] text-gray-400 hover:bg-white/[0.08]'
                 }`}
               >
                 {scope.enable ? '对外共享：开' : '对外共享：关'}
@@ -346,7 +346,7 @@ export default function Drive() {
           {/* 共享级别 + 好友名单：决定"给谁看"。
               公开 = 列出来也给；不列出 = 不列但凭 hash 能给；私密 = 只给自己和好友。 */}
           {scope && (
-            <div className="mb-3 rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+            <div className="mb-3 rounded-lg border border-white/[0.04] bg-white/[0.06] px-3 py-2">
               <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
                 <span className="text-gray-300">共享级别</span>
                 {LEVELS.map((l) => (
@@ -362,7 +362,7 @@ export default function Drive() {
                   value={friendDraft}
                   onChange={(e) => setFriendDraft(e.target.value)}
                   placeholder="用逗号分隔，例如 pd-alpha,pd-beta"
-                  className="min-w-[16rem] flex-1 rounded border border-gray-700 bg-gray-950 px-2 py-1 font-mono text-xs text-gray-200"
+                  className="min-w-[16rem] flex-1 rounded border border-white/[0.06] bg-surface-raised px-2 py-1 font-mono text-xs text-gray-200"
                 />
                 <Btn onClick={onSaveFriends} disabled={busy === 'friends'}>保存好友</Btn>
               </div>
@@ -376,7 +376,7 @@ export default function Drive() {
           {/* 共享目录：整目录共享（含以后新增的文件）。由目录带上的文件在下面
               表格里标「由共享目录带上的」，逐行取消不了——要在这里改范围。 */}
           {scope && (
-            <div className="mb-3 rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
+            <div className="mb-3 rounded-lg border border-white/[0.04] bg-white/[0.06] px-3 py-2">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-gray-300">共享目录</span>
                 <input
@@ -384,14 +384,14 @@ export default function Drive() {
                   value={dirDraft}
                   onChange={(e) => setDirDraft(e.target.value)}
                   placeholder="目录绝对路径，例如 /home/me/media 或 D:\Media"
-                  className="min-w-[16rem] flex-1 rounded border border-gray-700 bg-gray-950 px-2 py-1 font-mono text-xs text-gray-200"
+                  className="min-w-[16rem] flex-1 rounded border border-white/[0.06] bg-surface-raised px-2 py-1 font-mono text-xs text-gray-200"
                 />
                 <select
                   value={dirLevel}
                   onChange={(e) => setDirLevel(e.target.value)}
                   aria-label="新目录的共享级别"
                   title={LEVELS.map((l) => `${l.label}：${l.hint}`).join('\n')}
-                  className="rounded border border-gray-700 bg-gray-900 px-1.5 py-1 text-xs text-gray-300"
+                  className="rounded border border-white/[0.06] bg-surface-card px-1.5 py-1 text-xs text-gray-300"
                 >
                   {LEVELS.map((l) => (
                     <option key={l.v} value={l.v}>{l.label}</option>
@@ -412,7 +412,7 @@ export default function Drive() {
                         onChange={(e) => onSetDirLevel(d.id, e.target.value)}
                         disabled={busy === 'dirs'}
                         aria-label={`${d.id} 的共享级别`}
-                        className="rounded border border-gray-700 bg-gray-900 px-1.5 py-1 text-xs text-gray-300"
+                        className="rounded border border-white/[0.06] bg-surface-card px-1.5 py-1 text-xs text-gray-300"
                       >
                         {LEVELS.map((l) => (
                           <option key={l.v} value={l.v}>{l.label}</option>
@@ -434,7 +434,7 @@ export default function Drive() {
           {notice && <div className="mb-3 text-xs text-green-400">{notice}</div>}
           {err && <div className="mb-3 text-xs text-red-400">{err}</div>}
 
-          <div className="rounded-lg border border-gray-800 bg-gray-900/40">
+          <div className="rounded-lg border border-white/[0.04] bg-white/[0.06]">
             <FileTable
               rows={rows}
               loading={loading}
@@ -463,7 +463,7 @@ export default function Drive() {
                       disabled={busy === row.hash}
                       aria-label={`${row.name} 的共享级别`}
                       title={LEVELS.map((l) => `${l.label}：${l.hint}`).join('\n')}
-                      className="rounded border border-gray-700 bg-gray-900 px-1.5 py-1 text-xs text-gray-300"
+                      className="rounded border border-white/[0.06] bg-surface-card px-1.5 py-1 text-xs text-gray-300"
                     >
                       {LEVELS.map((l) => (
                         <option key={l.v} value={l.v}>{l.label}</option>
@@ -480,7 +480,7 @@ export default function Drive() {
             我的合集 <span className="text-xs font-normal text-gray-500">（打包好的文件链接，别人可经 share 帧看到）</span>
           </h2>
           {colls.length === 0 ? (
-            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-4 py-8 text-center text-sm text-gray-500">
+            <div className="rounded-lg border border-white/[0.04] bg-white/[0.06] px-4 py-8 text-center text-sm text-gray-500">
               还没有合集。在「创建合集」里把文件打成一个包，就能整包分享给别人。
             </div>
           ) : (
@@ -489,7 +489,7 @@ export default function Drive() {
                 <Link
                   key={c.hash}
                   to={`/c/${c.hash}`}
-                  className="rounded-lg border border-gray-800 bg-gray-900/50 p-3 hover:border-gray-700 hover:bg-gray-800/50 transition-colors"
+                  className="rounded-lg border border-white/[0.04] bg-white/[0.08] p-3 hover:border-white/[0.06] hover:bg-white/[0.06] transition-colors"
                 >
                   <div className="text-sm text-gray-200 truncate">
                     {c.friendly_name || `${String(c.hash).slice(0, 12)}…`}

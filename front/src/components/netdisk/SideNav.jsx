@@ -34,8 +34,8 @@ function Item({ to, icon, label }) {
       className={({ isActive }) =>
         `flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
           isActive
-            ? 'bg-blue-600/20 text-blue-300 border border-blue-700/40'
-            : 'text-gray-400 hover:text-white hover:bg-gray-800 border border-transparent'
+            ? 'bg-brand-600/20 text-brand-300 border border-brand-700/40'
+            : 'text-gray-400 hover:text-white hover:bg-white/[0.06] border border-transparent'
         }`
       }
     >
@@ -47,7 +47,7 @@ function Item({ to, icon, label }) {
 
 export default function SideNav() {
   return (
-    <aside className="hidden md:flex w-52 shrink-0 flex-col gap-1 border-r border-gray-800 bg-gray-900/60 p-3 overflow-y-auto">
+    <aside className="hidden md:flex w-52 shrink-0 flex-col gap-1 border-r border-white/[0.04] bg-white/[0.1] p-3 overflow-y-auto">
       <div className="px-3 pb-1 pt-1 text-[10px] uppercase tracking-wider text-gray-600">网盘</div>
       {MAIN.map((it) => (
         <Item key={it.to} {...it} />
@@ -63,7 +63,7 @@ export default function SideNav() {
 // MobileNav 小屏下的横向入口条（侧栏在小屏隐藏，但不能把入口一起藏了）。
 export function MobileNav() {
   return (
-    <div className="md:hidden flex gap-2 overflow-x-auto border-b border-gray-800 bg-gray-900/60 px-3 py-2">
+    <div className="md:hidden flex gap-2 overflow-x-auto border-b border-white/[0.04] bg-white/[0.1] px-3 py-2">
       {MAIN.map((it) => (
         <NavLink
           key={it.to}
@@ -71,8 +71,8 @@ export function MobileNav() {
           className={({ isActive }) =>
             `shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border ${
               isActive
-                ? 'bg-blue-600/20 text-blue-300 border-blue-700/40'
-                : 'text-gray-400 border-gray-700'
+                ? 'bg-brand-600/20 text-brand-300 border-brand-700/40'
+                : 'text-gray-400 border-white/[0.06]'
             }`
           }
         >

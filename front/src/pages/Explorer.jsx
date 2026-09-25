@@ -191,15 +191,15 @@ export default function Explorer() {
 
   return (
     <div className="flex flex-1 overflow-hidden relative h-full">
-      <div className="flex-1 flex flex-col bg-gray-900">
-        <div className="h-16 bg-gray-800 border-b border-gray-700 flex items-center px-4 md:px-6 justify-between shrink-0 gap-2">
+      <div className="flex-1 flex flex-col bg-surface-card">
+        <div className="h-16 bg-white/[0.06] border-b border-white/[0.06] flex items-center px-4 md:px-6 justify-between shrink-0 gap-2">
           <div className="flex items-center space-x-2 md:space-x-4 min-w-0">
             <button onClick={() => navigate('/')} className="text-gray-400 hover:text-white shrink-0 text-sm md:text-base">
               ←
             </button>
-            <div className="h-6 w-px bg-gray-700 shrink-0 hidden md:block"></div>
+            <div className="h-6 w-px bg-white/[0.06] shrink-0 hidden md:block"></div>
             <span className="hidden md:block text-gray-400 hover:text-white shrink-0 text-sm" onClick={() => navigate('/')}>返回广场</span>
-            <div className="h-6 w-px bg-gray-700 shrink-0"></div>
+            <div className="h-6 w-px bg-white/[0.06] shrink-0"></div>
             <h2 className="text-sm md:text-base font-bold text-gray-200 truncate">
               {username}/{collName}
             </h2>
@@ -209,22 +209,22 @@ export default function Explorer() {
             <button onClick={() => setShowSyncModal(true)} className="bg-indigo-600 hover:bg-indigo-500 px-2.5 md:px-4 py-1.5 rounded text-xs md:text-sm whitespace-nowrap">
               同步到本地
             </button>
-            <label className="bg-blue-600 hover:bg-blue-700 px-2.5 md:px-4 py-1.5 rounded text-xs md:text-sm cursor-pointer flex items-center whitespace-nowrap">
+            <label className="bg-brand-600 hover:bg-brand-700 px-2.5 md:px-4 py-1.5 rounded text-xs md:text-sm cursor-pointer flex items-center whitespace-nowrap">
               上传 <input type="file" className="hidden" onChange={handleUpload} />
             </label>
-            <button onClick={() => { setShowMergeModal(true); loadMergeSources(); }} className="bg-gray-700 hover:bg-gray-600 px-2.5 md:px-4 py-1.5 rounded text-xs md:text-sm whitespace-nowrap">
+            <button onClick={() => { setShowMergeModal(true); loadMergeSources(); }} className="bg-white/[0.06] hover:bg-white/[0.12] px-2.5 md:px-4 py-1.5 rounded text-xs md:text-sm whitespace-nowrap">
               合并
             </button>
           </div>
         </div>
 
         {/* commit bar */}
-        <div className="h-12 bg-gray-850 border-b border-gray-800 flex items-center px-6 gap-3 shrink-0">
+        <div className="h-12 bg-surface-raised border-b border-white/[0.04] flex items-center px-6 gap-3 shrink-0">
           <input type="text" placeholder="版本说明（可选）..."
             value={commitMsg} onChange={(e) => setCommitMsg(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleCommit(); }}
-            className="bg-gray-800 border border-gray-700 px-3 py-1.5 rounded text-sm flex-1 max-w-md focus:outline-none focus:border-blue-500" />
-          <button onClick={handleCommit} className="bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded text-sm font-medium" title="保存当前版本，之后可恢复到此状态">
+            className="bg-white/[0.06] border border-white/[0.06] px-3 py-1.5 rounded text-sm flex-1 max-w-md focus:outline-none focus:border-brand-500" />
+          <button onClick={handleCommit} className="bg-brand-600 hover:bg-brand-700 px-4 py-1.5 rounded text-sm font-medium" title="保存当前版本，之后可恢复到此状态">
             提交版本
           </button>
         </div>
@@ -232,7 +232,7 @@ export default function Explorer() {
         {/* file entries with folder navigation */}
         <div className="flex-1 overflow-y-auto">
           {/* breadcrumb */}
-          <div className="flex items-center gap-2 px-6 py-2 border-b border-gray-800 text-xs">
+          <div className="flex items-center gap-2 px-6 py-2 border-b border-white/[0.04] text-xs">
             <button onClick={() => setNavPath('')} className={`hover:text-white ${!navPath ? 'text-white' : 'text-gray-500'}`}>
               📂 /
             </button>
@@ -253,23 +253,23 @@ export default function Explorer() {
            entries.length === 0 ? <div className="py-10 text-center text-gray-500">空目录，请上传文件</div> :
            <>
             {navPath && (
-              <div onClick={navBack} className="flex items-center gap-3 px-6 py-3 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm">
+              <div onClick={navBack} className="flex items-center gap-3 px-6 py-3 hover:bg-white/[0.06] cursor-pointer border-b border-white/[0.03] text-sm">
                 <span className="text-lg">📁</span>
                 <span className="text-gray-400">..</span>
               </div>
             )}
             {currentItems.dirs.map(dir => (
               <div key={dir} onClick={() => navIn(dir)}
-                className="flex items-center gap-3 px-6 py-3 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm group">
+                className="flex items-center gap-3 px-6 py-3 hover:bg-white/[0.06] cursor-pointer border-b border-white/[0.03] text-sm group">
                 <span className="text-xl">📁</span>
                 <span className="text-yellow-400 font-mono truncate flex-1 text-sm">{dir}</span>
                 <span className="text-gray-600 text-xs opacity-0 group-hover:opacity-100">进入</span>
               </div>
             ))}
             {currentItems.files.map(entry => (
-              <div key={entry.id || entry.path} className="flex items-center px-6 py-3 border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors group">
+              <div key={entry.id || entry.path} className="flex items-center px-6 py-3 border-b border-white/[0.03] hover:bg-white/[0.06]/30 transition-colors group">
                 <span className="mr-3 text-xl">📄</span>
-                <span className="font-mono text-sm text-blue-300 truncate flex-1">{(entry.path || '').split('/').pop() || 'file'}</span>
+                <span className="font-mono text-sm text-brand-300 truncate flex-1">{(entry.path || '').split('/').pop() || 'file'}</span>
                 <span className="text-xs text-gray-500 font-mono mr-4 truncate max-w-[120px]">{(entry.file_hash || '').substring(0, 12)}...</span>
                 <div className="flex space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
                   <a href="#" onClick={e => {
@@ -286,7 +286,7 @@ export default function Explorer() {
                       document.body.removeChild(a);
                       setTimeout(() => URL.revokeObjectURL(u), 5000);
                     }).catch(err => alert('下载失败: ' + err.message));
-                  }} className="text-blue-400 hover:underline text-xs">下载</a>
+                  }} className="text-brand-400 hover:underline text-xs">下载</a>
                   <button onClick={() => handleDelete(entry.path)} className="text-red-400 hover:underline text-xs">移除</button>
                 </div>
               </div>
@@ -296,13 +296,13 @@ export default function Explorer() {
         </div>
       </div>
 
-      <div className="w-80 bg-gray-800 border-l border-gray-700 overflow-y-auto shrink-0 hidden md:block">
+      <div className="w-80 bg-white/[0.06] border-l border-white/[0.06] overflow-y-auto shrink-0 hidden md:block">
         <VersionLog username={username} collName={collName} triggerRefresh={refreshTrigger} />
       </div>
 
       {showMergeModal && (
         <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-xl w-96 border border-gray-600 shadow-2xl">
+          <div className="bg-white/[0.06] p-6 rounded-xl w-96 border border-white/[0.12] shadow-2xl">
             <h3 className="text-lg font-bold mb-4">合并</h3>
             <p className="text-sm text-gray-400 mb-4">将其他合集的条目合并到当前 <span className="text-white">{collName}</span></p>
             <div className="mb-3">
@@ -320,7 +320,7 @@ export default function Explorer() {
                     if (item) setMergeSrc(prev => ({ ...prev, user: item.user || '', coll: item.coll || '', hash: item.hash || '' }));
                   }
                 }}
-                className="w-full bg-gray-700 p-2 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full bg-white/[0.06] p-2 rounded text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
               >
                 <option value="">-- 选择合集 --</option>
                 {mergeCollections.map((c, i) => {
@@ -332,18 +332,18 @@ export default function Explorer() {
             </div>
             {mergeCustom && (
               <>
-                <input type="text" placeholder="源用户名" value={mergeSrc.user} onChange={(e)=>setMergeSrc({...mergeSrc, user: e.target.value})} className="w-full bg-gray-700 p-2 rounded mb-2 text-sm" />
-                <input type="text" placeholder="源合集名" value={mergeSrc.coll} onChange={(e)=>setMergeSrc({...mergeSrc, coll: e.target.value})} className="w-full bg-gray-700 p-2 rounded mb-3 text-sm" />
+                <input type="text" placeholder="源用户名" value={mergeSrc.user} onChange={(e)=>setMergeSrc({...mergeSrc, user: e.target.value})} className="w-full bg-white/[0.06] p-2 rounded mb-2 text-sm" />
+                <input type="text" placeholder="源合集名" value={mergeSrc.coll} onChange={(e)=>setMergeSrc({...mergeSrc, coll: e.target.value})} className="w-full bg-white/[0.06] p-2 rounded mb-3 text-sm" />
               </>
             )}
-            <select value={mergeSrc.strategy} onChange={(e)=>setMergeSrc({...mergeSrc, strategy: e.target.value})} className="w-full bg-gray-700 p-2 rounded mb-6 text-sm">
+            <select value={mergeSrc.strategy} onChange={(e)=>setMergeSrc({...mergeSrc, strategy: e.target.value})} className="w-full bg-white/[0.06] p-2 rounded mb-6 text-sm">
               <option value="ours">冲突保留本地</option>
               <option value="theirs">冲突采用远端</option>
               <option value="manual">冲突时报错</option>
             </select>
 
             {mergeConflicts && (
-              <div className="mb-4 bg-gray-900 p-3 rounded border border-yellow-700/60">
+              <div className="mb-4 bg-surface-card p-3 rounded border border-yellow-700/60">
                 <p className="text-xs font-bold text-yellow-400 mb-2">合并冲突 ({mergeConflicts.length})：请选择解决策略后重试</p>
                 <div className="max-h-40 overflow-y-auto space-y-1 mb-3">
                   {mergeConflicts.map((cf, i) => (
@@ -354,13 +354,13 @@ export default function Explorer() {
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => handleMerge('ours')} className="flex-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs">保留本地重试</button>
+                  <button onClick={() => handleMerge('ours')} className="flex-1 px-3 py-1.5 bg-white/[0.06] hover:bg-white/[0.12] rounded text-xs">保留本地重试</button>
                   <button onClick={() => handleMerge('theirs')} className="flex-1 px-3 py-1.5 bg-teal-700 hover:bg-teal-600 rounded text-xs">采用远端重试</button>
                 </div>
               </div>
             )}
             <div className="flex justify-end space-x-3">
-              <button onClick={() => setShowMergeModal(false)} className="px-4 py-2 bg-gray-600 rounded text-sm">取消</button>
+              <button onClick={() => setShowMergeModal(false)} className="px-4 py-2 bg-white/[0.1] rounded text-sm">取消</button>
               <button onClick={() => handleMerge()} disabled={!mergeSrc.user && !mergeSrc.hash}
                 className="px-4 py-2 bg-teal-600 hover:bg-teal-700 rounded text-sm disabled:opacity-40 disabled:cursor-not-allowed">
                 执行合并
@@ -372,27 +372,27 @@ export default function Explorer() {
 
       {showSyncModal && (
         <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-xl w-[500px] border border-gray-600 shadow-2xl">
+          <div className="bg-white/[0.06] p-6 rounded-xl w-[500px] border border-white/[0.12] shadow-2xl">
             <h3 className="text-lg font-bold mb-4">保存合集到本地</h3>
             <div className="space-y-4 mb-6">
               <div>
                 <label className="block text-xs text-gray-400 mb-1">本地绝对路径</label>
                 <input type="text" placeholder="/home/user/my_project" value={syncConfig.path} onChange={(e)=>setSyncConfig({...syncConfig, path: e.target.value})}
-                  className="w-full bg-gray-700 p-2 rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none" />
+                  className="w-full bg-white/[0.06] p-2 rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none" />
               </div>
               <div>
                 <label className="block text-xs text-gray-400 mb-1">包含文件 (逗号分隔, 选填)</label>
                 <input type="text" placeholder="main.go, *.js" value={syncConfig.include} onChange={(e)=>setSyncConfig({...syncConfig, include: e.target.value})}
-                  className="w-full bg-gray-700 p-2 rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none" />
+                  className="w-full bg-white/[0.06] p-2 rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none" />
               </div>
               <div>
                 <label className="block text-xs text-gray-400 mb-1">排除文件 (逗号分隔, 选填)</label>
                 <input type="text" placeholder="node_modules, .git" value={syncConfig.exclude} onChange={(e)=>setSyncConfig({...syncConfig, exclude: e.target.value})}
-                  className="w-full bg-gray-700 p-2 rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none" />
+                  className="w-full bg-white/[0.06] p-2 rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none" />
               </div>
             </div>
             {syncStatus && (
-              <div className="bg-gray-900 p-3 rounded mb-6 border border-gray-700">
+              <div className="bg-surface-card p-3 rounded mb-6 border border-white/[0.06]">
                 <div className="flex justify-between text-xs mb-2">
                   <span className="text-gray-400">同步状态: {syncStatus.saved_files}/{syncStatus.total_files} 已保存</span>
                   <button onClick={() => refreshSyncStatus(syncStatus.collection_hash)} className="text-indigo-400 hover:underline">刷新</button>
@@ -400,7 +400,7 @@ export default function Explorer() {
               </div>
             )}
             <div className="flex justify-end space-x-3">
-              <button onClick={() => setShowSyncModal(false)} className="px-4 py-2 bg-gray-600 rounded text-sm">取消</button>
+              <button onClick={() => setShowSyncModal(false)} className="px-4 py-2 bg-white/[0.1] rounded text-sm">取消</button>
               <button onClick={handleSaveLocal} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded text-sm">开始保存</button>
             </div>
           </div>

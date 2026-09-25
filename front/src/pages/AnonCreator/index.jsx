@@ -537,9 +537,9 @@ export default function AnonCreator() {
   }, [selectedFile]);
 
   return (
-    <div className="flex flex-1 overflow-hidden h-full bg-gray-950">
+    <div className="flex flex-1 overflow-hidden h-full bg-transparent">
       {/* ── 移动端面板切换标签 ── */}
-      <div className="md:hidden sticky top-0 z-10 bg-gray-950/95 backdrop-blur border-b border-gray-800">
+      <div className="md:hidden sticky top-0 z-10 bg-surface-raised/95 backdrop-blur border-b border-white/[0.04]">
         <div className="flex p-1 gap-1">
           {[
             { id: 'files', label: '📁 文件', count: files.length },
@@ -549,8 +549,8 @@ export default function AnonCreator() {
             <button key={tab.id} onClick={() => setMobilePanel(tab.id)}
               className={`flex-1 text-xs py-2 rounded transition-colors ${
                 mobilePanel === tab.id
-                  ? 'bg-blue-600 text-white font-medium'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  ? 'bg-brand-600 text-white font-medium'
+                  : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
               }`}>
               {tab.label}{tab.count !== undefined ? ` (${tab.count})` : ''}
             </button>
@@ -559,7 +559,7 @@ export default function AnonCreator() {
       </div>
 
       {/* 左列：筛选 + 文件列表 */}
-      <div className={`w-[380px] shrink-0 flex-col overflow-hidden border-r border-gray-800 ${
+      <div className={`w-[380px] shrink-0 flex-col overflow-hidden border-r border-white/[0.04] ${
         mobilePanel === 'files' ? 'flex' : 'hidden'
       } md:flex`}>
         <LeftPanel
@@ -602,14 +602,14 @@ export default function AnonCreator() {
       </div>
 
       {/* 中列：文件预览 */}
-      <div className={`flex-1 flex-col overflow-hidden bg-gray-950 ${
+      <div className={`flex-1 flex-col overflow-hidden bg-transparent ${
         mobilePanel === 'preview' ? 'flex' : 'hidden'
       } md:flex`}>
         <MiddlePanel selectedFile={selectedFile} />
       </div>
 
       {/* 右列：编辑器 */}
-      <div className={`w-[420px] shrink-0 border-l border-gray-800 bg-gray-900 flex-col overflow-hidden ${
+      <div className={`w-[420px] shrink-0 border-l border-white/[0.04] bg-surface-card flex-col overflow-hidden ${
         mobilePanel === 'editor' ? 'flex' : 'hidden'
       } md:flex`}>
         <RightPanel

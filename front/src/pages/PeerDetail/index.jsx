@@ -135,7 +135,7 @@ export default function PeerDetail() {
           {loading ? (
             <div className="py-8 text-center text-sm text-gray-500">加载中…</div>
           ) : data.collections.length === 0 ? (
-            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-4 py-8 text-center text-sm text-gray-500">
+            <div className="rounded-lg border border-white/[0.04] bg-white/[0.06] px-4 py-8 text-center text-sm text-gray-500">
               对方没有共享合集
             </div>
           ) : (
@@ -145,7 +145,7 @@ export default function PeerDetail() {
                 const entries = Array.isArray(c.entries) ? c.entries : [];
                 const totalSize = entries.reduce((s, e) => s + (Number(e.size) || 0), 0);
                 return (
-                  <div key={c.hash} className="rounded-lg border border-gray-800 bg-gray-900/50">
+                  <div key={c.hash} className="rounded-lg border border-white/[0.04] bg-white/[0.08]">
                     <div className="flex flex-wrap items-center gap-2 p-3">
                       <button
                         type="button"
@@ -173,7 +173,7 @@ export default function PeerDetail() {
                       </div>
                     </div>
                     {open && (
-                      <div className="border-t border-gray-800">
+                      <div className="border-t border-white/[0.04]">
                         <FileTable
                           rows={entries.map((e) => {
                             const key = `e\u0000${c.hash}\u0000${e.hash}\u0000${e.path}`;
@@ -202,7 +202,7 @@ export default function PeerDetail() {
 
           {/* ── 单独文件 ── */}
           <h2 className="mt-8 mb-2 text-sm font-semibold text-gray-200">单独文件</h2>
-          <div className="rounded-lg border border-gray-800 bg-gray-900/40">
+          <div className="rounded-lg border border-white/[0.04] bg-white/[0.06]">
             <FileTable
               rows={fileRows}
               columns={['size', 'hash']}

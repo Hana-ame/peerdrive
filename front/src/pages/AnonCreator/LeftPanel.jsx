@@ -79,17 +79,17 @@ export default function LeftPanel({
   const visibleSysEntries = q ? sysEntries.filter(e => (e.name || '').toLowerCase().includes(q)) : sysEntries;
 
   return (
-    <div className="h-full flex flex-col bg-gray-900 border-r border-gray-800">
+    <div className="h-full flex flex-col bg-surface-card border-r border-white/[0.04]">
       {/* 第一排：来源选择 */}
-      <div className="flex gap-1 p-2 border-b border-gray-800 shrink-0">
+      <div className="flex gap-1 p-2 border-b border-white/[0.04] shrink-0">
         {SOURCE_TABS.map(tab => (
           <button
             key={tab.id}
             onClick={() => onSourceTab(tab.id)}
             className={`flex-1 text-xs px-1.5 py-1.5 rounded transition-colors whitespace-nowrap ${
               sourceTab === tab.id
-                ? 'bg-blue-600 text-white font-medium'
-                : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700'
+                ? 'bg-brand-600 text-white font-medium'
+                : 'bg-white/[0.06] text-gray-400 hover:text-white hover:bg-white/[0.08]'
             }`}
             title={tab.label}
           >
@@ -100,19 +100,19 @@ export default function LeftPanel({
 
       {/* 文件类面板：搜索 + 排序 + 类型筛选 */}
       {isFileTab && (
-        <div className="shrink-0 border-b border-gray-800 p-2 space-y-1.5">
+        <div className="shrink-0 border-b border-white/[0.04] p-2 space-y-1.5">
           <input
             value={search}
             onChange={e => onSearch(e.target.value)}
             placeholder={sourceTab === 'local' ? '搜索本机当前目录的文件名...' : '搜索文件名 / 所在路径...'}
-            className="w-full bg-gray-800 text-xs px-3 py-1.5 rounded border border-gray-700 focus:outline-none focus:border-blue-600" />
+            className="w-full bg-white/[0.06] text-xs px-3 py-1.5 rounded border border-white/[0.06] focus:outline-none focus:border-brand-600" />
           <div className="flex items-center gap-1 flex-wrap">
             {LEFT_SORT_OPTS.map(o => (
               <button key={o.v} onClick={() => onSortKey(o.v)}
-                className={`text-[10px] px-2 py-0.5 rounded ${sortKey === o.v ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>{o.l}</button>
+                className={`text-[10px] px-2 py-0.5 rounded ${sortKey === o.v ? 'bg-brand-600 text-white' : 'bg-white/[0.06] text-gray-400 hover:text-white'}`}>{o.l}</button>
             ))}
             <button onClick={onSortOrder} title="切换升/降序"
-              className="text-[10px] px-2 py-0.5 rounded bg-gray-800 text-gray-400 hover:text-white">
+              className="text-[10px] px-2 py-0.5 rounded bg-white/[0.06] text-gray-400 hover:text-white">
               {sortOrder === 'asc' ? '↑' : '↓'}
             </button>
           </div>
@@ -123,7 +123,7 @@ export default function LeftPanel({
                 const active = typeFilters.includes(t.id);
                 return (
                   <button key={t.id} onClick={() => toggleType(t.id)}
-                    className={`text-[10px] px-1.5 py-0.5 rounded ${active ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>
+                    className={`text-[10px] px-1.5 py-0.5 rounded ${active ? 'bg-brand-600 text-white' : 'bg-white/[0.06] text-gray-400 hover:text-white'}`}>
                     {t.icon} {t.label}
                   </button>
                 );
@@ -135,12 +135,12 @@ export default function LeftPanel({
 
       {/* 合集模式：显示合集搜索/排序/标签筛选 */}
       {isCollectionsTab && (
-        <div className="shrink-0 bg-gray-900/50 border-b border-gray-800">
+        <div className="shrink-0 bg-white/[0.08] border-b border-white/[0.04]">
           <div className="flex items-center gap-2 px-3 pt-2 pb-1">
             <h3 className="text-sm font-bold text-gray-300 flex items-center gap-1">📦 合集</h3>
             <span className="text-[10px] text-gray-600">{collections.length}</span>
             <div className="flex-1" />
-            <button onClick={onSelectToggle} className={`text-[10px] px-2 py-0.5 rounded ${selectMode ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>
+            <button onClick={onSelectToggle} className={`text-[10px] px-2 py-0.5 rounded ${selectMode ? 'bg-brand-600 text-white' : 'bg-white/[0.06] text-gray-400 hover:text-white'}`}>
               {selectMode ? '退出选择' : '选择'}
             </button>
           </div>
@@ -150,7 +150,7 @@ export default function LeftPanel({
               onFocus={() => setLocalShowHistory(true)}
               onBlur={() => setTimeout(() => setLocalShowHistory(false), 200)}
               onKeyDown={handleCollSearchKeyDown}
-              placeholder="搜索合集名称 / tag..." className="w-full bg-gray-800 text-xs px-3 py-1.5 rounded border border-gray-700 focus:outline-none focus:border-blue-600" />
+              placeholder="搜索合集名称 / tag..." className="w-full bg-white/[0.06] text-xs px-3 py-1.5 rounded border border-white/[0.06] focus:outline-none focus:border-brand-600" />
             <SearchHistory visible={localShowHistory && searchHistory.length > 0 && !collSearch} searchHistory={searchHistory}
               onSelect={handleCollSearchSelect} onClear={() => {
                 localStorage.removeItem('peerdrive_search_history');
@@ -162,7 +162,7 @@ export default function LeftPanel({
             <div className="flex gap-0.5">
               {['time', 'name', 'count'].map(v => (
                 <button key={v} onClick={() => onCollSort(v)}
-                  className={`text-[10px] px-2 py-0.5 rounded ${collSort === v ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>
+                  className={`text-[10px] px-2 py-0.5 rounded ${collSort === v ? 'bg-brand-600 text-white' : 'bg-white/[0.06] text-gray-400 hover:text-white'}`}>
                   {v === 'time' ? '时间' : v === 'name' ? '名称' : '文件数'}
                 </button>
               ))}
@@ -170,12 +170,12 @@ export default function LeftPanel({
             {allCollTags.length > 0 && (
               <div className="flex gap-0.5 flex-wrap">
                 <button onClick={() => onCollTag([])}
-                  className={`text-[10px] px-1.5 py-0.5 rounded-full ${collTagFilter.length === 0 ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>全部</button>
+                  className={`text-[10px] px-1.5 py-0.5 rounded-full ${collTagFilter.length === 0 ? 'bg-brand-600 text-white' : 'bg-white/[0.06] text-gray-400'}`}>全部</button>
                 {allCollTags.map(t => {
                   const active = collTagFilter.includes(t);
                   return (
                     <button key={t} onClick={() => onCollTag(active ? collTagFilter.filter(x => x !== t) : [...collTagFilter, t])}
-                      className={`text-[10px] px-1.5 py-0.5 rounded-full ${active ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>{t}</button>
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full ${active ? 'bg-brand-600 text-white' : 'bg-white/[0.06] text-gray-300 hover:bg-white/[0.12]'}`}>{t}</button>
                   );
                 })}
               </div>
@@ -185,7 +185,7 @@ export default function LeftPanel({
           {selectMode && selectedColls.size > 0 && (
             <div className="px-2 pb-1.5">
               <button onClick={onBatchSaveColls}
-                className="w-full text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded">
+                className="w-full text-xs bg-brand-600 hover:bg-brand-700 px-2 py-1 rounded">
                 保存选中的 {selectedColls.size} 个合集到本机
               </button>
             </div>

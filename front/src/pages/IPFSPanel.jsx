@@ -76,7 +76,7 @@ export default function IPFSPanel() {
   const gwHealthyCount = gateways.filter(g => g.healthy).length;
 
   return (
-    <div className="h-full overflow-y-auto bg-gray-950">
+    <div className="h-full overflow-y-auto bg-transparent">
       <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-4 md:space-y-6">
 
         {/* ===== HEADER ===== */}
@@ -91,21 +91,21 @@ export default function IPFSPanel() {
           <div className="flex items-center gap-3 text-xs text-gray-500">
             {lastRefresh && <span>更新于 {lastRefresh.toLocaleTimeString()}</span>}
             <button onClick={refreshAll}
-              className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors">
+              className="px-3 py-1.5 rounded-lg border border-white/[0.06] text-gray-400 hover:text-gray-200 hover:border-white/[0.16] transition-colors">
               刷新
             </button>
           </div>
         </div>
 
         {/* ===== IPFS GATEWAY STATUS ===== */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className="bg-surface-card border border-white/[0.04] rounded-xl p-4">
           <h2 className="text-sm font-medium text-gray-300 mb-3">IPFS 网关状态</h2>
           <div className="flex flex-wrap items-center gap-4">
             {gateways.length === 0 ? (
               <span className="text-xs text-gray-500">未配置网关</span>
             ) : (
               gateways.map((gw, i) => (
-                <div key={i} className="flex items-center gap-2 bg-gray-800/50 rounded-lg px-3 py-2">
+                <div key={i} className="flex items-center gap-2 bg-white/[0.03] rounded-lg px-3 py-2">
                   <span className={`w-2.5 h-2.5 rounded-full ${gw.healthy ? 'bg-emerald-400' : 'bg-red-400'} ${gw.healthy ? '' : 'animate-pulse'}`} />
                   <div className="flex flex-col">
                     <span className="text-xs text-gray-300 font-mono">{gw.url.replace('https://', '')}</span>
@@ -121,13 +121,13 @@ export default function IPFSPanel() {
         </div>
 
         {/* ===== CID PIN INPUT ===== */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className="bg-surface-card border border-white/[0.04] rounded-xl p-4">
           <h2 className="text-sm font-medium text-gray-300 mb-3">固定 CID</h2>
           <form onSubmit={handlePinCID} className="flex gap-2">
             <input value={cidInput} onChange={e => setCidInput(e.target.value)}
               placeholder="输入 IPFS CID（如 Qm... 或 bafy...）"
-              className="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono
-                         focus:outline-none focus:border-gray-500 placeholder:text-gray-600 transition-colors" />
+              className="flex-1 bg-surface-raised border border-white/[0.06] rounded-lg px-3 py-2 text-xs font-mono
+                         focus:outline-none focus:border-white/[0.16] placeholder:text-gray-600 transition-colors" />
             <button type="submit" disabled={pinningCid || !cidInput.trim()}
               className="px-4 py-2 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors whitespace-nowrap">
               {pinningCid ? '下载中...' : '固定'}
@@ -136,7 +136,7 @@ export default function IPFSPanel() {
         </div>
 
         {/* ===== PINNED CIDS ===== */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className="bg-surface-card border border-white/[0.04] rounded-xl p-4">
           <h2 className="text-sm font-medium text-gray-300 mb-3">
             已固定的 CID
             <span className="text-gray-500 font-normal ml-1.5">({pins.length})</span>
@@ -146,11 +146,11 @@ export default function IPFSPanel() {
           ) : (
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {pins.map((pin) => (
-                <div key={pin.cid} className="flex items-center justify-between bg-gray-800/50 rounded-lg px-3 py-2 gap-2">
+                <div key={pin.cid} className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2 gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
-                      <span className="text-xs font-mono text-blue-300 truncate">{pin.cid}</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-brand-400 shrink-0" />
+                      <span className="text-xs font-mono text-brand-300 truncate">{pin.cid}</span>
                     </div>
                     <div className="flex items-center gap-3 mt-0.5 text-[10px] text-gray-500">
                       <span>{(pin.size / 1024).toFixed(1)} KB</span>

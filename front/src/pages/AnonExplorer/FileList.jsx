@@ -26,7 +26,7 @@ export default function FileList({ entries, navPath, allCollHashes, searchHash, 
     <div>
       {currentItems.dirs.map(dir => (
         <div key={dir} onClick={() => onNavIn(dir)}
-          className="flex items-center gap-3 px-5 py-3 hover:bg-gray-800 cursor-pointer border-b border-gray-800/50 text-sm">
+          className="flex items-center gap-3 px-5 py-3 hover:bg-white/[0.06] cursor-pointer border-b border-white/[0.03] text-sm">
           <span className="text-xl">📁</span>
           <span className="text-gray-200 font-mono truncate flex-1">{dir}</span>
           <span className="text-gray-600 text-xs">文件夹</span>

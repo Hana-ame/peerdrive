@@ -10,7 +10,7 @@ import React from 'react';
 import { shortPeer, formatRelative } from './format';
 
 function StatusDot({ connected, online }) {
-  const cls = connected ? 'bg-green-400' : online ? 'bg-yellow-400' : 'bg-gray-600';
+  const cls = connected ? 'bg-green-400' : online ? 'bg-yellow-400' : 'bg-white/[0.1]';
   const text = connected ? '已直连' : online ? '在线' : '离线';
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-400">
@@ -27,7 +27,7 @@ export default function NodeCard({ node, onJoin, onLeave, onOpen, busy = false }
   const hasShares = collCount > 0 || fileCount > 0;
 
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3 flex flex-col gap-2">
+    <div className="rounded-lg border border-white/[0.04] bg-white/[0.08] p-3 flex flex-col gap-2">
       <div className="flex items-start justify-between gap-2">
         <button
           type="button"
@@ -38,7 +38,7 @@ export default function NodeCard({ node, onJoin, onLeave, onOpen, busy = false }
           <div className="font-mono text-sm text-gray-200 truncate">{shortPeer(node.peer_id)}</div>
           <div className="text-[11px] text-gray-500 mt-0.5">
             {node.node_type || '节点'}
-            {node.joined && <span className="ml-2 text-blue-400">已加入</span>}
+            {node.joined && <span className="ml-2 text-brand-400">已加入</span>}
           </div>
         </button>
         <StatusDot connected={node.connected} online={node.online} />
@@ -55,7 +55,7 @@ export default function NodeCard({ node, onJoin, onLeave, onOpen, busy = false }
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-2 pt-1 border-t border-gray-800">
+      <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/[0.04]">
         <span className="text-[11px] text-gray-600">
           {node.online ? `最近在线 ${formatRelative(node.last_seen)}` : '当前离线'}
         </span>
@@ -63,7 +63,7 @@ export default function NodeCard({ node, onJoin, onLeave, onOpen, busy = false }
           <button
             type="button"
             onClick={() => onOpen?.(node)}
-            className="text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:text-white hover:bg-gray-700"
+            className="text-xs px-2 py-1 rounded border border-white/[0.06] text-gray-300 hover:text-white hover:bg-white/[0.08]"
           >
             查看文件
           </button>
@@ -81,7 +81,7 @@ export default function NodeCard({ node, onJoin, onLeave, onOpen, busy = false }
               type="button"
               disabled={busy}
               onClick={() => onJoin?.(node)}
-              className="text-xs px-2 py-1 rounded border border-blue-700/50 text-blue-300 hover:text-white hover:bg-blue-600/30 disabled:opacity-40"
+              className="text-xs px-2 py-1 rounded border border-brand-700/50 text-brand-300 hover:text-white hover:bg-brand-600/30 disabled:opacity-40"
             >
               加入
             </button>

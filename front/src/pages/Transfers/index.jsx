@@ -78,7 +78,7 @@ export default function Transfers() {
           {err && <div className="mb-3 text-xs text-red-400">{err}</div>}
 
           {!jobs.length && !loading ? (
-            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-4 py-12 text-center text-sm text-gray-500">
+            <div className="rounded-lg border border-white/[0.04] bg-white/[0.06] px-4 py-12 text-center text-sm text-gray-500">
               <div className="text-3xl mb-2 opacity-60">⬇</div>
               还没有传输任务。去「我的节点」选中对方的文件点保存，任务会出现在这里。
             </div>

@@ -396,10 +396,10 @@ export default function Settings({ dataConsent, setDataConsent }) {
   };
 
   return (
-    <div className="flex flex-1 h-full bg-gray-950" style={{ overflow: 'hidden' }}>
+    <div className="flex flex-1 h-full bg-transparent" style={{ overflow: 'hidden' }}>
       {/* ─── Left Sidebar (desktop only) ─── */}
-      <aside className="hidden md:flex w-48 lg:w-56 shrink-0 border-r border-gray-800 flex-col bg-gray-900/30">
-        <div className="p-4 border-b border-gray-800">
+      <aside className="hidden md:flex w-48 lg:w-56 shrink-0 border-r border-white/[0.04] flex-col bg-white/[0.05]">
+        <div className="p-4 border-b border-white/[0.04]">
           <div className="flex items-center gap-2">
             <button
               onClick={() => navigate(-1)}
@@ -421,8 +421,8 @@ export default function Settings({ dataConsent, setDataConsent }) {
               }}
               className={`block px-3 py-2 rounded text-sm transition-colors ${
                 activeSection === s.id
-                  ? 'text-white bg-blue-600/20'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  ? 'text-white bg-brand-600/20'
+                  : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
               }`}
             >
               {s.label}
@@ -434,7 +434,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
       {/* ─── Right Content ─── */}
       <main className="flex-1 overflow-y-auto">
         {/* ─── Mobile section nav ─── */}
-        <div className="md:hidden sticky top-0 z-10 bg-gray-950/95 backdrop-blur border-b border-gray-800 overflow-x-auto scrollbar-hide">
+        <div className="md:hidden sticky top-0 z-10 bg-surface-raised/95 backdrop-blur border-b border-white/[0.04] overflow-x-auto scrollbar-hide">
           <div className="flex items-center gap-1 p-2">
             <button
               onClick={() => navigate(-1)}
@@ -451,8 +451,8 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 }}
                 className={`shrink-0 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
                   activeSection === s.id
-                    ? 'text-white bg-blue-600/30'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                    ? 'text-white bg-brand-600/30'
+                    : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
                 }`}
               >
                 {s.label}
@@ -485,12 +485,12 @@ export default function Settings({ dataConsent, setDataConsent }) {
                       onClick={() => handleSwitchBackend(b.id)}
                       className={`group relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all border ${
                         isActive
-                          ? 'bg-blue-600/20 border-blue-500/50 text-blue-300'
-                          : 'bg-gray-800/50 border-gray-700/50 text-gray-400 hover:border-gray-600 hover:text-gray-200'
+                          ? 'bg-brand-600/20 border-brand-500/50 text-brand-300'
+                          : 'bg-white/[0.03] border-white/[0.06] text-gray-400 hover:border-white/[0.12] hover:text-gray-200'
                       }`}
                     >
                       <span>{b.name}</span>
-                      <span className={`text-[10px] ${isActive ? 'text-blue-400' : 'text-gray-600'}`}>
+                      <span className={`text-[10px] ${isActive ? 'text-brand-400' : 'text-gray-600'}`}>
                         {isActive ? '✓' : ''}
                       </span>
                       {!isActive && !DEFAULT_BACKEND_IDS.includes(b.id) && (
@@ -505,7 +505,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 })}
                 <button
                   onClick={() => setShowAddBackend(true)}
-                  className="px-3 py-2 rounded-lg text-sm border border-dashed border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-500 transition-all"
+                  className="px-3 py-2 rounded-lg text-sm border border-dashed border-white/[0.06] text-gray-500 hover:text-gray-300 hover:border-white/[0.16] transition-all"
                   title="添加后端"
                 >+ 添加</button>
               </div>
@@ -514,19 +514,19 @@ export default function Settings({ dataConsent, setDataConsent }) {
             {/* ─── 添加后端弹窗 ─── */}
             {showAddBackend && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowAddBackend(false)}>
-                <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 w-80 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                <div className="bg-surface-card border border-white/[0.06] rounded-xl p-5 w-80 shadow-2xl" onClick={(e) => e.stopPropagation()}>
                   <h3 className="text-sm font-bold text-gray-200 mb-3">添加后端</h3>
                   <input
                     value={newBackendName}
                     onChange={(e) => setNewBackendName(e.target.value)}
                     placeholder="名称（如：VPS）"
-                    className="w-full bg-gray-800 px-3 py-2 rounded text-sm mb-2 border border-gray-700 focus:outline-none focus:border-blue-500"
+                    className="w-full bg-white/[0.06] px-3 py-2 rounded text-sm mb-2 border border-white/[0.06] focus:outline-none focus:border-brand-500"
                   />
                   <input
                     value={newBackendUrl}
                     onChange={(e) => setNewBackendUrl(e.target.value)}
                     placeholder="URL（如：http://host:3000）"
-                    className="w-full bg-gray-800 px-3 py-2 rounded text-sm mb-3 border border-gray-700 focus:outline-none focus:border-blue-500"
+                    className="w-full bg-white/[0.06] px-3 py-2 rounded text-sm mb-3 border border-white/[0.06] focus:outline-none focus:border-brand-500"
                   />
                   <div className="flex gap-2 justify-end">
                     <button
@@ -536,7 +536,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                     <button
                       onClick={handleAddBackend}
                       disabled={!newBackendName.trim() || !newBackendUrl.trim()}
-                      className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-40"
+                      className="px-4 py-1.5 text-sm bg-brand-600 text-white rounded-lg hover:bg-brand-500 disabled:opacity-40"
                     >添加</button>
                   </div>
                 </div>
@@ -547,14 +547,14 @@ export default function Settings({ dataConsent, setDataConsent }) {
             <div>
               <label className="block text-xs text-gray-400 mb-1">
                 当前连接
-                {activeBackendName && <span className="text-blue-400 ml-1">({activeBackendName})</span>}
+                {activeBackendName && <span className="text-brand-400 ml-1">({activeBackendName})</span>}
               </label>
-              <div className="flex items-center gap-2 bg-gray-800/50 px-3 py-2.5 rounded-lg border border-gray-700/50">
+              <div className="flex items-center gap-2 bg-white/[0.03] px-3 py-2.5 rounded-lg border border-white/[0.06]">
                 <div className="flex items-center gap-1.5 shrink-0">
                   <span
                     className={`w-2.5 h-2.5 rounded-full ${
                       pingOk === null
-                        ? 'bg-gray-500'
+                        ? 'bg-white/[0.16]'
                         : pingOk
                           ? 'bg-green-500'
                           : 'bg-red-500'
@@ -569,7 +569,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 <span className="text-sm font-mono text-gray-300 truncate flex-1">{apiBase}</span>
               </div>
               {nodeInfo && (
-                <div className="mt-2 bg-gray-900/80 rounded-lg p-3 border border-gray-800">
+                <div className="mt-2 bg-white/[0.14] rounded-lg p-3 border border-white/[0.04]">
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                     {/* 2026-08-19：节点状态已从 libp2p /p2p/node（peer_id/p2p_enabled/
                         relay_mode/num_peers）迁移到 /peerjs/node（id/online/peers）。
@@ -613,12 +613,12 @@ export default function Settings({ dataConsent, setDataConsent }) {
                     value={customConnectUrl}
                     onChange={(e) => setCustomConnectUrl(e.target.value)}
                     placeholder="http://host:3000"
-                    className="flex-1 bg-gray-700 px-3 py-1.5 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
+                    className="flex-1 bg-white/[0.06] px-3 py-1.5 rounded text-sm font-mono focus:outline-none focus:border-brand-500 border border-white/[0.12]"
                   />
                   <button
                     onClick={handleCustomConnect}
                     disabled={!customConnectUrl.trim()}
-                    className="px-3 py-1.5 text-sm bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 disabled:opacity-40"
+                    className="px-3 py-1.5 text-sm bg-white/[0.06] text-gray-300 rounded-lg hover:bg-white/[0.12] disabled:opacity-40"
                   >连接</button>
                 </div>
               )}
@@ -628,7 +628,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 localStorage（btDht 无任何读取端；ipfs 与下方后端开关共用同一 state，
                 重载后漂移出两个互相矛盾的开关）。IPFS 开关见「IPFS 兼容模式」区。
                 Follow Redirects 保留 */}
-            <div className="border-t border-gray-700/50 pt-3 mt-2 space-y-3">
+            <div className="border-t border-white/[0.06] pt-3 mt-2 space-y-3">
 
             {/* Follow Redirects Toggle */}
             <div className="flex items-center gap-3 pt-2">
@@ -643,7 +643,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                   }}
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
+                <div className="w-9 h-5 bg-white/[0.1] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-600" />
               </label>
               <div>
                 <p className="text-sm text-gray-300">跟随重定向</p>
@@ -671,7 +671,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 value={regServer}
                 onChange={(e) => setRegServer(e.target.value)}
                 placeholder="https://bwh.moonchan.xyz:4000"
-                className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
+                className="w-full bg-white/[0.06] px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-brand-500 border border-white/[0.12]"
               />
             </div>
 
@@ -683,7 +683,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                   value={regUsername}
                   onChange={(e) => setRegUsername(e.target.value)}
                   placeholder="用户名"
-                  className="flex-1 min-w-[120px] bg-gray-700 px-3 py-2 rounded text-sm focus:outline-none focus:border-blue-500 border border-gray-600"
+                  className="flex-1 min-w-[120px] bg-white/[0.06] px-3 py-2 rounded text-sm focus:outline-none focus:border-brand-500 border border-white/[0.12]"
                 />
                 <input
                   type="password"
@@ -691,7 +691,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                   onChange={(e) => setRegPassword(e.target.value)}
                   placeholder="密码"
                   onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
-                  className="flex-1 min-w-[120px] bg-gray-700 px-3 py-2 rounded text-sm focus:outline-none focus:border-blue-500 border border-gray-600"
+                  className="flex-1 min-w-[120px] bg-white/[0.06] px-3 py-2 rounded text-sm focus:outline-none focus:border-brand-500 border border-white/[0.12]"
                 />
                 <button
                   onClick={handleRegister}
@@ -703,7 +703,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 <button
                   onClick={handleLogin}
                   disabled={regLoading}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 px-3 py-2 rounded text-sm whitespace-nowrap transition-colors"
+                  className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 px-3 py-2 rounded text-sm whitespace-nowrap transition-colors"
                 >
                   登录
                 </button>
@@ -720,11 +720,11 @@ export default function Settings({ dataConsent, setDataConsent }) {
                     type="text"
                     value={regToken}
                     readOnly
-                    className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none border border-gray-600 opacity-80 cursor-default truncate"
+                    className="flex-1 bg-white/[0.06] px-3 py-2 rounded text-sm font-mono focus:outline-none border border-white/[0.12] opacity-80 cursor-default truncate"
                   />
                   <button
                     onClick={handleCopyToken}
-                    className="bg-gray-600 hover:bg-gray-500 px-3 py-2 rounded text-sm transition-colors whitespace-nowrap"
+                    className="bg-white/[0.1] hover:bg-white/[0.16] px-3 py-2 rounded text-sm transition-colors whitespace-nowrap"
                   >
                     {copied ? '已复制' : '复制'}
                   </button>
@@ -744,7 +744,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                   onChange={handleToggleAuthHeader}
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
+                <div className="w-9 h-5 bg-white/[0.1] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-600" />
               </label>
               <div>
                 <p className="text-sm text-gray-300">使用 Token 认证</p>
@@ -757,7 +757,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
             </div>
 
             {/* Auth Status */}
-            <div className="border-t border-gray-700/50 pt-3 mt-2">
+            <div className="border-t border-white/[0.06] pt-3 mt-2">
               <p className="text-xs text-gray-400 mb-2">节点身份</p>
               <div className="flex items-center gap-2">
                 <span className={`w-2 h-2 rounded-full ${api.getAuthToken() ? 'bg-green-500' : 'bg-yellow-500'}`} />
@@ -773,7 +773,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
             </div>
 
             {/* Group Management */}
-            <div className="border-t border-gray-700/50 pt-3 mt-2">
+            <div className="border-t border-white/[0.06] pt-3 mt-2">
               <p className="text-xs text-gray-400 mb-2">分组管理</p>
               <div className="flex gap-2 mb-2">
                 <input
@@ -781,7 +781,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                   onChange={(e) => setGroupName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleJoinGroup()}
                   placeholder="输入分组名称"
-                  className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm focus:outline-none focus:border-blue-500 border border-gray-600"
+                  className="flex-1 bg-white/[0.06] px-3 py-2 rounded text-sm focus:outline-none focus:border-brand-500 border border-white/[0.12]"
                 />
                 <button
                   onClick={handleJoinGroup}
@@ -793,7 +793,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 <button
                   onClick={loadGroups}
                   disabled={groupsLoading}
-                  className="bg-gray-600 hover:bg-gray-500 disabled:opacity-40 px-3 py-2 rounded text-sm transition-colors"
+                  className="bg-white/[0.1] hover:bg-white/[0.16] disabled:opacity-40 px-3 py-2 rounded text-sm transition-colors"
                 >
                   刷新
                 </button>
@@ -804,7 +804,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
               ) : groups.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {groups.map((g, i) => (
-                    <span key={i} className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-1 rounded-full border border-blue-800/30">
+                    <span key={i} className="text-[10px] bg-brand-900/50 text-brand-300 px-2 py-1 rounded-full border border-brand-800/30">
                       {g.group_name}
                     </span>
                   ))}
@@ -818,7 +818,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
             </div>
 
             {/* Upload Limits */}
-            <div className="border-t border-gray-700/50 pt-3 mt-2">
+            <div className="border-t border-white/[0.06] pt-3 mt-2">
               <p className="text-xs text-gray-400 mb-2">上传限制</p>
               <p className="text-sm text-gray-200">
                 {formatLimit(100 * 1024 * 1024)} (已认证) / {formatLimit(10 * 1024 * 1024)} (匿名)
@@ -835,13 +835,13 @@ export default function Settings({ dataConsent, setDataConsent }) {
           <SettingsSection id="storage" title="存储管理" description="查看本地文件存储状态和管理缓存">
             {/* Stats */}
             <div className="grid grid-cols-2 gap-4">
-              <div className="bg-gray-900 rounded-lg p-4 text-center">
-                <p className="text-2xl font-mono text-blue-400">
+              <div className="bg-surface-card rounded-lg p-4 text-center">
+                <p className="text-2xl font-mono text-brand-400">
                   {storageLoading ? '...' : fileStats != null ? fileStats.count : '-'}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">文件总数</p>
               </div>
-              <div className="bg-gray-900 rounded-lg p-4 text-center">
+              <div className="bg-surface-card rounded-lg p-4 text-center">
                 <p className="text-2xl font-mono text-green-400">
                   {storageLoading ? '...' : fileStats != null ? formatBytes(fileStats.totalSize) : '-'}
                 </p>
@@ -865,7 +865,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
               </button>
               <button
                 onClick={loadFileStats}
-                className="bg-gray-600 hover:bg-gray-500 px-3 py-2 rounded text-sm transition-colors"
+                className="bg-white/[0.1] hover:bg-white/[0.16] px-3 py-2 rounded text-sm transition-colors"
               >
                 刷新统计
               </button>
@@ -889,7 +889,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                   disabled={ipfsToggling}
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
+                <div className="w-9 h-5 bg-white/[0.1] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-600" />
               </label>
               <div>
                 <p className="text-sm text-gray-300">
@@ -903,13 +903,13 @@ export default function Settings({ dataConsent, setDataConsent }) {
 
             {/* Stats */}
             <div className="grid grid-cols-2 gap-4 mt-3">
-              <div className="bg-gray-900 rounded-lg p-4 text-center">
-                <p className="text-2xl font-mono text-blue-400">
+              <div className="bg-surface-card rounded-lg p-4 text-center">
+                <p className="text-2xl font-mono text-brand-400">
                   {ipfsLoading ? '...' : ipfsBlockCount}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">IPFS 块数</p>
               </div>
-              <div className="bg-gray-900 rounded-lg p-4 text-center">
+              <div className="bg-surface-card rounded-lg p-4 text-center">
                 <p className="text-sm font-mono text-gray-400">{ipfsEnabled ? '活跃' : '未激活'}</p>
                 <p className="text-xs text-gray-500 mt-1">状态</p>
               </div>
@@ -936,7 +936,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 value={llmEndpoint}
                 onChange={(e) => setLlmEndpoint(e.target.value)}
                 placeholder="https://siliconflow.moonchan.xyz"
-                className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
+                className="w-full bg-white/[0.06] px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-brand-500 border border-white/[0.12]"
               />
             </div>
 
@@ -948,7 +948,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 onChange={(e) => {
                   if (e.target.value !== '__custom__') setLlmModel(e.target.value);
                 }}
-                className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
+                className="w-full bg-white/[0.06] px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-brand-500 border border-white/[0.12]"
               >
                 {api.FREE_LLM_MODELS.map((m) => (
                   <option key={m} value={m}>
@@ -962,7 +962,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                   value={llmModel}
                   onChange={(e) => setLlmModel(e.target.value)}
                   placeholder="输入自定义模型名"
-                  className="w-full bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600 mt-1"
+                  className="w-full bg-white/[0.06] px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-brand-500 border border-white/[0.12] mt-1"
                 />
               )}
             </div>
@@ -976,11 +976,11 @@ export default function Settings({ dataConsent, setDataConsent }) {
                   value={llmApiKey}
                   onChange={(e) => setLlmApiKey(e.target.value)}
                   placeholder="sk-..."
-                  className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-blue-500 border border-gray-600"
+                  className="flex-1 bg-white/[0.06] px-3 py-2 rounded text-sm font-mono focus:outline-none focus:border-brand-500 border border-white/[0.12]"
                 />
                 <button
                   onClick={() => setShowLlmKey(!showLlmKey)}
-                  className="bg-gray-600 hover:bg-gray-500 px-3 py-2 rounded text-sm transition-colors"
+                  className="bg-white/[0.1] hover:bg-white/[0.16] px-3 py-2 rounded text-sm transition-colors"
                 >
                   {showLlmKey ? '隐藏' : '显示'}
                 </button>
@@ -1000,7 +1000,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 onChange={(e) => setLlmBody(e.target.value)}
                 rows={4}
                 spellCheck={false}
-                className="w-full bg-gray-700 px-3 py-2 rounded text-xs font-mono focus:outline-none focus:border-blue-500 border border-gray-600 resize-y"
+                className="w-full bg-white/[0.06] px-3 py-2 rounded text-xs font-mono focus:outline-none focus:border-brand-500 border border-white/[0.12] resize-y"
               />
             </div>
 
@@ -1010,14 +1010,14 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 href="https://cloud.siliconflow.cn/i/sRO0U8o0"
                 target="_blank"
                 rel="noreferrer"
-                className="text-[10px] text-blue-400 hover:underline shrink-0"
+                className="text-[10px] text-brand-400 hover:underline shrink-0"
               >
                 硅基流动注册 &rarr;
               </a>
               <div className="flex items-center gap-2 sm:ml-auto">
                 <button
                   onClick={handleResetLlm}
-                  className="bg-gray-600 hover:bg-gray-500 px-3 py-1.5 sm:py-2 rounded text-xs sm:text-sm transition-colors"
+                  className="bg-white/[0.1] hover:bg-white/[0.16] px-3 py-1.5 sm:py-2 rounded text-xs sm:text-sm transition-colors"
                 >
                   恢复默认
                 </button>
@@ -1051,7 +1051,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                   type="text"
                   value={api.getApiBase() + '/webdav/'}
                   readOnly
-                  className="flex-1 bg-gray-700 px-3 py-2 rounded text-sm font-mono focus:outline-none border border-gray-600 opacity-80 cursor-default"
+                  className="flex-1 bg-white/[0.06] px-3 py-2 rounded text-sm font-mono focus:outline-none border border-white/[0.12] opacity-80 cursor-default"
                 />
                 <button
                   onClick={() => {
@@ -1059,7 +1059,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                       navigator.clipboard.writeText(api.getApiBase() + '/webdav/');
                     } catch {}
                   }}
-                  className="bg-gray-600 hover:bg-gray-500 px-3 py-2 rounded text-sm transition-colors whitespace-nowrap"
+                  className="bg-white/[0.1] hover:bg-white/[0.16] px-3 py-2 rounded text-sm transition-colors whitespace-nowrap"
                 >
                   复制
                 </button>
@@ -1067,7 +1067,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
             </div>
 
             {/* OS Instructions */}
-            <div className="border-t border-gray-700/50 pt-3 mt-2">
+            <div className="border-t border-white/[0.06] pt-3 mt-2">
               <p className="text-xs text-gray-400 mb-2">操作系统挂载方法（点击即复制）</p>
               <div className="space-y-3">
                 <div>
@@ -1078,7 +1078,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                       setCopiedBlock('windows');
                       setTimeout(() => setCopiedBlock(null), 1500);
                     }}
-                    className={`block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono cursor-pointer border transition-colors ${copiedBlock === 'windows' ? 'border-green-500' : 'border-transparent hover:border-gray-600'}`}
+                    className={`block bg-surface-card text-gray-300 px-3 py-2 rounded text-xs font-mono cursor-pointer border transition-colors ${copiedBlock === 'windows' ? 'border-green-500' : 'border-transparent hover:border-white/[0.12]'}`}
                     title="点击复制"
                   >
                     net use Z: {api.getApiBase() + '/webdav/'}
@@ -1093,7 +1093,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                       setCopiedBlock('macos');
                       setTimeout(() => setCopiedBlock(null), 1500);
                     }}
-                    className={`block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono cursor-pointer border transition-colors mt-1 ${copiedBlock === 'macos' ? 'border-green-500' : 'border-transparent hover:border-gray-600'}`}
+                    className={`block bg-surface-card text-gray-300 px-3 py-2 rounded text-xs font-mono cursor-pointer border transition-colors mt-1 ${copiedBlock === 'macos' ? 'border-green-500' : 'border-transparent hover:border-white/[0.12]'}`}
                     title="点击复制"
                   >
                     {api.getApiBase() + '/webdav/'}
@@ -1107,7 +1107,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
                       setCopiedBlock('linux');
                       setTimeout(() => setCopiedBlock(null), 1500);
                     }}
-                    className={`block bg-gray-900 text-gray-300 px-3 py-2 rounded text-xs font-mono cursor-pointer border transition-colors ${copiedBlock === 'linux' ? 'border-green-500' : 'border-transparent hover:border-gray-600'}`}
+                    className={`block bg-surface-card text-gray-300 px-3 py-2 rounded text-xs font-mono cursor-pointer border transition-colors ${copiedBlock === 'linux' ? 'border-green-500' : 'border-transparent hover:border-white/[0.12]'}`}
                     title="点击复制"
                   >
                     mount -t davfs {api.getApiBase() + '/webdav/'} /mnt/peerdrive
@@ -1128,7 +1128,7 @@ export default function Settings({ dataConsent, setDataConsent }) {
             {/* Version */}
             <div className="flex items-center gap-3">
               <span className="text-xs text-gray-400">Peerdrive Web</span>
-              <span className="text-sm font-mono text-gray-200 bg-gray-900 px-2 py-0.5 rounded">
+              <span className="text-sm font-mono text-gray-200 bg-surface-card px-2 py-0.5 rounded">
                 v{PEERDRIVE_VERSION}
               </span>
             </div>
@@ -1139,20 +1139,20 @@ export default function Settings({ dataConsent, setDataConsent }) {
                 href="https://github.com/neucn/peerdrive"
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs text-blue-400 hover:underline"
+                className="text-xs text-brand-400 hover:underline"
               >
                 GitHub
               </a>
             </div>
 
             {/* Data Consent */}
-            <div className="border-t border-gray-700/50 pt-3">
+            <div className="border-t border-white/[0.06] pt-3">
               <label className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={dataConsent}
                   onChange={(e) => handleConsentChange(e.target.checked)}
-                  className="w-4 h-4 rounded accent-blue-600"
+                  className="w-4 h-4 rounded accent-brand-600"
                 />
                 <span className="text-sm text-gray-300">
                   我同意采集使用数据以改进服务

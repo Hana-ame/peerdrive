@@ -92,7 +92,7 @@ export default function CommentSection({ hash }) {
   }
 
   return (
-    <div className="border-t border-gray-700/50 mt-4 pt-4">
+    <div className="border-t border-white/[0.06] mt-4 pt-4">
       <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
         <span>💬</span> 评论 ({comments.length})
       </h3>
@@ -104,13 +104,13 @@ export default function CommentSection({ hash }) {
           onChange={e => setContent(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handlePost(); } }}
           placeholder="发表评论（需已认证）..."
-          className="flex-1 bg-gray-800 border border-gray-600 px-3 py-2 rounded text-sm focus:outline-none focus:border-blue-500"
+          className="flex-1 bg-white/[0.06] border border-white/[0.12] px-3 py-2 rounded text-sm focus:outline-none focus:border-brand-500"
           disabled={posting}
         />
         <button
           onClick={handlePost}
           disabled={posting || !content.trim()}
-          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 px-4 py-2 rounded text-sm font-medium transition-colors"
+          className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 px-4 py-2 rounded text-sm font-medium transition-colors"
         >
           {posting ? '...' : '发送'}
         </button>
@@ -126,9 +126,9 @@ export default function CommentSection({ hash }) {
       ) : (
         <div className="space-y-3 max-h-80 overflow-y-auto">
           {comments.map((c, i) => (
-            <div key={c.id || i} className="bg-gray-800/60 rounded-lg px-3 py-2.5 border border-gray-700/40">
+            <div key={c.id || i} className="bg-white/[0.04] rounded-lg px-3 py-2.5 border border-white/[0.05]">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-blue-400">{c.username}</span>
+                <span className="text-xs font-medium text-brand-400">{c.username}</span>
                 <span className="text-[10px] text-gray-500">{formatTime(c.created_at)}</span>
               </div>
               <p className="text-sm text-gray-300 break-words">{c.content}</p>

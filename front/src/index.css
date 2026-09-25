@@ -2,10 +2,51 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── 统一组件工具类（2026-09-24 UI 风格批次）──
+   设计 token 见 tailwind.config.js（brand / surface / shadow / radius）;
+   这些类把「主按钮/幽灵按钮/输入框/徽章/卡片」收敛成一套，新代码优先引用。 */
+@layer components {
+  /* 主按钮：brand 渐变 + 微高光 + hover 抬升。替代刺眼的默认 blue-600 */
+  .btn-brand {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg
+      bg-gradient-to-b from-brand-500 to-brand-600 text-white text-sm font-medium
+      px-4 py-2 transition-all select-none
+      shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_6px_18px_-6px_rgba(99,102,241,0.55)]
+      hover:from-brand-400 hover:to-brand-600
+      hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_8px_22px_-6px_rgba(99,102,241,0.7)]
+      active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+  /* 次级按钮：白 4% 底 + 细描边，深色玻璃风 */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg
+      bg-white/[0.04] border border-white/10 text-gray-300 text-sm font-medium
+      px-4 py-2 transition-all select-none
+      hover:bg-white/[0.08] hover:text-white active:scale-[0.98];
+  }
+  /* 输入框 / 文本框 */
+  .input-base {
+    @apply w-full rounded-lg bg-white/[0.04] border border-white/10
+      text-sm text-gray-200 placeholder-gray-500 px-3.5 py-2.5 transition-all
+      focus:outline-none focus:border-brand-400/60 focus:ring-2 focus:ring-brand-500/20;
+  }
+  /* 软徽章：半透明底色 + 细描边 */
+  .badge-soft {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border;
+  }
+  /* 标准卡片：surface 分层的默认面孔 */
+  .card-surface {
+    @apply rounded-card bg-surface-card border border-surface-border shadow-card;
+  }
+}
+
 body {
   margin: 0;
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  background-color: #101014;
+  /* 顶部柔光：给近黑的底一点品牌色环境光，避免死板 */
+  background-image: radial-gradient(ellipse 90% 45% at 50% -12%, rgb(99 102 241 / 0.1), transparent);
+  background-attachment: fixed;
 }
 
 ::-webkit-scrollbar { width: 6px; }

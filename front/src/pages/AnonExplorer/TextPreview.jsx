@@ -23,9 +23,9 @@ export default function TextPreview({ buf, onLoad, downloadUrl, filename, hash, 
         <span>{(hash || '').substring(0, 12)}</span>
         {content && content.length >= 50000 && <span className="text-amber-500">（截断至前 50KB）</span>}
       </div>
-      <pre className="flex-1 overflow-auto bg-gray-900 border border-gray-800 rounded-lg p-4 text-xs font-mono text-gray-300 whitespace-pre-wrap break-all">{content}</pre>
+      <pre className="flex-1 overflow-auto bg-surface-card border border-white/[0.04] rounded-lg p-4 text-xs font-mono text-gray-300 whitespace-pre-wrap break-all">{content}</pre>
       <a href="#" onClick={e => { e.preventDefault(); if (onDownload) onDownload(); }}
-        className="text-xs text-blue-400 hover:underline mt-2 self-end">⬇ 下载</a>
+        className="text-xs text-brand-400 hover:underline mt-2 self-end">⬇ 下载</a>
     </div>
   );
 }

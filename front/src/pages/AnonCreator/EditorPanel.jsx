@@ -40,7 +40,7 @@ export default function EditorPanel({
 
       {/* 广播权限三选项：只有 public 才允许广播（非公开的合集广播出去也没人能拉，
           反而把 hash 泄露给 DHT 上的陌生人） */}
-      <div className="px-3 py-1.5 border-b border-gray-800 bg-gray-900/40 shrink-0">
+      <div className="px-3 py-1.5 border-b border-white/[0.04] bg-white/[0.06] shrink-0">
         <VisibilityPicker visibility={visibility} accessList={accessList}
           operator={operator}
           onChange={onVisibilityChange} onRequestAccounts={onRequestAccounts} />
@@ -57,22 +57,22 @@ export default function EditorPanel({
 
       {/* URL 添加行 */}
       {showUrlInput && (
-        <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-gray-800 shrink-0 bg-gray-900/50">
+        <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-white/[0.04] shrink-0 bg-white/[0.08]">
           <span className="text-[10px] text-gray-500 shrink-0">URL:</span>
           <input value={urlValue} onChange={e => setUrlValue(e.target.value)}
             placeholder="https://..."
-            className="flex-1 bg-gray-800 text-xs px-2 py-1.5 rounded border border-gray-700 focus:outline-none focus:border-blue-500 font-mono"
+            className="flex-1 bg-white/[0.06] text-xs px-2 py-1.5 rounded border border-white/[0.06] focus:outline-none focus:border-brand-500 font-mono"
             onKeyDown={e => { if (e.key === 'Enter') handleUrlSubmit(); if (e.key === 'Escape') setShowUrlInput(false); }}
             autoFocus />
           <input value={urlName} onChange={e => setUrlName(e.target.value)}
             placeholder="文件名（可选）"
-            className="w-24 bg-gray-800 text-xs px-2 py-1.5 rounded border border-gray-700 focus:outline-none focus:border-blue-500 hidden md:block" />
+            className="w-24 bg-white/[0.06] text-xs px-2 py-1.5 rounded border border-white/[0.06] focus:outline-none focus:border-brand-500 hidden md:block" />
           <label className="flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer shrink-0">
             <input type="checkbox" checked={urlRegister} onChange={e => setUrlRegister(e.target.checked)} className="w-3 h-3" />
             下载
           </label>
           <button onClick={handleUrlSubmit} disabled={urlLoading || !urlValue.trim()}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-xs px-2 py-1.5 rounded shrink-0">+</button>
+            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-xs px-2 py-1.5 rounded shrink-0">+</button>
           <button onClick={() => setShowUrlInput(false)} className="text-gray-500 hover:text-white text-xs px-1 shrink-0">×</button>
         </div>
       )}

@@ -17,13 +17,13 @@ const DUMMY_COLLECTIONS = [
 // 骨架屏组件：加载时的占位卡片
 function SkeletonCard() {
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 animate-pulse">
+    <div className="bg-surface-card border border-surface-border rounded-card p-5 animate-pulse">
       <div className="flex items-center justify-between mb-4">
-        <div className="w-10 h-10 bg-gray-700 rounded-lg" />
-        <div className="w-12 h-3 bg-gray-700 rounded" />
+        <div className="w-10 h-10 bg-white/[0.06] rounded-lg" />
+        <div className="w-12 h-3 bg-white/[0.06] rounded" />
       </div>
-      <div className="w-3/4 h-5 bg-gray-700 rounded mb-2" />
-      <div className="w-1/2 h-3 bg-gray-700 rounded" />
+      <div className="w-3/4 h-5 bg-white/[0.06] rounded mb-2" />
+      <div className="w-1/2 h-3 bg-white/[0.06] rounded" />
     </div>
   );
 }
@@ -98,17 +98,17 @@ export default function Plaza() {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <h1 className="text-3xl font-bold">合集</h1>
-            {p2pOnline && <span className="text-xs bg-emerald-900/50 text-emerald-400 px-2 py-0.5 rounded-full">P2P 在线</span>}
+            {p2pOnline && <span className="badge-soft border-emerald-400/20 bg-emerald-400/10 text-emerald-300">P2P 在线</span>}
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-              className="bg-gray-800 hover:bg-gray-700 text-gray-400 px-3 py-2 rounded-lg text-sm border border-gray-700"
+              className="btn-ghost"
               title={viewMode === 'grid' ? '切换为列表视图' : '切换为网格视图'}
             >
               {viewMode === 'grid' ? '≡ 列表' : '⊞ 网格'}
             </button>
-            <button onClick={() => navigate('/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">+ 创建合集</button>
+            <button onClick={() => navigate('/create')} className="btn-brand">+ 创建合集</button>
           </div>
         </div>
         {/* 搜索栏：输入 Hash / URL 直接跳转 */}
@@ -119,13 +119,13 @@ export default function Plaza() {
               onPaste={e => { const h = extractHash(e.clipboardData.getData('text')); if (h) { e.preventDefault(); setSearchInput(h); navigate(`/anon/collections/${h}`); } }}
               onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
               placeholder="输入 SHA256 Hash / URL 打开合集"
-              className="flex-1 bg-gray-800 border border-gray-600 px-4 py-2.5 rounded-lg text-sm font-mono focus:outline-none focus:border-blue-500" />
-            <button onClick={handleSearch} className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium">查看</button>
+              className="input-base flex-1 font-mono" />
+            <button onClick={handleSearch} className="btn-brand">查看</button>
           </div>
           {/* 标签切换：本机 / P2P 网络 */}
           <div className="flex gap-1 mt-3">
-            <button onClick={() => setPlazaTab('local')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='local'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>💻 本机 ({localColls.length})</button>
-            <button onClick={() => setPlazaTab('p2p')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='p2p'?'bg-blue-600 text-white':'bg-gray-800 text-gray-400 hover:text-white'}`}>🌐 P2P 网络 ({p2pColls.length})</button>
+            <button onClick={() => setPlazaTab('local')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='local'?'bg-brand-600 text-white shadow-glow':'bg-white/[0.04] text-gray-400 hover:text-white hover:bg-white/[0.08]'}`}>💻 本机 ({localColls.length})</button>
+            <button onClick={() => setPlazaTab('p2p')} className={`px-4 py-1.5 text-sm rounded ${plazaTab==='p2p'?'bg-brand-600 text-white shadow-glow':'bg-white/[0.04] text-gray-400 hover:text-white hover:bg-white/[0.08]'}`}>🌐 P2P 网络 ({p2pColls.length})</button>
           </div>
         </div>
 
@@ -134,17 +134,17 @@ export default function Plaza() {
             {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}
           </div>
         ) : activeColls.length === 0 ? (
-          <div className="text-center py-20 text-gray-500 border-2 border-dashed border-gray-700 rounded-xl">
+          <div className="text-center py-20 text-gray-500 border-2 border-dashed border-white/10 rounded-card">
             <p className="mb-3">{plazaTab === 'p2p' ? 'P2P 网络暂无公开合集' : '还没有创建任何合集'}</p>
             <p className="text-xs text-gray-600 mb-4">从文件管理器注册文件并自动创建匿名合集，或手动创建</p>
             <div className="flex justify-center gap-3">
-              <button onClick={() => navigate('/create')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">
+              <button onClick={() => navigate('/create')} className="btn-brand">
                 + 创建合集
               </button>
             </div>
           </div>
         ) : viewMode === 'list' ? (
-          <div className="bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden">
+          <div className="card-surface overflow-hidden">
             {activeColls.map(c => (
               <CollectionCard
                 key={collId(c)}

@@ -48,7 +48,7 @@ export default function MiddlePanel({ selectedFile }) {
 
   if (!selectedFile) {
     return (
-      <div className="h-full flex items-center justify-center bg-gray-950">
+      <div className="h-full flex items-center justify-center bg-transparent">
         <div className="text-center text-gray-600">
           <div className="text-4xl mb-3">👆</div>
           <div className="text-sm">选择左侧文件查看预览</div>
@@ -73,9 +73,9 @@ export default function MiddlePanel({ selectedFile }) {
      'cpp', 'h', 'log', 'txt', 'sql'].includes(e);
 
   return (
-    <div className="h-full flex flex-col bg-gray-950">
+    <div className="h-full flex flex-col bg-transparent">
       {/* 文件标题栏 */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-800 bg-gray-900 shrink-0">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.04] bg-surface-card shrink-0">
         <span className="text-lg">{fileIcon(mime, fname)}</span>
         <span className="text-sm text-gray-200 truncate flex-1 font-mono">{fname}</span>
         {size > 0 && <span className="text-[10px] text-gray-500 shrink-0">{fmtSize(size)}</span>}
@@ -86,7 +86,7 @@ export default function MiddlePanel({ selectedFile }) {
         {isImage && inlineUrl && (
           <div className="p-4 flex flex-col items-center">
             <img src={inlineUrl} alt={fname}
-              className="max-w-full max-h-[70vh] object-contain rounded border border-gray-800"
+              className="max-w-full max-h-[70vh] object-contain rounded border border-white/[0.04]"
               onError={(e) => { e.target.style.display = 'none'; }}
             />
             <div className="mt-3 text-xs text-gray-500 text-center">
@@ -98,7 +98,7 @@ export default function MiddlePanel({ selectedFile }) {
 
         {isVideo && inlineUrl && (
           <div className="p-4 flex flex-col items-center">
-            <video src={inlineUrl} controls className="max-w-full max-h-[70vh] rounded border border-gray-800" />
+            <video src={inlineUrl} controls className="max-w-full max-h-[70vh] rounded border border-white/[0.04]" />
             <div className="mt-3 text-xs text-gray-500 text-center">
               <div>{fname}</div>
               <div>{fmtSize(size)}</div>
@@ -119,7 +119,7 @@ export default function MiddlePanel({ selectedFile }) {
 
         {isPdf && inlineUrl && (
           <div className="p-4 h-full">
-            <iframe src={inlineUrl + '#toolbar=0'} className="w-full h-full rounded border border-gray-800" title={fname} />
+            <iframe src={inlineUrl + '#toolbar=0'} className="w-full h-full rounded border border-white/[0.04]" title={fname} />
           </div>
         )}
 
@@ -134,7 +134,7 @@ export default function MiddlePanel({ selectedFile }) {
             ) : textError ? (
               <div className="text-red-400 text-xs py-8 text-center">加载失败: {textError}</div>
             ) : (
-              <pre className="bg-gray-900 p-4 rounded border border-gray-800 text-xs text-gray-300 overflow-auto max-h-[70vh] font-mono whitespace-pre-wrap break-all">
+              <pre className="bg-surface-card p-4 rounded border border-white/[0.04] text-xs text-gray-300 overflow-auto max-h-[70vh] font-mono whitespace-pre-wrap break-all">
                 {textContent || '(空文件)'}
               </pre>
             )}

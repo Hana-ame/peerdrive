@@ -73,7 +73,7 @@ export default function Peers() {
           {loading && !nodes.length ? (
             <div className="py-12 text-center text-sm text-gray-500">加载中…</div>
           ) : nodes.length === 0 ? (
-            <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-4 py-12 text-center text-sm text-gray-500">
+            <div className="rounded-lg border border-white/[0.04] bg-white/[0.06] px-4 py-12 text-center text-sm text-gray-500">
               <div className="text-3xl mb-2 opacity-60">🔗</div>
               还没有加入任何节点。去「节点市场」找一个节点加入，就能看到对方的文件链接。
             </div>

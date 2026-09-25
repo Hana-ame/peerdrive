@@ -38,12 +38,12 @@ export default function EditorToolbar({ fname, tags, entryCount, validCount, sav
   };
 
   return (
-    <div className="px-3 py-1.5 border-b border-gray-800 shrink-0 space-y-1">
+    <div className="px-3 py-1.5 border-b border-white/[0.04] shrink-0 space-y-1">
       {/* 第一行：合集名称 + 统计 + 操作 + 保存 */}
       <div className="flex items-center gap-2">
-        <input value={fname} onChange={e => onFname(e.target.value)} placeholder="合集名称" className="bg-gray-800 text-xs px-2 py-1.5 rounded border border-gray-700 w-28 focus:outline-none focus:border-blue-500" />
+        <input value={fname} onChange={e => onFname(e.target.value)} placeholder="合集名称" className="bg-white/[0.06] text-xs px-2 py-1.5 rounded border border-white/[0.06] w-28 focus:outline-none focus:border-brand-500" />
         {onShowUrlInput && (
-          <button onClick={onShowUrlInput} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded shrink-0" title="添加 URL 条目">+ URL</button>
+          <button onClick={onShowUrlInput} className="text-xs bg-white/[0.06] hover:bg-white/[0.12] px-2 py-1 rounded shrink-0" title="添加 URL 条目">+ URL</button>
         )}
         <span className="text-[10px] text-gray-500 ml-auto shrink-0">{validCount} 个文件</span>
         <button onClick={onSave} disabled={saving || !validCount}
@@ -51,11 +51,11 @@ export default function EditorToolbar({ fname, tags, entryCount, validCount, sav
       </div>
 
       {/* 第二行：标签 */}
-      <div className="flex items-center gap-1 bg-gray-800 rounded border border-gray-700 px-1.5 py-0.5 cursor-text" onClick={() => inputRef.current?.focus()}>
+      <div className="flex items-center gap-1 bg-white/[0.06] rounded border border-white/[0.06] px-1.5 py-0.5 cursor-text" onClick={() => inputRef.current?.focus()}>
         {tagList.map((t, i) => (
-          <span key={i} className="flex items-center gap-0.5 text-[10px] bg-blue-900/50 text-blue-300 pl-1.5 pr-0.5 py-0.5 rounded-full whitespace-nowrap">
+          <span key={i} className="flex items-center gap-0.5 text-[10px] bg-brand-900/50 text-brand-300 pl-1.5 pr-0.5 py-0.5 rounded-full whitespace-nowrap">
             {t}
-            <button onClick={(e) => { e.stopPropagation(); removeTag(t); }} className="text-blue-400 hover:text-red-400 leading-none">&times;</button>
+            <button onClick={(e) => { e.stopPropagation(); removeTag(t); }} className="text-brand-400 hover:text-red-400 leading-none">&times;</button>
           </span>
         ))}
         <input ref={inputRef} value={inputVal}
