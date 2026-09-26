@@ -148,8 +148,19 @@ func TestNodeShareCandidateFilesFlags(t *testing.T) {
 		t.Fatalf("update dirs: %v", err)
 	}
 	items := s.CandidateFiles()
+	if len(items) != 1 {
+		t.Fatalf("candidates = %d, want 1 (only file under shared dir)", len(items))
+	}
+	if !items[0].Shared || !items[0].ByDir {
+		t.Fatalf("file under shared dir must be shared+by_dir: %+v", items[0])
+	}
+	// 手动勾选目录外文件后，它进入候选并正确标记（未勾选前不作为候选，见上）。
+	if _, err := s.SetFilesShared([]string{h2}, true, ""); err != nil {
+		t.Fatalf("share file: %v", err)
+	}
+	items = s.CandidateFiles()
 	if len(items) != 2 {
-		t.Fatalf("candidates = %d, want 2", len(items))
+		t.Fatalf("candidates after pick = %d, want 2", len(items))
 	}
 	byHash := map[string]ShareFileItem{}
 	for _, it := range items {
@@ -158,8 +169,8 @@ func TestNodeShareCandidateFilesFlags(t *testing.T) {
 	if !byHash[h1].Shared || !byHash[h1].ByDir {
 		t.Fatalf("file under shared dir must be shared+by_dir: %+v", byHash[h1])
 	}
-	if byHash[h2].Shared || byHash[h2].ByDir {
-		t.Fatalf("file outside shared dir must not be shared: %+v", byHash[h2])
+	if !byHash[h2].Shared || byHash[h2].ByDir {
+		t.Fatalf("picked file outside dir must be shared but not by_dir: %+v", byHash[h2])
 	}
 }
 

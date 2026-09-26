@@ -725,11 +725,18 @@ func (s *NodeShare) CandidateFiles() []ShareFileItem {
 		sel[it.ID] = it
 	}
 	out := make([]ShareFileItem, 0, len(files))
+	dirs := idsOf(sc.Dirs)
 	for _, f := range files {
 		if f.Path == "" || f.Delete {
 			continue
 		}
-		byDir := pathutil.WithinAny(idsOf(sc.Dirs), f.Path)
+		byDir := pathutil.WithinAny(dirs, f.Path)
+		_, picked := sel[f.Hash]
+		// 2026-09-26：声明了共享目录时，目录外且未被手动勾选的文件不再作为候选——
+		// 切换共享目录不会把旧目录的文件一起带出来；已勾选的手动文件永远保留。
+		if len(dirs) > 0 && !byDir && !picked {
+			continue
+		}
 		shared := false
 		lvl := ""
 		if it, ok := sel[f.Hash]; ok {
