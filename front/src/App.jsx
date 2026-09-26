@@ -9,6 +9,7 @@ import Settings from './pages/Settings';
 import Transfers from './pages/Transfers';
 import BT from './pages/BT';
 import IPFS from './pages/IPFS';
+import NodeControl from './pages/NodeControl';
 
 // 建设中占位页（模块②③④⑤⑥逐个替换）
 function Placeholder({ title }) {
@@ -59,6 +60,7 @@ export default function App() {
         <div className="flex-1 overflow-hidden">
           <Routes>
             <Route path="/" element={<Connect />} />
+            <Route path="/node" element={<NodeControl />} />
             <Route path="/drive" element={<Drive />} />
             <Route path="/collections" element={<Collections />} />
             <Route path="/settings" element={<Settings />} />

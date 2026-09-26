@@ -6,6 +6,7 @@
 import React, { useState, useRef } from 'react';
 import Peer from 'peerjs';
 import { connectToPeer, discoverNodes } from './pd-client';
+import { setNodeSession, clearNodeSession } from './nodeSession';
 
 const DEFAULT_SIG = {
   host: 'peersignal.moonchan.xyz',
@@ -29,7 +30,7 @@ function getStableMyId() {
   return id;
 }
 
-export default function PeerJSConnect({ compact = false }) {
+export default function PeerJSConnect({ compact = false, onConnected = null }) {
   const [sigHost, setSigHost] = useState(DEFAULT_SIG.host);
   const [sigPort, setSigPort] = useState(String(DEFAULT_SIG.port));
   const [sigKey, setSigKey] = useState(DEFAULT_SIG.key);
@@ -77,6 +78,9 @@ export default function PeerJSConnect({ compact = false }) {
       const snap = await client.shares();
       setPdShare(snap);
       setPdStatus('online');
+      // 存入全局会话（供节点控制页使用），并触发「连接成功跳转」回调
+      setNodeSession({ client, peerId: target, myId: myIdRef.current });
+      onConnected?.(client, target);
     } catch (e) {
       setPdStatus('error');
       setPdError(e?.message || String(e));
@@ -84,6 +88,7 @@ export default function PeerJSConnect({ compact = false }) {
   };
 
   const handleDisconnect = () => {
+    clearNodeSession();
     try { pdClient?.close?.(); } catch (e) { /* 忽略 */ }
     setPdClient(null);
     setPdShare(null);
