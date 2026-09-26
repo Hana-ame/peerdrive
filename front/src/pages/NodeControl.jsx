@@ -239,17 +239,19 @@ export default function NodeControl() {
                 <div className="px-4 py-2 bg-white/[0.03] text-[10px] uppercase tracking-wider text-gray-500">单独文件</div>
                 <ul className="divide-y divide-white/[0.04]">
                   {share.files.map((f, i) => (
-                    <li key={i} className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-white/[0.02]">
-                      <span className="flex-1 truncate text-gray-200">{f.path || f.name}</span>
-                      <span className="text-gray-500 shrink-0">{fmtBytes(f.size)}</span>
-                      <span className="font-mono text-[10px] text-gray-600 shrink-0">{String(f.hash).slice(0, 12)}…</span>
-                      {kindOf(f.path || f.name) && (
-                        <button onClick={() => openPreview(f)}
-                          className="px-2.5 py-1 text-[11px] bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 rounded shrink-0 mr-1">预览</button>
-                      )}
-                      <button onClick={() => save(f)} className="btn-brand !px-3 !py-1 !text-xs shrink-0">保存</button>
-                    </li>
-                  ))}
+                      <li key={i} className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-white/[0.02]">
+                        <span className="flex-1 truncate text-gray-200">{f.path || f.name}</span>
+                        <span className="text-gray-500 shrink-0 whitespace-nowrap">{fmtBytes(f.size)}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {kindOf(f.path || f.name) && (
+                            <button onClick={() => openPreview(f)}
+                              className="text-[11px] px-2.5 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 whitespace-nowrap">预览</button>
+                          )}
+                          <button onClick={() => save(f)}
+                            className="text-[11px] px-2.5 py-1 rounded bg-brand-600 hover:bg-brand-500 text-white whitespace-nowrap">保存</button>
+                        </div>
+                      </li>
+                    ))}
                 </ul>
               </div>
             )}
@@ -274,13 +276,15 @@ export default function NodeControl() {
                             {entries.map((e, ei) => (
                               <li key={ei} className="flex items-center gap-3 py-1.5 text-sm">
                                 <span className="flex-1 truncate text-gray-400">{e.path}</span>
-                                <span className="text-gray-500 shrink-0">{fmtBytes(e.size)}</span>
-                                <button onClick={() => save({ ...e, name: e.path || 'download' })}
-                                  className="px-2 py-0.5 text-[11px] bg-white/[0.06] hover:bg-white/[0.1] text-gray-300 rounded shrink-0 mr-1">保存</button>
-                                {kindOf(e.path) && (
-                                  <button onClick={() => openPreview({ ...e, name: e.path || 'download' })}
-                                    className="px-2 py-0.5 text-[11px] bg-white/[0.06] hover:bg-white/[0.1] text-gray-300 rounded shrink-0">预览</button>
-                                )}
+                                <span className="text-gray-500 shrink-0 whitespace-nowrap">{fmtBytes(e.size)}</span>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {kindOf(e.path) && (
+                                    <button onClick={() => openPreview({ ...e, name: e.path || 'download' })}
+                                      className="text-[11px] px-2.5 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 whitespace-nowrap">预览</button>
+                                  )}
+                                  <button onClick={() => save({ ...e, name: e.path || 'download' })}
+                                    className="text-[11px] px-2.5 py-1 rounded bg-brand-600 hover:bg-brand-500 text-white whitespace-nowrap">保存</button>
+                                </div>
                               </li>
                             ))}
                           </ul>
