@@ -134,10 +134,40 @@ export default function NodeControl() {
       }
       return;
     }
-    // 图片/视频/音频：SW 伪造 fetch 断点续传，原生元素渐进加载
+    // 图片：增量 blob 边下载边刷新显示（进度条 + 收一块刷一版；progressive/interlaced 会提前出图）
+    if (kind === 'image') {
+      setViewer({ scale: 1, x: 0, y: 0 });
+      const total = item.size || 0;
+      setPreview({ hash: item.hash, name, kind, loading: true, error: '', text: '', url: '', progress: { loaded: 0, total }, imgIndex: imgIdx });
+      const chunks = [];
+      let loaded = 0;
+      try {
+        for await (const chunk of session.client.stream(item.hash)) {
+          chunks.push(chunk);
+          loaded += chunk.byteLength;
+          // 每约 1MB 重建 objectURL 刷新 img（边下边显；progressive/interlaced 格式会提前出图）
+          if (loaded % (1024 * 1024) < chunk.byteLength || loaded >= total) {
+            setPreview(p => {
+              if (!p || p.hash !== item.hash) return p;
+              if (p.url) URL.revokeObjectURL(p.url);
+              return {
+                ...p,
+                url: URL.createObjectURL(new Blob(chunks, { type: mimeOf(name) })),
+                progress: { loaded, total },
+              };
+            });
+            await new Promise(r => setTimeout(r, 0));
+          }
+        }
+        setPreview(p => (p && p.hash === item.hash ? { ...p, loading: false, progress: { loaded: loaded || total, total } } : p));
+      } catch (e) {
+        setPreview(p => (p && p.hash === item.hash ? { ...p, loading: false, error: e?.message || String(e) } : p));
+      }
+      return;
+    }
+    // 视频/音频：SW 伪造 fetch 断点续传（原生控件 + 进度条）
     const url = `${import.meta.env.BASE_URL}swdrive/${encodeURIComponent(item.hash)}?name=${encodeURIComponent(name)}${item.size ? '&size=' + item.size : ''}`;
     setPreview({ hash: item.hash, name, kind, loading: false, error: '', text: '', url, imgIndex: imgIdx });
-    if (kind === 'image') setViewer({ scale: 1, x: 0, y: 0 });
   };
 
   const closePreview = () => {
