@@ -310,10 +310,10 @@ export default function NodeControl() {
                   </div>
                 )}
                 {!preview.loading && !preview.error && preview.kind === 'video' && preview.url && (
-                  <video src={preview.url} controls autoPlay className="w-full max-h-[86vh] rounded bg-black" />
+                  <video src={preview.url} controls autoPlay className="w-full h-[calc(100vh-150px)] object-contain rounded bg-black" />
                 )}
                 {preview.kind === 'text' && preview.text != null && (
-                  <pre className="text-xs text-gray-300 bg-black/40 rounded p-3 max-h-[82vh] overflow-auto whitespace-pre-wrap break-all">{preview.text}</pre>
+                  <pre className="text-xs text-gray-300 bg-black/40 rounded p-3 h-[calc(100vh-150px)] overflow-auto whitespace-pre-wrap break-all">{preview.text}</pre>
                 )}
               </div>
             </div>
