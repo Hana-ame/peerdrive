@@ -55,8 +55,9 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
     return v.toFixed(v < 10 ? 1 : 0) + ' ' + u[i];
   };
 
-  const handleConnect = async () => {
-    const target = targetPeerId.trim();
+  // 拨号核心：直接按传入的 peerId 连接（不依赖 state，搜索列表点击可立即调用）
+  const connectTo = async (peerId) => {
+    const target = (peerId || '').trim();
     if (!target) return;
     setPdStatus('connecting');
     setPdError('');
@@ -87,6 +88,8 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
     }
   };
 
+  const handleConnect = () => connectTo(targetPeerId);
+
   const handleDisconnect = () => {
     clearNodeSession();
     try { pdClient?.close?.(); } catch (e) { /* 忽略 */ }
@@ -114,12 +117,12 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
     }
   };
 
-  // 从搜索结果直接拨号
+  // 从搜索结果直接拨号（点击即连，不再回填输入框）
   const handleJoinFound = (peerId) => {
     setTargetPeerId(peerId);
     setFoundNodes(null);
     setSearchStatus('idle');
-    handleConnect();
+    connectTo(peerId);
   };
 
   const handleSave = async (item) => {
