@@ -6,6 +6,9 @@ import Connect from './pages/Connect';
 import Drive from './pages/Drive';
 import Collections from './pages/Collections';
 import Settings from './pages/Settings';
+import Transfers from './pages/Transfers';
+import BT from './pages/BT';
+import IPFS from './pages/IPFS';
 
 // 建设中占位页（模块②③④⑤⑥逐个替换）
 function Placeholder({ title }) {
@@ -23,8 +26,10 @@ const NAV = [
   { to: '/', label: '连接节点' },
   { to: '/drive', label: '我的网盘' },
   { to: '/collections', label: '合集' },
-  { to: '/settings', label: '设置' },
   { to: '/transfers', label: '传输任务' },
+  { to: '/bt', label: 'BT' },
+  { to: '/ipfs', label: 'IPFS' },
+  { to: '/settings', label: '设置' },
 ];
 
 function Nav() {
@@ -57,7 +62,9 @@ export default function App() {
             <Route path="/drive" element={<Drive />} />
             <Route path="/collections" element={<Collections />} />
             <Route path="/settings" element={<Settings />} />
-            <Route path="/transfers" element={<Placeholder title="传输任务" />} />
+            <Route path="/transfers" element={<Transfers />} />
+            <Route path="/bt" element={<BT />} />
+            <Route path="/ipfs" element={<IPFS />} />
             <Route path="*" element={<Placeholder title="页面不存在" />} />
           </Routes>
         </div>
