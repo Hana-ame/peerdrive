@@ -78,18 +78,54 @@ export default function NodeControl() {
       setPreview({ hash: item.hash, name, kind, error: `文件过大（${fmtBytes(item.size)}），请下载后查看` });
       return;
     }
-    setPreview({ hash: item.hash, name, kind, loading: true, error: '' });
+    const total = item.size || 0;
+    setPreview({ hash: item.hash, name, kind, loading: true, error: '', text: '', url: '', progress: { loaded: 0, total } });
+
+    // stream 边加载边显示：文本逐块实时渲染；图片/视频逐块收集并刷新进度（完成后出图/播放）
+    const mkUrl = (final) => {
+      setPreview(p => {
+        if (p?.url) URL.revokeObjectURL(p.url);
+        return final ? { ...p, loading: false, url: mkBlobUrl(p._chunks || []) } : p;
+      });
+    };
+    const mkBlobUrl = (chunks) => URL.createObjectURL(new Blob(chunks, { type: mimeOf(name) }));
+    const doneP = (extra) => setPreview(p => ({ ...p, ...extra }));
+
     try {
       if (kind === 'text') {
-        const text = await session.client.fetchText(item.hash);
-        setPreview(p => ({ ...p, loading: false, text }));
+        const dec = new TextDecoder('utf-8');
+        let acc = '';
+        let loaded = 0;
+        for await (const chunk of session.client.stream(item.hash)) {
+          loaded += chunk.byteLength;
+          const piece = dec.decode(chunk, { stream: true });
+          acc += piece;
+          setPreview(p => (p && p.hash === item.hash ? { ...p, text: acc, progress: { loaded, total } } : p));
+          // 让出主线程，保证大文本下 UI 仍能逐块刷新
+          await new Promise(r => setTimeout(r, 0));
+        }
+        acc += dec.decode();
+        doneP({ text: acc, loading: false, progress: { loaded, total } });
       } else {
-        const blob = await session.client.fetchBlob(item.hash, { name, mime: mimeOf(name) });
-        const url = URL.createObjectURL(blob);
-        setPreview(p => ({ ...p, loading: false, url }));
+        const chunks = [];
+        let loaded = 0;
+        for await (const chunk of session.client.stream(item.hash)) {
+          chunks.push(chunk);
+          loaded += chunk.byteLength;
+          // 每收 1MB 或收齐时重建 blob URL，图片边下边显示
+          if (loaded % (1024 * 1024) < chunk.byteLength || loaded >= total) {
+            setPreview(p => {
+              if (!p || p.hash !== item.hash) return p;
+              if (p.url) URL.revokeObjectURL(p.url);
+              return { ...p, url: URL.createObjectURL(new Blob(chunks, { type: mimeOf(name) })), progress: { loaded, total } };
+            });
+            await new Promise(r => setTimeout(r, 0));
+          }
+        }
+        doneP({ loading: false, progress: { loaded: loaded || total, total } });
       }
     } catch (e) {
-      setPreview(p => ({ ...p, loading: false, error: e?.message || String(e) }));
+      setPreview(p => (p && p.hash === item.hash ? { ...p, loading: false, error: e?.message || String(e) } : p));
     }
   };
 
@@ -99,6 +135,8 @@ export default function NodeControl() {
       return null;
     });
   };
+
+  const pct = (loaded, total) => (total ? Math.min(100, Math.round((loaded / total) * 100)) : 0);
 
   const disconnect = () => {
     clearNodeSession();
@@ -153,24 +191,38 @@ export default function NodeControl() {
         <h2 className="text-sm font-semibold text-gray-200 mb-2">对端共享{share ? `（${share.total ?? 0} 项）` : ''}</h2>
 
         {preview && (
-          <div className="card-surface p-4 mb-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm text-gray-200 font-mono truncate max-w-[80%]">{preview.name || preview.hash}</p>
-              <button onClick={closePreview} className="btn-ghost !px-2 !py-1 !text-xs">关闭</button>
-            </div>
-            {preview.loading && <p className="text-xs text-gray-500 py-8 text-center">加载中...</p>}
-            {preview.error && <p className="text-xs text-red-400 py-4">{preview.error}</p>}
-            {!preview.loading && !preview.error && preview.kind === 'image' && preview.url && (
-              <div className="flex justify-center">
-                <img src={preview.url} alt={preview.name} className="max-w-full max-h-[60vh] rounded object-contain" />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={closePreview}>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+            <div className="relative max-w-4xl w-full max-h-[88vh] card-surface overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] shrink-0">
+                <p className="text-sm text-gray-200 font-mono truncate pr-4">{preview.name || preview.hash}</p>
+                <button onClick={closePreview} className="btn-ghost !px-2 !py-1 !text-xs shrink-0">关闭 ✕</button>
               </div>
-            )}
-            {!preview.loading && !preview.error && preview.kind === 'video' && preview.url && (
-              <video src={preview.url} controls className="w-full max-h-[60vh] rounded bg-black" />
-            )}
-            {!preview.loading && !preview.error && preview.kind === 'text' && preview.text != null && (
-              <pre className="text-xs text-gray-300 bg-black/40 rounded p-3 max-h-[55vh] overflow-auto whitespace-pre-wrap break-all">{preview.text}</pre>
-            )}
+              <div className="flex-1 overflow-auto p-4">
+                {preview.loading && (
+                  <div className="flex flex-col items-center gap-2 py-8">
+                    <p className="text-xs text-gray-400">
+                      加载中… {preview.progress?.loaded ? `${fmtBytes(preview.progress.loaded)}${preview.progress.total ? ' / ' + fmtBytes(preview.progress.total) : ''} (${pct(preview.progress.loaded, preview.progress.total)}%)` : ''}
+                    </p>
+                    <div className="w-64 h-1.5 bg-white/[0.08] rounded overflow-hidden">
+                      <div className="h-full bg-brand-500 transition-all" style={{ width: pct(preview.progress?.loaded, preview.progress?.total) + '%' }} />
+                    </div>
+                  </div>
+                )}
+                {preview.error && <p className="text-xs text-red-400 py-4">{preview.error}</p>}
+                {!preview.error && preview.kind === 'image' && preview.url && (
+                  <div className="flex justify-center">
+                    <img src={preview.url} alt={preview.name} className="max-w-full max-h-[70vh] rounded object-contain" />
+                  </div>
+                )}
+                {!preview.loading && !preview.error && preview.kind === 'video' && preview.url && (
+                  <video src={preview.url} controls autoPlay className="w-full max-h-[70vh] rounded bg-black" />
+                )}
+                {preview.kind === 'text' && preview.text != null && (
+                  <pre className="text-xs text-gray-300 bg-black/40 rounded p-3 max-h-[65vh] overflow-auto whitespace-pre-wrap break-all">{preview.text}</pre>
+                )}
+              </div>
+            </div>
           </div>
         )}
         {share === null ? (
