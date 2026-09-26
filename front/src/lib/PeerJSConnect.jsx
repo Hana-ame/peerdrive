@@ -34,7 +34,6 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
   const [sigHost, setSigHost] = useState(DEFAULT_SIG.host);
   const [sigPort, setSigPort] = useState(String(DEFAULT_SIG.port));
   const [sigKey, setSigKey] = useState(DEFAULT_SIG.key);
-  const [sigSecure, setSigSecure] = useState(DEFAULT_SIG.secure);
   const [targetPeerId, setTargetPeerId] = useState('');
   const myIdRef = useRef(getStableMyId());
   const [pdClient, setPdClient] = useState(null);
@@ -69,7 +68,7 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
           port: Number(sigPort.trim()) || DEFAULT_SIG.port,
           path: DEFAULT_SIG.path,
           key: sigKey.trim() || DEFAULT_SIG.key,
-          secure: sigSecure,
+          secure: DEFAULT_SIG.secure, // 信令恒走 wss（HTTPS 加密），不提供开关
           id: myIdRef.current,
         },
         connOptions: { serialization: 'raw', reliable: true },
@@ -105,7 +104,7 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
     setSearchErr('');
     try {
       const nodes = await discoverNodes(
-        { host: sigHost.trim() || DEFAULT_SIG.host, port: Number(sigPort.trim()) || DEFAULT_SIG.port, secure: sigSecure },
+        { host: sigHost.trim() || DEFAULT_SIG.host, port: Number(sigPort.trim()) || DEFAULT_SIG.port, secure: DEFAULT_SIG.secure },
         { timeoutMs: 8000 },
       );
       setFoundNodes(nodes);
@@ -157,12 +156,7 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
           </div>
         </div>
       )}
-      {!compact && (
-        <label className="flex items-center gap-2 text-xs text-gray-400">
-          <input type="checkbox" checked={sigSecure} onChange={e => setSigSecure(e.target.checked)} className="accent-brand-500" />
-          HTTPS（secure）
-        </label>
-      )}
+
 
       {/* 搜索在线节点 */}
       <div>
