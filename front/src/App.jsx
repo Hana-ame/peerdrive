@@ -23,14 +23,10 @@ function Placeholder({ title }) {
   );
 }
 
+// 导航只留当前在用的入口（2026-09-26：网盘/合集/传输/BT/IPFS/设置暂时都用不到，
+// 从导航隐藏；页面路由保留，直接访问 URL 仍可打开）
 const NAV = [
   { to: '/', label: '连接节点' },
-  { to: '/drive', label: '我的网盘' },
-  { to: '/collections', label: '合集' },
-  { to: '/transfers', label: '传输任务' },
-  { to: '/bt', label: 'BT' },
-  { to: '/ipfs', label: 'IPFS' },
-  { to: '/settings', label: '设置' },
 ];
 
 function Nav() {
