@@ -52,6 +52,7 @@ export default function NodeControl() {
   // 图片查看器：缩放 + 拖拽平移
   const [viewer, setViewer] = useState({ scale: 1, x: 0, y: 0 });
   const dragRef = useRef(null);
+  const [downloading, setDownloading] = useState(null); // {hash,name,loaded,total}
 
   const loadShares = useCallback(async () => {
     if (!session?.client) return;
@@ -65,9 +66,34 @@ export default function NodeControl() {
   useEffect(() => { loadShares(); }, [loadShares]);
 
   const save = async (item) => {
+    if (downloading) return;
+    const name = item.path || item.name || 'download';
+    const total = item.size || 0;
+    setDownloading({ hash: item.hash, name, loaded: 0, total });
     try {
-      await session.client.saveAs(item.hash, item.path || item.name || 'download');
-    } catch (e) { setErr(e?.message || String(e)); }
+      // stream 流式拉取 + 进度；收齐后触发浏览器下载
+      const chunks = [];
+      let loaded = 0;
+      for await (const chunk of session.client.stream(item.hash)) {
+        chunks.push(chunk);
+        loaded += chunk.byteLength;
+        setDownloading(d => (d && d.hash === item.hash ? { ...d, loaded } : d));
+        await new Promise(r => setTimeout(r, 0));
+      }
+      const blob = new Blob(chunks, { type: mimeOf(name) });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = String(name).split(/[\\/]/).pop() || 'download';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    } catch (e) {
+      setErr(e?.message || String(e));
+    } finally {
+      setDownloading(null);
+    }
   };
 
   // 点击文件名：可预览 → 预览；否则直接下载
@@ -362,5 +388,16 @@ export default function NodeControl() {
         )}
       </div>
     </div>
+
+    {/* 下载进度条（页面底部浮动） */}
+    {downloading && (
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 card-surface px-5 py-3 flex items-center gap-3">
+        <p className="text-xs text-gray-300 max-w-[240px] truncate">下载中：{downloading.name}</p>
+        <div className="w-48 h-1.5 bg-white/[0.08] rounded overflow-hidden">
+          <div className="h-full bg-brand-500 transition-all" style={{ width: pct(downloading.loaded, downloading.total) + '%' }} />
+        </div>
+        <span className="text-xs text-gray-400 w-12 text-right">{pct(downloading.loaded, downloading.total)}%</span>
+      </div>
+    )}
   );
 }
