@@ -5,7 +5,7 @@
 // 抽成独立组件：Settings 节点连接分区与首页（Plaza）共用。
 import React, { useState, useRef } from 'react';
 import Peer from 'peerjs';
-import { connectToPeer } from '../lib/pd-client';
+import { connectToPeer, discoverNodes } from '../lib/pd-client';
 
 const DEFAULT_SIG = {
   host: 'peersignal.moonchan.xyz',
@@ -41,6 +41,10 @@ export default function PeerJSConnect({ compact = false }) {
   const [pdError, setPdError] = useState('');
   const [pdShare, setPdShare] = useState(null);
   const [collOpen, setCollOpen] = useState(null); // 展开的合集下标
+  // 搜索在线节点（信令 discover）
+  const [foundNodes, setFoundNodes] = useState(null); // null=未搜 | [] = 空
+  const [searchStatus, setSearchStatus] = useState('idle'); // idle|searching|error
+  const [searchErr, setSearchErr] = useState('');
 
   const fmtBytes = (n) => {
     if (!n || n === 0) return '—';
@@ -87,6 +91,32 @@ export default function PeerJSConnect({ compact = false }) {
     setCollOpen(null);
   };
 
+  // 经公共信令搜当前在线节点
+  const handleSearch = async () => {
+    setSearchStatus('searching');
+    setSearchErr('');
+    try {
+      const nodes = await discoverNodes(
+        { host: sigHost.trim() || DEFAULT_SIG.host, port: Number(sigPort.trim()) || DEFAULT_SIG.port, secure: sigSecure },
+        { timeoutMs: 8000 },
+      );
+      setFoundNodes(nodes);
+      setSearchStatus('done');
+    } catch (e) {
+      setSearchStatus('error');
+      setSearchErr(e?.message || String(e));
+      setFoundNodes(null);
+    }
+  };
+
+  // 从搜索结果直接拨号
+  const handleJoinFound = (peerId) => {
+    setTargetPeerId(peerId);
+    setFoundNodes(null);
+    setSearchStatus('idle');
+    handleConnect();
+  };
+
   const handleSave = async (item) => {
     if (!pdClient) return;
     try {
@@ -122,6 +152,36 @@ export default function PeerJSConnect({ compact = false }) {
           HTTPS（secure）
         </label>
       )}
+
+      {/* 搜索在线节点 */}
+      <div>
+        <div className="flex gap-2">
+          <button onClick={handleSearch} disabled={searchStatus === 'searching'}
+            className="px-3 py-1 text-xs bg-white/[0.06] text-gray-300 rounded-lg hover:bg-white/[0.12] disabled:opacity-40 whitespace-nowrap">
+            {searchStatus === 'searching' ? '搜索中...' : '搜索在线节点'}
+          </button>
+          <span className="text-xs self-center">
+            {searchStatus === 'error' && <span className="text-red-400">{searchErr}</span>}
+            {searchStatus === 'done' && <span className="text-gray-400">{foundNodes?.length ?? 0} 个在线节点</span>}
+          </span>
+        </div>
+        {searchStatus === 'done' && foundNodes && foundNodes.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {foundNodes.map((n, i) => (
+              <li key={i} className="flex items-center gap-2 text-xs bg-white/[0.04] px-2 py-1.5 rounded border border-white/[0.05]">
+                <span className="flex-1 truncate text-gray-300 font-mono">{n.peerId}</span>
+                <span className="text-gray-500 shrink-0">{n.nodeType || ''}</span>
+                <span className="text-gray-600 shrink-0">{Array.isArray(n.collections) ? n.collections.length + ' 合集' : ''}</span>
+                <button onClick={() => handleJoinFound(n.peerId)}
+                  className="px-2 py-0.5 text-[10px] bg-brand-600 text-white rounded hover:bg-brand-500 shrink-0">连接</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {searchStatus === 'done' && foundNodes && foundNodes.length === 0 && (
+          <p className="text-[10px] text-gray-600 mt-1.5">当前没有在线节点（节点在线后会经信令 announce）。</p>
+        )}
+      </div>
 
       <div>
         {!compact && <label className="block text-[10px] text-gray-500 mb-1">目标节点 peer id（拨号对象）</label>}

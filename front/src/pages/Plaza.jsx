@@ -116,7 +116,7 @@ export default function Plaza() {
         <div className="mb-4">
           <div className="bg-white/[0.03] rounded-card border border-white/[0.06] p-4">
             <p className="text-xs text-gray-400 mb-2">
-              连接节点（PeerJS）<span className="text-gray-600">——填对端 peer id 经公共信令拨号，看对方共享的文件/合集并保存</span>
+              节点搜索 / 连接（PeerJS）<span className="text-gray-600">——搜索在线节点、按 peer id 拨号连接，看对方共享的文件/合集并保存</span>
             </p>
             <PeerJSConnect compact />
           </div>
