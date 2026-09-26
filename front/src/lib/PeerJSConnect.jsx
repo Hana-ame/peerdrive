@@ -3,7 +3,7 @@
 // 完整 UI 里连对端节点的第二种方式：经公共信令按 peer id 拨号目标节点，
 // 看对方共享的单独文件 / 合集，并可直接保存。与 WebSocket/HTTP（管理面）并列。
 // 抽成独立组件：Settings 节点连接分区与首页（Plaza）共用。
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Peer from 'peerjs';
 import { connectToPeer, discoverNodes } from './pd-client';
 import { setNodeSession, clearNodeSession } from './nodeSession';
@@ -116,6 +116,9 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
       setFoundNodes(null);
     }
   };
+
+  // 挂载即自动搜索在线节点（不用手动点「搜索在线节点」；按钮留着手动刷新）
+  useEffect(() => { handleSearch(); }, []);
 
   // 从搜索结果直接拨号（点击即连，不再回填输入框）
   const handleJoinFound = (peerId) => {
