@@ -104,7 +104,7 @@ export default function App() {
     <AppContext.Provider value={{ username, setUsername: handleUsernameChange, nodeInfo, setNodeInfo }}>
       <PageContext.Provider value={{ pageContext, setPageContext }}>
         <AppErrorBoundary>
-          <BrowserRouter>
+          <BrowserRouter basename={import.meta.env.BASE_URL}>
           <div className="flex flex-col h-screen text-gray-200">
             <Navbar />
             <div className="flex-1 overflow-hidden">
