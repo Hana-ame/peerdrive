@@ -1,6 +1,6 @@
 // 节点控制页：连接成功后跳转过来的对端节点控制屏幕。
 // 从全局会话取已连接的对端：节点信息 / 共享（文件·合集）/ 保存 / 断开。
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { getNodeSession, clearNodeSession } from '../lib/nodeSession';
 
@@ -48,7 +48,10 @@ export default function NodeControl() {
   const [share, setShare] = useState(null); // null=加载中
   const [err, setErr] = useState('');
   const [collOpen, setCollOpen] = useState(null);
-  const [preview, setPreview] = useState(null); // {hash,name,kind,url?,text?,loading,error}
+  const [preview, setPreview] = useState(null); // {hash,name,kind,url?,text?,loading,error,imgIndex?}
+  // 图片查看器：缩放 + 拖拽平移
+  const [viewer, setViewer] = useState({ scale: 1, x: 0, y: 0 });
+  const dragRef = useRef(null);
 
   const loadShares = useCallback(async () => {
     if (!session?.client) return;
@@ -86,7 +89,10 @@ export default function NodeControl() {
       return;
     }
     const total = item.size || 0;
-    setPreview({ hash: item.hash, name, kind, loading: true, error: '', text: '', url: '', progress: { loaded: 0, total } });
+    const imgList = (share?.files || []).filter(f => kindOf(f.path || f.name) === 'image');
+    const imgIdx = kind === 'image' ? imgList.findIndex(f => f.hash === item.hash) : null;
+    setPreview({ hash: item.hash, name, kind, loading: true, error: '', text: '', url: '', progress: { loaded: 0, total }, imgIndex: imgIdx });
+    if (kind === 'image') setViewer({ scale: 1, x: 0, y: 0 });
 
     // stream 边加载边显示：文本逐块实时渲染；图片/视频逐块收集并刷新进度（完成后出图/播放）
     const mkUrl = (final) => {
@@ -144,6 +150,26 @@ export default function NodeControl() {
   };
 
   const pct = (loaded, total) => (total ? Math.min(100, Math.round((loaded / total) * 100)) : 0);
+
+  // ── 图片查看器：缩放 / 翻页 / 拖拽平移 ──
+  const zoomBy = (factor) => setViewer(v => ({ ...v, scale: Math.min(5, Math.max(0.1, +(v.scale * factor).toFixed(2))) }));
+  const resetZoom = () => setViewer({ scale: 1, x: 0, y: 0 });
+  const goImg = (delta) => {
+    const imgList = (share?.files || []).filter(f => kindOf(f.path || f.name) === 'image');
+    if (imgList.length < 2 || preview?.imgIndex == null) return;
+    const next = (preview.imgIndex + delta + imgList.length) % imgList.length;
+    openPreview(imgList[next]);
+  };
+  const onDragStart = (e) => {
+    if (preview?.kind !== 'image' || viewer.scale <= 1) return;
+    dragRef.current = { sx: e.clientX, sy: e.clientY, ox: viewer.x, oy: viewer.y };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onDragMove = (e) => {
+    if (!dragRef.current) return;
+    setViewer(v => ({ ...v, x: dragRef.current.ox + (e.clientX - dragRef.current.sx), y: dragRef.current.oy + (e.clientY - dragRef.current.sy) }));
+  };
+  const onDragEnd = () => { dragRef.current = null; };
 
   const disconnect = () => {
     clearNodeSession();
@@ -218,8 +244,44 @@ export default function NodeControl() {
                 )}
                 {preview.error && <p className="text-xs text-red-400 py-4">{preview.error}</p>}
                 {!preview.error && preview.kind === 'image' && preview.url && (
-                  <div className="flex justify-center">
-                    <img src={preview.url} alt={preview.name} className="max-w-full max-h-[70vh] rounded object-contain" />
+                  <div>
+                    {/* 查看器工具条 */}
+                    <div className="flex items-center justify-between gap-2 mb-2 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => zoomBy(0.8)} className="w-7 h-7 rounded bg-white/[0.06] hover:bg-white/[0.12] text-gray-300">−</button>
+                        <span className="w-14 text-center text-gray-400">{Math.round(viewer.scale * 100)}%</span>
+                        <button onClick={() => zoomBy(1.25)} className="w-7 h-7 rounded bg-white/[0.06] hover:bg-white/[0.12] text-gray-300">+</button>
+                        <button onClick={resetZoom} className="px-2 h-7 rounded bg-white/[0.06] hover:bg-white/[0.12] text-gray-300">1:1</button>
+                      </div>
+                      {(share?.files || []).filter(f => kindOf(f.path || f.name) === 'image').length > 1 && (
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => goImg(-1)} className="w-7 h-7 rounded bg-white/[0.06] hover:bg-white/[0.12] text-gray-300">←</button>
+                          <span className="text-gray-400">{(preview.imgIndex ?? 0) + 1}/{(share?.files || []).filter(f => kindOf(f.path || f.name) === 'image').length}</span>
+                          <button onClick={() => goImg(1)} className="w-7 h-7 rounded bg-white/[0.06] hover:bg-white/[0.12] text-gray-300">→</button>
+                        </div>
+                      )}
+                    </div>
+                    {/* 图片区：放大后可拖拽平移 */}
+                    <div
+                      className="relative bg-black/30 rounded overflow-hidden select-none"
+                      style={{ height: '58vh' }}
+                      onPointerDown={onDragStart}
+                      onPointerMove={onDragMove}
+                      onPointerUp={onDragEnd}
+                      onPointerLeave={onDragEnd}
+                      onWheel={e => { e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.1 : 0.9); }}
+                    >
+                      <img
+                        src={preview.url}
+                        alt={preview.name}
+                        draggable={false}
+                        style={{
+                          transform: `translate(${viewer.x}px, ${viewer.y}px) scale(${viewer.scale})`,
+                          cursor: viewer.scale > 1 ? 'grab' : 'default',
+                        }}
+                        className="absolute inset-0 m-auto max-w-full max-h-full object-contain"
+                      />
+                    </div>
                   </div>
                 )}
                 {!preview.loading && !preview.error && preview.kind === 'video' && preview.url && (
