@@ -4,6 +4,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import Connect from './pages/Connect';
 import Drive from './pages/Drive';
+import Collections from './pages/Collections';
 
 // 建设中占位页（模块②③④⑤⑥逐个替换）
 function Placeholder({ title }) {
@@ -53,7 +54,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Connect />} />
             <Route path="/drive" element={<Drive />} />
-            <Route path="/collections" element={<Placeholder title="合集" />} />
+            <Route path="/collections" element={<Collections />} />
             <Route path="/settings" element={<Placeholder title="设置" />} />
             <Route path="/transfers" element={<Placeholder title="传输任务" />} />
             <Route path="*" element={<Placeholder title="页面不存在" />} />
