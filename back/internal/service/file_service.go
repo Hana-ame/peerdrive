@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"mime"
 	"net/http"
 	"os"
@@ -147,7 +148,16 @@ func (s *FileService) allowedRoots() []string {
 			roots = append(roots, s.cfg.DownloadDir)
 		}
 	}
-	return roots
+	// 统一真实化：允许根若是软链（如 ~/Downloads → /mnt/c/...），Eval 成真实路径，
+	// 否则 RegisterFolder(Eval 后的真实路径) 与 root(软链) 永远匹配不上。
+	out := make([]string, 0, len(roots))
+	for _, r := range roots {
+		if real, err := filepath.EvalSymlinks(r); err == nil {
+			r = real
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 func (s *FileService) isPathAllowed(absPath string) bool {
@@ -281,6 +291,10 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 	if !filepath.IsAbs(folderPath) {
 		absDir = filepath.Join(s.storageDir, folderPath)
 	}
+	// 跟随软链（~/Downloads → /mnt/c/...）：否则 WalkDir 把软链当普通文件，遍历为空。
+	if real, err := filepath.EvalSymlinks(absDir); err == nil {
+		absDir = real
+	}
 
 	// 安全边界：文件夹也必须锚定 storage 根目录内（否则批量读取任意目录）。
 	if !s.isPathAllowed(absDir) {
@@ -288,15 +302,41 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 		return nil, fmt.Errorf("path outside storage root")
 	}
 
+	// 深度限制：只递归到 FolderMaxDepth 层（默认 1 = 只扫当前目录，不下钻子目录）。
+	// 背景：~/Downloads 这类大目录有上千子目录（含 .git / 解压产物），无限制递归
+	// 会把 25GB / 数千目录一次全拉进来（2026-09-26 用户要求）。
+	maxDepth := 1
+	if s.cfg != nil && s.cfg.FolderMaxDepth > 0 {
+		maxDepth = s.cfg.FolderMaxDepth
+	}
+
 	var results []map[string]string
-	err := filepath.Walk(absDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+	err := filepath.WalkDir(absDir, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		if info.IsDir() {
+		if p == absDir {
+			return nil // 根目录本身不下钻判断
+		}
+		rel, relErr := filepath.Rel(absDir, p)
+		if relErr != nil {
+			return relErr
+		}
+		depth := strings.Count(rel, string(filepath.Separator)) + 1
+		if d.IsDir() {
+			if depth > maxDepth {
+				return filepath.SkipDir
+			}
 			return nil
 		}
-		hash, err := s.RegisterLocal(path, info.Name())
+		if depth > maxDepth {
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return infoErr
+		}
+		hash, err := s.RegisterLocal(p, info.Name())
 		if err != nil {
 			return err
 		}

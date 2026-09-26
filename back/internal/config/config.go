@@ -91,6 +91,7 @@ type Config struct {
 	URLSourceTemplate string
 
 	DownloadDir         string
+	FolderMaxDepth      int // PEERDRIVE_FOLDER_MAX_DEPTH：register_folder 递归最大深度（默认 1=只扫当前目录）
 	MaxPeers            int
 	DownloadOrder       string
 	DownloadTimeoutSecs int
@@ -223,6 +224,7 @@ func Load() *Config {
 		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
 
 		DownloadDir: getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
+		FolderMaxDepth: getEnvInt("PEERDRIVE_FOLDER_MAX_DEPTH", 1),
 		MaxPeers:    getEnvInt("PEERDRIVE_MAX_PEERS", 8),
 
 		ShareEnable:      getEnvBool("PEERDRIVE_SHARE_ENABLE", false),
