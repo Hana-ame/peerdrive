@@ -2,9 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 根字号 16px → 18px：Tailwind 的字号/间距用 rem，整体等比放大（2026-09-25 前端重做后字号偏小） */
+/* 根字号 16px → 22px：Tailwind 的字号/间距用 rem，整体等比放大（2026-09-25 前端重做后字号偏小；18px 仍被嫌小，继续放大） */
 html {
-  font-size: 18px;
+  font-size: 22px;
 }
 
 /* ── 统一组件工具类（2026-09-24 UI 风格批次）──
