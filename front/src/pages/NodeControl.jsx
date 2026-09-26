@@ -250,14 +250,13 @@ export default function NodeControl() {
         <h2 className="text-sm font-semibold text-gray-200 mb-2">对端共享{share ? `（${share.total ?? 0} 项）` : ''}</h2>
 
         {preview && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={closePreview}>
-            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-            <div className="relative max-w-4xl w-full max-h-[88vh] card-surface overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 z-50 flex flex-col bg-black" onClick={closePreview}>
+            <div className="relative flex-1 min-h-0 flex flex-col" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] shrink-0">
                 <p className="text-sm text-gray-200 font-mono truncate pr-4">{preview.name || preview.hash}</p>
                 <button onClick={closePreview} className="btn-ghost !px-2 !py-1 !text-xs shrink-0">关闭 ✕</button>
               </div>
-              <div className="flex-1 overflow-auto p-4">
+              <div className="flex-1 min-h-0 overflow-auto p-3">
                 {preview.loading && (
                   <div className="flex flex-col items-center gap-2 py-8">
                     <p className="text-xs text-gray-400">
@@ -290,7 +289,7 @@ export default function NodeControl() {
                     {/* 图片区：放大后可拖拽平移 */}
                     <div
                       className="relative bg-black/30 rounded overflow-hidden select-none"
-                      style={{ height: '58vh' }}
+                      style={{ height: 'calc(100vh - 150px)' }}
                       onPointerDown={onDragStart}
                       onPointerMove={onDragMove}
                       onPointerUp={onDragEnd}
@@ -311,10 +310,10 @@ export default function NodeControl() {
                   </div>
                 )}
                 {!preview.loading && !preview.error && preview.kind === 'video' && preview.url && (
-                  <video src={preview.url} controls autoPlay className="w-full max-h-[70vh] rounded bg-black" />
+                  <video src={preview.url} controls autoPlay className="w-full max-h-[86vh] rounded bg-black" />
                 )}
                 {preview.kind === 'text' && preview.text != null && (
-                  <pre className="text-xs text-gray-300 bg-black/40 rounded p-3 max-h-[65vh] overflow-auto whitespace-pre-wrap break-all">{preview.text}</pre>
+                  <pre className="text-xs text-gray-300 bg-black/40 rounded p-3 max-h-[82vh] overflow-auto whitespace-pre-wrap break-all">{preview.text}</pre>
                 )}
               </div>
             </div>
