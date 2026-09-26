@@ -147,6 +147,26 @@ export default function NodeControl() {
     });
   };
 
+  // 媒体加载失败兜底：SW 未接管/流异常时改用内存 blob（objectURL）渲染
+  const fallbackBlob = async () => {
+    const cur = preview;
+    if (!cur || !cur.hash) return;
+    try {
+      const blob = await session.client.fetchBlob(cur.hash, { name: cur.name || '', mime: mimeOf(cur.name || '') });
+      const u = URL.createObjectURL(blob);
+      setPreview(p => (p && p.hash === cur.hash ? { ...p, url: u, error: '', _blob: true } : p));
+    } catch (e) {
+      setPreview(p => (p && p.hash === cur.hash ? { ...p, error: '预览失败：' + (e?.message || String(e)) } : p));
+    }
+  };
+  const onMediaError = () => {
+    if (preview?._blob) {
+      setPreview(p => (p ? { ...p, error: '媒体加载失败（可返回列表或下载查看）' } : p));
+      return;
+    }
+    fallbackBlob();
+  };
+
   // 拦截 back：预览开着时按后退 → 关闭预览回到文件列表（不离开页面）
   useEffect(() => {
     const onPop = () => {
@@ -307,7 +327,7 @@ export default function NodeControl() {
                   <video
                     src={preview.url}
                     controls autoPlay
-                    onError={() => setPreview(p => (p ? { ...p, error: '媒体加载失败：Service Worker 未接管 /swdrive 或连接已断开（返回列表重试）' } : p))}
+                    onError={onMediaError}
                     className="w-full h-[calc(100vh-150px)] object-contain rounded bg-black"
                   />
                 )}
