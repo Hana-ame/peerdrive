@@ -242,11 +242,15 @@ export default function NodeControl() {
                       <li key={i} className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-white/[0.02]">
                         <span className="flex-1 truncate text-gray-200">{f.path || f.name}</span>
                         <span className="text-gray-500 shrink-0 whitespace-nowrap">{fmtBytes(f.size)}</span>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {kindOf(f.path || f.name) && (
-                            <button onClick={() => openPreview(f)}
-                              className="text-[11px] px-2.5 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 whitespace-nowrap">预览</button>
-                          )}
+                        <div className="flex items-center justify-end gap-1.5 shrink-0 w-24">
+                          <button
+                            onClick={() => { if (kindOf(f.path || f.name)) openPreview(f); }}
+                            disabled={!kindOf(f.path || f.name)}
+                            className={`text-[11px] px-2.5 py-1 rounded whitespace-nowrap ${
+                              kindOf(f.path || f.name)
+                                ? 'bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 cursor-pointer'
+                                : 'bg-transparent text-transparent pointer-events-none'
+                            }`}>预览</button>
                           <button onClick={() => save(f)}
                             className="text-[11px] px-2.5 py-1 rounded bg-brand-600 hover:bg-brand-500 text-white whitespace-nowrap">保存</button>
                         </div>
@@ -277,11 +281,15 @@ export default function NodeControl() {
                               <li key={ei} className="flex items-center gap-3 py-1.5 text-sm">
                                 <span className="flex-1 truncate text-gray-400">{e.path}</span>
                                 <span className="text-gray-500 shrink-0 whitespace-nowrap">{fmtBytes(e.size)}</span>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  {kindOf(e.path) && (
-                                    <button onClick={() => openPreview({ ...e, name: e.path || 'download' })}
-                                      className="text-[11px] px-2.5 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 whitespace-nowrap">预览</button>
-                                  )}
+                                <div className="flex items-center justify-end gap-1.5 shrink-0 w-24">
+                                  <button
+                                    onClick={() => { if (kindOf(e.path)) openPreview({ ...e, name: e.path || 'download' }); }}
+                                    disabled={!kindOf(e.path)}
+                                    className={`text-[11px] px-2.5 py-1 rounded whitespace-nowrap ${
+                                      kindOf(e.path)
+                                        ? 'bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 cursor-pointer'
+                                        : 'bg-transparent text-transparent pointer-events-none'
+                                    }`}>预览</button>
                                   <button onClick={() => save({ ...e, name: e.path || 'download' })}
                                     className="text-[11px] px-2.5 py-1 rounded bg-brand-600 hover:bg-brand-500 text-white whitespace-nowrap">保存</button>
                                 </div>
