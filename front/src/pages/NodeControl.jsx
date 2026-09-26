@@ -135,7 +135,7 @@ export default function NodeControl() {
       return;
     }
     // 图片/视频/音频：SW 伪造 fetch 断点续传，原生元素渐进加载
-    const url = `${import.meta.env.BASE_URL}swdrive/${encodeURIComponent(item.hash)}?name=${encodeURIComponent(name)}`;
+    const url = `${import.meta.env.BASE_URL}swdrive/${encodeURIComponent(item.hash)}?name=${encodeURIComponent(name)}${item.size ? '&size=' + item.size : ''}`;
     setPreview({ hash: item.hash, name, kind, loading: false, error: '', text: '', url, imgIndex: imgIdx });
     if (kind === 'image') setViewer({ scale: 1, x: 0, y: 0 });
   };

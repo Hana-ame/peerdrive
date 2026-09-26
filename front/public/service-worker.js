@@ -146,9 +146,27 @@ function servePeerDriveStream(request) {
     const seg = url.pathname.split('/').filter(Boolean);
     const hash = decodeURIComponent(seg[seg.length - 1] || '');
     const name = url.searchParams.get('name') || '';
+    const sizeParam = parseInt(url.searchParams.get('size') || '', 10);
+    const total = Number.isFinite(sizeParam) && sizeParam > 0 ? sizeParam : null;
+
+    // Range 解析（支持播放器 seek）：bytes=a-b / bytes=a- / bytes=-n
     const range = parseRangeHeader(request.headers.get('Range'));
-    const offset = range && range.start != null ? range.start : 0;
-    const size = range && range.end != null ? range.end - range.start + 1 : -1;
+    let offset = 0;
+    let reqLen = null; // 请求段长度（null=全量）
+    let status = 200;
+    if (range && (range.start != null || range.end != null)) {
+      status = 206;
+      if (range.start != null) {
+        offset = range.start;
+      } else if (total != null && range.end != null) {
+        offset = Math.max(0, total - range.end); // 后缀段
+      }
+      let end = null;
+      if (range.end != null) end = range.end;
+      else if (total != null && range.start != null) end = total - 1;
+      if (end != null && offset <= end) reqLen = end - offset + 1;
+    }
+    const peerSize = reqLen != null ? reqLen : -1; // 向页面要的字节数（-1=到末尾）
 
     self.clients.matchAll({ includeUncontrolled: true }).then((clients) => {
       if (!clients.length) {
@@ -170,18 +188,19 @@ function servePeerDriveStream(request) {
       };
       // 只发给第一个 client（当前持有 PeerJS 连接的页面）
       clients[0].postMessage(
-        { type: 'pd-fetch', hash, name, offset, size, port: chan.port2 },
+        { type: 'pd-fetch', hash, name, offset, size: peerSize, port: chan.port2 },
         [chan.port2]
       );
 
-      const status = offset > 0 || size > -1 ? 206 : 200;
-      const headers = {
-        'Accept-Ranges': 'bytes',
-        'Content-Type': guessMimeSw(name),
-      };
-      if (status === 206) {
-        headers['Content-Range'] =
-          'bytes ' + offset + '-' + (size > -1 ? offset + size - 1 : '*') + '/' + '*';
+      const headers = { 'Accept-Ranges': 'bytes', 'Content-Type': guessMimeSw(name) };
+      if (status === 206 && total != null) {
+        const end = reqLen != null ? offset + reqLen - 1 : total - 1;
+        headers['Content-Range'] = 'bytes ' + offset + '-' + end + '/' + total;
+        if (reqLen != null) headers['Content-Length'] = String(reqLen);
+      } else if (status === 206) {
+        headers['Content-Range'] = 'bytes ' + offset + '-' + (reqLen != null ? offset + reqLen - 1 : '*') + '/' + '*';
+      } else if (total != null) {
+        headers['Content-Length'] = String(total); // 全量 + 真实长度：播放器才知道可 seek
       }
       resolve(new Response(stream, { status, headers }));
     });
