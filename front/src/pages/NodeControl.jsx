@@ -387,17 +387,17 @@ export default function NodeControl() {
           </div>
         )}
       </div>
-    </div>
 
-    {/* 下载进度条（页面底部浮动） */}
-    {downloading && (
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 card-surface px-5 py-3 flex items-center gap-3">
-        <p className="text-xs text-gray-300 max-w-[240px] truncate">下载中：{downloading.name}</p>
-        <div className="w-48 h-1.5 bg-white/[0.08] rounded overflow-hidden">
-          <div className="h-full bg-brand-500 transition-all" style={{ width: pct(downloading.loaded, downloading.total) + '%' }} />
-        </div>
-        <span className="text-xs text-gray-400 w-12 text-right">{pct(downloading.loaded, downloading.total)}%</span>
+        {/* 下载进度条（页面底部浮动） */}
+        {downloading && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 card-surface px-5 py-3 flex items-center gap-3">
+            <p className="text-xs text-gray-300 max-w-[240px] truncate">下载中：{downloading.name}</p>
+            <div className="w-48 h-1.5 bg-white/[0.08] rounded overflow-hidden">
+              <div className="h-full bg-brand-500 transition-all" style={{ width: pct(downloading.loaded, downloading.total) + '%' }} />
+            </div>
+            <span className="text-xs text-gray-400 w-12 text-right">{pct(downloading.loaded, downloading.total)}%</span>
+          </div>
+        )}
       </div>
-    )}
   );
 }
