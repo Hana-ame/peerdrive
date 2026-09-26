@@ -67,6 +67,13 @@ export default function NodeControl() {
     } catch (e) { setErr(e?.message || String(e)); }
   };
 
+  // 点击文件名：可预览 → 预览；否则直接下载
+  const openFile = (item) => {
+    const name = item.path || item.name || '';
+    if (kindOf(name)) openPreview(item);
+    else save(item);
+  };
+
   // 预览：按类型拉取内容
   const PREVIEW_LIMIT = 20 * 1024 * 1024; // 图片/视频预览内存上限 20MB
   const TEXT_LIMIT = 1024 * 1024;         // 文本预览上限 1MB
@@ -240,21 +247,14 @@ export default function NodeControl() {
                 <ul className="divide-y divide-white/[0.04]">
                   {share.files.map((f, i) => (
                       <li key={i} className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-white/[0.02]">
-                        <span className="flex-1 truncate text-gray-200">{f.path || f.name}</span>
-                        <span className="text-gray-500 shrink-0 whitespace-nowrap">{fmtBytes(f.size)}</span>
-                        <div className="flex items-center justify-end gap-1.5 shrink-0 w-24">
                           <button
-                            onClick={() => { if (kindOf(f.path || f.name)) openPreview(f); }}
-                            disabled={!kindOf(f.path || f.name)}
-                            className={`text-[11px] px-2.5 py-1 rounded whitespace-nowrap ${
-                              kindOf(f.path || f.name)
-                                ? 'bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 cursor-pointer'
-                                : 'bg-transparent text-transparent pointer-events-none'
-                            }`}>预览</button>
-                          <button onClick={() => save(f)}
-                            className="text-[11px] px-2.5 py-1 rounded bg-brand-600 hover:bg-brand-500 text-white whitespace-nowrap">保存</button>
-                        </div>
-                      </li>
+                            onClick={() => openFile(f)}
+                            title={kindOf(f.path || f.name) ? '点击预览' : '点击下载'}
+                            className="flex-1 truncate text-left text-gray-200 hover:text-brand-300 cursor-pointer transition-colors">
+                            {f.path || f.name}
+                          </button>
+                          <span className="text-gray-500 shrink-0 whitespace-nowrap">{fmtBytes(f.size)}</span>
+                        </li>
                     ))}
                 </ul>
               </div>
@@ -279,20 +279,13 @@ export default function NodeControl() {
                           <ul className="bg-white/[0.02] px-4 pb-2">
                             {entries.map((e, ei) => (
                               <li key={ei} className="flex items-center gap-3 py-1.5 text-sm">
-                                <span className="flex-1 truncate text-gray-400">{e.path}</span>
+                                <button
+                                  onClick={() => openFile({ ...e, name: e.path || 'download' })}
+                                  title={kindOf(e.path) ? '点击预览' : '点击下载'}
+                                  className="flex-1 truncate text-left text-gray-400 hover:text-brand-300 cursor-pointer transition-colors">
+                                  {e.path}
+                                </button>
                                 <span className="text-gray-500 shrink-0 whitespace-nowrap">{fmtBytes(e.size)}</span>
-                                <div className="flex items-center justify-end gap-1.5 shrink-0 w-24">
-                                  <button
-                                    onClick={() => { if (kindOf(e.path)) openPreview({ ...e, name: e.path || 'download' }); }}
-                                    disabled={!kindOf(e.path)}
-                                    className={`text-[11px] px-2.5 py-1 rounded whitespace-nowrap ${
-                                      kindOf(e.path)
-                                        ? 'bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 cursor-pointer'
-                                        : 'bg-transparent text-transparent pointer-events-none'
-                                    }`}>预览</button>
-                                  <button onClick={() => save({ ...e, name: e.path || 'download' })}
-                                    className="text-[11px] px-2.5 py-1 rounded bg-brand-600 hover:bg-brand-500 text-white whitespace-nowrap">保存</button>
-                                </div>
                               </li>
                             ))}
                           </ul>
