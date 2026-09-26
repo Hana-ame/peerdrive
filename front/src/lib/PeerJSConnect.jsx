@@ -5,7 +5,7 @@
 // 抽成独立组件：Settings 节点连接分区与首页（Plaza）共用。
 import React, { useState, useRef } from 'react';
 import Peer from 'peerjs';
-import { connectToPeer, discoverNodes } from '../lib/pd-client';
+import { connectToPeer, discoverNodes } from './pd-client';
 
 const DEFAULT_SIG = {
   host: 'peersignal.moonchan.xyz',
