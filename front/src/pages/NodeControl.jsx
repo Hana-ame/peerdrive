@@ -107,69 +107,35 @@ export default function NodeControl() {
     else save(item);
   };
 
-  // 预览：按类型拉取内容
-  const PREVIEW_LIMIT = 20 * 1024 * 1024; // 图片/视频预览内存上限 20MB
-  const TEXT_LIMIT = 1024 * 1024;         // 文本预览上限 1MB
+  // 预览：媒体（图片/视频/音频）走 sw.js 伪造 fetch（/swdrive/<hash> 带 Range 断点续传），
+  // 原生 img/video/audio 直接渐进加载；文本走流的 fetchText 逐块渲染。不设大小限制。
   const openPreview = async (item) => {
     const name = item.path || item.name || '';
     const kind = kindOf(name);
     if (!kind) { setPreview({ hash: item.hash, name, kind: null, error: '该类型不支持预览，可下载查看' }); return; }
-    if (item.size && item.size > (kind === 'text' ? TEXT_LIMIT : PREVIEW_LIMIT)) {
-      setPreview({ hash: item.hash, name, kind, error: `文件过大（${fmtBytes(item.size)}），请下载后查看` });
-      return;
-    }
-    const total = item.size || 0;
     const imgList = (share?.files || []).filter(f => kindOf(f.path || f.name) === 'image');
     const imgIdx = kind === 'image' ? imgList.findIndex(f => f.hash === item.hash) : null;
-    setPreview({ hash: item.hash, name, kind, loading: true, error: '', text: '', url: '', progress: { loaded: 0, total }, imgIndex: imgIdx });
-    if (kind === 'image') setViewer({ scale: 1, x: 0, y: 0 });
-
-    // stream 边加载边显示：文本逐块实时渲染；图片/视频逐块收集并刷新进度（完成后出图/播放）
-    const mkUrl = (final) => {
-      setPreview(p => {
-        if (p?.url) URL.revokeObjectURL(p.url);
-        return final ? { ...p, loading: false, url: mkBlobUrl(p._chunks || []) } : p;
-      });
-    };
-    const mkBlobUrl = (chunks) => URL.createObjectURL(new Blob(chunks, { type: mimeOf(name) }));
-    const doneP = (extra) => setPreview(p => ({ ...p, ...extra }));
-
-    try {
-      if (kind === 'text') {
-        const dec = new TextDecoder('utf-8');
-        let acc = '';
-        let loaded = 0;
+    if (kind === 'text') {
+      setPreview({ hash: item.hash, name, kind, loading: true, error: '', text: '', url: '', imgIndex: imgIdx });
+      const dec = new TextDecoder('utf-8');
+      let acc = '';
+      try {
         for await (const chunk of session.client.stream(item.hash)) {
-          loaded += chunk.byteLength;
-          const piece = dec.decode(chunk, { stream: true });
-          acc += piece;
-          setPreview(p => (p && p.hash === item.hash ? { ...p, text: acc, progress: { loaded, total } } : p));
-          // 让出主线程，保证大文本下 UI 仍能逐块刷新
+          acc += dec.decode(chunk, { stream: true });
+          setPreview(p => (p && p.hash === item.hash ? { ...p, text: acc } : p));
           await new Promise(r => setTimeout(r, 0));
         }
         acc += dec.decode();
-        doneP({ text: acc, loading: false, progress: { loaded, total } });
-      } else {
-        const chunks = [];
-        let loaded = 0;
-        for await (const chunk of session.client.stream(item.hash)) {
-          chunks.push(chunk);
-          loaded += chunk.byteLength;
-          // 每收 1MB 或收齐时重建 blob URL，图片边下边显示
-          if (loaded % (1024 * 1024) < chunk.byteLength || loaded >= total) {
-            setPreview(p => {
-              if (!p || p.hash !== item.hash) return p;
-              if (p.url) URL.revokeObjectURL(p.url);
-              return { ...p, url: URL.createObjectURL(new Blob(chunks, { type: mimeOf(name) })), progress: { loaded, total } };
-            });
-            await new Promise(r => setTimeout(r, 0));
-          }
-        }
-        doneP({ loading: false, progress: { loaded: loaded || total, total } });
+        setPreview(p => (p && p.hash === item.hash ? { ...p, text: acc, loading: false } : p));
+      } catch (e) {
+        setPreview(p => (p && p.hash === item.hash ? { ...p, loading: false, error: e?.message || String(e) } : p));
       }
-    } catch (e) {
-      setPreview(p => (p && p.hash === item.hash ? { ...p, loading: false, error: e?.message || String(e) } : p));
+      return;
     }
+    // 图片/视频/音频：SW 伪造 fetch 断点续传，原生元素渐进加载
+    const url = `${import.meta.env.BASE_URL}swdrive/${encodeURIComponent(item.hash)}?name=${encodeURIComponent(name)}`;
+    setPreview({ hash: item.hash, name, kind, loading: false, error: '', text: '', url, imgIndex: imgIdx });
+    if (kind === 'image') setViewer({ scale: 1, x: 0, y: 0 });
   };
 
   const closePreview = () => {

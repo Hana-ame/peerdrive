@@ -2,8 +2,8 @@
 
 const CACHE_NAME = 'peerdrive-v1';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
+  './',
+  './index.html',
 ];
 
 /* ─── Install: cache app shell ─── */
@@ -30,6 +30,12 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
+
+  /* 断点续传：伪造 fetch，把 PeerJS 流喂给 img/video/audio（支持 Range） */
+  if (url.pathname.includes('/swdrive/')) {
+    event.respondWith(servePeerDriveStream(event.request));
+    return;
+  }
 
   /* API calls — network first, fall back to cache */
   if (url.pathname.startsWith('/api/') || url.port === '7373' || url.hostname === 'localhost' && url.port) {
@@ -106,3 +112,78 @@ self.addEventListener('message', (event) => {
     self.skipWaiting();
   }
 });
+
+/* ═══ 断点续传：伪造 fetch（/swdrive/<hash>），经 MessageChannel 向页面要 PeerJS 流 ═══ */
+
+function parseRangeHeader(rangeHeader) {
+  if (!rangeHeader) return null;
+  const m = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+  if (!m) return null;
+  return {
+    start: m[1] === '' ? null : parseInt(m[1], 10),
+    end: m[2] === '' ? null : parseInt(m[2], 10),
+  };
+}
+
+function guessMimeSw(name) {
+  const ext = String(name || '').toLowerCase().split('.').pop();
+  const map = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+    webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', avif: 'image/avif',
+    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/x-m4v', ogv: 'video/ogg',
+    mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', aac: 'audio/aac',
+    m4a: 'audio/mp4', opus: 'audio/opus',
+    txt: 'text/plain', md: 'text/markdown', json: 'application/json', csv: 'text/csv',
+    html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+function servePeerDriveStream(request) {
+  return new Promise((resolve) => {
+    const url = new URL(request.url);
+    // /peerdrive/swdrive/<hash> 或 /swdrive/<hash>：取最后一段（去掉路径前缀）
+    const seg = url.pathname.split('/').filter(Boolean);
+    const hash = decodeURIComponent(seg[seg.length - 1] || '');
+    const name = url.searchParams.get('name') || '';
+    const range = parseRangeHeader(request.headers.get('Range'));
+    const offset = range && range.start != null ? range.start : 0;
+    const size = range && range.end != null ? range.end - range.start + 1 : -1;
+
+    self.clients.matchAll({ includeUncontrolled: true }).then((clients) => {
+      if (!clients.length) {
+        resolve(new Response('no peer connection', { status: 502 }));
+        return;
+      }
+      const chan = new MessageChannel();
+      let ctrl = null;
+      const stream = new ReadableStream({
+        start(c) { ctrl = c; },
+      });
+      chan.port1.onmessage = (ev) => {
+        const m = ev.data;
+        try {
+          if (m.error) ctrl.error(new Error(m.error));
+          else if (m.done) ctrl.close();
+          else if (m.chunk) ctrl.enqueue(new Uint8Array(m.chunk));
+        } catch (e) { /* stream 已关闭 */ }
+      };
+      // 只发给第一个 client（当前持有 PeerJS 连接的页面）
+      clients[0].postMessage(
+        { type: 'pd-fetch', hash, name, offset, size, port: chan.port2 },
+        [chan.port2]
+      );
+
+      const status = offset > 0 || size > -1 ? 206 : 200;
+      const headers = {
+        'Accept-Ranges': 'bytes',
+        'Content-Type': guessMimeSw(name),
+      };
+      if (status === 206) {
+        headers['Content-Range'] =
+          'bytes ' + offset + '-' + (size > -1 ? offset + size - 1 : '*') + '/' + '*';
+      }
+      resolve(new Response(stream, { status, headers }));
+    });
+  });
+}

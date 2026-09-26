@@ -1,7 +1,8 @@
 // 前端重做（模块①，2026-09-25）：应用外壳 + 路由。
 // 首页 = 节点搜索 / 连接（PeerJS 消费端）；其余模块按计划逐个重做（建设中占位）。
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { registerSW } from './lib/swBridge';
 import Connect from './pages/Connect';
 import Drive from './pages/Drive';
 import Collections from './pages/Collections';
@@ -49,6 +50,7 @@ function Nav() {
 }
 
 export default function App() {
+  useEffect(() => { registerSW(); }, []);
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>
       <div className="flex flex-col h-screen text-gray-200">
