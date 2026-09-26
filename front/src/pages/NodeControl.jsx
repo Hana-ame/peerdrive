@@ -110,6 +110,8 @@ export default function NodeControl() {
   // 预览：媒体（图片/视频/音频）走 sw.js 伪造 fetch（/swdrive/<hash> 带 Range 断点续传），
   // 原生 img/video/audio 直接渐进加载；文本走流的 fetchText 逐块渲染。不设大小限制。
   const openPreview = async (item) => {
+    // 打开预览压一条历史（同 URL）：浏览器 back 会先触发 popstate → 关预览回列表，而不是直接离开页面
+    window.history.pushState({ pdPreview: true }, '');
     const name = item.path || item.name || '';
     const kind = kindOf(name);
     if (!kind) { setPreview({ hash: item.hash, name, kind: null, error: '该类型不支持预览，可下载查看' }); return; }
@@ -144,6 +146,22 @@ export default function NodeControl() {
       return null;
     });
   };
+
+  // 拦截 back：预览开着时按后退 → 关闭预览回到文件列表（不离开页面）
+  useEffect(() => {
+    const onPop = () => {
+      if (preview) {
+        setPreview(p => {
+          if (p?.url) URL.revokeObjectURL(p.url);
+          return null;
+        });
+        setViewer({ scale: 1, x: 0, y: 0 });
+      }
+      // 无预览时不拦截，让浏览器正常后退
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [preview]);
 
   const pct = (loaded, total) => (total ? Math.min(100, Math.round((loaded / total) * 100)) : 0);
 
@@ -237,7 +255,12 @@ export default function NodeControl() {
                     </div>
                   </div>
                 )}
-                {preview.error && <p className="text-xs text-red-400 py-4">{preview.error}</p>}
+                {preview.error && (
+                  <div className="text-center py-10">
+                    <p className="text-xs text-red-400 mb-4">{preview.error}</p>
+                    <button onClick={closePreview} className="btn-brand !px-4 !py-2 !text-sm">← 返回列表</button>
+                  </div>
+                )}
                 {!preview.error && preview.kind === 'image' && preview.url && (
                   <div>
                     {/* 查看器工具条 */}
@@ -270,6 +293,7 @@ export default function NodeControl() {
                         src={preview.url}
                         alt={preview.name}
                         draggable={false}
+                        onError={() => setPreview(p => (p ? { ...p, error: '图片加载失败：Service Worker 未接管 /swdrive 或连接已断开（返回列表重试）' } : p))}
                         style={{
                           transform: `translate(${viewer.x}px, ${viewer.y}px) scale(${viewer.scale})`,
                           cursor: viewer.scale > 1 ? 'grab' : 'default',
@@ -280,11 +304,21 @@ export default function NodeControl() {
                   </div>
                 )}
                 {!preview.loading && !preview.error && preview.kind === 'video' && preview.url && (
-                  <video src={preview.url} controls autoPlay className="w-full h-[calc(100vh-150px)] object-contain rounded bg-black" />
+                  <video
+                    src={preview.url}
+                    controls autoPlay
+                    onError={() => setPreview(p => (p ? { ...p, error: '媒体加载失败：Service Worker 未接管 /swdrive 或连接已断开（返回列表重试）' } : p))}
+                    className="w-full h-[calc(100vh-150px)] object-contain rounded bg-black"
+                  />
                 )}
                 {!preview.loading && !preview.error && preview.kind === 'audio' && preview.url && (
                   <div className="flex items-center justify-center h-[calc(100vh-150px)]">
-                    <audio src={preview.url} controls autoPlay className="w-full max-w-xl" />
+                    <audio
+                      src={preview.url}
+                      controls autoPlay
+                      onError={() => setPreview(p => (p ? { ...p, error: '媒体加载失败：Service Worker 未接管 /swdrive 或连接已断开（返回列表重试）' } : p))}
+                      className="w-full max-w-xl"
+                    />
                   </div>
                 )}
                 {preview.kind === 'text' && preview.text != null && (
