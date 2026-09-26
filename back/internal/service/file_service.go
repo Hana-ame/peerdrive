@@ -302,10 +302,10 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 		return nil, fmt.Errorf("path outside storage root")
 	}
 
-	// 深度限制：只递归到 FolderMaxDepth 层（默认 1 = 只扫当前目录，不下钻子目录）。
-	// 背景：~/Downloads 这类大目录有上千子目录（含 .git / 解压产物），无限制递归
-	// 会把 25GB / 数千目录一次全拉进来（2026-09-26 用户要求）。
-	maxDepth := 1
+	// 深度限制：仅当显式配置 PEERDRIVE_FOLDER_MAX_DEPTH>0 时启用（默认 0=保持递归全量，
+	// 兼容既有 TestRegisterFolder 等的递归语义）。2026-09-26 曾默认 1 导致 CI 挂，
+	// 回退为显式才限制（~/Downloads 场景部署时显式设 1）。
+	maxDepth := 0
 	if s.cfg != nil && s.cfg.FolderMaxDepth > 0 {
 		maxDepth = s.cfg.FolderMaxDepth
 	}
@@ -324,12 +324,12 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 		}
 		depth := strings.Count(rel, string(filepath.Separator)) + 1
 		if d.IsDir() {
-			if depth > maxDepth {
+			if maxDepth > 0 && depth > maxDepth {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if depth > maxDepth {
+		if maxDepth > 0 && depth > maxDepth {
 			return nil
 		}
 		info, infoErr := d.Info()

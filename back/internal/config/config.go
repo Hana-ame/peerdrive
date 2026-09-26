@@ -224,7 +224,7 @@ func Load() *Config {
 		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
 
 		DownloadDir: getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
-		FolderMaxDepth: getEnvInt("PEERDRIVE_FOLDER_MAX_DEPTH", 1),
+		FolderMaxDepth: getEnvInt("PEERDRIVE_FOLDER_MAX_DEPTH", 0), // 0=不限制（保持递归全量；>0 才限深）
 		MaxPeers:    getEnvInt("PEERDRIVE_MAX_PEERS", 8),
 
 		ShareEnable:      getEnvBool("PEERDRIVE_SHARE_ENABLE", false),
