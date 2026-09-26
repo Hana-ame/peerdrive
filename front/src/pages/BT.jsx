@@ -48,7 +48,7 @@ export default function BT() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
               {Object.entries(status).filter(([k]) => !/^[a-z_]+:\//.test(k)).map(([k, v]) => (
                 <div key={k} className="bg-white/[0.03] rounded px-2 py-1.5">
-                  <span className="block text-[10px] text-gray-500">{k}</span>
+                  <span className="block text-xs text-gray-500">{k}</span>
                   <span className="text-gray-300">{typeof v === 'boolean' ? (v ? '开' : '关') : String(v)}</span>
                 </div>
               ))}
@@ -66,9 +66,9 @@ export default function BT() {
             <table className="w-full text-sm">
               <thead className="bg-white/[0.03]">
                 <tr>
-                  <th className="text-left text-[10px] uppercase tracking-wider text-gray-500 px-3 py-2">infohash</th>
-                  <th className="text-left text-[10px] uppercase tracking-wider text-gray-500 px-3 py-2">状态</th>
-                  <th className="text-right text-[10px] uppercase tracking-wider text-gray-500 px-3 py-2">操作</th>
+                  <th className="text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2">infohash</th>
+                  <th className="text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2">状态</th>
+                  <th className="text-right text-xs uppercase tracking-wider text-gray-500 px-3 py-2">操作</th>
                 </tr>
               </thead>
               <tbody>

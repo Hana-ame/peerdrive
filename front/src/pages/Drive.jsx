@@ -78,7 +78,7 @@ export default function Drive() {
     } catch (ex) { setErr(ex?.message || String(ex)); }
   };
 
-  const th = 'text-left text-[10px] uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
+  const th = 'text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
   const td = 'px-3 py-2';
 
   return (

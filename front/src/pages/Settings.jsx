@@ -108,7 +108,7 @@ export default function Settings() {
                 connMode === 'peerjs' ? 'bg-brand-600 text-white' : 'bg-white/[0.04] text-gray-400 hover:text-white'
               }`}>PeerJS（信令拨号）</button>
           </div>
-          <p className="text-[10px] text-gray-500">
+          <p className="text-xs text-gray-500">
             {connMode === 'ws'
               ? '直连后端节点管理面（/ws/peer）：管理自己的节点、文件与合集。'
               : '经公共信令按 peer id 拨号对端节点（消费端）：搜索在线节点、看共享并保存。'}
@@ -177,7 +177,7 @@ export default function Settings() {
             </>
           )}
           {authErr && <p className="text-xs text-red-400">{authErr}</p>}
-          <p className="text-[10px] text-gray-600">
+          <p className="text-xs text-gray-600">
             注册/登录走注册服务器（默认 account.moonchan.xyz）。浏览器跨域调用需该服务开放 CORS。
           </p>
         </section>

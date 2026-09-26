@@ -93,7 +93,7 @@ export default function Collections() {
     catch (e) { setErr(e?.message || String(e)); }
   };
 
-  const th = 'text-left text-[10px] uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
+  const th = 'text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
 
   return (
     <div className="p-8 overflow-y-auto h-full">
@@ -150,7 +150,7 @@ export default function Collections() {
                                 <span className="text-xs text-gray-500">读取中...</span>
                               ) : (
                                 <div>
-                                  <p className="text-[10px] text-gray-500 mb-2">
+                                  <p className="text-xs text-gray-500 mb-2">
                                     hash：<span className="font-mono text-gray-400 break-all">{detail.hash}</span>
                                   </p>
                                   {Array.isArray(detail.data.entries) && detail.data.entries.length > 0 ? (
@@ -158,9 +158,9 @@ export default function Collections() {
                                       {detail.data.entries.map((e, ei) => (
                                         <li key={ei} className="flex items-center gap-3 text-xs">
                                           <span className="flex-1 truncate text-gray-300">{e.path}</span>
-                                          <span className="font-mono text-[10px] text-gray-600">{String(e.hash || '').slice(0, 12)}…</span>
+                                          <span className="font-mono text-xs text-gray-600">{String(e.hash || '').slice(0, 12)}…</span>
                                           <button onClick={() => downloadEntry(e.hash, e.path)}
-                                            className="px-2 py-0.5 text-[10px] bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 rounded">下载</button>
+                                            className="px-2 py-0.5 text-xs bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 rounded">下载</button>
                                         </li>
                                       ))}
                                     </ul>

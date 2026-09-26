@@ -133,15 +133,15 @@ export default function PeerJSConnect({ compact = false }) {
       {!compact && (
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="block text-[10px] text-gray-500 mb-1">信令 host</label>
+            <label className="block text-xs text-gray-500 mb-1">信令 host</label>
             <input value={sigHost} onChange={e => setSigHost(e.target.value)} className={inputCls} />
           </div>
           <div>
-            <label className="block text-[10px] text-gray-500 mb-1">信令 port</label>
+            <label className="block text-xs text-gray-500 mb-1">信令 port</label>
             <input value={sigPort} onChange={e => setSigPort(e.target.value)} className={inputCls} />
           </div>
           <div className="col-span-2">
-            <label className="block text-[10px] text-gray-500 mb-1">信令 key</label>
+            <label className="block text-xs text-gray-500 mb-1">信令 key</label>
             <input value={sigKey} onChange={e => setSigKey(e.target.value)} className={inputCls} />
           </div>
         </div>
@@ -173,18 +173,18 @@ export default function PeerJSConnect({ compact = false }) {
                 <span className="text-gray-500 shrink-0">{n.nodeType || ''}</span>
                 <span className="text-gray-600 shrink-0">{Array.isArray(n.collections) ? n.collections.length + ' 合集' : ''}</span>
                 <button onClick={() => handleJoinFound(n.peerId)}
-                  className="px-2 py-0.5 text-[10px] bg-brand-600 text-white rounded hover:bg-brand-500 shrink-0">连接</button>
+                  className="px-2 py-0.5 text-xs bg-brand-600 text-white rounded hover:bg-brand-500 shrink-0">连接</button>
               </li>
             ))}
           </ul>
         )}
         {searchStatus === 'done' && foundNodes && foundNodes.length === 0 && (
-          <p className="text-[10px] text-gray-600 mt-1.5">当前没有在线节点（节点在线后会经信令 announce）。</p>
+          <p className="text-xs text-gray-600 mt-1.5">当前没有在线节点（节点在线后会经信令 announce）。</p>
         )}
       </div>
 
       <div>
-        {!compact && <label className="block text-[10px] text-gray-500 mb-1">目标节点 peer id（拨号对象）</label>}
+        {!compact && <label className="block text-xs text-gray-500 mb-1">目标节点 peer id（拨号对象）</label>}
         <div className="flex gap-2">
           <input value={targetPeerId} onChange={e => setTargetPeerId(e.target.value)}
             placeholder="peerdrive-xxxxxxxx"
@@ -207,17 +207,17 @@ export default function PeerJSConnect({ compact = false }) {
 
       {pdStatus === 'online' && (
         <div className={compact ? '' : 'border-t border-white/[0.06] pt-2'}>
-          <p className="text-[10px] text-gray-500 mb-1.5">对端共享（{pdShare?.total ?? 0} 项）</p>
+          <p className="text-xs text-gray-500 mb-1.5">对端共享（{pdShare?.total ?? 0} 项）</p>
           {pdShare && pdShare.files?.length > 0 && (
             <div className="mb-2">
-              {!compact && <p className="text-[10px] text-gray-500 mb-1">单独文件</p>}
+              {!compact && <p className="text-xs text-gray-500 mb-1">单独文件</p>}
               <ul className="space-y-1">
                 {pdShare.files.map((f, i) => (
                   <li key={i} className="flex items-center gap-2 text-xs">
                     <span className="flex-1 truncate text-gray-300">{f.path || f.name}</span>
                     <span className="text-gray-500 shrink-0">{fmtBytes(f.size)}</span>
                     <button onClick={() => handleSave(f)}
-                      className="px-2 py-0.5 text-[10px] bg-white/[0.06] text-gray-300 rounded hover:bg-white/[0.12] shrink-0">保存</button>
+                      className="px-2 py-0.5 text-xs bg-white/[0.06] text-gray-300 rounded hover:bg-white/[0.12] shrink-0">保存</button>
                   </li>
                 ))}
               </ul>
@@ -225,7 +225,7 @@ export default function PeerJSConnect({ compact = false }) {
           )}
           {pdShare && pdShare.collections?.length > 0 && (
             <div>
-              {!compact && <p className="text-[10px] text-gray-500 mb-1">合集</p>}
+              {!compact && <p className="text-xs text-gray-500 mb-1">合集</p>}
               <ul className="space-y-1">
                 {pdShare.collections.map((c, i) => {
                   const entries = Array.isArray(c.entries) ? c.entries : [];
@@ -247,7 +247,7 @@ export default function PeerJSConnect({ compact = false }) {
                               <span className="flex-1 truncate text-gray-400">{e.path}</span>
                               <span className="text-gray-500 shrink-0">{fmtBytes(e.size)}</span>
                               <button onClick={() => handleSave({ ...e, name: e.path || 'download' })}
-                                className="px-2 py-0.5 text-[10px] bg-white/[0.06] text-gray-300 rounded hover:bg-white/[0.12] shrink-0">保存</button>
+                                className="px-2 py-0.5 text-xs bg-white/[0.06] text-gray-300 rounded hover:bg-white/[0.12] shrink-0">保存</button>
                             </li>
                           ))}
                         </ul>
@@ -259,7 +259,7 @@ export default function PeerJSConnect({ compact = false }) {
             </div>
           )}
           {pdShare && (pdShare.total ?? 0) === 0 && (
-            <p className="text-[10px] text-gray-600">该节点没有共享内容（未开启对外共享，或未声明共享目录）。</p>
+            <p className="text-xs text-gray-600">该节点没有共享内容（未开启对外共享，或未声明共享目录）。</p>
           )}
         </div>
       )}

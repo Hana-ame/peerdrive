@@ -66,8 +66,8 @@ export default function IPFS() {
             <table className="w-full text-sm">
               <thead className="bg-white/[0.03]">
                 <tr>
-                  <th className="text-left text-[10px] uppercase tracking-wider text-gray-500 px-3 py-2">CID</th>
-                  <th className="text-right text-[10px] uppercase tracking-wider text-gray-500 px-3 py-2">操作</th>
+                  <th className="text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2">CID</th>
+                  <th className="text-right text-xs uppercase tracking-wider text-gray-500 px-3 py-2">操作</th>
                 </tr>
               </thead>
               <tbody>
