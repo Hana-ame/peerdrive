@@ -12,9 +12,10 @@ function fmtBytes(n) {
   return v.toFixed(v < 10 ? 1 : 0) + ' ' + u[i];
 }
 
-// ── 预览支持：按文件名后缀分类（图片 / 视频 / 文本）──
+// ── 预览支持：按文件名后缀分类（图片 / 视频 / 音频 / 文本）──
 const IMG_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif'];
 const VID_EXT = ['mp4', 'webm', 'mov', 'm4v', 'ogv'];
+const AUD_EXT = ['mp3', 'wav', 'flac', 'ogg', 'oga', 'aac', 'm4a', 'opus'];
 const TXT_EXT = ['txt', 'md', 'markdown', 'json', 'js', 'ts', 'jsx', 'tsx', 'py', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'hpp', 'xml', 'html', 'htm', 'css', 'scss', 'yaml', 'yml', 'csv', 'log', 'sql', 'sh', 'toml', 'ini', 'conf'];
 
 function extOf(name) {
@@ -26,6 +27,7 @@ function kindOf(name) {
   const ext = extOf(name);
   if (IMG_EXT.includes(ext)) return 'image';
   if (VID_EXT.includes(ext)) return 'video';
+  if (AUD_EXT.includes(ext)) return 'audio';
   if (TXT_EXT.includes(ext)) return 'text';
   return null;
 }
@@ -36,6 +38,8 @@ function mimeOf(name) {
     jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
     webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', avif: 'image/avif',
     mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/x-m4v', ogv: 'video/ogg',
+    mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', oga: 'audio/ogg',
+    aac: 'audio/aac', m4a: 'audio/mp4', opus: 'audio/opus',
     txt: 'text/plain', md: 'text/markdown', json: 'application/json', csv: 'text/csv',
     html: 'text/html', htm: 'text/html', xml: 'text/xml', css: 'text/css', js: 'text/javascript',
   };
@@ -311,6 +315,11 @@ export default function NodeControl() {
                 )}
                 {!preview.loading && !preview.error && preview.kind === 'video' && preview.url && (
                   <video src={preview.url} controls autoPlay className="w-full h-[calc(100vh-150px)] object-contain rounded bg-black" />
+                )}
+                {!preview.loading && !preview.error && preview.kind === 'audio' && preview.url && (
+                  <div className="flex items-center justify-center h-[calc(100vh-150px)]">
+                    <audio src={preview.url} controls autoPlay className="w-full max-w-xl" />
+                  </div>
                 )}
                 {preview.kind === 'text' && preview.text != null && (
                   <pre className="text-xs text-gray-300 bg-black/40 rounded p-3 h-[calc(100vh-150px)] overflow-auto whitespace-pre-wrap break-all">{preview.text}</pre>
