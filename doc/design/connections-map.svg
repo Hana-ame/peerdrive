@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1760" height="1360" viewBox="0 0 1760 1360">
+<svg xmlns="http://www.w3.org/2000/svg" width="1760" height="1480" viewBox="0 0 1760 1480">
   <defs>
     <!-- 箭头定义：全向带尺寸约束 -->
     <marker id="m_blue" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#2563eb"/></marker>
@@ -16,7 +16,7 @@
     <marker id="m_teal_back" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="1" refY="7" orient="auto" markerOverflow="visible"><path d="M13,1 L0,7 L13,13 Z" fill="#0d9488"/></marker>
   </defs>
 
-  <rect x="0" y="0" width="1760" height="1360" fill="#ffffff"/>
+  <rect x="0" y="0" width="1760" height="1480" fill="#ffffff"/>
 
   <!-- ============ 顶部标题 ============ -->
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
@@ -219,110 +219,125 @@
   <!-- ============================================================== -->
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif" font-size="11.5" font-weight="700">
     <!-- WebRTC 直连通道大标签 -->
-    <rect x="1080" y="445" width="100" height="26" rx="6" fill="#ea580c"/>
-    <text x="1130" y="462" fill="#ffffff" text-anchor="middle" font-size="11.5">WebRTC 直连</text>
+    <rect x="1060" y="440" width="145" height="32" rx="6" fill="#ea580c"/>
+    <text x="1132" y="455" fill="#ffffff" text-anchor="middle" font-size="11">WebRTC DataChannel</text>
+    <text x="1132" y="468" fill="#ffedd5" text-anchor="middle" font-size="9.5">[数据流] 64KB分片流 / 4MB背压</text>
 
     <!-- 纯前端直连标签 -->
-    <rect x="900" y="39" width="130" height="24" rx="6" fill="#0d9488"/>
-    <text x="965" y="55" fill="#ffffff" text-anchor="middle" font-size="11">纯前端 WebRTC 直连</text>
+    <rect x="850" y="38" width="240" height="26" rx="6" fill="#0d9488"/>
+    <text x="970" y="55" fill="#ffffff" text-anchor="middle" font-size="10.5">[数据流] WebRTC: share帧 / 64KB流 / 增量hash</text>
 
     <!-- 信令标签 -->
-    <!-- 信令标签 -->
-    <rect x="800" y="210" width="200" height="24" rx="6" fill="#ecfeff" stroke="#0891b2" stroke-width="1.2"/>
-    <text x="900" y="226" fill="#0e7490" text-anchor="middle" font-size="10.5">08: WS JSON信令 / 64hex存在心跳</text>
+    <rect x="780" y="210" width="240" height="24" rx="6" fill="#ecfeff" stroke="#0891b2" stroke-width="1.2"/>
+    <text x="900" y="226" fill="#0e7490" text-anchor="middle" font-size="10.5">08 [控制流] WS: JSON信令 / 64hex心跳</text>
 
-    <rect x="585" y="100" width="95" height="22" rx="5" fill="#ecfeff" stroke="#0891b2" stroke-width="1.2"/>
-    <text x="632" y="115" fill="#0e7490" text-anchor="middle" font-size="10">12: SDP/ICE</text>
+    <rect x="575" y="100" width="115" height="22" rx="5" fill="#ecfeff" stroke="#0891b2" stroke-width="1.2"/>
+    <text x="632" y="115" fill="#0e7490" text-anchor="middle" font-size="10">12 [控制流] SDP/ICE</text>
 
     <!-- 01 连接标签 -->
-    <rect x="365" y="193" width="170" height="24" rx="5" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
-    <text x="450" y="209" fill="#2563eb" text-anchor="middle" font-size="10">01: admin JSON帧 / 64KB二进制块</text>
+    <rect x="350" y="193" width="200" height="24" rx="5" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
+    <text x="450" y="209" fill="#2563eb" text-anchor="middle" font-size="10">01 [控制/数据] WS: admin帧 / 64KB流</text>
 
     <!-- 内部连接标签 -->
-    <rect x="250" y="303" width="185" height="24" rx="6" fill="#ffffff" stroke="#059669" stroke-width="1.2"/>
-    <text x="342" y="319" fill="#059669" text-anchor="middle" font-size="10">02: *gin.Context / 内部请求转接</text>
+    <rect x="235" y="303" width="210" height="24" rx="6" fill="#ffffff" stroke="#059669" stroke-width="1.2"/>
+    <text x="340" y="319" fill="#059669" text-anchor="middle" font-size="10">02 [控制流] HTTP: *gin.Context / 请求解包</text>
 
-    <rect x="385" y="353" width="70" height="24" rx="6" fill="#ffffff" stroke="#059669" stroke-width="1.2"/>
-    <text x="420" y="369" fill="#059669" text-anchor="middle" font-size="10">03: DTO参数</text>
+    <rect x="375" y="353" width="90" height="24" rx="6" fill="#ffffff" stroke="#059669" stroke-width="1.2"/>
+    <text x="420" y="369" fill="#059669" text-anchor="middle" font-size="10">03 [控制] DTO参数</text>
 
-    <rect x="685" y="353" width="105" height="24" rx="6" fill="#ffffff" stroke="#ea580c" stroke-width="1.2"/>
-    <text x="737" y="369" fill="#ea580c" text-anchor="middle" font-size="10">06: PullReq(hash)</text>
+    <rect x="675" y="353" width="125" height="24" rx="6" fill="#ffffff" stroke="#ea580c" stroke-width="1.2"/>
+    <text x="737" y="369" fill="#ea580c" text-anchor="middle" font-size="10">06 [控制] PullReq(hash)</text>
 
-    <rect x="850" y="405" width="115" height="24" rx="6" fill="#ffffff" stroke="#ea580c" stroke-width="1.2"/>
-    <text x="907" y="421" fill="#ea580c" text-anchor="middle" font-size="10">07: raw bytes原始帧</text>
+    <rect x="840" y="405" width="135" height="24" rx="6" fill="#ffffff" stroke="#ea580c" stroke-width="1.2"/>
+    <text x="907" y="421" fill="#ea580c" text-anchor="middle" font-size="10">07 [协议] raw bytes 帧</text>
 
     <!-- 10 controller → storage (落到底部物理磁盘) -->
-    <rect x="65" y="550" width="170" height="24" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.2"/>
-    <text x="150" y="566" fill="#7c3aed" text-anchor="middle" font-size="10">10: multipart 文件流 (io.Reader)</text>
+    <rect x="55" y="550" width="190" height="24" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.2"/>
+    <text x="150" y="566" fill="#7c3aed" text-anchor="middle" font-size="10">10 [数据流] 磁盘IO: SafeWrite 落盘</text>
 
     <!-- 04 service → repository (直达底部 SQLite 库) -->
-    <rect x="645" y="550" width="170" height="24" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.2"/>
-    <text x="730" y="566" fill="#7c3aed" text-anchor="middle" font-size="10">04: SQL / file_index与游标seq</text>
+    <rect x="635" y="550" width="190" height="24" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.2"/>
+    <text x="730" y="566" fill="#7c3aed" text-anchor="middle" font-size="10">04 [控制流] SQLite: SQL元数据读写</text>
 
     <!-- 11 transport ↔ storage -->
-    <rect x="545" y="813" width="210" height="24" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.2"/>
-    <text x="650" y="829" fill="#7c3aed" text-anchor="middle" font-size="10">11: 64KB分片流 (落盘验hash / 读盘供流)</text>
+    <rect x="530" y="813" width="240" height="24" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.2"/>
+    <text x="650" y="829" fill="#7c3aed" text-anchor="middle" font-size="10">11 [数据流] 磁盘IO: 64KB流 (验hash写/供流读)</text>
 
     <!-- 05 router ↔ source -->
-    <rect x="65" y="270" width="145" height="22" rx="5" fill="#ffffff" stroke="#059669" stroke-width="1.2"/>
-    <text x="137" y="285" fill="#059669" text-anchor="middle" font-size="9.5">05: Source抽象接口 / 流定位</text>
+    <rect x="55" y="270" width="165" height="22" rx="5" fill="#ffffff" stroke="#059669" stroke-width="1.2"/>
+    <text x="137" y="285" fill="#059669" text-anchor="middle" font-size="9.5">05 [控制流] Source接口 / 流定位</text>
 
     <!-- 09 controller → downloader -->
-    <rect x="335" y="406" width="165" height="24" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.2"/>
-    <text x="417" y="422" fill="#7c3aed" text-anchor="middle" font-size="10">09: SHA-256 hash → []byte 数据</text>
+    <rect x="320" y="406" width="195" height="24" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.2"/>
+    <text x="417" y="422" fill="#7c3aed" text-anchor="middle" font-size="10">09 [控制/数据] 多协议: Local/IPFS/BT/HTTP</text>
   </g>
 
   <!-- ============================================================== -->
   <!-- 8. 底部详细图例与联通机制说明卡片                            -->
   <!-- ============================================================== -->
-  <rect x="40" y="895" width="1680" height="440" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/>
+  <rect x="40" y="895" width="1680" height="560" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
-    <text x="65" y="928" font-size="16" font-weight="700" fill="#0f172a">联通机制全景说明与传递数据流（Payload / Stream）清单</text>
+    <text x="65" y="924" font-size="16" font-weight="700" fill="#0f172a">网络协议全景与【控制流 (Control Stream) vs 数据流 (Data Stream)】架构解耦规范</text>
+
+    <!-- 控制流 vs 数据流 核心架构原则 Banner -->
+    <rect x="65" y="938" width="1630" height="66" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.2"/>
+    
+    <rect x="75" y="946" width="110" height="22" rx="4" fill="#0891b2"/>
+    <text x="130" y="961" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">🕹️ 控制流原则</text>
+    <text x="195" y="961" font-size="11.5" fill="#334155"><tspan font-weight="700">采用协议：</tspan>WebSocket (JSON) · HTTP REST · BT DHT (KRPC/UDP) · SQLite 数据库 IPC</text>
+    <text x="75" y="990" font-size="11" fill="#475569">核心特点：传输小体积指令、握手协商 (SDP/ICE)、心跳、房间哈希与 SQL 元数据。体量极小（字节~几KB），负责寻址建连与准入门禁，绝不承载大文件，保护信令服不被大流量冲垮。</text>
+
+    <line x1="880" y1="946" x2="880" y2="996" stroke="#cbd5e1" stroke-width="1"/>
+
+    <rect x="895" y="946" width="110" height="22" rx="4" fill="#ea580c"/>
+    <text x="950" y="961" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">🚚 数据流原则</text>
+    <text x="1015" y="961" font-size="11.5" fill="#334155"><tspan font-weight="700">采用协议：</tspan>WebRTC DataChannel (SCTP/DTLS/UDP) · 操作系统磁盘 IO (SafeWrite) · TLS 1.3 ECH</text>
+    <text x="895" y="990" font-size="11" fill="#475569">核心特点：传递真实文件二进制块 (64KB Chunk)。脱离信令全速点对点 P2P 传输，内置 4MB 动态背压流控防止内存溢出，边收边算增量 SHA-256 防篡改，SafeWrite 原子落盘。</text>
 
     <!-- 模块 A: 节点与节点如何联通 -->
-    <rect x="65" y="945" width="510" height="365" rx="10" fill="#ffffff" stroke="#ea580c" stroke-width="1.5"/>
-    <text x="85" y="973" font-size="14" font-weight="700" fill="#c2410c">🤝 节点 A ↔ 远程对端 B 如何联通 (Node-to-Peer)</text>
-    <text x="85" y="1000" font-size="12" fill="#334155"><tspan font-weight="700">1. 信令发现：</tspan>A/B 经 WS 发送 PeerID 与 64hex 房间广播在线状态</text>
-    <text x="85" y="1025" font-size="12" fill="#334155"><tspan font-weight="700">2. 加入市场：</tspan>A 加入 B 后落盘 joined_nodes.json，成为常驻对端</text>
-    <text x="85" y="1050" font-size="12" fill="#334155"><tspan font-weight="700">3. 打洞建连：</tspan>信令交换 SDP/ICE 候选，建立 WebRTC DataChannel</text>
-    <text x="85" y="1075" font-size="12" fill="#334155"><tspan font-weight="700">4. PSK 门禁：</tspan>若 B 配有 PEERDRIVE_PSK，A 需出示同一密钥解密准入</text>
-    <text x="85" y="1100" font-size="12" fill="#334155"><tspan font-weight="700">5. 共享清单：</tspan>传输 {type:"share"} → 回传 share-resp JSON 目录与文件</text>
-    <text x="85" y="1125" font-size="12" fill="#334155"><tspan font-weight="700">6. 流式拉取：</tspan>传输 {type:"req",hash} → 回传 meta 头 + 64KB 二进制分片流</text>
-    <text x="85" y="1150" font-size="12" fill="#334155"><tspan font-weight="700">7. 校验落盘：</tspan>A 边收 64KB 流边算 SHA-256，校验一致后 SafeWrite 落盘</text>
-    <text x="85" y="1175" font-size="11.5" fill="#64748b">（全程脱离信令服务，满速点对点 P2P 传输，带 4MB 动态背压）</text>
+    <rect x="65" y="1016" width="510" height="420" rx="10" fill="#ffffff" stroke="#ea580c" stroke-width="1.5"/>
+    <text x="85" y="1044" font-size="14" font-weight="700" fill="#c2410c">🤝 节点 A ↔ 远程对端 B 如何联通 (Node-to-Peer)</text>
+    <text x="85" y="1072" font-size="12" fill="#334155"><tspan font-weight="700" fill="#0891b2">1. [控制流 · WebSocket]：</tspan>A 与 B 连入信令，在 64hex Presence 房间宣布在线</text>
+    <text x="85" y="1098" font-size="12" fill="#334155"><tspan font-weight="700" fill="#059669">2. [控制流 · 节点目录]：</tspan>A 经市场加入 B，持久化 joined_nodes.json 成常驻对端</text>
+    <text x="85" y="1124" font-size="12" fill="#334155"><tspan font-weight="700" fill="#0891b2">3. [控制流 · SDP/ICE 交换]：</tspan>信令转发双方网络候选包，打洞穿透 NAT</text>
+    <text x="85" y="1150" font-size="12" fill="#334155"><tspan font-weight="700" fill="#c026d3">4. [控制流 · PSK 门禁]：</tspan>建立 DataChannel 后，A 必须在首帧出示 PEERDRIVE_PSK</text>
+    <text x="85" y="1176" font-size="12" fill="#334155"><tspan font-weight="700" fill="#ea580c">5. [控制流 · share 协议帧]：</tspan>传输 {type:"share"} → B 回传公开目录树 share-resp</text>
+    <text x="85" y="1202" font-size="12" fill="#334155"><tspan font-weight="700" fill="#ea580c">6. [数据流 · WebRTC DataChannel]：</tspan>发送 req(hash) → B 回传 64KB 二进制分片流</text>
+    <text x="85" y="1228" font-size="12" fill="#334155"><tspan font-weight="700" fill="#7c3aed">7. [数据流 · 边收边验 SafeWrite]：</tspan>A 算 SHA-256 校验一致后落盘到 03 storage</text>
+    <text x="85" y="1254" font-size="11.5" fill="#64748b">（全程脱离信令服务，满速点对点 P2P 传输，带 4MB 动态背压限速）</text>
 
     <!-- 模块 B: 纯前端和节点如何联通 -->
-    <rect x="595" y="945" width="510" height="365" rx="10" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
-    <text x="615" y="973" font-size="14" font-weight="700" fill="#0f766e">🌐 13 前端 ↔ Peer 节点如何联通 (Browser-to-Peer)</text>
-    <text x="615" y="1000" font-size="12" fill="#334155"><tspan font-weight="700">1. 零运行依赖：</tspan>浏览器打开 panel.html，使用 peerdrive-client SDK</text>
-    <text x="615" y="1025" font-size="12" fill="#334155"><tspan font-weight="700">2. 注入连接：</tspan>用户输入目标 PeerID 与信令地址，SDK 接入信令握手</text>
-    <text x="615" y="1050" font-size="12" fill="#334155"><tspan font-weight="700">3. 浏览器直连：</tspan>浏览器与 Node 建立 DataChannel，传输 raw 协议帧</text>
-    <text x="615" y="1075" font-size="12" fill="#334155"><tspan font-weight="700">4. 浏览目录：</tspan>发送 share 帧，渲染远程节点的共享文件列表</text>
-    <text x="615" y="1100" font-size="12" fill="#334155"><tspan font-weight="700">5. 纯前端拉取：</tspan>点击下载传输 req 帧，节点回传 64KB 二进制分片流</text>
-    <text x="615" y="1125" font-size="12" fill="#334155"><tspan font-weight="700">6. 增量校验：</tspan>浏览器边收边调纯 JS 增量哈希计算，防内存暴涨 OOM</text>
-    <text x="615" y="1150" font-size="12" fill="#334155"><tspan font-weight="700">7. 磁盘保存：</tspan>校验通过后封装为 Blob 触发原生 SaveAs 保存</text>
-    <text x="615" y="1175" font-size="11.5" fill="#64748b">（使用者电脑不需要安装 Go、Node 或运行 peerdrive 节点）</text>
+    <rect x="595" y="1016" width="510" height="420" rx="10" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+    <text x="615" y="1044" font-size="14" font-weight="700" fill="#0f766e">🌐 13 前端 ↔ Peer 节点如何联通 (Browser-to-Peer)</text>
+    <text x="615" y="1072" font-size="12" fill="#334155"><tspan font-weight="700" fill="#0d9488">1. [独立前端 · 零部署]：</tspan>用户用浏览器打开 panel.html，加载 peerdrive-client</text>
+    <text x="615" y="1098" font-size="12" fill="#334155"><tspan font-weight="700" fill="#0891b2">2. [控制流 · WebSocket]：</tspan>输入 PeerID 与信令地址，SDK 接入信令交换 SDP</text>
+    <text x="615" y="1124" font-size="12" fill="#334155"><tspan font-weight="700" fill="#0d9488">3. [数据流 · DataChannel 建连]：</tspan>浏览器与目标 Peer 直连，跑 raw 协议帧</text>
+    <text x="615" y="1150" font-size="12" fill="#334155"><tspan font-weight="700" fill="#0d9488">4. [控制流 · 目录拉取]：</tspan>发送 share 帧，渲染远程节点的对外共享文件列表</text>
+    <text x="615" y="1176" font-size="12" fill="#334155"><tspan font-weight="700" fill="#0d9488">5. [数据流 · 浏览器点对点取流]：</tspan>点击下载发 req 帧，节点推送 64KB 二进制流</text>
+    <text x="615" y="1202" font-size="12" fill="#334155"><tspan font-weight="700" fill="#7c3aed">6. [数据流 · 纯 JS 增量哈希]：</tspan>纯 JS 边收边算 SHA-256，防大文件浏览器 OOM</text>
+    <text x="615" y="1228" font-size="12" fill="#334155"><tspan font-weight="700" fill="#0d9488">7. [数据流 · 本地 Blob 保存]：</tspan>哈希校验通过后封装为 Blob 触发原生 SaveAs</text>
+    <text x="615" y="1254" font-size="11.5" fill="#64748b">（使用者电脑不需要安装 Go、Node 或运行本地节点守护进程）</text>
 
     <!-- 模块 C: 架构连接图例与载荷数据流清单 -->
-    <rect x="1125" y="945" width="570" height="365" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
-    <text x="1145" y="968" font-size="13.5" font-weight="700" fill="#0f172a">🎨 13 组核心连接所传递的数据载荷 (Data Payload) 清单</text>
+    <rect x="1125" y="1016" width="570" height="420" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <text x="1145" y="1042" font-size="13.5" font-weight="700" fill="#0f172a">🎨 13 组核心连接所采用的协议与流向属性清单</text>
 
-    <text x="1145" y="992" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#2563eb">01 (WS 管理):</tspan> admin JSON 帧 ({method,path,body}) · admin-bin 64KB 二进制分片流</text>
-    <text x="1145" y="1012" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#059669">02 (路由分发):</tspan> *gin.Context / 请求解包 → Controller 内部 HTTP 语义调用</text>
-    <text x="1145" y="1032" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#059669">03 (业务参数):</tspan> 业务 DTO (hash, collectionId, peerId, fileInfo, offset, limit)</text>
-    <text x="1145" y="1052" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#7c3aed">04 (元数据读写):</tspan> SQL 语句 (file_index, 游标 seq, collections, share_links 记录)</text>
-    <text x="1145" y="1072" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#059669">05 (来源调度):</tspan> source.Source 统一接口 (Read / Size / Hash) · 磁盘/网络流句柄</text>
-    <text x="1145" y="1092" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#ea580c">06 (P2P 编排):</tspan> PullRequest(hash, peerId) · PSK 握手凭证 · 传输进度回调流</text>
-    <text x="1145" y="1112" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#ea580c">07 (底层传输):</tspan> DataConnection 句柄 · raw bytes 原始协议帧 (share/req/meta/data)</text>
-    <text x="1145" y="1132" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#0891b2">08 (节点信令):</tspan> WebSocket JSON (OPEN/OFFER/ANSWER/CANDIDATE) · 64hex 存在心跳</text>
-    <text x="1145" y="1152" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#7c3aed">09 (多协议下载):</tspan> 入参 64位 SHA-256 hash 字符串 → 回传 []byte 完整文件字节数据</text>
-    <text x="1145" y="1172" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#7c3aed">10 (上传写盘):</tspan> multipart 上传文件流 (io.Reader) → SafeWrite 物理落盘并算 hash</text>
-    <text x="1145" y="1192" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#7c3aed">11 (P2P 落盘供流):</tspan> 64KB 二进制分片流 (边收边验 SHA-256 落盘 / 读盘分块推送)</text>
-    <text x="1145" y="1212" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#0891b2">12 (消费端信令):</tspan> WebSocket JSON (PeerJS SDP/ICE 候选交换) · /discover/nodes 节点列表</text>
-    <text x="1145" y="1232" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#64748b">13 (媒体前置链):</tspan> 媒体 URL + ECH 加密 SNI ClientHello + HTTP 媒体文件流</text>
+    <text x="1145" y="1068" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#2563eb">01 [控制/数据] WebSocket /ws/peer：</tspan>admin JSON 指令帧 · admin-bin 64KB 分片流</text>
+    <text x="1145" y="1090" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#059669">02 [控制流] HTTP 路由转接：</tspan>*gin.Context / 请求解包 → 内部 HTTP 控制语义</text>
+    <text x="1145" y="1112" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#059669">03 [控制流] 内存 DTO 参数：</tspan>业务参数 (hash, collectionId, peerId, fileInfo, offset)</text>
+    <text x="1145" y="1134" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#7c3aed">04 [控制流] SQLite 数据库 IPC：</tspan>SQL 语句 (file_index, 游标 seq, collections 元数据)</text>
+    <text x="1145" y="1156" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#059669">05 [控制流] 内存接口调用：</tspan>source.Source 统一抽象 (Read / Size / Hash 磁盘流定位)</text>
+    <text x="1145" y="1178" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#ea580c">06 [控制流] P2P 业务编排：</tspan>PullRequest(hash, peerId) 任务 · PSK 凭证 · 进度回调</text>
+    <text x="1145" y="1200" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#ea580c">07 [控制/数据] WebRTC 原语：</tspan>DataConnection · raw bytes 协议帧 (share/req/data)</text>
+    <text x="1145" y="1222" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#0891b2">08 [控制流] WebSocket (JSON)：</tspan>PeerJS 信令 (OPEN/OFFER/ANSWER) · 64hex 存在心跳</text>
+    <text x="1145" y="1244" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#7c3aed">09 [控制/数据] 多协议下载管线：</tspan>hash 寻址 → Local / IPFS HTTP / BT DHT / HTTP直链</text>
+    <text x="1145" y="1266" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#7c3aed">10 [数据流] 操作系统磁盘 IO：</tspan>multipart 上传流 (io.Reader) → SafeWrite 物理落盘</text>
+    <text x="1145" y="1288" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#7c3aed">11 [数据流] 操作系统磁盘 IO：</tspan>64KB 二进制分片流 (边收边算 SHA-256 落盘 / 读盘供流)</text>
+    <text x="1145" y="1310" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#0891b2">12 [控制流] WebSocket (PeerJS)：</tspan>消费端 SDP/ICE 候选交换 · /discover/nodes 节点发现</text>
+    <text x="1145" y="1332" font-size="10.5" fill="#334155"><tspan font-weight="700" fill="#64748b">13 [数据流] TLS 1.3 ECH + HTTP/2：</tspan>媒体 URL + ECH 加密 SNI + HTTP 媒体文件流</text>
 
-    <line x1="1145" y1="1255" x2="1670" y2="1255" stroke="#e2e8f0" stroke-width="1"/>
-    <rect x="1145" y="1270" width="30" height="14" rx="3" fill="none" stroke="#d97706" stroke-width="1.8" stroke-dasharray="5 3"/>
-    <text x="1185" y="1282" font-size="11" font-weight="700" fill="#d97706">统一金色虚线框 = 01 config 环境变量注入与管理范围 (本地 Go 节点守护进程)</text>
+    <line x1="1145" y1="1355" x2="1670" y2="1355" stroke="#e2e8f0" stroke-width="1"/>
+    <rect x="1145" y="1370" width="30" height="14" rx="3" fill="none" stroke="#d97706" stroke-width="1.8" stroke-dasharray="5 3"/>
+    <text x="1185" y="1382" font-size="11" font-weight="700" fill="#d97706">统一金色虚线框 = 01 config 环境变量注入与管理范围 (本地 Go 节点守护进程)</text>
   </g>
 </svg>
