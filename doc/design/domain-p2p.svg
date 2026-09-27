@@ -113,31 +113,33 @@
 
   <!-- (A) 信令 ↔ 本地节点 A (09 transport 垂直直达，零交叉) -->
   <path d="M520,170 L520,205 L270,205 L270,275" fill="none" stroke="#0891b2" stroke-width="2.5" marker-start="url(#m_cyan_back)" marker-end="url(#m_cyan)"/>
-  <rect x="330" y="193" width="130" height="24" rx="5" fill="#ffffff" stroke="#0891b2" stroke-width="1.2"/>
-  <text x="395" y="209" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#0e7490" text-anchor="middle">信令保活 / 存在广播</text>
+  <rect x="300" y="193" width="190" height="24" rx="5" fill="#ffffff" stroke="#0891b2" stroke-width="1.2"/>
+  <text x="395" y="209" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="10.5" font-weight="700" fill="#0e7490" text-anchor="middle">WS: 64hex 存在房间心跳 / SDP握手</text>
 
   <!-- (B) 信令 ↔ 纯前端 Web 消费端 (水平右上直达，零交叉) -->
   <path d="M970,130 L1080,130 L1080,240" fill="none" stroke="#0891b2" stroke-width="2.5" marker-start="url(#m_cyan_back)" marker-end="url(#m_cyan)"/>
-  <rect x="990" y="118" width="140" height="24" rx="5" fill="#ffffff" stroke="#0891b2" stroke-width="1.2"/>
-  <text x="1060" y="134" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#0e7490" text-anchor="middle">浏览器信令打洞 / SDP</text>
+  <rect x="980" y="118" width="165" height="24" rx="5" fill="#ffffff" stroke="#0891b2" stroke-width="1.2"/>
+  <text x="1062" y="134" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="10.5" font-weight="700" fill="#0e7490" text-anchor="middle">WS: SDP/ICE 候选交换 / 节点列表</text>
 
   <!-- (C) 信令 ↔ 远程对端节点 B (右外边缘下行直达，零交叉) -->
   <path d="M970,150 L1415,150 L1415,620 L1400,620" fill="none" stroke="#0891b2" stroke-width="2.5" marker-start="url(#m_cyan_back)" marker-end="url(#m_cyan)"/>
-  <rect x="1270" y="138" width="130" height="24" rx="5" fill="#ffffff" stroke="#0891b2" stroke-width="1.2"/>
-  <text x="1335" y="154" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#0e7490" text-anchor="middle">对端在线宣布 / 发现</text>
+  <rect x="1250" y="138" width="160" height="24" rx="5" fill="#ffffff" stroke="#0891b2" stroke-width="1.2"/>
+  <text x="1330" y="154" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="10.5" font-weight="700" fill="#0e7490" text-anchor="middle">WS: 在线广播 / SDP转发打洞</text>
 
   <!-- (D) 核心通道 1: 【节点 A (10 peerjs) ↔ 远程对端 B】WebRTC DataChannel (直连大通道，零交叉) -->
   <path d="M475,540 L760,540" fill="none" stroke="#ea580c" stroke-width="4.5" marker-start="url(#m_orange_back)" marker-end="url(#m_orange)"/>
-  <rect x="535" y="525" width="165" height="30" rx="6" fill="#ea580c"/>
-  <text x="617" y="545" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">WebRTC DataChannel 直连</text>
+  <rect x="520" y="522" width="200" height="34" rx="6" fill="#ea580c"/>
+  <text x="620" y="537" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">WebRTC DataChannel 直连</text>
+  <text x="620" y="551" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="9.5" fill="#ffedd5" text-anchor="middle">req(hash) / 64KB 二进制流 / 4MB 背压</text>
 
   <!-- (E) 核心通道 2: 【纯前端 ↔ 节点 A (10 peerjs)】WebRTC 直连 (走廊下入，零交叉) -->
   <path d="M760,370 L620,370 L620,490 L475,490" fill="none" stroke="#0d9488" stroke-width="3.5" marker-start="url(#m_teal_back)" marker-end="url(#m_teal)"/>
-  <rect x="525" y="415" width="150" height="28" rx="6" fill="#0d9488"/>
-  <text x="600" y="433" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff" text-anchor="middle">纯前端 WebRTC 直连</text>
+  <rect x="510" y="412" width="180" height="34" rx="6" fill="#0d9488"/>
+  <text x="600" y="427" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">纯前端 WebRTC 直连</text>
+  <text x="600" y="441" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="9.5" fill="#ccfbf1" text-anchor="middle">share 目录帧 / 64KB 流 / 增量hash</text>
 
   <!-- (F) 纯前端 ↔ 对端节点 B (垂直下行直达，零交叉) -->
   <path d="M1080,495 L1080,535" fill="none" stroke="#0d9488" stroke-width="3" marker-start="url(#m_teal_back)" marker-end="url(#m_teal)"/>
-  <rect x="1025" y="502" width="110" height="22" rx="4" fill="#0d9488"/>
-  <text x="1080" y="517" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="10.5" font-weight="700" fill="#ffffff" text-anchor="middle">纯前端直拉对端</text>
+  <rect x="990" y="502" width="180" height="22" rx="4" fill="#0d9488"/>
+  <text x="1080" y="517" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="10" font-weight="700" fill="#ffffff" text-anchor="middle">纯前端直拉对端: req 帧 / 64KB 流</text>
 </svg>

@@ -73,10 +73,12 @@
 
   <!-- 连线：Frontend -> Router (两根平行垂线，无交叉) -->
   <path d="M545,170 L545,225" fill="none" stroke="#2563eb" stroke-width="2.2" marker-end="url(#m_blue)"/>
-  <text x="535" y="202" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="end">REST API</text>
+  <rect x="420" y="190" width="120" height="22" rx="4" fill="#ffffff" stroke="#2563eb" stroke-width="1"/>
+  <text x="480" y="205" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10" font-weight="600" fill="#1d4ed8" text-anchor="middle">HTTP REST / 字节流</text>
 
   <path d="M915,170 L915,225" fill="none" stroke="#2563eb" stroke-width="2.2" marker-end="url(#m_blue)"/>
-  <text x="925" y="202" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="start">/ws/peer 管理帧代理</text>
+  <rect x="830" y="190" width="170" height="22" rx="4" fill="#ffffff" stroke="#2563eb" stroke-width="1"/>
+  <text x="915" y="205" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10" font-weight="600" fill="#1d4ed8" text-anchor="middle">admin JSON帧 / 64KB分片流</text>
 
   <!-- ============ 右侧：14 nodestate 状态总线 ============ -->
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
@@ -102,11 +104,16 @@
 
   <!-- 连线：Router -> Controller (两根平行垂线，无交叉) -->
   <path d="M545,310 L545,345" fill="none" stroke="#059669" stroke-width="2.2" marker-end="url(#m_green)"/>
+  <rect x="460" y="318" width="170" height="20" rx="4" fill="#ffffff" stroke="#059669" stroke-width="1"/>
+  <text x="545" y="332" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="9.5" font-weight="600" fill="#059669" text-anchor="middle">02: *gin.Context / 请求解包</text>
+
   <path d="M915,310 L915,345" fill="none" stroke="#059669" stroke-width="2.2" marker-end="url(#m_green)"/>
+  <rect x="830" y="318" width="170" height="20" rx="4" fill="#ffffff" stroke="#059669" stroke-width="1"/>
+  <text x="915" y="332" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="9.5" font-weight="600" fill="#059669" text-anchor="middle">admin 帧转接内部 HTTP 调用</text>
 
   <!-- 连线：Controller -> NodeState (向右直连，无交叉) -->
   <path d="M1110,385 L1150,385" fill="none" stroke="#c026d3" stroke-width="1.8" marker-end="url(#m_fuchsia)"/>
-  <text x="1130" y="378" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10.5" fill="#a21caf" text-anchor="middle">读写状态</text>
+  <text x="1130" y="378" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10" fill="#a21caf" text-anchor="middle">读写状态</text>
 
   <!-- ============ 中间核心：06 service (Row 3) ============ -->
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
@@ -118,10 +125,12 @@
 
   <!-- 连线：Controller -> Service (中心单垂线，无交叉) -->
   <path d="M730,425 L730,455" fill="none" stroke="#059669" stroke-width="2.4" marker-end="url(#m_green)"/>
+  <rect x="635" y="432" width="190" height="20" rx="4" fill="#ffffff" stroke="#059669" stroke-width="1"/>
+  <text x="730" y="446" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="9.5" font-weight="600" fill="#059669" text-anchor="middle">03: 业务 DTO (hash, collectionId, peerId)</text>
 
   <!-- 连线：Service -> NodeState (直角向上，无交叉) -->
   <path d="M1110,497 L1265,497 L1265,425" fill="none" stroke="#c026d3" stroke-width="1.8" marker-end="url(#m_fuchsia)"/>
-  <text x="1190" y="490" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10.5" fill="#a21caf">更新 PeerID / 上报流量</text>
+  <text x="1190" y="490" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10" fill="#a21caf">更新 PeerID / 上报流量 stats</text>
 
   <!-- ============ 中间核心：07 source & 08 downloader (Row 4) ============ -->
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
@@ -140,24 +149,30 @@
 
   <!-- 连线：Service -> Source (平行垂线，无交叉) -->
   <path d="M530,540 L530,575" fill="none" stroke="#059669" stroke-width="2" marker-end="url(#m_green)"/>
+  <rect x="445" y="548" width="170" height="20" rx="4" fill="#ffffff" stroke="#059669" stroke-width="1"/>
+  <text x="530" y="562" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="9.5" font-weight="600" fill="#059669" text-anchor="middle">05: Source 统一接口 / 流定位</text>
+
   <!-- 连线：Service -> Downloader (平行垂线，无交叉) -->
   <path d="M930,540 L930,575" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#m_purple)"/>
+  <rect x="845" y="548" width="170" height="20" rx="4" fill="#ffffff" stroke="#7c3aed" stroke-width="1"/>
+  <text x="930" y="562" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="9.5" font-weight="600" fill="#7c3aed" text-anchor="middle">09: 64位 SHA-256 hash 字符串</text>
+
   <!-- 连线：Downloader -> Source (水平直连，无交叉) -->
   <path d="M750,615 L710,615" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#m_purple)"/>
-  <text x="730" y="608" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10.5" fill="#6d28d9" text-anchor="middle">调度取流</text>
+  <text x="730" y="608" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10" fill="#6d28d9" text-anchor="middle">调度多源取流</text>
 
   <!-- ============ 最底层：外部硬件与传输域接口插槽 (Row 5: y=695..765) ============ -->
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
     <!-- Dock 1: 03 storage -->
     <rect x="350" y="695" width="230" height="70" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8"/>
     <text x="465" y="722" font-size="14.5" font-weight="700" fill="#991b1b" text-anchor="middle">03 · storage 物理磁盘</text>
-    <text x="465" y="742" font-size="11" fill="#b91c1c" text-anchor="middle">磁盘物理落盘 / pathutil 安全读写</text>
+    <text x="465" y="742" font-size="11" fill="#b91c1c" text-anchor="middle">SafeWrite 写入 / 读盘数据流</text>
     <text x="465" y="756" font-size="10" fill="#7f1d1d" text-anchor="middle">（详见 本地存储域架构图）</text>
 
     <!-- Dock 2: 02 repository -->
     <rect x="615" y="695" width="230" height="70" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="1.8"/>
     <text x="730" y="722" font-size="14.5" font-weight="700" fill="#854d0e" text-anchor="middle">02 · repository 数据仓储</text>
-    <text x="730" y="742" font-size="11" fill="#a16207" text-anchor="middle">SQLite file_index 表与增量游标</text>
+    <text x="730" y="742" font-size="11" fill="#a16207" text-anchor="middle">SQL: file_index 表与增量游标</text>
     <text x="730" y="756" font-size="10" fill="#713f12" text-anchor="middle">（详见 本地存储域架构图）</text>
 
     <!-- Dock 3: 09 transport -->
