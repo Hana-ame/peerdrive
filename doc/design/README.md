@@ -5,6 +5,7 @@
 > - 每个模块一份 [`modules/NN-*.md`](modules/)：逻辑 / 如何储存 / 何时储存 / 储存什么
 > - 每对模块连接一份 [`connections/NN-*.md`](connections/)：连接方式 / 时序 / 情况处理
 > - 连接总览（连接地图、启动/停机时序、典型主流程）→ [如何连接.md](如何连接.md)
+> - 连接拓扑可视化（14 模块 / 13 连接一图）→ [connections-map.png](connections-map.png)（源文件 [connections-map.svg](connections-map.svg)）
 >
 > 配套既有文档：分层视角 [doc/layers/](../layers/)、架构决策与帧协议 [doc/REFACTOR.md](../REFACTOR.md)、部署 [doc/PEERSIGNAL.md](../PEERSIGNAL.md)、网盘链路 [doc/NETDISK.md](../NETDISK.md)。
 > 生成日期：2026-09-27（基于当日代码现状；文档与代码冲突时以代码为准并回来改文档）。
