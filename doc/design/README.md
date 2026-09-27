@@ -5,7 +5,11 @@
 > - 每个模块一份 [`modules/NN-*.md`](modules/)：逻辑 / 如何储存 / 何时储存 / 储存什么
 > - 每对模块连接一份 [`connections/NN-*.md`](connections/)：连接方式 / 时序 / 情况处理
 > - 连接总览（连接地图、启动/停机时序、典型主流程）→ [如何连接.md](如何连接.md)
-> - 连接拓扑可视化（14 模块 / 13 连接一图）→ [connections-map.svg](connections-map.svg)（markdown 内直接渲染；位图属派生物不入 git，按需 `rsvg-convert -o connections-map.png connections-map.svg` 导出）
+> - 连接拓扑可视化（高清矢量 SVG，零连线交叉设计）：
+>   - 🗺️ **全局总览**：14 模块 / 13 连接全景图 → [connections-map.svg](connections-map.svg)
+>   - 🗄️ **存储与持久化域**：物理磁盘与 SQLite 元数据落盘 → [domain-storage.svg](domain-storage.svg)
+>   - 🌐 **P2P 网络与直连域**：信令发现与跨节点/浏览器 DataChannel 直连 → [domain-p2p.svg](domain-p2p.svg)
+>   - 🎛️ **前端控制与路由域**：Web 管理面、WS admin 代理与内部调度 → [domain-control.svg](domain-control.svg)
 >
 > 配套既有文档：分层视角 [doc/layers/](../layers/)、架构决策与帧协议 [doc/REFACTOR.md](../REFACTOR.md)、部署 [doc/PEERSIGNAL.md](../PEERSIGNAL.md)、网盘链路 [doc/NETDISK.md](../NETDISK.md)。
 > 生成日期：2026-09-27（基于当日代码现状；文档与代码冲突时以代码为准并回来改文档）。

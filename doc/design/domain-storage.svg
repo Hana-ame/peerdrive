@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1360" height="820" viewBox="0 0 1360 820">
+  <defs>
+    <marker id="m_purple" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#7c3aed"/></marker>
+    <marker id="m_purple_back" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="1" refY="7" orient="auto" markerOverflow="visible"><path d="M13,1 L0,7 L13,13 Z" fill="#7c3aed"/></marker>
+    <marker id="m_green" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#059669"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1360" height="820" fill="#ffffff"/>
+
+  <!-- ============ 顶部标题 ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <text x="40" y="38" font-size="24" font-weight="700" fill="#0f172a">peerdrive 领域架构 · 本地存储与硬件持久化域 (Storage &amp; Persistence Domain)</text>
+    <text x="40" y="64" font-size="13" fill="#64748b">聚焦物理磁盘内容寻址 (03 storage) 与 SQLite 元数据库 (02 repository) 的读写调度、安全边界与落盘流向</text>
+  </g>
+
+  <!-- ============ 01 config 统一虚线管理范围 ============ -->
+  <rect x="40" y="90" width="1280" height="700" rx="16" fill="#f8fafc" stroke="#d97706" stroke-width="2" stroke-dasharray="8 5"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <rect x="60" y="78" width="460" height="26" rx="5" fill="#d97706"/>
+    <text x="290" y="95" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">⚙️ 01 config 环境变量注入与管理范围 (配置 storageDir, dbPath, 允许根)</text>
+  </g>
+
+  <!-- ============ 上层：业务与读写触发面 (Row 1: y=130..200) ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <!-- 01 config 实体 -->
+    <rect x="70" y="130" width="220" height="70" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="1.8"/>
+    <text x="180" y="158" font-size="14.5" font-weight="700" fill="#92400e" text-anchor="middle">01 · config 配置源</text>
+    <text x="180" y="180" font-size="11" fill="#a16207" text-anchor="middle">PEERDRIVE_STORAGE / DB_PATH</text>
+
+    <!-- 05 controller -->
+    <rect x="330" y="130" width="280" height="70" rx="10" fill="#f0fdf4" stroke="#059669" stroke-width="1.8"/>
+    <text x="470" y="158" font-size="14.5" font-weight="700" fill="#064e3b" text-anchor="middle">05 · controller 处理器</text>
+    <text x="470" y="180" font-size="11" fill="#047857" text-anchor="middle">HTTP 上传接口 · 校验后直接调度写盘</text>
+
+    <!-- 06 service -->
+    <rect x="650" y="130" width="290" height="70" rx="10" fill="#f0fdf4" stroke="#059669" stroke-width="1.8"/>
+    <text x="795" y="158" font-size="14.5" font-weight="700" fill="#064e3b" text-anchor="middle">06 · service 业务编排</text>
+    <text x="795" y="180" font-size="11" fill="#047857" text-anchor="middle">FileService / PeerPuller / 目录与索引维护</text>
+
+    <!-- 09 transport -->
+    <rect x="980" y="130" width="310" height="70" rx="10" fill="#fff7ed" stroke="#ea580c" stroke-width="1.8"/>
+    <text x="1135" y="158" font-size="14.5" font-weight="700" fill="#7c2d12" text-anchor="middle">09 · transport P2P 传输</text>
+    <text x="1135" y="180" font-size="11" fill="#c2410c" text-anchor="middle">P2P 拉取数据落盘 / serveFile 供流读盘</text>
+  </g>
+
+  <!-- ============ 中层：多源与下载中转 (Row 2: y=270..340) ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <!-- 07 source -->
+    <rect x="330" y="270" width="280" height="70" rx="10" fill="#f0fdf4" stroke="#059669" stroke-width="1.8"/>
+    <text x="470" y="298" font-size="14.5" font-weight="700" fill="#064e3b" text-anchor="middle">07 · source 文件来源管理器</text>
+    <text x="470" y="320" font-size="11" fill="#047857" text-anchor="middle">Local 本地源 · 映射磁盘物理路径</text>
+
+    <!-- 08 downloader -->
+    <rect x="650" y="270" width="290" height="70" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.8"/>
+    <text x="795" y="298" font-size="14.5" font-weight="700" fill="#3b0764" text-anchor="middle">08 · downloader 多协议下载</text>
+    <text x="795" y="320" font-size="11" fill="#6d28d9" text-anchor="middle">UniversalDownloader · 下载完成缓存至本地</text>
+
+    <!-- 03 controller -> service 水平连线 -->
+    <path d="M610,165 L650,165" fill="none" stroke="#059669" stroke-width="2" marker-end="url(#m_green)"/>
+  </g>
+
+  <!-- ============ 最底层：💽 硬件与物理持久化层 (Row 3: y=450..760 绝对置底！) ============ -->
+  <rect x="70" y="420" width="1220" height="340" rx="14" fill="#faf5ff" stroke="#7c3aed" stroke-width="2.2"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <rect x="90" y="406" width="460" height="28" rx="6" fill="#7c3aed"/>
+    <text x="320" y="425" font-size="13.5" font-weight="700" fill="#ffffff" text-anchor="middle">💽 硬件与物理持久化层 (Hardware Storage Layer · 绝对置底)</text>
+    <text x="570" y="425" font-size="11.5" fill="#6d28d9">操作系统硬件扇区 IO · 磁盘文件读写 · SQLite 库文件操作 · os.Root 允许根沙盒隔离</text>
+
+    <!-- 03 storage (物理磁盘内容寻址) -->
+    <rect x="100" y="455" width="530" height="280" rx="12" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+    <text x="365" y="488" font-size="17" font-weight="700" fill="#3b0764" text-anchor="middle">03 · storage 内容寻址存储 (物理磁盘读写)</text>
+    <text x="365" y="512" font-size="12" fill="#6d28d9" text-anchor="middle">代码：back/internal/pathutil + 实际物理落盘目录 (storageDir)</text>
+
+    <!-- 03 内部机制说明卡片 -->
+    <rect x="120" y="530" width="490" height="185" rx="8" fill="#faf5ff" stroke="#c084fc" stroke-width="1.2"/>
+    <text x="140" y="555" font-size="12.5" font-weight="700" fill="#581c87">硬件与安全核心机制：</text>
+    <text x="140" y="580" font-size="11.5" fill="#334155">1. 路径格式：storageDir/&lt;sha256[:2]&gt;/&lt;sha256&gt; 散列组织</text>
+    <text x="140" y="605" font-size="11.5" fill="#334155">2. 安全防穿透：基于 Go 1.24 os.Root (openat2) 内核级沙盒</text>
+    <text x="140" y="630" font-size="11.5" fill="#334155">3. 软硬链接防御：符号链接解析不逃逸，链接数 &gt; 1 硬链接拒绝</text>
+    <text x="140" y="655" font-size="11.5" fill="#334155">4. Windows 兼容：过滤 CON/PRN 等保留设备名，还原 8.3 短名</text>
+    <text x="140" y="680" font-size="11.5" fill="#334155">5. 原子写盘：SafeWriteFileAny 写入临时文件后重命名，防断电半截</text>
+    <text x="140" y="703" font-size="11" fill="#7c3aed">（服务于：HTTP 上传落盘、P2P 拉取落盘、serveFile 对外供流）</text>
+
+    <!-- 02 repository (SQLite 数据库文件) -->
+    <rect x="670" y="455" width="590" height="280" rx="12" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+    <text x="965" y="488" font-size="17" font-weight="700" fill="#3b0764" text-anchor="middle">02 · repository 元数据库 (SQLite 磁盘文件)</text>
+    <text x="965" y="512" font-size="12" fill="#6d28d9" text-anchor="middle">代码：back/internal/repository · 物理文件: peerdrive.db</text>
+
+    <!-- 02 内部数据表卡片 -->
+    <rect x="690" y="530" width="550" height="185" rx="8" fill="#faf5ff" stroke="#c084fc" stroke-width="1.2"/>
+    <text x="710" y="555" font-size="12.5" font-weight="700" fill="#581c87">持久化元数据核心表：</text>
+    <text x="710" y="580" font-size="11.5" fill="#334155">• file_index：sha256 → 绝对物理路径映射 + seq 单调递增同步游标</text>
+    <text x="710" y="605" font-size="11.5" fill="#334155">• file_meta / file_providers：大小、MIME 类型、本地/网络副本列表</text>
+    <text x="710" y="630" font-size="11.5" fill="#334155">• collections / entries / versions：虚拟网盘层级目录树与不可变版本快照</text>
+    <text x="710" y="655" font-size="11.5" fill="#334155">• share_links：对外临时分享链接（Token + 30 天过期）</text>
+    <text x="710" y="680" font-size="11.5" fill="#334155">• download_progress：大文件断点续传块位图与进度</text>
+    <text x="710" y="703" font-size="11" fill="#7c3aed">（驱动特性：CGO 开启时 mattn/sqlite3，否则纯 Go modernc，文件锁保护）</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 连线：上层直达最底硬件层（垂直下行，严格零交叉！）             -->
+  <!-- ============================================================== -->
+
+  <!-- 10: controller → storage (上传写物理磁盘，直线直达) -->
+  <path d="M410,200 L410,455" fill="none" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#m_purple)"/>
+  <rect x="340" y="225" width="140" height="24" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.2"/>
+  <text x="410" y="241" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#7c3aed" text-anchor="middle">10 上传写入物理磁盘</text>
+
+  <!-- 04: service → repository (业务读写 SQLite 库，直线直达) -->
+  <path d="M795,200 L795,455" fill="none" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#m_purple)"/>
+  <rect x="725" y="225" width="140" height="24" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.2"/>
+  <text x="795" y="241" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#7c3aed" text-anchor="middle">04 业务读写 SQLite 元数据</text>
+
+  <!-- 11: transport ↔ storage (P2P 落盘与供流读盘，右外走廊直达) -->
+  <path d="M1135,200 L1135,390 L580,390 L580,455" fill="none" stroke="#7c3aed" stroke-width="2.5" marker-start="url(#m_purple_back)" marker-end="url(#m_purple)"/>
+  <rect x="880" y="378" width="170" height="24" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.2"/>
+  <text x="965" y="394" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#7c3aed" text-anchor="middle">11 P2P 拉取落盘 / serveFile 供流</text>
+
+  <!-- 07 source ↔ 03 storage -->
+  <path d="M470,340 L470,455" fill="none" stroke="#059669" stroke-width="2.2" marker-start="url(#m_green)" marker-end="url(#m_green)"/>
+  <rect x="420" y="365" width="100" height="22" rx="5" fill="#ffffff" stroke="#059669" stroke-width="1.2"/>
+  <text x="470" y="380" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="10.5" font-weight="700" fill="#059669" text-anchor="middle">物理文件定位</text>
+
+  <!-- 09: controller → downloader -->
+  <path d="M570,200 L570,240 L720,240 L720,270" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#m_purple)"/>
+  <rect x="600" y="228" width="90" height="22" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.2"/>
+  <text x="645" y="243" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="10.5" font-weight="700" fill="#7c3aed" text-anchor="middle">09 下载调度</text>
+</svg>

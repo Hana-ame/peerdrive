@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="860" viewBox="0 0 1440 860">
+  <defs>
+    <marker id="m_orange" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#ea580c"/></marker>
+    <marker id="m_cyan" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#0891b2"/></marker>
+    <marker id="m_teal" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#0d9488"/></marker>
+    <marker id="m_orange_back" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="1" refY="7" orient="auto" markerOverflow="visible"><path d="M13,1 L0,7 L13,13 Z" fill="#ea580c"/></marker>
+    <marker id="m_cyan_back" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="1" refY="7" orient="auto" markerOverflow="visible"><path d="M13,1 L0,7 L13,13 Z" fill="#0891b2"/></marker>
+    <marker id="m_teal_back" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="1" refY="7" orient="auto" markerOverflow="visible"><path d="M13,1 L0,7 L13,13 Z" fill="#0d9488"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1440" height="860" fill="#ffffff"/>
+
+  <!-- ============ 顶部标题 ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <text x="40" y="38" font-size="24" font-weight="700" fill="#0f172a">peerdrive 领域架构 · P2P 网络互联与对端直连域 (P2P Network &amp; Signaling Domain)</text>
+    <text x="40" y="64" font-size="13" fill="#64748b">聚焦顶层信令发现、WebRTC DataChannel 跨节点对等直连 (Node-to-Peer) 与纯浏览器免部署拉取 (Browser-to-Peer)</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 1. 最顶层：11 · signalserver 信令发现服务                       -->
+  <!-- ============================================================== -->
+  <rect x="470" y="90" width="500" height="80" rx="14" fill="#ecfeff" stroke="#0891b2" stroke-width="2.2"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <text x="720" y="122" font-size="17" font-weight="700" fill="#155e75" text-anchor="middle">11 · signalserver 信令发现服务 (顶层交换中心)</text>
+    <text x="720" y="148" font-size="12" fill="#0e7490" text-anchor="middle">WebSocket SDP/ICE 转发打洞 + Presence 存在房间 (固定 64hex 哈希) + 节点在线心跳</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 2. 本地节点传输中枢 (Local Node A: Transport & PeerJS)         -->
+  <!-- ============================================================== -->
+  <rect x="40" y="240" width="460" height="580" rx="16" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.8"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <rect x="58" y="226" width="280" height="28" rx="6" fill="#0f172a"/>
+    <text x="198" y="245" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">🖥️ 本地节点 A 传输与网络中枢</text>
+
+    <!-- 09 transport -->
+    <rect x="65" y="275" width="410" height="150" rx="12" fill="#fff7ed" stroke="#ea580c" stroke-width="2"/>
+    <text x="270" y="306" font-size="16" font-weight="700" fill="#7c2d12" text-anchor="middle">09 · transport P2P 传输状态机</text>
+    <text x="270" y="330" font-size="11.5" fill="#9a3412" text-anchor="middle">代码：back/internal/transport · 会话状态机 / 协议帧调度</text>
+
+    <rect x="85" y="348" width="370" height="65" rx="8" fill="#ffffff" stroke="#fdba74" stroke-width="1"/>
+    <text x="100" y="370" font-size="11.5" fill="#7c2d12">• 帧协议调度：share/share-resp (共享范围) · req/meta/data (流)</text>
+    <text x="100" y="394" font-size="11.5" fill="#7c2d12">• 安全门禁：PEERDRIVE_PSK 密钥校验 · 4MB 动态背压限速</text>
+
+    <!-- 10 peerjs -->
+    <rect x="65" y="455" width="410" height="130" rx="12" fill="#fff7ed" stroke="#ea580c" stroke-width="2"/>
+    <text x="270" y="486" font-size="16" font-weight="700" fill="#7c2d12" text-anchor="middle">10 · peerjs 协议库 (WebRTC 原语)</text>
+    <text x="270" y="510" font-size="11.5" fill="#9a3412" text-anchor="middle">独立模块：github.com/Hana-ame/go-peerjs (Pion WebRTC 驱动)</text>
+
+    <rect x="85" y="525" width="370" height="48" rx="8" fill="#ffffff" stroke="#fdba74" stroke-width="1"/>
+    <text x="100" y="546" font-size="11.5" fill="#7c2d12">• 托管 DataConnection 双向二进制通道 · 零业务逻辑侵入</text>
+    <text x="100" y="564" font-size="11.5" fill="#7c2d12">• 负责底层 SDP/ICE 候选协商与 WebRTC 打洞建立</text>
+
+    <!-- 07 transport ↔ peerjs 垂直连线 -->
+    <path d="M270,425 L270,455" fill="none" stroke="#ea580c" stroke-width="2.5" marker-start="url(#m_orange_back)" marker-end="url(#m_orange)"/>
+
+    <!-- 旁路媒体代理：12 media-node & ech -->
+    <rect x="65" y="620" width="410" height="85" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="1.5"/>
+    <text x="270" y="648" font-size="14" font-weight="700" fill="#1e293b" text-anchor="middle">12 · media-node &amp; ECH 域名前置媒体代理</text>
+    <text x="270" y="670" font-size="11" fill="#475569" text-anchor="middle">back/cmd/media-node + back/ech · 独立二进制直连推特媒体 CDN</text>
+    <text x="270" y="690" font-size="10.5" fill="#64748b" text-anchor="middle">白名单限制 + ECH 加密握手直连，防阻断与泄露</text>
+
+    <!-- 节点内对本地存储输出提示 -->
+    <rect x="65" y="730" width="410" height="65" rx="8" fill="#faf5ff" stroke="#a855f7" stroke-width="1.5"/>
+    <text x="270" y="755" font-size="12.5" font-weight="700" fill="#6d28d9" text-anchor="middle">⬇️ 连接至本地底层硬件存储 (03 storage &amp; 02 repository)</text>
+    <text x="270" y="777" font-size="11" fill="#7c3aed" text-anchor="middle">P2P 拉取数据边收边算 SHA-256，校验通过后调用 SafeWrite 物理落盘</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 3. 右上容器：纯前端 Web 消费端 (Pure Frontend Client)          -->
+  <!-- ============================================================== -->
+  <rect x="760" y="240" width="640" height="255" rx="16" fill="#f0fdfa" stroke="#0d9488" stroke-width="2.2"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <rect x="778" y="226" width="340" height="28" rx="6" fill="#0d9488"/>
+    <text x="948" y="245" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">🌐 纯前端 Web 消费端 (peerdrive-client)</text>
+
+    <text x="785" y="280" font-size="15" font-weight="700" fill="#134e4a">形态：单文件面板 (dist/panel.html) · 零部署纯浏览器直接拉取</text>
+    <text x="785" y="306" font-size="12" fill="#0f766e">• 传输无关驱动：packages/peerdrive-client (零运行时依赖，ESM 直发)</text>
+    <text x="785" y="329" font-size="12" fill="#0f766e">• 浏览器直连：注入 PeerJS DataConnection 句柄，浏览器直通目标 Peer</text>
+    <text x="785" y="352" font-size="12" fill="#0f766e">• 目录浏览：发送 share 帧，即时渲染远程节点公开的文件列表</text>
+    <text x="785" y="375" font-size="12" fill="#0f766e">• 增量哈希：纯 JS 流式计算 SHA-256（非一次性 digest，防浏览器 OOM）</text>
+    <text x="785" y="398" font-size="12" fill="#0f766e">• 磁盘保存：校验一致后打包为 Blob 触发浏览器原生 SaveAs 落盘</text>
+
+    <rect x="785" y="420" width="590" height="55" rx="8" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.2"/>
+    <text x="1080" y="445" font-size="12" font-weight="700" fill="#115e59" text-anchor="middle">价值：用户电脑无需安装 Go、无需运行后端节点，直接通过网页拉取节点文件</text>
+    <text x="1080" y="464" font-size="11" fill="#0f766e" text-anchor="middle">支持出示 PSK 预共享密钥，无缝通过远程节点准入门禁</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 4. 右下容器：外部远程对端节点 (Remote Peer B)                  -->
+  <!-- ============================================================== -->
+  <rect x="760" y="535" width="640" height="285" rx="16" fill="#fff7ed" stroke="#ea580c" stroke-width="2.2"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <rect x="778" y="521" width="310" height="28" rx="6" fill="#ea580c"/>
+    <text x="933" y="540" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">🪐 远程对端节点 (Remote Peer B)</text>
+
+    <text x="785" y="575" font-size="15" font-weight="700" fill="#7c2d12">形态：网络中另一台对等 Peerdrive 节点 (常驻对端 / 市场发现)</text>
+    <text x="785" y="600" font-size="12" fill="#9a3412">• 节点市场：在 /discover/nodes 广播 announce，在市场界面可见</text>
+    <text x="785" y="622" font-size="12" fill="#9a3412">• 常驻清单：加入后记录在本地 joined_nodes.json，重启自动重新拨号</text>
+    <text x="785" y="644" font-size="12" fill="#9a3412">• 准入门禁：PEERDRIVE_PSK 密钥，未提供时拦截返回 PSK_REQUIRED</text>
+    <text x="785" y="666" font-size="12" fill="#9a3412">• 共享范围：PEERDRIVE_SHARE_DIRS 显式声明对外公开的目录范围</text>
+    <text x="785" y="688" font-size="12" fill="#9a3412">• 隐私隔离：share-resp 只返回文件 basename，绝不泄露对端物理绝对路径</text>
+
+    <rect x="785" y="710" width="590" height="85" rx="8" fill="#ffedd5" stroke="#f97316" stroke-width="1.2"/>
+    <text x="1080" y="735" font-size="12.5" font-weight="700" fill="#7c2d12" text-anchor="middle">WebRTC DataChannel 文件供流机制：</text>
+    <text x="1080" y="757" font-size="11.5" fill="#9a3412" text-anchor="middle">收到 req(hash) 帧 → 查本地 FileIndex 获取文件 → 串行推送 64KB 二进制分片</text>
+    <text x="1080" y="777" font-size="11" fill="#7c2d12" text-anchor="middle">内置 4MB 动态背压流控，防止对端或浏览器客户端缓冲区溢出崩溃</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 5. 跨角色连线（信令 + WebRTC 粗直连线，严格零交叉！）           -->
+  <!-- ============================================================== -->
+
+  <!-- (A) 信令 ↔ 本地节点 A (09 transport 垂直直达，零交叉) -->
+  <path d="M520,170 L520,205 L270,205 L270,275" fill="none" stroke="#0891b2" stroke-width="2.5" marker-start="url(#m_cyan_back)" marker-end="url(#m_cyan)"/>
+  <rect x="330" y="193" width="130" height="24" rx="5" fill="#ffffff" stroke="#0891b2" stroke-width="1.2"/>
+  <text x="395" y="209" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#0e7490" text-anchor="middle">信令保活 / 存在广播</text>
+
+  <!-- (B) 信令 ↔ 纯前端 Web 消费端 (水平右上直达，零交叉) -->
+  <path d="M970,130 L1080,130 L1080,240" fill="none" stroke="#0891b2" stroke-width="2.5" marker-start="url(#m_cyan_back)" marker-end="url(#m_cyan)"/>
+  <rect x="990" y="118" width="140" height="24" rx="5" fill="#ffffff" stroke="#0891b2" stroke-width="1.2"/>
+  <text x="1060" y="134" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#0e7490" text-anchor="middle">浏览器信令打洞 / SDP</text>
+
+  <!-- (C) 信令 ↔ 远程对端节点 B (右外边缘下行直达，零交叉) -->
+  <path d="M970,150 L1415,150 L1415,620 L1400,620" fill="none" stroke="#0891b2" stroke-width="2.5" marker-start="url(#m_cyan_back)" marker-end="url(#m_cyan)"/>
+  <rect x="1270" y="138" width="130" height="24" rx="5" fill="#ffffff" stroke="#0891b2" stroke-width="1.2"/>
+  <text x="1335" y="154" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#0e7490" text-anchor="middle">对端在线宣布 / 发现</text>
+
+  <!-- (D) 核心通道 1: 【节点 A (10 peerjs) ↔ 远程对端 B】WebRTC DataChannel (直连大通道，零交叉) -->
+  <path d="M475,540 L760,540" fill="none" stroke="#ea580c" stroke-width="4.5" marker-start="url(#m_orange_back)" marker-end="url(#m_orange)"/>
+  <rect x="535" y="525" width="165" height="30" rx="6" fill="#ea580c"/>
+  <text x="617" y="545" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">WebRTC DataChannel 直连</text>
+
+  <!-- (E) 核心通道 2: 【纯前端 ↔ 节点 A (10 peerjs)】WebRTC 直连 (走廊下入，零交叉) -->
+  <path d="M760,370 L620,370 L620,490 L475,490" fill="none" stroke="#0d9488" stroke-width="3.5" marker-start="url(#m_teal_back)" marker-end="url(#m_teal)"/>
+  <rect x="525" y="415" width="150" height="28" rx="6" fill="#0d9488"/>
+  <text x="600" y="433" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff" text-anchor="middle">纯前端 WebRTC 直连</text>
+
+  <!-- (F) 纯前端 ↔ 对端节点 B (垂直下行直达，零交叉) -->
+  <path d="M1080,495 L1080,535" fill="none" stroke="#0d9488" stroke-width="3" marker-start="url(#m_teal_back)" marker-end="url(#m_teal)"/>
+  <rect x="1025" y="502" width="110" height="22" rx="4" fill="#0d9488"/>
+  <text x="1080" y="517" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="10.5" font-weight="700" fill="#ffffff" text-anchor="middle">纯前端直拉对端</text>
+</svg>

@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="840" viewBox="0 0 1440 840">
+  <defs>
+    <marker id="m_blue" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#2563eb"/></marker>
+    <marker id="m_green" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#059669"/></marker>
+    <marker id="m_purple" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#7c3aed"/></marker>
+    <marker id="m_fuchsia" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#c026d3"/></marker>
+    <marker id="m_amber" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#d97706"/></marker>
+    <marker id="m_red" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#dc2626"/></marker>
+    <marker id="m_orange" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#ea580c"/></marker>
+    <marker id="m_yellow" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerOverflow="visible"><path d="M0,1 L13,7 L0,13 Z" fill="#ca8a04"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1440" height="840" fill="#ffffff"/>
+
+  <!-- ============ 顶部标题 ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <text x="40" y="38" font-size="24" font-weight="700" fill="#0f172a">peerdrive 领域架构 · 前端控制面与本地路由调度域 (Frontend Control &amp; Routing Domain)</text>
+    <text x="40" y="64" font-size="13" fill="#64748b">聚焦前端交互 (13 frontend)、本地路由与 WS 管理帧代理 (04 router)、API 处理器 (05 controller)、核心服务 (06 service) 及节点状态 (14 nodestate)</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 1. 最顶层：13 · frontend 前端网盘与控制台应用                   -->
+  <!-- ============================================================== -->
+  <rect x="350" y="85" width="760" height="85" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <text x="730" y="112" font-size="16" font-weight="700" fill="#1e40af" text-anchor="middle">13 · frontend 前端网盘与控制台应用 (Web Client)</text>
+    <text x="730" y="130" font-size="11.5" fill="#3b82f6" text-anchor="middle">React 18 + Vite SPA (Drive / Market / Peers / Transfers) · 单文件公共面板 panel.html</text>
+
+    <!-- 内部双出口 -->
+    <rect x="375" y="138" width="340" height="24" rx="5" fill="#ffffff" stroke="#93c5fd" stroke-width="1"/>
+    <text x="545" y="154" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">🌐 HTTP Client (REST API 请求 /api/v1/*)</text>
+
+    <rect x="745" y="138" width="340" height="24" rx="5" fill="#ffffff" stroke="#93c5fd" stroke-width="1"/>
+    <text x="915" y="154" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">⚡ WS 管理链路 (admin / admin-resp / admin-bin 协议帧)</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 2. 01 config 统一虚线管理范围 (后端运行态中枢)                  -->
+  <!-- ============================================================== -->
+  <rect x="40" y="195" width="1360" height="615" rx="16" fill="#f8fafc" stroke="#d97706" stroke-width="2" stroke-dasharray="8 5"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <rect x="60" y="183" width="510" height="26" rx="5" fill="#d97706"/>
+    <text x="315" y="200" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">⚙️ 01 config 环境变量注入与管理范围 (配置监听端口、跨域白名单、安全准入规则)</text>
+  </g>
+
+  <!-- ============ 左侧：01 config 配置源与注入走廊 ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <rect x="65" y="225" width="240" height="85" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="1.8"/>
+    <text x="185" y="252" font-size="15" font-weight="700" fill="#92400e" text-anchor="middle">01 · config 配置源</text>
+    <text x="185" y="272" font-size="11" fill="#a16207" text-anchor="middle">PEERDRIVE_HTTP_PORT / PEERDRIVE_PSK</text>
+    <text x="185" y="290" font-size="11" fill="#a16207" text-anchor="middle">PEERDRIVE_SHARE_DIRS / PEERDRIVE_STORAGE</text>
+
+    <!-- config 主纵向总线 (x=185) -->
+    <path d="M185,310 L185,615" fill="none" stroke="#d97706" stroke-width="1.8"/>
+
+    <!-- config 分支 1: 向右注入 router (y=267) -->
+    <path d="M305,267 L350,267" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#m_amber)"/>
+    <!-- config 分支 2: 向右注入 controller (y=382) -->
+    <path d="M185,382 L350,382" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#m_amber)"/>
+    <!-- config 分支 3: 向右注入 service (y=497) -->
+    <path d="M185,497 L350,497" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#m_amber)"/>
+    <!-- config 分支 4: 向右注入 source (y=615) -->
+    <path d="M185,615 L350,615" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#m_amber)"/>
+  </g>
+
+  <!-- ============ 中间核心：04 router (Row 1) ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <rect x="350" y="225" width="760" height="85" rx="12" fill="#f0fdf4" stroke="#059669" stroke-width="2"/>
+    <text x="730" y="252" font-size="16" font-weight="700" fill="#064e3b" text-anchor="middle">04 · router 路由分发器 (Gin Engine &amp; 本地 WS 管理面代理)</text>
+    <text x="730" y="272" font-size="11.5" fill="#047857" text-anchor="middle">代码：back/internal/router · 注册 RESTful API + /ws/peer 本地会话管理代理</text>
+    <text x="730" y="292" font-size="11" fill="#065f46" text-anchor="middle">捕获本地 WS 的 admin 协议帧，伪造 HTTP Request 注入 Gin 内部复用 Controller；拦截并输出 admin-bin 二进制流</text>
+  </g>
+
+  <!-- 连线：Frontend -> Router (两根平行垂线，无交叉) -->
+  <path d="M545,170 L545,225" fill="none" stroke="#2563eb" stroke-width="2.2" marker-end="url(#m_blue)"/>
+  <text x="535" y="202" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="end">REST API</text>
+
+  <path d="M915,170 L915,225" fill="none" stroke="#2563eb" stroke-width="2.2" marker-end="url(#m_blue)"/>
+  <text x="925" y="202" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="start">/ws/peer 管理帧代理</text>
+
+  <!-- ============ 右侧：14 nodestate 状态总线 ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <rect x="1150" y="225" width="230" height="200" rx="12" fill="#fdf4ff" stroke="#c026d3" stroke-width="1.8"/>
+    <text x="1265" y="252" font-size="15" font-weight="700" fill="#701a75" text-anchor="middle">14 · nodestate</text>
+    <text x="1265" y="272" font-size="12" font-weight="600" fill="#a21caf" text-anchor="middle">节点运行时状态总线</text>
+    <text x="1265" y="292" font-size="10.5" fill="#86198f" text-anchor="middle">back/internal/nodestate</text>
+
+    <rect x="1165" y="306" width="200" height="104" rx="6" fill="#ffffff" stroke="#f0abfc" stroke-width="1"/>
+    <text x="1175" y="326" font-size="11" fill="#701a75">• Configure / SetOperator</text>
+    <text x="1175" y="348" font-size="11" fill="#701a75">• GetPeerID 身份自持</text>
+    <text x="1175" y="370" font-size="11" fill="#701a75">• ReportStats 上报传输量</text>
+    <text x="1175" y="392" font-size="10" fill="#a21caf">内存互斥锁保护 · 打破循环导入</text>
+  </g>
+
+  <!-- ============ 中间核心：05 controller (Row 2) ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <rect x="350" y="345" width="760" height="80" rx="12" fill="#f0fdf4" stroke="#059669" stroke-width="2"/>
+    <text x="730" y="372" font-size="16" font-weight="700" fill="#064e3b" text-anchor="middle">05 · controller API 处理器层</text>
+    <text x="730" y="392" font-size="11.5" fill="#047857" text-anchor="middle">FileController (上传/删除/元数据) · NodeController (节点发现/已加入节点) · PullController (跨节点拉取任务)</text>
+    <text x="730" y="410" font-size="11" fill="#065f46" text-anchor="middle">参数校验 · 请求反序列化 · 统一响应格式与错误码封装</text>
+  </g>
+
+  <!-- 连线：Router -> Controller (两根平行垂线，无交叉) -->
+  <path d="M545,310 L545,345" fill="none" stroke="#059669" stroke-width="2.2" marker-end="url(#m_green)"/>
+  <path d="M915,310 L915,345" fill="none" stroke="#059669" stroke-width="2.2" marker-end="url(#m_green)"/>
+
+  <!-- 连线：Controller -> NodeState (向右直连，无交叉) -->
+  <path d="M1110,385 L1150,385" fill="none" stroke="#c026d3" stroke-width="1.8" marker-end="url(#m_fuchsia)"/>
+  <text x="1130" y="378" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10.5" fill="#a21caf" text-anchor="middle">读写状态</text>
+
+  <!-- ============ 中间核心：06 service (Row 3) ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <rect x="350" y="455" width="760" height="85" rx="12" fill="#f0fdf4" stroke="#059669" stroke-width="2"/>
+    <text x="730" y="482" font-size="16" font-weight="700" fill="#064e3b" text-anchor="middle">06 · service 核心业务编排层</text>
+    <text x="730" y="502" font-size="11.5" fill="#047857" text-anchor="middle">FileService (文件生命周期/安全路径判定) · PeerPuller (跨节点流式拉取/sha256校验) · NodeDirectory (常驻对端清单)</text>
+    <text x="730" y="522" font-size="11" fill="#065f46" text-anchor="middle">FileIndexService (SQLite 文件哈希与增量游标同步) · PSK 预共享密钥准入决策</text>
+  </g>
+
+  <!-- 连线：Controller -> Service (中心单垂线，无交叉) -->
+  <path d="M730,425 L730,455" fill="none" stroke="#059669" stroke-width="2.4" marker-end="url(#m_green)"/>
+
+  <!-- 连线：Service -> NodeState (直角向上，无交叉) -->
+  <path d="M1110,497 L1265,497 L1265,425" fill="none" stroke="#c026d3" stroke-width="1.8" marker-end="url(#m_fuchsia)"/>
+  <text x="1190" y="490" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10.5" fill="#a21caf">更新 PeerID / 上报流量</text>
+
+  <!-- ============ 中间核心：07 source & 08 downloader (Row 4) ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <!-- 07 source -->
+    <rect x="350" y="575" width="360" height="80" rx="12" fill="#f0fdf4" stroke="#059669" stroke-width="1.8"/>
+    <text x="530" y="602" font-size="15" font-weight="700" fill="#064e3b" text-anchor="middle">07 · source 文件来源管理器</text>
+    <text x="530" y="622" font-size="11" fill="#047857" text-anchor="middle">Local 本地源 · P2P 对端源 · 多源抽象接口</text>
+    <text x="530" y="640" font-size="10.5" fill="#065f46" text-anchor="middle">提供统一 Read / Size / Hash 数据流能力</text>
+
+    <!-- 08 downloader -->
+    <rect x="750" y="575" width="360" height="80" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.8"/>
+    <text x="930" y="602" font-size="15" font-weight="700" fill="#3b0764" text-anchor="middle">08 · downloader 通用多协议下载器</text>
+    <text x="930" y="622" font-size="11" fill="#6d28d9" text-anchor="middle">UniversalDownloader · 分块并发拉取与组装</text>
+    <text x="930" y="640" font-size="10.5" fill="#581c87" text-anchor="middle">4MB 背压流控 · 增量 SHA-256 完整性防篡改</text>
+  </g>
+
+  <!-- 连线：Service -> Source (平行垂线，无交叉) -->
+  <path d="M530,540 L530,575" fill="none" stroke="#059669" stroke-width="2" marker-end="url(#m_green)"/>
+  <!-- 连线：Service -> Downloader (平行垂线，无交叉) -->
+  <path d="M930,540 L930,575" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#m_purple)"/>
+  <!-- 连线：Downloader -> Source (水平直连，无交叉) -->
+  <path d="M750,615 L710,615" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#m_purple)"/>
+  <text x="730" y="608" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10.5" fill="#6d28d9" text-anchor="middle">调度取流</text>
+
+  <!-- ============ 最底层：外部硬件与传输域接口插槽 (Row 5: y=695..765) ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <!-- Dock 1: 03 storage -->
+    <rect x="350" y="695" width="230" height="70" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8"/>
+    <text x="465" y="722" font-size="14.5" font-weight="700" fill="#991b1b" text-anchor="middle">03 · storage 物理磁盘</text>
+    <text x="465" y="742" font-size="11" fill="#b91c1c" text-anchor="middle">磁盘物理落盘 / pathutil 安全读写</text>
+    <text x="465" y="756" font-size="10" fill="#7f1d1d" text-anchor="middle">（详见 本地存储域架构图）</text>
+
+    <!-- Dock 2: 02 repository -->
+    <rect x="615" y="695" width="230" height="70" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="1.8"/>
+    <text x="730" y="722" font-size="14.5" font-weight="700" fill="#854d0e" text-anchor="middle">02 · repository 数据仓储</text>
+    <text x="730" y="742" font-size="11" fill="#a16207" text-anchor="middle">SQLite file_index 表与增量游标</text>
+    <text x="730" y="756" font-size="10" fill="#713f12" text-anchor="middle">（详见 本地存储域架构图）</text>
+
+    <!-- Dock 3: 09 transport -->
+    <rect x="880" y="695" width="230" height="70" rx="10" fill="#fff7ed" stroke="#ea580c" stroke-width="1.8"/>
+    <text x="995" y="722" font-size="14.5" font-weight="700" fill="#7c2d12" text-anchor="middle">09 · transport 传输中枢</text>
+    <text x="995" y="742" font-size="11" fill="#c2410c" text-anchor="middle">WebRTC DataChannel 跨节点直连</text>
+    <text x="995" y="756" font-size="10" fill="#9a3412" text-anchor="middle">（详见 P2P 网络互联域架构图）</text>
+  </g>
+
+  <!-- 连线：Source -> Storage (垂线直达，无交叉) -->
+  <path d="M465,655 L465,695" fill="none" stroke="#dc2626" stroke-width="2.2" marker-end="url(#m_red)"/>
+  <!-- 连线：Downloader/Service -> Repository (垂线直达，无交叉) -->
+  <path d="M730,655 L730,695" fill="none" stroke="#ca8a04" stroke-width="2.2" marker-end="url(#m_yellow)"/>
+  <!-- 连线：Downloader/Service -> Transport (垂线直达，无交叉) -->
+  <path d="M995,655 L995,695" fill="none" stroke="#ea580c" stroke-width="2.2" marker-end="url(#m_orange)"/>
+
+  <!-- ============ 底部说明说明栏 ============ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
+    <rect x="40" y="818" width="1360" height="1" fill="#e2e8f0"/>
+  </g>
+</svg>
