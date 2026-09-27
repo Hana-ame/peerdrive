@@ -19,28 +19,28 @@
   </g>
 
   <!-- ============================================================== -->
-  <!-- 1. 最顶层：13 · frontend 前端网盘与控制台应用                   -->
+  <!-- 1. 最顶层独立实体：13 · frontend 独立 Web 面板与消费端         -->
   <!-- ============================================================== -->
   <rect x="350" y="85" width="760" height="85" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
-    <text x="730" y="112" font-size="16" font-weight="700" fill="#1e40af" text-anchor="middle">13 · frontend 前端网盘与控制台应用 (Web Client)</text>
-    <text x="730" y="130" font-size="11.5" fill="#3b82f6" text-anchor="middle">React 18 + Vite SPA (Drive / Market / Peers / Transfers) · 单文件公共面板 panel.html</text>
+    <text x="730" y="110" font-size="16.5" font-weight="700" fill="#1e40af" text-anchor="middle">13 · frontend 独立 Web 面板与消费端 (Standalone Client)</text>
+    <text x="730" y="128" font-size="11.5" fill="#3b82f6" text-anchor="middle">运行于用户浏览器 / 独立静态托管 / file:// 打开 · 纯前端独立运行，不在本地 Node 进程内！</text>
 
     <!-- 内部双出口 -->
     <rect x="375" y="138" width="340" height="24" rx="5" fill="#ffffff" stroke="#93c5fd" stroke-width="1"/>
     <text x="545" y="154" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">🌐 HTTP Client (REST API 请求 /api/v1/*)</text>
 
     <rect x="745" y="138" width="340" height="24" rx="5" fill="#ffffff" stroke="#93c5fd" stroke-width="1"/>
-    <text x="915" y="154" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">⚡ WS 管理链路 (admin / admin-resp / admin-bin 协议帧)</text>
+    <text x="915" y="154" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">⚡ 本地 WS 会话 (/ws/peer admin 协议帧)</text>
   </g>
 
   <!-- ============================================================== -->
-  <!-- 2. 01 config 统一虚线管理范围 (后端运行态中枢)                  -->
+  <!-- 2. 01 config 统一虚线管理范围 (本地 Go 节点后端进程)            -->
   <!-- ============================================================== -->
   <rect x="40" y="195" width="1360" height="615" rx="16" fill="#f8fafc" stroke="#d97706" stroke-width="2" stroke-dasharray="8 5"/>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
-    <rect x="60" y="183" width="510" height="26" rx="5" fill="#d97706"/>
-    <text x="315" y="200" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">⚙️ 01 config 环境变量注入与管理范围 (配置监听端口、跨域白名单、安全准入规则)</text>
+    <rect x="60" y="183" width="530" height="26" rx="5" fill="#d97706"/>
+    <text x="325" y="200" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">⚙️ 01 config 环境变量注入与管理范围 (本地 Go 节点守护进程 · Config Scope)</text>
   </g>
 
   <!-- ============ 左侧：01 config 配置源与注入走廊 ============ -->

@@ -67,14 +67,14 @@
   </g>
 
   <!-- ============================================================== -->
-  <!-- 3. 右上容器：纯前端 Web 消费端 (Pure Frontend Client)          -->
+  <!-- 3. 右上容器：13 · frontend 独立 Web 面板与消费端                -->
   <!-- ============================================================== -->
   <rect x="760" y="240" width="640" height="255" rx="16" fill="#f0fdfa" stroke="#0d9488" stroke-width="2.2"/>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">
-    <rect x="778" y="226" width="340" height="28" rx="6" fill="#0d9488"/>
-    <text x="948" y="245" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">🌐 纯前端 Web 消费端 (peerdrive-client)</text>
+    <rect x="778" y="226" width="370" height="28" rx="6" fill="#0d9488"/>
+    <text x="963" y="245" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">🌐 13 · frontend 独立 Web 面板与消费端</text>
 
-    <text x="785" y="280" font-size="15" font-weight="700" fill="#134e4a">形态：单文件面板 (dist/panel.html) · 零部署纯浏览器直接拉取</text>
+    <text x="785" y="280" font-size="15" font-weight="700" fill="#134e4a">形态：单文件面板 (dist/panel.html) · 纯浏览器环境，不在本地 Node 进程内</text>
     <text x="785" y="306" font-size="12" fill="#0f766e">• 传输无关驱动：packages/peerdrive-client (零运行时依赖，ESM 直发)</text>
     <text x="785" y="329" font-size="12" fill="#0f766e">• 浏览器直连：注入 PeerJS DataConnection 句柄，浏览器直通目标 Peer</text>
     <text x="785" y="352" font-size="12" fill="#0f766e">• 目录浏览：发送 share 帧，即时渲染远程节点公开的文件列表</text>
