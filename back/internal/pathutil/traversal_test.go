@@ -24,7 +24,7 @@ package pathutil
 
 import (
 	"os"
-	=path/filepath
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
