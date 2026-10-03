@@ -1,7 +1,7 @@
-// IPFS gateway provider -- fetches file content by CID through public IPFS gateways.
-// GetReader concurrently tries all gateways and returns the first successful response body;
-// once one gateway succeeds, the remaining requests are cancelled to avoid goroutine leaks.
-// The BitswapFetcher callback can inject boxo Bitswap as the first priority.
+// IPFS 网关提供者 — 通过公共 IPFS 网关按 CID 获取文件内容。
+// GetReader 并发尝试所有网关，返回第一个成功的响应体；
+// 一旦某个网关成功，取消其余请求，避免 goroutine 泄漏。
+// BitswapFetcher 回调可注入 boxo Bitswap 作为第一优先级。
 
 package provider
 
@@ -24,20 +24,20 @@ const (
 	defaultHTTPTimeout  = 30 * time.Second
 )
 
-// BitswapFetcher attempts to fetch data for a CID through Bitswap/DHT;
-// returns nil, nil on failure; the caller should fall back to other methods (such as HTTP gateways).
+// BitswapFetcher 尝试通过 Bitswap/DHT 获取 CID 对应的数据，
+// 失败时返回 nil, nil；调用方应回退到其他方式（如 HTTP 网关）。
 type BitswapFetcher func(ctx context.Context, cid string) ([]byte, error)
 
-// IPFSProvider manages a set of public IPFS gateways.
-// If BitswapFetcher is set, GetReader/FetchByCID tries Bitswap first,
-// then falls back to HTTP gateway racing on failure.
+// IPFSProvider 管理一组公共 IPFS 网关。
+// 如果设置了 BitswapFetcher，GetReader/FetchByCID 会先尝试 Bitswap，
+// 失败后再回退到 HTTP 网关竞速。
 type IPFSProvider struct {
 	Gateways       []string
 	bitswapFetcher BitswapFetcher
 	client         *http.Client
 }
 
-// NewIPFSProvider creates an IPFS gateway provider.
+// NewIPFSProvider 创建 IPFS 网关提供者。
 func NewIPFSProvider(gateways []string) *IPFSProvider {
 	return &IPFSProvider{
 		Gateways: gateways,
@@ -47,15 +47,15 @@ func NewIPFSProvider(gateways []string) *IPFSProvider {
 	}
 }
 
-// SetBitswapFetcher sets the Bitswap fetch callback so the provider prefers the Bitswap network.
+// SetBitswapFetcher 设置 Bitswap 获取回调，使 Provider 优先走 Bitswap 网络。
 func (p *IPFSProvider) SetBitswapFetcher(f BitswapFetcher) {
 	p.bitswapFetcher = f
 }
 
-// GetReader fetches file content by CID.
-// Tries the Bitswap network first, then falls back to HTTP gateway racing on failure.
+// GetReader 按 CID 获取文件内容。
+// 优先尝试 Bitswap 网络获取，失败后回退到 HTTP 网关竞速。
 func (p *IPFSProvider) GetReader(cid string) (io.ReadCloser, error) {
-	// 1. Bitswap first
+	// 1. Bitswap 优先
 	if p.bitswapFetcher != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		data, err := p.bitswapFetcher(ctx, cid)
@@ -65,7 +65,7 @@ func (p *IPFSProvider) GetReader(cid string) (io.ReadCloser, error) {
 		}
 	}
 
-	// 2. HTTP gateway fallback
+	// 2. HTTP 网关回退
 	if len(p.Gateways) == 0 {
 		return nil, fmt.Errorf("ipfs: no gateways configured and Bitswap unavailable")
 	}
@@ -111,7 +111,7 @@ func (p *IPFSProvider) GetReader(cid string) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("ipfs: all %d gateways failed: %w", len(p.Gateways), firstErr)
 }
 
-// GetFilenameHint returns a filename hint.
+// GetFilenameHint 返回文件名提示。
 func (p *IPFSProvider) GetFilenameHint(cid, originalFilename string) string {
 	if originalFilename != "" {
 		return originalFilename
@@ -119,18 +119,18 @@ func (p *IPFSProvider) GetFilenameHint(cid, originalFilename string) string {
 	return cid
 }
 
-// FetchByCID fetches the full data for a given CID.
-// Tries Bitswap network first, then falls back to HTTP gateway racing on failure.
+// FetchByCID 获取指定 CID 的完整数据。
+// 优先 Bitswap 网络，失败后回退到 HTTP 网关竞速。
 func (p *IPFSProvider) FetchByCID(ctx context.Context, cid string) ([]byte, error) {
-	// 1. Bitswap first
-	if p.bitsswapFetcher != nil {
+	// 1. Bitswap 优先
+	if p.bitswapFetcher != nil {
 		data, err := p.bitswapFetcher(ctx, cid)
 		if err == nil && data != nil {
 			return data, nil
 		}
 	}
 
-	// 2. HTTP gateway fallback
+	// 2. HTTP 网关回退
 	if len(p.Gateways) == 0 {
 		return nil, fmt.Errorf("ipfs: no gateways configured and Bitswap unavailable")
 	}

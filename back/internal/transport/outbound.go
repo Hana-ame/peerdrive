@@ -1,11 +1,10 @@
 package transport
 
-// outbound.go: Outbound role = this side initiates verbs and collects responses ("I ask others").
-// Owned by: FetchFromPeer/requestFile (initiate req frame), routeResponse (route meta/data/
-// done/err by reqId), stateFor (connection state lookup). Contrasting with inbound.go
-// (respond to peer), both paths share the same connection full-duplex concurrently —
-// connection close cleanup is done uniformly in conn.go's bindConn OnClose; this file
-// only handles initiation and collection.
+// outbound.go：出站角色 = 本端发起 verb 并收集响应的全集（「我问别人」）。
+// 归属：FetchFromPeer/requestFile（发起 req 帧）、routeResponse（按 reqId 路由
+// meta/data/done/err）、stateFor（连接状态查找）。与 inbound.go（应答对端）
+// 相对，两条路径在同一连接上双工并发复用——连接关闭时 routeResponse 的清理
+// 在 conn.go 的 bindConn OnClose 里统一做，本文件只管发起与收集。
 
 import (
 	"context"
@@ -24,24 +23,20 @@ import (
 	hashutil "peerdrive/pkg/hashutil"
 )
 
-// verbWaitTimeout waiting limit for one-shot verbs (small JSON response types like
-// share/info).
-// Responses themselves are millisecond-level; 15s covers "signaling just jittering and
-// reconnecting at this exact moment" — too short would falsely report failure during
-// network jitter, too long would make users wait when opening node details.
+// verbWaitTimeout 一次性 verb（share/info 这类小 JSON 应答）的等待上限。
+// 响应本身是毫秒级；给到 15s 是为了覆盖"刚好在此时信令抖动重连"的情况——
+// 短了会在网络抖动时误报失败，长了用户点开节点详情要干等。
 const verbWaitTimeout = 15 * time.Second
 
-// requestVerb initiates a "request-response" verb to a direct peer and waits for a single
-// JSON response returned as-is.
-// Only for small JSON responses (share etc.); file content must use OpenStream (streaming,
-// doesn't consume memory).
+// requestVerb 向直连对端发起「请求-应答」型 verb，等待单个 JSON 响应原样返回。
+// 只用于小 JSON 响应（share 等）；文件内容必须走 OpenStream（流式，不吃内存）。
 //
-// Why return raw JSON instead of dcResp: share-resp has fields (collections/files) that
-// dcResp doesn't have; parsing to dcResp then marshaling would lose them.
+// 为什么返回值是 raw JSON 而不是 dcResp：share-resp 带 collections/files
+// 等 dcResp 没有的字段，解析成 dcResp 再 marshal 会丢掉它们。
 //
-// Failure paths: peer returns err frame → return that error message; timeout/connection
-// closed/service closed → corresponding error. Connection close is detected via st.binDone
-// (cleanupConn closes it), no need for an additional done channel in the waiting slot.
+// 失败路径：对端回 err 帧 → 返回该 err 文案；超时/连接关闭/服务关闭 →
+// 对应错误。连接关闭用 st.binDone（cleanupConn 会 close）感知，不需要
+// 等待槽里再挂一个 done channel。
 func (s *PeerJSService) requestVerb(peerID, reqType string, timeout time.Duration) ([]byte, error) {
 	s.mu.Lock()
 	conn := s.conns[peerID]
@@ -88,10 +83,9 @@ func (s *PeerJSService) requestVerb(peerID, reqType string, timeout time.Duratio
 	}
 }
 
-// RequestShares queries a direct peer's sharing manifest (share frame).
-// This is the data source for "market/my nodes → peer node details page showing file
-// links", and also the entry point for cross-node collection fetch (M3): first get the
-// manifest, then fetch content by entry hash.
+// RequestShares 查询直连对端的共享清单（share 帧）。
+// 这是「市场/我的节点 → 对方节点详情页看到文件链接」的数据来源，
+// 也是跨节点拉取合集（M3）的入口：先拿清单，再按 entry hash 拉内容。
 func (s *PeerJSService) RequestShares(peerID string) (ShareSnapshot, error) {
 	raw, err := s.requestVerb(peerID, "share", verbWaitTimeout)
 	if err != nil {
@@ -105,8 +99,7 @@ func (s *PeerJSService) RequestShares(peerID string) (ShareSnapshot, error) {
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return ShareSnapshot{}, fmt.Errorf("peerjs: bad share response: %w", err)
 	}
-	// Empty array fallback: peer may return null (old version/abnormal implementation);
-	// frontend shouldn't crash because of this
+	// 空数组兜底：对端可能回 null（旧版本/异常实现），前端不该为此崩
 	if resp.Collections == nil {
 		resp.Collections = []ShareCollectionInfo{}
 	}
@@ -116,212 +109,365 @@ func (s *PeerJSService) RequestShares(peerID string) (ShareSnapshot, error) {
 	return resp.ShareSnapshot, nil
 }
 
-// maxPeerFetchSize remote-declared limit (H6 fix): data frame declared chunk size/file size
-// has no upper limit → malicious peer declaring 1<<62 and continuously sending data frames
-// → f.got grows unbounded, OOM.
-// Consistent with upload limit (8GB).
+// maxPeerFetchSize 远端声明上限（H6 修复）：data 帧声明的块大小/文件大小
+// 无上限 → 恶意对端声明 1<<62 并持续发 data 帧 → f.got 无界增长 OOM。
+// 与上传上限（8GB）一致。
 const maxPeerFetchSize = 8 * 1024 * 1024 * 1024
 
-// OpenStream fetches sha256 file content via streaming from a direct peer (chunked/streaming
-// read, entry point for source system's peerSource adapter). The returned reader automatically
-// verifies sha256 when the full request is read (content-addressed fallback); Close can
-// cancel early (local discard, no disconnection).
+// OpenStream 通过直连 peer 流式拉取 sha256 文件内容（分片/流式读取，
+// source 体系的 peerSource 适配入口）。返回的 reader 在全量请求读完时
+// 自动校验 sha256（内容寻址兜底）；Close 可提前取消（本地丢弃，不断连）。
 func (s *PeerJSService) OpenStream(peerID, hash string, offset, size int64) (io.ReadCloser, error) {
 	return s.OpenStreamFrom(peerID, hash, offset, size, nil)
 }
 
-// OpenStreamFrom has the same semantics as OpenStream, additionally carrying the fallback
-// chain trace (anti-loop, 2026-08-18 3rd optimization item, see dcReq.Trace comments).
+// OpenStreamFrom 与 OpenStream 同语义，额外携带回源链路 trace（防环，
+// 2026-08-18 第 3 项优化，见 dcReq.Trace 注释）。根请求 trace 为 nil；
+// serveFile 回源时由 PeerSource 从 ctx 取出传入（source/peer.go）。
 func (s *PeerJSService) OpenStreamFrom(peerID, hash string, offset, size int64, trace []string) (io.ReadCloser, error) {
-	if !hashutil.IsStrictSHA256(hash) {
-		return nil, fmt.Errorf("peerjs: invalid hash %q", hash)
-	}
 	s.mu.Lock()
 	conn := s.conns[peerID]
 	s.mu.Unlock()
 	if conn == nil {
 		return nil, fmt.Errorf("peerjs: no connection to %s", peerID)
 	}
-	st := s.stateFor(conn)
-	if st == nil {
-		return nil, fmt.Errorf("peerjs: connection not bound")
+	return s.openStream(conn, hash, offset, size, trace)
+}
+
+// FetchFromPeer 兼容封装：[]byte 整体拉取（现有调用方/集成测试用）。
+// 内部走流式 OpenStream + io.ReadAll——全量请求的 sha256 校验由 reader
+// 在 EOF 时完成，语义与旧实现一致。
+//
+// 连接 churn 兜底重试（2026-09-19，恒最多 2 次尝试）：
+// 发现阶段两端互相发现 → 双向互拨 → 同一 peerID 下两条连接，dedupConn 淘汰其一
+// （见 conn.go）。若请求恰好发在「连接已进 conns、去重尚未判定」的窗口里，
+// 它落在将被淘汰的那条连接上，读到一半报 "peerjs: connection closed"
+// ——**发现背景**：TestSelfHostedSignalAndDiscover 约 1/4 概率失败，日志
+// `dedup connection ... closing stale` 成对出现后紧接拉取失败。
+// 此时本端 conns[peerID] 已被去重改指向存活连接，重试一次即可成功。
+// 为什么整段重试（而非续传）：本函数语义是「取回完整内容」，返回单个 []byte，
+// 重来一次不会产生半截数据；分片请求（offset/size 非默认）重放同一范围也安全。
+// 为什么只重试一次：真断线时 conns 里没有可替换的连接，第二次会立刻以同样的
+// 错误失败，多试只是空等；一次足以覆盖去重窗口。
+func (s *PeerJSService) FetchFromPeer(peerID, hash string, offset, size int64) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			// 让去重判定 + conns 改指完成（实测窗口远小于 150ms）；
+			// sleepCtx 保证服务关闭时立刻返回，不拖住 Close。
+			if !sleepCtx(s.ctx, 150*time.Millisecond) {
+				break
+			}
+		}
+		r, err := s.OpenStream(peerID, hash, offset, size)
+		if err != nil {
+			lastErr = err
+			if !isConnChurnErr(err) {
+				return nil, err
+			}
+			continue
+		}
+		data, err := io.ReadAll(r)
+		r.Close()
+		if err == nil {
+			return data, nil
+		}
+		lastErr = err
+		if !isConnChurnErr(err) {
+			return nil, err
+		}
 	}
-	if offset < 0 {
-		offset = 0
+	return nil, lastErr
+}
+
+// isConnChurnErr 判定「换条连接就能好」瞬时错误：连接被去重淘汰/关闭、连接
+// 尚未绑定、peerID 当前无可用连接。内容类错误（哈希不匹配、上限拒绝、
+// 对端 err 帧）不在其中——那些重试也不会变好，必须原样上抛。
+func isConnChurnErr(err error) bool {
+	if err == nil {
+		return false
 	}
+	msg := err.Error()
+	return strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "connection not bound") ||
+		strings.Contains(msg, "no connection to")
+}
+
+// openStream 发送 req 帧并返回流式 reader。数据块经连接级 pump 投递到
+// fetchState.q（有界队列），reader 消费；done/err 经 done/errCh 通知。
+// 清理（cleanup）：EOF/错误/取消时从 fetches 路由表删除 + close(f.closed)
+// 放行 pump 投递阻塞——只执行一次。
+func (s *PeerJSService) openStream(c Session, hash string, offset, size int64, trace []string) (*fetchReader, error) {
+	// 指令 UUID：reqId 是响应路由键，UUID v4 保证跨连接唯一（randHex8 仅 32bit，并发高时可能碰撞）
 	reqID := uuid.NewString()
 	f := &fetchState{
 		reqID:  reqID,
-		total:  atomic.Int64{},
 		q:      make(chan []byte, 8),
 		done:   make(chan struct{}),
 		errCh:  make(chan error, 1),
 		closed: make(chan struct{}),
 	}
-	f.total.Store(-1)
+	f.total.Store(-1) // 未知：meta 到达前读到的是 -1（见 fetchReader.Total）
+	st := s.stateFor(c)
+	if st == nil {
+		return nil, fmt.Errorf("peerjs: connection not bound")
+	}
 	st.mu.Lock()
 	st.fetches[reqID] = f
 	st.mu.Unlock()
-	if err := conn.SendJSON(dcReq{
-		Type:   "req",
-		Hash:   hash,
-		Offset: offset,
-		Size:   size,
-		ReqID:  reqID,
-		Trace:  trace,
-	}); err != nil {
-		st.mu.Lock()
-		delete(st.fetches, reqID)
-		st.mu.Unlock()
+	cleanOnce := sync.Once{}
+	cleanup := func() {
+		cleanOnce.Do(func() {
+			st.mu.Lock()
+			delete(st.fetches, reqID)
+			st.mu.Unlock()
+			// 幂等 close：bindConn OnClose 也可能已关闭（连接先断开场景）——
+			// 重复 close(f.closed) 会 panic
+			select {
+			case <-f.closed:
+			default:
+				close(f.closed)
+			}
+		})
+	}
+
+	if err := c.SendJSON(dcReq{Type: "req", Hash: hash, Offset: offset, Size: size, ReqID: reqID, Trace: trace}); err != nil {
+		cleanup()
 		return nil, err
 	}
-	return &fetchReader{f: f, st: st, hash: hash, offset: offset, size: size}, nil
+	return &fetchReader{
+		f:       f,
+		ctx:     s.ctx,
+		hash:    hash,
+		verify:  offset == 0 && size < 0, // 全量请求 → 读完校验 sha256（H5）
+		cleanup: cleanup,
+	}, nil
 }
 
-// fetchReader streaming reader: reads from the fetch queue in chunks, verifies sha256 on
-// full read, supports Close for early cancellation.
+// fetchIdleTimeout 流式读取的块间隔超时。旧实现是 5 分钟总超时——流式下
+// 总超时对大文件（8GB 多块）无意义，改为「块间隔」超时：对端 5 分钟不
+// 发任何数据块视为卡死（原总超时语义由对端连接保活覆盖）。
+const fetchIdleTimeout = 5 * time.Minute
+
+// fetchReader 流式读取对端响应的数据块（出站角色）。
+// Read 语义：
+//   - 从 f.q 消费数据块，块间阻塞等待
+//   - done 帧（close(f.done)）→ 先 drain q 剩余块（pump 顺序保证块先于
+//     done 入队），再 EOF——EOF 前非阻塞检查 errCh，防 err 帧被 done 掩盖
+//   - err 帧 / 连接关闭（errCh）→ 返回错误
+//   - 块间隔超时（fetchIdleTimeout）→ 报错
+//   - 全量请求读完校验 sha256（内容寻址兜底，H5）——校验失败以错误返回
 type fetchReader struct {
-	f      *fetchState
-	st     *connState
-	hash   string
-	offset int64
-	size   int64
-	h      hash.Hash
-	got    int64
-	total  int64
-	closed bool
+	f       *fetchState
+	ctx     context.Context
+	hash    string
+	verify  bool
+	cleanup func()
+
+	buf []byte
+	h   hash.Hash
+	eof bool
+	err error
+}
+
+// Total 对端在 meta 帧里声明的文件总大小；-1 = 尚未收到 meta / 对端未声明。
+//
+// 为什么是"当前已知"而不是建立 reader 时就绪：meta 是异步到达的帧，openStream
+// 返回时它可能还在路上。调用方（跨节点拉取保存的进度显示）应在读了几块之后再取，
+// 那时一定已确定；取到 -1 就按"未知大小"渲染（不阻塞、不猜测）。
+// 返回 io.ReadCloser 的地方（OpenStream）拿不到它——需要大小的调用方用类型
+// 断言：`if s, ok := r.(interface{ Total() int64 }); ok { ... }`。
+func (r *fetchReader) Total() int64 {
+	if r.f == nil {
+		return -1
+	}
+	if t := r.f.total.Load(); t > 0 {
+		return t
+	}
+	return -1
 }
 
 func (r *fetchReader) Read(p []byte) (int, error) {
-	if r.closed {
-		return 0, io.ErrClosedPipe
-	}
-	if r.h == nil {
-		r.h = sha256.New()
+	// 空闲超时定时器：只创建一次并复用（Reset），不能每次循环 time.After——
+	// 每消费一个块就创建 1 个 timer，8GB 大文件 = 13 万个 timer 常驻 runtime
+	// timer 堆直到 5 分钟到期（发现背景：代码审阅，内存+GC 双浪费）。
+	idle := time.NewTimer(fetchIdleTimeout)
+	defer idle.Stop()
+	idleReset := func() {
+		if !idle.Stop() {
+			select {
+			case <-idle.C:
+			default:
+			}
+		}
+		idle.Reset(fetchIdleTimeout)
 	}
 	for {
-		select {
-		case chunk, ok := <-r.f.q:
-			if !ok {
-				return 0, io.EOF
-			}
-			n := copy(p, chunk)
-			r.h.Write(chunk[:n])
-			r.got += int64(n)
-			if n < len(chunk) {
-				r.f.q <- chunk[n:]
-			}
+		if len(r.buf) > 0 {
+			n := copy(p, r.buf)
+			r.buf = r.buf[n:]
 			return n, nil
-		case err, ok := <-r.f.errCh:
-			if ok {
-				return 0, err
+		}
+		if r.eof {
+			return 0, r.err
+		}
+		select {
+		case chunk := <-r.f.q:
+			idleReset() // 有数据活跃：重置空闲计时
+			if r.verify {
+				if r.h == nil {
+					r.h = sha256.New()
+				}
+				r.h.Write(chunk)
 			}
-			return 0, io.EOF
+			r.buf = chunk
 		case <-r.f.done:
-			// Done received: remaining chunks in queue are still consumable
+			// 传输完成：done 后 q 仍可能有块（pump 顺序：块先入队、done 后 close）。
+			// 一次只取一块——buf 消费完外层 for 会回到 select（done 一直 ready，
+			// 再次进此分支取下一块），直到 q 空才 EOF。不可循环取块：
+			// 循环里 buf 赋值会覆盖未消费的块（块1 丢失 bug，流式测试复现）。
 			select {
-			case chunk, ok := <-r.f.q:
-				if !ok {
-					return 0, io.EOF
-				}
-				n := copy(p, chunk)
-				r.h.Write(chunk[:n])
-				r.got += int64(n)
-				if n < len(chunk) {
-					r.f.q <- chunk[n:]
-				}
-				return n, nil
-			default:
-				// Verify sha256 for full requests
-				if r.offset == 0 && r.size < 0 {
-					sum := hex.EncodeToString(r.h.Sum(nil))
-					if sum != r.hash {
-						return 0, fmt.Errorf("peerjs: sha256 mismatch for %s: got %s", r.hash, sum)
+			case chunk := <-r.f.q:
+				idleReset()
+				if r.verify {
+					if r.h == nil {
+						r.h = sha256.New()
 					}
+					r.h.Write(chunk)
 				}
+				r.buf = chunk
+			default:
+				// q 空：EOF。EOF 前非阻塞检查 errCh，防 err 帧被 done 掩盖
+				select {
+				case err := <-r.f.errCh:
+					r.finish(err)
+					return 0, err
+				default:
+				}
+				r.finish(nil)
 				return 0, io.EOF
 			}
-		case <-r.f.closed:
-			return 0, io.EOF
+		case err := <-r.f.errCh:
+			r.finish(err)
+			return 0, err
+		case <-idle.C:
+			r.finish(fmt.Errorf("peerjs: fetch %s idle timeout", r.hash))
+			return 0, r.err
+		case <-r.ctx.Done():
+			r.finish(r.ctx.Err())
+			return 0, r.err
 		}
 	}
 }
 
-// Total returns the file total size declared by the peer's meta frame (-1 if unknown).
-// Used by the service layer for progress denominator in cross-node fetch saves.
-func (r *fetchReader) Total() int64 { return r.f.total.Load() }
-
-// Close cancels the fetch early (local discard, doesn't disconnect the connection).
-func (r *fetchReader) Close() error {
-	r.closed = true
-	select {
-	case <-r.f.closed:
-	default:
-		close(r.f.closed)
+// finish 幂等结束：标记 eof、记录错误、执行清理（delete 路由表 + close closed）。
+// 全量请求 EOF 时校验 sha256（H5 内容寻址兜底）。
+func (r *fetchReader) finish(err error) {	if r.eof {
+		return
 	}
-	r.st.mu.Lock()
-	delete(r.st.fetches, r.f.reqID)
-	r.st.mu.Unlock()
+	r.eof = true
+	if err == nil && r.verify && r.h != nil {
+		sum := hex.EncodeToString(r.h.Sum(nil))
+		if sum != r.hash {
+			err = fmt.Errorf("peerjs: content hash mismatch for %s", r.hash)
+		}
+	}
+	r.err = err
+	if r.cleanup != nil {
+		r.cleanup()
+	}
+}
+
+// Close 提前取消：本地丢弃后续块（pump 经 f.closed 停止投递），不断连。
+func (r *fetchReader) Close() error {
+	r.finish(io.ErrClosedPipe)
 	return nil
 }
 
-// routeResponse routes a response frame by reqId to the appropriate fetch state.
-// Handles: meta (total size), data (expect chunk), done (completion), err (failure).
-func (s *PeerJSService) routeResponse(st *connState, r dcResp, raw []byte) {
-	// One-shot verb responses (share/info etc.): route to verbWaits
-	if r.ReqID != "" {
-		st.mu.Lock()
-		ch := st.verbWaits[r.ReqID]
-		st.mu.Unlock()
-		if ch != nil {
-			select {
-			case ch <- raw:
-			default:
-			}
-			st.mu.Lock()
-			delete(st.verbWaits, r.ReqID)
-			st.mu.Unlock()
-			return
-		}
+// hashMatchesSHA256 校验 data 的 sha256 是否等于期望哈希。
+// 注意：hash 是用户输入，必须确保本身是合法 64 位 hex（否则比较恒失败）；
+// 调用方（FetchFromPeer 入口）已保证，防御性再判一次。
+// 空文件不做特判：sha256(空) 是合法内容寻址值，len(data)==0 不应被直接拒绝。
+func hashMatchesSHA256(hash string, data []byte) bool {
+	if len(hash) != 64 || !hashutil.IsValidSHA256(hash) {
+		return false
 	}
-	// Fetch responses
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]) == hash
+}
+
+func (s *PeerJSService) stateFor(c Session) *connState {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	return s.pending[c]
+}
+
+// failFetch 给 fetch 状态投递失败（错误/上限/完整性拒绝）。闭包戒律：
+// 每来一个 data 帧调用一次 routeResponse，内联闭包 = 每 64KB 一次堆分配
+// （8GB 传输 13 万次），抽成包级函数零分配。
+// 已完成（done 已 close）后的迟到 err 帧忽略。
+func failFetch(f *fetchState, format string, args ...any) {
+	select {
+	case <-f.done:
+		return
+	default:
+	}
+	select {
+	case f.errCh <- fmt.Errorf(format, args...):
+	default:
+	}
+}
+
+// routeResponse 把响应帧路由到对应的 fetch 状态（出站角色的收集端）。
+// 持有 st.mu 期间完成（数据帧高频：泵内直接调用，不额外加锁层次）。
+// raw 是原始帧字节：一次性 verb 等待槽（verbWaits）要原样交给请求方——
+// share-resp 等响应含 dcResp 没有的字段（collections/files），重新 marshal
+// 会丢。文件拉取路径不使用 raw（数据走二进制帧）。
+func (s *PeerJSService) routeResponse(st *connState, r dcResp, raw []byte) {
 	st.mu.Lock()
+	defer st.mu.Unlock()
+	if r.ReqID == "" {
+		return
+	}
+	// 一次性 verb 应答：先看等待槽（reqId 全局唯一，不会与 fetch 撞）
+	if ch, ok := st.verbWaits[r.ReqID]; ok {
+		delete(st.verbWaits, r.ReqID)
+		select {
+		case ch <- raw:
+		default: // 请求方已超时放弃：丢弃，不阻塞消息泵
+		}
+		return
+	}
 	f := st.fetches[r.ReqID]
-	st.mu.Unlock()
 	if f == nil {
 		return
 	}
 	switch r.Type {
 	case "meta":
-		// Total size declaration (H6: upper limit check to prevent OOM from malicious peers)
+		// total 为文件全量大小（range 请求时 ≠ 本次接收量），只做上限校验
 		if r.Total > maxPeerFetchSize {
 			failFetch(f, "peerjs: declared file size %d exceeds limit", r.Total)
 		}
-		// Record for service layer use (progress denominator for cross-node fetch saves,
-		// see fetchReader.Total)
+		// 记下来给服务层用（跨节点拉取保存的进度分母，见 fetchReader.Total）
 		f.total.Store(r.Total)
 	case "data":
-		// H6: chunk size upper limit and must be positive — malicious peer declaring
-		// oversized size → unbounded allocation
+		// H6：块大小设上限且必须为正——恶意对端声明超大 size → 无界分配
 		if r.Size <= 0 || r.Size > maxPeerFetchSize {
 			failFetch(f, "peerjs: invalid data size %d", r.Size)
 			return
 		}
 		f.size = r.Size
-		st.mu.Lock()
 		st.expect = f
-		st.mu.Unlock()
 	case "done":
-		// Done is idempotent: duplicate done (or done after err) not processed — duplicate
-		// close(done) would panic
+		// done 幂等：重复 done（或 err 后到达）不处理——重复 close(done) 会 panic
 		select {
 		case <-f.done:
 			return
 		default:
 		}
-		// H6 integrity check: peer sending done early (only meta+done) would return truncated
-		// file as success → silent data corruption. done.Size = peer-declared actual bytes
-		// sent; must match delivered bytes (received) to pass through
+		// H6 完整性校验：对端提前 done（只发 meta+done）会把截断文件
+		// 当成功返回 → 静默数据损坏。done.Size = 对端声明的实际发送字节，
+		// 必须与已投递字节（received）一致才放行
 		if r.Size >= 0 && f.received != r.Size {
 			failFetch(f, "peerjs: incomplete transfer: got %d bytes, peer sent %d", f.received, r.Size)
 			return
@@ -329,13 +475,5 @@ func (s *PeerJSService) routeResponse(st *connState, r dcResp, raw []byte) {
 		close(f.done)
 	case "err":
 		failFetch(f, "peerjs: %s", r.Msg)
-	}
-}
-
-// failFetch marks a fetch as failed and releases the state.
-func failFetch(f *fetchState, format string, args ...any) {
-	select {
-	case f.errCh <- fmt.Errorf(format, args...):
-	default:
 	}
 }
