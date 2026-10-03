@@ -699,7 +699,7 @@ func torrentMetaFromLibrary(mi *metainfo.MetaInfo, t *torrent.Torrent) *TorrentM
 	} else {
 		for _, f := range info.Files {
 			path := strings.Join(f.Path, "/")
-			meta.Files = append(meta.Files, TorrentFile{Path: path, Size: f.Length}})
+			meta.Files = append(meta.Files, TorrentFile{Path: path, Size: f.Length})
 		}
 	}
 
@@ -742,7 +742,7 @@ func metaFromTorrent(t *torrent.Torrent) *TorrentMeta {
 	} else {
 		for _, f := range info.Files {
 			path := strings.Join(f.Path, "/")
-			meta.Files = append(meta.Files, TorrentFile{Path: path, Size: f.Length}})
+			meta.Files = append(meta.Files, TorrentFile{Path: path, Size: f.Length})
 		}
 	}
 

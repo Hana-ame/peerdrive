@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
-	=path/filepath
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

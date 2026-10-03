@@ -346,7 +346,7 @@ export class PeerDriveClient {
           if (Number.isFinite(srv) && srv >= 0) offset = srv
           if (offset > size) throw new PeerDriveError(`server asks to resume from ${offset}, but content is only ${size} bytes`, ERR.PROTOCOL)
           const n = Math.min(UPLOAD_CHUNK, size - offset)
-          if (n <= 0) throw new PeerDriveError('the server's meta offset has exceeded the file size', ERR.PROTOCOL)
+          if (n <= 0) throw new PeerDriveError('the server\'s meta offset has exceeded the file size', ERR.PROTOCOL)
           this.conn.send(bytes.subarray(offset, offset + n))
           offset += n
           this.stats.chunks++
