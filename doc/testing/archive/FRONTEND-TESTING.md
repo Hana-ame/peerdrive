@@ -1,24 +1,24 @@
-# Peerdrive 前端测试文档
+# Peerdrive Frontend Testing Documentation
 
-> Vitest + Happy DOM + Testing Library — 单元测试 · 组件测试 · 冒烟测试
-> 更新: 2026-04-30
+> Vitest + Happy DOM + Testing Library — Unit Tests · Component Tests · Smoke Tests
+> Updated: 2026-04-30
 
 ---
 
-## 目录
+## Table of Contents
 
-1. [测试架构](#1-测试架构)
-2. [环境配置](#2-环境配置)
-3. [测试文件组织](#3-测试文件组织)
-4. [运行测试](#4-运行测试)
-5. [编写测试](#5-编写测试)
-6. [现有测试覆盖](#6-现有测试覆盖)
+1. [Test Architecture](#1-test-architecture)
+2. [Environment Configuration](#2-environment-configuration)
+3. [Test File Organization](#3-test-file-organization)
+4. [Running Tests](#4-running-tests)
+5. [Writing Tests](#5-writing-tests)
+6. [Existing Test Coverage](#6-existing-test-coverage)
 7. [Playwright E2E](#7-playwright-e2e)
-8. [测试清单](#8-测试清单)
+8. [Test Checklist](#8-test-checklist)
 
 ---
 
-## 1. 测试架构
+## 1. Test Architecture
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -33,23 +33,23 @@
 └──────────────────────────────────────────────┘
 ```
 
-| 层级 | 工具 | 职责 |
+| Layer | Tool | Responsibility |
 |------|------|------|
-| 测试运行器 | Vitest 4 | 执行测试、断言、覆盖率 |
-| DOM 环境 | Happy DOM | 模拟浏览器 DOM API (无头) |
-| React 渲染 | @testing-library/react | `render()` 组件到虚拟 DOM |
-| 断言扩展 | @testing-library/jest-dom | `.toBeTruthy()`, `.toContain()` 等 |
-| 路由模拟 | react-router-dom MemoryRouter | 包裹需要路由上下文的组件 |
+| Test Runner | Vitest 4 | Execute tests, assertions, coverage |
+| DOM Environment | Happy DOM | Simulate browser DOM API (headless) |
+| React Rendering | @testing-library/react | `render()` components to virtual DOM |
+| Assertion Extensions | @testing-library/jest-dom | `.toBeTruthy()`, `.toContain()`, etc. |
+| Router Simulation | react-router-dom MemoryRouter | Wrap components that need router context |
 
-### 为什么选 Happy DOM？
+### Why Happy DOM?
 
-- 比 jsdom 更快、更轻量
-- 对现代 Web API 支持更好
-- 与 Vitest 集成无需额外配置
+- Faster and lighter than jsdom
+- Better support for modern Web APIs
+- No extra configuration needed for Vitest integration
 
 ---
 
-## 2. 环境配置
+## 2. Environment Configuration
 
 ### vitest.config.ts (`front/vitest.config.ts`)
 
@@ -58,26 +58,26 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  plugins: [react()],           // 处理 JSX 转换
+  plugins: [react()],           // Handles JSX transformation
   test: {
-    environment: 'happy-dom',   // 浏览器环境模拟
-    setupFiles: ['./tests/setup.js'],  // 全局 setup
+    environment: 'happy-dom',   // Browser environment simulation
+    setupFiles: ['./tests/setup.js'],  // Global setup
   },
 })
 ```
 
-### 全局 setup (`front/tests/setup.js`)
+### Global setup (`front/tests/setup.js`)
 
 ```js
 import { afterEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 
 afterEach(() => {
-  cleanup()  // 每个测试后卸载组件，防止状态泄漏
+  cleanup()  // Unmount components after each test to prevent state leaks
 })
 ```
 
-### 依赖版本
+### Dependency Versions
 
 ```json
 {
@@ -94,57 +94,57 @@ afterEach(() => {
 
 ---
 
-## 3. 测试文件组织
+## 3. Test File Organization
 
 ```
 front/tests/
-├── setup.js              # 全局 setup (afterEach cleanup)
-├── smoke.test.jsx        # 冒烟测试：核心组件能否渲染
-├── components.test.jsx   # 组件渲染测试：各页面/组件基本渲染
-└── FileTree.test.jsx     # FileTree 专项测试：状态、交互
+├── setup.js              # Global setup (afterEach cleanup)
+├── smoke.test.jsx        # Smoke tests: core component rendering
+├── components.test.jsx   # Component rendering tests: basic rendering of pages/components
+└── FileTree.test.jsx     # FileTree-specific tests: state, interactions
 ```
 
-### 命名约定
+### Naming Conventions
 
-| 文件 | 测试内容 |
+| File | Test Content |
 |------|---------|
-| `*.test.jsx` | Vitest 单元/组件测试 |
-| `*.smoke.mjs` | Node.js 冒烟脚本（直接执行） |
+| `*.test.jsx` | Vitest unit/component tests |
+| `*.smoke.mjs` | Node.js smoke scripts (direct execution) |
 
 ---
 
-## 4. 运行测试
+## 4. Running Tests
 
 ```bash
 cd front
 
-# 运行所有测试（单次）
+# Run all tests (single run)
 npm test
 
-# 等价于
+# Equivalent to
 npx vitest run
 
-# Watch 模式（文件变更自动重跑）
+# Watch mode (auto-rerun on file changes)
 npx vitest
 
-# 运行特定文件
+# Run specific file
 npx vitest run tests/FileTree.test.jsx
 
-# 运行匹配名称的测试
+# Run tests matching a name
 npx vitest run -t "FileTree"
 
-# 生成覆盖率报告
+# Generate coverage report
 npx vitest run --coverage
 
-# UI 模式（可视化界面）
+# UI mode (visual interface)
 npx vitest --ui
 ```
 
 ---
 
-## 5. 编写测试
+## 5. Writing Tests
 
-### 5.1 基本模式
+### 5.1 Basic Pattern
 
 ```jsx
 import { describe, it, expect } from 'vitest'
@@ -152,7 +152,7 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import MyComponent from '../src/components/MyComponent'
 
-// 包裹路由上下文的 wrapper
+// Wrapper with router context
 const wrapper = ({ children }) => <MemoryRouter>{children}</MemoryRouter>
 
 describe('MyComponent', () => {
@@ -168,19 +168,19 @@ describe('MyComponent', () => {
 })
 ```
 
-### 5.2 查询方法速查
+### 5.2 Query Methods Quick Reference
 
-| 方法 | 用途 | 失败行为 |
+| Method | Purpose | Failure Behavior |
 |------|------|---------|
-| `screen.getByText('xxx')` | 精确文本匹配 | 找不到抛错 |
-| `screen.getByPlaceholderText('xxx')` | 按 placeholder 查找 | 找不到抛错 |
-| `screen.getByRole('button', { name: 'xxx' })` | 按 ARIA 角色查找 | 找不到抛错 |
-| `screen.queryByText('xxx')` | 文本匹配 | 找不到返回 null |
-| `container.textContent` | 获取元素内所有文本 | - |
+| `screen.getByText('xxx')` | Exact text match | Throws if not found |
+| `screen.getByPlaceholderText('xxx')` | Find by placeholder | Throws if not found |
+| `screen.getByRole('button', { name: 'xxx' })` | Find by ARIA role | Throws if not found |
+| `screen.queryByText('xxx')` | Text match | Returns null if not found |
+| `container.textContent` | Get all text within element | - |
 
-### 5.3 不用 Router 的组件
+### 5.3 Components Without Router
 
-对于不依赖路由的纯展示组件，直接 `render()` 即可：
+For pure display components that don't depend on routing, simply use `render()`:
 
 ```jsx
 import { render } from '@testing-library/react'
@@ -194,9 +194,9 @@ it('renders empty state', () => {
 })
 ```
 
-### 5.4 需要 Context 的组件
+### 5.4 Components Requiring Context
 
-如果组件消费 AppContext 或 PageContext，需要在测试中包裹 Provider：
+If a component consumes AppContext or PageContext, wrap it with Provider in tests:
 
 ```jsx
 import { AppContext, PageContext } from '../src/App'
@@ -214,136 +214,136 @@ function Wrapper({ children }) {
 render(<MyPage />, { wrapper: Wrapper })
 ```
 
-### 5.5 测试原则
+### 5.5 Testing Principles
 
-1. **渲染测试优先** — 每个组件至少要能渲染不崩溃
-2. **关键文本断言** — 检查标题/按钮/占位符是否出现
-3. **边界状态** — 空数据、loading、error 状态
-4. **不测实现细节** — 不测 state 内部值、不测 CSS 类名
-5. **隔离** — 每个测试不依赖其他测试的状态
+1. **Rendering tests first** — Each component should at least render without crashing
+2. **Key text assertions** — Check if titles/buttons/placeholders appear
+3. **Boundary states** — Empty data, loading, error states
+4. **Don't test implementation details** — Don't test internal state values, don't test CSS class names
+5. **Isolation** — Each test should not depend on state from other tests
 
 ---
 
-## 6. 现有测试覆盖
+## 6. Existing Test Coverage
 
-### 冒烟测试 (`tests/smoke.test.jsx`)
+### Smoke Tests (`tests/smoke.test.jsx`)
 
-确保核心组件不崩溃：
+Ensure core components don't crash:
 
-| 组件 | 断言 |
+| Component | Assertion |
 |------|------|
-| `Sha256Manager` | 标题 "SHA256 寻址" |
-| `CollectionBuilder` | 标题 "合集构建器" + "浏览合集" |
-| `P2PStatus` | 标题 "P2P 网络" |
+| `Sha256Manager` | Title "SHA256 寻址" |
+| `CollectionBuilder` | Title "合集构建器" + "浏览合集" |
+| `P2PStatus` | Title "P2P 网络" |
 | `App` | Logo "Peerdrive" |
 
-### 组件测试 (`tests/components.test.jsx`)
+### Component Tests (`tests/components.test.jsx`)
 
-覆盖主要页面和组件的渲染：
+Cover rendering of main pages and components:
 
-| 测试对象 | 测试数 | 关键断言 |
+| Test Target | Test Count | Key Assertions |
 |----------|--------|---------|
-| `App` | 1 | Navbar 中 Peerdrive logo |
-| `Plaza` | 3 | 标题/创建按钮/搜索框 |
-| `AnonCreator` | 3 | 4-Tab 栏/保存按钮/无 Commit 按钮 |
-| `AnonExplorer` | 1 | Hash 输入框 |
-| `FileManager` | 1 | 标题 "文件管理" |
-| `Settings` | 1 | 标题 "设置" |
-| `VersionLog` | 1 | 空状态提示 |
-| `Navbar` | 1 | 导航链接 |
+| `App` | 1 | Peerdrive logo in Navbar |
+| `Plaza` | 3 | Title/Create button/Search box |
+| `AnonCreator` | 3 | 4-Tab bar/Save button/No Commit button |
+| `AnonExplorer` | 1 | Hash input box |
+| `FileManager` | 1 | Title "文件管理" |
+| `Settings` | 1 | Title "设置" |
+| `VersionLog` | 1 | Empty state message |
+| `Navbar` | 1 | Navigation links |
 
-### FileTree 专项测试 (`tests/FileTree.test.jsx`)
+### FileTree-Specific Tests (`tests/FileTree.test.jsx`)
 
-| 测试 | 覆盖场景 |
+| Test | Coverage Scenario |
 |------|---------|
-| 空状态渲染 | `entries=[]` → 显示 "拖拽" |
-| 平铺条目渲染 | 单个文件 → 显示文件名 |
-| 嵌套路径展开 | `d/a.txt` → 显示目录 "d" |
-| 新建文件夹按钮 | 确认按钮文本出现 |
+| Empty state rendering | `entries=[]` → displays "拖拽" |
+| Flat item rendering | Single file → displays filename |
+| Nested path expansion | `d/a.txt` → displays directory "d" |
+| New folder button | Confirm button text appears |
 
 ---
 
 ## 7. Playwright E2E
 
-### 冒烟脚本 (`tests/playwright-smoke.mjs`)
+### Smoke Script (`tests/playwright-smoke.mjs`)
 
-这是一个独立的 Node.js 脚本，用于端到端验证——连接到 Windows 宿主机上运行的浏览器（CDP 端口 9222），测试真实的页面交互。
+This is a standalone Node.js script for end-to-end validation — connects to a browser running on the Windows host machine (CDP port 9222), testing real page interactions.
 
 ```bash
-# 前提：Windows 宿主机 Chrome/Edge 启动时带调试端口
+# Prerequisite: Windows host Chrome/Edge started with debug port
 # chrome.exe --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0
 
 cd front
 node tests/playwright-smoke.mjs
 ```
 
-该脚本需要 Playwright 技能 (`playwright-test`) 才能运行。详见对应技能文档。
+This script requires the Playwright skill (`playwright-test`) to run. See the corresponding skill documentation.
 
 ---
 
-## 8. 测试清单
+## 8. Test Checklist
 
-### 核心页面渲染
+### Core Page Rendering
 
-- [ ] `App` — 完整布局渲染
-- [ ] `Plaza` — 广场加载、合集卡片展示
-- [ ] `FileManager` — 文件列表展示
-- [ ] `Explorer` — 合集详情展示
-- [ ] `AnonCreator` — 三栏布局渲染
-- [ ] `AnonExplorer` — 合集浏览渲染
-- [ ] `Settings` — 设置分组渲染
-- [ ] `P2PPanel` — P2P 状态展示
-- [ ] `IPFSPanel` — IPFS 面板渲染
-- [ ] `BTPanel` — BT 面板渲染
+- [ ] `App` — Full layout rendering
+- [ ] `Plaza` — Plaza loading, collection card display
+- [ ] `FileManager` — File list display
+- [ ] `Explorer` — Collection detail display
+- [ ] `AnonCreator` — Three-column layout rendering
+- [ ] `AnonExplorer` — Collection browsing rendering
+- [ ] `Settings` — Settings group rendering
+- [ ] `P2PPanel` — P2P status display
+- [ ] `IPFSPanel` — IPFS panel rendering
+- [ ] `BTPanel` — BT panel rendering
 
-### 组件专项
+### Component-Specific
 
-- [ ] `FileTree` — 空/平铺/嵌套/多文件
-- [ ] `Navbar` — 搜索面板打开/关闭、键盘导航
-- [ ] `MobileNav` — 移动端链接渲染
-- [ ] `LLMAssistant` — 对话窗口渲染
-- [ ] `VersionLog` — 版本列表/空状态/回滚按钮
-- [ ] `CommentSection` — 评论列表/发表
-- [ ] `CollectionCard` — 卡片内容展示
-- [ ] `VisibilityPicker` — 可见性选项
-- [ ] `WebRTCTransfer` — 传输进度展示
+- [ ] `FileTree` — Empty/Flat/Nested/Multiple files
+- [ ] `Navbar` — Search panel open/close, keyboard navigation
+- [ ] `MobileNav` — Mobile link rendering
+- [ ] `LLMAssistant` — Chat window rendering
+- [ ] `VersionLog` — Version list/Empty state/Rollback button
+- [ ] `CommentSection` — Comment list/Post
+- [ ] `CollectionCard` — Card content display
+- [ ] `VisibilityPicker` — Visibility options
+- [ ] `WebRTCTransfer` — Transfer progress display
 
-### 交互与状态
+### Interactions & State
 
-- [ ] 用户输入 → 状态更新
-- [ ] API 调用成功 → UI 更新
-- [ ] API 调用失败 → 错误提示
-- [ ] Loading 状态 → 骨架屏/加载指示器
-- [ ] 空数据状态 → 空状态提示
-- [ ] 路由跳转 → 页面切换
+- [ ] User input → state update
+- [ ] API call success → UI update
+- [ ] API call failure → error message
+- [ ] Loading state → skeleton screen/loading indicator
+- [ ] Empty data state → empty state message
+- [ ] Route navigation → page switch
 
-### 建议添加的测试
+### Suggested Tests to Add
 
-以下测试尚未实现，建议按优先级补充：
+The following tests have not been implemented yet and are recommended by priority:
 
-1. **API mock 测试** — 用 `vi.mock()` 或 `msw` mock 后端响应，测试加载和错误状态
-2. **用户交互测试** — 使用 `fireEvent` 或 `@testing-library/user-event` 测试按钮点击、表单输入
-3. **AnonCreator 交互** — 测试三栏拖拽、文件选择、合集保存流程
-4. **快照测试** — 对关键组件做快照对比，防止意外 UI 变更
+1. **API mock tests** — Use `vi.mock()` or `msw` to mock backend responses, test loading and error states
+2. **User interaction tests** — Use `fireEvent` or `@testing-library/user-event` to test button clicks, form inputs
+3. **AnonCreator interactions** — Test three-column drag-and-drop, file selection, collection save flow
+4. **Snapshot tests** — Snapshot comparison of key components to prevent unexpected UI changes
 
 ---
 
-## 附录：常用断言速查
+## Appendix: Common Assertions Quick Reference
 
 ```jsx
-// 存在性
+// Existence
 expect(screen.getByText('标题')).toBeTruthy()
 expect(screen.queryByText('不应存在')).toBeNull()
 
-// 文本内容
+// Text content
 expect(container.textContent).toContain('部分文本')
 expect(element).toHaveTextContent('精确文本')
 
-// 属性
+// Attributes
 expect(input).toHaveValue('test')
 expect(link).toHaveAttribute('href', '/target')
 
-// 可见性
+// Visibility
 expect(element).toBeVisible()
 expect(element).not.toBeVisible()
 ```
