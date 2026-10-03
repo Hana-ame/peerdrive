@@ -1,31 +1,31 @@
-# Peerdrive 测试方法详解
+# Peerdrive Testing Methodology
 
-## 测试环境
+## Test Environment
 
-| 组件 | 地址 | 用途 |
-|------|------|------|
-| Node A (relay) | 97.64.30.221:3000 | 公网中继，IPFS+BT |
-| Node B | 97.64.30.221:3001 | 客户端节点 |
-| Reg Server | 97.64.30.221:4000 | JWT 认证 |
-| IPFS test peer | 97.64.30.221:9001 | 模拟 IPFS 节点 |
-| BT test peer | 97.64.30.221:6883 | 模拟 BT DHT 节点 |
+| Component | Address | Purpose |
+|-----------|---------|---------|
+| Node A (relay) | 97.64.30.221:3000 | Public relay, IPFS+BT |
+| Node B | 97.64.30.221:3001 | Client node |
+| Reg Server | 97.64.30.221:4000 | JWT authentication |
+| IPFS test peer | 97.64.30.221:9001 | Simulated IPFS node |
+| BT test peer | 97.64.30.221:6883 | Simulated BT DHT node |
 
 ---
 
-## Phase 1: 基础健康检查
+## Phase 1: Basic Health Checks
 
-### 测试 1.1 — Ping 端点
-**目的**: 确认服务进程在运行，HTTP 层可达  
-**测试目标**: 200 响应 + `pong`
+### Test 1.1 — Ping Endpoint
+**Purpose**: Confirm the service process is running and HTTP layer is reachable  
+**Test target**: 200 response + `pong`
 
 ```bash
 curl http://97.64.30.221:3000/ping
 # → pong
 ```
 
-### 测试 1.2 — P2P 状态
-**目的**: 确认 libp2p host 已创建，DHT 已引导  
-**测试目标**: `enabled: true`, `peer_id` 非空, `addrs` 非空
+### Test 1.2 — P2P Status
+**Purpose**: Confirm libp2p host is created and DHT is bootstrapped  
+**Test target**: `enabled: true`, `peer_id` non-empty, `addrs` non-empty
 
 ```bash
 curl http://97.64.30.221:3000/p2p/status
@@ -34,14 +34,14 @@ curl http://97.64.30.221:3000/p2p/status
 
 ---
 
-## Phase 2: IPFS/libp2p 连接
+## Phase 2: IPFS/libp2p Connectivity
 
-### 测试 2.1 — Node B 启动并连接
-**目的**: 验证 bootstrap 机制能否让新节点自动发现并连接 relay  
-**测试目标**: Node B 启动后 `connected_count >= 1`, Node A 的 peers 列表包含 B
+### Test 2.1 — Node B Start and Connect
+**Purpose**: Verify the bootstrap mechanism can allow a new node to automatically discover and connect to the relay  
+**Test target**: After Node B starts, `connected_count >= 1`, Node A's peers list contains B
 
 ```bash
-# 启动 Node B，bootstrap 指向 relay
+# Start Node B, bootstrap pointing to relay
 PORT=3001 PEERDRIVE_P2P_ENABLE=true \
   PEERDRIVE_BOOTSTRAP_PEER="/ip4/97.64.30.221/tcp/37537/p2p/<RELAY_ID>" \
   /root/pd-server &
@@ -51,9 +51,9 @@ curl http://127.0.0.1:3001/p2p/peers   # → ["<RELAY_ID>"]
 curl http://127.0.0.1:3000/p2p/peers   # → ["<NODE_B_ID>"]
 ```
 
-### 测试 2.2 — Ping 延迟
-**目的**: 验证 libp2p ping 协议通信  
-**测试目标**: RTT < 10ms (同机), 返回 JSON 含 `rtt`
+### Test 2.2 — Ping Latency
+**Purpose**: Verify libp2p ping protocol communication  
+**Test target**: RTT < 10ms (same machine), returns JSON with `rtt`
 
 ```bash
 B_ID=$(curl -s http://127.0.0.1:3001/p2p/node | jq -r .peer_id)
@@ -61,9 +61,9 @@ curl http://127.0.0.1:3000/p2p/ping/$B_ID
 # → {"peer":"12D3...","rtt":"1.649995ms"}
 ```
 
-### 测试 2.3 — 手动连接
-**目的**: 验证手动 multiaddr 连接  
-**测试目标**: 返回 `{"status":"connected"}`
+### Test 2.3 — Manual Connect
+**Purpose**: Verify manual multiaddr connection  
+**Test target**: Returns `{"status":"connected"}`
 
 ```bash
 curl -X POST http://127.0.0.1:3000/p2p/connect \
@@ -74,11 +74,11 @@ curl -X POST http://127.0.0.1:3000/p2p/connect \
 
 ---
 
-## Phase 3: 文件操作
+## Phase 3: File Operations
 
-### 测试 3.1 — HTTP 上传
-**目的**: 验证 multipart 上传 + SHA256 计算 + 存储
-**测试目标**: 返回 `hash` (64 位 hex), `size` 正确
+### Test 3.1 — HTTP Upload
+**Purpose**: Verify multipart upload + SHA256 calculation + storage
+**Test target**: Returns `hash` (64 hex chars), `size` correct
 
 ```bash
 echo "test content" > /tmp/test.txt
@@ -87,9 +87,9 @@ curl -X POST http://97.64.30.221:3000/files/upload \
 # → {"hash":"eafb6f7...","size":13,"filename":"test.txt"}
 ```
 
-### 测试 3.2 — 本地文件注册（新文件）
-**目的**: 验证从磁盘路径注册文件到 Peerdrive
-**测试目标**: 返回 hash, 之后可 SHA256 下载
+### Test 3.2 — Local File Registration (New File)
+**Purpose**: Verify registering a file to Peerdrive from a disk path
+**Test target**: Returns hash, then SHA256 download available
 
 ```bash
 curl -X POST http://97.64.30.221:3000/files/register_local \
@@ -98,27 +98,27 @@ curl -X POST http://97.64.30.221:3000/files/register_local \
 # → {"hash":"abc123...","filename":"hostname"}
 ```
 
-### 测试 3.3 — 重复注册（DB 中已有）
-**目的**: 验证对已在 DB 中的文件再次注册不会创建重复记录
-**测试目标**: 返回相同 hash, file_meta 表只有一条记录
+### Test 3.3 — Duplicate Registration (Already in DB)
+**Purpose**: Verify registering a file that already exists in DB does not create duplicate records
+**Test target**: Returns same hash, file_meta table has only one record
 
 ```bash
-# 第一次注册 → hash1
+# First registration → hash1
 HASH1=$(curl -s -X POST http://97.64.30.221:3000/files/register_local \
   -H 'Content-Type: application/json' \
   -d '{"path":"/etc/hostname"}' | jq -r .hash)
 
-# 第二次注册同文件 → 应返回相同 hash
+# Second registration of same file → should return same hash
 HASH2=$(curl -s -X POST http://97.64.30.221:3000/files/register_local \
   -H 'Content-Type: application/json' \
   -d '{"path":"/etc/hostname"}' | jq -r .hash)
 
-test "$HASH1" = "$HASH2"  # 必须相同
+test "$HASH1" = "$HASH2"  # Must be same
 ```
 
-### 测试 3.4 — 本地文件注册（带自定义文件名）
-**目的**: 验证注册时可以指定不同于磁盘名的文件名
-**测试目标**: 返回的 filename 等于自定义名称
+### Test 3.4 — Local File Registration (With Custom Filename)
+**Purpose**: Verify specifying a filename different from the disk name during registration
+**Test target**: Returned filename equals the custom name
 
 ```bash
 curl -X POST http://97.64.30.221:3000/files/register_local \
@@ -127,9 +127,9 @@ curl -X POST http://97.64.30.221:3000/files/register_local \
 # → {"hash":"...","filename":"my-host.txt"}
 ```
 
-### 测试 3.5 — 文件夹递归注册
-**目的**: 验证递归遍历目录注册所有文件
-**测试目标**: 返回 registered 数组, count 等于目录内文件数
+### Test 3.5 — Recursive Folder Registration
+**Purpose**: Verify recursively traversing a directory to register all files
+**Test target**: Returns registered array, count equals number of files in directory
 
 ```bash
 curl -X POST http://97.64.30.221:3000/files/register_folder \
@@ -138,24 +138,24 @@ curl -X POST http://97.64.30.221:3000/files/register_folder \
 # → {"registered":[{path,hash,filename},...],"count":N}
 ```
 
-### 测试 3.6 — 文件夹部分重复注册
-**目的**: 验证目录中部分文件已注册时，仅注册新文件
-**测试目标**: 新注册数 + 已存在数 = 总文件数
+### Test 3.6 — Partial Folder Registration (Some Already Registered)
+**Purpose**: Verify when some files in a directory are already registered, only new files are registered
+**Test target**: New registration count + already-existing count = total file count
 
 ```bash
-# 先注册单个文件
+# First register a single file
 curl -X POST http://97.64.30.221:3000/files/register_local \
   -d '{"path":"/etc/ssl/certs/ca-certificates.crt"}'
 
-# 再注册整个目录 → 应跳过已注册的文件
+# Then register the entire directory → should skip already-registered files
 curl -X POST http://97.64.30.221:3000/files/register_folder \
   -d '{"folder_path":"/etc/ssl"}'
-# → count 应 < 目录总文件数（跳过了已注册的）
+# → count should be < total files in directory (skipped already-registered ones)
 ```
 
-### 测试 3.7 — URL 文件注册
-**目的**: 验证通过 HTTP URL 注册远程文件
-**测试目标**: 返回 hash, 之后可通过 SHA256 下载
+### Test 3.7 — URL File Registration
+**Purpose**: Verify registering a remote file via HTTP URL
+**Test target**: Returns hash, then downloadable via SHA256
 
 ```bash
 curl -X POST http://97.64.30.221:3000/files/register_url \
@@ -165,32 +165,32 @@ curl -X POST http://97.64.30.221:3000/files/register_url \
 # → {"hash":"...","filename":"robots.txt","provider_type":"http"}
 ```
 
-### 测试 3.8 — URL 注册的文件下载
-**目的**: 验证 URL 注册的文件能通过 SHA256 下载（从远端拉取）
-**测试目标**: HTTP 200, 返回正确内容
+### Test 3.8 — URL-Registered File Download
+**Purpose**: Verify files registered via URL can be downloaded through SHA256 (pulled from remote)
+**Test target**: HTTP 200, returns correct content
 
 ```bash
-# 注册 URL 文件
+# Register URL file
 RESULT=$(curl -s -X POST http://97.64.30.221:3000/files/register_url \
   -d '{"url":"https://example.com/robots.txt"}')
 HASH=$(echo "$RESULT" | jq -r .hash)
 
-# SHA256 下载 → 应通过 http provider 自动拉取
+# SHA256 download → should auto-pull via http provider
 curl http://97.64.30.221:3000/sha256sum/$HASH | sha256sum
 ```
 
-### 测试 3.9 — 已注册文件列表
-**目的**: 验证列出所有已注册文件
-**测试目标**: 返回数组, 包含 hash/filename/size/mime_type/provider_type
+### Test 3.9 — Registered File Listing
+**Purpose**: Verify listing all registered files
+**Test target**: Returns array containing hash/filename/size/mime_type/provider_type
 
 ```bash
 curl http://97.64.30.221:3000/files?sort=time
 # → [{hash,filename,size,mime_type,provider_type,provider_path,created_at},...]
 ```
 
-### 测试 3.10 — 文件验证
-**目的**: 验证通过 hash 检查文件是否存在、一致
-**测试目标**: exists=true, consistent=true
+### Test 3.10 — File Verification
+**Purpose**: Verify checking if a file exists and is consistent by hash
+**Test target**: exists=true, consistent=true
 
 ```bash
 HASH=$(curl -s http://97.64.30.221:3000/files?sort=time | jq -r '.[0].hash')
@@ -198,54 +198,54 @@ curl http://97.64.30.221:3000/files/verify/$HASH
 # → {"hash":"...","exists":true,"consistent":true,"filename":"...","size":N}
 ```
 
-### 测试 3.11 — 不存在的文件验证
-**目的**: 验证对不存在的 hash 返回正确状态
-**测试目标**: exists=false
+### Test 3.11 — Nonexistent File Verification
+**Purpose**: Verify correct status for nonexistent hashes
+**Test target**: exists=false
 
 ```bash
 curl http://97.64.30.221:3000/files/verify/0000000000000000000000000000000000000000000000000000000000000000
-# → {"exists":false} 或 404
+# → {"exists":false} or 404
 ```
 
-### 测试 3.12 — 文件删除
-**目的**: 验证删除文件元数据（不删物理文件）
-**测试目标**: 删除后 SHA256 下载返回 404, 但物理文件还在
+### Test 3.12 — File Deletion
+**Purpose**: Verify deleting file metadata (not physical file)
+**Test target**: After deletion, SHA256 download returns 404, but physical file still exists
 
 ```bash
-# 先注册一个文件
+# First register a file
 HASH=$(echo "del-test" > /tmp/del.txt && \
   curl -s -X POST http://97.64.30.221:3000/files/upload -F "file=@/tmp/del.txt" | jq -r .hash)
 
-# 删除
+# Delete
 curl -X DELETE http://97.64.30.221:3000/files/$HASH
 # → 200
 
-# SHA256 下载 → 404
+# SHA256 download → 404
 curl -o /dev/null -w "%{http_code}" http://97.64.30.221:3000/sha256sum/$HASH
 # → 404
 ```
 
-### 测试 3.13 — 文件浏览器
-**目的**: 验证浏览服务器文件系统（不限于已注册文件）
-**测试目标**: 返回目录条目数组, 包含 is_dir/name/path/size
+### Test 3.13 — File Browser
+**Purpose**: Verify browsing server filesystem (not limited to registered files)
+**Test target**: Returns directory entry array containing is_dir/name/path/size
 
 ```bash
 curl "http://97.64.30.221:3000/files/browse?path=/etc"
 # → [{name,path,is_dir,size,mod_time},...]
 ```
 
-### 测试 3.14 — 文件浏览器根目录
-**目的**: 验证默认路径（Linux /, Windows C:\）
-**测试目标**: 返回根目录内容
+### Test 3.14 — File Browser Root Directory
+**Purpose**: Verify default path (Linux /, Windows C:\)
+**Test target**: Returns root directory contents
 
 ```bash
 curl "http://97.64.30.221:3000/files/browse"
-# → 默认路径的目录列表
+# → Directory listing for default path
 ```
 
-### 测试 3.15 — 空文件夹注册
-**目的**: 验证对空目录的注册行为
-**测试目标**: 返回 registered=[], count=0, 不报错
+### Test 3.15 — Empty Folder Registration
+**Purpose**: Verify behavior when registering an empty directory
+**Test target**: Returns registered=[], count=0, no error
 
 ```bash
 mkdir -p /tmp/empty-dir
@@ -256,20 +256,20 @@ curl -X POST http://97.64.30.221:3000/files/register_folder \
 
 ---
 
-## Phase 4: BT DHT 协议
+## Phase 4: BT DHT Protocol
 
-### 测试 4.1 — BT DHT 状态
-**目的**: 验证 BT Mainline DHT 节点已启动并连上全局网络  
-**测试目标**: `enabled: true`, `num_nodes > 0`（证明连上了全球 BT 网络）
+### Test 4.1 — BT DHT Status
+**Purpose**: Verify BT Mainline DHT node has started and connected to the global network  
+**Test target**: `enabled: true`, `num_nodes > 0` (proves connected to global BT network)
 
 ```bash
 curl http://97.64.30.221:3000/bt/status
 # → {"enabled":true,"listen_addr":"0.0.0.0:6881","num_nodes":127}
 ```
 
-### 测试 4.2 — BT Announce
-**目的**: 验证能否向全球 BT DHT 宣告文件  
-**测试目标**: 返回 `"status":"announced on BT DHT"`
+### Test 4.2 — BT Announce
+**Purpose**: Verify ability to announce files to the global BT DHT  
+**Test target**: Returns `"status":"announced on BT DHT"`
 
 ```bash
 curl -X POST http://97.64.30.221:3000/bt/announce \
@@ -278,16 +278,16 @@ curl -X POST http://97.64.30.221:3000/bt/announce \
 # → {"status":"announced on BT DHT"}
 ```
 
-### 测试 4.3 — BT Find (跨节点)
-**目的**: 验证跨节点 BT DHT 查找——Node A 宣告，Node B 查找  
-**测试目标**: Node B 查询 BT DHT 能找到 Node A 宣告的文件（count > 0）
+### Test 4.3 — BT Find (Cross-Node)
+**Purpose**: Verify cross-node BT DHT lookup — Node A announces, Node B finds  
+**Test target**: Node B querying BT DHT can find files announced by Node A (count > 0)
 
 ```bash
-# Node A 宣告
+# Node A announces
 curl -X POST http://127.0.0.1:3000/bt/announce \
   -d '{"hash":"FILE_HASH"}'
 
-# Node B 查找（wait for DHT propagation）
+# Node B finds (wait for DHT propagation)
 sleep 3
 curl -X POST http://127.0.0.1:3001/bt/find \
   -d '{"hash":"FILE_HASH"}'
@@ -296,11 +296,11 @@ curl -X POST http://127.0.0.1:3001/bt/find \
 
 ---
 
-## Phase 5: P2P 文件交换
+## Phase 5: P2P File Exchange
 
-### 测试 5.1 — IPFS Exchange
-**目的**: 验证 libp2p exchange 协议——B 从 A 下载文件  
-**测试目标**: responses=1, 返回文件大小正确
+### Test 5.1 — IPFS Exchange
+**Purpose**: Verify libp2p exchange protocol — B downloads file from A  
+**Test target**: responses=1, returns correct file size
 
 ```bash
 A_ID=$(curl -s http://127.0.0.1:3000/p2p/node | jq -r .peer_id)
@@ -309,17 +309,17 @@ curl -X POST http://127.0.0.1:3001/p2p/request-file \
 # → {"responses":1,"details":[{"hash":"...","size":13}]}
 ```
 
-### 测试 5.2 — 合集同步
-**目的**: 验证合集跨节点同步——A 创建合集，B 拉取  
-**测试目标**: synced count = 1
+### Test 5.2 — Collection Sync
+**Purpose**: Verify cross-node collection sync — A creates collection, B pulls  
+**Test target**: synced count = 1
 
 ```bash
-# A 创建合集
+# A creates collection
 curl -X POST http://127.0.0.1:3000/anon/collections \
   -d '{"entries":[{"path":"test.txt","hash":"FILE_HASH"}],"friendly_name":"Sync Test"}'
 # → {"hash":"COLLECTION_HASH"}
 
-# B 从 A 同步
+# B syncs from A
 curl -X POST http://127.0.0.1:3001/p2p/sync \
   -d "{\"peer_id\":\"$A_ID\",\"hash\":\"COLLECTION_HASH\",\"target_dir\":\"/tmp/synced\"}"
 # → {"synced":["FILE_HASH"],"count":1}
@@ -329,9 +329,9 @@ curl -X POST http://127.0.0.1:3001/p2p/sync \
 
 ## Phase 6: Dual-Stack
 
-### 测试 6.1 — Dual Announce
-**目的**: 验证同时在 IPFS 和 BT 两个 DHT 宣告  
-**测试目标**: `"announced on both networks"`
+### Test 6.1 — Dual Announce
+**Purpose**: Verify announcing on both IPFS and BT DHTs simultaneously  
+**Test target**: `"announced on both networks"`
 
 ```bash
 curl -X POST http://97.64.30.221:3000/p2p/dual/announce \
@@ -339,9 +339,9 @@ curl -X POST http://97.64.30.221:3000/p2p/dual/announce \
 # → {"status":"announced on both networks"}
 ```
 
-### 测试 6.2 — Dual Find
-**目的**: 验证同时在两个 DHT 查找提供者  
-**测试目标**: 返回 `ipfs_peers` 和 `bt_peers` 两个字段
+### Test 6.2 — Dual Find
+**Purpose**: Verify finding providers on both DHTs simultaneously  
+**Test target**: Returns `ipfs_peers` and `bt_peers` fields
 
 ```bash
 curl -X POST http://97.64.30.221:3000/p2p/dual/find \
@@ -351,59 +351,59 @@ curl -X POST http://97.64.30.221:3000/p2p/dual/find \
 
 ---
 
-## Phase 7: 多源并行下载
+## Phase 7: Multi-Source Parallel Download
 
-### 测试 7.1 — 三源同时下载
-**目的**: 验证同一文件可从 relay、IPFS test peer、BT test peer 三个来源下载  
-**测试目标**: 三次下载返回内容完全一致，SHA256 匹配
+### Test 7.1 — Three-Source Simultaneous Download
+**Purpose**: Verify the same file can be downloaded from relay, IPFS test peer, and BT test peer  
+**Test target**: Three downloads return identical content, SHA256 matches
 
 ```python
-# 从 relay 下载
+# Download from relay
 data1 = requests.get(f"http://97.64.30.221:3000/sha256sum/{hash}").content
-# 从 IPFS test peer 下载
+# Download from IPFS test peer
 data2 = requests.get(f"http://97.64.30.221:9001/files/{hash}").content
-# 从 BT peer 查询后下载
-peers = bt_find(hash)  # 找到 peer 地址
+# Find peer via BT, then download
+peers = bt_find(hash)  # find peer addresses
 data3 = download_from_peer(peers[0], hash).content
 
 assert sha256(data1) == hash
 assert sha256(data2) == hash
 assert sha256(data3) == hash
-assert data1 == data2 == data3  # 三个来源内容完全一致
+assert data1 == data2 == data3  # Three sources return identical content
 ```
 
 ---
 
-## Phase 8: 前端
+## Phase 8: Frontend
 
-### 测试 8.1 — Playwright Smoke (16 tests)
-**目的**: 验证所有页面加载、关键 UI 元素渲染  
-**测试目标**: 16/16 pass
+### Test 8.1 — Playwright Smoke (16 tests)
+**Purpose**: Verify all pages load and key UI elements render  
+**Test target**: 16/16 pass
 
 ```javascript
-// 测试页面：Plaza, AnonCreator, FileManager, AnonExplorer, Settings
-// 检查项：搜索框、4-tab、复选框、SHA256 输入、LLM 配置
+// Test pages: Plaza, AnonCreator, FileManager, AnonExplorer, Settings
+// Check items: search box, 4-tab, checkboxes, SHA256 input, LLM config
 ```
 
-### 测试 8.2 — Playwright Functional (18 tests)
-**目的**: 验证实际用户交互流程  
-**测试目标**: 18/18 pass
+### Test 8.2 — Playwright Functional (18 tests)
+**Purpose**: Verify actual user interaction flows  
+**Test target**: 18/18 pass
 
 ```javascript
-// Plaza: paste SHA256 → 导航到合集页
-// AnonCreator: 4-tab 可见、时间线日期分组、注册目录面包屑
-// FileManager: 复选框切换 → 选择计数更新
-// Settings: LLM 端点输入、模型下拉
-// Navbar: Ctrl+K 搜索面板
+// Plaza: paste SHA256 → navigate to collection page
+// AnonCreator: 4-tab visible, timeline date grouping, directory breadcrumb registration
+// FileManager: checkbox toggle → selection count update
+// Settings: LLM endpoint input, model dropdown
+// Navbar: Ctrl+K search panel
 ```
 
 ---
 
-## Phase 9: Go 单元测试
+## Phase 9: Go Unit Tests
 
-### 测试 9.1 — 全量运行
-**目的**: 验证所有 Go 包无回归  
-**测试目标**: 7 packages 全部 `ok`
+### Test 9.1 — Full Run
+**Purpose**: Verify all Go packages have no regressions  
+**Test target**: 7 packages all `ok`
 
 ```bash
 go test ./...
@@ -417,12 +417,12 @@ go test ./...
 
 ---
 
-## 未验证项
+## Unverified Items
 
-| 项目 | 原因 |
-|------|------|
-| Docker 5 节点组网 | 代码就绪，未执行 `docker compose up` |
-| WebRTC 实际传输 | signaling + 前端组件就绪，未两个浏览器测试 |
-| 断点续传 | ResumeManager 代码就绪，未中断下载场景验证 |
-| BT torrent 下载 | piece exchange 代码就绪，未用真实 .torrent 文件测试 |
-| 混沌网络 | chaos-net.sh 就绪，未在 chaos 条件下重跑测试 |
+| Item | Reason |
+|------|--------|
+| Docker 5-node networking | Code ready, `docker compose up` not executed |
+| WebRTC actual transfer | Signaling + frontend components ready, not tested with two browsers |
+| Resume/transfer continuation | ResumeManager code ready, not tested with interrupted download scenario |
+| BT torrent download | Piece exchange code ready, not tested with real .torrent file |
+| Chaos network | chaos-net.sh ready, tests not re-run under chaos conditions |

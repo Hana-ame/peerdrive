@@ -1,179 +1,180 @@
-# Peerdrive 测试方案
+# Peerdrive Test Plan
 
-> 2026-04-29 · 389+ 用例全部通过
+> 2026-04-29 · 389+ test cases all passed
 
 ---
 
-## 1. 测试体系总览
+## 1. Test System Overview
 
 ```
-                    ┌──────────────────────┐
-                    │    go test ./...      │
-                    │    163 单元测试        │
-                    │    7 包 · 即时反馈     │
-                    └──────────┬───────────┘
-                               │
-              ┌────────────────┼────────────────┐
-              ▼                ▼                ▼
-     ┌────────────┐   ┌────────────┐   ┌────────────┐
-     │  E2E 全端点 │   │  模块专项   │   │  浏览器测试  │
-     │  85 断言    │   │  BT/P2P/   │   │  Playwright │
-     │  自包含     │   │  WebRTC等  │   │  36 用例     │
-     └────────────┘   └────────────┘   └────────────┘
+                    ┌─────────────────────────────────────┐
+                    │    go test ./...                      │
+                    │    163 unit tests                     │
+                    │    7 packages · instant feedback      │
+                    └──────────────────┬──────────────────┘
+                                       │
+        ┌───────────────────────────────┼───────────────────────────────┐
+        ▼                               ▼                               ▼
+ ┌──────────────────┐  ┌────────────────────┐  ┌──────────────────┐
+ │  E2E full        │  │  Module-specific   │  │  Browser tests   │
+ │  endpoint        │  │  BT/P2P/           │  │  Playwright      │
+ │  85 assertions   │  │  WebRTC etc.       │  │  36 cases        │
+ │  Self-contained  │  │                    │  │                  │
+ └──────────────────┘  └────────────────────┘  └──────────────────┘
 ```
 
-| 层级 | 工具 | 用例数 | 运行时间 | 触发 |
+| Level | Tool | Cases | Runtime | Trigger |
 |------|------|--------|---------|------|
-| 单元测试 | `go test` | 163 | ~3s | 每次 push |
-| E2E 集成 | `test/e2e-all.sh` | 85 | ~15s | 每次 push |
-| 模块专项 | `test/{bt,p2p,webrtc}-full-test.sh` | 96 | ~30s | CI + 手动 |
-| 浏览器 | Playwright (`.mjs`) | 36 | ~20s | 手动 |
-| 双节点 | `test/p2p.sh` `relay.sh` | 25 | ~20s | 手动 |
+| Unit tests | `go test` | 163 | ~3s | Every push |
+| E2E integration | `test/e2e-all.sh` | 85 | ~15s | Every push |
+| Module-specific | `test/{bt,p2p,webrtc}-full-test.sh` | 96 | ~30s | CI + manual |
+| Browser | Playwright (`.mjs`) | 36 | ~20s | Manual |
+| Dual-node | `test/p2p.sh` `relay.sh` | 25 | ~20s | Manual |
 
 ---
 
-## 2. 测试分类
+## 2. Test Categories
 
-### 2.1 单元测试 — `go test ./...`
+### 2.1 Unit Tests — `go test ./...`
 
-| 包 | 测什么 | 用例 |
+| Package | What's tested | Cases |
 |----|--------|------|
-| `config` | 环境变量加载、默认值、布尔解析 | 10 |
-| `model` | 结构体序列化、JSON 兼容、Provider 规范化 | 10 |
-| `repository` | SQLite CRUD、providers_json、版本快照 | 25 |
-| `service` | 合集创建/验证、文件注册/MIME 检测、下载器 | 48 |
-| `controller` | HTTP 处理器、CRUD、Fork/Merge/Rollback | 20 |
-| `p2p_bt` | DHT 状态、BEP44、Torrent/Magnet、Wire | 38 |
-| `provider` | HTTP/Local/IPFS 提供者 | 12 |
+| `config` | Environment variable loading, defaults, bool parsing | 10 |
+| `model` | Struct serialization, JSON compatibility, Provider normalization | 10 |
+| `repository` | SQLite CRUD, providers_json, version snapshots | 25 |
+| `service` | Collection create/verify, file registration/MIME detection, downloader | 48 |
+| `controller` | HTTP handlers, CRUD, Fork/Merge/Rollback | 20 |
+| `p2p_bt` | DHT status, BEP44, Torrent/Magnet, Wire | 38 |
+| `provider` | HTTP/Local/IPFS providers | 12 |
 
-### 2.2 E2E 集成测试 — `test/e2e-all.sh`
+### 2.2 E2E Integration Test — `test/e2e-all.sh`
 
-自包含：编译 → 启动 :3999 → 12 段测试 → 清理。
+Self-contained: compile → start on :3999 → 12 test segments → cleanup.
 
-| 段 | 测试内容 | 断言 |
+| Segment | Test content | Assertions |
 |----|---------|------|
 | Health | `GET /ping` | 2 |
-| Upload | 新文件 201、重复 200、hash 验证 | 10 |
-| Verify | 文件校验、无效拒绝 | 3 |
-| Download | SHA256 下载、内容一致 | 3 |
-| Register Local | 本地注册、幂等、下载验证 | 5 |
-| Register Folder | 文件夹注册 | 2 |
-| Anon Collections | 创建/Fork/Commit/entries 下载 | 22 |
-| Named Collections | CRUD/条目/Commit/Rollback | 22 |
-| Fork/Merge/Pull | 条目复制、策略合并 | 4 |
-| File Delete | 删除后校验 404 | 2 |
-| Tasks | 任务列表 | 2 |
-| Edge Cases | 边界条件 | 5 |
+| Upload | New file 201, duplicate 200, hash verification | 10 |
+| Verify | File verification, invalid rejection | 3 |
+| Download | SHA256 download, content match | 3 |
+| Register Local | Local registration, idempotency, download verification | 5 |
+| Register Folder | Folder registration | 2 |
+| Anon Collections | Create/Fork/Commit/entries download | 22 |
+| Named Collections | CRUD/entries/Commit/Rollback | 22 |
+| Fork/Merge/Pull | Entry copying, strategy merging | 4 |
+| File Delete | Verify 404 after delete | 2 |
+| Tasks | Task list | 2 |
+| Edge Cases | Boundary conditions | 5 |
 
-### 2.3 模块专项测试
+### 2.3 Module-specific Tests
 
-#### BitTorrent — `test/bt-full-test.sh` (38 断言)
+#### BitTorrent — `test/bt-full-test.sh` (38 assertions)
 
 ```
-DHT 状态 → Announce → Find(self) → Find(cross)
+DHT status → Announce → Find(self) → Find(cross)
 → BEP44 Put/Get → BEP51 Sample
 → Torrent/Magnet Parse → Wire Handshake
 → Piece Download(SHA1) → Full Download(SHA256)
 ```
 
-#### P2P — `test/p2p-full-test.sh` (35 断言)
+#### P2P — `test/p2p-full-test.sh` (35 assertions)
 
 ```
-节点启动 → PeerID/multiaddr → DHT + mDNS 发现
-→ Exchange 握手 → 文件宣告/查找
-→ 连接管理(心跳/重连) → 拓扑 + 质量指标
+Node start → PeerID/multiaddr → DHT + mDNS discovery
+→ Exchange handshake → File announce/discover
+→ Connection management (heartbeat/reconnect) → Topology + quality metrics
 ```
 
-#### WebRTC — `test/webrtc_signal_test.sh` (23 断言)
+#### WebRTC — `test/webrtc_signal_test.sh` (23 assertions)
 
 ```
-WebSocket 注册 → 房间加入/离开
-→ SDP Offer/Answer → ICE 候选转发
-→ 文件宣告/发现 → 直接消息 → 3人房间 + 隔离
+WebSocket register → Room join/leave
+→ SDP Offer/Answer → ICE candidate forwarding
+→ File announce/discover → Direct messages → 3-person room + isolation
 ```
 
-### 2.4 双节点/穿透测试
+### 2.4 Dual-node/Traversal Tests
 
-| 脚本 | 内容 | 断言 | 自包含 |
+| Script | Content | Assertions | Self-contained |
 |------|------|------|--------|
-| `p2p.sh` | 双节点 mDNS 发现 → P2P fetch → sync | 13 | ✅ |
-| `relay.sh` | Relay server + client 穿透 | 12 | ✅ |
+| `p2p.sh` | Dual-node mDNS discovery → P2P fetch → sync | 13 | ✅ |
+| `relay.sh` | Relay server + client traversal | 12 | ✅ |
 
-### 2.5 浏览器测试 — Playwright
+### 2.5 Browser Tests — Playwright
 
-| 脚本 | 内容 | 用例 |
+| Script | Content | Cases |
 |------|------|------|
-| `peerdrive-smoke.mjs` | 页面加载/导航/基础交互 | 16 |
-| `peerdrive-functional.mjs` | 合集创建/文件上传/下载流程 | 20+ |
+| `peerdrive-smoke.mjs` | Page load/navigation/basic interaction | 16 |
+| `peerdrive-functional.mjs` | Collection create/file upload/download flow | 20+ |
 
 ---
 
-## 3. 运行方式
+## 3. How to Run
 
-### 本地快速验证（3 条命令）
+### Local Quick Verification (3 commands)
 
 ```bash
-cd back && go test ./... -count=1          # 163 单元测试
-cd back && bash test/e2e-all.sh            # 85 E2E 断言
-cd front && npm run build                # 前端编译
+cd back && go test ./... -count=1          # 163 unit tests
+cd back && bash test/e2e-all.sh            # 85 E2E assertions
+cd front && npm run build                # Frontend build
 ```
 
-### CI 自动运行（每次 push）
+### CI Auto-run (every push)
 
-| Workflow | 触发 | 内容 |
+| Workflow | Trigger | Content |
 |----------|------|------|
-| **Peerdrive CI** | push main | go test + build + anon/upload/register + P2P/relay 软跳 |
-| **Go Build Matrix** | push main | 5 平台编译 + go test (跳过 Windows) |
+| **Peerdrive CI** | push main | go test + build + anon/upload/register + P2P/relay soft skip |
+| **Go Build Matrix** | push main | 5-platform compilation + go test (skip Windows) |
 | **React CI** | push frontend | npm test (vitest 20) + npm run build |
 
-### 全量测试
+### Full Test Suite
 
 ```bash
-cd back && bash test/all.sh   # 一键：编译+单元+前端+Playwright
+cd back && bash test/all.sh   # All-in-one: compile + unit + frontend + Playwright
 ```
 
 ---
 
-## 4. 测试环境
+## 4. Test Environment
 
-| 依赖 | 用途 |
+| Dependency | Purpose |
 |------|------|
-| Go 1.21+ | 编译 + 单元测试 |
-| Node.js 20+ | 前端 + Playwright |
-| Python 3 | curl 测试 JSON 解析 |
-| bash | 集成测试脚本 |
+| Go 1.21+ | Compilation + unit tests |
+| Node.js 20+ | Frontend + Playwright |
+| Python 3 | curl test JSON parsing |
+| bash | Integration test scripts |
 
-### 代理注意
+### Proxy Notes
 
-系统 HTTP_PROXY 会拦截 localhost。解决：
+System HTTP_PROXY will intercept localhost. Solution:
 
 ```bash
 env -u HTTP_PROXY -u http_proxy bash test/e2e-all.sh
-# 或脚本内 export no_proxy='*'
+# Or within script: export no_proxy='*'
 ```
 
 ---
 
-## 5. 文档导航
+## 5. Documentation Navigation
 
-| 文档 | 内容 |
+| Document | Content |
 |------|------|
-| [如何测试.md](如何测试.md) | 中文操作指南——每条测试的运行命令和排错 |
-| [TESTING-HANDBOOK.md](TESTING-HANDBOOK.md) | 完整测试手册——环境搭建、架构、手动流程（840行） |
-| [TEST-PIPELINE.md](TEST-PIPELINE.md) | 测试管线——每个脚本的流程、预期、错误分析 |
-| [TEST-MATRIX.md](TEST-MATRIX.md) | 测试矩阵——109 项用例的 ID/步骤/预期 |
-| [TESTING-METHODOLOGY.md](TESTING-METHODOLOGY.md) | 方法详解——9 Phase 测试方法论 |
-| [CHAOS_TESTING.md](CHAOS_TESTING.md) | 混沌测试——恶劣网络模拟 |
-| [测试报告-2026-04-29.md](../../archive/report/测试报告-2026-04-29.md) | 最新测试报告（389+ PASS） |
-| [CI-FIXES.md](../../archive/report/CI-FIXES.md) | CI 修复记录（8 个问题） |
+| [如何测试.md](如何测试.md) | Chinese operation guide — run commands and troubleshooting for each test |
+| [TESTING-HANDBOOK.md](TESTING-HANDBOOK.md) | Complete test handbook — environment setup, architecture, manual flow (840 lines) |
+| [TEST-PIPELINE.md](TEST-PIPELINE.md) | Test pipeline — flow, expectations, error analysis for each script |
+| [TEST-MATRIX.md](TEST-MATRIX.md) | Test matrix — ID/steps/expectations for 109 test cases |
+| [TESTING-METHODOLOGY.md](TESTING-METHODOLOGY.md) | Methodology details — 9-phase testing methodology |
+| [CHAOS_TESTING.md](CHAOS_TESTING.md) | Chaos testing — harsh network simulation |
+| [测试报告-2026-04-29.md](../../archive/report/测试报告-2026-04-29.md) | Latest test report (389+ PASS) |
+| [CI-FIXES.md](../../archive/report/CI-FIXES.md) | CI fix records (8 issues) |
 
-### 归档（过时/早期文档）
+### Archived (obsolete/early documents)
 
-| 文档 | 说明 |
+| Document | Notes |
 |------|------|
-| [测试说明.md](archive/测试说明.md) | 早期测试说明 → 已并入如何测试.md |
-| [register.md](archive/register.md) | 注册测试早期笔记 |
-| [test-case-spec.md](archive/test-case-spec.md) | 旧测试用例 → 已升级为 TEST-MATRIX.md |
-| [test-peers.md](archive/test-peers.md) | P2P 节点测试笔记 |
-| [p2p-stage2-report.md](archive/p2p-stage2-report.md) | P2P Stage 2 测试报告 |
-| [test-steps.md](archive/test-steps.md) | P2P 实测步骤日志 |
+| [测试说明.md](archive/测试说明.md) | Early test description → merged into 如何测试.md |
+| [register.md](archive/register.md) | Early registration test notes |
+| [test-case-spec.md](archive/test-case-spec.md) | Old test cases → upgraded to TEST-MATRIX.md |
+| [test-peers.md](archive/test-peers.md) | P2P node test notes |
+| [p2p-stage2-report.md](archive/p2p-stage2-report.md) | P2P Stage 2 test report |
+| [test-steps.md](archive/test-steps.md) | P2P actual test steps log |

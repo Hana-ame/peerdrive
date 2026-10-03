@@ -1,138 +1,138 @@
-# Peerdrive 测试矩阵
+# Peerdrive Test Matrix
 
-> 2026-04-28 · 覆盖全部功能点的测试逻辑与预期行为
-
----
-
-## 1. 文件系统
-
-### 1.1 文件上传
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| F-01 | 上传小文件 | `curl -F "file=@test.txt" /files/upload` | 200, 返回 hash+size+mime | 检查 hash 为 64 位 hex |
-| F-02 | 上传无文件 | POST /files/upload 不传 file | 400 "file is required" | HTTP 400 |
-| F-03 | 上传大文件 (超限) | 上传 >100MB 文件 | 413/400 拒绝 | 认证用户 100MB, 匿名 10MB |
-| F-04 | 重复上传同内容 | 上传相同文件两次 | 200, 相同 hash, already_exists=true | hash 一致 |
-| F-05 | 上传带特殊字符文件名 | `file=@/tmp/你好 世界.txt` | 200, filename 保留原字符 | URL 编码正确处理 |
-
-### 1.2 本地文件注册
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| F-06 | 注册已存在文件 | POST /files/register_local {path:"/etc/hostname"} | 200, 返回 hash | SHA256 可下载 |
-| F-07 | 注册不存在的路径 | {path:"/nonexistent/file"} | 400/500 错误 | 错误信息明确 |
-| F-08 | 注册带自定义文件名 | {path:"/etc/hostname", filename:"my.txt"} | filename="my.txt" | 自定义名生效 |
-| F-09 | 重复注册同文件 | 注册两次同一路径 | 相同 hash, 不重复插入 DB | file_meta 只有一条 |
-| F-10 | 路径穿越防护 | {path:"../etc/passwd"} | 400 拒绝 | 不允许 ../ |
-
-### 1.3 文件夹注册
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| F-11 | 注册非空文件夹 | {folder_path:"/etc/ssl"} | 200, registered 数组非空 | count > 0 |
-| F-12 | 注册空文件夹 | {folder_path:"/tmp/empty"} | 200, count=0 | 不报错 |
-| F-13 | 注册不存在的文件夹 | {folder_path:"/nonexistent"} | 400 错误 | 错误信息 |
-| F-14 | 部分已注册 | 先注册一个文件，再注册整个文件夹 | 仅注册新文件 | count 少于总文件数 |
-
-### 1.4 SHA256 下载
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| F-15 | 下载已存在文件 | GET /sha256sum/:hash | 200, 返回文件内容 | sha256sum 验证一致 |
-| F-16 | 下载不存在的 hash | GET /sha256sum/000...000 | 404 | 错误信息 |
-| F-17 | Range 分块下载 | Range: bytes=0-99 | 206, Content-Range 头 | 返回 100 bytes |
-| F-18 | Range 超出范围 | Range: bytes=999999- | 206, 返回末尾部分 | 正确处理边界 |
-| F-19 | 无效 hash 格式 | GET /sha256sum/abc | 400 "invalid sha256" | 不崩溃 |
-
-### 1.5 CID/IPFS 下载
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| F-20 | CID 下载 | GET /ipfs/bafkrei... | 200, X-CID 头 | 与 SHA256 下载相同内容 |
-| F-21 | 无效 CID | GET /ipfs/invalid | 404 | 错误信息 |
-| F-22 | IPFS 网关拉取 | 本地无文件, 开启 IPFS 网关 | 从 ipfs.io 拉取 | 自动缓存到本地 |
-
-### 1.6 文件删除
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| F-23 | 删除已存在文件 | DELETE /files/:hash | 200 | 之后 GET /sha256sum/:hash → 404 |
-| F-24 | 删除不存在的 hash | DELETE /files/000...000 | 200 (不报错) | 幂等操作 |
-| F-25 | 物理文件不删除 | 删除后检查 storage | 文件仍在磁盘 | 只删 DB 记录 |
+> 2026-04-28 · Test logic and expected behavior covering all functionality points
 
 ---
 
-## 2. 合集系统
+## 1. File System
 
-### 2.1 匿名合集创建
+### 1.1 File Upload
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| C-01 | 创建合集 | POST /anon/collections {entries:[{path,hash}], friendly_name, tags} | 200, 返回 hash | 64 位 hex |
-| C-02 | 创建空条目合集 | entries:[] | 400 拒绝 | 至少一个条目 |
-| C-03 | 创建无效 hash | entries:[{path:"a", hash:"xxx"}] | 400 拒绝 | hash 非 64 位 hex |
-| C-04 | 路径穿越 | entries:[{path:"../etc", hash:valid}] | 400 拒绝 | 不允许 ../ |
-| C-05 | 无名称 (AI 推荐) | friendly_name 留空 | 弹窗→AI推荐/留空 | LLM 返回名称 |
-| C-06 | 带标签 | tags:["test","p2p"] | 200, tags 保存在合集 | GET 合集确认 tags |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| F-01 | Upload small file | `curl -F "file=@test.txt" /files/upload` | 200, returns hash+size+mime | Check hash is 64 hex chars |
+| F-02 | Upload without file | POST /files/upload without file | 400 "file is required" | HTTP 400 |
+| F-03 | Upload large file (exceeds limit) | Upload >100MB file | 413/400 rejected | Authenticated user 100MB, anonymous 10MB |
+| F-04 | Duplicate upload same content | Upload same file twice | 200, same hash, already_exists=true | Hash consistent |
+| F-05 | Upload with special character filename | `file=@/tmp/hello world.txt` | 200, filename preserves original characters | URL encoding handled correctly |
 
-### 2.2 合集查看
+### 1.2 Local File Registration
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| C-07 | 查看已存在合集 | GET /anon/collections/:hash | 200, 返回 entries/friendly_name/tags | entries 非空 |
-| C-08 | 查看不存在的合集 | GET /anon/collections/000...000 | 404 | 错误信息 |
-| C-09 | 空合集自动删除 | 查看 entry_count=0 的合集 | 自动 deleteFile | 返回 "空合集，已自动删除" |
-| C-10 | 单文件合集预览 | 查看 1 个文件的合集 | 图片→img, PDF→iframe, 文本→pre | 预览渲染正确 |
-| C-11 | 嵌套合集链接 | 合集包含另一合集的 hash | 显示 📦 合集链接 | 点击跳转到嵌套合集 |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| F-06 | Register existing file | POST /files/register_local {path:"/etc/hostname"} | 200, returns hash | SHA256 downloadable |
+| F-07 | Register nonexistent path | {path:"/nonexistent/file"} | 400/500 error | Error message clear |
+| F-08 | Register with custom filename | {path:"/etc/hostname", filename:"my.txt"} | filename="my.txt" | Custom name takes effect |
+| F-09 | Duplicate registration same file | Register same path twice | Same hash, no duplicate DB insert | file_meta has only one record |
+| F-10 | Path traversal protection | {path:"../etc/passwd"} | 400 rejected | `../` not allowed |
 
-### 2.3 合集列表
+### 1.3 Folder Registration
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| C-12 | 列出合集 | GET /anon/collections | 200, 返回数组 | 包含 hash/friendly_name/entry_count |
-| C-13 | 空列表 | 无合集时 | 返回 [] 或 dummy 合集 | 不报错 |
-| C-14 | 合集名优先级 | friendly_name→name_preview→hash→"未命名" | 正确的 fallback 链 | entry_count=0 时显示 "0 个文件" |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| F-11 | Register non-empty folder | {folder_path:"/etc/ssl"} | 200, registered array non-empty | count > 0 |
+| F-12 | Register empty folder | {folder_path:"/tmp/empty"} | 200, count=0 | No error |
+| F-13 | Register nonexistent folder | {folder_path:"/nonexistent"} | 400 error | Error message |
+| F-14 | Partially registered | Register one file first, then register entire folder | Only new files registered | count less than total file count |
 
-### 2.4 合集操作
+### 1.4 SHA256 Download
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| C-15 | Fork 合集 | POST /anon/collections/fork {source_hash, ...} | 200, 新 hash | 新合集包含源条目+新增条目 |
-| C-16 | 版本提交 | POST /collections/:u/:c/commit {message} | 200, version_number++ | 版本日志新增一条 |
-| C-17 | 版本回滚 | POST /collections/:u/:c/rollback/:vid | 200, 工作区恢复到指定版本 | 条目恢复 |
-| C-18 | 版本历史 | GET /collections/:u/:c/log | 200, 返回版本列表 | 按时间倒序 |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| F-15 | Download existing file | GET /sha256sum/:hash | 200, returns file content | sha256sum verification matches |
+| F-16 | Download nonexistent hash | GET /sha256sum/000...000 | 404 | Error message |
+| F-17 | Range chunked download | Range: bytes=0-99 | 206, Content-Range header | Returns 100 bytes |
+| F-18 | Range out of bounds | Range: bytes=999999- | 206, returns trailing portion | Correctly handles boundary |
+| F-19 | Invalid hash format | GET /sha256sum/abc | 400 "invalid sha256" | No crash |
+
+### 1.5 CID/IPFS Download
+
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| F-20 | CID download | GET /ipfs/bafkrei... | 200, X-CID header | Same content as SHA256 download |
+| F-21 | Invalid CID | GET /ipfs/invalid | 404 | Error message |
+| F-22 | IPFS gateway pull | No local file, enable IPFS gateway | Pull from ipfs.io | Auto-cache to local |
+
+### 1.6 File Deletion
+
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| F-23 | Delete existing file | DELETE /files/:hash | 200 | Then GET /sha256sum/:hash → 404 |
+| F-24 | Delete nonexistent hash | DELETE /files/000...000 | 200 (no error) | Idempotent operation |
+| F-25 | Physical file not deleted | Check storage after deletion | File still on disk | Only DB record deleted |
 
 ---
 
-## 3. P2P 网络
+## 2. Collection System
 
-### 3.1 libp2p 基础
+### 2.1 Anonymous Collection Creation
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| P-01 | P2P 启动 | 启动 Peerdrive | enabled=true, peer_id 非空 | GET /p2p/status |
-| P-02 | P2P 禁用 | PEERDRIVE_P2P_ENABLE=false | enabled=false, 其他功能正常 | HTTP 服务仍可用 |
-| P-03 | Node 信息 | GET /p2p/node | 返回 peer_id + addrs | addrs 非空 |
-| P-04 | Ping | GET /p2p/ping/:peer_id | 返回 rtt | < 10ms (同机) |
-| P-05 | mDNS 发现 | 两节点同局域网 | discovered > 0 | GET /p2p/discovered |
-| P-06 | 手动连接 | POST /p2p/connect {addr} | status:"connected" | peers 列表包含对方 |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| C-01 | Create collection | POST /anon/collections {entries:[{path,hash}], friendly_name, tags} | 200, returns hash | 64 hex chars |
+| C-02 | Create empty entries collection | entries:[] | 400 rejected | At least one entry required |
+| C-03 | Create invalid hash | entries:[{path:"a", hash:"xxx"}] | 400 rejected | Hash not 64 hex chars |
+| C-04 | Path traversal | entries:[{path:"../etc", hash:valid}] | 400 rejected | `../` not allowed |
+| C-05 | No name (AI recommended) | friendly_name left empty | Popup → AI recommend/empty | LLM returns name |
+| C-06 | With tags | tags:["test","p2p"] | 200, tags saved in collection | GET collection confirms tags |
 
-### 3.2 Exchange 协议
+### 2.2 Collection Viewing
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| P-07 | 文件请求 | POST /p2p/request-file {hash, peer_ids} | responses > 0, size 正确 | 返回的数据 hash 一致 |
-| P-08 | 跨节点下载 | 节点 A 上传, 节点 B 通过 P2P 下载 | 200, 内容一致 | sha256sum 相同 |
-| P-09 | 合集同步 | A 创建合集, B sync | synced > 0 | B 可通过 SHA256 访问 synced 文件 |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| C-07 | View existing collection | GET /anon/collections/:hash | 200, returns entries/friendly_name/tags | entries non-empty |
+| C-08 | View nonexistent collection | GET /anon/collections/000...000 | 404 | Error message |
+| C-09 | Auto-delete empty collection | View collection with entry_count=0 | Auto deleteFile | Returns "Empty collection, auto-deleted" |
+| C-10 | Single-file collection preview | View collection with 1 file | Image→img, PDF→iframe, text→pre | Preview renders correctly |
+| C-11 | Nested collection link | Collection contains another collection's hash | Shows 📦 collection link | Click navigates to nested collection |
+
+### 2.3 Collection Listing
+
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| C-12 | List collections | GET /anon/collections | 200, returns array | Contains hash/friendly_name/entry_count |
+| C-13 | Empty list | No collections | Returns [] or dummy collection | No error |
+| C-14 | Collection name priority | friendly_name→name_preview→hash→"Untitled" | Correct fallback chain | Shows "0 files" when entry_count=0 |
+
+### 2.4 Collection Operations
+
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| C-15 | Fork collection | POST /anon/collections/fork {source_hash, ...} | 200, new hash | New collection contains source entries + new entries |
+| C-16 | Version commit | POST /collections/:u/:c/commit {message} | 200, version_number++ | New version log entry |
+| C-17 | Version rollback | POST /collections/:u/:c/rollback/:vid | 200, workspace restored to specified version | Entries restored |
+| C-18 | Version history | GET /collections/:u/:c/log | 200, returns version list | Sorted by time descending |
+
+---
+
+## 3. P2P Network
+
+### 3.1 libp2p Basics
+
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| P-01 | P2P startup | Start Peerdrive | enabled=true, peer_id non-empty | GET /p2p/status |
+| P-02 | P2P disabled | PEERDRIVE_P2P_ENABLE=false | enabled=false, other functions normal | HTTP service still available |
+| P-03 | Node info | GET /p2p/node | Returns peer_id + addrs | addrs non-empty |
+| P-04 | Ping | GET /p2p/ping/:peer_id | Returns rtt | < 10ms (same machine) |
+| P-05 | mDNS discovery | Two nodes on same LAN | discovered > 0 | GET /p2p/discovered |
+| P-06 | Manual connect | POST /p2p/connect {addr} | status:"connected" | peers list contains the other node |
+
+### 3.2 Exchange Protocol
+
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| P-07 | File request | POST /p2p/request-file {hash, peer_ids} | responses > 0, correct size | Returned data hash matches |
+| P-08 | Cross-node download | Node A uploads, Node B downloads via P2P | 200, content matches | sha256sum same |
+| P-09 | Collection sync | A creates collection, B syncs | synced > 0 | B can access synced files via SHA256 |
 
 ### 3.3 DHT
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| P-10 | IPFS Announce | POST /p2p/announce {hash} | status:"announced" | DHT Provide 成功 |
-| P-11 | IPFS Find | 宣告后查找 | 在 bootstrap 环境应找到 | FindProviders 返回 peer |
-| P-12 | 单节点 (孤立) | 无 bootstrap, Announce | 200 + warning | 不报 500, 返回 "announced locally" |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| P-10 | IPFS Announce | POST /p2p/announce {hash} | status:"announced" | DHT Provide success |
+| P-11 | IPFS Find | Find after announce | Should find in bootstrap environment | FindProviders returns peer |
+| P-12 | Single node (isolated) | No bootstrap, Announce | 200 + warning | No 500 error, returns "announced locally" |
 
 ---
 
@@ -140,235 +140,235 @@
 
 ### 4.1 BT DHT
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| B-01 | BT DHT 启动 | PEERDRIVE_BT_DHT_ENABLE=true | num_nodes > 0 | GET /bt/status |
-| B-02 | BT DHT 禁用 | PEERDRIVE_BT_DHT_ENABLE=false | enabled:false | 其他功能正常 |
-| B-03 | BT Announce | POST /bt/announce {hash} | status:"announced on BT DHT" | 64 位 hex hash |
-| B-04 | BT Find (跨节点) | A announce, B find | count >= 1 | B 找到 A 宣告的 peer |
-| B-05 | BT Find (自查找) | 查找自己宣告的 hash | count >= 0 | 不报错 |
-| B-06 | 无效 hash (BT) | 40 字符 hash | 正确处理 | 接受 40 位 infohash |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| B-01 | BT DHT startup | PEERDRIVE_BT_DHT_ENABLE=true | num_nodes > 0 | GET /bt/status |
+| B-02 | BT DHT disabled | PEERDRIVE_BT_DHT_ENABLE=false | enabled:false | Other functions normal |
+| B-03 | BT Announce | POST /bt/announce {hash} | status:"announced on BT DHT" | 64 hex char hash |
+| B-04 | BT Find (cross-node) | A announces, B finds | count >= 1 | B finds peers announced by A |
+| B-05 | BT Find (self-find) | Find own announced hash | count >= 0 | No error |
+| B-06 | Invalid hash (BT) | 40-char hash | Correctly handled | Accepts 40-char infohash |
 
 ### 4.2 Torrent/Magnet
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| B-07 | 解析 .torrent | ParseTorrent(bencode) | 返回 name/pieces/size/infohash | infohash 20 字节 |
-| B-08 | 解析 Magnet | ParseMagnet("magnet:?xt=urn:btih:...") | 返回 infohash/name/trackers | 支持 hex 和 base32 |
-| B-09 | 上传 .torrent | POST /bt/torrent (multipart) | 200, 返回 files/infohash/status | status:"downloading" |
-| B-10 | 添加 Magnet | POST /bt/magnet {uri} | 200, 同上 | infohash 正确 |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| B-07 | Parse .torrent | ParseTorrent(bencode) | Returns name/pieces/size/infohash | infohash 20 bytes |
+| B-08 | Parse Magnet | ParseMagnet("magnet:?xt=urn:btih:...") | Returns infohash/name/trackers | Supports hex and base32 |
+| B-09 | Upload .torrent | POST /bt/torrent (multipart) | 200, returns files/infohash/status | status:"downloading" |
+| B-10 | Add Magnet | POST /bt/magnet {uri} | 200, same as above | infohash correct |
 
 ### 4.3 Wire Protocol
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| B-11 | Handshake | TCP 连接 → 发送 handshake | 双方交换 infohash | 协议 "BitTorrent protocol" |
-| B-12 | Piece 下载 | 从 seeder 下载单个 piece | SHA1 验证通过 | 数���正确 |
-| B-13 | 多 Piece 下载 | 下载多个 piece | 全部 SHA1 验证通过 | 文件重组后 SHA256 正确 |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| B-11 | Handshake | TCP connect → send handshake | Both sides exchange infohash | Protocol "BitTorrent protocol" |
+| B-12 | Piece download | Download single piece from seeder | SHA1 verification passes | Piece count correct |
+| B-13 | Multi-piece download | Download multiple pieces | All SHA1 verifications pass | Reassembled file SHA256 correct |
 
-### 4.4 BEP 标准
+### 4.4 BEP Standards
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| B-14 | BEP 44 Put | 存储 immutable 数据 | 返回 target hash | 数据存入 DHT |
-| B-15 | BEP 44 Get | 获取已存储数据 | 返回原数据 | base64 编码一致 |
-| B-16 | BEP 51 Sample | GET /bt/bep51/sample | 返回 samples 数组 | 每个 40 位 hex |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| B-14 | BEP 44 Put | Store immutable data | Returns target hash | Data stored in DHT |
+| B-15 | BEP 44 Get | Retrieve stored data | Returns original data | Base64 encoding consistent |
+| B-16 | BEP 51 Sample | GET /bt/bep51/sample | Returns samples array | Each 40 hex chars |
 
 ---
 
 ## 5. Dual-Stack
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| D-01 | Dual Announce | POST /p2p/dual/announce {hash} | IPFS+BT 均成功 | status:"announced on both networks" |
-| D-02 | Dual Find | POST /p2p/dual/find {hash} | 返回 ipfs_peers + bt_peers | 两个字段均存在 |
-| D-03 | 单网禁用 | BT 禁用时 Dual announce | IPFS 成功, BT skip | 不报错 |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| D-01 | Dual Announce | POST /p2p/dual/announce {hash} | Both IPFS+BT succeed | status:"announced on both networks" |
+| D-02 | Dual Find | POST /p2p/dual/find {hash} | Returns ipfs_peers + bt_peers | Both fields exist |
+| D-03 | Single network disabled | BT disabled, Dual announce | IPFS succeeds, BT skips | No error |
 
 ---
 
-## 6. 注册与认证
+## 6. Registration & Authentication
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| R-01 | 用户注册 | POST /auth/register | 201, 返回 token | token 可解码 |
-| R-02 | 用户登录 | POST /auth/login | 200, 返回 JWT | JWT 包含 username+role |
-| R-03 | Token 验证 | GET /auth/whoami (Bearer) | 200, 返回 username+role | 正确识别 |
-| R-04 | 无效 Token | 错误/过期 token | 401 | 错误信息 |
-| R-05 | Relay 注册 | POST /p2p/relay/register | 200 | relay 列表中出现 |
-| R-06 | Relay 心跳 | POST /p2p/relay/heartbeat | 200 | last_heartbeat 更新 |
-| R-07 | Relay 列表 | GET /p2p/relay/list | 200, 返回活跃 relay | 5 分钟内有心跳 |
-| R-08 | endpoint#token | API URL 包含 #token | 提取 token, 用于 Authorization | 前端自动解析 |
-
----
-
-## 7. 前端
-
-### 7.1 页面加载
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| UI-01 | Plaza 首页 | 打开 / | 显示合集卡片/搜索栏/标签页 | Playwright |
-| UI-02 | AnonCreator | 打开 /anon/create | 4-tab 平铺, 时间线默认 | 可见时间线/已注册/本机/合集 |
-| UI-03 | FileManager | 打开 /files | 文件列表+复选框+排序 | 复选框可见, 排序按钮有效 |
-| UI-04 | P2P 面板 | 打开 /ipfs, /bt, /p2p | 各面板正确渲染 | Playwright |
-| UI-05 | BT 控制器 | 打开 /bt/controller | 磁力输入+下载列表+统计栏 | 刷新按钮有效 |
-| UI-06 | Settings | 打开 /settings | IPFS/BT/WebDAV/LLM 配置节 | 设置持久化 |
-| UI-07 | PWA | 移动端打开 | manifest + service worker | 可添加到主屏幕 |
-
-### 7.2 交互
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| UI-08 | 粘贴 SHA256 导航 | Plaza 搜索栏粘贴 64 位 hash | 自动导航到合集页 | URL 变为 /anon/collections/:hash |
-| UI-09 | 拖拽文件 | AnonCreator 拖拽文件到编辑区 | 添加条目到 FileTree | 条目可见 |
-| UI-10 | 复选框多选 | FileManager 勾选多个文件 | 显示 "已选择 N 个文件" | 创建合集按钮可用 |
-| UI-11 | 分享输入框 | 点击分享 | 显示输入框(非 alert) | 可复制链接 |
-| UI-12 | 天线 | 切换到天线 tab | 拉取 P2P 发现 | 合集卡片出现 |
-| UI-13 | LLM 上下文 | 切换页面后使用 LLM | LLM 知道当前页面 | 回复相关 |
-
-### 7.3 错误处理
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| UI-14 | 无节点横幅 | 未配置 API, 打开 BT 控制器 | 显示 "未连接到本地节点" 横幅 | 橙色警告 |
-| UI-15 | 错误 tooltip | BT 任务错误, 鼠标悬停 | 显示错误详情 | title 属性 |
-| UI-16 | 空合集隐藏 | Plaza 空合集 (0 entries) | 不显示或标记 | 至少不是 "未命名合集" |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| R-01 | User registration | POST /auth/register | 201, returns token | Token decodable |
+| R-02 | User login | POST /auth/login | 200, returns JWT | JWT contains username+role |
+| R-03 | Token verification | GET /auth/whoami (Bearer) | 200, returns username+role | Correctly identified |
+| R-04 | Invalid token | Wrong/expired token | 401 | Error message |
+| R-05 | Relay registration | POST /p2p/relay/register | 200 | Appears in relay list |
+| R-06 | Relay heartbeat | POST /p2p/relay/heartbeat | 200 | last_heartbeat updated |
+| R-07 | Relay list | GET /p2p/relay/list | 200, returns active relays | Heartbeat within 5 minutes |
+| R-08 | endpoint#token | API URL contains #token | Extract token, used for Authorization | Frontend auto-parses |
 
 ---
 
-## 8. 部署与运维
+## 7. Frontend
 
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| O-01 | 单二进制编译 | go build ./cmd/server/ | 51MB 二进制 | file peerdrive-server |
-| O-02 | 跨平台编译 | GOOS=windows/darwin/linux | 各平台均成功 | CI matrix |
-| O-03 | VPS relay 启动 | systemctl start peerdrive-relay | active, P2P online | curl /ping |
-| O-04 | CF Tunnel | curl wsl-3000.moonchan.xyz/ping | pong | TLS 连接 |
-| O-05 | CF Pages | curl peerdrive.pages.dev | HTTP 200 | 前端可访问 |
-| O-06 | Docker compose up | docker compose up -d | 5 容器 running | relay healthcheck pass |
-| O-07 | 内存占用 | 长期运行后 | < 100MB (Go 进程) | ps aux RSS |
+### 7.1 Page Loading
 
----
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| UI-01 | Plaza homepage | Open / | Shows collection cards/search bar/tabs | Playwright |
+| UI-02 | AnonCreator | Open /anon/create | 4-tab layout, timeline default | Timeline/registered/local/collection visible |
+| UI-03 | FileManager | Open /files | File list+checkboxes+sorting | Checkboxes visible, sort buttons functional |
+| UI-04 | P2P panel | Open /ipfs, /bt, /p2p | Each panel renders correctly | Playwright |
+| UI-05 | BT Controller | Open /bt/controller | Magnet input+download list+stats bar | Refresh button functional |
+| UI-06 | Settings | Open /settings | IPFS/BT/WebDAV/LLM config sections | Settings persisted |
+| UI-07 | PWA | Open on mobile | manifest + service worker | Can add to home screen |
 
-## 10. 真实网络测试 (2026-04-28)
+### 7.2 Interactions
 
-### I-01 IPFS 真实节点互通
-| 项 | 详情 |
-|----|------|
-| 目标 | Peerdrive 从公网 IPFS CID 拉取文件 |
-| 步骤 | 已知 CID `QmUNLLsP...` → POST /ipfs/pin → GET /ipfs/ |
-| 结果 | ✅ HTTP 200, 249,154 bytes, pin 成功 |
-| 验证 | 文件写入本地 storage，SHA256 索引注册 |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| UI-08 | Paste SHA256 navigate | Paste 64-char hash in Plaza search bar | Auto-navigate to collection page | URL becomes /anon/collections/:hash |
+| UI-09 | Drag file | Drag file to AnonCreator edit area | Add entry to FileTree | Entry visible |
+| UI-10 | Checkbox multi-select | Check multiple files in FileManager | Shows "N files selected" | Create collection button available |
+| UI-11 | Share input box | Click share | Shows input box (not alert) | Can copy link |
+| UI-12 | Antenna tab | Switch to antenna tab | Pull P2P discovery | Collection cards appear |
+| UI-13 | LLM context | Use LLM after switching pages | LLM knows current page | Response relevant |
 
-### I-02 BT 真实种子测试
-| 项 | 详情 |
-|----|------|
-| 目标 | Peerdrive BT 客户端通过 Tracker+DHT 发现 peer 并下载 |
-| 步骤 | .torrent → POST /bt/torrent → Tracker 发现 → Wire Protocol |
-| 结果 | ✅ 2026-04-29: 16/16 pieces, 1,048,576 bytes, SHA256 验证通过 |
-| 详情 | Peerdrive ←Tracker→ Python seeder → Wire Protocol 16片下载 |
-| 验证 | sha256sum 与原文件完全一致: `39b90efc...` |
+### 7.3 Error Handling
 
-### I-04 BT 全球 DHT 连通性 (NEW)
-| 项 | 详情 |
-|----|------|
-| 目标 | Peerdrive BT DHT 接入全球 Mainline DHT 网络 |
-| 结果 | ✅ DHT 13+ 节点，发现 Transmission 客户端 (-TR2210-) |
-| 握手 | ✅ BT wire protocol handshake 成功 |
-| 日期 | 2026-04-29 |
-
-### I-05 P2P Collection 跨服务器同步 (NEW)
-| 项 | 详情 |
-|----|------|
-| 目标 | BWH 创建合集 → P2P announce → WSL 发现并拉取 |
-| 操作 | BWH: upload → create → dual announce; WSL: dual find → fetch → save → download |
-| 节点 | BWH (relay server) ↔ WSL (relay client) |
-| 结果 | ✅ 合集数据完整同步，文件内容端到端一致 |
-| 日期 | 2026-05-03 |
-
-### I-03 IPFS 本地节点互通
-| 项 | 详情 |
-|----|------|
-| 目标 | kubok add → CID → Peerdrive pin |
-| 步骤 | ipfs add → Peerdrive POST /ipfs/pin/:cid |
-| 结果 | ⚠️ 本地 kubo 节点文件未发布到 IPFS DHT，公网网关找不到 |
-| 修复 | 需要 kubo 连接 IPFS 公网或 Peerdrive 直接连接 kubo 的 libp2p 节点 |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| UI-14 | No node banner | API not configured, open BT controller | Shows "Not connected to local node" banner | Orange warning |
+| UI-15 | Error tooltip | BT task error, mouse hover | Shows error details | title attribute |
+| UI-16 | Empty collection hidden | Plaza empty collection (0 entries) | Hidden or marked | At least not "Untitled Collection" |
 
 ---
 
-## 11. 前端 UI 移动端适配
+## 8. Deployment & Operations
 
-### 11.1 创建页 (AnonCreator)
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| UI-01 | 移动端三栏切换 | 375px 视口打开 /create | 显示「文件」「预览」「编辑器」标签 | 一次只显示一个面板 |
-| UI-02 | 桌面端三栏布局 | >768px 视口打开 /create | 左中右三栏同时可见 | md:flex 生效 |
-| UI-03 | 选择文件自动切预览 | 点击左侧文件 | 自动切换到预览面板 | mobilePanel → 'preview' |
-| UI-04 | 本地电脑文件添加 | 本地电脑 tab → 文件 "+" | 自动注册文件再添加到合集 | 条目有 hash/provider |
-| UI-05 | 本地电脑文件夹添加 | 本地电脑 tab → 文件夹 "+" | 展开文件夹注册文件后添加，空文件夹忽略 | 条目带 foldername/ 前缀 |
-| UI-06 | 保存按钮禁用/启用 | 无条目/有条目时 | 无条目时 disabled=true | 按钮 disabled 属性 |
-| UI-07 | 标签独立行 | 编辑器工具栏 | 标签输入在名称下方的独立行 | DOM 结构验证 |
-| UI-08 | 内联新建文件夹 | 点击"+ 新建文件夹" | 文件树中出现内联输入框 | Enter 确认, Escape 取消 |
-| UI-09 | 文件夹右键重命名 | 右击文件夹 → 重命名 | 进入内联编辑模式 | path + '/' 传入 rename |
-
-### 11.2 设置页 (Settings)
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| UI-10 | 移动端标签栏 | 375px 视口打开 /settings | 水平滚动标签栏可见 | 节点连接/认证/存储管理等 |
-| UI-11 | 桌面端侧边栏 | 375px 视口 | 左侧导航 aside 不可见 | hidden md:flex |
-| UI-12 | LLM 面板宽度自适应 | 375px 视口打开 LLM 面板 | w-[calc(100vw-1.5rem)] 且不溢出 | 面板在视口内 |
-
-### 11.3 导航栏 (Navbar)
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| UI-13 | 汉堡菜单按钮 | 375px 视口，任意页 | 左上角汉堡按钮可见 | aria-label="菜单" |
-| UI-14 | 汉堡菜单展开 | 点击汉堡按钮 | 下拉菜单显示导航项 | 含本地文件管理、创建合集等 |
-| UI-15 | 桌面端下拉菜单 | >768px 视口 hover P2P/BT/IPFS | 下拉菜单展开 | 子菜单项可见 |
-| UI-16 | 触摸端下拉菜单 | 点击下拉箭头按钮 | 菜单 toggle 展开/收起 | 点击外部关闭 |
-| UI-17 | 搜索按钮紧凑 | 375px 视口 | 仅显示 🔍 图标，隐藏文字和快捷键 | 移动端无"搜索..."文字 |
-
-### 11.4 合集浏览 (Explorer/AnonExplorer)
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| UI-18 | Explorer VersionLog 隐藏 | 375px 视口打开 /:user/:coll | 右侧 VersionLog 面板不可见 | hidden md:block |
-| UI-19 | Explorer 顶栏紧凑 | 375px 视口 | 按钮文字缩短，不溢出 | "保存"代替"保存到本地" |
-
-### 11.5 其他
-
-| 测试ID | 测试项 | 操作 | 预期结果 | 验证方式 |
-|--------|--------|------|----------|----------|
-| UI-20 | DHT 输入框自适应 | 375px 视口 | 输入框 min-w=0，按钮自动换行 | flex-wrap 生效 |
-| UI-21 | LLM 面板视口适配 | 375px 视口打开 LLM | 面板不超出屏幕右侧 | w-[calc(100vw-1.5rem)] |
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| O-01 | Single binary build | go build ./cmd/server/ | 51MB binary | file peerdrive-server |
+| O-02 | Cross-platform build | GOOS=windows/darwin/linux | All platforms succeed | CI matrix |
+| O-03 | VPS relay startup | systemctl start peerdrive-relay | active, P2P online | curl /ping |
+| O-04 | CF Tunnel | curl wsl-3000.moonchan.xyz/ping | pong | TLS connection |
+| O-05 | CF Pages | curl peerdrive.pages.dev | HTTP 200 | Frontend accessible |
+| O-06 | Docker compose up | docker compose up -d | 5 containers running | relay healthcheck pass |
+| O-07 | Memory usage | After long-running | < 100MB (Go process) | ps aux RSS |
 
 ---
 
-## 附录 A: 测试环境
+## 10. Real Network Tests (2026-04-28)
 
-| 项 | 值 |
-|----|-----|
-| Playwright 浏览器 | Edge via CDP (port 9222) |
-| 移动端视口 | 375×667 (iPhone SE) |
-| 桌面端断点 | md: 768px |
-| 被测 URL | peerdrive.pages.dev (生产) 或 *.peerdrive.pages.dev (预览) |
-| 网络限制 | Host 浏览器无法直接访问 WSL2 localhost，需用 *.moonchan.xyz 或已部署的 cloudflare pages |
+### I-01 IPFS Real Node Interoperability
+| Item | Details |
+|------|---------|
+| Objective | Peerdrive pulls file from public IPFS CID |
+| Steps | Known CID `QmUNLLsP...` → POST /ipfs/pin → GET /ipfs/ |
+| Result | ✅ HTTP 200, 249,154 bytes, pin succeeded |
+| Verification | File written to local storage, SHA256 index registered |
 
-## 附录 B: 运行方式
+### I-02 BT Real Seeder Test
+| Item | Details |
+|------|---------|
+| Objective | Peerdrive BT client discovers peers via Tracker+DHT and downloads |
+| Steps | .torrent → POST /bt/torrent → Tracker discovery → Wire Protocol |
+| Result | ✅ 2026-04-29: 16/16 pieces, 1,048,576 bytes, SHA256 verification passed |
+| Details | Peerdrive ←Tracker→ Python seeder → Wire Protocol 16-piece download |
+| Verification | sha256sum matches original file exactly: `39b90efc...` |
+
+### I-04 BT Global DHT Connectivity (NEW)
+| Item | Details |
+|------|---------|
+| Objective | Peerdrive BT DHT connects to global Mainline DHT network |
+| Result | ✅ DHT 13+ nodes, discovered Transmission client (-TR2210-) |
+| Handshake | ✅ BT wire protocol handshake successful |
+| Date | 2026-04-29 |
+
+### I-05 P2P Collection Cross-Server Sync (NEW)
+| Item | Details |
+|------|---------|
+| Objective | BWH creates collection → P2P announce → WSL discovers and pulls |
+| Operation | BWH: upload → create → dual announce; WSL: dual find → fetch → save → download |
+| Nodes | BWH (relay server) ↔ WSL (relay client) |
+| Result | ✅ Collection data fully synced, file content end-to-end consistent |
+| Date | 2026-05-03 |
+
+### I-03 IPFS Local Node Interoperability
+| Item | Details |
+|------|---------|
+| Objective | kubok add → CID → Peerdrive pin |
+| Steps | ipfs add → Peerdrive POST /ipfs/pin/:cid |
+| Result | ⚠️ Local kubo node files not published to IPFS DHT, public gateway cannot find |
+| Fix | Need kubo connected to IPFS public network or Peerdrive directly connected to kubo's libp2p node |
+
+---
+
+## 11. Frontend UI Mobile Adaptation
+
+### 11.1 Create Page (AnonCreator)
+
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| UI-01 | Mobile 3-panel toggle | Open /create at 375px viewport | Shows "Files", "Preview", "Editor" tabs | Only one panel visible at a time |
+| UI-02 | Desktop 3-panel layout | Open /create at >768px viewport | Left-center-right 3 panels visible simultaneously | md:flex takes effect |
+| UI-03 | Select file auto-switch preview | Click file on left side | Auto-switch to preview panel | mobilePanel → 'preview' |
+| UI-04 | Local PC file add | Local PC tab → file "+" | Auto-register file then add to collection | Entry has hash/provider |
+| UI-05 | Local PC folder add | Local PC tab → folder "+" | Expand folder, register files then add, empty folders ignored | Entry prefixed with foldername/ |
+| UI-06 | Save button disabled/enabled | No entries/has entries | disabled=true when no entries | Button disabled attribute |
+| UI-07 | Tags on independent line | Editor toolbar | Tag input on independent line below name | DOM structure verification |
+| UI-08 | Inline new folder | Click "+ New Folder" | Inline input appears in file tree | Enter confirms, Escape cancels |
+| UI-09 | Folder right-click rename | Right-click folder → Rename | Enters inline edit mode | path + '/' passed to rename |
+
+### 11.2 Settings Page (Settings)
+
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| UI-10 | Mobile tab bar | Open /settings at 375px viewport | Horizontally scrollable tab bar visible | Node connection/auth/storage management etc. |
+| UI-11 | Desktop sidebar | 375px viewport | Left nav aside not visible | hidden md:flex |
+| UI-12 | LLM panel width adaptive | Open LLM panel at 375px viewport | w-[calc(100vw-1.5rem)] and no overflow | Panel within viewport |
+
+### 11.3 Navbar
+
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| UI-13 | Hamburger menu button | Any page at 375px viewport | Hamburger button visible top-left | aria-label="Menu" |
+| UI-14 | Hamburger menu expand | Click hamburger button | Dropdown menu shows navigation items | Includes local file management, create collection etc. |
+| UI-15 | Desktop dropdown menu | Hover P2P/BT/IPFS at >768px viewport | Dropdown menu expands | Submenu items visible |
+| UI-16 | Touch dropdown menu | Click dropdown arrow button | Menu toggle expands/collapses | Click outside to close |
+| UI-17 | Search button compact | 375px viewport | Only 🔍 icon shown, text and shortcut hidden | No "Search..." text on mobile |
+
+### 11.4 Collection Explorer (Explorer/AnonExplorer)
+
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| UI-18 | Explorer VersionLog hidden | Open /:user/:coll at 375px viewport | Right-side VersionLog panel not visible | hidden md:block |
+| UI-19 | Explorer top bar compact | 375px viewport | Button text shortened, no overflow | "Save" instead of "Save to Local" |
+
+### 11.5 Others
+
+| Test ID | Test Item | Operation | Expected Result | Verification |
+|---------|-----------|-----------|-----------------|--------------|
+| UI-20 | DHT input adaptive | 375px viewport | Input box min-w=0, buttons auto-wrap | flex-wrap takes effect |
+| UI-21 | LLM panel viewport adaptation | Open LLM at 375px viewport | Panel does not overflow screen right edge | w-[calc(100vw-1.5rem)] |
+
+---
+
+## Appendix A: Test Environment
+
+| Item | Value |
+|------|-------|
+| Playwright browser | Edge via CDP (port 9222) |
+| Mobile viewport | 375×667 (iPhone SE) |
+| Desktop breakpoint | md: 768px |
+| Test URL | peerdrive.pages.dev (production) or *.peerdrive.pages.dev (preview) |
+| Network limitation | Host browser cannot directly access WSL2 localhost, must use *.moonchan.xyz or deployed cloudflare pages |
+
+## Appendix B: How to Run
 
 ```bash
-# Go 单元测试
+# Go unit tests
 cd back && go test -tags nosqlite ./internal/service/ -run "TestCreateCollection" -v
 
-# 前端单元测试
+# Frontend unit tests
 cd front && npx vitest run
 
-# Playwright 移动端测试（需要 host Edge 打开 9222）
+# Playwright mobile tests (requires host Edge on 9222)
 cd /home/lumin/.claude/skills/playwright-test
 node scripts/test-runner.mjs /tmp/pw-mobile-final.mjs
 
-# 前端编译
+# Frontend build
 cd front && npx vite build
 ```

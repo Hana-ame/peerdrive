@@ -1,196 +1,196 @@
-# Peerdrive 测试手册
+# Peerdrive Testing Handbook
 
-> 面向测试人员和开发者的完整测试指南
-> 更新: 2026-04-29
-
----
-
-## 目录
-
-1. [环境准备](#1-环境准备)
-2. [测试架构概览](#2-测试架构概览)
-3. [快速开始](#3-快速开始)
-4. [测试套件详解](#4-测试套件详解)
-5. [手动测试流程](#5-手动测试流程)
-6. [故障排查](#6-故障排查)
-7. [测试矩阵](#7-测试矩阵)
-8. [混沌测试](#8-混沌测试)
+> A comprehensive testing guide for QA engineers and developers
+> Updated: 2026-04-29
 
 ---
 
-## 1. 环境准备
+## Table of Contents
 
-### 1.1 依赖安装
+1. [Environment Setup](#1-environment-setup)
+2. [Testing Architecture Overview](#2-testing-architecture-overview)
+3. [Quick Start](#3-quick-start)
+4. [Test Suite Details](#4-test-suite-details)
+5. [Manual Testing Workflow](#5-manual-testing-workflow)
+6. [Troubleshooting](#6-troubleshooting)
+7. [Test Matrix](#7-test-matrix)
+8. [Chaos Testing](#8-chaos-testing)
+
+---
+
+## 1. Environment Setup
+
+### 1.1 Dependency Installation
 
 ```bash
 # Go 1.24+
 go version
 
-# Python 3 (用于测试脚本 JSON 解析)
+# Python 3 (for test script JSON parsing)
 python3 --version
 
 # curl
 curl --version
 
-# jq (可选，用于命令行 JSON 处理)
+# jq (optional, for command-line JSON processing)
 sudo apt-get install jq
 ```
 
-### 1.2 系统代理配置
+### 1.2 System Proxy Configuration
 
-如果系统配置了 HTTP 代理（如 Privoxy），测试脚本需绕过代理：
+If the system has an HTTP proxy configured (e.g., Privoxy), test scripts need to bypass it:
 
 ```bash
-# 方法 1: 使用 no_proxy 环境变量
+# Method 1: Use the no_proxy environment variable
 export no_proxy='*'
 
-# 方法 2: curl 命令使用 -x "" 参数
+# Method 2: Use curl with -x "" parameter
 curl -x "" http://localhost:3000/ping
 
-# 方法 3: 测试脚本自动处理（大部分脚本已内置）
+# Method 3: Test scripts handle this automatically (most scripts have this built in)
 ```
 
-### 1.3 端口规划
+### 1.3 Port Plan
 
-| 组件 | 默认端口 | 说明 |
-|------|----------|------|
-| Peerdrive 主服务 | 3000 | Go Gin HTTP API |
-| Peerdrive 节点 B | 3001 | 双节点测试用 |
-| Peerdrive 节点 C | 3002 | 三节点测试用 |
-| Registration Server | 4000 | JWT 认证服务 |
-| React Dev Server | 5173 | Vite 前端开发 |
-| BT Tracker (测试) | 6969 | Python tracker 模拟 |
-| BT Seeder (测试) | 6890 | Python seeder |
-| IPFS 模拟节点 | 9001 | IPFS 测试节点 |
-| E2E 测试 | 3999 | 自包含测试端口 |
+| Component | Default Port | Description |
+|-----------|-------------|-------------|
+| Peerdrive Main Service | 3000 | Go Gin HTTP API |
+| Peerdrive Node B | 3001 | For two-node testing |
+| Peerdrive Node C | 3002 | For three-node testing |
+| Registration Server | 4000 | JWT authentication service |
+| React Dev Server | 5173 | Vite frontend development |
+| BT Tracker (Test) | 6969 | Python tracker simulation |
+| BT Seeder (Test) | 6890 | Python seeder |
+| IPFS Simulated Node | 9001 | IPFS test node |
+| E2E Tests | 3999 | Self-contained test port |
 
-### 1.4 环境变量速查
+### 1.4 Environment Variables Quick Reference
 
 ```bash
-# 核心配置
-PEERDRIVE_STORAGE=./storage        # 文件存储目录
-PEERDRIVE_STORAGE_ENABLE=true      # 存储开关
-PORT=3000                          # HTTP 端口
+# Core configuration
+PEERDRIVE_STORAGE=./storage        # File storage directory
+PEERDRIVE_STORAGE_ENABLE=true      # Storage switch
+PORT=3000                          # HTTP port
 
-# P2P 配置
-PEERDRIVE_P2P_ENABLE=true          # P2P 开关
-PEERDRIVE_MDNS_ENABLE=true         # mDNS 局域网发现
-PEERDRIVE_RELAY_ENABLE=true        # Relay 中继开关
+# P2P configuration
+PEERDRIVE_P2P_ENABLE=true          # P2P switch
+PEERDRIVE_MDNS_ENABLE=true         # mDNS LAN discovery
+PEERDRIVE_RELAY_ENABLE=true        # Relay switch
 PEERDRIVE_RELAY_MODE=client        # client / server / off
-PEERDRIVE_HOLE_PUNCH=true          # NAT 打洞
-PEERDRIVE_AUTO_NAT=true            # AutoNAT 检测
-PEERDRIVE_PUBLIC_REACHABLE=true    # 公网可达（relay server）
-PEERDRIVE_BOOTSTRAP_PEER=<multiaddr>  # Bootstrap 节点
+PEERDRIVE_HOLE_PUNCH=true          # NAT hole punching
+PEERDRIVE_AUTO_NAT=true            # AutoNAT detection
+PEERDRIVE_PUBLIC_REACHABLE=true    # Publicly reachable (relay server)
+PEERDRIVE_BOOTSTRAP_PEER=<multiaddr>  # Bootstrap node
 
-# BT 配置
-PEERDRIVE_BT_DHT_ENABLE=true       # BT DHT 开关
+# BT configuration
+PEERDRIVE_BT_DHT_ENABLE=true       # BT DHT switch
 
-# 安全（重要！）
-PEERDRIVE_JWT_SECRET=<random>      # JWT 密钥（生产环境必须设置）
+# Security (important!)
+PEERDRIVE_JWT_SECRET=<random>      # JWT secret (must be set in production)
 ```
 
 ---
 
-## 2. 测试架构概览
+## 2. Testing Architecture Overview
 
 ```
-测试金字塔
+Testing Pyramid
 ┌─────────────────────────┐
-│     E2E 测试             │  ← e2e-all.sh (85 断言, 12 段)
-│     真实网络测试          │  ← BT DHT / IPFS 公网
+│     E2E Tests            │  ← e2e-all.sh (85 assertions, 12 segments)
+│     Real Network Tests   │  ← BT DHT / IPFS public
 ├─────────────────────────┤
-│    集成测试              │  ← p2p.sh, relay.sh, bt-full-test.sh
-│    多节点/模块间         │
+│    Integration Tests     │  ← p2p.sh, relay.sh, bt-full-test.sh
+│    Multi-node/inter-mod.│
 ├─────────────────────────┤
-│    API 测试              │  ← upload.sh, register.sh, anon-collection.sh
-│    单节点 HTTP           │
+│    API Tests             │  ← upload.sh, register.sh, anon-collection.sh
+│    Single-node HTTP      │
 ├─────────────────────────┤
-│    单元测试              │  ← go test ./... (66 tests)
-│    Go 包级别             │
+│    Unit Tests            │  ← go test ./... (66 tests)
+│    Go package level      │
 └─────────────────────────┘
 ```
 
-### 测试文件位置
+### Test File Locations
 
 ```
 go/
-├── *_test.go                    # Go 单元测试（源码内嵌）
+├── *_test.go                    # Go unit tests (embedded in source)
 ├── test/
-│   ├── e2e-all.sh               # E2E 全端点测试（自包含）
-│   ├── test.sh                  # 完整集成测试（需要运行中的 server）
-│   ├── upload.sh                # 上传功能测试
-│   ├── register.sh              # 文件注册测试
-│   ├── anon-collection.sh       # 匿名合集测试
-│   ├── p2p.sh                   # P2P 双节点测试（自包含）
-│   ├── relay.sh                 # Relay 穿透测试（自包含）
-│   ├── bt-full-test.sh          # BT 全功能测试
-│   ├── ipfs-full-test.sh        # IPFS 全功能测试
-│   ├── p2p-full-test.sh         # P2P 全功能测试
-│   ├── storage-full-test.sh     # Storage 全功能测试
-│   ├── auth-full-test.sh        # Auth 全功能测试
-│   ├── webrtc_signal_test.sh    # WebRTC 信令测试
-│   └── *-full-test-results.txt  # 测试结果文件
+│   ├── e2e-all.sh               # E2E all-endpoint tests (self-contained)
+│   ├── test.sh                  # Full integration tests (requires running server)
+│   ├── upload.sh                # Upload functionality tests
+│   ├── register.sh              # File registration tests
+│   ├── anon-collection.sh       # Anonymous collection tests
+│   ├── p2p.sh                   # P2P two-node tests (self-contained)
+│   ├── relay.sh                 # Relay penetration tests (self-contained)
+│   ├── bt-full-test.sh          # BT full functionality tests
+│   ├── ipfs-full-test.sh        # IPFS full functionality tests
+│   ├── p2p-full-test.sh         # P2P full functionality tests
+│   ├── storage-full-test.sh     # Storage full functionality tests
+│   ├── auth-full-test.sh        # Auth full functionality tests
+│   ├── webrtc_signal_test.sh    # WebRTC signaling tests
+│   └── *-full-test-results.txt  # Test result files
 ```
 
 ---
 
-## 3. 快速开始
+## 3. Quick Start
 
-### 3.1 一键运行全部测试
+### 3.1 Run All Tests with One Command
 
 ```bash
 cd /mnt/d/WorkPlace/peerdrive/go
 
-# 1. 单元测试 — 最快，无需启动服务
+# 1. Unit tests — fastest, no server needed
 go test ./... -count=1
 
-# 2. E2E 测试 — 完整 HTTP 端点覆盖
+# 2. E2E tests — complete HTTP endpoint coverage
 bash test/e2e-all.sh
 
-# 3. 模块专项测试（需要服务在 :3000 运行）
+# 3. Module-specific tests (requires service running on :3000)
 bash test/all.sh
 ```
 
-### 3.2 最小验证（30 秒）
+### 3.2 Minimum Verification (30 seconds)
 
 ```bash
-# 启动服务
+# Start the service
 cd /mnt/d/WorkPlace/peerdrive/go
 PORT=3999 PEERDRIVE_STORAGE=/tmp/pd-test go run ./cmd/server/main.go &
 
-# 等待启动
+# Wait for startup
 sleep 3
 
-# 验证
+# Verify
 curl -x "" http://localhost:3999/ping
 # → pong
 
-# 停止
+# Stop
 kill %1
 ```
 
 ---
 
-## 4. 测试套件详解
+## 4. Test Suite Details
 
-### 4.1 Go 单元测试 (`go test ./...`)
+### 4.1 Go Unit Tests (`go test ./...`)
 
-**无需启动服务**，直接运行。
+**No server needed**, run directly.
 
 ```bash
 cd go
 go test ./... -count=1
 ```
 
-| 包 | 测试数 | 覆盖内容 |
-|----|--------|----------|
-| `internal/config` | 10 | Load() 默认值、env 解析、bool 处理、relay mode |
-| `internal/model` | 6 | Collection/AnonCollection 结构体 |
-| `internal/repository` | 5 | FileMeta CRUD、Provider 管理 |
-| `internal/service` | 29 | 文件注册/上传/校验、匿名合集、路径过滤 |
-| `internal/controller` | 17 | Ping、Collection CRUD、Commit/Rollback |
+| Package | Tests | Coverage |
+|---------|-------|----------|
+| `internal/config` | 10 | Load() defaults, env parsing, bool handling, relay mode |
+| `internal/model` | 6 | Collection/AnonCollection structs |
+| `internal/repository` | 5 | FileMeta CRUD, Provider management |
+| `internal/service` | 29 | File register/upload/verify, anonymous collections, path filtering |
+| `internal/controller` | 17 | Ping, Collection CRUD, Commit/Rollback |
 
-预期输出：
+Expected output:
 ```
 ok  peerdrive/internal/config     0.021s
 ok  peerdrive/internal/controller  0.087s
@@ -199,301 +199,301 @@ ok  peerdrive/internal/repository  0.020s
 ok  peerdrive/internal/service     0.314s
 ```
 
-### 4.2 E2E 全端点测试 (`test/e2e-all.sh`)
+### 4.2 E2E All-Endpoint Tests (`test/e2e-all.sh`)
 
-**最重要的一体化测试**，自包含（自己编译、启动、测试、清理）。
+**The most important integrated test**, self-contained (compiles, starts, tests, and cleans up itself).
 
 ```bash
 cd go
 bash test/e2e-all.sh
 ```
 
-**12 个测试段**：
+**12 test segments**:
 
-| # | 段名 | 断言 | 测试内容 |
-|---|------|------|----------|
-| 1 | Health | 2 | 服务启动、返回 pong |
-| 2 | File Upload | 10 | 新文件/重复/已存在/存储路径 |
-| 3 | File Verify | 3 | 合法 hash / 无效 hash |
-| 4 | SHA256 Download | 3 | 下载/比对/404 |
-| 5 | Register Local | 5 | 单文件/重复/文件夹注册 |
-| 6 | Register Folder | 2 | 递归注册/文件数 |
-| 7 | Anonymous Collections | 22 | CRUD/路径穿越/commit/fork/download |
-| 8 | Named Collections | 22 | 创建/条目/版本/rollback |
-| 9 | Fork/Merge/Pull | 4 | Fork/Merge/Pull 操作 |
-| 10 | File Delete | 2 | 删除/后续访问 404 |
-| 11 | Tasks | 2 | 任务列表/不存在任务 |
-| 12 | Edge Cases | 5 | 不存在用户/无效 hash/空 body |
+| # | Segment | Assertions | Test Content |
+|---|---------|-----------|--------------|
+| 1 | Health | 2 | Service starts, returns pong |
+| 2 | File Upload | 10 | New file/duplicate/exists/storage path |
+| 3 | File Verify | 3 | Valid hash / invalid hash |
+| 4 | SHA256 Download | 3 | Download/compare/404 |
+| 5 | Register Local | 5 | Single file/duplicate/folder registration |
+| 6 | Register Folder | 2 | Recursive registration/file count |
+| 7 | Anonymous Collections | 22 | CRUD/path traversal/commit/fork/download |
+| 8 | Named Collections | 22 | Create/entries/versions/rollback |
+| 9 | Fork/Merge/Pull | 4 | Fork/Merge/Pull operations |
+| 10 | File Delete | 2 | Delete/follow-up 404 |
+| 11 | Tasks | 2 | Task list/nonexistent task |
+| 12 | Edge Cases | 5 | Nonexistent user/invalid hash/empty body |
 
-预期输出：`PASS: 84  FAIL: 0  WARN: 1  TOTAL: 85`
+Expected output: `PASS: 84  FAIL: 0  WARN: 1  TOTAL: 85`
 
-> WARN: 空 body `{}` 创建 collection 返回 200（边界行为），不影响功能。
+> WARN: Empty body `{}` creating a collection returns 200 (edge behavior), does not affect functionality.
 
-### 4.3 模块专项测试
+### 4.3 Module-Specific Tests
 
-这些测试假设服务器已在端口 3000 运行。
+These tests assume the server is already running on port 3000.
 
-#### Upload 测试
+#### Upload Tests
 ```bash
-# 先启动服务
+# Start the service first
 PORT=3000 PEERDRIVE_STORAGE=./storage go run ./cmd/server/main.go &
 
-# 运行测试
+# Run tests
 bash test/upload.sh
 ```
-测试：新文件上传(201)、重复上传(200 already_exists)、第二个文件(不同hash)
+Tests: New file upload (201), duplicate upload (200 already_exists), second file (different hash)
 
-#### Register 测试
+#### Register Tests
 ```bash
 bash test/register.sh
 ```
-测试：单文件注册→验证→下载、文件夹递归注册、重复注册幂等性
+Tests: Single file register → verify → download, recursive folder registration, duplicate registration idempotency
 
-#### Anonymous Collection 测试
+#### Anonymous Collection Tests
 ```bash
 bash test/anon-collection.sh
 ```
-测试：创建合集、路径穿越拒绝、获取JSON、下载文件、Fork
+Tests: Create collection, path traversal rejection, fetch JSON, download file, Fork
 
-### 4.4 P2P 双节点测试 (`test/p2p.sh`)
+### 4.4 P2P Two-Node Tests (`test/p2p.sh`)
 
-**自包含**（编译两个节点，分别启动在 3001/3002）。
+**Self-contained** (compiles two nodes, starts them on 3001/3002 respectively).
 
 ```bash
 cd go
 bash test/p2p.sh
 ```
 
-测试流程：
+Test flow:
 1. Node A (3001) ping
 2. Node B (3002) ping
-3. P2P status 验证
-4. mDNS 发现（软断言，10 秒）
-5. A 注册文件 + 创建合集
-6. A 宣告 hash
-7. B 手动 connect 到 A
-8. Peer list 验证
-9. B P2P fetch 获取合集
-10. P2P sync 同步
-11. P2P push 推送
+3. P2P status verification
+4. mDNS discovery (soft assertion, 10 seconds)
+5. A registers file + creates collection
+6. A announces hash
+7. B manually connects to A
+8. Peer list verification
+9. B P2P fetch to get collection
+10. P2P sync
+11. P2P push
 
-环境变量：`PEERDRIVE_P2P_ENABLE=true PEERDRIVE_MDNS_ENABLE=true PEERDRIVE_RELAY_ENABLE=false`
+Environment variables: `PEERDRIVE_P2P_ENABLE=true PEERDRIVE_MDNS_ENABLE=true PEERDRIVE_RELAY_ENABLE=false`
 
-### 4.5 Relay 穿透测试 (`test/relay.sh`)
+### 4.5 Relay Penetration Tests (`test/relay.sh`)
 
-**自包含**，测试 relay 模式下的节点通信。
+**Self-contained**, tests node communication in relay mode.
 
 ```bash
 cd go
 bash test/relay.sh
 ```
 
-测试流程：
-1. Relay 节点 (3001, relay_mode=server) ping
-2. Client 节点 (3002, hole_punch=true) ping
-3. mDNS 发现（软断言）
-4. Client 手动 connect 到 Relay
-5. Peer list 验证
-6. Client 注册文件 + 合集 + 宣告
-7. Relay P2P fetch 获取合集
-8. WS info 端点验证
-9. Request-file 广播
+Test flow:
+1. Relay node (3001, relay_mode=server) ping
+2. Client node (3002, hole_punch=true) ping
+3. mDNS discovery (soft assertion)
+4. Client manually connects to Relay
+5. Peer list verification
+6. Client registers file + collection + announces
+7. Relay P2P fetch to get collection
+8. WS info endpoint verification
+9. Request-file broadcast
 
-### 4.6 BT 全功能测试 (`test/bt-full-test.sh`)
+### 4.6 BT Full Functionality Tests (`test/bt-full-test.sh`)
 
 ```bash
 cd go
 bash test/bt-full-test.sh
-# 预期: 38/38 PASS, 0 FAIL
+# Expected: 38/38 PASS, 0 FAIL
 ```
 
-覆盖：
-- BT DHT 启动/状态/节点数
+Coverage:
+- BT DHT start/status/node count
 - BT Announce / Find
-- BEP 44 Put/Get（不可变数据存储）
-- BEP 51 Sample（DHT 采样）
-- Torrent 解析 / Magnet 解析
-- Wire Protocol handshake / piece 下载
-- BT 下载管理（pause/resume/seed/unseed/delete）
+- BEP 44 Put/Get (immutable data storage)
+- BEP 51 Sample (DHT sampling)
+- Torrent parsing / Magnet parsing
+- Wire Protocol handshake / piece download
+- BT download management (pause/resume/seed/unseed/delete)
 
-### 4.7 WebRTC 信令测试 (`test/webrtc_signal_test.sh`)
+### 4.7 WebRTC Signaling Tests (`test/webrtc_signal_test.sh`)
 
 ```bash
 cd go
 bash test/webrtc_signal_test.sh
-# 预期: 23/23 PASS
+# Expected: 23/23 PASS
 ```
 
-覆盖：注册、房间加入/离开、SDP 交换、ICE 候选、文件宣告/发现、直接消息、3 人房间、房间隔离。
+Coverage: Registration, room join/leave, SDP exchange, ICE candidates, file announce/discovery, direct messages, 3-person rooms, room isolation.
 
-### 4.8 IPFS 全功能测试 (`test/ipfs-full-test.sh`)
+### 4.8 IPFS Full Functionality Tests (`test/ipfs-full-test.sh`)
 
 ```bash
 cd go
 bash test/ipfs-full-test.sh
 ```
 
-覆盖：IPFS CID 索引、Pin/Unpin、网关健康检查、IPFS 兼容模式切换。
+Coverage: IPFS CID indexing, Pin/Unpin, gateway health check, IPFS compatibility mode toggle.
 
-### 4.9 Storage 全功能测试 (`test/storage-full-test.sh`)
+### 4.9 Storage Full Functionality Tests (`test/storage-full-test.sh`)
 
 ```bash
 cd go
 bash test/storage-full-test.sh
 ```
 
-覆盖：SHA256 下载、CID 双索引、文件上传/注册/删除/校验、Range 下载、URL 注册、WebDAV、文件复制。
+Coverage: SHA256 download, CID dual indexing, file upload/register/delete/verify, Range download, URL registration, WebDAV, file copy.
 
-### 4.10 Auth 全功能测试 (`test/auth-full-test.sh`)
+### 4.10 Auth Full Functionality Tests (`test/auth-full-test.sh`)
 
 ```bash
 cd go
 bash test/auth-full-test.sh
-# 预期: 20/20 PASS
+# Expected: 20/20 PASS
 ```
 
-覆盖：用户注册/登录、JWT 验证、Relay 注册/心跳/列表、Group 管理、Comment 系统。
+Coverage: User registration/login, JWT verification, Relay register/heartbeat/list, Group management, Comment system.
 
-### 4.11 前端测试
+### 4.11 Frontend Tests
 
 ```bash
 cd react
 
-# Playwright E2E 测试
+# Playwright E2E tests
 npx playwright test
 
-# Smoke test (16 tests) — 页面加载、元素渲染
-# Functional test (18 tests) — 用户交互流程
+# Smoke test (16 tests) — page load, element rendering
+# Functional test (18 tests) — user interaction flows
 ```
 
 ---
 
-## 5. 手动测试流程
+## 5. Manual Testing Workflow
 
-### 5.1 基础健康检查
+### 5.1 Basic Health Checks
 
 ```bash
-# 1. 确认服务在线
+# 1. Confirm service is online
 curl -x "" http://localhost:3000/ping
 # → pong
 
-# 2. 确认 P2P 运行
+# 2. Confirm P2P is running
 curl -x "" http://localhost:3000/p2p/status | jq
 # → {"enabled":true, "peer_id":"12D3KooW...", "relay_mode":"..."}
 
-# 3. 确认 BT DHT 运行
+# 3. Confirm BT DHT is running
 curl -x "" http://localhost:3000/bt/status | jq
 # → {"enabled":true, "listen_addr":"0.0.0.0:6881", "num_nodes":127}
 ```
 
-### 5.2 文件上传→下载验证
+### 5.2 File Upload → Download Verification
 
 ```bash
-# 1. 创建测试文件
+# 1. Create test file
 echo "Hello Peerdrive Test $(date)" > /tmp/pd-test.txt
 ORIGINAL_SHA256=$(sha256sum /tmp/pd-test.txt | cut -d' ' -f1)
 
-# 2. 上传
+# 2. Upload
 RESULT=$(curl -s -x "" -F "file=@/tmp/pd-test.txt" http://localhost:3000/files/upload)
 HASH=$(echo "$RESULT" | jq -r .hash)
 echo "Hash: $HASH"
 
-# 3. 验证 hash 一致
-test "$HASH" = "$ORIGINAL_SHA256" && echo "✓ Hash 匹配"
+# 3. Verify hash match
+test "$HASH" = "$ORIGINAL_SHA256" && echo "✓ Hash matches"
 
-# 4. 下载
+# 4. Download
 curl -s -x "" -o /tmp/pd-downloaded http://localhost:3000/sha256sum/$HASH
 
-# 5. 内容对比
-diff /tmp/pd-test.txt /tmp/pd-downloaded && echo "✓ 内容一致"
+# 5. Compare content
+diff /tmp/pd-test.txt /tmp/pd-downloaded && echo "✓ Content matches"
 
-# 6. 删除
+# 6. Delete
 curl -s -x "" -X DELETE http://localhost:3000/files/$HASH
 # → 200
 
-# 7. 确认已删除
+# 7. Confirm deleted
 curl -s -x "" -o /dev/null -w "%{http_code}" http://localhost:3000/sha256sum/$HASH
 # → 404
 ```
 
-### 5.3 匿名合集完整流程
+### 5.3 Anonymous Collection Full Flow
 
 ```bash
-# 1. 准备两个文件
+# 1. Prepare two files
 echo "file1" > /tmp/f1.txt
 echo "file2" > /tmp/f2.txt
 H1=$(curl -s -x "" -F "file=@/tmp/f1.txt" http://localhost:3000/files/upload | jq -r .hash)
 H2=$(curl -s -x "" -F "file=@/tmp/f2.txt" http://localhost:3000/files/upload | jq -r .hash)
 
-# 2. 创建合集
+# 2. Create collection
 COLL=$(curl -s -x "" -H "Content-Type: application/json" \
   -d "{\"entries\":[{\"path\":\"a.txt\",\"hash\":\"$H1\"},{\"path\":\"b.txt\",\"hash\":\"$H2\"}],\"friendly_name\":\"Test Coll\"}" \
   -X POST http://localhost:3000/anon/collections)
 COLL_HASH=$(echo "$COLL" | jq -r .hash)
 
-# 3. 获取合集 JSON
+# 3. Fetch collection JSON
 curl -s -x "" http://localhost:3000/anon/collections/$COLL_HASH | jq
 
-# 4. 下载合集内文件
+# 4. Download files from collection
 curl -s -x "" -o /tmp/result http://localhost:3000/anon/collections/$COLL_HASH/entries/a.txt
-diff /tmp/f1.txt /tmp/result && echo "✓ 条目 a.txt 匹配"
+diff /tmp/f1.txt /tmp/result && echo "✓ Entry a.txt matches"
 
-# 5. Fork 合集
+# 5. Fork collection
 FORK=$(curl -s -x "" -H "Content-Type: application/json" \
   -d "{\"source_hash\":\"$COLL_HASH\",\"friendly_name\":\"Forked\",\"remove_paths\":[\"b.txt\"]}" \
   -X POST http://localhost:3000/anon/collections/fork)
 FORK_HASH=$(echo "$FORK" | jq -r .hash)
 
-# 6. 验证 Fork（只剩 a.txt）
+# 6. Verify fork (only a.txt remains)
 curl -s -x "" http://localhost:3000/anon/collections/$FORK_HASH | jq '.entries | length'
 # → 1
 ```
 
-### 5.4 路径穿越防护验证
+### 5.4 Path Traversal Protection Verification
 
 ```bash
-# 应被拒绝（400）
+# Should be rejected (400)
 curl -s -x "" -H "Content-Type: application/json" \
   -d '{"entries":[{"path":"../etc/passwd","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}' \
   -X POST http://localhost:3000/anon/collections | jq
 # → {"error":"path traversal detected: ../etc/passwd"}
 
-# 应被拒绝（400）
+# Should be rejected (400)
 curl -s -x "" -H "Content-Type: application/json" \
   -d '{"path":"/etc/passwd"}' \
   -X POST http://localhost:3000/files/register_local | jq
 ```
 
-### 5.5 P2P 双节点手动测试
+### 5.5 P2P Two-Node Manual Test
 
 ```bash
-# 终端 1 — 启动节点 A (relay)
+# Terminal 1 — Start Node A (relay)
 cd go
 PORT=3001 PEERDRIVE_P2P_ENABLE=true PEERDRIVE_MDNS_ENABLE=true \
   PEERDRIVE_RELAY_ENABLE=true PEERDRIVE_RELAY_MODE=server \
   PEERDRIVE_STORAGE=/tmp/pd-a go run ./cmd/server/main.go
 
-# 终端 2 — 启动节点 B (client)
+# Terminal 2 — Start Node B (client)
 PORT=3002 PEERDRIVE_P2P_ENABLE=true PEERDRIVE_MDNS_ENABLE=true \
   PEERDRIVE_RELAY_ENABLE=true PEERDRIVE_RELAY_MODE=client \
   PEERDRIVE_HOLE_PUNCH=true PEERDRIVE_STORAGE=/tmp/pd-b \
   PEERDRIVE_BOOTSTRAP_PEER="/ip4/127.0.0.1/tcp/<A_P2P_PORT>/p2p/<A_PEER_ID>" \
   go run ./cmd/server/main.go
 
-# 终端 3 — 测试
-# 获取节点信息
+# Terminal 3 — Testing
+# Get node info
 curl -s -x "" http://localhost:3001/p2p/node | jq
 A_ID=$(curl -s -x "" http://localhost:3001/p2p/node | jq -r .peer_id)
 
-# 查看发现的节点
+# View discovered nodes
 curl -s -x "" http://localhost:3001/p2p/discovered | jq
 
-# 节点 B 连接 A
+# Node B connects to A
 curl -s -x "" -H "Content-Type: application/json" \
   -d "{\"peer_id\":\"$A_ID\",\"addrs\":[\"/ip4/127.0.0.1/tcp/<A_P2P_PORT>\"]}" \
   -X POST http://localhost:3002/p2p/connect | jq
 
-# 验证连接
+# Verify connection
 curl -s -x "" http://localhost:3002/p2p/peers | jq
 # → ["<A_PEER_ID>"]
 
@@ -501,7 +501,7 @@ curl -s -x "" http://localhost:3002/p2p/peers | jq
 curl -s -x "" http://localhost:3002/p2p/ping/$A_ID | jq
 # → {"peer":"...","rtt":"1.5ms"}
 
-# 上传文件到 A → 宣告 → B 请求
+# Upload file to A → announce → B requests
 echo "P2P test" > /tmp/p2p-test.txt
 HASH=$(curl -s -x "" -F "file=@/tmp/p2p-test.txt" http://localhost:3001/files/upload | jq -r .hash)
 curl -s -x "" -X POST http://localhost:3001/p2p/announce -d "{\"hash\":\"$HASH\"}" | jq
@@ -509,13 +509,13 @@ curl -s -x "" -X POST http://localhost:3002/p2p/request-file \
   -d "{\"hash\":\"$HASH\",\"peer_ids\":[\"$A_ID\"]}" | jq
 ```
 
-### 5.6 BT 功能手动测试
+### 5.6 BT Functionality Manual Tests
 
 ```bash
-# 1. 查看 BT DHT 状态
+# 1. View BT DHT status
 curl -s -x "" http://localhost:3000/bt/status | jq
 
-# 2. 宣告一个 hash
+# 2. Announce a hash
 HASH="eafb6f737b516be4c8899299b4732f3d54ea5d119ce0571ce6f5cd2d55735275"
 curl -s -x "" -X POST http://localhost:3000/bt/announce \
   -H "Content-Type: application/json" \
@@ -527,7 +527,7 @@ curl -s -x "" -X POST http://localhost:3000/bt/bep44/put \
   -d '{"v":"SGVsbG8gV29ybGQ="}' | jq
 # → {"target":"...","status":"stored locally"}
 
-# 4. BEP 44 Get (用上面返回的 target)
+# 4. BEP 44 Get (using the target returned above)
 TARGET=$(curl -s -x "" -X POST http://localhost:3000/bt/bep44/put \
   -H "Content-Type: application/json" \
   -d '{"v":"SGVsbG8gV29ybGQ="}' | jq -r .target)
@@ -540,301 +540,301 @@ curl -s -x "" -X POST http://localhost:3000/bt/bep44/get \
 curl -s -x "" http://localhost:3000/bt/bep51/sample | jq
 ```
 
-### 5.7 WebRTC 信令手动测试
+### 5.7 WebRTC Signaling Manual Tests
 
 ```bash
-# 1. 获取 WebRTC 配置
+# 1. Get WebRTC configuration
 curl -s -x "" http://localhost:3000/p2p/webrtc/info | jq
 
-# 2. 获取 WebSocket 信息
+# 2. Get WebSocket info
 curl -s -x "" http://localhost:3000/p2p/ws/info | jq
 
-# 3. 使用 wscat 测试信令（需要安装 wscat）
+# 3. Test signaling with wscat (requires wscat installation)
 # npm install -g wscat
 # wscat -c ws://localhost:3000/ws/signal
 ```
 
 ---
 
-## 6. 故障排查
+## 6. Troubleshooting
 
-### 6.1 服务无法启动
+### 6.1 Service Fails to Start
 
-**症状**: `go run ./cmd/server/main.go` 报错或立即退出
+**Symptom**: `go run ./cmd/server/main.go` errors or exits immediately
 
 ```bash
-# 检查端口占用
+# Check port usage
 fuser 3000/tcp
 ss -tlnp | grep 3000
 
-# 杀死占用进程
+# Kill the occupying process
 fuser -k 3000/tcp
 
-# 检查环境变量
+# Check environment variables
 echo $PORT
 echo $PEERDRIVE_STORAGE
 
-# 检查数据库是否损坏
-rm -f go/peerdrive.db  # 警告：会丢失所有注册数据
+# Check if database is corrupted
+rm -f go/peerdrive.db  # Warning: will lose all registered data
 
-# 检查 storage 目录权限
+# Check storage directory permissions
 ls -la go/storage/
 ```
 
-### 6.2 P2P 节点无法互联
+### 6.2 P2P Nodes Cannot Interconnect
 
-**症状**: `GET /p2p/peers` 返回 `[]`
+**Symptom**: `GET /p2p/peers` returns `[]`
 
 ```bash
-# 1. 确认 P2P 已启用
+# 1. Confirm P2P is enabled
 curl -x "" http://localhost:3000/p2p/status | jq .enabled
 # → true
 
-# 2. 确认节点信息正常
+# 2. Confirm node info is normal
 curl -x "" http://localhost:3000/p2p/node | jq
 
-# 3. 检查 mDNS 发现
+# 3. Check mDNS discovery
 curl -x "" http://localhost:3000/p2p/discovered | jq
 
-# 4. 检查防火墙
-# 确保 P2P 端口（通常 40000+）未被防火墙阻止
+# 4. Check firewall
+# Ensure P2P port (usually 40000+) is not blocked by firewall
 sudo ufw status
 
-# 5. 手动连接（使用正确的 multiaddr）
-# 先从目标节点获取 P2P 地址
+# 5. Manual connect (using correct multiaddr)
+# First get P2P address from target node
 curl -x "" http://localhost:<OTHER_PORT>/p2p/node | jq '.addrs'
-# 然后用实际地址连接
+# Then connect with the actual address
 curl -x "" -X POST http://localhost:3000/p2p/connect \
   -H "Content-Type: application/json" \
   -d '{"addr":"/ip4/127.0.0.1/tcp/<PORT>/p2p/<PEER_ID>"}'
 ```
 
-### 6.3 BT DHT 无节点
+### 6.3 BT DHT Has No Nodes
 
-**症状**: `num_nodes: 0`
+**Symptom**: `num_nodes: 0`
 
 ```bash
-# 1. 确认 BT DHT 已启用
+# 1. Confirm BT DHT is enabled
 curl -x "" http://localhost:3000/bt/status | jq .enabled
 
-# 2. 检查网络连接
-# BT DHT 使用 UDP 6881，确保出站 UDP 未被阻止
+# 2. Check network connectivity
+# BT DHT uses UDP 6881, ensure outbound UDP is not blocked
 
-# 3. 等待引导（DHT 加入网络需要 1-2 分钟）
+# 3. Wait for bootstrapping (DHT joining network takes 1-2 minutes)
 sleep 60
 curl -x "" http://localhost:3000/bt/status | jq .num_nodes
 
-# 4. 如果仍然 0，检查系统代理是否拦截了 UDP
-# Privoxy 只代理 HTTP，一般不影响 UDP
+# 4. If still 0, check if system proxy is intercepting UDP
+# Privox only proxies HTTP, generally does not affect UDP
 ```
 
-### 6.4 测试脚本报错
+### 6.4 Test Script Errors
 
-**症状**: `curl: (7) Failed to connect`
+**Symptom**: `curl: (7) Failed to connect`
 
 ```bash
-# 确认服务在运行
+# Confirm service is running
 curl -x "" http://localhost:3000/ping
 
-# 确认端口正确（有些测试用 3001/3002/3999）
+# Confirm correct port (some tests use 3001/3002/3999)
 curl -x "" http://localhost:3999/ping
 
-# 如果使用了代理，添加 -x "" 或 no_proxy='*'
+# If using a proxy, add -x "" or no_proxy='*'
 export no_proxy='*'
 ```
 
-**症状**: `jq: parse error`
+**Symptom**: `jq: parse error`
 
 ```bash
-# 检查响应是否为有效 JSON
+# Check if response is valid JSON
 curl -s -x "" http://localhost:3000/p2p/status
 
-# 如果返回空或 HTML，说明端点不存在或路由未注册
-# 检查路由注册
+# If empty or HTML returned, endpoint doesn't exist or route not registered
+# Check route registration
 grep -n "GET\|POST" go/internal/router/router.go
 ```
 
-### 6.5 编译错误
+### 6.5 Compilation Errors
 
 ```bash
-# 清理 Go 缓存
+# Clean Go cache
 go clean -cache -modcache
 
-# 重新下载依赖
+# Re-download dependencies
 cd go
 go mod tidy
 go mod download
 
-# 检查 Go 版本
-go version  # 需要 >= 1.24
+# Check Go version
+go version  # Requires >= 1.24
 ```
 
-### 6.6 常见 HTTP 状态码
+### 6.6 Common HTTP Status Codes
 
-| 状态码 | 含义 | 常见原因 |
-|--------|------|----------|
-| 200 | 成功 | — |
-| 201 | 创建成功 | — |
-| 206 | 部分内容 | Range 请求 |
-| 400 | 请求错误 | 无效参数、路径穿越 |
-| 401 | 未认证 | 缺少/无效 token |
-| 404 | 不存在 | hash 未找到 |
-| 409 | 冲突 | 合集名重复 |
-| 413 | 内容过大 | 文件超限 |
-| 500 | 服务器错误 | 查看服务日志 |
+| Status Code | Meaning | Common Cause |
+|-------------|---------|--------------|
+| 200 | Success | — |
+| 201 | Created successfully | — |
+| 206 | Partial content | Range request |
+| 400 | Bad request | Invalid parameters, path traversal |
+| 401 | Unauthorized | Missing/invalid token |
+| 404 | Not found | Hash not found |
+| 409 | Conflict | Duplicate collection name |
+| 413 | Content too large | File exceeds limit |
+| 500 | Server error | Check service logs |
 
-### 6.7 日志查看
+### 6.7 Log Viewing
 
 ```bash
-# 查看服务日志（如果有重定向）
+# View service logs (if redirected)
 tail -f /root/p2p.log
 
-# Go 程序的标准输出/错误
-# 如果前台运行，直接看终端输出
+# Go program's stdout/stderr
+# If running in foreground, look at terminal output
 
-# 搜索特定关键词
+# Search for specific keywords
 grep -i "error\|panic\|fatal" /root/p2p.log
 
-# 查看最近 100 行
+# View last 100 lines
 tail -n 100 /root/p2p.log
 ```
 
 ---
 
-## 7. 测试矩阵
+## 7. Test Matrix
 
-完整的测试矩阵请参见 [TEST-MATRIX.md](TEST-MATRIX.md)，覆盖：
+For the complete test matrix, see [TEST-MATRIX.md](TEST-MATRIX.md), covering:
 
-| 类别 | 测试ID范围 | 数量 | 说明 |
-|------|-----------|------|------|
-| 文件系统 | F-01 ~ F-25 | 25 | 上传/注册/下载/删除/验证 |
-| 合集系统 | C-01 ~ C-18 | 18 | 匿名合集/用户合集/版本管理 |
-| P2P 网络 | P-01 ~ P-12 | 12 | libp2p/DHT/Exchange |
-| BitTorrent | B-01 ~ B-16 | 16 | BT DHT/Wire/BEP 标准 |
-| Dual-Stack | D-01 ~ D-03 | 3 | 双栈宣告/查找 |
-| 认证 | R-01 ~ R-08 | 8 | 注册/登录/JWT/Relay |
-| 前端 | UI-01 ~ UI-16 | 16 | 页面加载/交互/错误处理 |
-| 部署运维 | O-01 ~ O-07 | 7 | 编译/部署/Docker/内存 |
-| 真实网络 | I-01 ~ I-04 | 4 | IPFS/BT 公网连通性 |
+| Category | Test ID Range | Count | Description |
+|----------|--------------|-------|-------------|
+| File System | F-01 ~ F-25 | 25 | Upload/register/download/delete/verify |
+| Collection System | C-01 ~ C-18 | 18 | Anonymous collections/user collections/versioning |
+| P2P Network | P-01 ~ P-12 | 12 | libp2p/DHT/Exchange |
+| BitTorrent | B-01 ~ B-16 | 16 | BT DHT/Wire/BEP standards |
+| Dual-Stack | D-01 ~ D-03 | 3 | Dual-stack announce/find |
+| Authentication | R-01 ~ R-08 | 8 | Register/login/JWT/Relay |
+| Frontend | UI-01 ~ UI-16 | 16 | Page load/interaction/error handling |
+| Deployment/Ops | O-01 ~ O-07 | 7 | Build/deploy/Docker/memory |
+| Real Network | I-01 ~ I-04 | 4 | IPFS/BT public connectivity |
 
 ---
 
-## 8. 混沌测试
+## 8. Chaos Testing
 
-在恶劣网络条件下验证 P2P 协议鲁棒性。
+Verify P2P protocol robustness under harsh network conditions.
 
-### 8.1 前置条件
+### 8.1 Prerequisites
 
 ```bash
-# 加载内核模块
+# Load kernel modules
 sudo modprobe sch_netem sch_tbf sch_htb cls_u32
 
-# 安装依赖
+# Install dependencies
 sudo apt-get install iproute2 iptables
 ```
 
-### 8.2 快速使用
+### 8.2 Quick Usage
 
 ```bash
 cd /mnt/d/WorkPlace/peerdrive/go
 
-# 模拟 30% 丢包 + 500ms 延迟 + 1Mbps 带宽
+# Simulate 30% packet loss + 500ms latency + 1Mbps bandwidth
 sudo bash test/chaos-net.sh start --loss 30% --latency 500ms --bandwidth 1Mbps
 
-# 在混沌条件下运行测试
+# Run tests under chaos conditions
 bash test/test-under-chaos.sh --loss 30% --test bt-full-test.sh
 
-# 运行完整混沌矩阵（所有组合）
+# Run full chaos matrix (all combinations)
 bash test/test-under-chaos.sh --matrix
 
-# 停止混沌
+# Stop chaos
 sudo bash test/chaos-net.sh stop
 ```
 
-### 8.3 混沌参数
+### 8.3 Chaos Parameters
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--loss X%` | 0% | 丢包率 |
-| `--latency Xms` | 0ms | 额外延迟 |
-| `--jitter Xms` | 0ms | 延迟抖动 |
-| `--bandwidth X` | unlimited | 带宽限制 |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--loss X%` | 0% | Packet loss rate |
+| `--latency Xms` | 0ms | Extra latency |
+| `--jitter Xms` | 0ms | Latency jitter |
+| `--bandwidth X` | unlimited | Bandwidth limit |
 
-### 8.4 混沌矩阵
+### 8.4 Chaos Matrix
 
-矩阵模式自动测试以下组合：
-- 丢包: 0%, 10%, 30%, 50%
-- 延迟: 0ms, 100ms, 500ms
-- 带宽: unlimited, 1Mbps, 100Kbps
-- 组合: 30% loss + 500ms latency + 100Kbps
+Matrix mode automatically tests the following combinations:
+- Packet loss: 0%, 10%, 30%, 50%
+- Latency: 0ms, 100ms, 500ms
+- Bandwidth: unlimited, 1Mbps, 100Kbps
+- Combination: 30% loss + 500ms latency + 100Kbps
 
-详细文档: [CHAOS_TESTING.md](CHAOS_TESTING.md)
+Detailed documentation: [CHAOS_TESTING.md](CHAOS_TESTING.md)
 
 ---
 
-## 附录 A: 一键启动测试环境
+## Appendix A: One-Click Test Environment Startup
 
 ```bash
 #!/bin/bash
-# 保存为 start-test-env.sh
+# Save as start-test-env.sh
 cd /mnt/d/WorkPlace/peerdrive/go
 export no_proxy='*'
 
-# 清理旧数据库
+# Clean old database
 rm -f peerdrive.db
 
-# 启动服务
+# Start service
 PORT=3000 PEERDRIVE_STORAGE=./storage PEERDRIVE_P2P_ENABLE=true \
   go run ./cmd/server/main.go &
 
 sleep 5
-echo "服务已启动: http://localhost:3000"
+echo "Service started: http://localhost:3000"
 echo "Swagger: http://localhost:3000/swagger/index.html"
-echo "健康检查: $(curl -s -x "" http://localhost:3000/ping)"
+echo "Health check: $(curl -s -x "" http://localhost:3000/ping)"
 ```
 
-## 附录 B: VPS 测试环境
+## Appendix B: VPS Test Environment
 
 ```bash
-# SSH 到 VPS
+# SSH to VPS
 ssh -p26275 root@bwh.moonchan.xyz
 
-# 检查服务状态
+# Check service status
 systemctl status peerdrive-relay
 curl http://127.0.0.1:3000/ping
 curl http://127.0.0.1:3000/p2p/status | python3 -m json.tool
 curl http://127.0.0.1:3000/bt/status | python3 -m json.tool
 
-# 查看日志
+# View logs
 journalctl -u peerdrive-relay -n 50 --no-pager
 
-# 重启服务
+# Restart service
 systemctl restart peerdrive-relay
 ```
 
-## 附录 C: 测试结果模板
+## Appendix C: Test Result Template
 
 ```markdown
-## 测试报告 — YYYY-MM-DD
+## Test Report — YYYY-MM-DD
 
-### 环境
-- 服务版本: <commit hash>
-- 端口: 3000
+### Environment
+- Service version: <commit hash>
+- Port: 3000
 - P2P: enabled / disabled
-- BT DHT: enabled / disabled
+- BT DHT: ena bled / disabled
 
-### 结果
-| 测试套件 | 通过 | 失败 | 总计 |
-|----------|------|------|------|
+### Results
+| Test Suite | Pass | Fail | Total |
+|------------|------|------|-------|
 | go test | | | |
 | e2e-all.sh | | | |
 | bt-full-test.sh | | | |
 | p2p.sh | | | |
 
-### 发现的问题
+### Issues Found
 1. ...
 2. ...
 
-### 备注
+### Notes
 ...
 ```

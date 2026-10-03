@@ -1,48 +1,48 @@
-# Peerdrive 测试管线文档
+# Peerdrive Test Pipeline Document
 
-> 每个测试脚本的流程、预期行为、错误分析、是否需要修改代码
-> 更新: 2026-04-29
+> Flow, expected behavior, error analysis, and whether code changes are needed for each test script
+> Updated: 2026-04-29
 
 ---
 
-## 测试脚本总览
+## Test Script Overview
 
-| 脚本 | 类型 | 断言数 | 端口 | 自包含 |
+| Script | Type | Assertions | Port | Self-contained |
 |------|------|--------|------|--------|
-| `go test ./...` | 单元测试 | 66 | — | ✅ |
-| `test/e2e-all.sh` | E2E 集成 | 85 | 3999 | ✅ |
-| `test/bt-full-test.sh` | BT 专项 | 38 | 3000 | ❌ |
-| `test/p2p-full-test.sh` | P2P 专项 | 35 | 3000 | ❌ |
-| `test/p2p.sh` | P2P 双节点 | 13 | 3001/3002 | ✅ |
-| `test/relay.sh` | Relay 穿透 | 12 | 3001/3002 | ✅ |
-| `test/webrtc_signal_test.sh` | WebRTC 信令 | 23 | 3000 | ❌ |
-| `test/ipfs-full-test.sh` | IPFS 专项 | — | 3000 | ❌ |
-| `test/storage-full-test.sh` | Storage 专项 | 28 | 3000 | ❌ |
-| `test/auth-full-test.sh` | Auth 专项 | 20 | 4000 | ❌ |
-| `test/upload.sh` | 上传测试 | 3 | 3000 | ❌ |
-| `test/register.sh` | 注册测试 | 3 | 3000 | ❌ |
-| `test/anon-collection.sh` | 匿名合集 | 6 | 3000 | ❌ |
-| `test/all.sh` | 一键全模块 | — | 3000 | ❌ |
+| `go test ./...` | Unit test | 66 | — | ✅ |
+| `test/e2e-all.sh` | E2E integration | 85 | 3999 | ✅ |
+| `test/bt-full-test.sh` | BT-specific | 38 | 3000 | ❌ |
+| `test/p2p-full-test.sh` | P2P-specific | 35 | 3000 | ❌ |
+| `test/p2p.sh` | P2P dual-node | 13 | 3001/3002 | ✅ |
+| `test/relay.sh` | Relay traversal | 12 | 3001/3002 | ✅ |
+| `test/webrtc_signal_test.sh` | WebRTC signaling | 23 | 3000 | ❌ |
+| `test/ipfs-full-test.sh` | IPFS-specific | — | 3000 | ❌ |
+| `test/storage-full-test.sh` | Storage-specific | 28 | 3000 | ❌ |
+| `test/auth-full-test.sh` | Auth-specific | 20 | 4000 | ❌ |
+| `test/upload.sh` | Upload test | 3 | 3000 | ❌ |
+| `test/register.sh` | Registration test | 3 | 3000 | ❌ |
+| `test/anon-collection.sh` | Anonymous collection | 6 | 3000 | ❌ |
+| `test/all.sh` | All-in-one modules | — | 3000 | ❌ |
 
 ---
 
-## 1. go test ./... — Go 单元测试
+## 1. go test ./... — Go Unit Tests
 
-### 运行
+### Run
 ```bash
 cd back && go test ./... -count=1
 ```
 
-### 测试段
-| 包 | 测试数 | 覆盖 |
+### Test Segments
+| Package | Tests | Coverage |
 |----|--------|------|
-| config | 10 | Load()、getEnv、getEnvBool、parseRelayMode |
-| model | 6 | Collection/AnonCollection 结构体 |
-| repository | 5 | FileMeta CRUD、Provider 管理 |
-| service | 29 | 文件注册/上传/校验、匿名合集、路径穿越 |
-| controller | 17 | Ping、Collection CRUD、Commit/Rollback |
+| config | 10 | Load(), getEnv, getEnvBool, parseRelayMode |
+| model | 6 | Collection/AnonCollection structs |
+| repository | 5 | FileMeta CRUD, Provider management |
+| service | 29 | File register/upload/verify, anonymous collections, path traversal |
+| controller | 17 | Ping, Collection CRUD, Commit/Rollback |
 
-### 预期输出
+### Expected Output
 ```
 ok  peerdrive/internal/config     0.021s
 ok  peerdrive/internal/controller  0.087s
@@ -51,197 +51,197 @@ ok  peerdrive/internal/repository  0.020s
 ok  peerdrive/internal/service     0.314s
 ```
 
-### 常见错误
+### Common Errors
 
-| 错误 | 可能原因 | 是否需改代码 |
+| Error | Possible cause | Code change needed |
 |------|----------|-------------|
-| `cannot find package` | go.mod 依赖未下载 | 否，运行 `go mod tidy` |
-| `undefined: xxx` | 代码引用了已删除的函数 | 是，检查 import 和函数名 |
-| `FAIL: TestXxx` | 测试逻辑与当前实现不匹配 | 是，检查测试用例是否符合最新 API |
-| `database is locked` | SQLite 并发访问冲突 | 否，单独运行该测试 |
-| `no test files` | 测试文件在非测试目录 | 否，确认 `_test.go` 文件存在 |
+| `cannot find package` | go.mod dependencies not downloaded | No, run `go mod tidy` |
+| `undefined: xxx` | Code references a deleted function | Yes, check imports and function names |
+| `FAIL: TestXxx` | Test logic doesn't match current implementation | Yes, check if test case matches the latest API |
+| `database is locked` | SQLite concurrent access conflict | No, run this test separately |
+| `no test files` | Test file is in a non-test directory | No, confirm `_test.go` file exists |
 
-### 排错步骤
-1. 检查 `go.mod` 是否完整：`go mod tidy`
-2. 查看具体失败：`go test -v ./internal/... 2>&1 | grep FAIL`
-3. 单独运行失败包：`go test -v -run TestXxx ./internal/xxx/`
-4. 检查代码是否被 linter 修改（查看 git diff）
+### Troubleshooting Steps
+1. Check if `go.mod` is complete: `go mod tidy`
+2. View specific failures: `go test -v ./internal/... 2>&1 | grep FAIL`
+3. Run failing package separately: `go test -v -run TestXxx ./internal/xxx/`
+4. Check if code was modified by linter (see git diff)
 
 ---
 
-## 2. test/e2e-all.sh — E2E 全端点测试
+## 2. test/e2e-all.sh — E2E Full Endpoint Test
 
-### 运行
+### Run
 ```bash
 cd back && bash test/e2e-all.sh
 ```
 
-### 测试流程
+### Test Flow
 
 ```
-Phase 1: 编译 peerdrive-server → 启动于 :3999 → 等待 ready
-Phase 2-12: 按序执行 85 条 curl 断言
-Phase 13: kill 进程，清理临时文件
+Phase 1: Compile peerdrive-server → Start on :3999 → Wait for ready
+Phase 2-12: Execute 85 curl assertions in sequence
+Phase 13: Kill process, clean up temp files
 ```
 
-### 12 个测试段详情
+### 12 Test Segment Details
 
-#### 段 1 — Health (2 断言)
+#### Segment 1 — Health (2 assertions)
 - `GET /ping` → 200 "pong"
-- **如果失败**: 进程未启动或端口冲突
-- **排错**: `fuser 3999/tcp` 检查占用，查看编译错误
+- **If fails**: Process not started or port conflict
+- **Troubleshoot**: Use `fuser 3999/tcp` to check for port occupation, view compilation errors
 
-#### 段 2 — File Upload (10 断言)
-- 上传新文件 → 201 + hash + on-disk 验证
-- 重复上传 → 200 + already_exists + 相同 hash
-- 第二个文件 → 不同的 hash
-- **如果失败**: 
-  - 201 失败 → storage 目录权限问题
-  - hash 不匹配 → `hashutil.SHA256` 或 `io.Copy` 问题（需改代码）
-  - on-disk 验证失败 → `c.SaveUploadedFile` 路径问题（需改代码）
+#### Segment 2 — File Upload (10 assertions)
+- Upload new file → 201 + hash + on-disk verification
+- Duplicate upload → 200 + already_exists + same hash
+- Second file → different hash
+- **If fails**: 
+  - 201 failure → storage directory permission issue
+  - hash mismatch → `hashutil.SHA256` or `io.Copy` issue (code change needed)
+  - on-disk verification failure → `c.SaveUploadedFile` path issue (code change needed)
 
-#### 段 3 — File Verify (3 断言)
-- 合法 hash → 200 + 元数据
-- 无效 hash → 400
-- **如果失败**: `/files/verify/:hash` 路由或 `GetFileMeta` 查询问题（需改代码）
+#### Segment 3 — File Verify (3 assertions)
+- Valid hash → 200 + metadata
+- Invalid hash → 400
+- **If fails**: `/files/verify/:hash` route or `GetFileMeta` query issue (code change needed)
 
-#### 段 4 — SHA256 Download (3 断言)
-- 合法 hash → 200 + 内容一致
-- 无效 hash → 404
-- **如果失败**: provider 未找到文件路径或文件被删除
+#### Segment 4 — SHA256 Download (3 assertions)
+- Valid hash → 200 + content matches
+- Invalid hash → 404
+- **If fails**: provider cannot find file path or file was deleted
 
-#### 段 5 — Register Local (5 断言)
-- 注册本地文件 → hash + verify + download
-- 重复注册 → 相同 hash
-- **如果失败**: 路径权限问题或 `RegisterLocal` 逻辑（需改代码）
+#### Segment 5 — Register Local (5 assertions)
+- Register local file → hash + verify + download
+- Duplicate registration → same hash
+- **If fails**: path permission issue or `RegisterLocal` logic (code change needed)
 
-#### 段 6 — Register Folder (2 断言)
-- 注册文件夹 → 返回文件列表
-- **如果失败**: 目录遍历逻辑或权限问题
+#### Segment 6 — Register Folder (2 assertions)
+- Register folder → return file list
+- **If fails**: directory traversal logic or permission issue
 
-#### 段 7 — Anonymous Collections (22 断言)
-- 创建合集 → 路径穿越拒绝 → friendly_name
-- GET 合集 JSON → sha256sum 下载 → entries 下载
+#### Segment 7 — Anonymous Collections (22 assertions)
+- Create collection → path traversal rejected → friendly_name
+- GET collection JSON → sha256sum download → entries download
 - Fork → commit
-- **如果失败**: 
-  - 路径穿越未拒绝 → 安全漏洞（需改代码）
-  - commit 无 version → collection_versions 表问题（需改代码）
+- **If fails**: 
+  - Path traversal not rejected → security vulnerability (code change needed)
+  - commit has no version → collection_versions table issue (code change needed)
 
-#### 段 8 — Named Collections (22 断言)
-- 创建/重复拒/列出/获取/加条目/删条目/下载
+#### Segment 8 — Named Collections (22 assertions)
+- Create/duplicate reject/list/get/add entry/delete entry/download
 - Commit → version → rollback
-- **如果失败**: DB 表或 repository 逻辑问题（需改代码）
+- **If fails**: DB table or repository logic issue (code change needed)
 
-#### 段 9 — Fork/Merge/Pull (4 断言)
-- Fork 创建新合集 → Merge 合并 → Pull 响应
-- **如果失败**: `actions/` 路由或 fork/merge 逻辑（需改代码）
+#### Segment 9 — Fork/Merge/Pull (4 assertions)
+- Fork creates new collection → Merge combines → Pull response
+- **If fails**: `actions/` route or fork/merge logic (code change needed)
 
-#### 段 10 — File Delete (2 断言)
-- 删除成功 → verify 返回 404
-- **如果失败**: 删除逻辑或 DB 事务问题（需改代码）
+#### Segment 10 — File Delete (2 assertions)
+- Delete succeeds → verify returns 404
+- **If fails**: delete logic or DB transaction issue (code change needed)
 
-#### 段 11 — Tasks (2 断言)
-- 任务列表有效 → 不存在任务 404
-- **如果失败**: transfer_tasks 表或 task handler 问题（需改代码）
+#### Segment 11 — Tasks (2 assertions)
+- Task list valid → non-existent task 404
+- **If fails**: transfer_tasks table or task handler issue (code change needed)
 
-#### 段 12 — Edge Cases (5 断言)
-- 不存在用户、空合集、无效 hash、非法 body
-- **如果失败**: 边界条件处理不当（需改代码）
+#### Segment 12 — Edge Cases (5 assertions)
+- Non-existent user, empty collection, invalid hash, malformed body
+- **If fails**: boundary condition handling issue (code change needed)
 
-### 全局排错
-- 脚本需要 `python3` 用于 JSON 解析
-- 端口 3999 必须空闲
-- 系统代理可能干扰 curl，脚本自动设置 `no_proxy='*'`
+### Global Troubleshooting
+- Script requires `python3` for JSON parsing
+- Port 3999 must be free
+- System proxy may interfere with curl; script automatically sets `no_proxy='*'`
 
 ---
 
-## 3. test/bt-full-test.sh — BitTorrent 全功能测试
+## 3. test/bt-full-test.sh — BitTorrent Full Feature Test
 
-### 运行
+### Run
 ```bash
-# 先启动服务
+# Start service first
 PEERDRIVE_BT_DHT_ENABLE=true go run ./cmd/server/main.go &
-# 再测试
+# Then test
 bash test/bt-full-test.sh
 ```
 
-### 测试段
+### Test Segments
 
-| # | 测试 | 预期 |
+| # | Test | Expected |
 |---|------|------|
-| 1 | BT DHT 状态 | enabled:true, num_nodes > 0 |
+| 1 | BT DHT status | enabled:true, num_nodes > 0 |
 | 2 | BT Announce | status:"announced on BT DHT" |
-| 3 | BT Find (self) | 找到自己的宣告 |
-| 4 | BT Find (cross) | A 宣告 → B find → count >= 1 |
-| 5 | BEP 44 Put | 返回 target hash |
-| 6 | BEP 44 Get | 数据往返一致 (base64) |
-| 7 | BEP 51 Sample | 返回 sample 数组 |
+| 3 | BT Find (self) | Find own announcement |
+| 4 | BT Find (cross) | A announces → B finds → count >= 1 |
+| 5 | BEP 44 Put | Returns target hash |
+| 6 | BEP 44 Get | Data round-trip consistent (base64) |
+| 7 | BEP 51 Sample | Returns sample array |
 | 8 | Torrent Parse | name/pieces/size/infohash |
 | 9 | Magnet Parse | infohash/name/trackers |
-| 10 | Wire Handshake | 协议握手成功 |
-| 11 | Piece Download | SHA1 验证通过 |
-| 12 | Full Download | SHA256 最终匹配 |
+| 10 | Wire Handshake | Protocol handshake succeeds |
+| 11 | Piece Download | SHA1 verification passes |
+| 12 | Full Download | SHA256 final match |
 
-### 常见错误
+### Common Errors
 
-| 错误 | 可能原因 | 是否需改代码 |
+| Error | Possible cause | Code change needed |
 |------|----------|-------------|
-| `num_nodes: 0` | UDP 6881 被防火墙阻止 / DHT 引导需要 1-2 分钟 | 否，等 2 分钟后重试 |
-| `BEP44 put: 500` | DHT 远程节点不支持 BEP44 | 否，已修复为本地回退 |
-| `BEP44 get: not found` | 数据未存入 DHT（孤立节点） | 否，检查 BEP44 localBEP44Store |
-| `Wire handshake timeout` | Seeder 未启动或端口错误 | 否，检查 Python seeder 进程 |
-| `SHA1 mismatch` | Piece 下载损坏 | 是，检查 piece.go 验证逻辑 |
+| `num_nodes: 0` | UDP 6881 blocked by firewall / DHT bootstrap takes 1-2 minutes | No, wait 2 minutes and retry |
+| `BEP44 put: 500` | DHT remote node doesn't support BEP44 | No, fixed with local fallback |
+| `BEP44 get: not found` | Data not stored in DHT (isolated node) | No, check BEP44 localBEP44Store |
+| `Wire handshake timeout` | Seeder not started or wrong port | No, check Python seeder process |
+| `SHA1 mismatch` | Piece download corrupted | Yes, check piece.go verification logic |
 
-### 排错步骤
-1. 确认服务运行: `curl localhost:3000/bt/status`
-2. 确认 DHT 有节点: 等 60 秒后重查 `num_nodes`
-3. BEP44 问题: 检查 `internal/p2p_bt/bep44.go` 的 `localBEP44Store`
-4. Wire 问题: 启动 Python seeder: `python3 test/bt-integration/bt-listener.py`
+### Troubleshooting Steps
+1. Confirm service is running: `curl localhost:3000/bt/status`
+2. Confirm DHT has nodes: wait 60 seconds and recheck `num_nodes`
+3. BEP44 issue: check `localBEP44Store` in `internal/p2p_bt/bep44.go`
+4. Wire issue: start Python seeder: `python3 test/bt-integration/bt-listener.py`
 
 ---
 
-## 4. test/p2p.sh — P2P 双节点测试
+## 4. test/p2p.sh — P2P Dual-Node Test
 
-### 运行
+### Run
 ```bash
 cd back && bash test/p2p.sh
 ```
 
-### 测试流程
-1. 编译两个节点
-2. 启动 Node A (:3001) 和 Node B (:3002)
-3. 等待 mDNS 发现 (10s)
-4. Node A 注册文件 + 创建合集
-5. Node B 连接 A + P2P fetch + sync
-6. 清理进程
+### Test Flow
+1. Compile two nodes
+2. Start Node A (:3001) and Node B (:3002)
+3. Wait for mDNS discovery (10s)
+4. Node A registers file + creates collection
+5. Node B connects to A + P2P fetch + sync
+6. Clean up processes
 
-### 常见错误
+### Common Errors
 
-| 错误 | 可能原因 | 是否需改代码 |
+| Error | Possible cause | Code change needed |
 |------|----------|-------------|
-| 编译失败 | libp2p 依赖缺失 | 否，`go mod tidy` |
-| mDNS 未发现 (WARN) | 防火墙/网络隔离 | 否，软断言不 FAIL |
-| connect 失败 | 端口错误或 peer_id 不匹配 | 否，检查 multiaddr |
-| fetch 失败 | 合集未宣告或 DHT 无记录 | 否，检查 announce 状态 |
-| sync 返回 0 | 文件不在目标节点 | 否，确认文件已在 A 上注册 |
-| 端口冲突 | 3001/3002 被占用 | 否，`fuser -k 3001/tcp` |
+| Compilation failure | libp2p dependency missing | No, `go mod tidy` |
+| mDNS not discovered (WARN) | Firewall/network isolation | No, soft assertion doesn't FAIL |
+| connect failure | Wrong port or peer_id mismatch | No, check multiaddr |
+| fetch failure | Collection not announced or no DHT record | No, check announce status |
+| sync returns 0 | File not on target node | No, confirm file is registered on A |
+| Port conflict | 3001/3002 occupied | No, `fuser -k 3001/tcp` |
 
 ---
 
-## 5. test/relay.sh — Relay 穿透测试
+## 5. test/relay.sh — Relay Traversal Test
 
-### 运行
+### Run
 ```bash
 cd back && bash test/relay.sh
 ```
 
-### 测试流程
-1. Relay 节点 (:3001, relay_mode=server)
-2. Client 节点 (:3002, hole_punch=true)
-3. Client 连接 Relay → P2P fetch → WS info
-4. 清理
+### Test Flow
+1. Relay node (:3001, relay_mode=server)
+2. Client node (:3002, hole_punch=true)
+3. Client connects to Relay → P2P fetch → WS info
+4. Cleanup
 
-### 环境变量
+### Environment Variables
 ```bash
 PEERDRIVE_RELAY_ENABLE=true
 PEERDRIVE_RELAY_MODE=server  # or client
@@ -249,104 +249,104 @@ PEERDRIVE_HOLE_PUNCH=true
 PEERDRIVE_AUTO_NAT=true
 ```
 
-### 常见错误
+### Common Errors
 
-| 错误 | 可能原因 | 是否需改代码 |
+| Error | Possible cause | Code change needed |
 |------|----------|-------------|
-| relay_mode 不是 server | 环境变量未正确设置 | 否 |
-| Client 无法连接 Relay | 网络不可达或 peer_id 错误 | 否，检查地址 |
-| Hole punch 失败 | NAT 类型为对称型 | 否，对称 NAT 无法打洞 |
-| WS info 为空 | WebSocket 服务未初始化 | 是，检查 p2p_ws.go |
+| relay_mode is not server | Environment variable not set correctly | No |
+| Client cannot connect to Relay | Network unreachable or wrong peer_id | No, check address |
+| Hole punch failure | NAT type is symmetric | No, symmetric NAT cannot hole-punch |
+| WS info is empty | WebSocket service not initialized | Yes, check p2p_ws.go |
 
 ---
 
-## 6. test/webrtc_signal_test.sh — WebRTC 信令测试
+## 6. test/webrtc_signal_test.sh — WebRTC Signaling Test
 
-### 运行
+### Run
 ```bash
-# 服务在 :3000 运行
+# Service running on :3000
 bash test/webrtc_signal_test.sh
 ```
 
-### 测试段 (23 项)
-- 注册 (echo 消息往返)
-- 房间加入/离开
-- SDP Offer/Answer 交换
-- ICE 候选转发
-- 文件宣告/发现
-- 直接消息 (unicast)
-- 3 人房间
-- 房间隔离
+### Test Segments (23 items)
+- Register (echo message round-trip)
+- Room join/leave
+- SDP Offer/Answer exchange
+- ICE candidate forwarding
+- File announce/discover
+- Direct messages (unicast)
+- 3-person room
+- Room isolation
 
-### 常见错误
+### Common Errors
 
-| 错误 | 可能原因 | 是否需改代码 |
+| Error | Possible cause | Code change needed |
 |------|----------|-------------|
-| 注册失败 | SignalingHub 未初始化 | 是，检查 router.go 中 InitSignalHub |
-| 房间消息未到达 | broadcast 逻辑 bug | 是，检查 signaling.go exclude 参数 |
-| SDP 交换失败 | WebSocket 消息格式错误 | 否，检查 JSON 格式 |
-| panic: slice bounds | hash/room 名称过短 | 是，已修复 — 检查 length >= 16 |
+| Registration failure | SignalingHub not initialized | Yes, check InitSignalHub in router.go |
+| Room messages not received | broadcast logic bug | Yes, check exclude parameter in signaling.go |
+| SDP exchange failure | WebSocket message format error | No, check JSON format |
+| panic: slice bounds | hash/room name too short | Yes, fixed — check length >= 16 |
 
 ---
 
-## 7. test/storage-full-test.sh — Storage 全功能
+## 7. test/storage-full-test.sh — Storage Full Feature
 
-### 运行
+### Run
 ```bash
-# 服务在 :3000 运行
+# Service running on :3000
 bash test/storage-full-test.sh
 ```
 
-### 测试覆盖
-- SHA256 下载 / CID 双索引
-- 文件上传 / 注册 / 删除 / 校验
-- Range (HTTP 206) 下载
-- URL 文件注册 / WebDAV / 文件复制
+### Test Coverage
+- SHA256 download / CID dual index
+- File upload / register / delete / verify
+- Range (HTTP 206) download
+- URL file registration / WebDAV / file copy
 
-### 已知问题 (4 failures)
-- Collection get 返回格式不一致
-- Share token 创建后无法访问
-- CID 查询部分场景失败
-- 这些是已知 bug，不改测试脚本，需要改代码
+### Known Issues (4 failures)
+- Collection get returns inconsistent format
+- Share token not accessible after creation
+- CID queries fail in some scenarios
+- These are known bugs; don't change test scripts, code changes needed
 
 ---
 
-## 8. 测试失败分类处理指南
+## 8. Test Failure Categorization Guide
 
-### 不需要改代码（环境/配置问题）
-- 端口占用 → `fuser -k PORT/tcp`
-- 代理干扰 → `export no_proxy='*'`
-- 编译错误 → `go mod tidy`
-- 权限问题 → `chmod` / `sudo`
-- 数据库锁 → 单独重跑
+### No code change needed (environment/config issues)
+- Port occupied → `fuser -k PORT/tcp`
+- Proxy interference → `export no_proxy='*'`
+- Compilation error → `go mod tidy`
+- Permission issue → `chmod` / `sudo`
+- Database lock → rerun separately
 
-### 需要改测试脚本
-- API 路径变更
-- 返回格式变更
-- 新增必需参数
-- 超时时间不足
+### Test script changes needed
+- API path changes
+- Return format changes
+- New required parameters
+- Insufficient timeout
 
-### 需要改代码
-- HTTP 500 错误
-- 返回数据不正确
-- 安全漏洞（路径穿越、注入）
+### Code changes needed
+- HTTP 500 errors
+- Incorrect return data
+- Security vulnerabilities (path traversal, injection)
 - Panic / nil pointer
-- 断言失败但 API 返回看起来正确
+- Assertion fails but API response looks correct
 
 ---
 
-## 9. 添加新测试的规范
+## 9. Guidelines for Adding New Tests
 
-1. Shell 脚本放在 `go/test/<name>.sh`
-2. 脚本顶部添加注释说明测试目的
-3. 使用 `curl -x ""` 绕过系统代理
-4. 使用 `jq` 或 `python3 -c` 解析 JSON
-5. 使用 `|| echo "FAIL: ..."` 标记失败
-6. 清理临时文件和进程
-7. 避免依赖特定文件路径（使用 `/tmp/`）
-8. 测试结果保存到 `go/test/<name>-results.txt`
+1. Place shell scripts in `go/test/<name>.sh`
+2. Add comments at the top of the script describing the test purpose
+3. Use `curl -x ""` to bypass the system proxy
+4. Use `jq` or `python3 -c` to parse JSON
+5. Use `|| echo "FAIL: ..."` to mark failures
+6. Clean up temp files and processes
+7. Avoid depending on specific file paths (use `/tmp/`)
+8. Save test results to `go/test/<name>-results.txt`
 
-### 模板
+### Template
 ```bash
 #!/bin/bash
 # Test: <description>
