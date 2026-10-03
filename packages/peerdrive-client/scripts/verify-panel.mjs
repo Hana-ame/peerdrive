@@ -229,7 +229,7 @@ if (putDone) {
 await page.fill('#in-url', 'http://127.0.0.1:' + SIG.port + '/status')
 await page.locator('#btn-pull').click()
 const rejected = await waitLog(/网络?入库失败|抓取 http:\/\/127\.0\.0\.1.*失败/, 45000)
-const whyBool = rejected ? /内网|本机|private|loopback/i.test(await logText()) : false
+const whyBool = rejected ? /内网|本机|private|loopback|internal\/local address is forbidden/i.test(await logText()) : false
 rejected && whyBool
   ? ok('网络入库对内网地址被节点拒绝（SSRF 防护生效）')
   : bad(rejected ? '网络入库失败了，但不是 SSRF 拒绝（原因见日志）' : '网络入库既没成功也没报错')

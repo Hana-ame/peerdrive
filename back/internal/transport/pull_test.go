@@ -89,7 +89,7 @@ func TestPull_RejectsNonHTTP(t *testing.T) {
 		}))
 		h, ok := waitSent(sess, "err", 2*time.Second)
 		require.True(t, ok, "%s should be rejected", raw)
-		assert.Contains(t, h["msg"], "only http/https is supported", "%s rejection reason should be clear", raw)
+		assert.Contains(t, h["msg"], "only http/https supported", "%s rejection reason should be clear", raw)
 	}
 }
 
@@ -205,7 +205,7 @@ func TestPull_SizeCap(t *testing.T) {
 
 	h, ok := waitSent(sess, "err", 5*time.Second)
 	require.True(t, ok, "exceeding the cap must error, not truncate and store")
-	assert.Contains(t, h["msg"].(string), "cap")
+	assert.Contains(t, h["msg"].(string), "exceeds this node's limit")
 
 	// A leftover half-file would cause subsequent same-name uploads/Create to misjudge,
 	// so it must be cleaned up

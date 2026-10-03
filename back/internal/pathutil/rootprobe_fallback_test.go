@@ -51,7 +51,7 @@ func TestRootFallback_FailClosedThenWorks(t *testing.T) {
 	// 1) default fail closed, and the error message points to the next step
 	err := SafeWriteFileAny([]string{root}, target, []byte("x"), 0o644)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "filesystem not supported")
+	assert.Contains(t, err.Error(), "does not support directory handle constraints")
 	assert.Contains(t, err.Error(), "PEERDRIVE_ROOT_FALLBACK=1", "should tell operators how to proceed")
 	_, sterr := os.Stat(target)
 	assert.True(t, os.IsNotExist(sterr), "must not write anything when fail closed")
