@@ -1,20 +1,20 @@
-// client.js — peerdrive pure browser consumer: connects to a peerdrive node, lists its shared
-// content and fetches files. **Zero dependencies**, no local backend required.
+// client.js — peerdrive 纯浏览器消费端：连上一个 peerdrive 节点，列出它共享的
+// 内容并拉取文件。**零依赖**，不要求本地跑任何后端。
 //
-// Positioning (complements the back /peerjs/* client path):
-//   - Backend nodes (Go) interconnect using the same frame protocol, are "producers/holders";
-//   - This package is a **pure consumer**: a browser page (or any environment with WebRTC DataChannel)
-//     connects directly to a node, uses share frames to see the manifest, and req frames to fetch content.
-//     Corresponds to the requirement "webrtc pure client consumer, can fetch files from this p2p network".
+// 定位（与 back 的 /peerjs/* 客户端路径互补）：
+//   - 后端节点（Go）之间用同一套帧协议互联，是"生产方/持有方"；
+//   - 本包是**纯消费端**：一个浏览器页面（或任何有 WebRTC DataChannel 的环境）
+//     直连节点，走 share 帧看清单、走 req 帧拉内容。对应需求里那句
+//     "webrtc 纯 client 消费端，可以从这个 p2p 网络拉取文件"。
 //
-// Transport-agnostic design: this class doesn't know PeerJS. It only requires the passed-in object to satisfy
+// 传输无关设计：本类不认识 PeerJS。它只要求传进来的对象满足
 //   { on(type, cb), send(data), open?: boolean, close?() }
-// —— PeerJS's DataConnection naturally satisfies this. Benefits:
-//   1. Package has zero dependencies, doesn't add peerjs to the consumer's bundle size;
-//   2. Tests can cover the entire state machine with fake connections (no real WebRTC/signaling server needed);
-//   3. Future transport swaps (raw RTCPeerConnection / WebTransport) don't require changing this file.
+// —— PeerJS 的 DataConnection 天然满足。这样做的好处：
+//   1. 包本身零依赖，不把 peerjs 塞进使用方的打包体积；
+//   2. 测试用假连接即可覆盖全部状态机（不需要真 WebRTC/信令服务器）；
+//   3. 将来换传输（裸 RTCPeerConnection / WebTransport）不必改这个文件。
 //
-// Frame protocol details in src/protocol.js header comments (aligned word-for-word with Go-side conn.go).
+// 帧协议细节见 src/protocol.js 顶部注释（与 Go 侧 conn.go 逐字对齐）。
 
 import { Sha256 } from './sha256.js'
 import {
@@ -35,23 +35,23 @@ import {
   toUint8Array,
   uploadFrame,
 } from './protocol.js'
-// Note: don't re-export PSK_REQUIRED here — index.js is
-// `export * from './protocol.js'` + `export * from './client.js'`, star-exporting the same name
-// from two places creates "ambiguous export" and actually disappears from the package entry.
+// 注意：不要在这里再 re-export PSK_REQUIRED —— index.js 是
+// `export * from './protocol.js'` + `export * from './client.js'`，同一个名字
+// 从两处 star-export 出来会变成"歧义导出"，反而从包入口消失。
 
-/** Error codes. UI branches by code, don't match message text. */
+/** 错误码。UI 按 code 分支，不要去匹配 message 文案。 */
 export const ERR = {
-  INVALID_HASH: 'INVALID_HASH', // hash not 64 lowercase hex (blocked locally, no request sent)
-  TOO_LARGE: 'TOO_LARGE', // exceeds maxBufferBytes / protocol limit 8GB
-  HASH_MISMATCH: 'HASH_MISMATCH', // content doesn't match hash (peer data corrupted or tampered)
-  INCOMPLETE: 'INCOMPLETE', // bytes declared in peer's done don't match actual received
-  TIMEOUT: 'TIMEOUT', // idle timeout (peer stuck/connection half-dead)
-  CLOSED: 'CLOSED', // connection closed
-  PROTOCOL: 'PROTOCOL', // frame invalid (peer implements a different protocol)
-  PEER: 'PEER', // peer returned err frame (not found / unauthorized / read failure…)
-  CANCELLED: 'CANCELLED', // local cancellation (abort / early break in iteration)
-  // PSK_REQUIRED: peer has pre-shared key auth, and we didn't present (or presented wrong) one.
-  // Separate code because its remediation is "enter the key", completely different from "file not found".
+  INVALID_HASH: 'INVALID_HASH', // hash 不是 64 位小写 hex（本地就拦，不发请求）
+  TOO_LARGE: 'TOO_LARGE', // 超出 maxBufferBytes / 协议上限 8GB
+  HASH_MISMATCH: 'HASH_MISMATCH', // 内容与 hash 不符（对端数据损坏或被篡改）
+  INCOMPLETE: 'INCOMPLETE', // 对端 done 声明的字节数与实际收到的不一致
+  TIMEOUT: 'TIMEOUT', // 空闲超时（对端卡死/连接半死）
+  CLOSED: 'CLOSED', // 连接关闭
+  PROTOCOL: 'PROTOCOL', // 帧不合法（对端实现了别的协议）
+  PEER: 'PEER', // 对端回了 err 帧（not found / 越权 / 读失败…）
+  CANCELLED: 'CANCELLED', // 本地取消（abort / 迭代提前 break）
+  // PSK_REQUIRED：对端开了预共享密钥门禁，而我没有出示（或出示错了）。
+  // 单独成码是因为它的修复动作是"去填密钥"，跟"文件不存在"完全不同。
   PSK_REQUIRED: 'PSK_REQUIRED',
 }
 
@@ -65,19 +65,17 @@ export class PeerDriveError extends Error {
 }
 
 const DEFAULTS = {
-  // Idle timeout: how long without receiving any frame for this request before declaring dead.
-  // Go-side is 5 minutes (server patience), consumer side takes smaller — users staring at a
-  // frozen progress bar for 5 minutes is worse UX.
+  // 空闲超时：多久没收到该请求的任何帧就判死。Go 侧是 5 分钟（服务端耐心），
+  // 消费端取小一些——用户盯着一个不动的进度条等 5 分钟是更差的体验。
   idleTimeoutMs: 120_000,
   openTimeoutMs: 20_000,
-  verbTimeoutMs: 15_000, // same as Go-side verbWaitTimeout (share-type small JSON responses)
+  verbTimeoutMs: 15_000, // 与 Go 侧 verbWaitTimeout 一致（share 这类小 JSON 应答）
   maxBufferBytes: DEFAULT_MAX_BUFFER_BYTES,
 }
 
 /**
- * ChunkQueue bridges "push-mode" frame callbacks into "pull-mode" async iteration.
- * stream() uses it for backpressure: if the consumer doesn't take, chunks stay in the queue
- * (instead of infinitely filling memory).
+ * ChunkQueue 把「推模式」的帧回调桥接成「拉模式」的 async 迭代。
+ * stream() 用它做背压：消费端不取，块就停在队列里（而不是无限堆内存）。
  */
 class ChunkQueue {
   constructor() {
@@ -99,8 +97,8 @@ class ChunkQueue {
   }
 
   abort(err) {
-    // On failure discard cached chunks: no one will consume them, keeping them only holds memory
-    // (typical scenario: TOO_LARGE triggers mid-stream, queue may already hold tens of MB)
+    // 失败时把已缓存块丢掉：不会再有人消费它们，留着只会拖住内存
+    // （典型场景：TOO_LARGE 在中途触发，队列里可能已经压着几十 MB）
     this.buf.length = 0
     this._settle(err)
   }
@@ -119,42 +117,41 @@ class ChunkQueue {
   }
 }
 
-/** Consumer client: one instance per connection. */
+/** 消费端客户端：一条连接一个实例。 */
 export class PeerDriveClient {
   constructor(conn, opts = {}) {
     if (!conn || typeof conn.send !== 'function' || typeof conn.on !== 'function') {
-      throw new TypeError('peerdrive-client: conn must implement { on(type, cb), send(data) }')
+      throw new TypeError('peerdrive-client: conn 需实现 { on(type, cb), send(data) }')
     }
     this.conn = conn
     this.opts = { ...DEFAULTS, ...opts }
     this.peerId = conn.peer || conn.peerId || opts.peerId || ''
     this.stats = { requests: 0, chunks: 0, bytes: 0, failures: 0 }
 
-    // PSK auth state (doc/NETDISK.md "PSK Auth"):
-    //   none = no key configured (if peer has auth, will receive PSK_REQUIRED error)
-    //   sent = presented, waiting for peer acknowledgment (don't wait for it before sending business frames,
-    //          rely on DataChannel ordering)
-    //   ok   = peer accepted; err = peer rejected (wrong key), pskError is its msg
+    // PSK 门禁状态（doc/NETDISK.md「PSK 门禁」）：
+    //   none = 没配密钥（对端若开了门禁，会收到 PSK_REQUIRED 错误）
+    //   sent = 已出示，等对端回执（不等它就开始发业务帧，靠 DataChannel 保序）
+    //   ok   = 对端认可；err = 对端拒绝（密钥不对），pskError 是它的 msg
     this.psk = typeof opts.psk === 'string' ? opts.psk : ''
     this.pskState = this.psk ? 'pending' : 'none'
     this.pskError = null
 
-    this._pend = new Map() // reqId → fetch state
-    this._verbs = new Map() // reqId → one-shot response wait slot (share/pull etc.)
-    this._uploads = new Map() // reqId → upload session (local ingest)
-    this._expect = null // connection-level expect: next binary block belongs to whom (see protocol.js constraint 2)
+    this._pend = new Map() // reqId → 拉取状态
+    this._verbs = new Map() // reqId → 一次性应答等待槽（share/pull 等）
+    this._uploads = new Map() // reqId → 上传会话（本地入库）
+    this._expect = null // 连接级 expect：下一个二进制块归谁（见 protocol.js 约束 2）
     this._openWaiters = []
     this._closeErr = null
-    this._openState = conn.open === true ? true : null // null = unknown
+    this._openState = conn.open === true ? true : null // null = 未知
     this._ownedPeer = null
     this._bind()
-    // Connections already open when passed in won't fire 'open' event again, send here to compensate
+    // 传入时就已经打开的连接不会再来一次 'open' 事件，这里补发
     if (conn.open === true) this._sendPskAuth()
   }
 
   /**
-   * _sendPskAuth presents pre-shared key (only if configured, and must be the first frame from this side).
-   * See protocol.js's pskAuthFrame comments: relies on DataChannel ordering, don't wait for acknowledgment.
+   * _sendPskAuth 出示预共享密钥（配了才发，且必须是本端第一帧）。
+   * 见 protocol.js 的 pskAuthFrame 注释：靠 DataChannel 保序，不等回执。
    */
   _sendPskAuth() {
     if (!this.psk || this.pskState !== 'pending') return
@@ -162,7 +159,7 @@ export class PeerDriveClient {
       this.conn.send(pskAuthFrame(this.psk))
       this.pskState = 'sent'
     } catch {
-      this.pskState = 'none' // can't send, treat as not configured: let peer tell us via err
+      this.pskState = 'none' // 发不出去就当没配：让对端用 err 告诉我们
     }
   }
 
@@ -171,18 +168,18 @@ export class PeerDriveClient {
   }
 
   /**
-   * localPeerId our temporary id on signaling — UI displays "who am I" using this.
+   * localPeerId 本端在信令上的临时 id —— UI 显示"我是谁"要用这个。
    *
-   * Discovery: the panel first version displayed `conn.peer` as its own id, but the screen showed the
-   * peer's node name (DataConnection.peer refers to the **remote**). When using connectToPeer to
-   * connect, our local Peer is held by this class, so we get it from there; when not created by this class
-   * (externally passed conn), can only return empty string, caller should hold the Peer instance themselves.
+   * 发现背景：面板第一版把 `conn.peer` 当成自己的 id 显示，结果屏幕上写着对方的
+   * 节点名（DataConnection.peer 指的是**远端**）。用 connectToPeer 建连时本端 Peer
+   * 由本类持有，所以这里从它取；不是本类创建时（外部传入 conn）只能返回空串，
+   * 调用方应自行持有 Peer 实例。
    */
   get localPeerId() {
     return (this._ownedPeer && this._ownedPeer.id) || ''
   }
 
-  /** ready waits for connection ready. Resolves immediately if already ready. */
+  /** ready 等连接就绪。已就绪则立即 resolve。 */
   ready(timeoutMs = this.opts.openTimeoutMs) {
     if (this._closeErr) return Promise.reject(this._closeErr)
     if (this._openState === true) return Promise.resolve(this)
@@ -192,25 +189,24 @@ export class PeerDriveClient {
       if (timeoutMs > 0) {
         entry.timer = setTimeout(() => {
           this._openWaiters = this._openWaiters.filter((w) => w !== entry)
-          reject(new PeerDriveError(`Connection not established within ${timeoutMs}ms`, ERR.TIMEOUT))
+          reject(new PeerDriveError(`连接未在 ${timeoutMs}ms 内建立`, ERR.TIMEOUT))
         }, timeoutMs)
       }
     })
   }
 
   /**
-   * shares queries peer's share manifest (the last step of "node marketplace → join node → see file links").
-   * Returns {collections, files, dirs, total}.
+   * shares 查询对端的共享清单（「节点市场 → 加入节点 → 看到文件链接」里的
+   * 最后一步）。返回 {collections, files, dirs, total}。
    *
-   * Semantics reminder: empty manifest is a **valid result** (peer hasn't enabled sharing / declared
-   * any directories), not an error — UI should render "this node has no shared content". Peer really
-   * fails only via PEER/TIMEOUT.
+   * 语义提醒：空清单是**合法结果**（对方没开启共享 / 没声明任何目录），不是
+   * 错误——UI 应当渲染"该节点没有共享内容"。对端真的失败才走 PEER/TIMEOUT。
    */
   async shares({ timeoutMs = this.opts.verbTimeoutMs } = {}) {
     const reqId = nextReqId()
     const frame = await this._requestVerb(reqId, shareFrame(reqId), timeoutMs)
     if (!frame || frame.type !== 'share-resp') {
-      throw new PeerDriveError('Peer share response format abnormal (peer may not be a peerdrive node)', ERR.PROTOCOL)
+      throw new PeerDriveError('对端 share 应答格式异常（对端可能不是 peerdrive 节点）', ERR.PROTOCOL)
     }
     const collections = Array.isArray(frame.collections) ? frame.collections : []
     const files = Array.isArray(frame.files) ? frame.files : []
@@ -224,16 +220,15 @@ export class PeerDriveClient {
   }
 
   /**
-   * put puts content into the node's library (**local ingest**).
+   * put 把一段内容放进节点的库里（**本地入库**）。
    *
-   * Uses Go-side upload verb: send header → wait meta → send binary chunks → wait ack,
-   * progressing chunk by chunk until server returns uploaded{hash,size,path}. The back-and-forth
-   * acknowledgment rather than one-shot: the receiver needs to flush to disk at its own pace
-   * (flow control is the receiver's call, see protocol.js's uploadFrame comments), and only one
-   * upload can be in progress on this connection at a time.
+   * 走的 Go 侧 upload 动词：发头 → 等 meta → 发二进制分片 → 等 ack，
+   * 逐片推进直到服务端回 uploaded{hash,size,path}。之所以要来回确认而不是一次
+   * 灌过去：接收方要按自己的节奏落盘（流控由它说了算，见 protocol.js 的
+   * uploadFrame 注释），而且这条连接上同时只能有一个上传在进行。
    *
-   * Returns {hash,size,name,path} — hash is the content address, can fetch back with fetch() later.
-   * Note default maxPutBytes gate: for oversized content, slice it yourself first or use another channel.
+   * 返回 {hash,size,name,path}——hash 就是内容地址，之后能用 fetch() 拉回来。
+   * 注意默认 maxPutBytes 闸门：超大内容请先自己切片或改走别的通道。
    *
    * @param {Uint8Array|ArrayBuffer|Blob|File} data
    * @param {{name?:string,onProgress?:(sent:number,total:number)=>void,
@@ -244,20 +239,19 @@ export class PeerDriveClient {
     const name = opts.name || (typeof data === 'object' && data !== null && data.name) || 'upload.bin'
     const { onProgress, signal, chunkTimeoutMs = this.opts.verbTimeoutMs } = opts
     if (this._closeErr) throw this._closeErr
-    if (signal && signal.aborted) throw new PeerDriveError('Cancelled', ERR.CANCELLED)
+    if (signal && signal.aborted) throw new PeerDriveError('已取消', ERR.CANCELLED)
 
     const reqId = nextReqId()
     const state = { reqId, emit: null, timer: null }
-    // One round = one server frame for this upload. Each round times out separately: overall timeout
-    // can't distinguish "slow" from "stuck", and their remediation is completely different (slow can keep
-    // waiting, stuck must error and retry).
+    // 一轮 = 一条针对本次上传的服务端帧。每轮单独计时：整体超时无法区分
+    // 「慢」和「卡死」，而它们的处置完全不同（慢可以继续等，卡死要报错重试）。
     const round = () =>
       new Promise((resolve, reject) => {
         state.emit = { resolve, reject }
         state.timer = setTimeout(() => {
           this._uploads.delete(reqId)
           state.emit = null
-          reject(new PeerDriveError(`Upload ${chunkTimeoutMs}ms no response`, ERR.TIMEOUT))
+          reject(new PeerDriveError(`上传 ${chunkTimeoutMs}ms 无应答`, ERR.TIMEOUT))
         }, chunkTimeoutMs)
       })
     const stopRound = () => {
@@ -270,18 +264,17 @@ export class PeerDriveClient {
 
     let offset = 0
     const size = bytes.byteLength
-    // Cancellation: fail the "in-flight round" immediately. Previously only checked signal once at entry,
-    // result: UI cancel button after transfer starts was useless (had to wait full round to take effect,
-    // looked like it was stuck).
+    // 取消：让"在飞的这一轮"立刻失败。早先只在入口检查一次 signal，结果 UI 上的
+    // 取消按钮在已经开传之后形同虚设（要等整轮过去才生效，看着像卡住）。
     const onAbort = signal
       ? () => {
           const u = this._uploads.get(reqId)
-          if (u) this._failUpload(u, new PeerDriveError('Cancelled', ERR.CANCELLED))
+          if (u) this._failUpload(u, new PeerDriveError('已取消', ERR.CANCELLED))
         }
       : null
     if (onAbort) signal.addEventListener('abort', onAbort, { once: true })
     try {
-      // First frame header. size=0 (empty file) → server directly returns uploaded, skips meta.
+      // 第一帧头。size=0（空文件）时服务端会直接回 uploaded，不会经过 meta。
       this._send(uploadFrame(reqId, name, size, 0))
       for (;;) {
         const frame = await round()
@@ -291,7 +284,7 @@ export class PeerDriveClient {
 
         if (frame.type === 'err') {
           const code = frame.code === ERR.PSK_REQUIRED ? ERR.PSK_REQUIRED : ERR.PEER
-          throw new PeerDriveError(frame.msg || 'Upload failed', code)
+          throw new PeerDriveError(frame.msg || '上传失败', code)
         }
         if (frame.type === 'uploaded') {
           stopRound()
@@ -303,28 +296,28 @@ export class PeerDriveClient {
           }
         }
         if (frame.type === 'meta') {
-          // Server authorization: from here write n bytes (it decides granularity, follows UPLOAD_CHUNK).
-          // Its offset is authoritative — if same content was partially sent before, server requests
-          // continuation from the contiguous write breakpoint; self-incrementing writes bytes to the wrong
-          // position, producing a mismatched duplicate (and hangs in a place where we're not even at fault).
+          // 服务端授权：从这里起写 n 字节（它决定粒度，跟随 UPLOAD_CHUNK）。
+          // 它给出的 offset 才是权威——同一份内容若之前传过一半，服务端会从
+          // 连续写入的断点处要求续写；自顾自增会往错的位置写字节，落出一个
+          // 内容对不上的副本（而且 hang 在自己根本没错的地方）。
           const srv = Number(frame.offset)
           if (Number.isFinite(srv) && srv >= 0) offset = srv
-          if (offset > size) throw new PeerDriveError(`Server requests resume from ${offset}, but content is only ${size} bytes`, ERR.PROTOCOL)
+          if (offset > size) throw new PeerDriveError(`服务端要求从 ${offset} 续写，但内容只有 ${size} 字节`, ERR.PROTOCOL)
           const n = Math.min(UPLOAD_CHUNK, size - offset)
-          if (n <= 0) throw new PeerDriveError('Server meta offset exceeds file size', ERR.PROTOCOL)
+          if (n <= 0) throw new PeerDriveError('服务端的 meta 偏移已超出文件大小', ERR.PROTOCOL)
           this.conn.send(bytes.subarray(offset, offset + n))
           offset += n
           this.stats.chunks++
           this.stats.bytes += n
           if (onProgress) onProgress(offset, size)
-          continue // wait for this chunk's ack (or last chunk's uploaded)
+          continue // 等这一片的 ack（或最后一片的 uploaded）
         }
         if (frame.type === 'ack') {
-          if (offset >= size) continue // last chunk's completion acknowledgment not arrived yet, keep waiting
+          if (offset >= size) continue // 最后一片的完成回执还没到，继续等
           this._send(uploadFrame(reqId, name, size, offset))
           continue
         }
-        throw new PeerDriveError(`Upload interrupted by unknown frame: ${frame.type}`, ERR.PROTOCOL)
+        throw new PeerDriveError(`上传被未知帧打断：${frame.type}`, ERR.PROTOCOL)
       }
     } catch (e) {
       stopRound()
@@ -335,12 +328,12 @@ export class PeerDriveClient {
   }
 
   /**
-   * pull asks node to fetch a URL for you and ingest (**network ingest**).
+   * pull 让节点替你抓一个 URL 并入库（**网络入库**）。
    *
-   * Typical scenario: panel has only a link, no content (or content is on the other end of the net),
-   * let a network-capable node fetch it. Node side does SSRF protection (public http/https only,
-   * no internal/localhost, per-hop redirect validation) with size limits, so these failures are
-   * **expected behavior**, not bugs — error messages pass through directly to caller.
+   * 典型场景：面板只有链接、没有内容（或内容在大网另一端），让有网络能力的
+   * 节点去取。节点侧会做 SSRF 防护（只走公网 http/https、禁止内网/本机、
+   * 重定向逐跳校验）并有大小上限，所以这类失败是**预期行为**，不是 BUG——
+   * 错误信息直接透传给调用方。
    *
    * @param {string} url
    * @param {{name?:string,timeoutMs?:number}} [opts]
@@ -348,38 +341,38 @@ export class PeerDriveClient {
    */
   async pull(url, opts = {}) {
     if (typeof url !== 'string' || !url.trim()) {
-      throw new PeerDriveError('pull requires a non-empty URL', ERR.INVALID_HASH)
+      throw new PeerDriveError('pull 需要一个非空 URL', ERR.INVALID_HASH)
     }
     const reqId = nextReqId()
     const frame = await this._requestVerb(reqId, pullFrame(reqId, url.trim(), opts.name || ''), opts.timeoutMs || this.opts.verbTimeoutMs)
     if (!frame || frame.type !== 'pulled') {
-      throw new PeerDriveError('Peer pull response format abnormal (version too old?)', ERR.PROTOCOL)
+      throw new PeerDriveError('对端 pull 应答格式异常（版本太旧？）', ERR.PROTOCOL)
     }
     return { hash: frame.hash, size: Number(frame.total) || 0, name: frame.name || '', path: frame.path || '' }
   }
 
   /**
-   * stream streaming fetch: yields Uint8Array chunks one by one, **doesn't keep entire content in memory**.
-   * Suitable for large files (with File System Access API / StreamSaver for direct disk write).
+   * stream 流式拉取：逐个产出 Uint8Array 块，**不把整份内容驻留内存**。
+   * 适合大文件（配合 File System Access API / StreamSaver 直接落盘）。
    *
-   * Full request (offset=0 without size) verifies sha256 at end, throws HASH_MISMATCH on mismatch —
-   * verification is incremental (see sha256.js), no need to look back at previous chunks.
+   * 全量请求（offset=0 且不指定 size）会在结束时校验 sha256，不匹配则抛
+   * HASH_MISMATCH——校验是增量的（见 sha256.js），不需要回看前面的块。
    *
    * opts: {offset, size, maxBytes, onProgress(received, total), signal}
-   * Consumer-side early break cancels this request (subsequent arriving chunks are discarded).
+   * 消费端提前 break 会取消本请求（后续到达的块被丢弃）。
    */
   async *stream(hash, opts = {}) {
     this._assertHash(hash)
     const { offset = 0, size = -1, signal } = opts
-    // Already-aborted signal: reject **before sending request**. Sending first then checking wastes a fetch
-    // (and peer keeps sending to done, wasting bandwidth).
-    if (signal && signal.aborted) throw new PeerDriveError('Cancelled', ERR.CANCELLED)
+    // 已 abort 的 signal：在**发请求之前**就拒。先发后判会白白拉一次内容
+    // （而且对端会一直发到 done，白费带宽）。
+    if (signal && signal.aborted) throw new PeerDriveError('已取消', ERR.CANCELLED)
     const reqId = nextReqId()
     const p = this._startFetch(reqId, hash, { ...opts, offset, size })
 
     if (signal) {
       p.signal = signal
-      p.onAbort = () => this._cancel(reqId, new PeerDriveError('Cancelled', ERR.CANCELLED))
+      p.onAbort = () => this._cancel(reqId, new PeerDriveError('已取消', ERR.CANCELLED))
       signal.addEventListener('abort', p.onAbort, { once: true })
     }
 
@@ -393,16 +386,16 @@ export class PeerDriveClient {
         yield value
       }
     } finally {
-      // On normal end/failure _pend no longer has it, this is idempotent cleanup fallback;
-      // consumer-side early break also reaches here, releasing cached chunks with the request.
-      // Failure counting is handled by _failPending, don't double-count here (user-initiated cancel doesn't count).
-      this._cancel(reqId, new PeerDriveError('Cancelled', ERR.CANCELLED))
+      // 正常结束/失败时 _pend 里已经没有它了，这里是幂等的兜底清理；
+      // 消费端提前 break 也会走到这，把那批已缓存块连同请求一起放掉。
+      // 失败计数由 _failPending 负责，这里不重复计（用户主动取消不算失败）。
+      this._cancel(reqId, new PeerDriveError('已取消', ERR.CANCELLED))
     }
   }
 
   /**
-   * fetch fetch entire content (Uint8Array). Equivalent to collecting all of stream().
-   * Has memory gate: exceeding maxBytes (default 256MB) throws TOO_LARGE — use stream() for large files.
+   * fetch 整体取回（Uint8Array）。等价于把 stream() 全收集起来。
+   * 有内存闸：超过 maxBytes（默认 256MB）抛 TOO_LARGE——大文件请用 stream()。
    */
   async fetch(hash, opts = {}) {
     const chunks = []
@@ -414,25 +407,25 @@ export class PeerDriveClient {
     return concatChunks(chunks, received)
   }
 
-  /** fetchBlob fetch as Blob (for browser preview/playback; MIME can be guessed from name). */
+  /** fetchBlob 取回为 Blob（浏览器预览/播放用；MIME 可由 name 猜）。 */
   async fetchBlob(hash, { name = '', mime = '', ...opts } = {}) {
     const bytes = await this.fetch(hash, opts)
     return new Blob([bytes], { type: mime || guessMime(name) })
   }
 
-  /** fetchText fetch as text (utf-8). */
+  /** fetchText 取回为文本（utf-8）。 */
   async fetchText(hash, opts = {}) {
     const bytes = await this.fetch(hash, opts)
     return new TextDecoder('utf-8').decode(bytes)
   }
 
   /**
-   * saveAs triggers browser download. Uses Blob + <a download>, so **entire content is in memory**;
-   * shares the same maxBytes gate as fetch. Use stream() for oversized files and write to disk yourself.
+   * saveAs 触发浏览器下载。走 Blob + <a download>，因此**整份内容在内存里**；
+   * 与 fetch 共用同一个 maxBytes 闸。超大文件请用 stream() 自己落盘。
    */
   async saveAs(hash, filename = '', opts = {}) {
     if (typeof document === 'undefined') {
-      throw new PeerDriveError('saveAs requires DOM environment', ERR.PROTOCOL)
+      throw new PeerDriveError('saveAs 需要 DOM 环境', ERR.PROTOCOL)
     }
     const blob = await this.fetchBlob(hash, { name: filename, ...opts })
     const url = URL.createObjectURL(blob)
@@ -445,43 +438,43 @@ export class PeerDriveClient {
       a.click()
       a.remove()
     } finally {
-      // Immediate revoke causes some browsers (Safari) to cancel download: give some margin
+      // 立刻 revoke 会让部分浏览器（Safari）取消下载：给一点余量
       setTimeout(() => URL.revokeObjectURL(url), 30_000)
     }
     return blob.size
   }
 
-  /** Convenience method: directly fetch and save a share manifest entry/file (auto-extracts filename). */
+  /** 便捷方法：从共享清单里直接取某个 entry/file 并保存（自动取文件名）。 */
   async saveShare(item, opts = {}) {
-    if (!item || !item.hash) throw new PeerDriveError('saveShare requires an entry with hash', ERR.PROTOCOL)
+    if (!item || !item.hash) throw new PeerDriveError('saveShare 需要带 hash 的条目', ERR.PROTOCOL)
     const name = baseNameOf(item.name || item.path || '')
     return this.saveAs(item.hash, name, opts)
   }
 
-  /** close closes the connection (if this instance created the Peer object, destroy it too). */
+  /** close 关闭连接（若本实例自己创建了 Peer 对象，一并销毁）。 */
   close() {
     this._unbind()
-    this._failAll(new PeerDriveError('Connection closed', ERR.CLOSED))
+    this._failAll(new PeerDriveError('连接已关闭', ERR.CLOSED))
     try {
       if (typeof this.conn.close === 'function') this.conn.close()
     } catch {
-      /* connection already dead */
+      /* 连接已死 */
     }
     if (this._ownedPeer && typeof this._ownedPeer.destroy === 'function') {
       try {
         this._ownedPeer.destroy()
       } catch {
-        /* already destroyed */
+        /* 已销毁 */
       }
     }
     this._openState = false
   }
 
-  // ── Internal: connection binding and frame dispatch ────────────────────────────────────────
+  // ── 内部：连接绑定与帧分派 ────────────────────────────────────────────────
 
   _bind() {
     this._onData = (data) => {
-      // Frame order IS protocol semantics (see protocol.js constraint 2), must process synchronously, no queuing
+      // 帧顺序即协议语义（见 protocol.js 约束 2），必须同步处理、不排队
       try {
         if (isBinaryFrame(data)) this._onChunk(data)
         else this._onText(data)
@@ -492,16 +485,16 @@ export class PeerDriveClient {
     }
     this._onOpen = () => {
       this._openState = true
-      // PSK: must be presented **before any business frame** (including first request after ready()).
-      // Placed before flush because flush resolves waiters whose subsequent sends are queued after
-      // this send — order IS auth semantics.
+      // PSK：必须在**任何业务帧之前**出示（含 ready() 之后发的第一个请求）。
+      // 放在 flush 之前，是因为 flush 会 resolve 等待者，它们的后续 send
+      // 排在本次 send 之后 —— 顺序即门禁语义。
       this._sendPskAuth()
       this._flushOpenWaiters(null)
     }
-    this._onClose = () => this._failAll(new PeerDriveError('Connection closed', ERR.CLOSED))
+    this._onClose = () => this._failAll(new PeerDriveError('连接已关闭', ERR.CLOSED))
     this._onError = (err) => {
       const msg = err && (err.message || err.type) ? err.message || err.type : String(err)
-      this._failAll(new PeerDriveError(`Connection error: ${msg}`, ERR.CLOSED))
+      this._failAll(new PeerDriveError(`连接错误：${msg}`, ERR.CLOSED))
     }
     this.conn.on('data', this._onData)
     this.conn.on('open', this._onOpen)
@@ -530,11 +523,11 @@ export class PeerDriveClient {
 
   _onText(text) {
     const frame = parseFrame(text)
-    if (!frame) return // not this protocol's frame: ignore (same connection may have other purposes)
+    if (!frame) return // 非本协议帧：忽略（同连接可能有别的用途）
     switch (frame.type) {
       case 'meta': {
-        // meta is ambiguous: could be "fetch ready" or "upload chunk authorized".
-        // Route by reqId ownership — misrouting makes uploader wait for timeout, or fetcher gets unknown frame.
+        // meta 是双义帧：既可能是"拉取已就绪"，也可能是"上传分片已授权"。
+        // 按 reqId 归属分流——看错一边会让上传者等到超时，或让拉取者收到未知帧。
         const u = frame.reqId ? this._uploads.get(frame.reqId) : null
         return u ? this._settleUpload(u, frame) : this._onMeta(frame)
       }
@@ -542,7 +535,7 @@ export class PeerDriveClient {
       case 'uploaded': {
         const u = frame.reqId ? this._uploads.get(frame.reqId) : null
         if (u) return this._settleUpload(u, frame)
-        return // not ours: forward compatibility, ignore
+        return // 不是本次的：前向兼容，忽略
       }
       case 'data':
         return this._onDataHead(frame)
@@ -559,26 +552,25 @@ export class PeerDriveClient {
         return
       case 'psk-err':
         this.pskState = 'err'
-        this.pskError = frame.msg || 'psk: peer rejected the key'
+        this.pskError = frame.msg || 'psk: 对端拒绝了密钥'
         return
       default:
-        // Forward compatibility for unknown frame types only holds for frames "not about me".
-        // Unknown frames **carrying my pending reqId** must error: peer replied with an unknown type
-        // at my explicitly requested response slot, the only reasonable explanation is protocol version
-        // mismatch. If ignored here, caller only sees TIMEOUT ("peer is stuck"), while the real cause
-        // is peer speaking a different language — debugging direction completely wrong.
+        // 未知帧类型的前向兼容只对"与我无关"的帧成立。**带了我正在等的
+        // reqId** 的未知帧必须报错：对端在我明确请求的应答位上回了个我不认识的
+        // 类型，唯一合理的解释是双方协议版本不一致。这里若忽略，调用方只会看到
+        // TIMEOUT（"对端卡住了"），而真因是对端另说一套话——排查方向全错。
         return this._rejectOwner(frame.reqId, (t) => new PeerDriveError(
-          `Peer responded with unknown frame ${t} (protocol version mismatch?)`,
+          `对端应答了未知帧 ${t}（两边协议版本不一致？）`,
           ERR.PROTOCOL,
         ))
     }
   }
 
   /**
-   * _rejectOwner finds the waiting session by reqId and makes it fail.
+   * _rejectOwner 按 reqId 找到等待中的会话并让它以失败收尾。
    *
-   * All three wait slots (upload step/one-shot verb/fetch) may hold the same reqId space,
-   * so check them in order here; if none found, it's a late or unrelated frame, ignore.
+   * 一次步进(上传)/一次性动词/拉取三种等待槽都可能持有同一个 reqId 空间，
+   * 所以这里统一按序查一遍；都查不到说明是迟到的或与自己无关的帧，忽略即可。
    */
   _rejectOwner(reqId, makeErr) {
     if (!reqId) return
@@ -595,15 +587,15 @@ export class PeerDriveClient {
     if (!p) return
     p.touch()
     const total = Number(frame.total)
-    // total of -1 means peer also can't determine size (multi-source origin-pull scenario) — not an error
+    // total 为 -1 表示对端也无法确定大小（多源回源场景）——不是错误
     if (Number.isFinite(total) && total > MAX_FILE_BYTES) {
-      return this._failPending(p, new PeerDriveError(`Peer declares file ${total} bytes, exceeds protocol limit`, ERR.TOO_LARGE))
+      return this._failPending(p, new PeerDriveError(`对端声明文件 ${total} 字节，超出协议上限`, ERR.TOO_LARGE))
     }
     if (Number.isFinite(total) && total > p.maxBytes) {
       return this._failPending(
         p,
         new PeerDriveError(
-          `File ${total} bytes exceeds local memory gate ${p.maxBytes} (use stream() for streaming disk write, or increase maxBytes)`,
+          `文件 ${total} 字节超过本地内存闸 ${p.maxBytes}（改用 stream() 流式落盘，或调大 maxBytes）`,
           ERR.TOO_LARGE,
         ),
       )
@@ -614,27 +606,25 @@ export class PeerDriveClient {
 
   _onDataHead(frame) {
     const p = this._pend.get(frame.reqId)
-    if (!p) return // late frame (cancelled/ended): discard
+    if (!p) return // 迟到的帧（已取消/已结束）：丢弃
     p.touch()
     const size = Number(frame.size)
-    // Same limit as Go-side H6: block size must be positive and not exceed protocol limit, otherwise
-    // it's malicious/wrong protocol
+    // 与 Go 侧 H6 同样设上限：块大小必须为正且不超过协议上限，否则是恶意/错协议
     if (!Number.isFinite(size) || size <= 0 || size > MAX_FILE_BYTES) {
-      return this._failPending(p, new PeerDriveError(`Invalid data block size ${frame.size}`, ERR.PROTOCOL))
+      return this._failPending(p, new PeerDriveError(`非法数据块大小 ${frame.size}`, ERR.PROTOCOL))
     }
     p.blockSize = size
     p.blockGot = 0
-    // Connection-level expect: attach the following binary block to this request
+    // 连接级 expect：把紧随其后的二进制块挂到这个请求上
     this._expect = p
   }
 
   _onChunk(data) {
     const p = this._expect
-    if (!p) return // data block without preceding data header: not protocol content, discard
+    if (!p) return // 没有前置 data 头的数据块：非协议内内容，丢弃
     const bytes = toUint8Array(data)
-    // Note: **don't** store the block in request state here. Blocks only enter the bounded queue
-    // (backpressure), consumed by the consumer — "streaming" benefit is all here; storing an extra
-    // copy in state equals reverting to keeping everything in memory.
+    // 注意：这里**不**把块存到请求状态里。块只进有界队列（背压），由消费端
+    // 取走——"流式"的收益全在这；多存一份到 state 等于把它变回整体驻留内存。
     p.queue.push(bytes)
     p.received += bytes.byteLength
     p.blockGot += bytes.byteLength
@@ -647,7 +637,7 @@ export class PeerDriveClient {
     if (p.maxBytes > 0 && p.received > p.maxBytes) {
       this._failPending(
         p,
-        new PeerDriveError(`Content exceeds local memory gate ${p.maxBytes} (use stream())`, ERR.TOO_LARGE),
+        new PeerDriveError(`内容超过本地内存闸 ${p.maxBytes}（改用 stream()）`, ERR.TOO_LARGE),
       )
     }
   }
@@ -657,11 +647,11 @@ export class PeerDriveClient {
     if (!p) return
     p.touch()
     const declared = Number(frame.size)
-    // Same integrity gate as Go-side: peer sending early done returns truncated content as success (silent corruption)
+    // 与 Go 侧一致的完整性闸：对端提前 done 会把截断内容当成功返回（静默损坏）
     if (Number.isFinite(declared) && declared >= 0 && p.received !== declared) {
       return this._failPending(
         p,
-        new PeerDriveError(`Incomplete transfer: received ${p.received} bytes, peer declared ${declared} bytes`, ERR.INCOMPLETE, {
+        new PeerDriveError(`传输不完整：收到 ${p.received} 字节，对端声明 ${declared} 字节`, ERR.INCOMPLETE, {
           received: p.received,
           declared,
         }),
@@ -672,7 +662,7 @@ export class PeerDriveClient {
       if (got !== p.hash) {
         return this._failPending(
           p,
-          new PeerDriveError(`Content doesn't match hash (expected ${p.hash}, got ${got})`, ERR.HASH_MISMATCH, {
+          new PeerDriveError(`内容与 hash 不符（期望 ${p.hash}，实得 ${got}）`, ERR.HASH_MISMATCH, {
             expected: p.hash,
             actual: got,
           }),
@@ -683,13 +673,13 @@ export class PeerDriveClient {
   }
 
   _onErr(frame) {
-    const msg = frame.msg || 'Peer returned error'
-    // err frame may carry code (Go-side auth returns PSK_REQUIRED). Classify by code not text:
-    // text changes with versions, code is part of the protocol.
+    const msg = frame.msg || '对端返回错误'
+    // err 帧可能带 code（Go 侧门禁回 PSK_REQUIRED）。按 code 而不是文案分类：
+    // 文案会随版本改，code 是协议的一部分。
     const code = frame.code === ERR.PSK_REQUIRED ? ERR.PSK_REQUIRED : ERR.PEER
     const err = () => new PeerDriveError(msg, code)
-    // err frame's reqId may belong to fetch, one-shot verb, or upload — check all three,
-    // missing upload means put() hangs until timeout instead of immediately delivering server's rejection reason.
+    // err 帧的 reqId 可能属于拉取、一次性 verb，也可能属于上传——三种都要查，
+    // 漏掉上传的话 put() 会挂到超时，而不是立刻把服务端的拒绝原因交给调用方。
     if (frame.reqId) {
       const u = this._uploads.get(frame.reqId)
       if (u) return this._settleUpload(u, frame)
@@ -709,7 +699,7 @@ export class PeerDriveClient {
     state.emit = null
   }
 
-  /** _failUpload makes upload step end with error, also cancels this round's timer. */
+  /** _failUpload 让上传步进以错误收尾，顺手撤掉这一轮的计时器。 */
   _failUpload(state, err) {
     if (state.timer) {
       clearTimeout(state.timer)
@@ -725,12 +715,12 @@ export class PeerDriveClient {
     this._settleVerb(frame.reqId, frame, null)
   }
 
-  // ── Internal: request lifecycle ───────────────────────────────────────────────────────────
+  // ── 内部：请求生命周期 ───────────────────────────────────────────────────
 
   _assertHash(hash) {
     if (!isValidHash(hash)) {
       throw new PeerDriveError(
-        `hash must be 64 lowercase hex sha256, received ${JSON.stringify(hash)}`,
+        `hash 必须是 64 位小写十六进制 sha256，收到 ${JSON.stringify(hash)}`,
         ERR.INVALID_HASH,
       )
     }
@@ -753,8 +743,8 @@ export class PeerDriveClient {
       total: -1,
       blockSize: 0,
       blockGot: 0,
-      // Only verify content-address for "full requests": range request fragments don't equal the entire
-      // content's digest (same condition as Go-side fetchReader.verify)
+      // 只对"全量请求"做内容寻址校验：range 请求拿到的片段本来就不等于整份
+      // 内容的摘要（与 Go 侧 fetchReader.verify 同一条件）
       verify: offset === 0 && size < 0,
       hasher: null,
       maxBytes: Number.isFinite(maxBytes) ? maxBytes : this.opts.maxBufferBytes,
@@ -781,7 +771,7 @@ export class PeerDriveClient {
     p.idleTimer = setTimeout(() => {
       this._failPending(
         p,
-        new PeerDriveError(`Fetch ${p.hash.slice(0, 12)}… idle timeout (${this.opts.idleTimeoutMs}ms no data)`, ERR.TIMEOUT),
+        new PeerDriveError(`拉取 ${p.hash.slice(0, 12)}… 空闲超时（${this.opts.idleTimeoutMs}ms 无数据）`, ERR.TIMEOUT),
       )
     }, this.opts.idleTimeoutMs)
   }
@@ -791,7 +781,7 @@ export class PeerDriveClient {
       try {
         p.onProgress(p.received, p.total, p.hash)
       } catch {
-        /* progress callback errors shouldn't affect transfer */
+        /* 进度回调抛错不该影响传输 */
       }
     }
   }
@@ -826,9 +816,8 @@ export class PeerDriveClient {
       p.idleTimer = null
     }
     if (p.onAbort && p.signal) p.signal.removeEventListener('abort', p.onAbort)
-    // Gotcha: don't wait for peer to stop sending. Protocol has no "cancel" frame, peer continues
-    // sending this request to completion, we just drop subsequent frames (_expect/_pend no longer find it).
-    // To truly interrupt, must close the connection.
+    // 坑：不等对端停止发送。协议里没有"取消"帧，对端会继续把这次请求发完，
+    // 我们只是丢掉后续帧（_expect/_pend 里已查不到它）。要真正中断只能关连接。
     if (this._expect === p) this._expect = null
     this._pend.delete(p.reqId)
   }
@@ -843,8 +832,8 @@ export class PeerDriveClient {
     }
     this._verbs.clear()
     for (const p of [...this._pend.values()]) this._failPending(p, err)
-    // In-flight uploads must also end with error: otherwise put() waits for its own timeout,
-    // while the real cause (connection dead) is masked as TIMEOUT, debugging in completely wrong direction.
+    // 在飞的上传同样要以错误收尾：否则 put() 会等到它自己的超时才失败，
+    // 而真实原因（连接已断）被掩盖成 TIMEOUT，排查时会往完全错误的方向查。
     for (const u of [...this._uploads.values()]) {
       clearTimeout(u.timer)
       u.emit?.reject(err)
@@ -868,7 +857,7 @@ export class PeerDriveClient {
       this._verbs.set(reqId, entry)
       entry.timer = setTimeout(() => {
         this._verbs.delete(reqId)
-        reject(new PeerDriveError(`Peer ${timeoutMs}ms no response`, ERR.TIMEOUT))
+        reject(new PeerDriveError(`对端 ${timeoutMs}ms 内没有应答`, ERR.TIMEOUT))
       }, timeoutMs)
       try {
         this._send(frameText)
@@ -882,42 +871,42 @@ export class PeerDriveClient {
 }
 
 /**
- * readableBytes normalizes various "content sources" to Uint8Array.
+ * readableBytes 把各种"内容源"归一成 Uint8Array。
  *
- * Supported types cover what humans actually put in: typed array / ArrayBuffer /
- * Blob / File / string. File is the only entry point for the panel's "select file upload" path.
+ * 支持的类型覆盖到了人类实际会塞进来的东西： typed array / ArrayBuffer /
+ * Blob / File / string。其中 File 是面板"选文件上传"这条路的唯一入口。
  */
 async function readableBytes(data) {
   if (data instanceof Uint8Array) return data
   if (data instanceof ArrayBuffer) return new Uint8Array(data)
   if (typeof data === 'string') return new TextEncoder().encode(data)
-  // Blob / File / Response and any Blob-like proxy: duck-type by "has arrayBuffer()"
-  // instead of instanceof Blob —— cross-realm (iframe / unit test proxies)
-  // instanceof fails, but "can get bytes" is the only contract we care about here.
+  // Blob / File / Response 以及任何 Blob-like 替身：按「有 arrayBuffer()」鸭子判断，
+  // 而不是 instanceof Blob —— 跨 realm（iframe / 单元测试里的替身对象）时
+  // instanceof 会失效，而"能拿到字节"才是这里唯一真正关心的契约。
   if (data && typeof data === 'object' && typeof data.arrayBuffer === 'function') {
     return new Uint8Array(await data.arrayBuffer())
   }
-  throw new TypeError('put: data must be Uint8Array / ArrayBuffer / Blob / File / string')
+  throw new TypeError('put: data 必须是 Uint8Array / ArrayBuffer / Blob / File / string')
 }
 
 /**
- * discoverNodes asks self-hosted signaling "which nodes are online now" — consumer-side auto-discovery entry.
+ * discoverNodes 向自托管信令问「现在有哪些节点在线」——消费端的自动发现入口。
  *
- * Uses signaling's REST discovery endpoint GET /discover/nodes (built-in discovery, replacing public MQTT broker).
- * Returns [{peerId,lastSeen,nodeType,collections,uptime,loadInfo}].
+ * 走信令的 REST 发现端点 GET /discover/nodes（内置发现，替代公共 MQTT broker）。
+ * 返回 [{peerId,lastSeen,nodeType,collections,uptime,loadInfo}]。
  *
- * ⚠️ An unavoidable prerequisite: **signaling must serve cross-origin responses**. The panel is a public
- * static page, file:// gives origin `null`, hosted on Pages is another domain, and this step is a cross-origin
- * request — if signaling doesn't have Access-Control-Allow-Origin, the browser fails at the fetch level,
- * with no status code at all (NetworkError). This is the most common reason auto-discovery doesn't work,
- * so when it fails independently it needs a clear message (see NOT_CORS handling below).
+ * ⚠️ 一条绕不开的前提：**信令必须能给跨域响应**。面板是公共静态页，file:// 时
+ * 浏览器算出的 origin 是 `null`、托管在 Pages 时又是另一个域，而这一步是跨域
+ * 请求——信令没配 Access-Control-Allow-Origin，浏览器会在 fetch 层面直接失败，
+ * 而且拿不到任何状态码（NetworkError）。这是现阶段用不了在线发现的最常见原因，
+ * 所以它单独判不出来的时候要给明确提示（见下面 NOT_CORS 的处理）。
  *
  * @param {{host:string,port?:number|string,secure?:boolean}} sig
  * @param {{coll?:string,timeoutMs?:number}} [opts]
  */
 export async function discoverNodes(sig, opts = {}) {
   const host = sig?.host
-  if (!host) throw new PeerDriveError('discoverNodes requires signaling host', ERR.PROTOCOL)
+  if (!host) throw new PeerDriveError('discoverNodes 需要信令 host', ERR.PROTOCOL)
   const port = sig.port === undefined || sig.port === '' ? (sig.secure === false ? 80 : 443) : Number(sig.port)
   const scheme = sig.secure === false ? 'http' : 'https'
   const timeoutMs = opts.timeoutMs || 8000
@@ -927,17 +916,17 @@ export async function discoverNodes(sig, opts = {}) {
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
     const res = await fetch(`${scheme}://${host}:${port}/discover/nodes${q}`, { signal: ctrl.signal, mode: 'cors' })
-    if (!res.ok) throw new PeerDriveError(`Discovery service returned HTTP ${res.status}`, ERR.PEER)
+    if (!res.ok) throw new PeerDriveError(`发现服务返回 HTTP ${res.status}`, ERR.PEER)
     const body = await res.json()
     return Array.isArray(body?.nodes) ? body.nodes : []
   } catch (e) {
     if (e instanceof PeerDriveError) throw e
-    // CORS failure in browser is just a TypeError, no status code — without pointing this out,
-    // users only think "signaling is down" and repeatedly debug a healthy signaling.
+    // CORS 失败在浏览器里就是一个 TypeError，状态码都拿不到——不点破这一点，
+    // 用户只会以为是"信令挂了"，然后对着一个健康的信令反复排查。
     throw new PeerDriveError(
-      `Auto-discovery failed: ${e?.message || e}. Most common cause is signaling missing cross-origin response header (Access-Control-Allow-Origin)` +
-        `— panel is at origin ${typeof location !== 'undefined' ? location.origin : '(unknown)'}, this is a cross-origin request.` +
-        'Please upgrade signaling to latest go-peerserver (CORS enabled since 2026-09-20), or add the header at reverse proxy layer.',
+      `自动搜索失败：${e?.message || e}。最常见原因是信令没有给跨域响应头（Access-Control-Allow-Origin）` +
+        `——面板在原点 ${typeof location !== 'undefined' ? location.origin : '（未知）'} 上，属于跨域请求。` +
+        '信令请升到 go-peerserver 最新版（2026-09-20 起已放开 CORS），或在反代层补该响应头。',
       ERR.PEER,
     )
   } finally {
@@ -946,8 +935,8 @@ export async function discoverNodes(sig, opts = {}) {
 }
 
 /**
- * connect wraps an established connection, waits for ready then returns client.
- * This is the most commonly used entry: `const client = await connect(dataConnection)`
+ * connect 包装一个已建立的连接，等它就绪后返回客户端。
+ * 这是最常用的入口：`const client = await connect(dataConnection)`
  */
 export async function connect(conn, opts = {}) {
   const client = new PeerDriveClient(conn, opts)
@@ -961,33 +950,32 @@ export async function connect(conn, opts = {}) {
 }
 
 /**
- * connectToPeer convenience entry: provide PeerJS constructor and peer node id, one step to connect.
+ * connectToPeer 便捷入口：给出 PeerJS 构造函数与对方节点 id，一步到位。
  *
- * This package doesn't import peerjs (keeping zero dependencies, not polluting consumer bundle size),
- * so the constructor is passed by the caller — in browser it's the global `Peer` (CDN <script> or `import Peer from 'peerjs'`).
+ * 本包不 import peerjs（保持零依赖、不污染使用方打包体积），所以构造函数由
+ * 调用方传入——浏览器里就是全局的 `Peer`（CDN <script> 或 `import Peer from 'peerjs'`）。
  *
- * ⚠️ serialization must be 'raw': only raw mode sends string as text frame, ArrayBuffer as binary frame,
- * replicating Go-side "text frame=JSON header / binary frame=data block" semantics
- * (see back/internal/transport/conn.go header). Default binary serialization causes
- * data blocks to be wrapped by peerjs's own chunker, which peer can't parse.
+ * ⚠️ serialization 必须是 'raw'：只有 raw 模式下 string 走文本帧、ArrayBuffer
+ * 走二进制帧，才能复刻 Go 侧「文本帧=JSON 头 / 二进制帧=数据块」的语义
+ * （见 back/internal/transport/conn.go 顶部）。用默认的 binary 序列化会让
+ * 数据块被 peerjs 自己的 chunker 包装，对端解析不出来。
  */
 /**
- * randomPeerId generates our temporary peer id, character set consistent with server /peerjs/id.
+ * randomPeerId 生成本端临时 peer id，字符集与服务端 /peerjs/id 保持一致。
  *
- * Why not wait for signaling to assign: PeerJS without id in `new Peer(opts)` sends
- * `GET {scheme}://{host}:{port}/{path}{key}/id` to signaling for an id.
- * But consumer-side is a **public static panel** —— file:// gives origin `null`, hosted on
- * Pages/CDN is another domain, this step is definitely cross-origin. Without Access-Control-Allow-Origin,
- * the response is swallowed by same-origin policy, PeerJS only reports a vague
- * `server-error: Could not get an ID from the server`, from this error you can't tell it's CORS
- * (the online peersignal.moonchan.xyz deployment is exactly the pre-CORS version).
+ * 为什么不等信令分配：PeerJS 在 `new Peer(opts)` 没给 id 时，会自己发
+ * `GET {scheme}://{host}:{port}/{path}{key}/id` 向信令要一个 id。
+ * 而消费端是一个**公共静态面板** —— file:// 打开时浏览器算出的 origin 是
+ * `null`，托管到 Pages/CDN 时又是另一个域，这一步铁定跨域。信令没有
+ * Access-Control-Allow-Origin，响应就被同源策略吞掉，PeerJS 只报一句含义模糊的
+ * `server-error: Could not get an ID from the server`，从这个报错里根本看不出
+ * 是 CORS（线上 peersignal.moonchan.xyz 部署的正是还没开 CORS 的版本）。
  *
- * Self-generating id completely skips this request: signaling only forwards OFFER, doesn't care who sets
- * the id, plus saves a round trip. Convention: if caller doesn't provide peerOptions.id, use randomly
- * generated one here.
+ * 自带 id 就完全不发这个请求：信令只负责转发 OFFER，本来也不关心 id 是谁定的，
+ * 顺带还省掉一次往返。约定：调用方没给 peerOptions.id 就用这里随机生成的。
  *
- * Character set aligned with back/signalserver's randomID() (lowercase letters + digits, 16 chars);
- * if it actually collides with existing id, signaling returns ID-TAKEN, PeerJS reports error, just retry.
+ * 字符集对齐 back/signalserver 的 randomID()（小写字母 + 数字，16 位）；真撞上
+ * 已有 id，信令会回 ID-TAKEN，PeerJS 报 error，重试即可。
  */
 function randomPeerId() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
@@ -998,15 +986,11 @@ function randomPeerId() {
 
 export async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions = {}, ...opts } = {}) {
   if (typeof PeerCtor !== 'function') {
-    // Use double quotes instead of single quotes: the message text contains a bare apostrophe in "PeerJS's",
-    // writing it into a single-quoted string would prematurely close the string, causing the entire file to throw
-    // "missing ) after argument list", while node reports the line number pointing to where the engine gave up
-    // (this throw itself). The real issue is the apostrophe in the middle of the string.
-    throw new TypeError("peerdrive-client: connectToPeer requires PeerJS's Peer constructor")
+    throw new TypeError('peerdrive-client: connectToPeer 需要 PeerJS 的 Peer 构造函数')
   }
-  // id must go as **positional parameter**: empirically peerjs@1.5.5 ignores `new Peer({..., id})`
-  // options.id (still GETs /{path}{key}/id), only `new Peer(id, opts)` works. Provide both positional
-  // args for compatibility with other implementations.
+  // id 必须走**位置参数**：实测 peerjs@1.5.5 会把 `new Peer({..., id})` 里的
+  // options.id 忽略掉（照样去 GET /{path}{key}/id），只有 `new Peer(id, opts)`
+  // 才认。两个位置都给，兼容其它实现。
   const myId = peerOptions.id || randomPeerId()
   const peer = new PeerCtor(myId, { ...peerOptions, id: myId })
   try {
@@ -1017,7 +1001,7 @@ export async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOp
       }
       const onError = (e) => {
         peer.off?.('open', onOpen)
-        reject(new PeerDriveError(`Signaling failed: ${e?.message || e?.type || e}`, ERR.CLOSED))
+        reject(new PeerDriveError(`信令失败：${e?.message || e?.type || e}`, ERR.CLOSED))
       }
       peer.on('open', onOpen)
       peer.on('error', onError)
@@ -1031,7 +1015,7 @@ export async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOp
     try {
       peer.destroy()
     } catch {
-      /* already destroyed */
+      /* 已销毁 */
     }
     throw e
   }
