@@ -25,7 +25,7 @@ var (
 	ErrBEP51NoSamples = errors.New("no infohash samples returned from DHT")
 )
 
-// SampleInfohashes 查询 DHT 节点获取其已知的 infohash 样本。
+// SampleInfohashes queries DHT nodes for samples of infohashes they know.
 func (s *BTDHTService) SampleInfohashes(target [20]byte) (samples [][20]byte, err error) {
 	if s.Server == nil {
 		return nil, ErrBEP51DHTDisabled
@@ -142,7 +142,7 @@ func (s *BTDHTService) queryServerForSamples(target [20]byte) ([][20]byte, error
 	return s.queryNodeForSamples(localAddr, target)
 }
 
-// DiscoverInfohashes 爬取 DHT 路由表，收集附近节点已知的 infohashes。
+// DiscoverInfohashes crawls the DHT routing table to collect infohashes known by nearby nodes.
 func (s *BTDHTService) DiscoverInfohashes(maxResults int) ([][20]byte, error) {
 	if s.Server == nil {
 		return nil, ErrBEP51DHTDisabled

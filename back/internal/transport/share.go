@@ -1,63 +1,63 @@
 package transport
 
-// share.go：节点共享范围帧（doc/NETDISK.md M2 / ROADMAP 阶段 5「文件范围管理」）。
+// share.go: Node sharing-scope frame (doc/NETDISK.md M2 / ROADMAP Phase 5 "File Scope Management").
 //
-// 语义：share 帧回答「本节点对外提供了什么」——打包好的合集（含条目清单）
-// 与单独的文件。这是「市场 → 加入节点 → 看到文件链接 → 选中保存」链路里
-// "看到文件链接"那一步。
+// Semantics: the share frame answers "what does this node expose externally" — packaged collections (with entry lists)
+// and individual files. This is the "see file links" step in the
+// "marketplace → join node → see file links → select and save" pipeline.
 //
-// 与既有 list verb 的区别（**不要合并**）：
-//   - list = 本地文件管理索引（file_index 全量，含本机绝对路径），语义是
-//     "本节点在管理哪些文件"，只应对可信对端/本地会话开放；
-//   - share = **显式声明**的共享范围，默认关闭，是唯一对外发布内容的入口。
-// 把 list 当成"共享清单"用，等于默认全盘对外公开（也正是 ROADMAP 里
-// "广播本地合集 hash 等于公开本节点持有什么"那条待办的成因）。
+// Difference from the existing list verb (do NOT merge):
+//   - list = local file-management index (full file_index, including absolute local paths); its semantics are
+//     "which files does this node manage" and should only be open to trusted peers / local sessions;
+//   - share = **explicitly declared** sharing scope, off by default, the sole entry point for publishing content externally.
+// Using list as a "sharing manifest" is equivalent to publicly exposing the entire disk by default (this is also the root cause
+// of the ROADMAP TODO: "broadcasting local collection hashes equals revealing what this node holds").
 //
-// 帧序列：
+// Frame sequence:
 //
-//	请求: {"type":"share","reqId":"<optional>"}
-//	响应: {"type":"share-resp","collections":[...],"files":[...],"dirs":[...],
+//	Request: {"type":"share","reqId":"<optional>"}
+//	Response: {"type":"share-resp","collections":[...],"files":[...],"dirs":[...],
 //	       "total":N,"reqId":"..."}
 //
-// total = len(collections)+len(files)，服务端算好下发（前端卡片直接显示
-// "共 N 项"，不必自己按两类计数相加）。未开启共享时回**空** share-resp
-// 而不是 err：空态是合法业务状态（对方未共享任何内容），前端直接渲染
-// "该节点没有共享内容"，不必走错误分支。
+// total = len(collections)+len(files); the server computes and sends it (the frontend card displays
+// "N items total" directly, without having to sum two categories itself). When sharing is off, respond with an **empty**
+// share-resp rather than an error: the empty state is a valid business state (the peer shared nothing), and the frontend renders
+// "this node has no shared content" without needing an error branch.
 
-// ShareFileInfo 共享清单里的一个单独文件。
+// ShareFileInfo is a single file in the sharing manifest.
 type ShareFileInfo struct {
 	Hash string `json:"hash"`
 	Name string `json:"name"`
-	Path string `json:"path,omitempty"` // 相对根目录的展示路径（不含本机绝对路径）
+	Path string `json:"path,omitempty"` // Display path relative to the root directory (no absolute local path)
 	Size int64  `json:"size"`
 	Mime string `json:"mime,omitempty"`
 }
 
-// ShareEntryInfo 合集内一个条目的文件链接。
+// ShareEntryInfo is a file link for an entry within a collection.
 type ShareEntryInfo struct {
 	Path string `json:"path"`
 	Hash string `json:"hash"`
 	Mime string `json:"mime,omitempty"`
 }
 
-// ShareCollectionInfo 一个被打包共享的合集。
+// ShareCollectionInfo is a collection packaged for sharing.
 type ShareCollectionInfo struct {
 	Hash    string            `json:"hash"`
 	Name    string            `json:"name,omitempty"`
-	Size    int64             `json:"size,omitempty"` // 条目数（沿用 size 命名与前端卡片统一）
+	Size    int64             `json:"size,omitempty"` // Entry count (reuses the size name to stay consistent with the frontend card)
 	Tags    []string          `json:"tags,omitempty"`
 	Entries []ShareEntryInfo  `json:"entries"`
 }
 
-// ShareSnapshot 一次 share 查询的完整结果。
+// ShareSnapshot is the complete result of one share query.
 type ShareSnapshot struct {
 	Collections []ShareCollectionInfo `json:"collections"`
 	Files       []ShareFileInfo       `json:"files"`
 	Dirs        []string              `json:"dirs,omitempty"`
 }
 
-// shareResp share 帧响应。内嵌 ShareSnapshot 让 JSON 平铺
-// （{type,collections,files,dirs,total,reqId}），前端一层解析即可。
+// shareResp is the share frame response. It embeds ShareSnapshot so the JSON is flat
+// ({type,collections,files,dirs,total,reqId}), requiring only one layer of parsing on the frontend.
 type shareResp struct {
 	Type string `json:"type"`
 	ShareSnapshot
@@ -65,74 +65,74 @@ type shareResp struct {
 	ReqID string `json:"reqId,omitempty"`
 }
 
-// SetShareProvider 注入本节点共享范围读取器（main 装配
-// service.NodeShare.SnapshotFor）。入参是请求者节点 ID——好友能看到 private 条目。
-// nil = 未启用共享 → share 帧回空快照。可在 Start() 之后调用（见字段注释）。
+// SetShareProvider injects the node's sharing-scope reader (main wires
+// service.NodeShare.SnapshotFor). The argument is the requesting peer's ID — friends can see private entries.
+// nil = sharing not enabled → the share frame returns an empty snapshot. Can be called after Start() (see field comments).
 func (s *PeerJSService) SetShareProvider(p func(peerID string) ShareSnapshot) {
 	s.shareMu.Lock()
 	s.shareProvider = p
 	s.shareMu.Unlock()
 }
 
-// currentShareProvider 快照读取共享范围读取器（受锁保护）。
+// currentShareProvider takes a locked snapshot of the sharing-scope reader.
 func (s *PeerJSService) currentShareProvider() func(peerID string) ShareSnapshot {
 	s.shareMu.RLock()
 	defer s.shareMu.RUnlock()
 	return s.shareProvider
 }
 
-// ShareGate 下载门禁：判断某个 hash 能否发给请求者（doc/NETDISK.md §12.6）。
+// ShareGate is a download gate: determines whether a given hash can be sent to the requester (doc/NETDISK.md §12.6).
 //
-// 为什么清单与下载要分开：三档级别的本质区别就在"列不列"和"给不给"两件事上
-// （unlisted = 不列但给）。一个 provider 只能回答"清单里有什么"，答不了
-// "这个 hash 能不能取"。
+// Why separate the manifest from downloads: the essential difference between the three tiers lies in "list or not" and "give or not"
+// (unlisted = don't list but give). A single provider can only answer "what's in the manifest," not
+// "can this hash be fetched."
 //
-// 只有 private 会挡人：public / unlisted / 未声明都放行——内容寻址取回是这套
-// 系统的既有行为，PSK 才是准入门禁。把"没声明"也挡掉会连"上传→按 hash 取回
-// 校验"这种基本自检都过不去。
+// Only private blocks access: public / unlisted / undeclared all pass through — content-addressed retrieval is this
+// system's existing behavior, and PSK is the admission gate. Blocking "undeclared" would even break basic
+// self-checks like "upload → retrieve by hash to verify."
 //
-// self = 本节点的本地通道（HTTP 管理 API / 本机 WS 直连），永远是"自己"。
+// self = this node's local channel (HTTP management API / local WS direct connection), always "self."
 type ShareGate interface {
 	AllowsDownload(peerID, hash string, self bool) bool
 }
 
-// SetShareGate 注入下载门禁（main 装配 service.NodeShare）。nil = 不门禁。
+// SetShareGate injects the download gate (main wires service.NodeShare). nil = no gating.
 func (s *PeerJSService) SetShareGate(g ShareGate) {
 	s.shareMu.Lock()
 	s.shareGate = g
 	s.shareMu.Unlock()
 }
 
-// currentShareGate 快照读取下载门禁（受锁保护）。
+// currentShareGate takes a locked snapshot of the download gate.
 func (s *PeerJSService) currentShareGate() ShareGate {
 	s.shareMu.RLock()
 	defer s.shareMu.RUnlock()
 	return s.shareGate
 }
 
-// isSelfSession 判断会话是否来自"自己"（本机 WS 直连，即管理台/面板走
-// /ws/peer 的本地连接）。
+// isSelfSession determines whether the session comes from "self" (local WS direct connection, i.e., the admin panel/dashboard
+// connecting via /ws/peer locally).
 //
-// 为什么需要它：private 的语义是"只有自己和好友能下载"。P2P 连接上只有对端
-// 自报的 peer id，运营者自己的面板拿到的也是一个随机 id（每次可能不同），
-// 没法靠 id 认出"这是我"。而走本机 WS 进来的连接本来就是本节点的管理通道，
-// 它就是"自己"。
+// Why it's needed: the semantics of private is "only self and friends can download." On a P2P connection, the only
+// identifier available is the peer's self-reported peer id. The operator's own panel also gets a random id (which may differ each time),
+// so identity cannot be determined by id. A connection coming through the local WS is this node's management channel by definition,
+// and it IS "self."
 func isSelfSession(c Session) bool {
 	ls, ok := c.(interface{ IsLocal() bool })
 	return ok && ls.IsLocal()
 }
 
-// shareLoadInfo announce 时上报的共享摘要（loadInfo.shares），只含**数量**。
-// 为什么不报具体 hash：announce 会经发现服务器广播给所有查询者，报 hash
-// 等于公开"本节点持有什么"；数量足够支撑市场卡片的引导信息，细节等用户
-// 加入并直连后走 share 帧（点对点）再拿。
+// shareLoadInfo is the sharing summary reported during announce (loadInfo.shares); it contains only **counts**.
+// Why not report specific hashes: announce is broadcast by the discovery server to all queryers; reporting hashes
+// would publicly reveal "what this node holds." Counts are sufficient for the marketplace card's guiding info; details are obtained
+// via the share frame (point-to-point) after the user joins and connects directly.
 //
-// 注意：本函数作为回调注册给 HTTPDiscovery（announce 心跳每 30s 调用），
-// 每次调用都重新读 provider —— 装配晚于 Start（main 的顺序）也能生效。
+// Note: this function is registered as a callback to HTTPDiscovery (announce heartbeat called every 30s);
+// each call re-reads the provider — wiring after Start (main's order) also takes effect.
 //
-// 这里以**匿名视角**（空 peerID）统计：announce 的数量会被发现服务器广播给
-// 所有查询者，不能因为"某个查询者恰好是好友"就把 private 的条目数报出去——
-// 那等于把"我有 N 个只给好友的东西"公开了。
+// Here it counts from an **anonymous viewpoint** (empty peerID): announce counts are broadcast by the discovery server to
+// all queryers; we must not expose private entry counts just because "some queryer happens to be a friend" —
+// that would publicly reveal "I have N things shared only with friends."
 func (s *PeerJSService) shareLoadInfo() map[string]any {
 	p := s.currentShareProvider()
 	if p == nil {
@@ -148,18 +148,18 @@ func (s *PeerJSService) shareLoadInfo() map[string]any {
 	}
 }
 
-// serveShare 应答对端的 share 查询（入站角色）。
+// serveShare answers the peer's share query (inbound role).
 //
-// 请求者身份只有一个**自报的** peer id（ROADMAP 硬约束：第 7 阶段前不引入账号
-// 依赖，也没有签名可校验）。它能做的只有一件事：让好友名单里的人看到 private
-// 条目——再多就是假装自己有身份了。unlisted 永不列出，public 全部列出，
-// 这些过滤在 service.NodeShare.SnapshotFor 内完成。
+// The requester's identity is only a **self-reported** peer id (ROADMAP hard constraint: no account
+// dependency before Phase 7, and no signature to verify). It can do only one thing: let people on the friends list see private
+// entries — anything more would be impersonating an identity. unlisted is never listed, public is always listed;
+// this filtering is done inside service.NodeShare.SnapshotFor.
 func (s *PeerJSService) serveShare(c Session, r dcResp) {
 	snap := ShareSnapshot{}
 	if p := s.currentShareProvider(); p != nil {
 		snap = p(c.ID())
 	}
-	// 保证 JSON 里是 [] 而不是 null：前端列表渲染不必判空
+	// Ensure JSON contains [] instead of null: the frontend list renderer doesn't need null checks
 	if snap.Collections == nil {
 		snap.Collections = []ShareCollectionInfo{}
 	}

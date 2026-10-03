@@ -1,4 +1,4 @@
-// 分享链接控制器 — 创建、访问和列出分享链接（文件或合集）。
+// Share link controller — creates, accesses, and lists share links (files or collections).
 package controller
 
 import (
@@ -10,15 +10,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// shareSvc 分享服务（M2 收层：不再直调 repository）。
+// shareSvc share service (M2 collection layer: no longer calls repository directly).
 var shareSvc *service.ShareService
 
-// InitShareController 注入 ShareService 实例。
+// InitShareController injects ShareService instance.
 func InitShareController(svc *service.ShareService) {
 	shareSvc = svc
 }
 
-// CreateShare 处理 POST /shares，创建文件或集合的分享链接。
+// CreateShare handles POST /shares, creates a share link for a file or collection.
 func CreateShare(c *gin.Context) {
 	var req struct {
 		Hash     string `json:"hash" binding:"required"`
@@ -50,7 +50,7 @@ func CreateShare(c *gin.Context) {
 	})
 }
 
-// AccessShare 处理 GET /s/:token，按 token 访问分享链接并重定向到文件或集合。
+// AccessShare handles GET /s/:token, accesses the share link by token and redirects to the file or collection.
 func AccessShare(c *gin.Context) {
 	token := c.Param("token")
 	if token == "" {
@@ -74,7 +74,7 @@ func AccessShare(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/sha256sum/"+share.Hash)
 }
 
-// ListShares 处理 GET /shares，列出所有未过期的分享链接。
+// ListShares handles GET /shares, lists all non-expired share links.
 func ListShares(c *gin.Context) {
 	shares, err := shareSvc.List()
 	if err != nil {

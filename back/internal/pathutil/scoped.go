@@ -1,10 +1,12 @@
 package pathutil
 
-// scopedOps 把"在一个允许根之内做文件操作"包成一个统一的面：能用 os.Root 就用，
-// 用不了（且运营者显式开了逃生阀）就退回"绝对路径 + os.*"。
+// scopedOps wraps "perform file operations within an allowed root" into a unified interface: use os.Root
+// when available, fall back to "absolute path + os.*" when not (and the operator has explicitly
+// enabled the escape hatch).
 //
-// 为什么要有这一层：以前每个调用点自己 if-else，写 E1 处改了、E2 处忘了改。
-// 降级逻辑只有一处、正确性由这一个类型负责，调用点永远写 `ops.WriteFile(rel, …)`。
+// Why this layer: previously each call site had its own if-else, and when E1 was updated, E2 was
+// forgotten. Degradation logic lives in one place, correctness is owned by this single type, and
+// call sites always write `ops.WriteFile(rel, ...)`.
 
 import (
 	"os"
@@ -12,11 +14,11 @@ import (
 )
 
 type scopedOps struct {
-	root *os.Root // nil = 已降级到按路径操作
-	base string   // 降级时用：base/rel 就是完整路径
+	root *os.Root // nil = degraded to path-based operations
+	base string   // used in degraded mode: base/rel is the full path
 }
 
-// openScoped 在一个允许根上建立操作句柄。
+// openScoped establishes an operation handle on an allowed root.
 func openScoped(root string) (scopedOps, error) {
 	r, err := openRootOrFallback(root)
 	if err != nil {
@@ -27,7 +29,7 @@ func openScoped(root string) (scopedOps, error) {
 
 func (o scopedOps) degraded() bool { return o.root == nil }
 
-// full 降级模式下的完整路径（WriteFile/Remove 等最后一个参数是路径不是句柄）。
+// full returns the full path in degraded mode (WriteFile/Remove etc. take a path, not a handle, as the last argument).
 func (o scopedOps) full(rel string) string {
 	if rel == "." {
 		return o.base
@@ -83,6 +85,7 @@ func (o scopedOps) removeAll(rel string) error {
 	return os.RemoveAll(o.full(rel))
 }
 
-// Degraded 是否处在降级模式：此刻这些操作**没有** TOCTOU 保护（路径会被二次
-// 解析）。调用方若要在日志里说明状态、或拒绝某些高风险动作，用它判断。
+// Degraded returns whether in degraded mode: these operations **have no** TOCTOU protection
+// (paths are resolved a second time). Use this to explain status in logs or reject certain
+// high-risk actions.
 func (o scopedOps) Degraded() bool { return o.degraded() }

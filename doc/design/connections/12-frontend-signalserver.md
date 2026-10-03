@@ -1,140 +1,140 @@
-# 连接 12：frontend ↔ signalserver（消费端拨号）
+# Connection 12: frontend ↔ signalserver (consumer-side dialing)
 
-- **涉及模块**：`../modules/13-frontend.md` 与 `../modules/11-signalserver.md`
-- **代码位置**：A 侧 `front/src/lib/PeerJSConnect.jsx`（UI 组件 + `DEFAULT_SIG` + `connectTo`/`handleSearch`）与 `front/src/lib/pd-client/`（`connectToPeer` `client.js:987-1022`、`discoverNodes` `client.js:907-935`、`PeerDriveClient` 状态机 `client.js:121-...`、帧协议 `protocol.js:3-24`）；B 侧 `back/signalserver/signalserver.go`（`HandleWS` `:246-296`、`readLoop`/`route` `:298-356`、`HandleNodes` `:568-638`）
-- **方向**：A→B 为主，分两条面：**信令面**（A 发起 WS 拨号 → B 转发 OFFER/ANSWER/CANDIDATE/HEARTBEAT → A 拿到 DataChannel 后转 P2P 与 B 解耦）；**发现面**（A→B 单次 HTTP `GET /discover/nodes`，B 回在线节点列表）。B→A 仅在 `handleDeadDst`/`removeClient` 广播 LEAVE 时发生（`signalserver.go:388-401, 426-446`），视为双向。
+- **Modules involved**: `../modules/13-frontend.md` and `../modules/11-signalserver.md`
+- **Code locations**: A side `front/src/lib/PeerJSConnect.jsx` (UI component + `DEFAULT_SIG` + `connectTo`/`handleSearch`) and `front/src/lib/pd-client/` (`connectToPeer` `client.js:987-1022`, `discoverNodes` `client.js:907-935`, `PeerDriveClient` state machine `client.js:121-...`, frame protocol `protocol.js:3-24`); B side `back/signalserver/signalserver.go` (`HandleWS` `:246-296`, `readLoop`/`route` `:298-356`, `HandleNodes` `:568-638`)
+- **Direction**: A→B primary, split into two surfaces: **signaling surface** (A initiates WS dial → B forwards OFFER/ANSWER/CANDIDATE/HEARTBEAT → A gets DataChannel then goes P2P, decoupled from B); **discovery surface** (A→B single HTTP `GET /discover/nodes`, B returns online node list). B→A only occurs during `handleDeadDst`/`removeClient` broadcasting LEAVE (`signalserver.go:388-401, 426-446`), considered bidirectional.
 
-## 1. 连接方式
+## 1. Connection Method
 
-本连接是「一条信令 WS + 一条发现 HTTP」的叠加，**均由 A 侧（消费端浏览器）主动建立**，B 侧被动受理。与连接 08（transport↔signalserver）的差别：本连接 A 侧用**官方 peerjs 浏览器库**（不是 `back/peerjs` 的 go-peerjs 库），帧协议同构但实现独立，且**只拨号、不发 announce**。
+This connection is an overlay of "one signaling WS + one discovery HTTP", **both actively established by A side (consumer browser)**, B side passively accepts. Difference from connection 08 (transport↔signalserver): this connection's A side uses the **official peerjs browser library** (not the `back/peerjs` go-peerjs library), frame protocol is isomorphic but independently implemented, and **only dials, doesn't send announce**.
 
-### 1.1 信令面（消费端按 peer id 拨号）——WebSocket，PeerJS 兼容协议
+### 1.1 Signal Surface (Consumer dials by peer id) — WebSocket, PeerJS Compatible Protocol
 
-- **通道**：`PeerJSConnect.jsx:58-88` 的 `connectTo(peerId)` 调 `connectToPeer(Peer, target, {peerOptions, connOptions, timeoutMs:15000})`（`PeerJSConnect.jsx:65-76`）；`connectToPeer`（`client.js:987-1022`）在浏览器内 `new Peer(myId, {...peerOptions, id: myId})` 建 PeerJS 客户端，等 `open` 事件后 `peer.connect(targetId, {serialization:'raw', reliable:true, ...connOptions})` 建出 DataConnection，再包一层 `PeerDriveClient`。B 侧 `HandleWS` 受理（`signalserver.go:246-296`）。
-- **URL/参数**：`wss://{host}:{port}/{path}peerjs?key=&id=&token=&version=1.5.5`（`peerjs.js:3535-3541`，`version` 来自 `peerjs.js:3543`）。`host/port/path/key` 默认 `DEFAULT_SIG = {host:'peersignal.moonchan.xyz', port:443, path:'/', key:'pd-signal-b9447b406828e500', secure:true}`（`PeerJSConnect.jsx:11-17`），UI 上三个字段可覆写（`PeerJSConnect.jsx:144-157`），空串回落默认（`PeerJSConnect.jsx:67,68,70`）。**`id` 走 `getStableMyId()`**（`PeerJSConnect.jsx:19-31`）——localStorage `peerdrive.panel.v1` 里持久化，没有才生成 `pd-<ts36>-<rand6>`；这样重开面板身份不变，对端可识别为同一 peer。**`token` 由 peerjs 库自动生成**（`peerjs.js:4664` `randomToken()`），A 侧不透传——因为公共部署白名单为空（默认不限制），白名单只用于自托管可信节点（`signalserver.go:57-64`）。
-- **协议帧**：与连接 08 完全一致——`{type, src, dst, payload}` 文本 JSON，服务端**覆盖 src** 为连接者 id（`signalserver.go:309`）；类型 `OPEN/LEAVE/OFFER/ANSWER/CANDIDATE/EXPIRE/HEARTBEAT/ID-TAKEN/ERROR`（`peerjs.js:3516-3527`）。本连接在信令面**只承载 WebRTC 握手**：DataChannel open 后 `PeerDriveClient` 直接在其上跑 peerdrive 帧协议（`protocol.js:3-24`），不再回信令。
-- **鉴权**：三把锁在 B 侧 `HandleWS` 依次校验（`signalserver.go:249-263`）——① 缺 `id/token/key` 任一 → HTTP 400；② `key != s.key` → 400（消费端传 `DEFAULT_SIG.key` 或 UI 覆写值）；③ token 白名单启用（自托管部署配 `-tokens`）且 token 不在名单 → 400。公共部署白名单为空即不限制。**注意**：A 侧 token 是随机数（`peerjs.js:4664`），因此**消费端不能通过自托管信令的 token 白名单**——公共部署或把消费端 token 也加入名单才能用（`signalserver.go:62-64` 的「白名单只约束信令面」注释隐含这一点）。
-- **建立时机**：两条路径都会触发——① 挂载即自动搜索 → 用户点搜索结果里的「连接」按钮（`PeerJSConnect.jsx:119-120, 123-128`）；② 用户手输 target peer id 后点「连接」（`PeerJSConnect.jsx:90, 198-199`）。信令 WS 断开**不由前端主动重连**——peerjs 库内部有 `_scheduleHeartbeat` 循环（`peerjs.js:3567-3579`），但 `_disconnected` 后 send 静默丢弃，前端**只能由用户重新点连接**（`PeerJSConnect.jsx` 全文无 reconnect；错误态见 `PeerJSConnect.jsx:84-87`）。
+- **Channel**: `PeerJSConnect.jsx:58-88`'s `connectTo(peerId)` calls `connectToPeer(Peer, target, {peerOptions, connOptions, timeoutMs:15000})` (`PeerJSConnect.jsx:65-76`); `connectToPeer` (`client.js:987-1022`) in browser creates `new Peer(myId, {...peerOptions, id: myId})` PeerJS client, waits for `open` event then `peer.connect(targetId, {serialization:'raw', reliable:true, ...connOptions})` creates DataConnection, then wraps in `PeerDriveClient`. B side `HandleWS` accepts (`signalserver.go:246-296`).
+- **URL/Parameters**: `wss://{host}:{port}/{path}peerjs?key=&id=&token=&version=1.5.5` (`peerjs.js:3535-3541`, `version` from `peerjs.js:3543`). `host/port/path/key` default `DEFAULT_SIG = {host:'peersignal.moonchan.xyz', port:443, path:'/', key:'pd-signal-b9447b406828e500', secure:true}` (`PeerJSConnect.jsx:11-17`), three fields on UI can override (`PeerJSConnect.jsx:144-157`), empty string falls back to default (`PeerJSConnect.jsx:67,68,70`). **`id` uses `getStableMyId()`** (`PeerJSConnect.jsx:19-31`) — persisted in localStorage `peerdrive.panel.v1`, only generates `pd-<ts36>-<rand6>` when absent; this way reopening panel keeps same identity, peer can recognize as same peer. **`token` auto-generated by peerjs library** (`peerjs.js:4664` `randomToken()`), A side doesn't pass through — because public deployment whitelist is empty (default no restriction), whitelist only used for self-hosted trusted nodes (`signalserver.go:57-64`).
+- **Protocol frames**: Exactly identical to connection 08 — `{type, src, dst, payload}` text JSON, server **overwrites src** with connector's id (`signalserver.go:309`); types `OPEN/LEAVE/OFFER/ANSWER/CANDIDATE/EXPIRE/HEARTBEAT/ID-TAKEN/ERROR` (`peerjs.js:3516-3527`). This connection's signaling surface **only carries WebRTC handshake**: after DataChannel open, `PeerDriveClient` runs peerdrive frame protocol directly on it (`protocol.js:3-24`), no longer going back to signaling.
+- **Authentication**: Three locks checked sequentially at B side `HandleWS` (`signalserver.go:249-263`) — ① missing any of `id/token/key` → HTTP 400; ② `key != s.key` → 400 (consumer passes `DEFAULT_SIG.key` or UI override value); ③ token whitelist enabled (self-hosted deployment configures `-tokens`) and token not in list → 400. Public deployment empty whitelist = no restriction. **Note**: A side token is random (`peerjs.js:4664`), therefore **consumer cannot pass self-hosted signaling's token whitelist** — public deployment or adding consumer token to list is required (`signalserver.go:62-64`'s "whitelist only constrains signaling surface" comment implies this).
+- **Establishment timing**: Two paths trigger it — ① mount auto-search → user clicks "connect" button in search results (`PeerJSConnect.jsx:119-120, 123-128`); ② user manually enters target peer id then clicks "connect" (`PeerJSConnect.jsx:90, 198-199`). Signal WS disconnect **not actively reconnected by frontend** — peerjs library internally has `_scheduleHeartbeat` loop (`peerjs.js:3567-3579`), but after `_disconnected` send silently drops, frontend **can only have user click connect again** (`PeerJSConnect.jsx` has no reconnect anywhere; error state see `PeerJSConnect.jsx:84-87`).
 
-### 1.2 发现面（discoverNodes 查询在线节点）——HTTP REST，公开无鉴权
+### 1.2 Discovery Surface (discoverNodes query online nodes) — HTTP REST, Public No Auth
 
-- **通道**：`PeerJSConnect.jsx:101-117` 的 `handleSearch` 调 `discoverNodes({host,port,secure}, {timeoutMs:8000})`（`client.js:907-935`）→ B 侧 `HandleNodes`（`signalserver.go:568-638`）。
-- **接口**：`GET {scheme}://{host}:{port}/discover/nodes?coll=<hash>`——`coll` 空表示返回所有 collection 的节点（`signalserver.go:581-611`）；回 `{nodes:[{peerId,lastSeen,nodeType,collections,uptime,loadInfo}], links:[{source,target,lastSeen}]}`。
-- **A 侧调用特点**：**消费端不 announce**（`PeerJSConnect.jsx` 全文无 `/discover/announce` 调用），只消费 B 侧节点端的 announce 结果——因此发现列表里**看不到消费端自己**，只能看到已 announce 的 go-persistent 节点（连接 08 §2.2 的 announce 循环）。挂载即自动触发一次搜索（`PeerJSConnect.jsx:119-120`），按钮留给手动刷新（`PeerJSConnect.jsx:163-167`）。
-- **鉴权/CORS**：发现端**公开、不鉴权**；所有 REST 端点经 `allowCORS` 全放开 `Access-Control-Allow-Origin: *` 并短路 OPTIONS 预检（`signalserver.go:209-234`）。**这条全放开就是为了 A 侧的公共静态面板**——面板在 `file://` 时 origin 是 `null`、托管到 Pages/CDN 时又是另一个域，`GET /discover/nodes` 与 peerjs 库自动调的 `GET /peerjs/id` 都必然跨域（`signalserver.go:211-218` 的注释、`client.js:898-902` 与 `client.js:963-979` 的注释都点破了这一点）。
+- **Channel**: `PeerJSConnect.jsx:101-117`'s `handleSearch` calls `discoverNodes({host,port,secure}, {timeoutMs:8000})` (`client.js:907-935`) → B side `HandleNodes` (`signalserver.go:568-638`).
+- **Interface**: `GET {scheme}://{host}:{port}/discover/nodes?coll=<hash>` — empty `coll` means return nodes for all collections (`signalserver.go:581-611`); returns `{nodes:[{peerId,lastSeen,nodeType,collections,uptime,loadInfo}], links:[{source,target,lastSeen}]}`.
+- **A side calling characteristics**: **Consumer doesn't announce** (`PeerJSConnect.jsx` has no `/discover/announce` call anywhere), only consumes B side node-side announce results — therefore discovery list **doesn't show consumer itself**, only shows announced go-persistent nodes (connection 08 §2.2's announce loop). Mount auto-triggers one search (`PeerJSConnect.jsx:119-120`), button left for manual refresh (`PeerJSConnect.jsx:163-167`).
+- **Auth/CORS**: Discovery endpoints are **public, no auth**; all REST endpoints open CORS fully `Access-Control-Allow-Origin: *` and short-circuit OPTIONS preflight (`signalserver.go:209-234`). **This full open is for A side's public static panel** — panel on `file://` has origin `null`, hosted on Pages/CDN has another domain, `GET /discover/nodes` and peerjs library's auto-called `GET /peerjs/id` are all necessarily cross-origin (`signalserver.go:211-218` comments, `client.js:898-902` and `client.js:963-979` comments all point this out).
 
-## 2. 时序
+## 2. Timing
 
-### 2.1 发现面：搜索在线节点
+### 2.1 Discovery Surface: Search Online Nodes
 
 ```mermaid
 sequenceDiagram
-  participant U as 用户
+  participant U as User
   participant UI as PeerJSConnect.jsx
   participant DC as pd-client/discoverNodes
   participant SS as signalserver HandleNodes
 
-  U->>UI: 挂载或点「搜索在线节点」
+  U->>UI: Mount or click "Search Online Nodes"
   UI->>DC: discoverNodes({host,port,secure}, {timeoutMs:8000})
-  DC->>DC: AbortController 超时兜底 (client.js:915-917)
+  DC->>DC: AbortController timeout fallback (client.js:915-917)
   DC->>SS: GET /discover/nodes (fetch mode:cors, client.js:918)
-  SS->>SS: 按 heartbeatTTL 90s 剔过期；遍历 disc 去重 (signalserver.go:576-611)
+  SS->>SS: Filter expired by heartbeatTTL 90s; iterate disc dedupe (signalserver.go:576-611)
   SS-->>DC: {nodes, links}
   DC-->>UI: Array< {peerId,lastSeen,nodeType,collections,...} >
-  UI-->>U: 渲染节点列表（点击「连接」→ handleJoinFound → connectTo）
+  UI-->>U: Render node list (click "Connect" → handleJoinFound → connectTo)
 ```
 
-**逐步骤说明**：
+**Step-by-step explanation**:
 
-1. **触发**：`PeerJSConnect.jsx:119-120` 的 `useEffect(() => { handleSearch(); }, [])` 挂载即自动搜索一次；按钮（`PeerJSConnect.jsx:163-167`）留给手动刷新，`disabled={searchStatus==='searching'}` 防重复点击。
-2. **fetch**：`discoverNodes`（`client.js:907-935`）拼 URL：`https://{host}:{port||443}/discover/nodes`；`secure===false` 时用 `http`/`80`；`opts.coll` 非空追加 `?coll=<hash>`（消费端目前传空 coll，返回全房间，`PeerJSConnect.jsx:106-108`）。`AbortController` + `setTimeout(timeoutMs)` 硬超时（`client.js:915-917`），默认 8000ms（`client.js:912`）。
-3. **服务端筛选**：`HandleNodes`（`signalserver.go:568-638`）——`heartbeatTTL=90s`（`signalserver.go:194`）cutoff 剔除过期节点；`type` 过滤可选；空 coll 时遍历所有 collection 去重收集（`signalserver.go:597-611`）；再收 graph 边（两端都活跃的边、字典序去重，`signalserver.go:612-634`）。
-4. **回显**：UI 渲染 `foundNodes`（`PeerJSConnect.jsx:173-188`）：每行显示 `peerId / nodeType / collections 数量`，点「连接」→ `handleJoinFound(n.peerId)` → `connectTo(peerId)`（`PeerJSConnect.jsx:123-128`）。
-5. **CORS 兜底**：CORS 失败在浏览器里只表现为 `TypeError` 且无状态码，`discoverNodes` 单独包一句明确提示并附 origin（`client.js:926-931`）——用户能一眼看出是信令未开 CORS，而不是「信令挂了」。
+1. **Trigger**: `PeerJSConnect.jsx:119-120`'s `useEffect(() => { handleSearch(); }, [])` auto-searches once on mount; button (`PeerJSConnect.jsx:163-167`) left for manual refresh, `disabled={searchStatus==='searching'}` prevents duplicate clicks.
+2. **fetch**: `discoverNodes` (`client.js:907-935`) constructs URL: `https://{host}:{port||443}/discover/nodes`; `secure===false` uses `http`/`80`; `opts.coll` non-empty appends `?coll=<hash>` (consumer currently passes empty coll, returns all rooms, `PeerJSConnect.jsx:106-108`). `AbortController` + `setTimeout(timeoutMs)` hard timeout (`client.js:915-917`), default 8000ms (`client.js:912`).
+3. **Server-side filtering**: `HandleNodes` (`signalserver.go:568-638`) — `heartbeatTTL=90s` (`signalserver.go:194`) cutoff removes expired nodes; `type` filter optional; empty coll iterates all collections dedupe collect (`signalserver.go:597-611`); then collects graph edges (both ends active edges, lexicographic dedupe, `signalserver.go:612-634`).
+4. **Display**: UI renders `foundNodes` (`PeerJSConnect.jsx:173-188`): each row shows `peerId / nodeType / collections count`, click "Connect" → `handleJoinFound(n.peerId)` → `connectTo(peerId)` (`PeerJSConnect.jsx:123-128`).
+5. **CORS fallback**: CORS failure in browser only manifests as `TypeError` with no status code, `discoverNodes` wraps a clear message with origin (`client.js:926-931`) — user can immediately see it's signaling CORS not open, not "signaling is down".
 
-### 2.2 信令面：按 peer id 拨号并拿到 DataChannel
+### 2.2 Signal Surface: Dial by peer id and Get DataChannel
 
 ```mermaid
 sequenceDiagram
-  participant U as 用户
+  participant U as User
   participant UI as PeerJSConnect.jsx
   participant CL as pd-client/connectToPeer
-  participant PJ as peerjs 库 (peerjs.js)
+  participant PJ as peerjs library (peerjs.js)
   participant SS as signalserver
-  participant N as 目标节点（另一 transport 实例）
+  participant N as Target node (another transport instance)
   participant PD as PeerDriveClient
 
-  U->>UI: 输入 peerId + 点「连接」
+  U->>UI: Enter peerId + click "Connect"
   UI->>CL: connectToPeer(Peer, target, {peerOptions:{host,port,path,key,secure,id}, connOptions:{serialization:raw, reliable:true}, timeoutMs:15000}) (PeerJSConnect.jsx:65-76)
   CL->>PJ: new Peer(myId, {..peerOptions, id:myId}) (client.js:994-995)
-  PJ->>PJ: token 自动生成 randomToken() (peerjs.js:4664)
+  PJ->>PJ: Token auto-generated randomToken() (peerjs.js:4664)
   PJ->>SS: WSS /peerjs?key=&id=<myId>&token=&version=1.5.5
-  SS->>SS: 校验 id/token/key、key、token 白名单 (signalserver.go:249-263)
-  SS->>SS: 升级 WS（读限 40KB、初始 60s 读超时，signalserver.go:272-275）
-  SS->>SS: ID 占用检查（token 匹配接管 / 不匹配 ID-TAKEN，277-291）
+  SS->>SS: Validate id/token/key, key, token whitelist (signalserver.go:249-263)
+  SS->>SS: Upgrade WS (read limit 40KB, initial 60s read timeout, signalserver.go:272-275)
+  SS->>SS: ID occupancy check (token match takeover / mismatch ID-TAKEN, 277-291)
   SS-->>PJ: OPEN (signalserver.go:292)
-  SS->>SS: flushQueue 补发离线 OFFER (signalserver.go:293,405-416)
-  PJ-->>CL: 'open' 事件 → Promise resolve (client.js:997-1008)
-  loop 每 5s (peerjs.js:3567-3579，pingInterval 默认 5000)
-    PJ->>SS: HEARTBEAT (服务端续 60s 读超时，signalserver.go:312-313)
+  SS->>SS: flushQueue resend offline OFFER (signalserver.go:293,405-416)
+  PJ-->>CL: 'open' event → Promise resolve (client.js:997-1008)
+  loop Every 5s (peerjs.js:3567-3579, pingInterval default 5000)
+    PJ->>SS: HEARTBEAT (server extends 60s read timeout, signalserver.go:312-313)
   end
   CL->>PJ: peer.connect(target, {serialization:'raw', reliable:true}) (client.js:1009)
   PJ->>SS: OFFER {src:myId, dst:target, sdp, connectionId}
-  SS->>SS: route：m.Src=cl.id；查 clients[dst] (signalserver.go:309,331)
-  alt dst 在线
-    SS->>N: OFFER（answerer 侧接受，见连接 07）
-    N-->>SS: ANSWER + CANDIDATE（按 connectionId 路由）
+  SS->>SS: route: m.Src=cl.id; lookup clients[dst] (signalserver.go:309,331)
+  alt dst online
+    SS->>N: OFFER (answerer side accepts, see connection 07)
+    N-->>SS: ANSWER + CANDIDATE (routed by connectionId)
     SS-->>PJ: ANSWER / CANDIDATE
     PJ-->>CL: DataChannel open
-    CL->>PD: new PeerDriveClient(conn, {peerId:target})；client.ready(20s)
-    PD-->>CL: 就绪
-  else dst 不在线
-    SS->>SS: 入队 queues[dst]，TTL 30s、每 dst ≤100 条 (signalserver.go:343-355,77-80)
-    CL-->>U: client.ready 20s 超时 → 抛 ERR.TIMEOUT (client.js:190-193)
+    CL->>PD: new PeerDriveClient(conn, {peerId:target}); client.ready(20s)
+    PD-->>CL: Ready
+  else dst not online
+    SS->>SS: Enqueue queues[dst], TTL 30s, max 100 per dst (signalserver.go:343-355,77-80)
+    CL-->>U: client.ready 20s timeout → throw ERR.TIMEOUT (client.js:190-193)
   end
-  CL-->>UI: client 实例
-  UI->>PD: client.shares()（发 share 帧查清单，client.js:205-220）
+  CL-->>UI: client instance
+  UI->>PD: client.shares() (send share frame query manifest, client.js:205-220)
   PD-->>UI: {collections, files, dirs, total} → setPdShare + pdStatus='online'
-  UI->>UI: setNodeSession({client,peerId,myId})（跨页共享，nodeSession.js:5-7）
+  UI->>UI: setNodeSession({client,peerId,myId}) (cross-page sharing, nodeSession.js:5-7)
 ```
 
-**逐步骤说明**：
+**Step-by-step explanation**:
 
-1. **入口**：`handleConnect`（`PeerJSConnect.jsx:90`）或 `handleJoinFound`（`PeerJSConnect.jsx:123-128`）→ `connectTo(target)`（`PeerJSConnect.jsx:58-88`）；把 UI 上的 `sigHost/sigPort/sigKey` 与 `DEFAULT_SIG` 合并（UI 值优先、空串回落默认，`PeerJSConnect.jsx:67-71`），`id: myIdRef.current` 用稳定本机 id。
-2. **PeerJS 客户端建立**：`connectToPeer`（`client.js:987-1022`）在浏览器内 `new PeerCtor(myId, {...peerOptions, id: myId})`（`client.js:994-995`）——**id 走位置参数**（`client.js:991-993` 的注释）：`peerjs@1.5.5` 会把 `options.id` 忽略（照样发 `GET /id`），只有 `new Peer(id, opts)` 才认；两个位置都给是为了兼容。等 `open` 事件（Promise.resolve）或 `error` 事件（Promise.reject，错误码 `ERR.CLOSED`，`client.js:997-1008`）。
-3. **WS 建链与 id**：peerjs 库在 `start(id, token)`（`peerjs.js:3535-3541`）拼 `wss://host:port/path peerjs?key=&id=&token=&version=1.5.5`；token 由 `randomToken()` 生成（`peerjs.js:4664`）；`socket.onopen` 触发后 `_scheduleHeartbeat()` 起 5s 心跳（`peerjs.js:3567-3579`）。**消费端自带 id 时**（本例传了 `myIdRef.current`）peerjs 会跳过 `GET /peerjs/id` 随机 id 请求——`randomPeerId` 兜底（`client.js:980-985`）只在 `peerOptions.id` 缺省时用；这个跳过是**关键优化**，因为 `GET /id` 在 `file://` origin 下必然跨域（`client.js:963-979` 的注释专门讲这一坑）。
-4. **服务端受理**：`HandleWS`（`signalserver.go:246-296`）——① 缺 `id/token/key` 任一 → 400（`signalserver.go:250-253`）；② `key` 不匹配 → 400（`signalserver.go:254-257`）；③ token 白名单启用且不在名单 → 400（`signalserver.go:258-263`）；④ 升级 WS，读限 40KB、初始 60s 读超时（`signalserver.go:272-275`）；⑤ **ID 占用检查**：同 id 已在线且 token 匹配 → 关旧连接接管；不匹配 → 回 `ID-TAKEN` 并关闭（`signalserver.go:277-291`）；⑥ 注册 `clients[id]`、回 `OPEN`、`flushQueue` 补发离线消息、起 `readLoop`（`signalserver.go:288-295`）。
-5. **心跳保活**：peerjs 库 5s 一轮 `_scheduleHeartbeat`（`peerjs.js:3567-3579`），发送 `{type:'HEARTBEAT'}`；服务端 `readLoop` 收到任意消息都更新 `cl.last` 并续 60s 读超时（`signalserver.go:309-314`）。**A 侧不需要主动管理心跳**——全由 peerjs 库管，前端只感知 `peer.on('open'/'error'/'connection'/'disconnected')`。
-6. **拨号与房间转发**：`peer.connect(targetId, {serialization:'raw', reliable:true})`（`client.js:1009`）——**serialization:'raw' 是硬约束**（`client.js:958-961`）：只有 raw 模式下 string 走文本帧、ArrayBuffer 走二进制帧，才能复刻 Go 侧「文本帧=JSON 头 / 二进制帧=数据块」的语义（`protocol.js:16-24`）。发起侧发 `OFFER`，服务端 `route`（`signalserver.go:329-356`）——先 `m.Src = cl.id`（309），出锁后 `dst.send`（333-334，10s 写超时兜底），失败走 `handleDeadDst`；不在线则入队（TTL 30s、每 dst ≤100，`signalserver.go:343-355,77-80`）。目标节点作为 answerer 走连接 07 的 `onIncomingConnection` → `bindConn`，回 ANSWER + CANDIDATE，最终 DataChannel open。
-7. **就绪与本机身份**：`client.ready(opts.openTimeoutMs)`（`client.js:1012`；实现 `client.js:183-196`）等连接就绪——**注意**：`PeerJSConnect.jsx:75` 传的是 `timeoutMs:15000`，但 `connectToPeer` 只读 `opts.openTimeoutMs`（`client.js:1012`），该字段未传则回落 `DEFAULTS.openTimeoutMs = 20000`（`client.js:67-74`）——因此**实际生效的拨号超时是 20s 而非 15s**（未修 bug，见 §3「超时」行）。就绪后 `client._ownedPeer = peer`（`client.js:1011`）供 `localPeerId` getter 取「我是谁」（`client.js:178-180`，注释解释 `DataConnection.peer` 是**远端**不是自己）。
-8. **拉清单**：`client.shares()`（`client.js:205-220`）发 `share` 帧，服务端回 `share-resp`（结构见 `protocol.js:10-11`）——`PeerDriveClient` 整理成 `{peerId, collections, files, dirs, total}` 返回。**空清单是合法结果**（对方没开共享），UI 显示「该节点没有共享内容」（`PeerJSConnect.jsx:266-268`）。
-9. **会话落地**：`setNodeSession({client, peerId:target, myId:myIdRef.current})`（`PeerJSConnect.jsx:82`；`nodeSession.js:5-7`）——供节点控制页跨页共享；`onConnected?.(client, target)`（`PeerJSConnect.jsx:83`）触发「连接成功跳转」回调（`PeerJSConnect.jsx:33`）。
+1. **Entry**: `handleConnect` (`PeerJSConnect.jsx:90`) or `handleJoinFound` (`PeerJSConnect.jsx:123-128`) → `connectTo(target)` (`PeerJSConnect.jsx:58-88`); merges UI's `sigHost/sigPort/sigKey` with `DEFAULT_SIG` (UI values priority, empty string falls back to default, `PeerJSConnect.jsx:67-71`), `id: myIdRef.current` uses stable local id.
+2. **PeerJS client establishment**: `connectToPeer` (`client.js:987-1022`) in browser creates `new PeerCtor(myId, {...peerOptions, id: myId})` (`client.js:994-995`) — **id uses positional parameter** (`client.js:991-993` comment): `peerjs@1.5.5` ignores `options.id` (still sends `GET /id`), only `new Peer(id, opts)` is recognized; both positional args given for compatibility. Waits for `open` event (Promise.resolve) or `error` event (Promise.reject, error code `ERR.CLOSED`, `client.js:997-1008`).
+3. **WS connection and id**: peerjs library in `start(id, token)` (`peerjs.js:3535-3541`) constructs `wss://host:port/path peerjs?key=&id=&token=&version=1.5.5`; token generated by `randomToken()` (`peerjs.js:4664`); after `socket.onopen` triggers `_scheduleHeartbeat()` starts 5s heartbeat (`peerjs.js:3567-3579`). **When consumer brings its own id** (this case passes `myIdRef.current`), peerjs skips `GET /peerjs/id` random id request — `randomPeerId` fallback (`client.js:980-985`) only used when `peerOptions.id` is missing; this skip is a **key optimization** because `GET /id` on `file://` origin is necessarily cross-origin (`client.js:963-979` comment specifically discusses this pitfall).
+4. **Server-side acceptance**: `HandleWS` (`signalserver.go:246-296`) — ① missing any of `id/token/key` → 400 (`signalserver.go:250-253`); ② `key` mismatch → 400 (`signalserver.go:254-257`); ③ token whitelist enabled and not in list → 400 (`signalserver.go:258-263`); ④ upgrade WS, read limit 40KB, initial 60s read timeout (`signalserver.go:272-275`); ⑤ **ID occupancy check**: same id already online and token matches → close old connection takeover; mismatch → return `ID-TAKEN` and close (`signalserver.go:277-291`); ⑥ register `clients[id]`, return `OPEN`, `flushQueue` resend offline messages, start `readLoop` (`signalserver.go:288-295`).
+5. **Heartbeat keepalive**: peerjs library 5s per round `_scheduleHeartbeat` (`peerjs.js:3567-3579`), sends `{type:'HEARTBEAT'}`; server `readLoop` on any message updates `cl.last` and extends 60s read timeout (`signalserver.go:309-314`). **A side doesn't need to actively manage heartbeat** — fully managed by peerjs library, frontend only perceives `peer.on('open'/'error'/'connection'/'disconnected')`.
+6. **Dialing and room forwarding**: `peer.connect(targetId, {serialization:'raw', reliable:true})` (`client.js:1009`) — **serialization:'raw' is a hard constraint** (`client.js:958-961`): only in raw mode does string go text frame, ArrayBuffer go binary frame, replicating Go side "text frame=JSON header / binary frame=data chunk" semantics (`protocol.js:16-24`). Initiator sends `OFFER`, server `route` (`signalserver.go:329-356`) — first `m.Src = cl.id` (309), after releasing lock `dst.send` (333-334, 10s write timeout fallback), failure goes to `handleDeadDst`; not online enqueues (TTL 30s, max 100 per dst, `signalserver.go:343-355,77-80`). Target node as answerer goes through connection 07's `onIncomingConnection` → `bindConn`, returns ANSWER + CANDIDATE, finally DataChannel open.
+7. **Ready and local identity**: `client.ready(opts.openTimeoutMs)` (`client.js:1012`; implementation `client.js:183-196`) waits for connection ready — **note**: `PeerJSConnect.jsx:75` passes `timeoutMs:15000`, but `connectToPeer` only reads `opts.openTimeoutMs` (`client.js:1012`), this field not passed falls back to `DEFAULTS.openTimeoutMs = 20000` (`client.js:67-74`) — therefore **actual effective dial timeout is 20s not 15s** (unfixed bug, see §3 "Timeout" row). After ready `client._ownedPeer = peer` (`client.js:1011`) for `localPeerId` getter to get "who am I" (`client.js:178-180`, comment explains `DataConnection.peer` is **remote** not self).
+8. **Pull manifest**: `client.shares()` (`client.js:205-220`) sends `share` frame, server returns `share-resp` (structure see `protocol.js:10-11`) — `PeerDriveClient` organizes into `{peerId, collections, files, dirs, total}` and returns. **Empty manifest is a legitimate result** (other side hasn't opened sharing), UI shows "this node has no shared content" (`PeerJSConnect.jsx:266-268`).
+9. **Session landing**: `setNodeSession({client, peerId:target, myId:myIdRef.current})` (`PeerJSConnect.jsx:82`; `nodeSession.js:5-7`) — for node control page cross-page sharing; `onConnected?.(client, target)` (`PeerJSConnect.jsx:83`) triggers "connection success redirect" callback (`PeerJSConnect.jsx:33`).
 
-### 2.3 消费端 → 节点数据面（延伸说明，非本连接时序）
+### 2.3 Consumer → Node Data Surface (Extended explanation, not this connection's timing)
 
-DataChannel open 后，`PeerDriveClient` 在**直连 WebRTC DataChannel** 上跑 peerdrive 帧协议（`protocol.js:3-24`、`client.js:19-37` 的注释「本包不认识 PeerJS」）：`psk-auth`（若对端开了 PSK 门禁，`protocol.js:65-79`）→ `share`（清单元数据）→ `req`/`data`/`done`（文件拉取）→ `upload`/`meta`/`uploaded`（上传）。**这些帧不再经过 signalserver**——本连接在时序上到 DataChannel open 就结束了。
+After DataChannel open, `PeerDriveClient` runs peerdrive frame protocol on **direct WebRTC DataChannel** (`protocol.js:3-24`, `client.js:19-37` comment "this package doesn't know PeerJS"): `psk-auth` (if peer has PSK gate enabled, `protocol.js:65-79`) → `share` (manifest metadata) → `req`/`data`/`done` (file pull) → `upload`/`meta`/`uploaded` (upload). **These frames no longer go through signalserver** — this connection's timing ends at DataChannel open.
 
-## 3. 情况处理
+## 3. Case Handling
 
-| 异常/边界场景 | 行为与依据（代码位置） | 说明 |
+| Exception/Edge Case | Behavior & Rationale (code location) | Description |
 |---|---|---|
-| **超时** | ① 拨号总超时：`PeerJSConnect.jsx:75` 传 `timeoutMs:15000`，但 `connectToPeer` 只读 `opts.openTimeoutMs`（`client.js:1012`），未传则回落 `DEFAULTS.openTimeoutMs=20000`（`client.js:71`）——**实际生效是 20s，15s 是死参数**；超时抛 `PeerDriveError('连接未在 <t>ms 内建立', ERR.TIMEOUT)`（`client.js:190-193`）。② 发现请求 8s 硬超时：`AbortController + setTimeout` 中止 fetch（`client.js:912-917`），默认 8000ms。③ 服务端读超时：WS 初始 60s、每消息续期（`signalserver.go:272-275,312-313`），客户端 5s HEARTBEAT 续命（`peerjs.js:3567-3579`）；写超时服务端 10s（`signalserver.go:777`）。④ 帧级超时（数据面同源、非本连接）：`verbTimeoutMs=15000`、`idleTimeoutMs=120000`（`client.js:67-74`）。 | 拨号超时会同时触发 peerjs 库自身 `error` 事件与 `client.ready` 超时——两条路径都能把用户从「连接中」拉回错误态。`timeoutMs:15000` 的失效是**已知 bug**，改 `PeerJSConnect.jsx:75` 为 `openTimeoutMs:15000` 即可生效。 |
-| **断连 / 重连** | ① 信令 WS 断：peerjs 库 `socket.onclose` 触发 `_cleanup()`、置 `_disconnected=true`、emit `Disconnected`（`peerjs.js:3551-3558`）；前端**没有自动重连逻辑**——`PeerJSConnect.jsx` 全文无 `reconnect`，`peer.on('error')` 只在 `connectToPeer` 内部一次就 `off`（`client.js:997-1008`），UI 只能显示错误态由用户重连。② DataChannel 断：`conn.on('close')` → `PeerDriveClient` 触发所有 pending request reject（`client.js:143-149` 的 `_closeErr` 路径、`client.js:190-193` 的 ready 超时兜底）。③ 服务端 → 客户端：`removeClient` 断开时向其余节点广播 `LEAVE`（`signalserver.go:418-447`），收方 peerjs 库按 `connectionId` 关掉对应 Connection。 | 消费端不像节点端有 `startLoop`/`connectLoop` 退避重连（连接 08 §2.1）——因为消费端是**按用户意图一次性拨号**的交互型客户端，没有「要一直连着 N 个节点」的稳态需求；断连后由用户重新点连接即可。 |
-| **重复 / 并发** | ① 同 id 双连（多标签页 / 重开面板）：`myIdRef.current` 从 localStorage 取稳定 id（`PeerJSConnect.jsx:19-31`），B 侧 `HandleWS` 的 ID 占用检查——token 匹配则关旧连接接管（消费端每次 token 都是新随机数，**token 永不匹配**，所以必然是 `ID-TAKEN`）（`signalserver.go:277-291`）。② 并发搜索：`handleSearch` 无锁，`disabled={searchStatus==='searching'}` 禁用按钮防重复点击（`PeerJSConnect.jsx:164-167`）；已搜完后再点会发新 fetch 覆盖 `foundNodes`。③ 并发拨号：`connectTo` 每次 `setPdClient(client)` 覆盖旧实例但**不关闭旧连接**（`PeerJSConnect.jsx:77`）——用户切目标时旧 DataChannel 仍活着，需要手动点「断开」（`PeerJSConnect.jsx:200-203`）；这是**已知坑**（无自动清理）。④ 服务端并发写：`client.sendMu` 串行化（`signalserver.go:167,774-779`），路由出锁后写防持锁卡死（`signalserver.go:327-334`）。 | 双连的 `ID-TAKEN` 是消费端特有的表现：因为 token 每次都随机，多标签页打开同一面板会互相「踢」，用户体验是「刚连上就被断了」。 |
-| **数据缺失或校验失败** | ① 拨号目标空：`connectTo` 入口 `if (!target) return`（`PeerJSConnect.jsx:59-60`）；「连接」按钮 `disabled={!targetPeerId.trim()}`（`PeerJSConnect.jsx:198`）。② WS 缺 `id/token/key`、key 不符 → 服务端 400 拒升级（`signalserver.go:249-263`），peerjs 库把错误转为 `peer.on('error')` → `connectToPeer` 抛 `ERR.CLOSED`（`client.js:1002-1005`）。③ 发现响应异常：`!res.ok` → `PeerDriveError('发现服务返回 HTTP <status>', ERR.PEER)`（`client.js:918-919`）；非数组返回 → 空数组（`client.js:921`）；解码异常 → CORS 提示（`client.js:922-931`）。④ 帧异常：`parseFrame` 遇非 JSON 或缺 type 返 `null`（`protocol.js:111-120`）——静默忽略而非报错（注释：同连接可能有别的用途的帧）；`shares()` 只校验 `frame.type === 'share-resp'`（`client.js:207-210`）；`sha256Hex` 校验失败回 `ERR.HASH_MISMATCH`（`client.js:46`）。⑤ 服务端防御（与消费端无关但同源）：announce body > 8KB 或 collections > 64 → 400（`signalserver.go:457,469-473`）；WS 读限 40KB（`signalserver.go:272`）。 | 消费端帧校验很「宽容」——`parseFrame` 忽略非法帧，这是为了让同一连接能承载 peerjs 库的其它内部消息。 |
-| **鉴权失败** | 信令面：key 不符或 token 不在白名单 → 服务端 400 拒升级（`signalserver.go:254-263`），peerjs 库把错误转为 `peer.on('error')` → `connectToPeer` 抛 `ERR.CLOSED`（`client.js:1002-1005`）。ID 被占且 token 不匹配 → `ID-TAKEN` 消息（`signalserver.go:279-285`），peerjs 库内部 emit `IdTaken` 事件；前端 `connectToPeer` **不专门处理 `IdTaken`**（`client.js:997-1008` 只 catch `error`），表现为通用「信令失败」错误。**发现面无鉴权**：CORS 全放开（`signalserver.go:62-64,209-224`），任何浏览器都能查所有在线节点。**数据面 PSK 门禁不属本连接**：`PeerDriveClient` 可选传 `opts.psk`（`client.js:135-136,156-164`），若对端开了 `PEERDRIVE_PSK` 则**必须在第一帧**出示（`protocol.js:65-79`）；没出示或错了会被回 `psk-err` + `code=PSK_REQUIRED`（`ERR.PSK_REQUIRED`，`client.js:55`）。 | 消费端默认没有 PSK 输入 UI（`PeerJSConnect.jsx` 全文无 psk 相关字段）——连上开了门禁的节点会拿到 `PSK_REQUIRED` 错误；用户目前只能在节点控制页手动配置。 |
-| **半开状态** | 服务端：目标 socket 半开但仍在 `clients` 表 → `route` 的 `dst.send` 失败 → `handleDeadDst` 摘除表项、清理 disc/peerLinks/peerStats/peerColls 残留、关连接、广播 `LEAVE`、并向消息发起方补发 `LEAVE`（`signalserver.go:319-328,360-402`——修复旧实现 `_ = dst.send(m)` 静默吞 OFFER/ANSWER 致发起方永久卡握手）。**这直接影响消费端拨号**：消费端 OFFER 发到离线目标后，若目标恰好「半开」在线，服务端会走死连接清理并向消费端补发 LEAVE，peerjs 库关掉该 Connection、`client.ready` 触发拒绝。发现半开：`heartbeatTTL=90s` 后 sweeper/查询剔除（`signalserver.go:114-160,576`），下次搜索自然看不到。 | 服务端 60s 读超时兜底「断连但没发 FIN」的死连接（`signalserver.go:272-275,312-313`）；消费端 HEARTBEAT 5s 一轮，正常连接持续续期。 |
-| **进程重启** | 服务端：**纯内存态、无持久化、无优雅关闭 hook**（`signalserver.go:35-52`）——重启后 clients/queues/disc 全空；消费端发现列表变空（`nodes=[]`），已建立的 DataChannel **不受影响**（DataChannel 与信令无关，服务端重启不影响已建立的 P2P 连接），但信令断链后消费端无法再拨号新目标。消费端重启（浏览器刷新）：`localStorage` 保留 `myId`（`PeerJSConnect.jsx:19-31`），重开面板身份不变；但 `pdClient`/`pdStatus`/`pdShare`/`nodeSession` 全部**内存态丢失**——UI 回到 idle，用户需重新点连接；`setNodeSession` 的引用随刷新蒸发（`nodeSession.js` 全文是模块级变量）。 | 消费端的「重启恢复」= 用户重新点一次连接——设计上接受这个代价，因为交互型客户端不承担「一直挂着」的责任。 |
+| **Timeout** | ① Dial total timeout: `PeerJSConnect.jsx:75` passes `timeoutMs:15000`, but `connectToPeer` only reads `opts.openTimeoutMs` (`client.js:1012`), not passed falls back to `DEFAULTS.openTimeoutMs=20000` (`client.js:71`) — **actual effective is 20s, 15s is dead parameter**; timeout throws `PeerDriveError('connection not established within <t>ms', ERR.TIMEOUT)` (`client.js:190-193`). ② Discovery request 8s hard timeout: `AbortController + setTimeout` aborts fetch (`client.js:912-917`), default 8000ms. ③ Server read timeout: WS initial 60s, extended per message (`signalserver.go:272-275,312-313`), client 5s HEARTBEAT keeps alive (`peerjs.js:3567-3579`); write timeout server 10s (`signalserver.go:777`). ④ Frame-level timeout (data surface same source, not this connection): `verbTimeoutMs=15000`, `idleTimeoutMs=120000` (`client.js:67-74`). | Dial timeout will simultaneously trigger peerjs library's own `error` event and `client.ready` timeout — both paths can pull user from "connecting" back to error state. `timeoutMs:15000` being ineffective is a **known bug**, changing `PeerJSConnect.jsx:75` to `openTimeoutMs:15000` would fix it. |
+| **Disconnect/Reconnect** | ① Signal WS disconnect: peerjs library `socket.onclose` triggers `_cleanup()`, sets `_disconnected=true`, emits `Disconnected` (`peerjs.js:3551-3558`); frontend **has no auto-reconnect logic** — `PeerJSConnect.jsx` has no `reconnect` anywhere, `peer.on('error')` only `off` once inside `connectToPeer` (`client.js:997-1008`), UI can only show error state for user to reconnect. ② DataChannel disconnect: `conn.on('close')` → `PeerDriveClient` triggers all pending requests to reject (`client.js:143-149`'s `_closeErr` path, `client.js:190-193`'s ready timeout fallback). ③ Server → client: `removeClient` on disconnect broadcasts `LEAVE` to remaining nodes (`signalserver.go:418-447`), receiver peerjs library closes corresponding Connection by `connectionId`. | Consumer doesn't have `startLoop`/`connectLoop` backoff reconnect like node side (connection 08 §2.1) — because consumer is an **intent-driven one-shot dial** interactive client, no "need to stay connected to N nodes" steady-state requirement; disconnect means user clicks connect again. |
+| **Duplicate/Concurrent** | ① Same id double connect (multi-tab / reopen panel): `myIdRef.current` gets stable id from localStorage (`PeerJSConnect.jsx:19-31`), B side `HandleWS` ID occupancy check — token matches then close old connection takeover (consumer token always random new number, **token never matches**, so necessarily `ID-TAKEN`) (`signalserver.go:277-291`). ② Concurrent search: `handleSearch` no lock, `disabled={searchStatus==='searching'}` disables button to prevent duplicate clicks (`PeerJSConnect.jsx:164-167`); clicking again after search sends new fetch overwriting `foundNodes`. ③ Concurrent dial: `connectTo` each time `setPdClient(client)` overwrites old instance but **doesn't close old connection** (`PeerJSConnect.jsx:77`) — when user switches target, old DataChannel still alive, needs manual "disconnect" click (`PeerJSConnect.jsx:200-203`); this is a **known pitfall** (no auto-cleanup). ④ Server concurrent write: `client.sendMu` serializes (`signalserver.go:167,774-779`), route after releasing lock writes to prevent lock-holding deadlock (`signalserver.go:327-334`). | Double connect's `ID-TAKEN` is consumer-specific: because token is random each time, opening same panel in multiple tabs will "kick" each other, user experience is "just connected then disconnected". |
+| **Data missing or validation failure** | ① Empty dial target: `connectTo` entry `if (!target) return` (`PeerJSConnect.jsx:59-60`); "Connect" button `disabled={!targetPeerId.trim()}` (`PeerJSConnect.jsx:198`). ② WS missing `id/token/key`, key mismatch → server 400 reject upgrade (`signalserver.go:249-263`), peerjs library converts error to `peer.on('error')` → `connectToPeer` throws `ERR.CLOSED` (`client.js:1002-1005`). ③ Discovery response anomaly: `!res.ok` → `PeerDriveError('discovery service returned HTTP <status>', ERR.PEER)` (`client.js:918-919`); non-array return → empty array (`client.js:921`); decode error → CORS message (`client.js:922-931`). ④ Frame anomaly: `parseFrame` on non-JSON or missing type returns `null` (`protocol.js:111-120`) — silently ignores rather than errors (comment: same connection may have frames for other purposes); `shares()` only validates `frame.type === 'share-resp'` (`client.js:207-210`); `sha256Hex` validation failure returns `ERR.HASH_MISMATCH` (`client.js:46`). ⑤ Server defense (not consumer-related but same source): announce body > 8KB or collections > 64 → 400 (`signalserver.go:457,469-473`); WS read limit 40KB (`signalserver.go:272`). | Consumer frame validation is very "lenient" — `parseFrame` ignores invalid frames, this is to let same connection carry peerjs library's other internal messages. |
+| **Auth failure** | Signal surface: key mismatch or token not in whitelist → server 400 reject upgrade (`signalserver.go:254-263`), peerjs library converts error to `peer.on('error')` → `connectToPeer` throws `ERR.CLOSED` (`client.js:1002-1005`). ID occupied and token mismatch → `ID-TAKEN` message (`signalserver.go:279-285`), peerjs library internally emits `IdTaken` event; frontend `connectToPeer` **doesn't specifically handle `IdTaken`** (`client.js:997-1008` only catches `error`), manifests as generic "signaling failed" error. **Discovery surface has no auth**: CORS fully open (`signalserver.go:62-64,209-224`), any browser can query all online nodes. **Data surface PSK gate not in this connection**: `PeerDriveClient` optionally passes `opts.psk` (`client.js:135-136,156-164`), if peer has `PEERDRIVE_PSK` enabled then **must present in first frame** (`protocol.js:65-79`); not presented or wrong gets `psk-err` + `code=PSK_REQUIRED` (`ERR.PSK_REQUIRED`, `client.js:55`) returned. | Consumer defaults to no PSK input UI (`PeerJSConnect.jsx` has no psk-related fields anywhere) — connecting to gate-enabled node gets `PSK_REQUIRED` error; user currently can only manually configure in node control page. |
+| **Half-open state** | Server side: target socket half-open but still in `clients` table → `route`'s `dst.send` fails → `handleDeadDst` removes table entry, cleans disc/peerLinks/peerStats/peerColls residuals, closes connection, broadcasts `LEAVE`, and sends `LEAVE` to message originator (`signalserver.go:319-328,360-402` — fixing old implementation's `_ = dst.send(m)` silently swallowing OFFER/ANSWER causing initiator to permanently hang on handshake). **This directly affects consumer dialing**: consumer sends OFFER to offline target, if target happens to be "half-open" online, server will do dead connection cleanup and send LEAVE to consumer, peerjs library closes that Connection, `client.ready` triggers rejection. Discovery half-open: `heartbeatTTL=90s` after sweeper/query removes (`signalserver.go:114-160,576`), next search naturally won't see it. | Server 60s read timeout catches "disconnected but no FIN sent" dead connections (`signalserver.go:272-275,312-313`); consumer HEARTBEAT 5s per round, normal connections continuously extend. |
+| **Process restart** | Server side: **pure in-memory state, no persistence, no graceful shutdown hook** (`signalserver.go:35-52`) — after restart clients/queues/disc all empty; consumer discovery list becomes empty (`nodes=[]`), established DataChannels **unaffected** (DataChannel independent of signaling, server restart doesn't affect established P2P connections), but signaling link break means consumer can't dial new targets. Consumer restart (browser refresh): `localStorage` keeps `myId` (`PeerJSConnect.jsx:19-31`), reopening panel identity unchanged; but `pdClient`/`pdStatus`/`pdShare`/`nodeSession` all **in-memory state lost** — UI returns to idle, user needs to click connect again; `setNodeSession`'s reference evaporates on refresh (`nodeSession.js` is all module-level variables). | Consumer's "restart recovery" = user clicks connect again — design accepts this cost, because interactive clients don't carry "stay connected" responsibility. |
 
-## 4. 相关文档
+## 4. Related Documents
 
-- 连接文档（同目录）：
-  - [07-transport-peerjs.md](07-transport-peerjs.md)：本连接目标节点的**被动方**——`onIncomingConnection`（`peerjs_service.go:471-481`）接到消费端 OFFER 后由 `bindConn` 挂上 `rtcSession`；数据面 P2P 直连后不再经 signalserver。
-  - [08-transport-signalserver.md](08-transport-signalserver.md)：**姊妹连接**——同一 signalserver 的另一条消费链：节点端用 go-peerjs 库做信令+发现；本连接 A 侧用官方 peerjs 库、只拨号不互发 announce；两边的帧协议、`HandleWS` 校验逻辑、CORS 配置完全共用。
-  - [13-media-node-ech.md](13-media-node-ech.md)：`back/cmd/media-node` 注册到同一信令承载浏览器媒体 DataChannel，是消费端拨号的另一类目标（`nodeType:'media-node'`）。
-  - [01-frontend-backend.md](01-frontend-backend.md)：本地 WS 会话（id="local"）与本连接**无关**——本地会话走 router 的 `/ws/peer`，不经 signalserver；信令/发现只服务节点间与「面板→节点」的 P2P 拨号。
-- 模块文档：
-  - `../modules/13-frontend.md`：`PeerJSConnect` 组件在 Settings/Plaza 的挂载点、`DEFAULT_SIG` 与 `pd-client` 的分工、`nodeSession` 跨页共享。
-  - `../modules/11-signalserver.md`：`HandleWS` 校验链、`readLoop/route/hangleDeadDst`、`HandleNodes/HandleAnnounce`、`Start`/`sweepDiscovery` janitor、CORS 全放开的部署背景。
-  - `../modules/10-peerjs.md`：go-peerjs 库（节点端用）与 peerjs 浏览器库（消费端用）是**两套独立实现**，帧协议同构；本连接的 A 侧走浏览器库、连接 08 的 A 侧走 go-peerjs。
-  - `../modules/01-config.md`：`PEERDRIVE_PEERJS_HOST/PORT/KEY` 决定节点端默认指向的信令；消费端的 `DEFAULT_SIG`（`PeerJSConnect.jsx:11-17`）是硬编码副本，运维需要**手动保持同步**（配置与前端默认值脱节是本连接的已知风险）。
+- Connection documents (same directory):
+  - [07-transport-peerjs.md](07-transport-peerjs.md): This connection's target node **passive side** — `onIncomingConnection` (`peerjs_service.go:471-481`) receives consumer OFFER then `bindConn` hangs `rtcSession`; data surface P2P direct after no longer via signalserver.
+  - [08-transport-signalserver.md](08-transport-signalserver.md): **Sister connection** — same signalserver's another consumer chain: node side uses go-peerjs library for signaling+discovery; this connection A side uses official peerjs library, only dials doesn't mutual announce; both sides' frame protocol, `HandleWS` validation logic, CORS configuration fully shared.
+  - [13-media-node-ech.md](13-media-node-ech.md): `back/cmd/media-node` registers to same signaling to carry browser media DataChannel, another type of target for consumer dialing (`nodeType:'media-node'`).
+  - [01-frontend-backend.md](01-frontend-backend.md): Local WS session (id="local") is **unrelated** to this connection — local sessions go through router's `/ws/peer`, not via signalserver; signaling/discovery only serves node-to-node and "panel→node" P2P dialing.
+- Module documents:
+  - `../modules/13-frontend.md`: `PeerJSConnect` component mount point in Settings/Plaza, `DEFAULT_SIG` and `pd-client` division, `nodeSession` cross-page sharing.
+  - `../modules/11-signalserver.md`: `HandleWS` validation chain, `readLoop/route/handleDeadDst`, `HandleNodes/HandleAnnounce`, `Start`/`sweepDiscovery` janitor, CORS fully open deployment background.
+  - `../modules/10-peerjs.md`: go-peerjs library (node side) and peerjs browser library (consumer side) are **two independent implementations**, frame protocol isomorphic; this connection A side uses browser library, connection 08 A side uses go-peerjs.
+  - `../modules/01-config.md`: `PEERDRIVE_PEERJS_HOST/PORT/KEY` determines node-side default signaling target; consumer's `DEFAULT_SIG` (`PeerJSConnect.jsx:11-17`) is a hardcoded copy, operations need to **manually keep in sync** (config and frontend default desync is this connection's known risk).

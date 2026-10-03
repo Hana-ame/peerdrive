@@ -1,11 +1,13 @@
 package pathutil
 
-// 写路径（copy/delete/upload 落盘）上的软链逃逸。
+// Symlink escape on the write path (copy/delete/upload landing on disk).
 //
-// 为什么单开一个文件：读取侧（safeopen_test.go）早就用 os.Root 消掉了 TOCTOU，
-// 但写/落盘侧一直还是"先 Within 判一把，再 os.WriteFile / os.Remove"的两步走。
-// 这两步之间隔着一次路径解析——共享目录里能写东西的人可以在中间把某个**目录
-// 成分**换成软链，把写/删引导到根之外。下面的用例就是那个形状。
+// Why a separate file: the read side (safeopen_test.go) eliminated TOCTOU with
+// os.Root long ago, but the write/landing side was still the two-step "check
+// With Within first, then os.WriteFile / os.Remove" approach. Between those two
+// steps lies a path resolution — someone who can write to a shared directory
+// can swap a **directory component** into a symlink in between, redirecting the
+// write/delete outside the root. The cases below are that shape.
 
 import (
 	"os"
@@ -18,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newWriteFixture 允许根 root + 根外的诱饵区 outside（里面有 victim.txt）。
+// newWriteFixture root root + decoy area outside the root (contains victim.txt).
 type writeFixture struct {
 	root    string
 	outside string
@@ -30,47 +32,54 @@ func newWriteFixture(t *testing.T) writeFixture {
 	return writeFixture{
 		root:    t.TempDir(),
 		outside: t.TempDir(),
-		victim:  filepath.Join(t.TempDir(), "victim.txt"), // 单独位置，避免误伤
+		victim:  filepath.Join(t.TempDir(), "victim.txt"), // Separate location to avoid collateral damage
 	}
 }
 
-// TestSafeWriteFile_FinalComponentSymlink 最经典的形状：根内放一个指向受害文件
-// 的软链，然后按"正常路径"去写。**在读看来路径完全合法**（Within 必然放行），
-// 只有跟ague（实际确实走过 WritFile）才暴露。
+// TestSafeWriteFile_FinalComponentSymlink The classic shape: place a symlink
+// inside the root pointing to the victim file, then write via the "normal
+// path". **From the reader's perspective the path is completely legitimate**
+// (Within will necessarily allow it), only an actual write (and this test does
+// indeed go through WriteFile) exposes the issue.
 //
-// TestSafeWriteFile_FinalComponentSymlinkRace TOCTOU 的标准形状：
-// 先判路径（此刻一切正常）→ 攻击者把成分换成软链 → 再落盘。
+// TestSafeWriteFile_FinalComponentSymlinkRace The standard TOCTOU shape:
+// check the path first (everything normal at this point) → attacker swaps the
+// component into a symlink → then land the write.
 //
-// 为什么必须**先判再换**：静态摆着的软链 Within 也挡得住（normalize 里有
-// EvalSymlinks），真正没人管的正是"判定与落盘之间那段时间"。所以要模拟的是
-// 竞态，而不是放一个静静等着看的软链——后者证明不了新代码干了什么。
+// Why it must be **check first, swap after**: a statically placed symlink
+// would be caught by Within too (normalize has EvalSymlinks). What is truly
+// unguarded is "the time between validation and landing". So we need to
+// simulate a race, not just leave a symlink sitting there — the latter proves
+// nothing about what the new code does.
 //
-// os.WriteFile 会跟着这个软链把内容写到外面去；走 Root 之后必须失败。
+// os.WriteFile would follow this symlink and write content outside; going
+// through Root it must fail.
 func TestSafeWriteFile_FinalComponentSymlinkRace(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("Windows 上建符号链接需要开发者模式/管理员")
+		t.Skip("creating symlinks on Windows requires developer mode/admin")
 	}
 	f := newWriteFixture(t)
 	require.NoError(t, os.WriteFile(f.victim, []byte("ORIGINAL"), 0o600))
 
 	target := filepath.Join(f.root, "report.txt")
 
-	// 1) 校验通过：此刻它还不是软链
-	assert.True(t, WithinAny([]string{f.root}, target), "前置条件：此刻路径判定应当放行")
+	// 1) Validation passes: at this moment it is not yet a symlink
+	assert.True(t, WithinAny([]string{f.root}, target), "precondition: path check should allow at this moment")
 
-	// 2) 攻击者抢在这两步之间把它换成了指向受害文件的软链
+	// 2) Attacker swaps it for a symlink pointing to the victim file in between
 	require.NoError(t, os.Symlink(f.victim, target))
 
-	// 3) 落盘：旧的 os.WriteFile 会一路跟到根外；新的必须拒绝
+	// 3) Landing: old os.WriteFile would follow all the way outside; new must reject
 	err := SafeWriteFileAny([]string{f.root}, target, []byte("PWNED"), 0o644)
-	assert.Error(t, err, "判定之后被换成指向根外的软链时，写必须失败")
+	assert.Error(t, err, "write must fail when swapped to symlink pointing outside root after check")
 
 	got, rerr := os.ReadFile(f.victim)
 	require.NoError(t, rerr)
-	assert.Equal(t, "ORIGINAL", string(got), "受害文件必须一字未改")
+	assert.Equal(t, "ORIGINAL", string(got), "victim file must remain unchanged")
 
-	// 对照实验：同一套竞态，旧的 os.WriteFile 确实会把内容写到根外去。
-	// 有这一条，上面的失败才不能被解释成"环境里软链本来就不可用"之类的偶然。
+	// Control experiment: same race, old os.WriteFile does write through the symlink.
+	// With this line, the failure above cannot be dismissed as coincidence like
+	// "symlinks are unavailable in this environment" or similar.
 	legacyVictim := filepath.Join(f.outside, "legacy-victim.txt")
 	require.NoError(t, os.WriteFile(legacyVictim, []byte("ORIGINAL"), 0o600))
 	legacyLink := filepath.Join(f.root, "legacy.txt")
@@ -78,15 +87,17 @@ func TestSafeWriteFile_FinalComponentSymlinkRace(t *testing.T) {
 	require.NoError(t, os.WriteFile(legacyLink, []byte("PWNED"), 0o644))
 	gotLegacy, lerr := os.ReadFile(legacyVictim)
 	require.NoError(t, lerr)
-	assert.Equal(t, "PWNED", string(gotLegacy), "对照：os.WriteFile 确实写穿了软链——这正是要堵的洞")
+	assert.Equal(t, "PWNED", string(gotLegacy), "control: os.WriteFile does write through the symlink — this is the hole to plug")
 }
 
-// TestSafeWriteFile_ParentDirSymlinkRace 更隐蔽的一支：换掉的是**父目录**
-// （真目录 → 指向根外的软链）。目标文件名是全新的，它自己永远不可能是软链，
-// 所以"最终 component 不能是软链"这类检查根本看不到问题上哪儿去了。
+// TestSafeWriteFile_ParentDirSymlinkRace A more subtle variant: what gets
+// swapped is the **parent directory** (real directory → symlink pointing
+// outside the root). The target filename is brand new, it can never be a
+// symlink itself, so checks like "the final component must not be a symlink"
+// simply cannot see where the problem is.
 func TestSafeWriteFile_ParentDirSymlinkRace(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("Windows 上建符号链接需要开发者模式/管理员")
+		t.Skip("creating symlinks on Windows requires developer mode/admin")
 	}
 	f := newWriteFixture(t)
 	outsideDir := filepath.Join(f.outside, "dir")
@@ -95,25 +106,27 @@ func TestSafeWriteFile_ParentDirSymlinkRace(t *testing.T) {
 	sub := filepath.Join(f.root, "sub")
 	require.NoError(t, os.MkdirAll(sub, 0o755))
 	target := filepath.Join(sub, "new.txt")
-	assert.True(t, WithinAny([]string{f.root}, target), "前置条件：此刻 sub 还是真目录")
+	assert.True(t, WithinAny([]string{f.root}, target), "precondition: sub is still a real directory at this moment")
 
-	// 换掉中间那一层
+	// Swap the middle layer
 	require.NoError(t, os.Remove(sub))
 	require.NoError(t, os.Symlink(outsideDir, sub))
 
 	err := SafeWriteFileAny([]string{f.root}, target, []byte("PWNED"), 0o644)
-	assert.Error(t, err, "父目录被换成逃向根外的软链时不能写")
+	assert.Error(t, err, "must not write when parent directory is swapped to symlink escaping outside root")
 
 	_, sterr := os.Stat(filepath.Join(outsideDir, "new.txt"))
-	assert.True(t, os.IsNotExist(sterr), "根外不能出现新文件")
+	assert.True(t, os.IsNotExist(sterr), "no new file should appear outside root")
 }
 
-// TestSafeRemove_ParentDirSymlinkRace os.Remove 的老问题：它只解路径不判边界，
-// 会跟着路径里的软链走到任意文件上——"允许管理自己的目录"于是变成"能删任意
-// 文件"。同样是先判（合法）、后换（中间成分变软链）。
+// TestSafeRemove_ParentDirSymlinkRace os.Remove's old problem: it only
+// resolves paths without checking boundaries, and follows symlinks in the path
+// to any file — "allowing management of one's own directory" becomes "can
+// delete any file". Same pattern: check first (legitimate), swap after (middle
+// component becomes a symlink).
 func TestSafeRemove_ParentDirSymlinkRace(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("Windows 上建符号链接需要开发者模式/管理员")
+		t.Skip("creating symlinks on Windows requires developer mode/admin")
 	}
 	f := newWriteFixture(t)
 
@@ -125,43 +138,45 @@ func TestSafeRemove_ParentDirSymlinkRace(t *testing.T) {
 	sub := filepath.Join(f.root, "sub")
 	require.NoError(t, os.MkdirAll(sub, 0o755))
 	target := filepath.Join(sub, "target.txt")
-	assert.True(t, WithinAny([]string{f.root}, target), "前置条件：此刻路径判定应当放行")
+	assert.True(t, WithinAny([]string{f.root}, target), "precondition: path check should allow at this moment")
 
 	require.NoError(t, os.Remove(sub))
 	require.NoError(t, os.Symlink(outsideDir, sub))
 
 	err := SafeRemoveAny([]string{f.root}, target)
-	assert.Error(t, err, "经软链指向根外的删除必须失败")
+	assert.Error(t, err, "deletion through symlink pointing outside root must fail")
 
 	_, sterr := os.Stat(outsideTarget)
-	assert.NoError(t, sterr, "根外的文件必须还在")
+	assert.NoError(t, sterr, "file outside root must still exist")
 }
 
-// TestSafeWriteFile_RefusesOutside 路径本身就在根外：任何 ".." 写法都不该通过。
+// TestSafeWriteFile_RefusesOutside The path itself is outside the root: any
+// ".." form should not pass.
 func TestSafeWriteFile_RefusesOutside(t *testing.T) {
 	f := newWriteFixture(t)
 	require.NoError(t, os.WriteFile(f.victim, []byte("keep"), 0o600))
 
 	escaped := filepath.Join(f.root, "..", filepath.Base(f.outside), "..", filepath.Base(filepath.Dir(f.victim)), filepath.Base(f.victim))
-	escaped = f.victim // 直接用根外真实路径更直白
+	escaped = f.victim // Using the real path outside the root is more straightforward
 
 	err := SafeWriteFileAny([]string{f.root}, escaped, []byte("x"), 0o644)
-	assert.ErrorIs(t, err, ErrOutsideRoot, "根外路径必须报 ErrOutsideRoot：%s", escaped)
+	assert.ErrorIs(t, err, ErrOutsideRoot, "outside root path must report ErrOutsideRoot: %s", escaped)
 
 	err = SafeRemoveAny([]string{f.root}, escaped)
-	assert.ErrorIs(t, err, ErrOutsideRoot, "根外路径的删除同样要挡：%s", escaped)
+	assert.ErrorIs(t, err, ErrOutsideRoot, "deletion of outside root path must also be blocked: %s", escaped)
 
 	_, sterr := os.Stat(f.victim)
-	assert.NoError(t, sterr, "根外文件不能被写/删到")
+	assert.NoError(t, sterr, "file outside root must not be writable/deletable")
 }
 
-// TestSafeWriteFile_InsideStillWorks 防御不能过当：正常写必须还写得进去，
-// 包括"父目录还不存在"这种以前靠 os.MkdirAll 兜住的场景。
+// TestSafeWriteFile_InsideStillWorks Defenses cannot be overzealous: normal
+// writes must still work, including the "parent directory does not exist yet"
+// case that previously relied on os.MkdirAll.
 func TestSafeWriteFile_InsideStillWorks(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "not-exist-yet") // 根自己都还没建出来
+	root := filepath.Join(t.TempDir(), "not-exist-yet") // The root itself hasn't been created yet
 
 	err := SafeWriteFileAny([]string{root}, filepath.Join(root, "a", "b", "c.txt"), []byte("hello"), 0o644)
-	require.NoError(t, err, "允许根内的写不应被拦（含自动建父目录）")
+	require.NoError(t, err, "allowed writes inside root should not be blocked (including auto-creating parent directories)")
 
 	got, rerr := os.ReadFile(filepath.Join(root, "a", "b", "c.txt"))
 	require.NoError(t, rerr)
@@ -175,11 +190,12 @@ func TestSafeWriteFile_InsideStillWorks(t *testing.T) {
 
 	require.NoError(t, SafeRemoveAny([]string{root}, filepath.Join(root, "d.txt")))
 	_, sterr := os.Stat(filepath.Join(root, "d.txt"))
-	assert.True(t, os.IsNotExist(sterr), "删除应当真的生效")
+	assert.True(t, os.IsNotExist(sterr), "deletion should actually take effect")
 }
 
-// TestSafeWriteFile_RejectsRootItself 允许根自身不能被写/删：
-// rel == "." 必须是显式拒绝，而不是"碰巧换算出来没有 deleterious 行为"。
+// TestSafeWriteFile_RejectsRootItself The root itself must not be writable/
+// deletable: rel == "." must be explicitly rejected, not just "happen to
+// compute to no deleterious behavior".
 func TestSafeWriteFile_RejectsRootItself(t *testing.T) {
 	root := t.TempDir()
 	assert.Error(t, SafeWriteFileAny([]string{root}, root, []byte("x"), 0o644))
@@ -187,32 +203,34 @@ func TestSafeWriteFile_RejectsRootItself(t *testing.T) {
 	assert.Error(t, SafeRemoveAllAny([]string{root}, root))
 	assert.Error(t, SafeMkdirAllAny([]string{root}, root, 0o755))
 	_, sterr := os.Stat(root)
-	assert.NoError(t, sterr, "拒绝操作之后根目录必须还在")
+	assert.NoError(t, sterr, "root directory must still exist after rejection")
 }
 
-// TestSafeWriteFile_NULAndReserved 字符串层面的 payload 在写路径上同样要挡：
-// NUL 夹带、Windows 保留设备名。
+// TestSafeWriteFile_NULAndReserved String-level payloads must also be blocked
+// on the write path: NUL injection, Windows reserved device names.
 func TestSafeWriteFile_NULAndReserved(t *testing.T) {
 	root := t.TempDir()
 	assert.Error(t, SafeWriteFileAny([]string{root}, filepath.Join(root, "ok.txt")+"\x00", []byte("x"), 0o644))
 
-	// 折叠大小写那支：本来只在 Windows 生效，这里手动打开它，让 Linux CI 也能覆盖
+	// The case-folding branch: originally only effective on Windows, here we
+	// manually enable it so Linux CI can also cover it
 	old := foldCase
 	foldCase = true
 	t.Cleanup(func() { foldCase = old })
 	assert.Error(t, SafeWriteFileAny([]string{root}, filepath.Join(root, "CON"), []byte("x"), 0o644),
-		"保留设备名不能当普通文件写")
+		"reserved device names cannot be written as ordinary files")
 	assert.NoError(t, SafeWriteFileAny([]string{root}, filepath.Join(root, "CONCERT.mp3"), []byte("x"), 0o644),
-		"CONCERT.mp3 是正常文件名，不能被误伤")
+		"CONCERT.mp3 is a normal filename, must not be falsely blocked")
 }
 
-// TestSafeWriteFile_OutsideRootError 错误信息要带上路径，便于运维定位——
-// "outside root" 但不说是哪个路径的日志等于没有。
+// TestSafeWriteFile_OutsideRootError Error messages should include the path for
+// ops diagnostics — "outside root" without saying which path is as good as
+// no information.
 func TestSafeWriteFile_OutsideRootError(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "x.txt")
 	err := SafeWriteFileAny([]string{root}, outside, []byte("x"), 0o644)
 	require.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), filepath.Base(outside)), "错误信息应含目标路径：%v", err)
+	assert.True(t, strings.Contains(err.Error(), filepath.Base(outside)), "error message should contain target path: %v", err)
 	assert.ErrorIs(t, err, ErrOutsideRoot)
 }

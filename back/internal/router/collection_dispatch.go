@@ -12,8 +12,8 @@ import (
 	"peerdrive/internal/controller"
 )
 
-// dispatchCreateCollection 分派 POST /collections：
-// body 含 username 字段 → 用户体系（CreateCollection），否则匿名集合。
+// dispatchCreateCollection dispatches POST /collections:
+// body with username field → user system (CreateCollection), otherwise anonymous collection.
 func dispatchCreateCollection(c *gin.Context) {
 	raw, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -32,10 +32,11 @@ func dispatchCreateCollection(c *gin.Context) {
 	controller.CreateAnonCollection(c)
 }
 
-// dispatchGetCollection 分派 GET /collections/:id：
-// 64 位 hex → 匿名集合（GetAnonCollection），否则按 username 列集合。
-// 背景：anon 体系（hash 寻址）与用户体系（username 寻址）共用 /collections
-// 路径，但 gin 不允许同层 :param 用不同名字注册，故统一 :id 再按形态分派。
+// dispatchGetCollection dispatches GET /collections/:id:
+// 64-char hex → anonymous collection (GetAnonCollection), otherwise list collections by username.
+// Background: anon system (hash addressing) and user system (username addressing) share the
+// /collections path, but gin doesn't allow the same :param level with different names,
+// so use :id uniformly and dispatch by shape.
 func dispatchGetCollection(c *gin.Context) {
 	id := c.Param("id")
 	if len(id) == 64 {
@@ -47,15 +48,15 @@ func dispatchGetCollection(c *gin.Context) {
 	controller.ListCollections(cp)
 }
 
-// dispatchGetTree 分派 GET /collections/:id/*filepath：
-//   - id 为 64 位 hex → 匿名集合文件下载（DownloadAnonFile）
-//   - filepath 为空 → 用户集合列表（ListCollections）
-//   - filepath 单段 → 用户集合详情（GetCollection）
-//   - filepath 两段且末段为 log → 版本日志（GetVersionLog）
+// dispatchGetTree dispatches GET /collections/:id/*filepath:
+//   - id is 64-char hex → anonymous collection file download (DownloadAnonFile)
+//   - filepath empty → user collection list (ListCollections)
+//   - filepath one segment → user collection details (GetCollection)
+//   - filepath two segments with last segment "log" → version log (GetVersionLog)
 //
-// 坑：gin 不允许同一位置的 :param 与 *wildcard 并存
-// （"/:username/:collection_name" 与 "/:username/*filepath" 注册即 panic），
-// 所以用户体系的深层 GET 全部并入这一个 wildcard 路由内部分派。
+// Gotcha: gin doesn't allow :param and *wildcard coexistence at the same path level
+// ("/:username/:collection_name" and "/:username/*filepath" panic on registration),
+// so all user-system deep GETs are merged into this single wildcard route with internal dispatch.
 func dispatchGetTree(c *gin.Context) {
 	id := c.Param("id")
 	parts := splitPath(c.Param("filepath"))
@@ -80,14 +81,15 @@ func dispatchGetTree(c *gin.Context) {
 	}
 }
 
-// withParams 在原 context 上追加 URL 参数并返回原 c。
-// 背景：gin 的 c.Param 只读注册时的参数名，分派器合并了不同语义的路由
-// （:id → :hash/:username/:collection_name），用追加 Params 补齐，
-// 让底层 controller 无需改动。
-// 坑：不能用 c.Copy()——gin v1.8+ 的 Context.Copy 不复制 ResponseWriter，
-// 下游 c.JSON 必然 nil-pointer panic（2026-08-19 test.sh 6b GET
-// /collections/tester 暴露 500）。dispatcher 单请求串行调用，append 原
-// context 安全；handler 返回后请求即结束，无需恢复 Params。
+// withParams appends URL parameters to the original context and returns the original c.
+// Background: gin's c.Param only reads parameter names registered at route definition;
+// the dispatcher merges routes with different semantics (:id → :hash/:username/:collection_name),
+// so append Params to fill in, letting underlying controllers work without changes.
+// Gotcha: don't use c.Copy() — gin v1.8+ Context.Copy doesn't copy ResponseWriter,
+// downstream c.JSON would nil-pointer panic (exposed by 2026-08-19 test.sh 6b GET
+// /collections/tester returning 500). Dispatcher calls are single-request serial,
+// appending to the original context is safe; after the handler returns, the request
+// ends, no need to restore Params.
 func withParams(c *gin.Context, kv ...string) *gin.Context {
 	for i := 0; i+1 < len(kv); i += 2 {
 		c.Params = append(c.Params, gin.Param{Key: kv[i], Value: kv[i+1]})

@@ -1,17 +1,17 @@
-// 文件控制器 — 上传、注册本地文件/文件夹、哈希验证、删除、版本差异比较。
-// 先调用 InitFileController(storageDir) 创建存储目录并保存引用。
-// 上传流程：multipart → SHA256 → storage/{h[:2]}/{h} → INSERT file_meta → INSERT file_providers
-// 注册流程：扫描本地文件 → SHA256 → INSERT file_meta（如不存在）→ INSERT file_providers
+// File controller — upload, register local files/folders, hash verification, deletion, version diff comparison.
+// First call InitFileController(storageDir) to create the storage directory and save the reference.
+// Upload flow: multipart → SHA256 → storage/{h[:2]}/{h} → INSERT file_meta → INSERT file_providers
+// Registration flow: scan local files → SHA256 → INSERT file_meta (if not exists) → INSERT file_providers
 //
-// metadata 属性（gzip/mime_type）存储在 file_meta 的专用列中。
+// metadata properties (gzip/mime_type) are stored in dedicated columns of file_meta.
 //
-// 路由：
-//   POST   /files/upload           — 上传文件，按 SHA256 路径存储
-//   POST   /files/register_local   — 注册已有本地文件
-//   POST   /files/register_folder  — 批量注册文件夹内所有文件（不递归）
-//   GET    /files/verify/:hash     — 通过哈希查询文件元数据
-//   DELETE /files/:hash            — 按哈希删除文件（同时删本地文件）
-//   POST   /files/diff             — 对比两个版本的条目差异
+// Routes:
+//   POST   /files/upload           — upload file, stored by SHA256 path
+//   POST   /files/register_local   — register existing local file
+//   POST   /files/register_folder  — batch register all files in a folder (non-recursive)
+//   GET    /files/verify/:hash     — query file metadata by hash
+//   DELETE /files/:hash            — delete file by hash (also removes local file)
+//   POST   /files/diff             — compare entry diffs between two versions
 
 package controller
 
@@ -29,7 +29,7 @@ import (
 
 var fileSvc *service.FileService
 
-// InitFileController 注入 FileService 实例供文件管理处理函数使用。
+// InitFileController injects the FileService instance for file management handlers.
 func InitFileController(svc *service.FileService) {
 	log.LogDebug("ctrl-file: InitFileController")
 	fileSvc = svc
@@ -344,7 +344,7 @@ func BrowseDir(c *gin.Context) {
 	log.LogDebug("ctrl-file: BrowseDir")
 	dirPath := c.Query("path")
 	if dirPath == "" || dirPath == "/" {
-		dirPath = "." // 空路径和 "/" 都表示 storage 根目录，而不是系统 /（安全边界外）
+		dirPath = "." // Empty path and "/" both mean the storage root directory, not the system / (outside the security boundary)
 	}
 
 	entries, err := fileSvc.BrowseDir(dirPath)

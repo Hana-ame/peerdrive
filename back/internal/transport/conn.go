@@ -1,29 +1,37 @@
 package transport
 
-// conn.go：一条连接的共享核心（两角色共用的机制，禁止复制）。
+// conn.go: Shared core for a connection (mechanisms shared by both roles, no duplication).
 //
-// 角色划分——inbound/outbound 是「帧角色」，不是连接方向。WebRTC 连接全双工
-// 对称，同一条 Session 同时承载两角色（可一边 serve 对端的 req，一边收集自己
-// 发起请求的响应），因此：
-//   - inbound.go：入站角色 = 应答对端发来的 verb（req/create/upload/list/info/delete/sync）
-//   - outbound.go：出站角色 = 本端发起 verb（req）并收集响应（meta/data/done/err）
-//   - conn.go：两角色共享的连接级机制只此一份——帧类型、reqId 状态机、二进制块
-//     路由、流控。拆角色时若复制这些会直接破坏协议一致性（见 bindConn 注释）。
+// Role division — inbound/outbound are "frame roles", not connection direction. WebRTC
+// connections are full-duplex symmetric; the same Session simultaneously carries both
+// roles (can serve a peer's req while collecting responses for its own outgoing requests),
+// so:
+//   - inbound.go: inbound role = respond to verbs sent by peers (req/create/upload/
+//     list/info/delete/sync)
+//   - outbound.go: outbound role = this side initiates verbs (req) and collects responses
+//     (meta/data/done/err)
+//   - conn.go: connection-level mechanisms shared by both roles exist only here — frame
+//     types, reqId state machine, binary chunk routing, flow control. Duplicating these
+//     when splitting roles would directly break protocol consistency (see bindConn comments).
 //
-// 帧协议（DataChannel 上 JSON 文本帧 + 二进制块，go↔go 与 go↔web 共用）：
+// Frame protocol (JSON text frames + binary chunks on DataChannel, shared by go↔go and
+// go↔web):
 //
-//	请求: {"type":"req","hash":"<64hex>","offset":0,"size":-1,"reqId":"<optional>"}
-//	响应: {"type":"meta","hash","total","reqId"}          文件信息
-//	      {"type":"data","hash","offset","size","reqId"}  + 紧随 size 字节原始数据
-//	      {"type":"done","hash","offset","size","reqId"}  传输完成
-//	      {"type":"err","msg","reqId"}                    失败
+//	Request: {"type":"req","hash":"<64hex>","offset":0,"size":-1,"reqId":"<optional>"}
+//	Response: {"type":"meta","hash","total","reqId"}          file info
+//	          {"type":"data","hash","offset","size","reqId"}  + immediately followed by size bytes of raw data
+//	          {"type":"done","hash","offset","size","reqId"}  transfer complete
+//	          {"type":"err","msg","reqId"}                    failure
 //
-// 关键约束（协议正确性依赖，勿破坏）：
-//  1. data 头必须是文本帧、数据块必须是二进制帧（pion dc.Send 发二进制，
-//     SendText 发文本——发反了对端会把 JSON 头当数据块吞掉）
-//  2. data 头与数据块必须连续（Connection.SendFrame 原子发送），接收端按
-//     「连接级 expect」状态机把二进制块挂到最近的 data 头所属请求上
-//  3. reqId 路由：浏览器端可以不传 reqId（向后兼容），Go 端始终携带
+// Critical constraints (protocol correctness depends on these, do not break):
+//  1. data header must be a text frame, data chunk must be a binary frame (pion dc.Send
+//     sends binary, SendText sends text — reversed, the peer would swallow the JSON header
+//     as a data chunk)
+//  2. data header and data chunk must be contiguous (Connection.SendFrame atomic send);
+//     receiver uses "connection-level expect" state machine to attach binary chunks to
+//     the most recent data header's request
+//  3. reqId routing: browser side can omit reqId (backward compatibility); Go side always
+//     carries it
 
 import (
 	"encoding/json"
@@ -38,13 +46,14 @@ import (
 	"peerdrive/internal/log"
 )
 
-// dcReq 文件拉取请求帧（出站角色发起，入站角色应答）。
-// Trace 为回源链路（2026-08-18，防环）：serveFile 经多源路由回源到其它
-// 节点时带上「已经过的节点链」，转发路径上的节点发现自己在链中即拒绝
-// （A←→B 互连时 B 请求 A 没有的文件 → A 回源 B → B 回源 A 死循环）。
-// 根请求（HTTP 下载/浏览器拉取）trace 为空；旧对端忽略该字段（omitempty
-// 兼容）。传播：serveFile 用 context 携带（TraceKey），PeerSource.Open
-// 从 ctx 取出追加到 OpenStreamFrom 的请求帧。
+// dcReq file fetch request frame (initiated by outbound role, responded to by inbound role).
+// Trace is the fallback chain (2026-08-18, anti-loop): when serveFile routes fallback to
+// other nodes via multi-source routing, it carries "already passed node chain"; nodes on
+// the forwarding path find themselves in the chain and reject (A←→B mutual interconnect:
+// B requests a file A doesn't have → A falls back to B → B falls back to A infinite loop).
+// Root requests (HTTP download / browser fetch) have empty trace; old peers ignore the
+// field (omitempty compatible). Propagation: serveFile carries it via context (TraceKey);
+// PeerSource.Open retrieves from ctx and appends to OpenStreamFrom's request frame.
 type dcReq struct {
 	Type   string   `json:"type"`
 	Hash   string   `json:"hash"`
@@ -54,15 +63,16 @@ type dcReq struct {
 	Trace  []string `json:"trace,omitempty"`
 }
 
-// traceCtxKey context key（导出 TraceKey 供 source 包读取，类型私有防误用）。
+// traceCtxKey context key (exported as TraceKey for source package to read; type is
+// private to prevent misuse).
 type traceCtxKey struct{}
 
-// TraceKey 回源链路 context key：值为 []string（已经过的节点 id 链，
-// 不含当前节点——当前节点由调用方 append 后传给下游）。
+// TraceKey fallback chain context key: value is []string (already-passed node id chain,
+// excluding current node — current node is appended by caller before passing downstream).
 var TraceKey = traceCtxKey{}
 
-// dcResp 通用响应帧：拉取响应（meta/data/done/err）与文件索引 verb 响应
-// （created/uploaded/ack/list-resp/info-resp/deleted/sync-resp）共用。
+// dcResp general response frame: shared by fetch responses (meta/data/done/err) and file
+// index verb responses (created/uploaded/ack/list-resp/info-resp/deleted/sync-resp).
 type dcResp struct {
 	Type    string     `json:"type"`
 	Hash    string     `json:"hash,omitempty"`
@@ -76,114 +86,129 @@ type dcResp struct {
 	Seq     int64      `json:"seq,omitempty"`
 	Files   []FileInfo `json:"files"`
 	LastSeq int64      `json:"lastSeq,omitempty"`
-	Nonce   string     `json:"nonce,omitempty"` // fwd-challenge：一次性质询（forward.go）
-	Hmac    string     `json:"hmac,omitempty"`  // fwd-auth：HMAC-SHA256(key, nonce)
-	Port    int        `json:"port,omitempty"`  // fwd-open：客户端声明的目标端口
-	URL     string     `json:"url,omitempty"`   // pull：让本节点去抓的地址（pull.go）
-	Psk     string     `json:"psk,omitempty"`   // psk-auth：对端出示的预共享密钥（psk.go）
-	Code    string     `json:"code,omitempty"`  // err 帧的机器可读错误码（消费端按 code 分支）
+	Nonce   string     `json:"nonce,omitempty"` // fwd-challenge: one-time challenge (forward.go)
+	Hmac    string     `json:"hmac,omitempty"`  // fwd-auth: HMAC-SHA256(key, nonce)
+	Port    int        `json:"port,omitempty"`  // fwd-open: client-declared target port
+	URL     string     `json:"url,omitempty"`   // pull: address for this node to fetch (pull.go)
+	Psk     string     `json:"psk,omitempty"`   // psk-auth: peer's presented pre-shared key (psk.go)
+	Code    string     `json:"code,omitempty"`  // machine-readable error code in err frames (consumers branch on code)
 }
 
-// connState 记录一条连接上的请求状态机与响应路由。
-// 状态归属标注（同一条连接双工并发复用，平铺共享不拆两份）：
-//   - fetches/expect：出站角色（outbound.go 的 requestFile/routeResponse）
-//   - pendingUpload/binCh/binDone：入站角色（inbound.go 的 serveUploadBegin/uploadWorker）
+// connState records the request state machine and response routing for a connection.
+// State ownership annotations (same connection full-duplex concurrent reuse, flat shared,
+// not split into two copies):
+//   - fetches/expect: outbound role (outbound.go requestFile/routeResponse)
+//   - pendingUpload/binCh/binDone: inbound role (inbound.go serveUploadBegin/uploadWorker)
 type connState struct {
 	mu            sync.Mutex
-	expect        *fetchState            // 当前期待二进制数据块的下载请求
-	fetches       map[string]*fetchState // reqId → 下载请求
-	pendingUpload *uploadState           // 当前接收中的流式上传（同一连接同时只有一个）
+	expect        *fetchState            // current expected binary data chunk download request
+	fetches       map[string]*fetchState // reqId → download request
+	pendingUpload *uploadState           // current receiving streaming upload (only one at a time per connection)
 
-	// verbWaits 一次性 JSON 应答等待槽（share 等「请求-应答」型 verb）：
-	// reqId → 原始响应帧 bytes。与 fetches 分开的理由：文件拉取是**流式**的
-	// （数据走有界队列 + expect 状态机），而 share/info 这类只要一个 JSON
-	// 就结束；混进 fetchState 会让后者凭空多出"无数据块"的分支。
-	// 值是 raw JSON 而不是解析后的结构：share-resp 的字段（collections/files）
-	// 不在 dcResp 里，重新 marshal 会丢字段。
+	// verbWaits one-shot JSON response waiting slots (share-type "request-response" verbs):
+	// reqId → raw response frame bytes. Separate from fetches because file fetching is
+	// **streaming** (data goes through bounded queue + expect state machine), while
+	// share/info etc. just need one JSON and finish; mixing into fetchState would add
+	// phantom "no data chunks" branches. Value is raw JSON not parsed struct: share-resp
+	// fields (collections/files) aren't in dcResp; re-marshaling would lose them.
 	verbWaits map[string]chan []byte
 
-	// H5 修复：二进制数据块（上传分片）投递到连接级 worker（binCh/binDone），
-	// WriteAt/Complete（fsync + 全文件 hashFile）移出 pion 消息泵——之前 8GB
-	// 上传完成的瞬间，这条连接上的所有其他帧全部冻结到 Complete 结束
-	// （头-of-line 阻塞，慢磁盘直接卡死整条连接）。路由决策（归谁）在消息泵
-	// 内完成（廉价），worker 只做 IO，保序由单 worker 保证。
+	// H5 fix: binary data chunks (upload slices) delivered to connection-level worker
+	// (binCh/binDone); WriteAt/Complete (fsync + full file hashFile) moved out of pion
+	// message pump — previously, the moment an 8GB upload completed, all other frames on
+	// this connection froze until Complete finished (head-of-line blocking; slow disk
+	// would deadlock the entire connection). Routing decision (who owns it) happens in
+	// the message pump (cheap); worker only does IO; ordering guaranteed by single worker.
 	binCh   chan binaryChunk
 	binDone chan struct{}
 
-	// adminUp 管理面二进制上传收集槽（单槽，admin.go）：浏览器发 admin 帧
-	// binary=true 声明后，泵内把后续二进制帧路由到这里（写临时文件），收齐
-	// 后触发 serveAdminUploadComplete（multipart 内部转发）。与 pendingUpload
-	// （文件索引上传）互斥独立：同一连接同时最多一个上传收集者。
+	// adminUp management-plane binary upload collection slot (single slot, admin.go):
+	// after browser sends admin frame with binary=true declaration, in-pump routes
+	// subsequent binary frames here (writing to temp file); on completion triggers
+	// serveAdminUploadComplete (multipart internal forwarding). Mutually exclusive with
+	// pendingUpload (file index upload): same connection has at most one upload collector
+	// at a time.
 	adminUp *adminUploadState
 
-	// forward 转发隧道（单槽，forward.go）：同一连接同时一条活跃转发流。
-	// fwdHandshake 是握手等待状态（fwd-open 发出 → ok/err 到达前占位）。
+	// forward forwarding tunnel (single slot, forward.go): same connection has one active
+	// forwarding stream at a time. fwdHandshake is handshake waiting state (fwd-open sent
+	// → placeholder before ok/err arrives).
 	fwd   *fwdStream
 	fwdHs *fwdHandshake
-	fwdCh chan fwdChunk // fwd 块 → 连接级 worker 写隧道（有界背压，同 binCh）
+	fwdCh chan fwdChunk // fwd chunks → connection-level worker writes tunnel (bounded backpressure, same as binCh)
 
-	// pskOK 对端是否已通过本节点的预共享密钥校验（psk.go 门禁）。
-	// 只影响「本节点是否为它提供服务」，不影响它对我们自己请求的应答
-	// （应答走 routeResponse，我们没理由拦自己要的数据）。
+	// pskOK whether the peer has passed this node's pre-shared key verification (psk.go gate).
+	// Only affects "whether this node serves it", not its responses to our own requests
+	// (responses go through routeResponse; we have no reason to block our own data).
 	pskOK bool
 }
 
-// fwdChunk 一块待写入隧道的转发数据（归属随块携带——隧道可能已换/已关，
-// worker 写已关 out 报错即丢弃，符合「转发是尽力而为的流」语义）。
+// fwdChunk a chunk of forwarding data to be written to the tunnel (ownership carried
+// with the chunk — tunnel may have been swapped/closed; worker writing to a closed out
+// gets an error and discards, matching "forwarding is best-effort stream" semantics).
 type fwdChunk struct {
 	fw   *fwdStream
 	data []byte
 }
 
-// binaryChunk 一个待落盘的上传分片（路由已在消息泵确定，worker 只做 IO）。
-// up 为 fileIndex 上传（inbound.go uploadWorker 写 UploadSession）；
-// au 为 admin 管理面上传（admin.go 写临时文件，multipart 转发前收集）。
+// binaryChunk a pending-to-persist upload slice (routing decided in message pump, worker
+// only does IO).
+// up is fileIndex upload (inbound.go uploadWorker writes UploadSession);
+// au is admin management-plane upload (admin.go writes temp file, collected before multipart forwarding).
 type binaryChunk struct {
 	up     *uploadState
-	au     *adminUploadState // admin 上传分片（与 up 互斥，一帧只归一类）
+	au     *adminUploadState // admin upload chunk (mutually exclusive with up, one frame belongs to only one)
 	offset int64
 	data   []byte
-	last   bool // 本分片收齐 → 触发 Complete（位图全满才登记）
+	last   bool // this chunk completes → trigger Complete (only when bitmap is full)
 }
 
-// uploadState 分片上传接收状态（连接级单流：一次 upload 请求 → 一个 data 块）。
-// 多 source 并发 = 多连接并行 WriteAt 不同分片；同连接内分片串行（请求-响应配对）。
+// uploadState slice upload receiving state (connection-level single stream: one upload
+// request → one data chunk). Multi-source concurrency = multiple connections parallel
+// WriteAt different slices; within same connection, slices are serial (request-response
+// pairing).
 type uploadState struct {
 	reqID   string
-	offset  int64 // 本分片起点（chunk 对齐）
-	size    int64 // 本分片长度
+	offset  int64 // start of this slice (chunk-aligned)
+	size    int64 // length of this slice
 	got     int64
 	sess    *UploadSession
-	created time.Time // M6：创建时间——对端发 upload 头后不发数据块会永久占位
+	created time.Time // M6: creation time — peer sending upload header without data chunks
+	// permanently occupies the slot
 }
 
-// fetchState 一次文件拉取的流式收集状态（出站角色）。
-// 数据块不驻留 state（流式：投递到有界队列 q 由 fetchReader 消费），
-// received 只做字节计数——用于 done 帧的完整性校验。
+// fetchState streaming collection state for one file fetch (outbound role).
+// Data chunks don't reside in state (streaming: delivered to bounded queue q for
+// fetchReader consumption); received only does byte counting — for done frame integrity
+// verification.
 type fetchState struct {
 	reqID    string
-	size     int64         // 期待中的 data 块大小（上限校验见 maxPeerFetchSize）
-	received int64         // 已投递队列的字节数
-	// total 对端 meta 帧声明的文件总大小（-1 = 未知，见 fetchReader.Total）。
-	// 用 atomic 而不是普通字段：写入发生在消息泵（routeResponse，持 st.mu），
-	// 读取发生在消费者 goroutine（reader.Total()），普通字段是 data race。
+	size     int64         // expected data chunk size (upper limit verification in maxPeerFetchSize)
+	received int64         // bytes delivered to queue
+	// total: file total size declared by peer's meta frame (-1 = unknown, see fetchReader.Total).
+	// Uses atomic instead of plain field: write happens in message pump (routeResponse,
+	// holds st.mu); read happens in consumer goroutine (reader.Total()); plain field
+	// would be a data race.
 	total    atomic.Int64
-	q        chan []byte   // 数据块队列（有界 8，消息泵投递 / fetchReader 消费）
-	done     chan struct{} // close → 对端 done 帧（传输完成；q 中剩余块仍可消费）
-	errCh    chan error    // 错误（含连接关闭）
-	closed   chan struct{} // 本地取消（reader.Close）：pump 停止投递，块丢弃
+	q        chan []byte   // data chunk queue (bounded 8, message pump delivers / fetchReader consumes)
+	done     chan struct{} // close → peer's done frame (transfer complete; remaining chunks in q still consumable)
+	errCh    chan error    // error (including connection close)
+	closed   chan struct{} // local cancellation (reader.Close): pump stops delivering, chunks discarded
 }
 
-// bindConn 绑定连接的消息分派：解析 JSON 头按 reqId 路由，二进制块追加到 expect 状态。
-// 坑：这条连接是「全双工复用」的——既服务对端的 req（serveFile），也接收
-// 自己发起请求的响应（routeResponse）。两者靠帧类型 + reqId 区分：
-//   - 文本帧 type 为 verb（req/create/upload/list/info/delete/sync）→ 入站角色应答
-//   - 文本帧其它 type → 出站角色的响应，按 reqId 路由
-//   - 二进制帧 → 数据块，路由决策（归 upload 还是 expect）在泵内完成，
-//     落盘 IO 交给连接级 worker（H5，见 inbound.go 的 uploadWorker）
+// bindConn binds the message dispatch for a connection: parses JSON header, routes by reqId,
+// appends binary chunks to expect state.
+// Trap: this connection is "full-duplex reused" — it both serves the peer's req (serveFile)
+// and receives responses for our own outgoing requests (routeResponse). They are
+// distinguished by frame type + reqId:
+//   - Text frame with type being a verb (req/create/upload/list/info/delete/sync) →
+//     inbound role responds
+//   - Text frame with other types → outbound role responses, routed by reqId
+//   - Binary frame → data chunk, routing decision (belongs to upload or expect) done in
+//     pump, disk IO delegated to connection-level worker (H5, see inbound.go uploadWorker)
 //
-// connRanker 连接级 UUID（rtcSession 实现；WSSession/fakeSession 无，
-// 返回 "" 表示不可比）。
+// connRanker connection-level UUID (implemented by rtcSession; WSSession/fakeSession
+// don't have it, returning "" means incomparable).
 type connRanker interface{ ConnID() string }
 
 func sessionRank(s Session) string {
@@ -193,23 +218,28 @@ func sessionRank(s Session) string {
 	return ""
 }
 
-// dedupConn 同 peer 双连接去重决策（2026-08-19）：双向互拨（A↔B 同时
-// 拨号对方）或重连竞态会在同一 peerID 下留下两条连接——conns map 按
-// peerID 键只保留一条，另一条成为孤儿：connState 常驻 pending map、
-// uploadWorker/fwdWorker goroutine 泄漏、白占一条 WebRTC 连接资源。
-// 返回被淘汰连接（由调用方锁外 Close——持锁 Close 死锁坑见 REFACTOR §5；
-// 被淘汰连接的 OnClose 清理带 `s.conns[c.ID()] == c` 值相等守卫，不会
-// 误删保留连接）。keepOld=true 时 conns 已指回旧连接（旧 connState/worker
-// 已就位，调用方不得再为新连接建状态）。
-// 例外：local WS 会话不去重——多浏览器标签页各一条本地会话，主动关闭
-// 旧标签页连接会打断其进行中的入站服务。
-// ⚠️ 保留策略必须两端一致（连接级 UUID 字典序小的胜出）：双向互拨时
-// 两端各见两条连接 {自己拨出, 对方拨入}，若各留各的拨出连接，保留的
-// 恰是对方已关闭的断链（集成测试 TestSelfHostedSignalAndDiscover 偶发
-// 失败即此坑——发现背景：去重批次上线后集成测试 1/4 概率失败，拉取
-// 超时 10.5s）。连接 UUID 两端可见同一值 → 同取字典序小者 → 两端保留
-// 同一条物理连接。fakeSession 无连接 UUID（rank 相等）时保留新连接
-// （测试替身语义）。
+// dedupConn same-peer dual-connection dedup decision (2026-08-19): mutual dialing (A↔B
+// dialing each other simultaneously) or reconnection races leave two connections under the
+// same peerID — conns map keyed by peerID keeps only one, the other becomes an orphan:
+// connState persists in pending map, uploadWorker/fwdWorker goroutine leaks, wasting a
+// WebRTC connection resource. Returns the eliminated connection (caller Close's it outside
+// the lock — holding-lock Close deadlock trap in REFACTOR §5; eliminated connection's
+// OnClose cleanup has `s.conns[c.ID()] == c` value-equality guard, won't mistakenly
+// delete the retained connection). keepOld=true means conns already points back to the old
+// connection (old connState/worker already in place; caller must not create state for the
+// new connection).
+// Exception: local WS sessions are not deduped — multiple browser tabs each have a local
+// session; actively closing old tab's connection would interrupt its in-progress inbound
+// service.
+// ⚠️ Retention policy must be consistent on both ends (connection-level UUID lexicographic
+// comparison, smaller wins): with mutual dialing, both ends see two connections {own dial,
+// peer's incoming}; if each keeps its own outgoing connection, the retained one is exactly
+// the broken link the other side already closed (integration test
+// TestSelfHostedSignalAndDiscover occasionally fails due to this — discovery background:
+// after dedup batch went live, integration test failed 1/4 of the time, fetch timeout
+// 10.5s). Connection UUID is visible on both ends with the same value → both take the
+// lexicographically smaller → both retain the same physical connection. fakeSession has
+// no connection UUID (equal rank) → retains the new connection (test double semantics).
 func (s *PeerJSService) dedupConn(c Session, old Session) (loser Session, keepOld bool) {
 	if old == nil || old == c || c.ID() == "local" {
 		return nil, false
@@ -247,55 +277,61 @@ func (s *PeerJSService) bindConn(c Session) {
 	s.pending[c] = st
 	s.pendingMu.Unlock()
 
-	// ⚠️ OnMessage 必须在**做任何可能让出的事之前**挂上。
-	// 发现背景：CI 的面板 E2E 偶发「psk: 本节点需要预共享密钥」（约 1/5），
-	// 节点日志里只有自己发出的 psk-auth，没有对端的 psk ok/mismatch ——
-	// 即对端的 auth 帧根本没被看见。根因是顺序：peerjs 库里 dc.OnMessage 在
-	// onMessage 为 nil 时**直接丢弃**该帧，而 dc.OnOpen（跑 bindConn 的就是它）
-	// 与 dc.OnMessage 是两条可并发的回调，下面的发送又可能让出；对端在 open
-	// 那一刻就发出的 psk-auth 完全可能赶在注册之前到达，然后被静默丢掉
-	// —— 门禁于是永远等不到出示，后续 verb 全被拒，且没有任何报错。
-	// 早挂只影响入站，不影响「psk-auth 是本端第一帧」这个出站语义。
+	// ⚠️ OnMessage MUST be registered **before doing anything that may yield**.
+	// Discovery background: CI panel E2E occasionally shows "psk: this node requires
+	// a pre-shared key" (~1/5), node logs show only our own outgoing psk-auth with no
+	// peer's psk ok/mismatch — i.e. the peer's auth frame was never seen. Root cause
+	// is ordering: in the peerjs library, dc.OnMessage **silently drops** frames when
+	// onMessage is nil, and dc.OnOpen (which runs bindConn) and dc.OnMessage are two
+	// concurrently dispatchable callbacks; the send below may yield; the peer sending
+	// psk-auth at the moment of open could easily arrive before registration and be
+	// silently dropped — the gate then waits forever, all subsequent verbs are rejected,
+	// with no error at all.
+	// Early registration only affects inbound, not the "psk-auth is our first frame"
+	// outbound semantics.
 	c.OnMessage(func(msg peerjs.Frame) { s.dispatchFrame(c, st, msg) })
 	c.OnClose(func() { s.cleanupConn(c, st) })
 
 	go s.uploadWorker(c, st)
-	// 转发写 worker 与上传 worker 分离（2026-08-18）：大上传 Complete
-	// （fsync + hashFile）不再阻塞同连接转发隧道，见 inbound.go fwdWorker。
+	// Forwarding write worker separated from upload worker (2026-08-18): large upload
+	// Complete (fsync + hashFile) no longer blocks same-connection forwarding tunnel, see
+	// inbound.go fwdWorker.
 	go s.fwdWorker(c, st)
 
-	// PSK 门禁：配了密钥就出示（本端第一帧）。
+	// PSK gate: if a key is configured, present it (our first frame).
 	s.pskSendAuth(c)
 }
 
-// dispatchFrame 连接消息泵：解析 JSON 头按 reqId 路由，二进制块追加到
-// expect 状态。泵内处理必须保持帧序——部分 case 刻意同步执行：
-//   - admin（binary 上传声明）：adminUp 占槽必须在泵内完成，否则后续
-//     二进制帧先到泵时 adminUp 仍为空 → 数据块丢失（发现背景：初版 go
-//     异步，上传分片全部丢失）
-//   - fwd-data 头（转发块声明）：与文件传输一致的头-块连续约束，泵内按
-//     帧序处理故无竞态
+// dispatchFrame connection message pump: parses JSON header, routes by reqId, appends
+// binary chunks to expect state. In-pump handling must maintain frame order — some cases
+// are intentionally synchronous:
+//   - admin (binary upload declaration): adminUp slot claim MUST happen in-pump,
+//     otherwise subsequent binary frames arrive before adminUp is set → data chunks lost
+//     (discovery background: initial version went async, all upload chunks lost)
+//   - fwd-data header (forwarding chunk declaration): same header-chunk contiguity
+//     constraint as file transfer; in-pump frame-ordered processing means no race
 func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame) {
 	if msg.IsText {
 		var r dcResp
 		if err := json.Unmarshal(msg.Data, &r); err != nil || r.Type == "" {
 			return
 		}
-		// PSK 门禁：先处理握手帧，再用门禁过滤"要我干活"的入站 verb
-		// （psk.go）。对端出示前，这些 verb 一律回 err。
+		// PSK gate: handle handshake frames first, then filter "make me work" inbound
+		// verbs with the gate (psk.go). Before peer presents, these verbs all return err.
 		if r.Type == "psk-auth" {
 			s.servePskAuth(c, st, r.Psk)
 			return
 		}
 		if r.Type == "psk-ok" || r.Type == "psk-err" {
-			return // 客户端侧的握手回执：这里不需要（出示方不等回执，见 psk.go）
+			return // Client-side handshake receipts: not needed here (presenter doesn't wait
+			// for receipt, see psk.go)
 		}
 		if s.pskGate(c, st, r) {
 			return
 		}
 		switch r.Type {
 		case "req":
-			// 对端请求本节点文件（download）
+			// Peer requests this node's file (download)
 			req := dcReq{
 				Type:   r.Type,
 				Hash:   r.Hash,
@@ -305,19 +341,20 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 			}
 			go s.serveFile(c, req)
 		case "create":
-			// 对端登记外部文件（sha256 → 绝对路径）
+			// Peer registers external file (sha256 → absolute path)
 			go s.serveCreate(c, r)
 		case "upload":
-			// 对端流式上传：开始接收（后续 data 帧写入 UploadSink）
+			// Peer streaming upload: start receiving (subsequent data frames write to UploadSink)
 			go s.serveUploadBegin(c, st, r)
 		case "pull":
-			// 对端给一个 URL，让本节点去抓（pull.go：网络入库，带 SSRF 防护）
+			// Peer gives a URL, asks this node to fetch it (pull.go: network ingestion, with SSRF protection)
 			go s.servePull(c, r)
 		case "list":
 			go s.serveList(c, r)
 		case "share":
-			// 对端问"你共享了什么"（share.go，网盘目标 M2）：**仅返回显式
-			// 共享范围**，与 list（本地管理清单全量）严格区分。
+			// Peer asks "what did you share" (share.go, netdisk target M2): **only returns
+			// explicitly shared scope**, strictly distinct from list (local management list
+			// full set).
 			go s.serveShare(c, r)
 		case "info":
 			go s.serveInfo(c, r)
@@ -326,21 +363,23 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 		case "sync":
 			go s.serveSync(c, r)
 		case "admin":
-			// 管理面 verb（admin.go）：仅本地 WS 会话（浏览器）使用，
-			// 内部转发 gin engine 复用全部 HTTP controller。WebRTC 连接
-			// 收到 admin 帧在 serveAdmin 内被拒绝（ID!="local"）。
-			// 同步执行：binary 上传声明的 adminUp 占槽必须在泵内完成，
-			// 否则后续二进制帧先到泵时 adminUp 仍为空 → 数据块丢失
-			// （发现背景：初版 go 异步，上传分片全部丢失）。
+			// Management-plane verb (admin.go): used only by local WS sessions (browser),
+			// internally forwards to gin engine reusing all HTTP controllers. WebRTC
+			// connections receiving admin frames are rejected in serveAdmin (ID!="local").
+			// Synchronous execution: adminUp slot claim for binary upload declaration
+			// MUST happen in-pump, otherwise subsequent binary frames arrive before adminUp
+			// is set → data chunks lost (discovery background: initial version went async,
+			// all upload chunks lost).
 			s.serveAdmin(c, st, msg.Data)
 		case "fwd-open":
 			go s.serveForwardOpen(c, st, r)
 		case "fwd-auth":
 			go s.serveForwardAuth(c, st, r)
 		case "fwd-data":
-			// 转发数据头（forward.go）：声明「下一个二进制块归转发隧道」。
-			// 头-块连续约束与文件传输一致（SendFrame 原子发送），泵内按帧序
-			// 处理故无竞态；非法（无隧道/已关）时静默丢弃并清 pending。
+			// Forwarding data header (forward.go): declares "next binary chunk belongs to
+			// forwarding tunnel". Header-chunk contiguity same as file transfer (SendFrame
+			// atomic send); in-pump frame-ordered processing means no race; silently
+			// discarded and pending cleared when illegal (no tunnel / already closed).
 			st.mu.Lock()
 			fw := st.fwd
 			if fw != nil && !fw.closed {
@@ -350,19 +389,21 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 		case "fwd-close":
 			go s.serveForwardClose(c, st, r)
 		case "fwd-challenge", "fwd-ok", "fwd-err":
-			// 客户端侧握手响应（OpenForward 等待中）——与文件拉取响应同槽路由
+			// Client-side handshake responses (OpenForward waiting) — routed to same slot
+			// as file fetch responses
 			s.routeForwardResponse(st, r)
 		default:
 			s.routeResponse(st, r, msg.Data)
 		}
 		return
 	}
-	// 二进制数据块：路由决策在泵内（廉价、保持与文本帧的顺序一致性），
-	// 落盘 IO（WriteAt/Complete）交给连接级 worker（H5）
+	// Binary data chunk: routing decision in pump (cheap, maintains ordering consistency
+	// with text frames); disk IO (WriteAt/Complete) delegated to connection-level worker (H5)
 	st.mu.Lock()
 	fw := st.fwd
 	if fw != nil && fw.pending && !fw.closed {
-		// 转发块：投递到 fwdCh（有界背压，worker 写隧道；连接关闭放行）
+		// Forwarding chunk: deliver to fwdCh (bounded backpressure, worker writes tunnel;
+		// connection close releases)
 		fw.pending = false
 		select {
 		case st.fwdCh <- fwdChunk{fw: fw, data: msg.Data}:
@@ -378,19 +419,19 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 			st.pendingUpload = nil
 		}
 	}
-	// 管理面上传收集（admin.go）：pendingUpload 之后的第二优先级。
-	// 块投递到 binCh（复用 H5 worker，写盘移出泵）；收齐（got>=size）
-	// 触发内部 multipart 转发。
+	// Management-plane upload collection (admin.go): second priority after pendingUpload.
+	// Chunks delivered to binCh (reuses H5 worker, writes to disk outside pump); on
+	// completion (got>=size) triggers internal multipart forwarding.
 	au := st.adminUp
 	if au != nil {
 		au.got += int64(len(msg.Data))
-		// 防御：声明 size 与实际不符 / 对端多发 → 中止并清理
+		// Defense: declared size mismatch / peer sent extra → abort and clean up
 		abort := au.got > au.size || time.Since(au.created) > adminUploadTimeout
 		last := false
 		if abort {
 			st.adminUp = nil
 			au.aborted = true
-			last = true // 空块也投递：worker 收到 aborted 即清理回 err
+			last = true // empty chunk also delivered: worker sees aborted → cleanup and return err
 		} else if au.got >= au.size {
 			st.adminUp = nil
 			last = true
@@ -402,8 +443,9 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 	}
 	f := st.expect
 	if up == nil && f != nil {
-		// 数据块投递到 fetch 队列（有界背压）；本地已取消（closed）则丢弃。
-		// 投递成功才计数（取消后不计数，expect 由调用方清理）。
+		// Data chunk delivered to fetch queue (bounded backpressure); if locally cancelled
+		// (closed), discard. Only count on successful delivery (no counting after cancel;
+		// expect cleaned up by caller).
 		select {
 		case f.q <- msg.Data:
 			f.received += int64(len(msg.Data))
@@ -418,19 +460,21 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 	if up != nil {
 		select {
 		case st.binCh <- binaryChunk{up: up, offset: up.offset, data: msg.Data, last: last}:
-		case <-st.binDone: // 连接关闭：不再投递
+		case <-st.binDone: // connection closed: stop delivering
 			return
 		}
 	}
 }
 
-// cleanupConn 连接关闭清理：注销连接、释放 fetch/forward/上传状态。
-// 顺序敏感：fwdOut 在锁内取出、锁外 Close（关 out 会触发读侧返回，
-// 不能在持 st.mu 时做——forwardPump 可能在读 out 的 goroutine 里等锁）。
+// cleanupConn connection close cleanup: deregister connection, release fetch/forward/upload
+// states.
+// Order-sensitive: fwdOut taken out inside lock, Close outside lock (closing out triggers
+// read-side return, can't be done while holding st.mu — forwardPump might be waiting on
+// the lock in a goroutine reading from out).
 func (s *PeerJSService) cleanupConn(c Session, st *connState) {
 	s.mu.Lock()
-	// 值相等守卫：去重淘汰连接的清理不会误删保留连接
-	// （dedup 时 conns[c.ID()] 已被保留连接覆盖）。
+	// Value-equality guard: dedup-eliminated connection cleanup won't mistakenly delete
+	// retained connection (conns[c.ID()] already overwritten by retained connection during dedup).
 	if s.conns[c.ID()] == c {
 		delete(s.conns, c.ID())
 	}
@@ -443,14 +487,16 @@ func (s *PeerJSService) cleanupConn(c Session, st *connState) {
 	}
 	var fwdOut net.Conn
 	st.mu.Lock()
-	// 管理面上传收集（admin.go）：连接关闭 → 中止并清理临时文件
+	// Management-plane upload collection (admin.go): connection closed → abort and clean up
+	// temp file
 	if au := st.adminUp; au != nil {
 		st.adminUp = nil
-		au.cleanupTemp() // 顺序：先关句柄再删文件（Windows 上反了就删不掉）
+		au.cleanupTemp() // order: close handle first, then delete file (reversed on Windows = can't delete)
 	}
 	for _, f := range st.fetches {
-		// 连接关闭：通知 fetch reader 退出（errCh），并放行 pump 投递阻塞
-		// （close(f.closed) 幂等检查——reader 可能已自行清理）
+		// Connection closed: notify fetch reader to exit (errCh), and release pump
+		// delivery blockage (close(f.closed) idempotent check — reader may have already
+		// self-cleaned)
 		select {
 		case f.errCh <- fmt.Errorf("peerjs: connection closed"):
 		default:
@@ -461,14 +507,14 @@ func (s *PeerJSService) cleanupConn(c Session, st *connState) {
 			close(f.closed)
 		}
 	}
-	// forward：隧道随之死亡——关 out 释放读侧（forwardPump 退出），
-	// 调用方（OpenForward 返回的 net.Conn）读侧随即 EOF
+	// Forwarding: tunnel dies with it — close out to release read side (forwardPump exits),
+	// caller (OpenForward's returned net.Conn) read side immediately EOFs
 	if st.fwd != nil {
 		fwdOut = st.fwd.out
 	}
 	st.mu.Unlock()
-	// H5：通知上传 worker 退出（未消费的分片直接丢弃——连接已死，
-	// 会话残留由 file_index 的 10 分钟 reap 清理）
+	// H5: notify upload worker to exit (unconsumed chunks discarded — connection dead,
+	// session residue cleaned by file_index's 10-minute reap)
 	close(st.binDone)
 	if fwdOut != nil {
 		fwdOut.Close()

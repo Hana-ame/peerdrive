@@ -1,6 +1,6 @@
 package downloader
 
-// 注：本文件属于 legacy 代码（见 doc/archive/LEGACY.md，待删/待迁移）的测试，未逐一标注发现背景；「发现背景」规范对新代码生效。
+// Note: this file is the test for legacy code (see doc/archive/LEGACY.md, to be deleted/migrated); the "discovery background" was not annotated case by case. The "discovery background" convention applies to new code.
 
 import (
 	"context"
@@ -64,7 +64,7 @@ func TestLocalFetcher_FileInP2PSubdir(t *testing.T) {
 func TestLocalFetcher_FileFromDBProvider(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
-	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
+	t.Cleanup(func() { _ = repository.CloseDB() }) // On Windows: without closing the DB file it can't be deleted, so TempDir cleanup would fail
 
 	data := []byte("db provider test")
 	hash := sha256.Sum256(data)
@@ -90,8 +90,10 @@ func TestLocalFetcher_FileFromDBProvider(t *testing.T) {
 }
 
 func TestLocalFetcher_NotFound(t *testing.T) {
-	// 该用例会查 provider 表：以前全靠上一个用例漏下来的全局 DB（没关连接），
-	// 现在每个用例都 CloseDB 了，这里必须自己建库——测试之间不该靠泄漏共享状态。
+	// This test case queries the provider table: previously it relied entirely
+	// on the global DB leaked by the previous test (connection never closed);
+	// now every test case calls CloseDB, so we must build our own DB here --
+	// tests should not depend on leaked shared state.
 	if err := repository.InitDB(":memory:"); err != nil {
 		t.Fatalf("InitDB: %v", err)
 	}
@@ -153,7 +155,7 @@ func TestHTTPURLFetcher_IsAvailable(t *testing.T) {
 func TestHTTPURLFetcher_FetchFromServer(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
-	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
+	t.Cleanup(func() { _ = repository.CloseDB() }) // On Windows: without closing the DB file it can't be deleted, so TempDir cleanup would fail
 
 	data := []byte("http provider content")
 	hash := sha256.Sum256(data)
@@ -180,7 +182,7 @@ func TestHTTPURLFetcher_FetchFromServer(t *testing.T) {
 }
 
 func TestHTTPURLFetcher_NoProvider(t *testing.T) {
-	if err := repository.InitDB(":memory:"); err != nil { // 同上：不能靠别的用例漏下来的 DB
+	if err := repository.InitDB(":memory:"); err != nil { // Same as above: can't rely on a DB leaked by another test
 		t.Fatalf("InitDB: %v", err)
 	}
 	t.Cleanup(func() { _ = repository.CloseDB() })
@@ -235,7 +237,7 @@ func TestNewUniversalDownloader_CustomOrder(t *testing.T) {
 func TestDownload_LocalFile(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
-	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
+	t.Cleanup(func() { _ = repository.CloseDB() }) // On Windows: without closing the DB file it can't be deleted, so TempDir cleanup would fail
 
 	data := []byte("full pipeline test")
 	hash := sha256.Sum256(data)
@@ -266,7 +268,7 @@ func TestDownload_LocalFile(t *testing.T) {
 func TestDownload_Fallback(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
-	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
+	t.Cleanup(func() { _ = repository.CloseDB() }) // On Windows: without closing the DB file it can't be deleted, so TempDir cleanup would fail
 
 	data := []byte("http fallback test")
 	hash := sha256.Sum256(data)
@@ -300,7 +302,7 @@ func TestDownload_Fallback(t *testing.T) {
 func TestDownload_AllProtocolsFail(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
-	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
+	t.Cleanup(func() { _ = repository.CloseDB() }) // On Windows: without closing the DB file it can't be deleted, so TempDir cleanup would fail
 
 	d := NewUniversalDownloader(nil, dir, "local,http", 5*time.Second, nil)
 	_, _, err := d.Download(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
@@ -313,7 +315,7 @@ func TestDownload_AllProtocolsFail(t *testing.T) {
 func TestCacheToLocal(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
-	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
+	t.Cleanup(func() { _ = repository.CloseDB() }) // On Windows: without closing the DB file it can't be deleted, so TempDir cleanup would fail
 
 	data := []byte("cache test")
 	hash := sha256.Sum256(data)
@@ -352,7 +354,7 @@ func TestCacheToLocal(t *testing.T) {
 func TestCheckSources(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
-	t.Cleanup(func() { _ = repository.CloseDB() }) // Windows：库文件不关删不掉，TempDir 清理会失败
+	t.Cleanup(func() { _ = repository.CloseDB() }) // On Windows: without closing the DB file it can't be deleted, so TempDir cleanup would fail
 
 	data := []byte("sources check data")
 	hash := sha256.Sum256(data)

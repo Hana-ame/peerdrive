@@ -1,4 +1,4 @@
-// 模块⑥：BT —— BT DHT / torrent 下载状态与下载管理（简化面板）。
+// Module 6: BT — BT DHT / torrent download status and download management (simplified panel).
 import React, { useState, useEffect, useCallback } from 'react';
 import * as ws from '../ws';
 
@@ -32,10 +32,10 @@ export default function BT() {
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="text-2xl font-bold">BT 下载</h1>
-            <p className="text-sm text-gray-500 mt-0.5">BT DHT / torrent 下载管理</p>
+            <h1 className="text-2xl font-bold">BT Downloads</h1>
+            <p className="text-sm text-gray-500 mt-0.5">BT DHT / torrent download management</p>
           </div>
-          <button onClick={load} disabled={busy} className="btn-ghost">刷新</button>
+          <button onClick={load} disabled={busy} className="btn-ghost">Refresh</button>
         </div>
 
         {err && (
@@ -44,12 +44,12 @@ export default function BT() {
 
         {status && (
           <div className="card-surface p-4 mb-4">
-            <p className="text-xs text-gray-500 mb-1">BT DHT 状态</p>
+            <p className="text-xs text-gray-500 mb-1">BT DHT Status</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
               {Object.entries(status).filter(([k]) => !/^[a-z_]+:\//.test(k)).map(([k, v]) => (
                 <div key={k} className="bg-white/[0.03] rounded px-2 py-1.5">
                   <span className="block text-xs text-gray-500">{k}</span>
-                  <span className="text-gray-300">{typeof v === 'boolean' ? (v ? '开' : '关') : String(v)}</span>
+                  <span className="text-gray-300">{typeof v === 'boolean' ? (v ? 'On' : 'Off') : String(v)}</span>
                 </div>
               ))}
             </div>
@@ -58,8 +58,8 @@ export default function BT() {
 
         {downloads.length === 0 ? (
           <div className="text-center py-20 text-gray-500 border-2 border-dashed border-white/10 rounded-card">
-            <p>没有 BT 下载任务</p>
-            <p className="text-xs text-gray-600 mt-1">用种子 / magnet 发起下载后在这里管理。</p>
+            <p>No BT download tasks</p>
+            <p className="text-xs text-gray-600 mt-1">Initiate downloads via seed / magnet and manage them here.</p>
           </div>
         ) : (
           <div className="card-surface overflow-hidden">
@@ -67,8 +67,8 @@ export default function BT() {
               <thead className="bg-white/[0.03]">
                 <tr>
                   <th className="text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2">infohash</th>
-                  <th className="text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2">状态</th>
-                  <th className="text-right text-xs uppercase tracking-wider text-gray-500 px-3 py-2">操作</th>
+                  <th className="text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2">Status</th>
+                  <th className="text-right text-xs uppercase tracking-wider text-gray-500 px-3 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -78,11 +78,11 @@ export default function BT() {
                     <td className="px-3 py-2 text-gray-500 text-xs">{d.status || '—'}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <button onClick={() => act(() => ws.admin('POST', `/bt/download/${d.infohash}/pause`))}
-                        className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">暂停</button>
+                        className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Pause</button>
                       <button onClick={() => act(() => ws.admin('POST', `/bt/download/${d.infohash}/resume`))}
-                        className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">继续</button>
+                        className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Resume</button>
                       <button onClick={() => act(() => ws.admin('DELETE', `/bt/download/${d.infohash}`))}
-                        className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">删除</button>
+                        className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">Delete</button>
                     </td>
                   </tr>
                 ))}

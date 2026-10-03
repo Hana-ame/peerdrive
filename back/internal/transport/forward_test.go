@@ -1,14 +1,15 @@
 package transport
 
-// forward_test.go：forward v2（PeerJS DataChannel 端口转发）握手与数据透传测试。
+// forward_test.go: forward v2 (PeerJS DataChannel port forwarding) handshake and data passthrough tests.
 //
-// 覆盖（发现背景标注）：
-//   - 握手全流程 + 数据双向透传（服务端侧：echo TCP 服务 ↔ 隧道）
-//   - 坏 key / 端口越权 / nonce 重放 → fwd-err（权限控制与密钥交换核心断言）
-//   - 客户端 OpenForward 全链路（fakeSession 扮演服务端）
+// Coverage (with discovery backgrounds noted):
+//   - full handshake flow + bidirectional data passthrough (server side: echo TCP service <-> tunnel)
+//   - bad key / unauthorized port / nonce replay -> fwd-err (the core assertions for authorization and key exchange)
+//   - the client-side OpenForward end to end (fakeSession plays the server)
 //
-// 说明：不走真实 WebRTC/WS——用 fakeSession + bindConn 全链路（含 uploadWorker，
-// 转发块经 fwdCh 投递由 worker 写隧道），与文件帧路由共用同一套泵内逻辑。
+// Note: no real WebRTC/WS -- it uses fakeSession + bindConn end to end (including uploadWorker, so
+// forwarded blocks are delivered via fwdCh and written to the tunnel by the worker), sharing the same
+// pump-internal routing logic as file frames.
 
 import (
 	"context"
@@ -27,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// startEchoServer 起一个 loopback echo TCP 服务，返回监听端口与关闭函数。
+// startEchoServer starts a loopback echo TCP service, returning the listening port and a close function.
 func startEchoServer(t *testing.T, tag string) (int, func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -40,12 +41,12 @@ func startEchoServer(t *testing.T, tag string) (int, func()) {
 			}
 			go func() {
 				defer conn.Close()
-				// echo：收到什么原样回什么（收齐一行再回，断言简单）
+				// echo: return whatever was received unchanged (reply once a full line arrives, which keeps assertions simple)
 				buf := make([]byte, 4096)
 				for {
 					n, err := conn.Read(buf)
 					if n > 0 {
-						// 前缀 tag 便于断言区分多个服务
+						// prefix the tag so assertions can tell multiple services apart
 						resp := append([]byte(tag+":"), buf[:n]...)
 						if _, werr := conn.Write(resp); werr != nil {
 							return
@@ -61,8 +62,8 @@ func startEchoServer(t *testing.T, tag string) (int, func()) {
 	return ln.Addr().(*net.TCPAddr).Port, func() { ln.Close() }
 }
 
-// bindFakeServer 把 fakeSession 全链路绑定到 service（bindConn + conns/pending 注册），
-// 返回 st 便于断言隧道状态。
+// bindFakeServer binds a fakeSession to the service end to end (bindConn + conns/pending registration),
+// returning st so the tunnel state can be asserted on.
 func bindFakeServer(t *testing.T, svc *PeerJSService, sess *fakeSession) *connState {
 	t.Helper()
 	svc.mu.Lock()
@@ -74,8 +75,8 @@ func bindFakeServer(t *testing.T, svc *PeerJSService, sess *fakeSession) *connSt
 	return st
 }
 
-// waitFrameType 轮询等待最近一帧类型为 want（bindConn 分派是异步 goroutine，
-// feed 后不能立即断言）。超时返回空串。
+// waitFrameType polls until the most recent frame's type is want (bindConn dispatch is an asynchronous goroutine,
+// so asserting right after feed is not safe). On timeout it fails with the frames seen so far.
 func waitFrameType(t *testing.T, sess *fakeSession, want string) map[string]any {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -89,7 +90,7 @@ func waitFrameType(t *testing.T, sess *fakeSession, want string) map[string]any 
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("等待帧 %q 超时（当前最近帧: %v）", want, func() []string {
+	t.Fatalf("waiting for frame %q timed out (current most recent frames: %v)", want, func() []string {
 		out := []string{}
 		for _, fr := range sess.sentFrames() {
 			if tt, ok := fr.header["type"].(string); ok {
@@ -101,7 +102,7 @@ func waitFrameType(t *testing.T, sess *fakeSession, want string) map[string]any 
 	return nil
 }
 
-// fwdHMAC 计算客户端侧应答（与服务端验证逻辑对称）。
+// fwdHMAC computes the client-side response (symmetric with the server's verification logic).
 func fwdHMAC(key, nonceHex string) string {
 	nonce, _ := hex.DecodeString(nonceHex)
 	mac := hmac.New(sha256.New, []byte(key))
@@ -109,11 +110,11 @@ func fwdHMAC(key, nonceHex string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// TestForward_HandshakeAndData 服务端握手全流程 + 双向数据透传：
-//  1. 收到 fwd-open → 回 fwd-challenge（带 nonce）
-//  2. 收到合法 fwd-auth → 回 fwd-ok，隧道建立（服务端 dial 到 echo 服务）
-//  3. 本地 TCP → 隧道（经 pump 发 fwd-data 头+块）→ echo 服务
-//  4. echo 回包 → 隧道另一端 TCP 收到
+// TestForward_HandshakeAndData the full server-side handshake + bidirectional data passthrough:
+//  1. receive fwd-open -> reply fwd-challenge (with a nonce)
+//  2. receive a valid fwd-auth -> reply fwd-ok and establish the tunnel (the server dials the echo service)
+//  3. local TCP -> the tunnel (the pump sends a fwd-data header + block) -> the echo service
+//  4. the echo reply -> received on the other end of the tunnel over TCP
 func TestForward_HandshakeAndData(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	echoPort, stopEcho := startEchoServer(t, "srv")
@@ -123,25 +124,25 @@ func TestForward_HandshakeAndData(t *testing.T) {
 	sess := &fakeSession{id: "client"}
 	st := bindFakeServer(t, svc, sess)
 
-	// 1. fwd-open → fwd-challenge
+	// 1. fwd-open -> fwd-challenge
 	sess.feed(peerjs.Frame{IsText: true, Data: []byte(`{"type":"fwd-open","port":` + fmt.Sprint(echoPort) + `,"reqId":"h1"}`)})
 	ch := waitFrameType(t, sess, "fwd-challenge")
 	nonce, _ := ch["nonce"].(string)
 	require.NotEmpty(t, nonce)
 
-	// 2. fwd-auth → fwd-ok
+	// 2. fwd-auth -> fwd-ok
 	sess.feed(peerjs.Frame{IsText: true, Data: []byte(`{"type":"fwd-auth","hmac":"` + fwdHMAC("testkey", nonce) + `","reqId":"h1"}`)})
 	waitFrameType(t, sess, "fwd-ok")
 	st.mu.Lock()
-	require.NotNil(t, st.fwd, "隧道应已建立")
+	require.NotNil(t, st.fwd, "tunnel should be established")
 	require.Equal(t, echoPort, st.fwd.port)
 	st.mu.Unlock()
 
-	// 3. 客户端方向数据：注入 fwd-data 头+块 → 服务端 dial 的 TCP 应收到
-	// （bindConn 泵内路由：头帧标 pending → 二进制块投 fwdCh → worker 写 TCP）
+	// 3. client-direction data: inject a fwd-data header + block -> the TCP connection the server dialed should receive it
+	// (bindConn pump-internal routing: the header frame marks pending -> the binary block goes to fwdCh -> the worker writes TCP)
 	sess.feed(peerjs.Frame{IsText: true, Data: []byte(`{"type":"fwd-data","reqId":"h1"}`)})
 	sess.feed(peerjs.Frame{IsText: false, Data: []byte("ping-data")})
-	// 4. echo 回程：服务端 pump 读 TCP → SendFrame(fwd-data) 给 fakeSession
+	// 4. echo reply: the server pump reads TCP -> SendFrame(fwd-data) to the fakeSession
 	deadline := time.Now().Add(3 * time.Second)
 	var gotBody []byte
 	for time.Now().Before(deadline) {
@@ -157,11 +158,11 @@ func TestForward_HandshakeAndData(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	assert.Equal(t, "srv:ping-data", string(gotBody), "echo 回包应经隧道回到客户端侧")
+	assert.Equal(t, "srv:ping-data", string(gotBody), "echo reply should return to client side via tunnel")
 }
 
-// TestForward_AuthRejected 权限控制：坏 key / 端口越权 / nonce 重放全部 fwd-err，
-// 且不建立隧道（规则细节不泄露：三种失败报文不区分具体原因以外的信息）。
+// TestForward_AuthRejected authorization: a bad key / an unauthorized port / a nonce replay all get fwd-err,
+// and no tunnel is established (no rule details leak: the failure replies carry nothing beyond the reason).
 func TestForward_AuthRejected(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	echoPort, stopEcho := startEchoServer(t, "srv")
@@ -176,14 +177,14 @@ func TestForward_AuthRejected(t *testing.T) {
 		nonce, _ := ch["nonce"].(string)
 		return nonce
 	}
-	// 坏 key：HMAC 用错误密钥 → fwd-err
+	// bad key: HMAC with the wrong secret -> fwd-err
 	nonce1 := openAndGetNonce(t, "badk")
 	sess.feed(peerjs.Frame{IsText: true, Data: []byte(`{"type":"fwd-auth","hmac":"` + fwdHMAC("wrongkey", nonce1) + `","reqId":"badk"}`)})
 	waitFrameType(t, sess, "fwd-err")
 
-	// 端口越权单独在 TestForward_PortNotAuthorized 覆盖（本测试 open 固定用合法端口）
+	// unauthorized ports are covered separately in TestForward_PortNotAuthorized (this test always opens the legitimate port)
 
-	// 重放：同一 nonce 提交两次——第一次合法建隧道，第二次必须 fwd-err
+	// replay: submit the same nonce twice -- the first time legitimately establishes the tunnel, the second must be fwd-err
 	nonce3 := openAndGetNonce(t, "replay")
 	hm := fwdHMAC("goodkey", nonce3)
 	sess.feed(peerjs.Frame{IsText: true, Data: []byte(`{"type":"fwd-auth","hmac":"` + hm + `","reqId":"replay"}`)})
@@ -191,18 +192,18 @@ func TestForward_AuthRejected(t *testing.T) {
 	sess.feed(peerjs.Frame{IsText: true, Data: []byte(`{"type":"fwd-auth","hmac":"` + hm + `","reqId":"replay"}`)})
 	last := waitFrameType(t, sess, "fwd-err")
 	msg, _ := last["msg"].(string)
-	assert.Equal(t, "no challenge", msg, "nonce 重放必须拒绝（已消费）")
+	assert.Equal(t, "no challenge", msg, "nonce replay must be rejected (already consumed)")
 
-	// 合法请求确实建了隧道（重放被拒的前提成立）
+	// the legitimate request really did establish a tunnel (the premise of the replay rejection holds)
 	st := svc.stateFor(sess)
 	st.mu.Lock()
 	tunneled := st.fwd != nil
 	st.mu.Unlock()
-	assert.True(t, tunneled, "合法的 replay 请求建了隧道（后续重放被拒）")
+	assert.True(t, tunneled, "legitimate replay request established tunnel (later replay rejected)")
 }
 
-// TestForward_PortNotAuthorized 端口越权单独验证（上面那次实际是同端口合法，
-// 补一个真正越权端口的断言）。
+// TestForward_PortNotAuthorized unauthorized port verified on its own (the one above was actually the same
+// legitimate port, so this adds an assertion for a genuinely unauthorized port).
 func TestForward_PortNotAuthorized(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	echoPort, stopEcho := startEchoServer(t, "srv")
@@ -220,9 +221,9 @@ func TestForward_PortNotAuthorized(t *testing.T) {
 	assert.Equal(t, "port not authorized", msg)
 }
 
-// TestOpenForward_ClientSide 客户端 OpenForward 全链路：fakeSession 扮演服务端。
-// 验证：握手（open→challenge→auth→ok）→ 写隧道 → 对端收到 fwd-data；
-// 对端注入 fwd-data 块 → 调用方读出。
+// TestOpenForward_ClientSide the client-side OpenForward end to end: fakeSession plays the server.
+// Verifies: handshake (open -> challenge -> auth -> ok) -> write to the tunnel -> the peer receives fwd-data;
+// the peer injects a fwd-data block -> the caller reads it out.
 func TestOpenForward_ClientSide(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	svc.SetForwardRules(map[string][]int{})
@@ -243,7 +244,7 @@ func TestOpenForward_ClientSide(t *testing.T) {
 		}{c, err}
 	}()
 
-	// 服务端（fake）收到 fwd-open → 回 challenge
+	// the (fake) server receives fwd-open -> replies with challenge
 	deadline := time.Now().Add(2 * time.Second)
 	var nonce string
 	for time.Now().Before(deadline) {
@@ -257,16 +258,16 @@ func TestOpenForward_ClientSide(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 sent:
-	require.NotEmpty(t, nonce, "OpenForward 应发出 fwd-open")
+	require.NotEmpty(t, nonce, "OpenForward should send fwd-open")
 
-	// 客户端应发出 fwd-auth（HMAC 用 clientkey）
+	// the client should emit fwd-auth (HMAC computed with clientkey)
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		for _, fr := range sess.sentFrames() {
 			if fr.header["type"] == "fwd-auth" {
 				expected := fwdHMAC("clientkey", nonce)
-				assert.Equal(t, expected, fr.header["hmac"], "HMAC 必须用调用方 key 计算")
-				// 服务端回 fwd-ok
+				assert.Equal(t, expected, fr.header["hmac"], "HMAC must be computed with caller's key")
+				// the server replies fwd-ok
 				sess.feed(peerjs.Frame{IsText: true, Data: []byte(`{"type":"fwd-ok","reqId":"` + fr.header["reqId"].(string) + `"}`)})
 				goto authed
 			}
@@ -280,7 +281,7 @@ authed:
 		require.NoError(t, res.err)
 		require.NotNil(t, res.c)
 		defer res.c.Close()
-		// 写隧道 → 对端应收到 fwd-data 头+块
+		// write to the tunnel -> the peer should receive a fwd-data header + block
 		go res.c.Write([]byte("tunnel-write"))
 		deadline := time.Now().Add(2 * time.Second)
 		var got []byte
@@ -295,9 +296,9 @@ authed:
 			}
 			time.Sleep(5 * time.Millisecond)
 		}
-		assert.Equal(t, "tunnel-write", string(got), "写隧道的数据应以 fwd-data 帧到达对端")
+		assert.Equal(t, "tunnel-write", string(got), "data written to tunnel should reach peer as fwd-data frame")
 
-		// 对端注入 fwd-data → 调用方应读出
+		// the peer injects fwd-data -> the caller should read it out
 		st.mu.Lock()
 		fw := st.fwd
 		st.mu.Unlock()
@@ -310,27 +311,28 @@ authed:
 		require.NoError(t, err)
 		assert.Equal(t, "from-server", string(buf[:n]))
 	case <-time.After(3 * time.Second):
-		t.Fatal("OpenForward 未在超时内返回")
+		t.Fatal("OpenForward did not return within timeout")
 	}
 }
 
-// TestForward_FwdDataWithoutTunnel 防御：无隧道时 fwd-data 头/块静默丢弃不 panic。
-// 发现背景：手写协议测试时想到——恶意对端不发握手直接发 fwd-data，泵内路由
-// 必须优雅处理（不 panic、不建状态），否则公共信令上可被一行帧打崩。
+// TestForward_FwdDataWithoutTunnel defense: a fwd-data header/block with no tunnel is silently dropped, no panic.
+// Discovery background: thought of while writing the hand-rolled protocol tests -- a malicious peer that skips
+// the handshake and sends fwd-data straight away; the pump-internal routing must handle it gracefully (no panic,
+// no state created), otherwise one frame could take down a node on the public signaling channel.
 func TestForward_FwdDataWithoutTunnel(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	sess := &fakeSession{id: "evil"}
 	bindFakeServer(t, svc, sess)
 	sess.feed(peerjs.Frame{IsText: true, Data: []byte(`{"type":"fwd-data","reqId":"x"}`)})
 	sess.feed(peerjs.Frame{IsText: false, Data: []byte("garbage")})
-	// 不 panic 即通过；随后正常握手仍可用
+	// passing means no panic; a normal handshake afterwards still works
 	svc.SetForwardRules(map[string][]int{"k": {1}})
 	sess.feed(peerjs.Frame{IsText: true, Data: []byte(`{"type":"fwd-open","port":2,"reqId":"y"}`)})
 	waitFrameType(t, sess, "fwd-challenge")
 }
 
-// TestForward_CloseStream 主动断开（CloseForwardStream）：对端收到 fwd-close、
-// 本端隧道槽清空、out 关闭（调用方读侧 EOF）。
+// TestForward_CloseStream an active disconnect (CloseForwardStream): the peer receives fwd-close,
+// this end's tunnel slot is cleared, and out is closed (the caller sees EOF on its read side).
 func TestForward_CloseStream(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	echoPort, stopEcho := startEchoServer(t, "srv")
@@ -339,7 +341,7 @@ func TestForward_CloseStream(t *testing.T) {
 	sess := &fakeSession{id: "client"}
 	_ = bindFakeServer(t, svc, sess)
 
-	// 建一条隧道
+	// establish a tunnel
 	sess.feed(peerjs.Frame{IsText: true, Data: []byte(`{"type":"fwd-open","port":` + fmt.Sprint(echoPort) + `,"reqId":"c1"}`)})
 	ch := waitFrameType(t, sess, "fwd-challenge")
 	nonce, _ := ch["nonce"].(string)
@@ -352,10 +354,10 @@ func TestForward_CloseStream(t *testing.T) {
 	st.mu.Lock()
 	closed := st.fwd == nil
 	st.mu.Unlock()
-	assert.True(t, closed, "隧道应已清槽")
+	assert.True(t, closed, "tunnel should have cleared slot")
 }
 
-// TestForward_ListAndInfo 管理面：ListForwardStreams 返回隧道快照。
+// TestForward_ListAndInfo management plane: ListForwardStreams returns a tunnel snapshot.
 func TestForward_ListAndInfo(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	echoPort, stopEcho := startEchoServer(t, "srv")
@@ -368,17 +370,17 @@ func TestForward_ListAndInfo(t *testing.T) {
 	nonce, _ := ch["nonce"].(string)
 	sess.feed(peerjs.Frame{IsText: true, Data: []byte(`{"type":"fwd-auth","hmac":"` + fwdHMAC("testkey", nonce) + `","reqId":"l1"}`)})
 	waitFrameType(t, sess, "fwd-ok")
-	time.Sleep(50 * time.Millisecond) // 等隧道建立
+	time.Sleep(50 * time.Millisecond) // wait for the tunnel to be established
 	infos := svc.ListForwardStreams()
 	require.Len(t, infos, 1)
 	assert.Equal(t, "client", infos[0].PeerID)
 	assert.Equal(t, echoPort, infos[0].Port)
 }
 
-// TestForward_TimeoutNoChallenge 客户端超时：服务端不回 challenge → 错误返回，
-// 单槽释放（可再次握手）。
-// 发现背景：防御性测试——对端不回包（伪造/宕机）时 OpenForward 必须超时退出，
-// 不能永久挂住调用方或占住 fwdHs 单槽。
+// TestForward_TimeoutNoChallenge client timeout: the server never replies with challenge -> an error is returned,
+// and the single handshake slot is released (another handshake is possible).
+// Discovery background: defensive test -- when the peer does not reply (spoofed / crashed), OpenForward must time
+// out and return rather than hang the caller forever or keep occupying the fwdHs single slot.
 func TestForward_TimeoutNoChallenge(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	sess := &fakeSession{id: "silent"}
@@ -391,6 +393,6 @@ func TestForward_TimeoutNoChallenge(t *testing.T) {
 	st.mu.Lock()
 	hs := st.fwdHs
 	st.mu.Unlock()
-	assert.Nil(t, hs, "超时后握手槽必须释放")
+	assert.Nil(t, hs, "handshake slot must be released after timeout")
 	_ = io.EOF
 }

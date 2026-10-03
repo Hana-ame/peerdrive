@@ -15,11 +15,11 @@ import (
 	"peerdrive/internal/transport"
 )
 
-// TestLocalWSSessionFetch 本地 WebSocket 会话：浏览器直连本节点，
-// 复用与 DataChannel 完全一致的帧协议拉取文件。
-// 发现背景：架构决策——本地/局域网走 WS（无打洞/信令开销），远端走
-// WebRTC DataChannel；两传输必须语义一致（同一 reqId 状态机），本测试
-// 验证 WS 路径的 req/meta/data/done 全链路。
+// TestLocalWSSessionFetch Local WebSocket session: browser directly connects to local node,
+// reusing the exact same frame protocol as DataChannel to pull files.
+// Discovery context: architecture decision — local/LAN uses WS (no hole-punching/signaling overhead), remote uses
+// WebRTC DataChannel; both transports must have consistent semantics (same reqId state machine). This test
+// verifies the full WS path chain of req/meta/data/done.
 func TestLocalWSSessionFetch(t *testing.T) {
 	storage := t.TempDir()
 	content := make([]byte, 200*1024)
@@ -30,7 +30,7 @@ func TestLocalWSSessionFetch(t *testing.T) {
 
 	svc := newService(t, randID("it-ws"), storage, false, nil)
 
-	// 服务端：升级 WS 为 WSSession 并绑定（等价 router /ws/peer 处理）
+	// Server side: upgrade WS to WSSession and bind (equivalent to router /ws/peer handling)
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -41,7 +41,7 @@ func TestLocalWSSessionFetch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// 客户端：发 req 帧，收 meta/data/done
+	// Client side: send req frame, receive meta/data/done
 	wsURL := "ws" + srv.URL[4:] + "/ws"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
@@ -76,23 +76,23 @@ func TestLocalWSSessionFetch(t *testing.T) {
 		}
 		switch resp.Type {
 		case "err":
-			t.Fatalf("服务端错误: %s", resp.Msg)
+			t.Fatalf("server error: %s", resp.Msg)
 		case "done":
 			if !bytes.Equal(got, content) {
-				t.Fatalf("WS 拉取内容不一致: got %d bytes, want %d", len(got), len(content))
+				t.Fatalf("WS pull content mismatch: got %d bytes, want %d", len(got), len(content))
 			}
 			if sum := sha256Hex(got); sum != hash {
-				t.Fatalf("sha256 不一致: %s", sum)
+				t.Fatalf("sha256 mismatch: %s", sum)
 			}
 			return
 		}
 	}
-	t.Fatal("WS 拉取超时（未收到 done）")
+	t.Fatal("WS pull timeout (no done received)")
 }
 
-// TestLocalWSSession_FetchFromPeerReuse 本地会话注册后，
-// FetchFromPeer("local", ...) 走同一状态机（服务端主动拉方向）。
-// 发现背景：BindLocal 以 "local" 注册进 conns，FetchFromPeer 无需分支即可复用。
+// TestLocalWSSession_FetchFromPeerReuse After local session registration,
+// FetchFromPeer("local", ...) goes through the same state machine (server-initiated pull direction).
+// Discovery context: BindLocal registers with "local" in conns, FetchFromPeer can reuse without branching.
 func TestLocalWSSession_FetchFromPeerReuse(t *testing.T) {
 	storage := t.TempDir()
 	content := []byte("local-session-bidirectional")
@@ -116,10 +116,10 @@ func TestLocalWSSession_FetchFromPeerReuse(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// 等本地会话注册（bindConn 在 BindLocal 内同步完成，但等一个周期确保 readLoop 活跃）
+	// Wait for local session registration (bindConn completes synchronously inside BindLocal, but wait one cycle to ensure readLoop is active)
 	time.Sleep(200 * time.Millisecond)
 
-	// 服务端主动经 "local" 会话拉取——客户端需要模拟响应帧
+	// Server initiates pull via "local" session — client needs to simulate response frames
 	done := make(chan []byte, 1)
 	go func() {
 		data, err := svc.FetchFromPeer("local", hash, 0, -1)
@@ -130,7 +130,7 @@ func TestLocalWSSession_FetchFromPeerReuse(t *testing.T) {
 		done <- data
 	}()
 
-	// 客户端读 req 帧并回复（meta 不需要，直接发 data+done）
+	// Client reads req frame and replies (meta not needed, send data+done directly)
 	deadline := time.Now().Add(30 * time.Second)
 	sent := 0
 	for time.Now().Before(deadline) {
@@ -148,7 +148,7 @@ func TestLocalWSSession_FetchFromPeerReuse(t *testing.T) {
 			if err := json.Unmarshal(data, &req); err != nil || req.Type != "req" {
 				continue
 			}
-			// 模拟服务端分块响应
+			// Simulate server chunked response
 			const chunk = 64
 			for off := 0; off < len(content); off += chunk {
 				end := off + chunk
@@ -177,9 +177,9 @@ func TestLocalWSSession_FetchFromPeerReuse(t *testing.T) {
 	select {
 	case data := <-done:
 		if !bytes.Equal(data, content) {
-			t.Fatalf("双向拉取内容不一致: got %d bytes", len(data))
+			t.Fatalf("bidirectional pull content mismatch: got %d bytes", len(data))
 		}
 	case <-time.After(30 * time.Second):
-		t.Fatal("FetchFromPeer(local) 超时")
+		t.Fatal("FetchFromPeer(local) timeout")
 	}
 }

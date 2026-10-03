@@ -1,4 +1,4 @@
-// FileService 处理文件上传、URL 注册、本地文件注册/批量注册、文件验证/删除、目录遍历。
+// FileService handles file upload, URL registration, local file registration/bulk registration, file verification/deletion, and directory browsing.
 package service
 
 import (
@@ -35,7 +35,7 @@ type FileService struct {
 	cfg           *config.Config
 }
 
-// NewFileService 创建一个新的文件服务实例。
+// NewFileService creates a new file service instance.
 func NewFileService(cfg *config.Config) *FileService {
 	return &FileService{
 		storageDir:    cfg.StorageDir,
@@ -44,19 +44,19 @@ func NewFileService(cfg *config.Config) *FileService {
 	}
 }
 
-// GetMeta 按 hash 查文件元数据（M2 收层：download 控制器此前直调 repository.GetFileMeta）。
+// GetMeta looks up file metadata by hash (M2 convergence: the download controller previously called repository.GetFileMeta directly).
 func (s *FileService) GetMeta(hash string) (*model.FileMeta, error) {
 	return repository.GetFileMeta(hash)
 }
 
-// GetMetaByCID 按 IPFS CID 查文件元数据（M2 收层：download 控制器 DownloadByCID）。
+// GetMetaByCID looks up file metadata by IPFS CID (M2 convergence: the download controller DownloadByCID).
 func (s *FileService) GetMetaByCID(cid string) (*model.FileMeta, error) {
 	return repository.GetFileMetaByCID(cid)
 }
 
-// ImportGatewayData 把从 IPFS 公共网关拉取的数据落盘 + 登记元数据/provider。
-// M2 收层：原逻辑内联在 download 控制器 DownloadByCID 的网关 fallback 分支
-// （写盘 + InsertFileMeta + InsertFileProvider 三连）。返回内容 hash。
+// ImportGatewayData writes data fetched from IPFS public gateways to disk and registers metadata/provider.
+// M2 convergence: the original logic was inlined in the download controller DownloadByCID gateway fallback branch
+// (write to disk + InsertFileMeta + InsertFileProvider trio). Returns the content hash.
 func (s *FileService) ImportGatewayData(cid string, data []byte) (string, error) {
 	h := sha256.Sum256(data)
 	hashStr := hex.EncodeToString(h[:])
@@ -78,10 +78,10 @@ func (s *FileService) ImportGatewayData(cid string, data []byte) (string, error)
 	return hashStr, nil
 }
 
-// RegisterBTFile 登记 BT 下载完成的文件：写入存储目录 + 元数据/provider 登记。
-// M2 收层：原逻辑内联在 router.go BT onComplete 回调（InsertFileMeta +
-// InsertFileProvider + 文件复制三连）。返回错误（原内联全忽略错误，这里
-// 至少把存储失败暴露出来）。
+// RegisterBTFile registers a file completed by BT download: writes to storage directory + registers metadata/provider.
+// M2 convergence: the original logic was inlined in the router.go BT onComplete callback (InsertFileMeta +
+// InsertFileProvider + file copy trio). Returns an error (the original inline version ignored all errors, here
+// at least storage failures are exposed).
 func (s *FileService) RegisterBTFile(sha256hex string, size int64, srcPath string) error {
 	if !isValidHash(sha256hex) {
 		return fmt.Errorf("invalid sha256 %q", sha256hex)
@@ -118,25 +118,27 @@ func (s *FileService) RegisterBTFile(sha256hex string, size int64, srcPath strin
 	return nil
 }
 
-// ListAll 列出全部 blob 文件（M2 收层：file 控制器 ListFiles 此前直调 repository.ListAllFiles）。
+// ListAll lists all blob files (M2 convergence: the file controller ListFiles previously called repository.ListAllFiles directly).
 func (s *FileService) ListAll(sortBy string) ([]model.FileListItem, error) {
 	return repository.ListAllFiles(sortBy)
 }
 
-// isPathAllowed 校验 absPath 是否落在**运营者承认的根目录**内：
-// storage 根 ∪ PEERDRIVE_SHARE_DIRS 声明的目录 ∪ 下载目录。
+// isPathAllowed validates whether absPath falls within the **operator-acknowledged root directories**:
+// storage root ∪ PEERDRIVE_SHARE_DIRS declared directories ∪ download directory.
 //
-// 防御：register_local/register_folder/browse/copy 都接受调用方路径，若不锚定根目录，
-// 任意绝对路径（如 /etc/shadow）会经 LocalFetcher 回读 / os.Remove 构成任意文件读写。
+// Defense: register_local/register_folder/browse/copy all accept caller-supplied paths; without anchoring
+// to root directories, any absolute path (e.g. /etc/shadow) could be read back via LocalFetcher / os.Remove
+// to constitute arbitrary file read/write.
 //
-// 为什么现在不止看 storage 根：运营者把共享目录设在 storage 之外（例：挂载在
-// `/mnt/media` 的一块盘）是**完全正当**的用法，而旧的 storage 根判定会直接拒绝，
-// 于是 PEERDRIVE_SHARE_DIRS 只能配在 storage 内部——文档里被迫写成"共享目录必须
-// 放在 downloads 以下"，那条限制正是这里造成的。放宽的边界是"运营者自己声明过的
-// 目录"，不是"任意路径"：想在 /etc 上共享，得自己把 /etc 配进 SHARE_DIRS。
-// allowedRoots 运营者承认的全部根目录：storage 根 ∪ SHARE_DIRS ∪ 下载根。
-// 判定（isPathAllowed）与打开（openAllowed）必须共用同一份，否则会出现
-// "判定说行、打开走了另一套"的裂缝。
+// Why not only check storage root: the operator placing shared directories outside storage (e.g. a drive
+// mounted at `/mnt/media`) is a **completely legitimate** usage, and the old storage-root-only check would
+// reject it outright, forcing PEERDRIVE_SHARE_DIRS to be configured inside storage -- the documentation was
+// forced to say "shared directories must be under downloads", which was caused by this restriction. The relaxed
+// boundary is "directories the operator themselves declared", not "arbitrary paths": to share from /etc,
+// you must configure /etc into SHARE_DIRS yourself.
+// allowedRoots is all root directories acknowledged by the operator: storage root ∪ SHARE_DIRS ∪ download root.
+// The check (isPathAllowed) and open (openAllowed) must share the same source; otherwise a gap appears where
+// "the check says it's fine but the open uses a different one."
 func (s *FileService) allowedRoots() []string {
 	if s.storageDir == "" {
 		return nil
@@ -148,8 +150,8 @@ func (s *FileService) allowedRoots() []string {
 			roots = append(roots, s.cfg.DownloadDir)
 		}
 	}
-	// 统一真实化：允许根若是软链（如 ~/Downloads → /mnt/c/...），Eval 成真实路径，
-	// 否则 RegisterFolder(Eval 后的真实路径) 与 root(软链) 永远匹配不上。
+	// Unify by real paths: if an allowed root is a symlink (e.g. ~/Downloads → /mnt/c/...), Eval
+	// to the real path, otherwise RegisterFolder(Eval'd real path) and root(symlink) would never match.
 	out := make([]string, 0, len(roots))
 	for _, r := range roots {
 		if real, err := filepath.EvalSymlinks(r); err == nil {
@@ -167,8 +169,9 @@ func (s *FileService) isPathAllowed(absPath string) bool {
 	return pathutil.WithinAny(s.allowedRoots(), absPath)
 }
 
-// openAllowed 在允许根内安全地打开 absPath（os.Root，解析与打开一次完成）。
-// 不要退回 os.Open：那会留下"校验之后、打开之前被换成软链"的 TOCTOU 窗口。
+// openAllowed safely opens absPath within allowed roots (os.Root, resolution and open in one step).
+// Do not fall back to os.Open: that leaves a TOCTOU window where the file could be replaced with a symlink
+// between the check and the open.
 func (s *FileService) openAllowed(absPath string) (*os.File, error) {
 	if s.storageDir == "" {
 		return nil, fmt.Errorf("path outside storage root")
@@ -176,7 +179,7 @@ func (s *FileService) openAllowed(absPath string) (*os.File, error) {
 	return pathutil.SafeOpenAny(s.allowedRoots(), absPath)
 }
 
-// RegisterLocal 计算本地文件的 SHA256 哈希，注册到 file_meta 和 file_providers。
+// RegisterLocal computes the SHA256 hash of a local file and registers it in file_meta and file_providers.
 func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	defer log.LogDuration("FileService.RegisterLocal")()
 	log.LogDebug("file-svc: RegisterLocal path=%s filename=%s", path, filename)
@@ -192,8 +195,8 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 		absPath = filepath.Join(s.storageDir, path)
 	}
 
-	// 安全边界：只允许注册 storage 根目录内的文件。
-	// 坑：此前接受任意绝对路径，配合 LocalFetcher 的 provider 回读 = 匿名任意文件读取。
+	// Security boundary: only allow registering files within the storage root directory.
+	// Pitfall: previously any absolute path was accepted, combined with LocalFetcher's provider read-back = anonymous arbitrary file read.
 	if !s.isPathAllowed(absPath) {
 		log.LogWarn("file-svc: RegisterLocal path outside allowed roots (storage/share/download): %s", absPath)
 		return "", fmt.Errorf("path outside storage root")
@@ -206,8 +209,8 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	}
 	defer f.Close()
 
-	// 对**已打开的 fd** 取属性（fstat），不再按路径 stat 一次——少一次路径解析，
-	// 也就少一个"校验之后被换掉"的窗口。
+	// Get properties on the **already-opened fd** (fstat), rather than stat by path again --
+	// one fewer path resolution, and one fewer "replaced after check" window.
 	info, err := f.Stat()
 	if err != nil {
 		log.LogError("file-svc: RegisterLocal stat %s failed: %v", absPath, err)
@@ -215,10 +218,10 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	}
 	size := info.Size()
 
-	// 硬链接（与对端 create 侧共用 pathutil 里那一份判定）：同一个 inode 在
-	// 允许根内有一个名字、在外面还有另一个，路径判定看不出来。只在 transport
-	// 侧判过一次的话，HTTP 的 register_local 就是敞开的另一条路。
-	// 传句柄不传 FileInfo：Windows 上只有句柄能问出 NumberOfLinks。
+	// Hard links (shares the pathutil decision on the peer side too): if the same inode has
+	// one name inside an allowed root and another outside, path checks won't catch it.
+	// Checking only on the transport side leaves HTTP register_local as another open path.
+	// Pass a handle, not FileInfo: on Windows only the handle can query NumberOfLinks.
 	if err := pathutil.RejectHardlink(absPath, f); err != nil {
 		log.LogWarn("file-svc: RegisterLocal hard link rejected: %v", err)
 		return "", err
@@ -260,14 +263,16 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 
 	_ = repository.InsertFileProvider(hash, "local", absPath)
 
-	// 同步登记 file_index（hash → 绝对路径）：这份索引才是"本节点能对外提供
-	// 什么文件"的唯一真源——
-	//   - 对外共享清单（M2 的 share 帧，service/nodeshare.go 经
-	//     transport.FileIndexService.List 读取）按它过滤 ShareDirs 下的文件；
-	//   - 跨节点拉取（M3）用 Info(hash) 判断"本地已有"、用它的 path 落盘后登记。
-	// 缺了这一步的后果：运营者登记/上传的文件在自己的网盘 UI 里看得到，
-	// 对端问 share 帧时却永远拿到 files:[] —— 网盘链路在"清单"这一环断掉。
-	// 与 InsertFileProvider 同层写，失败只告警（不阻塞登记）。
+	// Sync-register file_index (hash -> absolute path): this index is the **only source of truth**
+	// for "what files this node can serve externally":
+	//   - The external share manifest (M2 share frame, service/nodeshare.go reads via
+	//     transport.FileIndexService.List) filters files under ShareDirs according to it;
+	//   - Cross-node pull (M3) uses Info(hash) to determine "already local" and uses its path to
+	//     register after writing to disk.
+	// Consequence of missing this step: files registered/uploaded by the operator are visible in their
+	// own drive UI, but when peers ask the share frame they always get files:[] -- the drive chain
+	// breaks at the "manifest" stage.
+	// Written at the same layer as InsertFileProvider; failure only warns (does not block registration).
 	if _, err := repository.UpsertFileIndex(hash, absPath, filename, size, false); err != nil {
 		log.LogWarn("file-svc: RegisterLocal upsert file_index %s failed: %v", hash, err)
 	}
@@ -276,7 +281,7 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	return hash, nil
 }
 
-// RegisterFolder 递归注册文件夹内的所有文件，返回每个文件的 filename 和 hash。
+// RegisterFolder recursively registers all files in a folder, returning each file's filename and hash.
 func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, error) {
 	defer log.LogDuration("FileService.RegisterFolder")()
 	log.LogDebug("file-svc: RegisterFolder folderPath=%s", folderPath)
@@ -291,20 +296,20 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 	if !filepath.IsAbs(folderPath) {
 		absDir = filepath.Join(s.storageDir, folderPath)
 	}
-	// 跟随软链（~/Downloads → /mnt/c/...）：否则 WalkDir 把软链当普通文件，遍历为空。
+	// Follow symlinks (~/Downloads -> /mnt/c/...): otherwise WalkDir treats symlinks as regular files and traversal is empty.
 	if real, err := filepath.EvalSymlinks(absDir); err == nil {
 		absDir = real
 	}
 
-	// 安全边界：文件夹也必须锚定 storage 根目录内（否则批量读取任意目录）。
+	// Security boundary: folders must also be anchored within storage root (otherwise bulk read of arbitrary directories).
 	if !s.isPathAllowed(absDir) {
 		log.LogWarn("file-svc: RegisterFolder outside allowed roots (storage/share/download): %s", absDir)
 		return nil, fmt.Errorf("path outside storage root")
 	}
 
-	// 深度限制：仅当显式配置 PEERDRIVE_FOLDER_MAX_DEPTH>0 时启用（默认 0=保持递归全量，
-	// 兼容既有 TestRegisterFolder 等的递归语义）。2026-09-26 曾默认 1 导致 CI 挂，
-	// 回退为显式才限制（~/Downloads 场景部署时显式设 1）。
+	// Depth limit: only enabled when PEERDRIVE_FOLDER_MAX_DEPTH>0 is explicitly configured (default 0 = keep
+	// full recursion, compatible with existing recursive semantics in TestRegisterFolder etc.). On 2026-09-26,
+	// default of 1 caused CI failures, so reverted to explicit-only (set to 1 explicitly when deploying ~/Downloads).
 	maxDepth := 0
 	if s.cfg != nil && s.cfg.FolderMaxDepth > 0 {
 		maxDepth = s.cfg.FolderMaxDepth
@@ -316,7 +321,7 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 			return walkErr
 		}
 		if p == absDir {
-			return nil // 根目录本身不下钻判断
+			return nil // Root directory itself: no need to descend further
 		}
 		rel, relErr := filepath.Rel(absDir, p)
 		if relErr != nil {
@@ -356,8 +361,8 @@ func (s *FileService) RegisterFolder(folderPath string) ([]map[string]string, er
 	return results, nil
 }
 
-// ResolveURL 从 URL 获取文件，计算 SHA256、检测 MIME 类型，不写入存储/DB。
-// followRedirects=false 时拒绝 301/302 重定向。
+// ResolveURL fetches a file from a URL, computes SHA256 and detects MIME type, without writing to storage/DB.
+// When followRedirects=false, 301/302 redirects are rejected.
 func (s *FileService) ResolveURL(rawURL string, followRedirects bool) (hash string, mimeType string, size int64, body []byte, filename string, err error) {
 	defer log.LogDuration("FileService.ResolveURL")()
 	log.LogDebug("file-svc: ResolveURL url=%s followRedirects=%v", rawURL, followRedirects)
@@ -393,13 +398,13 @@ func (s *FileService) ResolveURL(rawURL string, followRedirects bool) (hash stri
 	hash = hex.EncodeToString(h[:])
 	size = int64(len(body))
 
-	// MIME 检测：魔数嗅探优先，Content-Type 回退
+	// MIME detection: magic number sniffing first, Content-Type fallback
 	mimeType = http.DetectContentType(body[:min(len(body), 512)])
 	if ct := resp.Header.Get("Content-Type"); ct != "" && mimeType == "application/octet-stream" {
 		mimeType = ct
 	}
 
-	// 文件名提取：Content-Disposition → URL basename
+	// Filename extraction: Content-Disposition -> URL basename
 	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
 		if _, encoded, ok := strings.Cut(cd, "filename*="); ok {
 			if idx := strings.Index(encoded, "''"); idx > 0 && idx+2 < len(encoded) {
@@ -427,7 +432,7 @@ func (s *FileService) ResolveURL(rawURL string, followRedirects bool) (hash stri
 	return hash, mimeType, size, body, filename, nil
 }
 
-// RegisterURL 从 URL 获取文件，计算 SHA256 并注册（provider_type="http"），自动跟随 301/302 重定向。
+// RegisterURL fetches a file from a URL, computes SHA256 and registers it (provider_type="http"), automatically following 301/302 redirects.
 func (s *FileService) RegisterURL(rawURL string, filename string) (*model.FileMeta, error) {
 	defer log.LogDuration("FileService.RegisterURL")()
 	log.LogDebug("file-svc: RegisterURL url=%s filename=%s", rawURL, filename)
@@ -518,7 +523,7 @@ func hexDecodeNibble(c byte) (byte, error) {
 	}
 }
 
-// Upload 上传文件到 content-addressed 存储，计算 SHA256 并注册元数据和 provider。
+// Upload uploads a file to content-addressed storage, computes SHA256 and registers metadata and provider.
 func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta, error) {
 	defer log.LogDuration("FileService.Upload")()
 	log.LogDebug("file-svc: Upload filename=%s", filename)
@@ -565,9 +570,10 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 
 	relPath := hash[:2] + "/" + hash
 	fullPath := filepath.Join(s.storageDir, relPath)
-	// 不再 os.Rename(tmpName, fullPath)：源在系统临时目录，本来就在允许根之外，
-	// rename 那一步没法 Root 化（会跟着 dst 父目录上的软链走）。改成"在允许根内
-	// 打开目标 + 拷过去"，顺带也不再需要跨设备的兜底分支。
+	// No longer using os.Rename(tmpName, fullPath): the source is in the system temp directory, which is
+	// outside the allowed roots. The rename step cannot be Root-ified (it would follow symlinks on the
+	// dst parent directory). Changed to "open target within allowed roots + copy", which also eliminates
+	// the need for a cross-device fallback branch.
 	if err := s.copyInto(s.allowedRoots(), tmpName, fullPath); err != nil {
 		log.LogError("file-svc: Upload move to storage failed: %v", err)
 		return nil, fmt.Errorf("move to storage: %w", err)
@@ -596,7 +602,7 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 	return meta, nil
 }
 
-// Verify 通过 hash 查询文件元数据，用于验证文件是否存在。
+// Verify looks up file metadata by hash, used to verify whether a file exists.
 func (s *FileService) Verify(hash string) (*model.FileMeta, error) {
 	defer log.LogDuration("FileService.Verify")()
 	log.LogDebug("file-svc: Verify hash=%s", hash)
@@ -614,7 +620,7 @@ func (s *FileService) Verify(hash string) (*model.FileMeta, error) {
 	return meta, nil
 }
 
-// Delete 删除指定 hash 的本地文件及其元数据和 provider 记录。
+// Delete removes the local file for the given hash along with its metadata and provider records.
 func (s *FileService) Delete(hash string) error {
 	defer log.LogDuration("FileService.Delete")()
 	log.LogDebug("file-svc: Delete hash=%s", hash)
@@ -624,8 +630,8 @@ func (s *FileService) Delete(hash string) error {
 		log.LogError("file-svc: Delete storage disabled")
 		return err
 	}
-	// 防御：hash 未校验就进 provider 路径，配合 LocalFetcher 回读 = 任意文件删。
-	// 由于 RegisterLocal 现在已锚定 storage 根，这里再兜底防止历史数据里有根外 provider 路径。
+	// Defense: an unvalidated hash goes into the provider path, combined with LocalFetcher read-back = arbitrary file delete.
+	// Since RegisterLocal is now anchored to the storage root, this adds a fallback to prevent historical data from having provider paths outside the root.
 	if !isValidHash(hash) {
 		log.LogWarn("file-svc: Delete invalid hash %q", hash)
 		return fmt.Errorf("invalid hash")
@@ -644,7 +650,7 @@ func (s *FileService) Delete(hash string) error {
 	return nil
 }
 
-// BrowseDir 浏览本地目录，返回文件和子目录列表（含大小和修改时间）。
+// BrowseDir browses a local directory, returning a list of files and subdirectories (including size and modification time).
 func (s *FileService) BrowseDir(dirPath string) ([]model.DirEntry, error) {
 	defer log.LogDuration("FileService.BrowseDir")()
 	log.LogDebug("file-svc: BrowseDir dirPath=%s", dirPath)
@@ -660,7 +666,7 @@ func (s *FileService) BrowseDir(dirPath string) ([]model.DirEntry, error) {
 		absDir = filepath.Join(s.storageDir, dirPath)
 	}
 
-	// 安全边界：只允许浏览 storage 根目录内，拒绝任意目录列举（任意文件读取的前提）。
+	// Security boundary: only allow browsing within storage root; reject arbitrary directory listing (prerequisite for arbitrary file read).
 	if !s.isPathAllowed(absDir) {
 		log.LogWarn("file-svc: BrowseDir outside storage root: %s", absDir)
 		return nil, fmt.Errorf("path outside storage root")
@@ -692,10 +698,10 @@ func (s *FileService) BrowseDir(dirPath string) ([]model.DirEntry, error) {
 	return result, nil
 }
 
-// copyInto 把 src 的内容写进允许根内的 dst（创建 + 写入在同一 Root 会话里）。
+// copyInto writes the content of src into dst within allowed roots (creation + write in the same Root session).
 //
-// 为什么不能用 os.Create(dst) / os.Rename：两者都会跟着 dst 父目录上的软链走，
-// 而**是否有软链这件事是在更早之前检查的**。这里是同一份 TOCTOU 的写路径版本。
+// Why not use os.Create(dst) / os.Rename: both follow symlinks on the dst parent directory, and
+// whether a symlink exists was checked **earlier**. This is the write-path version of the same TOCTOU.
 func (s *FileService) copyInto(roots []string, src, dst string) error {
 	input, err := os.Open(src)
 	if err != nil {
@@ -716,9 +722,10 @@ func (s *FileService) copyInto(roots []string, src, dst string) error {
 	return nil
 }
 
-// 这里原先有个 copyFile(src, dst)：os.Create(dst) 会跟着 dst 父目录上的软链
-// 走到允许根之外，**所有调用点已迁到 copyInto**（2026-09-20 写路径 TOCTOU 收尾），
-// 函数随之删除——留一个"能打到任意文件"的旧函数在代码里，迟早有人再捡起来用。
+// This previously had a copyFile(src, dst) function: os.Create(dst) would follow symlinks on the
+// dst parent directory to escape the allowed roots. **All call sites have been migrated to copyInto**
+// (2026-09-20 write-path TOCTOU cleanup), and the function was removed -- leaving a "can write to
+// any file" old function in the code is just waiting for someone to pick it up again.
 
 // CopyFile copies a file identified by hash to a destination path within storage
 // and registers the copy in file_providers. Returns the destination path.
@@ -730,16 +737,17 @@ func (s *FileService) CopyFile(hash string, destPath string) (string, error) {
 		return "", ErrStorageDisabled
 	}
 
-	// 安全边界：目标必须在 storage 根目录内，且 hash 必须合法。
-	// 坑：此前绝对路径原样采用 / 相对路径可 ../ 逃逸，配合公开 upload 可写任意文件（如 authorized_keys）。
-	// 写盘前的检查而不是写盘后的 Rel 判定（旧代码 615 行只在写完后改 DB 记录）。
+	// Security boundary: destination must be within storage root, and hash must be valid.
+	// Pitfall: previously absolute paths were used as-is / relative paths could escape with ../, combined
+	// with public upload this could write to any file (e.g. authorized_keys).
+	// Check before writing to disk rather than checking Rel after writing (old code at line 615 only modified DB records after writing).
 	//
-	// 为什么这两条必须排在**查源 meta 之前**（2026-09-20 穿透测试发现）：
-	// 原来先 GetFileMeta，越权 dest 于是返回 "source hash not found" ——
-	//   1. 拒绝原因被掩盖，运维照日志排查会当成数据问题；
-	//   2. 安全边界不是第一道门：将来谁在上面加一段"源不存在就自动去拉"的逻辑，
-	//      数据会在路径校验之前就备好，退化成任意文件写；
-	//   3. 顺带泄露"某个 hash 存不存在"。
+	// Why these two checks must come **before looking up the source meta** (discovered during 2026-09-20 penetration testing):
+	// The original code did GetFileMeta first, so an unauthorized dest returned "source hash not found" --
+	//   1. The rejection reason was masked, and ops investigating logs would treat it as a data problem;
+	//   2. The security boundary wasn't the first gate: if someone later added "auto-fetch when source doesn't exist",
+	//      data would be prepared before path validation, degrading to arbitrary file write;
+	//   3. It also leaked whether a given hash exists.
 	absDest := destPath
 	if !filepath.IsAbs(destPath) {
 		absDest = filepath.Join(s.storageDir, destPath)
@@ -767,12 +775,12 @@ func (s *FileService) CopyFile(hash string, destPath string) (string, error) {
 		return "", fmt.Errorf("read source file: %w", err)
 	}
 
-	// Write to destination（只允许落在允许根内）。
+	// Write to destination (only allowed within allowed roots).
 	//
-	// 不用 os.MkdirAll + os.WriteFile：那两步会跟着 dst 父目录上的软链走到根外，
-	// isPathAllowed 是在它们**之前**判的，中间是个 TOCTOU 窗口。
-	// SafeWriteFileAny 在允许根上开 os.Root，父目录补齐与写文件一次完成；
-	// 跟着软链逃逸的 dst 会在这一步直接失败。
+	// Not using os.MkdirAll + os.WriteFile: those two steps would follow symlinks on the dst parent
+	// directory to escape the roots. isPathAllowed is checked **before** them, leaving a TOCTOU window.
+	// SafeWriteFileAny opens os.Root on the allowed roots, completing parent directory creation and file
+	// write in one step; a dst escaping via symlinks will fail at this step.
 	if err := pathutil.SafeWriteFileAny(s.allowedRoots(), absDest, body, 0644); err != nil {
 		log.LogWarn("file-svc: CopyFile write %s rejected: %v", absDest, err)
 		return "", fmt.Errorf("write dest file: %w", err)
@@ -833,7 +841,7 @@ func (s *FileService) ReadFile(hash string) ([]byte, error) {
 	return nil, fmt.Errorf("file %s not found", hash)
 }
 
-// MaxUploadBytes 根据认证状态返回最大上传字节数（认证用户使用 cfg.MaxUploadBytes，匿名用户使用 cfg.MaxUploadBytesAnon）。
+// MaxUploadBytes returns the maximum upload bytes based on authentication status (authenticated users use cfg.MaxUploadBytes, anonymous users use cfg.MaxUploadBytesAnon).
 func (s *FileService) MaxUploadBytes(c *gin.Context) int64 {
 	if authed, exists := c.Get("authenticated"); exists && authed.(bool) {
 		return s.cfg.MaxUploadBytes

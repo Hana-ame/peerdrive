@@ -1,258 +1,260 @@
-# repository —— 数据切面（AOP ⑤）
+# repository —— data aspect (AOP ⑤)
 
-> 一句话职责：SQLite 持久化层——`back/internal/repository/` 全部 14 张表的建表、
-> 迁移与 CRUD；其中 `file_index` 表（sha256→绝对路径 + seq 单调游标）是文件
-> 索引 verb 增量同步的数据底座，其余表支撑业务核心的文件/合集/用户/分享/pin/
-> 任务/本地同步持久化。
+> One-line responsibility: the SQLite persistence layer — all 14 tables in `back/internal/repository/`:
+> table creation,
+> migration, and CRUD; among them the `file_index` table (sha256→absolute path + a seq monotonic cursor) is the data
+> foundation for the file
+> index verb's incremental sync, and the other tables support the business core's file/collection/user/share/pin/
+> task/local-sync persistence.
 
-- 层归属：AOP ⑤ 数据切面（`doc/LAYERS.md` §1）
-- 依赖方向：`model ← repository ← provider ← service ← controller ← router ← cmd`
-  ——repository 只依赖 `internal/model` 与 `pkg/hashutil`，被 service 与
-  transport 消费（transport 的 `file_index.go` 直接引用本层做索引持久化）
-- 建表 DDL 全部集中在 `db.go` 的 `InitDB`，单文件管理全部 schema
+- Layer belonging: AOP ⑤ data aspect (`doc/LAYERS.md` §1)
+- Dependency direction: `model ← repository ← provider ← service ← controller ← router ← cmd`
+  —— repository depends only on `internal/model` and `pkg/hashutil`, and is consumed by service and
+  transport (transport's `file_index.go` references this layer directly for index persistence)
+- All table-creation DDL is concentrated in `db.go`'s `InitDB`, with a single file managing the whole schema
 
 ---
 
-## 职责
+## Responsibilities
 
-1. **集中管理 SQLite schema 与幂等迁移**：`InitDB(dbPath)` 打开连接（全局单例
-   `DB`）、建全部表、跑 `ALTER TABLE` 迁移、调 `InitShareTable` /
-   `createFileIndexTable`。
-2. **文件内容寻址登记**：`file_meta`（hash PK：size/mime/gziped/filename/type/cid）
-   + `file_providers`（hash → provider_type + path，多副本、available 标记）——
-   文件服务的元数据/位置登记，匿名合集、BT 完成回调、URL provider 都写这里。
-3. **文件索引增量同步**：`file_index` 表（sha256 → 绝对路径 + name/size/deleted/
-   seq/时间戳），`seq` 单调游标支撑对端 `sync` verb 的 metadata 增量同步；
-   tombstone（`deleted=1`）保证删除也可同步。**这是本层对新架构（帧协议文件
-   索引 verb）的核心贡献**。
-4. **用户/合集/分享/pin/任务/本地同步**：六组业务表 + 对应 repo，覆盖注册登录
-   （authkey）、合集（含版本快照回滚）、分享链接（30 天过期）、IPFS pin、
-   异步任务、集合→本地磁盘同步状态。
-5. **匿名合集内容寻址落盘**：`anon_repo.go` 把 `AnonCollection` JSON 序列化后
-   按 `{storageDir}/{hash[:2]}/{hash}` 布局写入（与文件 CAS 布局一致），并同步
-   登记 `file_meta` + local provider，使匿名合集可经普通文件拉取路径取回。
+1. **Centralized SQLite schema management and idempotent migration**: `InitDB(dbPath)` opens the connection (the global singleton
+   `DB`), creates all tables, runs `ALTER TABLE` migrations, and calls `InitShareTable` /
+   `createFileIndexTable`.
+2. **File content-addressed registration**: `file_meta` (hash PK: size/mime/gziped/filename/type/cid)
+   + `file_providers` (hash → provider_type + path, multiple replicas, an available flag) ——
+   the file service's metadata/location registry; anonymous collections, BT completion callbacks, and URL providers all write here.
+3. **File index incremental sync**: the `file_index` table (sha256 → absolute path + name/size/deleted/
+   seq/timestamps), where the `seq` monotonic cursor supports the peer `sync` verb's metadata incremental sync;
+   tombstones (`deleted=1`) ensure deletions are also synced. **This is this layer's core contribution to the new architecture (the frame protocol file
+   index verbs)**.
+4. **User/collection/share/pin/task/local-sync**: six business table groups + their corresponding repos, covering register/login
+   (authkey), collections (with version snapshot rollback), share links (30-day expiry), IPFS pin,
+   asynchronous tasks, and collection→local-disk sync status.
+5. **Anonymous collection content-addressed persistence**: `anon_repo.go` serializes the `AnonCollection` JSON and
+   writes it with the `{storageDir}/{hash[:2]}/{hash}` layout (same as the file CAS layout), and registers
+   `file_meta` + a local provider synchronously, so anonymous collections can be retrieved through the ordinary file fetch path.
 
-## 模块清单（每个文件：文件名 + 一句话职责 + 关键导出）
+## Module inventory (each file: filename + one-line responsibility + key exports)
 
-### `db.go` —— 数据库初始化 + 全量建表 DDL + 幂等迁移
+### `db.go` —— database initialization + full table-creation DDL + idempotent migration
 
-| 关键导出 | 说明 |
+| Key exports | Description |
 |---|---|
-| `DB *sql.DB` | 全局连接（`sql.Open("sqlite3", ...)`），所有 repo 函数直接用它 |
-| `InitDB(dbPath string) error` | 打开连接 + 执行 schema + 迁移；测试常用 `:memory:` |
-| `migrationExec(stmt string)` | 幂等迁移执行器：duplicate column 只记 debug，真实错误记 warn（L9） |
-| `FileTypeBlob` / `FileTypeAnonCollection` | 上移 `model` 包后的别名（M2 收层） |
+| `DB *sql.DB` | The global connection (`sql.Open("sqlite3", ...)`), used directly by all repo functions |
+| `InitDB(dbPath string) error` | Open the connection + run the schema + migrate; tests often use `:memory:` |
+| `migrationExec(stmt string)` | The idempotent migration executor: a duplicate column is only logged at debug, a real error is logged at warn (L9) |
+| `FileTypeBlob` / `FileTypeAnonCollection` | Aliases after moving up to the `model` package (the M2 layer collapse) |
 
-建表清单（14 张）：`users`、`local_collection_sync`、`local_sync_files`、
-`file_meta`、`file_providers`、`collections`、`collection_entries`、
-`collection_versions`、`version_entries`、`transfer_tasks`、`download_progress`、
-`share_links`（`InitShareTable`）、`ipfs_pins`、`file_index`（`createFileIndexTable`）。
+Table creation list (14 tables): `users`, `local_collection_sync`, `local_sync_files`,
+`file_meta`, `file_providers`, `collections`, `collection_entries`,
+`collection_versions`, `version_entries`, `transfer_tasks`, `download_progress`,
+`share_links` (`InitShareTable`), `ipfs_pins`, `file_index` (`createFileIndexTable`).
 
-### `file_index_repo.go` —— 文件索引（sha256→路径 + seq 游标）
+### `file_index_repo.go` —— the file index (sha256→path + the seq cursor)
 
-| 关键导出 | 说明 |
+| Key exports | Description |
 |---|---|
-| `FileIndex` 结构体 | `Hash/Path/Name/Size/Deleted/Seq/CreatedAt/UpdatedAt` |
-| `UpsertFileIndex(hash, path, name, size, deleted) (seq, error)` | 登记/更新映射；**seq 在单事务内 `MAX+1`**（M10 并发修复），delete 也走它 |
-| `GetFileIndex(hash)` | 查未删除映射（tombstone 只经 `ListFileIndexSince` 暴露） |
-| `ListFileIndex(offset, limit)` | 全量列表（`deleted=0`，seq 倒序，默认 limit 1000） |
-| `ListFileIndexSince(since)` | 增量同步：`seq > since` 升序，**LIMIT 1000 兜底**（防远端游标落后全表物化） |
-| `DeleteFileIndex(hash)` | 逻辑删除 = `UpsertFileIndex(..., deleted=true)` 返回新 seq |
+| The `FileIndex` struct | `Hash/Path/Name/Size/Deleted/Seq/CreatedAt/UpdatedAt` |
+| `UpsertFileIndex(hash, path, name, size, deleted) (seq, error)` | Register/update the mapping; **seq is `MAX+1` inside a single transaction** (the M10 concurrency fix), delete also goes through it |
+| `GetFileIndex(hash)` | Look up a non-deleted mapping (tombstones are only exposed via `ListFileIndexSince`) |
+| `ListFileIndex(offset, limit)` | The full list (`deleted=0`, seq descending, default limit 1000) |
+| `ListFileIndexSince(since)` | Incremental sync: `seq > since` ascending, **LIMIT 1000 as a backstop** (prevents a stale remote cursor materializing the whole table) |
+| `DeleteFileIndex(hash)` | Logical delete = `UpsertFileIndex(..., deleted=true)` returning a new seq |
 
-### `file_repo.go` —— 文件元数据 + 存储位置（file_meta / file_providers）
+### `file_repo.go` —— file metadata + storage location (file_meta / file_providers)
 
-| 关键导出 | 说明 |
+| Key exports | Description |
 |---|---|
-| `GetFileMeta(hash)` / `GetFileMetaByCID(cid)` | 查询；未找到返回 `(nil, nil)` |
-| `InsertFileMeta(meta)` | 插入时用 `hashutil.SHA256ToCID` 自动算 CID |
-| `GetFileProviders(hash)` | 可用 provider 列表，**local 优先**（`CASE provider_type` 排序） |
-| `InsertFileProvider(hash, type, path)` / `MarkProviderUnavailable(id)` | 登记/失效副本 |
-| `ListAllFiles(sortBy)` | blob 列表，支持 time/path/name/type/size 排序，**LIMIT 1000**（M11） |
+| `GetFileMeta(hash)` / `GetFileMetaByCID(cid)` | Lookup; not found returns `(nil, nil)` |
+| `InsertFileMeta(meta)` | On insert, computes the CID automatically with `hashutil.SHA256ToCID` |
+| `GetFileProviders(hash)` | The list of available providers, **local first** (`CASE provider_type` ordering) |
+| `InsertFileProvider(hash, type, path)` / `MarkProviderUnavailable(id)` | Register/invalidate a replica |
+| `ListAllFiles(sortBy)` | The blob list, supporting time/path/name/type/size sorting, **LIMIT 1000** (M11) |
 
-### `collection_repo.go` —— 用户合集 + 版本快照（4 张表）
+### `collection_repo.go` —— user collections + version snapshots (4 tables)
 
-| 关键导出 | 说明 |
+| Key exports | Description |
 |---|---|
-| `CreateCollection` / `CreateCollectionWithVisibility` / `WithTags` / `WithFull` | 建合集（public/unlisted/private + tags + follow_redirects） |
-| `GetOrCreateCollection` | 查询不存在则自动创建 |
-| `ListCollections` / `ListPublicCollections` / `GetCollection` / `SearchCollections` | 查询；均带 LIMIT（1000/100，M11） |
-| `UpdateCurrentHash` / `UpdateCollectionTags` / `SetCollectionVisibility` | 更新属性 |
-| `AddCollectionEntry` / `AddProviderCollectionEntry` | upsert 条目（`ON CONFLICT(collection_id,path)`，含 `providers_json`） |
-| `RemoveCollectionEntry` / `GetCollectionEntry` / `ListCollectionEntries` | 条目增删查（列表 LIMIT 10000） |
-| `CreateVersion` / `SnapshotVersionEntries` / `GetVersionLog` / `GetVersionEntries` / `RestoreVersionEntries` | 版本快照：commit 时快照，回滚在**事务内先删后插** |
+| `CreateCollection` / `CreateCollectionWithVisibility` / `WithTags` / `WithFull` | Create a collection (public/unlisted/private + tags + follow_redirects) |
+| `GetOrCreateCollection` | Look up, auto-creating if it does not exist |
+| `ListCollections` / `ListPublicCollections` / `GetCollection` / `SearchCollections` | Lookup; all carry a LIMIT (1000/100, M11) |
+| `UpdateCurrentHash` / `UpdateCollectionTags` / `SetCollectionVisibility` | Update attributes |
+| `AddCollectionEntry` / `AddProviderCollectionEntry` | upsert an entry (`ON CONFLICT(collection_id,path)`, including `providers_json`) |
+| `RemoveCollectionEntry` / `GetCollectionEntry` / `ListCollectionEntries` | Entry add/remove/lookup (list LIMIT 10000) |
+| `CreateVersion` / `SnapshotVersionEntries` / `GetVersionLog` / `GetVersionEntries` / `RestoreVersionEntries` | Version snapshots: snapshot at commit; rollback deletes-then-inserts **inside a transaction** |
 
-### `user_repo.go` —— 用户认证
+### `user_repo.go` —— user authentication
 
-| 关键导出 | 说明 |
+| Key exports | Description |
 |---|---|
-| `UserRepository` + `NewUserRepository()` | 空结构体实例化（唯一走方法的 repo） |
-| `ErrUserNotFound` / `ErrUserExists` | 包级哨兵错误 |
-| `CreateUser` / `GetByUsername` / `GetByAuthKey` / `UpdateAuthKey` / `ClearAuthKey` | users 表 CRUD（authkey = 长效令牌） |
+| `UserRepository` + `NewUserRepository()` | Empty struct instantiation (the only repo that goes through methods) |
+| `ErrUserNotFound` / `ErrUserExists` | Package-level sentinel errors |
+| `CreateUser` / `GetByUsername` / `GetByAuthKey` / `UpdateAuthKey` / `ClearAuthKey` | users table CRUD (authkey = a long-lived token) |
 
-### `anon_repo.go` —— 匿名合集内容寻址存储
+### `anon_repo.go` —— anonymous collection content-addressed storage
 
-| 关键导出 | 说明 |
+| Key exports | Description |
 |---|---|
-| `SetAnonStorageDir(dir)` | 包级默认存储目录 |
-| `SaveCollection(coll, storageDir) (hash, error)` | 条目按 path 排序后 JSON 序列化 → sha256 → 写 `{dir}/{h[:2]}/{h}` → 登记 meta+provider |
-| `GetAnonCollectionByHash(hash, storageDir)` | 读回 + 反序列化；**先 `IsValidSHA256` 再拼路径**（防 hash[:2] 越界/路径逃逸） |
-| `ListAnonCollections(storageDir)` | file_meta 里 type=anon 的列表（LIMIT 1000）+ 每行读 JSON 补 friendly_name 预览 |
+| `SetAnonStorageDir(dir)` | The package-level default storage directory |
+| `SaveCollection(coll, storageDir) (hash, error)` | Sort entries by path then JSON-serialize → sha256 → write `{dir}/{h[:2]}/{h}` → register meta+provider |
+| `GetAnonCollectionByHash(hash, storageDir)` | Read back + deserialize; **`IsValidSHA256` before joining the path** (prevents hash[:2] out-of-bounds / path escape) |
+| `ListAnonCollections(storageDir)` | The file_meta list where type=anon (LIMIT 1000) + reading the JSON per row to fill the friendly_name preview |
 
-### `pin_repo.go` —— IPFS pin 管理（ipfs_pins）
+### `pin_repo.go` —— IPFS pin management (ipfs_pins)
 
-| 关键导出 | 说明 |
+| Key exports | Description |
 |---|---|
-| `InsertPin(cid, hash, filename, size)` | upsert（ON CONFLICT(cid) 更新） |
-| `ListPins()` / `GetPin(cid)` / `RemovePin(cid)` / `PinExists(cid)` | 查询/删除（列表 LIMIT 1000，M11） |
+| `InsertPin(cid, hash, filename, size)` | upsert (ON CONFLICT(cid) update) |
+| `ListPins()` / `GetPin(cid)` / `RemovePin(cid)` / `PinExists(cid)` | Lookup/delete (list LIMIT 1000, M11) |
 
-### `share_repo.go` —— 分享链接（share_links）
+### `share_repo.go` —— share links (share_links)
 
-| 关键导出 | 说明 |
+| Key exports | Description |
 |---|---|
-| `CreateShare(hash, shareType, filename)` | 16 字节随机 token（`crypto/rand`）+ 30 天过期 |
-| `GetShareByToken(token)` | 只查未过期；`sql.NullTime` 显式处理 NULL/时间（L7 修复） |
-| `ListShares()` | 未过期链接倒序，LIMIT 100 |
-| `InitShareTable()` | 建表（`InitDB` 迁移阶段调用） |
+| `CreateShare(hash, shareType, filename)` | A 16-byte random token (`crypto/rand`) + 30-day expiry |
+| `GetShareByToken(token)` | Only looks up unexpired ones; `sql.NullTime` handles NULL/time explicitly (the L7 fix) |
+| `ListShares()` | Unexpired links descending, LIMIT 100 |
+| `InitShareTable()` | Table creation (called during the `InitDB` migration phase) |
 
-### `sync_repo.go` —— 集合→本地磁盘同步状态（2 张表）
+### `sync_repo.go` —— collection→local-disk sync status (2 tables)
 
-| 关键导出 | 说明 |
+| Key exports | Description |
 |---|---|
-| `SyncRepository` + `NewSyncRepository()` | 实例化（router 装配注入 SyncService） |
-| `UpsertSyncState` / `GetSyncState` | 集合同步配置（local_path + include/exclude 过滤 JSON） |
-| `UpsertFileSyncState` / `GetSyncFiles` / `ClearSyncFiles` | 单文件 is_saved 标记（列表 LIMIT 1000，M11） |
+| `SyncRepository` + `NewSyncRepository()` | Instantiation (injected into SyncService by router assembly) |
+| `UpsertSyncState` / `GetSyncState` | The collection sync configuration (local_path + include/exclude filter JSON) |
+| `UpsertFileSyncState` / `GetSyncFiles` / `ClearSyncFiles` | The per-file is_saved flag (list LIMIT 1000, M11) |
 
-### `task_repo.go` —— 异步任务（transfer_tasks）
+### `task_repo.go` —— asynchronous tasks (transfer_tasks)
 
-| 关键导出 | 说明 |
+| Key exports | Description |
 |---|---|
-| `CreateTask(type, params) (id, error)` | 新建任务（status='pending'） |
-| `UpdateTaskStatus(id, status, result)` | 更新状态 + `updated_at` 自动刷新 |
-| `GetTask(id)` | 查询；未找到 `(nil, nil)` |
+| `CreateTask(type, params) (id, error)` | Create a task (status='pending') |
+| `UpdateTaskStatus(id, status, result)` | Update the status + refresh `updated_at` automatically |
+| `GetTask(id)` | Lookup; not found returns `(nil, nil)` |
 
-## 关键机制
+## Key mechanisms
 
-### 0. 表结构速查（关键列）
+### 0. Table structure quick reference (key columns)
 
-| 表 | 关键列 | 用途 |
+| Table | Key columns | Purpose |
 |---|---|---|
-| `file_index` | hash PK / path / name / size / deleted / **seq**（索引 idx_file_index_seq）/ created_at / updated_at | sha256→绝对路径 + 同步游标（新架构核心） |
-| `file_meta` | hash PK / size / mime_type / gziped / filename / type（blob\|anon）/ cid | 文件内容元数据（内容寻址登记） |
-| `file_providers` | id / hash FK→file_meta / provider_type（local\|http）/ path / available | 文件存储位置（多副本，可标记失效） |
-| `collections` | id / username / collection_name / current_hash / visibility / tags / follow_redirects / UNIQUE(username, collection_name) | 用户合集（current_hash 指向最新匿名快照） |
-| `collection_entries` | id / collection_id FK / path / file_hash / providers_json / UNIQUE(collection_id, path) | 合集工作区条目 |
-| `collection_versions` | id / collection_id FK / version_number / commit_message / parent_version_id | 版本快照记录（支持父版本链） |
-| `version_entries` | id / version_id FK / path / file_hash / providers_json | 版本快照内容 |
-| `users` | id / username UNIQUE / password_hash / authkey UNIQUE | 注册用户（authkey = 长效令牌） |
-| `share_links` | id / token UNIQUE / hash / type / filename / expires_at | 分享链接（30 天过期） |
-| `ipfs_pins` | cid PK / hash / size / filename / pinned_at | IPFS pin 缓存登记 |
-| `transfer_tasks` | id / type / status / params / result | 异步任务跟踪 |
-| `download_progress` | hash PK / total_size / received_size / chunks_* / peers_used | 下载进度（遗留，无活跃写入方） |
-| `local_collection_sync` | collection_hash PK / local_path / include_filter / exclude_filter / synced_at | 集合同步配置 |
-| `local_sync_files` | id / collection_hash FK / file_path / is_saved / UNIQUE(collection_hash, file_path) | 单文件同步状态 |
+| `file_index` | hash PK / path / name / size / deleted / **seq** (index idx_file_index_seq) / created_at / updated_at | sha256→absolute path + the sync cursor (the core of the new architecture) |
+| `file_meta` | hash PK / size / mime_type / gziped / filename / type (blob\|anon) / cid | File content metadata (content-addressed registration) |
+| `file_providers` | id / hash FK→file_meta / provider_type (local\|http) / path / available | File storage location (multiple replicas, can be marked invalid) |
+| `collections` | id / username / collection_name / current_hash / visibility / tags / follow_redirects / UNIQUE(username, collection_name) | User collections (current_hash points at the newest anonymous snapshot) |
+| `collection_entries` | id / collection_id FK / path / file_hash / providers_json / UNIQUE(collection_id, path) | Collection workspace entries |
+| `collection_versions` | id / collection_id FK / version_number / commit_message / parent_version_id | Version snapshot records (supports a parent version chain) |
+| `version_entries` | id / version_id FK / path / file_hash / providers_json | Version snapshot content |
+| `users` | id / username UNIQUE / password_hash / authkey UNIQUE | Registered users (authkey = a long-lived token) |
+| `share_links` | id / token UNIQUE / hash / type / filename / expires_at | Share links (30-day expiry) |
+| `ipfs_pins` | cid PK / hash / size / filename / pinned_at | IPFS pin cache registration |
+| `transfer_tasks` | id / type / status / params / result | Asynchronous task tracking |
+| `download_progress` | hash PK / total_size / received_size / chunks_* / peers_used | Download progress (legacy, with no active writer) |
+| `local_collection_sync` | collection_hash PK / local_path / include_filter / exclude_filter / synced_at | The collection sync configuration |
+| `local_sync_files` | id / collection_hash FK / file_path / is_saved / UNIQUE(collection_hash, file_path) | The per-file sync status |
 
-### 1. seq 单调游标（file_index 增量同步的基石）
+### 1. The seq monotonic cursor (the foundation of file_index incremental sync)
 
-`file_index.seq` 每次 upsert/delete 递增 1。`UpsertFileIndex` 把
-`SELECT COALESCE(MAX(seq),0)` 与 INSERT 放进**同一个写事务**
-（file_index_repo.go:42-68），依赖 SQLite 单写者串行化保证两个并发请求不会
-读到相同 MAX 产生重复 seq（M10 坑，见「坑与设计决策」）。消费方：
+`file_index.seq` increments by 1 on each upsert/delete. `UpsertFileIndex` puts
+`SELECT COALESCE(MAX(seq),0)` and the INSERT into **the same write transaction**
+(file_index_repo.go:42-68), relying on SQLite single-writer serialization to guarantee that two concurrent requests do not
+read the same MAX and produce a duplicate seq (the M10 pitfall, see "Pitfalls and design decisions"). Consumers:
 
-- `transport/file_index.go` 的 `Create`（登记外部文件）、`upload` 完成（写盘后）、
-  `Delete`、`ApplySync`（合并对端增量，file_index.go:423-428）都经本层
-  `UpsertFileIndex` / `ListFileIndexSince` 读写游标；
-- 对端 `sync{seq}` verb → `ListFileIndexSince(since)` 取增量（含 tombstone）→
-  `ApplySync` 合并；`GetFileIndex` 对 tombstone 不可见（只经增量暴露），保证
-  「已删除文件不会在 info/list 里复活」。
+- `Create` (registering an external file), `upload` completion (after the disk write) in `transport/file_index.go`,
+  `Delete`, and `ApplySync` (merging a peer's incremental, file_index.go:423-428) all read/write the cursor
+  through this layer's
+  `UpsertFileIndex` / `ListFileIndexSince`;
+- the peer `sync{seq}` verb → `ListFileIndexSince(since)` fetches the incremental (including tombstones) →
+  `ApplySync` merges; `GetFileIndex` is blind to tombstones (only exposed incrementally), guaranteeing
+  "a deleted file does not resurrect in info/list".
 
-### 2. 幂等迁移策略（migrationExec）
+### 2. The idempotent migration strategy (migrationExec)
 
-`InitDB` 里旧库升级靠 `ALTER TABLE ... ADD COLUMN` 序列。重复执行时
-duplicate column 是预期结果——`migrationExec` 把这类错误只记 debug；
-**其他错误（表缺失、IO 故障）记 warn 留痕**（L9 修复：原来所有 ALTER 错误
-被静默吞掉，真实迁移失败无从排查）。新增表则用 `CREATE TABLE IF NOT EXISTS`
-天然幂等，无需迁移逻辑。
+In `InitDB`, upgrading an old database relies on an `ALTER TABLE ... ADD COLUMN` sequence. A duplicate column
+on a repeated run is the expected result —— `migrationExec` logs such errors only at debug;
+**other errors (missing tables, IO failures) are logged at warn to leave a trace** (the L9 fix: originally all ALTER errors
+were silently swallowed, leaving no way to investigate a real migration failure). New tables use `CREATE TABLE IF NOT EXISTS`
+for natural idempotency and need no migration logic.
 
-### 3. 匿名集合 = 文件（内容寻址双写）
+### 3. Anonymous collection = file (content-addressed dual write)
 
-`SaveCollection` 把合集 JSON 当普通文件处理：排序条目 → 序列化 → sha256 →
-写 `{storageDir}/{hash[:2]}/{hash}`，同时 `InsertFileMeta`（Type=AnonCollection）
-+ `InsertFileProvider("local")`。好处：匿名合集 hash 就是一个可寻址文件 hash，
-下载路径（LocalFetcher/CAS 读取）零特殊分支；`GetAnonCollectionByHash` 反向
-读回 JSON。`ListAnonCollections` 是唯一的「批量读文件」查询——每行再
-`os.ReadFile` 补 friendly_name/version/预览，文件 IO × N，所以 LIMIT 1000。
+`SaveCollection` treats the collection JSON as an ordinary file: sort entries → serialize → sha256 →
+write `{storageDir}/{hash[:2]}/{hash}`, and simultaneously `InsertFileMeta` (Type=AnonCollection)
++ `InsertFileProvider("local")`. Benefit: an anonymous collection hash is just an addressable file hash,
+and the download path (LocalFetcher/CAS reading) has zero special branches; `GetAnonCollectionByHash` reads the
+JSON back in reverse. `ListAnonCollections` is the only "batch file read" query —— each row does another
+`os.ReadFile` to fill friendly_name/version/preview, so file IO × N, hence LIMIT 1000.
 
-## 与其它模块的关系
+## Relationships with other modules
 
 ```
-transport（file_index.go / inbound.go）──► repository（file_index 系列）
-service（collection/share/task/pin/sync/anon/file）──► repository
-downloader（universal_downloader.go）──► repository（file_providers 回读）
-controller ──（M2 收层后禁止直接 import repository，一律经 service）
+transport (file_index.go / inbound.go) ──► repository (the file_index family)
+service (collection/share/task/pin/sync/anon/file) ──► repository
+downloader (universal_downloader.go) ──► repository (file_providers readback)
+controller ── (after the M2 layer collapse, importing repository directly is forbidden; everything goes through service)
 ```
 
-- **transport**：文件索引 verb 的持久化全部走本层（见机制 1）。
-- **service**：M2 收层后 controller 不再碰 repository，业务持久化统一收编进
-  service（CollectionService/ShareService/TaskService/PinService/SyncService/
-  FileService），本层是这些服务的唯一数据出口。
-- **downloader**：`LocalFetcher` 第三查找路径读 DB 的 "local" provider，
-  `HTTPURLFetcher` 读 "http" provider（provider 失效用 `MarkProviderUnavailable`）。
-- **provider/anon**：`anon_repo.SaveCollection` 双写 file_meta/providers，
-  与 file_repo 共享内容寻址布局。
+- **transport**: all persistence of the file index verbs goes through this layer (see mechanism 1).
+- **service**: after the M2 layer collapse the controller no longer touches repository, and business persistence is unified into
+  service (CollectionService/ShareService/TaskService/PinService/SyncService/
+  FileService); this layer is the sole data exit for those services.
+- **downloader**: `LocalFetcher`'s third lookup path reads the DB's "local" provider,
+  and `HTTPURLFetcher` reads the "http" provider (use `MarkProviderUnavailable` when a provider goes invalid).
+- **provider/anon**: `anon_repo.SaveCollection` dual-writes to file_meta/providers,
+  sharing the content-addressed layout with file_repo.
 
-## 坑与设计决策
+## Pitfalls and design decisions
 
-| 编号 | 坑 | 修复 |
+| Number | Pitfall | Fix |
 |---|---|---|
-| M10 | `nextFileIndexSeq()` 先 SELECT MAX 再单独 INSERT——连接池多连接并发写时读到相同 MAX → seq 重复，sync 游标错乱 | SELECT+INSERT 合并进同一事务（SQLite 串行写保证单调），file_index_repo.go:42-68 |
-| L9 | 原迁移静默吞掉所有 ALTER 错误——重复迁移的 duplicate column 是预期，但表缺失/磁盘故障也被吞 | `migrationExec` 区分：duplicate column 记 debug，其余记 warn 留痕 |
-| M11 | 一批列表查询无 LIMIT——文件多/恶意构造大集合时全表物化内存 DoS | `ListAllFiles` 1000、`ListCollections` 1000、`SearchCollections` 100、`ListCollectionEntries`/`GetVersionEntries` 10000、`GetVersionLog` 1000、`ListAnonCollections` 1000、`ListPins` 1000、`GetSyncFiles` 1000 |
-| L7 | `GetShareByToken` 原把 expires_at Scan 进 `*any`——driver 返回类型不确定（time.Time 或 string），断言失败时过期时间静默为空 | 改 `sql.NullTime` 显式处理 NULL/时间 |
-| 路径穿越 | `GetAnonCollectionByHash` 的 hash 可能来自 URL/请求体/远端 sync，未校验时 `hash[:2]` 越界 panic、`..` 逃逸 storage 目录 | 先 `hashutil.IsValidSHA256` 再拼路径 |
-| 层归属 | controller 曾直写 SQL（ListPublicCollections） | M2 收层收敛进 repository，controller 只依赖 service |
-| 兼容 | FileType 常量迁移到 model 包 | repository 保留别名 `FileTypeBlob`/`FileTypeAnonCollection` 避免 diff 爆炸 |
+| M10 | `nextFileIndexSeq()` did SELECT MAX then a separate INSERT —— with multiple pool connections writing concurrently, they read the same MAX → duplicate seq, breaking the sync cursor | SELECT+INSERT merged into one transaction (SQLite serialized writes guarantee monotonicity), file_index_repo.go:42-68 |
+| L9 | The original migration silently swallowed all ALTER errors —— a duplicate column on a repeated migration is expected, but missing tables/disk failures were swallowed too | `migrationExec` distinguishes: a duplicate column logs at debug, the rest log at warn to leave a trace |
+| M11 | A batch of list queries had no LIMIT —— with many files / a maliciously built large collection, the whole table would be materialized into memory (DoS) | `ListAllFiles` 1000, `ListCollections` 1000, `SearchCollections` 100, `ListCollectionEntries`/`GetVersionEntries` 10000, `GetVersionLog` 1000, `ListAnonCollections` 1000, `ListPins` 1000, `GetSyncFiles` 1000 |
+| L7 | `GetShareByToken` originally scanned expires_at into `*any` —— the driver's return type is uncertain (time.Time or string), and on an assertion failure the expiry time was silently empty | Changed to `sql.NullTime` to handle NULL/time explicitly |
+| Path traversal | `GetAnonCollectionByHash`'s hash may come from a URL/request body/remote sync; without validation, `hash[:2]` panics out of bounds and `..` escapes the storage directory | `hashutil.IsValidSHA256` first, then join the path |
+| Layer belonging | The controller once wrote SQL directly (ListPublicCollections) | The M2 layer collapse converged it into repository; the controller depends only on service |
+| Compatibility | The FileType constants moved to the model package | repository keeps the aliases `FileTypeBlob`/`FileTypeAnonCollection` to avoid a diff explosion |
 
-## 测试（11 单测，`scripts/test-layers.sh` L5 段）
+## Tests (11 unit tests, the L5 section of `scripts/test-layers.sh`)
 
-> 命令：`go test -tags nosqlite ./internal/repository/...`
+> Command: `go test -tags nosqlite ./internal/repository/...`
 
 ### `collection_repo_test.go`
 
-> 注：legacy 代码测试（见 doc/archive/LEGACY.md），未逐一标注发现背景；「发现背景」
-> 规范对新代码生效（文件头注释）。
+> Note: legacy code tests (see doc/archive/LEGACY.md), with no per-test background of discovery annotated; the "background of discovery"
+> convention applies to new code (file header comments).
 
-- `TestCollectionRepo_GetOrCreate`：GetOrCreate 幂等——同一用户名+集合名返回
-  相同 ID。
-- `TestCollectionRepo_CreateWithVisibility`：带可见性创建后可查回。
-- `TestCollectionRepo_EntriesCRUD`：条目增删查全流程（2 条 → 删 1 条）。
-- `TestCollectionRepo_VersionFlow`：CreateVersion 版本号从 1 递增 + GetVersionLog。
-- `TestCollectionRepo_ListAndSearch`：ListCollections 与 SearchCollections 命中。
-- `TestCollectionRepo_Tags`：标签创建与更新。
+- `TestCollectionRepo_GetOrCreate`: GetOrCreate is idempotent —— the same username+collection name returns
+  the same ID.
+- `TestCollectionRepo_CreateWithVisibility`: a collection created with visibility can be looked back up.
+- `TestCollectionRepo_EntriesCRUD`: the full entry add/remove/lookup flow (2 entries → delete 1).
+- `TestCollectionRepo_VersionFlow`: CreateVersion increments the version number from 1 + GetVersionLog.
+- `TestCollectionRepo_ListAndSearch`: ListCollections and SearchCollections hit.
+- `TestCollectionRepo_Tags`: tag creation and update.
 
 ### `file_repo_test.go`
 
-> 同上，legacy 测试，未标注发现背景。
+> Same as above, legacy tests, no background of discovery annotated.
 
-- `TestInsertFileMetaAndGetFileMeta`：meta 写入读出全字段一致。
-- `TestGetFileMetaNonexistent`：未找到返回 `(nil, nil)` 而非错误。
-- `TestInsertFileProviderAndGetFileProviders`：多 provider 登记，**local 优先**
-  排序。
-- `TestMarkProviderUnavailable`：标记失效后不再返回。
-- `TestGetFileProvidersEmptyForNonexistentHash`：未登记 hash 返回空。
+- `TestInsertFileMetaAndGetFileMeta`: meta write/read matches on all fields.
+- `TestGetFileMetaNonexistent`: not found returns `(nil, nil)` rather than an error.
+- `TestInsertFileProviderAndGetFileProviders`: multiple providers registered, sorted with **local first**.
+- `TestMarkProviderUnavailable`: after marking invalid, it is no longer returned.
+- `TestGetFileProvidersEmptyForNonexistentHash`: an unregistered hash returns empty.
 
-## 文件清单
+## File inventory
 
-| 文件 | 职责 |
+| File | Responsibility |
 |---|---|
-| `db.go` | 初始化 + 全量建表 DDL + 幂等迁移（L9） |
-| `file_index_repo.go` | sha256→路径映射 + seq 游标（M10 事务修复） |
+| `db.go` | Initialization + full table-creation DDL + idempotent migration (L9) |
+| `file_index_repo.go` | sha256→path mapping + the seq cursor (the M10 transaction fix) |
 | `file_repo.go` | file_meta / file_providers CRUD |
-| `collection_repo.go` | 合集 4 表 + 版本快照回滚 |
-| `user_repo.go` | users 表 CRUD（authkey） |
-| `anon_repo.go` | 匿名合集内容寻址读写（含路径防御） |
+| `collection_repo.go` | The 4 collection tables + version snapshot rollback |
+| `user_repo.go` | users table CRUD (authkey) |
+| `anon_repo.go` | Anonymous collection content-addressed read/write (including path defense) |
 | `pin_repo.go` | ipfs_pins CRUD |
-| `share_repo.go` | 分享链接（token + 过期） |
-| `sync_repo.go` | 本地同步状态 2 表 |
-| `task_repo.go` | 异步任务 CRUD |
-| `collection_repo_test.go` | legacy 测试（见 doc/archive/LEGACY.md） |
-| `file_repo_test.go` | legacy 测试（见 doc/archive/LEGACY.md） |
+| `share_repo.go` | Share links (token + expiry) |
+| `sync_repo.go` | The 2 local sync status tables |
+| `task_repo.go` | Asynchronous task CRUD |
+| `collection_repo_test.go` | legacy tests (see doc/archive/LEGACY.md) |
+| `file_repo_test.go` | legacy tests (see doc/archive/LEGACY.md) |

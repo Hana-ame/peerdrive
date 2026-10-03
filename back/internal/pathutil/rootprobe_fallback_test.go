@@ -1,9 +1,11 @@
 package pathutil
 
-// 降级路径本身的测试。
+// Tests for the fallback path itself.
 //
-// 为什么要单独摆一个文件：这段装配了 openRootFn 接缝，动了它就必须整机重建，
-// 放在主测试文件里会让"读的人分不清哪些用例是纯逻辑、哪些动过全局状态"。
+// Why a separate file: this part wires up the openRootFn seam, and touching it
+// means rebuilding the whole machine. Keeping it in the main test file would
+// leave the reader unable to tell which cases are pure logic and which touch
+// global state.
 
 import (
 	"os"
@@ -14,64 +16,71 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestRootUnavailable_Classification 分类器本身：语义不同的 errno 不能被归成一类。
+// TestRootUnavailable_Classification the classifier itself: errno's with
+// different semantics must not be lumped into one class.
 func TestRootUnavailable_Classification(t *testing.T) {
 	assert.False(t, RootUnavailable(nil))
 	assert.False(t, RootUnavailable(os.ErrNotExist))
 	assert.False(t, RootUnavailable(os.ErrPermission))
 	assert.False(t, RootUnavailable(os.ErrClosed))
-	assert.True(t, RootUnavailable(os.ErrInvalid), "EINVAL 在 Linux 上就是 openat2 flag 不被识别的返回")
-	assert.True(t, RootUnavailable(os.NewSyscallError("openat2", os.ErrInvalid)), "套了 SyscallError 也要认出来")
+	assert.True(t, RootUnavailable(os.ErrInvalid), "EINVAL on Linux is the return when openat2 flag is not recognized")
+	assert.True(t, RootUnavailable(os.NewSyscallError("openat2", os.ErrInvalid)), "should recognize when wrapped in SyscallError")
 	assert.True(t, RootUnavailable(&os.PathError{Op: "openat2", Path: "/mnt/x", Err: os.ErrInvalid}))
 }
 
-// TestRootFallback_FailClosedThenWorks 降级路径必须真的能用——不是"记下来了"就行。
+// TestRootFallback_FailClosedThenWorks the fallback path must actually be
+// usable -- it's not enough to just "log it".
 //
-// 用 openRootFn 接缝模拟"文件系统不支持"（本机上真造不出这种环境），验证三点：
-// 默认拦住并给出下一步、显式开阀后操作真的完成、降级状态可观测。
+// Use the openRootFn seam to simulate "filesystem unsupported" (you can't really
+// create such an environment on a real machine), verifying three things: by
+// default it blocks and gives the next step, after explicitly opening the hatch
+// the operation really completes, and the fallback state is observable.
 func TestRootFallback_FailClosedThenWorks(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "a", "b.txt")
 
 	orig := openRootFn
 	t.Cleanup(func() { openRootFn = orig })
-	// Linux 上两种真实形态：内核 <5.6 没有 openat2 → ENOSYS；flag 不识别 → EINVAL。
-	// 这里用 EINVAL，因为它能通过 errors.Is(err, os.ErrInvalid) 严格判定。
+	// Two real forms on Linux: kernel <5.6 has no openat2 -> ENOSYS; flag not
+	// recognized -> EINVAL. Here we use EINVAL, because it can be strictly
+	// detected via errors.Is(err, os.ErrInvalid).
 	unsupported := os.NewSyscallError("openat2", os.ErrInvalid)
 	openRootFn = func(string) (*os.Root, error) { return nil, unsupported }
-	require.True(t, RootUnavailable(unsupported), "前置条件：这个 errno 要被认成'不支持'")
+	require.True(t, RootUnavailable(unsupported), "precondition: this errno must be recognized as 'unsupported'")
 
-	// 1) 默认 fail closed，且错误信息指明下一步
+	// 1) default fail closed, and the error message points to the next step
 	err := SafeWriteFileAny([]string{root}, target, []byte("x"), 0o644)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "文件系统不支持")
-	assert.Contains(t, err.Error(), "PEERDRIVE_ROOT_FALLBACK=1", "要告诉运维怎么接着往下走")
+	assert.Contains(t, err.Error(), "filesystem not supported")
+	assert.Contains(t, err.Error(), "PEERDRIVE_ROOT_FALLBACK=1", "should tell operators how to proceed")
 	_, sterr := os.Stat(target)
-	assert.True(t, os.IsNotExist(sterr), "fail closed 时不能写出任何东西")
+	assert.True(t, os.IsNotExist(sterr), "must not write anything when fail closed")
 
-	// 2) 显式开阀后操作应当真的完成（父目录也要补出来）
+	// 2) after explicitly opening the hatch, the operation should really complete
+	// (parent directories must be created too)
 	t.Setenv("PEERDRIVE_ROOT_FALLBACK", "1")
 	require.NoError(t, SafeWriteFileAny([]string{root}, target, []byte("payload"), 0o644))
 	b, rerr := os.ReadFile(target)
 	require.NoError(t, rerr)
 	assert.Equal(t, "payload", string(b))
 
-	// 读回去也要能读（降级的另一端）
+	// reading it back must also work (the other end of the fallback)
 	f, oerr := SafeOpen(root, target)
 	require.NoError(t, oerr)
 	require.NoError(t, f.Close())
 
-	// 删除同样可用
+	// deletion is likewise usable
 	require.NoError(t, SafeRemoveAny([]string{root}, target))
 	_, sterr2 := os.Stat(target)
 	assert.True(t, os.IsNotExist(sterr2))
 }
 
-// TestRootFallback_MissingRootIsCreatedNotDegraded 目录还不存在 ≠ 文件系统不支持：
-// 首次运行不该被降级（更不该被误报成不安全），而是把目录建出来、继续用 Root。
+// TestRootFallback_MissingRootIsCreatedNotDegraded the directory not existing !=
+// filesystem unsupported: a first run should not be degraded (and certainly not
+// misreported as unsafe), but should create the directory and continue using Root.
 func TestRootFallback_MissingRootIsCreatedNotDegraded(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "not-created-yet")
-	t.Setenv("PEERDRIVE_ROOT_FALLBACK", "1") // 就算开着阀也不能顺手降级
+	t.Setenv("PEERDRIVE_ROOT_FALLBACK", "1") // even with the hatch open, it must not degrade along the way
 
 	require.NoError(t, SafeWriteFileAny([]string{root}, filepath.Join(root, "x.txt"), []byte("ok"), 0o644))
 	b, err := os.ReadFile(filepath.Join(root, "x.txt"))

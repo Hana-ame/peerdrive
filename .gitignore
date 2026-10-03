@@ -63,8 +63,9 @@ p2p-dual-stack/
 packages/peerdrive-client/pages-verify.png
 
 # 文档拓扑图的位图导出物（派生物，不入 git；需要时用
-# rsvg-convert -o doc/design/connections-map.png doc/design/connections-map.svg 重生成）
+# rsvg-convert -o doc/design/png/<name>.png doc/design/<name>.svg 批量重生成）
 doc/design/connections-map.png
+doc/design/png/
 
 # Root temp files
 # 注意：这些是「仓库根目录」的临时目录，必须加 / 锚定。

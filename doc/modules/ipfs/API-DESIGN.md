@@ -123,8 +123,8 @@ Client                  Peerdrive Server
   |        Stream file         |
   |  2c. Bitswap failed?       |
   |      Try HTTP gateways:    |
-  |      - 并发竞速多网关      |
-  |      - 指数退避重试        |
+  |      - Race multiple gateways        |
+  |      - Exponential backoff             |
   |      If success:           |
   |        Compute SHA256      |
   |        Cache to storage    |

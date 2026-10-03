@@ -1,15 +1,16 @@
 package transport
 
-// 测试背景（doc/NETDISK.md M2）：share 帧是「纯 WebRTC 客户端」（M5 的
-// packages/peerdrive-client）与 Go 节点之间唯一的"你共享了什么"契约。
-// JS 侧按字段名逐字解析，因此这里必须把**字段名本身**钉死：
-// 一旦改字段名，客户端静默拿不到数据（不报错、列表空）——最坏的一类 bug。
+// Test background (doc/NETDISK.md M2): the share frame is the only "what have you
+// shared" contract between a "pure WebRTC client" (M5's packages/peerdrive-client)
+// and the Go node. The JS side parses field names verbatim, so here we must nail
+// down the **field names themselves**: once a field name changes, the client silently
+// gets no data (no error, empty list) -- the worst kind of bug.
 //
-// 因此本文件的核心测试是 field-name contract：
-//   share-resp 顶层：type / collections / files / dirs / total / reqId
-//   collection 项：hash / name / size / tags / entries
-//   entry 项：path / hash / mime
-//   file 项：hash / name / path / size / mime
+// So the core test in this file is the field-name contract:
+//   share-resp top level: type / collections / files / dirs / total / reqId
+//   collection item: hash / name / size / tags / entries
+//   entry item: path / hash / mime
+//   file item: hash / name / path / size / mime
 
 import (
 	"encoding/json"
@@ -18,7 +19,7 @@ import (
 	"peerdrive/internal/config"
 )
 
-// newShareTestService 造一个不连信令的 PeerJSService（只测帧处理）。
+// newShareTestService creates a PeerJSService without signaling (only testing frame handling).
 func newShareTestService(t *testing.T) *PeerJSService {
 	t.Helper()
 	cfg := config.Load()
@@ -27,15 +28,16 @@ func newShareTestService(t *testing.T) *PeerJSService {
 	return NewPeerJSService(cfg, t.TempDir())
 }
 
-// TestServeShareResponseContract 断言 share-resp 的字段名与内容形态。
-// 发现背景：JS 客户端（M5）按这些字段名解析；同时 share 帧必须回数组而不是
-// null（前端列表渲染不判空），空共享是合法业务状态（不是 err）。
+// TestServeShareResponseContract Asserts the field names and content shape of
+// share-resp. Discovery background: the JS client (M5) parses by these field names;
+// also the share frame must reply with arrays, not null (the frontend list renderer
+// doesn't check for null). An empty share is a valid business state (not err).
 func TestServeShareResponseContract(t *testing.T) {
 	svc := newShareTestService(t)
 	svc.SetShareProvider(func(peerID string) ShareSnapshot {
 		return ShareSnapshot{
 			Collections: []ShareCollectionInfo{{
-				Hash: "aa", Name: "合集", Size: 1, Tags: []string{"t"},
+				Hash: "aa", Name: "collection", Size: 1, Tags: []string{"t"},
 				Entries: []ShareEntryInfo{{Path: "a.txt", Hash: "bb", Mime: "text/plain"}},
 			}},
 			Files: []ShareFileInfo{{Hash: "cc", Name: "c.txt", Path: "c.txt", Size: 12, Mime: "text/plain"}},
@@ -53,16 +55,16 @@ func TestServeShareResponseContract(t *testing.T) {
 
 	for _, key := range []string{"type", "collections", "files", "dirs", "total", "reqId"} {
 		if _, ok := got[key]; !ok {
-			t.Fatalf("share-resp 缺字段 %q: %v", key, got)
+			t.Fatalf("share-resp missing field %q: %v", key, got)
 		}
 	}
 	if got["type"] != "share-resp" {
 		t.Fatalf("type = %v, want share-resp", got["type"])
 	}
 	if got["reqId"] != "r1" {
-		t.Fatalf("reqId = %v, want r1（请求-响应配对依赖它）", got["reqId"])
+		t.Fatalf("reqId = %v, want r1 (request-response pairing depends on it)", got["reqId"])
 	}
-	// total = 合集数 + 文件数（前端卡片直接显示）
+	// total = collection count + file count (frontend cards display this directly)
 	if got["total"].(float64) != 2 {
 		t.Fatalf("total = %v, want 2", got["total"])
 	}
@@ -74,13 +76,13 @@ func TestServeShareResponseContract(t *testing.T) {
 	c0 := colls[0].(map[string]any)
 	for _, key := range []string{"hash", "name", "size", "tags", "entries"} {
 		if _, ok := c0[key]; !ok {
-			t.Fatalf("collection 缺字段 %q: %v", key, c0)
+			t.Fatalf("collection missing field %q: %v", key, c0)
 		}
 	}
 	e0 := c0["entries"].([]any)[0].(map[string]any)
 	for _, key := range []string{"path", "hash", "mime"} {
 		if _, ok := e0[key]; !ok {
-			t.Fatalf("entry 缺字段 %q: %v", key, e0)
+			t.Fatalf("entry missing field %q: %v", key, e0)
 		}
 	}
 
@@ -88,21 +90,23 @@ func TestServeShareResponseContract(t *testing.T) {
 	f0 := files[0].(map[string]any)
 	for _, key := range []string{"hash", "name", "path", "size", "mime"} {
 		if _, ok := f0[key]; !ok {
-			t.Fatalf("file 缺字段 %q: %v", key, f0)
+			t.Fatalf("file missing field %q: %v", key, f0)
 		}
 	}
 }
 
-// TestServeShareWithoutProviderIsEmptyArrays 未装配共享提供者时回空数组而非 null。
-// 发现背景：JSON null 会让前端 `resp.collections.map` 直接抛错白屏；
-// 且"对方没共享内容"是常规状态，不该走 err 分支。
+// TestServeShareWithoutProviderIsEmptyArrays When no share provider is wired,
+// reply with empty arrays rather than null. Discovery background: JSON null would
+// cause the frontend `resp.collections.map` to throw an error and white-screen;
+// also "the other side has no shared content" is a normal state and should not go
+// through the err branch.
 func TestServeShareWithoutProviderIsEmptyArrays(t *testing.T) {
 	svc := newShareTestService(t)
 	sess := &fakeSession{id: "peer-y"}
 	svc.serveShare(sess, dcResp{Type: "share"})
 
 	if len(sess.sentFrames()) != 1 {
-		t.Fatal("serveShare 应只回一帧")
+		t.Fatal("serveShare should only reply one frame")
 	}
 	raw, _ := json.Marshal(sess.sentFrames()[0].header)
 	var parsed struct {
@@ -122,9 +126,10 @@ func TestServeShareWithoutProviderIsEmptyArrays(t *testing.T) {
 	}
 }
 
-// TestShareLoadInfoCountsOnly 摘要只报数量、不报 hash。
-// 发现背景：announce 经发现服务器广播给所有查询者；一旦把合集 hash 放进
-// loadInfo 就等于公开"本节点持有什么"（ROADMAP 里明确点名的泄露面）。
+// TestShareLoadInfoCountsOnly The summary only reports counts, not hashes.
+// Discovery background: announce is broadcast to all queryers via the discovery
+// server; putting collection hashes into loadInfo is equivalent to publicly
+// revealing "what this node has" (a leak surface explicitly named in ROADMAP).
 func TestShareLoadInfoCountsOnly(t *testing.T) {
 	svc := newShareTestService(t)
 	svc.SetShareProvider(func(peerID string) ShareSnapshot {
@@ -136,24 +141,25 @@ func TestShareLoadInfoCountsOnly(t *testing.T) {
 	})
 	li := svc.shareLoadInfo()
 	if li == nil {
-		t.Fatal("loadInfo 不应为 nil")
+		t.Fatal("loadInfo should not be nil")
 	}
 	raw, _ := json.Marshal(li)
 	if contains(string(raw), "secret-hash") || contains(string(raw), "f1") {
-		t.Fatalf("loadInfo 泄露了具体 hash: %s", raw)
+		t.Fatalf("loadInfo leaked specific hashes: %s", raw)
 	}
 	shares, ok := li["shares"].(map[string]any)
 	if !ok {
-		t.Fatalf("loadInfo.shares 缺失: %v", li)
+		t.Fatalf("loadInfo.shares missing: %v", li)
 	}
 	if shares["collections"] != 1 || shares["files"] != 2 || shares["dirs"] != 1 {
-		t.Fatalf("shares 计数不符: %v", shares)
+		t.Fatalf("shares counts mismatch: %v", shares)
 	}
 }
 
-// TestShareLoadInfoNilWithoutProvider 未启用共享时不上报 loadInfo。
-// 发现背景：上报了但全是 0 会让市场卡片显示"共享了 0 个"——不如不报，
-// 前端按"未知"处理（未开启共享 vs 共享了空集，是两种不同状态）。
+// TestShareLoadInfoNilWithoutProvider When sharing is not enabled, do not report
+// loadInfo. Discovery background: reporting all zeros would make market cards show
+// "shared 0 items" -- better not to report at all. The frontend treats it as "unknown"
+// (sharing not enabled vs. shared an empty set are two different states).
 func TestShareLoadInfoNilWithoutProvider(t *testing.T) {
 	svc := newShareTestService(t)
 	if got := svc.shareLoadInfo(); got != nil {

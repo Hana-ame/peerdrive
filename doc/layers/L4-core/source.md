@@ -1,203 +1,203 @@
-# source 层（back/internal/source/）
+# source layer (back/internal/source/)
 
-> 层归属：AOP ④ 业务核心（见 doc/LAYERS.md §1）——统一文件获取抽象（provider 概念落地，
-> REFACTOR.md §3.8）。
-> 核心思想（source.go:1-18 头注释）：**任何能提供「内容寻址字节流」的东西都是 Source**
-> ——本地磁盘、p2p 对端（透传）、URL/HTTP 模板。上层只问「给我 hash 的内容」，不关心
-> 来源与网络路径。
+> Layer belonging: AOP ④ business core (see doc/LAYERS.md §1) — the unified file acquisition abstraction (the landing of the provider concept,
+> REFACTOR.md §3.8).
+> Core idea (header comment at source.go:1-18): **anything that can provide a "content-addressed byte stream" is a Source**
+> — the local disk, a p2p peer (pass-through), and URL/HTTP templates. The upper layers only ask "give me the content of this hash"
+> and do not care about the origin or the network path.
 
-**一句话职责**：把多后端（本地 / peer 透传 / URL 模板）文件获取抽象为 `Source` 接口 +
-`SourceManager` 统一路由（优先级/能力/统计/运行时调整）；大文件只走流式（CapStream），
-全量获取走 OpenAny 降级。
+**One-line responsibility**: abstract multi-backend (local / peer pass-through / URL template) file acquisition into the `Source` interface +
+`SourceManager` unified routing (priority/capability/statistics/runtime adjustment); large files go streaming only (CapStream),
+and full acquisition goes through OpenAny downgrade.
 
-## 职责
+## Responsibilities
 
-### 解决什么问题
+### What problem does it solve
 
-重构前 service 里「本地查找」逻辑复制了 6 遍（REFACTOR.md §7 的 provider 层设计动机）。
-且节点互联（PeerJS）成熟后出现新需求：**本节点没有的文件可以从在线对端拉**，再不行
-从 URL 模板拉——这就是「多源回退」。source 层把这三条路径收敛成：
+Before the refactor, the "local lookup" logic in service was copied 6 times (the motivation for the provider layer design in REFACTOR.md §7).
+And once node interconnection (PeerJS) matured, a new requirement appeared: **a file not on this node can be pulled from an online peer**, and if that fails
+from a URL template — this is "multi-source fallback". The source layer converges these three paths into:
 
-- **统一接口**：`Source`（Name/Type/Capabilities/Priority/SetPriority/Available/Open/Fetch/Info）
-- **统一路由**：`SourceManager`（优先级升序逐源尝试、能力路由、命中统计、全失败汇总错误）
-- **统一管理面**：`Snapshot()` → `GET /sources`（状态+统计+优先级运行时调整）
+- **A unified interface**: `Source` (Name/Type/Capabilities/Priority/SetPriority/Available/Open/Fetch/Info)
+- **Unified routing**: `SourceManager` (trying each source in ascending priority, capability routing, hit statistics, aggregated error on all-fail)
+- **A unified admin surface**: `Snapshot()` → `GET /sources` (status + statistics + runtime priority adjustment)
 
-### 在 AOP ④ 中的位置
+### Position in AOP ④
 
 ```
-controller（/sources 管理端点走 router/source_routes.go，不经 controller）
-router（source_routes.go：GET /sources、POST /sources/:name/priority）
+controller (the /sources admin endpoint goes through router/source_routes.go, not through the controller)
+router (source_routes.go: GET /sources, POST /sources/:name/priority)
   ↑
-source（本层）
-  ├→ transport.FileIndexService（LocalSource 的索引映射 + IsPathAllowed）
-  ├→ transport.PeerJSService（PeerSource 的连接枚举 + OpenStream）
-  └→ pkg/hashutil（IsStrictSHA256）
+source (this layer)
+  ├→ transport.FileIndexService (LocalSource's index mapping + IsPathAllowed)
+  ├→ transport.PeerJSService (PeerSource's connection enumeration + OpenStream)
+  └→ pkg/hashutil (IsStrictSHA256)
 ```
 
-装配在 `cmd/server/main.go`（source.go:17 注释：transport 不反向依赖本包）。
+Assembly lives in `cmd/server/main.go` (comment at source.go:17: transport does not depend back on this package).
 
-## 模块清单
+## Module inventory
 
-| 文件 | 一句话职责 | 关键导出 |
+| File | One-line responsibility | Key exports |
 |---|---|---|
-| source.go | 接口/类型定义：Source、Capability、FileMeta、Stats、SourceStatus | `Source` 接口、`Capability`（`CapFile=1`/`CapStream=2`）、`IsStream`/`IsFile`、`validHash` |
-| manager.go | SourceManager：注册/注销/优先级/统一获取入口/统计快照 | `Manager`：`New`、`Register`、`Unregister`、`SetPriority`、`Open`、`OpenRange`、`OpenAny`、`Info`、`Snapshot` |
-| local.go | 本地磁盘源：file_index 映射优先 + CAS 兜底，CapStream | `LocalSource`：`NewLocalSource`、`Open`、`Fetch`、`Info`、`Available`、`resolvePath` |
-| peer.go | p2p 透传源：枚举在线对端串行尝试，per-peer 单槽 | `PeerSource`：`NewPeerSource`、`Open`、`Available`、`Fetch`；`peerReadCloser` |
-| url.go | URL 模板源：%s/%d 模板 + Range 分片 + sha256 校验 | `URLSource`：`NewURLSource`、`Open`、`Fetch`、`buildURL`；`verifyReadCloser` |
+| source.go | Interface/type definitions: Source, Capability, FileMeta, Stats, SourceStatus | the `Source` interface, `Capability` (`CapFile=1`/`CapStream=2`), `IsStream`/`IsFile`, `validHash` |
+| manager.go | SourceManager: register/unregister/priority/unified acquisition entry/statistics snapshot | `Manager`: `New`, `Register`, `Unregister`, `SetPriority`, `Open`, `OpenRange`, `OpenAny`, `Info`, `Snapshot` |
+| local.go | The local disk source: file_index mapping preferred + CAS fallback, CapStream | `LocalSource`: `NewLocalSource`, `Open`, `Fetch`, `Info`, `Available`, `resolvePath` |
+| peer.go | The p2p pass-through source: enumerating online peers and trying serially, per-peer single slot | `PeerSource`: `NewPeerSource`, `Open`, `Available`, `Fetch`; `peerReadCloser` |
+| url.go | The URL template source: %s/%d templates + Range slicing + sha256 verification | `URLSource`: `NewURLSource`, `Open`, `Fetch`, `buildURL`; `verifyReadCloser` |
 
-## 关键机制
+## Key mechanisms
 
-### 1. 能力标记（source.go:29-39）
+### 1. Capability flags (source.go:29-39)
 
 ```go
 const (
-    CapFile   Capability = 1 << iota  // 整体获取（Fetch → []byte）
-    CapStream                         // 流式/分片（Open(ctx, hash, offset, size)）
+    CapFile   Capability = 1 << iota  // whole acquisition (Fetch → []byte)
+    CapStream                         // streaming/slicing (Open(ctx, hash, offset, size))
 )
 ```
 
-能力决定路由方式（manager.go:11-13 头注释）：
+Capability determines the routing mode (header comment at manager.go:11-13):
 
-- **大文件必须走 CapStream**——8GB 全量 buffer 会 OOM（transport 流式改造的教训，source.go:9）
-- `OpenRange` **只尝试 CapStream 源**：CapFile 源无分片能力，降级 = 全量 buffer 路径
-- `OpenAny` 允许降级 CapFile 整体拉取（小文件/元数据场景）
+- **Large files must go through CapStream** — an 8GB full buffer would OOM (the lesson from the transport streaming refactor, source.go:9)
+- `OpenRange` **only tries CapStream sources**: a CapFile source has no slicing capability, and downgrading = the full buffer path
+- `OpenAny` allows downgrading to a CapFile whole fetch (small files/metadata scenarios)
 
-各源能力声明：
+Each source's capability declaration:
 
-| 源 | 能力 | 理由 |
+| Source | Capability | Reason |
 |---|---|---|
-| local | CapStream | os.File Seek/ReadAt 天然分片 |
-| peer | CapStream | req 帧协议支持 offset/size range |
-| url | 模板含 `%d` → CapStream；否则 CapFile | Range 参数在模板里才可流式（url.go:52-57） |
+| local | CapStream | os.File Seek/ReadAt is natively sliceable |
+| peer | CapStream | the req frame protocol supports offset/size ranges |
+| url | a template containing `%d` → CapStream; otherwise CapFile | Range parameters in the template are what make it streaming (url.go:52-57) |
 
-### 2. 路由语义（manager.go:9-14）
+### 2. Routing semantics (manager.go:9-14)
 
 ```
 OpenRange(ctx, hash, offset, size):
-  1. validHash（IsStrictSHA256，统一防御——所有 source 入口）
-  2. 快照 sources（RLock 拷贝，路由时不持锁——Available/Open 是慢操作）
-  3. 按优先级升序：Available()==false 跳过（记录 "unavailable"）；
-     IsStream 源依次 Open，第一个成功返回
-  4. 全失败 → "all sources failed: <最后一个源的错误>"（lastErr 只保留最后一条，
-     每源详细失败原因在 Stats.LastErr）
+  1. validHash (IsStrictSHA256, unified defense — all source entry points)
+  2. snapshot sources (an RLock copy; no lock held while routing — Available/Open are slow operations)
+  3. In ascending priority: skip if Available()==false (recording "unavailable");
+     try each IsStream source's Open in turn; the first success returns
+  4. All fail → "all sources failed: <the last source's error>" (lastErr keeps only the last one;
+     the detailed failure reason per source is in Stats.LastErr)
 ```
 
-装配优先级（cmd/server/main.go）：`local → peer → url(可选, PEERDRIVE_URL_SOURCE_TEMPLATE)`。
-「本地命中即返回」是内容寻址的本地权威语义；未命中降级 peer；URL 最后兜底。
+Assembly priority (cmd/server/main.go): `local → peer → url (optional, PEERDRIVE_URL_SOURCE_TEMPLATE)`.
+"Return immediately on a local hit" is the local-authoritative semantics of content addressing; a miss downgrades to peer; URL is the last fallback.
 
-### 3. 统计与管理面（manager.go:205-248）
+### 3. Statistics and the admin surface (manager.go:205-248)
 
-每次尝试（含 unavailable 跳过）都 `record`：
+Every attempt (including an unavailable skip) is `record`ed:
 
 ```
 Stats{ Success, Fail, Bytes, LastErr, LastAt }
 ```
 
-`Snapshot()` 输出 `SourceStatus`（Name/Type/Priority/Capabilities/Stream/Available/Stats）
-→ `GET /sources`；`POST /sources/:name/priority` 运行时调优先级（SetPriority 后重排，
-sort.SliceStable）。这是「运行时调整路由」的管理能力——故障源可临时降权，不重启。
+`Snapshot()` outputs `SourceStatus` (Name/Type/Priority/Capabilities/Stream/Available/Stats)
+→ `GET /sources`; `POST /sources/:name/priority` adjusts priority at runtime (after SetPriority, resorted with
+sort.SliceStable). This is the admin capability of "runtime routing adjustment" — a failing source can be temporarily deprioritized
+without a restart.
 
-### 4. LocalSource：file_index 优先 + CAS 兜底（local.go:69-82）
+### 4. LocalSource: file_index preferred + CAS fallback (local.go:69-82)
 
 ```go
 resolvePath(hash):
   CAS: storageDir/{hash[:2]}/{hash}
-  若 fileIndex.Info(hash) 命中且 IsPathAllowed(路径在允许根内) → 返回索引路径
-  否则 → 回退 CAS（历史脏数据/恶意登记不回传根外文件，H2 语义）
+  if fileIndex.Info(hash) hits and IsPathAllowed (the path is inside the allowed root) → return the index path
+  else → fall back to CAS (historical dirty data / malicious registrations do not serve out-of-root files, H2 semantics)
 ```
 
-与 `transport.serveFile` 的路径决策完全一致（同一逻辑收敛到一处，local.go:3-8 注释）。
-本地文件写入时已完成 sha256 校验（upload Complete），`Open` 不再校验（与 serveFile 行为
-一致）；`Available` = 存储目录可读。
+Exactly the same path decision as `transport.serveFile` (the same logic converged in one place, comment at local.go:3-8).
+The sha256 check is already done when a local file is written (upload Complete), so `Open` does not re-verify
+(same behavior as serveFile); `Available` = the storage directory is readable.
 
-### 5. PeerSource：per-peer 单槽串行（peer.go:5-15 注释）
+### 5. PeerSource: per-peer single-slot serialization (comment at peer.go:5-15)
 
 ```
 Open:
-  枚举 PeerJSService.Connections()（排除自身 ID）
-  每个 peer：peerLocks.LoadOrStore 拿 *sync.Mutex → TryLock()
-    - 拿不到 = 该 peer 已有流在进行 → 跳过试下一个（不等待！大文件流会阻塞整个路由）
-    - 拿到 → svc.OpenStream(pid, hash, offset, size)，成功返回包装 reader
-      （Close 时解锁释放槽位）；失败解锁继续
+  enumerate PeerJSService.Connections() (excluding its own ID)
+  for each peer: peerLocks.LoadOrStore gets a *sync.Mutex → TryLock()
+    - cannot get it = this peer already has a stream in progress → skip to the next (do NOT wait! a large file stream would block the whole routing)
+    - got it → svc.OpenStream(pid, hash, offset, size); on success return a wrapper reader
+      (unlocking on Close releases the slot); on failure, unlock and continue
 ```
 
-- **单槽约束来源**：连接级 expect 状态机（transport/conn.go bindConn）——同一连接并发
-  两个 fetch 流数据会交错。TryLock 而非 Lock 是「忙则跳过」语义。
-- 当前**串行尝试**，未来可升级多 peer 并发竞速（不同连接并发安全，同一连接仍需互斥，
-  peer.go:13-14 注释）。
-- `Info` 不支持（对端 info verb 未在拉取侧实现，peer.go:114-117）。
+- **Where the single-slot constraint comes from**: the connection-level expect state machine (transport/conn.go bindConn) — two concurrent
+  fetch streams on the same connection would interleave data. TryLock rather than Lock is the "skip if busy" semantics.
+- Currently **serial attempts**; it can be upgraded to multi-peer concurrent racing in the future (concurrent across different connections is safe, the same connection still needs mutual exclusion,
+  comment at peer.go:13-14).
+- `Info` is not supported (the peer info verb is not implemented on the fetching side, peer.go:114-117).
 
-### 6. URLSource：模板 + Range + 内容寻址兜底（url.go）
+### 6. URLSource: template + Range + content-addressed backstop (url.go)
 
-- **模板**：`fmt.Sprintf`，`%s`=hash；含 `%d`（两次）= offset,size → 声明 CapStream
-  （url.go:40-58）。例：`https://example.com/f/%s?off=%d&size=%d`
-- **Range 语义**（Open）：`bytes=start-end`（size<0 到文件尾）；服务器 206 → 直用 body；
-  回 200 全量 → `io.CopyN` 丢弃 offset 段 + `LimitReader` 截 size 段（带宽浪费但正确，
-  url.go:121-134 注释）；416/4xx → 报错
-- **sha256 校验**（verifyReadCloser，url.go:177-214）：**全量请求（offset==0 && size<0）
-  读取时校验**——URL 源内容可能被篡改，校验是内容寻址语义的底线；EOF 时比对，不匹配
-  返回 hash mismatch（ReadAll 会拿到）。Fetch 同样校验（url.go:164-168）
-- `Available` 恒 true（ping 浪费请求，url.go:79-81 注释）；失败由路由统计暴露（LastErr）
-- 可注入 http.Client 的 Transport 指向 ech-proxy 等出口（wintools cmd/ech-proxy），
-  不建独立 source 类型（url.go:5-8 注释）
+- **Template**: `fmt.Sprintf`, `%s`=hash; containing `%d` (twice) = offset,size → declares CapStream
+  (url.go:40-58). Example: `https://example.com/f/%s?off=%d&size=%d`
+- **Range semantics** (Open): `bytes=start-end` (size<0 to the file tail); server 206 → use the body directly;
+  a 200 full response → `io.CopyN` to discard the offset portion + `LimitReader` to truncate to the size portion (bandwidth wasted but correct,
+  comment at url.go:121-134); 416/4xx → error
+- **sha256 verification** (verifyReadCloser, url.go:177-214): **a full request (offset==0 && size<0) is verified while reading** — URL source content can be tampered with, and verification is the
+  floor of content-addressed semantics; compared at EOF, returning a hash mismatch on failure (ReadAll gets it). Fetch verifies the same way (url.go:164-168)
+- `Available` is always true (ping would waste requests, comment at url.go:79-81); failures are exposed by routing statistics (LastErr)
+- An http.Client Transport can be injected to point at an ech-proxy or similar egress (wintools cmd/ech-proxy),
+  without creating a separate source type (comment at url.go:5-8)
 
-## 与其它模块的关系
+## Relationships with other modules
 
 ```
-router/source_routes.go（管理端点：/sources 快照 + 优先级调整）
+router/source_routes.go (admin endpoints: the /sources snapshot + priority adjustment)
   ↑ Snapshot/SetPriority
-source（本层）
-  ├→ transport.FileIndexService（LocalSource 索引；Info/IsPathAllowed）
-  ├→ transport.PeerJSService（PeerSource 连接枚举；Connections/OpenStream/ID）
-  └→ pkg/hashutil（IsStrictSHA256 统一 hash 防御）
-cmd/server/main.go（装配：local → peer → url）
+source (this layer)
+  ├→ transport.FileIndexService (the LocalSource index; Info/IsPathAllowed)
+  ├→ transport.PeerJSService (PeerSource connection enumeration; Connections/OpenStream/ID)
+  └→ pkg/hashutil (IsStrictSHA256 unified hash defense)
+cmd/server/main.go (assembly: local → peer → url)
 ```
 
-- **边界**（REFACTOR.md §3.8）：`serveFile` 保持本地语义**不接 manager**（避免入站→出站
-  透传递归环）；`/peerjs/fetch` 仍直调 FetchFromPeer（保持语义）。
-- **消费方**：目前主要是 transport 层文件索引的 `LocalSource` 装配；未来 downloader/
-  controller 的取数路径可切 manager（预留，未切）。
+- **Boundary** (REFACTOR.md §3.8): `serveFile` keeps its local semantics and does **not** use the manager (avoiding an inbound→outbound
+  pass-through recursion loop); `/peerjs/fetch` still calls FetchFromPeer directly (keeping its semantics).
+- **Consumers**: currently mainly the transport layer file index's `LocalSource` assembly; in the future the downloader/
+  controller's acquisition paths can be switched to the manager (reserved, not switched).
 
-## 坑与设计决策
+## Pitfalls and design decisions
 
-1. **OpenRange 拒绝 CapFile 源**（manager.go:102-103）：CapFile 源无分片能力，OpenRange
-   降级会走全量 buffer（OOM 路径）；需要整体获取的调用方显式用 OpenAny——API 语义强制
-   调用方声明内存预算。
-2. **全失败只返回最后一条错误**（manager.go:126-132）：`all sources failed: <lastErr>`，
-   每源详细原因在 Stats.LastErr（管理面排查用）——错误体不膨胀但信息可查。
-3. **路由期间不持锁**（manager.go:108-110）：snapshot 拷贝后释放 RLock——Available/Open
-   是网络/磁盘慢操作，持锁会让 SetPriority/Register 全部阻塞。
-4. **per-peer TryLock 而非全局锁**：同 peer 单槽是帧协议硬约束；不同 peer 的流天然并发
-   安全（不同连接）——锁粒度精确到 peer，避免一个慢 peer 阻塞全部路由。
-5. **URLSource 的 200 全量截取**：服务器不支持 Range 时正确性优先（带宽浪费可接受），
-   第一版不做 HEAD 探测（url.go:122-124 注释）。
-6. **verifyReadCloser 只在 EOF 校验**：中途 Close 提前取消不校验（与 transport 的
-   fetchReader 语义一致，H5 兜底在 transport 侧）。
-7. **Available 的软状态语义**：local=目录可读、peer=有在线连接（排除自身）、url=恒 true
-   ——都是「可能可用」而非「一定有该文件」，真实命中由 Open 决定（source.go:63-64 注释）。
-8. **重名注册拒绝**（manager.go:40-52）：Name 是注册表 key，重复注册返回错误——防装配
-   时误注册同名源静默覆盖。
+1. **OpenRange rejects CapFile sources** (manager.go:102-103): a CapFile source has no slicing capability, and downgrading in OpenRange
+   would go through the full buffer (the OOM path); callers needing a whole fetch explicitly use OpenAny — the API semantics force
+   the caller to declare its memory budget.
+2. **All-fail returns only the last error** (manager.go:126-132): `all sources failed: <lastErr>`,
+   with the detailed reason per source in Stats.LastErr (for admin troubleshooting) — the error body does not balloon but the information is queryable.
+3. **No lock held while routing** (manager.go:108-110): the snapshot is copied and the RLock released — Available/Open
+   are network/disk slow operations, and holding the lock would block SetPriority/Register entirely.
+4. **per-peer TryLock rather than a global lock**: the same-peer single slot is a hard frame protocol constraint; streams on different peers are
+   naturally concurrently safe (different connections) — lock granularity is exact to the peer, avoiding one slow peer blocking all routing.
+5. **URLSource's 200 full truncation**: when the server does not support Range, correctness comes first (bandwidth waste is acceptable),
+   and no HEAD probing is done in the first version (comment at url.go:122-124).
+6. **verifyReadCloser only verifies at EOF**: an early Close cancel does not verify (consistent with the transport
+   fetchReader semantics; the H5 backstop is on the transport side).
+7. **The soft-state semantics of Available**: local=directory readable, peer=there are online connections (excluding itself), url=always true
+   — all are "possibly available" rather than "definitely has this file", and a real hit is decided by Open (comment at source.go:63-64).
+8. **Duplicate name registration is rejected** (manager.go:40-52): Name is the registry key, and a duplicate registration returns an error — preventing assembly
+   from accidentally registering a source with the same name and silently overwriting.
 
-## 测试
+## Tests
 
-| 文件 | 测试 | 发现背景 |
+| File | Test | Background of discovery |
 |---|---|---|
-| source_test.go | `TestLocalSource_OpenCAS` | source 体系新功能（本地 CAS 分片/全量读取 + 非法 hash 拒绝 + 不存在报错）——无前置 bug，防御性 |
-| source_test.go | `TestLocalSource_IndexPriority` | file_index 映射优先于 CAS（同一 hash 两处存在时读索引路径）；测试用 `repository.InitDB(":memory:")` + 真实 `transport.NewFileIndexService`（依赖 SQLite 持久化） |
-| source_test.go | `TestManager_RoutePriority` | 路由语义回归：local 命中即返回（peer 不被调）、未命中降级链、OpenRange 跳过 CapFile 源、OpenAny 兜底、SetPriority 运行时调整、Snapshot 统计、重名拒绝——用可编程 stubSource 验证，覆盖 5 个路由分支 |
+| source_test.go | `TestLocalSource_OpenCAS` | A new feature of the source system (local CAS slicing/whole reading + illegal hash rejection + not-found error) — no prior bug, defensive |
+| source_test.go | `TestLocalSource_IndexPriority` | file_index mapping takes priority over CAS (when the same hash exists in both places, the index path is read); the test uses `repository.InitDB(":memory:")` + a real `transport.NewFileIndexService` (depends on SQLite persistence) |
+| source_test.go | `TestManager_RoutePriority` | Routing semantics regression: a local hit returns immediately (peer is not called), the miss downgrade chain, OpenRange skips CapFile sources, OpenAny backstop, SetPriority runtime adjustment, Snapshot statistics, duplicate name rejection — verified with a programmable stubSource, covering 5 routing branches |
 
-> 注：本层测试均标注了「source 体系」发现背景（source_test.go:3-5 头注释：路由优先级/
-> 能力标记/统计管理/错误降级链），为新代码的防御性测试。
+> Note: this layer's tests are all marked with a "source system" background of discovery (header comment at source_test.go:3-5: routing priority/
+> capability flags/statistics admin/error downgrade chain); they are defensive tests for new code.
 
-## 文件清单
+## File inventory
 
 ```
 back/internal/source/
-├── source.go         Source 接口 + Capability + FileMeta/Stats/SourceStatus + validHash
-├── manager.go        SourceManager（注册/路由/统计/快照）
-├── local.go          LocalSource（file_index 优先 + CAS 兜底，CapStream）
-├── peer.go           PeerSource（连接枚举 + per-peer 单槽串行）
-├── url.go            URLSource（模板 + Range + sha256 校验）
-└── source_test.go    Local/Manager 测试（stub source 驱动 5 个路由分支）
+├── source.go         Source interface + Capability + FileMeta/Stats/SourceStatus + validHash
+├── manager.go        SourceManager (registration/routing/statistics/snapshot)
+├── local.go          LocalSource (file_index preferred + CAS fallback, CapStream)
+├── peer.go           PeerSource (connection enumeration + per-peer single-slot serialization)
+├── url.go            URLSource (template + Range + sha256 verification)
+└── source_test.go    Local/Manager tests (a stub source drives 5 routing branches)
 ```

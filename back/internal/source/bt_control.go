@@ -1,19 +1,19 @@
 package source
 
-// bt_control.go：BTControl 实现——包装 p2p_bt.BTClient。
-// 发现背景：Source 控制面设计（doc/source-control.md），BT 主动下载 torrent/magnet。
+// bt_control.go: BTControl implementation -- wraps p2p_bt.BTClient.
+// Discovery background: Source control plane design (doc/source-control.md), BT active download of torrent/magnet.
 
 import (
 	pp "github.com/Hana-ame/go-peerdrive-bt"
 	"peerdrive/internal/log"
 )
 
-// btController 是 BTControl 的封装实现。
+// btController is the wrapper implementation of BTControl.
 type btController struct {
 	inner *pp.BTClient
 }
 
-// NewBTControl 创建 BT 控制面实例（nil 可用，所有方法返回 ErrControlUnsupported）。
+// NewBTControl creates a BT control plane instance (nil is acceptable; all methods return ErrControlUnsupported).
 func NewBTControl(client *pp.BTClient) BTControl {
 	return &btController{inner: client}
 }
@@ -97,7 +97,7 @@ func (b *btController) RemoveDownload(infohash string) error {
 	return b.inner.RemoveDownload(infohash)
 }
 
-// ---- 辅助 ----
+// --- Helpers ---
 
 func downloadStatusFromP2p(s pp.DownloadStatus) DownloadStatus {
 	return DownloadStatus{
@@ -107,7 +107,7 @@ func downloadStatusFromP2p(s pp.DownloadStatus) DownloadStatus {
 		BytesDone:     s.Downloaded,
 		BytesTotal:    s.TotalSize,
 		Peers:         s.Peers,
-		Seeders:       0, // p2p_bt.DownloadStatus 没有 Seeders 字段
+		Seeders:       0, // p2p_bt.DownloadStatus does not have a Seeders field
 		Progress:      float64(s.PiecesDone) / float64(max(s.PiecesTotal, 1)),
 		DownloadSpeed: s.Speed,
 		ErrorMessage:  s.Error,

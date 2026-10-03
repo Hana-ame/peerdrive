@@ -1,5 +1,5 @@
-// 已连接的对端节点会话（跨页面共享：连接页 → 节点控制页）
-// 只存引用；连接断开/失效时清空。
+// Connected peer node session (shared across pages: connect page → node control page)
+// Only stores references; cleared when the connection is broken/invalid.
 let session = null; // { client, peerId }
 
 export function setNodeSession(s) {
@@ -12,7 +12,7 @@ export function getNodeSession() {
 
 export function clearNodeSession() {
   if (session && session.client && typeof session.client.close === 'function') {
-    try { session.client.close(); } catch (e) { /* 忽略 */ }
+    try { session.client.close(); } catch (e) { /* ignore */ }
   }
   session = null;
 }

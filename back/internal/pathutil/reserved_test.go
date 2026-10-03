@@ -12,9 +12,10 @@ func TestHasReservedName(t *testing.T) {
 		`C:\data\LPT9.log`, `C:/data/AUX`, "CON", `\\?\C:\data\COM1:stream`,
 		`data\PRN\x.txt`,
 	}
-	// 注意：函数本身**不区分平台**（平台判断在 normalize 里）。`/data/CON`
-	// 在 POSIX 上只是个普通文件名，但"含保留名"这件事是真的，由调用方决定
-	// 要不要管——这样 Linux CI 才能单测 Windows 那一支。
+	// Note: the function itself is **platform-agnostic** (platform checking
+	// happens in normalize). `/data/CON` is just an ordinary filename on POSIX,
+	// but "contains a reserved name" is a real fact, left to the caller to decide
+	// whether to care -- this way Linux CI can unit test the Windows branch.
 	no := []string{
 		`C:\data\file.txt`, `C:\data\concert.mp3`, `C:\data\null.txt`,
 		`C:\data\com10.txt`, `C:\data\lpt0.txt`, `C:`,
@@ -32,30 +33,31 @@ func TestHasReservedName(t *testing.T) {
 	}
 }
 
-// TestWithin_ReservedDeviceName Windows 上"在根内"的文本判定会被设备名绕过去：
-// `root\CON` 文本上在根内，打开拿到的却是控制台设备。必须判为不在根内。
+// TestWithin_ReservedDeviceName On Windows the "inside the root" textual check
+// can be bypassed by device names: `root\CON` is textually inside the root, but
+// opening it yields the console device. It must be judged as not inside the root.
 func TestWithin_ReservedDeviceName(t *testing.T) {
 	root := t.TempDir()
 	old := foldCase
 	defer func() { foldCase = old }()
 
-	// foldCase 就是本包里"按 Windows 语义判定"的开关（见 path.go 注释），
-	// 所以这条在 Linux CI 上也能验 Windows 那一支。
+	// foldCase is this package's switch for "judging with Windows semantics" (see
+	// path.go comments), so this check can also verify the Windows branch on Linux CI.
 	foldCase = true
 	for _, name := range []string{"CON", "nul.txt", "COM1", "lpt9"} {
 		p := filepath.Join(root, name)
 		if Within(root, p) {
-			t.Errorf("Windows 语义下保留设备名不该算在根内：%s", p)
+			t.Errorf("reserved device names should not count as inside root under Windows semantics: %s", p)
 		}
 	}
-	// 普通文件名不受影响（CONCERT 只是以 CON 开头，不是设备名）
+	// ordinary filenames are unaffected (CONCERT just starts with CON, it's not a device name)
 	foldCase = true
 	if !Within(root, filepath.Join(root, "concert.mp3")) {
-		t.Error("CONCERT.mp3 是普通文件名，不该被当成设备名")
+		t.Error("CONCERT.mp3 is an ordinary filename, should not be treated as a device name")
 	}
 
-	foldCase = false // POSIX：CON 就是个普通文件名
+	foldCase = false // POSIX: CON is just an ordinary filename
 	if runtime.GOOS != "windows" && !Within(root, filepath.Join(root, "CON")) {
-		t.Error("POSIX 上 CON 是普通文件名，应放行")
+		t.Error("on POSIX, CON is an ordinary filename, should be allowed")
 	}
 }

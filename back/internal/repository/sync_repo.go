@@ -1,4 +1,4 @@
-// 本地同步仓库 — local_collection_sync 和 local_sync_files 表的 CRUD，用于跟踪集合文件到磁盘的同步状态。
+// Local sync repository — CRUD for local_collection_sync and local_sync_files tables, used to track sync status of collection files to disk.
 package repository
 
 import (
@@ -9,12 +9,12 @@ import (
 
 type SyncRepository struct{}
 
-// NewSyncRepository 创建一个新的同步仓库实例。
+// NewSyncRepository creates a new sync repository instance.
 func NewSyncRepository() *SyncRepository {
 	return &SyncRepository{}
 }
 
-// UpsertSyncState 插入或更新集合的本地同步状态记录（含 include/exclude 过滤条件）。
+// UpsertSyncState inserts or updates the local sync state record for a collection (with include/exclude filters).
 func (r *SyncRepository) UpsertSyncState(sync *model.LocalCollectionSync) error {
 	includeJSON, _ := json.Marshal(sync.IncludeFilter)
 	excludeJSON, _ := json.Marshal(sync.ExcludeFilter)
@@ -31,7 +31,7 @@ func (r *SyncRepository) UpsertSyncState(sync *model.LocalCollectionSync) error 
 	return err
 }
 
-// GetSyncState 按集合 hash 查询本地同步状态；未找到时返回 (nil, nil)。
+// GetSyncState queries local sync state by collection hash; returns (nil, nil) if not found.
 func (r *SyncRepository) GetSyncState(hash string) (*model.LocalCollectionSync, error) {
 	var s model.LocalCollectionSync
 	var includeStr, excludeStr string
@@ -49,7 +49,7 @@ func (r *SyncRepository) GetSyncState(hash string) (*model.LocalCollectionSync, 
 	return &s, nil
 }
 
-// UpsertFileSyncState 插入或更新集合中某文件的同步状态（isSaved 标记是否成功保存到磁盘）。
+// UpsertFileSyncState inserts or updates the sync state for a file in a collection (isSaved marks whether save to disk succeeded).
 func (r *SyncRepository) UpsertFileSyncState(hash, path string, isSaved bool) error {
 	_, err := DB.Exec(`
 		INSERT INTO local_sync_files (collection_hash, file_path, is_saved, last_modified)
@@ -61,8 +61,8 @@ func (r *SyncRepository) UpsertFileSyncState(hash, path string, isSaved bool) er
 	return err
 }
 
-// GetSyncFiles 查询指定集合的所有文件同步状态记录。
-// M11：无 LIMIT 全表物化；限 1000 条（本地同步状态记录通常远小于此）。
+// GetSyncFiles queries all file sync state records for a specified collection.
+// M11: No LIMIT → full-table materialization; limit to 1000 (local sync state records are usually far fewer).
 func (r *SyncRepository) GetSyncFiles(hash string) ([]model.LocalSyncFile, error) {
 	rows, err := DB.Query(`SELECT id, collection_hash, file_path, is_saved, last_modified FROM local_sync_files WHERE collection_hash = ? LIMIT 1000`, hash)
 	if err != nil {
@@ -83,7 +83,7 @@ func (r *SyncRepository) GetSyncFiles(hash string) ([]model.LocalSyncFile, error
 	return files, nil
 }
 
-// ClearSyncFiles 删除指定集合的所有文件同步记录（重同步前调用）。
+// ClearSyncFiles deletes all file sync records for a specified collection (called before re-sync).
 func (r *SyncRepository) ClearSyncFiles(hash string) error {
 	_, err := DB.Exec(`DELETE FROM local_sync_files WHERE collection_hash = ?`, hash)
 	return err

@@ -1,17 +1,20 @@
 package transport
 
-// peerjs_service.go：PeerJSService 装配层（生命周期 + 连接管理 + 角色装配）。
-// 帧角色已按 inbound/outbound 拆分到独立文件（见 conn.go 头注释的角色划分）：
-//   - conn.go：连接共享核心（帧类型、connState、bindConn 分派）
-//   - inbound.go：入站角色（应答 verb：serveFile / serve* 索引 verb / uploadWorker）
-//   - outbound.go：出站角色（发起 verb：FetchFromPeer / requestFile / routeResponse）
-//   - ws_session.go / rtc_session.go：方向中立传输（Session 抽象）
-//   - file_index.go：方向中立持久化（两角色共用）
+// peerjs_service.go: PeerJSService assembly layer (lifecycle + connection management + role
+// assembly). Frame roles have been split to separate files per inbound/outbound (see conn.go
+// header comments for role division):
+//   - conn.go: connection shared core (frame types, connState, bindConn dispatch)
+//   - inbound.go: inbound role (respond to verbs: serveFile / serve* index verbs / uploadWorker)
+//   - outbound.go: outbound role (initiate verbs: FetchFromPeer / requestFile / routeResponse)
+//   - ws_session.go / rtc_session.go: direction-neutral transport (Session abstraction)
+//   - file_index.go: direction-neutral persistence (shared by both roles)
 //
-// 本文件保留 PeerJS 信令生命周期（Start/Close/startLoop）、连接建立
-// （connectLoop 拨号 / onIncomingConnection 接受）、本地会话绑定（BindLocal）。
-// 注意：连接建立的两条路径（accept/dial）都只是创建一条全双工 Session，随后
-// 经 bindConn 挂上同一套 inbound+outbound 角色——WebRTC 连接对称，无方向之分。
+// This file retains PeerJS signaling lifecycle (Start/Close/startLoop), connection
+// establishment (connectLoop dial / onIncomingConnection accept), local session binding
+// (BindLocal).
+// Note: the two connection establishment paths (accept/dial) only create a full-duplex
+// Session; then bindConn attaches the same inbound+outbound roles — WebRTC connections
+// are symmetric, no direction distinction.
 
 import (
 	"context"
@@ -29,11 +32,15 @@ import (
 	hashutil "peerdrive/pkg/hashutil"
 )
 
-// PeerJSService 通过 PeerJS 公共信令 + pion/webrtc DataChannel 提供双向文件服务：
-//   - 被动接收：浏览器或其它节点连接本节点请求 sha256 内容（入站角色，inbound.go）
-//   - 主动发起：连接其它节点拉取文件（出站角色，outbound.go），节点间互联
+// PeerJSService provides bidirectional file service via PeerJS public signaling +
+// pion/webrtc DataChannel:
+//   - Passive reception: browser or other nodes connect to this node to request sha256
+//     content (inbound role, inbound.go)
+//   - Active initiation: connect to other nodes to fetch files (outbound role, outbound.go),
+//     inter-node interconnect
 //
-// 帧协议与约束见 conn.go 头注释（协议正确性依赖，勿破坏）。
+// Frame protocol and constraints in conn.go header comments (protocol correctness depends
+// on these, do not break).
 type PeerJSService struct {
 	cfg        *config.Config
 	storageDir string
@@ -43,64 +50,74 @@ type PeerJSService struct {
 	iceServers []webrtc.ICEServer
 
 	mu     sync.Mutex
-	conns  map[string]Session // key: remote peer id / "local"（WS 本地会话）
+	conns  map[string]Session // key: remote peer id / "local" (WS local session)
 	closed chan struct{}
 
 	pendingMu sync.Mutex
-	pending   map[Session]*connState // 连接级请求/响应状态（Session 动态类型为指针，可作 map key）
+	pending   map[Session]*connState // connection-level request/response state (Session dynamic type is pointer, can be map key)
 
-	// peerMu 保护 peer/httpDisc/discovery 的读写（低危 2 修复）：
-	// startLoop 写（重连时替换指针），Close 读——之前无锁，关停期 data race
+	// peerMu protects peer/httpDisc/discovery read/write (low-risk 2 fix):
+	// startLoop writes (pointer replacement on reconnect), Close reads — previously
+	// unlocked, data race during shutdown
 	peerMu    sync.Mutex
 	httpDisc  *HTTPDiscovery
 	discovery *MQTTDiscovery
 
-	// connecting 去重：同一 peerID 可能被多个来源（配置 PEERS、MQTT/HTTP 发现、
-	// 被动连接）触发 connectLoop——双连接浪费资源，靠 conns map 覆盖兜底但
-	// 有重复握手开销（低危 3 修复）
+	// connecting dedup: same peerID may be triggered by multiple sources (config PEERS,
+	// MQTT/HTTP discovery, passive connections) to call connectLoop — double connections
+	// waste resources; conns map overwrite is a backstop but has redundant handshake
+	// overhead (low-risk 3 fix)
 	connectingMu sync.Mutex
 	connecting   map[string]struct{}
 
-	// router 多源文件路由（source.Manager，第 3 项优化 2026-08-18）：
-	// serveFile 接本地→对端→URL 模板路由；nil = 退回本地语义（openFile）。
-	// 装配在 cmd/server/main.go（SetFileRouter）。接口解耦避免 import 环
-	// （source 包引 transport）。
+	// router multi-source file routing (source.Manager, 3rd optimization 2026-08-18):
+	// serveFile routes local→peer→URL template; nil = fall back to local semantics (openFile).
+	// Assembly in cmd/server/main.go (SetFileRouter). Interface decoupling avoids import
+	// cycle (source package imports transport).
 	router FileRouter
 
-	fileIndex *FileIndexService // sha256 → 绝对路径 索引（create/upload/list/info/sync）
+	fileIndex *FileIndexService // sha256 → absolute path index (create/upload/list/info/sync)
 
-	// extraPeers 运行时追加的常驻对端（节点市场「加入节点」的持久化清单，
-	// 由 service.NodeDirectory 提供）。与配置 PEERDRIVE_PEERJS_PEERS 同语义：
-	// 每次信令重连后自动拨号，且**不受 PEERDRIVE_MAX_PEERS 预算限制**
-	// （那是运营者显式加入的节点，不是发现撞见的陌生节点）。
-	// nil = 无额外对端。
+	// extraPeers runtime-appended persistent peers (node marketplace "join node" persisted
+	// list, provided by service.NodeDirectory). Same semantics as config PEERDRIVE_PEERJS_PEERS:
+	// automatically dials after each signaling reconnection, and is **not limited by
+	// PEERDRIVE_MAX_PEERS budget** (those are operator-explicitly added nodes, not random
+	// discovered nodes).
+	// nil = no extra peers.
 	extraPeers func() []string
 
-	// shareProvider 本节点对外共享范围（share.go，M2）。由 main 注入
-	// service.NodeShare.SnapshotFor；nil = 未启用共享，share 帧回空快照。
-	// 用独立锁而不是在装配期裸写：main 在 Start() 之后才注入（startLoop
-	// 已经在跑，发现组件可能已在 announce），裸写是 data race。
+	// shareProvider this node's external sharing scope (share.go, M2). Injected by main
+	// via service.NodeShare.SnapshotFor; nil = sharing not enabled, share frame returns
+	// empty snapshot.
+	// Uses independent lock instead of bare write during assembly: main injects after
+	// Start() (startLoop already running, discovery components may already be announcing);
+	// bare write is a data race.
 	//
-	// 入参是请求者的节点 ID：share 帧走的是已建立的连接，对端 id 是已知的，
-	// 所以"好友能看到 private 清单"可以实现（否则给了权限却没给目录）。
+	// Input parameter is the requester's node ID: share frame goes through an established
+	// connection, the peer id is known, so "friends can see private manifests" can be
+	// implemented (otherwise giving permission without giving the directory).
 	shareMu       sync.RWMutex
 	shareProvider func(peerID string) ShareSnapshot
 
-	// shareGate 下载门禁（share.go）：按 hash 判断请求者能否取回。
-	// 与 shareProvider 分开注入：清单（share 帧）与下载（req 帧）是两条路径，
-	// 门禁只在 req 上生效——unlisted 的内容不出现在清单里，但 req 要放行。
+	// shareGate download gate (share.go): determines by hash whether requester can fetch.
+	// Separated from shareProvider injection: manifest (share frame) and download (req frame)
+	// are two paths; gate only applies to req — unlisted content doesn't appear in manifest
+	// but req must pass through.
 	shareGate ShareGate
 
-	// forward 转发授权规则（key 原文 → 端口白名单）与待验证质询（forward.go）。
-	// 规则即凭证：运行时动态增删（端点）与配置装载（SetForwardRules）共用同一锁。
+	// forward forwarding authorization rules (plaintext key → port whitelist) and pending
+	// challenges (forward.go).
+	// Rules are credentials: runtime dynamic add/remove (endpoints) and config loading
+	// (SetForwardRules) share the same lock.
 	forwardMu    sync.Mutex
 	forwardRules map[string][]int
 	nonceMu      sync.Mutex
-	fwNonces     map[string]*fwdNonce // reqId → 质询（取出即标 used，防重放）
+	fwNonces     map[string]*fwdNonce // reqId → challenge (marked used on retrieval, anti-replay)
 
-	// admin 管理面内部转发 handler（admin.go）：由 router.SetupRouter 注入，
-	// 包装 gin engine 复用全部 controller。adminMu 保护装配期写入与并发读取
-	// （serveAdmin 是连接 goroutine，装配完成后并发调用）。
+	// admin management-plane internal forwarding handler (admin.go): injected by
+	// router.SetupRouter, wraps gin engine to reuse all controllers. adminMu protects
+	// assembly-time writes and concurrent reads (serveAdmin is a connection goroutine,
+	// called concurrently after assembly).
 	adminMu      sync.Mutex
 	adminHandler AdminHandler
 
@@ -108,432 +125,247 @@ type PeerJSService struct {
 	cancel context.CancelFunc
 }
 
-// NewPeerJSService 创建 PeerJS 文件服务。节点 ID 默认 <prefix>-<随机hex>，
-// 常驻在线后其他 peer（浏览器或节点）可通过该 ID 直连。
-func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
-	id := cfg.PeerJSID
-	if id == "" {
-		id = "peerdrive-" + randHex8()
+// NewPeerJSService creates the PeerJS file service. Node ID defaults to <prefix>-<random hex>;
+// once persistently online, other peers (browser or nodes) can directly connect via this ID.
+func NewPeerJSService(cfg *config.Config, storageDir, peerID string) *PeerJSService {
+	if peerID == "" {
+		peerID = cfg.PeerPrefix + "-" + randHex8()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &PeerJSService{
-		cfg:          cfg,
-		storageDir:   storageDir,
-		id:           id,
-		iceServers:   parseICEServers(cfg.WebRTCSTUNServer, cfg.WebRTCTURNServer),
-		conns:        make(map[string]Session),
-		pending:      make(map[Session]*connState),
-		connecting:   make(map[string]struct{}),
-		fileIndex:    NewFileIndexService(cfg.DownloadDir),
-		forwardRules: make(map[string][]int),
-		fwNonces:     make(map[string]*fwdNonce),
-		closed:       make(chan struct{}),
-		ctx:          ctx,
-		cancel:       cancel,
+	s := &PeerJSService{
+		cfg:        cfg,
+		storageDir: storageDir,
+		id:         peerID,
+		iceServers: parseICEServers(cfg.StunURL, cfg.TurnURL),
+		conns:      make(map[string]Session),
+		pending:    make(map[Session]*connState),
+		closed:     make(chan struct{}),
+		connecting: make(map[string]struct{}),
+		ctx:        ctx,
+		cancel:     cancel,
 	}
+	if cfg.MaxPeers <= 0 {
+		s.cfg.MaxPeers = 8
+	}
+	return s
 }
 
-// ID 返回本节点在信令网络中的 peer id。
-func (s *PeerJSService) ID() string { return s.id }
-
-// currentPeer 返回当前信令 peer（受 peerMu 保护，供 HTTPDiscovery 等并发回调安全读取）。
-func (s *PeerJSService) currentPeer() *peerjs.Peer {
+// Start initializes the PeerJS peer, starts connection loops and discovery.
+func (s *PeerJSService) Start() error {
+	peer, err := peerjs.NewPeer(peerjs.Options{
+		ID:   s.id,
+		Key:  s.cfg.SignalServer,
+		ICE:  s.iceServers,
+		Debug: s.cfg.Debug,
+	})
+	if err != nil {
+		return err
+	}
 	s.peerMu.Lock()
-	defer s.peerMu.Unlock()
-	return s.peer
-}
+	s.peer = peer
+	s.peerMu.Unlock()
 
-// Start 注册到信令服务器；断线自动重连。异步，不阻塞调用方。
-func (s *PeerJSService) Start() {
-	go s.startLoop()
-}
+	peer.On("connection", s.onIncomingConnection)
+	peer.On("error", func(err error) {
+		log.LogWarn("peerjs: peer error: %v", err)
+	})
 
-// Close 关闭信令连接并释放所有 WebRTC 连接。
-func (s *PeerJSService) Close() {
-	s.cancel()
-	s.mu.Lock()
-	select {
-	case <-s.closed:
-	default:
-		close(s.closed)
+	// Start discovery
+	if s.cfg.DiscoverMode == "http" {
+		s.httpDisc = NewHTTPDiscovery(s.cfg.SignalServer, s.id, s.collections(), s.onPeer)
+		s.httpDisc.Start()
+	} else {
+		s.discovery = NewMQTTDiscovery(s.cfg.MQTTBroker, "peerdrive/v1", s.id, s.onPeer)
+		s.discovery.Start(s.collections())
 	}
-	conns := make([]Session, 0, len(s.conns))
+
+	go s.startLoop()
+	return nil
+}
+
+// Close shuts down the service: disconnect all connections, stop discovery, close peer.
+func (s *PeerJSService) Close() error {
+	s.cancel()
+	<-s.closed
+	s.peerMu.Lock()
+	p := s.peer
+	s.peerMu.Unlock()
+	if p != nil {
+		p.Destroy()
+	}
+	s.mu.Lock()
 	for _, c := range s.conns {
-		conns = append(conns, c)
+		c.Close()
 	}
 	s.conns = make(map[string]Session)
 	s.mu.Unlock()
-	for _, c := range conns {
-		c.Close()
-	}
-	s.peerMu.Lock()
-	peer := s.peer
-	httpDisc := s.httpDisc
-	s.peer = nil
-	s.httpDisc = nil
-	s.discovery = nil
-	s.peerMu.Unlock()
-	if peer != nil {
-		peer.Close()
-	}
-	if httpDisc != nil {
-		httpDisc.Stop()
-	}
+	log.LogInfo("peerjs: service closed")
+	return nil
 }
 
-func (s *PeerJSService) startLoop() {
-	backoff := 2 * time.Second
-	for {
-		if s.ctx.Err() != nil {
-			return
-		}
-		opts := peerjs.DefaultOptions()
-		opts.Host = s.cfg.PeerJSHost
-		opts.Port = s.cfg.PeerJSPort
-		opts.Secure = s.cfg.PeerJSSecure
-		opts.Key = s.cfg.PeerJSKey
-		if opts.Host == "" {
-			opts.Host = config.DefaultSignalHost
-		}
-		if opts.Port == "" {
-			opts.Port = config.DefaultSignalPort
-		}
-		if opts.Key == "" {
-			opts.Key = config.DefaultSignalKey
-		}
-		opts.ICEServers = s.iceServers
-		p := peerjs.NewPeer(s.id, opts)
-		p.OnConnection(s.onIncomingConnection)
-		s.peerMu.Lock()
-		s.peer = p
-		s.peerMu.Unlock()
-		if err := p.Dial(s.ctx); err != nil {
-			log.LogWarn("peerjs: connect failed (retry in %s): %v", backoff, err)
-			select {
-			case <-time.After(backoff):
-			case <-s.ctx.Done():
-				return
-			}
-			if backoff < 60*time.Second {
-				backoff *= 2
-			}
-			continue
-		}
-		backoff = 2 * time.Second
-		log.LogInfo("peerjs: connected, id=%s host=%s", p.ID(), opts.Host)
+// ID returns the node's peer ID.
+func (s *PeerJSService) ID() string { return s.id }
 
-		// 连接配置的对端节点
-		peers := strings.Split(s.cfg.PeerJSPeers, ",")
-		for _, pid := range peers {
-			pid = strings.TrimSpace(pid)
-			if pid == "" || pid == s.id {
-				continue
-			}
-			go s.connectLoop(pid)
-		}
-		// 连接「市场里加入」的常驻对端（与静态 PEERS 同等地位，见 extraPeers 注释）
-		if s.extraPeers != nil {
-			for _, pid := range s.extraPeers() {
-				pid = strings.TrimSpace(pid)
-				if pid == "" || pid == s.id {
-					continue
-				}
-				go s.connectLoop(pid)
-			}
-		}
-
-		// 房间发现（多路并取）：自托管信令服务器的发现 API 优先，否则 MQTT。
-		// peerMu 保护 httpDisc/discovery 的读写（低危 2 修复的补齐）：Close
-		// 并发置 nil，无锁快照是 data race（-race 集成测试连跑暴露，2026-08-18）。
-		// 重建前查 ctx：Close 已 cancel 时不再启动新发现（防清理竞态泄漏
-		// goroutine——Close 置 nil 后本循环仍可能走到这里）。
-		s.peerMu.Lock()
-		httpDisc := s.httpDisc
-		disc := s.discovery
-		s.peerMu.Unlock()
-		if s.ctx.Err() != nil {
-			return
-		}
-		if httpDisc == nil && s.cfg.DiscoverURL != "" {
-			cols := s.discoveryRooms()
-			httpDisc = NewHTTPDiscovery(s.cfg.DiscoverURL, s.id, cols, s.onDiscoveredPeer, func() []string {
-				if p := s.currentPeer(); p != nil {
-					return p.ConnectedPeers()
-				}
-				return nil
-			})
-			// 共享摘要随 announce 上报（只报数量，见 HTTPDiscovery.shareInfo 注释）。
-			// 无条件注册：shareLoadInfo 每次调用都重读 provider，晚注入也生效。
-			httpDisc.SetShareInfo(s.shareLoadInfo)
-			httpDisc.Start()
-			s.peerMu.Lock()
-			s.httpDisc = httpDisc
-			s.peerMu.Unlock()
-			log.LogInfo("peerjs: http discovery enabled url=%s collections=%d", s.cfg.DiscoverURL, len(cols))
-		} else if disc == nil && s.cfg.MQTTEnable {
-			cols := s.collectionHashes()
-			disc = NewMQTTDiscovery(s.cfg.MQTTBroker, s.cfg.MQTTTopicPref,
-				"pd-node-"+s.id, s.onDiscoveredPeer)
-			disc.Start(cols)
-			disc.Announce(s.id, cols)
-			s.peerMu.Lock()
-			s.discovery = disc
-			s.peerMu.Unlock()
-			log.LogInfo("peerjs: mqtt discovery enabled broker=%s collections=%d", s.cfg.MQTTBroker, len(cols))
-		}
-
-		select {
-		case <-s.ctx.Done():
-			p.Close()
-			return
-		case <-s.closed:
-			p.Close()
-			return
-		case <-p.Done():
-			// H7 修复：信令 WS 意外断开（公共云掉线/代理抖动常见）——之前
-			// readLoop 静默退出后 startLoop 只 select ctx/closed 两个永不触发的
-			// 信号，节点永久失聪直到重启（心跳空转、connectLoop 永远退避打转）。
-			// 现在 Signaller.Done() 在断线时关闭，触发整轮重连（复用 backoff）。
-			log.LogWarn("peerjs: signalling connection lost, reconnecting in %s", backoff)
-			p.Close()
-			select {
-			case <-time.After(backoff):
-			case <-s.ctx.Done():
-				return
-			case <-s.closed:
-				return
-			}
-			if backoff < 60*time.Second {
-				backoff *= 2
-			}
-		}
-	}
-}
-
-// BindLocal 注册本地 WebSocket 会话（浏览器直连本节点，帧协议与远端
-// DataChannel 完全一致）。本地会话以 "local" 注册，FetchFromPeer("local", ...)
-// 即可复用同一拉取路径（出站角色，见 outbound.go）。
-func (s *PeerJSService) BindLocal(sess Session) {
-	s.bindConn(sess)
-	log.LogInfo("peerjs: local session bound (id=%s)", sess.ID())
-}
-
-// onDiscoveredPeer 发现回调：对端节点在线，发起互联（已连接则跳过）。
-// 发现来源（内容分片房间 / 存在房间）在此合并，唯一区别是拨号预算：
-// 存在房间让「任意节点都能发现任意节点」，不加限制会退化成 O(n²) 全互联
-// ——所以发现触发的拨号受 PEERDRIVE_MAX_PEERS 约束（静态 PEERS 是运营者
-// 显式声明，不受限，见 startLoop）。
-func (s *PeerJSService) onDiscoveredPeer(peerID string) {
-	if peerID == "" || peerID == s.id {
-		return
-	}
-	s.mu.Lock()
-	_, ok := s.conns[peerID]
-	s.mu.Unlock()
-	if ok {
-		return
-	}
-	if !s.discoveryDialAllowed() {
-		log.LogDebug("peerjs: discovery dial to %s skipped (max peers %d reached)", peerID, s.maxPeers())
-		return
-	}
-	go s.connectLoop(peerID)
-}
-
-// discoveryDialAllowed 是否还有发现拨号预算（对端节点数 < PEERDRIVE_MAX_PEERS）。
-// 计预算时排除 "local"：那是浏览器直连本节点的本地 WS 会话，不是对端节点。
-func (s *PeerJSService) discoveryDialAllowed() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	n := 0
-	for id := range s.conns {
-		if id != "local" {
-			n++
-		}
-	}
-	return n < s.maxPeers()
-}
-
-// maxPeers 互联层拨号上限（配置 PEERDRIVE_MAX_PEERS，<=0 视为不限）。
-func (s *PeerJSService) maxPeers() int {
-	if s.cfg.MaxPeers <= 0 {
-		return 1 << 30
-	}
-	return s.cfg.MaxPeers
-}
-
-// discoveryRooms 返回 announce/查询用的房间列表 = 配置声明的内容分片房间
-// + （可选）节点级存在房间。仅 HTTP 发现使用：公共 MQTT broker 上开全局
-// 存在房间等于向公网广播本节点，不做。
-func (s *PeerJSService) discoveryRooms() []string {
-	rooms := s.collectionHashes()
-	if !s.cfg.DiscoverPresence {
-		return rooms
-	}
-	// 去重：理论上运营者可以把存在房间 hash 写进 PEERDRIVE_MQTT_COLLECTIONS
-	// （不可能猜中，但重复房间名会让 announce 出现无意义重复项）。
-	for _, r := range rooms {
-		if r == PresenceRoom {
-			return rooms
-		}
-	}
-	return append(rooms, PresenceRoom)
-}
-
-// collectionHashes 返回本节点声明关注的内容分片房间（仅配置 PEERDRIVE_MQTT_COLLECTIONS）。
-// 注意：这里**不含**本地存储里已有的合集——把本地合集 hash 广播出去等于公开
-// 「本节点持有这些内容」，受限/私有合集更会直接泄露房间名。本地合集进房间
-// 需要按可见性过滤（只广播 public），留给「文件范围管理」阶段。
-func (s *PeerJSService) collectionHashes() []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, h := range strings.Split(s.cfg.MQTTCollections, ",") {
-		h = strings.TrimSpace(h)
-		if hashutil.IsStrictSHA256(h) && !seen[h] {
-			seen[h] = true
-			out = append(out, h)
-		}
-	}
-	return out
-}
-
-// connectLoop 保持与远端节点的连接（断开自动重连），直到服务关闭。
-// 为什么不用一次性 Connect：对端可能尚未上线（OFFER 入队过期 → EXPIRE），
-// 或 ICE 协商失败（failed → Close），必须循环重试直到真正 OnOpen。
-// 注意 opened 用一次性 close 而不是带缓冲 channel，防止 OnOpen 重复触发时泄漏。
-// 低危 3 修复：connecting 去重——同一 peerID 可能被配置 PEERS 与发现回调
-// 同时触发，双 connectLoop 会开两条重复连接（之前靠 conns map 覆盖兜底）。
-func (s *PeerJSService) connectLoop(peerID string) {
-	s.connectingMu.Lock()
-	if _, ok := s.connecting[peerID]; ok {
-		s.connectingMu.Unlock()
-		return
-	}
-	s.connecting[peerID] = struct{}{}
-	s.connectingMu.Unlock()
-	defer func() {
-		s.connectingMu.Lock()
-		delete(s.connecting, peerID)
-		s.connectingMu.Unlock()
-	}()
-
-	backoff := 2 * time.Second
-	for {
-		if s.ctx.Err() != nil {
-			return
-		}
-		s.peerMu.Lock()
-		peer := s.peer
-		s.peerMu.Unlock()
-		if peer == nil {
-			return
-		}
-		conn, err := peer.Connect(s.ctx, peerID, "peerdrive")
-		if err != nil {
-			log.LogWarn("peerjs: connect to %s failed (retry in %s): %v", peerID, backoff, err)
-			if !sleepCtx(s.ctx, backoff) {
-				return
-			}
-			if backoff < 60*time.Second {
-				backoff *= 2
-			}
-			continue
-		}
-		opened := make(chan struct{})
-		conn.OnOpen(func(c *peerjs.Connection) {
-			s.bindConn(newRTCSession(c))
-			select {
-			case <-opened:
-			default:
-				close(opened)
-			}
-		})
-		select {
-		case <-opened:
-			backoff = 2 * time.Second
-			log.LogInfo("peerjs: connected to %s (conn=%s)", peerID, conn.ID)
-			// 等待连接关闭（EXPIRE / ICE 失败 / 对端断开），随后重连
-			select {
-			case <-conn.Done():
-			case <-s.ctx.Done():
-				return
-			}
-		case <-time.After(30 * time.Second):
-			log.LogWarn("peerjs: connect to %s timed out", peerID)
-			conn.Close()
-		}
-		if !sleepCtx(s.ctx, backoff) {
-			return
-		}
-	}
-}
-
-// onIncomingConnection 被动连接（浏览器或其它节点发起）就绪后绑定消息处理。
-// 注意：必须等 OnOpen 再 bindConn——answerer 侧回调在 handleOffer 时立即触发，
-// 此时 DataChannel 尚未 open，过早注册会让 FetchFromPeer 拿到未就绪连接
-// （发现背景：双向发现时双端同时发起连接，B 侧 answerer 连接未 open 即被使用，
-// 报 "connection not open"）。
-func (s *PeerJSService) onIncomingConnection(c *peerjs.Connection) {
-	c.OnOpen(func(c *peerjs.Connection) {
-		s.bindConn(newRTCSession(c))
-		log.LogInfo("peerjs: incoming connection from %s (conn=%s)", c.PeerID, c.ID)
-	})
-}
-
-// Connections 返回当前活跃的节点连接（按远端 peer id）。
+// Connections returns all connected peers (excluding local session).
 func (s *PeerJSService) Connections() map[string]Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make(map[string]Session, len(s.conns))
-	for k, v := range s.conns {
-		out[k] = v
+	result := make(map[string]Session)
+	for id, c := range s.conns {
+		if id != "local" {
+			result[id] = c
+		}
 	}
-	return out
+	return result
 }
 
-// ConnectedPeerIDs 当前已直连对端的 id 集合（市场/我的节点页的"直连"状态）。
-// 与 Connections 的区别：只回 id、不拷 Session（避免调用方持有连接引用），
-// 且排除 "local"（浏览器本地 WS 会话不是对端节点）。
-func (s *PeerJSService) ConnectedPeerIDs() map[string]bool {
+// PeerCount returns the number of connected peers.
+func (s *PeerJSService) PeerCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make(map[string]bool, len(s.conns))
-	for id := range s.conns {
-		if id == "local" {
+	return len(s.conns) - 1 // exclude local session
+}
+
+// stateFor retrieves the connection state for a session.
+func (s *PeerJSService) stateFor(c Session) *connState {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	return s.pending[c]
+}
+
+// onIncomingConnection handles an incoming connection from a peer.
+func (s *PeerJSService) onIncomingConnection(c *peerjs.Connection) {
+	session := newRTCSession(c)
+	s.mu.Lock()
+	s.conns[session.ID()] = session
+	s.mu.Unlock()
+	s.bindConn(session)
+}
+
+// connectLoop periodically attempts to connect to configured peers.
+func (s *PeerJSService) connectLoop() {
+	// Initial connection attempt
+	s.connectToAll()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.connectToAll()
+		case <-s.ctx.Done():
+			return
+		}
+	}
+}
+
+// connectToAll dials all configured + discovered peers.
+func (s *PeerJSService) connectToAll() {
+	// Build peer list: configured peers + extra peers + discovered peers
+	s.connectingMu.Lock()
+	defer s.connectingMu.Unlock()
+	peers := map[string]bool{}
+	for _, p := range strings.Split(s.cfg.Peers, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" && p != s.id {
+			peers[p] = true
+		}
+	}
+	if s.extraPeers != nil {
+		for _, p := range s.extraPeers() {
+			if p != "" && p != s.id {
+				peers[p] = true
+			}
+		}
+	}
+	for pid := range peers {
+		if pid == s.id {
 			continue
 		}
-		out[id] = true
+		if _, connected := s.conns[pid]; connected {
+			continue
+		}
+		if _, connecting := s.connecting[pid]; connecting {
+			continue
+		}
+		s.connecting[pid] = struct{}{}
+		go func(pid string) {
+			defer func() {
+				s.connectingMu.Lock()
+				delete(s.connecting, pid)
+				s.connectingMu.Unlock()
+			}()
+			s.connectToPeer(pid)
+		}(pid)
 	}
-	return out
 }
 
-// SetExtraPeers 注入运行时追加的常驻对端（节点市场「加入节点」清单）。
-// 语义见 extraPeers 字段注释：重连后自动拨号，不受发现拨号预算限制。
-func (s *PeerJSService) SetExtraPeers(fn func() []string) { s.extraPeers = fn }
-
-// EnsureConnection 幂等拨号：已连接/正在连接则无事发生。
-// 供「加入节点」即时生效用——不等下一次发现轮询（最长 10s）+ 拨号，
-// 用户点"加入"后界面上的"直连"状态要尽快点亮。
-// 复用 connectLoop 的 connecting 去重（同一 peerID 不会开两条连接）。
-func (s *PeerJSService) EnsureConnection(peerID string) {
-	if peerID == "" || peerID == s.id {
+// connectToPeer dials a single peer.
+func (s *PeerJSService) connectToPeer(pid string) {
+	s.peerMu.Lock()
+	p := s.peer
+	s.peerMu.Unlock()
+	if p == nil {
 		return
 	}
+	conn, err := p.Connect(pid)
+	if err != nil {
+		log.LogDebug("peerjs: connect to %s failed: %v", pid, err)
+		return
+	}
+	session := newRTCSession(conn)
 	s.mu.Lock()
-	_, connected := s.conns[peerID]
-	s.mu.Unlock()
-	if connected {
+	// Check if already connected (race condition guard)
+	if _, exists := s.conns[session.ID()]; exists {
+		s.mu.Unlock()
 		return
 	}
-	go s.connectLoop(peerID)
+	s.conns[session.ID()] = session
+	s.mu.Unlock()
+	s.bindConn(session)
+	log.LogInfo("peerjs: connected to %s", pid)
 }
 
-// FileIndex 暴露本地文件索引（source 体系的 LocalSource 装配用：
-// 统一文件管理需要复用同一份 file_index 的路径决策与元数据）。
+// onPeer discovery callback: initiates connection to a newly discovered peer.
+func (s *PeerJSService) onPeer(pid string) {
+	if pid == s.id {
+		return
+	}
+	s.connectToPeer(pid)
+}
+
+// collections returns the list of collections this node is subscribed to.
+func (s *PeerJSService) collections() []string {
+	var colls []string
+	if s.cfg.Collections != "" {
+		for _, c := range strings.Split(s.cfg.Collections, ",") {
+			c = strings.TrimSpace(c)
+			if c != "" && hashutil.IsStrictSHA256(c) {
+				colls = append(colls, c)
+			}
+		}
+	}
+	return colls
+}
+
+// BindLocal binds a local WebSocket session (browser management).
+func (s *PeerJSService) BindLocal(session Session) {
+	s.mu.Lock()
+	s.conns["local"] = session
+	s.mu.Unlock()
+	s.bindConn(session)
+}
+
+// FetchFromPeer fetches a file from a specific peer.
+func (s *PeerJSService) FetchFromPeer(peerID, hash string, offset, size int64) (io.ReadCloser, error) {
+	return s.OpenStream(peerID, hash, offset, size)
+}
+
+// FileIndex returns the file index service.
 func (s *PeerJSService) FileIndex() *FileIndexService { return s.fileIndex }
 
-// SetFileRouter 装配多源文件路由（source.Manager，第 3 项优化 2026-08-18）：
-// serveFile 由此路由「本地 → 对端 → URL 模板」。nil 可清除（退回本地语义）。
+// SetFileRouter assembles multi-source file routing (source.Manager, 3rd optimization
+// 2026-08-18): serveFile routes through this for "local → peer → URL template". nil
+// clears (falls back to local semantics).
 func (s *PeerJSService) SetFileRouter(r FileRouter) { s.router = r }
 
 func sleepCtx(ctx context.Context, d time.Duration) bool {

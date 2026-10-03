@@ -1,72 +1,72 @@
-# Peerdrive 项目定位研究 (Project Vision)
+# Peerdrive Project Vision Research (Project Vision)
 
-> 2026-08-16 · 研究结论:基于 README、REFACTOR、REQUIREMENTS、
-> USER-ROLES 及近期需求文档,回答「peerdrive 应该是个什么样的项目」。
-> 作为后续所有功能决策的锚点:新功能先问「是否符合这个定位」。
+> 2026-08-16 · Research conclusions: Based on README, REFACTOR, REQUIREMENTS,
+> USER-ROLES and recent requirements documents, answering "what kind of project should peerdrive be".
+> Serves as the anchor for all future feature decisions: new features first ask "does it fit this vision".
 
 ---
 
-## 1. 一句话定位
+## 1. One-Sentence Positioning
 
-> **P2P 私域文件网络:身份中心化,存储去中心化。**
+> **P2P Private File Network: identity-centric, storage-decentralized.**
 >
-> 一个以注册服务器为信任锚点、成员节点 WebRTC 直连、内容按群组授权分享的私域网盘。
-> 类比:**自建 NAS 的 P2P 版 + Resilio Sync 的分享文件夹 + 身份/权限/统计**,
-> 而不是 IPFS/BT 的公开网络。
+> A private cloud storage with a registration server as trust anchor, member nodes connected via WebRTC, and content shared by group authorization.
+> Analogy: **P2P version of self-hosted NAS + Resilio Sync shared folders + identity/permissions/statistics**,
+> not a public network like IPFS/BT.
 
-## 2. 现状盘点:它是"六个东西"的缝合怪
+## 2. Status Quo: It's a Frankenstein of "Six Things"
 
-1. 多协议下载器 — SHA256/IPFS/BT/URL/WebDAV 全能拉文件
-2. 内容寻址合集管理器 — Collection + Provider
-3. P2P 网络节点 — libp2p(legacy)/PeerJS+WebRTC(新互联层)
-4. 分享平台 — 匿名合集、广场(Plaza)、评论、分享链接
-5. 账户体系 — 中心化注册服务器、用户↔节点目录、统计
-6. 运维面板 — 一堆 P2P/BT/IPFS 仪表盘(大半是死代码)
+1. Multi-protocol downloader — SHA256/IPFS/BT/URL/WebDAV, pulls files from anywhere
+2. Content-addressed collection manager — Collection + Provider
+3. P2P network node — libp2p (legacy) / PeerJS + WebRTC (new interconnection layer)
+4. Sharing platform — anonymous collections, Plaza, comments, share links
+5. Account system — centralized registration server, user↔node directory, statistics
+6. Operations panel — a pile of P2P/BT/IPFS dashboards (mostly dead code)
 
-## 3. 历史轨迹:三次转向已指明方向
+## 3. Historical Trajectory: Three Pivots Have Pointed the Way
 
-| 阶段 | 方向 | 结果 |
+| Phase | Direction | Outcome |
 |---|---|---|
-| 初始(README) | 公网 P2P 全网,双 DHT 内容寻址 | 经济模型缺失、运营商 QoS、与 IPFS 重叠、BT 式微 |
-| 2026-08 架构重构 | 互联层换成 **PeerJS 公共云信令 + WebRTC** | 免运维、浏览器直连、小规模 mesh —— 放弃「公网全网」 |
-| 近期新需求 | 身份认证 + 集合三态可见性 + P2P 广播 + 权限化 HTTP 隧道 | **私域 + 身份 + 授权** |
+| Initial (README) | Public P2P full mesh, dual DHT content addressing | Missing economic model, ISP QoS, overlaps with IPFS, BT fading |
+| 2026-08 Architecture Refactor | Interconnection layer switched to **PeerJS public cloud signaling + WebRTC** | Ops-free, browser direct connect, small-scale mesh — abandoning "public full mesh" |
+| Recent New Requirements | Identity authentication + collection tri-state visibility + P2P broadcast + authorized HTTP tunnel | **Private domain + identity + authorization** |
 
-**结论:三次转向方向一致 —— 不做公网全网,做身份背书的小群体私域网。**
+**Conclusion: All three pivots point the same way — not building a public full mesh, building a small-group private network with identity endorsement.**
 
-## 4. 关键约束信号
+## 4. Key Constraint Signals
 
-- 历史结论:**公网内容寻址方向已死**(别跟 IPFS 抢)
-- "用户情景几乎不允许 http/https 连接" → **浏览器原生 WebRTC 直连**是核心体验,不是可选项
-- "互相独立且不负责任的节点" → **授权必须走身份/token,不裸信 peerId**
-- collection 三态(公开/仅限权限/仅自己)+ steam 式群组分享 → **权限是产品级功能,不是安全细节**
+- Historical conclusion: **public content-addressing is a dead direction** (don't compete with IPFS)
+- "User scenarios almost never allow http/https connections" → **browser-native WebRTC direct connect** is the core experience, not an option
+- "Mutually independent and irresponsible nodes" → **authorization must go through identity/token, not blindly trust peerId**
+- Collection tri-state (public/authorized-only/self-only) + Steam-style group sharing → **permissions are a product-level feature, not a security detail**
 
-## 5. 四个支柱
+## 5. Four Pillars
 
-| 层 | 职责 | 技术 |
+| Layer | Responsibility | Technology |
 |---|---|---|
-| 身份层(中心化) | 注册服务器:JWT/OAuth、用户↔节点目录、权限、上传下载统计 | 唯一公网入口 |
-| 存储层(去中心化) | 内容寻址存储 + 集合三态可见性,成员节点间 P2P | SQLite + CAS |
-| 传输层(P2P) | PeerJS 云信令 + WebRTC 打洞,浏览器零安装直连 | 自托管信令可选 |
-| 访问层(可选) | 权限化 HTTP 隧道:节点远程管理 / 访问远端 REST API | 见 doc/HTTP_API_PROXY.md |
+| Identity Layer (Centralized) | Registration server: JWT/OAuth, user↔node directory, permissions, upload/download stats | Sole public entry point |
+| Storage Layer (Decentralized) | Content-addressed storage + collection tri-state visibility, P2P between member nodes | SQLite + CAS |
+| Transport Layer (P2P) | PeerJS cloud signaling + WebRTC hole punching, browser zero-install direct connect | Self-hosted signaling optional |
+| Access Layer (Optional) | Authorized HTTP tunnel: remote node management / access remote REST API | See doc/HTTP_API_PROXY.md |
 
-四类用户(USER-ROLES.md):匿名访客 / 认证用户 / 匿名+节点 / 认证+节点。
+Four user types (USER-ROLES.md): anonymous visitor / authenticated user / anonymous + node / authenticated + node.
 
-## 6. 项目不该做什么(边界)
+## 6. What the Project Should NOT Do (Boundaries)
 
-- ❌ 公网内容寻址网 / DHT 全网搜索—— BT、libp2p 栈降级删干净
-- ❌ 通用 P2P HTTP 代理(那是 wintools webrtc-proxy 的独立定位)—— peerdrive 只做
-  **权限化、目标锚定自身**的节点管理隧道
-- ❌ 大而全多协议下载器(下载降级为可选 provider,不是卖点)
-- ❌ WebDAV / forward / 前端死组件(高危，doc/archive/LEGACY.md 已标删)
+- ❌ Public content-addressing network / DHT full-mesh search — BT, libp2p stacks downgraded and cleaned up
+- ❌ Generic P2P HTTP proxy (that's wintools webrtc-proxy's separate positioning) — peerdrive only does
+  **authorized, self-anchored** node management tunnels
+- ❌ All-in-one multi-protocol downloader (download downgraded to optional provider, not a selling point)
+- ❌ WebDAV / forward / dead frontend components (high risk, doc/archive/LEGACY.md already marked for deletion)
 
-## 7. 对 HTTP 隧道整合的意义
+## 7. Implications for HTTP Tunnel Integration
 
-权限化 HTTP 隧道是「身份中心化」架构的**自然延伸**:节点间的管理/访问同样走身份授权,
-让「认证+节点」远程管理自己多台节点或其他成员节点,与集合三态共享同一套信任模型。
-因此该按群组授权体系做,而不是独立的安全机制(详见 doc/HTTP_API_PROXY.md)。
+Authorized HTTP tunnel is a **natural extension** of the "identity-centric" architecture: inter-node management/access also goes through identity authorization,
+enabling "authenticated + node" to remotely manage their own multiple nodes or other members' nodes, sharing the same trust model as collection tri-state.
+Therefore it should be built on the group authorization system, not as an independent security mechanism (see doc/HTTP_API_PROXY.md).
 
-## 8. 落地建议
+## 8. Implementation Recommendations
 
-1. 先把 legacy 清干净(BT/libp2p/WebDAV/死组件),聚焦「合集 + WebRTC + 身份」主链路
-2. 权限体系统一:集合三态、HTTP 隧道、节点管理共用一套「账户→群组→权限」模型
-3. 按「模块分支 + merge + CI/CD」git 架构(今日最后要求.txt)推进 HTTP 隧道模块
+1. Clean up legacy code first (BT/libp2p/WebDAV/dead components), focus on the "Collection + WebRTC + Identity" main pipeline
+2. Unify the permission system: collection tri-state, HTTP tunnel, and node management share one "account → group → permission" model
+3. Advance the HTTP tunnel module following the "module branch + merge + CI/CD" git architecture (today-last-requirements.txt)

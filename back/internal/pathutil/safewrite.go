@@ -1,17 +1,18 @@
 package pathutil
 
-// 写路径也得 Root 化——之前只有读取侧（SafeOpen）消除了 TOCTOU，
-// copy/delete/ upload 落盘那些地方还是经典的两步走：
+// Write paths also need Root-based ops -- previously only the read side (SafeOpen) eliminated TOCTOU;
+// copy/delete/upload to disk were still the classic two-step:
 //
-//	Within(root, path) → 通过 → os.WriteFile(path) / os.Remove(path)
+//	Within(root, path) -> pass -> os.WriteFile(path) / os.Remove(path)
 //
-// 校验与落盘之间隔着一次路径解析：共享目录里能写东西的人，可以在这两步之间把
-// 路径里的某个**目录成分**换成软链（或直接预先放一个指向外面的软链），把写/
-// 删引导到根之外。os.WriteFile 和 os.Remove 都会老老实实地跟着软链走。
+// Between verification and disk write there's a path resolution: someone who can write to a shared
+// directory can replace a **directory component** in the path with a symlink (or pre-place a symlink
+// pointing outside) between the two steps, steering the write/delete outside the root. Both os.WriteFile
+// and os.Remove will faithfully follow symlinks.
 //
-// 这里用同一个办法解决：先在**允许根**上开一个 os.Root，再让它把 rel 解析并
-// 落盘，一次完成。os.Root 在 Linux 上走 openat2(RESOLVE_BENEATH)，其它平台走
-// 目录句柄 + 逐段确认，任何指向根外的软链在解析时就失败。
+// Here we use the same approach: open an os.Root on the **allowed root** first, then let it resolve rel
+// and write to disk in one go. os.Root uses openat2(RESOLVE_BENEATH) on Linux, directory handles +
+// per-segment confirmation on other platforms. Any symlink pointing outside the root fails at resolution time.
 
 import (
 	"fmt"
@@ -20,19 +21,19 @@ import (
 	"strings"
 )
 
-// pickRoot 挑出第一个真正包含 path 的根，返回该根与 path 相对它的 rel。
+// pickRoot finds the first root that actually contains path, returning that root and rel of path relative to it.
 //
-// 与 normalize 不同，这里**故意不解析软链、也不折叠大小写**：
-//   - 解析交给 os.Root 自己做才是不受 TOCTOU 影响的那一层；我们这里再 stat 一遍
-//     等于重开一个窗口（且目标文件此时可能还不存在，EvalSymlinks 必然失败）；
-//   - 大小写折叠会把 Upper.Foo 变成 upper.foo 落盘，Windows 上等于悄悄改名。
+// Unlike normalize, this **intentionally does NOT resolve symlinks or fold case**:
+//   - Resolution is left to os.Root itself as the TOCTOU-immune layer; doing another stat here
+//     re-opens a window (and the target file may not exist yet, so EvalSymlinks would always fail);
+//   - Case folding would turn Upper.Foo into upper.foo on disk, which is a silent rename on Windows.
 //
-// 字符串层面的 defence in depth 仍然要有（NUL、保留设备名、.. 逃逸、绝对路径）。
+// String-level defense in depth is still needed (NUL, reserved device names, .. escapes, absolute paths).
 func pickRoot(roots []string, path string) (string, string, error) {
 	if strings.IndexByte(path, 0) >= 0 {
 		return "", "", fmt.Errorf("%w: invalid path (NUL byte)", ErrOutsideRoot)
 	}
-	// Windows 保留设备名（`CON`/`NUL`/`COM1`…）：写它们会直接落到设备上。
+	// Windows reserved device names (`CON`/`NUL`/`COM1`...): writing to them goes straight to the device.
 	if foldCase && hasReservedNameIn(path) {
 		return "", "", fmt.Errorf("%w: reserved device name: %s", ErrOutsideRoot, path)
 	}
@@ -45,8 +46,8 @@ func pickRoot(roots []string, path string) (string, string, error) {
 	}
 	cp = filepath.Clean(cp)
 	if foldCase {
-		// 与 normalize 保持一致：Windows 上先还原 8.3 短名。判定（Within）按长名
-		// 比较、而这里不还原的话，两边对同一目录会给出不同的 rel。
+		// Consistent with normalize: on Windows expand 8.3 short names first. Without expanding here,
+		// Within (which compares long names) and here would produce different rels for the same directory.
 		cp = filepath.Clean(ExpandShortNames(cp))
 	}
 
@@ -61,15 +62,15 @@ func pickRoot(roots []string, path string) (string, string, error) {
 		}
 		cr = filepath.Clean(cr)
 		if foldCase {
-			// 与 cp 用同一套写法：允许根自己也可能是 8.3 短名（GitHub 的 Windows
-			// runner 上 t.TempDir() 就是 `C:\Users\RUNNER~1\...`）。只还原 path
-			// 不还原 root，两边会被算成两棵树 → 明明在根内的写被判越权
-			//（CI 上 windows 那格第一次真跑就红了三个用例）。
+			// Use the same convention as cp: the allowed root itself may also be an 8.3 short name
+			// (GitHub's Windows runner t.TempDir() is `C:\Users\RUNNER~1\...`). Expanding only path
+			// but not root means they're computed as two trees -> a write that is actually within root
+			// is judged out of bounds (the first real Windows CI run had three red tests).
 			cr = filepath.Clean(ExpandShortNames(cr))
 		}
 		rel, err := filepath.Rel(cr, cp)
 		if err != nil {
-			continue // 跨盘/无法求相对路径：换下一个根
+			continue // Cross-drive / can't compute relative path: try next root
 		}
 		if rel == ".." || strings.HasPrefix(rel, ".."+sep) {
 			continue
@@ -82,10 +83,11 @@ func pickRoot(roots []string, path string) (string, string, error) {
 	return "", "", fmt.Errorf("%w: %s (checked %d roots)", ErrOutsideRoot, path, len(roots))
 }
 
-// withRoot 在一个有效的允许根之上执行 fn（rel 已保证没有 .. 逃逸）。
+// withRoot executes fn on a valid allowed root (rel is guaranteed to have no .. escapes).
 //
-// 支持 os.Root 就用 os.Root；文件系统不支持且运营者显式开了逃生阀时退回按路径
-// 操作（见 rootprobe.go）。这两种模式的每一次操作都走 scopedOps，调用点不必分支。
+// Uses os.Root when supported; when the filesystem doesn't support it and the operator has explicitly
+// enabled the escape hatch, falls back to path-based operations (see rootprobe.go). Both modes go through
+// scopedOps for every operation, so call sites don't need branching.
 func withRoot(roots []string, path string, fn func(ops scopedOps, rel string) error) error {
 	cr, rel, err := pickRoot(roots, path)
 	if err != nil {
@@ -102,7 +104,7 @@ func withRoot(roots []string, path string, fn func(ops scopedOps, rel string) er
 	return nil
 }
 
-// mkdirParent 补齐 rel 的父目录。
+// mkdirParent creates the parent directories for rel.
 func mkdirParent(ops scopedOps, rel string, perm os.FileMode) error {
 	parent := filepath.Dir(rel)
 	if parent == "." || parent == string(filepath.Separator) {
@@ -111,8 +113,9 @@ func mkdirParent(ops scopedOps, rel string, perm os.FileMode) error {
 	return ops.mkdirAll(parent, perm)
 }
 
-// rejectSelf 拒绝以"根目录自身"为操作对象：rel == "." 意味着目标是允许根本身，
-// 删掉/覆盖掉它没有合法用途，且必须是显式的一条规则而不是靠 caller 记得。
+// rejectSelf refuses to operate on "the root directory itself": rel == "." means the target is the
+// allowed root itself. Deleting/overwriting it has no legitimate use, and it must be an explicit
+// rule rather than relying on callers to remember.
 func rejectSelf(rel string) error {
 	if rel == "." {
 		return fmt.Errorf("%w: refusing to operate on the root directory itself", ErrOutsideRoot)
@@ -120,8 +123,8 @@ func rejectSelf(rel string) error {
 	return nil
 }
 
-// SafeWriteFileAny 在允许根内写文件（父目录自动补齐，0644 之类由调用方给）。
-// 不要用 os.WriteFile 替代：它会跟着软链走到根外。
+// SafeWriteFileAny writes a file within an allowed root (parent directories auto-created, 0644 etc. from caller).
+// Do not replace with os.WriteFile: it follows symlinks outside the root.
 func SafeWriteFileAny(roots []string, path string, data []byte, perm os.FileMode) error {
 	return withRoot(roots, path, func(ops scopedOps, rel string) error {
 		if err := rejectSelf(rel); err != nil {
@@ -134,10 +137,10 @@ func SafeWriteFileAny(roots []string, path string, data []byte, perm os.FileMode
 	})
 }
 
-// SafeOpenFileAny 在允许根内按任意 flag 打开文件（写/追加/分片续传都用它）。
-// 带 O_CREATE 时自动补齐父目录——省一次 MkdirAll 调用就是少一个窗口。
+// SafeOpenFileAny opens a file within an allowed root with arbitrary flags (write/append/resume chunked upload).
+// With O_CREATE, parent directories are auto-created -- one fewer MkdirAll call is one fewer window.
 //
-// 返回的 *os.File 在 Root 关闭之后依然有效（打开动作已经完成）。
+// The returned *os.File remains valid after Root is closed (the open operation is already done).
 func SafeOpenFileAny(roots []string, path string, flag int, perm os.FileMode) (*os.File, error) {
 	var f *os.File
 	err := withRoot(roots, path, func(ops scopedOps, rel string) error {
@@ -159,7 +162,7 @@ func SafeOpenFileAny(roots []string, path string, flag int, perm os.FileMode) (*
 	return f, nil
 }
 
-// SafeMkdirAllAny 在允许根内建目录。
+// SafeMkdirAllAny creates directories within an allowed root.
 func SafeMkdirAllAny(roots []string, path string, perm os.FileMode) error {
 	return withRoot(roots, path, func(ops scopedOps, rel string) error {
 		if err := rejectSelf(rel); err != nil {
@@ -169,10 +172,10 @@ func SafeMkdirAllAny(roots []string, path string, perm os.FileMode) error {
 	})
 }
 
-// SafeRemoveAny 在允许根内删除单个文件（或空目录）。
+// SafeRemoveAny removes a single file (or empty directory) within an allowed root.
 //
-// 为什么重要：os.Remove 会跟着**父目录**上的软链走到根外，把"允许编辑自己目录"
-// 变成"能删任意文件"。走 Root 之后，路径解析与 unlink 一次完成。
+// Why it matters: os.Remove follows symlinks on the **parent directory**, turning "allowed to edit
+// my own directory" into "can delete any file". With Root, path resolution and unlink are done in one step.
 func SafeRemoveAny(roots []string, path string) error {
 	return withRoot(roots, path, func(ops scopedOps, rel string) error {
 		if err := rejectSelf(rel); err != nil {
@@ -182,7 +185,7 @@ func SafeRemoveAny(roots []string, path string) error {
 	})
 }
 
-// SafeRemoveAllAny 递归删除，边界同 SafeRemoveAny。
+// SafeRemoveAllAny recursively deletes within an allowed root, with the same boundary as SafeRemoveAny.
 func SafeRemoveAllAny(roots []string, path string) error {
 	return withRoot(roots, path, func(ops scopedOps, rel string) error {
 		if err := rejectSelf(rel); err != nil {

@@ -15,62 +15,65 @@ import (
 	"peerdrive/internal/transport"
 )
 
-// peerjsService 由 main 注入，暴露节点在 PeerJS 信令网络中的 ID 供前端发现。
+// peerjsService injected by main, exposes the node's ID on the PeerJS signaling network for frontend discovery.
 var peerjsService *transport.PeerJSService
 
-// peerjsCfg WS 本地会话的 Origin 白名单（与 HTTP CORS 同一配置）。
+// peerjsCfg Origin whitelist for WS local sessions (same config as HTTP CORS).
 var peerjsCfg *config.Config
 
-// nodeDirectory 节点市场目录（doc/NETDISK.md M1），由 main 注入。
+// nodeDirectory node marketplace directory (doc/NETDISK.md M1), injected by main.
 var nodeDirectory *service.NodeDirectory
 
-// SetPeerJSService 注入 PeerJS WebRTC 服务（nil 则跳过节点信息路由）。
+// SetPeerJSService injects PeerJS WebRTC service (nil skips node info routes).
 func SetPeerJSService(svc *transport.PeerJSService) {
 	peerjsService = svc
 }
 
-// SetNodeDirectory 注入节点市场目录（nil 则 /peerjs/nodes* 返回 503）。
+// SetNodeDirectory injects node marketplace directory (nil → /peerjs/nodes* returns 503).
 func SetNodeDirectory(d *service.NodeDirectory) {
 	nodeDirectory = d
 	controller.InitNodeDirectory(d)
 }
 
-// SetNodeShare 注入共享范围服务（nil 则 /peerjs/share* 返回 503）。
-// 共享范围是运行时可改的运营者选择（管理台勾选），落盘在 storage 下。
+// SetNodeShare injects shared scope service (nil → /peerjs/share* returns 503).
+// Shared scope is a runtime operator choice (admin console checkbox), persisted under storage.
 func SetNodeShare(s *service.NodeShare) {
 	controller.InitNodeShareController(s)
 }
 
-// SetPeerPuller 注入跨节点拉取服务（nil 则 /p2p/pull* 返回 503）。
+// SetPeerPuller injects cross-node pull service (nil → /p2p/pull* returns 503).
 func SetPeerPuller(p *service.PeerPuller) {
 	controller.InitPeerPuller(p)
 }
 
-// SetPeerJSConfig 注入配置（WS 本地会话 Origin 白名单）。
+// SetPeerJSConfig injects configuration (WS local session Origin whitelist).
 func SetPeerJSConfig(cfg *config.Config) {
 	peerjsCfg = cfg
 }
 
-// isLoopbackRemote 判断 TCP 对端是不是本机（RemoteAddr 形如 127.0.0.1:54321 / [::1]:54321）。
+// isLoopbackRemote checks if TCP peer is local (RemoteAddr like 127.0.0.1:54321 / [::1]:54321).
 //
-// 为什么只看 RemoteAddr 而不看 X-Forwarded-For：反代后面 XFF 由客户端可控部分
-// 决定信任（PEERDRIVE_TRUSTED_PROXIES），而这里是安全边界，宁可保守——反代后面
-// 部署的场景，浏览器请求一定带 Origin，走白名单那条路就行。
+// Why only check RemoteAddr and not X-Forwarded-For: behind a reverse proxy, XFF
+// trust is partly client-controlled (PEERDRIVE_TRUSTED_PROXIES), and this is a
+// security boundary — better to be conservative. In reverse-proxy deployments,
+// browser requests always carry an Origin header, so the whitelist path works fine.
 func isLoopbackRemote(remote string) bool {
 	host := remote
 	if i := strings.LastIndex(host, ":"); i >= 0 {
-		host = host[:i] // IPv4: 去掉端口
+		host = host[:i] // IPv4: strip port
 	}
 	host = strings.Trim(host, "[]") // IPv6: [::1] → ::1
 	return host == "127.0.0.1" || host == "::1" || host == "localhost"
 }
 
-// registerPeerJSRoutes 注册 PeerJS 节点发现与互联路由。
-// 背景：peerjsService 由 main 在 SetupRouter 之前注入（包级变量，与
-// SetRegServer 同模式）；发现端点供前端/MQTT 房间解析节点 ID。
-// auth 参数：SetupRouter 的 authRequired（无注册服务器时放行的认证中间件），
-// 用于保护写/拉取端点（F1/H4）。发现与本地 WS 会话保持匿名（/ws/peer 起帧协议，
-// 拉取经 req 帧 peerjs 层自行校验）。
+// registerPeerJSRoutes registers PeerJS node discovery and interconnection routes.
+// Background: peerjsService is injected by main before SetupRouter (package-level
+// variable, same pattern as SetRegServer); discovery endpoints serve frontend/MQTT
+// room node ID resolution.
+// auth parameter: SetupRouter's authRequired (auth middleware that passes through when
+// no registration server is configured), used to protect write/fetch endpoints (F1/H4).
+// Discovery and local WS sessions remain anonymous (/ws/peer frame protocol; fetch
+// requests go through peerjs layer's own validation via req frames).
 func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 	if peerjsService == nil {
 		return
@@ -81,9 +84,9 @@ func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 		for pid := range conns {
 			peers = append(peers, pid)
 		}
-		// psk：本节点是否开了预共享密钥门禁（空 = 开放，谁连上都服务）；
-		// psk_peers：当前已通过门禁的连接数。给管理台/排查用——"对端拉不到"
-		// 的第一嫌疑就是它没出示密钥。
+		// psk: whether this node has pre-shared key gate enabled (empty = open, serve anyone who connects);
+		// psk_peers: current number of connections that have passed the gate. For admin console / debugging —
+		// "can't fetch from peer" first suspect is that they didn't present a key.
 		pskEnabled, pskOK := peerjsService.PSKState()
 		c.JSON(http.StatusOK, gin.H{
 			"id":        peerjsService.ID(),
@@ -94,28 +97,30 @@ func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 		})
 	})
 
-	// ── 节点市场（doc/NETDISK.md M1）──
-	// 列表只读开放（与 /peerjs/node 同级，属"发现"信息）；加入/移出是写操作
-	// → 挂 auth（无注册服务器时 AuthRequired 内部放行 = 单机模式）。
-	// 语义：市场 = 发现服务器在线节点 ∪ 本地已加入清单（离线也保留）。
+	// ── Node marketplace (doc/NETDISK.md M1) ──
+	// Listing is read-only open (same level as /peerjs/node, "discovery" info); join/leave are write operations
+	// → attached with auth (AuthRequired passes through internally when no registration server = single-machine mode).
+	// Semantics: marketplace = online nodes from discovery server ∪ locally joined list (kept offline too).
 	r.GET("/peerjs/nodes", controller.GetNodeMarket)
 	r.GET("/peerjs/nodes/joined", controller.GetJoinedNodes)
 	r.GET("/peerjs/nodes/:peer/shares", controller.GetPeerShares)
 	r.POST("/peerjs/nodes/join", auth, controller.JoinNode)
 	r.DELETE("/peerjs/nodes/join", auth, controller.LeaveNode)
 
-	// ── 本节点共享范围（doc/NETDISK.md M2.6）──
-	// 读也挂 auth：响应里有机上文件的名字/大小，属管理面信息；未配注册服务器
-	// 时 AuthRequired 内部放行（单机模式）。
-	// 命名与「问对端要清单」的 /peerjs/nodes/:peer/shares 刻意区分开。
+	// ── This node's shared scope (doc/NETDISK.md M2.6) ──
+	// Read also has auth: response contains local file names/sizes, which is admin surface info;
+	// when no registration server is configured, AuthRequired passes through internally (single-machine mode).
+	// Deliberately named differently from /peerjs/nodes/:peer/shares which queries the peer's share list.
 	r.GET("/peerjs/share", auth, controller.GetNodeShare)
 	r.PUT("/peerjs/share", auth, controller.PutNodeShare)
 	r.POST("/peerjs/share/files", auth, controller.PostNodeShareFiles)
 
-	// POST /peerjs/fetch {peer, hash, offset?, size?} 从对端节点拉取 sha256 内容
-	// H4：此端点把整个响应 buffer 驻留内存（service 内 8GB cap 只防溢出，不防慢读客户端
-	// 长时间持有内存）。收紧：挂认证 + 单次拉取上限 64MB；超大文件应走 /ws/peer 分片。
-	// 前端未使用此端点（集成测试直接调 service.FetchFromPeer），收紧无兼容影响。
+	// POST /peerjs/fetch {peer, hash, offset?, size?} fetch sha256 content from peer node
+	// H4: this endpoint holds the entire response buffer in memory (service's 8GB cap only prevents
+	// overflow, not slow-read clients holding memory for extended periods). Tightened: auth required
+	// + single fetch limit 64MB; large files should use /ws/peer chunked transfer.
+	// Frontend doesn't use this endpoint (integration tests call service.FetchFromPeer directly),
+	// no compatibility impact from tightening.
 	r.POST("/peerjs/fetch", auth, func(c *gin.Context) {
 		var body struct {
 			Peer   string `json:"peer"`
@@ -129,7 +134,7 @@ func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 		}
 		const maxPeerjsHTTPFetch = 64 << 20
 		if body.Size <= 0 {
-			body.Size = -1 // 全文件 → 由 service 侧 cap，但 HTTP 端点还要再限一次
+			body.Size = -1 // full file → capped by service side, but HTTP endpoint needs another limit
 		}
 		if body.Size > maxPeerjsHTTPFetch {
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "requested size exceeds 64MB limit; use /ws/peer chunked transfer"})
@@ -144,7 +149,8 @@ func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			return
 		}
-		// 防御：对端声明的文件比请求 size 大时 service 已拒绝；这里兜底防内存超限
+		// Defense: service already rejects when peer declares file larger than requested size;
+		// here as backstop to prevent memory overflow
 		if int64(len(data)) > maxPeerjsHTTPFetch {
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "peer returned oversized data"})
 			return
@@ -152,20 +158,21 @@ func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 		c.Data(http.StatusOK, "application/octet-stream", data)
 	})
 
-	// GET /ws/peer 本地 WebSocket 会话：帧协议与远端 DataChannel 完全一致
-	// （文本帧=JSON 控制头，二进制帧=数据块），浏览器本地直连无需打洞/信令。
-	// 注意与旧 /ws/signal、/ws/transfer（legacy 自建信令）不是一回事。
+	// GET /ws/peer local WebSocket session: frame protocol is identical to remote DataChannel
+	// (text frame = JSON control header, binary frame = data block); browser local connection
+	// needs no hole-punching/signaling.
+	// Note: different from legacy /ws/signal, /ws/transfer (old self-built signaling).
 	r.GET("/ws/peer", func(c *gin.Context) {
 		upgrader := websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
-				// 本地会话安全边界：仅放行配置的 Origin（同 HTTP CORS 白名单）
+				// Local session security boundary: only allow configured Origins (same as HTTP CORS whitelist)
 				origin := r.Header.Get("Origin")
 				if origin == "" {
-					// 没有 Origin 的大多不是浏览器（脚本 / curl / wscat）。
-					// 原来一律放行 = 只要端口可达就能拿到完整管理面，而且
-					// WSSession.IsLocal() 恒 true，它还被当成"自己"（private
-					// 共享内容也可见）。现在只放行确实来自本机的连接：
-					// 浏览器握手必带 Origin，所以正常前端不受影响。
+					// Most requests without Origin aren't from browsers (scripts / curl / wscat).
+					// Previously all were allowed = if the port is reachable, full admin surface access,
+					// and WSSession.IsLocal() is always true, so it was also treated as "self"
+					// (private shared content was visible). Now only connections truly from localhost:
+					// browser handshakes always carry Origin, so normal frontend is unaffected.
 					return isLoopbackRemote(r.RemoteAddr)
 				}
 				if peerjsCfg == nil {

@@ -1,4 +1,4 @@
-// index.js — React 入口。
+// index.js — React entry point.
 export { PeerMediaProvider, PeerMediaContext } from './context.js'
 export { usePeerMedia } from './usePeerMedia.js'
 export { PeerImage, PeerVideo, PeerMedia } from './components.jsx'

@@ -12,9 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ── message.go / 工具函数 ────────────────────────────────────────────────
+// ── message.go / utility functions ────────────────────────────────────────────────
 
-// 发现背景：防御性测试——工具函数基础行为：帧构造/序列化正确性，协议上层依赖
+// Discovery background: defensive test -- utility function basic behavior:
+// frame construction/serialization correctness, depended upon by the protocol layer above
 func TestNewMessage(t *testing.T) {
 	m := NewMessage(MsgOffer, "dst-node", OfferPayload{ConnectionID: "c1"})
 	assert.Equal(t, MsgOffer, m.Type)
@@ -23,12 +24,13 @@ func TestNewMessage(t *testing.T) {
 	require.NoError(t, json.Unmarshal(m.Payload, &p))
 	assert.Equal(t, "c1", p.ConnectionID)
 
-	// payload 为 nil 时 Payload 为空
+	// When payload is nil, Payload is empty
 	m2 := NewMessage(MsgHeartbeat, "", nil)
 	assert.Empty(t, m2.Payload)
 }
 
-// 发现背景：防御性测试——ID 规则（首尾字母数字）是信令注册成功的前提，规则回归保护
+// Discovery background: defensive test -- ID rules (alphanumeric at start/end) are
+// a prerequisite for signaling registration success; rule regression protection
 func TestValidID(t *testing.T) {
 	cases := []struct {
 		id   string
@@ -36,11 +38,11 @@ func TestValidID(t *testing.T) {
 	}{
 		{"peerdrive-abc123", true},
 		{"a", true},
-		{"a-b_c d", true}, // 中间允许 - _ 空格
+		{"a-b_c d", true}, // - _ and spaces allowed in the middle
 		{"", false},
-		{"-abc", false}, // 首字符必须字母数字
+		{"-abc", false}, // first character must be alphanumeric
 		{"abc-", false},
-		{"a b!", false}, // 非法字符
+		{"a b!", false}, // illegal character
 		{"ab\ncd", false},
 	}
 	for _, c := range cases {
@@ -48,18 +50,20 @@ func TestValidID(t *testing.T) {
 	}
 }
 
-// 发现背景：防御性测试——connectionId 提取是信令路由键，提取错误会导致消息错配
+// Discovery background: defensive test -- connectionId extraction is the signaling
+// routing key; extraction errors cause message misrouting
 func TestPayloadConnectionID(t *testing.T) {
 	m := NewMessage(MsgCandidate, "dst", CandidatePayload{ConnectionID: "conn-42"})
 	assert.Equal(t, "conn-42", payloadConnectionID(m))
 	assert.Empty(t, payloadConnectionID(NewMessage(MsgAnswer, "dst", nil)))
 }
 
-// ── Peer：信令路由（fakeSignaller 驱动） ─────────────────────────────────
+// ── Peer: signaling routing (fakeSignaller driven) ─────────────────────────────────
 
-// offer 构造一条合法的 data OFFER 消息。
-// 用真实 pion 生成的 offer SDP（SetRemoteDescription 才能成功——假 SDP
-// 会导致 handleOffer 失败、连接被关闭，测试走不到真实路径）。
+// offer constructs a valid data OFFER message.
+// Uses a real pion-generated offer SDP (SetRemoteDescription can succeed -- a fake SDP
+// would cause handleOffer to fail, the connection would close, and the test would not
+// reach the real code path).
 func offer(t *testing.T, src, connID string) Message {
 	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
 	require.NoError(t, err)
@@ -80,12 +84,15 @@ func offer(t *testing.T, src, connID string) Message {
 	return m
 }
 
-// TestRouteOffer_AnswererUsesOffererConnectionID 回归：answerer 必须沿用 offerer 的
-// connectionId（曾因新生成 ID 导致 ANSWER 路由不到、ICE 卡 checking）。
+// TestRouteOffer_AnswererUsesOffererConnectionID Regression: the answerer must reuse
+// the offerer's connectionId (a previously generated new ID caused ANSWER routing
+// failure and ICE stuck at checking).
 //
-// 发现背景：双节点 E2E（真实 0.peerjs.com 信令）——B 发起连接后收到 ANSWER
-// 但 ICE 永远停在 checking、DataChannel 不 open。加调试日志定位：A 回 ANSWER
-// 时用的是自己新生成的 connectionId，B 按该 id 在 conns 里找不到连接，消息被丢弃。
+// Discovery background: dual-node E2E (real 0.peerjs.com signaling) -- after B
+// initiates a connection, it receives an ANSWER but ICE stays at checking forever
+// and DataChannel never opens. Debugging logs located the issue: A's ANSWER used
+// a newly generated connectionId, and B couldn't find the connection in conns by that
+// id, so the message was dropped.
 func TestRouteOffer_AnswererUsesOffererConnectionID(t *testing.T) {
 	p, f := newTestPeer()
 	_ = f
@@ -97,11 +104,11 @@ func TestRouteOffer_AnswererUsesOffererConnectionID(t *testing.T) {
 	p.mu.Lock()
 	conn := p.conns["conn-from-offerer"]
 	p.mu.Unlock()
-	require.NotNil(t, conn, "连接必须以 offerer 提供的 connectionId 注册")
+	require.NotNil(t, conn, "connection must be registered with the offerer-provided connectionId")
 	assert.Equal(t, "conn-from-offerer", conn.ID)
 	assert.Equal(t, "remote-node", conn.PeerID)
 
-	// 应答必须是 ANSWER 且带同一 connectionId
+	// The answer must be ANSWER with the same connectionId
 	var found bool
 	for _, m := range f.sentSnapshot() {
 		if m.Type == MsgAnswer {
@@ -111,18 +118,18 @@ func TestRouteOffer_AnswererUsesOffererConnectionID(t *testing.T) {
 			found = true
 		}
 	}
-	assert.True(t, found, "必须发出 ANSWER 应答")
+	assert.True(t, found, "must send an ANSWER reply")
 }
 
-// TestRouteOffer_DuplicateConnectionID_ClosesOld 回归：重复 connectionId 时
-// 旧连接必须完整 Close（曾只 pc.Close：残留 conns map、done 永不关闭、
-// onClose 不触发 → 上层挂起）。
+// TestRouteOffer_DuplicateConnectionID_ClosesOld Regression: with a duplicate
+// connectionId, the old connection must be fully Closed (previously only pc.Close:
+// leftover conns map, done never closed, onClose not triggered -> upper layer hangs).
 //
-// 发现背景：
-//  1. 代码审阅发现「重复 OFFER 只关 pc 不清理注册表」的泄漏路径
-//  2. 写本测试时又暴露连环 bug：改成 old.Close() 后在持 p.mu 时调用 →
-//     Close→forgetConnection 需要同一把锁 → Go mutex 非重入死锁 → 测试卡死。
-//     修复：锁内只取出 old，解锁后再 Close。
+// Discovery background:
+//  1. Code review found the "duplicate OFFER only closes pc without cleaning up the registry" leak path
+//  2. While writing this test, another chained bug was exposed: changing to old.Close() while
+//     holding p.mu -> Close->forgetConnection needs the same lock -> Go mutex is non-reentrant
+//     deadlock -> test hangs. Fix: only extract old inside the lock, then unlock and Close.
 func TestRouteOffer_DuplicateConnectionID_ClosesOld(t *testing.T) {
 	p, f := newTestPeer()
 	p.OnConnection(func(c *Connection) {})
@@ -134,32 +141,34 @@ func TestRouteOffer_DuplicateConnectionID_ClosesOld(t *testing.T) {
 	p.mu.Unlock()
 	require.NotNil(t, first)
 
-	// 第二次同 connectionId 的 OFFER
+	// Second OFFER with the same connectionId
 	f.inject(offer(t, "remote-node", "conn-x"))
 
-	// 旧连接 done 必须已关闭（connectLoop 依赖它退出重连）
+	// The old connection's done channel must be closed (connectLoop relies on it to exit reconnect)
 	select {
 	case <-first.Done():
 	case <-time.After(2 * time.Second):
-		t.Fatal("旧连接的 Done 未关闭：泄漏（修复前行为）")
+		t.Fatal("old connection's Done not closed: leak (pre-fix behavior)")
 	}
-	// 旧连接必须从 conns 移除，新连接接管
+	// Old connection must be removed from conns, new connection takes over
 	p.mu.Lock()
 	cur := p.conns["conn-x"]
 	p.mu.Unlock()
 	assert.NotNil(t, cur)
-	assert.NotSame(t, first, cur, "必须是新连接")
+	assert.NotSame(t, first, cur, "must be the new connection")
 }
 
-// TestRouteExpire_ClosesConnection 回归：EXPIRE（OFFER 入队过期）必须关闭
-// 连接并触发 Done（connectLoop 依赖它重连；修复前永远等 OnOpen）。
+// TestRouteExpire_ClosesConnection Regression: EXPIRE (OFFER queued and expired) must
+// close the connection and trigger Done (connectLoop relies on it to reconnect; pre-fix
+// it waited forever for OnOpen).
 //
-// 发现背景：双节点 E2E——B 比 A 先启动（A 未上线），B 的 OFFER 在信令服务器
-// 入队后过期，服务端回 EXPIRE；B 的 connectLoop 仍在等 OnOpen，20s 后超时
-// 且不重试，A 上线后也连不上。修复：EXPIRE → Close（触发 Done）→ 循环重连。
+// Discovery background: dual-node E2E -- B starts before A (A not yet online), B's
+// OFFER expires in the signaling server queue, server replies EXPIRE; B's connectLoop
+// still waits for OnOpen, times out after 20s without retry, and A still can't connect
+// even after coming online. Fix: EXPIRE -> Close (trigger Done) -> loop reconnect.
 func TestRouteExpire_ClosesConnection(t *testing.T) {
 	p, f := newTestPeer()
-	c, _ := newTestConn(p, "conn-e") // 直接注册，不依赖 OFFER 流程
+	c, _ := newTestConn(p, "conn-e") // register directly, not relying on OFFER flow
 
 	exp := NewMessage(MsgExpire, "", struct {
 		ConnectionID string `json:"connectionId"`
@@ -170,27 +179,27 @@ func TestRouteExpire_ClosesConnection(t *testing.T) {
 	select {
 	case <-c.Done():
 	case <-time.After(2 * time.Second):
-		t.Fatal("EXPIRE 后连接未关闭")
+		t.Fatal("connection not closed after EXPIRE")
 	}
 	p.mu.Lock()
 	_, still := p.conns["conn-e"]
 	p.mu.Unlock()
-	assert.False(t, still, "连接应从注册表移除")
+	assert.False(t, still, "connection should be removed from the registry")
 }
 
-// TestRouteLeave_ClosesAllFromPeer LEAVE 关闭该远端的所有连接。
+// TestRouteLeave_ClosesAllFromPeer LEAVE closes all connections from that remote peer.
 //
-// 发现背景：代码审阅发现 handleLeave 在持有 p.mu 时逐个 c.Close()——
-// Close→forgetConnection 需要同一把锁 → Go mutex 非重入死锁。
-// 本测试在 -race 下直接复现（3 节点场景多个连接时卡死），
-// 修复为锁内收集、解锁后关闭。
+// Discovery background: code review found handleLeave called c.Close() one by one while
+// holding p.mu -- Close->forgetConnection needs the same lock -> Go mutex non-reentrant
+// deadlock. This test reproduces it directly under -race (hangs with 3 nodes / multiple
+// connections); fix: collect inside the lock, close after unlocking.
 func TestRouteLeave_ClosesAllFromPeer(t *testing.T) {
 	p, f := newTestPeer()
 	_, _ = newTestConn(p, "c-a")
 	_, _ = newTestConn(p, "c-b")
 	_, _ = newTestConn(p, "c-c")
 
-	// c-a/c-b 属于 remote-node，c-c 属于 other-node
+	// c-a/c-b belong to remote-node, c-c belongs to other-node
 	p.mu.Lock()
 	p.conns["c-a"].PeerID = "remote-node"
 	p.conns["c-b"].PeerID = "remote-node"
@@ -206,15 +215,17 @@ func TestRouteLeave_ClosesAllFromPeer(t *testing.T) {
 	_, hasB := p.conns["c-b"]
 	_, hasC := p.conns["c-c"]
 	p.mu.Unlock()
-	assert.False(t, hasA, "remote-node 的连接应全部关闭")
+	assert.False(t, hasA, "all connections from remote-node should be closed")
 	assert.False(t, hasB)
-	assert.True(t, hasC, "其他节点的连接不受影响")
+	assert.True(t, hasC, "connections from other nodes should be unaffected")
 }
 
-// TestRouteCandidate_UnknownConnID_Ignored 未知 connectionId 的候选不 panic。
+// TestRouteCandidate_UnknownConnID_Ignored A candidate with an unknown connectionId
+// does not panic.
 //
-// 发现背景：防御性测试——对端可能发来乱序/过期的 ICE 候选（或恶意注入），
-// route 对未知 connectionId 必须安全丢弃而不是 panic（曾考虑过 nil conn 解引用）。
+// Discovery background: defensive test -- the peer may send out-of-order or expired
+// ICE candidates (or malicious injection); route must safely drop unknown connectionIds
+// instead of panicking (nil conn dereference was previously considered).
 func TestRouteCandidate_UnknownConnID_Ignored(t *testing.T) {
 	p, f := newTestPeer()
 	cand := NewMessage(MsgCandidate, "", CandidatePayload{ConnectionID: "nope"})
@@ -222,25 +233,27 @@ func TestRouteCandidate_UnknownConnID_Ignored(t *testing.T) {
 	_ = p
 }
 
-// TestRouteHeartbeat_Ignored 心跳消息无副作用。
+// TestRouteHeartbeat_Ignored Heartbeat messages have no side effects.
 //
-// 发现背景：peerjs-server 会向客户端发 HEARTBEAT（服务端保活探测），
-// 客户端不应应答也不应产生任何副作用（peerjs-client 行为对齐）。
+// Discovery background: peerjs-server sends HEARTBEAT to clients (server-side keepalive
+// probe); the client should not reply and should not produce any side effects
+// (peerjs-client behavior alignment).
 func TestRouteHeartbeat_Ignored(t *testing.T) {
 	_, f := newTestPeer()
 	assert.NotPanics(t, func() {
 		f.inject(NewMessage(MsgHeartbeat, "", nil))
 	})
-	assert.Empty(t, f.sent, "心跳不应产生发送")
+	assert.Empty(t, f.sent, "heartbeat should not produce any sends")
 }
 
-// ── Peer：Close 幂等性与生命周期 ─────────────────────────────────────────
+// ── Peer: Close idempotency and lifecycle ─────────────────────────────────────────
 
-// TestPeerClose_Idempotent 回归：Close 重复调用不 panic（曾担心 closed channel 重复关闭）。
+// TestPeerClose_Idempotent Regression: repeated Close calls do not panic (previously
+// worried about closing a closed channel).
 //
-// 发现背景：代码审阅——Peer.Close / Connection.Close / signaller.Close 三处
-// 都有「close(channel)」逻辑，重复调用会 panic（close of closed channel），
-// 而 service 层 startLoop/Close 可能并发触发多次关闭。
+// Discovery background: code review -- Peer.Close / Connection.Close / signaller.Close
+// all have "close(channel)" logic; repeated calls would panic (close of closed channel),
+// and the service layer startLoop/Close may trigger multiple closes concurrently.
 func TestPeerClose_Idempotent(t *testing.T) {
 	p, _ := newTestPeer()
 	p.Close()
@@ -248,10 +261,11 @@ func TestPeerClose_Idempotent(t *testing.T) {
 	assert.NotPanics(t, p.Close)
 }
 
-// TestPeerClose_ClosesAllConnections Peer.Close 关闭所有连接并触发 Done。
+// TestPeerClose_ClosesAllConnections Peer.Close closes all connections and triggers Done.
 //
-// 发现背景：closeOnce 保证每个 Connection 只清理一次；本测试验证 Peer 级
-// 关闭能级联到全部连接（无连接被遗漏在 conns map 里等泄漏）。
+// Discovery background: closeOnce guarantees each Connection is cleaned up only once;
+// this test verifies that Peer-level close cascades to all connections (no connection
+// left behind in the conns map waiting to leak).
 func TestPeerClose_ClosesAllConnections(t *testing.T) {
 	p, _ := newTestPeer()
 	c1, _ := newTestConn(p, "c1")
@@ -262,40 +276,43 @@ func TestPeerClose_ClosesAllConnections(t *testing.T) {
 	select {
 	case <-c1.Done():
 	case <-time.After(2 * time.Second):
-		t.Fatal("c1 未关闭")
+		t.Fatal("c1 not closed")
 	}
 	select {
 	case <-c2.Done():
 	case <-time.After(2 * time.Second):
-		t.Fatal("c2 未关闭")
+		t.Fatal("c2 not closed")
 	}
 }
 
-// TestSetICEServers NewPeerWithSignaller 路径必须有 ICE 配置入口（修复前恒 nil）。
+// TestSetICEServers The NewPeerWithSignaller path must have an ICE configuration entry
+// point (previously always nil).
 //
-// 发现背景：代码审阅——NewPeerWithSignaller（自定义信令）路径下 p.iceServers
-// 恒为 nil，WebRTC 只有局域网 host 候选、无法跨公网打洞；Options.ICEServers
-// 只覆盖了 PeerJS 云信令路径。
+// Discovery background: code review -- under the NewPeerWithSignaller (custom signaling)
+// path, p.iceServers was always nil; WebRTC only had LAN host candidates and couldn't
+// hole-punch across public networks. Options.ICEServers only covered the PeerJS cloud
+// signaling path.
 func TestSetICEServers(t *testing.T) {
 	p, _ := newTestPeer()
 	servers := []webrtc.ICEServer{{URLs: []string{"stun:stun.l.google.com:19302"}}}
 	p.SetICEServers(servers)
 
-	// 通过 Connect 建立连接时使用该配置（真实 pion PC 创建，无网络）
+	// This configuration is used when establishing connections via Connect (real pion PC creation, no network)
 	conn, err := p.Connect(context.Background(), "remote-node", "t")
 	require.NoError(t, err)
 	assert.NotNil(t, conn)
 	conn.Close()
 }
 
-// ── Connection：帧协议 ────────────────────────────────────────────────────
+// ── Connection: frame protocol ────────────────────────────────────────────────────
 
-// TestConnection_SendJSON_UsesTextFrame 回归：JSON 头必须是文本帧
-// （曾用二进制帧导致对端把控制头当数据块吞掉）。
+// TestConnection_SendJSON_UsesTextFrame Regression: JSON headers must be text frames
+// (previously binary frames caused the peer to swallow control headers as data chunks).
 //
-// 发现背景：双节点 E2E——Go 端 JSON 头用 dc.Send([]byte)（二进制帧，PPID 53）
-// 发送，peerjs 浏览器端把全部消息当数据块收集，done 帧永远不触发、拉取超时；
-// 加日志发现对端收到的是二进制帧。修复：头用 SendText（PPID 51）。
+// Discovery background: dual-node E2E -- the Go side sent JSON headers with
+// dc.Send([]byte) (binary frames, PPID 53), and the peerjs browser side collected all
+// messages as data chunks; the done frame never fired, pulls timed out; adding logs
+// revealed the peer received binary frames. Fix: headers use SendText (PPID 51).
 func TestConnection_SendJSON_UsesTextFrame(t *testing.T) {
 	p, _ := newTestPeer()
 	c, dc := newTestConn(p, "c1")
@@ -307,10 +324,11 @@ func TestConnection_SendJSON_UsesTextFrame(t *testing.T) {
 	assert.Contains(t, dc.events[0], `"hello"`)
 }
 
-// TestConnection_Send_BinaryFrame 数据块必须是二进制帧。
+// TestConnection_Send_BinaryFrame Data chunks must be binary frames.
 //
-// 发现背景：与 TestConnection_SendJSON_UsesTextFrame 同一 E2E——协议靠
-// 「文本帧=控制头 / 二进制帧=数据块」区分，Send 必须保持二进制语义。
+// Discovery background: same E2E as TestConnection_SendJSON_UsesTextFrame -- the protocol
+// distinguishes "text frame = control header / binary frame = data chunk"; Send must
+// maintain binary semantics.
 func TestConnection_Send_BinaryFrame(t *testing.T) {
 	p, _ := newTestPeer()
 	c, dc := newTestConn(p, "c1")
@@ -321,12 +339,15 @@ func TestConnection_Send_BinaryFrame(t *testing.T) {
 	assert.Equal(t, "bin:\x01\x02\x03", dc.events[0])
 }
 
-// TestConnection_SendFrame_Atomic 回归：并发发送时 data 头与二进制体必须
-// 原子连续（曾因无锁交织导致接收端 expect 状态机挂错请求）。
+// TestConnection_SendFrame_Atomic Regression: during concurrent sends, the data header
+// and binary body must be atomic and contiguous (previously unlocked interleaving caused
+// the receiver's expect state machine to attach chunks to the wrong request).
 //
-// 发现背景：代码审阅——多个 goroutine 并发 serveFile 时，若 data 头与
-// 二进制体不连续落线，接收端把二进制块挂到错误的请求上（reqId 状态机错乱）。
-// SendFrame 的 sendMu 保证一帧原子；本测试 8 goroutine × 50 轮暴力验证。
+// Discovery background: code review -- when multiple goroutines concurrently run
+// serveFile, if the data header and binary body are not contiguous on the wire, the
+// receiver attaches binary chunks to the wrong request (reqId state machine confusion).
+// SendFrame's sendMu guarantees one frame is atomic; this test brute-forces with
+// 8 goroutines x 50 rounds.
 func TestConnection_SendFrame_Atomic(t *testing.T) {
 	p, _ := newTestPeer()
 	c, dc := newTestConn(p, "c1")
@@ -351,35 +372,38 @@ func TestConnection_SendFrame_Atomic(t *testing.T) {
 	}
 	wg.Wait()
 
-	// 每个 text: 头必须紧跟对应的 bin: 体
+	// Each text: header must be immediately followed by its corresponding bin: body
 	assert.GreaterOrEqual(t, len(dc.events), workers*perWorker*2)
 	for i := 0; i+1 < len(dc.events); i += 2 {
-		assert.True(t, isText(dc.events[i]), "事件 %d 应为文本头: %v", i, dc.events[i])
-		assert.True(t, isBin(dc.events[i+1]), "事件 %d 应为二进制体: %v", i+1, dc.events[i+1])
+		assert.True(t, isText(dc.events[i]), "event %d should be a text header: %v", i, dc.events[i])
+		assert.True(t, isBin(dc.events[i+1]), "event %d should be a binary body: %v", i+1, dc.events[i+1])
 	}
 }
 
 func isText(e string) bool { return len(e) > 5 && e[:5] == "text:" }
 func isBin(e string) bool  { return len(e) > 4 && e[:4] == "bin:" }
 
-// TestConnection_SendFrame_BeforeOpen_Error 未 open 时发送返回错误。
+// TestConnection_SendFrame_BeforeOpen_Error Sending before open returns an error.
 //
-// 发现背景：防御性测试——answerer 侧 OnConnection 回调在 DataChannel open
-// 之前触发（handleOffer 立即回调），上层若在此时发送必须得到明确错误
-// 而不是静默丢失或 panic。
+// Discovery background: defensive test -- the answerer-side OnConnection callback
+// fires before DataChannel open (handleOffer calls back immediately); if the upper
+// layer sends at this point, it must get a clear error rather than silent loss
+// or panic.
 func TestConnection_SendFrame_BeforeOpen_Error(t *testing.T) {
 	p, _ := newTestPeer()
-	c, _ := newTestConn(p, "c1") // 未 openFake
+	c, _ := newTestConn(p, "c1") // not openFake
 	assert.Error(t, c.SendFrame(map[string]any{"type": "data"}, []byte{1}))
 	assert.Error(t, c.SendJSON(map[string]any{"type": "x"}))
 	assert.Error(t, c.Send([]byte{1}))
 }
 
-// TestConnection_Close_Idempotent 回归：Close 重复调用不 panic、Done 只触发一次。
+// TestConnection_Close_Idempotent Regression: repeated Close calls do not panic, Done
+// fires only once.
 //
-// 发现背景：代码审阅——Connection.Close 由多个触发源并发调用（ICE 状态回调、
-// 远端 dc 关闭、上层主动、Peer.Close 级联），closeOnce 必须保证 onClose 只
-// 触发一次（上层 pending 请求依赖它精确清理）。
+// Discovery background: code review -- Connection.Close is called concurrently by
+// multiple triggers (ICE state callback, remote dc close, upper-layer active, Peer.Close
+// cascade); closeOnce must guarantee onClose fires only once (upper-layer pending requests
+// rely on it for precise cleanup).
 func TestConnection_Close_Idempotent(t *testing.T) {
 	p, _ := newTestPeer()
 	c, _ := newTestConn(p, "c1")
@@ -390,45 +414,49 @@ func TestConnection_Close_Idempotent(t *testing.T) {
 	c.Close()
 	c.Close()
 
-	assert.Equal(t, 1, closed, "onClose 只应触发一次")
+	assert.Equal(t, 1, closed, "onClose should fire only once")
 	select {
 	case <-c.Done():
 	default:
-		t.Fatal("Done 应已关闭")
+		t.Fatal("Done should already be closed")
 	}
-	// 已从注册表移除
+	// Already removed from the registry
 	p.mu.Lock()
 	_, ok := p.conns["c1"]
 	p.mu.Unlock()
 	assert.False(t, ok)
 }
 
-// TestConnection_RemoteClose_CleansUp 回归：远端关闭 dc 必须触发本端清理
-// （曾未接线 pionChannel.OnClose，连接悬挂到 ICE 超时兜底）。
+// TestConnection_RemoteClose_CleansUp Regression: remote closing the dc must trigger
+// local cleanup (previously pionChannel.OnClose was never wired; the connection hung
+// until ICE timeout fallback).
 //
-// 发现背景：代码审阅——DataChannel 接口有 OnClose 但 pion 适配层从未接线，
-// 对端主动关 dc 后本端连接悬挂数秒~分钟（等 ICE disconnected 兜底），
-// 上层 pending 请求只能靠 5 分钟超时释放。修复：attach 时 dc.OnClose → c.Close()。
+// Discovery background: code review -- the DataChannel interface has OnClose but the
+// pion adapter layer never wired it; after the peer actively closes the dc, the local
+// connection hangs for seconds to minutes (waiting for ICE disconnected fallback), and
+// upper-layer pending requests could only rely on a 5-minute timeout for release. Fix:
+// on attach, dc.OnClose -> c.Close().
 func TestConnection_RemoteClose_CleansUp(t *testing.T) {
 	p, _ := newTestPeer()
 	c, dc := newTestConn(p, "c1")
 	openFake(dc)
 
-	// 模拟远端关闭：触发 dc.OnClose
+	// Simulate remote close: trigger dc.OnClose
 	require.NotNil(t, dc.onCls)
 	dc.onCls()
 
 	select {
 	case <-c.Done():
 	case <-time.After(2 * time.Second):
-		t.Fatal("远端关闭后本端未清理")
+		t.Fatal("local cleanup did not happen after remote close")
 	}
 }
 
-// TestConnection_OnMessage_RoutesFrames 文本/二进制帧按类型回调。
+// TestConnection_OnMessage_RoutesFrames Text/binary frames are dispatched by type.
 //
-// 发现背景：防御性测试——帧类型区分是协议根基（见 SendJSON/Send 测试），
-// 验证接收侧同样按 IsText 正确分流（service 层 bindConn 依赖此行为）。
+// Discovery background: defensive test -- frame type distinction is the protocol
+// foundation (see SendJSON/Send tests); verifies the receiving side also correctly
+// routes by IsText (service layer bindConn relies on this behavior).
 func TestConnection_OnMessage_RoutesFrames(t *testing.T) {
 	p, _ := newTestPeer()
 	c, dc := newTestConn(p, "c1")
@@ -449,14 +477,16 @@ func TestConnection_OnMessage_RoutesFrames(t *testing.T) {
 	assert.True(t, gotBin)
 }
 
-// TestConnection_CallbackRegistration_Concurrent 回归：OnOpen/OnMessage/OnClose
-// 的注册（业务 goroutine 调用 setter）与 attach 回调触发（pion 回调
-// goroutine 读快照）并发执行——handlerMu 保护，-race 下验证无竞态。
+// TestConnection_CallbackRegistration_Concurrent Regression: registration of
+// OnOpen/OnMessage/OnClose (business goroutine calls setter) and attach callback
+// triggering (pion callback goroutine reads snapshot) execute concurrently -- handlerMu
+// protects, verified under -race for no data race.
 //
-// 发现背景：-race 集成测试连跑必挂（自托管信令 + 同机 WebRTC 时序快，
-// connectLoop 的 OnOpen 注册与 DataChannel open 回调竞争读写 c.onOpen）；
-// 真实网络下同样存在（时序慢不易触发）。修复：handlerMu 保护三字段，
-// 触发侧取快照再回调。
+// Discovery background: -race integration test crashes every time it runs (self-hosted
+// signaling + same-machine WebRTC timing is fast; connectLoop's OnOpen registration races
+// with the DataChannel open callback read/write of c.onOpen); real networks have the
+// same issue (timing is slower, harder to trigger). Fix: handlerMu protects the three
+// fields, the trigger side takes a snapshot before calling back.
 func TestConnection_CallbackRegistration_Concurrent(t *testing.T) {
 	p, _ := newTestPeer()
 	c, dc := newTestConn(p, "c1")
@@ -474,7 +504,7 @@ func TestConnection_CallbackRegistration_Concurrent(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			// 触发 attach 注册的闭包（内部读快照，与上面的 setter 竞争）
+			// Trigger the closures registered by attach (internally reads snapshot, racing with the setters above)
 			if dc.onOpen != nil {
 				dc.onOpen()
 			}
@@ -488,29 +518,30 @@ func TestConnection_CallbackRegistration_Concurrent(t *testing.T) {
 	}
 	wg.Wait()
 
-	// 快照读不破坏注册语义：触发后仍能收到最新注册的回调
+	// Snapshot reads don't break registration semantics: after triggering, the latest
+	// registered callback is still received
 	var got bool
 	c.OnMessage(func(f Frame) { got = string(f.Data) == "y" })
 	dc.onMsg(Frame{IsText: true, Data: []byte("y")})
-	assert.True(t, got, "并发后注册的回调必须仍生效")
+	assert.True(t, got, "the callback registered after concurrency must still work")
 }
 
-// TestConnectedPeers 验证 ConnectedPeers 只返回 open 连接且去重。
+// TestConnectedPeers Verifies ConnectedPeers only returns open connections and deduplicates.
 func TestConnectedPeers(t *testing.T) {
 	p, _ := newTestPeer()
 
-	// 未 open 的连接不计入
+	// Non-open connections are not counted
 	c1, f1 := newTestConn(p, "conn-1")
 	c2, f2 := newTestConn(p, "conn-2")
 	assert.Empty(t, p.ConnectedPeers())
 
-	// open 后返回远端 id
+	// After open, returns remote ids
 	openFake(f1)
 	openFake(f2)
 	got := p.ConnectedPeers()
 	assert.ElementsMatch(t, []string{"remote-conn-1", "remote-conn-2"}, got)
 
-	// 同一远端多条连接应去重
+	// Multiple connections from the same remote peer should be deduplicated
 	dup := &Connection{
 		ID:       "conn-dup",
 		PeerID:   "remote-conn-1",
@@ -524,19 +555,19 @@ func TestConnectedPeers(t *testing.T) {
 	p.registerConnection(dup)
 
 	got = p.ConnectedPeers()
-	assert.ElementsMatch(t, []string{"remote-conn-1", "remote-conn-2"}, got, "同一远端只应出现一次")
+	assert.ElementsMatch(t, []string{"remote-conn-1", "remote-conn-2"}, got, "same remote peer should appear only once")
 
-	// 关闭 c1 后 remote-conn-1 仍有 dup 连接 open，因此仍应出现（去重按远端 ID）
+	// After closing c1, remote-conn-1 still has the dup connection open, so it should still appear (dedup by remote ID)
 	c1.Close()
 	got = p.ConnectedPeers()
 	assert.ElementsMatch(t, []string{"remote-conn-1", "remote-conn-2"}, got)
 
-	// 关闭 c2 后只剩 remote-conn-1（dup 仍 open）
+	// After closing c2, only remote-conn-1 remains (dup still open)
 	c2.Close()
 	got = p.ConnectedPeers()
 	assert.ElementsMatch(t, []string{"remote-conn-1"}, got)
 
-	// 全部关闭后为空
+	// After closing all, empty
 	dup.Close()
 	assert.Empty(t, p.ConnectedPeers())
 }

@@ -1,12 +1,13 @@
 package transport
 
-// admin_test.go：admin 管理面 verb 单元测试（不依赖真实网络/gin engine，
-// 用 mock AdminHandler 验证帧协议、二进制上传收集、WebRTC 连接拒绝）。
+// admin_test.go: unit tests for the admin management-plane verb (no real network or gin engine --
+// a mock AdminHandler verifies the frame protocol, binary upload collection, and WebRTC rejection).
 //
-// 发现背景：admin verb 是「前端全面迁移到 ws/peerjs」的核心通道——浏览器经
-// 本地 WS 会话发 admin 帧管理本节点，内部转发 gin engine 复用全部 HTTP
-// controller。测试覆盖三类关键路径：JSON 请求转发、二进制上传收集、非本地
-// 会话拒绝（管理面不暴露给 WebRTC，防权限面漏洞）。
+// Discovery background: the admin verb is the core channel for "moving the frontend entirely onto
+// ws/peerjs" -- the browser sends admin frames over the local WS session to manage this node, and
+// they are forwarded internally to the gin engine, reusing every HTTP controller. The tests cover
+// three key paths: JSON request forwarding, binary upload collection, and non-local-session
+// rejection (the management plane is not exposed over WebRTC, to prevent privilege-plane holes).
 
 import (
 	"bytes"
@@ -23,7 +24,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// testAdminSvc 构造带 mock admin handler 的 service（不上真实信令）。
+// testAdminSvc builds a service with a mock admin handler (no real signaling).
 func testAdminSvc(t *testing.T, h AdminHandler) *PeerJSService {
 	t.Helper()
 	svc := newTestPeerJSService(t)
@@ -31,7 +32,7 @@ func testAdminSvc(t *testing.T, h AdminHandler) *PeerJSService {
 	return svc
 }
 
-// wsPair 建立本地 WS 会话（服务端 BindLocal + 客户端 gorilla 连接）。
+// wsPair establishes a local WS session (server-side BindLocal + a client gorilla connection).
 func wsPair(t *testing.T, svc *PeerJSService) (*websocket.Conn, *httptest.Server) {
 	t.Helper()
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -48,14 +49,14 @@ func wsPair(t *testing.T, svc *PeerJSService) (*websocket.Conn, *httptest.Server
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() { conn.Close() })
-	// 等 BindLocal 注册（bindConn 同步完成，但确保 readLoop 已活跃）
+	// wait for the BindLocal registration (bindConn completes synchronously, but this ensures the readLoop is active)
 	time.Sleep(100 * time.Millisecond)
 	return conn, srv
 }
 
-// readAdminResp 读帧直到 type=admin-resp / admin-bin / err。
-// admin-bin 时继续读后续二进制帧（头-体连续约束，同 req 拉取），
-// 读到 size 字节或后续文本帧为止。返回类型、状态码、body、二进制数据。
+// readAdminResp reads frames until type is admin-resp / admin-bin / err.
+// For admin-bin, keep reading the following binary frames (the header-body must be contiguous, as
+// with a req pull) up to size bytes or the next text frame. Returns type, status code, body, and binary data.
 func readAdminResp(t *testing.T, conn *websocket.Conn) (typ string, status int, body json.RawMessage, bin []byte) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
@@ -80,7 +81,7 @@ func readAdminResp(t *testing.T, conn *websocket.Conn) (typ string, status int, 
 		}
 		switch resp.Type {
 		case "admin-bin":
-			// 头已到：继续读二进制块直到 size 字节（测试中单块）
+			// header received: keep reading binary blocks until size bytes (a single block in this test)
 			if resp.Size == 0 {
 				return resp.Type, resp.Status, resp.Body, bin
 			}
@@ -90,7 +91,7 @@ func readAdminResp(t *testing.T, conn *websocket.Conn) (typ string, status int, 
 					t.Fatalf("read bin: %v", err)
 				}
 				if mt2 != websocket.BinaryMessage {
-					t.Fatalf("admin-bin 后应跟二进制帧, got %d", mt2)
+					t.Fatalf("after admin-bin should follow binary frame, got %d", mt2)
 				}
 				bin = append(bin, d2...)
 			}
@@ -98,17 +99,17 @@ func readAdminResp(t *testing.T, conn *websocket.Conn) (typ string, status int, 
 		case "admin-resp":
 			return resp.Type, resp.Status, resp.Body, bin
 		case "err":
-			t.Fatalf("服务端 err: %s", resp.Msg)
+			t.Fatalf("server err: %s", resp.Msg)
 		default:
 			continue
 		}
 	}
-	t.Fatal("等待 admin 响应超时")
+	t.Fatal("waiting for admin response timed out")
 	return
 }
 
-// TestAdminJSONRequest 本地 WS 会话发 admin JSON 请求 → mock handler 收到
-// 完整方法/路径/token → 响应回浏览器（body 原样嵌入）。
+// TestAdminJSONRequest a local WS session sends an admin JSON request -> the mock handler receives
+// the complete method/path/token -> the response goes back to the browser (the body embedded verbatim).
 func TestAdminJSONRequest(t *testing.T) {
 	var mu sync.Mutex
 	var gotMethod, gotPath, gotToken string
@@ -121,7 +122,7 @@ func TestAdminJSONRequest(t *testing.T) {
 	})
 	conn, _ := wsPair(t, svc)
 
-	// 浏览器并发两个请求（reqId 路由必须正确配对）
+	// the browser sends two requests concurrently (reqId routing must pair them correctly)
 	send := func(reqID string, body any) {
 		frame := map[string]any{"type": "admin", "method": "POST", "path": "/collections?x=1", "body": body, "token": "tok-" + reqID, "reqId": reqID}
 		if err := conn.WriteJSON(frame); err != nil {
@@ -137,23 +138,24 @@ func TestAdminJSONRequest(t *testing.T) {
 			t.Fatalf("want admin-resp 200, got %s %d", typ, status)
 		}
 		if !strings.Contains(string(body), `"ok":true`) {
-			t.Fatalf("body 未透传: %s", body)
+			t.Fatalf("body not passed through: %s", body)
 		}
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	if gotMethod != "POST" || gotPath != "/collections?x=1" {
-		t.Fatalf("handler 收到 %s %s", gotMethod, gotPath)
+		t.Fatalf("handler received %s %s", gotMethod, gotPath)
 	}
 	if !strings.Contains(gotToken, "tok-") {
-		t.Fatalf("token 未注入 Authorization: %q", gotToken)
+		t.Fatalf("token not injected into Authorization: %q", gotToken)
 	}
 }
 
-// TestAdminJSONError 4xx 错误体（含 409 冲突清单等结构化 body）透传为
-// admin-resp + status——前端据此抛 err.status/err.data（与 fetch 版一致）。
-// 发现背景：api.js request() 依赖 409 返回 {conflicts} 展示合并冲突清单；
-// admin 转发若把错误压成单一 msg 字符串，冲突数据丢失。
+// TestAdminJSONError a 4xx error body (including a structured body such as the 409 conflict list)
+// is passed through as admin-resp + status -- the frontend then throws err.status/err.data, as the
+// fetch version does. Discovery background: api.js request() relies on a 409 returning {conflicts}
+// to display the merge conflict list; if admin forwarding collapsed the error into a single msg
+// string, the conflict data would be lost.
 func TestAdminJSONError(t *testing.T) {
 	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
 		return http.StatusConflict, []byte(`{"error":"merge conflict","conflicts":[{"path":"a.txt"}]}`), "application/json", nil
@@ -168,15 +170,16 @@ func TestAdminJSONError(t *testing.T) {
 		t.Fatalf("want admin-resp 409, got %s %d", typ, status)
 	}
 	if !strings.Contains(string(body), `"conflicts"`) {
-		t.Fatalf("冲突清单未透传: %s", body)
+		t.Fatalf("conflict list not passed through: %s", body)
 	}
 }
 
-// TestAdminBinaryUpload 浏览器发 binary=true 声明 + 后续二进制帧 → 服务端
-// 收集成 multipart → handler 收到 FormFile("file") 完整内容 → admin-resp。
+// TestAdminBinaryUpload the browser sends a binary=true declaration + following binary frames -> the
+// server collects them into a multipart request -> the handler receives the full FormFile("file")
+// content -> admin-resp.
 func TestAdminBinaryUpload(t *testing.T) {
 	content := bytes.Repeat([]byte("admin-upload-payload-"), 1024)
-	content = append(content, []byte("END")...) // 不是 64KB 倍数，测部分块
+	content = append(content, []byte("END")...) // not a multiple of 64KB, to exercise a partial block
 
 	var mu sync.Mutex
 	var got []byte
@@ -195,12 +198,12 @@ func TestAdminBinaryUpload(t *testing.T) {
 	})
 	conn, _ := wsPair(t, svc)
 
-	// 声明帧
+	// declaration frame
 	decl := map[string]any{"type": "admin", "method": "POST", "path": "/files/upload", "binary": true, "filename": "hello.txt", "size": len(content), "reqId": "up-1"}
 	if err := conn.WriteJSON(decl); err != nil {
 		t.Fatalf("send decl: %v", err)
 	}
-	// 分块发二进制（64KB 对齐分片 + 尾块）
+	// send binary in chunks (64KB-aligned slices + a tail block)
 	const chunk = 64 * 1024
 	for off := 0; off < len(content); off += chunk {
 		end := off + chunk
@@ -219,17 +222,18 @@ func TestAdminBinaryUpload(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if !bytes.Equal(got, content) {
-		t.Fatalf("上传内容不一致: got %d bytes, want %d", len(got), len(content))
+		t.Fatalf("uploaded content mismatch: got %d bytes, want %d", len(got), len(content))
 	}
 	if gotFilename != "hello.txt" {
-		t.Fatalf("filename 错误: %q", gotFilename)
+		t.Fatalf("filename error: %q", gotFilename)
 	}
 }
 
-// TestAdminBinaryUploadToken 二进制上传声明帧携带 token 时，内部转发必须
-// 保留 Authorization 头；否则认证开启（有注册服务器）后前端所有上传都 401。
-// 发现背景：再 review 2026-08——adminUploadState 初版只存文件元数据，漏存
-// 声明帧的 token，serveAdminUploadComplete 用空 token 构造内部请求。
+// TestAdminBinaryUploadToken when a binary upload declaration frame carries a token, the internal
+// forwarding must preserve the Authorization header; otherwise, once auth is enabled (a registration
+// server present), every frontend upload would 401. Discovery background: another review on 2026-08 --
+// the first version of adminUploadState stored only file metadata and dropped the declaration frame's
+// token, so serveAdminUploadComplete built the internal request with an empty token.
 func TestAdminBinaryUploadToken(t *testing.T) {
 	content := []byte("token-preserving-upload")
 
@@ -266,14 +270,15 @@ func TestAdminBinaryUploadToken(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if gotAuth != "Bearer tok-upload-123" {
-		t.Fatalf("token 未透传到 multipart 内部请求: %q", gotAuth)
+		t.Fatalf("token not passed through to multipart internal request: %q", gotAuth)
 	}
 }
 
-// TestAdminBinaryUploadEmpty 空文件上传（size=0）也应能完成 multipart 转发。
-// 发现背景：再 review 2026-08——serveAdmin 初版 size<=0 直接拒绝，前端
-// ws.upload 对空文件声明 size=0 后没有二进制帧，上传会 400；这与 fileIndex
-// upload verb 已支持空文件不对称。
+// TestAdminBinaryUploadEmpty an empty file upload (size=0) must also complete the multipart forwarding.
+// Discovery background: another review on 2026-08 -- the first version of serveAdmin rejected size<=0
+// outright; the frontend's ws.upload declares size=0 for an empty file with no following binary frames,
+// so the upload would 400. That was asymmetric with the fileIndex upload verb, which already supports
+// empty files.
 func TestAdminBinaryUploadEmpty(t *testing.T) {
 	var mu sync.Mutex
 	var got int
@@ -299,7 +304,7 @@ func TestAdminBinaryUploadEmpty(t *testing.T) {
 	if err := conn.WriteJSON(decl); err != nil {
 		t.Fatalf("send decl: %v", err)
 	}
-	// 空文件：不发送任何二进制帧，服务端应立即完成
+	// empty file: no binary frames are sent at all, so the server should complete immediately
 	typ, status, _, _ := readAdminResp(t, conn)
 	if typ != "admin-resp" || status != http.StatusCreated {
 		t.Fatalf("want admin-resp 201, got %s %d", typ, status)
@@ -307,15 +312,15 @@ func TestAdminBinaryUploadEmpty(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if got != 0 {
-		t.Fatalf("空文件内容应为 0 字节, got %d", got)
+		t.Fatalf("empty file content should be 0 bytes, got %d", got)
 	}
 	if gotFilename != "empty.txt" {
-		t.Fatalf("filename 错误: %q", gotFilename)
+		t.Fatalf("filename error: %q", gotFilename)
 	}
 }
 
-// TestAdminBinaryResponse 二进制响应（如集合文件流）：admin-bin 头 + 单个
-// 二进制帧，前端按 size 收集。
+// TestAdminBinaryResponse a binary response (such as a collection file stream): an admin-bin header
+// plus a single binary frame, which the frontend collects according to size.
 func TestAdminBinaryResponse(t *testing.T) {
 	payload := bytes.Repeat([]byte{0xAB}, 300*1024)
 	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
@@ -331,15 +336,15 @@ func TestAdminBinaryResponse(t *testing.T) {
 		t.Fatalf("want admin-bin 200, got %s %d", typ, status)
 	}
 	if !bytes.Equal(bin, payload) {
-		t.Fatalf("二进制响应不一致: got %d bytes, want %d", len(bin), len(payload))
+		t.Fatalf("binary response mismatch: got %d bytes, want %d", len(bin), len(payload))
 	}
 }
 
-// TestAdminBinaryUploadReqPath 上传声明帧带自定义 path（如 /bt/torrent）时，
-// 转发必须打到该路径且 multipart 字段用声明 field。
-// 发现背景：serveAdminUploadComplete 初版硬编码 POST /files/upload，BT
-// torrent 上传（path=/bt/torrent + field=torrent）会打错路由；前端
-// btTorrentUpload 迁移到 WS 后此缺陷被 E2E 对账时发现。
+// TestAdminBinaryUploadReqPath when an upload declaration frame carries a custom path (such as /bt/torrent),
+// the forwarding must go to that path and the multipart field must use the declared field.
+// Discovery background: the first version of serveAdminUploadComplete hardcoded POST /files/upload, so a
+// BT torrent upload (path=/bt/torrent + field=torrent) hit the wrong route; the frontend's btTorrentUpload
+// exposed the defect during E2E reconciliation after moving to WS.
 func TestAdminBinaryUploadReqPath(t *testing.T) {
 	content := []byte("fake-torrent-bytes-0123456789")
 
@@ -376,18 +381,18 @@ func TestAdminBinaryUploadReqPath(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if gotMethod != "POST" || gotPath != "/bt/torrent" || gotField != "torrent" {
-		t.Fatalf("转发目标错误: %s %s field=%s", gotMethod, gotPath, gotField)
+		t.Fatalf("forwarding target error: %s %s field=%s", gotMethod, gotPath, gotField)
 	}
 	if !bytes.Equal(got, content) {
-		t.Fatalf("torrent 内容不一致: %d vs %d bytes", len(got), len(content))
+		t.Fatalf("torrent content mismatch: %d vs %d bytes", len(got), len(content))
 	}
 }
 
-// TestAdminTextResponse text/plain 响应（如 /ping 的 "pong"）必须走 admin-resp
-// 字符串透传，不能当二进制 admin-bin。
-// 发现背景：E2E 冒烟验证 /ping 时，dispatchAdmin 初版按 respBody 是否以 "{"
-// 开头分类，text/plain 被误判为二进制 → 前端收到 Uint8Array 而非字符串，
-// 且 admin-bin 占用 binaryExpect 槽。改为 json.Valid + Content-Type 判断。
+// TestAdminTextResponse a text/plain response (such as /ping's "pong") must go through admin-resp as
+// a string passthrough, never as binary admin-bin. Discovery background: while E2E smoke-testing /ping,
+// the first version of dispatchAdmin classified by whether respBody started with "{", so text/plain was
+// misjudged as binary -> the frontend received a Uint8Array instead of a string, and admin-bin occupied
+// the binaryExpect slot. Changed to json.Valid + Content-Type checks.
 func TestAdminTextResponse(t *testing.T) {
 	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
 		return http.StatusOK, []byte("pong"), "text/plain; charset=utf-8", nil
@@ -402,70 +407,73 @@ func TestAdminTextResponse(t *testing.T) {
 		t.Fatalf("want admin-resp 200, got %s %d", typ, status)
 	}
 	if string(body) != `"pong"` {
-		t.Fatalf("文本 body 透传错误: %s", body)
+		t.Fatalf("text body passthrough error: %s", body)
 	}
 	if len(bin) != 0 {
-		t.Fatalf("文本响应不应走二进制帧: %d bytes", len(bin))
+		t.Fatalf("text response should not go via binary frame: %d bytes", len(bin))
 	}
 }
 
-// TestAdminRejectedOnNonLocal 非本地会话（模拟 WebRTC 连接 ID）发 admin 帧
-// 必须被拒绝——管理面不开放给远端节点（防权限面漏洞的设计约束）。
+// TestAdminRejectedOnNonLocal an admin frame from a non-local session (a simulated WebRTC connection
+// ID) must be rejected -- the management plane is not opened to remote nodes (a design constraint
+// against privilege-plane holes).
 func TestAdminRejectedOnNonLocal(t *testing.T) {
 	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
-		t.Error("非本地会话不应触发 handler")
+		t.Error("non-local session should not trigger handler")
 		return http.StatusInternalServerError, nil, "", nil
 	})
-	// 直接构造 fake Session（ID 非 "local"），走 serveAdmin 入口
+	// build a fake Session directly (ID not "local") and go through the serveAdmin entry point
 	sess := &fakeSession{id: "remote-node-123"}
 	svc.BindLocal(sess)
 	raw, _ := json.Marshal(map[string]any{"type": "admin", "method": "GET", "path": "/files", "reqId": "x"})
 	svc.serveAdmin(sess, svc.pending[sess], raw)
 	types := sess.sentTypes()
 	if len(types) != 1 || types[0] != "err" {
-		t.Fatalf("应返回 err 拒绝帧, got %v", types)
+		t.Fatalf("should return err rejection frame, got %v", types)
 	}
 }
 
-// TestAdminUploadChunkWriteFail 写临时文件失败（已关闭文件 → os.ErrClosed）
-// 必须清理临时文件与句柄，并回 err 帧——此前该路径只 return 不清理，
-// 文件 + fd 永久泄漏（代码审阅 2026-08-18 发现）。
-// 防御意义：磁盘满/写入错误时不留残留，与 aborted 分支清理语义一致。
+// TestAdminUploadChunkWriteFail a temporary file write failure (a closed file -> os.ErrClosed) must
+// clean up the temp file and handle and reply with an err frame -- this path used to return without
+// cleaning up, leaking the file + fd permanently (found in the 2026-08-18 code review). Defensive
+// value: no residue when the disk is full or a write error occurs, matching the aborted branch's
+// cleanup semantics.
 func TestAdminUploadChunkWriteFail(t *testing.T) {
 	svc := testAdminSvc(t, nil)
 	sess := &fakeSession{id: "local"}
 
-	// 构造一个「已关闭」的临时文件：Write 必然返回错误（os.ErrClosed）
+	// build a "closed" temp file: Write must fail (os.ErrClosed)
 	f, err := os.CreateTemp("", "peerdrive-admin-upload-fail-*")
 	if err != nil {
 		t.Fatalf("CreateTemp: %v", err)
 	}
 	path := f.Name()
-	f.Close() // 关键：关闭后 Write 失败
+	f.Close() // the key step: after closing, Write fails
 
 	au := &adminUploadState{
 		reqID:   "fail-1",
-		size:    10, // 声明 10 字节，下面只写 4 字节
+		size:    10, // declared 10 bytes, but only 4 bytes are written below
 		f:       f,
 		path:    path,
 		created: time.Now(),
 	}
 
-	// 写失败路径：非 last 块也应清理（Write 失败立即 return 清理）
+	// the write-failure path: a non-last block must also be cleaned up (a Write failure returns and cleans up immediately)
 	svc.adminUploadChunk(sess, au, []byte("data"), false)
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("写失败后临时文件应被清理, 仍存在: %s", path)
+		t.Fatalf("temp file should be cleaned after write failure, still exists: %s", path)
 	}
-	// 已关闭的文件句柄应被 Close 过（再次 Close 报错；此处只需验证没 panic）
+	// the closed file handle should have been Closed (a second Close errors; here we only need to confirm there is no panic)
 	types := sess.sentTypes()
 	if len(types) != 1 || types[0] != "err" {
-		t.Fatalf("应回 err 帧, got %v", types)
+		t.Fatalf("should return err frame, got %v", types)
 	}
 }
 
-// TestAdminUploadAbortedCleansTemp 上传中止（size 超限/超时标记 aborted）：
-// 最后一帧（空块）到达时清理临时文件并回 err——上传收集失败不留残留。
+// TestAdminUploadAbortedCleansTemp an aborted upload (size over the limit / marked aborted on timeout):
+// when the final frame (an empty block) arrives, clean up the temp file and reply with an err -- a
+// failed upload collection leaves no residue.
 func TestAdminUploadAbortedCleansTemp(t *testing.T) {
 	svc := testAdminSvc(t, nil)
 	sess := &fakeSession{id: "local"}
@@ -479,32 +487,34 @@ func TestAdminUploadAbortedCleansTemp(t *testing.T) {
 	au := &adminUploadState{
 		reqID:   "abort-1",
 		size:    10,
-		got:     4, // 只收到 4 字节
+		got:     4, // only 4 bytes received
 		f:       f,
 		path:    path,
-		aborted: true, // 泵内判定超限/超时后置位
+		aborted: true, // set by the pump after detecting an over-limit / timeout
 		created: time.Now(),
 	}
 
-	// last=true（空块投递触发清理，见 conn.go abort 分支）
+	// last=true (delivering an empty block triggers cleanup; see the abort branch in conn.go)
 	svc.adminUploadChunk(sess, au, nil, true)
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("aborted 后临时文件应被清理, 仍存在: %s", path)
+		t.Fatalf("temp file should be cleaned after aborted, still exists: %s", path)
 	}
 	types := sess.sentTypes()
 	if len(types) != 1 || types[0] != "err" {
-		t.Fatalf("应回 err 帧, got %v", types)
+		t.Fatalf("should return err frame, got %v", types)
 	}
 }
 
-// TestAdminUploadReplacedErrsOld 旧上传槽被新声明替换时，旧 reqId 必须收到
-// err 帧且旧临时文件被清理——此前替换静默清文件不回帧，旧上传的浏览器
-// Promise 永久挂起（pending 条目直到连接断开才清），且旧上传迟到块混入新
-// au 的 got 计数导致新上传被误判 size 超限中止、err 指向新 reqId（误导排查）。
-// 发现背景：代码审阅 2026-08-18（serveAdmin 重复声明上传路径）。
+// TestAdminUploadReplacedErrsOld when an old upload slot is replaced by a new declaration, the old
+// reqId must receive an err frame and the old temp file must be cleaned up -- replacement used to
+// clear the file silently without a frame, so the browser's Promise for the old upload hung forever
+// (its pending entry survived until the connection dropped), and late blocks from the old upload were
+// mixed into the new au's got count, making the new upload be misjudged as over the size limit and
+// aborted with the err pointing at the new reqId (which misleads debugging). Discovery background:
+// 2026-08-18 code review (the duplicate-declaration upload path in serveAdmin).
 func TestAdminUploadReplacedErrsOld(t *testing.T) {
-	// 需要非 nil handler：serveAdmin 在 binary 分支前有 adminHandler==nil 检查
+	// a non-nil handler is required: serveAdmin has an adminHandler==nil check before the binary branch
 	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
 		return http.StatusOK, []byte(`{"ok":true}`), "application/json", nil
 	})
@@ -512,7 +522,7 @@ func TestAdminUploadReplacedErrsOld(t *testing.T) {
 	svc.BindLocal(sess)
 	st := svc.pending[sess]
 	if st == nil {
-		t.Fatal("BindLocal 后应有 connState")
+		t.Fatal("should have connState after BindLocal")
 	}
 
 	decl := func(reqID string) []byte {
@@ -523,34 +533,34 @@ func TestAdminUploadReplacedErrsOld(t *testing.T) {
 		return raw
 	}
 
-	// 第一次声明：占槽（创建临时文件）
+	// first declaration: occupies the slot (creates the temp file)
 	svc.serveAdmin(sess, st, decl("up-old"))
 	st.mu.Lock()
 	old := st.adminUp
 	st.mu.Unlock()
 	if old == nil {
-		t.Fatal("第一次声明应占槽")
+		t.Fatal("first declaration should occupy the slot")
 	}
 
-	// 第二次声明：替换 → 旧 reqId 回 err + 旧临时文件清理，新声明占槽
+	// second declaration: replacement -> the old reqId gets an err + the old temp file is cleaned up, and the new declaration occupies the slot
 	svc.serveAdmin(sess, st, decl("up-new"))
 	frames := sess.sentFrames()
 	if len(frames) != 1 || frames[0].header["type"] != "err" {
-		t.Fatalf("应给旧 reqId 回 err 帧, got %v", sess.sentTypes())
+		t.Fatalf("should return err frame for old reqId, got %v", sess.sentTypes())
 	}
 	if reqID, _ := frames[0].header["reqId"].(string); reqID != "up-old" {
-		t.Fatalf("err 帧应带旧 reqId up-old, got %q", reqID)
+		t.Fatalf("err frame should carry old reqId up-old, got %q", reqID)
 	}
 	if _, err := os.Stat(old.path); !os.IsNotExist(err) {
-		t.Fatalf("旧临时文件应被清理, 仍存在: %s", old.path)
+		t.Fatalf("old temp file should be cleaned, still exists: %s", old.path)
 	}
 	st.mu.Lock()
 	if st.adminUp == nil || st.adminUp.reqID != "up-new" {
-		t.Fatalf("新声明应占槽")
+		t.Fatalf("new declaration should occupy the slot")
 	}
 	au := st.adminUp
 	st.mu.Unlock()
-	// 收尾：清掉新槽的临时文件（测试不留残留）
+	// cleanup: remove the new slot's temp file (the test leaves no residue)
 	os.Remove(au.path)
 	au.f.Close()
 }

@@ -1,30 +1,42 @@
-// API 请求模块：封装与后端的所有通信和本地存储配置。
-// 迁移说明（2026-08-17）：后端通信全面走本地 WS 会话 /ws/peer 的 admin 帧
-// （ws.js），不再直接 fetch HTTP——管理面只暴露给本地 WS（WebRTC/peerjs
-// 不实现管理 verb，防权限面漏洞）。HTTP 端点保留原路径作 legacy（兼容旧
-// 客户端/curl/集成测试，见 back/internal/router/router.go 标记）。
-// 调用方（页面）无感：request() 签名不变，错误语义与 fetch 版一致
-// （Error.status/Error.data 结构化 body，409 冲突清单等）。
+// API request module: encapsulates all communication with the backend and the
+// local storage configuration.
+// Migration note (2026-08-17): backend communication now goes through the
+// local WS session /ws/peer admin frames (ws.js); it no longer fetches HTTP
+// directly — the management plane is exposed only to local WS (WebRTC/peerjs
+// does not implement management verbs, preventing privilege-plane bugs). HTTP
+// endpoints keep their original paths as legacy (for backward compatibility
+// with old clients/curl/integration tests, see the marker in
+// back/internal/router/router.go).
+// Callers (pages) are unaffected: the request() signature is unchanged, and
+// the error semantics match the fetch version (structured Error.status/
+// Error.data body, 409 conflict list, etc.).
 import * as ws from './ws.js';
 const STORAGE_KEY = 'peerdrive_api_base';
 const AUTH_TOKEN_KEY = 'peerdrive_auth_token';
-// 默认后端地址：优先取构建期注入的 VITE_API_BASE，没有才用兜底值。
+// Default backend address: prefer the build-time injected VITE_API_BASE, only
+// fall back to the default value if that's absent.
 //
-// 为什么不再写死一坨地址：后端地址属于部署配置，不是代码。写死意味着
-//   - 换部署要改源码重新构建；
-//   - 仓库里长期留着明文 http 的公网 IP（浏览器在 https 页面下会直接拦掉
-//     混合内容，那条默认后端其实从来没真正可用过）；
-// 构建时给 VITE_API_BASE（或部署一份 .env.production），运行期仍可在设置页改。
+// Why not hard-code a bunch of addresses: the backend address is deployment
+// configuration, not code. Hard-coding means
+//   - changing the deployment requires modifying source and rebuilding;
+//   - the repo keeps a plaintext http public IP long-term (browsers block
+//     mixed content on https pages directly, so that default backend was
+//     never actually usable).
+// Supply VITE_API_BASE at build time (or ship a .env.production); the
+// settings page can still change it at runtime.
 const DEFAULT_API = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) || 'https://wsl-3000.moonchan.xyz';
 
-/* ---- 多后端管理 ---- */
+/* ---- Multi-backend management ---- */
 const BACKENDS_KEY = 'peerdrive_backends';
 const CURRENT_BACKEND_KEY = 'peerdrive_current_backend_id';
 
-// 预置后端列表（仅在没有本地记录时写入，之后以 localStorage 为准）。
-// 只留一条：那条明文 http 的公网 IP 已移除——它在 https 页面下会被浏览器按
-// 混合内容拦掉，留着只会让人以为"配好了但连不上"。需要多个后端的自己在
-// 设置页加，或者用 VITE_BACKENDS 构建期注入（JSON 数组）。
+// Preset backend list (only written when there is no local record; afterwards
+// localStorage is authoritative).
+// Only one is kept: the plaintext http public IP has been removed — it was
+// being blocked by browsers as mixed content on https pages, and keeping it
+// only made people think "it's configured but can't connect". Add more
+// backends yourself on the settings page, or inject them at build time via
+// VITE_BACKENDS (JSON array).
 const DEFAULT_BACKENDS = [
   { id: 'wsl', name: 'WSL', url: DEFAULT_API },
 ];
@@ -37,7 +49,7 @@ function getBackends() {
       if (Array.isArray(list) && list.length > 0) return list;
     }
   } catch {}
-  // 初始化默认后端
+  // Initialize the default backend
   setBackends(DEFAULT_BACKENDS);
   return DEFAULT_BACKENDS;
 }
@@ -60,14 +72,18 @@ function switchBackend(id) {
   if (!target) return false;
   setCurrentBackendId(id);
   localStorage.setItem(STORAGE_KEY, target.url);
-  // 迁移记录（2026-08-20）：原此处同步 STUN/TURN 到全局 localStorage——
-  // 已随 STUN/TURN 死配置一并删除：全前端无任何 RTCPeerConnection/iceServers
-  // 消费方（浏览器主应用只走 /ws/peer WS 会话；peerdrive-media 独立包自带
-  // 空 iceServers 默认，见其 core.js），这些设置是「设置页写→设置页读」闭环。
+  // Migration note (2026-08-20): this used to sync STUN/TURN to global
+  // localStorage — removed together with the dead STUN/TURN config: no
+  // consumer of RTCPeerConnection/iceServers exists anywhere in the frontend
+  // (the browser main app only uses the /ws/peer WS session; the
+  // peerdrive-media standalone package has its own empty iceServers default,
+  // see its core.js), so these settings formed a "written by settings page →
+  // read by settings page" closed loop.
   return true;
 }
 
-// 读取当前后端的某个字段，fallback 到全局值或默认值
+// Read a field of the current backend, falling back to the global value or
+// default
 function getBackendField(id, key, fallback) {
   const backends = getBackends();
   const target = backends.find(b => b.id === id);
@@ -75,7 +91,7 @@ function getBackendField(id, key, fallback) {
   return fallback;
 }
 
-// 更新当前后端的字段并落盘
+// Update a field of the current backend and persist it
 function updateBackendField(id, key, value) {
   const backends = getBackends();
   const idx = backends.findIndex(b => b.id === id);
@@ -96,11 +112,11 @@ function addBackend(name, url) {
 function removeBackend(id) {
   let backends = getBackends();
   const defIds = DEFAULT_BACKENDS.map(b => b.id);
-  if (defIds.includes(id)) return false; // 默认后端不可删除
+  if (defIds.includes(id)) return false; // default backends cannot be removed
   backends = backends.filter(b => b.id !== id);
   setBackends(backends);
   if (getCurrentBackendId() === id) {
-    // 切回第一个可用后端
+    // Switch back to the first available backend
     if (backends.length > 0) {
       switchBackend(backends[0].id);
     }
@@ -120,7 +136,7 @@ function updateBackend(id, fields) {
   return true;
 }
 
-// 获取 API 基础地址（从 localStorage 读取）
+// Get the API base address (read from localStorage)
 function getApiBase() {
   return localStorage.getItem(STORAGE_KEY) || DEFAULT_API;
 }
@@ -152,48 +168,59 @@ function getAuthToken() {
   return '';
 }
 
-// 通用请求封装：走本地 WS 会话 admin 帧（ws.js 内部转发 gin engine）。
-// 语义与旧 fetch 版完全一致：status>=400 → Error(err.status/err.data)
-// （409 冲突清单等结构化错误体，见 ws.js handleText admin-resp 分支）。
+// Generic request wrapper: goes through the local WS session admin frames
+// (ws.js internally forwards to the gin engine).
+// Semantics are identical to the old fetch version: status>=400 → Error
+// (err.status/err.data) (structured error bodies like the 409 conflict list,
+// see the ws.js handleText admin-resp branch).
 async function request(method, path, body = null) {
   return ws.admin(method, path, body);
 }
 
 /* ---- file ---- */
 export const verifyFile = (hash) => request('GET', `/files/verify/${hash}`);
-// downloadFile 经 WS req verb 拉取 sha256 内容（ws.js download，返回 Uint8Array）。
-// 旧 getDownloadUrl(hash) 返回 HTTP URL 已废弃（HTTP 是 legacy）；调用方需改
-// 用本函数或 downloadFileToDisk。
+// downloadFile pulls sha256 content via the WS req verb (ws.js download,
+// returns Uint8Array).
+// The old getDownloadUrl(hash), which returned an HTTP URL, is deprecated
+// (HTTP is legacy); callers must use this function or downloadFileToDisk.
 export const downloadFile = (hash) => ws.download(hash);
 export const downloadFileToDisk = (hash, filename) => ws.downloadToFile(hash, filename);
 
-// getBlobUrl 经 WS 拉取文件 → objectURL（图片/视频/PDF 预览用），带缓存。
-// 旧做法直接 <img src={getDownloadUrl(hash)}> 走 HTTP（legacy）；迁移后预览
-// 资源也走 WS。objectURL 生命周期由调用方 revoke（或页面卸载时清理）。
-// 内存泄漏防御（发现背景：代码审阅 2026-08-18——blobUrlCache 只增不减，
-// 每个不重复 hash 的预览各占一个 Blob 内存 + objectURL，长时间浏览累积）：
-// LRU 上限 + 淘汰即 revoke。Map 迭代序 = 插入序，重读 delete+set 刷新位置。
+// getBlobUrl pulls the file via WS → objectURL (for image/video/PDF preview),
+// with caching.
+// The old approach used <img src={getDownloadUrl(hash)}> over HTTP (legacy);
+// after the migration preview resources also go over WS. The objectURL
+// lifetime is revoked by the caller (or cleaned up on page unload).
+// Memory-leak defense (discovery background: code review 2026-08-18 —
+// blobUrlCache only grew and never shrank, with each distinct hash's preview
+// occupying a Blob in memory + an objectURL, accumulating over long browsing):
+// LRU cap + revoke-on-eviction. Map iteration order = insertion order, so
+// re-reading via delete+set refreshes the position.
 const BLOB_URL_CACHE_MAX = 50;
-// 大文件预览防护（发现背景：代码审阅 2026-08-18——download 全量内存
-// 组装，超大型文件预览会 OOM）。超过阈值拒绝预览并抛 err.code==='TOO_LARGE'，
-// 调用方应提示走 downloadFileToDisk 流式保存。
+// Large-file preview guard (discovery background: code review 2026-08-18 —
+// download assembled everything in memory, so very large file previews would
+// OOM). Above the threshold, preview is refused and throws err.code==='TOO_LARGE';
+// callers should prompt the user to use downloadFileToDisk for streaming save.
 const BLOB_URL_MAX_BYTES = 200 * 1024 * 1024;
 const blobUrlCache = new Map();
-// 并发去重（发现背景：代码审阅 2026-08-18——同 hash 并发两次 getBlobUrl
-// 会发两次 WS 下载，后完成的覆盖先完成的缓存项，先完成的 objectURL 永久
-// 泄漏且白耗带宽）。blobUrlInflight 存进行中的 Promise，命中即共享同一次
-// 下载；失败会 settle 后从 map 移除，下次调用自然重试。
+// Concurrency deduplication (discovery background: code review 2026-08-18 —
+// two concurrent getBlobUrl calls for the same hash issued two WS downloads,
+// the later-completing one overwrote the earlier cache entry, and the
+// earlier's objectURL leaked permanently while wasting bandwidth).
+// blobUrlInflight holds in-flight Promises; a hit shares the same download;
+// on failure it's removed from the map after settling, so the next call
+// naturally retries.
 const blobUrlInflight = new Map();
 export async function getBlobUrl(hash, mime = '') {
   if (blobUrlCache.has(hash)) {
     const url = blobUrlCache.get(hash);
-    blobUrlCache.delete(hash); // 重读 → 刷新 LRU 位置（set 后位于末尾）
+    blobUrlCache.delete(hash); // re-read → refresh LRU position (set moves it to the end)
     blobUrlCache.set(hash, url);
     return url;
   }
   if (blobUrlInflight.has(hash)) return blobUrlInflight.get(hash);
   const p = (async () => {
-    // stat 只探大小不发数据（req offset=0 size=0 → meta{total}）
+    // stat only probes the size without sending data (req offset=0 size=0 → meta{total})
     const total = await ws.stat(hash);
     if (total > BLOB_URL_MAX_BYTES) {
       const err = new Error(`file too large for preview (>${BLOB_URL_MAX_BYTES / 1024 / 1024}MB)`);
@@ -205,8 +232,10 @@ export async function getBlobUrl(hash, mime = '') {
     const url = URL.createObjectURL(blob);
     blobUrlCache.set(hash, url);
     if (blobUrlCache.size > BLOB_URL_CACHE_MAX) {
-      // 逐出最久未用的：正在屏幕上预览的必然近期被 get（位置靠后），
-      // 最旧项最可能已离开视图，revoke 其 objectURL 释放 Blob 内存。
+      // Evict the least recently used: what's currently on screen has
+      // necessarily been read recently (position toward the back), so the
+      // oldest entry is most likely out of view — revoke its objectURL to
+      // release Blob memory.
       const oldest = blobUrlCache.keys().next().value;
       URL.revokeObjectURL(blobUrlCache.get(oldest));
       blobUrlCache.delete(oldest);
@@ -226,8 +255,8 @@ export const revokeBlobUrl = (hash) => {
 export const registerLocalFile = (path, filename) =>
   request('POST', '/collections/register-local', { path, filename: filename || path.split('/').pop() });
 export const registerURL = async (url, filename = '') => {
-  // 后端 RegisterURL 返回 {hash,size,mime,filename}（back file.go:120），字段是 mime 不是 mime_type；
-  // RegisterLocalFile 只返回 {hash,filename}。统一补 mime_type/size 兼容旧调用方。
+  // Backend RegisterURL returns {hash,size,mime,filename} (back file.go:120); the field is mime, not mime_type;
+  // RegisterLocalFile only returns {hash,filename}. Uniformly backfill mime_type/size for backward compatibility with old callers.
   const res = await request('POST', '/collections/register-url', { url, filename });
   return { ...res, mime_type: res.mime_type || res.mime || '', size: res.size || 0 };
 };
@@ -239,10 +268,10 @@ export const browseDir = (dirPath = '/') =>
   request('GET', `/files/browse?path=${encodeURIComponent(dirPath)}`);
 
 /* ---- anon collections ---- */
-// createAnonCollection：visibility/access_list 对应后端 model.AnonCollection 的权限字段。
-// 坑：access_list 是账号名数组，不是 /access/list 产出的 hash —— 旧版曾传
-// access_list_hash，后端 CreateAnonCollection 只读 access_list 字段，导致
-// 「仅限指定权限」创建出来的合集名单为空 → 后端直接 400。
+// createAnonCollection: visibility/access_list correspond to the permission fields of the backend model.AnonCollection.
+// Pitfall: access_list is an array of account names, NOT the hashes produced by /access/list — the old version
+// used to pass access_list_hash, and the backend's CreateAnonCollection only reads the access_list field, causing
+// the "restricted only" collection to be created with an empty list → the backend returns 400 directly.
 export const createAnonCollection = (entries, friendly_name = '', tags = [], visibility = '', access_list = []) => {
   const normalized = entries.map(e => ({
     path: e.path,
@@ -252,20 +281,28 @@ export const createAnonCollection = (entries, friendly_name = '', tags = [], vis
 };
 export const getAnonCollection = (hash) => request('GET', `/collections/${hash}`);
 
-// 可见性三选项：常量定义在 src/constants.js（组件不能从本模块取常量——
-// tests/setup.js 对本模块做全量 automock，非函数导出会丢失；原因见 constants.js 注释）。
-// 这里只做转发，方便 `api.VISIBILITY` 这种老写法继续可用。
+// The three visibility options: constants are defined in src/constants.js
+// (components cannot take constants from this module —
+// tests/setup.js does a full automock of this module, and non-function exports
+// get lost; see the comments in constants.js).
+// This only forwards them, so the old `api.VISIBILITY` usage style keeps working.
 export { VISIBILITY, VISIBILITY_PUBLIC, VISIBILITY_RESTRICTED, VISIBILITY_PRIVATE } from './constants.js';
 
-// 切换已存在集合的权限档位。
-// 坑：集合是内容寻址的，改权限会写新 JSON → 返回新的 hash，旧 hash 仍是旧权限的快照。
-// 调用方必须拿 res.hash 当集合的新身份，不能继续用老 hash 分享。
+// Switch the permission level of an existing collection.
+// Pitfall: collections are content-addressed; changing the permission writes a
+// new JSON → a new hash is returned, and the old hash is still the old
+// permission's snapshot.
+// Callers must use res.hash as the collection's new identity; do not keep
+// sharing with the old hash.
 export const setAnonCollectionVisibility = (hash, visibility, access_list = []) =>
   request('PUT', `/anon/collections/${encodeURIComponent(hash)}/visibility`, { visibility, access_list });
 
-// 账号目录：优先 regserver 代理端点 /reg/users（含分组 /reg/groups）。
-// 背景：账号目录属于「注册认证服务」模块，还没落地前端点不存在，这里不能抛错 ——
-// 调用方拿到空数组后降级到手动输入 @id（AccountPicker 自带这条兜底路径）。
+// Account directory: prefer the regserver proxy endpoint /reg/users (includes
+// groups at /reg/groups).
+// Background: the account directory belongs to the "registration service"
+// module, which has no frontend landing page yet, so we cannot throw here —
+// callers get an empty array and fall back to manual @id entry (AccountPicker
+// has this fallback path built in).
 export const listKnownAccounts = async () => {
   try {
     const res = await request('GET', '/reg/users');
@@ -275,7 +312,8 @@ export const listKnownAccounts = async () => {
   return [];
 };
 
-// listKnownGroups：分组用于「快捷分享整组」，同样允许服务缺席 → 空数组。
+// listKnownGroups: groups are used for "quick share to the whole group"; the
+// service may also be absent → empty array.
 export const listKnownGroups = async () => {
   try {
     const res = await request('GET', '/reg/groups');
@@ -284,11 +322,13 @@ export const listKnownGroups = async () => {
   } catch {}
   return [];
 };
-// 下载 URL 的虚拟路径必须逐段 encodeURIComponent（文件名可能含空格/#/? 等，
-// 不编码会破坏 URL；后端 gin *filepath 已对 URL.Path 解码，编码后服务端比对仍正确）
+// Download URL virtual paths must be encodeURIComponent'd segment by segment
+// (filenames may contain spaces/#/? etc.; not encoding breaks the URL; the
+// backend gin *filepath already decodes URL.Path, so the encoded form still
+// compares correctly on the server side)
 const encodePath = (p) => (p || '').split('/').map(encodeURIComponent).join('/');
-// downloadAnonFile 经 WS admin GET 拉集合内文件（后端返回文件流 → admin-bin
-// 二进制帧）。旧 getAnonFileDownloadUrl(hash, p) 返回 HTTP URL 已废弃。
+// downloadAnonFile pulls a file inside a collection via WS admin GET (backend
+// returns a file stream → admin-bin binary frame). The old getAnonFileDownloadUrl(hash, p), which returned an HTTP URL, is deprecated.
 export const downloadAnonFile = (hash, p) =>
   ws.admin('GET', `/collections/${encodeURIComponent(hash)}/${encodePath(p)}`);
 
@@ -313,55 +353,73 @@ export const forkUserCollection = (username, source_username, coll, source_coll)
   request('POST', '/actions/fork', { username, source_username, collection_name: coll, source_coll_name: source_coll });
 export const mergeUserCollection = (username, source_username, coll, source_coll, strategy = 'ours') =>
   request('POST', '/actions/merge', { username, source_username, collection_name: coll, source_coll_name: source_coll, strategy });
-// downloadUserFile 经 WS admin GET 拉用户集合内文件（同 downloadAnonFile）。
-// 旧 getUserFileDownloadUrl(username, coll, filepath) 返回 HTTP URL 已废弃。
+// downloadUserFile pulls a file inside a user collection via WS admin GET
+// (same as downloadAnonFile).
+// The old getUserFileDownloadUrl(username, coll, filepath), which returned an HTTP URL, is deprecated.
 export const downloadUserFile = (username, coll, filepath) =>
   ws.admin('GET', `/${encodeURIComponent(username)}/${encodeURIComponent(coll)}/${encodePath(filepath)}`);
 
-// 注意：旧 libp2p 双栈面板（P2PPanel/P2PDashboard/P2PTopology/DHTExplorer 双栈查询）
-// 及其 api 导出（getP2PStatus/getP2PPeers/dualAnnounce/dualFind 等）已于 2026-08-19
-// 随 libp2p 端点删除一并清理——后端 /p2p/* 只剩 forward/auth-status/webrtc-info。
+// Note: the old libp2p dual-stack panel (P2PPanel/P2PDashboard/P2PTopology/
+// DHTExplorer dual-stack queries)
+// and its api exports (getP2PStatus/getP2PPeers/dualAnnounce/dualFind, etc.)
+// were cleaned up on 2026-08-19 along with the libp2p endpoint deletion —
+// the backend /p2p/* now only has forward/auth-status/webrtc-info.
 
 /* ---- P2P BT ---- */
-// PeerJS 节点状态（GET /peerjs/node，2026-08-19 起替代已删的 /p2p/status 供前端面板用）。
+// PeerJS node status (GET /peerjs/node, replaces the deleted /p2p/status for
+// the frontend panel as of 2026-08-19).
 export const getPeerjsNode = () => request('GET', '/peerjs/node');
 
-/* ---- 节点市场 / 我的节点 / 对方节点（网盘目标 M1-M3，见 doc/NETDISK.md）----
- * 信息架构对齐普通网盘："自己的节点 / 别人的节点 / 市场里加入节点"。
- * 请求都经 /ws/peer 的 admin 帧（与其它 api 一致），后端路由见
- * back/internal/router/peerjs_routes.go 与 router.go 的 /p2p/pull*。
+/* ---- Node market / my nodes / peer nodes (netdisk targets M1-M3, see doc/NETDISK.md)----
+ * The information architecture aligns with a normal netdisk: "my nodes /
+ * other people's nodes / nodes joined from the market".
+ * All requests go through the admin frames of /ws/peer (consistent with the
+ * other APIs); backend routes are in
+ * back/internal/router/peerjs_routes.go and /p2p/pull* in router.go.
  */
-// 市场列表：发现服务器在线节点 ∪ 本地已加入清单（离线也保留，不会"消失"）。
+// Market list: nodes online at the discovery server ∪ the local joined list
+// (offline ones are kept, they don't "disappear").
 export const getNodeMarket = () => request('GET', '/peerjs/nodes');
-// 我加入的节点（列表页用；与市场列表相比只保留 joined=true 的条目）。
+// Nodes I have joined (used by the list page; compared with the market list,
+// only entries with joined=true are kept).
 export const getJoinedNodes = () => request('GET', '/peerjs/nodes/joined');
-// 加入/移出。加入是持久化的，且会让本节点在信令重连后自动连它。
+// Join/leave. Joining is persisted and makes this node auto-connect to it
+// after a signaling reconnection.
 export const joinNode = (peer) => request('POST', '/peerjs/nodes/join', { peer });
 export const leaveNode = (peer) =>
   request('DELETE', `/peerjs/nodes/join?peer=${encodeURIComponent(peer)}`);
-// 对方节点的共享清单：打包好的合集（含条目）与单独文件——即"文件链接"列表。
-// 未直连时后端会主动拨号并等一小会儿（见 controller.GetPeerShares）。
+// Peer node's share list: packaged collections (with entries) and standalone
+// files — i.e. the "file links" list.
+// If not directly connected, the backend actively dials and waits a moment
+// (see controller.GetPeerShares).
 export const getPeerShares = (peer) =>
   request('GET', `/peerjs/nodes/${encodeURIComponent(peer)}/shares`);
 
-/* ---- 本节点共享范围（doc/NETDISK.md M2.6）----
- * 「我愿意把哪些内容给出去」是运营者的运行时选择：整个目录 / 单个文件 / 合集，
- * 三条来源取并集。改它不用重启节点（后端落盘 storage/share_scope.json）。
- * 注意与 getPeerShares 的区别：那是去问**对方**共享了什么，这是管理**自己**的。
+/* ---- This node's share scope (doc/NETDISK.md M2.6)----
+ * "What content am I willing to give out" is the operator's runtime choice:
+ * a whole directory / a single file / a collection,
+ * and the three sources are unioned. Changing it doesn't require restarting
+ * the node (the backend persists it to storage/share_scope.json).
+ * Note the difference from getPeerShares: that asks **the peer** what they
+ * share; this manages **your own**.
  */
-// 当前范围 + 可选文件清单（每行带 shared / by_dir，前端直接渲染勾选框）。
+// Current scope + optional file list (each line carries shared / by_dir, so
+// the frontend can render checkboxes directly).
 export const getShareScope = () => request('GET', '/peerjs/share');
-// 局部更新：只传要改的字段（enable / dirs / files / collections / friends），
-// 未传的保持原样。条目形如 {id, level}（也接受字符串，级别按 public）。
+// Partial update: only pass the fields to change (enable / dirs / files /
+// collections / friends);
+// unchanged fields keep their values. Entries look like {id, level} (strings
+// are also accepted, with the level treated as public).
 export const setShareScope = (patch) => request('PUT', '/peerjs/share', patch || {});
-// 勾选/取消若干文件（按 hash），可同时指定级别：
-//   public   列出在共享清单里，谁都能下载
-//   unlisted 不列出，但知道 hash 的人能下载
-//   private  不列出，只有自己和好友能下载
-// level 省略时后端沿用该 hash 已有的级别（没有就 public）。
+// Check/uncheck several files (by hash), with an optional level:
+//   public   listed in the share list, anyone can download
+//   unlisted not listed, but anyone who knows the hash can download
+//   private  not listed, only yourself and friends can download
+// If level is omitted, the backend keeps the level that hash already has
+// (or public if it has none).
 export const setFilesShared = (hashes, shared = true, level = '') =>
   request('POST', '/peerjs/share/files', { hashes, shared, level });
-// 跨节点拉取保存（服务端任务式，带进度/取消）。
+// Cross-node pull and save (server-side task style, with progress/cancel).
 export const getPullJobs = () => request('GET', '/p2p/pull');
 export const startPull = (peer, hash, name = '', path = '') =>
   request('POST', '/p2p/pull', { peer, hash, name, path });
@@ -378,8 +436,8 @@ export const btGetDownloads = () => request('GET', '/bt/downloads');
 export const btGetDownload = (infohash) => request('GET', `/bt/download/${infohash}`);
 export const btMagnetResolve = (uri) => request('POST', '/bt/magnet', { uri });
 export const btTorrentUpload = (file) =>
-  // admin 二进制上传：/bt/torrent + multipart 字段名 "torrent"
-  // （后端 BTTorrentUpload 读 FormFile("torrent")，与 /files/upload 的 "file" 不同）
+  // admin binary upload: /bt/torrent + multipart field name "torrent"
+  // (the backend BTTorrentUpload reads FormFile("torrent"), which differs from "file" in /files/upload)
   ws.upload(file, file?.name, 'torrent', '/bt/torrent');
 export const btRemoveDownload = (infohash) => request('DELETE', `/bt/download/${infohash}`);
 export const btPauseDownload = (infohash) => request('POST', `/bt/download/${infohash}/pause`);
@@ -387,8 +445,8 @@ export const btResumeDownload = (infohash) => request('POST', `/bt/download/${in
 export const btSeedDownload = (infohash) => request('POST', `/bt/download/${infohash}/seed`);
 export const btStopSeed = (infohash) => request('POST', `/bt/download/${infohash}/unseed`);
 export const btGetMagnetUri = (infohash) => request('GET', `/bt/download/${infohash}/magnet`);
-// downloadTorrentFile 经 WS admin GET 拉 .torrent 文件（二进制响应 → admin-bin）。
-// 旧 btGetTorrentUrl(infohash) 返回 HTTP URL 已废弃。
+// downloadTorrentFile pulls a .torrent file via WS admin GET (binary response
+// → admin-bin). The old btGetTorrentUrl(infohash), which returned an HTTP URL, is deprecated.
 export const downloadTorrentFile = (infohash) =>
   ws.admin('GET', `/bt/download/${infohash}/torrent`);
 export const btSeedCollection = (collectionHash) => request('POST', '/bt/seed-collection', { collection_hash: collectionHash });
@@ -404,7 +462,8 @@ export const listPublicCollections = (q = '') =>
   request('GET', `/collections/public${q ? '?q=' + encodeURIComponent(q) : ''}`);
 
 /* ---- file upload/delete ---- */
-// uploadFile 走 admin 二进制分片上传（ws.upload，multipart 字段 "file"）。
+// uploadFile uses admin binary chunked upload (ws.upload, multipart field
+// "file").
 export const uploadFile = (file) => ws.upload(file, file?.name, 'file');
 export const deleteFile = (hash) => request('DELETE', `/files/${hash}`);
 
@@ -453,16 +512,19 @@ const FOLLOW_REDIRECTS_KEY = 'peerdrive_follow_redirects';
 export function getFollowRedirects() { return localStorage.getItem(FOLLOW_REDIRECTS_KEY) !== 'false'; }
 export function setFollowRedirects(v) { localStorage.setItem(FOLLOW_REDIRECTS_KEY, v ? 'true' : 'false'); }
 
-/* ---- p2p network config（已整体删除，2026-08-20）----
- * bootstrapPeer / relayServer / stunUrl / turnUrl / turnCredential 全部为
- * 「设置页写 localStorage → 设置页读回显」的死闭环，无任何功能消费方：
- * - bootstrap peer：libp2p 概念，后端 PEERDRIVE_BOOTSTRAP_PEER 已随 libp2p
- *   栈删除（doc/archive/LEGACY.md §C）
- * - relay：relay 服务后端已删（doc/archive/LEGACY.md §A），徽章恒 false
- * - STUN/TURN：浏览器主应用不创建 RTCPeerConnection（全部通信走 /ws/peer
- *   WS 会话）；peerdrive-media 独立包默认空 iceServers（浏览器↔Node 内网
- *   场景 host candidate 即可）。未来若做跨网穿透，在 media 包 signaling.config
- *   显式传 iceServers，而不是恢复这组设置页。
+/* ---- p2p network config (removed entirely, 2026-08-20)----
+ * bootstrapPeer / relayServer / stunUrl / turnUrl / turnCredential were all
+ * a dead closed loop of "settings page writes to localStorage → settings
+ * page reads it back for display", with no functional consumer:
+ * - bootstrap peer: a libp2p concept; the backend PEERDRIVE_BOOTSTRAP_PEER
+ *   was deleted along with the libp2p stack (doc/archive/LEGACY.md §C)
+ * - relay: the relay service was removed from the backend (doc/archive/LEGACY.md §A), the badge is always false
+ * - STUN/TURN: the browser main app doesn't create RTCPeerConnection (all
+ *   communication goes over the /ws/peer WS session); the peerdrive-media
+ *   standalone package defaults to empty iceServers (for browser↔Node
+ *   intranet scenarios, host candidates suffice). If cross-network
+ *   punching is done in the future, explicitly pass iceServers in the media
+ *   package's signaling.config rather than reviving this settings group.
  */
 
 /* ---- ipfs gateway config (frontend-only) ---- */
@@ -472,13 +534,14 @@ export function getIPFSEnabled() { return localStorage.getItem(IPFS_ENABLED_KEY)
 
 /* ---- IPFS compat layer (server-side) ---- */
 
-// getIPFSCompatStatus 查询服务器 IPFS 兼容层状态。
+// getIPFSCompatStatus queries the server's IPFS compatibility layer status.
 export async function getIPFSCompatStatus() {
   const data = await request('GET', '/ipfs');
   return data;
 }
 
-// setIPFSCompatEnabled 通过服务器 API 启用或禁用 IPFS 兼容模式。
+// setIPFSCompatEnabled enables or disables IPFS compatibility mode via the
+// server API.
 export async function setIPFSCompatEnabled(enabled) {
   const data = await request('POST', '/ipfs/toggle', { enabled });
   return data;
@@ -486,25 +549,26 @@ export async function setIPFSCompatEnabled(enabled) {
 
 /* ---- IPFS pin & gateway ---- */
 
-// pinCID 固定指定 CID（从 IPFS 网关下载并永久缓存）。
+// pinCID pins the given CID (downloads from the IPFS gateway and caches
+// permanently).
 export async function pinCID(cid) {
   const data = await request('POST', `/ipfs/pin/${cid}`);
   return data;
 }
 
-// unpinCID 取消固定指定 CID。
+// unpinCID unpins the given CID.
 export async function unpinCID(cid) {
   const data = await request('DELETE', `/ipfs/pin/${cid}`);
   return data;
 }
 
-// listPins 列出所有已固定的 CID。
+// listPins lists all pinned CIDs.
 export async function listPins() {
   const data = await request('GET', '/ipfs/pins');
   return data;
 }
 
-// getIPFSGatewayStatus 检查所有 IPFS 网关的健康状况。
+// getIPFSGatewayStatus checks the health of all IPFS gateways.
 export async function getIPFSGatewayStatus() {
   const data = await request('GET', '/ipfs/gateways');
   return data;
@@ -527,22 +591,30 @@ const FREE_LLM_MODELS = [
 ];
 export { DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_MODEL, DEFAULT_LLM_BODY, FREE_LLM_MODELS };
 
-// 保存数据同意到本地。
-// 注意：旧名称 uploadConsent 容易让人误以为会上传服务器，但后端没有 /consent 端点；
-// 这里只做本地记录，避免「已上传同意记录」这类误导性状态。
-// 再 review 2026-08：原实现写到 peerdrive_consent 这个没有任何读取方的键，
-// 而实际在设置页生效的是 DATA_CONSENT_KEY（peerdrive_data_consent）；统一改为
-// 委托 setDataConsent(true)，避免同意状态出现“已写但读不到”的分叉。
+// Save data consent locally.
+// Note: the old name uploadConsent is easily mistaken for uploading to the
+// server, but the backend has no /consent endpoint;
+// this only records it locally, avoiding misleading states like "consent record already uploaded".
+// Re-review 2026-08: the original implementation wrote to peerdrive_consent,
+// a key with no reader,
+// while what actually takes effect on the settings page is DATA_CONSENT_KEY
+// (peerdrive_data_consent); unified to
+// delegate to setDataConsent(true), avoiding a "written but can't be read"
+// divergence in consent state.
 export async function saveConsentLocal() {
   setDataConsent(true);
 }
 
 /* ---- alias exports for legacy usage ---- */
-// 统一 Collection API（替代旧的 createUserCollection/createAnonCollection 等）
-// 一切皆 collection，entry 的 provider 可为 sha256 或 url。
-// 注意：匿名分派器（dispatchCreateCollection）按 body 里是否有 username 走
-// 用户体系，匿名创建字段是 friendly_name 不是 name（发现背景：再 review 2026-08
-// 发现此别名用 name 会导致匿名创建时后端收到空 friendly_name，合集名丢失）。
+// Unified Collection API (replaces the old createUserCollection/
+// createAnonCollection, etc.)
+// Everything is a collection; an entry's provider can be sha256 or url.
+// Note: the anonymous dispatcher (dispatchCreateCollection) decides based on
+// whether the body has a username whether to go through the
+// user system; anonymous creation uses the field friendly_name, not name
+// (discovery background: re-review 2026-08
+// found that using name in this alias caused the backend to receive an empty
+// friendly_name on anonymous creation, losing the collection name).
 export const createCollection = (entries, name = '', tags = []) =>
   request('POST', '/collections', { friendly_name: name, entries, tags });
 export const listCollections = () => request('GET', '/collections');

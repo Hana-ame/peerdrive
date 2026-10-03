@@ -1,232 +1,234 @@
-# p2p_bt —— BT DHT 桥（go-peerdrive-bt 独立库）
+# p2p_bt —— BT DHT Bridge (go-peerdrive-bt standalone library)
 
-> 一句话职责：BitTorrent 生态能力桥——Mainline DHT 上的 announce/查找、
-> BEP 44（可变/不可变数据存储）、BEP 51（infohash 采样）、torrent/magnet
-> 下载与做种，作为**独立 go.mod 库** `github.com/Hana-ame/go-peerdrive-bt`
-> （`back/p2p_bt/`，主 go.mod `replace` 引用）。
+> One-line responsibility: BitTorrent ecosystem capability bridge —— announce/lookup
+> on the Mainline DHT,
+> BEP 44 (mutable/immutable data storage), BEP 51 (infohash sampling), torrent/magnet
+> download and seeding, as a **standalone go.mod library** `github.com/Hana-ame/go-peerdrive-bt`
+> (`back/p2p_bt/`, referenced from the main go.mod via `replace`).
 
-- 层归属：AOP ⑦ 外部能力切面（`doc/LAYERS.md` §1）
-- 独立库事实：`back/p2p_bt/go.mod` 声明 `module github.com/Hana-ame/go-peerdrive-bt`
-  （go 1.26.2），仅依赖 `anacrolix/dht/v2 v2.23.0` 与 `anacrolix/torrent v1.61.0`
-  （+传递依赖）；主模块 `replace github.com/Hana-ame/go-peerdrive-bt => ./p2p_bt`
-- 边界：**新代码禁止 import `internal/p2p_bt`**（旧路径已删）；主模块只准经
-  `github.com/Hana-ame/go-peerdrive-bt` 引用（REFACTOR.md §8 规则 1）
+- Layer membership: AOP ⑦ External capability aspect (`doc/LAYERS.md` §1)
+- Standalone library fact: `back/p2p_bt/go.mod` declares `module github.com/Hana-ame/go-peerdrive-bt`
+  (go 1.26.2), depending only on `anacrolix/dht/v2 v2.23.0` and `anacrolix/torrent v1.61.0`
+  (+ transitive dependencies); the main module uses `replace github.com/Hana-ame/go-peerdrive-bt => ./p2p_bt`
+- Boundary: **new code must not import `internal/p2p_bt`** (old path has been removed); the main module may only
+  reference it via `github.com/Hana-ame/go-peerdrive-bt` (REFACTOR.md §8 rule 1)
 
 ---
 
-## 职责
+## Responsibilities
 
-1. **BT Mainline DHT 节点**（`bt_dht.go`）：UDP 服务器 + 引导（router.bittorrent
-   .com / dht.transmissionbt.com）——announce 文件 hash、查找提供者。
-2. **BEP 44 数据存取**（`bep44.go`）：不可变项（≤1000 字节，target=sha1(v)）
-   与可变项（Ed25519 签名 + seq + salt，target=sha1(pubkey‖salt)）的 put/get。
-3. **BEP 51 采样**（`bep51.go`）：对 DHT 节点发 `sample_infohashes` 查询收集
-   infohash 样本，支持 `DiscoverInfohashes` 爬取。
-4. **torrent 下载客户端**（`client.go`）：.torrent 字节 / magnet URI 下载、
-   暂停恢复、做种、进度查询、完成回调（sha256 逐文件）。
-5. **文件桥**（`bt_bridge.go`）：把 peerdrive 内容寻址存储与 DHT 桥接——
-   `ShareFile`（announce）、`FetchFile`（FindProviders → 对端 HTTP 拉取）。
+1. **BT Mainline DHT node** (`bt_dht.go`): UDP server + bootstrapping (router.bittorrent
+   .com / dht.transmissionbt.com) —— announce file hash, find providers.
+2. **BEP 44 data storage** (`bep44.go`): immutable items (≤1000 bytes, target=sha1(v))
+   and mutable items (Ed25519 signature + seq + salt, target=sha1(pubkey‖salt)) put/get.
+3. **BEP 51 sampling** (`bep51.go`): send `sample_infohashes` queries to DHT nodes to collect
+   infohash samples, supports `DiscoverInfohashes` crawling.
+4. **torrent download client** (`client.go`): .torrent byte / magnet URI download,
+   pause/resume, seeding, progress query, completion callback (sha256 per file).
+5. **File bridge** (`bt_bridge.go`): bridges peerdrive's content-addressed storage with DHT ——
+   `ShareFile` (announce), `FetchFile` (FindProviders → HTTP pull from peer).
 
-## 模块清单（每个文件：文件名 + 一句话职责 + 关键导出）
+## Module inventory (per file: filename + one-line responsibility + key exports)
 
-### `bt_dht.go` —— DHT 节点 + announce/查找
+### `bt_dht.go` —— DHT node + announce/lookup
 
-| 关键导出 | 说明 |
+| Key export | Description |
 |---|---|
-| `PeerdriveDHTNodePrefix = [2]byte{0x70, 0x64}` | 节点 ID 前缀 "pd"（0x70='p', 0x64='d'）——标记自家节点，供 `IsPeerdriveNodeID` 识别 |
-| `IsPeerdriveNodeID(id krpc.ID) bool` | 判断 20 字节 DHT 节点 ID 是否属于 peerdrive 节点 |
-| `BTDHTService` 结构体 | `Server`(anacrolix dht.Server) / `listenAddr` / `NodeID` / `localBEP44Store`(sync.Map) |
-| `NewBTDHT(listenAddr) (*BTDHTService, error)` | 起 UDP DHT + 引导 + 等 1s 路由表填充；可注入已绑定的 `net.Conn` |
-| `Announce(hash) error` | sha256 截前 20 字节为 infohash → `Server.Announce(ih, port, false)` |
-| `FindProviders(hash) ([]string, error)` | `AnnounceTraversal` 收集 `ip:port` 去重列表，15s 超时 |
-| `NumNodes()` / `Close()` | 路由表节点数 / 关服务器 |
-| `infoHashFromHex(hash)` | 40 hex（已是 infohash）或 64 hex（SHA256 截 20）→ 20 字节 |
-| `generatePeerdriveNodeID()` | 前 2 字节 "pd" + 随机 18 字节 |
+| `PeerdriveDHTNodePrefix = [2]byte{0x70, 0x64}` | Node ID prefix "pd" (0x70='p', 0x64='d') —— marks our own nodes, for `IsPeerdriveNodeID` to recognize |
+| `IsPeerdriveNodeID(id krpc.ID) bool` | Checks whether a 20-byte DHT node ID belongs to a peerdrive node |
+| `BTDHTService` struct | `Server`(anacrolix dht.Server) / `listenAddr` / `NodeID` / `localBEP44Store`(sync.Map) |
+| `NewBTDHT(listenAddr) (*BTDHTService, error)` | Starts UDP DHT + bootstrapping + waits 1s for routing table to fill; can inject an already-bound `net.Conn` |
+| `Announce(hash) error` | Truncate sha256 to first 20 bytes as infohash → `Server.Announce(ih, port, false)` |
+| `FindProviders(hash) ([]string, error)` | `AnnounceTraversal` collects deduplicated `ip:port` list, 15s timeout |
+| `NumNodes()` / `Close()` | Routing table node count / close server |
+| `infoHashFromHex(hash)` | 40 hex (already an infohash) or 64 hex (SHA256 truncated to 20) → 20 bytes |
+| `generatePeerdriveNodeID()` | First 2 bytes "pd" + 18 random bytes |
 
-### `bep44.go` —— BEP 44 数据存取
+### `bep44.go` —— BEP 44 data storage
 
-| 关键导出 | 说明 |
+| Key export | Description |
 |---|---|
-| `ErrBEP44NotFound` / `ErrBEP44DHTDisabled` | 包级哨兵错误 |
-| `PutImmutable(data) (target [20]byte, err)` | bencode 后 ≤1000 字节；三写：`localBEP44Store`（内存，保 Get 回环）→ `putLocal`（自家服务器）→ 远端 close nodes 尽力而为（需先 get 拿写 token） |
-| `GetImmutable(target)` | 先查本地 store（自己 put 的必然能 get），再迭代 Kademlia lookup |
-| `PutMutable(privKey, salt, data, seq) (target, err)` | Ed25519 签名，salt ≤64 字节，seq 递增 |
-| `GetMutable(pubKey, salt) (data, seq, err)` | target=sha1(pubkey‖salt)，任意 seq 查询 |
-| `putLocal(put, target)` | **已取消 context 的 `Server.Put`**——anacrolix 在发网络查询前先写本地 store，取消 ctx 让网络查询立即返回（依赖库内部行为，见坑） |
-| `lookupValue(target, seq)` | 8 轮迭代 Kademlia（alpha=3 并行），首个带 v 的响应即返回 |
-| `closestNodes(target, count)` | 路由表到 target 距离最近的 count 个节点 |
-| `MakeBEP44Key()` / `MakeBEP44Target(pubKey, salt)` | 密钥对生成 / target 计算工具 |
+| `ErrBEP44NotFound` / `ErrBEP44DHTDisabled` | Package-level sentinel errors |
+| `PutImmutable(data) (target [20]byte, err)` | ≤1000 bytes after bencode; three writes: `localBEP44Store` (memory, keeps Get round-trip) → `putLocal` (own server) → remote close nodes best-effort (must first get to obtain a write token) |
+| `GetImmutable(target)` | First checks local store (anything you put will definitely be get-able), then iterates Kademlia lookup |
+| `PutMutable(privKey, salt, data, seq) (target, err)` | Ed25519 signature, salt ≤64 bytes, seq monotonically increasing |
+| `GetMutable(pubKey, salt) (data, seq, err)` | target=sha1(pubkey‖salt), any seq query |
+| `putLocal(put, target)` | **`Server.Put` with a cancelled context** —— anacrolix writes to local store before sending network queries; cancelling ctx makes the network query return immediately (relies on library internal behavior, see caveats) |
+| `lookupValue(target, seq)` | 8 rounds of iterative Kademlia (alpha=3 parallelism), first response with v is returned |
+| `closestNodes(target, count)` | The `count` nodes closest in routing-table distance to target |
+| `MakeBEP44Key()` / `MakeBEP44Target(pubKey, salt)` | Key pair generation / target computation utilities |
 
-### `bep51.go` —— infohash 采样
+### `bep51.go` —— infohash sampling
 
-| 关键导出 | 说明 |
+| Key export | Description |
 |---|---|
-| `ErrBEP51DHTDisabled` / `ErrBEP51NoSamples` | 包级哨兵错误 |
-| `SampleInfohashes(target) ([][20]byte, error)` | 并行查 8 个最近节点，去重收集；全失败回退本地服务器查询 |
-| `queryNodeForSamples(addr, target)` | 单节点 `sample_infohashes` 查询（10s 超时） |
-| `DiscoverInfohashes(maxResults)` | 用 3 个随机 target 覆盖不同 bucket 爬取，`maxResults` 上限 |
+| `ErrBEP51DHTDisabled` / `ErrBEP51NoSamples` | Package-level sentinel errors |
+| `SampleInfohashes(target) ([][20]byte, error)` | Queries 8 closest nodes in parallel, deduplicated collection; on total failure falls back to local server query |
+| `queryNodeForSamples(addr, target)` | Single-node `sample_infohashes` query (10s timeout) |
+| `DiscoverInfohashes(maxResults)` | Crawls using 3 random targets covering different buckets, `maxResults` upper bound |
 
-### `client.go` —— torrent 下载客户端
+### `client.go` —— torrent download client
 
-| 关键导出 | 说明 |
+| Key export | Description |
 |---|---|
-| `BTClient` 结构体 | `cl`(anacrolix torrent.Client) / `dataDir` / `onComplete` / `downloads` / `customPeers` / `torrentData` / `autoSeed` |
-| `NewBTClient(dataDir)` / `newBTClient(dataDir, listenAddr)` | 配置：`Seed=false, NoUpload=true, DisableUTP=true` |
-| `SetOnComplete(fn)` | 下载完成回调（infohash + 完成文件列表） |
-| `AddTorrentBytes(data)` / `AddMagnetURI(uri)` | 从 .torrent 字节 / magnet 启动下载（返回 `TorrentMeta`） |
-| `AddTorrent(meta)` / `AddMagnet(magnet)` | 向后兼容入口（重建 magnet 再走 AddMagnetURI） |
-| `PauseDownload` / `ResumeDownload` / `RemoveDownload` | 暂停/恢复/删除（删除含数据目录清理） |
-| `GetDownload` / `ListDownloads` / `GetGlobalStats` | 进度/状态查询 |
-| `StartSeed` / `StopSeed` / `IsSeeding` / `ListSeeders` / `SetAutoSeed` | 做种管理 |
-| `GetTorrentBytes` / `GetMagnetURI` | 导出 .torrent / magnet（磁力元数据就绪后从库导出） |
-| `AddPeer` / `GetCustomPeers` | 手动对端注入 |
-| `globalDHT` / `SetGlobalDHT(dht)` | 全局 DHT 引用（GetGlobalStats().DHTNodes 用） |
-| `torrentMetaFromLibrary` / `metaFromTorrent` | 库类型 → 本库 `TorrentMeta`（HTTP API 响应用） |
+| `BTClient` struct | `cl`(anacrolix torrent.Client) / `dataDir` / `onComplete` / `downloads` / `customPeers` / `torrentData` / `autoSeed` |
+| `NewBTClient(dataDir)` / `newBTClient(dataDir, listenAddr)` | Config: `Seed=false, NoUpload=true, DisableUTP=true` |
+| `SetOnComplete(fn)` | Download completion callback (infohash + list of completed files) |
+| `AddTorrentBytes(data)` / `AddMagnetURI(uri)` | Start download from .torrent bytes / magnet (returns `TorrentMeta`) |
+| `AddTorrent(meta)` / `AddMagnet(magnet)` | Backward-compatible entry points (rebuild magnet then go through AddMagnetURI) |
+| `PauseDownload` / `ResumeDownload` / `RemoveDownload` | Pause/resume/remove (remove includes data directory cleanup) |
+| `GetDownload` / `ListDownloads` / `GetGlobalStats` | Progress/status query |
+| `StartSeed` / `StopSeed` / `IsSeeding` / `ListSeeders` / `SetAutoSeed` | Seeding management |
+| `GetTorrentBytes` / `GetMagnetURI` | Export .torrent / magnet (magnet metadata exported from library once ready) |
+| `AddPeer` / `GetCustomPeers` | Manual peer injection |
+| `globalDHT` / `SetGlobalDHT(dht)` | Global DHT reference (used by GetGlobalStats().DHTNodes) |
+| `torrentMetaFromLibrary` / `metaFromTorrent` | Library type → this library's `TorrentMeta` (for HTTP API responses) |
 
-内部机制：`downloadState{status: downloading/paused/completed/error/seeding}` +
-`watchDownload`（2s 轮询完成判定）→ `finalizeDownload`（逐文件 sha256 → 关
-`doneCh` → 触发 onComplete / autoSeed）。
+Internal mechanism: `downloadState{status: downloading/paused/completed/error/seeding}` +
+`watchDownload` (2s polling for completion detection) → `finalizeDownload` (per-file sha256 → close
+`doneCh` → trigger onComplete / autoSeed).
 
-### `bt_bridge.go` —— 文件桥
+### `bt_bridge.go` —— File bridge
 
-| 关键导出 | 说明 |
+| Key export | Description |
 |---|---|
-| `BTBridge` 结构体 | `DHT`(BTDHTService) / `storageDir` / `shared`(已共享 hash 集合) |
-| `NewBTBridge(dhtSvc, storageDir)` | 创建 |
-| `ShareFile(hash) error` | DHT announce + 记入 `shared`（幂等语义由调用方维护） |
-| `FetchFile(ctx, hash) ([]byte, error)` | FindProviders → 逐个 `http://{peerAddr}/files/{hash}`（15s 超时）→ 第一个 200 返回 |
-| `ListShared()` / `FilePath(hash)` / `EnsureFileWritten(hash, data)` | 已共享列表 / 标准 CAS 路径 / 写入 peerdrive 存储布局 |
+| `BTBridge` struct | `DHT`(BTDHTService) / `storageDir` / `shared`(set of shared hashes) |
+| `NewBTBridge(dhtSvc, storageDir)` | Create |
+| `ShareFile(hash) error` | DHT announce + record into `shared` (idempotency semantics maintained by caller) |
+| `FetchFile(ctx, hash) ([]byte, error)` | FindProviders → sequentially try `http://{peerAddr}/files/{hash}` (15s timeout) → return first 200 |
+| `ListShared()` / `FilePath(hash)` / `EnsureFileWritten(hash, data)` | Shared list / standard CAS path / write into peerdrive storage layout |
 
-### `bt_types.go` —— 对外共享类型
+### `bt_types.go` —— Shared external types
 
-`TorrentFile`、`TorrentMeta`、`MagnetInfo`、`DownloadStatus`、`CompletedFile`、
-`OnTorrentComplete`（回调签名）、`GlobalStats`——全部带 JSON tag，直接作
-HTTP API 响应体。
+`TorrentFile`, `TorrentMeta`, `MagnetInfo`, `DownloadStatus`, `CompletedFile`,
+`OnTorrentComplete` (callback signature), `GlobalStats` —— all with JSON tags, directly
+usable as HTTP API response bodies.
 
-### `log.go` —— 库内日志
+### `log.go` —— In-library logging
 
-`LogDebug/LogInfo/LogWarn/LogError/LogDuration` 五个包级函数；级别由
-`PEERDRIVE_LOG_LEVEL` 环境变量控制（默认 INFO）。**坑：拆独立库后不能 import
-主模块 `internal/log`（Go internal 规则），原来委托 `p2p_bt.LogDebug ->
-log.LogDebug` 的写法改为自实现，签名/行为对齐**（log.go:1-3 注释）。
+Five package-level functions `LogDebug/LogInfo/LogWarn/LogError/LogDuration`; level controlled
+by `PEERDRIVE_LOG_LEVEL` environment variable (default INFO). **Caveat: after splitting into a standalone
+library, cannot import main module's `internal/log` (Go internal rule); the original delegation
+`p2p_bt.LogDebug -> log.LogDebug` is now self-implemented with matching signatures/behavior**
+(log.go:1-3 comments).
 
-## 关键机制
+## Key mechanisms
 
-### 1. 独立库约束与依赖方向
+### 1. Standalone library constraints and dependency direction
 
 ```
-主模块 back/（go.mod replace）──► github.com/Hana-ame/go-peerdrive-bt
-   ├─ router.go：NewBTDHT / NewBTClient / SetGlobalDHT / onComplete 登记
-   ├─ controller/p2p.go：BT HTTP 端点（薄包装）
-   └─ downloader：BTDHTFetcher（NewBTBridge + FetchFile）
+Main module back/ (go.mod replace) ──► github.com/Hana-ame/go-peerdrive-bt
+   ├─ router.go: NewBTDHT / NewBTClient / SetGlobalDHT / onComplete registration
+   ├─ controller/p2p.go: BT HTTP endpoints (thin wrapper)
+   └─ downloader: BTDHTFetcher (NewBTBridge + FetchFile)
 ```
 
-- 库内**零 import 主模块**（不 import internal/*）；唯一跨界是 env
-  `PEERDRIVE_LOG_LEVEL`（日志级别约定）。
-- 测试：`cd back/p2p_bt && go test ./... -count=1 -race`（独立 go.mod，
-  无需主模块 build tag）。
+- **Zero imports of main module inside the library** (no import of internal/*); the only cross-boundary
+  is env `PEERDRIVE_LOG_LEVEL` (log level convention).
+- Tests: `cd back/p2p_bt && go test ./... -count=1 -race` (standalone go.mod,
+  no main-module build tag needed).
 
-### 2. SHA256 → infohash 的映射
+### 2. SHA256 → infohash mapping
 
-peerdrive 用 sha256 内容寻址（64 hex）；BT DHT 用 20 字节 infohash。
-`infoHashFromHex` 统一入口：40 hex 原样解码，64 hex 截前 20 字节。
-**截断意味着 DHT 层寻址空间是 160bit**——collision 风险理论上 2^80，工程
-可接受（bt_dht.go:201-222 注释）。
+peerdrive uses sha256 content addressing (64 hex); BT DHT uses 20-byte infohash.
+`infoHashFromHex` is the unified entry point: 40 hex decoded as-is, 64 hex truncated to first 20 bytes.
+**Truncation means DHT addressing space is 160bit** —— theoretical collision risk 2^80, engineering
+acceptable (bt_dht.go:201-222 comments).
 
-### 3. BEP 44 的三级写策略（可靠性兜底）
+### 3. BEP 44 three-tier write strategy (reliability backstop)
 
-`PutImmutable` 一次写三处：
+`PutImmutable` writes to three places in one call:
 
-1. `localBEP44Store`（内存 sync.Map）——**保证自己 put 的 Get 必然回环**，
-   不依赖远端节点支持 BEP 44（大多数 DHT 节点不支持任意数据存储）；
-2. `putLocal`（自家服务器本地 store）——能应答其他节点的 get；
-3. 远端 close nodes 尽力而为（先 get 拿写 token 再 put，失败不报错）。
+1. `localBEP44Store` (in-memory sync.Map) —— **guarantees that Get of anything you put will round-trip**,
+   not relying on remote nodes' BEP 44 support (most DHT nodes don't support arbitrary data storage);
+2. `putLocal` (own server's local store) —— able to answer other nodes' gets;
+3. Best-effort writes to remote close nodes (first get for a write token, then put; failures don't report errors).
 
-`GetImmutable` 对称地先查本地 store 再走网络 lookup。`PutMutable` 只有
-putLocal + 远端两级（可变项不查本地缓存，靠 lookupValue 的 seq filter）。
+`GetImmutable` symmetrically checks local store first, then does network lookup. `PutMutable` has only
+putLocal + remote (mutable items don't consult local cache; relies on lookupValue's seq filter).
 
-### 4. BTBridge 的 HTTP 拉取约定
+### 4. BTBridge HTTP pull convention
 
-`FetchFile` 假设 DHT 对端「以 DHT 监听端口相同/邻近的 HTTP 端口提供
-`/files/{hash}`」——这是 peerdrive 节点间的约定协议（非标准 BT 线协议）。
-失败逐个换对端，全失败报错。**该假设是历史遗留设计**：新架构（PeerJS +
-WebRTC）下文件互传已走帧协议，BT DHT 桥只作为 downloader 的 "btdht"
-回退 fetcher 保留（见 downloader.md）。
+`FetchFile` assumes DHT peers "provide `/files/{hash}` on an HTTP port same/near as their
+DHT listen port" —— this is peerdrive's inter-node convention protocol (not standard BT wire protocol).
+On failure it tries peers sequentially; on total failure reports error. **This assumption is legacy design**:
+in the new architecture (PeerJS + WebRTC) file transfers already use a frame protocol, and the BT DHT bridge
+is kept only as a "btdht" fallback fetcher for the downloader (see downloader.md).
 
-## 与其它模块的关系
+## Relationships with other modules
 
-| 消费方 | 用途 |
+| Consumer | Purpose |
 |---|---|
-| `internal/router/router.go:107-145` | `PEERDRIVE_BT_DHT_ENABLE`（默认 true）起 DHT；`PEERDRIVE_BT_DHT_LISTEN`（默认 :6881）；BT 下载完成 → `FileService.RegisterBTFile` 登记入 storage |
-| `internal/controller/p2p.go` | BT HTTP 端点（torrent 上传/磁力下载/做种/状态）——薄包装，业务在库内 |
-| `internal/downloader/universal_downloader.go` | `BTDHTFetcher`：`NewBTBridge(dhtSvc, storageDir)` + `FetchFile`，优先级 "btdht" |
+| `internal/router/router.go:107-145` | `PEERDRIVE_BT_DHT_ENABLE` (default true) starts DHT; `PEERDRIVE_BT_DHT_LISTEN` (default :6881); BT download complete → `FileService.RegisterBTFile` registers into storage |
+| `internal/controller/p2p.go` | BT HTTP endpoints (torrent upload/magnet download/seeding/status) —— thin wrapper, business logic in library |
+| `internal/downloader/universal_downloader.go` | `BTDHTFetcher`: `NewBTBridge(dhtSvc, storageDir)` + `FetchFile`, priority "btdht" |
 | `internal/config/config.go` | `BTDHTEnabled` / `BTDHTListenAddr` / `DownloadDir` |
-| 主模块 go.mod | `replace github.com/Hana-ame/go-peerdrive-bt => ./p2p_bt` |
+| Main module go.mod | `replace github.com/Hana-ame/go-peerdrive-bt => ./p2p_bt` |
 
-反向：库不依赖主模块任何东西（除 env 约定）。
+Reverse: the library does not depend on anything in the main module (except env conventions).
 
-## HTTP 端点一览（controller/p2p.go 薄包装）
+## HTTP endpoints overview (thin wrapper in controller/p2p.go)
 
-| 端点 | 函数 | 库内调用 |
+| Endpoint | Function | Library call |
 |---|---|---|
-| `GET /bt/status` | `BTDHTStatus` | `NumNodes()` 等 |
+| `GET /bt/status` | `BTDHTStatus` | `NumNodes()` etc. |
 | `POST /bt/announce` | `BTAnnounce` | `DHT.Announce(hash)` |
 | `POST /bt/find` | `BTFindProviders` | `DHT.FindProviders(hash)` |
 | `POST /bt/bep44/put` | `BEP44Put` | `PutImmutable` |
 | `POST /bt/bep44/get` | `BEP44Get` | `GetImmutable` |
 | `GET /bt/bep51/sample` | `BEP51Sample` | `SampleInfohashes` |
-| `POST /bt/torrent` | `BTTorrentUpload` | `AddTorrentBytes`（.torrent 上传启动下载） |
+| `POST /bt/torrent` | `BTTorrentUpload` | `AddTorrentBytes` (.torrent upload starts download) |
 | `POST /bt/magnet` | `BTMagnetResolve` | `AddMagnetURI` |
-| `GET /bt/download/:infohash` 系列 | `BTDownloadProgress` / `BTDownloadTorrent` / `BTDownloadMagnet` | `GetDownload` / `GetTorrentBytes` / `GetMagnetURI` |
+| `GET /bt/download/:infohash` series | `BTDownloadProgress` / `BTDownloadTorrent` / `BTDownloadMagnet` | `GetDownload` / `GetTorrentBytes` / `GetMagnetURI` |
 | `POST /bt/download/:infohash/{pause,resume}` | `BTPauseDownload` / `BTResumeDownload` | `PauseDownload` / `ResumeDownload` |
 | `DELETE /bt/download/:infohash` | `BTRemoveDownload` | `RemoveDownload` |
 | `GET /bt/downloads` / `GET /bt/stats` | `BTDownloadList` / `BTGlobalStats` | `ListDownloads` / `GetGlobalStats` |
 | `POST /bt/seed/:infohash` / `POST /bt/download/:infohash/unseed` | `BTSeedTorrent` / `BTStopSeed` | `StartSeed` / `StopSeed` |
-| `POST /bt/seed-collection` | `BTSeedCollection` | 合集 → 生成 torrent → 做种（约 130 行，controller 侧组装） |
+| `POST /bt/seed-collection` | `BTSeedCollection` | Collection → generate torrent → seed (~130 lines, controller-side assembly) |
 
-> 前端经 admin verb（`path=/bt/...`，admin 二进制上传的 `field:"torrent"` 声明
-> 就为此设计，见 REFACTOR.md §3.10）调用这些端点；router 装配见
-> `InitBTController` / `InitBTClient`（controller/p2p.go:56-73）。
+> The frontend calls these endpoints via admin verb (`path=/bt/...`; the `field:"torrent"`
+> declaration in the admin binary upload was designed specifically for this, see REFACTOR.md §3.10); router
+> assembly in `InitBTController` / `InitBTClient` (controller/p2p.go:56-73).
 
-## 坑与设计决策
+## Caveats and design decisions
 
-| 编号 | 坑 | 修复 |
+| No. | Caveat | Fix |
 |---|---|---|
-| Go internal | 拆独立库后 p2p_bt 不能 import 主模块 `internal/log` | log.go 自实现日志（签名/行为对齐），级别经 `PEERDRIVE_LOG_LEVEL` |
-| 独立库断言 | README 说 p2p_bt「可独立使用」是**错的**（REFACTOR.md §6）：依赖 `internal/log`、`PutImmutable` 本地 store 优先掩盖网络失败、`putLocal` 依赖 anacrolix 内部行为（server.go:1081 先写 store 再发查询） | 已拆独立库（commit 5fb1193）后上述依赖解除；文档以 REFACTOR.md §6 为准 |
-| 库内部行为依赖 | `putLocal` 用「已取消 context」的 `Server.Put` 达到「只写本地 store」效果——anacrolix 内部实现变化会导致行为漂移 | bep44.go:237-253 注释明确标注依赖点 |
-| 截断 | 64 hex sha256 截 20 字节进 DHT | 寻址空间 160bit，collision 2^80，工程可接受（bt_dht.go:201-222 注释） |
-| 全量读 | `FetchFile` 用 `io.ReadAll`——文件无限大时内存炸 | 桥是 legacy 回退路径（download 语义为全量缓存），新拉取走 PeerJS 流式；防御性上限未做（历史遗留） |
-| 测试超时 | `TestFullBTDownload` 30s 内未完成 | `t.Skip` 跳过而非失败（DHT 引导/对端连通性属环境问题） |
+| Go internal | After splitting to standalone library, p2p_bt cannot import main module `internal/log` | log.go self-implements logging (matching signatures/behavior), level via `PEERDRIVE_LOG_LEVEL` |
+| Standalone library assertion | README's claim that p2p_bt is "usable standalone" is **wrong** (REFACTOR.md §6): it depended on `internal/log`, `PutImmutable`'s local store priority masking network failures, `putLocal` relied on anacrolix internal behavior (server.go:1081 writes store before sending queries) | After splitting into standalone library (commit 5fb1193), the above dependencies were removed; docs follow REFACTOR.md §6 |
+| Library internal behavior dependency | `putLocal` uses `Server.Put` with a "cancelled context" to achieve "only write to local store" —— anacrolix internal implementation changes will cause behavior drift | bep44.go:237-253 comments explicitly mark the dependency point |
+| Truncation | 64 hex sha256 truncated to 20 bytes for DHT | Addressing space 160bit, collision 2^80, engineering acceptable (bt_dht.go:201-222 comments) |
+| Full read | `FetchFile` uses `io.ReadAll` —— memory blows up when file is unlimited | Bridge is legacy fallback path (download semantics are full caching); new pulls use PeerJS streaming; defensive upper bound not implemented (legacy) |
+| Test timeout | `TestFullBTDownload` didn't finish in 30s | `t.Skip` skips instead of failing (DHT bootstrap/peer connectivity are environment issues) |
 
-## 测试（7 单测，独立 go.mod；`scripts/test-layers.sh` L7 段）
+## Tests (7 unit tests, standalone go.mod; `scripts/test-layers.sh` L7 section)
 
-> 命令：`cd back/p2p_bt && go test ./... -count=1`
+> Command: `cd back/p2p_bt && go test ./... -count=1`
 
 ### `bt_test.go`
 
-> 注：legacy 代码测试（文件头声明），未逐一标注发现背景；「发现背景」规范
-> 对新代码生效。
+> Note: legacy code tests (declared at file header); discovery context not marked case-by-case; "discovery context" spec
+> applies to new code.
 
-| 测试 | 覆盖 |
+| Test | Coverage |
 |---|---|
-| `TestParseTorrent` | .torrent 生成→`metainfo.Load` 解析一致性 + `AddTorrentBytes` 包装 |
-| `TestParseMagnet` | magnet URI 解析（合法/非法）+ `AddMagnetURI` |
-| `TestBTClientPauseResume` | 暂停/恢复/列表/全局统计/删除生命周期 |
-| `TestFullBTDownload` | 进程内 seeder + BTClient 下载全流程，完成回调校验 sha256（30s 超时 skip） |
-| `TestAddMagnetBackwardCompat` / `TestAddTorrentBackwardCompat` | 旧 API 入口兼容 |
-| `TestGlobalStats` | 统计字段非负 + DHTNodes 经 globalDHT |
+| `TestParseTorrent` | .torrent generation → `metainfo.Load` parse consistency + `AddTorrentBytes` wrapper |
+| `TestParseMagnet` | magnet URI parsing (valid/invalid) + `AddMagnetURI` |
+| `TestBTClientPauseResume` | Pause/resume/list/global stats/remove lifecycle |
+| `TestFullBTDownload` | In-process seeder + BTClient full download flow, completion callback verifies sha256 (30s timeout skip) |
+| `TestAddMagnetBackwardCompat` / `TestAddTorrentBackwardCompat` | Old API entry-point compatibility |
+| `TestGlobalStats` | Stat fields non-negative + DHTNodes via globalDHT |
 
-## 文件清单
+## File inventory
 
-| 文件 | 职责 |
+| File | Responsibility |
 |---|---|
-| `go.mod` / `go.sum` | 独立模块（anacrolix/dht + torrent） |
-| `bt_dht.go` | DHT 节点 + announce/FindProviders |
-| `bep44.go` | BEP 44 不可变/可变数据存取 |
-| `bep51.go` | BEP 51 infohash 采样 + 爬取 |
-| `client.go` | torrent 下载/做种客户端 |
-| `bt_bridge.go` | 文件桥（Share/Fetch/存储布局） |
-| `bt_types.go` | 对外共享类型 |
-| `log.go` | 库内日志（独立库约束） |
-| `bt_test.go` | 库测试 |
+| `go.mod` / `go.sum` | Standalone module (anacrolix/dht + torrent) |
+| `bt_dht.go` | DHT node + announce/FindProviders |
+| `bep44.go` | BEP 44 immutable/mutable data storage |
+| `bep51.go` | BEP 51 infohash sampling + crawling |
+| `client.go` | torrent download/seeding client |
+| `bt_bridge.go` | File bridge (Share/Fetch/storage layout) |
+| `bt_types.go` | Shared external types |
+| `log.go` | In-library logging (standalone library constraint) |
+| `bt_test.go` | Library tests |

@@ -1,6 +1,6 @@
-// Package hashutil 提供 SHA256 哈希值格式验证工具。
-// IsValidSHA256(s) 判断字符串是否为 64 位十六进制小写哈希值。
-// 验证步骤：转小写 → 检查长度是否为 64 → hex.DecodeString 解码验证。
+// Package hashutil provides SHA256 hash value format validation utilities.
+// IsValidSHA256(s) determines whether a string is a 64-character lowercase hexadecimal hash value.
+// Validation steps: lowercase → check length is 64 → verify with hex.DecodeString.
 
 package hashutil
 
@@ -12,7 +12,7 @@ import (
 	mh "github.com/multiformats/go-multihash"
 )
 
-// IsValidSHA256 判断字符串是否为有效的 64 字符十六进制 SHA256 哈希值。
+// IsValidSHA256 determines whether a string is a valid 64-character hexadecimal SHA256 hash value.
 func IsValidSHA256(s string) bool {
 	s = strings.ToLower(s)
 	if len(s) != 64 {
@@ -22,8 +22,8 @@ func IsValidSHA256(s string) bool {
 	return err == nil
 }
 
-// SHA256ToCID 将 64 字符十六进制 SHA256 哈希值转换为 CIDv1（base32 编码）。
-// 例如 "bafkreihk7nxx..."。输入无效时返回空字符串。
+// SHA256ToCID converts a 64-character hexadecimal SHA256 hash value to CIDv1 (base32 encoded).
+// For example "bafkreihk7nxx...". Returns an empty string for invalid input.
 func SHA256ToCID(sha256hex string) string {
 	if len(sha256hex) != 64 {
 		return ""
@@ -40,8 +40,8 @@ func SHA256ToCID(sha256hex string) string {
 	return c.String()
 }
 
-// CIDToSHA256 将 CID 字符串（CIDv1/CIDv0）解析为 64 字符 SHA-256 十六进制摘要。
-// 只支持 sha2-256 multihash；不匹配时返回空字符串。
+// CIDToSHA256 parses a CID string (CIDv1/CIDv0) into a 64-character SHA-256 hexadecimal digest.
+// Only supports sha2-256 multihash; returns an empty string on mismatch.
 func CIDToSHA256(cidStr string) string {
 	c, err := cid.Decode(cidStr)
 	if err != nil {
@@ -57,8 +57,9 @@ func CIDToSHA256(cidStr string) string {
 	}
 	return hex.EncodeToString(dec.Digest)
 }
-// IsStrictSHA256 严格校验：仅接受 64 位小写十六进制 SHA256（传输层对端 hash
-// 用：允许大写会让查找小写表 miss 且行为变宽，等同放宽输入校验）。
+// IsStrictSHA256 performs strict validation: accepts only 64-character lowercase hexadecimal SHA256 (used for
+// transport-layer peer hash: allowing uppercase would cause lookups against the lowercase table to miss and broaden behavior,
+// effectively relaxing input validation).
 func IsStrictSHA256(s string) bool {
 	if s == "" || len(s) != 64 {
 		return false

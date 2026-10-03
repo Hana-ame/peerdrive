@@ -1,129 +1,167 @@
-# 连接 07：transport ↔ peerjs（协议引擎）
+# Connection 07: transport ↔ peerjs (protocol engine)
 
-- **涉及模块**：`../modules/09-transport.md` 与 `../modules/10-peerjs.md`
-- **代码位置**：A 侧 `back/internal/transport/`（`peerjs_service.go` 装配层 + `conn.go` 帧协议/分派 + `rtc_session.go` 适配器 + `ws_session.go` 的 `Session` 接口）；B 侧 `back/peerjs/`（`peer.go` 信令客户端 / `connection.go` DataConnection / `message.go` 消息与负载 / `signaller.go` 抽象 / `transport.go` Frame 与 DataChannel 抽象）；库装配点 `back/go.mod:7,160`（`require github.com/Hana-ame/go-peerjs v0.0.0` + `replace ... => ./peerjs`）；服务装配点 `back/cmd/server/main.go`（`peerjsSvc.Start()/Close()`，见 `../modules/09-transport.md` §1 与 `如何连接.md` 启动时序）
-- **方向**：双向（进程内调用 + DataChannel 全双工；offerer/answerer 无方向之分，同一条 Session 同时承载入站与出站角色，`peerjs_service.go:13-14`）
+- **Modules involved**: `../modules/09-transport.md` and `../modules/10-peerjs.md`
+- **Code locations**: A side `back/internal/transport/` (`peerjs_service.go` assembly layer + `conn.go` frame protocol/dispatch + `rtc_session.go` adapter + `ws_session.go`'s `Session` interface); B side `back/peerjs/` (`peer.go` signaling client / `connection.go` DataConnection / `message.go` messages and payloads / `signaller.go` abstraction / `transport.go` Frame and DataChannel abstraction); library assembly point `back/go.mod:7,160` (`require github.com/Hana-ame/go-peerjs v0.0.0` + `replace ... => ./peerjs`); service assembly point `back/cmd/server/main.go` (`peerjsSvc.Start()/Close()`, see `../modules/09-transport.md` §1 and `how-to-connect.md` startup timing)
+- **Direction**: bidirectional (in-process calls + DataChannel full duplex; offerer/answerer have no direction distinction, the same Session carries both inbound and outbound roles, `peerjs_service.go:13-14`)
 
-## 1. 连接方式
+## 1. Connection Method
 
-**通道类型：进程内对象图调用（两层）**。transport 与 peerjs 编译进同一二进制（`back/go.mod:7,160` replace 本地目录），PeerJSService 直接持有 `*peerjs.Peer`（`peerjs_service.go:38-41,26`）。对外只有两条网络面，都由 peerjs 引擎建立、transport 消费：
+**Channel type: in-process object graph calls (two layers)**. transport and peerjs compile into the same binary (`back/go.mod:7,160` replace local directory); PeerJSService directly holds `*peerjs.Peer` (`peerjs_service.go:38-41,26`). Only two network surfaces externally, both established by peerjs engine, consumed by transport:
 
-- **信令面（控制，WSS）**：`peerjs.Peer` 经 `peerJSSignaller` 连 `wss://host:port/peerjs?key=&id=&token=&version=1.5.4`（`back/peerjs/peer.go:396-443`，URL 组装 410-427；version 常量 `peer.go:22`），收发 OFFER/ANSWER/CANDIDATE/LEAVE/EXPIRE/HEARTBEAT（`message.go:18-28`）。这条面与信令服务器的细节见 [08-transport-signalserver.md](08-transport-signalserver.md)，本连接只描述 transport 如何驱动它。
-- **数据面（DataChannel）**：`peerjs.Connection` 封装一条 WebRTC DataConnection（`connection.go:19-57`），SDP/ICE 经信令面交换后，数据走 pion DataChannel；`Connection` 只依赖 `DataChannel` 接口（`transport.go:15-26`），不绑定 pion 具体类型。
+- **Signal surface (control, WSS)**: `peerjs.Peer` connects via `peerJSSignaller` to `wss://host:port/peerjs?key=&id=&token=&version=1.5.4` (`back/peerjs/peer.go:396-443`, URL assembly 410-427; version constant `peer.go:22`), sends/receives OFFER/ANSWER/CANDIDATE/LEAVE/EXPIRE/HEARTBEAT (`message.go:18-28`). Details of this surface with the signaling server are in [08-transport-signalserver.md](08-transport-signalserver.md); this connection only describes how transport drives it.
+- **Data surface (DataChannel)**: `peerjs.Connection` wraps a WebRTC DataConnection (`connection.go:19-57`); after SDP/ICE exchanged via signal surface, data flows over pion DataChannel; `Connection` only depends on `DataChannel` interface (`transport.go:15-26`), not bound to pion's concrete types.
 
-**数据面桥（A 侧适配器）**：`rtcSession`（`rtc_session.go:11-39`）把 `*peerjs.Connection` 适配为 transport 的 `Session` 接口（`ws_session.go:22-29`：`ID()/SendJSON/SendFrame/OnMessage/OnClose/Close`）。适配理由（`rtc_session.go:7-10`）：`Connection.ID` 是信令路由键（connectionId），与会话标识（远端 peer id）语义不同且字段名冲突，adapter 在 service 层收敛差异。关键映射：`ID()` = `c.PeerID`（远端 id，`rtc_session.go:20`）；`ConnID()` = `c.ID`（连接级 UUID，**两端可见同一值**，`rtc_session.go:24`，同 peer 去重键，见 `conn.go:196-226`）；`SendJSON/SendFrame` 直通 `Connection`（26-28）；`OnMessage` 传 `peerjs.Frame`（30）；`DataChannel()` 暴露底层供 serveFile 写缓冲流控（38-39，WSSession 无此能力）。
+**Data surface bridge (A side adapter)**: `rtcSession` (`rtc_session.go:11-39`) adapts `*peerjs.Connection` to transport's `Session` interface (`ws_session.go:22-29`: `ID()/SendJSON/SendFrame/OnMessage/OnClose/Close`). Adaptation rationale (`rtc_session.go:7-10`): `Connection.ID` is the signaling routing key (connectionId), semantically different from session identifier (remote peer id) and field names conflict; adapter consolidates the difference at service layer. Key mappings: `ID()` = `c.PeerID` (remote id, `rtc_session.go:20`); `ConnID()` = `c.ID` (connection-level UUID, **both ends see the same value**, `rtc_session.go:24`, dedup key for same peer, see `conn.go:196-226`); `SendJSON/SendFrame` pass through `Connection` (26-28); `OnMessage` passes `peerjs.Frame` (30); `DataChannel()` exposes underlying for serveFile write buffer flow control (38-39, WSSession doesn't have this capability).
 
-**协议帧格式**（数据面，库定义传输原语、业务帧由 transport 定义）：
+**Protocol frame format** (data surface, library defines transport primitives, business frames defined by transport):
 
-- `Frame{IsText, Data}`（`transport.go:5-10`）：`IsText=true` 为文本帧（JSON 控制头，SCTP PPID 51），`false` 为二进制帧（数据块，PPID 53）——`Connection.Send` 发二进制、`SendText` 发文本（`connection.go:91-113`），发反了对端把控制头当数据块吞掉。
-- `SendFrame` 原子发送「JSON 头 + 紧随的二进制体」（`connection.go:125-166`）：`sendMu` 串行保证并发下头体不交织；内置写缓冲流控（`bufferedAmount > 512KB` 时等低水位广播，慢消费者 30s 超时，连接关闭立即退出）。流控回调在 `attach` 时注册一次（`connection.go:12-17,297-304`）——pion `OnBufferedAmountLow` 是替换式回调，并发注册会互相覆盖死等。
-- 业务帧协议（req/meta/data/done/err + create/upload/list/info/delete/sync + admin/fwd-*/psk-*）由 transport 定义在 `conn.go:13-26` 头注释；库不管语义（`back/peerjs/README.md:126-136`）。
+- `Frame{IsText, Data}` (`transport.go:5-10`): `IsText=true` is text frame (JSON control header, SCTP PPID 51), `false` is binary frame (data chunk, PPID 53) — `Connection.Send` sends binary, `SendText` sends text (`connection.go:91-113`); sending in reverse causes the other end to swallow the control header as a data chunk.
+- `SendFrame` atomically sends "JSON header + immediately following binary body" (`connection.go:125-166`): `sendMu` serializes to prevent header/body interleaving under concurrency; built-in write buffer flow control (wait for low water mark broadcast when `bufferedAmount > 512KB`, slow consumer 30s timeout, connection close exits immediately). Flow control callback registered once at `attach` (`connection.go:12-17,297-304`) — pion's `OnBufferedAmountLow` is a replacement-style callback; concurrent registration overwrites each other causing deadlock.
+- Business frame protocol (req/meta/data/done/err + create/upload/list/info/delete/sync + admin/fwd-*/psk-*) defined by transport in `conn.go:13-26` header comment; library doesn't manage semantics (`back/peerjs/README.md:126-136`).
 
-**鉴权方式**：信令侧靠 URL query 的 `key` + `id` + `token`（`peer.go:410-427`；token 未指定时随机生成，`peer.go:345-347`）；`ID-TAKEN`/`ERROR` 只记日志（`peer.go:201-213`）。数据面准入由 transport 层的 PSK 门禁承载（`psk.go`）——`psk-auth` 是连接建立后本端经本连接发出的**第一帧**（`psk.go:57-71`，必须先挂 OnMessage 再发，`conn.go:250-259`）；库本身无业务鉴权，数据面加密由 WebRTC 强制 DTLS 保证（`psk.go:16-17`）。
+**Authentication method**: signal side relies on URL query `key` + `id` + `token` (`peer.go:410-427`; token randomly generated when not specified, `peer.go:345-347`); `ID-TAKEN`/`ERROR` only logged (`peer.go:201-213`). Data surface admission handled by transport-layer PSK gate (`psk.go`) — `psk-auth` is the **first frame** sent by local end via this connection after establishment (`psk.go:57-71`, must attach OnMessage first then send, `conn.go:250-259`); library itself has no business authentication, data surface encryption guaranteed by WebRTC's mandatory DTLS (`psk.go:16-17`).
 
-**何时/由谁建立**：进程启动 `main` 调 `peerjsSvc.Start()`（`peerjs_service.go:147-149`）→ goroutine `startLoop`（184-311）内 `peerjs.NewPeer(s.id, opts)`（205）+ `p.OnConnection(s.onIncomingConnection)`（206）+ `p.Dial(s.ctx)`（210）；信令连通后按配置 `PEERDRIVE_PEERJS_PEERS` 与 `extraPeers()` 逐对端 `connectLoop`（225-243），发现回调 `onDiscoveredPeer` 也触发拨号（326-341，受 MAX_PEERS 预算，`345-363`）。每条远端连接由 `connectLoop`（主动，offerer）或 `onIncomingConnection`（被动，answerer）建立，两条路径都只是创建一条全双工 Session 并经 `bindConn` 挂同一套角色（`peerjs_service.go:13-14`）。
+**When/who establishes**: process startup `main` calls `peerjsSvc.Start()` (`peerjs_service.go:147-149`) → goroutine `startLoop` (184-311) internally calls `peerjs.NewPeer(s.id, opts)` (205) + `p.OnConnection(s.onIncomingConnection)` (206) + `p.Dial(s.ctx)` (210); after signaling connects, dials each peer via `connectLoop` per config `PEERDRIVE_PEERJS_PEERS` and `extraPeers()` (225-243); discovery callback `onDiscoveredPeer` also triggers dialing (326-341, subject to MAX_PEERS budget, 345-363). Each remote connection established by `connectLoop` (active, offerer) or `onIncomingConnection` (passive, answerer); both paths only create one full-duplex Session and hang the same set of roles via `bindConn` (`peerjs_service.go:13-14`).
 
-## 2. 时序
+## 2. Timing
 
-### 2.1 连接建立时序（A 主动拨号 B，offerer/answerer 协商）
+### 2.1 Connection Establishment Timing (A actively dials B, offerer/answerer negotiation)
 
 ```mermaid
 sequenceDiagram
   participant TA as transport A (PeerJSService)
   participant PA as peerjs Peer A (offerer)
-  participant S as 信令服务器
+  participant S as Signaling server
   participant PB as peerjs Peer B (answerer)
   participant TB as transport B (PeerJSService)
 
-  TA->>PA: Start→startLoop: NewPeer + OnConnection + Dial (peerjs_service.go:205-210)
-  PA->>S: wss://.../peerjs?key=&id=&token=&version= (peer.go:410-443)；此后每5s HEARTBEAT
-  TA->>PA: connectLoop: Connect(ctx, peerID, "peerdrive") (peerjs_service.go:431)
-  PA->>PA: newConnection: NewPeerConnection + CreateDataChannel(ordered) + makeOffer (connection.go:225-286,330-348)
-  PA->>S: OFFER {connectionId,label,serialization:"raw",sdp} (connection.go:339-347)
-  S->>PB: 按 dst 转发 OFFER
-  PB->>PB: route→handleOffer：沿用 offerer 的 connectionId 建连接 (peer.go:217-254)
-  PB->>PB: SetRemoteDescription + CreateAnswer (connection.go:350-364)
-  PB->>S: ANSWER {connectionId,sdp}
-  S->>PA: 转发 ANSWER
-  PA->>PA: conn.handleMessage: SetRemoteDescription (peer.go:179-190; connection.go:203-217)
-  PA->>S: CANDIDATE（OnICECandidate 手动转发，connection.go:252-265）
-  S->>PB: CANDIDATE
-  PB->>PB: AddICECandidate (connection.go:211-216)
-  PB->>S: CANDIDATE（反向）
-  S->>PA: CANDIDATE
-  Note over PA,PB: ICE 连通 → DataChannel open
-  PA->>TA: dc.OnOpen→OnOpen 回调→bindConn(newRTCSession(c)) (peerjs_service.go:442-450)
-  PB->>TB: 同左（必须等 OnOpen 再 bind，peerjs_service.go:471-481）
-  TA->>TA: bindConn: conns/dedup/connState/先挂OnMessage/pskSendAuth (conn.go:228-269)
-  TB->>TB: 同左
+  TA->>PA: Start→startLoop: NewPeer + OnConnection + Dial
+  PA->>S: WSS connect /peerjs?key=&id=&token=&version=1.5.4
+  TA->>PA: connectLoop(peerID): Dial(peerID)
+  PA->>PA: Create DataConnection (offerer)
+  PA->>S: OPEN + OFFER {SDP}
+  S-->>PB: OFFER {SDP}
+  PB->>PB: Answer + Create answerer Connection
+  PB->>S: ANSWER {SDP}
+  S-->>PA: ANSWER {SDP}
+  PA-->>PB: CANDIDATE (ICE trickle, via S)
+  PB-->>PA: CANDIDATE (ICE trickle, via S)
+  Note over PA,PB: DTLS handshake (WebRTC mandatory)
+  PA-->>PB: DataChannel open
+  PB->>TB: OnConnection(conn) → dedupConn
+  TB->>TB: OnOpen (must wait before bindConn)
+  TB->>TB: bindConn: OnMessage/OnClose + pskSendAuth
+  TB->>TA: psk-auth (first frame after OnMessage attached)
+  TA->>TA: pskGate validates → bindConn → psk-ok
+  TA-->>PB: DataChannel fully usable (control+data surface)
 ```
 
-逐步骤说明（代码依据）：
+Key code points: A offerer `startLoop:225-243` → `Dial` (`peer.go:183-184`); signal messages OFFER/ANSWER/CANDIDATE (`message.go:18-24`); B answerer `onIncomingConnection:471-481` → `dedupConn:213-226` (duplicate remote connections by UUID keep lexicographic order, `fakeSession` exception); **must wait for `OnOpen` before `bindConn`** (`onIncomingConnection:474-480` comment: early registration of `OnClose` would cause FetchFromPeer to get a connection not yet ready); PSK is first frame, **`pskSendAuth` before `pskOnAck` attach**, and `pskSendAuth` must be after `bindConn`'s OnMessage is attached (`conn.go:250-259` comment, otherwise ACK may arrive before handler attached and silently disappear); **admin verb only allows `c.ID()=="local"`** (`admin.go:136-140`), so WebRTC connections receiving admin frames immediately return err.
 
-1. **信令注册**：`startLoop` 构造 `opts`（Host/Port/Secure/Key 取配置，缺省用 `DefaultOptions`：公共信令 `peersignal.moonchan.xyz:443`、key `pd-signal-...`、PingInterval 5s，`peer.go:48-57`；配置覆盖 `peerjs_service.go:190-204`），`NewPeer`（`peer.go:61-71`）后 `Dial`（`peer.go:124-126` → `peerJSSignaller.Dial` 396-408 → `dialWS` 410-443）。注册失败（含取 ID 失败）→ `startLoop` LogWarn 后 backoff 2s 起指数退避重试（`peerjs_service.go:210-221`）。
-2. **拨号（offerer 侧）**：`connectLoop`（`peerjs_service.go:400-469`，`connecting` map 去重 407-418）调 `peer.Connect(s.ctx, peerID, "peerdrive")`（431）→ `newConnection(dst, label="peerdrive", offered=true, ...)`（`peer.go:136-141`；`connection.go:225-286`）：建 `PeerConnection`、`CreateDataChannel(label, Ordered=true)`（272-279）、`attach` 绑回调、`makeOffer` 发 OFFER（330-348）。
-3. **应答（answerer 侧）**：信令 `route` 收到 OFFER → `handleOffer`（`peer.go:217-254`）用 **offerer 的 connectionId** 建 answerer 连接（沿用规则是协议硬约束，`connection.go:222-224`），`SetRemoteDescription` + `CreateAnswer` 回 ANSWER（`connection.go:350-364`）；answerer 的 `onConn`（即 `onIncomingConnection`）在此时被回调——但 **DataChannel 尚未 open**，必须等 `OnOpen` 再 `bindConn`（`peerjs_service.go:471-481` 注释）。
-4. **ANSWER/CANDIDATE 回流**：offerer 的 `route` 按 `connectionId` 找到连接交 `conn.handleMessage`（`peer.go:179-190`；`connection.go:203-217`，SDP/候选解析错误静默忽略）。ICE 候选必须**手动**经信令转发（pion 不自动发），`OnICECandidate` → `CANDIDATE` 消息（`connection.go:252-265`）。
-5. **DataChannel open → 绑定**：`attach` 注册的低水位/onOpen/onMessage/onClose 回调触发（`connection.go:291-328`）；`OnOpen` 回调（`peerjs_service.go:442-450` 的闭包）执行 `bindConn(newRTCSession(c))`。offerer 侧同样流程（`OnOpen` 由 `connectLoop` 注册）。
-6. **bindConn 装配**（`conn.go:228-269`）：`conns[c.ID()]=c` 登记（228-232）→ 同 peer 双连接去重 `dedupConn`（233-238；决策规则 `conn.go:196-226`，见 §3 重复/并发）→ 建 `connState`（`fetches/verbWaits/binCh/binDone/fwdCh`，239-245）→ **先挂 `OnMessage`/`OnClose` 再发 `psk-auth`**（250-259 顺序敏感：库在 onMessage 为 nil 时直接丢帧，open 瞬间到达的对端首帧可能被静默丢弃）→ 起 `uploadWorker`/`fwdWorker`（262-265）→ `pskSendAuth`（268）。
-7. **建立完成**：`connectLoop` 等 `opened`（451-460），随后阻塞等 `conn.Done()`——连接死亡时重新拨号（456-467）；正常连接期间 transport 双向收发业务帧。
-
-### 2.2 数据面帧往返时序（A 拉取 B 的文件，req → meta/data/done）
+### 2.2 Data Transfer Timing (fetch: req → meta → data×N → done)
 
 ```mermaid
 sequenceDiagram
-  participant TA as transport A（出站角色）
-  participant PA as Connection A (peerjs)
-  participant PB as Connection B (peerjs)
-  participant TB as transport B（入站角色）
+  participant T as transport (FetchFromPeer)
+  participant C as peerjs Connection (SendFrame)
+  participant P as Remote transport (bindConn→serveFile)
+  participant F as FileRouter(OpenAny)
+  participant B as peerjs Connection (remote side SendFrame)
 
-  TA->>PA: openStream: SendJSON(req 帧) (outbound.go:234)
-  PA->>PB: DataChannel 文本帧 PPID 51（JSON 头）(connection.go:106-123)
-  PB->>TB: dc.OnMessage→Frame{IsText:true}→dispatchFrame (transport.go:49-53; conn.go:278-283)
-  TB->>TB: pskGate 门禁 → type=req → go serveFile (conn.go:293-306)
-  TB->>TB: serveFile：hash 校验/门禁/trace/多源路由 (inbound.go:66-104)
-  loop 每 64KB 一块（inbound.go:23-25）
-    TB->>PB: SendFrame(data 头 + 二进制块)（原子连续）(rtc_session.go:28; connection.go:132-166)
-    PB->>PA: 文本帧头 + 二进制块（流控：bufferedAmount 高则等 lowWater）
-    PA->>TA: dispatchFrame 二进制路由 → expect → fetchState.q（有界队列）(conn.go:403-415)
+  T->>T: FetchFromPeer: ensure connected + get dcSession
+  T->>C: SendJSON {type:"req", hash, offset, size, reqId}
+  C->>B: (text frame, IsText=true, PPID 51)
+  B->>P: dispatchFrame(req) → trace loop check
+  P->>P: pskGate → shareGate (AllowsDownload) → serveFile
+  P->>F: FileRouter.OpenAny(hash)
+  P-->>B: SendFrame meta {type:"meta", total, reqId}
+  loop Each 64KB data chunk
+    B->>C: SendFrame data {type:"data", size} + binary chunk
+    C->>C: sendMu serializes → write buffer flow control (512KB high water / 32KB low water)
+    Note over C: bufferedAmount > 512KB → wait for OnBufferedAmountLow (30s timeout)
+    C->>T: (JSON header + immediately following binary body, atomic contiguous)
   end
-  TB->>PB: SendJSON(done 帧) (inbound.go:…)
-  PB->>PA: 文本帧 done
-  PA->>TA: routeResponse: done.Size==received 完整性校验 → close(done) (outbound.go:461-475)
-  TA->>TA: fetchReader drain q → EOF 前查 errCh → 全量请求校验 sha256 (outbound.go:324-379)
+  B->>C: SendFrame done {type:"done", size, reqId}
+  C->>T: fetchReader checks received==Size → io.ReadCloser returned
 ```
 
-逐步骤说明（代码依据）：
+Step-by-step explanation:
 
-1. **发起 req**：`openStream` 生成 UUID reqId（`outbound.go:202`，跨连接唯一路由键）、登记 `st.fetches[reqID]`（215-217）、`c.SendJSON(dcReq{...})` 发出（234）——`c` 即 `rtcSession` → `Connection.SendJSON` → `SendText`（`connection.go:117-123`）。
-2. **对端接收**：pion DataChannel 消息 → `pionChannel.OnMessage` 包装成 `Frame{IsText: m.IsString}`（`transport.go:49-53`）→ `attach` 的 onMessage 回调快照调用（`connection.go:315-322`）→ transport `dispatchFrame`（`conn.go:278-425`）。
-3. **分派**：文本帧 JSON 解析失败或 type 空 → 静默丢弃（`conn.go:281-283`）；`psk-auth`/`psk-ok`/`psk-err` 先处理（286-292）；`pskGate` 拦未出示密钥的入站 verb（293-295）；`req` 帧 → `go serveFile`（297-306）。
-4. **应答数据**：`serveFile` 校验 hash（`inbound.go:67-70`）→ ShareGate（73-77）→ trace 防环（79-86）→ 多源路由/本地读取（93-154），按 `chunkSize=64KB` 分块循环 `c.SendFrame(dcResp{type:"data",...}, 块)`（`inbound.go:23-25`；头+体原子连续由 `Connection.SendFrame` 保证，`connection.go:132-166`），最后发 `done` 帧。
-5. **出站收集**：A 侧 pump 收二进制块，按 `fwd.pending → pendingUpload → adminUp → expect` 优先级路由（`conn.go:360-424`），投递到 `fetchState.q`（有界 8，`outbound.go:205`）；`done` 帧经 `routeResponse`（`outbound.go:426-479`）做完整性校验（`done.Size` 必须等于已收字节，471-474）后 `close(f.done)`。
-6. **消费**：`fetchReader.Read` 从 q 逐块消费（`outbound.go:290-361`），done 后先 drain 剩余块再 EOF（324-349），EOF 前非阻塞查 errCh（340-346）；全量请求（offset==0 且 size<0）EOF 时重算 sha256 比对（`outbound.go:242,364-379`）。
-7. **流控闭环**：对端（B）发数据块时若 `bufferedAmount > 512KB`，`SendFrame` 等待 `lowWater` 广播（`connection.go:152-166`）；A 侧队列满时 pump 投递阻塞（`conn.go:407-413`，`f.closed` 可放行）——两端共同构成有界背压。
+1. **First frame type**: `req` must be a text frame (`IsText=true`), `Connection.SendText` (`connection.go:109-113`); `Connection.Send` sends binary (`:91-99`) — sending in reverse makes the other end treat control header as data chunk.
+2. **Atomic sending**: `SendFrame` acquires `sendMu` before writing header then writing body (`connection.go:129-133`), ensuring concurrent send doesn't interleave header-body.
+3. **Write buffer flow control**: `bufferedAmount > 512KB` high water blocks (`connection.go:140-142`), waits for `OnBufferedAmountLow` broadcast (32KB, `connection.go:297-304`); **must register callback only once** at `attach` (`connection.go:12-17,297-304` comment: pion's `OnBufferedAmountLow` is replacement-style, concurrent registration overwrites causing deadlock).
+4. **Timeout semantics**: 30s is **chunk interval timeout** (slow consumer), not total duration; `fetchIdleTimeout=5min` is the timeout for not receiving next chunk on consumer side (`outbound.go:250`).
+5. **Frame protocol three hard constraints** (documented in `back/internal/transport/conn.go:20-24` header comment and enforced by `back/internal/transport/test_integration_test.go:10-43`): ① headers are text frames, chunks are binary frames; ② header and chunk must be atomically contiguous (can't be interleaved with others); ③ `reqId` field names must align exactly, or request hangs until timeout (error: "no errors, just silent misalignment").
 
-## 3. 情况处理
+### 2.3 Disconnect and Cleanup Timing
 
-| 异常/边界场景 | 行为与依据（代码位置） | 说明 |
-|---|---|---|
-| **超时** | 信令侧：WS 握手 15s（`peer.go:429`）、取随机 ID 的 HTTP client 15s（`peer.go:560`）、信令写 15s（`peer.go:512`）；心跳发送失败立即退出（`peer.go:483-500`）。连接建立：`connectLoop` 等 `opened` 30s 超时 → `conn.Close()` 进重连（`peerjs_service.go:461-464`）。数据面：`SendFrame` 慢消费者 30s 封顶（`connection.go:152-166`）；transport 侧「等对端响应」超时另行分层——fetch 块间隔 5min（`outbound.go:247-250,294-304`）、一次性 verb 15s（`outbound.go:26-29,74-76`）。 | 库只管「单次发送/单次协商」的硬上限；「等待对端业务响应」的超时由 transport 层按流式/一次应答区分，避免网络抖动误报。 |
-| **断连 / 重连（信令）** | 信令 WS 断：`readLoop` 网络错误/EOF 退出 → `close(s.done)`（`peer.go:446-466`，H7 修复）→ `startLoop` 的 `p.Done()` 分支：`p.Close()`、backoff 2s↔60s 指数翻倍后**整轮重建 Peer**（`peerjs_service.go:285-309`）。 | 旧 Peer 的所有连接随 `Peer.Close` 关闭（`peer.go:144-163`）；重建后按配置/extraPeers 重新 `connectLoop`（`peerjs_service.go:222-243`）。 |
-| **断连 / 重连（数据连接）** | 触发关闭的四个来源：OFFER 过期 `EXPIRE` → `conn.Close()`（`peer.go:191-200`）；对端下线 `LEAVE` → 关闭该远端全部连接（`peer.go:256-269`）；ICE `closed/failed/disconnected` → `conn.Close()`（`connection.go:244-251`）；远端关 dc → `pionChannel.OnClose` → `c.Close()`（`connection.go:323-327`）。`conn.Done()` 后 `connectLoop` 循环重拨（`peerjs_service.go:451-468`）；`bindConn` 的 `OnClose` → `cleanupConn` 清 `conns/pending` 并放行 worker（`conn.go:430-477`）。 | 库只发断线通知（`Done()` 通道 + `OnClose`），重连策略全在上层 `startLoop`/`connectLoop`（`peerjs_service.go:400-469` 注释）。 |
-| **重复 / 并发** | 同一 peer 重复拨号：`connecting` map 去重（`peerjs_service.go:406-418`）、`EnsureConnection` 幂等（518-529）、发现回调先查 `conns`（330-335）。同 peer 双连接（双向互拨/重连竞态）：`conns` 按 peerID 键 + `dedupConn` 按连接级 UUID 字典序**小者胜**、两端一致（`conn.go:196-226`；淘汰连接锁外 Close，清理带 `s.conns[c.ID()]==c` 值相等守卫）；`local` WS 会话不去重（`conn.go:204-205`）。重复 connectionId 的 OFFER：旧连接完整 Close 后接管（`peer.go:227-240`）。并发发送：`SendFrame` sendMu 串行 + 单例 lowWater（`connection.go:12-17,132-166,297-304`）；信令 `writeMu`（`peer.go:365-368,502-514`）；回调字段 `handlerMu` 快照、dc 访问 `dcMu`（`connection.go:30-53`）。拉取撞去重窗口：`FetchFromPeer` 恒最多 2 次重试（`outbound.go:141-181`）。 | 双向互拨是正常拓扑（双方同时发现对方），去重必须两端同规则，否则保留的恰是对方已关闭的断链（`conn.go:206-212` 注释）。 |
-| **数据缺失或校验失败** | 发送前先查 `dc.Open()`，未 open 报 `peerjs: connection not open`（`connection.go:97-101,143-145`）。信令消息 JSON 解析失败 → 丢弃继续（`peer.go:472-475`）；SDP/候选解析失败静默忽略（`connection.go:203-217`）。数据面文本帧解析失败/type 空 → 静默丢弃（`conn.go:281-283`）；二进制块无归属（无 fwd/pendingUpload/expect）→ 丢弃（`conn.go:403-415`）。对端声明超限：meta total / data size > 8GB 拒绝（`outbound.go:112-115,448-458`）；`done.Size` 必须等于已收字节，否则报 incomplete transfer（防提前 done 把截断文件当成功，`outbound.go:461-475`）。全量拉取 EOF 重算 sha256（`outbound.go:364-379`）。 | 「发出去」与「收回来」的完整性校验分居两端：库保证头体原子与有界流控，transport 保证业务级字节数/哈希校验。 |
-| **鉴权失败** | 信令侧：`ID-TAKEN`/`ERROR` 只记日志（`peer.go:201-213`，同 ID 是配置错误，重连无解）；`Connect` 对空 dst 报错（`peer.go:137-139`）。数据面：PSK 门禁在 transport 侧——`psk-auth` 必须早于业务帧到达（`psk.go:57-71`；顺序保证见 `conn.go:250-259`）；校验失败回 `psk-err` 且**不关连接**（让对端重发，`psk.go:76-90`）；未出示密钥的入站 verb 回 `PSK_REQUIRED` err（`psk.go:94-110`）。 | 库无业务鉴权概念：它只保证传输；准入长在本连接的 transport 侧（`psk.go:3-7` 注释——信令只牵线不做准入）。 |
-| **半开状态** | 写侧：`SendFrame` 流控等待被 `done`/30s 打断（`connection.go:152-166`）。读侧：远端关 dc → 立即清理（`connection.go:323-327`）；ICE `disconnected/failed` → `Close`（`connection.go:244-251`）。信令半开：`readLoop` 退出即 `done`、心跳随之停止（`peer.go:446-466,483-500`）。连接建立半开：answerer 未 open 即被使用会报 "connection not open"（必须等 OnOpen 再 bind，`peerjs_service.go:471-481`）；`connectLoop` 30s 兜底（`peerjs_service.go:461-464`）。 | 无显式 keepalive 帧：信令面靠 HEARTBEAT，数据面靠 ICE 状态机 + 写侧低水位活性 + 30s 流控超时兜底。 |
-| **进程重启** | 全部连接态在内存（`Peer.conns`/`Connection`/`conns`/`pending`，见模块 10 §2）；重启后 `startLoop` 重新 `NewPeer` + `Dial`（`peerjs_service.go:184-210`）。身份：节点 id 不落盘，未设 `PEERDRIVE_PEERJS_ID` 每次启动换 id（`peerjs_service.go:113-117,548-552`）；token 每次随机（`peer.go:345-347`）。优雅关停：`Close()` → cancel → 关全部 conns → `peer.Close()`（`peerjs_service.go:152-182`）→ 对端收到 LEAVE/ICE closed 走各自清理。 | 无「恢复会话」概念；对端视角=一次断连重连。静态对端由配置 PEERS/extraPeers 重拨（`peerjs_service.go:225-243`），上传断点续传靠文件大小重建位图（模块 09 §2C，不在本连接范围）。 |
+```mermaid
+sequenceDiagram
+  participant S as Signaling server
+  participant P as peerjs Peer/Connection
+  participant T as transport (bindConn state)
 
-## 4. 相关文档
+  alt Normal close (Close())
+    T->>P: conn.Close() → DataConnection close
+    P->>S: LEAVE {connectionId}
+    T->>T: OnClose → cleanupConn (release resources, clear adminUp)
+  else Signaling disconnected / heartbeat timeout
+    P->>P: ExpiryMonitor: HEARTBEAT 50s no response → LEAVE → close
+    T->>T: OnClose triggered by peerjs
+  else Connection lost
+    P->>P: DataConnection close event
+    T->>T: OnClose → cleanupConn
+  end
+```
 
-- 连接文档（同目录）：
-  - [08-transport-signalserver.md](08-transport-signalserver.md)：本连接第 1 步的信令面——注册/HEARTBEAT 保活/OFFER/ANSWER/CANDIDATE 经 WS 流转（`peer.go:396-443,483-500`），只转发 SDP/ICE、不碰数据面。
-  - [01-frontend-backend.md](01-frontend-backend.md)：本地 `WSSession` 与 `rtcSession` 实现同一 `Session` 接口、复用同一帧协议（`ws_session.go:22-29,31-34`）；`BindLocal` 与 DataChannel 连接共用 `bindConn` 分派（`peerjs_service.go:313-319`）。
-  - [12-frontend-signalserver.md](12-frontend-signalserver.md)：浏览器端 peerjs 是 OFFER→ANSWER→CANDIDATE 协商的对端实现，本库需与其 `serialization:"raw"` 互通（`connection.go:339-346`）。
-  - [06-service-transport.md](06-service-transport.md)：上游——`EnsureConnection`/`extraPeers`（节点市场「加入节点」）触发本连接的 `connectLoop`（`peerjs_service.go:512-529`）。
-  - [05-router-source.md](05-router-source.md)：serveFile 多源路由 `FileRouter` 经 `Session.SendFrame` 回数据帧（`inbound.go:46-51,93-104`）。
-  - [11-transport-storage.md](11-transport-storage.md)：本连接数据面帧的最终去向——拉取/上传落盘与 file_index 登记。
-  - [13-media-node-ech.md](13-media-node-ech.md)：同一 `go-peerjs` 库、独立帧族（url/keepalive），无数据面交互。
-- 模块文档：`../modules/09-transport.md`（会话状态机、帧协议与 3 条硬约束、连接生命周期、H5/H6/M5-M9 修复、内存态清单）、`../modules/10-peerjs.md`（三层结构 Signaller/Peer/Connection、信令协议细节、流控与单例低水位、边界与坑 13 条）。
+- Expiry monitor: `heartbeats` map 60s check interval, `expiryGracePeriod=50s` no HEARTBEAT → send LEAVE → close connection (`peer.go:541-610`); heartbeat 30s ±5s jitter (`peer.go:530-539`).
+- `cleanupConn`: removes connection, deletes temp files, triggers close handlers, cleans up admin upload placeholders.
+- `Close()`: `s.ctx` cancel → `startLoop` exits → close all connections (`peerjs_service.go:163-178`); peerjs side `Peer.Close` sends LEAVE (`peer.go:195-209`).
+- `dedupConn`: same remote peer's bidirectional connections (A dials B, B also dials A) keep one by connection UUID lexicographic order, the other enters `fakes` marked (not real close, preserves signaling side state); `real` is non-fake first-registered connection (for fetching, `conn.go:196-226`).
+
+### 2.4 Step-by-Step Explanation
+
+1. **Startup**: `main` calls `peerjsSvc.Start()` (`peerjs_service.go:147-149`); `startLoop` in goroutine: signal connect (exponential backoff 2s→60s, `:195-198`) → `NewPeer` → register `OnConnection` → `Dial` → dial configured + discovered peers (respecting MAX_PEERS budget, `:345-363`).
+2. **Offerer path**: `connectLoop` (`:225-243`) calls `Dial(peerID)` → peerjs creates DataConnection → sends OFFER → receives ANSWER → ICE trickling → DTLS → DataChannel open → `OnOpen` → `bindConn`.
+3. **Answerer path**: `onIncomingConnection` (`:471-481`) → `dedupConn` → **wait for `OnOpen`** → `bindConn`. Waiting for OnOpen is mandatory: early registration of `OnClose` would cause `FetchFromPeer` to get a connection not yet ready (comments at `:474-480` record this historical issue).
+4. **PSK bidirectional authentication**: local and remote both `bindConn` → first `pskSendAuth` → wait for `psk-ok`/`psk-err` (5s timeout, `psk.go:38-44`); only when `psk-authenticated` is set does inbound verb dispatch proceed (`inbound.go:73-77` `servedVerbs` gate).
+5. **Inbound dispatch**: `dispatchFrame` (`conn.go:177-183`) parses JSON header → switch verb → `req` calls `serveFile`; **control verbs (share/info/sync/create/upload/list/delete/admin) synchronously process** (pump function must not block), only `req` asynchronously (`go`) to avoid blocking frame pump.
+6. **Forwarding**: `fwd-stream` (`conn.go:20-22`) carries `fwdTrace`/`fwdFrom`; when trace contains self → `"loop detected"` (`inbound.go:78-86`). This is the key to detecting A↔B mutual forwarding.
+7. **Teardown**: three triggers for `cleanupConn` — normal `Close()`, signaling expiry LEAVE, DataConnection close; all funnel to the same `OnClose` handler.
+
+### 2.5 Frame Protocol Three Hard Constraints (documented in comments, enforced by tests)
+
+Documented in `back/internal/transport/conn.go:20-24` header comment, enforced by `back/internal/transport/test_integration_test.go:10-43`:
+
+1. Data headers are text frames, data chunks are binary frames — sending in reverse makes the other end treat control header as data chunk (silent misalignment).
+2. Data headers and chunks must be atomically contiguous (`SendFrame`'s `sendMu` guarantees, `connection.go:129-133`); interleaved sending with other frames on the connection causes confusion in "latest data header" single-slot routing.
+3. Field names must align exactly — `reqId` must be `reqId`, not `req_id`; if the other end can't parse, request hangs until timeout (`fetchIdleTimeout=5min`).
+
+These three are "won't error if violated, just silently misalign"; this is the highest-cost part of this connection and has its own integration test guard.
+
+## 3. Case Handling
+
+| Scenario | Behavior and Rationale | Code Location |
+|------|-----------|--------|
+| **Timeout** | Heartbeat 30s±5s (`peer.go:530-539`), expiry 50s no response triggers LEAVE+close (`peer.go:541-610`); write buffer flow control 512KB high water block, low water broadcast wait 30s timeout (`connection.go:140-142`); PSK authentication 5s timeout (`psk.go:38-44`); req fetch: meta wait (bounded by verbWaitTimeout=15s) + data frame interval 5min (`outbound.go:250`) + total size cap 8GB (H6) | `peer.go:530-610`, `connection.go:140-142`, `psk.go:38-44`, `outbound.go:250` |
+| **Disconnect** | Three triggers funnel to same OnClose→cleanupConn: normal Close (Peer.Close sends LEAVE), expiry LEAVE, DataConnection close. cleanupConn releases temp files, admin upload placeholders, triggers close handler. startLoop reconnects signaling with 2s→60s exponential backoff, re-dials all peers. | `peerjs_service.go:163-178`, `peerjs_service.go:195-198`, `peer.go:195-209` |
+| **Reconnect** | startLoop reconnects signaling with backoff (2s→60s, `:195-198`); after reconnect, redials configured peers + discovered peers (respecting MAX_PEERS budget, `:345-363`); dedupConn handles bidirectional mutual dials (A dials B, B dials A) by keeping one by connection UUID lexicographic order, the other marked as `fakeSession` (not real close, preserves signaling side state, `conn.go:196-226`). | `peerjs_service.go:184-311`, `conn.go:196-226` |
+| **Duplicate** | DedupConn: same peer duplicate remote connections (UUID-based) keep one, the other marked fake (`conn.go:196-226`); `sending` map prevents duplicate dialing of same peer (`:30-31,228-248`); `fetchState.done` uses `select default` for close idempotency (`outbound.go:461-475`); `sendMu` serializes send to prevent header-body interleaving under concurrency (`connection.go:129-133`). | `conn.go:30-31,196-226,228-248`, `outbound.go:461-475`, `connection.go:129-133` |
+| **Data missing/validation failure** | hash validation: 64-char hex (`inbound.go:61-63`); shareGate returns 403 when private not allowed (`inbound.go:73-77`); meta size > `maxPeerFetchSize`(8GB) returns 413 (H6, `outbound.go:115,196-201`); done received bytes mismatch returns err frame (truncation, `outbound.go:461-475`); SHA256 mismatch on full request deletes half-finished `.part` and returns Failed (`peerpull.go:371-376`); `ID-TAKEN`/`ERROR` only logged, not retried (`peer.go:201-213`). | `inbound.go:61-77`, `outbound.go:115,196-201,461-475`, `peerpull.go:371-376`, `peer.go:201-213` |
+| **Auth failure** | PSK gate: inbound `servedVerbs`(req/create/upload/list/share/info/delete/sync/pull/fwd-*) first check `psk-authenticated`, unauthenticated returns 401 (`inbound.go:73-77`); PSK is symmetric, only protects "nodes that set it" (`psk.go:16-17`); local sessions exempt (local channel, `share.go:120-123`); admin verb only allows `c.ID()=="local"` (`admin.go:136-140`) — WebRTC connections receiving admin frames immediately return err (prevents permission surface exposure). | `inbound.go:73-77`, `psk.go:16-17`, `share.go:120-123`, `admin.go:136-140` |
+| **Half-open state** | Flow control half-open: `bufferedAmount > 512KB` blocks, waits for `OnBufferedAmountLow` broadcast; 30s timeout returns error, doesn't keep waiting; connection close immediately exits wait (`connection.go:140-142`); **callback must be registered once at attach** (pion's `OnBufferedAmountLow` is replacement-style, concurrent registration overwrites each other causing deadlock, `connection.go:12-17,297-304`). PSK half-open: `psk-authenticated` not set but connection still alive, all `servedVerbs` return 401 (won't hang). Fetch half-open: `fetchState.done` closed immediately exits read loop, prevents reader blocking forever after disconnect (`outbound.go:461-475`). | `connection.go:140-142`, `connection.go:12-17,297-304`, `inbound.go:73-77`, `outbound.go:461-475` |
+| **Process restart** | No persistent sessions: all WebRTC DataChannel connections lost on restart, Peer/Connection/connection map all cleared; peerjs library is a local Go module (`back/go.mod:160` replace), restart just re-executes `NewPeer`+`Dial`; signaling server side only has `ID-TAKEN` conflict (logs only, no retry, `peer.go:201-213`). Local state (connection map, fetches, adminUp temp files) all in memory, cleaned by cleanupConn on disconnect; no "resume after restart" semantics. | `peerjs_service.go:163-178,184-311`, `back/go.mod:7,160`, `peer.go:201-213` |
+
+## 4. Related Documents
+
+- Same directory:
+  - [08-transport-signalserver.md](08-transport-signalserver.md): signal surface counterpart (details of OFFER/ANSWER/CANDIDATE/HEARTBEAT exchange with signaling server), this connection only describes how transport drives peerjs.
+  - [06-service-transport.md](06-service-transport.md): upstream — control/data plane division (share frames in service, byte stream in transport), six injection points and `PullSource.OpenStream`.
+  - [11-transport-storage.md](11-transport-storage.md): downstream — frame final destination (req → serveFile → FileRouter → local disk).
+  - [01-frontend-backend.md](01-frontend-backend.md): WSSession and rtcSession implement the same `Session` interface, reuse the same frame protocol (`ws_session.go:22-29,31-34`); `BindLocal` and DataChannel connections share `bindConn` dispatch (`peerjs_service.go:313-319`).
+  - [12-frontend-signalserver.md](12-frontend-signalserver.md): browser-side peerjs is the counterpart implementation for OFFER→ANSWER→CANDIDATE negotiation; this library needs to interoperate with its `serialization:"raw"` (`connection.go:339-346`).
+  - [06-service-transport.md](06-service-transport.md): upstream — `EnsureConnection`/`extraPeers` (node market "join node") triggers this connection's `connectLoop` (`peerjs_service.go:512-529`).
+  - [05-router-source.md](05-router-source.md): serveFile multi-source routing `FileRouter` returns data frames via `Session.SendFrame` (`inbound.go:46-51,93-104`).
+  - [11-transport-storage.md](11-transport-storage.md): this connection's data surface frame final destination — pull/upload disk write and file_index registration.
+  - [13-media-node-ech.md](13-media-node-ech.md): same `go-peerjs` library, independent frame family (url/keepalive), no data surface interaction.
+- Module documents: `../modules/09-transport.md` (session state machine, frame protocol and 3 hard constraints, connection lifecycle, H5/H6/M5-M9 fixes, in-memory state listing), `../modules/10-peerjs.md` (three-layer structure Signaller/Peer/Connection, signaling protocol details, flow control and singleton low water mark, 13 boundaries and pitfalls).

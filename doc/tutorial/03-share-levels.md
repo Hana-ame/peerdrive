@@ -1,137 +1,135 @@
-# 第三章：共享级别 —— public / unlisted / private
+# Chapter 3: Share Levels — public / unlisted / private
 
-> 接第二章：文件已经进了节点（内容库里查得到）。
-> 这一章解决「共享出去的东西，**给谁看**」。
-> **全程不用编译**：管理台是点按钮，命令行是 `curl` 打本机 HTTP。
+> Continues from Chapter 2: files are already in the node (visible in content store).
+> This chapter solves "who to show shared things to."
+> **No compilation needed throughout**: admin panel uses buttons, command line uses `curl` against local HTTP.
 
 ---
 
-## 3.0 先记住一句：列不列 ≠ 给不给
+## 3.0 First Remember One Rule: Listed ≠ Given
 
-上一章（怎么勾内容）解决"共享**什么**"，这一章解决"**给谁**"。这两件事是正交的，
-所以一共有三档：
+Last chapter (how to check content) solved "share **what**", this chapter solves "**to whom**". These two are orthogonal,
+so there are three levels total:
 
-| 级别 | 出现在共享清单里 | 谁能下载 | 典型用法 |
+| Level | Appears in Shared Manifest | Who Can Download | Typical Use |
 |---|---|---|---|
-| `public`（公开） | ✅ 是 | 连得上就行 | 想让加入节点的人一眼看到、随手保存 |
-| `unlisted`（不列出） | ❌ 否 | 连得上就行（知道 hash 即可） | 把某个文件发给你指定的人，不想被陌生人翻清单 |
-| `private`（私密） | ❌ 否（好友除外） | **只有自己和好友** | 自建节点之间的私用内容 |
+| `public` (public) | ✅ Yes | Anyone connected | Want people who join your node to see it at a glance, save with one click |
+| `unlisted` (not listed) | ❌ No | Anyone connected (knowing hash is enough) | Share a specific file with someone, don't want strangers browsing the manifest |
+| `private` (private) | ❌ No (except friends) | **Only you and friends** | Private content between self-hosted nodes |
 
-一句话记法：**public = 列出来也给；unlisted = 不列出来但给；private = 只给认识的人。**
+One-sentence mnemonic: **public = listed and given; unlisted = not listed but given; private = only for people you know.**
 
-> "共享清单"指的就是对端发 `share` 帧问"你有什么"时回的那份列表
-> （`GET /peerjs/nodes/<peer-id>/shares`）。**不列出**不代表拿不到——
-> 只要知道文件的 hash，发 `req` 就能取，这是内容寻址的基本能力。
+> "Shared manifest" means the list returned when a peer sends a `share` frame asking "what do you have"
+> (`GET /peerjs/nodes/<peer-id>/shares`). **Not listed** doesn't mean you can't get it —
+> as long as you know the file's hash, send `req` and you can retrieve it; this is the basic capability of content addressing.
 
 ---
 
-## 3.1 public：列出来，谁都能下
+## 3.1 public: Listed, Anyone Can Download
 
-默认档。你在管理台勾了"共享"而没动级别，就是这个：
+Default level. You checked "share" in the admin panel without changing the level, that's this one:
 
 ```bash
 curl -s -X POST http://127.0.0.1:3001/peerjs/share/files \
   -H 'Content-Type: application/json' \
-  -d '{"hashes":["<64位hex>"],"shared":true,"level":"public"}'
+  -d '{"hashes":["<64-char-hex>"],"shared":true,"level":"public"}'
 ```
 
-效果：任何连上你节点的对端，在它的"节点详情 / 市场"里都能看到这个文件，
-点一下就能保存到它自己那里。
+Effect: any peer connected to your node can see this file in their "Node Details / Market",
+click to save it to their own node.
 
 ---
 
-## 3.2 unlisted：不列出，但凭 hash 能下（"链接分享"）
+## 3.2 unlisted: Not Listed, But Hash Can Retrieve ("Link Sharing")
 
 ```bash
 curl -s -X POST http://127.0.0.1:3001/peerjs/share/files \
   -H 'Content-Type: application/json' \
-  -d '{"hashes":["<64位hex>"],"shared":true,"level":"unlisted"}'
+  -d '{"hashes":["<64-char-hex>"],"shared":true,"level":"unlisted"}'
 ```
 
-效果：它**不会**出现在 `share` 清单里（陌生人翻不到），但把 hash 告诉谁，谁就能取回。
+Effect: it **won't** appear in the `share` manifest (strangers can't find it by browsing), but if you tell someone the hash, they can retrieve it.
 
-**unlisted 和"根本没共享"的差别是什么？** 差别在于它是**你显式声明过的**：
+**What's the difference between unlisted and "never shared at all"?** The difference is it's **explicitly declared by you**:
 
-- 管理台里看得见（能审计、能改、能统计）；
-- 哪天你想把"没声明的也一律不给"打开时，它不会被误伤；
-- 而"没勾过的文件"只是恰好能被取回（内容寻址的既有行为），不在任何清单里。
+- Visible in the admin panel (can audit, modify, count);
+- If you later turn on "unlisted content also denied", it won't be accidentally affected;
+- Whereas "unchecked files" just happen to be retrievable (existing behavior of content addressing), not in any manifest.
 
-> 想让未声明的内容也取不到？当前版本没有这个开关：内容寻址取回（知道 hash
-> 就能取）是这套系统的默认能力，PSK 才是准入门禁（见 §3.3）。
+> Want undecleared content also unretrieveable? Current version doesn't have this switch: content-addressed retrieval (know hash
+> can retrieve) is the default capability of this system; PSK is the real access gate (see §3.3).
 
-### 把 hash 交给别人：面板的「链接」按钮
+### Give the Hash to Others: Panel's "Link" Button
 
-"凭 hash 能下"这句话要真能用，得有一个"把 hash 交出去"的动作——否则你只能口头
-传一串 64 位十六进制。公共面板的共享清单每一行都有「链接」按钮，点了生成一条：
+"Can download by hash" only works if there's an action to "give out the hash" — otherwise you can only verbally
+pass around a 64-character hex string. The public panel's shared manifest has a "Link" button on each row; clicking generates:
 
 ```text
-panel.html?node=<节点id>&hash=<64位hex>&auto=1
+panel.html?node=<node-id>&hash=<64-char-hex>&auto=1
 ```
 
-对方打开它：面板自动连上那个节点，并把这条内容单独列在共享清单**上方**
-（"这条内容来自分享链接"），点「取回」就拿到了。
+The other party opens it: panel automatically connects to that node, and lists this content **above** the shared manifest
+("this content comes from a sharing link"), click "Retrieve" to get it.
 
-这个入口**故意不依赖共享清单**：unlisted 按定义就不在清单里，只在清单里找的话，
-拿到链接的人看到的是"该节点没有共享内容"然后离开，而东西其实一直拿得到。
+This entry **intentionally doesn't rely on the shared manifest**: unlisted by definition isn't in the manifest, if you only look in the manifest,
+the link recipient sees "this node has no shared content" and leaves, while the content was always retrievable.
 
-链接里**不含**预共享密钥——密钥不能被转发、也不能留在对方的历史记录里；需要门禁
-的节点，收到链接的人得另外向你要密钥。
+Links **don't contain** the pre-shared key — keys can't be forwarded or left in someone else's history; nodes needing gates,
+link recipients need to ask you for the key separately.
 
-### 合集也能整包给一条链接
+### Collections Can Also Get a Link as a Package
 
-上面说的是**单个文件**。合集同样可以——它的 manifest（条目清单）本身就是一份按
-内容寻址存的 JSON，`hash` 就是那份 JSON 的 sha256，所以"凭 hash 取回"对合集一样
-成立：取回来的不是内容，是**条目清单**。
+Above is about **single files**. Collections work the same way — their manifest (entry list) itself is content-addressed JSON,
+`hash` is the sha256 of that JSON, so "retrieve by hash" works for collections too: what you retrieve isn't content, it's the **entry list**.
 
-合集标题行的「链接」按钮给出的就是这种链接（清单里每行自己的「链接」给的是
-**单条目**，别搞混）。对方打开后：
+The "Link" button on the collection title row gives this kind of link (the "Link" on each row within the manifest gives a
+**single entry**, don't confuse them). When the other party opens it:
 
-- 面板认出这是合集（清单里有它就直接认；清单里没有 —— 比如 unlisted —— 就把
-  manifest 取回来看看，有一个 `entries` 数组就是合集）；
-- 条目逐行列在清单**上方**，每条能单独「保存 / 预览 / 链接」；
-- 面板只能逐条存到浏览器（一次触发多个下载会被浏览器拦）。**要整包存进自己的
-  节点，用管理台的「保存整个合集」**（[第五章](05-save-from-other-nodes.md)）。
+- Panel recognizes this as a collection (if it's in the manifest, recognized directly; if not in the manifest — e.g., unlisted — it
+  fetches the manifest back to check, if there's an `entries` array it's a collection);
+- Entries listed one by one **above** the manifest, each can "Save / Preview / Link" individually;
+- Panel can only save to browser individually (browsers block triggering multiple downloads at once). **To save the whole collection into your
+  own node, use the admin panel's "Save Entire Collection"** ([Chapter 5](05-save-from-other-nodes.md)).
 
-这正好补上了 unlisted 合集唯一说得通的出口：不列出，但知道 hash 的人拿得到。
-整包存进**自己的节点**也成立——管理台的「保存整个合集」在清单里找不到它时，会退
-一步按 hash 把 manifest 取回来（细节见[第五章](05-save-from-other-nodes.md) §5.2）。
+This fills the one legitimate exit for unlisted collections: not listed, but people who know the hash can get it.
+Saving into **your own node** as a package also works — admin panel "Save Entire Collection" falls back to fetching the manifest by hash when it can't find it in the manifest (details in [Chapter 5](05-save-from-other-nodes.md) §5.2).
 
-⚠️ **private 合集连 manifest 都不给陌生人**——manifest 里是全部条目的路径与
-hash，泄出去等于目录泄露。所以陌生人打开 private 合集的链接，看到的是"取回失败"，
-而不是条目列表。
+⚠️ **private collections don't even give strangers the manifest** — the manifest contains all entries' paths and
+hashes, leaking it equals leaking the directory. So strangers opening a private collection link see "retrieval failed",
+not the entry list.
 
 ---
 
-## 3.3 private：只给自己和好友
+## 3.3 private: Only for You and Friends
 
 ```bash
-# 1) 把这个文件设成私密
+# 1) Set this file as private
 curl -s -X POST http://127.0.0.1:3001/peerjs/share/files \
   -H 'Content-Type: application/json' \
-  -d '{"hashes":["<64位hex>"],"shared":true,"level":"private"}'
+  -d '{"hashes":["<64-char-hex>"],"shared":true,"level":"private"}'
 
-# 2) 填好友名单（节点 ID，逗号分隔）
+# 2) Fill in the friend list (node IDs, comma-separated)
 curl -s -X PUT http://127.0.0.1:3001/peerjs/share \
   -H 'Content-Type: application/json' \
   -d '{"friends":["pd-mom","pd-laptop"]}'
 ```
 
-谁能取：
+Who can retrieve:
 
-| 请求者 | 能取到 private 吗 |
+| Requestor | Can Retrieve Private? |
 |---|---|
-| 你自己（管理台 / 面板直连本机的本地通道） | ✅ 永远能，不用加好友 |
-| 好友名单里的节点 | ✅ 能，**而且能在共享清单里看到它**（否则给了权限却没给目录） |
-| 其他人 | ❌ 取不到，回 `err: private` |
+| Yourself (admin panel / panel direct to local channel) | ✅ Always, no need to add friend |
+| Nodes in friend list | ✅ Yes, **and can see it in the shared manifest** (otherwise permission given but no directory) |
+| Others | ❌ Can't retrieve, returns `err: private` |
 
-**节点 ID 从哪看**：管理台顶部/节点页会显示本节点 peer id；对端连你时，你的节点
-日志里也有 `peer=<id>`。
+**Where to see Node ID**: admin panel top/node page shows your node's peer id; when a peer connects to you,
+your node log also has `peer=<id>`.
 
-### 对方用的是公共面板：id 在面板右上角
+### If the Other Party Uses the Public Panel: ID is in the Panel's Top-Right
 
-好友名单认的是**对端连上来时自报的 peer id**。面板以前每次打开都随机生成一个，
-名单里填它等于没填（第二天就换了个人）。现在面板右上角的「我的节点 id」是固定的
-（`pd-panel-` 开头，存在这台浏览器里），让对方点「复制」发给你，填进名单即可：
+The friend list matches the **peer ID the other party self-reports when connecting**. Panels previously generated a random one each time they opened,
+filling it in the list was pointless (a different person the next day). Now the "My Node ID" in the panel's top-right is fixed
+(starts with `pd-panel-`, stored in this browser), have the other person click "Copy" and send to you, fill into the list:
 
 ```bash
 curl -s -X PUT http://127.0.0.1:3001/peerjs/share \
@@ -139,48 +137,48 @@ curl -s -X PUT http://127.0.0.1:3001/peerjs/share \
   -d '{"friends":["pd-panel-8f3k2a9q"]}'
 ```
 
-他点了「换一个」之后旧 id 就失效了，要重新加一次。（同一个浏览器开两个面板页时
-也可能撞 id，面板会自动换一个并重连，界面上会说明原因。）
+After they click "Switch", the old id becomes invalid, need to re-add. (Opening two panel tabs in the same browser
+might also collide on id; the panel auto-switches and reconnects, the UI explains why.)
 
-### ⚠️ 好友名单只有在设了 PSK 时才可靠
+### ⚠️ Friend List Is Only Reliable When PSK Is Set
 
-peer id 是**对端自报**的：信令不校验身份，一个陌生人可以把自己的 id 改成你好友
-的名字再连上来。所以：
+Peer ID is **self-reported by the peer**: signaling doesn't verify identity, a stranger can change their id to your friend's
+name and connect. So:
 
-- **要真正挡住陌生人，先设 `PEERDRIVE_PSK`**（准入门禁：拿不到密钥连都连不上）；
-- 好友名单是在"已经进了门的人"里再分一级，**不是**身份校验；
-- 需要"指定账号才能看"这种强身份，得等账号体系（见 `doc/NETDISK.md` §12.6）。
+- **To truly block strangers, set `PEERDRIVE_PSK` first** (access gate: can't even connect without the key);
+- The friend list is a second-level filter among "people already inside", **not** identity verification;
+- If you need "only specific accounts can see" strong identity, you need to wait for the account system (see `doc/NETDISK.md` §12.6).
 
 ---
 
-## 3.4 一个文件被多条来源命中时：取最宽松
+## 3.4 When Multiple Sources Hit the Same File: Take the Most Relaxed
 
-三条来源（单文件勾选 / 整个目录 / 合集）可能同时命中同一个文件，这时取**最宽松**
-的那一档：
+Three sources (single file check / entire directory / collection) might simultaneously hit the same file, in which case the **most relaxed**
+level wins:
 
-| 目录 | 单文件勾选 | 生效级别 |
+| Directory | Single File Check | Effective Level |
 |---|---|---|
-| unlisted | public | **public**（列出） |
-| public | private | **public**（目录更宽松） |
-| unlisted | （没勾） | unlisted |
+| unlisted | public | **public** (listed) |
+| public | private | **public** (directory is more relaxed) |
+| unlisted | (not checked) | unlisted |
 
-为什么取最宽松而不是最严：取最严会让"我特意把这个文件放宽了"静默失效——你在界面
-上看到的就是"我改了，但刷新回来还是老样子"。
+Why take the most relaxed rather than strictest: taking the strictest would silently invalidate "I intentionally relaxed this file" —
+what you'd see in the UI is "I changed it, but after refresh it's back to normal."
 
-反过来，**你在下拉里显式选一档，就是覆盖**：已经 public 的文件改成 private，
-立刻生效，不需要先取消再重勾。
+Conversely, **if you explicitly pick a level in the dropdown, that's an override**: changing an already-public file to private
+takes effect immediately, no need to uncheck first then recheck.
 
 ---
 
-## 3.5 怎么验证
+## 3.5 How to Verify
 
-**看当前状态和三档取值**：
+**Check current state and three-level values**:
 
 ```bash
 curl -s http://127.0.0.1:3001/peerjs/share | python -m json.tool
 ```
 
-节选（注意每行多了 `level`）：
+Excerpt (note each row now has `level`):
 
 ```json
 {
@@ -188,33 +186,33 @@ curl -s http://127.0.0.1:3001/peerjs/share | python -m json.tool
   "levels": ["public", "unlisted", "private"],
   "friends": ["pd-mom"],
   "files": [
-    {"hash":"<64位hex>","name":"a.txt","size":1234,"shared":true,"by_dir":false,"level":"private"}
+    {"hash":"<64-char-hex>","name":"a.txt","size":1234,"shared":true,"by_dir":false,"level":"private"}
   ],
-  "selected": [{"id":"<64位hex>","level":"private"}]
+  "selected": [{"id":"<64-char-hex>","level":"private"}]
 }
 ```
 
-**本章自检清单**：
+**Chapter Self-Check List**:
 
-1. 设成 `unlisted` 的文件，**不出现在**对端 `shares` 清单里；
-2. 但它用 hash 仍能取回（面板"取回校验"或另一节点 `POST /p2p/pull`，见第五章）；
-3. 设成 `private` 后，不在好友名单的节点取它 → 报 `private`；
-4. 把自己加进好友名单后，同一个节点能取到，**并且**在 `shares` 里能看到它；
-5. 重启节点 → 级别和好友名单都还在（落在 `share_scope.json`）；
-6. 合集标题行的「链接」给出去 → 对方看到的是**合集**（条目列出来），不是一行文件；
-   合集设成 unlisted 后链接照样能用，设成 private 后陌生人连条目列表都看不到。
+1. Files set to `unlisted` do **not appear** in the peer's `shares` manifest;
+2. But they can still be retrieved by hash (panel "Retrieve Verify" or another node `POST /p2p/pull`, see Chapter 5);
+3. After setting to `private`, nodes not in the friend list retrieving it → returns `private`;
+4. After adding yourself to the friend list, the same node can retrieve, **and** can see it in `shares`;
+5. Restart node → levels and friend list both persist (stored in `share_scope.json`);
+6. Collection title row's "Link" shared out → the other party sees a **collection** (entries listed), not a single file;
+   after setting a collection to unlisted, the link still works; after setting to private, strangers can't even see the entry list.
 
 ---
 
-## 3.6 边界与几个"报错"其实是保护
+## 3.6 Boundaries and Several "Errors" That Are Actually Protection
 
-| 现象 | 原因 / 怎么办 |
+| Phenomenon | Cause / What to Do |
 |---|---|
-| 级别拼成 `"pubilc"` 返回 400 | 非法级别**整批拒绝**，不会悄悄兜成 public（那等于把本想限制的内容公开）。只能填三档之一 |
-| 好友 ID 里带空格 → 400 | 抄写错误肉眼看不出（`abc ` 与 `abc`），一律拒绝并提示 |
-| 加了好友，对方还是取不到 | ① 对方连上来的 id 和你填的不一致（大小写不敏感，但别多空格）；② 对方其实没通过 PSK |
-| 设了 private，自己反而取不到 | 不会：管理台 / 面板直连本机的本地通道永远算"自己"。走 P2P 的旁人则要按好友名单 |
-| 合集本身是"仅限指定权限/仅自己" | 按 **private** 处理：不列出，只给好友。因为访问名单是账号列表，现版本没有身份可校验 |
+| Level misspelled as `"pubilc"` returns 400 | Illegal level **rejects the entire batch**, won't silently fallback to public (that would equal publicly exposing content meant to be restricted). Only three levels can be used |
+| Friend ID contains spaces → 400 | Copy errors are invisible to the eye (`abc ` vs `abc`), reject all and prompt |
+| Added friend, but they still can't retrieve | ① Their connecting ID doesn't match what you filled (case-insensitive, but no extra spaces); ② They didn't actually pass PSK |
+| Set to private, can't even retrieve yourself | Won't happen: admin panel / panel direct to local channel always counts as "yourself". P2P peers use the friend list |
+| Collection itself is "specified permissions only / self only" | Treated as **private**: not listed, only friends. Because access list is an account list, current version has no identity verification |
 
-> 想了解判定与接线细节：`doc/NETDISK.md` §12.6。
-> 下一章（第四章）讲怎么逐行勾选内容、以及勾选与级别在管理台里的具体操作。
+> For judgment and wiring details: `doc/NETDISK.md` §12.6.
+> Next chapter (Chapter 4) covers how to check content row by row, and how check vs level works in the admin panel.

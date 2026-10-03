@@ -1,14 +1,15 @@
-// ws.test.js — ws.js 客户端单元测试：帧协议 reqId 路由、admin 响应、
-// 二进制块归属（admin-bin / data 头+块）、错误语义（status>=400 → err.status/err.data）。
+// ws.test.js — ws.js client unit tests: frame protocol reqId routing, admin responses,
+// binary chunk attribution (admin-bin / data header+chunk), error semantics (status>=400 → err.status/err.data).
 //
-// 发现背景：ws.js 是「前端全面迁移到 ws/peerjs」的核心客户端（api.js 的
-// request() 全部走它）。帧路由正确性直接决定页面能否工作——特别是
-// 「最近二进制声明头」单槽（binaryExpect）必须与后端连接级 expect 语义一致。
+// Discovery context: ws.js is the core client for "migrating the frontend entirely to ws/peerjs"
+// (api.js's request() all go through it). Frame routing correctness directly determines whether
+// the page works — especially the "last binary declaration header" single-slot (binaryExpect) must
+// be consistent with the backend's connection-level expect semantics.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import * as ws from '../src/ws'
 
-// 构造模拟 WebSocket：手动注入 onmessage，便于直接喂帧
+// Construct a mock WebSocket: manually inject onmessage for direct frame feeding
 function makeMockSock() {
   const sock = {
     readyState: WebSocket.OPEN,
@@ -20,31 +21,32 @@ function makeMockSock() {
   return sock
 }
 
-// feedText 模拟服务端发来的文本帧
+// feedText simulates text frames sent from the server
 function feedText(sock, msg) {
   sock.onmessage({ data: JSON.stringify(msg) })
 }
 
 describe('ws.js client', () => {
   beforeEach(() => {
-    // _reset 清掉残留 pending：上一测试未 resolve 的请求（如 token 测试）
-    // 若遗留在 map 里，后续 onclose 会连带 reject 产生 unhandled rejection
+    // _reset clears leftover pending: requests from the previous test that didn't resolve
+    // (e.g. token tests) — if they linger in the map, a subsequent onclose will reject them
+    // causing unhandled rejection
     ws.__test._reset()
     localStorage.clear()
   })
 
-  it('admin 请求按 reqId 路由响应', async () => {
+  it('admin requests route responses by reqId', async () => {
     const sock = makeMockSock()
     ws.__test._setSock(sock)
     const p1 = ws.admin('GET', '/files')
     const p2 = ws.admin('POST', '/collections', { name: 'x' })
-    // 两个请求已发出
+    // Two requests have been sent
     expect(sock.sent.length).toBe(2)
     const f1 = JSON.parse(sock.sent[0])
     const f2 = JSON.parse(sock.sent[1])
     expect(f1.type).toBe('admin')
     expect(f2.reqId).not.toBe(f1.reqId)
-    // 乱序响应：先回第二个
+    // Out-of-order response: reply to the second one first
     feedText(sock, { type: 'admin-resp', status: 200, body: { id: 'coll-x' }, reqId: f2.reqId })
     const r2 = await p2
     expect(r2).toEqual({ id: 'coll-x' })
@@ -53,7 +55,7 @@ describe('ws.js client', () => {
     expect(r1).toEqual({ files: [] })
   })
 
-  it('admin 4xx 响应 → reject Error(err.status/err.data)（409 冲突清单语义）', async () => {
+  it('admin 4xx response → reject Error(err.status/err.data) (409 conflict-list semantics)', async () => {
     const sock = makeMockSock()
     ws.__test._setSock(sock)
     const p = ws.admin('POST', '/actions/merge', {})
@@ -69,7 +71,7 @@ describe('ws.js client', () => {
     })
   })
 
-  it('admin 请求携带 token（Authorization 语义）', async () => {
+  it('admin requests carry token (Authorization semantics)', async () => {
     localStorage.setItem('peerdrive_auth_token', 'tok-123')
     const sock = makeMockSock()
     ws.__test._setSock(sock)
@@ -78,13 +80,13 @@ describe('ws.js client', () => {
     expect(f.token).toBe('tok-123')
   })
 
-  it('download：data 头+二进制块按 binaryExpect 收集，done 帧 resolve', async () => {
+  it('download: data header + binary chunks collected per binaryExpect, done frame resolves', async () => {
     const sock = makeMockSock()
     ws.__test._setSock(sock)
     const p = ws.download('a'.repeat(64))
     const req = JSON.parse(sock.sent[0])
     expect(req.type).toBe('req')
-    // 服务端回：meta → data 头 + 块1 → data 头 + 块2 → done
+    // Server replies: meta → data header + chunk1 → data header + chunk2 → done
     feedText(sock, { type: 'meta', total: 6, reqId: req.reqId })
     feedText(sock, { type: 'data', offset: 0, size: 3, reqId: req.reqId })
     sock.onmessage({ data: new Uint8Array([1, 2, 3]).buffer })
@@ -95,7 +97,7 @@ describe('ws.js client', () => {
     expect(Array.from(data)).toEqual([1, 2, 3, 4, 5, 6])
   })
 
-  it('download：err 帧 reject', async () => {
+  it('download: err frame rejects', async () => {
     const sock = makeMockSock()
     ws.__test._setSock(sock)
     const p = ws.download('b'.repeat(64))
@@ -104,7 +106,7 @@ describe('ws.js client', () => {
     await expect(p).rejects.toThrow('file not found')
   })
 
-  it('stat：req size=0 探大小，meta 帧 total resolve', async () => {
+  it('stat: req size=0 probes size, meta frame total resolves', async () => {
     const sock = makeMockSock()
     ws.__test._setSock(sock)
     const p = ws.stat('c'.repeat(64))
@@ -112,23 +114,24 @@ describe('ws.js client', () => {
     expect(req.type).toBe('req')
     expect(req.offset).toBe(0)
     expect(req.size).toBe(0)
-    // 服务端 meta 帧带 total（不发数据直接 done）
+    // Server meta frame carries total (no data sent, directly done)
     feedText(sock, { type: 'meta', total: 4096, reqId: req.reqId })
     await expect(p).resolves.toBe(4096)
-    // 迟到的 done 帧不得影响（pending 已删）
+    // A late-arriving done frame must not have any effect (pending already deleted)
     feedText(sock, { type: 'done', offset: 0, size: 0, reqId: req.reqId })
   })
 
-  it('downloadStream：块边收边吐，done 帧 close 流', async () => {
-    // 发现背景：代码审阅 2026-08-18——download 全量内存组装，大文件
-    // 保存/预览 OOM；downloadStream 提供边收边吐路径（FS Access API 保存用）。
+  it('downloadStream: chunks streamed as received, done frame closes stream', async () => {
+    // Discovery context: code review 2026-08-18 — download assembles everything in memory,
+    // OOM for large-file save/preview; downloadStream provides a stream-through path (for
+    // FS Access API saving).
     const sock = makeMockSock()
     ws.__test._setSock(sock)
     const stream = ws.downloadStream('d'.repeat(64))
     const reader = stream.getReader()
     const req = JSON.parse(sock.sent[0])
     expect(req.type).toBe('req')
-    // meta → data 头 + 块1 → data 头 + 块2 → done
+    // meta → data header + chunk1 → data header + chunk2 → done
     feedText(sock, { type: 'meta', total: 6, reqId: req.reqId })
     feedText(sock, { type: 'data', offset: 0, size: 3, reqId: req.reqId })
     sock.onmessage({ data: new Uint8Array([1, 2, 3]).buffer })
@@ -144,7 +147,7 @@ describe('ws.js client', () => {
     expect(r3.done).toBe(true)
   })
 
-  it('downloadStream：err 帧灌进流（read 抛错）', async () => {
+  it('downloadStream: err frame piped into stream (read throws)', async () => {
     const sock = makeMockSock()
     ws.__test._setSock(sock)
     const stream = ws.downloadStream('e'.repeat(64))
@@ -154,9 +157,9 @@ describe('ws.js client', () => {
     await expect(reader.read()).rejects.toThrow('peer fetch failed')
   })
 
-  it('downloadStream：消费者 cancel 清理 pending 与 binaryExpect（防迟到帧污染）', async () => {
-    // 发现背景：代码审阅 2026-08-18——abort/cancel 不清理会留下 pending
-    // 泄漏，且迟到 data 帧继续写入已放弃的流。
+  it('downloadStream: consumer cancel clears pending and binaryExpect (prevents late-frame pollution)', async () => {
+    // Discovery context: code review 2026-08-18 — abort/cancel without cleanup leaves pending
+    // leaking, and late-arriving data frames continue writing into an abandoned stream.
     const sock = makeMockSock()
     ws.__test._setSock(sock)
     const stream = ws.downloadStream('f'.repeat(64))
@@ -164,18 +167,19 @@ describe('ws.js client', () => {
     const req = JSON.parse(sock.sent[0])
     feedText(sock, { type: 'data', offset: 0, size: 3, reqId: req.reqId })
     sock.onmessage({ data: new Uint8Array([1, 2, 3]).buffer })
-    // 消费者放弃
+    // Consumer abandons
     await reader.cancel()
     expect(ws.__test.pending.has(req.reqId)).toBe(false)
-    // 迟到帧到达：binaryExpect 已清，静默丢弃不抛错
+    // Late frame arrives: binaryExpect already cleared, silently dropped without throwing
     sock.onmessage({ data: new Uint8Array([4, 5, 6]).buffer })
     feedText(sock, { type: 'done', offset: 0, size: 3, reqId: req.reqId })
   })
 
-  it('admin-bin size=0 清空 binaryExpect（防残留单槽污染后续二进制帧）', async () => {
-    // 发现背景：再 review（2026-08）——空文件/空响应的 admin-bin 声明没有
-    // 后续二进制帧，旧实现未清 binaryExpect；万一后面来一个无关二进制帧，
-    // 会被误判为这个已完成请求的数据块（pending 已删，数据被静默丢弃）。
+  it('admin-bin size=0 clears binaryExpect (prevents leftover single-slot from polluting subsequent binary frames)', async () => {
+    // Discovery context: re-review (2026-08) — empty file/empty response admin-bin declarations
+    // have no subsequent binary frames, old implementation didn't clear binaryExpect; if an
+    // unrelated binary frame arrives later, it could be misattributed as data for this
+    // already-completed request (pending already deleted, data silently discarded).
     const sock = makeMockSock()
     ws.__test._setSock(sock)
     const p = ws.admin('GET', '/empty-file')
@@ -184,12 +188,12 @@ describe('ws.js client', () => {
     const data = await p
     expect(data).toHaveLength(0)
     expect(ws.__test._binaryExpect()).toBeNull()
-    // 随后到达的无主二进制帧不得被误归到已完成请求
+    // A subsequently arriving orphan binary frame must not be misattributed to a completed request
     sock.onmessage({ data: new Uint8Array([1]).buffer })
     expect(ws.__test._binaryExpect()).toBeNull()
   })
 
-  it('admin-bin：二进制文件流响应收集为 Uint8Array', async () => {
+  it('admin-bin: binary file stream response collected as Uint8Array', async () => {
     const sock = makeMockSock()
     ws.__test._setSock(sock)
     const p = ws.admin('GET', '/bt/download/abc/torrent')
@@ -200,11 +204,12 @@ describe('ws.js client', () => {
     expect(Array.from(data)).toEqual([9, 8, 7, 6])
   })
 
-  it('连接关闭 → 全部 pending reject', async () => {
+  it('connection closed → all pending reject', async () => {
     const sock = makeMockSock()
     ws.__test._setSock(sock)
     const p = ws.admin('GET', '/files')
-    // 先挂 catch 再触发 onclose（避免 reject 先于 await 附着产生 unhandled rejection）
+    // Attach catch before triggering onclose (to avoid reject firing before await attachment,
+    // which would produce unhandled rejection)
     let caught = null
     p.catch(err => { caught = err })
     sock.onclose()
@@ -212,25 +217,26 @@ describe('ws.js client', () => {
     expect(caught.message).toBe('ws: connection closed')
   })
 
-  it('upload：声明帧 + 二进制块按 BIN_CHUNK 切片上传（FileReader 回退路径）', async () => {
-    // 发现背景（2026-08-18 代码审阅）：FileReader 回退分支引用未定义常量
-    // BIN_CHUNK → ReferenceError 上传直接失败（现代浏览器走 Streams API 分支
-    // 所以线上未触发）。本测试强制走回退分支（file 无 stream() 方法 + mock
-    // FileReader），验证声明帧 + 按 64KB 切片发送 + admin-resp resolve。
+  it('upload: declaration frame + binary chunks sliced per BIN_CHUNK for upload (FileReader fallback path)', async () => {
+    // Discovery context (2026-08-18 code review): FileReader fallback branch referenced an
+    // undefined constant BIN_CHUNK → ReferenceError causing upload failure (modern browsers
+    // use the Streams API branch, so this didn't trigger in production). This test forces
+    // the fallback branch (file has no stream() method + mock FileReader), verifying
+    // declaration frame + 64KB chunked sending + admin-resp resolve.
     const CHUNK = 64 * 1024
-    const total = CHUNK * 2 + 22 // 150KB → 3 块：64KB + 64KB + 22KB
+    const total = CHUNK * 2 + 22 // 150KB → 3 chunks: 64KB + 64KB + 22KB
     const file = {
       name: 'big.bin',
       size: total,
-      slice: (a, b) => new Uint8Array(Math.min(b, total) - a), // 真实 File.slice 会截到文件末尾，mock 需同样行为
+      slice: (a, b) => new Uint8Array(Math.min(b, total) - a), // Real File.slice truncates to end of file; mock needs same behavior
     }
-    // FileReader mock：readAsArrayBuffer 同步触发 onload（真实为异步，
-    // 同步触发对「切块数量/大小」断言无影响）
+    // FileReader mock: readAsArrayBuffer triggers onload synchronously (real is async,
+    // synchronous trigger has no effect on "chunk count/size" assertions)
     const reads = []
     class FakeFileReader {
       readAsArrayBuffer(slice) {
         reads.push(slice.length)
-        this.result = slice // 真实 FileReader 的 result 是 ArrayBuffer，这里直接给 slice
+        this.result = slice // Real FileReader result is an ArrayBuffer; here we use slice directly
         this.onload({})
       }
     }
@@ -240,7 +246,7 @@ describe('ws.js client', () => {
     ws.__test._setSock(sock)
     const p = ws.upload(file, 'big.bin')
 
-    // 第 1 帧：声明帧（admin binary）
+    // Frame 1: declaration frame (admin binary)
     const decl = JSON.parse(sock.sent[0])
     expect(decl.type).toBe('admin')
     expect(decl.binary).toBe(true)
@@ -248,12 +254,12 @@ describe('ws.js client', () => {
     expect(decl.size).toBe(total)
     expect(decl.field).toBe('file')
     expect(decl.path).toBe('/files/upload')
-    // 后续帧：二进制块（64KB × 2 + 22B）
+    // Subsequent frames: binary chunks (64KB × 2 + 22B)
     expect(sock.sent.length).toBe(4)
     expect(sock.sent[1].byteLength).toBe(CHUNK)
     expect(sock.sent[2].byteLength).toBe(CHUNK)
     expect(sock.sent[3].byteLength).toBe(22)
-    // 服务端回 admin-resp → resolve
+    // Server replies admin-resp → resolve
     feedText(sock, { type: 'admin-resp', status: 200, body: { hash: 'h' }, reqId: decl.reqId })
     await expect(p).resolves.toEqual({ hash: 'h' })
 
@@ -261,33 +267,33 @@ describe('ws.js client', () => {
   })
 })
 
-// 发现背景：代码审阅 2026-08-19——downloadToFile 在 showSaveFilePicker
-// 抛出 SecurityError 时应回退到 <a download> 路径，而非让 finally 块
-// 访问未定义的 writable 导致 ReferenceError。
+// Discovery context: code review 2026-08-19 — downloadToFile should fall back to the
+// <a download> path when showSaveFilePicker throws SecurityError, rather than letting the
+// finally block access an undefined writable causing ReferenceError.
 describe('downloadToFile error handling', () => {
   it('should fallback to <a download> when showSaveFilePicker is not available', async () => {
-    // 使用 mock socket 避免实际 WS 连接
+    // Use mock socket to avoid real WS connection
     const sock = makeMockSock()
     ws.__test._setSock(sock)
 
-    // 模拟 showSaveFilePicker 不存在，触发 fallback 路径
+    // Simulate showSaveFilePicker not existing, triggering the fallback path
     const orig = window.showSaveFilePicker
     delete window.showSaveFilePicker
 
-    // downloadToFile 会尝试 showSaveFilePicker（不存在），
-    // 回退到 download(hash) -> 发送 req 帧 -> 等待响应
-    // 我们模拟服务端返回 err 帧使 download 快速 reject
+    // downloadToFile will try showSaveFilePicker (not available),
+    // falling back to download(hash) -> send req frame -> wait for response
+    // We simulate the server returning an err frame to make download reject quickly
     const promise = ws.downloadToFile('testhash', 'testfile')
 
-    // 从 sock.sent 中提取 reqId
+    // Extract reqId from sock.sent
     const sent = sock.sent[0]
     const req = JSON.parse(sent)
-    // 发送 err 帧使 download 快速 reject
+    // Send err frame to make download reject quickly
     feedText(sock, { type: 'err', msg: 'not found', reqId: req.reqId })
 
     await expect(promise).rejects.toThrow('not found')
 
-    // 清理
+    // Cleanup
     window.showSaveFilePicker = orig
     ws.__test._reset()
   })

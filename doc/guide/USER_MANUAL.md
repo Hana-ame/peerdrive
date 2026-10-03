@@ -1,69 +1,69 @@
-# Peerdrive 使用手册 (v2)
+# Peerdrive User Manual (v2)
 
-## 界面概览
+## Interface Overview
 
-Peerdrive 提供了一个基于 Web 的界面，允许用户管理内容寻址的文件合集。
+Peerdrive provides a web-based interface for managing content-addressed file collections.
 
-- **顶部导航栏**: 包含用户登录/登出、当前用户名设置以及 P2P 节点在线状态。
-- **主面板**: 
-    - **Plaza (广场)**: 浏览和搜索公开的合集。
-    - **Explorer (资源管理器)**: 管理特定用户的特定合集。包含文件列表、上传功能、版本提交和回滚。
-
----
-
-## 基本概念
-
-### 1. 内容寻址 (CAS)
-Peerdrive 不通过文件名来定位文件，而是通过文件的 **SHA256 哈希值**。这意味着相同内容的文件在系统中只存储一份，无论它被命名为什么。
-
-### 2. 匿名合集 (Anonymous Collection)
-一个合集本质上是一个 `路径 -> 哈希` 的映射列表。
-- **匿名合集**是不可变的 JSON 文件，它本身也被存储在系统中并拥有一个唯一的哈希值。
-- 任何合集的“快照”就是一个匿名合集。
-
-### 3. 注册用户合集
-注册用户可以拥有多个命名的合集。
-- 每个用户合集通过一个 **指针 (current_hash)** 指向一个最新的匿名合集快照。
-- 这使得合集可以像 Git 一样进行版本管理、快照回滚和快速分叉 (Fork)。
-
-### 4. P2P 自动回退
-当你下载一个文件时，系统会尝试以下顺序：
-`本地存储` $\rightarrow$ `远程副本` $\rightarrow$ `P2P 网络 (Bitswap)`
-如果本地没有，系统会自动在 P2P 网络中寻找拥有该哈希文件的其他节点并下载。
+- **Top navigation bar**: Contains user login/logout, current username setting, and P2P node online status.
+- **Main panel**:
+    - **Plaza**: Browse and search public collections.
+    - **Explorer**: Manage a specific user's specific collection. Includes file list, upload, version commit, and rollback.
 
 ---
 
-## 操作指南
+## Basic Concepts
 
-### 认证与登录
-1. 在顶部导航栏输入用户名和密码。
-2. 点击 **登录**。登录后，你将获得权限执行上传、创建合集和提交版本等写操作。
-3. 退出时点击 **退出** 按钮清除会话。
+### 1. Content Addressing (CAS)
+Peerdrive doesn't locate files by filename, but by the file's **SHA256 hash**. This means identical files are stored only once regardless of their names.
 
-### 搜索合集
-在广场 (Plaza) 页面使用搜索框，可以通过用户名或合集名称寻找感兴趣的公开资源。
+### 2. Anonymous Collection
+A collection is essentially a `path -> hash` mapping list.
+- An **anonymous collection** is an immutable JSON file, which is itself stored in the system and has a unique hash.
+- Any collection's "snapshot" is an anonymous collection.
 
-### 管理合集
-1. **进入合集**: 在 URL 中输入 `/:username/:collection_name` 或从搜索结果进入。
-2. **上传文件**: 点击 **+ 上传文件**。文件会被计算哈希并添加到当前合集的“工作区”。
-3. **提交版本 (Commit)**: 
-    - 在提交信息框输入描述。
-    - 点击 **Commit**。此时系统会为当前工作区生成一个不可变的匿名快照，并更新合集的当前指针。
-4. **回滚版本 (Rollback)**: 在版本历史列表中，选择之前的一个版本进行回滚，工作区将恢复到该快照状态。
+### 3. Registered User Collection
+Registered users can own multiple named collections.
+- Each user collection points to the latest anonymous collection snapshot through a **pointer (current_hash)**.
+- This allows collections to be version-managed, snapshotted, rolled back, and quickly forked like Git.
 
-### 协作操作
-- **Fork**: 将另一个用户的合集完整复制到自己的账号下。
-- **Merge**: 将另一个合集的变更合并到当前合集中，支持不同的冲突解决策略（保留本地/接受远端）。
+### 4. P2P Auto-Fallback
+When downloading a file, the system tries the following order:
+`local storage` $\rightarrow$ `remote replica` $\rightarrow$ `P2P network (Bitswap)`
+If the file isn't available locally, the system automatically searches the P2P network for other nodes holding that hash and downloads from them.
 
 ---
 
-## 常见问题
+## User Guide
 
-**Q: 为什么我上传的文件在其他设备上也能下载？**
-A: 因为文件是按内容哈希存储的。只要对方拥有该哈希的引用（在合集中），且网络中至少有一个节点（包括你自己的节点）持有该文件副本，就可以下载。
+### Authentication and Login
+1. Enter username and password in the top navigation bar.
+2. Click **Login**. After logging in, you gain permission to perform write operations such as uploading, creating collections, and committing versions.
+3. Click **Logout** to clear the session.
 
-**Q: 提交 (Commit) 和上传有什么区别？**
-A: 上传只是将物理文件存入系统并记录在当前“工作区”。Commit 则是将工作区的所有状态冻结为一个永久的快照。没有 Commit 的变更在某些同步场景下可能不会被他人看到。
+### Search Collections
+Use the search box on the Plaza page to find public resources of interest by username or collection name.
 
-**Q: P2P 状态显示 "Online" 代表什么？**
-A: 代表你的节点已成功启动 libp2p 协议，可以发现其他对等节点并参与文件的分发。
+### Manage Collections
+1. **Enter Collection**: Enter `/:username/:collection_name` in the URL or navigate from search results.
+2. **Upload File**: Click **+ Upload File**. The file will be hashed and added to the current collection's "workspace".
+3. **Commit Version (Commit)**:
+    - Enter a description in the commit message box.
+    - Click **Commit**. The system generates an immutable anonymous snapshot of the current workspace and updates the collection's current pointer.
+4. **Rollback Version (Rollback)**: Select a previous version from the version history list to rollback; the workspace will be restored to that snapshot state.
+
+### Collaboration Operations
+- **Fork**: Copy another user's collection completely to your own account.
+- **Merge**: Merge another collection's changes into the current collection, supporting different conflict resolution strategies (keep local / accept remote).
+
+---
+
+## FAQ
+
+**Q: Why can I download my uploaded file on other devices?**
+A: Because files are stored by content hash. As long as the other party has a reference to that hash (in a collection), and at least one node on the network (including your own node) holds a copy of the file, it can be downloaded.
+
+**Q: What's the difference between Commit and Upload?**
+A: Upload only stores the physical file in the system and records it in the current "workspace". Commit freezes all workspace states into a permanent snapshot. Changes without Commit may not be visible to others in certain sync scenarios.
+
+**Q: What does P2P status "Online" mean?**
+A: It means your node has successfully started the libp2p protocol, can discover other peer nodes, and participate in file distribution.

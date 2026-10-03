@@ -1,4 +1,4 @@
-// SyncService 将集合文件同步到本地磁盘，支持路径过滤（include/exclude 模式匹配）和同步状态跟踪。
+// SyncService syncs collection files to local disk, supporting path filtering (include/exclude pattern matching) and sync state tracking.
 package service
 
 import (
@@ -27,7 +27,7 @@ func NewSyncService(syncRepo *repository.SyncRepository, uniDl *downloader.Unive
 	}
 }
 
-// SaveToDisk 将集合文件同步到本地磁盘，支持路径过滤（include/exclude）和同步状态跟踪。
+// SaveToDisk syncs collection files to local disk, supporting path filtering (include/exclude) and sync state tracking.
 func (s *SyncService) SaveToDisk(req model.SaveLocalRequest) error {
 	// 1. Path Traversal Prevention
 	if strings.Contains(req.LocalPath, "..") {
@@ -74,7 +74,7 @@ func (s *SyncService) SaveToDisk(req model.SaveLocalRequest) error {
 	return nil
 }
 
-// GetStatus 查询集合的本地同步状态，返回已保存/缺失的文件列表。
+// GetStatus queries the local sync state of a collection, returning the list of saved/missing files.
 func (s *SyncService) GetStatus(hash string) (*model.SyncStatusResponse, error) {
 	state, err := s.syncRepo.GetSyncState(hash)
 	if err != nil {
@@ -152,7 +152,7 @@ func (s *SyncService) filterFiles(entries []model.AnonCollectionEntry, include, 
 	return result
 }
 
-// isExcluded 检查路径是否匹配任一排除模式。
+// isExcluded checks whether the path matches any exclusion pattern.
 func (s *SyncService) isExcluded(path string, exclude []string) bool {
 	for _, pattern := range exclude {
 		if s.matchPattern(path, pattern) {
@@ -162,7 +162,7 @@ func (s *SyncService) isExcluded(path string, exclude []string) bool {
 	return false
 }
 
-// isIncluded 检查路径是否匹配任一包含模式。
+// isIncluded checks whether the path matches any inclusion pattern.
 func (s *SyncService) isIncluded(path string, include []string) bool {
 	for _, pattern := range include {
 		if s.matchPattern(path, pattern) {
@@ -172,11 +172,11 @@ func (s *SyncService) isIncluded(path string, include []string) bool {
 	return false
 }
 
-// matchPattern 判断 path 是否匹配 pattern（shell 风格 + 目录前缀 + 子串回退）。
-// L2：原 fallback strings.Contains 无路径边界——排除 "tmp/foo" 会把
-// "tmp/foobar" 也排除（用户想排除单个目录却误伤相邻文件）。
-// 子串回退加边界：要么 pattern 以 "/" 结尾（明确想匹配整个目录前缀），
-// 要么子串前后必须是路径分隔符或文件边界。
+// matchPattern determines whether path matches pattern (shell-style + directory prefix + substring fallback).
+// L2: the original fallback strings.Contains had no path boundary -- excluding "tmp/foo" would also
+// exclude "tmp/foobar" (the user wants to exclude a single directory but accidentally hits adjacent files).
+// The substring fallback now requires boundaries: either the pattern ends with "/" (explicitly matching
+// a whole directory prefix), or the substring must be bounded by a path separator or file boundary.
 func (s *SyncService) matchPattern(path, pattern string) bool {
 	if pattern == "*" {
 		return true
@@ -193,8 +193,8 @@ func (s *SyncService) matchPattern(path, pattern string) bool {
 			return true
 		}
 	}
-	// Fallback：子串匹配必须有路径边界（pattern 以 / 结尾 = 目录前缀；
-	// 否则前后边界必须是 '/' 或字符串端），防止 /tmp/foo 误匹配 /tmp/foobar
+	// Fallback: substring matching requires path boundaries (pattern ending with / = directory prefix;
+	// otherwise boundaries must be '/' or string ends) to prevent /tmp/foo from matching /tmp/foobar
 	if strings.HasSuffix(pattern, "/") {
 		return strings.HasPrefix(path, pattern)
 	}

@@ -16,21 +16,21 @@ import (
 	"peerdrive/internal/transport"
 )
 
-// 线上部署验证：以 peersignal.moonchan.xyz（cloudcone 自托管信令 + 发现）为
-// 信令服务器的完整测试流。运行：PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestLive -v
-// 注意：cloudcone 直连可达（不走宿主机代理），跑测试时不要设 HTTPS_PROXY 指向代理。
+// Live deployment verification: full test flow using peersignal.moonchan.xyz (cloudcone self-hosted signaling + discovery) as
+// the signaling server. Run: PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestLive -v
+// Note: cloudcone is directly reachable (bypasses host proxy); do not set HTTPS_PROXY to a proxy when running tests.
 const (
 	liveSignalHost = "peersignal.moonchan.xyz"
 	liveSignalKey  = "pd-signal-b9447b406828e500"
 	liveDiscover   = "https://peersignal.moonchan.xyz"
 )
 
-// TestLiveSignal_DiscoveryAndInterop 线上信令 + HTTP 发现 + WebRTC 拉文件全链路。
-// 发现背景：部署验证——自托管服务器上线后，节点零改动（仅改 host/key/discover）
-// 走线上信令互联并拉取文件。
+// TestLiveSignal_DiscoveryAndInterop Full chain: live signaling + HTTP discovery + WebRTC file pull.
+// Discovery context: deployment verification — after self-hosted server goes online, nodes require zero changes (only change host/key/discover)
+// to interconnect via live signaling and pull files.
 func TestLiveSignal_DiscoveryAndInterop(t *testing.T) {
 	if os.Getenv("PEERDRIVE_LIVE_TEST") != "1" {
-		t.Skip("线上测试需 PEERDRIVE_LIVE_TEST=1（会向 peersignal.moonchan.xyz 注册节点）")
+		t.Skip("Live test requires PEERDRIVE_LIVE_TEST=1 (registers nodes to peersignal.moonchan.xyz)")
 	}
 
 	storageA := t.TempDir()
@@ -60,28 +60,28 @@ func TestLiveSignal_DiscoveryAndInterop(t *testing.T) {
 		return svc
 	}
 
-	newLive(idA, storageA) // 文件源
+	newLive(idA, storageA) // File source
 	svcB := newLive(idB, t.TempDir())
 
-	// B 无静态 PEERS——靠线上发现互联 A
+	// B has no static PEERS — relies on live discovery to interconnect with A
 	waitConnections(t, svcB, map[string]bool{idA: true}, 90*time.Second)
 
 	data, err := svcB.FetchFromPeer(idA, hash, 0, -1)
 	if err != nil {
-		t.Fatalf("线上信令拉取失败: %v", err)
+		t.Fatalf("Live signaling fetch failed: %v", err)
 	}
 	if !bytes.Equal(data, content) {
-		t.Fatalf("内容不一致: got %q", data)
+		t.Fatalf("Content mismatch: got %q", data)
 	}
 }
 
-// TestLiveSignal_ProtocolCompat 线上信令协议兼容：peerjs 客户端模块
-// 直连线上完成 WebRTC 数据面互通（验证 wss 部署 + 协议零差异）。
+// TestLiveSignal_ProtocolCompat Live signaling protocol compatibility: peerjs client module
+// directly connects to live to achieve WebRTC data plane interoperability (verifies wss deployment + zero protocol difference).
 //
-// 发现背景：功能验收——线上部署协议兼容：peerjs 客户端直连线上 wss 数据面互通
+// Discovery context: feature acceptance — live deployment protocol compatibility: peerjs client directly connects to live wss data plane
 func TestLiveSignal_ProtocolCompat(t *testing.T) {
 	if os.Getenv("PEERDRIVE_LIVE_TEST") != "1" {
-		t.Skip("线上测试需 PEERDRIVE_LIVE_TEST=1")
+		t.Skip("Live test requires PEERDRIVE_LIVE_TEST=1")
 	}
 
 	pA := peerjs.NewPeer("live-pc-a-"+randSuffix(), liveOptions())
@@ -112,14 +112,14 @@ func TestLiveSignal_ProtocolCompat(t *testing.T) {
 	select {
 	case got := <-done:
 		if got != "hello-live" {
-			t.Fatalf("内容不符: %q", got)
+			t.Fatalf("Content mismatch: %q", got)
 		}
 	case <-time.After(30 * time.Second):
-		t.Fatal("线上信令数据面未通")
+		t.Fatal("Live signaling data plane not connected")
 	}
 }
 
-// liveOptions 线上信令客户端配置。
+// liveOptions Live signaling client configuration.
 func liveOptions() peerjs.Options {
 	opts := peerjs.DefaultOptions()
 	opts.Host = liveSignalHost

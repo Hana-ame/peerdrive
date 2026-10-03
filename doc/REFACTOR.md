@@ -1,1012 +1,1009 @@
-# 重构记录 (REFACTOR)
+# Refactoring Log (REFACTOR)
 
-> 2026-08-13 · 项目重启后的架构重构记录。所有新做的东西、决策、坑都记在这里。
-> 供 agent 后续工作时快速对齐上下文：**先读本文档，再动代码**。
+> 2026-08-13 · Architecture refactoring log after the project restart. Everything new, all decisions, and all pitfalls are recorded here.
+> For agents working later, quickly align context: **read this document first, then touch code**.
 
 ---
 
-## 1. 为什么重构
+## 1. Why Refactor
 
-原 peerdrive 是 libp2p + BT DHT + IPFS + WebDAV + 自建信令的巨型单体，review 发现：
-- **服务无法启动**：gin 路由重复注册直接 panic
-- 认证形同虚设、任意文件读写删、P2P 路径穿越、CSWSH、远端崩溃 DoS 等安全洞
-- 大量死代码（前端 ~4000 行）、全局单例、数据竞争
+The original peerdrive was a giant monolith of libp2p + BT DHT + IPFS + WebDAV + custom signaling. Review found:
+- **Service could not start**: duplicate gin route registration caused a panic directly
+- Auth was effectively useless, arbitrary file read/write/delete, P2P path traversal, CSWSH, remote crash DoS and other security holes
+- A large amount of dead code (~4000 lines in frontend), global singletons, data races
 
-核心决策：**互联层整体换成 PeerJS 公共云信令 + WebRTC DataChannel**（与 [hana-link](https://github.com/Hana-ame/hana-link) 同一设计哲学：传输格式无关、上层定义 verb）。BT/libp2p 栈降级为 legacy。
+Core decision: **replace the entire interconnect layer with PeerJS public cloud signaling + WebRTC DataChannel** (same design philosophy as [hana-link](https://github.com/Hana-ame/hana-link): transport-format-agnostic, upper layer defines verbs). The BT/libp2p stack is downgraded to legacy.
 
-## 2. 新架构总览
+## 2. New Architecture Overview
 
 ```
-浏览器(peerjs) ─┐
-               ├── PeerJS 公共云信令 (0.peerjs.com) ──→ WebRTC DataChannel 直连
-Go 节点        ─┘
-   │
-   └── MQTT 分片房间发现 (peerdrive/v1/{collectionHash}/nodes) ← 只交换 peerId
-   └── 静态配置 (PEERDRIVE_PEERJS_PEERS)
-   └── (预留) DHT bep44 发现
+Browser(peerjs) ─┐
+                ├── PeerJS public cloud signaling (0.peerjs.com) ──→ WebRTC DataChannel direct connection
+Go node          ─┘
+    │
+    └── MQTT sharded room discovery (peerdrive/v1/{collectionHash}/nodes) ← only exchange peerId
+    └── Static config (PEERDRIVE_PEERJS_PEERS)
+    └── (reserved) DHT bep44 discovery
 
-Go 节点职责：常驻在线、内容寻址存储（sha256）、双向文件服务（serve + fetch）
-浏览器职责：通过 peerjs 直连节点拉文件；节点↔节点互联共享
+Go node responsibilities: always online, content-addressed storage (sha256), bidirectional file service (serve + fetch)
+Browser responsibilities: pull files from nodes via peerjs direct connection; node↔node interconnect sharing
 ```
 
-## 3. 已完成变更
+## 3. Completed Changes
 
-### 3.1 路由修复（救活服务）
-`internal/router/router.go` — 删掉全部 legacy redirect（`/anon/*`、`/actions/*`、`/files`），
-冲突路由合并为分派器（`collection_dispatch.go`）：
-- `POST /collections` → `dispatchCreateCollection`（body 带 username 走用户体系，否则匿名）
-- `GET /collections/:id` → `dispatchGetCollection`（64hex 为匿名 hash，否则 username）
-- `GET /collections/:id/*filepath` → `dispatchGetTree`（gin 不允许 `:param` 与 `*wildcard` 共存，
-  用户体系深层 GET 全并入此路由）
-- `withParams` 用 `c.Copy()` + 追加 Params 补齐参数名，controller 零改动
+### 3.1 Route Fixes (Revive Service)
+`internal/router/router.go` — removed all legacy redirects (`/anon/*`, `/actions/*`, `/files`),
+conflicting routes merged into a dispatcher (`collection_dispatch.go`):
+- `POST /collections` → `dispatchCreateCollection` (body with username goes through user system, otherwise anonymous)
+- `GET /collections/:id` → `dispatchGetCollection` (64hex is anonymous hash, otherwise username)
+- `GET /collections/:id/*filepath` → `dispatchGetTree` (gin does not allow `:param` and `*wildcard` to coexist,
+  user system deep GET is all merged into this route)
+- `withParams` uses `c.Copy()` + appending Params to complete parameter names, controller zero changes
 
-### 3.2 peerjs 独立模块（新）
-位置：`back/peerjs/`，模块名 `github.com/Hana-ame/go-peerjs`（主 go.mod 用 replace 引用）。
-定位：**传输原语（信令 + 数据面），业务 verb 由上层定义**。
+### 3.2 peerjs Standalone Module (New)
+Location: `back/peerjs/`, module name `github.com/Hana-ame/go-peerjs` (main go.mod uses replace reference).
+Positioning: **transport primitives (signaling + data plane), business verbs defined by upper layer**.
 
 ```
 peerjs/
-├── message.go      MessageType(开放 string)/Message/Options/Offer/Answer/CandidatePayload
-├── signaller.go    Signaller 接口（信令抽象，PeerJS 公共云为默认实现）
-├── transport.go    DataChannel 接口（传输抽象）+ Frame{IsText,Data} + pion 适配层
-├── peer.go         Peer 顶层（Dial/Connect/OnConnection/路由）+ PeerJS 云信令实现
-├── connection.go   Connection（SDP 交换/ICE 转发/文本二进制帧/原子帧）
-└── README.md       模块级 Function Set 文档
+├── message.go      MessageType(open string)/Message/Options/Offer/Answer/CandidatePayload
+├── signaller.go    Signaller interface (signaling abstraction, PeerJS public cloud as default impl)
+├── transport.go    DataChannel interface (transport abstraction) + Frame{IsText,Data} + pion adapter
+├── peer.go         Peer top-level (Dial/Connect/OnConnection/routing) + PeerJS cloud signaling impl
+├── connection.go   Connection (SDP exchange/ICE forwarding/text binary frames/atomic frames)
+└── README.md       module-level Function Set documentation
 ```
 
-扩展点（后续扩展不动核心）：
-- 换信令：`NewPeerWithSignaller()` 注入自定义 `Signaller`
-- 换传输：实现 `DataChannel` 接口
-- 加 verb：`MessageType`/`Frame` 开放类型
+Extension points (future extensions don't touch core):
+- Change signaling: `NewPeerWithSignaller()` injects custom `Signaller`
+- Change transport: implement `DataChannel` interface
+- Add verbs: `MessageType`/`Frame` open types
 
-### 3.3 PeerJS 文件服务（新）
-`internal/service/peerjs_service.go` — 双向文件服务：
-- **被动**：浏览器/节点连接本节点 → `serveFile`（hash 校验 64hex → 分块发送）
-- **主动**：`FetchFromPeer(peerID, hash)` → `requestFile`（reqId 路由状态机收集响应）
-- 节点互联：`PEERDRIVE_PEERJS_PEERS` 静态配置，`connectLoop` 断线自动重连
-- HTTP：`GET /peerjs/node`（发现+对端列表）、`POST /peerjs/fetch`（拉取验证）
+### 3.3 PeerJS File Service (New)
+`internal/service/peerjs_service.go` — bidirectional file service:
+- **Passive**: browser/node connects to this node → `serveFile` (hash validation 64hex → chunked send)
+- **Active**: `FetchFromPeer(peerID, hash)` → `requestFile` (reqId routing state machine collects responses)
+- Node interconnect: `PEERDRIVE_PEERJS_PEERS` static config, `connectLoop` auto-reconnects on disconnect
+- HTTP: `GET /peerjs/node` (discovery + peer list), `POST /peerjs/fetch` (pull verification)
 
-### 3.4 MQTT 分片房间发现（新）
-`internal/service/mqtt_discovery.go` — topic `peerdrive/v1/{collectionHash}/nodes`：
-- **分片模式**（按集合 hash 分片，公共 broker 无规模上限；全局单 topic fan-out 是瓶颈）
-- announce 幂等去重 + 60s 心跳；paho 断线自动重订阅（SetOnConnectHandler）
-- 发现只交换 `{peerId, ts}`，实际传输仍走 WebRTC 直连
-- 配置：`PEERDRIVE_MQTT_ENABLE/BROKER/TOPIC_PREFIX/COLLECTIONS`
+### 3.4 MQTT Sharded Room Discovery (New)
+`internal/service/mqtt_discovery.go` — topic `peerdrive/v1/{collectionHash}/nodes`:
+- **Sharded mode** (sharded by collection hash, public broker has no scale limit; global single topic fan-out is the bottleneck)
+- announce idempotent dedup + 60s heartbeat; paho auto-resubscribes on disconnect (SetOnConnectHandler)
+- discovery only exchanges `{peerId, ts}`, actual transport still via WebRTC direct connection
+- Config: `PEERDRIVE_MQTT_ENABLE/BROKER/TOPIC_PREFIX/COLLECTIONS`
 
-### 3.5 本地 WebSocket 会话（新）
-`internal/service/ws_session.go` — 浏览器本地直连走 WS，**帧协议与 DataChannel 完全一致**：
-
-```
-浏览器 ──WS(/ws/peer)──→ 本地 node：管理/元数据/小文件（毫秒级，无打洞）
-浏览器 ──WebRTC───────→ 任意 node（含远端）：大文件、跨节点（打洞直连）
-```
-
-- `Session` 接口抽象两种传输（`internal/service/ws_session.go` + `rtc_session.go`）：
-  同一 reqId 状态机 / serveFile / FetchFromPeer 零分支复用
-- `FetchFromPeer("local", ...)` 复用同一拉取路径；`WSSession` 无写缓冲流控
-  （TCP 自带，serveFile 用接口断言只对 DataChannel 做水位控制）
-- 注意与旧 `/ws/signal`、`/ws/transfer`（legacy 自建信令）不是一回事
-
-### 3.6 自托管信令服务器（新）
-`internal/signalserver/` + `cmd/peerserver/` — 自托管 PeerJS 信令 + **内置房间发现**：
-替代公共云信令（0.peerjs.com）与公共 MQTT broker。
+### 3.5 Local WebSocket Session (New)
+`internal/service/ws_session.go` — browser local direct connection goes through WS, **frame protocol is identical to DataChannel**:
 
 ```
-vps 上跑：peerserver -addr :9000 -key <key>
-节点端：PEERDRIVE_PEERJS_HOST/PORT/KEY 指向自托管（peerjs 客户端协议零改动）
-       PEERDRIVE_DISCOVER_URL=http://vps:9000 （发现优先于 MQTT）
-浏览器：host/port/key 配置指向自托管（信令自有，无 MITM 面）
+Browser ──WS(/ws/peer)──→ Local node: management/metadata/small files (millisecond-level, no hole punching)
+Browser ──WebRTC───────→ Any node (including remote): large files, cross-node (hole-punched direct)
 ```
 
-- **信令**：兼容 peerjs-server 协议子集（WS 注册 + token、OFFER/ANSWER/CANDIDATE/LEAVE 按 dst 转发、
-  dst 离线入队 30s 过期、OPEN/ID-TAKEN、心跳保活、`GET /{key}/id` 分配）
-- **发现**（MQTT 功能并入）：`POST /discover/announce {peerId, collections}`（30s 心跳）+
-  `GET /discover/nodes?coll=` 查询在线节点——服务器天然知道所有在线节点，无需广播
-- 节点端 `HTTPDiscovery`（`service/http_discovery.go`）：announce + 10s 轮询 → onPeer → 自动互联
-- 安全：信令自有后无公共云 MITM 面；后续可在服务器加 token 白名单
+- `Session` interface abstracts both transports (`internal/service/ws_session.go` + `rtc_session.go`):
+  same reqId state machine / serveFile / FetchFromPeer with zero branch reuse
+- `FetchFromPeer("local", ...)` reuses the same pull path; `WSSession` has no write buffer flow control
+  (TCP has it built-in, serveFile uses interface assertion to only do water-level control on DataChannel)
+- Note: not the same as the old `/ws/signal`, `/ws/transfer` (legacy custom signaling)
 
-### 3.6.1 线上部署（cloudcone）
+### 3.6 Self-hosted Signaling Server (New)
+`internal/signalserver/` + `cmd/peerserver/` — self-hosted PeerJS signaling + **built-in room discovery**:
+replaces public cloud signaling (0.peerjs.com) and public MQTT broker.
+
 ```
-peersignal.moonchan.xyz ──CF 灰云 A 记录──▶ 117.55.237.217（cloudcone nginx）
+Run on vps: peerserver -addr :9000 -key <key>
+Node side: PEERDRIVE_PEERJS_HOST/PORT/KEY points to self-hosted (peerjs client protocol zero changes)
+          PEERDRIVE_DISCOVER_URL=http://vps:9000 (discovery takes priority over MQTT)
+Browser: host/port/key config points to self-hosted (own signaling, no MITM surface)
+```
+
+- **Signaling**: compatible with peerjs-server protocol subset (WS registration + token, OFFER/ANSWER/CANDIDATE/LEAVE forwarded by dst,
+  dst offline enqueue 30s expiry, OPEN/ID-TAKEN, heartbeat keepalive, `GET /{key}/id` allocation)
+- **Discovery** (MQTT functionality merged in): `POST /discover/announce {peerId, collections}` (30s heartbeat) +
+  `GET /discover/nodes?coll=` query online nodes — server naturally knows all online nodes, no broadcasting needed
+- Node-side `HTTPDiscovery` (`service/http_discovery.go`): announce + 10s polling → onPeer → auto interconnect
+- Security: with self-owned signaling there is no public cloud MITM surface; can add token whitelist on server later
+
+### 3.6.1 Online Deployment (cloudcone)
+```
+peersignal.moonchan.xyz ──CF gray cloud A record──▶ 117.55.237.217 (cloudcone nginx)
         │ wss + https
-   peerserver（systemd，127.0.0.1:9000，key=pd-signal-b9447b406828e500）
+   peerserver (systemd, 127.0.0.1:9000, key=pd-signal-b9447b406828e500)
 ```
 
-- 部署细节与运维命令见项目 AGENTS.md「线上部署」节
-- 线上验证：`PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestLive -v`
-  （TestLiveSignal_DiscoveryAndInterop：线上信令+发现+拉文件全链路；TestLiveSignal_ProtocolCompat：客户端协议兼容）
+- Deployment details and operations commands see project AGENTS.md "Online Deployment" section
+- Online verification: `PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestLive -v`
+  (TestLiveSignal_DiscoveryAndInterop: online signaling+discovery+pull files full chain; TestLiveSignal_ProtocolCompat: client protocol compatibility)
 
-### 3.7 transport 包 inbound/outbound 角色拆分（2026-08-16）
+### 3.7 transport Package inbound/outbound Role Split (2026-08-16)
 
-按帧角色把 `transport/` 拆成两角色 + 共享核心（对齐 Xray/sing-box 心智模型，
-但**只切角色不切连接**——WebRTC 连接全双工对称，同一条 Session 同时承载两角色）：
+Split `transport/` by frame role into two roles + shared core (aligning with Xray/sing-box mental model,
+but **only split roles, not connections** — WebRTC connections are full-duplex symmetric, the same Session carries both roles simultaneously):
 
 ```
-conn.go          ← 共享连接核心（禁止复制）：dcReq/dcResp、connState（fetches/expect 归
-                    outbound，pendingUpload/binCh 归 inbound，平铺共享）、bindConn 分派
-inbound.go       ← 入站角色 = 应答对端 verb 全集：serveFile/openFile、
-                    create/upload/list/info/delete/sync 服务端（原 file_index_verbs.go 并入）、
-                    uploadWorker（上传落盘）
-outbound.go      ← 出站角色 = 本端发起 verb 全集：FetchFromPeer/requestFile/routeResponse/
-                    stateFor + maxPeerFetchSize
-peerjs_service.go← 瘦身为装配层（854 → 420 行）：信令生命周期、连接建立
-                    （connectLoop 拨号 / onIncomingConnection 接受）、BindLocal、
-                    发现装配——连接建立只是创建全双工 Session，随后 bindConn 挂双角色
+conn.go          ← Shared connection core (copying forbidden): dcReq/dcResp, connState (fetches/expect belong
+                     to outbound, pendingUpload/binCh belong to inbound, flat shared), bindConn dispatch
+inbound.go       ← Inbound role = answer peer's full verb set: serveFile/openFile,
+                     create/upload/list/info/delete/sync server-side (original file_index_verbs.go merged in),
+                     uploadWorker (upload to disk)
+outbound.go      ← Outbound role = local-initiated full verb set: FetchFromPeer/requestFile/routeResponse/
+                     stateFor + maxPeerFetchSize
+peerjs_service.go← Slimmed down to assembly layer (854 → 420 lines): signaling lifecycle, connection establishment
+                     (connectLoop dialing / onIncomingConnection accept), BindLocal,
+                     discovery assembly — connection establishment just creates a full-duplex Session, then bindConn attaches both roles
 ```
 
-- 纯代码归位（剪切+重建文件），行为零变化；`file_index_verbs.go` 删除并入 inbound.go
-- 验证：`go build -tags nosqlite ./...` + `go test -tags nosqlite ./internal/transport/ -race` 全绿
-- 预留（未做）：outbound 侧 `Fetcher` 接口（localFetcher/peerFetcher/未来 httpFetcher）
-  实现「任意入口请求 → 任意出口」路由矩阵，有新传输需求时再落地
+- Pure code repositioning (cut+rebuild files), zero behavior change; `file_index_verbs.go` deleted and merged into inbound.go
+- Verification: `go build -tags nosqlite ./...` + `go test -tags nosqlite ./internal/transport/ -race` all green
+- Reserved (not done): outbound-side `Fetcher` interface (localFetcher/peerFetcher/future httpFetcher)
+  implements "any entry request → any exit" routing matrix, to be landed when new transport needs arise
 
-### 3.8 统一 source 体系（2026-08-16）
+### 3.8 Unified Source System (2026-08-16)
 
-统一文件管理：多后端（本地磁盘 / p2p 透传 / URL 模板）抽象为 `Source`，由
-`SourceManager` 统一路由（优先级）、统计（Snapshot）、运行时调整（SetPriority）。
+Unified file management: multiple backends (local disk / p2p passthrough / URL template) abstracted as `Source`,
+routed uniformly by `SourceManager` (priority), statistics (Snapshot), runtime adjustment (SetPriority).
 
 ```
 internal/source/
-  source.go   ← Source 接口 + Capability(CapFile=1 整体拉取 / CapStream=2 流式分片)
-                + FileMeta/Stats/SourceStatus
-  manager.go  ← 注册/反注册、优先级升序路由：命中即返回、Available()==false 跳过、
-                全失败返回汇总错误；record() 记成功/失败/字节/最近错误
-  local.go    ← LocalSource：resolvePath 复刻 serveFile（file_index 优先 + IsPathAllowed
-                防御 + CAS 兜底），CapStream
-  peer.go     ← PeerSource：Connections 枚举 + per-peer Mutex.TryLock 串行尝试
-                （连接级 expect 单槽约束：同一 peer 同时只允许一个 fetch 流）
-  url.go      ← URLSource：fmt 模板（%s=hash，含 %d 声明 CapStream）→ Range 分片；
-                全量请求读取后 sha256 校验（内容寻址兜底）；可注入 http.Client
-                指向 ech-proxy 等出口（wintools cmd/ech-proxy），不建独立 source 类型
+  source.go   ← Source interface + Capability(CapFile=1 full pull / CapStream=2 streaming shards)
+                 + FileMeta/Stats/SourceStatus
+  manager.go  ← Register/unregister, priority ascending routing: hit returns immediately, Available()==false skipped,
+                 all fail returns aggregated error; record() logs success/failure/bytes/last error
+  local.go    ← LocalSource: resolvePath replicates serveFile (file_index priority + IsPathAllowed
+                 defense + CAS fallback), CapStream
+  peer.go     ← PeerSource: Connections enumeration + per-peer Mutex.TryLock serial attempts
+                 (connection-level expect single-slot constraint: same peer only allows one fetch stream at a time)
+  url.go      ← URLSource: fmt template (%s=hash, including %d declares CapStream) → Range shards;
+                 full request reads then sha256 verify (content-addressed fallback); can inject http.Client
+                 pointing to ech-proxy or similar egress (wintools cmd/ech-proxy), no independent source type created
 ```
 
-- **路由语义**：本地命中即返回，未命中降级 peer，URL 源最后兜底；大文件只走
-  CapStream（OpenRange 拒绝 CapFile 源——防 8GB 全量 buffer OOM），OpenAny 可降级整体
-- **装配**（cmd/server/main.go）：local → peer → url(可选, `PEERDRIVE_URL_SOURCE_TEMPLATE`)
-- **管理面**：`GET /sources`（状态+统计）、`POST /sources/:name/priority`（运行时调整）
-- **边界**：serveFile 保持本地语义不接 manager（避免入站→出站透传递归环）；
-  /peerjs/fetch 仍直调 FetchFromPeer（保持语义，未切 Manager）
-- 配套：`requestFile` 流式化（fetchState 加 `q chan []byte` 块队列 + pump 投递，
-  OpenStream 流式读；FetchFromPeer 保留 []byte 兼容签名）；修复 cleanup 双 close panic、
-  fetchReader drain 循环 buf 覆盖丢块两个 bug
-- 验证：`go test -tags nosqlite ./internal/source/ -race` + transport 全绿；
-  集成测试引用 `service.*` 的 M3 遗留已改 `transport.*`
+- **Routing semantics**: local hit returns immediately, miss degrades to peer, URL source last fallback; large files only go through
+  CapStream (OpenRange rejects CapFile sources — prevents 8GB full buffer OOM), OpenAny can degrade to full
+- **Assembly** (cmd/server/main.go): local → peer → url(optional, `PEERDRIVE_URL_SOURCE_TEMPLATE`)
+- **Management plane**: `GET /sources` (status+stats), `POST /sources/:name/priority` (runtime adjustment)
+- **Boundary**: serveFile keeps local semantics without connecting to manager (avoids inbound→outbound passthrough regression loop);
+  /peerjs/fetch still calls FetchFromPeer directly (keeps semantics, not switched to Manager)
+- Companion: `requestFile` streaming (fetchState adds `q chan []byte` block queue + pump delivery,
+  OpenStream streaming read; FetchFromPeer keeps []byte compatible signature); fixed cleanup double close panic,
+  fetchReader drain loop buf overwrite losing blocks — two bugs
+- Verification: `go test -tags nosqlite ./internal/source/ -race` + transport all green;
+  integration tests referencing `service.*` M3 legacy changed to `transport.*`
 
 
-### 3.9 端口转发 forward v2（2026-08-16，inbound 一环重建）
+### 3.9 Port Forwarding forward v2 (2026-08-16, inbound link rebuilt)
 
-legacy 的 libp2p 流转发（`/peerdrive/forward/1.0.0`，明文 `KEY xxx` 单行认证、无
-白名单）已删除，改为 PeerJS DataChannel 上的 TCP 隧道（`internal/transport/forward.go`，
-约 470 行 + 8 个单测）：
+The legacy libp2p stream forwarding (`/peerdrive/forward/1.0.0`, plaintext `KEY xxx` single-line auth, no
+whitelist) has been deleted, replaced with a TCP tunnel on PeerJS DataChannel (`internal/transport/forward.go`,
+approximately 470 lines + 8 unit tests):
 
 ```
-client ──fwd-open {port, reqId}──────────────▶ server   申请转发目标端口
-client ◀──fwd-challenge {nonce, reqId}────────  server   一次性随机数(5min TTL, 上限64防洪水)
+client ──fwd-open {port, reqId}──────────────▶ server   request forwarding target port
+client ◀──fwd-challenge {nonce, reqId}────────  server   one-time random nonce (5min TTL, cap 64 to prevent flood)
 client ──fwd-auth {hmac, reqId}──────────────▶ server   HMAC-SHA256(key, nonce)
 client ◀──fwd-ok / fwd-err────────────────────  server
-之后: fwd-data 头+二进制块双向透传（复用 SendFrame 原子头-块约束）; fwd-close 收尾
+Then: fwd-data header+binary blocks bidirectional passthrough (reusing SendFrame atomic header-block constraint); fwd-close to close
 ```
 
-- **权限控制**：规则表 `key → 端口白名单`（配置 `PEERDRIVE_FORWARD_RULES="key:port,..."`
-  或运行时 `POST /p2p/forward/create` 动态登记）；端口越权 → fwd-err，不泄露规则
-- **密钥交换**：质询-响应（nonce 一次性+过期），key 明文永不落线；服务端验证需
-  key 原文（=凭证，配置 chmod 600）
-- **SSRF 防护**：服务端只 dial `127.0.0.1`；握手不占隧道槽，隧道建立才占连接级单槽
-- **API**：`PeerJSService.OpenForward(ctx, peerID, key, port)`（net.Conn）；HTTP 端点
-  4 个保留（create=登记规则 / connect=本地监听代理 / list / close）
-- 转发块写经连接级 worker（fwdCh，H5 同款）——TCP 背压不卡消息泵；
-  CloseForwardStream 主动断开即释放单槽
-- 验证：8 个单测（握手全流程/坏 key/端口越权/重放/超时/无隧道防御/数据透传）
-  + `-race` 全绿
+- **Permission control**: rule table `key → port whitelist` (config `PEERDRIVE_FORWARD_RULES="key:port,..."`
+  or runtime `POST /p2p/forward/create` dynamic registration); port privilege escalation → fwd-err, doesn't leak rules
+- **Key exchange**: challenge-response (nonce one-time + expiry), key plaintext never on the wire; server-side verification needs
+  key original (=<credential, config chmod 600)
+- **SSRF protection**: server side only dials `127.0.0.1`; handshake doesn't occupy tunnel slot, tunnel establishment occupies connection-level single slot
+- **API**: `PeerJSService.OpenForward(ctx, peerID, key, port)` (net.Conn); HTTP endpoints
+  4 retained (create=register rule / connect=local listener proxy / list / close)
+- Forward block write goes through connection-level worker (fwdCh, same as H5) — TCP backpressure doesn't block message pump;
+  CloseForwardStream active disconnect releases single slot immediately
+- Verification: 8 unit tests (handshake full flow/bad key/port privilege escalation/replay/timeout/no tunnel defense/data passthrough)
+  + `-race` all green
 
-### 3.10 前端全面迁移到 WS + admin 管理 verb（2026-08-17）
+### 3.10 Frontend Full Migration to WS + admin Management verb (2026-08-17)
 
-前端从 HTTP API 全面迁移到本地 WS 会话（`/ws/peer` 帧协议），HTTP 路由全部保留
-（`router.go` 标注 LEGACY 注释区）。用户决策：**管理面只走本地 WS**，WebRTC 连接
-不实现管理 verb（防权限面暴露给公共信令上的未知节点）；数据面仍走原 `req` verb。
+Frontend fully migrated from HTTP API to local WS session (`/ws/peer` frame protocol), HTTP routes all retained
+(`router.go` marked with LEGACY comment section). User decision: **management plane only through local WS**, WebRTC connections
+do not implement management verbs (prevents permission surface exposed to unknown nodes on public signaling); data plane still goes through original `req` verb.
 
-- **admin verb**（`internal/transport/admin.go`，约 300 行 + 6 个单测）：浏览器经
-  本地会话发 `{"type":"admin","method","path","body","token","reqId"}`，内部构造
-  *http.Request → 注入 gin engine 的 ServeHTTP（`httptest.NewRecorder`，router 经
-  `SetAdminHandler` 装配）→ **复用全部 HTTP controller，零重复实现**
-- **二进制上传**：admin 帧 `binary:true` + filename/field/size 声明，后续二进制帧
-  收集到临时文件 → multipart 重包转发（controller 的 FormFile 无感知）。field 默认
-  `file`，BT torrent 用 `torrent` + `path=/bt/torrent`（reqPath 由声明帧决定，
-  **坑**：初版硬编码 `/files/upload` 导致 torrent 打错路由，见 admin_test.go）
-- **二进制响应**：文件流 → `admin-bin` 头 + 单二进制帧（≤64MB；大文件走 req verb）
-- **认证**：admin 帧 token 字段 → 转发时注入 `Authorization: Bearer`，与 HTTP 一致
-- **上传槽替换坑（2026-08-18 审阅修复）**：重复声明上传时替换旧槽，必须给旧 reqId
-  回 err 帧——否则旧上传浏览器 Promise 永久挂起（pending 直到断连才清），且旧上传
-  迟到块混入新 au 的 got 计数导致新上传被误判 size 超限中止、err 指向新 reqId
-- **前端**：`front/src/ws.js`（新，admin/upload/download/downloadToFile，reqId pending
-  map + 单槽 binaryExpect）+ `api.js` 全部 request 走 WS；页面下载/预览改 Blob
-  方式（`getBlobUrl`/`downloadFileToDisk`）；`__mocks__/api.js` 同步。
-  **getBlobUrl 缓存泄漏坑（2026-08-18 审阅修复）**：blobUrlCache 只增不减（每个
-  预览 hash 各占一个 Blob + objectURL）→ LRU 上限 50，淘汰即 revoke
-- 验证：后端 10 个 admin 单测 + 前端 `tests/ws.test.js` 8 个单测（reqId 乱序路由/
-  409 透传/token/分块收集/err/admin-bin/断线/upload FileReader 回退）+ 全量单测 +
-  build 全绿
+- **admin verb** (`internal/transport/admin.go`, ~300 lines + 6 unit tests): browser sends
+  `{"type":"admin","method","path","body","token","reqId"}` through local session, internally constructs
+  *http.Request → injects into gin engine's ServeHTTP (`httptest.NewRecorder`, router assembled via
+  `SetAdminHandler`) → **reuses all HTTP controllers, zero duplicate implementation**
+- **Binary upload**: admin frame `binary:true` + filename/field/size declaration, subsequent binary frames
+  collected to temp file → multipart repackage forwarding (controller's FormFile unaware). field defaults to
+  `file`, BT torrent uses `torrent` + `path=/bt/torrent` (reqPath determined by declaration frame,
+  **pitfall**: initial version hardcoded `/files/upload` causing torrent to hit wrong route, see admin_test.go)
+- **Binary response**: file stream → `admin-bin` header + single binary frame (≤64MB; large files go through req verb)
+- **Authentication**: admin frame token field → forwarding injects `Authorization: Bearer`, consistent with HTTP
+- **Upload slot replacement pitfall (2026-08-18 review fix)**: when redeclaring upload, replacing old slot, must return
+  err frame to old reqId — otherwise old upload browser Promise hangs forever (pending until disconnect clears), and old upload
+  late blocks mix into new au's got count causing new upload to be falsely judged size exceeded and aborted, err pointing to new reqId
+- **Frontend**: `front/src/ws.js` (new, admin/upload/download/downloadToFile, reqId pending
+  map + single slot binaryExpect) + `api.js` all requests go through WS; page download/preview changed to Blob
+  approach (`getBlobUrl`/`downloadFileToDisk`); `__mocks__/api.js` synchronized.
+  **getBlobUrl cache leak pitfall (2026-08-18 review fix)**: blobUrlCache only grows never shrinks (each
+  preview hash occupies a Blob + objectURL) → LRU cap 50, evict on review
+- Verification: backend 10 admin unit tests + frontend `tests/ws.test.js` 8 unit tests (reqId out-of-order routing/
+  409 passthrough/token/chunked collection/err/admin-bin/disconnect/upload FileReader fallback) + full unit tests +
+  build all green
 
-### 3.11 standalone 包 peerdrive-media（2026-08-18，独立 repo）
+### 3.11 standalone Package peerdrive-media (2026-08-18, independent repo)
 
-`packages/peerdrive-media/` 是给第三方用的独立 npm 包：浏览器经 PeerJS 信令 +
-WebRTC DataChannel 从 Node 端加载 URL 资源并渲染 `<img>`/`<video>`。
-**独立托管于 github.com/Hana-ame/peerdrive-media**（tag 与 version 同步），原因：
-npm 不支持 git 依赖的 `#path:` 子目录语法（pnpm/yarn 才支持），主 repo 根目录
-也无 package.json，无法整体当 git 依赖。
+`packages/peerdrive-media/` is an independent npm package for third parties: browser loads URL resources from Node side via PeerJS signaling +
+WebRTC DataChannel and renders `<img>`/`<video>`.
+**Independently hosted at github.com/Hana-ame/peerdrive-media** (tag synced with version), reason:
+npm doesn't support git dependency `#path:` subdirectory syntax (only pnpm/yarn support it), main repo root directory
+also has no package.json, cannot be used as git dependency as a whole.
 
-- **三入口**：`peerdrive-media`（React 组件 PeerImage/PeerVideo/PeerMedia +
-  Provider/usePeerMedia）、`peerdrive-media/vanilla`（IIFE/ESM `<script>` 直引，
-  另有 jsDelivr CDN 直链）、`peerdrive-media/node`（createPeerMediaServer 提供者）
-- **帧协议**：peerjs `serialization:'raw'`——文本帧=JSON 头（url/meta/done/err），
-  二进制帧=64KB 数据块；连接级串行（一个连接同时只服务一个请求）、
-  `bufferedAmount > 4MB` 背压暂停读上游
-- **dist 入库**：主 repo 根 .gitignore 的 `dist/` 会吞掉包内 dist/（git 父目录排除
-  不下钻，`!dist/` 反制无效），用 `git add -f` 强加；独立 repo 无此问题直接提交
-- **peer 安装**：npm 7+ 对 `peerDependenciesMeta optional` 标记的依赖不自动安装，
-  会 `Cannot find package 'react'`（e2e 测试发现）→ 移除 meta，react/react-dom
-  随装
-- **验证**：包内单测+E2E 17/17（帧协议 6 + 本地信令全链路 7 + core 串行队列 4）；
-  消费者场景
-  复验——临时项目 `npm i github:Hana-ame/peerdrive-media` 后三入口 import 冒烟 +
-  e2e.test.mjs（改包名导入）7/7
-- **浏览器 E2E（10/10，2026-08-18 补做）**：playwright 本机 Firefox headless
-  （`~/.claude/skills/playwright-test/` 已弃 CDP 9222 改 local firefox；需
-  `playwright-core/cli.js install firefox` 走代理补装），demo 页用 node 原生静态
-  服务器（`scripts/static-serve.mjs`，vite dev 会 transform IIFE 破坏 `PeerMedia`
-  全局 + 陈旧缓存）。踩坑五连（均已修进 core.js）：
-  1. **peerjs 双构建 default export 语义不同**：`main`(cjs) default=module.exports
-     （含 Peer），`module`(esm) default=内部 util 对象（无 Peer）→ 三路兜底
+- **Three entry points**: `peerdrive-media` (React components PeerImage/PeerVideo/PeerMedia +
+  Provider/usePeerMedia), `peerdrive-media/vanilla` (IIFE/ESM `<script>` direct reference,
+  also jsDelivr CDN direct link), `peerdrive-media/node` (createPeerMediaServer provider)
+- **Frame protocol**: peerjs `serialization:'raw'` — text frames=JSON headers (url/meta/done/err),
+  binary frames=64KB data blocks; connection-level serial (one connection only serves one request at a time),
+  `bufferedAmount > 4MB` backpressure pauses reading upstream
+- **dist committed to repo**: main repo root .gitignore's `dist/` swallows package's dist/ (git parent directory exclusion
+  doesn't descend, `!dist/` counter-effect invalid), use `git add -f` to force; independent repo has no such issue, commit directly
+- **Peer install**: npm 7+ doesn't auto-install dependencies marked as `peerDependenciesMeta optional`,
+  will get `Cannot find package 'react'` (discovered by e2e tests) → removed meta, react/react-dom
+  installed together
+- **Verification**: package unit+E2E 17/17 (frame protocol 6 + local signaling full chain 7 + core serial queue 4);
+  consumer scenario
+  re-verification — temp project `npm i github:Hana-ame/peerdrive-media` then three entry points import smoke +
+  e2e.test.mjs (changed package name import) 7/7
+- **Browser E2E (10/10, 2026-08-18 completed)**: playwright local Firefox headless
+  (`~/.claude/skills/playwright-test/` deprecated CDP 9222, switched to local firefox; needs
+  `playwright-core/cli.js install firefox` via proxy to supplement install), demo page uses node native static
+  server (`scripts/static-serve.mjs`, vite dev will transform IIFE breaking `PeerMedia`
+  global + stale cache). Five pitfalls in a row (all fixed in core.js):
+  1. **peerjs dual build default export semantics differ**: `main`(cjs) default=module.exports
+     (contains Peer), `module`(esm) default=internal util object (no Peer) → three-way fallback
      `NS.Peer || pkg.Peer || pkg.default?.Peer`
-  2. **peerjs-server 0.2.9 无 retrieveId 端点**：浏览器端 Peer 必须显式随机 id
-     （`pd-b-` 前缀），否则信令 404 → ServerError
-  3. **默认 STUN 卡 gathering**：无外网 UDP 环境（WSL）peerjs 默认 stun.l.google.com
-     卡 ICE → `config: { iceServers: [] }`（内网 host candidate 足够）
-  4. **Firefox mDNS 混淆**：`media.peerconnection.ice.obfuscate_host_addresses=false`
-     （runner firefoxUserPrefs）
-  5. **core.js 三个自身 bug**：conn error 无条件 teardown（DC open 瞬间 flush 触发
-     peerjs NotOpenYet 竞态 → 拆掉刚建好的连接，真断线由 close 事件兜底）；
-     每次排队请求都 open()（4 个组件并发 = 4 条 Peer 连接，Node 端 busy 拒绝）；
-     客户端未按 Node 端「连接级串行」自排队（并发请求被 `another request in
-     flight` 拒绝）→ opening 守卫 + flush() 队列
-  6. **closed slot 复用挂死**：teardown 置 `closed=true` 但槽位仍在 client 缓存中，
-     后续 load() 沿用 closed 槽位时 request() 的「closed 不再 open()」守卫让新请求
-     永久排队、Promise 永不 settle（加载中无错误）。修复：load() 检测 slot.closed
-     即重建；浏览器实测 dispose → 再 load 成功。发现背景：代码审阅 2026-08-18
-  7. **串行槽空占三入口（2026-08-18 审阅修复）**：abort/迟到帧/conn.send 异常三类
-     路径都可能让「连接级串行槽」被空占——abort 只删 pending 不 flush（Node 端
-     处理完仍回 done/err，handleData 因 pending 不存在直接 return，排队请求永久
-     不发）；meta>=400 分支 delete+reject 但同样不 flush；conn.send 抛异常路径不
-     cleanup（abort 监听器泄漏，closure 持住 slot 与连接）。修复：三处统一补
-     cleanup+flush（flush 有 pending.size==0 守卫，不会过度发送）。core.test.mjs
-     4 项 mock 驱动事件流回归。发现背景：代码审阅 2026-08-18（组件卸载中止 +
-     后续排队请求场景）
-- 遗留：`test/e2e-browser.mjs` 的 readyState≥1 断言对无容器假视频字节不适用
-  （demo fake.mp4 无合法容器），改为只验元素挂载
-- 断线感知提示：WebRTC 无 STUN 时 keepalive 超时可达数十秒，断线后请求会
-  在 teardown 前发到死连接而报错（正确行为）；需即时失败用 client.dispose()
+  2. **peerjs-server 0.2.9 has no retrieveId endpoint**: browser-side Peer must explicitly use random id
+     (`pd-b-` prefix), otherwise signaling 404 → ServerError
+  3. **Default STUN stuck gathering**: no external UDP environment (WSL) peerjs default stun.l.google.com
+     stuck ICE → `config: { iceServers: [] }` (intranet host candidate is sufficient)
+  4. **Firefox mDNS obfuscation**: `media.peerconnection.ice.obfuscate_host_addresses=false`
+     (runner firefoxUserPrefs)
+  5. **core.js three self bugs**: conn error unconditional teardown (DC open instant flush triggers
+     peerjs NotOpenYet race → tears down just-created connection, real disconnect handled by close event);
+     every queued request calls open() (4 components concurrent = 4 Peer connections, Node side busy rejects);
+     client didn't self-queue per Node side "connection-level serial" (concurrent requests rejected by `another request in
+     flight`) → opening guard + flush() queue
+  6. **closed slot reuse hangs**: teardown sets `closed=true` but slot still in client cache,
+     subsequent load() reuses closed slot causes request()'s "closed doesn't open()" guard to let new requests
+     queue forever, Promise never settles (no error during loading). Fix: load() detects slot.closed
+     and rebuilds; browser test dispose → load again succeeds. Discovery background: code review 2026-08-18
+  7. **Serial slot empty occupation three entry points (2026-08-18 review fix)**: abort/late frames/conn.send exception three paths
+     can all cause "connection-level serial slot" to be empty-occupied — abort only deletes pending without flushing (Node side
+     still returns done/err after processing, handleData directly returns because pending doesn't exist, queued requests never
+     send); meta>=400 branch delete+reject but also doesn't flush; conn.send exception path doesn't
+     cleanup (abort listener leak, closure holds slot and connection). Fix: three places unified
+     cleanup+flush (flush has pending.size==0 guard, won't over-send). core.test.mjs
+     4 mock-driven event stream regression items. Discovery background: code review 2026-08-18 (component unmount abort +
+     subsequent queued request scenario)
+- Legacy: `test/e2e-browser.mjs` readyState≥1 assertion doesn't apply to no-container fake video bytes
+  (demo fake.mp4 has no valid container), changed to only verify element mount
+- Disconnect perception hint: WebRTC without STUN keepalive timeout can reach tens of seconds, after disconnect requests will
+  error out before teardown (correct behavior); for immediate failure use client.dispose()
 
-### 3.12 优化批次 1-10（2026-08-18）
+### 3.12 Optimization Batch 1-10 (2026-08-18)
 
-代码审阅 + 架构巡检产出的 10 项优化（全部落地并验证）：
+10 optimizations from code review + architecture inspection (all landed and verified):
 
-| # | 优化 | 落点 | 验证 |
+| # | Optimization | Location | Verification |
 |---|---|---|---|
-| 1 | 前端大文件下载全量内存组装（OOM 风险） | `front/src/ws.js` `downloadStream`（ReadableStream 边收边 enqueue）+ `downloadToFile`（File System Access API 流式落盘，回退 Blob）+ `stat`；`api.js` getBlobUrl 200MB 阈值（`err.code='TOO_LARGE'`） | ws.test.js +4；前端 36/36 |
-| 2 | uploadWorker 单 worker 串行阻塞（8GB 上传卡转发隧道） | `inbound.go` `fwdWorker` 拆出（与 uploadWorker 共用 binDone 退出），conn.go bindConn 双 worker | transport `TestFwd/TestUpload -race` |
-| 3 | serveFile 未接多源路由（§3.8 Source 体系预留未接线）+ 回源防环 | `inbound.go` `FileRouter` 接口（OpenRange/InfoSize）+ `serveFile` 路由分支（meta.total 来自 InfoSize，未命中 err not found，nil 回退本地语义）；`dcReq.Trace` 节点链防环（omitempty 兼容旧对端）；`outbound.go` `OpenStreamFrom` 传播点；`peerjs_service.go` `SetFileRouter`；`source/manager.go` `InfoSize` 适配；`cmd/server/main.go` 装配 | servefile_router_test.go（loop/router/fallback/trace 4 测试） |
-| 4 | core.js 断线感知慢（无 STUN 时超时数十秒） | `packages/peerdrive-media/src/core.js` keepalive（`KEEPALIVE_INTERVAL=5000`/`KEEPALIVE_TIMEOUT=15000`，超时 teardown 并重建；Node 端 serveConnection 对称） | core.test.mjs +2；npm test 20/20 |
-| 5 | core.js 排队中 abort 不立即 settle | core.js `request()` 排队分支挂 abort 监听，abort 即出队 reject（AbortError），移除监听防泄漏 | core.test.mjs +1 |
-| 6 | 集成测试依赖真实公共信令（需外网+代理，并行互扰） | TestMain 起全局自托管 signalserver（httptest），newService 全指向它；MQTT 公共 broker 测试 `PEERDRIVE_MQTT_TEST=1` 门控；顺带修复 go-peerjs `Connection` 回调注册 data race（handlerMu，独立库已同步） | 集成测试 13.7s 脱外网全绿 |
-| 7 | getBlobUrl 同 hash 并发双下载竞态 | `front/src/api.js` `blobUrlInflight` Map in-flight 去重 | 前端 36/36 |
-| 8 | signalserver token 白名单 | `signalserver.go` `WithTokenWhitelist`（空=不限制）+ `cmd/peerserver` `-tokens` flag | TestSignal_TokenWhitelist |
-| 9 | README env 表过时（残留已删的 P2P_ENABLE/WEBDAV/IPFS_COMPAT/RELAY_MODE） | README.md env 表对齐 config.go | — |
-| 10 | 文档行号引用易漂移 | 本节约定（见下）：长期文档函数名优先；本次改动文档（conn.md/ws-client.md/README）全部去行号 | — |
+| 1 | Frontend large file download full memory assembly (OOM risk) | `front/src/ws.js` `downloadStream` (ReadableStream enqueue as received) + `downloadToFile` (File System Access API streaming to disk, fallback Blob) + `stat`; `api.js` getBlobUrl 200MB threshold (`err.code='TOO_LARGE'`) | ws.test.js +4; frontend 36/36 |
+| 2 | uploadWorker single worker serial blocking (8GB upload blocks forwarding tunnel) | `inbound.go` `fwdWorker` split out (shares binDone exit with uploadWorker), conn.go bindConn dual workers | transport `TestFwd/TestUpload -race` |
+| 3 | serveFile not connected to multi-source routing (§3.8 Source system reserved but not wired) + origin loop prevention | `inbound.go` `FileRouter` interface (OpenRange/InfoSize) + `serveFile` routing branch (meta.total from InfoSize, miss returns err not found, nil falls back to local semantics); `dcReq.Trace` node chain loop prevention (omitempty compatible with old peers); `outbound.go` `OpenStreamFrom` propagation point; `peerjs_service.go` `SetFileRouter`; `source/manager.go` `InfoSize` adapter; `cmd/server/main.go` assembly | servefile_router_test.go (loop/router/fallback/trace 4 tests) |
+| 4 | core.js disconnect perception slow (timeout tens of seconds without STUN) | `packages/peerdrive-media/src/core.js` keepalive (`KEEPALIVE_INTERVAL=5000`/`KEEPALIVE_TIMEOUT=15000`, timeout tears down and rebuilds; Node side serveConnection symmetric) | core.test.mjs +2; npm test 20/20 |
+| 5 | core.js queued abort doesn't settle immediately | core.js `request()` queued branch adds abort listener, abort dequeues reject (AbortError), removes listener to prevent leak | core.test.mjs +1 |
+| 6 | Integration tests depend on real public signaling (needs external network+proxy, parallel interference) | TestMain starts global self-hosted signalserver (httptest), newService all point to it; MQTT public broker tests `PEERDRIVE_MQTT_TEST=1` gated; also fixed go-peerjs `Connection` callback registration data race (handlerMu, independent library synced) | Integration tests 13.7s external-network-free all green |
+| 7 | getBlobUrl same hash concurrent double download race | `front/src/api.js` `blobUrlInflight` Map in-flight dedup | Frontend 36/36 |
+| 8 | signalserver token whitelist | `signalserver.go` `WithTokenWhitelist` (empty=no limit) + `cmd/peerserver` `-tokens` flag | TestSignal_TokenWhitelist |
+| 9 | README env table outdated (residual deleted P2P_ENABLE/WEBDAV/IPFS_COMPAT/RELAY_MODE) | README.md env table aligned with config.go | — |
+| 10 | Document line number references easily drift | This section convention (see below): long-term docs prefer function names; this round's docs (conn.md/ws-client.md/README) all removed line numbers | — |
 
-**文档引用约定（第 10 项落地）**：长期维护文档（REFACTOR.md、doc/layers/*、README、
-AGENTS.md）引用代码一律用 **`文件路径:函数名`**（如 `inbound.go serveFile`），禁止
-行号（代码改动即漂移，历史文档的准确行号也早已失效）。一次性审阅文档
-（HTTP-REVIEW/FRONTEND-FIX 等）是当时快照，允许保留行号。行数标注（「xxx 行」）
-同样禁止——用文件清单说明职责即可。
+**Document reference convention (item 10 landed)**: long-term maintained documents (REFACTOR.md, doc/layers/*, README,
+AGENTS.md) referencing code must use **`file path:function name`** (e.g., `inbound.go serveFile`), line numbers forbidden
+(line numbers drift with code changes, historical documents' accurate line numbers are long since invalid). One-time review documents
+(HTTP-REVIEW/FRONTEND-FIX etc.) are snapshots at the time, line numbers allowed. Line count annotations ("xxx lines")
+also forbidden — just use file list to explain responsibilities.
 
-**第 6 项细节**：集成测试数据面仍是真实 WebRTC（同机 host candidate 直连，无需
-STUN）——无 UDP 的沙箱（docker 默认）会连不上，互联类测试可用 `PEERDRIVE_SKIP_RTC=1`
-跳过（本地 WS/admin 类不受影响）。go-peerjs 的 race 修复（`connection.go` handlerMu
-保护 onOpen/onMessage/onClose 回调注册与触发并发）是 -race 连跑自托管测试时暴露的
-真 bug，真实网络下同样存在（时序慢不易触发）。
+**Item 6 details**: integration test data plane is still real WebRTC (same-machine host candidate direct, no
+STUN needed) — no UDP sandbox (docker default) can't connect, interconnect tests can use `PEERDRIVE_SKIP_RTC=1`
+to skip (local WS/admin types unaffected). go-peerjs's race fix (`connection.go` handlerMu
+protects onOpen/onMessage/onClose callback registration and trigger concurrency) is a
+real bug exposed during -race consecutive self-hosted test runs, exists the same way on real networks (slow timing makes it hard to trigger).
 
-**测试补全批次（2026-08-18，77cff65）**：1-10 项全部落地后，按「保证 test 全面」
-补的回归测试，覆盖此前未锁定的行为：
+**Test completion batch (2026-08-18, 77cff65)**: after all 1-10 items landed, regression tests added per "ensure comprehensive tests"
+covering previously unlocked behaviors:
 
-| 测试 | 锁定目标 |
+| Test | Locked Target |
 |---|---|
-| `front/tests/api.test.js`（新文件，5 项） | getBlobUrl 200MB TOO_LARGE 阈值、同 hash 并发 in-flight 去重（第 7 项）、失败后重试、缓存命中刷新 LRU、LRU 逐出 revoke（第 1 项） |
-| `peerjs` peer_test.go `TestConnection_CallbackRegistration_Concurrent` | handlerMu 修复的 -race 回归：50 轮并发「注册 vs 触发」，并验证快照读不破坏注册语义 |
-| transport peerjs_service_test.go `TestServeFile_IndexPathAllowed` | fallback 分支 file_index 命中合法路径必须回传（第 3 项重写时丢分支的回归——集成测试报 not found 暴露） |
-| transport servefile_router_test.go `TestServeFile_RouterInfoSizeFail` | InfoSize 失败 → meta.total=-1（协议约定，数据流不受影响）；`infoFailRouter` 对齐 PeerSource/URLSource 无元数据场景 |
-| integration selfhosted_test.go `TestStartClose_RacePressure` | 30 轮 Start/Close + 50ms 命中竞态窗口：锁死 startLoop 发现组件 peerMu 快照 + ctx.Err() 守卫（dfd4acb 修复的 -race 回归） |
+| `front/tests/api.test.js` (new file, 5 items) | getBlobUrl 200MB TOO_LARGE threshold, same hash concurrent in-flight dedup (item 7), retry after failure, cache hit refresh LRU, LRU eviction revoke (item 1) |
+| `peerjs` peer_test.go `TestConnection_CallbackRegistration_Concurrent` | handlerMu fix -race regression: 50 rounds concurrent "register vs trigger", also verifies snapshot read doesn't break register semantics |
+| transport peerjs_service_test.go `TestServeFile_IndexPathAllowed` | fallback branch file_index hit valid path must return (item 3 rewrite lost branch regression — integration test reported not found exposing it) |
+| transport servefile_router_test.go `TestServeFile_RouterInfoSizeFail` | InfoSize failure → meta.total=-1 (protocol convention, data flow unaffected); `infoFailRouter` aligns with PeerSource/URLSource no metadata scenario |
+| integration selfhosted_test.go `TestStartClose_RacePressure` | 30 rounds Start/Close + 50ms hitting race window: locks startLoop discovery component peerMu snapshot + ctx.Err() guard (dfd4acb fix -race regression) |
 
-验证基线更新：前端 41/41（36+5）、peerjs `-race` 绿、transport `-race` 绿、
-集成 `-race -p 1` 脱外网 18.9s 绿。
+Verification baseline updated: frontend 41/41 (36+5), peerjs `-race` green, transport `-race` green,
+integration `-race -p 1` external-network-free 18.9s green.
 
-### 3.13 死代码清理批次（2026-08-19，审阅后清理）
+### 3.13 Dead Code Cleanup Batch (2026-08-19, post-review cleanup)
 
-代码审阅发现「doc/archive/LEGACY.md 标注可删/待迁移但未落地」的存量全部处理：
+Code review found "doc/archive/LEGACY.md marked as deletable/pending migration but not landed" stock all processed:
 
-**后端（-8 文件）**：
-- Auth 子系统整套（`controller/auth.go`、`service/auth_service.go`、`model/user.go`、
-  `repository/user_repo.go`）：`NewAuthController` 零调用点、无 `/auth/*` 路由
-  （router 认证走远程 reg server 的 `AuthRequired()`，与本地这套无关）
-- Task 子系统整套（`controller/task.go`、`service/task_service.go`、
-  `model/transfer_task.go`、`repository/task_repo.go`）：`ListTasks` 恒返空占位，
-  TaskService 唯一写入方是 PullCollection
-- `fork.go` `PullCollection`：no-op + 写假 completed 任务；`/tasks` 路由、
-  `/collections/pull`、`/actions/pull` 同步移除；db.go 的 `users`/`transfer_tasks`
-  建表 DDL 删除（存量库旧表无读写端，保留无害）
-- `p2p.go` 顶部 ~30 行描述已删函数的过时注释（GetNodeInfo/GetPeers/P2PStatus 等）清除
+**Backend (-8 files)**:
+- Auth subsystem whole set (`controller/auth.go`, `service/auth_service.go`, `model/user.go`,
+  `repository/user_repo.go`): `NewAuthController` zero call points, no `/auth/*` routes
+  (router auth goes through remote reg server's `AuthRequired()`, unrelated to this local set)
+- Task subsystem whole set (`controller/task.go`, `service/task_service.go`,
+  `model/transfer_task.go`, `repository/task_repo.go`): `ListTasks` always returns empty placeholder,
+  TaskService only writer is PullCollection
+- `fork.go` `PullCollection`: no-op + writes fake completed task; `/tasks` route,
+  `/collections/pull`, `/actions/pull` synchronously removed; db.go's `users`/`transfer_tasks`
+  table creation DDL deleted (existing DB old tables have no read/write endpoints, harmless to keep)
+- `p2p.go` top ~30 lines of outdated comments describing deleted functions (GetNodeInfo/GetPeers/P2PStatus etc.) cleared
 
-**前端（-4 文件 + 重写 2 页 + 死导出清理）**：
-- P2PPanel / P2PDashboard / P2PTopology 删除：全部调用已删端点
-  （/p2p/status、/p2p/peers、/p2p/dual/* 等）；App.jsx 路由（/p2p、/p2p/dashboard、
-  /p2p/topology）与 Navbar「P2P 网络」下拉同步移除
-- `api.js` 死导出清理（14 个）：getP2PStatus/getP2PNode/getP2PPeers/getP2PDiscovered/
+**Frontend (-4 files + 2 pages rewritten + dead export cleanup)**:
+- P2PPanel / P2PDashboard / P2PTopology deleted: all called deleted endpoints
+  (/p2p/status, /p2p/peers, /p2p/dual/* etc.); App.jsx routes (/p2p, /p2p/dashboard,
+  /p2p/topology) and Navbar "P2P Network" dropdown synchronously removed
+- `api.js` dead export cleanup (14): getP2PStatus/getP2PNode/getP2PPeers/getP2PDiscovered/
   pingPeer/connectPeer/p2pAnnounce/p2pRequestFile/getWSInfo/getSignalPeers/
-  getP2PTopology/getP2PQuality/dualAnnounce/dualFind/getTasks + getNodeInfo 别名
-- 新增 `getPeerjsNode`（GET /peerjs/node，替代旧 /p2p/status 的在线状态查询），
-  Plaza「P2P 在线」徽标与 BTController 状态横幅改用它
-- DHTExplorer 重写为仅 BEP51 采样（/bt/bep51/sample 存活；双栈查询已死），
-  /ipfs/dht 路由并入 /bt/dht；IPFSPanel 重写为仅 CID pin + 网关状态
-- LLMAssistant 移除 get_tasks/get_p2p_status 两个死端点工具
+  getP2PTopology/getP2PQuality/dualAnnounce/dualFind/getTasks + getNodeInfo alias
+- Added `getPeerjsNode` (GET /peerjs/node, replacing old /p2p/status online status query),
+  Plaza "P2P Online" badge and BTController status banner changed to use it
+- DHTExplorer rewritten to only BEP51 sampling (/bt/bep51/sample alive; dual-stack query dead),
+  /ipfs/dht route merged into /bt/dht; IPFSPanel rewritten to only CID pin + gateway status
+- LLMAssistant removed get_tasks/get_p2p_status two dead endpoint tools
 
-验证：back 全包 + 集成（-p 1 脱外网）全绿；前端 41/41；`go vet` 干净。
+Verification: back all packages + integration (-p 1 external-network-free) all green; frontend 41/41; `go vet` clean.
 
 ```jsonc
-// 请求（任意端）；reqId 为指令 UUID v4（服务端生成，保证跨连接唯一）
+// Request (any endpoint); reqId is command UUID v4 (server-generated, guarantees cross-connection uniqueness)
 {"type":"req","hash":"<64hex>","offset":0,"size":-1,"reqId":"<uuid-v4>"}
-// 响应（回显 reqId）
+// Response (echoes reqId)
 {"type":"meta","hash","total","reqId"}
-{"type":"data","hash","offset","size","reqId"}   // 后随 size 字节二进制
+{"type":"data","hash","offset","size","reqId"}   // followed by size bytes binary
 {"type":"done","hash","offset","size","reqId"}
 {"type":"err","msg","reqId"}
 ```
 
-**文件索引 verb**（`FileIndexService`，SQLite `file_index` 表持久化 sha256→绝对路径）：
+**File Index verb** (`FileIndexService`, SQLite `file_index` table persists sha256→absolute path):
 
 ```jsonc
 create   {type:"create", path}              → created {hash,size,name,path,seq}
-upload   {type:"upload", name, size, offset?, reqId}  分片上传（offset 缺省 0）
-         → meta {total, offset:连续已写} → data×1 → uploaded{hash,path}（整体完成）| ack{offset}（续传）
+upload   {type:"upload", name, size, offset?, reqId}  chunked upload (offset defaults 0)
+         → meta {total, offset:contiguous written} → data×1 → uploaded{hash,path} (fully complete) | ack{offset} (resume)
 list     {type:"list", offset?, size?}       → list-resp {files,total}
 info     {type:"info", hash}                → info-resp {hash,size,name,path,seq}
 delete   {type:"delete", hash}              → deleted {hash,seq}
-sync     {type:"sync", seq}                 → sync-resp {files,lastSeq}（metadata 增量同步）
+sync     {type:"sync", seq}                 → sync-resp {files,lastSeq} (metadata incremental sync)
 ```
 
-- **分片上传**：offset 按 64KB chunk 对齐，一次 upload 请求 = 一个分片（data 块 ≤64KB）；
-  服务端 `UploadSession` 位图跟踪（chunk 粒度），**多 source** = 多连接并发传不同分片，
-  位图全满自动触发 uploaded（最后一片的请求方收到）
-- **断点续传**：同 name 重开会话幂等复用；meta.offset 返回连续已写偏移（位图重建，
-  进程重启后按文件大小近似，最终 sha256 校验兜底）；会话 10 分钟无活动清理
-- 同步模型：`file_index.seq` 单调游标，`sync{seq}` 取增量变更（含 tombstone），对端 `ApplySync` 合并
-- 上传安全：size 上限 8GB、文件名净化（防路径穿越）、offset 必须 chunk 对齐、越界写拒绝
-- download 优先查 file_index（外部登记/上传文件），其次内容寻址存储
+- **Chunked upload**: offset aligned by 64KB chunks, one upload request = one chunk (data block ≤64KB);
+  server-side `UploadSession` bitmap tracking (chunk granularity), **multi-source** = multi-connection concurrent uploading different chunks,
+  bitmap full auto-triggers uploaded (last chunk's requester receives it)
+- **Resume upload**: same name reopening session idempotent reuse; meta.offset returns contiguous written offset (bitmap rebuilt,
+  after process restart approximated by file size, final sha256 verification fallback); session 10 min inactivity cleanup
+- Sync model: `file_index.seq` monotonic cursor, `sync{seq}` gets incremental changes (including tombstone), peer `ApplySync` merges
+- Upload security: size cap 8GB, filename sanitization (prevents path traversal), offset must be chunk aligned, out-of-bounds write rejected
+- download prefers file_index (externally registered/uploaded files), then content-addressed storage
 
-**三条协议约束（勿破坏）**：
-1. JSON 控制头必须是**文本帧**（`SendText`），数据块是**二进制帧**（`Send`）——发反了对端把控制头当数据块吞掉
-2. data 头与数据块必须**原子连续**（`SendFrame` 的 sendMu），接收端按连接级 expect 状态机路由
-3. 浏览器端可不传 reqId（向后兼容），Go 端始终携带（UUID v4）
+**Three protocol constraints (don't break)**:
+1. JSON control headers must be **text frames** (`SendText`), data blocks are **binary frames** (`Send`) — sending reversed causes peer to swallow control header as data block
+2. data header and data block must be **atomically continuous** (`SendFrame`'s sendMu), receiver routes by connection-level expect state machine
+3. Browser side can omit reqId (backward compatible), Go side always carries it (UUID v4)
 
-**admin 管理 verb**（§3.10，仅本地 WS 会话，`admin.go`）：
+**admin management verb** (§3.10, local WS session only, `admin.go`):
 
 ```jsonc
-// 普通请求 → admin-resp（4xx/5xx 也走 admin-resp，body 为结构化错误体，409 含 conflicts）
-{"type":"admin","method":"GET|POST|DELETE","path":"/files?x=1","body":<JSON>,"token":"<可选>","reqId"}
-{"type":"admin-resp","status":200,"body":<原始 JSON>,"reqId"}
+// Normal request → admin-resp (4xx/5xx also go through admin-resp, body is structured error body, 409 contains conflicts)
+{"type":"admin","method":"GET|POST|DELETE","path":"/files?x=1","body":<JSON>,"token":"<optional>","reqId"}
+{"type":"admin-resp","status":200,"body":<original JSON>,"reqId"}
 
-// 二进制上传：声明帧 + 后续二进制帧（收齐 multipart 重包转发；field 默认 "file"）
-{"type":"admin","method":"POST","path":"/files/upload","binary":true,"filename":"a.bin","field":"file","size":N,"reqId"} + N 字节二进制帧
+// Binary upload: declaration frame + subsequent binary frames (collect complete multipart repackage forwarding; field defaults "file")
+{"type":"admin","method":"POST","path":"/files/upload","binary":true,"filename":"a.bin","field":"file","size":N,"reqId"} + N bytes binary frame
 
-// 二进制响应（文件流，≤64MB）：admin-bin 头 + 单二进制帧
-{"type":"admin-bin","status":200,"size":N,"reqId"} + 二进制帧
+// Binary response (file stream, ≤64MB): admin-bin header + single binary frame
+{"type":"admin-bin","status":200,"size":N,"reqId"} + binary frame
 ```
 
-### 3.14 独立 repo 镜像：go-peerjs / go-peerserver（2026-08-19）
+### 3.14 Independent repo Mirror: go-peerjs / go-peerserver (2026-08-19)
 
-模块闭合性审阅后，将两个零内部依赖的模块镜像为独立 repo（主仓库双份维护，
-模式同 peerdrive-media：**主 go.mod 保持 replace 指向本地目录**，改动随主 repo
-提交后镜像同步）：
+After module closure review, two modules with zero internal dependencies mirrored as independent repos (main repo dual-maintained,
+same pattern as peerdrive-media: **main go.mod keeps replace pointing to local directory**, changes committed with main repo
+then mirrored to sync):
 
-| 独立 repo | 本地位置 | tag |
+| Independent repo | Local location | tag |
 |---|---|---|
 | `github.com/Hana-ame/go-peerjs` | `back/peerjs/` | v0.1.0 |
 | `github.com/Hana-ame/go-peerserver` | `back/signalserver/` | v0.1.0 |
 
-**go-peerserver 拆分细节**（本次主仓库结构变更）：
+**go-peerserver split details** (this round's main repo structure change):
 - `back/internal/signalserver/` + `back/cmd/peerserver/` → `back/signalserver/`
-  （独立 go.mod `github.com/Hana-ame/go-peerserver`，含 signalserver 包 +
-  `cmd/peerserver` 独立二进制）
-- 主 go.mod：`require ... v0.0.0` + `replace => ./signalserver`（本地双份维护）
-- 集成测试 import 改 `github.com/Hana-ame/go-peerserver`（TestMain 自托管信令不变）
-- 独立模块零 peerdrive 依赖（仅 gorilla/websocket + stdlib），可单独 `go build ./cmd/peerserver`
+  (independent go.mod `github.com/Hana-ame/go-peerserver`, containing signalserver package +
+  `cmd/peerserver` independent binary)
+- Main go.mod: `require ... v0.0.0` + `replace => ./signalserver` (local dual-maintained)
+- Integration test imports changed to `github.com/Hana-ame/go-peerserver` (TestMain self-hosted signaling unchanged)
+- Independent module has zero peerdrive dependencies (only gorilla/websocket + stdlib), can independently `go build ./cmd/peerserver`
 
-**为什么保留 replace 本地而非切远程依赖**：保证 `back/peerjs`、`back/signalserver`
-改动可随主 repo 直接构建验证，无需先推独立 repo——开发零卡顿；外部使用者
-`go get github.com/Hana-ame/go-peerjs@v0.1.0` 不受影响。
+**Why keep local replace rather than switch to remote dependency**: ensures `back/peerjs`, `back/signalserver`
+changes can be directly built and verified with main repo, no need to push independent repo first — zero dev friction; external users
+`go get github.com/Hana-ame/go-peerjs@v0.1.0` unaffected.
 
-**为什么 go-peerjs 未删 go.mod 原版本前缀**：本 repo 内同时存在主模块与独立模块，
-模块名即 `github.com/Hana-ame/go-peerjs`，replace 用本地路径，无需 version designator。
+**Why go-peerjs didn't remove go.mod original version prefix**: within this repo both main module and independent module exist,
+module name is `github.com/Hana-ame/go-peerjs`, replace uses local path, no version designator needed.
 
-拆分的判断标准（记录取舍）：forward 引擎（transport/forward.go 仅依赖 log）与
-文件数据面引擎（req/索引 verb 耦合 file_index 存储 + config/log）**暂不独立**——均无
-仓库外使用者，拆分是负收益；待出现第二个使用者再拆。
+Split decision criteria (recording tradeoffs): forward engine (transport/forward.go only depends on log) and
+file data plane engine (req/index verb coupled with file_index storage + config/log) **not independent for now** — both have
+no out-of-repo users, splitting is negative benefit; wait until second user appears then split.
 
-### 3.15 效率优化批次（2026-08-19）
+### 3.15 Efficiency Optimization Batch (2026-08-19)
 
-大文件传输路径代码审阅产出的 3 项效率优化（全部落地并验证）：
+3 efficiency optimizations from large file transfer path code review (all landed and verified):
 
-| # | 优化 | 落点 | 验证 |
+| # | Optimization | Location | Verification |
 |---|---|---|---|
-| 1 | **fetchReader 定时器泄漏**：`Read` 每消费一个数据块就 `time.After(fetchIdleTimeout)` 新建 5 分钟 timer——8GB 文件 = 13 万个 timer 常驻 runtime timer 堆直到到期（内存 + GC 双浪费，大文件传输时长期积累） | `outbound.go fetchReader.Read`：单次创建 timer + 每次收到块 `Reset`（Stop 后 drain C 再 Reset，防 Go timer 语义坑） | transport 全量 -race 绿 |
-| 2 | **serveFile 每请求分配 64KB 块缓冲**：并发 serveFile 各自 make，GC 压力 + 内存峰值 | `inbound.go` `chunkPool`（sync.Pool 64KB，SendFrame 同步复制后归还——pion Send 内部拷贝，归还安全） | transport 全量 -race 绿 |
-| 3 | **PeerSource 串行尝试对端**：第一个慢对端（远端磁盘慢/网络抖）卡住整个回源，注释里预留的并发竞速落地 | `source/peer.go Open`：多对端并发发起 OpenStreamFrom，**首个成功立即返回**（真竞速，慢对端不阻塞本调用）；迟到/失败结果由后台收割 goroutine Close（防输家流泄漏：对端流互斥锁永久占用 + 本端 fetch 状态悬挂）。单对端走原串行路径零开销；失败路径立即 Unlock | `source/peer_test.go` 新增 2 测试（先响应对端胜出 + 迟到帧静默忽略 + 全失败报错与锁释放，用真实 PeerJSService + BindLocal 内存会话全链路驱动）；新增 `transport file_index.go PendingFetchesForTest` 跨包观察辅助 |
+| 1 | **fetchReader timer leak**: `Read` creates `time.After(fetchIdleTimeout)` new 5-min timer for every consumed data block — 8GB file = 130k timers resident in runtime timer heap until expiry (memory + GC double waste, long-term accumulation during large file transfer) | `outbound.go fetchReader.Read`: single timer creation + `Reset` each time block received (Stop then drain C then Reset, prevents Go timer semantics pitfall) | transport full -race green |
+| 2 | **serveFile allocates 64KB block buffer per request**: concurrent serveFile each make, GC pressure + memory peak | `inbound.go` `chunkPool` (sync.Pool 64KB, SendFrame synchronous copy then return — pion Send internally copies, return is safe) | transport full -race green |
+| 3 | **PeerSource serial peer attempts**: first slow peer (remote disk slow/network jitter) blocks entire origin fallback, concurrent race reserved in comments now landed | `source/peer.go Open`: multi-peer concurrent OpenStreamFrom, **first success returns immediately** (real race, slow peer doesn't block this call); late/failure results collected by background goroutine Close (prevents loser stream leak: peer stream mutex permanently occupied + local fetch state hanging). Single peer goes original serial path zero overhead; failure path immediately Unlocks | `source/peer_test.go` 2 new tests (first-responder peer wins + late frames silently ignored + all fail error and lock release, using real PeerJSService + BindLocal in-memory session full chain driven); added `transport file_index.go PendingFetchesForTest` cross-package observation helper |
 
-验证基线：back 全包 + peerjs -race + 集成 `-p 1` 脱外网 17.9s 全绿。
+Verification baseline: back all packages + peerjs -race + integration `-p 1` external-network-free 17.9s all green.
 
-**竞速测试补全批次（2026-08-19，第 3 项 PeerSource 竞速的回归覆盖）**：
-`source/peer_test.go` 扩到 8 项，用真实 PeerJSService + BindLocal 内存会话全链路驱动：
+**Race test completion batch (2026-08-19, item 3 PeerSource race regression coverage)**:
+`source/peer_test.go` expanded to 8 items, using real PeerJSService + BindLocal in-memory session full chain driven:
 
-| 测试 | 锁定目标 |
+| Test | Locked Target |
 |---|---|
-| `TestPeerSource_RaceWinsFastest` | 双端竞速：数据完整 + 输家收割（fetch 状态清理）+ 迟到帧静默忽略 |
-| `TestPeerSource_RaceThreePeers` | 三端竞速：全部对端并发收到 req；收割后第二轮竞速成功（锁无泄漏） |
-| `TestPeerSource_RaceMixedFailSuccess` | 部分失败 + 部分成功：失败路径立即释放锁，恢复后可再竞速 |
-| `TestPeerSource_RaceBusyPeerSkipped` | 忙对端（互斥锁被占）跳过不阻塞：不发 req 不占状态，其余对端正常胜出 |
-| `TestPeerSource_RaceAllFail` | 全失败报错 + 失败路径零残留（锁 + fetch 状态） |
-| `TestPeerSource_MultiBlockTransfer` | 胜者流 >64KB 三块重组按序完整 |
-| `TestPeerSource_WinnerPeerLockReleased` | 胜者 Close / 输家收割两条锁释放路径逐对端验证（failSend 收敛唯一胜者） |
-| `TestPeerSource_WinnerErrFrame` | 胜者流 err 帧读取期报错（不静默返回坏数据） |
+| `TestPeerSource_RaceWinsFastest` | Dual-peer race: data complete + loser collection (fetch state cleanup) + late frames silently ignored |
+| `TestPeerSource_RaceThreePeers` | Three-peer race: all peers concurrently receive req; after collection second round race succeeds (lock no leak) |
+| `TestPeerSource_RaceMixedFailSuccess` | Partial failure + partial success: failure path immediately releases lock, can race again after recovery |
+| `TestPeerSource_RaceBusyPeerSkipped` | Busy peer (mutex occupied) skipped without blocking: no req sent no state occupied, remaining peers win normally |
+| `TestPeerSource_RaceAllFail` | All fail error + failure path zero residual (lock + fetch state) |
+| `TestPeerSource_MultiBlockTransfer` | Winner stream >64KB three blocks reassembled in order complete |
+| `TestPeerSource_WinnerPeerLockReleased` | Winner Close / loser collection two lock release paths per-peer verified (failSend converges to unique winner) |
+| `TestPeerSource_WinnerErrFrame` | Winner stream err frame read-time error (doesn't silently return bad data) |
 
-**测试设计坑（本批次记录）**：竞速胜负不确定（`Connections()` map 迭代随机 +
-goroutine 调度不定），依赖「喂给指定对端」的断言不可靠（一度写出 50% 概率
-超时的测试）——统一改为「响应喂给全部候选对端（输家迟到帧被忽略）」
-或「failSend 把竞争收敛到唯一对端」两种确定性写法。
+**Test design pitfall (recorded this batch)**: race winner is non-deterministic (`Connections()` map iteration random +
+goroutine scheduling uncertain), assertions relying on "feed to specific peer" unreliable (once wrote test with 50% probability
+timeout) — uniformly changed to "response fed to all candidate peers (loser late frames ignored)"
+or "failSend converges competition to unique peer" two deterministic approaches.
 
-**失效回退批次（2026-08-19，第 3 项 PeerSource 的失效/回退路径覆盖）**：
+**Failure fallback batch (2026-08-19, item 3 PeerSource failure/fallback path coverage)**:
 
-| 测试 | 锁定目标 |
+| Test | Locked Target |
 |---|---|
-| `TestPeerSource_NoConnections` | 无在线对端 → 明确报错（回退链末端的可诊断错误） |
-| `TestPeerSource_OpenAfterSvcClose` | 服务已关闭后再 Open → 报错不悬挂（连接全释放） |
-| `TestPeerSource_ReadAfterSvcClose` | 竞速建立后服务关闭 → 读取期 ctx 取消报错，不把已缓冲数据当完整结果 |
-| `TestPeerSource_WinnerPeerDropped` | 竞速胜出后对端传输中掉线（无 done 帧）→ 读取期报错，不返回截断数据（内容寻址语义） |
-| `TestPeerSource_AllFailErrorDetail` | 全失败错误聚合：每个对端失败原因进最终报错（实现改进：失败原因原串行版有、竞速版丢失，已补 `strings.Join` 聚合） |
+| `TestPeerSource_NoConnections` | No online peers → explicit error (diagnosable error at end of fallback chain) |
+| `TestPeerSource_OpenAfterSvcClose` | Open after service closed → error without hanging (all connections released) |
+| `TestPeerSource_ReadAfterSvcClose` | Race established then service closed → read-time ctx cancel error, doesn't treat buffered data as complete result |
+| `TestPeerSource_WinnerPeerDropped` | Race wins then peer disconnects mid-transfer (no done frame) → read-time error, doesn't return truncated data (content-addressed semantics) |
+| `TestPeerSource_AllFailErrorDetail` | All failure error aggregation: each peer failure reason enters final error (implementation improvement: failure reason existed in serial version but lost in race version, added `strings.Join` aggregation) |
 
-配套改动：`source/peer.go Open` 全失败报错从「all peers failed」升级为
-聚合各对端原因；`fakePeerSess` 补 `Close` 触发 `onClose`（模拟对端断连，
-与真实 `WSSession.Close` 语义一致——此前 Close 为空实现，断连类测试无法驱动
-bindConn 的 OnClose 清理路径）。
+Companion changes: `source/peer.go Open` all-fail error upgraded from "all peers failed" to
+aggregated per-peer reasons; `fakePeerSess` added `Close` triggering `onClose` (simulates peer disconnect,
+consistent with real `WSSession.Close` semantics — previously Close was empty implementation, disconnect-type tests couldn't drive
+bindConn's OnClose cleanup path).
 
-**多连接批次（2026-08-19，同 peer 双连接去重 + 多连接测试）**：
+**Multi-connection batch (2026-08-19, same peer dual connection dedup + multi-connection tests)**:
 
-**问题**：双向互拨（A↔B 同时拨号对方，集成测试默认场景）或重连竞态会在
-同一 peerID 下留下两条 WebRTC 连接——`conns` map 按 peerID 键只保留一条，
-另一条成为孤儿：connState 常驻 pending map + uploadWorker/fwdWorker
-goroutine 泄漏 + 白占一条连接资源。
+**Problem**: bidirectional mutual dialing (A↔B dialing each other simultaneously, integration test default scenario) or reconnection race leaves
+two WebRTC connections under same peerID — `conns` map keyed by peerID only keeps one,
+the other becomes orphan: connState resident in pending map + uploadWorker/fwdWorker
+goroutine leak + wastes one connection resource.
 
-**修复**（`transport/conn.go bindConn`）：
-1. 同 peer 双连接去重：`conns` 保留其一、锁外 `Close` 淘汰者（锁内 Close
-   死锁坑见 §5）；被淘汰连接的 OnClose 清理带 `s.conns[c.ID()] == c` 值
-   相等守卫，不会误删保留连接。
-2. **保留策略必须两端一致**：按连接级 UUID 字典序小者胜出
-   （`rtcSession.ConnID()` = peerjs `Connection.ID`，两端可见同一值）。
-   双向互拨两端各见 {自己拨出, 对方拨入}，若各留各的拨出连接，保留的
-   恰是对方已关闭的断链 → 拉取超时失败。**发现背景**：去重批次上线后
-   集成测试约 1/4 概率失败（`TestSelfHostedSignalAndDiscover` 10.5s 超时），
-   日志 `dedup connection ... closing stale` 成对出现——两端各关一条，
-   互留断链。修复后 6 连跑全绿。fakeSession 无连接 UUID（rank 相等）时
-   保留新连接（测试替身语义）。
-3. local WS 会话不去重：多浏览器标签页各一条本地会话，主动关闭旧标签页
-   连接会打断其进行中的入站服务。
+**Fix** (`transport/conn.go bindConn`):
+1. Same peer dual connection dedup: `conns` keeps one, `Close` eliminated one outside lock (deadlock pitfall from Close inside lock see §5); eliminated connection's OnClose cleanup has `s.conns[c.ID()] == c` value
+   equality guard, won't accidentally delete kept connection.
+2. **Retention strategy must be consistent on both ends**: lexicographically smaller connection-level UUID wins
+   (`rtcSession.ConnID()` = peerjs `Connection.ID`, both ends see same value).
+   Bidirectional mutual dial each end sees {own dial-out, peer dial-in}, if each keeps own dial-out connection, the kept
+   is exactly the peer's already-closed broken link → pull timeout failure. **Discovery background**: after dedup batch went live,
+   integration test ~1/4 probability failure (`TestSelfHostedSignalAndDiscover` 10.5s timeout),
+   logs `dedup connection ... closing stale` appearing in pairs — both ends each close one,
+   mutual broken links left. After fix 6 consecutive runs all green. fakeSession without connection UUID (rank equal)
+   keeps new connection (test double semantics).
+3. local WS session not deduped: multiple browser tabs each have one local session, actively closing old tab
+   connection would interrupt its ongoing inbound service.
 
-**测试**（`transport/conn_test.go` 新增 4 项 + `source/peer_test.go` 1 项）：
+**Tests** (`transport/conn_test.go` 4 new + `source/peer_test.go` 1 new):
 
-| 测试 | 锁定目标 |
+| Test | Locked Target |
 |---|---|
-| `TestBindConn_SamePeerDedup` | 同 peer 双连接：新连接保留、旧连接被关、旧 OnClose 清理不误删新连接 |
-| `TestBindConn_ReplacedConnOldStreamErrors` | 连接被替换后旧连接上的进行中流必须报错结束（不悬挂不截断） |
-| `TestBindConn_LocalNoDedup` | 多 local 会话共存不互杀（多标签页场景） |
-| `TestBindConn_DedupFreesSlot` | 去重后资源完整释放，新连接可正常服务拉取（真实 pump 链路：meta/data 头/二进制块/done） |
-| `TestPeerSource_ParallelStreamsAcrossPeers` | 3 对端 3 条连接并行流：peer 流互斥锁按 peer 隔离互不阻塞，数据各自完整，结束零残留 |
+| `TestBindConn_SamePeerDedup` | Same peer dual connection: new connection kept, old connection closed, old OnClose cleanup doesn't accidentally delete new connection |
+| `TestBindConn_ReplacedConnOldStreamErrors` | After connection replaced, ongoing streams on old connection must error end (no hang no truncation) |
+| `TestBindConn_LocalNoDedup` | Multiple local sessions coexist without killing each other (multi-tab scenario) |
+| `TestBindConn_DedupFreesSlot` | After dedup resources fully released, new connection can normally serve pulls (real pump chain: meta/data header/binary block/done) |
+| `TestPeerSource_ParallelStreamsAcrossPeers` | 3 peers 3 connections parallel streams: peer stream mutex isolated per peer without blocking each other, data each complete, end zero residual |
 
-配套改动：`fakeSession` 补 `closed` 标志 + `Close` 触发 `onClose`（模拟
-真实连接关闭清理路径，去重测试依赖）；`rtcSession` 新增 `ConnID()` +
-`connRanker` 可选接口（Session 接口本体不动，WSSession 不受影响）。
+Companion changes: `fakeSession` added `closed` flag + `Close` triggers `onClose` (simulates
+real connection close cleanup path, dedup tests depend on it); `rtcSession` added `ConnID()` +
+`connRanker` optional interface (Session interface itself unchanged, WSSession unaffected).
 
-**测试设计坑（本批次记录）**：竞速 goroutine 是异步的——`Open` 返回
-≠ 所有候选 goroutine 已结束，失败对端解锁可能晚于返回；连续多轮竞速时
-下一轮 `TryLock` 会撞上未释放的锁（`-count=5` 偶发失败，错误
-「peer peerA: ...」表明上一轮失败者锁未释放）。修复：`waitLockFree` 用
-TryLock 探测 + 立即释放等待「本轮候选锁」空闲（不能等全部锁空闲——胜者
-锁被 reader 故意持有到测试结束）。
+**Test design pitfall (recorded this batch)**: race goroutines are asynchronous — `Open` returning
+≠ all candidate goroutines finished, failed peer unlock may be later than return; consecutive multi-round racing,
+next round `TryLock` hits unreleased lock (`-count=5` occasional failure, error
+"peer peerA: ..." indicates previous round loser lock unreleased). Fix: `waitLockFree` uses
+TryLock probing + immediately release waiting for "this round candidate lock" free (can't wait for all locks free — winner
+lock intentionally held by reader until test end).
 
-**可读性与热点批次（2026-08-19，limb 2）**：
+**Readability and hotspot batch (2026-08-19, limb 2)**:
 
-可读性（已提交 806aff9）：
-- `transport/conn.go`：`bindConn` 130 行内联 `OnMessage` → `dispatchFrame`
-  方法（泵内同步语义注释保留：admin 占槽/fwd-data 帧序）；45 行 `OnClose`
-  → `cleanupConn`（fwdOut 锁外关闭的顺序敏感注释）；dedup 决策 → `dedupConn`
-  返回 `(loser, keepOld)`。`bindConn` 只剩编排。
-- `source/peer.go`：删过时注释「串行尝试，未来并发竞速」（竞速已上线）；
-  竞速逻辑拆 `collectPeers`（枚举+TryLock）与 `raceOpen`（竞速+收割），
-  `raceResult` 提为包级类型。
+Readability (committed 806aff9):
+- `transport/conn.go`: `bindConn` 130-line inline `OnMessage` → `dispatchFrame`
+  method (pump internal sync semantics comments preserved: admin slot occupation/fwd-data frame order); 45-line `OnClose`
+  → `cleanupConn` (fwdOut lock-outside-close order-sensitive comments); dedup decision → `dedupConn`
+  returns `(loser, keepOld)`. `bindConn` now only orchestrates.
+- `source/peer.go`: deleted outdated comment "serial attempts, future concurrent race" (race already live);
+  race logic split into `collectPeers` (enumeration+TryLock) and `raceOpen` (race+collection),
+  `raceResult` promoted to package-level type.
 
-热点（本次提交）：
-| # | 优化 | 落点 | 验证 |
+Hotspots (this commit):
+| # | Optimization | Location | Verification |
 |---|---|---|---|
-| 1 | **Complete 位图判满 O(words)→O(1)**：上传每分片（64KB）调一次 Complete，每 8GB = 13 万分片 × 2048 word 全扫 = 2.6 亿次比较，全耗在单 worker goroutine 上（fsync+hashFile 的前置步骤） | `file_index.go UploadSession` 加 `fullWords` 增量计数（setBit 置位时 word 从非满变满即 +1，重复置位不重复计数）；Complete 只检查 fullWords 数 + 末 word 掩码（<64 chunk 特判，=64 全满），空文件特判 | 新增 `TestFileIndex_FullWordsIncrementalBoundaries`（非 64 倍数/正好 64 倍数 size/重复置位/空文件四边界）+ 全部 13 项既有 TestFileIndex 绿 |
-| 2 | **routeResponse 的 reject 闭包 → 包级 `failFetch`**：每 data 帧一次闭包堆分配（8GB 传输 13 万次） | `outbound.go` | transport/source -race 绿 |
-| 3 | 死代码清理：`var _ = uploadChunkSize` ×2（常量本可未用）、重复注释块 ×2、`UploadSession.seq` 字段（无读者） | `file_index.go` | 编译 + 全量测试绿 |
+| 1 | **Complete bitmap full check O(words)→O(1)**: upload calls Complete once per chunk (64KB), each 8GB = 130k chunks × 2048 word full scan = 260 million comparisons, all spent on single worker goroutine (fsync+hashFile prerequisite step) | `file_index.go UploadSession` added `fullWords` incremental count (setBit when word changes from non-full to full +1, repeated setting doesn't double count); Complete only checks fullWords count + last word mask (<64 chunks special case, =64 full), empty file special case | Added `TestFileIndex_FullWordsIncrementalBoundaries` (non-64 multiple/exactly 64 multiple size/repeated setting/empty file four boundaries) + all 13 existing TestFileIndex green |
+| 2 | **routeResponse's reject closure → package-level `failFetch`**: each data frame once closure heap allocation (8GB transfer 130k times) | `outbound.go` | transport/source -race green |
+| 3 | Dead code cleanup: `var _ = uploadChunkSize` ×2 (constants could be unused), duplicate comment blocks ×2, `UploadSession.seq` field (no readers) | `file_index.go` | Compile + full tests green |
 
-**已知限制（不修，记录理由）**：`PeerSource.peerLocks`（sync.Map）只增不减
-——peer 永久离线后锁条目残留（~60B/peer）。删除需与并发 Open 的
-LoadOrStore+TryLock 竞争串行化（否则删除窗口内新流拿到旧锁、另一流拿新锁
-→ 破坏连接级 expect 单槽），复杂度与风险远超收益（私有节点网络 peer 量级
-几十个，残留几十 KB）。保持只增不减，无需清理。
+**Known limitations (not fixed, reason recorded)**: `PeerSource.peerLocks` (sync.Map) only grows never shrinks
+— after peer permanently offline lock entries remain (~60B/peer). Deletion requires serializing with concurrent Open's
+LoadOrStore+TryLock race (otherwise new stream in deletion window gets old lock, another stream gets new lock
+→ breaks connection-level expect single slot), complexity and risk far exceed benefit (private node network peer count
+tens of peers, residual tens of KB). Keep only growing never shrinking, no cleanup needed.
 
-### 3.16 匿合集广播权限三档 + AnonCreator 面板回归修复（2026-09-19）
+### 3.16 Anon Collection Broadcast Permission Three Levels + AnonCreator Panel Regression Fix (2026-09-19)
 
-**需求**：把匿合集的「广播」从二态改成三档 —— **公开访问 / 仅限指定权限 / 仅自己**；
-「仅限指定权限」弹 regserver 账号列表（头像 + 昵称 + @id，支持分组快捷分享）；
-公开档位才显示「保存并广播」按钮（走 BT DHT announce + 本地做种）。
+**Requirement**: change anon collection "broadcast" from binary to three levels — **public access / restricted to specific permissions / only self**;
+"restricted to specific permissions" pops regserver account list (avatar + nickname + @id, supports group quick share);
+only public level shows "Save and Broadcast" button (goes through BT DHT announce + local seeding).
 
-**语义（后端 model/anon.go）**：
+**Semantics (backend model/anon.go)**:
 
-| visibility | 谁能看 | 空值兜底 |
+| visibility | Who can view | Null value fallback |
 |---|---|---|
-| `public` | 所有人 | 历史集合无该字段 → 视作 public（向后兼容） |
-| `restricted` | Owner + `access_list` 内的账号 | 名单为空 → **创建时 400**，不静默生成「谁都打不开」的合集 |
-| `private` | 仅 `owner`（= 本节点 regserver operator） | 节点未登录 regserver（operator 空）时前端禁用该档 |
+| `public` | Everyone | Historical collections without this field → treated as public (backward compatible) |
+| `restricted` | Owner + accounts in `access_list` | Empty list → **400 on create**, doesn't silently create "nobody can open" collection |
+| `private` | Only `owner` (= this node's regserver operator) | Node not logged into regserver (operator empty) frontend disables this level |
 
-**关键决策与坑**：
+**Key decisions and pitfalls**:
 
-1. **权限参与摘要 → 切档必然产生新 hash**。集合是 content-addressed，权限写在
-   JSON 里，`UpdateCollectionVisibility` 基于原集合复制一份写新文件并返回**新 hash**；
-   旧 hash 仍解析旧权限（快照语义，不是原地改）。前端拿新 hash 当集合的新身份。
-2. **`CanView("")` 必须为 false**（restricted/private）。未认证请求（空账号）不能
-   穿透受限档位，否则任何拿到 hash 的 P2P 同步都能拖走受限合集。这是本模块最
-   容易写错的一行。
-3. **越权一律表现成 404 而不是 403**（`GetCollectionVisibleTo`）——否则等于替攻击者
-   确认了「这个 hash 存在且属于别人」。
-4. **读写入口全部改走可见性版**：`GetAnonCollection` / `DownloadAnonFile` / `ForkAnonCollection`
-   从 `GetCollectionByHash` 换成 `GetCollectionVisibleTo(hash, nodestate.GetOperator())`。
-   本地会话注入本节点 operator，所以自己发的受限合集照常能读。
-   **为什么 fork 也要**：fork 会产出一份新合集，若源读取不设闸，拿到任意 hash 就能把
-   private 合集 fork 成一份 public 副本 → 三档权限被 fork 绕过。
-5. **派生路径必须继承权限**（这一条漏了会静默泄露）：
-   - `CommitCollection` 原来只复制 name/entries/tags → restricted/private 合集
-     **commit 一次就变回 public**；现在统一走 `inheritVisibility(dst, src)` 复制
-     Visibility/AccessList/Owner，且源集合按可见性读取（非可见者 commit 直接 not found）。
-   - `ForkAnonCollection` 产出的副本同样继承源的 visibility/access_list（Owner 延续源，
-     源无 Owner 时记为本机 operator），避免「同内容换 hash 即公开」。
-6. **`access_list` 是账号名扁平数组，不是 `/access/list` 的 hash**。早先 api.js 传的是
-   `access_list_hash`，后端只读 `access_list` 字段 → 受限合集名单为空 → 400。已修正。
-7. **切换档位时清空名单**（`pickVisibility`）：否则「切到受限但名单还留着上一次的人」，
-   后端会收到过期名单。
-8. `AuthStatus` 响应新增 `operator` 字段：`username` 是本次请求的调用者，
-   `operator` 是节点登录 regserver 后登记的账号（Owner 取它），二者不是一回事；
-   前端需要它判断「仅自己」档位是否可用。
-9. **账号目录服务缺席不阻塞功能**：`/reg/users`、`/reg/groups` 拿不到就返回空数组，
-   `AccountPicker` 降级到手动输入 `@id`（界面里明说「还没有可用账号」）。
+1. **Permissions participate in digest → changing level necessarily produces new hash**. Collection is content-addressed, permissions written in
+   JSON, `UpdateCollectionVisibility` copies original collection writing new file returning **new hash**;
+   old hash still parses old permissions (snapshot semantics, not in-place modification). Frontend takes new hash as collection's new identity.
+2. **`CanView("")` must be false** (restricted/private). Unauthenticated requests (empty account) cannot
+   penetrate restricted levels, otherwise any P2P sync with a hash can drag away restricted collections. This is the most
+   easily-mistaken line in this module.
+3. **Privilege escalation always manifests as 404 rather than 403** (`GetCollectionVisibleTo`) — otherwise equal to confirming to attackers
+   "this hash exists and belongs to someone else".
+4. **All read/write entry points changed to visibility version**: `GetAnonCollection` / `DownloadAnonFile` / `ForkAnonCollection`
+   changed from `GetCollectionByHash` to `GetCollectionVisibleTo(hash, nodestate.GetOperator())`.
+   Local session injects this node's operator, so one's own restricted collections read normally.
+   **Why fork also**: fork produces a new collection copy, if source read doesn't gate, getting any hash can fork
+   a private collection into a public copy → three-level permissions bypassed by fork.
+5. **Derived paths must inherit permissions** (missing this silently leaks):
+   - `CommitCollection` originally only copied name/entries/tags → restricted/private collections
+     **commit once reverts to public**; now unified through `inheritVisibility(dst, src)` copying
+     Visibility/AccessList/Owner, and source collection read by visibility (non-viewer commit directly not found).
+   - `ForkAnonCollection` produced copy also inherits source's visibility/access_list (Owner continues from source,
+     when source has no Owner records as local operator), avoids "same content different hash becomes public".
+6. **`access_list` is flat account name array, not hash of `/access/list`**. Earlier api.js sent
+   `access_list_hash`, backend only reads `access_list` field → restricted collection list empty → 400. Fixed.
+7. **Clear list when switching levels** (`pickVisibility`): otherwise "switched to restricted but list still has last time's people",
+   backend receives stale list.
+8. `AuthStatus` response added `operator` field: `username` is this request's caller,
+   `operator` is account registered after node logs into regserver (Owner takes this), they're not the same thing;
+   frontend needs it to determine if "only self" level is available.
+9. **Account directory service absence doesn't block functionality**: `/reg/users`, `/reg/groups` unavailable returns empty arrays,
+   `AccountPicker` degrades to manual `@id` input (UI explicitly says "no accounts available yet").
 
-**落点**：
+**Locations**:
 
-| 层 | 文件 | 改动 |
+| Layer | File | Change |
 |---|---|---|
-| model | `back/internal/model/anon.go` | `Visibility`/`AccessList`/`Owner` 字段 + `IsValidVisibility`/`EffectiveVisibility`/`CanView`；`AnonCollectionSummary` 回填 visibility/owner |
-| service | `back/internal/service/anon_service.go` | `CreateCollectionWithVisibility`（restricted 无名单直接 400）、`GetCollectionVisibleTo`（越权→404）、`UpdateCollectionVisibility`（Owner 校验 + 新 hash）、`saveCollectionJSON` |
-| controller | `back/internal/controller/anon.go` | 创建/详情/下载/切档接可见性；`PUT /anon/collections/:hash/visibility`（挂 authRequired） |
-| controller | `back/internal/controller/p2p.go` | `AuthStatus` 增 `operator` |
-| repository | `back/internal/repository/anon_repo.go` | 列表摘要回填 `EffectiveVisibility()`（空串不能直接透给前端，否则三选项无高亮） |
-| router | `back/internal/router/router.go` | 新增 visibility 路由 |
-| 前端 | `front/src/api.js` | `createAnonCollection` 改传 `access_list` 数组；`listKnownAccounts`/`listKnownGroups`（可缺席降级） |
-| 前端 | `AnonCreator/index.jsx` | visibility/accessList/accounts/operator 状态；`pickVisibility`、`openAccountPicker`、`handleSave(broadcast)` 保存前校验 |
-| 前端 | `AnonCreator/VisibilityPicker.jsx` | 三档开关（private 在无 operator 时禁用 + 原因提示） |
-| 前端 | `AnonCreator/AccountPicker.jsx` | 昵称 + @id 列表、分组快捷分享、手动 @id 兜底 |
-| 前端 | `AnonCreator/EditorPanel.jsx` | 权限行 + 「📡 保存并广播」按钮（仅 public 显示） |
+| model | `back/internal/model/anon.go` | `Visibility`/`AccessList`/`Owner` fields + `IsValidVisibility`/`EffectiveVisibility`/`CanView`; `AnonCollectionSummary` backfills visibility/owner |
+| service | `back/internal/service/anon_service.go` | `CreateCollectionWithVisibility` (restricted no list directly 400), `GetCollectionVisibleTo` (privilege escalation→404), `UpdateCollectionVisibility` (Owner validation + new hash), `saveCollectionJSON` |
+| controller | `back/internal/controller/anon.go` | Create/detail/download/level switch connect visibility; `PUT /anon/collections/:hash/visibility` (mounted with authRequired) |
+| controller | `back/internal/controller/p2p.go` | `AuthStatus` adds `operator` |
+| repository | `back/internal/repository/anon_repo.go` | List summary backfills `EffectiveVisibility()` (empty string can't pass directly to frontend, otherwise three options no highlight) |
+| router | `back/internal/router/router.go` | New visibility route added |
+| Frontend | `front/src/api.js` | `createAnonCollection` changed to send `access_list` array; `listKnownAccounts`/`listKnownGroups` (can be absent degraded) |
+| Frontend | `AnonCreator/index.jsx` | visibility/accessList/accounts/operator state; `pickVisibility`, `openAccountPicker`, `handleSave(broadcast)` pre-save validation |
+| Frontend | `AnonCreator/VisibilityPicker.jsx` | Three-level switch (private disabled when no operator + reason hint) |
+| Frontend | `AnonCreator/AccountPicker.jsx` | Nickname + @id list, group quick share, manual @id fallback |
+| Frontend | `AnonCreator/EditorPanel.jsx` | Permission row + "📡 Save and Broadcast" button (only shown for public) |
 
-**同批修掉的面板回归**（`😅.txt` 清单）：左侧来源标签补回「已注册·按目录」并新增
-`RegisteredDirView.jsx` 目录下钻视图；`FileTree` 空列表时也渲染工具栏（否则条目为 0
-时「新建文件夹」按钮整个消失）；「已注册（按文件）」口径修正为
-`provider_path || provider_type`（旧实现看 `f.providers.length`，`FileListItem` 没这个
-字段 → 列表恒空）；时间排序改 `Date.parse` 数值比较（RFC3339 字符串直接 localeCompare
-会把 `+08:00` 与 `Z` 混排）。
+**Panel regressions fixed in same batch** (`😅.txt` list): left source tags added back "Registered·by directory" and added
+`RegisteredDirView.jsx` directory drill-down view; `FileTree` renders toolbar even when list empty (otherwise "New Folder" button entirely disappears when entries 0); "Registered (by file)" scope corrected to
+`provider_path || provider_type` (old impl looked at `f.providers.length`, `FileListItem` doesn't have this
+field → list always empty); time sort changed to `Date.parse` numeric comparison (RFC3339 strings directly localeCompare
+mixes `+08:00` with `Z`).
 
-**验证**：back `go build -tags nosqlite ./...` + `go vet` + 全包测试绿；
-`gofmt -l` 对改动文件无输出。新增测试
-`back/internal/service/anon_visibility_test.go`（CanView 全档位 + 未认证拒绝、
-restricted 无名单报错、切档产生新 hash 且旧 hash 快照不变、Owner 越权拒绝、
-越权表现为 not found）与 `front/tests/VisibilityPicker.test.jsx`。
+**Verification**: back `go build -tags nosqlite ./...` + `go vet` + all package tests green;
+`gofmt -l` no output on changed files. New tests
+`back/internal/service/anon_visibility_test.go` (CanView all levels + unauthenticated reject,
+restricted no list error, level switch produces new hash and old hash snapshot unchanged, Owner privilege escalation reject,
+privilege escalation manifests as not found) and `front/tests/VisibilityPicker.test.jsx`.
 
-**已知限制**：P2P 同步路径（远端 peer 拉集合）尚未携带请求者身份，因此远端
-统一按 `requester=""` 处理 —— 受限/私有合集目前只能在本节点读到，跨节点分享
-受限合集要等「注册认证服务」上线后把账号带进同步请求（见 `doc/modules/auth`）。
+**Known limitations**: P2P sync path (remote peer pulling collections) doesn't yet carry requester identity, so remote
+uniformly treats as `requester=""` — restricted/private collections currently only readable on this node, cross-node sharing
+restricted collections awaits "registration auth service" online then bring account into sync requests (see `doc/modules/auth`).
 
-### 3.17 去重竞态的残留窗口：出站拉取补一次重试（2026-09-19）
+### 3.17 Dedup Race Residual Window: Outbound Pull Adds One Retry (2026-09-19)
 
-**症状**：`TestSelfHostedSignalAndDiscover` 约 1/4 概率失败，报
-`自托管发现后拉取失败: peerjs: connection closed`（10.05s，正好卡在 waitConnections
-返回后立刻拉取的瞬间）。
+**Symptom**: `TestSelfHostedSignalAndDiscover` ~1/4 probability failure, reports
+`self-hosted discovery pull failed: peerjs: connection closed` (10.05s, exactly stuck at the moment right after waitConnections
+returns and immediately pulls).
 
-**根因**（是 3.15/多连接批次的残留窗口，不是新 bug）：发现阶段两端互相发现 →
-双向互拨 → 同一 peerID 下两条连接。`dedupConn` 的保留策略两端一致（连接级 UUID
-字典序小者胜出），这解决的是「两端互留断链」；但仍有第三个窗口：
-`bindConn` 先把新连接写进 `conns[peerID]`、再去重判定淘汰谁。测试的
-`waitConnections` 只检查 `conns` 里有没有 key，一旦在「已进 conns、尚未判定」的
-窗口里返回，紧接着的拉取就发在**将被淘汰的那条连接**上，`cleanupConn` 一关它，
-在飞 fetch 立刻收到 `connection closed`。
+**Root cause** (residual window from 3.15/multi-connection batch, not new bug): discovery phase both ends discover each other →
+bidirectional mutual dialing → two connections under same peerID. `dedupConn` retention strategy consistent on both ends (connection-level UUID
+lexicographically smaller wins), this solves "both ends mutual broken links left"; but there's a third window:
+`bindConn` first writes new connection into `conns[peerID]`, then dedup decision on who to eliminate. Test's
+`waitConnections` only checks if key exists in `conns`, once returns in the "already in conns, not yet decided"
+window, immediately following pull sends on the **connection about to be eliminated**, `cleanupConn` closes it,
+in-flight fetch immediately receives `connection closed`.
 
-**修复**（`transport/outbound.go`）：`FetchFromPeer` 加一次条件重试 ——
-- 仅在错误属「连接 churn」时重试（`isConnChurnErr`：connection closed /
-  connection not bound / no connection to）；内容类错误（哈希不匹配、上限拒绝、
-  对端 err 帧）不重试，重试也不会变好。
-- 只重试一次：真断线时 `conns` 里没有可替换连接，第二次会以同样错误立刻失败。
-- 重试前等 150ms，让去重判定与 `conns` 改指完成；用 `sleepCtx` 保证服务关闭时
-  立刻返回，不拖住 `Close`。
-- 整段重试而不是续传：`FetchFromPeer` 语义是「取回完整内容」（返回单个 `[]byte`），
-  重来不会产生半截数据；带 offset/size 的分片请求重放同一范围同样安全。
+**Fix** (`transport/outbound.go`): `FetchFromPeer` adds one conditional retry —
+- Only retries when error is "connection churn" (`isConnChurnErr`: connection closed /
+  connection not bound / no connection to); content errors (hash mismatch, limit rejection,
+  peer err frame) don't retry, retry won't help.
+- Only retries once: when truly disconnected there's no replaceable connection in `conns`, second time fails immediately with same error.
+- Waits 150ms before retry, lets dedup decision and `conns` re-pointing complete; uses `sleepCtx` to ensure service closure
+  immediately returns, doesn't drag `Close`.
+- Full retry rather than resume: `FetchFromPeer` semantics is "retrieve complete content" (returns single `[]byte`),
+  restart won't produce half-data; offset/size chunked requests replaying same range equally safe.
 
-**为什么不改成「dedup 不关旧连接」**：设计上明确要求「连接被替换后旧连接上的
-进行中流必须报错结束」（`TestBindConn_ReplacedConnOldStreamErrors`，防悬挂），
-所以兜底责任在上层调用方 —— 换到存活连接重试即可。两条规则是互补的，不是矛盾。
+**Why not change to "dedup doesn't close old connection"**: design explicitly requires "after connection replaced, old connection's
+ongoing streams must error end" (`TestBindConn_ReplacedConnOldStreamErrors`, prevents hanging),
+so fallback responsibility is on upper caller — switch to surviving connection and retry. The two rules are complementary, not contradictory.
 
-**验证**：`TestSelfHostedSignalAndDiscover -count=4 -p 1` 连续 4 次全绿（修复前
-单跑即复现）；`internal/transport`、`internal/source` 单测与 -race 全绿。
+**Verification**: `TestSelfHostedSignalAndDiscover -count=4 -p 1` 4 consecutive runs all green (before fix
+single run reproduced); `internal/transport`, `internal/source` unit tests and -race all green.
 
-**已知残留**：`source.PeerSource`（节点透传回源的分片读）走的是 `OpenStreamFrom`
-的流式 reader，中途失败时已消费的字节无法安全重放，因此**没有**加同样的重试；
-它的候选枚举来自 `conns`，同样可能撞上这个窗口。真要彻底消除需要在
-`PeerSource.Open` 的竞速层做「零字节失败即重开一次」，留待后续（当前私有节点
-场景频率极低，且上层 HTTP 下载本身可重试）。
+**Known residual**: `source.PeerSource` (node passthrough origin fallback chunked read) goes through `OpenStreamFrom`
+streaming reader, mid-failure consumed bytes can't be safely replayed, so **doesn't** add same retry;
+its candidate enumeration comes from `conns`, same window can be hit. To truly eliminate need
+"zero-byte failure reopens once" at `PeerSource.Open` race layer, left for later (current private node
+scenario frequency extremely low, and upper HTTP download itself is retryable).
 
-### 3.18 互联层：节点级「存在房间」+ 发现拨号预算（2026-09-20）
+### 3.18 Interconnect Layer: Node-level "Presence Room" + Discovery Dial Budget (2026-09-20)
 
-**背景**：用户重排了开发顺序（见 `doc/ROADMAP.md`），把「基于 PeerJS 的互联」放在第一位。
-按该顺序盘点互联层时发现一个阻塞性缺口，本批次修掉。
+**Background**: user rearranged development order (see `doc/ROADMAP.md`), putting "PeerJS-based interconnect" first.
+Inventoried interconnect layer per that order and found a blocking gap, fixed in this batch.
 
-**缺口（阻塞性）**：发现是**内容分片制** —— `HTTPDiscovery` 只 announce/查询
-`PEERDRIVE_MQTT_COLLECTIONS` 里声明的 collection hash 房间。默认配置下该变量为空，
-于是节点**既不 announce 也不查询任何房间**，发现完全空转：两个默认配置的节点永远
-看不见对方，只有手工配静态 `PEERDRIVE_PEERJS_PEERS` 才能互联。
-（集成测试之所以没暴露：`TestSelfHostedSignalAndDiscover` 给两端都设了同一个
-`MQTTCollections` hash，等于替测试手工铺好了房间。）
+**Gap (blocking)**: discovery is **content-sharded** — `HTTPDiscovery` only announces/queries
+collection hash rooms declared in `PEERDRIVE_MQTT_COLLECTIONS`. Default config that variable is empty,
+so node **neither announces nor queries any room**, discovery completely idles: two default-configured nodes never
+see each other, only manual static `PEERDRIVE_PEERJS_PEERS` config enables interconnect.
+(Integration tests didn't expose this: `TestSelfHostedSignalAndDiscover` set same
+`MQTTCollections` hash on both ends, effectively manually set up the room for the test.)
 
-**修法（客户端侧，不动信令服务器）**：
-- `transport/http_discovery.go` 新增 `PresenceRoom` 常量 = `sha256("peerdrive/presence/v1")`
-  = `405265e5…d15a`；HTTP 发现额外加入这个固定房间，使互联层独立于内容分片工作。
-- `transport/peerjs_service.go`：`collectionHashes()`（内容房间，仅配置）之上加
-  `discoveryRooms()` = 内容房间 + 存在房间；新增 `discoveryDialAllowed()` /
-  `maxPeers()`，发现触发的拨号受 `PEERDRIVE_MAX_PEERS`（此前**定义了但从未被使用**）约束。
-- 配置：新增 `PEERDRIVE_DISCOVER_PRESENCE`（默认 true）。
-- 新测试：`internal/transport/discovery_rooms_test.go`（5 组）、集成测试
-  `TestInterconnectViaPresenceRoom`（零共享 collection 的两个节点仅靠存在房间互联）。
+**Fix (client side, doesn't touch signaling server)**:
+- `transport/http_discovery.go` added `PresenceRoom` constant = `sha256("peerdrive/presence/v1")`
+  = `405265e5…d15a`; HTTP discovery additionally joins this fixed room, making interconnect layer independent of content sharding.
+- `transport/peerjs_service.go`: `collectionHashes()` (content rooms, config only) on top adds
+  `discoveryRooms()` = content rooms + presence room; added `discoveryDialAllowed()` /
+  `maxPeers()`, discovery-triggered dialing constrained by `PEERDRIVE_MAX_PEERS` (previously **defined but never used**).
+- Config: added `PEERDRIVE_DISCOVER_PRESENCE` (default true).
+- New tests: `internal/transport/discovery_rooms_test.go` (5 groups), integration test
+  `TestInterconnectViaPresenceRoom` (two nodes with zero shared collections interconnect via presence room only).
 
-**为什么存在房间用 sha256 字面量而不是 `"_presence"` 这类可读名**（关键决策）：
-房间名会被塞进 announce 的 `collections` 字段。peerdrive 自己的 `signalserver` 对该字段
-只 trim 不校验，但**线上信令由 wintools 维护、实现未知**——一旦那侧做「必须 64hex」校验，
-可读名会让**整条 announce 被 400 拒掉**，连带内容分片房间一起登记不上，发现全断。
-代价（不可读）远小于风险。sha256 的原像不可求性同时保证它与任何真实内容/合集 hash
-不会碰撞。测试 `TestPresenceRoom_IsStrictSHA256` 把这个约束钉死。
+**Why presence room uses sha256 literal rather than readable name like `"_presence"`** (key decision):
+room names get stuffed into announce's `collections` field. peerdrive's own `signalserver` only trims that field
+without validation, but **online signaling maintained by wintools, implementation unknown** — once that side adds "must be 64hex" validation,
+readable name causes **entire announce to be 400 rejected**, dragging content sharded rooms unable to register, discovery fully broken.
+Cost (unreadable) far less than risk. sha256 preimage resistance also ensures it won't collide with any real content/collection hash.
+Test `TestPresenceRoom_IsStrictSHA256` locks this constraint.
 
-**为什么拨号要有上限**：内容分片制天然限流（只有同房间的节点才碰面）；存在房间让
-「任意节点都能发现任意节点」，发现即拨号会退化成 O(n²) 全互联。用闲置的
-`PEERDRIVE_MAX_PEERS` 兜住（默认 8；`<=0` 视为不限）。静态 `PEERDRIVE_PEERJS_PEERS`
-不受限 —— 那是运营者的显式声明。计预算时排除 `"local"`（浏览器直连本节点的本地
-WS 会话不是对端节点）。
+**Why dialing needs a cap**: content sharding naturally limits flow (only same-room nodes meet); presence room makes
+"any node can discover any node", discovery-triggered dialing degrades to O(n²) full interconnect. Use idle
+`PEERDRIVE_MAX_PEERS` to catch (default 8; `<=0` means unlimited). Static `PEERDRIVE_PEERJS_PEERS`
+not limited — that's operator's explicit declaration. Budget calculation excludes `"local"` (browser direct local
+WS session to this node is not a peer node).
 
-**MQTT 分支刻意不加存在房间**：公共 broker 上开全局房间等于向公网广播本节点在线，
-不做。存在房间只作用于自托管信令的 HTTP 发现。
+**MQTT branch deliberately doesn't add presence room**: opening global room on public broker equals broadcasting this node online to public net,
+not doing. Presence room only applies to self-hosted signaling HTTP discovery.
 
-**有意保留的缺口**：`collectionHashes()` 只读配置、不读本地存储的合集（原注释误称
-「配置 + 本地存储」）。广播本地合集 hash 等于公开「本节点持有什么」，受限/私有合集
-更会直接泄露房间名 —— 要按可见性过滤（只广播 public）后才能做，留给「文件范围管理」
-阶段（`doc/ROADMAP.md` 第 5 阶段）。
+**Intentionally retained gap**: `collectionHashes()` only reads config, doesn't read locally stored collections (original comment falsely claimed
+"config + local storage"). Broadcasting local collection hash equals publicly "what this node holds", restricted/private collections
+would directly leak room names — must filter by visibility (only broadcast public) before doing, left for "file scope management"
+phase (`doc/ROADMAP.md` phase 5).
 
-**未做（后续）**：连接健康度观测（每对端 RTT / 最后收帧 / 重连次数）、按能力筛选对端
-（announce 已有 `nodeType`/`loadInfo` 字段，节点端目前发常量）。
+**Not done (future)**: connection health observation (per-peer RTT / last received frame / reconnect count), capability-based peer filtering
+(announce already has `nodeType`/`loadInfo` fields, node side currently sends constants).
 
-### 3.19 网盘链路：节点市场 / 共享范围 / 跨节点保存 / 网盘界面 / 纯消费端（2026-09-20）
+### 3.19 Netdisk Chain: Node Market / Shared Scope / Cross-node Save / Netdisk UI / Pure Consumer (2026-09-20)
 
-**背景**：用户给出目标形态（见 `doc/NETDISK.md`）：前端是普通网盘界面（自己的节点 / 别人的节点 /
-市场加入 / 看到对方的「文件链接」/ 选中保存）+ 一个纯 WebRTC 消费端。按模块分支实施（M1-M6），
-每个分支自己跑通 CI 后 merge 回 `refactor`。
+**Background**: user gave target form (see `doc/NETDISK.md`): frontend is normal netdisk UI (own nodes / others' nodes /
+market join / see other's "file links" / select save) + one pure WebRTC consumer. Implemented by module branch (M1-M6),
+each branch runs CI through then merges back to `refactor`.
 
-**新增的帧 verb：`share` / `share-resp`**
+**New frame verbs: `share` / `share-resp`**
 
 ```
-请求 {"type":"share","reqId":"…"}
-响应 {"type":"share-resp","collections":[…],"files":[…],"dirs":[…],"total":N,"reqId":"…"}
+Request {"type":"share","reqId":"…"}
+Response {"type":"share-resp","collections":[…],"files":[…],"dirs":[…],"total":N,"reqId":"…"}
 ```
 
-- **不复用 `list`**（关键决策）：`list` 是本地**管理**索引（file_index 全量、含本机绝对路径），
-  语义是「我在管理哪些文件」；`share` 是运营者**显式声明**的对外范围。混用等于默认全盘对外公开。
-- 未开启共享回**空数组**而不是 `err`：空态是合法业务状态（对方没共享），前端渲染"无内容"即可。
-- 不含请求者身份（ROADMAP 硬约束：第 7 阶段前不引入账号），因此只回本来就允许公开的内容
-  （受限/私有合集一律跳过——放出去等于公开）。
-- 响应帧字段（`collections/files/dirs`）不在 `dcResp` 里，所以 Go 侧一次性 verb 的等待槽
-  `connState.verbWaits` 存的是**原始 JSON bytes**、不是解析后的结构（重新 marshal 会丢字段）。
-  这也是「一次性 verb 等待槽」与「流式 fetch 状态机」分开的原因：后者要处理数据块，
-  前者只要一个 JSON 就结束。
+- **Don't reuse `list`** (key decision): `list` is local **management** index (full file_index, including local absolute paths),
+  semantics is "which files am I managing"; `share` is operator **explicitly declared** external scope. Mixing equals default full disk public.
+- Shared not enabled returns **empty array** rather than `err`: empty state is legitimate business state (other didn't share), frontend renders "no content" accordingly.
+- Doesn't contain requester identity (ROADMAP hard constraint: no accounts before phase 7), so only returns content that was already allowed to be public
+  (restricted/private collections uniformly skipped — publishing equals making public).
+- Response frame fields (`collections/files/dirs`) not in `dcResp`, so Go side one-shot verb wait slot
+  `connState.verbWaits` stores **original JSON bytes**, not parsed structure (re-marshaling would lose fields).
+  This is also why "one-shot verb wait slot" and "streaming fetch state machine" are separate: latter needs to handle data blocks,
+  former just needs one JSON to end.
 
-**announce 只报共享数量**：`loadInfo.shares = {collections,files,dirs}`（**只数量不 hash**）。
-announce 会经发现服务器广播给所有查询者，报 hash 等于公开「本节点持有什么」；数量足够支撑
-市场卡片的引导信息，具体清单只在点对点直连后走 `share` 帧拿。这条同时定性解决了
-§3.18 留下的「广播本地合集 hash」待办。
+**announce only reports share count**: `loadInfo.shares = {collections,files,dirs}` (**only count, no hash**).
+announce gets broadcast by discovery server to all queryers, reporting hash equals publicly "what this node holds"; count is enough to support
+market card guiding info, specific lists only obtained via `share` frame after point-to-point direct connection. This also qualitatively resolves
+§3.18's "broadcast local collection hash" TODO.
 
-**跨节点拉取保存（`service.PeerPuller`）**
+**Cross-node pull save (`service.PeerPuller`)**
 
-- 落盘位置：`<DownloadDir>/pulled/<相对路径>.part` → 校验 sha256 → rename → `file_index.Create` 登记。
-  **不写 CAS 副本**：登记后内容既能出现在"我的文件"，也能被本节点继续 `serveFile` 服务给别的节点
-  （集成测试 `TestPeerPullSavesToLocalDrive` 用 C 从 B 拉取验证了这点），再写一份 CAS 是同一份内容的
-  第二次落盘。
-- 端点全是**静态路径**：`GET/POST /p2p/pull`、`POST /p2p/pull/collection`、`POST /p2p/pull/cancel`。
-  坑：gin **不允许同级路由同时有静态段与参数段**（`/p2p/pull` 与 `/p2p/pull/:id` 会 panic），
-  取消因此改成 body 传 id 而不是 `:id`。
-- `fetchState.total` 改用 `atomic.Int64`：meta 帧由消息泵写、`fetchReader.Total()` 由消费者
-  goroutine 读，普通字段是 data race（`-race` 会报）。
+- Landing location: `<DownloadDir>/pulled/<relative_path>.part` → sha256 verify → rename → `file_index.Create` register.
+  **Don't write CAS copy**: after registration content can appear in "my files", also can be continued `serveFile` by this node to other nodes
+  (integration test `TestPeerPullSavesToLocalDrive` verified from C pulling from B), writing another CAS copy is second landing of same content.
+- All endpoints are **static paths**: `GET/POST /p2p/pull`, `POST /p2p/pull/collection`, `POST /p2p/pull/cancel`.
+  Pitfall: gin **doesn't allow static segment and parameter segment at same level** (`/p2p/pull` and `/p2p/pull/:id` panic),
+  cancel therefore changed to body passing id instead of `:id`.
+- `fetchState.total` changed to `atomic.Int64`: meta frame written by message pump, `fetchReader.Total()` read by consumer
+  goroutine, normal field is data race (`-race` reports).
 
-**前端（M4）**
+**Frontend (M4)**
 
-- 新增 `Fill` 容器（`App.jsx`）：网盘页是 `flex flex-1 min-h-0`，而 `<Routes>` 的父级是**块级**容器
-  ——不在中间加一层 `h-full flex` 的话，页内 `overflow-y-auto` 拿不到确定高度，内容会被
-  `overflow-hidden` 裁掉而不是滚动。既有页面自带 `h-full`，所以没有改造它们（只包新路由）。
-- `/peers/:peer` 与既有 `/:username/:collName` 不冲突：react-router v6 按特异性排序，静态段优先，
-  与声明顺序无关。
-- 预览不做大改造：既有 `AnonExplorer/*Preview` 组件与合集条目结构耦合，网盘的文件是 file_index
-  条目（形状不同），所以走 `api.getBlobUrl` + 新窗口打开，避免为一个入口改造两处。
+- Added `Fill` container (`App.jsx`): netdisk page is `flex flex-1 min-h-0`, while `<Routes>`'s parent is **block-level** container
+  — without adding a `h-full flex` layer in between, in-page `overflow-y-auto` can't get definite height, content gets
+  cut by `overflow-hidden` instead of scrolling. Existing pages have their own `h-full`, so didn't modify them (only wrapped new routes).
+- `/peers/:peer` doesn't conflict with existing `/:username/:collName`: react-router v6 sorts by specificity, static segments first,
+  unrelated to declaration order.
+- Preview not heavily reworked: existing `AnonExplorer/*Preview` components coupled with collection entry structure, netdisk files are file_index
+  entries (different shape), so go through `api.getBlobUrl` + new window open, avoids reworking two places for one entry.
 
-**测试基建修复（值得单独记）**
+**Test infrastructure fixes (worth recording separately)**
 
-- `front/src/__mocks__/api.js` 是**手写** mock（不是 automock），随 api.js 演进已漂移：
-  缺 8 个导出、多 18 个僵尸导出。表现是页面在测试里拿到 `undefined`，然后死在离原因很远的调用点
-  （`Cannot read properties of undefined`）。
-- 修法：补齐 + 清理，并新增 `front/tests/api-mock-sync.test.js` 做**双向**守卫
-  （真实模块的导出清单 vs 手写 mock；缺了/多了都红）。这条守卫在这次就抓出了 8 个缺失。
-- 需要断言"点了保存到底给后端发了什么"的测试，在文件级用 `vi.mock('../src/api.js', () => ({...vi.fn()}))`
-  覆盖 setup.js 的手写 mock（手写 mock 是普通函数，既不能断言也不能注入返回值）。
+- `front/src/__mocks__/api.js` is **hand-written** mock (not automock), drifted with api.js evolution:
+  missing 8 exports, extra 18 zombie exports. Manifests as pages getting `undefined` in tests, then dying at call points far from cause
+  (`Cannot read properties of undefined`).
+- Fix: complete + clean, and added `front/tests/api-mock-sync.test.js` as **bidirectional** guard
+  (real module's export list vs hand-written mock; both missing/extra turn red). This guard caught 8 missing in this round.
+- Tests needing to assert "what does clicking save actually send to backend", use file-level `vi.mock('../src/api.js', () => ({...vi.fn()}))`
+  to override setup.js's hand-written mock (hand-written mock is plain function, can't assert or inject return values).
 
-**纯 WebRTC 消费端（`packages/peerdrive-client`）**
+**Pure WebRTC Consumer (`packages/peerdrive-client`)**
 
-- **传输无关**（关键决策）：`PeerDriveClient` 只要求传入 `{on(type,cb), send(data), open, close}`，
-  不认识 PeerJS。收益：包零依赖、不污染使用方打包体积；测试用假连接即可覆盖全部状态机
-  （不需要信令服务器与真 WebRTC）；将来换裸 `RTCPeerConnection`/WebTransport 不用改这个文件。
-- 逐条复刻 Go 侧的正确性约束：连接级 expect（二进制块挂到**最近一个** data 头所属请求，
-  块里不带 reqId —— 所以两个请求的块**不能交错发送**）、`done` 字节数比对（防截断静默损坏）、
-  块大小上限、hash 必须 64 位小写 hex（本地即拒，否则错误晚一个往返才出现）。
-- **自实现增量 SHA-256**（`src/sha256.js`）：`crypto.subtle.digest()` 是**一次性**的，必须先把
-  整份内容攒进内存才能算摘要——与流式拉取直接冲突。增量实现让"边收边算"成立，代价是纯 JS 约
-  30–80 MB/s；一次性路径 `sha256Hex()` 仍优先走 WebCrypto。副产物：纯 JS 不要求安全上下文。
-- **内存闸**：`fetch()/saveAs()` 整体驻留内存（浏览器 Blob 下载只能这样），默认 256MB，
-  超了抛 `TOO_LARGE` 并引导用 `stream()`；对端在 `meta` 里声明的大小时**在 meta 阶段就拦**，不白下。
-- 取消语义诚实标注：协议里**没有取消帧**（Go 侧也没有对应实现），提前 `break` 只是本地丢帧并
-  释放已缓存块，对端会把这次请求发完；要真正中断只能关连接。
-- 不做 `list` 帧：那是节点的本地管理索引，按设计只对可信对端开放。
-- `serialization` 必须是 `'raw'`（同 peerdrive-media 的踩坑）：否则数据块会被 peerjs 自己的
-  chunker 包装，对端解析不出来。
+- **Transport-agnostic** (key decision): `PeerDriveClient` only requires passing `{on(type,cb), send(data), open, close}`,
+  doesn't know PeerJS. Benefits: package zero dependencies, doesn't pollute consumer bundle size; tests cover full state machine with fake connection
+  (no signaling server or real WebRTC needed); future switch to raw `RTCPeerConnection`/WebTransport doesn't need to change this file.
+- Replicates Go side's correctness constraints item by item: connection-level expect (binary blocks attach to **most recent** data header's request,
+  blocks don't carry reqId — so two requests' blocks **cannot interleave sending**), `done` byte count comparison (prevents silent truncation corruption),
+  block size limit, hash must be 64-bit lowercase hex (local immediate reject, otherwise error appears a roundtrip late).
+- **Self-implemented incremental SHA-256** (`src/sha256.js`): `crypto.subtle.digest()` is **one-shot**, must first
+  accumulate entire content in memory before computing digest — directly conflicts with streaming pull. Incremental implementation enables "compute as receiving", cost is pure JS ~
+  30–80 MB/s; one-shot path `sha256Hex()` still prefers WebCrypto. Byproduct: pure JS doesn't require secure context.
+- **Memory gate**: `fetch()/saveAs()` fully resides in memory (browser Blob download only way), default 256MB,
+  exceeded throws `TOO_LARGE` and guides to `stream()`; peer's size declared in `meta` is **blocked at meta stage**, no wasted download.
+- Cancel semantics honestly annotated: protocol has **no cancel frame** (Go side also no corresponding implementation), early `break` only locally drops frames and
+  releases cached blocks, peer will finish this request; true interruption only by closing connection.
+- Doesn't implement `list` frame: that's node's local management index, by design only open to trusted peers.
+- `serialization` must be `'raw'` (same pitfall as peerdrive-media): otherwise data blocks wrapped by peerjs's own
+  chunker, peer can't parse them.
 
-**验证**：back 单测全绿；集成 `-p 1` 全绿（新增 `TestNodeMarketListsDiscoveredPeer` /
-`TestShareProtocolContract` / `TestPeerPullSavesToLocalDrive`）；前端 vitest 88/88 + `vite build`；
-消费端 `node --test` 60/60。计划与实际偏差的完整清单见 `doc/NETDISK.md` §6.1。
+**Verification**: back unit tests all green; integration `-p 1` all green (new `TestNodeMarketListsDiscoveredPeer` /
+`TestShareProtocolContract` / `TestPeerPullSavesToLocalDrive`); frontend vitest 88/88 + `vite build`;
+consumer `node --test` 60/60. Complete list of plan vs actual deviations see `doc/NETDISK.md` §6.1.
 
-### 3.20 CI 转绿：两个既有红灯（2026-09-20）
+### 3.20 CI Green: Two Existing Red Flags (2026-09-20)
 
-合并网盘模块后推 `refactor` 触发 CI，发现仓库有**两条** workflow
-（`ci.yml` 与 `go-build.yml`）且各有一处红。两者在 `9e4ede3` 上就已存在，
-与网盘改动无关，但主干必须是绿的才能算"验证通过"，故一并修。完整表格见
-`doc/NETDISK.md` §6.4，这里只记**可复用的经验**。
+After merging netdisk module and pushing `refactor` to trigger CI, found repo has **two** workflows
+(`ci.yml` and `go-build.yml`) each with one red. Both existed at `9e4ede3`,
+unrelated to netdisk changes, but main branch must be green to count as "verification passed", so fixed together. Complete table see
+`doc/NETDISK.md` §6.4, here only recording **reusable lessons**.
 
-#### (1) `media-package`：`npm ci` 报 lockfile 缺 react
+#### (1) `media-package`: `npm ci` reports lockfile missing react
 
-`react`/`react-dom` 在 `packages/peerdrive-media` 里只是 **optional
-peerDependencies**，但 `@vitejs/plugin-react` 把 react 当**必需** peer →
-npm 7+ 自动补装 peer 后算出的理想树含 `react@19.3.0`，而 lockfile 没有 →
-`npm ci` 的同步检查直接失败（EUSAGE）。
+`react`/`react-dom` in `packages/peerdrive-media` are only **optional
+peerDependencies**, but `@vitejs/plugin-react` treats react as **required** peer →
+after npm 7+ auto-installing peers the computed ideal tree contains `react@19.3.0`, but lockfile doesn't have it →
+`npm ci`'s sync check fails directly (EUSAGE).
 
-修法是把它俩补进 `devDependencies`（带 peerDependencies 的库的常规做法：
-本地开发/构建要装，消费者仍走自己的 peer 声明），再
-`npm install --package-lock-only` 重算。
+Fix is to add them to `devDependencies` (standard practice for libraries with peerDependencies:
+local dev/build installs, consumers still use their own peer declaration), then
+`npm install --package-lock-only` to recompute.
 
-> 坑：`npm install` 在本机代理下会**挂住十几分钟**（全量 reify 走几百次请求），
-> 但 `npm install --package-lock-only` 只解算元数据、几秒就完；
-> 之后再 `npm ci --dry-run` 验证同步、实跑一次 `npm ci` 验证产物。
-> 另：`npm run build` 本地报 "Cannot find native binding" 是 **npm optional
-> deps bug**（npm/cli#4828）导致 rolldown 的 14 个平台二进制一个都没装上，
-> 显式补 `@rolldown/binding-linux-x64-gnu` 即通过——非仓库缺陷。
-> 另注意 vite 8 要求 node `^20.19 || >=22.12`，本机 WSL 默认 22.9 会 EBADENGINE，
-> 用 nvm 的 22.23 复现 CI 的真实环境。
+> Pitfall: `npm install` under local proxy **hangs for tens of minutes** (full reify makes hundreds of requests),
+> but `npm install --package-lock-only` only resolves metadata, done in seconds;
+> then `npm ci --dry-run` to verify sync, run `npm ci` once to verify artifacts.
+> Also: `npm run build` locally reports "Cannot find native binding" is **npm optional
+> deps bug** (npm/cli#4828) causing rolldown's 14 platform binaries not installed at all,
+> explicitly adding `@rolldown/binding-linux-x64-gnu` passes — not a repo defect.
+> Also note vite 8 requires node `^20.19 || >=22.12`, local WSL default 22.9 gets EBADENGINE,
+> use nvm's 22.23 to replicate CI's real environment.
 
-#### (2) `internal/source` 竞速用例偶发失败
+#### (2) `internal/source` race test case occasional failure
 
-`TestPeerSource_WinnerPeerLockReleased` 在 CI 的 macos/arm64 上约 1/4 概率红，
-一度被当成"平台专属"。**其实不是** —— 本地 Linux `go test -count=400` 就能
-复现约 1%~2%，慢机器只是把概率放大。
+`TestPeerSource_WinnerPeerLockReleased` reds at ~1/4 probability on CI's macos/arm64,
+was once considered "platform-specific". **Actually not** — local Linux `go test -count=400` reproduces
+~1%-2%, slow machines just amplify the probability.
 
-根因（靠插桩轨迹坐实）：`raceOpen` 胜出即返回，**输家候选 goroutine 可能仍在
-飞行并持有该 peer 槽位**（锁由后台收割 goroutine 关流后释放——刻意设计）。
-用例第二轮之后直接开第三轮 → 第三轮 `collectPeers` 看到 peerB BUSY → 退化成
-单对端串行路径 → 而 peerA 已被 `failSend` → 报 `peer peerA: assert.AnError`，
-与"锁是否已释放"的断言前提完全错位。
+Root cause (confirmed via instrumented tracing): `raceOpen` returns on win, **loser candidate goroutines may still be
+in flight holding that peer's slot** (lock released by background collection goroutine after closing stream — deliberate design).
+Test third round directly opens → third round `collectPeers` sees peerB BUSY → degrades to
+single peer serial path → but peerA already `failSend` → reports `peer peerA: assert.AnError`,
+completely misaligned with "is lock released" assertion premise.
 
-修法：新增 `waitPeersIdle(t, ps, want)`（TryLock 探测、拿到即释放、3s deadline），
-第一/二轮结束各等一次，替换原来只覆盖第一轮的固定 `sleep(50ms)`。
-**生产代码未改**——竞速"不等输家"是有意为之。真发生锁泄漏时会以明确 Fatal
-暴露，反而强化了用例语义。
+Fix: added `waitPeersIdle(t, ps, want)` (TryLock probing, release on get, 3s deadline),
+wait once after first/second rounds, replacing original fixed `sleep(50ms)` that only covered first round.
+**Production code unchanged** — race "not waiting for losers" is deliberate. Real lock leak will surface as clear Fatal
+exposure, actually strengthening test semantics.
 
-> 坑（重要）：**插桩别写 stderr**。`fmt.Fprintf(os.Stderr, ...)` 的 I/O 会改变
-> goroutine 调度，把 1~2% 的竞态直接掩盖（600 次全绿、查不到证据）。
-> 要改成**内存环形缓冲**（加锁 append，容量上限），失败时再 dump。
-> 同理，`-race` 也会因时序变化而不复现（本次 -race 300 次全绿），
-> 不能拿"race 下没红"当作"没有竞态"的证据。
+> Pitfall (important): **don't write stderr for instrumentation**. `fmt.Fprintf(os.Stderr, ...)` I/O changes
+> goroutine scheduling, directly masking 1-2% race (600 runs all green, no evidence found).
+> Change to **in-memory ring buffer** (locked append, capacity limit), dump on failure.
+> Similarly, `-race` may not reproduce due to timing changes (this -race 300 runs all green),
+> can't use "no red under race" as evidence of "no race exists".
 
-#### (3) `.gitignore` 的 `react/` 吞掉了 media 包的 React 源码
+#### (3) `.gitignore`'s `react/` swallowed media package's React source
 
-修好 (1) 之后 `npm ci` 过了，作业才走到 `npm run build`，随即报
-`[UNRESOLVED_ENTRY] Cannot resolve entry module src/react/index.js` —— 本地能
-构建、CI 全新 checkout 却找不到文件。原因是 `.gitignore` 「Root temp files」
-段写的是不带前导斜杠的 `react/` / `go/`，**匹配任意层级的同名目录**，于是
-`packages/peerdrive-media/src/react/` 被整体忽略，那 5 个源文件从未入库；
-本地磁盘上有文件所以一直没暴露。
+After fixing (1), `npm ci` passed, job proceeded to `npm run build`, immediately reported
+`[UNRESOLVED_ENTRY] Cannot resolve entry module src/react/index.js` — local can
+build, CI fresh checkout can't find files. Reason: `.gitignore` "Root temp files"
+section writes `react/` / `go/` without leading slash, **matches same-named directories at any level**, so
+`packages/peerdrive-media/src/react/` entirely ignored, those 5 source files never committed;
+local disk has files so never exposed.
 
-修法：锚定为 `/react/` 与 `/go/`（与同段 `/docs/` 一致）。`dist/react/` 仍由
-`dist/` 覆盖。
+Fix: anchor as `/react/` and `/go/` (consistent with same section's `/docs/`). `dist/react/` still covered by
+`dist/`.
 
-> 教训：**红灯是会互相掩盖的**。一个作业卡在第一步时，后面的步骤可能早就坏了。
-> 修完一处要重跑整条链，别假设"剩下的本来就是好的"。
-> 另外 `.gitignore` 里写"根目录临时目录"务必加前导 `/`——不带 `/` 的
-> 目录规则是**任意层级**匹配。
+> Lesson: **red flags mask each other**. When one job stuck at first step, later steps may have long been broken.
+> After fixing one place rerun entire chain, don't assume "the rest were already good".
+> Also `.gitignore` writing "root directory temp dirs" must add leading `/` — without `/`
+> directory rules match **at any level**.
 
-## 5. E2E 踩过的坑（全部已修）
+## 5. E2E Pitfalls Encountered (All Fixed)
 
-| 坑 | 修复 |
+| Pitfall | Fix |
 |---|---|
-| answerer 新生成 connectionId → ANSWER 路由不到、ICE 卡 checking | answerer 必须沿用 offerer 的 connectionId |
-| pion 不自动发 ICE 候选 → 双方永远 checking | `OnICECandidate` → 信令 CANDIDATE 手动转发 |
-| `dc.Send([]byte)` 发二进制帧，JSON 头被当数据块丢弃 | 头用 `SendText` |
-| 对端未上线 OFFER 入队过期（EXPIRE）→ 永远等 OnOpen | EXPIRE 时 Close 连接，connectLoop 循环重连 |
-| 重连失败后不重试（connectLoop 一次性退出） | 无限循环 + 指数退避 |
-| 浏览器测试超时：chromium 不走系统代理 / about:blank 无 crypto.subtle | chromium 显式 `--proxy-server`；sha256 在 Node 侧算 |
-| **持锁调用 `conn.Close()` 死锁**（Go mutex 非重入）：handleOffer 重复 connectionId 清理、handleLeave 关闭对端连接 | 锁内只收集，解锁后 Close |
-| **WS 并发写 panic**：`gorilla/websocket` 不允许并发 WriteJSON，心跳/ICE 候选/ANSWER 多 goroutine 并发（3 节点互通测试触发） | signaller 加 writeMu 串行化 |
-| **并发流控死锁**：旧实现每个 serveFile 各自注册 `OnBufferedAmountLow`（pion 替换式回调）——并发请求只有最后一个注册者能收到低水位事件，其余在 bufferedAmount 超阈值时死等（4 并发 × 2MB 集成测试复现，修复前卡到超时） | 流控下沉到 `peerjs.Connection.SendFrame`（attach 时全局注册一次回调 + lowWater 广播），serveFile 零流控代码；等待可用 c.done 退出（连接关闭不悬挂） |
+| answerer generates new connectionId → ANSWER routing fails, ICE stuck checking | answerer must reuse offerer's connectionId |
+| pion doesn't auto-send ICE candidates → both sides forever checking | `OnICECandidate` → signaling CANDIDATE manual forwarding |
+| `dc.Send([]byte)` sends binary frame, JSON header treated as data block discarded | Headers use `SendText` |
+| Peer not online OFFER queued expiry (EXPIRE) → forever waiting for OnOpen | On EXPIRE close connection, connectLoop loops reconnect |
+| No retry after reconnect failure (connectLoop one-shot exit) | Infinite loop + exponential backoff |
+| Browser test timeout: chromium doesn't use system proxy / about:blank has no crypto.subtle | chromium explicit `--proxy-server`; sha256 computed on Node side |
+| **Calling `conn.Close()` while holding lock deadlock** (Go mutex non-reentrant): handleOffer duplicate connectionId cleanup, handleLeave closing peer connection | Only collect inside lock, Close after unlocking |
+| **WS concurrent write panic**: `gorilla/websocket` doesn't allow concurrent WriteJSON, heartbeat/ICE candidates/ANSWER multi-goroutine concurrent (3-node interconnect test triggered) | signaller added writeMu serialization |
+| **Concurrent flow control deadlock**: old impl each serveFile registered own `OnBufferedAmountLow` (pion replacement callback) — concurrent requests only last registrant receives low water level event, others deadlock waiting when bufferedAmount exceeds threshold (4 concurrent × 2MB integration test reproduced, before fix stuck until timeout) | Flow control sunk to `peerjs.Connection.SendFrame` (attach-time global single callback registration + lowWater broadcast), serveFile zero flow control code; waiting available uses c.done to exit (connection close no hang) |
 
-## 5.1 测试体系
+## 5.1 Test System
 
-单元测试（无网络，race 下跑）：
+Unit tests (no network, run under race):
 
 ```bash
 cd back/peerjs && go test ./... -count=1 -race
 ```
 
-覆盖：connectionId 沿用、重复 OFFER 清理、EXPIRE/LEAVE 关闭、Close 幂等、
-SendFrame 并发原子性（8×50 轮验证头体不交织）、**SendFrame 内置流控
-（高水位阻塞 → 低水位恢复；连接关闭退出不悬挂）**、文本/二进制帧类型、
-远端关闭清理、ICE 配置入口。
+Coverage: connectionId reuse, duplicate OFFER cleanup, EXPIRE/LEAVE close, Close idempotent,
+SendFrame concurrent atomicity (8×50 rounds verify header-body non-interleaving), **SendFrame built-in flow control
+(high water level blocking → low water level recovery; connection close exit no hang)**, text/binary frame types,
+remote close cleanup, ICE config entry.
 
-集成测试（脱外网，全局自托管信令——见 §3.12 第 6 项；race 下跑）：
+Integration tests (external-network-free, global self-hosted signaling — see §3.12 item 6; run under race):
 
 ```bash
 cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1 -race
 ```
 
-**必须 `-p 1` 串行**：多组测试共享全局自托管信令服务器，并行会互相干扰（信令
-注册的 ID/房间互相可见）。MQTT 公共 broker 测试需 `PEERDRIVE_MQTT_TEST=1` 显式
-门控（默认跳过，脱外网）；线上环境测试 `PEERDRIVE_LIVE_TEST=1`；无 UDP 沙箱
-（docker 默认）用 `PEERDRIVE_SKIP_RTC=1` 跳过 WebRTC 互联类（本地 WS/admin 类
-不受影响）。
+**Must `-p 1` serial**: multiple test groups share global self-hosted signaling server, parallel interferes with each other (signaling
+registered IDs/rooms visible to each other). MQTT public broker tests require `PEERDRIVE_MQTT_TEST=1` explicit
+gating (default skipped, external-network-free); online environment tests `PEERDRIVE_LIVE_TEST=1`; no UDP sandbox
+(docker default) use `PEERDRIVE_SKIP_RTC=1` to skip WebRTC interconnect (local WS/admin types
+unaffected).
 
-覆盖：双节点互通+range 拉取、3 节点两两互联、4 节点星型一对多并发拉取、
-**4 并发 × 2MB 大文件拉取（流控死锁回归，修复前卡到超时）**、
-MQTT 分片互相发现（含 60s 心跳兜底时序，门控外网）、MQTT 发现→PeerJS 互联→
-拉文件全链路（门控外网）、本地 WS 会话拉取 + FetchFromPeer("local") 双向复用、
-自托管信令协议兼容（peerjs 客户端模块直连）、自托管发现 API 互联拉文件、
-Start/Close 竞态压力（30 轮，-race 回归）。
+Coverage: dual-node interconnect+range pull, 3-node pairwise interconnect, 4-node star one-to-many concurrent pull,
+**4 concurrent × 2MB large file pull (flow control deadlock regression, before fix stuck until timeout)**,
+MQTT sharded mutual discovery (including 60s heartbeat fallback timing, gated external network), MQTT discovery→PeerJS interconnect→
+full pull file chain (gated external network), local WS session pull + FetchFromPeer("local") bidirectional reuse,
+self-hosted signaling protocol compatibility (peerjs client module direct), self-hosted discovery API interconnect pull file,
+Start/Close race pressure (30 rounds, -race regression).
 
-## 6. 旧代码处置（详见 doc/archive/LEGACY.md）
+## 6. Old Code Disposal (see doc/archive/LEGACY.md for details)
 
-- libp2p 栈（p2p.go/transfer/resume/multipeer/dual/ws/signaling/relay...）：✅ **已删**（2026-08-16 批2，被 PeerJS 取代）
-- BT 栈（p2p_bt/）：✅ **已独立成库** `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt 即其源码，go.mod replace 引用）。
-  原 README 说"可独立使用"是**错的**（依赖 `internal/log`，`PutImmutable` 本地 store 优先掩盖网络失败，
-  `putLocal` 依赖 anacrolix 内部行为）——该断言已于 2026-08-18 修正
-- WebDAV/forward/auth 死代码：✅ **已删**（2026-08-16，WebDAV 无认证任意读写删；forward 重建为 PeerJS 版）
-- 前端 ~4000 行死组件：✅ **已删**（2026-08-16，见 doc/archive/LEGACY.md F 节；含 FileManager/WebRTCTransfer/
-  旧 P2P 状态面板/localDB 等 21 文件 + api.js 死导出清理；CollBrowserNav 勘误保留）
-  同步修复一批活跃主链路 bug（合并/移动语义/竞态守卫等，见 doc/archive/REVIEW-FIX-2026-08-16.md 第二轮）
+- libp2p stack (p2p.go/transfer/resume/multipeer/dual/ws/signaling/relay...): ✅ **Deleted** (2026-08-16 batch 2, replaced by PeerJS)
+- BT stack (p2p_bt/): ✅ **Independent into library** `github.com/Hana-ame/go-peerdrive-bt` (back/p2p_bt is its source, go.mod replace reference).
+  Original README said "can be used independently" was **wrong** (depends on `internal/log`, `PutImmutable` local store priority masks network failures,
+  `putLocal` depends on anacrolix internal behavior) — that assertion corrected on 2026-08-18
+- WebDAV/forward/auth dead code: ✅ **Deleted** (2026-08-16, WebDAV no auth arbitrary read/write/delete; forward rebuilt as PeerJS version)
+- Frontend ~4000 lines dead components: ✅ **Deleted** (2026-08-16, see doc/archive/LEGACY.md F section; includes FileManager/WebRTCTransfer/
+  old P2P status panels/localDB etc 21 files + api.js dead export cleanup; CollBrowserNav errata retained)
+  Simultaneously fixed a batch of active main-chain bugs (merge/move semantics/race guards etc, see doc/archive/REVIEW-FIX-2026-08-16.md second round)
 
-## 7. 目标包结构（依赖分层，渐进迁移）
+## 7. Target Package Structure (Dependency Layering, Incremental Migration)
 
 ```
 internal/
-├── domain/        层0 领域模型（零依赖）—— 未来把 model 拆 collection/file/peer
-├── config/ log/   层0 基础设施叶子
-├── repository/    层1 持久化（只依赖 domain）
-├── provider/      层1 文件获取抽象（把 service 里复制 6 遍的本地查找收敛进来）
-├── service/       层2 用例编排（只依赖 domain/repository/provider/transport）
-├── transport/     层2 互联传输（peerjs_service + discovery/ 迁入）
-└── api/           层3 HTTP（原 controller 只依赖 service）+ router 装配
+├── domain/        Layer 0 domain model (zero deps) — future split model into collection/file/peer
+├── config/ log/   Layer 0 infrastructure leaves
+├── repository/    Layer 1 persistence (only depends on domain)
+├── provider/      Layer 1 file fetch abstraction (consolidates local lookup copied 6 times in service)
+├── service/       Layer 2 use case orchestration (only depends on domain/repository/provider/transport)
+├── transport/     Layer 2 interconnect transport (peerjs_service + discovery/ migrated in)
+└── api/           Layer 3 HTTP (original controller only depends on service) + router assembly
 ```
-> ✅ 2026-08-16 批1/批2 后：`legacy/` 已全部删除（webdav/forward→v2/测试工具/批2 整栈）。
-> `internal/downloader/`（原 universal_downloader）为独立下载器（local/ipfsgw/btdht/http）。
+> ✅ After 2026-08-16 batch 1/batch 2: `legacy/` all deleted (webdav/forward→v2/test tools/batch 2 full stack).
+> `internal/downloader/` (original universal_downloader) is independent downloader (local/ipfsgw/btdht/http).
 ```
 
-迁移顺序：M0 依赖规则文档 → M1 legacy 隔离 → M2 收 controller 越层依赖 → M3 拆 transport → M4 provider 落地。
+Migration order: M0 dependency rules doc → M1 legacy isolation → M2 collect controller cross-layer deps → M3 split transport → M4 provider landed.
 
 
-### §8 依赖规则（M0，2026-08-16 立）
+### §8 Dependency Rules (M0, established 2026-08-16)
 
-硬性规则（代码评审 + 文档双通道执行）：
-1. **禁止 import `internal/p2p_bt`**（除 p2p_bt 库自身与 cmd/test 入口；`internal/legacy`
-   已于 2026-08-16 批2 删除，此规则自动升级为「legacy 已不存在」）。
-2. 包层级单向：`model ← repository ← provider ← service ← controller ← router ← cmd`，
-   `transport` 与 `provider` 同级（可被 service/controller 引用，不反向）。
-3. `service` 包内不直接 import `transport`；跨层一律经 controller 装配注入。
-4. 准出条件：所有新包测试通过；`go build -tags nosqlite ./...` 全绿。
-5. ✅ 已达成：legacy 存量引用于 2026-08-16 批2 清零（webdav/forward/libp2p 端点已删）。
+Hard rules (enforced via code review + doc dual channel):
+1. **No import `internal/p2p_bt`** (except p2p_bt library itself and cmd/test entry points; `internal/legacy`
+   deleted in 2026-08-16 batch 2, this rule auto-upgrades to "legacy no longer exists").
+2. Package hierarchy unidirectional: `model ← repository ← provider ← service ← controller ← router ← cmd`,
+   `transport` and `provider` same level (can be referenced by service/controller, not reversed).
+3. `service` package doesn't directly import `transport`; cross-layer uniformly through controller assembly injection.
+4. Exit conditions: all new package tests pass; `go build -tags nosqlite ./...` all green.
+5. ✅ Achieved: legacy stock references zeroed in 2026-08-16 batch 2 (webdav/forward/libp2p endpoints deleted).
 
-**迁移状态（2026-08-16）**：M2 ✅ 完成 · M3 ✅ 完成 · M4 ✅（provider 已落地）· M1 ✅ 完成（p2p_bt 拆独立库另计）。
+**Migration status (2026-08-16)**: M2 ✅ Complete · M3 ✅ Complete · M4 ✅ (provider landed) · M1 ✅ Complete (p2p_bt split into independent library counted separately).
 
-M1 legacy 隔离要点（本次完成，internal/legacy/ 落地）：
-- 22 个文件从 service 迁入 legacy 包：libp2p 栈（p2p.go/transfer/resume/multipeer/dual/ws/
-  helpers/connection/key + 测试）、信令（signaling.go）、中继（relay + relay_registry）、
-  注册（node_registrar）、扫描（peer_scanner/peer_tracker）、IPFS（ipfs_service/ipfs_compat）、
-  webdav、forward、universal_downloader（依赖 P2PService 的下载栈核心）。
-- legacy 依赖面收敛到 config/log/model/nodestate/p2p_bt/provider/repository/hashutil
-  （层0/1），service 包零 legacy 反向引用之外的循环依赖。
-- 过渡期残留：service/file_service + sync_service、controller/{p2p,signal,download}、
-  router、cmd/server 仍引用 legacy（旧栈端点保留至删除决策）；
-  test-p2p-colls / test/bt-integration 旧工具已改引用。
-- ✅ 后续：p2p_bt 拆独立库（5fb1193，README 断言成立）；webdav/forward 删除（6bfc000/e030216）；
-  libp2p+IPFS 整栈删除（a5b090d）；legacy 包清零（下载器迁 internal/downloader）。
+M1 legacy isolation key points (completed this round, internal/legacy/ landed):
+- 22 files migrated from service to legacy package: libp2p stack (p2p.go/transfer/resume/multipeer/dual/ws/
+  helpers/connection/key + tests), signaling (signaling.go), relay (relay + relay_registry),
+  registration (node_registrar), scanning (peer_scanner/peer_tracker), IPFS (ipfs_service/ipfs_compat),
+  webdav, forward, universal_downloader (P2PService-dependent download stack core).
+- legacy dependency surface converged to config/log/model/nodestate/p2p_bt/provider/repository/hashutil
+  (layer 0/1), service package zero legacy reverse references besides circular deps.
+- Transition residuals: service/file_service + sync_service, controller/{p2p,signal,download},
+  router, cmd/server still reference legacy (old stack endpoints kept until deletion decision);
+  test-p2p-colls / test/bt-integration old tools changed references.
+- ✅ Follow-up: p2p_bt split into independent library (5fb1193, README assertion holds); webdav/forward deleted (6bfc000/e030216);
+  libp2p+IPFS full stack deleted (a5b090d); legacy package zeroed (downloader migrated to internal/downloader).
 
-M3 收层要点（本次完成，transport 包落地）：
-- 新建 `internal/transport/`：PeerJS 文件服务子系统整体迁入——
-  `peerjs_service.go`（互联 + 帧协议服务端）、`file_index.go` + `file_index_verbs.go`
-  （sha256 文件索引 + req/meta/data/done/err 业务 verb）、`ws_session.go` + `rtc_session.go`
-  （Session 抽象：本地 WS / WebRTC DataChannel 双实现）、`mqtt_discovery.go` +
-  `http_discovery.go`（发现组件）。
-- transport 依赖面收敛到 `config/log/repository/pkg/hashutil`（层0/1），不再触碰
-  service 包；`pkg/hashutil` 新增 `IsStrictSHA256`（严格小写 64 hex，替代原
-  service 包 isValidHash 在传输层的使用）。
-- 外部装配（router/peerjs_routes、cmd/server main）改引用 `transport.*`；
-  测试随迁（file_index_test / peerjs_service_test），transport↔service 无循环依赖。
+M3 layer collection key points (completed this round, transport package landed):
+- Created `internal/transport/`: PeerJS file service subsystem migrated entirely —
+  `peerjs_service.go` (interconnect + frame protocol server-side), `file_index.go` + `file_index_verbs.go`
+  (sha256 file index + req/meta/data/done/err business verbs), `ws_session.go` + `rtc_session.go`
+  (Session abstraction: local WS / WebRTC DataChannel dual impl), `mqtt_discovery.go` +
+  `http_discovery.go` (discovery components).
+- transport dependency surface converged to `config/log/repository/pkg/hashutil` (layer 0/1), no longer touches
+  service package; `pkg/hashutil` added `IsStrictSHA256` (strict lowercase 64 hex, replaces original
+  service package isValidHash usage in transport layer).
+- External assembly (router/peerjs_routes, cmd/server main) changed to reference `transport.*`;
+  tests migrated with (file_index_test / peerjs_service_test), transport↔service no circular deps.
 
-M2 收层要点（本次完成）：
-- controller 不再 import repository：集合/分享/任务/pin 直调全部收编进 service——
-  `CollectionService`（collection_service.go，含 fork/merge/版本/匿名集合）、
-  `ShareService`、`TaskService`、`PinService`；download/file 控制器改走 FileService
-  （新增 GetMeta/GetMetaByCID/ListAll/ImportGatewayData/RegisterBTFile）。
-- 领域类型上移 model：`FileTypeBlob/FileTypeAnonCollection`、`IPFSPin`；
-  repository 保留别名兼容。
-- router 不再内联写库（BT onComplete 回调收敛进 FileService.RegisterBTFile）；
-  router 仅保留 SyncRepository 等 DI 装配。
-- collection.go 中直写 SQL 的 ListPublicCollections 收敛为 repository.ListPublicCollections。
+M2 layer collection key points (completed this round):
+- controller no longer imports repository: collection/share/task/pin direct calls all collected into service —
+  `CollectionService` (collection_service.go, including fork/merge/version/anonymous collections),
+  `ShareService`, `TaskService`, `PinService`; download/file controllers changed to use FileService
+  (added GetMeta/GetMetaByCID/ListAll/ImportGatewayData/RegisterBTFile).
+- Domain types moved up to model: `FileTypeBlob/FileTypeAnonCollection`, `IPFSPin`;
+  repository retains aliases for compatibility.
+- router no longer writes DB inline (BT onComplete callback collected into FileService.RegisterBTFile);
+  router only retains DI assembly like SyncRepository.
+- collection.go's direct SQL ListPublicCollections collected into repository.ListPublicCollections.
 
-## 8. 环境与验证
+## 8. Environment and Verification
 
 ```bash
 cd back
-go build -tags nosqlite ./...          # 必须带 nosqlite（双 SQLite 驱动 CGO 冲突）
+go build -tags nosqlite ./...          # must include nosqlite (dual SQLite driver CGO conflict)
 go test -tags nosqlite ./...
-# 集成测试（3.12 第 6 项起脱外网：全局自托管信令 + 同机 WebRTC；必须 -p 1 串行）：
+# Integration tests (external-network-free from 3.12 item 6: global self-hosted signaling + same-machine WebRTC; must -p 1 serial):
 go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1
-#   外网测试显式门控：
+#   External network tests explicitly gated:
 #   PEERDRIVE_MQTT_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestMQTT -v
-#   PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestLive -v（无代理跑）
-# 无 UDP 沙箱（docker 默认）跳过互联类：PEERDRIVE_SKIP_RTC=1
-# E2E 手动验证（需外网）：
-#   A/B 节点各设 PEERDRIVE_PEERJS_ID，B 设 PEERDRIVE_PEERJS_PEERS=pd-node-a
+#   PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration" ./test/integration/ -run TestLive -v (no proxy run)
+# No UDP sandbox (docker default) skip interconnect: PEERDRIVE_SKIP_RTC=1
+# E2E manual verification (needs external network):
+#   A/B nodes each set PEERDRIVE_PEERJS_ID, B sets PEERDRIVE_PEERJS_PEERS=pd-node-a
 #   curl -X POST localhost:PORT/peerjs/fetch -d '{"peer":"pd-node-a","hash":"<64hex>"}'
-# admin verb 冒烟（无需外网，本地起服即可）：
+# admin verb smoke (no external network needed, local server start only):
 #   PEERDRIVE_STORAGE=/tmp/pd-storage PORT=3000 go run ./cmd/server/ &
-#   node front/tests/e2e-admin-smoke.mjs   # 连接 /ws/peer 走 admin 全链路（ping/上传/下载/集合/404）
+#   node front/tests/e2e-admin-smoke.mjs   # connects /ws/peer for admin full chain (ping/upload/download/collections/404)
 ```
 
-**构建环境坑**：go 命令需 `HTTPS_PROXY=http://172.29.80.1:10809 GOPROXY=https://goproxy.cn,direct`
-（WSL 出网走宿主机代理，opencode 环境 unset 了代理）。cloudcone 443 例外（直连）。
+**Build environment pitfall**: go commands need `HTTPS_PROXY=http://172.29.80.1:10809 GOPROXY=https://goproxy.cn,direct`
+(WSL outbound goes through host machine proxy, opencode environment unsets proxy). cloudcone 443 exception (direct connection).

@@ -5,9 +5,9 @@ import (
 	"sync"
 )
 
-// fakeSignaller 内存版信令：无网络，可注入消息驱动 Peer.route。
-// 用途：协议路由/连接生命周期测试不依赖公共云信令。
-// 注意：Send 可能被 pion ICE gather 回调 goroutine 并发调用，sent 需加锁。
+// fakeSignaller in-memory signaling: no network, messages can be injected to drive Peer.route.
+// Purpose: protocol routing/connection lifecycle tests do not depend on public cloud signaling.
+// Note: Send may be called concurrently by pion ICE gather callback goroutines; sent needs a lock.
 type fakeSignaller struct {
 	mu      sync.Mutex
 	id      string
@@ -30,7 +30,7 @@ func (f *fakeSignaller) OnMessage(h MessageHandler) {
 	f.handler = h
 	f.mu.Unlock()
 }
-// Done 返回断线通知（测试可手动触发模拟信令掉线）。
+// Done returns the disconnect notification (tests can manually trigger to simulate signaling disconnection).
 func (f *fakeSignaller) Done() <-chan struct{} {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -41,7 +41,7 @@ func (f *fakeSignaller) Done() <-chan struct{} {
 }
 func (f *fakeSignaller) Close() error { return nil }
 
-// disconnect 模拟信令网络断开（H7 重连回归测试用）。
+// disconnect simulates signaling network disconnection (used by H7 reconnect regression tests).
 func (f *fakeSignaller) disconnect() {
 	f.mu.Lock()
 	if f.done == nil {
@@ -51,7 +51,7 @@ func (f *fakeSignaller) disconnect() {
 	f.mu.Unlock()
 }
 
-// inject 模拟信令服务器转发消息给本 peer。
+// inject simulates the signaling server forwarding a message to this peer.
 func (f *fakeSignaller) inject(m Message) {
 	f.mu.Lock()
 	h := f.handler
@@ -61,7 +61,7 @@ func (f *fakeSignaller) inject(m Message) {
 	}
 }
 
-// sentCount 返回发送消息中指定类型的数量（测试断言用）。
+// sentCount returns the count of sent messages of a specific type (for test assertions).
 func (f *fakeSignaller) sentCount(t MessageType) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -74,8 +74,8 @@ func (f *fakeSignaller) sentCount(t MessageType) int {
 	return n
 }
 
-// sentSnapshot 返回已发送消息的锁内快照（遍历需用本方法——pion ICE
-// gather 回调 goroutine 可能在测试结束后仍在写 sent）。
+// sentSnapshot returns a locked snapshot of sent messages (iteration must use this method --
+// pion ICE gather callback goroutines may still be writing to sent after the test ends).
 func (f *fakeSignaller) sentSnapshot() []Message {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -84,8 +84,8 @@ func (f *fakeSignaller) sentSnapshot() []Message {
 	return out
 }
 
-// fakeDC 内存版 DataChannel：记录发送序列，可手动触发 open/message/close。
-// 用途：帧类型/原子性/生命周期/流控测试。
+// fakeDC in-memory DataChannel: records send sequences, can manually trigger open/message/close.
+// Purpose: frame type/atomicity/lifecycle/flow control tests.
 type fakeDC struct {
 	mu       sync.Mutex
 	events   []string // "text:xxx" / "bin:xxx"
@@ -121,7 +121,7 @@ func (f *fakeDC) BufferedAmount() uint64 {
 	return f.buffered
 }
 
-// setBuffered 模拟对端消费/积压（测试辅助，带锁）。
+// setBuffered simulates peer consumption/backlog (test helper, with lock).
 func (f *fakeDC) setBuffered(n uint64) {
 	f.mu.Lock()
 	f.buffered = n
@@ -135,22 +135,22 @@ func (f *fakeDC) Close() {
 	f.mu.Unlock()
 }
 
-// emitLow 手动触发低水位事件（模拟对端消费）。
+// emitLow manually triggers a low-water event (simulating peer consumption).
 func (f *fakeDC) emitLow() {
 	if f.onLow != nil {
 		f.onLow()
 	}
 }
 
-// newTestPeer 构造使用 fakeSignaller 的 Peer。
+// newTestPeer constructs a Peer using fakeSignaller.
 func newTestPeer() (*Peer, *fakeSignaller) {
 	f := &fakeSignaller{id: "test-node"}
 	p := NewPeerWithSignaller(f)
 	return p, f
 }
 
-// newTestConn 构造绑定 fakeDC 的 Connection（不经 newConnection，避免真实 pion）。
-// 注意：必须与 newConnection 一样初始化 lowWater（nil channel 会让流控永久阻塞）。
+// newTestConn constructs a Connection bound to a fakeDC (not through newConnection, avoiding real pion).
+// Note: must initialize lowWater just like newConnection (a nil channel causes flow control to block permanently).
 func newTestConn(p *Peer, id string) (*Connection, *fakeDC) {
 	f := newFakeDC()
 	c := &Connection{
@@ -165,7 +165,7 @@ func newTestConn(p *Peer, id string) (*Connection, *fakeDC) {
 	return c, f
 }
 
-// openFake 模拟 DataChannel open。
+// openFake simulates DataChannel open.
 func openFake(f *fakeDC) {
 	f.opened = true
 	if f.onOpen != nil {

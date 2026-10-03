@@ -1,51 +1,51 @@
-# ① 信令/传输原语层 — back/peerjs/（模块总览）
+# ① Signaling/Transport Primitives Layer — back/peerjs/ (Module Overview)
 
-> 一句话：PeerJS 信令 + WebRTC DataChannel 传输原语，**零业务知识**——业务帧协议（verb）由上层（AOP ② transport 包）定义。
+> One-line: PeerJS signaling + WebRTC DataChannel transport primitives, **zero business knowledge** — business frame protocol (verbs) defined by upper layer (AOP ② transport package).
 
-## 模块清单
+## Module List
 
-| 模块 | 文件 | 文档 |
+| Module | Files | Documentation |
 |---|---|---|
 | Connection | `connection.go` | [connection.md](connection.md) |
-| Peer + 信令客户端 | `peer.go` + `signaller.go` | [peer.md](peer.md) |
-| 传输抽象 + 消息类型 | `transport.go` + `message.go` | [transport.md](transport.md) |
+| Peer + Signaling Client | `peer.go` + `signaller.go` | [peer.md](peer.md) |
+| Transport Abstraction + Message Types | `transport.go` + `message.go` | [transport.md](transport.md) |
 
-## 三模块协作
+## Three-Module Collaboration
 
 ```
-上层（internal/service/peerjs_service.go，AOP ②）
+Upper (internal/service/peerjs_service.go, AOP ②)
   │  NewPeer / Connect / OnConnection / SendFrame / OnMessage
   ▼
-Peer（信令：注册/路由/心跳/重连）          Connection（单连接：帧原子发送/流控/生命周期）
-  │  OFFER/ANSWER/CANDIDATE 路由             │  SendFrame(头, 体) / SendText / Send
-  ▼                                          ▼
-peerJSSignaller（WS 信令，H7 断线通知）    DataChannel 接口（pionChannel 适配）
+Peer (signaling: registration/routing/heartbeat/reconnection)    Connection (single connection: atomic frame send/flow control/lifecycle)
+  │  OFFER/ANSWER/CANDIDATE routing                                 │  SendFrame(header, body) / SendText / Send
+  ▼                                                                ▼
+peerJSSignaller (WS signaling, H7 disconnection notification)   DataChannel interface (pionChannel adapter)
 ```
 
-## 关键事实
+## Key Facts
 
-- 独立 go.mod（`github.com/Hana-ame/go-peerjs`），主 go.mod `replace` 引用——独立可演进
-- 三个扩展点：`Signaller` 接口（换信令）、`DataChannel` 接口（换传输）、开放 string `MessageType`（加消息）
-- 文本帧（PPID 51）vs 二进制帧（PPID 53）的区分是上层帧协议的基础（控制头 vs 数据块）
-- 流控三件套（BufferedAmount/LowThreshold/OnBufferedAmountLow）在此层暴露，上层 serveFile 水位流控依赖（sessions.md）
-- 无业务知识：不知道 req/upload/admin 等任何 verb
+- Independent go.mod (`github.com/Hana-ame/go-peerjs`), main go.mod `replace` references — independently evolvable
+- Three extension points: `Signaller` interface (swap signaling), `DataChannel` interface (swap transport), open string `MessageType` (add messages)
+- Text frame (PPID 51) vs binary frame (PPID 53) distinction is the foundation of the upper frame protocol (control headers vs data blocks)
+- Flow control trio (BufferedAmount/LowThreshold/OnBufferedAmountLow) exposed at this layer, upper serveFile water-level flow control depends on it (sessions.md)
+- No business knowledge: doesn't know about req/upload/admin or any other verbs
 
-## 测试（21 单测，独立 go.mod）
+## Tests (21 unit tests, independent go.mod)
 
-- `peer_test.go`（内存信令桩，不依赖公网）+ `flowcontrol_test.go`（流控路径）
-- 层内：`cd back/peerjs && go test ./... -count=1 -race`（`scripts/test-layers.sh` L1 段）
-- 集成测试：`cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1 -v`（真实公共信令 0.peerjs.com，需代理，必须 `-p 1` 串行）
+- `peer_test.go` (in-memory signaling stub, no public network dependency) + `flowcontrol_test.go` (flow control paths)
+- In-layer: `cd back/peerjs && go test ./... -count=1 -race` (`scripts/test-layers.sh` L1 section)
+- Integration tests: `cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1 -v` (real public signaling 0.peerjs.com, requires proxy, must use `-p 1` serial)
 
-## 文件清单
+## File List
 
-| 文件 | 行数 | 说明 |
+| File | Lines | Description |
 |---|---|---|
-| `peer.go` | 560 | Peer + peerJSSignaller（信令客户端/心跳/H7） |
-| `connection.go` | 335 | Connection（帧原语/流控/生命周期） |
-| `transport.go` | 57 | Frame + DataChannel 接口 + pionChannel |
+| `peer.go` | 560 | Peer + peerJSSignaller (signaling client/heartbeat/H7) |
+| `connection.go` | 335 | Connection (frame primitives/flow control/lifecycle) |
+| `transport.go` | 57 | Frame + DataChannel interface + pionChannel |
 | `message.go` | 93 | Message/payload/Options |
-| `signaller.go` | 39 | Signaller 接口 |
-| `peer_test.go` | 450 | 单测 |
-| `testutil_test.go` | 174 | 内存信令桩 |
-| `flowcontrol_test.go` | 77 | 流控单测 |
-| `README.md` | — | 库自身 README |
+| `signaller.go` | 39 | Signaller interface |
+| `peer_test.go` | 450 | Unit tests |
+| `testutil_test.go` | 174 | In-memory signaling stub |
+| `flowcontrol_test.go` | 77 | Flow control unit tests |
+| `README.md` | — | Library's own README |

@@ -1,6 +1,6 @@
 package controller
 
-// 注：本文件属于 legacy 代码（见 doc/archive/LEGACY.md，待删/待迁移）的测试，未逐一标注发现背景；「发现背景」规范对新代码生效。
+// Note: this file is the test for legacy code (see doc/archive/LEGACY.md, to be deleted/migrated); the "discovery background" was not annotated case by case. The "discovery background" convention applies to new code.
 
 import (
 	"encoding/json"
@@ -134,9 +134,12 @@ func TestBrowseDir_SpecificPath(t *testing.T) {
 	}
 }
 
-// TestBrowseDir_SlashMeansStorageRoot 前端文件管理器用 "/" 表示 storage 根目录。
-// 发现背景：安全边界收紧后 BrowseDir 拒绝任何根目录外路径，但前端默认传 "/"，
-// 导致文件管理器/创建页的本地浏览一直 400。修复：空路径与 "/" 都映射为 storage 根。
+// TestBrowseDir_SlashMeansStorageRoot The frontend file manager uses "/" to
+// denote the storage root.
+// Discovery background: after the security boundary was tightened, BrowseDir
+// rejects any path outside the root, but the frontend defaults to sending "/",
+// which left the file manager's / creation page's local browsing perpetually
+// returning 400. Fix: both an empty path and "/" map to the storage root.
 func TestBrowseDir_SlashMeansStorageRoot(t *testing.T) {
 	r, dir := setupFileTestRouter(t)
 	if err := os.WriteFile(filepath.Join(dir, "root.txt"), []byte("root"), 0o644); err != nil {
@@ -156,7 +159,7 @@ func TestBrowseDir_SlashMeansStorageRoot(t *testing.T) {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if len(entries) == 0 {
-		t.Error("storage 根目录应能列出文件")
+		t.Error("storage root directory should be able to list files")
 	}
 }
 

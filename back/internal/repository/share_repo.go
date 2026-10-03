@@ -1,4 +1,4 @@
-// 分享链接仓库 — share_links 表的 CRUD 操作，创建带随机 token 的链接、按 token 查询（检查过期）、列出所有有效链接。
+// Share link repository — CRUD for share_links table: create links with random tokens, query by token (with expiry check), list all valid links.
 package repository
 
 import (
@@ -10,7 +10,7 @@ import (
 	"peerdrive/internal/model"
 )
 
-// CreateShare 创建一条新的分享链接记录，生成随机 token 并设置 30 天过期时间。
+// CreateShare creates a new share link record with a random token and 30-day expiry.
 func CreateShare(hash, shareType, filename string) (*model.ShareLink, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -37,9 +37,10 @@ func CreateShare(hash, shareType, filename string) (*model.ShareLink, error) {
 	}, nil
 }
 
-// GetShareByToken 按 token 查询未过期的分享链接。
-// L7：原实现 Scan 进 *any——driver 返回类型不确定（time.Time 或 string），
-// 类型断言失败时 ExpiresAt 静默为空。用 sql.NullTime 显式处理 NULL/时间。
+// GetShareByToken queries a share link by token that hasn't expired.
+// L7: original implementation scanned into *any — driver return type is uncertain
+// (time.Time or string), and type assertion failure silently left ExpiresAt empty.
+// Use sql.NullTime to explicitly handle NULL/time.
 func GetShareByToken(token string) (*model.ShareLink, error) {
 	var s model.ShareLink
 	var exp sql.NullTime
@@ -56,7 +57,7 @@ func GetShareByToken(token string) (*model.ShareLink, error) {
 	return &s, nil
 }
 
-// ListShares 返回所有未过期的分享链接，按创建时间倒序排列，最多 100 条。
+// ListShares returns all unexpired share links, ordered by creation time descending, max 100.
 func ListShares() ([]model.ShareLink, error) {
 	rows, err := DB.Query(`SELECT id, token, hash, type, COALESCE(filename,''), created_at, expires_at
 		FROM share_links WHERE expires_at IS NULL OR expires_at > datetime('now')
@@ -82,7 +83,7 @@ func ListShares() ([]model.ShareLink, error) {
 	return shares, nil
 }
 
-// InitShareTable 创建 share_links 表（如不存在）。
+// InitShareTable creates the share_links table (if it doesn't exist).
 func InitShareTable() {
 	DB.Exec(`CREATE TABLE IF NOT EXISTS share_links (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,

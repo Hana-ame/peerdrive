@@ -1,56 +1,57 @@
-// protocol.js — 帧协议定义（web ↔ node 两端共用）。
+// protocol.js — frame protocol definition (shared between web and node sides).
 //
-// 传输载体：peerjs DataConnection，serialization 必须为 'raw'——
-// raw 模式下 string 原样走文本帧（PPID 51），ArrayBuffer 原样走二进制帧
-// （PPID 53），对端 on('data') 收到的类型可直接区分。这复刻了 peerdrive
-// Go 端「文本帧（JSON 头） vs 二进制帧（数据块）」的语义：
-//   - 文本帧 = 控制头（JSON）
-//   - 二进制帧 = 紧跟最近一个声明的数据块
+// Transport carrier: peerjs DataConnection, serialization must be 'raw' —
+// in raw mode string goes as text frame (PPID 51), ArrayBuffer goes as binary frame
+// (PPID 53), so the receiving side's on('data') can directly distinguish types. This replicates the
+// peerdrive Go side's "text frame (JSON header) vs binary frame (data block)" semantics:
+//   - Text frame = control header (JSON)
+//   - Binary frame = data block following the most recent declaration
 //
-// 多 DataChannel 架构（2026-09-06）：
-//   - 控制通道（control）：keepalive ping/ping-ack
-//   - 文件通道（file-{reqId}）：每个文件请求一条独立通道，支持并发传输
-//   - 文件通道协议：url → meta → 块×N → done/err
+// Multi-DataChannel architecture (2026-09-06):
+//   - Control channel (control): keepalive ping/ping-ack
+//   - File channel (file-{reqId}): one independent channel per file request, supports concurrent transfer
+//   - File channel protocol: url → meta → blocks×N → done/err
 //
-// 控制帧序列（控制通道）：
+// Control frame sequence (control channel):
 //   web → node:  {"type":"ping"}
 //   node → web:  {"type":"ping-ack"}
 //
-// 文件帧序列（文件通道）：
+// File frame sequence (file channel):
 //   web → node:  {"type":"url","url":"...","reqId":"..."}
 //   node → web:  {"type":"meta","status":200,"mime":"image/png","size":N,"reqId":"..."}
-//                二进制帧×N（每块 chunkSize，不声明单独头——块属于本通道）
+//                Binary frames×N (each block chunkSize, no separate header declaration — blocks belong to this channel)
 //                {"type":"done","reqId":"..."}
-//   或失败:      {"type":"err","msg":"...","reqId":"..."}
+//   or failure:  {"type":"err","msg":"...","reqId":"..."}
 
 export const PROTOCOL_VERSION = 1
 
-// CHUNK_SIZE 数据块大小：64KB。
-// 坑：raw 模式没有 peerjs binary 模式的 chunker（chunkedMTU 自动分片），
-// 整块直接进 SCTP——块必须小于对端 maxMessageSize（Chrome/pion 均 256KB+），
-// 64KB 在两端都安全。过小则帧开销大（每块一次 dc.send）。
+// CHUNK_SIZE data block size: 64KB.
+// Caveat: raw mode doesn't have peerjs binary mode's chunker (chunkedMTU auto-fragmentation),
+// the entire block goes into SCTP directly — blocks must be smaller than the peer's maxMessageSize
+// (Chrome/pion both 256KB+), 64KB is safe on both ends. Too small increases frame overhead
+// (one dc.send per block).
 export const CHUNK_SIZE = 64 * 1024
 
-// makeUrlRequest 构造资源请求帧（web → node）。
+// makeUrlRequest constructs resource request frame (web → node).
 export function makeUrlRequest(url, reqId) {
   return JSON.stringify({ type: 'url', url, reqId, v: PROTOCOL_VERSION })
 }
 
-// parseFrame 解析文本帧 JSON；非 JSON 返回 null。
+// parseFrame parses text frame JSON; returns null for non-JSON.
 export function parseFrame(text) {
   try {
     const o = JSON.parse(text)
     if (typeof o === 'object' && o !== null && typeof o.type === 'string') return o
   } catch {
-    /* 非 JSON 文本：非本协议帧，返回 null */
+    /* Non-JSON text: not this protocol's frame, return null */
   }
   return null
 }
 
-// isBinaryFrame 判断对端发来的数据是否二进制块。
-// raw 模式下：string → 文本帧；ArrayBuffer/TypedArray/DataView → 二进制块。
-// 注意：浏览器端 peerjs raw 模式收到的 Blob 会以 ArrayBuffer 呈现
-// （DataConnection.binaryType 默认 arraybuffer），Node 端 @roamhq/wrtc 同理。
+// isBinaryFrame determines if data received from peer is a binary block.
+// In raw mode: string → text frame; ArrayBuffer/TypedArray/DataView → binary block.
+// Note: browser-side peerjs raw mode receives Blob as ArrayBuffer
+// (DataConnection.binaryType defaults to arraybuffer), same for Node-side @roamhq/wrtc.
 export function isBinaryFrame(data) {
   if (typeof data === 'string') return false
   if (data instanceof ArrayBuffer) return true
@@ -59,7 +60,7 @@ export function isBinaryFrame(data) {
   return false
 }
 
-// toUint8Array 把二进制帧统一为 Uint8Array（后续拼接 Blob）。
+// toUint8Array normalizes binary frames to Uint8Array (for subsequent Blob concatenation).
 export function toUint8Array(data) {
   if (data instanceof Uint8Array) return data
   if (data instanceof ArrayBuffer) return new Uint8Array(data)
@@ -67,7 +68,7 @@ export function toUint8Array(data) {
   throw new Error('peerdrive-media: unsupported binary frame type')
 }
 
-// MIME 兜底表：Node 端响应缺 Content-Type 时按扩展名猜（video 必需才能渲染）。
+// MIME fallback table: when Node-side response lacks Content-Type, guess by extension (required for video to render).
 const EXT_MIME = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
   webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp',
@@ -78,8 +79,8 @@ const EXT_MIME = {
 
 export function guessMime(url, contentType) {
   if (contentType) {
-    // 小写化：HTTP 头大小写不敏感（真实坑：上游回 "IMAGE/PNG" 时按原样
-    // 返回，浏览器 <img> 仍能渲染但 isImageMime 判断会失败）
+    // Lowercase: HTTP headers are case-insensitive (real issue: upstream returns "IMAGE/PNG" as-is,
+    // browser <img> can still render but isImageMime check would fail)
     const ct = contentType.split(';')[0].trim().toLowerCase()
     if (/^[a-z]+\/[a-z0-9.+-]+$/.test(ct)) return ct
   }
@@ -87,7 +88,7 @@ export function guessMime(url, contentType) {
   return EXT_MIME[ext] || 'application/octet-stream'
 }
 
-// nextReqId 生成请求 ID（时间戳+随机，避免多组件并发请求撞 ID）。
+// nextReqId generates request ID (timestamp+random, avoids ID collision in concurrent multi-component requests).
 export function nextReqId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }

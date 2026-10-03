@@ -1,6 +1,6 @@
-// 本文件为 go-peerdrive-bt 独立库自带日志实现(package p2p_bt 内联函数)。
-// 背景: 拆独立库后 p2p_bt 不能再 import 主模块 internal/log(Go internal 规则);
-// 原来是委托 p2p_bt.LogDebug -> log.LogDebug, 现改为自实现, 签名/行为对齐
+// This file provides a self-contained logging implementation for the go-peerdrive-bt standalone library (inline functions within package p2p_bt).
+// Background: after splitting into a standalone library, p2p_bt can no longer import the main module's internal/log (Go internal rule);
+// previously it delegated p2p_bt.LogDebug -> log.LogDebug; now it is self-implemented with matching signatures/behavior
 package p2p_bt
 
 import (

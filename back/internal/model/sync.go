@@ -1,5 +1,5 @@
-// LocalCollectionSync 和 LocalSyncFile 定义本地同步状态的数据结构，
-// 用于跟踪集合文件到本地磁盘的同步进度。
+// LocalCollectionSync and LocalSyncFile define data structures for local sync state,
+// used to track the sync progress of collection files to the local disk.
 package model
 
 import "time"

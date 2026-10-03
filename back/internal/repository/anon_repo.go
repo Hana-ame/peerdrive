@@ -16,12 +16,12 @@ import (
 
 var anonStorageDir string
 
-// SetAnonStorageDir 设置匿名集合的默认存储目录路径。
+// SetAnonStorageDir sets the default storage directory path for anonymous collections.
 func SetAnonStorageDir(dir string) {
 	anonStorageDir = dir
 }
 
-// SaveCollection 将匿名集合序列化为 JSON，写入 content-addressed 存储，返回 SHA256 hash。
+// SaveCollection serializes an anonymous collection to JSON, writes it to content-addressed storage, and returns the SHA256 hash.
 func SaveCollection(coll *model.AnonCollection, storageDir string) (string, error) {
 	if storageDir == "" {
 		storageDir = anonStorageDir
@@ -60,13 +60,14 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 	return hashStr, nil
 }
 
-// GetAnonCollectionByHash 从 content-addressed 存储中读取并反序列化匿名集合。
+// GetAnonCollectionByHash reads and deserializes an anonymous collection from content-addressed storage.
 func GetAnonCollectionByHash(hash, storageDir string) (*model.AnonCollection, error) {
 	if storageDir == "" {
 		storageDir = anonStorageDir
 	}
-	// 防御：hash 可能来自 URL/请求体/远端 sync，未校验时 hash[:2] 越界 panic、
-	// ".." 类值逃逸 storage 目录。与 anon_service.GetCollectionByHash 同一根因。
+	// Defense: hash may come from URL/request body/remote sync; without validation
+	// hash[:2] panics on out-of-bounds, and ".."-like values escape the storage dir.
+	// Same root cause as anon_service.GetCollectionByHash.
 	if !hashutil.IsValidSHA256(hash) {
 		return nil, fmt.Errorf("collection not found locally: invalid hash")
 	}
@@ -85,9 +86,9 @@ func GetAnonCollectionByHash(hash, storageDir string) (*model.AnonCollection, er
 	return &coll, nil
 }
 
-// ListAnonCollections 返回所有已注册的匿名集合摘要（含名称预览和标签），按创建时间倒序。
-// M11：无 LIMIT → 千级集合时全表物化 + 每行 os.ReadFile（文件 IO × N）。
-// 前端只展示最近集合，1000 条上限足够。
+// ListAnonCollections returns summaries of all registered anonymous collections (including name preview and tags), ordered by creation time descending.
+// M11: No LIMIT → full-table materialization with os.ReadFile per row (file I/O × N) at thousands of collections.
+// Frontend only shows recent collections; a 1000-row cap is sufficient.
 func ListAnonCollections(storageDir string) ([]model.AnonCollectionSummary, error) {
 	if storageDir == "" {
 		storageDir = anonStorageDir
@@ -129,9 +130,10 @@ func ListAnonCollections(storageDir string) ([]model.AnonCollectionSummary, erro
 					preview = append(preview, e.Path)
 				}
 				summary.NamePreview = strings.Join(preview, ", ")
-				// 权限档位回填：列表页直接显示 公开/指定/仅自己，不用逐个拉详情。
-				// 坑：历史集合没有该字段 → EffectiveVisibility() 兜底成 public，
-				// 不要把空串直接透给前端，否则三选项 UI 没有可选项高亮。
+				// Visibility backfill: list page shows Public/Specific/Self-only directly,
+				// no need to fetch details one by one.
+				// Gotcha: historical collections lack this field → EffectiveVisibility() falls back to "public".
+				// Do not pass an empty string to the frontend, or the three-option UI has no default highlight.
 				summary.Visibility = coll.EffectiveVisibility()
 				summary.Owner = coll.Owner
 			}

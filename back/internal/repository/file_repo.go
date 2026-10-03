@@ -1,6 +1,6 @@
-// 文件仓库 — file_meta 和 file_providers 两表的 CRUD。
-// file_meta：每个唯一文件内容一行（hash = PK）。
-// file_providers：同一文件可有多份副本（不同 provider/path），用 available 标记。
+// File repository — CRUD for file_meta and file_providers tables.
+// file_meta: one row per unique file content (hash = PK).
+// file_providers: a file can have multiple replicas (different provider/path), marked by available.
 
 package repository
 
@@ -12,7 +12,7 @@ import (
 
 // ─── file_meta ──────────────────────────────────────────
 
-// GetFileMeta 按 hash 查询文件元数据；未找到时返回 (nil, nil)。
+// GetFileMeta queries file metadata by hash; returns (nil, nil) if not found.
 func GetFileMeta(hash string) (*model.FileMeta, error) {
 	var m model.FileMeta
 	err := DB.QueryRow(
@@ -28,7 +28,7 @@ func GetFileMeta(hash string) (*model.FileMeta, error) {
 	return &m, nil
 }
 
-// GetFileMetaByCID 按 CID 查询文件元数据；未找到时返回 (nil, nil)。
+// GetFileMetaByCID queries file metadata by CID; returns (nil, nil) if not found.
 func GetFileMetaByCID(cid string) (*model.FileMeta, error) {
 	var m model.FileMeta
 	err := DB.QueryRow(
@@ -44,7 +44,7 @@ func GetFileMetaByCID(cid string) (*model.FileMeta, error) {
 	return &m, nil
 }
 
-// InsertFileMeta 插入一条新的文件元数据记录，自动计算并存储 CID。
+// InsertFileMeta inserts a new file metadata record, automatically computing and storing the CID.
 func InsertFileMeta(meta *model.FileMeta) error {
 	cid := hashutil.SHA256ToCID(meta.Hash)
 	_, err := DB.Exec(
@@ -56,7 +56,7 @@ func InsertFileMeta(meta *model.FileMeta) error {
 
 // ─── file_providers ─────────────────────────────────────
 
-// GetFileProviders 查询指定 hash 的所有可用 provider，优先返回 local 类型。
+// GetFileProviders queries all available providers for a given hash, prioritizing local type.
 func GetFileProviders(hash string) ([]model.FileProvider, error) {
 	rows, err := DB.Query(
 		`SELECT id, hash, provider_type, path, available FROM file_providers WHERE hash = ? AND available = 1 ORDER BY CASE provider_type WHEN 'local' THEN 0 ELSE 1 END ASC, id ASC`,
@@ -77,7 +77,7 @@ func GetFileProviders(hash string) ([]model.FileProvider, error) {
 	return out, nil
 }
 
-// InsertFileProvider 为指定 hash 添加一个新 provider（如 local/http）。
+// InsertFileProvider adds a new provider (e.g. local/http) for a given hash.
 func InsertFileProvider(hash, providerType, path string) error {
 	_, err := DB.Exec(
 		`INSERT INTO file_providers (hash, provider_type, path) VALUES (?, ?, ?)`,
@@ -86,13 +86,13 @@ func InsertFileProvider(hash, providerType, path string) error {
 	return err
 }
 
-// MarkProviderUnavailable 将指定 provider 标记为不可用。
+// MarkProviderUnavailable marks the specified provider as unavailable.
 func MarkProviderUnavailable(id int) error {
 	_, err := DB.Exec(`UPDATE file_providers SET available = 0 WHERE id = ?`, id)
 	return err
 }
 
-// ListAllFiles 返回所有 blob 类型文件列表，支持按 time/path/name/type/size 排序。
+// ListAllFiles returns all blob-type file list, supports sorting by time/path/name/type/size.
 func ListAllFiles(sortBy string) ([]model.FileListItem, error) {
 	orderCol := "m.created_at"
 	switch sortBy {
@@ -116,7 +116,7 @@ func ListAllFiles(sortBy string) ([]model.FileListItem, error) {
 		WHERE m.type = 'blob'
 		GROUP BY m.hash
 		ORDER BY ` + orderCol + ` DESC
-		LIMIT 1000` // M11：无 LIMIT 全表物化 → 文件多时内存 DoS（前端分页未实现）
+		LIMIT 1000` // M11: No LIMIT → full-table materialization → memory DoS with many files (frontend pagination not implemented)
 
 	rows, err := DB.Query(query)
 	if err != nil {

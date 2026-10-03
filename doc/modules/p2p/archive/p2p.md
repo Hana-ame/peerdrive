@@ -1,181 +1,181 @@
-# P2P 网络架构
+# P2P Network Architecture
 
-> **⚠️ 过时文档（历史存档）**：本文档描述的 libp2p 栈已于 2026-08-16 全部删除
-> （REFACTOR.md §8）。当前互联层 = PeerJS 信令 + WebRTC DataChannel
-> （`back/internal/transport/peerjs_service.go` + `back/peerjs/`），以下内容仅作历史参考。
+> **⚠️ Outdated Documentation (Historical Archive)**: The libp2p stack described in this document was entirely removed on 2026-08-16
+> (REFACTOR.md §8). The current interconnect layer = PeerJS signaling + WebRTC DataChannel
+> (`back/internal/transport/peerjs_service.go` + `back/peerjs/`); the following content is for historical reference only.
 
-> **最后修改**: 2026-04-27 · **版本**: v2.0
-> **上一版本**: v1.0 (2026-04-26) — 基础 libp2p 节点、mDNS 发现、Exchange 协议
-> **本版新增**: 连接管理器（心跳/重连）、分片传输（256KB chunk/8并发）、STUN 配置、SIZE 协议
+> **Last Modified**: 2026-04-27 · **Version**: v2.0
+> **Previous Version**: v1.0 (2026-04-26) — Basic libp2p node, mDNS discovery, Exchange protocol
+> **New in this version**: Connection manager (heartbeat/reconnect), chunked transfer (256KB chunk/8 concurrent), STUN configuration, SIZE protocol
 
-## 概述
+## Overview
 
-Peerdrive 基于 libp2p 构建 P2P 对等网络，支持节点发现、文件传输、DHT 路由和中继转发。
+Peerdrive builds a P2P peer-to-peer network based on libp2p, supporting node discovery, file transfer, DHT routing, and relay forwarding.
 
-## 协议栈
+## Protocol Stack
 
-| 层 | 协议/组件 | 说明 |
+| Layer | Protocol/Component | Description |
 |---|---|---|
-| 传输层 | TCP, QUIC, WebSocket | 底层通信协议 |
-| 安全层 | Noise (自动协商) | libp2p 内置加密 |
-| 流复用 | Yamux | 单连接多流复用 |
-| NAT 穿越 | AutoNAT v2, DCUtR, NAT-PMP | 自动检测网络类型并打洞 |
-| 中继 | Circuit Relay v2 | 公网中继转发流量 |
-| 发现 | mDNS (局域网), Kademlia DHT | 节点发现和路由 |
-| 应用层 | /peerdrive/exchange/1.0.0, /peerdrive/chunk/1.0.0 | 文件传输协议 |
+| Transport | TCP, QUIC, WebSocket | Low-level communication protocols |
+| Security | Noise (auto-negotiated) | libp2p built-in encryption |
+| Stream Multiplexing | Yamux | Multi-stream multiplexing over a single connection |
+| NAT Traversal | AutoNAT v2, DCUtR, NAT-PMP | Auto-detect network type and perform hole punching |
+| Relay | Circuit Relay v2 | Public relay for forwarding traffic |
+| Discovery | mDNS (LAN), Kademlia DHT | Node discovery and routing |
+| Application | /peerdrive/exchange/1.0.0, /peerdrive/chunk/1.0.0 | File transfer protocols |
 
-## 应用层协议
+## Application Layer Protocols
 
-### Exchange 协议 (`/peerdrive/exchange/1.0.0`)
+### Exchange Protocol (`/peerdrive/exchange/1.0.0`)
 
-用于整文件传输和文件大小查询。
+Used for whole-file transfer and file size queries.
 
-**整文件请求：**
+**Whole File Request:**
 ```
-请求: <64-char hex SHA256>\n
-响应: OK <byte_count>\n<raw binary data>
-错误: ERR <message>\n
-```
-
-**文件大小查询：**
-```
-请求: SIZE <64-char hex SHA256>\n
-响应: OK <byte_count>\n
-错误: ERR <message>\n
+Request: <64-char hex SHA256>\n
+Response: OK <byte_count>\n<raw binary data>
+Error: ERR <message>\n
 ```
 
-### Chunk 协议 (`/peerdrive/chunk/1.0.0`)
-
-用于分片传输大文件。
-
+**File Size Query:**
 ```
-请求: CHUNK <64-char hex SHA256> <offset> <size>\n
-响应: <raw binary chunk data>
-错误: ERR <message>\n
+Request: SIZE <64-char hex SHA256>\n
+Response: OK <byte_count>\n
+Error: ERR <message>\n
 ```
 
-限制: 每个 chunk 最大 256KB。
+### Chunk Protocol (`/peerdrive/chunk/1.0.0`)
 
-### Announce 协议 (`/peerdrive/announce/1.0.0`)
-
-节点向其他节点宣告自己拥有某个文件。
+Used for chunked transfer of large files.
 
 ```
-请求: <64-char hex SHA256>\n
-响应: OK\n
+Request: CHUNK <64-char hex SHA256> <offset> <size>\n
+Response: <raw binary chunk data>
+Error: ERR <message>\n
 ```
 
-收到 Announce 后，节点自动向 DHT 注册为提供者。
+Limit: Maximum 256KB per chunk.
 
-## 连接管理
+### Announce Protocol (`/peerdrive/announce/1.0.0`)
 
-### 自动连接
+A node announces to other nodes that it owns a particular file.
 
-- **mDNS 发现**：局域网内自动发现节点并连接
-- **Bootstrap 节点**：启动时尝试连接配置的引导节点
-- **DHT 发现**：通过 DHT 查找文件提供者时尝试连接
+```
+Request: <64-char hex SHA256>\n
+Response: OK\n
+```
 
-### 心跳检测
+After receiving an Announce, the node automatically registers itself as a provider on the DHT.
 
-每 30 秒检查已连接节点的状态，对断开的节点尝试重连。
+## Connection Management
 
-### 重连策略
+### Automatic Connection
 
-- 初始重连间隔：10 秒
-- 退避上限：5 分钟
-- 连接超时：15 秒
+- **mDNS Discovery**: Automatically discovers and connects to nodes on the local network
+- **Bootstrap Nodes**: Attempts to connect to configured bootstrap nodes at startup
+- **DHT Discovery**: Attempts to connect when looking up file providers via DHT
 
-## 文件传输
+### Heartbeat Detection
 
-### 小文件传输
+Checks the status of connected nodes every 30 seconds; attempts to reconnect to disconnected nodes.
 
-- 使用 Exchange 协议单次请求获取完整文件
-- 超时：30 秒
+### Reconnection Policy
 
-### 大文件分片传输
+- Initial reconnection interval: 10 seconds
+- Backoff ceiling: 5 minutes
+- Connection timeout: 15 seconds
 
-- 文件被分为 256KB 的 Chunk
-- 最多 8 个并发 Chunk 请求
-- 支持从多个提供者并行下载不同分片
-- 下载完成后验证 SHA256 哈希
-- 支持进度回调，实时显示下载进度
-- 传输超时：5 分钟
+## File Transfer
 
-### 文件查找优先级
+### Small File Transfer
 
-1. 本地 storage 目录 (SHA256 内容寻址)
-2. file_providers 数据库记录（本地路径）
-3. P2P 网络（DHT + 直接请求）
+- Uses the Exchange protocol to fetch a complete file in a single request
+- Timeout: 30 seconds
 
-## WebSocket 传输
+### Large File Chunked Transfer
 
-用于浏览器节点的文件传输。
+- Files are split into 256KB Chunks
+- Up to 8 concurrent Chunk requests
+- Supports downloading different chunks in parallel from multiple providers
+- Verifies SHA256 hash after download completes
+- Supports progress callbacks for real-time download progress display
+- Transfer timeout: 5 minutes
 
-- 端点：`GET /ws/transfer`
-- 消息格式：JSON + 二进制帧
-- 支持 ping/pong 心跳
-- 文件请求通过 WS 广播到所有连接的浏览器节点
+### File Lookup Priority
 
-### 消息类型
+1. Local storage directory (SHA256 content-addressed)
+2. file_providers database records (local path)
+3. P2P network (DHT + direct requests)
 
-**客户端 -> 服务端:**
+## WebSocket Transfer
+
+Used for file transfer in browser nodes.
+
+- Endpoint: `GET /ws/transfer`
+- Message format: JSON + binary frames
+- Supports ping/pong heartbeat
+- File requests are broadcast via WS to all connected browser nodes
+
+### Message Types
+
+**Client -> Server:**
 ```json
 {"type": "request", "hash": "sha256..."}
 {"type": "ping"}
 ```
 
-**服务端 -> 客户端:**
+**Server -> Client:**
 ```json
 {"type": "response", "hash": "sha256...", "size": 1234}
-（后跟二进制帧）
+(followed by binary frame)
 {"type": "pong"}
 {"type": "error", "hash": "sha256...", "message": "not found"}
 ```
 
-## 环境变量
+## Environment Variables
 
-| 变量 | 说明 | 默认值 |
+| Variable | Description | Default |
 |------|------|--------|
-| `PEERDRIVE_P2P_ENABLE` | 是否启用 P2P | `true` |
-| `PEERDRIVE_P2P_LISTEN` | libp2p 监听地址 | `/ip4/0.0.0.0/tcp/0` |
-| `PEERDRIVE_BOOTSTRAP_PEER` | 引导节点地址 | `""` |
-| `PEERDRIVE_MDNS_ENABLE` | 是否启用 mDNS | `true` |
-| `PEERDRIVE_RELAY_ENABLE` | 是否启用中继 | `false` |
-| `PEERDRIVE_RELAY_MODE` | 中继模式 (client/server/off) | `client` |
-| `PEERDRIVE_STATIC_RELAYS` | 静态中继地址列表 | `""` |
-| `PEERDRIVE_HOLE_PUNCH` | 是否启用打洞 | `true` |
-| `PEERDRIVE_PUBLIC_REACHABLE` | 节点是否公网可达 | `false` |
-| `PEERDRIVE_AUTO_NAT` | 是否启用 AutoNAT | `true` |
-| `PEERDRIVE_NAT_PORTMAP` | 是否启用 NAT-PMP | `false` |
-| `PEERDRIVE_PUBLIC_DOMAIN` | 节点公网访问域名 | `""` |
+| `PEERDRIVE_P2P_ENABLE` | Whether to enable P2P | `true` |
+| `PEERDRIVE_P2P_LISTEN` | libp2p listen address | `/ip4/0.0.0.0/tcp/0` |
+| `PEERDRIVE_BOOTSTRAP_PEER` | Bootstrap node address | `""` |
+| `PEERDRIVE_MDNS_ENABLE` | Whether to enable mDNS | `true` |
+| `PEERDRIVE_RELAY_ENABLE` | Whether to enable relay | `false` |
+| `PEERDRIVE_RELAY_MODE` | Relay mode (client/server/off) | `client` |
+| `PEERDRIVE_STATIC_RELAYS` | Static relay address list | `""` |
+| `PEERDRIVE_HOLE_PUNCH` | Whether to enable hole punching | `true` |
+| `PEERDRIVE_PUBLIC_REACHABLE` | Whether the node is publicly reachable | `false` |
+| `PEERDRIVE_AUTO_NAT` | Whether to enable AutoNAT | `true` |
+| `PEERDRIVE_NAT_PORTMAP` | Whether to enable NAT-PMP | `false` |
+| `PEERDRIVE_PUBLIC_DOMAIN` | Node public access domain | `""` |
 
-## API 接口
+## API Endpoints
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |------|------|------|
-| GET | `/p2p/status` | P2P 状态（含连接统计和传输任务） |
-| GET | `/p2p/node` | 本节点信息 |
-| GET | `/p2p/peers` | 已连接节点列表 |
-| GET | `/p2p/discovered` | 已发现节点列表 |
-| GET | `/p2p/ping/:peer_id` | Ping 节点 |
-| POST | `/p2p/connect` | 手动连接节点 |
-| POST | `/p2p/announce` | 宣告拥有文件 |
-| POST | `/p2p/fetch` | P2P 获取合集 |
-| POST | `/p2p/sync` | 从节点同步文件 |
-| POST | `/p2p/push` | 推送合集到节点 |
-| POST | `/p2p/request-file` | 广播文件请求 |
-| GET | `/p2p/ws/info` | WebSocket 连接信息 |
-| GET | `/ws/transfer` | WebSocket 传输端点 |
+| GET | `/p2p/status` | P2P status (includes connection stats and transfer tasks) |
+| GET | `/p2p/node` | This node's information |
+| GET | `/p2p/peers` | List of connected nodes |
+| GET | `/p2p/discovered` | List of discovered nodes |
+| GET | `/p2p/ping/:peer_id` | Ping a node |
+| POST | `/p2p/connect` | Manually connect to a node |
+| POST | `/p2p/announce` | Announce ownership of a file |
+| POST | `/p2p/fetch` | P2P fetch a collection |
+| POST | `/p2p/sync` | Sync files from a node |
+| POST | `/p2p/push` | Push a collection to a node |
+| POST | `/p2p/request-file` | Broadcast file request |
+| GET | `/p2p/ws/info` | WebSocket connection info |
+| GET | `/ws/transfer` | WebSocket transfer endpoint |
 
-## 运行模式
+## Running Modes
 
-### 普通节点 (默认)
+### Regular Node (default)
 
 ```bash
 PEERDRIVE_P2P_ENABLE=true go run ./cmd/server/main.go
 ```
 
-### 中继服务端 (公网超级节点)
+### Relay Server (Public Super Node)
 
 ```bash
 PEERDRIVE_RELAY_ENABLE=true \
@@ -185,7 +185,7 @@ PEERDRIVE_PUBLIC_DOMAIN=relay.example.com \
 go run ./cmd/server/main.go
 ```
 
-### 纯中继节点（不存储文件）
+### Pure Relay Node (does not store files)
 
 ```bash
 PEERDRIVE_RELAY_ENABLE=true \
@@ -194,7 +194,7 @@ PEERDRIVE_STORAGE_ENABLE=false \
 go run ./cmd/server/main.go
 ```
 
-### 中继客户端（NAT 后节点）
+### Relay Client (node behind NAT)
 
 ```bash
 PEERDRIVE_RELAY_ENABLE=true \
@@ -203,17 +203,18 @@ PEERDRIVE_STATIC_RELAYS="/ip4/1.2.3.4/tcp/4001/p2p/12D3..." \
 go run ./cmd/server/main.go
 ```
 
-## 测试
+## Testing
 
 ```bash
-# 启动两个节点测试 P2P 传输
-# 节点 A
+# Start two nodes to test P2P transfer
+# Node A
 PEERDRIVE_PORT=3001 go run ./cmd/server/main.go
 
-# 节点 B (使用不同的端口)
+# Node B (using a different port)
 PEERDRIVE_PORT=3002 PEERDRIVE_P2P_LISTEN=/ip4/0.0.0.0/tcp/0 \
 go run ./cmd/server/main.go
 
-# 运行 P2P 测试（注意：本文档描述的是 2026-08-16 已删除的 libp2p 栈，
-# 当前互联层为 PeerJS/WebRTC，见 doc/REFACTOR.md；test/p2p_transfer.sh 已随栈删除）
+# Run P2P tests (note: this document describes the libp2p stack that was
+# removed on 2026-08-16; the current interconnect layer is PeerJS/WebRTC,
+# see doc/REFACTOR.md; test/p2p_transfer.sh was removed with the stack)
 ```

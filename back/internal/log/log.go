@@ -1,5 +1,5 @@
-// Package log 提供分级日志输出（DEBUG/INFO/WARN/ERROR），日志级别由 PEERDRIVE_LOG_LEVEL 环境变量控制。
-// LogDuration 自动记录函数调用耗时。
+// Package log provides leveled log output (DEBUG/INFO/WARN/ERROR), with log level controlled by the PEERDRIVE_LOG_LEVEL environment variable.
+// LogDuration automatically records function call duration.
 package log
 
 import (

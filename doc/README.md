@@ -1,93 +1,93 @@
-# Peerdrive 架构文档
+# Peerdrive Architecture Documentation
 
-> 基于内容寻址 + Git 风格版本管理的 P2P 文件分享系统 · v3.0
+> Content-addressed + Git-style version-controlled P2P file sharing system · v3.0
 
-## Monorepo 结构
+## Monorepo Structure
 
 ```
 peerdrive/
-├── front/                    React 前端 (Vite + TailwindCSS + Vitest)
+├── front/                    React frontend (Vite + TailwindCSS + Vitest)
 │   ├── src/
 │   │   ├── pages/
-│   │   │   ├── AnonCreator/  合集创建页（三列布局：筛选 | 预览 | 编辑）
-│   │   │   ├── AnonExplorer/ 合集浏览页
-│   │   │   ├── Plaza/        合集广场
-│   │   │   ├── FileManager/  文件管理
-│   │   │   ├── P2PDashboard/ P2P 控制台
-│   │   │   └── Settings/     设置
-│   │   ├── components/       共享组件
-│   │   └── api.js            API 客户端
-│   └── tests/                前端测试
-├── back/                     Go 后端 (Gin + SQLite + libp2p + BT DHT)
-│   ├── cmd/server/           入口
+│   │   │   ├── AnonCreator/  Collection creation page (three-column layout: filter | preview | edit)
+│   │   │   ├── AnonExplorer/ Collection browsing page
+│   │   │   ├── Plaza/        Collection plaza
+│   │   │   ├── FileManager/  File management
+│   │   │   ├── P2PDashboard/ P2P dashboard
+│   │   │   └── Settings/     Settings
+│   │   ├── components/       Shared components
+│   │   └── api.js            API client
+│   └── tests/                Frontend tests
+├── back/                     Go backend (Gin + SQLite + libp2p + BT DHT)
+│   ├── cmd/server/           Entry point
 │   ├── internal/
-│   │   ├── controller/       HTTP 处理层
-│   │   ├── service/          业务逻辑层 (P2P/文件/合集/下载)
-│   │   ├── repository/       SQLite 持久化
-│   │   ├── provider/         数据源抽象 (本地/HTTP/IPFS)
-│   │   ├── router/           Gin 路由 & 中间件
-│   │   ├── model/            数据模型
-│   │   ├── config/           配置
-│   │   └── p2p_bt/           BT DHT 实现
-│   ├── pkg/hashutil/         哈希工具
-│   └── test/                 集成/E2E 测试脚本
-├── doc/                      项目文档（你在这里）
+│   │   ├── controller/       HTTP handler layer
+│   │   ├── service/          Business logic layer (P2P/files/collections/downloads)
+│   │   ├── repository/       SQLite persistence
+│   │   ├── provider/         Data source abstraction (local/HTTP/IPFS)
+│   │   ├── router/           Gin routing & middleware
+│   │   ├── model/            Data models
+│   │   ├── config/           Configuration
+│   │   └── p2p_bt/           BT DHT implementation
+│   ├── pkg/hashutil/         Hash utilities
+│   └── test/                 Integration/E2E test scripts
+├── doc/                      Project documentation (you are here)
 └── .github/workflows/        CI/CD
 ```
 
-## 分层架构 (Backend)
+## Layered Architecture (Backend)
 
 ```
 HTTP API (Gin Router)
-  → Controller (参数校验、响应格式化)
-    → Service (业务逻辑)
-      → Provider (数据源: local / http / ipfsgw)
+  → Controller (parameter validation, response formatting)
+    → Service (business logic)
+      → Provider (data source: local / http / ipfsgw)
       → Repository (SQLite)
       → P2P (libp2p / BT DHT / WebRTC)
-      → IPFSService (boxo Bitswap + DHT)  ← 新增
+      → IPFSService (boxo Bitswap + DHT)  ← New
 ```
 
-| 层 | 位置 | 职责 |
+| Layer | Location | Responsibility |
 |----|------|------|
-| Router | `back/internal/router/` | 路由注册、CORS、Auth 中间件 |
-| Controller | `back/internal/controller/` | HTTP 处理、参数解析 |
-| Service | `back/internal/service/` | 核心逻辑：文件注册/下载、合集 CRUD/版本、P2P 传输/信令、**IPFSService (boxo Bitswap)** |
+| Router | `back/internal/router/` | Route registration, CORS, Auth middleware |
+| Controller | `back/internal/controller/` | HTTP handling, parameter parsing |
+| Service | `back/internal/service/` | Core logic: file registration/download, collection CRUD/versions, P2P transport/signaling, **IPFSService (boxo Bitswap)** |
 | Repository | `back/internal/repository/` | SQLite CRUD |
-| Provider | `back/internal/provider/` | 数据源接口：`local` / `http` / `ipfsgw`（IPFS 优先走 Bitswap） |
-| P2P BT | `back/internal/p2p_bt/` | Mainline DHT、BEP44/BEP51、torrent/magnet |
+| Provider | `back/internal/provider/` | Data source interface: `local` / `http` / `ipfsgw` (IPFS prefers Bitswap) |
+| P2P BT | `back/internal/p2p_bt/` | Mainline DHT, BEP44/BEP51, torrent/magnet |
 
-## 端口
+## Ports
 
-| 端口 | 服务 | 仓库位置 | 说明 |
+| Port | Service | Repository Location | Description |
 |------|------|----------|------|
-| `:3000` | back (主 API) | `back/` | Gin HTTP，文件/合集/P2P 全部端点 |
-| `:5173` | front (Dev) | `front/` | Vite HMR 开发服务器 |
-| `:4000` | registration-server | 独立仓库 | 用户注册、JWT 认证 |
+| `:3000` | back (main API) | `back/` | Gin HTTP, all file/collection/P2P endpoints |
+| `:5173` | front (Dev) | `front/` | Vite HMR development server |
+| `:4000` | registration-server | Independent repo | User registration, JWT authentication |
 
-## 核心概念
+## Core Concepts
 
-| 概念 | 类比 Git | 说明 |
+| Concept | Git Analogy | Description |
 |------|----------|------|
-| Collection | Repository | 文件合集 |
+| Collection | Repository | File collection |
 | Entry | Tree | `path → [{type, value, mime_type}]` |
-| Version / Commit | Commit | 版本快照 |
-| Fork | Fork | 基于现有合集创建新版本 |
-| Merge | Merge | 三路合并 |
-| Anonymous Collection | — | 无需注册，SHA256 hash 直接访问 |
+| Version / Commit | Commit | Version snapshot |
+| Fork | Fork | Create a new version based on an existing collection |
+| Merge | Merge | Three-way merge |
+| Anonymous Collection | — | No registration required, direct access via SHA256 hash |
 
-## 模块
+## Modules
 
-| 模块 | 前端 | 后端 |
+| Module | Frontend | Backend |
 |------|------|------|
-| 文件管理 | `FileManager.jsx`, `Sha256Manager.jsx` | `controller/file.go`, `service/file_service.go` |
-| 合集 | `AnonCreator/`, `AnonExplorer/`, `CollectionBuilder.jsx` | `controller/anon.go`, `controller/collection.go`, `service/anon_service.go` |
+| File Management | `FileManager.jsx`, `Sha256Manager.jsx` | `controller/file.go`, `service/file_service.go` |
+| Collections | `AnonCreator/`, `AnonExplorer/`, `CollectionBuilder.jsx` | `controller/anon.go`, `controller/collection.go`, `service/anon_service.go` |
 | P2P | `P2PDashboard.jsx`, `P2PTopology.jsx`, `WebRTCPeer.jsx` | `service/p2p.go`, `controller/p2p.go` |
-| BT DHT | `BTController.jsx`, `BTPanel.jsx` | `p2p_bt/`, `controller/p2p.go` (BT 端点) |
+| BT DHT | `BTController.jsx`, `BTPanel.jsx` | `p2p_bt/`, `controller/p2p.go` (BT endpoints) |
 | IPFS | `IPFSPanel.jsx` | `provider/ipfs.go`, `service/ipfs_compat.go` |
-| WebRTC | `WebRTCTransfer.jsx` | `service/p2p.go` (WebRTC 信令) |
-| 认证 | `UserGroupPicker.jsx`, `VisibilityPicker.jsx` | `controller/auth.go`, `service/auth_service.go` |
+| WebRTC | `WebRTCTransfer.jsx` | `service/p2p.go` (WebRTC signaling) |
+| Authentication | `UserGroupPicker.jsx`, `VisibilityPicker.jsx` | `controller/auth.go`, `service/auth_service.go` |
 
-## 数据流
+## Data Flow
 
 ```
 Upload:   front → POST /files/upload → Controller → FileService → Provider(local) → SQLite
@@ -97,168 +97,168 @@ BT:       Node ← Mainline DHT → Find Peers → Torrent Download
 Collection: front → POST /anon/collections → AnonService → CollectionRepo → JSON → SHA256
 ```
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 后端
+# Backend
 cd back
 go run ./cmd/server/
 # → http://localhost:3000 , Swagger at /swagger/index.html
 
-# 前端
+# Frontend
 cd front
 npm ci && npm run dev
 # → http://localhost:5173
 ```
 
-## 测试
+## Testing
 
 ```bash
-# 后端单元测试
+# Backend unit tests
 cd back && go test ./... -count=1
 
-# E2E 全端点测试
+# E2E full endpoint tests
 cd back && bash test/e2e-all.sh
 
-# P2P 双节点测试
+# P2P dual-node tests
 cd back && bash test/p2p.sh
 
-# 前端测试
+# Frontend tests
 cd front && npm test
 
-# 前端构建
+# Frontend build
 cd front && npm run build
 ```
 
-## 环境变量
+## Environment Variables
 
-| 变量 | 默认值 | 说明 |
+| Variable | Default | Description |
 |------|--------|------|
-| `PORT` | `3000` | 后端端口 |
-| `PEERDRIVE_STORAGE` | `./storage` | 文件存储目录 |
-| `PEERDRIVE_P2P_ENABLE` | `true` | 启用 libp2p |
-| `PEERDRIVE_P2P_LISTEN` | `/ip4/0.0.0.0/tcp/0` | P2P 监听地址 |
-| `PEERDRIVE_BT_DHT_ENABLE` | `true` | 启用 BT DHT |
-| `PEERDRIVE_MDNS_ENABLE` | `true` | 局域网发现 |
-| `PEERDRIVE_RELAY_ENABLE` | `false` | Relay 模式 |
+| `PORT` | `3000` | Backend port |
+| `PEERDRIVE_STORAGE` | `./storage` | File storage directory |
+| `PEERDRIVE_P2P_ENABLE` | `true` | Enable libp2p |
+| `PEERDRIVE_P2P_LISTEN` | `/ip4/0.0.0.0/tcp/0` | P2P listen address |
+| `PEERDRIVE_BT_DHT_ENABLE` | `true` | Enable BT DHT |
+| `PEERDRIVE_MDNS_ENABLE` | `true` | LAN discovery |
+| `PEERDRIVE_RELAY_ENABLE` | `false` | Relay mode |
 | `PEERDRIVE_RELAY_MODE` | `client` | `server` / `client` |
-| `PEERDRIVE_HOLE_PUNCH` | `true` | NAT 打洞 |
-| `CORS_MODE` | 白名单 | `all` / `localhost` |
-| `VITE_API_BASE` | `http://localhost:3000` | 前端 API 基地址 |
-| `PEERDRIVE_DISCOVER_URL` | 空 | 自托管信令的发现 API（设置后优先于 MQTT） |
-| `PEERDRIVE_DISCOVER_PRESENCE` | `true` | 节点级「存在房间」发现：零共享 collection 的节点也能互相发现（见 [ROADMAP.md](ROADMAP.md) 第 1 阶段、[REFACTOR.md](REFACTOR.md) §3.18） |
-| `PEERDRIVE_MAX_PEERS` | `8` | 发现触发的拨号上限（防全互联退化）；静态 `PEERDRIVE_PEERJS_PEERS` 不受限 |
-| `PEERDRIVE_DB_PATH` | `./peerdrive.db` | SQLite 元数据库路径（新，2026-09-23） |
-| `PEERDRIVE_RATE_LIMIT_RPS` | `30` | 每 IP 请求速率上限，0=不限（新） |
-| `PEERDRIVE_CSP` | 开 | 设为 `off` 关闭 Content-Security-Policy（新） |
-| `PEERDRIVE_TRUSTED_PROXIES` | 空 | 可信反向代理（IP/CIDR 逗号分隔或 `all`）；空=只认 RemoteAddr（新） |
+| `PEERDRIVE_HOLE_PUNCH` | `true` | NAT hole punching |
+| `CORS_MODE` | Allowlist | `all` / `localhost` |
+| `VITE_API_BASE` | `http://localhost:3000` | Frontend API base URL |
+| `PEERDRIVE_DISCOVER_URL` | Empty | Self-hosted signaling discovery API (when set, takes priority over MQTT) |
+| `PEERDRIVE_DISCOVER_PRESENCE` | `true` | Node-level "presence room" discovery: nodes with zero shared collections can also discover each other (see [ROADMAP.md](ROADMAP.md) Phase 1, [REFACTOR.md](REFACTOR.md) §3.18) |
+| `PEERDRIVE_MAX_PEERS` | `8` | Dial limit triggered by discovery (prevents full-mesh degradation); static `PEERDRIVE_PEERJS_PEERS` is unlimited |
+| `PEERDRIVE_DB_PATH` | `./peerdrive.db` | SQLite metadata database path (new, 2026-09-23) |
+| `PEERDRIVE_RATE_LIMIT_RPS` | `30` | Per-IP request rate limit, 0=unlimited (new) |
+| `PEERDRIVE_CSP` | On | Set to `off` to disable Content-Security-Policy (new) |
+| `PEERDRIVE_TRUSTED_PROXIES` | Empty | Trusted reverse proxies (IP/CIDR comma-separated or `all`); empty=only trust RemoteAddr (new) |
 
-> 新增项的来龙去脉与未修项见 [FULLSTACK-AUDIT.md](FULLSTACK-AUDIT.md)。
+> Background and remaining items for new additions see [FULLSTACK-AUDIT.md](FULLSTACK-AUDIT.md).
 
-## 文档索引
+## Documentation Index
 
-### 架构
+### Architecture
 
-| 文件 | 内容 |
+| File | Content |
 |------|------|
-| [ROADMAP.md](ROADMAP.md) | **开发顺序（用户 2026-09 定序）**：PeerJS 互联 → 文件 → 组合 → 管理链路 → 文件范围管理 → 上传下载保存 → 身份管理（最后） |
-| [REFACTOR.md](REFACTOR.md) | 重构手册：分层边界、迁移顺序、既有问题的修法 |
-| [FULLSTACK-AUDIT.md](FULLSTACK-AUDIT.md) | **全栈体检报告（2026-09-23）**：配置/日志/数据层/认证/加固的现状、已修 12 项与未修 7 项 |
-| [NETDISK.md](NETDISK.md) | 网盘（PeerJS 节点 + 面板）使用与实现手册 |
-| [LAYERS.md](LAYERS.md) / [layers/](layers/) | 分层架构与逐层说明 |
-| [NODE.md](NODE.md) / [NODE-API.md](NODE-API.md) | 节点与节点 API |
-| [PEERSIGNAL.md](PEERSIGNAL.md) | 自托管信令（peersignal）部署与协议 |
-| [PROJECT-VISION.md](PROJECT-VISION.md) | 产品愿景 |
-| [HTTP_API_PROXY.md](HTTP_API_PROXY.md) | HTTP API 代理 |
-| [TODO-SIMPLIFY.md](TODO-SIMPLIFY.md) | 简化待办 |
-| [source-control.md](source-control.md) | 版本控制（合集 fork / merge） |
-| [dht-wire-format.md](dht-wire-format.md) | DHT 线格式 |
-| [api-reference.md](api-reference.md) | API 参考（简版） |
-| [design/PEERDRIVE-DSH-INSPIRED.md](design/PEERDRIVE-DSH-INSPIRED.md) | 参考 dsh 的组合式架构设计（profile/bundle/patch） |
-| [design/FRONTEND-DSH-INSPIRED.md](design/FRONTEND-DSH-INSPIRED.md) | 前端参考 dsh 的组合式设计（bundle manifest + registry + profile） |
-| [design/FRONTEND-DSH-KERNEL.md](design/FRONTEND-DSH-KERNEL.md) | 前端参考 dsh 内核的引导/模块/slot/传输设计 |
-| [FILE-REFERENCE.md](FILE-REFERENCE.md) | 全部项目文件路径与说明手册 (~240 文件) |
+| [ROADMAP.md](ROADMAP.md) | **Development order (sequenced by user in 2026-09)**: PeerJS interconnection → files → combination → management chain → file-scope management → upload/download/save → identity management (last) |
+| [REFACTOR.md](REFACTOR.md) | Refactoring manual: layered boundaries, migration order, fixes for existing issues |
+| [FULLSTACK-AUDIT.md](FULLSTACK-AUDIT.md) | **Full-stack health check report (2026-09-23)**: configuration/logging/data layer/auth/hardening current state, 12 fixed and 7 remaining items |
+| [NETDISK.md](NETDISK.md) | Netdisk (PeerJS node + panel) usage and implementation manual |
+| [LAYERS.md](LAYERS.md) / [layers/](layers/) | Layered architecture and per-layer descriptions |
+| [NODE.md](NODE.md) / [NODE-API.md](NODE-API.md) | Node and node API |
+| [PEERSIGNAL.md](PEERSIGNAL.md) | Self-hosted signaling (peersignal) deployment and protocol |
+| [PROJECT-VISION.md](PROJECT-VISION.md) | Product vision |
+| [HTTP_API_PROXY.md](HTTP_API_PROXY.md) | HTTP API proxy |
+| [TODO-SIMPLIFY.md](TODO-SIMPLIFY.md) | Simplification to-do |
+| [source-control.md](source-control.md) | Version control (collection fork / merge) |
+| [dht-wire-format.md](dht-wire-format.md) | DHT wire format |
+| [api-reference.md](api-reference.md) | API reference (brief) |
+| [design/PEERDRIVE-DSH-INSPIRED.md](design/PEERDRIVE-DSH-INSPIRED.md) | Compositional architecture design inspired by dsh (profile/bundle/patch) |
+| [design/FRONTEND-DSH-INSPIRED.md](design/FRONTEND-DSH-INSPIRED.md) | Frontend compositional design inspired by dsh (bundle manifest + registry + profile) |
+| [design/FRONTEND-DSH-KERNEL.md](design/FRONTEND-DSH-KERNEL.md) | Frontend kernel bootstrap/module/slot/transport design inspired by dsh |
+| [FILE-REFERENCE.md](FILE-REFERENCE.md) | Complete project file path and description manual (~240 files) |
 
-### spec — 技术规范
+### spec — Technical Specifications
 
-| 文件 | 内容 |
+| File | Content |
 |------|------|
-| [spec/API-REFERENCE.md](spec/API-REFERENCE.md) | 完整 API 参考 (105 端点) |
-| [spec/REQUIREMENTS.md](spec/REQUIREMENTS.md) | 全部需求总表 (130+ 项) |
-| [spec/COLLECTION-LOGIC.md](spec/COLLECTION-LOGIC.md) | 合集逻辑完整追踪 |
-| [spec/USER-ROLES.md](spec/USER-ROLES.md) | 用户角色模型 |
-| [spec/BACKEND_TASKS.md](spec/BACKEND_TASKS.md) | 后端任务清单 |
-| [spec/FRONTEND_TASKS.md](spec/FRONTEND_TASKS.md) | 前端任务清单 |
-| [spec/backend/](spec/backend/) | 后端 API / 数据库 / 设计规范 |
-| [spec/frontend/](spec/frontend/) | 前端 API 文档 |
+| [spec/API-REFERENCE.md](spec/API-REFERENCE.md) | Complete API reference (105 endpoints) |
+| [spec/REQUIREMENTS.md](spec/REQUIREMENTS.md) | Complete requirements table (130+ items) |
+| [spec/COLLECTION-LOGIC.md](spec/COLLECTION-LOGIC.md) | Complete collection logic trace |
+| [spec/USER-ROLES.md](spec/USER-ROLES.md) | User role model |
+| [spec/BACKEND_TASKS.md](spec/BACKEND_TASKS.md) | Backend task list |
+| [spec/FRONTEND_TASKS.md](spec/FRONTEND_TASKS.md) | Frontend task list |
+| [spec/backend/](spec/backend/) | Backend API / database / design specifications |
+| [spec/frontend/](spec/frontend/) | Frontend API documentation |
 
-### modules — 模块设计
+### modules — Module Design
 
-| 目录 | 内容 |
+| Directory | Content |
 |------|------|
-| [modules/auth/](modules/auth/) | 认证模块：API 设计、安全审查、用户角色 |
-| [modules/bt/](modules/bt/) | BT DHT 模块：协议、测试矩阵、API 设计 |
-| [modules/ipfs/](modules/ipfs/) | IPFS 模块：协议、WebRTC 架构 |
-| [modules/p2p/](modules/p2p/) | P2P 模块：当前互联框架（TRANSPORT）+ API 设计；旧栈文档见 [modules/p2p/archive/](modules/p2p/archive/) |
-| [modules/storage/](modules/storage/) | 存储模块：数据库、合集逻辑、API |
+| [modules/auth/](modules/auth/) | Authentication module: API design, security review, user roles |
+| [modules/bt/](modules/bt/) | BT DHT module: protocol, test matrix, API design |
+| [modules/ipfs/](modules/ipfs/) | IPFS module: protocol, WebRTC architecture |
+| [modules/p2p/](modules/p2p/) | P2P module: current interconnection framework (TRANSPORT) + API design; legacy stack docs see [modules/p2p/archive/](modules/p2p/archive/) |
+| [modules/storage/](modules/storage/) | Storage module: database, collection logic, API |
 
-### guide — 操作指南
+### guide — Operation Guides
 
-| 文件 | 内容 |
+| File | Content |
 |------|------|
-| [guide/API-USAGE.md](guide/API-USAGE.md) | API 使用手册 — 调用顺序/目的/条件 |
-| [guide/USER_MANUAL.md](guide/USER_MANUAL.md) | 用户手册 |
-| [guide/siliconflow-setup.md](guide/siliconflow-setup.md) | LLM 配置 |
-| [guide/FRONTEND.md](guide/FRONTEND.md) | 前端界面说明 — 技术栈、路由、组件树、工作流、代码地图 |
-| [guide/操作说明.md](guide/操作说明.md) | 中文操作说明 |
+| [guide/API-USAGE.md](guide/API-USAGE.md) | API usage manual — call order/purpose/conditions |
+| [guide/USER_MANUAL.md](guide/USER_MANUAL.md) | User manual |
+| [guide/siliconflow-setup.md](guide/siliconflow-setup.md) | LLM configuration |
+| [guide/FRONTEND.md](guide/FRONTEND.md) | Frontend interface description — tech stack, routing, component tree, workflows, code map |
+| [guide/operation-manual.md](guide/operation-manual.md) | Chinese operation guide |
 
-### testing — 测试
+### testing — Testing
 
-| 文件 | 内容 |
+| File | Content |
 |------|------|
-| [testing/README.md](testing/README.md) | **测试组件总览（入口）** — 14 个组件的选表/命令/规模/CI 映射/盲区清单（2026-09-20 实测：308+21+23+21+7+88+60+21） |
-| [testing/index.md](testing/index.md) | 测试文档门户（指向上面那份 + 分层文档） |
-| [testing/archive/](testing/archive/) | 旧栈时代测试文档（2026-04~05，libp2p / e2e-all.sh / reg-server），仅历史参考 |
+| [testing/README.md](testing/README.md) | **Testing components overview (entry point)** — selection table/commands/scale/CI mapping/blind-spot checklist for 14 components (2026-09-20 measured: 308+21+23+21+7+88+60+21) |
+| [testing/index.md](testing/index.md) | Testing documentation portal (points to the above + layered docs) |
+| [testing/archive/](testing/archive/) | Legacy stack testing documentation (2026-04~05, libp2p / e2e-all.sh / reg-server), historical reference only |
 
-> 旧索引里列过一批 `TESTING-HANDBOOK.md` / `TEST-PIPELINE.md` / `TEST-MATRIX.md` /
-> `FRONTEND-TESTING.md` 等文件名，**当前目录下已不存在**（2026-08-18 重写后清理），
-> 内容统一并入 `testing/README.md`。测试现状以它为准，勿再引用旧文件名。
+> The old index listed several filenames such as `TESTING-HANDBOOK.md` / `TEST-PIPELINE.md` / `TEST-MATRIX.md` /
+> `FRONTEND-TESTING.md`, **which no longer exist in the current directory** (cleaned up after the 2026-08-18 rewrite),
+> content has been unified into `testing/README.md`. The current testing state is authoritative per that file; do not reference old filenames.
 >
-> 相关：[NETDISK.md §7 本地跑通手册](NETDISK.md#7-本地跑通怎么亲手测这几个功能)、
-> `scripts/test-layers.sh`（分层聚合）、`scripts/netdisk-local-demo.sh`（端到端）。
+> Related: [NETDISK.md §7 Local run-through manual](NETDISK.md#7-local-runthrough-manual-test-guide),
+> `scripts/test-layers.sh` (layered aggregation), `scripts/netdisk-local-demo.sh` (end-to-end).
 
-### tutorial — 教程（面向使用者的正路）
+### tutorial — Tutorial (the proper path for end users)
 
-| 文件 | 内容 |
+| File | Content |
 |------|------|
-| [tutorial/README.md](tutorial/README.md) | 教程总入口与阅读顺序 |
-| [tutorial/01-run-and-connect.md](tutorial/01-run-and-connect.md) | 跑起来 & 连上：装、启动、看到对方 |
-| [tutorial/02-add-local-files.md](tutorial/02-add-local-files.md) | 把本机文件放进网盘 |
-| [tutorial/03-share-levels.md](tutorial/03-share-levels.md) | 共享级别 public / unlisted / private |
-| [tutorial/04-choose-what-to-share.md](tutorial/04-choose-what-to-share.md) | 挑要共享的东西（目录 / 单文件 / 合集） |
-| [tutorial/05-save-from-other-nodes.md](tutorial/05-save-from-other-nodes.md) | 从别的节点保存内容 |
-| [tutorial/appendix-build-from-source.md](tutorial/appendix-build-from-source.md) | 附录：从源码构建 |
+| [tutorial/README.md](tutorial/README.md) | Tutorial entry point and reading order |
+| [tutorial/01-run-and-connect.md](tutorial/01-run-and-connect.md) | Get it running & connect: install, start, see the other side |
+| [tutorial/02-add-local-files.md](tutorial/02-add-local-files.md) | Add local files to the netdisk |
+| [tutorial/03-share-levels.md](tutorial/03-share-levels.md) | Share levels public / unlisted / private |
+| [tutorial/04-choose-what-to-share.md](tutorial/04-choose-what-to-share.md) | Choose what to share (directory / single file / collection) |
+| [tutorial/05-save-from-other-nodes.md](tutorial/05-save-from-other-nodes.md) | Save content from other nodes |
+| [tutorial/appendix-build-from-source.md](tutorial/appendix-build-from-source.md) | Appendix: build from source |
 
-### archive — 归档（旧文档 / 旧结构，**不再维护**）
+### archive — Archive (legacy docs / legacy structure, **no longer maintained**)
 
-> 这里的文档描述的是**重构前的结构**（`registration-server/`、`go/cmd/server/`、
-> `p2p-dual-stack/`、`libp2p` 主栈、`e2e-all.sh` 等）。留着只为追溯决策与历史，
-> **不要照着做**——路径与端点现在都不存在。
+> The documents here describe the **pre-refactor structure** (`registration-server/`, `go/cmd/server/`,
+> `p2p-dual-stack/`, `libp2p` main stack, `e2e-all.sh`, etc.). Kept only for decision traceability and history,
+> **do not follow them** —— paths and endpoints no longer exist.
 
-| 文件 / 目录 | 内容 |
+| File / Directory | Content |
 |------|------|
-| [archive/report/](archive/report/) | 旧「报告」目录（36 份：REPORT-OVERVIEW / ROADMAP / SECURITY-REVIEW / DEVELOPMENT_PLAN / TODO-FIXES / changelog / GIT-ANALYSIS / MILESTONE-* / 各次测试与修改报告） |
-| [archive/TUTORIAL.md](archive/TUTORIAL.md) | 旧教程（已被 [tutorial/](tutorial/README.md) 取代） |
-| [archive/DASHBOARD.md](archive/DASHBOARD.md) | 旧项目仪表盘 |
-| [archive/LEGACY.md](archive/LEGACY.md) | 旧栈遗留说明 |
-| [archive/VPS_DEPLOY.md](archive/VPS_DEPLOY.md) | 旧结构下的 VPS 部署（`registration-server/` 等路径已不存在） |
-| [archive/docker.md](archive/docker.md) | 旧结构下的 Docker 部署 |
-| [archive/p2p-discovery-flow.md](archive/p2p-discovery-flow.md) | 旧 libp2p 发现流程 |
-| [archive/TRANSPORT-REVIEW-2026-08-15.md](archive/TRANSPORT-REVIEW-2026-08-15.md)、[archive/TRANSPORT-REVIEW2-2026-08-16.md](archive/TRANSPORT-REVIEW2-2026-08-16.md) | 传输层两轮 review |
-| [archive/HTTP-REVIEW-2026-08-16.md](archive/HTTP-REVIEW-2026-08-16.md)、[archive/REVIEW-FIX-2026-08-16.md](archive/REVIEW-FIX-2026-08-16.md) | HTTP 层 review 与修复清单 |
-| [archive/FRONTEND-FIX-2026-08-16.md](archive/FRONTEND-FIX-2026-08-16.md)、[archive/FRONTEND-FIXES-2026-08-16.md](archive/FRONTEND-FIXES-2026-08-16.md) | 前端两次修复记录 |
-| [archive/SESSION-REPORT-20260503T135000.md](archive/SESSION-REPORT-20260503T135000.md) | 2026-05-03 会话报告 |
-| [archive/CODE-DOC-MAPPING.md](archive/CODE-DOC-MAPPING.md) | 2026-04 的代码 ↔ 文档映射表（多数目标文档现已不存在） |
-| [archive/AGENTS.md](archive/AGENTS.md)、[archive/方案.md](archive/方案.md)、[archive/测试方案.md](archive/测试方案.md)、[archive/知识库.md](archive/知识库.md)、[archive/reply.md](archive/reply.md) | 早期设计草案与参考资料 |
-| [modules/p2p/archive/](modules/p2p/archive/) | 旧 libp2p/BT-DHT 栈：p2p / dual-stack-protocol / grid |
-| [testing/archive/](testing/archive/) | 旧栈时代的测试文档（libp2p / e2e-all.sh / reg-server 测试） |
+| [archive/report/](archive/report/) | Legacy "reports" directory (36 docs: REPORT-OVERVIEW / ROADMAP / SECURITY-REVIEW / DEVELOPMENT_PLAN / TODO-FIXES / changelog / GIT-ANALYSIS / MILESTONE-* / various test and fix reports) |
+| [archive/TUTORIAL.md](archive/TUTORIAL.md) | Legacy tutorial (superseded by [tutorial/](tutorial/README.md)) |
+| [archive/DASHBOARD.md](archive/DASHBOARD.md) | Legacy project dashboard |
+| [archive/LEGACY.md](archive/LEGACY.md) | Legacy stack remnants description |
+| [archive/VPS_DEPLOY.md](archive/VPS_DEPLOY.md) | VPS deployment under the old structure (`registration-server/` etc. paths no longer exist) |
+| [archive/docker.md](archive/docker.md) | Docker deployment under the old structure |
+| [archive/p2p-discovery-flow.md](archive/p2p-discovery-flow.md) | Legacy libp2p discovery flow |
+| [archive/TRANSPORT-REVIEW-2026-08-15.md](archive/TRANSPORT-REVIEW-2026-08-15.md), [archive/TRANSPORT-REVIEW2-2026-08-16.md](archive/TRANSPORT-REVIEW2-2026-08-16.md) | Two rounds of transport layer review |
+| [archive/HTTP-REVIEW-2026-08-16.md](archive/HTTP-REVIEW-2026-08-16.md), [archive/REVIEW-FIX-2026-08-16.md](archive/REVIEW-FIX-2026-08-16.md) | HTTP layer review and fix checklist |
+| [archive/FRONTEND-FIX-2026-08-16.md](archive/FRONTEND-FIX-2026-08-16.md), [archive/FRONTEND-FIXES-2026-08-16.md](archive/FRONTEND-FIXES-2026-08-16.md) | Two rounds of frontend fix records |
+| [archive/SESSION-REPORT-20260503T135000.md](archive/SESSION-REPORT-20260503T135000.md) | 2026-05-03 session report |
+| [archive/CODE-DOC-MAPPING.md](archive/CODE-DOC-MAPPING.md) | 2026-04 code ↔ document mapping table (most target documents no longer exist) |
+| [archive/AGENTS.md](archive/AGENTS.md), [archive/proposal.md](archive/proposal.md), [archive/test-plan.md](archive/test-plan.md), [archive/knowledge-base.md](archive/knowledge-base.md), [archive/reply.md](archive/reply.md) | Early design drafts and reference materials |
+| [modules/p2p/archive/](modules/p2p/archive/) | Legacy libp2p/BT-DHT stack: p2p / dual-stack-protocol / grid |
+| [testing/archive/](testing/archive/) | Legacy stack era testing documentation (libp2p / e2e-all.sh / reg-server tests) |

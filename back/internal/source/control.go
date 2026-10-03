@@ -1,60 +1,61 @@
 package source
 
-// control.go：Source 控制面（可选能力）。
+// control.go: Source control plane (optional capability).
 //
-// 读取面（Source 接口）只回答“给我 hash 的字节流”；控制面回答“如何把文件
-// 加入/写入这个 source”。控制面按能力拆分，不是每个 source 都必须实现。
-// 发现背景：2026-08-19 控制面设计（doc/source-control.md）——用户需要
-// local 能添加本地文件/直接写文件，BT 能下载 torrent，IPFS 能 serve/pin。
+// The read plane (Source interface) only answers "give me the byte stream for a hash";
+// the control plane answers "how to add/write files to this source." Control planes are
+// split by capability; not every source must implement one.
+// Discovery background: 2026-08-19 control plane design (doc/source-control.md) -- users need
+// local to add local files/write directly, BT to download torrents, IPFS to serve/pin.
 
 import (
 	"errors"
 	"io"
 )
 
-// ErrControlUnsupported 表示当前 source 没有实现对应控制能力。
+// ErrControlUnsupported indicates the current source does not implement the corresponding control capability.
 var ErrControlUnsupported = errors.New("source does not support this control operation")
 
-// LocalControl 本地文件源的控制能力。
+// LocalControl is the control capability for local file sources.
 type LocalControl interface {
-	// AddLocalFile 把本地已有文件加入 source：计算 hash、登记索引。
+	// AddLocalFile adds an existing local file to the source: computes hash, registers index.
 	AddLocalFile(path string) (*FileMeta, error)
 
-	// WriteFile 直接写文件：从 reader 写入，完成后计算 hash 并登记。
+	// WriteFile writes a file directly: reads from a reader, computes hash and registers after completion.
 	WriteFile(name string, r io.Reader) (*FileMeta, error)
 }
 
-// LocalControlOf 返回 source 的 LocalControl 实现；不支持时 ok=false。
+// LocalControlOf returns the LocalControl implementation of a source; ok=false if not supported.
 func LocalControlOf(s Source) (LocalControl, bool) {
 	lc, ok := s.(LocalControl)
 	return lc, ok
 }
 
-// BTControl 种子下载的控制能力。
+// BTControl is the control capability for torrent downloads.
 type BTControl interface {
-	// DownloadTorrent 从 .torrent 文件字节启动下载，返回元信息。
+	// DownloadTorrent starts a download from .torrent file bytes, returning metadata.
 	DownloadTorrent(data []byte) (*TorrentMeta, error)
 
-	// DownloadMagnet 从 magnet URI 启动下载，返回元信息。
+	// DownloadMagnet starts a download from a magnet URI, returning metadata.
 	DownloadMagnet(uri string) (*TorrentMeta, error)
 
-	// ListDownloads 列出所有下载任务状态。
+	// ListDownloads lists all download task statuses.
 	ListDownloads() []DownloadStatus
 
-	// GetDownload 查询指定 infohash 的下载状态。
+	// GetDownload queries the download status of a specified infohash.
 	GetDownload(infohash string) *DownloadStatus
 
-	// PauseDownload 暂停下载。
+	// PauseDownload pauses a download.
 	PauseDownload(infohash string) error
 
-	// ResumeDownload 恢复下载。
+	// ResumeDownload resumes a download.
 	ResumeDownload(infohash string) error
 
-	// RemoveDownload 删除下载任务（含已下载数据）。
+	// RemoveDownload removes a download task (including downloaded data).
 	RemoveDownload(infohash string) error
 }
 
-// TorrentMeta 种子元信息。
+// TorrentMeta is torrent metadata.
 type TorrentMeta struct {
 	InfoHash  string `json:"infohash"`
 	Name      string `json:"name"`
@@ -62,36 +63,36 @@ type TorrentMeta struct {
 	Files     int    `json:"files"`
 }
 
-// DownloadStatus 下载任务状态。
+// DownloadStatus is the download task status.
 type DownloadStatus struct {
-	InfoHash      string `json:"infohash"`
-	Name          string `json:"name"`
-	Status        string `json:"status"` // downloading / paused / completed / error / seeding
-	BytesDone     int64  `json:"bytes_done"`
-	BytesTotal    int64  `json:"bytes_total"`
-	Peers         int    `json:"peers"`
-	Seeders       int    `json:"seeders"`
+	InfoHash      string  `json:"infohash"`
+	Name          string  `json:"name"`
+	Status        string  `json:"status"` // downloading / paused / completed / error / seeding
+	BytesDone     int64   `json:"bytes_done"`
+	BytesTotal    int64   `json:"bytes_total"`
+	Peers         int     `json:"peers"`
+	Seeders       int     `json:"seeders"`
 	Progress      float64
 	DownloadSpeed float64
-	ErrorMessage  string `json:"error_message,omitempty"`
+	ErrorMessage  string  `json:"error_message,omitempty"`
 }
 
-// IPFSControl IPFS 的控制能力。
+// IPFSControl is the control capability for IPFS.
 type IPFSControl interface {
-	// PinCID 下载 CID 并缓存到本地存储，返回 meta。
+	// PinCID downloads a CID and caches it to local storage, returning meta.
 	PinCID(cid string) (*PinInfo, error)
 
-	// UnpinCID 删除已 pin 的 CID。
+	// UnpinCID removes a pinned CID.
 	UnpinCID(cid string) error
 
-	// ListPins 列出所有已 pin 的 CID。
+	// ListPins lists all pinned CIDs.
 	ListPins() ([]PinInfo, error)
 
-	// GatewayStatus 返回各网关健康状态。
+	// GatewayStatus returns the health status of each gateway.
 	GatewayStatus() ([]GatewayStatus, error)
 }
 
-// PinInfo pin 条目信息。
+// PinInfo is pin entry information.
 type PinInfo struct {
 	CID      string `json:"cid"`
 	Hash     string `json:"hash,omitempty"`
@@ -100,7 +101,7 @@ type PinInfo struct {
 	PinnedAt string `json:"pinned_at,omitempty"`
 }
 
-// GatewayStatus 网关状态。
+// GatewayStatus is the gateway status.
 type GatewayStatus struct {
 	URL     string `json:"url"`
 	Online  bool   `json:"online"`

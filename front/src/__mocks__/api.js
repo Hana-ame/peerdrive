@@ -3,9 +3,11 @@
 // This avoids happy-dom Fetch creating Node HTTP requests that
 // cause AbortError / socket hang up noise during window teardown.
 //
-// 这是**手写** mock（不是 automock）：新增 api 导出忘同步，页面在测试里会拿到
-// undefined，然后死在离原因很远的调用点。tests/api-mock-sync.test.js 拿真实
-// 模块的导出清单做双向守卫（缺了/多了都红），改 api.js 后跑一次就知道该改哪。
+// This is a **hand-written** mock (not automock): forgetting to sync a new
+// api export means pages in tests will get undefined, then die at a call site
+// far from the actual cause. tests/api-mock-sync.test.js does a bidirectional
+// guard using the real module's export list (missing/extra both fail), so run
+// it after changing api.js to know what to update.
 
 const EMPTY_PROMISE = Promise.resolve({})
 const EMPTY_ARRAY_PROMISE = Promise.resolve([])
@@ -23,7 +25,8 @@ export const browseDir = () => EMPTY_ARRAY_PROMISE
 // anon collections
 export const createAnonCollection = () => EMPTY_PROMISE
 export const getAnonCollection = () => EMPTY_PROMISE
-// 可见性三档：常量直接转发真实定义（组件读的是值，不是函数）
+// Visibility three levels: constants forwarded directly from the real definition
+// (components read values, not functions)
 export { VISIBILITY, VISIBILITY_PUBLIC, VISIBILITY_RESTRICTED, VISIBILITY_PRIVATE } from '../constants.js'
 export const setAnonCollectionVisibility = () => EMPTY_PROMISE
 export const listKnownAccounts = () => EMPTY_ARRAY_PROMISE
@@ -45,13 +48,13 @@ export const mergeUserCollection = () => EMPTY_PROMISE
 export const getBTStatus = () => EMPTY_PROMISE
 export const getPeerjsNode = () => EMPTY_PROMISE
 
-// 网盘链路（M1-M3 的后端端点，界面见 src/pages/{Drive,Market,Peers,PeerDetail,Transfers}）
+// Netdisk links (backend endpoints for M1-M3, UI in src/pages/{Drive,Market,Peers,PeerDetail,Transfers})
 export const getNodeMarket = () => EMPTY_PROMISE
 export const getJoinedNodes = () => EMPTY_PROMISE
 export const joinNode = () => EMPTY_PROMISE
 export const leaveNode = () => EMPTY_PROMISE
 export const getPeerShares = () => EMPTY_PROMISE
-// 本节点共享范围（M2.6）
+// This node's share scope (M2.6)
 export const getShareScope = () => EMPTY_PROMISE
 export const setShareScope = () => EMPTY_PROMISE
 export const setFilesShared = () => EMPTY_PROMISE
@@ -132,7 +135,7 @@ export const setAuthHeaderEnabled = () => {}
 export const getFollowRedirects = () => true
 export const setFollowRedirects = () => {}
 
-// P2P network config（已删，见 src/api.js 迁移记录）
+// P2P network config (deleted, see src/api.js migration notes)
 
 // IPFS
 export const getIPFSEnabled = () => false
@@ -174,7 +177,8 @@ export const postComment = () => EMPTY_PROMISE
 // Consent
 export const saveConsentLocal = () => {}
 
-// WS 下载/预览（迁移后的新 API，全部 mock 成空 Promise——测试不触发真实 WS）
+// WS download/preview (post-migration new APIs, all mocked as empty Promises —
+// tests do not trigger real WS)
 export const downloadFile = () => Promise.resolve(new Uint8Array(0))
 export const downloadFileToDisk = () => Promise.resolve()
 export const downloadAnonFile = () => Promise.resolve(new Uint8Array(0))

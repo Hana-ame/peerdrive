@@ -1,9 +1,11 @@
 package transport
 
-// create / upload / write-file 这三个 verb 是**对端可控**的路径入口：
-// path 字段由对端整个塞进来，name 字段直接参与落盘路径拼接。
-// pathutil.Within 已经挡住字符串层面的穿透，这里验的是"挡住之后各 verb 真的
-// 没有绕过它另开一条路"——历史上出过事的就是这种"校验在一处、落盘在另一处"。
+// create / upload / write-file are **peer-controlled** path entry points:
+// the path field is entirely stuffed in by the peer, and the name field directly
+// participates in on-disk path concatenation. pathutil.Within already blocks
+// string-level traversal; here we verify that "after blocking, each verb really
+// doesn't have a bypass opening another path" -- historically incidents have
+// happened exactly with this "check in one place, write in another" pattern.
 
 import (
 	"os"
@@ -18,7 +20,7 @@ import (
 	"peerdrive/internal/pathutil"
 )
 
-// newTraversalIndex 根目录 + 根外的诱饵文件。
+// newTraversalIndex root directory + decoy file outside the root.
 func newTraversalIndex(t *testing.T) (*FileIndexService, string, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -26,7 +28,7 @@ func newTraversalIndex(t *testing.T) (*FileIndexService, string, string) {
 	secret := filepath.Join(outside, "secret.txt")
 	require.NoError(t, os.WriteFile(secret, []byte("top secret"), 0o600))
 	svc := NewFileIndexService(root)
-	t.Cleanup(svc.Close) // Windows：不关会话句柄，TempDir 清不掉
+	t.Cleanup(svc.Close) // Windows: without closing session handles, TempDir cannot be cleaned up
 	return svc, root, secret
 }
 
@@ -39,24 +41,25 @@ func TestTraversal_CreateRejectsEscape(t *testing.T) {
 		name string
 		path string
 	}{
-		{"向上逃逸", filepath.Join(root, "..", filepath.Base(parent), "secret.txt")},
-		{"多级向上逃逸", filepath.Join(root, "a", "b", "..", "..", "..", "..", "etc", "passwd")},
-		{"根外绝对路径", secret},
-		{"系统绝对路径", "/etc/passwd"},
-		{"NUL 夹带（否则在根内）", filepath.Join(root, "ok.txt") + "\x00"},
-		{"点号原地逃逸", filepath.Join(root, ".", "..", filepath.Base(parent), "secret.txt")},
+		{"upward escape", filepath.Join(root, "..", filepath.Base(parent), "secret.txt")},
+		{"multi-level upward escape", filepath.Join(root, "a", "b", "..", "..", "..", "..", "etc", "passwd")},
+		{"outside-root absolute path", secret},
+		{"system absolute path", "/etc/passwd"},
+		{"NUL injection (otherwise inside root)", filepath.Join(root, "ok.txt") + "\x00"},
+		{"dot-in-place escape", filepath.Join(root, ".", "..", filepath.Base(parent), "secret.txt")},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := svc.Create(c.path)
-			assert.Error(t, err, "create 必须拒绝：%q", c.path)
+			assert.Error(t, err, "create must reject: %q", c.path)
 		})
 	}
 }
 
-// TestTraversal_CreateAllowsInside 防御不能过当：根内的正常路径必须能登记，
-// 否则"共享目录放外面就拉不到"那类伪约束又会回来。
+// TestTraversal_CreateAllowsInside Defense cannot be overzealous: normal paths inside
+// the root must be registrable, otherwise the fake constraint of "share directory is
+// outside so can't pull" will come back.
 func TestTraversal_CreateAllowsInside(t *testing.T) {
 	initTestDB(t)
 	svc, root, _ := newTraversalIndex(t)
@@ -69,18 +72,19 @@ func TestTraversal_CreateAllowsInside(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "a.txt", fi.Name)
 
-	// 冗余写法（重复分隔符 / 中间夹 "." ）不应被误判
+	// Redundant notation (repeated separators / embedded "." in the middle) should not be misjudged
 	redundant := root + string(filepath.Separator) + string(filepath.Separator) + "sub" +
 		string(filepath.Separator) + "." + string(filepath.Separator) + "a.txt"
 	_, err = svc.Create(redundant)
-	assert.NoError(t, err, "冗余但仍在根内的写法应放行")
+	assert.NoError(t, err, "redundant but still inside root notation should pass")
 }
 
-// TestTraversal_CreateSymlink 根内软链指向根外 → 拒绝。目录级软链尤其阴：
-// "root/alias/secret.txt" 看着在根下两层。
+// TestTraversal_CreateSymlink Symlink inside root pointing outside root -> reject.
+// Directory-level symlinks are especially tricky: "root/alias/secret.txt" looks two
+// levels under root.
 func TestTraversal_CreateSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("Windows 上创建符号链接需要开发者模式/管理员，跳过")
+		t.Skip("creating symbolic links on Windows requires developer mode/admin, skipping")
 	}
 	initTestDB(t)
 	svc, root, secret := newTraversalIndex(t)
@@ -89,16 +93,16 @@ func TestTraversal_CreateSymlink(t *testing.T) {
 	link := filepath.Join(root, "link.txt")
 	require.NoError(t, os.Symlink(secret, link))
 	_, err := svc.Create(link)
-	assert.Error(t, err, "指向根外的文件软链必须拒绝")
+	assert.Error(t, err, "file symlink pointing outside root must be rejected")
 
 	dirLink := filepath.Join(root, "alias")
 	require.NoError(t, os.Symlink(outside, dirLink))
 	_, err = svc.Create(filepath.Join(dirLink, "secret.txt"))
-	assert.Error(t, err, "指向根外的目录软链必须拒绝")
+	assert.Error(t, err, "directory symlink pointing outside root must be rejected")
 }
 
-// TestTraversal_WriteFileNameEscape upload/write-file 的 name 直接进
-// filepath.Join(uploadDir, sanitizeName(name))，是落盘路径的最后一道拼接。
+// TestTraversal_WriteFileNameEscape upload/write-file's name goes directly into
+// filepath.Join(uploadDir, sanitizeName(name)), the last concatenation of the on-disk path.
 func TestTraversal_WriteFileNameEscape(t *testing.T) {
 	initTestDB(t)
 	svc, root, _ := newTraversalIndex(t)
@@ -107,38 +111,39 @@ func TestTraversal_WriteFileNameEscape(t *testing.T) {
 		name string
 		in   string
 	}{
-		{"点点向上", "../../evil.txt"},
-		{"反斜杠点点向上", `..\..\evil.txt`},
-		{"纯点点", ".."},
-		{"多级点点", "../a/../../evil.txt"},
-		{"绝对路径", "/etc/passwd"},
-		{"带子目录", "sub/evil.txt"},
-		{"空名", ""},
-		{"点", "."},
-		{"根", "/"},
+		{"dot-dot upward", "../../evil.txt"},
+		{"backslash dot-dot upward", `..\..\evil.txt`},
+		{"pure dot-dot", ".."},
+		{"multi-level dot-dot", "../a/../../evil.txt"},
+		{"absolute path", "/etc/passwd"},
+		{"with subdirectory", "sub/evil.txt"},
+		{"empty name", ""},
+		{"dot", "."},
+		{"root", "/"},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			fi, err := svc.WriteFile(c.in, strings.NewReader("payload"))
-			require.NoError(t, err, "WriteFile 不应报错，但要落在根目录内")
-			// 落盘位置必须还在 uploadDir 之下——这是唯一的硬断言
+			require.NoError(t, err, "WriteFile should not error, but must land inside the root directory")
+			// On-disk location must still be under uploadDir -- this is the only hard assertion
 			assert.Contains(t, filepath.Clean(fi.Path), filepath.Clean(root),
-				"name=%q 逃出了根目录：%s", c.in, fi.Path)
-			assert.True(t, svc.IsPathAllowed(fi.Path), "name=%q 落到了不允许的位置：%s", c.in, fi.Path)
+				"name=%q escaped the root directory: %s", c.in, fi.Path)
+			assert.True(t, svc.IsPathAllowed(fi.Path), "name=%q landed at a disallowed location: %s", c.in, fi.Path)
 		})
 	}
 }
 
-// TestTraversal_CreateHardlinkRejected 硬链接：没有方向，EvalSymlinks 认不出来。
-// 同一个 inode 在根内有一个名字、根外还有另一个，从路径上无法判断它有没有被
-// 暴露出去，所以只能"有多个名字就拒绝"。
+// TestTraversal_CreateHardlinkRejected Hard links: no direction, EvalSymlinks can't
+// detect them. The same inode has one name inside the root and another outside,
+// and from the path alone you can't tell whether it's been exposed, so the only
+// option is "reject if there are multiple names".
 func TestTraversal_CreateHardlinkRejected(t *testing.T) {
-	// 不再按 GOOS 跳过：以前就是因为 Windows 上没人验证，那条防线悄悄地是空的。
-	// 现在 Windows 走 GetFileInformationByHandle 也能拿到 NumberOfLinks，
-	// 这条用例在两个平台上都必须真的跑一遍。
+	// No longer skip based on GOOS: previously no one verified on Windows, so that
+	// defense line was quietly empty. Now Windows uses GetFileInformationByHandle
+	// to also get NumberOfLinks; this test must actually run on both platforms.
 	if !pathutil.NlinkSupported() {
-		t.Skip("本平台拿不到硬链接数，这条防线为空（见 pathutil/links_*.go）")
+		t.Skip("this platform cannot get hard link count, this defense line is empty (see pathutil/links_*.go)")
 	}
 	initTestDB(t)
 	svc, root, _ := newTraversalIndex(t)
@@ -148,62 +153,67 @@ func TestTraversal_CreateHardlinkRejected(t *testing.T) {
 	require.NoError(t, os.WriteFile(original, []byte("shared inode"), 0o644))
 	alias := filepath.Join(root, "alias.txt")
 	if err := os.Link(original, alias); err != nil {
-		t.Skipf("本环境不能跨目录建硬链接：%v", err)
+		t.Skipf("this environment cannot create cross-directory hard links: %v", err)
 	}
 
-	// 路径判定是**放行**的——它看不出这是硬链接，这正是软链之外的另一个口子
-	assert.True(t, svc.IsPathAllowed(alias), "前置条件：纯路径判定看不出硬链接")
+	// Path check **passes** -- it can't tell this is a hard link; this is another hole
+	// besides symlinks
+	assert.True(t, svc.IsPathAllowed(alias), "precondition: pure path check cannot detect hard links")
 
 	_, err := svc.Create(alias)
-	require.Error(t, err, "有多个名字的文件必须拒绝登记")
-	assert.Contains(t, err.Error(), "hard link", "错误要说明是硬链接：%v", err)
+	require.Error(t, err, "files with multiple names must be rejected from registration")
+	assert.Contains(t, err.Error(), "hard link", "error should indicate it's a hard link: %v", err)
 
-	// 开关打开后放行（pnpm node_modules / git alternates 这类目录需要）。
-	// 判定每次读环境变量，所以 t.Setenv 就能验——不必为了测试改包级变量。
+	// When the switch is on, allow (pnpm node_modules / git alternates and similar directories need it).
+	// The check reads the env var each time, so t.Setenv works for testing -- no need
+	// to modify package-level variables just for the test.
 	t.Setenv("PEERDRIVE_ALLOW_HARDLINKS", "1")
 	_, err = svc.Create(alias)
-	assert.NoError(t, err, "PEERDRIVE_ALLOW_HARDLINKS=1 时应放行")
+	assert.NoError(t, err, "should pass when PEERDRIVE_ALLOW_HARDLINKS=1")
 }
 
-// TestTraversal_ReadRootSymlinkEscape 声明了共享根目录之后，读取边界放宽了，
-// 但**软链逃逸不能跟着放宽**：共享目录里放一个指向 /etc 的软链，仍要判越权。
+// TestTraversal_ReadRootSymlinkEscape After declaring a shared root directory, the
+// read boundary is relaxed, but **symlink escape cannot be relaxed along with it**:
+// a symlink inside the shared directory pointing to /etc must still be judged as
+// privilege escalation.
 func TestTraversal_ReadRootSymlinkEscape(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("Windows 上创建符号链接需要开发者模式/管理员，跳过")
+		t.Skip("creating symbolic links on Windows requires developer mode/admin, skipping")
 	}
 	initTestDB(t)
 	svc, root, secret := newTraversalIndex(t)
-	share := t.TempDir() // 模拟 PEERDRIVE_SHARE_DIRS，在下载根之外
+	share := t.TempDir() // simulate PEERDRIVE_SHARE_DIRS, outside the download root
 
 	svc.AddReadRoot(share)
 
-	// 声明过 → 可读（这是上一轮修的产品约束）
+	// Declared -> readable (this is the product constraint fixed in the previous round)
 	inShare := filepath.Join(share, "movie.mkv")
 	require.NoError(t, os.WriteFile(inShare, []byte("x"), 0o644))
-	assert.True(t, svc.IsPathReadable(inShare), "声明过的共享目录必须可读")
+	assert.True(t, svc.IsPathReadable(inShare), "a declared shared directory must be readable")
 
-	// 共享目录里的软链指向别处 → 越权
+	// Symlink inside the shared directory pointing elsewhere -> privilege escalation
 	require.NoError(t, os.Symlink(secret, filepath.Join(share, "link.txt")))
 	assert.False(t, svc.IsPathReadable(filepath.Join(share, "link.txt")),
-		"共享目录内指向外部的软链必须判越权")
+		"symlink inside a shared directory pointing outside must be judged as privilege escalation")
 
-	// 但登记/写入边界不能因为 AddReadRoot 被带开
+	// But the registration/write boundary must not be widened by AddReadRoot
 	_, err := svc.Create(inShare)
-	assert.Error(t, err, "可读 ≠ 可登记：写边界不许被 AddReadRoot 带开")
+	assert.Error(t, err, "readable != registrable: write boundary must not be widened by AddReadRoot")
 	_ = root
 }
 
-// TestTraversal_RedactDisallowedPath 历史库/旧版本可能残留根目录外的 Path，
-// list/info/sync 对外回显时必须脱敏，不能把绝对路径泄给对端。
+// TestTraversal_RedactDisallowedPath Legacy DBs / old versions may have Path values
+// outside the root directory; list/info/sync must redact them when returning
+// externally -- we cannot leak absolute paths to the peer.
 func TestTraversal_RedactDisallowedPath(t *testing.T) {
 	svc, root, secret := newTraversalIndex(t)
 	p := &PeerJSService{fileIndex: svc}
 
 	got := p.redactDisallowedPath(FileInfo{Hash: "h", Path: secret, Name: "secret.txt"})
-	assert.Equal(t, "", got.Path, "根目录外的 Path 必须脱敏")
-	assert.Equal(t, "secret.txt", got.Name, "Name 可以留")
+	assert.Equal(t, "", got.Path, "Path outside the root directory must be redacted")
+	assert.Equal(t, "secret.txt", got.Name, "Name can stay")
 
 	inside := filepath.Join(root, "a.txt")
 	got = p.redactDisallowedPath(FileInfo{Hash: "h", Path: inside})
-	assert.Equal(t, inside, got.Path, "根目录内的 Path 应保留")
+	assert.Equal(t, inside, got.Path, "Path inside the root directory should be kept")
 }

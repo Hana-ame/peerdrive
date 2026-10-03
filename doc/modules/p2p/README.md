@@ -1,16 +1,16 @@
 # P2P Module Docs
 
-> ⚠️ 2026-08-16 起：互联层已整体替换为 **PeerJS 信令 + WebRTC DataChannel**。
+> ⚠️ As of 2026-08-16: The interconnection layer has been entirely replaced with **PeerJS signaling + WebRTC DataChannel**.
 
-## 当前有效
+## Currently Active
 
-- [TRANSPORT.md](./TRANSPORT.md) — 互联框架：WS + PeerJS 双传输 + Session 抽象 + 信令装配
-- [API-DESIGN.md](./API-DESIGN.md) — `/p2p` 分组下的 HTTP 端点设计
+- [TRANSPORT.md](./TRANSPORT.md) — Interconnection framework: WS + PeerJS dual transport + Session abstraction + signaling assembly
+- [API-DESIGN.md](./API-DESIGN.md) — HTTP endpoint design under the `/p2p` group
 
-## 已归档（旧 libp2p/BT-DHT 栈，**勿照此实现**）
+## Archived (legacy libp2p/BT-DHT stack, **do not implement from these**)
 
-> 见 [doc/archive/LEGACY.md](../../archive/LEGACY.md)。这三份搬到 [archive/](./archive/)：
+> See [doc/archive/LEGACY.md](../../archive/LEGACY.md). These three have been moved to [archive/](./archive/):
 
-- [archive/p2p.md](./archive/p2p.md) — 旧 libp2p 网络架构
-- [archive/dual-stack-protocol.md](./archive/dual-stack-protocol.md) — 旧 IPFS+BT 双栈规格
-- [archive/grid.md](./archive/grid.md) — 旧 P2P 测试网格
+- [archive/p2p.md](./archive/p2p.md) — Legacy libp2p network architecture
+- [archive/dual-stack-protocol.md](./archive/dual-stack-protocol.md) — Legacy IPFS+BT dual-stack specification
+- [archive/grid.md](./archive/grid.md) — Legacy P2P test grid

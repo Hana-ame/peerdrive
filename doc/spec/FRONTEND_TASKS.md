@@ -1,216 +1,216 @@
-# 前端待办事项
+# Frontend Todo List
 
-> 最后更新: 2026-04-27
-> 图例: 🔴 用户重复抱怨 · 🟡 已做但需验证 · ⚪ 待实现
-
----
-
-## 1. AnonCreator（创建合集页）— `react/src/pages/AnonCreator.jsx`
-
-这是用户抱怨最多的页面。核心问题是"左边文件源 + 右边编辑区"的设计不完善。
-
-### 🔴 1.1 左边文件源需要三种视图模式
-
-**抱怨来源**: TODO.txt, 我的测试结果.txt, 我的测试结果2.txt, UI.txt（共 4 次）
-
-三种模式：
-| 模式 | 名称 | 功能 |
-|------|------|------|
-| 模式1 | 🕐 时间线 | 所有已注册文件按时间排列，标注日期分隔 |
-| 模式2 | 📁 已注册目录 | 按 provider_path 构建的目录树，逐级进入 |
-| 模式3 | 🖥️ 本机目录 | 浏览服务器本机文件系统，不依赖已注册文件 |
-
-**当前状态**: 模式1,2 已实现，模式3 框架已加（`browseRawFs` 函数、`rawfs` viewMode），**需验证是否正常工作**。
-
-**测试点**:
-- 切换到"本机目录"后能否看到服务器 `/` 目录下的文件
-- 能否逐级进入文件夹并返回
-- 拖拽本机目录文件到右侧编辑区是否生效
-
-### 🔴 1.2 新建文件夹 —— 直接创建，不弹输入框
-
-**抱怨来源**: 我的测试结果.txt, 我的测试结果2.txt（共 2 次）
-
-- 点击"+ 新建文件夹"后 → 直接创建一个名为"新建文件夹"的文件夹条目
-- 用户双击文件夹名 → 进入重命名模式
-- 移动端需要支持长按重命名
-
-**当前状态**: `FileTree.jsx` 的 `openNewFolder` 已改为直接调用 `onNewFolder('新建文件夹')`。**需验证弹窗是否真的不出现了**。
-
-**测试点**:
-- 点击"+ 新建文件夹" → 是否直接出现"新建文件夹/"条目，无弹窗
-- 双击条目能否重命名
-- 移动端触摸能否触发
-
-### 🔴 1.3 拖拽文件必须生效
-
-**抱怨来源**: 我的测试结果.txt, 我的测试结果2.txt（共 2 次）
-
-- 从左边文件源拖动文件到右边 FileTree 区域 → 添加条目
-- 从左边拖动文件到右侧文件夹上 → 添加条目到该文件夹路径下
-- 拖动到空白区域 → 添加到根目录
-- 拖动时需要有视觉反馈（高亮 drop zone）
-
-**当前状态**: `FileTree.jsx` 有 `onDrop` 处理且添加了 `console.error` 日志。**MIME type `application/peerdrive-file` 在 dragStart 设置，onDrop 读取**。需验证匹配。
-
-**测试点**:
-- 拖拽时间线/目录视图的文件到右侧 → 是否添加
-- 拖拽到文件夹节点上 → 路径是否包含文件夹前缀
-- 拖拽到空白区域 → 是否添加
-- 打开浏览器开发者工具的 console → 拖拽失败是否有 error 日志
-
-### 🔴 1.4 重复添加同路径文件不创建文件夹
-
-**抱怨来源**: 我的测试结果.txt, 我的测试结果2.txt（共 2 次）
-
-- 用户可以对同一 path 添加多个文件（不同 hash）
-- FileTree 中同一路径的多个文件应并列显示，不应被渲染为文件夹
-
-**当前状态**: `FileTree.jsx` 的 `buildTree` 已修复 `_files.length > 1` 的情况。**需验证**。
-
-**测试点**:
-- 添加两个同 path 不同 hash 的文件 → FileTree 显示两个文件条目，不出现文件夹
-
-### 🔴 1.5 合集列表需要完整功能
-
-**抱怨来源**: TODO.txt（1 次，但明确列了多项需求）
-
-- 合集列表左边全屏显示
-- 提供按时间、名称、文件数排序
-- 提供按 tag 搜索/过滤
-- 提供搜索历史
-- 合集名：优先 `friendly_name` → `name_preview`（如"文件a, 文件b 等3个文件"）→ 最后才是 hash 前缀
-
-**当前状态**: 已添加排序按钮和 tag 过滤，但**没有搜索历史**。
-
-**测试点**:
-- 创建带 tag 的合集 → tag 过滤是否出现对应 tag
-- 排序切换是否正常
-- 空合集显示"空合集"而非 hash
-
-### 🔴 1.6 未设名称时弹窗提示
-
-**抱怨来源**: TODO.txt, MEMO.md（多次）
-
-- 点击"保存"时如果名称为空 → `confirm()` 弹窗
-- 用户选"确定" → 调 LLM 推荐名称
-- 用户选"取消" → 留空保存
-
-**当前状态**: 已实现 `confirm()` 弹窗 + `llmSuggest` 调用。
-
-**测试点**:
-- 名称为空时点保存 → 是否弹窗
-- 点确定 → LLM 是否返回推荐名称
-- 点取消 → 是否留空保存成功
-
-### 🔴 1.7 不要 Commit 按钮
-
-**抱怨来源**: TODO.txt, commit.txt（共 2 次）
-
-- 右侧顶栏只保留"保存"按钮
-- "Commit"按钮、"克隆并修改"按钮 → 已删除
-
-**当前状态**: Commit 按钮已移除，仅保留"保存"。**需验证**。
-
-### 🟡 1.8 "已有合集" → 点击合集后编辑
-
-**抱怨来源**: collections.txt
-
-- 点击已有合集 → 加载该合集条目到编辑草稿（不是立刻创建）
-- 编辑完成后点"保存"才会正式保存
-
-**当前状态**: "已有合集" tab 目前是查看合集文件并逐个添加。用户期望是直接加载整个合集作为草稿。
-
-**当前行为**: 点击合集 → `loadCollAsSource()` → 显示文件列表 → 逐个点 +
-**期望行为**: 点击合集 → 加载该合集的所有条目到右侧编辑区（替换现有条目）
+> Last updated: 2026-04-27
+> Legend: 🔴 User repeated complaints · 🟡 Done but needs verification · ⚪ To implement
 
 ---
 
-## 2. FileManager（文件管理页）— `react/src/pages/FileManager.jsx`
+## 1. AnonCreator (Collection Creation Page) — `react/src/pages/AnonCreator.jsx`
 
-### 🔴 2.1 复选框必须明显可见
+This is the page with the most user complaints. The core issue is the "left file source + right editing area" design is incomplete.
 
-**抱怨来源**: 我的测试结果.txt, 我的测试结果2.txt（共 2 次）
+### 🔴 1.1 Left File Source Needs Three View Modes
 
-- 每个文件行前必须有可见的复选框（不要只是点击变色）
-- 复选框要够大（已改为 w-5 h-5 + accent-cyan-500）
-- 选中行要有明显的视觉反馈（已加蓝色左边框 + 背景色）
+**Source of complaints**: TODO.txt, MyTestResults.txt, MyTestResults2.txt, UI.txt (4 times total)
 
-**当前状态**: 已实现。**需在浏览器中验证视觉效果**。
+Three modes:
+| Mode | Name | Function |
+|------|------|----------|
+| Mode 1 | 🕐 Timeline | All registered files sorted by time, with date separators |
+| Mode 2 | 📁 Registered Directories | Directory tree built by provider_path, navigate level by level |
+| Mode 3 | 🖥️ Local Directories | Browse server local filesystem, not dependent on registered files |
 
-### 🔴 2.2 注册目录直接创建合集
+**Current status**: Mode 1,2 implemented, Mode 3 framework added (`browseRawFs` function, `rawfs` viewMode). **Need to verify if working properly**.
 
-**抱怨来源**: 我的测试结果.txt, 我的测试结果2.txt, register.txt（共 3 次）
+**Test points**:
+- Switch to "Local Directories" → can see files under server `/` directory
+- Can navigate into folders and return level by level
+- Dragging local directory files to right editing area works
 
-- 选中目录 → 注册 → **直接创建匿名合集**，不要跳转到 AnonCreator
-- 可选添加 tag
-- 注册完成后导航到合集页面
+### 🔴 1.2 Create New Folder — Direct Creation, No Input Dialog
 
-**当前状态**: `handleRegisterCurrentFolder` 已改为直接 `createAnonCollection` 然后 `navigate`。**需验证**。
+**Source of complaints**: MyTestResults.txt, MyTestResults2.txt (2 times total)
 
-### 🟡 2.3 界面需大一点
+- Click "+ New Folder" → Directly create a folder entry named "New Folder"
+- User double-clicks folder name → Enter rename mode
+- Mobile needs long-press rename support
 
-**抱怨来源**: 我的测试结果.txt（1 次）
+**Current status**: `FileTree.jsx`'s `openNewFolder` changed to directly call `onNewFolder('New Folder')`. **Need to verify if the dialog no longer appears**.
 
-- 已增加 padding、文字大小、行间距
-- √ 已有"已选择 X 个文件"提示
+**Test points**:
+- Click "+ New Folder" → Does "New Folder/" entry appear directly, no dialog
+- Can double-click rename entry
+- Mobile touch triggers
+
+### 🔴 1.3 Drag Files Must Work
+
+**Source of complaints**: MyTestResults.txt, MyTestResults2.txt (2 times total)
+
+- Drag file from left source to right FileTree area → Add entry
+- Drag file from left onto right folder → Add entry under that folder path
+- Drop on empty area → Add to root directory
+- Need visual feedback while dragging (highlight drop zone)
+
+**Current status**: `FileTree.jsx` has `onDrop` handler and added `console.error` logs. **MIME type `application/peerdrive-file` set in dragStart, read in onDrop**. Need to verify matching.
+
+**Test points**:
+- Drag timeline/directory view files to right → Are they added
+- Drag onto folder node → Does path include folder prefix
+- Drop on empty area → Is it added
+- Open browser dev tools console → Are there error logs on drag failure
+
+### 🔴 1.4 Duplicate Adding Same Path Files Should Not Create Folder
+
+**Source of complaints**: MyTestResults.txt, MyTestResults2.txt (2 times total)
+
+- Users can add multiple files to the same path (different hashes)
+- Multiple files with the same path in FileTree should be displayed side by side, not rendered as a folder
+
+**Current status**: `FileTree.jsx`'s `buildTree` fixed for `_files.length > 1` case. **Need to verify**.
+
+**Test points**:
+- Add two files with same path, different hash → FileTree shows two file entries, no folder
+
+### 🔴 1.5 Collection List Needs Full Features
+
+**Source of complaints**: TODO.txt (1 time, but lists multiple requirements clearly)
+
+- Collection list displayed full-screen on left
+- Provide sorting by time, name, file count
+- Provide search/filter by tag
+- Provide search history
+- Collection name: prefer `friendly_name` → `name_preview` (e.g., "File A, File B etc. 3 files") → hash prefix last
+
+**Current status**: Sorting buttons and tag filter added, but **no search history**.
+
+**Test points**:
+- Create collection with tags → Tag filter shows corresponding tags
+- Sort switching works
+- Empty collections show "Empty Collection" instead of hash
+
+### 🔴 1.6 Dialog Prompt When Name Not Set
+
+**Source of complaints**: TODO.txt, MEMO.md (multiple times)
+
+- Click "Save" when name is empty → `confirm()` dialog
+- User selects "OK" → Call LLM to suggest name
+- User selects "Cancel" → Save with empty name
+
+**Current status**: `confirm()` dialog + `llmSuggest` call implemented.
+
+**Test points**:
+- Click save when name is empty → Does dialog appear
+- Click OK → Does LLM return suggested name
+- Click Cancel → Does save succeed with empty name
+
+### 🔴 1.7 No Commit Button
+
+**Source of complaints**: TODO.txt, commit.txt (2 times total)
+
+- Right top bar only keeps "Save" button
+- "Commit" button, "Clone and Modify" button → Already removed
+
+**Current status**: Commit button removed, only "Save" kept. **Need to verify**.
+
+### 🟡 1.8 "Existing Collection" → Click to Edit
+
+**Source of complaints**: collections.txt
+
+- Click existing collection → Load that collection's entries to editing draft (not create immediately)
+- Click "Save" after editing to officially save
+
+**Current status**: "Existing Collection" tab currently shows collection files for individual adding. Users expect to load entire collection as draft directly.
+
+**Current behavior**: Click collection → `loadCollAsSource()` → Show file list → Click + individually
+**Expected behavior**: Click collection → Load all entries of that collection to right editing area (replace existing entries)
 
 ---
 
-## 3. Explorer（用户合集页）— `react/src/pages/Explorer.jsx`
+## 2. FileManager (File Management Page) — `react/src/pages/FileManager.jsx`
 
-### 🔴 3.1 文件浏览用 breadcrumb 目录导航
+### 🔴 2.1 Checkboxes Must Be Clearly Visible
 
-**抱怨来源**: collections.txt, TODO.txt（共 2 次）
+**Source of complaints**: MyTestResults.txt, MyTestResults2.txt (2 times total)
 
-- 不用递归展开树
-- 用平级浏览: 点击文件夹 → 进入 → 显示内容 → 返回
-- 顶部 breadcrumb 显示当前路径
+- Each file row must have a visible checkbox (not just click color change)
+- Checkboxes should be large enough (changed to w-5 h-5 + accent-cyan-500)
+- Selected rows should have clear visual feedback (added blue left border + background color)
 
-**当前状态**: 已改为 `navIn`/`navBack` + breadcrumb。**需验证**。
+**Current status**: Implemented. **Need to verify visual effect in browser**.
 
-### 🟡 3.2 中文术语
+### 🔴 2.2 Register Directory Creates Collection Directly
 
-- Commit → 提交
-- Merge → 合并
-- 不显示 "Version: N" 大字
+**Source of complaints**: MyTestResults.txt, MyTestResults2.txt, register.txt (3 times total)
 
-**当前状态**: 已修改。
+- Select directory → Register → **Directly create anonymous collection**, don't navigate to AnonCreator
+- Optionally add tags
+- After registration, navigate to collection page
+
+**Current status**: `handleRegisterCurrentFolder` changed to directly `createAnonCollection` then `navigate`. **Need to verify**.
+
+### 🟡 2.3 Interface Should Be Larger
+
+**Source of complaints**: MyTestResults.txt (1 time)
+
+- Increased padding, font size, line spacing
+- √ Already has "Selected X files" prompt
 
 ---
 
-## 4. AnonExplorer（匿名合集浏览）— `react/src/pages/AnonExplorer.jsx`
+## 3. Explorer (User Collection Page) — `react/src/pages/Explorer.jsx`
 
-### 🟡 4.1 单文件合集直接显示文件
+### 🔴 3.1 File Browsing Uses Breadcrumb Navigation
 
-- 如果合集只有 1 个条目 → 直接显示文件预览和下载按钮
-- 不显示目录浏览 UI
+**Source of complaints**: collections.txt, TODO.txt (2 times total)
 
-**当前状态**: 已添加 `isSingleFile` 检测 + 单文件视图。
+- No recursive tree expansion
+- Use level-by-level browsing: Click folder → Enter → Show contents → Return
+- Top breadcrumb shows current path
 
-### 🟡 4.2 嵌套合集链接
+**Current status**: Changed to `navIn`/`navBack` + breadcrumb. **Need to verify**.
 
-- 合集中某个条目的 hash 本身是另一个合集 → 显示为合集图标，点击跳转
+### 🟡 3.2 Terminology Translation
 
-**当前状态**: 已添加 `allCollHashes` 检测。文件 hash 匹配时渲染为 📦 合集链接。
+- Commit → Submit
+- Merge → Merge
+- Don't show large "Version: N" text
 
-### 🟡 4.3 空合集自动删除
+**Current status**: Modified.
 
-- 合集条目数为 0 → 自动 `deleteFile` 并提示"空合集，已自动删除"
+---
 
-**当前状态**: 已在 `fetchCollection` 中添加。
+## 4. AnonExplorer (Anonymous Collection Viewer) — `react/src/pages/AnonExplorer.jsx`
+
+### 🟡 4.1 Single File Collection Shows File Directly
+
+- If collection has only 1 entry → Show file preview and download button directly
+- Don't show directory browsing UI
+
+**Current status**: Added `isSingleFile` detection + single file view.
+
+### 🟡 4.2 Nested Collection Links
+
+- If a collection entry's hash is itself another collection → Show as collection icon, click to navigate
+
+**Current status**: Added `allCollHashes` detection. When file hash matches, renders as 📦 collection link.
+
+### 🟡 4.3 Empty Collection Auto-Delete
+
+- If collection entry count is 0 → Auto `deleteFile` and prompt "Empty collection, automatically deleted"
+
+**Current status**: Added in `fetchCollection`.
 
 ---
 
 ## 5. Navbar — `react/src/components/Navbar.jsx`
 
-### 🔴 5.1 "探索合集"导航修复
+### 🔴 5.1 "Explore Collections" Navigation Fix
 
-**抱怨来源**: 我的测试结果2.txt #15
+**Source of complaints**: MyTestResults2.txt #15
 
-- 之前用 `window.location.href = '/'` ❌
-- 已改为 React Router `nav('/')`
+- Previously used `window.location.href = '/'` ❌
+- Changed to React Router `nav('/')`
 
 ---
 
-## 6. 全局 UI — `react/src/pages/Plaza.jsx` 等
+## 6. Global UI — `react/src/pages/Plaza.jsx` etc.

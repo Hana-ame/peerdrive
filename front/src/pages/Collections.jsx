@@ -1,17 +1,17 @@
-// 模块③：合集 —— 浏览本机匿名合集 / 从网盘文件新建 / 查看条目并下载。
+// Module 3: Collections — browse local anonymous collections / create new from netdisk files / view entries and download.
 import React, { useState, useEffect, useCallback } from 'react';
 import * as ws from '../ws';
 
 const VIS_LABEL = {
-  public: { icon: '🌐', label: '公开访问' },
-  restricted: { icon: '👥', label: '仅限权限' },
-  private: { icon: '🔒', label: '仅自己' },
+  public: { icon: '🌐', label: 'Public' },
+  restricted: { icon: '👥', label: 'Authorized Only' },
+  private: { icon: '🔒', label: 'Self Only' },
 };
 
 function fmtTime(ts) {
   if (!ts) return '—';
   const d = new Date(ts);
-  return isNaN(d) ? ts : d.toLocaleString('zh-CN', { hour12: false });
+  return isNaN(d) ? ts : d.toLocaleString('en-US', { hour12: false });
 }
 
 export default function Collections() {
@@ -20,13 +20,13 @@ export default function Collections() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // 新建态
+  // Create-mode state
   const [files, setFiles] = useState([]);
   const [selected, setSelected] = useState([]);
   const [name, setName] = useState('');
   const [visibility, setVisibility] = useState('public');
 
-  // 详情态
+  // Detail-mode state
   const [detail, setDetail] = useState(null); // {hash, data}
 
   const loadList = useCallback(async () => {
@@ -54,9 +54,9 @@ export default function Collections() {
   };
 
   const create = async () => {
-    if (!name.trim()) { setErr('请填合集名称'); return; }
+    if (!name.trim()) { setErr('Please enter a collection name'); return; }
     const chosen = files.filter(f => selected.includes(f.hash));
-    if (chosen.length === 0) { setErr('请至少选择一个文件'); return; }
+    if (chosen.length === 0) { setErr('Please select at least one file'); return; }
     const entries = chosen.map(f => ({
       path: f.filename,
       providers: [{ type: 'sha256', value: f.hash, mime_type: f.mime_type }],
@@ -100,10 +100,10 @@ export default function Collections() {
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="text-2xl font-bold">合集</h1>
-            <p className="text-sm text-gray-500 mt-0.5">内容寻址版本化的文件合集（匿名 / 哈希寻址）</p>
+            <h1 className="text-2xl font-bold">Collections</h1>
+            <p className="text-sm text-gray-500 mt-0.5">Content-addressed versioned file collections (anonymous / hash-addressed)</p>
           </div>
-          <button onClick={openCreate} className="btn-brand">+ 新建合集</button>
+          <button onClick={openCreate} className="btn-brand">+ New Collection</button>
         </div>
 
         {err && (
@@ -112,22 +112,22 @@ export default function Collections() {
 
         {tab === 'list' && (
           collections === null ? (
-            <div className="text-center py-16 text-gray-500 text-sm">读取中...</div>
+            <div className="text-center py-16 text-gray-500 text-sm">Loading...</div>
           ) : collections.length === 0 ? (
             <div className="text-center py-20 text-gray-500 border-2 border-dashed border-white/10 rounded-card">
-              <p>还没有任何合集</p>
-              <p className="text-xs text-gray-600 mt-1">点「新建合集」从网盘文件创建。</p>
+              <p>No collections yet</p>
+              <p className="text-xs text-gray-600 mt-1">Click "New Collection" to create from netdisk files.</p>
             </div>
           ) : (
             <div className="card-surface overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-white/[0.03]">
                   <tr>
-                    <th className={th}>名称</th>
-                    <th className={th}>可见性</th>
-                    <th className={th}>版本</th>
-                    <th className={th}>条目</th>
-                    <th className={th}>创建时间</th>
+                    <th className={th}>Name</th>
+                    <th className={th}>Visibility</th>
+                    <th className={th}>Version</th>
+                    <th className={th}>Entries</th>
+                    <th className={th}>Created</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -137,7 +137,7 @@ export default function Collections() {
                       <React.Fragment key={c.hash || i}>
                         <tr onClick={() => openDetail(c)}
                           className="border-t border-white/[0.04] hover:bg-white/[0.02] cursor-pointer">
-                          <td className="px-3 py-2 text-gray-200">{c.friendly_name || '未命名'}</td>
+                          <td className="px-3 py-2 text-gray-200">{c.friendly_name || 'Unnamed'}</td>
                           <td className="px-3 py-2 text-gray-500">{v.icon} {v.label}</td>
                           <td className="px-3 py-2 text-gray-500">v{c.version}</td>
                           <td className="px-3 py-2 text-gray-500">{c.entry_count ?? c.entries?.length ?? '—'}</td>
@@ -147,11 +147,11 @@ export default function Collections() {
                           <tr className="bg-white/[0.02]">
                             <td colSpan={5} className="px-4 py-3">
                               {detail.data === null ? (
-                                <span className="text-xs text-gray-500">读取中...</span>
+                                <span className="text-xs text-gray-500">Loading...</span>
                               ) : (
                                 <div>
                                   <p className="text-xs text-gray-500 mb-2">
-                                    hash：<span className="font-mono text-gray-400 break-all">{detail.hash}</span>
+                                    hash: <span className="font-mono text-gray-400 break-all">{detail.hash}</span>
                                   </p>
                                   {Array.isArray(detail.data.entries) && detail.data.entries.length > 0 ? (
                                     <ul className="space-y-1">
@@ -160,12 +160,12 @@ export default function Collections() {
                                           <span className="flex-1 truncate text-gray-300">{e.path}</span>
                                           <span className="font-mono text-xs text-gray-600">{String(e.hash || '').slice(0, 12)}…</span>
                                           <button onClick={() => downloadEntry(e.hash, e.path)}
-                                            className="px-2 py-0.5 text-xs bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 rounded">下载</button>
+                                            className="px-2 py-0.5 text-xs bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 rounded">Download</button>
                                         </li>
                                       ))}
                                     </ul>
                                   ) : (
-                                    <p className="text-xs text-gray-600">该合集没有条目。</p>
+                                    <p className="text-xs text-gray-600">This collection has no entries.</p>
                                   )}
                                 </div>
                               )}
@@ -184,12 +184,12 @@ export default function Collections() {
         {tab === 'create' && (
           <div className="card-surface p-5 space-y-4">
             <div>
-              <label className="block text-xs text-gray-400 mb-1.5">合集名称</label>
-              <input value={name} onChange={e => setName(e.target.value)} placeholder="合集名称"
+              <label className="block text-xs text-gray-400 mb-1.5">Collection Name</label>
+              <input value={name} onChange={e => setName(e.target.value)} placeholder="Collection name"
                 className="input-base max-w-md" />
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1.5">可见性</label>
+              <label className="block text-xs text-gray-400 mb-1.5">Visibility</label>
               <div className="flex gap-1">
                 {Object.entries(VIS_LABEL).map(([k, v]) => (
                   <button key={k} onClick={() => setVisibility(k)}
@@ -202,9 +202,9 @@ export default function Collections() {
               </div>
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1.5">选择网盘文件（{selected.length} 个已选）</label>
+              <label className="block text-xs text-gray-400 mb-1.5">Select Netdisk Files ({selected.length} selected)</label>
               {files.length === 0 ? (
-                <p className="text-xs text-gray-600">网盘还没有文件，先去「我的网盘」上传。</p>
+                <p className="text-xs text-gray-600">No files in netdisk yet. Go to "My Cloud Drive" to upload first.</p>
               ) : (
                 <ul className="border border-white/[0.06] rounded-lg divide-y divide-white/[0.04] max-h-72 overflow-y-auto">
                   {files.map((f, i) => (
@@ -223,8 +223,8 @@ export default function Collections() {
             </div>
             <div className="flex gap-2">
               <button onClick={create} disabled={busy || selected.length === 0}
-                className="btn-brand">创建合集</button>
-              <button onClick={() => setTab('list')} className="btn-ghost">取消</button>
+                className="btn-brand">Create Collection</button>
+              <button onClick={() => setTab('list')} className="btn-ghost">Cancel</button>
             </div>
           </div>
         )}

@@ -1,17 +1,17 @@
 package source
 
-// manager.go：SourceManager——统一文件管理 + source 生命周期管理。
-// 职责：
-//   - 注册/注销 source（重名拒绝）、运行时调整优先级
-//   - 统一文件获取入口（Open/OpenRange/OpenAny/Info）：按优先级路由，逐源尝试
-//   - 统一管理数据面（Stats/Snapshot）→ GET /sources 端点
+// manager.go: SourceManager -- unified file management + source lifecycle management.
+// Responsibilities:
+//   - Register/unregister sources (reject duplicates), adjust priority at runtime
+//   - Unified file retrieval entry (Open/OpenRange/OpenAny/Info): route by priority, try sources in order
+//   - Unified management data plane (Stats/Snapshot) -> GET /sources endpoint
 //
-// 路由语义：
-//   - Available()==false 的 source 直接跳过（软健康检查）
-//   - 按优先级升序尝试：local 命中即返回（内容寻址本地权威，优先本地）；
-//     未命中继续降级 peer → url → ipfs
-//   - OpenRange 只走 CapStream（流式分片）；OpenAny 允许降级 CapFile 整体拉取
-//   - 所有尝试记录 Stats；全失败返回汇总错误（含每源失败原因）
+// Routing semantics:
+//   - Sources with Available()==false are skipped directly (soft health check)
+//   - Try in ascending priority order: local hit returns immediately (content-addressed
+//     local authority, prefer local); on miss continue downgrading peer -> url -> ipfs
+//   - OpenRange only uses CapStream (streaming ranges); OpenAny allows falling back to CapFile for full fetch
+//   - All attempts are recorded in Stats; all failures return a summary error (with per-source failure reason)
 
 import (
 	"bytes"
@@ -24,26 +24,28 @@ import (
 	"time"
 )
 
-// Manager 统一管理所有 Source。
+// Manager manages all Sources uniformly.
 type Manager struct {
 	mu      sync.RWMutex
-	sources []Source // 按优先级升序（变更时重排）
+	sources []Source // sorted by ascending priority (re-sorted on change)
 	stats   map[string]*Stats
 
-	// 可选控制面（nil 表示未配置）。按实例持有——多 Manager 互不共享。
-	// 历史背景：此前误用包级全局 var，多实例共享同一控制面 + 测试需防御性
-	// 清理上一轮残留（见 TestManager_ControlNilDefault 旧注释）；改为字段后
-	// 各 Manager 独立，Set/Get 在 m.mu 下访问，与并发 HTTP 请求安全共存。
+	// Optional control planes (nil means not configured). Held per instance -- multiple
+	// Managers do not share them.
+	// Historical background: previously misused a package-level global var, causing multiple
+	// instances to share the same control plane + tests needing defensive cleanup of leftovers
+	// (see TestManager_ControlNilDefault old comment); changed to fields so each Manager
+	// is independent; Set/Get access under m.mu, safe for concurrent HTTP requests.
 	btControl   BTControl
 	ipfsControl IPFSControl
 }
 
-// New 创建空 Manager。
+// New creates an empty Manager.
 func New() *Manager {
 	return &Manager{stats: make(map[string]*Stats)}
 }
 
-// Register 注册 source（重名拒绝）。
+// Register registers a source (rejects duplicate names).
 func (m *Manager) Register(s Source) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -58,7 +60,7 @@ func (m *Manager) Register(s Source) error {
 	return nil
 }
 
-// Unregister 注销 source，返回是否找到。
+// Unregister unregisters a source, returning whether it was found.
 func (m *Manager) Unregister(name string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -72,37 +74,37 @@ func (m *Manager) Unregister(name string) bool {
 	return false
 }
 
-// SetBTControl 注入 BT 控制面实例（nil 表示未启用）。按实例持有，多 Manager
-// 互不干扰；写锁保护，可与并发 Get 安全共存。
+// SetBTControl injects a BT control plane instance (nil means not enabled). Held per instance,
+// so multiple Managers do not interfere; write lock protected, safe with concurrent Get.
 func (m *Manager) SetBTControl(bc BTControl) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.btControl = bc
 }
 
-// GetBTControl 返回当前 BT 控制面实例（可能为 nil）。读锁保护，与运行时
-// 注入互不阻塞。
+// GetBTControl returns the current BT control plane instance (may be nil). Read lock protected,
+// does not block concurrent injection.
 func (m *Manager) GetBTControl() BTControl {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.btControl
 }
 
-// SetIPFSControl 注入 IPFS 控制面实例（nil 表示未启用）。按实例持有。
+// SetIPFSControl injects an IPFS control plane instance (nil means not enabled). Held per instance.
 func (m *Manager) SetIPFSControl(ic IPFSControl) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.ipfsControl = ic
 }
 
-// GetIPFSControl 返回当前 IPFS 控制面实例（可能为 nil）。
+// GetIPFSControl returns the current IPFS control plane instance (may be nil).
 func (m *Manager) GetIPFSControl() IPFSControl {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.ipfsControl
 }
 
-// Get 按名字取 source（控制面/管理面入口用）。
+// Get retrieves a source by name (used by control plane/management plane entry points).
 func (m *Manager) Get(name string) Source {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -114,7 +116,7 @@ func (m *Manager) Get(name string) Source {
 	return nil
 }
 
-// SetPriority 运行时调整 source 优先级（统一管理能力）。
+// SetPriority adjusts a source's priority at runtime (unified management capability).
 func (m *Manager) SetPriority(name string, p int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -128,28 +130,28 @@ func (m *Manager) SetPriority(name string, p int) error {
 	return fmt.Errorf("source %q not registered", name)
 }
 
-// sortLocked 按优先级升序重排（调用方持锁）。
+// sortLocked re-sorts by ascending priority (caller holds the lock).
 func (m *Manager) sortLocked() {
 	sort.SliceStable(m.sources, func(i, j int) bool {
 		return m.sources[i].Priority() < m.sources[j].Priority()
 	})
 }
 
-// snapshot 拷贝当前 sources（调用方持 RLock）。
+// snapshot copies the current sources (caller holds RLock).
 func (m *Manager) snapshot() []Source {
 	out := make([]Source, len(m.sources))
 	copy(out, m.sources)
 	return out
 }
 
-// Open 统一文件管理入口：流式获取 hash 的完整内容（等价 OpenRange 0,-1）。
+// Open is the unified file management entry: streams the full content of a hash (equivalent to OpenRange 0,-1).
 func (m *Manager) Open(ctx context.Context, hash string) (io.ReadCloser, error) {
 	return m.OpenRange(ctx, hash, 0, -1)
 }
 
-// OpenRange 统一文件管理入口：按优先级路由获取 hash 的分片内容。
-// 只尝试 CapStream source——CapFile 源无分片能力，降级会走 8GB 全量
-// buffer（OOM 路径），需要整体获取的调用方请用 OpenAny。
+// OpenRange is the unified file management entry: routes by priority to fetch a range of a hash.
+// Only tries CapStream sources -- CapFile sources have no range capability, falling back would
+// go through an 8GB full buffer (OOM path). Callers needing full fetch should use OpenAny.
 func (m *Manager) OpenRange(ctx context.Context, hash string, offset, size int64) (io.ReadCloser, error) {
 	if err := validHash(hash); err != nil {
 		return nil, err
@@ -181,8 +183,9 @@ func (m *Manager) OpenRange(ctx context.Context, hash string, offset, size int64
 	return nil, fmt.Errorf("all sources failed: %w", lastErr)
 }
 
-// OpenAny 兼容整体获取：优先 CapStream 源（流式），全部失败时降级
-// CapFile 源整体拉取（内存驻留——适合小文件/元数据场景）。
+// OpenAny is a full-fetch compatible entry: prefers CapStream sources (streaming), falls back
+// to CapFile sources for full fetch when all stream sources fail (memory-resident -- suitable
+// for small files/metadata scenarios).
 func (m *Manager) OpenAny(ctx context.Context, hash string) (io.ReadCloser, error) {
 	if err := validHash(hash); err != nil {
 		return nil, err
@@ -223,7 +226,7 @@ func (m *Manager) OpenAny(ctx context.Context, hash string) (io.ReadCloser, erro
 	return nil, fmt.Errorf("all sources failed: %w", lastErr)
 }
 
-// Info 元数据查询：按优先级尝试支持 Info 的 source（第一个命中返回）。
+// Info queries metadata: tries sources supporting Info in priority order (first hit returns).
 func (m *Manager) Info(ctx context.Context, hash string) (*FileMeta, error) {
 	if err := validHash(hash); err != nil {
 		return nil, err
@@ -251,9 +254,9 @@ func (m *Manager) Info(ctx context.Context, hash string) (*FileMeta, error) {
 	return nil, lastErr
 }
 
-// InfoSize 文件大小查询（transport.FileRouter 适配，2026-08-18 第 3 项
-// 优化）：serveFile 的 meta 帧需要 total，但传输层不能依赖 source 包的
-// FileMeta 类型（import 环）——接口收敛为标量 size。
+// InfoSize queries file size (transport.FileRouter adapter, 2026-08-18 optimization item #3):
+// serveFile's meta frame needs total, but the transport layer cannot depend on the source package's
+// FileMeta type (import cycle) -- the interface is converged to a scalar size.
 func (m *Manager) InfoSize(ctx context.Context, hash string) (int64, error) {
 	fi, err := m.Info(ctx, hash)
 	if err != nil || fi == nil {
@@ -262,7 +265,7 @@ func (m *Manager) InfoSize(ctx context.Context, hash string) (int64, error) {
 	return fi.Size, nil
 }
 
-// Snapshot 管理快照：每个 source 的状态 + 统计（GET /sources 数据源）。
+// Snapshot is the management snapshot: each source's status + stats (data source for GET /sources).
 func (m *Manager) Snapshot() []SourceStatus {
 	m.mu.RLock()
 	sources := m.snapshot()
@@ -286,7 +289,7 @@ func (m *Manager) Snapshot() []SourceStatus {
 	return out
 }
 
-// record 记录一次尝试结果（统计 + 最近错误）。
+// record records the result of an attempt (stats + most recent error).
 func (m *Manager) record(name string, ok bool, n int64, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

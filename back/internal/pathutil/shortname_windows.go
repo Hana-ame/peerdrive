@@ -2,21 +2,23 @@
 
 package pathutil
 
-// 8.3 短名（`C:\PROGRA~1`、`D:\MYMEDI~1\VIDEO~1\a.mkv`）。
+// 8.3 short names (`C:\PROGRA~1`, `D:\MYMEDI~1\VIDEO~1\a.mkv`).
 //
-// 为什么必须单独处理：Windows 上同一个目录可以有两个**字符串不同**的名字，
-// 而 Within/normalize 的比较就是按字符串来的。不还原会出两种问题：
+// Why separate handling is required: on Windows, the same directory can have two **different strings**
+// names, and Within/normalize comparison is string-based. Without expansion, two problems arise:
 //
-//  1. 误拒（真会打到正常使用）：运营者配的是长名 `\…\Shared Media Library`，
-//     请求用短名 `\…\SHARED~1\a.txt` 进来（其它工具写进 DB 的路径、面板透传的
-//     路径都可能是短名），Rel 比对不上 → 判成越权。现象和当年的"清单看得见、
-//     一拉就 read failed"同源：文件确实在允许根里，却读不到。
-//  2. 两套名字各自被当回事：判定用长名、打开用短名（或反过来），两边不一致时
-//     会出现"判定放行、实际打到别处"的裂缝。
+//  1. False rejection (would actually affect normal usage): the operator configures a long name
+//     like `\...\Shared Media Library`, but the request comes in with a short name like
+//     `\...\SHARED~1\a.txt` (paths written into the DB by other tools, or paths passed through
+//     the panel may be short names), Rel won't match -> judged out of bounds. The symptom is the
+//     same as the old "visible in manifest, but read failed on fetch": the file is actually inside
+//     the allowed root but can't be read.
+//  2. Two name systems each taken seriously: checking uses the long name, opening uses the short name
+//     (or vice versa), and when they disagree, a crack appears where "check passes but actually goes elsewhere".
 //
-// 反面要记住：短名**不能创造新的可达范围**——它是同一个目录的另一个名字，
-// 不会把 `C:\Windows` 变成共享目录 `C:\data` 之内的东西。所以这里做的是
-// "统一到长名"，而不是"拦住短名"。
+// On the other hand, remember: short names **cannot create new reachable scopes** -- it's another name
+// for the same directory, it won't turn `C:\Windows` into something inside the shared directory
+// `C:\data`. So this does "unify to long names", not "block short names".
 
 import (
 	"path/filepath"
@@ -31,10 +33,10 @@ var (
 	procGetShortNam = kernel32DLL.NewProc("GetShortPathNameW")
 )
 
-// getPathName 调 kernel32 的路径名转换 API；失败返回 false。
+// getPathName calls kernel32 path name conversion APIs; returns false on failure.
 //
-// 这些 API 在没有对应名字时直接返回 0（GetLastError 未必有意义），所以这里
-// 不认 lasterr，只看返回值。
+// These APIs directly return 0 when the corresponding name doesn't exist (GetLastError may not be
+// meaningful), so we don't check lasterr here, only the return value.
 func getPathName(proc *syscall.LazyProc, in string) (string, bool) {
 	if proc == nil || proc.Find() != nil {
 		return "", false
@@ -51,11 +53,12 @@ func getPathName(proc *syscall.LazyProc, in string) (string, bool) {
 	return syscall.UTF16ToString(buf[:r]), true
 }
 
-// ExpandShortNames 把路径里存在的短名成分还原成长名。
+// ExpandShortNames expands short name components in the path back to long names.
 //
-// 不做无所求的替换：只替换**文件系统真的给了短名**的那一段，其余一字不改。
-// 路径还不存在的新文件也支持——从最长前缀往回缩，取第一个能成功转换的前缀，
-// 后面不存在的部分原样保留（正因为它们还不存在，也无从谈长短名）。
+// Doesn't do speculative replacement: only replaces the segment where the **filesystem actually
+// gave a short name**, everything else unchanged. Also works for new files that don't exist yet --
+// shrink from the longest prefix backwards, take the first prefix that converts successfully, and
+// keep the non-existent tail as-is (since they don't exist, short/long names are moot).
 func ExpandShortNames(p string) string {
 	clean := filepath.Clean(p)
 	vol := filepath.VolumeName(clean)
@@ -77,8 +80,8 @@ func ExpandShortNames(p string) string {
 	return clean
 }
 
-// ShortNameOf 取路径的 8.3 短名形式（测试用：构造短名 payload）。
-// 卷上禁用了 8.3 生成时返回空串。
+// ShortNameOf gets the 8.3 short name form of a path (for testing: constructing short-name payloads).
+// Returns empty string when 8.3 generation is disabled on the volume.
 func ShortNameOf(p string) string {
 	if s, ok := getPathName(procGetShortNam, p); ok {
 		return s

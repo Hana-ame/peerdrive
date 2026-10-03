@@ -1,7 +1,7 @@
-// echclient — media-node 的验证客户端（临时工具）。
-// 连接 peersignal.moonchan.xyz 的 media-node，发一个 url 请求，
-// 验证 ECH 直接访问 twimg 的完整链路（信令 → WebRTC → ECH → twimg）。
-// 用法：go run ./cmd/echclient
+// echclient — validation client for media-node (temporary tool).
+// Connects to media-node on peersignal.moonchan.xyz, sends a URL request,
+// and verifies the full ECH path to twimg (signaling → WebRTC → ECH → twimg).
+// Usage: go run ./cmd/echclient
 package main
 
 import (
@@ -26,7 +26,7 @@ type Frame struct {
 }
 
 func main() {
-	urlFlag := flag.String("url", "https://video-cf.twimg.com/ext_tw_video/example.mp4", "要拉的 URL（media-node 仅允许 video-cf.twimg.com）")
+	urlFlag := flag.String("url", "https://video-cf.twimg.com/ext_tw_video/example.mp4", "URL to fetch (media-node only allows video-cf.twimg.com)")
 	flag.Parse()
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()

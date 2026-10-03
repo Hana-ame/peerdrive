@@ -2,15 +2,16 @@
 
 package pathutil
 
-// 8.3 短名的专项用例。
+// Dedicated test cases for 8.3 short names.
 //
-// 这个文件里每个用例都曾在 Linux CI 上无处可跑（8.3 是 NTFS/Windows 的概念），
-// 于是"Windows 语义"长期处于没验证过的状态。现在它们是 Windows 真机测试矩阵
-// 的一部分（见 doc/NETDISK.md §11.6）。
+// Every case in this file previously had nowhere to run on Linux CI (8.3 is an
+// NTFS/Windows concept), so "Windows semantics" remained unverified for a long
+// time. They are now part of the Windows real-machine test matrix (see
+// doc/NETDISK.md §11.6).
 
 import (
 	"os"
-	"path/filepath"
+	=path/filepath
 	"runtime"
 	"testing"
 
@@ -18,13 +19,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestWithin_83ShortNameInsideRoot 修复的那个 bug：文件**真的在允许根内**，
-// 只是路径写法用了 8.3 短名——以前会被判成越权。
+// TestWithin_83ShortNameInsideRoot The bug being fixed: the file **is really
+// inside the allowed root**, it's just that the path form uses 8.3 short
+// names — previously it would be judged as unauthorized.
 //
-// 这不是洁癖：共享目录由其它工具登记、路径穿过 Symlink/UNC/旧面板时都可能
-// 变成短名形态，于是出现"文件在、hash 对、就是读不出来"。
+// This is not nitpicking: shared directories registered by other tools, paths
+// passing through Symlink/UNC/old panels may all become short-name forms,
+// resulting in "file is there, hash matches, just can't read it".
 func TestWithin_83ShortNameInsideRoot(t *testing.T) {
-	require.Equal(t, "windows", runtime.GOOS, "本用例只在 Windows 上有意义")
+	require.Equal(t, "windows", runtime.GOOS, "this test case is only meaningful on Windows")
 
 	base := t.TempDir()
 	root := filepath.Join(base, "Shared Media Library")
@@ -36,26 +39,29 @@ func TestWithin_83ShortNameInsideRoot(t *testing.T) {
 
 	shortRoot := ShortNameOf(root)
 	if shortRoot == "" {
-		t.Skip("本卷没有为这个目录生成 8.3 短名（8.3 生成可能被禁用了）")
+		t.Skip("this volume did not generate an 8.3 short name for this directory (8.3 generation may be disabled)")
 	}
 	t.Logf("root=%s short=%s", root, shortRoot)
-	require.NotEqual(t, root, shortRoot, "前置条件：短名必须真的不同于长名")
+	require.NotEqual(t, root, shortRoot, "precondition: short name must really differ from long name")
 
 	shortFile := filepath.Join(shortRoot, "movie.mkv")
 
-	assert.True(t, Within(root, realFile), "长名写法必须在根内")
-	assert.True(t, Within(root, shortFile), "同一个文件的 8.3 短名写法也必须在根内")
+	assert.True(t, Within(root, realFile), "long name form must be inside root")
+	assert.True(t, Within(root, shortFile), "8.3 short name form of the same file must also be inside root")
 
-	// 走一遍真实打开：光有判定一致还不够，Open 也得认这个别名
+	// Do a real open: just having consistent checks is not enough, Open must
+	// also recognize this alias
 	f, err := SafeOpen(root, shortFile)
-	require.NoError(t, err, "短名写法要能真的打开")
+	require.NoError(t, err, "short name form must actually open")
 	require.NoError(t, f.Close())
 }
 
-// TestWithin_83AliasCannotEscape 修 relax 之后必须确认没顺便开门：短名是别名，
-// 它能指到同一个目录，但**不能**把根外的东西变成根内。
+// TestWithin_83AliasCannotEscape After fixing relax, must confirm we didn't
+// accidentally open the door: a short name is an alias, it can point to the
+// same directory, but it **cannot** turn things outside the root into
+// things inside.
 func TestWithin_83AliasCannotEscape(t *testing.T) {
-	require.Equal(t, "windows", runtime.GOOS, "本用例只在 Windows 上有意义")
+	require.Equal(t, "windows", runtime.GOOS, "this test case is only meaningful on Windows")
 
 	base := t.TempDir()
 	parent := filepath.Join(base, "Parent Dir")
@@ -68,24 +74,26 @@ func TestWithin_83AliasCannotEscape(t *testing.T) {
 
 	shortParent := ShortNameOf(parent)
 	if shortParent == "" {
-		t.Skip("本卷没有生成 8.3 短名")
+		t.Skip("this volume did not generate 8.3 short names")
 	}
-	// 用短名走到共享目录之外
+	// Use short name to reach outside the shared directory
 	viaAlias := filepath.Join(shortParent, "Private Vault", "secret.txt")
-	assert.False(t, Within(share, viaAlias), "短名不能让共享目录之外的文件变成可达")
+	assert.False(t, Within(share, viaAlias), "short name must not make files outside the shared directory reachable")
 
-	// 反过来：短名配共享目录、长名请求，也必须一致（两边混用不能产生缝隙）
+	// Conversely: short name with shared directory, long name request, must
+	// also be consistent (mixing both sides must not create gaps)
 	shortShare := ShortNameOf(share)
 	if shortShare != "" {
 		assert.True(t, Within(share, filepath.Join(shortShare, "a.txt")),
-			"共享目录自己的短名别名应当仍算根内")
+			"the shared directory's own short name alias should still count as inside root")
 	}
 }
 
-// TestExpandShortNames_NewFile 即将写入的新文件最后一段不存在——还原不能就此
-// 摆烂，目录那部分必须还是长名。
+// TestExpandShortNames_NewFile The new file being written — its last segment
+// does not exist yet — the expansion must not give up: the directory part
+// must still be restored to long names.
 func TestExpandShortNames_NewFile(t *testing.T) {
-	require.Equal(t, "windows", runtime.GOOS, "本用例只在 Windows 上有意义")
+	require.Equal(t, "windows", runtime.GOOS, "this test case is only meaningful on Windows")
 
 	base := t.TempDir()
 	dir := filepath.Join(base, "Brand New Dir")
@@ -93,39 +101,47 @@ func TestExpandShortNames_NewFile(t *testing.T) {
 
 	shortDir := ShortNameOf(dir)
 	if shortDir == "" {
-		t.Skip("本卷没有生成 8.3 短名")
+		t.Skip("this volume did not generate 8.3 short names")
 	}
 	got := ExpandShortNames(filepath.Join(shortDir, "not-created-yet.bin"))
-	// 注意基准也要还原：t.TempDir() 自身可能就是短名形态（CI 上是 RUNNER~1），
-	// 直接拿它拼期望值会在那台机器上恒红，而还原逻辑其实是对的。
+	// Note the baseline must also be expanded: t.TempDir() itself may already
+	// be in short-name form (on CI it's RUNNER~1), directly using it for the
+	// expected value would always be red on that machine, while the expansion
+	// logic is actually correct.
 	assert.Equal(t, filepath.Join(ExpandShortNames(base), "Brand New Dir", "not-created-yet.bin"), got,
-		"目录段要还原成长名，文件名原样保留")
+		"directory segments should be restored to long names, filename kept as-is")
 
-	// 能写进去才算真的生效（写路径也走同一套还原）
+	// Being able to write into it means it really works (the write path also
+	// goes through the same expansion)
 	require.NoError(t, SafeWriteFileAny([]string{dir}, filepath.Join(shortDir, "not-created-yet.bin"), []byte("ok"), 0o644))
 	b, err := os.ReadFile(filepath.Join(dir, "not-created-yet.bin"))
 	require.NoError(t, err)
 	assert.Equal(t, "ok", string(b))
 }
 
-// TestExpandShortNames_UnknownPath 不存在的路径不能被"还原成"别的东西：
-// 拿不到长名就原样返回。
+// TestExpandShortNames_UnknownPath A non-existent path must not be "expanded
+// into" something else: if the long name cannot be obtained, return as-is.
 func TestExpandShortNames_UnknownPath(t *testing.T) {
-	require.Equal(t, "windows", runtime.GOOS, "本用例只在 Windows 上有意义")
+	require.Equal(t, "windows", runtime.GOOS, "this test case is only meaningful on Windows")
 	base := t.TempDir()
 	p := filepath.Join(base, "No Such Thing", "x.txt")
-	// 同上：基准可能是短名形态，还原后才是可比较的长名写法
+	// Same as above: the baseline may be in short-name form, only after
+	// expansion is it a comparable long-name form
 	assert.Equal(t, filepath.Join(ExpandShortNames(base), "No Such Thing", "x.txt"), ExpandShortNames(p))
 }
 
-// TestSafeWriteFile_ShortNameRootAlias 允许根本身配成 8.3 短名时，写路径也得认。
+// TestSafeWriteFile_ShortNameRootAlias When the allowed root itself is
+// configured as an 8.3 short name, the write path must also recognize it.
 //
-// 真出过事：GitHub 的 Windows runner 上 t.TempDir() 是 `C:\Users\RUNNER~1\...`，
-// 而 pickRoot 只还原了 path 没还原 root → root 短名 + path 长名被算成两棵树 →
-// 明明在根内的写被判 "path outside allowed root"（本机用户名没有 8.3 别名，
-// 所以本地真机跑不出来，只能靠这里造形状）。
+// This actually caused problems: on GitHub's Windows runner t.TempDir() is
+// `C:\Users\RUNNER~1\...`, while pickRoot only expanded the path but not the
+// root → root short name + path long name were treated as two different
+// trees → a write clearly inside the root was judged "path outside allowed
+// root" (this machine's username has no 8.3 alias, so it couldn't be
+// reproduced on a local real machine, could only rely on creating the shape
+// here).
 func TestSafeWriteFile_ShortNameRootAlias(t *testing.T) {
-	require.Equal(t, "windows", runtime.GOOS, "本用例只在 Windows 上有意义")
+	require.Equal(t, "windows", runtime.GOOS, "this test case is only meaningful on Windows")
 
 	base := t.TempDir()
 	dir := filepath.Join(base, "Shared Media Library")
@@ -133,11 +149,12 @@ func TestSafeWriteFile_ShortNameRootAlias(t *testing.T) {
 
 	short := ShortNameOf(dir)
 	if short == "" {
-		t.Skip("本卷没有生成 8.3 短名")
+		t.Skip("this volume did not generate 8.3 short names")
 	}
-	require.NotEqual(t, short, dir, "短名必须真的与长名不同，否则这个用例测不到东西")
+	require.NotEqual(t, short, dir, "short name must really differ from long name, otherwise this test case tests nothing")
 
-	// 允许根用短名、写入路径也用短名：两边混用不能产生"判不进去"的缝隙
+	// Allowed root uses short name, write path also uses short name: mixing
+	// both sides must not create a "can't check in" gap
 	require.NoError(t, SafeWriteFileAny([]string{short}, filepath.Join(short, "a.bin"), []byte("ok"), 0o644))
 	b, err := os.ReadFile(filepath.Join(dir, "a.bin"))
 	require.NoError(t, err)

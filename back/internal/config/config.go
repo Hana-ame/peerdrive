@@ -1,5 +1,6 @@
-// Package config 从环境变量加载全部配置项（端口、存储目录、PeerJS/WebRTC、BT DHT、转发等）。
-// Load() 读取 PEERDRIVE_* 系列环境变量并返回 *Config。
+// Package config loads all configuration from environment variables (port, storage directory,
+// PeerJS/WebRTC, BT DHT, forwarding, etc.).
+// Load() reads PEERDRIVE_* environment variables and returns *Config.
 package config
 
 import (
@@ -10,21 +11,22 @@ import (
 	"strings"
 )
 
-// 项目公共信令（所有人都连它，不需要自己部署）。
-// 环境变量可以覆盖（自托管 / 内网调试用），但**默认值必须是这一对**——
-// 早先默认是 PeerJS 公共云 0.peerjs.com/peerjs，导致"照默认跑"的节点和面板
-// 互相找不到（分属两个信令，discover 也拿不到任何节点）。
+// Project-wide public signaling (everyone connects to it, no self-hosting needed).
+// Environment variables can override (for self-hosting / internal debugging), but
+// **the default values must be this pair** — the earlier default was PeerJS public cloud
+// 0.peerjs.com/peerjs, which caused nodes and panels running with defaults to not find
+// each other (they were on two different signaling servers, and discover returned no nodes).
 const (
 	DefaultSignalHost = "peersignal.moonchan.xyz"
 	DefaultSignalPort = "443"
 	DefaultSignalKey  = "pd-signal-b9447b406828e500"
-	// DefaultDiscoverURL 公共信令的发现 API（announce + 节点列表）。
+	// DefaultDiscoverURL is the public signaling discovery API (announce + node list).
 	DefaultDiscoverURL = "https://peersignal.moonchan.xyz"
 )
 
 type Config struct {
 	Port   string
-	DBPath string // PEERDRIVE_DB_PATH：SQLite 元数据库路径（默认 ./peerdrive.db）
+	DBPath string // PEERDRIVE_DB_PATH: SQLite metadata database path (default ./peerdrive.db)
 
 	StorageDir    string
 	StorageEnable bool
@@ -48,107 +50,117 @@ type Config struct {
 	WebRTCSTUNServer string
 	WebRTCTURNServer string
 
-	PeerJSEnable bool // PEERDRIVE_PEERJS_ENABLE, 默认 true
-	// 默认指向项目自己的公共信令 peersignal.moonchan.xyz（不是 PeerJS 公共云）。
-	// 环境变量仍然可覆盖（自托管 / 内网调试），但教程不教改它。
-	PeerJSHost   string // PEERDRIVE_PEERJS_HOST, 默认 peersignal.moonchan.xyz
-	PeerJSPort   string // PEERDRIVE_PEERJS_PORT, 默认 443
-	PeerJSKey    string // PEERDRIVE_PEERJS_KEY, 默认 pd-signal-b9447b406828e500
-	PeerJSID     string // PEERDRIVE_PEERJS_ID, 空则生成 peerdrive-<random>
-	PeerJSSecure bool   // PEERDRIVE_PEERJS_SECURE, 默认 true
-	PeerJSPeers  string // PEERDRIVE_PEERJS_PEERS, 逗号分隔对端节点 peer id，启动自动互联
+	PeerJSEnable bool // PEERDRIVE_PEERJS_ENABLE, default true
+	// Defaults to the project's own public signaling peersignal.moonchan.xyz (not PeerJS public cloud).
+	// Environment variables can still override (for self-hosting / internal debugging), but tutorials
+	// don't teach changing this.
+	PeerJSHost   string // PEERDRIVE_PEERJS_HOST, default peersignal.moonchan.xyz
+	PeerJSPort   string // PEERDRIVE_PEERJS_PORT, default 443
+	PeerJSKey    string // PEERDRIVE_PEERJS_KEY, default pd-signal-b9447b406828e500
+	PeerJSID     string // PEERDRIVE_PEERJS_ID, empty generates peerdrive-<random>
+	PeerJSSecure bool   // PEERDRIVE_PEERJS_SECURE, default true
+	PeerJSPeers  string // PEERDRIVE_PEERJS_PEERS, comma-separated peer node ids for auto-interconnection on startup
 
-	// PeerPSK 节点访问预共享密钥（PEERDRIVE_PSK，默认空 = 开放模式）。
+	// PeerPSK is the node access pre-shared key (PEERDRIVE_PSK, default empty = open mode).
 	//
-	// 设了之后：任何对端必须先在这条连接上出示**同样的**密钥，本节点才会应答
-	// 它的数据请求（req/share/list/create/upload/info/delete/sync/转发）。
-	// 没设 = 完全向后兼容的老行为（谁连上都服务）。
+	// When set: any peer must present the **same** key on this connection before this node
+	// will respond to its data requests (req/share/list/create/upload/info/delete/sync/forward).
+	// Not set = fully backward-compatible legacy behavior (serve anyone who connects).
 	//
-	// 边界：它验的是「对端知不知道这个密钥」，不是「对方是谁」——
-	// 不做身份、不做授权分级，所有持钥者对节点有同等访问权。
-	// 想按人区分权限得走注册服务器鉴权（doc/modules/auth），不是这里。
+	// Boundary: it verifies "does the peer know this key", not "who the peer is" — no identity,
+	// no authorization tiers; all key holders have equal access to the node.
+	// To distinguish permissions per user, use the registration server auth (doc/modules/auth), not here.
 	PeerPSK string
 
-	MQTTEnable      bool   // PEERDRIVE_MQTT_ENABLE, 默认 false（MQTT 分片房间发现）
-	MQTTBroker      string // PEERDRIVE_MQTT_BROKER, 默认 tcp://broker.emqx.io:1883
-	MQTTTopicPref   string // PEERDRIVE_MQTT_TOPIC_PREFIX, 默认 peerdrive/v1
-	MQTTCollections string // PEERDRIVE_MQTT_COLLECTIONS, 逗号分隔关注的 collection hash 分片
-	DiscoverURL     string // PEERDRIVE_DISCOVER_URL, 自托管信令服务器的发现 API（设置后优先于 MQTT）
+	MQTTEnable      bool   // PEERDRIVE_MQTT_ENABLE, default false (MQTT shard room discovery)
+	MQTTBroker      string // PEERDRIVE_MQTT_BROKER, default tcp://broker.emqx.io:1883
+	MQTTTopicPref   string // PEERDRIVE_MQTT_TOPIC_PREFIX, default peerdrive/v1
+	MQTTCollections string // PEERDRIVE_MQTT_COLLECTIONS, comma-separated collection hash shards to watch
+	DiscoverURL     string // PEERDRIVE_DISCOVER_URL, discovery API of a self-hosted signaling server (takes priority over MQTT when set)
 
-	// DiscoverPresence 节点级「存在房间」发现（PEERDRIVE_DISCOVER_PRESENCE，默认 true）。
-	// 打开后节点额外加入一个固定的公共房间，使「没有任何共享 collection hash」的
-	// 两个节点也能互相发现并直连（互联层的基础能力）。
-	// 关闭后回归纯内容分片发现（只有声明了同一 collection 的节点才会碰面）。
-	// 隐私取舍：开 = 发现服务端与同房间节点能看到本节点在线及其 peerId；
-	// 关 = 仅在共享集合的房间里可见。仅对 HTTP 发现（自托管信令）生效，
-	// 公共 MQTT broker 不加存在房间（公共 broker 上做全局房间等于广播）。
+	// DiscoverPresence enables node-level "presence room" discovery (PEERDRIVE_DISCOVER_PRESENCE, default true).
+	// When enabled, nodes additionally join a fixed public room so that two nodes with **no shared
+	// collection hash** can still discover and directly connect to each other (a fundamental capability
+	// of the interconnection layer).
+	// When disabled, falls back to pure content-shard discovery (nodes only meet if they declare
+	// the same collection).
+	// Privacy tradeoff: on = discovery server and nodes in the same room can see this node is online
+	// and its peerId; off = only visible in rooms where you share collections. Only applies to HTTP
+	// discovery (self-hosted signaling); the public MQTT broker does not add a presence room (a global
+	// room on a public broker is equivalent to broadcasting).
 	DiscoverPresence bool
 
-	// URLSourceTemplate 统一 source 体系的 URL 源模板（PEERDRIVE_URL_SOURCE_TEMPLATE）。
-	// 空则不注册 url source。%s = sha256 hash；含 %d 时（%d 依次为 offset,size）
-	// 声明 CapStream（Range 分片），否则 CapFile（整体拉取）。
-	// 示例: https://example.com/ipfs/%s 或 https://example.com/f/%s?off=%d&size=%d
+	// URLSourceTemplate is the URL source template for the unified source system (PEERDRIVE_URL_SOURCE_TEMPLATE).
+	// Empty = no URL source registered. %s = sha256 hash; when %d is present (%d for offset,size),
+	// declares CapStream (Range chunks); otherwise CapFile (full fetch).
+	// Example: https://example.com/ipfs/%s or https://example.com/f/%s?off=%d&size=%d
 	URLSourceTemplate string
 
 	DownloadDir         string
-	FolderMaxDepth      int // PEERDRIVE_FOLDER_MAX_DEPTH：register_folder 递归最大深度（默认 1=只扫当前目录）
+	FolderMaxDepth      int // PEERDRIVE_FOLDER_MAX_DEPTH: register_folder max recursion depth (default 1 = scan current directory only)
 	MaxPeers            int
 	DownloadOrder       string
 	DownloadTimeoutSecs int
 
-	ForwardRules string // PEERDRIVE_FORWARD_RULES: "key1:8080,key2:8443"（转发授权白名单,key 即凭证,配置文件建议 chmod 600）
+	ForwardRules string // PEERDRIVE_FORWARD_RULES: "key1:8080,key2:8443" (forwarding auth whitelist; key is the credential; recommend chmod 600 on config file)
 
-	// ── HTTP 加固（见 internal/router/middleware.go）──
-	// RateLimitRPS 每 IP 请求速率上限（PEERDRIVE_RATE_LIMIT_RPS，0 = 不限）。
-	// 默认 30：够管理台正常用（列表轮询 + 手动操作远不到这个量），又能挡住
-	// "一个脚本刷接口"。上传/跨节点拉取这类要真花带宽的口子也一并受它保护。
+	// ── HTTP hardening (see internal/router/middleware.go) ──
+	// RateLimitRPS is the per-IP request rate limit (PEERDRIVE_RATE_LIMIT_RPS, 0 = unlimited).
+	// Default 30: enough for normal admin panel usage (list polling + manual ops are far below this
+	// volume), while blocking "a script spamming the API". Upload/cross-node pull endpoints, which
+	// consume real bandwidth, are also protected by this.
 	RateLimitRPS float64
-	// DisableCSP 关闭 Content-Security-Policy（PEERDRIVE_CSP=off）。
-	// 只在嵌入第三方页面/老浏览器兼容出问题时的逃生阀，默认开。
+	// DisableCSP disables Content-Security-Policy (PEERDRIVE_CSP=off).
+	// Only an escape hatch for when embedding third-party pages or old-browser compatibility breaks. Default on.
 	DisableCSP bool
-	// DisableSwagger 关闭 /swagger/*（PEERDRIVE_SWAGGER=off）。默认开：
-	// 它会把全部端点与参数结构公开出来，公网部署等于送一份攻击地图。
+	// DisableSwagger disables /swagger/* (PEERDRIVE_SWAGGER=off). Default on:
+	// it publishes all endpoints and parameter structures, which on public deployments is like
+	// handing over a map to attackers.
 	DisableSwagger bool
-	// Host 监听地址（PEERDRIVE_HOST，默认空 = 监听所有网卡）。
+	// Host is the listen address (PEERDRIVE_HOST, default empty = listen on all interfaces).
 	//
-	// 为什么值得配：管理面（/ws/peer）没有账号体系，边界就是"谁能连到这个
-	// 端口"。默认听 0.0.0.0 意味着同一局域网内的人都能连上并当管理员。
-	// 只在本机用管理台的话，设成 127.0.0.1 是成本最低的一道墙。
+	// Why it's worth configuring: the admin surface (/ws/peer) has no account system, so the boundary
+	// is "who can reach this port". Default 0.0.0.0 means anyone on the same LAN can connect and
+	// act as admin. If the admin panel is only used locally, setting 127.0.0.1 is the cheapest wall.
 	Host string
 
-	// TrustedProxies 可信反向代理（PEERDRIVE_TRUSTED_PROXIES，逗号分隔 IP/CIDR）。
+	// TrustedProxies are trusted reverse proxies (PEERDRIVE_TRUSTED_PROXIES, comma-separated IP/CIDR).
 	//
-	// 为什么必须显式配：gin 默认**信任所有**代理，ClientIP() 直接取
-	// X-Forwarded-For——而这个头是客户端能伪造的，等于限流和日志里的 IP 全
-	// 由攻击者填。空 = 只认 RemoteAddr（直连部署的正确选择）；反代后面务必
-	// 填上那一跳的地址，否则所有人会被当成一个 IP 一起限流。
+	// Why this must be explicitly configured: gin **trusts all** proxies by default, and ClientIP()
+	// directly takes X-Forwarded-For — but this header can be forged by the client, meaning rate
+	// limiting and log IPs are all filled in by the attacker. Empty = only trust RemoteAddr (the
+	// correct choice for direct deployments); behind a reverse proxy, be sure to fill in the last
+	// hop's address, otherwise everyone will be treated as one IP and rate-limited together.
 	TrustedProxies string
 
-	// ── 节点共享范围（PEERDRIVE_SHARE_*，doc/NETDISK.md M2 / ROADMAP 阶段 5）──
+	// ── Node sharing scope (PEERDRIVE_SHARE_*, doc/NETDISK.md M2 / ROADMAP phase 5) ──
 	//
-	// ShareEnable 共享总开关（PEERDRIVE_SHARE_ENABLE，默认 **false**）。
-	// 为什么默认关：对端经 share 帧能列举本节点"提供了什么"，开启即等于对外
-	// 公开内容清单。默认全盘分享是隐私事故，必须运营者显式开启。
+	// ShareEnable is the sharing master switch (PEERDRIVE_SHARE_ENABLE, default **false**).
+	// Why default off: peers can list "what this node offers" via share frames; enabling it equals
+	// publicly exposing the content manifest. Defaulting to full sharing is a privacy incident —
+	// it must be explicitly enabled by the operator.
 	ShareEnable bool
-	// ShareCollections 对外共享的合集（PEERDRIVE_SHARE_COLLECTIONS，逗号分隔）：
-	// 64hex 合集 hash，或 "all" = 所有 public 合集。受限/私有合集即使写在这里
-	// 也会被跳过（无身份可校验，第 7 阶段前无法安全共享）。
+	// ShareCollections are collections to share externally (PEERDRIVE_SHARE_COLLECTIONS, comma-separated):
+	// 64hex collection hash, or "all" = all public collections. Restricted/private collections listed here
+	// will still be skipped (no identity to verify; cannot be shared safely before phase 7).
 	ShareCollections string
-	// ShareDirs 对外共享的目录（PEERDRIVE_SHARE_DIRS，逗号分隔）。
-	// 语义：file_index 中路径落在这些目录下的文件进入共享清单。
-	// 空 = 不按目录共享（只有合集共享）。仅相对/绝对路径前缀匹配，
-	// 真正的越权读仍由 file_index.IsPathAllowed（上传根目录）兜底。
+	// ShareDirs are directories to share externally (PEERDRIVE_SHARE_DIRS, comma-separated).
+	// Semantics: files in file_index whose path falls under these directories enter the sharing list.
+	// Empty = no directory-based sharing (only collection sharing). Only relative/absolute path
+	// prefix matching; true out-of-bounds reads are still caught by file_index.IsPathAllowed (upload root).
 	ShareDirs string
-	// ShareFriends 好友节点 ID（PEERDRIVE_SHARE_FRIENDS，逗号分隔）：
-	// private 级别的内容放行给这些节点（见 model.LevelPrivate）。
+	// ShareFriends are friend node IDs (PEERDRIVE_SHARE_FRIENDS, comma-separated):
+	// private-level content is allowed through to these nodes (see model.LevelPrivate).
 	//
-	// 注意：peer id 由对端自报，信令不校验身份。好友名单只在**已通过 PSK 准入**
-	// 的连接上才有意义——没设 PSK 时任何人都能连上并自称是好友。要强身份得等
-	// 账号体系（ROADMAP 第 7 阶段）。这里只是运行时状态的初值，之后在管理台改。
+	// Note: peer ids are self-reported by the peer; the signaling server does not verify identity.
+	// The friend list is only meaningful on connections that have **passed PSK admission** — without
+	// PSK, anyone can connect and claim to be a friend. Strong identity requires the account system
+	// (ROADMAP phase 7). Here it's just the initial runtime state; change it from the admin panel later.
 	ShareFriends string
 }
 
-// IsOriginAllowed 检查给定的 Origin 是否在允许列表中，支持通配符（*）和子域名通配（*.example.com）。
+// IsOriginAllowed checks whether the given Origin is in the allow list, supporting
+// wildcards (*) and subdomain wildcards (*.example.com).
 func (c *Config) IsOriginAllowed(origin string) bool {
 	if c.AllowedOrigins == "*" || c.AllowedOrigins == "" {
 		return true
@@ -161,7 +173,7 @@ func (c *Config) IsOriginAllowed(origin string) bool {
 		if o == "*" || strings.EqualFold(origin, o) {
 			return true
 		}
-		// 子域名通配：支持 "*.example.com" 和 "https://*.example.com" 两种写法
+		// Subdomain wildcard: supports both "*.example.com" and "https://*.example.com" formats
 		if strings.HasPrefix(o, "*.") || strings.Contains(o, "://*.") {
 			pattern := o
 			if idx := strings.Index(o, "://*"); idx >= 0 {
@@ -175,7 +187,7 @@ func (c *Config) IsOriginAllowed(origin string) bool {
 	return false
 }
 
-// DefaultRootPath 返回当前操作系统的根路径（Windows 为 C:\，其他为 /）。
+// DefaultRootPath returns the root path of the current OS (C:\ on Windows, / on others).
 func DefaultRootPath() string {
 	if runtime.GOOS == "windows" {
 		return "C:\\"
@@ -183,7 +195,8 @@ func DefaultRootPath() string {
 	return "/"
 }
 
-// Load 读取 PEERDRIVE_* 环境变量并返回完整配置结构体，未设置的项使用默认值。
+// Load reads PEERDRIVE_* environment variables and returns the full configuration struct,
+// using defaults for unset items.
 func Load() *Config {
 	return &Config{
 		Port:               getEnv("PORT", "3000"),
@@ -197,7 +210,7 @@ func Load() *Config {
 		RegServerURL:       getEnv("PEERDRIVE_REG_SERVER_URL", ""),
 		MaxUploadBytes:     getEnvInt64("PEERDRIVE_MAX_UPLOAD_BYTES", 100*1024*1024),     // 100MB default
 		MaxUploadBytesAnon: getEnvInt64("PEERDRIVE_MAX_UPLOAD_ANON_BYTES", 10*1024*1024), // 10MB for anonymous
-		BTDHTEnabled:       getEnvBool("PEERDRIVE_BT_DHT_ENABLE", false),                 // 默认禁用：DHT 初始化阻塞启动，按需手动启用
+		BTDHTEnabled:       getEnvBool("PEERDRIVE_BT_DHT_ENABLE", false),                 // Default disabled: DHT init blocks startup; enable manually as needed
 
 		BTDHTListenAddr:   getEnv("PEERDRIVE_BT_DHT_LISTEN", ":6881"),
 		IPFSGatewayEnable: getEnvBool("PEERDRIVE_IPFS_GATEWAY_ENABLE", true),
@@ -224,7 +237,7 @@ func Load() *Config {
 		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
 
 		DownloadDir: getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
-		FolderMaxDepth: getEnvInt("PEERDRIVE_FOLDER_MAX_DEPTH", 0), // 0=不限制（保持递归全量；>0 才限深）
+		FolderMaxDepth: getEnvInt("PEERDRIVE_FOLDER_MAX_DEPTH", 0), // 0=unlimited (full recursion; >0 limits depth)
 		MaxPeers:    getEnvInt("PEERDRIVE_MAX_PEERS", 8),
 
 		ShareEnable:      getEnvBool("PEERDRIVE_SHARE_ENABLE", false),
@@ -245,40 +258,41 @@ func Load() *Config {
 	}
 }
 
-// Validate 在启动期把"配错了但不会报错"的配置挡掉。
+// Validate catches "misconfigured but won't error" configs at startup time.
 //
-// 为什么要它：环境变量是字符串，拼错一个字符不会让进程失败，只会让行为跑偏
-// （PORT=300o → 监听失败；PEERDRIVE_STORAGE= 空 → 文件落进当前工作目录），
-// 等到用户发现时，落点已经是一堆找不回来的文件了。
-// 原则是"快速失败"：启动期一次说清，好过运行期慢慢错。
+// Why it's needed: env vars are strings; one typo won't crash the process, it just
+// causes subtle misbehavior (PORT=300o → bind failure; PEERDRIVE_STORAGE= empty →
+// files land in the current working directory). By the time the user notices, the
+// destination is already a pile of unrecoverable files. The principle is "fail fast":
+// a clear message at startup is better than slow errors at runtime.
 func Validate(c *Config) error {
 	var errs []string
 
 	if n, err := strconv.Atoi(c.Port); err != nil || n <= 0 || n > 65535 {
-		errs = append(errs, fmt.Sprintf("PORT=%q 不是合法端口（1-65535）", c.Port))
+		errs = append(errs, fmt.Sprintf("PORT=%q is not a valid port (1-65535)", c.Port))
 	}
 	if strings.TrimSpace(c.DBPath) == "" {
-		errs = append(errs, "PEERDRIVE_DB_PATH 不能为空")
+		errs = append(errs, "PEERDRIVE_DB_PATH cannot be empty")
 	}
 	if strings.TrimSpace(c.StorageDir) == "" {
-		errs = append(errs, "PEERDRIVE_STORAGE 不能为空")
+		errs = append(errs, "PEERDRIVE_STORAGE cannot be empty")
 	}
 	if strings.TrimSpace(c.DownloadDir) == "" {
-		errs = append(errs, "PEERDRIVE_DOWNLOAD_DIR 不能为空")
+		errs = append(errs, "PEERDRIVE_DOWNLOAD_DIR cannot be empty")
 	}
 	if p := strings.TrimSpace(c.PeerJSPort); p != "" {
 		if n, err := strconv.Atoi(p); err != nil || n <= 0 || n > 65535 {
-			errs = append(errs, fmt.Sprintf("PEERDRIVE_PEERJS_PORT=%q 不是合法端口", p))
+			errs = append(errs, fmt.Sprintf("PEERDRIVE_PEERJS_PORT=%q is not a valid port", p))
 		}
 	}
 	if c.MaxPeers <= 0 {
-		errs = append(errs, fmt.Sprintf("PEERDRIVE_MAX_PEERS=%d 必须为正数", c.MaxPeers))
+		errs = append(errs, fmt.Sprintf("PEERDRIVE_MAX_PEERS=%d must be positive", c.MaxPeers))
 	}
 
 	if len(errs) == 0 {
 		return nil
 	}
-	return fmt.Errorf("配置校验失败：\n  - %s", strings.Join(errs, "\n  - "))
+	return fmt.Errorf("configuration validation failed:\n  - %s", strings.Join(errs, "\n  - "))
 }
 
 func getEnv(key, defaultVal string) string {

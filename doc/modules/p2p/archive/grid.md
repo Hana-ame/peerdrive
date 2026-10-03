@@ -40,7 +40,7 @@
          │   /p2p/12D3KooWFgwXYLY84fi...
          │
     ┌────┴────┐
-    │ 外部节点  │ (any peer with bootstrap addr)
+    │ External nodes  │ (any peer with bootstrap addr)
     └─────────┘
 ```
 

@@ -1,15 +1,17 @@
 package source
 
-// peer.go：PeerSource——p2p 透传源（经 PeerJS/WebRTC 从在线对端拉取）。
-// 语义：
-//   - Open 枚举在线对端（PeerJSService.Connections），多对端并发竞速，
-//     首个流建立成功立即返回——透传语义：本节点没有就从对端拉，且选
-//     最快的路径（2026-08-19 竞速批次，见 REFACTOR §3.15）
-//   - 同一对端同时只允许一个流：连接级 expect 单槽（帧协议约束，见
-//     transport/conn.go bindConn 注释）——并发向同一 peer 发起两个流会
-//     数据交错。用 TryLock 跳过忙碌 peer 而不是等待（大文件流会阻塞很久）
-//   - 全量请求的 sha256 校验由 transport 的 fetchReader 完成（H5 兜底）
-//   - Available = 有在线对端
+// peer.go: PeerSource — p2p passthrough source (fetches from online peers via PeerJS/WebRTC).
+// Semantics:
+//   - Open enumerates online peers (PeerJSService.Connections), races multiple peers concurrently,
+//     returns immediately on the first successful stream — passthrough semantics: if this node
+//     doesn't have it, fetch from peers, and pick the fastest path (2026-08-19 race batch,
+//     see REFACTOR §3.15).
+//   - Only one stream allowed per peer at a time: connection-level expect single-slot (frame
+//     protocol constraint, see transport/conn.go bindConn comments) — concurrent streams to
+//     the same peer will interleave data. TryLock skips busy peers instead of waiting (large
+//     file streams would block for a long time).
+//   - sha256 verification of full requests is done by transport's fetchReader (H5 fallback).
+//   - Available = has online peers.
 
 import (
 	"context"
@@ -21,7 +23,7 @@ import (
 	"peerdrive/internal/transport"
 )
 
-// PeerSource p2p 透传文件源。
+// PeerSource p2p passthrough file source.
 type PeerSource struct {
 	name string
 	svc  *transport.PeerJSService
@@ -29,13 +31,13 @@ type PeerSource struct {
 	mu       sync.RWMutex
 	priority int
 
-	// peerLocks 每个对端的流互斥：同 peer 同时只一个 OpenStream。
-	// TryLock 语义：忙则跳过该 peer（去下一个），不等待——等大文件流
-	// 结束会阻塞整个路由。
+	// peerLocks per-peer stream mutex: only one OpenStream per peer at a time.
+	// TryLock semantics: skip busy peers (go to the next), don't wait — waiting for a
+	// large file stream to finish would block the entire routing.
 	peerLocks sync.Map // peerID → *sync.Mutex
 }
 
-// NewPeerSource 创建 p2p 透传源。name 默认 "peer"。
+// NewPeerSource creates a p2p passthrough source. name defaults to "peer".
 func NewPeerSource(svc *transport.PeerJSService) *PeerSource {
 	return &PeerSource{name: "peer", svc: svc}
 }
@@ -43,7 +45,7 @@ func NewPeerSource(svc *transport.PeerJSService) *PeerSource {
 func (s *PeerSource) Name() string { return s.name }
 func (s *PeerSource) Type() string { return "peer" }
 
-// Capabilities 对端流式分片（req 帧支持 offset/size range）。
+// Capabilities peer streaming chunks (req frames support offset/size range).
 func (s *PeerSource) Capabilities() Capability { return CapStream }
 
 func (s *PeerSource) Priority() int {
@@ -58,7 +60,7 @@ func (s *PeerSource) SetPriority(p int) {
 	s.mu.Unlock()
 }
 
-// Available 有在线对端（排除自身）。
+// Available has online peers (excluding self).
 func (s *PeerSource) Available(ctx context.Context) bool {
 	conns := s.svc.Connections()
 	for pid := range conns {
@@ -69,14 +71,17 @@ func (s *PeerSource) Available(ctx context.Context) bool {
 	return false
 }
 
-// Open 从在线对端拉取内容：多对端并发竞速，首个成功返回。
-// 为什么要竞速：串行尝试时第一个慢对端（远端磁盘慢/网络抖）会卡住整个
-// 回源直到失败/超时——透传场景多个对端在线时应选最快路径。竞速只到
-// 「首个流建立成功」，不等待其余对端返回（迟到/失败的流由收割 goroutine
-// Close，防 peer 流互斥锁泄漏和本端 fetch 状态悬挂）。
-// ctx 可携带回源链路（transport.TraceKey，serveFile 回源时注入）——
-// 透传给 OpenStreamFrom 防环（A←→B 互连回源死循环，2026-08-18 第 3 项
-// 优化）。根请求（HTTP 下载等）ctx 无该值 → trace 为 nil。
+// Open fetches content from online peers: multi-peer concurrent race, first success returns.
+// Why race: with serial attempts, the first slow peer (slow remote disk / network jitter)
+// would block the entire fetch fallback until failure/timeout — in passthrough scenarios
+// with multiple peers online, we should pick the fastest path. Racing only goes to
+// "first stream established", not waiting for remaining peers (late/failing streams are
+// closed by the reaper goroutine to prevent peer stream mutex leaks and local fetch state
+// hangs).
+// ctx can carry the fallback chain (transport.TraceKey, injected during serveFile
+// fallback) — passed through to OpenStreamFrom to prevent loops (A←→B mutual interconnect
+// fallback infinite loop, 2026-08-18 3rd optimization item). Root requests (HTTP download
+// etc.) ctx has no such value → trace is nil.
 func (s *PeerSource) Open(ctx context.Context, hash string, offset, size int64) (io.ReadCloser, error) {
 	if err := validHash(hash); err != nil {
 		return nil, err
@@ -90,7 +95,7 @@ func (s *PeerSource) Open(ctx context.Context, hash string, offset, size int64) 
 		return nil, fmt.Errorf("no online peer available")
 	}
 	if len(pids) == 1 {
-		// 单对端：走原串行路径（无并发开销）
+		// Single peer: take the original serial path (no concurrency overhead)
 		r, err := s.svc.OpenStreamFrom(pids[0], hash, offset, size, trace)
 		if err != nil {
 			locks[0].Unlock()
@@ -101,10 +106,11 @@ func (s *PeerSource) Open(ctx context.Context, hash string, offset, size int64) 
 	return s.raceOpen(pids, locks, hash, offset, size, trace)
 }
 
-// collectPeers 枚举可用对端并逐个 TryLock：忙对端（已有流在进行，
-// 连接级 expect 单槽）跳过不等待——等大文件流结束会阻塞整个路由。
-// 返回的锁已由本调用持有，释放责任交给流生命周期（胜者 reader Close /
-// 失败路径立即 Unlock / 竞速收割者 Close）。
+// collectPeers enumerates available peers and TryLocks each: busy peers (already have
+// an active stream, connection-level expect single-slot) are skipped without waiting —
+// waiting for large file streams would block the entire routing.
+// Returned locks are held by this caller; release responsibility is transferred to the
+// stream lifecycle (winner reader Close / failure path immediate Unlock / race reaper Close).
 func (s *PeerSource) collectPeers() (pids []string, locks []*sync.Mutex) {
 	conns := s.svc.Connections()
 	for pid := range conns {
@@ -122,28 +128,29 @@ func (s *PeerSource) collectPeers() (pids []string, locks []*sync.Mutex) {
 	return pids, locks
 }
 
-// raceResult 竞速结果。chan 容量 = 候选数 → 输家 goroutine 永不阻塞。
+// raceResult race result. chan capacity = candidate count → loser goroutines never block.
 type raceResult struct {
 	r   io.ReadCloser
 	mu  *sync.Mutex
-	err error // 失败原因（全失败时聚合进最终报错，可诊断）
+	err error // failure reason (aggregated into final error on all-failure, for diagnosis)
 }
 
-// raceOpen 多对端并发竞速：每个候选对端并发发起流，首个成功立即返回
-// （真竞速：慢对端不阻塞本调用）；其余未决结果由后台收割 goroutine 关闭
-// （r 泄漏 → 该对端流互斥锁永久占用 + 本端 fetch 状态悬挂，慢对端晚到
-// 数秒即泄漏）。
+// raceOpen multi-peer concurrent race: each candidate peer initiates a stream concurrently,
+// first success returns immediately (true race: slow peers don't block this call); remaining
+// undecided results are closed by a background reaper goroutine (r leak → that peer's stream
+// mutex permanently occupied + local fetch state hang, slow peers arriving seconds late
+// cause leaks).
 func (s *PeerSource) raceOpen(pids []string, locks []*sync.Mutex, hash string, offset, size int64, trace []string) (io.ReadCloser, error) {
 	ch := make(chan raceResult, len(pids))
 	for i := range pids {
 		go func(pid string, mu *sync.Mutex) {
 			r, err := s.svc.OpenStreamFrom(pid, hash, offset, size, trace)
 			if err != nil {
-				mu.Unlock() // 失败：立即释放该 peer 槽位
+				mu.Unlock() // failure: immediately release that peer's slot
 				ch <- raceResult{err: err}
 				return
 			}
-			ch <- raceResult{r: r, mu: mu} // 成功：解锁权交给胜者/收割者
+			ch <- raceResult{r: r, mu: mu} // success: unlock ownership goes to winner/reaper
 		}(pids[i], locks[i])
 	}
 	got := 0
@@ -170,14 +177,15 @@ func (s *PeerSource) raceOpen(pids []string, locks []*sync.Mutex, hash string, o
 		}
 		return &peerReadCloser{r: rr.r, mu: rr.mu}, nil
 	}
-	// 全失败：聚合每个对端的原因（回退到上层 source 时的可诊断报错）
+	// All failed: aggregate each peer's reason (diagnosable error when falling back to
+	// upper-layer source)
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("all peers failed: %s", strings.Join(errs, "; "))
 	}
 	return nil, fmt.Errorf("all peers failed")
 }
 
-// Fetch 整体获取（CapStream 已覆盖，防御性实现）。
+// Fetch full fetch (CapStream already covers, defensive implementation).
 func (s *PeerSource) Fetch(ctx context.Context, hash string) ([]byte, error) {
 	r, err := s.Open(ctx, hash, 0, -1)
 	if err != nil {
@@ -187,19 +195,21 @@ func (s *PeerSource) Fetch(ctx context.Context, hash string) ([]byte, error) {
 	return io.ReadAll(r)
 }
 
-// Info p2p 源不做元数据查询（对端 info verb 未在拉取侧实现——第一版不支持）。
+// Info p2p source does not do metadata queries (peer info verb not implemented on the
+// fetch side — not supported in the first version).
 func (s *PeerSource) Info(ctx context.Context, hash string) (*FileMeta, error) {
 	return nil, nil
 }
 
-// peerReadCloser 读完后释放 peer 流互斥锁。
+// peerReadCloser releases the peer stream mutex after reading is complete.
 type peerReadCloser struct {
 	r  io.ReadCloser
 	mu *sync.Mutex
-	// 防调用方重复 Close：io.Reader 的使用约定允许 Close 多次（defer +
-	// 显式关闭），若每次都 Unlock 同一个 *sync.Mutex 会 panic。
-	// 发现背景：再 review 2026-08-19——竞速收割/失败路径与调用方 defer
-	// 叠加时，双 Close 解锁是潜在崩溃点。
+	// Prevent caller from calling Close twice: io.Reader usage convention allows Close
+	// to be called multiple times (defer + explicit close), and Unlock on the same
+	// *sync.Mutex every time would panic.
+	// Discovery background: re-review 2026-08-19 — race reaping / failure path combined
+	// with caller defer, double Close unlock is a potential crash point.
 	once sync.Once
 }
 
@@ -209,7 +219,7 @@ func (p *peerReadCloser) Close() error {
 	var err error
 	p.once.Do(func() {
 		err = p.r.Close()
-		p.mu.Unlock() // 流结束释放该 peer 槽位（TryLock 持有者才走到这）
+		p.mu.Unlock() // release the peer's slot when stream ends (only TryLock holders reach here)
 	})
 	return err
 }

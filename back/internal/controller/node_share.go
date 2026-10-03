@@ -1,25 +1,28 @@
-// node_share.go：本节点共享范围的管理端点（doc/NETDISK.md M2.6 / §12.6）。
+// node_share.go: management endpoints for this node's sharing scope (doc/NETDISK.md M2.6 / §12.6).
 //
-// 语义：回答并修改「我这个节点对外提供什么、给谁」：
-//   - GET  /peerjs/share         当前共享范围 + 可选文件清单（带是否已共享/级别）
-//   - PUT  /peerjs/share         局部更新（enable/dirs/files/collections/friends）
-//   - POST /peerjs/share/files   勾选/取消若干文件 {hashes:[], shared:bool, level:string}
+// Semantics: answer and modify "what does my node offer externally, and to whom":
+//   - GET  /peerjs/share         current sharing scope + optional file list (with shared/level flags)
+//   - PUT  /peerjs/share         partial update (enable/dirs/files/collections/friends)
+//   - POST /peerjs/share/files   toggle some files {hashes:[], shared:bool, level:string}
 //
-// 为什么要这套端点：共享范围原本只能靠 PEERDRIVE_SHARE_* 环境变量在启动时定，
-// 想改就得重启节点。而"我愿意把哪些文件给出去、给谁看"是随手的决定——新上传
-// 一个文件想立刻共享、某个目录不想给了。要求重启等于逼运营者要么长期共享一个
-// 过宽的目录，要么干脆不开共享（见 service/nodeshare.go 文件头）。
+// Why this set of endpoints: sharing scope used to only be configurable via PEERDRIVE_SHARE_*
+// environment variables at startup — changing it required a node restart. But "which files am I
+// willing to share, and with whom" is an ad-hoc decision — you upload a file and want to share it
+// immediately, or decide you don't want to share a certain directory anymore. Requiring a restart
+// forces operators to either long-term share an overbroad directory, or not enable sharing at all
+// (see service/nodeshare.go file header).
 //
-// 级别三档（model.Level*）：public 列出且可下载 / unlisted 不列出但可下载 /
-// private 只给自己与好友。同一内容被多条来源命中时取最宽松的那条。
+// Three levels (model.Level*): public = listed and downloadable / unlisted = not listed but
+// downloadable / private = only self and friends. When the same content is matched by multiple
+// sources, the most permissive one wins.
 //
-// 为什么挂 auth（AuthRequired）：GET 会列出本机文件的名字与大小，写端点更是
-// 直接决定对外公开什么。未配注册服务器时 AuthRequired 内部放行（单机模式），
-// 语义与 /peerjs/nodes/join 一致。
+// Why auth is required (AuthRequired): GET lists local file names and sizes, and write endpoints
+// directly decide what's publicly exposed. When no registration server is configured, AuthRequired
+// passes through internally (single-machine mode); semantics are consistent with /peerjs/nodes/join.
 //
-// 与 /peerjs/nodes/:peer/shares 的区别（不要混淆命名）：
-//   - /peerjs/nodes/:peer/shares = 去**问对端**它的共享清单（share 帧）
-//   - /peerjs/share              = 管理**自己**的共享范围（本地状态）
+// Distinction from /peerjs/nodes/:peer/shares (don't confuse the names):
+//   - /peerjs/nodes/:peer/shares = **ask a peer** for its share manifest (share frames)
+//   - /peerjs/share              = manage **your own** sharing scope (local state)
 
 package controller
 
@@ -33,18 +36,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// nodeShareSvc 由 main 注入（同 InitNodeDirectory 模式）。
+// nodeShareSvc is injected by main (same pattern as InitNodeDirectory).
 var nodeShareSvc *service.NodeShare
 
-// InitNodeShareController 注入共享范围服务（nil = 该组端点 503）。
+// InitNodeShareController injects the sharing scope service (nil = this group of endpoints returns 503).
 func InitNodeShareController(s *service.NodeShare) {
 	log.LogDebug("ctrl-node-share: InitNodeShareController")
 	nodeShareSvc = s
 }
 
-// GetNodeShare 处理 GET /peerjs/share：
-// 返回当前共享范围 + 可选文件清单（每行带 shared/by_dir/level），管理台据此
-// 渲染勾选框与级别选择。
+// GetNodeShare handles GET /peerjs/share:
+// Returns current sharing scope + optional file list (each row with shared/by_dir/level),
+// so the admin panel can render checkboxes and level selectors.
 func GetNodeShare(c *gin.Context) {
 	if nodeShareSvc == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "share scope not enabled (peerjs disabled)"})
@@ -53,7 +56,7 @@ func GetNodeShare(c *gin.Context) {
 	scope := nodeShareSvc.Scope()
 	files := nodeShareSvc.CandidateFiles()
 	if files == nil {
-		files = []service.ShareFileItem{} // 保持 JSON 为 []
+		files = []service.ShareFileItem{} // Keep JSON as []
 	}
 	summary := model.NodeShares{}
 	if nodeShareSvc.Enabled() {
@@ -64,17 +67,18 @@ func GetNodeShare(c *gin.Context) {
 		"dirs":        scope.Dirs,
 		"files":       files,
 		"collections": scope.Collections,
-		// 勾选了但当前不在 file_index 里的 hash 也要回给前端：否则用户看不到
-		// "我勾过它"（文件被删除后勾选残留），会以为系统把他的选择弄丢了。
+		// Hashes that were checked but aren't currently in file_index must also be returned to
+		// the frontend: otherwise the user can't see "I checked it" (residual checkmark after
+		// file deletion), and would think the system lost their selection.
 		"selected": scope.Files,
-		// friends：private 级别的放行名单（peer id）。前端直接编辑它。
+		// friends: the allowlist of peer IDs for private level. Frontend edits this directly.
 		"friends": scope.Friends,
 		"levels":  []string{model.LevelPublic, model.LevelUnlisted, model.LevelPrivate},
 		"summary": summary,
 	})
 }
 
-// PutNodeShare 处理 PUT /peerjs/share（局部更新，未传的项保持不变）。
+// PutNodeShare handles PUT /peerjs/share (partial update; unsubmitted fields remain unchanged).
 func PutNodeShare(c *gin.Context) {
 	if nodeShareSvc == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "share scope not enabled (peerjs disabled)"})
@@ -87,7 +91,8 @@ func PutNodeShare(c *gin.Context) {
 	}
 	scope, err := nodeShareSvc.Update(patch)
 	if err != nil {
-		// 校验失败（卷根目录 / 非法 hash / 非法级别）是用户输入问题，400 而不是 500
+		// Validation failures (volume root directory / invalid hash / invalid level) are user input
+		// issues → 400, not 500
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -100,14 +105,15 @@ func PutNodeShare(c *gin.Context) {
 	})
 }
 
-// PostNodeShareFiles 处理 POST /peerjs/share/files
-// {hashes:[...], shared:bool, level:"public"|"unlisted"|"private"}。
+// PostNodeShareFiles handles POST /peerjs/share/files
+// {hashes:[...], shared:bool, level:"public"|"unlisted"|"private"}.
 //
-// 单独一条而不是让前端每次 PUT 全量：勾选框一次改一行，全量 PUT 需要前端先把
-// 整份范围读回来再拼，并发点两下就会互相覆盖。
+// A separate endpoint rather than letting the frontend PUT the full state each time: a checkbox
+// changes one row at a time, and a full PUT requires the frontend to read the entire scope back
+// and reassemble it — two concurrent clicks would overwrite each other.
 //
-// level 省略时沿用已有级别（没有就 public）——只切"共享/不共享"的界面不该被迫
-// 知道当前级别。
+// When level is omitted, the existing level is kept (or public if none exists) — a UI that only
+// toggles "shared/not shared" shouldn't be forced to know the current level.
 func PostNodeShareFiles(c *gin.Context) {
 	if nodeShareSvc == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "share scope not enabled (peerjs disabled)"})

@@ -1,4 +1,4 @@
-// Package service 提供 Peerdrive 业务逻辑层，包括匿名集合管理、下载、P2P 传输、文件注册等功能。
+// Package service provides the Peerdrive business logic layer, including anonymous collection management, download, P2P transfer, file registration, and other features.
 package service
 
 import (
@@ -24,7 +24,7 @@ type AnonService struct {
 	config *config.Config
 }
 
-// NewAnonService 创建一个新的匿名集合服务实例。
+// NewAnonService creates a new anonymous collection service instance.
 func NewAnonService(cfg *config.Config) *AnonService {
 	return &AnonService{config: cfg}
 }
@@ -71,14 +71,16 @@ func isValidProviders(providers []model.Provider) bool {
 	return hasValid
 }
 
-// CreateCollection 创建匿名集合（默认 public，兼容历史调用方/测试）。
+// CreateCollection creates an anonymous collection (defaults to public, compatible with legacy callers/tests).
 func (s *AnonService) CreateCollection(name string, entries []model.AnonCollectionEntry, tags []string) (string, error) {
 	return s.CreateCollectionWithVisibility(name, entries, tags, model.VisibilityPublic, nil, "")
 }
 
-// CreateCollectionWithVisibility 创建带可见性的匿名集合。
-// 坑：集合是 content-addressed（hash = JSON 内容摘要），visibility/access_list/owner 一旦写进
-// JSON 就参与摘要 —— 改权限等于生成新 hash 的新集合，调用方必须拿返回值当新的身份用。
+// CreateCollectionWithVisibility creates an anonymous collection with visibility settings.
+// Pitfall: collections are content-addressed (hash = JSON content digest), so once
+// visibility/access_list/owner are written into the JSON they participate in the digest --
+// changing permissions equals generating a new collection with a new hash. Callers must
+// use the returned value as the new identity.
 func (s *AnonService) CreateCollectionWithVisibility(
 	name string,
 	entries []model.AnonCollectionEntry,
@@ -96,14 +98,15 @@ func (s *AnonService) CreateCollectionWithVisibility(
 		log.LogError("anon-svc: %v", err)
 		return "", err
 	}
-	// restricted 必须有放行名单：否则这个集合除了 owner 谁也看不到，等于误设 private
+	// restricted must have an allowlist: otherwise nobody except the owner can see this
+	// collection, which is equivalent to mistakenly setting it to private
 	if visibility == model.VisibilityRestricted && len(accessList) == 0 {
 		err := fmt.Errorf("access_list required for restricted visibility")
 		log.LogError("anon-svc: %v", err)
 		return "", err
 	}
 
-	// 规范化：struct literal 可能直接设置 Hash 但没设 Providers
+	// Normalize: struct literals may set Hash directly but forget to set Providers
 	for i := range entries {
 		entries[i].Normalize()
 	}
@@ -163,13 +166,15 @@ func (s *AnonService) CreateCollectionWithVisibility(
 	return hash, nil
 }
 
-// GetCollectionByHash 通过 SHA256 hash 从 content-addressed 存储中读取匿名集合。
+// GetCollectionByHash reads an anonymous collection from content-addressed storage by SHA256 hash.
 func (s *AnonService) GetCollectionByHash(hash string) (*model.AnonCollection, error) {
 	defer log.LogDuration("AnonService.GetCollectionByHash")()
 	log.LogDebug("anon-svc: GetCollectionByHash hash=%s", hash)
 
-	// 防御：hash 来自 URL 路径/请求体/远端 P2P sync，无长度校验时 hash[:2] 会切片越界 panic；
-	// 非 64 位 hex（如 ".."）还会让 filepath.Join 逃逸 storage 目录。非法直接返回 not-found。
+	// Defense: hash comes from URL path/request body/remote P2P sync. Without length
+	// validation, hash[:2] will panic with slice out of bounds; non-64-digit hex values
+	// (like "..") will also let filepath.Join escape the storage directory.
+	// Invalid hashes return not-found directly.
 	if !isValidHash(hash) {
 		log.LogWarn("anon-svc: GetCollectionByHash invalid hash=%q", hash)
 		return nil, fmt.Errorf("collection not found")
@@ -195,15 +200,18 @@ func (s *AnonService) GetCollectionByHash(hash string) (*model.AnonCollection, e
 	return &coll, nil
 }
 
-// ListCollections 返回所有已注册的匿名集合摘要列表。
+// ListCollections returns a summary list of all registered anonymous collections.
 func (s *AnonService) ListCollections() ([]model.AnonCollectionSummary, error) {
 	return repository.ListAnonCollections(s.config.StorageDir)
 }
 
-// GetCollectionVisibleTo 按可见性给请求者返回集合：越权等价于不存在（404 语义）。
-// requester 是当前请求绑定的账号；本地 WS 会话由 controller 传入本节点 operator，
-// 因此运营者始终能看到自己的 private/restricted 合集。
-// 坑：不能因为「拿不到账号」就放行——未认证只能看 public。
+// GetCollectionVisibleTo returns a collection to the requester based on visibility:
+// unauthorized access is equivalent to not existing (404 semantics).
+// requester is the account bound to the current request; local WS sessions are passed
+// the operator from the controller, so the operator can always see their own
+// private/restricted collections.
+// Pitfall: do NOT allow access just because "no account is available" --
+// unauthenticated users can only see public collections.
 func (s *AnonService) GetCollectionVisibleTo(hash, requester string) (*model.AnonCollection, error) {
 	coll, err := s.GetCollectionByHash(hash)
 	if err != nil {
@@ -217,10 +225,12 @@ func (s *AnonService) GetCollectionVisibleTo(hash, requester string) (*model.Ano
 	return coll, nil
 }
 
-// UpdateCollectionVisibility 基于原集合生成一份换过权限的新集合。
-// 背景：前端把「广播」改成三档开关，用户会随时切档；集合是 content-addressed，
-// 权限写在 JSON 里参与摘要，所以切档必然产生新 hash —— 返回值是新的身份。
-// 越权保护：只有 Owner（或历史无 Owner 的本机集合）能改。
+// UpdateCollectionVisibility creates a new collection with changed permissions based on the original.
+// Background: the frontend changed "broadcast" to a three-tier switch, so users can
+// switch tiers at any time. Collections are content-addressed, and permissions are
+// written into the JSON and participate in the digest, so changing tiers necessarily
+// produces a new hash -- the return value is the new identity.
+// Access control: only the Owner (or a legacy local collection without an Owner) can change this.
 func (s *AnonService) UpdateCollectionVisibility(hash, visibility string, accessList []string, requester string) (string, error) {
 	defer log.LogDuration("AnonService.UpdateCollectionVisibility")()
 	if !model.IsValidVisibility(visibility) {
@@ -234,8 +244,9 @@ func (s *AnonService) UpdateCollectionVisibility(hash, visibility string, access
 	if err != nil {
 		return "", err
 	}
-	// 历史集合没有 Owner（权限字段上线前的产物），视为本机集合放行；
-	// 一旦有 Owner 就必须匹配，防止拿到 hash 的第三方改写别人的权限档位。
+	// Legacy collections without an Owner (pre-dating the permissions fields) are treated
+	// as local collections and allowed; once an Owner exists it must match, to prevent
+	// a third party who obtained the hash from rewriting someone else's permission tier.
 	if src.Owner != "" && src.Owner != requester {
 		log.LogWarn("anon-svc: UpdateCollectionVisibility denied hash=%s owner=%s requester=%q", hash, src.Owner, requester)
 		return "", fmt.Errorf("collection not found")
@@ -250,13 +261,16 @@ func (s *AnonService) UpdateCollectionVisibility(hash, visibility string, access
 	return s.saveCollectionJSON(&dst)
 }
 
-// CommitCollection 基于源集合创建新版本，支持添加/更新/删除条目，自动递增版本号。
+// CommitCollection creates a new version based on the source collection, supporting
+// adding/updating/deleting entries, and auto-incrementing the version number.
 //
-// 权限继承（2026-09-19 修复）：集合换 hash 就等于换了一个新 JSON，权限字段
-// （Visibility/AccessList/Owner）不显式继承就会被丢掉 → 一个 restricted/private
-// 合集只要被 commit 一次就变回 public，内容随新 hash 对外敞开。
-// 因此这里整组复制源集合的权限字段；越权（requester 看不到源集合）直接拒绝，
-// 语义与 GetCollectionVisibleTo 一致（拿不到 = 不存在）。
+// Permission inheritance (fixed 2026-09-19): changing the collection hash equals
+// replacing the JSON entirely, so permission fields (Visibility/AccessList/Owner)
+// that are not explicitly inherited will be lost -> a restricted/private collection
+// would revert to public after a single commit, exposing its content under the new hash.
+// Therefore, all permission fields from the source collection are copied as a group;
+// unauthorized access (requester cannot see the source) is rejected directly,
+// consistent with GetCollectionVisibleTo semantics (cannot see = does not exist).
 func (s *AnonService) CommitCollection(
 	sourceHash string,
 	entries []model.AnonCollectionEntry,
@@ -272,8 +286,9 @@ func (s *AnonService) CommitCollection(
 		return "", fmt.Errorf("source collection not found: %w", err)
 	}
 
-	// 规范化：struct literal / 旧格式可能只设了 Hash 而没设 Providers ——
-	// 不归一化的话「只想加一个文件」会被误判成「删除该条目」（空 providers）。
+	// Normalize: struct literals / old formats may only set Hash without setting Providers --
+	// without normalization, "just adding a file" would be misinterpreted as "deleting that entry"
+	// (empty providers).
 	for i := range entries {
 		entries[i].Normalize()
 	}
@@ -284,11 +299,13 @@ func (s *AnonService) CommitCollection(
 			log.LogError("anon-svc: CommitCollection invalid path: %s", e.Path)
 			return "", err
 		}
-		// 空 providers = 删除该条目（API 约定见 controller/anon.go 的
-		// CommitAnonCollection 注释：非空 hash 增改 / 空 hash 删除）。
-		// 坑：这里若沿用 CreateCollection 的校验直接拒绝空 providers，
-		// 下面 removeEmpty 分支永远走不到——「commit 删除条目」这条路径
-		// 拿到空 hash 请求会 400，功能形同不存在。
+		// Empty providers = delete this entry (API convention is documented in the
+		// CommitAnonCollection comments in controller/anon.go: non-empty hash = add/update,
+		// empty hash = delete).
+		// Pitfall: if we applied CreateCollection's validation here and rejected empty
+		// providers directly, the removeEmpty branch below would never be reached --
+		// "commit to delete an entry" would return 400 on empty-hash requests,
+		// making the feature effectively nonexistent.
 		if len(e.Providers) > 0 && !strings.HasSuffix(e.Path, "/") && !isValidProviders(e.Providers) {
 			err := fmt.Errorf("invalid providers for path: %s", e.Path)
 			log.LogError("anon-svc: CommitCollection invalid providers for path: %s", e.Path)
@@ -296,7 +313,7 @@ func (s *AnonService) CommitCollection(
 		}
 	}
 
-	// 用 providers 合并源条目和新条目
+	// Merge source entries and new entries by providers
 	entryMap := map[string][]model.Provider{}
 	for _, e := range src.Entries {
 		entryMap[e.Path] = e.Providers
@@ -329,9 +346,11 @@ func (s *AnonService) CommitCollection(
 	return s.saveCollectionJSON(coll)
 }
 
-// inheritVisibility 把源集合的权限三件套复制到派生集合（commit/版本滚动用）。
-// 为什么单独一个函数：派生路径（commit、removeEmpty 分支）不止一处，漏掉任何
-// 一处都会静默把受限合集降级为 public，集中在一处便于 review。
+// inheritVisibility copies the permission triple from the source collection to the derived
+// collection (used by commit/version-roll paths).
+// Why a separate function: there are multiple derived paths (commit, removeEmpty branch),
+// and missing any one would silently downgrade a restricted collection to public.
+// Centralizing here makes review easier.
 func inheritVisibility(dst, src *model.AnonCollection) {
 	if dst == nil || src == nil {
 		return

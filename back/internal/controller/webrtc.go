@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// WebRTCInfoHandler 返回 GET /p2p/webrtc/info 的 Gin 处理函数，提供 STUN/TURN 配置。
+// WebRTCInfoHandler returns a Gin handler for GET /p2p/webrtc/info, providing STUN/TURN configuration.
 func WebRTCInfoHandler(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		resp := gin.H{

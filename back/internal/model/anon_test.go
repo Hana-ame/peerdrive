@@ -1,6 +1,6 @@
 package model
 
-// 注：本文件属于 legacy 代码（见 doc/archive/LEGACY.md，待删/待迁移）的测试，未逐一标注发现背景；「发现背景」规范对新代码生效。
+// Note: this file is the test for legacy code (see doc/archive/LEGACY.md, to be deleted/migrated); the "discovery background" was not annotated case by case. The "discovery background" convention applies to new code.
 
 import (
 	"encoding/json"
@@ -57,7 +57,7 @@ func TestAnonCollectionEntry_MarshalJSON(t *testing.T) {
 	assert.Len(t, providers, 1)
 	p0 := providers[0].(map[string]interface{})
 	assert.Equal(t, "sha256", p0["type"])
-	// Hash 字段也应输出以保证旧客户端兼容
+	// The Hash field should also be emitted to preserve compatibility with old clients
 	assert.Equal(t, "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a", out["hash"])
 }
 

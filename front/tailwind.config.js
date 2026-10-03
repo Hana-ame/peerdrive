@@ -4,21 +4,21 @@ export default {
   theme: {
     extend: {
       colors: {
-        // 品牌主色：indigo（蓝紫）。深色底上比 Tailwind 默认 blue 更精致、
-        // 更有 P2P/网络产品的科技感；cyan 留作次级强调（如在线态）。
+        // Brand primary color: indigo (blue-purple). On dark backgrounds, it looks more refined than Tailwind's default blue,
+        // giving it a more tech-y P2P/network product feel; cyan is reserved as a secondary accent (e.g. online status).
         brand: {
           50: '#eef2ff', 100: '#e0e7ff', 200: '#c7d2fe', 300: '#a5b4fc',
           400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca',
           800: '#3730a3', 900: '#312e81', 950: '#1e1b4b',
         },
-        // 表面层级：页面底 → 卡片 → 抬升（输入/悬浮面板）→ hover → 描边。
-        // 比裸 zinc 系列多一层「近黑偏蓝」的底，玻璃质感统一。
+        // Surface hierarchy: page background → card → raised (input/floating panel) → hover → border.
+        // One extra "near-black with a blue tint" base layer beyond plain zinc, keeping the glass aesthetic consistent.
         surface: {
-          DEFAULT: '#101014',      // 页面底
-          card: '#191920',         // 卡片
-          raised: '#21212a',       // 输入框/悬浮面板
-          hover: '#2a2a34',        // hover 态
-          border: '#2b2b34',       // 描边
+          DEFAULT: '#101014',      // Page background
+          card: '#191920',         // Card
+          raised: '#21212a',       // Input / floating panel
+          hover: '#2a2a34',        // Hover state
+          border: '#2b2b34',       // Border
         },
       },
       fontFamily: {

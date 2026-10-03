@@ -14,29 +14,32 @@ import (
 	"peerdrive/pkg/hashutil"
 )
 
-// MQTTDiscovery 基于公共 broker 的分片房间发现。
-// 模式：topic 按 collection hash 分片（peerdrive/v1/{hash}/nodes），
-// 节点只订阅自己关注的分片——订阅数与消息量随集合摊开，公共 broker
-// 可支持大规模（全局单 topic 的 fan-out 是瓶颈，分片后无上限）。
+// MQTTDiscovery chunked-room discovery based on a public broker.
+// Pattern: topics sharded by collection hash (peerdrive/v1/{hash}/nodes), nodes only
+// subscribe to chunks they care about — subscription count and message volume scale with
+// collections; public brokers can support large scale (global single topic fan-out is the
+// bottleneck; sharding removes the limit).
 //
-// 扩展性：发现只交换「节点 peer id」，实际传输仍走 PeerJS 云信令 +
-// WebRTC 直连；换信令/传输不影响本组件。
+// Extensibility: discovery only exchanges "node peer id"; actual transport still goes through
+// PeerJS cloud signaling + WebRTC direct connection; changing signaling/transport doesn't
+// affect this component.
 type MQTTDiscovery struct {
 	broker       string
 	topicPrefix  string
 	clientID     string
-	onPeer       func(peerID string) // 发现新节点回调（去重由调用方保证）
+	onPeer       func(peerID string) // New node discovery callback (dedup guaranteed by caller)
 	announceTick time.Duration
 
 	client   mqtt.Client
 	mu       sync.Mutex
-	announce map[string]bool // 已 announce 的 peer id（同 id 不去重发）
+	announce map[string]bool // already announced peer ids (same id not sent again)
 	ctx      context.Context
 	cancel   context.CancelFunc
 	done     chan struct{}
 }
 
-// NewMQTTDiscovery 创建发现组件。onPeer 在发现新节点时回调。
+// NewMQTTDiscovery creates the discovery component. onPeer is called when a new node is
+// discovered.
 func NewMQTTDiscovery(broker, topicPrefix, clientID string, onPeer func(peerID string)) *MQTTDiscovery {
 	if broker == "" {
 		broker = "tcp://broker.emqx.io:1883"
@@ -61,18 +64,19 @@ func NewMQTTDiscovery(broker, topicPrefix, clientID string, onPeer func(peerID s
 	}
 }
 
-// nodeTopic 返回分片 topic：peerdrive/v1/{collectionHash}/nodes
+// nodeTopic returns the sharded topic: peerdrive/v1/{collectionHash}/nodes
 func (d *MQTTDiscovery) nodeTopic(hash string) string {
 	return d.topicPrefix + "/" + hash + "/nodes"
 }
 
-// announceMsg 节点 announce 消息体。
+// announceMsg node announce message body.
 type announceMsg struct {
 	PeerID string `json:"peerId"`
 	TS     int64  `json:"ts"`
 }
 
-// Start 连接 broker 并发布/订阅分片 topic。异步重连由 paho 内部处理。
+// Start connects to broker and publishes/subscribes to chunked topics. Asynchronous reconnection
+// is handled internally by paho.
 func (d *MQTTDiscovery) Start(collections []string) {
 	opts := mqtt.NewClientOptions().
 		AddBroker(d.broker).
@@ -82,7 +86,7 @@ func (d *MQTTDiscovery) Start(collections []string) {
 		SetConnectRetry(true).
 		SetConnectRetryInterval(5 * time.Second).
 		SetOnConnectHandler(func(c mqtt.Client) {
-			// 断线重连后重新订阅（paho 不保留旧订阅）
+			// Re-subscribe after reconnection (paho doesn't preserve old subscriptions)
 			for _, h := range collections {
 				h = strings.TrimSpace(h)
 				if !hashutil.IsStrictSHA256(h) {
@@ -98,9 +102,10 @@ func (d *MQTTDiscovery) Start(collections []string) {
 	go d.loop()
 }
 
-// onMessage 收到对端 announce 后回调 onPeer。
-// M15：公共 broker 上任何人都能发任意 payload——限制 payload 大小（64KB）
-// 与 peerID 长度（128），防异常大消息/超长 id 打爆内存或污染互联状态。
+// onMessage calls onPeer after receiving a peer announce.
+// M15: anyone on the public broker can send any payload — limit payload size (64KB) and
+// peerID length (128) to prevent abnormal large messages / oversized ids from exhausting
+// memory or polluting interconnection state.
 func (d *MQTTDiscovery) onMessage(_ mqtt.Client, msg mqtt.Message) {
 	raw := msg.Payload()
 	if len(raw) > 64<<10 {
@@ -110,12 +115,12 @@ func (d *MQTTDiscovery) onMessage(_ mqtt.Client, msg mqtt.Message) {
 	if err := json.Unmarshal(raw, &a); err != nil || a.PeerID == "" || len(a.PeerID) > 128 {
 		return
 	}
-	// 迟到 announce（peer id 未知归属集合）也上报，由调用方去重
+	// Late announce (peer id unknown collection) also reported, caller deduplicates
 	d.onPeer(a.PeerID)
 }
 
-// Announce 发布本节点 peer id 到集合分片。
-// 幂等：同一 peer+集合只发一次上线 announce + 定时心跳。
+// Announce publishes this node's peer id to collection chunks.
+// Idempotent: same peer+collection only sends one online announce + periodic heartbeat.
 func (d *MQTTDiscovery) Announce(peerID string, collections []string) {
 	for _, h := range collections {
 		h = strings.TrimSpace(h)
@@ -146,7 +151,7 @@ func (d *MQTTDiscovery) publish(peerID, hash string) {
 	d.client.Publish(d.nodeTopic(hash), 0, false, payload)
 }
 
-// loop 定时心跳 announce（防 broker 清理 + 通知迟到节点）。
+// loop periodic heartbeat announce (prevents broker cleanup + notifies late-arriving nodes).
 func (d *MQTTDiscovery) loop() {
 	defer close(d.done)
 	t := time.NewTicker(d.announceTick)
@@ -172,7 +177,7 @@ func (d *MQTTDiscovery) loop() {
 	}
 }
 
-// Stop 断开 broker。
+// Stop disconnects from broker.
 func (d *MQTTDiscovery) Stop() {
 	d.cancel()
 	<-d.done

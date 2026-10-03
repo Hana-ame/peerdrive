@@ -1,7 +1,8 @@
-// format.js — demo 的展示格式化。
+// format.js — demo display formatting.
 //
-// 故意不复用 front/src/components/netdisk/format.js：这个包要能单独发布/单独
-// 打开（`npm run demo` 只服务包目录），跨目录 import 会让演示依赖外部仓库结构。
+// Intentionally does not reuse front/src/components/netdisk/format.js: this package
+// needs to be published/opened standalone (`npm run demo` only serves the package
+// directory), cross-directory imports would make the demo depend on external repo structure.
 
 export function formatBytes(bytes) {
   const n = Number(bytes)

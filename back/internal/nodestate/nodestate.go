@@ -1,5 +1,6 @@
-// Package nodestate 存储 Peerdrive 节点的运行时状态（operator 用户名、reg server 连接），
-// 并提供统计报告功能。controller 和 service 都需要访问此状态，故独立为一个包以打破循环导入。
+// Package nodestate stores the runtime state of a Peerdrive node (operator username, reg server connection),
+// and provides statistics reporting. Both controller and service need to access this state, so it is split
+// into a separate package to break circular imports.
 package nodestate
 
 import (
@@ -22,7 +23,7 @@ var (
 	peerID    string
 )
 
-// Configure 设置节点身份和注册服务器连接信息。由 NodeRegistrar.Start() 调用。
+// Configure sets the node identity and registration server connection info. Called by NodeRegistrar.Start().
 func Configure(op, url, token, pid string) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -32,28 +33,28 @@ func Configure(op, url, token, pid string) {
 	peerID = pid
 }
 
-// SetOperator 设置节点运营者（空字符串 = 匿名）。
+// SetOperator sets the node operator (empty string = anonymous).
 func SetOperator(username string) {
 	mu.Lock()
 	defer mu.Unlock()
 	operator = username
 }
 
-// GetOperator 获取节点运营者（空字符串 = 匿名）。
+// GetOperator returns the node operator (empty string = anonymous).
 func GetOperator() string {
 	mu.Lock()
 	defer mu.Unlock()
 	return operator
 }
 
-// GetPeerID 获取节点 peer ID。
+// GetPeerID returns the node's peer ID.
 func GetPeerID() string {
 	mu.Lock()
 	defer mu.Unlock()
 	return peerID
 }
 
-// ReportStats 向注册服务器报告传输统计。仅在节点已认证时有效。
+// ReportStats reports transfer statistics to the registration server. Only effective when the node is authenticated.
 func ReportStats(uploadBytes, downloadBytes int64) {
 	mu.Lock()
 	u := regURL

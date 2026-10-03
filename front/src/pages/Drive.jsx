@@ -1,5 +1,5 @@
-// 模块②：我的网盘 —— 本节点文件管理（经 WS admin 帧走后端）
-// 列表 / 上传 / 下载 / 删除 / 生成分享链接。
+// Module ②: My Cloud Drive —— file management for this node (goes through WS admin frames to the backend)
+// List / upload / download / delete / generate share links.
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as ws from '../ws';
 
@@ -15,11 +15,11 @@ function fmtTime(ts) {
   if (!ts) return '—';
   const d = new Date(ts);
   if (isNaN(d)) return ts;
-  return d.toLocaleString('zh-CN', { hour12: false });
+  return d.toLocaleString('en-US', { hour12: false });
 }
 
 export default function Drive() {
-  const [files, setFiles] = useState(null); // null=加载中
+  const [files, setFiles] = useState(null); // null = loading
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [shareLink, setShareLink] = useState('');
@@ -58,7 +58,7 @@ export default function Drive() {
   };
 
   const onDelete = async (f) => {
-    if (!confirm(`删除「${f.filename}」？`)) return;
+    if (!confirm(`Delete "${f.filename}"?`)) return;
     try {
       await ws.admin('DELETE', `/files/${f.hash}`);
       await load();
@@ -86,15 +86,15 @@ export default function Drive() {
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="text-2xl font-bold">我的网盘</h1>
-            <p className="text-sm text-gray-500 mt-0.5">本节点已登记的文件（内容寻址存储）</p>
+            <h1 className="text-2xl font-bold">My Cloud Drive</h1>
+            <p className="text-sm text-gray-500 mt-0.5">Files registered on this node (content-addressed storage)</p>
           </div>
           <button
             onClick={() => fileRef.current?.click()}
             disabled={busy}
             className="btn-brand"
           >
-            {busy ? '上传中...' : '+ 上传文件'}
+            {busy ? 'Uploading...' : '+ Upload File'}
           </button>
           <input ref={fileRef} type="file" className="hidden" onChange={onPick} />
         </div>
@@ -106,28 +106,28 @@ export default function Drive() {
         )}
         {shareLink && (
           <div className="mb-4 text-xs text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 break-all">
-            分享链接：<span className="font-mono text-brand-300">{shareLink}</span>
-            <button onClick={() => { navigator.clipboard?.writeText(shareLink); }} className="ml-2 text-gray-500 hover:text-white">复制</button>
+            Share link: <span className="font-mono text-brand-300">{shareLink}</span>
+            <button onClick={() => { navigator.clipboard?.writeText(shareLink); }} className="ml-2 text-gray-500 hover:text-white">Copy</button>
           </div>
         )}
 
         {files === null ? (
-          <div className="text-center py-16 text-gray-500 text-sm">读取中...</div>
+          <div className="text-center py-16 text-gray-500 text-sm">Loading...</div>
         ) : files.length === 0 ? (
           <div className="text-center py-20 text-gray-500 border-2 border-dashed border-white/10 rounded-card">
-            <p className="mb-2">还没有任何文件</p>
-            <p className="text-xs text-gray-600">点右上角「上传文件」或在后端注册本地路径。</p>
+            <p className="mb-2">No files yet</p>
+            <p className="text-xs text-gray-600">Click "Upload File" in the top right or register local paths on the backend.</p>
           </div>
         ) : (
           <div className="card-surface overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-white/[0.03]">
                 <tr>
-                  <th className={th}>名称</th>
-                  <th className={th}>大小</th>
-                  <th className={th}>类型</th>
-                  <th className={th}>登记时间</th>
-                  <th className={th + ' text-right'}>操作</th>
+                  <th className={th}>Name</th>
+                  <th className={th}>Size</th>
+                  <th className={th}>Type</th>
+                  <th className={th}>Registered</th>
+                  <th className={th + ' text-right'}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -138,9 +138,9 @@ export default function Drive() {
                     <td className={td + ' text-gray-500 whitespace-nowrap'}>{f.mime_type || '—'}</td>
                     <td className={td + ' text-gray-500 whitespace-nowrap'}>{fmtTime(f.created_at)}</td>
                     <td className={td + ' text-right whitespace-nowrap'}>
-                      <button onClick={() => onDownload(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">下载</button>
-                      <button onClick={() => onShare(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">分享</button>
-                      <button onClick={() => onDelete(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">删除</button>
+                      <button onClick={() => onDownload(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Download</button>
+                      <button onClick={() => onShare(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Share</button>
+                      <button onClick={() => onDelete(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">Delete</button>
                     </td>
                   </tr>
                 ))}

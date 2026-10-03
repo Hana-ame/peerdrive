@@ -1,253 +1,253 @@
 # Peerdrive Collection Logic — Full Trace
 
-> 2026-04-28 · 检查所有细节问题
+> 2026-04-28 · Review all detail issues
 
-## 1. 合集创建
+## 1. Collection Creation
 
 ### 1.1 AnonCreator → POST /anon/collections
 
 ```
-用户拖文件 → entries[] → 点保存 → POST /anon/collections
+User drags files → entries[] → Click save → POST /anon/collections
   body: {entries: [{path, hash}], friendly_name, tags}
   handler: controller.CreateAnonCollection
     → anonSvc.CreateCollection(name, entries, tags)
-      → 验证: 拒绝空path、含../的path、非64字符hash
+      → Validate: reject empty path, path with ../, non-64-char hash
       → model.NewAnonCollection(name, entries, tags)
-        → version=1, CreatedAt=now, 计算name_preview (entries前3个文件名)
-      → JSON序列化 → SHA256 → 写入storage/<hash[:2]>/<hash>
-      → 返回 {hash, name_preview, entry_count}
+        → version=1, CreatedAt=now, compute name_preview (first 3 filenames)
+      → JSON serialize → SHA256 → write to storage/<hash[:2]>/<hash>
+      → Return {hash, name_preview, entry_count}
 ```
 
-### 1.2 广播按钮 (Plaza)
+### 1.2 Broadcast Button (Plaza)
 
 ```
-搜索栏输入hash → 点📡广播 → 
-  → api.createAnonCollection([{path:'broadcast',hash}], '广播 '+hash前缀)
+Search bar input hash → Click 📡 broadcast → 
+  → api.createAnonCollection([{path:'broadcast',hash}], 'Broadcast '+hash prefix)
   → api.dualAnnounce(hash) // IPFS + BT
-  → 显示hash作为分享链接
+  → Display hash as sharing link
 ```
 
-### 1.3 URL注册 → 合集
+### 1.3 URL Registration → Collection
 
 ```
-FileManager → URL tab → 输入url → POST /files/register_url
+FileManager → URL tab → Input URL → POST /files/register_url
   → fileSvc.RegisterURL(url, filename)
     → HTTP GET url → SHA256 → InsertFileMeta + InsertFileProvider(type="http")
 ```
 
-## 2. 合集列表 (Plaza)
+## 2. Collection List (Plaza)
 
-### 2.1 数据来源
+### 2.1 Data Source
 
 ```
 Plaza.loadAll()
   → listAnonCollections() → GET /anon/collections
-    → 遍历 storage 目录, 读取每个blob, JSON反序列化
-    → 返回 [{hash, friendly_name, name_preview, entry_count, tags, created_at}]
-    → 注意: 不返回 entries 数组!
+    → Iterate storage directory, read each blob, JSON deserialize
+    → Return [{hash, friendly_name, name_preview, entry_count, tags, created_at}]
+    → Note: does NOT return entries array!
   → listPublicCollections() → GET /collections/public
-    → 返回有 current_hash 的public合集
+    → Return public collections with current_hash
 ```
 
-### 2.2 展示逻辑 (CollectionCard)
+### 2.2 Display Logic (CollectionCard)
 
 ```
 collFileCount(c):
   → c.entry_count || (c.entries ? c.entries.length : 0)
-  → list API 返回 entry_count, entries=undefined → ✅
+  → list API returns entry_count, entries=undefined → ✅
 
 isSingleFile = count === 1
 singleFile = c.entries?.[0] || (c.name_preview ? {path: c.name_preview} : null)
   → list API: entries=undefined → fallback to name_preview ✅
-  → name_preview 如果是 "hello.txt" → {path: "hello.txt"} ✅
+  → name_preview if "hello.txt" → {path: "hello.txt"} ✅
 
 cardIcon:
   isSingleFile && singleFile 
-    ? fileIconFromPath(singleFile.path)  // 📝🎬🖼️等
+    ? fileIconFromPath(singleFile.path)  // 📝🎬🖼️ etc.
     : isDummy ? '🧪' : '📦'
-  → 🔴 BUG: 刷新后可能仍显示📦 → CF缓存
+  → 🔴 BUG: After refresh may still show 📦 → CF cache
 
-名称显示:
+Name display:
   isSingleFile && singleFile ? singleFile.path : name
-  → 单文件显示文件名, 多文件显示合集名 ✅
+  → Single file shows filename, multiple files show collection name ✅
 ```
 
-### 2.3 点击跳转
+### 2.3 Click Navigation
 
 ```
-本地合集 (有hash):
+Local collection (has hash):
   handleDownload → navigate(`/anon/collections/${c.hash}`) ✅
-  
-P2P合集 (有current_hash):
+   
+P2P collection (has current_hash):
   handleDownload → navigate(`/anon/collections/${c.current_hash}`) ✅
-  
-P2P合集 (只有username+coll):
+   
+P2P collection (only username+coll):
   handleDownload → navigate(`/${username}/${collection_name}`)
   → Explorer.jsx → getCollection → navigate to AnonExplorer ✅
 ```
 
-## 3. 合集查看 (AnonExplorer)
+## 3. Collection View (AnonExplorer)
 
-### 3.1 加载
+### 3.1 Loading
 
 ```
 GET /anon/collections/:hash
   → controller.GetAnonCollection → anonSvc.GetCollectionByHash(hash)
-    → 读取 storage/<hash[:2]>/<hash> → JSON反序列化
-    → 返回 {hash, friendly_name, entries: [{path, hash}], tags, created_at}
-    → 注意: 返回完整的 entries 数组!
+    → Read storage/<hash[:2]>/<hash> → JSON deserialize
+    → Return {hash, friendly_name, entries: [{path, hash}], tags, created_at}
+    → Note: returns complete entries array!
 ```
 
-### 3.2 空合集处理
+### 3.2 Empty Collection Handling
 
 ```
 fetchCollection(hash):
   coll = await api.getAnonCollection(hash)
   if (!coll.entries || coll.entries.length === 0)
-    → api.deleteFile(hash) // 自动删除空合集
-    → setError('空合集，已自动删除')
+    → api.deleteFile(hash) // Auto-delete empty collection
+    → setError('Empty collection, automatically deleted')
 ```
 
-### 3.3 单文件预览
+### 3.3 Single File Preview
 
 ```
 isSingleFile = entries.length === 1 && !entries[0].path.includes('/')
 
-如果单文件:
-  图片: <img src={downloadUrl}> ✅
+If single file:
+  Image: <img src={downloadUrl}> ✅
   PDF: <iframe src={downloadUrl}> ✅
-  文本/代码: <TextPreview> → fetch内容 → <pre> ✅
-  其他: 下载按钮 ✅
+  Text/Code: <TextPreview> → fetch content → <pre> ✅
+  Others: Download button ✅
 ```
 
-### 3.4 嵌套合集
+### 3.4 Nested Collections
 
 ```
-加载时获取所有合集hash: Set(allCollHashes)
-文件hash在这个set里 → 显示为📦合集链接 → 点击跳转 ✅
+On load, get all collection hashes: Set(allCollHashes)
+File hash in this set → Show as 📦 collection link → Click to navigate ✅
 ```
 
-## 4. P2P 广播与发现
+## 4. P2P Broadcast and Discovery
 
-### 4.1 宣告
+### 4.1 Announce
 
 ```
 POST /p2p/announce → p2pSvc.AnnounceHash(hash)
-  → DHT.Provide(CID) → IPFS网络
-  → 失败返回200+WARN (单节点DHT孤立) ✅
+  → DHT.Provide(CID) → IPFS network
+  → Failure returns 200+WARN (single-node DHT isolated) ✅
 
 POST /bt/announce → btSvc.Announce(hash)
-  → SHA256 → infohash(前20字节) → DHT.Announce
-  → 成功返回 "announced on BT DHT" ✅
+  → SHA256 → infohash(first 20 bytes) → DHT.Announce
+  → Success returns "announced on BT DHT" ✅
 
 POST /p2p/dual/announce → dualSvc.Announce(hash)
-  → 并行: IPFS announce + BT announce ✅
+  → Parallel: IPFS announce + BT announce ✅
 ```
 
-### 4.2 查找
+### 4.2 Find
 
 ```
 POST /bt/find → btSvc.FindProviders(hash)
-  → DHT遍历 → get_peers → 收集IP:port
-  → 跨节点测试: Node B查Node A宣告的文件 → count=1 ✅
+  → DHT traverse → get_peers → Collect IP:port
+  → Cross-node test: Node B searches Node A's announced file → count=1 ✅
 
 POST /p2p/dual/find → dualSvc.FindProviders(hash)
-  → 并行: IPFS find + BT find → 合并结果 ✅
+  → Parallel: IPFS find + BT find → Merge results ✅
 ```
 
-## 5. 用户合集 (Explorer)
+## 5. User Collections (Explorer)
 
-### 5.1 路由
+### 5.1 Routing
 
 ```
 /:username/:collection_name → Explorer.jsx
-  
-现在行为:
+   
+Current behavior:
   1. getCollection(username, collName)
-  2. 如果有 current_hash → redirect to /anon/collections/:hash ✅
-  3. 如果没有 → 显示旧 Explorer UI (版本管理/commit/merge/sync)
+  2. If has current_hash → redirect to /anon/collections/:hash ✅
+  3. If not → show old Explorer UI (version management/commit/merge/sync)
 ```
 
-### 5.2 🔴 问题: Explorer 额外功能丢失
+### 5.2 🔴 Issue: Explorer Extra Features Lost
 
 ```
-redirect后用户无法使用:
-  - Commit新版本
-  - 查看版本历史
+After redirect, user cannot use:
+  - Commit new version
+  - View version history
   - Fork
-  - Merge合并
-  - 保存到本地
-  - 上传文件到合集
+  - Merge
+  - Save to local
+  - Upload file to collection
   
-AnonExplorer没有这些功能!
+AnonExplorer doesn't have these features!
 ```
 
-## 6. 🔴 发现的细节问题
+## 6. 🔴 Discovered Detail Issues
 
-### 6.1 Explorer功能丢失
-- Explorer 的重定向会丢失 commit/merge/sync/upload 功能
-- **修复**: AnonExplorer 需要加 "版本历史" 按钮和 actions
+### 6.1 Explorer Features Lost
+- Explorer's redirect loses commit/merge/sync/upload features
+- **Fix**: AnonExplorer needs "Version History" button and actions
 
-### 6.2 单文件图标CF缓存
-- 源码修复正确但CF可能缓存旧版本
-- **验证**: 清除CF缓存或等max-age=0生效
+### 6.2 Single File Icon CF Cache
+- Source code fix is correct but CF may cache old version
+- **Verify**: Clear CF cache or wait for max-age=0 to take effect
 
-### 6.3 name_preview 可能为空
-- 老合集 name_preview 为 null → fallback到 "N个文件" ✅
-- 但如果friendly_name也为空而entries=undefined → 显示 "未命名合集" 
+### 6.3 name_preview May Be Empty
+- Old collections have name_preview as null → fallback to "N files" ✅
+- But if friendly_name is also empty and entries=undefined → show "Unnamed Collection"
 
-### 6.4 空合集处理不一致
-- AnonExplorer: 自动删除空合集 ✅
-- Plaza列表: 空合集仍然显示 "0个文件"
-- **修复**: Plaza也应在list时将空合集标记为可清理
+### 6.4 Empty Collection Handling Inconsistent
+- AnonExplorer: auto-delete empty collections ✅
+- Plaza list: empty collections still show "0 files"
+- **Fix**: Plaza should also mark empty collections as cleanable in list
 
-### 6.5 合集命名优先级
+### 6.5 Collection Name Priority
 ```
-CollectionCard: collection_name → friendly_name → name_preview → N个文件 → hash前缀 → '未命名合集' ✅
-AnonExplorer: friendly_name → name_preview → N个文件 → '未命名合集' ✅
-不一致: CollectionCard有collection_name和hash fallback, AnonExplorer没有
+CollectionCard: collection_name → friendly_name → name_preview → N files → hash prefix → 'Unnamed Collection' ✅
+AnonExplorer: friendly_name → name_preview → N files → 'Unnamed Collection' ✅
+Inconsistent: CollectionCard has collection_name and hash fallback, AnonExplorer doesn't
 ```
 
-### 6.6 P2P合集在Plaza无法区分
-- P2P合集显示 "⚪ 仅本地" — 错误!
-- P2P合集应显示 "🔵 P2P可用"
-- **根因**: `c._type === 'public'` 检查 — 如果reg server没返回public合集, 这个永远false
+### 6.6 P2P Collections Cannot Be Distinguished in Plaza
+- P2P collections show "⚪ Local Only" — wrong!
+- P2P collections should show "🔵 P2P Available"
+- **Root cause**: `c._type === 'public'` check — if reg server doesn't return public collections, this is always false
 
-## 7. 修复优先级
+## 7. Fix Priority
 
-| 优先级 | 问题 | 修复 |
-|--------|------|------|
-| P0 | 单文件图标 | CF部署后已修复, 验证 |
-| P0 | Explorer功能丢失 | AnonExplorer加版本历史+操作按钮 |
-| P1 | P2P合集标记 | 修复 _type 标记逻辑 |
-| P1 | 空合集在列表 | Plaza自动隐藏或标记空合集 |
+| Priority | Issue | Fix |
+|----------|-------|-----|
+| P0 | Single file icon | Fixed after CF deploy, verify |
+| P0 | Explorer features lost | Add version history + action buttons to AnonExplorer |
+| P1 | P2P collection marking | Fix _type marking logic |
+| P1 | Empty collections in list | Plaza auto-hide or mark empty collections |
 ---
 
-## 双信道架构 (2026-04-28)
+## Dual-Channel Architecture (2026-04-28)
 
-Peerdrive 奉行两套通信信道，用户自由切换：
+Peerdrive implements two communication channels, users can freely switch:
 
-### 信道 1: 中心服务器（硬编码，默认开启）
+### Channel 1: Central Server (hardcoded, enabled by default)
 ```
-用户 → Registration Server (VPS :4000)
-     → 用户认证、Relay列表、Peer发现
-     → 合集发布、留言板、统计
+User → Registration Server (VPS :4000)
+     → User authentication, relay list, peer discovery
+     → Collection publishing, message board, statistics
 ```
-- 写死的地址，始终可用
-- 提供可靠的服务发现
-- 无 P2P 网络时也能工作
+- Hardcoded address, always available
+- Provides reliable service discovery
+- Works even without P2P network
 
-### 信道 2: P2P 自由网络（可选开启）
+### Channel 2: P2P Free Network (optional enable)
 ```
-用户 → IPFS DHT / BT DHT
-     → P2P 节点发现、文件交换
-     → WebRTC 直连、端口转发
+User → IPFS DHT / BT DHT
+     → P2P node discovery, file exchange
+     → WebRTC direct connection, port forwarding
 ```
-- 完全去中心化
-- 用户自行选择开关
-- 不依赖任何中心服务器
+- Fully decentralized
+- Users choose enable/disable themselves
+- Doesn't depend on any central server
 
-### 一致性设计
-- 两套信道的**用户逻辑完全一致**——同一个 API、同一个 UI
-- 有节点时优先 P2P，无节点时降级到中心服务器
-- 合集创建、分享、下载在两个信道下体验相同
+### Consistency Design
+- Both channels have **completely identical user logic** — same API, same UI
+- When nodes are available, prioritize P2P; when no nodes, fallback to central server
+- Collection creation, sharing, downloading have the same experience across both channels

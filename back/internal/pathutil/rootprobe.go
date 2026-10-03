@@ -1,18 +1,18 @@
 package pathutil
 
-// os.Root 打不开时怎么办。
+// What to do when os.Root can't be opened.
 //
-// 现状（2026-09-20 之前的写法）：OpenRoot 失败就是返回一个 error 算了。表现是
-// "那个目录共享不了"，而日志里只有一句 "open root ...: <errno>"，运维看不出是
-// 文件系统不支持、还是目录不存在、还是权限不够——于是要么认为产品坏了，要么
-// 去 chmod/chown 一通，白忙。
+// Status quo (pre-2026-09-20 approach): when OpenRoot fails, just return an error. The symptom is
+// "that directory can't be shared", and the log only says "open root ...: <errno>". Operators can't tell
+// whether it's filesystem unsupported, directory missing, or permission denied -- so they either think
+// the product is broken or go chmod/chown a bunch of stuff for nothing.
 //
-// 这里做两件事：
-//  1. 分类 + 可操作的解释：unsupported vs missing vs permission，各自给出下一步；
-//  2. 一个**显式**、默认关闭的逃生阀 PEERDRIVE_ROOT_FALLBACK=1：真到了不支持的
-//     文件系统上又必须用这个目录时，运营者可以选择退回"按路径判定 + 按路径打开"
-//     的老路，并在日志里持续收到告警。默认不开——宁可少给，不能默认把 TOCTOU
-//     窗口开回来。
+// This does two things:
+//  1. Classification + actionable explanation: unsupported vs missing vs permission, each with next steps;
+//  2. An **explicit**, off-by-default escape hatch PEERDRIVE_ROOT_FALLBACK=1: when you're on an unsupported
+//     filesystem and must use the directory, the operator can choose to fall back to "path-based checking
+//     + path-based opening" and continue receiving warnings in the log. Off by default -- less is more;
+//     don't open a TOCTOU window by default.
 
 import (
 	"errors"
@@ -24,16 +24,16 @@ import (
 	"peerdrive/internal/log"
 )
 
-// openRootOrFallback 打开允许根；os.Root 在本文件系统上不可用时，按逃生阀决定
-// 是否退回"按路径操作"。返回的 *os.Root 为 nil 表示**已降级**（此时用 base 拼
-// 出完整路径走老的 os.* 函数）。
+// openRootOrFallback opens the allowed root; if os.Root is unavailable on the filesystem, the escape
+// hatch decides whether to fall back to "path-based operations". A nil *os.Root return means **degraded**
+// (use base + rel to construct the full path for the old os.* functions).
 func openRootOrFallback(root string) (*os.Root, error) {
 	var (
 		dir *os.Root
 		err error
 	)
-	// 根自己还没建出来（首次运行时 storageDir / uploadDir 都不存在）：建目录本来
-	// 就是预期行为——边界是"不能越过这个根"，而不是"这个根得先存在"。
+	// Root doesn't exist yet (first run, storageDir / uploadDir both missing): creating the directory
+	// is the expected behavior -- the boundary is "can't go beyond this root", not "this root must exist first".
 	if root != "" {
 		if dir, err = openRootFn(root); err != nil && errors.Is(err, os.ErrNotExist) {
 			if mkErr := os.MkdirAll(root, 0o755); mkErr == nil {
@@ -47,19 +47,19 @@ func openRootOrFallback(root string) (*os.Root, error) {
 	if RootUnavailable(err) && RootFallbackEnabled() {
 		if WarnOnce("root-fallback:" + root) {
 			log.LogWarn("pathutil: %s", RootFallbackWhy)
-			log.LogWarn("pathutil: 降级目录=%s 底层原因=%v", root, err)
+			log.LogWarn("pathutil: degraded dir=%s underlying cause=%v", root, err)
 		}
-		// 降级模式下没有 Root 兜着，目录得自己先建出来：后面的写都以它为父
+		// In degraded mode there's no Root fallback, so the directory must be created first: subsequent writes use it as parent
 		_ = os.MkdirAll(root, 0o755)
 		return nil, nil
 	}
 	return nil, fmt.Errorf("%s: %w", ExplainRootFailure(root, err), err)
 }
 
-// WarnOnce 返回 true 表示这是第一次撞上这个 key（应当打日志）；重复调用不再打扰。
+// WarnOnce returns true if this key is being seen for the first time (should log); repeated calls don't bother anyone.
 //
-// 安全降级/不支持这类消息刷屏会把真正的问题淹没掉，也不该让每个请求都白白做
-// 一次字符串格式化。
+// Safety-degradation/unsupported messages flooding the log will drown the real problem, and
+// every request shouldn't pay for a string format call either.
 func WarnOnce(key string) bool {
 	warnMu.Lock()
 	defer warnMu.Unlock()
@@ -71,23 +71,24 @@ func WarnOnce(key string) bool {
 	return true
 }
 
-// RootFallbackEnabled 运营者是否显式要求"Root 用不了就退回按路径操作"。
+// RootFallbackEnabled returns whether the operator explicitly requested "fall back to path-based ops when Root is unavailable".
 //
-// 为什么要有：某些文件系统（部分网络文件系统、9P、老的 overlay/SMB 挂载、WSL
-// 的 DrvFs 在某些内核上）做不了打开目录当根目录再 tree-scoped 解析那套；
-// 那时 fail closed 的直接后果是"这个目录完全共享不了"，产品等于不可用。
-// 给一个**明确知道自己在做什么**的人留个开关，比让他在暗处猜要好。
+// Why it exists: some filesystems (certain network filesystems, 9P, old overlay/SMB mounts,
+// WSL DrvFs on certain kernels) can't do the "open a directory as root then tree-scoped resolution" thing;
+// in that case fail-closed means "this directory can't be shared at all" and the product is unusable.
+// Giving a switch to someone who **knows what they're doing** is better than having them guess in the dark.
 func RootFallbackEnabled() bool {
 	return os.Getenv("PEERDRIVE_ROOT_FALLBACK") == "1"
 }
 
-// RootUnavailable 这个错误是不是"平台/文件系统干不了这件事"（而不是"目录不存在"
-// 或"没权限"）。分清楚很重要：排查方向完全不同。
+// RootUnavailable returns whether this error is "platform/filesystem can't do this" (as opposed to
+// "directory doesn't exist" or "permission denied"). Distinguishing matters: the troubleshooting direction
+// is completely different.
 func RootUnavailable(err error) bool {
 	if err == nil {
 		return false
 	}
-	// os.Root 内部会把 errno 包成 *PathError 再往上丢，errors.Is 能穿透
+	// os.Root wraps errno as *PathError internally, and errors.Is can see through it
 	for _, target := range []error{os.ErrInvalid, errNotSupported} {
 		if errors.Is(err, target) {
 			return true
@@ -97,39 +98,40 @@ func RootUnavailable(err error) bool {
 	if errors.As(err, &pe) {
 		return RootUnavailable(pe.Err)
 	}
-	// openat2 不被识别时内核返回 EINVAL；完全没实现则是 ENOSYS/ENOTSUP。
-	// 这里也认 Windows 的 ERROR_NOT_SUPPORTED（syscall 侧 errno 1150）。
+	// When openat2 is unrecognized the kernel returns EINVAL; if not implemented at all it's ENOSYS/ENOTSUP.
+	// Also recognizes Windows ERROR_NOT_SUPPORTED (syscall errno 1150).
 	msg := err.Error()
 	return strings.Contains(msg, "not supported") ||
 		strings.Contains(msg, "operation not supported") ||
 		strings.Contains(msg, "not implemented")
 }
 
-// errNotSupported 用一个可比较的哨兵承接 syscall.Errno 之外的判定，
-// 免得在 RootUnavailable 里散布 magic number。
+// errNotSupported uses a comparable sentinel for syscall.Errno checks outside of RootUnavailable,
+// to avoid scattering magic numbers.
 var errNotSupported = errors.New("root operations unsupported")
 
-// ExplainRootFailure 把 OpenRoot 的失败翻译成人话 + 下一步该干嘛。
+// ExplainRootFailure translates an OpenRoot failure into human-readable text + next steps.
 func ExplainRootFailure(root string, err error) string {
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		return fmt.Sprintf("目录 %s 不存在：创建它（或修正配置）后重启", root)
+		return fmt.Sprintf("directory %s does not exist: create it (or fix the config) and restart", root)
 	case errors.Is(err, os.ErrPermission):
-		return fmt.Sprintf("进程没有访问 %s 的权限：检查目录的 owner/ACL，不要用 chmod 777 敷衍", root)
+		return fmt.Sprintf("process lacks permission to access %s: check directory owner/ACL, don't just chmod 777", root)
 	case RootUnavailable(err):
 		extra := ""
 		if !RootFallbackEnabled() {
-			extra = "；若确认要在这种文件系统上用这个目录，可显式设 PEERDRIVE_ROOT_FALLBACK=1（会退回按路径判定，存在 TOCTOU 风险）"
+			extra = "; if you confirm this directory should be used on such a filesystem, set PEERDRIVE_ROOT_FALLBACK=1 explicitly (falls back to path-based checking, has TOCTOU risk)"
 		}
-		return fmt.Sprintf("文件系统不支持目录句柄约束（os.Root），安全边界无法在该目录上强制执行%v", extra)
+		return fmt.Sprintf("filesystem does not support directory handle constraints (os.Root), safety boundary cannot be enforced on this directory%v", extra)
 	default:
 		return fmt.Sprintf("%v", err)
 	}
 }
 
-// ProbeRootSupport 试着在一个目录上建立 os.Root；返回 nil 表示这条路走得通。
+// ProbeRootSupport tries to create an os.Root on a directory; returns nil if it works.
 //
-// 什么时候用：**启动自检**。别等到有人来拉文件才发现这个目录其实提供不出去。
+// When to use: **startup self-check**. Don't wait until someone tries to fetch a file to discover
+// the directory can't be served.
 func ProbeRootSupport(root string) error {
 	if strings.TrimSpace(root) == "" {
 		return fmt.Errorf("empty root")
@@ -139,28 +141,28 @@ func ProbeRootSupport(root string) error {
 		return err
 	}
 	defer r.Close()
-	// 打开成功还不够：有的挂载点上 openat2 能开、但后续 *_at 调用会失败。
+	// Opening successfully is not enough: on some mounts openat2 works but subsequent *_at calls fail.
 	if _, err := r.Stat("."); err != nil {
 		return err
 	}
 	return nil
 }
 
-// warnOnce 同一个目录只告警一次：安全降级/不支持这类消息刷屏会把真正的
-// 问题淹没掉，也不该让每个请求都走一遍字符串格式化。
+// warnOnce: warn only once per directory: safety-degradation/unsupported messages flooding the log
+// will drown the real problem, and every request shouldn't pay for a string format call.
 var (
 	warnMu    sync.Mutex
 	warned    = map[string]bool{}
 	warnLines = []string{}
 )
 
-// openRootFn 可被单测替换的接缝。
+// openRootFn: replaceable seam for unit tests.
 //
-// 为什么需要它：os.Root 支不支持取决于**运行机器的文件系统**，而一台支持得很
-// 好的机器上根本造不出"不支持"的环境——降级这条分支就永远没被执行过，而我们
-// 不该寄希望于它"看起来应该没问题"。
+// Why it's needed: whether os.Root works depends on the **filesystem of the running machine**, and
+// on a well-supported machine you can't create an "unsupported" environment -- so the degradation
+// branch would never be executed, and we shouldn't just hope it "looks like it should be fine".
 var openRootFn = os.OpenRoot
 
-// RootFallbackWhy 为什么走成了降级路径（日志/错误信息里要说清楚：这是被允许的
-// 降级，不是"我们没做防护"）。
-const RootFallbackWhy = "PEERDRIVE_ROOT_FALLBACK=1：本文件系统无法使用 os.Root，已退回按路径判定（存在 TOCTOU 窗口，仅限信任该目录下用户的场景使用）"
+// RootFallbackWhy: explains why the degraded path was taken (the log/error message should make clear:
+// this is an intentional degradation, not "we didn't implement defenses").
+const RootFallbackWhy = "PEERDRIVE_ROOT_FALLBACK=1: this filesystem cannot use os.Root; fell back to path-based checking (has TOCTOU window, only for scenarios where the directory's users are trusted)"

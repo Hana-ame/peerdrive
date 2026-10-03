@@ -1,9 +1,9 @@
-# 匿名合集层 (Anonymous Collection Layer)
+# Anonymous Collection Layer
 
-## 概述
-匿名合集是一个不可变的、内容寻址的 JSON 文件，包含一组 `path → hash` 映射关系。其唯一标识符（hash）由规范 JSON 的 SHA256 决定，因此相同内容始终生成相同的 hash。
+## Overview
+An anonymous collection is an immutable, content-addressed JSON file containing a set of `path → hash` mappings. Its unique identifier (hash) is determined by the SHA256 of the canonical JSON, so identical content always produces the same hash.
 
-## 合集结构
+## Collection Structure
 
 ```json
 {
@@ -21,9 +21,9 @@
 
 ### POST /anon/collections
 
-创建匿名合集。
+Create an anonymous collection.
 
-**请求体：**
+**Request body:**
 ```json
 {
   "friendly_name": "my-collection",
@@ -33,26 +33,26 @@
 }
 ```
 
-**校验规则：**
-- 所有 `path` 必须是相对路径，不能以 `/` 开头，不能包含 `..`
-- 所有 `hash` 必须是 64 位小写十六进制字符串
-- 条目会在服务端按 `path` 字典序排序（保证确定性）
+**Validation rules:**
+- All `path` values must be relative paths, must not start with `/`, and must not contain `..`
+- All `hash` values must be 64-character lowercase hexadecimal strings
+- Entries are sorted lexicographically by `path` on the server side (to ensure determinism)
 
-**成功响应（201 Created）：**
+**Success response (201 Created):**
 ```json
 {"hash": "sha256-of-the-json"}
 ```
 
-**错误响应（400 Bad Request）：**
+**Error response (400 Bad Request):**
 ```json
 {"error": "invalid path: ../etc/passwd"}
 ```
 
 ### GET /anon/collections/:hash
 
-获取已创建的合集 JSON 内容。
+Retrieve the JSON content of an existing collection.
 
-**成功响应（200 OK）：**
+**Success response (200 OK):**
 ```json
 {
   "version": 1,
@@ -61,32 +61,32 @@
 }
 ```
 
-**错误响应（404 Not Found）：**
+**Error response (404 Not Found):**
 ```json
 {"error": "collection not found"}
 ```
 
 ### GET /anon/collections/:hash/entries/*path
 
-从匿名合集中下载指定路径的文件。
+Download a file at a specified path from an anonymous collection.
 
-**参数：**
-- `:hash` — 合集 hash
-- `*path` — 文件在合集 entries 中的路径
+**Parameters:**
+- `:hash` — collection hash
+- `*path` — file path within the collection entries
 
-**成功响应（200 OK）：**
-文件内容流，附带 `Content-Disposition` 头。
+**Success response (200 OK):**
+File content stream with a `Content-Disposition` header.
 
-**错误响应：**
-- 合集不存在 → 404
-- 路径在合集中不存在 → 404
-- 文件数据不可用 → 404
+**Error responses:**
+- Collection not found → 404
+- Path not found in collection → 404
+- File data unavailable → 404
 
 ### POST /anon/collections/fork
 
-基于已有合集创建一个新合集，可增删条目。
+Create a new collection based on an existing one, with the ability to add or remove entries.
 
-**请求体：**
+**Request body:**
 ```json
 {
   "source_hash": "sha256-of-source-collection",
@@ -95,59 +95,59 @@
 }
 ```
 
-**成功响应（201 Created）：**
+**Success response (201 Created):**
 ```json
 {"hash": "sha256-of-the-new-collection"}
 ```
 
-## 执行流程
+## Execution Flow
 
-### 创建流程
-1. 校验每个 entry 的 `path` 和 `hash` 格式
-2. 按 `path` 字典序排序 entries
-3. 构建 `AnonCollection` 对象（version=1, created_at=当前 UTC 时间）
-4. `json.MarshalIndent` 序列化为规范 JSON
-5. 计算 SHA256 -> hash
-6. 写文件到 `storage/{hash[:2]}/{hash}`
-7. 注册 `file_meta`（type=anon_collection, mime=application/json）
-8. 注册 `file_providers`（provider_type=local, path=相对路径）
-9. 返回 hash
+### Creation Flow
+1. Validate the `path` and `hash` format of each entry
+2. Sort entries lexicographically by `path`
+3. Build an `AnonCollection` object (version=1, created_at=current UTC time)
+4. Serialize to canonical JSON via `json.MarshalIndent`
+5. Compute SHA256 -> hash
+6. Write file to `storage/{hash[:2]}/{hash}`
+7. Register `file_meta` (type=anon_collection, mime=application/json)
+8. Register `file_providers` (provider_type=local, path=relative path)
+9. Return hash
 
-### 读取流程
-1. 按 hash 从 `storage/{hash[:2]}/{hash}` 读取文件
-2. `json.Unmarshal` 解析为 `AnonCollection`
-3. 校验 `version == 1`
-4. 返回解析后的 JSON
+### Read Flow
+1. Read file from `storage/{hash[:2]}/{hash}` by hash
+2. Parse into `AnonCollection` via `json.Unmarshal`
+3. Validate `version == 1`
+4. Return parsed JSON
 
-### 下载文件流程
-1. 读取合集 JSON
-2. 匹配 entries 中的 `path`
-3. 通过 `Downloader.GetFileStream(entry.Hash)` 获取文件流
-4. 流式返回给客户端
+### File Download Flow
+1. Read collection JSON
+2. Match the `path` in entries
+3. Obtain file stream via `Downloader.GetFileStream(entry.Hash)`
+4. Stream back to the client
 
-## 响应头
-- 通过 `GET /sha256sum/:hash` 下载合集 JSON 时，若 `file_meta.type == anon_collection`，响应头增加 `X-Peerdrive-Collection: true`
+## Response Headers
+- When downloading collection JSON via `GET /sha256sum/:hash`, if `file_meta.type == anon_collection`, add `X-Peerdrive-Collection: true` to the response headers
 
-## 与下载层的关系
-- 合集 JSON 本身是一个 SHA256 寻址的普通文件，可通过 `/sha256sum/:hash` 直接下载
-- 合集内文件的下载最终依赖 `/sha256sum/:hash` 相同的代码路径（复用 P2P 回退、多副本重试等）
+## Relationship with the Download Layer
+- The collection JSON itself is a regular SHA256-addressed file and can be downloaded directly via `/sha256sum/:hash`
+- Downloading files within a collection ultimately relies on the same code path as `/sha256sum/:hash` (reusing P2P fallback, multi-replica retry, etc.)
 
-## 涉及文件
+## Related Files
 
 ```
 internal/model/anon.go             — AnonCollection / AnonCollectionEntry
-internal/service/anon_service.go   — 校验、排序、创建、读取
-internal/controller/anon.go        — HTTP 入口
-internal/repository/anon_repo.go   — 底层存储
-internal/controller/download.go    — X-Peerdrive-Collection 响应头
+internal/service/anon_service.go   — validation, sorting, creation, reading
+internal/controller/anon.go        — HTTP entry points
+internal/repository/anon_repo.go   — underlying storage
+internal/controller/download.go    — X-Peerdrive-Collection response header
 ```
 
-## 测试
+## Testing
 
-执行 `test_anon_collection.sh` 验证：
-- 创建合集（201）
-- 路径遍历拦截（400）
-- 合集 JSON 读取（version=1）
-- 通过 sha256sum 下载合集
-- 从合集条目中下载文件
-- 复刻合集并移除条目
+Run `test_anon_collection.sh` to verify:
+- Create collection (201)
+- Path traversal interception (400)
+- Read collection JSON (version=1)
+- Download collection via sha256sum
+- Download file from collection entry
+- Fork collection and remove entry

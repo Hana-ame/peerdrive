@@ -1,6 +1,6 @@
 package service
 
-// 注：本文件属于 legacy 代码（见 doc/archive/LEGACY.md，待删/待迁移）的测试，未逐一标注发现背景；「发现背景」规范对新代码生效。
+// Note: This file is a test for legacy code (see doc/archive/LEGACY.md, pending deletion/migration); discovery background is not annotated individually. The "discovery background" convention applies to new code.
 
 import (
 	"os"
@@ -119,9 +119,12 @@ func TestGetCollection_NonexistentHash(t *testing.T) {
 	assert.Contains(t, err.Error(), "collection not found")
 }
 
-// 发现背景（2026-08-16 传输层审阅 H1）：GetCollectionByHash 未校验 hash 就做 hash[:2] 切片，
-// 短 hash（0/1 字符）→ 越界 panic 杀进程；".." 类值还逃逸 storage 目录。
-// 修复：入口校验 isValidHash。此前无此测试，非法 hash 直接 panic。
+// Discovery background (2026-08-16 transport layer review H1): GetCollectionByHash
+// didn't validate hash before slicing hash[:2] — short hashes (0/1 characters)
+// → out-of-bounds panic killing the process; ".."-like values also escaped the
+// storage directory.
+// Fix: entry-level isValidHash validation. Previously no test existed; invalid
+// hashes would directly panic.
 func TestGetCollection_InvalidHashNoPanic(t *testing.T) {
 	tmpDir, svc := setupAnonServiceTest(t)
 	defer os.RemoveAll(tmpDir)

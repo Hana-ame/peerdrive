@@ -9,44 +9,44 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// defaultBufferLowThreshold 发送缓冲低水位阈值。
-// SendFrame 内置流控：bufferedAmount 超过阈值时等待低水位事件再发下一块。
-// 坑：pion 的 OnBufferedAmountLow 是替换式回调——若每个并发发送方各自注册，
-// 只有最后一个注册者能收到事件，其余死等（曾导致并发 serveFile 卡死）。
-// 因此回调必须在 attach 时注册一次（全局一份），等待统一走 lowWater 通道。
+// defaultBufferLowThreshold is the send-buffer low-water threshold.
+// SendFrame has built-in flow control: when bufferedAmount exceeds the threshold, it waits for the low-water event before sending the next chunk.
+// Pitfall: pion's OnBufferedAmountLow is a replacement-style callback — if each concurrent sender registers its own,
+// only the last registrant receives the event and the others dead-wait (this once caused concurrent serveFile to hang).
+// Therefore the callback must be registered once at attach time (a single global instance), with waiting funneled through the lowWater channel.
 const defaultBufferLowThreshold = 512 * 1024
 
-// Connection 表示一条 WebRTC DataConnection（主动发起或被动接收）。
-// SDP 交换与 ICE 候选收发经由信令服务器完成，数据面为 DataChannel。
+// Connection represents a WebRTC DataConnection (actively initiated or passively received).
+// SDP exchange and ICE candidate exchange happen via the signaling server; the data plane is a DataChannel.
 //
-// 扩展性：数据面依赖 DataChannel 接口（transport.go），不绑定 pion 具体类型；
-// 业务帧协议（verb）由上层定义，本类型只提供传输原语。
+// Extensibility: the data plane depends on the DataChannel interface (transport.go), not bound to specific pion types;
+// the business frame protocol (verb) is defined by the upper layer; this type provides only transport primitives.
 type Connection struct {
-	ID      string // connectionId（信令消息路由键）
-	PeerID  string // 远端 peer id
+	ID      string // connectionId (signaling message routing key)
+	PeerID  string // remote peer id
 	Label   string
-	Offered bool // 本端是否为 offerer
+	Offered bool // whether this end is the offerer
 
-	// M9：dc 在 attach（pion OnDataChannel 回调/本地 CreateDataChannel 后）
-	// 无锁写入，而 Open/Send/SendFrame/Close 从任意 goroutine 并发读——
-	// 数据竞争（-race 必现，极端下读到 nil 半初始化）。dcMu 保护 dc 的读写；
-	// attach 只调用一次，锁开销可忽略。
+	// M9: dc is written lock-free during attach (pion OnDataChannel callback / after local CreateDataChannel),
+	// while Open/Send/SendFrame/Close read it concurrently from arbitrary goroutines —
+	// data race (guaranteed by -race, at extreme reading nil half-initialized). dcMu protects dc reads/writes;
+	// attach is called only once, so the lock overhead is negligible.
 	dcMu sync.RWMutex
 	pc   *webrtc.PeerConnection
 	dc   DataChannel
 	ice  []webrtc.ICEServer
 
-	sendMu sync.Mutex // 保证 data 头与二进制块连续发送（SendFrame）
+	sendMu sync.Mutex // ensures data header and binary chunk are sent consecutively (SendFrame)
 
-	lowWater chan struct{} // 低水位事件广播（attach 时注册一次，容量 1 防堆积）
+	lowWater chan struct{} // low-water event broadcast (registered once at attach, capacity 1 to prevent accumulation)
 
 	peer *Peer
 
-	// handlerMu 保护 onOpen/onMessage/onClose：注册方（业务 goroutine 调
-	// OnOpen/OnMessage/OnClose）与触发方（attach 注册的 pion 回调闭包在
-	// PC goroutine 读）并发——-race 必现的读写竞争（发现背景：自托管集成
-	// 测试 -race 连跑必挂，真实网络下时序慢不易暴露）。回调体直接调用，
-	// 闭包内只取快照。
+	// handlerMu protects onOpen/onMessage/onClose: the registrant (business goroutine calling
+	// OnOpen/OnMessage/OnClose) and the trigger (pion callback closure registered during attach,
+	// read on the PC goroutine) are concurrent — a data race guaranteed by -race (discovery context:
+	// self-hosted integration tests under -race always fail; real-world network timing is slower and
+	// harder to expose). Callback bodies are invoked directly; closures only take a snapshot.
 	handlerMu sync.Mutex
 	onOpen    func(*Connection)
 	onMessage func(Frame)
@@ -56,40 +56,40 @@ type Connection struct {
 	done      chan struct{}
 }
 
-// Done 返回连接关闭通知（Close 或对端断开时触发）。
+// Done returns the connection-close notification (triggered on Close or peer disconnect).
 func (c *Connection) Done() <-chan struct{} { return c.done }
 
-// OnOpen 注册连接就绪（DataChannel open）回调。
+// OnOpen registers the connection-ready (DataChannel open) callback.
 func (c *Connection) OnOpen(f func(*Connection)) {
 	c.handlerMu.Lock()
 	c.onOpen = f
 	c.handlerMu.Unlock()
 }
 
-// OnMessage 注册数据消息回调（Frame：文本/二进制帧）。
+// OnMessage registers the data message callback (Frame: text/binary frame).
 func (c *Connection) OnMessage(f func(Frame)) {
 	c.handlerMu.Lock()
 	c.onMessage = f
 	c.handlerMu.Unlock()
 }
 
-// OnClose 注册连接关闭回调。
+// OnClose registers the connection-close callback.
 func (c *Connection) OnClose(f func(*Connection)) {
 	c.handlerMu.Lock()
 	c.onClose = f
 	c.handlerMu.Unlock()
 }
 
-// Open 返回 DataChannel 是否已就绪。
+// Open returns whether the DataChannel is ready.
 func (c *Connection) Open() bool {
 	c.dcMu.RLock()
 	defer c.dcMu.RUnlock()
 	return c.dc != nil && c.dc.Open()
 }
 
-// Send 发送二进制数据。
-// 注意：pion 的 dc.Send([]byte) 发送的是二进制帧（SCTP PPID 53），
-// 与文本帧（PPID 51）在接收端可区分——协议依赖此区分「数据块 vs 控制头」。
+// Send sends binary data.
+// Note: pion's dc.Send([]byte) sends a binary frame (SCTP PPID 53),
+// distinguishable from a text frame (PPID 51) on the receiver side — the protocol relies on this distinction to route "data chunks vs. control headers."
 func (c *Connection) Send(data []byte) error {
 	c.dcMu.RLock()
 	dc := c.dc
@@ -100,9 +100,9 @@ func (c *Connection) Send(data []byte) error {
 	return dc.Send(data)
 }
 
-// SendText 发送文本帧（JSON 控制头专用）。
-// 坑：必须用文本帧。若用 Send([]byte) 发送 JSON 头，对端（peerjs 浏览器端
-// / 本库对端）会把头误判为二进制数据块而丢弃/错配。
+// SendText sends a text frame (for JSON control headers).
+// Pitfall: must use a text frame. If a JSON header is sent via Send([]byte), the peer (peerjs browser side
+// / this library's peer) will misidentify the header as a binary data chunk and discard/mismatch it.
 func (c *Connection) SendText(s string) error {
 	c.dcMu.RLock()
 	dc := c.dc
@@ -113,7 +113,7 @@ func (c *Connection) SendText(s string) error {
 	return dc.SendText(s)
 }
 
-// SendJSON 发送 JSON 文本消息（等价 SendText(json(v))）。
+// SendJSON sends a JSON text message (equivalent to SendText(json(v))).
 func (c *Connection) SendJSON(v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -122,13 +122,13 @@ func (c *Connection) SendJSON(v any) error {
 	return c.SendText(string(b))
 }
 
-// SendFrame 原子发送「JSON 头 + 二进制体」帧（头与体连续发送），内置写缓冲流控。
-// 为什么：接收端按「data 头 → 紧随的二进制块」的状态机路由数据，
-// 若多个 goroutine 并发发送时头体交织，数据块会挂到错误的请求上。
-// sendMu 保证一帧的头+体原子落线，多请求并发安全；同时作为背压闸门——
-// 对端消费慢时所有发送方在此排队（有界等待，连接关闭立即退出）。
-// 坑：流控事件依赖 attach 时注册的全局回调（lowWater），不能在此处注册
-// （替换式回调会被并发发送方覆盖 → 死等）。
+// SendFrame atomically sends a "JSON header + binary body" frame (header and body sent consecutively), with built-in write-buffer flow control.
+// Why: the receiver routes data using a state machine of "data header → immediately following binary chunk";
+// if multiple goroutines send concurrently and headers/chunks interleave, chunks attach to the wrong request.
+// sendMu guarantees atomic on-wire delivery of one frame's header+body, safe for concurrent multi-request use; it also acts as a backpressure gate —
+// when the peer consumes slowly, all senders queue here (bounded wait; immediate exit on connection close).
+// Pitfall: flow-control events rely on the global callback registered at attach time (lowWater); registering here
+// (replacement-style callbacks would be overwritten by concurrent senders → dead-wait) is not allowed.
 func (c *Connection) SendFrame(header any, body []byte) error {
 	hb, err := json.Marshal(header)
 	if err != nil {
@@ -136,7 +136,7 @@ func (c *Connection) SendFrame(header any, body []byte) error {
 	}
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
-	// M9：持 sendMu 期间读一次 dc 快照，后续全部用局部变量（避免每次取锁）
+	// M9: hold sendMu and read a dc snapshot once; subsequent code uses the local variable (avoid locking each time)
 	c.dcMu.RLock()
 	dc := c.dc
 	c.dcMu.RUnlock()
@@ -149,32 +149,32 @@ func (c *Connection) SendFrame(header any, body []byte) error {
 	if len(body) == 0 {
 		return nil
 	}
-	// 低危 1 修复：流控等待加整体超时上限（30s）——之前只等 done/lowWater，
-	// 慢消费者时依赖 ICE disconnected（~30s）兜底。有界但不快，现在显式封顶
+	// Low-severity 1 fix: add an overall timeout ceiling (30s) to the flow-control wait — previously only done/lowWater were waited on,
+	// relying on ICE disconnected (~30s) as a backstop for slow consumers. Bounded but not fast; now explicitly capped.
 	flowWait := time.NewTimer(30 * time.Second)
 	defer flowWait.Stop()
 	for dc.BufferedAmount() > defaultBufferLowThreshold {
 		select {
 		case <-c.lowWater:
-		case <-c.done: // 连接关闭：立即退出，不悬挂调用方
+		case <-c.done: // connection closed: exit immediately, don't hang the caller
 			return fmt.Errorf("peerjs: connection closed during flow control")
-		case <-flowWait.C: // 慢消费者：超时返回错误（上层会断开/重试）
+		case <-flowWait.C: // slow consumer: return timeout error (upper layer will disconnect/retry)
 			return fmt.Errorf("peerjs: flow control timeout (slow consumer)")
 		}
 	}
 	return dc.Send(body)
 }
 
-// DataChannel 返回底层数据通道（高级用法：流控、关闭等）。
+// DataChannel returns the underlying data channel (advanced usage: flow control, close, etc.).
 func (c *Connection) DataChannel() DataChannel {
 	c.dcMu.RLock()
 	defer c.dcMu.RUnlock()
 	return c.dc
 }
 
-// Close 关闭连接并从信令层注销。
-// M9：Close 可能被 pion 内部回调（OnDataChannel 的 OnClose）触发，与 attach
-// 写入 dc 并发——读取 dc 需持 dcMu。
+// Close closes the connection and deregisters from the signaling layer.
+// M9: Close may be triggered by pion internal callbacks (OnClose in OnDataChannel), concurrent with attach
+// writing dc — reading dc requires holding dcMu.
 func (c *Connection) Close() {
 	c.closeOnce.Do(func() {
 		if c.pc != nil {
@@ -197,9 +197,9 @@ func (c *Connection) Close() {
 	})
 }
 
-// handleMessage 处理该连接相关的信令消息（ANSWER/CANDIDATE）。
-// SDP/候选的解析错误被静默忽略：对端可能发来乱序/过期的候选，
-// 失败仅意味着本轮协商失败，由 ICE 状态回调负责最终清理。
+// handleMessage handles signaling messages related to this connection (ANSWER/CANDIDATE).
+// SDP/candidate parsing errors are silently ignored: the peer may send out-of-order or stale candidates;
+// a failure simply means this round of negotiation failed; ICE state callbacks handle final cleanup.
 func (c *Connection) handleMessage(m Message) {
 	switch m.Type {
 	case MsgAnswer:
@@ -217,11 +217,11 @@ func (c *Connection) handleMessage(m Message) {
 	}
 }
 
-// newConnection 创建连接（offerer 时立即建立 PC 与 DataChannel）。
-// connID 为空时生成新 ID；answerer 必须沿用 offerer 提供的 connectionId。
-// 坑：曾因 answerer 新生成 ID 导致 ANSWER 消息在信令路由（按 connectionId）
-// 时找不到对端 conn，ICE 永远停在 checking，DataChannel 永不 open——
-// peerjs 协议规定 connectionId 由 offerer 定义、双方共用。
+// newConnection creates a connection (when offered, establishes PC and DataChannel immediately).
+// If connID is empty, a new ID is generated; the answerer must reuse the connectionId provided by the offerer.
+// Pitfall: previously the answerer generated a new ID, causing ANSWER messages to fail signaling routing (by connectionId),
+// leaving ICE stuck in checking forever and DataChannel never opening —
+// the peerjs protocol specifies that connectionId is defined by the offerer and shared by both sides.
 func (p *Peer) newConnection(dst, label string, offered bool, iceServers []webrtc.ICEServer, connID string) (*Connection, error) {
 	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{ICEServers: iceServers})
 	if err != nil {
@@ -240,7 +240,7 @@ func (p *Peer) newConnection(dst, label string, offered bool, iceServers []webrt
 		done:     make(chan struct{}),
 		lowWater: make(chan struct{}, 1),
 	}
-	// ICE 失败/断开即清理连接，避免泄漏（peerjs-client negotiator 同款行为）
+	// On ICE failure/disconnect, clean up the connection immediately to avoid leaks (same behavior as peerjs-client negotiator)
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		switch state {
 		case webrtc.ICEConnectionStateClosed,
@@ -249,9 +249,9 @@ func (p *Peer) newConnection(dst, label string, offered bool, iceServers []webrt
 			conn.Close()
 		}
 	})
-	// 收集本地 ICE 候选并经信令转发（peerjs negotiator.onicecandidate 等价实现）。
-	// 坑：pion 不会自动发送候选，必须手动 OnICECandidate + 信令 CANDIDATE，
-	// 否则双方停在 checking 永远连不上。
+	// Collect local ICE candidates and forward them via signaling (equivalent to peerjs negotiator.onicecandidate).
+	// Pitfall: pion does not send candidates automatically; manual OnICECandidate + signaling CANDIDATE is required,
+	// otherwise both sides stay in checking and never connect.
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {
 			return
@@ -285,16 +285,16 @@ func (p *Peer) newConnection(dst, label string, offered bool, iceServers []webrt
 	return conn, nil
 }
 
-// attach 绑定数据通道并设置 open/消息/流控回调。
-// offerer 侧在 CreateDataChannel 后立即调用（状态为 connecting），
-// answerer 侧在对端 offer 触发 pc.OnDataChannel 时调用。
+// attach binds the data channel and sets open/message/flow-control callbacks.
+// The offerer side calls this immediately after CreateDataChannel (state is connecting);
+// the answerer side calls it when the peer's offer triggers pc.OnDataChannel.
 func (c *Connection) attach(dc DataChannel) {
-	// M9：dc 写入持锁（Close/Send/Open 并发读；pion 的 OnDataChannel 回调
-	// 在 PC goroutine，可能刚好与首次 Send 竞争）。
+	// M9: dc write holds the lock (Close/Send/Open read concurrently; pion's OnDataChannel callback
+	// runs on the PC goroutine and may race with the first Send).
 	c.dcMu.Lock()
 	c.dc = dc
 	c.dcMu.Unlock()
-	// 流控回调全局注册一次（替换式回调，多个发送方各自注册会互相覆盖→死等）
+	// Flow-control callback registered globally once (replacement-style callback; multiple senders each registering would overwrite each other → dead-wait)
 	dc.SetBufferedAmountLowThreshold(defaultBufferLowThreshold)
 	dc.OnBufferedAmountLow(func() {
 		select {
@@ -303,8 +303,8 @@ func (c *Connection) attach(dc DataChannel) {
 		}
 	})
 	dc.OnOpen(func() {
-		// 快照后回调：onOpen 可能晚于 open 事件注册（attach 时仍为 nil），
-		// 只读快照避免与 OnOpen 注册并发写（handlerMu 保护）。
+		// Snapshot then callback: onOpen may be registered later than the open event (still nil at attach time);
+		// reading a snapshot only avoids concurrent write with OnOpen registration (handlerMu protects).
 		c.handlerMu.Lock()
 		h := c.onOpen
 		c.handlerMu.Unlock()
@@ -320,14 +320,14 @@ func (c *Connection) attach(dc DataChannel) {
 			h(f)
 		}
 	})
-	// 远端主动关闭 dc 时清理本端（Close 幂等）：否则本端连接悬挂，
-	// 依赖 ICE disconnected 兜底（秒级~分钟级，太慢）。
+	// Clean up this end when the remote actively closes the dc (Close is idempotent): otherwise this end's connection hangs,
+	// relying on ICE disconnected as a backstop (seconds-to-minutes, too slow).
 	dc.OnClose(func() {
 		c.Close()
 	})
 }
 
-// makeOffer 创建并发送 OFFER（peerjs negotiator._makeOffer 的等价实现）。
+// makeOffer creates and sends an OFFER (equivalent to peerjs negotiator._makeOffer).
 func (c *Connection) makeOffer() error {
 	offer, err := c.pc.CreateOffer(nil)
 	if err != nil {
@@ -347,7 +347,7 @@ func (c *Connection) makeOffer() error {
 	return c.peer.Send(NewMessage(MsgOffer, c.PeerID, payload))
 }
 
-// handleOffer 对端发起 OFFER：设置远端 SDP 并回 ANSWER。
+// handleOffer handles a remote-initiated OFFER: sets the remote SDP and replies with an ANSWER.
 func (c *Connection) handleOffer(sdp *webrtc.SessionDescription) error {
 	if err := c.pc.SetRemoteDescription(*sdp); err != nil {
 		return fmt.Errorf("peerjs: set remote offer: %w", err)

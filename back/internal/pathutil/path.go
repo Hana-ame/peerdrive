@@ -1,22 +1,22 @@
-// Package pathutil 只做一件事：判断「一个路径是否落在某个根目录之内」。
+// Package pathutil does one thing: determine "whether a path falls within a given root directory".
 //
-// 为什么值得单开一个包：这个判断同时被三处用到，而且三处的判断必须**完全一致**
-// ——文件登记（`service.FileService`）、对外服务（`transport.FileIndexService`
-// 的 serveFile / `source.LocalSource`）、共享清单过滤（`service.NodeShare`）。
-// 之前这三处各写一份 `filepath.Rel` + `HasPrefix`，于是出现了经典的组合错误：
-// 登记放行了（storage 根内）、共享清单也列得出来（ShareDirs 前缀匹配），
-// 唯独读取那一份判定说"越权"，回退到一个根本不存在的内容寻址副本 ——
-// 对端的表现是"清单里看得见、一拉就 read failed"。
+// Why a separate package: this check is used in three places, and the three checks must be
+// **identical** -- file registration (`service.FileService`), outbound serving (`transport.FileIndexService`
+// serveFile / `source.LocalSource`), and shared manifest filtering (`service.NodeShare`).
+// Previously each wrote its own `filepath.Rel` + `HasPrefix`, which produced a classic composition error:
+// registration allowed (inside the storage root), the shared manifest listed it too (ShareDirs prefix match),
+// but the read check said "out of bounds" and fell back to a non-existent content-addressed copy --
+// the peer saw "visible in the manifest, but read failed on fetch".
 //
-// 跨平台要点（Linux/macOS/Windows 都要对）：
-//   - 分隔符：`filepath.Rel` 自带平台语义，不要手写 `strings.HasPrefix(a+"/")`
-//     （Windows 上是 `\`，而且 `/` 也被接受，手写必错）。
-//   - 大小写：Windows（NTFS）默认大小写不敏感，`C:\Data` 与 `c:\data` 是同一
-//     目录；Linux/ext4 严格区分。所以 Windows 上按折叠大小写比较，其它平台不折。
-//   - 盘符/卷：`filepath.Rel("C:\\a", "D:\\a")` 会直接报错，天然拦住跨盘；
-//     但盘符大小写不同（C: vs c:）时 Rel 仍能算出结果，靠上面的折叠解决。
-//   - 符号链接：解析后判定（best-effort）。目录内的软链指向外面 → 判为越权，
-//     这是刻意的（宁可少给，不能多给）。
+// Cross-platform notes (Linux/macOS/Windows must all be right):
+//   - Separators: `filepath.Rel` carries platform semantics; don't hand-write `strings.HasPrefix(a+"/")`
+//     (Windows uses `\`, and `/` is also accepted, so hand-writing is guaranteed to be wrong).
+//   - Case: Windows (NTFS) defaults to case-insensitive, so `C:\Data` and `c:\data` are the same
+//     directory; Linux/ext4 is case-sensitive. So Windows compares case-folded, other platforms don't.
+//   - Drives/volumes: `filepath.Rel("C:\\a", "D:\\a")` errors directly, naturally blocking cross-drive;
+//     but if drive letters differ in case (C: vs c:), Rel still returns a result, which the folding above handles.
+//   - Symlinks: resolve then check (best-effort). Symlinks inside the directory pointing outside -> out of bounds,
+//     by design (less is more; never give more than intended).
 package pathutil
 
 import (
@@ -25,8 +25,8 @@ import (
 	"strings"
 )
 
-// SplitList 拆分逗号分隔的目录配置（PEERDRIVE_SHARE_DIRS 这类）。
-// 去空白、丢弃空项；**不**做绝对路径化（调用方自己知道基准目录）。
+// SplitList splits comma-separated directory configuration (like PEERDRIVE_SHARE_DIRS).
+// Trims whitespace, drops empty items; does **not** make paths absolute (the caller knows its base directory).
 func SplitList(v string) []string {
 	if strings.TrimSpace(v) == "" {
 		return nil
@@ -42,18 +42,19 @@ func SplitList(v string) []string {
 	return out
 }
 
-// resolveBestEffort 尽力解析软链：整条解析不了时，退而解析**最长存在前缀**
-// 再把剩下的部分原样拼回去。
+// resolveBestEffort resolves symlinks as far as possible: when the whole path can't be resolved,
+// it resolves the **longest existing prefix** and concatenates the remainder as-is.
 //
-// 为什么需要它（darwin 上真出过一次，CI 只有 macos 那格红）：`t.TempDir()` 在
-// macOS 上是 `/var/folders/...`，而 `/var` 是 `/private/var` 的软链。当 path 的
-// **最后一段还不存在**时（写目标、软链目标 —— 非常常见），`EvalSymlinks` 直接
-// 失败并原样返回 `/var/...`；而 root 那一侧是存在的，被解析成了 `/private/var/...`。
-// 于是明明在同一个目录里的两个路径被当成两棵树，`filepath.Rel` 算出一串 `..`
-// → 判成越权（表现为「共享目录里的文件读不出来」）。
+// Why it's needed (happened on darwin, CI only had the macOS cell red): `t.TempDir()` on
+// macOS is `/var/folders/...`, and `/var` is a symlink to `/private/var`. When the
+// **last segment of path does not yet exist** (write targets, symlink targets -- very common),
+// `EvalSymlinks` fails outright and returns `/var/...` as-is; while root exists and was resolved
+// to `/private/var/...`. Two paths in the same directory end up treated as two trees, and
+// `filepath.Rel` returns a string of `..` -> classified as out of bounds (manifesting as
+// "files in the shared directory can't be read").
 //
-// 修法是按前缀回退：能解析多深就解析多深，后面不存在的部分保持原样。
-// 这样 root 与 path 永远落在同一套写法上。
+// The fix is prefix fallback: resolve as deep as possible, keep the non-existent tail as-is.
+// This way root and path always land on the same tree.
 func resolveBestEffort(abs string) string {
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		return resolved
@@ -80,8 +81,8 @@ func resolveBestEffort(abs string) string {
 	return abs
 }
 
-// Within 判断 path 是否位于 root 之内（root 自身算在内）。
-// root 或 path 为空 → false（不给默认值兜底：空根目录等于"全放行"）。
+// Within determines whether path is within root (root itself counts as within).
+// root or path empty -> false (no default fallback: an empty root equals "allow everything").
 func Within(root, path string) bool {
 	if strings.TrimSpace(root) == "" || strings.TrimSpace(path) == "" {
 		return false
@@ -97,7 +98,7 @@ func Within(root, path string) bool {
 	if r == p {
 		return true
 	}
-	// Rel 已经处理了分隔符与跨盘（跨盘时返回 error）
+	// Rel already handles separators and cross-drive (returns error for cross-drive)
 	rel, err := filepath.Rel(r, p)
 	if err != nil {
 		return false
@@ -108,11 +109,11 @@ func Within(root, path string) bool {
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false
 	}
-	// 防御：Rel 理论上不会返回绝对路径，真返回了说明不在一个树上
+	// Defense: Rel theoretically should not return an absolute path; if it does, they're on different trees
 	return !filepath.IsAbs(rel)
 }
 
-// WithinAny 判断 path 是否落在 roots 中任意一个之内。
+// WithinAny determines whether path falls within any of the roots.
 func WithinAny(roots []string, path string) bool {
 	for _, r := range roots {
 		if Within(r, path) {
@@ -122,26 +123,30 @@ func WithinAny(roots []string, path string) bool {
 	return false
 }
 
-// foldCase 是否折叠大小写：Windows（NTFS）默认大小写不敏感，`C:\Data` 与
-// `c:\data` 是同一个目录；Linux/ext4 严格区分，折叠反而会把两个不同路径当成同一个。
+// foldCase whether to fold case: Windows (NTFS) defaults to case-insensitive, so `C:\Data` and
+// `c:\data` are the same directory; Linux/ext4 is case-sensitive, and folding would incorrectly
+// treat two different paths as the same.
 //
-// 做成**变量**而不是直接读 runtime.GOOS，是为了让单测能在任何平台上验证
-// Windows 那一支——否则 CI 跑在 Linux 上永远 skip，Windows 语义等于没测过。
+// Made a **variable** rather than reading runtime.GOOS directly so that unit tests can verify
+// the Windows branch on any platform -- otherwise CI running on Linux would always skip it,
+// meaning Windows semantics are never tested.
 var foldCase = runtime.GOOS == "windows"
 
-// normalize 把路径整理成可比较的形式：绝对路径 → Clean → 解析软链（尽力）→
-// 按需折叠大小写。解析失败（路径不存在）时保留 Clean 后的绝对路径——
-// 登记一个还没落盘的文件时很常见，不能因为 stat 失败就判越权。
+// normalize turns a path into a comparable form: absolute path -> Clean -> resolve symlinks (best-effort) ->
+// fold case as needed. If resolution fails (path does not exist), keep the Cleaned absolute path --
+// very common when registering a file that hasn't been written to disk yet; we can't reject it as
+// out of bounds just because stat failed.
 func normalize(p string) (string, bool) {
-	// NUL 字节：Go 的 os.Open 会拒绝（`invalid argument`），所以单靠系统调用也漏
-	// 不出去；但纯字符串判定（Rel/Clean）不认 NUL，`root/x\x00../../etc/passwd`
-	// 在字符串层面算"根内"。显式拒掉，免得将来有人拿 Within 去 gate 一个
-	// 自己拼命令/写日志的路径时被打穿。
+	// NUL byte: Go's os.Open will reject it (`invalid argument`), so a pure syscall check alone can't
+	// let it through; but string-level checks (Rel/Clean) don't recognize NUL, and `root/x\x00../../etc/passwd`
+	// computes as "within root" at the string level. Explicitly reject it so that nobody later uses Within
+	// to gate a path they assemble for commands/logging and gets bypassed.
 	if strings.IndexByte(p, 0) >= 0 {
 		return "", false
 	}
-	// Windows 保留设备名（`CON`/`NUL`/`COM1`…）：文本上在根内、实际上指向设备，
-	// 判"在根内"没有意义。只在 Windows 上启用——Linux 上它们就是普通文件名。
+	// Windows reserved device names (`CON`/`NUL`/`COM1`...): textually within root but actually
+	// pointing to a device, so "within root" is meaningless. Only enabled on Windows -- on Linux
+	// they are just ordinary filenames.
 	if foldCase && hasReservedNameIn(p) {
 		return "", false
 	}
@@ -151,12 +156,14 @@ func normalize(p string) (string, bool) {
 	}
 	abs = filepath.Clean(resolveBestEffort(abs))
 	if foldCase {
-		// Windows：同一个目录可能有 8.3 短名（`C:\PROGRA~1`）这个别名。不还原的
-		// 话，长名配的共享目录会用短名判成越权（文件确实在里面却读不到）。
-		// 详见 shortname_windows.go。
-		// 细节（实测 2026-09-20）：Windows 的 EvalSymlinks 对**已存在**的路径会顺带
-		// 还原短名，但对"最后一段还不存在"的路径无能为力——而那正是所有写操作和
-		// 所有软链目标的样子。所以这一步不能指望 EvalSymlinks。
+		// Windows: the same directory may have an 8.3 short name alias (e.g. `C:\PROGRA~1`).
+		// Without expanding, a shared directory configured with the long name will judge the
+		// short name as out of bounds (the file is actually inside but unreadable).
+		// See shortname_windows.go.
+		// Detail (measured 2026-09-20): Windows EvalSymlinks does expand short names for
+		// **existing** paths, but is helpless when "the last segment doesn't exist yet" -- which
+		// is exactly what all write operations and symlink targets look like. So we can't rely
+		// on EvalSymlinks for this step.
 		abs = filepath.Clean(ExpandShortNames(abs))
 		abs = strings.ToLower(abs)
 	}

@@ -1,16 +1,23 @@
-// sha256.js — 零依赖 SHA-256（增量式），用于内容寻址校验。
+// sha256.js — zero-dependency SHA-256 (incremental), for content-address
+// verification.
 //
-// 为什么要自己实现而不只用 WebCrypto：`crypto.subtle.digest()` 是**一次性**的
-// ——必须先把整份内容攒在内存里才能算摘要，这与本包的流式接口直接冲突
-// （stream() 的卖点就是不驻留内存）。Go 侧 /peerjs/fetch 的语义是"全量请求读完后
-// 校验 sha256，不匹配即报错"，消费端要给出同样的保证，就必须能边收边算。
+// Why implement it ourselves rather than just using WebCrypto:
+// `crypto.subtle.digest()` is **one-shot** — you must first buffer the whole
+// content in memory before computing the digest, which directly conflicts with
+// this package's streaming interface (stream()'s selling point is not
+// residing in memory). The Go-side /peerjs/fetch semantics is "verify sha256
+// after a full fetch completes, error if mismatched"; for the consumer to give
+// the same guarantee, it must be able to compute as it receives.
 //
-// 另一个副作用是省钱：WebCrypto 只在**安全上下文**（https / localhost）可用，
-// 纯 JS 实现在任意 http 页面都能跑（demo 直接 `python -m http.server` 就能验）。
+// Another side benefit is that it's cheap: WebCrypto is only available in
+// **secure contexts** (https / localhost), while a pure-JS implementation
+// works on any http page (a demo can be verified with just
+// `python -m http.server`).
 //
-// 性能：纯 JS 约 30–80 MB/s。一次性接口 sha256Hex() 优先走 WebCrypto（快一个
-// 数量级），流式接口走这里的增量实现；两条路径在测试里互相校验（含 63/64/65
-// 这类跨块边界长度）。
+// Performance: pure JS is about 30–80 MB/s. The one-shot sha256Hex() prefers
+// WebCrypto (an order of magnitude faster); the streaming path uses the
+// incremental implementation here; the two paths cross-verify in tests
+// (including 63/64/65 boundary-crossing lengths).
 
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -25,22 +32,24 @@ const K = new Uint32Array([
 
 const H0 = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
 
-/** 增量 SHA-256。update() 可任意次调用（块边界自动处理），digestHex() 可重复调用。 */
+/** Incremental SHA-256. update() can be called any number of times (block
+ * boundaries handled automatically); digestHex() can be called repeatedly. */
 export class Sha256 {
   constructor() {
     this.h = Int32Array.from(H0)
     this.buf = new Uint8Array(64)
     this.bufLen = 0
-    this.total = 0 // 已 feed 的**字节**数（不是块数）
+    this.total = 0 // number of **bytes** fed so far (not block count)
     this._w = new Int32Array(64)
   }
 
-  /** update 追加一段内容。接受 Uint8Array / ArrayBuffer / TypedArray。 */
+  /** update appends a segment of content. Accepts Uint8Array / ArrayBuffer /
+   * TypedArray. */
   update(data) {
     const bytes = toBytes(data)
     this.total += bytes.length
     let off = 0
-    // 先把上次残留的半个块补满
+    // First fill up the half-block left over from last time
     if (this.bufLen > 0) {
       const take = Math.min(64 - this.bufLen, bytes.length)
       this.buf.set(bytes.subarray(0, take), this.bufLen)
@@ -51,12 +60,12 @@ export class Sha256 {
         this.bufLen = 0
       }
     }
-    // 整块直接算（不复制）
+    // Process full blocks directly (no copying)
     while (off + 64 <= bytes.length) {
       this._block(bytes, off)
       off += 64
     }
-    // 尾巴留着
+    // Keep the tail for next time
     if (off < bytes.length) {
       this.buf.set(bytes.subarray(off), 0)
       this.bufLen = bytes.length - off
@@ -65,9 +74,10 @@ export class Sha256 {
   }
 
   /**
-   * digestHex 输出 64 位小写十六进制摘要。
-   * 可重复调用：内部先快照 h 再填充/压缩，调用后对象状态不变（调用方可能在
-   * 出错分支里重算一次用于日志）。
+   * digestHex outputs the 64-char lowercase hex digest.
+   * Repeatably callable: internally snapshots h first, then pads/compresses;
+   * the object state is unchanged after the call (the caller may recompute once
+   * in an error branch for logging).
    */
   digestHex() {
     const saved = this.h.slice()
@@ -75,13 +85,15 @@ export class Sha256 {
     const savedTotal = this.total
     try {
       const bitLen = this.total * 8
-      // 补 0x80 + 长度：留 8 字节存 64 位长度。bufLen>=56 时不够放，需要两块
+      // Pad with 0x80 + length: leave 8 bytes for the 64-bit length. If
+      // bufLen>=56 there isn't enough room, so two blocks are needed
       const padLen = this.bufLen < 56 ? 64 : 128
       const pad = new Uint8Array(padLen)
       pad.set(this.buf.subarray(0, this.bufLen), 0)
       pad[this.bufLen] = 0x80
       const dv = new DataView(pad.buffer)
-      // bitLen 用「高位 = floor(total / 2^29)」拆开，避免 total*8 溢出 2^53
+      // Split bitLen as "high = floor(total / 2^29)" to avoid total*8
+      // overflowing 2^53
       dv.setUint32(padLen - 8, Math.floor(this.total / 536870912))
       dv.setUint32(padLen - 4, bitLen >>> 0)
       for (let i = 0; i < padLen; i += 64) this._block(pad, i)
@@ -147,8 +159,10 @@ function toBytes(data) {
 }
 
 /**
- * sha256Hex 一次性摘要：优先 WebCrypto（快），不可用时退回纯 JS。
- * 两条路径在同一次调用里不会混用，结果一致（测试里逐长度比对过）。
+ * sha256Hex one-shot digest: prefers WebCrypto (fast); falls back to pure JS
+ * when unavailable.
+ * The two paths are never mixed within a single call; results are identical
+ * (cross-checked at every length in tests).
  */
 export async function sha256Hex(bytes) {
   const subtle = globalThis.crypto && globalThis.crypto.subtle
@@ -160,7 +174,8 @@ export async function sha256Hex(bytes) {
       for (let i = 0; i < view.length; i++) out += view[i].toString(16).padStart(2, '0')
       return out
     } catch {
-      // 某些环境（老 Safari / 非安全上下文）会抛：静默退回纯 JS
+      // Some environments (older Safari / non-secure context) throw: silently
+      // fall back to pure JS
     }
   }
   return new Sha256().update(bytes).digestHex()

@@ -1,8 +1,8 @@
 package router
 
-// source_routes.go：统一 source 管理端点（source 体系的管理面）。
-// GET  /sources                  → 每个 source 的状态 + 统计（优先级/能力/在线/命中）
-// POST /sources/:name/priority   → 运行时调整路由优先级（body: {"priority": n}）
+// source_routes.go: Unified source management endpoints (the management plane of the source system).
+// GET  /sources                  -> Status + stats for each source (priority/capabilities/online/hits)
+// POST /sources/:name/priority   -> Adjust routing priority at runtime (body: {"priority": n})
 
 import (
 	"io"
@@ -13,15 +13,15 @@ import (
 	"peerdrive/internal/source"
 )
 
-// sourceManager 由 main 注入（与 peerjsService 同装配模式）。
+// sourceManager is injected by main (same wiring pattern as peerjsService).
 var sourceManager *source.Manager
 
-// SetSourceManager 注入统一文件管理（nil 则跳过管理端点）。
+// SetSourceManager injects the unified file manager (nil skips the management endpoints).
 func SetSourceManager(mgr *source.Manager) {
 	sourceManager = mgr
 }
 
-// registerSourceRoutes 注册 source 管理端点。
+// registerSourceRoutes registers the source management endpoints.
 func registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFunc) {
 	if sourceManager == nil {
 		return
@@ -44,9 +44,11 @@ func registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFunc) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	// Source 控制面：Local 添加本地文件/直接写文件。
-	// 仅管理/认证路由开放（authRequired 与其它写操作一致）；这是把“文件如何
-	// 进本地 source”从分散 controller 收口到统一 source 管理面的第一步。
+	// Source control plane: Local adds local files/writes directly.
+	// Only management/authenticated routes are open (authRequired is consistent
+	// with other write operations); this is the first step of converging "how
+	// files enter the local source" from scattered controllers into a unified
+	// source management plane.
 	r.POST("/sources/local/add", authRequired, func(c *gin.Context) {
 		var body struct {
 			Path string `json:"path"`
@@ -107,7 +109,7 @@ func registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFunc) {
 		})
 	})
 
-	// BT 控制面：下载 torrent / magnet / 管理任务
+	// BT control plane: download torrent / magnet / manage tasks
 	r.POST("/sources/bt/torrent", authRequired, func(c *gin.Context) {
 		file, _, err := c.Request.FormFile("torrent")
 		if err != nil {
@@ -210,7 +212,7 @@ func registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFunc) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	// IPFS 控制面：pin / unpin / 列表 / 网关状态
+	// IPFS control plane: pin / unpin / list / gateway status
 	r.POST("/sources/ipfs/pin/:cid", authRequired, func(c *gin.Context) {
 		ic := sourceManager.GetIPFSControl()
 		if ic == nil {

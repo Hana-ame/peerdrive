@@ -18,7 +18,7 @@ import (
 	"peerdrive/internal/transport"
 )
 
-// requireInitDB 内存 DB 初始化（每次调用重置，防跨测试污染）。
+// requireInitDB In-memory DB initialization (resets on each call, prevents cross-test contamination).
 func requireInitDB(t *testing.T) {
 	t.Helper()
 	if err := repository.InitDB(":memory:"); err != nil {
@@ -26,15 +26,15 @@ func requireInitDB(t *testing.T) {
 	}
 }
 
-// TestSelfHostedSignalAndDiscover 自托管信令 + 内置发现全链路：
-//   - 全局自托管信号服务器（PeerJS 协议 + /discover API，见 integration_test.go
-//     TestMain，替代 0.peerjs.com + MQTT）
-//   - 两个节点信令指向自托管，发现走 HTTP（无任何外部服务）
-//   - B 仅靠发现互联 A 并拉文件
+// TestSelfHostedSignalAndDiscover Self-hosted signaling + built-in discovery full chain:
+//   - Global self-hosted signaling server (PeerJS protocol + /discover API, see integration_test.go
+//     TestMain, replacing 0.peerjs.com + MQTT)
+//   - Two nodes point signaling to self-hosted, discovery via HTTP (no external services)
+//   - B relies only on discovery to interconnect with A and pull files
 //
-// 发现背景：功能需求——自托管后 PeerJS 信令与房间发现都归自己管。
+// Discovery context: feature requirement — after self-hosting, PeerJS signaling and room discovery are fully self-managed.
 func TestSelfHostedSignalAndDiscover(t *testing.T) {
-	// 测试文件
+	// Test file
 	storageA := t.TempDir()
 	content := []byte("self-hosted-signal-and-discover")
 	hash := writeTestFile(t, storageA, content)
@@ -42,7 +42,7 @@ func TestSelfHostedSignalAndDiscover(t *testing.T) {
 	idA := randID("sh-a")
 	idB := randID("sh-b")
 
-	// newService 指向全局自托管信令；这里手工构造指向自托管发现 API
+	// newService points to global self-hosted signaling; here we manually construct to point to self-hosted discovery API
 	newSelfHosted := func(id, storage string) *transport.PeerJSService {
 		requireInitDB(t)
 		cfg := config.Load()
@@ -60,28 +60,28 @@ func TestSelfHostedSignalAndDiscover(t *testing.T) {
 		return svc
 	}
 
-	newSelfHosted(idA, storageA) // svcA：文件源（无需直接引用）
+	newSelfHosted(idA, storageA) // svcA: file source (no direct reference needed)
 	svcB := newSelfHosted(idB, t.TempDir())
 
-	// B 无静态 PEERS——靠自托管发现互联 A
+	// B has no static PEERS — relies on self-hosted discovery to interconnect with A
 	waitConnections(t, svcB, map[string]bool{idA: true}, 60*time.Second)
 
 	data, err := svcB.FetchFromPeer(idA, hash, 0, -1)
 	if err != nil {
-		t.Fatalf("自托管发现后拉取失败: %v", err)
+		t.Fatalf("pull failed after self-hosted discovery: %v", err)
 	}
 	if string(data) != string(content) {
-		t.Fatalf("内容不一致: got %q", data)
+		t.Fatalf("content mismatch: got %q", data)
 	}
 }
 
-// TestInterconnectViaPresenceRoom 零共享内容房间的两个节点靠「存在房间」互联。
-// 发现背景（互联层）：发现原本是内容分片制——节点只 announce/查询自己关注的
-// collection hash 房间。于是**没有共享 collection 的两个节点永远看不见对方**：
-// 默认配置下 PEERDRIVE_MQTT_COLLECTIONS 为空 → 既不 announce 也不查询任何房间，
-// 发现完全空转，只有静态 PEERDRIVE_PEERJS_PEERS 才能互联。
-// 修法：HTTP 发现额外加入固定存在房间（transport.PresenceRoom），让互联层
-// 独立于内容分片工作。本测试刻意不设任何共享 collection，只靠存在房间互联。
+// TestInterconnectViaPresenceRoom Two nodes with zero shared content rooms interconnect via "presence room".
+// Discovery context (interconnect layer): Discovery was originally content-sharded — nodes only announce/query
+// collection hash rooms they care about. Thus **two nodes without shared collections can never see each other**:
+// under default configuration, PEERDRIVE_MQTT_COLLECTIONS is empty → neither announce nor query any rooms,
+// discovery completely spins idle, only static PEERDRIVE_PEERJS_PEERS can interconnect.
+// Fix: HTTP discovery additionally joins a fixed presence room (transport.PresenceRoom), making the interconnect layer
+// independent of content sharding. This test deliberately sets no shared collections, only relying on presence rooms for interconnect.
 func TestInterconnectViaPresenceRoom(t *testing.T) {
 	idA := randID("pr-a")
 	idB := randID("pr-b")
@@ -97,25 +97,25 @@ func TestInterconnectViaPresenceRoom(t *testing.T) {
 		cfg.BTDHTEnabled = false
 		cfg.DiscoverURL = selfHostedURL
 		cfg.DiscoverPresence = true
-		cfg.MQTTCollections = "" // 刻意不设共享内容房间：只验证节点级互联
+		cfg.MQTTCollections = "" // Deliberately no shared content rooms: only verifying node-level interconnect
 		svc := transport.NewPeerJSService(cfg, t.TempDir())
 		svc.Start()
 		t.Cleanup(svc.Close)
 		return svc
 	}
 
-	newPresenceNode(idA) // 只作为对端存在，不需要显式引用
+	newPresenceNode(idA) // Only as a peer, no explicit reference needed
 	svcB := newPresenceNode(idB)
 
 	waitConnections(t, svcB, map[string]bool{idA: true}, 60*time.Second)
 }
 
-// TestSelfHostedPeerJSSignal 自托管信令协议兼容：直接用 peerjs 客户端模块
-// 连自托管服务器完成 WebRTC 数据面互通（协议与公共云一致）。
-// 发现背景：功能需求——节点端零改动（仅改 host 配置）切到自托管。
+// TestSelfHostedPeerJSSignal Self-hosted signaling protocol compatibility: directly using peerjs client module
+// to connect to self-hosted server and complete WebRTC data plane interoperability (protocol identical to public cloud).
+// Discovery context: feature requirement — node side requires zero changes (only change host config) to switch to self-hosted.
 func TestSelfHostedPeerJSSignal(t *testing.T) {
 	host, port := splitHostPort(selfHostedURL)
-	// 两个 peerjs 客户端连自托管（协议兼容性验证）
+	// Two peerjs clients connect to self-hosted (protocol compatibility verification)
 	pA := peerjs.NewPeer("sp-a", peerjsOptions(host, port))
 	pB := peerjs.NewPeer("sp-b", peerjsOptions(host, port))
 
@@ -138,21 +138,21 @@ func TestSelfHostedPeerJSSignal(t *testing.T) {
 	select {
 	case got := <-done:
 		if got != "hello-self-hosted" {
-			t.Fatalf("内容不符: %q", got)
+			t.Fatalf("content mismatch: %q", got)
 		}
 	case <-time.After(30 * time.Second):
-		t.Fatal("自托管信令数据面未通")
+		t.Fatal("self-hosted signaling data plane not reachable")
 	}
 }
 
-// TestNodeMarketListsDiscoveredPeer 节点市场（doc/NETDISK.md M1）端到端：
-// 两个零共享 collection 的节点靠存在房间互相发现后，B 的市场列表里应出现 A，
-// 且 A 被标记为在线；加入 A 后 joined 清单里要有它。
+// TestNodeMarketListsDiscoveredPeer Node market (doc/NETDISK.md M1) end-to-end:
+// Two nodes with zero shared collections discover each other via presence rooms,
+// B's market list should show A, and A should be marked as online; after joining A, it should be in the joined list.
 //
-// 发现背景（网盘目标）：用户要的是"有别人的节点，可以在市场里加入节点"。
-// 市场数据源 = 发现服务器的 /discover/nodes（空 coll = 全部在线节点）∪
-// 本地已加入清单。本测试同时覆盖「空 coll 查询在自托管信令上确实返回节点」
-// 这一前提（若不成立，市场页会静默空列表）。
+// Discovery context (netdisk target): Users want "there are other people's nodes, can join nodes from the market."
+// Market data source = discovery server's /discover/nodes (empty coll = all online nodes) ∪
+// local joined list. This test also covers the prerequisite that "empty coll query on self-hosted signaling actually returns nodes"
+// (if not true, the market page would silently show an empty list).
 func TestNodeMarketListsDiscoveredPeer(t *testing.T) {
 	idA := randID("mk-a")
 	idB := randID("mk-b")
@@ -182,8 +182,8 @@ func TestNodeMarketListsDiscoveredPeer(t *testing.T) {
 	dir.SetSelfID(svcB.ID)
 	dir.SetConnected(svcB.ConnectedPeerIDs)
 
-	// announce 心跳 30s 一次，但 HTTPDiscovery.loop 启动时立即 announce 一次；
-	// 这里等 B 发现 A（互联成功）后再查市场，避免等心跳。
+	// announce heartbeat every 30s, but HTTPDiscovery.loop immediately announces once at startup;
+	// here we wait for B to discover A (interconnect success) before querying the market, avoiding waiting for heartbeat.
 	waitConnections(t, svcB, map[string]bool{idA: true}, 60*time.Second)
 
 	var found *model.NodeSummary
@@ -202,31 +202,31 @@ func TestNodeMarketListsDiscoveredPeer(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	if found == nil {
-		t.Fatalf("市场列表里没有发现对端 %s", idA)
+		t.Fatalf("peer %s not found in market list", idA)
 	}
 	if !found.Online {
-		t.Fatalf("对端 %s 应为在线: %+v", idA, *found)
+		t.Fatalf("peer %s should be online: %+v", idA, *found)
 	}
 	if !found.Connected {
-		t.Fatalf("对端 %s 已直连但未标记 connected: %+v", idA, *found)
+		t.Fatalf("peer %s is directly connected but not marked connected: %+v", idA, *found)
 	}
-	// 自身不应出现在市场列表
+	// Self should not appear in market list
 	for _, n := range dir.Market(context.Background()) {
 		if n.PeerID == idB {
-			t.Fatal("本节点不应出现在市场节点列表")
+			t.Fatal("this node should not appear in market node list")
 		}
 	}
-	// 加入后应持久化并可查
+	// After joining, should be persisted and queryable
 	if err := dir.Join(idA); err != nil {
 		t.Fatalf("join %s: %v", idA, err)
 	}
 	joined := dir.Joined(context.Background())
 	if len(joined) != 1 || joined[0].PeerID != idA || !joined[0].Joined {
-		t.Fatalf("joined 列表不符: %+v", joined)
+		t.Fatalf("joined list mismatch: %+v", joined)
 	}
 }
 
-// peerjsOptions 指向自托管服务器的客户端配置。
+// peerjsOptions Client configuration pointing to self-hosted server.
 func peerjsOptions(host, port string) peerjs.Options {
 	opts := peerjs.DefaultOptions()
 	opts.Host = host
@@ -236,14 +236,14 @@ func peerjsOptions(host, port string) peerjs.Options {
 	return opts
 }
 
-// TestStartClose_RacePressure 循环 Start/Close 竞争：-race 下验证 startLoop
-// 房间发现组件读写（peerMu 快照）与 Close 清理无竞态、Close 后无 goroutine
-// 泄漏重建（ctx.Err() 守卫）。
+// TestStartClose_RacePressure Loop Start/Close race: under -race verifies startLoop
+// room discovery component read/write (peerMu snapshot) and Close cleanup have no race, no goroutine
+// leak after Close (ctx.Err() guard).
 //
-// 发现背景：2026-08-18 -race 集成测试连跑暴露——Close（持 peerMu 置 nil
-// httpDisc/discovery）vs startLoop 无锁快照读竞争；修复（peerMu + ctx
-// 守卫）后本测试作压力回归。sleep 50ms 让 startLoop 走完发现路径再 Close，
-// 命中竞态窗口。
+// Discovery context: 2026-08-18 -race integration test continuous runs exposed — Close (holding peerMu setting nil
+// httpDisc/discovery) vs startLoop lock-free snapshot read race; after fix (peerMu + ctx
+// guard), this test serves as a pressure regression. sleep 50ms lets startLoop complete discovery path before Close,
+// hitting the race window.
 func TestStartClose_RacePressure(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		requireInitDB(t)

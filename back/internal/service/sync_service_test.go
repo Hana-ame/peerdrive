@@ -1,6 +1,8 @@
 package service
 
-// 注：本文件属于 legacy 代码（见 doc/archive/LEGACY.md，待删/待迁移）的测试，未逐一标注发现背景；「发现背景」规范对新代码生效。
+// Note: this file tests legacy code (see doc/archive/LEGACY.md, pending deletion/migration),
+// so discovery backgrounds are not annotated per case; the "discovery background" convention
+// applies to new code.
 
 import (
 	"os"

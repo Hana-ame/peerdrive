@@ -1,25 +1,26 @@
-// 集合控制器 — 集合 CRUD、条目增删、版本提交/日志/回滚。
-// 集合是一个命名的一组 path→hash 映射，属于某个用户。
-// 通过 repository 包操作 SQLite 的 collections、collection_entries、
-// collection_versions、version_entries 四张表。
+// Collection controller — collection CRUD, entry add/remove, version commit/log/rollback.
+// A collection is a named set of path→hash mappings belonging to a user.
+// Operates on SQLite tables collections, collection_entries, collection_versions, and
+// version_entries through the repository package.
 //
-// CID 指针机制：
-//   Commit 时，除原有版本快照外，还将当前 entries 组装为 AnonCollection JSON，
-//   经 anon_repo.StoreCollection 存储并获取 CID，然后调用 repo.UpdateCurrentCID。
-//   GetCollection 时，若 collections.current_cid 非空，优先通过 Downloader
-//   读取该 CID 的 JSON 返回 entries；否则 fallback 到 collection_entries 表。
-//   Rollback 后也需重新生成 CID 并更新 current_cid。
+// CID pointer mechanism:
+//   On Commit, in addition to the version snapshot, the current entries are assembled
+//   into an AnonCollection JSON, stored via anon_repo.StoreCollection to obtain the CID,
+//   then repo.UpdateCurrentCID is called.
+//   On GetCollection, if collections.current_cid is non-empty, the entries are read
+//   from the CID's JSON via the Downloader; otherwise fall back to the collection_entries table.
+//   After Rollback, the CID must also be regenerated and current_cid updated.
 //
-// 路由：
-//   POST   /collections                              — 创建集合
-//   GET    /collections/:username                     — 列出用户集合
-//   GET    /collections/:username/:coll               — 获取集合 + 条目列表（优先走 CID）
-//   POST   /collections/:username/:coll/entries       — 添加 path→hash 条目
-//   DELETE /collections/:username/:coll/entries/:path — 删除条目
-//   POST   /collections/:username/:coll/commit        — 快照当前条目为版本 + 生成 CID
-//   GET    /collections/:username/:coll/log           — 版本历史（最新优先）
-//   POST   /collections/:username/:coll/rollback/:vid — 回滚到指定版本 + 更新 CID
-//   GET    /:username/:coll/*filepath                 — 从集合下文件条目下载
+// Routes:
+//   POST   /collections                              — create collection
+//   GET    /collections/:username                     — list user collections
+//   GET    /collections/:username/:coll               — get collection + entries (CID preferred)
+//   POST   /collections/:username/:coll/entries       — add path→hash entry
+//   DELETE /collections/:username/:coll/entries/:path — remove entry
+//   POST   /collections/:username/:coll/commit        — snapshot current entries as version + generate CID
+//   GET    /collections/:username/:coll/log           — version history (newest first)
+//   POST   /collections/:username/:coll/rollback/:vid — rollback to version + update CID
+//   GET    /:username/:coll/*filepath                 — download file from collection entry
 
 package controller
 
@@ -35,21 +36,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// collSvc 集合域服务（M2 收层后 controller 不再直调 repository）。
+// collSvc is the collection domain service (after M2 layering, controllers no longer call repository directly).
 var collSvc *service.CollectionService
 
-// InitCollectionController 注入 CollectionService 实例（由 router 装配时调用）。
+// InitCollectionController injects the CollectionService instance (called during router assembly).
 func InitCollectionController(svc *service.CollectionService) {
 	collSvc = svc
 }
 
-// collectionUsername 读取集合路由的 username 参数。
-// 背景：collections 组子路由（entries/commit/rollback/visibility/tags）注册的
-// 参数名是 :id（gin 同一前缀只允许一组 param 段），但 handler 统一读
-// :username——grep 不出任何调用点，运行时恒空，导致 GetOrCreate("") 创建空
-// 用户名脏行、条目挂错集合（2026-08-19 test.sh 7d/7e 暴露：Add entry OK 但
-// Get entries 空）。分派器（dispatchGet*）走 withParams 补齐 username，
-// 直接挂载的 handler 需此兜底。
+// collectionUsername reads the username parameter from collection routes.
+// Background: the collections group sub-routes (entries/commit/rollback/visibility/tags) register
+// parameter name :id (gin allows only one param segment per prefix), but handlers uniformly read
+// :username — grep finds no call sites, it's always empty at runtime, causing GetOrCreate("") to
+// create an empty-username dirty row and entries hanging on the wrong collection (exposed by
+// 2026-08-19 test.sh 7d/7e: Add entry OK but Get entries empty). The dispatcher (dispatchGet*)
+// uses withParams to fill in username; directly mounted handlers need this fallback.
 func collectionUsername(c *gin.Context) string {
 	username := c.Param("username")
 	if username == "" {
@@ -305,7 +306,7 @@ func DownloadCollectionFile(c *gin.Context) {
 		return
 	}
 	providers := entry.BuildProviders()
-	// 按 provider 顺序尝试：sha256 优先
+	// Try providers in order: sha256 first
 	for _, p := range providers {
 		if p.Type == "sha256" && p.Value != "" {
 			DownloadBySHA256Internal(c, p.Value)
@@ -361,14 +362,14 @@ func CommitCollection(c *gin.Context) {
 		return
 	}
 
-	// 1. 获取当前工作区条目
+	// 1. Get current workspace entries
 	entries, err := collSvc.ListEntries(col.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 2. 转换为匿名集合的 entries（含 providers）
+	// 2. Convert to anonymous collection entries (with providers)
 	anonEntries := make([]model.AnonCollectionEntry, 0, len(entries))
 	for _, e := range entries {
 		anonEntries = append(anonEntries, model.AnonCollectionEntry{
@@ -377,7 +378,7 @@ func CommitCollection(c *gin.Context) {
 		})
 	}
 
-	// 3. 构造匿名集合并保存
+	// 3. Build anonymous collection and save
 	anonColl := model.NewAnonCollection("", anonEntries, nil)
 	storageDir := c.MustGet("storageDir").(string)
 	hash, err := collSvc.SaveAnon(anonColl, storageDir)
@@ -386,13 +387,13 @@ func CommitCollection(c *gin.Context) {
 		return
 	}
 
-	// 4. 更新 current_hash
+	// 4. Update current_hash
 	if err := collSvc.UpdateCurrentHash(col.ID, hash); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update current hash: " + err.Error()})
 		return
 	}
 
-	// 5. 原有版本快照逻辑 (保留历史)
+	// 5. Original version snapshot logic (preserves history)
 	versions, err := collSvc.VersionLog(col.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -483,7 +484,7 @@ func RollbackCollection(c *gin.Context) {
 		return
 	}
 
-	// 重新生成 CID
+	// Regenerate CID
 	entries, err := collSvc.ListEntries(col.ID)
 	if err == nil {
 		anonEntries := make([]model.AnonCollectionEntry, 0, len(entries))

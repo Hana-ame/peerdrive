@@ -1,4 +1,4 @@
-// 模块⑤：传输任务 —— 跨节点拉取（pull）任务列表与取消。
+// Module ⑤: Transfer tasks —— cross-node pull task list and cancel.
 import React, { useState, useEffect, useCallback } from 'react';
 import * as ws from '../ws';
 
@@ -39,10 +39,10 @@ export default function Transfers() {
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="text-2xl font-bold">传输任务</h1>
-            <p className="text-sm text-gray-500 mt-0.5">跨节点拉取（pull）任务</p>
+            <h1 className="text-2xl font-bold">Transfer Tasks</h1>
+            <p className="text-sm text-gray-500 mt-0.5">Cross-node pull tasks</p>
           </div>
-          <button onClick={load} disabled={busy} className="btn-ghost">刷新</button>
+          <button onClick={load} disabled={busy} className="btn-ghost">Refresh</button>
         </div>
 
         {err && (
@@ -50,22 +50,22 @@ export default function Transfers() {
         )}
 
         {jobs === null ? (
-          <div className="text-center py-16 text-gray-500 text-sm">读取中...</div>
+          <div className="text-center py-16 text-gray-500 text-sm">Loading...</div>
         ) : jobs.length === 0 ? (
           <div className="text-center py-20 text-gray-500 border-2 border-dashed border-white/10 rounded-card">
-            <p>没有传输任务</p>
-            <p className="text-xs text-gray-600 mt-1">跨节点拉取从「节点市场 / 对端共享」发起。</p>
+            <p>No transfer tasks</p>
+            <p className="text-xs text-gray-600 mt-1">Cross-node pulls are initiated from "Node Market / Peer Sharing".</p>
           </div>
         ) : (
           <div className="card-surface overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-white/[0.03]">
                 <tr>
-                  <th className={th}>对端</th>
-                  <th className={th}>名称 / 路径</th>
-                  <th className={th}>状态</th>
-                  <th className={th}>创建时间</th>
-                  <th className={th + ' text-right'}>操作</th>
+                  <th className={th}>Peer</th>
+                  <th className={th}>Name / Path</th>
+                  <th className={th}>Status</th>
+                  <th className={th}>Created</th>
+                  <th className={th + ' text-right'}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -85,7 +85,7 @@ export default function Transfers() {
                     <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{fmtTime(j.created_at)}</td>
                     <td className="px-3 py-2 text-right">
                       <button onClick={() => cancel(j)} disabled={busy}
-                        className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">取消</button>
+                        className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">Cancel</button>
                     </td>
                   </tr>
                 ))}

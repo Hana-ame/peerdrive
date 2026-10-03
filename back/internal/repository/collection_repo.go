@@ -1,16 +1,16 @@
-// 集合仓库 — collections、collection_entries、collection_versions、
-// version_entries 四张表的 CRUD 和业务操作。
-// 函数列表：
-//   CreateCollection / GetOrCreateCollection — 创建/获取集合 ID（INSERT 含 current_hash）
-//   ListCollections / GetCollection          — 查询集合列表/详情（SELECT 含 current_hash）
-//   UpdateCurrentHash                      — 更新集合的 current_hash（Commit/Rollback 后调用）
-//   AddCollectionEntry / RemoveCollectionEntry — 增删条目（upsert 语义）
-//   GetCollectionEntry / ListCollectionEntries — 查询条目
-//   CreateVersion / SnapshotVersionEntries   — 创建版本快照
-//   GetVersionLog / GetVersionEntries        — 查询版本历史/快照内容
-//   RestoreVersionEntries                   — 事务内回滚（先删后插）
+// Collection repository — CRUD and business operations for collections,
+// collection_entries, collection_versions, and version_entries tables.
+// Function list:
+//   CreateCollection / GetOrCreateCollection — create/get collection ID (INSERT with current_hash)
+//   ListCollections / GetCollection          — query collection list/details (SELECT with current_hash)
+//   UpdateCurrentHash                      — update collection's current_hash (called after Commit/Rollback)
+//   AddCollectionEntry / RemoveCollectionEntry — add/remove entries (upsert semantics)
+//   GetCollectionEntry / ListCollectionEntries — query entries
+//   CreateVersion / SnapshotVersionEntries   — create version snapshot
+//   GetVersionLog / GetVersionEntries        — query version history/snapshot content
+//   RestoreVersionEntries                   — rollback within transaction (delete then insert)
 //
-// current_hash 迁移：已有数据库需执行 ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL
+// current_hash migration: existing databases need ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL
 
 package repository
 
@@ -21,7 +21,7 @@ import (
 	"peerdrive/internal/model"
 )
 
-// CreateCollection 为指定用户创建一个新集合，返回集合 ID。
+// CreateCollection creates a new collection for the given user, returns the collection ID.
 func CreateCollection(username, collectionName string) (int, error) {
 	res, err := DB.Exec(`INSERT INTO collections (username, collection_name, tags) VALUES (?, ?, '')`,
 		username, collectionName)
@@ -32,7 +32,7 @@ func CreateCollection(username, collectionName string) (int, error) {
 	return int(id), err
 }
 
-// CreateCollectionWithVisibility 创建集合并指定可见性（public/unlisted/private）。
+// CreateCollectionWithVisibility creates a collection with specified visibility (public/unlisted/private).
 func CreateCollectionWithVisibility(username, collectionName, visibility string) (int, error) {
 	if visibility == "" {
 		visibility = "public"
@@ -46,7 +46,7 @@ func CreateCollectionWithVisibility(username, collectionName, visibility string)
 	return int(id), err
 }
 
-// CreateCollectionWithTags 创建集合并设置标签和可见性。
+// CreateCollectionWithTags creates a collection with tags and visibility.
 func CreateCollectionWithTags(username, collectionName, visibility string, tags []string) (int, error) {
 	if visibility == "" {
 		visibility = "public"
@@ -61,7 +61,7 @@ func CreateCollectionWithTags(username, collectionName, visibility string, tags 
 	return int(id), err
 }
 
-// CreateCollectionWithFull 创建集合并指定全部属性（可见性、重定向跟随、标签）。
+// CreateCollectionWithFull creates a collection with all attributes specified (visibility, redirect following, tags).
 func CreateCollectionWithFull(username, collectionName, visibility string, followRedirects bool, tags []string) (int, error) {
 	if visibility == "" {
 		visibility = "public"
@@ -80,7 +80,7 @@ func CreateCollectionWithFull(username, collectionName, visibility string, follo
 	return int(id), err
 }
 
-// UpdateCollectionTags 替换集合的标签列表。
+// UpdateCollectionTags replaces the collection's tag list.
 func UpdateCollectionTags(username, collectionName string, tags []string) error {
 	tagsJSON := model.MarshalTags(tags)
 	_, err := DB.Exec(`UPDATE collections SET tags = ? WHERE username = ? AND collection_name = ?`,
@@ -88,14 +88,14 @@ func UpdateCollectionTags(username, collectionName string, tags []string) error 
 	return err
 }
 
-// SetCollectionVisibility 更新集合的可见性属性。
+// SetCollectionVisibility updates the collection's visibility attribute.
 func SetCollectionVisibility(username, collectionName, visibility string) error {
 	_, err := DB.Exec(`UPDATE collections SET visibility = ? WHERE username = ? AND collection_name = ?`,
 		visibility, username, collectionName)
 	return err
 }
 
-// GetOrCreateCollection 按用户名和集合名查询集合，不存在则自动创建。
+// GetOrCreateCollection queries a collection by username and name; auto-creates if not found.
 func GetOrCreateCollection(username, collectionName string) (int, error) {
 	var id int
 	err := DB.QueryRow(`SELECT id FROM collections WHERE username = ? AND collection_name = ?`,
@@ -106,14 +106,14 @@ func GetOrCreateCollection(username, collectionName string) (int, error) {
 	return id, err
 }
 
-// UpdateCurrentHash 更新集合的 current_hash 指针（指向最新的匿名集合快照）。
+// UpdateCurrentHash updates the collection's current_hash pointer (pointing to the latest anonymous collection snapshot).
 func UpdateCurrentHash(collectionID int, hash string) error {
 	_, err := DB.Exec(`UPDATE collections SET current_hash = ? WHERE id = ?`, hash, collectionID)
 	return err
 }
 
-// ListCollections 查询指定用户的所有集合，按创建时间倒序排列。
-// M11：无 LIMIT 全表物化 → LIMIT 1000。
+// ListCollections queries all collections for a given user, ordered by creation time descending.
+// M11: No LIMIT → full-table materialization; LIMIT 1000.
 func ListCollections(username string) ([]model.Collection, error) {
 	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? ORDER BY created_at DESC LIMIT 1000`, username)
 	if err != nil {
@@ -131,9 +131,9 @@ func ListCollections(username string) ([]model.Collection, error) {
 	return cols, nil
 }
 
-// ListPublicCollections 列出全部公开集合，q 非空时按用户名/集合名模糊过滤。
-// M2 收层：原逻辑写在 controller（collection.go ListPublicCollections 直跑 SQL），
-// 收敛进 repository，controller 只依赖 service。
+// ListPublicCollections lists all public collections; q filters by username/collection name when non-empty.
+// M2 layering: original logic lived in controller (collection.go ListPublicCollections ran raw SQL),
+// consolidated into repository; controller only depends on service.
 func ListPublicCollections(q string) ([]model.Collection, error) {
 	var rows *sql.Rows
 	var err error
@@ -157,7 +157,7 @@ func ListPublicCollections(q string) ([]model.Collection, error) {
 	return cols, rows.Err()
 }
 
-// GetCollection 按用户名和集合名查询单个集合；未找到时返回 (nil, nil)。
+// GetCollection queries a single collection by username and name; returns (nil, nil) if not found.
 func GetCollection(username, collectionName string) (*model.Collection, error) {
 	c, err := model.ScanCollection(DB.QueryRow(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? AND collection_name = ?`,
 		username, collectionName))
@@ -167,8 +167,8 @@ func GetCollection(username, collectionName string) (*model.Collection, error) {
 	return c, err
 }
 
-// SearchCollections 在公开集合中按用户名或集合名模糊搜索。
-// M11：LIKE %q% 无 LIMIT → 全表扫描 + 物化；限 100 条结果（搜索场景足够）。
+// SearchCollections fuzzy searches public collections by username or collection name.
+// M11: LIKE %q% with no LIMIT → full-table scan + materialization; limit to 100 results (sufficient for search).
 func SearchCollections(query string) ([]model.Collection, error) {
 	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE (username LIKE ? OR collection_name LIKE ?) AND visibility = 'public' ORDER BY created_at DESC LIMIT 100`,
 		"%"+query+"%", "%"+query+"%")
@@ -187,7 +187,7 @@ func SearchCollections(query string) ([]model.Collection, error) {
 	return cols, nil
 }
 
-// AddCollectionEntry 插入或更新集合中的一条 path->fileHash 映射（upsert 语义），同时存储 providers_json。
+// AddCollectionEntry inserts or updates a path->fileHash mapping in a collection (upsert semantics), also storing providers_json.
 func AddCollectionEntry(collectionID int, path, fileHash string) error {
 	providers := []model.Provider{{Type: "sha256", Value: fileHash}}
 	providersJSON, _ := json.Marshal(providers)
@@ -197,7 +197,7 @@ func AddCollectionEntry(collectionID int, path, fileHash string) error {
 	return err
 }
 
-// AddProviderCollectionEntry 插入或更新集合条目，附带完整的 providers 数组。
+// AddProviderCollectionEntry inserts or updates a collection entry with the full providers array.
 func AddProviderCollectionEntry(collectionID int, path string, providers []model.Provider) error {
 	primaryHash := ""
 	for _, p := range providers {
@@ -216,14 +216,14 @@ func AddProviderCollectionEntry(collectionID int, path string, providers []model
 	return err
 }
 
-// RemoveCollectionEntry 从集合中删除指定 path 的条目。
+// RemoveCollectionEntry removes the entry for a given path from a collection.
 func RemoveCollectionEntry(collectionID int, path string) error {
 	_, err := DB.Exec(`DELETE FROM collection_entries WHERE collection_id = ? AND path = ?`,
 		collectionID, path)
 	return err
 }
 
-// GetCollectionEntry 查询集合中指定 path 的条目；未找到时返回 (nil, nil)。
+// GetCollectionEntry queries the entry for a given path in a collection; returns (nil, nil) if not found.
 func GetCollectionEntry(collectionID int, path string) (*model.CollectionEntry, error) {
 	var e model.CollectionEntry
 	var pj sql.NullString
@@ -241,9 +241,9 @@ func GetCollectionEntry(collectionID int, path string) (*model.CollectionEntry, 
 	return &e, nil
 }
 
-// ListCollectionEntries 查询集合中的所有条目，包含 providers_json。
-// M11：条目数是集合数据本体，理论上必须全量……但恶意构造大集合会全表物化。
-// 限 10000（正常集合同步批次远小于此；异常大集合走分页重构而非全量爆内存）。
+// ListCollectionEntries queries all entries in a collection, including providers_json.
+// M11: Entry count is the collection's data body, theoretically must be full... but maliciously constructed large collections cause full-table materialization.
+// Limit to 10000 (normal collection sync batches are far smaller; abnormally large collections need pagination refactoring, not full memory blowup).
 func ListCollectionEntries(collectionID int) ([]model.CollectionEntry, error) {
 	rows, err := DB.Query(`SELECT id, collection_id, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ? LIMIT 10000`, collectionID)
 	if err != nil {
@@ -263,7 +263,7 @@ func ListCollectionEntries(collectionID int) ([]model.CollectionEntry, error) {
 	return entries, nil
 }
 
-// CreateVersion 为集合创建新版本快照记录，返回版本 ID 和版本号。
+// CreateVersion creates a new version snapshot record for a collection, returns version ID and version number.
 func CreateVersion(collectionID int, commitMsg string, parentVersionID *int) (int, int, error) {
 	var maxVer int
 	err := DB.QueryRow(`SELECT COALESCE(MAX(version_number), 0) FROM collection_versions WHERE collection_id = ?`,
@@ -287,15 +287,15 @@ func CreateVersion(collectionID int, commitMsg string, parentVersionID *int) (in
 	return int(id), newVer, nil
 }
 
-// SnapshotVersionEntries 将集合当前条目快照（含 providers_json）复制到 version_entries。
+// SnapshotVersionEntries copies the collection's current entries (including providers_json) into version_entries.
 func SnapshotVersionEntries(versionID, collectionID int) error {
 	_, err := DB.Exec(`INSERT INTO version_entries (version_id, path, file_hash, providers_json) SELECT ?, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ?`,
 		versionID, collectionID)
 	return err
 }
 
-// GetVersionLog 返回集合的版本历史，按版本号倒序排列。
-// M11：无 LIMIT → 无限版本历史全表物化；限 1000（历史回滚 UI 展示最近版本即可）。
+// GetVersionLog returns the collection's version history, ordered by version number descending.
+// M11: No LIMIT → unlimited version history full-table materialization; limit to 1000 (UI only shows recent versions for rollback).
 func GetVersionLog(collectionID int) ([]model.CollectionVersion, error) {
 	rows, err := DB.Query(`SELECT id, collection_id, version_number, commit_message, created_at, parent_version_id FROM collection_versions WHERE collection_id = ? ORDER BY version_number DESC LIMIT 1000`, collectionID)
 	if err != nil {
@@ -313,8 +313,8 @@ func GetVersionLog(collectionID int) ([]model.CollectionVersion, error) {
 	return versions, nil
 }
 
-// GetVersionEntries 查询指定版本快照中的全部条目列表（含 providers_json）。
-// M11：同 ListCollectionEntries，限 10000。
+// GetVersionEntries queries all entries in a specified version snapshot (including providers_json).
+// M11: Same as ListCollectionEntries, limit to 10000.
 func GetVersionEntries(versionID int) ([]model.VersionEntry, error) {
 	rows, err := DB.Query(`SELECT id, version_id, path, file_hash, COALESCE(providers_json, '') FROM version_entries WHERE version_id = ? LIMIT 10000`, versionID)
 	if err != nil {
@@ -334,7 +334,7 @@ func GetVersionEntries(versionID int) ([]model.VersionEntry, error) {
 	return entries, nil
 }
 
-// RestoreVersionEntries 在事务内将集合条目回滚到指定版本的快照内容（先删后插，含 providers_json）。
+// RestoreVersionEntries rolls back collection entries to a specified version's snapshot within a transaction (delete then insert, including providers_json).
 func RestoreVersionEntries(versionID, collectionID int) error {
 	entries, err := GetVersionEntries(versionID)
 	if err != nil {

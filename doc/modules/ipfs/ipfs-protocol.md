@@ -632,109 +632,109 @@ CID → Multihash → SHA-256 digest (32 bytes)
 storage/<sha256[:2]>/<sha256>
     │
     ├── exists? → blocks.NewBlockWithCid(data, cid) → return
-    └──不存在? → Bitswap client → DHT FindProviders → 从 IPFS 节点拉取
+    └── Not found? → Bitswap client → DHT FindProviders → Fetch from IPFS nodes
 ```
 
-**关键设计:** Blockstore 不复制文件。CID 对应的数据直接从 SHA-256 内容寻址存储读取。文件在 Peerdrive collection 中存在即自动成为 IPFS 可提供的内容。
+**Key design:** Blockstore does not copy files. Data corresponding to a CID is read directly from SHA-256 content-addressed storage. Files existing in a Peerdrive collection automatically become IPFS-available content.
 
-### 20.4 Bitswap 操作
+### 20.4 Bitswap Operations
 
 ```
-// 获取块 (本地优先，再网络)
+// Get block (local first, then network)
 blk := bitswap.GetBlock(ctx, cid)
-    ├── 本地 blockstore.Has(cid)? → 直接返回
-    └── 通过 DHT 查找提供者 → 连接 → 请求块 → Put 到 blockstore → 返回
+    ├── Local blockstore.Has(cid)? → Return directly
+    └── Find providers via DHT → Connect → Request block → Put to blockstore → Return
 ```
 
-### 20.5 与旧 IPFSCompatLayer 的关系
+### 20.5 Relationship with Old IPFSCompatLayer
 
-| 功能 | 旧 (IPFSCompatLayer) | 新 (IPFSService + boxo) |
+| Function | Old (IPFSCompatLayer) | New (IPFSService + boxo) |
 |------|---------------------|------------------------|
-| Bitswap 解析 | 手动 protobuf (`protowire`) | boxo 自动处理 |
-| AddFile | 复制文件到 `ipfs-blocks/` | 不复制，CID 直接映射 SHA-256 路径 |
-| Stream handlers | 手动 `SetStreamHandler` | boxo `NewFromIpfsHost` 自动注册 |
-| Pin | 无 | 文件在 storage 即 pinned |
+| Bitswap parsing | Manual protobuf (`protowire`) | boxo automatic handling |
+| AddFile | Copy file to `ipfs-blocks/` | No copy, CID directly maps to SHA-256 path |
+| Stream handlers | Manual `SetStreamHandler` | boxo `NewFromIpfsHost` automatic registration |
+| Pin | None | File in storage is automatically pinned |
 
 ---
 
-## 21. IPFSService (boxo 集成层)
+## 21. IPFSService (boxo Integration Layer)
 
-### 21.1 结构
+### 21.1 Structure
 
 ```go
 type IPFSService struct {
-    host       host.Host          // 复用 P2PService.Host
-    dht        *dht.IpfsDHT       // 复用 P2PService.DHT
-    storageDir string             // SHA-256 内容寻址存储根目录
+    host       host.Host          // Reuse P2PService.Host
+    dht        *dht.IpfsDHT       // Reuse P2PService.DHT
+    storageDir string             // SHA-256 content-addressed storage root directory
     blockstore blockstore.Blockstore  // peerdriveBlockstore
-    bswap      *bitswap.Bitswap   // boxo Bitswap 客户端 + 服务端
+    bswap      *bitswap.Bitswap   // boxo Bitswap client + server
 }
 ```
 
-### 21.2 初始化流程
+### 21.2 Initialization Flow
 
 ```
 NewIPFSService(ctx, p2p, storageDir)
     │
     ├── 1. newPeerdriveBlockstore(storageDir)
-    │      CID → SHA-256 路径映射
+    │      CID → SHA-256 path mapping
     │
     ├── 2. bsnet.NewFromIpfsHost(p2p.Host)
-    │      注册 /ipfs/bitswap/* stream handlers
+    │      Register /ipfs/bitswap/* stream handlers
     │
     ├── 3. bitswap.New(ctx, network, dht, blockstore)
-    │      Bitswap 客户端 + 服务端启动
+    │      Bitswap client + server startup
     │
     └── 4. network.Start(bitswap)
-           开始接收和处理 Bitswap 请求
+           Start receiving and processing Bitswap requests
 ```
 
-### 21.3 公开方法
+### 21.3 Public Methods
 
-| 方法 | 说明 |
+| Method | Description |
 |------|------|
-| `FetchByCID(ctx, cid)` | Bitswap 获取（本地 → DHT → P2P） |
-| `Provide(ctx, sha256)` | 通过 DHT 宣布提供 SHA-256 文件的 CID |
-| `ProvideAll(ctx)` | 遍历所有本地文件并 announce 到 DHT |
-| `FindProviders(ctx, cid, n)` | DHT 查找 CID 提供者 |
-| `HasCID(cid)` | 检查 CID 是否在本地存储中 |
-| `GetBlock(cid)` | 读取 CID 的原始块数据 |
-| `AddToBlockstore(sha256)` | 将 SHA-256 文件注册为 IPFS 块 |
-| `BlockCount()` | 本地可提供的文件数 |
+| `FetchByCID(ctx, cid)` | Bitswap fetch (local → DHT → P2P) |
+| `Provide(ctx, sha256)` | Announce CID of SHA-256 file via DHT |
+| `ProvideAll(ctx)` | Iterate all local files and announce to DHT |
+| `FindProviders(ctx, cid, n)` | Find CID providers via DHT |
+| `HasCID(cid)` | Check if CID is in local storage |
+| `GetBlock(cid)` | Read raw block data of CID |
+| `AddToBlockstore(sha256)` | Register SHA-256 file as IPFS block |
+| `BlockCount()` | Number of locally available files |
 
-### 21.4 CID ↔ SHA-256 双向转换
+### 21.4 CID ↔ SHA-256 Bidirectional Conversion
 
 ```go
 // SHA-256 → CID (pkg/hashutil)
 SHA256ToCID("e3b0c442...855")  → "bafkreihk7nxx..."
 
-// CID → SHA-256 (pkg/hashutil, 新增)
+// CID → SHA-256 (pkg/hashutil, new)
 CIDToSHA256("bafkreihk7nxx...") → "e3b0c442...855"
 ```
 
 ---
 
-## 22. IPFS Provider (下载策略)
+## 22. IPFS Provider (Download Strategy)
 
-### 22.1 两层获取
+### 22.1 Two-Layer Retrieval
 
 ```
 IPFSProvider.GetReader(cid)
     │
     ├── 1. BitswapFetcher (IPFSService.FetchByCID)
-    │      ├── 本地 blockstore → 命中则返回
-    │      └── DHT + Bitswap 网络获取
+    │      ├── Local blockstore → Return on hit
+    │      └── DHT + Bitswap network retrieval
     │
-    └── 2. HTTP 网关回退 (fallback)
-           ├── 多个网关并发竞速
-           ├── 指数退避重试 (3次, 500ms→5s)
-           └── 第一个成功者胜出
+    └── 2. HTTP gateway fallback
+           ├── Race multiple gateways concurrently
+           ├── Exponential backoff retry (3 times, 500ms→5s)
+           └── First success wins
 ```
 
-### 22.2 配置
+### 22.2 Configuration
 
-| 环境变量 | 默认值 | 说明 |
+| Env Variable | Default | Description |
 |----------|--------|------|
-| `PEERDRIVE_IPFS_GATEWAY_ENABLE` | `true` | 是否启用 IPFS 网关回退 |
-| `PEERDRIVE_IPFS_GATEWAYS` | `ipfs.io,cloudflare-ipfs.com,dweb.link` | 网关 URL 列表 |
-| `PEERDRIVE_IPFS_COMPAT` | `false` | 启用 IPFS 兼容层（Bitswap 服务端） |
+| `PEERDRIVE_IPFS_GATEWAY_ENABLE` | `true` | Whether to enable IPFS gateway fallback |
+| `PEERDRIVE_IPFS_GATEWAYS` | `ipfs.io,cloudflare-ipfs.com,dweb.link` | Gateway URL list |
+| `PEERDRIVE_IPFS_COMPAT` | `false` | Enable IPFS compatibility layer (Bitswap server) |

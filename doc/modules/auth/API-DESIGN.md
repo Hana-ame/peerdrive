@@ -541,25 +541,29 @@ For development and testing:
 
 ---
 
-## 6. 节点目录：用户 ↔ 节点（设计提案，2026-09-19）
+## 6. Node directory: user ↔ node (design proposal, 2026-09-19)
 
-**需求原文**：「Peerdrive Node 本身启动时就应该用用户账号登录注册服务器，把整个 node
-（不只是 relay）的信息上报。其他 node 可以通过注册服务器查询『这个 peer 是谁在运营』。」
-「node 有开放端点可以查询信息，其中一条就是运营者的账户。」
+**Original requirement**: "A Peerdrive Node itself should log into the registration
+server with the user account at startup and report the whole node's information
+(not just the relay). Other nodes can query via the registration server 'who is
+operating this peer.'" "A node has public endpoints to query info, one of which is
+the operator's account."
 
-注意与第 4 节的区别：第 4 节只让 relay **匿名**登记；本节是**带账号**登记整个节点。
+Note the difference from section 4: section 4 only lets relays register
+**anonymously**; this section registers the entire node **with an account**.
 
-### 6.1 端点
+### 6.1 Endpoints
 
 ```
-POST /nodes/register      # 节点携带用户 token 登记自己（幂等 upsert）
-POST /nodes/heartbeat     # 60s 心跳，刷新 last_seen / 地址 / 在线状态
-DELETE /nodes/{peer_id}   # 注销（或心跳超时自动下线）
-GET  /nodes/{peer_id}     # 公开查询：这个 peer 是谁在运营
-GET  /users/{username}/nodes  # 某个账号有哪些在线节点
+POST /nodes/register      # Node registers itself with user token (idempotent upsert)
+POST /nodes/heartbeat     # 60s heartbeat, refreshes last_seen / addresses / online status
+DELETE /nodes/{peer_id}   # Deregister (or auto-offline on heartbeat timeout)
+GET  /nodes/{peer_id}     # Public query: who is operating this peer
+GET  /users/{username}/nodes  # Which online nodes does a given account have
 ```
 
-`POST /nodes/register` 请求体（字段都是节点自述，服务端只做校验与存储）：
+`POST /nodes/register` request body (fields are all node self-descriptions; the
+server only validates and stores):
 
 ```json
 {
@@ -571,60 +575,73 @@ GET  /users/{username}/nodes  # 某个账号有哪些在线节点
 }
 ```
 
-### 6.2 可见性（与匿合集三档同语义，便于前端复用同一套 UI 文案）
+### 6.2 Visibility (same semantics as anonymous collection's three tiers, so the frontend can reuse the same UI copy)
 
-| visibility | 谁能查到 | 说明 |
+| visibility | Who can query | Description |
 |---|---|---|
-| `public` | 任何人（含未认证） | 默认；`GET /nodes/{peer_id}` 返回运营者账号 |
-| `registered` | 已认证用户 | 匿名查询只见「存在但不可见」 |
-| `private` | 仅运营者本人 | 未授权查询返回 404（不确认存在性） |
+| `public` | Anyone (including unauthenticated) | Default; `GET /nodes/{peer_id}` returns the operator account |
+| `registered` | Authenticated users | Anonymous query only sees "exists but not visible" |
+| `private` | Only the operator | Unauthorized query returns 404 (does not confirm existence) |
 
-### 6.3 关键决策（为什么这么做）
+### 6.3 Key decisions (why this approach)
 
-1. **未登录节点照常运行，只是不在目录里**。目录是「可选增值」而不是运行前提——
-   与合集 `owner` 的语义一致（无 operator = 无主，但仍能用）。
-2. **`peer_id` 是唯一键，账号不是**。同一账号可运营多节点；换账号登记同一
-   `peer_id` 视为**转移归属**（需要旧账号在有效期内确认，否则等于任何人抢注别人的
-   peer_id）。抢注是该模块最容易出的洞：注册接口必须校验「本次请求的 token 与
-   该 peer_id 当前归属一致，或该 peer_id 尚未登记」。
-3. **运营者账号是公开可查字段**，因此登记时必须由用户显式选择 visibility，
-   不默认公开（默认值定为 `public` 便于发现，但 UI 上要明示「别人能看到你的账号」）。
-4. 心跳超时（5 分钟，与 relay 一致）后从目录下线，避免僵尸节点被当成可信运营者。
+1. **Unregistered nodes run normally, they just aren't in the directory**. The
+   directory is an "optional value-add" not a runtime prerequisite —— consistent with
+   collection `owner` semantics (no operator = unowned, but still usable).
+2. **`peer_id` is the unique key, not the account**. The same account can operate
+   multiple nodes; registering the same `peer_id` under a different account is treated
+   as **transfer of ownership** (requires confirmation from the old account within the
+   validity period, otherwise it equals letting anyone squat someone else's peer_id).
+   Squatting is the most likely hole in this module: the register interface must verify
+   "the current request's token matches the peer_id's current owner, or the peer_id
+   has not yet been registered".
+3. **Operator account is a publicly queryable field**, so at registration the user must
+   explicitly choose visibility, not default public (default value is set to `public`
+   for ease of discovery, but the UI must explicitly show "others can see your account").
+4. After heartbeat timeout (5 minutes, same as relay), node is offlined from the
+   directory, avoiding zombie nodes being treated as trusted operators.
 
 ---
 
-## 7. 传输量统计与防谎报（设计提案，2026-09-19）
+## 7. Traffic statistics and anti-falsification (design proposal, 2026-09-19)
 
-**需求原文**：「保存一些统计信息如上传下载量」「统计上传下载信息（需要防止谎报）」
-「统计信息经过验证，会上传中心化注册认证服务器」「中继节点也可以统计中继流量」。
+**Original requirement**: "Save some statistics like upload/download amounts" "Count
+upload/download info (needs anti-falsification)" "Statistics are verified and uploaded
+to the centralized registration/auth server" "Relay nodes can also count relayed traffic".
 
-### 7.1 口径（先定义清楚，否则「防谎报」无从下手）
+### 7.1 Definition (define clearly first, otherwise "anti-falsification" has no foothold)
 
-- 计数对象是**已校验的内容字节**：只有通过 sha256 校验的完整/分片传输才计账
-  （`FetchFromPeer` 的 `fetchReader` 已经在 EOF 校验，天然是计账锚点）。
-- 三个维度：`direction`（up / down）× `channel`（direct / relay）× `peer_id`。
-  `channel=relay` 的流量同时被两端与中继方各记一次，用于 7.2 的交叉校验。
-- 只上报**聚合值**（per-peer per-5min 窗口的字节数与会话数），不上报文件 hash 或
-  文件名 —— 统计不等于内容监控。
+- Counted object is **verified content bytes**: only complete/chunked transfers that
+  pass sha256 verification are counted (`FetchFromPeer`'s `fetchReader` already
+  verifies at EOF, naturally a billing anchor).
+- Three dimensions: `direction` (up / down) × `channel` (direct / relay) × `peer_id`.
+  `channel=relay` traffic is counted once by both ends and once by the relay, for
+  cross-verification in 7.2.
+- Only **aggregated values** are reported (bytes and sessions per peer per 5-min
+  window); file hashes or filenames are not reported —— statistics ≠ content
+  monitoring.
 
-### 7.2 防谎报：四道闸（核心设计）
+### 7.2 Anti-falsification: four gates (core design)
 
-单方面节点总能虚报自己的流量，所以**任何单方数据都不可信**，必须交叉：
+A unilateral node can always falsely report its traffic, so **any single-party data is
+untrustworthy** and must be cross-checked:
 
-| # | 机制 | 做法 | 挡住的谎报 |
+| # | Mechanism | Approach | Falsification blocked |
 |---|---|---|---|
-| 1 | **对端会签** | 每 5 分钟窗口（或会话结束）双方互换计数摘要，用节点 Ed25519 私钥签名（`countersign`）。上报时携带对端签名。服务端只接受**双方数量差在容差内**的记录，入账取 `min(A上报, B上报)` | 单方虚报（虚报需要串通对端，成本大幅提高） |
-| 2 | **中继兜底** | `channel=relay` 的流量由中继节点（第三方）独立统计上报，与两端三方比对 | 两端合谋虚报（中继是独立观察者） |
-| 3 | **抽样挑战** | 服务端随机要求某节点对指定 hash 的随机 range 返回数据 + 计算 sha256；节点若根本没这条数据/没做过这些传输，挑战必然失败 | 纯凭空捏造（没有真实传输记录） |
-| 4 | **物理上限 + 漂移检测** | 单窗口流量 ≤ 带宽上限 × 窗口时长；对节点的历史基线做移动平均，超阈值（如 3σ）先不入账并人工/自动复核 | 数量级级别的离谱值 |
+| 1 | **Peer countersigning** | Every 5-minute window (or at session end) both sides exchange count summaries, signed with the node's Ed25519 private key (`countersign`). Reports carry the peer's signature. Server only accepts records where **both sides' counts are within tolerance**; billing takes `min(A_reported, B_reported)` | Unilateral inflation (inflating requires collusion with the peer, greatly raising the cost) |
+| 2 | **Relay backstop** | `channel=relay` traffic is independently counted and reported by the relay node (third party), cross-checked against both ends | Collusion between both ends (relay is an independent observer) |
+| 3 | **Sample challenge** | Server randomly challenges a node to return data for a random range of a specified hash + compute sha256; if the node has no such data/didn't do those transfers, the challenge must fail | Pure fabrication (no real transfer records) |
+| 4 | **Physical caps + drift detection** | Single-window traffic ≤ bandwidth cap × window duration; moving average of a node's historical baseline, exceeding a threshold (e.g. 3σ) is not billed first and triggers manual/auto review | Order-of-magnitude absurd values |
 
-**信誉与后果**：连续 N 个窗口校验失败 → 标记 `untrusted`（不派 relay 任务、不参与
-流量榜），并在节点目录里体现。**不做自动封号**——误判代价高于收益。
+**Reputation and consequences**: consecutive N windows failing verification → marked
+`untrusted` (no relay tasks assigned, not participating in traffic leaderboard),
+reflected in the node directory. **No auto-ban** —— false positive cost is higher than
+the benefit.
 
-### 7.3 上报接口
+### 7.3 Reporting interface
 
 ```
-POST /stats/report          # 节点 → reg server，批量窗口
+POST /stats/report          # node → reg server, batch windows
 Authorization: Bearer <node token>
 {
   "node_id": "pd-7f3a1c2e",
@@ -641,74 +658,94 @@ Authorization: Bearer <node token>
 ```
 
 ```
-GET /stats/me               # 自己的累计上/下行、按 peer 分解
-GET /stats/nodes/{peer_id}  # 节点公开流量（仅 public 节点）
-POST /stats/challenge       # 服务端发起抽样挑战（见 7.2 第 3 条）
+GET /stats/me               # own cumulative up/down, decomposed by peer
+GET /stats/nodes/{peer_id}  # node public traffic (only public nodes)
+POST /stats/challenge       # server initiates sample challenge (see 7.2 #3)
 ```
 
-### 7.4 待定决策（需要拍板）
+### 7.4 Open decisions (need to be decided)
 
-1. **OAuth 要不要**：本设计**暂不引入**。中心化服务器自己就是唯一账号源，
-   OAuth 的价值在第三方联合登录（GitHub/微信等），对「唯一公网服务器 + 自有账号」
-   没有增量；真要做，按 **Authorization Code + PKCE**、以「一种登录方式」接入，
-   不承担授权范围（scope）语义。现阶段 HTTP 只走 `Bearer <JWT>`。
-2. **JWT 算法**：建议 **EdDSA/RS256**（非对称）而非 HS256——节点侧只需内置公钥
-   即可验签，regserver 可轮换密钥（`kid` 头 + JWKS 端点）；HS256 需要把对称密钥
-   发到每个节点，泄露即全盘沦陷。有效期 access 15min / refresh 7d。
-3. **计账是否与激励挂钩**：若将来做流量奖励，7.1 的「只上报聚合」需要放宽到
-   「聚合 + 内容 hash 前缀」，这会引入内容侧隐私问题，届时单独评审。
-4. 中继流量的**计量起点**由中继决定（它看到的是加密包大小），与两端看到的
-   明文大小会有固定开销差（帧头/分片），容差阈值必须容忍这个系统性偏差。
-
----
-
-## 8. 注册用户的加密信道与 HTTP 鉴权（设计提案，2026-09-19）
-
-**需求原文**：「如果是注册用户传输，p2p 时会进行简单加密信道，http 时也会带 auth」。
-
-- **HTTP**：节点 → 节点、节点 → regserver 一律 `Authorization: Bearer <token>`。
-  regserver 是**唯一且必须公网可达、仅 HTTP(S)** 的中心服务（不做 P2P 入口）；
-  节点到 regserver 必须 TLS（HTTPS），否则 JWT 在链路上裸奔。
-- **P2P**：WebRTC DataChannel 本身是 DTLS 加密（SCTP over DTLS），已经有链路级
-  加密；本设计在此之上再加一层**应用层信封**，目的不是「更加密」而是：
-  1. **绑定账号身份**：握手时双方用节点 Ed25519 密钥互签（nonce 挑战），
-     把 `peer_id ↔ username` 的绑定做实，`restricted` 合集的 `requester` 才有依据
-     （当前 P2P 同步路径传的是空 requester，见 REFACTOR §3.16 已知限制）。
-  2. **中继场景不泄露**：`channel=relay` 时数据经过中继节点，
-     应用层信封保证中继最多看到密文与计量元数据，不能顺手拿走内容。
-- **算法**：X25519 ECDH 派生会话密钥 → ChaCha20-Poly1305；每会话随机数 + 定期
-  rekey。不做前向保密之外的额外花活（需求是「简单加密信道」）。
-- **匿名节点**：不强制加密信封（保持兼容），但**受限合集要求必须认证**
-  （无身份者拿不到 restricted/private 内容），这是权限三档能成立的前提。
+1. **Do we need OAuth**: this design **does not introduce it for now**. The centralized
+   server itself is the only account source; OAuth's value is third-party federated
+   login (GitHub/WeChat etc.), which adds no incremental value for "single public
+   server + self-hosted accounts"; if really needed, use **Authorization Code + PKCE**,
+   plugged in as "one login method", not taking on scope semantics. At this stage HTTP
+   only uses `Bearer <JWT>`.
+2. **JWT algorithm**: recommend **EdDSA/RS256** (asymmetric) rather than HS256 —— nodes
+   only need to embed a public key to verify signatures; regserver can rotate keys
+   (`kid` header + JWKS endpoint); HS256 requires distributing the symmetric key to
+   every node, and leak means total compromise. Validity access 15min / refresh 7d.
+3. **Whether billing ties to incentives**: if future traffic rewards are done, 7.1's
+   "only aggregate reporting" would need to relax to "aggregate + content hash prefix",
+   introducing content-side privacy issues; review separately at that time.
+4. The relay traffic **metering starting point** is decided by the relay (it sees
+   encrypted packet sizes), which differs systematically from what both ends see
+   (plaintext sizes) by a fixed overhead (frame headers/chunking); tolerance thresholds
+   must allow for this systematic deviation.
 
 ---
 
-## 9. Relay 的位置：在 node 里，不在服务器里（设计提案，2026-09-19）
+## 8. Registered users' encrypted channels and HTTP auth (design proposal, 2026-09-19)
 
-**需求原文**：「拥有账户可以在 relay 节点拖数据」「中继节点也可以统计中继流量」
-「relay 集成在 node 中，而不是这个服务器中」。
+**Original requirement**: "For registered-user transfers, p2p uses a simple encrypted
+channel, http also carries auth".
 
-- relay 是**节点自带能力**（`capabilities.relay = true` 登记进第 6 节目录），
-  不是中心服务器的一部分 —— 服务器只负责目录、鉴权、统计与校验，不转发文件，
-  因此服务器带宽/合规压力与网络规模解耦。
-- 「拥有账户可以在 relay 节点拖数据」= 用账号身份经中继节点拉取自己（或被授权）
-  的合集；中继只转发不落盘（或按配置做有限缓存，缓存命中仍要计账并标注
-  `cache_hit=true`，避免把缓存当成真实端到端流量）。
-- 中继流量按 7.1 的 `channel=relay` 口径统计，并作为 7.2 第 2 条的独立观察者上报；
-  中继自己的运营者账号同样出现在节点目录里（谁在提供中继是可查的）。
+- **HTTP**: node → node, node → regserver all use `Authorization: Bearer <token>`.
+  regserver is the **only, must be publicly reachable, HTTP(S) only** central service
+  (no P2P entry); node to regserver must use TLS (HTTPS), otherwise JWT is exposed on
+  the wire.
+- **P2P**: WebRTC DataChannel itself is DTLS-encrypted (SCTP over DTLS), already has
+  link-level encryption; this design adds another layer of **application-layer
+  envelope** on top. The purpose is not "more encryption" but:
+  1. **Bind account identity**: during handshake both sides mutually sign with the
+     node's Ed25519 key (nonce challenge), making the `peer_id ↔ username` binding
+     real; `restricted` collections' `requester` then has a basis (currently P2P sync
+     passes an empty requester, see REFACTOR §3.16 known limitation).
+  2. **No leak on relay scenarios**: when `channel=relay` data passes through the relay
+     node, the application-layer envelope guarantees the relay at most sees ciphertext
+     and metering metadata, cannot casually take the content.
+- **Algorithm**: X25519 ECDH derives session key → ChaCha20-Poly1305; per-session
+  random nonce + periodic rekey. No extra flairs beyond forward secrecy (requirement is
+  "simple encrypted channel").
+- **Anonymous nodes**: encrypted envelope not mandatory (compatibility), but
+  **restricted collections require authentication** (anonymous identity cannot get
+  restricted/private content) —— this is the prerequisite for the three-tier permission
+  model to work.
 
 ---
 
-## 10. 与现有代码的衔接点
+## 9. Relay location: in node, not in server (design proposal, 2026-09-19)
 
-| 需求 | 现状 | 缺口 |
+**Original requirement**: "Having an account can drag data on relay nodes" "Relay
+nodes can also count relayed traffic" "relay is integrated in node, not in this
+server".
+
+- relay is a **node-bundled capability** (registers `capabilities.relay = true` into
+  section 6 directory), not part of the central server —— the server is only
+  responsible for directory, auth, statistics and verification, does not forward
+  files, so server bandwidth/compliance pressure decouples from network scale.
+- "Having an account can drag data on relay nodes" = using account identity to pull
+  own (or authorized) collections through the relay node; relay only forwards and
+  doesn't persist (or does limited caching per config; cache hits still need billing
+  and marking `cache_hit=true` to avoid treating cache as real end-to-end traffic).
+- Relay traffic is counted per 7.1's `channel=relay` definition and reported as an
+  independent observer per 7.2 #2; the relay's own operator account also appears in
+  the node directory (who is providing relay is queryable).
+
+---
+
+## 10. Integration points with existing code
+
+| Requirement | Current state | Gap |
 |---|---|---|
-| 用户注册/登录/JWT | regserver 已有 `/auth/register`、`/auth/login`、`/auth/whoami` | JWT 算法未定（见 7.4）；OAuth 未做（建议不做） |
-| 节点侧鉴权中间件 | `AuthOptional`/`AuthRequired`，token 转发给 regserver 校验（第 3 节） | 每请求远程校验 → 应加本地缓存（TTL = token 剩余有效期） |
-| 账号 ↔ 节点目录 | 只有 relay 匿名登记（第 4 节） | **第 6 节整套未做**；合集 `Owner` 目前取 `nodestate.GetOperator()`，来源就是这一层 |
-| 流量统计 | 无 | **第 7 节整套未做**（含会签、挑战、容差） |
-| 受限合集跨节点 | P2P 同步不携带 requester → 仅本节点可读（REFACTOR §3.16） | 需要第 8 节的身份绑定把 requester 带进同步请求 |
-| relay | 端口转发 v2 已实现（REFACTOR §3.9）+ relay 登记/心跳/列表（第 4 节） | relay 流量统计与节点目录可见性 |
+| User register/login/JWT | regserver already has `/auth/register`, `/auth/login`, `/auth/whoami` | JWT algorithm TBD (see 7.4); OAuth not done (recommend not to) |
+| Node-side auth middleware | `AuthOptional`/`AuthRequired`, token forwarded to regserver for validation (section 3) | Remote validation per request → should add local cache (TTL = token remaining validity) |
+| Account ↔ node directory | Only relay anonymous registration (section 4) | **All of section 6 not done**; collection `Owner` currently takes `nodestate.GetOperator()`, source is this layer |
+| Traffic statistics | None | **All of section 7 not done** (including countersign, challenge, tolerance) |
+| Restricted collection cross-node | P2P sync doesn't carry requester → only this node readable (REFACTOR §3.16) | Need section 8's identity binding to bring requester into sync requests |
+| relay | Port forwarding v2 implemented (REFACTOR §3.9) + relay register/heartbeat/list (section 4) | Relay traffic statistics and node directory visibility |
 
-**落地顺序建议**：6（目录，依赖最小、能立刻支撑 owner 语义）→ 8（身份绑定，
-解锁受限合集跨节点）→ 7（统计，依赖 6 的节点身份与会签密钥）→ 8/9 的 relay 统计。
+**Recommended implementation order**: 6 (directory, minimum dependencies, immediately
+supports owner semantics) → 8 (identity binding, unlocks restricted collection
+cross-node) → 7 (statistics, depends on 6's node identity and countersigning key) →
+8/9 relay statistics.

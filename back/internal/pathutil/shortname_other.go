@@ -2,14 +2,15 @@
 
 package pathutil
 
-// 非 Windows 上不存在 8.3 短名，这些函数退化成恒等/空结果。
+// On non-Windows there are no 8.3 short names, so these functions are identity/empty.
 //
-// 为什么不是"只在 Windows 侧引用它们"：normalize / pickRoot 在两个平台上都要
-// 编译，调用点写出来了就得有定义。留空实现好过用 build tag 把 normalize 拆成
-// 两份——那才是真正的维护灾难（改一处忘另一处）。
+// Why not just "reference them only from the Windows side": normalize / pickRoot must compile on
+// both platforms, and if the call sites are written out, the definitions must exist. Leaving
+// stub implementations is better than splitting normalize with build tags into two files --
+// that would be a real maintenance disaster (change one, forget the other).
 
-// ExpandShortNames 非 Windows 上无短名可还原：原样返回。
+// ExpandShortNames: no short names to expand on non-Windows: returns as-is.
 func ExpandShortNames(p string) string { return p }
 
-// ShortNameOf 非 Windows 上没有短名。
+// ShortNameOf: no short names on non-Windows.
 func ShortNameOf(string) string { return "" }

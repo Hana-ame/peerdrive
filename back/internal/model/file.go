@@ -1,12 +1,12 @@
-// Package model 定义 Peerdrive 系统的核心数据结构和 SQLite 表映射。
-// FileMeta 为每个唯一文件内容的元数据（hash 是主键）。
-// FileProvider 为每份副本的存储位置（同一 hash 可多个 provider）。
-// 使用 db 标签标记数据库列名，用于 repository 层的 Scan 绑定。
+// Package model defines the core data structures and SQLite table mappings for the Peerdrive system.
+// FileMeta holds metadata for each unique file content (hash is the primary key).
+// FileProvider holds the storage location for each copy (the same hash can have multiple providers).
+// Uses db tags to mark database column names for Scan binding in the repository layer.
 
 package model
 
-// 文件类型常量（领域常量，原定义在 repository 包——M2 收层时上移到 domain，
-// 让 repository/controller 统一依赖 model 而非互相/反向引用）。
+// File type constants (domain constants, originally defined in the repository package — moved to domain during M2 collection layer
+// so that repository/controller uniformly depend on model instead of mutual/reverse references).
 const (
 	FileTypeBlob           = "blob"
 	FileTypeAnonCollection = "anon_collection"
@@ -50,7 +50,7 @@ type DirEntry struct {
 	ModTime string `json:"mod_time"`
 }
 
-// IPFSPin 表示 ipfs_pins 表中的一条 pin 记录（M2 收层：原定义在 repository，上移 domain）。
+// IPFSPin represents a pin record in the ipfs_pins table (M2 collection layer: originally defined in repository, moved to domain).
 type IPFSPin struct {
 	CID      string `json:"cid"`
 	Hash     string `json:"hash"`

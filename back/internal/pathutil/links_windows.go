@@ -7,31 +7,31 @@ import (
 	"syscall"
 )
 
-// Nlink 这条入口在 Windows 上给不出答案：os.FileInfo.Sys() 到这里只有
-// Win32FileAttributeData，里面没有链接数。留着只是为了跨平台调用点一致，
-// 真正生效的是下面的 NlinkOf。
+// Nlink cannot answer on Windows: os.FileInfo.Sys() only provides
+// Win32FileAttributeData here, which has no link count. Kept only for cross-platform call-site consistency;
+// NlinkOf below is the one that actually works.
 func Nlink(os.FileInfo) uint64 { return 0 }
 
-// NlinkOf 从**已打开的句柄**取硬链接数。
+// NlinkOf obtains the hard link count from an **already-opened handle**.
 //
-// 这是 Windows 上唯一常规的取 nlink 的办法：GetFileInformationByHandle 返回的
-// BY_HANDLE_FILE_INFORMATION.NumberOfLinks，语义等价于 Unix fstat 的 st_nlink。
-// 之前这条防线在 Windows 上是空的（= 硬链接完全没拦），现在补上了。
+// This is the only regular way to get nlink on Windows: BY_HANDLE_FILE_INFORMATION.NumberOfLinks
+// returned by GetFileInformationByHandle, semantically equivalent to st_nlink from Unix fstat.
+// Before this, the defense was empty on Windows (= hard links were not blocked at all); now it is fixed.
 //
-// 注意句柄必须是已经打开的那个（就是随后要读内容做 sha256 的那个 fd）——中途
-// 再按路径 stat 一次等于重新解析一次路径，又开一个 TOCTOU 窗口。
+// Note the handle must be the already-opened one (the same fd used later to read content for sha256) --
+// statting by path again in between would mean re-resolving the path, opening another TOCTOU window.
 func NlinkOf(f *os.File) uint64 {
 	if f == nil {
 		return 0
 	}
 	var d syscall.ByHandleFileInformation
 	if err := syscall.GetFileInformationByHandle(syscall.Handle(f.Fd()), &d); err != nil {
-		// 取不到（句柄类型不支持等 exotic 情况）按"未知=放行"处理，
-		// 与 Unix 侧 Nlink 拿不到 *syscall.Stat_t 时的策略一致。
+		// If it can't be obtained (exotic cases such as unsupported handle type), treat as "unknown=allow",
+		// consistent with the Unix-side Nlink policy when *syscall.Stat_t can't be obtained.
 		return 0
 	}
 	return uint64(d.NumberOfLinks)
 }
 
-// NlinkSupported Windows 现在能拿到链接数了（走句柄）。
+// NlinkSupported: Windows can now obtain link counts (via handle).
 func NlinkSupported() bool { return true }

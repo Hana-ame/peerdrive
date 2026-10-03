@@ -1,223 +1,222 @@
-# service 层（back/internal/service/）
+# service layer (back/internal/service/)
 
-> 层归属：AOP ④ 业务核心（见 doc/LAYERS.md §1）。
-> 业务用例编排层：controller 的「下一步做什么」在这里变成「怎么做」——组合 repository
-> 读写、文件系统操作、外部能力（downloader/p2p_bt/transport 语义 API）。
-> M2 收层（REFACTOR.md §7 M2）后 controller 不再直调 repository，本层是唯一业务入口。
+> Layer belonging: AOP ④ business core (see doc/LAYERS.md §1).
+> The business use-case orchestration layer: the controller's "what to do next" becomes "how to do it" here — combining repository
+> read/writes, filesystem operations, and external capabilities (downloader/p2p_bt/transport semantic APIs).
+> After the M2 layer collapse (REFACTOR.md §7 M2), the controller no longer calls repository directly, and this layer is the only business entry point.
 
-**一句话职责**：把 HTTP 语义业务（文件/合集/认证/同步/分享/任务/pin）的规则与持久化
-收敛成可被 controller 单次调用的服务方法；不感知传输层（不 import transport 业务语义
-之外的连接细节，LAYERS.md §3 规则 3：service 包内不直接 import transport——装配经
-controller/router 完成）。
+**One-line responsibility**: converge the rules and persistence of HTTP semantic business (files/collections/auth/sync/shares/tasks/pins)
+into service methods that the controller can call in one shot; it is unaware of the transport layer (it does not import transport connection details
+beyond the business semantics; LAYERS.md §3 rule 3: the service package does not import transport directly —
+assembly is done via controller/router).
 
-## 职责
+## Responsibilities
 
-### 解决什么问题
+### What problem does it solve
 
-M2 之前 controller 60+ 处散落 repository 直调（collection/fork/merge/file 控制器），
-依赖方向混乱且无规则可守。本层目标：
+Before M2, the controller had 60+ scattered direct repository calls (collection/fork/merge/file controllers),
+with confused dependency directions and no rule to follow. This layer's goals:
 
-- **依赖单向**：`controller → service → repository`（LAYERS.md §2）
-- **安全边界集中**：路径防御（isPathInStorage）、hash 校验、上传限流都在本层做，controller 只传参
-- **业务组合点**：同步（SyncService 组合 downloader）、CID 导入（FileService.ImportGatewayData）、
-  BT 完成登记（FileService.RegisterBTFile）等跨域逻辑有明确归属
+- **One-way dependencies**: `controller → service → repository` (LAYERS.md §2)
+- **A centralized security boundary**: path defense (isPathInStorage), hash validation, and upload rate limits are all done here; the controller only passes arguments
+- **Business combination points**: sync (SyncService combines the downloader), CID import (FileService.ImportGatewayData),
+  BT completion registration (FileService.RegisterBTFile), and other cross-domain logic have a clear home
 
-### 两种风格并存
+### Two styles coexist
 
-| 风格 | 服务 | 说明 |
+| Style | Services | Description |
 |---|---|---|
-| 有状态实例（构造注入依赖） | FileService、AnonService、AuthService、SyncService | 持 config/repository/downloader 等依赖 |
-| 无状态透明转发（空结构体） | CollectionService、ShareService、TaskService、PinService | M2 收层产物：方法名与 repository 一一对应，仅收口依赖方向（collection_service.go:1-5 头注释明示） |
+| Stateful instances (dependencies injected by constructor) | FileService, AnonService, AuthService, SyncService | Hold dependencies such as config/repository/downloader |
+| Stateless transparent forwarding (empty structs) | CollectionService, ShareService, TaskService, PinService | A product of the M2 layer collapse: method names map one-to-one to repository methods, only correcting the dependency direction (explicit in the header comment at collection_service.go:1-5) |
 
-## 模块清单
+## Module inventory
 
-| 文件 | 一句话职责 | 关键导出 |
+| File | One-line responsibility | Key exports |
 |---|---|---|
-| anon_service.go | 匿名集合（内容寻址 JSON 存储）：创建/读取/列表/版本提交 | `AnonService`：`CreateCollection`、`GetCollectionByHash`、`ListCollections`、`CommitCollection` |
-| auth_service.go | 用户注册/登录/登出/authkey 验证（bcrypt） | `AuthService`：`Register`、`Login`、`Logout`、`ValidateKey`；`ErrInvalidCredentials` |
-| collection_service.go | 用户集合域用例（M2 透明转发层） | `CollectionService`：`Get/List/Search/ListPublic/Create/CreatePlain/GetOrCreate/SetVisibility/UpdateTags/UpdateCurrentHash/ListEntries/GetEntry/AddEntry/AddProviderEntry/RemoveEntry/CreateVersion/SnapshotEntries/VersionLog/VersionEntries/RestoreVersion/GetAnonByHash/SaveAnon` |
-| file_service.go | 文件上传/注册/验证/删除/复制/浏览/元数据（含安全边界） | `FileService`：`Upload`、`RegisterLocal`、`RegisterFolder`、`RegisterURL`、`ResolveURL`、`Verify`、`Delete`、`BrowseDir`、`CopyFile`、`ReadFile`、`MaxUploadBytes`、`GetMeta`、`GetMetaByCID`、`ImportGatewayData`、`RegisterBTFile`、`ListAll`；`ErrStorageDisabled`、`ErrFileAlreadyExists` |
-| pin_service.go | IPFS pin 用例层（M2 收编） | `PinService`：`Get`、`Insert`、`Remove`、`List`、`InsertMeta` |
-| share_service.go | 分享链接用例层（M2 收编） | `ShareService`：`Create`（30 天）、`GetByToken`、`List` |
-| sync_service.go | 集合同步到本地磁盘：过滤/状态跟踪 | `SyncService`：`SaveToDisk`、`GetStatus` |
-| task_service.go | 异步任务占位（transfer_tasks 表） | `TaskService`：`Create`、`UpdateStatus`、`Get` |
+| anon_service.go | Anonymous collections (content-addressed JSON storage): create/read/list/version commit | `AnonService`: `CreateCollection`, `GetCollectionByHash`, `ListCollections`, `CommitCollection` |
+| auth_service.go | User register/login/logout/authkey verification (bcrypt) | `AuthService`: `Register`, `Login`, `Logout`, `ValidateKey`; `ErrInvalidCredentials` |
+| collection_service.go | User collection domain use cases (the M2 transparent forwarding layer) | `CollectionService`: `Get/List/Search/ListPublic/Create/CreatePlain/GetOrCreate/SetVisibility/UpdateTags/UpdateCurrentHash/ListEntries/GetEntry/AddEntry/AddProviderEntry/RemoveEntry/CreateVersion/SnapshotEntries/VersionLog/VersionEntries/RestoreVersion/GetAnonByHash/SaveAnon` |
+| file_service.go | File upload/register/verify/delete/copy/browse/metadata (including the security boundary) | `FileService`: `Upload`, `RegisterLocal`, `RegisterFolder`, `RegisterURL`, `ResolveURL`, `Verify`, `Delete`, `BrowseDir`, `CopyFile`, `ReadFile`, `MaxUploadBytes`, `GetMeta`, `GetMetaByCID`, `ImportGatewayData`, `RegisterBTFile`, `ListAll`; `ErrStorageDisabled`, `ErrFileAlreadyExists` |
+| pin_service.go | The IPFS pin use-case layer (absorbed by M2) | `PinService`: `Get`, `Insert`, `Remove`, `List`, `InsertMeta` |
+| share_service.go | The share link use-case layer (absorbed by M2) | `ShareService`: `Create` (30 days), `GetByToken`, `List` |
+| sync_service.go | Syncing a collection to the local disk: filtering/status tracking | `SyncService`: `SaveToDisk`, `GetStatus` |
+| task_service.go | Asynchronous task placeholder (the transfer_tasks table) | `TaskService`: `Create`, `UpdateStatus`, `Get` |
 
-## 关键机制
+## Key mechanisms
 
-### 1. FileService 的存储模型
+### 1. FileService's storage model
 
-上传/注册统一收敛到**内容寻址存储**（CAS）布局 `storageDir/{hash[:2]}/{hash}`：
+Upload/register converge uniformly to a **content-addressed storage** (CAS) layout `storageDir/{hash[:2]}/{hash}`:
 
 ```
-Upload（file_service.go:444）：
-  multipart reader → TeeReader 边写临时文件边算 sha256 → os.Rename 到 CAS
-  （EXDEV 跨设备 fallback copyFile）→ InsertFileMeta + InsertFileProvider("local", relPath)
-  → 已存在返回 ErrFileAlreadyExists（controller 转 200 already_exists:true）
+Upload (file_service.go:444):
+  multipart reader → TeeReader writes a temp file while computing sha256 → os.Rename to the CAS
+  (EXDEV cross-device fallback copyFile) → InsertFileMeta + InsertFileProvider("local", relPath)
+  → an existing file returns ErrFileAlreadyExists (the controller converts this to 200 already_exists:true)
 ```
 
-- **防重复写**：`GetFileMeta(hash)` 存在即跳过 InsertFileMeta（RegisterLocal:212、
-  RegisterURL:365）
-- **临时文件**：`os.CreateTemp` + defer Remove，写完 rename 原子落位（Upload:454-499）
-- **MIME 嗅探**：`http.DetectContentType` 前 512 字节，octet-stream 时按扩展名回退
-  （RegisterLocal:198-205、Upload:472-480）
+- **Duplicate-write protection**: if `GetFileMeta(hash)` exists, skip InsertFileMeta (RegisterLocal:212,
+  RegisterURL:365)
+- **Temp file**: `os.CreateTemp` + defer Remove; rename puts it into place atomically after writing (Upload:454-499)
+- **MIME sniffing**: `http.DetectContentType` on the first 512 bytes, falling back to the extension when octet-stream
+  (RegisterLocal:198-205, Upload:472-480)
 
-### 2. 安全边界：isPathInStorage（file_service.go:128-151）
+### 2. The security boundary: isPathInStorage (file_service.go:128-151)
 
-`register_local/register_folder/browse/copy/delete` 都接受调用方路径，是历史上
-「匿名任意文件读写删」漏洞源（F2/F3/H1/H6，见测试节）。统一防御：
+`register_local/register_folder/browse/copy/delete` all accept a caller-supplied path, and historically were the
+source of the "anonymous arbitrary file read/write/delete" vulnerability family (F2/F3/H1/H6, see the tests section). Unified defense:
 
 ```go
 isPathInStorage(absPath):
-  storageDir → filepath.Abs + EvalSymlinks（防符号链接逃逸）
+  storageDir → filepath.Abs + EvalSymlinks (prevents symlink escape)
   absPath   → filepath.Abs + EvalSymlinks
-  filepath.Rel(root, abs) → 必须 "." 或 不含 ".." 前缀
+  filepath.Rel(root, abs) → must be "." or have no ".." prefix
 ```
 
-与 `transport.FileIndexService.IsPathAllowed`（file_index.go:53）同一模式。
-`Delete` 再叠一层 hash 校验（isValidHash）——防历史数据里根外 provider 路径被回读删除
-（file_service.go:551-556 注释）。
+The same pattern as `transport.FileIndexService.IsPathAllowed` (file_index.go:53).
+`Delete` layers on an extra hash validation (isValidHash) — preventing an out-of-root provider path in historical
+data from being read back and deleted (comment at file_service.go:551-556).
 
-### 3. AnonService 的内容寻址集合
+### 3. AnonService's content-addressed collections
 
-匿名集合 = 磁盘上的 JSON 文件，hash = JSON 内容的 sha256（anon_service.go:101-133）：
+An anonymous collection = a JSON file on disk, hash = the sha256 of the JSON content (anon_service.go:101-133):
 
-- **验证**：条目 path 必须相对（`isRelativePath` + 禁 `..`）；文件条目必须带合法
-  providers（`isValidProviders`：sha256 64hex 或 http/https url）；目录条目（path 以 "/"
-  结尾）免 providers
-- **排序**：entries 按 path 排序后 marshal——**同内容必同 hash**（可寻址的前提）
-- **版本**：`CommitCollection` 合并条目（空 providers = 删除）→ version+1 → 重新落盘；
-  旧版本文件保留（hash 不同即新文件）
-- **登记**：落盘同时 `InsertFileMeta`（Type=FileTypeAnonCollection）+ provider
-- **读取防御**（GetCollectionByHash:143-146 注释）：hash 来自 URL/远端输入，未校验则
-  `hash[:2]` 越界 panic + `filepath.Join` 逃逸 storage（H1，见测试节）
+- **Validation**: an entry path must be relative (`isRelativePath` + `..` forbidden); a file entry must carry legal
+  providers (`isValidProviders`: a 64hex sha256 or an http/https url); a directory entry (path ending with "/") is exempt from providers
+- **Sorting**: entries are sorted by path before marshaling — **same content must produce the same hash** (the precondition for addressability)
+- **Versioning**: `CommitCollection` merges entries (empty providers = delete) → version+1 → rewrite to disk;
+  the old version file is kept (a different hash is a new file)
+- **Registration**: on write, also `InsertFileMeta` (Type=FileTypeAnonCollection) + provider
+- **Read defense** (comment at GetCollectionByHash:143-146): the hash comes from URL/remote input, and without validation
+  `hash[:2]` would panic out of bounds and `filepath.Join` would escape storage (H1, see the tests section)
 
-### 4. AuthService 的 bcrypt 细节
+### 4. AuthService's bcrypt details
 
-- **72 字节上限**（auth_service.go:28-32 注释 L1）：bcrypt 只取前 72 字节，超长密码尾部
-  被静默忽略（截断熵损失）——超限直接拒绝
-- **登录不区分错误**：用户不存在与密码错误都返回 `ErrInvalidCredentials`（防用户名枚举）
-- **authkey**：32 随机字节 hex（generateAuthKey），每次 Login/Register 重新生成
-  （旧 key 立即失效）
+- **The 72-byte cap** (comment L1 at auth_service.go:28-32): bcrypt only takes the first 72 bytes, and the tail of an
+  overlong password is silently ignored (truncated entropy loss) — reject outright when over the limit
+- **Login does not distinguish errors**: user does not exist and wrong password both return `ErrInvalidCredentials` (prevents username enumeration)
+- **authkey**: 32 random bytes in hex (generateAuthKey), regenerated on each Login/Register
+  (the old key expires immediately)
 
-### 5. SyncService 的同步流水线
-
-```
-SaveToDisk（sync_service.go:31）：
-  1. LocalPath 禁 ".."（路径穿越第一道）
-  2. GetAnonCollectionByHash 读集合
-  3. filterFiles（include/exclude 模式过滤）
-  4. UpsertSyncState + ClearSyncFiles（DB 状态先清后写）
-  5. 逐文件 saveFile：禁 ".." → MkdirAll → universalDownloader.Download →
-     os.WriteFile → UpsertFileSyncState（单文件失败不中断，记 missing）
-```
-
-**matchPattern 的路径边界**（sync_service.go:176-208 注释 L2）：子串回退匹配必须有
-路径边界——pattern 以 "/" 结尾=目录前缀匹配，否则子串前后必须是 '/' 或字符串端；
-否则排除 "tmp/foo" 会误伤 "tmp/foobar"。
-
-### 6. 上传限额与存储开关（MaxUploadBytes，file_service.go:743-748）
-
-`MaxUploadBytes(c *gin.Context)` 按认证状态取 `cfg.MaxUploadBytes` /
-`cfg.MaxUploadBytesAnon`（controller 侧配 `MaxBytesReader` 落地）。`storageEnable=false`
-时（纯中继/纯索引节点）upload/register 系列全部拒绝（403），只允许登记 provider
-（RegisterURL 仅写 "http" provider，不落盘）——存储开关是**全服务级**的，
-不是每文件判断（file_service.go:32/158/235/389/448/546/576/644 六处入口统一检查）。
-
-### 7. 注册与浏览的递归语义
-
-- `RegisterFolder`（file_service.go:262-290）：递归遍历目录内全部文件逐个
-  RegisterLocal（isPathInStorage 先拦根外）——同文件重复注册被 meta 去重跳过。
-- `BrowseDir`（file_service.go:305-340）：`path==""` 或 `"/"` 都映射 storage 根
-  （controller 层 400 修复的配套，见 controllers.md 测试节）；目录条目聚合
-  file_meta 的 path 前缀，返回 `{dirs, files}` 两类清单。
-- `DiffVersions`（file_service.go:378-426）：两个 version_id 的 entries 按 path
-  比对——added（仅 A）/removed（仅 B）/modified（A≠B 且都在）三组；controller 层
-  组合 `CollectionService.VersionEntries` 取数据。
-
-### 8. 依赖注入方向（M2/M4 产物）
+### 5. SyncService's sync pipeline
 
 ```
-FileService  ← config（storageDir/storageEnable/MaxUploadBytes）
-SyncService  ← SyncRepository + UniversalDownloader + storageDir（下载器注入）
-AnonService  ← config（StorageDir）
+SaveToDisk (sync_service.go:31):
+  1. LocalPath forbids ".." (the first path traversal guard)
+  2. GetAnonCollectionByHash reads the collection
+  3. filterFiles (include/exclude pattern filtering)
+  4. UpsertSyncState + ClearSyncFiles (the DB state is cleared before writing)
+  5. Per-file saveFile: forbid ".." → MkdirAll → universalDownloader.Download →
+     os.WriteFile → UpsertFileSyncState (a single file failure does not abort; recorded as missing)
+```
+
+**matchPattern's path boundary** (comment L2 at sync_service.go:176-208): the substring fallback match must
+have a path boundary — a pattern ending with "/" = directory prefix matching, otherwise the substring must be
+bounded by '/' on both sides or by string ends;
+otherwise excluding "tmp/foo" would also hit "tmp/foobar".
+
+### 6. Upload limits and the storage switch (MaxUploadBytes, file_service.go:743-748)
+
+`MaxUploadBytes(c *gin.Context)` picks `cfg.MaxUploadBytes` /
+`cfg.MaxUploadBytesAnon` based on authentication state (the controller side enforces it with `MaxBytesReader`). When `storageEnable=false`
+(pure relay/pure index node), the entire upload/register family is rejected (403); only provider registration is allowed
+(RegisterURL writes only an "http" provider, no disk write) — the storage switch is **service-wide**,
+not judged per file (all six entry points at file_service.go:32/158/235/389/448/546/576/644 check uniformly).
+
+### 7. The recursive semantics of registration and browsing
+
+- `RegisterFolder` (file_service.go:262-290): recursively walks all files in the directory and RegisterLocal each one
+  (isPathInStorage blocks out-of-root first) — a duplicate registration of the same file is skipped by meta de-duplication.
+- `BrowseDir` (file_service.go:305-340): both `path==""` and `"/"` map to the storage root
+  (the counterpart to the controller-layer 400 fix, see the controllers.md tests section); directory entries aggregate
+  file_meta path prefixes and return two lists, `{dirs, files}`.
+- `DiffVersions` (file_service.go:378-426): entries of two version_ids are compared by path
+  — added (only A)/removed (only B)/modified (A≠B and both present) in three groups; the controller layer
+  combines `CollectionService.VersionEntries` for the data.
+
+### 8. Dependency injection directions (a product of M2/M4)
+
+```
+FileService  ← config (storageDir/storageEnable/MaxUploadBytes)
+SyncService  ← SyncRepository + UniversalDownloader + storageDir (downloader injection)
+AnonService  ← config (StorageDir)
 AuthService  ← UserRepository
-PinService / ShareService / TaskService / CollectionService ← 无依赖（内部引 repository）
+PinService / ShareService / TaskService / CollectionService ← no dependencies (reference repository internally)
 ```
 
-## 与其它模块的关系
+## Relationships with other modules
 
 ```
-controller（调用方）
+controller (the caller)
   ↓
-service（本层）
-  ├→ repository（SQLite：file_meta/file_providers/collections/users/pins/shares/tasks）
-  ├→ downloader.UniversalDownloader（SyncService.saveFile 的取数；AnonService 不直接用——
-  │   匿名集合下载走 controller 侧 universalDownloader）
-  ├→ config（路径/开关/限额）
-  └→ model（领域类型）
+service (this layer)
+  ├→ repository (SQLite: file_meta/file_providers/collections/users/pins/shares/tasks)
+  ├→ downloader.UniversalDownloader (data fetching in SyncService.saveFile; AnonService does not use it directly —
+  │   anonymous collection downloads go through the controller-side universalDownloader)
+  ├→ config (paths/switches/limits)
+  └→ model (domain types)
 ```
 
-- **不 import transport**（LAYERS.md §3 规则 3）：节点互联语义（OpenStream/FetchFromPeer）
-  由 controller 经 `transport.PeerJSService` 装配，service 不直接引用——唯一的例外面是
-  `downloader` 与 `p2p_bt`（外部能力切面 ⑦），在 service 是被允许的下游。
-- **repository 不再被 controller import**（M2 达成）：本层是 repository 唯一业务入口。
-- **PinService/ShareService/TaskService 的收编语义**（M2）：三者的方法直接透传
-  repository（PinRepository/ShareRepository/SyncRepository），无中间规则——
-  它们是「依赖方向修正」而非「业务提炼」，新逻辑应优先落到 FileService/AnonService
-  这类有规则的服务里。
+- **Does not import transport** (LAYERS.md §3 rule 3): the node interconnection semantics (OpenStream/FetchFromPeer)
+  are assembled by the controller via `transport.PeerJSService`, and service does not reference it directly — the only exception is
+  `downloader` and `p2p_bt` (the external capability aspect ⑦), which are allowed downstream in service.
+- **repository is no longer imported by the controller** (M2 achieved): this layer is the only business entry point to repository.
+- **The absorption semantics of PinService/ShareService/TaskService** (M2): all three methods pass through to
+  repository directly (PinRepository/ShareRepository/SyncRepository) with no intermediate rules —
+  they are a "dependency direction correction" rather than "business refinement"; new logic should preferably land in services with rules like FileService/AnonService.
 
-## 坑与设计决策
+## Pitfalls and design decisions
 
-1. **透明转发层的定位**（collection_service.go:1-5）：方法名与 repository 一一对应、
-   零业务逻辑——这是 M2 的「收口」手段而非最终形态；缓存/事务留到未来在 service 里加，
-   controller 无需感知。
-2. **RegisterLocal 锚定 storage 根**（file_service.go:169-174 注释）：此前接受任意绝对
-   路径 → 配合 LocalFetcher 的 provider 回读 = 匿名任意文件读取（F2）。register_folder/
-   browse/copy 同款边界，一处漏即全链漏。
-3. **Upload 的 EXDEV fallback**（file_service.go:492-498）：tmp 在 /tmp、storage 在别的
-   挂载点时 os.Rename 报 cross-device link——fallback copyFile（含 Sync 持久化）。
-4. **Delete 只删「storage 内的 local provider」**（file_service.go:557-564）：provider 路径
-   必须过 isPathInStorage 才 os.Remove——历史上直接 os.Remove 任意 provider 路径 = 任意
-   文件删（H1 同类）。
-5. **匿名集合 hash 稳定性依赖排序**（anon_service.go:97-99）：entries 必须先 sort 再
-   marshal；新增字段/改 marshal 格式会改变所有历史 hash（内容寻址的不可变契约）。
-6. **GetAnonCollectionByHash 的版本门槛**：Version < 1 拒绝（anon_service.go:159-162）——
-   防旧格式/半写文件被当作合法集合解析。
-7. **authkey 单值覆盖**：每个用户只有一个有效 authkey（UpdateAuthKey 覆盖）——多端登录
-   互相踢下线，设计如此（无多会话概念）。
-8. **SyncService 用 fmt.Printf 记错误**（sync_service.go:67）：未走 log 包，属遗留瑕疵，
-   非新代码模式。
-9. **URL 注册不落盘当存储关闭**（RegisterURL:389-396）：storageEnable=false 时只登记
-   provider（"http" 类型），下载时经 HTTPURLFetcher 直取；落盘失败仅 LogWarn 不致命。
+1. **The positioning of the transparent forwarding layer** (collection_service.go:1-5): method names map one-to-one to repository,
+   with zero business logic — this is M2's "convergence" means, not the final form; caching/transactions are left for the future to be added in service,
+   and the controller does not need to be aware.
+2. **RegisterLocal anchored to the storage root** (comment at file_service.go:169-174): previously it accepted any absolute
+   path → combined with LocalFetcher's provider readback = anonymous arbitrary file reading (F2). register_folder/
+   browse/copy share the same boundary, and one leak leaks the whole chain.
+3. **Upload's EXDEV fallback** (file_service.go:492-498): when tmp is on /tmp and storage is on a different
+   mount, os.Rename reports cross-device link — fallback copyFile (with Sync persistence).
+4. **Delete only removes "local providers inside storage"** (file_service.go:557-564): a provider path
+   must pass isPathInStorage before os.Remove — historically os.Remove on any provider path = arbitrary
+   file deletion (same class as H1).
+5. **Anonymous collection hash stability depends on sorting** (anon_service.go:97-99): entries must be sorted before
+   marshaling; adding fields/changing the marshal format changes every historical hash (the immutability contract of content addressing).
+6. **The version gate on GetAnonCollectionByHash**: Version < 1 is rejected (anon_service.go:159-162) —
+   preventing old-format/half-written files from being parsed as a legal collection.
+7. **authkey single-value overwrite**: each user has only one valid authkey (UpdateAuthKey overwrites) — multi-device logins
+   kick each other off; this is by design (no multi-session concept).
+8. **SyncService uses fmt.Printf for errors** (sync_service.go:67): it does not go through the log package, a legacy wart,
+   not a new code pattern.
+9. **URL registration does not write to disk when storage is disabled** (RegisterURL:389-396): when storageEnable=false, only the
+   provider is registered (type "http"), and downloads go through HTTPURLFetcher directly; a write failure is only LogWarn and not fatal.
 
-## 测试
+## Tests
 
-> 本层测试除明确标注发现背景的 5 个外均属 legacy 标注（文件头注释）。
+> Except for the 5 tests explicitly marked with a background of discovery below, this layer's tests are legacy-marked (file header comments).
 
-| 文件 | 测试 | 发现背景 |
+| File | Test | Background of discovery |
 |---|---|---|
-| anon_service_test.go | `TestCreateCollection_ValidEntries/PathTraversal/InvalidHash/EmptyEntries/EmptyPath/DirEntryWithoutProvider/FileWithoutProvider/AbsolutePath`、`TestGetCollection_ByHash/NonexistentHash`、`TestForkCollection`、`TestDownloadFile_FromCollectionEntry` | legacy（匿名集合创建/校验/读取主链路） |
-| anon_service_test.go | `TestGetCollection_InvalidHashNoPanic` | **2026-08-16 传输层审阅 H1：GetCollectionByHash 未校验 hash 就 hash[:2] 切片——短 hash 越界 panic 杀进程，".." 类值逃逸 storage 目录**；修复：入口 isValidHash（anon_service.go:143-146） |
-| file_service_test.go | `TestNewFileService`、`TestRegisterLocal(_NonexistentPath/_StorageDisabled/_EmptyFilename)`、`TestRegisterFolder`、`TestVerify(_Nonexistent)`、`TestDelete(_StorageDisabled)`、`TestRegisterURLDefaultFilename` | legacy |
-| file_service_test.go | `TestRegisterLocalOutsideStorageRootRejected` | **F2：RegisterLocal 接受任意绝对路径 + LocalFetcher provider 回读 = 匿名任意文件读取（可读 /etc/shadow）**；修复：isPathInStorage 锚定根 |
-| file_service_test.go | `TestCopyFileOutsideStorageRootRejected` | **F3：CopyFile 目标可写任意位置（绝对路径原样 / ../ 逃逸），配合公开 upload 可写 authorized_keys**；修复：写盘前校验目标在 storage 根内 |
-| file_service_test.go | `TestDeleteInvalidHashRejected` | **H1 同类：Delete 对任意 hash 直接 os.Remove provider 路径**；修复：先校验 hash 再确认路径在根内 |
-| file_service_test.go | `TestBrowseDirOutsideStorageRootRejected` | **H6：BrowseDir 接受任意绝对路径 → 任意目录列举（任意文件读取的前提）**；修复：锚定 storage 根 |
-| sync_service_test.go | `TestSyncService_PathTraversal`（ValidPath/TraversalAttempt/ContainDotDot）、`TestSyncService_Filtering`（All/ExcludeOne/IncludeOne/IncludeAndExclude） | legacy（SaveToDisk 路径穿越防御 + include/exclude 过滤语义） |
+| anon_service_test.go | `TestCreateCollection_ValidEntries/PathTraversal/InvalidHash/EmptyEntries/EmptyPath/DirEntryWithoutProvider/FileWithoutProvider/AbsolutePath`, `TestGetCollection_ByHash/NonexistentHash`, `TestForkCollection`, `TestDownloadFile_FromCollectionEntry` | legacy (the anonymous collection create/validate/read main chain) |
+| anon_service_test.go | `TestGetCollection_InvalidHashNoPanic` | **2026-08-16 transport layer review H1: GetCollectionByHash sliced hash[:2] without validating the hash — a short hash panicked out of bounds and killed the process, and ".."-like values escaped the storage directory**; fix: isValidHash at the entry point (anon_service.go:143-146) |
+| file_service_test.go | `TestNewFileService`, `TestRegisterLocal(_NonexistentPath/_StorageDisabled/_EmptyFilename)`, `TestRegisterFolder`, `TestVerify(_Nonexistent)`, `TestDelete(_StorageDisabled)`, `TestRegisterURLDefaultFilename` | legacy |
+| file_service_test.go | `TestRegisterLocalOutsideStorageRootRejected` | **F2: RegisterLocal accepted any absolute path + LocalFetcher provider readback = anonymous arbitrary file reading (could read /etc/shadow)**; fix: anchor the root with isPathInStorage |
+| file_service_test.go | `TestCopyFileOutsideStorageRootRejected` | **F3: CopyFile could write to anywhere (absolute paths passed through / `../` escape), and combined with the public upload could write authorized_keys**; fix: validate the target is inside the storage root before writing |
+| file_service_test.go | `TestDeleteInvalidHashRejected` | **Same class as H1: Delete did os.Remove on any provider path for any hash**; fix: validate the hash first, then confirm the path is inside the root |
+| file_service_test.go | `TestBrowseDirOutsideStorageRootRejected` | **H6: BrowseDir accepted any absolute path → arbitrary directory listing (the precondition for arbitrary file reading)**; fix: anchor the storage root |
+| sync_service_test.go | `TestSyncService_PathTraversal` (ValidPath/TraversalAttempt/ContainDotDot), `TestSyncService_Filtering` (All/ExcludeOne/IncludeOne/IncludeAndExclude) | legacy (SaveToDisk path traversal defense + include/exclude filtering semantics) |
 
-## 文件清单
+## File inventory
 
 ```
 back/internal/service/
-├── anon_service.go       匿名集合（内容寻址 JSON 存储 + 版本提交）
-├── anon_service_test.go  匿名集合测试（含 H1 发现背景 1 条）
-├── auth_service.go       bcrypt 认证（72 字节上限 / authkey）
-├── collection_service.go 用户集合透明转发层（M2）
-├── file_service.go       文件主服务（上传/注册/删除/复制/浏览 + 安全边界）
-├── file_service_test.go  文件服务测试（含 F2/F3/H1/H6 发现背景 4 条）
-├── pin_service.go        IPFS pin 收编层（M2）
-├── share_service.go      分享链接收编层（M2）
-├── sync_service.go       本地同步（过滤 + 状态跟踪 + 路径防御）
-├── sync_service_test.go  同步测试（路径穿越/过滤）
-└── task_service.go       异步任务占位（M2）
+├── anon_service.go       anonymous collections (content-addressed JSON storage + version commit)
+├── anon_service_test.go  anonymous collection tests (includes 1 H1 background-of-discovery entry)
+├── auth_service.go       bcrypt authentication (72-byte cap / authkey)
+├── collection_service.go user collection transparent forwarding layer (M2)
+├── file_service.go       the main file service (upload/register/delete/copy/browse + the security boundary)
+├── file_service_test.go  file service tests (includes 4 F2/F3/H1/H6 background-of-discovery entries)
+├── pin_service.go        IPFS pin absorption layer (M2)
+├── share_service.go      share link absorption layer (M2)
+├── sync_service.go       local sync (filtering + status tracking + path defense)
+├── sync_service_test.go  sync tests (path traversal/filtering)
+└── task_service.go       asynchronous task placeholder (M2)
 ```

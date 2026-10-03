@@ -15,17 +15,18 @@ import (
 	"peerdrive/internal/repository"
 )
 
-// initTestDB 内存 SQLite（file_index 表随 InitDB 建）。
+// initTestDB in-memory SQLite (the file_index table is created with InitDB).
 func initTestDB(t *testing.T) {
 	t.Helper()
 	require.NoError(t, repository.InitDB(":memory:"))
 }
 
-// newTestIndex 建一个测试用的 FileIndexService，并**注册 Close**。
+// newTestIndex builds a test FileIndexService and **registers Close**.
 //
-// 为什么不能直接 NewFileIndexService(t.TempDir())：上传会话持有文件句柄，
-// 没关掉的话 Windows 上 TempDir 清不掉（"being used by another process"），
-// Linux 上同样泄漏但看不见——只在 Windows 上真跑过测试才会发现（2026-09-20）。
+// Why NewFileIndexService(t.TempDir()) alone is not enough: upload sessions hold file handles,
+// and if those are not closed, Windows cannot clean TempDir ("being used by another process");
+// Linux leaks the same way but silently -- this only shows up when the tests are actually run on
+// Windows (2026-09-20).
 func newTestIndex(t *testing.T) *FileIndexService {
 	t.Helper()
 	svc := NewFileIndexService(t.TempDir())
@@ -33,9 +34,9 @@ func newTestIndex(t *testing.T) *FileIndexService {
 	return svc
 }
 
-// TestFileIndex_CreateAndInfo 登记外部文件 → 可查信息。
-// 发现背景：功能测试——create 只索引绝对路径、不复制文件。
-// 注意：create 受 H2 根目录限制，登记文件必须位于服务 uploadDir 内。
+// TestFileIndex_CreateAndInfo register an external file -> its info becomes queryable.
+// Discovery background: functional test -- create only indexes the absolute path, it does not copy the file.
+// Note: create is subject to the H2 root-directory restriction, so a registered file must live inside the service's uploadDir.
 func TestFileIndex_CreateAndInfo(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
@@ -44,11 +45,11 @@ func TestFileIndex_CreateAndInfo(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "src.bin")
 	require.NoError(t, os.WriteFile(src, content, 0o644))
 
-	// 根目录外登记必须被拒绝（H2 任意文件读取修复：create 后可 req 读取）
+	// registering outside the root must be rejected (H2 arbitrary-file-read fix: after create it could be read via req)
 	_, err := svc.Create(src)
-	assert.Error(t, err, "根目录外文件不得登记")
+	assert.Error(t, err, "files outside root must not be registered")
 
-	// 根目录内登记正常
+	// registering inside the root works normally
 	inRoot := filepath.Join(svc.uploadDir, "src.bin")
 	require.NoError(t, os.WriteFile(inRoot, content, 0o644))
 	fi, err := svc.Create(inRoot)
@@ -56,20 +57,20 @@ func TestFileIndex_CreateAndInfo(t *testing.T) {
 	assert.Equal(t, int64(len(content)), fi.Size)
 	assert.Equal(t, "src.bin", fi.Name)
 
-	// 查询
+	// query
 	got, err := svc.Info(fi.Hash)
 	require.NoError(t, err)
 	assert.Equal(t, fi.Hash, got.Hash)
 	assert.Equal(t, inRoot, got.Path)
 
-	// 非法 hash 拒绝
+	// an illegal hash is rejected
 	_, err = svc.Info("not-a-hash")
 	assert.Error(t, err)
 }
 
-// TestFileIndex_CreateSymlinkEscape 符号链接逃逸根目录 → 拒绝。
-// 发现背景：H2 防御性测试——IsPathAllowed 必须 EvalSymlinks 解析后再判，
-// 否则「根内软链 → 根外目标」绕过限制。
+// TestFileIndex_CreateSymlinkEscape a symlink escaping the root directory -> rejected.
+// Discovery background: H2 defensive test -- IsPathAllowed must EvalSymlinks and only then judge,
+// or a "symlink inside the root -> target outside the root" slips past the restriction.
 func TestFileIndex_CreateSymlinkEscape(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
@@ -80,10 +81,10 @@ func TestFileIndex_CreateSymlinkEscape(t *testing.T) {
 	require.NoError(t, os.Symlink(outside, link))
 
 	_, err := svc.Create(link)
-	assert.Error(t, err, "符号链接逃逸根目录必须拒绝")
+	assert.Error(t, err, "symlink escaping root must be rejected")
 }
 
-// TestFileIndex_IsPathAllowed 根目录判定：目录内允许、根外拒绝。
+// TestFileIndex_IsPathAllowed root-directory judgement: inside the directory is allowed, outside the root is rejected.
 func TestFileIndex_IsPathAllowed(t *testing.T) {
 	svc := newTestIndex(t)
 	inRoot := filepath.Join(svc.uploadDir, "a.bin")
@@ -94,48 +95,50 @@ func TestFileIndex_IsPathAllowed(t *testing.T) {
 	assert.False(t, svc.IsPathAllowed(outside))
 }
 
-// TestFileIndex_ReadRoot 登记边界与读取边界必须分开。
+// TestFileIndex_ReadRoot the registration boundary and the read boundary must be separate.
 //
-// 发现背景（真实故障）：运营者把共享目录设在下载目录之外（例：/mnt/media），
-// 登记成功、share 帧列得出文件，但对端一拉就是 read failed —— 读取侧用登记侧
-// 那套「只允许下载目录」的判定把它判成越权，回退到并不存在的内容寻址副本。
-// 修复口径：可读 = 下载根 ∪ 运营者声明的共享目录；可登记/可写入仍只有下载根。
+// Discovery background (real incident): the operator put the shared directory outside the downloads
+// directory (e.g. /mnt/media); registration succeeded and the share frame listed the file, but the
+// peer's pull gave read failed -- the read side used the registration side's "only the downloads
+// directory" judgement, ruled it out of bounds, and fell back to a content-addressed copy that
+// did not exist. Fix: readable = downloads root ∪ operator-declared shared directories; while
+// registerable/writable remains only the downloads root.
 func TestFileIndex_ReadRoot(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
 
-	share := t.TempDir() // 模拟 PEERDRIVE_SHARE_DIRS 指向的、下载目录之外的目录
+	share := t.TempDir() // simulate the directory outside the downloads dir that PEERDRIVE_SHARE_DIRS points at
 	shared := filepath.Join(share, "movie.mkv")
 	require.NoError(t, os.WriteFile(shared, []byte("movie"), 0o644))
 
-	// 1) 没声明之前：两边都不放行
-	assert.False(t, svc.IsPathReadable(shared), "未声明的目录不该对外可读")
+	// 1) before declaration: neither side allows it
+	assert.False(t, svc.IsPathReadable(shared), "undeclared directory should not be readable externally")
 
-	// 2) 声明为可读根之后：读取放行
+	// 2) after declaring it a readable root: reads are allowed
 	svc.AddReadRoot(share)
-	assert.True(t, svc.IsPathReadable(shared), "运营者声明过的共享目录必须可读")
+	assert.True(t, svc.IsPathReadable(shared), "operator-declared shared directory must be readable")
 
-	// 3) 但登记/写入边界**不能**跟着放开：对端仍不能把文件写进我的共享目录
+	// 3) but the registration/write boundary must **not** open up with it: a peer still cannot write files into my shared directory
 	_, err := svc.Create(shared)
-	assert.Error(t, err, "共享目录可读 ≠ 可登记，写边界不许被带开")
+	assert.Error(t, err, "shared directory readable ≠ registrable, write boundary must not be opened up")
 
-	// 4) 下载根内的文件两边都放行
+	// 4) a file inside the downloads root is allowed on both sides
 	inRoot := filepath.Join(svc.uploadDir, "a.bin")
 	require.NoError(t, os.WriteFile(inRoot, []byte("x"), 0o644))
 	assert.True(t, svc.IsPathAllowed(inRoot))
 	assert.True(t, svc.IsPathReadable(inRoot))
 
-	// 5) 空配置不能变成"全放行"
+	// 5) an empty config must not become "allow everything"
 	svc.AddReadRoot("")
 	svc.AddReadRoot("   ")
-	assert.False(t, svc.IsPathReadable(""), "空路径必须拒绝")
+	assert.False(t, svc.IsPathReadable(""), "empty path must be rejected")
 	other := filepath.Join(t.TempDir(), "other.bin")
 	require.NoError(t, os.WriteFile(other, []byte("x"), 0o644))
-	assert.False(t, svc.IsPathReadable(other), "未声明的目录仍然不可读")
+	assert.False(t, svc.IsPathReadable(other), "undeclared directory still not readable")
 }
 
-// TestFileIndex_ReadRootSiblingPrefix 同名前缀目录不能互相放行
-// （/media 与 /media-private 在朴素前缀匹配下会串）。
+// TestFileIndex_ReadRootSiblingPrefix same-prefix sibling directories must not allow each other
+// (/media and /media-private would collide under naive prefix matching).
 func TestFileIndex_ReadRootSiblingPrefix(t *testing.T) {
 	svc := newTestIndex(t)
 	base := t.TempDir()
@@ -147,16 +150,16 @@ func TestFileIndex_ReadRootSiblingPrefix(t *testing.T) {
 	svc.AddReadRoot(share)
 	assert.True(t, svc.IsPathReadable(filepath.Join(share, "a.mkv")))
 	assert.False(t, svc.IsPathReadable(filepath.Join(sibling, "secret.txt")),
-		"同名前缀的兄弟目录不得被放行")
+		"same-prefix sibling directory must not be allowed")
 }
 
-// TestFileIndex_UploadStream 分片上传（chunk 对齐块）→ 完成 → 映射可查 → 内容可读。
-// 发现背景：功能测试——WriteAt 分片 + 位图全满判定 + sha256 登记。
+// TestFileIndex_UploadStream chunked upload (chunk-aligned blocks) -> complete -> mapping queryable -> content readable.
+// Discovery background: functional test -- WriteAt chunking + the bitmap-full judgement + sha256 registration.
 func TestFileIndex_UploadStream(t *testing.T) {
 	initTestDB(t)
 	uploadDir := t.TempDir()
 	svc := NewFileIndexService(uploadDir)
-	t.Cleanup(svc.Close) // 同 newTestIndex：Windows 上不关句柄 TempDir 清不掉
+	t.Cleanup(svc.Close) // same as newTestIndex: on Windows TempDir cannot be cleaned without closing the handles
 
 	content := make([]byte, 200*1024)
 	for i := range content {
@@ -165,7 +168,7 @@ func TestFileIndex_UploadStream(t *testing.T) {
 	sess, err := svc.BeginUpload("up.bin", int64(len(content)))
 	require.NoError(t, err)
 
-	// 分片顺序写入（每片 64KB，模拟帧协议 data 块）
+	// write chunks in order (each 64KB, simulating the frame protocol's data blocks)
 	for off := 0; off < len(content); off += uploadChunkSize {
 		end := off + uploadChunkSize
 		if end > len(content) {
@@ -175,7 +178,7 @@ func TestFileIndex_UploadStream(t *testing.T) {
 	}
 	done, fi, err := sess.Complete()
 	require.NoError(t, err)
-	assert.True(t, done, "位图全满应完成")
+	assert.True(t, done, "bitmap full should complete")
 
 	got, err := os.ReadFile(fi.Path)
 	require.NoError(t, err)
@@ -187,9 +190,10 @@ func TestFileIndex_UploadStream(t *testing.T) {
 	assert.Equal(t, fi.Path, info.Path)
 }
 
-// TestFileIndex_UploadEmpty 空文件上传：size=0 也是合法内容寻址值。
-// 发现背景：拉取侧 hashMatchesSHA256 已支持空文件，但上传侧 BeginUpload(0)
-// 可以直接 Complete；serveUploadBegin 旧实现 size<=0 直接拒绝，两端不对称。
+// TestFileIndex_UploadEmpty empty-file upload: size=0 is a legitimate content-addressed value.
+// Discovery background: the pull side's hashMatchesSHA256 already supports empty files, but the
+// upload side's BeginUpload(0) can Complete directly; the old serveUploadBegin rejected size<=0
+// outright, so the two sides were asymmetric.
 func TestFileIndex_UploadEmpty(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
@@ -198,7 +202,7 @@ func TestFileIndex_UploadEmpty(t *testing.T) {
 	require.NoError(t, err)
 	done, fi, err := sess.Complete()
 	require.NoError(t, err)
-	assert.True(t, done, "size=0 位图应天然全满")
+	assert.True(t, done, "size=0 bitmap should be naturally full")
 	assert.Equal(t, int64(0), fi.Size)
 	assert.Equal(t, sha256Hex([]byte{}), fi.Hash)
 
@@ -207,32 +211,33 @@ func TestFileIndex_UploadEmpty(t *testing.T) {
 	assert.Empty(t, got)
 }
 
-// TestFileIndex_UploadSizeMismatch 声明大小与实际不符 → Commit 失败。
-// 发现背景：防御性测试——size 是协议信任边界，必须校验防半包/丢包残留。
+// TestFileIndex_UploadSizeMismatch declared size does not match the actual one -> Commit fails.
+// Discovery background: defensive test -- size is a protocol trust boundary and must be validated
+// to prevent half-package / lost-package residue.
 func TestFileIndex_UploadSizeMismatch(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
 
-	// 超上限拒绝
+	// over the cap is rejected
 	_, err := svc.BeginUpload("big.bin", 9*1024*1024*1024)
 	assert.Error(t, err)
 
-	// 越界写拒绝（声明 100 字节，写 200）
+	// an out-of-bounds write is rejected (declared 100 bytes, wrote 200)
 	sess, err := svc.BeginUpload("m.bin", 100)
 	require.NoError(t, err)
-	require.NoError(t, sess.WriteAt(0, []byte("ten-bytes!"))) // 对齐 OK
+	require.NoError(t, sess.WriteAt(0, []byte("ten-bytes!"))) // aligned, OK
 	err = sess.WriteAt(0, make([]byte, 200))
-	assert.Error(t, err, "越界写应失败")
+	assert.Error(t, err, "out-of-bounds write should fail")
 }
 
-// TestFileIndex_ListAndDelete 列表 + 逻辑删除（tombstone）→ 列表不再出现。
+// TestFileIndex_ListAndDelete listing + logical deletion (tombstone) -> the entry no longer appears in the list.
 //
-// 发现背景：功能测试——列表 + 逻辑删除（tombstone）语义
+// Discovery background: functional test -- list + logical-deletion (tombstone) semantics
 func TestFileIndex_ListAndDelete(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
 
-	dir := svc.uploadDir // H2：create 只允许根目录内文件
+	dir := svc.uploadDir // H2: create only allows files inside the root directory
 	var hashes []string
 	for i := 0; i < 3; i++ {
 		p := filepath.Join(dir, "f"+itoa(i)+".bin")
@@ -246,7 +251,7 @@ func TestFileIndex_ListAndDelete(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, files, 3)
 
-	// L6：delete 返回新 seq（tombstone 同步游标）
+	// L6: delete returns a new seq (the tombstone sync cursor)
 	_, err = svc.Delete(hashes[0])
 	require.NoError(t, err)
 	files, err = svc.List(0, 0)
@@ -254,20 +259,20 @@ func TestFileIndex_ListAndDelete(t *testing.T) {
 	assert.Len(t, files, 2)
 }
 
-// TestFileIndex_SyncSince 增量同步：seq 游标 → 变更集（含 tombstone）→ 对端应用。
-// 发现背景：功能测试——metadata 同步依赖单调 seq 游标；ApplySync 幂等合并。
+// TestFileIndex_SyncSince incremental sync: seq cursor -> change set (including tombstones) -> applied by the peer.
+// Discovery background: functional test -- metadata sync depends on a monotonic seq cursor; ApplySync merges idempotently.
 func TestFileIndex_SyncSince(t *testing.T) {
 	initTestDB(t)
 	svcA := newTestIndex(t)
-	svcB := newTestIndex(t) // 对端
+	svcB := newTestIndex(t) // the peer
 
-	dir := svcA.uploadDir // H2：create 只允许根目录内文件
+	dir := svcA.uploadDir // H2: create only allows files inside the root directory
 	p1 := filepath.Join(dir, "a.bin")
 	require.NoError(t, os.WriteFile(p1, []byte("aaa"), 0o644))
 	fi1, err := svcA.Create(p1)
 	require.NoError(t, err)
 
-	// A → B 同步（seq 从 0）
+	// A -> B sync (seq from 0)
 	files, last, err := svcA.SyncSince(0)
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -276,12 +281,12 @@ func TestFileIndex_SyncSince(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
 
-	// B 侧可查（路径原样同步）
+	// queryable on the B side (the path is synced verbatim)
 	got, err := svcB.Info(fi1.Hash)
 	require.NoError(t, err)
 	assert.Equal(t, p1, got.Path)
 
-	// 删除 → tombstone 同步（L6：delete 返回 seq，对端 sync 才跟踪得到删除）
+	// delete -> tombstone sync (L6: delete returns a seq, so the peer's sync can track the deletion)
 	_, err = svcA.Delete(fi1.Hash)
 	require.NoError(t, err)
 	files, _, err = svcA.SyncSince(last)
@@ -291,7 +296,7 @@ func TestFileIndex_SyncSince(t *testing.T) {
 	_, err = svcB.ApplySync(files)
 	require.NoError(t, err)
 	_, err = svcB.Info(fi1.Hash)
-	assert.Error(t, err, "删除应同步生效")
+	assert.Error(t, err, "deletion should sync and take effect")
 }
 
 func itoa(n int) string {
@@ -306,24 +311,25 @@ func itoa(n int) string {
 	return string(b)
 }
 
-// TestFileIndex_UploadMultiSource 多 source 并发分片上传：乱序 WriteAt 合并，
-// 最后一个分片触发完成（位图合并正确）。
-// 发现背景：功能需求——多节点并行上传同一文件不同分片。
+// TestFileIndex_UploadMultiSource concurrent chunked upload from multiple sources: out-of-order
+// WriteAt calls merge, and the last chunk triggers completion (the bitmap merges correctly).
+// Discovery background: functional requirement -- multiple nodes upload different chunks of the
+// same file in parallel.
 func TestFileIndex_UploadMultiSource(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
 
-	content := make([]byte, 4*uploadChunkSize) // 4 个 source 各一块
+	content := make([]byte, 4*uploadChunkSize) // 4 sources, one block each
 	for i := range content {
 		content[i] = byte(i * 7)
 	}
 	sess, err := svc.BeginUpload("multi.bin", int64(len(content)))
 	require.NoError(t, err)
 
-	// 4 个 source 乱序并发（模拟 4 个连接）
+	// 4 sources concurrently and out of order (simulating 4 connections)
 	const sources = 4
 	var wg sync.WaitGroup
-	order := []int{2, 0, 3, 1} // 乱序
+	order := []int{2, 0, 3, 1} // out of order
 	for _, si := range order {
 		wg.Add(1)
 		go func(si int) {
@@ -345,14 +351,14 @@ func TestFileIndex_UploadMultiSource(t *testing.T) {
 	assert.True(t, done)
 	assert.Equal(t, sha256Hex(content), fi.Hash)
 
-	got, err := os.ReadFile(fi.Path)
+	got, err = os.ReadFile(fi.Path)
 	require.NoError(t, err)
 	assert.Equal(t, content, got)
 }
 
-// TestFileIndex_UploadResume 断点续传：中断后重开会话，连续已写偏移正确，
-// 剩余分片补齐后完成。
-// 发现背景：功能需求——上传中断后从已接收位置继续。
+// TestFileIndex_UploadResume resumable upload: re-open the session after an interruption, the
+// contiguous written offset is correct, and it completes once the remaining chunks are filled in.
+// Discovery background: functional requirement -- continue from the already-received position after an upload interruption.
 func TestFileIndex_UploadResume(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
@@ -363,17 +369,17 @@ func TestFileIndex_UploadResume(t *testing.T) {
 	}
 	sess, err := svc.BeginUpload("resume.bin", int64(len(content)))
 	require.NoError(t, err)
-	// 只写前两个 chunk，中断
+	// write only the first two chunks, then interrupt
 	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize]))
 	require.NoError(t, sess.WriteAt(int64(uploadChunkSize), content[uploadChunkSize:2*uploadChunkSize]))
 
-	// 重开会话（模拟断线重连/新 source 加入）
+	// re-open the session (simulates a reconnect / a new source joining)
 	sess2, err := svc.BeginUpload("resume.bin", int64(len(content)))
 	require.NoError(t, err)
 	cont := sess2.ContiguousOffset()
-	assert.Equal(t, int64(2*uploadChunkSize), cont, "续传起点应为 2 个 chunk")
+	assert.Equal(t, int64(2*uploadChunkSize), cont, "resume start should be 2 chunks")
 
-	// 从续传点补齐
+	// fill in from the resume point
 	require.NoError(t, sess2.WriteAt(cont, content[cont:]))
 	done, fi, err := sess2.Complete()
 	require.NoError(t, err)
@@ -381,8 +387,8 @@ func TestFileIndex_UploadResume(t *testing.T) {
 	assert.Equal(t, sha256Hex(content), fi.Hash)
 }
 
-// TestFileIndex_UploadPartialNotComplete 位图未满时 Complete 返回未完成。
-// 发现背景：防御性测试——缺分片时不得登记映射。
+// TestFileIndex_UploadPartialNotComplete Complete reports not-complete when the bitmap is not full.
+// Discovery background: defensive test -- a missing chunk must not register a mapping.
 func TestFileIndex_UploadPartialNotComplete(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
@@ -390,17 +396,17 @@ func TestFileIndex_UploadPartialNotComplete(t *testing.T) {
 	content := make([]byte, 2*uploadChunkSize)
 	sess, err := svc.BeginUpload("partial.bin", int64(len(content)))
 	require.NoError(t, err)
-	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize])) // 只写一半
+	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize])) // only half is written
 
 	done, fi, err := sess.Complete()
 	require.NoError(t, err)
-	assert.False(t, done, "缺分片不得完成")
+	assert.False(t, done, "missing chunk must not complete")
 	assert.Nil(t, fi)
 }
 
-// TestFileIndex_BeginUploadSizeMismatch 同名会话复用声明 size 不一致 → 拒绝。
-// 发现背景：M7 防御性测试——位图按旧 size 建，声明不一致会导致续传偏移
-// 错乱、末 chunk 判满错误（TRANSPORT-REVIEW M7）。
+// TestFileIndex_BeginUploadSizeMismatch reusing a same-name session with a different declared size -> rejected.
+// Discovery background: M7 defensive test -- the bitmap is built for the old size, so a mismatched
+// declaration would corrupt the resume offset and the last chunk's full judgement (TRANSPORT-REVIEW M7).
 func TestFileIndex_BeginUploadSizeMismatch(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
@@ -408,14 +414,14 @@ func TestFileIndex_BeginUploadSizeMismatch(t *testing.T) {
 	_, err := svc.BeginUpload("same.bin", 100)
 	require.NoError(t, err)
 	_, err = svc.BeginUpload("same.bin", 200)
-	assert.Error(t, err, "同名会话 size 不一致必须拒绝")
-	// 一致则可复用（续传）
+	assert.Error(t, err, "same-name session with inconsistent size must be rejected")
+	// matching is reusable (resume)
 	_, err = svc.BeginUpload("same.bin", 100)
 	assert.NoError(t, err)
 }
 
-// TestFileIndex_AbortIdempotent Abort 幂等（reap 与显式 Abort 并发不 panic）。
-// 发现背景：M7 防御性测试——Abort 与 reap 摘除句柄可能竞争，必须幂等。
+// TestFileIndex_AbortIdempotent Abort is idempotent (a concurrent reap and explicit Abort do not panic).
+// Discovery background: M7 defensive test -- Abort and reap may race on detaching the handle, so it must be idempotent.
 func TestFileIndex_AbortIdempotent(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
@@ -423,36 +429,37 @@ func TestFileIndex_AbortIdempotent(t *testing.T) {
 	sess, err := svc.BeginUpload("abort.bin", 100)
 	require.NoError(t, err)
 	sess.Abort()
-	sess.Abort() // 幂等
-	// 中止后写入必须报错（而非写已关闭句柄的莫名失败）
+	sess.Abort() // idempotent
+	// a write after abort must error out (not a cryptic failure from writing a closed handle)
 	err = sess.WriteAt(0, []byte("x"))
-	assert.Error(t, err, "abort 后写入必须明确失败")
+	assert.Error(t, err, "write after abort must fail clearly")
 }
 
-// TestFileIndex_FullWordsIncrementalBoundaries 位图增量计数（fullWords）
-// 的边界回归：size 正好 64 chunk 倍数 / 非倍数 / 重复置位不重复计数 /
-// 空文件——Complete O(1) 判满重构的保护（发现背景：代码审阅——Complete
-// 每分片全扫位图，8GB 上传 = 13 万分片 × 2048 word，改为 setBit 增量
-// 计数后必须保证判满语义不变）。
+// TestFileIndex_FullWordsIncrementalBoundaries boundary regression for the bitmap's incremental
+// counter (fullWords): a size that is exactly a multiple of 64 chunks / not a multiple / repeated
+// setting does not double count / empty file -- protection for the Complete O(1) full-judgement
+// refactor (discovery background: code review -- Complete used to scan the whole bitmap per chunk;
+// an 8GB upload = 130k chunks × 2048 words; after switching to incremental counting in setBit,
+// the full-judgement semantics must stay unchanged).
 func TestFileIndex_FullWordsIncrementalBoundaries(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
 
-	// 1) 非 64 倍数 size：末 word 不足 64 chunk，Complete 判满正确
+	// 1) a size that is not a multiple of 64: the last word has fewer than 64 chunks, and Complete's full judgement is correct
 	content := make([]byte, 2*uploadChunkSize+12345)
 	sess, err := svc.BeginUpload("incr1.bin", int64(len(content)))
 	require.NoError(t, err)
 	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize]))
 	done, _, err := sess.Complete()
 	require.NoError(t, err)
-	assert.False(t, done, "未写满不得完成")
+	assert.False(t, done, "not fully written must not complete")
 	require.NoError(t, sess.WriteAt(int64(uploadChunkSize), content[uploadChunkSize:]))
 	done, _, err = sess.Complete()
 	require.NoError(t, err)
-	assert.True(t, done, "全部写满必须完成")
+	assert.True(t, done, "fully written must complete")
 
-	// 2) 正好 64 chunk 倍数：全部 word 满阈值都是 64，末 word 判满不依赖
-	//    增量计数特判
+	// 2) exactly a multiple of 64 chunks: every word's full threshold is 64, and the last word's
+	//    full judgement does not rely on an incremental-counting special case
 	content = make([]byte, 64*uploadChunkSize)
 	sess, err = svc.BeginUpload("incr2.bin", int64(len(content)))
 	require.NoError(t, err)
@@ -461,48 +468,48 @@ func TestFileIndex_FullWordsIncrementalBoundaries(t *testing.T) {
 	}
 	done, _, err = sess.Complete()
 	require.NoError(t, err)
-	assert.True(t, done, "64 倍数 size 全部写满必须完成")
+	assert.True(t, done, "64-multiple size fully written must complete")
 
-	// 3) 重复置位（重复分片/续传重建）不破坏计数
+	// 3) repeated setting (duplicate chunks / resume rebuilds) does not break the count
 	content = make([]byte, 2*uploadChunkSize)
 	sess, err = svc.BeginUpload("incr3.bin", int64(len(content)))
 	require.NoError(t, err)
 	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize]))
-	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize])) // 重复写同一分片
-	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize])) // 再写一次
+	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize])) // write the same chunk again
+	require.NoError(t, sess.WriteAt(0, content[:uploadChunkSize])) // and once more
 	done, _, err = sess.Complete()
 	require.NoError(t, err)
-	assert.False(t, done, "重复置位不构成完成")
+	assert.False(t, done, "repeated setting does not constitute completion")
 	require.NoError(t, sess.WriteAt(int64(uploadChunkSize), content[uploadChunkSize:]))
 	done, _, err = sess.Complete()
 	require.NoError(t, err)
-	assert.True(t, done, "补全后必须完成")
+	assert.True(t, done, "must complete after filling in")
 
-	// 4) 空文件：位图空，O(1) 判满路径直接通过（diff 于 size>0 路径）
+	// 4) empty file: the bitmap is empty and the O(1) full-judgement path passes straight through (a branch differing from the size>0 path)
 	sess, err = svc.BeginUpload("incr4.bin", 0)
 	require.NoError(t, err)
 	done, fi, err := sess.Complete()
 	require.NoError(t, err)
-	assert.True(t, done, "空文件必须直接判满")
-	assert.Equal(t, sha256Hex(nil), fi.Hash, "空文件 sha256 是合法内容寻址值")
+	assert.True(t, done, "empty file must be judged full directly")
+	assert.Equal(t, sha256Hex(nil), fi.Hash, "empty file sha256 is a legal content-addressed value")
 }
 
-// sha256Hex 计算内容哈希（拆分到 transport 包后自带的测试辅助）。
+// sha256Hex computes the content hash (a test helper that came along after splitting into the transport package).
 func sha256Hex(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
 }
 
-// TestFileIndex_WriteFile 直接写文件：流式写入 uploadDir 并登记。
-// 发现背景：Source 控制面“直接写文件”的底层实现，2026-08-19。
+// TestFileIndex_WriteFile direct file write: streamed into uploadDir and registered.
+// Discovery background: the low-level implementation behind the Source control plane's "write file directly", 2026-08-19.
 func TestFileIndex_WriteFile(t *testing.T) {
 	initTestDB(t)
 	svc := newTestIndex(t)
 	content := []byte("file-index-write-file")
-	fi, err := svc.WriteFile("写入测试.bin", bytes.NewReader(content))
+	fi, err := svc.WriteFile("write-test.bin", bytes.NewReader(content))
 	require.NoError(t, err)
 	assert.Equal(t, int64(len(content)), fi.Size)
-	assert.Equal(t, "写入测试.bin", fi.Name)
+	assert.Equal(t, "write-test.bin", fi.Name)
 
 	got, err := os.ReadFile(fi.Path)
 	require.NoError(t, err)

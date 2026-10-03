@@ -1,18 +1,20 @@
 package source
 
-// url.go：URLSource——按 URL 模板拉取内容（HTTP source）。
-// 用途：
-//   - 外部资源表：hash → 已知 URL（如 https://gateway/ipfs/<hash>）
-//   - 可注入 Transport 指向 ech-proxy 等网络出口（wintools 的 ech-proxy
-//     可作为本 source 的出站代理，不需要独立 source 类型）
+// url.go: URLSource — fetches content by URL template (HTTP source).
+// Usage:
+//   - External resource table: hash → known URL (e.g. https://gateway/ipfs/<hash>)
+//   - Can inject a Transport pointing to ech-proxy or other egress (wintools' ech-proxy
+//     can serve as the outbound proxy for this source, no need for a separate source type)
 //
-// 语义：
-//   - 模板用 fmt.Sprintf：%s = hash；%d（可选两次）= offset, size
-//   - 支持 CapStream：优先带 Range 头请求（服务器支持 206 则流式分片）；
-//     服务器回 200 全量时截取 offset..offset+size 段（带宽浪费但正确）
-//   - 全量请求（offset==0,size<0）读取完成后校验 sha256（内容寻址兜底）——
-//     URL 源内容可能被篡改，校验是内容寻址语义的底线
-//   - Info 不支持（HTTP HEAD 元数据留给未来）
+// Semantics:
+//   - Template uses fmt.Sprintf: %s = hash; %d (optionally twice) = offset, size
+//   - Supports CapStream: prefer requests with Range header (if server supports 206,
+//     streaming chunks); when server returns 200 full, extract offset..offset+size
+//     segment (bandwidth waste but correct)
+//   - Full requests (offset==0, size<0) perform sha256 verification after reading (content-
+//     addressed fallback) — URL source content may be tampered with; verification is the
+//     baseline of content-addressed semantics
+//   - Info not supported (HTTP HEAD metadata left for future)
 
 import (
 	"context"
@@ -26,30 +28,30 @@ import (
 	"sync"
 )
 
-// URLSource HTTP URL 文件源。
+// URLSource HTTP URL file source.
 type URLSource struct {
 	name     string
-	template string // fmt 模板：%s=hash，可选 %d=offset %d=size
+	template string // fmt template: %s=hash, optional %d=offset %d=size
 	client   *http.Client
-	caps     Capability // 由模板推导（见 NewURLSource）
+	caps     Capability // derived from template (see NewURLSource)
 
 	mu       sync.RWMutex
 	priority int
 }
 
-// NewURLSource 创建 URL 源。template 示例：
+// NewURLSource creates a URL source. template examples:
 //
-//	"https://example.com/ipfs/%s"                    （不支持分片，CapFile）
-//	"https://example.com/f/%s?off=%d&size=%d"        （支持分片，CapStream）
+//	"https://example.com/ipfs/%s"                    (no chunking, CapFile)
+//	"https://example.com/f/%s?off=%d&size=%d"        (supports chunking, CapStream)
 //
-// client 可为 nil（默认 http.Client）；注入自定义 Transport（如 ech-proxy
-// 出口代理）时传带该 Transport 的 client。
+// client can be nil (defaults to http.Client); when injecting a custom Transport
+// (e.g. ech-proxy egress proxy), pass a client with that Transport.
 func NewURLSource(template string, client *http.Client) *URLSource {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	s := &URLSource{name: "url", template: template, client: client}
-	// 模板含 %d → 支持 range 参数 → CapStream；否则 CapFile
+	// Template contains %d → supports range params → CapStream; otherwise CapFile
 	if strings.Contains(template, "%d") {
 		s.caps = CapStream
 	} else {
@@ -61,7 +63,7 @@ func NewURLSource(template string, client *http.Client) *URLSource {
 func (s *URLSource) Name() string { return s.name }
 func (s *URLSource) Type() string { return "url" }
 
-// Capabilities 由模板决定：含 %d（offset/size 参数）→ 流式分片。
+// Capabilities determined by template: contains %d (offset/size params) → streaming chunks.
 func (s *URLSource) Capabilities() Capability { return s.caps }
 
 func (s *URLSource) Priority() int {
@@ -76,12 +78,14 @@ func (s *URLSource) SetPriority(p int) {
 	s.mu.Unlock()
 }
 
-// Available URL 源无主动健康检查（ping 会浪费请求）——第一版恒 true，
-// 失败由路由统计暴露（LastErr）。未来可加最近成功时间窗。
+// Available URL source has no active health check (ping would waste requests) — first
+// version always returns true, failures are exposed through routing stats (LastErr).
+// Future versions can add a recent-success time window.
 func (s *URLSource) Available(ctx context.Context) bool { return true }
 
-// buildURL 按模板生成请求 URL。模板含 %d 时补 offset/size（size<0 → -1，
-// 由服务器语义决定；这里传 -1 表示整段）。
+// buildURL generates the request URL from the template. When template contains %d,
+// fills in offset/size (size<0 → -1, server semantics decide; passing -1 here means
+// entire segment).
 func (s *URLSource) buildURL(hash string, offset, size int64) string {
 	if s.caps&CapStream != 0 {
 		return fmt.Sprintf(s.template, hash, offset, size)
@@ -89,7 +93,7 @@ func (s *URLSource) buildURL(hash string, offset, size int64) string {
 	return fmt.Sprintf(s.template, hash)
 }
 
-// Open 流式打开（需模板含 %d）。
+// Open streaming open (requires template to contain %d).
 func (s *URLSource) Open(ctx context.Context, hash string, offset, size int64) (io.ReadCloser, error) {
 	if err := validHash(hash); err != nil {
 		return nil, err
@@ -100,7 +104,7 @@ func (s *URLSource) Open(ctx context.Context, hash string, offset, size int64) (
 		return nil, err
 	}
 	if offset > 0 || size >= 0 {
-		// Range 请求：bytes=start-end（size<0 → 到文件尾）
+		// Range request: bytes=start-end (size<0 → to end of file)
 		end := ""
 		if size >= 0 {
 			end = fmt.Sprintf("%d", offset+size-1)
@@ -119,8 +123,8 @@ func (s *URLSource) Open(ctx context.Context, hash string, offset, size int64) (
 	if resp.StatusCode == http.StatusPartialContent {
 		body = resp.Body
 	} else {
-		// 服务器不支持 Range（回 200 全量）：截取 offset 段。
-		// 正确性优先，带宽浪费可接受（第一版不做 HEAD 探测）
+		// Server doesn't support Range (returns 200 full): extract the offset segment.
+		// Correctness first, bandwidth waste acceptable (no HEAD probing in first version)
 		if offset > 0 {
 			if _, err := io.CopyN(io.Discard, resp.Body, offset); err != nil {
 				resp.Body.Close()
@@ -132,14 +136,14 @@ func (s *URLSource) Open(ctx context.Context, hash string, offset, size int64) (
 			body = &limitedReadCloser{r: io.LimitReader(resp.Body, size), c: resp.Body}
 		}
 	}
-	// 全量请求（offset==0 && size<0）→ 读取时校验 sha256（内容寻址兜底）
+	// Full request (offset==0 && size<0) → verify sha256 during read (content-addressed fallback)
 	if offset == 0 && size < 0 {
 		return &verifyReadCloser{r: body, hash: hash}, nil
 	}
 	return body, nil
 }
 
-// Fetch 整体获取（CapFile 模板或防御性实现）。
+// Fetch full fetch (CapFile template or defensive implementation).
 func (s *URLSource) Fetch(ctx context.Context, hash string) ([]byte, error) {
 	if err := validHash(hash); err != nil {
 		return nil, err
@@ -161,7 +165,7 @@ func (s *URLSource) Fetch(ctx context.Context, hash string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 内容寻址兜底：整体获取必须校验 sha256
+	// Content-addressed fallback: full fetch must verify sha256
 	sum := sha256.Sum256(data)
 	if hex.EncodeToString(sum[:]) != hash {
 		return nil, fmt.Errorf("url: content hash mismatch for %s", hash)
@@ -169,14 +173,15 @@ func (s *URLSource) Fetch(ctx context.Context, hash string) ([]byte, error) {
 	return data, nil
 }
 
-// Info URL 源不做元数据查询。
+// Info URL source does not do metadata queries.
 func (s *URLSource) Info(ctx context.Context, hash string) (*FileMeta, error) {
 	return nil, nil
 }
 
-// verifyReadCloser 读取完成后校验 sha256（内容寻址兜底——URL 源内容可能
-// 被篡改，不校验会把错误内容当作寻址文件使用）。校验在 EOF 时执行：
-// 成功 → 返回 io.EOF；失败 → 返回 hash mismatch 错误（ReadAll 会拿到）。
+// verifyReadCloser verifies sha256 after reading completes (content-addressed fallback —
+// URL source content may be tampered with; without verification, corrupted content would
+// be treated as the addressed file). Verification runs at EOF: success → returns io.EOF;
+// failure → returns hash mismatch error (ReadAll will catch it).
 type verifyReadCloser struct {
 	r    io.ReadCloser
 	hash string

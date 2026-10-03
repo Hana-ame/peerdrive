@@ -9,16 +9,16 @@ import (
 	peerjs "github.com/Hana-ame/go-peerjs"
 )
 
-// nowPlus 写超时时间点。
+// nowPlus returns a write-deadline time point.
 func nowPlus(sec int) time.Time { return time.Now().Add(time.Duration(sec) * time.Second) }
 
-// Session 会话抽象：一条承载帧协议的通道。
-// 两种实现语义完全一致（同一 reqId 状态机 / 帧协议复用）：
-//   - *peerjs.Connection：WebRTC DataChannel（远端节点 / 浏览器经公共云信令直连）
-//   - *WSSession：本地 WebSocket（浏览器直连本节点，无打洞/信令开销）
+// Session is a session abstraction: a channel carrying the frame protocol.
+// The two implementations have identical semantics (same reqId state machine / frame-protocol reuse):
+//   - *peerjs.Connection: WebRTC DataChannel (remote node / browser connecting directly via public cloud signaling)
+//   - *WSSession: local WebSocket (browser connecting directly to this node, no NAT traversal/signaling overhead)
 //
-// 帧协议见 doc/REFACTOR.md 第 4 节：文本帧=控制头（JSON），二进制帧=数据块，
-// SendFrame 保证头+体原子连续。
+// See doc/REFACTOR.md Section 4 for the frame protocol: text frames = control headers (JSON), binary frames = data chunks;
+// SendFrame guarantees atomic consecutive header + body.
 type Session interface {
 	ID() string
 	SendJSON(v any) error
@@ -28,30 +28,30 @@ type Session interface {
 	Close()
 }
 
-// WSSession 把本地 WebSocket 适配为 Session（帧协议与 DataChannel 完全一致）。
-// 语义复用：浏览器端同一套 req/meta/data/done/err 帧，本地走 WS、远端走
-// WebRTC DataChannel——前端只需一套协议编解码。
+// WSSession adapts a local WebSocket to the Session interface (frame protocol identical to DataChannel).
+// Semantic reuse: the browser uses the same req/meta/data/done/err frames locally over WS and remotely over
+// WebRTC DataChannel — the frontend only needs one protocol codec.
 type WSSession struct {
 	id   string
 	conn *websocket.Conn
 
-	sendMu    sync.Mutex // gorilla 不允许并发写
+	sendMu    sync.Mutex // gorilla does not allow concurrent writes
 	onMessage func(peerjs.Frame)
 	onClose   func()
 	closeOnce sync.Once
 }
 
-// NewWSSession 包装已升级的 WebSocket 连接，并启动读循环与保活。
-// M5 修复：
-//   - SetReadLimit：之前无读限制，恶意/故障浏览器发超大帧无限占内存
-//   - ping/pong 保活：之前无 ReadDeadline，浏览器标签页死掉 → readLoop
-//     goroutine + 会话常驻，连接 map 永不清理，pending fetch 挂 5 分钟
+// NewWSSession wraps an already-upgraded WebSocket connection and starts the read loop and keep-alive.
+// M5 fixes:
+//   - SetReadLimit: previously no read limit; a malicious/faulty browser sending oversized frames would consume unbounded memory
+//   - ping/pong keep-alive: previously no ReadDeadline; a dead browser tab would leave the readLoop
+//     goroutine and session alive forever, the connection map would never clean up, and pending fetches would hang for 5 minutes
 func NewWSSession(id string, conn *websocket.Conn) *WSSession {
-	// 数据块 ≤64KB + JSON 控制头余量（两倍留余）
+	// Data chunks ≤64KB + JSON control header margin (2× headroom)
 	conn.SetReadLimit(3 * 64 * 1024)
 	conn.SetReadDeadline(nowPlus(90))
 	conn.SetPongHandler(func(string) error {
-		// 收到 pong 刷新读超时（浏览器对 ping 自动回 pong，协议层行为）
+		// Refresh the read deadline on pong (browsers auto-reply pong to ping; protocol-level behavior)
 		conn.SetReadDeadline(nowPlus(90))
 		return nil
 	})
@@ -61,9 +61,9 @@ func NewWSSession(id string, conn *websocket.Conn) *WSSession {
 	return s
 }
 
-// heartbeatLoop 周期性 ping 保活：死连接 90s 内无 pong → 读超时 →
-// ReadMessage 报错 → readLoop 退出 → Close 清理会话。ping 失败（连接已关）
-// 直接退出，无泄漏。
+// heartbeatLoop periodically pings to keep the connection alive: a dead connection with no pong within 90s → read timeout →
+// ReadMessage errors → readLoop exits → Close cleans up the session. If ping fails (connection already closed),
+// exit immediately with no leak.
 func (s *WSSession) heartbeatLoop() {
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
@@ -77,17 +77,17 @@ func (s *WSSession) heartbeatLoop() {
 	}
 }
 
-// ID 返回会话标识（本地会话为 "local"）。
+// ID returns the session identifier (local sessions are "local").
 func (s *WSSession) ID() string { return s.id }
 
-// IsLocal 本机 WS 会话（/ws/peer）视为"自己"（share.go 的 isSelfSession）。
+// IsLocal treats a local WS session (/ws/peer) as "self" (used by isSelfSession in share.go).
 //
-// 它承载的是本节点的管理通道（管理台/面板直连本节点），不是某个远端节点的
-// P2P 连接，因此 private 共享内容对它一律放行——运营者总得能取回自己的东西，
-// 而不必先把自己加进好友名单。
+// It carries this node's management channel (admin panel/dashboard connecting directly to this node), not a P2P connection to a remote node,
+// so private shared content is always allowed through it — the operator must always be able to retrieve their own stuff
+// without first adding themselves to the friends list.
 func (s *WSSession) IsLocal() bool { return true }
 
-// SendJSON 发送文本帧（JSON 控制头）。
+// SendJSON sends a text frame (JSON control header).
 func (s *WSSession) SendJSON(v any) error {
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
@@ -95,7 +95,7 @@ func (s *WSSession) SendJSON(v any) error {
 	return s.conn.WriteJSON(v)
 }
 
-// SendFrame 原子发送「JSON 头 + 二进制体」帧（同 DataChannel 约束）。
+// SendFrame atomically sends a "JSON header + binary body" frame (same constraint as DataChannel).
 func (s *WSSession) SendFrame(header any, body []byte) error {
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
@@ -110,21 +110,21 @@ func (s *WSSession) SendFrame(header any, body []byte) error {
 	return nil
 }
 
-// OnMessage 注册帧回调（文本/二进制帧区分与 DataChannel 一致）。
+// OnMessage registers a frame callback (text/binary frame distinction consistent with DataChannel).
 func (s *WSSession) OnMessage(f func(peerjs.Frame)) {
 	s.sendMu.Lock()
 	s.onMessage = f
 	s.sendMu.Unlock()
 }
 
-// OnClose 注册关闭回调。
+// OnClose registers a close callback.
 func (s *WSSession) OnClose(f func()) {
 	s.sendMu.Lock()
 	s.onClose = f
 	s.sendMu.Unlock()
 }
 
-// Close 关闭会话。
+// Close closes the session.
 func (s *WSSession) Close() {
 	s.closeOnce.Do(func() {
 		_ = s.conn.Close()
@@ -138,7 +138,7 @@ func (s *WSSession) Close() {
 	})
 }
 
-// readLoop 读取帧并分发（文本→IsText=true，二进制→IsText=false）。
+// readLoop reads frames and dispatches them (text → IsText=true, binary → IsText=false).
 func (s *WSSession) readLoop() {
 	defer s.Close()
 	for {

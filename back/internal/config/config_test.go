@@ -1,6 +1,6 @@
 package config
 
-// 注：本文件属于 legacy 代码（见 doc/archive/LEGACY.md，待删/待迁移）的测试，未逐一标注发现背景；「发现背景」规范对新代码生效。
+// Note: this file is the test for legacy code (see doc/archive/LEGACY.md, to be deleted/migrated); the "discovery background" was not annotated case by case. The "discovery background" convention applies to new code.
 
 import (
 	"os"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestLoad_Defaults(t *testing.T) {
-	// 确保测试的是默认值，不受外部环境变量影响
+	// Make sure we're testing the defaults, unaffected by external environment variables
 	os.Unsetenv("PEERDRIVE_BT_DHT_ENABLE")
 	os.Unsetenv("PEERDRIVE_STORAGE_ENABLE")
 	cfg := Load()
@@ -58,12 +58,14 @@ func TestGetEnvBool_ParsesFalseValues(t *testing.T) {
 	assert.Equal(t, false, getEnvBool("TEST_GET_ENV_BOOL_KEY", true))
 }
 
-// TestIsOriginAllowed 验证 CORS Origin 白名单匹配逻辑：精确匹配、通配符、
-// 子域名通配、空/星号放行、不匹配拒绝。
+// TestIsOriginAllowed verifies the CORS Origin allowlist matching logic: exact
+// match, wildcard, subdomain wildcard, empty/star passthrough, and mismatch
+// rejection.
 //
-// 发现背景：2026-09-05 CORS 问题修复——Cloudflare Pages 预览部署使用
-// 子域名（6f670b67.peerdrive.pages.dev），默认白名单只有精确的
-// peerdrive.pages.dev 匹配不上。补测试防止通配符逻辑回归。
+// Discovery background: 2026-09-05 CORS fix -- Cloudflare Pages preview
+// deployments use a subdomain (6f670b67.peerdrive.pages.dev), which the default
+// allowlist (exact peerdrive.pages.dev) doesn't match. Added tests to prevent
+// the wildcard logic from regressing.
 func TestIsOriginAllowed(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -71,30 +73,30 @@ func TestIsOriginAllowed(t *testing.T) {
 		origin   string
 		wantAllow bool
 	}{
-		// 星号放行一切
+		// star allows everything
 		{"star_allows_all", "*", "https://anything.example.com", true},
 		{"star_allows_all_2", "*", "http://evil.com", true},
-		// 空字符串放行一切（默认行为）
+		// empty string allows everything (default behavior)
 		{"empty_allows_all", "", "https://anything.com", true},
-		// 精确匹配
+		// exact match
 		{"exact_match", "https://a.com,https://b.com", "https://a.com", true},
 		{"exact_match_2", "https://a.com,https://b.com", "https://b.com", true},
 		{"exact_mismatch", "https://a.com,https://b.com", "https://c.com", false},
-		// 大小写不敏感
+		// case insensitive
 		{"case_insensitive", "https://A.COM", "https://a.com", true},
-		// 子域名通配 *.example.com
+		// subdomain wildcard *.example.com
 		{"subdomain_wildcard_match", "https://*.example.com", "https://sub.example.com", true},
 		{"subdomain_wildcard_match_deep", "https://*.example.com", "https://deep.sub.example.com", true},
 		{"subdomain_wildcard_no_match", "https://*.example.com", "https://example.com", false},
 		{"subdomain_wildcard_wrong_domain", "https://*.example.com", "https://evil.com", false},
-		// Cloudflare Pages 预览部署场景
+		// Cloudflare Pages preview deployment scenario
 		{"cf_pages_exact", "https://peerdrive.pages.dev", "https://peerdrive.pages.dev", true},
 		{"cf_pages_preview_not_matched", "https://peerdrive.pages.dev", "https://6f670b67.peerdrive.pages.dev", false},
 		{"cf_pages_preview_wildcard", "https://*.pages.dev,https://peerdrive.pages.dev", "https://6f670b67.peerdrive.pages.dev", true},
-		// 混合列表
+		// mixed list
 		{"mixed_list", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://*.pages.dev", "https://preview.pages.dev", true},
 		{"mixed_list_no_match", "http://localhost:5173,https://peerdrive.moonchan.xyz", "https://preview.pages.dev", false},
-		// 逗号分隔 + 空格容错
+		// comma separated + whitespace tolerance
 		{"whitespace_trim", "https://a.com, https://b.com", "https://b.com", true},
 	}
 

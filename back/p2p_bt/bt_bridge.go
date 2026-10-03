@@ -1,4 +1,4 @@
-// BTBridge 将 Peerdrive 文件系统与 BitTorrent DHT 桥接，支持文件的 announce 和 HTTP 获取。
+// BTBridge bridges the Peerdrive filesystem with BitTorrent DHT, supporting file announce and HTTP fetch.
 package p2p_bt
 
 import (
@@ -23,7 +23,7 @@ type BTBridge struct {
 	shared     map[string]struct{}
 }
 
-// NewBTBridge 使用给定的 DHT 服务和存储目录创建桥接实例。
+// NewBTBridge creates a bridge instance with the given DHT service and storage directory.
 func NewBTBridge(dhtSvc *BTDHTService, storageDir string) *BTBridge {
 	return &BTBridge{
 		DHT:        dhtSvc,
@@ -32,7 +32,7 @@ func NewBTBridge(dhtSvc *BTDHTService, storageDir string) *BTBridge {
 	}
 }
 
-// ShareFile 在 BitTorrent DHT 上 announce 指定的 64 字符十六进制哈希。
+// ShareFile announces a specified 64-character hex hash on the BitTorrent DHT.
 func (b *BTBridge) ShareFile(hash string) error {
 	defer LogDuration("BTBridge.ShareFile")()
 	LogDebug("bt-bridge: ShareFile hash=%s", hash)
@@ -53,7 +53,7 @@ func (b *BTBridge) ShareFile(hash string) error {
 	return nil
 }
 
-// FetchFile 在 BitTorrent DHT 上查找文件提供者并通过 HTTP 下载。
+// FetchFile finds file providers on the BitTorrent DHT and downloads via HTTP.
 func (b *BTBridge) FetchFile(ctx context.Context, hash string) ([]byte, error) {
 	defer LogDuration("BTBridge.FetchFile")()
 	LogDebug("bt-bridge: FetchFile hash=%s", hash)
@@ -114,7 +114,7 @@ func (b *BTBridge) FetchFile(ctx context.Context, hash string) ([]byte, error) {
 	return nil, err
 }
 
-// ListShared 返回当前所有已共享的哈希列表。
+// ListShared returns the current list of all shared hashes.
 func (b *BTBridge) ListShared() ([]string, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -125,12 +125,12 @@ func (b *BTBridge) ListShared() ([]string, error) {
 	return result, nil
 }
 
-// FilePath 返回给定哈希的完整存储路径。
+// FilePath returns the full storage path for a given hash.
 func (b *BTBridge) FilePath(hash string) string {
 	return filepath.Join(b.storageDir, hash[:2], hash)
 }
 
-// EnsureFileWritten 将数据写入标准的 peerdrive 存储布局。
+// EnsureFileWritten writes data to the standard peerdrive storage layout.
 func (b *BTBridge) EnsureFileWritten(hash string, data []byte) error {
 	relPath := hash[:2] + "/" + hash
 	fullPath := filepath.Join(b.storageDir, relPath)

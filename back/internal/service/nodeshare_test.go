@@ -1,11 +1,13 @@
 package service
 
-// 测试背景（doc/NETDISK.md M2 / ROADMAP 阶段 5「文件范围管理」）：
-// 共享范围是这个项目里唯一"对外发布内容清单"的入口，三件事必须钉死：
-//  ① 默认关（不显式开启就必须完全空）；
-//  ② 受限/私有合集一律不出现在共享清单（share 帧不带请求者身份，
-//     放出去等于把"仅限指定账号"的内容公开）；
-//  ③ 文件共享只认显式声明的目录前缀（防"配了个父目录结果整盘都共享"）。
+// Test background (doc/NETDISK.md M2 / ROADMAP phase 5 "file scope management"):
+// the sharing scope is this project's only entry point that "publishes the content listing
+// outward", and three things must be pinned down:
+//  1. off by default (without explicit opt-in it must be completely empty);
+//  2. restricted/private collections never appear in the shared listing (a share frame
+//     carries no requester identity, so letting them out publishes "accounts-only" content);
+//  3. file sharing honors only explicitly declared directory prefixes (guards against
+//     "configured a parent dir and ended up sharing the whole disk").
 
 import (
 	"path/filepath"
@@ -17,7 +19,7 @@ import (
 )
 
 func sha(hex string) string {
-	// 造合法 64hex 测试值（内容无所谓，只要格式合法）
+	// fabricate a legal 64hex test value (content doesn't matter, only the format)
 	out := ""
 	for len(out) < 64 {
 		out += hex
@@ -33,11 +35,12 @@ func testShareCfg(enable bool, colls, dirs string) *config.Config {
 	return cfg
 }
 
-// newShareWith 构造带假数据源的共享服务。
+// newShareWith builds a share service wired to fake data sources.
 func newShareWith(t *testing.T, cfg *config.Config, colls map[string]*model.AnonCollection, list []model.AnonCollectionSummary, files []transport.FileInfo) *NodeShare {
 	t.Helper()
-	// storageDir 传空 = 内存模式（不落盘）：单测只关心解析语义，落盘由
-	// TestNodeSharePersist* 系列单独覆盖。
+	// empty storageDir = in-memory mode (no disk writes): unit tests only care
+	// about resolution semantics; persistence is covered separately by the
+	// TestNodeSharePersist* series.
 	s := NewNodeShare(cfg, "")
 	s.SetAnonAccess(
 		func(h string) (*model.AnonCollection, error) {
@@ -58,9 +61,10 @@ type notFoundErr struct{}
 
 func (e *notFoundErr) Error() string { return "not found" }
 
-// TestNodeShareDisabledByDefault 默认关：不发配置就必须完全空。
-// 发现背景：默认全盘分享是隐私事故（用户目标里"别人的节点能看到我的
-// 文件链接"是双向的，得先由运营者决定共享什么）。
+// TestNodeShareDisabledByDefault off by default: without a config it must be completely empty.
+// Discovery background: default full-disk sharing is a privacy incident (the user goal
+// "other nodes can see my file links" is bidirectional, so the operator must first decide
+// what to share).
 func TestNodeShareDisabledByDefault(t *testing.T) {
 	pub := sha("a")
 	cfg := testShareCfg(false, pub, "/tmp")
@@ -77,16 +81,17 @@ func TestNodeShareDisabledByDefault(t *testing.T) {
 	}
 }
 
-// TestNodeShareExplicitPublicCollection 显式声明的 public 合集进共享清单，含条目。
-// 发现背景：用户要「打包好的 collection」出现在对方的文件链接列表里，
-// 因此 entries（path+hash）必须一起下发，否则对方只能看到合集名点不进去。
+// TestNodeShareExplicitPublicCollection an explicitly declared public collection enters the shared listing, including its entries.
+// Discovery background: users want their "packaged collection" to show up in the peer's
+// file link list, so entries (path+hash) must be sent along, otherwise the peer only sees
+// the collection name and cannot click in.
 func TestNodeShareExplicitPublicCollection(t *testing.T) {
 	hash := sha("1")
 	fileHash := sha("2")
 	cfg := testShareCfg(true, hash, "")
 	s := newShareWith(t, cfg, map[string]*model.AnonCollection{
 		hash: {
-			FriendlyName: "我的电影",
+			FriendlyName: "My Movies",
 			Visibility:   model.VisibilityPublic,
 			Tags:         []string{"movie"},
 			Entries: []model.AnonCollectionEntry{
@@ -100,7 +105,7 @@ func TestNodeShareExplicitPublicCollection(t *testing.T) {
 		t.Fatalf("collections = %d, want 1", len(snap.Collections))
 	}
 	c := snap.Collections[0]
-	if c.Hash != hash || c.Name != "我的电影" || c.Size != 1 {
+	if c.Hash != hash || c.Name != "My Movies" || c.Size != 1 {
 		t.Fatalf("collection meta wrong: %+v", c)
 	}
 	if len(c.Entries) != 1 || c.Entries[0].Path != "a.mp4" || c.Entries[0].Hash != fileHash || c.Entries[0].Mime != "video/mp4" {
@@ -111,10 +116,10 @@ func TestNodeShareExplicitPublicCollection(t *testing.T) {
 	}
 }
 
-// TestNodeShareSkipsNonPublicCollections 受限/私有合集必须被跳过。
-// 发现背景：share 帧没有请求者身份（ROADMAP 硬约束：第 7 阶段前不引入账号
-// 依赖），因此无法校验 AccessList——放出去等于把"仅限指定账号"的合集
-// 清单+文件 hash 泄给任何连上的对端。
+// TestNodeShareSkipsNonPublicCollections restricted/private collections must be skipped.
+// Discovery background: a share frame has no requester identity (ROADMAP hard constraint:
+// no account dependency before phase 7), so AccessList cannot be verified -- letting them
+// out means leaking the "accounts-only" collection listing + file hashes to any connected peer.
 func TestNodeShareSkipsNonPublicCollections(t *testing.T) {
 	restricted := sha("3")
 	private := sha("4")
@@ -130,12 +135,13 @@ func TestNodeShareSkipsNonPublicCollections(t *testing.T) {
 	}
 }
 
-// TestNodeShareAllTokenOnlyPublic 配置 "all" 时只带 public 合集。
-// 发现背景：运营者想"把公开的都共享出去"，且不希望以后新增 public 合集
-// 还要改配置；但 all 绝不能把受限/私有也捎带上。
+// TestNodeShareAllTokenOnlyPublic with "all" configured, only public collections are carried.
+// Discovery background: the operator wants "share everything public" and does not want to
+// edit the config every time a new public collection appears; but "all" must never drag
+// restricted/private ones along.
 func TestNodeShareAllTokenOnlyPublic(t *testing.T) {
 	pub, res, pri := sha("5"), sha("6"), sha("7")
-	// 空 visibility 视为 public（与 model.EffectiveVisibility 一致）
+	// empty visibility is treated as public (consistent with model.EffectiveVisibility)
 	legacy := sha("8")
 	cfg := testShareCfg(true, "all", "")
 	s := newShareWith(t, cfg, map[string]*model.AnonCollection{
@@ -161,9 +167,10 @@ func TestNodeShareAllTokenOnlyPublic(t *testing.T) {
 	}
 }
 
-// TestNodeShareIgnoresInvalidCollectionHash 配置里写错的 hash 被忽略。
-// 发现背景：写成名字/短 hash 会在共享清单里留一个"永远查不到的幽灵项"，
-// 前端点进去必然失败；宁可启动时告警并忽略。
+// TestNodeShareIgnoresInvalidCollectionHash a hash written wrong in config is ignored.
+// Discovery background: writing a name or a short hash leaves a "phantom entry that can
+// never be looked up" in the shared listing, and the frontend is guaranteed to fail on
+// click; better to warn at startup and ignore it.
 func TestNodeShareIgnoresInvalidCollectionHash(t *testing.T) {
 	cfg := testShareCfg(true, "not-a-hash,my-collection", "")
 	s := newShareWith(t, cfg, nil, nil, nil)
@@ -175,9 +182,10 @@ func TestNodeShareIgnoresInvalidCollectionHash(t *testing.T) {
 	}
 }
 
-// TestNodeShareDirPrefixFilter 文件共享按目录前缀过滤。
-// 发现背景：前缀匹配必须按路径分隔符边界判定——否则 /data/share2 会被
-// /data/share 的前缀命中（经典越界共享）。
+// TestNodeShareDirPrefixFilter file sharing filters by directory prefix.
+// Discovery background: prefix matching must be decided on path-separator boundaries --
+// otherwise /data/share2 would be matched by the prefix of /data/share (a classic
+// out-of-bounds share).
 func TestNodeShareDirPrefixFilter(t *testing.T) {
 	dir := t.TempDir()
 	inside := filepath.Join(dir, "inside.txt")
@@ -199,7 +207,7 @@ func TestNodeShareDirPrefixFilter(t *testing.T) {
 		t.Fatalf("files = %d, want 2 (inside+nested): %+v", len(snap.Files), snap.Files)
 	}
 	for _, f := range snap.Files {
-		// 只回 basename：不回本机绝对路径（对外最小信息原则）
+		// return only the basename: never the local absolute path (minimum outward information principle)
 		if f.Path != "inside.txt" && f.Path != "nested.txt" {
 			t.Fatalf("unexpected shared file path %q (must be basename)", f.Path)
 		}
@@ -212,9 +220,9 @@ func TestNodeShareDirPrefixFilter(t *testing.T) {
 	}
 }
 
-// TestNodeShareNoDirsMeansNoFiles 未配置目录时不共享任何文件（而不是共享全部）。
-// 发现背景：这是"默认关"在文件维度的体现——空 dirs 若被当成"无过滤"，
-// 等于 PEERDRIVE_SHARE_ENABLE=true 就泄露整个 file_index。
+// TestNodeShareNoDirsMeansNoFiles with no directories configured, no files are shared (not "share everything").
+// Discovery background: this is "off by default" on the file dimension -- if an empty dirs
+// were read as "no filter", then PEERDRIVE_SHARE_ENABLE=true alone would leak the entire file_index.
 func TestNodeShareNoDirsMeansNoFiles(t *testing.T) {
 	cfg := testShareCfg(true, "", "")
 	s := newShareWith(t, cfg, nil, nil, []transport.FileInfo{

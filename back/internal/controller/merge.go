@@ -1,12 +1,12 @@
-// 合并控制器 — 将源集合条目合并到本地集合。
-// 支持三种策略：
-//   "ours"   — 冲突时保留本地哈希
-//   "theirs" — 冲突时接受源哈希
-//   "manual" — 检测冲突后返回 409 + 冲突列表，前端解决后重试
-// 合并流程：读本地和源集合的全部条目 → 按 path 建立 map →
-//   检测冲突（同 path 不同 hash）→ 按策略合并 → 逐条 upsert 到本地。
-// 路由：
-//   POST /actions/merge — 合并源集合到本地集合
+// Merge controller — merges source collection entries into a local collection.
+// Supports three strategies:
+//   "ours"   — on conflict, keep local hash
+//   "theirs" — on conflict, accept source hash
+//   "manual" — detect conflicts, return 409 + conflict list, frontend resolves then retries
+// Merge flow: read all entries from local and source collections → build map by path →
+//   detect conflicts (same path, different hash) → merge by strategy → upsert into local one by one.
+// Routes:
+//   POST /actions/merge — merge source collection into local collection
 
 package controller
 
@@ -90,7 +90,7 @@ func MergeFromSource(c *gin.Context) {
 		sourceMap[e.Path] = e.BuildProviders()
 	}
 
-	// 提取主 hash 用于冲突检测
+	// Extract primary hash for conflict detection
 	primaryHash := func(providers []model.Provider) string {
 		for _, p := range providers {
 			if p.Type == "sha256" && p.Value != "" {

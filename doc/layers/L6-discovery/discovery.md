@@ -1,213 +1,215 @@
-# discovery —— 发现客户端（HTTP / MQTT）
+# discovery —— the discovery clients (HTTP / MQTT)
 
-> 一句话职责：节点「如何找到彼此」的客户端半区——`transport/http_discovery.go`
-> （自托管信令服务器的房间发现 API）与 `transport/mqtt_discovery.go`（公共
-> broker 的分片房间发现），只交换 peerId，实际传输仍走 PeerJS 云信令 +
-> WebRTC 直连。
+> One-line responsibility: the client half of "how nodes find each other" —— `transport/http_discovery.go`
+> (the room discovery API of the self-hosted signaling server) and `transport/mqtt_discovery.go` (sharded room discovery on a
+> public
+> broker); they only exchange peerIds, and actual transport still goes through PeerJS cloud signaling +
+> WebRTC direct connection.
 
-- 层归属：AOP ⑥ 发现切面（`doc/LAYERS.md` §1）——⑥ 的禁止项「传输业务数据
-  （只交换 peerId/连接信息）」在本模块严格执行
-- 位置：两个文件在 `internal/transport/` 包内（REFACTOR.md §3.6 迁入），被
-  `peerjs_service.go` 装配消费
-- 服务端半区（`signalserver`）见 `L6-discovery/signalserver.md`
+- Layer belonging: AOP ⑥ discovery aspect (`doc/LAYERS.md` §1) —— ⑥'s prohibition "transport business data
+  (only exchange peerId/connection information)" is strictly enforced in this module
+- Location: the two files live inside the `internal/transport/` package (migrated in REFACTOR.md §3.6), consumed by
+  `peerjs_service.go` assembly
+- The server half (`signalserver`) is in `L6-discovery/signalserver.md`
 
 ---
 
-## 职责
+## Responsibilities
 
-1. **HTTPDiscovery**：替代 MQTT 的优先发现方式——announce 本节点关注的集合
-   （`POST /discover/announce`，30s 心跳）+ 轮询查询在线节点
-   （`GET /discover/nodes?coll=`，10s 周期）→ `onPeer` 回调互联。
-2. **MQTTDiscovery**：公共 broker 分片房间发现——topic 按 collection hash
-   分片（`peerdrive/v1/{hash}/nodes`），节点只订阅自己关注的分片；announce
-   幂等去重 + 60s 心跳；paho 断线自动重连 + 重订阅。
-3. **装配决策**：`PEERDRIVE_DISCOVER_URL` 设置时优先 HTTP 发现，否则
-   `PEERDRIVE_MQTT_ENABLE` 时启用 MQTT（peerjs_service.go:197-210）。
-4. **去重与防御**：两种发现都对已上报 peer 去重（避免重复 onPeer）；对
-   payload 大小、peerId 长度、集合 hash 合法性做校验（M15）。
+1. **HTTPDiscovery**: the preferred discovery method replacing MQTT —— announce the collections this node
+   follows
+   (`POST /discover/announce`, 30s heartbeat) + poll for online nodes
+   (`GET /discover/nodes?coll=`, 10s period) → the `onPeer` callback for interconnection.
+2. **MQTTDiscovery**: public broker sharded room discovery —— topics are sharded by collection hash
+   (`peerdrive/v1/{hash}/nodes`), and a node only subscribes to the shards it follows; announce
+   is idempotently de-duplicated + a 60s heartbeat; paho auto-reconnect on disconnect + resubscribe.
+3. **Assembly decision**: when `PEERDRIVE_DISCOVER_URL` is set, HTTP discovery takes priority, otherwise
+   MQTT is enabled when `PEERDRIVE_MQTT_ENABLE` is set (peerjs_service.go:197-210).
+4. **Deduplication and defense**: both discovery kinds de-duplicate already-reported peers (avoiding duplicate onPeer); and validate
+   payload size, peerId length, and collection hash legality (M15).
 
-## 模块清单（每个文件：文件名 + 一句话职责 + 关键导出）
+## Module inventory (each file: filename + one-line responsibility + key exports)
 
-### `http_discovery.go` —— 自托管信令服务器的 HTTP 发现客户端
+### `http_discovery.go` —— the HTTP discovery client for the self-hosted signaling server
 
-| 关键导出 | 说明 |
+| Key exports | Description |
 |---|---|
-| `HTTPDiscovery` 结构体 | `baseURL` / `peerID` / `collections` / `onPeer` 回调 / `client`(10s 超时) / `seen`(去重表) / ctx |
-| `NewHTTPDiscovery(baseURL, peerID, collections, onPeer)` | 创建（自带 `context.WithCancel`） |
-| `Start()` / `Stop()` | 异步循环启停（cancel 退出） |
-| `loop()` | 先 announce 一次 → 10s poll（discover）+ 30s hb（announce）双 ticker |
-| `announce()` | `POST {baseURL}/discover/announce {peerId, collections}`；失败仅 debug |
-| `discover()` | 逐集合 `GET /discover/nodes?coll=` → 解码（**LimitReader 256KB**，M15）→ 过滤空/自身/超长 id → `seen` 去重 → `onPeer` |
+| The `HTTPDiscovery` struct | `baseURL` / `peerID` / `collections` / the `onPeer` callback / `client` (10s timeout) / `seen` (dedup table) / ctx |
+| `NewHTTPDiscovery(baseURL, peerID, collections, onPeer)` | Creation (with its own `context.WithCancel`) |
+| `Start()` / `Stop()` | Start/stop the async loop (cancel to exit) |
+| `loop()` | announce once first → dual tickers: 10s poll (discover) + 30s hb (announce) |
+| `announce()` | `POST {baseURL}/discover/announce {peerId, collections}`; a failure is only debug |
+| `discover()` | per-collection `GET /discover/nodes?coll=` → decode (**LimitReader 256KB**, M15) → filter empty/self/over-long ids → `seen` dedup → `onPeer` |
 
-### `mqtt_discovery.go` —— 公共 broker 分片房间发现客户端
+### `mqtt_discovery.go` —— the public broker sharded room discovery client
 
-| 关键导出 | 说明 |
+| Key exports | Description |
 |---|---|
-| `MQTTDiscovery` 结构体 | `broker` / `topicPrefix` / `clientID` / `onPeer` / `announceTick`(60s) / `announce`(幂等表) / ctx |
-| `NewMQTTDiscovery(broker, topicPrefix, clientID, onPeer)` | 创建；默认 broker `tcp://broker.emqx.io:1883`、prefix `peerdrive/v1`、clientID 时间戳后缀 |
-| `nodeTopic(hash)` | 分片 topic：`{prefix}/{hash}/nodes` |
-| `Start(collections)` | 连 broker（paho：CleanSession + AutoReconnect + ConnectRetry 5s）；`SetOnConnectHandler` 里**重订阅全部集合分片**（paho 不保留旧订阅） |
-| `onMessage` | 解析 `{peerId, ts}` → onPeer；**payload ≤64KB、peerId ≤128**（M15） |
-| `Announce(peerID, collections)` | 幂等 announce（同 peer+集合只发一次）+ 启动心跳循环 |
-| `loop()` | 60s ticker 重发全部已 announce 的 peer+集合（防 broker 清理 + 通知迟到节点） |
-| `Stop()` | cancel → 等 `done` → Disconnect |
+| The `MQTTDiscovery` struct | `broker` / `topicPrefix` / `clientID` / `onPeer` / `announceTick` (60s) / `announce` (idempotent table) / ctx |
+| `NewMQTTDiscovery(broker, topicPrefix, clientID, onPeer)` | Creation; default broker `tcp://broker.emqx.io:1883`, prefix `peerdrive/v1`, clientID with a timestamp suffix |
+| `nodeTopic(hash)` | The sharded topic: `{prefix}/{hash}/nodes` |
+| `Start(collections)` | Connect to the broker (paho: CleanSession + AutoReconnect + ConnectRetry 5s); in `SetOnConnectHandler`, **resubscribe to all collection shards** (paho does not retain old subscriptions) |
+| `onMessage` | Parse `{peerId, ts}` → onPeer; **payload ≤64KB, peerId ≤128** (M15) |
+| `Announce(peerID, collections)` | Idempotent announce (same peer+collection sent only once) + start the heartbeat loop |
+| `loop()` | A 60s ticker resends all announced peer+collections (guards against broker cleanup + notifies late-arriving nodes) |
+| `Stop()` | cancel → wait for `done` → Disconnect |
 
-### 装配点：`peerjs_service.go`
+### Assembly point: `peerjs_service.go`
 
-| 位置 | 行为 |
+| Location | Behavior |
 |---|---|
 | peerjs_service.go:198-202 | `DiscoverURL != ""` → `NewHTTPDiscovery(...)` + `Start()` |
-| peerjs_service.go:203-209 | 否则 `MQTTEnable` → `NewMQTTDiscovery(...)` + `Start(cols)` + `Announce(id, cols)` |
-| `onDiscoveredPeer` | 发现回调 → 已连接则跳过，否则 `connectLoop` 自动互联（去重由调用方保证） |
+| peerjs_service.go:203-209 | otherwise `MQTTEnable` → `NewMQTTDiscovery(...)` + `Start(cols)` + `Announce(id, cols)` |
+| `onDiscoveredPeer` | The discovery callback → skip if already connected, otherwise `connectLoop` auto-interconnects (deduplication is guaranteed by the caller) |
 
-## 关键机制
+## Key mechanisms
 
-### 1. 发现协议（HTTP）
+### 1. The discovery protocol (HTTP)
 
 ```
-节点上线 ──POST /discover/announce {peerId, collections}──▶ 服务器
-   │  30s 心跳续期（服务器端 90s 过期窗口）
-   ▼  10s 轮询
+node comes online ──POST /discover/announce {peerId, collections}──▶ server
+   │  30s heartbeat renewal (the server-side 90s expiry window)
+   ▼  10s polling
 GET /discover/nodes?coll={hash} ◀── {nodes:[{peerId,lastSeen}]}
-   │  过滤：空 id / 自己 / >128 字符；seen 去重
+   │  filter: empty id / itself / >128 chars; seen dedup
    ▼
-onPeer(peerID) → PeerJSService.connectLoop（WebRTC 直连）
+onPeer(peerID) → PeerJSService.connectLoop (WebRTC direct connection)
 ```
 
-announce 与信令连接解耦——即使 WS 信令闪断，HTTP 发现仍能维持在线状态。
-轮询/心跳各自独立 ticker，服务器端 TTL 比心跳间隔宽裕（90s vs 30s）容忍
-丢包。
+announce is decoupled from the signaling connection —— even if the WS signaling flaps, HTTP discovery still maintains the online status.
+Polling and heartbeat each use independent tickers, and the server-side TTL is more generous than the heartbeat interval (90s vs 30s) to tolerate
+packet loss.
 
-### 2. 发现协议（MQTT）
+### 2. The discovery protocol (MQTT)
 
 ```
 broker topic: peerdrive/v1/{collectionHash}/nodes
-节点 A ──Publish {peerId, ts}（announce，幂等）──▶ broker
-节点 B ◀─Subscribe（同分片）── onMessage → onPeer(A)
-60s 心跳：loop() 重发全部已 announce 键（幂等表只记键，重发无副作用）
-断线：paho SetAutoReconnect + SetOnConnectHandler 重订阅（paho 不保留旧订阅）
+node A ──Publish {peerId, ts} (announce, idempotent)──▶ broker
+node B ◀─Subscribe (same shard)── onMessage → onPeer(A)
+60s heartbeat: loop() resends all announced keys (the idempotent table only records keys, so resending is side-effect free)
+disconnect: paho SetAutoReconnect + SetOnConnectHandler resubscribe (paho does not retain old subscriptions)
 ```
 
-分片设计动机：公共 broker 无规模上限的前提是**订阅数与消息量随集合摊开**——
-全局单 topic 的 fan-out 是瓶颈，按集合 hash 分片后每片只服务关注该集合的
-节点（mqtt_discovery.go:17-23 注释）。
+The sharding design motivation: a public broker has no scale ceiling only if **subscription counts and message volume are spread across collections** ——
+the fan-out of a single global topic is the bottleneck; after sharding by collection hash, each shard only serves nodes
+following that collection (comment at mqtt_discovery.go:17-23).
 
-### 3. 优先级与互斥
+### 3. Priority and mutual exclusion
 
-`DiscoverURL` 优先于 `MQTTEnable`（if/else if 结构），且各自只装配一次
-（`s.httpDisc == nil` / `s.discovery == nil` 守卫，防止信令重连循环重复起
-发现组件）。
+`DiscoverURL` takes priority over `MQTTEnable` (an if/else if structure), and each is assembled only once
+(guards `s.httpDisc == nil` / `s.discovery == nil`, preventing the signaling reconnect loop from repeatedly starting
+the discovery component).
 
-### 4. HTTP 发现 vs MQTT 发现（选型对比）
+### 4. HTTP discovery vs MQTT discovery (a selection comparison)
 
-| 维度 | HTTPDiscovery | MQTTDiscovery |
+| Dimension | HTTPDiscovery | MQTTDiscovery |
 |---|---|---|
-| 服务端 | 自托管 signalserver（自己管，无第三方依赖） | 公共 broker（broker.emqx.io，免费但有外部依赖） |
-| 发现方式 | 10s 轮询查询（pull） | 订阅分片 topic 实时推送（push，迟到的节点靠心跳重发兜底） |
-| 时序窗口 | 服务器 90s 心跳过期 vs 客户端 30s 心跳 | 60s 心跳；无过期窗口（消息即时生效） |
-| 隐私面 | 集合 hash 只发给自己的服务器 | 集合 hash 上公共 broker，任何人可订阅观察 |
-| 配置 | `PEERDRIVE_DISCOVER_URL` | `PEERDRIVE_MQTT_ENABLE/BROKER/COLLECTIONS` |
+| Server | A self-hosted signalserver (you run it, no third-party dependency) | A public broker (broker.emqx.io, free but an external dependency) |
+| Discovery method | 10s polling query (pull) | Subscribed sharded topic real-time push (push; late-arriving nodes are backstopped by heartbeat resends) |
+| Timing window | server 90s heartbeat expiry vs client 30s heartbeat | 60s heartbeat; no expiry window (messages take effect immediately) |
+| Privacy surface | collection hashes go only to your own server | collection hashes go to the public broker, where anyone can subscribe and observe |
+| Configuration | `PEERDRIVE_DISCOVER_URL` | `PEERDRIVE_MQTT_ENABLE/BROKER/COLLECTIONS` |
 
-历史：MQTT 是首批发现实现（REFACTOR.md §3.4，2026-08-13，分片模式设计）；
-自托管信令落地后（§3.6）发现并入服务器（服务器天然知道所有在线节点），
-HTTP 方式成为优先选择——**公共云（0.peerjs.com + broker.emqx.io）零信任场景
-用 MQTT，自有服务器场景用 HTTP**。
+History: MQTT was the first discovery implementation (REFACTOR.md §3.4, 2026-08-13, sharded mode design);
+after the self-hosted signaling landed (§3.6), discovery merged into the server (which naturally knows all online nodes),
+and HTTP became the preferred choice —— **use MQTT in the public cloud (0.peerjs.com + broker.emqx.io) zero-trust scenario,
+and HTTP in the own-server scenario**.
 
-### 5. 集合来源：collectionHashes()
+### 5. Collection source: collectionHashes()
 
-两种发现都以 `s.collectionHashes()`（peerjs_service.go）为集合列表输入——
-节点配置 `PEERDRIVE_MQTT_COLLECTIONS`（逗号分隔 64hex）。hash 合法性过滤
-（`IsStrictSHA256`）发生在 subscribe/announce 之前：非法值不订阅、不发布，
-防 topic 注入（如 `../` 或超长字符串污染分片命名空间）。
+Both discovery kinds take `s.collectionHashes()` (peerjs_service.go) as their collection list input ——
+the node config `PEERDRIVE_MQTT_COLLECTIONS` (comma-separated 64hex). Hash legality filtering
+(`IsStrictSHA256`) happens before subscribe/announce: illegal values are not subscribed to and not published,
+preventing topic injection (such as `../` or an over-long string polluting the shard namespace).
 
-## 与其它模块的关系
+## Relationships with other modules
 
 ```
-transport/peerjs_service.go（装配/消费）
-    ├─► HTTPDiscovery ──► signalserver（/discover/*，服务端半区）
-    └─► MQTTDiscovery ──► 公共 broker（broker.emqx.io）
-test/integration/mqtt_test.go（公共 broker 集成，需外网+代理）
-test/integration/selfhosted_test.go（自托管 HTTP 发现全链路）
-internal/config/config.go（PEERDRIVE_DISCOVER_URL / PEERDRIVE_MQTT_* 配置）
+transport/peerjs_service.go (assembly/consumption)
+    ├─► HTTPDiscovery ──► signalserver (/discover/*, the server half)
+    └─► MQTTDiscovery ──► public broker (broker.emqx.io)
+test/integration/mqtt_test.go (public broker integration, requires outernet + proxy)
+test/integration/selfhosted_test.go (self-hosted HTTP discovery end-to-end)
+internal/config/config.go (PEERDRIVE_DISCOVER_URL / PEERDRIVE_MQTT_* configuration)
 ```
 
-- 两种发现产出同一个东西：`peerID` 字符串回调。上层（PeerJSService）不感知
-  发现方式，符合⑥「发现与传输解耦」的设计——换发现方式不动互联层。
-- 配置项（config.go:44-48,126-130）：`PEERDRIVE_MQTT_ENABLE`（默认 false）、
-  `PEERDRIVE_MQTT_BROKER`（默认 tcp://broker.emqx.io:1883）、
-  `PEERDRIVE_MQTT_TOPIC_PREFIX`（默认 peerdrive/v1）、
-  `PEERDRIVE_MQTT_COLLECTIONS`（逗号分隔）、`PEERDRIVE_DISCOVER_URL`（设置后
-  优先于 MQTT）。
-- 集合 hash 合法性过滤用 `hashutil.IsStrictSHA256`（严格小写 64 hex，M3 收层
-  时从 service 迁入 pkg 的传输层工具）——非法值不订阅/不 announce。
+- Both discovery kinds produce the same thing: a `peerID` string callback. The upper layer (PeerJSService) is unaware of
+  the discovery method, matching ⑥'s design of "decoupling discovery from transport" —— switching discovery methods does not touch the interconnection layer.
+- Configuration items (config.go:44-48,126-130): `PEERDRIVE_MQTT_ENABLE` (default false),
+  `PEERDRIVE_MQTT_BROKER` (default tcp://broker.emqx.io:1883),
+  `PEERDRIVE_MQTT_TOPIC_PREFIX` (default peerdrive/v1),
+  `PEERDRIVE_MQTT_COLLECTIONS` (comma-separated), `PEERDRIVE_DISCOVER_URL` (when set,
+  takes priority over MQTT).
+- Collection hash legality filtering uses `hashutil.IsStrictSHA256` (strict lowercase 64 hex, a transport-layer utility moved
+  from service into pkg during the M3 layer collapse) —— illegal values are not subscribed to / not announced.
 
-## 坑与设计决策
+## Pitfalls and design decisions
 
-| 编号 | 坑 | 修复 |
+| Number | Pitfall | Fix |
 |---|---|---|
-| M15 | 公共 broker / 被攻破的发现服务器可回任意 payload——异常大 JSON / 超长 id 打爆内存或污染互联状态 | HTTP：解码 `LimitReader(256KB)`；MQTT：payload ≤64KB、peerID ≤128；均过滤空 id/自身 id |
-| 幂等 | 重复 announce 会刷屏公共 broker | `announce map[string]bool` 幂等表：同 peer+集合只发一次上线 announce，心跳循环重发 |
-| 重订阅 | paho 断线重连不保留旧订阅 | `SetOnConnectHandler` 里重新 Subscribe 全部集合分片 |
-| 集成并行 | 公共信令/broker 上多组测试并行互相干扰（发现：默认并行时 ThreeNodes/MQTT 偶发失败） | 集成测试必须 `-p 1` 串行（REFACTOR.md §5.1） |
-| 优先级 | 两种发现同时开会双份 onPeer | `DiscoverURL` 优先（if/else if），且 `== nil` 守卫防重连循环重复装配 |
-| 无 announce 边界 | MQTT `Announce` 与 `Start` 分离——调用方需先 Start 后 Announce | 见装配点（Start 后立即 Announce） |
+| M15 | A public broker / a compromised discovery server can return an arbitrary payload —— an abnormally large JSON / over-long id would blow up memory or pollute the interconnection state | HTTP: decode with `LimitReader(256KB)`; MQTT: payload ≤64KB, peerID ≤128; both filter empty id/own id |
+| Idempotency | Repeated announces would flood the public broker | An `announce map[string]bool` idempotent table: same peer+collection sends the online announce only once; the heartbeat loop resends |
+| Resubscribe | paho's reconnect after disconnect does not retain old subscriptions | Re-Subscribe all collection shards inside `SetOnConnectHandler` |
+| Integration parallelism | Multiple test groups running in parallel on the public signaling/broker interfere with each other (discovery: with default parallelism, ThreeNodes/MQTT fail intermittently) | Integration tests must run serially with `-p 1` (REFACTOR.md §5.1) |
+| Priority | Enabling both discovery kinds would double the onPeer calls | `DiscoverURL` takes priority (if/else if), and `== nil` guards prevent the reconnect loop from assembling twice |
+| No announce boundary | MQTT's `Announce` and `Start` are separate —— the caller must Start first then Announce | See the assembly point (Announce immediately after Start) |
 
-## 测试
+## Tests
 
-### 单测
+### Unit tests
 
-本层两个客户端文件**无独立单测**（依赖真实 broker/服务器），单元级覆盖经
-`peerjs_service_test.go` 的间接路径与 signalserver 侧测试（
-`TestDiscover_AnnounceAndQuery`）；发现客户端的完整行为由集成测试兜底。
+The two client files in this layer have **no independent unit tests** (they depend on a real broker/server); unit-level coverage comes through
+the indirect path in `peerjs_service_test.go` and the signalserver-side tests
+(`TestDiscover_AnnounceAndQuery`); the complete behavior of the discovery clients is backstopped by integration tests.
 
-### 集成测试（`test/integration/`，`go test -tags "nosqlite integration" -p 1`）
+### Integration tests (`test/integration/`, `go test -tags "nosqlite integration" -p 1`)
 
-| 测试 | 发现背景 |
+| Test | Background of discovery |
 |---|---|
-| `TestMQTTDiscovery`（mqtt_test.go:16） | 功能测试——MQTT 分片房间互相发现（announce/订阅/onPeer 回调/心跳幂等），A 收到 B、B 收到 A，60s 心跳兜底时序 |
-| `TestMQTTDiscoverThenPeerJSInterop`（mqtt_test.go:59） | 功能测试——MQTT 发现 → PeerJS 互联 → 拉文件全链路：B 完全不知道 A 的 peer id，仅靠分片发现后经公共云信令直连拉取 |
-| `TestSelfHostedSignalAndDiscover`（selfhosted_test.go:37） | 功能需求——自托管后 PeerJS 信令与房间发现都归自己管：本地起信号服务器，B 仅靠 HTTP 发现互联 A 并拉文件（无任何外部服务） |
+| `TestMQTTDiscovery` (mqtt_test.go:16) | Functional test —— MQTT sharded rooms discover each other (announce/subscribe/onPeer callback/heartbeat idempotency), A receives B and B receives A, with the 60s heartbeat backstopping timing |
+| `TestMQTTDiscoverThenPeerJSInterop` (mqtt_test.go:59) | Functional test —— the full chain of MQTT discovery → PeerJS interconnection → file fetch: B knows nothing about A's peer id, and only via sharded discovery does it fetch directly over the public cloud signaling |
+| `TestSelfHostedSignalAndDiscover` (selfhosted_test.go:37) | Functional requirement —— after self-hosting, both PeerJS signaling and room discovery are under your own control: start a local signal server, and B interconnects with A and fetches a file via HTTP discovery only (no external service at all) |
 
-> 两个 MQTT 测试都需外网 + 代理（broker.emqx.io），自托管测试无外部依赖。
+> Both MQTT tests require outernet + proxy (broker.emqx.io); the self-hosted test has no external dependency.
 
-### 运行
+### Running
 
 ```bash
 cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1 -v
-# ⚠️ 必须 -p 1 串行（公共 broker 上并行互相干扰）
+# ⚠️ must run serially with -p 1 (parallel on a public broker interferes with itself)
 ```
 
-## 发现链路全貌（一次「节点互相找到」的完整旅程）
+## The whole discovery chain (the complete journey of "nodes finding each other")
 
-以自托管（HTTP 发现）为例：
+Taking self-hosting (HTTP discovery) as an example:
 
 ```
-[节点 A]                              [signalserver]                    [节点 B]
-   │ 1. 启动：PEERJS_HOST 指向自托管         │                              │
-   │ 2. WS 注册 {key,id,token} ───────────▶│ 回 OPEN，入 clients             │
-   │ 3. HTTPDiscovery.Start()               │                              │
-   │ 4. POST /discover/announce {peerId:A,  │ disc[coll][A]=now             │
-   │    collections:[...]} ───────────────▶│                              │
-   │ 5. 每 30s 心跳续期 ──────────────────▶│                              │
-   │                                       │ 6. B 同样 announce（同集合）    │
-   │ 7. 每 10s GET /discover/nodes?coll= ◀─│ {nodes:[{peerId:B,...}]}       │
-   │ 8. onPeer(B) → connectLoop(B)         │                              │
-   │ 9. PeerJS OFFER ──────────────────────▶│ ──转发──▶ B                  │
-   │ 10. WebRTC DataChannel 直连建立        │                              │
-   │ 11. 帧协议（req/meta/data/done）拉文件  │                              │
+[node A]                              [signalserver]                    [node B]
+   │ 1. start: PEERJS_HOST points at self-hosted        │                              │
+   │ 2. WS register {key,id,token} ─────────────────▶│ reply OPEN, added to clients             │
+   │ 3. HTTPDiscovery.Start()                         │                              │
+   │ 4. POST /discover/announce {peerId:A,            │ disc[coll][A]=now               │
+   │    collections:[...]} ────────────────────▶│                              │
+   │ 5. 30s heartbeat renewal ─────────────────▶│                              │
+   │                                       │ 6. B announces the same way (same collection)    │
+   │ 7. every 10s GET /discover/nodes?coll= ◀─│ {nodes:[{peerId:B,...}]}       │
+   │ 8. onPeer(B) → connectLoop(B)              │                              │
+   │ 9. PeerJS OFFER ───────────────────────▶│ ──forward──▶ B                  │
+   │ 10. WebRTC DataChannel direct connection established        │                              │
+   │ 11. frame protocol (req/meta/data/done) fetches a file  │                              │
 ```
 
-关键点：第 3-8 步只交换 peerId（⑥的禁区内不传业务数据）；第 9 步起的信令
-转发与第 11 步的数据面都不再依赖发现组件——**发现只负责「初见」，互联与
-传输由 peerjs 层全权接管**。
+Key point: steps 3-8 only exchange peerIds (inside ⑥'s forbidden zone, no business data is sent); from step 9 onward, signaling
+forwarding and the step 11 data plane no longer depend on the discovery component —— **discovery is only responsible for "the first meeting";
+interconnection and transport are taken over entirely by the peerjs layer**.
 
-## 文件清单
+## File inventory
 
-| 文件 | 职责 |
+| File | Responsibility |
 |---|---|
-| `back/internal/transport/http_discovery.go` | HTTP 发现客户端（announce + 10s 轮询 + 30s 心跳） |
-| `back/internal/transport/mqtt_discovery.go` | MQTT 分片发现客户端（幂等 announce + 60s 心跳 + 重订阅） |
-| `back/internal/transport/peerjs_service.go` | 装配点（DiscoverURL 优先，onDiscoveredPeer → connectLoop） |
-| `back/internal/config/config.go` | 发现配置（PEERDRIVE_DISCOVER_URL / PEERDRIVE_MQTT_*） |
-| `back/test/integration/mqtt_test.go` | MQTT 发现集成测试（2 个） |
-| `back/test/integration/selfhosted_test.go` | 自托管 HTTP 发现集成测试 |
+| `back/internal/transport/http_discovery.go` | The HTTP discovery client (announce + 10s polling + 30s heartbeat) |
+| `back/internal/transport/mqtt_discovery.go` | The MQTT sharded discovery client (idempotent announce + 60s heartbeat + resubscribe) |
+| `back/internal/transport/peerjs_service.go` | The assembly point (DiscoverURL first, onDiscoveredPeer → connectLoop) |
+| `back/internal/config/config.go` | The discovery configuration (PEERDRIVE_DISCOVER_URL / PEERDRIVE_MQTT_*) |
+| `back/test/integration/mqtt_test.go` | MQTT discovery integration tests (2) |
+| `back/test/integration/selfhosted_test.go` | Self-hosted HTTP discovery integration test |

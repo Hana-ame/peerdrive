@@ -1,106 +1,106 @@
-# Connection 模块（back/peerjs/connection.go）
+# Connection Module (back/peerjs/connection.go)
 
-> 一句话职责：一条 WebRTC DataConnection 的封装——SDP/ICE 经由信令，数据面为 DataChannel，提供「文本帧（JSON 头）+ 二进制帧（数据块）」的原子发送原语与写缓冲流控。
+> One-line responsibility: An encapsulation of a WebRTC DataConnection — SDP/ICE via signaling, data plane via DataChannel, providing atomic send primitives for "text frames (JSON headers) + binary frames (data blocks)" with write buffer flow control.
 
-## 职责
+## Responsibilities
 
-- 封装 `pion/webrtc` 的 PeerConnection + DataChannel，不绑定具体传输类型（依赖 `DataChannel` 接口，见 transport.md）
-- 提供三类发送原语：`Send`（纯二进制块）、`SendText`（JSON 头）、`SendFrame`（头+体原子帧）
-- 处理信令消息中与「本连接」相关的部分（ANSWER/CANDIDATE 设置远端 SDP、加 ICE 候选）
-- 生命周期：offerer 主动建链（`makeOffer`）或 answerer 被动应答（`handleOffer`），ICE 失败自动清理
-- **不包含任何业务帧协议知识**（verb 由上层 transport 包定义）——模块定位是传输原语
+- Wraps `pion/webrtc` PeerConnection + DataChannel, not bound to a specific transport type (depends on `DataChannel` interface, see transport.md)
+- Provides three send primitives: `Send` (pure binary blocks), `SendText` (JSON headers), `SendFrame` (atomic header+body frames)
+- Handles the parts of signaling messages related to "this connection" (ANSWER/CANDIDATE: set remote SDP, add ICE candidates)
+- Lifecycle: offerer actively establishes connection (`makeOffer`) or answerer passively responds (`handleOffer`), auto-cleanup on ICE failure
+- **Contains no business frame protocol knowledge** (verbs defined by upper transport package) — module positioning is transport primitives
 
-## 关键机制
+## Key Mechanisms
 
-### 1. 帧模型：文本帧 vs 二进制帧
+### 1. Frame Model: Text Frames vs Binary Frames
 
-`Send` 走 SCTP PPID 53（二进制），`SendText` 走 PPID 51（文本）。接收端（pion `OnMessage` → `Frame{IsText}`）据此区分「控制头 vs 数据块」——**协议依赖此区分**：
+`Send` uses SCTP PPID 53 (binary), `SendText` uses PPID 51 (text). Receiver (pion `OnMessage` → `Frame{IsText}`) uses this to distinguish "control headers vs data blocks" — **protocol depends on this distinction**:
 
-- 控制头必须用 `SendText`/`SendJSON`。若误用 `Send([]byte)` 发 JSON，对端会把头判为二进制数据块而丢弃/错配（connection.go:86-87 注释）。
+- Control headers must use `SendText`/`SendJSON`. If JSON is accidentally sent with `Send([]byte)`, the peer will judge the header as a binary data block and discard/misroute it (connection.go:86-87 comment).
 
-### 2. SendFrame 原子性 + 流控（connection.go:114-148）
+### 2. SendFrame Atomicity + Flow Control (connection.go:114-148)
 
 ```go
-c.sendMu.Lock()          // ① 串行化：头+体必须连续落线
-dc := c.dc               // ② 持 sendMu 期间读一次 dc 快照（M9，避免每次取锁）
-dc.SendText(headerJSON)  // ③ 头
-for dc.BufferedAmount() > 512KB {  // ④ 内置背压
-    select { <-lowWater / <-done / 30s 超时 }
+c.sendMu.Lock()          // ① Serialize: header+body must be written consecutively
+dc := c.dc               // ② Read dc snapshot once while holding sendMu (M9, avoid locking each time)
+dc.SendText(headerJSON)  // ③ Header
+for dc.BufferedAmount() > 512KB {  // ④ Built-in backpressure
+    select { <-lowWater / <-done / 30s timeout }
 }
-dc.Send(body)            // ⑤ 体
+dc.Send(body)            // ⑤ Body
 ```
 
-- **为什么原子**：上层状态机按「data 头 → 紧随二进制块」路由数据；多 goroutine 并发发送时若头体交织，数据块会挂到错误请求上。
-- **流控**：`defaultBufferLowThreshold = 512KB`。发送缓冲超阈值时等待低水位事件再发下一块，防止慢消费者撑爆 pion 缓冲。
-- **坑（注释原文）**：pion 的 `OnBufferedAmountLow` 是**替换式回调**——若每个并发发送方各自注册，只有最后一个注册者能收到事件，其余死等（曾导致并发 serveFile 卡死）。因此回调在 `attach` 时全局注册一次，等待统一走 `lowWater` 通道（容量 1 防堆积）。
-- 30s 流控超时（低危 1 修复）：之前只等 done/lowWater，慢消费者时依赖 ICE disconnected（~30s）兜底——现在显式封顶，超时返回错误由上层断开/重试。
+- **Why atomic**: Upper state machine routes data by "data header → subsequent binary block"; if header and body interleave during multi-goroutine concurrent sending, data blocks attach to the wrong request.
+- **Flow control**: `defaultBufferLowThreshold = 512KB`. When send buffer exceeds threshold, wait for low-water event before sending next block, preventing slow consumers from blowing up pion's buffer.
+- **Pitfall (original comment)**: pion's `OnBufferedAmountLow` is a **replacement callback** — if each concurrent sender registers its own, only the last registrant receives events, others deadlock (caused concurrent serveFile hangs). Therefore the callback is globally registered once during `attach`, waiting uniformly through the `lowWater` channel (capacity 1 to prevent backlog).
+- 30s flow control timeout (low-severity 1 fix): Previously only waited for done/lowWater, relying on ICE disconnected (~30s) as fallback for slow consumers — now explicitly capped, timeout returns error for upper layer to disconnect/retry.
 
-### 3. M9：dc 字段的数据竞争防护
+### 3. M9: dc Field Data Race Protection
 
-`dc`（DataChannel）在 `attach` 时**无锁写入**（pion 的 `OnDataChannel` 回调跑在 PC goroutine），而 `Open/Send/SendFrame/Close` 从任意 goroutine 并发读——-race 必现、极端下读到 nil 半初始化。`dcMu sync.RWMutex` 保护读写；attach 只调用一次，锁开销可忽略。
+`dc` (DataChannel) is written **without a lock** during `attach` (pion's `OnDataChannel` callback runs on PC goroutine), while `Open/Send/SendFrame/Close` read from any goroutine concurrently — -race always triggers, extreme cases read nil half-initialized. `dcMu sync.RWMutex` protects read/write; attach is only called once, lock overhead is negligible.
 
-### 4. 生命周期
+### 4. Lifecycle
 
-- **建链**（offerer，`newConnection` → `makeOffer`）：
-  1. `NewPeerConnection` + 注册 ICE 状态/候选/DataChannel 回调
+- **Establishment** (offerer, `newConnection` → `makeOffer`):
+  1. `NewPeerConnection` + register ICE state/candidate/DataChannel callbacks
   2. `CreateDataChannel(label, {Ordered:true})` → `attach`
-  3. `CreateOffer` → `SetLocalDescription` → 信令 `OFFER`（payload 含 connectionId/label/reliable/serialization=raw）
-- **应答**（answerer，`handleOffer`）：`SetRemoteDescription` → `CreateAnswer` → `SetLocalDescription` → 信令 `ANSWER`
-- **清理**：`pc.OnICEConnectionStateChange` 对 Closed/Failed/Disconnected 三态调用 `conn.Close()`（peerjs-client negotiator 同款行为，防泄漏）
-- **坑（connection.go:201-203）**：answerer 必须沿用 offerer 的 connectionId。曾因 answerer 新生成 ID 导致 ANSWER 在信令路由（按 connectionId）时找不到对端 conn，ICE 永远停在 checking。
-- **坑（connection.go:216-221）**：重复 OFFER 时旧连接必须走完整 `Close`（closeOnce 幂等）——只关 pc 会泄漏：旧连接残留在 conns map、done 永不关闭、onClose 不触发。且必须在 `p.mu` 解锁后调用（Close→forgetConnection 需要同一把锁，Go mutex 非重入）。
+  3. `CreateOffer` → `SetLocalDescription` → signaling `OFFER` (payload includes connectionId/label/reliable/serialization=raw)
+- **Response** (answerer, `handleOffer`): `SetRemoteDescription` → `CreateAnswer` → `SetLocalDescription` → signaling `ANSWER`
+- **Cleanup**: `pc.OnICEConnectionStateChange` calls `conn.Close()` for Closed/Failed/Disconnected states (same behavior as peerjs-client negotiator, preventing leaks)
+- **Pitfall (connection.go:201-203)**: Answerer must reuse offerer's connectionId. Previously answerer generated new ID, causing ANSWER not to find peer conn during signaling routing (by connectionId), ICE stuck at checking forever.
+- **Pitfall (connection.go:216-221)**: On duplicate OFFER, old connection must go through full `Close` (closeOnce idempotent) — only closing pc leaks: old connection remains in conns map, done never closes, onClose doesn't fire. Must be called after `p.mu` unlock (Close→forgetConnection needs the same lock, Go mutex is non-reentrant).
 
-### 5. 信令消息处理（handleMessage）
+### 5. Signaling Message Handling (handleMessage)
 
-只处理 ANSWER（SetRemoteDescription）与 CANDIDATE（AddICECandidate）。解析错误**静默忽略**：对端可能发来乱序/过期候选，失败仅意味本轮协商失败，由 ICE 状态回调负责最终清理。
+Only handles ANSWER (SetRemoteDescription) and CANDIDATE (AddICECandidate). Parse errors are **silently ignored**: peer may send out-of-order/expired candidates, failure only means this round of negotiation failed, ICE state callback handles final cleanup.
 
-### 6. attach 回调布局
+### 6. attach Callback Layout
 
-- `OnOpen` → 上层 `onOpen`（连接就绪通知）
-- `OnMessage` → 上层 `onMessage(Frame)`（数据面）
-- `OnClose` → `c.Close()`：**远端主动关 dc 时本端立即清理**（Close 幂等）。否则本端连接悬挂，依赖 ICE disconnected 兜底（秒级~分钟级，太慢）
-- `OnBufferedAmountLow` → `lowWater` 广播（全局一次）
+- `OnOpen` → upper `onOpen` (connection ready notification)
+- `OnMessage` → upper `onMessage(Frame)` (data plane)
+- `OnClose` → `c.Close()`: **When remote actively closes dc, this side cleans up immediately** (Close idempotent). Otherwise local connection hangs, relying on ICE disconnected as fallback (seconds to minutes, too slow)
+- `OnBufferedAmountLow` → `lowWater` broadcast (global once)
 
-### 7. ICE 候选转发（connection.go:234-244）
+### 7. ICE Candidate Forwarding (connection.go:234-244)
 
-pion 不会自动发送候选——必须手动 `OnICECandidate` + 信令 CANDIDATE 消息（`CandidatePayload{Type: ConnData, ConnectionID}`），否则双方停在 checking 永远连不上。
+Pion doesn't automatically send candidates — must manually `OnICECandidate` + signaling CANDIDATE message (`CandidatePayload{Type: ConnData, ConnectionID}`), otherwise both sides stay at checking forever and never connect.
 
-## 与其它模块的关系
+## Relationships with Other Modules
 
 ```
-Peer（信令路由/注册表）
-  └─ Connection（本模块）
-       ├─ 信令消息：ANSWER/CANDIDATE（入）/ OFFER/CANDIDATE（出，经 Peer.Send）
-       ├─ DataChannel 接口（transport.go）：pionChannel 适配
-       └─ 上层（internal/transport）：OnOpen/OnMessage/OnClose 回调 + SendFrame 原语
+Peer (signaling routing/registry)
+  └─ Connection (this module)
+        ├─ Signaling messages: ANSWER/CANDIDATE (in) / OFFER/CANDIDATE (out, via Peer.Send)
+        ├─ DataChannel interface (transport.go): pionChannel adapter
+        └─ Upper (internal/transport): OnOpen/OnMessage/OnClose callbacks + SendFrame primitive
 ```
 
-- `Peer.Connect` → `newConnection(offered=true)`；`Peer.handleOffer` → `newConnection(offered=false)`
-- 上层 transport 包通过 `DataChannel()` 获取底层通道做高级流控（水位流控只对 WebRTC 生效，见 sessions.md）
+- `Peer.Connect` → `newConnection(offered=true)`; `Peer.handleOffer` → `newConnection(offered=false)`
+- Upper transport package gets the underlying channel through `DataChannel()` for advanced flow control (water-level flow control only applies to WebRTC, see sessions.md)
 
-## 坑与设计决策
+## Pitfalls and Design Decisions
 
-| # | 坑 | 修复 | 来源 |
+| # | Pitfall | Fix | Source |
 |---|---|---|---|
-| M9 | attach 无锁写 dc vs 并发读，-race 必现 | dcMu 读写锁 | connection.go:30-34 |
-| — | OnBufferedAmountLow 替换式回调，并发注册互相覆盖 → 死等 | attach 时注册一次 + lowWater 通道 | connection.go:14-17, 276-283 |
-| — | answerer 新生成 connectionId → ICE 停在 checking | 沿用 offerer 的 connID | connection.go:201-203 |
-| — | 重复 OFFER 只关 pc → conns map 泄漏 + done 永不关 | 走完整 Close（closeOnce 幂等），且锁外调用 | connection.go:216-221 |
-| — | pion 不自动发 ICE 候选 | 手动 OnICECandidate + 信令转发 | connection.go:232-233 |
-| — | 慢消费者无限等流控 | 30s 超时封顶（低危 1） | connection.go:134-144 |
-| — | 远端关 dc 本端悬挂 | dc.OnClose → Close（幂等） | connection.go:295-297 |
-| — | 用二进制帧发 JSON 头 → 对端误判为数据块 | SendText 专用于控制头 | connection.go:86-87 |
-| 低危 7 | ID-TAKEN 静默忽略 → 同 ID 双节点失联无痕迹 | 记日志（peer.go 侧） | peer.go:183-194 |
+| M9 | attach writes dc without lock vs concurrent reads, -race always triggers | dcMu RWMutex | connection.go:30-34 |
+| — | OnBufferedAmountLow replacement callback, concurrent registrations overwrite each other → deadlock | Register once during attach + lowWater channel | connection.go:14-17, 276-283 |
+| — | Answerer generates new connectionId → ICE stuck at checking | Reuse offerer's connID | connection.go:201-203 |
+| — | Duplicate OFFER only closes pc → conns map leak + done never closes | Full Close (closeOnce idempotent), called outside lock | connection.go:216-221 |
+| — | Pion doesn't auto-send ICE candidates | Manual OnICECandidate + signaling forwarding | connection.go:232-233 |
+| — | Slow consumer waits indefinitely for flow control | 30s timeout cap (low-severity 1) | connection.go:134-144 |
+| — | Remote closes dc, local side hangs | dc.OnClose → Close (idempotent) | connection.go:295-297 |
+| — | Sending JSON header as binary frame → peer misjudges as data block | SendText exclusively for control headers | connection.go:86-87 |
+| Low-7 | ID-TAKEN silently ignored → same-ID dual nodes lose contact with no trace | Log output (peer.go side) | peer.go:183-194 |
 
-## 测试
+## Tests
 
-- `flowcontrol_test.go`（77 行）：SendFrame 流控行为验证（低水位等待/超时/关闭退出路径）
-- `peer_test.go`（450 行，含 `testutil_test.go` 174 行的内存信令桩）：连接建立/消息路由/生命周期——内存 signaller 使单测不依赖公网
+- `flowcontrol_test.go` (77 lines): SendFrame flow control behavior verification (low-water wait/timeout/closure exit paths)
+- `peer_test.go` (450 lines, including `testutil_test.go` 174 lines in-memory signaling stub): Connection establishment/message routing/lifecycle — in-memory signaller makes unit tests not depend on public network
 
-## 文件清单
+## File List
 
-| 文件 | 说明 |
+| File | Description |
 |---|---|
-| `connection.go` | 本模块（335 行） |
-| `flowcontrol_test.go` | 流控单测 |
-| `peer_test.go` + `testutil_test.go` | 连接级测试与测试工具（内存信令桩） |
+| `connection.go` | This module (335 lines) |
+| `flowcontrol_test.go` | Flow control unit tests |
+| `peer_test.go` + `testutil_test.go` | Connection-level tests and test utilities (in-memory signaling stub) |

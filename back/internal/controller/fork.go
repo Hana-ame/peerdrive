@@ -1,10 +1,10 @@
-// 复刻控制器 — 将源集合的所有条目复制到新集合（Fork）。
-// Fork 流程：查询源集合 → GetOrCreate 目标集合 → 逐条复制
-//   collection_entries 内容。
-// 路由：
-//   POST /actions/fork — 将源集合条目复制到新本地集合
-// 注：PullCollection 占位（no-op + 假任务）已于 2026-08-19 删除
-// （TaskService 同批删除，/tasks 与 /pull 路由一并移除）。
+// Fork controller — copies all entries from a source collection into a new collection (Fork).
+// Fork flow: query source collection → GetOrCreate target collection → copy entries one by one.
+//   from collection_entries.
+// Routes:
+//   POST /actions/fork — copy source collection entries to a new local collection
+// Note: PullCollection placeholder (no-op + fake task) was deleted on 2026-08-19
+// (TaskService deleted in the same batch; /tasks and /pull routes removed together).
 
 package controller
 
@@ -47,7 +47,7 @@ func ForkCollection(c *gin.Context) {
 		return
 	}
 
-	localID, err := collSvc.CreatePlain(req.Username, req.CollectionName)
+	localID, terr := collSvc.CreatePlain(req.Username, req.CollectionName)
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return

@@ -1,56 +1,56 @@
-// ws.js — 本地 WS 会话客户端（/ws/peer），前端全面迁移后所有后端通信的通道。
+// ws.js — local WS session client (/ws/peer), the channel for all backend communication after the full frontend migration.
 //
-// 为什么存在：帧协议（doc/REFACTOR.md §4）覆盖文件数据面（req/meta/data/done/err
-// 拉取 + create/upload/list/info/delete/sync 索引 + fwd-* 转发），但不覆盖
-// 集合/认证/BT/IPFS/任务等管理面。后端在本地 WS 会话上加 admin verb
-// （back/internal/transport/admin.go），内部转发到 gin engine 复用全部
-// HTTP controller——浏览器经此通道完成全部管理操作，不再直接 fetch HTTP。
+// Why this exists: the frame protocol (doc/REFACTOR.md §4) covers the file data plane (req/meta/data/done/err
+// pull + create/upload/list/info/delete/sync index + fwd-* forwarding), but not the
+// collection/auth/BT/IPFS/job management plane. The backend adds an admin verb on the local WS session
+// (back/internal/transport/admin.go), forwarding internally to the gin engine to reuse all
+// HTTP controllers — the browser completes all admin operations over this channel, no longer fetching HTTP directly.
 //
-// 帧协议（与后端约定，勿改）：
-//   管理请求: {"type":"admin","method":"GET|POST|DELETE","path":"/files?x=1",
-//             "body":<JSON 对象|null>,"token":"<可选>","reqId":"<uuid>"}
+// Frame protocol (agreed with the backend, do not change):
+//   Admin request: {"type":"admin","method":"GET|POST|DELETE","path":"/files?x=1",
+//             "body":<JSON object|null>,"token":"<optional>","reqId":"<uuid>"}
 //             {"type":"admin",...,"binary":true,"filename":"a.bin","size":N,"reqId"}
-//               → 声明后紧跟二进制帧（数据块），收齐后 multipart 转发 /files/upload
-//   管理响应: {"type":"admin-resp","status":200,"body":<原始 JSON>,"reqId"}
-//             {"type":"admin-bin","status":200,"size":N,"reqId"} + 二进制帧（文件流）
+//               → followed immediately by a binary frame (data chunk); once collected, forward as multipart to /files/upload
+//   Admin response: {"type":"admin-resp","status":200,"body":<raw JSON>,"reqId"}
+//             {"type":"admin-bin","status":200,"size":N,"reqId"} + binary frame (file stream)
 //             {"type":"err","msg":"...","reqId"}
-//   文件下载（走 req verb，与 DataChannel 同一套）:
+//   File download (goes through the req verb, same set as DataChannel):
 //             {"type":"req","hash":"<64hex>","offset":0,"size":-1,"reqId"}
-//             ← {"type":"meta",...} {"type":"data","size":N,"reqId"}+二进制块 ...
+//             ← {"type":"meta",...} {"type":"data","size":N,"reqId"}+binary chunk ...
 //               {"type":"done",...} / {"type":"err","msg","reqId"}
 //
-// 关键约束（协议正确性依赖，勿破坏）：
-//   1. data/admin-bin 头与二进制块原子连续（后端 SendFrame 保证）——前端
-//      「最近二进制声明头」单槽路由（binaryExpect），与后端连接级 expect
-//      状态机语义一致：一个二进制帧必属于最近的 data/admin-bin 头
-//   2. reqId 路由：管理响应/下载响应按 reqId 配对；admin 响应 status>=400
-//      → reject Error(err.status/err.data)，与 api.js request() fetch 版行为
-//      一致（409 冲突清单等结构化错误体可用）
-//   3. 连接断开 → reject 全部 pending + 置空重连（下一请求前自动连接）
-//   4. 管理面只走本地 WS；peerjs/WebRTC 不实现管理 verb（防权限面漏洞，
-//      用户决策；后端 serveAdmin 按会话 ID 拒绝非本地连接）
+// Key constraints (protocol correctness depends on these, do not break):
+//   1. data/admin-bin headers and binary chunks are atomically contiguous (guaranteed by backend SendFrame) — the frontend
+//      uses a single-slot "most recent binary declaration header" router (binaryExpect), consistent with the backend's
+//      connection-level expect state machine semantics: a binary frame always belongs to the most recent data/admin-bin header
+//   2. reqId routing: admin responses / download responses are paired by reqId; admin response status>=400
+//      → reject Error(err.status/err.data), consistent with the api.js request() fetch version behavior
+//      (409 conflict lists and other structured error bodies are usable)
+//   3. Connection disconnect → reject all pending + clear and reconnect (auto-connect before the next request)
+//   4. The admin plane goes only through local WS; peerjs/WebRTC does not implement admin verbs (to prevent privilege-plane
+//      vulnerabilities, a user decision; the backend serveAdmin rejects non-local connections by session ID)
 
-// apiBase → ws url（http→ws / https→wss），与 api.js getApiBase() 同源。
+// apiBase → ws url (http→ws / https→wss), same source as api.js getApiBase().
 function wsUrl(base) {
   return (base.startsWith('https') ? 'wss://' : 'ws://') + base.replace(/^https?:\/\//, '')
 }
 
 let sock = null
 let reqSeq = 0
-const pending = new Map() // reqId → 请求状态（resolve/reject + 下载收集态）
+const pending = new Map() // reqId → request state (resolve/reject + download collection state)
 
-// BIN_CHUNK 上传二进制分块大小：与后端协议一致（uploadChunkSize / inbound
-// chunkSize 均 64KB，见 back/internal/transport/{file_index,inbound}.go）。
-// 发现背景：FileReader 回退路径（旧浏览器无 stream() API）引用未定义常量
-// → ReferenceError，上传直接失败（代码审阅 2026-08-18 发现；现代浏览器走
-// Streams API 分支所以线上未触发）。WS 读限 3*64KB 之上，64KB 块安全。
+// BIN_CHUNK upload binary chunk size: consistent with the backend protocol (uploadChunkSize / inbound
+// chunkSize are both 64KB, see back/internal/transport/{file_index,inbound}.go).
+// Discovery background: the FileReader fallback path (old browsers without the stream() API) referenced an undefined constant
+// → ReferenceError, causing uploads to fail outright (found during code review 2026-08-18; modern browsers take the
+// Streams API branch, so this wasn't triggered in production). The WS read limit is above 3*64KB, so 64KB chunks are safe.
 const BIN_CHUNK = 64 * 1024
 
-// binaryExpect 「最近二进制声明头」单槽：一个二进制帧必属于最近声明的
-// admin-bin 或 data 头（后端 SendFrame 原子连续保证，勿改）。
+// binaryExpect "most recent binary declaration header" single slot: a binary frame always belongs to the most recently declared
+// admin-bin or data header (guaranteed by backend SendFrame atomic contiguity, do not change).
 let binaryExpect = null
 
-// 与 api.js 同步 token（localStorage key 见 api.js AUTH_TOKEN_KEY）
+// Sync the token with api.js (see the localStorage key at api.js AUTH_TOKEN_KEY)
 function readToken() {
   const frag = localStorage.getItem('peerdrive_auth_token')
   if (frag) return frag
@@ -64,24 +64,26 @@ function getWsBase() {
   return localStorage.getItem('peerdrive_api_base') || 'https://wsl-3000.moonchan.xyz'
 }
 
-/* ── 连接状态、心跳与自动重连 ──
+/* ── Connection state, heartbeat and auto-reconnect ──
  *
- * 为什么补这三样（原来都没有）：
- *   1. 心跳：中间设备（NAT/反代/浏览器省电策略）会静默掐掉空闲连接，而 TCP
- *      不保证让你立刻知道——浏览器可能几分钟都不触发 onclose。用户看到的是
- *      "点了没反应"，其实是通道早就死了。定时发一条 admin /ping 既探活又保活。
- *   2. 死连接检测：光发心跳不够，还得看有没有回来过。超过 STALE_MS 没收到
- *      任何帧就主动 close()，走重连流程，而不是继续往黑洞里发请求。
- *   3. 自动重连（指数退避）：原来 onclose 只把 sock 置空，等下一次请求才重连。
- *      于是"节点重启了一下"会导致管理台整页卡死——没有任何请求在飞，就永远
- *      没人去触发重连。退避上限 30s：既不会在节点真挂了时打爆日志，又能在
- *      节点恢复后 30s 内自己回来。
+ * Why these three were added (none existed before):
+ *   1. Heartbeat: intermediate devices (NAT/proxy/browser power-saving policies) silently drop idle connections, and TCP
+ *      doesn't guarantee you'll know immediately — the browser might not fire onclose for several minutes. What the user
+ *      sees is "clicking does nothing," when really the channel died long ago. Sending an admin /ping on a timer both
+ *      probes and keeps the connection alive.
+ *   2. Dead-connection detection: just sending a heartbeat isn't enough, you also have to check whether anything came back.
+ *      If no frame is received within STALE_MS, proactively close() and go through the reconnect flow, rather than
+ *      keep sending requests into a black hole.
+ *   3. Auto-reconnect (exponential backoff): previously onclose only cleared sock and waited for the next request to reconnect.
+ *      So "the node restarted briefly" would freeze the entire admin console — no requests were in flight, so nobody
+ *      ever triggered a reconnect. Backoff cap of 30s: it won't flood the logs when the node is truly dead, and it
+ *      comes back on its own within 30s after the node recovers.
  *
- * 为什么只对本模块自己 new 出来的连接生效（_wsOwned）：
- *   单测注入的是 mock socket，它永远不会 onopen，也不该去连真实网络。
+ * Why this only applies to connections this module created itself (_wsOwned):
+ *   Unit tests inject a mock socket, which never fires onopen and shouldn't connect to a real network.
  */
-const HEARTBEAT_MS = 25000 // 心跳间隔
-const STALE_MS = 60000 // 超过这么久没收到任何帧 → 判定连接已死
+const HEARTBEAT_MS = 25000 // heartbeat interval
+const STALE_MS = 60000 // no frame received for this long → treat the connection as dead
 const RETRY_MIN_MS = 1000
 const RETRY_MAX_MS = 30000
 
@@ -90,8 +92,8 @@ let retryTimer = null
 let retryDelay = RETRY_MIN_MS
 let lastRecv = 0
 
-// 连接状态：idle / connecting / open / closed。UI 拿它显示"离线"，
-// 否则断线时用户只会看到按钮点了没反应，不知道是该等还是该刷新。
+// Connection state: idle / connecting / open / closed. The UI uses this to show "offline";
+// otherwise, on disconnect the user only sees buttons doing nothing on click, with no idea whether to wait or refresh.
 let status = 'idle'
 const statusListeners = new Set()
 
@@ -107,7 +109,7 @@ export function getStatus() {
   return status
 }
 
-// onStatus 订阅连接状态变化；立即回调一次当前状态，返回取消订阅函数。
+// onStatus subscribes to connection state changes; it immediately calls back once with the current state and returns an unsubscribe function.
 export function onStatus(cb) {
   statusListeners.add(cb)
   try { cb(status) } catch {}
@@ -122,18 +124,18 @@ function stopHeartbeat() {
 }
 
 function startHeartbeat() {
-  if (!sock || !sock._wsOwned) return // 测试注入的 mock 不探活
+  if (!sock || !sock._wsOwned) return // mocks injected by tests don't probe
   stopHeartbeat()
   lastRecv = Date.now()
   hbTimer = setInterval(() => {
     if (!sock || sock.readyState !== WebSocket.OPEN) return
     if (Date.now() - lastRecv > STALE_MS) {
-      // 发了心跳却一直没回来：触发 close → 走重连
+      // Sent heartbeats but none came back: trigger close → go through reconnect
       try { sock.close() } catch {}
       return
     }
-    // /ping 是最轻的管理端点（后端 controller/ping.go 返回 pong），
-    // 拿它当应用层 ping：既探活，也让中间设备看到这条连接是活的。
+    // /ping is the lightest admin endpoint (backend controller/ping.go returns pong);
+    // use it as an application-layer ping: it both probes and lets intermediate devices see the connection is alive.
     admin('GET', '/ping').catch(() => {})
   }, HEARTBEAT_MS)
 }
@@ -149,16 +151,16 @@ function scheduleReconnect() {
   retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS)
 }
 
-// connect 建立 WS 连接（幂等：已有连接直接返回；已初始化 handlers 不重复挂）。
-// 单连接复用：浏览器与本地节点只有一条会话，所有请求并发经 reqId 路由。
+// connect establishes the WS connection (idempotent: returns immediately if already connected; already-initialized handlers aren't reattached).
+// Single-connection reuse: the browser and the local node share one session, and all requests are routed concurrently by reqId.
 function connect() {
   if (!sock) {
     sock = new WebSocket(wsUrl(getWsBase()) + '/ws/peer')
-    // 自己创建的连接才需要心跳与自动重连（测试注入的 mock 不带这个标记）
+    // Only connections we created ourselves need heartbeat and auto-reconnect (test-injected mocks don't carry this flag)
     sock._wsOwned = true
     setStatus('connecting')
   }
-  // handlers 幂等挂载：mock/已有 sock（测试注入）也能走同一初始化路径
+  // Idempotent handler attachment: mocks/existing sockets (test-injected) can also go through the same init path
   if (sock._wsHandlers) return
   sock._wsHandlers = true
 
@@ -177,9 +179,9 @@ function connect() {
     }
   }
   sock.onclose = () => {
-    // 连接断开：reject 所有 pending（调用方按网络错误处理），sock 置空等重连。
-    // owned 必须在置空前取：只有自己创建的连接才排自动重连，测试注入的
-    // mock 断开后不该去连真实网络。
+    // Connection dropped: reject all pending (callers treat it as a network error), clear sock to wait for reconnect.
+    // owned must be captured before clearing: only connections we created ourselves schedule auto-reconnect; test-injected
+    // mocks shouldn't connect to a real network after being disconnected.
     const owned = !!sock._wsOwned
     stopHeartbeat()
     for (const [, p] of pending) p.reject(new Error('ws: connection closed'))
@@ -190,7 +192,7 @@ function connect() {
     if (owned) scheduleReconnect()
   }
   sock.onerror = () => {
-    // onerror 后浏览器一定会跟一个 onclose，重连逻辑统一放在那边，这里只收尾
+    // After onerror, the browser will always follow up with onclose; the reconnect logic lives uniformly there, here we just clean up
     try { sock.close() } catch {}
   }
 }
@@ -200,8 +202,8 @@ function nextReqId() {
   return 'w' + Date.now().toString(36) + '-' + reqSeq.toString(36)
 }
 
-// handleText 文本帧分发：admin 响应按 reqId 路由；req 拉取响应（meta/data 头/
-// done/err）路由到对应下载请求。
+// handleText text frame dispatch: admin responses are routed by reqId; req pull responses (meta/data headers/
+// done/err) are routed to the corresponding download request.
 function handleText(text) {
   let msg
   try {
@@ -227,33 +229,33 @@ function handleText(text) {
       return
     }
     case 'admin-bin': {
-      // 二进制文件流响应头：声明「下一二进制帧归本次管理下载」
+      // Binary file stream response header: declares "the next binary frame belongs to this admin download"
       const p = pending.get(msg.reqId)
       if (!p) return
       binaryExpect = { type: 'admin', reqId: msg.reqId, size: msg.size || 0, got: 0, chunks: [] }
       if (binaryExpect.size === 0) {
-        // 空文件/空响应没有后续二进制帧，必须立刻清 expect；
-        // 否则残留单槽会把下一次无关二进制帧误判给这个已完成请求。
+        // Empty file / empty response has no following binary frame; the expect must be cleared immediately;
+        // otherwise the leftover single slot would misattribute the next unrelated binary frame to this already-completed request.
         finishBinaryExpect(p, binaryExpect)
         binaryExpect = null
       }
       return
     }
     case 'data': {
-      // 下载数据块头：声明「下一二进制帧归本次下载，大小 size」
-      // （与服务端连接级 expect 语义一致；data 头+块原子连续）
+      // Download data chunk header: declares "the next binary frame belongs to this download, size size"
+      // (consistent with the server-side connection-level expect semantics; data header + chunk are atomically contiguous)
       const p = pending.get(msg.reqId)
       if (!p || (p.kind !== 'download' && p.kind !== 'stream')) return
       binaryExpect = { type: p.kind, reqId: msg.reqId, size: msg.size || 0, got: 0, chunks: [] }
       if (binaryExpect.size === 0) {
-        // 空块（罕见）：直接清期待，等下一帧
+        // Empty chunk (rare): clear the expectation immediately, wait for the next frame
         binaryExpect = null
       }
       return
     }
     case 'meta': {
-      // req 拉取响应头。download/stream 忽略（大小由 data 头 + done 保证）；
-      // stat 请求（offset=0 size=0，只探大小不发数据）取 total 即 resolve
+      // req pull response header. download/stream are ignored (size is guaranteed by the data header + done);
+      // stat requests (offset=0 size=0, only probing size, no data sent) take total and resolve
       const p = pending.get(msg.reqId)
       if (!p || p.kind !== 'stat') return
       pending.delete(msg.reqId)
@@ -264,11 +266,11 @@ function handleText(text) {
       const p = pending.get(msg.reqId)
       if (!p || (p.kind !== 'download' && p.kind !== 'stream')) return
       if (msg.type === 'done') {
-        // done 帧：传输完成，收集齐的数据已在上一个 data 头声明 size
+        // done frame: transfer complete, the collected data's size was declared by the previous data header
         pending.delete(msg.reqId)
         binaryExpect = null
         if (p.kind === 'stream') {
-          // 流式下载：所有块已 enqueue，关闭流
+          // Streaming download: all chunks are enqueued, close the stream
           p.controller.close()
         } else {
           p.resolve(assemble(p))
@@ -288,9 +290,9 @@ function handleText(text) {
   }
 }
 
-// handleBinary 二进制帧：归 binaryExpect（最近 data/admin-bin 头的归属）。
-// admin-bin：收齐 size 即 resolve（响应体单块）。
-// download：data 块收齐只清期待（等 done 帧才 resolve——完整性由 done 保证）。
+// handleBinary binary frame: belongs to binaryExpect (ownership of the most recent data/admin-bin header).
+// admin-bin: once size is collected, resolve immediately (the response body is a single chunk).
+// download: once data chunks are collected, only clear the expectation (wait for the done frame to resolve — completeness is guaranteed by done).
 function handleBinary(data) {
   if (!binaryExpect) return
   const e = binaryExpect
@@ -303,16 +305,16 @@ function handleBinary(data) {
     if (e.type === 'admin') {
       finishBinaryExpect(p, e)
     } else if (e.type === 'stream') {
-      // 流式下载：块收齐（一个二进制帧 = 一个块）即 enqueue，不缓存累计
+      // Streaming download: chunks collected (one binary frame = one chunk), enqueue immediately without caching the accumulation
       p.controller.enqueue(assemble(e))
     } else {
-      // download：块收齐，等待下一个 data 头或 done 帧
+      // download: chunks collected, wait for the next data header or the done frame
       p.chunks.push(...e.chunks)
     }
   }
 }
 
-// finishBinaryExpect 收齐二进制响应：组装 Uint8Array 并 resolve。
+// finishBinaryExpect finishes collecting a binary response: assembles a Uint8Array and resolves.
 function finishBinaryExpect(p, e) {
   const arr = new Uint8Array(e.got)
   let off = 0
@@ -324,7 +326,7 @@ function finishBinaryExpect(p, e) {
   p.resolve(arr)
 }
 
-// assemble 下载收集态 → Uint8Array。
+// assemble download collection state → Uint8Array.
 function assemble(p) {
   const arr = new Uint8Array(p.chunks.length ? p.chunks.reduce((n, c) => n + c.byteLength, 0) : 0)
   let off = 0
@@ -335,7 +337,7 @@ function assemble(p) {
   return arr
 }
 
-// admin 通用管理请求（JSON）→ 响应 JSON 对象。
+// admin generic admin request (JSON) → response JSON object.
 export function admin(method, path, body = null) {
   connect()
   if (!sock || sock.readyState !== WebSocket.OPEN) {
@@ -349,12 +351,12 @@ export function admin(method, path, body = null) {
   })
 }
 
-// upload 分片上传：admin binary 声明帧 + 连续二进制块（复用同一 WS 连接）。
-// field：multipart 字段名（默认 "file"）；path：上传端点（默认 /files/upload；
-// BT torrent 上传用 /bt/torrent + field "torrent"）。
-// readyState 守卫与 admin()/download() 一致：CONNECTING 下 sock.send 同步抛
-// InvalidStateError，executor 内 throw 虽会 reject 但 pending 条目泄漏到
-// onclose 才清（发现背景：代码审阅 2026-08-18，三入口守卫不齐）。
+// upload chunked upload: admin binary declaration frame + contiguous binary chunks (reusing the same WS connection).
+// field: multipart field name (default "file"); path: upload endpoint (default /files/upload;
+// BT torrent upload uses /bt/torrent + field "torrent").
+// The readyState guard is consistent with admin()/download(): sock.send throws synchronously with
+// InvalidStateError while CONNECTING; a throw inside the executor does reject, but the pending entry leaks until
+// onclose clears it (discovery background: code review 2026-08-18, three entry-point guards were inconsistent).
 export function upload(file, fileName, field = 'file', path = '/files/upload') {
   connect()
   if (!sock || sock.readyState !== WebSocket.OPEN) {
@@ -374,7 +376,7 @@ export function upload(file, fileName, field = 'file', path = '/files/upload') {
   })
 }
 
-// pumpBinary 流式发送文件二进制块（Streams API 优先，FileReader 回退）。
+// pumpBinary streams out file binary chunks (Streams API preferred, FileReader fallback).
 function pumpBinary(file, reqId) {
   const send = (buf) => {
     if (sock.readyState !== WebSocket.OPEN) throw new Error('ws: closed during upload')
@@ -402,7 +404,7 @@ function pumpBinary(file, reqId) {
     })()
     return
   }
-  // FileReader 回退：整体切片逐块发送
+  // FileReader fallback: slice the whole thing and send chunk by chunk
   const CH = BIN_CHUNK
   let off = 0
   const next = () => {
@@ -424,9 +426,9 @@ function pumpBinary(file, reqId) {
   next()
 }
 
-// download 经 req verb 拉取文件（sha256 内容寻址），返回 Uint8Array。
-// 服务端按 64KB 块发 data 头+二进制帧；前端按 data 头声明 size 收集。
-// 注意：全量内存组装，大文件用 downloadStream（边收边吐）或 downloadToFile。
+// download pulls a file via the req verb (sha256 content addressing), returning a Uint8Array.
+// The server sends data headers + binary frames in 64KB chunks; the frontend collects according to the size declared by the data header.
+// Note: full in-memory assembly; for large files use downloadStream (emit-as-you-receive) or downloadToFile.
 export function download(hash, offset = 0, size = -1) {
   connect()
   if (!sock || sock.readyState !== WebSocket.OPEN) {
@@ -440,13 +442,13 @@ export function download(hash, offset = 0, size = -1) {
   })
 }
 
-// downloadStream：流式下载（ReadableStream）。数据块边收边吐（每 64KB 块
-// enqueue 一次），全量数据不落内存；大文件保存/传输用（downloadToFile 的
-// FS Access API 路径、未来流水线消费）。服务端帧序列与 download 相同
-// （meta → data 头+块… → done），只差收集侧语义。
-// 消费者 cancel（如保存对话框被取消）→ 立刻清理 pending + binaryExpect，
-// 防止 pending 泄漏与迟到帧污染后续请求（与上传 abort 同源的泄漏防护，
-// 发现背景：代码审阅 2026-08-18）。
+// downloadStream: streaming download (ReadableStream). Data chunks are enqueued as they arrive (once per 64KB chunk);
+// the full data never sits in memory; used for large-file saves/transfer (the FS Access API path in downloadToFile,
+// future pipeline consumption). The server frame sequence is the same as download
+// (meta → data header+chunks… → done), differing only in collection-side semantics.
+// Consumer cancel (e.g. the save dialog is cancelled) → immediately clean up pending + binaryExpect,
+// preventing pending leaks and late frames contaminating subsequent requests (leak protection from the same source as
+// upload abort; discovery background: code review 2026-08-18).
 export function downloadStream(hash, offset = 0, size = -1) {
   connect()
   if (!sock || sock.readyState !== WebSocket.OPEN) {
@@ -459,7 +461,7 @@ export function downloadStream(hash, offset = 0, size = -1) {
         kind: 'stream',
         controller,
         resolve: () => {},
-        // stream 的 reject = 把错误灌进流（await reader.read() 抛错）
+        // stream reject = pump the error into the stream (await reader.read() throws)
         reject: (err) => controller.error(err),
       })
       sock.send(JSON.stringify({ type: 'req', hash, offset, size, reqId }))
@@ -472,10 +474,10 @@ export function downloadStream(hash, offset = 0, size = -1) {
   })
 }
 
-// stat 查询文件总大小：发 req 请求 0 字节（offset=0 size=0），服务端回
-// meta{total} 后不发数据直接 done（见 back inbound.go 的 size 语义）。
-// 下载前探大小用（如 getBlobUrl 的大文件预览阈值）。本地 WS 连接是
-// reqId 并发路由，与后续 download 互不干扰。
+// stat queries the total file size: sends a req request for 0 bytes (offset=0 size=0), the server replies
+// meta{total} then goes straight to done without sending data (see the size semantics in back inbound.go).
+// Used to probe size before download (e.g. getBlobUrl's large-file preview threshold). The local WS connection
+// routes concurrently by reqId, so it doesn't interfere with the subsequent download.
 export function stat(hash) {
   connect()
   if (!sock || sock.readyState !== WebSocket.OPEN) {
@@ -488,11 +490,11 @@ export function stat(hash) {
   })
 }
 
-// downloadToFile 下载并触发浏览器保存。优先 File System Access API
-// （showSaveFilePicker → createWritable，流式边收边写，全量不占内存）；
-// 不支持时回退 <a download>（全量内存 Blob，中小文件够用）。
-// 发现背景：代码审阅 2026-08-18——原实现 download() 全量组装内存，
-// 8GB 上传上限下大文件保存直接 OOM。
+// downloadToFile downloads and triggers a browser save. Prefers the File System Access API
+// (showSaveFilePicker → createWritable, streaming write-as-you-receive, never holding everything in memory);
+// when unsupported, falls back to <a download> (full in-memory Blob, fine for small-to-medium files).
+// Discovery background: code review 2026-08-18 — the original implementation download() assembled everything in memory,
+// which would OOM directly on large-file saves under the 8GB upload limit.
 export async function downloadToFile(hash, filename) {
   const name = filename || hash
   if (window.showSaveFilePicker) {
@@ -519,8 +521,8 @@ export async function downloadToFile(hash, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 5000)
 }
 
-// ws.js 专用测试钩子（vitest 用；生产不导出）
-// __test 钩子仅供单测：注入 mock socket / 强制重连 / 清理残留 pending
+// ws.js-specific test hooks (for vitest; not exported in production)
+// __test hooks are only for unit tests: inject a mock socket / force reconnect / clean up leftover pending
 export const __test = {
   connect,
   readToken,
@@ -529,8 +531,9 @@ export const __test = {
   handleBinary,
   pending,
   _setSock: (s) => { sock = s },
-  // _reset 必须连心跳/重连定时器一起清：单测之间若留着它们，前一个用例注入的
-  // mock 断开后会排一次真实重连（连到默认后端），表现为测试结束时报连接错误。
+  // _reset must also clear the heartbeat/reconnect timers: if they're left between unit tests, a mock injected by an
+  // earlier test, once disconnected, schedules a real reconnect (connecting to the default backend), surfacing as a
+  // connection error reported after the test ends.
   _reset: () => {
     stopHeartbeat()
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }

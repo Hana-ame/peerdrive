@@ -19,17 +19,17 @@ import (
 	"github.com/Hana-ame/go-peerserver"
 )
 
-// TestFileLifecycleEndToEnd 文件生命周期双节点闭环（自托管信令 + 静态互联）：
+// TestFileLifecycleEndToEnd File lifecycle dual-node closed loop (self-hosted signaling + static interconnect):
 //
-//	① A(WS)：create 登记本地文件 fileA
-//	② B：WebRTC 从 A 拉 fileA（内容一致）
-//	③ B(WS)：upload 分片上传 fileB
-//	④ A：WebRTC 从 B 拉 fileB（内容一致）
-//	⑤ 两侧 sync 分别返回各自 file_index（A=fileA，B=fileB）
+//	① A(WS): create registers local file fileA
+//	② B: WebRTC pulls fileA from A (content matches)
+//	③ B(WS): upload chunked upload of fileB
+//	④ A: WebRTC pulls fileB from B (content matches)
+//	⑤ Both sides sync return their respective file_index (A=fileA, B=fileB)
 //
-// 发现背景：功能验收——create/req/upload/download/sync 跨节点完整闭环。
+// Discovery background: functional acceptance -- create/req/upload/download/sync complete cross-node closed loop.
 func TestFileLifecycleEndToEnd(t *testing.T) {
-	// 自托管信令
+	// Self-hosted signaling
 	ss := signalserver.NewServer("testkey")
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/peerjs") {
@@ -53,7 +53,7 @@ func TestFileLifecycleEndToEnd(t *testing.T) {
 		cfg.PeerJSKey = "testkey"
 		cfg.BTDHTEnabled = false
 		cfg.PeerJSPeers = join(peers)
-		// H2：create 只允许 DownloadDir 根内文件；测试根 = storage
+		// H2: create only allows files within the DownloadDir root; test root = storage
 		cfg.DownloadDir = storage
 		svc := transport.NewPeerJSService(cfg, storage)
 		svc.Start()
@@ -61,7 +61,7 @@ func TestFileLifecycleEndToEnd(t *testing.T) {
 		return svc
 	}
 
-	// 每个节点挂自己的本地 WS 会话（文件 verb 入口）
+	// Each node gets its own local WS session (file verb entry point)
 	bindWS := func(svc *transport.PeerJSService) *wsVerbClient {
 		upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,50 +81,50 @@ func TestFileLifecycleEndToEnd(t *testing.T) {
 	wsA := bindWS(svcA)
 	wsB := bindWS(svcB)
 
-	// ① A create fileA（H2：create 只允许 DownloadDir 根内文件 → 源文件放 storageA）
+	// ① A create fileA (H2: create only allows files within the DownloadDir root -> source file goes in storageA)
 	fileA := []byte("file-A-e2e-content")
 	srcA := filepath.Join(storageA, "file-a.bin")
 	requireWrite(t, srcA, fileA)
 	created := wsA.call(map[string]any{"type": "create", "path": srcA, "reqId": "a1"})
 	if created["type"] != "created" {
-		t.Fatalf("A create 失败: %v", created)
+		t.Fatalf("A create failed: %v", created)
 	}
 	hashA := created["hash"].(string)
 
-	// ② B 从 A 拉 fileA（WebRTC）
+	// ② B pulls fileA from A (WebRTC)
 	waitConnections(t, svcB, map[string]bool{idA: true}, 60*time.Second)
 	data, err := svcB.FetchFromPeer(idA, hashA, 0, -1)
 	if err != nil {
-		t.Fatalf("B 从 A 拉取失败: %v", err)
+		t.Fatalf("B pull from A failed: %v", err)
 	}
 	if !bytes.Equal(data, fileA) {
-		t.Fatalf("B 拉取内容不一致: got %q", data)
+		t.Fatalf("B pulled content mismatch: got %q", data)
 	}
 
-	// ③ B upload fileB（分片上传）
+	// ③ B upload fileB (chunked upload)
 	fileB := make([]byte, 2*transport.UploadChunkSizeForTest()+7777)
 	for i := range fileB {
 		fileB[i] = byte(i * 31)
 	}
 	up := wsB.uploadStream("file-b.bin", fileB)
 	if up["type"] != "uploaded" {
-		t.Fatalf("B upload 失败: %v", up)
+		t.Fatalf("B upload failed: %v", up)
 	}
 	hashB := up["hash"].(string)
 
-	// ④ A 从 B 拉 fileB（WebRTC）
+	// ④ A pulls fileB from B (WebRTC)
 	waitConnections(t, svcA, map[string]bool{idB: true}, 60*time.Second)
 	data2, err := svcA.FetchFromPeer(idB, hashB, 0, -1)
 	if err != nil {
-		t.Fatalf("A 从 B 拉取失败: %v", err)
+		t.Fatalf("A pull from B failed: %v", err)
 	}
 	if !bytes.Equal(data2, fileB) {
-		t.Fatalf("A 拉取内容不一致: got %d bytes", len(data2))
+		t.Fatalf("A pulled content mismatch: got %d bytes", len(data2))
 	}
 
-	// ⑤ 两侧 sync 应包含各自产生的文件
-	// 注意：repository.DB 是进程级全局单例，测试内两节点共享内存 DB——
-	// 断言"包含"而非精确条数（真实部署每节点独立进程/DB，无此共享）。
+	// ⑤ Both sides sync should contain their respective files
+	// Note: repository.DB is a process-level global singleton; two nodes within the test share an in-memory DB --
+	// assert "contains" rather than exact count (in real deployments each node has its own process/DB, no such sharing).
 	syncA := wsA.call(map[string]any{"type": "sync", "seq": 0, "reqId": "a2"})
 	hasA := false
 	for _, f := range syncA["files"].([]any) {
@@ -133,7 +133,7 @@ func TestFileLifecycleEndToEnd(t *testing.T) {
 		}
 	}
 	if !hasA {
-		t.Fatalf("A sync 应包含 fileA: %v", syncA)
+		t.Fatalf("A sync should contain fileA: %v", syncA)
 	}
 	syncB := wsB.call(map[string]any{"type": "sync", "seq": 0, "reqId": "b2"})
 	hasB := false
@@ -143,12 +143,12 @@ func TestFileLifecycleEndToEnd(t *testing.T) {
 		}
 	}
 	if !hasB {
-		t.Fatalf("B sync 应包含 fileB: %v", syncB)
+		t.Fatalf("B sync should contain fileB: %v", syncB)
 	}
 }
 
-// TestFileLifecycleWS 单节点全 verb 闭环（create/info/download/upload/list/sync/delete）：
-// 发现背景：功能验收——本地文件索引完整生命周期。
+// TestFileLifecycleWS Single-node full verb closed loop (create/info/download/upload/list/sync/delete):
+// Discovery background: functional acceptance -- local file index complete lifecycle.
 func TestFileLifecycleWS(t *testing.T) {
 	storage := t.TempDir()
 	svc := newService(t, randID("it-fl"), storage, false, nil)
@@ -164,25 +164,25 @@ func TestFileLifecycleWS(t *testing.T) {
 	defer srv.Close()
 	c := newWSVerbClient(t, srv.URL)
 
-	// ① create（H2：源文件必须在 DownloadDir 根内 = storage）
+	// ① create (H2: source file must be within the DownloadDir root = storage)
 	src := filepath.Join(storage, "lifecycle.bin")
 	contentA := []byte("lifecycle-create-content")
 	requireWrite(t, src, contentA)
 	created := c.call(map[string]any{"type": "create", "path": src, "reqId": "c1"})
 	if created["type"] != "created" {
-		t.Fatalf("create 失败: %v", created)
+		t.Fatalf("create failed: %v", created)
 	}
 	hashA := created["hash"].(string)
 
 	// ② info
 	info := c.call(map[string]any{"type": "info", "hash": hashA, "reqId": "c2"})
 	if info["type"] != "info-resp" || info["name"] != "lifecycle.bin" {
-		t.Fatalf("info 失败: %v", info)
+		t.Fatalf("info failed: %v", info)
 	}
 
 	// ③ download
 	if got := c.download(hashA, contentA); !bytes.Equal(got, contentA) {
-		t.Fatalf("create 后下载不一致")
+		t.Fatalf("download after create mismatch")
 	}
 
 	// ④ upload
@@ -192,46 +192,46 @@ func TestFileLifecycleWS(t *testing.T) {
 	}
 	up := c.uploadStream("up.bin", contentB)
 	if up["type"] != "uploaded" {
-		t.Fatalf("upload 失败: %v", up)
+		t.Fatalf("upload failed: %v", up)
 	}
 	hashB := up["hash"].(string)
 	if sha256Hex(contentB) != hashB {
-		t.Fatalf("upload hash 不符")
+		t.Fatalf("upload hash mismatch")
 	}
 
-	// ⑤ download 回验
+	// ⑤ download verification
 	if got := c.download(hashB, contentB); !bytes.Equal(got, contentB) {
-		t.Fatalf("upload 后下载不一致")
+		t.Fatalf("download after upload mismatch")
 	}
 
-	// ⑥ list 两条
+	// ⑥ list two entries
 	list := c.call(map[string]any{"type": "list", "reqId": "c3"})
 	if n := len(list["files"].([]any)); n != 2 {
-		t.Fatalf("list 应有 2 条: %d", n)
+		t.Fatalf("list should have 2 entries: %d", n)
 	}
 
-	// ⑦ sync 全量两条 + 增量空
+	// ⑦ sync full two entries + incremental empty
 	sync := c.call(map[string]any{"type": "sync", "seq": 0, "reqId": "c4"})
 	if n := len(sync["files"].([]any)); n != 2 {
-		t.Fatalf("sync 应有 2 条: %d", n)
+		t.Fatalf("sync should have 2 entries: %d", n)
 	}
 	lastSeq := int64(sync["lastSeq"].(float64))
 	sync2 := c.call(map[string]any{"type": "sync", "seq": lastSeq, "reqId": "c5"})
 	if n := len(sync2["files"].([]any)); n != 0 {
-		t.Fatalf("增量 sync 应无变更: %v", sync2)
+		t.Fatalf("incremental sync should have no changes: %v", sync2)
 	}
 
-	// ⑧ delete → 增量 sync 出现 tombstone
+	// ⑧ delete -> incremental sync shows a tombstone
 	del := c.call(map[string]any{"type": "delete", "hash": hashA, "reqId": "c6"})
 	if del["type"] != "deleted" {
-		t.Fatalf("delete 失败: %v", del)
+		t.Fatalf("delete failed: %v", del)
 	}
 	sync3 := c.call(map[string]any{"type": "sync", "seq": lastSeq, "reqId": "c7"})
 	s3 := sync3["files"].([]any)
 	if len(s3) != 1 {
-		t.Fatalf("delete 后 sync 应有 1 条 tombstone: %d", len(s3))
+		t.Fatalf("after delete, sync should have 1 tombstone: %d", len(s3))
 	}
 	if first := s3[0].(map[string]any); first["delete"] != true {
-		t.Fatalf("tombstone 标记缺失: %v", first)
+		t.Fatalf("tombstone marker missing: %v", first)
 	}
 }

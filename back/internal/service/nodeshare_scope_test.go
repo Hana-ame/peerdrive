@@ -1,14 +1,17 @@
 package service
 
-// nodeshare_scope_test.go：运行时共享范围（doc/NETDISK.md M2.6）。
+// nodeshare_scope_test.go: runtime sharing scope (doc/NETDISK.md M2.6).
 //
-// 背景：共享范围原本只能靠环境变量在启动时定死，改一次要重启节点。改成运行时
-// 可勾选之后，最容易出事的三件事是：
-//  ① 重启后选择丢失（或者反过来：环境变量把运营者取消掉的共享项又播回来）；
-//  ② 校验放宽——HTTP 请求体里填个 `/` 就把整个盘共享出去；
-//  ③ 目录共享与单文件共享两条来源互相打架（勾了个文件，取消时因为它在
-//     共享目录里而勾不掉；或者清单列得出、对端拉不到）。
-// 下面的用例分别钉死这三类。
+// Background: the sharing scope used to be fixed at startup via environment
+// variables only; changing it once meant restarting the node. After making it
+// checkable at runtime, the three things most likely to go wrong are:
+//  1. the choice is lost after a restart (or the reverse: an env var resurrects a
+//     share item the operator had cancelled);
+//  2. relaxed validation -- putting `/` in the HTTP request body shares the whole disk;
+//  3. directory sharing and single-file sharing conflict (a file is checked but
+//     cannot be unchecked because it sits inside a shared directory; or the listing
+//     shows it but the peer cannot fetch it).
+// The cases below pin down these three classes respectively.
 
 import (
 	"fmt"
@@ -20,8 +23,8 @@ import (
 	"peerdrive/internal/transport"
 )
 
-// newScopeShare 构造一个只带文件索引假数据、落盘到 storageDir 的共享服务。
-// storageDir 传空即内存模式。
+// newScopeShare builds a share service with only fake file-index data, persisting to storageDir.
+// Pass an empty storageDir for in-memory mode.
 func newScopeShare(t *testing.T, storageDir string, enable bool, files []transport.FileInfo) *NodeShare {
 	t.Helper()
 	s := NewNodeShare(testShareCfg(enable, "", ""), storageDir)
@@ -29,22 +32,24 @@ func newScopeShare(t *testing.T, storageDir string, enable bool, files []transpo
 	return s
 }
 
-// TestNodeShareRuntimeChoiceBeatsEnvAfterRestart 运行时选择优先于环境变量。
+// TestNodeShareRuntimeChoiceBeatsEnvAfterRestart a runtime choice beats the env var.
 //
-// 发现背景：环境变量如果每次启动都覆盖落盘状态，运营者在管理台上取消掉的共享
-// 项会在重启后复活——"我明明取消了共享"是最难自查的一类反馈（他不会怀疑是
-// 配置文件又生效了）。环境变量只在**首次**（无落盘文件）时播种。
+// Discovery background: if env vars overwrote persisted state on every startup,
+// share items the operator had cancelled in the admin console would come back to
+// life after a restart -- "I clearly cancelled the share" is the hardest kind of
+// feedback to self-diagnose (he would not suspect the config file had taken
+// effect again). Env vars only seed on the **first** run (no persisted file).
 func TestNodeShareRuntimeChoiceBeatsEnvAfterRestart(t *testing.T) {
 	dir := t.TempDir()
 	h := sha("f1")
 	files := []transport.FileInfo{{Hash: h, Name: "a.txt", Path: filepath.Join(dir, "a.txt"), Size: 3}}
 
-	// 首次启动：配置说 enable=false
+	// first start: config says enable=false
 	s1 := newScopeShare(t, dir, false, files)
 	if s1.Scope().Enable {
 		t.Fatal("seed from config must keep enable=false")
 	}
-	// 运营者在管理台上开启共享并勾了一个文件
+	// the operator enables sharing in the admin console and checks a file
 	if _, err := s1.Update(ScopePatch{Enable: boolPtr(true)}); err != nil {
 		t.Fatalf("update enable: %v", err)
 	}
@@ -52,7 +57,7 @@ func TestNodeShareRuntimeChoiceBeatsEnvAfterRestart(t *testing.T) {
 		t.Fatalf("share file: %v", err)
 	}
 
-	// 重启：同一个配置（enable=false），必须以落盘状态为准
+	// restart: same config (enable=false), but the persisted state must win
 	s2 := newScopeShare(t, dir, false, files)
 	if !s2.Scope().Enable {
 		t.Fatal("runtime choice must survive restart (enable lost)")
@@ -65,11 +70,12 @@ func TestNodeShareRuntimeChoiceBeatsEnvAfterRestart(t *testing.T) {
 	}
 }
 
-// TestNodeShareUpdateRejectsVolumeRoot 卷根目录必须被拒（且不能改坏已有范围）。
+// TestNodeShareUpdateRejectsVolumeRoot the volume root must be rejected (and must not corrupt an existing scope).
 //
-// 为什么单测钉这条：值来自 HTTP 请求体，一次误填就是"共享整个盘"。
-// pathutil.Within 会把 `/etc/passwd` 判成"在根内"——判定没错，是配置意图错了，
-// 所以只能在入口拦。
+// Why a unit test pins this: the value comes from the HTTP request body, so one
+// typo means "share the whole disk". pathutil.Within calls `/etc/passwd` "inside
+// the root" -- the judgement is correct, the config intent is wrong, so this can
+// only be stopped at the entry point.
 func TestNodeShareUpdateRejectsVolumeRoot(t *testing.T) {
 	dir := t.TempDir()
 	s := newScopeShare(t, dir, true, nil)
@@ -82,7 +88,7 @@ func TestNodeShareUpdateRejectsVolumeRoot(t *testing.T) {
 	}
 }
 
-// TestNodeShareUpdateRejectsInvalidHash 非法 hash 整批拒绝（不写半份范围）。
+// TestNodeShareUpdateRejectsInvalidHash an invalid hash rejects the whole batch (no half-written scope).
 func TestNodeShareUpdateRejectsInvalidHash(t *testing.T) {
 	dir := t.TempDir()
 	s := newScopeShare(t, dir, true, nil)
@@ -95,10 +101,12 @@ func TestNodeShareUpdateRejectsInvalidHash(t *testing.T) {
 	}
 }
 
-// TestNodeShareSingleFileOutsideDirs 单文件勾选：不在任何共享目录里的文件也能共享。
+// TestNodeShareSingleFileOutsideDirs single-file check: a file in no shared directory can also be shared.
 //
-// 发现背景：目录粒度太粗——上传一个文件想立刻给出去，就得为它单独建一个共享
-// 目录（还得重启）。按 hash 勾选与目录共享取并集，互不干扰。
+// Discovery background: directory granularity is too coarse -- to hand out one
+// uploaded file immediately you had to create a dedicated shared directory for it
+// (plus a restart). Checking by hash and directory sharing take the union and do
+// not interfere with each other.
 func TestNodeShareSingleFileOutsideDirs(t *testing.T) {
 	base := t.TempDir()
 	shared := filepath.Join(base, "shared")
@@ -122,7 +130,7 @@ func TestNodeShareSingleFileOutsideDirs(t *testing.T) {
 	if len(snap.Files) != 2 {
 		t.Fatalf("after: files = %d, want 2 (dir + single pick): %+v", len(snap.Files), snap.Files)
 	}
-	// 取消勾选：目录带来的那份**勾不掉**（它属于目录共享，得去目录列表里改）
+	// uncheck: the part coming from the directory **cannot be unchecked** (it belongs to the directory share; edit it in the directory list)
 	if _, err := s.SetFilesShared([]string{h2}, false, ""); err != nil {
 		t.Fatalf("unshare file: %v", err)
 	}
@@ -131,10 +139,12 @@ func TestNodeShareSingleFileOutsideDirs(t *testing.T) {
 	}
 }
 
-// TestNodeShareCandidateFilesFlags 候选清单的 shared/by_dir 标记必须正确。
+// TestNodeShareCandidateFilesFlags the shared/by_dir flags on the candidate listing must be correct.
 //
-// 为什么不让前端自己算：目录匹配在 Windows 上有盘符大小写与分隔符混写的坑，
-// 前端再实现一遍迟早和后端不一致（勾选框显示错比共享错更难发现）。
+// Why not let the frontend compute it: directory matching on Windows has
+// drive-letter case and mixed-separator pitfalls, and re-implementing it in the
+// frontend will sooner or later disagree with the backend (a wrong checkbox is
+// harder to spot than a wrong share).
 func TestNodeShareCandidateFilesFlags(t *testing.T) {
 	base := t.TempDir()
 	shared := filepath.Join(base, "shared")
@@ -154,7 +164,7 @@ func TestNodeShareCandidateFilesFlags(t *testing.T) {
 	if !items[0].Shared || !items[0].ByDir {
 		t.Fatalf("file under shared dir must be shared+by_dir: %+v", items[0])
 	}
-	// 手动勾选目录外文件后，它进入候选并正确标记（未勾选前不作为候选，见上）。
+	// after manually checking a file outside the directory, it enters the candidates with the right flags (before checking it is not a candidate, see above).
 	if _, err := s.SetFilesShared([]string{h2}, true, ""); err != nil {
 		t.Fatalf("share file: %v", err)
 	}
@@ -174,10 +184,11 @@ func TestNodeShareCandidateFilesFlags(t *testing.T) {
 	}
 }
 
-// TestNodeShareUpdatePartialKeepsOthers 局部更新：没传的项保持原样。
+// TestNodeShareUpdatePartialKeepsOthers partial update: items not sent keep their values.
 //
-// 为什么不用"整体替换"：管理台一次只改一类东西，全量 PUT 会把"我只想开个
-// 开关"变成一次可能覆盖别人改动的全量写。
+// Why not "full replacement": the admin console changes one kind of thing at a
+// time, and a full PUT would turn "I only want to flip a switch" into a full
+// write that may clobber someone else's changes.
 func TestNodeShareUpdatePartialKeepsOthers(t *testing.T) {
 	dir := t.TempDir()
 	shared := filepath.Join(dir, "shared")
@@ -189,7 +200,7 @@ func TestNodeShareUpdatePartialKeepsOthers(t *testing.T) {
 	if _, err := s.SetFilesShared([]string{h}, true, ""); err != nil {
 		t.Fatalf("share file: %v", err)
 	}
-	// 只改 enable
+	// change only enable
 	if _, err := s.Update(ScopePatch{Enable: boolPtr(false)}); err != nil {
 		t.Fatalf("update enable: %v", err)
 	}
@@ -200,14 +211,14 @@ func TestNodeShareUpdatePartialKeepsOthers(t *testing.T) {
 	if len(sc.Dirs) != 1 || len(sc.Files) != 1 {
 		t.Fatalf("partial update must keep dirs/files: %+v", sc)
 	}
-	// 关掉共享 = 对外空清单（不是"不过滤"）
+	// sharing off = empty external listing (not "no filter")
 	if got := len(s.Snapshot().Files); got != 0 {
 		t.Fatalf("disabled snapshot files = %d, want 0", got)
 	}
 }
 
-// TestNodeShareDirHookFiresOncePerNewDir 新增目录回调：只通知新增的那部分。
-// 背景：回调是注册 file_index 可读根用的，漏一个就出现"清单列得出、拉不到"。
+// TestNodeShareDirHookFiresOncePerNewDir new-directory callback: notify only the newly added part.
+// Background: the callback registers readable roots for file_index; missing one yields "listed but not fetchable".
 func TestNodeShareDirHookFiresOncePerNewDir(t *testing.T) {
 	base := t.TempDir()
 	a := filepath.Join(base, "a")
@@ -222,7 +233,7 @@ func TestNodeShareDirHookFiresOncePerNewDir(t *testing.T) {
 	if len(got) != 1 || got[0] != a {
 		t.Fatalf("hook = %v, want [%s]", got, a)
 	}
-	// 追加 b：只通知 b（a 已经注册过）
+	// append b: notify only b (a is already registered)
 	if _, err := s.Update(ScopePatch{Dirs: &[]ShareItem{{ID: a}, {ID: b}}}); err != nil {
 		t.Fatalf("update dirs: %v", err)
 	}
@@ -231,12 +242,14 @@ func TestNodeShareDirHookFiresOncePerNewDir(t *testing.T) {
 	}
 }
 
-// TestNodeShareSelectedFileBeyondIndexPage 索引分页之外的勾选项仍然生效。
+// TestNodeShareSelectedFileBeyondIndexPage a checked item beyond the index page still takes effect.
 //
-// 发现背景：fileList 有 1000 条上限（防远端 list verb 的 DoS）。节点登记的文件
-// 超过 1000 条时，新上传的文件不在那一页里——只按页过滤的话，用户勾了它却既
-// 列不出来也共享不出去（"我勾了，但什么都没发生"）。勾选按 hash 单独查，不受
-// 分页影响。
+// Discovery background: fileList has a 1000-entry cap (to prevent a DoS on the
+// remote list verb). When the files registered by a node exceed 1000, a newly
+// uploaded file is not on that page -- filtering by page only means the user
+// checks it but it is neither listed nor shared ("I checked it, but nothing
+// happened"). A check is looked up separately by hash and is not affected by
+// pagination.
 func TestNodeShareSelectedFileBeyondIndexPage(t *testing.T) {
 	base := t.TempDir()
 	onPage := sha("aa")
@@ -257,7 +270,7 @@ func TestNodeShareSelectedFileBeyondIndexPage(t *testing.T) {
 	if len(snap.Files) != 1 || snap.Files[0].Hash != offPage {
 		t.Fatalf("snapshot = %+v, want only the selected off-page file", snap.Files)
 	}
-	// 候选清单里也要看得见它——否则用户勾完找不到地方取消
+	// it must also be visible in the candidate listing -- otherwise the user has nowhere to uncheck it after checking
 	var found bool
 	for _, it := range s.CandidateFiles() {
 		if it.Hash == offPage && it.Shared {
@@ -269,8 +282,8 @@ func TestNodeShareSelectedFileBeyondIndexPage(t *testing.T) {
 	}
 }
 
-// TestNodeShareCorruptStateFallsBackToConfig 落盘文件损坏不阻塞启动。
-// 与 node_directory 同一取向：坏文件保留（人工可查），按"没保存过"处理。
+// TestNodeShareCorruptStateFallsBackToConfig a corrupt persisted file does not block startup.
+// Same orientation as node_directory: keep the bad file (for manual inspection) and treat it as "never saved".
 func TestNodeShareCorruptStateFallsBackToConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testShareCfg(true, "", dir)

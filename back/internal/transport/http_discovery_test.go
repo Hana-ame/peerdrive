@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestHTTPDiscoveryAnnounceIncludesNodeTypeAndPeers 验证 announce 请求体包含
-// peerId/collections/peers/nodeType，供信令服务器 discovery/graph 使用。
+// TestHTTPDiscoveryAnnounceIncludesNodeTypeAndPeers verifies that the announce request body
+// carries peerId/collections/peers/nodeType, for the signaling server's discovery/graph.
 func TestHTTPDiscoveryAnnounceIncludesNodeTypeAndPeers(t *testing.T) {
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

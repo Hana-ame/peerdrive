@@ -1,7 +1,7 @@
 package source
 
-// ipfs_control.go：IPFSControl 实现——包装 IPFSProvider + repository pin。
-// 发现背景：Source 控制面设计（doc/source-control.md），IPFS pin/网关管理。
+// ipfs_control.go: IPFSControl implementation -- wraps IPFSProvider + repository pin.
+// Discovery background: Source control plane design (doc/source-control.md), IPFS pin/gateway management.
 
 import (
 	"context"
@@ -20,13 +20,13 @@ import (
 	"peerdrive/internal/repository"
 )
 
-// ipfsController 是 IPFSControl 的封装实现。
+// ipfsController is the wrapper implementation of IPFSControl.
 type ipfsController struct {
 	prov  *provider.IPFSProvider
-	store string // 存储目录（pin 缓存）
+	store string // storage directory (pin cache)
 }
 
-// NewIPFSControl 创建 IPFS 控制面实例（nil 后所有方法返回 ErrControlUnsupported）。
+// NewIPFSControl creates an IPFS control plane instance (when nil, all methods return ErrControlUnsupported).
 func NewIPFSControl(prov *provider.IPFSProvider, storageDir string) IPFSControl {
 	return &ipfsController{prov: prov, store: storageDir}
 }
@@ -43,7 +43,7 @@ func (c *ipfsController) PinCID(cid string) (*PinInfo, error) {
 	}
 	h := sha256.Sum256(data)
 	hash := hex.EncodeToString(h[:])
-	// 写缓存
+	// Write cache
 	relPath := filepath.Join(hash[:2], hash)
 	absPath := filepath.Join(c.store, relPath)
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
@@ -52,11 +52,11 @@ func (c *ipfsController) PinCID(cid string) (*PinInfo, error) {
 	if err := os.WriteFile(absPath, data, 0o644); err != nil {
 		return nil, err
 	}
-	// 登记 pin
+	// Register pin
 	if err := repository.InsertPin(cid, hash, cid, int64(len(data))); err != nil {
 		log.LogWarn("source/ipfs: insert pin %s: %v", cid, err)
 	}
-	// 登记 file_meta + provider
+	// Register file_meta + provider
 	if err := repository.InsertFileMeta(&model.FileMeta{
 		Hash:     hash,
 		Size:     int64(len(data)),

@@ -233,7 +233,7 @@ npm test           # Run Vitest test suite
 - **Dummy data**: When both anon and public return empty, shows 2 hardcoded demo collections (`demo-1` demo image set, `demo-2` demo document set)
 - **Grid layout**: Responsive 1-4 column grid (`grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4`)
 - Click card navigates to `/anon/collections/:hash` or `/:username/:collection_name`
-- **"+ 创建合集"** button navigates to `/anon/create`
+- **"+ Create Collection"** button navigates to `/anon/create`
 
 **Data Handling:**
 - Merges `anon` array (mapped with `_type: 'anon'`) and `pub.collections` or `pub.data` (mapped with `_type: 'public'`)
@@ -274,11 +274,11 @@ npm test           # Run Vitest test suite
 **UI Layout:**
 - **Split pane**: Left panel (file/collection source) | Resizable divider | Right panel (FileTree of entries + save/commit buttons)
 - Drag divider: mouse-down starts tracking, `mousemove`/`mouseup` handlers adjust `split` (20%-80% range)
-- Left panel has tabs: "本地文件" (with sort + type filter + directory browser) and "已有合集" (browse + load)
+- Left panel has tabs: "Local Files" (with sort + type filter + directory browser) and "Existing Collections" (browse + load)
 
 **Entry States:**
-- **Draft (new)**: No `savedHash` → button shows "未保存" badge, green "保存" button
-- **Modified**: Has `savedHash` and entries changed → "已修改" badge, blue "Commit" button appears
+- **Draft (new)**: No `savedHash` → button shows "Unsaved" badge, green "Save" button
+- **Modified**: Has `savedHash` and entries changed → "Modified" badge, blue "Commit" button appears
 - **Pristine**: Has `savedHash` and no changes → "Commit" button still shown
 
 **Drag Support:**
@@ -324,12 +324,12 @@ npm test           # Run Vitest test suite
 - **Paste support**: Automatically extracts hash from pasted text
 - **Breadcrumb navigation**: Click directory names to navigate, `›` separators
 - **Directory browser**: `useMemo` computes `dirs` and `files` for current `navPath`
-- **"💾 保存" button**: Creates a copy of the current collection with " (副本)" suffix
+- **"💾 Save" button**: Creates a copy of the current collection with " (Copy)" suffix
 - **Fork/Edit buttons**: Navigate to `AnonCreator` with state (`forkFrom` / `editFrom`)
 - File entries are clickable download links: `{API_BASE}/anon/collections/{hash}/{filepath}`
 
 **Known Issues:**
-- No loading skeleton — shows centered "加载中..." text
+- No loading skeleton — shows centered "Loading..." text
 - Hash extraction regex can match a hash embedded in a longer string (e.g., URL fragments)
 
 ---
@@ -361,12 +361,12 @@ npm test           # Run Vitest test suite
 2. **Tree view** (`viewMode === 'tree'`): Directory tree built from `provider_path` field, with cascade checkboxes
 
 **Features:**
-- **Category chips**: 全部, 图片, 视频, 音频, 文档, 压缩包 — with counts
-- **Sort buttons**: 时间, 名称, 大小, 类型
+- **Category chips**: All, Images, Videos, Audio, Documents, Archives — with counts
+- **Sort buttons**: Time, Name, Size, Type
 - **Cascade checkboxes**: In tree view, checking a directory selects/deselects all descendant files
 - **Browse modal**: File system browser for registering new files from server paths; supports directory navigation with breadcrumb
 - **Create collection from selection**: Selected files → navigate to AnonCreator with `draftFrom` state
-- **Per-file "合集" button**: Hover on a file row → quick-create a collection from single file
+- **Per-file "Collection" button**: Hover on a file row → quick-create a collection from single file
 
 **Checkbox Styling:**
 ```css

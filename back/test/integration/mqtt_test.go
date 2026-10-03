@@ -10,20 +10,20 @@ import (
 	"peerdrive/internal/transport"
 )
 
-// requireMQTTEnv 外网测试门控（第 6 项优化 2026-08-18）：MQTT 公共 broker
-// 测试需要外网+代理，默认集成测试已脱外网（自托管信令）——这里加
-// PEERDRIVE_MQTT_TEST=1 显式门控，避免无网环境全量跑挂。
+// requireMQTTEnv External network test gate (Optimization 2 of 6, 2026-08-18): MQTT public broker
+// tests require external network + proxy; default integration tests have already moved to self-hosted signaling
+// — this adds an explicit PEERDRIVE_MQTT_TEST=1 gate to avoid full test suite failures in offline environments.
 func requireMQTTEnv(t *testing.T) {
 	t.Helper()
 	if os.Getenv("PEERDRIVE_MQTT_TEST") != "1" {
-		t.Skip("MQTT 公共 broker 测试需 PEERDRIVE_MQTT_TEST=1（外网）")
+		t.Skip("MQTT public broker test requires PEERDRIVE_MQTT_TEST=1 (external network)")
 	}
 }
 
-// TestMQTTDiscovery 两个节点通过 MQTT 分片房间互相发现（无任何静态配置）。
-// 覆盖：announce 发布、分片 topic 订阅、onPeer 回调、心跳幂等。
+// TestMQTTDiscovery Two nodes discover each other via MQTT sharded rooms (no static configuration at all).
+// Covers: announce publishing, sharded topic subscription, onPeer callback, heartbeat idempotency.
 //
-// 发现背景：功能测试——MQTT 分片房间互相发现（announce/订阅/心跳兜底）
+// Discovery context: feature test — MQTT sharded room mutual discovery (announce/subscription/heartbeat fallback)
 func TestMQTTDiscovery(t *testing.T) {
 	requireMQTTEnv(t)
 	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -44,7 +44,7 @@ func TestMQTTDiscovery(t *testing.T) {
 	discA.Announce(idA, []string{hash})
 	discB.Announce(idB, []string{hash})
 
-	// A 应收到 B 的 announce，B 应收到 A 的
+	// A should receive B's announce, and B should receive A's
 	waitFor := func(ch chan string, want string, timeout time.Duration) {
 		t.Helper()
 		deadline := time.After(timeout)
@@ -55,7 +55,7 @@ func TestMQTTDiscovery(t *testing.T) {
 					return
 				}
 			case <-deadline:
-				t.Fatalf("未收到 %s 的 announce（MQTT 发现失败）", want)
+				t.Fatalf("Did not receive announce from %s (MQTT discovery failed)", want)
 			}
 		}
 	}
@@ -63,30 +63,30 @@ func TestMQTTDiscovery(t *testing.T) {
 	waitFor(gotB, idA, 60*time.Second)
 }
 
-// TestMQTTDiscoverThenPeerJSInterop MQTT 发现 → PeerJS 互联 → 拉文件：
-// B 完全不知道 A 的 peer id（无静态配置），仅通过 MQTT 分片发现后经
-// 公共云信令直连 A 拉取文件——覆盖发现与互联全链路。
+// TestMQTTDiscoverThenPeerJSInterop MQTT discovery → PeerJS interconnect → file pull:
+// B knows nothing about A's peer id (no static configuration), only through MQTT sharded discovery
+// then directly connects to A via public cloud signaling to pull files — covers the full chain of discovery and interconnect.
 //
-// 发现背景：功能测试——MQTT 发现 → PeerJS 互联 → 拉文件全链路
+// Discovery context: feature test — MQTT discovery → PeerJS interconnect → file pull full chain
 func TestMQTTDiscoverThenPeerJSInterop(t *testing.T) {
 	requireMQTTEnv(t)
 	storageA := t.TempDir()
 	content := []byte("mqtt-discovered-peerjs-transfer")
 	hash := writeTestFile(t, storageA, content)
 
-	// A：MQTT 开启，announce 自己的 peer id
+	// A: MQTT enabled, announce its own peer id
 	svcA := newService(t, randID("it-ma"), storageA, true, nil, hash)
-	// B：MQTT 开启，无 PEERS 配置——靠发现互联
+	// B: MQTT enabled, no PEERS config — relies on discovery to interconnect
 	svcB := newService(t, randID("it-mb"), t.TempDir(), true, nil, hash)
 
-	// 等 B 发现并连上 A
+	// Wait for B to discover and connect to A
 	waitConnections(t, svcB, map[string]bool{svcA.ID(): true}, 120*time.Second)
 
 	data, err := svcB.FetchFromPeer(svcA.ID(), hash, 0, -1)
 	if err != nil {
-		t.Fatalf("MQTT 发现后拉取失败: %v", err)
+		t.Fatalf("Fetch after MQTT discovery failed: %v", err)
 	}
 	if string(data) != string(content) {
-		t.Fatalf("内容不一致: got %q", data)
+		t.Fatalf("Content mismatch: got %q", data)
 	}
 }

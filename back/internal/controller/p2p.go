@@ -1,4 +1,4 @@
-// Package controller 提供 P2P 网络相关 HTTP 处理函数，包括节点信息、对端管理、BT DHT、双网络、端口转发等端点。
+// Package controller provides HTTP handlers for P2P network related endpoints, including node info, peer management, BT DHT, dual network, port forwarding, etc.
 package controller
 
 import (
@@ -33,15 +33,15 @@ var btSvc *p2p_bt.BTDHTService
 var btClient *p2p_bt.BTClient
 
 var pinSvc *service.PinService
-var forwardPeer *transport.PeerJSService // PeerJS 版端口转发（forward v2，见 transport/forward.go）
+var forwardPeer *transport.PeerJSService // PeerJS-based port forwarding (forward v2, see transport/forward.go)
 
-// InitPeerScanner 注入 PeerScanner 实例供 P2P 扫描状态查询使用。
+// InitPeerScanner injects PeerScanner instance for P2P scan status queries.
 
-// InitForwardController 注入 PeerJS 服务供端口转发端点使用（forward v2）。
-// 转发语义：本节点经 PeerJS DataChannel 把远端 peer 的本地端口暴露给自己——
-// create 端点登记本节点授权规则（key→端口白名单），connect 端点建立本地
-// loopback 监听并逐连接开隧道。legacy 的 libp2p ForwardService 已删除。
-// InitPinController 注入 PinService（M2 收层：pin 端点不再直调 repository）。
+// InitForwardController injects PeerJS service for port forwarding endpoints (forward v2).
+// Forwarding semantics: this node uses PeerJS DataChannel to expose the remote peer's local port to itself --
+// the create endpoint registers this node's authorization rule (key->port whitelist), the connect endpoint sets up
+// a local loopback listener and opens a tunnel per connection. The legacy libp2p ForwardService has been removed.
+// InitPinController injects PinService (M2 collection layer: pin endpoints no longer call repository directly).
 func InitPinController(svc *service.PinService) {
 	pinSvc = svc
 }
@@ -51,13 +51,13 @@ func InitForwardController(svc *transport.PeerJSService) {
 	forwardPeer = svc
 }
 
-// InitBTController 注入 BTDHTService 实例供 BitTorrent DHT 处理函数使用。
+// InitBTController injects BTDHTService instance for BitTorrent DHT handlers.
 func InitBTController(svc *p2p_bt.BTDHTService) {
 	log.LogDebug("ctrl-p2p: InitBTController")
 	btSvc = svc
 }
 
-// InitBTClient 注入 BTClient 实例供 BitTorrent 下载处理函数使用。
+// InitBTClient injects BTClient instance for BitTorrent download handlers.
 func InitBTClient(c *p2p_bt.BTClient) {
 	log.LogDebug("ctrl-p2p: InitBTClient")
 	btClient = c
@@ -65,7 +65,7 @@ func InitBTClient(c *p2p_bt.BTClient) {
 
 // --- BitTorrent DHT handlers ---
 
-// BTDHTStatus 处理 GET /bt/status，返回 BitTorrent DHT 节点状态。
+// BTDHTStatus handles GET /bt/status, returns BitTorrent DHT node status.
 func BTDHTStatus(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTDHTStatus")
 	if btSvc == nil || btSvc.Server == nil {
@@ -81,7 +81,7 @@ func BTDHTStatus(c *gin.Context) {
 	})
 }
 
-// BTAnnounce 处理 POST /bt/announce，在 BitTorrent DHT 上 announce 指定 hash。
+// BTAnnounce handles POST /bt/announce, announces the specified hash on BitTorrent DHT.
 func BTAnnounce(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTAnnounce")
 	if btSvc == nil || btSvc.Server == nil {
@@ -106,7 +106,7 @@ func BTAnnounce(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "announced on BT DHT"})
 }
 
-// BTFindProviders 处理 POST /bt/find，在 BitTorrent DHT 上查找持有指定 hash 的对端。
+// BTFindProviders handles POST /bt/find, finds peers holding the specified hash on BitTorrent DHT.
 func BTFindProviders(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTFindProviders")
 	if btSvc == nil || btSvc.Server == nil {
@@ -138,25 +138,25 @@ func BTFindProviders(c *gin.Context) {
 
 // --- Dual P2P (IPFS + BT DHT) handlers ---
 
-// DualAnnounce 处理 POST /p2p/dual/announce，同时在 IPFS DHT 和 BT DHT 上 announce。
+// DualAnnounce handles POST /p2p/dual/announce, announces on both IPFS DHT and BT DHT simultaneously.
 
-// DualFindProviders 处理 POST /p2p/dual/find，同时在 IPFS DHT 和 BT DHT 上查找 providers。
+// DualFindProviders handles POST /p2p/dual/find, searches providers on both IPFS DHT and BT DHT simultaneously.
 
-// GetPeersDetail 处理 GET /p2p/peers/detail，返回所有已跟踪对端的详细元数据。
+// GetPeersDetail handles GET /p2p/peers/detail, returns detailed metadata for all tracked peers.
 
-// GetPeerDetail 处理 GET /p2p/peers/detail/:peer_id，返回指定对端的详细元数据。
+// GetPeerDetail handles GET /p2p/peers/detail/:peer_id, returns detailed metadata for the specified peer.
 
-// GetP2PStats 处理 GET /p2p/stats，返回全局 P2P 统计信息（传输量、对端数等）。
+// GetP2PStats handles GET /p2p/stats, returns global P2P statistics (transfer volume, peer count, etc.).
 
-// GetConnections 处理 GET /p2p/connections，返回按方向统计的连接数和扫描器状态。
+// GetConnections handles GET /p2p/connections, returns connection counts by direction and scanner status.
 
-// GetTopology 处理 GET /p2p/topology，返回连接拓扑图。
+// GetTopology handles GET /p2p/topology, returns the connection topology graph.
 
-// GetConnectionQuality 处理 GET /p2p/quality，返回所有对端的连接质量指标。
+// GetConnectionQuality handles GET /p2p/quality, returns connection quality metrics for all peers.
 
 // --- BEP 44 (Arbitrary DHT Data Storage) ---
 
-// BEP44Put 处理 POST /bt/bep44/put，通过 BEP 44 将不可变数据存储到 BT DHT。
+// BEP44Put handles POST /bt/bep44/put, stores immutable data on BT DHT via BEP 44.
 func BEP44Put(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BEP44Put")
 	if btSvc == nil || btSvc.Server == nil {
@@ -207,7 +207,7 @@ func BEP44Put(c *gin.Context) {
 	})
 }
 
-// BEP44Get 处理 POST /bt/bep44/get，通过 BEP 44 从 BT DHT 读取不可变数据。
+// BEP44Get handles POST /bt/bep44/get, reads immutable data from BT DHT via BEP 44.
 func BEP44Get(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BEP44Get")
 	if btSvc == nil || btSvc.Server == nil {
@@ -249,7 +249,7 @@ func BEP44Get(c *gin.Context) {
 
 // --- BEP 51 (Infohash Indexing) ---
 
-// BEP51Sample 处理 GET /bt/bep51/sample，通过 BEP 51 采集 DHT 中的 infohash 样本。
+// BEP51Sample handles GET /bt/bep51/sample, collects infohash samples from DHT via BEP 51.
 func BEP51Sample(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BEP51Sample")
 	if btSvc == nil || btSvc.Server == nil {
@@ -278,7 +278,7 @@ func BEP51Sample(c *gin.Context) {
 
 // --- BitTorrent Download Handlers ---
 
-// BTTorrentUpload 处理 POST /bt/torrent，接受 .torrent 文件上传并启动下载。
+// BTTorrentUpload handles POST /bt/torrent, accepts .torrent file upload and starts download.
 func BTTorrentUpload(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTTorrentUpload")
 	if btClient == nil {
@@ -319,7 +319,7 @@ func BTTorrentUpload(c *gin.Context) {
 	})
 }
 
-// BTMagnetResolve 处理 POST /bt/magnet，解析 magnet URI 并启动 BitTorrent 下载。
+// BTMagnetResolve handles POST /bt/magnet, resolves a magnet URI and starts a BitTorrent download.
 func BTMagnetResolve(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTMagnetResolve")
 	if btClient == nil {
@@ -352,7 +352,7 @@ func BTMagnetResolve(c *gin.Context) {
 	})
 }
 
-// BTDownloadProgress 处理 GET /bt/download/:infohash，查询指定 infohash 的下载进度。
+// BTDownloadProgress handles GET /bt/download/:infohash, queries download progress for the specified infohash.
 func BTDownloadProgress(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTDownloadProgress")
 	if btClient == nil {
@@ -371,7 +371,7 @@ func BTDownloadProgress(c *gin.Context) {
 	c.JSON(http.StatusOK, status)
 }
 
-// BTPauseDownload 处理 POST /bt/download/:infohash/pause，暂停指定下载任务。
+// BTPauseDownload handles POST /bt/download/:infohash/pause, pauses the specified download task.
 func BTPauseDownload(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTPauseDownload")
 	if btClient == nil {
@@ -390,7 +390,7 @@ func BTPauseDownload(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "paused"})
 }
 
-// BTResumeDownload 处理 POST /bt/download/:infohash/resume，恢复暂停的下载任务。
+// BTResumeDownload handles POST /bt/download/:infohash/resume, resumes a paused download task.
 func BTResumeDownload(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTResumeDownload")
 	if btClient == nil {
@@ -409,7 +409,7 @@ func BTResumeDownload(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "downloading"})
 }
 
-// BTRemoveDownload 处理 DELETE /bt/download/:infohash，删除下载任务及其文件。
+// BTRemoveDownload handles DELETE /bt/download/:infohash, removes the download task and its files.
 func BTRemoveDownload(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTRemoveDownload")
 	if btClient == nil {
@@ -428,7 +428,7 @@ func BTRemoveDownload(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "removed"})
 }
 
-// BTGlobalStats 处理 GET /bt/stats，返回全局 BT 客户端统计信息。
+// BTGlobalStats handles GET /bt/stats, returns global BT client statistics.
 func BTGlobalStats(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTGlobalStats")
 	if btClient == nil {
@@ -455,7 +455,7 @@ func BTGlobalStats(c *gin.Context) {
 	c.JSON(http.StatusOK, minimal)
 }
 
-// BTSeedTorrent 处理 POST /bt/seed/:infohash，开始为已完成的下载做种。
+// BTSeedTorrent handles POST /bt/seed/:infohash, starts seeding a completed download.
 func BTSeedTorrent(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTSeedTorrent")
 	if btClient == nil {
@@ -474,7 +474,7 @@ func BTSeedTorrent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "seeding"})
 }
 
-// BTStopSeed 处理 POST /bt/download/:infohash/unseed，停止为指定下载做种。
+// BTStopSeed handles POST /bt/download/:infohash/unseed, stops seeding the specified download.
 func BTStopSeed(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTStopSeed")
 	if btClient == nil {
@@ -493,7 +493,7 @@ func BTStopSeed(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"infohash": infohash, "status": "stopped"})
 }
 
-// BTDownloadList 处理 GET /bt/downloads，返回所有活跃和已完成的 BT 下载任务。
+// BTDownloadList handles GET /bt/downloads, returns all active and completed BT download tasks.
 func BTDownloadList(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTDownloadList")
 	if btClient == nil {
@@ -509,7 +509,7 @@ func BTDownloadList(c *gin.Context) {
 	})
 }
 
-// BTDownloadTorrent 处理 GET /bt/download/:infohash/torrent，返回 .torrent 文件下载。
+// BTDownloadTorrent handles GET /bt/download/:infohash/torrent, returns the .torrent file download.
 func BTDownloadTorrent(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTDownloadTorrent")
 	if btClient == nil {
@@ -539,7 +539,7 @@ func BTDownloadTorrent(c *gin.Context) {
 	c.Data(http.StatusOK, "application/x-bittorrent", data)
 }
 
-// BTDownloadMagnet 处理 GET /bt/download/:infohash/magnet，返回磁力链接。
+// BTDownloadMagnet handles GET /bt/download/:infohash/magnet, returns the magnet link.
 func BTDownloadMagnet(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTDownloadMagnet")
 	if btClient == nil {
@@ -556,7 +556,7 @@ func BTDownloadMagnet(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"magnet_uri": uri})
 }
 
-// BTSeedCollection 处理 POST /bt/seed-collection，从合集创建种子并开始做种。
+// BTSeedCollection handles POST /bt/seed-collection, creates a seed from a collection and starts seeding.
 func BTSeedCollection(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTSeedCollection")
 	if btClient == nil {
@@ -579,7 +579,7 @@ func BTSeedCollection(c *gin.Context) {
 		return
 	}
 
-	// 创建临时目录，写入合集文件供 BuildFromFilePath 使用。
+	// Create a temp directory and write collection files for BuildFromFilePath.
 	tmpDir, err := os.MkdirTemp("", "peerdrive-seed-")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create temp dir"})
@@ -615,7 +615,7 @@ func BTSeedCollection(c *gin.Context) {
 		}
 	}
 
-	// 从文件结构创建 torrent metainfo
+	// Build torrent metainfo from file structure
 	info := &metainfo.Info{
 		PieceLength: 256 * 1024,
 	}
@@ -635,7 +635,7 @@ func BTSeedCollection(c *gin.Context) {
 	torrentBytes := buf.Bytes()
 	ih := mi.HashInfoBytes().HexString()
 
-	// 将文件写入 BT 数据目录，使库能立即验证并完成
+	// Write files to BT data directory so the library can immediately verify and complete
 	dataRoot := filepath.Join(btClient.GetDownloadDir(), name)
 	if err := os.MkdirAll(dataRoot, 0755); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create bt data dir"})
@@ -655,11 +655,11 @@ func BTSeedCollection(c *gin.Context) {
 		}
 	}
 
-	// 添加种子（库会验证已存在的文件后标记完成）
+	// Add seed (library will verify existing files and mark as complete)
 	btClient.SetAutoSeed(ih)
 	meta, err := btClient.AddTorrentBytes(torrentBytes)
 	if err != nil {
-		btClient.SetAutoSeed(ih) // 可能重复但无害，cleanup 在 handler 层面没有单独处理
+		btClient.SetAutoSeed(ih) // May duplicate but harmless; cleanup is not handled separately at the handler level
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -675,10 +675,10 @@ func BTSeedCollection(c *gin.Context) {
 	})
 }
 
-// --- Port Forwarding（forward v2：PeerJS DataChannel 隧道，见 transport/forward.go）---
+// --- Port Forwarding (forward v2: PeerJS DataChannel tunnels, see transport/forward.go) ---
 
-// fwdListener 本端代理监听（connect 端点建立）：本地 loopback 端口收到的每条
-// TCP 连接 → 一条转发隧道（OpenForward）。
+// fwdListener local proxy listener (established by connect endpoint): each local
+// TCP connection received on the loopback port -> one forwarding tunnel (OpenForward).
 type fwdListener struct {
 	key        string
 	targetPeer string
@@ -690,8 +690,8 @@ var (
 	fwdListeners   = map[string]*fwdListener{} // key: "<target_peer>:<local_port>"
 )
 
-// CreateForwardSession 处理 POST /p2p/forward/create，登记本节点转发授权规则
-// （key → 端口白名单，运行时内存表；静态规则走配置 PEERDRIVE_FORWARD_RULES）。
+// CreateForwardSession handles POST /p2p/forward/create, registers this node's forwarding authorization rule
+// (key -> port whitelist, runtime in-memory table; static rules go through config PEERDRIVE_FORWARD_RULES).
 func CreateForwardSession(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: CreateForwardSession")
 	if forwardPeer == nil {
@@ -719,8 +719,8 @@ func CreateForwardSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "rule-added", "port": req.Port})
 }
 
-// ConnectForwardSession 处理 POST /p2p/forward/connect：本地 loopback 起监听，
-// 每条本地 TCP 经一条转发隧道打到目标 peer 的授权端口（port=0 时目标按规则决定）。
+// ConnectForwardSession handles POST /p2p/forward/connect: starts a local loopback listener,
+// each local TCP connection goes through a forwarding tunnel to the target peer's authorized port (when port=0, the target is determined by rules).
 func ConnectForwardSession(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: ConnectForwardSession")
 	if forwardPeer == nil {
@@ -731,7 +731,7 @@ func ConnectForwardSession(c *gin.Context) {
 		Key        string `json:"key"`
 		TargetPeer string `json:"target_peer"`
 		LocalPort  int    `json:"local_port"`
-		Port       int    `json:"port"` // 目标端口（可选：0 = 目标节点按规则唯一端口）
+		Port       int    `json:"port"` // Target port (optional: 0 = target node's unique port by rules)
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.LogWarn("ctrl-p2p: ConnectForwardSession invalid request: %v", err)
@@ -750,7 +750,7 @@ func ConnectForwardSession(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid port"})
 		return
 	}
-	// 幂等：同 key+端口已有监听则直接返回（前端重试/重复点击不炸）
+	// Idempotent: if a listener already exists for the same key+port, return directly (frontend retries/duplicate clicks won't break)
 	key2 := fmt.Sprintf("%s:%d", req.TargetPeer, req.LocalPort)
 	fwdListenersMu.Lock()
 	if _, ok := fwdListeners[key2]; ok {
@@ -775,14 +775,14 @@ func ConnectForwardSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "connected", "local_port": req.LocalPort})
 }
 
-// acceptForwardTunnels 为每个本地 TCP 连接开一条转发隧道并双向透传。
-// 语义：连接建立失败（坏 key/端口越权/隧道占用）只断这一条，监听继续。
+// acceptForwardTunnels opens a forwarding tunnel for each local TCP connection and pipes bidirectionally.
+// Semantics: if connection establishment fails (bad key/insufficient permissions/tunnel occupied), only that connection is dropped; listening continues.
 func acceptForwardTunnels(fl *fwdListener, targetPort int) {
 	defer fl.ln.Close()
 	for {
 		tcp, err := fl.ln.Accept()
 		if err != nil {
-			return // 监听关闭
+			return // listener closed
 		}
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -798,8 +798,8 @@ func acceptForwardTunnels(fl *fwdListener, targetPort int) {
 	}
 }
 
-// pipeTCPForward 双向透传本地 TCP ↔ 转发隧道。任一侧 EOF/错误即双向关闭：
-// 隧道侧关闭会触发 pump 的 fwd-close 通知对端清槽（见 transport/forward.go）。
+// pipeTCPForward pipes bidirectionally between local TCP <-> forwarding tunnel. Either side EOF/error closes both directions:
+// tunnel-side close triggers the pump's fwd-close notification to the peer to clear the slot (see transport/forward.go).
 func pipeTCPForward(tcp net.Conn, tun net.Conn) {
 	done := make(chan struct{}, 2)
 	go func() {
@@ -813,7 +813,7 @@ func pipeTCPForward(tcp net.Conn, tun net.Conn) {
 	tun.Close()
 }
 
-// ListForwardSessions 处理 GET /p2p/forward/list，返回本端活跃监听与隧道。
+// ListForwardSessions handles GET /p2p/forward/list, returns local active listeners and tunnels.
 func ListForwardSessions(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: ListForwardSessions")
 	listeners := []gin.H{}
@@ -831,8 +831,8 @@ func ListForwardSessions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"listeners": listeners, "tunnels": tunnels})
 }
 
-// CloseForwardSession 处理 POST /p2p/forward/close，关闭指定 key 的本端监听
-// （活跃隧道由隧道两端自然收尾；断开指定 peer 的全部隧道可用 peer_id）。
+// CloseForwardSession handles POST /p2p/forward/close, closes the local listener for the specified key
+// (active tunnels are naturally closed at both ends; use peer_id to disconnect all tunnels to a specified peer).
 func CloseForwardSession(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: CloseForwardSession")
 	var req struct {
@@ -864,7 +864,7 @@ func CloseForwardSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "closed", "closed_listeners": closed})
 }
 
-// AuthStatus 处理 GET /p2p/auth/status，返回当前节点的认证状态。
+// AuthStatus handles GET /p2p/auth/status, returns the current node's authentication status.
 func AuthStatus(c *gin.Context) {
 	authenticated, _ := c.Get("authenticated")
 	username, _ := c.Get("username")
@@ -885,9 +885,9 @@ func AuthStatus(c *gin.Context) {
 		r = rl
 	}
 
-	// operator 与 username 不是一回事：username 来自请求上下文（本次请求的调用者），
-	// operator 是节点登录 regserver 后登记的运营者账号（匿合集 Owner 取这个值）。
-	// 前端需要它决定「仅自己」档位是否可用（Owner 为空 = 谁都读不了）。
+	// operator and username are not the same thing: username comes from the request context (the caller of this request),
+	// operator is the operator account registered after the node logs into regserver (anonymized collection Owner uses this value).
+	// The frontend needs it to determine whether the "only me" tier is available (Owner empty = no one can read).
 	c.JSON(http.StatusOK, gin.H{
 		"authenticated": isAuth,
 		"username":      uname,
@@ -898,11 +898,11 @@ func AuthStatus(c *gin.Context) {
 
 // ─── IPFS Compat Handlers ─────────────────────────────────────────
 
-// InitIPFSCompatController 注入 IPFSCompatLayer 实例供 IPFS 兼容端点使用。
+// InitIPFSCompatController injects IPFSCompatLayer instance for IPFS compatibility endpoints.
 
-// IPFSCompatStatus 处理 GET /ipfs，返回 IPFS 兼容层的状态信息。
+// IPFSCompatStatus handles GET /ipfs, returns IPFS compatibility layer status info.
 
-// IPFSCompatToggle 处理 POST /ipfs/toggle，启用或禁用 IPFS 兼容模式。
+// IPFSCompatToggle handles POST /ipfs/toggle, enables or disables IPFS compatibility mode.
 
 // --- IPFS Pin & Gateway Handlers ------------------------------------
 

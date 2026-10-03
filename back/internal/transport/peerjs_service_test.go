@@ -19,18 +19,18 @@ import (
 	"peerdrive/internal/repository"
 )
 
-// fakeSession 内存版 Session：记录发送的 JSON 帧（头+体），可捕获 OnMessage
-// 回调并手动注入帧（H1/H6/M6 单元测试 + 流式 OpenStream + forward 测试用）。
-// Close 触发 OnClose 回调 + 标记 closed（模拟真实连接关闭的清理路径——
-// bindConn 同 peer 去重测试依赖此行为）。
+// fakeSession an in-memory Session: records the JSON frames it sends (header + body), and can capture the
+// OnMessage callback so frames can be injected by hand (used by the H1/H6/M6 unit tests, the streaming
+// OpenStream, and the forward tests). Close fires the OnClose callback + marks closed (simulating the
+// real connection-close cleanup path -- the bindConn same-peer dedup test relies on this behaviour).
 type fakeSession struct {
 	id   string
 	mu   sync.Mutex
 	sent []map[string]any
-	// frames 完整帧记录（含 SendFrame 的二进制体）——forward 数据透传断言用
+	// frames full frame records (including SendFrame's binary body) -- used by the forward data-passthrough assertions
 	frames []fakeFrame
 
-	// local = 本机 WS 直连（"自己"），见 share.go 的 isSelfSession
+	// local = a direct local WS connection ("ourselves"), see isSelfSession in share.go
 	local bool
 
 	onMessage func(peerjs.Frame)
@@ -38,10 +38,10 @@ type fakeSession struct {
 	closed    bool
 }
 
-// IsLocal 实现 isSelfSession 识别的可选接口（本机 WS 会话才有）。
+// IsLocal implements the optional interface recognised by isSelfSession (only local WS sessions have it).
 func (f *fakeSession) IsLocal() bool { return f.local }
 
-// fakeFrame 一帧的完整记录（头 JSON + 可选二进制体）。
+// fakeFrame a full record of one frame (JSON header + optional binary body).
 type fakeFrame struct {
 	header map[string]any
 	body   []byte
@@ -92,14 +92,14 @@ func (f *fakeSession) Close() {
 	}
 }
 
-// Closed 返回会话是否已被 Close（去重测试断言旧连接被关闭）。
+// Closed reports whether the session has been Closed (the dedup tests assert the old connection was closed).
 func (f *fakeSession) Closed() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.closed
 }
 
-// feed 手动注入一帧到 OnMessage 回调（模拟对端到达的帧）。
+// feed manually injects one frame into the OnMessage callback (simulating a frame arriving from the peer).
 func (f *fakeSession) feed(frame peerjs.Frame) {
 	f.mu.Lock()
 	fn := f.onMessage
@@ -109,7 +109,7 @@ func (f *fakeSession) feed(frame peerjs.Frame) {
 	}
 }
 
-// sentFrames 返回已发送帧（含 body）副本。
+// sentFrames returns a copy of the frames sent so far (including bodies).
 func (f *fakeSession) sentFrames() []fakeFrame {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -128,7 +128,7 @@ func (f *fakeSession) sentFrameTypes() []string {
 	return out
 }
 
-// sentTypes 返回已发送帧的 type 序列。
+// sentTypes returns the sequence of frame types sent so far.
 func (f *fakeSession) sentTypes() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -148,7 +148,7 @@ func newTestPeerJSService(t *testing.T) *PeerJSService {
 
 func newTestPeerJSServiceWithIndex(t *testing.T, idx *FileIndexService) *PeerJSService {
 	t.Helper()
-	t.Cleanup(idx.Close) // Windows：上传会话的句柄不关，TempDir 清不掉
+	t.Cleanup(idx.Close) // Windows: without closing the upload session's handles, TempDir cannot be cleaned up
 	return &PeerJSService{
 		cfg:          &config.Config{},
 		storageDir:   t.TempDir(),
@@ -162,26 +162,29 @@ func newTestPeerJSServiceWithIndex(t *testing.T, idx *FileIndexService) *PeerJSS
 	}
 }
 
-// TestServeFile_InvalidHashNoPanic 非法 hash（空/短）→ err 帧，不 panic。
-// 发现背景：H1 远程崩溃漏洞——serveFile 直接 req.Hash[:2]，对端发
-// {"type":"req","hash":""} 或 "a" 即越界 panic 杀进程（公共信令网络上
-// 任意节点一行 JSON 打崩全节点）。修复：先 isValidHash 校验。
+// TestServeFile_InvalidHashNoPanic an illegal hash (empty / short) -> an err frame, no panic.
+// Discovery background: the H1 remote-crash bug -- serveFile indexed req.Hash[:2] directly, so a peer
+// sending {"type":"req","hash":""} or "a" caused an out-of-bounds panic and killed the process (on the
+// public signaling network, any one node could crash every node with a single line of JSON). Fix:
+// validate with isValidHash first.
 func TestServeFile_InvalidHashNoPanic(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	for _, bad := range []string{"", "a", "abc", "not-hex!"} {
 		sess := &fakeSession{id: "remote"}
 		svc.serveFile(sess, dcReq{Type: "req", Hash: bad, ReqID: "r1"})
 		types := sess.sentTypes()
-		require.Len(t, types, 1, "hash=%q 应恰好回一个 err 帧", bad)
+		require.Len(t, types, 1, "hash=%q should return exactly one err frame", bad)
 		assert.Equal(t, "err", types[0], "hash=%q", bad)
 	}
 }
 
-// TestServeFile_PrivateDeniedToStrangers private 内容：陌生人取不到，好友/自己能取
-// （doc/NETDISK.md §12.6）。
+// TestServeFile_PrivateDeniedToStrangers private content: strangers cannot fetch it, friends / ourselves can
+// (doc/NETDISK.md §12.6).
 //
-// 为什么钉在传输层而不是只测 service：门禁的接线在 serveFile 里（gate 为 nil 时
-// 放行），"装了 gate 却没在 req 上调用"是那种单看 service 全绿、线上全漏的错。
+// Why pin this in the transport layer rather than testing the service only: the gate wiring lives inside
+// serveFile (a nil gate lets everything through), and "installing a gate but never calling it on a req" is
+// exactly the kind of mistake that shows all green in the service alone while leaking everything in
+// production.
 func TestServeFile_PrivateDeniedToStrangers(t *testing.T) {
 	initTestDB(t)
 	svc := newTestPeerJSService(t)
@@ -192,23 +195,23 @@ func TestServeFile_PrivateDeniedToStrangers(t *testing.T) {
 	fi, err := svc.fileIndex.Create(inRoot)
 	require.NoError(t, err)
 
-	// 假门禁：只认 hash==fi.Hash 为 private，好友名单里只有 "buddy"
+	// fake gate: only hash==fi.Hash counts as private, and the friend list contains only "buddy"
 	svc.SetShareGate(fakeShareGate{private: fi.Hash, friends: []string{"buddy"}})
 
 	stranger := &fakeSession{id: "stranger"}
 	svc.serveFile(stranger, dcReq{Type: "req", Hash: fi.Hash, Size: -1, ReqID: "r1"})
-	require.Equal(t, []string{"err"}, stranger.sentTypes(), "private 不得发给陌生人")
+	require.Equal(t, []string{"err"}, stranger.sentTypes(), "private must not be sent to strangers")
 
 	friend := &fakeSession{id: "buddy"}
 	svc.serveFile(friend, dcReq{Type: "req", Hash: fi.Hash, Size: -1, ReqID: "r1"})
-	require.Equal(t, []string{"meta", "data", "done"}, friend.sentFrameTypes(), "好友必须能取")
+	require.Equal(t, []string{"meta", "data", "done"}, friend.sentFrameTypes(), "friends must be able to fetch")
 
 	self := &fakeSession{id: "whatever", local: true}
 	svc.serveFile(self, dcReq{Type: "req", Hash: fi.Hash, Size: -1, ReqID: "r1"})
-	require.Equal(t, []string{"meta", "data", "done"}, self.sentFrameTypes(), "自己（本地通道）必须能取")
+	require.Equal(t, []string{"meta", "data", "done"}, self.sentFrameTypes(), "self (local channel) must be able to fetch")
 }
 
-// fakeShareGate 下载门禁假实现（只认一个 private hash + 一份好友名单）。
+// fakeShareGate a fake download gate (one private hash + one friend list).
 type fakeShareGate struct {
 	private string
 	friends []string
@@ -226,15 +229,15 @@ func (g fakeShareGate) AllowsDownload(peerID, hash string, self bool) bool {
 	return false
 }
 
-// TestServeFile_IndexPathOutsideRoot 索引命中但路径越权 → err 帧，不回传
-// 根目录外文件（H2）。
-// 发现背景：H2 任意文件读取漏洞——对端 create 任意绝对路径后 req 读取。
-// 防御性测试：模拟历史脏数据（根外路径已 upsert 进索引），serveFile 必须拒绝。
+// TestServeFile_IndexPathOutsideRoot the index matches but the path is out of bounds -> err frame, no file
+// outside the root is served (H2). Discovery background: the H2 arbitrary-file-read vulnerability -- a peer
+// creates an arbitrary absolute path and then req-reads it. Defensive test: simulating historical dirty data
+// (an out-of-root path already upserted into the index), serveFile must refuse.
 func TestServeFile_IndexPathOutsideRoot(t *testing.T) {
 	initTestDB(t)
 	svc := newTestPeerJSService(t)
 
-	// 根目录内放一个文件并正常登记
+	// put a file inside the root and register it normally
 	inRoot := filepath.Join(svc.fileIndex.uploadDir, "in.bin")
 	require.NoError(t, os.MkdirAll(svc.fileIndex.uploadDir, 0o755))
 	content := []byte("inside-root")
@@ -242,25 +245,25 @@ func TestServeFile_IndexPathOutsideRoot(t *testing.T) {
 	fi, err := svc.fileIndex.Create(inRoot)
 	require.NoError(t, err)
 
-	// 模拟历史脏数据：把索引路径改写为根外文件
+	// simulate historical dirty data: rewrite the indexed path to an out-of-root file
 	outside := filepath.Join(t.TempDir(), "shadow.txt")
 	require.NoError(t, os.WriteFile(outside, []byte("secret"), 0o644))
 	_, err = repository.UpsertFileIndex(fi.Hash, outside, "shadow.txt", 6, false)
 	require.NoError(t, err)
 
-	// 请求该 hash：必须拒绝，不得回传根外内容
+	// request that hash: must be refused, no out-of-root content may be returned
 	sess := &fakeSession{id: "remote"}
 	svc.serveFile(sess, dcReq{Type: "req", Hash: fi.Hash, ReqID: "r1"})
 	types := sess.sentTypes()
 	require.Len(t, types, 1)
-	assert.Equal(t, "err", types[0], "根外路径不得回传")
+	assert.Equal(t, "err", types[0], "out-of-root paths must not be returned")
 }
 
-// TestServeFile_IndexPathAllowed fallback 分支 file_index 命中合法路径 →
-// 服务该路径文件（内容寻址只是兜底，create 的文件只有绝对路径 + 索引）。
-// 发现背景：2026-08-18 serveFile 多源路由重写时丢了 file_index 分支
-// （路由未命中时只查 CAS），集成测试 TestFrameVerbs_CreateListInfoDownload
-// 报 not found；恢复后本测试锁定「索引命中合法路径必须回传」。
+// TestServeFile_IndexPathAllowed the fallback branch: a file_index hit on a legal path -> that path's file
+// is served (content addressing is only a backstop; a created file has just an absolute path + the index).
+// Discovery background: during the 2026-08-18 serveFile multi-source routing rewrite the file_index branch
+// was lost (a routing miss only queried CAS), and the integration test TestFrameVerbs_CreateListInfoDownload
+// reported not found; once restored, this test pins down "an index hit on a legal path must be served".
 func TestServeFile_IndexPathAllowed(t *testing.T) {
 	initTestDB(t)
 	svc := newTestPeerJSService(t)
@@ -279,9 +282,9 @@ func TestServeFile_IndexPathAllowed(t *testing.T) {
 	assert.Equal(t, content, frames[1].body)
 }
 
-// TestRouteResponse_DataSizeCap 恶意 data 帧声明超大 size → errCh（H6）。
-// 发现背景：H6——f.size = r.Size 无上限，恶意对端声明 1<<62 并持续发
-// data 帧 → f.got 无界 append OOM。修复：≤8GB 上限。
+// TestRouteResponse_DataSizeCap a malicious data frame declaring a huge size -> errCh (H6).
+// Discovery background: H6 -- f.size = r.Size had no cap, so a malicious peer declaring 1<<62 and
+// streaming data frames made f.got grow without bound until OOM. Fix: an 8GB cap.
 func TestRouteResponse_DataSizeCap(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	st := &connState{fetches: make(map[string]*fetchState)}
@@ -293,35 +296,36 @@ func TestRouteResponse_DataSizeCap(t *testing.T) {
 	case err := <-f.errCh:
 		assert.Error(t, err)
 	case <-time.After(time.Second):
-		t.Fatal("超上限 data 帧必须报错")
+		t.Fatal("data frame exceeding limit must error")
 	}
 }
 
-// TestRouteResponse_DoneSizeMismatch 对端提前 done（截断文件当成功）→ errCh（H6）。
-// 发现背景：H6——done 不校验实收字节，对端只发 meta+done 就把空/截断数据
-// 当成功返回 → 静默数据损坏。修复：done.Size 与实收字节对比。
+// TestRouteResponse_DoneSizeMismatch the peer sends done early (a truncated file counted as success) -> errCh (H6).
+// Discovery background: H6 -- done did not check the bytes actually received, so a peer sending only
+// meta+done returned empty or truncated data as success -> silent data corruption. Fix: compare done.Size
+// against the bytes actually received.
 func TestRouteResponse_DoneSizeMismatch(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	st := &connState{fetches: make(map[string]*fetchState)}
 	f := newTestFetchState("r1")
 	st.fetches["r1"] = f
 
-	// 声明发送 100 字节，实际 0 字节（无 data 帧）→ 必须报错
+	// declares 100 bytes sent, but 0 actually received (no data frame) -> must error
 	svc.routeResponse(st, dcResp{Type: "done", ReqID: "r1", Size: 100}, nil)
 	select {
 	case err := <-f.errCh:
 		assert.Error(t, err)
 	case <-time.After(time.Second):
-		t.Fatal("截断 done 必须报错")
+		t.Fatal("truncated done must error")
 	}
 	select {
 	case <-f.done:
-		t.Fatal("不得把截断数据当成功")
+		t.Fatal("must not treat truncated data as success")
 	default:
 	}
 }
 
-// TestRouteResponse_DoneSizeMatch 正常 done（Size 与实收一致）→ 成功。
+// TestRouteResponse_DoneSizeMatch a normal done (Size matches what was received) -> success.
 func TestRouteResponse_DoneSizeMatch(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	st := &connState{fetches: make(map[string]*fetchState)}
@@ -333,13 +337,13 @@ func TestRouteResponse_DoneSizeMatch(t *testing.T) {
 	svc.routeResponse(st, dcResp{Type: "done", ReqID: "r1", Size: 3}, nil)
 	select {
 	case <-f.done:
-		// done 已 close = 传输完成（流式语义：数据经 f.q 消费）
+		// done closed = the transfer is complete (streaming semantics: data is consumed through f.q)
 	case <-time.After(time.Second):
-		t.Fatal("匹配的 done 应成功返回")
+		t.Fatal("matching done should return success")
 	}
 }
 
-// newTestFetchState 构造测试用 fetchState（流式字段全初始化）。
+// newTestFetchState builds a fetchState for tests (every streaming field initialised).
 func newTestFetchState(reqID string) *fetchState {
 	return &fetchState{
 		reqID:  reqID,
@@ -350,16 +354,17 @@ func newTestFetchState(reqID string) *fetchState {
 	}
 }
 
-// TestServeUploadBegin_StalePendingCleared 旧 upload 头占位超时 → 自动清空（M6）。
-// 发现背景：M6——对端发 upload 头后不发数据块，pendingUpload 永久占用，
-// 该连接后续所有 upload 全部 "already in progress"（连接级 DoS，重连才恢复）。
+// TestServeUploadBegin_StalePendingCleared a stale upload-header placeholder times out -> cleared automatically (M6).
+// Discovery background: M6 -- when a peer sent an upload header and never sent the data blocks,
+// pendingUpload was held forever, so every later upload on that connection got "already in progress" (a
+// connection-level DoS that only a reconnect cleared).
 func TestServeUploadBegin_StalePendingCleared(t *testing.T) {
 	initTestDB(t)
 	svc := newTestPeerJSService(t)
 	st := &connState{fetches: make(map[string]*fetchState)}
 	sess := &fakeSession{id: "remote"}
 
-	// 过期占位（31s 前创建）
+	// a stale placeholder (created 31s ago)
 	st.mu.Lock()
 	st.pendingUpload = &uploadState{reqID: "stale", created: time.Now().Add(-31 * time.Second)}
 	st.mu.Unlock()
@@ -367,16 +372,17 @@ func TestServeUploadBegin_StalePendingCleared(t *testing.T) {
 	svc.serveUploadBegin(sess, st, dcResp{Type: "upload", Name: "new.bin", Size: 10, ReqID: "r2"})
 	types := sess.sentTypes()
 	require.Len(t, types, 1)
-	assert.Equal(t, "meta", types[0], "过期占位应被清空并正常开始上传")
+	assert.Equal(t, "meta", types[0], "stale placeholder should be cleared and upload starts normally")
 
 	st.mu.Lock()
-	assert.NotNil(t, st.pendingUpload, "新上传应占用槽位")
+	assert.NotNil(t, st.pendingUpload, "new upload should occupy the slot")
 	st.mu.Unlock()
 }
 
-// TestUploadWorker_WriteThenComplete 上传 worker 落盘 + 完成回帧（H5 链路）。
-// 发现背景：H5——二进制帧的 WriteAt/Complete 移出消息泵到连接级 worker，
-// 本测试直接驱动 worker 验证 chunk 投递 → 落盘 → uploaded 回帧全链路。
+// TestUploadWorker_WriteThenComplete the upload worker writes to disk + replies with the completion frame (the H5 chain).
+// Discovery background: H5 -- the WriteAt/Complete for binary frames moved out of the message pump into a
+// connection-level worker; this test drives the worker directly to verify the whole chain: chunk delivery ->
+// disk write -> the uploaded reply frame.
 func TestUploadWorker_WriteThenComplete(t *testing.T) {
 	initTestDB(t)
 	svc := newTestPeerJSService(t)
@@ -395,7 +401,7 @@ func TestUploadWorker_WriteThenComplete(t *testing.T) {
 	require.NoError(t, err)
 	up := &uploadState{reqID: "r1", offset: 0, size: 10, sess: us}
 
-	// 单 worker 处理一个分片（last=true → Complete）
+	// one worker handles a single chunk (last=true -> Complete)
 	done := make(chan struct{})
 	go func() {
 		svc.uploadWorker(sess, st)
@@ -403,8 +409,8 @@ func TestUploadWorker_WriteThenComplete(t *testing.T) {
 	}()
 	st.binCh <- binaryChunk{up: up, offset: 0, data: content, last: true}
 
-	// 等 worker 回 uploaded 帧（轮询 + 超时；不能立刻 close(binDone)——
-	// select 随机选路会把未处理的 chunk 直接丢掉）
+	// wait for the worker to reply with the uploaded frame (polling + timeout; binDone must not be
+	// closed immediately -- the select's random branch choice would drop an unprocessed chunk outright)
 	var types []string
 	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
 		types = sess.sentTypes()
@@ -417,14 +423,14 @@ func TestUploadWorker_WriteThenComplete(t *testing.T) {
 	<-done
 
 	require.Len(t, types, 1)
-	assert.Equal(t, "uploaded", types[0], "分片收齐应回 uploaded")
+	assert.Equal(t, "uploaded", types[0], "all chunks collected should reply with uploaded")
 }
 
-// TestHashMatchesSHA256_AllowsEmptyFile 空文件也可通过内容寻址校验。
-// 发现背景：代码审阅——原实现 `len(data)==0` 直接 return false，导致
-// sha256(空)（e3b0c442...）这类合法空文件永远无法从对端拉取。
-// 修复：移除空数据特判，空文件只校验其真实 sha256。
+// TestHashMatchesSHA256_AllowsEmptyFile an empty file also passes the content-addressed check.
+// Discovery background: code review -- the original implementation did `len(data)==0` and returned false
+// straight away, so a legitimate empty file (sha256 of empty = e3b0c442...) could never be pulled from a
+// peer. Fix: remove the empty-data special case; an empty file is checked only against its real sha256.
 func TestHashMatchesSHA256_AllowsEmptyFile(t *testing.T) {
 	emptyHash := sha256.Sum256([]byte{})
-	assert.True(t, hashMatchesSHA256(hex.EncodeToString(emptyHash[:]), []byte{}), "空文件的 sha256 应被接受")
+	assert.True(t, hashMatchesSHA256(hex.EncodeToString(emptyHash[:]), []byte{}), "sha256 of empty file should be accepted")
 }

@@ -1,9 +1,10 @@
-// api.test.js：getBlobUrl 预览路径测试（200MB 阈值 + in-flight 去重 + LRU）。
-// 发现背景：2026-08-18 优化批次第 1/7 项——预览大文件 OOM 防护（TOO_LARGE）、
-// 同 hash 并发双下载（blobUrlInflight）、缓存只增不减泄漏（LRU revoke）。
-// 注意：tests/setup.js 全局 vi.mock('../src/api.js')（防组件测试发真请求），
-// 本文件要测真实实现——doUnmock + 动态 import 解除（vitest per-file 隔离，
-// 不影响其它测试文件）。
+// api.test.js: getBlobUrl preview path tests (200MB threshold + in-flight dedup + LRU).
+// Discovery context: 2026-08-18 optimization batch item 1/7 — OOM protection for large-file
+// previews (TOO_LARGE), concurrent duplicate downloads for the same hash (blobUrlInflight),
+// cache growing without bound causing leaks (LRU revoke).
+// Note: tests/setup.js does a global vi.mock('../src/api.js') (to prevent component tests from
+// sending real requests), this file needs to test the real implementation — doUnmock + dynamic
+// import to un-mock (vitest per-file isolation, does not affect other test files).
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -20,13 +21,13 @@ const api = await import('../src/api.js')
 describe('getBlobUrl', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    // happy-dom 的 URL.createObjectURL/revokeObjectURL 无稳定实现，替换为
-    // 确定值（blob:size 编码内容长度，断言可比对）。
+    // happy-dom's URL.createObjectURL/revokeObjectURL has no stable implementation, so
+    // replace with deterministic values (blob:size encodes content length for comparison).
     URL.createObjectURL = vi.fn((b) => `blob:${b.size}`)
     URL.revokeObjectURL = vi.fn()
   })
 
-  it('stat 超过 200MB 阈值 → 抛 err.code=TOO_LARGE，不触发 download', async () => {
+  it('stat exceeds 200MB threshold → throws err.code=TOO_LARGE, does not trigger download', async () => {
     ws.stat.mockResolvedValue(200 * 1024 * 1024 + 1)
     await expect(api.getBlobUrl('a'.repeat(64))).rejects.toMatchObject({
       code: 'TOO_LARGE',
@@ -34,7 +35,7 @@ describe('getBlobUrl', () => {
     expect(ws.download).not.toHaveBeenCalled()
   })
 
-  it('并发同 hash → stat/download 各只调一次（in-flight 去重）', async () => {
+  it('concurrent same hash → stat/download each called only once (in-flight dedup)', async () => {
     let resolveStat
     ws.stat.mockImplementation(() => new Promise((r) => { resolveStat = r }))
     ws.download.mockResolvedValue(new Uint8Array(10))
@@ -47,7 +48,7 @@ describe('getBlobUrl', () => {
     expect(u1).toBe(u2)
   })
 
-  it('失败后 inflight 清除 → 下次调用重试', async () => {
+  it('inflight cleared after failure → next call retries', async () => {
     ws.stat
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce(1024)
@@ -57,7 +58,7 @@ describe('getBlobUrl', () => {
     expect(url).toBe('blob:5')
   })
 
-  it('缓存命中不再下载（且刷新 LRU 位置）', async () => {
+  it('cache hit does not download again (and refreshes LRU position)', async () => {
     ws.stat.mockResolvedValue(10)
     ws.download.mockResolvedValue(new Uint8Array(3))
     const u1 = await api.getBlobUrl('d'.repeat(64))
@@ -67,9 +68,9 @@ describe('getBlobUrl', () => {
     expect(ws.stat).toHaveBeenCalledTimes(1)
   })
 
-  it('LRU 上限 50：超出淘汰最旧并 revoke，被淘汰项重新下载', async () => {
-    // 模块级 blobUrlCache 跨测试共享（无清理导出），断言用相对基线——
-    // 只验证本测试内的增量。
+  it('LRU cap 50: evicts oldest and revokes on overflow, evicted item re-downloads', async () => {
+    // Module-level blobUrlCache is shared across tests (no cleanup export), so assertions
+    // use relative baselines — only verify increments within this test.
     const createdBase = URL.createObjectURL.mock.calls.length
     const revokedBase = URL.revokeObjectURL.mock.calls.length
     ws.stat.mockResolvedValue(10)
@@ -81,8 +82,8 @@ describe('getBlobUrl', () => {
     expect(URL.revokeObjectURL.mock.calls.length).toBeGreaterThan(revokedBase)
     ws.download.mockClear()
     ws.stat.mockClear()
-    // 循环第 1 个 hash（'00...0'）在本测试 51 次插入 + 历史遗留项下必然
-    // 已被逐出缓存：再取触发重新下载
+    // The first hash ('00...0') in the loop must have been evicted from cache given
+    // 51 insertions in this test + any leftover from prior tests: re-fetch triggers a download
     await api.getBlobUrl('0'.repeat(64))
     expect(ws.download).toHaveBeenCalledTimes(1)
     expect(ws.stat).toHaveBeenCalledTimes(1)

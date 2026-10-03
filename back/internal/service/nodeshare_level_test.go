@@ -1,15 +1,18 @@
 package service
 
-// nodeshare_level_test.go：三档共享级别（doc/NETDISK.md §12.6）。
+// nodeshare_level_test.go: three-tier sharing levels (doc/NETDISK.md §12.6).
 //
-// 一句话语义：**public = 列出来也给；unlisted = 不列出来但给；private = 只给
-// 认识的人**。容易写错的地方不是"存不存得住"，而是三档之间的边界：
-//   · unlisted 必须**不进清单但仍能下载**（漏了后半句，链接分享就废了）
-//   · private 必须**挡住陌生人**（漏了就等于 private 和 unlisted 没区别）
-//   · 同一内容被目录 + 单文件同时命中时取**最宽松**（取最严会让"我特意放宽
-//     了这一个"静默失效）
-//   · 级别写错（"pubilc"）必须整批拒绝，绝不悄悄兜成 public（那是把本想限制
-//     的内容公开出去）
+// One-sentence semantics: **public = listed and given; unlisted = not listed but
+// given; private = only to known people**. The part easy to get wrong is not
+// "can it be stored", but the boundaries between the three tiers:
+//   · unlisted must be **not listed but still downloadable** (dropping the second
+//     half and link sharing is broken)
+//   · private must **block strangers** (drop it and private is no different from unlisted)
+//   · when the same content is hit by both a directory rule and a single-file
+//     rule, take the **loosest** (taking the strictest silently voids "I
+//     deliberately loosened this one")
+//   · a misspelled level ("pubilc") must reject the whole batch; never silently
+//     fall back to public (that publishes content meant to be restricted)
 
 import (
 	"os"
@@ -20,7 +23,7 @@ import (
 	"peerdrive/internal/transport"
 )
 
-// TestNodeSharePublicListedAndDownloadable public：进清单，谁都能取。
+// TestNodeSharePublicListedAndDownloadable public: listed, anyone can fetch.
 func TestNodeSharePublicListedAndDownloadable(t *testing.T) {
 	base := t.TempDir()
 	h := sha("a1")
@@ -39,10 +42,11 @@ func TestNodeSharePublicListedAndDownloadable(t *testing.T) {
 	}
 }
 
-// TestNodeShareUnlistedHiddenButDownloadable unlisted：不进清单，但知道 hash 能取。
+// TestNodeShareUnlistedHiddenButDownloadable unlisted: not listed, but fetchable by hash.
 //
-// 这条最容易写成"不列出 = 不给"——那样 unlisted 就退化成"没共享"，链接分享
-// 这件唯一想支持的事就没了。
+// This one is easiest to write as "not listed = not given" -- then unlisted
+// degrades into "not shared", and link sharing, the one thing it exists to
+// support, is gone.
 func TestNodeShareUnlistedHiddenButDownloadable(t *testing.T) {
 	base := t.TempDir()
 	h := sha("b1")
@@ -58,13 +62,13 @@ func TestNodeShareUnlistedHiddenButDownloadable(t *testing.T) {
 	if !s.AllowsDownload("stranger-peer", h, false) {
 		t.Fatal("unlisted must still be downloadable by hash")
 	}
-	// 摘要（announce 上报的数量）也不该把它算进"对外共享了 N 个"
+	// The summary (count reported by announce) must not count it as "shared N externally"
 	if got := s.Summary().Files; got != 0 {
 		t.Fatalf("unlisted must not be counted in summary, got %d", got)
 	}
 }
 
-// TestNodeSharePrivateOnlyFriendsAndSelf private：只给好友和自己。
+// TestNodeSharePrivateOnlyFriendsAndSelf private: friends and self only.
 func TestNodeSharePrivateOnlyFriendsAndSelf(t *testing.T) {
 	base := t.TempDir()
 	h := sha("c1")
@@ -80,7 +84,7 @@ func TestNodeSharePrivateOnlyFriendsAndSelf(t *testing.T) {
 	if !s.AllowsDownload("stranger-peer", h, true) {
 		t.Fatal("private must be allowed to self (local channel)")
 	}
-	// 好友名单为空 → 谁都不是好友
+	// empty friends list => nobody is a friend
 	if got := len(s.SnapshotFor("stranger-peer").Files); got != 0 {
 		t.Fatalf("private must not be listed to strangers, got %d", got)
 	}
@@ -90,13 +94,13 @@ func TestNodeSharePrivateOnlyFriendsAndSelf(t *testing.T) {
 	if !s.AllowsDownload("friend-node", h, false) {
 		t.Fatal("friend must be allowed (id match is case-insensitive)")
 	}
-	// 好友要能看到 private 清单：给了权限却不给目录，等于没给
+	// friends must see the private listing: granting permission without a directory listing grants nothing
 	if got := len(s.SnapshotFor("Friend-Node").Files); got != 1 {
 		t.Fatalf("private must be listed to friends, got %d", got)
 	}
 }
 
-// TestNodeShareLoosestLevelWins 目录 unlisted + 单文件 public → 该文件 public。
+// TestNodeShareLoosestLevelWins dir unlisted + single file public => that file is public.
 func TestNodeShareLoosestLevelWins(t *testing.T) {
 	base := t.TempDir()
 	dir := filepath.Join(base, "media")
@@ -110,7 +114,7 @@ func TestNodeShareLoosestLevelWins(t *testing.T) {
 	if got := len(s.Snapshot().Files); got != 0 {
 		t.Fatalf("dir unlisted ⇒ not listed, got %d", got)
 	}
-	// 单独把这个文件放宽成 public
+	// loosen just this file to public
 	if _, err := s.SetFilesShared([]string{h}, true, model.LevelPublic); err != nil {
 		t.Fatalf("share: %v", err)
 	}
@@ -118,7 +122,7 @@ func TestNodeShareLoosestLevelWins(t *testing.T) {
 	if len(snap.Files) != 1 {
 		t.Fatalf("loosest must win (public), listed=%d", len(snap.Files))
 	}
-	// 反过来：目录 public + 文件 private，仍是 public（目录更宽松）
+	// the reverse: dir public + file private, still public (the dir is looser)
 	s2 := newScopeShare(t, base, true, []transport.FileInfo{
 		{Hash: h, Name: "a.txt", Path: filepath.Join(dir, "a.txt"), Size: 1},
 	})
@@ -136,7 +140,7 @@ func TestNodeShareLoosestLevelWins(t *testing.T) {
 	}
 }
 
-// TestNodeShareInvalidLevelRejected 级别写错整批拒绝（不兜成 public）。
+// TestNodeShareInvalidLevelRejected a misspelled level rejects the whole batch (no public fallback).
 func TestNodeShareInvalidLevelRejected(t *testing.T) {
 	base := t.TempDir()
 	h := sha("e1")
@@ -153,17 +157,18 @@ func TestNodeShareInvalidLevelRejected(t *testing.T) {
 	if _, err := s.Update(ScopePatch{Dirs: &[]ShareItem{{ID: dir, Level: "secret"}}}); err == nil {
 		t.Fatal("invalid dir level must be rejected")
 	}
-	// 非法好友 ID（含空白）同样拒绝
+	// an invalid friend ID (containing whitespace) is rejected the same way
 	if _, err := s.Update(ScopePatch{Friends: &[]string{"node id"}}); err == nil {
 		t.Fatal("friend id with whitespace must be rejected")
 	}
 }
 
-// TestNodeShareSetLevelOverrides 显式改级别要能收紧（public → private）。
+// TestNodeShareSetLevelOverrides an explicit level change must be able to tighten (public → private).
 //
-// 坑：一开始写成"取最宽松"合并，结果已公开的文件改成私密永远改不动——界面上
-// 显示的是"我选了私密，但刷新回来还是公开"。合并只发生在解析时（目录 ∪ 单文件），
-// 用户在下拉里的选择是**显式覆盖**。
+// Pitfall: the first draft merged by "take the loosest", so a file already made
+// public could never be tightened to private -- the UI showed "I selected private,
+// but after a refresh it's public again". Merging happens only at resolution time
+// (dir ∪ single file); the user's dropdown selection is an **explicit override**.
 func TestNodeShareSetLevelOverrides(t *testing.T) {
 	base := t.TempDir()
 	h := sha("a3")
@@ -184,7 +189,7 @@ func TestNodeShareSetLevelOverrides(t *testing.T) {
 	}
 }
 
-// TestNodeShareLevelPersistedAcrossRestart 级别随范围一起落盘。
+// TestNodeShareLevelPersistedAcrossRestart the level persists to disk together with the scope.
 func TestNodeShareLevelPersistedAcrossRestart(t *testing.T) {
 	base := t.TempDir()
 	h := sha("a2")
@@ -208,10 +213,12 @@ func TestNodeShareLevelPersistedAcrossRestart(t *testing.T) {
 	}
 }
 
-// TestNodeShareLegacyStringItemsStillPublic 历史落盘（字符串数组）读作 public。
+// TestNodeShareLegacyStringItemsStillPublic legacy persisted state (string arrays) reads as public.
 //
-// 升级前写的 share_scope.json 只有 id。读不懂就退回初值，等于把运营者选好的
-// 范围丢掉——而且丢得悄无声息（重启后清单空了，他会以为文件没了）。
+// share_scope.json written before the upgrade carries only ids. If it cannot be
+// parsed and we fall back to the initial value, the scope the operator picked is
+// silently dropped -- and dropped quietly (after a restart the listing is empty,
+// so he thinks the files are gone).
 func TestNodeShareLegacyStringItemsStillPublic(t *testing.T) {
 	base := t.TempDir()
 	h := sha("b2")
@@ -229,7 +236,7 @@ func TestNodeShareLegacyStringItemsStillPublic(t *testing.T) {
 	}
 }
 
-// writeScopeFile 直接写落盘状态（模拟历史版本/手改过的 share_scope.json）。
+// writeScopeFile writes persisted state directly (simulating a legacy version / a hand-edited share_scope.json).
 func writeScopeFile(t *testing.T, dir, body string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, shareScopeFile), []byte(body), 0o600); err != nil {
@@ -237,10 +244,12 @@ func writeScopeFile(t *testing.T, dir, body string) {
 	}
 }
 
-// TestNodeShareCollectionVisibilityDowngradesToPrivate 合集自身非 public → 降级。
+// TestNodeShareCollectionVisibilityDowngradesToPrivate a collection that is itself not public ⇒ downgrade.
 //
-// 受限/私有合集的 AccessList 是账号列表，无身份就校验不了；把它按 public 发出去
-// 等于一条 share 帧绕过账号门禁。降级成 private 后至少只给好友。
+// The AccessList of a restricted/private collection is a list of accounts, which
+// cannot be verified without an identity; serving it as public is the same as a
+// share frame bypassing the account gate. Downgrading it to private keeps it at
+// least friends-only.
 func TestNodeShareCollectionVisibilityDowngradesToPrivate(t *testing.T) {
 	base := t.TempDir()
 	h := sha("c1")
@@ -274,12 +283,14 @@ func TestNodeShareCollectionVisibilityDowngradesToPrivate(t *testing.T) {
 	}
 }
 
-// TestNodeShareCollectionManifestFollowsLevel 合集 manifest 自身也受级别约束。
+// TestNodeShareCollectionManifestFollowsLevel the collection manifest itself is bound by the level too.
 //
-// 背景：manifest 就是一份按内容寻址存的 JSON（hash 即它的 sha256），凭 hash 能
-// 直接 req 回条目清单——面板的「合集整包链接」正是靠这条。如果不把合集自身的
-// hash 也算进级别表，private 合集的 manifest 会被陌生人取走：文件内容仍被条目
-// 级别挡着，但条目路径与 hash 全泄了（等于把目录结构交出去）。
+// Background: a manifest is just content-addressed JSON (the hash is its sha256),
+// so from the hash one can req the entry listing directly -- the panel's
+// "whole-collection link" relies on exactly that. If the collection's own hash is
+// not also put into the level table, a private collection's manifest gets taken
+// by strangers: file contents are still blocked by the entry levels, but the entry
+// paths and hashes are all leaked (i.e. the directory structure is handed over).
 func TestNodeShareCollectionManifestFollowsLevel(t *testing.T) {
 	base := t.TempDir()
 	h := sha("a1")
@@ -306,7 +317,7 @@ func TestNodeShareCollectionManifestFollowsLevel(t *testing.T) {
 		t.Fatal("self must always reach its own collection manifest")
 	}
 
-	// unlisted 合集：不列出，但 manifest 凭 hash 可取（否则整包链接就没有意义）
+	// unlisted collection: not listed, but the manifest is fetchable by hash (otherwise a whole-collection link is meaningless)
 	if _, err := s.Update(ScopePatch{Collections: &[]ShareItem{{ID: cid, Level: model.LevelUnlisted}}}); err != nil {
 		t.Fatalf("collections: %v", err)
 	}

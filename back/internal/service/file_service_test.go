@@ -1,6 +1,6 @@
 package service
 
-// 注：本文件属于 legacy 代码（见 doc/archive/LEGACY.md，待删/待迁移）的测试，未逐一标注发现背景；「发现背景」规范对新代码生效。
+// Note: This file is a test for legacy code (see doc/archive/LEGACY.md, pending deletion/migration); discovery background is not annotated individually. The "discovery background" convention applies to new code.
 
 import (
 	"os"
@@ -88,14 +88,16 @@ func TestRegisterLocalStorageDisabled(t *testing.T) {
 	assert.Empty(t, hash)
 }
 
-// 发现背景（2026-08-16 传输层审阅 F2）：RegisterLocal 此前接受任意绝对路径，
-// 配合 LocalFetcher 的 provider 回读 = 匿名任意文件读取（可读 /etc/shadow 等）。
-// 修复：锚定 storage 根目录（Abs + EvalSymlinks 前缀判定）。此测试保护该边界。
+// Discovery background (2026-08-16 transport layer review F2): RegisterLocal
+// previously accepted any absolute path, combined with LocalFetcher's provider
+// readback = anonymous arbitrary file reading (can read /etc/shadow etc.).
+// Fix: anchor to the storage root (Abs + EvalSymlinks prefix check). This test
+// protects that boundary.
 func TestRegisterLocalOutsideStorageRootRejected(t *testing.T) {
 	tmpDir, svc := setupFileServiceTest()
 	defer os.RemoveAll(tmpDir)
 
-	outside := os.TempDir() // storage 根目录之外
+	outside := os.TempDir() // Outside the storage root
 	outFile := filepath.Join(outside, "peerdrive_root_escape_test.txt")
 	err := os.WriteFile(outFile, []byte("secret"), 0644)
 	assert.NoError(t, err)
@@ -107,8 +109,10 @@ func TestRegisterLocalOutsideStorageRootRejected(t *testing.T) {
 	assert.Empty(t, hash)
 }
 
-// 发现背景（2026-08-16 传输层审阅 F3）：CopyFile 目标路径此前可写任意位置
-// （绝对路径原样采用 / 相对路径 ../ 逃逸）。修复：写盘前校验目标在 storage 根内。
+// Discovery background (2026-08-16 transport layer review F3): CopyFile's
+// target path previously could write to any location (absolute paths used as-is
+// / relative paths ../ escape). Fix: validate target is inside storage root
+// before writing to disk.
 func TestCopyFileOutsideStorageRootRejected(t *testing.T) {
 	tmpDir, svc := setupFileServiceTest()
 	defer os.RemoveAll(tmpDir)
@@ -119,14 +123,15 @@ func TestCopyFileOutsideStorageRootRejected(t *testing.T) {
 	hash, err := svc.RegisterLocal(src, "src.txt")
 	assert.NoError(t, err)
 
-	// ../ 逃逸目标
+	// ../ escape target
 	_, err = svc.CopyFile(hash, filepath.Join("..", "..", "escape_me.txt"))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "outside storage root")
 }
 
-// 发现背景（2026-08-16 传输层审阅 H1 同类）：Delete 此前对任意 hash 直接 os.Remove
-// provider 路径。修复：先校验 hash，再确认路径在 storage 根内。
+// Discovery background (2026-08-16 transport layer review H1 same category):
+// Delete previously directly called os.Remove on the provider path for any hash.
+// Fix: validate hash first, then confirm path is inside storage root.
 func TestDeleteInvalidHashRejected(t *testing.T) {
 	_, svc := setupFileServiceTest()
 
@@ -135,15 +140,18 @@ func TestDeleteInvalidHashRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid hash")
 }
 
-// 发现背景（2026-08-16 传输层审阅 H6）：BrowseDir 此前接受任意绝对路径 → 任意目录列举。
-// 修复：锚定 storage 根。
+// Discovery background (2026-08-16 transport layer review H6): BrowseDir
+// previously accepted any absolute path → arbitrary directory listing.
+// Fix: anchor to the storage root.
 func TestBrowseDirOutsideStorageRootRejected(t *testing.T) {
 	_, svc := setupFileServiceTest()
 
-	// 必须是**目标平台上的绝对路径**：Windows 上 "/etc" 不是绝对路径
-	// （没有卷名），会被当成相对路径拼到 storage 根底下，于是判定放行、
-	// 失败原因是"文件不存在"而不是"越权"——断言就假绿了。
-	// （2026-09-20 真机 Windows 跑出来的，Linux CI 上永远暴露不了）
+	// Must be an **absolute path on the target platform**: on Windows "/etc"
+	// is not an absolute path (no volume name), it would be treated as a
+	// relative path joined under the storage root, so the check would pass and
+	// the failure reason would be "file not found" instead of "unauthorized" —
+	// the assertion would be a false positive.
+	// (Found on a real Windows machine 2026-09-20, never exposed on Linux CI)
 	outside := "/etc"
 	if runtime.GOOS == "windows" {
 		outside = filepath.Join(filepath.VolumeName(svc.storageDir), `\Windows\System32\drivers\etc`)

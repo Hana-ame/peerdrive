@@ -1,563 +1,563 @@
-# Peerdrive 项目文件参考手册
+# Peerdrive Project File Reference Manual
 
-> 全部文件路径与说明，按模块组织。最后更新: 2026-04-30。
-
----
-
-## 根目录
-
-| 文件 | 说明 |
-|------|------|
-| `README.md` | 项目简介 — P2P 内容寻址文件分享系统，含快速开始、端口说明 |
-| `.gitignore` | 根级 Git 忽略规则 |
-| `opencode.sh` | OpenCode 启动脚本 |
-| `test.sh` | 项目级测试入口脚本 |
+> All file paths and descriptions, organized by module. Last updated: 2026-04-30.
 
 ---
 
-## back/ — Go 后端 (Gin + SQLite + libp2p + BT DHT)
+## Root Directory
 
-### 入口
-
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `back/cmd/server/main.go` | 服务主入口 — 启动 Gin HTTP server、初始化 DB、注册路由 |
-
-### 配置
-
-| 文件 | 说明 |
-|------|------|
-| `back/internal/config/config.go` | 配置结构体与加载逻辑（端口、DB 路径、P2P 密钥等） |
-| `back/internal/config/config_test.go` | config 包单元测试 |
-| `back/go.mod` | Go 模块定义 (`peerdrive`)，含 libp2p/BT/Gin 依赖 |
-| `back/go.sum` | Go 依赖校验和 |
-| `back/.gitignore` | 后端 .gitignore |
-
-### Controller — HTTP 处理器
-
-| 文件 | 说明 |
-|------|------|
-| `back/internal/controller/anon.go` | 匿名合集 CRUD + 匿名文件上传/下载端点 |
-| `back/internal/controller/auth.go` | 用户认证端点（注册/登录/token 刷新） |
-| `back/internal/controller/collection.go` | 合集管理端点（创建/删除/列表/更新/合并/fork） |
-| `back/internal/controller/collection_test.go` | 合集控制器测试 |
-| `back/internal/controller/download.go` | 文件下载端点（HTTP 范围请求、断点续传） |
-| `back/internal/controller/download_test.go` | 下载控制器测试 |
-| `back/internal/controller/file.go` | 文件 CRUD 端点（上传/列表/重命名/移动/删除） |
-| `back/internal/controller/file_test.go` | 文件控制器测试 |
-| `back/internal/controller/fork.go` | 合集 fork 端点 |
-| `back/internal/controller/merge.go` | 合集合并端点（三方合并、冲突解决） |
-| `back/internal/controller/p2p.go` | P2P 传输控制端点（发起/取消/状态查询） |
-| `back/internal/controller/p2p_download.go` | P2P 下载专用端点 |
-| `back/internal/controller/ping.go` | 健康检查端点 (`/ping`) |
-| `back/internal/controller/ping_test.go` | ping 控制器测试 |
-| `back/internal/controller/share.go` | 分享链接端点（生成/验证/删除） |
-| `back/internal/controller/signal.go` | WebRTC 信令端点（SDP/ICE 交换） |
-| `back/internal/controller/sync.go` | 设备同步端点 |
-| `back/internal/controller/task.go` | 传输任务端点（列表/重试/取消/清除） |
-| `back/internal/controller/webrtc.go` | WebRTC 连接控制端点 |
-
-### Service — 业务逻辑层
-
-| 文件 | 说明 |
-|------|------|
-| `back/internal/service/anon_service.go` | 匿名合集业务逻辑（创建/读写/浏览/有效期管理） |
-| `back/internal/service/anon_service_test.go` | 匿名服务测试 |
-| `back/internal/service/auth_service.go` | 认证服务 — token 签发/验证/用户管理 |
-| `back/internal/service/downloader.go` | HTTP 下载器 — 从外部 URL 拉取文件并入库 |
-| `back/internal/service/downloader_test.go` | 下载器测试 |
-| `back/internal/service/file_service.go` | 文件服务 — 存储/索引/去重/SHA256 校验 |
-| `back/internal/service/file_service_test.go` | 文件服务测试 |
-| `back/internal/service/forward.go` | 请求转发 — 中继节点透明转发 |
-| `back/internal/service/ipfs_compat.go` | IPFS CID 兼容层 — CID ↔ SHA256 映射，boxo/IPFSService 回退 |
-| `back/internal/service/ipfs_service.go` | **IPFSService** — boxo Bitswap 客户端/服务端 + peerdriveBlockstore + DHT 提供/查询 |
-| `back/internal/service/node_registrar.go` | 节点注册 — 向 registration-server 注册与发现 |
-| `back/internal/service/p2p.go` | P2P 传输核心 — 双栈协调 (libp2p + BT DHT) |
-| `back/internal/service/p2p_connection.go` | P2P 连接管理 — 建立/维持/超时/重连 |
-| `back/internal/service/p2p_dual.go` | 双栈传输 — libp2p 与 BT 协议并行/切换 |
-| `back/internal/service/p2p_helpers.go` | P2P 辅助函数 |
-| `back/internal/service/p2p_multipeer.go` | 多 Peer 并发下载 — 分片调度与聚合 |
-| `back/internal/service/p2p_resume.go` | 断点续传 — 传输状态持久化、续传逻辑 |
-| `back/internal/service/p2p_test.go` | P2P 服务测试 |
-| `back/internal/service/p2p_transfer.go` | P2P 实际传输 — 数据块读写、速率控制 |
-| `back/internal/service/p2p_ws.go` | P2P WebSocket 通道 — 信令与元数据交换 |
-| `back/internal/service/peer_scanner.go` | Peer 扫描器 — 主动发现网络中的对等节点 |
-| `back/internal/service/peer_tracker.go` | Peer 追踪器 — 记录与管理已知节点状态 |
-| `back/internal/service/relay.go` | 中继服务 — 为 NAT 后节点提供流量中转 |
-| `back/internal/service/relay_registry.go` | 中继注册 — 中继节点登记与发现 |
-| `back/internal/service/signaling.go` | WebRTC 信令服务 — SDP/ICE 候选交换 |
-| `back/internal/service/sync_service.go` | 设备同步服务 — 多设备间合集/文件同步 |
-| `back/internal/service/sync_service_test.go` | 同步服务测试 |
-| `back/internal/service/universal_downloader.go` | 通用下载器 — 按优先级选择 HTTP/P2P/IPFS/BT 下载策略 |
-| `back/internal/service/universal_downloader_test.go` | 通用下载器测试 |
-| `back/internal/service/webdav.go` | WebDAV 服务 — 将合集挂载为 WebDAV 驱动器 |
-
-### Repository — 数据持久化 (SQLite)
-
-| 文件 | 说明 |
-|------|------|
-| `back/internal/repository/db.go` | 数据库初始化 — SQLite 连接、迁移、连接池 |
-| `back/internal/repository/anon_repo.go` | 匿名合集数据访问 — 创建/过期清理/读写 |
-| `back/internal/repository/collection_repo.go` | 合集数据访问 — CRUD/版本管理/成员查询 |
-| `back/internal/repository/collection_repo_test.go` | 合集 repo 测试 |
-| `back/internal/repository/file_repo.go` | 文件元数据访问 — SHA256 索引/路径管理 |
-| `back/internal/repository/file_repo_test.go` | 文件 repo 测试 |
-| `back/internal/repository/pin_repo.go` | 固定(Pin)记录访问 — 防止 GC 清理标记 |
-| `back/internal/repository/share_repo.go` | 分享链接记录访问 |
-| `back/internal/repository/sync_repo.go` | 同步状态记录访问 |
-| `back/internal/repository/task_repo.go` | 传输任务记录访问 — 创建/状态更新/查询 |
-| `back/internal/repository/user_repo.go` | 用户记录访问 |
-
-### Provider — 数据源抽象
-
-| 文件 | 说明 |
-|------|------|
-| `back/internal/provider/provider.go` | ContentProvider 接口定义 — 统一的文件块获取抽象 |
-| `back/internal/provider/provider_test.go` | Provider 接口测试 |
-| `back/internal/provider/local.go` | 本地文件系统 Provider |
-| `back/internal/provider/http.go` | HTTP/HTTPS 远程文件 Provider |
-| `back/internal/provider/ipfs.go` | IPFS 网络 Provider（通过 Kubo RPC / HTTP Gateway） |
-| `back/internal/provider/ipfs_test.go` | IPFS Provider 测试 |
-| `back/internal/provider/manager.go` | Provider 管理器 — 注册/选择/故障转移 |
-
-### p2p_bt — BT DHT 实现
-
-| 文件 | 说明 |
-|------|------|
-| `back/internal/p2p_bt/client.go` | BT DHT 客户端 — 节点启动、DHT 加入 |
-| `back/internal/p2p_bt/torrent.go` | Torrent 管理 — metainfo 解析、piece 校验 |
-| `back/internal/p2p_bt/magnet.go` | Magnet 链接解析与处理器 |
-| `back/internal/p2p_bt/tracker.go` | Tracker 通信 — announce/scrape |
-| `back/internal/p2p_bt/seeder.go` | Seeder — 本地文件做种 |
-| `back/internal/p2p_bt/piece.go` | Piece 管理 — 分片下载、bitfield 追踪 |
-| `back/internal/p2p_bt/bt_bridge.go` | BT 桥接层 — 连接 Provider 接口与 BT 下载 |
-| `back/internal/p2p_bt/bt_dht.go` | 扩展 DHT — PUT/GET 支持 (BEP-44) |
-| `back/internal/p2p_bt/bep44.go` | BEP-44 实现 — DHT 可变数据存储 |
-| `back/internal/p2p_bt/bep51.go` | BEP-51 实现 — DHT 不可变索引 |
-| `back/internal/p2p_bt/log.go` | BT 模块日志 |
-| `back/internal/p2p_bt/bt_test.go` | BT 模块测试 |
-
-### Model — 数据模型
-
-| 文件 | 说明 |
-|------|------|
-| `back/internal/model/anon.go` | 匿名合集模型 — 元数据、过期策略、token 映射 |
-| `back/internal/model/anon_test.go` | 匿名模型测试 |
-| `back/internal/model/collection.go` | 合集模型 — 版本链、成员关系、权限 |
-| `back/internal/model/collection_test.go` | 合集模型测试 |
-| `back/internal/model/file.go` | 文件模型 — SHA256 Cid、块信息、状态 |
-| `back/internal/model/peer.go` | 对等节点模型 — 地址、协议、能力 |
-| `back/internal/model/share.go` | 分享链接模型 — token/权限/过期 |
-| `back/internal/model/sync.go` | 同步状态模型 — 设备/操作/时间戳 |
-| `back/internal/model/transfer_task.go` | 传输任务模型 — 进度/优先级/重试 |
-| `back/internal/model/user.go` | 用户模型 — 身份/角色/密钥 |
-
-### Router — 路由与中间件
-
-| 文件 | 说明 |
-|------|------|
-| `back/internal/router/router.go` | Gin 路由注册 — 全部端点映射、中间件挂载 |
-| `back/internal/router/auth_middleware.go` | 认证中间件 — JWT 验证、角色检查、匿名访问控制 |
-
-### 其他
-
-| 文件 | 说明 |
-|------|------|
-| `back/internal/log/log.go` | 结构化日志封装 |
-| `back/internal/nodestate/nodestate.go` | 节点运行时状态管理（在线/离线/忙碌） |
-| `back/pkg/hashutil/hashutil.go` | SHA256 哈希工具函数 |
-| `back/docs/docs.go` | Swagger 文档生成代码 |
-
-### Test — 测试脚本
-
-| 文件 | 说明 |
-|------|------|
-| `back/test/all.sh` | 全部测试入口 |
-| `back/test/e2e-all.sh` | E2E 全量测试 |
-| `back/test/anonymous_test.sh` | 匿名合集测试 |
-| `back/test/auth_test.sh` | 认证流程测试 |
-| `back/test/auth-full-test.sh` | 认证全量测试 |
-| `back/test/auth-node-test.sh` | 认证节点测试 |
-| `back/test/bt-full-test.sh` | BT DHT 全量集成测试 |
-| `back/test/bt-integration/create-torrent.sh` | 创建 Torrent 辅助脚本 |
-| `back/test/bt-integration/main.go` | BT 集成测试入口程序 |
-| `back/test/e2e-all.sh` | E2E 全量测试 |
-| `back/test/ipfs-full-test.sh` | IPFS 全量集成测试 |
-| `back/test/ipfs-integration/main.go` | IPFS 集成测试入口程序 |
-| `back/test/ipfs-peer-test.sh` | IPFS 多 Peer 测试 |
-| `back/test/p2p.sh` | P2P 基础测试 |
-| `back/test/p2p-full-test.sh` | P2P 全量测试 |
-| `back/test/p2p_transfer.sh` | P2P 传输测试 |
-| `back/test/peerdrive-functional.mjs` | Peerdrive 功能测试 (Node.js) |
-| `back/test/peerdrive-new-features.mjs` | 新功能测试 (Node.js) |
-| `back/test/peerdrive-smoke.mjs` | 冒烟测试 (Node.js) |
-| `back/test/register.sh` | 注册流程测试 |
-| ~~`back/test/reg-server-user-mgmt.sh`~~ | 注册服务器用户管理测试（已随旧栈清理删除） |
-| `back/test/relay.sh` | 中继功能测试 |
-| `back/test/storage-full-test.sh` | 存储全量测试 |
-| `back/test/upload.sh` | 上传功能测试 |
-| `back/test/webrtc_signal_test.sh` | WebRTC 信令测试 |
-| `back/test/webrtc-test.sh` | WebRTC 全量测试 |
-| `back/test/anon-collection.sh` | 匿名合集测试 |
-| `back/test/p2p-full-test.sh` | P2P 全量测试 |
-| `back/test/diagnose.py` | 测试诊断 Python 脚本 |
-| `back/testdata/test.txt` | 测试用数据文件 |
+| `README.md` | Project overview — P2P content-addressed file sharing system, with quick start, port descriptions |
+| `.gitignore` | Root-level Git ignore rules |
+| `opencode.sh` | OpenCode launch script |
+| `test.sh` | Project-level test entry script |
 
 ---
 
-## front/ — React 前端 (Vite + TailwindCSS)
+## back/ — Go Backend (Gin + SQLite + libp2p + BT DHT)
 
-### 入口与配置
+### Entry Points
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `front/index.html` | HTML 入口 — SPA 挂载点 |
-| `front/package.json` | Node 依赖定义 |
-| `front/package-lock.json` | 依赖锁文件 |
-| `front/vite.config.ts` | Vite 构建配置 |
-| `front/vitest.config.ts` | Vitest 测试配置 |
-| `front/tailwind.config.js` | TailwindCSS 配置 |
-| `front/postcss.config.js` | PostCSS 配置 |
-| `front/.gitignore` | 前端 .gitignore |
-| `front/README.md` | 前端 README |
+| `back/cmd/server/main.go` | Server main entry — starts Gin HTTP server, initializes DB, registers routes |
 
-### public/ — 静态资源
+### Configuration
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `front/public/favicon.svg` | 网站图标 |
-| `front/public/icons.svg` | SVG 图标 sprite |
-| `front/public/icons/icon-192.png` | PWA 192px 图标 |
-| `front/public/icons/icon-512.png` | PWA 512px 图标 |
+| `back/internal/config/config.go` | Config struct and loading logic (ports, DB path, P2P keys, etc.) |
+| `back/internal/config/config_test.go` | Config package unit tests |
+| `back/go.mod` | Go module definition (`peerdrive`), includes libp2p/BT/Gin dependencies |
+| `back/go.sum` | Go dependency checksums |
+| `back/.gitignore` | Backend .gitignore |
+
+### Controller — HTTP Handlers
+
+| File | Description |
+|------|------|
+| `back/internal/controller/anon.go` | Anonymous collection CRUD + anonymous file upload/download endpoints |
+| `back/internal/controller/auth.go` | User authentication endpoints (register/login/token refresh) |
+| `back/internal/controller/collection.go` | Collection management endpoints (create/delete/list/update/merge/fork) |
+| `back/internal/controller/collection_test.go` | Collection controller tests |
+| `back/internal/controller/download.go` | File download endpoints (HTTP range requests, resumable download) |
+| `back/internal/controller/download_test.go` | Download controller tests |
+| `back/internal/controller/file.go` | File CRUD endpoints (upload/list/rename/move/delete) |
+| `back/internal/controller/file_test.go` | File controller tests |
+| `back/internal/controller/fork.go` | Collection fork endpoint |
+| `back/internal/controller/merge.go` | Collection merge endpoint (three-way merge, conflict resolution) |
+| `back/internal/controller/p2p.go` | P2P transfer control endpoints (initiate/cancel/status query) |
+| `back/internal/controller/p2p_download.go` | P2P download-specific endpoints |
+| `back/internal/controller/ping.go` | Health check endpoint (`/ping`) |
+| `back/internal/controller/ping_test.go` | Ping controller tests |
+| `back/internal/controller/share.go` | Share link endpoints (generate/verify/delete) |
+| `back/internal/controller/signal.go` | WebRTC signaling endpoints (SDP/ICE exchange) |
+| `back/internal/controller/sync.go` | Device sync endpoints |
+| `back/internal/controller/task.go` | Transfer task endpoints (list/retry/cancel/clear) |
+| `back/internal/controller/webrtc.go` | WebRTC connection control endpoints |
+
+### Service — Business Logic Layer
+
+| File | Description |
+|------|------|
+| `back/internal/service/anon_service.go` | Anonymous collection business logic (create/read/write/browse/expiry management) |
+| `back/internal/service/anon_service_test.go` | Anonymous service tests |
+| `back/internal/service/auth_service.go` | Authentication service — token issuance/verification/user management |
+| `back/internal/service/downloader.go` | HTTP downloader — fetches files from external URLs and indexes them |
+| `back/internal/service/downloader_test.go` | Downloader tests |
+| `back/internal/service/file_service.go` | File service — storage/indexing/deduplication/SHA256 verification |
+| `back/internal/service/file_service_test.go` | File service tests |
+| `back/internal/service/forward.go` | Request forwarding — transparent forwarding through relay nodes |
+| `back/internal/service/ipfs_compat.go` | IPFS CID compatibility layer — CID ↔ SHA256 mapping, boxo/IPFSService fallback |
+| `back/internal/service/ipfs_service.go` | **IPFSService** — boxo Bitswap client/server + peerdriveBlockstore + DHT provide/lookup |
+| `back/internal/service/node_registrar.go` | Node registration — register and discover with registration-server |
+| `back/internal/service/p2p.go` | P2P transfer core — dual-stack coordination (libp2p + BT DHT) |
+| `back/internal/service/p2p_connection.go` | P2P connection management — establish/maintain/timeout/reconnect |
+| `back/internal/service/p2p_dual.go` | Dual-stack transfer — libp2p and BT protocol parallel/switching |
+| `back/internal/service/p2p_helpers.go` | P2P helper functions |
+| `back/internal/service/p2p_multipeer.go` | Multi-Peer concurrent download — chunk scheduling and aggregation |
+| `back/internal/service/p2p_resume.go` | Resumable transfer — transfer state persistence, resume logic |
+| `back/internal/service/p2p_test.go` | P2P service tests |
+| `back/internal/service/p2p_transfer.go` | P2P actual transfer — data block read/write, rate control |
+| `back/internal/service/p2p_ws.go` | P2P WebSocket channel — signaling and metadata exchange |
+| `back/internal/service/peer_scanner.go` | Peer scanner — actively discovers peer nodes on the network |
+| `back/internal/service/peer_tracker.go` | Peer tracker — records and manages known node states |
+| `back/internal/service/relay.go` | Relay service — provides traffic relay for NAT'd nodes |
+| `back/internal/service/relay_registry.go` | Relay registration — relay node registration and discovery |
+| `back/internal/service/signaling.go` | WebRTC signaling service — SDP/ICE candidate exchange |
+| `back/internal/service/sync_service.go` | Device sync service — multi-device collection/file sync |
+| `back/internal/service/sync_service_test.go` | Sync service tests |
+| `back/internal/service/universal_downloader.go` | Universal downloader — selects HTTP/P2P/IPFS/BT download strategy by priority |
+| `back/internal/service/universal_downloader_test.go` | Universal downloader tests |
+| `back/internal/service/webdav.go` | WebDAV service — mounts collections as WebDAV drives |
+
+### Repository — Data Persistence (SQLite)
+
+| File | Description |
+|------|------|
+| `back/internal/repository/db.go` | Database initialization — SQLite connection, migration, connection pool |
+| `back/internal/repository/anon_repo.go` | Anonymous collection data access — create/expiry cleanup/read/write |
+| `back/internal/repository/collection_repo.go` | Collection data access — CRUD/version management/member queries |
+| `back/internal/repository/collection_repo_test.go` | Collection repo tests |
+| `back/internal/repository/file_repo.go` | File metadata access — SHA256 indexing/path management |
+| `back/internal/repository/file_repo_test.go` | File repo tests |
+| `back/internal/repository/pin_repo.go` | Pin record access — prevents GC cleanup marks |
+| `back/internal/repository/share_repo.go` | Share link record access |
+| `back/internal/repository/sync_repo.go` | Sync state record access |
+| `back/internal/repository/task_repo.go` | Transfer task record access — create/status update/query |
+| `back/internal/repository/user_repo.go` | User record access |
+
+### Provider — Data Source Abstraction
+
+| File | Description |
+|------|------|
+| `back/internal/provider/provider.go` | ContentProvider interface definition — unified file block acquisition abstraction |
+| `back/internal/provider/provider_test.go` | Provider interface tests |
+| `back/internal/provider/local.go` | Local filesystem Provider |
+| `back/internal/provider/http.go` | HTTP/HTTPS remote file Provider |
+| `back/internal/provider/ipfs.go` | IPFS network Provider (via Kubo RPC / HTTP Gateway) |
+| `back/internal/provider/ipfs_test.go` | IPFS Provider tests |
+| `back/internal/provider/manager.go` | Provider manager — register/select/failover |
+
+### p2p_bt — BT DHT Implementation
+
+| File | Description |
+|------|------|
+| `back/internal/p2p_bt/client.go` | BT DHT client — node startup, DHT join |
+| `back/internal/p2p_bt/torrent.go` | Torrent management — metainfo parsing, piece verification |
+| `back/internal/p2p_bt/magnet.go` | Magnet link parsing and handler |
+| `back/internal/p2p_bt/tracker.go` | Tracker communication — announce/scrape |
+| `back/internal/p2p_bt/seeder.go` | Seeder — local file seeding |
+| `back/internal/p2p_bt/piece.go` | Piece management — chunked download, bitfield tracking |
+| `back/internal/p2p_bt/bt_bridge.go` | BT bridge layer — connects Provider interface with BT download |
+| `back/internal/p2p_bt/bt_dht.go` | Extended DHT — PUT/GET support (BEP-44) |
+| `back/internal/p2p_bt/bep44.go` | BEP-44 implementation — DHT mutable data storage |
+| `back/internal/p2p_bt/bep51.go` | BEP-51 implementation — DHT immutable indexing |
+| `back/internal/p2p_bt/log.go` | BT module logging |
+| `back/internal/p2p_bt/bt_test.go` | BT module tests |
+
+### Model — Data Models
+
+| File | Description |
+|------|------|
+| `back/internal/model/anon.go` | Anonymous collection model — metadata, expiry policy, token mapping |
+| `back/internal/model/anon_test.go` | Anonymous model tests |
+| `back/internal/model/collection.go` | Collection model — version chain, membership, permissions |
+| `back/internal/model/collection_test.go` | Collection model tests |
+| `back/internal/model/file.go` | File model — SHA256 Cid, block info, status |
+| `back/internal/model/peer.go` | Peer node model — address, protocol, capabilities |
+| `back/internal/model/share.go` | Share link model — token/permissions/expiry |
+| `back/internal/model/sync.go` | Sync state model — device/operations/timestamps |
+| `back/internal/model/transfer_task.go` | Transfer task model — progress/priority/retry |
+| `back/internal/model/user.go` | User model — identity/role/keys |
+
+### Router — Routing and Middleware
+
+| File | Description |
+|------|------|
+| `back/internal/router/router.go` | Gin route registration — all endpoint mappings, middleware mounting |
+| `back/internal/router/auth_middleware.go` | Auth middleware — JWT verification, role checking, anonymous access control |
+
+### Others
+
+| File | Description |
+|------|------|
+| `back/internal/log/log.go` | Structured logging wrapper |
+| `back/internal/nodestate/nodestate.go` | Node runtime state management (online/offline/busy) |
+| `back/pkg/hashutil/hashutil.go` | SHA256 hash utility functions |
+| `back/docs/docs.go` | Swagger documentation generated code |
+
+### Test — Test Scripts
+
+| File | Description |
+|------|------|
+| `back/test/all.sh` | All tests entry |
+| `back/test/e2e-all.sh` | E2E full test suite |
+| `back/test/anonymous_test.sh` | Anonymous collection tests |
+| `back/test/auth_test.sh` | Authentication flow tests |
+| `back/test/auth-full-test.sh` | Full authentication tests |
+| `back/test/auth-node-test.sh` | Auth node tests |
+| `back/test/bt-full-test.sh` | BT DHT full integration tests |
+| `back/test/bt-integration/create-torrent.sh` | Torrent creation helper script |
+| `back/test/bt-integration/main.go` | BT integration test entry program |
+| `back/test/e2e-all.sh` | E2E full test suite |
+| `back/test/ipfs-full-test.sh` | IPFS full integration tests |
+| `back/test/ipfs-integration/main.go` | IPFS integration test entry program |
+| `back/test/ipfs-peer-test.sh` | IPFS multi-peer tests |
+| `back/test/p2p.sh` | P2P basic tests |
+| `back/test/p2p-full-test.sh` | P2P full tests |
+| `back/test/p2p_transfer.sh` | P2P transfer tests |
+| `back/test/peerdrive-functional.mjs` | Peerdrive functional tests (Node.js) |
+| `back/test/peerdrive-new-features.mjs` | New features tests (Node.js) |
+| `back/test/peerdrive-smoke.mjs` | Smoke tests (Node.js) |
+| `back/test/register.sh` | Registration flow tests |
+| `back/test/reg-server-user-mgmt.sh` | Registration server user management tests (deleted with old stack cleanup) |
+| `back/test/relay.sh` | Relay functionality tests |
+| `back/test/storage-full-test.sh` | Full storage tests |
+| `back/test/upload.sh` | Upload functionality tests |
+| `back/test/webrtc_signal_test.sh` | WebRTC signaling tests |
+| `back/test/webrtc-test.sh` | Full WebRTC tests |
+| `back/test/anon-collection.sh` | Anonymous collection tests |
+| `back/test/p2p-full-test.sh` | P2P full tests |
+| `back/test/diagnose.py` | Test diagnostics Python script |
+| `back/testdata/test.txt` | Test data file |
+
+---
+
+## front/ — React Frontend (Vite + TailwindCSS)
+
+### Entry and Configuration
+
+| File | Description |
+|------|------|
+| `front/index.html` | HTML entry — SPA mount point |
+| `front/package.json` | Node dependencies definition |
+| `front/package-lock.json` | Dependency lock file |
+| `front/vite.config.ts` | Vite build configuration |
+| `front/vitest.config.ts` | Vitest test configuration |
+| `front/tailwind.config.js` | TailwindCSS configuration |
+| `front/postcss.config.js` | PostCSS configuration |
+| `front/.gitignore` | Frontend .gitignore |
+| `front/README.md` | Frontend README |
+
+### public/ — Static Assets
+
+| File | Description |
+|------|------|
+| `front/public/favicon.svg` | Website icon |
+| `front/public/icons.svg` | SVG icon sprite |
+| `front/public/icons/icon-192.png` | PWA 192px icon |
+| `front/public/icons/icon-512.png` | PWA 512px icon |
 | `front/public/manifest.json` | PWA manifest |
-| `front/public/service-worker.js` | Service Worker (离线缓存) |
-| `front/public/_redirects` | Netlify/Caddy 重定向规则 |
+| `front/public/service-worker.js` | Service Worker (offline caching) |
+| `front/public/_redirects` | Netlify/Caddy redirect rules |
 
-### src/ — 源代码
+### src/ — Source Code
 
-#### 核心框架
+#### Core Framework
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `front/src/main.jsx` | React 应用入口 — 挂载根组件与路由 |
-| `front/src/App.jsx` | 根组件 — 全局布局、路由分发、状态管理 |
-| `front/src/api.js` | API 客户端 — Axios 封装、token 注入、错误处理 |
-| `front/src/index.css` | 全局样式 — Tailwind 指令与自定义 |
+| `front/src/main.jsx` | React application entry — mounts root component and routes |
+| `front/src/App.jsx` | Root component — global layout, route distribution, state management |
+| `front/src/api.js` | API client — Axios wrapper, token injection, error handling |
+| `front/src/index.css` | Global styles — Tailwind directives and custom |
 
-#### components/ — 共享组件
+#### components/ — Shared Components
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `front/src/components/ActiveConnPanel.jsx` | 活跃连接面板 — 显示当前 P2P 连接列表 |
-| `front/src/components/AnonCollectionManager.jsx` | 匿名合集管理器 — 创建与管理匿名合集 |
-| `front/src/components/CollectionBuilder.jsx` | 合集构建向导 |
-| `front/src/components/CollectionCard.jsx` | 合集卡片 — 封面/标题/摘要展示 |
-| `front/src/components/CommentSection.jsx` | 评论区组件 |
-| `front/src/components/FileTree.jsx` | 文件树组件 — 树形目录浏览与操作 |
-| `front/src/components/LLMAssistant.jsx` | LLM AI 助手面板 |
-| `front/src/components/MobileNav.jsx` | 移动端导航栏 |
-| `front/src/components/Navbar.jsx` | 桌面端导航栏 |
-| `front/src/components/P2PStatus.jsx` | P2P 连接状态指示器 |
-| `front/src/components/PathRegistrar.jsx` | 路径注册组件 — 注册到 registration-server |
-| `front/src/components/PeerDetailPanel.jsx` | Peer 详情面板 — 节点信息/状态/统计 |
-| `front/src/components/ServiceStatus.jsx` | 后端服务状态指示器 (ping-based) |
-| `front/src/components/SettingsSection.jsx` | 设置面板组件 |
-| `front/src/components/Sha256Manager.jsx` | SHA256 文件管理 — 内容寻址操作 |
-| `front/src/components/UserGroupPicker.jsx` | 用户/群组选择器 |
-| `front/src/components/VersionLog.jsx` | 版本历史查看组件 (Git 风格) |
-| `front/src/components/VisibilityPicker.jsx` | 可见性选择器 (公开/私有/群组) |
-| `front/src/components/WebRTCPeer.jsx` | WebRTC Peer 管理组件 |
-| `front/src/components/WebRTCTransfer.jsx` | WebRTC 文件传输组件 |
+| `front/src/components/ActiveConnPanel.jsx` | Active connections panel — displays current P2P connection list |
+| `front/src/components/AnonCollectionManager.jsx` | Anonymous collection manager — create and manage anonymous collections |
+| `front/src/components/CollectionBuilder.jsx` | Collection builder wizard |
+| `front/src/components/CollectionCard.jsx` | Collection card — cover/title/summary display |
+| `front/src/components/CommentSection.jsx` | Comment section component |
+| `front/src/components/FileTree.jsx` | File tree component — tree directory browsing and operations |
+| `front/src/components/LLMAssistant.jsx` | LLM AI assistant panel |
+| `front/src/components/MobileNav.jsx` | Mobile navigation bar |
+| `front/src/components/Navbar.jsx` | Desktop navigation bar |
+| `front/src/components/P2PStatus.jsx` | P2P connection status indicator |
+| `front/src/components/PathRegistrar.jsx` | Path registrar component — registers with registration-server |
+| `front/src/components/PeerDetailPanel.jsx` | Peer detail panel — node info/status/statistics |
+| `front/src/components/ServiceStatus.jsx` | Backend service status indicator (ping-based) |
+| `front/src/components/SettingsSection.jsx` | Settings panel component |
+| `front/src/components/Sha256Manager.jsx` | SHA256 file management — content-addressed operations |
+| `front/src/components/UserGroupPicker.jsx` | User/group picker |
+| `front/src/components/VersionLog.jsx` | Version history viewer (Git-style) |
+| `front/src/components/VisibilityPicker.jsx` | Visibility picker (public/private/group) |
+| `front/src/components/WebRTCPeer.jsx` | WebRTC Peer management component |
+| `front/src/components/WebRTCTransfer.jsx` | WebRTC file transfer component |
 
-#### pages/AnonCreator/ — 匿名合集创建页
+#### pages/AnonCreator/ — Anonymous Collection Creator Page
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `front/src/pages/AnonCreator/index.jsx` | AnonCreator 页主入口 — 三列布局容器 |
-| `front/src/pages/AnonCreator/constants.js` | 页面常量（分类、标签、默认值） |
-| `front/src/pages/AnonCreator/utils.js` | 工具函数（格式化、校验、状态计算） |
-| `front/src/pages/AnonCreator/CollBrowser.jsx` | 合集浏览器 — 浏览可引用合集 |
-| `front/src/pages/AnonCreator/CollBrowserNav.jsx` | 合集浏览器导航 |
-| `front/src/pages/AnonCreator/CollectionHeader.jsx` | 合集头信息展示 |
-| `front/src/pages/AnonCreator/CollectionRow.jsx` | 合集列表行 |
-| `front/src/pages/AnonCreator/CollFileRow.jsx` | 合集内文件行 |
-| `front/src/pages/AnonCreator/EditorPanel.jsx` | 编辑面板 — 合集元数据编辑 |
-| `front/src/pages/AnonCreator/EditorToolbar.jsx` | 编辑器工具栏 |
-| `front/src/pages/AnonCreator/FileSourceRow.jsx` | 文件来源行 — 来源选择与预览 |
-| `front/src/pages/AnonCreator/LeftPanel.jsx` | 左面板 — 数据源筛选 |
-| `front/src/pages/AnonCreator/MiddlePanel.jsx` | 中面板 — 文件预览 |
-| `front/src/pages/AnonCreator/RightPanel.jsx` | 右面板 — 合集编辑/发布 |
-| `front/src/pages/AnonCreator/NamePrompt.jsx` | 命名提示弹框 |
-| `front/src/pages/AnonCreator/RegisteredView.jsx` | 已注册合集视图 |
-| `front/src/pages/AnonCreator/SearchHistory.jsx` | 搜索历史记录 |
-| `front/src/pages/AnonCreator/SourceFilters.jsx` | 数据源筛选器 |
-| `front/src/pages/AnonCreator/SourceTabs.jsx` | 数据源标签页 |
-| `front/src/pages/AnonCreator/SplitHandle.jsx` | 面板分割手柄（拖拽调整大小） |
-| `front/src/pages/AnonCreator/SystemBrowse.jsx` | 系统文件浏览 |
-| `front/src/pages/AnonCreator/TimelineView.jsx` | 时间线视图 |
-| `front/src/pages/AnonCreator/Toast.jsx` | Toast 通知 |
+| `front/src/pages/AnonCreator/index.jsx` | AnonCreator page main entry — three-column layout container |
+| `front/src/pages/AnonCreator/constants.js` | Page constants (categories, tags, default values) |
+| `front/src/pages/AnonCreator/utils.js` | Utility functions (formatting, validation, state calculation) |
+| `front/src/pages/AnonCreator/CollBrowser.jsx` | Collection browser — browse referencable collections |
+| `front/src/pages/AnonCreator/CollBrowserNav.jsx` | Collection browser navigation |
+| `front/src/pages/AnonCreator/CollectionHeader.jsx` | Collection header information display |
+| `front/src/pages/AnonCreator/CollectionRow.jsx` | Collection list row |
+| `front/src/pages/AnonCreator/CollFileRow.jsx` | File row within collection |
+| `front/src/pages/AnonCreator/EditorPanel.jsx` | Editor panel — collection metadata editing |
+| `front/src/pages/AnonCreator/EditorToolbar.jsx` | Editor toolbar |
+| `front/src/pages/AnonCreator/FileSourceRow.jsx` | File source row — source selection and preview |
+| `front/src/pages/AnonCreator/LeftPanel.jsx` | Left panel — data source filtering |
+| `front/src/pages/AnonCreator/MiddlePanel.jsx` | Middle panel — file preview |
+| `front/src/pages/AnonCreator/RightPanel.jsx` | Right panel — collection edit/publish |
+| `front/src/pages/AnonCreator/NamePrompt.jsx` | Naming prompt dialog |
+| `front/src/pages/AnonCreator/RegisteredView.jsx` | Registered collection view |
+| `front/src/pages/AnonCreator/SearchHistory.jsx` | Search history records |
+| `front/src/pages/AnonCreator/SourceFilters.jsx` | Data source filter |
+| `front/src/pages/AnonCreator/SourceTabs.jsx` | Data source tabs |
+| `front/src/pages/AnonCreator/SplitHandle.jsx` | Panel split handle (drag to resize) |
+| `front/src/pages/AnonCreator/SystemBrowse.jsx` | System file browser |
+| `front/src/pages/AnonCreator/TimelineView.jsx` | Timeline view |
+| `front/src/pages/AnonCreator/Toast.jsx` | Toast notification |
 
-#### pages/AnonExplorer/ — 匿名合集浏览页
+#### pages/AnonExplorer/ — Anonymous Collection Explorer Page
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `front/src/pages/AnonExplorer/index.jsx` | AnonExplorer 页主入口 |
-| `front/src/pages/AnonExplorer/utils.js` | 工具函数 |
-| `front/src/pages/AnonExplorer/BreadcrumbNav.jsx` | 面包屑导航 |
-| `front/src/pages/AnonExplorer/CollectionHeader.jsx` | 合集头信息展示 |
-| `front/src/pages/AnonExplorer/EmptyState.jsx` | 空状态占位 |
-| `front/src/pages/AnonExplorer/FileList.jsx` | 文件列表 |
-| `front/src/pages/AnonExplorer/FileRow.jsx` | 文件列表行 |
-| `front/src/pages/AnonExplorer/GenericFilePreview.jsx` | 通用文件预览（二进制/未知格式） |
-| `front/src/pages/AnonExplorer/ImagePreview.jsx` | 图片预览组件 |
-| `front/src/pages/AnonExplorer/NestedCollectionLink.jsx` | 嵌套合集链接（合集内引用合集） |
-| `front/src/pages/AnonExplorer/PdfPreview.jsx` | PDF 预览组件 |
-| `front/src/pages/AnonExplorer/SearchBar.jsx` | 搜索栏 |
-| `front/src/pages/AnonExplorer/SingleFilePreview.jsx` | 单文件预览 |
-| `front/src/pages/AnonExplorer/TextPreview.jsx` | 文本文件预览 |
-| `front/src/pages/AnonExplorer/Toast.jsx` | Toast 通知 |
+| `front/src/pages/AnonExplorer/index.jsx` | AnonExplorer page main entry |
+| `front/src/pages/AnonExplorer/utils.js` | Utility functions |
+| `front/src/pages/AnonExplorer/BreadcrumbNav.jsx` | Breadcrumb navigation |
+| `front/src/pages/AnonExplorer/CollectionHeader.jsx` | Collection header information display |
+| `front/src/pages/AnonExplorer/EmptyState.jsx` | Empty state placeholder |
+| `front/src/pages/AnonExplorer/FileList.jsx` | File list |
+| `front/src/pages/AnonExplorer/FileRow.jsx` | File list row |
+| `front/src/pages/AnonExplorer/GenericFilePreview.jsx` | Generic file preview (binary/unknown format) |
+| `front/src/pages/AnonExplorer/ImagePreview.jsx` | Image preview component |
+| `front/src/pages/AnonExplorer/NestedCollectionLink.jsx` | Nested collection link (collection referencing collection) |
+| `front/src/pages/AnonExplorer/PdfPreview.jsx` | PDF preview component |
+| `front/src/pages/AnonExplorer/SearchBar.jsx` | Search bar |
+| `front/src/pages/AnonExplorer/SingleFilePreview.jsx` | Single file preview |
+| `front/src/pages/AnonExplorer/TextPreview.jsx` | Text file preview |
+| `front/src/pages/AnonExplorer/Toast.jsx` | Toast notification |
 
-#### pages/ — 其他页面
+#### pages/ — Other Pages
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `front/src/pages/BTController.jsx` | BT DHT 控制器页面 |
-| `front/src/pages/BTPanel.jsx` | BT 面板 — 种子/磁力链接管理 |
-| `front/src/pages/DHTExplorer.jsx` | DHT 网络浏览器 |
-| `front/src/pages/Explorer.jsx` | 文件管理器 — 全局文件浏览 |
-| `front/src/pages/FileManager.jsx` | 文件管理页 — 上传/整理/删除 |
-| `front/src/pages/IPFSPanel.jsx` | IPFS 面板 — CID 查询/内容管理 |
-| `front/src/pages/P2PDashboard.jsx` | P2P 仪表盘 — 全局状态总览 |
-| `front/src/pages/P2PPanel.jsx` | P2P 面板 — 节点/连接/传输控制 |
-| `front/src/pages/P2PTopology.jsx` | P2P 拓扑图 — 网络可视化 |
-| `front/src/pages/Plaza.jsx` | 合集广场 — 公开合集浏览与发现 |
-| `front/src/pages/Settings.jsx` | 设置页面 |
+| `front/src/pages/BTController.jsx` | BT DHT controller page |
+| `front/src/pages/BTPanel.jsx` | BT panel — torrent/magnet link management |
+| `front/src/pages/DHTExplorer.jsx` | DHT network browser |
+| `front/src/pages/Explorer.jsx` | File manager — global file browsing |
+| `front/src/pages/FileManager.jsx` | File management page — upload/organize/delete |
+| `front/src/pages/IPFSPanel.jsx` | IPFS panel — CID query/content management |
+| `front/src/pages/P2PDashboard.jsx` | P2P dashboard — global status overview |
+| `front/src/pages/P2PPanel.jsx` | P2P panel — node/connection/transfer control |
+| `front/src/pages/P2PTopology.jsx` | P2P topology graph — network visualization |
+| `front/src/pages/Plaza.jsx` | Collection plaza — public collection browsing and discovery |
+| `front/src/pages/Settings.jsx` | Settings page |
 
-#### storage/ — 本地存储
+#### storage/ — Local Storage
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `front/src/storage/localDB.js` | 本地数据库 — IndexedDB 封装、前端缓存 |
-| `front/src/storage/syncManager.js` | 同步管理器 — 前端 ⇄ 后端数据同步 |
+| `front/src/storage/localDB.js` | Local database — IndexedDB wrapper, frontend cache |
+| `front/src/storage/syncManager.js` | Sync manager — frontend ⇄ backend data sync |
 
-#### tests/ — 前端测试
+#### tests/ — Frontend Tests
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `front/tests/setup.js` | 测试环境初始化 (jsdom, mocks) |
-| `front/tests/components.test.jsx` | 组件单元测试 |
-| `front/tests/FileTree.test.jsx` | FileTree 组件单元测试 |
-| `front/tests/smoke.test.jsx` | 前端冒烟测试 |
-| `front/tests/playwright-smoke.mjs` | Playwright E2E 冒烟测试 |
+| `front/tests/setup.js` | Test environment initialization (jsdom, mocks) |
+| `front/tests/components.test.jsx` | Component unit tests |
+| `front/tests/FileTree.test.jsx` | FileTree component unit tests |
+| `front/tests/smoke.test.jsx` | Frontend smoke tests |
+| `front/tests/playwright-smoke.mjs` | Playwright E2E smoke tests |
 
-#### dist/ — 构建产物
+#### dist/ — Build Artifacts
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `front/dist/index.html` | 构建后 HTML 入口 |
-| `front/dist/manifest.json` | 构建 manifest |
-| `front/dist/favicon.svg` | 构建后 favicon |
-| `front/dist/icons.svg` | 构建后 icon sprite |
-| `front/dist/service-worker.js` | 构建后 Service Worker |
-| `front/dist/assets/index-C5vd8htV.css` | 构建后 CSS bundle |
-| `front/dist/assets/index-D4NOIXnB.js` | 构建后 JS bundle |
+| `front/dist/index.html` | Built HTML entry |
+| `front/dist/manifest.json` | Build manifest |
+| `front/dist/favicon.svg` | Built favicon |
+| `front/dist/icons.svg` | Built icon sprite |
+| `front/dist/service-worker.js` | Built Service Worker |
+| `front/dist/assets/index-C5vd8htV.css` | Built CSS bundle |
+| `front/dist/assets/index-D4NOIXnB.js` | Built JS bundle |
 
 ---
 
-## doc/ — 项目文档
+## doc/ — Project Documentation
 
-### 入口与仪表盘
+### Entry and Dashboard
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/README.md` | 文档总览 + 完整索引 — 架构、分层设计、模块映射、所有文档入口 |
-| `doc/ROADMAP.md` | 开发顺序排期（当前有效；与 `doc/archive/report/ROADMAP.md` 那份 v3.0 历史路线图区分） |
-| `doc/REFACTOR.md` | 重构手册 |
-| `doc/NETDISK.md` | 网盘（PeerJS 节点 + 面板）手册 |
-| `doc/LAYERS.md` | 分层架构说明 |
-| `doc/NODE.md` / `doc/NODE-API.md` | 节点 / 节点 API |
-| `doc/PEERSIGNAL.md` | 自托管信令 |
-| `doc/PROJECT-VISION.md` | 产品愿景 |
-| `doc/HTTP_API_PROXY.md` | HTTP API 代理 |
-| `doc/TODO-SIMPLIFY.md` | 简化待办 |
-| `doc/dht-wire-format.md` | DHT 线格式 |
-| `doc/source-control.md` | 版本控制（合集 fork/merge） |
-| `doc/api-reference.md` | API 参考（简版） |
-| `doc/tutorial/` | 教程（面向使用者） |
+| `doc/README.md` | Documentation overview + full index — architecture, layered design, module mapping, all document entries |
+| `doc/ROADMAP.md` | Development sequence schedule (currently active; distinguished from `doc/archive/report/ROADMAP.md` v3.0 historical roadmap) |
+| `doc/REFACTOR.md` | Refactoring manual |
+| `doc/NETDISK.md` | Netdisk (PeerJS node + panel) manual |
+| `doc/LAYERS.md` | Layered architecture description |
+| `doc/NODE.md` / `doc/NODE-API.md` | Node / Node API |
+| `doc/PEERSIGNAL.md` | Self-hosted signaling |
+| `doc/PROJECT-VISION.md` | Product vision |
+| `doc/HTTP_API_PROXY.md` | HTTP API proxy |
+| `doc/TODO-SIMPLIFY.md` | Simplification TODO |
+| `doc/dht-wire-format.md` | DHT wire format |
+| `doc/source-control.md` | Version control (collection fork/merge) |
+| `doc/api-reference.md` | API reference (simplified) |
+| `doc/tutorial/` | Tutorials (for users) |
 
-### spec/ — 技术规范
+### spec/ — Technical Specifications
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/spec/REQUIREMENTS.md` | 全部需求总表 (130+ 项) |
-| `doc/spec/API-REFERENCE.md` | 完整 API 参考 (105 端点) |
-| `doc/spec/COLLECTION-LOGIC.md` | 合集逻辑完整追踪 |
-| `doc/spec/USER-ROLES.md` | 用户角色模型 |
-| `doc/spec/BACKEND_TASKS.md` | 后端任务清单 |
-| `doc/spec/FRONTEND_TASKS.md` | 前端任务清单 |
+| `doc/spec/REQUIREMENTS.md` | Full requirements table (130+ items) |
+| `doc/spec/API-REFERENCE.md` | Complete API reference (105 endpoints) |
+| `doc/spec/COLLECTION-LOGIC.md` | Complete collection logic trace |
+| `doc/spec/USER-ROLES.md` | User role model |
+| `doc/spec/BACKEND_TASKS.md` | Backend task checklist |
+| `doc/spec/FRONTEND_TASKS.md` | Frontend task checklist |
 
-#### spec/backend/ — 后端规范
+#### spec/backend/ — Backend Specifications
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/spec/backend/BACKEND_DOC.md` | 后端总览文档 |
-| `doc/spec/backend/IMPLEMENTATION_SPEC.md` | 实现规范 |
-| `doc/spec/backend/design.md` | 后端设计文档 |
-| `doc/spec/backend/api-reference.md` | 后端 API 参考 |
-| `doc/spec/backend/backend-reference.md` | 后端代码参考 |
-| `doc/spec/backend/database.md` | 数据库设计（表结构/索引/迁移） |
-| `doc/spec/backend/sha256-download.md` | SHA256 内容寻址下载设计 |
-| `doc/spec/backend/upload.md` | 文件上传流程设计 |
-| `doc/spec/backend/register.md` | 注册服务器交互设计 |
-| `doc/spec/backend/anon-collection.md` | 匿名合集设计 |
+| `doc/spec/backend/BACKEND_DOC.md` | Backend overview document |
+| `doc/spec/backend/IMPLEMENTATION_SPEC.md` | Implementation specification |
+| `doc/spec/backend/design.md` | Backend design document |
+| `doc/spec/backend/api-reference.md` | Backend API reference |
+| `doc/spec/backend/backend-reference.md` | Backend code reference |
+| `doc/spec/backend/database.md` | Database design (table structure/indexes/migrations) |
+| `doc/spec/backend/sha256-download.md` | SHA256 content-addressed download design |
+| `doc/spec/backend/upload.md` | File upload flow design |
+| `doc/spec/backend/register.md` | Registration server interaction design |
+| `doc/spec/backend/anon-collection.md` | Anonymous collection design |
 
-#### spec/frontend/ — 前端规范
+#### spec/frontend/ — Frontend Specifications
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/spec/frontend/FRONTEND_DOC.md` | 前端总览文档 |
-| `doc/spec/frontend/API_DOC.md` | 前端 API 调用文档 |
+| `doc/spec/frontend/FRONTEND_DOC.md` | Frontend overview document |
+| `doc/spec/frontend/API_DOC.md` | Frontend API call documentation |
 
-### modules/ — 模块设计文档
+### modules/ — Module Design Documents
 
-#### modules/auth/ — 认证模块
+#### modules/auth/ — Authentication Module
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/modules/auth/README.md` | 认证模块总览 |
-| `doc/modules/auth/API-DESIGN.md` | 认证 API 设计 |
-| `doc/modules/auth/SECURITY-REVIEW.md` | 认证安全审查 |
-| `doc/modules/auth/USER-ROLES.md` | 用户角色与权限 |
+| `doc/modules/auth/README.md` | Authentication module overview |
+| `doc/modules/auth/API-DESIGN.md` | Authentication API design |
+| `doc/modules/auth/SECURITY-REVIEW.md` | Authentication security review |
+| `doc/modules/auth/USER-ROLES.md` | User roles and permissions |
 
-#### modules/bt/ — BT DHT 模块
+#### modules/bt/ — BT DHT Module
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/modules/bt/README.md` | BT 模块总览 |
-| `doc/modules/bt/API-DESIGN.md` | BT API 设计 |
-| `doc/modules/bt/bt-dht-protocol.md` | BT DHT 协议设计 |
-| `doc/modules/bt/TEST-MATRIX.md` | BT 测试矩阵 |
+| `doc/modules/bt/README.md` | BT module overview |
+| `doc/modules/bt/API-DESIGN.md` | BT API design |
+| `doc/modules/bt/bt-dht-protocol.md` | BT DHT protocol design |
+| `doc/modules/bt/TEST-MATRIX.md` | BT test matrix |
 
-#### modules/ipfs/ — IPFS 模块
+#### modules/ipfs/ — IPFS Module
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/modules/ipfs/README.md` | IPFS 模块总览 |
-| `doc/modules/ipfs/API-DESIGN.md` | IPFS API 设计 |
-| `doc/modules/ipfs/ipfs-protocol.md` | IPFS 集成协议设计 |
-| `doc/modules/ipfs/webrtc-architecture.md` | WebRTC 架构设计（浏览器 IPFS 直连） |
+| `doc/modules/ipfs/README.md` | IPFS module overview |
+| `doc/modules/ipfs/API-DESIGN.md` | IPFS API design |
+| `doc/modules/ipfs/ipfs-protocol.md` | IPFS integration protocol design |
+| `doc/modules/ipfs/webrtc-architecture.md` | WebRTC architecture design (browser IPFS direct connection) |
 
-#### modules/p2p/ — P2P 模块
+#### modules/p2p/ — P2P Module
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/modules/p2p/README.md` | P2P 模块总览 |
-| `doc/modules/p2p/API-DESIGN.md` | P2P API 设计 |
-| `doc/modules/p2p/TRANSPORT.md` | 当前互联框架（WS + PeerJS + Session 抽象） |
+| `doc/modules/p2p/README.md` | P2P module overview |
+| `doc/modules/p2p/API-DESIGN.md` | P2P API design |
+| `doc/modules/p2p/TRANSPORT.md` | Current interconnection framework (WS + PeerJS + Session abstraction) |
 
-#### modules/storage/ — 存储模块
+#### modules/storage/ — Storage Module
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/modules/storage/README.md` | 存储模块总览 |
-| `doc/modules/storage/API-DESIGN.md` | 存储 API 设计 |
-| `doc/modules/storage/api-reference.md` | 存储 API 参考 |
-| `doc/modules/storage/COLLECTION-LOGIC.md` | 合集逻辑详细设计 |
-| `doc/modules/storage/database.md` | 数据库设计 |
+| `doc/modules/storage/README.md` | Storage module overview |
+| `doc/modules/storage/API-DESIGN.md` | Storage API design |
+| `doc/modules/storage/api-reference.md` | Storage API reference |
+| `doc/modules/storage/COLLECTION-LOGIC.md` | Detailed collection logic design |
+| `doc/modules/storage/database.md` | Database design |
 
-### guide/ — 操作指南
+### guide/ — User Guides
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/guide/API-USAGE.md` | API 使用手册 — 调用顺序/目的/条件 |
-| `doc/guide/USER_MANUAL.md` | 用户使用手册 |
-| `doc/archive/VPS_DEPLOY.md` | VPS 部署指南（已归档：指向重构前结构） |
-| `doc/archive/docker.md` | Docker 部署指南（已归档：指向重构前结构） |
-| `doc/guide/siliconflow-setup.md` | SiliconFlow LLM API 配置 |
-| `doc/guide/操作说明.md` | 中文操作说明 |
+| `doc/guide/API-USAGE.md` | API usage manual — call order/purpose/conditions |
+| `doc/guide/USER_MANUAL.md` | User manual |
+| `doc/archive/VPS_DEPLOY.md` | VPS deployment guide (archived: points to pre-refactor structure) |
+| `doc/archive/docker.md` | Docker deployment guide (archived: points to pre-refactor structure) |
+| `doc/guide/siliconflow-setup.md` | SiliconFlow LLM API configuration |
+| `doc/guide/operation-manual.md` | Chinese operation instructions |
 
-### archive/report/ — 项目报告（2026-04~05 历史报告，已归档）
+### archive/report/ — Project Reports (2026-04~05 historical reports, archived)
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/archive/report/REPORT-OVERVIEW.md` | 报告总览 |
-| `doc/archive/report/index.md` | 报告索引 |
-| `doc/archive/report/DEVELOPMENT_PLAN.md` | 开发计划 |
-| `doc/archive/report/ROADMAP.md` | 产品路线图 |
-| `doc/archive/report/MILESTONE-P2P.md` | P2P 里程碑 |
-| `doc/archive/report/MILESTONE-p2p-vps.md` | P2P VPS 部署里程碑 |
-| `doc/archive/report/changelog.md` | 变更日志 |
-| `doc/archive/report/refactor-report.md` | 重构报告 |
-| `doc/archive/report/SECURITY-REVIEW.md` | 安全审查报告 |
-| `doc/archive/report/grid.md` | 网格拓扑报告 |
-| `doc/archive/report/TASK-COMPLETION-2026-04-29.md` | 2026-04-29 任务完成报告 |
-| `doc/archive/report/测试报告-2026-04-29.md` | 2026-04-29 测试报告 |
-| `doc/archive/report/TXT-REPLY.md` | TXT 回复记录 |
-| `doc/archive/report/TXT-STATUS.md` | TXT 状态记录 |
-| `doc/archive/report/MEMO.md` | 开发备忘录 |
-| `doc/archive/report/memo-go.md` | Go 开发备忘录 |
-| `doc/archive/report/ISSUES_FOR_GEMINI.md` | 待向 Gemini 反馈的问题 |
-| `doc/archive/report/CI-FIXES.md` | CI 修复记录 |
-| `doc/archive/report/TODO-FIXES.md` | 待修复问题清单 |
-| `doc/archive/report/TODO-P2P-DUAL-STACK.md` | P2P 双栈待办 |
+| `doc/archive/report/REPORT-OVERVIEW.md` | Report overview |
+| `doc/archive/report/index.md` | Report index |
+| `doc/archive/report/DEVELOPMENT_PLAN.md` | Development plan |
+| `doc/archive/report/ROADMAP.md` | Product roadmap |
+| `doc/archive/report/MILESTONE-P2P.md` | P2P milestone |
+| `doc/archive/report/MILESTONE-p2p-vps.md` | P2P VPS deployment milestone |
+| `doc/archive/report/changelog.md` | Changelog |
+| `doc/archive/report/refactor-report.md` | Refactoring report |
+| `doc/archive/report/SECURITY-REVIEW.md` | Security review report |
+| `doc/archive/report/grid.md` | Grid topology report |
+| `doc/archive/report/TASK-COMPLETION-2026-04-29.md` | 2026-04-29 task completion report |
+| `doc/archive/report/test-report-2026-04-29.md` | 2026-04-29 test report |
+| `doc/archive/report/TXT-REPLY.md` | TXT reply records |
+| `doc/archive/report/TXT-STATUS.md` | TXT status records |
+| `doc/archive/report/MEMO.md` | Development memo |
+| `doc/archive/report/memo-go.md` | Go development memo |
+| `doc/archive/report/ISSUES_FOR_GEMINI.md` | Issues to report to Gemini |
+| `doc/archive/report/CI-FIXES.md` | CI fix records |
+| `doc/archive/report/TODO-FIXES.md` | TODO fix checklist |
+| `doc/archive/report/TODO-P2P-DUAL-STACK.md` | P2P dual-stack TODO |
 
-### testing/ — 测试文档
+### testing/ — Testing Documents
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/testing/index.md` | 测试文档门户 |
-| `doc/testing/README.md` | 测试总览 |
-| `doc/testing/TESTING-HANDBOOK.md` | 测试手册 |
-| `doc/testing/TESTING-METHODOLOGY.md` | 测试方法论 |
-| `doc/testing/TEST-MATRIX.md` | 测试矩阵 |
-| `doc/testing/TEST-PIPELINE.md` | 测试流水线设计 |
-| `doc/testing/CHAOS_TESTING.md` | 混沌测试方案 |
-| `doc/testing/测试方案.md` | 中文测试方案 |
-| `doc/testing/如何测试.md` | 中文测试指南 |
-| `doc/testing/archive/reg-server-test-plan.md` | 注册服务器测试计划（已归档） |
+| `doc/testing/index.md` | Testing documentation portal |
+| `doc/testing/README.md` | Testing overview |
+| `doc/testing/TESTING-HANDBOOK.md` | Testing handbook |
+| `doc/testing/TESTING-METHODOLOGY.md` | Testing methodology |
+| `doc/testing/TEST-MATRIX.md` | Test matrix |
+| `doc/testing/TEST-PIPELINE.md` | Test pipeline design |
+| `doc/testing/CHAOS_TESTING.md` | Chaos testing plan |
+| `doc/testing/archive/test-plan.md` | Chinese testing plan |
+| `doc/testing/archive/how-to-test.md` | Chinese testing guide |
+| `doc/testing/archive/reg-server-test-plan.md` | Registration server test plan (archived) |
 
-### archive/ — 历史归档
+### archive/ — Historical Archive
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `doc/archive/方案.md` | 历史方案文档 |
-| `doc/archive/测试方案.md` | 历史测试方案 |
-| `doc/archive/知识库.md` | 历史知识库 |
-| `doc/archive/AGENTS.md` | 历史 Agent 配置 |
-| `doc/archive/reply.md` | 历史回复记录 |
-| `doc/archive/DASHBOARD.md` | 项目仪表盘（旧结构快照） |
-| `doc/archive/LEGACY.md` | 旧栈（libp2p/BT/WebDAV/前端死代码）处置清单 |
-| `doc/archive/TUTORIAL.md` | 旧教程（libp2p 时代，已被 `doc/tutorial/` 取代） |
-| `doc/archive/CODE-DOC-MAPPING.md` | 代码 ↔ 文档映射表（2026-04 快照，多数目标文档已不存在） |
-| `doc/archive/VPS_DEPLOY.md` | VPS 部署（旧结构） |
-| `doc/archive/docker.md` | Docker 部署（旧结构） |
-| `doc/archive/p2p-discovery-flow.md` | 旧 libp2p 发现流程 |
-| `doc/archive/TRANSPORT-REVIEW-2026-08-15.md` / `-2-2026-08-16.md` | 传输层两轮 review |
-| `doc/archive/HTTP-REVIEW-2026-08-16.md` / `REVIEW-FIX-…` | HTTP 层 review 与修复清单 |
-| `doc/archive/FRONTEND-FIX-2026-08-16.md` / `FRONTEND-FIXES-…` | 前端修复记录 |
-| `doc/archive/SESSION-REPORT-20260503T135000.md` | 2026-05-03 会话报告 |
-| `doc/modules/p2p/archive/` | 旧 libp2p/BT-DHT 栈文档（p2p / dual-stack-protocol / grid） |
+| `doc/archive/proposal.md` | Historical proposal document |
+| `doc/archive/test-plan.md` | Historical testing plan |
+| `doc/archive/knowledge-base.md` | Historical knowledge base |
+| `doc/archive/AGENTS.md` | Historical Agent configuration |
+| `doc/archive/reply.md` | Historical reply records |
+| `doc/archive/DASHBOARD.md` | Project dashboard (old structure snapshot) |
+| `doc/archive/LEGACY.md` | Legacy stack (libp2p/BT/WebDAV/frontend dead code) disposal checklist |
+| `doc/archive/TUTORIAL.md` | Old tutorial (libp2p era, replaced by `doc/tutorial/`) |
+| `doc/archive/CODE-DOC-MAPPING.md` | Code ↔ document mapping table (2026-04 snapshot, most target documents no longer exist) |
+| `doc/archive/VPS_DEPLOY.md` | VPS deployment (old structure) |
+| `doc/archive/docker.md` | Docker deployment (old structure) |
+| `doc/archive/p2p-discovery-flow.md` | Old libp2p discovery flow |
+| `doc/archive/TRANSPORT-REVIEW-2026-08-15.md` / `-2-2026-08-16.md` | Transport layer two-round reviews |
+| `doc/archive/HTTP-REVIEW-2026-08-16.md` / `REVIEW-FIX-…` | HTTP layer reviews and fix checklists |
+| `doc/archive/FRONTEND-FIX-2026-08-16.md` / `FRONTEND-FIXES-…` | Frontend fix records |
+| `doc/archive/SESSION-REPORT-20260503T135000.md` | 2026-05-03 session report |
+| `doc/modules/p2p/archive/` | Old libp2p/BT-DHT stack documents (p2p / dual-stack-protocol / grid) |
 
 ---
 
 ## .github/workflows/ — CI/CD
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `.github/workflows/ci.yml` | 项目 CI 流水线 — 后端测试 + 前端测试 + 构建 |
-| `.github/workflows/go-build.yml` | Go 多平台构建矩阵 (linux/macos/windows) |
-| `.github/workflows/release.yml` | Release 发布流程 |
-| `front/.github/workflows/ci.yml` | 前端 CI 流水线 |
+| `.github/workflows/ci.yml` | Project CI pipeline — backend tests + frontend tests + build |
+| `.github/workflows/go-build.yml` | Go multi-platform build matrix (linux/macos/windows) |
+| `.github/workflows/release.yml` | Release publishing process |
+| `front/.github/workflows/ci.yml` | Frontend CI pipeline |
 
 ---
 
-## 统计
+## Statistics
 
-| 类别 | 数量 |
+| Category | Count |
 |------|------|
-| Go 源文件 | ~75 |
-| 前端源文件 (JSX/TS/JS/CSS) | ~70 |
-| 测试脚本 (.sh/.mjs/.py) | ~25 |
-| 文档 (.md) | ~65 |
-| CI/CD 配置 | 4 |
-| **总计** | **~240** |
+| Go source files | ~75 |
+| Frontend source files (JSX/TS/JS/CSS) | ~70 |
+| Test scripts (.sh/.mjs/.py) | ~25 |
+| Documentation (.md) | ~65 |
+| CI/CD configurations | 4 |
+| **Total** | **~240** |

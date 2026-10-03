@@ -12,20 +12,24 @@ import (
 	"peerdrive/internal/transport"
 )
 
-// 测试统一背景：节点市场目录（doc/NETDISK.md M1）。
-// 关键风险点：① joined 清单必须原子落盘（进程被 kill 不能留下半截 JSON）；
-// ② 市场聚合要在"发现服务器不可用"时仍能显示已加入节点（否则用户会以为
-// 加过的节点丢了）；③ 自己不能出现在市场列表里。
+// Unified test background: node market directory (doc/NETDISK.md M1).
+// Key risk points: ① the joined list must be written atomically (a killed
+// process must not leave half-written JSON); ② market aggregation must still
+// show joined nodes when "the discovery server is unavailable" (otherwise
+// users think joined nodes are lost); ③ self must not appear in the market
+// list.
 
-// newTestDir 建一个临时 storageDir 上的目录服务。
+// newTestDir Creates a directory service on a temporary storageDir.
 func newTestDir(t *testing.T, discoverURL string) (*NodeDirectory, string) {
 	t.Helper()
 	base := t.TempDir()
 	return NewNodeDirectory(base, discoverURL), base
 }
 
-// TestNodeDirectoryJoinPersistsAndReloads 校验加入清单跨实例持久化。
-// 发现背景：清单是运营者唯一的"我加入过谁"记录，重启丢失等于功能不可用。
+// TestNodeDirectoryJoinPersistsAndReloads Verifies that the join list persists
+// across instances.
+// Discovery background: the list is the operator's only record of "who I've
+// joined"; losing it on restart equals the feature being unavailable.
 func TestNodeDirectoryJoinPersistsAndReloads(t *testing.T) {
 	d, base := newTestDir(t, "")
 	d.SetSelfID(func() string { return "self-node" })
@@ -36,19 +40,19 @@ func TestNodeDirectoryJoinPersistsAndReloads(t *testing.T) {
 	if err := d.Join("peer-b"); err != nil {
 		t.Fatalf("join peer-b: %v", err)
 	}
-	// 重复加入必须幂等（前端可能重复点/重试）
+	// Repeated joins must be idempotent (the frontend may double-click/retry)
 	if err := d.Join("peer-a"); err != nil {
 		t.Fatalf("re-join peer-a: %v", err)
 	}
 	if got := len(d.JoinedPeerIDs()); got != 2 {
 		t.Fatalf("joined count = %d, want 2", got)
 	}
-	// 原子写的临时文件不能残留
+	// The atomic-write temp file must not be left behind
 	if _, err := os.Stat(filepath.Join(base, joinedFileName+".tmp")); !os.IsNotExist(err) {
 		t.Fatalf("temp file left behind: %v", err)
 	}
 
-	// 新实例（模拟进程重启）应恢复清单
+	// A new instance (simulating process restart) should restore the list
 	d2 := NewNodeDirectory(base, "")
 	ids := d2.JoinedPeerIDs()
 	if len(ids) != 2 || ids[0] != "peer-a" || ids[1] != "peer-b" {
@@ -56,9 +60,10 @@ func TestNodeDirectoryJoinPersistsAndReloads(t *testing.T) {
 	}
 }
 
-// TestNodeDirectoryLeave 校验移出语义。
-// 发现背景：移出后必须真的从磁盘消失（否则重启又回来了）；
-// 移出未加入的节点要报错（前端才能提示"该节点未加入"）。
+// TestNodeDirectoryLeave Verifies leave semantics.
+// Discovery background: after leaving, the entry must really disappear from
+// disk (otherwise it comes back on restart); leaving an unjoined node must
+// error (so the frontend can show "this node is not joined").
 func TestNodeDirectoryLeave(t *testing.T) {
 	d, base := newTestDir(t, "")
 	if err := d.Join("peer-a"); err != nil {
@@ -70,7 +75,7 @@ func TestNodeDirectoryLeave(t *testing.T) {
 	if got := len(d.JoinedPeerIDs()); got != 0 {
 		t.Fatalf("joined count = %d, want 0", got)
 	}
-	// 落盘也要清掉
+	// The persisted file must also be cleared
 	raw, err := os.ReadFile(filepath.Join(base, joinedFileName))
 	if err != nil {
 		t.Fatalf("read joined file: %v", err)
@@ -87,8 +92,11 @@ func TestNodeDirectoryLeave(t *testing.T) {
 	}
 }
 
-// TestNodeDirectoryJoinValidation 校验 peer id 校验与自我加入拒绝。
-// 发现背景：peerId 会落盘并进信令查询串，放任换行/超长会污染清单与日志。
+// TestNodeDirectoryJoinValidation Verifies peer ID validation and self-join
+// rejection.
+// Discovery background: peerId gets persisted and goes into signaling query
+// strings; allowing newlines/excessive length would pollute the list and
+// logs.
 func TestNodeDirectoryJoinValidation(t *testing.T) {
 	d, _ := newTestDir(t, "")
 	d.SetSelfID(func() string { return "self-node" })
@@ -121,9 +129,11 @@ func repeat(b byte, n int) string {
 	return string(out)
 }
 
-// TestNodeDirectoryMarketMerge 校验市场聚合：在线 ∪ 已加入，且自己不在列表里。
-// 发现背景：用户要的界面是"自己的节点 / 别人的节点"，别人节点里可能离线
-// （已加入但发现服务器里没有），必须保留条目并标 offline。
+// TestNodeDirectoryMarketMerge Verifies market aggregation: online ∪ joined,
+// and self is not in the list.
+// Discovery background: the UI users want is "my nodes / other people's nodes",
+// where other people's nodes may be offline (joined but not in the discovery
+// server); the entry must be retained and marked offline.
 func TestNodeDirectoryMarketMerge(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/discover/nodes" {
@@ -151,7 +161,8 @@ func TestNodeDirectoryMarketMerge(t *testing.T) {
 	if len(nodes) != 2 {
 		t.Fatalf("market size = %d, want 2 (%+v)", len(nodes), nodes)
 	}
-	// 直连的已加入离线节点排第一（排序规则：直连 > 加入 > 在线）
+	// Directly connected joined offline node comes first (sorting rule:
+	// direct > joined > online)
 	if nodes[0].PeerID != "peer-offline" {
 		t.Fatalf("first = %s, want peer-offline", nodes[0].PeerID)
 	}
@@ -171,10 +182,11 @@ func TestNodeDirectoryMarketMerge(t *testing.T) {
 	}
 }
 
-// TestNodeDirectoryMarketFallsBackToPresenceRoom 校验空 coll 查询拿不到节点时
-// 回退到存在房间查询。
-// 发现背景：线上信令由外部维护，不能假设它支持"不带 coll 返回全部节点"
-// （不支持时返回空列表而非报错，静默失效）。
+// TestNodeDirectoryMarketFallsBackToPresenceRoom Verifies fallback to the
+// presence room query when an empty coll query returns no nodes.
+// Discovery background: the online signaling service is externally maintained;
+// we can't assume it supports "return all nodes without coll" (when
+// unsupported, it returns an empty list rather than an error, failing silently).
 func TestNodeDirectoryMarketFallsBackToPresenceRoom(t *testing.T) {
 	var calls []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -199,8 +211,10 @@ func TestNodeDirectoryMarketFallsBackToPresenceRoom(t *testing.T) {
 	}
 }
 
-// TestNodeDirectoryMarketWithoutDiscoverURL 校验没有发现服务器时不报错。
-// 发现背景：纯本地/离线部署（无 DiscoverURL）仍要能用市场页（只显示已加入）。
+// TestNodeDirectoryMarketWithoutDiscoverURL Verifies no error when there's no
+// discovery server.
+// Discovery background: pure local/offline deployments (no DiscoverURL) must
+// still be able to use the market page (only showing joined nodes).
 func TestNodeDirectoryMarketWithoutDiscoverURL(t *testing.T) {
 	d, _ := newTestDir(t, "")
 	if err := d.Join("peer-a"); err != nil {
@@ -212,8 +226,9 @@ func TestNodeDirectoryMarketWithoutDiscoverURL(t *testing.T) {
 	}
 }
 
-// TestSharesFromLoadInfo 校验共享摘要解析容错。
-// 发现背景：loadInfo 来自外部节点，字段可能缺失/类型不同（JSON 数字是 float64）。
+// TestSharesFromLoadInfo Verifies share summary parsing tolerance.
+// Discovery background: loadInfo comes from external nodes, fields may be
+// missing/have different types (JSON numbers are float64).
 func TestSharesFromLoadInfo(t *testing.T) {
 	if got := sharesFromLoadInfo(nil); got.Collections != 0 || got.Files != 0 {
 		t.Fatalf("nil loadInfo = %+v, want zero", got)

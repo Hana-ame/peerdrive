@@ -1,4 +1,4 @@
-// 模块⑥：IPFS —— pin 列表与 gateway 状态（简化面板）。
+// Module ⑥: IPFS —— pin list and gateway status (simplified panel).
 import React, { useState, useEffect, useCallback } from 'react';
 import * as ws from '../ws';
 
@@ -36,9 +36,9 @@ export default function IPFS() {
         <div className="flex items-center justify-between mb-5">
           <div>
             <h1 className="text-2xl font-bold">IPFS</h1>
-            <p className="text-sm text-gray-500 mt-0.5">内容寻址下载 / pin 管理</p>
+            <p className="text-sm text-gray-500 mt-0.5">Content-addressed download / pin management</p>
           </div>
-          <button onClick={load} disabled={busy} className="btn-ghost">刷新</button>
+          <button onClick={load} disabled={busy} className="btn-ghost">Refresh</button>
         </div>
 
         {err && (
@@ -47,7 +47,7 @@ export default function IPFS() {
 
         {gateways.length > 0 && (
           <div className="card-surface p-4 mb-4">
-            <p className="text-xs text-gray-500 mb-1.5">可用 gateway</p>
+            <p className="text-xs text-gray-500 mb-1.5">Available gateways</p>
             <ul className="space-y-1">
               {gateways.map((g, i) => (
                 <li key={i} className="text-xs text-gray-300 font-mono">{typeof g === 'string' ? g : String(g.url || g)}</li>
@@ -58,8 +58,8 @@ export default function IPFS() {
 
         {pins.length === 0 ? (
           <div className="text-center py-20 text-gray-500 border-2 border-dashed border-white/10 rounded-card">
-            <p>没有 pin 的内容</p>
-            <p className="text-xs text-gray-600 mt-1">pin 过的 CID 会在这里列出。</p>
+            <p>No pinned content</p>
+            <p className="text-xs text-gray-600 mt-1">Pinned CIDs will be listed here.</p>
           </div>
         ) : (
           <div className="card-surface overflow-hidden">
@@ -67,7 +67,7 @@ export default function IPFS() {
               <thead className="bg-white/[0.03]">
                 <tr>
                   <th className="text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2">CID</th>
-                  <th className="text-right text-xs uppercase tracking-wider text-gray-500 px-3 py-2">操作</th>
+                  <th className="text-right text-xs uppercase tracking-wider text-gray-500 px-3 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -76,7 +76,7 @@ export default function IPFS() {
                     <td className="px-3 py-2 font-mono text-xs text-gray-300 break-all">{typeof p === 'string' ? p : p.cid || p.hash || JSON.stringify(p)}</td>
                     <td className="px-3 py-2 text-right">
                       <button onClick={() => unpin(typeof p === 'string' ? p : p.cid || p.hash)}
-                        className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">取消 pin</button>
+                        className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">Unpin</button>
                     </td>
                   </tr>
                 ))}

@@ -1,7 +1,7 @@
-// Package model 定义匿集合（AnonCollection）及其条目的数据结构。
-// 匿名集合通过 SHA256 内容寻址存储，支持版本递增和标签。
-// Version=1: 旧格式 entries[].hash（向后兼容读取）
-// Version=2: 新格式 entries[].providers[]（sha256/url 多源）
+// Package model defines the data structures for anonymous collections (AnonCollection) and their entries.
+// Anonymous collections are stored via SHA256 content addressing, supporting version increments and tags.
+// Version=1: old format entries[].hash (backward-compatible reading)
+// Version=2: new format entries[].providers[] (sha256/url multi-source)
 package model
 
 import (
@@ -9,24 +9,24 @@ import (
 	"time"
 )
 
-// Provider 表示一个文件来源，可以是 SHA256 哈希或 URL。
+// Provider represents a file source, which can be a SHA256 hash or a URL.
 type Provider struct {
 	Type     string `json:"type"`                // "sha256" | "url"
 	Value    string `json:"value"`               // 64-char hex hash, or HTTP(S) URL
-	MimeType string `json:"mime_type,omitempty"` // 显式 MIME，覆盖自动检测
+	MimeType string `json:"mime_type,omitempty"` // Explicit MIME, overrides auto-detection
 }
 
-// AnonCollectionEntry 表示合集中的一个文件条目，支持多 provider。
-// 自定义 JSON 处理：旧格式 {path, hash} 自动归一化为 providers。
+// AnonCollectionEntry represents a file entry in a collection, supporting multiple providers.
+// Custom JSON handling: old format {path, hash} is automatically normalized to providers.
 type AnonCollectionEntry struct {
 	Path      string     `json:"path"`
 	Providers []Provider `json:"providers"`
-	Hash      string     `json:"hash,omitempty"` // 仅向后兼容反序列化
+	Hash      string     `json:"hash,omitempty"` // Backward-compatible deserialization only
 }
 
 type anonCollectionEntryAlias AnonCollectionEntry
 
-// UnmarshalJSON 支持旧格式 {path, hash} 和新格式 {path, providers}。
+// UnmarshalJSON supports old format {path, hash} and new format {path, providers}.
 func (e *AnonCollectionEntry) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		Path      string     `json:"path"`
@@ -47,7 +47,7 @@ func (e *AnonCollectionEntry) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// MarshalJSON 输出 providers 格式，Version=1 时额外输出 hash 保证旧客户端兼容。
+// MarshalJSON outputs providers format; when Version=1, also outputs hash for old client compatibility.
 func (e AnonCollectionEntry) MarshalJSON() ([]byte, error) {
 	type out struct {
 		Path      string     `json:"path"`
@@ -69,14 +69,14 @@ func (e AnonCollectionEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(o)
 }
 
-// Normalize 将 struct literal 设置的 Hash 字段迁移到 Providers（如尚未设置）。
+// Normalize migrates the Hash field set by struct literal to Providers (if not yet set).
 func (e *AnonCollectionEntry) Normalize() {
 	if len(e.Providers) == 0 && e.Hash != "" {
 		e.Providers = []Provider{{Type: "sha256", Value: e.Hash}}
 	}
 }
 
-// GetPrimaryHash 返回第一个 sha256 provider 的 hash 值，没有则返回空串。
+// GetPrimaryHash returns the hash value of the first sha256 provider, or an empty string if none.
 func (e *AnonCollectionEntry) GetPrimaryHash() string {
 	for _, p := range e.Providers {
 		if p.Type == "sha256" && p.Value != "" {
@@ -86,7 +86,7 @@ func (e *AnonCollectionEntry) GetPrimaryHash() string {
 	return ""
 }
 
-// GetPrimaryMime 返回显式 MIME 或第一个有 MIME 的 provider 的值。
+// GetPrimaryMime returns the explicit MIME or the first provider's MIME value.
 func (e *AnonCollectionEntry) GetPrimaryMime() string {
 	for _, p := range e.Providers {
 		if p.MimeType != "" {
@@ -102,24 +102,24 @@ type AnonCollection struct {
 	Entries      []AnonCollectionEntry `json:"entries"`
 	Tags         []string              `json:"tags,omitempty"`
 	CreatedAt    string                `json:"created_at"`
-	// Visibility 可见性：public=公开可广播 / restricted=仅 AccessList 内账号 / private=仅 Owner。
-	// 背景：2026-09 前端「广播」改为三选项（公开访问 / 仅限指定权限 / 仅自己），
-	// 旧匿名集合没有任何权限字段，空值一律按 public 处理以保持向后兼容。
+	// Visibility: public=broadcastable / restricted=only AccessList accounts / private=only Owner.
+	// Background: 2026-09 frontend "broadcast" changed to three options (public access / specific permissions only / only myself),
+	// old anonymous collections had no permission field, empty values are treated as public for backward compatibility.
 	Visibility string `json:"visibility,omitempty"`
-	// AccessList 是 restricted 时放行的账号清单（regserver 侧唯一用户名）。
+	// AccessList is the account list allowed when restricted (unique username on the regserver side).
 	AccessList []string `json:"access_list,omitempty"`
-	// Owner 是发布者账号（节点 operator），private 集合只对它放行。
+	// Owner is the publisher account (node operator), private collections only allow access to the Owner.
 	Owner string `json:"owner,omitempty"`
 }
 
-// visibility 取值常量：与前端三选项一一对应，后端只接受这三个字符串。
+// visibility value constants: one-to-one mapping with the frontend three options, the backend only accepts these three strings.
 const (
 	VisibilityPublic     = "public"
 	VisibilityRestricted = "restricted"
 	VisibilityPrivate    = "private"
 )
 
-// IsValidVisibility 校验可见性取值，空串视为未设置（合法，等价于 public）。
+// IsValidVisibility validates visibility values; empty string is treated as unset (valid, equivalent to public).
 func IsValidVisibility(v string) bool {
 	switch v {
 	case "", VisibilityPublic, VisibilityRestricted, VisibilityPrivate:
@@ -128,7 +128,7 @@ func IsValidVisibility(v string) bool {
 	return false
 }
 
-// EffectiveVisibility 返回兜底后的可见性：历史集合没有该字段 → public。
+// EffectiveVisibility returns the visibility after fallback: historical collections without this field → public.
 func (c *AnonCollection) EffectiveVisibility() string {
 	if c == nil || c.Visibility == "" {
 		return VisibilityPublic
@@ -136,10 +136,10 @@ func (c *AnonCollection) EffectiveVisibility() string {
 	return c.Visibility
 }
 
-// CanView 判断某个请求者（账号名）能否查看该集合。
-// 语义：public 放行所有人；restricted 放行 Owner + AccessList；private 只放行 Owner。
-// 坑：requester 为空代表未认证请求，不能因此放行 private/restricted——
-// 否则任何没带身份的 P2P 同步都能拖走受限合集。
+// CanView determines whether a requester (account name) can view the collection.
+// Semantics: public allows everyone; restricted allows Owner + AccessList; private only allows Owner.
+// Pitfall: empty requester represents an unauthenticated request; do not allow private/restricted based on this alone —
+// otherwise any P2P sync without identity could pull restricted collections.
 func (c *AnonCollection) CanView(requester string) bool {
 	if c == nil {
 		return false
@@ -162,7 +162,7 @@ func (c *AnonCollection) CanView(requester string) bool {
 	}
 }
 
-// NormalizeEntries 将 Version=1 的旧格式条目升级为 providers 格式。
+// NormalizeEntries upgrades Version=1 old format entries to providers format.
 func (c *AnonCollection) NormalizeEntries() {
 	if c.Version >= 2 {
 		return
@@ -175,7 +175,7 @@ func (c *AnonCollection) NormalizeEntries() {
 	c.Version = 2
 }
 
-// NewAnonCollection 创建一个新的匿名集合，版本为 2（providers 格式）。
+// NewAnonCollection creates a new anonymous collection, version 2 (providers format).
 func NewAnonCollection(name string, entries []AnonCollectionEntry, tags []string) *AnonCollection {
 	if entries == nil {
 		entries = []AnonCollectionEntry{}
@@ -200,7 +200,7 @@ type AnonCollectionSummary struct {
 	Tags         []string `json:"tags,omitempty"`
 	EntryCount   int      `json:"entry_count"`
 	CreatedAt    string   `json:"created_at"`
-	// Visibility / Owner 供列表页在合集卡片上直接显示权限档位（前端三选项回填）。
+	// Visibility / Owner for the list page to directly display permission tier on collection cards (frontend three-option backfill).
 	Visibility string `json:"visibility,omitempty"`
 	Owner      string `json:"owner,omitempty"`
 }

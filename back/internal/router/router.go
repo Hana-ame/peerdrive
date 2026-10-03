@@ -1,21 +1,22 @@
-// Package router 将 Gin 路由注册到所有 Controller 处理函数。
-// 由 cmd/server/main.go 调用（仅传 cfg）；PeerJS/source 等服务实例由 main
-// 在调用 SetupRouter 前经 SetPeerJSService/SetSourceManager 等包级注入器
-// 装配，Downloader 在本函数内部按 cfg 构造（不再接收 P2PService——
-// libp2p 栈于 2026-08-16 全删，见 doc/archive/LEGACY.md §A）。
-// 路由分组：
-//   /ping              — 健康检查（GET）
-//   /sha256sum/:sha256 — 通过 SHA256 哈希下载文件（仅本地存储，无 P2P 回退）
-//   /p2p/*             — 端口转发 v2 + 认证状态 + WebRTC 信息（GET/POST）
-//   /anon/*            — 匿名合集创建/读取/Fork（POST/GET）
-//   /files/*           — 文件上传/注册/验证/删除/版本差异（POST/POST/POST/GET/DELETE）
-//   /collections/*     — 集合 CRUD + 条目管理 + 版本控制（POST/GET）
-//   /local/*           — 本地同步状态管理（POST/GET）
-//   /actions/*         — 合并/复刻（POST；/actions/pull 已随 TaskService 删除 2026-08-19）
-//   /:user/:coll/*     — 从集合条目中下载文件（GET）
-//   /collections/search — 公开搜索合集（GET）
-//   /peerjs/*          — PeerJS 节点发现 + /ws/peer 本地会话
-//   /swagger/*         — Swagger UI 页面（GET）
+// Package router registers Gin routes to all Controller handlers.
+// Called by cmd/server/main.go (only passes cfg); PeerJS/source and other service
+// instances are assembled by main via package-level injectors like SetPeerJSService/
+// SetSourceManager before calling SetupRouter; Downloader is constructed inside this
+// function based on cfg (no longer receives P2PService — libp2p stack fully removed
+// on 2026-08-16, see doc/archive/LEGACY.md §A).
+// Route groups:
+//   /ping              — health check (GET)
+//   /sha256sum/:sha256 — download file by SHA256 hash (local storage only, no P2P fallback)
+//   /p2p/*             — port forwarding v2 + auth status + WebRTC info (GET/POST)
+//   /anon/*            — anonymous collection create/read/fork (POST/GET)
+//   /files/*           — file upload/register/verify/delete/version diff (POST/POST/POST/GET/DELETE)
+//   /collections/*     — collection CRUD + entry management + version control (POST/GET)
+//   /local/*           — local sync state management (POST/GET)
+//   /actions/*         — merge/fork (POST; /actions/pull removed with TaskService 2026-08-19)
+//   /:user/:coll/*     — download files from collection entries (GET)
+//   /collections/search — public collection search (GET)
+//   /peerjs/*          — PeerJS node discovery + /ws/peer local session
+//   /swagger/*         — Swagger UI page (GET)
 
 package router
 
@@ -40,20 +41,22 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
-// SetupRouter 创建 Gin 引擎并注册全部路由（健康检查、文件下载、P2P、集合、WebDAV、信令等）。
+// SetupRouter creates a Gin engine and registers all routes (health check, file download, P2P, collections, WebDAV, signaling, etc.).
 func SetupRouter(cfg *config.Config) *gin.Engine {
 	log.LogInfo("router: SetupRouter starting")
-	// 不用 gin.Default()：它自带的 Logger 是给人看的非结构化文本，而且和下面
-	// 的 AccessLog 重复输出两遍。这里显式组装：Recovery（最外层，panic 也要
-	// 能恢复）+ 请求 ID + 安全头 + 结构化访问日志 + 限流。
+	// Don't use gin.Default(): its built-in Logger produces human-readable
+	// unstructured text and duplicates with AccessLog below. Explicit assembly here:
+	// Recovery (outermost, recovers panics) + RequestID + SecurityHeaders +
+	// structured access logging + rate limiting.
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(RequestID(), SecurityHeaders(cfg.DisableCSP), AccessLog(), RateLimit(cfg.RateLimitRPS, 0))
 	r.RedirectTrailingSlash = false
 	r.RedirectFixedPath = false
 
-	// 可信代理（见 config.TrustedProxies 注释）：默认一个都不信，ClientIP()
-	// 直接用 RemoteAddr。反代后面不配这一项，所有人会被算成同一个来源一起限流。
+	// Trusted proxies (see config.TrustedProxies comments): default trusts none,
+	// ClientIP() uses RemoteAddr directly. Without configuring this behind a reverse
+	// proxy, everyone is counted as the same source and rate-limited together.
 	if tp := strings.TrimSpace(cfg.TrustedProxies); tp != "" {
 		if tp == "all" {
 			_ = r.SetTrustedProxies([]string{"0.0.0.0/0"})
@@ -79,11 +82,13 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	})
 
 	r.Use(func(c *gin.Context) {
-		// L8：原实现非白名单 Origin 也回 `Allow-Origin: *` + `Allow-Credentials: true`——
-		// 恶意网页（无凭据）仍能跨域读取本机 API 响应，白名单形同虚设。
-		// 现在：仅白名单 Origin 回显 origin（+credentials 才合法）；其余不设
-		// Allow-Origin（浏览器阻止读取响应）。无 Origin（同源/curl）不设 CORS 头，
-		// 同源请求本来就不需要 CORS 授权。
+		// L8: original implementation returned `Allow-Origin: *` + `Allow-Credentials: true`
+		// even for non-whitelisted Origins — malicious web pages (without credentials) could
+		// still cross-origin read local API responses, making the whitelist useless.
+		// Now: only whitelisted Origins get origin echoed back (+credentials is then legal);
+		// others don't get Allow-Origin set (browser blocks reading the response). No Origin
+		// (same-origin/curl) doesn't get CORS headers — same-origin requests don't need CORS
+		// authorization anyway.
 		origin := c.Request.Header.Get("Origin")
 		allowOrigin := ""
 		if origin != "" {
@@ -113,25 +118,27 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		SetRegServer(cfg.RegistrationServer)
 		r.Use(AuthOptional())
 	}
-	// 挂载到所有 mutating/admin 路由：未配置注册服务器时 AuthRequired 内部放行
-	// （本地单机模式），配置后则要求 Bearer token（F1：此前 AuthRequired 0 调用点，
-	// 任意文件读写/删除接口全部匿名可达）。
+	// Attached to all mutating/admin routes: when no registration server is configured,
+	// AuthRequired passes through internally (local single-machine mode); after configuration,
+	// requires Bearer token (F1: previously AuthRequired had 0 call sites, all file
+	// read/write/delete endpoints were anonymously accessible).
 	authRequired := AuthRequired()
 
 	fileSvc := service.NewFileService(cfg)
 	controller.InitFileController(fileSvc)
-	// 探针：注入"数据库能不能连"这一项依赖（controller 不直接碰 repository）。
+	// Probe: inject "can the database connect" as a dependency (controller doesn't touch repository directly).
 	controller.InitHealth(repository.Ping)
-	// M2 收层装配：集合/分享/pin 服务注入 controller（替代原先的 repository 直调）
+	// M2 layering assembly: collection/share/pin services injected into controller (replaces previous direct repository calls)
 	controller.InitCollectionController(service.NewCollectionService())
 	controller.InitShareController(service.NewShareService())
 	controller.InitPinController(service.NewPinService())
 
-	// 端口转发服务（PeerJS DataChannel 版，forward.go）：规则表由 main 装配时
-	// SetForwardRules 注入（配置 PEERDRIVE_FORWARD_RULES），运行时端点可动态追加。
+	// Port forwarding service (PeerJS DataChannel version, forward.go): rule table injected
+	// by main during assembly via SetForwardRules (config PEERDRIVE_FORWARD_RULES), runtime
+	// endpoints can dynamically add rules.
 	controller.InitForwardController(peerjsService)
-	// 对方节点共享清单查询（网盘目标 M2）：/peerjs/nodes/:peer/shares 由
-	// controller 直接调 transport.RequestShares（share 帧的请求方）。
+	// Peer node share list query (cloud drive target M2): /peerjs/nodes/:peer/shares
+	// has controller call transport.RequestShares directly (requester of share frames).
 	controller.InitPeerShareController(peerjsService)
 
 	// Initialize BitTorrent DHT service if enabled.
@@ -165,7 +172,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 					if f.SHA256 == "" {
 						continue
 					}
-					// M2 收层：登记逻辑收敛进 FileService.RegisterBTFile（原内联写库）
+					// M2 layering: registration logic consolidated into FileService.RegisterBTFile (previously inline DB write)
 					if err := fileSvc.RegisterBTFile(f.SHA256, f.Size, f.Path); err != nil {
 						log.LogWarn("router: register BT file %s failed: %v", f.SHA256, err)
 					} else {
@@ -212,18 +219,20 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	syncSvc := service.NewSyncService(syncRepo, uniDownloader, cfg.StorageDir)
 	syncCtrl := controller.NewSyncController(syncSvc)
 
-	// ── LEGACY HTTP 路由区（保留原路径，注释标记） ──
-	// 背景：前端已全面迁移到 /ws/peer 的 admin 帧（transport/admin.go 内部转发
-	// 到本 engine，覆盖以下全部 controller）。这些 HTTP 端点保留原路径且继续
-	// 工作：① 兼容旧版前端/curl/外部脚本；② 集成测试直接走 HTTP。
-	// 前端新代码禁止直接 fetch 以下端点（除 /ws/peer 升级外）。
-	// 迁移日期：2026-08-17（前端 api.js 改走 ws.js 客户端后完成）。
+	// ── LEGACY HTTP route area (original paths preserved, marked with comments) ──
+	// Background: frontend has fully migrated to /ws/peer admin frames (transport/admin.go
+	// internally forwards to this engine, covering all controllers below). These HTTP
+	// endpoints keep their original paths and continue working: ① compatibility with
+	// old frontend/curl/external scripts; ② integration tests go through HTTP directly.
+	// New frontend code is prohibited from directly fetching these endpoints (except /ws/peer upgrade).
+	// Migration date: 2026-08-17 (completed after frontend api.js switched to ws.js client).
 	//
-	// 注意：admin 内部转发复用本 engine，因此这些路由同时服务「浏览器 admin 帧」
-	// 与「直接 HTTP 调用」两条入口——行为一致，无需维护两份。
+	// Note: admin internal forwarding reuses this engine, so these routes serve both
+	// "browser admin frames" and "direct HTTP calls" — consistent behavior, no need
+	// to maintain two copies.
 
 	r.GET("/ping", controller.Ping)
-	// 存活 / 就绪探针（见 controller/health.go 里两者语义的区别）
+	// Liveness / readiness probes (see controller/health.go for the semantic difference between the two)
 	r.GET("/health", controller.Health)
 	r.GET("/ready", controller.Ready)
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256Local)
@@ -235,18 +244,18 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	r.GET("/download/:hash/sources", controller.UniversalDownloadSources)
 	r.POST("/download/:hash/refresh", authRequired, controller.UniversalDownloadRefresh)
 
-	// P2P routes（批2 精简：libp2p 旧栈端点已删，保留认证状态/WebRTC 信息/端口转发）
+	// P2P routes (batch 2 simplification: libp2p legacy stack endpoints removed, kept auth status/WebRTC info/port forwarding)
 	p2p := r.Group("/p2p")
 	{
 		p2p.GET("/auth/status", controller.AuthStatus)
 		p2p.GET("/webrtc/info", controller.WebRTCInfoHandler(cfg))
-		// Port forwarding routes（forward v2，PeerJS DataChannel）
+		// Port forwarding routes (forward v2, PeerJS DataChannel)
 		p2p.POST("/forward/create", authRequired, controller.CreateForwardSession)
 		p2p.POST("/forward/connect", authRequired, controller.ConnectForwardSession)
 		p2p.GET("/forward/list", controller.ListForwardSessions)
 		p2p.POST("/forward/close", authRequired, controller.CloseForwardSession)
-		// 跨节点拉取保存（网盘目标 M3）：把对端的文件/合集拉到本节点落盘。
-		// 读列表只读开放（与其它状态端点一致），启动/取消是写操作挂认证。
+		// Cross-node pull & save (cloud drive target M3): pull peer files/collections to this node's disk.
+		// Read list is open (consistent with other status endpoints); start/cancel are write operations with auth.
 		p2p.GET("/pull", controller.ListPullJobs)
 		p2p.POST("/pull", authRequired, controller.StartPull)
 		p2p.POST("/pull/collection", authRequired, controller.StartPullCollection)
@@ -280,7 +289,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		bt.GET("/stats", controller.BTGlobalStats)
 	}
 
-	// IPFS 路由（批2 精简：Bitswap 兼容层已删；保留 HTTP 网关 pin/查询）
+	// IPFS routes (batch 2 simplification: Bitswap compatibility layer removed; kept HTTP gateway pin/query)
 	ipfs := r.Group("/ipfs")
 	{
 		// IPFS pin routes
@@ -291,20 +300,21 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		ipfs.GET("/gateways", controller.IPFSGatewayStatus)
 	}
 
-	// ── 统一 Collection 路由（新代码使用这些） ──
-	// 背景：原代码存在 legacy redirect（/anon/*、/actions/*）与真实路由重复注册，
-	// gin 启动即 panic（"handlers are already registered"），服务根本起不来。
-	// 修复方案：删掉全部 redirect（前端已直接用新路径），冲突路由合并为
-	// 分派器（dispatchCreateCollection / dispatchGetCollection / dispatchGetTree）。
+	// ── Unified Collection routes (new code uses these) ──
+	// Background: original code had legacy redirects (/anon/*, /actions/*) with duplicate
+	// real route registration — gin panics on startup ("handlers are already registered"),
+	// service can't start at all.
+	// Fix: removed all redirects (frontend already uses new paths directly), conflicting
+	// routes merged into dispatchers (dispatchCreateCollection / dispatchGetCollection / dispatchGetTree).
 	coll := r.Group("/collections")
 	{
-		// POST /collections 分派：body 带 username 走用户体系，否则匿名集合
+		// POST /collections dispatch: body with username goes user system, otherwise anonymous collection
 		coll.POST("", authRequired, dispatchCreateCollection)
 		coll.GET("", controller.ListAnonCollections)
-		// GET /collections/:id 分派：64 位 hex 为匿名集合 hash，否则按 username 列出
+		// GET /collections/:id dispatch: 64-char hex is anonymous collection hash, otherwise list by username
 		coll.GET("/:id", dispatchGetCollection)
-		// GET /collections/:id/*filepath 分派 anon 文件下载与用户集合子路由
-		//（gin 不允许 :param 与 *wildcard 共存，统一走分派器）
+		// GET /collections/:id/*filepath dispatch anon file download and user collection sub-routes
+		// (gin doesn't allow :param and *wildcard coexistence, unified through dispatcher)
 		coll.GET("/:id/*filepath", dispatchGetTree)
 		coll.POST("/fork", authRequired, controller.ForkAnonCollection)
 		coll.POST("/merge", authRequired, controller.MergeFromSource)
@@ -314,7 +324,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		coll.POST("/register-folder", authRequired, controller.RegisterFolder)
 	}
 
-	// Anonymous Collection routes (public read；创建/提交/fork 为写操作挂认证)
+	// Anonymous Collection routes (public read; create/commit/fork are write operations with auth)
 	anon := r.Group("/anon")
 	{
 		anon.POST("/collections", authRequired, controller.CreateAnonCollection)
@@ -323,11 +333,11 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		anon.GET("/collections/:hash", controller.GetAnonCollection)
 		anon.GET("/collections/:hash/*filepath", controller.DownloadAnonFile)
 		anon.POST("/collections/fork", authRequired, controller.ForkAnonCollection)
-		// 权限切档：必须走 authRequired（裸 PUT 等于让任何人改写别人的可见性）
+		// Visibility change: must go through authRequired (bare PUT would let anyone change anyone's visibility)
 		anon.PUT("/collections/:hash/visibility", authRequired, controller.SetAnonCollectionVisibility)
 	}
 
-	// File management（browse/list/verify 只读开放；写操作挂认证）
+	// File management (browse/list/verify read-only open; write operations with auth)
 	files := r.Group("/files")
 	{
 		files.GET("", controller.ListFiles)
@@ -342,7 +352,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		files.POST("/diff", authRequired, controller.DiffVersions)
 	}
 
-	// Collection management（写操作挂认证）
+	// Collection management (write operations with auth)
 	collections := r.Group("/collections")
 	{
 		collections.GET("/public", controller.ListPublicCollections)
@@ -355,14 +365,14 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		collections.POST("/:id/:collection_name/tags", authRequired, controller.UpdateCollectionTags)
 	}
 
-	// Local sync（写挂认证，读开放）
+	// Local sync (write with auth, read open)
 	sync := r.Group("/local")
 	{
 		sync.POST("/save", authRequired, syncCtrl.SaveLocal)
 		sync.GET("/status/:hash", syncCtrl.GetStatus)
 	}
-	// 向后兼容 redirects: /actions/* → /collections/*
-	// (已移除：与真实路由冲突；前端已直接用 /collections/fork|merge|pull)
+	// Backward-compatible redirects: /actions/* → /collections/*
+	// (removed: conflicts with real routes; frontend already uses /collections/fork|merge|pull directly)
 
 	// Collaboration actions
 	actions := r.Group("/actions")
@@ -374,7 +384,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	// Public collection file download
 	r.GET("/:username/:collection_name/*filepath", controller.DownloadCollectionFile)
 
-	// Share links（创建挂认证；读取 token 公开）
+	// Share links (create with auth; read by token public)
 	shares := r.Group("/shares")
 	{
 		shares.POST("", authRequired, controller.CreateShare)
@@ -382,29 +392,33 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	}
 	r.GET("/s/:token", controller.AccessShare)
 
-	// Swagger：默认开。它把全部端点（105 个）连同参数结构公开出来，对公网
-	// 部署等于免费送一份攻击地图——生产建议 PEERDRIVE_SWAGGER=off。
+	// Swagger: enabled by default. It publishes all endpoints (105) with parameter structures,
+	// which is essentially giving away a free attack map for public deployments —
+	// production recommends PEERDRIVE_SWAGGER=off.
 	if !cfg.DisableSwagger {
 		r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	} else {
 		log.LogInfo("router: swagger disabled by PEERDRIVE_SWAGGER=off")
 	}
 
-	// PeerJS 节点发现
+	// PeerJS node discovery
 	registerPeerJSRoutes(r, authRequired)
 
-	// admin 管理面内部转发（transport/admin.go）：浏览器经 /ws/peer 发 admin
-	// 帧 → 这里包装 gin engine 复用全部 HTTP controller（零重复实现）。
-	// 为什么这样做：帧协议原有 verb 只覆盖文件数据面（req/upload/index），
-	// 集合/认证/BT/IPFS/任务等管理面若逐个写 verb 是巨大重复劳动，且 WebRTC
-	// 连接不处理 admin（serveAdmin 按会话 ID 拒绝），管理面只暴露给本地 WS。
-	// 前端 api.js 迁移后不再直接 fetch HTTP，全部走 /ws/peer admin 帧。
+	// admin management surface internal forwarding (transport/admin.go): browser sends admin
+	// frames via /ws/peer → wrapped here as gin engine to reuse all HTTP controllers (zero
+	// duplicate implementation).
+	// Why: the original frame protocol verbs only cover the file data plane (req/upload/index);
+	// collection/auth/BT/IPFS/task etc. admin surfaces would be massive duplicate work if each
+	// got a verb, and WebRTC connections don't handle admin (serveAdmin rejects by session ID),
+	// admin surface is only exposed to local WS.
+	// Frontend api.js no longer directly fetches HTTP after migration, all goes through /ws/peer admin frames.
 	if peerjsService != nil {
 		peerjsService.SetAdminHandler(func(req *http.Request) (int, []byte, string, error) {
-			// 内部转发的请求没有 TCP 来源（它来自一条已建立的本地 WS 会话），
-			// 不写 RemoteAddr 的话 ClientIP() 是空串，限流会把所有管理请求算进
-			// 同一个"未知来源"桶，管理台点几下就 429。标成本机是语义正确的做法：
-			// 管理面本来就只服务本地 WS（serveAdmin 按会话 ID 拒绝远端）。
+			// Internally forwarded requests have no TCP source (they come from an established local WS session);
+			// without setting RemoteAddr, ClientIP() is an empty string, and rate limiting would bucket
+			// all admin requests into the same "unknown source" bucket — admin console 429 after a few clicks.
+			// Tagging as localhost is semantically correct: admin surface already only serves local WS
+			// (serveAdmin rejects remote by session ID).
 			if req.RemoteAddr == "" {
 				req.RemoteAddr = "127.0.0.1:0"
 			}
@@ -414,7 +428,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		})
 	}
 
-	// 统一 source 管理（source 体系管理面）
+	// Unified source management (source system admin surface)
 	registerSourceRoutes(r, authRequired)
 
 	// Count routes

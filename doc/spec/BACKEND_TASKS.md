@@ -1,102 +1,102 @@
-# 后端功能文档
+# Backend Feature Documentation
 
-> 最后更新: 2026-04-27
+> Last updated: 2026-04-27
 
 ---
 
-## 架构概览
+## Architecture Overview
 
 ```
-cmd/server/main.go          — 入口：加载配置 → 初始化组件 → 启动 HTTP
+cmd/server/main.go          — Entry point: load config → initialize components → start HTTP
   │
-  ├── config/config.go      — 环境变量配置
-  ├── router/router.go      — 路由注册（22+ 路由）
-  ├── controller/           — HTTP 层：参数校验、调用 service、返回 JSON
+  ├── config/config.go      — Environment variable configuration
+  ├── router/router.go      — Route registration (22+ routes)
+  ├── controller/           — HTTP layer: parameter validation, call service, return JSON
   │   ├── file.go, collection.go, p2p.go, anon.go, sync.go, fork.go, merge.go, auth.go
-  ├── service/              — 业务逻辑层
-  │   ├── file_service.go   — 文件上传/注册/验证/删除
-  │   ├── p2p.go            — libp2p 节点、Exchange/Announce/Request 协议
-  │   ├── p2p_connection.go — 连接管理（心跳/重连）
-  │   ├── p2p_transfer.go   — 分片传输（256KB chunk/8并发）
-  │   ├── p2p_ws.go         — WebSocket 传输
-  │   ├── downloader.go     — 内容寻址下载（local → P2P 降级）
-  │   ├── anon_service.go   — 匿名集合 CRUD
-  │   ├── sync_service.go   — 本地同步
-  │   └── auth_service.go   — 用户认证
-  ├── provider/             — 存储后端抽象
-  │   ├── local.go          — 本地文件
-  │   └── http.go           — 远程 HTTP
-  └── repository/           — SQLite 数据访问
+  ├── service/              — Business logic layer
+  │   ├── file_service.go   — File upload/registration/verification/deletion
+  │   ├── p2p.go            — libp2p node, Exchange/Announce/Request protocol
+  │   ├── p2p_connection.go — Connection management (heartbeat/reconnect)
+  │   ├── p2p_transfer.go   — Chunked transfer (256KB chunk/8 concurrent)
+  │   ├── p2p_ws.go         — WebSocket transfer
+  │   ├── downloader.go     — Content-addressed download (local → P2P fallback)
+  │   ├── anon_service.go   — Anonymous collection CRUD
+  │   ├── sync_service.go   — Local sync
+  │   └── auth_service.go   — User authentication
+  ├── provider/             — Storage backend abstraction
+  │   ├── local.go          — Local files
+  │   └── http.go           — Remote HTTP
+  └── repository/           — SQLite data access
       ├── file_repo.go, collection_repo.go, anon_repo.go, sync_repo.go, task_repo.go, user_repo.go
 ```
 
 ---
 
-## 🔴 P1 - 用户重复抱怨
+## 🔴 P1 - User Repeated Complaints
 
-### 🔴 P1.1 文件浏览 `/files/browse` 301 重定向问题
+### 🔴 P1.1 File Browse `/files/browse` 301 Redirect Issue
 
-**抱怨来源**: 游览文件系统.txt
+**Source of complaint**: FileSystemBrowse.txt
 
 ```
 [GIN-debug] redirecting request 301: /files/browse/ → /files/browse/?path=%2F
 ```
 
-路由: `GET /files/browse?path=<dir>`
+Route: `GET /files/browse?path=<dir>`
 Handler: `controller.BrowseDir` → `FileService.BrowseDir(dirPath)`
 
-**问题**: 某些请求携带尾部 `/` 导致 Gin 301 重定向。已在 `router.go` 设置:
+**Issue**: Some requests with trailing `/` trigger Gin 301 redirect. Already set in `router.go`:
 ```go
 r.RedirectTrailingSlash = false
 r.RedirectFixedPath = false
 ```
-**需验证是否生效**。如果仍有问题，需要额外添加 `/files/browse/` 路由。
+**Need to verify if this is effective**. If issues persist, need to add `/files/browse/` route explicitly.
 
-**测试**:
+**Test**:
 ```bash
 curl -v http://127.0.0.1:3000/files/browse/?path=/
-# 应返回 200 + JSON，不是 301
+# Should return 200 + JSON, not 301
 ```
 
-### 🔴 P1.2 Windows 路径兼容
+### 🔴 P1.2 Windows Path Compatibility
 
-**抱怨来源**: 游览文件系统.txt（"不一定运行在linux下面"）
+**Source of complaint**: FileSystemBrowse.txt ("not necessarily running on Linux")
 
-- `BrowseDir` 中使用 `filepath.Join` 处理路径（跨平台安全）
-- `DefaultRootPath()` 已在 Windows 下返回 `C:\`
-- `storageDir` 也应使用 `filepath` 处理
+- `BrowseDir` uses `filepath.Join` for path handling (cross-platform safe)
+- `DefaultRootPath()` already returns `C:\` on Windows
+- `storageDir` should also use `filepath` handling
 
-**当前状态**: 已使用 `filepath.IsAbs`、`filepath.Join`。**需 Windows 环境验证**。
+**Current status**: Already uses `filepath.IsAbs`, `filepath.Join`. **Needs verification in Windows environment**.
 
 ---
 
-## 各接口详情
+## API Endpoint Details
 
-### 系统
+### System
 
-| 方法 | 路径 | Handler | 说明 | 测试点 |
-|------|------|---------|------|--------|
-| GET | `/ping` | `controller.Ping` | 健康检查 → `"pong"` | `curl /ping` → 200 |
+| Method | Path | Handler | Description | Test Point |
+|--------|------|---------|-------------|------------|
+| GET | `/ping` | `controller.Ping` | Health check → `"pong"` | `curl /ping` → 200 |
 
-### 文件管理
+### File Management
 
 #### GET `/files?sort=time`
 
-列出所有已注册文件。sort 参数: `time`, `name`, `size`, `type`, `path`。
+Lists all registered files. sort parameter: `time`, `name`, `size`, `type`, `path`.
 
-**返回**: `[{hash, filename, size, mime_type, created_at, provider_type, provider_path}]`
+**Response**: `[{hash, filename, size, mime_type, created_at, provider_type, provider_path}]`
 
-**测试**: `curl /files` → 200 + JSON 数组
+**Test**: `curl /files` → 200 + JSON array
 
 #### POST `/files/upload`
 
-Multipart 文件上传。
+Multipart file upload.
 
-**请求**: `multipart/form-data`, field `file`
-**返回**: `{hash, filename, size}`
-**流程**: 接收文件流 → 计算 SHA256 → 写入 storage → 注册到 DB
+**Request**: `multipart/form-data`, field `file`
+**Response**: `{hash, filename, size}`
+**Flow**: Receive file stream → Calculate SHA256 → Write to storage → Register to DB
 
-**测试**:
+**Test**:
 ```bash
 echo "test" > /tmp/t.txt
 curl -X POST http://127.0.0.1:3000/files/upload -F "file=@/tmp/t.txt"
@@ -105,153 +105,153 @@ curl -X POST http://127.0.0.1:3000/files/upload -F "file=@/tmp/t.txt"
 
 #### POST `/files/register_local`
 
-注册本地文件路径。
+Register a local file path.
 
-**请求**: `{path: "/abs/path/to/file", filename: "可选"}`
-**流程**: 读取本地文件 → 计算 SHA256 → 注册到 DB
-**测试**: 指向存在的文件 → 200 + `{hash, filename}`
+**Request**: `{path: "/abs/path/to/file", filename: "optional"}`
+**Flow**: Read local file → Calculate SHA256 → Register to DB
+**Test**: Point to an existing file → 200 + `{hash, filename}`
 
 #### POST `/files/register_folder`
 
-递归注册文件夹。
+Recursively register a folder.
 
-**请求**: `{folder_path: "/abs/path/"}`
-**返回**: `{registered: [{hash, filename, path}], count: N}`
-**安全**: 需要路径穿越检测 (`../` 拒绝)
+**Request**: `{folder_path: "/abs/path/"}`
+**Response**: `{registered: [{hash, filename, path}], count: N}`
+**Security**: Requires path traversal detection (reject `../`)
 
-**测试**:
+**Test**:
 ```bash
 curl -X POST /files/register_folder -H 'Content-Type: application/json' \
   -d '{"folder_path":"/tmp/testdir"}'
-# → 200 + registered 数组
+# → 200 + registered array
 ```
 
 #### GET `/files/verify/:hash`
 
-验证文件完整性。
+Verify file integrity.
 
-**返回**: `{hash, filename, size, mime_type, exists: true/false, consistent: true/false}`
-**测试**: 用已知 hash → 验证返回 exists:true, consistent:true
+**Response**: `{hash, filename, size, mime_type, exists: true/false, consistent: true/false}`
+**Test**: Use a known hash → verify returns exists:true, consistent:true
 
 #### DELETE `/files/:hash`
 
-删除文件元数据和 provider 记录。**不删除物理文件**。
+Delete file metadata and provider records. **Does not delete physical files**.
 
-**测试**: `curl -X DELETE /files/<hash>` → 200
+**Test**: `curl -X DELETE /files/<hash>` → 200
 
 #### GET `/files/browse?path=/`
 
-浏览服务器文件系统（不限于已注册文件）。
+Browse server filesystem (not limited to registered files).
 
-**返回**: `[{name, path, is_dir, size, mod_time}]`
-**安全**: 仅返回目录内容，不遍历符号链接
-**默认路径**: Linux `/`, Windows `C:\`
+**Response**: `[{name, path, is_dir, size, mod_time}]`
+**Security**: Only returns directory contents, does not traverse symlinks
+**Default path**: Linux `/`, Windows `C:\`
 
 ---
 
-### 匿名合集
+### Anonymous Collections
 
 #### POST `/anon/collections`
 
-创建匿名合集（内容寻址，不可变）。
+Create anonymous collection (content-addressed, immutable).
 
-**请求**: `{entries: [{path, hash}], friendly_name: "名称", tags: ["tag1"]}`
-**流程**: 验证条目 → JSON 序列化 → SHA256 哈希 → 写入 storage → 返回 hash
-**安全**: 
-- 拒绝 path 为空、含 `../`、绝对路径
-- hash 必须 64 位 hex
+**Request**: `{entries: [{path, hash}], friendly_name: "name", tags: ["tag1"]}`
+**Flow**: Validate entries → JSON serialize → SHA256 hash → Write to storage → Return hash
+**Security**: 
+- Reject empty path, paths containing `../`, absolute paths
+- Hash must be 64 hex characters
 
-**测试**:
+**Test**:
 ```bash
 curl -X POST /anon/collections -H 'Content-Type: application/json' -d '{
   "entries":[{"path":"f.txt","hash":"<real_hash>"}],
-  "friendly_name":"测试合集"
+  "friendly_name":"test collection"
 }'
 # → {"hash":"<64-hex>"}
 ```
 
 #### GET `/anon/collections`
 
-列出所有匿名合集。
+List all anonymous collections.
 
-**返回**: `[{hash, friendly_name, name_preview, version, entry_count, tags, created_at}]`
+**Response**: `[{hash, friendly_name, name_preview, version, entry_count, tags, created_at}]`
 
 #### GET `/anon/collections/:hash`
 
-获取单个匿名合集的全部内容。
+Get full contents of a single anonymous collection.
 
-**返回**: `{hash, friendly_name, name_preview, entries: [{path, hash}], tags, created_at}`
+**Response**: `{hash, friendly_name, name_preview, entries: [{path, hash}], tags, created_at}`
 
 #### GET `/anon/collections/:hash/*filepath`
 
-下载合集内的单个文件。
+Download a single file within a collection.
 
-**流程**: 根据合集 hash 加载 JSON → 找到 entry → 通过 hash 获取文件内容 → 流式返回
+**Flow**: Load JSON by collection hash → Find entry → Get file content by hash → Stream return
 
 #### POST `/anon/collections/fork`
 
-基于现有合集创建分支。
+Create a branch based on an existing collection.
 
-**请求**: `{source_hash, add_entries: [], remove_paths: [], friendly_name: ""}`
-**流程**: 加载源合集 → 添加新条目 → 移除指定路径 → 序列化为新合集
+**Request**: `{source_hash, add_entries: [], remove_paths: [], friendly_name: ""}`
+**Flow**: Load source collection → Add new entries → Remove specified paths → Serialize as new collection
 
 #### POST `/anon/collections/commit`
 
-提交新版本的合集。
+Submit a new version of a collection.
 
-**请求**: `{source_hash, entries: [], commit_message: ""}`
-**流程**: 创建新的 AnonCollection → 新 hash
+**Request**: `{source_hash, entries: [], commit_message: ""}`
+**Flow**: Create new AnonCollection → New hash
 
 ---
 
-### 用户合集
+### User Collections
 
 #### POST `/collections`
 
-创建用户合集。
+Create a user collection.
 
-**请求**: `{username, collection_name, visibility: "public"|"unlisted"|"private", tags: []}`
-**返回**: `{id, username, collection_name, visibility}`
+**Request**: `{username, collection_name, visibility: "public"|"unlisted"|"private", tags: []}`
+**Response**: `{id, username, collection_name, visibility}`
 
 #### GET `/collections/:username`
 
-列出用户的所有合集。
+List all collections of a user.
 
 #### GET `/collections/:username/:collection_name`
 
-获取合集详情（含条目列表）。
+Get collection details (with entry list).
 
-**返回**: `{id, username, collection_name, entries: [{path, file_hash}], current_hash, visibility, tags}`
+**Response**: `{id, username, collection_name, entries: [{path, file_hash}], current_hash, visibility, tags}`
 
 #### POST `/collections/:username/:collection_name/entries`
 
-添加条目到合集。
+Add an entry to a collection.
 
-**请求**: `{path: "dir/file.txt", hash: "<sha256>"}`
-**注意**: 允许重复 path（不同 hash），去重是 SHA256 文件层的事
+**Request**: `{path: "dir/file.txt", hash: "<sha256>"}`
+**Note**: Duplicate paths are allowed (different hashes); deduplication is at the SHA256 file level
 
 #### DELETE `/collections/:username/:collection_name/entries/*path`
 
-删除合集条目。
+Delete a collection entry.
 
 #### POST `/collections/:username/:collection_name/commit`
 
-提交新版本。
+Submit a new version.
 
-**请求**: `{commit_message: ""}`
-**流程**: 冻结当前工作区为快照 → 生成版本记录
+**Request**: `{commit_message: ""}`
+**Flow**: Freeze current workspace as snapshot → Generate version record
 
 #### GET `/collections/:username/:collection_name/log`
 
-版本历史。
+Version history.
 
 #### POST `/collections/:username/:collection_name/rollback/:version_id`
 
-回滚到指定版本。**覆盖当前工作区**。
+Roll back to a specified version. **Overwrites the current workspace**.
 
 #### GET `/collections/public` & `/collections/search`
 
-列出公开合集 / 搜索合集。
+List public collections / search collections.
 
 ---
 
@@ -259,9 +259,9 @@ curl -X POST /anon/collections -H 'Content-Type: application/json' -d '{
 
 #### GET `/p2p/status`
 
-P2P 状态摘要。
+P2P status summary.
 
-**返回**:
+**Response**:
 ```json
 {
   "enabled": true,
@@ -279,132 +279,132 @@ P2P 状态摘要。
 
 #### GET `/p2p/node`
 
-本节点 Peer ID 和地址。
+Local node Peer ID and addresses.
 
 #### GET `/p2p/peers` / `/p2p/discovered`
 
-已连接/已发现节点列表。
+Connected/discovered node lists.
 
 #### POST `/p2p/connect`
 
-手动连接节点。
+Manually connect to a node.
 
-**请求**: `{addr: "/ip4/1.2.3.4/tcp/4001/p2p/12D3..."}`
+**Request**: `{addr: "/ip4/1.2.3.4/tcp/4001/p2p/12D3..."}`
 
 #### POST `/p2p/announce`
 
-向 DHT 宣告拥有某文件。
+Announce to DHT that a file is owned.
 
-**请求**: `{hash: "<sha256>"}`
+**Request**: `{hash: "<sha256>"}`
 
 #### POST `/p2p/fetch`
 
-从 P2P 网络获取合集。
+Fetch a collection from the P2P network.
 
-**请求**: `{hash: "<sha256>"}`
-**流程**: DHT 查找 provider → exchange 协议获取数据 → 解析 JSON → 返回合集
+**Request**: `{hash: "<sha256>"}`
+**Flow**: DHT lookup provider → exchange protocol to get data → Parse JSON → Return collection
 
 #### POST `/p2p/sync`
 
-从指定节点同步文件到本地。
+Sync files from a specified node to local.
 
-**请求**: `{peer_id, hash, target_dir: "/path/"}`
-**流程**: 获取合集 → 下载所有文件 → 写入本地存储
+**Request**: `{peer_id, hash, target_dir: "/path/"}`
+**Flow**: Get collection → Download all files → Write to local storage
 
 #### POST `/p2p/push` / POST `/p2p/request-file`
 
-推送合集 / 广播文件请求。
+Push collection / Broadcast file request.
 
 #### GET `/ws/transfer`
 
-WebSocket 升级端点（用于浏览器节点文件传输）。
+WebSocket upgrade endpoint (for browser node file transfer).
 
-**协议**: JSON 消息 + 二进制帧
+**Protocol**: JSON messages + binary frames
 - Client → Server: `{"type":"request","hash":"..."}`
-- Server → Client: `{"type":"response","hash":"...","size":N}` + 二进制数据
+- Server → Client: `{"type":"response","hash":"...","size":N}` + binary data
 
 ---
 
-### 协作操作
+### Collaboration Operations
 
 #### POST `/actions/fork`
 
-Fork 合集到本地。
+Fork a collection to local.
 
-**请求**: `{username, source_username, collection_name, source_coll_name}`
+**Request**: `{username, source_username, collection_name, source_coll_name}`
 
 #### POST `/actions/merge`
 
-合并两个合集。
+Merge two collections.
 
-**请求**: `{username, source_username, collection_name, source_coll_name, strategy: "ours"|"theirs"|"manual"}`
+**Request**: `{username, source_username, collection_name, source_coll_name, strategy: "ours"|"theirs"|"manual"}`
 
-**策略**:
-- `ours`: 冲突时保留本地 → 乐观合并
-- `theirs`: 冲突时采用远端 → 覆盖合并
-- `manual`: 冲突时报错 → 强制手动处理
+**Strategies**:
+- `ours`: On conflict, keep local → optimistic merge
+- `theirs`: On conflict, adopt remote → overwrite merge
+- `manual`: On conflict, error → force manual handling
 
 #### POST `/actions/pull`
 
-从上游拉取更新。
+Pull updates from upstream.
 
 ---
 
-### 本地同步
+### Local Sync
 
 #### POST `/local/save`
 
-保存合集文件到本地磁盘。
+Save collection files to local disk.
 
-**请求**: `{collection_hash, local_path, include: ["*.go"], exclude: ["node_modules"]}`
+**Request**: `{collection_hash, local_path, include: ["*.go"], exclude: ["node_modules"]}`
 
 #### GET `/local/status/:hash`
 
-查询同步状态。
+Query sync status.
 
 ---
 
-### 任务
+### Tasks
 
 #### GET `/tasks` / GET `/tasks/:id`
 
-查询异步传输任务（Fork/Pull）状态。
+Query asynchronous transfer task (Fork/Pull) status.
 
 ---
 
-## 环境变量
+## Environment Variables
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `PORT` | 3000 | HTTP 端口 |
-| `PEERDRIVE_STORAGE` | ./storage | 存储目录 |
-| `PEERDRIVE_STORAGE_ENABLE` | true | 是否启用存储 |
-| `PEERDRIVE_ALLOWED_ORIGINS` | localhost:5173,... | CORS 白名单 |
-| `PEERDRIVE_PUBLIC_DOMAIN` | "" | 公网域名 |
-| `PEERDRIVE_P2P_ENABLE` | true | P2P 开关 |
-| `PEERDRIVE_P2P_LISTEN` | /ip4/0.0.0.0/tcp/0 | P2P 监听 |
-| `PEERDRIVE_BOOTSTRAP_PEER` | "" | 引导节点 |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | 3000 | HTTP port |
+| `PEERDRIVE_STORAGE` | ./storage | Storage directory |
+| `PEERDRIVE_STORAGE_ENABLE` | true | Whether to enable storage |
+| `PEERDRIVE_ALLOWED_ORIGINS` | localhost:5173,... | CORS whitelist |
+| `PEERDRIVE_PUBLIC_DOMAIN` | "" | Public domain |
+| `PEERDRIVE_P2P_ENABLE` | true | P2P toggle |
+| `PEERDRIVE_P2P_LISTEN` | /ip4/0.0.0.0/tcp/0 | P2P listen address |
+| `PEERDRIVE_BOOTSTRAP_PEER` | "" | Bootstrap node |
 | `PEERDRIVE_MDNS_ENABLE` | true | mDNS |
-| `PEERDRIVE_RELAY_ENABLE` | false | 中继 |
-| `PEERDRIVE_RELAY_MODE` | client | 中继模式 |
-| `PEERDRIVE_STATIC_RELAYS` | "" | 静态中继 |
-| `PEERDRIVE_HOLE_PUNCH` | true | NAT 打洞 |
+| `PEERDRIVE_RELAY_ENABLE` | false | Relay |
+| `PEERDRIVE_RELAY_MODE` | client | Relay mode |
+| `PEERDRIVE_STATIC_RELAYS` | "" | Static relays |
+| `PEERDRIVE_HOLE_PUNCH` | true | NAT hole punching |
 | `PEERDRIVE_AUTO_NAT` | true | AutoNAT |
 | `PEERDRIVE_NAT_PORTMAP` | false | NAT-PMP |
 
 ---
 
-## 数据库表
+## Database Tables
 
-| 表 | 关键字段 | 用途 |
-|----|---------|------|
-| file_meta | hash(PK), size, filename, mime_type | 文件元数据 |
-| file_providers | hash(FK), provider_type, path, available | 文件存储位置 |
-| collections | username, collection_name, current_hash | 用户合集 |
-| collection_entries | collection_id(FK), path, file_hash | 合集工作区 |
-| collection_versions | id, collection_id(FK), snapshot_data, message | 版本快照 |
-| version_entries | version_id(FK), path, file_hash | 版本条目 |
-| transfer_tasks | id, type, status, params | 异步任务 |
-| users | username, password_hash, authkey | 用户认证 |
-| local_collection_sync | collection_hash, local_path | 本地同步 |
-| local_sync_files | collection_hash, file_path, is_saved | 同步文件状态 |
+| Table | Key Fields | Purpose |
+|-------|-----------|---------|
+| file_meta | hash(PK), size, filename, mime_type | File metadata |
+| file_providers | hash(FK), provider_type, path, available | File storage locations |
+| collections | username, collection_name, current_hash | User collections |
+| collection_entries | collection_id(FK), path, file_hash | Collection workspace |
+| collection_versions | id, collection_id(FK), snapshot_data, message | Version snapshots |
+| version_entries | version_id(FK), path, file_hash | Version entries |
+| transfer_tasks | id, type, status, params | Async tasks |
+| users | username, password_hash, authkey | User authentication |
+| local_collection_sync | collection_hash, local_path | Local sync |
+| local_sync_files | collection hashes, file_path, is_saved | Sync file status |

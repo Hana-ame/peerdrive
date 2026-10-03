@@ -1,233 +1,203 @@
-# 第五章：跨节点保存 —— 把别人的东西存进自己的节点
+# Chapter 5: Cross-Node Save — Storing Others' Content on Your Own Node
 
-> 接第四章：你已经知道怎么决定"共享什么、给谁看"。
-> 这一章反过来：**我是消费者**，怎么把别人节点上的内容搬到我自己的节点里。
-> **全程不用编译**：管理台是点按钮，命令行是 `curl` 打本机 HTTP。
+> Continues from Chapter 4: you already know how to decide "what to share and who can see it."
+> This chapter goes the other direction: **I am the consumer** — how to pull content from another node into my own node.
+> **No compilation needed throughout**: the admin console uses button clicks, and the command line uses `curl` against the local HTTP server.
 
 ---
 
-## 5.0 先分清三种"保存"，别点错了地方
+## 5.0 Distinguish Three Kinds of "Save" First — Don't Click the Wrong One
 
-这一章最容易搞混的地方：**「保存」这个词在面板和管理台里是两件不同的事**。
+This is the most confusing part of this chapter: **"Save" means two different things** in the panel and the admin console.
 
-| 入口 | 按钮 | 东西落在哪 | 谁能用 |
+| Entry Point | Button | Where It Lands | Who Can Use |
 |---|---|---|---|
-| 公共面板（`panel.html`） | 「保存」 | **你打开面板的那台电脑**（浏览器下载目录） | 任何人，不用有节点 |
-| 管理台 → 我的节点 → 对方节点 | 「保存选中」/「保存整个合集」 | **你自己的节点**（盘上某个目录） | 得先有一个在跑的节点 |
-| 面板 → URL 输入框 | 「网络入库」 | 你连着的那个节点（节点去抓这个 URL） | 见 §5.7 |
+| Public Panel (`panel.html`) | "Save" | **The computer you opened the panel on** (browser download directory) | Anyone, no node required |
+| Admin Console → My Node → Other Node | "Save Selected" / "Save Entire Collection" | **Your own node** (some directory on disk) | Must have a running node first |
+| Panel → URL input box | "Ingest from Network" | The node you're connected to (node fetches this URL) | See §5.7 |
 
-一句话记法：**面板是"临时访客"，它自己没有仓库**——面板的保存是把文件拖回你
-本机；要落进"我的网盘"，必须有一个节点在替你收，而管理台就是那个节点的遥控器。
+One-line mnemonic: **the panel is a "temporary visitor," it has no storage of its own** — the panel's Save drags files back to your machine; to land in "My Drive," a node must be receiving for you, and the admin console is that node's remote control.
 
-> 所以：想让文件出现在「我的网盘」里、能被自己再共享出去（第四章），走管理台
-> 这条路；只是想下载一份到电脑上看，面板就够了，两条路不冲突。
+> So: to have files appear in "My Drive" and be shareable again (Chapter 4), use the admin console path; if you just want to download a copy to your computer, the panel is enough — the two paths don't conflict.
 
 ---
 
-## 5.1 管理台：勾选 → 保存选中
+## 5.1 Admin Console: Check → Save Selected
 
-1. 左侧 **我的节点**（`/peers`）→ 点一个已连接的节点，进它的详情页；
-2. 页面列出对方共享给你的内容：**单独的文件** 与 **合集里的条目** 都在一张表里，
-   每行可以勾选；
-3. 勾选若干行 → 点 **保存选中 (N)**；
-4. 立刻跳到 **传输任务** 页看进度（任务在节点后台跑，关掉浏览器也继续）。
+1. Left sidebar **My Node** (`/peers`) → click a connected node to enter its detail page;
+2. The page lists what the peer has shared with you: **individual files** and **collection entries** are in one table, each row can be checked;
+3. Check several rows → click **Save Selected (N)**;
+4. Immediately jump to the **Transfer Tasks** page to see progress (tasks run in the node's backend, browser can be closed and they continue).
 
-合集也可以整包来：每个合集卡片上有 **保存整个合集**，一次建 N 个任务。
+Collections can also be saved as a whole: each collection card has a **Save Entire Collection** button, creating N tasks at once.
 
-> 逐条建任务而不是发一个"批量请求"，是刻意的：每个文件有**独立的进度、独立
-> 的成败**，一个坏了不该让整批停住（和 BT 客户端里"选中多个文件下载"一个语义）。
+> Creating tasks individually rather than sending one "batch request" is intentional: each file has **independent progress, independent success/failure** — one bad file shouldn't stop the whole batch (same semantics as "select multiple files to download" in a BT client).
 
 ---
 
-## 5.2 「保存整个合集」为什么有时 404
+## 5.2 Why "Save Entire Collection" Sometimes Returns 404
 
-点下去之后，节点会**当场**向对方要一次共享清单（`share` 帧），在里面找这个
-合集；清单里没有，就退一步**按 hash 把 manifest 取回来**（合集 manifest 本身就是
-一份按内容寻址存的 JSON，hash 即其 sha256 —— 所以 unlisted 合集也能整包存，
-它只是不在清单里，不是不存在）。两条路都不通才报错：
+After clicking, the node will **immediately** request a share list (`share` frame) from the peer, looking for this collection there; if not in the list, it falls back to **fetching the manifest by hash** (a collection's manifest itself is a content-addressed JSON stored by hash — so unlisted collections can also be saved as a whole, they're just not in the list, not non-existent). If both paths fail, it errors:
 
-- 对方**离线 / 连不上** → 拿不到清单也取不到 manifest → `502`；
-- 这个合集是 **private 而你不在对方好友名单里** → 清单里没有，manifest 也被挡
-  → `404`（不是 403：清单里没有的东西，服务端不会告诉你"它存在但不给你"）；
-- 你填的 hash **根本不是合集**（比如把某个文件的 hash 当合集 hash 传了）→ manifest
-  取回来解析不出条目 → 同样是 `404`。
+- Peer is **offline / unreachable** → can't get the list or the manifest → `502`;
+- The collection is **private and you're not on their friend list** → not in the list, and the manifest is also blocked → `404` (not 403: things not in the list, the server won't tell you "it exists but not for you");
+- The hash you filled in **isn't a collection at all** (e.g. you passed a file's hash as a collection hash) → the manifest can't be parsed into entries → also `404`.
 
-> 逐条保存没有这个限制：`POST /p2p/pull` 本来就是按 hash 拉的，不看清单，所以
-> 拿到一条合集链接后，按条目 hash 一条条拉也行（只是要自己拼路径与名字）。
+> Individual saves don't have this limitation: `POST /p2p/pull` works by hash, doesn't look at the list, so after getting a collection link, you can pull entry by entry hash (you just have to assemble paths and names yourself).
 
-> 注意它**不信任页面上显示的数量摘要**：那个数字只是引导信息，可能是几分钟前
-> 的缓存；真正保存时一定以对方当前状态为准。
+> Note it **doesn't trust the quantity summary displayed on the page**: that number is just guidance, possibly a cached value from minutes ago; the actual save always goes by the peer's current state.
 
 ---
 
-## 5.3 传输任务页：进度、状态、取消
+## 5.3 Transfer Tasks Page: Progress, Status, Cancel
 
-左侧 **传输任务**（`/transfers`），形态和下载工具一样：
+Left sidebar **Transfer Tasks** (`/transfers`), looks like a download tool:
 
-| 状态 | 含义 | 怎么办 |
+| Status | Meaning | What to Do |
 |---|---|---|
-| `running` | 正在传，有进度条和速率 | 可以点「取消」 |
-| `done` | 完成，行尾显示 `已保存到 <路径>` | — |
-| `failed` | 失败，行内带错误原因 | 看 §5.8 |
-| `cancelled` | 你（或对方断开）取消了 | 重来一次 |
+| `running` | Transferring, with progress bar and rate | Can click "Cancel" |
+| `done` | Complete, end of row shows `Saved to <path>` | — |
+| `failed` | Failed, error reason shown inline | See §5.8 |
+| `cancelled` | You (or peer disconnect) cancelled | Try again |
 
-几个行为细节（都是"看起来像 bug 其实是设计"）：
+Several behavioral details (all "looks like a bug, actually design"):
 
-- **有 `running` 任务时才轮询**（1 秒一次），全结束就停下，不会长期空转打后端；
-- 已结束的任务**留在列表里**（你要回看"存哪了"），只是排到下面；后端任务表上限
-  200 条，超了自动丢最老的已结束任务；
-- **取消只对 `running` 有效**：已经结束的任务会回错误（按钮也就是点不动的意思），
-  取消是"关掉流 + 唤醒正在读的 goroutine"，不是删文件；
-- 本地**已经有相同 hash 的内容**会直接跳过（`skipped`），状态仍是 `done`——内容
-  寻址的去重，同样的内容不必再下一遍；
-- 同时最多 **3 个**在传：每条拉取占一条 WebRTC 连接，对方也是逐连接串行服务，
-  堆更多只会让每个都变慢；
-- 任务表**只在内存里**：重启节点后传输页会空掉，但已经存好的文件还在盘上
-  （它没有"续传"概念，重开一个任务会从头再来；内容相同的会直接 `skipped`）。
+- **Only polls when there are `running` tasks** (once per second), stops when all finish, doesn't keep hitting the backend idly;
+- Finished tasks **stay in the list** (so you can look back at "where it was saved"), just sorted to the bottom; the backend task table limit is 200 entries, overflow auto-drops the oldest finished tasks;
+- **Cancel only works on `running`**: finished tasks return an error (the button is effectively unclickable); cancel is "close the stream + wake the reading goroutine," not delete the file;
+- **Locally existing content with the same hash** is skipped directly (`skipped`), status remains `done` — content-addressed dedup, same content doesn't need downloading twice;
+- Maximum **3** concurrent transfers: each pull occupies one WebRTC connection, the peer also serves serially per connection, more just makes each slower;
+- The task table is **in memory only**: after restarting the node, the transfer page is empty, but already-saved files remain on disk (there's no "resume" concept — reopening a task starts from scratch; identical content will be `skipped` directly).
 
 ---
 
-## 5.4 命令行版（脚本 / 无浏览器）
+## 5.4 Command Line Version (Scripts / No Browser)
 
-节点在 `3001`，四个端点：
+Node on `3001`, four endpoints:
 
 ```bash
-# ① 存对方的一个文件（hash 必须 64 位 hex）
+# ① Save one of the peer's files (hash must be 64-digit hex)
 curl -s -X POST http://127.0.0.1:3001/p2p/pull \
   -H 'Content-Type: application/json' \
-  -d '{"peer":"<对方peer-id>","hash":"<64位hex>","name":"a.txt"}'
+  -d '{"peer":"<peer-peer-id>","hash":"<64-digit hex>","name":"a.txt"}'
 
-# ② 存整个合集
+# ② Save an entire collection
 curl -s -X POST http://127.0.0.1:3001/p2p/pull/collection \
   -H 'Content-Type: application/json' \
-  -d '{"peer":"<对方peer-id>","collection":"<合集hash>"}'
+  -d '{"peer":"<peer-peer-id>","collection":"<collection-hash>"}'
 
-# ③ 看任务列表（最新的在前）
+# ③ See task list (newest first)
 curl -s http://127.0.0.1:3001/p2p/pull | python -m json.tool
 
-# ④ 取消某个任务
+# ④ Cancel a specific task
 curl -s -X POST http://127.0.0.1:3001/p2p/pull/cancel \
   -H 'Content-Type: application/json' -d '{"id":"<job id>"}'
 ```
 
-返回示例（① 与 ③ 的节选）：
+Return examples (excerpts from ① and ③):
 
 ```json
 {
   "job": {
-    "id": "j-1a2b3c", "peer": "pd-alice", "hash": "<64位hex>", "name": "a.txt",
+    "id": "j-1a2b3c", "peer": "pd-alice", "hash": "<64-digit hex>", "name": "a.txt",
     "total": -1, "received": 0, "status": "running", "started_at": "2026-09-22T13:00:00Z"
   }
 }
 ```
 
-字段一句话说明：
+One-line field descriptions:
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `total` | 对方声明的大小；**`-1` = 没声明**，进度条会画成不确定态 |
-| `received` | 已收到字节 |
-| `path` | 合集内的相对路径（保存后本地按同样结构落盘） |
-| `skipped` | 本地已有同内容，跳过了 |
-| `saved_to` | 最终落盘的绝对路径（`done` 时才有） |
-| `error` | 失败原因（`failed` 时才有） |
+| `total` | Size declared by peer; **`-1` = not declared**, progress bar shows indeterminate state |
+| `received` | Bytes received |
+| `path` | Relative path within the collection (saved locally with same structure) |
+| `skipped` | Same content already exists locally, was skipped |
+| `saved_to` | Final absolute path on disk (only on `done`) |
+| `error` | Failure reason (only on `failed`) |
 
-> `POST /p2p/pull` 只要 hash 对、对方肯给，**不需要这个文件出现在对方的共享清单
-> 里** —— 所以它是第三章 `unlisted`（不列出但凭 hash 能下）在命令行侧的落地动作。
+> `POST /p2p/pull` only needs the correct hash and the peer willing to give it — **the file doesn't need to be in the peer's share list** — so it's the command-line counterpart of Chapter 3's `unlisted` (not listed but downloadable by hash).
 >
-> 注意 `POST /p2p/pull` 返回 200 **只代表任务建好了**，不代表传成功：参数层面的
-> 错误（`peer` 空、hash 不是 64 位 hex）才当场 400，传输中的失败（对方离线、private）
-> 是异步写进任务里，用 ③ 去看。
+> Note `POST /p2p/pull` returning 200 **only means the task was created**, not that the transfer succeeded: parameter-level errors (empty `peer`, hash not 64-digit hex) return 400 immediately, but in-transfer failures (peer offline, private) are written asynchronously into the task — check via ③.
 
 ---
 
-## 5.5 存到哪了？怎么保证没存坏
+## 5.5 Where Was It Saved? How Is Integrity Guaranteed?
 
-落盘位置固定：
+Save location is fixed:
 
 ```text
-<PEERDRIVE_DOWNLOAD_DIR>/pulled/<相对路径>
+<PEERDRIVE_DOWNLOAD_DIR>/pulled/<relative-path>
 ```
 
-- `PEERDRIVE_DOWNLOAD_DIR` 默认 `./downloads`（第一章起节点时那个目录）；
-- 单文件就叫你传的 `name`；合集条目保留对方给的**目录结构**；
-- 对方没给名字 → 用 `hash[:12]` 当文件名，至少能落到盘上。
+- `PEERDRIVE_DOWNLOAD_DIR` defaults to `./downloads` (the directory used to start the node in Chapter 1);
+- Single files are named whatever `name` you passed; collection entries keep the peer's **directory structure**;
+- If the peer didn't provide a name → uses `hash[:12]` as the filename, at least lands on disk.
 
-**写入是"先临时文件 → 校验 → 改名"三步**：
+**Writes follow "temp file → verify → rename" in three steps**:
 
-1. 流式写进**同目录下**的 `<正式名>.part`（同目录才能保证最后那次改名是原子的，
-   不会出现"半个 a.txt"）；
-2. 边写边算 **sha256**，和 hash 对不上 → 删掉临时文件、任务报 `failed: hash mismatch`
-   （这一步不能省：否则等于允许对端往你盘上写任意内容）；
-3. 通过了才 `rename` 成正式名，并**登记进文件索引**——之后「我的网盘」里能看到它，
-   它也能被别人从你这里取走。
+1. Stream-write into `<formal-name>.part` **in the same directory** (same directory guarantees the final rename is atomic — no "half an a.txt");
+2. Calculate **sha256** while writing, if it doesn't match the hash → delete the temp file, task reports `failed: hash mismatch` (this step can't be skipped: otherwise it's equivalent to allowing the peer to write arbitrary content to your disk);
+3. Only after passing does it `rename` to the formal name and **register into the file index** — after which "My Drive" will show it, and others can retrieve it from you.
 
-两个例外提示别误读：
+Two exception messages — don't misread them:
 
-- `done` 但带着 `saved but not indexed`：文件**已经在盘上**了，只是登记索引失败
-  （比如路径不在允许根目录内）。内容没丢，去那个路径就能找到；
-- 对方给的 `path` 里带 `../` 或绝对路径 → 会被清洗掉再拼接，最后还有一道"必须落在
-  `pulled/` 内"的复核。这是防恶意对端写穿你的磁盘，**不是**在跟你作对。
+- `done` but with `saved but not indexed`: the file **is already on disk**, just the index registration failed (e.g. path not within allowed root). Content isn't lost, just find it at that path;
+- Peer-provided `path` contains `../` or absolute paths → they get sanitized before joining, and there's a final "must land within `pulled/`" check. This prevents malicious peers from writing through your disk — **not** the system fighting you.
 
 ---
 
-## 5.6 存进来 ≠ 共享出去（重要）
+## 5.6 Saved ≠ Shared Out (Important)
 
-拉回来的文件默认只在**你自己的内容库**里，它**不会**自动共享出去。
+Pulled files default to only being in **your own content store** — they are **not** automatically shared out.
 
-这条和第二章那条原则是一回事，只是方向反过来：
+This is the same principle as in Chapter 2, just reversed:
 
 ```text
-别人的节点 ──保存──> 我的内容库 ──勾选第四章──> 我的共享清单 ──> 别人
+Other's node ──save──> My content store ──check Chapter 4──> My share list ──> Others
 ```
 
-也就是说，"我保存了别人的东西"这个动作**不会把你变成二次分发源**，除非你自己
-再去勾一次。想让它对外可见，按第四章做一遍即可。
+In other words, the act of "I saved someone else's content" **does not make you a redistribution source**, unless you go check it again yourself. To make it visible externally, just do Chapter 4 again.
 
 ---
 
-## 5.7 面板那个「网络入库」是什么
+## 5.7 What Is the Panel's "Ingest from Network"
 
-面板上还有一行 URL 输入框（旁边可填保存名，留空按 URL 推断）+ **网络入库** 按钮：
-它是让**你连着的那个节点**去抓一个 HTTP(S) URL 并入库，跟"从别的 Peerdrive 节点
-取"是两回事——源头是普通网站，不是 Peerdrive 节点。
+The panel also has a URL input row (optional save name alongside, empty infers from URL) + **Ingest from Network** button: it tells **the node you're connected to** to fetch an HTTP(S) URL and ingest it — different from "pull from another Peerdrive node." The source is a regular website, not a Peerdrive node.
 
-- 用途：把网上一个公开文件直接喂进节点（比如一个 ISO、一个数据集）；
-- 失败大多不是网络问题，而是**节点在保护自己**：SSRF 拦截（内网地址）、超过
-  大小上限、URL 404 / 需要登录。看任务里的错误原文。
+- Use case: feed a public file from the web directly into the node (e.g. an ISO, a dataset);
+- Failures are usually not network problems but **the node protecting itself**: SSRF blocking (internal addresses), exceeding size limits, URL 404 / requires login. Check the error text in the task.
 
 ---
 
-## 5.8 常见失败与含义
+## 5.8 Common Failures & Their Meanings
 
-| 现象 | 原因 / 怎么办 |
+| Symptom | Cause / What to Do |
 |---|---|
-| `404 collection not shared by peer` | 对方当前清单里没有它：取消共享了 / 是 private 而你不在好友名单 / id 写错 |
-| `502` | 拿不到对方清单：对方离线、PSK 没通过、信令不通（按第一章 §1.6 排查） |
-| `open stream: ...` | 连上了但对方此刻不肯给：断了、或这条是 private 而你不是好友 |
-| `hash mismatch: got <12位>` | 对方文件变了 / 传输损坏；删掉重来即可（坏的没落到盘上） |
-| `invalid sha256 hash` | hash 不是 64 位 hex（多半是复制漏了尾巴） |
-| `peer pull not enabled`（503） | 这个节点没开 PeerJS（`PEERDRIVE_PEERJS_ENABLE=false`），保存功能整体不可用 |
-| 取消时报错 `already finished` | 任务已经结束了，不用取消 |
-| 进度一直是"不确定" | 对方没声明大小（`total: -1`），不是卡住，看 `received` 在涨就行 |
-| 传得很慢 | 单条连接就是这么快（没有分片并行）；批量保存时一次多选几个，才能把 3 个并发跑满 |
-| 面板点了「保存」，节点里没有 | 正常：面板的保存是下载到浏览器。要进节点用管理台（§5.0） |
+| `404 collection not shared by peer` | Peer's current list doesn't have it: unshared / private and you're not on friend list / wrong ID |
+| `502` | Can't get peer's list: peer offline, PSK didn't pass, signaling unreachable (debug per Chapter 1 §1.6) |
+| `open stream: ...` | Connected but the peer won't give it right now: disconnected, or this is private and you're not a friend |
+| `hash mismatch: got <12-digit>` | Peer's file changed / transfer corrupted; delete and retry (corrupt data didn't land on disk) |
+| `invalid sha256 hash` | Hash isn't 64-digit hex (probably copy-paste missed the tail) |
+| `peer pull not enabled` (503) | This node doesn't have PeerJS enabled (`PEERDRIVE_PEERJS_ENABLE=false`), save feature is completely unavailable |
+| Cancel returns `already finished` | Task already ended, no need to cancel |
+| Progress always "indeterminate" | Peer didn't declare size (`total: -1`), not stuck — just watch `received` increase |
+| Very slow transfer | Single connection is just that fast (no parallel chunking); for batch saves, select multiple at once to maximize 3-way concurrency |
+| Clicked "Save" in panel, nothing on node | Normal: panel's Save is browser download. To get it into the node, use the admin console (§5.0) |
 
 ---
 
-## 5.9 本章自检清单
+## 5.9 Chapter Self-Check List
 
-1. 在对方节点详情页勾一个文件保存 → 传输页出现 `running`，随后 `done`；
-2. 到 `<PEERDRIVE_DOWNLOAD_DIR>/pulled/` 下能看到那个文件；
-3. 再保存一次同一个 → 任务直接 `skipped` + `done`（去重生效）；
-4. 「我的网盘」里能查到它（已登记进索引）；
-5. 它**没有**出现在你自己的共享清单里（§5.6）；
-6. 存一个对方没共享、但你拿到 hash 的文件（第三章 unlisted）→ 能存下来；
-7. 存一个对方 `private` 且你不在好友名单的内容 → 失败（第三章）；
-8. 传输中点取消 → 变 `cancelled`，`.part` 临时文件被删掉，不会留半截正式文件
-   （只有节点进程被强杀时才可能留下 `.part`，手动删即可）。
+1. Check a file on the peer's detail page to save → transfer page shows `running`, then `done`;
+2. That file is visible under `<PEERDRIVE_DOWNLOAD_DIR>/pulled/`;
+3. Save the same file again → task immediately `skipped` + `done` (dedup works);
+4. Can find it in "My Drive" (registered in the index);
+5. It is **not** in your own share list (§5.6);
+6. Save a file the peer didn't share but you have the hash for (Chapter 3 unlisted) → it saves;
+7. Save content the peer has as `private` and you're not on friend list → fails (Chapter 3);
+8. Click cancel during transfer → becomes `cancelled`, `.part` temp file deleted, no half-file left (`.part` may only remain if the node process was force-killed — delete manually).
 
 ---
 
-> 设计与实现细节：`doc/NETDISK.md` §12（共享）与 `back/internal/service/peerpull.go`
-> （拉取任务：并发闸、sha256 校验、路径清洗、取消）。
+> Design and implementation details: `doc/NETDISK.md` §12 (sharing) and `back/internal/service/peerpull.go` (pull tasks: concurrency gate, sha256 verification, path sanitization, cancel).

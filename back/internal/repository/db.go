@@ -1,17 +1,18 @@
-// Package repository 提供 SQLite 数据库操作层。
-// 驱动按 cgo 是否可用二选一（见 db_driver_cgo.go / db_driver_pure.go）：
-// 有 cgo 用 mattn/go-sqlite3，没有则退回纯 Go 的 modernc.org/sqlite——
-// 否则 CGO_ENABLED=0 构建出来的二进制（含全部发布包）会退化成 stub，一启动就挂。
-// 必须先调用 InitDB(dbPath) 初始化全局 DB 连接。
-// 表清单：
-//   file_meta       — 文件内容元数据（hash PK：size / mime_type / gziped / filename / type）
-//   file_providers  — 文件存储位置（hash → provider_type + path，多副本可用）
-//   collections     — 注册用户合集（current_hash 指向最新快照）
-//   collection_entries  — 合集工作区条目
-//   collection_versions — 版本快照记录
-//   version_entries     — 版本快照内容
-// 注：users / transfer_tasks 表曾由本地 AuthService 与 TaskService 使用
-// （2026-08-19 随死代码删除）。已存在数据库中的旧表无读写端，保留无害。
+// Package repository provides the SQLite database operation layer.
+// Driver selection is based on cgo availability (see db_driver_cgo.go / db_driver_pure.go):
+// with cgo use mattn/go-sqlite3, without use pure-Go modernc.org/sqlite —
+// otherwise binaries built with CGO_ENABLED=0 (including all release packages) degrade to a stub and crash on start.
+// InitDB(dbPath) must be called first to initialize the global DB connection.
+// Table list:
+//   file_meta       — file content metadata (hash PK: size / mime_type / gziped / filename / type)
+//   file_providers  — file storage locations (hash → provider_type + path, multiple replicas allowed)
+//   collections     — registered user collections (current_hash points to latest snapshot)
+//   collection_entries  — collection workspace entries
+//   collection_versions — version snapshot records
+//   version_entries     — version snapshot content
+// Note: users / transfer_tasks tables were previously used by local AuthService
+// and TaskService (deleted as dead code on 2026-08-19). Old tables in existing
+// databases have no read/write endpoints; retained harmlessly.
 
 package repository
 
@@ -25,8 +26,9 @@ import (
 	"peerdrive/internal/model"
 )
 
-// FileType* 常量已上移到 model 包（M2 收层：领域常量归 domain），
-// 此处保留别名避免 diff 爆炸，repository 内部引用走常量。新代码直接用 model.FileType*。
+// FileType* constants have been moved to the model package (M2 layering: domain
+// constants belong to domain); aliases retained here to avoid diff explosion,
+// repository internal references use constants. New code should use model.FileType* directly.
 const (
 	FileTypeBlob           = model.FileTypeBlob
 	FileTypeAnonCollection = model.FileTypeAnonCollection
@@ -34,14 +36,16 @@ const (
 
 var DB *sql.DB
 
-// CloseDB 关闭全局连接并把 DB 置空（幂等）。
+// CloseDB closes the global connection and nils out DB (idempotent).
 //
-// 为什么要有它：**打开着的库文件在 Windows 上删不掉**。测试用 t.TempDir()
-// 建库、结束时 testing 会 RemoveAll 整个目录，只要连接没关就报 "The process
-// cannot access the file because it is being used by another process"。
-// Linux 上 unlink 一个打开的文件是允许的，所以这条只有 Windows 能暴露
-// （2026-09-20 之前 Windows 那格 CI 只 build 不 test，一直没发现）。
-// 生产路径（进程退出）不调用它——进程一走句柄自然回收。
+// Why it exists: **open database files cannot be deleted on Windows**. Tests use
+// t.TempDir() to create databases; at the end testing calls RemoveAll on the whole
+// directory. If the connection isn't closed, it reports "The process cannot access
+// the file because it is being used by another process".
+// On Linux, unlinking an open file is allowed, so this only surfaces on Windows
+// (before 2026-09-20, Windows CI only built, didn't test, so it was never found).
+// Production path (process exit) does not call it — the process goes away and the
+// handle is naturally reclaimed.
 func CloseDB() error {
 	if DB == nil {
 		return nil
@@ -51,10 +55,12 @@ func CloseDB() error {
 	return err
 }
 
-// Ping 检查元数据库是否可连通（供 /ready 探针使用）。
+// Ping checks whether the metadata database is reachable (used by /ready probe).
 //
-// 为什么包一层而不是把 DB 暴露给 controller：DB 是包级变量，直接放出去等于
-// 让上层拿到整个数据库句柄，分层的口子一开就合不上。探针只需要一个是/否。
+// Why wrap instead of exposing DB to controller: DB is a package-level variable;
+// passing it out equals giving upper layers the entire database handle. Once the
+// layering boundary is breached, it's impossible to close it again. The probe only
+// needs a yes/no.
 func Ping() error {
 	if DB == nil {
 		return errors.New("database not initialized")
@@ -62,20 +68,24 @@ func Ping() error {
 	return DB.Ping()
 }
 
-// isMemoryDB 判断是否为进程内内存库（":memory:"）。
+// isMemoryDB checks if this is an in-process in-memory database (":memory:").
 //
-// 为什么单独判：内存库下**每个连接都是一份独立的空库**。一旦连接池开出第二条
-// 连接，或者旧连接被回收后重开，前面的表就"消失"了——表现为随机报
-// "no such table"。所以内存库必须强制单连接且连接永不过期。这条只对测试
-// 路径生效（测试用 :memory: 隔离），但它决定了下面两个开关怎么设。
+// Why check separately: in-memory DBs have **a separate empty database per connection**.
+// Once the connection pool opens a second connection, or an old connection is recycled
+// and reopened, the previous tables "vanish" — manifesting as random "no such table"
+// errors. So in-memory DBs must enforce a single connection that never expires. This
+// only affects the test path (tests use :memory: for isolation), but it determines
+// how the two switches below are set.
 func isMemoryDB(dbPath string) bool {
 	return dbPath == ":memory:" || dbPath == "file::memory:"
 }
 
-// dsn 拼出最终连接串：普通文件路径追加驱动特定的 PRAGMA 参数。
+// dsn assembles the final connection string: appends driver-specific PRAGMA parameters
+// to normal file paths.
 //
-// 为什么内存库 / 已是 URI（file: 前缀）的不追加：":memory:?_pragma=..." 会被
-// 当成一个普通文件名处理，测试直接连到一份文件库，表互相污染且清不掉。
+// Why not append for in-memory DBs / existing URIs (file: prefix): ":memory:?_pragma=..."
+// would be treated as a normal filename, tests would connect to a file-based DB, tables
+// would cross-contaminate and can't be cleaned up.
 func dsn(dbPath string) string {
 	if dbPath == "" || isMemoryDB(dbPath) || strings.HasPrefix(dbPath, "file:") {
 		return dbPath
@@ -83,7 +93,8 @@ func dsn(dbPath string) string {
 	return dbPath + dsnSuffix()
 }
 
-// InitDB 初始化 SQLite 数据库连接并执行全部建表 DDL，包括 file_meta、file_providers、collections 等表。
+// InitDB initializes the SQLite database connection and executes all table-creation DDL,
+// including file_meta, file_providers, collections, and other tables.
 func InitDB(dbPath string) error {
 	var err error
 	DB, err = sql.Open(sqliteDriver, dsn(dbPath))
@@ -91,23 +102,26 @@ func InitDB(dbPath string) error {
 		return err
 	}
 
-	// 连接池：默认（无限制）在 SQLite 上是不可用的——每个写事务都要独占库，
-	// 连接越多并发写冲突越频繁（症状是偶发 "database is locked"）。
-	// 这里显式收口：内存库 1 条（见 isMemoryDB），文件库 8 条（够并发读，
-	// 写冲突交给 busy_timeout 排队而不是直接报错）。
+	// Connection pool: the default (unlimited) is unusable with SQLite — each write
+	// transaction needs exclusive database access, and more connections mean more
+	// frequent concurrent write conflicts (symptom: sporadic "database is locked").
+	// Explicitly constrained here: 1 connection for in-memory DBs (see isMemoryDB),
+	// 8 for file DBs (enough for concurrent reads; write conflicts are queued by
+	// busy_timeout instead of erroring immediately).
 	if isMemoryDB(dbPath) {
 		DB.SetMaxOpenConns(1)
 		DB.SetMaxIdleConns(1)
-		DB.SetConnMaxLifetime(0) // 连接一旦回收，内存库里的表就没了
+		DB.SetConnMaxLifetime(0) // once a connection is recycled, in-memory DB tables are gone
 	} else {
 		DB.SetMaxOpenConns(8)
 		DB.SetMaxIdleConns(4)
 		DB.SetConnMaxLifetime(30 * time.Minute)
 	}
 
-	// 先 Ping 再建表：sql.Open 是惰性的（连错了也不报错），真正的失败发生在
-	// 第一次 Exec。启动期就把它变成明确的错误，否则运维看到的是"建表失败"
-	// 这类把病因藏在别处的报错（路径不可写 / 目录不存在 / 驱动退化成 stub）。
+	// Ping before table creation: sql.Open is lazy (doesn't error on wrong connection),
+	// real failure happens at first Exec. Make it an explicit error at startup,
+	// otherwise ops sees "table creation failed" — a symptom that hides the root cause
+	// elsewhere (unwritable path / nonexistent directory / driver degraded to stub).
 	if err := DB.Ping(); err != nil {
 		return err
 	}
@@ -202,10 +216,12 @@ func InitDB(dbPath string) error {
 		return err
 	}
 
-	// 迁移：从旧 files 表迁移到新表。
-	// L9：原实现静默忽略所有 ALTER 错误——重复迁移时 duplicate column 是预期
-	// 幂等行为，但真实错误（表缺失、磁盘故障）也被吞掉，迁移失败无从排查。
-	// 现在统一走 migrationExec：duplicate column 仅记 debug，其他错误记 warn。
+	// Migration: migrate from old files table to new tables.
+	// L9: original implementation silently ignored all ALTER errors — duplicate column
+	// on repeated migration is expected idempotent behavior, but real errors (missing
+	// table, disk failure) were also swallowed, making failed migrations untraceable.
+	// Now all go through migrationExec: duplicate column logs debug only, other errors
+	// log warn for traceability.
 	migrationExec(`ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`)
 	migrationExec(`ALTER TABLE collections ADD COLUMN visibility TEXT DEFAULT 'public'`)
 	migrationExec(`ALTER TABLE collections ADD COLUMN tags TEXT DEFAULT ''`)
@@ -223,13 +239,14 @@ func InitDB(dbPath string) error {
 		filename TEXT DEFAULT '',
 		pinned_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
-	// 文件索引表：sha256 → 绝对路径映射 + 同步游标（独立于旧 file_meta）
+	// File index table: sha256 → absolute path mapping + sync cursor (independent of old file_meta)
 	createFileIndexTable()
 	return nil
 }
 
-// migrationExec 执行幂等迁移语句。duplicate column name 是重跑迁移的预期结果，
-// 只记 debug；其余错误（表缺失、IO 故障等真实问题）记 warn 留痕（L9）。
+// migrationExec executes idempotent migration statements. Duplicate column name
+// is the expected result of re-running migrations — only logs debug. Other errors
+// (missing table, I/O failure, etc.) log warn for traceability (L9).
 func migrationExec(stmt string) {
 	if _, err := DB.Exec(stmt); err != nil {
 		if strings.Contains(err.Error(), "duplicate column") {

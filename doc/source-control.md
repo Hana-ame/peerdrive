@@ -1,100 +1,100 @@
-# Source 控制面设计（草案）
+# Source Control Plane Design (Draft)
 
-> 2026-08-19 · 文档先行。目标：在现有“读取面 Source 接口”之外，
-> 增加每个 source 的**控制面**，让用户可以主动管理/写入/下载文件。
-> 当前只记录设计，不改代码。
+> 2026-08-19 · Documentation first. Goal: in addition to the existing "read-plane Source interface",
+> add a **control plane** for each source, so users can actively manage/write/download files.
+> Currently only documenting the design, no code changes.
 
-## 1. 为什么需要控制面
+## 1. Why a Control Plane is Needed
 
-现在的 `Source` 接口是**只读**的：
+The current `Source` interface is **read-only**:
 
-- `Open`：按 hash 流式读取
-- `Fetch`：按 hash 整体读取
-- `Info`：查询元数据
-- `Available`：是否可用
+- `Open`: streaming read by hash
+- `Fetch`: bulk read by hash
+- `Info`: query metadata
+- `Available`: whether available
 
-但实际使用还需要“写入/管理”能力，例如：
+But actual usage also requires "write/manage" capabilities, such as:
 
-- 把本地已有文件加入 local source
-- 直接写文件到 local source
-- BT 主动下载某个 torrent / magnet
-- IPFS 主动 pin / unpin / 下载 CID
+- Adding existing local files to the local source
+- Directly writing files to the local source
+- Actively downloading a torrent / magnet via BT
+- Actively pin / unpin / download a CID via IPFS
 
-这些不属于“按 hash 读取”，而属于 **source 控制面**。
+These don't belong to "read by hash", but to the **source control plane**.
 
-## 2. 控制面原则
+## 2. Control Plane Principles
 
-- **读取面保持稳定**：现有 `Source` 接口不破坏。
-- **控制面作为可选能力**：不是所有 source 都必须实现。
-- **统一入口**：由 `SourceControl`/路由统一收口，避免每个 source 各搞一套 HTTP。
-- **一旦控制面写入完成**：文件进入内容寻址体系，之后仍通过读取面 `Open/Fetch` 获取。
+- **Keep the read plane stable**: the existing `Source` interface is not broken.
+- **Control plane as optional capability**: not every source must implement it.
+- **Unified entry point**: `SourceControl`/router handles it centrally, avoiding each source building its own HTTP.
+- **Once control plane write is complete**: the file enters the content-addressed system, and is subsequently retrieved via the read-plane `Open/Fetch`.
 
-## 3. 控制面接口草案
+## 3. Control Plane Interface Draft
 
 ```go
-// Control 是 source 的可选控制能力。
-// 实现方可以只实现自己支持的子集；不支持的返回 ErrUnsupported。
+// Control is an optional control capability for a source.
+// Implementations can implement only the subset they support; unsupported ones return ErrUnsupported.
 type Control interface {
-    // Local：把本地已有文件加入 source（计算 hash、登记索引）
+    // Local: add an existing local file to the source (compute hash, register in index)
     AddLocalFile(path string) (*FileMeta, error)
 
-    // Local：直接写文件，写完后计算 hash 并登记
+    // Local: directly write a file, compute hash and register after writing
     WriteFile(name string, r io.Reader) (*FileMeta, error)
 
-    // BT：下载 torrent / magnet 到本地存储，并登记结果文件
+    // BT: download a torrent / magnet to local storage and register the result file
     DownloadTorrent(location string, opts TorrentOptions) (*TorrentTask, error)
 
-    // BT：查询任务状态 / 取消任务 / 列表
+    // BT: query task status / cancel task / list
     TorrentStatus(taskID string) (*TorrentTask, error)
     CancelTorrent(taskID string) error
     ListTorrents() ([]TorrentTask, error)
 
-    // IPFS：主动 pin / unpin / 按 CID 下载
+    // IPFS: actively pin / unpin / download by CID
     PinCID(cid string) (*FileMeta, error)
     UnpinCID(cid string) error
     ListPins() ([]PinInfo, error)
 }
 ```
 
-> 具体方法名可以后续细化；这个草案先表达“每个 source 有什么控制能力”。
+> Specific method names can be refined later; this draft first expresses "what control capabilities each source has".
 
-## 4. 各 source 控制面现状
+## 4. Current Control Plane Status per Source
 
-| Source | 控制面能力 | 现有可复用代码 |
+| Source | Control Plane Capabilities | Existing Reusable Code |
 |---|---|---|
-| Local | `AddLocalFile`、`WriteFile` | `transport.FileIndexService.Create`、`UploadSession` |
-| Peer | 暂不定义 | 暂无 |
-| URL | 暂不定义 | 暂无 |
-| IPFS | `PinCID`、`UnpinCID`、`ListPins`；单独 serve IPFS 协议；control 控制其行为 | `internal/controller/p2p.go` 已有 pin 端点、`internal/provider/ipfs.go`、`front/src/pages/IPFSPanel.jsx` |
-| BT | `DownloadTorrent`、状态/取消/列表 | `back/p2p_bt` 已有 DHT 获取，torrent 主动下载待接入 |
+| Local | `AddLocalFile`, `WriteFile` | `transport.FileIndexService.Create`, `UploadSession` |
+| Peer | Not yet defined | N/A |
+| URL | Not yet defined | N/A |
+| IPFS | `PinCID`, `UnpinCID`, `ListPins`; serve IPFS protocol independently; control manages its behavior | `internal/controller/p2p.go` already has pin endpoints, `internal/provider/ipfs.go`, `front/src/pages/IPFSPanel.jsx` |
+| BT | `DownloadTorrent`, status/cancel/list | `back/p2p_bt` already has DHT fetch; torrent active download pending integration |
 
-## 5. IPFS 源的特殊性：自己 serve IPFS 协议
+## 5. IPFS Source Specialities: Serving IPFS Protocol Itself
 
-IPFS 不只是“从公共网关拉取文件”的被动源，它还可以在本节点**单独 serve IPFS 协议**：
+IPFS is not just a passive source that "pulls files from public gateways"; it can also **independently serve the IPFS protocol** on this node:
 
-- 对外提供 `/ipfs/:cid` 或 IPFS 兼容 API，让其他客户端/节点直接访问本节点上的 CID。
-- 内部通过 Bitswap / 网关 / DHT 回源。
-- 是否启用、开放哪条路径、是否允许 pin、哪些网关可用，都由 Control 面控制。
+- Expose `/ipfs/:cid` or an IPFS-compatible API, letting other clients/nodes access CIDs on this node directly.
+- Internally fetches through Bitsswap / gateway / DHT.
+- Whether to enable it, which paths to expose, whether to allow pinning, which gateways are available — all controlled by the Control plane.
 
-因此 IPFS 的控制面设计分成两类：
+Therefore, IPFS control plane design is divided into two categories:
 
-| 分类 | 能力 |
+| Category | Capabilities |
 |---|---|
-| 内容管理 | `PinCID`、`UnpinCID`、`ListPins`、按 CID 下载 |
-| 协议服务控制 | 启用/停用 IPFS serve、配置网关列表、切换 Bitswap/HTTP 模式、开放 `/ipfs/:cid` 路由、查看服务状态 |
+| Content Management | `PinCID`, `UnpinCID`, `ListPins`, download by CID |
+| Protocol Service Control | Enable/disable IPFS serve, configure gateway list, switch Bitsswap/HTTP mode, expose `/ipfs/:cid` route, view service status |
 
-对应控制接口可以扩展成：
+The corresponding control interface can be extended to:
 
 ```go
 type IPFSControl interface {
-    Control // 通用：AddLocalFile/WriteFile 等若适用
+    Control // Generic: AddLocalFile/WriteFile etc. if applicable
 
-    // 内容管理
+    // Content Management
     PinCID(cid string) (*FileMeta, error)
     UnpinCID(cid string) error
     ListPins() ([]PinInfo, error)
 
-    // 协议服务控制
+    // Protocol Service Control
     EnableIPFSServe(enable bool) error
     IPFSServeStatus() (*IPFSServeStatus, error)
     SetGateways(gateways []string) error
@@ -102,13 +102,13 @@ type IPFSControl interface {
 }
 ```
 
-## 6. 推荐落点
+## 6. Recommended Landing Points
 
-- 新建 `internal/source/control.go`：定义 `Control` 接口与 `TorrentOptions` 等模型。
-- `LocalSource` 实现 `AddLocalFile` / `WriteFile`，复用现有 file-index/upload 逻辑。
-- BT 控制面先包住 `back/p2p_bt`，任务状态存 `repository` 或内存表。
-- IPFS 控制面可以复用现有 controller 的 pin 逻辑，后续收编到统一 `SourceControl`。
-- 管理入口走 router/admin：例如
+- Create new `internal/source/control.go`: define the `Control` interface and models like `TorrentOptions`.
+- `LocalSource` implements `AddLocalFile` / `WriteFile`, reusing existing file-index/upload logic.
+- BT control plane first wraps `back/p2p_bt`, task status stored in `repository` or in-memory table.
+- IPFS control plane can reuse existing controller pin logic, later consolidated into unified `SourceControl`.
+- Management entry via router/admin, e.g.:
   - `POST /sources/local/add`
   - `POST /sources/local/upload`
   - `POST /sources/bt/download`
@@ -117,67 +117,67 @@ type IPFSControl interface {
   - `POST /sources/ipfs/serve/enable`
   - `GET /sources/ipfs/serve/status`
 
-## 7. BT / IPFS 做成可选 DLL/插件（架构偏好）
+## 7. BT / IPFS as Optional DLL/Plugin (Architecture Preference)
 
-用户偏好：BT 和 IPFS 都做成可选外部模块（Windows 下可叫 DLL，**EXE 也可以接受**），
-**不需要时就不带这个模块**，核心 peerdrive 仍然可以工作。
-评判标准不是“必须 DLL 还是 EXE”，而是：**只要能控制、能当 Source 用**。
+User preference: BT and IPFS should both be optional external modules (on Windows they can be called DLL, **EXE is also acceptable**),
+**the module is not included when not needed**, and core peerdrive still works.
+The criterion is not "must be DLL or EXE", but: **as long as it can be controlled and used as a Source**.
 
-### 为什么合理
+### Why This is Reasonable
 
-- BT/IPFS 涉及较重依赖、外部网络协议、open-source 库，不是人人需要。
-- 做成可选模块后：
-  - 主程序不强制引入 BT/IPFS 依赖。
-  - 只要系统里没有对应 DLL/插件，对应 source/control 就显示“不可用”。
-  - 需要时才部署对应 DLL/插件，不影响主程序升级。
+- BT/IPFS involve heavy dependencies, external network protocols, open-source libraries — not everyone needs them.
+- As optional modules:
+  - The main program doesn't force BT/IPFS dependencies.
+  - As long as the corresponding DLL/plugin is not installed, the corresponding source/control shows "unavailable".
+  - Deploy the corresponding DLL/plugin only when needed, without affecting main program upgrades.
 
-### Go 里的可选模块方案
+### Optional Module Approaches in Go
 
-| 方案 | 说明 | 适合场景 |
+| Approach | Description | Best For |
 |---|---|---|
-| **独立进程/服务**（推荐首选） | BT/IPFS 各自做成独立 EXE/本地服务，主程序通过 HTTP/gRPC 调用；不需要时就不部署 | 跨平台最省事，不需要 CGO/DLL 加载，EXE 可接受 |
-| **c-shared DLL** | 用 cgo 把 BT/IPFS 编译成 Windows DLL / Linux .so，主程序动态加载 | 如果必须“一个 DLL 文件”形态 |
-| **Go plugin** | Go 官方 plugin（`.so`） | 仅 Linux，Windows 不支持 |
-| **build tags 可选编译** | `//go:build bt && ipfs`，不满足 tag 就不编译对应代码 | 构建期决定，不是运行期动态加载 |
-| **独立 go.mod** | 像现在的 `back/p2p_bt` 一样做成独立仓库/模块，主程序按需 replace | 已经具备类似结构 |
+| **Standalone Process/Service** (recommended first choice) | BT/IPFS each as standalone EXE/local service, main program calls via HTTP/gRPC; not deployed when not needed | Most convenient cross-platform, no CGO/DLL loading needed, EXE acceptable |
+| **c-shared DLL** | Use cgo to compile BT/IPFS into Windows DLL / Linux .so, dynamically loaded by main program | If a single "DLL file" form is required |
+| **Go plugin** | Official Go plugin (`.so`) | Linux only, Windows not supported |
+| **build tags optional compilation** | `//go:build bt && ipfs`, if tag not satisfied the corresponding code is not compiled | Decided at build time, not dynamically loaded at runtime |
+| **Standalone go.mod** | Like the current `back/p2p_bt`, as a standalone repo/module, main program replaces as needed | Already has a similar structure |
 
-> 考虑到项目在 Windows 下，DLL 和 EXE 都可接受；推荐优先 **独立 EXE/本地服务**，
-> 用稳定的本地接口（HTTP/gRPC/JSON）暴露“控制 + 当 Source 读取”的能力。
-> 如果只是“不需要就不带”，独立进程或 build tags 更简单可靠。
+> Given the project runs on Windows, both DLL and EXE are acceptable; recommend **standalone EXE/local service** first,
+> exposing "control + use as Source for reading" capabilities through a stable local interface (HTTP/gRPC/JSON).
+> If it's just "not included when not needed", standalone processes or build tags are simpler and more reliable.
 
-外部模块只要满足以下条件，无论 DLL 还是 EXE 都算合格：
+External modules meet the following conditions to be qualified, whether DLL or EXE:
 
 ```text
-1. 可被主程序控制：加载/卸载、启用/停用、pin/下载/任务管理等。
-2. 可当 Source 用：主程序能通过它按 hash/CID/磁力等获取文件内容。
-3. 未安装时主程序仍能正常工作，对应能力标记为“不可用”。
+1. Controllable by the main program: load/unload, enable/disable, pin/download/task management, etc.
+2. Usable as a Source: the main program can retrieve file content through it by hash/CID/magnet, etc.
+3. When not installed, the main program still works normally, with the corresponding capability marked "unavailable".
 ```
 
 
-### 预留接口
+### Reserved Interface
 
-在 Control 面上增加“能力探测”，让主程序知道哪些外部模块可用：
+Add "capability probing" to the Control plane, so the main program knows which external modules are available:
 
 ```go
 type SourceControl interface {
-    // 检测外部模块是否已加载/可用
+    // Detect whether external modules are loaded/available
     CapabilityStatus() map[string]CapabilityStatus
 }
 ```
 
-每个可选 DLL/模块暴露同一套本地接口：
+Each optional DLL/module exposes the same set of local interfaces:
 
-- 加载时注册：`local` / `peer` / `url` 是核心，始终存在。
-- 可选模块：`ipfs` / `bt` 未加载时，`Available=false`，相关控制入口直接返回“模块未安装”。
+- Registered on load: `local` / `peer` / `url` are core, always present.
+- Optional modules: when `ipfs` / `bt` is not loaded, `Available=false`, and related control entry points return "module not installed" directly.
 
-### 开源库参考（后续选型）
+### Open-Source Library References (for later selection)
 
-- IPFS / Bitswap：
-  - `boxo`（IPFS 底层库，bitswap / gateway）
-  - `kubo` / `go-ipfs` RPC 或 HTTP API（作为独立进程接入）
-- BT / DHT：
+- IPFS / Bitswap:
+  - `boxo` (IPFS underlying library, bitswap / gateway)
+  - `kubo` / `go-ipfs` RPC or HTTP API (as a standalone process)
+- BT / DHT:
   - `github.com/anacrolix/torrent`
   - `github.com/anacrolix/dht/v2`
-  - 现有 `back/p2p_bt` 已经是独立 go.mod，可以继续作为 BT 模块基础
+  - The existing `back/p2p_bt` is already a standalone go.mod and can continue as the BT module foundation
 
-> 当前阶段只记录方向，不绑定具体库；实际接入时再根据许可证/体积/稳定性选择。
+> This stage only records the direction, without binding to specific libraries; selection will be made based on license/size/stability during actual integration.

@@ -1,4 +1,4 @@
-// vite.vanilla.config.js — vanilla 产物：peerjs 打进 bundle，<script> 直接可用。
+// vite.vanilla.config.js — vanilla artifact: peerjs bundled, directly usable via <script>.
 import { defineConfig } from 'vite'
 
 export default defineConfig({
@@ -11,8 +11,8 @@ export default defineConfig({
     },
     outDir: 'dist/vanilla',
     emptyOutDir: true,
-    // named：IIFE 全局 PeerMedia 直接挂命名导出（PeerMedia.load/mount/client），
-    // 避免消费者被迫写 PeerMedia.default.load（MIXED_EXPORTS 警告来源）。
+    // named: the IIFE global PeerMedia directly exposes named exports (PeerMedia.load/mount/client),
+    // avoiding consumers being forced to write PeerMedia.default.load (source of MIXED_EXPORTS warning).
     rollupOptions: { output: { exports: 'named' } },
   },
 })

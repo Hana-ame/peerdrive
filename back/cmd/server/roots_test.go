@@ -1,11 +1,13 @@
 package main
 
-// 启动期"卷根配置"拦截的测试（doc/NETDISK.md §11.3）。
+// Tests for the startup-time "volume root" configuration guard (doc/NETDISK.md §11.3).
 //
-// 为什么要有这份测试：这类配置**过得了**所有运行时边界判定——root 配成 `/`
-// 时 `/etc/passwd` 确实"在根内"，pathutil.Within 判 true 是正确行为。
-// 唯一能拦住它的地方就是启动期，而启动期逻辑最容易在重构中被删掉。
-// 这里把它当 API 测，而不是只测 pathutil.IsUnsafeRoot（后者已有单测）。
+// Why this test exists: this kind of configuration **passes** every runtime
+// boundary check -- when root is set to `/`, `/etc/passwd` genuinely "is inside
+// the root", so pathutil.Within returning true is the correct behavior. The only
+// place that can stop it is at startup, and startup logic is the easiest thing
+// to delete during a refactor. So we test it as an API, rather than only testing
+// pathutil.IsUnsafeRoot (which already has unit tests of its own).
 
 import (
 	"os"
@@ -26,38 +28,38 @@ func cfgWith(storage, download, shareDirs string) *config.Config {
 }
 
 func TestCheckUnsafeRoots_DefaultConfigIsFine(t *testing.T) {
-	// 默认配置（./storage、./downloads、无共享目录）绝不该被拦，
-	// 否则 everybody's node 起不来。
+	// The default configuration (./storage, ./downloads, no share dirs) must never
+	// be blocked, otherwise nobody's node can start.
 	if err := checkUnsafeRoots(cfgWith("./storage", "./downloads", "")); err != nil {
-		t.Fatalf("默认配置不该被拒: %v", err)
+		t.Fatalf("default config should not be rejected: %v", err)
 	}
 	if err := checkUnsafeRoots(cfgWith("/data/peerdrive/storage", "/data/peerdrive/dl", "/data/pub,/mnt/media")); err != nil {
-		t.Fatalf("正常子目录不该被拒: %v", err)
+		t.Fatalf("normal subdirectories should not be rejected: %v", err)
 	}
 }
 
 func TestCheckUnsafeRoots_RejectsFilesystemRoot(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("该用例用 POSIX 根 '/'；Windows 分支见 TestCheckUnsafeRoots_WindowsDriveRoot")
+		t.Skip("this test case uses POSIX root '/'; see TestCheckUnsafeRoots_WindowsDriveRoot for the Windows branch")
 	}
 	cases := []struct {
 		name string
 		cfg  *config.Config
-		want string // 错误信息里必须点名的配置项
+		want string // the config item that must be named in the error message
 	}{
 		{"storage=/", cfgWith("/", "/downloads", ""), "PEERDRIVE_STORAGE"},
 		{"download=/", cfgWith("/storage", "/", ""), "PEERDRIVE_DOWNLOAD_DIR"},
-		{"share 里混入 /", cfgWith("/storage", "/downloads", "/data/pub,/"), "PEERDRIVE_SHARE_DIRS[1]"},
-		{"多个都错", cfgWith("/", "/", "/"), "PEERDRIVE_STORAGE"},
+		{"share mixed with /", cfgWith("/storage", "/downloads", "/data/pub,/"), "PEERDRIVE_SHARE_DIRS[1]"},
+		{"multiple all wrong", cfgWith("/", "/", "/"), "PEERDRIVE_STORAGE"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := checkUnsafeRoots(tc.cfg)
 			if err == nil {
-				t.Fatalf("配置 %s 应该被拒，实际放行", tc.name)
+				t.Fatalf("config %s should be rejected, but was allowed", tc.name)
 			}
 			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("错误信息该点名 %s，实际: %v", tc.want, err)
+				t.Errorf("error message should name %s, actual: %v", tc.want, err)
 			}
 		})
 	}
@@ -65,32 +67,34 @@ func TestCheckUnsafeRoots_RejectsFilesystemRoot(t *testing.T) {
 
 func TestCheckUnsafeRoots_EscapeHatch(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("POSIX 根 '/'")
+		t.Skip("POSIX root '/'")
 	}
 	t.Setenv("PEERDRIVE_ALLOW_UNSAFE_ROOT", "1")
 	if err := checkUnsafeRoots(cfgWith("/", "/", "")); err != nil {
-		t.Fatalf("设了逃生阀之后不该再拒: %v", err)
+		t.Fatalf("should not reject after setting the escape hatch: %v", err)
 	}
 }
 
-// Windows 的卷根是盘符：`C:\`、`d:`、`\\?\C:\`。Linux 上 filepath.Abs 不认
-// 盘符（`C:\` 会被当成当前目录下名为 `C:\` 的普通子目录），所以这一支
-// 只能在 Windows 上真跑——CI 里由 windows 矩阵负责（见 .github/workflows）。
+// On Windows the volume root is a drive letter: `C:\`, `d:`, `\\?\C:\`. On
+// Linux, filepath.Abs doesn't recognize drive letters (`C:\` gets treated as an
+// ordinary subdirectory named `C:\` under the current directory), so this branch
+// can only really run on Windows -- the windows matrix in CI handles it (see
+// .github/workflows).
 func TestCheckUnsafeRoots_WindowsDriveRoot(t *testing.T) {
 	if runtime.GOOS != "windows" {
-		t.Skip("盘符语义只在 Windows 上成立")
+		t.Skip("drive letter semantics only apply on Windows")
 	}
 	p := filepath.Join("C:", string(filepath.Separator))
 	if err := checkUnsafeRoots(cfgWith(p, filepath.Join("C:", string(filepath.Separator), "storage"), "")); err == nil {
-		t.Fatal("storage 配成 C:\\ 应该被拒")
+		t.Fatal("storage configured as C:\\ should be rejected")
 	}
-	// 盘符 + 子目录是正常的
+	// drive letter + subdirectory is normal
 	if err := checkUnsafeRoots(cfgWith(filepath.Join("C:", string(filepath.Separator), "data", "storage"), "", "")); err != nil {
-		t.Fatalf("C:\\data\\storage 不该被拒: %v", err)
+		t.Fatalf("C:\\data\\storage should not be rejected: %v", err)
 	}
 }
 
-// 逃生阀读的是环境变量，测试之间不能互相污染。
+// The escape hatch reads from an environment variable, so tests must not pollute each other.
 func TestMain(m *testing.M) {
 	_ = os.Unsetenv("PEERDRIVE_ALLOW_UNSAFE_ROOT")
 	os.Exit(m.Run())

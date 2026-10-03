@@ -1,304 +1,359 @@
-# WS 客户端模块（front/src/ws.js）
+# WS client module (front/src/ws.js)
 
-> 层归属：AOP ⑧ 前端切面（doc/LAYERS.md §1）。浏览器与本地节点 `/ws/peer` 会话之间
-> 的帧协议客户端——管理面 admin verb、二进制上传、req verb 文件拉取都在这一条 WS
-> 连接上完成；`api.js` 的 `request()` 全部经它。协议权威定义见 REFACTOR.md §3.10/§4
-> 与 NODE-API.md §2.4，本文只写前端侧实现与坑。
+> Layer membership: AOP ⑧ Frontend aspect (doc/LAYERS.md §1). The frame protocol client
+> between the browser and the local node `/ws/peer` session —— management-plane admin
+> verb, binary upload, req verb file fetch all happen on this one WS connection;
+> `api.js`'s `request()` all goes through it. Authoritative protocol definition is in
+> REFACTOR.md §3.10/§4 and NODE-API.md §2.4; this doc only covers the frontend
+> implementation and pitfalls.
 
-## 职责
+## Responsibilities
 
-- **管理面**：`admin(method, path, body)`（ws.js:218）→ 后端 admin verb 内部转发
-  gin engine → `admin-resp`（JSON）或 `admin-bin`（二进制文件流，如集合文件/.torrent）。
-  覆盖集合/认证/BT/IPFS/任务/文件管理等全部 HTTP 语义端点。
-- **二进制上传**：`upload(file, fileName, field, path)`（ws.js:237）→ admin 声明帧 +
-  连续二进制块（文件分片上传、BT torrent 上传），后端收齐后 multipart 重包转发。
-- **数据面拉取**：`download(hash, offset, size)`（ws.js:308）→ `req` verb，与
-  WebRTC DataChannel 同一套帧协议（64KB 块 + data 头 + done 收尾）。
-- **连接生命周期**：单连接复用、断线 reject 全部 pending 并置空等重连、token 注入。
-- **下载落盘**：`downloadToFile(hash, filename)`（ws.js:322）→ Blob + `<a download>` 模拟保存。
+- **Management plane**: `admin(method, path, body)` (ws.js:218) → backend admin verb
+  internally forwards to gin engine → `admin-resp` (JSON) or `admin-bin` (binary file
+  stream, e.g. collection files/.torrent). Covers all HTTP semantic endpoints:
+  collections/auth/BT/IPFS/tasks/file management, etc.
+- **Binary upload**: `upload(file, fileName, field, path)` (ws.js:237) → admin
+  declaration frame + continuous binary chunks (file chunked upload, BT torrent upload);
+  backend re-wraps into multipart after receiving all.
+- **Data-plane fetch**: `download(hash, offset, size)` (ws.js:308) → `req` verb, same
+  frame protocol as WebRTC DataChannel (64KB blocks + data headers + done terminator).
+- **Connection lifecycle**: single connection reuse, disconnect rejects all pending
+  and clears, waiting for reconnect, token injection.
+- **Download to disk**: `downloadToFile(hash, filename)` (ws.js:322) → Blob + `<a download>`
+  simulated save.
 
-**为什么存在**：帧协议（REFACTOR.md §4）只覆盖文件数据面（req 拉取 + create/upload/
-list/info/delete/sync 索引 + fwd-* 转发），不覆盖集合/认证/BT/IPFS/任务等管理面。后端
-在本地 WS 会话上加 admin verb（`back/internal/transport/admin.go`），内部转发 gin
-engine 复用全部 HTTP controller（零重复实现）——浏览器经此通道完成全部管理操作，
-**不再直接 fetch HTTP**（HTTP 路由保留作 legacy，见 router.go LEGACY 注释区）。
+**Why it exists**: the frame protocol (REFACTOR.md §4) only covers the file data plane
+(req fetch + create/upload/list/info/delete/sync index + fwd-* forwarding), not the
+management plane for collections/auth/BT/IPFS/tasks. The backend adds admin verb on
+local WS sessions (`back/internal/transport/admin.go`), internally forwarding to gin
+engine to reuse all HTTP controllers (zero duplicate implementation) —— the browser
+completes all management operations through this channel, **no more direct HTTP fetch**
+(HTTP routes kept as legacy, see router.go LEGACY comment section).
 
-## 关键机制
+## Key mechanisms
 
-### 连接生命周期
+### Connection lifecycle
 
-**wsUrl 转换**（ws.js:34）：`http://` → `ws://`、`https://` → `wss://`，与 api.js
-`getApiBase()` 同源。`getWsBase()`（ws.js:63）读 `localStorage['peerdrive_api_base']`，
-缺省 `https://wsl-3000.moonchan.xyz`。
+**wsUrl transformation** (ws.js:34): `http://` → `ws://`, `https://` → `wss://`,
+same source as api.js `getApiBase()`. `getWsBase()` (ws.js:63) reads
+`localStorage['peerdrive_api_base']`, default `https://wsl-3000.moonchan.xyz`.
 
-**幂等 connect**（ws.js:69）：
+**Idempotent connect** (ws.js:69):
 
 ```js
 function connect() {
   if (!sock) sock = new WebSocket(wsUrl(getWsBase()) + '/ws/peer')
-  if (sock._wsHandlers) return      // handlers 幂等挂载
+  if (sock._wsHandlers) return      // handlers idempotently mounted
   sock._wsHandlers = true
   ...
 }
 ```
 
-- 已有 `sock` 直接复用；handlers 以 `sock._wsHandlers` 标记幂等挂载（测试注入 mock
-  socket 也能走同一初始化路径）。
-- **单连接复用，无连接池**：浏览器与本地节点只有一条会话，所有请求并发经 reqId 路由。
+- Existing `sock` is directly reused; handlers are marked with `sock._wsHandlers`
+  for idempotent mounting (test-injected mock sockets go through the same init path).
+- **Single connection reuse, no connection pool**: the browser and local node have
+  only one session; all requests concurrently route via reqId.
 
-**断线处理**（ws.js:84）：`onclose` → reject 全部 pending（`Error('ws: connection
-closed')`）、清空 pending、`binaryExpect = null`、`sock = null`；下一请求前自动重连。
-`onerror` → 主动 `close()` 走同一清理路径。
+**Disconnect handling** (ws.js:84): `onclose` → reject all pending
+(`Error('ws: connection closed')`), clear pending, `binaryExpect = null`, `sock = null`;
+auto-reconnects before the next request. `onerror` → actively `close()` goes through
+the same cleanup path.
 
-**为什么**：连接断开时挂起的请求永远不会收到响应帧，必须主动 reject 让调用方按网络
-错误处理；sock 置空保证重连不会复用僵尸连接。
+**Why**: when the connection drops, hanging requests will never receive a response
+frame; they must be actively rejected so callers can handle them as network errors;
+clearing sock ensures reconnect doesn't reuse a zombie connection.
 
-### reqId 路由（pending Map）
+### reqId routing (pending Map)
 
-`nextReqId()`（ws.js:96）= `'w' + Date.now().toString(36) + '-' + seq.toString(36)`；
-`pending` Map 存放 resolve/reject（download 型还有 `chunks`/`total` 收集态）。响应帧
-回显 reqId 配对，**乱序安全**（单测覆盖：先回第二个请求）。
+`nextReqId()` (ws.js:96) = `'w' + Date.now().toString(36) + '-' + seq.toString(36)`;
+`pending` Map stores resolve/reject (download types also have `chunks`/`total`
+collection state). Response frames echo reqId for pairing, **out-of-order safe**
+(unit test covers: second request returns first).
 
-### 文本帧分发（handleText，ws.js:103）
+### Text frame dispatch (handleText, ws.js:103)
 
-JSON.parse 后按 `msg.type` 分发（解析失败/无 type 直接丢弃）：
+After JSON.parse, dispatch by `msg.type` (parse failure/no type dropped directly):
 
-| type | 行为 |
+| type | Behavior |
 |---|---|
-| `admin-resp` | 按 reqId 取 pending；`status>=400` → `reject(Error(body.error\|body.message \|\| 'HTTP '+status))`，错误挂 `err.status`/`err.data`（409 冲突清单等结构化体可用）；否则 `resolve(msg.body)` |
-| `admin-bin` | 声明「下一二进制帧归本次管理下载」：`binaryExpect = {type:'admin', reqId, size, got:0, chunks:[]}`；size==0 立即 finish |
-| `data` | 下载数据块头：仅 `p.kind==='download'` 才接管；`binaryExpect = {type:'download',...}`；size==0 直接清期待（空块罕见） |
-| `meta` / `done` | 仅 download 型 pending；`done` → 删除 pending、清 binaryExpect、`resolve(assemble(p))` |
-| `err` | 按 reqId reject（`msg.msg` 或 'peer fetch failed'） |
+| `admin-resp` | Look up pending by reqId; `status>=400` → `reject(Error(body.error\|body.message \|\| 'HTTP '+status))`, error carries `err.status`/`err.data` (structured bodies like the 409 conflict list are available); otherwise `resolve(msg.body)` |
+| `admin-bin` | Declares "next binary frame belongs to this admin download": `binaryExpect = {type:'admin', reqId, size, got:0, chunks:[]}`; size==0 immediately finish |
+| `data` | Download data block header: only `p.kind==='download'` takes over; `binaryExpect = {type:'download',...}`; size==0 directly clears expectation (empty blocks rare) |
+| `meta` / `done` | Only for download-type pending; `done` → delete pending, clear binaryExpect, `resolve(assemble(p))` |
+| `err` | Reject by reqId (`msg.msg` or 'peer fetch failed') |
 
-### binaryExpect 单槽（ws.js:51、176）
+### binaryExpect single slot (ws.js:51, 176)
 
-「最近二进制声明头」单槽：一个二进制帧必属于最近的 admin-bin 或 data 头。
+"Recent binary declaration header" single slot: a binary frame must belong to the
+most recent admin-bin or data header.
 
-**为什么是单槽（协议正确性依赖）**：后端 `SendFrame` 保证 data/admin-bin 头与二进制
-块**原子连续**（sendMu，REFACTOR.md §4 约束 2）——同一时刻最多只有一个「声明头待其
-块」的窗口，前端单槽与后端连接级 expect 状态机语义一致。若改成多槽（按 reqId 缓冲
-块）会破坏「块归属最近声明头」的隐含序，且协议上无法区分「块属于谁」。
+**Why single slot (protocol correctness depends on it)**: backend `SendFrame` guarantees
+data/admin-bin headers and binary blocks are **atomically continuous** (sendMu,
+REFACTOR.md §4 constraint 2) —— at any given time at most one "declaration header
+awaiting its blocks" window; the frontend single slot matches the backend connection-
+level expect state machine semantics. Switching to multi-slot (buffering blocks by
+reqId) would break the implicit "blocks belong to most recent declaration header"
+ordering, and the protocol can't distinguish "whose blocks these are".
 
-handleBinary（ws.js:176）：
-- 无 `binaryExpect` → 丢弃（脏块）。
-- 累计 `got`，`got >= size` 时：
-  - admin 型 → `finishBinaryExpect`（组装 Uint8Array 并 resolve）
-  - download 型 → 块并入 `p.chunks`，**不 resolve**——完整性由 done 帧保证
-    （data 头可多次出现，每块收齐后等下一个 data 头或 done 帧）
+handleBinary (ws.js:176):
+- No `binaryExpect` → drop (dirty block).
+- Accumulate `got`; when `got >= size`:
+  - admin type → `finishBinaryExpect` (assemble Uint8Array and resolve)
+  - download type → merge block into `p.chunks`, **don't resolve** —— completeness is
+    guaranteed by the done frame (data headers can appear multiple times; after each
+    block is complete, wait for the next data header or done frame)
 
-### token 注入（readToken，ws.js:54）
+### Token injection (readToken, ws.js:54)
 
-`peerdrive_auth_token`（URL fragment `#token` 导入，见 api.js `setApiBase`）优先；
-否则 `peerdrive_auth_header_enabled==='true'`（设置页开关）时用
-`peerdrive_auth_key`；否则空串。admin 请求帧带 `token` 字段，后端转发时注入
-`Authorization: Bearer`（与 HTTP 行为一致，NODE-API.md §2.4）。
+`peerdrive_auth_token` (URL fragment `#token` import, see api.js `setApiBase`) takes
+priority; otherwise when `peerdrive_auth_header_enabled==='true'` (settings toggle)
+use `peerdrive_auth_key`; otherwise empty string. Admin request frames carry a `token`
+field; backend injects `Authorization: Bearer` when forwarding (same as HTTP behavior,
+NODE-API.md §2.4).
 
-### admin verb 帧格式实例
+### Admin verb frame format examples
 
-普通 JSON 请求（与后端约定，ws.js:10-16）：
+Ordinary JSON request (backend agreement, ws.js:10-16):
 
 ```jsonc
-// 浏览器 → 后端（发送，ws.js:224）
+// Browser → Backend (send, ws.js:224)
 {"type":"admin","method":"GET","path":"/files?sort=time","body":null,
- "token":"<可选>","reqId":"w-m4f3a-1"}
+ "token":"<optional>","reqId":"w-m4f3a-1"}
 
-// 后端 → 浏览器（admin-resp，body 为 controller 原始 JSON）
+// Backend → Browser (admin-resp, body is the controller's original JSON)
 {"type":"admin-resp","status":200,"body":{"files":[...]},"reqId":"w-m4f3a-1"}
 
-// 4xx/5xx 也走 admin-resp：body 为结构化错误体（409 含 conflicts 清单）
+// 4xx/5xx also go through admin-resp: body is a structured error body (409 has a conflicts list)
 {"type":"admin-resp","status":409,
  "body":{"error":"merge conflict","conflicts":[{"path":"a.txt","local_hash":"...","source_hash":"..."}]},
  "reqId":"w-m4f3a-1"}
 ```
 
-二进制响应（文件流，如集合文件/`.torrent`，≤64MB `adminBinMax`）：
+Binary response (file stream, e.g. collection files/`.torrent`, ≤64MB `adminBinMax`):
 
 ```jsonc
 {"type":"admin-bin","status":200,"size":N,"reqId":"w-m4f3a-1"}
-<紧随的 N 字节二进制帧（单块，后端 SendFrame 原子连续）>
+<following N-byte binary frame (single block, backend SendFrame atomically continuous)>
 ```
 
-### 二进制上传帧序列（upload/pumpBinary，ws.js:237）
+### Binary upload frame sequence (upload/pumpBinary, ws.js:237)
 
-`upload(file, fileName, field='file', path='/files/upload')` 的完整帧序列：
+The complete frame sequence of `upload(file, fileName, field='file', path='/files/upload')`:
 
 ```
-浏览器 → 后端：
-  1. admin 声明帧（文本，同步发出）：
+Browser → Backend:
+  1. admin declaration frame (text, sent synchronously):
      {"type":"admin","method":"POST","path":"/files/upload","binary":true,
-      "filename":"a.bin","field":"file","size":N,"token":"<可选>","reqId":"w-m4f3a-2"}
-  2. 连续二进制块（≤64KB 分片，Streams API 逐块读出即发）：
-     [chunk1][chunk2]...[chunkN]   ← 声明与块之间不允许插入任何其他帧
-后端 → 浏览器（收齐后 multipart 重包转发 controller）：
+      "filename":"a.bin","field":"file","size":N,"token":"<optional>","reqId":"w-m4f3a-2"}
+  2. Continuous binary chunks (≤64KB slices, Streams API reads and sends per block):
+     [chunk1][chunk2]...[chunkN]   ← no other frame may be inserted between declaration and blocks
+Backend → Browser (after full receive, re-wraps into multipart and forwards to controller):
   3. {"type":"admin-resp","status":201,"body":{"hash":"<64hex>",...},"reqId":"w-m4f3a-2"}
 ```
 
-**为什么声明帧先同步发出**：后端消息泵内同步占槽 `st.adminUp`（NODE-API.md §2.4），
-声明与块之间不允许插入其他帧，否则会打断 multipart 收集（e2e smoke 里同样注释
-「声明帧不能 await」——响应要等二进制块收齐才回）。
+**Why the declaration frame is sent synchronously first**: the backend message pump
+synchronously occupies the `st.adminUp` slot (NODE-API.md §2.4); no other frame may
+be inserted between declaration and blocks, otherwise multipart collection is broken
+(e2e smoke has the same comment "declaration frame cannot await" —— response comes back
+after blocks are fully received).
 
-pumpBinary（ws.js:257）：
-- **Streams API 优先**：`file.stream().getReader()` 逐块 `reader.read()` →
-  `sock.send(value)`。大文件零拷贝、背压友好，不整读进内存。
-- **FileReader 回退**（无 stream 的文件对象）：`BIN_CHUNK` 分片 `file.slice(off, off+CH)`
-  → `readAsArrayBuffer` → 逐块发送。
-- 中途断开：`send` 抛 `Error('ws: closed during upload')` → `fail()` 删 pending 并 reject。
-- `field`/`path` 可换：BT torrent 上传用 `field='torrent'` + `path='/bt/torrent'`。
+pumpBinary (ws.js:257):
+- **Streams API first**: `file.stream().getReader()` reads block-by-block via
+  `reader.read()` → `sock.send(value)`. Zero-copy for large files, backpressure-friendly,
+  doesn't read entirely into memory.
+- **FileReader fallback** (file objects without stream): `BIN_CHUNK` slices `file.slice(off, off+CH)`
+  → `readAsArrayBuffer` → send block by block.
+- Disconnection mid-way: `send` throws `Error('ws: closed during upload')` → `fail()`
+  deletes pending and rejects.
+- `field`/`path` can be swapped: BT torrent upload uses `field='torrent'` +
+  `path='/bt/torrent'`.
 
-### 下载帧序列（download/downloadStream/stat，ws.js）
+### Download frame sequence (download/downloadStream/stat, ws.js)
 
-`download(hash, offset=0, size=-1)` 发送 `{type:'req', hash, offset, size, reqId}`，
-pending 记录 `kind:'download'`；服务端按 64KB 块回（与 WebRTC DataChannel 同一套）：
+`download(hash, offset=0, size=-1)` sends `{type:'req', hash, offset, size, reqId}`,
+pending records `kind:'download'`; the server responds in 64KB blocks (same set as
+WebRTC DataChannel):
 
 ```
-浏览器 → 后端：
+Browser → Backend:
   {"type":"req","hash":"<64hex>","offset":0,"size":-1,"reqId":"w-m4f3a-3"}
-后端 → 浏览器：
+Backend → Browser:
   {"type":"meta","hash","total","reqId":"w-m4f3a-3"}
-  {"type":"data","offset":0,"size":65536,"reqId":"w-m4f3a-3"} + 64KB 二进制块
-  {"type":"data","offset":65536,"size":65536,"reqId":"w-m4f3a-3"} + 64KB 二进制块
-  ...（多块）
-  {"type":"done","hash","offset","size","reqId":"w-m4f3a-3"}   ← 完整性信号，触发 resolve
-  或 {"type":"err","msg":"file not found","reqId":"w-m4f3a-3"}
+  {"type":"data","offset":0,"size":65536,"reqId":"w-m4f3a-3"} + 64KB binary block
+  {"type":"data","offset":65536,"size":65536,"reqId":"w-m4f3a-3"} + 64KB binary block
+  ... (multiple blocks)
+  {"type":"done","hash","offset","size","reqId":"w-m4f3a-3"}   ← completeness signal, triggers resolve
+  or {"type":"err","msg":"file not found","reqId":"w-m4f3a-3"}
 ```
 
-- 前端按 data 头声明 size 收集（handleBinary），**done 帧才 resolve** 为 Uint8Array。
-- **`downloadStream(hash, offset, size)`（2026-08-18，第 1 项优化）**：返回
-  ReadableStream（pending 记 `kind:'stream'`）——data 块边收边 `controller.enqueue`
-  （每块完成即投递，不等 done），done → `controller.close()`，err → `controller.error()`
-  （未完成即异常），cancel → 清 pending + 清 binaryExpect。大文件**零全量内存**：
-  旧 download() 把全部块组装成单个 Uint8Array（8GB 文件 OOM），流式 API 是
-  downloadToFile 的落盘通道。
-- **`stat(hash)`（2026-08-18）**：发 `req`（offset=0, size=0）→ meta 帧的 `total`
-  即文件大小（size=0 语义=只回 meta 不发 data，服务端约定）。用于预览前探大小。
-- **`downloadToFile(hash, filename)`（2026-08-18 重写）**：优先 File System Access
-  API（`showSaveFilePicker` + `createWritable` + `for await (downloadStream)` 流式写，
-  边下边落盘）；无 API（非 Chromium）回退旧 Blob + `<a download>`（5s 后 revoke）。
-  前端预览（api.js getBlobUrl）>200MB 抛 `TOO_LARGE` 不再整读进内存。
+- The frontend collects by the size declared in data headers (handleBinary), **only
+  done frame resolves** as a Uint8Array.
+- **`downloadStream(hash, offset, size)` (2026-08-18, optimization #1)**: returns a
+  ReadableStream (pending records `kind:'stream'`) —— data blocks are `controller.enqueue`'d
+  as they arrive (delivered upon each block completion, no waiting for done); done →
+  `controller.close()`, err → `controller.error()` (exception if incomplete); cancel →
+  clear pending + clear binaryExpect. Large files with **zero full memory**: old
+  download() assembled all blocks into a single Uint8Array (8GB file OOM); the
+  streaming API is the downloadToFile's disk-write channel.
+- **`stat(hash)` (2026-08-18)**: sends `req` (offset=0, size=0) → the meta frame's
+  `total` is the file size (size=0 semantics = only meta returned, no data sent;
+  server-side convention). Used for size probing before preview.
+- **`downloadToFile(hash, filename)` (2026-08-18 rewritten)**: prefers File System
+  Access API (`showSaveFilePicker` + `createWritable` + `for await (downloadStream)`
+  streaming write, writing to disk as it downloads); without API (non-Chromium)
+  falls back to old Blob + `<a download>` (revoke after 5s). Frontend preview
+  (api.js getBlobUrl) > 200MB throws `TOO_LARGE` and no longer reads fully into
+  memory.
 
-### __test 测试钩子（ws.js:337）
+### __test test hooks (ws.js:337)
 
-生产不导出，仅 vitest 单测使用：
+Not exported in production; used only by vitest unit tests:
 - `connect` / `readToken` / `getWsBase` / `handleText` / `handleBinary` / `pending`
-- `_setSock(s)`：注入 mock socket（`_wsHandlers:false` 时 connect 幂等挂 handlers）
-- `_reset()`：sock 置空 + 清 pending + 清 binaryExpect
+- `_setSock(s)`: inject mock socket (when `_wsHandlers:false`, connect idempotently
+  mounts handlers)
+- `_reset()`: clears sock + clears pending + clears binaryExpect
 
-## 与其它模块的关系
+## Relationships with other modules
 
 ```
-页面组件（pages/*）
+Page components (pages/*)
    │  import * as api
    ▼
-api.js ──request()──▶ ws.admin()         管理面 JSON/二进制
-api.js ──downloadFile──▶ ws.download()   数据面 req verb
-api.js ──getBlobUrl──▶ ws.download()     预览 objectURL
+api.js ──request()──▶ ws.admin()         Management plane JSON/binary
+api.js ──downloadFile──▶ ws.download()   Data plane req verb
+api.js ──getBlobUrl──▶ ws.download()     Preview objectURL
    │
    ▼
-ws.js ──WebSocket──▶ back/internal/transport/ws_session.go（/ws/peer，WSSession）
-                        └─ serveAdmin（仅 ID()=="local" 会话接受）
-                              └─ 构造 *http.Request → gin engine ServeHTTP
-                                    └─ controller（业务层无感知）
+ws.js ──WebSocket──▶ back/internal/transport/ws_session.go (/ws/peer, WSSession)
+                        └─ serveAdmin (only sessions with ID()=='local' accepted)
+                              └─ construct *http.Request → gin engine ServeHTTP
+                                    └─ controller (business layer unaware)
 ```
 
-- **上层（api.js）**：`request()` 即 `ws.admin()`（api.js:148-150）；`downloadFile`、
-  `getBlobUrl`、`downloadFileToDisk` 走 `ws.download`/`ws.downloadToFile`；
-  `uploadFile`/`btTorrentUpload` 走 `ws.upload`；`downloadAnonFile`/`downloadUserFile`/
-  `downloadTorrentFile` 走 `ws.admin('GET', ...)`（二进制响应 → admin-bin）。
-- **后端协议面**：`admin.go`（admin verb 处理 + `adminUp` 上传单槽 + multipart 重包 +
-  `adminBinMax` 64MB 上限）、`ws_session.go`（WSSession，帧协议与 DataChannel 一致）、
-  `router.go` `SetAdminHandler` 装配。协议权威定义：REFACTOR.md §3.10/§4、NODE-API.md §2.4。
-- **非关系（重要）**：peerjs/WebRTC 连接**不实现管理 verb**（防权限面暴露给公共信令
-  上的未知节点，用户决策）；前端也没有 peerjs/mqtt 依赖——peerjs 栈只存在于后端，
-  旧前端 P2P 客户端代码已删（doc/archive/LEGACY.md F 节）。
+- **Upper layer (api.js)**: `request()` is `ws.admin()` (api.js:148-150);
+  `downloadFile`, `getBlobUrl`, `downloadFileToDisk` use `ws.download`/`ws.downloadToFile`;
+  `uploadFile`/`btTorrentUpload` use `ws.upload`; `downloadAnonFile`/`downloadUserFile`/
+  `downloadTorrentFile` use `ws.admin('GET', ...)` (binary response → admin-bin).
+- **Backend protocol side**: `admin.go` (admin verb handling + `adminUp` upload single
+  slot + multipart re-wrap + `adminBinMax` 64MB limit), `ws_session.go` (WSSession,
+  frame protocol matches DataChannel), `router.go` `SetAdminHandler` assembly.
+  Authoritative protocol definition: REFACTOR.md §3.10/§4, NODE-API.md §2.4.
+- **Non-relationship (important)**: peerjs/WebRTC connections **do not implement admin
+  verb** (prevents privilege boundary exposure to unknown nodes on the public signaling
+  channel; user decision); the frontend also has no peerjs/mqtt dependencies —— the
+  peerjs stack only exists in the backend; old frontend P2P client code was removed
+  (doc/archive/LEGACY.md section F).
 
-## 坑与设计决策
+## Caveats and design decisions
 
-1. **data/admin-bin 头与二进制块必须原子连续**（后端 SendFrame 保证）——前端单槽
-   binaryExpect 与之配套，勿改成多槽（ws.js:23, 51）。
-2. **admin 响应 status>=400 的语义**：reject 的 Error 带 `err.status`/`err.data`，
-   与 api.js 旧 fetch 版一致，409 冲突清单等结构化错误体依赖它（ws.js:26；
-   Explorer 合并冲突弹窗直接消费 `e.data.conflicts`）。
-3. **连接断开必须 reject 全部 pending**：否则挂起 Promise 永不 settle，调用方无法
-   区分「慢」与「死」（ws.js:84）。
-4. **管理面只走本地 WS**：peerjs/WebRTC 不实现管理 verb（防权限面漏洞；后端
-   serveAdmin 按会话 ID 拒绝非本地连接，ws.js:30）。
-5. **上传声明帧必须与二进制块连续发送**：中间插入任何帧都会打乱后端 multipart
-   收集；且**不能 await 声明帧的响应再发块**——响应要等块收齐才回（ws.js:237、
-   e2e-admin-smoke.mjs 注释）。
-6. **下载 resolve 时机**：块收齐不清期待不等于完成，必须等 done 帧——data 头可
-   多次出现，done 才是完整性信号（ws.js:175）。
-7. **BIN_CHUNK 缺失（已修复，382b74c）**：pumpBinary 的 FileReader 回退分支曾引用
-   未定义的 `BIN_CHUNK`——现代浏览器带 `.stream()` 走 Streams API 不触发，一旦遇到
-   无 stream 的文件对象会抛 ReferenceError 且 pending 永不 settle。修复：定义
-   `const BIN_CHUNK = 64 * 1024`（与后端 uploadChunkSize/chunkSize 一致，WS 读限
-   3×64KB 之上安全）。发现背景：代码审阅 2026-08-18（grep 全 front/src 仅一处引用、
-   无定义）；回归测试：ws.test.js「upload FileReader 回退」150KB 分 3 块。
-8. **upload() 缺 readyState 守卫（已修复，1992406）**：admin()/download() 都先查
-   `sock.readyState !== OPEN` 再 reject，upload() 原没有——CONNECTING 状态（页面刚
-   加载立即上传）下 `sock.send` 同步抛 InvalidStateError，executor 内 throw 虽会
-   reject 但 pending 条目泄漏到 onclose 才清，且错误类型与其他路径不一致。修复：
-   三入口统一守卫。发现背景：代码审阅 2026-08-18（三入口守卫不齐）。
-9. **token 双来源**：URL fragment token（`peerdrive_auth_token`）恒生效；设置页
-   legacy token（`peerdrive_auth_key`）需开关 `peerdrive_auth_header_enabled`——
-   两者同时存在时 fragment 优先（api.js getAuthToken 同语义）。
-10. **downloadStream 的 cancel 必须清理 pending + binaryExpect**（2026-08-18）：
-    reader.cancel() 时服务端仍在发后续块——不清理会让迟到帧挂到下一个请求头上
-    （单槽 binaryExpect 被旧请求占据）。测试：ws.test.js「stream cancel 清理」。
-11. **getBlobUrl 200MB 预览阈值**（2026-08-18，api.js）：预览 objectURL 全量组装，
-    大文件先 `ws.stat` 探大小，>200MB 抛 `err.code='TOO_LARGE'`（页面回退到下载
-    提示）；同 hash 并发预览请求 in-flight 去重（blobUrlInflight Map，共享一次
-    下载）。测试：ws.test.js stat 探大小 + api 侧阈值。
+1. **data/admin-bin headers and binary blocks must be atomically continuous** (backend
+   SendFrame guarantees) —— the frontend single-slot binaryExpect pairs with it; don't
+   change to multi-slot (ws.js:23, 51).
+2. **admin response status>=400 semantics**: the rejected Error carries `err.status`/
+   `err.data`, consistent with api.js's old fetch version; structured error bodies like
+   the 409 conflict list depend on it (ws.js:26; Explorer's merge conflict modal
+   directly consumes `e.data.conflicts`).
+3. **Disconnect must reject all pending**: otherwise hanging Promises never settle,
+   callers can't distinguish "slow" from "dead" (ws.js:84).
+4. **Management plane only goes through local WS**: peerjs/WebRTC doesn't implement admin
+   verb (prevents privilege boundary leaks; backend serveAdmin rejects non-local
+   connections by session ID, ws.js:30).
+5. **Upload declaration frame must be sent continuously with binary blocks**: inserting
+   any frame in between will scramble backend multipart collection; also **cannot await
+   the declaration frame's response before sending blocks** —— the response comes back
+   after blocks are fully received (ws.js:237, e2e-admin-smoke.mjs comments).
+6. **Download resolve timing**: blocks fully received doesn't mean done; must wait for
+   the done frame —— data headers can appear multiple times; done is the completeness
+   signal (ws.js:175).
+7. **Missing BIN_CHUNK (fixed, 382b74c)**: pumpBinary's FileReader fallback branch
+   previously referenced an undefined `BIN_CHUNK` —— modern browsers with `.stream()`
+   go through Streams API and don't trigger; encountering a file object without stream
+   throws ReferenceError and pending never settles. Fix: define
+   `const BIN_CHUNK = 64 * 1024` (matches backend uploadChunkSize/chunkSize, safely
+   above WS read limit 3×64KB). Discovery context: code review 2026-08-18 (grep of
+   all front/src found only one reference, no definition); regression test:
+   ws.test.js "upload FileReader fallback" 150KB split into 3 blocks.
+8. **upload() missing readyState guard (fixed, 1992406)**: admin()/download() both
+   check `sock.readyState !== OPEN` first and then reject; upload() didn't have it
+   originally —— in CONNECTING state (uploading immediately after page load),
+   `sock.send` synchronously throws InvalidStateError; the throw in the executor rejects
+   but the pending entry leaks until onclose clears it, and the error type is
+   inconsistent with other paths. Fix: unified guard on all three entry points.
+   Discovery context: code review 2026-08-18 (three entry point guards were uneven).
+9. **Token dual source**: URL fragment token (`peerdrive_auth_token`) is always
+   effective; settings-page legacy token (`peerdrive_auth_key`) requires the toggle
+   `peerdrive_auth_header_enabled` —— when both coexist fragment wins (api.js
+   getAuthToken has same semantics).
+10. **downloadStream cancel must clean pending + binaryExpect** (2026-08-18): when
+    reader.cancel() is called the server is still sending subsequent blocks —— not
+    cleaning causes late frames to hang on the next request's header (single-slot
+    binaryExpect occupied by the old request). Test: ws.test.js "stream cancel
+    cleanup".
+11. **getBlobUrl 200MB preview threshold** (2026-08-18, api.js): preview objectURL
+    assembles the full content; for large files first `ws.stat` probes the size;
+    > 200MB throws `err.code='TOO_LARGE'` (page falls back to a download prompt);
+    concurrent preview requests for the same hash are deduplicated in-flight
+    (blobUrlInflight Map, share one download). Test: ws.test.js stat size probe +
+    api-side threshold.
 
-## 测试（`cd front && npm test`，全量 36 项 × 4 文件）
+## Tests (`cd front && npm test`, full 36 items × 4 files)
 
-### 单元测试（front/tests/ws.test.js）
+### Unit tests (front/tests/ws.test.js)
 
-Mock socket 直接注入 `ws.__test._setSock`，`feedText` 手动喂文本帧、`onmessage` 喂
-二进制帧，验证纯帧路由逻辑。`beforeEach` 调 `_reset()` + `localStorage.clear()`
-（残留 pending 会在 onclose 时连带 reject 产生 unhandled rejection——测试间隔离）。
+Mock socket directly injected via `ws.__test._setSock`; `feedText` manually feeds text
+frames, `onmessage` feeds binary frames, verifying pure frame routing logic.
+`beforeEach` calls `_reset()` + `localStorage.clear()` (residual pending will be
+rejected en masse on onclose producing unhandled rejections —— isolates between tests).
 
-| 测试 | 覆盖 |
+| Test | Coverage |
 |---|---|
-| `admin 请求按 reqId 路由响应` | 两请求乱序响应仍正确配对 |
-| `admin 4xx 响应 → reject Error(err.status/err.data)（409 冲突清单语义）` | 结构化错误体透传 |
-| `admin 请求携带 token（Authorization 语义）` | token 注入 |
-| `download：data 头+二进制块按 binaryExpect 收集，done 帧 resolve` | 多块收集+done 触发 resolve |
-| `download：err 帧 reject` | err 帧语义 |
-| `admin-bin：二进制文件流响应收集为 Uint8Array` | 文件流响应 |
-| `连接关闭 → 全部 pending reject` | 断线清理（先挂 catch 再 onclose，避免 unhandled rejection） |
-| `upload：声明帧 + 二进制块按 BIN_CHUNK 切片上传（FileReader 回退路径）` | 150KB 文件分 3 块（64+64+22KB），FileReader 回退分支回归（BIN_CHUNK ReferenceError 修复） |
-| `stat：size=0 请求回 meta.total`（2026-08-18） | stat 探大小语义（预览阈值前置） |
-| `downloadStream：多块边收边 enqueue + done close`（2026-08-18） | 流式下载分块投递（零全量内存） |
-| `downloadStream：err 帧 → controller.error`（2026-08-18） | 流式异常路径 |
-| `downloadStream：cancel 清理 pending + binaryExpect`（2026-08-18） | cancel 后迟到帧不污染下一请求 |
+| `admin requests route responses by reqId` | Two requests respond out of order and still pair correctly |
+| `admin 4xx response → reject Error(err.status/err.data) (409 conflict list semantics)` | Structured error body pass-through |
+| `admin request carries token (Authorization semantics)` | Token injection |
+| `download: data header + binary blocks collected by binaryExpect, done frame resolves` | Multi-block collection + done triggers resolve |
+| `download: err frame rejects` | err frame semantics |
+| `admin-bin: binary file stream response collected as Uint8Array` | File stream response |
+| `connection close → all pending rejected` | Disconnect cleanup (attach catch before onclose, avoiding unhandled rejection) |
+| `upload: declaration frame + binary blocks sliced by BIN_CHUNK (FileReader fallback path)` | 150KB file split into 3 blocks (64+64+22KB), FileReader fallback branch regression (BIN_CHUNK ReferenceError fix) |
+| `stat: size=0 request returns meta.total` (2026-08-18) | stat size probe semantics (preview threshold prerequisite) |
+| `downloadStream: multi-block enqueue-as-arrive + done close` (2026-08-18) | Streaming download chunk delivery (zero full memory) |
+| `downloadStream: err frame → controller.error` (2026-08-18) | Streaming exception path |
+| `downloadStream: cancel cleans pending + binaryExpect` (2026-08-18) | After cancel, late frames don't pollute the next request |
 
-**发现背景**（文件头注释）：ws.js 是「前端全面迁移到 ws/peerjs」的核心客户端，帧
-路由正确性直接决定页面能否工作——单槽 binaryExpect 必须与后端连接级 expect 语义
-一致。本套单测是迁移批次的一部分（REFACTOR.md §3.10）。
+**Discovery context** (file header comment): ws.js is the core client of the "frontend
+full migration to ws/peerjs"; frame routing correctness directly determines whether pages
+work —— the single-slot binaryExpect must be semantically consistent with the backend
+connection-level expect. This test suite is part of the migration batch (REFACTOR.md
+§3.10).
 
-### E2E 冒烟（front/tests/e2e-admin-smoke.mjs，121 行）
+### E2E smoke (front/tests/e2e-admin-smoke.mjs, 121 lines)
 
-Node 22 原生 WebSocket 直连 `ws://localhost:3000/ws/peer`（本地起服后运行，
-`PEERDRIVE_STORAGE=/tmp/pd-storage PORT=3000 go run ./cmd/server/`），走 admin verb
-验证管理面全链路：`GET /ping` → 二进制上传 `/files/upload` → `GET /download/:hash`
-（admin-bin 响应）→ 匿名集合 POST/GET → `GET /files` → 未知名路由 404 透传。与
-ws.js 同一帧协议（实现独立复刻，二进制用 Buffer 收集）。
+Node 22 native WebSocket connects directly to `ws://localhost:3000/ws/peer` (run after
+starting local service, `PEERDRIVE_STORAGE=/tmp/pd-storage PORT=3000 go run ./cmd/server/`),
+going through admin verb to verify the full management plane chain: `GET /ping` → binary
+upload `/files/upload` → `GET /download/:hash` (admin-bin response) → anonymous collection
+POST/GET → `GET /files` → unknown route 404 pass-through. Same frame protocol as ws.js
+(independent implementation, binary collected with Buffer).
 
-### 手动验证
+### Manual verification
 
-- 浏览器打开页面，任一列表/上传/下载操作；DevTools Network 过滤 WS 帧，核对
-  admin 声明帧与二进制块的连续性。
-- 断网（关掉节点进程）观察所有页面请求报「ws: connection closed」，重启节点后
-  下一请求自动重连成功。
+- Open a page in the browser, do any list/upload/download operation; DevTools Network
+  filters WS frames, verify the continuity of admin declaration frames with binary
+  blocks.
+- Disconnect network (kill the node process) and observe all page requests report
+  "ws: connection closed"; restart the node and the next request auto-reconnects
+  successfully.
 
-## 文件清单
+## File inventory
 
-> 引用一律函数名（行号易漂移，见 REFACTOR.md §10 约定）。
+> References use function names only (line numbers drift easily, see REFACTOR.md §10 convention).
 
-- `front/src/ws.js` —— 本文档主体（download/downloadStream/stat/downloadToFile）
-- `front/tests/ws.test.js` —— 帧路由 + upload + 流式下载单测
-- `front/tests/e2e-admin-smoke.mjs` —— admin verb E2E 冒烟（需本地起服）
-- `front/src/api.js` —— getBlobUrl（200MB 阈值 + in-flight 去重）消费方
-- 相关后端（协议对端，非本模块）：`back/internal/transport/admin.go`（admin verb 服务端）、
-  `back/internal/transport/ws_session.go`（WSSession 会话实现）
+- `front/src/ws.js` —— the main subject of this doc (download/downloadStream/stat/
+  downloadToFile)
+- `front/tests/ws.test.js` —— frame routing + upload + streaming download unit tests
+- `front/tests/e2e-admin-smoke.mjs` —— admin verb E2E smoke (requires local service)
+- `front/src/api.js` —— getBlobUrl (200MB threshold + in-flight dedup) consumer
+- Related backend (protocol peer, not this module):
+  `back/internal/transport/admin.go` (admin verb server side),
+  `back/internal/transport/ws_session.go` (WSSession session implementation)

@@ -1,38 +1,38 @@
-# Silicon Flow 接入指南
+# Silicon Flow Integration Guide
 
-> 最后更新: 2026-04-27
+> Last updated: 2026-04-27
 
-## 概述
+## Overview
 
-Peerdrive 项目使用 Silicon Flow（硅基流动）作为 LLM 后端，通过 `siliconflow.moonchan.xyz` 反向代理访问，用于 AI 合集命名等功能。
+Peerdrive uses Silicon Flow (SiliconFlow) as the LLM backend, accessed through `siliconflow.moonchan.xyz` reverse proxy, for AI collection naming and similar features.
 
-涉及三个组件：
-| 组件 | 路径 | 用途 |
+Three components involved:
+| Component | Path | Purpose |
 |------|------|------|
-| anthropic-sf-proxy | `/mnt/d/WorkPlace/anthropic-sf-proxy/` | Claude Code → Silicon Flow 协议转换 |
-| siliconflow.moonchan.xyz | Cloudflare 反向代理 | 代理 `api.siliconflow.cn`，避免直连 |
-| Peerdrive Settings | `react/src/pages/Settings.jsx` | 前端 LLM 端点/模型/Key 配置 |
+| anthropic-sf-proxy | `/mnt/d/WorkPlace/anthropic-sf-proxy/` | Claude Code → Silicon Flow protocol conversion |
+| siliconflow.moonchan.xyz | Cloudflare reverse proxy | Proxies `api.siliconflow.cn` to avoid direct connections |
+| Peerdrive Settings | `react/src/pages/Settings.jsx` | Frontend LLM endpoint/model/key configuration |
 
 ---
 
-## 一、siliconflow.moonchan.xyz 反向代理
+## 1. siliconflow.moonchan.xyz Reverse Proxy
 
-### 用途
+### Purpose
 
-Peerdrive 前端直接调用 `https://siliconflow.moonchan.xyz/v1/chat/completions` 进行 AI 合集命名（LLMAssistant、AnonCreator 的 🤖 按钮）。
+Peerdrive frontend directly calls `https://siliconflow.moonchan.xyz/v1/chat/completions` for AI collection naming (LLMAssistant, AnonCreator's 🤖 button).
 
-### 原理
+### Principle
 
-Cloudflare 上配置的反向代理，将 `siliconflow.moonchan.xyz` 的请求转发到 `api.siliconflow.cn`。前端无需直连硅基流动，避免跨域和 Key 暴露问题。
+A Cloudflare reverse proxy that forwards requests from `siliconflow.moonchan.xyz` to `api.siliconflow.cn`. The frontend doesn't need to connect to Silicon Flow directly, avoiding cross-origin and key exposure issues.
 
-### Peerdrive 中的使用
+### Usage in Peerdrive
 
-**LLM 端点配置**（`react/src/api.js:143`）：
+**LLM endpoint configuration** (`react/src/api.js:143`):
 ```js
 const DEFAULT_LLM_ENDPOINT = 'https://siliconflow.moonchan.xyz';
 ```
 
-**调用方式**（`react/src/pages/AnonCreator.jsx:7-16`）：
+**Call pattern** (`react/src/pages/AnonCreator.jsx:7-16`):
 ```js
 const LLM_URL = api.getLlmEndpoint() || 'https://siliconflow.moonchan.xyz';
 const LLM_CHAT = `${LLM_URL}/v1/chat/completions`;
@@ -43,7 +43,7 @@ async function llmSuggest(names) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'Qwen/Qwen3-8B',
-      messages: [{ role: 'user', content: `请用3-5个中文字为以下文件集取一个简洁的合集名称: ${names}` }],
+      messages: [{ role: 'user', content: `Please give the following file set a concise collection name in 3-5 Chinese characters: ${names}` }],
       max_tokens: 20,
       stream: false,
     }),
@@ -52,25 +52,25 @@ async function llmSuggest(names) {
 }
 ```
 
-**LLMAssistant 函数调用**（`react/src/components/LLMAssistant.jsx`）：
-- 使用相同的 OpenAI 兼容 `/v1/chat/completions` 端点
-- 支持 SSE 流式输出
-- 有 17 个 function call 工具（导航、搜索、集合操作、P2P 状态等）
-- 最多 5 轮工具调用循环
-- 支持 AbortController 中断
+**LLMAssistant function calling** (`react/src/components/LLMAssistant.jsx`):
+- Uses the same OpenAI-compatible `/v1/chat/completions` endpoint
+- Supports SSE streaming output
+- Has 17 function call tools (navigation, search, collection operations, P2P status, etc.)
+- Up to 5 tool call rounds
+- Supports AbortController interruption
 
-### 前端配置页面
+### Frontend Configuration Page
 
-`/settings` 页面（`react/src/pages/Settings.jsx`）提供完整的 LLM 配置面板：
+The `/settings` page (`react/src/pages/Settings.jsx`) provides a complete LLM configuration panel:
 
-| 配置项 | localStorage Key | 默认值 |
+| Setting | localStorage Key | Default |
 |--------|-----------------|--------|
 | Endpoint | `peerdrive_llm_endpoint` | `https://siliconflow.moonchan.xyz` |
 | Model | `peerdrive_llm_model` | `Qwen/Qwen3-8B` |
-| API Key | `peerdrive_llm_apikey` | 空 |
-| Body 模板 | `peerdrive_llm_body_template` | OpenAI 兼容 JSON |
+| API Key | `peerdrive_llm_apikey` | Empty |
+| Body template | `peerdrive_llm_body_template` | OpenAI-compatible JSON |
 
-**Body JSON 模板默认值**：
+**Body JSON template default value**:
 ```json
 {
   "model": "Qwen/Qwen3-8B",
@@ -81,175 +81,250 @@ async function llmSuggest(names) {
 }
 ```
 
-模板中的 `model` 和 `messages` 会被运行时替换，其余参数（`stream`、`max_tokens`、`temperature`）可自定义。
+The `model` and `messages` fields in the template are replaced at runtime; other parameters (`stream`, `max_tokens`, `temperature`) can be customized.
 
 ---
 
-## 二、免费模型列表
+## 2. Free Model List
 
-在 Settings → LLM 配置 → 模型下拉中可选的 13 个免费模型：
+13 free models available in Settings → LLM Configuration → Model dropdown:
 
-| 模型 | 系列 | 说明 |
+| Model | Series | Description |
 |------|------|------|
-| `Qwen/Qwen3-8B` | 通义千问 3 | 推荐，中文能力强 |
-| `Qwen/Qwen3.5-4B` | 通义千问 3.5 | 轻量 |
-| `Qwen/Qwen2.5-7B-Instruct` | 通义千问 2.5 | 稳定版 |
-| `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B` | DeepSeek R1 | 推理增强 |
-| `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | DeepSeek R1 Distill | 蒸馏推理 |
-| `deepseek-ai/DeepSeek-OCR` | DeepSeek OCR | 文字识别 |
-| `THUDM/GLM-4-9B-0414` | 智谱 GLM-4 | 通用对话 |
-| `THUDM/GLM-Z1-9B-0414` | 智谱 GLM-Z1 | 推理增强 |
-| `THUDM/GLM-4.1V-9B-Thinking` | 智谱 GLM-4V | 多模态思考 |
-| `tencent/Hunyuan-MT-7B` | 腾讯混元 | 机器翻译 |
-| `internlm/internlm2_5-7b-chat` | 书生浦语 | 通用对话 |
-| `PaddlePaddle/PaddleOCR-VL` | 百度 PaddleOCR | 视觉文字识别 |
-| `PaddlePaddle/PaddleOCR-VL-1.5` | 百度 PaddleOCR 1.5 | 视觉文字识别新版 |
+| `Qwen/Qwen3-8B` | Qwen 3 | Recommended, strong Chinese capability |
+| `Qwen/Qwen3.5-4B` | Qwen 3.5 | Lightweight |
+| `Qwen/Qwen2.5-7B-Instruct` | Qwen 2.5 | Stable version |
+| `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B` | DeepSeek R1 | Enhanced reasoning |
+| `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | DeepSeek R1 Distill | Distilled reasoning |
+| `deepseek-ai/DeepSeek-OCR` | DeepSeek OCR | Text recognition |
+| `THUDM/GLM-4-9B-0414` | Zhipu GLM-4 | General dialogue |
+| `THUDM/GLM-Z1-9B-0414` | Zhipu GLM-Z1 | Enhanced reasoning |
+| `THUDM/GLM-4.1V-9B-Thinking` | Zhipu GLM-4V | Multimodal thinking |
+| `tencent/Hunyuan-MT-7B` | Tencent Hunyuan | Machine translation |
+| `internlm/internlm2_5-7b-chat` | InternLM | General dialogue |
+| `PaddlePaddle/PaddleOCR-VL` | Baidu PaddleOCR | Visual text recognition |
+| `PaddlePaddle/PaddleOCR-VL-1.5` | Baidu PaddleOCR 1.5 | New visual text recognition |
 
-硅基流动注册: https://cloud.siliconflow.cn/i/sRO0U8o0
+Silicon Flow registration: https://cloud.siliconflow.cn/i/sRO0U8o0
 
 ---
 
-## 三、Anthropic-SF-Proxy（Claude Code 代理）
+## 3. Anthropic-SF-Proxy (Claude Code Proxy)
 
-### 用途
+### Purpose
 
-让 Claude Code（Anthropic Messages API）通过 Silicon Flow 模型工作。
+Enables Claude Code (Anthropic Messages API) to work through Silicon Flow models.
 
-### 仓库
+### Repository
 
 `/mnt/d/WorkPlace/anthropic-sf-proxy/`
 
-### 协议转换
+### Protocol Conversion
 
 Claude Code → Anthropic Messages API → Proxy → OpenAI Chat Completions → Silicon Flow
 
-| 转换 | Anthropic | OpenAI |
+| Conversion | Anthropic | OpenAI |
 |------|-----------|--------|
-| 端点 | `/v1/messages` | `/v1/chat/completions` |
-| 系统提示 | 顶层 `system` | `messages[0] role=system` |
-| 内容 | `content` 数组 | `content` 字符串/多模态数组 |
-| 工具定义 | `input_schema` | `function.parameters` |
-| 工具调用 | `tool_use` 块 | `tool_calls[]` |
-| 工具结果 | `tool_result` 块 | `role=tool` |
-| 停止原因 | `stop_reason` | `finish_reason` |
-| 流式 | `content_block_delta` | `choices[0].delta.content` |
+| Endpoint | `/v1/messages` | `/v1/chat/completions` |
+| Request body | `system` + `messages` | `messages` (system merged) |
+| Streaming | SSE `message_start`/`content_block_delta`/`message_delta` | SSE `data: {"choices":[...]}` |
+| Model | `claude-*` | `Qwen/*` etc. |
 
-### 安装
+### Request Conversion (convert.py)
+
+```python
+def anthropic_to_openai(anthropic_request, model_map):
+    """
+    Convert Anthropic Messages API request to OpenAI Chat Completions
+    - Merge system into messages
+    - Map model name
+    - Preserve tools/tool_choice
+    """
+    messages = []
+    if 'system' in req:
+        messages.append({'role': 'system', 'content': req['system']})
+    messages.extend(req['messages'])
+    
+    # Model name mapping
+    openai_model = model_map.get(req['model'], req['model'])
+    
+    openai_request = {
+        'model': openai_model,
+        'messages': messages,
+        'max_tokens': req.get('max_tokens', 1024),
+        'temperature': req.get('temperature', 1),
+    }
+    
+    # Tools mapping
+    if 'tools' in req:
+        openai_tools = []
+        for tool in req['tools']:
+            openai_tools.append({
+                'type': 'function',
+                'function': {
+                    'name': tool['name'],
+                    'description': tool.get('description', ''),
+                    'parameters': tool['input_schema'],
+                }
+            })
+        openai_request['tools'] = openai_tools
+    
+    return openai_request
+```
+
+### Response Conversion
+
+```python
+def openai_to_anthropic(openai_response, is_stream):
+    """
+    Convert OpenAI response to Anthropic format
+    - Non-stream: complete message object
+    - Stream: SSE events (message_start, content_block_start/delta/stop, message_delta, message_stop)
+    """
+    if not is_stream:
+        return {
+            'id': f'msg_{uuid4().hex[:24]}',
+            'type': 'message',
+            'role': 'assistant',
+            'model': openai_response.get('model'),
+            'content': [
+                {
+                    'type': 'text',
+                    'text': openai_response['choices'][0]['message']['content']
+                }
+            ],
+            'stop_reason': openai_response['choices'][0]['finish_reason'],
+            'stop_sequence': None,
+            'usage': openai_response.get('usage', {}),
+        }
+    
+    # Streaming: return SSE event sequence
+    yield 'event: message_start\n...'
+    yield 'event: content_block_start\n...'
+    yield 'event: content_block_delta\n...'
+    yield 'event: content_block_stop\n...'
+    yield 'event: message_delta\n...'
+    yield 'event: message_stop\n...'
+```
+
+### Configuration
+
+```python
+# config.py
+class Config:
+    # Port
+    PORT = 8080
+    
+    # Silicon Flow API
+    SILICONFLOW_API_BASE = 'https://api.siliconflow.cn/v1'
+    
+    # Model name mapping (Anthropic → Silicon Flow)
+    MODEL_MAP = {
+        'claude-3-5-sonnet-20241022': 'Qwen/Qwen3-8B',
+        'claude-3-5-haiku-20241022': 'Qwen/Qwen3.5-4B',
+        'claude-3-opus-20240229': 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
+        # ...
+    }
+    
+    # Request timeout (seconds)
+    TIMEOUT = 60
+```
+
+### Model Mapping Table
+
+| Claude Model | Silicon Flow Model | Notes |
+|-------------|-------------------|-------|
+| `claude-3-5-sonnet-20241022` | `Qwen/Qwen3-8B` | Main model, strong dialogue |
+| `claude-3-5-haiku-20241022` | `Qwen/Qwen3.5-4B` | Lightweight fast |
+| `claude-3-opus-20240229` | `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B` | Complex reasoning |
+| `claude-3-sonnet-20240229` | `Qwen/Qwen2.5-7B-Instruct` | Stable general |
+| `claude-3-haiku-20240307` | `tencent/Hunyuan-MT-7B` | Lightweight fast response |
+| (default fallback) | `Qwen/Qwen3-8B` | When no mapping |
+
+### Server
+
+```python
+# server.py
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+import httpx
+from convert import anthropic_to_openai, openai_to_anthropic, openai_to_anthropic_stream
+from config import Config
+
+app = FastAPI()
+
+@app.post("/v1/messages")
+async def messages(request: Request):
+    req = await request.json()
+    stream = req.get('stream', False)
+    
+    # Convert request
+    openai_req = anthropic_to_openai(req, Config.MODEL_MAP)
+    
+    if stream:
+        return StreamingResponse(
+            stream_anthropic(openai_req),
+            media_type='text/event-stream'
+        )
+    else:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f'{Config.SILICONFLOW_API_BASE}/chat/completions',
+                json=openai_req,
+                timeout=Config.TIMEOUT
+            )
+            return openai_to_anthropic(resp.json(), is_stream=False)
+```
+
+### Usage
 
 ```bash
+# Start proxy
 cd /mnt/d/WorkPlace/anthropic-sf-proxy
-pip install -r requirements.txt   # FastAPI + httpx
-cp .env.example .env              # 填入 SILICONFLOW_API_KEY=sk-xxx
-python server.py                  # 监听 0.0.0.0:8080
+python server.py
+
+# Configure Claude Code
+export ANTHROPIC_BASE_URL=http://localhost:8080
+
+# Then use Claude Code normally
+claude
 ```
 
-### Claude Code 配置
+### Direct API Call Test
 
 ```bash
-export ANTHROPIC_BASE_URL=http://localhost:8080/v1
-export ANTHROPIC_API_KEY=any-value
-export NO_PROXY=localhost,127.0.0.1
-```
-
-然后用 `/model` 指定 Silicon Flow 模型名。
-
-### 端点
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/v1/messages` | 消息接口（支持 stream） |
-| POST | `/v1/messages/count_tokens` | Token 估算（启发式） |
-| GET | `/health` | 健康检查 |
-
-### 环境变量
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `SILICONFLOW_API_KEY` | — | Silicon Flow API Key（必需） |
-| `SILICONFLOW_BASE_URL` | `https://api.siliconflow.cn/v1` | API 地址 |
-| `PROXY_PORT` | `8080` | 代理端口 |
-| `PROXY_HOST` | `0.0.0.0` | 监听地址 |
-| `DEBUG` | `false` | 打印完整请求/响应 |
-
-### 已知限制
-
-- Extended Thinking / Prompt Caching 无 OpenAI 等价物，会丢失
-- Token 计数仅启发式估算（CJK ~1.5 token/char，英文 ~0.3 token/char），误差 ±30%
-- 图片仅支持 base64，不支持 URL 源
-- 代理不校验 API Key，`ANTHROPIC_API_KEY` 可填任意值
-
----
-
-## 四、架构图
-
-```
-┌──────────────────────────────────────────────────┐
-│  Peerdrive React 前端 (localhost:5173)            │
-│  ├── AnonCreator 🤖 llmSuggest()                 │
-│  ├── LLMAssistant (function calling)             │
-│  └── Settings (LLM 配置面板)                      │
-│        │                                          │
-│        ▼ POST /v1/chat/completions               │
-│  https://siliconflow.moonchan.xyz                │
-│        │ Cloudflare 反向代理                       │
-│        ▼                                          │
-│  https://api.siliconflow.cn/v1                   │
-│        │                                          │
-│        ▼                                          │
-│  Silicon Flow 模型 (Qwen/GLM/DeepSeek...)         │
-└──────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────┐
-│  Claude Code                                     │
-│        │ POST /v1/messages (Anthropic 格式)       │
-│        ▼                                          │
-│  anthropic-sf-proxy (localhost:8080)              │
-│        │ 协议转换 Anthropic → OpenAI               │
-│        ▼                                          │
-│  Silicon Flow API                                 │
-└──────────────────────────────────────────────────┘
-```
-
----
-
-## 五、测试
-
-### 测试前端 LLM 调用
-
-```bash
-# 直接测试 siliconflow 代理（AI 命名）
-curl -s https://siliconflow.moonchan.xyz/v1/chat/completions \
+curl http://localhost:8080/v1/messages \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "Qwen/Qwen3-8B",
-    "messages": [{"role":"user","content":"say hello"}],
+    "model": "claude-3-5-sonnet-20241022",
+    "messages": [{"role":"user","content":"Hello"}],
     "max_tokens": 20
   }'
 ```
 
-### 测试 Claude Code 代理
+### Test Claude Code Proxy
 
 ```bash
-# 非流式
+# Non-streaming
 NO_PROXY=localhost,127.0.0.1 curl -s http://localhost:8080/v1/messages \
   -H 'Content-Type: application/json' \
   -d '{"model":"Qwen/Qwen2.5-7B-Instruct","max_tokens":50,"messages":[{"role":"user","content":"say hi"}]}'
 
-# 健康检查
+# Health check
 curl http://localhost:8080/health
 ```
 
 ---
 
-## 六、相关文件索引
+## 6. Related Files Index
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `react/src/api.js:143-177` | LLM 配置 localStorage 存取 + 免费模型列表 |
-| `react/src/pages/AnonCreator.jsx:7-17` | AI 合集命名调用 |
-| `react/src/pages/Settings.jsx:176-264` | LLM 配置 UI 面板 |
-| `react/src/components/LLMAssistant.jsx` | AI 聊天助手（function calling） |
-| `/mnt/d/WorkPlace/anthropic-sf-proxy/server.py` | Claude Code → SF 协议转换服务 |
-| `/mnt/d/WorkPlace/anthropic-sf-proxy/convert.py` | 请求/响应/流式转换逻辑 |
+| `react/src/api.js:143-177` | LLM configuration localStorage access + free model list |
+| `react/src/pages/AnonCreator.jsx:7-17` | AI collection naming call |
+| `react/src/pages/Settings.jsx:176-264` | LLM configuration UI panel |
+| `react/src/components/LLMAssistant.jsx` | AI chat assistant (function calling) |
+| `/mnt/d/WorkPlace/anthropic-sf-proxy/server.py` | Claude Code → SF protocol conversion service |
+| `/mnt/d/WorkPlace/anthropic-sf-proxy/convert.py` | Request/response/streaming conversion logic |
 
-#siliconflow #LLM #Qwen #ClaudeCode #协议转换 #代理 #peerdrive
+#siliconflow #LLM #Qwen #ClaudeCode #protocol-conversion #proxy #peerdrive

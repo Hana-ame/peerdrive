@@ -1,24 +1,24 @@
-// core.js — 浏览器端核心：PeerMediaClient。
+// core.js — browser-side core: PeerMediaClient.
 //
-// 职责：维护到「Node 端 peer」的 PeerJS 连接，管理多条 DataChannel：
-//   - 控制通道（control）：keepalive ping/ping-ack
-//   - 文件通道（file-{reqId}）：每个文件请求一条独立通道，支持并发传输
+// Responsibilities: maintain PeerJS connection to "Node-side peer", manage multiple DataChannels:
+//   - Control channel (control): keepalive ping/ping-ack
+//   - File channel (file-{reqId}): one independent channel per file request, supports concurrent transfer
 //
-// 多 DataChannel 架构（2026-09-06）：
-//   - 一条 PeerJS 连接 → 多条 DataChannel
-//   - 控制通道：keepalive，不发文件请求
-//   - 文件通道：每个文件请求创建一条新通道，Node 端独立处理
-//   - 并发：多个文件可同时传输（每条通道独立）
+// Multi-DataChannel architecture (2026-09-06):
+//   - One PeerJS connection → multiple DataChannels
+//   - Control channel: keepalive, no file requests sent
+//   - File channel: each file request creates a new channel, Node side handles independently
+//   - Concurrency: multiple files can transfer simultaneously (each channel independent)
 //
-// 不依赖 React——vanilla 与 React 入口共用本模块。
+// Does not depend on React — vanilla and React entry points share this module.
 //
-// peerjs 是 CJS 包（无 exports 字段）——Node 原生 ESM 无法静态解析 named
-// export，必须 default import 后解构。但坑：peerjs 的 main(bundler.cjs) 与
-// module(bundler.mjs) 两个构建 default export 语义不同——Node 解析 CJS 时
-// default = module.exports（含 Peer）；vite 构建解析 ESM 时 default 是内部
-// util 对象（无 Peer），Peer 只挂在命名导出上。实测（2026-08-18 浏览器 E2E
-// 暴露）：IIFE 里 Peer 解构出 undefined → "yt is not a constructor"。
-// 三路兜底：namespace 命名导出（vite/ESM）→ CJS default（Node）→ default.default。
+// peerjs is a CJS package (no exports field) — Node native ESM cannot statically resolve named
+// exports, must default import then destructure. But caveat: peerjs's main(bundler.cjs) and
+// module(bundler.mjs) builds have different default export semantics — Node resolves CJS as
+// default = module.exports (includes Peer); vite builds resolve ESM as default being internal
+// util object (no Peer), Peer is only on named exports. Empirical test (2026-08-18 browser E2E
+// exposed): in IIFE, Peer destructured as undefined → "yt is not a constructor".
+// Three-way fallback: namespace named export (vite/ESM) → CJS default (Node) → default.default.
 import peerjsPkg from 'peerjs'
 import * as peerjsNS from 'peerjs'
 const Peer =
@@ -35,56 +35,56 @@ export const DEFAULT_SIGNALING = {
   path: '/',
 }
 
-// keepalive 参数：无 STUN 环境下 WebRTC 断线无 close 事件（连接级 error
-// 在 ready 后被忽略，见 open() 注释），真断线要等 SCTP 超时（数十秒）。
-// 两端（浏览器/Node）每 KEEPALIVE_INTERVAL 发一次 ping 帧制造流量；
-// 收到**任何**帧（含 ping）刷新 lastActive；超过 KEEPALIVE_TIMEOUT 无帧
-// → teardown（槽位 closed，下次 load 重建，失败感知从数十秒降到秒级）。
-// 发现背景：代码审阅 2026-08-18（第 4 项优化）。
+// keepalive parameters: in no-STUN environments, WebRTC disconnection has no close event (connection-level
+// error ignored after ready, see open() comments), real disconnection must wait for SCTP timeout (tens of seconds).
+// Both ends (browser/Node) send a ping frame every KEEPALIVE_INTERVAL to generate traffic;
+// receiving **any** frame (including ping) refreshes lastActive; exceeding KEEPALIVE_TIMEOUT without frames
+// → teardown (slot closed, rebuilt on next load, failure detection reduced from tens of seconds to seconds).
+// Discovery: code review 2026-08-18 (item 4 optimization).
 export const KEEPALIVE_INTERVAL = 5000
 export const KEEPALIVE_TIMEOUT = 15000
 
-// signalingKey 连接缓存键：同信令配置 + 同 peerId 共享一条连接。
+// signalingKey connection cache key: same signaling config + same peerId shares one connection.
 function signalingKey(sig) {
   return `${sig.host}:${sig.port}:${sig.key}:${sig.path || '/'}`
 }
 
 class ConnectionSlot {
-  // 一条到对端 peer 的连接及其上的全部 DataChannel。
+  // A connection to the peer and all its DataChannels.
   constructor(peerId, signaling) {
     this.peerId = peerId
     this.signaling = signaling
-    this.peer = null          // peerjs Peer（信令客户端）
-    this.controlConn = null   // 控制通道（keepalive）
+    this.peer = null          // peerjs Peer (signaling client)
+    this.controlConn = null   // control channel (keepalive)
     this.ready = false
     this.closed = false
     this.opening = false
     this.pending = new Map()  // reqId → { resolve, reject, chunks, mime, size, got, conn, cleanup }
-    this.lastActive = 0       // 最近收到帧的时间（keepalive 判活）
-    this.kaTimer = null       // keepalive 定时器（controlConn open 后启动）
-    // 通道池：复用已建立的 DataChannel，预热降低首请求延迟
-    this.pool = []            // 空闲通道列表
-    this.inUse = new Set()    // 占用中的通道
-    this.poolSize = 2         // 预热数量
+    this.lastActive = 0       // most recent time a frame was received (keepalive liveness)
+    this.kaTimer = null       // keepalive timer (starts after controlConn opens)
+    // Channel pool: reuse established DataChannels, pre-warm to reduce first-request latency
+    this.pool = []            // idle channel list
+    this.inUse = new Set()    // channels in use
+    this.poolSize = 2         // pre-warm count
   }
 
-  // request 在连接上发起一次加载。创建新的文件 DataChannel 并发传输。
+  // request initiates a load on the connection. Creates a new file DataChannel for concurrent transfer.
   request(url, resolve, reject, signal) {
     if (this.closed) {
       reject(new Error('peerdrive-media: connection closed'))
       return
     }
-    // 连接未就绪时先打开，ready 后发送请求
+    // Open first if not ready, send request after ready
     if (!this.ready) {
       if (!this.opening) {
         this.opening = true
         this.open()
       }
-      // 排队等待连接就绪
+      // Queue waiting for connection readiness
       this._waitingForReady = this._waitingForReady || []
       const entry = { url, resolve, reject, signal }
       this._waitingForReady.push(entry)
-      // 排队中 abort：立即从等待列表移除并 reject
+      // Abort while queued: immediately remove from wait list and reject
       if (signal) {
         if (signal.aborted) {
           const idx = this._waitingForReady.findIndex(e => e === entry)
@@ -93,7 +93,7 @@ class ConnectionSlot {
           return
         }
         const onAbort = () => {
-          // 防御：_waitingForReady 可能已被清空（open 后处理完）
+          // Defensive: _waitingForReady may have been cleared (processed after open)
           if (this._waitingForReady) {
             const idx = this._waitingForReady.findIndex(e => e === entry)
             if (idx >= 0) {
@@ -111,17 +111,17 @@ class ConnectionSlot {
     this.sendFileRequest(url, resolve, reject, signal)
   }
 
-  // sendFileRequest 从通道池获取 DataChannel（或创建新的）并发送请求。
+  // sendFileRequest gets a DataChannel from the pool (or creates a new one) and sends the request.
   sendFileRequest(url, resolve, reject, signal) {
     const reqId = nextReqId()
-    // 从池获取通道，无空闲则创建新的
+    // Get channel from pool, create new if none available
     let conn
     let fromPool = false
     if (this.pool.length > 0) {
-      conn = this.pool.shift()  // 复用空闲通道
+      conn = this.pool.shift()  // reuse idle channel
       fromPool = true
     } else {
-      // 创建新通道
+      // Create new channel
       conn = this.peer.connect(this.peerId, {
         reliable: true,
         serialization: 'raw',
@@ -138,10 +138,10 @@ class ConnectionSlot {
       size: 0,
       got: 0,
       conn,
-      _listeners: {},  // 保存监听器引用，便于清理
+      _listeners: {},  // save listener references for cleanup
       cleanup: () => {
         this.inUse.delete(conn)
-        // 移除监听器
+        // Remove listeners
         if (rec._listeners.data) {
           conn.removeListener('data', rec._listeners.data)
         }
@@ -154,7 +154,7 @@ class ConnectionSlot {
         if (rec._listeners.open) {
           conn.removeListener('open', rec._listeners.open)
         }
-        // 通道归还池（如果没关闭）
+        // Return channel to pool (if not closed)
         if (!conn.closed) {
           this.pool.push(conn)
         }
@@ -170,7 +170,7 @@ class ConnectionSlot {
       const onAbort = () => {
         this.pending.delete(reqId)
         rec.cleanup()
-        try { conn.close() } catch { /* 幂等 */ }
+        try { conn.close() } catch { /* idempotent */ }
         reject(new DOMException('aborted', 'AbortError'))
       }
       signal.addEventListener('abort', onAbort)
@@ -179,7 +179,7 @@ class ConnectionSlot {
 
     this.pending.set(reqId, rec)
 
-    // 如果是池中的通道，已经 open，直接发送请求
+    // If from pool, already open, send request directly
     if (fromPool) {
       try {
         conn.send(makeUrlRequest(url, reqId))
@@ -189,7 +189,7 @@ class ConnectionSlot {
         reject(err)
       }
     } else {
-      // 新通道，等待 open
+      // New channel, wait for open
       const onOpen = () => {
         try {
           conn.send(makeUrlRequest(url, reqId))
@@ -203,12 +203,12 @@ class ConnectionSlot {
       rec._listeners.open = onOpen
     }
 
-    // 监听数据
+    // Listen for data
     const onData = (data) => this.handleFileData(reqId, data)
     conn.on('data', onData)
     rec._listeners.data = onData
 
-    // 监听关闭
+    // Listen for close
     const onClose = () => {
       const p = this.pending.get(reqId)
       if (p) {
@@ -220,7 +220,7 @@ class ConnectionSlot {
     conn.on('close', onClose)
     rec._listeners.close = onClose
 
-    // 监听错误
+    // Listen for error
     const onError = (err) => {
       const p = this.pending.get(reqId)
       if (p) {
@@ -233,7 +233,7 @@ class ConnectionSlot {
     rec._listeners.error = onError
   }
 
-  // open 建立到 Node 端 peer 的完整链路（Peer 信令 + 控制 DataChannel）。
+  // open establishes the full link to Node-side peer (Peer signaling + control DataChannel).
   open() {
     const sig = this.signaling
     const dbg = typeof window !== 'undefined' && window.__PDM_DEBUG ? 3 : 0
@@ -251,7 +251,7 @@ class ConnectionSlot {
       if (!this.ready && !this.closed) this.failAll(`peerjs error: ${err?.type || err}`)
     })
     peer.on('open', () => {
-      // 创建控制通道（只用于 keepalive）
+      // Create control channel (only for keepalive)
       const conn = peer.connect(this.peerId, {
         reliable: true,
         serialization: 'raw',
@@ -263,19 +263,19 @@ class ConnectionSlot {
         this.opening = false
         this.ready = true
         this.startKeepalive()
-        // 处理排队等待的连接就绪请求
+        // Process queued connection-ready requests
         if (this._waitingForReady && this._waitingForReady.length) {
           const entries = this._waitingForReady
           this._waitingForReady = null
           for (const entry of entries) {
-            // 移除 abort 监听（已发送，不再需要排队中止）
+            // Remove abort listener (already sent, no longer need queued abort)
             if (entry.signal) {
               entry.signal.removeEventListener('abort', entry._onAbort)
             }
             this.sendFileRequest(entry.url, entry.resolve, entry.reject, entry.signal)
           }
         }
-        // 预热通道池（延迟一个 tick，确保请求通道先创建）
+        // Pre-warm channel pool (delay one tick to ensure request channels are created first)
         setTimeout(() => this.warmUp(), 0)
       })
       conn.on('data', (data) => this.handleControlData(data))
@@ -286,23 +286,23 @@ class ConnectionSlot {
     })
   }
 
-  // handleControlData 处理控制通道数据（只接收 ping-ack）。
+  // handleControlData handles control channel data (only receives ping-ack).
   handleControlData(data) {
     this.lastActive = Date.now()
     if (typeof data === 'string') {
       const msg = parseFrame(data)
-      if (msg?.type === 'ping-ack') return // keepalive 响应
+      if (msg?.type === 'ping-ack') return // keepalive response
     }
   }
 
-  // handleFileData 处理文件通道数据。
+  // handleFileData handles file channel data.
   handleFileData(reqId, data) {
     this.lastActive = Date.now()
     const p = this.pending.get(reqId)
     if (!p) return
 
     if (isBinaryFrame(data)) {
-      // 二进制块
+      // Binary block
       const bytes = toUint8Array(data)
       p.chunks.push(bytes)
       p.got += bytes.length
@@ -325,24 +325,24 @@ class ConnectionSlot {
       case 'done':
         this.pending.delete(reqId)
         const blob = new Blob(p.chunks, { type: p.mime })
-        p.cleanup()  // 通道归还池
+        p.cleanup()  // return channel to pool
         p.resolve({ blob, blobUrl: URL.createObjectURL(blob), mime: p.mime, size: p.got })
         break
       case 'err':
         this.pending.delete(reqId)
-        p.cleanup()  // 通道归还池
+        p.cleanup()  // return channel to pool
         p.reject(new Error(`peerdrive-media: ${msg.msg || 'request failed'}`))
         break
       case 'ping':
-        // Node 端发来的 ping（keepalive），回复 ping-ack
-        try { p.conn.send(JSON.stringify({ type: 'ping-ack' })) } catch { /* 通道已死 */ }
+        // Ping from Node side (keepalive), reply with ping-ack
+        try { p.conn.send(JSON.stringify({ type: 'ping-ack' })) } catch { /* channel dead */ }
         break
       default:
         break
     }
   }
 
-  // startKeepalive 启动断线感知定时器（controlConn open 后调用）。
+  // startKeepalive starts the disconnect detection timer (called after controlConn opens).
   startKeepalive() {
     this.lastActive = Date.now()
     this.kaTimer = setInterval(() => {
@@ -356,11 +356,11 @@ class ConnectionSlot {
         if (this.controlConn) {
           this.controlConn.send(JSON.stringify({ type: 'ping' }))
         }
-      } catch { /* 连接已死，超时兜底 */ }
+      } catch { /* connection dead, timeout fallback */ }
     }, KEEPALIVE_INTERVAL)
   }
 
-  // warmUp 预热通道池，降低首请求延迟。
+  // warmUp pre-warms the channel pool to reduce first-request latency.
   warmUp() {
     const promises = []
     for (let i = 0; i < this.poolSize; i++) {
@@ -374,29 +374,29 @@ class ConnectionSlot {
           this.pool.push(conn)
           resolve()
         })
-        conn.on('close', () => resolve())  // 失败也 resolve，避免阻塞
+        conn.on('close', () => resolve())  // resolve even on failure, avoid blocking
         conn.on('error', () => resolve())
       }))
     }
-    // 不阻塞，后台预热
+    // Non-blocking, background pre-warm
     Promise.all(promises).then(() => {})
   }
 
   failAll(msg) {
-    // 连接级失败：reject 全部在途请求与排队等待者，然后清理槽位。
+    // Connection-level failure: reject all in-flight requests and queue waiters, then clean up slot.
     this.closed = true
     this.opening = false
     if (this.kaTimer) { clearInterval(this.kaTimer); this.kaTimer = null }
     const err = new Error(`peerdrive-media: ${msg}`)
     for (const [, p] of this.pending) {
       p.cleanup()
-      try { p.conn?.close() } catch { /* 幂等 */ }
+      try { p.conn?.close() } catch { /* idempotent */ }
       p.reject(err)
     }
     this.pending.clear()
-    // 清理池中的通道
+    // Clean up channels in pool
     for (const conn of this.pool) {
-      try { conn.close() } catch { /* 幂等 */ }
+      try { conn.close() } catch { /* idempotent */ }
     }
     this.pool = []
     this.inUse = new Set()
@@ -408,37 +408,37 @@ class ConnectionSlot {
   }
 
   teardown(msg) {
-    // 连接关闭（对端断开/网络失败）：与 failAll 相同处理，槽位保持 closed。
+    // Connection closed (peer disconnect/network failure): same handling as failAll, slot stays closed.
     if (this.closed) return
     this.failAll(msg)
   }
 
   closePeer() {
-    try { this.peer?.destroy() } catch { /* 幂等清理 */ }
+    try { this.peer?.destroy() } catch { /* idempotent cleanup */ }
     this.peer = null
     this.controlConn = null
   }
 }
 
-// PeerMediaClient 浏览器核心：模块级单例，React/vanilla 共用。
-// slots 缓存 key = 信令配置 + peerId；同一对端的所有组件共享连接。
+// PeerMediaClient browser core: module-level singleton, shared by React/vanilla.
+// slots cache key = signaling config + peerId; all components to the same peer share the connection.
 export class PeerMediaClient {
   constructor() {
     this.slots = new Map()
   }
 
-  // load 加载 URL 资源，返回 { blob, blobUrl, mime, size }。
-  // peer：Node 端 peer id（必填）；signaling：信令配置（默认公共云）；
-  // signal：AbortSignal（组件卸载时取消——见 ConnectionSlot.request 的 abort 处理）。
+  // load loads URL resource, returns { blob, blobUrl, mime, size }.
+  // peer: Node-side peer id (required); signaling: signaling config (defaults to public cloud);
+  // signal: AbortSignal (cancel on component unmount — see ConnectionSlot.request's abort handling).
   async load(url, { peer, signaling = DEFAULT_SIGNALING, signal } = {}) {
     if (!peer) throw new Error('peerdrive-media: peer (node peer id) is required')
     if (!url || typeof url !== 'string') throw new Error('peerdrive-media: url is required')
     const key = `${signalingKey(signaling)}|${peer}`
     let slot = this.slots.get(key)
-    // 断线后重建：teardown/failAll 置 closed=true 但槽位仍在缓存中，
-    // 若沿用 closed 槽位，request() 的「closed 不再 open()」守卫会让新请求
-    // 永久排队、Promise 永不 settle（加载中无错误）。
-    // 发现背景：代码审阅 2026-08-18（Node 端重启/断网后页面恢复场景）。
+    // Rebuild after disconnect: teardown/failAll sets closed=true but slot remains in cache,
+    // if reusing closed slot, request()'s "closed doesn't open()" guard causes new requests
+    // to queue permanently, Promise never settles (no error during loading).
+    // Discovery: code review 2026-08-18 (page recovery scenario after Node restart/disconnect).
     if (!slot || slot.closed) {
       slot = new ConnectionSlot(peer, signaling)
       this.slots.set(key, slot)
@@ -450,7 +450,7 @@ export class PeerMediaClient {
     })
   }
 
-  // dispose 主动释放到某 peer 的连接（组件全局卸载时调用；通常不需要）。
+  // dispose actively releases the connection to a peer (called on global component unmount; usually not needed).
   dispose(peer, signaling = DEFAULT_SIGNALING) {
     const key = `${signalingKey(signaling)}|${peer}`
     const slot = this.slots.get(key)
@@ -461,36 +461,36 @@ export class PeerMediaClient {
   }
 }
 
-// client 模块级单例。
+// client module-level singleton.
 export const client = new PeerMediaClient()
 export default client
 
-// ====== Service Worker 支持 ======
+// ====== Service Worker support ======
 
-// SW 消息处理：主线程 ↔ SW
+// SW message handling: main thread ↔ SW
 let swMessagePort = null
 let swConfig = null
 
-// registerSW 注册 Service Worker，启用媒体拦截。
-// 返回 Promise，SW 就绪后 resolve。
+// registerSW registers Service Worker, enables media interception.
+// Returns Promise, resolves when SW is ready.
 export async function registerSW({ peer, signaling = DEFAULT_SIGNALING, allow } = {}) {
   if (!navigator.serviceWorker) {
     throw new Error('peerdrive-media: Service Worker not supported')
   }
   
-  // 注册 SW
+  // Register SW
   const reg = await navigator.serviceWorker.register('/sw.js')
   await navigator.serviceWorker.ready
   
-  // 建立消息通道
+  // Establish message channel
   const channel = new MessageChannel()
   channel.port1.start()
   swMessagePort = channel.port1
   
-  // 设置 SW 配置
+  // Set SW configuration
   swConfig = { peer, signaling, allow }
   
-  // 发送配置到 SW
+  // Send configuration to SW
   channel.port2.postMessage({
     type: 'pdm-config',
     config: {
@@ -500,7 +500,7 @@ export async function registerSW({ peer, signaling = DEFAULT_SIGNALING, allow } 
     },
   })
   
-  // 监听 SW 消息
+  // Listen for SW messages
   channel.port1.onmessage = (event) => {
     const data = event.data || {}
     if (data.type === 'pdm-load-request') {
@@ -516,13 +516,13 @@ export async function registerSW({ peer, signaling = DEFAULT_SIGNALING, allow } 
   }
 }
 
-// 处理 SW 的加载请求
+// Handle SW's load request
 async function handleSWLoadRequest(url, reqId) {
   try {
-    // 使用 client 加载资源
+    // Use client to load resource
     const result = await client.load(url, { peer: swConfig.peer, signaling: swConfig.signaling })
     
-    // 返回结果到 SW
+    // Return result to SW
     if (swMessagePort) {
       swMessagePort.postMessage({
         type: 'pdm-load-response',
@@ -543,20 +543,20 @@ async function handleSWLoadRequest(url, reqId) {
   }
 }
 
-// ====== Monkey-Patch 自动拦截 ======
+// ====== Monkey-Patch auto-interception ======
 
-// 拦截 img/video src 设置，自动经 WebRTC 加载
+// Intercept img/video src setting, auto-load via WebRTC
 let mpConfig = null
 let mpOrigSetters = {}
 
-// setupMP 启用 monkey-patch 自动拦截。
-// 之后 JS 设置 img.src / video.src 会自动经 WebRTC 加载。
+// setupMP enables monkey-patch auto-interception.
+// After this, JS setting img.src / video.src will auto-load via WebRTC.
 export function setupMP({ peer, signaling = DEFAULT_SIGNALING, allow } = {}) {
   if (!peer) throw new Error('peerdrive-media: peer is required for setupMP')
   
   mpConfig = { peer, signaling, allow }
   
-  // 拦截 HTMLImageElement.src
+  // Intercept HTMLImageElement.src
   if (!mpOrigSetters.img) {
     const desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src')
     mpOrigSetters.img = desc?.set
@@ -574,7 +574,7 @@ export function setupMP({ peer, signaling = DEFAULT_SIGNALING, allow } = {}) {
     })
   }
   
-  // 拦截 HTMLVideoElement.src
+  // Intercept HTMLVideoElement.src
   if (!mpOrigSetters.video) {
     const desc = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, 'src')
     mpOrigSetters.video = desc?.set
@@ -592,7 +592,7 @@ export function setupMP({ peer, signaling = DEFAULT_SIGNALING, allow } = {}) {
     })
   }
   
-  // 拦截 HTMLAudioElement.src
+  // Intercept HTMLAudioElement.src
   if (typeof HTMLAudioElement !== 'undefined' && !mpOrigSetters.audio) {
     const desc = Object.getOwnPropertyDescriptor(HTMLAudioElement.prototype, 'src')
     mpOrigSetters.audio = desc?.set
@@ -613,7 +613,7 @@ export function setupMP({ peer, signaling = DEFAULT_SIGNALING, allow } = {}) {
   return {
     teardown: () => {
       mpConfig = null
-      // 恢复原始 setter
+      // Restore original setters
       for (const [type, setter] of Object.entries(mpOrigSetters)) {
         if (setter) {
           const proto = type === 'img' ? HTMLImageElement.prototype :
@@ -632,7 +632,7 @@ export function setupMP({ peer, signaling = DEFAULT_SIGNALING, allow } = {}) {
   }
 }
 
-// 检查 URL 是否在白名单内
+// Check if URL is in the whitelist
 function shouldInterceptMP(url) {
   if (!mpConfig?.allow) return false
   if (typeof mpConfig.allow === 'function') {
@@ -644,7 +644,7 @@ function shouldInterceptMP(url) {
   return false
 }
 
-// 加载资源并设置 src
+// Load resource and set src
 async function loadAndSetSrc(el, url, config) {
   try {
     const result = await client.load(url, { peer: config.peer, signaling: config.signaling })
@@ -655,7 +655,7 @@ async function loadAndSetSrc(el, url, config) {
     }
   } catch (err) {
     console.error('peerdrive-media: load failed', err)
-    // 降级到原始 src
+    // Fallback to original src
     if (mpOrigSetters[el.tagName?.toLowerCase()]) {
       mpOrigSetters[el.tagName?.toLowerCase()].call(el, url)
     } else {

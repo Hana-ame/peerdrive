@@ -1,13 +1,13 @@
-# WebRTC P2P 架构
+# WebRTC P2P Architecture
 
 > 2026-04-28
 
-## 问题
+## Problem
 
-当前架构假设所有节点都有 HTTP 公网可达地址。实际上大部分 client node 在 NAT/防火墙后面，
-无法被直接访问。
+The current architecture assumes all nodes have HTTP publicly reachable addresses. In reality, most client nodes are behind NAT/firewalls
+and cannot be directly accessed.
 
-## 新架构
+## New Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -27,9 +27,9 @@
 │  │  - User auth (JWT)                           │   │
 │  └─────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────┘
-         │                    ▲
-         │ WebSocket          │ WebSocket
-         ▼                    │
+          │                    ▲
+          │ WebSocket          │ WebSocket
+          ▼                    │
 ┌─────────────────┐   ┌─────────────────┐
 │ Client Node A   │   │ Client Node B   │
 │ (NAT behind)    │◄──│ (NAT behind)    │
@@ -38,23 +38,23 @@
 │ WebRTC client   │   │ WebRTC client   │
 │ HTTP API client │   │ HTTP API client │
 └─────────────────┘   └─────────────────┘
-         │                    │
-         └──── WebRTC P2P ────┘
-         (STUN hole-punched direct connection)
+          │                    │
+          └──── WebRTC P2P ────┘
+          (STUN hole-punched direct connection)
 ```
 
-## 协议栈
+## Protocol Stack
 
-| 层 | 协议 | 说明 |
+| Layer | Protocol | Description |
 |----|------|------|
-| 信令 | WebSocket (wss://vps/ws/signal) | Peer 发现、SDP 交换、ICE 候选转发 |
-| 连接 | WebRTC (STUN + ICE) | NAT 穿越、对等直连 |
-| 数据 | WebRTC Data Channel | 文件传输（二进制流） |
-| 认证 | JWT (Registration Server) | 信令连接认证 |
+| Signaling | WebSocket (wss://vps/ws/signal) | Peer discovery, SDP exchange, ICE candidate forwarding |
+| Connection | WebRTC (STUN + ICE) | NAT traversal, peer-to-peer direct connection |
+| Data | WebRTC Data Channel | File transfer (binary stream) |
+| Authentication | JWT (Registration Server) | Signaling connection authentication |
 
-## 信令协议
+## Signaling Protocol
 
-### 客户端 → 服务端
+### Client → Server
 
 ```json
 {"type": "register", "peer_id": "12D3...", "token": "jwt..."}
@@ -66,7 +66,7 @@
 {"type": "find_file", "hash": "sha256..."}
 ```
 
-### 服务端 → 客户端
+### Server → Client
 
 ```json
 {"type": "offer", "from": "12D3...", "sdp": "v=0\r\n..."}
@@ -80,13 +80,13 @@
 
 ## WebRTC Data Channel
 
-建立连接后，通过 `FileTransfer` data channel 传输文件：
+After establishing a connection, files are transferred via the `FileTransfer` data channel:
 
 ```
-请求: {"type":"request","hash":"<sha256>"}
-响应: {"type":"response","hash":"<sha256>","size":1234}
-     （后跟二进制数据帧）
-错误: {"type":"error","hash":"<sha256>","message":"not found"}
+Request: {"type":"request","hash":"<sha256>"}
+Response: {"type":"response","hash":"<sha256>","size":1234}
+      (followed by binary data frames)
+Error: {"type":"error","hash":"<sha256>","message":"not found"}
 ```
 
 ## STUN/TURN
@@ -94,7 +94,7 @@
 - STUN: `stun:stun.moonchan.xyz:3478`
 - TURN: `turn:turn.moonchan.xyz:3478` (fallback, relayed)
 
-## 实现计划
+## Implementation Plan
 
 ### Phase 1: Signaling Server
 - [ ] WebSocket signaling endpoint `/ws/signal`

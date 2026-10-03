@@ -7,8 +7,8 @@
 //	btdht  → BitTorrent Mainline DHT HTTP bridge (independent go-peerdrive-bt)
 //	http   → HTTP URL registered in file_providers
 //
-// 批2 (2026-08-16): 删除 IPFSFetcher（libp2p DHT+Bitswap 栈随旧互联层移除；
-// IPFS 兼容 API/Bitswap 不再提供，仅保留 HTTP gateway 抓取）。
+// Batch 2 (2026-08-16): Removed IPFSFetcher (libp2p DHT+Bitswap stack removed with the old interconnection layer;
+// IPFS compatibility API/Bitswap is no longer provided, only HTTP gateway fetching is retained).
 //
 // On success the file is cached to local storage, so the next request
 // is served instantly by the LocalFetcher.
@@ -117,7 +117,7 @@ type BTDHTFetcher struct {
 	dhtSvc *p2p_bt.BTDHTService
 }
 
-// NewBTDHTFetcher 创建基于 BitTorrent DHT 的获取器。
+// NewBTDHTFetcher creates a BitTorrent DHT-based fetcher.
 func NewBTDHTFetcher(dhtSvc *p2p_bt.BTDHTService, storageDir string) *BTDHTFetcher {
 	return &BTDHTFetcher{
 		bridge: p2p_bt.NewBTBridge(dhtSvc, storageDir),
@@ -142,14 +142,14 @@ func (f *BTDHTFetcher) Fetch(ctx context.Context, hash string) ([]byte, error) {
 // HTTPURLFetcher checks file_providers for "http"-type entries and fetches
 // from the registered URL.
 type HTTPURLFetcher struct {
-	// httpClient 带超时（M5）：原实现用 http.DefaultClient 无 timeout，
-	// 慢速 URL provider 会永久挂住 Download（下载端点随之挂死）。
-	// Fetch 整体受 Download 的 per-fetcher context 限制，这里再加一重保险。
+	// httpClient with timeout (M5): the original implementation used http.DefaultClient with no timeout,
+	// a slow URL provider would hang Download permanently (the download endpoint would hang too).
+	// The entire Fetch is bounded by Download's per-fetcher context; this adds a second safety net.
 	httpClient *http.Client
 }
 
-// maxURLFetchSize URL provider 单次拉取上限（M5）：
-// 与 peerjs 上传上限一致（8GB），防恶意/失控 URL 返回无限流。
+// maxURLFetchSize URL provider single-fetch limit (M5):
+// Same as the peerjs upload limit (8GB), prevents malicious/runaway URLs from returning infinite streams.
 const maxURLFetchSize = 8 * 1024 * 1024 * 1024
 
 func (f *HTTPURLFetcher) Name() string { return "http" }
@@ -163,7 +163,7 @@ func (f *HTTPURLFetcher) Fetch(ctx context.Context, hash string) ([]byte, error)
 	}
 	client := f.httpClient
 	if client == nil {
-		client = http.DefaultClient // 防御：NewUniversalDownloader 未注入时的兜底
+		client = http.DefaultClient // Defense: fallback when NewUniversalDownloader doesn't inject
 	}
 	for _, p := range providers {
 		if p.ProviderType != "http" || !p.Available {
@@ -181,7 +181,7 @@ func (f *HTTPURLFetcher) Fetch(ctx context.Context, hash string) ([]byte, error)
 			resp.Body.Close()
 			continue
 		}
-		// M5：LimitReader 限流，超上限即视为异常 provider
+		// M5: LimitReader throttling; exceeding the limit is treated as an anomalous provider
 		data, err := io.ReadAll(io.LimitReader(resp.Body, maxURLFetchSize+1))
 		resp.Body.Close()
 		if err != nil {
@@ -232,13 +232,13 @@ type UniversalDownloader struct {
 	timeout      time.Duration
 	ipfsProvider *provider.IPFSProvider
 
-	// M5：lastMetrics 读写竞态（Download 并发写 vs LastMetrics 读，
-	// /download/:hash/sources 端点高频调用）→ 互斥保护。
+	// M5: lastMetrics read/write race (concurrent Download writes vs LastMetrics reads,
+	// /download/:hash/sources endpoint called at high frequency) → mutex protection.
 	metricsMu   sync.Mutex
 	lastMetrics []FetcherMetric
 }
 
-// NewUniversalDownloader 创建通用下载器，支持按优先级顺序尝试多种协议。
+// NewUniversalDownloader creates a universal downloader that tries multiple protocols in priority order.
 func NewUniversalDownloader(
 	btSvc *p2p_bt.BTDHTService,
 	storageDir string,
@@ -283,8 +283,8 @@ func (d *UniversalDownloader) buildFetchers(order string, btSvc *p2p_bt.BTDHTSer
 			return NewBTDHTFetcher(btSvc, d.storageDir)
 		},
 		"http": func() ProtocolFetcher {
-			// M5：URL provider 用带超时的 client（Download 的 per-fetcher
-			// context 兜底整体耗时，client timeout 防单请求悬挂）
+			// M5: URL provider uses a client with timeout (Download's per-fetcher
+			// context bounds overall time, client timeout prevents single-request hang)
 			return &HTTPURLFetcher{httpClient: &http.Client{Timeout: d.timeout}}
 		},
 	}
@@ -300,11 +300,12 @@ func (d *UniversalDownloader) buildFetchers(order string, btSvc *p2p_bt.BTDHTSer
 	return fetchers
 }
 
-// Download 按优先级顺序尝试各协议下载文件，成功后缓存到本地存储。
-// 每次尝试都会记录 timing metrics，可通过 LastMetrics() 获取。
+// Download tries each protocol in priority order to download the file, caching successfully to local storage.
+// Each attempt records timing metrics, retrievable via LastMetrics().
 func (d *UniversalDownloader) Download(ctx context.Context, hash string) (data []byte, protocol string, err error) {
-	// 防御：hash 来自 anon collection entry 的远端输入（sync/serve 路径），
-	// 未校验就进 LocalFetcher 会触发 hash[:2] 越界 panic。本地下载端点已前置校验，这里是最后防线。
+	// Defense: hash comes from remote input of anon collection entries (sync/serve path),
+	// without validation it would trigger a hash[:2] out-of-bounds panic in LocalFetcher. The local download endpoint
+	// already validates upstream; this is the last line of defense.
 	if !hashutil.IsStrictSHA256(hash) {
 		return nil, "", fmt.Errorf("download: invalid hash %q", hash)
 	}
@@ -366,7 +367,7 @@ func (d *UniversalDownloader) Download(ctx context.Context, hash string) (data [
 	return nil, "", fmt.Errorf("file not found on any protocol")
 }
 
-// LastMetrics 返回最近一次 Download 调用的各协议尝试记录（含耗时）。
+// LastMetrics returns the per-protocol attempt records (including duration) from the most recent Download call.
 func (d *UniversalDownloader) LastMetrics() []FetcherMetric {
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
@@ -401,7 +402,7 @@ func (d *UniversalDownloader) cacheToLocal(hash string, data []byte) {
 // Source checks
 // ---------------------------------------------------------------------------
 
-// CheckSources 返回各协议对指定哈希的可用性映射。
+// CheckSources returns a map of protocol availability for the given hash.
 func (d *UniversalDownloader) CheckSources(ctx context.Context, hash string) map[string]bool {
 	result := make(map[string]bool, len(d.fetchers))
 	for _, fetcher := range d.fetchers {
@@ -424,7 +425,7 @@ func (d *UniversalDownloader) CheckSources(ctx context.Context, hash string) map
 	return result
 }
 
-// ClearLocalCache 清除指定哈希的本地缓存，下次下载将从网络重新获取。
+// ClearLocalCache clears the local cache for the given hash; the next download will re-fetch from the network.
 func (d *UniversalDownloader) ClearLocalCache(hash string) {
 	// Remove from standard content-addressed paths.
 	paths := []string{
@@ -446,7 +447,7 @@ func (d *UniversalDownloader) ClearLocalCache(hash string) {
 	}
 }
 
-// Fetchers 返回按优先级排序的协议获取器切片（暴露给测试使用）。
+// Fetchers returns the protocol fetcher slice sorted by priority (exposed for testing).
 func (d *UniversalDownloader) Fetchers() []ProtocolFetcher {
 	return d.fetchers
 }

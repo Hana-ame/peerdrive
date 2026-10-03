@@ -1,18 +1,18 @@
 package model
 
-// share_level.go：共享级别（doc/NETDISK.md §12.6）。
+// share_level.go: Share levels (doc/NETDISK.md §12.6).
 //
-// 一条共享声明（目录 / 单个文件 / 合集）除了「要不要共享」，还要回答「给谁」：
+// A share declaration (directory / single file / collection) needs to answer not just "share or not" but also "to whom":
 //
-//	· public   —— 出现在共享清单里，连得上（过得了 PSK）的人都能下载
-//	· unlisted —— 不出现在清单里，但知道 hash 的人可以下载（"链接分享"）
-//	· private  —— 不出现在清单里，只有自己和好友能下载
+//	· public   —— appears in the share list, anyone who can connect (passes PSK) can download
+//	· unlisted —— does not appear in the list, but anyone who knows the hash can download ("link sharing")
+//	· private  —— does not appear in the list, only the owner and friends can download
 //
-// 一句话记法：**public = 列出来也给；unlisted = 不列出来但给；private = 只给认识的人**。
+// One-liner memory aid: **public = listed and given; unlisted = not listed but given; private = only given to people you know**.
 //
-// 空值等价于 public：历史落盘的共享范围只有 id 没有级别（本次升级前写的
-// share_scope.json），按 public 处理才不会让一次升级把运营者已经共享出去的东西
-// 悄悄收回来——那种"我没动过，别人却说取不到了"最难自查。
+// Empty value is equivalent to public: historically stored share scopes only have id without level (written before this upgrade
+// in share_scope.json), treating them as public prevents an upgrade from silently re-taking back content the operator
+// already shared out — the "I didn't change anything but others say they can't access it" kind is the hardest to self-check.
 
 import "strings"
 
@@ -22,7 +22,7 @@ const (
 	LevelPrivate  = "private"
 )
 
-// IsValidLevel 校验级别取值（空串视为未设置，合法，等价于 public）。
+// IsValidLevel validates level values (empty string is treated as unset, valid, equivalent to public).
 func IsValidLevel(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "", LevelPublic, LevelUnlisted, LevelPrivate:
@@ -31,10 +31,11 @@ func IsValidLevel(v string) bool {
 	return false
 }
 
-// NormalizeLevel 归一化：空 → public；非法值 → 空串（调用方据此报 400）。
+// NormalizeLevel normalizes: empty → public; invalid value → empty string (caller uses this to return 400).
 //
-// 为什么不把非法值也兜成 public：级别写错（比如拼成 "pubilc"）如果悄悄按
-// public 生效，等于把本想限制的内容公开出去——宁可整批拒绝让运营者重填。
+// Why not also treat invalid values as public: if a miswritten level (e.g. "pubilc" instead of "public") is silently
+// treated as public, it's essentially exposing content that was meant to be restricted — better to reject the whole batch
+// and let the operator fill it in again.
 func NormalizeLevel(v string) string {
 	v = strings.ToLower(strings.TrimSpace(v))
 	if v == "" {
@@ -46,15 +47,15 @@ func NormalizeLevel(v string) string {
 	return v
 }
 
-// LevelRank 宽松度排序（public 最宽松）。
+// LevelRank looseness ranking (public is the loosest).
 //
-// 空串/非法值为 **0**，不要理解成 public：LoosestLevel 要靠 0 表达"这条来源
-// 没有意见"，否则"目录 unlisted + 文件没级别"会被算成 public——把本该不列出
-// 的内容列了出去。
+// Empty string/invalid values return **0**, do not interpret as public: LoosestLevel relies on 0 to express "this source
+// has no opinion", otherwise "directory unlisted + file has no level" would be computed as public — listing content that
+// shouldn't be listed.
 //
-// 同一内容被多条来源命中时（目录 + 单文件勾选）取**最宽松**的那条：目录设成
-// unlisted、里面某个文件单独设成 public，那这个文件就该是 public。取最严会让
-// "我特意放宽了这一个"静默失效——用户在界面上看到的是"我改了，但没变化"。
+// When the same content is matched by multiple sources (directory + single file checked), take the **loosest** one: if
+// the directory is set to unlisted and a specific file inside is set to public, that file should be public. Taking the
+// strictest would silently nullify "I specifically relaxed this one" — users see "I changed it, but nothing happened" in the UI.
 func LevelRank(v string) int {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case LevelPublic:
@@ -67,10 +68,10 @@ func LevelRank(v string) int {
 	return 0
 }
 
-// LoosestLevel 取两条级别里更宽松的一条。
+// LoosestLevel returns the looser of two levels.
 //
-// 空串 = "这条来源没意见"，所以两条都空时返回空（而不是 public）——调用方靠
-// 空串判断"这条内容根本没被共享"。想拿"默认值"请用 NormalizeLevel。
+// Empty string = "this source has no opinion", so when both are empty, return empty (not public) — callers use
+// empty string to determine "this content isn't shared at all". Use NormalizeLevel if you want the "default value".
 func LoosestLevel(a, b string) string {
 	ra, rb := LevelRank(a), LevelRank(b)
 	if ra == 0 && rb == 0 {

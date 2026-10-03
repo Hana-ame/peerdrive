@@ -9,7 +9,8 @@ import (
 	"peerdrive/internal/model"
 )
 
-// IPFSPin 已上移 model 包（M2 收层：领域类型归 domain）。此处用别名保持引用不变。
+// IPFSPin has been moved to the model package (M2 layering: domain types belong to domain).
+// Alias retained here to keep references unchanged.
 
 // InsertPin inserts a new pin record (or replaces an existing one).
 func InsertPin(cid, hash, filename string, size int64) error {
@@ -27,7 +28,7 @@ func InsertPin(cid, hash, filename string, size int64) error {
 }
 
 // ListPins returns all pinned CIDs, most recently pinned first.
-// M11：无 LIMIT → 大量 pin 时全表物化；pin 数无业务上限，加 LIMIT 兜底。
+// M11: No LIMIT → full-table materialization with many pins; pin count has no business cap, add LIMIT as backstop.
 func ListPins() ([]model.IPFSPin, error) {
 	rows, err := DB.Query(
 		`SELECT cid, hash, size, filename, pinned_at

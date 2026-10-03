@@ -1,221 +1,226 @@
-# 端口转发 v2（forward.go）
+# Port Forwarding v2 (forward.go)
 
-> 一句话职责：在 PeerJS DataChannel 上承载 TCP 隧道——把被 NAT 挡住的节点本地
-> 端口暴露给持 key 的远端（fwd-open/challenge/auth/ok/err/data/close 七 verb，
-> HMAC 质询认证 + 端口白名单 + SSRF 防护）。
+> One-line responsibility: carries a TCP tunnel over the PeerJS DataChannel — exposing a NAT'd
+> node's local port to a remote holder of the key (seven verbs fwd-open/challenge/auth/ok/err/data/close,
+> HMAC challenge authentication + port allowlist + SSRF protection).
 
-## 职责
+## Responsibilities
 
-`forward.go` 实现端口转发 v2（inbound 一环，独立文件承载）：legacy 的 libp2p
-流转发（`/peerdrive/forward/1.0.0`，明文 `KEY xxx` 单行认证、无密钥交换、无
-白名单）随 libp2p 栈淘汰后，在新 transport 角色体系里以协议级 verb 重建。
-转发需求本身保留：把被 NAT 挡住的节点本地端口暴露给持 key 的远端（典型场景：
-VPS 常驻节点的 127.0.0.1 服务）。
+`forward.go` implements port forwarding v2 (one leg of inbound, in its own file): after the legacy libp2p
+stream forwarding (`/peerdrive/forward/1.0.0`, plaintext single-line `KEY xxx` authentication, no key exchange,
+no allowlist) was retired along with the libp2p stack, it is rebuilt as protocol-level verbs in the new
+transport role system. The forwarding requirement itself is retained: expose a NAT'd node's local port to a
+remote holder of the key (typical scenario: a 127.0.0.1 service on a VPS-resident node).
 
-角色分工（与 inbound/outbound 同构，全双工对称）：
+Role division (isomorphic with inbound/outbound, full-duplex symmetric):
 
-- **服务端**（被转发方）：`serveForwardOpen` → 发一次性质询；
-  `serveForwardAuth` → 验证 HMAC + 端口白名单 → dial 127.0.0.1:port → 建隧道；
-  `serveForwardClose` → 收尾清槽。数据方向：`forwardPump` 读 TCP → SendFrame。
-- **客户端**（发起方）：`OpenForward(ctx, peerID, key, port)` → 返回 net.Conn
-  （调用方当 TCP 连接用）；`routeForwardResponse` 收集握手响应。
+- **Server side** (the forwarded-to party): `serveForwardOpen` → sends a one-time challenge;
+  `serveForwardAuth` → verifies HMAC + port allowlist → dials 127.0.0.1:port → establishes the tunnel;
+  `serveForwardClose` → cleanup of the slot. Data direction: `forwardPump` reads TCP → SendFrame.
+- **Client side** (the initiator): `OpenForward(ctx, peerID, key, port)` → returns net.Conn
+  (the caller uses it as a TCP connection); `routeForwardResponse` collects handshake responses.
 
-管理面：`SetForwardRules`（全量装载）/ `AddForwardRule`（运行时追加）/
-`ListForwardStreams`（隧道快照）/ `CloseForwardStream`（主动断开），对应
-`POST /p2p/forward/create|connect|list|close` 端点。
+Admin plane: `SetForwardRules` (full load) / `AddForwardRule` (runtime append) /
+`ListForwardStreams` (tunnel snapshot) / `CloseForwardStream` (active disconnect), corresponding to
+the `POST /p2p/forward/create|connect|list|close` endpoints.
 
-## 关键机制
+## Key mechanisms
 
-### 握手协议（7 步帧序）
+### Handshake protocol (7-step frame order)
 
 ```
-client ──fwd-open {port, reqId}──────────────▶ server   申请转发目标端口
-client ◀──fwd-challenge {nonce, reqId}────────  server   一次性随机数（16 字节）
+client ──fwd-open {port, reqId}──────────────▶ server   request the port to forward to
+client ◀──fwd-challenge {nonce, reqId}────────  server   one-time random (16 bytes)
 client ──fwd-auth {hmac, reqId}──────────────▶ server   HMAC-SHA256(key, nonce)
-client ◀──fwd-ok / fwd-err──────────────────── server   终局
-之后: fwd-data 头 + 二进制块双向透传（复用 SendFrame 原子头-块约束）
-      fwd-close 收尾（任一侧 EOF/主动关闭）
+client ◀──fwd-ok / fwd-err──────────────────── server   terminal
+afterwards: fwd-data header + binary chunks passed through bidirectionally (reusing SendFrame's atomic header-chunk constraint)
+      fwd-close to finish (either side hits EOF / actively closes)
 ```
 
-帧载体是 `dcResp` 通用结构（conn.go:52）——Nonce/Hmac/Port 字段被 forward
-独占，其余字段与文件/索引 verb 共用同一 JSON 结构。文本帧与二进制块的
-「头-块原子连续」约束与文件传输完全一致（REFACTOR §4 约束 2）：fwd-data
-头声明归属 → 下一二进制帧归转发隧道。
+The frame carrier is the generic `dcResp` structure (conn.go:52) — the Nonce/Hmac/Port fields are
+exclusively owned by forward, while the remaining fields share the same JSON structure with the file/index
+verbs. The "header-chunk atomically contiguous" constraint for text frames and binary chunks is
+identical to file transfer (REFACTOR §4 constraint 2): a fwd-data header declares attribution → the next
+binary frame belongs to the forwarding tunnel.
 
-### 一次完整握手的真实帧交换（对应 TestOpenForward_ClientSide）
+### A real frame exchange for one full handshake (corresponding to TestOpenForward_ClientSide)
 
 ```
-客户端                         服务端（fakeSession 扮演）
+client                         server (played by fakeSession)
   │ {type:"fwd-open",port:8080,reqId:"ab12cd34"} →│
   │← {type:"fwd-challenge",nonce:"aabbccdd...",reqId:"ab12cd34"}
   │ {type:"fwd-auth",hmac:hex(HMAC-SHA256(key,nonce)),reqId:"ab12cd34"} →│
   │← {type:"fwd-ok",reqId:"ab12cd34"}
-  │ {type:"fwd-data",reqId:"ab12cd34"} + 二进制块 ── 双向 ──▶│
-  │ {type:"fwd-close",reqId:"ab12cd34"} ── 任一侧收尾 ──▶│
+  │ {type:"fwd-data",reqId:"ab12cd34"} + binary chunks ── bidirectional ──▶│
+  │ {type:"fwd-close",reqId:"ab12cd34"} ── either side finishes ──▶│
 ```
 
-reqId 由客户端生成（`randHex8`，握手槽路由键）；服务端全程回显。HMAC 计算：
-`hex(hmac.New(sha256.New, key).Write(nonce))`——客户端与 `serveForwardAuth`
-的验证逻辑对称（测试里的 `fwdHMAC` 辅助与实现一一对应）。
+reqId is generated by the client (`randHex8`, the handshake slot routing key); the server echoes it throughout.
+HMAC computation: `hex(hmac.New(sha256.New, key).Write(nonce))` — the client and
+`serveForwardAuth`'s verification logic are symmetric (the `fwdHMAC` helper in the tests corresponds one-to-one
+with the implementation).
 
-### 服务端握手（serveForwardOpen / serveForwardAuth，forward.go:192,234）
+### Server-side handshake (serveForwardOpen / serveForwardAuth, forward.go:192,234)
 
 ```
 fwd-open:
   1. port ∉ [1, 65535] → fwd-err "invalid port"
-  2. 规则表空 = 本节点未开放任何转发（等价旧版 ForwardEnable=false）→ fwd-err
-  3. 防洪水：未消费质询 ≥ fwdNonceMax(64) → 先清过期，仍满 → fwd-err
-     "too many challenges"
-  4. rand 16 字节 nonce → fwNonces[reqId] = {nonce, port, expire: now+5min}
-  5. 回 fwd-challenge{nonce}
-     ——不建隧道、不验证 key（验证在 fwd-auth 拿着 nonce 才算）
+  2. an empty rule table means this node has opened no forwarding at all (equivalent to the old ForwardEnable=false) → fwd-err
+  3. flood defense: unconsumed challenges >= fwdNonceMax(64) → first clear expired ones; if still full → fwd-err
+      "too many challenges"
+  4. random 16-byte nonce → fwNonces[reqId] = {nonce, port, expire: now+5min}
+  5. reply fwd-challenge{nonce}
+      —— no tunnel created, no key verification (verification only counts at fwd-auth, holding the nonce)
 
 fwd-auth:
-  1. 取出即标 used + delete（防重放：同一 nonce 二次提交必失败）
-  2. 无 nonce → "no challenge"；过期 → "challenge expired"
-  3. 遍历规则表：HMAC-SHA256(key, nonce) == r.Hmac 命中 → matchedKey
-     （key 明文只在服务端内存；hmac.Equal 常量时间比较）
-  4. 无匹配 → "unauthorized"（不泄露规则）
-  5. 端口 ∉ key 授权列表 → "port not authorized"（key 合法但越权，不泄露规则细节）
-  6. 连接级单槽占用检查：st.fwd 活跃 → "tunnel already active"
-  7. net.Dial("tcp", "127.0.0.1:port")——SSRF 防护：只 dial 本机 loopback
-  8. 建 fwdStream 占单槽 → 回 fwd-ok → go forwardPump
+  1. take out and immediately mark used + delete (replay defense: a second submission of the same nonce must fail)
+  2. no nonce → "no challenge"; expired → "challenge expired"
+  3. iterate the rule table: HMAC-SHA256(key, nonce) == r.Hmac match → matchedKey
+      (the plaintext key lives only in server memory; hmac.Equal is a constant-time comparison)
+  4. no match → "unauthorized" (does not leak the rules)
+  5. port ∉ the key's authorized list → "port not authorized" (valid key but out of bounds; rule details are not leaked)
+  6. connection-level single-slot occupancy check: st.fwd active → "tunnel already active"
+  7. net.Dial("tcp", "127.0.0.1:port") —— SSRF protection: only dial the local loopback
+  8. create fwdStream and occupy the single slot → reply fwd-ok → go forwardPump
 ```
 
-### 数据面（forwardPump + 泵内路由，forward.go:325）
+### Data plane (forwardPump + in-pump routing, forward.go:325)
 
-- **发送方向**（服务端→客户端 / 客户端→服务端）：`forwardPump` 循环
-  `out.Read(buf)`（fwdChunkSize=32KB，转发是流，块小延迟低）→
-  `SendFrame(fwd-data 头, 块)`；EOF/错误 → `out.Close()` + 回 `fwd-close` +
-  清本端槽。
-- **接收方向**：conn.go 泵内——`fwd-data` 头把 `fw.pending` 置 true，下一
-  二进制帧投递到 `st.fwdCh`（有界 16，背压不卡泵）→ uploadWorker 写隧道
-  （inbound.go fwdCh 分支，H5 同款：IO 移出消息泵，对端 TCP 背压不 head-of-line
-  冻结整条连接）。写失败（隧道已关/对端断开）静默丢弃：转发是尽力而为的流。
-- **连接关闭**：OnClose 关 `st.fwd.out` → forwardPump 读侧 EOF 退出；调用方
-  （OpenForward 返回的 net.Conn）读侧随即 EOF。
+- **Send direction** (server→client / client→server): `forwardPump` loops
+  `out.Read(buf)` (fwdChunkSize=32KB; forwarding is a stream, so small chunks mean low latency) →
+  `SendFrame(fwd-data header, chunk)`; EOF/error → `out.Close()` + reply `fwd-close` +
+  clear the local slot.
+- **Receive direction**: inside the conn.go pump — a `fwd-data` header sets `fw.pending` to true, and the next
+  binary frame is delivered to `st.fwdCh` (bounded 16, so backpressure does not stall the pump) → the
+  uploadWorker writes the tunnel (inbound.go's fwdCh branch; the same approach as H5: move IO out of the
+  message pump so a peer TCP backpressure does not head-of-line freeze the whole connection). Write failures
+  (tunnel already closed / peer disconnected) are silently dropped: forwarding is a best-effort stream.
+- **Connection close**: OnClose closes `st.fwd.out` → forwardPump's read side exits at EOF; the caller
+  (the net.Conn returned by OpenForward) then sees EOF on its read side.
 
-### 客户端（OpenForward，forward.go:384）
+### Client (OpenForward, forward.go:384)
 
 ```
-1. conns[peerID] 查连接；连接级双单槽检查（st.fwd 活跃 / st.fwdHs 握手中）
-2. fwdHandshake{reqID: randHex8, challenge, done} 占握手槽
-3. 发 fwd-open → 阶段1：等 challenge（fwdHandshakeTTL=30s / ctx 超时）
-4. 算 HMAC-SHA256(key, nonce) → 发 fwd-auth → 阶段2：等 done（ok/err）
-5. 成功：net.Pipe() —— 调用方拿 client 端，pump 读 server 端（数据双向透传）
-6. defer 清握手槽（无论成败，防重复握手占单槽）
+1. look up conns[peerID]; connection-level double single-slot check (st.fwd active / st.fwdHs mid-handshake)
+2. fwdHandshake{reqID: randHex8, challenge, done} occupies the handshake slot
+3. send fwd-open → stage 1: wait for challenge (fwdHandshakeTTL=30s / ctx timeout)
+4. compute HMAC-SHA256(key, nonce) → send fwd-auth → stage 2: wait for done (ok/err)
+5. on success: net.Pipe() —— the caller gets the client end, the pump reads the server end (data passes through bidirectionally)
+6. defer clears the handshake slot (regardless of success, preventing a repeated handshake from occupying the single slot)
 ```
 
-- **坑：challenge/done 两个 channel 分开**（forward.go:76-79）。若共用同一
-  channel，阶段1「等 challenge」后无法区分「有 challenge 待继续」与「终局」——
-  先 close 的 channel 让第二次 select 立即返回 false 终局。故各自独立 close 一次。
-- **port=0**：由服务端按 key 规则唯一端口决定（多端口规则须显式指定，否则
-  fwd-err）。
+- **Pitfall: challenge/done use two separate channels** (forward.go:76-79). If they shared one
+  channel, after stage 1 "wait for challenge" you could not distinguish "a challenge is waiting, continue" from "terminal" —
+  whichever channel closes first makes the second select return false as terminal. Hence each is closed once, independently.
+- **port=0**: the server determines the unique port per key rule (multi-port rules must be explicit, otherwise
+  fwd-err).
 
-### 规则表与管理面
+### Rule table and admin plane
 
-- `SetForwardRules(map[key][]ports)`：全量装载（配置
-  `PEERDRIVE_FORWARD_RULES="key:port,..."`）；`AddForwardRule` 运行时追加
-  （`POST /p2p/forward/create`，不持久化）。key 等价于凭证——配置文件名
-  chmod 600。
-- `ensureForwardMaps`（forward.go:97）：懒初始化规则/质询表——结构体字面量
-  构造的实例（测试）不经过 NewPeerJSService，防御 nil map 赋值/读 panic。
-- `ListForwardStreams`：遍历 conns → 活跃隧道快照 `{peer_id, port, key_id}`
-  （keyID 只留前 16 hex，审计不落全量）。
-- `CloseForwardStream`：`fw.closed = true; st.fwd = nil`（主动断开即释放单槽：
-  close 端点语义是「立刻可开新隧道」）→ 通知对端 fwd-close（对端
-  serveForwardClose 幂等清自己的槽）→ `fw.out.Close()`。
+- `SetForwardRules(map[key][]ports)`: full load (configuration
+  `PEERDRIVE_FORWARD_RULES="key:port,..."`); `AddForwardRule` appends at runtime
+  (`POST /p2p/forward/create`, not persisted). The key is equivalent to credentials — set the config file
+  chmod to 600.
+- `ensureForwardMaps` (forward.go:97): lazy initialization of the rule/challenge tables — instances constructed
+  via struct literals (tests) do not go through NewPeerJSService, guarding against nil map assignment/read panics.
+- `ListForwardStreams`: iterates conns → snapshot of active tunnels `{peer_id, port, key_id}`
+  (keyID keeps only the first 16 hex chars, so audits do not log the full key).
+- `CloseForwardStream`: `fw.closed = true; st.fwd = nil` (an active disconnect frees the single slot:
+  the close endpoint's semantics are "a new tunnel can be opened immediately") → notify the peer with fwd-close (the
+  peer's serveForwardClose idempotently clears its own slot) → `fw.out.Close()`.
 
-### 连接级单槽（connState.fwd / fwdHs / fwdCh）
+### Connection-level single slots (connState.fwd / fwdHs / fwdCh)
 
-| 槽位 | 用途 | 生命周期 |
+| Slot | Purpose | Lifecycle |
 |---|---|---|
-| `fwd` | 活跃转发隧道（`fwdStream{reqID, keyID, port, out, pending, closed}`） | serveForwardAuth 成功 / OpenForward 成功时建立；fwd-close、主动 CloseForwardStream、连接关闭时清空 |
-| `fwdHs` | 客户端握手等待状态（challenge/done 双 channel） | OpenForward 占位，defer 必清（无论成败） |
-| `fwdCh` | 转发块 → worker 的投递通道（有界 16，同 binCh） | bindConn 创建 |
+| `fwd` | active forwarding tunnel (`fwdStream{reqID, keyID, port, out, pending, closed}`) | created on serveForwardAuth success / OpenForward success; cleared on fwd-close, an active CloseForwardStream, or connection close |
+| `fwdHs` | client-side handshake waiting state (challenge/done dual channel) | occupied by OpenForward, defer always clears it (regardless of success) |
+| `fwdCh` | delivery channel for forwarding chunks → worker (bounded 16, same as binCh) | created by bindConn |
 
-`fwdStream.pending` 是「fwd-data 头已到、期待下一个二进制块」的泵内声明标记
-（conn.go 泵内按帧序处理故无竞态）；非法（无隧道/已关）时静默丢弃并清 pending。
-服务端与客户端各持一份 `fwdStream`——服务端 `out` = dial 的 TCP 连接；客户端
-`out` = net.Pipe 的 server 端（返回给调用方的是 client 端）。
+`fwdStream.pending` is an in-pump declaration flag meaning "the fwd-data header has arrived and the next
+binary chunk is expected" (the conn.go pump handles frame order, so there is no race); for an illegal case
+(no tunnel / already closed) it is silently dropped and pending is cleared. The server and the client each hold
+one `fwdStream` — the server's `out` = the dialed TCP connection; the client's `out` = the server end of
+net.Pipe (the client end is what is returned to the caller).
 
-### 安全设计（对应「权限控制 + 密钥交换」要求）
+### Security design (corresponding to the "access control + key exchange" requirements)
 
-1. 服务端规则表只认 key 原文白名单（key → 允许端口[]）；key 等价凭证。
-2. 质询-响应：nonce 一次性（取出即标 used + 5 分钟过期），HMAC 证明持有 key，
-   key 明文永不落线（DataChannel 本身 DTLS 加密，双保险）。
-3. 端口越权拒绝：请求端口 ∉ key 授权列表 → fwd-err，不泄露规则细节。
-4. SSRF 防护：服务端只允许 dial 127.0.0.1（转发目标是本机端口，不许打任意
-   内网 IP）。
-5. 握手不占隧道槽：fwd-open/fwd-auth 只是质询状态；隧道建立才占连接级单槽
-   （同一连接同时只有一条活跃转发流）。文件拉取/上传与之互不阻塞（二进制块
-   按「fwd-data 头声明归属」先行路由）。
+1. The server rule table only recognizes plaintext key allowlists (key → allowed ports[]); the key is equivalent to credentials.
+2. Challenge-response: the nonce is one-time (marked used on retrieval + 5-minute expiry), and the HMAC proves possession of the
+   key, so the plaintext key never goes on the wire (DataChannel is DTLS-encrypted itself, belt and braces).
+3. Port overreach is rejected: requested port ∉ the key's authorized list → fwd-err, without leaking rule details.
+4. SSRF protection: the server only dials 127.0.0.1 (the forwarding target is a local port; it is not allowed to hit an arbitrary
+   intranet IP).
+5. Handshakes do not occupy a tunnel slot: fwd-open/fwd-auth are only challenge states; only tunnel establishment
+   occupies the connection-level single slot (at most one active forwarding flow per connection at a time). File fetch/upload is
+   not blocked by it (binary chunks are routed first by "fwd-data header declares attribution").
 
-## 与其它模块的关系
+## Relationships with other modules
 
-| 模块 | 关系 |
+| Module | Relationship |
 |---|---|
-| `conn.go`（共享核心） | 泵内分派：fwd-open/fwd-auth/fwd-data/fwd-close 头帧 + fwd-challenge/fwd-ok/fwd-err 响应；`connState.fwd/fwdHs/fwdCh` 单槽定义；OnClose 关 out 释放读侧 |
-| `inbound.go`（入站角色） | uploadWorker 的 `fwdCh` 分支写隧道（H5 同款架构，IO 移出消息泵） |
-| `outbound.go`（出站角色） | routeResponse 与 routeForwardResponse 同槽路由（conn.go 按帧类型分流）；reqId 生成同源（客户端侧 randHex8） |
-| `peerjs_service.go` | 规则/质询表挂在 PeerJSService 上（forwardMu/nonceMu/forwardRules/fwNonces） |
-| `internal/router/peerjs_routes.go` | HTTP 端点 4 个（create/connect/list/close） |
-| `config` | `PEERDRIVE_FORWARD_RULES` 环境变量装载 |
-| 旧实现 | legacy libp2p `/peerdrive/forward/1.0.0` 已删除（doc/archive/LEGACY.md） |
+| `conn.go` (shared core) | In-pump dispatch: fwd-open/fwd-auth/fwd-data/fwd-close header frames + fwd-challenge/fwd-ok/fwd-err responses; `connState.fwd/fwdHs/fwdCh` single-slot definitions; OnClose closes out to free the read side |
+| `inbound.go` (inbound role) | The uploadWorker's `fwdCh` branch writes the tunnel (the same architecture as H5, moving IO out of the message pump) |
+| `outbound.go` (outbound role) | routeResponse and routeForwardResponse route in the same slot (conn.go splits by frame type); reqId generation shares the same source (client-side randHex8) |
+| `peerjs_service.go` | Rule/challenge tables hang off PeerJSService (forwardMu/nonceMu/forwardRules/fwNonces) |
+| `internal/router/peerjs_routes.go` | 4 HTTP endpoints (create/connect/list/close) |
+| `config` | Loaded from the `PEERDRIVE_FORWARD_RULES` environment variable |
+| Old implementation | legacy libp2p `/peerdrive/forward/1.0.0` deleted (doc/archive/LEGACY.md) |
 
-## 坑与设计决策
+## Pitfalls and design decisions
 
-1. **legacy 为什么重写**：明文 `KEY xxx` 单行认证（无密钥交换，key 落线）、无
-   端口白名单、无防重放。新实现全部 verb 级重建，不在旧代码上打补丁。
-2. **nonce 一次性 + TTL**（serveForwardAuth:236-241）：取出即标 used 再 delete
-   （防重放：同一 nonce 二次提交必失败）；5 分钟过期（防长时间占用内存）；
-   上限 64 防 fwd-open 洪水（先清过期再判满）。
-3. **HMAC 验证遍历规则表**（forward.go:252-261）：key 原文只在服务端内存、
-   客户端只持有 key；`hmac.Equal` 常量时间比较防时序侧信道。验证通过才取
-   ports——**端口越权单独判定**（matchedKey 已确定后才查白名单，报错文案
-   "port not authorized" 与 "unauthorized" 区分但不泄露规则）。
-4. **握手不占隧道槽**：fwd-open/fwd-auth 只是质询状态；隧道建立才占连接级
-   单槽——避免恶意端反复握手把连接转发能力打满。
-5. **SSRF 防护**（forward.go:289）：`net.Dial("tcp", "127.0.0.1:%d")`——转发
-   目标是本节点端口，不许打任意内网 IP（规则表只控制端口，不控制目标主机）。
-6. **challenge/done 双 channel**（forward.go:76-79）：共用 channel 会让阶段1
-   等 challenge 后无法区分「待继续」与「终局」——各自独立 close 一次。
-7. **转发块写不卡消息泵**（fwdCh + worker）：对端 TCP 背压若直接同步写会
-   head-of-line 冻结整条连接（H5 同款思路）；写失败静默丢弃——转发是尽力而
-   为的流，不因隧道死亡拖垮文件传输。
-8. **fwd-data 无隧道防御**（conn.go 泵内）：非法 fwd-data 头/块静默丢弃并清
-   pending、不 panic、不建状态——公共信令上可被一行帧打崩（与 H1 同类威胁）。
-9. **单槽语义的主动性**：CloseForwardStream 先清槽再通知对端（close 端点语义
-   =「立刻可开新隧道」）；serveForwardClose 按 reqID 幂等清槽（对端先发 close
-   场景）。
-10. **keyID 截断**：审计日志只记 key 前 16 hex，不落全量（key=凭证，防日志
-    泄露）。
+1. **Why legacy was rewritten**: plaintext single-line `KEY xxx` authentication (no key exchange, the key goes on the wire), no
+   port allowlist, no replay defense. The new implementation rebuilds everything at the verb level; it is not patched onto the old code.
+2. **One-time nonce + TTL** (serveForwardAuth:236-241): mark used on retrieval, then delete
+   (replay defense: a second submission of the same nonce must fail); 5-minute expiry (against long-term memory
+   occupancy); a cap of 64 against fwd-open floods (clear expired ones first, then check for fullness).
+3. **HMAC verification iterates the rule table** (forward.go:252-261): the plaintext key is only in server memory;
+   the client holds only the key; `hmac.Equal` is a constant-time comparison against timing side channels. Ports are only
+   fetched after verification passes — **port overreach is judged separately** (the allowlist is checked only after matchedKey
+   is determined; the error message "port not authorized" is distinguished from "unauthorized" but does not leak the rules).
+4. **Handshakes do not occupy a tunnel slot**: fwd-open/fwd-auth are only challenge states; only tunnel establishment
+   occupies the connection-level single slot — this prevents a malicious peer from exhausting a connection's forwarding capacity with repeated handshakes.
+5. **SSRF protection** (forward.go:289): `net.Dial("tcp", "127.0.0.1:%d")` — the forwarding
+   target is this node's port; it is not allowed to hit an arbitrary intranet IP (the rule table only controls ports, not the target host).
+6. **challenge/done dual channel** (forward.go:76-79): sharing a channel would make stage 1 unable to
+   distinguish "awaiting continuation" from "terminal" after waiting for the challenge — each is closed once, independently.
+7. **Forwarding chunk writes do not stall the message pump** (fwdCh + worker): a peer TCP backpressure written
+   synchronously would head-of-line freeze the whole connection (the same idea as H5); write failures are silently dropped —
+   forwarding is a best-effort stream, and it should not drag down file transfer because the tunnel died.
+8. **Defense against fwd-data with no tunnel** (inside the conn.go pump): illegal fwd-data headers/chunks are silently
+   dropped and pending is cleared — no panic, no state creation — since a single line of frames on the public signaling server could
+   crash it (the same threat class as H1).
+9. **Proactivity of the single-slot semantics**: CloseForwardStream clears the slot before notifying the peer (the close endpoint's
+   semantics = "a new tunnel can be opened immediately"); serveForwardClose idempotently clears the slot by reqID (the scenario where the
+   peer sends close first).
+10. **keyID truncation**: audit logs record only the first 16 hex chars of the key, not the full value (key = credential, preventing log
+    leakage).
 
-## 测试
+## Tests
 
-全部在 `forward_test.go`（8 个测试），不走真实 WebRTC/WS——用 fakeSession +
-`bindConn` 全链路（含 uploadWorker，转发块经 fwdCh 投递由 worker 写隧道，与
-文件帧路由共用同一套泵内逻辑）。辅助：`startEchoServer`（loopback echo TCP）、
-`fwdHMAC`（与客户端计算对称）。
+All in `forward_test.go` (8 tests); they do not use real WebRTC/WS — they use fakeSession +
+`bindConn` end-to-end (including uploadWorker: forwarding chunks are delivered via fwdCh and written to the tunnel
+by the worker, sharing the same in-pump logic as file frame routing). Helpers: `startEchoServer` (loopback echo TCP),
+`fwdHMAC` (symmetric with the client's computation).
 
-| 测试 | 发现背景 |
+| Test | Background of discovery |
 |---|---|
-| `TestForward_HandshakeAndData`（:117） | **功能测试**：服务端握手全流程（fwd-open→challenge→auth→ok）+ 双向数据透传（客户端块经 fwdCh→worker→TCP；echo 回包经 pump→fwd-data 帧回） |
-| `TestForward_AuthRejected`（:165） | **权限控制核心断言**：坏 key → fwd-err；**nonce 重放**（同一 nonce 二次提交）→ "no challenge"（已消费）；合法请求确实建了隧道（重放被拒的前提成立） |
-| `TestForward_PortNotAuthorized`（:206） | **端口越权**：key 合法但端口不在授权列表（65000）→ "port not authorized"，不泄露规则 |
-| `TestOpenForward_ClientSide`（:226） | **客户端全链路**：fakeSession 扮演服务端——握手（open→challenge→auth→ok，断言 HMAC 用调用方 key 计算）、写隧道 → 对端收 fwd-data 头+块、对端注入块 → 调用方读出 |
-| `TestForward_FwdDataWithoutTunnel`（:320） | **防御性测试（手写协议测试时想到）**：恶意对端不发握手直接发 fwd-data 头/块，泵内路由必须优雅处理（不 panic、不建状态）；随后正常握手仍可用 |
-| `TestForward_CloseStream`（:334） | **主动断开**（CloseForwardStream）：对端收到 fwd-close、本端隧道槽清空、out 关闭（调用方读侧 EOF） |
-| `TestForward_ListAndInfo`（:359） | **管理面**：ListForwardStreams 返回隧道快照（peer_id/port 正确） |
-| `TestForward_TimeoutNoChallenge`（:382） | **防御性测试**：对端不回包（伪造/宕机）时 OpenForward 必须超时退出，不能永久挂住调用方或占住 fwdHs 单槽（超时后握手槽必须释放） |
+| `TestForward_HandshakeAndData` (:117) | **Functional test**: the full server-side handshake (fwd-open→challenge→auth→ok) + bidirectional data passthrough (client chunks via fwdCh→worker→TCP; echo replies via pump→fwd-data frames back) |
+| `TestForward_AuthRejected` (:165) | **Core assertion of access control**: bad key → fwd-err; **nonce replay** (a second submission of the same nonce) → "no challenge" (already consumed); a legal request really did create a tunnel (the premise that a replay is rejected holds) |
+| `TestForward_PortNotAuthorized` (:206) | **Port overreach**: the key is valid but the port is not in the authorized list (65000) → "port not authorized", without leaking the rules |
+| `TestOpenForward_ClientSide` (:226) | **Full client chain**: fakeSession plays the server — handshake (open→challenge→auth→ok, asserting the HMAC is computed with the caller's key), write to the tunnel → the peer receives fwd-data header+chunks, peer-injected chunks → the caller reads them out |
+| `TestForward_FwdDataWithoutTunnel` (:320) | **Defensive test (thought of while writing the protocol test by hand)**: a malicious peer sends fwd-data headers/chunks without a handshake; in-pump routing must handle it gracefully (no panic, no state creation); a normal handshake afterwards still works |
+| `TestForward_CloseStream` (:334) | **Active disconnect** (CloseForwardStream): the peer receives fwd-close, the local tunnel slot is cleared, out is closed (the caller's read side hits EOF) |
+| `TestForward_ListAndInfo` (:359) | **Admin plane**: ListForwardStreams returns a tunnel snapshot (peer_id/port correct) |
+| `TestForward_TimeoutNoChallenge` (:382) | **Defensive test**: when the peer does not reply (spoofed/down), OpenForward must time out and exit — it must not hang the caller forever or hold the fwdHs single slot (the handshake slot must be released after timeout) |
 
-## 文件清单
+## File inventory
 
-- `back/internal/transport/forward.go`（461 行）——本模块
-- `back/internal/transport/forward_test.go`（396 行）——8 个测试
-- `back/internal/transport/conn.go` —— fwd 单槽定义、泵内 fwd-data 路由、OnClose 隧道清理
-- `back/internal/transport/inbound.go` —— uploadWorker fwdCh 分支（写隧道）
-- `back/internal/router/peerjs_routes.go` —— HTTP 端点（create/connect/list/close）
-- `doc/REFACTOR.md` §3.9（forward v2 重建记录）、§4（帧协议）
-- `doc/LAYERS.md` §6（forward 边界说明：verb 语义属 ②，底层隧道实现可抽离）
-- `doc/archive/LEGACY.md` —— legacy libp2p forward 处置记录
+- `back/internal/transport/forward.go` (461 lines) — this module
+- `back/internal/transport/forward_test.go` (396 lines) — 8 tests
+- `back/internal/transport/conn.go` — fwd single-slot definitions, in-pump fwd-data routing, OnClose tunnel cleanup
+- `back/internal/transport/inbound.go` — uploadWorker fwdCh branch (writes the tunnel)
+- `back/internal/router/peerjs_routes.go` — HTTP endpoints (create/connect/list/close)
+- `doc/REFACTOR.md` §3.9 (forward v2 rebuild record), §4 (frame protocol)
+- `doc/LAYERS.md` §6 (forward boundary notes: verb semantics belong to ②, the underlying tunnel implementation is extractable)
+- `doc/archive/LEGACY.md` — disposition record for the legacy libp2p forward

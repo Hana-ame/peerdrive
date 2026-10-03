@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testServer 起一个内存信号服务器并返回连接工厂。
+// testServer starts an in-memory signaling server and returns a connection factory.
 func testServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 	srv := NewServer("testkey")
@@ -39,7 +39,7 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 	return srv, hs
 }
 
-// dialWS 以指定 id 连接信令服务器。
+// dialWS connects to the signaling server with a given id.
 func dialWS(t *testing.T, hs *httptest.Server, id, token string) *websocket.Conn {
 	t.Helper()
 	url := "ws" + strings.TrimPrefix(hs.URL, "http") + "/peerjs?key=testkey&id=" + id + "&token=" + token
@@ -48,7 +48,7 @@ func dialWS(t *testing.T, hs *httptest.Server, id, token string) *websocket.Conn
 	return conn
 }
 
-// readMsg 读取一条信令消息。
+// readMsg reads a single signaling message.
 func readMsg(t *testing.T, conn *websocket.Conn) Message {
 	t.Helper()
 	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
@@ -57,9 +57,10 @@ func readMsg(t *testing.T, conn *websocket.Conn) Message {
 	return m
 }
 
-// TestSignal_OpenAndForward 注册 → OPEN；消息按 dst 转发（src 被服务端覆盖）。
+// TestSignal_OpenAndForward Register -> OPEN; messages forwarded by dst (src overridden by server).
 //
-// 发现背景：功能测试——注册 OPEN + 消息转发（服务端覆盖 src 是协议要求）
+// Discovery background: functional test -- register OPEN + message forwarding (server-side src
+// override is a protocol requirement)
 func TestSignal_OpenAndForward(t *testing.T) {
 	_, hs := testServer(t)
 	a := dialWS(t, hs, "node-a", "tok-a")
@@ -70,38 +71,39 @@ func TestSignal_OpenAndForward(t *testing.T) {
 	defer b.Close()
 	require.Equal(t, Message{Type: "OPEN"}, readMsg(t, b))
 
-	// A → B 转发
+	// A -> B forwarding
 	payload := json.RawMessage(`{"type":"OFFER","connectionId":"c1"}`)
 	require.NoError(t, a.WriteJSON(Message{Type: "OFFER", Dst: "node-b", Payload: payload}))
 	m := readMsg(t, b)
 	assert.Equal(t, "OFFER", m.Type)
-	assert.Equal(t, "node-a", m.Src, "服务端必须覆盖 src")
+	assert.Equal(t, "node-a", m.Src, "server must override src")
 	assert.Equal(t, "node-b", m.Dst)
 	assert.Equal(t, payload, m.Payload)
 }
 
-// TestSignal_OfflineQueue 目标离线入队，上线后补发（OFFER 不丢）。
-// 发现背景：peerjs-server 行为对齐——OFFER 在目标上线前到达不能丢。
+// TestSignal_OfflineQueue Target offline -> queue, resend after coming online (OFFER not lost).
+// Discovery background: peerjs-server behavior alignment -- OFFER arriving before target comes online must not be lost.
 func TestSignal_OfflineQueue(t *testing.T) {
 	_, hs := testServer(t)
 	a := dialWS(t, hs, "node-a", "tok-a")
 	defer a.Close()
 	readMsg(t, a)
 
-	// B 未上线，A 发 OFFER → 入队
+	// B not online, A sends OFFER -> queued
 	require.NoError(t, a.WriteJSON(Message{Type: "OFFER", Dst: "node-b", Payload: json.RawMessage(`{"x":1}`)}))
 
 	b := dialWS(t, hs, "node-b", "tok-b")
 	defer b.Close()
 	readMsg(t, b) // OPEN
 	m := readMsg(t, b)
-	assert.Equal(t, "OFFER", m.Type, "上线后应补发离线队列")
+	assert.Equal(t, "OFFER", m.Type, "after coming online, the offline queue should be resent")
 	assert.Equal(t, "node-a", m.Src)
 }
 
-// TestSignal_LeaveBroadcast 断开 → 其他节点收到 LEAVE。
+// TestSignal_LeaveBroadcast Disconnect -> other nodes receive LEAVE.
 //
-// 发现背景：功能测试——LEAVE 广播让对端感知断开（peerjs-server 行为对齐）
+// Discovery background: functional test -- LEAVE broadcast lets peers detect disconnection
+// (peerjs-server behavior alignment)
 func TestSignal_LeaveBroadcast(t *testing.T) {
 	_, hs := testServer(t)
 	a := dialWS(t, hs, "node-a", "tok-a")
@@ -116,16 +118,17 @@ func TestSignal_LeaveBroadcast(t *testing.T) {
 	assert.Equal(t, "node-a", m.Src)
 }
 
-// TestSignal_IDTaken token 不匹配时同 ID 拒绝；token 匹配时接管。
+// TestSignal_IDTaken Same ID with mismatched token is rejected; with matched token it takes over.
 //
-// 发现背景：功能测试——ID 占用保护：token 不匹配拒绝（防劫持他人 ID）
+// Discovery background: functional test -- ID occupation protection: mismatched token is rejected
+// (prevents hijacking someone else's ID)
 func TestSignal_IDTaken(t *testing.T) {
 	_, hs := testServer(t)
 	a := dialWS(t, hs, "same-id", "tok-1")
 	defer a.Close()
 	readMsg(t, a)
 
-	// 不同 token → ID-TAKEN
+	// Different token -> ID-TAKEN
 	conn2, _, err := websocket.DefaultDialer.Dial(
 		"ws"+strings.TrimPrefix(hs.URL, "http")+"/peerjs?key=testkey&id=same-id&token=wrong", nil)
 	require.NoError(t, err)
@@ -135,25 +138,27 @@ func TestSignal_IDTaken(t *testing.T) {
 	conn2.Close()
 }
 
-// TestSignal_InvalidKey 错误 key 拒绝。
+// TestSignal_InvalidKey Wrong key is rejected.
 //
-// 发现背景：防御性测试——key 校验失败必须拒绝连接
+// Discovery background: defensive test -- failed key validation must reject the connection
 func TestSignal_InvalidKey(t *testing.T) {
 	_, hs := testServer(t)
 	conn, resp, err := websocket.DefaultDialer.Dial(
 		"ws"+strings.TrimPrefix(hs.URL, "http")+"/peerjs?key=wrong&id=x&token=t", nil)
 	if err == nil {
 		conn.Close()
-		t.Fatal("错误 key 应拒绝")
+		t.Fatal("wrong key should be rejected")
 	}
 	_ = resp
 }
 
-// TestSignal_TokenWhitelist token 白名单：名单外拒绝升级，名单内正常 OPEN。
+// TestSignal_TokenWhitelist Token whitelist: reject upgrade for tokens not on the list;
+// normal OPEN for tokens on the list.
 //
-// 发现背景：代码审阅 2026-08-18——token 原本只做 ID 占用保护，任意客户端
-// 可自定 token 连接并注册任意 ID，冒充节点收信令/诱导 OFFER；白名单让
-// 自托管部署只信任已知节点（修复：WithTokenWhitelist + HandleWS 校验）。
+// Discovery background: code review 2026-08-18 -- tokens previously only served ID occupation
+// protection; any client could self-define a token and connect to register any ID, impersonating
+// nodes to receive signaling/induce OFFERs; the whitelist makes self-hosted deployments trust
+// only known nodes (fix: WithTokenWhitelist + HandleWS validation).
 func TestSignal_TokenWhitelist(t *testing.T) {
 	srv := NewServer("testkey", WithTokenWhitelist([]string{"tok-a", "tok-b"}))
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -161,25 +166,25 @@ func TestSignal_TokenWhitelist(t *testing.T) {
 	}))
 	defer hs.Close()
 
-	// 名单外 token → 拒绝（HTTP 400，无 OPEN）
+	// Token not on list -> reject (HTTP 400, no OPEN)
 	conn, resp, err := websocket.DefaultDialer.Dial(
 		"ws"+strings.TrimPrefix(hs.URL, "http")+"/peerjs?key=testkey&id=evil&token=not-in-list", nil)
 	if err == nil {
 		conn.Close()
-		t.Fatal("白名单外 token 应拒绝升级")
+		t.Fatal("token not on whitelist should be rejected")
 	}
 	require.NotNil(t, resp)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 
-	// 名单内 token → 正常 OPEN
+	// Token on list -> normal OPEN
 	a := dialWS(t, hs, "node-a", "tok-a")
 	defer a.Close()
 	m := readMsg(t, a)
 	assert.Equal(t, "OPEN", m.Type)
 }
 
-// TestDiscover_AnnounceAndQuery 节点 announce 房间 → 查询返回在线节点（心跳过期剔除）。
-// 发现背景：自托管后房间发现并入信令服务器（替代 MQTT 广播）。
+// TestDiscover_AnnounceAndQuery Node announces to a room -> query returns online nodes (expired ones evicted).
+// Discovery background: after self-hosting, room discovery was merged into the signaling server (replacing MQTT broadcast).
 func TestDiscover_AnnounceAndQuery(t *testing.T) {
 	_, hs := testServer(t)
 	announce := func(peerID, coll string) {
@@ -192,7 +197,7 @@ func TestDiscover_AnnounceAndQuery(t *testing.T) {
 	announce("node-2", "coll-a")
 	announce("node-3", "coll-b")
 
-	// coll-a 应返回 node-1/node-2
+	// coll-a should return node-1/node-2
 	resp, err := http.Get(hs.URL + "/nodes?coll=coll-a")
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -204,12 +209,12 @@ func TestDiscover_AnnounceAndQuery(t *testing.T) {
 	for _, n := range out.Nodes {
 		ids[n.PeerID] = true
 	}
-	assert.True(t, ids["node-1"], "coll-a 应含 node-1")
+	assert.True(t, ids["node-1"], "coll-a should contain node-1")
 	assert.True(t, ids["node-2"])
-	assert.False(t, ids["node-3"], "coll-b 节点不应出现")
+	assert.False(t, ids["node-3"], "coll-b nodes should not appear")
 }
 
-// TestGraph_AnnouncePeersCreatesLinks 两个节点 announce peers 后 /nodes 返回对应边。
+// TestGraph_AnnouncePeersCreatesLinks After two nodes announce peers, /nodes returns the corresponding edge.
 func TestGraph_AnnouncePeersCreatesLinks(t *testing.T) {
 	_, hs := testServer(t)
 	announce := func(peerID string, peers []string) {
@@ -230,12 +235,12 @@ func TestGraph_AnnouncePeersCreatesLinks(t *testing.T) {
 	}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
 	assert.Len(t, out.Nodes, 2)
-	require.Len(t, out.Links, 1, "A→B 和 B→A 应去重为一条边")
+	require.Len(t, out.Links, 1, "A->B and B->A should be deduplicated to one edge")
 	assert.Equal(t, "node-1", out.Links[0].Source)
 	assert.Equal(t, "node-2", out.Links[0].Target)
 }
 
-// TestGraph_EmptyPeersClearsLinks 再次 announce 空 peers 清空旧边。
+// TestGraph_EmptyPeersClearsLinks Announcing empty peers again clears old edges.
 func TestGraph_EmptyPeersClearsLinks(t *testing.T) {
 	_, hs := testServer(t)
 	announce := func(peerID string, peers []string) {
@@ -246,7 +251,7 @@ func TestGraph_EmptyPeersClearsLinks(t *testing.T) {
 	}
 	announce("node-1", []string{"node-2"})
 	announce("node-2", []string{"node-1"})
-	// 两端都清空 peers，旧边才应消失（仅一端清空时另一端仍可能上报该边）
+	// Both sides must clear peers for old edges to disappear (if only one side clears, the other may still report that edge)
 	announce("node-1", []string{})
 	announce("node-2", []string{})
 
@@ -257,10 +262,10 @@ func TestGraph_EmptyPeersClearsLinks(t *testing.T) {
 		Links []GraphLink `json:"links"`
 	}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
-	assert.Empty(t, out.Links, "两端空 peers 应清空旧边")
+	assert.Empty(t, out.Links, "both sides with empty peers should clear old edges")
 }
 
-// TestGraph_LeaveRemovesLinks 节点 leave 后相关边消失。
+// TestGraph_LeaveRemovesLinks After a node leaves, related edges disappear.
 func TestGraph_LeaveRemovesLinks(t *testing.T) {
 	srv, hs := testServer(t)
 	announce := func(peerID string, peers []string) {
@@ -286,11 +291,11 @@ func TestGraph_LeaveRemovesLinks(t *testing.T) {
 		Links []GraphLink `json:"links"`
 	}
 	require.NoError(t, json.NewDecoder(getResp.Body).Decode(&out))
-	assert.Len(t, out.Nodes, 1, "node-2 下线后只剩 node-1")
-	assert.Empty(t, out.Links, "node-2 下线后边应消失")
+	assert.Len(t, out.Nodes, 1, "after node-2 goes offline, only node-1 remains")
+	assert.Empty(t, out.Links, "after node-2 goes offline, edges should disappear")
 }
 
-// TestGraph_SelfPeerIgnored announce peers 包含自身 ID 时忽略。
+// TestGraph_SelfPeerIgnored When announce peers contains the node's own ID, it is ignored.
 func TestGraph_SelfPeerIgnored(t *testing.T) {
 	_, hs := testServer(t)
 	announce := func(peerID string, peers []string) {
@@ -310,10 +315,10 @@ func TestGraph_SelfPeerIgnored(t *testing.T) {
 	}
 	require.NoError(t, json.NewDecoder(getResp.Body).Decode(&out))
 	require.Len(t, out.Links, 1)
-	assert.NotEqual(t, out.Links[0].Source, out.Links[0].Target, "自身边应被忽略")
+	assert.NotEqual(t, out.Links[0].Source, out.Links[0].Target, "self-edges should be ignored")
 }
 
-// TestNodes_EmptyCollReturnsAll 空 coll 返回所有 collection 节点（行为与 wintools 对齐）。
+// TestNodes_EmptyCollReturnsAll Empty coll returns all collection nodes (behavior aligned with wintools).
 func TestNodes_EmptyCollReturnsAll(t *testing.T) {
 	_, hs := testServer(t)
 	announce := func(peerID, coll string) {
@@ -335,7 +340,7 @@ func TestNodes_EmptyCollReturnsAll(t *testing.T) {
 	assert.Len(t, out.Nodes, 2)
 }
 
-// TestNodes_TypeFilter 支持 ?type= 过滤节点类型（行为与 wintools 对齐）。
+// TestNodes_TypeFilter Supports ?type= to filter node types (behavior aligned with wintools).
 func TestNodes_TypeFilter(t *testing.T) {
 	_, hs := testServer(t)
 	announce := func(peerID, nodeType string) {
@@ -358,7 +363,7 @@ func TestNodes_TypeFilter(t *testing.T) {
 	assert.Equal(t, "go-1", out.Nodes[0].PeerID)
 }
 
-// TestNodes_IncludesNodeMetadata announce 上报 nodeType/collections/loadInfo 后 nodes 返回完整元数据。
+// TestNodes_IncludesNodeMetadata After announce reports nodeType/collections/loadInfo, nodes returns full metadata.
 func TestNodes_IncludesNodeMetadata(t *testing.T) {
 	_, hs := testServer(t)
 	body, _ := json.Marshal(map[string]any{
@@ -383,7 +388,7 @@ func TestNodes_IncludesNodeMetadata(t *testing.T) {
 	assert.Equal(t, float64(3), n.LoadInfo["connections"])
 }
 
-// TestGraph_TypeFilterLinksExcludeFilteredNodes 验证 type 过滤时，graph 边不会包含被过滤掉的节点。
+// TestGraph_TypeFilterLinksExcludeFilteredNodes Verifies that when type filtering is applied, graph edges do not include filtered-out nodes.
 func TestGraph_TypeFilterLinksExcludeFilteredNodes(t *testing.T) {
 	_, hs := testServer(t)
 	announce := func(peerID, nodeType string, peers []string) {
@@ -395,7 +400,7 @@ func TestGraph_TypeFilterLinksExcludeFilteredNodes(t *testing.T) {
 	announce("go-1", "go-persistent", []string{"web-1"})
 	announce("web-1", "web-temp", []string{"go-1"})
 
-	// 只查 go-persistent 类型：nodes 只有 go-1，links 应为空（web-1 被过滤）
+	// Only querying go-persistent type: nodes only has go-1, links should be empty (web-1 filtered out)
 	resp, err := http.Get(hs.URL + "/nodes?type=go-persistent")
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -405,10 +410,10 @@ func TestGraph_TypeFilterLinksExcludeFilteredNodes(t *testing.T) {
 	}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
 	require.Len(t, out.Nodes, 1)
-	assert.Empty(t, out.Links, "被过滤节点不应出现在 graph 边中")
+	assert.Empty(t, out.Links, "filtered-out nodes should not appear in graph edges")
 }
 
-// TestNodes_EmptyReturnsEmptyArray 空节点/空边时 JSON 应返回 [] 而不是 null。
+// TestNodes_EmptyReturnsEmptyArray When nodes/edges are empty, JSON should return [] not null.
 func TestNodes_EmptyReturnsEmptyArray(t *testing.T) {
 	_, hs := testServer(t)
 	resp, err := http.Get(hs.URL + "/nodes")
@@ -418,14 +423,14 @@ func TestNodes_EmptyReturnsEmptyArray(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&raw))
 	require.Contains(t, raw, "nodes")
 	require.Contains(t, raw, "links")
-	assert.True(t, len(raw["nodes"]) > 0 && raw["nodes"][0] == '[', "nodes 应为 JSON 数组")
-	assert.True(t, len(raw["links"]) > 0 && raw["links"][0] == '[', "links 应为 JSON 数组")
+	assert.True(t, len(raw["nodes"]) > 0 && raw["nodes"][0] == '[', "nodes should be a JSON array")
+	assert.True(t, len(raw["links"]) > 0 && raw["links"][0] == '[', "links should be a JSON array")
 }
 
-// TestSweepDiscovery_CleansExpiredNodes 过期节点应从 disc/peerLinks/peerStats/peerColls 清理。
+// TestSweepDiscovery_CleansExpiredNodes Expired nodes should be cleaned from disc/peerLinks/peerStats/peerColls.
 func TestSweepDiscovery_CleansExpiredNodes(t *testing.T) {
 	srv, hs := testServer(t)
-	// announce 一个节点，让它进入 disc/peerStats/peerColls
+	// Announce a node so it enters disc/peerStats/peerColls
 	body, _ := json.Marshal(map[string]any{
 		"peerId": "node-1", "collections": []string{"media"}, "nodeType": "go-persistent",
 		"peers": []string{"node-2"}, "loadInfo": map[string]any{"connections": 1},
@@ -434,7 +439,7 @@ func TestSweepDiscovery_CleansExpiredNodes(t *testing.T) {
 	require.NoError(t, err)
 	resp.Body.Close()
 
-	// 把它的 lastSeen 改到心跳 TTL 之前
+	// Set its lastSeen to before the heartbeat TTL
 	srv.mu.Lock()
 	srv.disc["media"]["node-1"] = time.Now().Add(-2 * srv.heartbeatTTL)
 	srv.mu.Unlock()
@@ -447,20 +452,20 @@ func TestSweepDiscovery_CleansExpiredNodes(t *testing.T) {
 	_, hasStats := srv.peerStats["node-1"]
 	_, hasColls := srv.peerColls["node-1"]
 	srv.mu.Unlock()
-	assert.False(t, hasDisc, "过期节点应从 disc 清理")
-	assert.False(t, hasLinks, "过期节点应从 peerLinks 清理")
-	assert.False(t, hasStats, "过期节点应从 peerStats 清理")
-	assert.False(t, hasColls, "过期节点应从 peerColls 清理")
+	assert.False(t, hasDisc, "expired node should be cleaned from disc")
+	assert.False(t, hasLinks, "expired node should be cleaned from peerLinks")
+	assert.False(t, hasStats, "expired node should be cleaned from peerStats")
+	assert.False(t, hasColls, "expired node should be cleaned from peerColls")
 }
 
-// TestHandleStatus GET /status 返回服务器状态快照（含节点/图/计数）。
+// TestHandleStatus GET /status returns a server status snapshot (including nodes/graph/counts).
 //
-// 发现背景：2026-09-05 新增 dashboard/status/leave API 时未补测试；
-// 本测试验证响应结构、节点过滤（仅活跃）、去重边、msgCount。
+// Discovery background: 2026-09-05 dashboard/status/leave API was added without tests;
+// this test verifies response structure, node filtering (only active), deduplicated edges, msgCount.
 func TestHandleStatus(t *testing.T) {
 	_, hs := testServer(t)
 
-	// 注册两个节点 + 一条链接
+	// Register two nodes + one link
 	announce := func(id string, peers []string) {
 		body, _ := json.Marshal(map[string]any{
 			"peerId": id, "collections": []string{"media"}, "nodeType": "go-persistent",
@@ -482,7 +487,7 @@ func TestHandleStatus(t *testing.T) {
 	var st map[string]any
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&st))
 
-	// 结构完整性
+	// Structure completeness
 	assert.Contains(t, st, "key")
 	assert.Contains(t, st, "uptimeSec")
 	assert.Contains(t, st, "uptimeStr")
@@ -493,14 +498,14 @@ func TestHandleStatus(t *testing.T) {
 	assert.Contains(t, st, "links")
 	assert.Contains(t, st, "msgCount")
 
-	// 节点数：2 个活跃节点
+	// Node count: 2 active nodes
 	assert.Equal(t, float64(2), st["discovered"])
 
-	// 边：去重后 1 条（a-b 或 b-a）
+	// Edges: 1 after deduplication (a-b or b-a)
 	links, _ := st["links"].([]any)
-	assert.Len(t, links, 1, "双向链接应去重为 1 条")
+	assert.Len(t, links, 1, "bidirectional links should be deduplicated to 1")
 
-	// 节点元数据含 nodeType
+	// Node metadata includes nodeType
 	nodes, _ := st["nodes"].([]any)
 	assert.Len(t, nodes, 2)
 	n0, _ := nodes[0].(map[string]any)
@@ -509,11 +514,11 @@ func TestHandleStatus(t *testing.T) {
 	assert.Contains(t, n0, "loadInfo")
 }
 
-// TestHandleDashboard GET / 返回内嵌 dashboard.html；非 / 路径 404。
+// TestHandleDashboard GET / returns embedded dashboard.html; non-/ paths return 404.
 func TestHandleDashboard(t *testing.T) {
 	_, hs := testServer(t)
 
-	// 根路径返回 HTML
+	// Root path returns HTML
 	resp, err := http.Get(hs.URL + "/")
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -521,14 +526,14 @@ func TestHandleDashboard(t *testing.T) {
 	assert.Contains(t, resp.Header.Get("Content-Type"), "text/html")
 	assert.Contains(t, resp.Header.Get("Cache-Control"), "no-cache")
 
-	// 非根路径 404（防止 / 前缀误匹配）
+	// Non-root path returns 404 (prevents / prefix mis-matching)
 	resp2, err := http.Get(hs.URL + "/nonexistent")
 	require.NoError(t, err)
 	resp2.Body.Close()
 	assert.Equal(t, http.StatusNotFound, resp2.StatusCode)
 }
 
-// TestFormatDuration 秒数→人可读时长（dashboard uptime 显示用）。
+// TestFormatDuration Seconds -> human-readable duration (used for dashboard uptime display).
 func TestFormatDuration(t *testing.T) {
 	tests := []struct {
 		seconds float64
@@ -551,15 +556,15 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
-// TestHandleDeadDst 发送失败的目标：从 clients/disc/peerLinks/peerStats/peerColls 摘除、
-// 广播 LEAVE 给其他存活节点、通知消息发起方。
+// TestHandleDeadDst Failed forwarding target: removed from clients/disc/peerLinks/peerStats/peerColls,
+// LEAVE broadcast to other surviving nodes, message sender notified.
 //
-// 发现背景：handleDeadDst 是 handleForward 错误路径的关键清理逻辑，
-// 此前无直接测试（仅通过 TestSignal_LeaveBroadcast 间接覆盖 LEAVE 广播）。
+// Discovery background: handleDeadDst is the key cleanup logic for handleForward's error path;
+// previously had no direct tests (only indirectly covered LEAVE broadcast through TestSignal_LeaveBroadcast).
 func TestHandleDeadDst(t *testing.T) {
 	srv, hs := testServer(t)
 
-	// 注册 A 和 B（token 必须非空，HandleWS 强制校验）
+	// Register A and B (token must be non-empty; HandleWS enforces validation)
 	connA := dialWS(t, hs, "dead-node", "tok-a")
 	defer connA.Close()
 	connB := dialWS(t, hs, "survivor", "tok-b")
@@ -567,7 +572,7 @@ func TestHandleDeadDst(t *testing.T) {
 	readMsg(t, connA) // OPEN
 	readMsg(t, connB) // OPEN
 
-	// A announce 自己 + 指向 B 的链接
+	// A announces itself + link to B
 	body, _ := json.Marshal(map[string]any{
 		"peerId": "dead-node", "collections": []string{"media"}, "nodeType": "go-persistent",
 		"peers": []string{"survivor"},
@@ -576,21 +581,21 @@ func TestHandleDeadDst(t *testing.T) {
 	require.NoError(t, err)
 	resp.Body.Close()
 
-	// 让 A 的连接断开（模拟死目标）
+	// Let A's connection drop (simulate dead target)
 	connA.Close()
 
-	// B 向 A 发消息 → 转发失败 → handleDeadDst 清理 A 的残留
+	// B sends a message to A -> forwarding fails -> handleDeadDst cleans up A's remnants
 	connB.WriteJSON(Message{Type: "ICE", Dst: "dead-node"})
 	time.Sleep(200 * time.Millisecond)
 
-	// B 应收到 LEAVE（从 dead-node 方向，通知其他存活节点）
+	// B should receive LEAVE (from dead-node direction, notifying other surviving nodes)
 	connB.SetReadDeadline(time.Now().Add(3 * time.Second))
 	var m Message
 	require.NoError(t, connB.ReadJSON(&m))
 	assert.Equal(t, "LEAVE", m.Type)
 	assert.Equal(t, "dead-node", m.Src)
 
-	// A 的残留应从 disc/peerLinks/peerStats/peerColls 清理
+	// A's remnants should be cleaned from disc/peerLinks/peerStats/peerColls
 	srv.mu.Lock()
 	_, hasDisc := srv.disc["media"]["dead-node"]
 	_, hasLinks := srv.peerLinks["dead-node"]
@@ -598,38 +603,41 @@ func TestHandleDeadDst(t *testing.T) {
 	_, hasColls := srv.peerColls["dead-node"]
 	_, hasClient := srv.clients["dead-node"]
 	srv.mu.Unlock()
-	assert.False(t, hasDisc, "dead-node 应从 disc 清理")
-	assert.False(t, hasLinks, "dead-node 应从 peerLinks 清理")
-	assert.False(t, hasStats, "dead-node 应从 peerStats 清理")
-	assert.False(t, hasColls, "dead-node 应从 peerColls 清理")
-	assert.False(t, hasClient, "dead-node 应从 clients 清理")
+	assert.False(t, hasDisc, "dead-node should be cleaned from disc")
+	assert.False(t, hasLinks, "dead-node should be cleaned from peerLinks")
+	assert.False(t, hasStats, "dead-node should be cleaned from peerStats")
+	assert.False(t, hasColls, "dead-node should be cleaned from peerColls")
+	assert.False(t, hasClient, "dead-node should be cleaned from clients")
 }
 
-// TestHandleID_CORS — 浏览器直连消费端（公共静态面板）必须能跨域取 id。
+// TestHandleID_CORS -- Browser direct-connect consumer side (public static panel) must be able to fetch id cross-origin.
 //
-// 发现背景：2026-09-20 做 packages/peerdrive-client 的单文件公共面板时发现，
-// file:// 打开的面板向自托管信令 "GET /peerjs/id" 要临时 id 会被同源策略拦掉
-// （页面 origin 为 null），PeerJS 侧只报含混的 server-error，看不出是 CORS。
-// 面板是「公用」的前提就是信令对所有来源开放这几个公开接口。
+// Discovery background: 2026-09-20 while building the single-file public panel for packages/peerdrive-client,
+// discovered that a file:// opened panel requesting a temporary id from self-hosted signaling "GET /peerjs/id"
+// gets blocked by same-origin policy (page origin is null), and the PeerJS side only reports a vague
+// server-error with no CORS indication. For the panel to be "public", the signaling must open these public
+// endpoints to all origins.
 func TestHandleID_CORS(t *testing.T) {
 	srv := NewServer("testkey")
 
-	// GET：响应必须带跨域头，且仍然正常返回随机 id
+	// GET: response must carry cross-origin headers, and still return a random id normally
 	rec := httptest.NewRecorder()
 	srv.HandleID(rec, httptest.NewRequest(http.MethodGet, "/peerjs/id", nil))
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.NotEmpty(t, strings.TrimSpace(rec.Body.String()), "应返回随机 id")
+	assert.NotEmpty(t, strings.TrimSpace(rec.Body.String()), "should return a random id")
 	assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
 	assert.NotEmpty(t, rec.Header().Get("Access-Control-Allow-Methods"))
 
-	// OPTIONS 预检：应短路为 204 且同样带跨域头（否则浏览器不会发真正的请求）
+	// OPTIONS preflight: should short-circuit to 204 with the same cross-origin headers
+	// (otherwise the browser won't send the real request)
 	rec = httptest.NewRecorder()
 	srv.HandleID(rec, httptest.NewRequest(http.MethodOptions, "/peerjs/id", nil))
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
-	assert.Empty(t, rec.Body.String(), "预检不应返回正文")
+	assert.Empty(t, rec.Body.String(), "preflight should not return a body")
 
-	// 发现相关的三个 REST 接口同样要放开：浏览器侧面板/分布式调试都要读发现结果
+	// The three discovery-related REST endpoints must also be open: browser-side panel/distributed
+	// debugging all need to read discovery results
 	for name, h := range map[string]http.HandlerFunc{
 		"/discover/announce": srv.HandleAnnounce,
 		"/discover/leave":    srv.HandleLeave,
@@ -638,6 +646,6 @@ func TestHandleID_CORS(t *testing.T) {
 	} {
 		r := httptest.NewRecorder()
 		h(r, httptest.NewRequest(http.MethodGet, name, nil))
-		assert.Equal(t, "*", r.Header().Get("Access-Control-Allow-Origin"), name+" 缺跨域头")
+		assert.Equal(t, "*", r.Header().Get("Access-Control-Allow-Origin"), name+" missing cross-origin headers")
 	}
 }

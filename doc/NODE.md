@@ -1,125 +1,125 @@
-# Peerdrive 节点（Go）功能与 P2P 连接体系
+# Peerdrive Node (Go) Features & P2P Connection System
 
-> 代码：`back/cmd/server/main.go`（入口）+ `back/internal/transport/`（互联层）+ `back/peerjs/`（传输原语）。
-> 节点职责：**常驻在线 + 内容寻址存储（sha256）+ 双向文件服务 + 端口转发**，与浏览器/其它节点互联。
+> Code: `back/cmd/server/main.go` (entry) + `back/internal/transport/` (interconnection layer) + `back/peerjs/` (transport primitives).
+> Node responsibilities: **always online + content-addressed storage (sha256) + bidirectional file service + port forwarding**, interconnecting with browsers/other nodes.
 
-## 1. 节点功能总览
+## 1. Node Features Overview
 
-| 功能 | 入口 | 说明 |
+| Feature | Entry | Description |
 |---|---|---|
-| 信令注册 | `peerjs_service.go` Start/startLoop | PeerJS WS 连公共云或自托管；断线指数退避（2s→60s）整轮重连（H7） |
-| 主动互联 | `connectLoop` | `PEERDRIVE_PEERJS_PEERS` 静态配置 + 发现回调；无限重试到 OnOpen |
-| 被动接收 | `onIncomingConnection` | 等 OnOpen 才 bindConn（坑：过早绑定会拿未就绪连接） |
-| 文件服务（入站） | `inbound.go` | serveFile（64KB 分块+流控）、索引 verb（create/upload/list/info/delete/sync）、上传分片 worker |
-| 文件拉取（出站） | `outbound.go` | `OpenStream` 流式拉取（UUID reqId 路由+有界队列）+ sha256 校验兜底；`FetchFromPeer` 兼容封装 |
-| 本地会话 | `/ws/peer` | 浏览器 WS 直连本节点，帧协议与 DataChannel 一致，毫秒级无需打洞 |
-| 房间发现 | `http_discovery.go`/`mqtt_discovery.go` | 自托管发现 API 优先（`PEERDRIVE_DISCOVER_URL`），否则 MQTT 分片房间 |
-| 端口转发 v2 | `forward.go` | HMAC 质询认证 + 端口白名单，DataChannel 上承载 TCP 隧道 |
-| 统一 source | `main.go:98` | LocalSource（file_index+CAS）→ PeerSource（p2p 透传）→ URLSource（模板） |
-| 管理端点 | `peerjs_routes.go`/`source_routes.go` | `/peerjs/node`、`/peerjs/fetch`、`/sources` |
+| Signaling registration | `peerjs_service.go` Start/startLoop | PeerJS WS to public cloud or self-hosted; exponential backoff disconnect reconnect (2s→60s) full round (H7) |
+| Active interconnection | `connectLoop` | `PEERDRIVE_PEERJS_PEERS` static config + discovery callback; infinite retry until OnOpen |
+| Passive receive | `onIncomingConnection` | Wait for OnOpen then bindConn (pitfall: premature binding gets unready connection) |
+| File service (inbound) | `inbound.go` | serveFile (64KB chunks + flow control), index verbs (create/upload/list/info/delete/sync), upload chunk worker |
+| File fetch (outbound) | `outbound.go` | `OpenStream` streaming fetch (UUID reqId routing + bounded queue) + sha256 verify fallback; `FetchFromPeer` compatibility wrapper |
+| Local session | `/ws/peer` | Browser WS directly connected to this node, frame protocol identical to DataChannel, millisecond-level no hole-punching needed |
+| Room discovery | `http_discovery.go`/`mqtt_discovery.go` | Self-hosted discovery API priority (`PEERDRIVE_DISCOVER_URL`), otherwise MQTT sharded rooms |
+| Port forwarding v2 | `forward.go` | HMAC challenge authentication + port whitelist, TCP tunnel over DataChannel |
+| Unified source | `main.go:98` | LocalSource (file_index+CAS) → PeerSource (p2p pass-through) → URLSource (template) |
+| Management endpoints | `peerjs_routes.go`/`source_routes.go` | `/peerjs/node`、`/peerjs/fetch`、`/sources` |
 
-启动流程：`InitDB → NewPeerJSService → SetupRouter → Gin :PORT`。
+Startup flow: `InitDB → NewPeerJSService → SetupRouter → Gin :PORT`.
 
-## 2. P2P 连接分类
+## 2. P2P Connection Classification
 
-### 2.1 按传输类型（2 类，`Session` 接口统一，`ws_session.go:22`）
+### 2.1 By Transport Type (2 types, unified by `Session` interface, `ws_session.go:22`)
 
-| 类型 | 适配器 | id | 用途 |
+| Type | Adapter | id | Usage |
 |---|---|---|---|
-| **WebRTC DataChannel** | `rtc_session.go` 包 `*peerjs.Connection` | 远端 peer id | 远端节点 / 浏览器经信令直连（NAT 打洞） |
-| **本地 WebSocket** | `ws_session.go`（`NewWSSession`） | `"local"` | 浏览器直连本节点，无信令/打洞开销 |
+| **WebRTC DataChannel** | `rtc_session.go` Wraps `*peerjs.Connection` | Remote peer id | Remote node / browser directly connected via signaling (NAT hole-punch) |
+| **Local WebSocket** | `ws_session.go`（`NewWSSession`） | `"local"` | Browser directly connected to this node, no signaling/hole-punch overhead |
 
-两者语义完全一致：同一 reqId 状态机、同一帧协议（文本帧=JSON 头，二进制帧=数据块），
-`Session` 接口抽象后 `FetchFromPeer("local", ...)` 与远端拉取零分支复用。
+Both have identical semantics: same reqId state machine, same frame protocol (text frame=JSON header, binary frame=data block),
+After `Session` interface abstraction, `FetchFromPeer("local", ...)` and remote fetch reuse with zero branches.
 
-### 2.2 按建立方向（信令层角色，`peer.go`）
+### 2.2 By Establishment Direction (Signaling Layer Role, `peer.go`)
 
-- **offerer（主动方）**：`connectLoop` → `peer.Connect(ctx, dst, label)` → 发 OFFER
-- **answerer（被动方）**：收到 OFFER → `handleOffer` 创建 Connection → 回 ANSWER
-- 约束：answerer 必须沿用 offerer 的 `connectionId`，否则 ANSWER 路由不到（REFACTOR §5 第一坑）
-- 重连：connectLoop 无限循环 + 指数退避（EXPIRE / ICE 失败 / 对端断开都会触发）
+- **offerer (active side)**: `connectLoop` → `peer.Connect(ctx, dst, label)` → send OFFER
+- **answerer (passive side)**: receive OFFER → `handleOffer` creates Connection → reply ANSWER
+- Constraint: answerer must use offerer's `connectionId`, otherwise ANSWER won't route (REFACTOR §5 first pitfall)
+- Reconnect: connectLoop infinite loop + exponential backoff (EXPIRE / ICE failure / peer disconnect all trigger)
 
-### 2.3 按帧角色（inbound / outbound，`conn.go` 头注释）
+### 2.3 By Frame Role (inbound / outbound, `conn.go` header comments)
 
-WebRTC 连接全双工对称，同一条 Session **同时承载两角色**（可一边 serve 对端 req，
-一边收集自己请求的响应），不共享任何可变状态（除 connState 内各自槽位）：
+WebRTC connections are full-duplex symmetric, same Session **carries both roles simultaneously** (can serve peer req on one side,
+and collect own request responses on the other), sharing no mutable state (except respective slots within connState):
 
-| 角色 | 归属 | 文件 |
+| Role | Attribution | File |
 |---|---|---|
-| **inbound**（入站 =「别人问我答」） | 应答 verb：`req`（serveFile）、`create/upload/list/info/delete/sync`（serve* 索引）、`fwd-open/fwd-auth/fwd-data/fwd-close`（转发） | `inbound.go` + `forward.go` |
-| **outbound**（出站 =「我问别人」） | 发起 `req`（requestFile/openStream）并收集 `meta/data/done/err`（routeResponse）；客户端侧转发握手 `OpenForward` | `outbound.go` + `forward.go` |
-| **共享机制**（只此一份） | 帧类型、reqId 状态机、二进制块路由、流控 | `conn.go` |
+| **inbound** (inbound = 'others ask me, I answer') | Respond to verbs: `req` (serveFile), `create/upload/list/info/delete/sync` (serve* index), `fwd-open/fwd-auth/fwd-data/fwd-close` (forwarding) | `inbound.go` + `forward.go` |
+| **outbound** (outbound = 'I ask others') | Initiate `req` (requestFile/openStream) and collect `meta/data/done/err` (routeResponse); client-side forwarding handshake `OpenForward` | `outbound.go` + `forward.go` |
+| **Shared mechanism** (only one copy) | Frame types, reqId state machine, binary block routing, flow control | `conn.go` |
 
-### 2.4 按用途
+### 2.4 By Usage
 
-- **文件传输**：拉取（req 流式）+ 分片上传（upload，64KB chunk 位图）+ 索引同步（sync，seq 游标增量）
-- **端口转发隧道**：同一连接单槽 `connState.fwd`（同时一条活跃转发流）；fwd-data 块路由优先于文件数据（二进制块按「fwd-data 头声明归属」先行）
+- **File transfer**: Fetch (req streaming) + Chunked upload (upload, 64KB chunk bitmap) + Index sync (sync, seq cursor incremental)
+- **Port forwarding tunnel**: Single slot `connState.fwd` per connection (one active forwarding stream at a time); fwd-data block routing has priority over file data (binary blocks route by 'fwd-data header declaration' first)
 
-## 3. 连接建立流程（全链路）
+## 3. Connection Establishment Flow (Full Chain)
 
 ```
-发现（HTTP 轮询 10s / MQTT 心跳 / PEERS 静态配置）
-   │ onDiscoveredPeer / 配置解析
+Discovery (HTTP polling 10s / MQTT heartbeat / PEERS static config)
+   │ onDiscoveredPeer / config parsing
    ▼
-connectLoop(peerID)  ──去重（connecting map）──►  peer.Connect
-   │ OFFER {dst, connectionId, SDP} ──信令──► 对端 handleOffer
-   │ ◄── ANSWER（沿用 connectionId）        对端回 ANSWER
-   │ CANDIDATE ⇄ ICE 候选交换（STUN 打洞）
+connectLoop(peerID)  ──dedup（connecting map）──►  peer.Connect
+   │ OFFER {dst, connectionId, SDP} ──signaling──► Peer handleOffer
+   │ ◄── ANSWER（reuses connectionId）        peer replies ANSWER
+   │ CANDIDATE ⇄ ICE candidate exchange (STUN hole-punch)
    ▼
-WebRTC DataChannel 打开 → OnOpen → bindConn(newRTCSession)
-   │ 注册 conns[peerID] + connState（fetches/pendingUpload/fwd 槽位）
-   │ OnMessage 泵：文本帧按 type 分派（verb→inbound 角色 / 其余→outbound 响应路由）
-   │ 二进制块按 expect 状态路由（fetch 队列 / upload worker / 转发隧道）
+WebRTC DataChannel opened → OnOpen → bindConn(newRTCSession)
+   │ Register conns[peerID] + connState (fetches/pendingUpload/fwd slots)
+   │ OnMessage pump: text frames dispatched by type (verb→inbound role / rest→outbound response routing)
+   │ Binary blocks routed by expect state (fetch queue / upload worker / forwarding tunnel)
    ▼
-双工并发：serveFile 应答对端 req 的同时可 OpenStream 拉对端文件
+Full-duplex concurrency: serveFile responds to peer req while simultaneously OpenStream can fetch peer files
 ```
 
-## 4. 验证信息的产生
+## 4. Verification Information Generation
 
-### 4.1 信令层（身份，`peer.go`）
+### 4.1 Signaling Layer (Identity, `peer.go`)
 
-| 凭证 | 产生方式 | 作用 |
+| Credential | Generation Method | Purpose |
 |---|---|---|
-| **key** | 共享配置（`PEERDRIVE_PEERJS_KEY`，默认 peerjs） | WS URL 参数；服务端校验不匹配即拒绝（防陌生人注册） |
-| **token** | 客户端启动 `randomToken()` = 16 字节随机 hex（`peer.go:302`） | 同 id 重连时 token 匹配才允许接管旧连接；不匹配回 `ID-TAKEN`（防 ID 劫持） |
-| **id** | 自定（`PEERDRIVE_PEERJS_ID`）或 `GET /peerjs/id` 服务端分配 | 节点在信令网络的标识 |
+| **key** | Shared config (`PEERDRIVE_PEERJS_KEY`, default peerjs) | WS URL parameter; server rejects if mismatch (prevents stranger registration) |
+| **token** | Client startup `randomToken()` = 16 bytes random hex (`peer.go:302`) | On same-id reconnect, token must match to take over old connection; mismatch returns `ID-TAKEN` (prevents ID hijacking) |
+| **id** | Custom (`PEERDRIVE_PEERJS_ID`) or server-assigned via `GET /peerjs/id` | Node identity in signaling network |
 
-### 4.2 业务层（端口转发 HMAC 质询，`forward.go`）
+### 4.2 Business Layer (Port Forwarding HMAC Challenge, `forward.go`)
 
 ```
-服务端                                   客户端（OpenForward）
+Server                                   Client (OpenForward)
   │ ←── fwd-open {port, reqId} ────────────
-  │ rand.Read → 16B nonce（一次性+5min 过期+上限64）
+  │ rand.Read → 16B nonce（one-time + 5min expiry + max 64)
   │ ── fwd-challenge {nonce} ──►
   │                                     hmac = HMAC-SHA256(key, nonce) → hex
   │ ◄── fwd-auth {hmac} ────────────────
-  │ 遍历规则表 key 原文重算 HMAC，hmac.Equal 常量时间比较
-  │ 通过 → 校验端口 ∈ key 授权白名单 → dial 127.0.0.1:port（SSRF 防护）
-  │ ── fwd-ok ──►  隧道建立，fwd-data 双向透传
+  │ Iterate rules table, recompute HMAC with original key, hmac.Equal constant-time comparison
+  │ Pass → verify port in key authorization whitelist → dial 127.0.0.1:port (SSRF protection)
+  │ ── fwd-ok ──►  tunnel established，fwd-data bidirectional pass-through
 ```
 
-- key 即凭证：`PEERDRIVE_FORWARD_RULES="key1:8080,key2:8443"` 或运行时 `POST /p2p/forward/create` 动态追加（不持久化）
-- key 明文永不落线（客户端本地持有，落线只传 HMAC；DataChannel 本身 DTLS 加密双保险）
-- 失败只回 `fwd-err`，不泄露规则细节；防重放：nonce 取出即标 used
+- key is the credential: `PEERDRIVE_FORWARD_RULES="key1:8080,key2:8443"` or runtime `POST /p2p/forward/create` dynamic addition (not persisted)
+- key plaintext never on the wire (client holds locally, only HMAC on wire; DataChannel itself DTLS encrypted for double protection)
+- Failure only returns `fwd-err`, no rule details leaked; anti-replay: nonce marked used upon retrieval
 
-### 4.3 传输层（WebRTC 自带）
+### 4.3 Transport Layer (WebRTC Built-in)
 
-- **DTLS 加密**：pion 自动生成自签名证书，信令交换 SDP 后协商
-- **ICE**：STUN/TURN 打洞（`parseICEServers`，`PEERDRIVE_WEBRTC_STUN/TURN` 配置）
+- **DTLS encryption**: pion auto-generates self-signed certificate, negotiated after signaling SDP exchange
+- **ICE**: STUN/TURN hole-punch (`parseICEServers`, `PEERDRIVE_WEBRTC_STUN/TURN` config)
 
-### 4.4 本地 WS 会话（无 token）
+### 4.4 Local WS Session (No token)
 
-- 仅 HTTP **Origin 白名单**校验（`peerjs_routes.go:99`，同 CORS 配置 `IsOriginAllowed`）；
-  无 Origin（curl）放行，白名单外 Origin 拒绝升级
+- Only HTTP **Origin whitelist** check (`peerjs_routes.go:99`, same CORS config `IsOriginAllowed`);
+  No Origin (curl) allowed, Origin outside whitelist rejected for upgrade
 
-## 5. 安全边界小结
+## 5. Security Boundary Summary
 
-| 层 | 防护 |
+| Layer | Protection |
 |---|---|
-| 信令注册 | key 校验 + token 防 ID 劫持 |
-| 文件服务 | hash 严格 64hex（H1）；file_index 路径必须落在允许根内，越权回退 CAS（H2）；远端声明上限 8GB（H6） |
-| HTTP 拉取端点 | 认证 + 单次 64MB 上限（H4） |
-| 上传 | size ≤8GB、文件名净化（防路径穿越）、offset chunk 对齐（REFACTOR §4） |
-| 转发 | HMAC 质询 + 端口白名单 + 仅 loopback + nonce 一次性 |
-| WS 会话 | Origin 白名单 + 读限制 192KB + ping/pong 90s 保活（M5） |
-| 信令服务器 | key 校验、ID-TAKEN、队列上限 100/dst、40KB 读限制、body 1KB（见 doc/PEERSIGNAL.md） |
+| Signaling registration | key verification + token prevents ID hijacking |
+| File service | hash strictly 64hex (H1); file_index path must be within allowed roots, unauthorized fallback to CAS (H2); remote declaration limit 8GB (H6) |
+| HTTP fetch endpoints | Authentication + 64MB single-limit (H4) |
+| Upload | size ≤8GB, filename sanitization (prevents path traversal), offset chunk alignment (REFACTOR §4) |
+| Forwarding | HMAC challenge + port whitelist + loopback only + nonce one-time |
+| WS sessions | Origin whitelist + read limit 192KB + ping/pong 90s keepalive (M5) |
+| Signaling server | key verification, ID-TAKEN, queue limit 100/dst, 40KB read limit, body 1KB (see doc/PEERSIGNAL.md) |

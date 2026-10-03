@@ -1,85 +1,85 @@
-# Peerdrive API 参考
+# Peerdrive API Reference
 
 Base URL: `http://localhost:3000`
 
-所有写操作可通过 `PEERDRIVE_STORAGE_ENABLE=false` 环境变量关闭（返回 403）。
+All write operations can be disabled via the `PEERDRIVE_STORAGE_ENABLE=false` environment variable (returns 403).
 
 ---
 
-## 文件管理
+## File Management
 
-### 上传文件
+### Upload File
 ```
 POST /files/upload
 Content-Type: multipart/form-data
 Field: file
 ```
-**响应 201（新文件）：**
+**Response 201 (new file):**
 ```json
 {"hash":"abc123...","size":1024,"mime":"text/plain","filename":"a.txt","already_exists":false}
 ```
-**响应 200（重复文件）：**
+**Response 200 (duplicate file):**
 ```json
 {"hash":"abc123...","size":1024,"mime":"text/plain","filename":"a.txt","already_exists":true}
 ```
-**响应 403：** `{"error":"storage is disabled"}`
+**Response 403:** `{"error":"storage is disabled"}`
 
-### 注册本地文件（零拷贝）
+### Register Local File (Zero-Copy)
 ```
 POST /files/register_local
 Content-Type: application/json
 ```
-**请求体：**
+**Request body:**
 ```json
 {"path":"/absolute/path/to/file.txt","filename":"file.txt"}
 ```
-**响应 200：** `{"hash":"abc123...","filename":"file.txt"}`
+**Response 200:** `{"hash":"abc123...","filename":"file.txt"}`
 
-### 注册文件夹（递归）
+### Register Folder (Recursive)
 ```
 POST /files/register_folder
 Content-Type: application/json
 ```
-**请求体：**
+**Request body:**
 ```json
 {"folder_path":"/absolute/path/to/folder"}
 ```
-**响应 200：**
+**Response 200:**
 ```json
 {"registered":[{"filename":"a.txt","hash":"abc..."},{"filename":"b.txt","hash":"def..."}]}
 ```
 
-### 验证文件元数据
+### Verify File Metadata
 ```
 GET /files/verify/:hash
 ```
-**响应 200：** `{"hash":"abc...","filename":"a.txt","size":1024,"mime":"text/plain"}`
+**Response 200:** `{"hash":"abc...","filename":"a.txt","size":1024,"mime":"text/plain"}`
 
-### 删除文件
+### Delete File
 ```
 DELETE /files/:hash
 ```
-**响应 200：** `{"message":"deleted"}`
+**Response 200:** `{"message":"deleted"}`
 
 ---
 
-## SHA256 下载
+## SHA256 Download
 
 ```
 GET /sha256sum/:hash
 ```
-**响应 200：** 文件流，附带 `Content-Disposition: attachment; filename=xxx`
+**Response 200:** File stream with `Content-Disposition: attachment; filename=xxx`
 
 ---
 
-## 匿名合集
+## Anonymous Collections
 
-### 创建合集
+### Create Collection
 ```
 POST /anon/collections
 Content-Type: application/json
 ```
-**请求体：**
+**Request body:**
 ```json
 {
   "entries": [
@@ -88,17 +88,17 @@ Content-Type: application/json
   ]
 }
 ```
-- path 必须是相对路径，不能含 `..`
-- hash 必须为 64 位十六进制
-- 服务端按 path 字典序排序
+- `path` must be a relative path and must not contain `..`
+- `hash` must be 64-character hexadecimal
+- Server-side sorts entries lexicographically by `path`
 
-**响应 201：** `{"hash":"sha256-of-the-collection-json"}`
+**Response 201:** `{"hash":"sha256-of-the-collection-json"}`
 
-### 获取合集
+### Get Collection
 ```
 GET /anon/collections/:hash
 ```
-**响应 200：**
+**Response 200:**
 ```json
 {
   "version": 1,
@@ -111,18 +111,18 @@ GET /anon/collections/:hash
 }
 ```
 
-### 下载合集内文件
+### Download File from Collection
 ```
 GET /anon/collections/:hash/entries/path/to/file
 ```
-**响应 200：** 文件流
+**Response 200:** File stream
 
-### 复刻合集（Fork）
+### Fork Collection
 ```
 POST /anon/collections/fork
 Content-Type: application/json
 ```
-**请求体：**
+**Request body:**
 ```json
 {
   "source_hash":"abc123...",
@@ -130,70 +130,70 @@ Content-Type: application/json
   "remove_paths":["old.txt"]
 }
 ```
-**响应 201：** `{"hash":"new-collection-hash"}`
+**Response 201:** `{"hash":"new-collection-hash"}`
 
 ---
 
-## P2P 网络
+## P2P Network
 
-### P2P 状态
+### P2P Status
 ```
 GET /p2p/status
 ```
-**响应 200：**
+**Response 200:**
 ```json
 {"enabled":true,"peer_id":"12D3Koo...","addrs":["/ip4/..."],"connected_count":1,"discovered_count":2,"relay_mode":"client","hole_punch":true,"ws_connections":0}
 ```
 
-### 节点信息
+### Node Information
 ```
 GET /p2p/node
 ```
-**响应 200：** `{"peer_id":"...","addrs":["/ip4/..."]}`
+**Response 200:** `{"peer_id":"...","addrs":["/ip4/..."]}`
 
-### 已连接节点
+### Connected Peers
 ```
 GET /p2p/peers
 ```
-**响应 200：** `{"peers":["12D3Koo..."]}`
+**Response 200:** `{"peers":["12D3Koo..."]}`
 
-### 已发现节点
+### Discovered Peers
 ```
 GET /p2p/discovered
 ```
-**响应 200：** `{"peers":[{"peer_id":"...","addrs":["..."]}]}`
+**Response 200:** `{"peers":[{"peer_id":"...","addrs":["..."]}]}`
 
-### Ping 对等节点
+### Ping Peer
 ```
 GET /p2p/ping/:peer_id
 ```
-**响应 200：** `{"peer":"...","rtt":"12.345ms"}`
+**Response 200:** `{"peer":"...","rtt":"12.345ms"}`
 
-### 连接对等节点
+### Connect to Peer
 ```
 POST /p2p/connect
 Content-Type: application/json
 {"addr": "/ip4/127.0.0.1/tcp/12345/p2p/12D3Koo..."}
 ```
-**响应 200：** `{"status":"connected"}`
+**Response 200:** `{"status":"connected"}`
 
-### 宣告合集 Hash
+### Announce Collection Hash
 ```
 POST /p2p/announce
 Content-Type: application/json
 {"hash": "abc123..."}
 ```
-**响应 200：** `{"status":"announced"}`
+**Response 200:** `{"status":"announced"}`
 
-### 从 P2P 获取合集
+### Fetch Collection from P2P
 ```
 POST /p2p/fetch
 Content-Type: application/json
 {"hash": "abc123..."}
 ```
-**响应 200：** 合集 JSON（含 friendly_name + entries）
+**Response 200:** Collection JSON (with `friendly_name` + `entries`)
 
-### 从对等节点同步文件
+### Sync Files from Peer
 ```
 POST /p2p/sync
 Content-Type: application/json
@@ -204,9 +204,9 @@ Content-Type: application/json
   "target_dir": "/tmp/sync"
 }
 ```
-**响应 200：** `{"synced":["def456..."],"count":1,"saved_to":"/tmp/sync"}`
+**Response 200:** `{"synced":["def456..."],"count":1,"saved_to":"/tmp/sync"}`
 
-### 接收推送的合集
+### Receive Pushed Collection
 ```
 POST /p2p/push
 Content-Type: application/json
@@ -216,53 +216,53 @@ Content-Type: application/json
   "target_dir": "callback-folder"
 }
 ```
-**响应 200：** `{"entries":[...],"target_dir":"./callback-folder","message":"collection received"}`
+**Response 200:** `{"entries":[...],"target_dir":"./callback-folder","message":"collection received"}`
 
-### 广播文件请求
+### Broadcast File Request
 ```
 POST /p2p/request-file
 Content-Type: application/json
 {"hash": "abc123...", "peer_ids": ["12D3Koo..."]}
 ```
-向已连接节点请求文件（peer_ids 为空则广播全部）。通过 `/peerdrive/exchange/1.0.0` 协议拉取。
-**响应 200：** `{"hash":"...","requested":1,"responses":1,"details":[{"hash":"...","size":1024}]}`
+Request a file from connected peers (broadcasts to all if `peer_ids` is empty). Fetches via the `/peerdrive/exchange/1.0.0` protocol.
+**Response 200:** `{"hash":"...","requested":1,"responses":1,"details":[{"hash":"...","size":1024}]}`
 
-### WS 传输信息
+### WS Transfer Info
 ```
 GET /p2p/ws/info
 ```
-**响应 200：** `{"ws_connections":0,"ws_endpoint":"/ws/transfer","message_types":["request","response","ping","pong"]}`
+**Response 200:** `{"ws_connections":0,"ws_endpoint":"/ws/transfer","message_types":["request","response","ping","pong"]}`
 
-### WebSocket 文件传输
+### WebSocket File Transfer
 ```
 GET /ws/transfer
 Upgrade: websocket
 ```
-双向文件传输通道。
+Bidirectional file transfer channel.
 
-**客户端 → 服务端：**
+**Client → Server:**
 ```json
 {"type":"request","hash":"abc123..."}
-{"type":"response","hash":"abc123..."}  （转发到其他 WS 客户端）
+{"type":"response","hash":"abc123..."}  (forwarded to other WS clients)
 {"type":"ping"}
 ```
-**服务端 → 客户端：**
+**Server → Client:**
 ```json
 {"type":"response","hash":"abc123...","size":1024}
-  → 紧接着 Binary frame = 文件内容
+  → Followed by Binary frame = file content
 {"type":"error","hash":"abc123...","message":"not found locally"}
 {"type":"pong"}
 ```
-- `request`: 查询文件。本地有则回复 response + binary；否则转发给其他 WS 客户端
-- `response`: 广播到其他连接（排除发送者）
-- 每个节点可接受多个并发 WS 连接
+- `request`: Query for a file. If available locally, respond with `response` + binary; otherwise forward to other WS clients
+- `response`: Broadcast to other connections (excluding the sender)
+- Each node can accept multiple concurrent WS connections
 
 ---
 
-## 前端调用示例
+## Frontend Call Examples
 
 ```js
-// 注册文件夹
+// Register folder
 const res = await fetch('/files/register_folder', {
   method: 'POST',
   headers: {'Content-Type': 'application/json'},
@@ -271,7 +271,7 @@ const res = await fetch('/files/register_folder', {
 const {registered} = await res.json();
 // registered = [{filename:"a.txt", hash:"abc..."}, ...]
 
-// 用注册结果创建匿名合集
+// Create anonymous collection from registration results
 const entries = registered.map(f => ({path: f.filename, hash: f.hash}));
 const coll = await fetch('/anon/collections', {
   method: 'POST',
@@ -280,17 +280,17 @@ const coll = await fetch('/anon/collections', {
 });
 const {hash} = await coll.json();
 
-// 下载合集内文件
+// Download file from collection
 window.open(`/anon/collections/${hash}/entries/${registered[0].filename}`);
 ```
 
 ---
 
-## 响应头
+## Response Headers
 
-| 头 | 说明 |
+| Header | Description |
 |---|------|
-| `Access-Control-Allow-Origin` | 匹配请求 Origin（动态） |
+| `Access-Control-Allow-Origin` | Matches the request Origin (dynamic) |
 | `Access-Control-Allow-Credentials` | `true` |
-| `Content-Disposition` | 下载文件时附带文件名 |
-| `X-Peerdrive-Collection` | 下载合集 JSON 时设为 `true` |
+| `Content-Disposition` | Includes filename when downloading files |
+| `X-Peerdrive-Collection` | Set to `true` when downloading collection JSON |

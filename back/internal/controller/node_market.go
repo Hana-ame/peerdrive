@@ -1,12 +1,13 @@
-// node_market.go：节点市场端点（doc/NETDISK.md M1）。
+// node_market.go: node market endpoints (doc/NETDISK.md M1).
 //
-// 语义与「自己的节点/别人的节点」对齐：
-//   - GET    /peerjs/nodes            市场列表（在线 ∪ 已加入），含本节点自身条目
-//   - GET    /peerjs/nodes/joined     我加入的节点
-//   - POST   /peerjs/nodes/join       加入节点（落盘 + 立即拨号）
-//   - DELETE /peerjs/nodes/join?peer= 移出（不断开在途连接，见 service 注释）
+// Semantics aligned with "own node / other people's node":
+//   - GET    /peerjs/nodes            market list (online ∪ joined), includes own node entry
+//   - GET    /peerjs/nodes/joined     nodes I have joined
+//   - POST   /peerjs/nodes/join       join a node (persisted + immediate dial)
+//   - DELETE /peerjs/nodes/join?peer= leave (does not disconnect in-flight connections, see service comment)
 //
-// 与 /peerjs/node（单节点自身信息）刻意分开命名，避免与旧端点语义混淆。
+// Deliberately named separately from /peerjs/node (single node self info) to avoid
+// semantic confusion with legacy endpoints.
 package controller
 
 import (
@@ -22,37 +23,40 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// nodeDir 由 main 注入（同 InitForwardController 模式）。
+// nodeDir is injected by main (same pattern as InitForwardController).
 var nodeDir *service.NodeDirectory
 
-// InitNodeDirectory 注入节点市场目录服务（nil = 该组端点不可用）。
+// InitNodeDirectory injects the node market directory service (nil = this group of endpoints unavailable).
 func InitNodeDirectory(d *service.NodeDirectory) {
 	log.LogDebug("ctrl-node-market: InitNodeDirectory")
 	nodeDir = d
 }
 
-// marketTimeout 发现服务器查询超时：市场列表是交互式请求，不能让前端
-// 长时间挂在"加载中"（发现服务器不可达时按空列表渲染已加入节点）。
+// marketTimeout is the discovery server query timeout: the market list is an interactive
+// request and shouldn't keep the frontend stuck in "loading" for too long (when the discovery
+// server is unreachable, render the joined nodes as an empty list).
 const marketTimeout = 6 * time.Second
 
-// peerShareSvc 提供"问对端要共享清单"能力（transport.PeerJSService）。
-// 单独注入而不是复用 forwardPeer：两者语义无关，共用一个包级变量会让
-// "改转发" 意外影响节点详情页。
+// peerShareSvc provides the "ask the peer for its share manifest" capability (transport.PeerJSService).
+// Injected separately rather than reusing forwardPeer: the two have unrelated semantics, and
+// sharing a package-level variable would accidentally let "changing forwarding" affect the node detail page.
 var peerShareSvc *transport.PeerJSService
 
-// InitPeerShareController 注入 PeerJS 服务供对方节点共享清单查询使用。
+// InitPeerShareController injects the PeerJS service for querying peer node share manifests.
 func InitPeerShareController(svc *transport.PeerJSService) {
 	log.LogDebug("ctrl-node-market: InitPeerShareController")
 	peerShareSvc = svc
 }
 
-// shareWaitTimeout 等待"接入对方节点"的上限。
-// 用户点开对方节点详情时该节点可能还没直连（刚加入/刚重启），这里主动拨号
-// 并等一小会儿——比直接报"未连接"体验好，但不能久等（HTTP 请求会挂住）。
+// shareWaitTimeout is the upper limit for waiting on "connecting to the peer node".
+// When the user clicks into a peer node's details, that node may not yet be directly connected
+// (just joined / just restarted), so we proactively dial and wait a moment — better UX than
+// immediately reporting "not connected", but can't wait too long (HTTP request would hang).
 const shareWaitTimeout = 8 * time.Second
 
-// GetPeerShares 处理 GET /peerjs/nodes/:peer/shares。
-// 返回对方节点的共享清单（合集 + 单文件），供前端渲染"文件链接"列表。
+// GetPeerShares handles GET /peerjs/nodes/:peer/shares.
+// Returns the peer node's share manifest (collections + single files) for the frontend to render
+// as a "file links" list.
 func GetPeerShares(c *gin.Context) {
 	if peerShareSvc == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "peerjs service not enabled"})
@@ -64,7 +68,7 @@ func GetPeerShares(c *gin.Context) {
 		return
 	}
 
-	// 未直连时先拨号（幂等），最多等 shareWaitTimeout
+	// If not directly connected, dial first (idempotent), wait up to shareWaitTimeout
 	if !peerShareSvc.ConnectedPeerIDs()[peer] {
 		peerShareSvc.EnsureConnection(peer)
 		deadline := time.Now().Add(shareWaitTimeout)
@@ -96,7 +100,7 @@ func GetPeerShares(c *gin.Context) {
 	})
 }
 
-// GetNodeMarket 处理 GET /peerjs/nodes。
+// GetNodeMarket handles GET /peerjs/nodes.
 func GetNodeMarket(c *gin.Context) {
 	if nodeDir == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "node directory not enabled"})
@@ -106,7 +110,7 @@ func GetNodeMarket(c *gin.Context) {
 	defer cancel()
 	nodes := nodeDir.Market(ctx)
 	if nodes == nil {
-		nodes = []model.NodeSummary{} // 保持 JSON 为 []（前端不必判 null）
+		nodes = []model.NodeSummary{} // Keep JSON as [] (frontend doesn't need to check for null)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"self":  nodeDir.Self(ctx),
@@ -114,7 +118,7 @@ func GetNodeMarket(c *gin.Context) {
 	})
 }
 
-// GetJoinedNodes 处理 GET /peerjs/nodes/joined。
+// GetJoinedNodes handles GET /peerjs/nodes/joined.
 func GetJoinedNodes(c *gin.Context) {
 	if nodeDir == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "node directory not enabled"})
@@ -125,7 +129,7 @@ func GetJoinedNodes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"nodes": nodeDir.Joined(ctx)})
 }
 
-// JoinNode 处理 POST /peerjs/nodes/join {peer}。
+// JoinNode handles POST /peerjs/nodes/join {peer}.
 func JoinNode(c *gin.Context) {
 	if nodeDir == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "node directory not enabled"})
@@ -146,7 +150,7 @@ func JoinNode(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "joined", "peer": req.Peer})
 }
 
-// LeaveNode 处理 DELETE /peerjs/nodes/join?peer=<id>。
+// LeaveNode handles DELETE /peerjs/nodes/join?peer=<id>.
 func LeaveNode(c *gin.Context) {
 	if nodeDir == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "node directory not enabled"})

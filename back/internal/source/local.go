@@ -1,11 +1,11 @@
 package source
 
-// local.go：LocalSource——本地磁盘源（file_index 映射优先 + 内容寻址存储兜底）。
-// 语义与 transport.serveFile 的路径决策完全一致（同一逻辑收敛到一处）：
-//   - file_index 命中且路径在允许根目录内 → 读映射路径
-//   - 否则 → 内容寻址存储 storageDir/<hash[:2]>/<hash>
-// 本地文件写入时已完成 sha256 校验（upload Complete），Open 不再校验（与
-// serveFile 行为一致）；Available = 存储目录可读。
+// local.go: LocalSource -- local disk source (file_index mapping preferred + content-addressed storage fallback).
+// Semantics are fully consistent with transport.serveFile's path decision logic (the same logic converged in one place):
+//   - file_index hit and path is within allowed roots -> read the mapped path
+//   - otherwise -> content-addressed storage storageDir/<hash[:2]>/<hash>
+// Local file writes already complete sha256 verification (upload Complete), so Open does not
+// verify again (consistent with serveFile behavior); Available = the storage directory is readable.
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"peerdrive/internal/transport"
 )
 
-// LocalSource 本地磁盘文件源。
+// LocalSource is the local disk file source.
 type LocalSource struct {
 	name       string
 	storageDir string
@@ -29,8 +29,8 @@ type LocalSource struct {
 	priority int
 }
 
-// NewLocalSource 创建本地源。name 默认 "local"；storageDir 为内容寻址存储根；
-// fileIndex 可为 nil（仅内容寻址）。
+// NewLocalSource creates a local source. name defaults to "local"; storageDir is the content-addressed storage root;
+// fileIndex may be nil (content-addressed only).
 func NewLocalSource(storageDir string, fileIndex *transport.FileIndexService) *LocalSource {
 	return &LocalSource{
 		name:       "local",
@@ -42,7 +42,7 @@ func NewLocalSource(storageDir string, fileIndex *transport.FileIndexService) *L
 func (s *LocalSource) Name() string { return s.name }
 func (s *LocalSource) Type() string { return "local" }
 
-// Capabilities 本地磁盘天然支持流式分片（os.File Seek/ReadAt）。
+// Capabilities local disk natively supports streaming ranges (os.File Seek/ReadAt).
 func (s *LocalSource) Capabilities() Capability { return CapStream }
 
 func (s *LocalSource) Priority() int {
@@ -57,7 +57,7 @@ func (s *LocalSource) SetPriority(p int) {
 	s.mu.Unlock()
 }
 
-// Available 存储目录存在且可读。
+// Available checks whether the storage directory exists and is readable.
 func (s *LocalSource) Available(ctx context.Context) bool {
 	f, err := os.Open(s.storageDir)
 	if err != nil {
@@ -67,12 +67,14 @@ func (s *LocalSource) Available(ctx context.Context) bool {
 	return true
 }
 
-// resolvePath 复刻 serveFile 的路径决策：file_index 优先（路径须**可读**，否则
-// 回退 CAS——历史脏数据/恶意登记不回传根外文件，H2）。
+// resolvePath replicates serveFile's path decision: file_index first (path must be **readable**,
+// otherwise fall back to CAS -- historical dirty data/malicious registrations do not return
+// files outside the root, H2).
 //
-// 注意用 IsPathReadable 而不是 IsPathAllowed：后者是登记/写入边界，只认下载目录；
-// 运营者把共享目录设在下载目录之外时，用它会把一份**正当**的文件判成越权，
-// 于是回退到并不存在的 CAS 副本 → 对端 "read failed"。
+// Note: uses IsPathReadable instead of IsPathAllowed. The latter is the registration/write
+// boundary and only recognizes the download directory. When the operator places shared directories
+// outside the download directory, using it would misclassify a **legitimate** file as unauthorized,
+// then fall back to a non-existent CAS copy -> the peer gets "read failed".
 func (s *LocalSource) resolvePath(hash string) string {
 	path := filepath.Join(s.storageDir, hash[:2], hash)
 	if s.fileIndex != nil {
@@ -86,11 +88,12 @@ func (s *LocalSource) resolvePath(hash string) string {
 	return path
 }
 
-// open 安全地打开 resolvePath 的结果。
+// open safely opens the result of resolvePath.
 //
-// 不走 os.Open：resolvePath 返回的索引路径是**登记时**校验过的，到此刻之间可能
-// 已被换成软链。走 pathutil.SafeOpen（os.Root）让内核在打开那一刻重新判定；
-// 共享根里的路径用 fileIndex.OpenReadable，CAS 副本锚定 storageDir。
+// Does not use os.Open: the index path returned by resolvePath was **validated at registration
+// time**, but it may have been replaced with a symlink by now. Using pathutil.SafeOpen (os.Root)
+// lets the kernel re-evaluate at the moment of opening. Shared root paths use fileIndex.OpenReadable,
+// CAS copies are anchored to storageDir.
 func (s *LocalSource) open(hash string) (*os.File, error) {
 	p := s.resolvePath(hash)
 	if s.fileIndex != nil && s.fileIndex.IsPathReadable(p) {
@@ -99,13 +102,13 @@ func (s *LocalSource) open(hash string) (*os.File, error) {
 		}
 	}
 	if s.storageDir == "" {
-		return os.Open(p) // 未配置 storageDir（纯测试装配），保持旧行为
+		return os.Open(p) // storageDir not configured (pure test assembly), keep old behavior
 	}
 	return pathutil.SafeOpen(s.storageDir, p)
 }
 
-// Open 流式打开：offset<0 → 0；size<0 → 到文件尾。分片用 os.File.Seek 定位
-// （本地文件无网络成本，直接给原文件句柄）。
+// Open streams open: offset<0 -> 0; size<0 -> to end of file. Ranges use os.File.Seek
+// (local files have no network cost, so just give the raw file handle).
 func (s *LocalSource) Open(ctx context.Context, hash string, offset, size int64) (io.ReadCloser, error) {
 	if err := validHash(hash); err != nil {
 		return nil, err
@@ -134,12 +137,12 @@ func (s *LocalSource) Open(ctx context.Context, hash string, offset, size int64)
 		f.Close()
 		return nil, err
 	}
-	// 限长读取：io.LimitReader 截断到 length（防越界读——offset/size 是
-	// 调用方输入，防御性处理）
+	// Length-limited read: io.LimitReader truncates to length (prevents out-of-bounds reads --
+	// offset/size are caller input, handled defensively)
 	return &limitedReadCloser{r: io.LimitReader(f, length), c: f}, nil
 }
 
-// Fetch 整体获取（CapStream 已覆盖，此处防御性实现，Manager 不会调用）。
+// Fetch does a full fetch (CapStream already covers this; defensive implementation, Manager will not call it).
 func (s *LocalSource) Fetch(ctx context.Context, hash string) ([]byte, error) {
 	r, err := s.Open(ctx, hash, 0, -1)
 	if err != nil {
@@ -149,7 +152,7 @@ func (s *LocalSource) Fetch(ctx context.Context, hash string) ([]byte, error) {
 	return io.ReadAll(r)
 }
 
-// Info 元数据：优先 file_index（有 name/path），否则 CAS 文件 stat。
+// Info metadata: prefer file_index (has name/path), otherwise CAS file stat.
 func (s *LocalSource) Info(ctx context.Context, hash string) (*FileMeta, error) {
 	if err := validHash(hash); err != nil {
 		return nil, err
@@ -171,8 +174,9 @@ func (s *LocalSource) Info(ctx context.Context, hash string) (*FileMeta, error) 
 	return &FileMeta{Hash: hash, Size: st.Size()}, nil
 }
 
-// AddLocalFile 把本地已有文件加入 local source（Source 控制面）。
-// 底层复用 FileIndexService.Create，安全边界、去重、索引语义与 create verb 一致。
+// AddLocalFile adds an existing local file to the local source (Source control plane).
+// Underlying implementation reuses FileIndexService.Create; security boundaries, dedup, and index
+// semantics are consistent with the create verb.
 func (s *LocalSource) AddLocalFile(path string) (*FileMeta, error) {
 	if s.fileIndex == nil {
 		return nil, ErrControlUnsupported
@@ -185,8 +189,8 @@ func (s *LocalSource) AddLocalFile(path string) (*FileMeta, error) {
 	return &FileMeta{Hash: fi.Hash, Size: fi.Size, Name: fi.Name, Path: fi.Path}, nil
 }
 
-// WriteFile 直接写文件到 local source（Source 控制面）。
-// 底层复用 FileIndexService.WriteFile：流式写入索引导航目录，完成后登记。
+// WriteFile writes a file directly to the local source (Source control plane).
+// Underlying implementation reuses FileIndexService.WriteFile: streams into the index directory, then registers.
 func (s *LocalSource) WriteFile(name string, r io.Reader) (*FileMeta, error) {
 	if s.fileIndex == nil {
 		return nil, ErrControlUnsupported
@@ -199,7 +203,7 @@ func (s *LocalSource) WriteFile(name string, r io.Reader) (*FileMeta, error) {
 	return &FileMeta{Hash: fi.Hash, Size: fi.Size, Name: fi.Name, Path: fi.Path}, nil
 }
 
-// limitedReadCloser 限长读取 + 关闭底层文件。
+// limitedReadCloser limits read length and closes the underlying file.
 type limitedReadCloser struct {
 	r io.Reader
 	c io.Closer

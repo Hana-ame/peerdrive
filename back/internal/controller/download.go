@@ -1,11 +1,11 @@
-// 下载控制器 — 通过 SHA256 哈希进行内容寻址文件下载。
-// 先调用 InitDownloader(svc) 注册 service.Downloader 实例。
-// 流程：校验 hash → Downloader.GetFileStream → 解析 meta.is_gzip → Content-Encoding
-// 路由：
-//   GET /sha256sum/:sha256   — 按 SHA256 哈希下载文件（含多协议回退）
-//   GET /download/:hash       — 通用多协议下载（X-Protocol 头）
-//   GET /download/:hash/sources — 检查各协议可用性
-//   POST /download/:hash/refresh — 强制重新检查所有协议
+// Download controller — content-addressable file download by SHA256 hash.
+// First call InitDownloader(svc) to register the service.Downloader instance.
+// Flow: validate hash → Downloader.GetFileStream → parse meta.is_gzip → Content-Encoding
+// Routes:
+//   GET /sha256sum/:sha256   — download file by SHA256 hash (with multi-protocol fallback)
+//   GET /download/:hash       — universal multi-protocol download (X-Protocol header)
+//   GET /download/:hash/sources — check protocol availability
+//   POST /download/:hash/refresh — force re-check all protocols
 
 package controller
 
@@ -31,23 +31,23 @@ import (
 var universalDownloader *downloader.UniversalDownloader
 var ipfsGatewayProvider *provider.IPFSProvider
 
-// InitUniversalDownloader 注入 UniversalDownloader 实例供多协议下载端点使用。
+// InitUniversalDownloader injects the UniversalDownloader instance for multi-protocol download endpoints.
 func InitUniversalDownloader(d *downloader.UniversalDownloader) {
 	universalDownloader = d
 }
 
-// InitIPFSProvider 注入 IPFS 网关提供者供 DownloadByCID 回退使用。
-// 当 IPFS 网关被禁用或未配置时传入 nil。
+// InitIPFSProvider injects the IPFS gateway provider for DownloadByCID fallback.
+// Pass nil when IPFS gateway is disabled or not configured.
 func InitIPFSProvider(p *provider.IPFSProvider) {
 	ipfsGatewayProvider = p
 }
 
-// DownloadBySHA256 处理 GET /sha256sum/:sha256，优先使用 UniversalDownloader 多协议下载，否则回退到原始逻辑。
+// DownloadBySHA256 handles GET /sha256sum/:sha256, preferring UniversalDownloader multi-protocol download, otherwise falls back to original logic.
 func DownloadBySHA256(c *gin.Context) {
 	DownloadBySHA256Internal(c, c.Param("sha256"))
 }
 
-// DownloadBySHA256Internal 是 DownloadBySHA256 的内部实现，也供其他控制器按 hash 获取文件流。
+// DownloadBySHA256Internal is the internal implementation of DownloadBySHA256, also used by other controllers to fetch file streams by hash.
 func DownloadBySHA256Internal(c *gin.Context, hash string) {
 	if !hashutil.IsValidSHA256(hash) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256 format"})
@@ -93,7 +93,7 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 }
 
-// DownloadBySHA256Local 处理 GET /sha256sum/:sha256，仅从本地存储读取，不含 P2P 回退。
+// DownloadBySHA256Local handles GET /sha256sum/:sha256, reading only from local storage without P2P fallback.
 func DownloadBySHA256Local(c *gin.Context) {
 	hash := c.Param("sha256")
 	if !hashutil.IsValidSHA256(hash) {
@@ -144,7 +144,7 @@ func DownloadByCID(c *gin.Context) {
 			ctx := c.Request.Context()
 			data, fetchErr := ipfsGatewayProvider.FetchByCID(ctx, searchCID)
 			if fetchErr == nil {
-				// 落盘 + 登记元数据/provider（M2 收层：原内联 repository 三连）
+				// Persist + register metadata/provider (M2 layering: original inline repository triplet)
 				hashStr, err := fileSvc.ImportGatewayData(searchCID, data)
 				if err == nil {
 					c.Header("X-CID", searchCID)
@@ -203,7 +203,7 @@ func handleRangeRequest(c *gin.Context, data []byte, rangeHeader string) bool {
 // ─── Universal download endpoint ───────────────────────────────────────────
 // ─── Universal download endpoint ───────────────────────────────────────────
 
-// UniversalDownload 处理 GET /download/:hash，使用通用下载器跨协议获取文件。
+// UniversalDownload handles GET /download/:hash, using the universal downloader to fetch files across protocols.
 func UniversalDownload(c *gin.Context) {
 	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
@@ -226,7 +226,7 @@ func UniversalDownload(c *gin.Context) {
 	c.Data(http.StatusOK, "application/octet-stream", data)
 }
 
-// UniversalDownloadSources 处理 GET /download/:hash/sources，列出所有可用协议源。
+// UniversalDownloadSources handles GET /download/:hash/sources, listing all available protocol sources.
 func UniversalDownloadSources(c *gin.Context) {
 	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
@@ -245,7 +245,7 @@ func UniversalDownloadSources(c *gin.Context) {
 	c.JSON(http.StatusOK, sources)
 }
 
-// UniversalDownloadRefresh 处理 POST /download/:hash/refresh，清除本地缓存后重新执行下载流水线。
+// UniversalDownloadRefresh handles POST /download/:hash/refresh, clearing local cache and re-running the download pipeline.
 func UniversalDownloadRefresh(c *gin.Context) {
 	hash := c.Param("hash")
 	if !hashutil.IsValidSHA256(hash) {
@@ -272,9 +272,9 @@ func UniversalDownloadRefresh(c *gin.Context) {
 	c.Data(http.StatusOK, "application/octet-stream", data)
 }
 
-// parseRangeHeader 解析 HTTP Range 头并返回起止字节索引和总大小。
-// 支持标准 range (bytes=N-M)、开放式 (bytes=N-)、后缀式 (bytes=-N)。
-// 源：legacy/relay.go ParseRange（批2 迁移，纯函数无外部依赖）。
+// parseRangeHeader parses an HTTP Range header and returns start/end byte indices and total size.
+// Supports standard range (bytes=N-M), open-ended (bytes=N-), and suffix (bytes=-N).
+// Source: legacy/relay.go ParseRange (batch 2 migration, pure function with no external dependencies).
 func parseRangeHeader(rangeVal string, fileSize int64) (start, end int64, ok bool) {
 	if fileSize <= 0 {
 		return 0, 0, false

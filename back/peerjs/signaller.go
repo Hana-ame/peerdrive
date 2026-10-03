@@ -2,38 +2,38 @@ package peerjs
 
 import "context"
 
-// Signaller 信令通道抽象：负责节点注册、消息收发。
-// 扩展性：当前实现为 PeerJS 公共云协议（peerjsSignaller），后续可替换为
-// 自托管 peerjs-server、MQTT 房间信令等，无需改动 Peer/Connection 层。
+// Signaller is a signaling channel abstraction: responsible for node registration and message send/receive.
+// Extensibility: the current implementation uses the PeerJS public cloud protocol (peerJSSignaller); it can later be replaced with
+// self-hosted peerjs-server, MQTT room signaling, etc., without modifying the Peer/Connection layer.
 //
-// 注意：实现自定义 Signaller 时无需关心消息分发——OnMessage 由框架
-// 内部注入（Peer 构造时调用），实现者只需在收到信令消息后调用
-// 注入的回调（见 peerJSSignaller.readLoop 的做法）。
+// Note: when implementing a custom Signaller, message dispatch is not your concern — OnMessage is injected
+// internally by the framework (called when Peer is constructed). The implementer only needs to call the
+// injected callback after receiving a signaling message (see peerJSSignaller.readLoop for the pattern).
 type Signaller interface {
-	// Dial 注册节点并建立信令连接；ctx 取消时中止。
+	// Dial registers the node and establishes the signaling connection; ctx cancellation aborts.
 	Dial(ctx context.Context) error
-	// ID 返回节点 ID（Dial 成功后有效；未指定 ID 时服务端分配）。
+	// ID returns the node ID (valid after Dial succeeds; the server assigns one if ID is not specified).
 	ID() string
-	// Send 发送消息到信令服务器。
+	// Send sends a message to the signaling server.
 	Send(m Message) error
-	// OnMessage 注册信令消息回调。
-	// Deprecated: 仅框架内部使用（Peer 注入消息路由）。使用者无需调用；
-	// 实现自定义 Signaller 时把收到的消息交给注入的回调即可。
+	// OnMessage registers a signaling message callback.
+	// Deprecated: for framework internal use only (Peer injects the message router). Users do not need to call it;
+	// when implementing a custom Signaller, simply pass received messages to the injected callback.
 	OnMessage(h MessageHandler)
-	// Done 返回信令连接断开通知（readLoop 因网络错误/对端关闭退出时关闭）。
-	// H7 修复：之前 readLoop 出错静默退出、connected=false，但没有任何信号
-	// 通知上层——startLoop 只 select ctx/closed 两个永不触发的信号，公网 WS
-	// 掉一次后节点永久失聪直到重启。重连循环依赖本通道触发整轮重连。
+	// Done returns the signaling connection disconnect notification (closed when readLoop exits due to network error/peer close).
+	// H7 fix: previously readLoop exited silently on error and connected=false, but there was no signal
+	// to notify the upper layer — startLoop only selects on ctx/closed (two signals that never fire), so a public WS
+	// dropping once would leave the node permanently deaf until restart. The reconnect loop depends on this channel to trigger a full reconnect.
 	Done() <-chan struct{}
-	// Close 关闭信令连接。
+	// Close closes the signaling connection.
 	Close() error
 }
 
-// MessageHandler 信令消息回调。
-// Deprecated: 使用者无需直接接触——消息处理由 Peer 内部路由接管
-// （OFFER/ANSWER/CANDIDATE/LEAVE/EXPIRE 均内部处理）。该类型仅作为
-// Signaller 实现者与框架之间的内部接线保留。
+// MessageHandler is a signaling message callback.
+// Deprecated: users do not need to interact with it directly — message handling is taken over by Peer's internal router
+// (OFFER/ANSWER/CANDIDATE/LEAVE/EXPIRE are all handled internally). This type is retained only as internal
+// plumbing between the Signaller implementer and the framework.
 type MessageHandler func(m Message) error
 
-// SignallerFactory 创建自定义信令的入口（NewPeer 的可选参数）。
+// SignallerFactory is the entry point for creating custom signaling (optional parameter to NewPeer).
 type SignallerFactory func() Signaller

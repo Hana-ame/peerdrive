@@ -1,5 +1,6 @@
-// 前端重做（模块①，2026-09-25）：应用外壳 + 路由。
-// 首页 = 节点搜索 / 连接（PeerJS 消费端）；其余模块按计划逐个重做（建设中占位）。
+// Frontend rebuild (Module 1, 2026-09-25): app shell + routing.
+// Home page = node search / connect (PeerJS consumer); other modules are being
+// rebuilt one by one (in-construction placeholder).
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { registerSW } from './lib/swBridge';
@@ -12,22 +13,23 @@ import BT from './pages/BT';
 import IPFS from './pages/IPFS';
 import NodeControl from './pages/NodeControl';
 
-// 建设中占位页（模块②③④⑤⑥逐个替换）
+// In-construction placeholder page (Modules 2, 3, 4, 5, 6 to be replaced one by one)
 function Placeholder({ title }) {
   return (
     <div className="p-8 h-full overflow-y-auto">
       <div className="max-w-3xl mx-auto text-center py-24">
         <h2 className="text-xl font-semibold text-gray-200 mb-3">{title}</h2>
-        <p className="text-sm text-gray-500">模块建设中，正在逐个重做。</p>
+        <p className="text-sm text-gray-500">Module under construction, being rebuilt one by one.</p>
       </div>
     </div>
   );
 }
 
-// 导航只留当前在用的入口（2026-09-26：网盘/合集/传输/BT/IPFS/设置暂时都用不到，
-// 从导航隐藏；页面路由保留，直接访问 URL 仍可打开）
+// Navigation only keeps currently active entries (2026-09-26: netdisk/collections/
+// transfers/BT/IPFS/settings are temporarily unused and hidden from nav; page
+// routes are kept, so direct URL access still works)
 const NAV = [
-  { to: '/', label: '连接节点' },
+  { to: '/', label: 'Connect' },
 ];
 
 function Nav() {
@@ -65,7 +67,7 @@ export default function App() {
             <Route path="/transfers" element={<Transfers />} />
             <Route path="/bt" element={<BT />} />
             <Route path="/ipfs" element={<IPFS />} />
-            <Route path="*" element={<Placeholder title="页面不存在" />} />
+            <Route path="*" element={<Placeholder title="Page Not Found" />} />
           </Routes>
         </div>
       </div>

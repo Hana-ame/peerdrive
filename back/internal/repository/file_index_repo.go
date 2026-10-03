@@ -6,21 +6,22 @@ import (
 	"time"
 )
 
-// FileIndex 本地文件索引：sha256 → 绝对路径映射（持久化 SQLite）。
-// 独立于旧 file_meta/file_providers 表：语义专注（映射 + 同步游标），
-// 不影响旧文件服务逻辑。
+// FileIndex local file index: sha256 → absolute path mapping (persisted in SQLite).
+// Independent of old file_meta/file_providers tables: semantically focused (mapping + sync cursor),
+// does not affect old file service logic.
 type FileIndex struct {
 	Hash      string
 	Path      string
 	Name      string
 	Size      int64
 	Deleted   bool
-	Seq       int64 // 单调递增同步游标（metadata 增量同步用）
+	Seq       int64 // monotonically increasing sync cursor (for metadata incremental sync)
 	CreatedAt string
 	UpdatedAt string
 }
 
-// createFileIndexTable 建表。seq 每次 upsert/delete 递增，节点间增量同步按它取数。
+// createFileIndexTable creates the table. seq increments on each upsert/delete;
+// incremental sync between nodes fetches by seq.
 func createFileIndexTable() {
 	DB.Exec(`CREATE TABLE IF NOT EXISTS file_index (
 		hash TEXT PRIMARY KEY,
@@ -35,10 +36,12 @@ func createFileIndexTable() {
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_seq ON file_index(seq)`)
 }
 
-// UpsertFileIndex 登记/更新映射（create/upload 成功后调用），返回新 seq。
-// M10：原实现 nextFileIndexSeq() 是 SELECT MAX+1 再单独 INSERT——database/sql
-// 连接池多连接并发写时，两个请求可能同时读到相同 MAX → seq 重复，sync 游标错乱。
-// 合并进同一事务：SELECT 与 INSERT 在同一写事务内原子完成（SQLite 串行写保证单调）。
+// UpsertFileIndex registers/updates a mapping (called after create/upload succeeds), returns new seq.
+// M10: original implementation had nextFileIndexSeq() as SELECT MAX+1 then separate INSERT —
+// with database/sql connection pool's multiple connections writing concurrently, two requests
+// could read the same MAX → seq collision, sync cursor chaos.
+// Merged into the same transaction: SELECT and INSERT complete atomically within one write
+// transaction (SQLite's serial write guarantee ensures monotonicity).
 func UpsertFileIndex(hash, path, name string, size int64, deleted bool) (int64, error) {
 	tx, err := DB.Begin()
 	if err != nil {
@@ -46,7 +49,7 @@ func UpsertFileIndex(hash, path, name string, size int64, deleted bool) (int64, 
 	}
 	defer tx.Rollback()
 	var last sql.NullInt64
-	// 注意：seq 单调性依赖事务串行；SQLite 单写者下安全
+	// Note: seq monotonicity depends on transaction serialization; safe under SQLite single-writer
 	if err := tx.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM file_index`).Scan(&last); err != nil {
 		return 0, fmt.Errorf("read file_index max seq: %w", err)
 	}
@@ -67,14 +70,14 @@ func UpsertFileIndex(hash, path, name string, size int64, deleted bool) (int64, 
 	return seq, nil
 }
 
-// GetFileIndex 按 hash 查询映射（未删除——tombstone 只通过 SyncSince 暴露）。
+// GetFileIndex queries mapping by hash (not deleted — tombstones are only exposed through SyncSince).
 func GetFileIndex(hash string) (*FileIndex, error) {
 	row := DB.QueryRow(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
 		FROM file_index WHERE hash = ? AND deleted = 0`, hash)
 	return scanFileIndex(row)
 }
 
-// ListFileIndex 列出全部未删除映射（按 seq 升序，支持分页）。
+// ListFileIndex lists all non-deleted mappings (ordered by seq ascending, supports pagination).
 func ListFileIndex(offset, limit int) ([]FileIndex, error) {
 	if limit <= 0 {
 		limit = 1000
@@ -96,8 +99,9 @@ func ListFileIndex(offset, limit int) ([]FileIndex, error) {
 	return out, rows.Err()
 }
 
-// ListFileIndexSince 增量同步：返回 seq 大于 since 的全部变更（含删除标记）。
-// 防御：since 来自远端 sync verb，变更记录无上限会全表扫描+物化；加 LIMIT 兜底（超过丢弃对端游标落后时的极端值）。
+// ListFileIndexSince incremental sync: returns all changes with seq greater than since (including delete markers).
+// Defense: since comes from remote sync verb; unbounded change records cause full-table scan + materialization.
+// Add LIMIT as backstop (discard extreme values when peer's cursor is far behind).
 func ListFileIndexSince(since int64) ([]FileIndex, error) {
 	rows, err := DB.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
 		FROM file_index WHERE seq > ? ORDER BY seq ASC LIMIT 1000`, since)
@@ -116,7 +120,7 @@ func ListFileIndexSince(since int64) ([]FileIndex, error) {
 	return out, rows.Err()
 }
 
-// DeleteFileIndex 逻辑删除（同步用 tombstone），返回新 seq。
+// DeleteFileIndex logical delete (sync tombstone), returns new seq.
 func DeleteFileIndex(hash string) (int64, error) {
 	return UpsertFileIndex(hash, "", "", 0, true)
 }
@@ -142,5 +146,5 @@ func boolToInt(b bool) int {
 	return 0
 }
 
-// fileIndexNow 时间戳（测试可覆盖）。
+// fileIndexNow timestamp (overridable in tests).
 var fileIndexNow = func() string { return time.Now().UTC().Format(time.RFC3339) }

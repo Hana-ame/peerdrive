@@ -1,11 +1,15 @@
 package service
 
-// 测试背景（doc/NETDISK.md M3）：跨节点拉取保存是"用户点保存 → 文件真的
-// 落到我这边"的那一步，四个风险点必须钉死：
-//  ① 对端给的内容必须校验 sha256（否则等于允许对端往本节点写任意内容）；
-//  ② 对端给的路径必须清洗（否则 "../" 就是任意文件写入）；
-//  ③ 取消要真的停下并清掉半截文件（.part 残留会被误当成果）；
-//  ④ 本地已有同 hash 内容要跳过（内容寻址去重，别白下一遍）。
+// Test background (doc/NETDISK.md M3): cross-node pull-and-save is the step where
+// "the user clicks save → the file actually lands on my side", and four risks must be
+// pinned down:
+//  1. content from the peer must be verified against sha256 (otherwise the peer could
+//     write arbitrary content to this node);
+//  2. the path given by the peer must be sanitized (otherwise "../" is arbitrary file write);
+//  3. cancel must really stop and clean up the partial file (a leftover .part would be
+//     mistaken for a result);
+//  4. if local content with the same hash already exists, skip it (content-addressed dedup,
+//     don't download it for nothing).
 
 import (
 	"bytes"
@@ -21,11 +25,11 @@ import (
 	"time"
 )
 
-// fakePullSource 假数据面：按 hash 回预置内容。
+// fakePullSource a fake data plane: returns preset content by hash.
 type fakePullSource struct {
 	content map[string][]byte
 	err     error
-	block   chan struct{} // 非 nil 时 Read 阻塞直到 Close（取消测试用）
+	block   chan struct{} // when non-nil, Read blocks until Close (used by the cancel test)
 }
 
 func (f *fakePullSource) OpenStream(peerID, hash string, offset, size int64) (io.ReadCloser, error) {
@@ -42,7 +46,7 @@ func (f *fakePullSource) OpenStream(peerID, hash string, offset, size int64) (io
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
-// blockingReader 读第一块后阻塞，直到 Close 被调用（模拟"传输中"）。
+// blockingReader blocks after reading the first chunk until Close is called (simulates "in transfer").
 type blockingReader struct {
 	data    []byte
 	off     int
@@ -70,7 +74,7 @@ func hashOf(b []byte) string {
 	return hex.EncodeToString(s[:])
 }
 
-// newPullerForTest 造一个带假数据面 + 假登记的拉取服务。
+// newPullerForTest builds a pull service with a fake data plane + fake registration.
 func newPullerForTest(t *testing.T, src *fakePullSource, local []string) (*PeerPuller, string, *[]string) {
 	t.Helper()
 	root := t.TempDir()
@@ -95,27 +99,28 @@ func newPullerForTest(t *testing.T, src *fakePullSource, local []string) (*PeerP
 	return p, root, registered
 }
 
-// waitJob 等任务进入终态（拉取是异步的）。
+// waitJob waits for a job to reach a terminal state (pulling is asynchronous).
 func waitJob(t *testing.T, p *PeerPuller, id string) PullJob {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		j, ok := p.Get(id)
 		if !ok {
-			t.Fatalf("job %s 不存在", id)
+			t.Fatalf("job %s does not exist", id)
 		}
 		if j.Done() {
 			return j
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("job %s 超时未结束", id)
+	t.Fatalf("job %s timed out before finishing", id)
 	return PullJob{}
 }
 
-// TestStartPullSavesAndRegisters 正常拉取：落盘到 pulled/<相对路径> 并登记。
-// 发现背景：用户诉求就是"选中文件保存就可以从别人那里下载"——这里断言
-// 保存结果是**真实文件**（大小/内容一致）且经过登记（"我的文件"能看到）。
+// TestStartPullSavesAndRegisters normal pull: saved to pulled/<relative path> and registered.
+// Discovery background: the user ask is simply "select a file and save, and I can download it
+// from someone else" -- here we assert the save result is a **real file** (matching size and
+// content) and that it is registered ("my files" can see it).
 func TestStartPullSavesAndRegisters(t *testing.T) {
 	content := []byte("remote file content")
 	h := hashOf(content)
@@ -131,7 +136,7 @@ func TestStartPullSavesAndRegisters(t *testing.T) {
 		t.Fatalf("status = %s (err=%s), want done", done.Status, done.Error)
 	}
 	if done.Skipped {
-		t.Fatal("不应跳过（本地没有内容）")
+		t.Fatal("should not skip (no content locally)")
 	}
 	want := filepath.Join(root, "pulled", "docs", "readme.txt")
 	if done.SavedTo != want {
@@ -142,22 +147,23 @@ func TestStartPullSavesAndRegisters(t *testing.T) {
 		t.Fatalf("read saved file: %v", err)
 	}
 	if !bytes.Equal(got, content) {
-		t.Fatalf("内容不一致: %q", got)
+		t.Fatalf("content mismatch: %q", got)
 	}
 	if done.Received != int64(len(content)) {
 		t.Fatalf("received = %d, want %d", done.Received, len(content))
 	}
 	if len(*registered) != 1 || (*registered)[0] != want {
-		t.Fatalf("登记路径不符: %v", *registered)
+		t.Fatalf("registered path mismatch: %v", *registered)
 	}
-	// .part 不能残留
+	// no .part may be left behind
 	if _, err := os.Stat(want + ".part"); !os.IsNotExist(err) {
-		t.Fatalf(".part 残留: %v", err)
+		t.Fatalf(".part residue: %v", err)
 	}
 }
 
-// TestStartPullSkipsWhenLocal 本地已有同 hash → 跳过下载。
-// 发现背景：内容寻址天然去重；重复"保存"同一个文件不该再走一遍网络。
+// TestStartPullSkipsWhenLocal the same hash already exists locally → skip the download.
+// Discovery background: content addressing dedupes naturally; "saving" the same file again
+// should not go over the network a second time.
 func TestStartPullSkipsWhenLocal(t *testing.T) {
 	content := []byte("already here")
 	h := hashOf(content)
@@ -173,13 +179,14 @@ func TestStartPullSkipsWhenLocal(t *testing.T) {
 		t.Fatalf("want done+skipped, got %+v", done)
 	}
 	if len(*registered) != 0 {
-		t.Fatal("跳过时不应重新登记")
+		t.Fatal("should not re-register when skipped")
 	}
 }
 
-// TestStartPullHashMismatch 对端内容与请求 hash 不符 → 失败且不留文件。
-// 发现背景：不校验等于允许对端往本节点写任意内容；且必须删掉 .part，
-// 否则下次 rename 会把垃圾当正式文件。
+// TestStartPullHashMismatch peer content does not match the requested hash → fail, leaving no file.
+// Discovery background: not verifying means letting the peer write arbitrary content to this
+// node; and the .part must be deleted, otherwise the next rename would promote garbage to a
+// real file.
 func TestStartPullHashMismatch(t *testing.T) {
 	want := []byte("expected content")
 	other := []byte("evil content")
@@ -197,19 +204,19 @@ func TestStartPullHashMismatch(t *testing.T) {
 	}
 	target := filepath.Join(root, "pulled", "a.txt")
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Fatal("校验失败后不应留下正式文件")
+		t.Fatal("no final file should remain after validation failure")
 	}
 	if _, err := os.Stat(target + ".part"); !os.IsNotExist(err) {
-		t.Fatal("校验失败后不应留下 .part")
+		t.Fatal("no .part should remain after validation failure")
 	}
 	if len(*registered) != 0 {
-		t.Fatal("校验失败不应登记")
+		t.Fatal("should not register after validation failure")
 	}
 }
 
-// TestStartPullCleansPathTraversal 对端给的路径不能逃出保存目录。
-// 发现背景：relPath 来自对端（合集条目 path），"../../etc/passwd" 或绝对
-// 路径不清洗就是任意文件写入。
+// TestStartPullCleansPathTraversal a path given by the peer must not escape the save directory.
+// Discovery background: relPath comes from the peer (the collection entry path), so an
+// unsanitized "../../etc/passwd" or absolute path is arbitrary file write.
 func TestStartPullCleansPathTraversal(t *testing.T) {
 	content := []byte("traversal")
 	h := hashOf(content)
@@ -237,13 +244,14 @@ func TestStartPullCleansPathTraversal(t *testing.T) {
 			t.Fatalf("abs: %v", err)
 		}
 		if !strings.HasPrefix(abs, pulledRoot+string(filepath.Separator)) {
-			t.Fatalf("%q 逃出了保存目录: %s", in, abs)
+			t.Fatalf("%q escaped the save directory: %s", in, abs)
 		}
 	}
 }
 
-// TestStartPullCancel 取消：任务置 cancelled、临时文件清理、不再继续写。
-// 发现背景：用户可能点错/反悔；半截文件留在盘上会被误认为已保存。
+// TestStartPullCancel cancel: the job is marked cancelled, the temp file is cleaned, and no more writing happens.
+// Discovery background: the user may misclick or change their mind; a half-written file left
+// on disk would be mistaken for a saved one.
 func TestStartPullCancel(t *testing.T) {
 	content := []byte("slow content")
 	h := hashOf(content)
@@ -255,7 +263,7 @@ func TestStartPullCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	// 等它真的开始读（首块已写入）
+	// wait until it really starts reading (first chunk written)
 	time.Sleep(50 * time.Millisecond)
 	if err := p.Cancel(job.ID); err != nil {
 		t.Fatalf("cancel: %v", err)
@@ -265,17 +273,18 @@ func TestStartPullCancel(t *testing.T) {
 		t.Fatalf("status = %s (err=%s), want cancelled", done.Status, done.Error)
 	}
 	if _, err := os.Stat(filepath.Join(root, "pulled", "slow.bin.part")); !os.IsNotExist(err) {
-		t.Fatal("取消后 .part 应被清理")
+		t.Fatal(".part should be cleaned after cancel")
 	}
-	// 已结束的任务再取消要报错（前端据此提示"该任务已结束"）
+	// cancelling an already finished job must error (the frontend uses this to show "the job is already done")
 	if err := p.Cancel(job.ID); err == nil {
-		t.Fatal("对已结束任务取消应报错")
+		t.Fatal("cancel on finished job should error")
 	}
 }
 
-// TestStartCollectionPartialFailure 批量拉取：单个坏条目不影响其它条目。
-// 发现背景："保存整个合集"里有一个 hash 非法/对端缺失时，整批失败会让
-// 用户完全无法保存；逐条目独立成任务，前端能看出哪几个失败。
+// TestStartCollectionPartialFailure batch pull: one bad entry does not affect the others.
+// Discovery background: when "save the whole collection" has one illegal hash or a missing
+// peer entry, a whole-batch failure would leave the user unable to save anything at all;
+// each entry becomes its own job, so the frontend can show which ones failed.
 func TestStartCollectionPartialFailure(t *testing.T) {
 	good := []byte("good")
 	gh := hashOf(good)
@@ -291,37 +300,39 @@ func TestStartCollectionPartialFailure(t *testing.T) {
 		t.Fatalf("jobs = %d, want 3", len(jobs))
 	}
 	if jobs[1].Status != PullFailed || jobs[1].Error == "" {
-		t.Fatalf("非法 hash 应立即失败: %+v", jobs[1])
+		t.Fatalf("invalid hash should fail immediately: %+v", jobs[1])
 	}
 	if done := waitJob(t, p, jobs[0].ID); done.Status != PullDone {
-		t.Fatalf("好条目应成功: %+v", done)
+		t.Fatalf("good entry should succeed: %+v", done)
 	}
 	if done := waitJob(t, p, jobs[2].ID); done.Status != PullFailed {
-		t.Fatalf("对端缺失条目应失败: %+v", done)
+		t.Fatalf("peer-missing entry should fail: %+v", done)
 	}
 }
 
-// TestStartPullRejectsBadInput 入参校验（前端错误提示依赖这些错误）。
+// TestStartPullRejectsBadInput input validation (frontend error messages depend on these errors).
 func TestStartPullRejectsBadInput(t *testing.T) {
 	p := NewPeerPuller(t.TempDir())
 	if _, err := p.Start("peer-a", strings.Repeat("a", 64), "x", "x", ""); err == nil {
-		t.Fatal("未注入 source 时应报错")
+		t.Fatal("should error when source not injected")
 	}
 	p.SetSource(&fakePullSource{})
 	if _, err := p.Start("", strings.Repeat("a", 64), "x", "x", ""); err == nil {
-		t.Fatal("空 peer 应报错")
+		t.Fatal("empty peer should error")
 	}
 	if _, err := p.Start("peer-a", "short", "x", "x", ""); err == nil {
-		t.Fatal("非法 hash 应报错")
+		t.Fatal("invalid hash should error")
 	}
 }
 
-// TestFetchManifest 清单里没有的合集，按 hash 取回 manifest（unlisted 合集的出口）。
+// TestFetchManifest for a collection not in the listing, fetch the manifest back by hash (the exit for unlisted collections).
 //
-// 为什么必须支持：合集 manifest 本身就是按内容寻址存的一份 JSON，hash 即其
-// sha256，所以"凭 hash 取回"对合集同样成立；而 unlisted 合集按定义不在共享清单里
-// —— 只认清单的话，"给一条合集链接、让人整包存进自己的节点"永远做不成。
-// 级别不受影响：取回走同一条 req 通道，private 的 manifest 由对端 ShareGate 挡。
+// Why this must be supported: a collection manifest is itself content-addressed JSON whose
+// hash is its sha256, so "fetch by hash" holds for collections too; and an unlisted
+// collection is, by definition, not in the shared listing -- accepting only the listing
+// would make "give someone a collection link, have them save the whole thing to their own
+// node" impossible forever. Levels are unaffected: fetching uses the same req channel, and a
+// private manifest is blocked by the peer's ShareGate.
 func TestFetchManifest(t *testing.T) {
 	manifest := []byte(`{"version":2,"friendly_name":"c","entries":[{"path":"a.txt","hash":"` +
 		strings.Repeat("a", 64) + `"}]}`)
@@ -330,41 +341,43 @@ func TestFetchManifest(t *testing.T) {
 
 	p := NewPeerPuller(t.TempDir())
 	if _, err := p.FetchManifest("peer-a", hash, 0); err == nil {
-		t.Fatal("未注入 source 时应报错")
+		t.Fatal("should error when source not injected")
 	}
 	p.SetSource(&fakePullSource{content: map[string][]byte{hash: manifest}})
 
 	got, err := p.FetchManifest("peer-a", hash, 0)
 	if err != nil {
-		t.Fatalf("取回 manifest 失败: %v", err)
+		t.Fatalf("failed to fetch manifest: %v", err)
 	}
 	if string(got) != string(manifest) {
-		t.Fatalf("manifest 内容不一致: %q", got)
+		t.Fatalf("manifest content mismatch: %q", got)
 	}
 
-	// 上限：入参可能是用户随手填的一串 hash，指向的未必是 manifest（可能几 GB），
-	// 不设限会把它整份读进内存再判断。
+	// cap: the argument may be a hash the user typed by hand, pointing at something that is
+	// not a manifest (maybe several GB), and without a cap we would read the whole thing into
+	// memory before deciding.
 	trimmed, err := p.FetchManifest("peer-a", hash, 16)
 	if err != nil {
-		t.Fatalf("带上限取回失败: %v", err)
+		t.Fatalf("failed to fetch with cap: %v", err)
 	}
 	if len(trimmed) != 16 {
-		t.Fatalf("maxBytes 没生效: got %d bytes", len(trimmed))
+		t.Fatalf("maxBytes did not take effect: got %d bytes", len(trimmed))
 	}
 
 	if _, err := p.FetchManifest("peer-a", "short", 0); err == nil {
-		t.Fatal("非法 hash 应报错")
+		t.Fatal("invalid hash should error")
 	}
-	// 对端拒绝（private 被 ShareGate 挡下）要透传，不能吞成"空的合集"
+	// a peer refusal (private blocked by ShareGate) must pass through, not be swallowed as "an empty collection"
 	p.SetSource(&fakePullSource{err: errors.New("err: private")})
 	if _, err := p.FetchManifest("peer-a", hash, 0); err == nil {
-		t.Fatal("对端拒绝时应返回错误")
+		t.Fatal("peer refusal should return error")
 	}
 }
 
-// TestSanitizeRelPath 路径清洗规则表。
-// 发现背景：清洗是安全边界的第一道（第二道是 targetPath 的绝对路径前缀校验），
-// 行为必须明确可回归。
+// TestSanitizeRelPath the path-sanitizing rule table.
+// Discovery background: sanitizing is the first line of the security boundary (the second is
+// the absolute-path prefix check on targetPath), so the behavior must be explicit and
+// regressable.
 func TestSanitizeRelPath(t *testing.T) {
 	cases := map[string]string{
 		"":                   "",
@@ -383,9 +396,10 @@ func TestSanitizeRelPath(t *testing.T) {
 	}
 }
 
-// TestPullJobListOrderAndPrune 任务列表顺序 + 上限裁剪。
-// 发现背景：任务表在内存里，长期运行会无界增长；裁剪必须只丢已结束任务
-// （丢运行中的会让用户看不到进行中的下载）。
+// TestPullJobListOrderAndPrune job list ordering + cap trimming.
+// Discovery background: the job table lives in memory and grows unboundedly over a long run;
+// trimming must only drop finished jobs (dropping a running one would hide an in-progress
+// download from the user).
 func TestPullJobListOrderAndPrune(t *testing.T) {
 	content := []byte("x")
 	h := hashOf(content)
@@ -407,6 +421,6 @@ func TestPullJobListOrderAndPrune(t *testing.T) {
 		t.Fatalf("list = %d, want 3", len(list))
 	}
 	if list[0].ID != lastID {
-		t.Fatalf("列表应按开始时间倒序，首个 = %s, want %s", list[0].ID, lastID)
+		t.Fatalf("list should be ordered by start time descending, first = %s, want %s", list[0].ID, lastID)
 	}
 }

@@ -13,45 +13,51 @@ import (
 	"peerdrive/internal/log"
 )
 
-// PresenceRoom 节点级「存在房间」——所有开启节点级互联的节点都加入它，
-// 从而在没有任何共享内容 hash 时也能互相发现（互联层的基础能力）。
+// PresenceRoom node-level "presence room" — all nodes with node-level interconnection
+// enabled join it, so they can discover each other even without any shared content hash
+// (the foundational capability of the interconnection layer).
 //
-// 为什么是 sha256 字面量而不是 "_presence" 这类可读名：
-// 发现服务端的 collection 字段在不同实现下可能做「必须 64hex」的校验——
-// peerdrive 自己的 signalserver 只 trim 不校验，但线上信令由 wintools 维护，
-// 不能假设其宽松。用可读名一旦被 400 拒掉，整条 announce 都会失败，连内容
-// 分片房间也一起登记不上（发现全断），代价远大于收益。
-// 该值 = sha256("peerdrive/presence/v1")：既是合法 64hex，又因 SHA256 的
-// 原像不可求性，与任何真实内容/合集 hash 碰撞在计算上不可能。
+// Why a sha256 literal instead of a readable name like "_presence":
+// Discovery server collection fields may enforce "must be 64hex" validation in different
+// implementations — peerdrive's own signalserver only trims without validating, but online
+// signaling is maintained by wintools, so we can't assume leniency. Using a readable name
+// that gets 400-rejected would cause the entire announce to fail, and content chunk rooms
+// wouldn't be registered either (discovery fully broken), with costs far outweighing benefits.
+// This value = sha256("peerdrive/presence/v1"): it's valid 64hex, and due to SHA256's
+// preimage resistance, collision with any real content/collection hash is computationally
+// impossible.
 const PresenceRoom = "405265e56dfcc1047e9fcd13125fd343d93214eb3219f7cd5bb8927a8994d15a"
 
-// HTTPDiscovery 自托管信令服务器的房间发现（替代 MQTT 公共 broker）。
-// 自托管服务器天然知道所有在线节点（都连着它做信令），发现变成 HTTP 查询：
-//   - announce：POST /discover/announce {peerId, collections, peers}（上线 + 30s 心跳）
-//   - 发现：GET /discover/nodes?coll={hash} → 在线节点列表 → onPeer 回调互联
+// HTTPDiscovery room discovery via self-hosted signaling server (replaces MQTT public broker).
+// Self-hosted servers naturally know all online nodes (all connect for signaling), so
+// discovery becomes an HTTP query:
+//   - announce: POST /discover/announce {peerId, collections, peers} (online + 30s heartbeat)
+//   - discover: GET /discover/nodes?coll={hash} → online node list → onPeer callback interconnect
 type HTTPDiscovery struct {
-	baseURL     string // 如 http://vps.moonchan.xyz:9000
+	baseURL     string // e.g. http://vps.moonchan.xyz:9000
 	peerID      string
 	collections []string
 	onPeer      func(peerID string)
-	peers       func() []string // 当前 WebRTC 直连对端，供信令服务器画 graph；可为 nil
+	peers       func() []string // current WebRTC direct peers, for signaling server to draw graph; can be nil
 
 	client *http.Client
 	mu     sync.Mutex
-	seen   map[string]bool // 已上报过的节点（去重，避免重复 onPeer）
+	seen   map[string]bool // already reported nodes (dedup, avoid duplicate onPeer)
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// shareInfo 本节点共享摘要（loadInfo.shares），供市场卡片显示"该节点
-	// 共享了 N 个合集/M 个文件"。**只报数量不报 hash**：announce 经发现
-	// 服务器广播，报 hash 等于公开"本节点持有什么"。nil = 未启用共享。
+	// shareInfo this node's sharing summary (loadInfo.shares), for marketplace card display
+	// "this node shares N collections/M files". **Only reports count, not hash**: announce
+	// is broadcast via the discovery server; reporting hash equals publicly declaring "what
+	// this node has". nil = sharing not enabled.
 	shareInfo func() map[string]any
 }
 
-// SetShareInfo 注入共享摘要读取器（必须在 Start 之前调用，首次 announce 就用）。
+// SetShareInfo injects the sharing summary reader (must be called before Start, first
+// announce uses it).
 func (d *HTTPDiscovery) SetShareInfo(fn func() map[string]any) { d.shareInfo = fn }
 
-// NewHTTPDiscovery 创建发现组件。
+// NewHTTPDiscovery creates the discovery component.
 func NewHTTPDiscovery(baseURL, peerID string, collections []string, onPeer func(peerID string), peers ...func() []string) *HTTPDiscovery {
 	ctx, cancel := context.WithCancel(context.Background())
 	var peersFn func() []string
@@ -71,12 +77,12 @@ func NewHTTPDiscovery(baseURL, peerID string, collections []string, onPeer func(
 	}
 }
 
-// Start announce + 轮询发现（异步）。
+// Start announce + polling discovery (asynchronous).
 func (d *HTTPDiscovery) Start() {
 	go d.loop()
 }
 
-// Stop 停止。
+// Stop stops discovery.
 func (d *HTTPDiscovery) Stop() {
 	d.cancel()
 }
@@ -99,7 +105,7 @@ func (d *HTTPDiscovery) loop() {
 	}
 }
 
-// announce 上报本节点在哪些集合以及当前直连对端（graph 用）。
+// announce reports which collections this node is in and current direct peers (for graph).
 func (d *HTTPDiscovery) announce() {
 	body, _ := json.Marshal(map[string]any{
 		"peerId":      d.peerID,
@@ -116,8 +122,9 @@ func (d *HTTPDiscovery) announce() {
 	_ = resp.Body.Close()
 }
 
-// loadInfo 上报本节点负载/能力信息（目前只有共享摘要）。
-// 返回 nil 时 JSON 里 loadInfo 为 null，发现服务器按"未上报"处理。
+// loadInfo reports this node's load/capability information (currently only sharing summary).
+// Returns nil when not configured; JSON loadInfo is null, discovery server treats as "not
+// reported".
 func (d *HTTPDiscovery) loadInfo() map[string]any {
 	if d.shareInfo == nil {
 		return nil
@@ -132,7 +139,7 @@ func (d *HTTPDiscovery) peersList() []string {
 	return d.peers()
 }
 
-// discover 查询集合在线节点并回调 onPeer（去重）。
+// discover queries collection online nodes and calls onPeer (with dedup).
 func (d *HTTPDiscovery) discover() {
 	for _, coll := range d.collections {
 		resp, err := d.client.Get(d.baseURL + "/discover/nodes?coll=" + coll)
@@ -145,7 +152,8 @@ func (d *HTTPDiscovery) discover() {
 				PeerID string `json:"peerId"`
 			} `json:"nodes"`
 		}
-		// M15：解码响应限 256KB——被攻破/异常的发现服务器回巨大 JSON 时不整包入内存
+		// M15: decode response limited to 256KB — when a compromised/abnormal discovery
+		// server returns huge JSON, don't load the entire thing into memory
 		decErr := json.NewDecoder(io.LimitReader(resp.Body, 256<<10)).Decode(&out)
 		resp.Body.Close()
 		if decErr != nil {

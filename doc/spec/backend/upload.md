@@ -1,41 +1,41 @@
-# 上传层 (Upload Layer)
+# Upload Layer
 
-## 概述
-上传功能通过 `POST /files/upload` 接口实现，将文件存入内容寻址存储系统。  
-文件以 SHA256 哈希命名，存储在配置的存储目录下，并自动注册元数据和提供者信息。
+## Overview
+The upload feature is implemented through the `POST /files/upload` endpoint, storing files in the content-addressed storage system.  
+Files are named by their SHA256 hash and stored in the configured storage directory, with metadata and provider information automatically registered.
 
-## 配置
-- `PEERDRIVE_STORAGE`：存储根目录，默认 `./storage`
-- `PEERDRIVE_STORAGE_ENABLE`：是否启用存储写操作，默认 `true`
-  - 设为 `false` 时，上传、注册本地文件等写操作均返回 403 Forbidden
+## Configuration
+- `PEERDRIVE_STORAGE`: Storage root directory, default `./storage`
+- `PEERDRIVE_STORAGE_ENABLE`: Whether to enable storage write operations, default `true`
+  - When set to `false`, all write operations such as upload and local file registration return 403 Forbidden
 
-## 接口
+## Endpoint
 
 ### POST /files/upload
 - Content-Type: `multipart/form-data`
-- 表单字段: `file` (文件)
-- 成功响应 (新文件):
-  - 状态码: `201 Created`
-  - 体: `{"hash": "...", "size": ..., "mime": "...", "filename": "...", "already_exists": false}`
-- 文件已存在响应:
-  - 状态码: `200 OK`
-  - 体: `{"hash": "...", "size": ..., "mime": "...", "filename": "...", "already_exists": true}`
-- 存储禁用时:
-  - 状态码: `403 Forbidden`
-  - 体: `{"error": "storage is disabled"}`
+- Form field: `file` (file)
+- Success response (new file):
+  - Status code: `201 Created`
+  - Body: `{"hash": "...", "size": ..., "mime": "...", "filename": "...", "already_exists": false}`
+- File already exists response:
+  - Status code: `200 OK`
+  - Body: `{"hash": "...", "size": ..., "mime": "...", "filename": "...", "already_exists": true}`
+- When storage is disabled:
+  - Status code: `403 Forbidden`
+  - Body: `{"error": "storage is disabled"}`
 
-## 执行流程
-1. 检查 `StorageEnable`，若为 `false` 则立即返回 403。
-2. 将上传流写入临时文件，同时计算 SHA256 和文件大小。
-3. 检测 MIME（基于内容前 512 字节 + 扩展名回退）。
-4. 查询 `file_meta` 表，若已存在相同哈希的记录：
-   - 直接返回元数据，并设置 `already_exists: true`；**不重复存储文件**。
-5. 若不存在：
-   - 创建目录 `storage/{hash[:2]}/`，将临时文件移动为 `storage/{hash[:2]}/{hash}`。
-   - 在 `file_meta` 表中插入记录（hash, size, mime_type, filename, gziped=false, type=blob）。
-   - 在 `file_providers` 表中插入记录，`provider_type` 为 `"local"`，`path` 为 `"{hash[:2]}/{hash}"`（相对存储根目录）。
-6. 返回 `201 Created` 及元数据。
+## Execution Flow
+1. Check `StorageEnable`; if `false`, immediately return 403.
+2. Write the upload stream to a temporary file, calculating SHA256 and file size simultaneously.
+3. Detect MIME type (based on first 512 bytes of content + extension fallback).
+4. Query the `file_meta` table; if a record with the same hash already exists:
+   - Return metadata directly with `already_exists: true`; **do not duplicate storage**.
+5. If not exists:
+   - Create directory `storage/{hash[:2]}/`, move temporary file to `storage/{hash[:2]}/{hash}`.
+   - Insert record into `file_meta` table (hash, size, mime_type, filename, gziped=false, type=blob).
+   - Insert record into `file_providers` table, with `provider_type` as `"local"` and `path` as `"{hash[:2]}/{hash}"` (relative to storage root).
+6. Return `201 Created` with metadata.
 
-## 与下载层的衔接
-- `LocalProvider` 基于 `provider.path` 拼接 `StorageDir` 读取文件。
-- 上传后，立即可通过 `GET /sha256sum/{hash}` 下载文件。
+## Integration with Download Layer
+- `LocalProvider` concatenates `provider.path` with `StorageDir` to read files.
+- After upload, files can be immediately downloaded via `GET /sha256sum/{hash}`.

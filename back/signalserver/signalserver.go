@@ -1,18 +1,18 @@
-// Package signalserver 自托管 PeerJS 信令服务器（兼容 peerjs-server 协议子集）
-// + 内置房间发现（替代公共信令 + 公共 MQTT broker）。
+// Package signalserver is a self-hosted PeerJS signaling server (compatible with the peerjs-server protocol subset)
+// + built-in room discovery (replaces public signaling + public MQTT brokers).
 //
-// 职责：
-//  1. 信令：节点注册（WS + token）、OFFER/ANSWER/CANDIDATE/LEAVE 按 dst 转发、
-//     dst 不在线入队（带过期）、心跳保活、ID 分配
-//  2. 发现：节点 announce 自己关注的集合，`GET /discover/nodes?coll=` 查询在线节点
-//     ——自托管后服务器天然知道所有在线节点，不再需要 MQTT 广播
+// Responsibilities:
+//  1. Signaling: node registration (WS + token), OFFER/ANSWER/CANDIDATE/LEAVE forwarding by dst,
+//     queuing when dst is offline (with expiry), heartbeat keep-alive, ID allocation
+//  2. Discovery: nodes announce the collections they follow, `GET /discover/nodes?coll=` queries online nodes
+//     ——after self-hosting, the server naturally knows all online nodes, no longer needing MQTT broadcast
 //
-// 协议细节对齐 peers/peerjs-server（src/services/webSocketServer、messageHandler）：
+// Protocol details aligned with peers/peerjs-server (src/services/webSocketServer, messageHandler):
 //   - WS URL: /{path}peerjs?key=&id=&token=
-//   - 消息 {type, src, dst, payload}，服务端覆盖 src
-//   - dst 在线转发；不在线入队（LEAVE/EXPIRE 不入队）
-//   - OPEN / ID-TAKEN / ERROR 控制消息
-//   - 客户端每 5s 发 HEARTBEAT 保活
+//   - Messages {type, src, dst, payload}, server overwrites src
+//   - Forward when dst is online; queue when offline (LEAVE/EXPIRE not queued)
+//   - OPEN / ID-TAKEN / ERROR control messages
+//   - Client sends HEARTBEAT every 5s for keep-alive
 package signalserver
 
 import (
@@ -35,33 +35,34 @@ var dashboardFS embed.FS
 type Server struct {
 	key            string
 	path           string
-	queueTTL       time.Duration   // 离线队列存活时间（OFFER 过期用）
-	heartbeatTTL   time.Duration   // 发现的心跳过期时间
-	tokenWhitelist map[string]bool // 允许的信令 token（nil/空 = 不限制）
+	queueTTL       time.Duration   // offline queue TTL (used for OFFER expiry)
+	heartbeatTTL   time.Duration   // discovery heartbeat expiry time
+	tokenWhitelist map[string]bool // allowed signaling tokens (nil/empty = unrestricted)
 
-	startedAt time.Time // 服务器启动时间
-	msgCount  int64     // 总转发消息数（原子访问）
+	startedAt time.Time // server startup time
+	msgCount  int64     // total forwarded message count (atomic access)
 
 	mu        sync.Mutex
-	clients   map[string]*client              // id → 在线连接
-	queues    map[string][]queuedMsg          // dst → 待转发消息
+	clients   map[string]*client              // id → online connection
+	queues    map[string][]queuedMsg          // dst → messages pending forwarding
 	disc      map[string]map[string]time.Time // collection → peerId → lastSeen
-	peerLinks map[string]map[string]time.Time // peerId → 邻居 peerId → lastSeen（graph 用）
+	peerLinks map[string]map[string]time.Time // peerId → neighbor peerId → lastSeen (for graph)
 	peerColls map[string][]string             // peerId -> collections
 	peerStats map[string]*PeerStats           // peerId -> stats
 }
 
-// Option 信令服务器配置项。
+// Option is a signaling server configuration option.
 type Option func(*Server)
 
-// WithTokenWhitelist 设置信令 token 白名单：WS 连接的 token 必须在名单内，
-// 否则拒绝升级（"Invalid token provided"）。空名单 = 不限制（默认，兼容
-// 公共部署现状）。
-// 坑（2026-08-18 代码审阅）：token 原本只是 ID 占用保护——任意客户端可自定
-// token 连接，攻击者可注册任意 ID 冒充在线节点收信令（配合其自选 ID 可以
-// 对任何节点发起 OFFER 诱导连向攻击者）；白名单让自托管部署只信任已知节点。
-// 注意：发现端点（announce/nodes）保持公开——发现的目的就是让任何人找到
-// 节点，白名单只约束信令面。
+// WithTokenWhitelist sets the signaling token whitelist: the WS connection token must be on the list,
+// otherwise the upgrade is rejected ("Invalid token provided"). Empty list = unrestricted (default, compatible
+// with current public deployments).
+// Pitfall (2026-08-18 code review): tokens were originally just ID occupancy protection—any client could choose
+// a token to connect, so an attacker could register any ID to impersonate an online node and receive signaling
+// (combined with a self-chosen ID, this can send OFFERs to any node luring connections to the attacker).
+// A whitelist lets self-hosted deployments trust only known nodes.
+// Note: discovery endpoints (announce/nodes) remain public—discovery's purpose is to let anyone find
+// nodes; the whitelist only constrains the signaling plane.
 func WithTokenWhitelist(tokens []string) Option {
 	return func(s *Server) {
 		if len(tokens) == 0 {
@@ -74,13 +75,13 @@ func WithTokenWhitelist(tokens []string) Option {
 	}
 }
 
-// 离线队列限制（H3 修复）：每 dst 最多缓存 maxQueuedPerDst 条消息。
-// 坑：原实现无上限——dst 永不连接时队列无限增长（每个恶意客户端可对任意随机 ID
-// 发 OFFER 把服务器内存打爆）。超限丢最旧（信令消息过期即失效，丢旧比丢新合理）。
+// Offline queue limit (H3 fix): each dst caches at most maxQueuedPerDst messages.
+// Pitfall: the original implementation had no limit—when dst never connects, the queue grows unbounded (each malicious client can send OFFERs to any random ID
+// to exhaust server memory). When the limit is exceeded, drop the oldest (signaling messages expire anyway, so dropping old is more reasonable than dropping new).
 const maxQueuedPerDst = 100
 
-// Start 启动后台 sweeper：定期清理已过期队列项与空队列。
-// 背景：过期清理原只在 flushQueue（dst 上线）时做，dst 永不连接则过期消息堆积。
+// Start launches a background sweeper: periodically cleans up expired queue entries and empty queues.
+// Background: expiry cleanup was originally only done in flushQueue (when dst comes online); if dst never connects, expired messages accumulate.
 func (s *Server) Start() {
 	go func() {
 		t := time.NewTicker(30 * time.Second)
@@ -111,7 +112,7 @@ func (s *Server) sweepQueues() {
 	}
 }
 
-// sweepDiscovery 定期清理心跳过期的发现节点，并同步清理 graph/元数据，防止长期运行内存和 graph 残留。
+// sweepDiscovery periodically cleans up discovery nodes with expired heartbeats, and synchronously cleans up graph/metadata to prevent memory and graph residue over long runs.
 func (s *Server) sweepDiscovery() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -132,13 +133,13 @@ func (s *Server) sweepDiscovery() {
 		}
 	}
 
-	// 清理不再活跃节点的 graph 起点
+	// Clean up graph origins of nodes that are no longer active
 	for id := range s.peerLinks {
 		if !active[id] {
 			delete(s.peerLinks, id)
 		}
 	}
-	// 清理指向不再活跃节点的边
+	// Clean up edges pointing to nodes that are no longer active
 	for _, links := range s.peerLinks {
 		for nid := range links {
 			if !active[nid] {
@@ -146,7 +147,7 @@ func (s *Server) sweepDiscovery() {
 			}
 		}
 	}
-	// 清理不再活跃节点的统计/集合
+	// Clean up stats/collections of nodes that are no longer active
 	for id := range s.peerStats {
 		if !active[id] {
 			delete(s.peerStats, id)
@@ -159,22 +160,22 @@ func (s *Server) sweepDiscovery() {
 	}
 }
 
-// client 一条在线信令连接。
+// client is an online signaling connection.
 type client struct {
 	id     string
 	token  string
 	conn   *websocket.Conn
-	sendMu sync.Mutex // gorilla 不允许并发写
-	last   time.Time  // 最后心跳
+	sendMu sync.Mutex // gorilla does not allow concurrent writes
+	last   time.Time  // last heartbeat
 }
 
-// queuedMsg 离线队列条目（入队时带过期时间）。
+// queuedMsg is an offline queue entry (with expiry time set at enqueue time).
 type queuedMsg struct {
 	msg    Message
 	expire time.Time
 }
 
-// Message 信令消息（与 peerjs 客户端协议一致）。
+// Message is a signaling message (consistent with the peerjs client protocol).
 type Message struct {
 	Type    string          `json:"type"`
 	Src     string          `json:"src,omitempty"`
@@ -182,7 +183,7 @@ type Message struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
-// NewServer 创建信令服务器。
+// NewServer creates a signaling server.
 func NewServer(key string, opts ...Option) *Server {
 	if key == "" {
 		key = "peerjs"
@@ -206,16 +207,16 @@ func NewServer(key string, opts ...Option) *Server {
 	return s
 }
 
-// allowCORS 放开跨域，并短路 OPTIONS 预检。
+// allowCORS opens up cross-origin and short-circuits OPTIONS preflight.
 //
-// 发现背景：peerdrive 的网盘 UI 形态是「一个公用静态面板（packages/peerdrive-client
-// 的 dist/panel.html，可以 file:// 双击打开或托管到任意静态空间），用 PeerJS 直连节点」。
-// 面板第一步就是 `GET /peerjs/id` 向信令要一个临时 id —— 而浏览器对该页面算出的
-// origin 是 `null`（file://）或面板自己的域，**与信令不同源**：不带 Access-Control-Allow-Origin
-// 的响应会被同源策略直接吞掉，客户端侧只表现为含混的
-// `server-error: Could not get an ID from the server`，看不出是 CORS。
-// 这些 REST 接口（取随机 id、发现）本来就是公开信息，没有凭据可被窃取，
-// 所以放开是安全的。WS 握手不走 CORS，不需要处理。
+// Discovery background: peerdrive's cloud storage UI is "a shared static panel (packages/peerdrive-client
+// dist/panel.html, which can be opened via file:// double-click or hosted on any static space), connecting directly to nodes via PeerJS".
+// The panel's first step is `GET /peerjs/id` to request a temporary id from the signaling server —— and the browser computes the
+// origin of that page as `null` (file://) or the panel's own domain, **which is cross-origin from the signaling server**: responses without Access-Control-Allow-Origin
+// are silently dropped by same-origin policy, and the client only shows a vague
+// `server-error: Could not get an ID from the server`, with no indication it's CORS.
+// These REST endpoints (fetch random id, discovery) are inherently public information, with no credentials to be stolen,
+// so opening them up is safe. WS handshakes don't go through CORS and don't need handling.
 func allowCORS(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("Access-Control-Allow-Origin", "*")
@@ -223,7 +224,7 @@ func allowCORS(w http.ResponseWriter) {
 	h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 }
 
-// handleCORS 写入跨域头并处理预检；返回 true 表示请求已处理完，调用方应直接返回。
+// handleCORS writes cross-origin headers and handles preflight; returns true when the request is fully handled and the caller should return immediately.
 func handleCORS(w http.ResponseWriter, r *http.Request) bool {
 	allowCORS(w)
 	if r.Method == http.MethodOptions {
@@ -233,7 +234,7 @@ func handleCORS(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-// HandleID GET /{path}{key}/id → 随机 id（peerjs API 兼容）。
+// HandleID GET /{path}{key}/id → random id (peerjs API compatible).
 func (s *Server) HandleID(w http.ResponseWriter, r *http.Request) {
 	if handleCORS(w, r) {
 		return
@@ -242,8 +243,8 @@ func (s *Server) HandleID(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, randomID())
 }
 
-// HandleWS 处理信令 WebSocket 升级与消息循环。
-// 路径形如 /{path}peerjs?key=&id=&token=（gin 路由挂载时提供 {path}）。
+// HandleWS handles signaling WebSocket upgrade and the message loop.
+// Path is shaped like /{path}peerjs?key=&id=&token= ({path} is provided when mounted via gin routing).
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	id, token, key := q.Get("id"), q.Get("token"), q.Get("key")
@@ -255,27 +256,27 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 		s.wsError(w, "Invalid key provided")
 		return
 	}
-	// token 白名单：空名单 = 不限制（默认）；非空则 token 必须在名单内。
-	// 见 WithTokenWhitelist 的坑说明（任意 token 可冒充节点收信令）。
+	// Token whitelist: empty list = unrestricted (default); if non-empty, token must be on the list.
+	// See the pitfall note in WithTokenWhitelist (any token can impersonate a node to receive signaling).
 	if len(s.tokenWhitelist) > 0 && !s.tokenWhitelist[token] {
 		s.wsError(w, "Invalid token provided")
 		return
 	}
 
 	upgrader := websocket.Upgrader{
-		CheckOrigin: func(*http.Request) bool { return true }, // 自托管，由调用方配置白名单
+		CheckOrigin: func(*http.Request) bool { return true }, // self-hosted, whitelist configured by the caller
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
-	// 读限制：信令消息很小（SDP/ICE 文案），40KB 足够；防恶意客户端塞超大 payload。
-	// 同时设 60s 读超时兜底——readLoop 里靠 HEARTBEAT 刷新，断连客户端不再占资源。
+	// Read limit: signaling messages are small (SDP/ICE payloads), 40KB is sufficient; prevents malicious clients from stuffing huge payloads.
+	// Also set a 60s read timeout as a fallback—readLoop refreshes it via HEARTBEAT, so disconnected clients don't hold resources.
 	conn.SetReadLimit(40 << 10)
 	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 	s.mu.Lock()
-	// ID 占用：token 匹配则复用连接，否则拒绝
+	// ID occupancy: if token matches, reuse the connection; otherwise reject
 	if existing, ok := s.clients[id]; ok {
 		if existing.token != token {
 			s.mu.Unlock()
@@ -295,7 +296,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	go s.readLoop(cl)
 }
 
-// readLoop 读取客户端消息并路由。
+// readLoop reads client messages and routes them.
 func (s *Server) readLoop(cl *client) {
 	defer func() {
 		s.removeClient(cl)
@@ -306,31 +307,31 @@ func (s *Server) readLoop(cl *client) {
 		if err := cl.conn.ReadJSON(&m); err != nil {
 			return
 		}
-		m.Src = cl.id // 服务端覆盖 src
+		m.Src = cl.id // server overwrites src
 		s.mu.Lock()
 		cl.last = time.Now()
-		// 收到消息即视为活跃，续读超时（配合 HandleWS 的 SetReadDeadline）
+		// Receiving a message counts as active; extend the read timeout (paired with SetReadDeadline in HandleWS)
 		_ = cl.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		s.mu.Unlock()
 		s.route(m)
 	}
 }
 
-// route 路由消息：dst 在线转发，不在线入队（LEAVE/EXPIRE 除外）。
+// route routes messages: forward if dst is online, queue if offline (except LEAVE/EXPIRE).
 //
-// 两处对标 peers/peerjs-server 的修复（src/messageHandler/handlers/transmission）：
+// Two fixes aligned with peers/peerjs-server (src/messageHandler/handlers/transmission):
 //
-//  1. send 失败不再静默丢弃。旧实现 `_ = dst.send(m)`：目标 socket 已半开但还
-//     没从 clients 表摘除时（对端崩溃、NAT 映射消失、连接半开未 FIN），
-//     OFFER/ANSWER/CANDIDATE 会被吞掉，发起方永久卡在等握手。这里摘除死连接
-//     并向发起方补发 LEAVE 让其停止重试。
-//  2. send 前释放 s.mu。send 内部 WriteJSON 带 10s 写超时，一个慢/死客户端
-//     会持锁 10s 卡死整个信令服务器的路由。因此出锁后再写。
+//  1. send failures are no longer silently dropped. The old implementation `_ = dst.send(m)`: when the target socket is half-open but still
+//     hasn't been removed from the clients table yet (peer crashed, NAT mapping expired, connection half-open without FIN),
+//     OFFER/ANSWER/CANDIDATE messages are swallowed, leaving the initiator stuck waiting for handshake forever. Here we remove the dead connection
+//     and send a supplementary LEAVE to the initiator so it stops retrying.
+//  2. Release s.mu before send. WriteJSON inside send has a 10s write timeout; a slow/dead client
+//     would hold the lock for 10s and freeze the entire signaling server's routing. So we unlock before writing.
 func (s *Server) route(m Message) {
 	s.mu.Lock()
 	dst := s.clients[m.Dst]
 	if dst != nil {
-		s.mu.Unlock() // 出锁后再写，避免持 s.mu 阻塞在慢客户端上
+		s.mu.Unlock() // unlock before writing, to avoid blocking on s.mu held by a slow client
 		if err := dst.send(m); err == nil {
 			atomic.AddInt64(&s.msgCount, 1)
 			return
@@ -343,8 +344,8 @@ func (s *Server) route(m Message) {
 	if m.Type == "LEAVE" || m.Type == "EXPIRE" || m.Dst == "" {
 		return
 	}
-	// 入队：目标上线后补发（OFFER/ANSWER/CANDIDATE）
-	// H3：队列无上限 → OOM。超 maxQueuedPerDst 丢最旧。
+	// Enqueue: replay after the target comes online (OFFER/ANSWER/CANDIDATE)
+	// H3: unbounded queue → OOM. When exceeding maxQueuedPerDst, drop the oldest.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	q := append(s.queues[m.Dst], queuedMsg{msg: m, expire: time.Now().Add(s.queueTTL)})
@@ -355,13 +356,13 @@ func (s *Server) route(m Message) {
 	atomic.AddInt64(&s.msgCount, 1)
 }
 
-// handleDeadDst 处理"在 clients 表里但发送失败"的目标：摘除表项、关连接、
-// 广播 LEAVE。
+// handleDeadDst handles a target that's "in the clients table but failed to send": remove the entry, close the connection,
+// broadcast LEAVE.
 func (s *Server) handleDeadDst(dst *client, m Message) {
 	s.mu.Lock()
 	if cur, ok := s.clients[m.Dst]; !ok || cur != dst {
 		s.mu.Unlock()
-		return // 已被别的流程摘除/顶替，交给那边的清理
+		return // already removed/replaced by another flow, leave cleanup to that process
 	}
 	delete(s.clients, m.Dst)
 	var victims []*client
@@ -370,7 +371,7 @@ func (s *Server) handleDeadDst(dst *client, m Message) {
 			victims = append(victims, c)
 		}
 	}
-	// 清理该死连接在发现/图/元数据中的残留（removeClient 因 clients 已摘除不会再来清理）
+	// Clean up the dead connection's residue in discovery/graph/metadata (removeClient won't come back to clean up since the client was already removed)
 	for coll, peers := range s.disc {
 		delete(peers, m.Dst)
 		if len(peers) == 0 {
@@ -401,7 +402,7 @@ func (s *Server) handleDeadDst(dst *client, m Message) {
 	}
 }
 
-// flushQueue 客户端上线后补发离线队列（含过期清理）。
+// flushQueue replays the offline queue after a client comes online (with expiry cleanup).
 func (s *Server) flushQueue(cl *client) {
 	s.mu.Lock()
 	q := s.queues[cl.id]
@@ -415,7 +416,7 @@ func (s *Server) flushQueue(cl *client) {
 	}
 }
 
-// removeClient 断开清理：通知其他节点 LEAVE、删除发现记录。
+// removeClient handles disconnect cleanup: notify other nodes with LEAVE, delete discovery records.
 func (s *Server) removeClient(cl *client) {
 	s.mu.Lock()
 	if s.clients[cl.id] != cl {
@@ -446,10 +447,10 @@ func (s *Server) removeClient(cl *client) {
 	}
 }
 
-// HandleAnnounce POST /discover/announce {peerId, collections[], nodeType, loadInfo, peers} 节点登记。
-// 与信令连接解耦（节点可通过任意 HTTP 入口上报），lastSeen 由心跳刷新。
-// M15：无界 decode 风险——限制 body 大小（8KB 足够：peerId + collections + peers + loadInfo）
-// 与 collection 数量（单节点关注房间数有限）。
+// HandleAnnounce POST /discover/announce {peerId, collections[], nodeType, loadInfo, peers} node registration.
+// Decoupled from signaling connections (nodes can report via any HTTP endpoint); lastSeen is refreshed by heartbeats.
+// M15: unbounded decode risk—limit body size (8KB is sufficient: peerId + collections + peers + loadInfo)
+// and the number of collections (a single node follows a limited number of rooms).
 func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 	if handleCORS(w, r) {
 		return
@@ -460,7 +461,7 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 		Collections []string       `json:"collections"`
 		NodeType    string         `json:"nodeType,omitempty"`
 		LoadInfo    map[string]any `json:"loadInfo,omitempty"`
-		Peers       []string       `json:"peers,omitempty"` // 当前 WebRTC 直连的对端 peer id 列表
+		Peers       []string       `json:"peers,omitempty"` // list of currently WebRTC-connected peer ids
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.PeerID == "" {
 		http.Error(w, "peerId required", http.StatusBadRequest)
@@ -471,7 +472,7 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many collections", http.StatusBadRequest)
 		return
 	}
-	// 规范化 collection 列表：trim 并去掉空串，disc 与 peerColls 使用同一份数据。
+	// Normalize the collection list: trim whitespace and remove empty strings; disc and peerColls use the same data.
 	cleanColls := make([]string, 0, len(body.Collections))
 	for _, coll := range body.Collections {
 		coll = strings.TrimSpace(coll)
@@ -492,7 +493,7 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 		}
 		peers[body.PeerID] = now
 	}
-	// 立即从旧集合移除该节点（collections 变更后不用等 TTL）
+	// Immediately remove this node from old collections (no need to wait for TTL after collections change)
 	for coll, peers := range s.disc {
 		if !collSet[coll] {
 			delete(peers, body.PeerID)
@@ -501,7 +502,7 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// 更新节点元数据（nodeType/collections/loadInfo），dashboard 与发现 API 共用。
+	// Update node metadata (nodeType/collections/loadInfo), shared by dashboard and discovery API.
 	stats := s.peerStats[body.PeerID]
 	if stats == nil {
 		stats = &PeerStats{}
@@ -510,10 +511,10 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 	stats.NodeType = body.NodeType
 	stats.LastSeen = now
 	stats.LoadInfo = body.LoadInfo
-	// 总是更新 collections（空也清空旧值），避免节点清空集合后旧集合残留。
+	// Always update collections (even clear old values when empty) to avoid stale collections remaining after a node clears its set.
 	s.peerColls[body.PeerID] = cleanColls
-	// 更新 graph 边：该节点当前直连的对端列表。
-	// 总是更新（即使 peers 为空/缺失也清空旧边），避免 graph 残留过期连接。
+	// Update graph edges: this node's currently directly connected peers.
+	// Always update (even clear old edges when peers is empty/missing) to avoid stale connections lingering in the graph.
 	links := make(map[string]time.Time, len(body.Peers))
 	for _, nid := range body.Peers {
 		nid = strings.TrimSpace(nid)
@@ -527,7 +528,7 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
-// HandleLeave POST /discover/leave 节点优雅下线。
+// HandleLeave POST /discover/leave graceful node shutdown.
 func (s *Server) HandleLeave(w http.ResponseWriter, r *http.Request) {
 	if handleCORS(w, r) {
 		return
@@ -541,14 +542,14 @@ func (s *Server) HandleLeave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	// 从所有 collection 中移除
+	// Remove from all collections
 	for _, peers := range s.disc {
 		delete(peers, body.PeerID)
 	}
 	delete(s.peerStats, body.PeerID)
 	delete(s.peerColls, body.PeerID)
 	delete(s.peerLinks, body.PeerID)
-	// 同时从其他节点的邻居列表中移除该节点
+	// Also remove this node from other nodes' neighbor lists
 	for _, links := range s.peerLinks {
 		delete(links, body.PeerID)
 	}
@@ -558,15 +559,15 @@ func (s *Server) HandleLeave(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
-// GraphLink graph 中的一条边（source ↔ target 已建立 WebRTC 连接）。
+// GraphLink is an edge in the graph (source ↔ target have established a WebRTC connection).
 type GraphLink struct {
 	Source   string `json:"source"`
 	Target   string `json:"target"`
 	LastSeen int64  `json:"lastSeen,omitempty"`
 }
 
-// HandleNodes GET /discover/nodes?coll=&type= → 在线节点列表（心跳过期剔除）+ graph 边。
-// 空 coll 表示返回所有 collection 的节点；type 可用于过滤节点类型。
+// HandleNodes GET /discover/nodes?coll=&type= → online node list (heartbeat-expired entries removed) + graph edges.
+// Empty coll means return nodes from all collections; type can be used to filter node types.
 func (s *Server) HandleNodes(w http.ResponseWriter, r *http.Request) {
 	if handleCORS(w, r) {
 		return
@@ -579,14 +580,14 @@ func (s *Server) HandleNodes(w http.ResponseWriter, r *http.Request) {
 	seen := make(map[string]bool)
 
 	if coll != "" {
-		// 指定 collection：只查这一个房间
+		// Specified collection: query only this room
 		peers := s.disc[coll]
 		out = make([]NodeInfo, 0, len(peers))
 		for id, last := range peers {
 			if last.After(cutoff) && !seen[id] {
 				info := s.nodeInfo(id, last)
-				// 类型过滤不通过时不标记 seen：允许该节点在其他 collection
-				// 再次被检查，同时 graph 边只基于实际返回的节点。
+				// Don't mark as seen when type filter doesn't pass: allow this node to be checked again in other collections
+				// while graph edges are only based on actually returned nodes.
 				if nodeType != "" && info.NodeType != nodeType {
 					continue
 				}
@@ -595,7 +596,7 @@ func (s *Server) HandleNodes(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
-		// 空 coll：遍历所有 collection，返回去重后的全部在线节点
+		// Empty coll: iterate all collections and return deduplicated online nodes
 		for _, peers := range s.disc {
 			for id, last := range peers {
 				if last.After(cutoff) && !seen[id] {
@@ -609,7 +610,7 @@ func (s *Server) HandleNodes(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// 收集 graph 边：仅保留两端都仍活跃的边，避免展示离线幽灵节点。
+	// Collect graph edges: only keep edges where both ends are still active, to avoid showing offline ghost nodes.
 	links := make([]GraphLink, 0)
 	linkSeen := make(map[string]bool)
 	for src, neighbors := range s.peerLinks {
@@ -637,7 +638,7 @@ func (s *Server) HandleNodes(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"nodes": out, "links": links})
 }
 
-// PeerStats 节点统计与负载信息。
+// PeerStats is node statistics and load information.
 type PeerStats struct {
 	NodeType string         `json:"nodeType,omitempty"`
 	Uptime   int64          `json:"uptime,omitempty"`
@@ -645,7 +646,7 @@ type PeerStats struct {
 	LastSeen time.Time      `json:"-"`
 }
 
-// nodeInfo 从 peerStats/peerColls 组装发现响应条目。
+// nodeInfo assembles a discovery response entry from peerStats/peerColls.
 func (s *Server) nodeInfo(id string, last time.Time) NodeInfo {
 	info := NodeInfo{PeerID: id, LastSeen: last.Unix()}
 	if st := s.peerStats[id]; st != nil {
@@ -659,7 +660,7 @@ func (s *Server) nodeInfo(id string, last time.Time) NodeInfo {
 	return info
 }
 
-// NodeInfo 发现响应条目。
+// NodeInfo is a discovery response entry.
 type NodeInfo struct {
 	PeerID      string         `json:"peerId"`
 	LastSeen    int64          `json:"lastSeen"`
@@ -669,7 +670,7 @@ type NodeInfo struct {
 	LoadInfo    map[string]any `json:"loadInfo,omitempty"`
 }
 
-// HandleStatus GET /status → 服务器状态快照（dashboard 轮询用）。
+// HandleStatus GET /status → server status snapshot (for dashboard polling).
 func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	if handleCORS(w, r) {
 		return
@@ -681,7 +682,7 @@ func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	for _, q := range s.queues {
 		totalQueued += len(q)
 	}
-	// 收集活跃发现节点
+	// Collect active discovery nodes
 	discoveredNodes := make([]NodeInfo, 0)
 	seen := make(map[string]bool)
 	cutoff := time.Now().Add(-s.heartbeatTTL)
@@ -693,7 +694,7 @@ func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// 收集 graph 边：仅保留两端都仍活跃的边，避免展示离线幽灵节点。
+	// Collect graph edges: only keep edges where both ends are still active, to avoid showing offline ghost nodes.
 	links := make([]GraphLink, 0)
 	linkSeen := make(map[string]bool)
 	for src, neighbors := range s.peerLinks {
@@ -735,7 +736,7 @@ func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// HandleDashboard GET / → dashboard HTML（内嵌）。
+// HandleDashboard GET / → dashboard HTML (embedded).
 func (s *Server) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -751,7 +752,7 @@ func (s *Server) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(b)
 }
 
-// formatDuration 秒数转人可读时长。
+// formatDuration converts seconds to a human-readable duration.
 func formatDuration(seconds float64) string {
 	d := time.Duration(seconds) * time.Second
 	if d < time.Minute {
@@ -766,7 +767,7 @@ func formatDuration(seconds float64) string {
 	return fmt.Sprintf("%.1fd", seconds/86400)
 }
 
-// wsError 升级失败（HTTP 层）。
+// wsError handles upgrade failure (HTTP layer).
 func (s *Server) wsError(w http.ResponseWriter, msg string) {
 	http.Error(w, msg, http.StatusBadRequest)
 }
@@ -786,7 +787,7 @@ func (cl *client) closeConn() {
 
 func raw(s string) json.RawMessage { return json.RawMessage(s) }
 
-// randomID 生成符合 PeerJS 规则的首尾字母数字 id。
+// randomID generates an alphanumeric id conforming to PeerJS rules.
 func randomID() string {
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 16)

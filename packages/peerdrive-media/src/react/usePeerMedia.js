@@ -1,9 +1,9 @@
-// usePeerMedia.js — 加载钩子：经 peerjs 从 Node 端拉取 URL 资源，产出 objectURL。
+// usePeerMedia.js — loading hook: fetches URL resources from Node via peerjs, produces objectURL.
 //
-// 生命周期：
-//   loading → ready（src=blobUrl）| error
-//   reload() 重新加载（url 变化时自动重载）
-//   卸载：abort 在途请求 + revokeObjectURL（防泄漏，React StrictMode 双跑安全）
+// Lifecycle:
+//   loading → ready (src=blobUrl) | error
+//   reload() reloads (auto-reloads when url changes)
+//   unmount: abort in-flight requests + revokeObjectURL (prevent leaks, safe with React StrictMode double-run)
 import { useEffect, useRef, useState } from 'react'
 import { client } from '../core.js'
 import { usePeerMediaDefaults } from './context.js'
@@ -29,7 +29,7 @@ export function usePeerMedia({ url, peer, signaling } = {}) {
       .load(url, { peer: effectivePeer, signaling: effectiveSignaling, signal: ac.signal })
       .then((res) => {
         if (ac.signal.aborted) {
-          // 竞态：abort 后 resolve（blob 已拼完）——立即 revoke，不留悬空 src
+          // Race: resolved after abort (blob already assembled) — revoke immediately, no dangling src
           URL.revokeObjectURL(res.blobUrl)
           return
         }
@@ -37,7 +37,7 @@ export function usePeerMedia({ url, peer, signaling } = {}) {
         setState({ status: 'ready', src: res.blobUrl, mime: res.mime, error: null })
       })
       .catch((err) => {
-        if (err.name === 'AbortError') return // 卸载/重载触发，非错误
+        if (err.name === 'AbortError') return // triggered by unmount/reload, not an error
         setState({ status: 'error', src: null, mime: null, error: err })
       })
 

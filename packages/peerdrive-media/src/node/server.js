@@ -1,49 +1,50 @@
-// server.js — Node 端资源提供者：peerjs 节点 + fetch，把 URL 资源经
-// WebRTC DataChannel 流式分块发给网页端（React/vanilla 组件）。
+// server.js — Node-side resource provider: peerjs node + fetch, streams URL resources in chunks
+// via WebRTC DataChannel to the web side (React/vanilla components).
 //
-// 运行要求：
-//   1. Node >= 22（原生 WebSocket/fetch；peerjs 信令依赖 WebSocket）
-//   2. @roamhq/wrtc（本包 optionalDependencies）——peerjs 在 Node 无内置
-//      WebRTC 实现，必须注入全局 RTC。安装失败时本模块 import 即报错。
-//   3. signaling 必须显式传 secure —— peerjs 的 isSecure() 读 location，
-//      Node 下会 ReferenceError（真实坑：自托管 host 且未传 secure 时崩）。
+// Requirements:
+//   1. Node >= 22 (native WebSocket/fetch; peerjs signaling depends on WebSocket)
+//   2. @roamhq/wrtc (this package's optionalDependencies) — peerjs has no built-in
+//      WebRTC implementation in Node, must inject global RTC. Module import fails if installation fails.
+//   3. signaling must explicitly pass secure — peerjs's isSecure() reads location,
+//      which causes ReferenceError in Node (real issue: crashes when using self-hosted host without secure).
 //
-// 安全边界：allow(url) 白名单必须显式配置（默认全拒）——本节点是任意
-// 网页端都能连的公共 peer，不设白名单等于开放任意 URL 抓取（SSRF）。
+// Security boundary: allow(url) whitelist must be explicitly configured (default deny all) — this
+// node is a public peer connectable by any web page, no whitelist means open arbitrary URL fetching (SSRF).
 //
-// 多 DataChannel 架构（2026-09-06）：
-//   - 控制通道（label='control'）：keepalive ping/ping-ack
-//   - 文件通道（label='file-{reqId}'）：每个文件请求一条独立通道
-//   - 并发：多条文件通道可同时传输，互不阻塞
+// Multi-DataChannel architecture (2026-09-06):
+//   - Control channel (label='control'): keepalive ping/ping-ack
+//   - File channel (label='file-{reqId}'): one independent channel per file request
+//   - Concurrent: multiple file channels can transfer simultaneously, non-blocking
 import wrtc from '@roamhq/wrtc'
 import { CHUNK_SIZE, guessMime, parseFrame } from '../protocol.js'
 
-// 注入全局 RTC：peerjs 直接用全局 RTCPeerConnection（bundler 里
-// `new RTCPeerConnection(...)`），Node 没有内置实现。
-// 必须在 peerjs 模块加载之前执行（见下方动态 import 原因）。
+// Inject global RTC: peerjs uses global RTCPeerConnection directly (`new RTCPeerConnection(...)`)
+// in its bundler, Node has no built-in implementation.
+// Must execute before peerjs module loads (see dynamic import reason below).
 globalThis.RTCPeerConnection = wrtc.RTCPeerConnection
 globalThis.RTCSessionDescription = wrtc.RTCSessionDescription
 globalThis.RTCIceCandidate = wrtc.RTCIceCandidate
 
-// peerjs 的 supports 检测（isWebRTCSupported 等）在**模块加载时**以 IIFE
-// 一次性计算并缓存（util 单例）。ESM import 会 hoist——静态 import peerjs
-// 必然先于本文件的注入代码执行，导致 supports 缓存为全 false（运行时
-// 报 browser-incompatible，真实坑：E2E 首次跑通前踩中）。
-// 因此必须动态 import：模块体先注入 RTC，再 await import('peerjs') 加载。
-// 注意：若宿主程序在此之前已 import 过 peerjs（Node 无 RTC），其 supports
-// 已缓存 false，本包无法补救——文档要求先引 peerdrive-media/node。
+// peerjs's supports detection (isWebRTCSupported etc.) is computed and cached **at module load time**
+// via IIFE (util singleton). ESM imports are hoisted — static import of peerjs
+// necessarily executes before this file's injection code, causing supports cache to be all false
+// (runtime reports browser-incompatible, real issue: encountered on first E2E run).
+// Therefore must use dynamic import: module body injects RTC first, then await import('peerjs').
+// Note: if the host application already imported peerjs before this (Node without RTC), its supports
+// is already cached as false, this package cannot fix it — documentation requires importing
+// peerdrive-media/node first.
 let Peer
 async function loadPeerjs() {
   if (!Peer) {
-    // CJS 包动态 import：named export 由 cjs-module-lexer 静态分析，peerjs
-    // 的导出无法被识别——必须走 mod.default（module.exports 对象）
+    // CJS package dynamic import: named exports are statically analyzed by cjs-module-lexer,
+    // peerjs's exports cannot be recognized — must use mod.default (module.exports object)
     const mod = await import('peerjs')
     Peer = mod.default.Peer
   }
   return Peer
 }
 
-// 自托管信令默认值（必须显式 secure=true，原因见文件头注释）。
+// Self-hosted signaling defaults (must explicitly set secure=true, see file header comments for reason).
 export const DEFAULT_SIGNALING = {
   host: '0.peerjs.com',
   port: 443,
@@ -52,31 +53,31 @@ export const DEFAULT_SIGNALING = {
   path: '/',
 }
 
-// LOW_WATER 发送背压阈值：DataChannel 缓冲超阈值时暂停读 fetch 流。
-// 为什么需要：peerjs raw 模式无 chunker、wrtc 的 send 不阻塞——无背压时
-// 大文件会把全部块塞进 SCTP 缓冲，内存无界增长。
+// LOW_WATER send backpressure threshold: pause reading fetch stream when DataChannel buffer exceeds threshold.
+// Why needed: peerjs raw mode has no chunker, wrtc's send is non-blocking — without backpressure
+// large files would stuff all blocks into SCTP buffer, unbounded memory growth.
 const LOW_WATER = 4 * 1024 * 1024
 
-// keepalive 参数（与 core.js 同协议）：Node 端每 5s 发 ping 制造流量，
-// 任何帧（含浏览器端 ping）刷新活跃；15s 无帧 → 主动 close 连接——
-// 网页端崩溃/断网时 Node 端不悬挂（此前只能等 SCTP 超时，无 STUN 环境
-// 可达数十秒）。发现背景：代码审阅 2026-08-18（第 4 项优化）。
+// keepalive parameters (same protocol as core.js): Node side sends ping every 5s to generate traffic,
+// any frame (including browser-side pings) refreshes active; 15s without frames → actively close connection —
+// when web page crashes/disconnects, Node side doesn't hang (previously could only wait for
+// SCTP timeout, which can be tens of seconds in no-STUN environments). Discovery: code review 2026-08-18 (item 4).
 const KEEPALIVE_INTERVAL = 5000
 const KEEPALIVE_TIMEOUT = 15000
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-// createPeerMediaServer 启动 Node 端资源提供者。
+// createPeerMediaServer starts the Node-side resource provider.
 //
 // options:
-//   peerId    — 本节点在信令服务器上的 ID（网页端连这个 id）
-//   signaling — 信令配置（默认公共云 0.peerjs.com）
-//   allow     — URL 白名单 (url) => boolean，默认全拒，必须显式配置
-//   fetchImpl — 自定义 fetch（测试注入；默认 globalThis.fetch）
-//   chunkSize — 数据块大小（默认 CHUNK_SIZE 64KB）
-//   onRequest — 日志钩子 ({url, peer, status, bytes, ms})
+//   peerId    — this node's ID on the signaling server (web side connects to this id)
+//   signaling — signaling configuration (defaults to public cloud 0.peerjs.com)
+//   allow     — URL whitelist (url) => boolean, default deny all, must be explicitly configured
+//   fetchImpl — custom fetch (for test injection; default globalThis.fetch)
+//   chunkSize — data block size (default CHUNK_SIZE 64KB)
+//   onRequest — logging hook ({url, peer, status, bytes, ms})
 //
-// 返回 { peer, close }。close() 销毁 peer（断连 + 清理）。
+// Returns { peer, close }. close() destroys peer (disconnect + cleanup).
 export async function createPeerMediaServer({
   peerId,
   signaling = DEFAULT_SIGNALING,
@@ -87,8 +88,8 @@ export async function createPeerMediaServer({
 } = {}) {
   if (!peerId) throw new Error('peerdrive-media: peerId is required')
   if (typeof signaling.secure !== 'boolean') {
-    // Node 无 location，peerjs isSecure() 会 ReferenceError——强制显式
-    // （注意不能用 !signaling.secure 判断：显式 secure:false 是合法值）
+    // Node has no location, peerjs isSecure() causes ReferenceError — force explicit
+    // (note: don't use !signaling.secure to check: explicit secure:false is a valid value)
     throw new Error('peerdrive-media: signaling.secure must be explicitly set (true/false) in Node')
   }
 
@@ -100,7 +101,7 @@ export async function createPeerMediaServer({
     secure: signaling.secure,
     key: signaling.key,
     path: signaling.path || '/',
-    // 诊断：PEERDRIVE_MEDIA_DEBUG=1 时输出 peerjs ICE/信令日志
+    // Diagnostics: output peerjs ICE/signaling logs when PEERDRIVE_MEDIA_DEBUG=1
     debug: process.env.PEERDRIVE_MEDIA_DEBUG ? 3 : 0,
   })
 
@@ -110,33 +111,33 @@ export async function createPeerMediaServer({
     peer.once('error', (err) => { clearTimeout(to); reject(new Error(`peerdrive-media: signaling error: ${err?.type || err}`)) })
   })
 
-  // serveConnection 处理一条网页端 DataConnection。
-  // 多 DataChannel 架构：每条连接独立处理一个文件请求，支持并发。
+  // serveConnection handles a single web-side DataConnection.
+  // Multi-DataChannel architecture: each connection independently handles one file request, supporting concurrency.
   const serveConnection = (conn) => {
     let lastActive = Date.now()
-    // keepalive：发 ping 制造流量 + 超时主动断开（见文件头 KEEPALIVE 注释）
+    // keepalive: send ping to generate traffic + actively disconnect on timeout (see KEEPALIVE comments in file header)
     const ka = setInterval(() => {
       if (Date.now() - lastActive > KEEPALIVE_TIMEOUT) {
         clearInterval(ka)
-        try { conn.close() } catch { /* 幂等 */ }
+        try { conn.close() } catch { /* idempotent */ }
         return
       }
-      try { conn.send(JSON.stringify({ type: 'ping' })) } catch { /* 连接已死 */ }
+      try { conn.send(JSON.stringify({ type: 'ping' })) } catch { /* connection dead */ }
     }, KEEPALIVE_INTERVAL)
 
     conn.on('data', (data) => {
-      lastActive = Date.now() // 任何帧都刷新活跃
-      if (typeof data !== 'string') return // 二进制帧不应由网页端发出
+      lastActive = Date.now() // any frame refreshes active
+      if (typeof data !== 'string') return // binary frames should not be sent by web side
       const msg = parseFrame(data)
       if (!msg) return
 
-      // 控制帧：ping-ack（浏览器回复 Node 的 ping）
+      // Control frame: ping-ack (browser replies to Node's ping)
       if (msg.type === 'ping-ack') return
 
-      // 文件请求：url
+      // File request: url
       if (msg.type === 'url') {
         handleUrlRequest(conn, msg).catch((err) => {
-          try { conn.send(JSON.stringify({ type: 'err', msg: err.message, reqId: msg.reqId })) } catch { /* 通道已死 */ }
+          try { conn.send(JSON.stringify({ type: 'err', msg: err.message, reqId: msg.reqId })) } catch { /* channel dead */ }
         })
       }
     })
@@ -144,7 +145,7 @@ export async function createPeerMediaServer({
   }
   peer.on('connection', serveConnection)
 
-  // handleUrlRequest 拉取 URL 并流式回发：meta → 块×N → done。
+  // handleUrlRequest fetches URL and streams response: meta → blocks×N → done.
   async function handleUrlRequest(conn, msg) {
     const { url, reqId } = msg
     const t0 = Date.now()
@@ -164,8 +165,8 @@ export async function createPeerMediaServer({
 
       let sent = 0
       if (resp.body) {
-        // 流式读取 + 分块 + 背压：块直接 send（raw 模式无 chunker 分片）。
-        // chunk 是 Uint8Array（Node fetch 流），wrtc send 接受 ArrayBufferView。
+        // Streaming read + chunking + backpressure: blocks sent directly (raw mode has no chunker fragmentation).
+        // chunk is Uint8Array (Node fetch stream), wrtc send accepts ArrayBufferView.
         for await (const chunk of resp.body) {
           const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk)
           for (let off = 0; off < bytes.length; off += chunkSize) {
@@ -173,7 +174,7 @@ export async function createPeerMediaServer({
             conn.send(piece)
             sent += piece.length
             while (conn.dataChannel && conn.dataChannel.bufferedAmount > LOW_WATER) {
-              await sleep(10) // 背压：对端消费慢时暂停读流
+              await sleep(10) // backpressure: pause stream reading when peer is slow
             }
           }
         }
@@ -189,12 +190,12 @@ export async function createPeerMediaServer({
     peerId,
     peer,
     close() {
-      try { peer.destroy() } catch { /* 幂等 */ }
+      try { peer.destroy() } catch { /* idempotent */ }
     },
   }
 }
 
-// allowHttp 便捷白名单：允许指定前缀的 http(s) URL。
+// allowHttp convenient whitelist: allows http(s) URLs with specified prefixes.
 export const allowPrefix = (prefixes) => (url) =>
   prefixes.some((p) => url.startsWith(p))
 

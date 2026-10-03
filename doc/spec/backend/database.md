@@ -1,29 +1,29 @@
-# Peerdrive 数据库设计
+# Peerdrive Database Design
 
-## 概述
+## Overview
 
-Peerdrive 使用 SQLite3 存储元数据，将内容标识符（SHA256）与实际物理存储位置解耦。同一内容可对应多份副本（多行记录），每份副本独立标记可用状态。
+Peerdrive uses SQLite3 to store metadata, decoupling content identifiers (SHA256) from actual physical storage locations. The same content can correspond to multiple replicas (multiple rows), each independently marked for availability status.
 
-## 技术栈
+## Tech Stack
 
-- **数据库**: SQLite3
-- **驱动**: `github.com/mattn/go-sqlite3`
-- **原因**: 零配置、文件级、轻量，适合元数据存储
+- **Database**: SQLite3
+- **Driver**: `github.com/mattn/go-sqlite3`
+- **Reason**: Zero configuration, file-level, lightweight — suitable for metadata storage
 
-## 表结构
+## Table Structure
 
-### `users` — 用户账户
+### `users` — User accounts
 
-| 列名 | 类型 | 约束 | 说明 |
-|------|------|------|------|
-| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | 自增主键 |
-| `username` | `TEXT` | `NOT NULL UNIQUE` | 用户名 |
-| `password_hash` | `TEXT` | `NOT NULL` | 密码哈希 |
-| `authkey` | `TEXT` | `UNIQUE` | 当前有效会话密钥 |
-| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | 创建时间 |
-| `updated_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | 更新时间 |
+| Column | Type | Constraint | Description |
+|--------|------|------------|-------------|
+| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | Auto-incrementing primary key |
+| `username` | `TEXT` | `NOT NULL UNIQUE` | Username |
+| `password_hash` | `TEXT` | `NOT NULL` | Password hash |
+| `authkey` | `TEXT` | `UNIQUE` | Current valid session key |
+| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | Creation time |
+| `updated_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | Update time |
 
-**DDL**：
+**DDL**:
 ```sql
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,19 +36,19 @@ CREATE TABLE IF NOT EXISTS users (
 ```
 
 
-### `files` — 文件元数据
+### `files` — File metadata
 
-| 列名 | 类型 | 约束 | 说明 |
-|------|------|------|------|
-| `hash` | `TEXT` | `PRIMARY KEY` | 文件内容的 SHA256 哈希（唯一） |
-| `size` | `INTEGER` | `DEFAULT 0` | 文件大小（字节） |
-| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | 首次注册时间 |
-| `mime_type` | `TEXT` | `DEFAULT ''` | MIME 类型（如 `image/png`） |
-| `gziped` | `INTEGER` | `DEFAULT 0` | 文件是否为 gzip 压缩 |
-| `filename` | `TEXT` | — | 原始文件名，用于下载时的 `Content-Disposition` |
-| `type` | `TEXT` | `DEFAULT 'blob'` | 文件类型：`blob`（普通文件）、`anon_collection`（匿名合集） |
+| Column | Type | Constraint | Description |
+|--------|------|------------|-------------|
+| `hash` | `TEXT` | `PRIMARY KEY` | SHA256 hash of file content (unique) |
+| `size` | `INTEGER` | `DEFAULT 0` | File size (bytes) |
+| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | First registration time |
+| `mime_type` | `TEXT` | `DEFAULT ''` | MIME type (e.g. `image/png`) |
+| `gziped` | `INTEGER` | `DEFAULT 0` | Whether the file is gzip compressed |
+| `filename` | `TEXT` | — | Original filename, used for `Content-Disposition` during download |
+| `type` | `TEXT` | `DEFAULT 'blob'` | File type: `blob` (regular file), `anon_collection` (anonymous collection) |
 
-**DDL**：
+**DDL**:
 ```sql
 CREATE TABLE IF NOT EXISTS file_meta (
     hash TEXT PRIMARY KEY,
@@ -61,17 +61,17 @@ CREATE TABLE IF NOT EXISTS file_meta (
 );
 ```
 
-### `file_providers` — 文件存储位置（多副本）
+### `file_providers` — File storage locations (multi-replica)
 
-| 列名 | 类型 | 约束 | 说明 |
-|------|------|------|------|
-| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | 自增主键 |
-| `hash` | `TEXT` | `NOT NULL REFERENCES file_meta(hash)` | 文件 SHA256（外键） |
-| `provider_type` | `TEXT` | `NOT NULL` | 提供者类型：`local`（本地）、`http`（远程） |
-| `path` | `TEXT` | `NOT NULL` | 上传文件：`{h[:2]}/{h}`；注册文件：用户指定路径 |
-| `available` | `INTEGER` | `DEFAULT 1` | 可用标记：1=可用，0=不可用 |
+| Column | Type | Constraint | Description |
+|--------|------|------------|-------------|
+| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | Auto-incrementing primary key |
+| `hash` | `TEXT` | `NOT NULL REFERENCES file_meta(hash)` | File SHA256 (foreign key) |
+| `provider_type` | `TEXT` | `NOT NULL` | Provider type: `local` (local), `http` (remote) |
+| `path` | `TEXT` | `NOT NULL` | Uploaded files: `{h[:2]}/{h}`; registered files: user-specified path |
+| `available` | `INTEGER` | `DEFAULT 1` | Availability flag: 1=available, 0=unavailable |
 
-**DDL**：
+**DDL**:
 ```sql
 CREATE TABLE IF NOT EXISTS file_providers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,80 +83,80 @@ CREATE TABLE IF NOT EXISTS file_providers (
 CREATE INDEX IF NOT EXISTS idx_provider_hash ON file_providers(hash);
 ```
 
-### `collections` — 注册用户合集
+### `collections` — Registered user collections
 
-| 列名 | 类型 | 约束 | 说明 |
-|------|------|------|------|
-| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | 自增主键 |
-| `username` | `TEXT` | `NOT NULL` | 所属用户（命名空间） |
-| `collection_name` | `TEXT` | `NOT NULL` | 合集名称 |
-| `current_hash` | `TEXT` | `DEFAULT NULL` | 当前最新快照的 SHA256（指向 files 表的一条 type='anon_collection' 记录） |
-| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | 创建时间 |
+| Column | Type | Constraint | Description |
+|--------|------|------------|-------------|
+| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | Auto-incrementing primary key |
+| `username` | `TEXT` | `NOT NULL` | Owning user (namespace) |
+| `collection_name` | `TEXT` | `NOT NULL` | Collection name |
+| `current_hash` | `TEXT` | `DEFAULT NULL` | SHA256 of the current latest snapshot (points to a type='anon_collection' record in the files table) |
+| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | Creation time |
 
-**约束**：`UNIQUE(username, collection_name)`
+**Constraint**: `UNIQUE(username, collection_name)`
 
-### `collection_entries` — 合集条目（工作区）
+### `collection_entries` — Collection entries (workspace)
 
-| 列名 | 类型 | 约束 | 说明 |
-|------|------|------|------|
-| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | 自增主键 |
-| `collection_id` | `INTEGER` | `NOT NULL` | 外键 → collections(id) |
-| `path` | `TEXT` | `NOT NULL` | 文件相对路径 |
-| `file_hash` | `TEXT` | `NOT NULL` | 文件 SHA256 hash |
+| Column | Type | Constraint | Description |
+|--------|------|------------|-------------|
+| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | Auto-incrementing primary key |
+| `collection_id` | `INTEGER` | `NOT NULL` | Foreign key → collections(id) |
+| `path` | `TEXT` | `NOT NULL` | File relative path |
+| `file_hash` | `TEXT` | `NOT NULL` | File SHA256 hash |
 
-**约束**：`UNIQUE(collection_id, path)`，`FOREIGN KEY(collection_id) REFERENCES collections(id) ON DELETE CASCADE`
+**Constraint**: `UNIQUE(collection_id, path)`, `FOREIGN KEY(collection_id) REFERENCES collections(id) ON DELETE CASCADE`
 
-### `collection_versions` — 版本快照记录
+### `collection_versions` — Version snapshot records
 
-| 列名 | 类型 | 约束 | 说明 |
-|------|------|------|------|
-| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | 自增主键 |
-| `collection_id` | `INTEGER` | `NOT NULL` | 外键 → collections(id) |
-| `version_number` | `INTEGER` | `NOT NULL` | 版本号（从 1 开始递增） |
-| `commit_message` | `TEXT` | — | 提交信息 |
-| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | 提交时间 |
-| `parent_version_id` | `INTEGER` | — | 父版本 ID（形成版本链） |
+| Column | Type | Constraint | Description |
+|--------|------|------------|-------------|
+| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | Auto-incrementing primary key |
+| `collection_id` | `INTEGER` | `NOT NULL` | Foreign key → collections(id) |
+| `version_number` | `INTEGER` | `NOT NULL` | Version number (incrementing from 1) |
+| `commit_message` | `TEXT` | — | Commit message |
+| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | Commit time |
+| `parent_version_id` | `INTEGER` | — | Parent version ID (forms a version chain) |
 
-**外键**：`FOREIGN KEY(collection_id) REFERENCES collections(id) ON DELETE CASCADE`
+**Foreign key**: `FOREIGN KEY(collection_id) REFERENCES collections(id) ON DELETE CASCADE`
 
-### `version_entries` — 版本快照内容
+### `version_entries` — Version snapshot content
 
-| 列名 | 类型 | 约束 | 说明 |
-|------|------|------|------|
-| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | 自增主键 |
-| `version_id` | `INTEGER` | `NOT NULL` | 外键 → collection_versions(id) |
-| `path` | `TEXT` | `NOT NULL` | 文件相对路径 |
-| `file_hash` | `TEXT` | `NOT NULL` | 文件 SHA256 hash |
+| Column | Type | Constraint | Description |
+|--------|------|------------|-------------|
+| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | Auto-incrementing primary key |
+| `version_id` | `INTEGER` | `NOT NULL` | Foreign key → collection_versions(id) |
+| `path` | `TEXT` | `NOT NULL` | File relative path |
+| `file_hash` | `TEXT` | `NOT NULL` | File SHA256 hash |
 
-### `transfer_tasks` — 异步任务跟踪
+### `transfer_tasks` — Asynchronous task tracking
 
-| 列名 | 类型 | 约束 | 说明 |
-|------|------|------|------|
-| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | 自增主键 |
-| `type` | `TEXT` | `NOT NULL` | 任务类型 |
-| `status` | `TEXT` | `DEFAULT 'pending'` | 状态：pending/running/completed/failed |
-| `params` | `TEXT` | `DEFAULT ''` | 任务参数（JSON） |
-| `result` | `TEXT` | `DEFAULT ''` | 任务结果（JSON） |
-| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | 创建时间 |
-| `updated_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | 更新时间 |
+| Column | Type | Constraint | Description |
+|--------|------|------------|-------------|
+| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | Auto-incrementing primary key |
+| `type` | `TEXT` | `NOT NULL` | Task type |
+| `status` | `TEXT` | `DEFAULT 'pending'` | Status: pending/running/completed/failed |
+| `params` | `TEXT` | `DEFAULT ''` | Task parameters (JSON) |
+| `result` | `TEXT` | `DEFAULT ''` | Task result (JSON) |
+| `created_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | Creation time |
+| `updated_at` | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | Update time |
 
-## 设计要点
+## Design Notes
 
-### 1. hash = PK — 元数据唯一
-`file_meta` 以 hash 为主键，每份内容唯一一行。`size`、`mime_type`、`gziped` 等属性记录在专用列中。
+### 1. hash = PK — Unique metadata
+`file_meta` uses hash as its primary key, with one row per unique content. Properties such as `size`, `mime_type`, `gziped` are recorded in dedicated columns.
 
-### 2. 多副本存储
-`file_providers` 表支持同一文件多份副本。下载时循环尝试，失败后 `available=0` 并试下一副本。
+### 2. Multi-replica storage
+The `file_providers` table supports multiple replicas for the same file. During download, the system cycles through replicas; upon failure it sets `available=0` and tries the next replica.
 
-### 3. type 列区分文件角色
-- `blob` — 普通上传/注册的文件
-- `anon_collection` — 匿名合集元数据 JSON
+### 3. type column distinguishes file roles
+- `blob` — Regular uploaded/registered files
+- `anon_collection` — Anonymous collection metadata JSON
 
-### 4. 注册用户合集与匿名合集的关系
-- 匿名合集 = 不可变 JSON，由 hash 寻址（存入 `file_meta` + `file_providers`）
-- 注册用户合集 = 可变指针（`collections` 表），通过 `current_hash` 指向最新匿名快照
-- Commit = 生成匿名快照 JSON + 更新 `current_hash`
-- GetCollection 优先返回 `current_hash` 对应的快照内容
+### 4. Relationship between registered user collections and anonymous collections
+- Anonymous collection = immutable JSON, addressed by hash (stored in `file_meta` + `file_providers`)
+- Registered user collection = mutable pointer (`collections` table), pointing to the latest anonymous snapshot via `current_hash`
+- Commit = generate anonymous snapshot JSON + update `current_hash`
+- GetCollection preferentially returns the snapshot content corresponding to `current_hash`
 
-### 5. 迁移兼容
-旧 `files` 表需手动迁移到 `file_meta` + `file_providers`。新系统建表时自动创建新表，旧表数据暂不迁移。
+### 5. Migration compatibility
+The old `files` table must be manually migrated to `file_meta` + `file_providers`. The new system automatically creates new tables during setup; old table data is not migrated for now.

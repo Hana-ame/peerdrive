@@ -1,13 +1,15 @@
-// Package ech 提供 ECH (Encrypted Client Hello) HTTP 客户端。
+// Package ech provides an ECH (Encrypted Client Hello) HTTP client.
 //
-// 背景：twitter 的媒体 CDN（video-cf.twimg.com）在中国大陆直连被墙，
-// 但它在 Cloudflare 后面。ECH 域前置（domain fronting）利用
-// cloudflare-ech.com 作为外壳：TCP 连 cloudflare-ech.com（不被墙），
-// TLS 握手时通过 ECH 加密的 ClientHello 把真实目标域名
-// （video-cf.twimg.com）告诉 Cloudflare 边缘，由边缘路由到目标。
-// 因为 ClientHello 里的 SNI 被 ECH 加密，GFW 只看到外壳域名，放行。
+// Background: Twitter's media CDN (video-cf.twimg.com) is blocked from mainland
+// China, but it is behind Cloudflare. ECH domain fronting uses cloudflare-ech.com
+// as a shell: TCP connects to cloudflare-ech.com (not blocked), and during the TLS
+// handshake, the ECH-encrypted ClientHello tells the Cloudflare edge the real
+// target domain (video-cf.twimg.com), which routes to the target. Because the
+// SNI in the ClientHello is encrypted by ECH, the GFW only sees the shell domain
+// and allows it.
 //
-// 本包不依赖 wintools，独立实现（peerdrive 生产版 media-node 用）。
+// This package does not depend on wintools and is independently implemented (used by
+// the peerdrive production media-node).
 package ech
 
 import (
@@ -27,7 +29,7 @@ import (
 	"time"
 )
 
-// ---- ECH 配置缓存 ----
+// ---- ECH config cache ----
 
 type echEntry struct {
 	config []byte
@@ -66,7 +68,7 @@ func setCachedECH(domain string, config []byte, ttl int) {
 	cacheMu.Unlock()
 }
 
-// ---- DoH 获取 ECH 配置 ----
+// ---- DoH for fetching ECH config ----
 
 type dohResponse struct {
 	Answer []struct {
@@ -114,21 +116,21 @@ var (
 	nonHexRE      = regexp.MustCompile(`[^0-9a-fA-F]`)
 )
 
-// DefaultDoHURL 默认 DoH 端点（moonchan.xyz 自托管 DNS over HTTPS，
-// 返回 cloudflare-ech.com 的 SVCB/ECH 记录）。
+// DefaultDoHURL is the default DoH endpoint (moonchan.xyz self-hosted DNS over HTTPS,
+// returns SVCB/ECH records for cloudflare-ech.com).
 const DefaultDoHURL = "https://moonchan.xyz/doh"
 
-// Config 客户端配置。
+// Config is the client configuration.
 type Config struct {
-	// DoHURL 获取 ECH 配置的端点（默认 DefaultDoHURL）。
+	// DoHURL is the endpoint for fetching ECH config (defaults to DefaultDoHURL).
 	DoHURL string
-	// ProxyURL HTTP 代理（"http://host:port"）；空则读 HTTPS_PROXY 环境变量。
+	// ProxyURL is the HTTP proxy ("http://host:port"); empty reads HTTPS_PROXY env var.
 	ProxyURL string
-	// ShellDomain ECH 外壳域名（默认 cloudflare-ech.com）。
+	// ShellDomain is the ECH shell domain (defaults to cloudflare-ech.com).
 	ShellDomain string
 }
 
-// fetchECHConfig 通过 DoH 获取 ECH 配置（type=65 SVCB 记录），带 TTL 缓存。
+// fetchECHConfig fetches ECH config via DoH (type=65 SVCB records), with TTL caching.
 func fetchECHConfig(ctx context.Context, cfg Config) ([]byte, error) {
 	dohURL := cfg.DoHURL
 	if dohURL == "" {
@@ -194,7 +196,7 @@ func fetchECHConfig(ctx context.Context, cfg Config) ([]byte, error) {
 	return nil, fmt.Errorf("no ECH config found for %s from %s", domain, dohURL)
 }
 
-// proxyTransport 构造走代理的 http.Transport（DoH 用）。
+// proxyTransport constructs an http.Transport using a proxy (for DoH).
 func proxyTransport(cfg Config) *http.Transport {
 	tr := &http.Transport{
 		ForceAttemptHTTP2:   true,
@@ -211,7 +213,7 @@ func proxyTransport(cfg Config) *http.Transport {
 	return tr
 }
 
-// effectiveProxy 返回要使用的代理：显式配置优先，否则读 HTTPS_PROXY。
+// effectiveProxy returns the proxy to use: explicit config takes priority, otherwise reads HTTPS_PROXY.
 func effectiveProxy(explicit string) string {
 	if explicit != "" {
 		return explicit
@@ -219,13 +221,13 @@ func effectiveProxy(explicit string) string {
 	return os.Getenv("HTTPS_PROXY")
 }
 
-// dialConn 拨号到 host:port，支持 HTTP 代理（CONNECT 隧道）。
+// dialConn dials host:port, supporting HTTP proxy (CONNECT tunnel).
 func dialConn(ctx context.Context, network, addr string, proxy string) (net.Conn, error) {
 	if proxy == "" {
 		d := &net.Dialer{Timeout: 10 * time.Second}
 		return d.DialContext(ctx, network, addr)
 	}
-	// HTTP 代理：先连代理，再发 CONNECT 建隧道
+	// HTTP proxy: connect to the proxy first, then send CONNECT to establish the tunnel
 	pu, err := url.Parse(proxy)
 	if err != nil {
 		return nil, err
@@ -236,13 +238,13 @@ func dialConn(ctx context.Context, network, addr string, proxy string) (net.Conn
 	if err != nil {
 		return nil, err
 	}
-	// 发送 CONNECT 请求
+	// Send CONNECT request
 	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", addr, addr)
 	if _, err := conn.Write([]byte(connectReq)); err != nil {
 		conn.Close()
 		return nil, err
 	}
-	// 读取响应行（简化：读第一行判断 200）
+	// Read the response (simplified: read the first line to check for 200)
 	buf := make([]byte, 0, 256)
 	tmp := make([]byte, 1)
 	statusLine := ""
@@ -263,10 +265,10 @@ func dialConn(ctx context.Context, network, addr string, proxy string) (net.Conn
 		}
 		_ = statusLine
 	}
-	// 判断状态码（第一行 "HTTP/1.1 200"）
+	// Parse the status code (first line "HTTP/1.1 200")
 	head := string(buf)
 	rest := head
-	// 去掉状态行前的可能前缀
+	// Strip any possible prefix before the status line
 	idx := 0
 	for idx < len(rest) && rest[idx] != ' ' {
 		idx++
@@ -286,13 +288,13 @@ func dialConn(ctx context.Context, network, addr string, proxy string) (net.Conn
 
 // ---- Client ----
 
-// Client 是 ECH 域前置 HTTP 客户端。
-// 所有请求 TCP 连 shellDomain，TLS 内层 SNI 为真实目标域名。
+// Client is an ECH domain-fronting HTTP client.
+// All requests TCP-connect to shellDomain; the inner TLS SNI is the real target domain.
 type Client struct {
 	inner *http.Client
 }
 
-// New 初始化 ECH 客户端。首次调用获取 ECH 配置。
+// New initializes an ECH client. The first call fetches ECH config.
 func New(cfg Config) (*Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -303,7 +305,7 @@ func New(cfg Config) (*Client, error) {
 	return newClient(echConfig, cfg), nil
 }
 
-// newTransport 构造 ECH 域前置 transport。
+// newTransport constructs an ECH domain-fronting transport.
 func newTransport(echConfig []byte, cfg Config) *http.Transport {
 	shellDomain := cfg.ShellDomain
 	if shellDomain == "" {
@@ -344,13 +346,13 @@ func newClient(echConfig []byte, cfg Config) *Client {
 	return &Client{
 		inner: &http.Client{
 			Transport: newTransport(echConfig, cfg),
-			Timeout:   0, // 大文件不限时
+			Timeout:   0, // No timeout for large files
 		},
 	}
 }
 
-// Do 执行 HTTP 请求，经 ECH 域前置发出。
-// req.Host 被设为真实目标域名（内层 SNI + HTTP Host）。
+// Do executes an HTTP request via ECH domain fronting.
+// req.Host is set to the real target domain (inner SNI + HTTP Host).
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	if req.Host == "" {
 		req.Host = req.URL.Host
@@ -358,11 +360,11 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	return c.inner.Do(req)
 }
 
-// ---- 全局默认客户端 ----
+// ---- Global default client ----
 
 var defaultClient atomic.Pointer[Client]
 
-// InitDefault 显式初始化全局默认客户端（程序启动时调用）。
+// InitDefault explicitly initializes the global default client (call at program startup).
 func InitDefault(cfg Config) error {
 	c, err := New(cfg)
 	if err != nil {
@@ -373,7 +375,7 @@ func InitDefault(cfg Config) error {
 	return nil
 }
 
-// Do 用全局默认客户端执行 ECH 请求（首次自动初始化）。
+// Do executes an ECH request using the global default client (auto-initializes on first use).
 func Do(req *http.Request) (*http.Response, error) {
 	c := defaultClient.Load()
 	if c == nil {
@@ -391,7 +393,7 @@ func Do(req *http.Request) (*http.Response, error) {
 
 var refreshCtx, refreshCancel = context.WithCancel(context.Background())
 
-// refreshLoop 每 5 分钟刷新 ECH 配置（Cloudflare 会轮换）。
+// refreshLoop refreshes ECH config every 5 minutes (Cloudflare rotates them).
 func refreshLoop(cfg Config) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()

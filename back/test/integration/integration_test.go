@@ -1,15 +1,16 @@
 //go:build integration
 
-// Package integration 集成测试（第 6 项优化 2026-08-18 起默认脱外网）：
-//   - 信令：TestMain 起全局自托管 signalserver（httptest 内存服务），
-//     所有节点指向它——不再依赖 0.peerjs.com 公共云（无需代理/外网）
-//   - 数据面：真实 WebRTC（同机双 pion host candidate 直连，无 STUN）
-//   - 发现：自托管 /announce + /nodes API（替代 MQTT）
-//   - 外网测试单独门控：
-//     - PEERDRIVE_MQTT_TEST=1 → MQTT 公共 broker 发现测试（mqtt_test.go）
-//     - PEERDRIVE_LIVE_TEST=1  → 线上全链路（live_test.go）
+// Package integration Integration tests (optimization item 6, 2026-08-18, now offline by default):
+//   - Signaling: TestMain starts a global self-hosted signalserver (httptest in-memory service);
+//     all nodes point to it -- no longer depends on the public cloud 0.peerjs.com (no proxy/internet needed)
+//   - Data plane: real WebRTC (same-machine dual pion host candidate direct connection, no STUN)
+//   - Discovery: self-hosted /announce + /nodes API (replacing MQTT)
+//   - External network tests separately gated:
+//     - PEERDRIVE_MQTT_TEST=1 -> MQTT public broker discovery tests (mqtt_test.go)
+//     - PEERDRIVE_LIVE_TEST=1  -> full online chain (live_test.go)
 //
-// 运行（无需外网，但 -p 1 串行必须：多组测试共享全局信令，并行互相干扰）：
+// Run (no external network needed, but -p 1 serial is mandatory: multiple test groups
+// share the global signaling, and running in parallel causes interference):
 //
 //	cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1
 package integration
@@ -33,12 +34,13 @@ import (
 	"peerdrive/internal/transport"
 )
 
-// selfHostedURL 全局自托管信令 + 发现服务器（TestMain 启动，脱外网）。
-// 第 6 项优化：集成测试不再依赖公共云信令——公共信令并行跑会互相干扰
-// 且必须代理/外网，自托管 httptest 本地串行稳定。
+// selfHostedURL global self-hosted signaling + discovery server (started by TestMain, offline).
+// Optimization item 6: integration tests no longer depend on public cloud signaling -- public
+// signaling causes mutual interference when run in parallel, and requires proxy/internet.
+// Self-hosted httptest is stable for local serial execution.
 var selfHostedURL string
 
-// TestMain 启动全局自托管信令服务器（PeerJS 协议 + 发现 API）。
+// TestMain starts the global self-hosted signaling server (PeerJS protocol + discovery API).
 func TestMain(m *testing.M) {
 	ss := signalserver.NewServer("testkey")
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -59,26 +61,26 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// splitHostPort 从 httptest URL 拆 host/port。
+// splitHostPort splits host/port from an httptest URL.
 func splitHostPort(url string) (string, string) {
 	trimmed := strings.TrimPrefix(url, "http://")
 	i := strings.LastIndex(trimmed, ":")
 	return trimmed[:i], trimmed[i+1:]
 }
 
-// randID 生成唯一节点 ID（避免公共信令上 ID 冲突）。
+// randID generates a unique node ID (avoids ID conflicts on public signaling).
 func randID(prefix string) string {
 	return fmt.Sprintf("%s-%s", prefix, randSuffix())
 }
 
-// randSuffix 4 字节随机 hex 后缀。
+// randSuffix 4-byte random hex suffix.
 func randSuffix() string {
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
-// writeTestFile 写入内容寻址测试文件（storage/{h[:2]}/{h}），返回 hash。
+// writeTestFile writes a content-addressed test file (storage/{h[:2]}/{h}), returns hash.
 func writeTestFile(t *testing.T, storageDir string, content []byte) string {
 	t.Helper()
 	h := sha256Hex(content)
@@ -97,15 +99,16 @@ func sha256Hex(b []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// newService 构造启用 PeerJS 的 service（P2P/BT 关闭加速）。
-// peers：静态对端列表（不设则仅被动接收/靠发现）。
-// 第 6 项优化：信令默认指向全局自托管服务器（selfHostedURL），脱外网；
-// mqtt=true 时发现走公共 broker（需 PEERDRIVE_MQTT_TEST=1，见 mqtt_test.go）。
+// newService constructs a service with PeerJS enabled (P2P/BT disabled for speed).
+// peers: static peer list (if not set, only passive receive/discovery).
+// Optimization item 6: signaling defaults to the global self-hosted server (selfHostedURL), offline;
+// mqtt=true uses the public broker for discovery (requires PEERDRIVE_MQTT_TEST=1, see mqtt_test.go).
 func newService(t *testing.T, id, storageDir string, mqtt bool, peers []string, collections ...string) *transport.PeerJSService {
 	t.Helper()
-	// 文件索引等需要 repository.DB；集成测试每个 service 用独立内存库
-	// （InitDB 重新 Open 覆盖全局单例——防止上一测试留下的 file_index 行
-	// 污染本测试的 sync/list 断言。发现背景：verb 测试连跑时 sync 多出文件）。
+	// File index etc. need repository.DB; each service in integration tests uses an independent in-memory DB
+	// (InitDB re-Opens the global singleton -- prevents file_index rows left by previous tests
+	// from polluting this test's sync/list assertions. Discovery background: verb tests ran in sequence and
+	// sync had extra files).
 	if err := repository.InitDB(":memory:"); err != nil {
 		t.Fatalf("InitDB: %v", err)
 	}
@@ -122,8 +125,8 @@ func newService(t *testing.T, id, storageDir string, mqtt bool, peers []string, 
 		cfg.MQTTBroker = "tcp://broker.emqx.io:1883"
 		cfg.MQTTCollections = join(collections)
 	}
-	// H2：create 只允许 DownloadDir 根内的文件；测试统一把根指到 storageDir，
-	// 需要 create 的测试把源文件写进 storageDir 即可。
+	// H2: create only allows files within the DownloadDir root; tests uniformly point the root to storageDir,
+	// tests that need create write the source file into storageDir.
 	cfg.DownloadDir = storageDir
 	svc := transport.NewPeerJSService(cfg, storageDir)
 	svc.Start()
@@ -131,13 +134,13 @@ func newService(t *testing.T, id, storageDir string, mqtt bool, peers []string, 
 	return svc
 }
 
-// waitConnections 轮询等待与指定节点的连接建立。
-// PEERDRIVE_SKIP_RTC=1（无 UDP 沙箱，如 docker 默认）时跳过互联类测试——
-// 数据面 WebRTC 需要 UDP；本地 WS/admin 类测试不经过本函数不受影响。
+// waitConnections polls until connections to specified nodes are established.
+// PEERDRIVE_SKIP_RTC=1 (no UDP sandbox, like docker default) skips interconnect tests --
+// data plane WebRTC requires UDP; local WS/admin tests don't go through this function and are unaffected.
 func waitConnections(t *testing.T, svc *transport.PeerJSService, want map[string]bool, timeout time.Duration) {
 	t.Helper()
 	if os.Getenv("PEERDRIVE_SKIP_RTC") == "1" {
-		t.Skip("PEERDRIVE_SKIP_RTC=1：无 UDP 环境跳过 WebRTC 互联测试")
+		t.Skip("PEERDRIVE_SKIP_RTC=1: no UDP environment, skipping WebRTC interconnect tests")
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -156,7 +159,7 @@ func waitConnections(t *testing.T, svc *transport.PeerJSService, want map[string
 		time.Sleep(500 * time.Millisecond)
 	}
 	got := svc.Connections()
-	t.Fatalf("连接状态未达预期 want=%v got=%v", want, keys(got))
+	t.Fatalf("connection state not as expected want=%v got=%v", want, keys(got))
 }
 
 func keys[V any](m map[string]V) []string {

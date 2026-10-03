@@ -1,29 +1,28 @@
-# Peerdrive 教程
+# Peerdrive Tutorial
 
-> 面向「想把这个项目跑起来用」的人，按章节推进；每一章都能独立跑完并自己验证。
-> **主线章节一律不用编译** —— 下载发布好的二进制就行。
-> 详细设计与踩坑记录不在这里，需要时看 `doc/NETDISK.md` · `doc/REFACTOR.md` · `doc/NODE.md`。
+> For people who "want to get this project running and use it," progresses chapter by chapter; each chapter can be independently completed and self-verified.
+> **Main-line chapters require no compilation** — just download the released binary.
+> Detailed design and pitfall records are not here — consult `doc/NETDISK.md` · `doc/REFACTOR.md` · `doc/NODE.md` when needed.
 
-## 主线
+## Main Line
 
-| 章节 | 内容 |
+| Chapter | Contents |
 |---|---|
-| [第一章：如何运行并连接自己的节点](01-run-and-connect.md) | 下载 release → 起节点（信令默认连公共的，不用部署）→ 用面板 / 管理台连上它 → 连不上怎么查 |
-| [第二章：添加本地文件到节点中查看](02-add-local-files.md) | 内容库 ≠ 共享清单 · 面板入库 / `POST /files/upload` / 登记目录 · 三种查看视角 · 「入库成功但清单里没有」的原因 |
-| [第三章：共享级别 —— public / unlisted / private](03-share-levels.md) | 列出来也给 / 不列出但能给 / 只给自己和好友 · 好友名单怎么填 · 「没共享」与「不列出」的差别 · 为什么必须配 PSK |
-| [第四章：自由选择共享什么](04-choose-what-to-share.md) | 管理台逐行勾选（含级别下拉）/ 命令行三个端点 · 单文件·目录·合集三种粒度 · 重启后选择还在 · 怎么验对端真的看得到 |
-| [第五章：跨节点保存](05-save-from-other-nodes.md) | 面板「保存」vs 管理台「保存选中」的区别 · 合集整包保存 · 传输页进度与取消 · 落盘位置与 sha256 校验 · 存进来 ≠ 共享出去 · 常见失败含义 |
+| [Chapter 1: How to Run and Connect Your Own Node](01-run-and-connect.md) | Download release → start node (signaling defaults to public, no deployment needed) → connect via panel / admin console → troubleshooting if it won't connect |
+| [Chapter 2: Adding Local Files to the Node for Viewing](02-add-local-files.md) | Content store ≠ share list · panel ingest / `POST /files/upload` / register directory · three viewing perspectives · why "ingest succeeded but not in the list" |
+| [Chapter 3: Share Levels — public / unlisted / private](03-share-levels.md) | Listed and granted / not listed but granted / only for self and friends · how to fill in the friend list · the difference between "not shared" and "unlisted" · why PSK is required |
+| [Chapter 4: Freely Choose What to Share](04-choose-what-to-share.md) | Admin console row-by-row checks (with level dropdown) / command line three endpoints · single file · directory · collection three granularities · selections persist after restart · how to verify peers can actually see it |
+| [Chapter 5: Cross-Node Save](05-save-from-other-nodes.md) | Panel "Save" vs admin console "Save Selected" difference · save entire collection · transfer page progress and cancel · save location and sha256 verification · saved ≠ shared out · common failure meanings |
 
-## 附录（可跳过，不占章节号）
+## Appendix (Can Be Skipped, Not a Chapter Number)
 
-| 附录 | 内容 |
+| Appendix | Contents |
 |---|---|
-| [附录 A：从源码编译](appendix-build-from-source.md) | 什么时候非自己编不可 · 编译节点/信令 · 一键端到端脚本 · 构建面板与管理台 · 跑测试 · 自己出发布包 |
+| [Appendix A: Build from Source](appendix-build-from-source.md) | When building from source is necessary · build node/signaling · one-shot e2e script · build panel and admin console · run tests · build your own release package |
 
-> 附录是「想改代码 / 跑还没发版的提交 / 跑测试 / 自己出包」时才看的材料，
-> 只是要把项目跑起来的话，读完第一章就够了。章节号留给主线，附录不占位。
+> The appendix is for "modifying code / running unreleased commits / running tests / building your own package" — if you just want to get the project running, finishing Chapter 1 is enough. Chapter numbers are reserved for the main line; appendices don't take slots.
 
-> ⚠️ 仓库里另有一份 `doc/archive/TUTORIAL.md`，写于 2026-05，讲的是当时的 libp2p 链路
-> （`p2p-test`、multiaddr、bootstrap peer）。**那些内容已随 libp2p 栈删除而失效**
-> （2026-08-16 全删，见 `doc/archive/LEGACY.md`）。当前互联层是 PeerJS + WebRTC，
-> 请以本目录为准。
+> ⚠️ The repo also contains `doc/archive/TUTORIAL.md`, written in 2026-05, covering the libp2p stack at that time
+> (`p2p-test`, multiaddr, bootstrap peer). **That content has been invalidated along with the libp2p stack removal**
+> (fully deleted 2026-08-16, see `doc/archive/LEGACY.md`). The current interconnect layer is PeerJS + WebRTC,
+> use this directory as the source of truth.

@@ -1,102 +1,94 @@
-# 第四章：自由选择共享什么
+# Chapter 4: Freely Choose What to Share
 
-> 接第三章：已经知道有 public / unlisted / private 三档级别。
-> 这一章解决「哪些内容**对外可见**、各给哪一档」——逐个勾，想给哪个给哪个，不用重启节点。
-> **全程不用编译**：管理台是点按钮，命令行是 `curl` 打本机 HTTP。
-
----
-
-## 4.0 先记住一句：持有 ≠ 共享
-
-第二章末尾那张表在这里继续生效（级别见第三章），只是这一章要把它变成可操作的：
-
-- 内容库里有一堆文件 → **只有你自己看得到**；
-- 共享清单里的文件 → **任何连上来的对端都能看到并取回**（`share` 帧）。
-
-共享清单默认是**空**的（`PEERDRIVE_SHARE_ENABLE=false`），也就是说：什么都不
-做的话，你节点里的文件对别人完全不可见。这不是限制，是默认保护。
+> Continues from Chapter 3: you already know there are three tiers — public / unlisted / private.
+> This chapter solves "which content is **visible to others**, and which tier to assign" — check items one by one, grant what you want to grant, no node restart required.
+> **No compilation needed throughout**: the admin console uses button clicks, and the command line uses `curl` against the local HTTP server.
 
 ---
 
-## 4.1 方式一：管理台里勾选（推荐）
+## 4.0 Remember One Thing First: Holding ≠ Sharing
 
-管理台（第一章 §1.5 装好的那个 `front/`）打开 **我的网盘**：
+The table at the end of Chapter 2 continues to apply here (levels described in Chapter 3), but this chapter makes it actionable:
 
-1. 顶部多了一条共享条：
-   - 左边是**总开关**（`对外共享：关` → 点一下变 `对外共享：开`）；
-   - 中间显示 `已共享 N / M 个文件`；
-   - 下面一条是三档级别说明 + **好友节点 ID** 输入框（`private` 放行给谁，见第三章）；
-2. 文件表格每一行多了一个 **共享 / 取消共享** 按钮；
-3. 已共享的行还会多一个**级别下拉**（公开 / 不列出 / 私密）——没共享的行不显示它，
-   免得以为"选了级别就等于共享出去了"；
-4. 点了立刻生效，按钮当场变文字，右上角提示 `已共享 xxx.txt`。
+- Files in your content store → **only you can see them**;
+- Files in the share list → **any connected peer can see and retrieve them** (via the `share` frame).
 
-> 关掉总开关**不会清空你的勾选**：它只是让对外清单变空，再打开时原来勾的还在。
+The share list is **empty** by default (`PEERDRIVE_SHARE_ENABLE=false`), meaning: if you do nothing, the files on your node are completely invisible to others. This is not a limitation — it's default protection.
 
-### 共享目录（整目录给出去）
+---
 
-「共享级别 / 好友」下面还有一条 **共享目录**：填一个绝对路径 → 选级别 → **添加目录**。
+## 4.1 Method One: Check in the Admin Console (Recommended)
 
-- 它把目录下**所有文件**（含以后新加的）都带上，不用一个个勾；
-- 已添加的目录列在下面，每个都能单独改级别、单独 **移除**；
-- 由目录带上的文件，在下面的文件表格里会标「由共享目录带上的，取消需改目录范围」——
-  也就是要去掉它，得在这里移除目录，而不是点那一行；
-- 卷根目录（`/`、`C:\`）会被后端拒绝（400），错误原文直接显示在页面上。
+Open the admin console (the `front/` installed in Chapter 1 §1.5) → **My Drive**:
 
-> 后端 `PUT /peerjs/share` 的 `dirs` 是**整体替换**：管理台每次增删都会把已有的
-> 目录一起发回去，所以你不会遇到"加了一个目录，另一个悄悄没了"。
+1. There's now a share bar at the top:
+   - Left side is the **master switch** (`Sharing to outsiders: off` → click to change to `Sharing to outsiders: on`);
+   - Middle displays `N / M files shared`;
+   - Below that is the three-tier level description + **friend node ID** input box (who `private` is granted to — see Chapter 3);
+2. Each row in the file table now has a **Share / Unshare** button;
+3. Already-shared rows also show a **level dropdown** (public / unlisted / private) — unshared rows don't show it, so you don't think "selecting a level means it's already shared out";
+4. Takes effect immediately upon clicking — the button text changes on the spot, with a top-right notification `Shared xxx.txt`.
 
-### 消费者那边长什么样（公共面板）
+> Turning off the master switch **does not clear your checks**: it just makes the external list empty; when you turn it back on, your previous checks are still there.
 
-共享出去之后，别人用**公共面板**（第一章那个 `panel.html`）打开会看到：
+### Sharing Directories (Share an Entire Directory)
 
-- 共享清单里每一行都有 **保存 / 预览 / 链接** 三个按钮；
-- 「链接」生成一条 `?node=<节点id>&hash=<64hex>&auto=1` 的链接，就是第三章说的
-  **unlisted 的落地动作**——不列出、凭 hash 可取；
-- 面板右上角的 **我的节点 id**（`pd-panel-` 开头，固定不变）是你要来填进好友名单的
-  那个值，否则 `private` 内容他拿不到。
+Below the "share level / friends" section there's a **Shared Directories** entry: fill in an absolute path → select level → **Add Directory**.
 
-### 两种"已共享"，勾不掉的那一种是正常的
+- It includes **all files** under that directory (including any added later) — no need to check them one by one;
+- Added directories are listed below, each can individually change level or be **removed**;
+- Files brought in by a directory show in the file table below marked "brought in by shared directory — to remove, change directory scope" — meaning to remove them, you must remove the directory here, not click that row;
+- The volume root (`/`, `C:\`) will be rejected by the backend (400), with the error shown directly on the page.
 
-表格里一个文件可能是这两种来源之一：
+> The `dirs` field in the backend `PUT /peerjs/share` is a **full replacement**: the admin console sends back all existing directories on every add/remove, so you won't encounter "added one directory and another quietly disappeared."
 
-| 来源 | 怎么来的 | 能单独取消吗 |
+### What It Looks Like on the Consumer Side (Public Panel)
+
+After sharing, when someone opens your node with the **public panel** (the `panel.html` from Chapter 1) they'll see:
+
+- Each row in the share list has **Save / Preview / Link** buttons;
+- "Link" generates a `?node=<node-id>&hash=<64hex>&auto=1` link — this is the **landing action for unlisted** mentioned in Chapter 3 — not listed, but retrievable by hash;
+- The **My Node ID** in the top-right of the panel (starts with `pd-panel-`, fixed) is the value you need to fill into their friend list, otherwise they can't get `private` content.
+
+### Two Kinds of "Already Shared" — The One You Can't Uncheck Is Normal
+
+A file in the table may come from one of two sources:
+
+| Source | How it got there | Can it be individually unchecked? |
 |---|---|---|
-| 单文件勾选 | 你在这一行点的「共享」 | 能，再点「取消共享」 |
-| 目录共享 | 它所在的整个目录被共享了 | **不能**——得去改目录范围 |
+| Single file check | You clicked "Share" on this row | Yes, click "Unshare" again |
+| Directory sharing | Its entire directory was shared | **No** — you must change the directory scope |
 
-目录共享带上的行，鼠标悬停会提示"由共享目录带上的，取消需改目录范围"。这是
-刻意的：不然"取消了一个文件，重启后它又出现了"会变成灵异事件。
+Rows brought in by directory sharing show a hover tooltip "brought in by shared directory — to remove, change directory scope." This is intentional: otherwise "unchecked a file, but it reappeared after restart" would become a ghost story.
 
 ---
 
-## 4.2 方式二：命令行（脚本 / 无浏览器）
+## 4.2 Method Two: Command Line (Scripts / No Browser)
 
-三个端点，节点在 `3001`：
+Three endpoints, node on `3001`:
 
 ```bash
-# 看当前共享范围 + 可选文件清单（每行带 shared / by_dir / level）
+# See current share scope + optional file list (each row includes shared / by_dir / level)
 curl -s http://127.0.0.1:3001/peerjs/share | python -m json.tool
 
-# 开总开关（只传要改的字段，其它保持原样）
+# Turn on master switch (only send fields to change, others stay as-is)
 curl -s -X PUT http://127.0.0.1:3001/peerjs/share \
   -H 'Content-Type: application/json' -d '{"enable":true}'
 
-# 勾两个文件（按 hash）。level 省略 = 沿用已有级别（没有就 public）
+# Check two files (by hash). Omitting level = keep existing level (defaults to public if none)
 curl -s -X POST http://127.0.0.1:3001/peerjs/share/files \
   -H 'Content-Type: application/json' \
-  -d '{"hashes":["<64位hex>","<64位hex>"],"shared":true}'
+  -d '{"hashes":["<64-digit hex>","<64-digit hex>"],"shared":true}'
 
-# 共享整个目录，并且整目录按"不列出"给（级别见第三章）
+# Share an entire directory, set the whole directory to "unlisted" (level details in Chapter 3)
 curl -s -X PUT http://127.0.0.1:3001/peerjs/share \
   -H 'Content-Type: application/json' \
   -d '{"dirs":[{"id":"/home/me/media","level":"unlisted"}]}'
 ```
 
-> 条目也可以只写字符串（`"dirs":["/home/me/media"]`，级别按 public）——两种写法
-> 后端都认，字符串写法是为了兼容以前落盘的范围文件。
+> Entries can also be plain strings (`"dirs":["/home/me/media"]`, level defaults to public) — the backend accepts both formats; the string form is for backwards compatibility with previously persisted scope files.
 
-`GET` 返回长这样（节选）：
+`GET` returns something like this (excerpt):
 
 ```json
 {
@@ -106,87 +98,81 @@ curl -s -X PUT http://127.0.0.1:3001/peerjs/share \
   "collections": [],
   "friends": [],
   "files": [
-    {"hash":"<64位hex>","name":"upload-me.txt","size":1234,"shared":true,"by_dir":false,"level":"public"}
+    {"hash":"<64-digit hex>","name":"upload-me.txt","size":1234,"shared":true,"by_dir":false,"level":"public"}
   ],
-  "selected": [{"id":"<64位hex>","level":"public"}],
+  "selected": [{"id":"<64-digit hex>","level":"public"}],
   "summary": {"collections":0,"files":1,"dirs":0}
 }
 ```
 
-字段名一句话说明：
+One-line field descriptions:
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `enable` | 总开关。关 = 对外空清单，勾选保留 |
-| `dirs` / `collections` | 按目录 / 按合集共享的范围（条目带 `level`） |
-| `files[]` | 可选文件清单（**候选**），每行带是否已共享与生效级别 |
-| `selected` | 你勾过的 hash。**包含当前已不在索引里的**（比如文件删了），让你看得到"我勾过它" |
-| `friends` | 好友节点 ID 名单（`private` 放行给它们，见第三章） |
-| `levels` | 三档级别取值，给界面渲染下拉用 |
-| `summary` | 对端 `share` 帧会看到的条目数（按**匿名视角**算，不含只给好友的） |
+| `enable` | Master switch. Off = empty external list, checks preserved |
+| `dirs` / `collections` | Share scope by directory / by collection (entries include `level`) |
+| `files[]` | Optional file list (**candidates**), each row includes whether shared and effective level |
+| `selected` | Hashes you've checked. **Includes those no longer in the index** (e.g. file deleted), so you can see "I checked this" |
+| `friends` | Friend node ID list (`private` is granted to these — see Chapter 3) |
+| `levels` | Three tier values, for UI dropdown rendering |
+| `summary` | Entry count the peer's `share` frame will see (calculated from **anonymous perspective**, excluding friend-only items) |
 
 ---
 
-## 4.3 三种粒度：想共享什么就选什么
+## 4.3 Three Granularities: Share What You Want
 
-| 想共享 | 用哪个 |
+| Want to share | Use this |
 |---|---|
-| 某一个刚上传的文件 | 管理台文件行的「共享」，或 `POST /peerjs/share/files`（按 hash）——**不要求它在任何共享目录里** |
-| 整个照片目录（含以后新加的） | 管理台的「共享目录」，或 `PUT {"dirs":["/path/to/photos"]}` |
-| 打包好的合集 | `PUT {"collections":["<hash>"]}`，或 `"all"` = 全部 public 合集 |
+| One specific file just uploaded | Admin console file row "Share" button, or `POST /peerjs/share/files` (by hash) — **does not require it to be in any shared directory** |
+| Entire photo directory (including future additions) | Admin console "Shared Directory", or `PUT {"dirs":["/path/to/photos"]}` |
+| A packaged collection | `PUT {"collections":["<hash>"]}`, or `"all"` = all public collections |
 
-三条来源取**并集**，互不干扰：勾了单文件，目录共享照常工作；取消单文件勾选，
-目录带上的那份仍在（见 §4.1 的表）。
+The three sources take **union**, non-interfering: checking single files, directory sharing works as normal; unchecking a single file, the directory-brought-in copy remains (see §4.1 table).
 
-> 受限 / 私有合集即使写进 `collections` 也不会被共享：`share` 帧不带请求者身份，
-> 没有身份就无法校验访问名单，放出去等于把"仅限指定账号"的内容公开。
+> Restricted / private collections won't be shared even if written into `collections`: the `share` frame doesn't carry requester identity, and without identity, the access list can't be verified — sharing them out is equivalent to making "restricted to specified accounts" content public.
 
 ---
 
-## 4.4 重启之后还在吗？在
+## 4.4 Still There After Restart? Yes
 
-选择落在节点的 `PEERDRIVE_STORAGE/share_scope.json`。
+Your selections are stored in the node's `PEERDRIVE_STORAGE/share_scope.json`.
 
-`PEERDRIVE_SHARE_ENABLE` / `SHARE_DIRS` / `SHARE_COLLECTIONS` 这几个环境变量
-只是**第一次启动时的初值**：播种一次之后就以文件为准。所以——
+The `PEERDRIVE_SHARE_ENABLE` / `SHARE_DIRS` / `SHARE_COLLECTIONS` environment variables are only **initial values on first startup**: after seeding once, the file takes precedence. So:
 
-- 你在管理台取消掉的共享项，**不会因为重启而复活**；
-- 反过来，改了环境变量也不会覆盖你已经做出的选择（想重来就删掉那个 json 再重启）。
+- Shares you unchecked in the admin console will **not resurrect on restart**;
+- Conversely, changing environment variables won't override your existing selections (to start over, delete that JSON file and restart).
 
 ---
 
-## 4.5 怎么验证"别人真的能看到"
+## 4.5 How to Verify "Others Can Actually See It"
 
-**最直接的验法**：用另一个节点（或第一章的面板）问一次 `share` 帧。
+**Most direct verification**: use another node (or the panel from Chapter 1) to send a `share` frame.
 
 ```bash
-# 在另一个节点上：问这个节点共享了什么
-curl -s http://127.0.0.1:3001/peerjs/nodes/<对方peer-id>/shares | python -m json.tool
+# On another node: ask this node what it's sharing
+curl -s http://127.0.0.1:3001/peerjs/nodes/<peer-peer-id>/shares | python -m json.tool
 ```
 
-回的 `files` / `collections` 就是你勾的那些。没连上会主动拨号并等几秒，连不上
-会报 502（按第一章 §1.6 排查）。
+The returned `files` / `collections` are what you checked. If not connected, it will actively dial out and wait a few seconds; if still unreachable, it reports 502 (debug per Chapter 1 §1.6).
 
-**本章自检清单**：
+**Chapter Self-Check List**:
 
-1. 总开关关着时，对端 `shares` 回 `files: []`、`collections: []`；
-2. 勾一个文件 → 对端清单里出现它；
-3. 取消勾选 → 对端清单里消失；
-4. 重启节点 → 勾选还在（§4.4）；
-5. 加一个共享目录 → 目录里的文件（包括新放进去的）对端都能看到，文件行标
-   「由共享目录带上的」；移除目录 → 它们一起消失。
+1. Master switch off → peer `shares` returns `files: []`, `collections: []`;
+2. Check a file → it appears in peer's list;
+3. Uncheck → it disappears from peer's list;
+4. Restart node → checks remain (§4.4);
+5. Add a shared directory → files in that directory (including new ones) are visible to peers, file rows marked "brought in by shared directory"; remove directory → they all disappear together.
 
 ---
 
-## 4.6 边界与两个"报错"其实是保护
+## 4.6 Edge Cases & Two "Errors" That Are Actually Protection
 
-| 现象 | 原因 |
+| Symptom | Cause |
 |---|---|
-| `PUT {"dirs":["/"]}` 返回 400 | 卷根目录不许当共享目录——那等于共享整个盘。请填具体子目录 |
-| `POST` 里 hash 写错返回 400 | 只接受 64 位 hex 的 sha256；整批拒绝，不会写半份 |
-| 勾了文件，对端还是看不到 | ① 总开关没开；② 对端问的是缓存的旧清单，等它下次 `share` |
-| 清单列得出、对端一拉失败 | 目录没登记成可读根（管理台勾选的路径会自动登记；手写环境变量的目录要在启动时配好） |
+| `PUT {"dirs":["/"]}` returns 400 | Volume root can't be a shared directory — that's equivalent to sharing the entire disk. Fill in a specific subdirectory |
+| `POST` with wrong hash returns 400 | Only 64-digit hex sha256 accepted; entire batch rejected, no partial writes |
+| File checked, but peer still can't see it | ① Master switch not on; ② Peer is asking for a cached old list, wait for its next `share` |
+| List shows it, but peer fails to pull | Directory not registered as a readable root (admin console paths auto-register; manually configured env-var directories must be set up at startup) |
 
-> 想了解这些判定背后的设计与踩坑，看 `doc/NETDISK.md` §12 与 §11（路径边界）。
-> 下一章（[第五章](05-save-from-other-nodes.md)）换个方向：别人共享给我的东西，
-> 怎么存进我自己的节点（面板的「保存」和管理台的「保存选中」不是一回事）。
+> To understand the design and pitfalls behind these checks, see `doc/NETDISK.md` §12 and §11 (path boundaries).
+> The next chapter ([Chapter 5](05-save-from-other-nodes.md)) goes the other direction: things others share with me — how to save them into my own node (the panel's "Save" and the admin console's "Save Selected" are not the same thing).

@@ -1,31 +1,35 @@
-// media-node — peerdrive 的 standalone 媒体节点（先行验证版）。
+// media-node — standalone media node for peerdrive (early verification build).
 //
-// 定位：peerdrive 其余部分尚未实现，本模块单独先行——一个 Go 二进制，
-// 注册到 PeerJS 信令服务器，接收浏览器 WebRTC 连接，**只提供
-// video-cf.twimg.com 的内容访问**。整条链路内置在本二进制内，
-// 不监听任何额外端口，不依赖任何外部代理进程。
+// Role: the rest of peerdrive is not yet implemented, so this module runs
+// independently — a single Go binary that registers with the PeerJS signaling
+// server, accepts browser WebRTC connections, and **only provides access to
+// video-cf.twimg.com content**. The entire pipeline is built into this binary;
+// it listens on no extra ports and depends on no external proxy processes.
 //
-// 访问方式：**直接集成 ECH（Encrypted Client Hello）**。
-//   - 浏览器请求 video-cf.twimg.com 的真实 URL 原样发来
-//   - TCP 连 cloudflare-ech.com 外壳（该域名不被墙）
-//   - TLS 握手时用 ECH 加密的 ClientHello 携带真实目标域名
-//     （video-cf.twimg.com），Cloudflare 边缘据此路由到 twitter CDN
-//   - GFW 只见外壳域名的明文 SNI，放行
-//   - ECH 域前置只对 Cloudflare 托管的域名有效（video-cf.twimg.com 正是）
+// Access method: **direct ECH (Encrypted Client Hello) integration**.
+//   - The browser sends the real URL of video-cf.twimg.com as-is
+//   - TCP connects to the cloudflare-ech.com shell domain (not blocked)
+//   - During the TLS handshake, the ECH-encrypted ClientHello carries the
+//     real target domain (video-cf.twimg.com); the Cloudflare edge routes
+//     to the Twitter CDN accordingly
+//   - The GFW only sees the plaintext SNI of the shell domain and allows it
+//   - ECH domain fronting works only for Cloudflare-hosted domains
+//     (video-cf.twimg.com qualifies)
 //
-// 用法：
+// Usage:
 //   go run ./cmd/media-node [--peer-id media-node]
-//   本地需走代理：HTTPS_PROXY=http://172.29.80.1:10809 go run ./cmd/media-node
+//   Local proxy required: HTTPS_PROXY=http://172.29.80.1:10809 go run ./cmd/media-node
 //
-// 帧协议（与浏览器端 peerdrive-media 一致，DataChannel 上 JSON 文本帧 +
-// 二进制块）：
-//   浏览器 → node: {"type":"url","url":"https://video-cf.twimg.com/...","reqId":"1"}
-//   node  → 浏览器: {"type":"meta","status":200,"mime":"video/mp4","size":N,"reqId":"1"}
-//   node  → 浏览器: <二进制块 × N>
-//   node  → 浏览器: {"type":"done","reqId":"1"}
-//   node  → 浏览器: {"type":"err","msg":"...","reqId":"1"}
-//   keepalive：node **主动**每 5s 发 {"type":"ping"}（对所有连接），
-//   对端回 {"type":"ping-ack"}；15s 无任何帧 → node 主动断开。
+// Frame protocol (consistent with the browser-side peerdrive-media;
+// DataChannel JSON text frames + binary chunks):
+//   browser → node: {"type":"url","url":"https://video-cf.twimg.com/...","reqId":"1"}
+//   node  → browser: {"type":"meta","status":200,"mime":"video/mp4","size":N,"reqId":"1"}
+//   node  → browser: <binary chunk × N>
+//   node  → browser: {"type":"done","reqId":"1"}
+//   node  → browser: {"type":"err","msg":"...","reqId":"1"}
+//   keepalive: the node **proactively** sends {"type":"ping"} every 5s
+//   (to all connections); the peer replies with {"type":"ping-ack"};
+//   if no frame arrives within 15s, the node disconnects.
 package main
 
 import (
@@ -47,13 +51,13 @@ import (
 	"peerdrive/ech"
 )
 
-// twimgHost 唯一允许访问的后端目标（写死，不接受其它域名）。
+// twimgHost is the only backend host allowed (hardcoded; no other domains accepted).
 const twimgHost = "video-cf.twimg.com"
 
-// twimgURLPrefix 允许的 URL 前缀（https://video-cf.twimg.com/）。
+// twimgURLPrefix is the allowed URL prefix (https://video-cf.twimg.com/).
 const twimgURLPrefix = "https://" + twimgHost + "/"
 
-// Msg 协议帧。
+// Msg is the protocol frame.
 type Msg struct {
 	Type   string `json:"type"`
 	URL    string `json:"url,omitempty"`
@@ -64,7 +68,8 @@ type Msg struct {
 	Msg    string `json:"msg,omitempty"`
 }
 
-// guessMime 按 Content-Type 或扩展名决定媒体类型（浏览器端 mount 分派 img/video 用）。
+// guessMime determines the media type from Content-Type or file extension
+// (used by the browser-side mount dispatch for img/video).
 func guessMime(url, contentType string) string {
 	if contentType != "" {
 		return contentType
@@ -89,8 +94,8 @@ func guessMime(url, contentType string) string {
 	return "application/octet-stream"
 }
 
-// fetchTwimg 经内置 ECH 客户端直接访问 video-cf.twimg.com。
-// twitter CDN 防盗链要求 Referer: https://x.com，且校验 User-Agent。
+// fetchTwimg accesses video-cf.twimg.com via the built-in ECH client.
+// The Twitter CDN hotlink protection requires Referer: https://x.com and validates User-Agent.
 func fetchTwimg(url string) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -101,7 +106,7 @@ func fetchTwimg(url string) (*http.Response, error) {
 	return ech.Do(req)
 }
 
-// serveRequest 处理一个媒体请求：校验域名 → ECH 抓取 → meta → 64KB 块 × N → done。
+// serveRequest handles a single media request: validate domain → ECH fetch → meta → 64KB chunks × N → done.
 func serveRequest(conn *peerjs.Connection, msg Msg, chunkSize int) {
 	reqID := msg.ReqID
 	url := msg.URL
@@ -109,7 +114,7 @@ func serveRequest(conn *peerjs.Connection, msg Msg, chunkSize int) {
 		_ = conn.SendJSON(Msg{Type: "err", ReqID: reqID, Msg: "url required"})
 		return
 	}
-	// 只允许 video-cf.twimg.com（写死，防 SSRF 到其它后端）
+	// Only video-cf.twimg.com is allowed (hardcoded to prevent SSRF to other backends)
 	if !strings.HasPrefix(url, twimgURLPrefix) {
 		_ = conn.SendJSON(Msg{Type: "err", ReqID: reqID, Msg: "only " + twimgURLPrefix + " allowed"})
 		return
@@ -129,10 +134,10 @@ func serveRequest(conn *peerjs.Connection, msg Msg, chunkSize int) {
 	}
 
 	mime := guessMime(url, resp.Header.Get("Content-Type"))
-	size := resp.ContentLength // -1 = 未知（流式无 content-length）
+	size := resp.ContentLength // -1 = unknown (streaming with no content-length)
 	_ = conn.SendJSON(Msg{Type: "meta", Status: resp.StatusCode, Mime: mime, Size: size, ReqID: reqID})
 
-	// 流式分块发送（pion 的 Connection.SendFrame 已内置低水位流控）
+	// Stream chunked transfer (pion's Connection.SendFrame has built-in low-water flow control)
 	buf := make([]byte, chunkSize)
 	sent := int64(0)
 	for {
@@ -155,7 +160,7 @@ func serveRequest(conn *peerjs.Connection, msg Msg, chunkSize int) {
 	log.Printf("[req %s] done, %d bytes", reqID, sent)
 }
 
-// main 仅解析信令参数并运行媒体节点——不监听任何 HTTP 端口。
+// main only parses signaling parameters and runs the media node — no HTTP ports are listened on.
 func main() {
 	peerID := "media-node"
 	host := "peersignal.moonchan.xyz"
@@ -163,24 +168,24 @@ func main() {
 	secure := true
 	key := "pd-signal-b9447b406828e500"
 	chunkSize := 64 * 1024 // 64KB
-	proxyURL := ""         // 空则读 HTTPS_PROXY 环境变量
+	proxyURL := ""         // empty means read from HTTPS_PROXY env var
 
-	flag.StringVar(&peerID, "peer-id", peerID, "PeerJS peer id（浏览器连接用）")
-	flag.StringVar(&host, "host", host, "信令服务器 host")
-	flag.StringVar(&port, "port", port, "信令服务器 port")
-	flag.BoolVar(&secure, "secure", secure, "信令走 TLS")
-	flag.StringVar(&key, "key", key, "信令 API key")
-	flag.IntVar(&chunkSize, "chunk-size", chunkSize, "数据块大小（字节）")
-	flag.StringVar(&proxyURL, "proxy", proxyURL, "HTTP 代理（默认读 HTTPS_PROXY）")
+	flag.StringVar(&peerID, "peer-id", peerID, "PeerJS peer id (for browser connection)")
+	flag.StringVar(&host, "host", host, "Signaling server host")
+	flag.StringVar(&port, "port", port, "Signaling server port")
+	flag.BoolVar(&secure, "secure", secure, "Signaling over TLS")
+	flag.StringVar(&key, "key", key, "Signaling API key")
+	flag.IntVar(&chunkSize, "chunk-size", chunkSize, "Data chunk size (bytes)")
+	flag.StringVar(&proxyURL, "proxy", proxyURL, "HTTP proxy (defaults to HTTPS_PROXY)")
 	flag.Parse()
 
-	// 初始化内置 ECH 客户端（DoH 拉取 cloudflare-ech.com 的 ECH 配置）
+	// Initialize the built-in ECH client (DoH fetches the ECH config for cloudflare-ech.com)
 	if err := ech.InitDefault(ech.Config{ProxyURL: proxyURL}); err != nil {
 		log.Fatalf("ECH init failed: %v", err)
 	}
-	log.Printf("ECH 就绪（仅访问 %s，无外部代理、无额外端口）", twimgHost)
+	log.Printf("ECH ready (accesses only %s, no external proxy, no extra ports)", twimgHost)
 
-	// 注册到信令服务器
+	// Register with the signaling server
 	opts := peerjs.Options{
 		ID:           peerID,
 		Host:         host,
@@ -194,18 +199,18 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := peer.Dial(ctx); err != nil {
-		log.Fatalf("信令连接失败: %v", err)
+		log.Fatalf("signaling connection failed: %v", err)
 	}
-	log.Printf("已注册到 %s:%s，peer id=%s（浏览器 PeerMedia 连这个 id）", host, port, peerID)
+	log.Printf("registered with %s:%s, peer id=%s (browser PeerMedia connects to this id)", host, port, peerID)
 
-	// 处理浏览器连接
+	// Handle browser connections
 	peer.OnConnection(func(conn *peerjs.Connection) {
-		log.Printf("浏览器连接: %s (label=%s)", conn.PeerID, conn.Label)
+		log.Printf("browser connection: %s (label=%s)", conn.PeerID, conn.Label)
 
-		// keepalive：本端**主动**发 ping（用户明确要求，对所有连接）。
-		// 每条 DataChannel 独立：每 5s 发 {"type":"ping"} 制造流量；
-		// 收到任何帧刷新 lastActive；超过 15s 无帧 → 主动断开
-		// （无 STUN 环境下 WebRTC 断线无 close 事件，必须靠超时感知）。
+		// Keepalive: this side **proactively** sends pings (user requirement, to all connections).
+		// Each DataChannel is independent: send {"type":"ping"} every 5s to generate traffic;
+		// any incoming frame refreshes lastActive; if no frame arrives within 15s → disconnect
+		// (in environments without STUN, WebRTC disconnection has no close event; timeout detection is required).
 		var lastActive atomic.Int64
 		lastActive.Store(time.Now().UnixMilli())
 		kaStop := make(chan struct{})
@@ -219,11 +224,11 @@ func main() {
 				case <-ticker.C:
 				}
 				if time.Now().UnixMilli()-lastActive.Load() > 15000 {
-					log.Printf("keepalive 超时，断开 %s (label=%s)", conn.PeerID, conn.Label)
+					log.Printf("keepalive timeout, disconnecting %s (label=%s)", conn.PeerID, conn.Label)
 					conn.Close()
 					return
 				}
-				// 主动发 ping（对端回 ping-ack 即刷新 lastActive）
+				// Proactively send ping (peer replies with ping-ack, refreshing lastActive)
 				if err := conn.SendJSON(Msg{Type: "ping"}); err != nil {
 					conn.Close()
 					return
@@ -232,10 +237,10 @@ func main() {
 		}()
 
 		conn.OnMessage(func(frame peerjs.Frame) {
-			// 任何帧（文本/二进制）都刷新活跃——对端还在，连接未死
+			// Any frame (text/binary) refreshes activity — the peer is still alive, connection is not dead
 			lastActive.Store(time.Now().UnixMilli())
 			if !frame.IsText {
-				return // 二进制帧由浏览器端发出（本模块只收文本）
+				return // Binary frames are sent by the browser (this module only receives text)
 			}
 			var msg Msg
 			if err := json.Unmarshal(frame.Data, &msg); err != nil || msg.Type == "" {
@@ -245,13 +250,13 @@ func main() {
 			case "url":
 				go serveRequest(conn, msg, chunkSize)
 			case "ping-ack":
-				// keepalive 响应（lastActive 已刷新）
+				// Keepalive response (lastActive already refreshed)
 			}
 		})
 
 		conn.OnClose(func(*peerjs.Connection) {
 			close(kaStop)
-			log.Printf("浏览器连接关闭: %s", conn.PeerID)
+			log.Printf("browser connection closed: %s", conn.PeerID)
 		})
 	})
 
@@ -260,5 +265,5 @@ func main() {
 	<-sig
 
 	peer.Close()
-	log.Println("已退出")
+	log.Println("exited")
 }

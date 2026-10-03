@@ -15,7 +15,7 @@ import (
 
 var anonSvc *service.AnonService
 
-// InitAnonController 注入 AnonService 实例供匿名集合处理函数使用。
+// InitAnonController injects the AnonService instance for anonymous collection handlers.
 func InitAnonController(svc *service.AnonService) {
 	anonSvc = svc
 }
@@ -36,8 +36,8 @@ func CreateAnonCollection(c *gin.Context) {
 		FriendlyName string                      `json:"friendly_name"`
 		Entries      []model.AnonCollectionEntry `json:"entries"`
 		Tags         []string                    `json:"tags"`
-		// Visibility/AccessList 对应前端「公开访问 / 仅限指定权限 / 仅自己」三选项。
-		// 旧前端不带这两个字段 → visibility 空串 → 服务层兜底为 public，行为不变。
+		// Visibility/AccessList correspond to the frontend's "public access / restricted to specified / private only" options.
+		// Old frontends without these two fields → visibility empty string → service layer defaults to public, behavior unchanged.
 		Visibility string   `json:"visibility"`
 		AccessList []string `json:"access_list"`
 	}
@@ -46,8 +46,8 @@ func CreateAnonCollection(c *gin.Context) {
 		return
 	}
 
-	// Owner 取本节点 operator：登录到 regserver 的节点才有账号，匿名节点是空串
-	// （private 合集在无主状态下无人能读，所以前端未登录时应禁掉「仅自己」选项）。
+	// Owner is the current node operator: only nodes logged into regserver have an account; anonymous nodes get an empty string
+	// (private collections are unreadable by anyone when unowned, so the frontend should disable the "private only" option when not logged in).
 	owner := nodestate.GetOperator()
 
 	hash, err := anonSvc.CreateCollectionWithVisibility(req.FriendlyName, req.Entries, req.Tags, req.Visibility, req.AccessList, owner)
@@ -134,10 +134,10 @@ func ListAnonCollections(c *gin.Context) {
 // @Router       /anon/collections/{hash} [get]
 func GetAnonCollection(c *gin.Context) {
 	hash := c.Param("hash")
-	// 可见性闸门：private/restricted 合集对无权请求者等价于「不存在」（404）。
-	// 坑：这里曾用 GetCollectionByHash 裸读——content-addressed 的 JSON 一旦
-	// 拿到 hash 谁都能取，权限三档就形同虚设（下载已走 DownloadAnonFile 的
-	// 可见性检查，元数据入口漏掉等于绕开）。本节点 operator 当作请求者身份。
+	// Visibility gate: private/restricted collections are equivalent to "not found" (404) for unauthorized requesters.
+	// Gotcha: this previously used GetCollectionByHash for a raw read — once you have the hash of a content-addressed
+	// JSON, anyone can fetch it, making the three permission tiers meaningless (downloads already check visibility via
+	// DownloadAnonFile, but the metadata endpoint was missing it = bypass). The current node operator is used as the requester identity.
 	coll, err := anonSvc.GetCollectionVisibleTo(hash, nodestate.GetOperator())
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
@@ -178,7 +178,7 @@ func DownloadAnonFile(c *gin.Context) {
 		return
 	}
 
-	// 按 provider 顺序尝试下载：sha256 优先，url 兜底
+	// Try downloading by provider order: sha256 first, url as fallback
 	primaryHash := targetEntry.GetPrimaryHash()
 	if primaryHash != "" {
 		if universalDownloader != nil {
@@ -234,8 +234,8 @@ func ForkAnonCollection(c *gin.Context) {
 		return
 	}
 
-	// 源集合按可见性读取（同 GetAnonCollection）：否则拿到任意 hash 就能把
-	// private/restricted 合集 fork 成一份 public 副本 —— 权限三档被 fork 绕过。
+	// Source collection read by visibility (same as GetAnonCollection): otherwise anyone with any hash
+	// could fork a private/restricted collection into a public copy — the three permission tiers bypassed by forking.
 	operator := nodestate.GetOperator()
 	src, err := anonSvc.GetCollectionVisibleTo(req.SourceHash, operator)
 	if err != nil {
@@ -271,9 +271,10 @@ func ForkAnonCollection(c *gin.Context) {
 	if friendlyName == "" {
 		friendlyName = src.FriendlyName
 	}
-	// fork 是本机新建的副本，但权限档位必须继承源集合：源为 restricted/private
-	// 时，副本若默认 public 等于把受限内容重新公开（同一份文件换个 hash 就绕过权限）。
-	// Owner 延续源集合（源无 Owner 时记为本机 operator，保证 private 副本仍可读）。
+	// Fork creates a new local copy, but the permission tier must be inherited from the source:
+	// if the source is restricted/private and the copy defaults to public, restricted content is
+	// re-exposed (same files with a different hash bypass permissions).
+	// Owner carries over from the source (when the source has no Owner, record the current node operator to ensure private copies remain readable).
 	forkOwner := src.Owner
 	if forkOwner == "" {
 		forkOwner = operator

@@ -1,5 +1,5 @@
-// BTClient 包装 anacrolix/torrent 库，管理 BitTorrent 下载任务。
-// DHT 对等发现、线协议、Tracker 通信、做种均由库内部处理。
+// BTClient wraps the anacrolix/torrent library, managing BitTorrent download tasks.
+// DHT peer discovery, wire protocol, tracker communication, and seeding are all handled internally by the library.
 package p2p_bt
 
 import (
@@ -19,15 +19,15 @@ import (
 
 )
 
-// globalDHT 保留给 BEP 44/51 及 GetGlobalStats().DHTNodes 使用。
+// globalDHT is retained for BEP 44/51 and GetGlobalStats().DHTNodes usage.
 var globalDHT *BTDHTService
 
-// SetGlobalDHT 设置全局 DHT 服务引用。
+// SetGlobalDHT sets the global DHT service reference.
 func SetGlobalDHT(dht *BTDHTService) {
 	globalDHT = dht
 }
 
-// ---- 内部状态 ----
+// ---- Internal state ----
 
 type downloadState struct {
 	infoHashHex string
@@ -44,7 +44,7 @@ type downloadState struct {
 
 // ---- BTClient ----
 
-// BTClient 管理 BitTorrent 下载任务。
+// BTClient manages BitTorrent download tasks.
 type BTClient struct {
 	cl          *torrent.Client
 	dataDir     string
@@ -56,12 +56,12 @@ type BTClient struct {
 	autoSeed    map[string]bool   // infohashes to auto-start seeding on completion
 }
 
-// NewBTClient 创建 BT 客户端实例（默认监听端口）。
+// NewBTClient creates a BT client instance (default listen port).
 func NewBTClient(dataDir string) *BTClient {
 	return newBTClient(dataDir, "")
 }
 
-// newBTClient 创建 BT 客户端实例，可指定监听地址（":0" = 随机端口）。
+// newBTClient creates a BT client instance with an optional listen address (":0" = random port).
 func newBTClient(dataDir string, listenAddr string) *BTClient {
 	if dataDir == "" {
 		dataDir = filepath.Join(os.TempDir(), "peerdrive-bt")
@@ -95,16 +95,16 @@ func newBTClient(dataDir string, listenAddr string) *BTClient {
 	return client
 }
 
-// SetOnComplete 注册下载完成回调。
+// SetOnComplete registers a download-complete callback.
 func (c *BTClient) SetOnComplete(fn OnTorrentComplete) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.onComplete = fn
 }
 
-// ---- 添加下载 ----
+// ---- Adding downloads ----
 
-// AddTorrentBytes 从原始 .torrent 文件字节启动下载，返回解析后的元信息。
+// AddTorrentBytes starts a download from raw .torrent file bytes, returning the parsed metadata.
 func (c *BTClient) AddTorrentBytes(data []byte) (*TorrentMeta, error) {
 	mi, err := metainfo.Load(bytes.NewReader(data))
 	if err != nil {
@@ -126,7 +126,7 @@ func (c *BTClient) AddTorrentBytes(data []byte) (*TorrentMeta, error) {
 		return nil, fmt.Errorf("add torrent: %w", err)
 	}
 
-	// 等待元信息可用（.torrent 文件通常立即可用）
+	// Wait for metadata to be available (.torrent files are typically available immediately)
 	<-t.GotInfo()
 
 	meta := torrentMetaFromLibrary(mi, t)
@@ -152,7 +152,7 @@ func (c *BTClient) AddTorrentBytes(data []byte) (*TorrentMeta, error) {
 	return meta, nil
 }
 
-// AddMagnetURI 从磁力链接 URI 启动下载。
+// AddMagnetURI starts a download from a magnet link URI.
 func (c *BTClient) AddMagnetURI(uri string) (*TorrentMeta, error) {
 	spec, err := torrent.TorrentSpecFromMagnetUri(uri)
 	if err != nil {
@@ -219,9 +219,9 @@ func (c *BTClient) AddMagnetURI(uri string) (*TorrentMeta, error) {
 	return meta, nil
 }
 
-// AddTorrent 向后兼容方法——从 TorrentMeta 添加下载。
-// 由于旧 TorrentMeta 不含原始 .torrent 字节，此方法仅重建磁力链接再添加。
-// 新代码应使用 AddTorrentBytes。
+// AddTorrent is a backward-compatible method — adds a download from a TorrentMeta.
+// Since the old TorrentMeta does not contain the raw .torrent bytes, this method only reconstructs a magnet link and adds it.
+// New code should use AddTorrentBytes.
 func (c *BTClient) AddTorrent(meta *TorrentMeta) error {
 	uri := fmt.Sprintf("magnet:?xt=urn:btih:%s", meta.InfoHashHex)
 	if meta.Name != "" {
@@ -234,8 +234,8 @@ func (c *BTClient) AddTorrent(meta *TorrentMeta) error {
 	return err
 }
 
-// AddMagnet 向后兼容方法——从 MagnetInfo 添加下载。
-// 新代码应使用 AddMagnetURI。
+// AddMagnet is a backward-compatible method — adds a download from a MagnetInfo.
+// New code should use AddMagnetURI.
 func (c *BTClient) AddMagnet(magnet *MagnetInfo) error {
 	uri := fmt.Sprintf("magnet:?xt=urn:btih:%s", magnet.InfoHash)
 	if magnet.DisplayName != "" {
@@ -248,7 +248,7 @@ func (c *BTClient) AddMagnet(magnet *MagnetInfo) error {
 	return err
 }
 
-// ---- 下载完成监控 ----
+// ---- Download completion monitoring ----
 
 func (c *BTClient) watchDownload(ds *downloadState) {
 	ticker := time.NewTicker(2 * time.Second)
@@ -324,7 +324,7 @@ func (c *BTClient) finalizeDownload(ds *downloadState) {
 
 	if c.onComplete != nil && len(completedFiles) > 0 {
 
-		// 检查自动做种标记
+		// Check the auto-seed flag
 		c.mu.RLock()
 		shouldAutoSeed := c.autoSeed[ds.infoHashHex]
 		c.mu.RUnlock()
@@ -342,7 +342,7 @@ func (c *BTClient) finalizeDownload(ds *downloadState) {
 		ds.infoHashHex, ds.name, len(completedFiles))
 }
 
-// ---- 进度查询 ----
+// ---- Progress queries ----
 
 func (c *BTClient) GetDownload(infohash string) *DownloadStatus {
 	c.mu.RLock()
@@ -395,7 +395,7 @@ func (c *BTClient) buildStatus(ds *downloadState) *DownloadStatus {
 	}
 }
 
-// ---- 暂停/恢复 ----
+// ---- Pause/Resume ----
 
 func (c *BTClient) PauseDownload(infohash string) error {
 	c.mu.RLock()
@@ -433,7 +433,7 @@ func (c *BTClient) ResumeDownload(infohash string) error {
 	return nil
 }
 
-// ---- 删除 ----
+// ---- Removal ----
 
 func (c *BTClient) RemoveDownload(infohash string) error {
 	c.mu.Lock()
@@ -449,7 +449,7 @@ func (c *BTClient) RemoveDownload(infohash string) error {
 
 	ds.t.Drop()
 
-	// 删除数据目录
+	// Remove the data directory
 	dataDir := filepath.Join(c.dataDir, ds.name)
 	if dataDir != "" && dataDir != c.dataDir {
 		if err := os.RemoveAll(dataDir); err != nil {
@@ -461,9 +461,9 @@ func (c *BTClient) RemoveDownload(infohash string) error {
 	return nil
 }
 
-// ---- Torrent 数据和 Magnet ----
+// ---- Torrent data and Magnet ----
 
-// GetTorrentBytes 返回原始 .torrent 文件字节。对于从磁力链接添加的下载，若元数据已就绪则从库导出。
+// GetTorrentBytes returns the raw .torrent file bytes. For downloads added from a magnet link, exports from the library if metadata is available.
 func (c *BTClient) GetTorrentBytes(infohash string) ([]byte, error) {
 	c.mu.RLock()
 	data, ok := c.torrentData[infohash]
@@ -490,7 +490,7 @@ func (c *BTClient) GetTorrentBytes(infohash string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// GetMagnetURI 为指定下载生成磁力链接 URI。
+// GetMagnetURI generates a magnet link URI for the specified download.
 func (c *BTClient) GetMagnetURI(infohash string) string {
 	c.mu.RLock()
 	ds, ok := c.downloads[infohash]
@@ -514,14 +514,14 @@ func (c *BTClient) GetMagnetURI(infohash string) string {
 	return uri
 }
 
-// SetAutoSeed 标记指定 infohash 在下载完成后自动开始做种。
+// SetAutoSeed marks the specified infohash to auto-start seeding after download completion.
 func (c *BTClient) SetAutoSeed(infohash string) {
 	c.mu.Lock()
 	c.autoSeed[infohash] = true
 	c.mu.Unlock()
 }
 
-// HasTorrentBytes 检查是否存储了指定 infohash 的 torrent 字节。
+// HasTorrentBytes checks whether torrent bytes are stored for the specified infohash.
 func (c *BTClient) HasTorrentBytes(infohash string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -529,7 +529,7 @@ func (c *BTClient) HasTorrentBytes(infohash string) bool {
 	return ok
 }
 
-// ---- 做种 ----
+// ---- Seeding ----
 
 func (c *BTClient) StartSeed(infohash string) error {
 	c.mu.RLock()
@@ -592,7 +592,7 @@ func (c *BTClient) ListSeeders() []string {
 	return keys
 }
 
-// ---- Peer 手动管理 ----
+// ---- Peer manual management ----
 
 func (c *BTClient) AddPeer(infohash, addr string) {
 	c.mu.Lock()
@@ -612,7 +612,7 @@ func (c *BTClient) GetCustomPeers(infohash string) []string {
 	return result
 }
 
-// ---- 全局统计 ----
+// ---- Global statistics ----
 
 func (c *BTClient) GetGlobalStats() *GlobalStats {
 	c.mu.RLock()
@@ -642,14 +642,14 @@ func (c *BTClient) GetGlobalStats() *GlobalStats {
 	return stats
 }
 
-// ---- 生命周期 ----
+// ---- Lifecycle ----
 
 func (c *BTClient) Close() {
 	LogInfo("bt-client: closing")
 	c.cl.Close()
 }
 
-// ---- 文件访问 ----
+// ---- File access ----
 
 func (c *BTClient) ListDownloadFiles(infohash string) ([]CompletedFile, bool) {
 	c.mu.RLock()
@@ -669,16 +669,16 @@ func (c *BTClient) GetDownloadDir() string {
 	return c.dataDir
 }
 
-// ---- 辅助函数 ----
+// ---- Helper functions ----
 
-// torrentMetaFromLibrary 从库类型提取 TorrentMeta（用于 HTTP API 响应）。
+// torrentMetaFromLibrary extracts TorrentMeta from library types (used for HTTP API responses).
 func torrentMetaFromLibrary(mi *metainfo.MetaInfo, t *torrent.Torrent) *TorrentMeta {
 	info := t.Info()
 	if info == nil {
 		meta := &TorrentMeta{
 			InfoHashHex: mi.HashInfoBytes().HexString(),
 		}
-		// 尝试解析 Info 获取名称
+		// Try to parse Info to get the name
 		if parsed, err := mi.UnmarshalInfo(); err == nil {
 			meta.Name = parsed.BestName()
 		}
@@ -699,16 +699,16 @@ func torrentMetaFromLibrary(mi *metainfo.MetaInfo, t *torrent.Torrent) *TorrentM
 	} else {
 		for _, f := range info.Files {
 			path := strings.Join(f.Path, "/")
-			meta.Files = append(meta.Files, TorrentFile{Path: path, Size: f.Length})
+			meta.Files = append(meta.Files, TorrentFile{Path: path, Size: f.Length}})
 		}
 	}
 
-	// 提取 Announce URL
+	// Extract Announce URLs
 	for _, tier := range mi.UpvertedAnnounceList() {
 		meta.AnnounceList = append(meta.AnnounceList, tier...)
 	}
 
-	// 提取 piece 哈希（每 20 字节一个 SHA1）
+	// Extract piece hashes (one SHA1 per 20 bytes)
 	numPieces := len(info.Pieces) / 20
 	meta.Pieces = make([][]byte, numPieces)
 	meta.PiecesHex = make([]string, numPieces)
@@ -721,7 +721,7 @@ func torrentMetaFromLibrary(mi *metainfo.MetaInfo, t *torrent.Torrent) *TorrentM
 	return meta
 }
 
-// metaFromTorrent 从已完成的 Torrent 对象提取 TorrentMeta。
+// metaFromTorrent extracts TorrentMeta from a completed Torrent object.
 func metaFromTorrent(t *torrent.Torrent) *TorrentMeta {
 	info := t.Info()
 	if info == nil {
@@ -742,7 +742,7 @@ func metaFromTorrent(t *torrent.Torrent) *TorrentMeta {
 	} else {
 		for _, f := range info.Files {
 			path := strings.Join(f.Path, "/")
-			meta.Files = append(meta.Files, TorrentFile{Path: path, Size: f.Length})
+			meta.Files = append(meta.Files, TorrentFile{Path: path, Size: f.Length}})
 		}
 	}
 

@@ -1,19 +1,19 @@
-# Peerdrive 节点开发接口参考
+# Peerdrive Node Development API Reference
 
-> 面向开发人员：节点（Go）对外暴露的三层接口——**HTTP 管理面 / 帧协议（DataChannel/WS 共用）/ Go API**。
-> 与 `doc/api-reference.md`（面向前端的 HTTP API 参考）互补；协议细节见 `doc/REFACTOR.md` §4。
+> For developers: Three-layer interfaces exposed by the node (Go)——**HTTP management plane / Frame protocol (shared by DataChannel/WS) / Go API**.
+> Complements `doc/api-reference.md` (HTTP API reference for frontend); see `doc/REFACTOR.md` §4 for protocol details.
 
-## 1. HTTP 管理面（`back/internal/router/`）
+## 1. HTTP Management Plane (`back/internal/router/`)
 
-### 1.1 节点发现与拉取（`peerjs_routes.go`）
+### 1.1 Node Discovery & Fetch (`peerjs_routes.go`)
 
-| 端点 | 方法 | 认证 | 用法 |
+| Endpoint | Method | Auth | Usage |
 |---|---|---|---|
-| `/peerjs/node` | GET | 无 | 本节点状态：`{"id","online":true,"peers":[]}`（peers = 当前互联的远端节点 id） |
-| `/peerjs/fetch` | POST | 需 | 从对端拉文件：`{peer, hash, offset?, size?}` → 文件流（≤64MB，H4；超大走 `/ws/peer` 分片） |
-| `/ws/peer` | GET(WS) | Origin 白名单 | 本地直连会话，帧协议与 DataChannel 完全一致 |
+| `/peerjs/node` | GET | None | This node status: `{"id","online":true,"peers":[]}` (peers = currently connected remote node ids) |
+| `/peerjs/fetch` | POST | Required | Fetch file from peer: `{peer, hash, offset?, size?}` → file stream (≤64MB, H4; large files use `/ws/peer` chunked) |
+| `/ws/peer` | GET(WS) | Origin whitelist | Local direct session, frame protocol identical to DataChannel |
 
-`/peerjs/fetch` 示例：
+`/peerjs/fetch` example:
 
 ```bash
 curl -X POST http://localhost:3000/peerjs/fetch \
@@ -21,172 +21,172 @@ curl -X POST http://localhost:3000/peerjs/fetch \
   -d '{"peer":"peerdrive-abc123","hash":"<64hex>","offset":0,"size":-1}' -o file.bin
 ```
 
-### 1.2 端口转发（`controller/p2p.go:711`）
+### 1.2 Port Forwarding (`controller/p2p.go:711`)
 
-| 端点 | 方法 | 认证 | 用法 |
+| Endpoint | Method | Auth | Usage |
 |---|---|---|---|
-| `/p2p/forward/create` | POST | 需 | 登记授权：`{key, port}`（key 即凭证，运行时追加不持久化） |
-| `/p2p/forward/connect` | POST | 需 | 本端 loopback 起监听转发：`{key, target_peer, local_port, port?}`（`local_port` 本端监听必填；`port` 目标端口可选，0/缺省 = 由目标节点按规则唯一端口决定） |
-| `/p2p/forward/list` | GET | 无 | 活跃监听与隧道：`{"listeners":[{id,target_peer,local_port}], "tunnels":[{peer_id,port,key_id}]}` |
-| `/p2p/forward/close` | POST | 需 | 关闭转发：`{key?}` 关闭匹配 key 的监听，`{peer_id?}` 断开指定 peer 的全部隧道 |
+| `/p2p/forward/create` | POST | Required | Register authorization: `{key, port}` (key is the credential, runtime additions not persisted) |
+| `/p2p/forward/connect` | POST | Required | Start loopback listener on this end: `{key, target_peer, local_port, port?}` (`local_port` required for this-end listening; `port` optional target port, 0/omitted = determined by target node rules for unique port) |
+| `/p2p/forward/list` | GET | None | Active listeners and tunnels: `{"listeners":[{id,target_peer,local_port}], "tunnels":[{peer_id,port,key_id}]}` |
+| `/p2p/forward/close` | POST | Required | Close forwarding: `{key?}` closes listener matching key, `{peer_id?}` disconnects all tunnels for specified peer |
 
-### 1.3 统一 source 管理（`source_routes.go`）
+### 1.3 Unified Source Management (`source_routes.go`)
 
-| 端点 | 方法 | 认证 | 用法 |
+| Endpoint | Method | Auth | Usage |
 |---|---|---|---|
-| `/sources` | GET | 无 | 各 source 快照：优先级/能力/在线/命中统计 |
-| `/sources/:name/priority` | POST | 无 | 运行时调整优先级：`{"priority": n}` |
+| `/sources` | GET | None | Snapshot of each source: priority/capability/online/hit stats |
+| `/sources/:name/priority` | POST | None | Adjust priority at runtime: `{"priority": n}` |
 
-### 1.4 通用（`router.go`）
+### 1.4 General (`router.go`)
 
-| 端点 | 方法 | 说明 |
+| Endpoint | Method | Description |
 |---|---|---|
-| `/ping` | GET | 健康检查 |
-| `/download/:hash` | GET | 统一多协议下载（source 链） |
-| `/download/:hash/sources` | GET | 下载源列表 |
-| `/download/:hash/refresh` | POST | 刷新源（需认证） |
+| `/ping` | GET | Health check |
+| `/download/:hash` | GET | Unified multi-protocol download (source chain) |
+| `/download/:hash/sources` | GET | Download source list |
+| `/download/:hash/refresh` | POST | Refresh source (requires auth) |
 | `/swagger/*any` | GET | Swagger UI |
 
-## 2. 帧协议（DataChannel / WS 共用，`conn.go`）
+## 2. Frame Protocol (Shared by DataChannel / WS, `conn.go`)
 
-### 2.1 文件拉取
+### 2.1 File Fetch
 
 ```jsonc
-// 请求（任意端）；reqId 为指令 UUID v4（Go 端始终携带）
+// Request (any side); reqId is command UUID v4 (Go side always carries)
 {"type":"req","hash":"<64hex>","offset":0,"size":-1,"reqId":"<uuid-v4>"}
-// 响应（回显 reqId）
+// Response (echoes reqId)
 {"type":"meta","hash","total","reqId"}
-{"type":"data","hash","offset","size","reqId"}   // 后随 size 字节二进制
+{"type":"data","hash","offset","size","reqId"}   // Followed by size bytes of binary
 {"type":"done","hash","offset","size","reqId"}
 {"type":"err","msg","reqId"}
 ```
 
-### 2.2 文件索引 verb（`file_index.go`）
+### 2.2 File Index Verbs (`file_index.go`)
 
 ```jsonc
 create   {type:"create", path}              → created {hash,size,name,path,seq}
-upload   {type:"upload", name, size, offset?, reqId}   // 分片上传（offset 缺省 0）
-         → meta {total, offset} → data×1 → uploaded {hash,path}（完成）| ack {offset}（续传）
+upload   {type:"upload", name, size, offset?, reqId}   // Chunked upload (offset defaults to 0)
+         → meta {total, offset} → data×1 → uploaded {hash,path} (complete) | ack {offset} (resume)
 list     {type:"list", offset?, size?}      → list-resp {files,total}
 info     {type:"info", hash}                → info-resp {hash,size,name,path,seq}
 delete   {type:"delete", hash}              → deleted {hash,seq}
 sync     {type:"sync", seq}                 → sync-resp {files,lastSeq}
 ```
 
-- 分片上传：offset 按 64KB chunk 对齐，一次 upload = 一个分片（data 块 ≤64KB）；
-  多 source = 多连接并发传不同分片，位图全满自动 uploaded
-- 断点续传：同 name 重开会话幂等复用；会话 10 分钟无活动清理
+- Chunked upload: offset aligned to 64KB chunks, one upload = one chunk (data block ≤64KB);
+  Multiple sources = multiple connections upload different chunks concurrently, bitmap full auto-triggers uploaded
+- Resume: Same name reopens session with idempotent reuse; session cleaned after 10 min inactivity
 
-### 2.3 端口转发 v2（`forward.go`）
+### 2.3 Port Forwarding v2 (`forward.go`)
 
 ```jsonc
 client ──fwd-open {port, reqId}──────────▶ server
-client ◀──fwd-challenge {nonce, reqId}──── server   一次性随机数
+client ◀──fwd-challenge {nonce, reqId}──── server   One-time random number
 client ──fwd-auth {hmac, reqId}──────────▶ server   HMAC-SHA256(key, nonce)
 client ◀──fwd-ok / fwd-err──────────────── server
-之后: fwd-data 头 + 二进制块双向透传（头文本、块二进制、原子连续）
-      fwd-close 收尾（任一侧 EOF/主动关闭）
+Afterward: fwd-data header + binary blocks bidirectional pass-through (header text, block binary, atomic consecutive)
+      fwd-close Finalize (either side EOF/active close)
 ```
 
-### 2.4 admin 管理面 verb（`admin.go`，仅本地 WS 会话）
+### 2.4 Admin Management Plane Verbs (`admin.go`, Local WS Sessions Only)
 
-浏览器经 `/ws/peer` 本地会话发 admin 帧管理本节点（内部转发 gin engine，复用全部
-HTTP controller 逻辑，零重复实现）。**仅 `ID()=="local"` 会话接受**——WebRTC 连接
-来自公共信令任意节点，不开放管理面（防权限面暴露）。
+Browser sends admin frames via `/ws/peer` local session to manage this node (internally forwards gin engine, reuses all
+HTTP controller logic, zero duplication). **Only `ID()=="local"` sessions accepted**——WebRTC connections
+from any node on public signaling, management plane not exposed (prevents privilege escalation).
 
 ```jsonc
-// 普通请求 → admin-resp
-{"type":"admin","method":"GET|POST|DELETE","path":"/files?x=1","body":<JSON>,"token":"<可选>","reqId"}
-{"type":"admin-resp","status":200,"body":<原始 JSON>,"reqId"}   // 4xx/5xx 也走 admin-resp（body 为结构化错误体，409 含 conflicts 清单）
+// Normal request → admin-resp
+{"type":"admin","method":"GET|POST|DELETE","path":"/files?x=1","body":<JSON>,"token":"<optional>","reqId"}
+{"type":"admin-resp","status":200,"body":<raw JSON>,"reqId"}   // 4xx/5xx also use admin-resp (body is structured error body, 409 includes conflicts list)
 
-// 二进制上传（声明帧 + 后续二进制帧；收齐后 multipart 重包转发）
-{"type":"admin","method":"POST","path":"/files/upload","binary":true,"filename":"a.bin","field":"file","size":N,"reqId"} + N 字节二进制帧
-   // field 默认 "file"；BT torrent 上传 field="torrent" + path="/bt/torrent"
-   // reqPath 由声明帧 path 决定（旧版硬编码 /files/upload 的 bug 已修复，见 admin_test.go TestAdminBinaryUploadReqPath）
+// Binary upload (declaration frame + subsequent binary frames; after collecting all, multipart repackaged and forwarded)
+{"type":"admin","method":"POST","path":"/files/upload","binary":true,"filename":"a.bin","field":"file","size":N,"reqId"} + N bytes binary frame
+   // field defaults to "file"; BT torrent upload field="torrent" + path="/bt/torrent"
+   // reqPath determined by declaration frame path (old bug with hardcoded /files/upload fixed, see admin_test.go TestAdminBinaryUploadReqPath)
 
-// 二进制响应（文件流，如集合文件）→ admin-bin 头 + 紧随一个二进制帧（≤64MB adminBinMax；大文件走 2.1 req verb 分片）
-{"type":"admin-bin","status":200,"size":N,"reqId"} + 二进制帧
+// Binary response (file stream, e.g., collection files) → admin-bin header + immediate binary frame (≤64MB adminBinMax; large files use 2.1 req verb chunked)
+{"type":"admin-bin","status":200,"size":N,"reqId"} + binary frame
 ```
 
-- 上传收集：连接级单槽（`st.adminUp`），声明帧在消息泵内**同步**占槽（异步会丢后续
-  二进制块）；30s 无数据自动中止清理临时文件
-- 认证：admin 帧 `token` 字段 → 转发时注入 `Authorization: Bearer` → 与 HTTP 行为一致
-- 前端使用：`front/src/ws.js`（`admin`/`upload`）+ `front/src/api.js`（全部 request 走此通道）
+- Upload collection: Connection-level single slot (`st.adminUp`), declaration frame **synchronously** claims slot in message pump (async would lose subsequent
+  binary blocks); 30s no data auto-aborts and cleans temp files
+- Authentication: admin frame `token` field → inject `Authorization: Bearer` during forwarding → consistent with HTTP behavior
+- Frontend usage: `front/src/ws.js` (`admin`/`upload`) + `front/src/api.js` (all requests use this channel)
 
-### 2.5 三条协议硬约束（勿破坏）
+### 2.5 Three Protocol Hard Constraints (Do Not Break)
 
-1. JSON 控制头必须是**文本帧**（`SendText`），数据块是**二进制帧**（`Send`）——发反了对端把控制头当数据块吞掉
-2. data 头与数据块必须**原子连续**（`SendFrame` 的 sendMu）；接收端按连接级 expect 状态机路由
-3. 浏览器端可不传 reqId（向后兼容），Go 端始终携带（UUID v4）
+1. JSON control headers must be **text frames** (`SendText`), data blocks must be **binary frames** (`Send`)——sending backwards causes peer to treat control header as data block
+2. data header and data block must be **atomic consecutive** (SendFrame sendMu); receiver routes by connection-level expect state machine
+3. Browser side may omit reqId (backward compatible), Go side always carries (UUID v4)
 
-## 3. Go API（`transport.PeerJSService`，`peerjs_service.go`）
+## 3. Go API (`transport.PeerJSService`, `peerjs_service.go`)
 
-### 3.1 连接管理
+### 3.1 Connection Management
 
-| 方法 | 说明 |
+| Method | Description |
 |---|---|
-| `NewPeerJSService(cfg, storageDir) *PeerJSService` | 构造（节点 id 默认 `peerdrive-<随机hex>`） |
-| `Start()` | 注册信令 + 断线自动重连（异步） |
-| `Close()` | 关闭信令 + 全部 WebRTC 连接 |
-| `ID() string` | 本节点信令 id |
-| `Connections() map[string]Session` | 当前活跃连接（key = 远端 peer id，含 `"local"`） |
-| `BindLocal(sess Session)` | 注册本地 WS 会话 |
-| `FileIndex() *FileIndexService` | 共享本地文件索引（LocalSource 装配用） |
+| `NewPeerJSService(cfg, storageDir) *PeerJSService` | Construct (node id defaults to `peerdrive-<random hex>`) |
+| `Start()` | Register signaling + auto-reconnect on disconnect (async) |
+| `Close()` | Close signaling + all WebRTC connections |
+| `ID() string` | This node's signaling id |
+| `Connections() map[string]Session` | Currently active connections (key = remote peer id, includes `"local"`) |
+| `BindLocal(sess Session)` | Register local WS session |
+| `FileIndex() *FileIndexService` | Shared local file index (for LocalSource assembly) |
 
-### 3.2 文件拉取（出站角色）
+### 3.2 File Fetch (Outbound Role)
 
-| 方法 | 说明 |
+| Method | Description |
 |---|---|
-| `OpenStream(peerID, hash, offset, size) (io.ReadCloser, error)` | **流式**拉取；全量读完自动 sha256 校验；Close 提前取消（不断连） |
-| `FetchFromPeer(peerID, hash, offset, size) ([]byte, error)` | 整体拉取（OpenStream + ReadAll 封装） |
+| `OpenStream(peerID, hash, offset, size) (io.ReadCloser, error)` | **Streaming** fetch; auto SHA256 verify after full read; Close cancels early (does not disconnect) |
+| `FetchFromPeer(peerID, hash, offset, size) ([]byte, error)` | Full fetch (OpenStream + ReadAll wrapper) |
 
 ```go
-// 示例：从对端节点流式拉取文件
+// Example: Stream fetch file from remote node
 r, err := svc.OpenStream("peerdrive-abc123", hash, 0, -1)
-if err != nil { /* 无连接 / 拉取失败 */ }
+if err != nil { /* No connection / Fetch failed */ }
 defer r.Close()
-written, err := io.Copy(dstFile, r) // EOF 时自动校验 sha256
+written, err := io.Copy(dstFile, r) // Auto SHA256 verify on EOF
 ```
 
-### 3.3 端口转发（客户端侧）
+### 3.3 Port Forwarding (Client Side)
 
-| 方法 | 说明 |
+| Method | Description |
 |---|---|
-| `AddForwardRule(key string, port int) error` | 运行时追加授权（不持久化） |
-| `SetForwardRules(rules map[string][]int)` | 全量设置规则表 |
-| `OpenForward(ctx, peerID, key string, port int) (net.Conn, error)` | 建立转发隧道（port=0 由服务端按规则唯一端口决定） |
-| `ListForwardStreams() []ForwardStreamInfo` | 活跃隧道快照 |
-| `CloseForwardStream(peerID string)` | 主动断开隧道 |
+| `AddForwardRule(key string, port int) error` | Add authorization at runtime (not persisted) |
+| `SetForwardRules(rules map[string][]int)` | Set full rules table |
+| `OpenForward(ctx, peerID, key string, port int) (net.Conn, error)` | Establish forwarding tunnel (port=0 determined by server rules for unique port) |
+| `ListForwardStreams() []ForwardStreamInfo` | Active tunnel snapshot |
+| `CloseForwardStream(peerID string)` | Actively disconnect tunnel |
 
 ```go
-// 示例：经对端节点访问其 127.0.0.1:8080
+// Example: Access peer node's 127.0.0.1:8080 through it
 conn, err := svc.OpenForward(ctx, "peerdrive-abc123", "my-key", 8080)
-if err != nil { /* 认证失败 / 端口未授权 */ }
+if err != nil { /* Auth failed / Port not authorized */ }
 defer conn.Close()
-// conn 当普通 TCP 连接使用，双向透传
+// Use conn as regular TCP connection, bidirectional pass-through
 ```
 
-## 4. peerjs 模块扩展点（`back/peerjs/`，独立 go.mod）
+## 4. peerjs Module Extension Points (`back/peerjs/`, independent go.mod)
 
-| 扩展点 | 接口 | 说明 |
+| Extension Point | Interface | Description |
 |---|---|---|
-| 换信令 | `Signaller` 接口（`signaller.go`） | `NewPeerWithSignaller()` 注入；实现只需收到消息后调注入的 route 回调 |
-| 换传输 | `DataChannel` 接口（`transport.go`） | `Connection` 只依赖此接口 |
-| 加 verb | `MessageType` / `Frame` | 开放 string 类型，自定义消息直接发送 |
+| Change signaling | `Signaller` Interface (`signaller.go`) | `NewPeerWithSignaller()` injection; implementation only needs to call injected route callback after receiving message |
+| Change transport | `DataChannel` Interface (`transport.go`) | `Connection` only depends on this interface |
+| Add verb | `MessageType` / `Frame` | Open string type, send custom messages directly |
 
-## 5. 配置速查（节点相关）
+## 5. Configuration Quick Reference (Node-related)
 
-| 环境变量 | 默认 | 说明 |
+| Env Variable | Default | Description |
 |---|---|---|
-| `PEERDRIVE_PEERJS_ENABLE` | true | 启用节点互联 |
-| `PEERDRIVE_PEERJS_ID` | 随机 | 节点 id |
-| `PEERDRIVE_PEERJS_HOST/PORT/KEY/SECURE` | 0.peerjs.com/443/peerjs/true | 信令服务器 |
-| `PEERDRIVE_PEERJS_PEERS` | - | 逗号分隔对端 id，启动自动互联 |
-| `PEERDRIVE_DISCOVER_URL` | - | 自托管发现 API（优先于 MQTT） |
-| `PEERDRIVE_MQTT_ENABLE` | false | MQTT 发现开关 |
+| `PEERDRIVE_PEERJS_ENABLE` | true | Enable node interconnection |
+| `PEERDRIVE_PEERJS_ID` | Random | Node id |
+| `PEERDRIVE_PEERJS_HOST/PORT/KEY/SECURE` | 0.peerjs.com/443/peerjs/true | Signaling server |
+| `PEERDRIVE_PEERJS_PEERS` | - | Comma-separated peer ids, auto-connect on startup |
+| `PEERDRIVE_DISCOVER_URL` | - | Self-hosted discovery API (priority over MQTT) |
+| `PEERDRIVE_MQTT_ENABLE` | false | MQTT discovery switch |
 | `PEERDRIVE_MQTT_BROKER` | tcp://broker.emqx.io:1883 | MQTT broker |
-| `PEERDRIVE_MQTT_TOPIC_PREFIX` | peerdrive/v1 | 发现 topic 前缀 |
-| `PEERDRIVE_MQTT_COLLECTIONS` | - | 逗号分隔关注的 collection hash 分片 |
-| `PEERDRIVE_FORWARD_RULES` | - | 转发白名单 `key:port,key2:port2`（key 即凭证，建议 chmod 600） |
-| `PEERDRIVE_WEBRTC_STUN` | stun:stun.l.google.com:19302 | STUN 服务器 |
-| `PEERDRIVE_WEBRTC_TURN` | - | TURN 服务器（逗号分隔多 URL） |
+| `PEERDRIVE_MQTT_TOPIC_PREFIX` | peerdrive/v1 | Discovery topic prefix |
+| `PEERDRIVE_MQTT_COLLECTIONS` | - | Comma-separated collection hash shards to watch |
+| `PEERDRIVE_FORWARD_RULES` | - | Forwarding whitelist `key:port,key2:port2` (key is credential, recommend chmod 600) |
+| `PEERDRIVE_WEBRTC_STUN` | stun:stun.l.google.com:19302 | STUN server |
+| `PEERDRIVE_WEBRTC_TURN` | - | TURN server (comma-separated multiple URLs) |
