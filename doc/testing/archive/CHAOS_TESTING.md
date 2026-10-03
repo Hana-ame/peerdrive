@@ -260,14 +260,14 @@ Results are saved to a temporary directory (`/tmp/peerdrive-chaos-matrix.XXXXXX/
 The script uses Linux Traffic Control (`tc`) with the `netem` (Network Emulator) qdisc:
 
 ```
-Normal:  [应用程序] --> [eth0]
-With tc: [应用程序] --> [netem loss/delay/jitter] --> [tbf bandwidth] --> [eth0]
+Normal:  [Application] --> [eth0]
+With tc: [Application] --> [netem loss/delay/jitter] --> [tbf bandwidth] --> [eth0]
 ```
 
 For bandwidth limiting combined with netem:
 
 ```
-[应用程序] --> [HTB root (1:)] --> [class 1:1 @ 1Mbps] --> [netem loss/delay] --> [eth0]
+[Application] --> [HTB root (1:)] --> [class 1:1 @ 1Mbps] --> [netem loss/delay] --> [eth0]
 ```
 
 ### How `iptables` Works for Flaky Mode

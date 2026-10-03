@@ -232,9 +232,9 @@ Ensure core components don't crash:
 
 | Component | Assertion |
 |------|------|
-| `Sha256Manager` | Title "SHA256 寻址" |
-| `CollectionBuilder` | Title "合集构建器" + "浏览合集" |
-| `P2PStatus` | Title "P2P 网络" |
+| `Sha256Manager` | Title "SHA256 Addressing" |
+| `CollectionBuilder` | Title "Collection Builder" + "Browse Collections" |
+| `P2PStatus` | Title "P2P Network" |
 | `App` | Logo "Peerdrive" |
 
 ### Component Tests (`tests/components.test.jsx`)
@@ -247,8 +247,8 @@ Cover rendering of main pages and components:
 | `Plaza` | 3 | Title/Create button/Search box |
 | `AnonCreator` | 3 | 4-Tab bar/Save button/No Commit button |
 | `AnonExplorer` | 1 | Hash input box |
-| `FileManager` | 1 | Title "文件管理" |
-| `Settings` | 1 | Title "设置" |
+| `FileManager` | 1 | Title "File Management" |
+| `Settings` | 1 | Title "Settings" |
 | `VersionLog` | 1 | Empty state message |
 | `Navbar` | 1 | Navigation links |
 
@@ -256,7 +256,7 @@ Cover rendering of main pages and components:
 
 | Test | Coverage Scenario |
 |------|---------|
-| Empty state rendering | `entries=[]` → displays "拖拽" |
+| Empty state rendering | `entries=[]` → displays "Drag" |
 | Flat item rendering | Single file → displays filename |
 | Nested path expansion | `d/a.txt` → displays directory "d" |
 | New folder button | Confirm button text appears |
