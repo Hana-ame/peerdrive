@@ -206,7 +206,6 @@ peerdrive
 | `PORT` | 3000 | HTTP port |
 | `PEERDRIVE_STORAGE` | ./storage | Storage directory (content-addressed files) |
 | `PEERDRIVE_STORAGE_ENABLE` | true | Storage enabled |
-| `PEERDRIVE_AUTH_TOKEN` | - | Node auth token (HTTP admin surface) |
 | `PEERDRIVE_MAX_UPLOAD_BYTES` | 100MB | Single-file upload cap |
 | `PEERDRIVE_MAX_UPLOAD_ANON_BYTES` | 10MB | Anonymous upload cap |
 | `PEERDRIVE_BT_DHT_ENABLE` / `PEERDRIVE_BT_DHT_LISTEN` | true / :6881 | BT DHT (standalone library go-peerdrive-bt) |
@@ -231,11 +230,53 @@ peerdrive
 | `PEERDRIVE_SHARE_DIRS` | - | Shared directories: comma-separated. Empty = no file sharing (files only return basename, not absolute path) |
 | `PEERDRIVE_SHARE_FRIENDS` | - | Friend node IDs: comma-separated, `private`-level content is allowed for them (see `model.LevelPrivate`) |
 
+| `PEERDRIVE_PSK` | - | Node access pre-shared key. Empty = open (serves whoever connects); set = peer must present the same key to pull anything (`doc/NETDISK.md` §9) |
+
 > These `PEERDRIVE_SHARE_*` entries are only **first-boot initial values**: after startup they can be changed any time via `GET/PUT /peerjs/share`
 > and `POST /peerjs/share/files` (by directory / collection / individual file hash), persisted in
 > `PEERDRIVE_STORAGE/share_scope.json`; from then on that file is authoritative, changing env vars will not overwrite
 > already-made choices (see `doc/NETDISK.md` §12.6, tutorial chapters 3 and 4).
-| `PEERDRIVE_PSK` | - | Node access pre-shared key. Empty = open (serves whoever connects); set = peer must present the same key to pull anything (`doc/NETDISK.md` §9) |
+
+## Security status after startup (added 2026-10-04)
+
+> **The node prints a security status summary after startup.** Out of the box, several switches are **off** (= open),
+> and previously there was **no prompt at all** — you had to know the implementation details to find out it was open.
+> Now you can check the log directly right after starting:
+
+```
+security: 4 open item(s) need operator attention, 1 informational item(s)
+security: [open] inbound P2P has no gate (PEERDRIVE_PSK empty) — ...
+security: [open] HTTP admin surface has no auth (PEERDRIVE_REG_SERVER empty) — ...
+security: [open] node is present in the public roster (PEERDRIVE_DISCOVER_PRESENCE=true) — ...
+security: [open] Swagger API docs are public (PEERDRIVE_SWAGGER not off) — ...
+security: [info] external sharing not enabled (PEERDRIVE_SHARE_ENABLE not true) — ...
+```
+
+Once everything is configured, it becomes one line:
+
+```
+security: all gates closed (inbound PSK / admin-surface auth / public roster / Swagger)
+```
+
+**What each item means / how to close it**
+
+| Item | Meaning | How to close |
+|---|---|---|
+| `PEERDRIVE_PSK` empty | Once the peer id is known, anyone can connect and pull share content | Set `PEERDRIVE_PSK`; or bind `PEERDRIVE_HOST=127.0.0.1` |
+| `PEERDRIVE_REG_SERVER` empty | List/delete files, change sharing scope, read Swagger — all open without a credential | Set `PEERDRIVE_REG_SERVER`; or bind `PEERDRIVE_HOST=127.0.0.1` |
+| `PEERDRIVE_DISCOVER_PRESENCE=true` | peer id and sharing summary are announced to the signaling server, and strangers can call back | Set `PEERDRIVE_DISCOVER_PRESENCE=false` |
+| `PEERDRIVE_SWAGGER` not off | `/swagger/index.html` publishes the endpoint and parameter structure of all 105+ endpoints without a credential | Set `PEERDRIVE_SWAGGER=off` |
+
+> **Why `PEERDRIVE_PSK` is not forced by default**: forcing it would make every existing deployment fail to start
+> (the env block in `doc/tutorial/01-run-and-connect.md` §1.3 has no PSK, and the public panel does not present one by default),
+> CI has no coverage of the PSK path, and PSK itself is a **shared key with no identity** — it can only answer
+> "does the other side know this key", not "who is the other side" (see `back/internal/transport/psk.go`).
+> So: report first, then add gates as the deployment scenario requires.
+
+> **About `PEERDRIVE_AUTH_TOKEN`**: it has been **removed** (2026-10-04). It was never an inbound gate to begin with —
+> in the original implementation (`539efc5`) it was the **outbound** identity this node used when reporting to the
+> registration server, and deleting the libp2p stack (`a5b090d`) left the field with no consumer.
+> The admin surface's actual auth switch is `PEERDRIVE_REG_SERVER`.
 
 
 ## Leftover items
