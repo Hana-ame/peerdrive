@@ -138,6 +138,28 @@ func (s *PeerJSService) shareLoadInfo() map[string]any {
 	if p == nil {
 		return nil
 	}
+	// 2026-10-04: when no PSK is configured this node serves **anyone** who reaches it
+	// (transport/psk.go pskEnabled() is literally cfg.PeerPSK != ""), so the announce body is a
+	// public description of a node that has no admission control at all. Measured on the live
+	// deployment: GET /status returned this node's dir/file/collection counts to any caller.
+	//
+	// Degrade rather than disable: the counts are what the market card shows to help someone
+	// decide whether to connect, and the node still needs to be **findable**. Dropping just the
+	// counts keeps discovery working while removing the "here is exactly what this node holds"
+	// signal. Operators who want the counts published opt in by setting a PSK (the counts then
+	// sit behind a gate that exists) or, once tokenized signaling lands, a signaling token.
+	//
+	// Boundary: this is metadata reduction, not access control. It deliberately does NOT try to
+	// replace a gate — with no PSK the content is still reachable, and the honest statement of that
+	// is the startup warning from cmd/server/security_status.go.
+	if s.cfg == nil || s.cfg.PeerPSK == "" {
+		return map[string]any{
+			"shares": map[string]any{
+				"countsHidden": true,
+				"reason":       "no PSK configured — counts hidden from the public roster",
+			},
+		}
+	}
 	snap := p("")
 	return map[string]any{
 		"shares": map[string]any{

@@ -17,6 +17,8 @@ import (
 	"testing"
 
 	"peerdrive/internal/config"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // newShareTestService creates a PeerJSService without signaling (only testing frame handling).
@@ -126,12 +128,20 @@ func TestServeShareWithoutProviderIsEmptyArrays(t *testing.T) {
 	}
 }
 
-// TestShareLoadInfoCountsOnly The summary only reports counts, not hashes.
-// Discovery background: announce is broadcast to all queryers via the discovery
-// server; putting collection hashes into loadInfo is equivalent to publicly
-// revealing "what this node has" (a leak surface explicitly named in ROADMAP).
+// TestShareLoadInfoCountsOnly The summary only reports counts, not hashes — and only
+// when there is a gate.
+//
+// Discovery background: announce is broadcast to all queryers via the discovery server;
+// putting collection hashes into loadInfo is equivalent to publicly revealing "what this node
+// has" (a leak surface explicitly named in ROADMAP).
+//
+// 2026-10-04 update: a PSK is now also part of the contract. With no PSK the node admits anyone,
+// so the counts are withheld entirely (see TestShareLoadInfo_HidesCountsWithoutPSK). This test
+// therefore sets a PSK — it keeps pinning the original intent (never leak hashes) plus the
+// counts-are-published-when-gated half.
 func TestShareLoadInfoCountsOnly(t *testing.T) {
 	svc := newShareTestService(t)
+	svc.cfg.PeerPSK = "a-real-key"
 	svc.SetShareProvider(func(peerID string) ShareSnapshot {
 		return ShareSnapshot{
 			Collections: []ShareCollectionInfo{{Hash: "secret-hash"}},
@@ -174,4 +184,63 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestShareLoadInfo_HidesCountsWithoutPSK — 2026-10-04.
+//
+// Background: shareLoadInfo feeds the announce body, which the discovery server broadcasts
+// to every queryer. With no PSK configured the node admits anyone (pskEnabled() is
+// literally cfg.PeerPSK != ""), so those counts were a public description of a node with
+// no admission control — measured live: GET /status handed out dir/file/collection counts.
+//
+// The fix hides the counts but keeps the node findable. These cases pin BOTH halves:
+// dropping the counts must not accidentally drop the whole payload, and setting a PSK
+// must restore them.
+func TestShareLoadInfo_HidesCountsWithoutPSK(t *testing.T) {
+	counted := func(t *testing.T, info map[string]any) (float64, bool) {
+		t.Helper()
+		if info == nil {
+			return 0, false
+		}
+		shares, ok := info["shares"].(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		v, present := shares["files"]
+		if !present {
+			return 0, false
+		}
+		n, ok := v.(int)
+		assert.True(t, ok, "files count should be an int, got %T", v)
+		return float64(n), true
+	}
+
+	t.Run("no PSK hides counts but keeps the payload", func(t *testing.T) {
+		svc := newTestPeerJSService(t) // cfg.PeerPSK == ""
+		svc.SetShareProvider(func(string) ShareSnapshot {
+			return ShareSnapshot{Files: []ShareFileInfo{{Hash: "h1"}, {Hash: "h2"}}}
+		})
+
+		info := svc.shareLoadInfo()
+		assert.NotNil(t, info, "payload must stay non-nil so the node is still announced")
+		_, hasCount := counted(t, info)
+		assert.False(t, hasCount, "no files count may be published without a PSK")
+
+		shares := info["shares"].(map[string]any)
+		assert.Equal(t, true, shares["countsHidden"],
+			"mark that counts were deliberately hidden, not merely absent")
+	})
+
+	t.Run("PSK restores counts", func(t *testing.T) {
+		svc := newTestPeerJSService(t)
+		svc.cfg.PeerPSK = "a-real-key"
+		svc.SetShareProvider(func(string) ShareSnapshot {
+			return ShareSnapshot{Files: []ShareFileInfo{{Hash: "h1"}, {Hash: "h2"}}}
+		})
+
+		info := svc.shareLoadInfo()
+		got, hasCount := counted(t, info)
+		assert.True(t, hasCount, "with a PSK the counts should be published again")
+		assert.Equal(t, float64(2), got)
+	})
 }
