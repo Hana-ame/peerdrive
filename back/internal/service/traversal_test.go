@@ -43,6 +43,12 @@ func newTraversalFixture(t *testing.T) traversalFixture {
 	t.Helper()
 	require.NoError(t, repository.InitDB(":memory:"))
 	base := t.TempDir()
+	// Resolve symlinks (macOS: /var -> /private/var). The service checks candidate paths against
+	// the storage root with isPathAllowed, so an unresolved root makes it reject its own
+	// directory — this suite passed on Linux and failed on darwin/arm64 in CI.
+	if resolved, rerr := filepath.EvalSymlinks(base); rerr == nil {
+		base = resolved
+	}
 	storage := filepath.Join(base, "storage")
 	outside := filepath.Join(base, "outside")
 	require.NoError(t, os.MkdirAll(filepath.Join(storage, "sub"), 0o755))

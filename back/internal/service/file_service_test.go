@@ -26,6 +26,19 @@ func setupFileServiceTest() (string, *FileService) {
 		panic(err)
 	}
 
+	// Resolve symlinks before using the path as a storage root.
+	//
+	// Why (found via CI on darwin/arm64, invisible on Linux): os.MkdirTemp returns
+	// /var/folders/... on macOS, while every file the service actually touches lives under the
+	// resolved /private/var/folders/.... isPathAllowed / copyInto compare against that root, so an
+	// unresolved root makes the service reject its own storage directory with
+	// "path outside allowed root". Every test in this file that uploads or registers therefore
+	// passed on Linux and failed on macOS. Fixing it in the shared helper rather than per-test is
+	// what makes this correct everywhere instead of just for the test that happened to trip it.
+	if resolved, rerr := filepath.EvalSymlinks(tmpDir); rerr == nil {
+		tmpDir = resolved
+	}
+
 	cfg := &config.Config{
 		StorageDir:    tmpDir,
 		StorageEnable: true,
@@ -333,21 +346,10 @@ func TestGuardExternalURL_AcceptsPublicHost(t *testing.T) {
 // prevents nodeshare from silently regressing again from this direction.
 func TestUpload_RegistersFileIndex(t *testing.T) {
 	dir, svc := setupFileServiceTest()
-
-	// Resolve symlinks on the storage root before uploading.
-	//
-	// Why (caught by CI on macOS/arm64, invisible on Linux): os.MkdirTemp returns
-	// /var/folders/... on macOS while the bytes land under the resolved
-	// /private/var/folders/.... Upload's copyInto compares the destination against the allowed
-	// roots and rejects the mismatch with "move to storage: path outside allowed root", so this
-	// test passed locally on Linux and panicked on darwin. Resolving here keeps the assertion
-	// about the behavior under test (file_index registration) instead of about temp-dir
-	// path canonicalization.
-	if resolved, rerr := filepath.EvalSymlinks(dir); rerr == nil {
-		dir = resolved
-	}
 	defer os.RemoveAll(dir)
 
+	// setupFileServiceTest resolves symlinks in the storage root (macOS /var -> /private/var),
+	// which is why this passes on darwin — see the comment there.
 	payload := []byte("upload writes file_index now")
 	meta, err := svc.Upload(bytes.NewReader(payload), "demo.txt")
 	require.NoError(t, err, "upload itself must succeed")
