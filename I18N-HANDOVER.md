@@ -1,5 +1,39 @@
 # Task: Clean up the residual Chinese in peerdrive (i18n or English)
 
+> ## ⚠️ 2026-10-04 状态更正 —— 本文描述的损坏状态已全部回退
+>
+> **本文写于 2026-10-03，描述的是那批"中译英"提交（`0713b38..93889b1`）的中间状态。
+> 该批已被审计并部分回退，本文所列的"功能消失/权限失效"问题现在都不存在了。**
+>
+> | 本文所说的损坏 | 现状 |
+> |---|---|
+> | 面板分享链接出口整块消失（§6 表格 10 项 missing） | **已恢复**，回退于 `ef53fe2` |
+> | `id: myId` 被删、private 内容永远取不到（§6.1） | **已恢复** |
+> | id 前缀 `pd-panel-` → `p-`（§6.1） | **已恢复**，前缀仍是 `pd-panel-` |
+> | SHA-256 K 表少一个常量（§3.2） | **从来不是这次的问题**——见下方"两条需要更正的陈述" |
+> | 建议 `git checkout HEAD -- panel/app.js` 回退（§6.2） | **已执行** |
+>
+> **契约测试已恢复全绿**：`packages/peerdrive-client` 从 13 失败 → **0 失败（115/115）**，
+> CI（Peerdrive CI / Go Build Matrix / E2E）当前全绿，HEAD `75cfdb3`。
+>
+> **现在要做的**：本文 §2/§4/§5 里那些**产品决策**仍然有效且没做过
+> （i18n 怎么做、archive 文档翻不翻、面板 4 段提示块怎么处理）。
+> §3（"我已修好的两件事"）与 §6（"面板功能消失了"）**已过期**，读 §0 的更正即可。
+>
+> **动手翻译前先读 [`doc/TRANSLATION-CONSTRAINTS.md`](doc/TRANSLATION-CONSTRAINTS.md)**
+> ——那批提交之所以越界改坏 16 个文件，正是因为没有这份约束。
+>
+> ### 两条需要更正的陈述（否则会误导下一个人）
+>
+> 1. **§3.2 的 K 表从未被改坏。** 本文称 K 表从 64 项变成 63 项（`0xf40e3585` 被删）。
+>    实测全历史：`git log --all -- packages/peerdrive-client/src/sha256.js
+>    front/src/lib/pd-client/sha256.js` 的**每一个提交**里，两处 K 表都是完整 64 项、
+>    都含 `0xf40e3585`。§3.1 的单引号串语法错误是真的（`peerdrive-client` CI 确实抓到过）。
+> 2. **§0.1 与 §5 的产品判断有一个前提写歪了**：§2.2 用"零依赖是这个包的卖点"
+>    推出"panel 禁止引任何 i18n 库"。若真实诉求只是**页面打开时不额外下载**，
+>    正确结论是**把词条内联进产物**，"不许引库"只是它的副产品而不是目标。
+>    这一点尚未有产品侧结论，留给接手的人判断。
+
 > Handover document. Written for the next person (or agent) who picks this up.
 > Generated: 2026-10-03. Repo: `D:\WorkPlace\peerdrive`, branch `refactor`.
 > **Read before touching anything**: §0 — the workspace currently holds **someone else's unfinished English-ization redo**, not a clean starting point.

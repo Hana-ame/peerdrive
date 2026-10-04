@@ -77,7 +77,7 @@
 ## 6. External Connections
 
 - [../connections/13-media-node-ech.md](../connections/13-media-node-ech.md): This module is the media node implementation. The ECH library (`back/ech`) provides domain fronting transport. The peerjs library provides signaling and DataChannel transport.
-- [../connections/10-peerjs.md](../connections/10-peerjs.md): Uses the peerjs library for signaling registration and DataChannel transport primitives.
+- [../modules/10-peerjs.md](../modules/10-peerjs.md): Uses the peerjs library for signaling registration and DataChannel transport primitives.
 - [../connections/08-transport-signalserver.md](../connections/08-transport-signalserver.md): Media node registers to project public signaling `peersignal.moonchan.xyz` with fixed peer id (`main.go:161-164,184-199`), browser connection negotiation messages (CANDIDATE send `back/peerjs/connection.go:255-265`, ANSWER/CANDIDATE handling `connection.go:203-218`, OFFER send `connection.go:331-348`, ANSWER response `connection.go:351-364`) all forwarded via signaling; direction media-node → signaling server.
 - [../connections/12-frontend-signalserver.md](../connections/12-frontend-signalserver.md): Browser-side peerdrive-media and `echclient` dial media-node's peer id via same signaling (`echclient/main.go:34-49` demonstrates consumer perspective: `Connect("media-node","media")`); direction frontend/echclient → signaling → media-node.
 - Related note: Related module documents in same directory are [10-peerjs.md](10-peerjs.md) (peerjs library implementation). Media node has **no dependency or data flow** with main process modules (config/repository/storage/router/controller/service/transport etc.) — independent binary, only shared artifact is signaling server and peerjs library.

@@ -159,22 +159,27 @@ env -u HTTP_PROXY -u http_proxy bash test/e2e-all.sh
 
 | Document | Content |
 |------|------|
-| [如何测试.md](如何测试.md) | Chinese operation guide — run commands and troubleshooting for each test |
+| [how-to-test.md](how-to-test.md) | Chinese operation guide — run commands and troubleshooting for each test |
 | [TESTING-HANDBOOK.md](TESTING-HANDBOOK.md) | Complete test handbook — environment setup, architecture, manual flow (840 lines) |
 | [TEST-PIPELINE.md](TEST-PIPELINE.md) | Test pipeline — flow, expectations, error analysis for each script |
 | [TEST-MATRIX.md](TEST-MATRIX.md) | Test matrix — ID/steps/expectations for 109 test cases |
 | [TESTING-METHODOLOGY.md](TESTING-METHODOLOGY.md) | Methodology details — 9-phase testing methodology |
 | [CHAOS_TESTING.md](CHAOS_TESTING.md) | Chaos testing — harsh network simulation |
-| [测试报告-2026-04-29.md](../../archive/report/测试报告-2026-04-29.md) | Latest test report (389+ PASS) |
+| [test-report-2026-04-29.md](../../archive/report/test-report-2026-04-29.md) | Latest test report (389+ PASS) |
 | [CI-FIXES.md](../../archive/report/CI-FIXES.md) | CI fix records (8 issues) |
 
 ### Archived (obsolete/early documents)
 
+> ⚠️ These targets were already gone before the 2026-10-03 translation batch
+> (verified against `0713b38`): `doc/testing/archive/archive/` does not exist,
+> so the links below cannot be resolved. They are kept for traceability of what
+> this plan superseded, not as working links.
+
 | Document | Notes |
 |------|------|
-| [测试说明.md](archive/测试说明.md) | Early test description → merged into 如何测试.md |
-| [register.md](archive/register.md) | Early registration test notes |
-| [test-case-spec.md](archive/test-case-spec.md) | Old test cases → upgraded to TEST-MATRIX.md |
-| [test-peers.md](archive/test-peers.md) | P2P node test notes |
-| [p2p-stage2-report.md](archive/p2p-stage2-report.md) | P2P Stage 2 test report |
-| [test-steps.md](archive/test-steps.md) | P2P actual test steps log |
+| [测试说明.md](archive/测试说明.md) | Early test description → merged into how-to-test.md (file no longer in repo) |
+| [register.md](archive/register.md) | Early registration test notes (file no longer in repo; see [spec/backend/register.md](../../spec/backend/register.md)) |
+| [test-case-spec.md](archive/test-case-spec.md) | Old test cases → upgraded to TEST-MATRIX.md (file no longer in repo) |
+| [test-peers.md](archive/test-peers.md) | P2P node test notes (file no longer in repo) |
+| [p2p-stage2-report.md](archive/p2p-stage2-report.md) | P2P Stage 2 test report (file no longer in repo) |
+| [test-steps.md](archive/test-steps.md) | P2P actual test steps log (file no longer in repo) |
