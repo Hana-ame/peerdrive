@@ -32,17 +32,28 @@ type Config struct {
 	StorageEnable bool
 
 	AllowedOrigins     string
-	PublicAccessDomain string
 	RegistrationServer string
-	NodeAuthToken      string // persistent auth token for node identity
+	// 2026-10-04: removed the three dead fields PublicAccessDomain / NodeAuthToken /
+	// RegServerURL.
+	// Why deletion instead of implementation:
+	//   NodeAuthToken (PEERDRIVE_AUTH_TOKEN) was never an inbound gate to begin with —
+	//   git show 539efc5 shows it was consumed by NodeRegistrar + service/p2p_key.go as the
+	//   **outbound** identity this node uses when reporting to the registration server.
+	//   Commit a5b090d deleted the libp2p stack along with those two consumers, leaving the
+	//   field stranded; NodeRegistrar no longer exists and nodestate.Configure (its only
+	//   remaining writer) has zero call sites. So "implement it now" would mean inventing a
+	//   brand-new credential system and calling it a security guarantee — strictly worse than
+	//   deleting it. Inbound admin-surface auth is RegistrationServer above
+	//   (router/auth_middleware.go authDisabled()).
+	//   PublicAccessDomain / RegServerURL were zero-consumption from introduction.
+	// Rollback note: to restore, re-add the three fields plus their getEnv lines at the
+	// original positions; nothing else in the tree references them.
 
 	BTDHTEnabled    bool
 	BTDHTListenAddr string
 
 	IPFSGatewayEnable bool
 	IPFSGateways      string
-
-	RegServerURL string
 
 	MaxUploadBytes     int64 // 0 = unlimited
 	MaxUploadBytesAnon int64
@@ -204,10 +215,7 @@ func Load() *Config {
 		StorageDir:         getEnv("PEERDRIVE_STORAGE", "./storage"),
 		StorageEnable:      getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
 		AllowedOrigins:     getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev"),
-		PublicAccessDomain: getEnv("PEERDRIVE_PUBLIC_DOMAIN", ""),
 		RegistrationServer: getEnv("PEERDRIVE_REG_SERVER", ""),
-		NodeAuthToken:      getEnv("PEERDRIVE_AUTH_TOKEN", ""),
-		RegServerURL:       getEnv("PEERDRIVE_REG_SERVER_URL", ""),
 		MaxUploadBytes:     getEnvInt64("PEERDRIVE_MAX_UPLOAD_BYTES", 100*1024*1024),     // 100MB default
 		MaxUploadBytesAnon: getEnvInt64("PEERDRIVE_MAX_UPLOAD_ANON_BYTES", 10*1024*1024), // 10MB for anonymous
 		BTDHTEnabled:       getEnvBool("PEERDRIVE_BT_DHT_ENABLE", false),                 // Default disabled: DHT init blocks startup; enable manually as needed
