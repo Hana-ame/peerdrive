@@ -11,6 +11,7 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/repository"
+	"peerdrive/internal/transport"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -278,4 +279,44 @@ func TestDeleteStorageDisabled(t *testing.T) {
 	err := svc.Delete("somehash")
 	assert.Error(t, err)
 	assert.Equal(t, ErrStorageDisabled, err)
+}
+
+// TestResolveURL_SSRFGuard — POST /files/register_url is "fetch a caller-supplied URL
+// on the node's behalf", the same shape as the P2P pull verb, so it must carry the
+// same SSRF guard.
+//
+// Background: measured on 2026-10-04 that this endpoint had **no** guard — posting
+// {"url":"http://127.0.0.1:<node port>/peerjs/share"} returned 201 and stored the
+// node's own admin response as a file. These cases pin that every internal target is
+// rejected *before* any network call, and that the rejection names the reason.
+func TestResolveURL_SSRFGuard(t *testing.T) {
+	dir, svc := setupFileServiceTest()
+	defer os.RemoveAll(dir)
+
+	blocked := map[string]string{
+		"http://127.0.0.1:3399/peerjs/share": "internal/local", // the original exploit
+		"http://localhost:8080/":            "localhost",
+		"http://169.254.169.254/latest/meta-data/": "internal/local",
+		"http://10.0.0.5/":                        "internal/local",
+		"http://192.168.1.1/":                     "internal/local",
+		"http://[::1]:9000/":                      "internal/local",
+		"file:///etc/passwd":                      "only http/https",
+		"ftp://example.com/x":                     "only http/https",
+		"http://user:pw@example.com/":             "user info",
+	}
+
+	for raw, wantSubstr := range blocked {
+		_, _, _, _, _, err := svc.ResolveURL(raw, true)
+		assert.Error(t, err, "%s must be rejected by the SSRF guard", raw)
+		assert.Contains(t, err.Error(), wantSubstr,
+			"%s: error %q should explain why (expected to mention %q)", raw, err.Error(), wantSubstr)
+	}
+}
+
+// TestGuardExternalURL_AcceptsPublicHost makes sure the guard is not simply
+// "reject everything": a syntactically valid public https URL must pass the check.
+// (It is only checked, not fetched — no network in a unit test.)
+func TestGuardExternalURL_AcceptsPublicHost(t *testing.T) {
+	assert.NoError(t, transport.GuardExternalURL("https://example.com/file.zip"))
+	assert.NoError(t, transport.GuardExternalURL("http://example.com/a.bin"))
 }
