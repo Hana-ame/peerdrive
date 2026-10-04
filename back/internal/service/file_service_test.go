@@ -15,6 +15,7 @@ import (
 	"peerdrive/internal/transport"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func setupFileServiceTest() (string, *FileService) {
@@ -332,12 +333,25 @@ func TestGuardExternalURL_AcceptsPublicHost(t *testing.T) {
 // prevents nodeshare from silently regressing again from this direction.
 func TestUpload_RegistersFileIndex(t *testing.T) {
 	dir, svc := setupFileServiceTest()
+
+	// Resolve symlinks on the storage root before uploading.
+	//
+	// Why (caught by CI on macOS/arm64, invisible on Linux): os.MkdirTemp returns
+	// /var/folders/... on macOS while the bytes land under the resolved
+	// /private/var/folders/.... Upload's copyInto compares the destination against the allowed
+	// roots and rejects the mismatch with "move to storage: path outside allowed root", so this
+	// test passed locally on Linux and panicked on darwin. Resolving here keeps the assertion
+	// about the behavior under test (file_index registration) instead of about temp-dir
+	// path canonicalization.
+	if resolved, rerr := filepath.EvalSymlinks(dir); rerr == nil {
+		dir = resolved
+	}
 	defer os.RemoveAll(dir)
 
 	payload := []byte("upload writes file_index now")
 	meta, err := svc.Upload(bytes.NewReader(payload), "demo.txt")
-	assert.NoError(t, err)
-	assert.NotEmpty(t, meta.Hash)
+	require.NoError(t, err, "upload itself must succeed")
+	require.NotEmpty(t, meta.Hash)
 
 	listed, err := repository.ListFileIndex(0, 100)
 	assert.NoError(t, err)
