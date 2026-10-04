@@ -623,6 +623,27 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 		return nil, fmt.Errorf("insert provider: %w", err)
 	}
 
+	// Sync-register file_index, same step RegisterLocal already takes (file_service.go:276).
+	//
+	// Why this was missing (found 2026-10-04): file_index is the **only source of truth** for
+	// "which files may this node serve outward" — service/nodeshare.go builds the share manifest
+	// from it via transport.FileIndexService.List. Upload wrote file_meta + file_providers only,
+	// so an uploaded file showed up in the operator's own /files listing yet **never** appeared in
+	// the share manifest: a peer connected successfully and saw files:[] forever. The comment on
+	// RegisterLocal already spelled out precisely this trap; Upload simply never took the step.
+	//
+	// Measured before the fix: POST /files/upload → GET /peerjs/share returns files:[]. Issuing
+	// one POST /files/register_local for the same file made the manifest list it immediately.
+	// The admin console's "+ Upload File" button goes through this endpoint
+	// (front/src/pages/Drive.jsx → ws.upload(..., '/files/upload')), so the primary operator
+	// workflow could not share anything it uploaded.
+	//
+	// Failure only warns: the bytes are already stored and the meta row is committed, so a
+	// bookkeeping problem must not turn a successful upload into an error.
+	if _, err := repository.UpsertFileIndex(hash, fullPath, filename, size, false); err != nil {
+		log.LogWarn("file-svc: Upload upsert file_index %s failed: %v", hash, err)
+	}
+
 	log.LogInfo("file-svc: Upload %s completed (hash=%s, size=%d)", filename, hash, size)
 	return meta, nil
 }
