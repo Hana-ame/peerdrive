@@ -87,6 +87,30 @@ jobs:
           CGO_ENABLED: 0
         run: go test -count=1 ./...
 
+      # go test 会编译包，但不会产出二进制。cmd/peersignal 是对外发布的
+      # 独立二进制入口（2026-10-04 module 改名后其 import 路径也变了），
+      # 只测不建会漏掉入口侧的链接错误。
+      - name: Build signalserver binary
+        working-directory: back/signalserver
+        env:
+          CGO_ENABLED: 0
+        run: go build -o /dev/null ./cmd/peersignal
+
+      # 父模块的集成测试带 //go:build integration，日常 job 不覆盖；
+      # 它是唯一会编译 back/go.mod 里 require/replace 与 ./signalserver
+      # 是否匹配的地方（2026-10-04 那条坏 replace 就藏在这里）。
+      - name: Vet integration tests
+        working-directory: back
+        env:
+          CGO_ENABLED: 0
+        run: go vet -tags integration ./test/integration/
+
+      - name: Test integration (signalserver wiring)
+        working-directory: back
+        env:
+          CGO_ENABLED: 0
+        run: go test -tags 'integration nosqlite' -count=1 ./test/integration/
+
       - name: Test p2p_bt
         working-directory: back/p2p_bt
         env:
