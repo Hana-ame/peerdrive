@@ -234,6 +234,63 @@ func handleCORS(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
+// handleCORSPreflight is handleCORS **without** the wildcard header, for endpoints that
+// must not be readable cross-origin.
+//
+// Why (2026-10-04): allowCORS sets `Access-Control-Allow-Origin: *`, which is load-bearing for
+// the public panel — it is opened via file:// (Origin `null`) or from any static host, so all of
+// its origins are cross-origin from the signaling server (see the allowCORS comment).
+// But that same header on the **ops-facing** endpoints turns "which nodes exist on this
+// network" into something any web page can read. So: panel endpoints keep the wildcard,
+// ops endpoints keep only the preflight short-circuit and omit the allow-origin header —
+// a cross-origin caller then gets an opaque response, a same-origin/curl caller is unaffected.
+func handleCORSPreflight(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.WriteHeader(http.StatusNoContent)
+		return true
+	}
+	return false
+}
+
+// tokenFromRequest reads the signaling token from the query string or the
+// `Authorization: Bearer` header.
+//
+// Two shapes accepted on purpose: the WebSocket upgrade can only carry a query param
+// (see HandleWS), while curl/dashboard scripts naturally send a header.
+func tokenFromRequest(r *http.Request) string {
+	if t := r.URL.Query().Get("token"); t != "" {
+		return t
+	}
+	if h := r.Header.Get("Authorization"); len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
+		return strings.TrimSpace(h[7:])
+	}
+	return ""
+}
+
+// opsTokenOK reports whether this request may use ops-facing REST endpoints (/status and
+// the full roster). Policy (2026-10-04):
+//
+//   - When a token whitelist is configured, a presented token must be on it.
+//   - When **no** whitelist is configured (the default), any non-empty token passes.
+//     This is deliberate: default deployments have no token to present, and hard-failing
+//     would break every existing /status dashboard. The real fix is operators turning the
+//     whitelist on (`-tokens`); this keeps that the single switch.
+//
+// An empty token never passes — that is what closes the "any web page reads the roster"
+// hole for the default deployment, because a browser cannot conjure a token.
+func (s *Server) opsTokenOK(r *http.Request) bool {
+	t := tokenFromRequest(r)
+	if t == "" {
+		return false
+	}
+	if len(s.tokenWhitelist) == 0 {
+		return true
+	}
+	return s.tokenWhitelist[t]
+}
+
 // HandleID GET /{path}{key}/id → random id (peerjs API compatible).
 func (s *Server) HandleID(w http.ResponseWriter, r *http.Request) {
 	if handleCORS(w, r) {
@@ -596,6 +653,21 @@ func (s *Server) HandleNodes(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
+		// 2026-10-04: `type` is an **ops filter** — the public panel never sends it
+		// (panel/app.js discoverNow calls discoverNodes(sig) with neither coll nor type, to answer
+		// "who is online at all"). The dashboard uses it to colour the node graph by role.
+		// Gating on "no coll" was this change's first attempt and it was **wrong**: CI caught it —
+		// the E2E panel step failed with "Discovery service returned HTTP 401" because the panel's
+		// own auto-search IS a coll-less query. Keep the no-coll form public (it is the panel's
+		// entry point) and require an ops token only for the inventory-style query.
+		// Trade-off accepted for now: the roster is still enumerable without a token, because the
+		// panel depends on it. What is closed here is /status (ops-only) and its cross-origin
+		// readability; the roster proper waits for Round 3 panel token support.
+		if nodeType != "" && !s.opsTokenOK(r) {
+			s.mu.Unlock()
+			http.Error(w, "ops token required for ?type= queries", http.StatusUnauthorized)
+			return
+		}
 		// Empty coll: iterate all collections and return deduplicated online nodes
 		for _, peers := range s.disc {
 			for id, last := range peers {
@@ -671,8 +743,18 @@ type NodeInfo struct {
 }
 
 // HandleStatus GET /status → server status snapshot (for dashboard polling).
+//
+// 2026-10-04: now requires an ops token and drops the wildcard CORS header.
+// /status embeds the full online-node roster (peer ids + share summary), so leaving it
+// readable from any web page turned the roster into a one-fetch list of every node on the
+// network. The bundled dashboard.html is served from this same origin, so it is unaffected;
+// external tooling should pass `?token=` or an Authorization header.
 func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
-	if handleCORS(w, r) {
+	if handleCORSPreflight(w, r) {
+		return
+	}
+	if !s.opsTokenOK(r) {
+		http.Error(w, "ops token required", http.StatusUnauthorized)
 		return
 	}
 	s.mu.Lock()
