@@ -62,6 +62,11 @@ func main() {
 	storageDir := cfg.StorageDir
 	log.LogInfo("main: config loaded, storageDir=%s, port=%s", storageDir, cfg.Port)
 
+	// share is built inside the PeerJS block below but also read by logSecuritySummary
+	// afterwards (whether external sharing is on). Declared at function scope so the
+	// summary can see it; nil when PeerJS is disabled, which the summary treats as "not sharing".
+	var share *service.NodeShare
+
 	// Reject "volume root" configuration at startup (doc/NETDISK.md §11.3).
 	//
 	// pathutil.Within is a pure containment check: when root is configured as `/`
@@ -143,7 +148,7 @@ func main() {
 		// storageDir is also passed in: the sharing scope is **runtime-mutable** (admin panel
 		// checkbox / PUT /peerjs/share), stored in storageDir/share_scope.json; the env var is
 		// only the initial value at first startup (see service.NodeShare header comment).
-		share := service.NewNodeShare(cfg, storageDir)
+		share = service.NewNodeShare(cfg, storageDir)
 		// Runtime-added share directories must be registered as readable roots, otherwise you get
 		// "listing shows up but read failed" (the read side considers it out-of-bounds). The batch
 		// added at startup is registered by the AddReadRoot loop above; here we only cover those
@@ -251,6 +256,12 @@ func main() {
 	}
 	log.LogInfo("main: setting up HTTP router")
 	r := router.SetupRouter(cfg)
+
+	// Security status summary (security_status.go): print "where exactly is this node open"
+	// after the router is assembled. Read-only, doesn't change any default.
+	// share is the NodeShare built in the PeerJS block above; nil when PeerJS is disabled,
+	// which the summary itself treats as "sharing not enabled".
+	logSecuritySummary(cfg, share)
 
 	// Listen address: PEERDRIVE_HOST empty = listen on all interfaces (historical behavior).
 	// The admin surface has no account system; "who can reach this port" is its only boundary.
