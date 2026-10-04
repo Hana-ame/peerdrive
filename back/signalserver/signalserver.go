@@ -38,6 +38,9 @@ type Server struct {
 	queueTTL       time.Duration   // offline queue TTL (used for OFFER expiry)
 	heartbeatTTL   time.Duration   // discovery heartbeat expiry time
 	tokenWhitelist map[string]bool // allowed signaling tokens (nil/empty = unrestricted)
+	// corsOrigins is the explicit CORS allow-list (nil/empty = wildcard "*", the historical behavior).
+	// See WithCORSOrigins and allowCORS for why the default stays permissive.
+	corsOrigins []string
 
 	startedAt time.Time // server startup time
 	msgCount  int64     // total forwarded message count (atomic access)
@@ -53,6 +56,32 @@ type Server struct {
 
 // Option is a signaling server configuration option.
 type Option func(*Server)
+
+// WithCORSOrigins sets an explicit CORS allow-list for the panel-facing REST endpoints.
+//
+// Default (not called) stays `Access-Control-Allow-Origin: *`, which is what every existing
+// deployment relies on — see the allowCORS comment for why the panel cannot be given an
+// exact origin by default (file:// has Origin `null`, and the panel may be hosted anywhere).
+//
+// Once an operator supplies a list, the server echoes back the request's Origin when it
+// matches instead of the wildcard. That is the tightening switch; it is opt-in so that
+// turning it on is a deliberate deployment decision rather than a surprise after an upgrade.
+//
+// Practical note: `null` must be listed explicitly to keep file:// panels working:
+//
+//	-cors-origin "https://peerdrive.pages.dev,null"
+func WithCORSOrigins(origins []string) Option {
+	return func(s *Server) {
+		cleaned := make([]string, 0, len(origins))
+		for _, o := range origins {
+			o = strings.TrimSpace(o)
+			if o != "" {
+				cleaned = append(cleaned, o)
+			}
+		}
+		s.corsOrigins = cleaned
+	}
+}
 
 // WithTokenWhitelist sets the signaling token whitelist: the WS connection token must be on the list,
 // otherwise the upgrade is rejected ("Invalid token provided"). Empty list = unrestricted (default, compatible
@@ -224,9 +253,40 @@ func allowCORS(w http.ResponseWriter) {
 	h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 }
 
+// allowCORSFor is allowCORS with the optional explicit allow-list applied (2026-10-04).
+//
+// No list configured -> wildcard, byte-identical to the historical behavior, so not
+// configuring anything keeps every existing deployment working exactly as before.
+// List configured -> echo the request Origin when it matches; when it does not match,
+// deliberately emit **no** Allow-Origin header, which is exactly what makes the browser
+// block the read. That is the point of the switch: a wildcard means "every site on the
+// internet may read this", which is what turned the discovery endpoint into a one-fetch
+// census of every node on the network.
+func (s *Server) allowCORSFor(w http.ResponseWriter, r *http.Request) {
+	if len(s.corsOrigins) == 0 {
+		allowCORS(w)
+		return
+	}
+	origin := r.Header.Get("Origin")
+	for _, allowed := range s.corsOrigins {
+		if allowed == "*" {
+			allowCORS(w)
+			return
+		}
+		if origin != "" && strings.EqualFold(origin, allowed) {
+			h := w.Header()
+			h.Set("Access-Control-Allow-Origin", origin)
+			h.Set("Access-Control-Allow-Headers", "Content-Type")
+			h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			return
+		}
+	}
+	// Not allow-listed: fall through with no Allow-Origin, so the browser blocks it.
+}
+
 // handleCORS writes cross-origin headers and handles preflight; returns true when the request is fully handled and the caller should return immediately.
-func handleCORS(w http.ResponseWriter, r *http.Request) bool {
-	allowCORS(w)
+func (s *Server) handleCORS(w http.ResponseWriter, r *http.Request) bool {
+	s.allowCORSFor(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return true
@@ -293,7 +353,7 @@ func (s *Server) opsTokenOK(r *http.Request) bool {
 
 // HandleID GET /{path}{key}/id → random id (peerjs API compatible).
 func (s *Server) HandleID(w http.ResponseWriter, r *http.Request) {
-	if handleCORS(w, r) {
+	if s.handleCORS(w, r) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
@@ -509,7 +569,7 @@ func (s *Server) removeClient(cl *client) {
 // M15: unbounded decode risk—limit body size (8KB is sufficient: peerId + collections + peers + loadInfo)
 // and the number of collections (a single node follows a limited number of rooms).
 func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
-	if handleCORS(w, r) {
+	if s.handleCORS(w, r) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
@@ -587,7 +647,7 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 
 // HandleLeave POST /discover/leave graceful node shutdown.
 func (s *Server) HandleLeave(w http.ResponseWriter, r *http.Request) {
-	if handleCORS(w, r) {
+	if s.handleCORS(w, r) {
 		return
 	}
 	var body struct {
@@ -626,7 +686,7 @@ type GraphLink struct {
 // HandleNodes GET /discover/nodes?coll=&type= → online node list (heartbeat-expired entries removed) + graph edges.
 // Empty coll means return nodes from all collections; type can be used to filter node types.
 func (s *Server) HandleNodes(w http.ResponseWriter, r *http.Request) {
-	if handleCORS(w, r) {
+	if s.handleCORS(w, r) {
 		return
 	}
 	coll := r.URL.Query().Get("coll")
@@ -750,6 +810,10 @@ type NodeInfo struct {
 // network. The bundled dashboard.html is served from this same origin, so it is unaffected;
 // external tooling should pass `?token=` or an Authorization header.
 func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	// CORS preflight first (Round 3), then the ops-token gate (Round 2). Both apply and
+	// neither replaces the other: the preflight decides what the browser may read, the
+	// token decides who may read it at all. Resolved conflict during the 2026-10-04 merge
+	// of PR #4 and PR #5, which both touched this block.
 	if handleCORSPreflight(w, r) {
 		return
 	}

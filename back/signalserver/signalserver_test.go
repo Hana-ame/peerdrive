@@ -763,3 +763,61 @@ func TestOpsTokenHonoursWhitelist(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, get("bad-token"))
 	assert.Equal(t, http.StatusUnauthorized, get(""))
 }
+
+// --- 2026-10-04: explicit CORS allow-list (WithCORSOrigins) ---
+
+// TestCORSOrigins_DefaultKeepsWildcard is the backward-compatibility guard: an operator
+// who configures nothing must get byte-identical behavior to before this change,
+func TestCORSOrigins_DefaultKeepsWildcard(t *testing.T) {
+	srv := NewServer("testkey") // no WithCORSOrigins
+
+	rec := httptest.NewRecorder()
+	srv.HandleID(rec, httptest.NewRequest(http.MethodGet, "/peerjs/id", nil))
+	assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"),
+		"unconfigured server must keep the wildcard")
+}
+
+// TestCORSOrigins_AllowListEchoesMatchAndBlocksOthers: with a list configured, an
+// allow-listed Origin is echoed back (so the browser lets the read through) and a
+// non-listed Origin gets **no** Allow-Origin header at all (so the browser blocks it).
+func TestCORSOrigins_AllowListEchoesMatchAndBlocksOthers(t *testing.T) {
+	srv := NewServer("testkey", WithCORSOrigins([]string{"https://peerdrive.pages.dev", "null"}))
+
+	// Allowed: exact origin echoed.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/peerjs/id", nil)
+	req.Header.Set("Origin", "https://peerdrive.pages.dev")
+	srv.HandleID(rec, req)
+	assert.Equal(t, "https://peerdrive.pages.dev", rec.Header().Get("Access-Control-Allow-Origin"),
+		"allow-listed origin must be echoed")
+
+	// Allowed: file:// panels send Origin "null".
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/peerjs/id", nil)
+	req.Header.Set("Origin", "null")
+	srv.HandleID(rec, req)
+	assert.Equal(t, "null", rec.Header().Get("Access-Control-Allow-Origin"),
+		"file:// panels need an explicit null entry")
+
+	// Not allowed: no header at all -> browser blocks the read.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/peerjs/id", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	srv.HandleID(rec, req)
+	assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"),
+		"non-listed origin must receive no Allow-Origin header")
+	assert.Equal(t, http.StatusOK, rec.Code,
+		"status is unaffected — the browser enforces via the header")
+}
+
+// TestCORSOrigins_ExplicitStarInListRestoresWildcard: an operator can put "*" in the
+// list to opt back into permissive behavior without clearing the flag.
+func TestCORSOrigins_ExplicitStarInListRestoresWildcard(t *testing.T) {
+	srv := NewServer("testkey", WithCORSOrigins([]string{"*"}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/peerjs/id", nil)
+	req.Header.Set("Origin", "https://anything.example")
+	srv.HandleID(rec, req)
+	assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
+}
