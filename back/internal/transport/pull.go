@@ -178,6 +178,25 @@ func (l *limitedPuller) Read(p []byte) (int, error) {
 // real check, so replacement implementations can't take shortcuts with `return nil`.
 var pullGuard = guardPullURL
 
+// GuardExternalURL is the SSRF guard for **any** caller-supplied outbound URL.
+//
+// Exported 2026-10-04: it used to be unexported (guardPullURL) and reachable only from the P2P
+// pull verb, so the HTTP surface POST /files/register_url silently had **no** guard at all —
+// measured: {"url":"http://127.0.0.1:<node port>/peerjs/share"} was fetched and ingested as a
+// file, i.e. the node could be made to read its own admin endpoints (and, on a cloud host,
+// 169.254.169.254). Now both paths share one guard so the two surfaces cannot drift apart again.
+//
+// Boundary: checks scheme, user-info, localhost, and every resolved IP (loopback, private,
+// link-local, multicast, plus IPv4-mapped IPv6 unwrapping). It does **not** restrict certificate
+// trust — a separate concern. Callers must also apply it per redirect hop.
+func GuardExternalURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	return guardPullURL(u)
+}
+
 // guardPullURL SSRF protection: only allows public http(s), rejects internal/local/link-local
 // addresses.
 //

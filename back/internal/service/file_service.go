@@ -20,6 +20,7 @@ import (
 	"peerdrive/internal/model"
 	"peerdrive/internal/pathutil"
 	"peerdrive/internal/repository"
+	"peerdrive/internal/transport"
 
 	"github.com/gin-gonic/gin"
 )
@@ -367,11 +368,35 @@ func (s *FileService) ResolveURL(rawURL string, followRedirects bool) (hash stri
 	defer log.LogDuration("FileService.ResolveURL")()
 	log.LogDebug("file-svc: ResolveURL url=%s followRedirects=%v", rawURL, followRedirects)
 
+	// SSRF guard (2026-10-04): this function fetches a **caller-supplied** URL on the node's
+	// behalf, exactly like the P2P pull verb does — but until now it had no guard at all.
+	// Measured before the fix: POST /files/register_url with
+	// {"url":"http://127.0.0.1:<node port>/peerjs/share"} returned 201 and stored the node's
+	// own admin response as a file. Shared guard so the two surfaces cannot drift again.
+	if err := transport.GuardExternalURL(rawURL); err != nil {
+		log.LogWarn("file-svc: ResolveURL rejected %s: %v", rawURL, err)
+		return "", "", 0, nil, "", fmt.Errorf("URL rejected by SSRF guard: %w", err)
+	}
+
 	client := http.DefaultClient
 	if !followRedirects {
 		client = &http.Client{
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
+			},
+		}
+	} else {
+		// Per-hop redirect validation: checking only the first hop lets a public URL 302 to
+		// 127.0.0.1 straight back into the internal network. Same reasoning as pull.go.
+		client = &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 10 {
+					return fmt.Errorf("redirect exceeds 10 hops, aborting")
+				}
+				if err := transport.GuardExternalURL(req.URL.String()); err != nil {
+					return fmt.Errorf("redirect target rejected: %w", err)
+				}
+				return nil
 			},
 		}
 	}
