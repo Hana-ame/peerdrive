@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Hana-ame/go-peersignal"
+	"github.com/Hana-ame/go-peerserver"
 )
 
 // Discovery background: 2026-09-20 deployed the public panel (packages/peerdrive-client/dist/panel.html)

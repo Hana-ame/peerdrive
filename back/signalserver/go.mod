@@ -1,4 +1,8 @@
-module github.com/Hana-ame/go-peersignal
+// 信令服务器的唯一真相源：本目录。
+// module 名统一为 go-peerserver —— 与线上消费者（wintools cmd/peerfs-server）
+// 早已在用的 import 路径一致，避免同名两份代码各自发版。原 go-peersignal 一名
+// 只存在于本仓内部，无外部消费者，故统一到 go-peerserver 而非反向。
+module github.com/Hana-ame/go-peerserver
 
 go 1.26.2
 

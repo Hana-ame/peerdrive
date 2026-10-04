@@ -13,10 +13,10 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/Hana-ame/go-peerserver"
 	"peerdrive/internal/config"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/transport"
-	"github.com/Hana-ame/go-peerserver"
 )
 
 // TestFileLifecycleEndToEnd File lifecycle dual-node closed loop (self-hosted signaling + static interconnect):

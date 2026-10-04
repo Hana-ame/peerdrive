@@ -32,7 +32,6 @@ require (
 )
 
 require (
-	github.com/Hana-ame/go-peerserver v0.0.0
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/RoaringBitmap/roaring v1.2.3 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
@@ -157,8 +156,14 @@ require (
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
 
+// 子模块一律以本仓目录为唯一真相源，同一份代码只维护这一处。
+// signalserver 的 module 名已统一为 go-peerserver：原先 go.mod 里 replace 指向
+// ./signalserver 却写成 go-peerserver（该目录当时自称 go-peersignal），名字对不上，
+// 故带 //go:build integration 的集成测试长期编不过。现 require 与 replace 同名。
 replace github.com/Hana-ame/go-peerjs => ./peerjs
 
 replace github.com/Hana-ame/go-peerdrive-bt => ./p2p_bt
+
+require github.com/Hana-ame/go-peerserver v0.0.0
 
 replace github.com/Hana-ame/go-peerserver => ./signalserver
