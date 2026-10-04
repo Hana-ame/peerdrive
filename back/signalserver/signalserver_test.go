@@ -39,6 +39,29 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 	return srv, hs
 }
 
+// opsGet issues a GET against an ops-facing endpoint (/status, /nodes?type=…) carrying
+// an ops token.
+//
+// Why the token (2026-10-04): those endpoints stopped being world-readable. The public
+// panel's own queries (with ?coll=, and the plain no-coll "who is online" form) stay public —
+// gating those breaks every panel user — but /status and the ?type= inventory query now
+// require a token. Presenting one in tests is harmless either way, which keeps these
+// helpers usable for both shapes; the rejection behavior is pinned by
+// TestOpsEndpointsRequireToken below.
+func opsGet(hs *httptest.Server, path string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, hs.URL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer ops-token")
+	return http.DefaultClient.Do(req)
+}
+
+// publicGet issues a GET **without** a token, i.e. what a random web page can do.
+func publicGet(hs *httptest.Server, path string) (*http.Response, error) {
+	return http.Get(hs.URL + path)
+}
+
 // dialWS connects to the signaling server with a given id.
 func dialWS(t *testing.T, hs *httptest.Server, id, token string) *websocket.Conn {
 	t.Helper()
@@ -226,7 +249,7 @@ func TestGraph_AnnouncePeersCreatesLinks(t *testing.T) {
 	announce("node-1", []string{"node-2"})
 	announce("node-2", []string{"node-1"})
 
-	resp, err := http.Get(hs.URL + "/nodes")
+	resp, err := opsGet(hs, "/nodes")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	var out struct {
@@ -255,7 +278,7 @@ func TestGraph_EmptyPeersClearsLinks(t *testing.T) {
 	announce("node-1", []string{})
 	announce("node-2", []string{})
 
-	resp, err := http.Get(hs.URL + "/nodes")
+	resp, err := opsGet(hs, "/nodes")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	var out struct {
@@ -283,7 +306,7 @@ func TestGraph_LeaveRemovesLinks(t *testing.T) {
 	srv.HandleLeave(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	getResp, err := http.Get(hs.URL + "/nodes")
+	getResp, err := opsGet(hs, "/nodes")
 	require.NoError(t, err)
 	defer getResp.Body.Close()
 	var out struct {
@@ -307,7 +330,7 @@ func TestGraph_SelfPeerIgnored(t *testing.T) {
 	announce("node-1", []string{"node-1", "node-2"})
 	announce("node-2", []string{"node-1"})
 
-	getResp, err := http.Get(hs.URL + "/nodes")
+	getResp, err := opsGet(hs, "/nodes")
 	require.NoError(t, err)
 	defer getResp.Body.Close()
 	var out struct {
@@ -330,7 +353,7 @@ func TestNodes_EmptyCollReturnsAll(t *testing.T) {
 	announce("node-1", "coll-a")
 	announce("node-2", "coll-b")
 
-	resp, err := http.Get(hs.URL + "/nodes")
+	resp, err := opsGet(hs, "/nodes")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	var out struct {
@@ -352,7 +375,7 @@ func TestNodes_TypeFilter(t *testing.T) {
 	announce("go-1", "go-persistent")
 	announce("web-1", "web-temp")
 
-	resp, err := http.Get(hs.URL + "/nodes?type=go-persistent")
+	resp, err := opsGet(hs, "/nodes?type=go-persistent")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	var out struct {
@@ -374,7 +397,7 @@ func TestNodes_IncludesNodeMetadata(t *testing.T) {
 	require.NoError(t, err)
 	resp.Body.Close()
 
-	getResp, err := http.Get(hs.URL + "/nodes")
+	getResp, err := opsGet(hs, "/nodes")
 	require.NoError(t, err)
 	defer getResp.Body.Close()
 	var out struct {
@@ -401,7 +424,7 @@ func TestGraph_TypeFilterLinksExcludeFilteredNodes(t *testing.T) {
 	announce("web-1", "web-temp", []string{"go-1"})
 
 	// Only querying go-persistent type: nodes only has go-1, links should be empty (web-1 filtered out)
-	resp, err := http.Get(hs.URL + "/nodes?type=go-persistent")
+	resp, err := opsGet(hs, "/nodes?type=go-persistent")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	var out struct {
@@ -416,7 +439,7 @@ func TestGraph_TypeFilterLinksExcludeFilteredNodes(t *testing.T) {
 // TestNodes_EmptyReturnsEmptyArray When nodes/edges are empty, JSON should return [] not null.
 func TestNodes_EmptyReturnsEmptyArray(t *testing.T) {
 	_, hs := testServer(t)
-	resp, err := http.Get(hs.URL + "/nodes")
+	resp, err := opsGet(hs, "/nodes")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	var raw map[string]json.RawMessage
@@ -478,7 +501,7 @@ func TestHandleStatus(t *testing.T) {
 	announce("node-a", []string{"node-b"})
 	announce("node-b", []string{"node-a"})
 
-	resp, err := http.Get(hs.URL + "/status")
+	resp, err := opsGet(hs, "/status")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -636,16 +659,107 @@ func TestHandleID_CORS(t *testing.T) {
 	assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
 	assert.Empty(t, rec.Body.String(), "preflight should not return a body")
 
-	// The three discovery-related REST endpoints must also be open: browser-side panel/distributed
-	// debugging all need to read discovery results
+	// The discovery REST endpoints must stay open: the public panel and browser-side
+	// debugging need to read discovery results. **/status is deliberately excluded** since
+	// 2026-10-04 — it enumerates every node on the network and now requires an ops token
+	// (pinned by TestOpsEndpointsRequireToken below).
 	for name, h := range map[string]http.HandlerFunc{
 		"/discover/announce": srv.HandleAnnounce,
 		"/discover/leave":    srv.HandleLeave,
 		"/discover/nodes":    srv.HandleNodes,
-		"/status":            srv.HandleStatus,
 	} {
 		r := httptest.NewRecorder()
 		h(r, httptest.NewRequest(http.MethodGet, name, nil))
 		assert.Equal(t, "*", r.Header().Get("Access-Control-Allow-Origin"), name+" missing cross-origin headers")
 	}
+
+	// /status must NOT be readable cross-origin, even before the token check runs.
+	r := httptest.NewRecorder()
+	srv.HandleStatus(r, httptest.NewRequest(http.MethodGet, "/status", nil))
+	assert.Empty(t, r.Header().Get("Access-Control-Allow-Origin"),
+		"/status must not advertise a wildcard origin")
+}
+
+// TestOpsEndpointsRequireToken (2026-10-04) pins the actual security property, not just the
+// CORS header: a request with **no token** cannot read the full roster or /status — which is
+// exactly what a random web page's fetch() looks like.
+func TestOpsEndpointsRequireToken(t *testing.T) {
+	_, hs := testServer(t)
+
+	body, _ := json.Marshal(map[string]any{"peerId": "node-1", "collections": []string{"coll-a"}})
+	resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	for _, path := range []string{"/status", "/nodes?type=go-persistent"} {
+		resp, err := publicGet(hs, path)
+		require.NoError(t, err)
+		resp.Body.Close()
+		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+			path+" must reject a token-less caller (ops status / inventory query)")
+	}
+
+	// The panel's path must stay open, or the public panel's "auto-search" dies for
+	// every user. This covers BOTH panel shapes:
+	//   - /nodes?coll=<hash>  — a room-scoped lookup;
+	//   - /nodes              — the plain "who is online" query the panel actually sends
+	//     (discoverNodes is called with neither coll nor type).
+	// The second one is a regression guard: the first version of this change gated on
+	// "no coll", which broke exactly that call and turned CI's E2E panel step red.
+	for _, path := range []string{"/nodes?coll=coll-a", "/nodes"} {
+		panelResp, err := publicGet(hs, path)
+		require.NoError(t, err)
+		panelResp.Body.Close()
+		assert.Equal(t, http.StatusOK, panelResp.StatusCode,
+			path+" must remain public — the public panel depends on it")
+		assert.Equal(t, "*", panelResp.Header.Get("Access-Control-Allow-Origin"),
+			path+" must keep the wildcard CORS header for the panel")
+	}
+
+	// With a token, the inventory query works and returns the node.
+	invResp, err := opsGet(hs, "/nodes?type=go-persistent")
+	require.NoError(t, err)
+	defer invResp.Body.Close()
+	assert.Equal(t, http.StatusOK, invResp.StatusCode, "token-bearing ?type= query must succeed")
+}
+
+// TestOpsTokenAcceptsQueryAndHeader: both token shapes must work, since the WebSocket upgrade
+// can only carry a query param while curl/dashboard scripts send a header.
+func TestOpsTokenAcceptsQueryAndHeader(t *testing.T) {
+	_, hs := testServer(t)
+
+	viaHeader, err := opsGet(hs, "/status")
+	require.NoError(t, err)
+	viaHeader.Body.Close()
+	assert.Equal(t, http.StatusOK, viaHeader.StatusCode, "Authorization: Bearer must be accepted")
+
+	viaQuery, err := publicGet(hs, "/status?token=ops-token")
+	require.NoError(t, err)
+	viaQuery.Body.Close()
+	assert.Equal(t, http.StatusOK, viaQuery.StatusCode, "?token= must be accepted")
+}
+
+// TestOpsTokenHonoursWhitelist: when -tokens is configured, a token outside the list is
+// rejected. Without this, enabling the whitelist would look like it did nothing for /status.
+func TestOpsTokenHonoursWhitelist(t *testing.T) {
+	srv := NewServer("testkey", WithTokenWhitelist([]string{"good-token"}))
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv.HandleStatus(w, r)
+	}))
+	defer hs.Close()
+
+	get := func(token string) int {
+		req, _ := http.NewRequest(http.MethodGet, hs.URL+"/status", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	assert.Equal(t, http.StatusOK, get("good-token"))
+	assert.Equal(t, http.StatusUnauthorized, get("bad-token"))
+	assert.Equal(t, http.StatusUnauthorized, get(""))
 }
