@@ -16,7 +16,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Hana-ame/go-peersignal"
+	"github.com/Hana-ame/go-peerserver"
 )
 
 func main() {
