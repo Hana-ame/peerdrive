@@ -12,13 +12,16 @@ peerdrive-server
 peerdrive
 peerdrive-reg-server
 peersignal
-reg-server
+# 只忽略名为 reg-server 的构建产物，不匹配同名目录
+# （不加 / 时它会连 back/cmd/reg-server/ 源码目录一起忽略掉——
+#  2026-10-05 就因此 git add 不到新包，提交缺文件才发现。）
+/reg-server
 *.exe
 *.out
 
 # Compiled binaries (back)
 back/server
-back/reg-server
+/back/reg-server
 back/bt-integration
 
 # OS files

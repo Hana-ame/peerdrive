@@ -46,7 +46,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -455,8 +457,24 @@ func main() {
 	mux.HandleFunc("GET /p2p/relay/list", relayList)
 
 	fmt.Printf("Registration server starting on %s (db=%s)\n", addr, dbPath)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+
+	// 收到 SIGINT/SIGTERM 时先停收新请求、再关库：直接退出会让 WAL 留下
+	// 未合并的事务，下次启动虽能恢复，但 Windows 上文件句柄不释放，
+	// 运维想立刻重开同一路径会撞 "being used by another process"。
+	srv := &http.Server{Addr: addr, Handler: mux}
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+		<-sig
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fmt.Fprintf(os.Stderr, "failed to start: %v\n", err)
+		_ = db.Close()
 		os.Exit(1)
 	}
+	_ = db.Close()
 }

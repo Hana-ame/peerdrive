@@ -19,7 +19,16 @@ func newTestServer(t *testing.T) *http.ServeMux {
 	t.Helper()
 	jwtSecret = []byte("test-secret")
 	prev := db
-	t.Cleanup(func() { db = prev })
+	// 必须 Close：Windows 上 SQLite 文件被打开后不关，t.TempDir 的
+	// RemoveAll 会因「文件正被另一进程使用」而失败——2026-10-05 首次
+	// 跑 Windows CI 时 6 个用例全挂在这一条（unlinkat ... reg.db）。
+	// Linux 上 unlink 打开中的文件是允许的，故这类泄漏只在 Windows 暴露。
+	t.Cleanup(func() {
+		if db != nil {
+			db.Close()
+		}
+		db = prev
+	})
 	if err := openDB(filepath.Join(t.TempDir(), "reg.db")); err != nil {
 		t.Fatalf("openDB: %v", err)
 	}
