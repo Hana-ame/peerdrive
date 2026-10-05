@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"peerdrive/internal/config"
@@ -19,6 +20,52 @@ import (
 	"peerdrive/internal/serverapp"
 	"peerdrive/internal/services"
 )
+
+// normalizePort 让 PORT 两种写法都能用。
+//
+// 旧 reg-server 收的是裸端口号（`PORT=4000` → `":" + port`），
+// 而监听地址习惯写成 `HOST:PORT`（`:4000` / `127.0.0.1:4000`）。
+// 两种都见过，所以都支持——但不能一律拼冒号，
+// 否则 `HOST=127.0.0.1 PORT=4000` 会被拼成 `127.0.0.1:127.0.0.1:4000`。
+// regAddrFromEnv 解析 reg 子命令的监听地址。
+//
+// ⚠️ PORT 沿用旧 reg-server 的写法：不带冒号（"4000"）是常态——旧实现是
+// `addr := ":" + port`。若直接把 PORT 当监听地址传下去，`PORT=4000` 会报
+// "address 4000: missing port in address"，等于把还能跑的旧部署脚本弄坏。
+//
+// 单独成函数而不是内联在 runReg 里，是为了让测试能调到**同一个**入口：
+// 上一版测试直接调 normalizePort，摘掉 runReg 里的调用照样绿；
+// 再一版调 regAddrFromEnv，可它有自己的实现，跟 runReg 那个 flag 无关，还是绿。
+func regAddrFromEnv() string {
+	return normalizePort(envOr("PORT", ":4000"))
+}
+
+// regFlagSet 构造 reg 子命令的 flag 定义。
+//
+// 抽出来是为了让测试能拿到**真实的那一份**：前几版的护栏都是「测辅助函数、
+// 不测调用点」，把 runReg 改回 envOr("PORT", ":4000") 照样绿。
+// 现在 runReg 与测试读同一个 FlagSet，摘掉 normalizePort 即失败。
+func regFlagSet() *flag.FlagSet {
+	fs := flag.NewFlagSet("reg", flag.ContinueOnError)
+	fs.String("addr", regAddrFromEnv(), "listen address")
+	fs.String("db", "", "sqlite path (default: $DB_PATH → $PEERDRIVE_REG_DB → ./reg.db)")
+	fs.String("tls-cert", os.Getenv("PEERDRIVE_REG_TLS_CERT"), "TLS certificate (PEM)")
+	fs.String("tls-key", os.Getenv("PEERDRIVE_REG_TLS_KEY"), "TLS private key (PEM)")
+	return fs
+}
+
+func normalizePort(p string) string {
+	if p == "" {
+		return ":4000"
+	}
+	if strings.Contains(p, ":") {
+		return p // 已是 host:port 或 :port
+	}
+	if strings.Contains(p, ".") { // 纯 IP，没有端口
+		return p + ":4000"
+	}
+	return ":" + p
+}
 
 func envOr(k, def string) string {
 	if v := os.Getenv(k); v != "" {
@@ -51,14 +98,14 @@ func runSignal(args []string) {
 
 // runReg 起注册/认证/中继登记，阻塞直到出错或收到退出信号。
 func runReg(args []string) {
-	fs := flag.NewFlagSet("reg", flag.ExitOnError)
-	addr := fs.String("addr", envOr("PORT", ":4000"), "listen address")
-	dbPath := fs.String("db", "", "sqlite path (default: $DB_PATH → $PEERDRIVE_REG_DB → ./reg.db)")
-	cert := fs.String("tls-cert", os.Getenv("PEERDRIVE_REG_TLS_CERT"), "TLS certificate (PEM)")
-	tlsKey := fs.String("tls-key", os.Getenv("PEERDRIVE_REG_TLS_KEY"), "TLS private key (PEM)")
+	fs := regFlagSet()
+	addr := fs.Lookup("addr")
+	dbPath := fs.Lookup("db")
+	cert := fs.Lookup("tls-cert")
+	tlsKey := fs.Lookup("tls-key")
 	_ = fs.Parse(args)
 
-	srv, err := regserver.New(*dbPath)
+	srv, err := regserver.New(dbPath.DefValue)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "peerdrive reg: %v\n", err)
 		os.Exit(1)
@@ -66,7 +113,7 @@ func runReg(args []string) {
 	defer srv.Close()
 
 	log.LogInfo("reg: listening on %s", *addr)
-	if err := srv.Serve(*addr, *cert, *tlsKey); err != nil {
+	if err := srv.Serve(addr.Value.String(), cert.Value.String(), tlsKey.Value.String()); err != nil {
 		fmt.Fprintf(os.Stderr, "peerdrive reg: %v\n", err)
 		os.Exit(1)
 	}
