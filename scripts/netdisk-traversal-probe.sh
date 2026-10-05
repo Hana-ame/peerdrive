@@ -70,13 +70,13 @@ printf 'top secret\n' > "$DEMO_DIR"/outside/secret.txt
 printf 'shared\n'     > "$DEMO_DIR"/media/movie.mkv
 ok "诱饵：$DEMO_DIR/outside/secret.txt（storage 之外，绝不能被摸到）"
 
-say "编译 back/cmd/server"
-( cd "$ROOT/back" && go build -tags nosqlite -o "$BIN/server" ./cmd/server ) || { bad "编译失败"; exit 1; }
+say "编译 back/cmd/peerdrive（单二进制：serve/signal/reg/all）"
+( cd "$ROOT/back" && go build -tags nosqlite -o "$BIN/server" ./cmd/peerdrive ) || { bad "编译失败"; exit 1; }
 ok "编译完成"
 
 say "启动自托管信令 :$SIG_PORT"
 ( cd "$ROOT/back/signalserver" && \
-  setsid --fork nohup go run ./cmd/peersignal -addr ":$SIG_PORT" -key peerjs \
+  setsid --fork nohup "$BIN/server" signal -addr ":$SIG_PORT" -key peerjs \
     > "$DEMO_DIR/signal.log" 2>&1 < /dev/null & )
 wait_up "http://127.0.0.1:$SIG_PORT/status" "信令" || exit 1
 

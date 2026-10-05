@@ -99,13 +99,13 @@ printf 'hello peerdrive netdisk demo\n' > "$DEMO_DIR"/a/root/downloads/shared/de
 head -c 300000 /dev/urandom              > "$DEMO_DIR"/a/root/downloads/shared/blob.bin
 ok "样例文件：demo.txt(29B) + blob.bin(300KB)"
 
-say "编译 back/cmd/server"
-( cd "$ROOT/back" && go build -tags nosqlite -o "$BIN/server" ./cmd/server ) || { bad "编译失败"; exit 1; }
+say "编译 back/cmd/peerdrive（单二进制：serve/signal/reg/all）"
+( cd "$ROOT/back" && go build -tags nosqlite -o "$BIN/server" ./cmd/peerdrive ) || { bad "编译失败"; exit 1; }
 ok "编译完成"
 
 say "启动自托管信令 :$SIG_PORT"
-( cd "$ROOT/back/signalserver" && \
-  setsid nohup go run ./cmd/peersignal -addr ":$SIG_PORT" -key peerjs \
+( cd "$BIN" && \
+  setsid nohup ./server signal -addr ":$SIG_PORT" -key peerjs \
     > "$DEMO_DIR/signal.log" 2>&1 < /dev/null & )
 wait_up "http://127.0.0.1:$SIG_PORT/status" "信令" || exit 1
 
