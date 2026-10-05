@@ -10,11 +10,15 @@ peerdrive.db
 # Compiled binaries
 peerdrive-server
 peerdrive
+peerdrive-reg-server
+peersignal
+reg-server
 *.exe
 *.out
 
 # Compiled binaries (back)
 back/server
+back/reg-server
 back/bt-integration
 
 # OS files

@@ -42,6 +42,15 @@ jobs:
           CGO_ENABLED: 0
         run: go build -tags nosqlite -ldflags="-s -w" -o peerdrive-server${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/server/
 
+      # reg-server 同模块同 tag，一并编出来。丢弃输出（/dev/null 不跨平台，
+      # 这里用平台后缀占位即可——目的只是验证交叉编译能过）。
+      - name: Build reg-server
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: go build -tags nosqlite -ldflags="-s -w" -o reg-server-build-check${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/reg-server/
+
       # Windows 也跑测试，不再跳过（2026-09-20）。
       #
       # 之前 `if: matrix.goos != 'windows'` 的代价：路径边界这套判定里最有

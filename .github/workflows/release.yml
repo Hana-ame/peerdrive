@@ -40,7 +40,11 @@ jobs:
         run: |
           go vet -tags nosqlite ./...
           go test -tags nosqlite ./... -count=1
+          # reg-server 一并构建：它是认证链路的一环（peerdrive-server 靠
+          # /auth/whoami 校验 token），发布物里缺它等于发了半套。
+          # 测试已被上面的 ./... 覆盖（含与原实现的 JWT 对拍）。
           go build -tags nosqlite -o peerdrive-server ./cmd/server/
+          go build -tags nosqlite -o peerdrive-reg-server ./cmd/reg-server/
 
       # 集成测试：TestMain 起全局自托管信令 + 同机 WebRTC，脱外网。
       # 必须 -p 1（多组测试共享同一个信令服务，并行会互相干扰）。
@@ -110,10 +114,30 @@ jobs:
           mkdir -p out
           cp "peerdrive-server${{ matrix.ext }}" "out/peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
 
+      # 注册/认证/中继登记服务与 peerdrive-server 同模块（back/cmd/reg-server），
+      # 在同一个 job 里一次编出来，不另开 job——另开只是多一次 setup-go 和
+      # 一次 checkout，产物却来自同一次编译。
+      # 必须 -tags nosqlite：与 peerdrive-server 同因（双 SQLite 驱动的 CGO
+      # 符号冲突），见 cmd/server/main.go 顶部说明。
+      - name: Build reg-server
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: go build -tags nosqlite -ldflags="-s -w" -o peerdrive-reg-server${{ matrix.ext }} ./cmd/reg-server/
+
+      - name: 按平台重命名（reg-server）
+        shell: bash
+        run: |
+          set -eu
+          cp "peerdrive-reg-server${{ matrix.ext }}" "out/peerdrive-reg-server-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+
       - uses: actions/upload-artifact@v4
         with:
           name: peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: back/out/peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: |
+            back/out/peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+            back/out/peerdrive-reg-server-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
 
   # 自托管信令同样要「下载即用」：教程第一章起本地信令不该先要求装 Go。
   # 它是独立 go.mod（back/signalserver），所以单独一个 job 编，不能并进上面那个
@@ -185,6 +209,8 @@ jobs:
         run: |
           set -eu
           mkdir -p dist
+          # peerdrive-reg-server-* 已被 peerdrive-* 的 glob 覆盖（同一前缀），
+          # 这里只需再加 peersignal-*。
           find . -type f \( -name 'peerdrive-*' -o -name 'peersignal-*' \) -exec cp -v {} dist/ \;
           ls -l dist
 
