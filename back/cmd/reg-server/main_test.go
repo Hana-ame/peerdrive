@@ -4,6 +4,7 @@ package main
 // 旧 token 必须仍可验、路由与状态码不能漂。
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,17 +20,27 @@ func newTestServer(t *testing.T) *http.ServeMux {
 	t.Helper()
 	jwtSecret = []byte("test-secret")
 	prev := db
-	// 必须 Close：Windows 上 SQLite 文件被打开后不关，t.TempDir 的
-	// RemoveAll 会因「文件正被另一进程使用」而失败——2026-10-05 首次
-	// 跑 Windows CI 时 6 个用例全挂在这一条（unlinkat ... reg.db）。
-	// Linux 上 unlink 打开中的文件是允许的，故这类泄漏只在 Windows 暴露。
+
+	// 顺序是关键：先取目录，再注册 Close。
+	//
+	// t.Cleanup 是 LIFO（后注册的先执行）。t.TempDir() 内部也注册了一个
+	// RemoveAll 清理——若 Close 注册在 TempDir 之前，RemoveAll 先跑，
+	// 此时 .db 还开着，Windows 直接报
+	//   "unlinkat ...\reg.db: The process cannot access the file
+	//    because it is being used by another process"
+	// 2026-10-05 首次 Windows CI（7759641、417c4c5）两次都挂在这一处：
+	// 第一次是忘了 Close，第二次是 Close 了但注册顺序反了。
+	// Linux 允许 unlink 打开中的文件，所以本地与 Linux/macOS 全绿——
+	// 这类泄漏只在 Windows 暴露，别当"平台差异"绕过。
+	// 同仓库的 internal/repository/db_test.go:17 用同样的手法。
+	dir := t.TempDir()
 	t.Cleanup(func() {
 		if db != nil {
 			db.Close()
 		}
 		db = prev
 	})
-	if err := openDB(filepath.Join(t.TempDir(), "reg.db")); err != nil {
+	if err := openDB(filepath.Join(dir, "reg.db")); err != nil {
 		t.Fatalf("openDB: %v", err)
 	}
 
@@ -262,5 +273,34 @@ func TestMainRequiresJWTSecret(t *testing.T) {
 	jwtSecret = nil
 	if _, _, err := verifyToken("a.b.c"); err == nil {
 		t.Error("empty jwtSecret accepted a token")
+	}
+}
+
+
+// TestNewTestServerClosesDbOnCleanup 直接验证 newTestServer 的清理契约：
+// 测试结束后 sql.DB 必须已关闭、文件可删。
+//
+// 为什么这条能在 Linux 上失败：它不依赖「删除打开中的文件」（那是 Windows
+// 才禁止的），而是直接读 db.Ping() 的返回值——句柄没关就一定 Ping 得通。
+// 2026-10-05 两次 Windows CI（7759641、417c4c5）就是漏了关闭：
+//   TempDir RemoveAll cleanup: unlinkat ...\reg.db:
+//   The process cannot access the file because it is being used by another process
+// 第一次是忘了 Close；第二次 Close 了却注册在 t.TempDir() 之前，LIFO 下
+// RemoveAll 仍然先跑。本用例锁住「Close 确实发生」这一半；另一半（注册顺序）
+// 由 newTestServer 里两行的物理顺序保证，注释已写明原因。
+func TestNewTestServerClosesDbOnCleanup(t *testing.T) {
+	var captured *sql.DB
+	// 子测试：t.Cleanup 在子测试结束时执行，父测试随后即可检查句柄状态。
+	t.Run("inner", func(t *testing.T) {
+		newTestServer(t)
+		captured = db
+		if err := captured.Ping(); err != nil {
+			t.Fatalf("precondition: db should be open during the test: %v", err)
+		}
+	})
+	// 子测试已结束，其 t.Cleanup（含 db.Close）应已执行。
+	if err := captured.Ping(); err == nil {
+		t.Error("db still open after the test finished — newTestServer must Close it " +
+			"(on Windows an unclosed .db makes t.TempDir's RemoveAll fail)")
 	}
 }
