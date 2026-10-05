@@ -3,6 +3,7 @@ package service
 // Note: This file is a test for legacy code (see doc/archive/LEGACY.md, pending deletion/migration); discovery background is not annotated individually. The "discovery background" convention applies to new code.
 
 import (
+	"bytes"
 	"os"
 	"path"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"peerdrive/internal/transport"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func setupFileServiceTest() (string, *FileService) {
@@ -22,6 +24,19 @@ func setupFileServiceTest() (string, *FileService) {
 	tmpDir, err := os.MkdirTemp("", "peerdrive_file_service_test")
 	if err != nil {
 		panic(err)
+	}
+
+	// Resolve symlinks before using the path as a storage root.
+	//
+	// Why (found via CI on darwin/arm64, invisible on Linux): os.MkdirTemp returns
+	// /var/folders/... on macOS, while every file the service actually touches lives under the
+	// resolved /private/var/folders/.... isPathAllowed / copyInto compare against that root, so an
+	// unresolved root makes the service reject its own storage directory with
+	// "path outside allowed root". Every test in this file that uploads or registers therefore
+	// passed on Linux and failed on macOS. Fixing it in the shared helper rather than per-test is
+	// what makes this correct everywhere instead of just for the test that happened to trip it.
+	if resolved, rerr := filepath.EvalSymlinks(tmpDir); rerr == nil {
+		tmpDir = resolved
 	}
 
 	cfg := &config.Config{
@@ -319,4 +334,41 @@ func TestResolveURL_SSRFGuard(t *testing.T) {
 func TestGuardExternalURL_AcceptsPublicHost(t *testing.T) {
 	assert.NoError(t, transport.GuardExternalURL("https://example.com/file.zip"))
 	assert.NoError(t, transport.GuardExternalURL("http://example.com/a.bin"))
+}
+
+// TestUpload_RegistersFileIndex is the regression guard for the bug found 2026-10-04:
+// Upload wrote file_meta + file_providers but never file_index, so the file showed in
+// the operator's own /files listing yet never reached the share manifest (nodeshare
+// reads file_index, not file_meta) — peers got files:[] forever.
+//
+// The assertion is deliberately on file_index rather than on the manifest: it is the
+// single source of truth for "what may this node serve outward", so holding this
+// prevents nodeshare from silently regressing again from this direction.
+func TestUpload_RegistersFileIndex(t *testing.T) {
+	dir, svc := setupFileServiceTest()
+	defer os.RemoveAll(dir)
+
+	// setupFileServiceTest resolves symlinks in the storage root (macOS /var -> /private/var),
+	// which is why this passes on darwin — see the comment there.
+	payload := []byte("upload writes file_index now")
+	meta, err := svc.Upload(bytes.NewReader(payload), "demo.txt")
+	require.NoError(t, err, "upload itself must succeed")
+	require.NotEmpty(t, meta.Hash)
+
+	listed, err := repository.ListFileIndex(0, 100)
+	assert.NoError(t, err)
+
+	var found bool
+	for _, f := range listed {
+		if f.Hash == meta.Hash {
+			found = true
+			assert.Equal(t, "demo.txt", f.Name)
+			assert.Equal(t, int64(len(payload)), f.Size)
+			assert.False(t, f.Deleted)
+			assert.NotEmpty(t, f.Path,
+				"index path must be absolute — nodeshare matches share-dir prefixes against it")
+		}
+	}
+	assert.True(t, found, "uploaded file %s must appear in file_index", meta.Hash)
+
 }
