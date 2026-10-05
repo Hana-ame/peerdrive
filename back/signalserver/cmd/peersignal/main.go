@@ -25,11 +25,18 @@ func main() {
 	tokens := flag.String("tokens", "", "signaling token whitelist (comma-separated; empty = no restriction)")
 	tlsCert := flag.String("tls-cert", "", "TLS certificate (PEM). When given together with -tls-key, serve over HTTPS/WSS")
 	tlsKey := flag.String("tls-key", "", "TLS private key (PEM)")
+	corsOrigin := flag.String("cors-origin", "",
+		"comma-separated CORS allow-list for the panel-facing REST endpoints "+
+			"(e.g. https://peerdrive.pages.dev,null). Empty = keep the historical wildcard '*'")
 	flag.Parse()
 
 	var opts []signalserver.Option
 	if *tokens != "" {
 		opts = append(opts, signalserver.WithTokenWhitelist(strings.Split(*tokens, ",")))
+	}
+	if *corsOrigin != "" {
+		opts = append(opts, signalserver.WithCORSOrigins(strings.Split(*corsOrigin, ",")))
+		log.Printf("cors: restricted to %s (file:// panels need an explicit \"null\")", *corsOrigin)
 	}
 	srv := signalserver.NewServer(*key, opts...)
 	srv.Start() // background sweeper: clean up expired offline queues (H3)

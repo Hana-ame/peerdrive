@@ -56,6 +56,14 @@ Wants=network-online.target
 Type=simple
 User=root
 ExecStart=/opt/peersignal/peersignal --addr 127.0.0.1:9000 --key pd-signal-KEYPLACEHOLDER
+# 两个安全开关（代码早已/现已支持，默认都不填 = 行为与现在完全一致）：
+#   -cors-origin  面板侧 REST 端点的 CORS 白名单。不填 = 历史行为（通配 *）。
+#               填了只回显命中的 Origin，没命中的**不发 Allow-Origin 头**，浏览器因此读不到。
+#               ⚠️ 双击打开的面板 Origin 是 null，要保留它必须显式带上 null，例如：
+#               --cors-origin "https://peerdrive.pages.dev,https://peerdrive.moonchan.xyz,null"
+#   -tokens       信令 token 白名单。此前生产一直没开，所以任意客户端都能注册任意 id
+#               冒充在线节点收走信令。
+# 打开任一开关都是一次独立的部署决策，不随升级自动发生。
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
