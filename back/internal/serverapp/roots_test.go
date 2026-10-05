@@ -1,4 +1,4 @@
-package main
+package serverapp
 
 // Tests for the startup-time "volume root" configuration guard (doc/NETDISK.md §11.3).
 //

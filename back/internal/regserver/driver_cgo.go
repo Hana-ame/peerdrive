@@ -1,6 +1,6 @@
 //go:build cgo
 
-package main
+package regserver
 
 // 有 cgo 时用 mattn/go-sqlite3（C 绑定，体积小，与本地开发/CI 一致）。
 //

@@ -1,4 +1,4 @@
-package main
+package serverapp
 
 // security_status_test.go — unit tests for the security status summary (security_status.go).
 //

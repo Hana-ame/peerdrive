@@ -1,4 +1,4 @@
-package main
+package regserver
 
 // 迁移兼容性的核心断言：新实现在同密钥下必须与**原独立仓**逐字节一致地签发
 // token，并且能验原实现签出的 token。
@@ -29,7 +29,7 @@ func TestTokenByteIdenticalToOriginal(t *testing.T) {
 			t.Fatalf("orig sign %s: %v", c.u, err)
 		}
 
-		jwtSecret = secret
+		srv := &Server{jwtSecret: secret}
 		claims := map[string]any{
 			"username": c.u, "role": c.r,
 			"iss": "https://localhost:4000", "sub": c.u,
@@ -40,7 +40,7 @@ func TestTokenByteIdenticalToOriginal(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := newTokenFrom(hb, pb)
+		got, err := srv.newTokenFrom(hb, pb)
 		if err != nil {
 			t.Fatalf("new sign %s: %v", c.u, err)
 		}
@@ -54,13 +54,13 @@ func TestTokenByteIdenticalToOriginal(t *testing.T) {
 // TestNewVerifiesOldTokens 生产已有旧 token：新实现必须仍能验出正确 claims。
 func TestNewVerifiesOldTokens(t *testing.T) {
 	secret := []byte("prod-like-secret")
-	jwtSecret = secret
+	srv := &Server{jwtSecret: secret}
 	for _, c := range []struct{ u, r string }{{"alice", "user"}, {"admin", "admin"}} {
 		old, err := origNewToken(secret, c.u, c.r, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
-		u, role, err := verifyToken(old)
+		u, role, err := srv.verifyToken(old)
 		if err != nil {
 			t.Fatalf("new impl rejected a token signed by the original impl (%s): %v", c.u, err)
 		}
@@ -68,8 +68,7 @@ func TestNewVerifiesOldTokens(t *testing.T) {
 			t.Errorf("claims = %s/%s, want %s/%s", u, role, c.u, c.r)
 		}
 		// 反向：新签的，旧实现也得能验（灰度切换期两个版本并存）。
-		jwtSecret = secret
-		got, _ := newToken(c.u, c.r)
+		got, _ := srv.newToken(c.u, c.r)
 		if ou, orr, err := origVerifyToken(secret, got); err != nil || ou != c.u || orr != c.r {
 			t.Errorf("original impl rejected a token signed by new impl (%s): %s/%s err=%v", c.u, ou, orr, err)
 		}
@@ -80,7 +79,7 @@ func TestNewVerifiesOldTokens(t *testing.T) {
 // 「旧版本放行、新版本拒绝」的诡异差异。
 func TestOldAndNewAgreeOnRejects(t *testing.T) {
 	secret := []byte("s")
-	jwtSecret = secret
+	srv := &Server{jwtSecret: secret}
 	good, _ := origNewToken(secret, "u", "user", time.Now())
 	other, _ := origNewToken([]byte("different"), "u", "user", time.Now())
 	expired, _ := origNewToken(secret, "u", "user", time.Now().Add(-100*time.Hour))
@@ -94,13 +93,13 @@ func TestOldAndNewAgreeOnRejects(t *testing.T) {
 		{"signed-with-other-secret", other},
 		{"expired", expired},
 	} {
-		_, _, nerr := verifyToken(tc.tok)
+		_, _, nerr := srv.verifyToken(tc.tok)
 		_, _, oerr := origVerifyToken(secret, tc.tok)
 		if (nerr == nil) != (oerr == nil) {
 			t.Errorf("%s: new err=%v, old err=%v — behaviour diverged", tc.name, nerr, oerr)
 		}
 	}
-	if _, _, err := verifyToken(good); err != nil {
+	if _, _, err := srv.verifyToken(good); err != nil {
 		t.Errorf("sanity: new impl rejected a valid token: %v", err)
 	}
 }

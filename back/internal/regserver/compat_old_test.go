@@ -1,4 +1,4 @@
-package main
+package regserver
 
 // 本文件持有**原独立仓的原始实现**（逐行照抄 registration-server/main.go，
 // 函数加 orig 前缀避免与本包重名），只用于对拍：证明新实现在同密钥下

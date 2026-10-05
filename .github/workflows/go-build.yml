@@ -40,16 +40,8 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
-        run: go build -tags nosqlite -ldflags="-s -w" -o peerdrive-server${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/server/
-
-      # reg-server 同模块同 tag，一并编出来。丢弃输出（/dev/null 不跨平台，
-      # 这里用平台后缀占位即可——目的只是验证交叉编译能过）。
-      - name: Build reg-server
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
-        run: go build -tags nosqlite -ldflags="-s -w" -o reg-server-build-check${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/reg-server/
+        # 单二进制（v0.3.0）：主服务 / 信令 / 注册认证是它的子命令。
+        run: go build -tags nosqlite -ldflags="-s -w" -o peerdrive${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/peerdrive/
 
       # Windows 也跑测试，不再跳过（2026-09-20）。
       #
@@ -96,14 +88,15 @@ jobs:
           CGO_ENABLED: 0
         run: go test -count=1 ./...
 
-      # go test 会编译包，但不会产出二进制。cmd/peersignal 是对外发布的
-      # 独立二进制入口（2026-10-04 module 改名后其 import 路径也变了），
-      # 只测不建会漏掉入口侧的链接错误。
-      - name: Build signalserver binary
+      # go test 会编译包，但不会产出二进制。back/signalserver 是独立 module，
+      # 父模块的 ./... 覆盖不到它，只测不建会漏掉那边的链接错误
+      # （cmd/peersignal 入口已并入父模块的 `peerdrive signal` 子命令，
+      #  但 signalserver 库本身仍是独立 module，仍需单独验证能编）。
+      - name: Build signalserver module
         working-directory: back/signalserver
         env:
           CGO_ENABLED: 0
-        run: go build -o /dev/null ./cmd/peersignal
+        run: go build -o /dev/null ./...
 
       # 父模块的集成测试带 //go:build integration，日常 job 不覆盖；
       # 它是唯一会编译 back/go.mod 里 require/replace 与 ./signalserver

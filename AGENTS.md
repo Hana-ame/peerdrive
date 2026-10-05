@@ -112,7 +112,7 @@ CI 连续全红，最终回退了 16 个文件。典型后果：面板稳定身�
     `packages/peerdrive-client`、front（test/build）。
   - `.github/workflows/go-build.yml`：5 个平台交叉构建矩阵
     （linux amd64/arm64、windows amd64、darwin amd64/arm64），
-    `go build -tags nosqlite ./cmd/server/` + 非 Windows 跑 `go test -tags nosqlite ./...`。
+    `go build -tags nosqlite ./cmd/peerdrive/`（单二进制：serve/signal/reg/all 四个子命令）+ 非 Windows 跑 `go test -tags nosqlite ./...`。
     **跨平台的调度差异会放大时序敏感的竞态**，只在本机 Linux 跑通不代表这里绿——
     2026-09-20 就是靠它暴露了 `internal/source` 一个 ~1% 的竞速用例偶发失败
     （本机 `-count=400` 也能复现，见 REFACTOR §3.20）。

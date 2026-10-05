@@ -44,14 +44,25 @@ peerdrive 的用户与中继登记服务。**本目录是唯一真相源**：202
 
 ## 构建与运行
 
-必须带 `-tags nosqlite`，与 `cmd/server` 同理（两个 SQLite 驱动的 CGO 符号冲突）：
+必须带 `-tags nosqlite`，与主服务同理（两个 SQLite 驱动的 CGO 符号冲突）。
+
+**v0.3.0 起本服务不再是独立二进制**，而是 `peerdrive` 的一个子命令：
 
 ```bash
-# 从 back/ 目录
-go build -tags nosqlite -o peerdrive-reg-server ./cmd/reg-server/
+# 从 back/ 目录构建单二进制
+go build -tags nosqlite -o peerdrive ./cmd/peerdrive/
 
-JWT_SECRET=xxx PEERDRIVE_REG_DB=./reg.db ./peerdrive-reg-server
+# 只起注册服务（原独立二进制的行为，地址仍由 PORT/HOST 决定）
+JWT_SECRET=xxx PEERDRIVE_REG_DB=./reg.db ./peerdrive reg
+
+# 或者与主服务、信令同进程同端口
+JWT_SECRET=xxx ./peerdrive all
 ```
+
+代码位置也一并调整：本包从 `back/cmd/reg-server/` 迁到
+`back/internal/regserver/`，以便主二进制能把它作为库引入。迁移只改了
+可见性（`package main` → `package regserver`）与状态归属（包级 `db`/`jwtSecret`
+→ `Server` 实例字段），**JWT 签发与校验逐字节不变**，由 `compat_test.go` 保证。
 
 跨平台发布用 `CGO_ENABLED=0`（此时走纯 Go 驱动 `modernc.org/sqlite`，
 见 `driver_pure.go`；有 cgo 时走 `mattn/go-sqlite3`，见 `driver_cgo.go`——与

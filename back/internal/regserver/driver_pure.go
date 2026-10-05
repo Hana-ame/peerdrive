@@ -1,6 +1,6 @@
 //go:build !cgo
 
-package main
+package regserver
 
 // 无 cgo（CGO_ENABLED=0、交叉编译、release 构建）时用 modernc.org/sqlite——
 // 它把 SQLite 的 C 源码翻译成 Go，不需要 C 编译器。

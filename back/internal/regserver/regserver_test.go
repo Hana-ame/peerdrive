@@ -1,10 +1,9 @@
-package main
+package regserver
 
 // reg-server 的测试重点是「与原独立仓行为一致」——因为它接管了既有部署：
 // 旧 token 必须仍可验、路由与状态码不能漂。
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,46 +14,43 @@ import (
 	"time"
 )
 
-// newTestServer 起一个挂在临时库上的 mux（不监听端口）。
+// newBareServer 造一个只带密钥、不开库的 Server，用于纯 JWT 层测试。
+func newBareServer(t *testing.T, secret string) *Server {
+	t.Helper()
+	return &Server{jwtSecret: []byte(secret)}
+}
+
+// newTestServer 起一个挂在临时库上的 Server，返回其 mux（不监听端口）。
+//
+// 注意这里不再用包级全局 db/jwtSecret：v0.2.0 起它们是 Server 实例字段，
+// 全局写法会掩盖「同进程起两个实例」的可行性——而那正是单二进制要支持的场景。
+//
+// 顺序仍需小心：先取目录，再注册 Close。
+//
+// t.Cleanup 是 LIFO（后注册的先执行）。t.TempDir() 内部也注册了一个
+// RemoveAll 清理——若 Close 注册在 TempDir 之前，RemoveAll 先跑，
+// 此时 .db 还开着，Windows 直接报
+//
+//	"unlinkat ...\reg.db: The process cannot access the file
+//	 because it is being used by another process"
+//
+// 2026-10-05 首次 Windows CI（7759641、417c4c5）两次都挂在这一处：
+// 第一次是忘了 Close，第二次是 Close 了但注册顺序反了。
+// Linux 允许 unlink 打开中的文件，所以本地与 Linux/macOS 全绿——
+// 这类泄漏只在 Windows 暴露，别当"平台差异"绕过。
+// 同仓库的 internal/repository/db_test.go:17 用同样的手法。
 func newTestServer(t *testing.T) *http.ServeMux {
 	t.Helper()
-	jwtSecret = []byte("test-secret")
-	prev := db
+	t.Setenv("JWT_SECRET", "test-secret")
 
-	// 顺序是关键：先取目录，再注册 Close。
-	//
-	// t.Cleanup 是 LIFO（后注册的先执行）。t.TempDir() 内部也注册了一个
-	// RemoveAll 清理——若 Close 注册在 TempDir 之前，RemoveAll 先跑，
-	// 此时 .db 还开着，Windows 直接报
-	//   "unlinkat ...\reg.db: The process cannot access the file
-	//    because it is being used by another process"
-	// 2026-10-05 首次 Windows CI（7759641、417c4c5）两次都挂在这一处：
-	// 第一次是忘了 Close，第二次是 Close 了但注册顺序反了。
-	// Linux 允许 unlink 打开中的文件，所以本地与 Linux/macOS 全绿——
-	// 这类泄漏只在 Windows 暴露，别当"平台差异"绕过。
-	// 同仓库的 internal/repository/db_test.go:17 用同样的手法。
 	dir := t.TempDir()
-	t.Cleanup(func() {
-		if db != nil {
-			db.Close()
-		}
-		db = prev
-	})
-	if err := openDB(filepath.Join(dir, "reg.db")); err != nil {
-		t.Fatalf("openDB: %v", err)
+	srv, err := New(filepath.Join(dir, "reg.db"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(func() { _ = srv.Close() })
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /ping", apiPing)
-	mux.HandleFunc("GET /api/health", authRequired(apiHealth))
-	mux.HandleFunc("POST /auth/register", authRegister)
-	mux.HandleFunc("POST /auth/login", authLogin)
-	mux.HandleFunc("GET /auth/whoami", authRequired(authWhoami))
-	mux.HandleFunc("GET /auth/list", authRequired(authList))
-	mux.HandleFunc("POST /p2p/relay/register", relayRegister)
-	mux.HandleFunc("POST /p2p/relay/heartbeat", relayHeartbeat)
-	mux.HandleFunc("GET /p2p/relay/list", relayList)
-	return mux
+	return srv.Handler().(*http.ServeMux)
 }
 
 func do(mux *http.ServeMux, method, path, body, token string) *httptest.ResponseRecorder {
@@ -144,7 +140,7 @@ func TestAuthRequired(t *testing.T) {
 
 // TestExpiredTokenRejects 是回归护栏：exp 过期必须被拒。
 func TestExpiredTokenRejects(t *testing.T) {
-	jwtSecret = []byte("test-secret")
+	srv := newBareServer(t, "test-secret")
 	now := time.Now()
 	claims := map[string]any{
 		"username": "old", "role": "user",
@@ -154,24 +150,24 @@ func TestExpiredTokenRejects(t *testing.T) {
 	}
 	hb, _ := json.Marshal(map[string]string{"alg": "HS256", "typ": "JWT"})
 	pb, _ := json.Marshal(claims)
-	tok, err := newTokenFrom(hb, pb)
+	tok, err := srv.newTokenFrom(hb, pb)
 	if err != nil {
 		t.Fatalf("build token: %v", err)
 	}
-	if _, _, err := verifyToken(tok); err == nil {
+	if _, _, err := srv.verifyToken(tok); err == nil {
 		t.Error("expired token accepted — verifyToken must reject exp < now")
 	}
 }
 
 // TestTokenStableAcrossRestarts 验签不依赖进程内状态：换一个 jwtSecret 就该失效。
 func TestTokenWrongSecretRejected(t *testing.T) {
-	jwtSecret = []byte("secret-a")
-	tok, err := newToken("u", "user")
+	a := newBareServer(t, "secret-a")
+	tok, err := a.newToken("u", "user")
 	if err != nil {
 		t.Fatal(err)
 	}
-	jwtSecret = []byte("secret-b")
-	if _, _, err := verifyToken(tok); err == nil {
+	b := newBareServer(t, "secret-b")
+	if _, _, err := b.verifyToken(tok); err == nil {
 		t.Error("token verified under different secret")
 	}
 }
@@ -179,8 +175,8 @@ func TestTokenWrongSecretRejected(t *testing.T) {
 // TestAuthListEmptyIsArray 空库时必须返回 [] 而不是 null——前端常直接 .map()。
 func TestAuthListEmptyIsArray(t *testing.T) {
 	mux := newTestServer(t)
-	jwtSecret = []byte("test-secret")
-	tok, err := newToken("admin", "user")
+	srv := newBareServer(t, "test-secret")
+	tok, err := srv.newToken("admin", "user")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,8 +266,8 @@ func TestMainRequiresJWTSecret(t *testing.T) {
 	}
 	// main() 走 os.Exit，无法在同进程测；此处只锁定「空密钥不会静默启动」这一
 	// 前提：verifyToken 在 jwtSecret 为空时对任何签名都不通过。
-	jwtSecret = nil
-	if _, _, err := verifyToken("a.b.c"); err == nil {
+	empty := &Server{}
+	if _, _, err := empty.verifyToken("a.b.c"); err == nil {
 		t.Error("empty jwtSecret accepted a token")
 	}
 }
@@ -289,17 +285,24 @@ func TestMainRequiresJWTSecret(t *testing.T) {
 // RemoveAll 仍然先跑。本用例锁住「Close 确实发生」这一半；另一半（注册顺序）
 // 由 newTestServer 里两行的物理顺序保证，注释已写明原因。
 func TestNewTestServerClosesDbOnCleanup(t *testing.T) {
-	var captured *sql.DB
+	var captured *Server
 	// 子测试：t.Cleanup 在子测试结束时执行，父测试随后即可检查句柄状态。
 	t.Run("inner", func(t *testing.T) {
-		newTestServer(t)
-		captured = db
-		if err := captured.Ping(); err != nil {
+		t.Setenv("JWT_SECRET", "test-secret")
+		srv, err := New(filepath.Join(t.TempDir(), "reg.db"))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		t.Cleanup(func() { _ = srv.Close() })
+		captured = srv
+		if err := srv.db.Ping(); err != nil {
 			t.Fatalf("precondition: db should be open during the test: %v", err)
 		}
 	})
-	// 子测试已结束，其 t.Cleanup（含 db.Close）应已执行。
-	if err := captured.Ping(); err == nil {
+	// 子测试已结束，其 t.Cleanup（含 Close）应已执行。
+	// 用 srv.PingDB() 而不是裸 sql.DB.Ping()：关掉之后 *sql.DB 指针仍在，
+	// 直接调 Ping 会 panic（nil 内部连接池解引用），不是我们要的断言。
+	if err := captured.PingDB(); err == nil {
 		t.Error("db still open after the test finished — newTestServer must Close it " +
 			"(on Windows an unclosed .db makes t.TempDir's RemoveAll fail)")
 	}

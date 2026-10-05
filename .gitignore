@@ -8,14 +8,22 @@ peerdrive.db
 *.db
 
 # Compiled binaries
-peerdrive-server
-peerdrive
-peerdrive-reg-server
-peersignal
-# 只忽略名为 reg-server 的构建产物，不匹配同名目录
-# （不加 / 时它会连 back/cmd/reg-server/ 源码目录一起忽略掉——
-#  2026-10-05 就因此 git add 不到新包，提交缺文件才发现。）
+#
+# ⚠️ 这些条目**不能带路径**（如 `peerdrive`），否则会连源码目录一起忽略：
+#   .gitignore:12 peerdrive  →  忽略了 back/cmd/peerdrive/（单二进制入口源码）
+#   .gitignore     reg-server →  忽略了 back/cmd/reg-server/（已迁走的 regserver 包）
+# 2026-10-05 两次都因此 git add 不到新包，提交缺文件才发现。
+# 正确做法：只忽略仓库根的构建产物（前面加 / 锚定），并显式排除源码目录。
+# 构建产物惯例写在 back/ 下（back/out、back/peerdrive），故锚定到 /back/。
+/peerdrive
+/peersignal
+/peerdrive-server
+/peerdrive-reg-server
 /reg-server
+/back/peerdrive
+/back/peersignal
+/back/server
+/back/reg-server
 *.exe
 *.out
 

@@ -14,7 +14,7 @@
 // "libp2p P2P node / NewP2PService→IPFSService→UniversalDownloader" flow, which is no
 // longer accurate. Corrected here to reflect the current flow.
 
-package main
+package serverapp
 
 import (
 	"context"
@@ -47,8 +47,25 @@ import (
 // @host localhost:3000
 // @BasePath /
 
-// main is the Peerdrive server entry point; it initializes the DB, P2P, HTTP router and listens on the port.
-func main() {
+// Load 读配置并做启动期校验，返回 cfg 与一个清理函数。
+//
+// 为什么抽出来：`peerdrive all`（单二进制合并模式）需要先拿配置、再把三个
+// 服务挂到同一个端口上，不能直接调用「读配置 + 监听」的完整流程。
+func Load() (*config.Config, func(), error) {
+	cfg := config.Load()
+	if err := config.Validate(cfg); err != nil {
+		return nil, nil, err
+	}
+	return cfg, func() {}, nil
+}
+
+// ListenAddr 返回主服务的监听地址。
+func ListenAddr(cfg *config.Config) string {
+	return net.JoinHostPort(cfg.Host, cfg.Port)
+}
+
+// RunServe is the Peerdrive server entry point; it initializes the DB, P2P, HTTP router and listens on the port.
+func RunServe() {
 	log.LogInfo("main: Peerdrive server starting")
 
 	cfg := config.Load()
@@ -58,6 +75,35 @@ func main() {
 	// message (see config.Validate for details).
 	if err := config.Validate(cfg); err != nil {
 		stdlog.Fatalf("%v", err)
+	}
+	r, shutdown, err := BuildRouter(cfg)
+	if err != nil {
+		stdlog.Fatalf("%v", err)
+	}
+	defer shutdown()
+	log.LogInfo("main: setting up HTTP router")
+
+	addr := ListenAddr(cfg)
+	RunHTTP(addr, r)
+}
+
+// BuildRouter 初始化 DB、PeerJS 服务、source manager 并返回 HTTP handler。
+//
+// 抽出来是为了 `peerdrive all`：它要把主服务挂进一个更大的 mux（与信令、
+// 注册服务共端口），不能走「读配置 + 自己 ListenAndServe」的完整流程。
+// 返回的 shutdown 负责关闭 DB 与 PeerJS 服务——调用方必须调用，否则
+// Windows 上 .db 文件删不掉，且进行中的大文件传输会被截断。
+func BuildRouter(cfg *config.Config) (http.Handler, func(), error) {
+	var shutdowns []func()
+	shutdown := func() {
+		// 后注册的先关：PeerJS 依赖 DB，关的时候按相反顺序。
+		for i := len(shutdowns) - 1; i >= 0; i-- {
+			shutdowns[i]()
+		}
+	}
+	fail := func(err error) (http.Handler, func(), error) {
+		shutdown()
+		return nil, nil, err
 	}
 	storageDir := cfg.StorageDir
 	log.LogInfo("main: config loaded, storageDir=%s, port=%s", storageDir, cfg.Port)
@@ -77,7 +123,7 @@ func main() {
 	// letting the node silently allow the whole drive, we refuse at startup.
 	// Operators who truly need this can set PEERDRIVE_ALLOW_UNSAFE_ROOT=1.
 	if err := checkUnsafeRoots(cfg); err != nil {
-		stdlog.Fatalf("%v", err)
+		return fail(err)
 	}
 	warnUnsupportedRoots(cfg)
 
@@ -87,13 +133,13 @@ func main() {
 	// to rely on "remember to cd to the right directory" as a safety net.
 	log.LogInfo("main: initializing database at %s", cfg.DBPath)
 	if err := repository.InitDB(cfg.DBPath); err != nil {
-		stdlog.Fatalf("database initialization failed: %v", err)
+		return fail(fmt.Errorf("database initialization failed: %w", err))
 	}
-	defer func() {
+	shutdowns = append(shutdowns, func() {
 		if err := repository.CloseDB(); err != nil {
 			log.LogWarn("main: close db: %v", err)
 		}
-	}()
+	})
 	log.LogInfo("main: database initialized")
 
 	// Initialize the anonymous storage directory (same directory as regular files)
@@ -124,7 +170,7 @@ func main() {
 		}
 
 		peerjsSvc.Start()
-		defer peerjsSvc.Close()
+		shutdowns = append(shutdowns, func() { peerjsSvc.Close() })
 		log.LogInfo("main: PeerJS node id=%s", peerjsSvc.ID())
 	}
 
@@ -262,25 +308,27 @@ func main() {
 	// share is the NodeShare built in the PeerJS block above; nil when PeerJS is disabled,
 	// which the summary itself treats as "sharing not enabled".
 	logSecuritySummary(cfg, share)
+	return r, shutdown, nil
+}
 
+// RunHTTP 在 addr 上监听并阻塞，直到出错或收到 SIGINT/SIGTERM，然后优雅退出。
+//
+// 为什么不用 r.Run()：
+//  1. r.Run() 内部调 Fatalf，出错直接 os.Exit —— main 里所有 defer 都跳过，
+//     PeerJS 连接与 DB 句柄只能靠进程退出清理（Windows 上 DB 文件句柄不关，
+//     下次就打不开了）；
+//  2. 没有优雅退出：收到 SIGTERM 直接退，进行中的大文件传输被截断成半个文件——
+//     对端拿到的是损坏的残片，却以为传输成功了。
+//
+// ReadHeaderTimeout 是最低限度的 Slowloris 防护（gin 的 r.Run() 不设这个）。
+func RunHTTP(addr string, h http.Handler) {
 	// Listen address: PEERDRIVE_HOST empty = listen on all interfaces (historical behavior).
 	// The admin surface has no account system; "who can reach this port" is its only boundary.
 	// If the admin panel is only used locally, setting PEERDRIVE_HOST=127.0.0.1 is the
 	// cheapest wall.
-	addr := net.JoinHostPort(cfg.Host, cfg.Port)
-
-	// Using an explicit http.Server instead of r.Run():
-	//   1. r.Run() calls Fatalf internally, which does os.Exit on error — all main defers
-	//      are skipped, and PeerJS connections and DB handles are left to the process exit
-	//      to clean up (on Windows, DB file handles don't close and may prevent opening
-	//      the next time);
-	//   2. No graceful shutdown: on SIGTERM it just exits, leaving in-progress large file
-	//      transfers truncated mid-way — the peer gets a corrupt partial file and thinks
-	//      the transfer succeeded.
-	// ReadHeaderTimeout is the minimum Slowloris protection (gin's default r.Run() doesn't set it).
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           r,
+		Handler:           h,
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 

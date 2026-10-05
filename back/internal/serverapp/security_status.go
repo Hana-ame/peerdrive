@@ -1,4 +1,4 @@
-package main
+package serverapp
 
 // security_status.go — security status summary at startup (2026-10-04).
 //
