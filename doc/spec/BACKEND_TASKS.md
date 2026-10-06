@@ -7,7 +7,7 @@
 ## Architecture Overview
 
 ```
-cmd/server/main.go          — Entry point: load config → initialize components → start HTTP
+internal/serverapp/app.go          — Entry point: load config → initialize components → start HTTP
   │
   ├── config/config.go      — Environment variable configuration
   ├── router/router.go      — Route registration (22+ routes)

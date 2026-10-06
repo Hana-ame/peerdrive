@@ -69,11 +69,14 @@ try {
   const dl = Date.now() + TIMEOUT
   while (Date.now() < dl) {
     const txt = (await page.textContent('body').catch(() => '')) || ''
-    const m = txt.match(/peerdrive-[0-9a-f]{6,}/g)
-    // 面板会把自己的随机 id（pd-panel-*）也显示出来，所以比对 node 参数更严：
-    // 搜索结果里必须出现 node 参数那个 id。
+    // 比对 node 参数那个 id，**而不是**去匹配某个 id 形态。
+    // 早先写死 /peerdrive-[0-9a-f]{6,}/ 是因为默认 id 形如 peerdrive-64373d50；
+    // 但节点也可以用 PEERDRIVE_PEERJS_ID 指定成任意字符串
+    // （e2e.yml 里就是 node-a / node-zero），那种配置下这条正则永远匹配不上 ——
+    // 用例会变成「只有默认 id 才绿」的地雷。
+    // 正确口径：搜索结果里必须出现 URL 上那个**实际的** node id。
     const want = new URL(page.url()).searchParams.get('node')
-    if (want && m && m.includes(want)) { found = true; break }
+    if (want && txt.includes(want)) { found = true; break }
     await sleep(500)
   }
   if (found) ok('自动搜索列出了本节点（信令链路真通，不是标签文字命中）')

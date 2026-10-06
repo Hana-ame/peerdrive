@@ -125,8 +125,8 @@ JS helper encapsulation. Zero backend changes needed on frontend side.
 
 ## 9. Related Files
 
-- Frame protocol/reqId routing/`bindConn`: `back/internal/service/peerjs_service.go`
-- `Session` abstraction: `back/internal/service/ws_session.go`, `rtc_session.go`
+- Frame protocol/reqId routing/`bindConn`: `back/internal/transport/peerjs_service.go`
+- `Session` abstraction: `back/internal/transport/ws_session.go`, `rtc_session.go`
 - Atomic frames + flow control: `back/peerjs/connection.go` (`SendFrame`)
 - Route mounting: `back/internal/router/peerjs_routes.go`
 - Reference implementation (wintools): `cmd/webrtc-proxy/main.go` (reqBodyQueue / stream / forward timeout)

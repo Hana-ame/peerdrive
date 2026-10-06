@@ -1,7 +1,7 @@
 # Connection 07: transport ↔ peerjs (protocol engine)
 
 - **Modules involved**: `../modules/09-transport.md` and `../modules/10-peerjs.md`
-- **Code locations**: A side `back/internal/transport/` (`peerjs_service.go` assembly layer + `conn.go` frame protocol/dispatch + `rtc_session.go` adapter + `ws_session.go`'s `Session` interface); B side `back/peerjs/` (`peer.go` signaling client / `connection.go` DataConnection / `message.go` messages and payloads / `signaller.go` abstraction / `transport.go` Frame and DataChannel abstraction); library assembly point `back/go.mod:7,160` (`require github.com/Hana-ame/go-peerjs v0.0.0` + `replace ... => ./peerjs`); service assembly point `back/cmd/server/main.go` (`peerjsSvc.Start()/Close()`, see `../modules/09-transport.md` §1 and `how-to-connect.md` startup timing)
+- **Code locations**: A side `back/internal/transport/` (`peerjs_service.go` assembly layer + `conn.go` frame protocol/dispatch + `rtc_session.go` adapter + `ws_session.go`'s `Session` interface); B side `back/peerjs/` (`peer.go` signaling client / `connection.go` DataConnection / `message.go` messages and payloads / `signaller.go` abstraction / `transport.go` Frame and DataChannel abstraction); library assembly point `back/go.mod:7,160` (`require github.com/Hana-ame/go-peerjs v0.0.0` + `replace ... => ./peerjs`); service assembly point `back/internal/serverapp/app.go` (`peerjsSvc.Start()/Close()`, see `../modules/09-transport.md` §1 and `how-to-connect.md` startup timing)
 - **Direction**: bidirectional (in-process calls + DataChannel full duplex; offerer/answerer have no direction distinction, the same Session carries both inbound and outbound roles, `peerjs_service.go:13-14`)
 
 ## 1. Connection Method

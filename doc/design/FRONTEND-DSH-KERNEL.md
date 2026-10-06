@@ -1,3 +1,4 @@
+
 # Peerdrive Frontend Architecture Inspired by dsh's Frontend Kernel
 
 > Date: 2026-08-16
@@ -8,6 +9,13 @@
 > The goal is to have Peerdrive's frontend also adopt the **host-pushed boot graph + browser shell two-stage startup + plugin lazy loading + slot-composed UI** mechanism.
 > See `FRONTEND-DSH-INSPIRED.md` for the higher-level bundle/profile/patch organization.
 
+
+> ⚠️ **The paths in this document are design proposals, not current state** (written 2026-08-16,
+> paths such as `bundles/` `profiles/` `harness/` `front/src/modules` have **not been implemented to this day**;
+> currently `back/` has no `bundles/` or `harness/`, and `front/src/` has only `pages/` `lib/` `api.js` `ws.js`).
+> This document records "what the target structure looks like"; to see the actual structure, see
+> [`doc/FILE-REFERENCE.md`](../FILE-REFERENCE.md). Paths were deliberately **not** modified —
+> changing them would misrepresent the original proposal.
 ---
 
 ## 1. Key Mechanisms of dsh's Frontend

@@ -6,6 +6,21 @@
 > To modify code / run latest unreleased commits / run tests, see [Appendix A: Build from Source](appendix-build-from-source.md)
 > — that's **optional**, only affects those who want to change code.
 > Port convention: **Node 3001** — signaling doesn't need you to start it, see §1.2.
+>
+> ### Since v0.3.2, you don't have to fill in the node ID anymore
+>
+> Earlier versions made you copy the node ID out of the log and paste it into the panel.
+> Now `peerdrive serve` prints a **clickable panel URL** on startup:
+>
+> ```
+>   Next step: open the panel
+>     http://127.0.0.1:3000/panel
+> ```
+>
+> Open it and the panel figures out its own node ID and that node's signaling by itself.
+> **This entire chapter's "enter the node ID" step is only needed on v0.3.1 and earlier,**
+> or when you're connecting to **someone else's** node from the standalone panel (§1.5) —
+> there you genuinely need that other person's ID, since it can't be guessed.
 > After connecting, to add files: [Chapter 2: Add Local Files to Your Node](02-add-local-files.md).
 
 ---
@@ -34,8 +49,10 @@ Open <https://github.com/Hana-ame/peerdrive/releases/latest>, pick for your mach
 | macOS Intel | `peerdrive-darwin-amd64` |
 | macOS Apple Silicon | `peerdrive-darwin-arm64` |
 
-> The release also includes a `peersignal-*` — that's **self-hosted signaling**.
-> Only needed if you want to run your own signaling on your machine — normal usage doesn't need it, see §1.2.
+> Since **v0.3.0** the release ships **only 5 assets, all the same `peerdrive` binary** — server,
+> signaling, and registration are subcommands of it (`serve` / `signal` / `reg` / `all`).
+> There is **no separate `peersignal-*` to download**; you get self-hosted signaling via `peerdrive signal`,
+> and normal usage doesn't need it anyway, see §1.2.
 
 Command line download (no need to open browser):
 
@@ -113,12 +130,17 @@ env PORT=3001 \
 
 (Windows: use `set VAR=...` on separate lines, or PowerShell's `$env:VAR='...'`; change program name to `.exe`.)
 
+> **Actually, none of the above is required just to try it out.** `/tmp/pd/peerdrive-linux-amd64 demo`
+> runs the entire chain (market → join → manifest → pull → checksum) with zero configuration,
+> then `serve` alone already works with every default — sharing just won't be on (§1.3).
+> The table below is for when you want a **stable node ID** or **a specific port**.
+
 Only these need to be set, the rest use defaults:
 
 | Variable | Why Set It |
 |---|---|
 | `PORT` | HTTP port, default 3000 |
-| `PEERDRIVE_PEERJS_ID` | Your name on the network (peer id). Not given = random generation —— **if random, others can't enter your id to connect** |
+| `PEERDRIVE_PEERJS_ID` | Your name on the network (peer id). Not given = random generation (`peerdrive-<random>`). Since v0.3.2 the panel can self-discover the id, so a random one is no longer fatal — but **to connect from another machine or another node, you still need a fixed one** |
 | `PEERDRIVE_STORAGE` | Content-addressed root: incoming content saved as `storageDir/<hash-first-2-chars>/<hash>`, naturally deduplicated |
 | `PEERDRIVE_DOWNLOAD_DIR` | Download / registration directory (root of `file_index`) |
 | `PEERDRIVE_SHARE_ENABLE` + `PEERDRIVE_SHARE_DIRS` | Enable sharing + declare shared directories (default off; if not enabled, other nodes can't see any content) |
@@ -142,7 +164,27 @@ peersignal connected as my-node-1
 
 ---
 
-## 1.5 Open the Online Panel
+## 1.5 Open the Panel
+
+### 1.5.0 Local node: use the one served by your node (recommended since v0.3.2)
+
+`http://127.0.0.1:3000/panel`（replace 3000 with your `PORT`）
+
+The panel is embedded in the binary along with peerjs. **No inputs required** — it asks your node
+"who am I / which signaling am I on", fills it in itself, then auto-connects.
+
+One caveat: **`panel` is served over HTTP, so it can only use `ws://` signaling**. The default public signaling is wss
+(HTTPS), so the browser will block it as mixed content. Symptoms: panel spins, or reports connection failure.
+**Two ways around it** (pick either):
+
+| Method | How |
+|---|---|
+| Self-hosted signaling | Start a `peerdrive signal` + `-tls-cert`/`-tls-key` on your own machine, open the panel with that domain |
+| Trust the certificate locally | Access the panel over https via a reverse proxy with a locally-trusted cert |
+
+If you just want to verify it works, use the online panel below (already https, wss works directly).
+
+### 1.5.1 Connecting to someone else's node: use the online panel
 
 <https://peerdrive.pages.dev/> (or <https://hana-ame.github.io/peerdrive/>)
 
@@ -167,7 +209,10 @@ Two prerequisites:
 1. Your node is reachable from the public network (public server, or home broadband with port mapping/UPnP).
 2. Your machine and your node don't share the same local network.
 
-If both met, just open the panel from your phone / other computer, enter node ID as normal.
+If both met, the startup log already printed a **LAN address**（for example `http://172.29.89.192:3000/panel`）——
+open that on your phone or another computer and the panel self-discovers, no need to enter the node ID.
+Connecting to **another node** is different: you have to enter that node's ID, because it can't be guessed.
+
 Data goes through WebRTC DataChannel, doesn't occupy server bandwidth.
 
 ---
@@ -213,3 +258,6 @@ Connect the panel to your node and you should see:
 | List shows files, but pull says `read failed` | Shared directory not declared in `PEERDRIVE_SHARE_DIRS` | Declare it (directory can be anywhere, but **must be declared**) |
 | Request hangs 15s then TIMEOUT (not error) | Running old binary, doesn't recognize new verbs | Download latest release |
 | Node just started, panel immediately can't connect | Node hasn't finished announcing, heartbeat not stable | Wait for `/ping` to respond, wait a few seconds for heartbeat stability |
+| Blank panel page, nothing renders (check the browser console) | The server's global CSP blocked inline scripts | Already fixed since v0.3.2 (the `/panel` prefix is exempted); if you self-built an old commit, upgrade to v0.3.2+ |
+| Panel is full but spins forever, console reports a `ws://` mixed-content error | Local `panel` is http, the default public signaling is wss | See §1.5.0 — either self-host signaling over TLS, or use the online https panel |
+| Demo works but your node's panel doesn't | Yours may be on v0.3.1 or earlier (no embedded panel) | Check `peerdrive version`; download v0.3.2 or newer |

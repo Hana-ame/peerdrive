@@ -101,7 +101,7 @@ changes (including tombstones), the peer's `ApplySync` merges them — **delete 
 | `peerjs_service.go` | The `PeerJSService.fileIndex` field holds this service (assembled by NewPeerJSService) |
 | `admin.go` | Admin-plane upload does **not** go through UploadSession (it uses temp-file collection + multipart repackaging); the two are independent |
 | `internal/source/local.go` | LocalSource.resolvePath replicates serveFile's index-first + IsPathAllowed + CAS fallback logic (REFACTOR §3.8) |
-| `cmd/server/main.go` | `NewFileIndexService(uploadDir)` assembly; storageDir and upload directory are separate |
+| `internal/serverapp/app.go` | `NewFileIndexService(uploadDir)` assembly; storageDir and upload directory are separate |
 
 ## Pitfalls and design decisions
 

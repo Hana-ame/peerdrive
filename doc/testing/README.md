@@ -19,14 +19,14 @@ The project has **15 test components**, distributed across 4 go modules (back ma
 
 | You changed | Must run | Suggested add |
 |---|---|---|
-| Any single package logic in `back/internal/**` | `cd back && go test -tags nosqlite ./... -count=1` (551) | `bash scripts/test-layers.sh` to pinpoint to a specific layer |
+| Any single package logic in `back/internal/**` | `cd back && go test -tags nosqlite ./... -count=1` (622, 16 packages) | `bash scripts/test-layers.sh` to pinpoint to a specific layer |
 | `back/internal/transport/**` frame protocol | Same as above (transport 86) | Integration tests (21) |
 | **Netdisk chain** (`nodes/share/pull/RegisterLocal`) | Integration tests + **`./scripts/netdisk-local-demo.sh`** (manual, must run once) | Browser UI manual test (`NETDISK.md` §7.2) |
 | `back/peerjs/**` | `cd back/peerjs && go test ./... -count=1 -race` (23) | — |
 | `back/signalserver/**` (peersignal) | `cd back/signalserver && go test ./...` (23) | ✅ `go-build` `submodules` matrix (added 2026-09-21) |
 | `back/p2p_bt/**` | `cd back/p2p_bt && go test ./...` (7) | ✅ Same as above |
 | `front/src/**` | `cd front && npm test` (101) + `npm run build` | `front/tests/e2e-admin-smoke.mjs` (admin plane, CI already runs); the other two `.mjs` manually (depending on change scope) |
-| `packages/peerdrive-client/**` | `npm test` (115) + `npm run check:panel` | `node scripts/verify-panel.mjs` (real browser end-to-end); `scripts/verify-panel-share.mjs` (share levels end-to-end, requires node + signaling); after merge `pages.yml` will **automatically** verify online (§2 item 11) |
+| `packages/peerdrive-client/**` | `npm test` (115) + `npm run check:panel` | `node packages/peerdrive-client/scripts/verify-panel.mjs` (real browser end-to-end); `packages/peerdrive-client/scripts/verify-panel-share.mjs` (share levels end-to-end, requires node + signaling); after merge `pages.yml` will **automatically** verify online (§2 item 11) |
 | `packages/peerdrive-media/**` | `npm test` (21) + `npm run build` | `test/e2e-browser.mjs`, `test/media-node-e2e.mjs` |
 | Preparing to merge into `refactor` | All must-run items above all green (= same commands as CI) | Run again on trunk after merge |
 
@@ -38,7 +38,7 @@ Unit "test cases" = go side `-json` pass lines with `Test` (including subcases);
 
 | # | Component | Location | Command | Cases | In CI | Needs External Network |
 |---|------|------|------|------|-------|--------|
-| 1 | Backend unit/package tests | `back/` (main module) | `go test -tags nosqlite ./... -count=1` | **551** (12 packages) | ✅ `backend` + `go-build`×4 | ❌ |
+| 1 | Backend unit/package tests | `back/` (main module) | `go test -tags nosqlite ./... -count=1` | **622** (16 packages) | ✅ `backend` + `go-build`×4 | ❌ |
 | 2 | Backend integration tests | `back/test/integration/` | `go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1` | **21** pass / 4 skipped | ✅ `integration` | ❌ (self-hosted signaling) |
 | 3 | External network integration (manual gated) | Same as 2 | `PEERDRIVE_MQTT_TEST=1` / `PEERDRIVE_LIVE_TEST=1` | 4 test cases | ❌ | ✅ (direct connection, no proxy) |
 | 4 | peerjs module | `back/peerjs/` (independent go.mod) | `go test ./... -count=1 -race` | **23** | ✅ `peerjs` | ❌ |
@@ -46,25 +46,31 @@ Unit "test cases" = go side `-json` pass lines with `Test` (including subcases);
 | 6 | p2p_bt module | `back/p2p_bt/` (independent go.mod) | `go test ./... -count=1` | **7** | ✅ `go-build`·`submodules` | ❌ |
 | 7 | Frontend vitest | `front/tests/*.test.{js,jsx}` | `npm test` | **101** (9 files) | ✅ `frontend` (includes build) | npm ci needed |
 | 8 | Frontend admin plane smoke | `front/tests/e2e-admin-smoke.mjs` | Start node locally then `node front/tests/e2e-admin-smoke.mjs` (hits `ws://localhost:3000/ws/peer`) | **19** assertions | ✅ `e2e.yml` (added 2026-09-21, no external network) | ❌ |
-| 8b | Two other frontend manual scripts | `front/tests/{playwright-smoke,pw-settings-mobile}.mjs` | playwright runner | — | ❌ **(blind spot)** | ✅ (hits online/preview sites) |
+| 8b | ~~Two other frontend manual scripts~~ | ~~`front/tests/{playwright-smoke,pw-settings-mobile}.mjs`~~ | — | — | — **已删除（2026-10-06 核实：两个脚本均不存在）** | — |
 | 9 | client package unit tests | `packages/peerdrive-client/` | `npm test` (zero dependencies) | **115** | ✅ `client-package` | ❌ |
-| 10 | client public panel + browser self-check | `packages/peerdrive-client/{dist,scripts}` | `npm run check:panel`·`node scripts/verify-panel.mjs` | Panel 8 assertions | ✅ `check:panel` (artifact consistency) | ❌ (peerjs fetched from CDN) |
+| 10 | client public panel + browser self-check | `packages/peerdrive-client/{dist,scripts}` | `npm run check:panel`·`node scripts/verify-panel.mjs` | Panel 9 assertions | ✅ `check:panel` (artifact consistency) | ✅ **peerjs no longer fetched from CDN since v0.3.2** (embedded in the binary; CI also byte-compares the two copies) |
 | 11 | Online hosting self-check (Pages) | `packages/peerdrive-client/scripts/verify-pages.mjs` | `node scripts/verify-pages.mjs` | Online 5 assertions | ✅ `pages.yml`·`verify` (deploy then verify back, added 2026-09-21) | ✅ (verifies the online version) |
 | 12 | media package unit tests | `packages/peerdrive-media/` | `npm test` + `npm run build` | **21** | ✅ `media-package` | npm ci needed |
 | 13 | media browser E2E (2) | `packages/peerdrive-media/test/{e2e-browser,media-node-e2e}.mjs` | playwright runner | 10 assertions + … | ❌ **(blind spot)** | ✅ (twimg images + peerjs CDN, also needs media-node running) |
 | 14 | Layered aggregation script | `scripts/test-layers.sh` | `bash scripts/test-layers.sh [--integration]` | Aggregates 1/4/5/6/7 | ❌ (local aggregation) | — |
 | 15 | Netdisk end-to-end script | `scripts/netdisk-local-demo.sh` | Starts 3 processes running full chain | 12 assertions | ✅ **`e2e.yml`** | ❌ (no external network, local processes) |
 | 16 | Panel browser end-to-end | `packages/peerdrive-client/scripts/verify-panel.mjs` | Real browser clicks on panel | 9 assertions | ✅ **Same `e2e.yml` (reuses previous environment)** | ❌ |
+| 17 | **Zero-config panel** (new in v0.3.2) | `packages/peerdrive-client/scripts/verify-panel-zero-config.mjs` | Opens `/panel` with **zero params**, asserts the panel reverse-looks-up its own node and connects | 3 assertions | ✅ `e2e.yml` (independent node, no PSK) | ❌ |
 
-**Total coverage** (2026-09-22 retested): automated (CI) covers 551 + 21 + 23 + 101 + 115 + 21 = **832**;
-Previously added to CI: signalserver (23) · p2p_bt (7) · Pages online self-check (5) · admin plane smoke (19) ⇒ **886**.
+**Total coverage** (2026-10-06 retested): automated (CI) covers 622 + 21 + 101 + 115 = **859**;
+Previously added to CI: signalserver (23) · p2p_bt (7) · Pages online self-check (5) · admin plane smoke (19).
+Since v0.3.2 the `media-package` job covers the client package; the standalone `signalserver` (23) count
+still applies only when building that submodule separately.
+
+> ⚠️ **Note on `go build`**: `-tags nosqlite` is mandatory (three-way SQLite CGO conflict); plain
+> `go build ./...` fails at link time. This is a known build constraint, not a code defect.
 Still outside CI: 4 external-network gated cases, `front/tests/*.mjs` (2 remaining) · media browser E2E (2) · client demo page —— they either depend on external sites or require manual service startup first, see §4.
 
 ---
 
 ## 3. Component-by-Component Description
 
-### 3.1 Backend Unit/Package Tests (551)
+### 3.1 Backend Unit/Package Tests (622, 16 packages)
 
 - **Responsibility**: single-package behavior correctness, dependencies use injected/temporary directory substitutes (e.g. fake `fileList`, fake transport).
 - **Command**: `cd back && go build -tags nosqlite ./... && go test -tags nosqlite ./... -count=1`
@@ -174,7 +180,7 @@ The manual acceptance entry for "fetching files from P2P network without running
 - `test/media-node-e2e.mjs`: **name looks like Node side, but is actually browser E2E too** (consumes playwright runner passed
   `page`/`ok`). Prerequisites: Go `media-node` running + static server :5176, and needs to actually load a twimg image
   ⇒ doesn't match `*.test.mjs` glob, **also uses external network**, so not in CI short-term.
-  Also has independent entry `scripts/run-media-node-e2e.mjs` (with proxy connecting to remote peersignal)
+  Also has independent entry `packages/peerdrive-media/scripts/run-media-node-e2e.mjs` (with proxy connecting to remote peersignal)
 - Pits and browser E2E seven-serial (including serial slot empty-occupation three entries) see `REFACTOR.md` §3.11
 
 ### 3.13 `scripts/test-layers.sh` (Layered Aggregation)
@@ -268,7 +274,7 @@ By risk from high to low:
 | `front/tests/*.mjs` 2 remaining | Asserts on online/preview sites, running in CI is like health-checking someone else's deployment | Manual |
 | media's 2 non-`*.test.mjs` E2E | Browser real rendering path not in `npm test`; also both use external network (twimg images + peerjs CDN), and need manual `media-node` startup first | Manual (not in CI short-term) |
 | client demo page (:8123) | Last line of defense for consumer real-user usability | Manual |
-| **Public panel browser self-check** | `dist/panel.html` is a single file via file:///static hosting, unit tests can't touch it at all; peerjs CDN loading, signaling CORS, real click-save can only be verified here | Manual `scripts/verify-panel.mjs` (8 assertions, already passing) |
+| **Public panel browser self-check** | `dist/panel.html` is a single file via file:///static hosting, unit tests can't touch it at all; peerjs CDN loading, signaling CORS, real click-save can only be verified here | Manual `packages/peerdrive-client/scripts/verify-panel.mjs` (8 assertions, already passing) |
 | ~~**Online hosting itself** (Pages deploy)~~ | Same as above | ✅ **Added 2026-09-21**: `pages.yml` added `verify` job (`needs: deploy`, probes release propagation first, then verifies, 3 retries on full failure) |
 | ~~**Tag release**~~ | Previously: `ci.yml` didn't include tags, `release.yml` only built ⇒ release had no gate | ✅ **Added 2026-09-20**: `ci.yml` added tags trigger + `release.yml` has its own `gate` (see §3.15) |
 | **PSK gate can only be verified in real network** | Frame-level behavior has unit tests, but "with/without key actually being blocked/allowed on real WebRTC" must run the chain | Manual: `netdisk-local-demo.sh` step [6] (A with key → B without key blocked → B with key recovers); could consider connecting to `e2e.yml` |

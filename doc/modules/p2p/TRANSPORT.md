@@ -152,7 +152,7 @@ carries both inbound+outbound roles simultaneously, distinguished by 'frame type
 ## 5. Assembly Call Order (main → router → transport)
 
 ```
-cmd/server/main.go
+internal/serverapp/app.go
   ├─ cfg := config.Load()
   ├─ repository.InitDB / SetAnonStorageDir
   ├─ peerjsSvc = transport.NewPeerJSService(cfg, storageDir)  // Assembly point

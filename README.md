@@ -35,15 +35,17 @@ SHA256 hashes are converted to CIDv1 and announced on the IPFS DHT, while also a
 
 ## Features: what you can do now
 
-> All of the following capabilities have been run on this branch (`refactor`): backend unit tests 551 · integration 21 · frontend 101 · client 115 ·
-> netdisk end-to-end script 12 assertions · panel real-browser 9 assertions · sharing-level end-to-end 12 assertions ·
-> admin-surface smoke 19 assertions, CI coverage totals 886 cases
-> (item-by-item list, commands and blind spots in `doc/testing/README.md`).
+> All of the following capabilities have been run on this branch (`refactor`): backend unit tests **622** (16 packages) · integration 21 · frontend 101 · client 115 ·
+> netdisk end-to-end script 12 assertions · panel real-browser 9 assertions · zero-config panel 3 assertions (new in v0.3.2) · sharing-level end-to-end 12 assertions ·
+> admin-surface smoke 19 assertions (item-by-item list, commands and blind spots in `doc/testing/README.md`).
+>
+> **First run? Start with `peerdrive demo`** — see [Quick start](#quick-start) below. It needs no configuration.
 
 ### Usable without running a node (public panel `dist/panel.html`)
 
 | Capability | Description |
 |------|------|
+| **No input at all** | Since **v0.3.2**, `http://127.0.0.1:<port>/panel` is embedded in the binary. The panel reverse-looks-up its own node id and that node's signaling from the server and connects on its own — **you don't fill in node id / signaling / key** (v0.3.1 and earlier all had to be copied by hand from the log) |
 | Connect to a node | Fill in a node's peer id to connect directly, or "auto-search" lists nodes online on the signaling (hits the signaling's REST API, does not occupy a WebRTC connection) |
 | See the other side's shared file links | After connecting, automatically pulls the `share` manifest: collections / files / directories. Only shows what the other side **explicitly declared** as open |
 | Save · preview | "Save" = streaming pull + browser download; <=2MB can "preview". Task rows carry progress and cancel |
@@ -111,6 +113,7 @@ Progress, module breakdown, **plan vs actual deviations**, and verification resu
 
 ## Quick start
 
+> **Zero-configuration Chinese guide (recommended for first contact)**: [`doc/guide/single-binary-guide.md`](doc/guide/single-binary-guide.md)
 > Step-by-step tutorial (download -> start a node -> connect with the panel -> what to do when it won't connect):
 > [`doc/tutorial/01-run-and-connect.md`](doc/tutorial/01-run-and-connect.md)
 > You do not need to deploy your own signaling: by default it connects to the public signaling `peersignal.moonchan.xyz` (wss).
@@ -118,22 +121,33 @@ Progress, module breakdown, **plan vs actual deviations**, and verification resu
 > Full tutorial index (sharing levels · choosing what to share · cross-node save): [`doc/tutorial/README.md`](doc/tutorial/README.md)
 
 ```bash
-# Backend (no compilation needed: download the released binary)
-#   https://github.com/Hana-ame/peerdrive/releases/latest
-#   Node: peerdrive-<linux|darwin|windows>-<amd64|arm64>[.exe]
-#   (peersignal-* is self-hosted signaling, only download if you want to self-host, see tutorial appendix A)
+# ── One binary since v0.3.0: server + signaling + registration are all subcommands of it ──
+#   5 assets, no separate peersignal-* to download (see the subcommand notes in doc/guide/single-binary-guide.md)
 gh release download --repo Hana-ame/peerdrive --pattern 'peerdrive-linux-amd64'
+chmod +x peerdrive-linux-amd64
 
-# Want to run from source (when modifying code)
-cd back && go run -tags nosqlite ./cmd/server/main.go
+# ── Step 1 (zero configuration, run this first): self-hosted demo + two nodes, verify the whole chain ──
+./peerdrive-linux-amd64 demo
+#   Auto-selects ports, generates test data itself, prints the result step by step.
+#   No Go / repo / Node / env vars needed. Works offline (self-hosted signaling).
 
-# Netdisk UI = public panel (single file, no server needed)
-#   Online version: https://hana-ame.github.io/peerdrive/   (auto-deployed after push)
-#   Local version: npm run build:panel generates dist/panel.html, double-click file:// to open
-#   With params to reach a specific node directly:
-#   panel.html?node=<node peer id>&host=peersignal.moonchan.xyz&port=443&path=/
-#              &key=pd-signal-b9447b406828e500&secure=1&auto=1
-#   The signaling host/key default to this (prefilled in the panel), usually no need to write;
+# ── Step 2: start your own node ──
+./peerdrive-linux-amd64 serve
+#   On startup it prints "next step" directly, including a clickable panel URL:
+#     http://127.0.0.1:3000/panel
+#   Open it in a browser and you're done — node id and signaling are auto-detected by the panel itself.
+
+# Run from source (when changing code)
+cd back && go build -tags nosqlite -o peerdrive ./cmd/peerdrive/ && ./peerdrive
+
+# Netdisk UI = public panel
+#   Since v0.3.2 it's embedded in the binary, reachable via the /panel above — the highest priority way to open it
+#   Standalone version (for connecting to someone else's node without a local node):
+#     Online: https://hana-ame.github.io/peerdrive/   (auto-deployed after push)
+#     Local: npm run build:panel generates dist/panel.html, open file:// to run
+#   To connect directly to a specific node via params:
+#     panel.html?node=<node peer id>&host=peersignal.moonchan.xyz&port=443&path=/
+#                &key=pd-signal-b9447b406828e500&secure=1&auto=1
 #   Note: HTTPS pages (including the online version) can only use wss signaling, otherwise the browser blocks it as mixed content.
 #   Online hosting self-check: node scripts/verify-pages.mjs
 
@@ -143,7 +157,7 @@ cd front && npm run dev
 # Minimal demo (needs an http server serving the package dir, for reference only)
 cd packages/peerdrive-client && npm run demo   # http://127.0.0.1:8123/demo/consumer.html
 
-# One-shot run of the whole netdisk pipeline (self-hosted signaling + two nodes, auto-verifies market/join/manifest/pull/verify)
+# One-shot run of the whole netdisk pipeline (same flow as `peerdrive demo`; script version for CI/dev)
 ./scripts/netdisk-local-demo.sh                # --stop to stop
 
 # Panel end-to-end self-check (real browser + real clicks, needs the above environment started first)
@@ -154,8 +168,12 @@ SIG_HOST=<local IP> SIG_PORT=9100 NODE_ID=node-a node scripts/verify-panel.mjs
 # / collection whole-package link: recognizable in manifest · unlisted still fetchable by hash · private does not even give the manifest)
 NODE_PORT=3001 SIG_PORT=9100 NODE_ID=node-a PW_CHANNEL=default node scripts/verify-panel-share.mjs
 
+# Zero-config panel self-check (v0.3.2: open /panel with no params at all, assert the panel discovers its own node)
+cd packages/peerdrive-client && PANEL_URL=http://127.0.0.1:3000/panel PW_CHANNEL=chromium \
+  node scripts/verify-panel-zero-config.mjs
+
 # Tests
-cd back && go test -tags nosqlite ./... -count=1                                     # 551 (12 packages)
+cd back && go test -tags nosqlite ./... -count=1                                     # 622 (16 packages)
 cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1    # 21 passed / 4 skipped (offline, self-hosted signaling; must be -p 1)
 cd back/signalserver && go test ./...            # 23 (standalone go.mod; ✅ go-build·submodules covered)
 cd back/p2p_bt && go test ./...                  # 7 (standalone go.mod; ✅ same)

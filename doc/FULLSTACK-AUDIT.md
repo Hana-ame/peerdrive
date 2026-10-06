@@ -24,7 +24,7 @@
 
 | # | Problem | Severity | Location Changed |
 |---|------|--------|----------|
-| 1 | **No graceful shutdown**: `r.Run()` calls `Fatalf` in a goroutine; any error causes `os.Exit`, skipping all `defer` in main (PeerJS connections, DB handles all rely on process exit as safety net); on SIGTERM, it just exits, truncating files being transferred mid-stream | High | `cmd/server/main.go` (changed to `http.Server` + `Shutdown(20s)` + forced close on timeout) |
+| 1 | **No graceful shutdown**: `r.Run()` calls `Fatalf` in a goroutine; any error causes `os.Exit`, skipping all `defer` in main (PeerJS connections, DB handles all rely on process exit as safety net); on SIGTERM, it just exits, truncating files being transferred mid-stream | High | `internal/serverapp/app.go` (changed to `http.Server` + `Shutdown(20s)` + forced close on timeout) |
 | 2 | **No liveness/readiness probes**: only `/ping`, two probe semantics mixed | Medium | `internal/controller/health.go` (`/health` doesn't check deps, `/ready` actually pings DB) |
 | 3 | **No request ID**: dozens of concurrent requests interleave in logs, can only guess by timestamp | Medium | `internal/router/middleware.go` (`X-Request-ID` reuses upstream/newly generated, written to context and response header) |
 | 4 | **Unstructured logging**: text lines can't go into a logging system | Medium | Same as above (`AccessLog()` outputs JSON lines; 5xx=error, 4xx=warn; **does not log Authorization/request body**) |

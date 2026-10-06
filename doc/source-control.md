@@ -65,7 +65,7 @@ type Control interface {
 | Local | `AddLocalFile`, `WriteFile` | `transport.FileIndexService.Create`, `UploadSession` |
 | Peer | Not yet defined | N/A |
 | URL | Not yet defined | N/A |
-| IPFS | `PinCID`, `UnpinCID`, `ListPins`; serve IPFS protocol independently; control manages its behavior | `internal/controller/p2p.go` already has pin endpoints, `internal/provider/ipfs.go`, `front/src/pages/IPFSPanel.jsx` |
+| IPFS | `PinCID`, `UnpinCID`, `ListPins`; serve IPFS protocol independently; control manages its behavior | `internal/controller/p2p.go` already has pin endpoints, `internal/provider/ipfs.go`, `front/src/pages/IPFS.jsx` |
 | BT | `DownloadTorrent`, status/cancel/list | `back/p2p_bt` already has DHT fetch; torrent active download pending integration |
 
 ## 5. IPFS Source Specialities: Serving IPFS Protocol Itself

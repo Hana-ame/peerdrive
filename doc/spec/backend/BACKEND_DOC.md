@@ -11,17 +11,17 @@
 | WebSocket | [gorilla/websocket](https://github.com/gorilla/websocket) v1.5.3 |
 | Swagger | [swaggo/gin-swagger](https://github.com/swaggo/gin-swagger) v1.6.1 |
 | Module path | `peerdrive` |
-| DB path | `./peerdrive.db` (hardcoded in `cmd/server/main.go:42`) |
+| DB path | `./peerdrive.db` (hardcoded in `internal/serverapp/app.go:42`) |
 | Default storage | `./storage/` (configurable via `PEERDRIVE_STORAGE`) |
 | Default port | `3000` |
 
-**Entry point**: `cmd/server/main.go:34` — `main()` initializes DB → P2P → provider manager → downloader → anon storage → router → Gin engine.
+**Entry point**: `internal/serverapp/app.go:34` — `main()` initializes DB → P2P → provider manager → downloader → anon storage → router → Gin engine.
 
 **Key packages**:
 
 | Package | Path | Role |
 |---------|------|------|
-| `cmd/server` | `cmd/server/main.go` | Entry point, wires all dependencies |
+| `internal/serverapp` | `internal/serverapp/app.go` | Entry point, wires all dependencies |
 | `router` | `internal/router/router.go` | Gin route registration, CORS middleware, context injection |
 | `controller` | `internal/controller/*.go` | HTTP handler functions for each route group |
 | `service` | `internal/service/*.go` | Business logic layer (file ops, anon collections, P2P, sync, download) |
@@ -591,13 +591,13 @@ type Config struct {
 
 ```bash
 # Build server binary
-go build -o peerdrive-server ./cmd/server/main.go
+go build -o peerdrive-server ./internal/serverapp/app.go
 
 # Check all packages compile
 go build ./...
 
 # Run server
-PORT=3000 PEERDRIVE_STORAGE=./storage go run ./cmd/server/main.go
+PORT=3000 PEERDRIVE_STORAGE=./storage go run ./internal/serverapp/app.go
 ```
 
 ### Unit Tests
@@ -647,7 +647,7 @@ go test -v ./internal/controller/
 
 Defined in `.github/workflows/ci.yml`. Runs on `ubuntu-latest` with Go 1.23:
 1. `go mod download`
-2. `go build -o peerdrive-server ./cmd/server/main.go`
+2. `go build -o peerdrive-server ./internal/serverapp/app.go`
 3. `bash test/p2p.sh` (P2P integration)
 4. Start server → `bash test/anon-collection.sh` → kill server
 5. Start server → `bash test/upload.sh` → kill server
@@ -661,7 +661,7 @@ Defined in `.github/workflows/ci.yml`. Runs on `ubuntu-latest` with Go 1.23:
 
 ```
 go/
-├── cmd/server/main.go              # Entry point
+├── internal/serverapp/app.go              # Entry point
 ├── internal/
 │   ├── config/config.go            # Configuration loading
 │   ├── config/config_test.go       # Config unit tests

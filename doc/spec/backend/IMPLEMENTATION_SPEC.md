@@ -25,7 +25,7 @@
 | 11 | `internal/router/router.go` | Modified | Added /auth, /anon routes and Auth middleware | ✅ |
 | 12 | `internal/service/downloader.go` | Modified | GetFileStream loops over available locations + P2P fallback | ✅ |
 | 13 | `internal/service/p2p.go` | Modified | Added FetchFile implementation | ✅ |
-| 14 | `cmd/server/main.go` | Modified | Initialize AuthService and inject into router | ✅ |
+| 14 | `internal/serverapp/app.go` | Modified | Initialize AuthService and inject into router | ✅ |
 
 ## Constraint Verification
 - [x] All changes are backward-compatible with existing APIs
@@ -46,7 +46,7 @@
 | 19 | `internal/model/anon.go` | Modified | AnonCollection added FriendlyName | ✅ |
 | 20 | `internal/service/anon_service.go` | Modified | CreateCollection(name, entries) supports naming | ✅ |
 | 21 | `internal/router/router.go` | Modified | Registered all P2P and new anon routes | ✅ |
-| 22 | `cmd/server/main.go` | Modified | Pass cfg to NewP2PService | ✅ |
+| 22 | `internal/serverapp/app.go` | Modified | Pass cfg to NewP2PService | ✅ |
 | 23 | `test/p2p.sh` | New | 13-step dual-node integration test | ✅ |
 | 24 | `.github/workflows/ci.yml` | New | CI: build + 4 test suites | ✅ |
 | 25 | `docs/specs/api-reference.md` | Modified | P2P Stage 2 endpoint documentation | ✅ |

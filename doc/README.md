@@ -18,19 +18,23 @@ peerdrive/
 │   │   ├── components/       Shared components
 │   │   └── api.js            API client
 │   └── tests/                Frontend tests
-├── back/                     Go backend (Gin + SQLite + libp2p + BT DHT)
-│   ├── cmd/server/           Entry point
+├── back/                     Go backend (Gin + SQLite + BT DHT), single binary since v0.3.0
+│   ├── cmd/peerdrive/        Entry point (subcommands: demo/serve/signal/reg/all)
 │   ├── internal/
+│   │   ├── serverapp/        Startup assembly + HTTP bootstrap (was cmd/server)
+│   │   ├── panel/            Embedded public panel + peerjs (go:embed, since v0.3.2)
+│   │   ├── regserver/        Registration / auth / relay registration
+│   │   ├── services/         In-process handler assembly (signal + reg multiplexing)
 │   │   ├── controller/       HTTP handler layer
+│   │   ├── transport/        WebRTC frame protocol / session management
 │   │   ├── service/          Business logic layer (P2P/files/collections/downloads)
 │   │   ├── repository/       SQLite persistence
 │   │   ├── provider/         Data source abstraction (local/HTTP/IPFS)
 │   │   ├── router/           Gin routing & middleware
 │   │   ├── model/            Data models
-│   │   ├── config/           Configuration
-│   │   └── p2p_bt/           BT DHT implementation
+│   │   └── config/           Configuration
 │   ├── pkg/hashutil/         Hash utilities
-│   └── test/                 Integration/E2E test scripts
+│   └── test/integration/     Integration/E2E tests (build tag `integration`, must run with -p 1)
 ├── doc/                      Project documentation (you are here)
 └── .github/workflows/        CI/CD
 ```
@@ -54,7 +58,9 @@ HTTP API (Gin Router)
 | Service | `back/internal/service/` | Core logic: file registration/download, collection CRUD/versions, P2P transport/signaling, **IPFSService (boxo Bitswap)** |
 | Repository | `back/internal/repository/` | SQLite CRUD |
 | Provider | `back/internal/provider/` | Data source interface: `local` / `http` / `ipfsgw` (IPFS prefers Bitswap) |
-| P2P BT | `back/internal/p2p_bt/` | Mainline DHT, BEP44/BEP51, torrent/magnet |
+| P2P BT | `back/p2p_bt/` | Mainline DHT, BEP44/BEP51, torrent/magnet |
+| Startup assembly | `back/internal/serverapp/` | Assemble router/service/transport; **also prints the "next step" guidance and the clickable `/panel` URL** (since v0.3.2) |
+| Public panel | `back/internal/panel/` | `go:embed` panel.html + peerjs.min.js, served at `/panel`; auto reverse-lookup of node id and signaling (since v0.3.2) |
 
 ## Ports
 
@@ -100,10 +106,13 @@ Collection: front → POST /anon/collections → AnonService → CollectionRepo 
 ## Quick Start
 
 ```bash
-# Backend
+# Backend (⚠️ -tags nosqlite is mandatory: three-way SQLite CGO conflict)
 cd back
-go run ./cmd/server/
-# → http://localhost:3000 , Swagger at /swagger/index.html
+go build -tags nosqlite -o peerdrive ./cmd/peerdrive/ && ./peerdrive
+# → http://localhost:3000 , panel at /panel (zero config), Swagger at /swagger/index.html
+
+# Zero-config full-chain demo (no Go/repo/Node needed):
+./peerdrive demo
 
 # Frontend
 cd front

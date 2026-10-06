@@ -3,13 +3,13 @@
 - **Code location**: `back/internal/config`
 - **One-line function**: At process startup, reads all runtime configuration from environment variables (`PEERDRIVE_*` series and `PORT`) into a read-only `*Config`, and performs "fail-fast" startup validation (`back/internal/config/config.go:1-3`, `back/internal/config/config.go:186-246`, `back/internal/config/config.go:254-282`).
 - **Dependencies**: Only Go standard library `fmt`/`os`/`runtime`/`strconv`/`strings` (`back/internal/config/config.go:5-11`), no third-party dependencies, does not read/write files, does not depend on a database.
-- **Depended upon by** (all injected via `back/cmd/server/main.go`):
-  - `back/cmd/server/main.go:52-71`: `config.Load()` + `config.Validate(cfg)` (validation failure `stdlog.Fatalf`) + volume root check/`os.Root` probing (implemented in main package, operating on config values);
+- **Depended upon by** (all injected via `back/internal/serverapp/app.go`):
+  - `back/internal/serverapp/app.go:52-71`: `config.Load()` + `config.Validate(cfg)` (validation failure `stdlog.Fatalf`) + volume root check/`os.Root` probing (implemented in main package, operating on config values);
   - `back/internal/router`: `SetupRouter(cfg)` (`back/internal/router/router.go:44`), `SetPeerJSConfig(cfg)` (`back/internal/router/peerjs_routes.go:50-52`);
   - `back/internal/transport`: `NewPeerJSService(cfg, storageDir)` (`back/internal/transport/peerjs_service.go:113`), PSK gate reads `cfg.PeerPSK` (`back/internal/transport/psk.go:54,66`), cross-node pull limit reads `cfg.MaxUploadBytes` (`back/internal/transport/pull.go:79-80`);
-  - `back/internal/service`: `AnonService{config: cfg}` (`back/internal/service/anon_service.go:25-28`), `NewNodeShare(cfg, storageDir)` (`back/cmd/server/main.go:134`), `NewNodeDirectory(storageDir, cfg.DiscoverURL)` (`back/cmd/server/main.go:120`), `FileService` upload limit/directory depth (`back/internal/service/file_service.go:309,836-841`);
+  - `back/internal/service`: `AnonService{config: cfg}` (`back/internal/service/anon_service.go:25-28`), `NewNodeShare(cfg, storageDir)` (`back/internal/serverapp/app.go:134`), `NewNodeDirectory(storageDir, cfg.DiscoverURL)` (`back/internal/serverapp/app.go:120`), `FileService` upload limit/directory depth (`back/internal/service/file_service.go:309,836-841`);
   - `back/internal/controller`: `WebRTCInfoHandler(cfg)` (`back/internal/controller/webrtc.go:12-23`);
-  - `back/internal/source`: URL source templates registered via main (`back/cmd/server/main.go:224-228`);
+  - `back/internal/source`: URL source templates registered via main (`back/internal/serverapp/app.go:224-228`);
   - Tests: `back/test/integration/*`, `back/internal/.../*_test.go` (construct cfg for components under test).
 
 ## 1. Logic
@@ -25,8 +25,8 @@
 
 1. `Load()` (`back/internal/config/config.go:186-246`): Reads environment variables field by field via `getEnv*` and fills default values, returns a fresh `*Config`.
 2. `Validate()` (`back/internal/config/config.go:254-282`): Startup validation, catching "misconfigured but won't error" configs at once; aggregates all errors and returns them in one shot (`back/internal/config/config.go:278-281`).
-3. Call flow (`back/cmd/server/main.go:52-71`): `cfg := config.Load()` → `config.Validate(cfg)` (non-nil means `stdlog.Fatalf`) → `checkUnsafeRoots(cfg)` (volume root config rejection, main package implementation, `back/cmd/server/main.go:316-333`) → `warnUnsupportedRoots(cfg)` (`os.Root` security boundary probing, `back/cmd/server/main.go:340-354`).
-4. Read-only distribution (`back/cmd/server/main.go:73-241`): `cfg.DBPath` → `repository.InitDB`; `cfg.StorageDir` → Gin context/storage; when `cfg.PeerJSEnable` is true `NewPeerJSService(cfg, storageDir)`; `router.SetPeerJSConfig(cfg)`/`SetupRouter(cfg)`; only registers URL sources when `cfg.URLSourceTemplate` is non-empty (`back/cmd/server/main.go:224-228`).
+3. Call flow (`back/internal/serverapp/app.go:52-71`): `cfg := config.Load()` → `config.Validate(cfg)` (non-nil means `stdlog.Fatalf`) → `checkUnsafeRoots(cfg)` (volume root config rejection, main package implementation, `back/internal/serverapp/app.go:316-333`) → `warnUnsupportedRoots(cfg)` (`os.Root` security boundary probing, `back/internal/serverapp/app.go:340-354`).
+4. Read-only distribution (`back/internal/serverapp/app.go:73-241`): `cfg.DBPath` → `repository.InitDB`; `cfg.StorageDir` → Gin context/storage; when `cfg.PeerJSEnable` is true `NewPeerJSService(cfg, storageDir)`; `router.SetPeerJSConfig(cfg)`/`SetupRouter(cfg)`; only registers URL sources when `cfg.URLSourceTemplate` is non-empty (`back/internal/serverapp/app.go:224-228`).
 
 **Helper reading function semantics** (`back/internal/config/config.go:284-329`): `getEnv` unset → default value; `getEnvBool` uses `strconv.ParseBool`; `getEnvInt`/`getEnvInt64` require successful parse and value `> 0`; `getEnvFloat` requires successful parse and value `>= 0`; any parse failure **silently falls back to default**.
 

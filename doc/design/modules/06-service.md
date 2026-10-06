@@ -3,7 +3,7 @@
 - **Code location**: `back/internal/service/`
 - **One-line function**: Business use case orchestration layer — combines repository (persistence), transport/source/downloader (data plane) and pathutil (persistence), only exposed to controller/router, shielding downstream details.
 - **Dependencies**: repository (`back/internal/repository/`), model (`back/internal/model/`), transport (`back/internal/transport/`), source (`back/internal/source/`), downloader (`back/internal/downloader/`), pathutil (`back/internal/pathutil/`), config, nodestate, log.
-- **Depended upon by**: `back/internal/controller/` all controllers (file/collection/share/sync/anon/p2p/node_market/node_share/peer_pull etc.), `back/cmd/server/main.go` (assembles NewNodeDirectory/NewNodeShare/NewPeerPuller/NewAnonService).
+- **Depended upon by**: `back/internal/controller/` all controllers (file/collection/share/sync/anon/p2p/node_market/node_share/peer_pull etc.), `back/internal/serverapp/app.go` (assembles NewNodeDirectory/NewNodeShare/NewPeerPuller/NewAnonService).
 
 ## 1. Logic
 

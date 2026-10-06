@@ -1,14 +1,14 @@
 # Connection 05: router ↔ source (source management injection and endpoints)
 
 - **Modules involved**: `../modules/04-router.md` and `../modules/07-source.md`
-- **Code locations**: A side `back/internal/router/source_routes.go`, `back/internal/router/router.go`; B side `back/internal/source/manager.go`, `back/internal/source/source.go`; assembly point `back/cmd/server/main.go:217-232`
+- **Code locations**: A side `back/internal/router/source_routes.go`, `back/internal/router/router.go`; B side `back/internal/source/manager.go`, `back/internal/source/source.go`; assembly point `back/internal/serverapp/app.go:217-232`
 - **Direction**: bidirectional — A→B is **package-level injection + HTTP endpoint calls** (management plane); B→A runtime data plane goes through `transport.FileRouter` interface **backwards** into router's registered route tree (transport depends on the interface implemented by source, doesn't import source package in reverse)
 
 ## 1. Connection Method
 
 **Channel type: in-process function call** (no independent network channel). Three-layer wiring:
 
-1. **Assembly injection** (`back/cmd/server/main.go:217-232`, before `SetupRouter`):
+1. **Assembly injection** (`back/internal/serverapp/app.go:217-232`, before `SetupRouter`):
    - `mgr := source.New()`
    - `mgr.Register(source.NewLocalSource(storageDir, peerjsSvc.FileIndex()))`
    - `mgr.Register(source.NewPeerSource(peerjsSvc))`
@@ -115,4 +115,4 @@ Key points (`back/internal/source/manager.go:9-14`, `:145-160`, `:289-309`):
 - [07-source.md](../modules/07-source.md) —— Source interface, four implementations, Manager routing algorithm
 - [02-router-controller.md](02-router-controller.md) —— HTTP dispatch and `authRequired` semantics
 - [11-transport-storage.md](11-transport-storage.md) —— `PeerSource` disk write via `FileIndex` and streaming read
-- [06-service-transport.md](06-service-transport.md) —— Origin of `transport.FileRouter` interface decoupling (avoiding import cycles, assembly in cmd/server/main)
+- [06-service-transport.md](06-service-transport.md) —— Origin of `transport.FileRouter` interface decoupling (avoiding import cycles, assembly in internal/serverapp)

@@ -82,7 +82,7 @@ Configuration is done via environment variables:
 
 ## 7. Architecture Layers
 ```
-cmd/server/main.go     — Entry point
+internal/serverapp/app.go     — Entry point
 internal/router/        — Route registration
 internal/controller/    — HTTP request/response handling
 internal/service/       — Business logic layer

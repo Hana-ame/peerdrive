@@ -2,6 +2,14 @@
 
 > For people who "want to get this project running and use it," progresses chapter by chapter; each chapter can be independently completed and self-verified.
 > **Main-line chapters require no compilation** — just download the released binary.
+> For the zero-configuration Chinese version (recommended for first contact), see [`doc/guide/single-binary-guide.md`](../guide/single-binary-guide.md);
+> if you just want to "see it work first," run `./peerdrive demo` — no configuration, no compilation needed.
+>
+> **Since v0.3.2 you don't have to fill in the node ID yourself**: `peerdrive serve` directly prints a clickable
+> panel URL, and the panel reverse-looks-up its own node and signaling automatically.
+> Steps involving "copy the node ID from the log and paste it into the panel" in the following chapters
+> **only apply to versions before v0.3.2, or when connecting to someone else's node** (in which case
+> you genuinely need that other party's ID, since it can't be guessed).
 > Detailed design and pitfall records are not here — consult `doc/NETDISK.md` · `doc/REFACTOR.md` · `doc/NODE.md` when needed.
 
 ## Main Line

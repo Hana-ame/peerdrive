@@ -1,9 +1,9 @@
 # Module 03: storage Content-Addressed File Storage
 
-- **Code location**: `back/internal/pathutil` (path security boundaries); persistence layout and read/write logic distributed across `back/internal/service/file_service.go`, `back/internal/repository/anon_repo.go`, `back/internal/source/local.go`, `back/internal/transport/inbound.go`, `back/internal/downloader/universal_downloader.go`, `back/internal/controller/{file,download,p2p}.go`, `back/cmd/server/main.go`; actual data stored in repository `back/storage/` (the directory pointed to by runtime `PEERDRIVE_STORAGE`).
+- **Code location**: `back/internal/pathutil` (path security boundaries); persistence layout and read/write logic distributed across `back/internal/service/file_service.go`, `back/internal/repository/anon_repo.go`, `back/internal/source/local.go`, `back/internal/transport/inbound.go`, `back/internal/downloader/universal_downloader.go`, `back/internal/controller/{file,download,p2p}.go`, `back/internal/serverapp/app.go`; actual data stored in repository `back/storage/` (the directory pointed to by runtime `PEERDRIVE_STORAGE`).
 - **One-line function**: Persists files and anonymous collections to local disk in a content-addressed manner (`storage/<sha256 first two chars>/<sha256>`), and uses pathutil's os.Root security boundary to ensure no path, symlink, or hardlink can escape the allowed root directory.
 - **Dependencies**: `path/filepath`, `os` (`os.Root`, Go 1.24), `crypto/sha256`, SQLite (`back/internal/repository`'s `file_meta` / `file_providers` / `file_index` tables as metadata sidecar), `back/pkg/hashutil`, `back/internal/config`, `back/internal/log`.
-- **Depended upon by**: `controller` (HTTP upload/download/register), `transport` (WebRTC `req`/`create`/`upload` frames), `source` (`LocalSource`), `downloader` (`LocalFetcher`/`cacheToLocal`), `service` (`FileService`/`AnonService`/`PeerPuller`/`SyncService`/`NodeDirectory`/`NodeShare`), `cmd/server` (startup assembly).
+- **Depended upon by**: `controller` (HTTP upload/download/register), `transport` (WebRTC `req`/`create`/`upload` frames), `source` (`LocalSource`), `downloader` (`LocalFetcher`/`cacheToLocal`), `service` (`FileService`/`AnonService`/`PeerPuller`/`SyncService`/`NodeDirectory`/`NodeShare`), `internal/serverapp` (startup assembly).
 
 ## 1. Logic
 

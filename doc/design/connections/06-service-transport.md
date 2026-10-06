@@ -1,12 +1,12 @@
 # Connection 06: service ↔ transport
 
 - **Modules involved**: `service` (`NodeShare` / `NodeDirectory` / `PeerPuller`) ↔ `transport` (`PeerJSService` / `FileIndexService` / `HTTPDiscovery`)
-- **Code locations**: `back/internal/service/` (`nodeshare.go` / `node_directory.go` / `peerpull.go`) ↔ `back/internal/transport/` (`share.go` / `outbound.go` / `inbound.go` / `file_index.go` / `psk.go` / `pull.go` / `conn.go`); assembly concentrated in `back/cmd/server/main.go:94-182`
+- **Code locations**: `back/internal/service/` (`nodeshare.go` / `node_directory.go` / `peerpull.go`) ↔ `back/internal/transport/` (`share.go` / `outbound.go` / `inbound.go` / `file_index.go` / `psk.go` / `pull.go` / `conn.go`); assembly concentrated in `back/internal/serverapp/app.go:94-182`
 - **Direction**: bidirectional — service consumes transport's transfer capabilities (pull files, send share frames); transport calls back to service through injected callbacks (answer share frames, gate req frames, provide announce summaries, register readable roots)
 
 ## 1. Connection Method
 
-The two layers are **dependency-injection coupling between two modules in the same process**, with no shared database, no RPC, only three interfaces + six callbacks "welded" together in `main.go`. Assembly order: `transport.NewPeerJSService` → `peerjsSvc.Start()` → `SetShareProvider` / `SetShareGate` / `SetShareSummary` → `SetSource(peerjsSvc)` / `SetFileAccess` / `SetFileRouter` (`back/cmd/server/main.go:94-182`).
+The two layers are **dependency-injection coupling between two modules in the same process**, with no shared database, no RPC, only three interfaces + six callbacks "welded" together in `main.go`. Assembly order: `transport.NewPeerJSService` → `peerjsSvc.Start()` → `SetShareProvider` / `SetShareGate` / `SetShareSummary` → `SetSource(peerjsSvc)` / `SetFileAccess` / `SetFileRouter` (`back/internal/serverapp/app.go:94-182`).
 
 ### 1.1 Control Plane / Data Plane Division
 
@@ -16,7 +16,7 @@ The two layers are **dependency-injection coupling between two modules in the sa
 
 ### 1.2 Assembly Order and "Late Injection"
 
-`main.go`'s assembly order deliberately puts `Start()` before `SetXxx` (`back/cmd/server/main.go:110` before `back/cmd/server/main.go:156`):
+`main.go`'s assembly order deliberately puts `Start()` before `SetXxx` (`back/internal/serverapp/app.go:110` before `back/internal/serverapp/app.go:156`):
 
 ```
 L97   peerjsSvc = NewPeerJSService(cfg, storageDir)
@@ -37,12 +37,12 @@ Why Start can be before injection: `shareProvider`/`shareGate` are protected by 
 
 | # | Direction | Injection point | Actual argument | Location |
 |---|---|---|---|---|
-| 1 | service → transport | `PeerJSService.SetShareProvider(func(peerID) ShareSnapshot)` | `NodeShare.SnapshotFor` | `back/cmd/server/main.go:156` |
-| 2 | service → transport | `PeerJSService.SetShareGate(ShareGate)` | `NodeShare` (implements `AllowsDownload`) | `back/cmd/server/main.go:158` |
-| 3 | service → transport | `NodeDirectory.SetShareSummary(func() NodeShares)` | `NodeShare.Summary` | `back/cmd/server/main.go:159` |
-| 4 | service → transport | `PeerJSService.SetExtraPeers(func() []string)` | `NodeDirectory.JoinedPeerIDs` | `back/cmd/server/main.go:124` |
-| 5 | service → transport | `FileIndexService.AddReadRoot(dir)` | Triggered by `NodeShare.SetDirHook` callback (runtime new shared directories) | `back/cmd/server/main.go:138-142` |
-| 6 | transport → service | `PeerPuller.SetSource(PullSource)` + `SetFileAccess(isLocal, register)` | `PeerJSService.OpenStream` + `FileIndexService.Info`/`Create` | `back/cmd/server/main.go:168-181` |
+| 1 | service → transport | `PeerJSService.SetShareProvider(func(peerID) ShareSnapshot)` | `NodeShare.SnapshotFor` | `back/internal/serverapp/app.go:156` |
+| 2 | service → transport | `PeerJSService.SetShareGate(ShareGate)` | `NodeShare` (implements `AllowsDownload`) | `back/internal/serverapp/app.go:158` |
+| 3 | service → transport | `NodeDirectory.SetShareSummary(func() NodeShares)` | `NodeShare.Summary` | `back/internal/serverapp/app.go:159` |
+| 4 | service → transport | `PeerJSService.SetExtraPeers(func() []string)` | `NodeDirectory.JoinedPeerIDs` | `back/internal/serverapp/app.go:124` |
+| 5 | service → transport | `FileIndexService.AddReadRoot(dir)` | Triggered by `NodeShare.SetDirHook` callback (runtime new shared directories) | `back/internal/serverapp/app.go:138-142` |
+| 6 | transport → service | `PeerPuller.SetSource(PullSource)` + `SetFileAccess(isLocal, register)` | `PeerJSService.OpenStream` + `FileIndexService.Info`/`Create` | `back/internal/serverapp/app.go:168-181` |
 
 (Additionally, `NodeDirectory.SetSelfID` / `SetConnected` / `SetDial` three assemblies, which are "market state → transport layer" information synchronization, not cross-plane callbacks.)
 
@@ -64,7 +64,7 @@ Why Start can be before injection: `shareProvider`/`shareGate` are protected by 
 - **Write boundary** = only `rootDir` (`uploadDir`, H2 safety boundary) — peers using `create` can only register files here.
 - **Read boundary** = `rootDir + readRoots` (`readRoots` appended via `AddReadRoot`) — `PEERDRIVE_SHARE_DIRS` and shared directories added by `NodeShare.SetDirHook` all go here.
 
-Without `AddReadRoot`, you'd get "manifest lists them, peer pulls but read failed" — registration side allows it, read side judges it unauthorized (`back/cmd/server/main.go:99-104` comment). Reading uses `pathutil.SafeOpenAny` (`back/internal/transport/file_index.go:124-131`), delegating path resolution to the kernel to avoid TOCTOU window of "validate then open".
+Without `AddReadRoot`, you'd get "manifest lists them, peer pulls but read failed" — registration side allows it, read side judges it unauthorized (`back/internal/serverapp/app.go:99-104` comment). Reading uses `pathutil.SafeOpenAny` (`back/internal/transport/file_index.go:124-131`), delegating path resolution to the kernel to avoid TOCTOU window of "validate then open".
 
 ## 2. Timing
 
@@ -224,7 +224,7 @@ sequenceDiagram
 
 - **Trace loop prevention**: `dcReq.Trace []string` (`back/internal/transport/conn.go:55`); `serveFile` appends `s.ID()` to `fwdTrace` (`inbound.go:78-86`); outbound `PeerSource` reads `TraceKey` from ctx and appends to `dcReq.Trace`. Any trace containing self → `"loop detected"`. This is the key to discovering A↔B mutual forwarding.
 - **Level cache semantics**: `levelMapLocked` merges Files (hash direct record) → Dirs (path prefix inheritance) → Collections (hash inheritance); restricted collections (visibility not public) automatically downgraded to private (`back/internal/service/nodeshare.go:636-645`). Multiple sources hitting same hash take the **most permissive** (`model.LoosestLevel`) — this is the correct semantics of "I checked public but got directory-hit as private, result can still download".
-- **`file_index` index limit exceeded**: `share.SetFileLister` limit 1000 (`back/cmd/server/main.go:148-150`); checked files rely on `SetFileInfoReader` hash-based fallback (`back/cmd/server/main.go:151-153`), otherwise "I checked but it didn't take effect".
+- **`file_index` index limit exceeded**: `share.SetFileLister` limit 1000 (`back/internal/serverapp/app.go:148-150`); checked files rely on `SetFileInfoReader` hash-based fallback (`back/internal/serverapp/app.go:151-153`), otherwise "I checked but it didn't take effect".
 - **`FileIndexService.Close` must be called by tests** (`back/internal/transport/file_index.go:174-191`): unclosed handles on Windows would prevent `t.TempDir()` cleanup; same leak on Linux but invisible (only discovered on real Windows machine 2026-09-20).
 
 ## 4. Related Documents
@@ -248,7 +248,7 @@ sequenceDiagram
   - `back/internal/transport/share.go:68-104` —— `SetShareProvider` / `ShareGate` interface definitions and `shareMu` protection
   - `back/internal/service/nodeshare.go:553-610` —— `SnapshotFor(peerID)` friend filtering, `AllowsDownload` private gate
   - `back/internal/service/peerpull.go:88-90` + `back/internal/transport/outbound.go:120-122` —— `PullSource.OpenStream` interface and transport implementation (only data plane exit)
-  - `back/cmd/server/main.go:110-182` —— assembly order: Start() before all Set injections, `shareLoadInfo` re-reads provider each time ensuring late injection takes effect
+  - `back/internal/serverapp/app.go:110-182` —— assembly order: Start() before all Set injections, `shareLoadInfo` re-reads provider each time ensuring late injection takes effect
 - **Unverified items**:
   - `NodeShare.persistLocked` (`nodeshare.go:435`) whether it explicitly clears `s.levels` / `s.levelsAt` not directly read; this document infers "change immediately invalidates" from `save` comments and `Update` comments.
   - `back/internal/transport/conn.go:250-477` (message pump, `cleanupConn`, `OnClose` cleanup path) not read; disconnect/half-open state cleanup details based on `peerjs_service.go` and `outbound.go` comments.

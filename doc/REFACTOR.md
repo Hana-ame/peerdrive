@@ -161,7 +161,7 @@ internal/source/
 
 - **Routing semantics**: local hit returns immediately, miss degrades to peer, URL source last fallback; large files only go through
   CapStream (OpenRange rejects CapFile sources — prevents 8GB full buffer OOM), OpenAny can degrade to full
-- **Assembly** (cmd/server/main.go): local → peer → url(optional, `PEERDRIVE_URL_SOURCE_TEMPLATE`)
+- **Assembly** (internal/serverapp/app.go): local → peer → url(optional, `PEERDRIVE_URL_SOURCE_TEMPLATE`)
 - **Management plane**: `GET /sources` (status+stats), `POST /sources/:name/priority` (runtime adjustment)
 - **Boundary**: serveFile keeps local semantics without connecting to manager (avoids inbound→outbound passthrough regression loop);
   /peerjs/fetch still calls FetchFromPeer directly (keeps semantics, not switched to Manager)
@@ -252,7 +252,7 @@ also has no package.json, cannot be used as git dependency as a whole.
 - **Browser E2E (10/10, 2026-08-18 completed)**: playwright local Firefox headless
   (`~/.claude/skills/playwright-test/` deprecated CDP 9222, switched to local firefox; needs
   `playwright-core/cli.js install firefox` via proxy to supplement install), demo page uses node native static
-  server (`scripts/static-serve.mjs`, vite dev will transform IIFE breaking `PeerMedia`
+  server (`scripts/static-serve.mjs` ⚠️该脚本已不存在, vite dev will transform IIFE breaking `PeerMedia`
   global + stale cache). Five pitfalls in a row (all fixed in core.js):
   1. **peerjs dual build default export semantics differ**: `main`(cjs) default=module.exports
      (contains Peer), `module`(esm) default=internal util object (no Peer) → three-way fallback
@@ -293,7 +293,7 @@ also has no package.json, cannot be used as git dependency as a whole.
 |---|---|---|---|
 | 1 | Frontend large file download full memory assembly (OOM risk) | `front/src/ws.js` `downloadStream` (ReadableStream enqueue as received) + `downloadToFile` (File System Access API streaming to disk, fallback Blob) + `stat`; `api.js` getBlobUrl 200MB threshold (`err.code='TOO_LARGE'`) | ws.test.js +4; frontend 36/36 |
 | 2 | uploadWorker single worker serial blocking (8GB upload blocks forwarding tunnel) | `inbound.go` `fwdWorker` split out (shares binDone exit with uploadWorker), conn.go bindConn dual workers | transport `TestFwd/TestUpload -race` |
-| 3 | serveFile not connected to multi-source routing (§3.8 Source system reserved but not wired) + origin loop prevention | `inbound.go` `FileRouter` interface (OpenRange/InfoSize) + `serveFile` routing branch (meta.total from InfoSize, miss returns err not found, nil falls back to local semantics); `dcReq.Trace` node chain loop prevention (omitempty compatible with old peers); `outbound.go` `OpenStreamFrom` propagation point; `peerjs_service.go` `SetFileRouter`; `source/manager.go` `InfoSize` adapter; `cmd/server/main.go` assembly | servefile_router_test.go (loop/router/fallback/trace 4 tests) |
+| 3 | serveFile not connected to multi-source routing (§3.8 Source system reserved but not wired) + origin loop prevention | `inbound.go` `FileRouter` interface (OpenRange/InfoSize) + `serveFile` routing branch (meta.total from InfoSize, miss returns err not found, nil falls back to local semantics); `dcReq.Trace` node chain loop prevention (omitempty compatible with old peers); `outbound.go` `OpenStreamFrom` propagation point; `peerjs_service.go` `SetFileRouter`; `source/manager.go` `InfoSize` adapter; `internal/serverapp/app.go` assembly | servefile_router_test.go (loop/router/fallback/trace 4 tests) |
 | 4 | core.js disconnect perception slow (timeout tens of seconds without STUN) | `packages/peerdrive-media/src/core.js` keepalive (`KEEPALIVE_INTERVAL=5000`/`KEEPALIVE_TIMEOUT=15000`, timeout tears down and rebuilds; Node side serveConnection symmetric) | core.test.mjs +2; npm test 20/20 |
 | 5 | core.js queued abort doesn't settle immediately | core.js `request()` queued branch adds abort listener, abort dequeues reject (AbortError), removes listener to prevent leak | core.test.mjs +1 |
 | 6 | Integration tests depend on real public signaling (needs external network+proxy, parallel interference) | TestMain starts global self-hosted signalserver (httptest), newService all point to it; MQTT public broker tests `PEERDRIVE_MQTT_TEST=1` gated; also fixed go-peerjs `Connection` callback registration data race (handlerMu, independent library synced) | Integration tests 13.7s external-network-free all green |
@@ -600,7 +600,7 @@ only public level shows "Save and Broadcast" button (goes through BT DHT announc
 
 | Layer | File | Change |
 |---|---|---|
-| model | `back/internal/model/anon.go` | `Visibility`/`AccessList`/`Owner` fields + `IsValidVisibility`/`EffectiveVisibility`/`CanView`; `AnonCollectionSummary` backfills visibility/owner |
+| model | `back/internal/controller/anon.go` | `Visibility`/`AccessList`/`Owner` fields + `IsValidVisibility`/`EffectiveVisibility`/`CanView`; `AnonCollectionSummary` backfills visibility/owner |
 | service | `back/internal/service/anon_service.go` | `CreateCollectionWithVisibility` (restricted no list directly 400), `GetCollectionVisibleTo` (privilege escalation→404), `UpdateCollectionVisibility` (Owner validation + new hash), `saveCollectionJSON` |
 | controller | `back/internal/controller/anon.go` | Create/detail/download/level switch connect visibility; `PUT /anon/collections/:hash/visibility` (mounted with authRequired) |
 | controller | `back/internal/controller/p2p.go` | `AuthStatus` adds `operator` |
@@ -622,7 +622,7 @@ mixes `+08:00` with `Z`).
 `gofmt -l` no output on changed files. New tests
 `back/internal/service/anon_visibility_test.go` (CanView all levels + unauthenticated reject,
 restricted no list error, level switch produces new hash and old hash snapshot unchanged, Owner privilege escalation reject,
-privilege escalation manifests as not found) and `front/tests/VisibilityPicker.test.jsx`.
+privilege escalation manifests as not found) and `front/tests/VisibilityPicker.test.jsx` ⚠️(该测试文件已不存在).
 
 **Known limitations**: P2P sync path (remote peer pulling collections) doesn't yet carry requester identity, so remote
 uniformly treats as `requester=""` — restricted/private collections currently only readable on this node, cross-node sharing

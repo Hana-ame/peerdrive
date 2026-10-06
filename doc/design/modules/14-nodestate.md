@@ -40,7 +40,7 @@ Every function except `Configure` independently acquires `mu.Lock()` for protect
 1. **Read Flow (currently the only truly triggered flow)**: HTTP request arrives at controller's anonymous collection endpoint → handler calls `nodestate.GetOperator()` to get this node's operator → passed as `owner`/`requester` into `service.AnonService` (`back/internal/controller/anon.go:51,97,141,163,239,317`) → service writes the value into the anonymous collection JSON's `Owner` field for persistence (`back/internal/service/anon_service.go:131,140-160`). Also returned to the frontend via `GET /p2p/auth/status` (p2p.go:895).
 2. **Report Flow (exists by design, currently no callers)**: After `ReportStats` guards pass, it POSTs `peerID` and upload/download byte counts to `regURL + "/auth/node/stats"`, with `Authorization: Bearer <authToken>` header (nodestate.go:78-81).
 
-**Lifecycle**: Process-level. Package-level variables exist from process startup (zero-value empty strings), no init function, no `Close`/`Stop` hooks; all state disappears on process exit. The startup/graceful shutdown flow in `cmd/server/main.go` (main.go:49-285) does not touch this package at all.
+**Lifecycle**: Process-level. Package-level variables exist from process startup (zero-value empty strings), no init function, no `Close`/`Stop` hooks; all state disappears on process exit. The startup/graceful shutdown flow in `internal/serverapp/app.go` (main.go:49-285) does not touch this package at all.
 
 > Note: The module map defines it as "operator/reg/peerID process-shared state (independent package to break circular imports)" (doc/design/how-to-connect.md:28, doc/design/README.md:29); the architecture review document concludes "nodestate package exists solely to resolve circular references" (doc/archive/report/ARCHITECTURE-REVIEW.md:34-35).
 
@@ -52,7 +52,7 @@ Every function except `Configure` independently acquires `mu.Lock()` for protect
 
 **In-Memory Composition**: 4 `string` values (`operator`, `regURL`, `authToken`, `peerID`) + 1 `sync.Mutex`; no struct instances, no map/slice. Initial values are all Go zero-value empty strings.
 
-**Lifecycle**: Exists from process startup → cleared on process exit, no intermediate persistence. **After process restart, all four fields return to `""`**, with no recovery mechanism (no code path found that reloads from disk/DB; `cmd/server/main.go` full flow does not touch this package).
+**Lifecycle**: Exists from process startup → cleared on process exit, no intermediate persistence. **After process restart, all four fields return to `""`**, with no recovery mechanism (no code path found that reloads from disk/DB; `internal/serverapp/app.go` full flow does not touch this package).
 
 **Delegation Relationship (values flow downstream and are persisted by downstream, but this package does not persist itself)**: Values read by `GetOperator()` are passed by controller as `owner`/`requester` to `service.AnonService`, and ultimately **written by the service layer** into content-addressed anonymous collection JSON and registered in the database (`back/internal/service/anon_service.go:128-160`: `coll.Owner = owner` participates in `json.MarshalIndent` → `sha256Hex` → write to `storage/<hash[:2]>/<hash>` → `repository.InsertFileMeta` + `InsertFileProvider`). In other words: nodestate provides an in-process "staging slot"; persistence occurs in the downstream service/repository/storage chain (see §6 connections 03/04).
 
@@ -99,7 +99,7 @@ No scheduled tasks, no event callbacks, no graceful shutdown hooks touch this pa
 | `authToken` | `string`, initial `""` | `Configure`(31) | `ReportStats`(60,80) | Returns directly when empty (64-66); used as `Authorization: Bearer <token>` header (80) |
 | `peerID` | `string`, initial `""` | `Configure`(32) | `GetPeerID`(50), `ReportStats`(61,72) | Returns directly when empty (64-66); `peer_id` field in report JSON (72) |
 
-**Content delegated to downstream for persistence (not belonging to this package's fields, but values originate from this package, for traceability)**: `AnonCollection.Owner` — written to the anonymous collection JSON tail (`back/internal/service/anon_service.go:131`), participates in content-addressed digest hash calculation (138); constraints: `private` visible only to Owner, `restricted` allows Owner+AccessList (`back/internal/model/anon.go:139-163`); unauthorized access returns 404 uniformly (anon_service.go:212-216); hash is 64-character lowercase hexadecimal sha256 (anon_service.go:36-40,138), files stored in `storage/<hash[:2]>/<hash>`, 0644 (anon_service.go:140-149).
+**Content delegated to downstream for persistence (not belonging to this package's fields, but values originate from this package, for traceability)**: `AnonCollection.Owner` — written to the anonymous collection JSON tail (`back/internal/service/anon_service.go:131`), participates in content-addressed digest hash calculation (138); constraints: `private` visible only to Owner, `restricted` allows Owner+AccessList (`back/internal/controller/anon.go:139-163`); unauthorized access returns 404 uniformly (anon_service.go:212-216); hash is 64-character lowercase hexadecimal sha256 (anon_service.go:36-40,138), files stored in `storage/<hash[:2]>/<hash>`, 0644 (anon_service.go:140-149).
 
 ---
 

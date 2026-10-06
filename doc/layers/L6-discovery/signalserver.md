@@ -1,7 +1,7 @@
 # signalserver —— the self-hosted signaling server
 
 > One-line responsibility: a PeerJS signaling server compatible with a subset of the peerjs-server protocol + a built-in room discovery
-> API (`back/internal/signalserver/`, standalone binary `cmd/peerserver`) —— replacing public cloud
+> API (`back/signalserver/`, **standalone go.mod**; the entry point is now `peerdrive signal`) —— replacing public cloud
 > signaling (0.peerjs.com) and the public MQTT broker; discovery only exchanges peerIds and does not carry business data.
 
 - Layer belonging: AOP ⑥ discovery aspect (`doc/LAYERS.md` §1)
@@ -27,7 +27,9 @@
 
 ```bash
 # Start a server locally (unit/integration tests hang the handler straight off httptest and do not need it)
-cd back && go run ./cmd/peerserver/ -addr :9000 -key peerjs
+# Since v0.3.0 the main binary has a `signal` subcommand, so no separate build is needed:
+cd back && go run -tags nosqlite ./cmd/peerdrive/ signal -addr :9000 -key peerjs
+# (the standalone entry point is `back/signalserver/cmd/peersignal` — note the name is peersignal, not peerserver)
 
 # Verify the signaling handshake (from the node's perspective; pointing host/port/key at self-hosted is a zero-change switch)
 # Discovery API smoke:
@@ -36,7 +38,7 @@ curl "localhost:9000/discover/nodes?coll=<64hex>"   # → {"nodes":[{peerId,last
 curl localhost:9000/peerjs/id                        # → a random id (peerjs API compatible)
 ```
 
-The deployment form is a **standalone process** (systemd), with no dependency on the main service (cmd/server) —— a crashed signaling
+The deployment form is a **standalone process** (systemd), with no dependency on the main service (cmd/peerdrive signal is a separate subcommand) —— a crashed signaling
 server does not affect already-established WebRTC DataChannel direct connections (only new connections and discovery are affected).
 
 ## Module inventory (each file: filename + one-line responsibility + key exports)
@@ -61,7 +63,7 @@ writes), `queuedMsg{msg, expire}` (enqueued with an expiry), `route` (forward wh
 LEAVE/EXPIRE are not enqueued), `flushQueue` (replay on coming online + expiry cleanup), `removeClient`
 (LEAVE broadcast + discovery record cleanup, **sending outside the lock**).
 
-### `main.go` (`cmd/peerserver/`) —— the standalone binary assembly
+### Entry point —— the `signal` subcommand of the main binary
 
 | Key exports | Description |
 |---|---|
@@ -107,7 +109,7 @@ expired nodes. A node with a 30s heartbeat does not disappear from the discovery
 ## Relationships with other modules
 
 ```
-cmd/peerserver ──► signalserver (the only entry point, deployed as a standalone binary)
+cmd/peerdrive (signal subcommand) ──► signalserver
 transport/http_discovery.go ──► /discover/announce + /discover/nodes (the discovery client)
 transport/peerjs_service.go ──► the peerjs client (PEERDRIVE_PEERJS_HOST/PORT/KEY point
                                  at this server, with zero protocol changes)
@@ -164,7 +166,7 @@ peersignal.moonchan.xyz ──CF orange-cloud A record──▶ 117.55.237.217 (
   curl/tests connect directly without a proxy; public services like 0.peerjs.com must go through the proxy. The two are distinguished
   by target domain (the "production deployment" section of the project AGENTS.md).
 - Deployment update: `GOOS=linux CGO_ENABLED=0 go build -tags nosqlite -o /tmp/peerserver
-  ./cmd/peerserver/` → upload writing to `.new` → `systemctl restart peerserver` (avoiding
+  ./peerdrive signal` → upload writing to `.new` → `systemctl restart peerserver` (avoiding
   Text file busy).
 - Live verification: `PEERDRIVE_LIVE_TEST=1 go test -tags "nosqlite integration"
   ./test/integration/ -run TestLive -v` (run without a proxy).
@@ -182,7 +184,7 @@ peersignal.moonchan.xyz ──CF orange-cloud A record──▶ 117.55.237.217 (
 
 ## Tests (6 unit tests, the L6 section of `scripts/test-layers.sh`)
 
-> Command: `go test -tags nosqlite ./internal/signalserver/...`
+> Command: `cd back/signalserver && go test ./...`  (independent go.mod, **do not append `-tags nosqlite`**)
 
 ### `signalserver_test.go` (unit tests, all in-memory httptest + gorilla client)
 
@@ -212,8 +214,8 @@ peersignal.moonchan.xyz ──CF orange-cloud A record──▶ 117.55.237.217 (
 
 | File | Responsibility |
 |---|---|
-| `back/internal/signalserver/signalserver.go` | The signaling + discovery core (about 344 lines) |
-| `back/internal/signalserver/signalserver_test.go` | Unit tests (6, with background-of-discovery annotations) |
-| `back/cmd/peerserver/main.go` | The standalone binary assembly (flags + 4 routes) |
+| `back/signalserver/signalserver.go` | The signaling + discovery core (independent go.mod) |
+| `back/signalserver/signalserver_test.go` | Unit tests (with background-of-discovery annotations) |
+| `back/signalserver/cmd/peersignal/main.go` | Standalone entry (**note the name `peersignal`, not `peerserver`**) |
 | `back/test/integration/selfhosted_test.go` | The self-hosted full-chain integration tests |
 | `back/test/integration/live_test.go` | Production deployment verification (TestLiveSignal_*) |

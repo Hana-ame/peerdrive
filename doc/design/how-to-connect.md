@@ -97,7 +97,7 @@
 
 ## 4. Startup Sequence (server-side wiring order)
 
-Derived from `back/cmd/server/main.go` (`InitDB → PeerJSService.Start → register sources → SetupRouter`):
+Derived from `back/internal/serverapp/app.go` (`InitDB → PeerJSService.Start → register sources → SetupRouter`):
 
 ```text
 main()

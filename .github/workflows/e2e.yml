@@ -103,6 +103,66 @@ jobs:
           npm i playwright --no-audit --no-fund
           npx playwright install --with-deps chromium
 
+      - name: 零配置面板自检（v0.3.2：零参数打开 /panel）
+        # 这条断言的是 v0.3.2 的头号承诺：**面板自己认出所在节点并连上**，
+        # 用户不用手填 node/host/port/key。所以这里刻意**不带任何参数**。
+        #
+        # 断言方式不是匹配「已连接 / 在线」这类正文——面板界面上
+        # 「在线节点」「连接节点」这些**标签文字本身就含这些字**，
+        # 早先的用例因此永远绿（第四个「永远绿的测试」）。
+        # 现在断言的是：搜出来的节点 id **等于** 本节点的 id。标签文字匹配不上它。
+        #
+        # 需要一个**自己的、不带 PSK 的**节点：上面的链路脚本第 [6] 步把 node-a
+        # 重启成了带 PSK 的节点，而 PSK 门禁的时序问题正是本 workflow 里
+        # 那条 known-flaky 的内容（见下一个 step 的注释）。这两条互不干扰：
+        # 本 step 用独立的普通节点，known-flaky 仍原样保留，未做任何放宽。
+        working-directory: /tmp/pw
+        env:
+          PANEL_URL: http://127.0.0.1:3000/panel
+          PW_CHANNEL: chromium
+          TIMEOUT: 60000
+        run: |
+          set -o pipefail
+          # 自己编一份，不复用链路脚本那份：那个位于 $DEMO_DIR/bin/server，
+          # 而 DEMO_DIR 是脚本内部的临时路径，这里拿不到也不该依赖它。
+          ( cd "$GITHUB_WORKSPACE/back" && \
+            go build -tags nosqlite -o /tmp/pdzero/peerdrive ./cmd/peerdrive/ )
+          mkdir -p /tmp/pdzero/run
+          cd /tmp/pdzero/run
+          env PORT=3000 \
+            PEERDRIVE_PEERJS_ID=node-zero \
+            PEERDRIVE_STORAGE=/tmp/pdzero/root \
+            PEERDRIVE_DOWNLOAD_DIR=/tmp/pdzero/root/downloads \
+            PEERDRIVE_PEERJS_ENABLE=true \
+            PEERDRIVE_PEERJS_HOST=127.0.0.1 \
+            PEERDRIVE_PEERJS_PORT=9100 \
+            PEERDRIVE_PEERJS_KEY=peerjs \
+            PEERDRIVE_PEERJS_SECURE=false \
+            PEERDRIVE_DISCOVER_URL=http://127.0.0.1:9100 \
+            PEERDRIVE_BT_DHT_ENABLE=false \
+            PEERDRIVE_IPFS_GATEWAY_ENABLE=false \
+            PEERDRIVE_SWAGGER=off \
+            /tmp/pdzero/peerdrive > /tmp/pdzero/node.log 2>&1 &
+          echo $! > /tmp/pdzero/node.pid
+          # 先确认**监听者就是自己刚起的那个**：曾经有一次旧二进制占着端口，
+          # 验证脚本打的是它，结论整个反过来。
+          for i in $(seq 1 60); do
+            curl -sf -m 2 http://127.0.0.1:3000/ping >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -sf -m 5 http://127.0.0.1:3000/ping | grep -q pong \
+            || { echo "::error::零配置面板用的节点没起来"; tail -30 /tmp/pdzero/node.log; exit 1; }
+          node "$GITHUB_WORKSPACE/packages/peerdrive-client/scripts/verify-panel-zero-config.mjs" 2>&1 |
+            tee /tmp/panel-zero.log
+
+      - name: 上传零配置面板自检日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: panel-zero-config-log
+          path: /tmp/panel-zero.log
+          if-no-files-found: warn
+
       - name: 面板端到端（真实浏览器点一遍）
         # 在同一个 runner 上复用上面那套环境：file:// 页面 + ws://127.0.0.1:9100
         # （混合内容规则只拦 HTTPS 页面，file:// 不受限，所以 ws 就够）

@@ -4,10 +4,10 @@
 - API-DESIGN.md — IPFS HTTP API design
 
 ## Architecture
-- **IPFSService** (`back/internal/service/ipfs_service.go`) — boxo Bitswap client/server, reuses libp2p host + DHT
+- **IPFSService** (`back/internal/provider/ipfs.go` + `back/internal/source/ipfs_control.go`) — boxo Bitswap client/server, reuses libp2p host + DHT
 - **peerdriveBlockstore** — Implements boxo Blockstore interface, CID directly maps to SHA-256 content-addressed storage, zero file duplication
 - **IPFSProvider** (`back/internal/provider/ipfs.go`) — Bitswap-first retrieval, HTTP gateway racing fallback
-- **IPFSCompatLayer** (`back/internal/service/ipfs_compat.go`) — Compatibility layer, Bitswap handled by boxo
+- **IPFSCompatLayer** (`back/internal/provider/ipfs.go`（兼容层已并入）) — Compatibility layer, Bitswap handled by boxo
 - **hashutil** (`back/pkg/hashutil/hashutil.go`) — SHA256 ↔ CID bidirectional conversion
 
 ## File Storage

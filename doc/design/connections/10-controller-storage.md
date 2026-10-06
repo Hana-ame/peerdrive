@@ -12,7 +12,7 @@
 
 All blob writes follow fixed CAS layout: `<storageDir>/<hash[:2]>/<hash>` (`back/internal/service/file_service.go:469,566,796`).
 
-- `storageDir` from `config.StorageDir` (`back/internal/config/config.go:29,191`), default `./storage`, overridden by `PEERDRIVE_STORAGE` (`back/cmd/server/main.go:58`); when `PEERDRIVE_STORAGE_ENABLE=false` all write paths return `ErrStorageDisabled` (`file_service.go:526-530`; definition `:28`).
+- `storageDir` from `config.StorageDir` (`back/internal/config/config.go:29,191`), default `./storage`, overridden by `PEERDRIVE_STORAGE` (`back/internal/serverapp/app.go:58`); when `PEERDRIVE_STORAGE_ENABLE=false` all write paths return `ErrStorageDisabled` (`file_service.go:526-530`; definition `:28`).
 - Anonymous collections use same CAS (`anon_service.go:140-146`), just content is JSON not blob.
 - Prefix bucketing `hash[:2]` ensures max ~67.66M files per directory, avoiding single-directory entry explosion.
 
@@ -32,7 +32,7 @@ The common skeleton of primitives is `pickRoot → withRoot → scopedOps` (`saf
 1. `pickRoot` string-layer defense (`safewrite.go:31-83`): rejects NUL bytes, Windows reserved device names (`CON/PRN/AUX/NUL/COM1..9/LPT1..9`, see `back/internal/pathutil/reserved.go:24-60`), `..` escape, absolute paths, empty roots, cross-drive.
 2. `withRoot` opens `os.Root` (`safewrite.go:89-103`; Linux uses `openat2(RESOLVE_BENEATH)`, other platforms use directory handle + `O_NOFOLLOW` per-segment confirmation, see `safeopen.go:11-24` header comment) — "resolution and writing completed once by kernel", any symlink escaping allowed root fails at open.
 3. Degradation escape valve: when `os.Root` can't open and filesystem doesn't support (9P/SMB/DrvFs etc.), operator explicitly sets `PEERDRIVE_ROOT_FALLBACK=1` to fall back to path-based operations (`back/internal/pathutil/rootprobe.go:47-55,80-82`), continuous warning logs (`rootprobe.go:48-51`); disabled by default, TOCTOU window won't silently regress.
-4. Startup volume root check: `PEERDRIVE_STORAGE=/` (or `C:\`) judged as misconfiguration by `UnsafeRoots` and exits directly (`back/cmd/server/main.go:294-331`), unless explicitly set `PEERDRIVE_ALLOW_UNSAFE_ROOT=1` (`main.go:317-318`). Judgment logic in `back/internal/pathutil/unsaferoot.go:20-44`.
+4. Startup volume root check: `PEERDRIVE_STORAGE=/` (or `C:\`) judged as misconfiguration by `UnsafeRoots` and exits directly (`back/internal/serverapp/app.go:294-331`), unless explicitly set `PEERDRIVE_ALLOW_UNSAFE_ROOT=1` (`main.go:317-318`). Judgment logic in `back/internal/pathutil/unsaferoot.go:20-44`.
 
 ### 1.3 Authentication Method
 

@@ -141,7 +141,7 @@ No step verifies whether the **requestor** is `alice`. If Bob knows Alice's coll
 
 | File Path | Package Comment Summary | Relationship to User/Auth |
 |----------|-----------|-------------------|
-| `cmd/server/main.go` | Startup entry: DB → provider → downloader → P2P → router | No user initialization |
+| `internal/serverapp/app.go` | Startup entry: DB → provider → downloader → P2P → router | No user initialization |
 | `internal/router/router.go` | Route registration: /ping, /p2p/, /files/, /collections/, /actions/, /:user/:coll/ | username passed as URL parameter, no validation |
 | `internal/controller/collection.go` | Collection CRUD + entries + version control | All functions get username via `c.Param("username")`, passed directly to repo |
 | `internal/controller/fork.go` | fork/pull operations | Reads username (target) and source_username (source) from JSON body, no permission check |

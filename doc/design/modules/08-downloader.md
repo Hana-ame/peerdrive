@@ -4,7 +4,7 @@
 - **One-line function**: For the same 64-char SHA-256 hash, tries protocols in configured priority order: local (local content-addressed storage) → ipfsgw (IPFS HTTP gateway) → btdht (BitTorrent Mainline DHT HTTP bridge) → http (URL registered in `file_providers`); the first one that passes byte-level verification wins; on success caches data to local storage and registers metadata/source, finally returns `(data []byte, protocol string, err error)` to caller (`back/internal/downloader/universal_downloader.go:1-14, 303-367`).
 - **Dependencies**:
   - `peerdrive/internal/repository` (direct, bypasses service convergence): `GetFileProviders` / `InsertFileMeta` / `InsertFileProvider` / `MarkProviderUnavailable` (`back/internal/repository/file_repo.go:48-93`).
-  - `peerdrive/internal/model`: `FileMeta` / `FileProvider` structs and `FileTypeBlob` constant (`back/internal/model/file.go:10-32`).
+  - `peerdrive/internal/model`: `FileMeta` / `FileProvider` structs and `FileTypeBlob` constant (`back/internal/controller/file.go:10-32`).
   - `peerdrive/internal/provider`: `IPFSProvider` (ipfsgw fetch; `back/internal/provider/ipfs.go:34-48, 124-166`).
   - `github.com/Hana-ame/go-peerdrive-bt` (local module `back/p2p_bt`): `BTDHTService` / `BTBridge` (`back/p2p_bt/bt_bridge.go:19-33, 57-115`).
   - `peerdrive/pkg/hashutil`: `IsStrictSHA256` (download entry validation), `SHA256ToCID` (ipfsgw hash→CID conversion, auto-compute CID on registration) (`back/pkg/hashutil/hashutil.go:27-41, 62-73`).

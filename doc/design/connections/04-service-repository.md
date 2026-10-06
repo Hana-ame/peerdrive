@@ -18,7 +18,7 @@
 
 ### 1.2 Connection Establishment and Lifecycle (one-time, startup phase)
 
-- **When established**: during process startup phase, completed once before any service assembly. `main.go` order: `repository.InitDB(cfg.DBPath)` → `defer repository.CloseDB()` → `repository.SetAnonStorageDir(storageDir)` (`back/cmd/server/main.go:76-87`). After that, all service constructions (`NewFileService(cfg)` etc., `back/internal/router/router.go:121-148`) no longer touch DB.
+- **When established**: during process startup phase, completed once before any service assembly. `main.go` order: `repository.InitDB(cfg.DBPath)` → `defer repository.CloseDB()` → `repository.SetAnonStorageDir(storageDir)` (`back/internal/serverapp/app.go:76-87`). After that, all service constructions (`NewFileService(cfg)` etc., `back/internal/router/router.go:121-148`) no longer touch DB.
 - **Why it must be before services**: service construction is cheap (only saves `cfg/storageDir`), but repository's table creation/migration must be completed, otherwise the first CRUD will hit an empty database. `InitDB` internally calls `DB.Ping()` immediately after opening (`back/internal/repository/db.go:111-113`) — because `sql.Open` is lazy; without Ping, you can't know if the path/driver is actually usable.
 - **Driver one-of-two (compile time)**: when `cgo`, registers `sqlite3` (mattn/go-sqlite3); when `!cgo`, registers `sqlite` (modernc.org/sqlite) (`back/internal/repository/db_driver_cgo.go:14-16`, `back/internal/repository/db_driver_pure.go:15-17`). The repository release process cross-compiles with `CGO_ENABLED=0` for all platforms (`db_driver_cgo.go:7-12` comment); without cgo, mattn degrades to a stub causing "startup dies in InitDB table creation", so the driver name can't be hardcoded.
 - **DSN suffix**: `dsn()` (`back/internal/repository/db.go:79-84`) appends `dsnSuffix()` to dbPath. The two drivers have different syntax: cgo uses `?_busy_timeout=5000&_foreign_keys=1`, pure uses `?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)` (`db_driver_cgo.go:29`, `db_driver_pure.go:22`). In-memory DBs and `file:`/`data:` URI prefixes skip the suffix to avoid breaking URI structure.
@@ -71,7 +71,7 @@ sequenceDiagram
     participant Svc as service
     participant Ctrl as controller
 
-    Main->>Repo: InitDB(cfg.DBPath)   [back/cmd/server/main.go:76]
+    Main->>Repo: InitDB(cfg.DBPath)   [back/internal/serverapp/app.go:76]
     Repo->>Repo: sql.Open + dsnSuffix (busy_timeout=5000, foreign_keys=1)
     Repo->>Repo: SetMaxOpenConns/MaxIdle/ConnMaxLifetime
     Repo->>Repo: DB.Ping()            [db.go:111-113]
@@ -96,7 +96,7 @@ controller.Collection.Get
   → service.CollectionService.Get(username, name)        [back/internal/service/collection_service.go:19-21]
     → repository.GetCollection(username, name)           [back/internal/repository/collection_repo.go:161-168]
       → DB.QueryRow(SELECT ... WHERE username=? AND collection_name=?)
-      → model.ScanCollection(rows)                       [back/internal/model/collection.go]
+      → model.ScanCollection(rows)                       [back/internal/controller/collection.go]
       → sql.ErrNoRows → return (nil, nil)                [collection_repo.go:164-166]
 ```
 

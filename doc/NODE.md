@@ -1,6 +1,6 @@
 # Peerdrive Node (Go) Features & P2P Connection System
 
-> Code: `back/cmd/server/main.go` (entry) + `back/internal/transport/` (interconnection layer) + `back/peerjs/` (transport primitives).
+> Code: `back/internal/serverapp/app.go` (entry) + `back/internal/transport/` (interconnection layer) + `back/peerjs/` (transport primitives).
 > Node responsibilities: **always online + content-addressed storage (sha256) + bidirectional file service + port forwarding**, interconnecting with browsers/other nodes.
 
 ## 1. Node Features Overview

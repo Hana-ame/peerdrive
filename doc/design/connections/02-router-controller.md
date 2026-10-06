@@ -9,7 +9,7 @@
 ### 1.1 Channel Type
 
 - **In-process function call** (Gin `gin.HandlerFunc` → `controller.*`). Router endpoints are bound to `gin.Engine` once in `SetupRouter` (`back/internal/router/router.go:R44-R51`); controller only exposes handler functions in `func(c *gin.Context)` form, with no independent network channel and no independent goroutine boundary.
-- **HTTP over TCP** (external entry point). `gin.Engine` is given to `http.Server` for listening after `cmd/server/main.go` calls `SetupRouter`; request entry points include browser direct connection, `curl`, external scripts, and §1.4 internal forwarding.
+- **HTTP over TCP** (external entry point). `gin.Engine` is given to `http.Server` for listening after `internal/serverapp/app.go` calls `SetupRouter`; request entry points include browser direct connection, `curl`, external scripts, and §1.4 internal forwarding.
 
 ### 1.2 Protocol Frames and Parameter Format
 

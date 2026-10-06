@@ -1,3 +1,4 @@
+
 # Peerdrive Composition-Based Architecture Design Inspired by dsh
 
 > Date: 2026-08-16
@@ -5,6 +6,13 @@
 > transform Peerdrive from "a single monolithic main sequential initialization" to a "harness with an empty base + ordered module bundles + user override layer".
 > This design also satisfies `today-final-requirements.txt`: the first commit is the base, each module developed on independent branches, finally merged for integration.
 
+
+> ⚠️ **The paths in this document are design proposals, not current state** (written 2026-08-16,
+> paths such as `bundles/` `profiles/` `harness/` `front/src/modules` have **not been implemented to this day**;
+> currently `back/` has no `bundles/` or `harness/`, and `front/src/` has only `pages/` `lib/` `api.js` `ws.js`).
+> This document records "what the target structure looks like"; to see the actual structure, see
+> [`doc/FILE-REFERENCE.md`](../FILE-REFERENCE.md). Paths were deliberately **not** modified —
+> changing them would misrepresent the original proposal.
 ---
 
 ## 1. Why Reference dsh

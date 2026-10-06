@@ -34,7 +34,7 @@ source (this layer)
   └→ pkg/hashutil (IsStrictSHA256)
 ```
 
-Assembly lives in `cmd/server/main.go` (comment at source.go:17: transport does not depend back on this package).
+Assembly lives in `internal/serverapp/app.go` (comment at source.go:17: transport does not depend back on this package).
 
 ## Module inventory
 
@@ -83,7 +83,7 @@ OpenRange(ctx, hash, offset, size):
      the detailed failure reason per source is in Stats.LastErr)
 ```
 
-Assembly priority (cmd/server/main.go): `local → peer → url (optional, PEERDRIVE_URL_SOURCE_TEMPLATE)`.
+Assembly priority (internal/serverapp/app.go): `local → peer → url (optional, PEERDRIVE_URL_SOURCE_TEMPLATE)`.
 "Return immediately on a local hit" is the local-authoritative semantics of content addressing; a miss downgrades to peer; URL is the last fallback.
 
 ### 3. Statistics and the admin surface (manager.go:205-248)
@@ -151,7 +151,7 @@ source (this layer)
   ├→ transport.FileIndexService (the LocalSource index; Info/IsPathAllowed)
   ├→ transport.PeerJSService (PeerSource connection enumeration; Connections/OpenStream/ID)
   └→ pkg/hashutil (IsStrictSHA256 unified hash defense)
-cmd/server/main.go (assembly: local → peer → url)
+internal/serverapp/app.go (assembly: local → peer → url)
 ```
 
 - **Boundary** (REFACTOR.md §3.8): `serveFile` keeps its local semantics and does **not** use the manager (avoiding an inbound→outbound

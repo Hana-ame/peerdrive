@@ -31,7 +31,7 @@
 
 ```bash
 cd back
-go build -tags nosqlite -o /tmp/pd/bin/peerdrive-server ./cmd/server
+go build -tags nosqlite -o /tmp/pd/bin/peerdrive ./cmd/peerdrive/
 ```
 
 > **`-tags nosqlite` is a hard requirement, not optional.**
@@ -42,7 +42,7 @@ go build -tags nosqlite -o /tmp/pd/bin/peerdrive-server ./cmd/server
 Cross-compilation (for other machines):
 
 ```bash
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags nosqlite -o peerdrive-server.exe ./cmd/server
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags nosqlite -o peerdrive.exe ./cmd/peerdrive/
 ```
 
 Using the built binary is exactly the same as Chapter 1 §1.3 (all configuration via environment variables).
@@ -150,9 +150,13 @@ git push origin v0.1.1
    **Red = no release** — the gate is built into the release itself, because workflows don't have `needs`,
    so parallel `ci.yml` can't stop it.
 2. **Build × 5 platforms**: `CGO_ENABLED=0`, artifacts named `peerdrive-<goos>-<goarch>[.exe]`
-   (without renaming, all 5 packages are called `peerdrive-server`, uploads overwrite each other by basename).
-3. **build-signalserver × 5 platforms**: same, producing `peersignal-<goos>-<goarch>[.exe]`.
-4. **Release**: attach 10 files to the GitHub Release.
+   (without renaming, all 5 packages are called `peerdrive`, uploads overwrite each other by basename).
+3. **Release**: attach the 5 files to the GitHub Release.
+
+> ⚠️ **v0.3.0 changed the asset count**: server, signaling, and registration were merged into a single
+> `peerdrive` binary as subcommands (`serve` / `signal` / `reg` / `all`).
+> So it's **5 assets, not 10**, and **there is no longer a separate `peersignal-*`** — use `peerdrive signal`
+> to self-host signaling. Release also injects the version number via `-ldflags -X`.
 
 To only verify whether the gate passes, without actually releasing: manually run `Release` on the Actions page, keeping `dry_run` at default `true`
 (the `release` step will be skipped).
