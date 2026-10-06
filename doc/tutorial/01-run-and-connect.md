@@ -173,16 +173,25 @@ peersignal connected as my-node-1
 The panel is embedded in the binary along with peerjs. **No inputs required** — it asks your node
 "who am I / which signaling am I on", fills it in itself, then auto-connects.
 
-One caveat: **`panel` is served over HTTP, so it can only use `ws://` signaling**. The default public signaling is wss
-(HTTPS), so the browser will block it as mixed content. Symptoms: panel spins, or reports connection failure.
-**Two ways around it** (pick either):
+> ✅ **No protocol caveat needed — verified 2026-10-06 in a real browser (Chromium).**
+> The panel served over http:// connects fine to the default wss:// signaling. Browsers only block
+> **downgrade** mixed content (an https page opening ws://), not upgrade (http page opening wss://).
+> Observed: WS connects to `wss://peersignal.moonchan.xyz/peerjs?...`, no mixed-content block,
+> `自动搜索` lists this node. Out of the box, zero config, works.
 
-| Method | How |
-|---|---|
-| Self-hosted signaling | Start a `peerdrive signal` + `-tls-cert`/`-tls-key` on your own machine, open the panel with that domain |
-| Trust the certificate locally | Access the panel over https via a reverse proxy with a locally-trusted cert |
+The only real mixed-content case is the **reverse** of what's often assumed: an **https** page
+cannot open a `ws://` signaling. Chromium's exact wording:
+`SecurityError: Failed to construct 'WebSocket': An insecure WebSocket connection may not be
+initiated from a page loaded over HTTPS.` (Verified 2026-10-06 on a real domain over https.)
 
-If you just want to verify it works, use the online panel below (already https, wss works directly).
+Since the local `/panel` is http and default signaling is wss, this does not bite you.
+If you front your node with https and self-host a plain-ws signaling, point the panel at it
+over http, or give that signaling TLS (`peerdrive signal -tls-cert/-tls-key`).
+For the online panel (§1.5.1, https) with default wss signaling, it works as-is too.
+
+> ⚠️ One trap when reproducing this yourself: testing on `127.0.0.1` **will not trigger the block** —
+> browsers treat loopback as a secure context. Use a real hostname (Chromium
+> `--host-resolver-rules=MAP your.host 127.0.0.1`) or you'll wrongly conclude it's allowed.
 
 ### 1.5.1 Connecting to someone else's node: use the online panel
 
@@ -259,5 +268,5 @@ Connect the panel to your node and you should see:
 | Request hangs 15s then TIMEOUT (not error) | Running old binary, doesn't recognize new verbs | Download latest release |
 | Node just started, panel immediately can't connect | Node hasn't finished announcing, heartbeat not stable | Wait for `/ping` to respond, wait a few seconds for heartbeat stability |
 | Blank panel page, nothing renders (check the browser console) | The server's global CSP blocked inline scripts | Already fixed since v0.3.2 (the `/panel` prefix is exempted); if you self-built an old commit, upgrade to v0.3.2+ |
-| Panel is full but spins forever, console reports a `ws://` mixed-content error | Local `panel` is http, the default public signaling is wss | See §1.5.0 — either self-host signaling over TLS, or use the online https panel |
+| Panel spins forever, console reports a `ws://` mixed-content error | An **https** page (online panel, or your node behind an https proxy) pointed at a plain `ws://` signaling | Point it at `wss://` (the default public signaling is wss) or enable TLS on self-hosted signaling (Appendix A). ⚠️ Local http `/panel` + default wss is **never** blocked — this row does not apply to the default setup |
 | Demo works but your node's panel doesn't | Yours may be on v0.3.1 or earlier (no embedded panel) | Check `peerdrive version`; download v0.3.2 or newer |

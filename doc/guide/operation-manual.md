@@ -233,8 +233,11 @@ A: 查浏览器控制台。`Content Security Policy` 拦截内联脚本是这个
 v0.3.2 已对 `/panel` 前缀豁免 CSP，若是更早的构建则需升级。
 
 **Q: 面板转圈但连不上，console 报 `ws://` 混合内容**
-A: `/panel` 是 http，只能源于 `ws://` 信令；公共信令是 wss（https）。
-自托管信令并启用 TLS，或改用在线面板（本身就是 https）。
+A: 先看**页面是 http 还是 https**。浏览器只拦「降级」混合内容
+（**https 页面**开 `ws://`），不拦「升级」（http 页面开 `wss://`）。
+所以 http 的 `/panel` + 默认 wss 公共信令**开箱即通**，2026-10-06 用真浏览器实测过。
+真遇到这条报错，说明你在 **https 页面**（在线面板 / 反代后的节点）上连了**明文 ws 信令**：
+把信令换成 `wss://`，或给自托管信令开 TLS（`peerdrive signal -tls-cert/-tls-key`）。
 
 **Q: 多节点跑不起来 / 互相看不见**
 A: 确认各自 cwd 不同（`peerdrive.db` 落在 cwd 下），且 `PEERDRIVE_SHARE_DIRS` 已声明。
