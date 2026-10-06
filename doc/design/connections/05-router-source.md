@@ -73,7 +73,7 @@ sequenceDiagram
   participant P as PeerSource
   participant H as Route tree (/download etc.)
 
-  T->>M: Interface holds s.router (injected at main.go:230)
+  T->>M: Interface holds s.router (injected at app.go:320)
   M->>M: OpenRange(ctx,hash,offset,size) iterate by priority ascending
   loop Each source
     M->>L: Available(ctx)? No→skip and record(name,false,0,err)
@@ -93,7 +93,7 @@ sequenceDiagram
 Key points (`back/internal/source/manager.go:9-14`, `:145-160`, `:289-309`):
 
 - Source with `Available()==false` is directly skipped (**soft health check**, not circuit breaker);
-- Try in **priority ascending order**, `local` hit returns immediately (content-addressed local authoritative), miss degrades `peer → url` (default registration order is main.go:218/221/225);
+- Try in **priority ascending order**, `local` hit returns immediately (content-addressed local authoritative), miss degrades `peer → url` (default registration order is app.go:320 onward);
 - `OpenRange` only uses `CapStream`; `OpenAny` allows degradation to `CapFile` for full pull (large files must use CapStream, full buffer has OOM risk — `back/internal/source/source.go:9-15`);
 - Each attempt calls `record(name, ok, n, err)` to update `Stats` (`LastAt/Success/Bytes/Fail/LastErr`); all fail returns aggregated error **with per-source failure reasons**.
 

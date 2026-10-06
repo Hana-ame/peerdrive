@@ -50,7 +50,7 @@ This layer **does not do general persistence** — it is the orchestrator, persi
 
 | Trigger | Behavior | Code Reference |
 |--------|------|----------|
-| Process startup (main) | `NewNodeDirectory` loads `joined_nodes.json`; `NewNodeShare` reads `share_scope.json` (environment variables `PEERDRIVE_SHARE_*` only seed on **first startup** then persist) | main.go:120-162; nodeshare.go:10-60 |
+| Process startup (main) | `NewNodeDirectory` loads `joined_nodes.json`; `NewNodeShare` reads `share_scope.json` (environment variables `PEERDRIVE_SHARE_*` only seed on **first startup** then persist) | app.go:221-291; nodeshare.go:10-60 |
 | Marketplace join/leave operation (API) | `NodeDirectory.Join/Leave` → update `joined_nodes.json` (atomic write) | node_directory.go |
 | Admin console checkbox / PUT `/peerjs/share` | NodeShare updates `share_scope.json` (runtime persistence; environment variable changes don't backfill) | nodeshare.go |
 | File upload / gateway import (request) | FileService writes content-addressed file + repository.InsertFileMeta + InsertFileProvider | file_service.go:57-70 |

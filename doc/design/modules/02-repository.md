@@ -3,7 +3,7 @@
 - **Code location**: `back/internal/repository`
 - **One-line function**: The sole metadata persistence layer for the entire node — saves file metadata and replicas, collections and versions, share links, local sync state, IPFS pins, file index (sha256→absolute path), and incremental sync cursors to a single SQLite file; anonymous collections are persisted as content-addressed JSON files then registered into the database (`back/internal/repository/db.go:1-14`).
 - **Dependencies**: `database/sql`; compile-time either-or SQLite driver — uses `mattn/go-sqlite3` with cgo, falls back to pure-Go `modernc.org/sqlite` without cgo (`back/internal/repository/db_driver_cgo.go:1-16`, `back/internal/repository/db_driver_pure.go:1-22`); `peerdrive/internal/log` (logging), `peerdrive/internal/model` (domain structs), `peerdrive/pkg/hashutil` (SHA256/CID validation and conversion) (`back/internal/repository/db.go:24-26`); and the external filesystem (anonymous collection JSON persisted as `<storageDir>/<hash[:2]>/<hash>`, see `back/internal/repository/anon_repo.go:40-49`).
-- **Depended upon by**: `back/internal/serverapp/app.go` (starts `InitDB`/`SetAnonStorageDir`, closes `CloseDB`, `main.go:76-87`); `back/internal/service/*` (file/collection/anon/sync/pin/share/peerpull etc. all read/write through this, after M2 convergence repository is only referenced by service, see `back/internal/service/collection_service.go:1-4`); `back/internal/transport` (`FileIndexService` performs create/upload/delete/sync on file_index table, `back/internal/transport/file_index.go:238,461,570,575`); `back/internal/downloader` (download cache registration, `back/internal/downloader/universal_downloader.go:378-398`); `back/internal/source` (IPFS pin registration and deletion, `back/internal/source/ipfs_control.go:56-70`); `back/internal/router`/`controller` (health probe via `repository.Ping`, `back/internal/router/router.go:124`).
+- **Depended upon by**: `back/internal/serverapp/app.go` (starts `InitDB`/`SetAnonStorageDir`, closes `CloseDB`, `app.go:170-181`); `back/internal/service/*` (file/collection/anon/sync/pin/share/peerpull etc. all read/write through this, after M2 convergence repository is only referenced by service, see `back/internal/service/collection_service.go:1-4`); `back/internal/transport` (`FileIndexService` performs create/upload/delete/sync on file_index table, `back/internal/transport/file_index.go:238,461,570,575`); `back/internal/downloader` (download cache registration, `back/internal/downloader/universal_downloader.go:378-398`); `back/internal/source` (IPFS pin registration and deletion, `back/internal/source/ipfs_control.go:56-70`); `back/internal/router`/`controller` (health probe via `repository.Ping`, `back/internal/router/router.go:124`).
 
 ---
 
@@ -26,7 +26,7 @@
 5. **Download cache**: After remote protocol fetches data, `cacheToLocal` persists to CAS and registers (`back/internal/downloader/universal_downloader.go:378-398`).
 6. **IPFS pin**: `PinCID` fetches gateway data → writes pin cache file → `InsertPin` + `InsertFileMeta` + `InsertFileProvider` (`back/internal/source/ipfs_control.go:34-73`).
 
-**Lifecycle**: `InitDB` establishes once at startup; process exit handled by `defer CloseDB()` in `main.go:79-83` (production path previously did not actively close, relied on process exit to reclaim handle, `db.go:38-44`); test path must explicitly `CloseDB` (on Windows, open .db files cannot be deleted, `db.go:37-44`, `back/internal/repository/db_test.go:10-27`).
+**Lifecycle**: `InitDB` establishes once at startup; process exit handled by `defer CloseDB()` in `app.go:174` (production path previously did not actively close, relied on process exit to reclaim handle, `db.go:38-44`); test path must explicitly `CloseDB` (on Windows, open .db files cannot be deleted, `db.go:37-44`, `back/internal/repository/db_test.go:10-27`).
 
 ---
 
@@ -86,7 +86,7 @@
 | Transport upload verb | Update `file_index` | `file_index.go:461` |
 | Transport delete verb | Tombstone in `file_index` | `file_index.go:570,575` |
 | Download cache | `InsertFileMeta` + `InsertFileProvider` | `universal_downloader.go:378-398` |
-| Process shutdown | `CloseDB()` closes connection | `main.go:79-83` |
+| Process shutdown | `CloseDB()` closes connection | `app.go:174` |
 
 ---
 

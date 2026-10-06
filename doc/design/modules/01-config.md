@@ -59,7 +59,7 @@ The only "write" to configuration is at startup:
 |--------|--------|----------------|
 | Process startup | `Load()` reads env vars into `*Config` | `config.go:186-246` |
 | After Load | `Validate()` checks consistency (read-only validation) | `config.go:254-282` |
-| After Validate | Value distribution to downstream modules (read-only) | `main.go:73-241` |
+| After Validate | Value distribution to downstream modules (read-only) | `app.go:170-339` |
 
 No module writes configuration back. The pattern is strictly "read env → validate → distribute → immutable".
 

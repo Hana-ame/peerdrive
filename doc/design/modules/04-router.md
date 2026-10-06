@@ -3,11 +3,11 @@
 - **Code location**: `back/internal/router`
 - **One-line function**: Assembles the Gin engine as the sole HTTP/WS entry point for the entire backend — registers all routes (health check, files, collections, P2P, PeerJS, source management), mounts cross-cutting middleware (request ID / security headers / access log / per-IP rate limiting / CORS / authentication), and reuses the same engine as the admin backend for browser `/ws/peer` admin frames.
 - **Dependencies**: `config` (`back/internal/config/config.go` — reads `RateLimitRPS`/`TrustedProxies`/`RegistrationServer`/`DisableCSP`/`DisableSwagger`/`StorageDir`/`AllowedOrigins` etc.), `controller` (all handlers, `back/internal/router/router.go:225-383` per-route references), `service` (`SetupRouter` constructs `NewFileService`/`NewCollectionService`/`NewShareService`/`NewPinService`/`NewAnonService`/`NewSyncService`, router.go:121-128), `repository` (`Ping` probe, `NewSyncRepository`, router.go:124,211), `source` (`source.Manager`/`NewBTControl`/`NewIPFSControl`, router.go:153,192 and source_routes.go), `transport` (`PeerJSService`/`NewWSSession`, peerjs_routes.go), `downloader` (`NewUniversalDownloader`, router.go:201), `provider` (`NewIPFSProvider`, router.go:190), `p2p_bt` (`go-peerdrive-bt`, router.go:141,151), gin / swaggo / gorilla-websocket.
-- **Depended upon by**: `back/internal/serverapp/app.go` (main.go:52-236 assembles injectors then calls `router.SetupRouter(cfg)`, returns `*gin.Engine` as `http.Server.Handler`, main.go:250-254); `transport` admin plane (`back/internal/transport/admin.go:13-19` explains admin frame → internal `*http.Request` → injected `AdminHandler` → reuses all controllers from this engine); frontend (sends admin frames via `/ws/peer` local WS sessions, see `back/internal/transport/admin.go:26-27`; old HTTP endpoints retained for backward compatibility with old frontend/curl/integration tests, router.go:216-223); `collection_dispatch_test.go` etc. test dispatcher/routes directly via integration tests.
+- **Depended upon by**: `back/internal/serverapp/app.go` (assembly, `app.go:170-339` assembles injectors then calls `router.SetupRouter(cfg)`, returns `*gin.Engine` as `http.Server.Handler`, app.go:370-379); `transport` admin plane (`back/internal/transport/admin.go:13-19` explains admin frame → internal `*http.Request` → injected `AdminHandler` → reuses all controllers from this engine); frontend (sends admin frames via `/ws/peer` local WS sessions, see `back/internal/transport/admin.go:26-27`; old HTTP endpoints retained for backward compatibility with old frontend/curl/integration tests, router.go:216-223); `collection_dispatch_test.go` etc. test dispatcher/routes directly via integration tests.
 
 ## 1. Logic
 
-The module has only one entry function `SetupRouter(cfg *config.Config) *gin.Engine` (router.go:44), called once by main after all services are assembled (main.go:236). Responsibilities split into four layers:
+The module has only one entry function `SetupRouter(cfg *config.Config) *gin.Engine` (router.go:44), called once by main after all services are assembled (`app.go:339`). Responsibilities split into four layers:
 
 **① Middleware stack assembly** (router.go:49-107). Does not use `gin.Default()` (its built-in Logger duplicates `AccessLog` output), explicit assembly, execution order is registration order (middleware.go:7-10 comments):
 
@@ -50,7 +50,7 @@ The router layer **does not persist any data** (no file writes, no DB writes); i
 
 | Timing | Action | Notes |
 |--------|--------|-------|
-| Process startup | `SetupRouter(cfg)` assembles engine, middleware, routes, dependencies | Called once from main.go:236 |
+| Process startup | `SetupRouter(cfg)` assembles engine, middleware, routes, dependencies | Called once from `app.go:339` |
 | Each HTTP request | Middleware chain executes (request ID, security headers, rate limit, CORS, auth) | Stateless per request |
 | Each request context | `storageDir` injected into Gin context | Per-request, not persisted |
 | Process shutdown | Engine discarded with process | No explicit cleanup needed |
