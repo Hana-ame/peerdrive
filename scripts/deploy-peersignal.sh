@@ -19,6 +19,14 @@ CLOUDCONE_PORT="9000"                # peersignal 监听端口
 CLOUDCONE_SSH_PORT="22"              # SSH 端口
 DOMAIN="peersignal.moonchan.xyz"     # 域名
 KEY="pd-signal-$(openssl rand -hex 12)"  # API key（自动生成）
+
+# ops token：/status 与 /status/key 的凭据。**2026-10-06 起必须配。**
+# 不配的后果是实测出来的，不是推演：
+#   curl https://peersignal.moonchan.xyz/status   → 200 + 信令 key + 全网节点名册
+# 因为 opsTokenOK 在白名单为空时曾经「任何非空 token 都放行」，
+# 于是 `?token=随便编的` 也能进。现已改成默认拒绝（signalserver.go:343）。
+# 这个 token 只给运维从命令行查面板用，不进前端、不进仓库。
+OPS_TOKEN="pd-ops-$(openssl rand -hex 16)"
 BINARY="/tmp/peersignal-linux-amd64"
 REMOTE_DIR="/opt/peersignal"
 SYSTEMD_SERVICE="peersignal"
@@ -45,7 +53,9 @@ deploy_files() {
 # ====== Step 2: systemd 服务 ======
 deploy_systemd() {
   echo "── Step 2: 安装 systemd 服务 ──"
-  ssh "${CLOUDCONE_USER}@${CLOUDCONE_HOST}" -p "${CLOUDCONE_SSH_PORT}" bash -s <<'SYSTEMD_EOF'
+  # 把已求值的 KEY/OPS_TOKEN 传进远端（原因见 SYSTEMD_EOF 内那段说明）
+  ssh "${CLOUDCONE_USER}@${CLOUDCONE_HOST}" -p "${CLOUDCONE_SSH_PORT}" \
+    PD_KEY="${KEY}" PD_OPS="${OPS_TOKEN}" bash -s <<'SYSTEMD_EOF'
 cat > /etc/systemd/system/peersignal.service << 'UNIT'
 [Unit]
 Description=Peerdrive Peersignal (PeerJS Signaling + Discovery)
@@ -55,15 +65,20 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-ExecStart=/opt/peersignal/peersignal --addr 127.0.0.1:9000 --key pd-signal-KEYPLACEHOLDER
+ExecStart=/opt/peersignal/peersignal --addr 127.0.0.1:9000 --key pd-signal-KEYPLACEHOLDER --tokens OPS_TOKENPLACEHOLDER
 # 两个安全开关（代码早已/现已支持，默认都不填 = 行为与现在完全一致）：
 #   -cors-origin  面板侧 REST 端点的 CORS 白名单。不填 = 历史行为（通配 *）。
 #               填了只回显命中的 Origin，没命中的**不发 Allow-Origin 头**，浏览器因此读不到。
 #               ⚠️ 双击打开的面板 Origin 是 null，要保留它必须显式带上 null，例如：
 #               --cors-origin "https://peerdrive.pages.dev,https://peerdrive.moonchan.xyz,null"
-#   -tokens       信令 token 白名单。此前生产一直没开，所以任意客户端都能注册任意 id
+#   -tokens       同一个白名单现在同时管**信令注册**与**运维面（/status、/status/key）**。
+#               ⚠️ 2026-10-06 起**必须填**：不填时 opsTokenOK 默认拒绝，
+#               面板会显示「Error: 需要 ops token」而不是伪装成正常数据。
+#               它的另一个作用是信令注册白名单——不填则任意客户端都能注册任意 id
 #               冒充在线节点收走信令。
-# 打开任一开关都是一次独立的部署决策，不随升级自动发生。
+#               取值：下面脚本生成的 OPS_TOKEN（部署完会打印一次）。
+#   -cors-origin  仍建议单独评估，见上面的说明。
+# 除 -tokens 外，其余开关保持原样；升级本身不应改变既有部署的行为。
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
@@ -75,9 +90,11 @@ StandardError=journal
 WantedBy=multi-user.target
 UNIT
 
-# 替换 key
-KEY=$(grep "KEY=" /tmp/deploy-peersignal.sh | sed 's/.*="//;s/".*//')
+# 替换 key 与 ops token
+KEY=$(grep '^KEY=' /tmp/deploy-peersignal.sh | head -1 | sed 's/.*="//;s/".*//')
+OPS=$(grep '^OPS_TOKEN=' /tmp/deploy-peersignal.sh | head -1 | sed 's/.*="//;s/".*//')
 sed -i "s/pd-signal-KEYPLACEHOLDER/${KEY}/" /etc/systemd/system/peersignal.service
+sed -i "s/OPS_TOKENPLACEHOLDER/${OPS}/" /etc/systemd/system/peersignal.service
 
 systemctl daemon-reload
 systemctl enable peersignal
