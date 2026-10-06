@@ -21,7 +21,7 @@ import (
 // Note: cloudcone is directly reachable (bypasses host proxy); do not set HTTPS_PROXY to a proxy when running tests.
 const (
 	liveSignalHost = "peersignal.moonchan.xyz"
-	liveSignalKey  = "pd-signal-b9447b406828e500"
+	liveSignalKey  = "pd-signal-1edf5e05e4a52b7351392574"
 	liveDiscover   = "https://peersignal.moonchan.xyz"
 )
 

@@ -166,7 +166,7 @@ func main() {
 	host := "peersignal.moonchan.xyz"
 	port := "443"
 	secure := true
-	key := "pd-signal-b9447b406828e500"
+	key := "pd-signal-1edf5e05e4a52b7351392574"
 	chunkSize := 64 * 1024 // 64KB
 	proxyURL := ""         // empty means read from HTTPS_PROXY env var
 

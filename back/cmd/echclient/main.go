@@ -35,7 +35,7 @@ func main() {
 	opts.Host = "peersignal.moonchan.xyz"
 	opts.Port = "443"
 	opts.Secure = true
-	opts.Key = "pd-signal-b9447b406828e500"
+	opts.Key = "pd-signal-1edf5e05e4a52b7351392574"
 
 	peer := peerjs.NewPeer(fmt.Sprintf("echclient-%d", time.Now().UnixNano()%100000), opts)
 	if err := peer.Dial(ctx); err != nil {

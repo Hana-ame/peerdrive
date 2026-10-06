@@ -51,7 +51,7 @@ func DefaultOptions() Options {
 		Port:         "443",
 		Secure:       true,
 		Path:         "/",
-		Key:          "pd-signal-b9447b406828e500",
+		Key:          "pd-signal-1edf5e05e4a52b7351392574",
 		PingInterval: 5 * time.Second,
 	}
 }

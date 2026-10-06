@@ -18,7 +18,23 @@ CLOUDCONE_USER="root"                 # SSH 用户
 CLOUDCONE_PORT="9000"                # peersignal 监听端口
 CLOUDCONE_SSH_PORT="22"              # SSH 端口
 DOMAIN="peersignal.moonchan.xyz"     # 域名
-KEY="pd-signal-$(openssl rand -hex 12)"  # API key（自动生成）
+# 信令 key：⚠️ 必须是**稳定**的，不是每次随机生成。
+#
+# 2026-10-06 实测踩到的坑：这里原本是 `pd-signal-$(openssl rand -hex 12)`，
+# 每次部署都换一个新值。而客户端把这个 key **硬编码**在
+# back/peerjs/peer.go:54 与 back/internal/config/config.go:22，
+# 没法跟着服务器变。于是结果是：
+#   每部署一次 → 线上 key 变了 → 所有已发布客户端全部连不上信令
+#                → 跨节点传输断掉，且没有任何报错提示「key 变了」
+# 实际验证：拿客户端里的旧 key 对生产跑 live 测试，13 次 bad handshake。
+#
+# 也就是说，**照原样跑这个脚本，第一次部署之后就把自己的产品弄坏了**，
+# 而部署本身会报「✅ 部署完成」。
+#
+# 现在：优先读服务器上已有的 key，读不到才生成一次并写回去。
+# 这样重复部署是幂等的；真要轮换，得显式 SIGNAL_KEY_ROTATE=1（并同步改客户端）。
+REMOTE_DIR="/opt/peersignal"          # peersignal 在服务器上的目录
+KEY_FILE="${REMOTE_DIR}/signal.key"
 
 # ops token：/status 与 /status/key 的凭据。**2026-10-06 起必须配。**
 # 不配的后果是实测出来的，不是推演：
@@ -28,7 +44,6 @@ KEY="pd-signal-$(openssl rand -hex 12)"  # API key（自动生成）
 # 这个 token 只给运维从命令行查面板用，不进前端、不进仓库。
 OPS_TOKEN="pd-ops-$(openssl rand -hex 16)"
 BINARY="/tmp/peersignal-linux-amd64"
-REMOTE_DIR="/opt/peersignal"
 SYSTEMD_SERVICE="peersignal"
 
 # ====== 定位仓库根 =====
@@ -38,6 +53,31 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$REPO_ROOT"
 [ -d "back/signalserver" ] || { echo "❌ 不是 peerdrive 仓库（缺 back/signalserver）: $REPO_ROOT"; exit 1; }
+
+# ====== 取信令 key（幂等）======
+# 先看服务器上有没有；有就沿用，没有才生成并写回服务器。
+# 这样重复部署不会改 key，只有显式轮换才会。
+load_or_create_key() {
+  local remote_key=""
+  if [ "$REMOTE" = "1" ]; then
+    remote_key=$(ssh "${CLOUDCONE_USER}@${CLOUDCONE_HOST}" -p "${CLOUDCONE_SSH_PORT}" \
+      "cat ${KEY_FILE} 2>/dev/null || true")
+  fi
+  if [ -n "$remote_key" ] && [ "${SIGNAL_KEY_ROTATE:-0}" != "1" ]; then
+    KEY="$remote_key"
+    echo "── 沿用服务器上已有的信令 key（不轮换）──"
+  else
+    KEY="pd-signal-$(openssl rand -hex 12)"
+    echo "── 生成新的信令 key${SIGNAL_KEY_ROTATE:+ （显式轮换）}──"
+    [ -n "$remote_key" ] && echo "⚠️  轮换后，旧客户端（硬编码了旧 key）会连不上，需同步更新。"
+  fi
+  # 写回服务器，保证下次部署读到同一个值。权限 600：它是凭据。
+  if [ "$REMOTE" = "1" ]; then
+    ssh "${CLOUDCONE_USER}@${CLOUDCONE_HOST}" -p "${CLOUDCONE_SSH_PORT}" \
+      "mkdir -p ${REMOTE_DIR} && printf '%s\\n' '${KEY}' > ${KEY_FILE} && chmod 600 ${KEY_FILE}" \
+      || { echo "❌ 写回 key 文件失败，中止（否则下次部署会生成另一个 key）"; exit 1; }
+  fi
+}
 
 # ====== 检查前置 =====
 # 二进制改为**缺失时自动构建**。
@@ -73,6 +113,9 @@ else
   echo "=== 模式: 从本地 SSH 部署到 $CLOUDCONE_HOST ==="
   REMOTE=1
 fi
+
+# REMOTE 确定之后才能读服务器上的 key（REMOTE=0 时在本机读/写同一个文件）
+load_or_create_key
 
 # ====== Step 1: 上传二进制 + 配置 ======
 deploy_files() {

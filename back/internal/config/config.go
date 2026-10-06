@@ -19,7 +19,7 @@ import (
 const (
 	DefaultSignalHost = "peersignal.moonchan.xyz"
 	DefaultSignalPort = "443"
-	DefaultSignalKey  = "pd-signal-b9447b406828e500"
+	DefaultSignalKey  = "pd-signal-1edf5e05e4a52b7351392574"
 	// DefaultDiscoverURL is the public signaling discovery API (announce + node list).
 	DefaultDiscoverURL = "https://peersignal.moonchan.xyz"
 )
@@ -67,7 +67,7 @@ type Config struct {
 	// don't teach changing this.
 	PeerJSHost   string // PEERDRIVE_PEERJS_HOST, default peersignal.moonchan.xyz
 	PeerJSPort   string // PEERDRIVE_PEERJS_PORT, default 443
-	PeerJSKey    string // PEERDRIVE_PEERJS_KEY, default pd-signal-b9447b406828e500
+	PeerJSKey    string // PEERDRIVE_PEERJS_KEY, default pd-signal-1edf5e05e4a52b7351392574
 	PeerJSID     string // PEERDRIVE_PEERJS_ID, empty generates peerdrive-<random>
 	PeerJSSecure bool   // PEERDRIVE_PEERJS_SECURE, default true
 	PeerJSPeers  string // PEERDRIVE_PEERJS_PEERS, comma-separated peer node ids for auto-interconnection on startup
