@@ -23,6 +23,10 @@ func main() {
 	addr := flag.String("addr", ":9000", "listen address")
 	key := flag.String("key", "peerjs", "API key (client must match)")
 	tokens := flag.String("tokens", "", "signaling token whitelist (comma-separated; empty = no restriction)")
+	opsToken := flag.String("ops-token", "",
+		"credential for ops endpoints (/status, /status/key). Empty = ops endpoints reject everyone.\n"+
+			"Kept separate from -tokens on purpose: -tokens also gates WebSocket registration, so\n"+
+			"reusing it here would silently break any node that doesn't send a token.")
 	tlsCert := flag.String("tls-cert", "", "TLS certificate (PEM). When given together with -tls-key, serve over HTTPS/WSS")
 	tlsKey := flag.String("tls-key", "", "TLS private key (PEM)")
 	corsOrigin := flag.String("cors-origin", "",
@@ -33,6 +37,9 @@ func main() {
 	var opts []signalserver.Option
 	if *tokens != "" {
 		opts = append(opts, signalserver.WithTokenWhitelist(strings.Split(*tokens, ",")))
+	}
+	if *opsToken != "" {
+		opts = append(opts, signalserver.WithOpsToken(*opsToken))
 	}
 	if *corsOrigin != "" {
 		opts = append(opts, signalserver.WithCORSOrigins(strings.Split(*corsOrigin, ",")))

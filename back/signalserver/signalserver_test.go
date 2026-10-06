@@ -13,11 +13,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// opsTestToken is the whitelist entry used by opsGet. It must be on the server's
-// token whitelist, because opsTokenOK now REJECTS everything when no whitelist is
-// configured (2026-10-06). Before that fix, any non-empty token passed, so the
-// helpers below worked against a bare NewServer("testkey") — that reliance is what
-// let "random token gets full ops access" pass CI for months.
+// opsTestToken is the ops credential used by opsGet. It is set via WithOpsToken —
+// NOT via the signaling token whitelist (2026-10-06).
+//
+// That separation is not cosmetic: ops access used to read the signaling whitelist, so
+// securing /status silently turned on WebSocket auth for every node. Deployed that way,
+// all nodes that send no token lost their signaling connection while HTTP probes still
+// returned 200. TestOpsTokenIsIndependentOfSignaling pins the separation.
 const opsTestToken = "ops-token"
 
 // testServer starts an in-memory signaling server and returns a connection factory.
@@ -380,7 +382,7 @@ func TestNodes_EmptyCollReturnsAll(t *testing.T) {
 
 // TestNodes_TypeFilter Supports ?type= to filter node types (behavior aligned with wintools).
 func TestNodes_TypeFilter(t *testing.T) {
-	_, hs := testServerWithOpts(t, WithTokenWhitelist([]string{opsTestToken}))
+	_, hs := testServerWithOpts(t, WithOpsToken(opsTestToken))
 	announce := func(peerID, nodeType string) {
 		body, _ := json.Marshal(map[string]any{"peerId": peerID, "collections": []string{"media"}, "nodeType": nodeType})
 		resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
@@ -428,7 +430,7 @@ func TestNodes_IncludesNodeMetadata(t *testing.T) {
 
 // TestGraph_TypeFilterLinksExcludeFilteredNodes Verifies that when type filtering is applied, graph edges do not include filtered-out nodes.
 func TestGraph_TypeFilterLinksExcludeFilteredNodes(t *testing.T) {
-	_, hs := testServerWithOpts(t, WithTokenWhitelist([]string{opsTestToken}))
+	_, hs := testServerWithOpts(t, WithOpsToken(opsTestToken))
 	announce := func(peerID, nodeType string, peers []string) {
 		body, _ := json.Marshal(map[string]any{"peerId": peerID, "collections": []string{"media"}, "nodeType": nodeType, "peers": peers})
 		resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
@@ -501,7 +503,7 @@ func TestSweepDiscovery_CleansExpiredNodes(t *testing.T) {
 // Discovery background: 2026-09-05 dashboard/status/leave API was added without tests;
 // this test verifies response structure, node filtering (only active), deduplicated edges, msgCount.
 func TestHandleStatus(t *testing.T) {
-	_, hs := testServerWithOpts(t, WithTokenWhitelist([]string{opsTestToken}))
+	_, hs := testServerWithOpts(t, WithOpsToken(opsTestToken))
 
 	// Register two nodes + one link
 	announce := func(id string, peers []string) {
@@ -712,7 +714,7 @@ func TestHandleID_CORS(t *testing.T) {
 // CORS header: a request with **no token** cannot read the full roster or /status — which is
 // exactly what a random web page's fetch() looks like.
 func TestOpsEndpointsRequireToken(t *testing.T) {
-	_, hs := testServerWithOpts(t, WithTokenWhitelist([]string{opsTestToken}))
+	_, hs := testServerWithOpts(t, WithOpsToken(opsTestToken))
 
 	body, _ := json.Marshal(map[string]any{"peerId": "node-1", "collections": []string{"coll-a"}})
 	resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
@@ -754,7 +756,7 @@ func TestOpsEndpointsRequireToken(t *testing.T) {
 // TestOpsTokenAcceptsQueryAndHeader: both token shapes must work, since the WebSocket upgrade
 // can only carry a query param while curl/dashboard scripts send a header.
 func TestOpsTokenAcceptsQueryAndHeader(t *testing.T) {
-	_, hs := testServerWithOpts(t, WithTokenWhitelist([]string{opsTestToken}))
+	_, hs := testServerWithOpts(t, WithOpsToken(opsTestToken))
 
 	viaHeader, err := opsGet(hs, "/status")
 	require.NoError(t, err)
@@ -767,17 +769,19 @@ func TestOpsTokenAcceptsQueryAndHeader(t *testing.T) {
 	assert.Equal(t, http.StatusOK, viaQuery.StatusCode, "?token= must be accepted")
 }
 
-// TestOpsTokenHonoursWhitelist: when -tokens is configured, a token outside the list is
-// rejected. Without this, enabling the whitelist would look like it did nothing for /status.
-func TestOpsTokenHonoursWhitelist(t *testing.T) {
-	srv := NewServer("testkey", WithTokenWhitelist([]string{"good-token"}))
-	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		srv.HandleStatus(w, r)
-	}))
-	defer hs.Close()
-
-	get := func(token string) int {
-		req, _ := http.NewRequest(http.MethodGet, hs.URL+"/status", nil)
+// TestOpsTokenIsIndependentOfSignaling pins the 2026-10-06 fix.
+//
+// Ops access used to be checked against the *signaling* token whitelist. That coupled two
+// unrelated decisions: turning on the ops gate also turned on WebSocket auth for every node.
+// Deployed that way, the failure was invisible to HTTP probes (/status still answered 200 via
+// a different route) while every node that sends no token lost its signaling connection —
+// i.e. cross-node transfer broke while the service looked healthy.
+//
+// So: -tokens must gate WebSocket registration only, -ops-token must gate /status and
+// /status/key only, and configuring one must never affect the other.
+func TestOpsTokenIsIndependentOfSignaling(t *testing.T) {
+	get := func(hs *httptest.Server, path, token string) int {
+		req, _ := http.NewRequest(http.MethodGet, hs.URL+path, nil)
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
@@ -787,9 +791,41 @@ func TestOpsTokenHonoursWhitelist(t *testing.T) {
 		return resp.StatusCode
 	}
 
-	assert.Equal(t, http.StatusOK, get("good-token"))
-	assert.Equal(t, http.StatusUnauthorized, get("bad-token"))
-	assert.Equal(t, http.StatusUnauthorized, get(""))
+	t.Run("ops token alone gates /status but leaves signaling open", func(t *testing.T) {
+		srv := NewServer("testkey", WithOpsToken("ops-only"))
+		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/status" {
+				srv.HandleStatus(w, r)
+				return
+			}
+			srv.HandleWS(w, r)
+		}))
+		defer hs.Close()
+
+		assert.Equal(t, http.StatusOK, get(hs, "/status", "ops-only"))
+		assert.Equal(t, http.StatusUnauthorized, get(hs, "/status", "wrong"))
+		assert.Equal(t, http.StatusUnauthorized, get(hs, "/status", ""))
+
+		// The whole point: an ops token must NOT have become a signaling requirement.
+		conn, resp, err := websocket.DefaultDialer.Dial(
+			"ws"+strings.TrimPrefix(hs.URL, "http")+"/peerjs?key=testkey&id=n1&token=anything",
+			nil)
+		require.NoError(t, err, "an empty signaling whitelist must still allow any token")
+		require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+		conn.Close()
+	})
+
+	t.Run("signaling whitelist alone does not grant ops access", func(t *testing.T) {
+		srv := NewServer("testkey", WithTokenWhitelist([]string{"node-token"}))
+		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv.HandleStatus(w, r)
+		}))
+		defer hs.Close()
+
+		assert.Equal(t, http.StatusUnauthorized, get(hs, "/status", "node-token"),
+			"a signaling token must not be accepted on the ops surface")
+		assert.Equal(t, http.StatusUnauthorized, get(hs, "/status", ""))
+	})
 }
 
 // --- 2026-10-04: explicit CORS allow-list (WithCORSOrigins) ---
@@ -856,7 +892,7 @@ func TestCORSOrigins_ExplicitStarInListRestoresWildcard(t *testing.T) {
 // This is the regression guard for a live-measured leak (2026-10-06): an unauthenticated
 // GET /status returned {"key":"pd-signal-…"} plus the whole node roster.
 func TestOpsKeyEndpointGated(t *testing.T) {
-	_, hs := testServerWithOpts(t, WithTokenWhitelist([]string{opsTestToken}))
+	_, hs := testServerWithOpts(t, WithOpsToken(opsTestToken))
 
 	// 1. No token at all.
 	resp, err := publicGet(hs, "/status/key")

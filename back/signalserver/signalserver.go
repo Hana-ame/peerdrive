@@ -16,6 +16,7 @@
 package signalserver
 
 import (
+	"crypto/subtle"
 	"crypto/rand"
 	"embed"
 	"encoding/json"
@@ -34,6 +35,7 @@ var dashboardFS embed.FS
 
 type Server struct {
 	key            string
+	opsToken       string
 	path           string
 	queueTTL       time.Duration   // offline queue TTL (used for OFFER expiry)
 	heartbeatTTL   time.Duration   // discovery heartbeat expiry time
@@ -92,6 +94,19 @@ func WithCORSOrigins(origins []string) Option {
 // A whitelist lets self-hosted deployments trust only known nodes.
 // Note: discovery endpoints (announce/nodes) remain public—discovery's purpose is to let anyone find
 // nodes; the whitelist only constrains the signaling plane.
+// WithOpsToken sets the single credential for ops-facing endpoints (/status, /status/key).
+//
+// 2026-10-06: this was previously taken from the *signaling* token whitelist, which coupled two
+// unrelated decisions — securing the ops surface silently turned on signaling auth for every
+// node. Deployed that way, all existing nodes (which send no token) could no longer open a
+// WebSocket, while HTTP probes kept returning 200, so it looked healthy. Hence a separate flag:
+// turning the ops gate on must never break node connectivity.
+func WithOpsToken(token string) Option {
+	return func(s *Server) {
+		s.opsToken = token
+	}
+}
+
 func WithTokenWhitelist(tokens []string) Option {
 	return func(s *Server) {
 		if len(tokens) == 0 {
@@ -345,9 +360,17 @@ func tokenFromRequest(r *http.Request) string {
 // An empty token never passes — that is what closes the "any web page reads the roster"
 // hole for the default deployment, because a browser cannot conjure a token.
 func (s *Server) opsTokenOK(r *http.Request) bool {
+	// Ops credentials are independent of the signaling token whitelist.
+	// An unconfigured ops token means "no ops access at all" — default closed.
+	if s.opsToken == "" {
+		return false
+	}
 	t := tokenFromRequest(r)
 	if t == "" {
 		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(t), []byte(s.opsToken)) == 1 {
+		return true
 	}
 	// ⚠️ 这里原来是「白名单为空 → 任何非空 token 都放行」。
 	// 2026-10-06 实测：线上没配 -tokens，于是
@@ -358,10 +381,7 @@ func (s *Server) opsTokenOK(r *http.Request) bool {
 	// 「不设防」——后者把一个鉴权字段变成了摆设：任何人都能构造出非空 token。
 	// 空 → 一律拒绝，与 HandleWS 里 tokenWhitelist 的空=不限制**刻意不同**
 	// （那个空是 peerjs 协议行为，不能改；这里是运维面，必须默认关闭）。
-	if len(s.tokenWhitelist) == 0 {
-		return false
-	}
-	return s.tokenWhitelist[t]
+	return false
 }
 
 // HandleOpsKey GET /status/key → 只回信令 key，且要求完整 ops 鉴权。
