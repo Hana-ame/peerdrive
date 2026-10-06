@@ -152,6 +152,11 @@ jobs:
           done
           curl -sf -m 5 http://127.0.0.1:3000/ping | grep -q pong \
             || { echo "::error::零配置面板用的节点没起来"; tail -30 /tmp/pdzero/node.log; exit 1; }
+          # ⚠️ 必须先 cd 回装 playwright 的目录再跑：
+          # 脚本用 createRequire(process.cwd()) 解析 playwright-core，
+          # 上面为了给节点一个独立 cwd（peerdrive.db 落在 cwd 下）已经 cd 走了，
+          # 留在那儿会以「需要 playwright-core」退出码 2 结束 —— 首跑就是这么红的。
+          cd /tmp/pw
           node "$GITHUB_WORKSPACE/packages/peerdrive-client/scripts/verify-panel-zero-config.mjs" 2>&1 |
             tee /tmp/panel-zero.log
 
