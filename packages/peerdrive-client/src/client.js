@@ -138,6 +138,9 @@ export class PeerDriveClient {
     this.psk = typeof opts.psk === 'string' ? opts.psk : ''
     this.pskState = this.psk ? 'pending' : 'none'
     this.pskError = null
+    // Resolvers waiting for the gate (see _awaitPskGate). Kept as a set because several
+    // verbs may be issued back-to-back before the gate opens.
+    this._pskGateWaiters = new Set()
 
     this._pend = new Map() // reqId → fetch state
     this._verbs = new Map() // reqId → one-shot response wait slot (share/pull etc.)
@@ -158,9 +161,15 @@ export class PeerDriveClient {
    */
   _sendPskAuth() {
     if (!this.psk || this.pskState !== 'pending') return
+    // ⚠️ 顺序很重要（2026-10-06 实测踩到）：必须**先**置 'sent' 再 send。
+    // 反过来写（先 send 后置 'sent'）时，如果对端的回执是**同步**到达的
+    // （假连接就是如此：send() 里直接 emit('data')），
+    // psk-ok 的处理会把 pskState 置成 'ok'，紧接着又被这一行覆盖回 'sent' ——
+    // 门禁状态被自己抹掉，之后所有动词都以为门禁还开着，一直等到超时。
+    // 真实 WebRTC 下回执是异步的，所以这个 bug 只在同步回执下暴露，更难察觉。
+    this.pskState = 'sent'
     try {
       this.conn.send(pskAuthFrame(this.psk))
-      this.pskState = 'sent'
     } catch {
       this.pskState = 'none' // can't send, treat as not configured: let peer tell us via err
     }
@@ -282,7 +291,7 @@ export class PeerDriveClient {
     if (onAbort) signal.addEventListener('abort', onAbort, { once: true })
     try {
       // First frame header. size=0 (empty file) → server directly returns uploaded, skips meta.
-      this._send(uploadFrame(reqId, name, size, 0))
+      await this._send(uploadFrame(reqId, name, size, 0))
       for (;;) {
         const frame = await round()
         if (state.timer) clearTimeout(state.timer)
@@ -321,7 +330,7 @@ export class PeerDriveClient {
         }
         if (frame.type === 'ack') {
           if (offset >= size) continue // last chunk's completion acknowledgment not arrived yet, keep waiting
-          this._send(uploadFrame(reqId, name, size, offset))
+          await this._send(uploadFrame(reqId, name, size, offset))
           continue
         }
         throw new PeerDriveError(`Upload interrupted by unknown frame: ${frame.type}`, ERR.PROTOCOL)
@@ -475,6 +484,10 @@ export class PeerDriveClient {
       }
     }
     this._openState = false
+    // Wake anyone blocked on the PSK gate: on close the gate will never open,
+    // so leaving them pending would hang the caller until its own timeout.
+    this._settlePskGate(this._closeErr || new PeerDriveError(
+      'connection closed before the psk gate opened', ERR.NETWORK))
   }
 
   // ── Internal: connection binding and frame dispatch ────────────────────────────────────────
@@ -556,10 +569,13 @@ export class PeerDriveClient {
       case 'psk-ok':
         this.pskState = 'ok'
         this.pskError = null
+        this._settlePskGate(null)
         return
       case 'psk-err':
         this.pskState = 'err'
         this.pskError = frame.msg || 'psk: peer rejected the key'
+        this._settlePskGate(new PeerDriveError(
+          `psk: peer rejected the key: ${this.pskError}`, ERR.PSK_REQUIRED))
         return
       default:
         // Forward compatibility for unknown frame types only holds for frames "not about me".
@@ -736,9 +752,64 @@ export class PeerDriveClient {
     }
   }
 
+  /**
+   * _awaitPskGate resolves once the peer's gate has opened, rejects if it closed or was rejected.
+   *
+   * Why this exists (2026-10-06): psk-auth is fire-and-forget — _sendPskAuth sends it and only
+   * records pskState='sent', with no acknowledgment wait. The server rejects every "make me work"
+   * verb until it has processed that frame (conn.go: pskGate). So a verb issued right after open
+   * can arrive first and get bounced with PSK_REQUIRED, even though the key was correct and
+   * the DataChannel is up. DataChannel ordering only guarantees order *between the two ends once
+   * frames are queued*, not that our psk-auth has been consumed before we send a verb.
+   * This is exactly the race the CI comment called out on 2026-10-04; the comment's "correct fix"
+   * (confirm the gate before sending subsequent verbs) is what this implements.
+   *
+   * Only waits when a psk is actually configured and the gate hasn't settled yet — a peer with
+   * no psk gate is unaffected, and an already-open gate resolves synchronously on the microtask queue.
+   */
+  _awaitPskGate() {
+    if (!this.psk) return Promise.resolve()
+    if (this.pskState === 'ok' || this.pskState === 'none') return Promise.resolve()
+    if (this.pskState === 'err') {
+      return Promise.reject(new PeerDriveError(
+        `psk: peer rejected the key: ${this.pskError}`, ERR.PSK_REQUIRED))
+    }
+    return new Promise((resolve, reject) => {
+      this._pskGateWaiters.add({ resolve, reject })
+    })
+  }
+
+  _settlePskGate(err) {
+    if (this._pskGateWaiters.size === 0) return
+    const waiters = [...this._pskGateWaiters]
+    this._pskGateWaiters.clear()
+    for (const w of waiters) { if (err) w.reject(err); else w.resolve() }
+  }
+
+  /**
+   * 发送一个文本帧。门禁未开时**返回 Promise**，需要 await。
+   *
+   * 注意同步性：无 psk、或门禁已开时走下面的同步分支立即 send 并返回 null。
+   * 这是被测试钉住的契约（test/client.test.mjs「req 帧当场发出」）：
+   * 帧必须当场送达，不能被塞进微任务队列，否则所有「发完立刻断言」的测试全部失效。
+   */
   _send(frameText) {
     if (this._closeErr) throw this._closeErr
-    this.conn.send(frameText)
+    const gate = this._pskGatePending() ? this._awaitPskGate() : null
+    if (gate === null) { // 门禁无需等待：保持原来的同步语义
+      this.conn.send(frameText)
+      return null
+    }
+    return gate.then(() => {
+      if (this._closeErr) throw this._closeErr
+      this.conn.send(frameText)
+    })
+  }
+
+  /** 门禁是否还没落定（需要等 psk-ok / psk-err）。 */
+  _pskGatePending() {
+    if (!this.psk) return false
+    return this.pskState === 'pending' || this.pskState === 'sent'
   }
 
   _startFetch(reqId, hash, opts) {
@@ -768,10 +839,15 @@ export class PeerDriveClient {
     this._pend.set(reqId, p)
     this._armIdle(p)
     this.stats.requests++
-    try {
-      this._send(reqFrame(hash, { offset, size, reqId }))
-    } catch (e) {
-      this._cancel(reqId, e instanceof Error ? e : new Error(String(e)))
+    // 注意：**必须同步**返回 p（调用方 stream() 要立刻读 p.queue / 挂 p.onAbort），
+    // 所以这里不 await _send，而是把它挂成后台任务：
+    // 门禁未开时 req 帧会晚一点发出，这正是我们想要的（先等 psk-ok）；
+    // 门禁已开/无门禁时 _send 同步发出，行为与改动前完全一致。
+    const sendReq = this._send(reqFrame(hash, { offset, size, reqId }))
+    if (sendReq) {
+      sendReq.catch((e) => {
+        this._cancel(reqId, e instanceof Error ? e : new Error(String(e)))
+      })
     }
     return p
   }
@@ -862,6 +938,11 @@ export class PeerDriveClient {
     else v.resolve(frame)
   }
 
+  // async：同上，_send 可能在等 PSK 门禁。
+  // ⚠️ 注意：`await` 放在 new Promise 的 executor 里是不行的——executor 本身不是 async
+  // 函数（acorn 会直接报 "Cannot use keyword 'await' outside an async function"）。
+  // 所以改成：先把请求登记进 _verbs（同步，超时计时立刻开始），再把发送挂成后台任务，
+  // 发送失败时再走原来那套清理 + reject。语义与之前一致，且不丢超时保护。
   _requestVerb(reqId, frameText, timeoutMs) {
     return new Promise((resolve, reject) => {
       const entry = { resolve, reject, timer: null }
@@ -870,13 +951,17 @@ export class PeerDriveClient {
         this._verbs.delete(reqId)
         reject(new PeerDriveError(`Peer ${timeoutMs}ms no response`, ERR.TIMEOUT))
       }, timeoutMs)
-      try {
-        this._send(frameText)
-      } catch (e) {
-        this._verbs.delete(reqId)
-        clearTimeout(entry.timer)
-        reject(e instanceof Error ? e : new Error(String(e)))
+      const sent = this._send(frameText)
+      if (sent) {
+        sent.catch((e) => {
+          this._verbs.delete(reqId)
+          clearTimeout(entry.timer)
+          reject(e instanceof Error ? e : new Error(String(e)))
+        })
+        return
       }
+      // sent === null：无门禁或门禁已开，_send 已同步把帧发出去了，
+      // 不会失败，无需额外处理。
     })
   }
 }

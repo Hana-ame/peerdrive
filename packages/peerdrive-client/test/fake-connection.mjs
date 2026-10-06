@@ -22,6 +22,8 @@ export class FakeConnection {
     this.autoServe = autoServe
     // 观测钩子：每次收到请求帧时回调（测试用它做故障注入）
     this.onServe = null
+    // 收到 psk-auth 时是否接受。false = 扮演服务端拒绝，用来测 psk-err 分支。
+    this.pskAccept = true
   }
 
   // ── 连接接口 ──
@@ -87,6 +89,17 @@ export class FakeConnection {
 
   _serve(frame) {
     if (this.onServe) this.onServe(frame)
+    // psk-auth：按 back/internal/transport/conn.go 的行为回执（servePskAuth → psk-ok/psk-err）。
+    // 2026-10-06：客户端现在会**等门禁开**才发后续动词，所以假连接必须回执，
+    // 否则任何带 psk 的测试都会停在门禁上等到超时——这会让假连接比真服务端更苛刻，
+    // 测出来的"通过"反而没有意义（假绿的一种）。
+    if (frame.type === 'psk-auth') {
+      const accept = this.pskAccept !== false
+      this.replyText(accept
+        ? { type: 'psk-ok' }
+        : { type: 'psk-err', msg: 'psk: wrong key' })
+      return
+    }
     if (frame.type === 'share') {
       const snap = this.shareSnapshot || { collections: [], files: [], dirs: [] }
       const total = (snap.collections?.length || 0) + (snap.files?.length || 0)
