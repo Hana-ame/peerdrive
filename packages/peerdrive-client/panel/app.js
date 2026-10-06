@@ -20,7 +20,7 @@
     host: 'peersignal.moonchan.xyz',
     port: 443,
     path: '/',
-    key: 'pd-signal-b9447b406828e500',
+    key: 'pd-signal-1edf5e05e4a52b7351392574',
     secure: true,
   }
   var MAX_RECENT = 8
