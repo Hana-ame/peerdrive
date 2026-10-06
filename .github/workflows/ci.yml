@@ -109,8 +109,13 @@ jobs:
   # packages/peerdrive-client：纯 WebRTC 消费端（61 个用例，覆盖协议状态机 +
   # 增量 SHA-256）。刻意零依赖——所以这里不需要 npm ci：没有 lock 文件、
   # 没有网络安装步骤，CI 只跑 node --test。
-  # 另外校验公共面板产物 dist/panel.html 与 src/ 一致（它是内联单文件，
-  # 改了 src 忘了 build 就会发出过期的面板，这种漂移这里必须拦住）。
+  # 另外校验两件事，都是「忘了重新生成就会发出过期产物」这一类漂移：
+  #   1. dist/panel.html 与 src/ 一致（它是内联单文件，改了 src 忘了 build
+  #      就会发出过期的面板）；
+  #   2. dist/peerjs.min.js 的 sha256 与 vendor-peerjs.mjs 里记录的期望值一致
+  #      ——**这一条是 2026-10-06 新增的**：该文件从 2026-10-06 起被 go:embed
+  #      进二进制（back/internal/panel/），内嵌了一份副本。副本与 dist/ 两处
+  #      不一致的话，内嵌进用户手上的面板连不上，且本地毫无征兆。
   client-package:
     runs-on: ubuntu-latest
     defaults:
@@ -123,6 +128,21 @@ jobs:
           node-version: 22
       - run: npm test
       - run: npm run check:panel
+      - name: 校验内嵌进二进制的 panel/peerjs 副本与 dist/ 一致
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in panel.html peerjs.min.js; do
+            a="dist/$f"; b="../../back/internal/panel/$f"
+            if [ ! -f "$b" ]; then echo "缺失: $b"; fail=1; continue; fi
+            if cmp -s "$a" "$b"; then
+              echo "一致: $f"
+            else
+              echo "不一致: $a vs $b —— 重新执行 npm run vendor:peerjs 并同步复制"
+              fail=1
+            fi
+          done
+          [ "$fail" = 0 ]
 
   frontend:
     runs-on: ubuntu-latest

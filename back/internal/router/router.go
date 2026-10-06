@@ -38,6 +38,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
+
+	"peerdrive/internal/panel"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
@@ -400,6 +402,34 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	} else {
 		log.LogInfo("router: swagger disabled by PEERDRIVE_SWAGGER=off")
 	}
+
+	// 公共面板（internal/panel，内嵌单文件）：零学习成本的关键一环。
+	//
+	// 挂在 /panel 而不是 "/"："/" 同时是所有未匹配路由的兜底（gin 的 404/redirect），
+	// 抢过来会让本来该 404 的地址变成 200 HTML，看起来像 API 在返回页面。
+	//
+	// 不受 PSK 门禁：面板是「打开就能用」的入口，拦在门外等于取消零学习成本。
+	// 它只读节点清单，真正的数据读取仍走既有的鉴权路径。
+	// 用 panel.Handler 而不是 panel.HTML()：前者会注入「我已经知道该连谁」的
+	// 前置脚本（同源 → 反查本节点 ID → 自动连），后者是原始文件。
+	// 直接吐原始文件的话用户打开面板还得手填 node/host/port，不算零学习成本。
+	//
+	// ⚠️ 只能注册精确路径，不能加 /panel/*any：gin 的路由树里已有 "/" 前缀，
+	// 再挂 catch-all 通配会直接 panic
+	//   catch-all wildcard '*any' in new path '/panel/*any' conflicts with existing path segment ''
+	// 面板没有子资源，精确匹配 /panel 与 /panel/ 两个形态就够。
+	panelMux := http.NewServeMux()
+	panelMux.Handle("/panel", panel.Handler("/panel"))
+	panelMux.Handle("/panel/", panel.Handler("/panel"))
+	r.GET("/panel", gin.WrapH(panelMux))
+	r.GET("/panel/", gin.WrapH(panelMux))
+
+	// 面板的同目录 peerjs.min.js 副本：让它「优先加载同目录」这一环恒定命中，
+	// 不必每次都去 CDN（内网/墙/慢网下 CDN 会表现为「面板连不上」，
+	// e2e.yml:120-140 记录的 known-flaky 就是这个根因）。
+	r.GET("/peerjs.min.js", func(c *gin.Context) {
+		c.Data(http.StatusOK, "application/javascript; charset=utf-8", panel.PeerJSJS())
+	})
 
 	// PeerJS node discovery
 	registerPeerJSRoutes(r, authRequired)

@@ -76,9 +76,9 @@ func RequestIDFrom(c *gin.Context) string {
 
 // SecurityHeaders sets a set of default security response headers.
 //
-// CSP enabled by default, but /swagger/* is an exception: Swagger UI's official
-// implementation relies on inline scripts and eval; CSP turns it into a blank
-// page. Admin console pages are not served by this process (front is separately
+// CSP enabled by default, but /swagger/* and /panel/* are exceptions: both are
+// single-file HTML pages with inline scripts/styles (Swagger's official UI relies
+// on inline scripts and eval); CSP turns them into blank pages. Admin console pages are not served by this process (front is separately
 // deployed), so strict CSP has no business side effects. If compatibility issues
 // arise, use PEERDRIVE_CSP=off to disable.
 func SecurityHeaders(disableCSP bool) gin.HandlerFunc {
@@ -88,7 +88,14 @@ func SecurityHeaders(disableCSP bool) gin.HandlerFunc {
 		c.Header("X-Frame-Options", "SAMEORIGIN")
 		c.Header("Referrer-Policy", "no-referrer")
 		c.Header("Cross-Origin-Opener-Policy", "same-origin")
-		if !disableCSP && !strings.HasPrefix(c.Request.URL.Path, "/swagger") {
+		// /panel 与 /swagger 同理：公共面板是单文件内联（4 段 <script> + style），
+		// 严格 CSP 会把内联全部拦掉，面板打开是一张空白页 —— 实测踩到：
+		// 浏览器控制台报 "Executing inline script violates ... default-src 'self'"，
+		// 自动连接的前置脚本根本没跑。
+		// 放宽只针对这一个前缀，且其余指令（object-src/base-uri/frame-ancestors）不放宽。
+		inlineHTML := strings.HasPrefix(c.Request.URL.Path, "/swagger") ||
+			strings.HasPrefix(c.Request.URL.Path, "/panel")
+		if !disableCSP && !inlineHTML {
 			c.Header("Content-Security-Policy", csp)
 		}
 		c.Next()

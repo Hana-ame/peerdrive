@@ -76,12 +76,21 @@ func RunServe() {
 	if err := config.Validate(cfg); err != nil {
 		stdlog.Fatalf("%v", err)
 	}
-	r, shutdown, err := BuildRouter(cfg)
+	r, shutdown, info, err := BuildRouterWithInfo(cfg)
 	if err != nil {
 		stdlog.Fatalf("%v", err)
 	}
 	defer shutdown()
 	log.LogInfo("main: setting up HTTP router")
+
+	// 启动指引要在 RunHTTP 阻塞之前打出来——那是用户第一次也是唯一一次
+	// 需要知道「接下来做什么」的时刻（见 nextstep.go 的说明）。
+	PrintNextStep(NextStepInfo{
+		NodeID:  info.NodeID,
+		Host:    cfg.Host,
+		Port:    cfg.Port,
+		Storage: cfg.StorageDir,
+	}, panelFilePath())
 
 	addr := ListenAddr(cfg)
 	RunHTTP(addr, r)
@@ -94,6 +103,32 @@ func RunServe() {
 // 返回的 shutdown 负责关闭 DB 与 PeerJS 服务——调用方必须调用，否则
 // Windows 上 .db 文件删不掉，且进行中的大文件传输会被截断。
 func BuildRouter(cfg *config.Config) (http.Handler, func(), error) {
+	h, shutdown, _, err := buildRouter(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return h, shutdown, nil
+}
+
+// BuildRouterWithInfo 与 BuildRouter 相同，额外带回启动指引需要的节点信息
+// （当前只有 nodeID）。单独提供是为了不改动既有调用方——
+// cmd/peerdrive 的 all 子命令与既有测试都仍在用 BuildRouter。
+func BuildRouterWithInfo(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
+	return buildRouter(cfg)
+}
+
+// RouterInfo 是启动指引要用的运行时信息。
+type RouterInfo struct {
+	NodeID string // PeerJS 节点 ID（未启用 PeerJS 时为空）
+}
+
+type builtRouter struct {
+	handler  http.Handler
+	shutdown func()
+	info     RouterInfo
+}
+
+func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	var shutdowns []func()
 	shutdown := func() {
 		// 后注册的先关：PeerJS 依赖 DB，关的时候按相反顺序。
@@ -101,9 +136,9 @@ func BuildRouter(cfg *config.Config) (http.Handler, func(), error) {
 			shutdowns[i]()
 		}
 	}
-	fail := func(err error) (http.Handler, func(), error) {
+	fail := func(err error) (http.Handler, func(), RouterInfo, error) {
 		shutdown()
-		return nil, nil, err
+		return nil, nil, RouterInfo{}, err
 	}
 	storageDir := cfg.StorageDir
 	log.LogInfo("main: config loaded, storageDir=%s, port=%s", storageDir, cfg.Port)
@@ -308,7 +343,13 @@ func BuildRouter(cfg *config.Config) (http.Handler, func(), error) {
 	// share is the NodeShare built in the PeerJS block above; nil when PeerJS is disabled,
 	// which the summary itself treats as "sharing not enabled".
 	logSecuritySummary(cfg, share)
-	return r, shutdown, nil
+
+	// NodeID is needed by the startup instructions (panel URL); PeerJS disabled → empty.
+	var nodeID string
+	if peerjsSvc != nil {
+		nodeID = peerjsSvc.ID()
+	}
+	return r, shutdown, RouterInfo{NodeID: nodeID}, nil
 }
 
 // RunHTTP 在 addr 上监听并阻塞，直到出错或收到 SIGINT/SIGTERM，然后优雅退出。

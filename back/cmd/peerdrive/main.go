@@ -59,6 +59,8 @@ func main() {
 		runReg(args)
 	case "all":
 		runAll(args)
+	case "demo":
+		os.Exit(runDemo(args))
 	case "version", "--version", "-v":
 		fmt.Printf("peerdrive %s\n", version.Version)
 	case "help", "--help", "-h":
@@ -74,12 +76,16 @@ func usage() {
 	fmt.Fprint(os.Stderr, `peerdrive — 单二进制：主服务 + 信令 + 注册认证
 
 用法:
+  peerdrive demo         一条命令跑通全链路（信令+两节点+跨节点传文件+校验）
   peerdrive [serve]      起主服务（默认）
   peerdrive signal       只起信令 + 节点发现
   peerdrive reg          只起注册 / 认证 / 中继登记
   peerdrive all          三者同进程、同端口起（端口=主服务的 PEERDRIVE_PORT）
   peerdrive version      打印版本
   peerdrive help         本帮助
+
+第一次用，先跑 demo：它不需要任何配置，会把「节点之间怎么传文件」
+跑一遍给你看。看完直接 peerdrive serve，浏览器打开它打印的面板地址即可。
 
 子命令之间互不影响：信号与注册服务的旧环境变量全部照旧生效
 （PEERJS_PORT / JWT_SECRET / DB_PATH 等），旧的部署脚本不需要改。

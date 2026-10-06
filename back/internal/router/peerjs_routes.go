@@ -88,13 +88,25 @@ func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 		// psk_peers: current number of connections that have passed the gate. For admin console / debugging —
 		// "can't fetch from peer" first suspect is that they didn't present a key.
 		pskEnabled, pskOK := peerjsService.PSKState()
-		c.JSON(http.StatusOK, gin.H{
+		// signal_*: 本节点自己用的信令参数。面板拿到它就不必让用户手填
+		// host/port/path/key —— 面板连的必须是**这个节点所在的信令**，
+		// 否则会连到别处（实测填本机 3000 会得到 ws 404：那个端口是节点自己的
+		// HTTP 服务，不是信令）。只读字段，不改任何行为。
+		resp := gin.H{
 			"id":        peerjsService.ID(),
 			"online":    true,
 			"peers":     peers,
 			"psk":       pskEnabled,
 			"psk_peers": pskOK,
-		})
+		}
+		if peerjsCfg != nil {
+			resp["signal_host"] = peerjsCfg.PeerJSHost
+			resp["signal_port"] = peerjsCfg.PeerJSPort
+			resp["signal_path"] = "/"
+			resp["signal_key"] = peerjsCfg.PeerJSKey
+			resp["signal_secure"] = peerjsCfg.PeerJSSecure
+		}
+		c.JSON(http.StatusOK, resp)
 	})
 
 	// ── Node marketplace (doc/NETDISK.md M1) ──
