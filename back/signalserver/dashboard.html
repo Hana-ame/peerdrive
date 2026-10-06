@@ -59,9 +59,13 @@ footer { margin-top: 24px; text-align: center; color: #6e7681; font-size: 11px; 
     <div class="label">Messages Forwarded</div>
     <div class="value" id="msgCount">--</div>
   </div>
-  <div class="card key">
+  <!-- 2026-10-06：这里原来直接显示信令 key 明文。
+       /status 是个同源可读端点，面板能在浏览器里显示密钥，就等于
+       任何能打开这个页面的人都能读走它 —— 而 key 是这个公开中继的唯一凭据。
+       改成只回答「配没配」，值改从 /status/key 查（需要 ops token）。 -->
+  <div class="card key" title="信令 key 是中继的唯一凭据，刻意不在面板里回显。用 curl '服务器/status/key?token=…' 查看。">
     <div class="label">API Key</div>
-    <div class="value" id="key">--</div>
+    <div class="value" id="key" title="仅显示是否已配置，不显示值">已配置</div>
   </div>
 </div>
 
@@ -159,15 +163,38 @@ function drawGraph(nodes, links) {
   });
 }
 
+// ops token 从哪来：URL 的 ?token=（运维从带 token 的链接打开面板），
+// 存一次到 sessionStorage，之后刷新面板不用重复带。
+// 刻意不用 localStorage —— token 是凭据，关掉标签页就该失效。
+function opsToken() {
+  var fromURL = new URLSearchParams(location.search).get('token');
+  if (fromURL) {
+    try { sessionStorage.setItem('peerdrive.opsToken', fromURL); } catch (e) { /* 隐私模式 */ }
+    return fromURL;
+  }
+  try { return sessionStorage.getItem('peerdrive.opsToken') || ''; } catch (e) { return ''; }
+}
+
+function opsAuthHeaders() {
+  var t = opsToken();
+  // 服务端 tokenFromRequest 只认 ?token= 与 Authorization: Bearer，别自造头名
+  return t ? {'Authorization': 'Bearer ' + t} : {};
+}
+
 function poll() {
-  fetch('/status').then(r => r.json()).then(data => {
+  // /status 自 2026-10-04 起要 ops token；没配 token 时它返回 401。
+  // 之前这里直接 .json()，401 的 "ops token required" 会被当成数据渲染出
+  // 一屏 undefined —— 面板看起来像挂了，其实只是没鉴权。
+  fetch('/status', {headers: opsAuthHeaders()}).then(r => {
+    if (r.status === 401) throw new Error('需要 ops token（-tokens），且面板需带 token 访问');
+    return r.json();
+  }).then(data => {
     document.getElementById('uptime').textContent = data.uptimeStr || fmtUptime(data.uptimeSec);
     document.getElementById('clients').textContent = data.clients;
     document.getElementById('discovered').textContent = data.discovered;
     document.getElementById('queued').textContent = data.totalQueued;
     document.getElementById('queueDst').textContent = data.queues + ' destinations';
     document.getElementById('msgCount').textContent = data.msgCount;
-    document.getElementById('key').textContent = data.key;
 
     var nodes = data.nodes || [];
     drawGraph(nodes, data.links || []);

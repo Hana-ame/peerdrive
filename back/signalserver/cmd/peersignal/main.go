@@ -51,6 +51,9 @@ func main() {
 	mux.HandleFunc("/discover/nodes", srv.HandleNodes)
 	// Status API and dashboard (graph visualization)
 	mux.HandleFunc("/status", srv.HandleStatus)
+	// 信令 key 单独一个端点：/status 不再回显它（2026-10-06）。
+	// 同一个 -tokens 白名单做鉴权，没配 token 时默认进不来。
+	mux.HandleFunc("/status/key", srv.HandleOpsKey)
 	mux.HandleFunc("/", srv.HandleDashboard)
 
 	if err := Serve(*addr, *tlsCert, *tlsKey, mux); err != nil {

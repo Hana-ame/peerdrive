@@ -332,8 +332,12 @@ func tokenFromRequest(r *http.Request) string {
 // opsTokenOK reports whether this request may use ops-facing REST endpoints (/status and
 // the full roster). Policy (2026-10-04):
 //
-//   - When a token whitelist is configured, a presented token must be on it.
-//   - When **no** whitelist is configured (the default), any non-empty token passes.
+//   - A token must be presented (query `?token=` or `Authorization: Bearer …`).
+//   - When a token whitelist is configured, the presented token must be on it.
+//   - When **no** whitelist is configured, the request is rejected (2026-10-06 fix:
+//     it used to pass any non-empty token, which made the check decorative — see
+//     the opsTokenOK body). Note this is deliberately NOT peerjs's "empty whitelist =
+//     unrestricted": that one is protocol behaviour, this one is an ops surface.
 //     This is deliberate: default deployments have no token to present, and hard-failing
 //     would break every existing /status dashboard. The real fix is operators turning the
 //     whitelist on (`-tokens`); this keeps that the single switch.
@@ -345,10 +349,35 @@ func (s *Server) opsTokenOK(r *http.Request) bool {
 	if t == "" {
 		return false
 	}
+	// ⚠️ 这里原来是「白名单为空 → 任何非空 token 都放行」。
+	// 2026-10-06 实测：线上没配 -tokens，于是
+	//   curl 'https://peersignal.moonchan.xyz/status?token=totally-made-up'
+	// 返回 200 + 信令 key + 全网节点名册。等于「随便编一个 token 就能读」。
+	//
+	// 语义上「没配白名单」应该意味着**没有可用的 ops 身份**，而不是
+	// 「不设防」——后者把一个鉴权字段变成了摆设：任何人都能构造出非空 token。
+	// 空 → 一律拒绝，与 HandleWS 里 tokenWhitelist 的空=不限制**刻意不同**
+	// （那个空是 peerjs 协议行为，不能改；这里是运维面，必须默认关闭）。
 	if len(s.tokenWhitelist) == 0 {
-		return true
+		return false
 	}
 	return s.tokenWhitelist[t]
+}
+
+// HandleOpsKey GET /status/key → 只回信令 key，且要求完整 ops 鉴权。
+//
+// 从 /status 里拆出来的原因见 HandleStatus 的注释：/status 是同源面板轮询用的，
+// 面板不需要知道 key；而「核对部署配置」需要，所以给它一个单独的、默认无凭据
+// 就进不来的端点。不设 CORS 头 —— 运维从命令行查，不该有网页能读。
+func (s *Server) HandleOpsKey(w http.ResponseWriter, r *http.Request) {
+	if !s.opsTokenOK(r) {
+		http.Error(w, "ops token required", http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	// 仍是共享凭据，所以不回显到日志、也不加缓存。
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{"key": s.key})
 }
 
 // HandleID GET /{path}{key}/id → random id (peerjs API compatible).
@@ -867,7 +896,17 @@ func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
 
 	uptime := time.Since(s.startedAt).Seconds()
 	resp := map[string]any{
-		"key":         s.key,
+		// ⚠️ 这里原来回 `s.key`。2026-10-06 实测线上
+		//   `curl https://peersignal.moonchan.xyz/status` 直接返回
+		//   {"key":"pd-signal-b9447b406828e500", ...}，无需任何凭据。
+		// 于是「把 key 藏进二进制、轮换 git 里的硬编码」这条路走不通——
+		// 任何匿名客户端读一次 /status 就拿到了，轮换没有意义。
+		//
+		// 信号 key 是这个公开中继的唯一凭据（HandleWS 会拿它比对，
+		// signalserver.go:372），拿到就能注册任意 peer id 给全网中继流量。
+		// 所以它不再出现在任何响应体里。
+		// 唯一还需要知道它的场景是「运维要核对部署配置对不对」，
+		// 为此新增 /status/key（带完整 ops 鉴权 + 不走 CORS），见 HandleOpsKey。
 		"uptimeSec":   int64(uptime),
 		"uptimeStr":   formatDuration(uptime),
 		"clients":     clientCount,
