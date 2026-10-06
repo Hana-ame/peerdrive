@@ -209,6 +209,11 @@ jobs:
         # 保留原记录的意义：提醒「红了先 rerun 复核，不要动断言」这条纪律本身
         # 是对的——但它不能替代查清机制。**连续 3 次同样签名就不是 flaky**，
         # 应当去读代码，而不是把「偶发」当成结论。
+        run: |
+          set -o pipefail
+          node "$GITHUB_WORKSPACE/packages/peerdrive-client/scripts/verify-panel.mjs" 2>&1 |
+            tee /tmp/panel-e2e.log
+
       - name: 上传面板自检日志
         if: always()
         uses: actions/upload-artifact@v4

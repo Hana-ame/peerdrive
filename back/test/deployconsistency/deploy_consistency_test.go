@@ -156,3 +156,88 @@ func TestEmbeddedPanelIsByteIdenticalToDist(t *testing.T) {
 		})
 	}
 }
+
+// TestWorkflowStepsStillHaveRunnableBody 保证每个 GitHub Actions step 要么有 run，
+// 要么有 uses —— 不能只有一个 name 和一堆注释。
+//
+// 2026-10-06 亲历：更新 e2e.yml 里那段 known-flaky 注释时，用 python 做
+// 字符串切片替换，把紧跟其后的 `run: | …` 整块吃掉了。剩下的 step 有 name、
+// 有 env、有注释，唯独没有 run —— **本地 yaml.safe_load 照样解析通过**，
+// 因为 YAML 层面它仍然合法；只有 GitHub 的 schema 校验才会拒绝，
+// 表现为整个 workflow 显示为 failure 且没有任何日志。
+//
+// 这类错误本地几乎发现不了，所以必须落成断言。
+func TestWorkflowStepsStillHaveRunnableBody(t *testing.T) {
+	root := repoRoot(t)
+	entries, err := os.ReadDir(filepath.Join(root, ".github", "workflows"))
+	if err != nil {
+		t.Fatalf("读 .github/workflows: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yml") && !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		e := e
+		t.Run(e.Name(), func(t *testing.T) {
+			b, err := os.ReadFile(filepath.Join(root, ".github", "workflows", e.Name()))
+			if err != nil {
+				t.Fatalf("读 %s: %v", e.Name(), err)
+			}
+			lines := strings.Split(string(b), "\n")
+			inSteps := false
+			var curName string
+			hasBody := false
+			flush := func(stepNo int) {
+				if curName == "" {
+					return
+				}
+				if !hasBody {
+					t.Errorf("%s:%d step %q 既没有 run 也没有 uses —— 只有 name 和注释。"+
+						"\n  YAML 层面仍合法，所以本地解析发现不了；GitHub schema 校验会让整个 workflow 直接 failure 且无日志。",
+						e.Name(), stepNo, curName)
+				}
+				curName, hasBody = "", false
+			}
+			for i, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "#") {
+					continue
+				}
+				if !strings.HasPrefix(line, " ") && strings.HasSuffix(trimmed, ":") && strings.HasSuffix(trimmed, "s:") {
+					inSteps = true // 顶层 xxx: 块（jobs: 之类），下一步找 steps:
+					continue
+				}
+				if strings.HasPrefix(trimmed, "steps:") {
+					inSteps = true
+					continue
+				}
+				if !inSteps {
+					continue
+				}
+				// 新 step 开始
+				if strings.HasPrefix(trimmed, "- name:") || trimmed == "- uses:" {
+					flush(i + 1)
+					inSteps = true
+					curName = strings.TrimSpace(strings.TrimPrefix(trimmed, "- name:"))
+					hasBody = trimmed == "- uses:"
+					continue
+				}
+				if strings.HasPrefix(trimmed, "- uses:") {
+					flush(i + 1)
+					curName, hasBody = "<uses>", true
+					continue
+				}
+				// 顶格的 key（离开当前 step / block）
+				if len(line) > 0 && line[0] != ' ' && strings.HasSuffix(trimmed, ":") {
+					flush(i + 1)
+					inSteps = strings.HasSuffix(trimmed, "steps:")
+					continue
+				}
+				if strings.HasPrefix(trimmed, "run:") || strings.HasPrefix(trimmed, "uses:") {
+					hasBody = true
+				}
+			}
+			flush(len(lines))
+		})
+	}
+}
