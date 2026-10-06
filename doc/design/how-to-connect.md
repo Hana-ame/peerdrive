@@ -19,7 +19,7 @@
 |---|------|----------|--------|
 | 01 | [config](modules/01-config.md) | `back/internal/config/` | Env variable loading, defaults, startup-time Validate; not persisted |
 | 02 | [repository metadata DB](modules/02-repository.md) | `back/internal/repository/` | SQLite metadata persistence: files/collections/shares/sync/pin/anon/file_index |
-| 03 | [storage content-addressed store](modules/03-storage.md) | `back/internal/pathutil/` + `back/storage/` | File content-addressed on-disk, path safety, hard links, reserved names |
+| 03 | [storage content-addressed store](modules/03-storage.md) | `back/internal/pathutil/` + `PEERDRIVE_STORAGE` (default `./storage`) | File content-addressed on-disk, path safety, hard links, reserved names |
 | 04 | [router routing & middleware](modules/04-router.md) | `back/internal/router/` | HTTP routing, auth/rate-limit/logging/CORS, collection dispatch, admin verb reusing gin |
 | 05 | [controller HTTP handlers](modules/05-controller.md) | `back/internal/controller/` | HTTP semantic business surface (17 endpoint groups); not persisted |
 | 06 | [service business logic layer](modules/06-service.md) | `back/internal/service/` | Business orchestration (collection/file/share/sync/pin/anon/node_directory/nodeshare/peerpull) |

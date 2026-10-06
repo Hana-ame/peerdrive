@@ -20,7 +20,7 @@
 |---|------|------|----------|--------|
 | 01 | [modules/01-config.md](modules/01-config.md) | config | `back/internal/config/` | Configuration assembly and startup validation, pure in-memory |
 | 02 | [modules/02-repository.md](modules/02-repository.md) | repository | `back/internal/repository/` | SQLite metadata persistence |
-| 03 | [modules/03-storage.md](modules/03-storage.md) | storage | `back/internal/pathutil/` + `back/storage/` | Content-addressed file storage + path safety |
+| 03 | [modules/03-storage.md](modules/03-storage.md) | storage | `back/internal/pathutil/` + `PEERDRIVE_STORAGE` (default `./storage`) | Content-addressed file storage + path safety |
 | 04 | [modules/04-router.md](modules/04-router.md) | router | `back/internal/router/` | HTTP routing / middleware / admin forwarding |
 | 05 | [modules/05-controller.md](modules/05-controller.md) | controller | `back/internal/controller/` | HTTP handler layer |
 | 06 | [modules/06-service.md](modules/06-service.md) | service | `back/internal/service/` | Business logic orchestration |
