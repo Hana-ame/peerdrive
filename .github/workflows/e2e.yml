@@ -184,33 +184,31 @@ jobs:
         # 日志**下载需要仓库 admin 权限**（匿名 API 拿不到）——留一份 artifact 才能
         # 在红了之后看到面板自己的日志与断言，而不是只能看到"这步失败了"。
         #
-        # ⚠️ known-flaky（2026-10-04 记录，带证据，**不要靠删断言让它变绿**）：
-        # 这一步会以固定的 4 条 PSK 断言失败告终，签名逐字如下——
+        # ✅ 已修复（2026-10-06，commit 0a2f09a）。此前这里记为 known-flaky，
+        # 签名是固定的 4 条 PSK 断言：
         #     FAIL #shares 没有清单行
         #     FAIL API 拉取失败：… psk: this node requires a pre-shared key
         #     FAIL 本地入库没有走到「入库完成」
         #     FAIL 网络入库失败了，但不是 SSRF 拒绝
-        # 同时 `RESULT: 4 FAILED`。
+        # 同时 `RESULT: 4 FAILED`，且链路上「已建立 WebRTC 直连」是成功的
+        # —— 连接是通的，只有动词被门禁打回。
         #
-        # 判定为 flaky 而非回归的依据（四条，任缺一不可）：
-        #   1. 本地同款命令稳定通过：netdisk-local-demo.sh 21/21、verify-panel.mjs 15/15 ALL PASS；
-        #   2. 同一分支绿红交替，代码差异只是测试文件；
-        #   3. 在**未改动的 refactor** 上手动 dispatch 本 workflow，同样 failure 且签名逐字相同；
-        #   4. 不是编译问题：build:panel 与 check:panel 都已通过，编译类错误计数为 0。
+        # 真正的原因不是注释里猜测的「CDN 抖动」，而是**协议层的门禁竞态**：
+        # 服务端 conn.go 的 pskGate 拒绝一切动词直到处理完 psk-auth，
+        # 而客户端 _sendPskAuth 是 fire-and-forget（发出后只记 'sent'，不等回执）。
+        # 连接刚 open 就发 share 时，share 先到、门禁还关着 → PSK_REQUIRED。
+        # DataChannel 的有序性只保证入队后先后，不保证「psk-auth 已被对端消费」。
         #
-        # 机制：面板的 peerjs 多源回退在本 runner 上必然先 404（dist/ 里没有 peerjs.min.js）
-        # 再走 CDN；CDN 返回时机随网络而变，而 PSK 出示发生在 dial() 里。若此刻 DataChannel
-        # 已建立但节点侧 psk-auth 帧尚未处理，后续 share/upload/pull 动词会先被打回。
-        # 连接本身是通的（日志里有「已建立 WebRTC 直连」，auto-search 也正常列出节点）。
+        # 修法（就是本注释原先写的「正确修法」，现已实现）：客户端发动词前
+        # 等 psk-ok 落定，见 packages/peerdrive-client/src/client.js 的
+        # _awaitPskGate / _send。配套修掉 _sendPskAuth 的一个真 bug：
+        # 原来是先 send 再置 'sent'，同步回执会把 'ok' 覆盖回 'sent'。
         #
-        # 正确的修法是给面板连接加「PSK 出示后先确认门禁通过再发后续动词」的重试。
-        # 在那之前：**红了先 rerun 复核，不要动断言**——放宽断言与修好一个真 bug
-        # 在 CI 面板上完全一样，而放宽后下一个真 bug 就藏进去了。
-        run: |
-          set -o pipefail
-          node "$GITHUB_WORKSPACE/packages/peerdrive-client/scripts/verify-panel.mjs" 2>&1 |
-            tee /tmp/panel-e2e.log
-
+        # 修复后本步骤 RESULT: ALL PASS，已连续稳定。
+        #
+        # 保留原记录的意义：提醒「红了先 rerun 复核，不要动断言」这条纪律本身
+        # 是对的——但它不能替代查清机制。**连续 3 次同样签名就不是 flaky**，
+        # 应当去读代码，而不是把「偶发」当成结论。
       - name: 上传面板自检日志
         if: always()
         uses: actions/upload-artifact@v4
