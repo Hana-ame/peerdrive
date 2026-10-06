@@ -63,7 +63,7 @@ sync).
 |---|---|---|
 | repository (11 repos) | `repository/*.go` + `db.go` | [README.md](L5-data/README.md) |
 
-## ⑥ Discovery aspect — `back/internal/signalserver/` + `transport/*_discovery.go`
+## ⑥ Discovery aspect — `back/signalserver/`（独立模块）+ `back/internal/transport/*_discovery.go`
 
 **One-liner**: How nodes find each other (self-hosted signaling/HTTP discovery/MQTT rooms),
 only exchanges peerId.

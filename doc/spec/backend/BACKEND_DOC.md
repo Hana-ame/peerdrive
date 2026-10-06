@@ -97,7 +97,7 @@
 |--------|------|---------|------|----------------|----------|
 | `POST` | `/actions/merge` | `controller.MergeFromSource` | `internal/controller/merge.go:38` | JSON: `{"username": "...", "collection_name": "...", "source_username": "...", "source_coll_name": "...", "strategy": "ours\|theirs\|manual"}` | `200` `{message: "merge complete", conflicts_found: int, total_entries: int}`. Strategy `manual` returns `409` with `{conflicts: [{path, local_hash, source_hash}], message}`. |
 | `POST` | `/actions/fork` | `controller.ForkCollection` | `internal/controller/fork.go:32` | JSON: `{"username": "...", "collection_name": "...", "source_username": "...", "source_coll_name": "..."}` | `200` `{message: "forked", id, username, collection_name, entries_count}`. Copies all entries from source to new collection. `409` if target already exists. |
-| `POST` | `/actions/pull` | `controller.PullCollection` | `internal/controller/fork.go:90` | JSON: `{"username": "...", "collection_name": "..."}` | `200` `{message: "pull not implemented (upstream sync coming in v2)"}`. Creates a no-op transfer task. |
+| ~~`POST`~~ | ~~`/actions/pull`~~ | — | — | — | **⚠️ 已删除（2026-08-19，随 TaskService 整批移除）。** `PullCollection` 是 no-op + 假任务占位，与真实的跨节点拉取不是一回事。真实端点是 `POST /p2p/pull`（`router.go:262`）、`POST /p2p/pull/collection`（`router.go:263`）、`GET /p2p/pull`（`router.go:261`）、`POST /p2p/pull/cancel`（`router.go:264`）。遗留痕迹见 `back/internal/controller/fork.go:6` 的注释。 |
 
 ### 2.7 P2P Endpoints (`/p2p`)
 
@@ -511,7 +511,7 @@ Anonymous collections are serialized as JSON files on disk at `{storageDir}/{has
 
 ### 5.8 Pull not implemented
 
-- **Where**: `internal/controller/fork.go:90` (`PullCollection`).
+- **Where**: （见上表：`/actions/pull` 已删除） (`PullCollection`).
 - **Issue**: The `/actions/pull` endpoint returns `"pull not implemented (upstream sync coming in v2)"` and creates a no-op transfer task. There is no actual upstream sync functionality.
 
 ### 5.9 ListTasks returns empty array

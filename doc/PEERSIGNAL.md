@@ -1,6 +1,6 @@
 # Peersignal Self-hosted Signaling Server
 
-> Code: `back/internal/signalserver/` + `back/cmd/peerserver/` (REFACTOR §3.6)
+> Code: `back/signalserver/`（**独立 go.mod**，信令服务器的唯一真相源）+ `back/internal/transport/*_discovery.go`；入口是主二进制的 `peerdrive signal` 子命令，独立入口为 `back/signalserver/cmd/peersignal/`（注意是 peersignal，不是 peerserver）
 > Role: Replace public cloud signaling (0.peerjs.com) and public MQTT broker — **signaling + room discovery in one**.
 
 ## 1. System Architecture

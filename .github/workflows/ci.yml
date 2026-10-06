@@ -23,6 +23,24 @@ on:
     branches: [main, master, refactor]
 
 jobs:
+  doc-refs:
+    # 文档里的 `路径` 和 `文件.go:行号` 引用是否还对得上代码。
+    #
+    # 为什么值得单独一个 job：2026-10-06 连续两轮修文档都漏了同一类问题。
+    #   第一轮查「路径存在吗」→ 漏了裸写的 `main.go:行号`（换了文件名没换行号）
+    #   第二轮查「行号越界吗」→ 漏了「行号有效但内容已变」（心跳写 30s 实际 5s）
+    # 两次的教训是存在性检查证明不了「说的是不是那件事」。
+    # 这个 job 只能守住前一半（越界/缺失），后一半仍需人读——
+    # 但守住前一半就已经能挡住最贵的一类：读者点开发现路径没了。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 文档引用体检
+        run: node scripts/check-doc-refs.mjs
+
   backend:
     runs-on: ubuntu-latest
     defaults:

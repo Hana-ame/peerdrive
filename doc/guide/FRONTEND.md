@@ -406,7 +406,14 @@ npm run test:watch  # Watch mode tests
 
 ### AnonCreator Subcomponents
 
-Directory `front/src/pages/AnonCreator/`:
+> ⚠️ **以下清单已于 2026-10-06 核实：`front/src/pages/AnonCreator/` 与
+> `AnonExplorer/` 目录均已不存在**，其下列的文件也不存在。v3 重构后前端只剩
+> `pages/`（8 个页面：Connect / Drive / Collections / Transfers / NodeControl / BT / IPFS / Settings）
+> 与 `lib/`（nodeSession.js / swBridge.js / PeerJSConnect.jsx / pd-client/），
+> 匿名集合相关功能收在 **`Collections.jsx`** 里。
+> **本节保留原文仅作重构追溯**，不要照着找文件。
+
+Directory `front/src/pages/AnonCreator/`（已删除）:
 
 | File | Purpose |
 |------|------|
@@ -436,7 +443,9 @@ Directory `front/src/pages/AnonCreator/`:
 
 ### AnonExplorer Subcomponents
 
-Directory `front/src/pages/AnonExplorer/`:
+> ⚠️ 同上：该目录已不存在，见上面 AnonCreator 节的说明。
+
+Directory `front/src/pages/AnonExplorer/`（已删除）:
 
 | File | Purpose |
 |------|------|

@@ -239,7 +239,7 @@ No page-level E2E framework (vitest + happy-dom + testing-library); coverage:
 - `front/src/App.jsx` (127 lines) —— routes/Context/ErrorBoundary
 - `front/src/pages/` (10 top-level pages + 2 page component trees, 41 files total) ——
   see the "Page inventory" table
-- `front/src/components/` (7 files: Navbar/LLMAssistant/FileTree/VersionLog/
+- ⚠️ `front/src/components/` **已不存在**（v3 重构后组件拆进各页面，前端只剩 `pages/` `lib/` `api.js` `ws.js`）。原先的 7 个文件（Navbar/LLMAssistant/FileTree/VersionLog/
   CollectionCard/CommentSection/SettingsSection)
 - `front/tests/` (smoke.test.jsx / components.test.jsx / FileTree.test.jsx +
   playwright smoke scripts)
