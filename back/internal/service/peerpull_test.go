@@ -74,8 +74,15 @@ func hashOf(b []byte) string {
 	return hex.EncodeToString(s[:])
 }
 
+// pullStreamSource 是 puller 唯一需要的数据面能力：开一个内容流。
+// 抽成接口而不是写死 *fakePullSource，才能把 flakyPullSource 也喂进去
+// （故障注入用例要模拟「连着断」，不是「一上来就报错」）。
+type pullStreamSource interface {
+	OpenStream(peerID, hash string, offset, size int64) (io.ReadCloser, error)
+}
+
 // newPullerForTest builds a pull service with a fake data plane + fake registration.
-func newPullerForTest(t *testing.T, src *fakePullSource, local []string) (*PeerPuller, string, *[]string) {
+func newPullerForTest(t *testing.T, src pullStreamSource, local []string) (*PeerPuller, string, *[]string) {
 	t.Helper()
 	root := t.TempDir()
 	p := NewPeerPuller(root)
@@ -100,9 +107,12 @@ func newPullerForTest(t *testing.T, src *fakePullSource, local []string) (*PeerP
 }
 
 // waitJob waits for a job to reach a terminal state (pulling is asynchronous).
+// waitJob 等 job 落到终态。
+// 预算 30s 而非 5s：重试用例最坏要走 pullAttempts-1 次退避（1s+2s）+ 三轮传输，
+// 5s 会在**成功重试**的路径上误报 timeout，把一条绿测试变成红。
 func waitJob(t *testing.T, p *PeerPuller, id string) PullJob {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		j, ok := p.Get(id)
 		if !ok {
@@ -111,7 +121,7 @@ func waitJob(t *testing.T, p *PeerPuller, id string) PullJob {
 		if j.Done() {
 			return j
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("job %s timed out before finishing", id)
 	return PullJob{}
@@ -422,5 +432,121 @@ func TestPullJobListOrderAndPrune(t *testing.T) {
 	}
 	if list[0].ID != lastID {
 		t.Fatalf("list should be ordered by start time descending, first = %s, want %s", list[0].ID, lastID)
+	}
+}
+
+// flakyPullSource 前 failBefore 次 OpenStream 返回 err，之后正常返回内容。
+// 模拟真实故障：P2P 连接在传输途中被 ICE/NAT/对端重启打断（CI 上
+// TestPeerPullSavesToLocalDrive 的 err="peerjs: connection closed" 就是它）。
+type flakyPullSource struct {
+	content    map[string][]byte
+	err        error
+	failBefore int
+	opens      int
+	mu         sync.Mutex
+}
+
+func (f *flakyPullSource) OpenStream(peerID, hash string, offset, size int64) (io.ReadCloser, error) {
+	f.mu.Lock()
+	n := f.opens
+	f.opens++
+	f.mu.Unlock()
+	if n < f.failBefore {
+		return nil, f.err
+	}
+	data, ok := f.content[hash]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (f *flakyPullSource) openCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.opens
+}
+
+// 断线后应自动重试并最终成功 —— 这是 pullAttempts 的核心行为。
+// 没有这条，改动前的实现（单次失败即 failed）在 CI 上表现为偶发红。
+func TestPullRetriesAfterConnectionDrop(t *testing.T) {
+	data := []byte("payload that survives a dropped connection")
+	h := hashOf(data)
+	src := &flakyPullSource{
+		content:    map[string][]byte{h: data},
+		err:        errors.New("peerjs: connection closed"),
+		failBefore: 2, // 前两次断开，第三次成功
+	}
+	p, _, registered := newPullerForTest(t, src, nil)
+
+	job, err := p.Start("peer-a", h, "out.bin", "sub/dir/out.bin", "")
+	if err != nil { t.Fatalf("unexpected error: %v", err) }
+
+	done := waitJob(t, p, job.ID)
+	if done.Status != PullDone {
+		t.Fatalf("status = %v, want PullDone (err=%s)", done.Status, done.Error)
+	}
+	if got := src.openCount(); got != 3 {
+		t.Fatalf("openCount = %d, want 3 (1 initial + 2 retries)", got)
+	}
+	if len(*registered) != 1 {
+		t.Fatalf("registered %d paths, want exactly 1", len(*registered))
+	}
+	if len(*registered) != 1 {
+		t.Fatalf("registered %d paths, want exactly 1", len(*registered))
+	}
+}
+
+// 连接稳定断开时必须有上限，不能无限重试把 job 永久挂住。
+func TestPullGivesUpAfterMaxAttempts(t *testing.T) {
+	data := []byte("never reachable")
+	h := hashOf(data)
+	src := &flakyPullSource{
+		content:    map[string][]byte{h: data},
+		err:        errors.New("peerjs: connection closed"),
+		failBefore: 999, // 永远断
+	}
+	p, _, registered := newPullerForTest(t, src, nil)
+
+	job, err := p.Start("peer-a", h, "out.bin", "out.bin", "")
+	if err != nil { t.Fatalf("unexpected error: %v", err) }
+
+	done := waitJob(t, p, job.ID)
+	if done.Status != PullFailed {
+		t.Fatalf("status = %v, want PullFailed", done.Status)
+	}
+	if got := src.openCount(); got != pullAttempts {
+		t.Fatalf("openCount = %d, want %d (must stop at pullAttempts, not loop forever)", got, pullAttempts)
+	}
+	if len(*registered) != 0 {
+		t.Fatalf("registered %d paths, want 0 (failed pull must not register anything)", len(*registered))
+	}
+}
+
+// 不可重试的错误（协议/本地类）必须**一次就放弃**——
+// 无脑重试只会把用户的等待从 1 秒拖成 7 秒，再给出一模一样的错误。
+func TestPullDoesNotRetryNonTransientError(t *testing.T) {
+	h := hashOf([]byte("never registered"))
+	src := &fakePullSource{content: map[string][]byte{}, err: errors.New("not found")}
+	p, _, _ := newPullerForTest(t, src, nil)
+
+	job, err := p.Start("peer-a", h, "out.bin", "out.bin", "")
+	if err != nil { t.Fatalf("unexpected error: %v", err) }
+
+	done := waitJob(t, p, job.ID)
+	if done.Status != PullFailed {
+		t.Fatalf("status = %v, want PullFailed", done.Status)
+	}
+	if retryablePullErr(errors.New("not found")) {
+		t.Fatal(`"not found" must not be retryable`)
+	}
+	if retryablePullErr(errors.New("open temp: permission denied")) {
+		t.Fatal("local IO errors must not be retryable")
+	}
+	if !retryablePullErr(errors.New("peerjs: connection closed")) {
+		t.Fatal("connection closed must be retryable")
+	}
+	if !retryablePullErr(errors.New("unexpected EOF")) {
+		t.Fatal("EOF must be retryable")
 	}
 }

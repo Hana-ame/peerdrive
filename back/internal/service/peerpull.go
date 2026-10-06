@@ -293,6 +293,50 @@ func (p *PeerPuller) Cancel(id string) error {
 	return nil
 }
 
+// pullAttempts 跨节点拉取的最大尝试次数（首次 + 重试）。
+//
+// 为什么需要重试：transport 的连接是会断的（ICE 切换、对端重启、
+// NAT 超时），conn.go 在连接断开时给所有在途 fetch 推 "connection closed"。
+// 改之前单次失败即任务 failed——**任何一次网络抖动都会让用户的保存操作
+// 彻底失败**，只能手动重来。CI 上这个缺陷表现为
+// TestPeerPullSavesToLocalDrive 偶发 err="peerjs: connection closed"
+// （2026-10-06 连续两次红，本地跑 3/3 绿：CI 机器负载高、连接更容易被打断）。
+//
+// 为什么是 3 而不是无限重试：连接断在「对端确实走了」时会一直断，
+// 无限重试会让 job 永远挂着，占着并发名额（sem），用户既看不到进展也取消不掉。
+// 3 次 + 递增退避足以覆盖瞬时抖动，又能让真断连在十几秒内给出明确失败。
+const pullAttempts = 3
+
+// pullBackoff 第 n 次重试前的等待（n 从 0 起）。
+// 递增而不是固定：对端可能正在重启，等久一点比连环重试更容易赶上。
+func pullBackoff(n int) time.Duration {
+	d := time.Duration(1<<uint(n)) * time.Second // 1s → 2s → 4s
+	if d > 8*time.Second {
+		d = 8 * time.Second
+	}
+	return d
+}
+
+// retryablePullErr 判断拉取错误是否值得重试。
+//
+// 重试：连接类瞬时故障（连接断开、流被取消/重置、请求超时）。
+// 不重试：本地 I/O 与协议类错误——重跑一遍还是同样的结果，
+//   只会把用户的等待时间从 1 秒拖到 7 秒，然后给出一模一样的错误信息。
+func retryablePullErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	// 对端没在我们请求之前就准备好（会话刚建立时的竞态），重试有意义
+	if strings.Contains(msg, "no connection to") || strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "use of closed network connection") ||
+		strings.Contains(msg, "connection reset") || strings.Contains(msg, "EOF") ||
+		strings.Contains(msg, "broken pipe") || strings.Contains(msg, "i/o timeout") {
+		return true
+	}
+	return false
+}
+
 // run 执行一次拉取：跳过检查 → 流式下载（带进度）→ 校验 → 落盘登记。
 func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 	// 并发闸：等一个名额（可被取消打断）
@@ -314,22 +358,6 @@ func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 		return
 	}
 
-	// ② 打开对端流
-	stream, err := p.source.OpenStream(job.Peer, job.Hash, 0, -1)
-	if err != nil {
-		p.finish(job, PullFailed, "open stream: "+err.Error(), time.Time{})
-		return
-	}
-	p.mu.Lock()
-	p.closers[job.ID] = stream
-	p.mu.Unlock()
-	defer func() {
-		_ = stream.Close()
-		p.mu.Lock()
-		delete(p.closers, job.ID)
-		p.mu.Unlock()
-	}()
-
 	// ③ 落盘到 .part（与最终文件同目录 → rename 原子，不会留半截"正式文件"）
 	target, err := p.targetPath(job)
 	if err != nil {
@@ -341,10 +369,64 @@ func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 		return
 	}
 	tmp := target + ".part"
+
+	// ②+③ 合并成可重试的一轮：开流 → 写 .part → 校验 → rename → 登记。
+	// 每次重试都从零开始（.part 用 O_TRUNC 截断重写，哈希也重新算）：
+	// transport.OpenStream 没有 Range 语义，半截数据没法续，只能重下。
+	// 内容寻址保证重下不会拿到不同内容——这正是这里能安全重试的前提。
+	var lastErr error
+	for attempt := 0; attempt < pullAttempts; attempt++ {
+		if attempt > 0 {
+			// 用户主动取消就别再重试了：等完退避才失败会让人以为卡死
+			if ctx.Err() != nil {
+				p.finish(job, PullCancelled, "", time.Time{})
+				return
+			}
+			log.LogWarn("peerpull: %s retry %d/%d after %v",
+				job.Hash[:12], attempt+1, pullAttempts, lastErr)
+			select {
+			case <-time.After(pullBackoff(attempt - 1)):
+			case <-ctx.Done():
+				p.finish(job, PullCancelled, "", time.Time{})
+				return
+			}
+		}
+		ok, err := p.fetchOnce(ctx, job, target, tmp)
+		if ok {
+			return // fetchOnce 内部已 finish（done / failed）
+		}
+		lastErr = err
+		if !retryablePullErr(err) {
+			p.finish(job, PullFailed, err.Error(), time.Time{})
+			return
+		}
+	}
+	p.finish(job, PullFailed,
+		fmt.Sprintf("%v (after %d attempts)", lastErr, pullAttempts), time.Time{})
+}
+
+// fetchOnce 跑一轮完整的「开流 → 落盘 → 校验 → 登记」。
+// 返回 ok=true 表示已经 finish 过（无论成功还是终态失败），调用方直接返回；
+// ok=false + err 表示这是一次**值得重试**的瞬时故障，err 里是原因。
+func (p *PeerPuller) fetchOnce(ctx context.Context, job *PullJob, target, tmp string) (bool, error) {
+	stream, err := p.source.OpenStream(job.Peer, job.Hash, 0, -1)
+	if err != nil {
+		return false, fmt.Errorf("open stream: %w", err)
+	}
+	p.mu.Lock()
+	p.closers[job.ID] = stream
+	p.mu.Unlock()
+	defer func() {
+		_ = stream.Close()
+		p.mu.Lock()
+		delete(p.closers, job.ID)
+		p.mu.Unlock()
+	}()
+
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		p.finish(job, PullFailed, "open temp: "+err.Error(), time.Time{})
-		return
+		return true, nil // 本地 I/O 失败，不重试
 	}
 
 	h := sha256.New()
@@ -352,17 +434,16 @@ func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 	closeErr := f.Close()
 	if cpErr != nil {
 		_ = os.Remove(tmp)
-		status := PullFailed
 		if ctx.Err() != nil {
-			status = PullCancelled
+			p.finish(job, PullCancelled, "", time.Time{})
+			return true, nil
 		}
-		p.finish(job, status, cpErr.Error(), time.Time{})
-		return
+		return false, cpErr
 	}
 	if closeErr != nil {
 		_ = os.Remove(tmp)
 		p.finish(job, PullFailed, "close temp: "+closeErr.Error(), time.Time{})
-		return
+		return true, nil
 	}
 
 	// ④ 内容寻址校验：对端给的内容必须真的等于请求的 hash
@@ -372,13 +453,13 @@ func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 	if sum != job.Hash {
 		_ = os.Remove(tmp)
 		p.finish(job, PullFailed, fmt.Sprintf("hash mismatch: got %s", sum[:12]), time.Time{})
-		return
+		return true, nil
 	}
 	// ⑤ rename 成正式名 + 登记进 file_index（"我的文件"可见、可被 serveFile 服务）
 	if err := os.Rename(tmp, target); err != nil {
 		_ = os.Remove(tmp)
 		p.finish(job, PullFailed, "rename: "+err.Error(), time.Time{})
-		return
+		return true, nil
 	}
 	ended := time.Now()
 	if p.register != nil {
@@ -390,7 +471,7 @@ func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 			p.mu.Lock()
 			job.SavedTo = target
 			p.mu.Unlock()
-			return
+			return true, nil
 		}
 	}
 	p.mu.Lock()
@@ -398,6 +479,7 @@ func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 	job.Received = written
 	p.mu.Unlock()
 	p.finish(job, PullDone, "", ended)
+	return true, nil
 }
 
 // copyWithProgress 流式拷贝并更新进度（进度按块更新，够前端画进度条）。
