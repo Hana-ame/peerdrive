@@ -98,7 +98,7 @@ back/internal/signalserver/signalserver.go
 | `/discover/announce` | POST | JSON `{peerId,collections[]}` | Node registers rooms |
 | `/discover/nodes` | GET | `coll` | Query online nodes in collection |
 
-Startup: `peerserver [-addr :9000] [-key peerjs]`
+Startup: `peerserver [-addr :9000] [-key <api key>]`（`signalserver.DefaultKey` 为默认值，即 peerdrive 权威 key，不是公共云的 peerjs）
 
 ## 4. Sequence Diagrams
 

@@ -11,11 +11,15 @@ discovery uses the built-in HTTP API. PeerJS protocol compatible — any `peerjs
 
 ```bash
 go build -o peerserver ./cmd/peerserver/
-./peerserver [-addr :9000] [-key peerjs] [-tokens tok1,tok2] [-tls-cert c.pem -tls-key k.pem]
+./peerserver [-addr :9000] [-key <api key>] [-tokens tok1,tok2] [-tls-cert c.pem -tls-key k.pem]
 ```
 
 - `-addr` listen address (default `:9000`)
-- `-key` PeerJS API key (client must match, prevents unrelated clients from connecting)
+- `-key` PeerJS API key (client must match, prevents unrelated clients from connecting).
+  Default `pd-signal-1edf5e05e4a52b7351392574` (`signalserver.DefaultKey`) — the
+  peerdrive-authoritative key, **not** the public-cloud `peerjs`: this server defaults to
+  the same signaling the peerdrive client and `peerdrive all` use, so a default-configured
+  node connects without extra flags.
 - `-tokens` optional: signaling token whitelist (comma-separated). When set, WS connection
   tokens must be in the list, otherwise the upgrade is rejected (prevents arbitrary clients from impersonating nodes to receive signaling)
 - `-tls-cert` / `-tls-key`: PEM certificate and private key. **When both are provided, HTTPS/WSS is served**,

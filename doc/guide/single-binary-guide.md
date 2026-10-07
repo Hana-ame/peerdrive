@@ -132,7 +132,7 @@ cd back && go build -tags nosqlite -o peerdrive ./cmd/peerdrive/ && ./peerdrive
 |---|---|
 | `./peerdrive-server` | `./peerdrive serve` |
 | `./peerdrive-reg-server` | `./peerdrive reg` |
-| `peersignal -addr :9000 -key peerjs` | `./peerdrive signal -addr :9000 -key peerjs` |
+| `peersignal -addr :9000 -key pd-signal-1edf5e05e4a52b7351392574` | `./peerdrive signal -addr :9000 -key pd-signal-1edf5e05e4a52b7351392574` |
 
 几点必须知道：
 
@@ -181,13 +181,13 @@ ExecStart=/opt/peerdrive/peerdrive serve
 ### 5.2 `signal`
 
 ```bash
-./peerdrive signal -addr :9000 -key peerjs
+./peerdrive signal -addr :9000 -key pd-signal-1edf5e05e4a52b7351392574
 ```
 
 | flag | 环境变量 | 默认值 | 说明 |
 |---|---|---|---|
 | `-addr` | `PEERSIGNAL_ADDR` | `:9000` | 监听地址 |
-| `-key` | `PEERSIGNAL_KEY` | `peerjs` | API key，客户端要一致 |
+| `-key` | `PEERSIGNAL_KEY` | `pd-signal-1edf5e05e4a52b7351392574` | API key，客户端要一致（权威值，同 `config.DefaultSignalKey`） |
 | `-tokens` | `PEERJS_TOKENS` | 空 | 运维令牌白名单（逗号分隔） |
 | `-tls-cert` / `-tls-key` | `PEERSIGNAL_TLS_CERT` / `_KEY` | 空 | 给了就走 HTTPS/WSS |
 | `-cors-origin` | `PEERSIGNAL_CORS` | 空 | 面板类 REST 的 CORS 白名单 |
@@ -296,12 +296,12 @@ exec ./peerdrive serve
 
 ```bash
 # 终端 1：信令（信令要先起来，节点要连它）
-PEERJS_TOKENS=<运维令牌> ./peerdrive signal -addr :9000 -key peerjs
+PEERJS_TOKENS=<运维令牌> ./peerdrive signal -addr :9000 -key pd-signal-1edf5e05e4a52b7351392574
 
 # 终端 2：节点
 PEERDRIVE_STORAGE=/srv/peerdrive \
 PEERDRIVE_PEERJS_HOST=127.0.0.1 PEERDRIVE_PEERJS_PORT=9000 \
-PEERDRIVE_PEERJS_KEY=peerjs PEERDRIVE_PEERJS_SECURE=false \
+PEERDRIVE_PEERJS_KEY=pd-signal-1edf5e05e4a52b7351392574 PEERDRIVE_PEERJS_SECURE=false \
 PEERDRIVE_REG_SERVER=http://127.0.0.1:4000 \
 ./peerdrive serve
 
