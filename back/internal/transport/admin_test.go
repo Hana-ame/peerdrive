@@ -433,6 +433,30 @@ func TestAdminRejectedOnNonLocal(t *testing.T) {
 	}
 }
 
+// TestAdminRejectedOnSpoofedLocalID 发现背景：审计 A-9（2026-10-06）。
+// 旧实现用 `c.ID() != "local"` 判本机；但 rtcSession.ID() 返回的是信令里对端自报的 id
+// （rtc_session.go:17-21 缓存 c.PeerID），信令侧只判空不校验保留名（signalserver.go:367），
+// 攻击者注册 ?id=local 即可同时绕过 admin 与 PSK 门禁。
+// 修法：serveAdmin 改用 isSelfSession 类型断言——只有 WSSession 实现了 IsLocal()，
+// rtcSession 没有实现，所以 IsLocal() 断言失败自动落空。
+// 本用例构造一个 id="local" 但 local=false 的 fakeSession（模拟 WebRTC 对端自报 local），
+// 断言 admin verb 被拒绝且 handler 未被触发。
+func TestAdminRejectedOnSpoofedLocalID(t *testing.T) {
+	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
+		t.Error("spoofed local-id session must not trigger admin handler")
+		return http.StatusInternalServerError, nil, "", nil
+	})
+	// id="local" 模拟信令自报，但 local=false 表示非本地 WS 会话（即 WebRTC 对端）
+	sess := &fakeSession{id: "local", local: false}
+	svc.BindLocal(sess)
+	raw, _ := json.Marshal(map[string]any{"type": "admin", "method": "GET", "path": "/files", "reqId": "x"})
+	svc.serveAdmin(sess, svc.pending[sess], raw)
+	types := sess.sentTypes()
+	if len(types) != 1 || types[0] != "err" {
+		t.Fatalf("spoofed local-id session should be rejected, got %v", types)
+	}
+}
+
 // TestAdminUploadChunkWriteFail a temporary file write failure (a closed file -> os.ErrClosed) must
 // clean up the temp file and handle and reply with an err frame -- this path used to return without
 // cleaning up, leaking the file + fd permanently (found in the 2026-08-18 code review). Defensive
@@ -440,7 +464,7 @@ func TestAdminRejectedOnNonLocal(t *testing.T) {
 // cleanup semantics.
 func TestAdminUploadChunkWriteFail(t *testing.T) {
 	svc := testAdminSvc(t, nil)
-	sess := &fakeSession{id: "local"}
+	sess := &fakeSession{id: "local", local: true}
 
 	// build a "closed" temp file: Write must fail (os.ErrClosed)
 	f, err := os.CreateTemp("", "peerdrive-admin-upload-fail-*")
@@ -476,7 +500,7 @@ func TestAdminUploadChunkWriteFail(t *testing.T) {
 // failed upload collection leaves no residue.
 func TestAdminUploadAbortedCleansTemp(t *testing.T) {
 	svc := testAdminSvc(t, nil)
-	sess := &fakeSession{id: "local"}
+	sess := &fakeSession{id: "local", local: true}
 
 	f, err := os.CreateTemp("", "peerdrive-admin-upload-abort-*")
 	if err != nil {
@@ -518,7 +542,7 @@ func TestAdminUploadReplacedErrsOld(t *testing.T) {
 	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
 		return http.StatusOK, []byte(`{"ok":true}`), "application/json", nil
 	})
-	sess := &fakeSession{id: "local"}
+	sess := &fakeSession{id: "local", local: true}
 	svc.BindLocal(sess)
 	st := svc.pending[sess]
 	if st == nil {

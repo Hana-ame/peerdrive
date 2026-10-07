@@ -142,7 +142,7 @@ func TestPSK_ResponseFramesNotGated(t *testing.T) {
 func TestPSK_LocalSessionExempt(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	svc.cfg.PeerPSK = "s3cret"
-	sess := &fakeSession{id: "local"}
+	sess := &fakeSession{id: "local", local: true}
 	svc.bindConn(sess)
 
 	assert.Empty(t, sess.sentFrames(), "local session should not present a key")
@@ -246,4 +246,34 @@ func TestPSK_AuthArrivingDuringBindIsNotDropped(t *testing.T) {
 	svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{"type": "share", "reqId": "r1"}))
 	_, ok := waitSent(inner, "share-resp", 2*time.Second)
 	assert.True(t, ok, "after receiving auth, share must be answered, not stuck forever on the gate")
+}
+
+// TestPSK_SpoofedLocalIDNotExempt 发现背景：审计 A-9（2026-10-06）。
+// 旧实现用 `c.ID() == "local"` 豁免 PSK 门禁；攻击者注册 ?id=local 即可跳过。
+// 修后用 isSelfSession 类型断言，rtcSession 未实现 IsLocal() 故自动落空。
+// 本用例构造 id="local" 但 local=false 的 fakeSession（模拟 WebRTC 对端自报 local），
+// 断言 pskGate 仍然拦截 servedVerbs。
+func TestPSK_SpoofedLocalIDNotExempt(t *testing.T) {
+	svc := newTestPeerJSService(t)
+	svc.cfg.PeerPSK = "s3cret"
+	// id="local" 模拟信令自报，但 local=false 表示非本地 WS 会话
+	sess := &fakeSession{id: "local", local: false}
+	svc.bindConn(sess)
+
+	// pskSendAuth 应该被调用（因为 isSelfSession 返回 false）
+	sentTypes := sess.sentTypes()
+	require.NotEmpty(t, sentTypes)
+	assert.Equal(t, "psk-auth", sentTypes[0], "spoofed local-id session must still present PSK")
+
+	// servedVerbs 应该被 pskGate 拦截
+	svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{"type": "share", "reqId": "r1"}))
+	types := sess.sentTypes()
+	foundErr := false
+	for _, f := range sess.sentFrames()[1:] {
+		if f.header["type"] == "err" {
+			foundErr = true
+			assert.Equal(t, "PSK_REQUIRED", f.header["code"])
+		}
+	}
+	assert.True(t, foundErr, "spoofed local-id session must be gated by PSK")
 }

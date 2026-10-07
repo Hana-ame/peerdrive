@@ -149,7 +149,15 @@ func (au *adminUploadState) cleanupTemp() {
 // background: initial version had all case "admin" go async, upload chunks arrived
 // before adminUp was set, upload never completed).
 func (s *PeerJSService) serveAdmin(c Session, st *connState, raw []byte) {
-	if c.ID() != "local" {
+	// 2026-10-06 security fix (audit A-9): the old check `c.ID() != "local"` compared the
+	// session id against a string literal. But rtcSession.ID() returns the peer id that the
+	// remote side self-reported through the signaling server (rtc_session.go:17-21 caches
+	// c.PeerID, which is whatever the client registered as ?id= on the signaling WebSocket).
+	// The signaling server accepted any non-empty id (signalserver.go:367 only checked for
+	// empty string), so an attacker could register with ?id=local and pass this gate.
+	// isSelfSession (share.go:120) uses a type assertion — only WSSession (the local WS
+	// management channel) implements IsLocal(), so WebRTC sessions always fail closed.
+	if !isSelfSession(c) {
 		// Management plane not open to WebRTC connections (file header comment: prevent
 		// permission surface exposure)
 		c.SendJSON(dcResp{Type: "err", Msg: "admin verb is only allowed on the local session"})
