@@ -4,6 +4,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { registerSW } from './lib/swBridge';
+import ConnectionStatus from './lib/ConnectionStatus';
 import Connect from './pages/Connect';
 import Drive from './pages/Drive';
 import Collections from './pages/Collections';
@@ -47,6 +48,11 @@ function Nav() {
           <Link key={it.to} to={it.to} className="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded hover:bg-white/[0.06]">{it.label}</Link>
         ))}
       </div>
+      {/* Live local-node session pill (audit P7): subscribes to ws.onStatus — the nav
+          used to carry zero connection signal. ml-auto right-aligns it on desktop (the
+          md:hidden block above it is display:none there, so two ml-autos don't fight);
+          on mobile it shares the trailing space with the compact nav links. */}
+      <ConnectionStatus />
     </nav>
   );
 }
