@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	signalserver "github.com/Hana-ame/go-peerserver"
@@ -42,6 +43,7 @@ func newSignalMux(key, tokens, corsOrigin string) *http.ServeMux {
 	if corsOrigin != "" {
 		opts = append(opts, signalserver.WithCORSOrigins(strings.Split(corsOrigin, ",")))
 	}
+	opts = append(opts, signalserver.WithRateLimit(SignalRateLimit()))
 	srv := signalserver.NewServer(key, opts...)
 	srv.Start() // 后台清理过期离线队列（H3）
 
@@ -57,6 +59,41 @@ func newSignalMux(key, tokens, corsOrigin string) *http.ServeMux {
 	mux.HandleFunc("/status", srv.HandleStatus)
 	mux.HandleFunc("/", srv.HandleDashboard)
 	return mux
+}
+
+// SignalRateLimit 返回信令端点的限流配置（2026-10-06，N3）。
+//
+// 抽成独立函数，是为了让 newSignalMux 与 UnifiedMux 读**同一个**来源。
+// 此前这两个装配点各写各的，是「改了一处、忘了另一处」的典型：UnifiedMux
+// 自己重建了一份 signalserver（不经过 newSignalMux），任何加在新SignalMux
+// 上的 Option 都不会自动出现在 `peerdrive all` 里。
+//
+// 变量名沿用主仓 PEERDRIVE_ 前缀（信令本体的 PEERSIGNAL_* 是旧独立二进制的）。
+// 默认值与 cmd/peersignal 的 -rate-* 保持一致，理由见那里的注释。
+// 设为 0 或非法值退回默认：**不提供「关掉限流」**，因为这些端点按设计就是
+// 公开的，速率是唯一防线。
+func SignalRateLimit() signalserver.RateLimitConfig {
+	return signalserver.RateLimitConfig{
+		AnnounceRPS:   signalRate("PEERDRIVE_SIGNAL_RATE_ANNOUNCE", 1),
+		AnnounceBurst: 10,
+		WSRPS:         signalRate("PEERDRIVE_SIGNAL_RATE_WS", 2),
+		WSBurst:       20,
+		IDRPS:         signalRate("PEERDRIVE_SIGNAL_RATE_ID", 5),
+		IDBurst:       20,
+	}
+}
+
+// signalRate 读一个限流速率；未配置/非法时用默认值。
+func signalRate(env string, def float64) float64 {
+	v := os.Getenv(env)
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f <= 0 {
+		return def
+	}
+	return f
 }
 
 // RegPatterns 是注册服务的全部路由。UnifiedMux 依赖它把路由逐条搬进总 mux，
@@ -170,6 +207,9 @@ func UnifiedMux(cfg *config.Config, ginHandler http.Handler) (*http.ServeMux, *r
 	if cors != "" {
 		sigOpts = append(sigOpts, signalserver.WithCORSOrigins(strings.Split(cors, ",")))
 	}
+	// 与 newSignalMux 读同一个限流来源（SignalRateLimit）——这两条装配路径
+	// 必须同时加限流，否则 `peerdrive all` 的信令端点又变回无限流。
+	sigOpts = append(sigOpts, signalserver.WithRateLimit(SignalRateLimit()))
 	sig := signalserver.NewServer(sigKey, sigOpts...)
 	sig.Start()
 	mux.HandleFunc("/peerjs", sig.HandleWS)

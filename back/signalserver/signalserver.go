@@ -21,6 +21,8 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"math"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -43,6 +45,15 @@ type Server struct {
 	// corsOrigins is the explicit CORS allow-list (nil/empty = wildcard "*", the historical behavior).
 	// See WithCORSOrigins and allowCORS for why the default stays permissive.
 	corsOrigins []string
+
+	// Rate limiting (2026-10-06, N3). Three separate buckets because these
+	// endpoints differ hugely in cost and blast radius — see WithRateLimit for
+	// the per-bucket reasoning. All three nil = not configured, which preserves
+	// the pre-2026-10-06 behavior; that keeps this package usable as a generic
+	// PeerJS-compatible server for deployments that already limit at the proxy.
+	announceLim *tokenBucket // POST /discover/announce — unauthenticated, writes the discovery roster
+	wsLim      *tokenBucket // /peerjs upgrade — each accepted conn costs a goroutine + readLoop + a clients-table entry
+	idLim      *tokenBucket // GET /peerjs/id — the panel's first call; must not be throttled by the WS bucket
 
 	startedAt time.Time // server startup time
 	msgCount  int64     // total forwarded message count (atomic access)
@@ -117,6 +128,170 @@ func WithTokenWhitelist(tokens []string) Option {
 			s.tokenWhitelist[t] = true
 		}
 	}
+}
+
+// RateLimitConfig holds the per-endpoint rate limits (req/s and burst).
+//
+// Any field left at 0 disables that bucket **independently**, so an operator can
+// throttle announce without touching WebSocket connects.
+type RateLimitConfig struct {
+	// AnnounceRPS / AnnounceBurst governs POST /discover/announce.
+	//
+	// Why this endpoint first: it is unauthenticated (by design — nodes announce
+	// from any HTTP endpoint), and each accepted call inserts into the discovery
+	// roster (disc / peerStats / peerColls / peerLinks). So it was the cheapest
+	// available way to grow server-side state at will. 2026-10-06 audit N3.
+	AnnounceRPS   float64
+	AnnounceBurst int
+
+	// WSRPS / WSBurst governs the /peerjs WebSocket upgrade.
+	//
+	// Why it matters beyond CPU: the read limit (40KB) and the 60s read deadline
+	// bound a single connection's memory, but nothing bounded how many
+	// connections could exist — each accepted upgrade costs a goroutine plus a
+	// readLoop and a clients-table entry. Reconnects (normal on flaky mobile)
+	// also mean the upgrade path is hit far more often than the steady-state
+	// connection count suggests, so the bucket is sized for reconnects, not for
+	// "how many nodes are online".
+	WSRPS   float64
+	WSBurst int
+
+	// IDRPS / IDBurst governs GET /peerjs/id (the panel's first call).
+	//
+	// Kept separate from the WS bucket on purpose: a single page load does
+	// GET /id and then opens the socket, so sharing one bucket would let either
+	// half throttle the other — a user reloading the panel could be rejected on
+	// /id because their socket is reconnecting. Sized generously because it
+	// costs a random-ID generation and nothing else.
+	IDRPS   float64
+	IDBurst int
+}
+
+// WithRateLimit enables per-IP rate limiting on announce / WS upgrade / id.
+//
+// Before this there was no limit anywhere in this file: HandleWS had a read
+// limit and a read deadline (both per-connection, neither bounds the *number*
+// of connections), and announce had a body-size cap and a collection-count cap
+// (both per-request, neither bounds the *number* of requests). Per-request and
+// per-connection caps are not a substitute for a rate limit — an attacker who
+// sends N small requests pays nothing extra and gets N roster entries.
+//
+// Left unset, this package keeps its historical unlimited behavior. That is
+// deliberate: it is a standalone module whose consumers include deployments
+// that already rate-limit at the nginx layer, and silently imposing a default
+// would be a breaking change for them. The peerdrive wiring (services.SignalHandler
+// and cmd/peersignal) passes an explicit config.
+func WithRateLimit(cfg RateLimitConfig) Option {
+	return func(s *Server) {
+		if cfg.AnnounceRPS > 0 {
+			s.announceLim = newTokenBucket(cfg.AnnounceRPS, cfg.AnnounceBurst)
+		}
+		if cfg.WSRPS > 0 {
+			s.wsLim = newTokenBucket(cfg.WSRPS, cfg.WSBurst)
+		}
+		if cfg.IDRPS > 0 {
+			s.idLim = newTokenBucket(cfg.IDRPS, cfg.IDBurst)
+		}
+	}
+}
+
+// tokenBucket is a per-IP token bucket: constant refill rate, capped burst.
+//
+// Deliberately self-contained rather than shared with the main module: this is
+// a standalone module (github.com/Hana-ame/go-peerserver) and importing
+// peerdrive/internal/... would create a dependency from a published library
+// back into an application. Same algorithm as internal/ratelimit in the main
+// module — keep the two in sync if one changes.
+type tokenBucket struct {
+	mu      sync.Mutex
+	rps     float64
+	burst   float64
+	buckets map[string]*bucketState
+	now     func() time.Time // overridable in tests
+}
+
+type bucketState struct {
+	tokens float64
+	last   time.Time
+}
+
+func newTokenBucket(rps float64, burst int) *tokenBucket {
+	if burst <= 0 {
+		burst = int(rps * 2)
+		if burst < 1 {
+			burst = 1
+		}
+	}
+	return &tokenBucket{
+		rps:     rps,
+		burst:   float64(burst),
+		buckets: map[string]*bucketState{},
+	}
+}
+
+// allow takes one token for key; false means the caller should be rejected.
+func (b *tokenBucket) allow(key string) bool {
+	if b == nil {
+		return true // not configured = unlimited
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now()
+	if b.now != nil {
+		now = b.now()
+	}
+	st, ok := b.buckets[key]
+	if !ok {
+		st = &bucketState{tokens: b.burst, last: now}
+		b.buckets[key] = st
+	}
+	// Refill at a constant rate but never past capacity — otherwise a client that
+	// stayed quiet for an hour could return with an enormous burst allowance.
+	st.tokens = math.Min(b.burst, st.tokens+now.Sub(st.last).Seconds()*b.rps)
+	st.last = now
+	defer b.sweep(now) // caller holds b.mu; sweep must not relock
+	if st.tokens < 1 {
+		return false
+	}
+	st.tokens--
+	return true
+}
+
+// sweep drops sources idle for 10 minutes so the map cannot grow without bound.
+// Caller must hold b.mu.
+func (b *tokenBucket) sweep(now time.Time) {
+	if len(b.buckets) < 4096 {
+		return // only pay for this at scale
+	}
+	for k, st := range b.buckets {
+		if now.Sub(st.last) > 10*time.Minute {
+			delete(b.buckets, k)
+		}
+	}
+}
+
+// clientIP returns the request's source address from RemoteAddr only.
+//
+// X-Forwarded-For is deliberately ignored: it is client-supplied, so trusting it
+// would let an attacker mint a fresh bucket per request — rate limiting that is
+// worse than none, because it also looks like protection. The cost is that
+// behind a same-host nginx every client shares 127.0.0.1's bucket; limiting too
+// hard is strictly better than not limiting at all. Deployments behind a proxy
+// that need per-client buckets should rate-limit at the proxy.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return strings.TrimSpace(host)
+}
+
+// rateLimited writes a 429. For the WS path the caller rejects *before* calling
+// upgrader.Upgrade, because once the upgrade response headers are written the
+// status code can no longer be changed.
+func rateLimited(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 }
 
 // Offline queue limit (H3 fix): each dst caches at most maxQueuedPerDst messages.
@@ -405,6 +580,13 @@ func (s *Server) HandleID(w http.ResponseWriter, r *http.Request) {
 	if s.handleCORS(w, r) {
 		return
 	}
+	// Checked after handleCORS so a CORS preflight is never charged for a bucket
+	// token — preflights carry no work and blocking them would break the panel
+	// with a CORS error rather than a readable 429.
+	if !s.idLim.allow(clientIP(r)) {
+		rateLimited(w)
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain")
 	fmt.Fprint(w, randomID())
 }
@@ -412,6 +594,19 @@ func (s *Server) HandleID(w http.ResponseWriter, r *http.Request) {
 // HandleWS handles signaling WebSocket upgrade and the message loop.
 // Path is shaped like /{path}peerjs?key=&id=&token= ({path} is provided when mounted via gin routing).
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
+	// Rate limit first (2026-10-06, N3). Placed before the key/token checks and
+	// before the upgrade because the upgrade is the expensive part: it commits a
+	// goroutine, a readLoop and a clients-table entry. Note this also means a
+	// client with a *wrong key* still consumes a token — which is the point:
+	// key-guessing is exactly the abuse this bounds.
+	// (Rejected by rate limit, the caller gets an HTTP 429 rather than a WS
+	// close frame; that is deliberate — before the upgrade nothing has been
+	// written, so a real status code is still possible and is far more debuggable
+	// than a silent disconnect.)
+	if !s.wsLim.allow(clientIP(r)) {
+		rateLimited(w)
+		return
+	}
 	q := r.URL.Query()
 	id, token, key := q.Get("id"), q.Get("token"), q.Get("key")
 	if id == "" || token == "" || key == "" {
@@ -629,6 +824,15 @@ func (s *Server) removeClient(cl *client) {
 // and the number of collections (a single node follows a limited number of rooms).
 func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 	if s.handleCORS(w, r) {
+		return
+	}
+	// Rate limit before decoding (2026-10-06, N3). The existing M15 caps (8KB body,
+	// 64 collections) are **per-request**; they bound one call's cost but not the
+	// number of calls, and each accepted announce writes the roster (disc /
+	// peerStats / peerColls / peerLinks). Unauthenticated + per-request-only caps
+	// = an unbounded-growth endpoint, so this is the missing half.
+	if !s.announceLim.allow(clientIP(r)) {
+		rateLimited(w)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
