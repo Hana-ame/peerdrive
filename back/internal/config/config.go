@@ -168,6 +168,21 @@ type Config struct {
 	// PSK, anyone can connect and claim to be a friend. Strong identity requires the account system
 	// (ROADMAP phase 7). Here it's just the initial runtime state; change it from the admin panel later.
 	ShareFriends string
+
+	// ── Auto-extract after pull (PEERDRIVE_AUTO_EXTRACT_*) ──
+	//
+	// AutoExtract is the master switch (default false). When enabled, after a cross-node
+	// pull completes and the file is registered in file_index, the node attempts to extract
+	// archives (zip/tar/gz/tar.gz/tar.bz2) into a sibling directory. Extracted files
+	// are individually registered in file_index. The original archive is optionally deleted.
+	//
+	// Why default off: auto-extract is a convenience feature that adds attack surface
+	// (zip bombs, path traversal). Operators must explicitly opt in.
+	AutoExtract           bool
+	AutoExtractMaxSize    int64 // PEERDRIVE_AUTO_EXTRACT_MAX_SIZE: max total extracted bytes (default 500MB)
+	AutoExtractMaxRatio   int   // PEERDRIVE_AUTO_EXTRACT_MAX_RATIO: max compression ratio (default 100)
+	AutoExtractMaxFiles   int   // PEERDRIVE_AUTO_EXTRACT_MAX_FILES: max number of extracted files (default 10000)
+	AutoExtractDeleteOrig bool  // PEERDRIVE_AUTO_EXTRACT_DELETE_ORIGINAL: delete archive after extraction (default true)
 }
 
 // IsOriginAllowed checks whether the given Origin is in the allow list, supporting
@@ -252,6 +267,12 @@ func Load() *Config {
 		ShareCollections: getEnv("PEERDRIVE_SHARE_COLLECTIONS", ""),
 		ShareDirs:        getEnv("PEERDRIVE_SHARE_DIRS", ""),
 		ShareFriends:     getEnv("PEERDRIVE_SHARE_FRIENDS", ""),
+
+		AutoExtract:           getEnvBool("PEERDRIVE_AUTO_EXTRACT", false),
+		AutoExtractMaxSize:    getEnvInt64("PEERDRIVE_AUTO_EXTRACT_MAX_SIZE", 500*1024*1024),
+		AutoExtractMaxRatio:   getEnvInt("PEERDRIVE_AUTO_EXTRACT_MAX_RATIO", 100),
+		AutoExtractMaxFiles:   getEnvInt("PEERDRIVE_AUTO_EXTRACT_MAX_FILES", 10000),
+		AutoExtractDeleteOrig: getEnvBool("PEERDRIVE_AUTO_EXTRACT_DELETE_ORIGINAL", true),
 
 		DownloadOrder:       getEnv("PEERDRIVE_DOWNLOAD_ORDER", "local,ipfs,ipfsgw,btdht,http"),
 		DownloadTimeoutSecs: getEnvInt("PEERDRIVE_DOWNLOAD_TIMEOUT", 30),

@@ -32,6 +32,7 @@ import (
 
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
+	"peerdrive/internal/extractor"
 	"peerdrive/internal/log"
 	"peerdrive/internal/pathutil"
 	"peerdrive/internal/repository"
@@ -320,6 +321,21 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 				return fi.Hash, fi.Size, nil
 			},
 		)
+		// 拉取后自动解包（可选，默认关，PEERDRIVE_AUTO_EXTRACT）。开时把压缩包
+		// 解到 <target>_extracted/ 并逐个登记进 file_index；安全边界（大小/
+		// 压缩比/文件数/路径穿越）由 extractor 包强制执行。
+		if cfg.AutoExtract {
+			ex := extractor.New(extractor.Config{
+				Enabled:        true,
+				MaxSize:        cfg.AutoExtractMaxSize,
+				MaxRatio:       cfg.AutoExtractMaxRatio,
+				MaxFiles:       cfg.AutoExtractMaxFiles,
+				DeleteOriginal: cfg.AutoExtractDeleteOrig,
+			})
+			puller.SetExtractor(ex)
+			log.LogInfo("main: auto-extract enabled (max_size=%d max_ratio=%d max_files=%d delete_orig=%v)",
+				cfg.AutoExtractMaxSize, cfg.AutoExtractMaxRatio, cfg.AutoExtractMaxFiles, cfg.AutoExtractDeleteOrig)
+		}
 		router.SetPeerPuller(puller)
 	}
 
