@@ -113,13 +113,12 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		c.Next()
 	})
 
-	// Auth middleware — validates Bearer tokens via registration server.
+	// Auth middleware — validates Bearer tokens via registration server or local admin token.
 	// Sets "authenticated" and "username" in Gin context for downstream handlers.
 	// Anonymous requests (no token) pass through with authenticated=false.
-	if cfg.RegistrationServer != "" {
-		SetRegServer(cfg.RegistrationServer)
-		r.Use(AuthOptional())
-	}
+	SetRegServer(cfg.RegistrationServer)
+	SetAdminToken(cfg.AdminToken)
+	r.Use(AuthOptional())
 	// Attached to all mutating/admin routes: when no registration server is configured,
 	// AuthRequired passes through internally (local single-machine mode); after configuration,
 	// requires Bearer token (F1: previously AuthRequired had 0 call sites, all file

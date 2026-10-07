@@ -1,8 +1,10 @@
 // Package router provides Gin authentication middleware. AuthOptional allows anonymous requests through (authenticated=false),
-// AuthRequired rejects requests without a valid token. Tokens are validated via registration server /auth/whoami.
+// AuthRequired rejects requests without a valid token. Tokens are validated via registration server /auth/whoami,
+// or locally against PEERDRIVE_ADMIN_TOKEN when no registration server is configured.
 package router
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,18 +16,27 @@ import (
 )
 
 var regServerURL string
+var adminToken string
 
 // SetRegServer sets the registration server URL for token validation.
 func SetRegServer(url string) {
 	regServerURL = url
 }
 
-// authDisabled returns true when the authentication backend is not configured.
-// Background: local single-machine mode has no registration server; AuthRequired
-// forcing rejection would make the entire site return 401 and unusable.
-// Public deployments configure RegistrationServer to automatically tighten.
-// Allow/tighten decisions rely on this check.
-func authDisabled() bool { return regServerURL == "" }
+// SetAdminToken sets the local admin token for HTTP Bearer authentication.
+// When regServerURL == "" and adminToken != "", AuthRequired compares incoming
+// Bearer tokens against this value (constant-time). When both are empty, auth
+// is disabled (local single-machine mode).
+func SetAdminToken(token string) {
+	adminToken = token
+}
+
+// authDisabled returns true when NO authentication backend is configured.
+// Background: local single-machine mode has no registration server and no admin
+// token; AuthRequired forcing rejection would make the entire site return 401
+// and unusable. Public deployments configure RegistrationServer or AdminToken
+// to automatically tighten. Allow/tighten decisions rely on this check.
+func authDisabled() bool { return regServerURL == "" && adminToken == "" }
 
 // AuthOptional validates Bearer token (if present), sets authenticated, username, and role in the Gin context.
 func AuthOptional() gin.HandlerFunc {
@@ -42,6 +53,17 @@ func AuthOptional() gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		// Local admin token mode: no reg server configured, validate against AdminToken.
+		if regServerURL == "" {
+			if adminToken == "" || !constantTimeEqual(parts[1], adminToken) {
+				c.Set("authenticated", false)
+			} else {
+				c.Set("authenticated", true)
+			}
+			c.Next()
+			return
+		}
+		// Remote registration server mode.
 		username, role := validateToken(parts[1])
 		if username != "" {
 			c.Set("authenticated", true)
@@ -55,7 +77,10 @@ func AuthOptional() gin.HandlerFunc {
 }
 
 // AuthRequired rejects requests without a valid Bearer token, returns 401.
-// Passes through when no registration server is configured (local single-machine mode has no auth backend, see authDisabled).
+// Auth mode selection (in priority order):
+//  1. regServerURL != "" → remote whoami validation
+//  2. adminToken != "" → local constant-time Bearer comparison
+//  3. both empty → auth disabled, pass through (local single-machine mode)
 func AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if authDisabled() {
@@ -72,6 +97,17 @@ func AuthRequired() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format"})
 			return
 		}
+		// Local admin token mode: constant-time comparison against AdminToken.
+		if regServerURL == "" {
+			if adminToken == "" || !constantTimeEqual(parts[1], adminToken) {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
+				return
+			}
+			c.Set("authenticated", true)
+			c.Next()
+			return
+		}
+		// Remote registration server mode.
 		username, role := validateToken(parts[1])
 		if username == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
@@ -83,20 +119,14 @@ func AuthRequired() gin.HandlerFunc {
 	}
 }
 
+// constantTimeEqual compares two strings in constant time to prevent timing attacks.
+func constantTimeEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
 // tokenCacheTTL cache duration for token validation results.
-//
-// Why caching is mandatory: validateToken is a remote call PER REQUEST (registration
-// server /auth/whoami). A single admin console list page fires a dozen requests,
-// so every action pays a network round-trip first — if the registration server
-// hiccups, the entire admin console gets 401 (even though tokens are valid).
-// Cost: revoked tokens remain valid for up to 30s. This is the classic
-// availability-vs-immediate-revocation trade-off. 30s is chosen because it's
-// far less than the ops reaction time to detect and handle anomalies, and it
-// prevents the admin console from jittering with the registration server.
-// To enable immediate revocation, set this to 0.
 const tokenCacheTTL = 30 * time.Second
 
-// tokenCache token → validation result. Process memory only: no disk, no logging.
 var tokenCache = struct {
 	sync.RWMutex
 	m map[string]tokenCacheEntry
@@ -108,7 +138,6 @@ type tokenCacheEntry struct {
 	exp      time.Time
 }
 
-// cacheGet reads from cache; expired entries are treated as misses.
 func cacheGet(token string) (string, string, bool) {
 	tokenCache.RLock()
 	e, ok := tokenCache.m[token]
@@ -119,8 +148,6 @@ func cacheGet(token string) (string, string, bool) {
 	return e.username, e.role, true
 }
 
-// cachePut writes to cache and cleans up expired entries (otherwise invalid tokens
-// that were scanned would keep occupying memory forever).
 func cachePut(token, username, role string) {
 	tokenCache.Lock()
 	defer tokenCache.Unlock()
@@ -136,15 +163,13 @@ func cachePut(token, username, role string) {
 }
 
 func validateToken(token string) (string, string) {
-	if authDisabled() {
-		return "", "" // no reg server configured, auth disabled
+	if regServerURL == "" {
+		return "", "" // no reg server — only called when regServerURL != ""
 	}
 	if u, r, ok := cacheGet(token); ok {
 		return u, r
 	}
 	u, r := queryWhoami(token)
-	// Only cache successful results: failures may be network hiccups; caching would
-	// extend a single hiccup's impact for 30s.
 	if u != "" {
 		cachePut(token, u, r)
 	}
@@ -152,10 +177,6 @@ func validateToken(token string) (string, string) {
 }
 
 func queryWhoami(token string) (string, string) {
-	// Gotcha: original implementation had http.Client{} with no timeout — when the
-	// registration server hangs, every request blocks forever (connection pool exhaustion).
-	// Fix: 5s timeout + 64KB response body limit (whoami responses are tiny, this
-	// prevents malicious/compromised registration servers from returning large payloads).
 	client := &http.Client{Timeout: 5 * time.Second}
 	req, _ := http.NewRequest("GET", regServerURL+"/auth/whoami", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

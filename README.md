@@ -236,6 +236,7 @@ peerdrive
 | `PEERDRIVE_PEERJS_PEERS` | - | Comma-separated peers for auto interconnect |
 | `PEERDRIVE_MQTT_ENABLE` / `PEERDRIVE_MQTT_BROKER` | false / tcp://broker.emqx.io:1883 | MQTT sharded-room discovery |
 | `PEERDRIVE_MQTT_TOPIC_PREFIX` / `PEERDRIVE_MQTT_COLLECTIONS` | peerdrive/v1 / - | MQTT topic prefix / collections of interest |
+| `PEERDRIVE_DISCOVER_MODE` | `auto` | Discovery mode: `auto` (HTTP if URL set, else MQTT), `peerjs` (no discovery, static peers only), `discover` (force HTTP), `mqtt` (force MQTT), `off` (no discovery) |
 | `PEERDRIVE_DISCOVER_URL` | - | Self-hosted discovery API (takes precedence over MQTT) |
 | `PEERDRIVE_URL_SOURCE_TEMPLATE` | - | URL source template (%s=hash, multi-source fallback) |
 | `PEERDRIVE_DOWNLOAD_DIR` | ./downloads | Download/registration directory (file_index root) |
@@ -249,6 +250,7 @@ peerdrive
 | `PEERDRIVE_SHARE_FRIENDS` | - | Friend node IDs: comma-separated, `private`-level content is allowed for them (see `model.LevelPrivate`) |
 
 | `PEERDRIVE_PSK` | - | Node access pre-shared key. Empty = open (serves whoever connects); set = peer must present the same key to pull anything (`doc/NETDISK.md` §9) |
+| `PEERDRIVE_ADMIN_TOKEN` | - | Local HTTP Bearer token for authRequired routes when no reg server is configured. Empty + no `PEERDRIVE_REG_SERVER` = auth disabled (loopback only); non-empty = `Authorization: Bearer <token>` required |
 
 > These `PEERDRIVE_SHARE_*` entries are only **first-boot initial values**: after startup they can be changed any time via `GET/PUT /peerjs/share`
 > and `POST /peerjs/share/files` (by directory / collection / individual file hash), persisted in

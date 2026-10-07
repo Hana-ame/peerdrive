@@ -29,7 +29,7 @@ PEERDRIVE_DISCOVER_URL=http://127.0.0.1:$SIG_PORT \
 PEERDRIVE_BT_DHT_ENABLE=false \
 PEERDRIVE_IPFS_GATEWAY_ENABLE=false \
 PEERDRIVE_PSK=demo-psk \
-PEERDRIVE_ALLOW_NO_AUTH=1"
+PEERDRIVE_ADMIN_TOKEN=ci-test-token"
 
 say() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 ok()  { printf '  \033[32mPASS\033[0m %s\n' "$*"; }
@@ -98,9 +98,9 @@ API="http://127.0.0.1:$A_PORT"
 probe() { # method endpoint body expect desc
   local code body_out
   if [ "$1" = "GET" ]; then
-    body_out=$(curl -s -m 15 -w '\n%{http_code}' "$API$2")
+    body_out=$(curl -s -m 15 -w '\n%{http_code}' -H "Authorization: Bearer ci-test-token" "$API$2")
   else
-    body_out=$(curl -s -m 15 -w '\n%{http_code}' -X POST "$API$2" \
+    body_out=$(curl -s -m 15 -w '\n%{http_code}' -X POST -H "Authorization: Bearer ci-test-token" "$API$2" \
                -H 'Content-Type: application/json' -d "$3")
   fi
   code=$(echo "$body_out" | tail -n1)

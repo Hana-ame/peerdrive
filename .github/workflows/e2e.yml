@@ -83,7 +83,7 @@ jobs:
           PEERDRIVE_PEERJS_ID: admin-smoke
           PEERDRIVE_BT_DHT_ENABLE: "false"
           PEERDRIVE_IPFS_GATEWAY_ENABLE: "false"
-          PEERDRIVE_ALLOW_NO_AUTH: "1"
+          PEERDRIVE_ADMIN_TOKEN: "ci-test-token"
         run: |
           set -u
           mkdir -p /tmp/pdadmin/root/downloads/shared
@@ -144,7 +144,7 @@ jobs:
             PEERDRIVE_BT_DHT_ENABLE=false \
             PEERDRIVE_IPFS_GATEWAY_ENABLE=false \
             PEERDRIVE_SWAGGER=off \
-            PEERDRIVE_ALLOW_NO_AUTH=1 \
+            PEERDRIVE_ADMIN_TOKEN=ci-test-token \
             /tmp/pdzero/peerdrive > /tmp/pdzero/node.log 2>&1 &
           echo $! > /tmp/pdzero/node.pid
           # 先确认**监听者就是自己刚起的那个**：曾经有一次旧二进制占着端口，

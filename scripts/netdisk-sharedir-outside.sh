@@ -36,7 +36,7 @@ PEERDRIVE_DISCOVER_URL=http://127.0.0.1:$SIG_PORT \
 PEERDRIVE_BT_DHT_ENABLE=false \
 PEERDRIVE_IPFS_GATEWAY_ENABLE=false \
 PEERDRIVE_PSK=demo-psk \
-PEERDRIVE_ALLOW_NO_AUTH=1"
+PEERDRIVE_ADMIN_TOKEN=ci-test-token"
 
 say() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 ok()  { printf '  \033[32mPASS\033[0m %s\n' "$*"; }
@@ -112,7 +112,7 @@ wait_up "http://127.0.0.1:$B_PORT/ping" "node-b" || exit 1
 sleep 5
 
 say "[1] 登记 storage 根之外的共享目录（旧代码会 400 path outside storage root）"
-RR=$(curl -s -m 60 -X POST "http://127.0.0.1:$A_PORT/files/register_folder" \
+RR=$(curl -s -m 60 -X POST -H "Authorization: Bearer ci-test-token" "http://127.0.0.1:$A_PORT/files/register_folder" \
       -H 'Content-Type: application/json' \
       -d "{\"folder_path\":\"$DEMO_DIR/media\"}")
 echo "  $RR" | head -c 300; echo
@@ -123,7 +123,7 @@ else
 fi
 
 say "[2] 反向：未声明的目录必须仍然拒绝（安全边界不能被顺手放宽）"
-RS=$(curl -s -m 60 -X POST "http://127.0.0.1:$A_PORT/files/register_folder" \
+RS=$(curl -s -m 60 -X POST -H "Authorization: Bearer ci-test-token" "http://127.0.0.1:$A_PORT/files/register_folder" \
       -H 'Content-Type: application/json' \
       -d "{\"folder_path\":\"$DEMO_DIR/secret\"}")
 echo "  $RS" | head -c 300; echo
@@ -134,7 +134,7 @@ else
 fi
 
 say "[3] 共享清单：B 经 share 帧问 A"
-curl -s -m 20 -X POST "http://127.0.0.1:$B_PORT/peerjs/nodes/join" \
+curl -s -m 20 -X POST -H "Authorization: Bearer ci-test-token" "http://127.0.0.1:$B_PORT/peerjs/nodes/join" \
   -H 'Content-Type: application/json' -d '{"peer":"node-a"}' >/dev/null
 sleep 3
 SH=$(curl -s -m 25 "http://127.0.0.1:$B_PORT/peerjs/nodes/node-a/shares")
@@ -153,7 +153,7 @@ for f in shares["files"]:
 PY
 while read -r HASH NAME SIZE; do
   [ -z "$HASH" ] && continue
-  RES=$(curl -s -m 120 -X POST "http://127.0.0.1:$B_PORT/p2p/pull" \
+  RES=$(curl -s -m 120 -X POST -H "Authorization: Bearer ci-test-token" "http://127.0.0.1:$B_PORT/p2p/pull" \
         -H 'Content-Type: application/json' \
         -d "{\"peer\":\"node-a\",\"hash\":\"$HASH\",\"name\":\"$NAME\"}")
   echo "  pull $NAME -> $(echo "$RES" | head -c 160)"
