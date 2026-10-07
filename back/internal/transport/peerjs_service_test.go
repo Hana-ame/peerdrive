@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -433,4 +434,147 @@ func TestUploadWorker_WriteThenComplete(t *testing.T) {
 func TestHashMatchesSHA256_AllowsEmptyFile(t *testing.T) {
 	emptyHash := sha256.Sum256([]byte{})
 	assert.True(t, hashMatchesSHA256(hex.EncodeToString(emptyHash[:]), []byte{}), "sha256 of empty file should be accepted")
+}
+
+// TestDiscoveryMode_OffAndPeerjsNoDiscovery: "off" 与 "peerjs" 模式下，
+// 无论 DiscoverURL / MQTTEnable 怎么设，HTTP 与 MQTT 发现都不启动——
+// 这是"只用官方 0.peerjs.com 信令、不向自托管发现 API 上报"的落点（信令可选）。
+// 发现背景：旧实现只有"URL 非空/MQTTEnable"两个布尔，没有显式关发现的通道。
+func TestDiscoveryMode_OffAndPeerjsNoDiscovery(t *testing.T) {
+	tests := []struct {
+		mode        string
+		discoverURL string
+		mqttEnable  bool
+	}{
+		{"off", "http://example.com", false},
+		{"off", "", true},
+		{"off", "http://example.com", true},
+		{"peerjs", "http://example.com", false},
+		{"peerjs", "", true},
+		{"peerjs", "http://example.com", true},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("mode=%s url=%v mqtt=%v", tt.mode, tt.discoverURL != "", tt.mqttEnable), func(t *testing.T) {
+			svc := newTestPeerJSService(t)
+			svc.cfg.DiscoverMode = tt.mode
+			svc.cfg.DiscoverURL = tt.discoverURL
+			svc.cfg.MQTTEnable = tt.mqttEnable
+
+			shouldHTTP, shouldMQTT, mode := svc.discoveryMode()
+			assert.False(t, shouldHTTP, "mode=%s must not start HTTP discovery", tt.mode)
+			assert.False(t, shouldMQTT, "mode=%s must not start MQTT discovery", tt.mode)
+			assert.Equal(t, tt.mode, mode)
+		})
+	}
+}
+
+// TestDiscoveryMode_DiscoverForcesHTTP: "discover" 强制 HTTP 发现、忽略 MQTT；
+// DiscoverURL 为空时连 HTTP 也不启动（config.Validate 启动期拦截，这里兜底）。
+func TestDiscoveryMode_DiscoverForcesHTTP(t *testing.T) {
+	t.Run("with DiscoverURL set, HTTP is enabled", func(t *testing.T) {
+		svc := newTestPeerJSService(t)
+		svc.cfg.DiscoverMode = "discover"
+		svc.cfg.DiscoverURL = "http://example.com"
+		svc.cfg.MQTTEnable = true // MQTT 必须被忽略
+
+		shouldHTTP, shouldMQTT, mode := svc.discoveryMode()
+		assert.True(t, shouldHTTP)
+		assert.False(t, shouldMQTT, "discover mode must not start MQTT")
+		assert.Equal(t, "discover", mode)
+	})
+
+	t.Run("without DiscoverURL, no discovery", func(t *testing.T) {
+		svc := newTestPeerJSService(t)
+		svc.cfg.DiscoverMode = "discover"
+		svc.cfg.DiscoverURL = ""
+		svc.cfg.MQTTEnable = true
+
+		shouldHTTP, shouldMQTT, mode := svc.discoveryMode()
+		assert.False(t, shouldHTTP, "no URL means no HTTP discovery")
+		assert.False(t, shouldMQTT, "discover mode must not fall back to MQTT")
+		assert.Equal(t, "discover", mode)
+	})
+}
+
+// TestDiscoveryMode_MQTTForcesMQTT: "mqtt" 强制 MQTT 发现、忽略 HTTP；
+// MQTT_ENABLE=false 时 MQTT 也不启动（config.Validate 启动期拦截，这里兜底）。
+func TestDiscoveryMode_MQTTForcesMQTT(t *testing.T) {
+	t.Run("with MQTTEnable, MQTT is enabled", func(t *testing.T) {
+		svc := newTestPeerJSService(t)
+		svc.cfg.DiscoverMode = "mqtt"
+		svc.cfg.MQTTEnable = true
+		svc.cfg.DiscoverURL = "http://example.com" // HTTP 必须被忽略
+
+		shouldHTTP, shouldMQTT, mode := svc.discoveryMode()
+		assert.False(t, shouldHTTP, "mqtt mode must not start HTTP")
+		assert.True(t, shouldMQTT)
+		assert.Equal(t, "mqtt", mode)
+	})
+
+	t.Run("without MQTTEnable, no discovery", func(t *testing.T) {
+		svc := newTestPeerJSService(t)
+		svc.cfg.DiscoverMode = "mqtt"
+		svc.cfg.MQTTEnable = false
+
+		shouldHTTP, shouldMQTT, mode := svc.discoveryMode()
+		assert.False(t, shouldHTTP, "mqtt mode must not start HTTP")
+		assert.False(t, shouldMQTT, "no MQTT enabled means no MQTT discovery")
+		assert.Equal(t, "mqtt", mode)
+	})
+}
+
+// TestDiscoveryMode_Auto: "auto"（默认）——DiscoverURL 非空优先 HTTP，否则 MQTT。
+func TestDiscoveryMode_Auto(t *testing.T) {
+	tests := []struct {
+		name        string
+		discoverURL string
+		mqttEnable  bool
+		wantHTTP    bool
+		wantMQTT    bool
+	}{
+		{"HTTP preferred when URL set", "http://example.com", true, true, false},
+		{"MQTT fallback when no URL", "", true, false, true},
+		{"neither when nothing set", "", false, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := newTestPeerJSService(t)
+			svc.cfg.DiscoverMode = "auto"
+			svc.cfg.DiscoverURL = tt.discoverURL
+			svc.cfg.MQTTEnable = tt.mqttEnable
+
+			shouldHTTP, shouldMQTT, mode := svc.discoveryMode()
+			assert.Equal(t, tt.wantHTTP, shouldHTTP, "shouldHTTP")
+			assert.Equal(t, tt.wantMQTT, shouldMQTT, "shouldMQTT")
+			assert.Equal(t, "auto", mode)
+		})
+	}
+}
+
+// TestDiscoveryMode_EmptyStringAuto: DiscoverMode 为空串时按 "auto" 处理
+// （默认 env 值是 "auto"，但手动清空 env 的情况也必须可用）。
+func TestDiscoveryMode_EmptyStringAuto(t *testing.T) {
+	svc := newTestPeerJSService(t)
+	svc.cfg.DiscoverMode = ""
+	svc.cfg.DiscoverURL = "http://example.com"
+	svc.cfg.MQTTEnable = false
+
+	shouldHTTP, shouldMQTT, mode := svc.discoveryMode()
+	assert.True(t, shouldHTTP)
+	assert.False(t, shouldMQTT)
+	assert.Equal(t, "auto", mode)
+}
+
+// TestDiscoveryMode_UnknownFallsBackToAuto: 未知值回退 auto 且报 warning，
+// 不 panic、不静默什么都不做（config.Validate 启动期拦截，这里是防御兜底）。
+func TestDiscoveryMode_UnknownFallsBackToAuto(t *testing.T) {
+	svc := newTestPeerJSService(t)
+	svc.cfg.DiscoverMode = "bogus"
+	svc.cfg.DiscoverURL = ""
+	svc.cfg.MQTTEnable = true
+
+	shouldHTTP, shouldMQTT, mode := svc.discoveryMode()
+	assert.False(t, shouldHTTP)
+	assert.True(t, shouldMQTT, "unknown mode falls back to auto semantics")
+	assert.Equal(t, "auto", mode)
 }

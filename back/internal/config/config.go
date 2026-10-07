@@ -33,6 +33,15 @@ type Config struct {
 
 	AllowedOrigins     string
 	RegistrationServer string
+	// AdminToken is the local HTTP admin-surface Bearer token when no registration
+	// server is configured (PEERDRIVE_ADMIN_TOKEN, default empty). When
+	// RegistrationServer == "" and AdminToken != "": AuthRequired compares incoming
+	// Bearer tokens against this value with constant-time comparison — the HTTP
+	// management surface gets auth even though the remote login service is off.
+	// When both are empty, auth is disabled (local single-machine mode, loopback).
+	// Deliberately NOT reusing PEERDRIVE_PSK: PSK is a P2P DataChannel secret;
+	// leaking it to HTTP would expose it in browser devtools/logs.
+	AdminToken string
 	// 2026-10-04: removed the three dead fields PublicAccessDomain / NodeAuthToken /
 	// RegServerURL.
 	// Why deletion instead of implementation:
@@ -100,6 +109,26 @@ type Config struct {
 	// discovery (self-hosted signaling); the public MQTT broker does not add a presence room (a global
 	// room on a public broker is equivalent to broadcasting).
 	DiscoverPresence bool
+
+	// DiscoverMode controls which discovery mechanism the node uses (PEERDRIVE_DISCOVER_MODE).
+	//
+	// Valid values:
+	//   - "auto" (default): current behavior — if DiscoverURL is set, use HTTP discovery
+	//     (self-hosted signaling server); otherwise if MQTT_ENABLE=true, use MQTT discovery.
+	//   - "peerjs": use only PeerJS signaling for connections; no HTTP or MQTT discovery.
+	//     Nodes interconnect via the static PEERDRIVE_PEERJS_PEERS list (and market-joined
+	//     peers). This is how a node opts into the official 0.peerjs.com signaling without
+	//     announcing presence to any self-hosted discovery API.
+	//   - "discover": force HTTP discovery via DiscoverURL (requires DiscoverURL non-empty).
+	//   - "mqtt": force MQTT discovery (requires MQTT_ENABLE=true).
+	//   - "off": completely disable discovery (same behavior as "peerjs", but semantically
+	//     more explicit for "no discovery server" deployments).
+	//
+	// Background: the old behavior had no way to turn discovery off — as long as the
+	// default DiscoverURL was set, auto mode kept announcing to the self-hosted server.
+	// "可选用官方信令或自定义信令" needs an explicit off/peerjs lane (goal: signal
+	// optional). "off" and "peerjs" behave identically; use whichever reads clearer.
+	DiscoverMode string
 
 	// URLSourceTemplate is the URL source template for the unified source system (PEERDRIVE_URL_SOURCE_TEMPLATE).
 	// Empty = no URL source registered. %s = sha256 hash; when %d is present (%d for offset,size),
@@ -231,6 +260,7 @@ func Load() *Config {
 		StorageEnable:      getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
 		AllowedOrigins:     getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev"),
 		RegistrationServer: getEnv("PEERDRIVE_REG_SERVER", ""),
+		AdminToken:         getEnv("PEERDRIVE_ADMIN_TOKEN", ""),
 		MaxUploadBytes:     getEnvInt64("PEERDRIVE_MAX_UPLOAD_BYTES", 100*1024*1024),     // 100MB default
 		MaxUploadBytesAnon: getEnvInt64("PEERDRIVE_MAX_UPLOAD_ANON_BYTES", 10*1024*1024), // 10MB for anonymous
 		BTDHTEnabled:       getEnvBool("PEERDRIVE_BT_DHT_ENABLE", false),                 // Default disabled: DHT init blocks startup; enable manually as needed
@@ -257,6 +287,7 @@ func Load() *Config {
 		MQTTCollections:   getEnv("PEERDRIVE_MQTT_COLLECTIONS", ""),
 		DiscoverURL:       getEnv("PEERDRIVE_DISCOVER_URL", DefaultDiscoverURL),
 		DiscoverPresence:  getEnvBool("PEERDRIVE_DISCOVER_PRESENCE", true),
+		DiscoverMode:      getEnv("PEERDRIVE_DISCOVER_MODE", "auto"),
 		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
 
 		DownloadDir: getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
@@ -316,6 +347,23 @@ func Validate(c *Config) error {
 	}
 	if c.MaxPeers <= 0 {
 		errs = append(errs, fmt.Sprintf("PEERDRIVE_MAX_PEERS=%d must be positive", c.MaxPeers))
+	}
+
+	// DiscoverMode 合法性 + 交叉校验：模式与依赖项不符时启动期就拦，
+	// 而不是运行期静默降级（那会让运营者以为 discovery=discover 其实没开）。
+	switch c.DiscoverMode {
+	case "auto", "peerjs", "discover", "mqtt", "off":
+		// valid
+	case "":
+		errs = append(errs, "PEERDRIVE_DISCOVER_MODE cannot be empty")
+	default:
+		errs = append(errs, fmt.Sprintf("PEERDRIVE_DISCOVER_MODE=%q is invalid (valid: auto, peerjs, discover, mqtt, off)", c.DiscoverMode))
+	}
+	if c.DiscoverMode == "discover" && c.DiscoverURL == "" {
+		errs = append(errs, "PEERDRIVE_DISCOVER_MODE=discover requires PEERDRIVE_DISCOVER_URL to be set")
+	}
+	if c.DiscoverMode == "mqtt" && !c.MQTTEnable {
+		errs = append(errs, "PEERDRIVE_DISCOVER_MODE=mqtt requires PEERDRIVE_MQTT_ENABLE=true")
 	}
 
 	if len(errs) == 0 {

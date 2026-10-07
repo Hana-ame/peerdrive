@@ -1,8 +1,10 @@
 // Package router provides Gin authentication middleware. AuthOptional allows anonymous requests through (authenticated=false),
-// AuthRequired rejects requests without a valid token. Tokens are validated via registration server /auth/whoami.
+// AuthRequired rejects requests without a valid token. Tokens are validated via registration server /auth/whoami,
+// or locally against PEERDRIVE_ADMIN_TOKEN when no registration server is configured.
 package router
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,18 +16,27 @@ import (
 )
 
 var regServerURL string
+var adminToken string
 
 // SetRegServer sets the registration server URL for token validation.
 func SetRegServer(url string) {
 	regServerURL = url
 }
 
-// authDisabled returns true when the authentication backend is not configured.
-// Background: local single-machine mode has no registration server; AuthRequired
-// forcing rejection would make the entire site return 401 and unusable.
-// Public deployments configure RegistrationServer to automatically tighten.
-// Allow/tighten decisions rely on this check.
-func authDisabled() bool { return regServerURL == "" }
+// SetAdminToken sets the local admin token for HTTP Bearer authentication.
+// When regServerURL == "" and adminToken != "", AuthRequired compares incoming
+// Bearer tokens against this value with constant-time comparison. When both are
+// empty, auth is disabled (local single-machine mode) — see authDisabled.
+func SetAdminToken(token string) {
+	adminToken = token
+}
+
+// authDisabled returns true when NO authentication backend is configured.
+// Background: local single-machine mode has no registration server and no admin
+// token; AuthRequired forcing rejection would make the entire site return 401
+// and unusable. Public deployments configure RegistrationServer or AdminToken
+// to automatically tighten. Allow/tighten decisions rely on this check.
+func authDisabled() bool { return regServerURL == "" && adminToken == "" }
 
 // AuthOptional validates Bearer token (if present), sets authenticated, username, and role in the Gin context.
 func AuthOptional() gin.HandlerFunc {
@@ -42,6 +53,17 @@ func AuthOptional() gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		// 无远端注册服务器时走本地令牌分支：用常量时间比较 AdminToken，
+		// 不向任何远端服务发请求（又能让管理面在登录服务关闭时仍可鉴权）。
+		if regServerURL == "" {
+			if adminToken != "" && constantTimeEqual(parts[1], adminToken) {
+				c.Set("authenticated", true)
+			} else {
+				c.Set("authenticated", false)
+			}
+			c.Next()
+			return
+		}
 		username, role := validateToken(parts[1])
 		if username != "" {
 			c.Set("authenticated", true)
@@ -55,7 +77,10 @@ func AuthOptional() gin.HandlerFunc {
 }
 
 // AuthRequired rejects requests without a valid Bearer token, returns 401.
-// Passes through when no registration server is configured (local single-machine mode has no auth backend, see authDisabled).
+// Auth mode selection (in priority order):
+//  1. regServerURL != "" → remote registration server whoami validation
+//  2. adminToken != "" → local constant-time Bearer comparison
+//  3. both empty → auth disabled, pass through (local single-machine mode)
 func AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if authDisabled() {
@@ -72,6 +97,17 @@ func AuthRequired() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format"})
 			return
 		}
+		// 本地管理员令牌模式：常量时间比较，不给时序侧信道（C-14 follow-up）。
+		if regServerURL == "" {
+			if adminToken == "" || !constantTimeEqual(parts[1], adminToken) {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
+				return
+			}
+			c.Set("authenticated", true)
+			c.Next()
+			return
+		}
+		// 远端注册服务器模式。
 		username, role := validateToken(parts[1])
 		if username == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
@@ -81,6 +117,11 @@ func AuthRequired() gin.HandlerFunc {
 		c.Set("role", role)
 		c.Next()
 	}
+}
+
+// constantTimeEqual compares two strings in constant time to prevent timing attacks.
+func constantTimeEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 // tokenCacheTTL cache duration for token validation results.
@@ -136,8 +177,11 @@ func cachePut(token, username, role string) {
 }
 
 func validateToken(token string) (string, string) {
-	if authDisabled() {
-		return "", "" // no reg server configured, auth disabled
+	// 只在远端注册服务器模式下被调用（AuthOptional/AuthRequired 已先分流本地令牌），
+	// 用 regServerURL 判空而不是 authDisabled()：AdminToken 已设但 regServer 为空时
+	// authDisabled() 为 false，若走这里会拿本地令牌去问一个不存在的远端服务。
+	if regServerURL == "" {
+		return "", "" // no reg server configured — local token path handles auth
 	}
 	if u, r, ok := cacheGet(token); ok {
 		return u, r

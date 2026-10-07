@@ -254,7 +254,20 @@ func (s *PeerJSService) startLoop() {
 		if s.ctx.Err() != nil {
 			return
 		}
-		if httpDisc == nil && s.cfg.DiscoverURL != "" {
+		// 发现模式选择（PEERDRIVE_DISCOVER_MODE）：
+		//   auto（默认）   DiscoverURL 非空→HTTP 发现，否则 MQTT_ENABLE→MQTT
+		//   peerjs / off   完全不启动 HTTP/MQTT 发现，只靠静态 PEERDRIVE_PEERJS_PEERS
+		//                   与市场加入的对端互联——"只用官方 0.peerjs.com 信令、不向
+		//                   任何自托管发现 API 上报"正是靠这个模式（信令可选）。
+		//   discover       强制 HTTP 发现（要求 DiscoverURL 非空；忽略 MQTT）
+		//   mqtt           强制 MQTT 发现（要求 MQTT_ENABLE=true；忽略 HTTP）
+		// 为什么做成模式而不是沿用旧的"URL 非空 / MQTTEnable"两个布尔：旧行为没有
+		// "显式关掉发现"的通道——默认 DiscoverURL 非空（config.go DefaultDiscoverURL）
+		// 会让 auto 模式一直上报到自托管服务器。config.Validate 已在启动期校验模式值。
+		shouldHTTP, shouldMQTT, mode := s.discoveryMode()
+
+		// HTTP 发现（仅当模式允许且未启动过）。
+		if shouldHTTP && httpDisc == nil {
 			cols := s.discoveryRooms()
 			httpDisc = NewHTTPDiscovery(s.cfg.DiscoverURL, s.id, cols, s.onDiscoveredPeer, func() []string {
 				if p := s.currentPeer(); p != nil {
@@ -269,8 +282,11 @@ func (s *PeerJSService) startLoop() {
 			s.peerMu.Lock()
 			s.httpDisc = httpDisc
 			s.peerMu.Unlock()
-			log.LogInfo("peerjs: http discovery enabled url=%s collections=%d", s.cfg.DiscoverURL, len(cols))
-		} else if disc == nil && s.cfg.MQTTEnable {
+			log.LogInfo("peerjs: http discovery enabled (mode=%s) url=%s collections=%d", mode, s.cfg.DiscoverURL, len(cols))
+		}
+
+		// MQTT 发现（仅当模式允许且未启动过）。
+		if shouldMQTT && disc == nil {
 			cols := s.collectionHashes()
 			disc = NewMQTTDiscovery(s.cfg.MQTTBroker, s.cfg.MQTTTopicPref,
 				"pd-node-"+s.id, s.onDiscoveredPeer)
@@ -279,7 +295,7 @@ func (s *PeerJSService) startLoop() {
 			s.peerMu.Lock()
 			s.discovery = disc
 			s.peerMu.Unlock()
-			log.LogInfo("peerjs: mqtt discovery enabled broker=%s collections=%d", s.cfg.MQTTBroker, len(cols))
+			log.LogInfo("peerjs: mqtt discovery enabled (mode=%s) broker=%s collections=%d", mode, s.cfg.MQTTBroker, len(cols))
 		}
 
 		select {
@@ -360,6 +376,56 @@ func (s *PeerJSService) maxPeers() int {
 		return 1 << 30
 	}
 	return s.cfg.MaxPeers
+}
+
+// discoveryMode 返回发现模式配置（PEERDRIVE_DISCOVER_MODE）的决策结果：
+// (shouldHTTP, shouldMQTT, mode)。
+//
+// 模式语义：
+//   - "off" / "peerjs"：不启动任何 HTTP/MQTT 发现，仅靠静态 PEERDRIVE_PEERJS_PEERS
+//     与市场加入的对端互联。「off」是"无发现服务器部署"的推荐写法，
+//     「peerjs」语义相同、写给"只用官方 peerjs 信令"的部署。
+//   - "discover"：强制 HTTP 发现（DiscoverURL 非空时），忽略 MQTT。
+//   - "mqtt"：强制 MQTT 发现（MQTT_ENABLE=true 时），忽略 HTTP。
+//   - "auto"（默认）：DiscoverURL 非空 → HTTP；否则 MQTT_ENABLE → MQTT。
+//
+// 未知值回退 auto 并告警（config.Validate 启动期就拦，这里兜底防御）。
+func (s *PeerJSService) discoveryMode() (shouldHTTP, shouldMQTT bool, mode string) {
+	mode = s.cfg.DiscoverMode
+	if mode == "" {
+		mode = "auto"
+	}
+
+	auto := func() (bool, bool) {
+		http := s.cfg.DiscoverURL != ""
+		mqtt := !http && s.cfg.MQTTEnable
+		return http, mqtt
+	}
+
+	switch mode {
+	case "off", "peerjs":
+		log.LogInfo("peerjs: discovery mode=%s (no HTTP/MQTT discovery; nodes connect via PEERDRIVE_PEERJS_PEERS)", mode)
+		return false, false, mode
+	case "discover":
+		shouldHTTP = s.cfg.DiscoverURL != ""
+		if !shouldHTTP {
+			log.LogWarn("peerjs: discovery mode=discover but PEERDRIVE_DISCOVER_URL is empty; no discovery started")
+		}
+		return shouldHTTP, false, mode
+	case "mqtt":
+		shouldMQTT = s.cfg.MQTTEnable
+		if !shouldMQTT {
+			log.LogWarn("peerjs: discovery mode=mqtt but PEERDRIVE_MQTT_ENABLE is false; no discovery started")
+		}
+		return false, shouldMQTT, mode
+	case "auto":
+		shouldHTTP, shouldMQTT = auto()
+		return shouldHTTP, shouldMQTT, mode
+	default:
+		log.LogWarn("peerjs: unknown discovery mode=%q, falling back to auto", mode)
+		shouldHTTP, shouldMQTT = auto()
+		return shouldHTTP, shouldMQTT, "auto"
+	}
 }
 
 // discoveryRooms 返回 announce/查询用的房间列表 = 配置声明的内容分片房间

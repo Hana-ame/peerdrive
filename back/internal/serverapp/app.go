@@ -81,7 +81,7 @@ func isLoopbackListen(host string) bool {
 // validateAuthStartup checks that a non-loopback deployment has an auth backend configured,
 // or has explicitly opted out with PEERDRIVE_ALLOW_NO_AUTH=1.
 //
-// Why this check: AuthRequired passes through when no registration server is configured
+// Why this check: AuthRequired passes through when no auth backend is configured
 // (local single-machine mode). On a loopback-only deployment that's fine — the operator
 // is the only one who can reach the port. But on a non-loopback deployment (e.g.
 // PEERDRIVE_HOST=0.0.0.0), every authRequired route is wide open. This check forces an
@@ -92,13 +92,16 @@ func validateAuthStartup(cfg *config.Config) error {
 		return nil // loopback only — safe
 	}
 	if cfg.RegistrationServer != "" {
-		return nil // auth backend configured — safe
+		return nil // remote auth backend configured — safe
+	}
+	if cfg.AdminToken != "" {
+		return nil // local admin token configured — safe (C-14 follow-up: login service off, HTTP surface still gated)
 	}
 	if os.Getenv("PEERDRIVE_ALLOW_NO_AUTH") == "1" {
 		log.LogWarn("main: non-loopback with no auth backend; PEERDRIVE_ALLOW_NO_AUTH=1 set, continuing")
 		return nil
 	}
-	return fmt.Errorf("refusing to serve %s (non-loopback) with no auth backend; set PEERDRIVE_REG_SERVER or PEERDRIVE_ALLOW_NO_AUTH=1 to override", addr)
+	return fmt.Errorf("refusing to serve %s (non-loopback) with no auth backend; set PEERDRIVE_REG_SERVER, PEERDRIVE_ADMIN_TOKEN, or PEERDRIVE_ALLOW_NO_AUTH=1 to override", addr)
 }
 
 // RunServe is the Peerdrive server entry point; it initializes the DB, P2P, HTTP router and listens on the port.
@@ -116,6 +119,16 @@ func RunServe() {
 	// C-14: non-loopback without auth backend is a security risk; require explicit opt-in.
 	if err := validateAuthStartup(cfg); err != nil {
 		stdlog.Fatalf("%v", err)
+	}
+	// 启动时把当前认证模式打出来——运营者需要一眼知道这门是开是关、靠什么开。
+	// 三种模式：远端注册服务 / 本地 AdminToken / 完全关闭（仅回环安全）。
+	switch {
+	case cfg.RegistrationServer != "":
+		log.LogInfo("main: auth mode = registration server (%s)", cfg.RegistrationServer)
+	case cfg.AdminToken != "":
+		log.LogInfo("main: auth mode = local admin token (PEERDRIVE_ADMIN_TOKEN)")
+	default:
+		log.LogInfo("main: auth mode = disabled (no auth backend)")
 	}
 	r, shutdown, info, err := BuildRouterWithInfo(cfg)
 	if err != nil {
