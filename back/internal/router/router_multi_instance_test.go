@@ -249,7 +249,10 @@ func TestNewRouter_DepsAreCapturedByValue(t *testing.T) {
 	t.Parallel()
 
 	cfg := testCfg(func(c *config.Config) { c.AdminToken = "original" })
-	deps := Deps{Cfg: cfg, SourceManager: source.New()}
+	peerSvc := transport.NewPeerJSService(cfg, defaultTestStorageDir)
+	t.Cleanup(peerSvc.Close)
+
+	deps := Deps{Cfg: cfg, PeerJSService: peerSvc, SourceManager: source.New()}
 	rt, err := NewRouter(deps)
 	require.NoError(t, err)
 
