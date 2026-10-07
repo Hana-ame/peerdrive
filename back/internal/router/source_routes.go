@@ -13,16 +13,13 @@ import (
 	"peerdrive/internal/source"
 )
 
-// sourceManager is injected by main (same wiring pattern as peerjsService).
-var sourceManager *source.Manager
-
-// SetSourceManager injects the unified file manager (nil skips the management endpoints).
-func SetSourceManager(mgr *source.Manager) {
-	sourceManager = mgr
-}
-
 // registerSourceRoutes registers the source management endpoints.
-func registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFunc) {
+// Background: SourceManager comes from this Router's Deps (constructor injection —
+// previously a package-level global written by SetSourceManager, same wiring pattern
+// as the old peerjsService). The manager is captured into a local because the
+// registered handlers outlive this function.
+func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFunc) {
+	sourceManager := rt.deps.SourceManager
 	if sourceManager == nil {
 		return
 	}

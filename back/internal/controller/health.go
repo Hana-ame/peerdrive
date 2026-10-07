@@ -22,7 +22,7 @@ import (
 // use this to determine if the container was repeatedly restarted).
 var startedAt = time.Now()
 
-// dbPing is the "is the database alive?" probe injected by the assembly layer (router.SetupRouter).
+// dbPing is the "is the database alive?" probe injected by the assembly layer (Router.Engine in the router package).
 //
 // Why not directly import repository: the controller layer not touching persistence is a hard
 // implementation convention (service layer → repository layer; controllers only see services).

@@ -6,7 +6,7 @@
 // registration) makes "what middleware does this route have" impossible to see
 // at a glance — and that's exactly what security audits need to see most.
 //
-// Mounting order (in SetupRouter, order = execution order):
+// Mounting order (in Router.Engine, order = execution order):
 //   RequestID → SecurityHeaders → AccessLog → RateLimit → CORS → routes
 // Request ID must be first (all subsequent logs need to carry it), rate limiting
 // must be before business logic but after logging (rate-limited requests must
@@ -243,7 +243,7 @@ func RateLimit(rps float64, burst int) gin.HandlerFunc {
 		now := time.Now()
 		ip := c.ClientIP()
 		// Loopback and unknown sources are not rate-limited: the former is the admin
-		// channel (/ws/peer internal forwarding tagged as 127.0.0.1, see SetupRouter),
+		// channel (/ws/peer internal forwarding tagged as 127.0.0.1, see Router.Engine),
 		// the latter would only cause false positives — can't treat all requests where
 		// IP can't be identified as the same attacker.
 		if ip == "" || ip == "127.0.0.1" || ip == "::1" {

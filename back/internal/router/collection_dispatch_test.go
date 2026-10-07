@@ -18,7 +18,7 @@ import (
 // TestWithParams_CanRenderJSON Verifies that the context returned by withParams can still write responses normally
 // (regression: Copy fix caused Writer=nil panic).
 func TestWithParams_CanRenderJSON(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	t.Parallel()
 	r := gin.New()
 	r.GET("/collections/:id", func(c *gin.Context) {
 		cp := withParams(c, "username", "alice")
@@ -38,7 +38,7 @@ func TestWithParams_CanRenderJSON(t *testing.T) {
 // TestWithParams_OriginalParamsPreserved Verifies that original route params are still readable after appending
 // (:id and new params coexist, must not overwrite each other).
 func TestWithParams_OriginalParamsPreserved(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	t.Parallel()
 	r := gin.New()
 	r.GET("/collections/:id", func(c *gin.Context) {
 		cp := withParams(c, "username", "alice", "collection_name", "docs")
@@ -58,7 +58,7 @@ func TestWithParams_OriginalParamsPreserved(t *testing.T) {
 // TestDispatchGetCollection_ListCollections Verifies the full dispatcher chain
 // (dispatch → append params → controller writes JSON), preventing similar regressions from recurring at the dispatch layer.
 func TestDispatchGetCollection_ListCollections(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	t.Parallel()
 	r := gin.New()
 	// controller.InitCollectionController needs service injection; here we directly
 	// hook ListCollections to the dispatcher's same path to verify param assembly.

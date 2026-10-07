@@ -9,46 +9,34 @@ import (
 
 	hashutil "peerdrive/pkg/hashutil"
 
-	"peerdrive/internal/config"
 	"peerdrive/internal/controller"
-	"peerdrive/internal/service"
 	"peerdrive/internal/transport"
 )
 
-// peerjsService injected by main, exposes the node's ID on the PeerJS signaling network for frontend discovery.
-var peerjsService *transport.PeerJSService
-
-// peerjsCfg Origin whitelist for WS local sessions (same config as HTTP CORS).
-var peerjsCfg *config.Config
-
-// nodeDirectory node marketplace directory (doc/NETDISK.md M1), injected by main.
-var nodeDirectory *service.NodeDirectory
-
-// SetPeerJSService injects PeerJS WebRTC service (nil skips node info routes).
-func SetPeerJSService(svc *transport.PeerJSService) {
-	peerjsService = svc
-}
-
-// SetNodeDirectory injects node marketplace directory (nil → /peerjs/nodes* returns 503).
-func SetNodeDirectory(d *service.NodeDirectory) {
-	nodeDirectory = d
-	controller.InitNodeDirectory(d)
-}
-
-// SetNodeShare injects shared scope service (nil → /peerjs/share* returns 503).
-// Shared scope is a runtime operator choice (admin console checkbox), persisted under storage.
-func SetNodeShare(s *service.NodeShare) {
-	controller.InitNodeShareController(s)
-}
-
-// SetPeerPuller injects cross-node pull service (nil → /p2p/pull* returns 503).
-func SetPeerPuller(p *service.PeerPuller) {
-	controller.InitPeerPuller(p)
-}
-
-// SetPeerJSConfig injects configuration (WS local session Origin whitelist).
-func SetPeerJSConfig(cfg *config.Config) {
-	peerjsCfg = cfg
+// injectControllerDeps hands the PeerJS-backed dependencies to the controller
+// package, which still carries its own package-level Init* state (a separate
+// refactor; see NewRouter's scope note).
+//
+// Why it is a single method rather than four exported setters: these are only
+// ever meaningful together, as one Router's dependency set. Keeping them
+// together makes it obvious that they come from Deps and not from the caller,
+// and leaves nothing for a caller to wire up in the wrong order.
+//
+// Note the ordering constraint this replaces: the old code documented "SetNodeDirectory
+// must be called before SetupRouter (read during route registration)". Now the
+// dependency set is a value handed to NewRouter, so there is no window in which
+// the controller can observe a half-assembled router.
+func (r *Router) injectControllerDeps() {
+	controller.InitForwardController(r.deps.PeerJSService)
+	// Peer node share list query (cloud drive target M2): /peerjs/nodes/:peer/shares
+	// has controller call transport.RequestShares directly (requester of share frames).
+	controller.InitPeerShareController(r.deps.PeerJSService)
+	controller.InitNodeDirectory(r.deps.NodeDirectory)
+	// Shared scope is a runtime operator choice (admin console checkbox), persisted
+	// under storage — so the very same instance must reach both the controller
+	// (for /peerjs/share*) and the transport (for `share` frames).
+	controller.InitNodeShareController(r.deps.NodeShare)
+	controller.InitPeerPuller(r.deps.PeerPuller)
 }
 
 // isLoopbackRemote checks if TCP peer is local (RemoteAddr like 127.0.0.1:54321 / [::1]:54321).
@@ -67,17 +55,23 @@ func isLoopbackRemote(remote string) bool {
 }
 
 // registerPeerJSRoutes registers PeerJS node discovery and interconnection routes.
-// Background: peerjsService is injected by main before SetupRouter (package-level
-// variable, same pattern as SetRegServer); discovery endpoints serve frontend/MQTT
-// room node ID resolution.
-// auth parameter: SetupRouter's authRequired (auth middleware that passes through when
+// Background: PeerJSService comes from this Router's Deps (constructor injection —
+// previously it was a package-level global written by SetPeerJSService before
+// SetupRouter, which made registration depend on call order).
+// auth parameter: the Router's authRequired (auth middleware that passes through when
 // no registration server is configured), used to protect write/fetch endpoints (F1/H4).
 // Discovery and local WS sessions remain anonymous (/ws/peer frame protocol; fetch
 // requests go through peerjs layer's own validation via req frames).
-func registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
+//
+// The deps are captured into locals at the top: the handlers below run long after
+// this function returns, and reading them off r.deps each time would be both a
+// wider access surface and an unnecessary indirection per request.
+func (rt *Router) registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
+	peerjsService := rt.deps.PeerJSService
 	if peerjsService == nil {
 		return
 	}
+	peerjsCfg := rt.deps.PeerJSCfg
 	r.GET("/peerjs/node", func(c *gin.Context) {
 		conns := peerjsService.Connections()
 		peers := make([]string, 0, len(conns))

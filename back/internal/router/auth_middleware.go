@@ -1,6 +1,20 @@
 // Package router provides Gin authentication middleware. AuthOptional allows anonymous requests through (authenticated=false),
 // AuthRequired rejects requests without a valid token. Tokens are validated via registration server /auth/whoami,
 // or locally against PEERDRIVE_ADMIN_TOKEN when no registration server is configured.
+//
+// ── Instance-scoped since the 2026-10 dependency-injection refactor ──
+//
+// These used to be package-level globals (`regServerURL`, `adminToken`,
+// `tokenCache`) mutated by `SetRegServer`/`SetAdminToken`, which meant one auth
+// configuration per process and a mandatory "reset the globals" dance before each
+// test. They are now fields of an Authenticator, one per Router:
+//
+//	a := router.NewAuthenticator(regServerURL, adminToken)
+//	r.Use(a.AuthOptional())
+//	r.GET("/admin", a.AuthRequired(), handler)
+//
+// Two Authenticators in one process are fully independent — including their token
+// caches, so a token validated via one is never visible to the other.
 package router
 
 import (
@@ -15,20 +29,32 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var regServerURL string
-var adminToken string
-
-// SetRegServer sets the registration server URL for token validation.
-func SetRegServer(url string) {
-	regServerURL = url
+// Authenticator holds one node's auth backend choice and the token cache for it.
+//
+// Both string fields are set once at construction and never mutated, so a single
+// Authenticator is safe for concurrent use by many requests. The cache is
+// mutex-guarded because it is written on every successful remote validation.
+type Authenticator struct {
+	// regServerURL is the registration server base URL; empty means "no remote
+	// auth backend" (then the local adminToken path, or auth-disabled, applies).
+	regServerURL string
+	// adminToken is the local Bearer token (PEERDRIVE_ADMIN_TOKEN).
+	adminToken string
+	// tokenCache caches remote whoami results. Per-instance so that two
+	// Authenticators pointed at different registration servers never share
+	// entries — a shared cache would let a token validated by server A be
+	// accepted by a Router wired to server B.
+	tokenCache tokenCache
 }
 
-// SetAdminToken sets the local admin token for HTTP Bearer authentication.
-// When regServerURL == "" and adminToken != "", AuthRequired compares incoming
-// Bearer tokens against this value with constant-time comparison. When both are
-// empty, auth is disabled (local single-machine mode) — see authDisabled.
-func SetAdminToken(token string) {
-	adminToken = token
+// NewAuthenticator builds an Authenticator for one registration server URL and
+// local admin token. Pass "" for either to leave that backend unconfigured.
+func NewAuthenticator(regServerURL, adminToken string) *Authenticator {
+	return &Authenticator{
+		regServerURL: regServerURL,
+		adminToken:   adminToken,
+		tokenCache:   newTokenCache(),
+	}
 }
 
 // authDisabled returns true when NO authentication backend is configured.
@@ -36,10 +62,10 @@ func SetAdminToken(token string) {
 // token; AuthRequired forcing rejection would make the entire site return 401
 // and unusable. Public deployments configure RegistrationServer or AdminToken
 // to automatically tighten. Allow/tighten decisions rely on this check.
-func authDisabled() bool { return regServerURL == "" && adminToken == "" }
+func (a *Authenticator) authDisabled() bool { return a.regServerURL == "" && a.adminToken == "" }
 
 // AuthOptional validates Bearer token (if present), sets authenticated, username, and role in the Gin context.
-func AuthOptional() gin.HandlerFunc {
+func (a *Authenticator) AuthOptional() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")
 		if auth == "" {
@@ -55,8 +81,8 @@ func AuthOptional() gin.HandlerFunc {
 		}
 		// 无远端注册服务器时走本地令牌分支：用常量时间比较 AdminToken，
 		// 不向任何远端服务发请求（又能让管理面在登录服务关闭时仍可鉴权）。
-		if regServerURL == "" {
-			if adminToken != "" && constantTimeEqual(parts[1], adminToken) {
+		if a.regServerURL == "" {
+			if a.adminToken != "" && constantTimeEqual(parts[1], a.adminToken) {
 				c.Set("authenticated", true)
 			} else {
 				c.Set("authenticated", false)
@@ -64,7 +90,7 @@ func AuthOptional() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		username, role := validateToken(parts[1])
+		username, role := a.validateToken(parts[1])
 		if username != "" {
 			c.Set("authenticated", true)
 			c.Set("username", username)
@@ -81,9 +107,9 @@ func AuthOptional() gin.HandlerFunc {
 //  1. regServerURL != "" → remote registration server whoami validation
 //  2. adminToken != "" → local constant-time Bearer comparison
 //  3. both empty → auth disabled, pass through (local single-machine mode)
-func AuthRequired() gin.HandlerFunc {
+func (a *Authenticator) AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if authDisabled() {
+		if a.authDisabled() {
 			c.Next()
 			return
 		}
@@ -98,8 +124,8 @@ func AuthRequired() gin.HandlerFunc {
 			return
 		}
 		// 本地管理员令牌模式：常量时间比较，不给时序侧信道（C-14 follow-up）。
-		if regServerURL == "" {
-			if adminToken == "" || !constantTimeEqual(parts[1], adminToken) {
+		if a.regServerURL == "" {
+			if a.adminToken == "" || !constantTimeEqual(parts[1], a.adminToken) {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
 				return
 			}
@@ -108,7 +134,7 @@ func AuthRequired() gin.HandlerFunc {
 			return
 		}
 		// 远端注册服务器模式。
-		username, role := validateToken(parts[1])
+		username, role := a.validateToken(parts[1])
 		if username == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
 			return
@@ -137,71 +163,89 @@ func constantTimeEqual(a, b string) bool {
 // To enable immediate revocation, set this to 0.
 const tokenCacheTTL = 30 * time.Second
 
-// tokenCache token → validation result. Process memory only: no disk, no logging.
-var tokenCache = struct {
-	sync.RWMutex
-	m map[string]tokenCacheEntry
-}{m: map[string]tokenCacheEntry{}}
-
+// tokenCacheEntry is one cached whoami result.
 type tokenCacheEntry struct {
 	username string
 	role     string
 	exp      time.Time
 }
 
-// cacheGet reads from cache; expired entries are treated as misses.
-func cacheGet(token string) (string, string, bool) {
-	tokenCache.RLock()
-	e, ok := tokenCache.m[token]
-	tokenCache.RUnlock()
+// tokenCache maps token → validation result, guarded by its own mutex.
+//
+// It is a named struct (rather than the anonymous inline struct it used to be) so
+// that each Authenticator owns a distinct map. Embedded in Authenticator by
+// value, so constructing an Authenticator is enough to get a private cache — there
+// is no package-level map left to share, or to reset between tests.
+type tokenCache struct {
+	mu sync.RWMutex
+	m  map[string]tokenCacheEntry
+}
+
+func newTokenCache() tokenCache {
+	return tokenCache{m: make(map[string]tokenCacheEntry)}
+}
+
+// get reads from cache; expired entries are treated as misses.
+func (t *tokenCache) get(token string) (string, string, bool) {
+	t.mu.RLock()
+	e, ok := t.m[token]
+	t.mu.RUnlock()
 	if !ok || time.Now().After(e.exp) {
 		return "", "", false
 	}
 	return e.username, e.role, true
 }
 
-// cachePut writes to cache and cleans up expired entries (otherwise invalid tokens
+// put writes to cache and cleans up expired entries (otherwise invalid tokens
 // that were scanned would keep occupying memory forever).
-func cachePut(token, username, role string) {
-	tokenCache.Lock()
-	defer tokenCache.Unlock()
-	if len(tokenCache.m) > 1024 {
+func (t *tokenCache) put(token, username, role string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.m) > 1024 {
 		now := time.Now()
-		for k, v := range tokenCache.m {
+		for k, v := range t.m {
 			if now.After(v.exp) {
-				delete(tokenCache.m, k)
+				delete(t.m, k)
 			}
 		}
 	}
-	tokenCache.m[token] = tokenCacheEntry{username: username, role: role, exp: time.Now().Add(tokenCacheTTL)}
+	t.m[token] = tokenCacheEntry{username: username, role: role, exp: time.Now().Add(tokenCacheTTL)}
 }
 
-func validateToken(token string) (string, string) {
+// len reports how many entries are cached. Used by the tests that assert two
+// Authenticator instances do not share cache entries.
+func (t *tokenCache) len() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return len(t.m)
+}
+
+func (a *Authenticator) validateToken(token string) (string, string) {
 	// 只在远端注册服务器模式下被调用（AuthOptional/AuthRequired 已先分流本地令牌），
 	// 用 regServerURL 判空而不是 authDisabled()：AdminToken 已设但 regServer 为空时
 	// authDisabled() 为 false，若走这里会拿本地令牌去问一个不存在的远端服务。
-	if regServerURL == "" {
+	if a.regServerURL == "" {
 		return "", "" // no reg server configured — local token path handles auth
 	}
-	if u, r, ok := cacheGet(token); ok {
+	if u, r, ok := a.tokenCache.get(token); ok {
 		return u, r
 	}
-	u, r := queryWhoami(token)
+	u, r := a.queryWhoami(token)
 	// Only cache successful results: failures may be network hiccups; caching would
 	// extend a single hiccup's impact for 30s.
 	if u != "" {
-		cachePut(token, u, r)
+		a.tokenCache.put(token, u, r)
 	}
 	return u, r
 }
 
-func queryWhoami(token string) (string, string) {
+func (a *Authenticator) queryWhoami(token string) (string, string) {
 	// Gotcha: original implementation had http.Client{} with no timeout — when the
 	// registration server hangs, every request blocks forever (connection pool exhaustion).
 	// Fix: 5s timeout + 64KB response body limit (whoami responses are tiny, this
 	// prevents malicious/compromised registration servers from returning large payloads).
 	client := &http.Client{Timeout: 5 * time.Second}
-	req, _ := http.NewRequest("GET", regServerURL+"/auth/whoami", nil)
+	req, _ := http.NewRequest("GET", a.regServerURL+"/auth/whoami", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := client.Do(req)
 	if err != nil {
