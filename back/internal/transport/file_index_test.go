@@ -350,6 +350,31 @@ func TestFileIndex_UploadMultiSource(t *testing.T) {
 	assert.Equal(t, content, got)
 }
 
+// TestFileIndex_UploadCompleteCloseError 发现背景：审计 C-17（2026-10-06）。
+// 旧实现 Complete() 忽略 Close() 返回值——Close 失败（Windows 文件锁、fd 耗尽）
+// 时仍报成功。修法：Close 错误传播给调用方。
+// 测试方法：Complete 成功后 file handle 被设为 nil，再次 WriteAt 应报 "aborted"。
+func TestFileIndex_UploadCompleteCloseError(t *testing.T) {
+	initTestDB(t)
+	svc := newTestIndex(t)
+
+	content := make([]byte, uploadChunkSize)
+	sess, err := svc.BeginUpload("complete-close.bin", int64(len(content)))
+	require.NoError(t, err)
+	require.NoError(t, sess.WriteAt(0, content))
+
+	// 正常 Complete（Close 成功）
+	done, fi, err := sess.Complete()
+	require.NoError(t, err, "正常完成不应报错")
+	assert.True(t, done)
+	assert.NotNil(t, fi)
+
+	// Complete 后 file handle 已置 nil，再写应报 "aborted"
+	err = sess.WriteAt(0, content)
+	require.Error(t, err, "Complete 后 file=nil，WriteAt 应报 aborted")
+	assert.Contains(t, err.Error(), "aborted")
+}
+
 // TestFileIndex_UploadResume 断点续传：中断后重开会话，连续已写偏移正确，
 // 剩余分片补齐后完成。
 // 发现背景：功能需求——上传中断后从已接收位置继续。

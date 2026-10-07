@@ -429,10 +429,18 @@ func (u *UploadSession) ContiguousOffset() int64 {
 // 在 Windows 上却是硬伤——文件被本进程占着，删不掉、移不动、覆盖不了，
 // 测试 TempDir 清理直接失败（2026-09-20 真机 Windows 跑出来的）。
 // 已完成的表项由 reap 摘除（不删文件，见 reapUploads 的 done 分支）。
+//
+// 2026-10-06 correctness fix (audit C-17): Close() errors are no longer ignored.
+// A failed Close means the file descriptor was not released cleanly — on Windows
+// this leaves the file locked. The error is propagated so the caller (uploadWorker)
+// can report it. Note: the session may still be marked done (file on disk, index
+// entry created), so a client retry will succeed via the done-cache path.
 func (u *UploadSession) Complete() (bool, *FileInfo, error) {
 	done, fi, err, toClose := u.completeLocked()
 	if toClose != nil {
-		_ = toClose.Close()
+		if closeErr := toClose.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close upload file: %w", closeErr)
+		}
 	}
 	return done, fi, err
 }
