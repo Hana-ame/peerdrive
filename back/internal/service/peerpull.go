@@ -38,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	"peerdrive/internal/extractor"
 	"peerdrive/internal/log"
 )
 
@@ -103,6 +104,9 @@ type PeerPuller struct {
 	isLocal  func(hash string) bool
 	register func(path string) (string, int64, error)
 
+	// extractor 拉取后自动解包器（nil = 不启用）。
+	extractor *extractor.Extractor
+
 	mu   sync.Mutex
 	jobs map[string]*PullJob
 	// cancels jobID → cancel（cancel 会关闭 reader，让传输立刻中断）
@@ -136,6 +140,9 @@ func (p *PeerPuller) SetFileAccess(isLocal func(hash string) bool, register func
 	p.isLocal = isLocal
 	p.register = register
 }
+
+// SetExtractor 注入拉取后自动解包器（nil = 不启用）。
+func (p *PeerPuller) SetExtractor(ex *extractor.Extractor) { p.extractor = ex }
 
 // Start 建一个拉取任务并立刻开始（异步）。
 // name/path/coll 只用于落盘命名与前端展示：path 是合集内相对路径（保留目录
@@ -474,6 +481,32 @@ func (p *PeerPuller) fetchOnce(ctx context.Context, job *PullJob, target, tmp st
 			return true, nil
 		}
 	}
+
+	// ⑥ 自动解包（可选）：如果文件是压缩包且 extractor 已启用，自动解压到 sibling 目录。
+	// 解包失败不影响拉取本身（文件已保存 + 已登记），只记录警告——自动解包只是增强，
+	// 不能让对端用伪造压缩包拖垮/阻断正常拉取流程。
+	if p.extractor != nil && p.extractor.ShouldExtract(filepath.Base(target)) {
+		destDir := target + "_extracted"
+		extracted, err := p.extractor.Extract(target, destDir)
+		if err != nil {
+			log.LogWarn("peerpull: auto-extract %s failed: %v", target, err)
+		} else if len(extracted) > 0 && p.register != nil {
+			// 把解包后的文件逐个登记进 file_index，与主文件同等待遇
+			//（extracted 的 FullName 都在 downloadRoot/_extracted 下，
+			// register 内部的 pathutil 边界会再次兜底校验）。
+			registered := 0
+			for _, ef := range extracted {
+				if _, _, regErr := p.register(ef.FullName); regErr != nil {
+					log.LogWarn("peerpull: register extracted %s failed: %v", ef.FullName, regErr)
+				} else {
+					registered++
+				}
+			}
+			log.LogInfo("peerpull: auto-extracted %d files (registered %d) from %s",
+				len(extracted), registered, target)
+		}
+	}
+
 	p.mu.Lock()
 	job.SavedTo = target
 	job.Received = written
