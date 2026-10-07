@@ -170,6 +170,7 @@
     q.set('hash', hash)
     q.set('auto', '1')
     q.delete('psk')
+    q.delete('token') // 信令凭据同样不带（见 tokenOfForm 注释）
     // file:// 下 location.origin 是字符串 "null"，拼出来不能用，直接用 href 去参数
     var base = String(location.href).split('#')[0].split('?')[0]
     return base + '?' + q.toString()
@@ -229,6 +230,16 @@
     return $('in-psk') ? $('in-psk').value : ''
   }
 
+  // 信令 token：与 psk 同一档待遇——**不进地址栏、不进 localStorage / 最近连接**。
+  // 它是信令白名单（部署侧 peersignal --tokens / PEERJS_TOKENS）的凭据，泄露
+  // 等于把「能连上这台信令冒充任意节点收发消息」的钥匙发出去了（2026-08-18
+  // 评审记录：白名单存在的原因就是任意 token 可冒充节点）。链接里带 token=
+  // 允许预填（一次性分享），读完立刻从 URL 抹掉，与 psk 同机制。
+  // 空 = 不发送该字段（见 peerOptions 里「字段必须缺席」的实测依据）。
+  function tokenOfForm() {
+    return ($('in-token') ? $('in-token').value : '').trim()
+  }
+
   // 面板状态回写地址栏 —— 让用户能直接复制「连这个节点的面板」链接
   function syncURL() {
     var q = params()
@@ -239,6 +250,7 @@
     q.set('key', sig.key)
     q.set('secure', sig.secure ? '1' : '0')
     q.delete('psk') // 密钥绝不回写地址栏（见 pskOfForm 注释）
+    q.delete('token') // 信令 token 同理（见 tokenOfForm 注释）
     if ($('in-node').value.trim()) q.set('node', $('in-node').value.trim())
     else q.delete('node')
     try { history.replaceState(null, '', location.pathname + '?' + q.toString()) } catch (e) { /* file:// 下可能不让改 */ }
@@ -684,14 +696,24 @@
     updateShares()
   }
 
-  function peerOptions(sig) {
+  function peerOptions(sig, token) {
     // secure 必须显式传：自托管信令常用 ws://，peerjs 默认 secure=true 会去连 wss://，
     // 表现为「连不上但不报错」——最常见的踩坑点。
     // id 用固定的 myId（见顶部注释）：private 级别的好友名单是按这个 id 判的。
-    return {
+    //
+    // token 是信令白名单（peersignal --tokens / PEERJS_TOKENS）的**发送口**（审计 A-2）。
+    // ⚠️ 空时必须**整个字段缺席**，不能传空串也不能传 undefined：
+    //   实测 dist/peerjs.min.js 里 Peer 的默认值是 `{token: randomToken(), ...用户选项}`，
+    //   显式给 `token: ''` 会**覆盖**那个随机值，WS URL 拼成 `&token=`，而信令
+    //   （signalserver HandleWS）对空 token 直接回 "No id, token, or key supplied"——
+    //   连**没开白名单**的信令都连不上。字段缺席才会落到 peerjs 的随机 token 老路，
+    //   默认行为与改动前逐字节一致（白名单关着时服务端根本不读这个值）。
+    var opts = {
       host: sig.host, port: sig.port, path: sig.path,
       key: sig.key, secure: sig.secure, debug: 1, id: myId,
     }
+    if (token) opts.token = token
+    return opts
   }
 
   // idTaken 判断「连不上」是不是因为本端 id 被占用。
@@ -731,9 +753,11 @@
   }
 
   // dial 拨一次号。单独抽出来是为了 id 冲突时能原样重试一次（见 connect）。
-  function dial(nodeId, sig, psk) {
+  // token 单独成参（不进 sig）：sig 会被 remember() 存进 localStorage，
+  // 凭据不能跟着「最近连接」落盘（同 psk 的理由，见 tokenOfForm）。
+  function dial(nodeId, sig, psk, token) {
     return window.PeerDrive.connectToPeer(window.Peer, nodeId, {
-      peerOptions: peerOptions(sig),
+      peerOptions: peerOptions(sig, token),
       idleTimeoutMs: 60 * 1000,
       psk: psk, // 空串 = 不出示（对端没开门禁时完全无感）
     })
@@ -756,16 +780,18 @@
     try {
       log('连接信令 ' + sig.host + ':' + sig.port + ' 并拨号 ' + nodeId + ' …')
       var psk = pskOfForm()
+      var token = tokenOfForm()
+      if (token) log('信令 token 已出示（' + token.length + ' 字符，不回写地址栏）')
       var client
       try {
-        client = await dial(nodeId, sig, psk)
+        client = await dial(nodeId, sig, psk, token)
       } catch (e) {
         // 本端 id 撞了（自己另开一个面板页、或 localStorage 被复制到别处）：
         // 换一个 id 重试一次。不重试的话界面上只有"信令失败"，指向完全错误的方向。
         if (!idTaken(e)) throw e
         log('我的节点 id ' + myId + ' 已被占用（多半是你自己另开了一个面板），换一个再连', 'warn')
         saveMyId(newPanelId())
-        client = await dial(nodeId, sig, psk)
+        client = await dial(nodeId, sig, psk, token)
       }
       s.client = client
       s.status = 'online'
@@ -782,6 +808,14 @@
       log('连接失败：' + s.error + (e.code ? '（' + e.code + '）' : ''), 'err')
       if (e.code === window.PeerDrive.ERR.TIMEOUT) {
         log('提示：对方节点离线、peer id 写错，或信令配置不同（host/port/path/key/secure）', 'warn')
+      }
+      // 白名单拒绝发生在 **HTTP 升级层**（signalserver 回 400 "Invalid token
+      // provided"），WebSocket API 不会把响应体递给 JS —— 面板只能看到 bad
+      // handshake 一类无差别错误。不点名 token 的话，开了白名单的信令上，
+      // 用户会往「节点离线」方向排查（正是这条防线最难自查的失败形态）。
+      if (/handshake|signalling|socket/i.test(String((e && e.message) || '')) && !tokenOfForm()) {
+        log('若信令开了 token 白名单（peersignal --tokens / PEERJS_TOKENS）：' +
+          '在「信令 token」框里填白名单里的值再连。token 留空时本面板不会发送该字段。', 'warn')
       }
       if (pskHint(e)) log(pskHint(e), 'warn')
       renderNodes()
@@ -1096,6 +1130,13 @@
       q.delete('psk')
       try { history.replaceState(null, '', location.pathname + '?' + q.toString()) } catch (e) { /* file:// 下可能不让改 */ }
       log('已从链接读入预共享密钥，并将其从地址栏移除（不留在历史记录里）', 'warn')
+    }
+    // token= 同理：信令白名单凭据可经链接预填，读完即从地址栏抹掉（见 tokenOfForm）
+    if (q.get('token')) {
+      $('in-token').value = q.get('token')
+      q.delete('token')
+      try { history.replaceState(null, '', location.pathname + '?' + q.toString()) } catch (e) { /* file:// 下可能不让改 */ }
+      log('已从链接读入信令 token，并将其从地址栏移除（不留在历史记录里）', 'warn')
     }
 
     // 分享链接带来的 hash（unlisted 的取回入口）

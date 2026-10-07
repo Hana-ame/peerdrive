@@ -145,6 +145,67 @@ describe('面板 / 分享链接（unlisted 的出口）', () => {
   })
 })
 
+describe('面板 / 信令 token 发送口（审计 A-2）', () => {
+  // 发现背景：2026-10-07 审计确认 PEERJS_TOKENS 这条防线从未生效——服务端白名单
+  // 校验存在（signalserver HandleWS），但面板 peerOptions() 里没有 token 字段、
+  // 部署脚本没有开关，两端都缺。这里钉住面板这端的三条契约，改动一旦把它们
+  // 拆掉，白名单又会变成"看起来配了其实没配"的摆设。
+  it('peerOptions 有 token 发送口，且空值时字段必须缺席', () => {
+    assert.match(src, /function peerOptions\(sig, token\)/)
+    // 关键契约是 `if (token)` 这个**条件添加**，不是无条件 `token: token`：
+    // 实测 peerjs 用 {token: randomToken(), ...用户选项} 合并，显式空串会
+    // 覆盖随机值 → WS URL 带 &token= → 信令以 "No id, token, or key supplied"
+    // 拒掉**连没开白名单的连接**（旧面板全断）。这条断言防的就是有人"顺手简化"。
+    assert.match(src, /if\s*\(token\)\s*opts\.token\s*=\s*token/)
+    assert.doesNotMatch(src, /return\s*\{[^}]*token:\s*token/)
+  })
+
+  it('token 来自输入框且带 trim，dial 把它传给 peerOptions', () => {
+    assert.match(src, /function tokenOfForm\(\)/)
+    assert.match(src, /\$\('in-token'\)/)
+    assert.match(src, /peerOptions\(sig, token\)/)
+    assert.match(src, /function dial\(nodeId, sig, psk, token\)/)
+  })
+
+  it('token 与 psk 同待遇：不进地址栏、不进分享链接', () => {
+    // syncURL 回写与 shareLink 生成都必须抹掉 token——它是信令凭据，
+    // 进了 URL 就会被历史记录/截图/转发带走（与 psk 同一条理由）。
+    const sync = src.slice(src.indexOf('function syncURL()'), src.indexOf('function syncURL()') + 700)
+    assert.match(sync, /q\.delete\('token'\)/)
+    const share = src.slice(src.indexOf('function shareLink('), src.indexOf('function shareLink(') + 900)
+    assert.match(share, /q\.delete\('token'\)/)
+    // token 不进 sigOfForm：sig 会被 remember() 存进 localStorage（最近连接），
+    // 凭据不能落盘。
+    const sig = src.slice(src.indexOf('function sigOfForm()'), src.indexOf('function sigOfForm()') + 500)
+    assert.doesNotMatch(sig, /in-token/)
+  })
+
+  it('URL 里的 token= 预填后立刻从地址栏抹掉（一次性分享）', () => {
+    const bootFn = src.slice(src.indexOf('function boot()'))
+    assert.match(bootFn, /q\.get\('token'\)/)
+    assert.match(bootFn, /\$\('in-token'\)\.value = q\.get\('token'\)/)
+    assert.match(bootFn, /q\.delete\('token'\)/)
+  })
+
+  it('模板里有输入框（type=password），产物里有说明文字', () => {
+    assert.match(tpl, /id="in-token"[^>]*type="password"/)
+    if (dist) {
+      assert.ok(dist.includes('id="in-token"'), '产物里没有 in-token —— 改了 panel/ 忘了 npm run build:panel')
+      assert.ok(dist.includes('信令 token'), '产物里没有 token 字段的说明文字')
+    }
+  })
+
+  it('握手失败且没填 token 时，日志点名白名单这个方向', () => {
+    // 白名单拒绝发生在 HTTP 升级层（400 "Invalid token provided"），
+    // 浏览器只给到 bad handshake 级别的错误。不加这条提示，开了白名单的
+    // 信令上用户会去排查"节点离线"——A-2 的失效正是以这种无声方式维持了两轮。
+    assert.match(src, /--tokens/)
+    assert.match(src, /PEERJS_TOKENS/)
+    assert.match(src, /handshake|signalling|socket/i)
+    assert.match(src, /!tokenOfForm\(\)/)
+  })
+})
+
 describe('面板 / 产物', () => {
   it('dist/panel.html 与源码同步（存在时才查）', () => {
     if (!dist) {
