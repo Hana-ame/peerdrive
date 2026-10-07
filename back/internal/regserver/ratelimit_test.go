@@ -25,7 +25,12 @@ import (
 	"peerdrive/internal/ratelimit"
 )
 
-// ratelimitForTest 造一个测试用的令牌桶（rps 高、burst 小：既能打满又不用 sleep）。
+// ratelimitForTest 造一个测试用的令牌桶。
+//
+// rps 取 **0.01** 而不是「一个大数」：令牌桶按真实经过的时间回填。
+// 本包最贵的被放行请求是 register（真跑 bcrypt cost10，约 60-100ms），
+// 若 rps 给到 2，三次 bcrypt 的耗时就能回填约半个令牌，测试会变得依赖机器快慢。
+// 0.01 rps 时两次请求之间最多回填 0.001 个令牌，可确定性地认为桶不会自行恢复。
 func ratelimitForTest(rps float64, burst int) *ratelimit.Limiter {
 	return ratelimit.New(rps, burst)
 }
@@ -45,6 +50,11 @@ func ratelimitBackoffForTest(threshold int) *ratelimit.Backoff {
 // 要打过几十个请求才能触发，那会让测试要么很慢、要么依赖 sleep；
 // 而**验证的是「限流是否生效」，不是「默认值是否好看」**——默认值由
 // cmd/peerdrive 的文档与 flag 默认值负责。
+//
+// ⚠️ 桶和退避器必须在调用 srv.Handler() **之前**换好：Handler() 把
+// s.loginLimiter 这类指针按值捕获进闭包，之后再改 s.* 字段不会生效。
+// 之前就踩过这个：测试里替换了桶但 Handler() 还握着旧的 burst=3，
+// 于是第 4 个请求被旧桶挡成 429，误判成「退避没清零」。
 func newLimitedServer(t *testing.T) *Server {
 	t.Helper()
 	t.Setenv("JWT_SECRET", "test-secret")
@@ -53,10 +63,19 @@ func newLimitedServer(t *testing.T) *Server {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = srv.Close() })
-	srv.registerLimiter = ratelimitForTest(2, 3)
-	srv.loginLimiter = ratelimitForTest(2, 3)
-	srv.relayLimiter = ratelimitForTest(2, 3)
+	srv.registerLimiter = ratelimitForTest(0.01, 3)
+	srv.loginLimiter = ratelimitForTest(0.01, 3)
+	srv.relayLimiter = ratelimitForTest(0.01, 3)
 	return srv
+}
+
+// withBackoff 重设 login 退避器。必须在 srv.Handler() 之前调用（见 newLimitedServer）。
+func withBackoff(srv *Server, threshold int) {
+	srv.loginBackoff = ratelimitBackoffForTest(threshold)
+	// 同时把 IP 桶调到 burst 20 以**隔离变量**：否则第 3 次尝试会被 IP 桶
+	// 挡成 429，测试就分不清这个 429 来自退避还是限流——而这两者的修复动机
+	// 完全不同。同理必须在 Handler() 之前生效。
+	srv.loginLimiter = ratelimitForTest(0.01, 20)
 }
 
 // doFrom 从指定 IP 发请求。限流是按来源 IP 分桶的，所以必须能控制 RemoteAddr，
@@ -118,15 +137,11 @@ func TestLoginIsRateLimited(t *testing.T) {
 // 测试里已经很慢了；这里直接构造低阈值的 Backoff，验证的是机制而非默认值。
 func TestLoginBackoffKicksInAfterRepeatedFailures(t *testing.T) {
 	srv := newLimitedServer(t)
+	// 阈值 3、base 1 小时：一旦触发就回 429 而不是 401。
+	// withBackoff 必须先于 Handler()——见 newLimitedServer 的说明。
+	withBackoff(srv, 3)
 	mux := srv.Handler().(*http.ServeMux)
 	_ = doFrom(mux, "10.0.0.3", "POST", "/auth/register", `{"username":"dave","password":"pw123456"}`, "")
-
-	// 阈值 3、base 1 小时：一旦触发就回 429 而不是 401
-	srv.loginBackoff = ratelimitBackoffForTest(3)
-	// login 的 IP 桶给足余量（burst 20）：否则第 3 次尝试会被 **IP 桶**
-	// 挡成 429，测试就分不清这个 429 来自退避还是来自限流——而这两者的
-	// 修复动机完全不同。给足桶 = 把变量隔离开，只观察退避。
-	srv.loginLimiter = ratelimitForTest(100, 20)
 
 	// 前两次：阈值以下 → 401（凭据错）
 	for i := 0; i < 2; i++ {
@@ -157,10 +172,9 @@ func TestLoginBackoffKicksInAfterRepeatedFailures(t *testing.T) {
 // 否则用户改对密码后仍进不来（永久锁在门外）。
 func TestLoginBackoffClearedBySuccess(t *testing.T) {
 	srv := newLimitedServer(t)
+	withBackoff(srv, 3) // 同上：必须先于 Handler()
 	mux := srv.Handler().(*http.ServeMux)
 	_ = doFrom(mux, "10.0.0.4", "POST", "/auth/register", `{"username":"erin","password":"pw123456"}`, "")
-	srv.loginBackoff = ratelimitBackoffForTest(3)
-	srv.loginLimiter = ratelimitForTest(100, 20) // 同上：隔离变量，只观察退避
 
 	for i := 0; i < 2; i++ {
 		doFrom(mux, "10.0.0.4", "POST", "/auth/login", `{"username":"erin","password":"wrong"}`, "")

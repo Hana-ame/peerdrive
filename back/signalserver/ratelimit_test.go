@@ -26,13 +26,18 @@ import (
 )
 
 // limitedTestServer 起一个带限流的测试信令服务。
-// rps 给得很大，burst 小：这样不用 sleep 就能打满桶。
+//
+// rps 取 **0.01** 而不是「一个大数」：令牌桶按真实经过的时间回填，
+// rps=1000 时四次请求之间回填的令牌就够放行第 4 次了（CI 实测：
+// burst=3 + rps=1000 时第 4 次拿到的是 200 而不是 429）。
+// 0.01 rps 意味着两次请求之间最多回填 0.00001 个令牌，
+// 可以确定性地认为「桶不会自己恢复」，测试才稳定。
 func limitedTestServer(t *testing.T, burst int) (*Server, *httptest.Server) {
 	t.Helper()
 	return testServerWithOpts(t, WithRateLimit(RateLimitConfig{
-		AnnounceRPS: 1000, AnnounceBurst: burst,
-		WSRPS: 1000, WSBurst: burst,
-		IDRPS: 1000, IDBurst: burst,
+		AnnounceRPS: 0.01, AnnounceBurst: burst,
+		WSRPS: 0.01, WSBurst: burst,
+		IDRPS: 0.01, IDBurst: burst,
 	}))
 }
 
@@ -90,10 +95,10 @@ func TestWSUpgradeIsRateLimited(t *testing.T) {
 // 面板刷新时可能因为自己的 socket 正在重连而被 /id 拒掉——
 // 两个本该互不相干的路径互相拖累。
 func TestHandleIDIsRateLimitedSeparately(t *testing.T) {
-	// id 桶设为 2，ws 桶故意设很大
+	// id 桶设为 2，ws 桶故意设很大。rps 同样取 0.01（理由见 limitedTestServer）。
 	srv := NewServer("testkey", WithRateLimit(RateLimitConfig{
-		IDRPS: 1000, IDBurst: 2,
-		WSRPS: 1000, WSBurst: 100,
+		IDRPS: 0.01, IDBurst: 2,
+		WSRPS: 0.01, WSBurst: 100,
 	}))
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		srv.HandleID(w, r)
