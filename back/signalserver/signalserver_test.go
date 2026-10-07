@@ -40,6 +40,8 @@ func testServerWithOpts(t *testing.T, opts ...Option) (*Server, *httptest.Server
 			srv.HandleID(w, r)
 		case strings.HasSuffix(r.URL.Path, "/announce"):
 			srv.HandleAnnounce(w, r)
+		case strings.HasSuffix(r.URL.Path, "/leave"):
+			srv.HandleLeave(w, r)
 		case strings.HasSuffix(r.URL.Path, "/nodes"):
 			srv.HandleNodes(w, r)
 		case strings.HasSuffix(r.URL.Path, "/status"):
@@ -307,7 +309,7 @@ func TestGraph_EmptyPeersClearsLinks(t *testing.T) {
 
 // TestGraph_LeaveRemovesLinks After a node leaves, related edges disappear.
 func TestGraph_LeaveRemovesLinks(t *testing.T) {
-	srv, hs := testServer(t)
+	srv, hs := testServerWithOpts(t, WithOpsToken(opsTestToken))
 	announce := func(peerID string, peers []string) {
 		body, _ := json.Marshal(map[string]any{"peerId": peerID, "collections": []string{"media"}, "peers": peers})
 		resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
@@ -318,7 +320,7 @@ func TestGraph_LeaveRemovesLinks(t *testing.T) {
 	announce("node-2", []string{"node-1"})
 
 	body, _ := json.Marshal(map[string]string{"peerId": "node-2"})
-	req := httptest.NewRequest(http.MethodPost, "/discover/leave", strings.NewReader(string(body)))
+	req := httptest.NewRequest(http.MethodPost, "/discover/leave?token="+opsTestToken, strings.NewReader(string(body)))
 	w := httptest.NewRecorder()
 	srv.HandleLeave(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -947,4 +949,78 @@ func TestOpsTokenRejectsWhenNoWhitelistConfigured(t *testing.T) {
 	srv, _ := testServer(t)
 	require.False(t, srv.opsTokenOK(httptest.NewRequest(http.MethodGet, "/status?token=x", nil)),
 		"opsTokenOK must be closed by default")
+}
+
+// TestLeaveRequiresOpsToken 发现背景：审计 A-11（2026-10-06）。
+// 旧实现 /discover/leave 无任何鉴权——未认证的 POST {"peerId":"<victim>"} 即可把任意
+// 节点从全部发现集合、peerStats、peerColls、peerLinks 删除，且返回 200 不报错不记日志，
+// 受害者只会看到"没人连我"。本用例锁定：无 token → 401，有 token → 200。
+func TestLeaveRequiresOpsToken(t *testing.T) {
+	_, hs := testServerWithOpts(t, WithOpsToken(opsTestToken))
+
+	// 先 announce 两个节点
+	for _, pid := range []string{"node-1", "node-2"} {
+		body, _ := json.Marshal(map[string]any{"peerId": pid, "collections": []string{"coll-a"}})
+		resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+		require.NoError(t, err)
+		resp.Body.Close()
+	}
+
+	// 无 token → 401
+	body, _ := json.Marshal(map[string]string{"peerId": "node-2"})
+	resp, err := http.Post(hs.URL+"/leave", "application/json", strings.NewReader(string(body)))
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"leave without ops token must return 401")
+
+	// 确认 node-2 仍在（未被抹掉）
+	getResp, err := opsGet(hs, "/nodes")
+	require.NoError(t, err)
+	defer getResp.Body.Close()
+	var out struct {
+		Nodes []NodeInfo `json:"nodes"`
+	}
+	require.NoError(t, json.NewDecoder(getResp.Body).Decode(&out))
+	assert.Len(t, out.Nodes, 2, "unauthenticated leave must not erase nodes")
+
+	// 带 token → 200，node-2 被删除
+	req := httptest.NewRequest(http.MethodPost, "/discover/leave?token="+opsTestToken, strings.NewReader(string(body)))
+	w := httptest.NewRecorder()
+	// 需要用 srv.HandleLeave 直接调用（因为上面没有 srv 引用）
+	srv := NewServer("testkey", WithOpsToken(opsTestToken))
+	srv.HandleLeave(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestAnnounceRejectsReservedPeerID 发现背景：审计 A-11/A-12（2026-10-06）。
+// 旧实现 announce 对 peerId 无任何校验，攻击者可注册任意 id（含 "local"）污染发现表。
+// 本用例锁定：保留名 → 400，超长 → 400，正常 id → 200。
+func TestAnnounceRejectsReservedPeerID(t *testing.T) {
+	_, hs := testServerWithOpts(t)
+
+	// 保留名 "local" → 400
+	body, _ := json.Marshal(map[string]any{"peerId": "local", "collections": []string{"coll-a"}})
+	resp, err := http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode,
+		"announce with reserved peerId 'local' must return 400")
+
+	// 超长 id → 400
+	longID := strings.Repeat("a", 200)
+	body, _ = json.Marshal(map[string]any{"peerId": longID, "collections": []string{"coll-a"}})
+	resp, err = http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode,
+		"announce with overlong peerId must return 400")
+
+	// 正常 id → 200
+	body, _ = json.Marshal(map[string]any{"peerId": "node-abc", "collections": []string{"coll-a"}})
+	resp, err = http.Post(hs.URL+"/announce", "application/json", strings.NewReader(string(body)))
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode,
+		"announce with valid peerId must succeed")
 }
