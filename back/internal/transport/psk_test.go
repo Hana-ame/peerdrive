@@ -267,7 +267,6 @@ func TestPSK_SpoofedLocalIDNotExempt(t *testing.T) {
 
 	// servedVerbs 应该被 pskGate 拦截
 	svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{"type": "share", "reqId": "r1"}))
-	types := sess.sentTypes()
 	foundErr := false
 	for _, f := range sess.sentFrames()[1:] {
 		if f.header["type"] == "err" {
