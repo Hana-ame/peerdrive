@@ -199,6 +199,10 @@
         <label>预共享密钥（可留空）</label>
         <input id="in-psk" type="password" autocomplete="off" placeholder="节点开了 PSK 才要填">
       </div>
+      <div class="f" style="flex:1 1 150px">
+        <label>信令 token（可留空）</label>
+        <input id="in-token" type="password" autocomplete="off" placeholder="信令开了 token 白名单才要填">
+      </div>
       <div class="f auto"><label>&nbsp;</label><button id="btn-connect">连接</button></div>
       <div class="f auto"><label>&nbsp;</label><button id="btn-discover" class="ghost">自动搜索</button></div>
     </div>
@@ -213,6 +217,12 @@
       <b>预共享密钥</b>：节点用 <span class="mono">PEERDRIVE_PSK</span> 开了门禁时才需要——
       连上后如果提示 <span class="mono">psk required</span>，说明你没填或填错了。
       密钥<b>不会</b>被写回地址栏、也不会存进「最近连接」，只留在这一页的输入框里。
+      <br>
+      <b>信令 token</b>：信令用 <span class="mono">peersignal --tokens</span>（或 <span class="mono">PEERJS_TOKENS</span>）
+      开了注册白名单时才需要——留空则本面板<b>不发送</b>该字段（走 peerjs 默认随机 token，
+      与未开启白名单时的旧行为一致）。填错/没填的表现是握手直接被拒（<span class="mono">bad handshake</span>），
+      因为白名单在 HTTP 升级层拦截，拿不到更细的报错。此字段与预共享密钥同待遇：
+      <b>不</b>回写地址栏、<b>不</b>存「最近连接」。
       <br>
       <b>我的节点 id</b>（右上角）：固定不变，存在这台浏览器里。节点运营者要把它填进
       好友名单，你才拿得到 <span class="mono">private</span> 级别的内容 —— id 每次都随机的话，
