@@ -428,6 +428,16 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 		s.wsError(w, "Invalid token provided")
 		return
 	}
+	// 2026-10-06 security fix (audit A-12): validate the registered id before accepting
+	// the connection. The server overwrites message Src with cl.id (readLoop:476), so an
+	// unvalidated id that passes here will be used as the source identity for every
+	// message. Before this check, an attacker could register with ?id=local and have the
+	// server forward messages with Src="local", which the transport side (admin.go,
+	// psk.go) used to treat as the local management session.
+	if !validPeerID(id) {
+		s.wsError(w, "Invalid id provided")
+		return
+	}
 
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(*http.Request) bool { return true }, // self-hosted, whitelist configured by the caller
