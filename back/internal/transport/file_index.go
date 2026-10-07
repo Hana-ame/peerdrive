@@ -365,6 +365,11 @@ func (s *FileIndexService) BeginUpload(name string, size int64) (*UploadSession,
 }
 
 // WriteAt 写入一个分片（offset 需 chunk 对齐，长度 ≤ chunk 粒度由帧协议保证）。
+//
+// 2026-10-06 correctness fix (audit C-16): if the underlying write fails, the bitmap
+// bits for the affected chunks are cleared (not just left as-is). A previous write may
+// have set those bits, but a failed retransmit write could have partially overwritten
+// the on-disk data — leaving the bit set would silently corrupt the final file.
 func (u *UploadSession) WriteAt(offset int64, data []byte) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -378,6 +383,18 @@ func (u *UploadSession) WriteAt(offset int64, data []byte) error {
 		return fmt.Errorf("write out of range: offset=%d len=%d size=%d", offset, len(data), u.size)
 	}
 	if _, err := u.file.WriteAt(data, offset); err != nil {
+		// Clear the bits for the chunks this write was supposed to cover. Even though
+		// the current call didn't set them, a previous successful write may have. A
+		// failed write can leave partial/corrupt data on disk; clearing the bits
+		// forces the client to retry those chunks, which will overwrite the corrupt
+		// region. Without this, the bitmap says "done" while the on-disk data is
+		// garbage — the sha256 check at Complete would catch it, but only after the
+		// entire upload finishes (wasted bandwidth).
+		start := offset / uploadChunkSize
+		end := (offset + int64(len(data)) + uploadChunkSize - 1) / uploadChunkSize
+		for i := start; i < end; i++ {
+			u.clearBit(i)
+		}
 		return fmt.Errorf("write at %d: %w", offset, err)
 	}
 	// 置位覆盖的分片（一次写可能跨 chunk 边界，按字节区间逐 chunk 置位）
@@ -514,6 +531,26 @@ func (u *UploadSession) setBit(i int64) {
 		totalChunks := (u.size + uploadChunkSize - 1) / uploadChunkSize
 		if w < (totalChunks-1)/64 {
 			u.fullWords++
+		}
+	}
+}
+
+// clearBit unsets bit i and decrements fullWords if the word is no longer full.
+// Called by WriteAt on failure to undo bits that a previous successful write may
+// have set, forcing the client to retry the chunk (audit C-16, 2026-10-06).
+func (u *UploadSession) clearBit(i int64) {
+	w := i / 64
+	mask := uint64(1) << (i % 64)
+	if u.bitmap[w]&mask == 0 {
+		return // 本就未置位
+	}
+	before := u.bitmap[w] == ^uint64(0)
+	u.bitmap[w] &^= mask
+	// 该 word 刚不再满（非末 word 才计入 fullWords）：回退计数
+	if before {
+		totalChunks := (u.size + uploadChunkSize - 1) / uploadChunkSize
+		if w < (totalChunks-1)/64 {
+			u.fullWords--
 		}
 	}
 }
