@@ -82,6 +82,15 @@ jobs:
             back/signalserver/go.sum
             back/p2p_bt/go.sum
 
+      # go vet 单独一步：`go test` 不产出二进制、也不走 vet 分析，
+      # 独立 module 的静态检查只有在这一步里跑。与主模块 backend job 的
+      # vet/test/build 三步对齐，避免 signalserver 只测不 vet。
+      - name: Vet signalserver
+        working-directory: back/signalserver
+        env:
+          CGO_ENABLED: 0
+        run: go vet ./...
+
       - name: Test signalserver
         working-directory: back/signalserver
         env:
@@ -118,3 +127,17 @@ jobs:
         env:
           CGO_ENABLED: 0
         run: go test -count=1 ./...
+
+      - name: Vet p2p_bt
+        working-directory: back/p2p_bt
+        env:
+          CGO_ENABLED: 0
+        run: go vet ./...
+
+      # p2p_bt 与 signalserver 一样是独立 module，父模块的 ./... 覆盖不到它。
+      # 只 go test 会漏掉 main 包链接路径上的 import 错误。
+      - name: Build p2p_bt
+        working-directory: back/p2p_bt
+        env:
+          CGO_ENABLED: 0
+        run: go build -o /dev/null ./...
