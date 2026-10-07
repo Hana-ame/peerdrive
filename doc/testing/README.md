@@ -121,7 +121,8 @@ PEERDRIVE_SKIP_RTC=1  ...                                                       
 
 - **Command**: `cd front && npm test` (`vitest run`) + `npm run build` (`vite build`)
 - **Config**: `vitest.config.ts` (happy-dom + `@vitejs/plugin-react`, setup file `tests/setup.js`)
-- **File details**: `netdisk.test.jsx` 45 · `components.test.jsx` 18 · `ws.test.js` 14 · `smoke.test.jsx` 1 · `FileTree/LeftPanel/VisibilityPicker/api/api-mock-sync` total 23
+- **File details**: `netdisk.test.jsx` 45 · `components.test.jsx` 18 · `ws.test.js` 14 · `smoke.test.jsx` 1 · `FileTree/LeftPanel/VisibilityPicker` total 13
+- **2026-10-07: the `api` and `api-mock-sync` test files were deleted** along with the zero-importer HTTP wrapper module they guarded (that module + its hand-written mock). They contributed 23 of the cases above, so the "(101 / 9 files)" in this section's header and the per-file totals need a refresh against a real `npm test` run — this branch deliberately did not run the suite locally.
 - **⚠️ Only collects `*.test.{js,jsx}`**, `.mjs` under `tests/` is not in vitest's scope (see §3.8).
 - **Do not** add `--reporter=basic` (this version of vitest doesn't have that reporter).
 

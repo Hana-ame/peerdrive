@@ -1,44 +1,50 @@
-// Package nodestate stores the runtime state of a Peerdrive node (operator username, reg server connection),
-// and provides statistics reporting. Both controller and service need to access this state, so it is split
-// into a separate package to break circular imports.
+// Package nodestate holds the runtime identity of a Peerdrive node.
+//
+// 2026-10-07 cleanup: this package used to carry four package-level fields
+// (operator / regURL / authToken / peerID) and five exported functions. Four of
+// them had **zero call sites anywhere in the module** and were deleted (see the
+// list below); only GetOperator() has real consumers. The package is kept
+// (rather than inlined into controller) because controller/anon.go and
+// controller/p2p.go both read it and it is nothing more than that read-only
+// accessor.
+//
+// Deleted, and why — all verified by a whole-module symbol search. These are
+// plain exported Go functions with no reflection or registry indirection, and
+// the only importer of this package in the entire tree is internal/controller:
+//
+//   - Configure(op, url, token, pid): its only writer caller was NodeRegistrar,
+//     deleted along with the libp2p stack (commit a5b090d). Zero call sites since.
+//   - SetOperator(username): no caller.
+//   - GetPeerID(): no caller.
+//   - ReportStats(upload, download): no caller, and it POSTed to
+//     `regURL + "/auth/node/stats"` — an endpoint that **does not exist**. The
+//     bundled registration server only serves POST /auth/register, POST
+//     /auth/login, GET /auth/whoami, GET /auth/list
+//     (back/internal/regserver/regserver.go:493-496). So this was a fake
+//     implementation that could never have succeeded, while implying a
+//     "transfer statistics are reported to the registration server" capability
+//     that does not exist. Same failure mode as the three dead config fields
+//     removed on 2026-10-04 (see the note at back/internal/config/config.go).
+//
+// IMPORTANT — operator now has **no writer**: with Configure and SetOperator
+// both gone, nothing in the tree can assign it, so GetOperator() always returns
+// "". That is the honest current state rather than a regression: those two
+// functions had no callers either, so the value was already always "" at
+// runtime. Seven call sites read it as the collection owner/operator
+// (controller/anon.go:51,97,141,163,239,318 and controller/p2p.go:895); they
+// keep working and keep receiving "". Do not add a writer ad hoc — deciding
+// what an operator *is* (per-user session vs. node owner) belongs to the
+// identity work tracked in doc/modules/auth, which is explicitly last in
+// doc/ROADMAP.md. Until that lands, keeping the accessor means that work is a
+// one-line change in one place rather than a sweep across seven call sites.
 package nodestate
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"net"
-	"net/http"
-	"net/url"
-	"strings"
-	"sync"
-	"time"
-)
+import "sync"
 
 var (
-	mu        sync.Mutex
-	operator  string
-	regURL    string
-	authToken string
-	peerID    string
+	mu       sync.Mutex
+	operator string
 )
-
-// Configure sets the node identity and registration server connection info. Called by NodeRegistrar.Start().
-func Configure(op, url, token, pid string) {
-	mu.Lock()
-	defer mu.Unlock()
-	operator = op
-	regURL = url
-	authToken = token
-	peerID = pid
-}
-
-// SetOperator sets the node operator (empty string = anonymous).
-func SetOperator(username string) {
-	mu.Lock()
-	defer mu.Unlock()
-	operator = username
-}
 
 // GetOperator returns the node operator (empty string = anonymous).
 func GetOperator() string {
@@ -46,62 +52,3 @@ func GetOperator() string {
 	defer mu.Unlock()
 	return operator
 }
-
-// GetPeerID returns the node's peer ID.
-func GetPeerID() string {
-	mu.Lock()
-	defer mu.Unlock()
-	return peerID
-}
-
-// ReportStats reports transfer statistics to the registration server. Only effective when the node is authenticated.
-func ReportStats(uploadBytes, downloadBytes int64) {
-	mu.Lock()
-	u := regURL
-	t := authToken
-	p := peerID
-	mu.Unlock()
-
-	if u == "" || t == "" || p == "" {
-		return
-	}
-	if uploadBytes == 0 && downloadBytes == 0 {
-		return
-	}
-
-	body, _ := json.Marshal(map[string]interface{}{
-		"peer_id":        p,
-		"upload_bytes":   uploadBytes,
-		"download_bytes": downloadBytes,
-	})
-
-	client := localClient()
-	req, _ := http.NewRequest("POST", u+"/auth/node/stats", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+t)
-	resp, err := client.Do(req)
-	if err != nil {
-		return
-	}
-	resp.Body.Close()
-}
-
-func localClient() *http.Client {
-	transport := &http.Transport{
-		Proxy: func(req *http.Request) (*url.URL, error) {
-			host, _, _ := net.SplitHostPort(req.URL.Host)
-			if host == "" {
-				host = req.URL.Host
-			}
-			if host == "localhost" || strings.HasPrefix(host, "127.") || host == "::1" {
-				return nil, nil
-			}
-			return http.ProxyFromEnvironment(req)
-		},
-		DialContext: (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
-	}
-	return &http.Client{Transport: transport, Timeout: 10 * time.Second}
-}
-
-// ensure fmt is used
-var _ = fmt.Sprintf

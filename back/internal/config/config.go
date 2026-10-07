@@ -50,10 +50,12 @@ type Config struct {
 	//   **outbound** identity this node uses when reporting to the registration server.
 	//   Commit a5b090d deleted the libp2p stack along with those two consumers, leaving the
 	//   field stranded; NodeRegistrar no longer exists and nodestate.Configure (its only
-	//   remaining writer) has zero call sites. So "implement it now" would mean inventing a
-	//   brand-new credential system and calling it a security guarantee — strictly worse than
-	//   deleting it. Inbound admin-surface auth is RegistrationServer above
-	//   (router/auth_middleware.go authDisabled()).
+	//   remaining writer) had zero call sites — and was deleted on 2026-10-07 along with the
+	//   rest of nodestate's dead API, so there is now no writer for nodestate's operator at
+	//   all. So "implement it now" would mean inventing a brand-new credential system and
+	//   calling it a security guarantee — strictly worse than deleting it. Inbound
+	//   admin-surface auth is RegistrationServer above (router/auth_middleware.go
+	//   authDisabled()).
 	//   PublicAccessDomain / RegServerURL were zero-consumption from introduction.
 	// Rollback note: to restore, re-add the three fields plus their getEnv lines at the
 	// original positions; nothing else in the tree references them.
@@ -305,7 +307,17 @@ func Load() *Config {
 		AutoExtractMaxFiles:   getEnvInt("PEERDRIVE_AUTO_EXTRACT_MAX_FILES", 10000),
 		AutoExtractDeleteOrig: getEnvBool("PEERDRIVE_AUTO_EXTRACT_DELETE_ORIGINAL", true),
 
-		DownloadOrder:       getEnv("PEERDRIVE_DOWNLOAD_ORDER", "local,ipfs,ipfsgw,btdht,http"),
+		// 2026-10-07: dropped the bogus "ipfs" entry from the default (was
+		// "local,ipfs,ipfsgw,btdht,http"). "ipfs" has not been in the fetcher
+		// registry since the libp2p stack was removed (commit a5b090d); the
+		// registry only knows local/ipfsgw/btdht/http
+		// (downloader/universal_downloader.go buildFetchers). Every buildFetchers
+		// call therefore emitted `downloader: unknown protocol "ipfs" in order,
+		// skipping` at startup — a permanent warning about a protocol that cannot
+		// exist, which trains operators to ignore downloader log lines.
+		// The default now equals the empty-string fallback in buildFetchers, so
+		// the default is exactly what the code would pick with no config at all.
+		DownloadOrder:       getEnv("PEERDRIVE_DOWNLOAD_ORDER", "local,ipfsgw,btdht,http"),
 		DownloadTimeoutSecs: getEnvInt("PEERDRIVE_DOWNLOAD_TIMEOUT", 30),
 
 		ForwardRules: getEnv("PEERDRIVE_FORWARD_RULES", ""),

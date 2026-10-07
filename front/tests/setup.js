@@ -1,10 +1,13 @@
-import { afterEach, vi } from 'vitest'
+import { afterEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 
-// Mock the API module globally to prevent real HTTP requests during tests.
-// Components call API functions in useEffect, which would create real Node
-// HTTP requests in happy-dom, causing AbortError noise during teardown.
-vi.mock('../src/api.js')
+// 2026-10-07: the global `vi.mock('../src/api.js')` was removed together with
+// src/api.js. That module was a zombie: no page or component imported it (all
+// traffic goes through ws.js admin frames), so the mock only existed to keep a
+// dead file from issuing real HTTP requests during tests. Nothing in the app
+// opens a connection at import time — ws.js connects lazily on connect() — so
+// no equivalent guard is needed here. If a test ever needs to stub the WS
+// layer, it should mock '../src/ws.js' in that test file instead.
 
 afterEach(() => {
   cleanup()

@@ -42,7 +42,7 @@ Frontend:
 | # | Problem | Severity | Location Changed |
 |---|------|--------|----------|
 | 13 | **WS no heartbeat / no reconnection / no dead connection detection**: `onclose` just sets sock to null, waiting for the next request to reconnect — one node restart with no in-flight requests means reconnection is never triggered, the entire page goes "clicks don't respond" | High | `front/src/ws.js` (25s heartbeat `/ping`, 60s no-frame dead connection detection, 1s→30s exponential backoff reconnection, `onStatus()` subscription) |
-| 14 | **Backend address hardcoded**: source code hardcodes a domain and a **plaintext http public IP** (blocked as mixed content on https pages, that default backend was never actually usable) | Medium | `front/src/api.js` (changed to `VITE_API_BASE`, removed plaintext http entries) |
+| 14 | **Backend address hardcoded**: source code hardcodes a domain and a **plaintext http public IP** (blocked as mixed content on https pages, that default backend was never actually usable) | Medium | `front/src/ws.js` (changed to `VITE_API_BASE`, removed plaintext http entries; the historical HTTP wrapper module that used to hold this was deleted on 2026-10-07) |
 
 > 13 and 14 combined count as 12 items in the table above; listed separately because they belong to the frontend.
 
@@ -62,7 +62,7 @@ Second round deep-dive fixed 3 more items (all on the "who can touch the admin p
 
 ## 2. Not Yet Fixed (by Suggested Priority)
 
-1. **Token stored in localStorage** (`front/src/api.js`): XSS gets full access, and there's no 401 refresh/retry flow. Recommend migrating to httpOnly Cookie (requires backend `Set-Cookie` config); at minimum, change to sessionStorage + short expiry.
+1. **Token stored in localStorage** (`front/src/ws.js`, key `peerdrive_auth_token`; it moved here when the unused HTTP wrapper module was deleted on 2026-10-07): XSS gets full access, and there's no 401 refresh/retry flow. Recommend migrating to httpOnly Cookie (requires backend `Set-Cookie` config); at minimum, change to sessionStorage + short expiry.
 2. **No RBAC**: `role` is fetched from whoami but only used for **display** at `controller/p2p.go:871`, with no authorization decision based on role anywhere — all authenticated users have equivalent permissions. Recommend adding `RequireRole(...)` alongside `AuthRequired`, covering delete and shared scope changes first.
 3. **No migration version table**: `InitDB` relies on `CREATE TABLE IF NOT EXISTS` + a series of `migrationExec(ALTER ...)`, with no record of whether migrations have run or what version is current, and no rollback support. Recommend adding `schema_migrations(version, applied_at)`.
 4. **No typed error system**: 153 hand-written status codes, error messages and HTTP statuses scattered everywhere, clients can't get stable error codes. Recommend defining `AppError{Code, HTTP, Msg}` in `internal/errors.go` + a global handler, **and keeping `err.Error()` out of responses** (internal paths/DSN shouldn't appear in response bodies).

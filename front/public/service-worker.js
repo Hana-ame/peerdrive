@@ -75,7 +75,11 @@ self.addEventListener('fetch', (event) => {
   }
 
   /* Everything else — network only */
-  event.respondWith(fetch(request).catch(() => caches.match('/index.html')));
+  // 2026-10-07: relative instead of '/index.html' — a worker registered under a
+  // sub-path scope (e.g. /peerdrive/ on Pages) has its cache keys under that
+  // sub-path, so the absolute form never matched and the offline fallback
+  // resolved to a 404. Matches the './index.html' key used at install time.
+  event.respondWith(fetch(request).catch(() => caches.match('./index.html')));
 });
 
 /* ─── Background Sync: retry pending uploads ─── */

@@ -241,7 +241,7 @@ peerdrive
 | `PEERDRIVE_URL_SOURCE_TEMPLATE` | - | URL source template (%s=hash, multi-source fallback) |
 | `PEERDRIVE_DOWNLOAD_DIR` | ./downloads | Download/registration directory (file_index root) |
 | `PEERDRIVE_MAX_PEERS` | 8 | Interconnect peer cap |
-| `PEERDRIVE_DOWNLOAD_ORDER` / `PEERDRIVE_DOWNLOAD_TIMEOUT` | local,ipfs,ipfsgw,btdht,http / 30s | Downloader routing order / timeout |
+| `PEERDRIVE_DOWNLOAD_ORDER` / `PEERDRIVE_DOWNLOAD_TIMEOUT` | local,ipfsgw,btdht,http / 30s | Downloader routing order / timeout (any permutation/subset of these four names) |
 | `PEERDRIVE_FORWARD_RULES` | - | Port forwarding rules (`key:port,...`, chmod 600) |
 | `PEERDRIVE_DISCOVER_PRESENCE` | true | Node-level "presence room" discovery (zero-shared-collection nodes can also interconnect) |
 | `PEERDRIVE_SHARE_ENABLE` | **false** | External sharing master switch. Default off -- without explicit enable, no manifest is exposed externally |

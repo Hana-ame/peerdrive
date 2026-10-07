@@ -1,8 +1,8 @@
 # PeerDrive Backend API Reference
 
-> ⚠️ **As of 2026-08-17 the frontend has fully migrated to admin frames on `/ws/peer`** (see REFACTOR §3.10, NODE-API §2.4): `front/src/api.js`'s `request()` now all go over WS; HTTP routes are retained but marked legacy (router.go LEGACY section), used only for compatibility with old frontends/curl/integration tests. The tables below remain the authoritative reference for route and request/response structure (admin frames internally forward to the same controller, so behavior is identical).
+> ⚠️ **As of 2026-08-17 the frontend has fully migrated to admin frames on `/ws/peer`** (see REFACTOR §3.10, NODE-API §2.4): HTTP routes are retained but marked legacy (router.go LEGACY section), used only for compatibility with old frontends/curl/integration tests. The tables below remain the authoritative reference for route and request/response structure (admin frames internally forward to the same controller, so behavior is identical).
 >
-> Intended for frontend developers, organized per `front/src/api.js`. The API Base is configurable, defaulting to `https://wsl-3000.moonchan.xyz`.
+> Intended for frontend developers. Organized per the frontend WS client `front/src/ws.js` (`admin`/`upload`/`download`/`stat`). The API Base is configurable, defaulting to `https://wsl-3000.moonchan.xyz`. (This doc was previously organized per an HTTP wrapper module in `front/src/` that had zero importers and was deleted on 2026-10-07; nothing reads it anymore.)
 > Auth: `Authorization: Bearer <token>`, with the token sourced from the URL fragment (`#token`) or manual entry on the settings page.
 
 ---

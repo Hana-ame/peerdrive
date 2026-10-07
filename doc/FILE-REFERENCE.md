@@ -54,12 +54,12 @@
 | `router/` | 6 | 1488 | Gin 路由与中间件（含 `/panel`、CSP 豁免） |
 | `repository/` | 10 | 1387 | SQLite 持久化 |
 | `pathutil/` | 12 | 1088 | 路径作用域校验（`os.Root` / 降级模式统一） |
-| `downloader/` | 1 | 453 | 通用下载器（`local → ipfs → ipfsgw → btdht → http`） |
+| `downloader/` | 1 | 453 | 通用下载器（`local → ipfsgw → btdht → http`；registry 里没有 `ipfs`） |
 | `model/` | 8 | 603 | 数据模型 |
 | `regserver/` | 3 | 557 | 注册 / 认证 / 中继登记（原独立仓，已并入） |
-| `config/` | 1 | 351 | 配置加载（**端口读 `PORT`，没有 `PEERDRIVE_PORT`**） |
+| `config/` | 1 | 430 | 配置加载（**端口读 `PORT`，没有 `PEERDRIVE_PORT`**） |
 | `services/` | 1 | 285 | 信令 + 注册 mux 装配 |
-| `nodestate/` | 1 | 107 | 进程级状态（无 init / 无 Close） |
+| `nodestate/` | 1 | 53 | 只剩 `GetOperator()` 一个读函数（2026-10-07 清掉 4 个零消费函数；operator 当前无写入方，恒为 `""`） |
 | `panel/` | 1 | 115 | **v0.3.2 新增**：`go:embed` 面板 + peerjs，`/panel` 零输入自发现 |
 | `log/` | 1 | 80 | 日志封装 |
 | `version/` | 1 | 16 | 版本号（由 `-ldflags -X` 注入） |

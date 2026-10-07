@@ -1,46 +1,49 @@
 # Module 14: nodestate Runtime Shared State
 
 - **Code Location**: `back/internal/nodestate` (single file `back/internal/nodestate/nodestate.go`, no `_test.go` in directory)
-- **One-line Function**: Stores node runtime identity/connection state (operator username, reg server URL, auth token, peerID) in process-level package variables, and provides the ability to report transfer statistics to the registration server; it is an independent package to break the controller↔service circular import (per the package comment); currently it is only read by controller, with **no write callers whatsoever**.
-- **Dependencies**: Go standard library only (`sync`/`encoding/json`/`net/http`/`net/url`/`bytes`/`time`/`fmt`, `back/internal/nodestate/nodestate.go:5-15`); zero business dependencies.
-- **Depended on by**: `back/internal/controller` — the **only** importer in the entire back module (go list scan + symbol search): `back/internal/controller/anon.go` 6 places, `back/internal/controller/p2p.go` 1 place call `nodestate.GetOperator()`. The package comment claims "both controller and service need to access this state" (nodestate.go:2), which is inconsistent with actual import relationships (see §5).
+- **One-line Function**: Stores the node operator username in a process-level package variable and exposes it read-only; it is an independent package to break the controller↔service circular import (per the package comment). **Since 2026-10-07 it is a single-field, single-function package** — `GetOperator()` is the only exported symbol, and nothing in the tree can write `operator` (see §1 "Deleted API").
+- **Dependencies**: Go standard library only (`sync`, `back/internal/nodestate/nodestate.go:42`); zero business dependencies.
+- **Depended on by**: `back/internal/controller` — the **only** importer in the entire back module (go list scan + symbol search): `back/internal/controller/anon.go` 6 places, `back/internal/controller/p2p.go` 1 place call `nodestate.GetOperator()`.
 
 ---
 
 ## 1. Logic
 
-**Responsibilities** (nodestate.go:1-3 package comment): Store the runtime state of a Peerdrive node (operator username, reg server connection info) and provide statistics reporting; since both controller and service need to access this state, it is separated into its own package to break circular imports.
+**Responsibilities** (post-2026-10-07): hold the node's operator username so controller handlers can stamp it onto anonymous collections and report it in `GET /p2p/auth/status`.
 
-**Core Shape: Package-level Global Variables, Not a Struct**. This package defines no `struct`/interface; state is simply 4 package-level `string` variables plus a lock (nodestate.go:17-23):
+**Core Shape: Package-level Global Variable, Not a Struct**. This package defines no `struct`/interface; state is a single package-level `string` plus a lock (`nodestate.go:44-47`):
 
 ```go
 var (
-	mu        sync.Mutex
-	operator  string
-	regURL    string
-	authToken string
-	peerID    string
+	mu       sync.Mutex
+	operator string
 )
 ```
 
-**5 Public API Functions Total**:
+**1 Public API Function**:
 
 | Function | Purpose | Code Location |
 |---|---|---|
-| `Configure(op, url, token, pid string)` | Set all four fields at once | nodestate.go:26-33 |
-| `SetOperator(username string)` | Set operator separately (empty string = anonymous) | nodestate.go:36-40 |
-| `GetOperator() string` | Read operator | nodestate.go:43-47 |
-| `GetPeerID() string` | Read peerID | nodestate.go:50-54 |
-| `ReportStats(uploadBytes, downloadBytes int64)` | Report transfer statistics to reg server | nodestate.go:57-86 |
+| `GetOperator() string` | Read operator (always `""` today — see §5.1) | nodestate.go:49-54 |
 
-Every function except `Configure` independently acquires `mu.Lock()` for protection (write functions 27-32/37-39, read functions 44-46/51-53, ReportStats locks to copy snapshot then unlocks 58-62).
+**1 Flow — the read flow (the only one left)**: HTTP request arrives at controller's anonymous collection endpoint → handler calls `nodestate.GetOperator()` → passed as `owner`/`requester` into `service.AnonService` (`back/internal/controller/anon.go:51,97,141,163,239,317`) → service writes the value into the anonymous collection JSON's `Owner` field for persistence (`back/internal/service/anon_service.go:131,140-160`). Also returned to the frontend via `GET /p2p/auth/status` (p2p.go:895).
 
-**Two Main Flows**:
+### Deleted API (2026-10-07)
 
-1. **Read Flow (currently the only truly triggered flow)**: HTTP request arrives at controller's anonymous collection endpoint → handler calls `nodestate.GetOperator()` to get this node's operator → passed as `owner`/`requester` into `service.AnonService` (`back/internal/controller/anon.go:51,97,141,163,239,317`) → service writes the value into the anonymous collection JSON's `Owner` field for persistence (`back/internal/service/anon_service.go:131,140-160`). Also returned to the frontend via `GET /p2p/auth/status` (p2p.go:895).
-2. **Report Flow (exists by design, currently no callers)**: After `ReportStats` guards pass, it POSTs `peerID` and upload/download byte counts to `regURL + "/auth/node/stats"`, with `Authorization: Bearer <authToken>` header (nodestate.go:78-81).
+Four exported functions were removed after a whole-module symbol search found **zero call sites** for each. These are plain exported Go functions, and the only importer of the package in the whole tree is `internal/controller` — so "zero call sites" is a complete statement, not a grep approximation; there is no reflection or registry indirection that could hide a caller.
 
-**Lifecycle**: Process-level. Package-level variables exist from process startup (zero-value empty strings), no init function, no `Close`/`Stop` hooks; all state disappears on process exit. The startup/graceful shutdown flow in `internal/serverapp/app.go` (app.go:170-420) does not touch this package at all.
+| Deleted | Why |
+|---|---|
+| `Configure(op, url, token, pid)` | Its only writer caller was `NodeRegistrar`, removed with the libp2p stack in commit `a5b090d`. Zero call sites since. |
+| `SetOperator(username)` | No caller. |
+| `GetPeerID()` | No caller. |
+| `ReportStats(upload, download)` | No caller — **and the endpoint it POSTed to does not exist**: it targeted `regURL + "/auth/node/stats"`, while the bundled registration server only serves `POST /auth/register`, `POST /auth/login`, `GET /auth/whoami`, `GET /auth/list` (`back/internal/regserver/regserver.go:493-496`). This was a fake implementation that could never have succeeded while implying a "stats are reported to the registration server" capability that does not exist — the same failure mode as the three dead config fields deleted on 2026-10-04 (`back/internal/config/config.go`, see §5.5). Its `localClient()` helper, the `var _ = fmt.Sprintf` placeholder, and the `regURL`/`authToken`/`peerID` fields died with it. |
+
+**Why the package was not deleted outright**: `GetOperator()` has 7 real consumers (§Depended on by), so the package survives as a one-function accessor. Inlining it into controller would be churn for no gain, and keeping it means that when a real operator identity is defined (see §5.1) this becomes a one-line change in one place rather than a sweep across seven call sites.
+
+**Lifecycle**: Process-level. The package variable exists from process startup (zero-value empty string), no init function, no `Close`/`Stop` hooks; all state disappears on process exit. The startup/graceful shutdown flow in `internal/serverapp/app.go` does not touch this package at all.
+
+> Note: the module map still describes it as "operator/reg/peerID process-shared state" (doc/design/how-to-connect.md:33); after this cleanup only `operator` remains.
 
 > Note: The module map defines it as "operator/reg/peerID process-shared state (independent package to break circular imports)" (doc/design/how-to-connect.md:28, doc/design/README.md:29); the architecture review document concludes "nodestate package exists solely to resolve circular references" (doc/archive/report/ARCHITECTURE-REVIEW.md:34-35).
 
@@ -48,11 +51,11 @@ Every function except `Configure` independently acquires `mu.Lock()` for protect
 
 ## 2. Storage
 
-**Medium and Location: Pure In-Memory, No Persistence.** State exists only in the package-level variables at `back/internal/nodestate/nodestate.go:17-23`, with no disk/DB/file writes, and no exported persistence paths — this package does not import repository/storage, the dependency list contains only standard library (nodestate.go:5-15).
+**Medium and Location: Pure In-Memory, No Persistence.** State exists only in the package-level variable at `back/internal/nodestate/nodestate.go:44-47`, with no disk/DB/file writes, and no exported persistence paths — this package does not import repository/storage, the dependency list contains only the standard library (`sync`).
 
-**In-Memory Composition**: 4 `string` values (`operator`, `regURL`, `authToken`, `peerID`) + 1 `sync.Mutex`; no struct instances, no map/slice. Initial values are all Go zero-value empty strings.
+**In-Memory Composition**: 1 `string` (`operator`) + 1 `sync.Mutex`; no struct instances, no map/slice. Initial value is the Go zero-value empty string. (Was 4 strings + mutex before the 2026-10-07 cleanup; see §1 "Deleted API".)
 
-**Lifecycle**: Exists from process startup → cleared on process exit, no intermediate persistence. **After process restart, all four fields return to `""`**, with no recovery mechanism (no code path found that reloads from disk/DB; `internal/serverapp/app.go` full flow does not touch this package).
+**Lifecycle**: Exists from process startup → cleared on process exit, no intermediate persistence. **After process restart, `operator` returns to `""`**, with no recovery mechanism (no code path reloads it; `internal/serverapp/app.go` does not touch this package). In fact it never leaves `""` — there is no writer at all (§5.1).
 
 **Delegation Relationship (values flow downstream and are persisted by downstream, but this package does not persist itself)**: Values read by `GetOperator()` are passed by controller as `owner`/`requester` to `service.AnonService`, and ultimately **written by the service layer** into content-addressed anonymous collection JSON and registered in the database (`back/internal/service/anon_service.go:128-160`: `coll.Owner = owner` participates in `json.MarshalIndent` → `sha256Hex` → write to `storage/<hash[:2]>/<hash>` → `repository.InsertFileMeta` + `InsertFileProvider`). In other words: nodestate provides an in-process "staging slot"; persistence occurs in the downstream service/repository/storage chain (see §6 connections 03/04).
 
@@ -62,15 +65,7 @@ Every function except `Configure` independently acquires `mu.Lock()` for protect
 
 Strictly distinguishing "write" and "read" directions, presented as-is:
 
-**Writes (all 4 write entry points have NO callers — exist by design, zero trigger points in current code, marked as unverified):**
-
-| Write Entry Point | Declared Timing in Code | Actual Trigger Point |
-|---|---|---|
-| `Configure` | Comment states "called by NodeRegistrar.Start()" (nodestate.go:25), i.e., during node startup | **Unverified: no `NodeRegistrar` type/call site exists anywhere in the repository** (go list scan + symbol search found none) |
-| `SetOperator` | Comment semantics: "operator account registered after node logs into regserver" (compare p2p.go:888-890 and doc/REFACTOR.md:567,595 semantic descriptions) | **Unverified: no call sites at all**, operator is therefore always empty string |
-| `ReportStats` | Comment semantics: report transfer statistics to registration server when node is authenticated (nodestate.go:56) | **Unverified: no call sites** (compare doc/modules/auth/API-DESIGN.md:627 designed `POST /stats/report` batch window, also not implemented) |
-
-There is also a read-only API `GetPeerID` (nodestate.go:50-54) with **no callers at all** (unverified).
+**Writes: there are none.** As of the 2026-10-07 cleanup this package has **no write entry point at all** — `Configure`, `SetOperator` and `ReportStats` were all deleted for having zero call sites (see §1 "Deleted API"), and `GetPeerID` was deleted for the same reason. So `operator` is structurally always `""`, and there is no timing at which it could ever become non-empty. The intended semantics ("operator only has a value after the node logs into regserver") remain unimplemented; the design record for that lives in p2p.go:888-890 and doc/modules/auth, and the sequencing constraint (identity last) is in doc/ROADMAP.md.
 
 **Reads (the only actual access happening currently, all are per-request synchronous reads):**
 
@@ -90,14 +85,11 @@ No scheduled tasks, no event callbacks, no graceful shutdown hooks touch this pa
 
 ## 4. What is Stored
 
-**The 4 self-held fields of this package** (all in-memory, no initialization logic beyond default values):
+**2026-10-07: the package now holds exactly one field.** `regURL`/`authToken`/`peerID` and the four functions that only existed to feed `ReportStats` were deleted — see §1 "Deleted API" below.
 
 | Field | Type/Initial Value | Write Function | Read/Consumer | Key Constraints |
 |---|---|---|---|---|
-| `operator` | `string`, initial `""` | `Configure`(29)/`SetOperator`(38) | `GetOperator`(43) → anon.go 6 places, p2p.go:895 | Empty string = anonymous node (nodestate.go:35,42 comments); **no length/format validation** |
-| `regURL` | `string`, initial `""` | `Configure`(30) | `ReportStats`(59,78) | Returns directly when empty (64-66); used as HTTP POST prefix, directly concatenated with `/auth/node/stats` (78) |
-| `authToken` | `string`, initial `""` | `Configure`(31) | `ReportStats`(60,80) | Returns directly when empty (64-66); used as `Authorization: Bearer <token>` header (80) |
-| `peerID` | `string`, initial `""` | `Configure`(32) | `GetPeerID`(50), `ReportStats`(61,72) | Returns directly when empty (64-66); `peer_id` field in report JSON (72) |
+| `operator` | `string`, initial `""` | **none left in the tree** (the two writers were deleted; see below) | `GetOperator()` → anon.go 6 places, p2p.go:895 | Empty string = anonymous node; **no length/format validation** |
 
 **Content delegated to downstream for persistence (not belonging to this package's fields, but values originate from this package, for traceability)**: `AnonCollection.Owner` — written to the anonymous collection JSON tail (`back/internal/service/anon_service.go:131`), participates in content-addressed digest hash calculation (138); constraints: `private` visible only to Owner, `restricted` allows Owner+AccessList (`back/internal/controller/anon.go:139-163`); unauthorized access returns 404 uniformly (anon_service.go:212-216); hash is 64-character lowercase hexadecimal sha256 (anon_service.go:36-40,138), files stored in `storage/<hash[:2]>/<hash>`, 0644 (anon_service.go:140-149).
 
@@ -105,18 +97,18 @@ No scheduled tasks, no event callbacks, no graceful shutdown hooks touch this pa
 
 ## 5. Boundaries and Pitfalls
 
-1. **Currently a "read-only empty package"**: No callers of `Configure`/`SetOperator`/`ReportStats`/`GetPeerID` exist anywhere in the repository → `operator` is always `""`. Consequence: anonymous collections created will always have empty Owner, `private` visibility has no owner and cannot be read (`CanView` returns false for empty requester, model/anon.go:158-159), frontend disables "only self" option based on this (doc/REFACTOR.md:567). There is a gap between this and the design intent of "operator only has a value after node logs into regserver" (p2p.go:888-890) — the "writer not implemented" gap.
-2. **Concurrency Safety**: All public function reads/writes hold `mu` (nodestate.go:27-32,37-39,44-46,51-53,58-62). `ReportStats` uses the pattern of locking to copy snapshot, unlocking before making HTTP call, avoiding holding the lock during network operations (58-62); this is intentional, callers should not assume read/write atomicity beyond a single function's scope.
-3. **Silent Failures**: `ReportStats` swallows all errors — HTTP error `err != nil` directly returns (82-85), response body only closes without reading or checking status codes (85); when upload/download are both 0, no request is sent (67-69). No logging, no retries, no queue.
-4. **Proxy Bypass**: `localClient` connects directly without environment proxy for `localhost`/`127.*`/`::1`, others use `http.ProxyFromEnvironment` (88-103); Dial and overall timeout are both 10s (100,102). Note: the "local determination" here is for the HTTP client, unrelated to the "local WS admin plane".
+1. **`operator` has no writer — it is structurally always `""`**: as of the 2026-10-07 cleanup there is **no code path that can assign it** (both writers were deleted along with the rest of the dead API). Consequence: anonymous collections created will always have empty Owner, `private` visibility has no owner and cannot be read (`CanView` returns false for empty requester, model/anon.go:158-159), frontend disables "only self" option based on this. This is **not a regression**: the deleted writers had no callers either, so the value was already always `""` at runtime — the difference is that now the code cannot pretend otherwise. There remains a gap versus the design intent of "operator only has a value after node logs into regserver" (p2p.go:888-890) — the "writer not implemented" gap. **Do not add a writer ad hoc**: deciding what an operator *is* (per-user session vs. node owner) belongs to the identity work in doc/modules/auth, which is explicitly sequenced last in doc/ROADMAP.md.
+2. **Concurrency Safety**: `GetOperator()` holds `mu` while reading (nodestate.go:51-53). The lock is currently uncontended, but it is kept so that adding a writer later is race-free by construction rather than by review.
+3. ~~**Silent Failures**~~ — resolved by deletion: `ReportStats` swallowed every error (HTTP error returns immediately, response status never checked, no logging/retry/queue). Removed with the function.
+4. ~~**Proxy Bypass**~~ — resolved by deletion: `localClient`'s localhost-proxy-bypass special case existed only for `ReportStats`. Removed with it.
 5. **Package comments and current state/docs have multiple inconsistencies**:
-   - Comments say both controller and service access this package (nodestate.go:2), actually only controller imports it (see §Depended on by).
-   - `Configure` comment references `NodeRegistrar.Start()` (nodestate.go:25) which does not exist in the repository (doc/archive/TRANSPORT-REVIEW2-2026-08-16.md:163 planned `NodeRegistrar`/`RelayRegistry` with `Stop()` also not implemented).
-   - `doc/FILE-REFERENCE.md:167` records this package managing "online/offline/busy" state, which are not in the code.
-   - This package has **no tests at all** (directory only contains nodestate.go; doc/archive/report/ARCHITECTURE-REVIEW.md:84 also records this).
-6. **`username` ≠ `operator`**: `AuthOptional`/`AuthRequired` middleware puts the "request caller's account" into gin context (`c.Set("username", ...)`, auth_middleware.go:43-50,78-79), sourced from per-request remote verification of reg server `/auth/whoami` (auth_middleware.go:147-168, 30s cache); while `operator` is "the account registered after node logs into regserver", the two have completely different sources (p2p.go:888-890 comments explicitly state this). Middleware **never writes** to nodestate.
-7. **`var _ = fmt.Sprintf` (nodestate.go:105-106)**: Placeholder added to keep the `fmt` import — `fmt` is not actually used in this package, a historical artifact, don't mistake it for having formatting logic.
-8. **No corresponding connection documentation for reg server statistics reporting**: None of the 13 connections/ documents cover the node → reg server `/auth/node/stats` reporting (nodestate.go:78), an undocumented external protocol; the established auth-direction connection is router middleware → reg server `/auth/whoami` (see §6 connection 02).
+   - The package comment claimed "both controller and service need to access this state"; only controller ever imported it. Corrected in the 2026-10-07 package comment.
+   - `Configure`'s comment referenced a non-existent `NodeRegistrar.Start()` (doc/archive/TRANSPORT-REVIEW2-2026-08-16.md:163 planned `NodeRegistrar`/`RelayRegistry` with `Stop()`, also never implemented). Gone with the function.
+   - `doc/FILE-REFERENCE.md` recorded this package managing "online/offline/busy" state, which were never in the code. Row updated to reflect the one remaining function.
+   - This package has **no tests at all** (directory only contains nodestate.go; doc/archive/report/ARCHITECTURE-REVIEW.md:84 also records this). The remaining function is a pure getter, so the gap is much smaller than it was.
+6. **`username` ≠ `operator`**: `AuthOptional`/`AuthRequired` middleware puts the "request caller's account" into gin context (`c.Set("username", ...)`), sourced from per-request remote verification of reg server `/auth/whoami` (auth_middleware.go, 30s cache); while `operator` is "the account registered after node logs into regserver", the two have completely different sources (p2p.go:888-890 comments explicitly state this). Middleware **never writes** to nodestate — and, as of this cleanup, nothing does.
+7. ~~**`var _ = fmt.Sprintf`**~~ — resolved by deletion: the placeholder existed only to keep the `fmt` import alive for the removed code.
+8. ~~**No connection documentation for reg server statistics reporting**~~ — resolved by deletion: the undocumented node → reg server `/auth/node/stats` protocol no longer exists anywhere in the tree. The established auth-direction connection is router middleware → reg server `/auth/whoami` (see §6 connection 02).
 
 ---
 

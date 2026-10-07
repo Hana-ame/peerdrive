@@ -2,21 +2,36 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!--
+      Asset URLs are relative on purpose (2026-10-07). The Pages deployment builds
+      with `--base=/peerdrive/`, and vite's build-html plugin only rewrites URL
+      attributes (link href / script src / img src) that point at public/ files.
+      Anything inside a <script> block, or inside a public/*.json file, is copied
+      verbatim and would resolve against the site root instead — which 404s under
+      a sub-path deployment. Relative URLs resolve correctly under both root and
+      sub-path deploys, so they are the safe form here.
+    -->
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="manifest" href="/manifest.json" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
     <meta name="theme-color" content="#0f172a" />
     <title>Peerdrive</title>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/service-worker.js');
-        });
-      }
-    </script>
+    <!--
+      Service worker registration intentionally does NOT happen here (2026-10-07).
+      It used to be registered twice: once by the inline script that used to sit at
+      this spot, and once by registerSW() in src/lib/swBridge.js (invoked from
+      App.jsx). The inline copy passed a plain absolute "/service-worker.js"
+      string, which vite does not rewrite, so on the /peerdrive/ Pages deployment
+      it always 404'd — while still counting as a registration attempt, leaving
+      the browser's SW registry reconciling two different scopes for one worker.
+      The surviving registration is registerSW() in src/lib/swBridge.js: it
+      resolves the URL against import.meta.env.BASE_URL, so it follows --base,
+      and it also handles the "registered but not yet controlling this page" case
+      by reloading once so /swdrive/ is actually intercepted.
+    -->
   </head>
   <body>
     <div id="root"></div>
