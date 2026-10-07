@@ -33,7 +33,11 @@ package transport
 //     our stuff), **but our requests to the peer are unaffected** (peer is open, it serves
 //     us normally).
 //     i.e.: PSK protects the outgoing content of "the node that configured it".
-//   - local (browser admin WS session) exempted: it's local, doesn't go through the gate.
+//   - Local WS management session exempted (isSelfSession type assertion, share.go:120):
+//     it's the operator's own management channel, doesn't go through the gate. A remote
+//     peer registering with ?id=local on the signaling server does NOT exempt them —
+//     rtcSession never implements IsLocal(), so the assertion fails closed (audit A-9,
+//     2026-10-06).
 
 import (
 	"crypto/subtle"
@@ -66,7 +70,10 @@ func (s *PeerJSService) pskEnabled() bool {
 // MUST be sent **before** registering OnMessage, guaranteeing it's always our first frame —
 // order is semantics (see file header trade-off 2).
 func (s *PeerJSService) pskSendAuth(c Session) {
-	if !s.pskEnabled() || c.ID() == "local" {
+	// 2026-10-06 security fix (audit A-9): the old check `c.ID() == "local"` was
+	// bypassable by a remote peer registering with ?id=local on the signaling server.
+	// isSelfSession uses type assertion — only WSSession implements IsLocal().
+	if !s.pskEnabled() || isSelfSession(c) {
 		return
 	}
 	// Use a plain map instead of dcResp: dcResp has many omitempty fields, making the frame
@@ -101,7 +108,10 @@ func (s *PeerJSService) servePskAuth(c Session, st *connState, got string) {
 // pskGate gate decision: should this inbound verb be blocked.
 // Returns true if err has been sent and the caller must stop processing the frame.
 func (s *PeerJSService) pskGate(c Session, st *connState, r dcResp) bool {
-	if !s.pskEnabled() || !servedVerbs[r.Type] || c.ID() == "local" {
+	// 2026-10-06 security fix (audit A-9): the old check `c.ID() == "local"` was
+	// bypassable by a remote peer registering with ?id=local on the signaling server.
+	// isSelfSession uses type assertion — only WSSession implements IsLocal().
+	if !s.pskEnabled() || !servedVerbs[r.Type] || isSelfSession(c) {
 		return false
 	}
 	st.mu.Lock()

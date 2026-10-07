@@ -67,8 +67,8 @@ func TestBindConn_ReplacedConnOldStreamErrors(t *testing.T) {
 // service is still active).
 func TestBindConn_LocalNoDedup(t *testing.T) {
 	svc := newTestPeerJSService(t)
-	tab1 := &fakeSession{id: "local"}
-	tab2 := &fakeSession{id: "local"}
+	tab1 := &fakeSession{id: "local", local: true}
+	tab2 := &fakeSession{id: "local", local: true}
 	svc.bindConn(tab1)
 	svc.bindConn(tab2)
 
@@ -131,7 +131,7 @@ func reqIDOf(t *testing.T, s *fakeSession) string {
 // serveAdmin explicitly checks whether the other is already occupied.
 func TestConnState_AdminUpAndPendingUploadSlot(t *testing.T) {
 	svc := newTestPeerJSService(t)
-	sess := &fakeSession{id: "local"}
+	sess := &fakeSession{id: "local", local: true}
 	svc.bindConn(sess)
 	st := svc.pending[sess]
 	require.NotNil(t, st)
@@ -156,7 +156,7 @@ func TestConnState_AdminUpAndPendingUploadSlot(t *testing.T) {
 // takes the slot (discovery background: the replacement logic in admin.go).
 func TestConnState_AdminUpOverlap(t *testing.T) {
 	svc := newTestPeerJSService(t)
-	sess := &fakeSession{id: "local"}
+	sess := &fakeSession{id: "local", local: true}
 	svc.bindConn(sess)
 	st := svc.pending[sess]
 	require.NotNil(t, st)
