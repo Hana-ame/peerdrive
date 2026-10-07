@@ -8,8 +8,11 @@ package serverapp
 // "open items must be reported" and "hardened nodes must report nothing" both ways.
 
 import (
+	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"peerdrive/internal/config"
 )
 
@@ -115,4 +118,52 @@ func TestSecurityStatus_PSKOnly(t *testing.T) {
 	if _, ok := got["HTTP admin surface has no auth (PEERDRIVE_REG_SERVER empty)"]; !ok {
 		t.Error("admin-auth warning must survive when only PSK was set")
 	}
+}
+
+// TestValidateAuthStartup_... tests for validateAuthStartup (C-14 audit fix).
+// Discovery: C-14 — non-loopback deployment without auth backend is fully open.
+
+func TestValidateAuthStartup_NonLoopbackNoAuth(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.Host = "0.0.0.0"
+	cfg.RegistrationServer = ""
+	os.Setenv("PEERDRIVE_ALLOW_NO_AUTH", "")
+	defer os.Unsetenv("PEERDRIVE_ALLOW_NO_AUTH")
+
+	err := validateAuthStartup(cfg)
+	require.Error(t, err, "non-loopback with no auth backend must fail")
+	assert.Contains(t, err.Error(), "refusing to serve")
+}
+
+func TestValidateAuthStartup_NonLoopbackWithAuth(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.Host = "0.0.0.0"
+	cfg.RegistrationServer = "https://account.example.com"
+	os.Setenv("PEERDRIVE_ALLOW_NO_AUTH", "")
+	defer os.Unsetenv("PEERDRIVE_ALLOW_NO_AUTH")
+
+	err := validateAuthStartup(cfg)
+	require.NoError(t, err, "non-loopback with auth backend must pass")
+}
+
+func TestValidateAuthStartup_NonLoopbackAllowNoAuth(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.Host = "0.0.0.0"
+	cfg.RegistrationServer = ""
+	os.Setenv("PEERDRIVE_ALLOW_NO_AUTH", "1")
+	defer os.Unsetenv("PEERDRIVE_ALLOW_NO_AUTH")
+
+	err := validateAuthStartup(cfg)
+	require.NoError(t, err, "non-loopback with PEERDRIVE_ALLOW_NO_AUTH=1 must pass")
+}
+
+func TestValidateAuthStartup_LoopbackNoAuth(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.Host = "127.0.0.1"
+	cfg.RegistrationServer = ""
+	os.Setenv("PEERDRIVE_ALLOW_NO_AUTH", "")
+	defer os.Unsetenv("PEERDRIVE_ALLOW_NO_AUTH")
+
+	err := validateAuthStartup(cfg)
+	require.NoError(t, err, "loopback without auth is safe")
 }
