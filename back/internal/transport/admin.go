@@ -14,7 +14,7 @@ package transport
 //     to manage this node.
 //
 // Internal forwarding design: admin frame → construct internal *http.Request → inject
-// into gin engine's ServeHTTP (injected via SetAdminHandler in router.SetupRouter) →
+// into gin engine's ServeHTTP (injected via SetAdminHandler in router.Engine) →
 // reuse all controller logic (files/collections/sharing/tasks/BT/IPFS etc. with zero
 // duplication). Response:
 //   - JSON response → {"type":"admin-resp","status":N,"body":<raw JSON>,"reqId"}
@@ -385,10 +385,10 @@ func (s *PeerJSService) dispatchAdmin(c Session, req *http.Request, reqID string
 	}
 }
 
-// SetAdminHandler injects internal forwarding handler (called by router.SetupRouter, see
+// SetAdminHandler injects internal forwarding handler (called by router.Engine, see
 // peerjs_routes.go registerPeerJSRoutes). h wraps gin engine: constructs internal
 // *http.Request → engine.ServeHTTP(recorder) → returns status/response body/Content-Type.
-// Locking: adminHandler is set during SetupRouter assembly, then read-only (serveAdmin
+// Locking: adminHandler is set during Router.Engine assembly, then read-only (serveAdmin
 // called concurrently).
 func (s *PeerJSService) SetAdminHandler(h AdminHandler) {
 	s.adminMu.Lock()

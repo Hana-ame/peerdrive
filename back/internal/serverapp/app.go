@@ -6,7 +6,7 @@
 // Usage (must use -tags nosqlite due to dual SQLite driver CGO symbol conflict):
 //   go run -tags nosqlite ./cmd/server/main.go
 //   PORT=3000 PEERDRIVE_STORAGE=./storage go run -tags nosqlite ./cmd/server/main.go
-// Internal flow: InitDB → PeerJSService.Start → register local/peer/url source → SetupRouter
+// Internal flow: InitDB → PeerJSService.Start → register local/peer/url source → NewRouter
 //
 // storageDir is injected into the Gin Context for use by controller/anon.go etc.
 // Historical note: the original libp2p interconnection layer was entirely removed on
@@ -202,6 +202,17 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	// summary can see it; nil when PeerJS is disabled, which the summary treats as "not sharing".
 	var share *service.NodeShare
 
+	// deps is the router's dependency set, filled in as each module is built below
+	// and handed to router.NewRouter in one piece.
+	//
+	// This is the whole point of the 2026-10 refactor: previously each module was
+	// pushed into the router package with a `router.SetXxx(...)` call as it was
+	// built, and the router read those package globals back while registering routes.
+	// That made the wiring order load-bearing and unenforceable by the compiler.
+	// Collecting into one value means "everything the router needs" is visible in
+	// one place, and NewRouter validates it before any route is registered.
+	deps := router.Deps{Cfg: cfg}
+
 	// Reject "volume root" configuration at startup (doc/NETDISK.md §11.3).
 	//
 	// pathutil.Within is a pure containment check: when root is configured as `/`
@@ -239,7 +250,11 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	// The default signaling server is the public cloud 0.peerjs.com; in production, set
 	// PEERDRIVE_PEERJS_HOST/KEY to point to a self-hosted peerserver (see doc/PEERSIGNAL.md
 	// / AGENTS.md for deployment).
-	// Note: SetPeerJSService must be called before SetupRouter; it's read during route registration.
+	// Note: peerjsSvc is handed to the router below as a constructor argument
+	// (router.Deps.PeerJSService), not injected into the router package beforehand.
+	// The old "SetPeerJSService must be called before SetupRouter" constraint is gone:
+	// there is no longer a window in which the router could observe a half-wired
+	// dependency set.
 	var peerjsSvc *transport.PeerJSService
 	if cfg.PeerJSEnable {
 		log.LogInfo("main: initializing PeerJS WebRTC service")
@@ -264,16 +279,20 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	}
 
 	// Node market directory (doc/NETDISK.md M1): market list = online nodes from discovery server ∪ joined list.
-	// Injection order matters: SetExtraPeers makes "nodes joined in the market" auto-dial on every
-	// signaling reconnection (same status as PEERDRIVE_PEERJS_PEERS); SetNodeDirectory must be
-	// called before SetupRouter (read during route registration).
+	// SetExtraPeers makes "nodes joined in the market" auto-dial on every
+	// signaling reconnection (same status as PEERDRIVE_PEERJS_PEERS).
+	//
+	// The directory is collected into the router's Deps below; it used to be pushed
+	// in with router.SetNodeDirectory before SetupRouter, which carried the same
+	// "must be called before route registration" ordering constraint that the
+	// constructor form removes.
 	if peerjsSvc != nil {
 		nodeDir := service.NewNodeDirectory(storageDir, cfg.DiscoverURL)
 		nodeDir.SetSelfID(peerjsSvc.ID)
 		nodeDir.SetConnected(peerjsSvc.ConnectedPeerIDs)
 		nodeDir.SetDial(peerjsSvc.EnsureConnection)
 		peerjsSvc.SetExtraPeers(nodeDir.JoinedPeerIDs)
-		router.SetNodeDirectory(nodeDir)
+		deps.NodeDirectory = nodeDir
 		log.LogInfo("main: node directory ready (joined=%d)", len(nodeDir.JoinedPeerIDs()))
 
 		// Node sharing scope (doc/NETDISK.md M2): data source for share frames + announce summary.
@@ -314,7 +333,7 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 		nodeDir.SetShareSummary(share.Summary)
 		// Admin endpoints /peerjs/share* (GET/PUT/POST files): let the operator toggle what
 		// to share from the admin panel without restarting the node to change env vars.
-		router.SetNodeShare(share)
+		deps.NodeShare = share
 
 		// Cross-node pull-save (doc/NETDISK.md M3): peer content → local disk + registration.
 		// downloadRoot must be an allowed root in file_index (cfg.DownloadDir); otherwise
@@ -349,16 +368,19 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 			log.LogInfo("main: auto-extract enabled (max_size=%d max_ratio=%d max_files=%d delete_orig=%v)",
 				cfg.AutoExtractMaxSize, cfg.AutoExtractMaxRatio, cfg.AutoExtractMaxFiles, cfg.AutoExtractDeleteOrig)
 		}
-		router.SetPeerPuller(puller)
+		deps.PeerPuller = puller
 	}
 
 	// Set up routes (internally injects storageDir/downloader into context)
-	if cfg.RegistrationServer != "" {
-		router.SetRegServer(cfg.RegistrationServer)
-	}
+	//
+	// Auth configuration is not passed separately any more: NewRouter derives its
+	// Authenticator from Deps.Cfg (RegistrationServer / AdminToken). The old
+	// `router.SetRegServer(cfg.RegistrationServer)` call is gone, and with it the
+	// possibility of a registration server being configured after the auth
+	// middleware had already been built.
 	if peerjsSvc != nil {
-		router.SetPeerJSService(peerjsSvc)
-		router.SetPeerJSConfig(cfg)
+		deps.PeerJSService = peerjsSvc
+		deps.PeerJSCfg = cfg
 		// Port-forwarding authorization rules (forward v2): PEERDRIVE_FORWARD_RULES="key:port,key2:port2".
 		// key is the credential (the server uses the raw text for HMAC verification) — configure as a
 		// sensitive file, recommended chmod 600.
@@ -397,15 +419,24 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 				log.LogWarn("main: register url source: %v", err)
 			}
 		}
-		router.SetSourceManager(mgr)
+		deps.SourceManager = mgr
 		// serveFile multi-source routing (3rd optimization on 2026-08-18): when a peer req
 		// misses locally, fall back to the peer/URL template (loop prevention via dcReq.Trace).
 		// HTTP download root requests already use mgr; here we reuse the same instance to keep
 		// routing order consistent.
 		peerjsSvc.SetFileRouter(mgr)
 	}
+
+	// Hand the assembled dependency set to the router in one call.
+	// NewRouter validates it before registering anything, so a wiring mistake
+	// surfaces as a startup error with a message naming the field, rather than as
+	// routes that silently went missing.
 	log.LogInfo("main: setting up HTTP router")
-	r := router.SetupRouter(cfg)
+	rt, err := router.NewRouter(deps)
+	if err != nil {
+		return fail(err)
+	}
+	r := rt.Engine()
 
 	// Security status summary (security_status.go): print "where exactly is this node open"
 	// after the router is assembled. Read-only, doesn't change any default.

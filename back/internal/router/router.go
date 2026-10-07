@@ -1,9 +1,11 @@
 // Package router registers Gin routes to all Controller handlers.
-// Called by cmd/server/main.go (only passes cfg); PeerJS/source and other service
-// instances are assembled by main via package-level injectors like SetPeerJSService/
-// SetSourceManager before calling SetupRouter; Downloader is constructed inside this
-// function based on cfg (no longer receives P2PService — libp2p stack fully removed
-// on 2026-08-16, see doc/archive/LEGACY.md §A).
+// Assembled by serverapp: it constructs one Router from a Deps value (see deps.go)
+// — `router.NewRouter(router.Deps{...})` then `rt.Engine()`. Dependencies used to
+// arrive via package-level injectors (SetPeerJSService/SetSourceManager/…) that had
+// to be called *before* SetupRouter; they are now constructor arguments, so there
+// is no ordering contract to honour.
+// Downloader is still constructed inside this package from cfg (no longer receives
+// P2PService — libp2p stack fully removed on 2026-08-16, see doc/archive/LEGACY.md §A).
 // Route groups:
 //   /ping              — health check (GET)
 //   /sha256sum/:sha256 — download file by SHA256 hash (local storage only, no P2P fallback)
@@ -27,7 +29,6 @@ import (
 	"time"
 
 	"github.com/Hana-ame/go-peerdrive-bt"
-	"peerdrive/internal/config"
 	"peerdrive/internal/controller"
 	"peerdrive/internal/downloader"
 	"peerdrive/internal/log"
@@ -43,9 +44,24 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
-// SetupRouter creates a Gin engine and registers all routes (health check, file download, P2P, collections, WebDAV, signaling, etc.).
-func SetupRouter(cfg *config.Config) *gin.Engine {
-	log.LogInfo("router: SetupRouter starting")
+// Engine builds this Router's gin engine and registers all routes (health check,
+// file download, P2P, collections, WebDAV, signaling, etc.).
+//
+// It replaces the old package-level `SetupRouter(cfg)`, which read its
+// dependencies out of package globals at registration time. Two consequences of
+// the change worth knowing:
+//
+//   - Calling Engine twice on one Router panics (gin rejects duplicate route
+//     registration). That is intentional: one Router owns one engine. Callers
+//     that want two surfaces build two Routers with two Deps values.
+//   - The engine is cached on the Router, so `Engine()` is idempotent in the sense
+//     that later calls return the same engine rather than rebuilding it.
+func (rt *Router) Engine() *gin.Engine {
+	if rt.engine != nil {
+		return rt.engine
+	}
+	cfg := rt.cfg
+	log.LogInfo("router: Engine starting")
 	// Don't use gin.Default(): its built-in Logger produces human-readable
 	// unstructured text and duplicates with AccessLog below. Explicit assembly here:
 	// Recovery (outermost, recovers panics) + RequestID + SecurityHeaders +
@@ -116,18 +132,20 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	// Auth middleware — validates Bearer tokens via registration server or local admin token.
 	// Sets "authenticated" and "username" in Gin context for downstream handlers.
 	// Anonymous requests (no token) pass through with authenticated=false.
-	// Why always registered (was conditional on RegistrationServer): with AdminToken
-	// there is now a second, equally valid auth backend — local comparison without a
-	// remote login service. Registering unconditionally keeps the two paths symmetric
-	// and lets AuthRequired decide pass-through via authDisabled().
-	SetRegServer(cfg.RegistrationServer)
-	SetAdminToken(cfg.AdminToken)
-	r.Use(AuthOptional())
+	// Why always registered: with AdminToken there is a second, equally valid auth
+	// backend — local comparison without a remote login service. Registering
+	// unconditionally keeps the two paths symmetric and lets AuthRequired decide
+	// pass-through via authDisabled().
+	//
+	// The backend choice itself is baked in at construction (NewRouter builds this
+	// Router's Authenticator from cfg); the old code re-read cfg into package globals
+	// here, which meant the last SetupRouter call in a process silently won.
+	r.Use(rt.authOptional)
 	// Attached to all mutating/admin routes: when no registration server is configured,
 	// AuthRequired passes through internally (local single-machine mode); after configuration,
 	// requires Bearer token (F1: previously AuthRequired had 0 call sites, all file
 	// read/write/delete endpoints were anonymously accessible).
-	authRequired := AuthRequired()
+	authRequired := rt.authRequired
 
 	fileSvc := service.NewFileService(cfg)
 	controller.InitFileController(fileSvc)
@@ -138,13 +156,12 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	controller.InitShareController(service.NewShareService())
 	controller.InitPinController(service.NewPinService())
 
-	// Port forwarding service (PeerJS DataChannel version, forward.go): rule table injected
-	// by main during assembly via SetForwardRules (config PEERDRIVE_FORWARD_RULES), runtime
-	// endpoints can dynamically add rules.
-	controller.InitForwardController(peerjsService)
-	// Peer node share list query (cloud drive target M2): /peerjs/nodes/:peer/shares
-	// has controller call transport.RequestShares directly (requester of share frames).
-	controller.InitPeerShareController(peerjsService)
+	// Port forwarding service (PeerJS DataChannel version, forward.go): the rule
+	// table is configured on the service itself (PEERDRIVE_FORWARD_RULES) before
+	// the router is built; runtime endpoints can dynamically add rules.
+	// Peer node share list query (cloud drive target M2) and the marketplace /
+	// share-scope / pull endpoints are wired in the same call — see injectControllerDeps.
+	rt.injectControllerDeps()
 
 	// Initialize BitTorrent DHT service if enabled.
 	var btSvc *p2p_bt.BTDHTService
@@ -160,9 +177,12 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	controller.InitAnonController(service.NewAnonService(cfg))
 
 	// Initialize BitTorrent client for torrent/magnet downloads.
+	// The source manager (when present) gets the BT control wired here: this is the
+	// one place that knows both the client and the manager, so it is the one place
+	// that can join them. Previously read from a package global.
 	btClient := p2p_bt.NewBTClient(cfg.DownloadDir)
-	if sourceManager != nil && btClient != nil {
-		sourceManager.SetBTControl(source.NewBTControl(btClient))
+	if rt.deps.SourceManager != nil && btClient != nil {
+		rt.deps.SourceManager.SetBTControl(source.NewBTControl(btClient))
 		log.LogInfo("router: BT control injected")
 	}
 	if btClient != nil {
@@ -200,8 +220,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		}
 		if len(gateways) > 0 {
 			ipfsProv = provider.NewIPFSProvider(gateways)
-			if sourceManager != nil && ipfsProv != nil {
-				sourceManager.SetIPFSControl(source.NewIPFSControl(ipfsProv, cfg.StorageDir))
+			if rt.deps.SourceManager != nil && ipfsProv != nil {
+				rt.deps.SourceManager.SetIPFSControl(source.NewIPFSControl(ipfsProv, cfg.StorageDir))
 				log.LogInfo("router: IPFS control injected")
 			}
 		}
@@ -435,7 +455,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	})
 
 	// PeerJS node discovery
-	registerPeerJSRoutes(r, authRequired)
+	rt.registerPeerJSRoutes(r, authRequired)
 
 	// admin management surface internal forwarding (transport/admin.go): browser sends admin
 	// frames via /ws/peer → wrapped here as gin engine to reuse all HTTP controllers (zero
@@ -445,8 +465,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	// got a verb, and WebRTC connections don't handle admin (serveAdmin rejects by session ID),
 	// admin surface is only exposed to local WS.
 	// Frontend api.js no longer directly fetches HTTP after migration, all goes through /ws/peer admin frames.
-	if peerjsService != nil {
-		peerjsService.SetAdminHandler(func(req *http.Request) (int, []byte, string, error) {
+	if peerjsSvc := rt.deps.PeerJSService; peerjsSvc != nil {
+		peerjsSvc.SetAdminHandler(func(req *http.Request) (int, []byte, string, error) {
 			// Internally forwarded requests have no TCP source (they come from an established local WS session);
 			// without setting RemoteAddr, ClientIP() is an empty string, and rate limiting would bucket
 			// all admin requests into the same "unknown source" bucket — admin console 429 after a few clicks.
@@ -462,10 +482,11 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	}
 
 	// Unified source management (source system admin surface)
-	registerSourceRoutes(r, authRequired)
+	rt.registerSourceRoutes(r, authRequired)
 
 	// Count routes
 	routes := r.Routes()
-	log.LogInfo("router: SetupRouter completed with %d routes", len(routes))
+	log.LogInfo("router: Engine completed with %d routes", len(routes))
+	rt.engine = r
 	return r
 }
