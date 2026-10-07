@@ -276,3 +276,22 @@ func TestPSK_SpoofedLocalIDNotExempt(t *testing.T) {
 	}
 	assert.True(t, foundErr, "spoofed local-id session must be gated by PSK")
 }
+
+// TestPSK_UnauthedConnectionClosedAfterTimeout
+// 发现背景：C-13（审计）— 未认证连接无超时，资源耗尽向量。
+// bindConn 无条件起 goroutine 并登记 connState，未出示 psk-auth 的连接会常驻。
+// 攻击者反复握手建连但不认证，可耗尽 connState + 2 goroutine。
+func TestPSK_UnauthedConnectionClosedAfterTimeout(t *testing.T) {
+	old := pskAuthTimeout
+	pskAuthTimeout = 100 * time.Millisecond
+	defer func() { pskAuthTimeout = old }()
+
+	svc := newTestPeerJSService(t)
+	svc.cfg.PeerPSK = "s3cret"
+	sess := &fakeSession{id: "peer-x"}
+	svc.bindConn(sess)
+
+	// Wait for the timer to fire and close the session (no psk-auth is sent).
+	time.Sleep(200 * time.Millisecond)
+	assert.True(t, sess.Closed(), "unauthed session must be closed after pskAuthTimeout")
+}
