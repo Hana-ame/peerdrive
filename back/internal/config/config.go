@@ -33,6 +33,15 @@ type Config struct {
 
 	AllowedOrigins     string
 	RegistrationServer string
+	// AdminToken is the local HTTP admin-surface Bearer token when no registration
+	// server is configured (PEERDRIVE_ADMIN_TOKEN, default empty). When
+	// RegistrationServer == "" and AdminToken != "": AuthRequired compares incoming
+	// Bearer tokens against this value with constant-time comparison — the HTTP
+	// management surface gets auth even though the remote login service is off.
+	// When both are empty, auth is disabled (local single-machine mode, loopback).
+	// Deliberately NOT reusing PEERDRIVE_PSK: PSK is a P2P DataChannel secret;
+	// leaking it to HTTP would expose it in browser devtools/logs.
+	AdminToken string
 	// 2026-10-04: removed the three dead fields PublicAccessDomain / NodeAuthToken /
 	// RegServerURL.
 	// Why deletion instead of implementation:
@@ -216,6 +225,7 @@ func Load() *Config {
 		StorageEnable:      getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
 		AllowedOrigins:     getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev"),
 		RegistrationServer: getEnv("PEERDRIVE_REG_SERVER", ""),
+		AdminToken:         getEnv("PEERDRIVE_ADMIN_TOKEN", ""),
 		MaxUploadBytes:     getEnvInt64("PEERDRIVE_MAX_UPLOAD_BYTES", 100*1024*1024),     // 100MB default
 		MaxUploadBytesAnon: getEnvInt64("PEERDRIVE_MAX_UPLOAD_ANON_BYTES", 10*1024*1024), // 10MB for anonymous
 		BTDHTEnabled:       getEnvBool("PEERDRIVE_BT_DHT_ENABLE", false),                 // Default disabled: DHT init blocks startup; enable manually as needed

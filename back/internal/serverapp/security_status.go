@@ -56,14 +56,22 @@ func collectSecurityFindings(cfg *config.Config, share *service.NodeShare) []sec
 		})
 	}
 
-	// 2. HTTP admin surface: router/auth_middleware.go:28 authDisabled() is
-	//    literally regServerURL == "", i.e. an empty RegistrationServer means auth is disabled.
-	if cfg.RegistrationServer == "" {
+	// 2. HTTP admin surface: auth_middleware.go authDisabled() is now
+	//    literally regServerURL == "" && adminToken == "" — both empty means auth off.
+	if cfg.RegistrationServer == "" && cfg.AdminToken == "" {
 		out = append(out, securityFinding{
 			Level:  "warn",
 			Title:  "HTTP admin surface has no auth (PEERDRIVE_REG_SERVER empty)",
 			Detail: "list/delete files, change sharing scope, read Swagger API docs — all open without a credential",
-			Remedy: "set PEERDRIVE_REG_SERVER, or bind PEERDRIVE_HOST=127.0.0.1",
+			Remedy: "set PEERDRIVE_REG_SERVER or PEERDRIVE_ADMIN_TOKEN, or bind PEERDRIVE_HOST=127.0.0.1",
+		})
+	} else if cfg.RegistrationServer == "" && cfg.AdminToken != "" {
+		// 本地令牌模式不是敞口，只是能力弱于远端身份校验——info 不 warn。
+		out = append(out, securityFinding{
+			Level:  "info",
+			Title:  "HTTP admin uses local token (PEERDRIVE_ADMIN_TOKEN)",
+			Detail: "Bearer token is compared locally; no remote identity verification",
+			Remedy: "set PEERDRIVE_REG_SERVER for remote identity if needed",
 		})
 	}
 

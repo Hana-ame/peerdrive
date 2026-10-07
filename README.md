@@ -249,6 +249,7 @@ peerdrive
 | `PEERDRIVE_SHARE_FRIENDS` | - | Friend node IDs: comma-separated, `private`-level content is allowed for them (see `model.LevelPrivate`) |
 
 | `PEERDRIVE_PSK` | - | Node access pre-shared key. Empty = open (serves whoever connects); set = peer must present the same key to pull anything (`doc/NETDISK.md` §9) |
+| `PEERDRIVE_ADMIN_TOKEN` | - | Local HTTP admin-surface Bearer token when no `PEERDRIVE_REG_SERVER` is configured. Empty + no reg server = auth disabled (loopback only); non-empty = `Authorization: Bearer <token>` required on authRequired routes |
 
 > These `PEERDRIVE_SHARE_*` entries are only **first-boot initial values**: after startup they can be changed any time via `GET/PUT /peerjs/share`
 > and `POST /peerjs/share/files` (by directory / collection / individual file hash), persisted in
