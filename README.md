@@ -236,6 +236,7 @@ peerdrive
 | `PEERDRIVE_PEERJS_PEERS` | - | Comma-separated peers for auto interconnect |
 | `PEERDRIVE_MQTT_ENABLE` / `PEERDRIVE_MQTT_BROKER` | false / tcp://broker.emqx.io:1883 | MQTT sharded-room discovery |
 | `PEERDRIVE_MQTT_TOPIC_PREFIX` / `PEERDRIVE_MQTT_COLLECTIONS` | peerdrive/v1 / - | MQTT topic prefix / collections of interest |
+| `PEERDRIVE_DISCOVER_MODE` | `auto` | Discovery mode: `auto` (HTTP if URL set, else MQTT), `peerjs`/`off` (no discovery, static `PEERDRIVE_PEERJS_PEERS` only — use with `PEERDRIVE_PEERJS_HOST=0.peerjs.com` for official signaling), `discover` (force HTTP), `mqtt` (force MQTT) |
 | `PEERDRIVE_DISCOVER_URL` | - | Self-hosted discovery API (takes precedence over MQTT) |
 | `PEERDRIVE_URL_SOURCE_TEMPLATE` | - | URL source template (%s=hash, multi-source fallback) |
 | `PEERDRIVE_DOWNLOAD_DIR` | ./downloads | Download/registration directory (file_index root) |
