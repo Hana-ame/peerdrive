@@ -31,6 +31,17 @@
 //
 // 环境变量沿用原服务名以免改部署脚本：PORT / HOST / DB_PATH / JWT_SECRET。
 // 另认 PEERDRIVE_REG_DB 作为 DB_PATH 的别名（主仓配置项统一带 PEERDRIVE_ 前缀）。
+//
+// 限流（2026-10-06，N2）：register / login / relay 三个无认证端点按来源 IP
+// 限流，login 另有账号级指数退避。这些端点「无认证」是**既有对外行为**（不能改），
+// 所以速率与退避是唯一的防线。参数：
+//
+//	PEERDRIVE_REG_RATE_REGISTER  默认 0.5 req/s（burst 3）——每次都跑一次 bcrypt cost10，最贵
+//	PEERDRIVE_REG_RATE_LOGIN     默认 1   req/s（burst 5）——同样每次 bcrypt 比对
+//	PEERDRIVE_REG_RATE_RELAY     默认 2   req/s（burst 20）——只写库，但能伪造 peer_id 污染名录
+//
+// 登录退避参数在 ratelimit.DefaultBackoff：连续 5 次失败后 15s 起指数翻倍，
+// 上限 5 分钟；登录成功即清零。设为 0 或非法值退回默认，**不提供「不限流」**。
 
 package regserver
 
@@ -45,12 +56,15 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
 	_ "modernc.org/sqlite" // 驱动名由 driver_cgo.go / driver_pure.go 注册
+
+	"peerdrive/internal/ratelimit"
 )
 
 // ---------------------------------------------------------------------------
@@ -180,6 +194,40 @@ func authInfoOf(r *http.Request) authInfo {
 }
 
 // ---------------------------------------------------------------------------
+// 限流中间件（2026-10-06，N2）
+//
+// 根因：`/auth/*` 与 `/p2p/relay/*` 都不经过 gin engine——
+// 独立 `peerdrive reg` 是纯 net/http 进程；`peerdrive all` 模式下这两批路由
+// 由 services.UnifiedMux 直接从 reg.Handler() 搬进总 mux。
+// 而项目里原本**只有**一个限流实现，且它挂成 gin 中间件（router.go:55）。
+// 于是这些公开端点从未被限过：
+//
+//	/auth/register        无认证 + bcrypt cost10 → 可无限刷号，且每个请求
+//	                       都真跑一次 ~60-100ms 的 bcrypt，等于一个 CPU 放大器
+//	/auth/login           无退避 → 可爆破（每次也是一次 bcrypt）
+//	/p2p/relay/register   无认证 + 幂等 upsert → 可任意伪造 peer_id
+//	                       污染中继名录（relay_nodes 表按 peer_id 主键）
+//
+// 挂载点选在 Handler() 里（而不是 Serve 或各子命令）的原因：
+// Handler() 是这 9 条路由的**唯一装配点**，`peerdrive reg`（经 srv.Serve→
+// s.Handler()）与 `peerdrive all`（经 services.UnifiedMux→reg.Handler()）
+// 都从这里过，一条实现同时盖住两条部署路径；在 Serve 里挂则会漏掉 all 模式，
+// 而 all 模式恰恰是**默认**给外部署用的那个。
+
+// rateLimit 按来源 IP 限流，超限回 429 + Retry-After。
+func (s *Server) rateLimit(l *ratelimit.Limiter) func(http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if !l.Allow(ratelimit.ClientIP(r)) {
+				ratelimit.TooManyRequests(w, time.Second)
+				return
+			}
+			next(w, r)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // 数据库
 
 var db *sql.DB
@@ -265,6 +313,34 @@ func (s *Server) authRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"username": req.Username, "token": tok})
 }
 
+// dummyHash 是一个**有效但永不匹配**的 bcrypt hash（cost 10）。
+//
+// 用途见 authLogin：用户不存在时也拿它跑一次 CompareHashAndPassword，
+// 让「账号不存在」与「密码错误」耗时一致（都约 60-100ms）。
+// 少了这一步，攻击者能用响应时间枚举出哪些账号真实存在。
+//
+// 值本身是随机生成的合法 bcrypt 串，改动无副作用；保持 cost 10 是必须的——
+// bcrypt 的耗时由 cost 决定，用更低 cost 的 hash 当陪衬会让它比真实路径快，
+// 等于没做。
+var dummyHash = []byte("$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy")
+
+// validHash 报告这个 hash 能不能喂给 bcrypt 比对。
+//
+// 存在的意义：库里若存了**非 bcrypt 格式**的串（历史遗留、迁移事故、
+// 或被手工改过），直接传给 CompareHashAndPassword 会返回
+// ErrHashTooShort 之类的错误——那个错误里会带上输入串的长度信息。
+// 更要紧的是：那样会让「密码错」这条路径**不执行** bcrypt 耗时，
+// 于是「账号存在但 hash 损坏」比「账号不存在」还快，同样是枚举信道。
+// 所以先判格式，判不过就走与「不存在」相同的陪衬分支。
+func validHash(h string) bool {
+	// bcrypt hash 形如 $2a$10$<53 字符>；costs / salt+hash 长度是固定的。
+	// 这里只做长度与前缀的粗判，足够挡住非 bcrypt 输入。
+	if len(h) != 60 {
+		return false
+	}
+	return strings.HasPrefix(h, "$2a$") || strings.HasPrefix(h, "$2b$") || strings.HasPrefix(h, "$2y$")
+}
+
 func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username string `json:"username"`
@@ -274,13 +350,36 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid request")
 		return
 	}
+	// 账号级退避（2026-10-06，N2）。放在查库之前：被退避住的请求应当
+	// **一次 bcrypt 都不花**——否则「退避」只是把爆破窗口拉长，
+	// 攻击者仍能拿满 CPU。
+	if d := s.loginBackoff.RetryAfter(req.Username); d > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(d.Seconds())+1))
+		writeErr(w, http.StatusTooManyRequests, "too many failed attempts")
+		return
+	}
+
 	var hash, role string
 	err := s.db.QueryRow(`SELECT password_hash, role FROM users WHERE username = ?`, req.Username).Scan(&hash, &role)
 	// 用户不存在与密码错误返回同一句，避免用户名枚举。
-	if errors.Is(err, sql.ErrNoRows) || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
+	// ⚠️ 且两者必须**同样耗时**：写 `errors.Is(err, sql.ErrNoRows) || bcrypt.Compare…`
+	// 会在账号不存在时短路掉 bcrypt（hash 是空的，比对必然失败），
+	// 于是「不存在」快、「存在但密码错」慢——响应时间就成了账号枚举信道。
+	// 故这里把 hash 兜底成 dummyHash，让两个分支都真跑一次 bcrypt。
+	compareTo := hash
+	if errors.Is(err, sql.ErrNoRows) {
+		compareTo = string(dummyHash)
+	}
+	if !validHash(compareTo) || bcrypt.CompareHashAndPassword([]byte(compareTo), []byte(req.Password)) != nil {
+		if d := s.loginBackoff.Fail(req.Username); d > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(int(d.Seconds())+1))
+			writeErr(w, http.StatusTooManyRequests, "too many failed attempts")
+			return
+		}
 		writeErr(w, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
+	s.loginBackoff.Success(req.Username)
 	tok, err := s.newToken(req.Username, role)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal error")
@@ -430,6 +529,22 @@ func parseAddrs(raw string) any {
 type Server struct {
 	db        *sql.DB
 	jwtSecret []byte
+
+	// 限流状态（2026-10-06，N2）。
+	//
+	// 为什么限流器挂在 Server 上而不是全局：全局会让同进程的两个实例
+	// 共用一份桶状态，测试并行时互相干扰——这与 v0.2.0 把 db/jwtSecret
+	// 挪进实例的同一条理由。
+	//
+	// 为什么这三类端点的默认桶要**分档**（见 Handler 里的注释）：
+	// bcrypt cost 10 单次约 60-100ms，register 无认证且每次都真跑一次 bcrypt，
+	// 与 1 字节查询的 whoami 共用一个 30rps 的桶，前者每秒最多只能过 ~10 次，
+	// 后者却还有富余——一档就等于把最贵的端点限死在最低档。
+	// 所以按「代价」分三档，而不是全站一刀切。
+	registerLimiter *ratelimit.Limiter // 昂贵（bcrypt）+ 可刷号
+	loginLimiter    *ratelimit.Limiter // 昂贵（bcrypt 比对）+ 可爆破
+	relayLimiter    *ratelimit.Limiter // 廉价写库，但会污染中继名录
+	loginBackoff    *ratelimit.Backoff // 账号级退避（防爆破的主力，限流只是兜底）
 }
 
 // New 打开（或创建）指定路径的库并返回服务实例。
@@ -443,11 +558,35 @@ func New(dbPath string) (*Server, error) {
 	if secret == "" {
 		return nil, errors.New("JWT_SECRET is required")
 	}
-	s := &Server{jwtSecret: []byte(secret)}
+	s := &Server{
+		jwtSecret:      []byte(secret),
+		registerLimiter: ratelimit.New(regRate("PEERDRIVE_REG_RATE_REGISTER", 0.5), 3),
+		loginLimiter:    ratelimit.New(regRate("PEERDRIVE_REG_RATE_LOGIN", 1), 5),
+		relayLimiter:    ratelimit.New(regRate("PEERDRIVE_REG_RATE_RELAY", 2), 20),
+		loginBackoff:    ratelimit.DefaultBackoff(),
+	}
 	if err := s.openDB(dbPath); err != nil {
 		return nil, fmt.Errorf("db open failed: %w", err)
 	}
 	return s, nil
+}
+
+// regRate 读一个限流速率；未配置时用默认值。
+//
+// 设成 0 会退回默认值而不是「不限流」：reg-server 的这些端点
+// **按设计就是公开的**（register/relay 无认证是既有行为，不能改），
+// 因此「关掉限流」不是一个安全选项，只能调快调慢。确实需要放开时，
+// 调一个很大的值即可，语义仍然显式。
+func regRate(env string, def float64) float64 {
+	v := os.Getenv(env)
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f <= 0 {
+		return def
+	}
+	return f
 }
 
 // ResolveDBPath 按 DB_PATH → PEERDRIVE_REG_DB → ./reg.db 的顺序解析库路径。
@@ -490,12 +629,13 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ping", s.apiPing)
 	mux.HandleFunc("GET /api/health", s.authRequired(s.apiHealth))
-	mux.HandleFunc("POST /auth/register", s.authRegister)
-	mux.HandleFunc("POST /auth/login", s.authLogin)
+	// 三档限流桶，理由见上面 rateLimit 的注释（按「每次请求的代价」分档）。
+	mux.HandleFunc("POST /auth/register", s.rateLimit(s.registerLimiter)(s.authRegister))
+	mux.HandleFunc("POST /auth/login", s.rateLimit(s.loginLimiter)(s.authLogin))
 	mux.HandleFunc("GET /auth/whoami", s.authRequired(s.authWhoami))
 	mux.HandleFunc("GET /auth/list", s.authRequired(s.authList))
-	mux.HandleFunc("POST /p2p/relay/register", s.relayRegister)
-	mux.HandleFunc("POST /p2p/relay/heartbeat", s.relayHeartbeat)
+	mux.HandleFunc("POST /p2p/relay/register", s.rateLimit(s.relayLimiter)(s.relayRegister))
+	mux.HandleFunc("POST /p2p/relay/heartbeat", s.rateLimit(s.relayLimiter)(s.relayHeartbeat))
 	mux.HandleFunc("GET /p2p/relay/list", s.relayList)
 	return mux
 }

@@ -151,7 +151,7 @@ so the client library can switch with zero changes. Key behaviors:
 peersignal.moonchan.xyz ──CF orange-cloud A record──▶ 117.55.237.217 (cloudcone nginx)
          │ wss://peersignal.moonchan.xyz/peerjs (signaling)
          │ https://peersignal.moonchan.xyz/discover/* (discovery API)
-    peerserver (systemd, listening on 127.0.0.1:9000, key=pd-signal-b9447b406828e500)
+    peerserver (systemd, listening on 127.0.0.1:9000, key=pd-signal-1edf5e05e4a52b7351392574)
 ```
 
 - nginx reverse-proxies `127.0.0.1:9000`, passing the WS upgrade headers through; CF's 100s idle timeout does not affect signaling

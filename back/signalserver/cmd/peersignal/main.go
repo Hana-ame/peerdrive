@@ -32,6 +32,22 @@ func main() {
 	corsOrigin := flag.String("cors-origin", "",
 		"comma-separated CORS allow-list for the panel-facing REST endpoints "+
 			"(e.g. https://peerdrive.pages.dev,null). Empty = keep the historical wildcard '*'")
+	// Rate limiting (2026-10-06, N3), all per-source-IP; 0 disables one bucket
+	// without touching the others.
+	//
+	// Defaults are sized for a small self-hosted relay. announce: nodes announce
+	// every 30s (transport/http_discovery.go loop), so even 100 nodes total ~3.3 rps,
+	// and since buckets are per-IP a single-node deployment uses 0.03 rps; burst 10
+	// absorbs the thundering herd when many nodes restart together (a deploy, or a
+	// host coming back at once). ws: 2 rps / burst 20 — sized for reconnects rather
+	// than for steady-state connection count, because every reconnect re-enters the
+	// upgrade path and each accepted one costs a goroutine + readLoop + table entry.
+	rateAnnounce := flag.Float64("rate-announce", 1, "per-IP requests/s for POST /discover/announce (0 = unlimited)")
+	rateAnnounceBurst := flag.Int("rate-announce-burst", 10, "burst for -rate-announce")
+	rateWS := flag.Float64("rate-ws", 2, "per-IP WebSocket upgrades/s on /peerjs (0 = unlimited)")
+	rateWSBurst := flag.Int("rate-ws-burst", 20, "burst for -rate-ws")
+	rateID := flag.Float64("rate-id", 5, "per-IP requests/s for GET /peerjs/id (0 = unlimited)")
+	rateIDBurst := flag.Int("rate-id-burst", 20, "burst for -rate-id")
 	flag.Parse()
 
 	var opts []signalserver.Option
@@ -44,6 +60,17 @@ func main() {
 	if *corsOrigin != "" {
 		opts = append(opts, signalserver.WithCORSOrigins(strings.Split(*corsOrigin, ",")))
 		log.Printf("cors: restricted to %s (file:// panels need an explicit \"null\")", *corsOrigin)
+	}
+	if *rateAnnounce > 0 || *rateWS > 0 || *rateID > 0 {
+		opts = append(opts, signalserver.WithRateLimit(signalserver.RateLimitConfig{
+			AnnounceRPS: *rateAnnounce, AnnounceBurst: *rateAnnounceBurst,
+			WSRPS: *rateWS, WSBurst: *rateWSBurst,
+			IDRPS: *rateID, IDBurst: *rateIDBurst,
+		}))
+		log.Printf("rate limit per IP — announce %.2f/s (burst %d) · ws %.2f/s (burst %d) · id %.2f/s (burst %d)",
+			*rateAnnounce, *rateAnnounceBurst, *rateWS, *rateWSBurst, *rateID, *rateIDBurst)
+		log.Printf("note: clientIP() reads RemoteAddr only, so behind a reverse proxy every client shares " +
+			"one bucket — limit per-client at the proxy instead")
 	}
 	srv := signalserver.NewServer(*key, opts...)
 	srv.Start() // background sweeper: clean up expired offline queues (H3)

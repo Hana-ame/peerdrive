@@ -182,7 +182,7 @@ Referencing dsh's `cordis.patch.yml`, Peerdrive's patches are also "row operatio
   config:
     enable: true
     host: peersignal.moonchan.xyz
-    key: pd-signal-b9447b406828e500
+    key: pd-signal-1edf5e05e4a52b7351392574
 
 # Disable
 - id: legacy

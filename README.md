@@ -147,7 +147,7 @@ cd back && go build -tags nosqlite -o peerdrive ./cmd/peerdrive/ && ./peerdrive
 #     Local: npm run build:panel generates dist/panel.html, open file:// to run
 #   To connect directly to a specific node via params:
 #     panel.html?node=<node peer id>&host=peersignal.moonchan.xyz&port=443&path=/
-#                &key=pd-signal-b9447b406828e500&secure=1&auto=1
+#                &key=pd-signal-1edf5e05e4a52b7351392574&secure=1&auto=1
 #   Note: HTTPS pages (including the online version) can only use wss signaling, otherwise the browser blocks it as mixed content.
 #   Online hosting self-check: node scripts/verify-pages.mjs
 
@@ -187,7 +187,7 @@ node front/tests/e2e-admin-smoke.mjs             # 7 admin-surface assertions (n
 
 ## Signaling server implementation
 
-> **By default it connects to the project's public signaling `peersignal.moonchan.xyz` (wss, key `pd-signal-b9447b406828e500`)**,
+> **By default it connects to the project's public signaling `peersignal.moonchan.xyz` (wss, key `pd-signal-1edf5e05e4a52b7351392574`)**,
 > node and panel defaults match, so it works out of the box, no signaling deployment needed.
 > It is compatible with the PeerJS protocol (`back/signalserver` is its source, you can deploy your own to replace it):
 > to self-host, change `PEERDRIVE_PEERJS_HOST/PORT/KEY` and `PEERDRIVE_DISCOVER_URL`,

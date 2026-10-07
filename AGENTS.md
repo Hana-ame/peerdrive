@@ -237,7 +237,7 @@ Windows 那格不再跳过 `go test`；本机没装 Go 也能验：
 
 - 服务：`peersignal`（systemd）监听 `127.0.0.1:9000`，nginx 反代
 - 域名：`wss://peersignal.moonchan.xyz/peerjs`（WS 信令）+ `https://peersignal.moonchan.xyz/discover/*`（发现 API）
-- key：`pd-signal-b9447b406828e500`
+- key：`pd-signal-1edf5e05e4a52b7351392574`
 - **DNS 决策（橙云，已用）**：peersignal.moonchan.xyz → 117.55.237.217 **proxied=true（橙云）**。
   橙云已验证可行：CF 按 A 记录 IP 回源到 cloudcone nginx（自有证书），CF 100s 空闲超时对信令
   无影响（心跳 5s 保活）。踩坑记录：加 A 记录前 peersignal 橙云路径下实测 404（nginx/1.18.0，
