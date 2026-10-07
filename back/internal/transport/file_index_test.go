@@ -398,6 +398,32 @@ func TestFileIndex_UploadPartialNotComplete(t *testing.T) {
 	assert.Nil(t, fi)
 }
 
+// TestFileIndex_UploadWriteFailClearsBit 发现背景：审计 C-16（2026-10-06）。
+// 旧实现 WriteAt 失败只 continue，若之前一次成功写已置位，则位图「已置位」而
+// 磁盘数据可能已损坏——Complete 虽会 sha256 兜底，但整个上传白跑。
+// 修法：写失败时 clearBit，强制客户端重传该 chunk。
+// 测试方法：先成功写 chunk 0（置位），关闭底层文件句柄，再写同一 chunk
+// （WriteAt 报 "file already closed"），断言 ContiguousOffset 回到 0。
+func TestFileIndex_UploadWriteFailClearsBit(t *testing.T) {
+	initTestDB(t)
+	svc := newTestIndex(t)
+
+	sess, err := svc.BeginUpload("writefail.bin", uploadChunkSize*2)
+	require.NoError(t, err)
+	// 成功写 chunk 0
+	require.NoError(t, sess.WriteAt(0, make([]byte, uploadChunkSize)))
+	assert.Equal(t, int64(uploadChunkSize), sess.ContiguousOffset(), "chunk 0 已写，连续偏移应为 64KB")
+
+	// 关闭底层文件（模拟后续写入必然失败）
+	require.NoError(t, sess.file.Close())
+	// 再写 chunk 0 → WriteAt 失败
+	err = sess.WriteAt(0, make([]byte, uploadChunkSize))
+	require.Error(t, err, "关闭文件后写入必须失败")
+
+	// 断言 chunk 0 的位被清掉
+	assert.Equal(t, int64(0), sess.ContiguousOffset(), "写失败后 chunk 0 位必须被清除")
+}
+
 // TestFileIndex_BeginUploadSizeMismatch 同名会话复用声明 size 不一致 → 拒绝。
 // 发现背景：M7 防御性测试——位图按旧 size 建，声明不一致会导致续传偏移
 // 错乱、末 chunk 判满错误（TRANSPORT-REVIEW M7）。
