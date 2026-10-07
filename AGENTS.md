@@ -123,32 +123,64 @@ CI 连续全红，最终回退了 16 个文件。典型后果：面板稳定身�
 
 ## 构建与验证
 
-```bash
-cd back
-go build -tags nosqlite ./...     # 必须 -tags nosqlite（双 SQLite 驱动 CGO 冲突）
-go test -tags nosqlite ./...      # 单元/包测试
-cd peerjs && go test ./... -count=1 -race      # peerjs 模块（独立 go.mod，改动需同步独立 repo）
-cd ../signalserver && go test ./...            # peersignal 模块（独立 go.mod，**无 CI job**，改了 CI 不会红）
-cd ../p2p_bt && go test ./...                  # BT 模块（独立 go.mod，**无 CI job**）
-# 上面几个可以换成一条（仓库根执行）：bash scripts/test-layers.sh
-#   按 AOP 分层（L1-L8 + LB）逐层跑并汇总，失败日志在 /tmp/layer-test-<层>.log
-#   ⚠️ 它不等于 `go test -tags nosqlite ./...` 的全集，改后端建议两个都跑
-# 集成测试（脱外网：TestMain 起全局自托管信令 + 同机 WebRTC，无需代理）：
-cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1
-#   ⚠️ 必须 -p 1 串行：多组测试共享全局自托管信令，并行会互相干扰
-#   外网测试显式门控：PEERDRIVE_MQTT_TEST=1（公共 broker）/ PEERDRIVE_LIVE_TEST=1（线上）
-#   无 UDP 沙箱（docker 默认）跳过互联类：PEERDRIVE_SKIP_RTC=1
-# go 命令需代理：HTTPS_PROXY=http://172.29.80.1:10809 GOPROXY=https://goproxy.cn,direct
-# （cloudcone 443 例外：直连）
+**本项目是 CI-only：不在本地跑测试/构建，全部交给 GitHub Actions。**
+本地只做两件事——写代码、把 PR 提上去，以及读 CI 的结果。这一节回答的是
+**「CI 会替你跑什么、红了去看哪里」，不是「你本地该敲什么」**。
 
-cd ../packages/peerdrive-client && npm test   # 消费端包：node --test，60 个用例，零依赖无需 npm ci
-cd ../../front && npm test && npm run build   # 前端：vitest 88 + vite build
+> **命令清单的唯一出处是 [`doc/testing/README.md`](doc/testing/README.md)**：
+> §1「我改了 X，该跑哪些」按改动选组件，§2 是全量对照表（组件 → 命令 → 规模 →
+> CI 映射 → 哪些没被自动化覆盖），§3 逐组件展开。本文档**不复制**那份清单——
+> 复制过的那份已经因为无人跟着更新而腐烂过一次。
+
+### CI 覆盖对照
+
+以下按 `.github/workflows/` 实读（2026-10-07）：
+
+| workflow | 触发 | 覆盖 |
+|---|---|---|
+| `ci.yml` | push 到 `main`/`master`/`refactor`/`base`/`docs`/`feat/*`/`fix/*`/`module/*`/`*-agent`/`*-frontend`，或 tag `v*`；PR 到 `main`/`master`/`refactor` | `backend`（`go vet` + `go test` + 构建 `./cmd/peerdrive/`）、`integration`（脱外网，`-p 1` 串行）、`peerjs` 独立模块、`media-package`、`client-package`（`npm test` + `check:panel` + 与内嵌副本逐字节比对）、`frontend`（`npm test` + `npm run build`）、`doc-refs` |
+| `go-build.yml` | push / PR（任意分支） | `build`：5 平台交叉构建 + `go test -tags nosqlite ./...`（**Windows 那格也跑测试**，2026-09-20 起不再跳过）；`submodules`：`back/signalserver` 与 `back/p2p_bt` 的 vet/test/build，外加集成测试的 vet 与编译 |
+| `e2e.yml` | PR；push 到 `refactor` 且动到 `back/**` 等；手动 | 真起信令 + 两节点跑通链路断言，再用 bundled chromium 真实浏览器点面板 |
+| `pages.yml` | push 到 `refactor` 且动到 `front/**`；手动 | 构建并部署前端站点，部署后回探线上 |
+| `release.yml` | tag `v*`；手动（`dry_run` 默认开，只跑门禁不出包） | `gate` 不绿就不出包——发版门禁长在 release 自己身上（workflow 之间没有 `needs`） |
+
+**读 CI 结果时最容易踩的四点**：
+
+- **改了 `back/signalserver` / `back/p2p_bt`，CI 现在抓得到。** `go-build.yml` 的
+  `submodules` job 自 2026-09-21 起覆盖这两个独立 go.mod 的 vet/test/build
+  （此前「改了也不会红」的说法已作废）。但要注意**主模块的 `go test ./...`
+  覆盖不到它们**——这三个子模块各是独立 go.mod，别指望后端那条绿灯替你验了。
+- **CI 的 `peerjs` job 不带 `-race`。** 想验数据竞争只能手动加，或信 `doc/testing/README.md` §3.4 的建议。
+- **跨平台调度差异会放大时序敏感的竞态**：本机 Linux 跑通不代表这里绿——2026-09-20
+  就是靠交叉矩阵暴露了 `internal/source` 一个 ~1% 的偶发用例（见 REFACTOR §3.20）。
+- **主模块 `back/` 的 Go 步骤都带 `-tags nosqlite`**（双 SQLite 驱动 CGO 冲突）。
+  三个独立 go.mod 的子模块（`peerjs` / `signalserver` / `p2p_bt`）**不带**这个 tag——
+  其中 `signalserver` 与 `p2p_bt` 在 `submodules` 那格里走 `CGO_ENABLED=0`，走纯 Go 驱动。
+  所以「本地报的错和 CI 不一样」时，先看你是不是漏了或多加了 tag。
+
+### CI 覆盖不到的（只能手动跑或补测）
+
+- **外网集成**：`PEERDRIVE_MQTT_TEST=1`（公共 broker）/ `PEERDRIVE_LIVE_TEST=1`（线上）
+  显式门控，CI 默认不开门即跳过。无 UDP 沙箱（docker 默认）还需 `PEERDRIVE_SKIP_RTC=1`。
+- **网盘链路的完整组合**：单测 + 集成全绿 ≠ 链路可用（2026-09-20 那两个致命缺陷
+  就藏在这条组合路径里）。`e2e.yml` 覆盖了主链路；要快速复现或验门禁类分支，
+  手动 `./scripts/netdisk-local-demo.sh`。
+- **浏览器真实点击**：面板的 share 分级 / 真下载、media 的两个浏览器 E2E、
+  前端对线上站点的冒烟——都依赖外网或要先手工起服务。
+- **穿透矩阵**（四层，共 162 条）是独立的一套，别另起判定；用法见
+  [`doc/NETDISK.md`](doc/NETDISK.md) §11.1。
+
+### 本机需要出网时的代理
+
+不要把地址写死进文档——本机的代理地址/端口会变。需要 `go mod download`
+之类的出网操作前：
+
+```bash
+. ~/script/env.source    # 动态取主机地址，导出 HTTPS_PROXY / GOPROXY 等
+echo "$HTTPS_PROXY"      # 先确认取到了（它靠 nslookup，取空时会静默走直连）
 ```
 
-> **全部测试组件（14 个：命令、规模、CI 映射、哪些没被自动化覆盖）见
-> [`doc/testing/README.md`](doc/testing/README.md)。**
-> 选不出该跑哪个时先看它的 §1「我改了 X，该跑哪些」。
-> 网盘链路相关的分功能对照见 [`doc/NETDISK.md` §7.6](doc/NETDISK.md#76-这几个功能各由哪些测试组件兜底)。
+（cloudcone 443 是例外：直连，不走宿主机代理。）
 
 > 本机（Windows 侧）bash 工具受限时，改经 WSL 跑：
 > `ssh -i ~/.ssh/id_rsa lumin@127.0.0.1 "bash -s" < 脚本`，脚本必须先 `tr -d '\r'`
