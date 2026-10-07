@@ -26,10 +26,10 @@ func registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFunc) {
 	if sourceManager == nil {
 		return
 	}
-	r.GET("/sources", func(c *gin.Context) {
+	r.GET("/sources", authRequired, func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"sources": sourceManager.Snapshot()})
 	})
-	r.POST("/sources/:name/priority", func(c *gin.Context) {
+	r.POST("/sources/:name/priority", authRequired, func(c *gin.Context) {
 		var body struct {
 			Priority int `json:"priority"`
 		}
