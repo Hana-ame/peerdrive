@@ -46,6 +46,12 @@ import (
 	"peerdrive/internal/log"
 )
 
+// pskAuthTimeout how long to wait for a peer to present psk-auth after bindConn.
+// Connections that don't authenticate hold connState + 2 goroutines — without a timeout
+// an attacker can exhaust resources by repeatedly handshaking without authenticating.
+// Override in tests for faster execution.
+var pskAuthTimeout = 30 * time.Second
+
 // dcReq file fetch request frame (initiated by outbound role, responded to by inbound role).
 // Trace is the fallback chain (2026-08-18, anti-loop): when serveFile routes fallback to
 // other nodes via multi-source routing, it carries "already passed node chain"; nodes on
@@ -297,6 +303,22 @@ func (s *PeerJSService) bindConn(c Session) {
 	// Complete (fsync + hashFile) no longer blocks same-connection forwarding tunnel, see
 	// inbound.go fwdWorker.
 	go s.fwdWorker(c, st)
+
+	// PSK auth timeout: unauthenticated connections are a resource exhaustion vector.
+	// If the peer doesn't present psk-auth within pskAuthTimeout, close the connection.
+	// The timer checks st.pskOK (set by servePskAuth) — if the peer authenticates first,
+	// the timer callback is a no-op. If the connection closes early, c.Close() is a no-op.
+	if s.pskEnabled() && !isSelfSession(c) {
+		time.AfterFunc(pskAuthTimeout, func() {
+			st.mu.Lock()
+			ok := st.pskOK
+			st.mu.Unlock()
+			if !ok {
+				log.LogWarn("peerjs: no psk-auth from %s within %s, closing", c.ID(), pskAuthTimeout)
+				c.Close()
+			}
+		})
+	}
 
 	// PSK gate: if a key is configured, present it (our first frame).
 	s.pskSendAuth(c)
