@@ -111,7 +111,7 @@ from any node on public signaling, management plane not exposed (prevents privil
 - Upload collection: Connection-level single slot (`st.adminUp`), declaration frame **synchronously** claims slot in message pump (async would lose subsequent
   binary blocks); 30s no data auto-aborts and cleans temp files
 - Authentication: admin frame `token` field → inject `Authorization: Bearer` during forwarding → consistent with HTTP behavior
-- Frontend usage: `front/src/ws.js` (`admin`/`upload`) + `front/src/api.js` (all requests use this channel)
+- Frontend usage: `front/src/ws.js` (`admin`/`upload`/`download`/`stat`). Since the 2026-10-07 removal of the zombie HTTP wrapper module, pages call `ws.js` directly — it is the only frontend channel.
 
 ### 2.5 Three Protocol Hard Constraints (Do Not Break)
 

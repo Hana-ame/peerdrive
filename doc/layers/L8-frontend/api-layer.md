@@ -1,10 +1,17 @@
-# API wrapper layer (front/src/api.js)
+# API wrapper layer (front/src) — **DELETED 2026-10-07**
+
+> ⚠️ **This document is retained as a historical record only.** The HTTP wrapper module it
+> describes had **zero importers** across the whole repo and was deleted on 2026-10-07. The
+> line-number references below point at code that no longer exists, so do not use them to
+> navigate the tree. For the frontend's actual backend channel, read
+> [ws-client.md](ws-client.md).
 
 > Layer membership: AOP ⑧ Frontend aspect (doc/LAYERS.md §1). The frontend's single
 > business API facade: wraps all backend HTTP semantic endpoints as named functions;
 > page components only `import * as api` and call functions, unaware of transport details.
-> Since 2026-08-17 all requests go through the local WS session admin frames (ws.js);
-> HTTP endpoints are kept as legacy.
+> Since 2026-08-17 all requests went through the local WS session admin frames (ws.js);
+> HTTP endpoints were kept as legacy. **Since 2026-10-07 pages call `ws.js` directly and
+> this wrapper layer is gone.**
 
 ## Responsibilities
 
@@ -159,21 +166,19 @@ api.js ──direct fetch──▶ regServerUrl (group mgmt/comments, exception)
 
 ## Tests
 
-No independent unit test file (api.js is a pure thin wrapper, logic is tested in ws.js).
-Test side provides:
+**This layer was deleted on 2026-10-07.** The module described above had **zero importers** — no page or component ever imported it (all traffic had already moved to `ws.js` admin frames in 2026-08-17), yet it cost a hand-written 200-line mock plus a bidirectional sync guard test purely to keep the dead file "honest". The whole apparatus existed to maintain a second copy of a protocol that nothing used.
 
-- **`front/src/__mocks__/api.js`**: same-signature empty implementations for all functions
-  (`request()` returns `{}`, list functions return `[]`), preventing real HTTP requests in
-  the happy-dom environment from generating AbortError/socket hang up noise during window
-  teardown (file header comment explains the reason).
-- **`front/tests/setup.js`**: `vi.mock('../src/api.js')` mounts the mock globally; component
-  tests (smoke.test.jsx / components.test.jsx / FileTree.test.jsx) auto-apply it.
-- **Manual verification**: any page function in the browser + DevTools Network to confirm
-  no XHR/fetch to `:3000` (except /ws/peer upgrade and direct regserver/LLM).
+Deleted together with the module:
+
+- the wrapper module itself (689 lines)
+- its hand-written mock (the `__mocks__/` directory under `front/src` is now gone too)
+- the getBlobUrl test (threshold / in-flight dedup / LRU — the only real logic in the module, and it had no production caller)
+- the mock-vs-real export guard test
+- the global `vi.mock()` line in `front/tests/setup.js`
+
+**Replacement guidance**: if a page needs to stub the backend, mock `front/src/ws.js` in that test file — that is the module the app actually calls. Note that `getBlobUrl`'s preview safeguards (200MB `TOO_LARGE` threshold, in-flight dedup, LRU + revoke) are **not** reimplemented anywhere: page components build their preview blobs directly via `URL.createObjectURL` (e.g. `pages/NodeControl.jsx`). That path has no size guard, so a future preview through `ws.download` should re-add one; see ws-client.md for the `stat` primitive that exists to support it.
 
 ## File inventory
 
-- `front/src/api.js` (514 lines) —— the main subject of this doc
-- `front/src/__mocks__/api.js` —— test mock (same-signature empty implementations)
-- `front/tests/setup.js` —— global mount of `vi.mock('../src/api.js')`
-- Related peers (not this module): `front/src/ws.js` (transport layer), `doc/api-reference.md` (endpoint semantics)
+- **None** — this layer no longer exists. The surviving frontend transport is `front/src/ws.js`, documented in [ws-client.md](ws-client.md).
+- Related: `front/tests/setup.js` (keeps only `cleanup()`), `doc/api-reference.md` (endpoint semantics, unchanged — admin frames still forward to the same controllers)

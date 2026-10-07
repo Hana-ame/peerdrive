@@ -353,7 +353,7 @@ POST/GET → `GET /files` → unknown route 404 pass-through. Same frame protoco
   downloadToFile)
 - `front/tests/ws.test.js` —— frame routing + upload + streaming download unit tests
 - `front/tests/e2e-admin-smoke.mjs` —— admin verb E2E smoke (requires local service)
-- `front/src/api.js` —— getBlobUrl (200MB threshold + in-flight dedup) consumer
+- ~~the deleted HTTP wrapper module~~ —— was the getBlobUrl (200MB threshold + in-flight dedup) consumer; **deleted 2026-10-07** for having zero importers, so the preview path in this doc is now reached by page code calling `ws.stat`/`ws.download` directly
 - Related backend (protocol peer, not this module):
   `back/internal/transport/admin.go` (admin verb server side),
   `back/internal/transport/ws_session.go` (WSSession session implementation)
