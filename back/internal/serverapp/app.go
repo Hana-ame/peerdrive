@@ -64,6 +64,42 @@ func ListenAddr(cfg *config.Config) string {
 	return net.JoinHostPort(cfg.Host, cfg.Port)
 }
 
+// isLoopbackListen reports whether the given host listens on loopback only.
+// Empty host = listen on all interfaces (0.0.0.0), which is non-loopback.
+func isLoopbackListen(host string) bool {
+	if host == "" {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
+}
+
+// validateAuthStartup checks that a non-loopback deployment has an auth backend configured,
+// or has explicitly opted out with PEERDRIVE_ALLOW_NO_AUTH=1.
+//
+// Why this check: AuthRequired passes through when no registration server is configured
+// (local single-machine mode). On a loopback-only deployment that's fine — the operator
+// is the only one who can reach the port. But on a non-loopback deployment (e.g.
+// PEERDRIVE_HOST=0.0.0.0), every authRequired route is wide open. This check forces an
+// explicit opt-in for that dangerous configuration.
+func validateAuthStartup(cfg *config.Config) error {
+	addr := ListenAddr(cfg)
+	if isLoopbackListen(cfg.Host) {
+		return nil // loopback only — safe
+	}
+	if cfg.RegistrationServer != "" {
+		return nil // auth backend configured — safe
+	}
+	if os.Getenv("PEERDRIVE_ALLOW_NO_AUTH") == "1" {
+		log.LogWarn("main: non-loopback with no auth backend; PEERDRIVE_ALLOW_NO_AUTH=1 set, continuing")
+		return nil
+	}
+	return fmt.Errorf("refusing to serve %s (non-loopback) with no auth backend; set PEERDRIVE_REG_SERVER or PEERDRIVE_ALLOW_NO_AUTH=1 to override", addr)
+}
+
 // RunServe is the Peerdrive server entry point; it initializes the DB, P2P, HTTP router and listens on the port.
 func RunServe() {
 	log.LogInfo("main: Peerdrive server starting")
@@ -74,6 +110,10 @@ func RunServe() {
 	// binding), and by the time you notice it's too late. Here we fail fast with a clear
 	// message (see config.Validate for details).
 	if err := config.Validate(cfg); err != nil {
+		stdlog.Fatalf("%v", err)
+	}
+	// C-14: non-loopback without auth backend is a security risk; require explicit opt-in.
+	if err := validateAuthStartup(cfg); err != nil {
 		stdlog.Fatalf("%v", err)
 	}
 	r, shutdown, info, err := BuildRouterWithInfo(cfg)
