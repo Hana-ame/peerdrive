@@ -28,7 +28,8 @@ PEERDRIVE_PEERJS_SECURE=false \
 PEERDRIVE_DISCOVER_URL=http://127.0.0.1:$SIG_PORT \
 PEERDRIVE_BT_DHT_ENABLE=false \
 PEERDRIVE_IPFS_GATEWAY_ENABLE=false \
-PEERDRIVE_PSK=demo-psk"
+PEERDRIVE_PSK=demo-psk \
+PEERDRIVE_ALLOW_NO_AUTH=1"
 
 say() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 ok()  { printf '  \033[32mPASS\033[0m %s\n' "$*"; }
