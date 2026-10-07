@@ -89,7 +89,7 @@ Confirm it runs: `./peerdrive-linux-amd64` then access `http://127.0.0.1:3001/pi
 |---|---|
 | host | `peersignal.moonchan.xyz` |
 | port | `443` |
-| key | `pd-signal-b9447b406828e500` |
+| key | `pd-signal-1edf5e05e4a52b7351392574` |
 | encryption | `wss` (also works in HTTPS pages) |
 
 Both sides are hardcoded to this pair, so **nothing needs to be filled in** to find each other.
@@ -101,7 +101,7 @@ never through signaling. To check it's alive:
 
 ```bash
 curl -s https://peersignal.moonchan.xyz/status
-# {"clients":N,"discovered":N,"key":"pd-signal-b9447b406828e500","nodes":[...]}
+# {"clients":N,"discovered":N,"key":"pd-signal-1edf5e05e4a52b7351392574","nodes":[...]}
 ```
 
 When you'd need to change it: intranet offline environments, or wanting to control your own signaling. In that case change environment variables to point to yours

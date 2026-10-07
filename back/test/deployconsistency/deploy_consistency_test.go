@@ -15,12 +15,21 @@
 //     client-package job 会红（它比的是 cmp，不是语义）。
 //
 // 这三条都是「改了一处、忘了另一处」型缺陷。人靠自觉会漏，CI 不会。
+//
+// 2026-10-06 补：第 1 条自身也翻车了。key 在 Go 代码里统一了，但**文档里的
+// 12 处**（AGENTS.md 线上部署节 / README / 教程 / PEERSIGNAL.md / design/ /
+// layers/ / VERIFICATION_CHECKLIST.md / media demo）还写着上一代的值——
+// 那条测试只列了 7 个文件，doc/ 与 demo/ 压根不在扫描范围内。
+// 按文档配置去部署的人会连上一台信令，而代码连的是另一台。
+// 故扫描改成「按后缀全仓遍历」，并另加一条测试把**覆盖面本身**变成断言
+// （见 TestSignalKeyScanCoversDocsAndDemos）。
 package main
 
 import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -45,6 +54,105 @@ func repoRoot(t *testing.T) string {
 // signalKeyRe 匹配形如 pd-signal-<hex> 的信令 key 字面量。
 var signalKeyRe = regexp.MustCompile(`pd-signal-[0-9a-f]{8,}`)
 
+// signalKeyScanExts 是要参与一致性检查的文本类型。
+//
+// 为什么要从「手写文件清单」换成「按后缀全仓遍历」：原实现只列了 7 个文件，
+// 于是 key 在 Go 代码里漂了，但文档里的那 12 处（AGENTS/README/教程/demo/…）
+// 一个都没被扫到——**漂移检测只覆盖了它写代码时想着的那几类文件**。
+// 2026-10-06 实测：config.go 已经是 1edf5e05…，而线上部署文档（AGENTS.md）
+// 还写着 b9447b40…，两者指向两台不同的信令，按文档配置会连不上。
+// 列清单的写法天然漏：新增一个写死 key 的文件时没人会顺手去改这个数组。
+var signalKeyScanExts = map[string]bool{
+	".go":   true,
+	".md":   true,
+	".html": true,
+	".js":   true,
+	".jsx":  true,
+	".ts":   true,
+	".tsx":  true,
+	".mjs":  true,
+}
+
+// signalKeySkipDirs 是遍历时跳过的目录（构建产物、依赖、版本控制）。
+//
+// ⚠️ node_modules 与 dist 必须跳过：它们体积巨大且内容由 lockfile / 构建决定，
+// 扫它们只会让 CI 变慢，而产物里的 key 必然源自某个源文件——源文件已被覆盖。
+var signalKeySkipDirs = map[string]bool{
+	".git": true, "node_modules": true, "dist": true,
+}
+
+// signalKeyScanRoots 是遍历起点（仓库根下的一级目录 + 根级文档）。
+//
+// 根级文档单独列出：AGENTS.md / README.md / VERIFICATION_CHECKLIST.md
+// 不在任何子目录里，按目录遍历会漏掉它们——而它们恰好是最常被直接照抄的地方。
+var signalKeyScanRoots = []string{
+	"back", "doc", "front", "packages", "scripts", "AGENTS.md",
+	"README.md", "VERIFICATION_CHECKLIST.md",
+}
+
+// signalKeyEvidenceFiles 是「故意保留旧值」的文件：里面的字面量是**事故证据**，
+// 不是会生效的配置，改掉反而抹掉了记录。
+//
+// back/signalserver/signalserver.go 的 HandleStatus 注释里贴着一段
+// /status 响应体，里面是**上一代**的 key 字面量——那是 2026-10-06 那次
+// /status 匿名泄漏的现场记录（注释明确写了「无需任何凭据」），
+// 它的作用是解释「为什么 key 必须从 /status 里拿掉」以及为什么当时
+// 「轮换 git 里的硬编码」这条路无效。把它改成当前 key 等于伪造证据——
+// 读者会以为当时泄漏的就是今天这个值。
+//
+// ⚠️ 本文件自己也在扫描范围内（它在 back/ 下、后缀是 .go），所以这里
+// **不能**把那个旧 key 原样写进注释，否则本测试会把自己判成漂移。
+var signalKeyEvidenceFiles = map[string]bool{
+	"back/signalserver/signalserver.go": true,
+}
+
+// collectSignalKeyFiles 递归收集所有待检查文件，返回仓库相对路径（/ 分隔）。
+func collectSignalKeyFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var out []string
+	seen := map[string]bool{}
+	add := func(rel string) {
+		if !seen[rel] {
+			seen[rel] = true
+			out = append(out, rel)
+		}
+	}
+	for _, entry := range signalKeyScanRoots {
+		p := filepath.Join(root, filepath.FromSlash(entry))
+		st, err := os.Stat(p)
+		if err != nil {
+			continue // 目录可能不存在（eg. 单模块 checkout），跳过而不是整个测试红
+		}
+		if !st.IsDir() {
+			add(entry)
+			continue
+		}
+		_ = filepath.WalkDir(p, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				if signalKeySkipDirs[d.Name()] {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(d.Name()))
+			if !signalKeyScanExts[ext] {
+				return nil
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return nil
+			}
+			add(filepath.ToSlash(rel))
+			return nil
+		})
+	}
+	sort.Strings(out) // 顺序稳定，CI 输出可复现
+	return out
+}
+
 // TestSignalKeyIsConsistentAcrossRepo 保证：**所有**写死信令 key 的地方用的是同一个值。
 //
 // 写法上刻意不硬编码期望值，而是要求「它们彼此相等」——
@@ -66,18 +174,15 @@ func TestSignalKeyIsConsistentAcrossRepo(t *testing.T) {
 		t.Fatal("config.go 里找不到 pd-signal-<hex>，key 约定被改掉了？")
 	}
 
-	files := []string{
-		"back/internal/config/config.go",
-		"back/peerjs/peer.go",
-		"back/cmd/echclient/main.go",
-		"back/cmd/media-node/main.go",
-		"back/test/integration/live_test.go",
-		"packages/peerdrive-client/panel/template.html",
-		"packages/peerdrive-client/panel/app.js",
+	// 权威定义本身也必须在扫描范围内，否则「只改 config.go」会绕过这条检查。
+	files := collectSignalKeyFiles(t, root)
+	if len(files) == 0 {
+		t.Fatal("扫描到 0 个文件——遍历逻辑坏了，这条检查会永远假绿")
 	}
 
 	for _, rel := range files {
 		rel := rel
+		evidence := signalKeyEvidenceFiles[rel]
 		t.Run(rel, func(t *testing.T) {
 			b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 			if err != nil {
@@ -88,9 +193,8 @@ func TestSignalKeyIsConsistentAcrossRepo(t *testing.T) {
 					if k == canonical {
 						continue
 					}
-					// signalserver.go 里有 921 行的注释贴的是历史泄漏响应（真实 key），
-					// 它是证据不是配置，不参与一致性检查——下面单独排除。
-					if strings.HasPrefix(rel, "back/signalserver/") {
+					// 事故证据文件里的旧值是记录，不是配置（见上面的说明）。
+					if evidence {
 						continue
 					}
 					t.Errorf("%s:%d 用了不同的 key %q（权威值 %q）\n"+
@@ -100,6 +204,51 @@ func TestSignalKeyIsConsistentAcrossRepo(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestSignalKeyScanCoversDocsAndDemos 是**防退化**护栏：确保上面那条遍历
+// 真的覆盖到了文档与 demo，而不是某次重构让遍历悄悄退化成「只扫 back/」。
+//
+// 发现背景：原实现是手写的 7 个文件数组，doc/ 与 demo/ 从来没进去过，
+// 于是「所有客户端/文档用同一个 key」这条约定只在 Go 代码里成立。
+// 加了新文件进数组也救不回来——没人会记得往数组里加。
+// 这条测试把「覆盖面」本身变成断言：以后谁把遍历范围改窄，先在这里红。
+func TestSignalKeyScanCoversDocsAndDemos(t *testing.T) {
+	root := repoRoot(t)
+	files := collectSignalKeyFiles(t, root)
+
+	// 每类必须至少命中一个文件，否则「扩到 doc/」这件事会被一次重构悄悄回退。
+	prefixes := map[string]string{
+		"back/":                  "back/ 下的 Go 代码",
+		"doc/":                   "doc/ 下的设计文档（线上部署 / 教程最容易抄错）",
+		"packages/":              "packages/ 下的面板与 demo",
+		"front/":                 "front/ 下的前端面板",
+		"AGENTS.md":              "AGENTS.md 线上部署节",
+		"README.md":              "README.md",
+		"VERIFICATION_CHECKLIST.md": "VERIFICATION_CHECKLIST.md",
+	}
+	for prefix, why := range prefixes {
+		hit := false
+		for _, f := range files {
+			if f == prefix || strings.HasPrefix(f, prefix) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			t.Errorf("扫描范围没有覆盖 %s（%s）。\n"+
+				"  这正是 key 漂移当初能溜过去的原因：检查只覆盖了写代码时\n"+
+				"  想到的那几类文件，文档与 demo 全在扫描之外。",
+				prefix, why)
+		}
+	}
+
+	// 反向断言：node_modules / dist 这类目录不能被扫进来（否则 CI 慢到没法用）。
+	for _, f := range files {
+		if strings.Contains(f, "node_modules/") || strings.Contains(f, "/dist/") {
+			t.Errorf("扫描范围混入了 %s —— 构建产物与依赖不该参与检查", f)
+		}
 	}
 }
 

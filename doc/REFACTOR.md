@@ -109,7 +109,7 @@ Browser: host/port/key config points to self-hosted (own signaling, no MITM surf
 ```
 peersignal.moonchan.xyz ──CF gray cloud A record──▶ 117.55.237.217 (cloudcone nginx)
         │ wss + https
-   peerserver (systemd, 127.0.0.1:9000, key=pd-signal-b9447b406828e500)
+   peerserver (systemd, 127.0.0.1:9000, key=pd-signal-1edf5e05e4a52b7351392574)
 ```
 
 - Deployment details and operations commands see project AGENTS.md "Online Deployment" section

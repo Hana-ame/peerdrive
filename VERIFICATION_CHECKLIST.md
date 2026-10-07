@@ -127,7 +127,7 @@
 |---|---|
 | PEERDRIVE_PEERJS_KEY 用来干嘛 | 信令服务器的 API Key，客户端连接时必须带上，服务器校验后拒绝未授权连接。相当于"通行证"。 |
 | PEERDRIVE_PEERJS_ID 用来干嘛 | 本节点的唯一标识符，其他节点通过这个名字找到你、发起 WebRTC 连接。相当于"门牌号"。 |
-| key 是多少现在 | `pd-signal-b9447b406828e500`（查 `/status` 端点确认） |
+| key 是多少现在 | `pd-signal-1edf5e05e4a52b7351392574`（查 `/status` 端点确认） |
 | key 是固定的吗 | 不固定，配置值。公共云默认 `peerjs`，自托管手动指定。 |
 | 哪个模块在用 key | signalserver（校验）、peerjs 库（URL 里发送）、peerjs_service（配置传递）、config（环境变量加载） |
 | signal 用来协调什么 | 身份注册（OPEN/ID-TAKEN）+ 能力交换（OFFER→ANSWER）+ 地址发现（ICE candidates）。建链后退出。 |
