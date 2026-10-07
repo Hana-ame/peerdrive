@@ -28,7 +28,7 @@
 ```bash
 # Start a server locally (unit/integration tests hang the handler straight off httptest and do not need it)
 # Since v0.3.0 the main binary has a `signal` subcommand, so no separate build is needed:
-cd back && go run -tags nosqlite ./cmd/peerdrive/ signal -addr :9000 -key peerjs
+cd back && go run -tags nosqlite ./cmd/peerdrive/ signal -addr :9000 -key pd-signal-1edf5e05e4a52b7351392574
 # (the standalone entry point is `back/signalserver/cmd/peersignal` — note the name is peersignal, not peerserver)
 
 # Verify the signaling handshake (from the node's perspective; pointing host/port/key at self-hosted is a zero-change switch)
@@ -67,7 +67,7 @@ LEAVE/EXPIRE are not enqueued), `flushQueue` (replay on coming online + expiry c
 
 | Key exports | Description |
 |---|---|
-| `-addr` / `-key` flags | The listen address (default `:9000`) / the API key (default "peerjs") |
+| `-addr` / `-key` flags | The listen address (default `:9000`) / the API key (default `pd-signal-1edf5e05e4a52b7351392574` — the peerdrive-authoritative key, same as `config.DefaultSignalKey`; see the standalone's `signalserver.DefaultKey`) |
 | Routes | `/peerjs` (HandleWS), `/peerjs/id` (HandleID), `/discover/announce`, `/discover/nodes` |
 
 ## Key mechanisms

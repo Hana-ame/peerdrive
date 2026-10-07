@@ -162,17 +162,7 @@ func TestSignalKeyIsConsistentAcrossRepo(t *testing.T) {
 	root := repoRoot(t)
 
 	// 权威值取自 config.DefaultSignalKey 的定义处。
-	cfg, err := os.ReadFile(filepath.Join(root, "back", "internal", "config", "config.go"))
-	if err != nil {
-		t.Fatalf("读 config.go: %v", err)
-	}
-	canonical := ""
-	if m := signalKeyRe.FindAllString(string(cfg), -1); len(m) > 0 {
-		canonical = m[0]
-	}
-	if canonical == "" {
-		t.Fatal("config.go 里找不到 pd-signal-<hex>，key 约定被改掉了？")
-	}
+	canonical := canonicalSignalKey(t, root)
 
 	// 权威定义本身也必须在扫描范围内，否则「只改 config.go」会绕过这条检查。
 	files := collectSignalKeyFiles(t, root)
@@ -390,3 +380,124 @@ func TestWorkflowStepsStillHaveRunnableBody(t *testing.T) {
 		})
 	}
 }
+
+// canonicalSignalKey 取权威信令 key：config.DefaultSignalKey 的定义处。
+//
+// 刻意不硬编码期望值，而是从定义处读——将来真轮换 key 只需改 config.go 一处。
+func canonicalSignalKey(t *testing.T, root string) string {
+	t.Helper()
+	cfg, err := os.ReadFile(filepath.Join(root, "back", "internal", "config", "config.go"))
+	if err != nil {
+		t.Fatalf("读 config.go: %v", err)
+	}
+	if m := signalKeyRe.FindAllString(string(cfg), -1); len(m) > 0 {
+		return m[0]
+	}
+	t.Fatal("config.go 里找不到 pd-signal-<hex>，key 约定被改掉了？")
+	return ""
+}
+
+// TestSignalKeyDefaultsAreUnified —— C-8 的**默认值一致性**闸门。
+//
+// 发现背景：上面那条 TestSignalKeyIsConsistentAcrossRepo 只按 `pd-signal-<hex>`
+// 字面量扫描，看不见「默认值是 peerjs」这类分叉——peerjs 不长成 pd-signal-<hex>
+// 的样子。实测后果（C-8）：同一个二进制里 `peerdrive signal` 的 -key 默认是
+// peerjs，而 `peerdrive all` 走 config.PeerJSKey（权威值），两个子命令连不上彼此，
+// 默认配置的节点也连不上，而 CI 一直绿。
+//
+// 补的是默认值这一层：
+//
+//	1. 装配点的默认值必须**引用权威常量**（单一真相源），不能各自写死字面量；
+//	2. 旧默认值 peerjs 不得以「信令 key 默认 / -key 示例」的形态残留在
+//	   back/ 的 Go 代码与后端信令文档里。
+//
+// 范围：只扫 back/（.go/.md）与 doc/（.md）——后端默认值才是 C-8 的事故面。
+// scripts/、packages/、front/ 里大量 `key: 'peerjs'` 是**本机演示 / 面板**连自托管
+// 信令的显式值（连同对应的 -key 一起显式给），不是后端默认值，故意不扫；否则
+// 这条会对着几十处与 C-8 无关的客户端演示误报。
+func TestSignalKeyDefaultsAreUnified(t *testing.T) {
+	root := repoRoot(t)
+	canonical := canonicalSignalKey(t, root)
+
+	// 1) 三个装配点的默认值必须引用权威常量。
+	//    standalone 是独立 go.mod（github.com/Hana-ame/go-peerserver），拿不到主仓
+	//    config，只能用它自己那侧、同样指向权威值的 signalserver.DefaultKey。
+	for _, c := range []struct{ rel, want, why string }{
+		{"back/cmd/peerdrive/subcommands.go",
+			`envOr("PEERSIGNAL_KEY", config.DefaultSignalKey)`,
+			"peerdrive signal 的 -key 默认值"},
+		{"back/internal/services/services.go",
+			`envOr("PEERSIGNAL_KEY", config.DefaultSignalKey)`,
+			"SignalConfig / UnifiedMux(nil) 的默认值"},
+		{"back/signalserver/cmd/peersignal/main.go",
+			`flag.String("key", signalserver.DefaultKey`,
+			"独立 peersignal 的 -key 默认值"},
+	} {
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(c.rel)))
+		if err != nil {
+			t.Errorf("读 %s: %v", c.rel, err)
+			continue
+		}
+		if !strings.Contains(string(b), c.want) {
+			t.Errorf("%s 没有用权威常量作默认值（找不到 %q）。\n"+
+				"  这是 %s：必须引用单一真相源，不能自己写死一个值——\n"+
+				"  否则 signal / all / 独立 peersignal 三处又会各自漂移（C-8）。",
+				c.rel, c.want, c.why)
+		}
+	}
+
+	// standalone 的 DefaultKey 必须就是权威值本身（它在独立模块里，引用不了 config）。
+	// 字面量一致性另由 TestSignalKeyIsConsistentAcrossRepo 覆盖，这里只确认它存在。
+	if b, err := os.ReadFile(filepath.Join(root, "back", "signalserver", "defaults.go")); err != nil {
+		t.Errorf("读 back/signalserver/defaults.go: %v", err)
+	} else if !strings.Contains(string(b), `DefaultKey = "`+canonical+`"`) {
+		t.Errorf("back/signalserver/defaults.go 的 DefaultKey 不是权威值 %q", canonical)
+	}
+
+	// 2) 旧默认值 peerjs 的残留形态（默认表达式 + 文档示例）。
+	stale := []*regexp.Regexp{
+		regexp.MustCompile(`envOr\("PEERSIGNAL_KEY",\s*"peerjs"\)`), // Go：env 默认
+		regexp.MustCompile(`String\("key",\s*"peerjs"`),              // Go：flag 默认
+		regexp.MustCompile(`sigKey\s*:=\s*"",\s*"peerjs"`),           // Go：UnifiedMux nil-cfg 兜底
+		regexp.MustCompile(`-key\s+peerjs`),                          // 文档/用法注释里的 -key 示例
+		// ⚠️ 后两条的 "peer" + "js" 拼接是必须的：本文件自己也在扫描范围内，
+		// 把 `peerjs` 原样写进 backtick 模式里，这两行会先把自己判成漂移。
+		regexp.MustCompile("`-key`.*`peer" + "js`"),                      // 文档表格里的默认值单元格
+		regexp.MustCompile("`-key`.*default.*peer" + "js"),               // 文档里「default 旧值」的英文表述
+	}
+
+	files := collectSignalKeyFiles(t, root)
+	scanned := 0
+	for _, rel := range files {
+		// 只扫后端：back/ 的 .go 与 .md、doc/ 的 .md（见函数头「范围」）。
+		ext := strings.ToLower(filepath.Ext(rel))
+		if ext != ".go" && ext != ".md" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(rel, "back/"), strings.HasPrefix(rel, "doc/"):
+		default:
+			continue
+		}
+		scanned++
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Errorf("读 %s: %v", rel, err)
+			continue
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			for _, re := range stale {
+				if re.MatchString(line) {
+					t.Errorf("%s:%d 残留了旧的 peerjs 信令-key 默认值/示例:\n    %s\n"+
+						"  默认值必须统一到 %q（C-8）。",
+						rel, i+1, strings.TrimSpace(line), canonical)
+					break
+				}
+			}
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("默认值扫描到 0 个文件——范围过滤写坏了，这条会永远假绿")
+	}
+}
+

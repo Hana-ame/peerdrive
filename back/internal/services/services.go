@@ -28,9 +28,10 @@ import (
 
 // SignalHandler 构造信令 + 节点发现的 http.Handler（不监听端口）。
 //
-// 路由与 back/signalserver/cmd/peersignal/main.go 逐条一致。改这里等于改那个
-// 文件——两边分叉会让「peerdrive signal」和旧的 peersignal 行为不同，
-// 是个隐蔽的坑（有测试专门对拍，见 signals_compat_test.go）。
+// 路由与 back/signalserver/cmd/peersignal/main.go 逐条一致（都由
+// registerSignalRoutes 登记同一份清单）。改这里等于改那个文件——两边分叉会让
+// 「peerdrive signal」和旧的 peersignal 行为不同，是个隐蔽的坑
+// （三处装配点由 signals_compat_test.go 专门对拍）。
 func SignalHandler(key, tokens, corsOrigin string) http.Handler {
 	return newSignalMux(key, tokens, corsOrigin)
 }
@@ -48,6 +49,24 @@ func newSignalMux(key, tokens, corsOrigin string) *http.ServeMux {
 	srv.Start() // 后台清理过期离线队列（H3）
 
 	mux := http.NewServeMux()
+	registerSignalRoutes(mux, srv)
+	// 单跑时面板直接挂 "/"；合并模式的挂法不同，见 UnifiedMux。
+	mux.HandleFunc("/", srv.HandleDashboard)
+	return mux
+}
+
+// registerSignalRoutes 登记信令 + 发现 + 状态这 6 条**三处装配点共享**的路由。
+//
+// 抽出来是为了让 newSignalMux（peerdrive signal）与 UnifiedMux（peerdrive all）
+// 读同一份清单。此前两处各自抄了同样的 6 行，是「改了一处、忘了另一处」的典型
+// （与 SignalRateLimit 同一类问题）：任何只加在其中一处的东西都不会自动出现在
+// 另一处。第三处装配点——独立模块 back/signalserver/cmd/peersignal/main.go——
+// 跨 go.mod 没法共享这段代码，由 signals_compat_test.go 对拍守住。
+//
+// 不含 "/"：单跑时面板挂 "/"、合并模式挂 "/_signal"，各装配点的面板挂法本就不同。
+// 不含 /status/key：那是独立 peersignal 的运维端点，而主仓二进制没有配置 ops
+// token 的入口（/status 已由 ops token 网关），挂上也只会是个永远 401 的死端点。
+func registerSignalRoutes(mux *http.ServeMux, srv *signalserver.Server) {
 	// PeerJS 协议兼容端点
 	mux.HandleFunc("/peerjs", srv.HandleWS)
 	mux.HandleFunc("/peerjs/id", srv.HandleID)
@@ -55,10 +74,8 @@ func newSignalMux(key, tokens, corsOrigin string) *http.ServeMux {
 	mux.HandleFunc("/discover/announce", srv.HandleAnnounce)
 	mux.HandleFunc("/discover/leave", srv.HandleLeave)
 	mux.HandleFunc("/discover/nodes", srv.HandleNodes)
-	// 状态 API 与面板
+	// 状态 API
 	mux.HandleFunc("/status", srv.HandleStatus)
-	mux.HandleFunc("/", srv.HandleDashboard)
-	return mux
 }
 
 // SignalRateLimit 返回信令端点的限流配置（2026-10-06，N3）。
@@ -142,7 +159,11 @@ func ServeHTTP(addr, certFile, keyFile string, h http.Handler) error {
 // 所以 `peerdrive signal` 可直接替换旧部署里的 peersignal。
 func SignalConfig() (addr, key, tokens, cors, cert, keyFile string) {
 	addr = envOr("PEERSIGNAL_ADDR", ":9000")
-	key = envOr("PEERSIGNAL_KEY", "peerjs")
+	// 默认值必须是权威信令 key（config.DefaultSignalKey），不是 peerjs：
+	// `peerdrive all` 走 config.PeerJSKey（同源），两边默认值不一致就等于同一个
+	// 二进制里 signal 与 all 连不上彼此（C-8）。对拍的默认值闸门见
+	// test/deployconsistency。
+	key = envOr("PEERSIGNAL_KEY", config.DefaultSignalKey)
 	tokens = os.Getenv("PEERJS_TOKENS")
 	cors = os.Getenv("PEERSIGNAL_CORS")
 	cert = os.Getenv("PEERSIGNAL_TLS_CERT")
@@ -190,13 +211,14 @@ func UnifiedMux(cfg *config.Config, ginHandler http.Handler) (*http.ServeMux, *r
 	mux := http.NewServeMux()
 
 	// cfg 允许为 nil：测试里只想验证路由归属时不必构造整个配置。
-	// nil 时退回环境变量 / 默认值，行为与 peerdrive signal 单跑时一致。
-	cors, sigKey := "", "peerjs"
+	// nil 时退回环境变量 / 默认值，行为与 peerdrive signal 单跑时一致——
+	// 所以这里必须和 subcommands.go / SignalConfig 用**同一个**权威默认值（C-8）。
+	cors, sigKey := "", config.DefaultSignalKey
 	if cfg != nil {
 		cors, sigKey = cfg.AllowedOrigins, cfg.PeerJSKey
 	} else {
 		cors = os.Getenv("PEERDRIVE_ALLOWED_ORIGINS")
-		sigKey = envOr("PEERSIGNAL_KEY", "peerjs")
+		sigKey = envOr("PEERSIGNAL_KEY", config.DefaultSignalKey)
 	}
 
 	// 信令：显式登记，不用 newSignalMux 的 "/" 兜底（那是面板，会被主服务挡掉）。
@@ -212,12 +234,8 @@ func UnifiedMux(cfg *config.Config, ginHandler http.Handler) (*http.ServeMux, *r
 	sigOpts = append(sigOpts, signalserver.WithRateLimit(SignalRateLimit()))
 	sig := signalserver.NewServer(sigKey, sigOpts...)
 	sig.Start()
-	mux.HandleFunc("/peerjs", sig.HandleWS)
-	mux.HandleFunc("/peerjs/id", sig.HandleID)
-	mux.HandleFunc("/discover/announce", sig.HandleAnnounce)
-	mux.HandleFunc("/discover/leave", sig.HandleLeave)
-	mux.HandleFunc("/discover/nodes", sig.HandleNodes)
-	mux.HandleFunc("/status", sig.HandleStatus)
+	// 与 newSignalMux 读同一份路由清单（registerSignalRoutes）。
+	registerSignalRoutes(mux, sig)
 	// 信令面板：HandleDashboard 硬拒非 "/" 的路径（signalserver/signalserver.go），
 	// 而合并模式下 "/" 归主服务兜底，所以面板在这里是拿不到的。
 	// 改挂 /_signal 面板 + 剥前缀，让合并模式下也能开面板——

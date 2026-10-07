@@ -276,6 +276,11 @@ func runDemo(args []string) int {
 	// ── 1) 信令 ──
 	if _, err := start("signal", "signal", dir, append(os.Environ(),
 		"PEERSIGNAL_ADDR=127.0.0.1:"+strconv.Itoa(demoSignalPort),
+		// ⚠️ 显式给 key，且与下面 demoEnv 里节点侧的 PEERDRIVE_PEERJS_KEY 相同。
+		// 信令与节点的默认 key 已统一到权威值（DefaultSignalKey），而演示想让两侧
+		// 都用短的 "peerjs"：**必须两边都显式写**，否则哪天默认值再变一次，
+		// 演示就会以「节点反复 connect failed」的形式静默坏掉（C-8 那类分叉）。
+		"PEERSIGNAL_KEY=peerjs",
 		// ⚠️ 不设 PEERJS_TOKENS：它把信号变成「必须带 token」，而节点侧
 		// 没有对应字段可发 → WebSocket 握手直接 bad handshake，
 		// 表现为节点反复 "connect failed (retry in 2s)"、

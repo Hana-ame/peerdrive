@@ -2,7 +2,8 @@
 // Replaces public cloud signaling (0.peerjs.com) and public MQTT brokers—nodes just need to point
 // PEERDRIVE_PEERJS_HOST/PORT at this server; discovery goes through the built-in HTTP API.
 //
-// Usage: peersignal [-addr :9000] [-key peerjs] [-tokens tok1,tok2] [-tls-cert c.pem -tls-key k.pem]
+// Usage: peersignal [-addr :9000] [-key <api key>] [-tokens tok1,tok2] [-tls-cert c.pem -tls-key k.pem]
+// (-key default: see signalserver.DefaultKey — the peerdrive-authoritative signal key)
 //
 //	-tokens optional: signaling token whitelist (comma-separated). When set, the WS connection token
 //	must be on the list, otherwise the upgrade is rejected (prevents arbitrary clients from impersonating nodes to receive signaling).
@@ -21,7 +22,7 @@ import (
 
 func main() {
 	addr := flag.String("addr", ":9000", "listen address")
-	key := flag.String("key", "peerjs", "API key (client must match)")
+	key := flag.String("key", signalserver.DefaultKey, "API key (client must match; default is the peerdrive-authoritative key)")
 	tokens := flag.String("tokens", "", "signaling token whitelist (comma-separated; empty = no restriction)")
 	opsToken := flag.String("ops-token", "",
 		"credential for ops endpoints (/status, /status/key). Empty = ops endpoints reject everyone.\n"+

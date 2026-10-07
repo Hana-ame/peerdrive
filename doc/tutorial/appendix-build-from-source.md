@@ -60,7 +60,7 @@ so it can't be built as part of the previous step's `./...`:
 ```bash
 cd back/signalserver
 go build -o /tmp/pd/bin/peersignal ./cmd/peersignal
-go run ./cmd/peersignal -addr :9100 -key peerjs
+go run ./cmd/peersignal -addr :9100 -key pd-signal-1edf5e05e4a52b7351392574
 ```
 
 After starting, the node side needs to point signaling here (`PEERDRIVE_PEERJS_HOST/PORT/KEY/SECURE` and

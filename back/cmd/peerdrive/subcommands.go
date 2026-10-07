@@ -82,7 +82,10 @@ func envOr(k, def string) string {
 func runSignal(args []string) {
 	fs := flag.NewFlagSet("signal", flag.ExitOnError)
 	addr := fs.String("addr", envOr("PEERSIGNAL_ADDR", ":9000"), "listen address")
-	key := fs.String("key", envOr("PEERSIGNAL_KEY", "peerjs"), "API key (client must match)")
+	// 默认 key 必须与 `peerdrive all`（config.PeerJSKey，同源 DefaultSignalKey）
+	// 以及独立 peersignal 一致——不一致时同一个二进制里 signal 与 all 连不上
+	// 彼此，且默认配置的节点都连不上（C-8，默认值闸门见 test/deployconsistency）。
+	key := fs.String("key", envOr("PEERSIGNAL_KEY", config.DefaultSignalKey), "API key (client must match)")
 	tokens := fs.String("tokens", os.Getenv("PEERJS_TOKENS"), "signaling token whitelist (comma-separated)")
 	cert := fs.String("tls-cert", os.Getenv("PEERSIGNAL_TLS_CERT"), "TLS certificate (PEM); with -tls-key serves HTTPS/WSS")
 	tlsKey := fs.String("tls-key", os.Getenv("PEERSIGNAL_TLS_KEY"), "TLS private key (PEM)")
