@@ -633,6 +633,13 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "peerId required", http.StatusBadRequest)
 		return
 	}
+	// 2026-10-06 security fix (audit A-11): validate the peer id before writing it to the
+	// discovery table. An unauthenticated announce used to let anyone register arbitrary
+	// ids (including reserved names like "local") as dictionary keys, poisoning discovery.
+	if !validPeerID(body.PeerID) {
+		http.Error(w, "invalid peerId", http.StatusBadRequest)
+		return
+	}
 	const maxCollectionsPerAnnounce = 64
 	if len(body.Collections) > maxCollectionsPerAnnounce {
 		http.Error(w, "too many collections", http.StatusBadRequest)
@@ -695,8 +702,19 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleLeave POST /discover/leave graceful node shutdown.
+//
+// 2026-10-06 security fix (audit A-11): this endpoint used to be unauthenticated —
+// any caller could POST {"peerId":"<victim>"} and erase that node from every discovery
+// collection, peerStats, peerColls, and peerLinks graph edges. The operation is idempotent
+// (returns 200 + {"ok":true}), leaves no log, and the victim would only notice "nobody
+// connects to me" — a silent DoS vector. Now gated with opsTokenOK (same as /status).
+// No known client calls leave (nodes rely on heartbeat expiry for offline detection).
 func (s *Server) HandleLeave(w http.ResponseWriter, r *http.Request) {
 	if s.handleCORS(w, r) {
+		return
+	}
+	if !s.opsTokenOK(r) {
+		http.Error(w, "ops token required", http.StatusUnauthorized)
 		return
 	}
 	var body struct {
@@ -1001,4 +1019,33 @@ func randomID() string {
 		b[i] = chars[b[i]%byte(len(chars))]
 	}
 	return string(b)
+}
+
+// reservedPeerIDs are id strings that must never be registered by a signaling client
+// or announced to the discovery table. They are reserved for internal use (e.g. the
+// local WS management session in back/internal/transport/ws_session.go uses id "local").
+// Audit A-9/A-12 (2026-10-06): before this check, an attacker could register with
+// ?id=local on the signaling WS, and the server would overwrite message Src with that
+// id (readLoop:476), letting a spoofed "local" id pass the admin/PSK gate.
+var reservedPeerIDs = map[string]bool{
+	"local": true, // WSSession management channel id (ws_session.go:81)
+}
+
+// maxPeerIDLen caps the length of a peer id to prevent memory abuse via extremely long
+// self-reported identifiers (announced ids become dictionary keys in disc/peerStats/etc.).
+const maxPeerIDLen = 128
+
+// validPeerID reports whether id is usable as a signaling registration or discovery
+// peer id. It rejects empty, too-long, and reserved ids.
+func validPeerID(id string) bool {
+	if id == "" {
+		return false
+	}
+	if len(id) > maxPeerIDLen {
+		return false
+	}
+	if reservedPeerIDs[id] {
+		return false
+	}
+	return true
 }
