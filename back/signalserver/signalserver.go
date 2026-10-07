@@ -428,6 +428,16 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 		s.wsError(w, "Invalid token provided")
 		return
 	}
+	// 2026-10-06 security fix (audit A-12): validate the registered id before accepting
+	// the connection. The server overwrites message Src with cl.id (readLoop:476), so an
+	// unvalidated id that passes here will be used as the source identity for every
+	// message. Before this check, an attacker could register with ?id=local and have the
+	// server forward messages with Src="local", which the transport side (admin.go,
+	// psk.go) used to treat as the local management session.
+	if !validPeerID(id) {
+		s.wsError(w, "Invalid id provided")
+		return
+	}
 
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(*http.Request) bool { return true }, // self-hosted, whitelist configured by the caller
@@ -1001,4 +1011,34 @@ func randomID() string {
 		b[i] = chars[b[i]%byte(len(chars))]
 	}
 	return string(b)
+}
+
+// reservedPeerIDs are id strings that must never be registered by a signaling client.
+// They are reserved for internal use (e.g. the local WS management session in
+// back/internal/transport/ws_session.go uses id "local").
+// Audit A-12 (2026-10-06): before this check, an attacker could register with
+// ?id=local on the signaling WS, and the server would overwrite message Src with that
+// id (readLoop:476 `m.Src = cl.id`), letting a spoofed "local" id pass the admin/PSK
+// gate on the transport side.
+var reservedPeerIDs = map[string]bool{
+	"local": true, // WSSession management channel id (ws_session.go:81)
+}
+
+// maxPeerIDLen caps the length of a peer id to prevent memory abuse via extremely long
+// self-reported identifiers (registered ids become dictionary keys in clients/queues/disc).
+const maxPeerIDLen = 128
+
+// validPeerID reports whether id is usable as a signaling registration id. It rejects
+// empty, too-long, and reserved ids.
+func validPeerID(id string) bool {
+	if id == "" {
+		return false
+	}
+	if len(id) > maxPeerIDLen {
+		return false
+	}
+	if reservedPeerIDs[id] {
+		return false
+	}
+	return true
 }

@@ -223,6 +223,35 @@ func TestSignal_TokenWhitelist(t *testing.T) {
 	assert.Equal(t, "OPEN", m.Type)
 }
 
+// TestSignal_RejectsReservedID 发现背景：审计 A-12（2026-10-06）。
+// 旧实现 HandleWS 对 id 只判空，攻击者注册 ?id=local 后，readLoop:476 用注册 id 覆写
+// m.Src，使 transport 侧（admin.go / psk.go）的 "local" 判定被绕过。
+// 本用例锁定：保留名 → 400 拒绝，正常 id → OPEN 接受。
+func TestSignal_RejectsReservedID(t *testing.T) {
+	srv := NewServer("testkey")
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv.HandleWS(w, r)
+	}))
+	defer hs.Close()
+
+	// 保留名 "local" → HTTP 400 拒绝
+	conn, resp, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(hs.URL, "http")+"/peerjs?key=testkey&id=local&token=tok", nil)
+	if err == nil {
+		conn.Close()
+		t.Fatal("reserved id 'local' should be rejected")
+	}
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode,
+		"reserved id 'local' must return 400")
+
+	// 正常 id → OPEN 接受
+	a := dialWS(t, hs, "node-a", "tok")
+	defer a.Close()
+	m := readMsg(t, a)
+	assert.Equal(t, "OPEN", m.Type, "valid id should be accepted")
+}
+
 // TestDiscover_AnnounceAndQuery Node announces to a room -> query returns online nodes (expired ones evicted).
 // Discovery background: after self-hosting, room discovery was merged into the signaling server (replacing MQTT broadcast).
 func TestDiscover_AnnounceAndQuery(t *testing.T) {
