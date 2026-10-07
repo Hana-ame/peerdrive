@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -69,6 +70,17 @@ func TestIsArchive(t *testing.T) {
 	}
 }
 
+// systemAbsolutePath 返回当前平台上一个真实存在的绝对路径，用于「绝对路径必须被
+// 拒绝」的断言。不能写死 POSIX payload（/etc/passwd）：它在 Windows 上不是绝对
+// 路径（filepath.IsAbs 为 false，实际是卷相对路径），断言会假绿——2026-10-07
+// Windows CI 实测踩坑，与 AGENTS.md「Windows 语义必须真在 Windows 上跑过」一致。
+func systemAbsolutePath() string {
+	if runtime.GOOS == "windows" {
+		return `C:\Windows\System32\drivers\etc\hosts`
+	}
+	return "/etc/passwd"
+}
+
 func TestResolveEntry(t *testing.T) {
 	destDir := t.TempDir()
 	tests := []struct {
@@ -80,7 +92,7 @@ func TestResolveEntry(t *testing.T) {
 		{"nested path", "dir/test.txt", false},
 		{"path traversal", "../escape.txt", true},
 		{"path traversal deep", "../../escape.txt", true},
-		{"absolute path", "/etc/passwd", true},
+		{"absolute path", systemAbsolutePath(), true},
 		{"empty", "", true},
 		{"nul byte", "bad\x00name", true},
 		{"dot", ".", false},

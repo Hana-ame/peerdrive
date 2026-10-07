@@ -171,6 +171,14 @@ func resolveEntry(name, destDir string) (string, error) {
 	if filepath.IsAbs(rel) {
 		return "", fmt.Errorf("absolute path in archive: %s", name)
 	}
+	// Windows 语义：`\etc\passwd` 是卷相对路径（无盘符），filepath.IsAbs 返回
+	// false，但它以分隔符开头、会从当前盘根解析——同样按绝对路径拒绝
+	//（2026-10-07 Windows CI 实测：POSIX payload /etc/passwd 在 Windows 上
+	// 不被 IsAbs 拦下，断言假绿。见 AGENTS.md「Windows 语义必须真在 Windows
+	// 上跑过」）。
+	if strings.HasPrefix(rel, string(filepath.Separator)) {
+		return "", fmt.Errorf("absolute path in archive: %s", name)
+	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("path traversal in archive: %s", name)
 	}
