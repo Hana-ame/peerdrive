@@ -924,7 +924,10 @@ func (s *Server) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 // connects to me" — a silent DoS vector. Now gated with opsTokenOK (same as /status).
 // No known client calls leave (nodes rely on heartbeat expiry for offline detection).
 func (s *Server) HandleLeave(w http.ResponseWriter, r *http.Request) {
-	if s.handleCORS(w, r) {
+	// 审计 R2 MEDIUM（2026-10-08）：HandleLeave 是 ops 端点（需要 ops token），
+	// 不应向跨源暴露 Access-Control-Allow-Origin: *。改用 handleCORSPreflight
+	// （只处理 OPTIONS preflight，不设 Allow-Origin），与 HandleStatus 对齐。
+	if handleCORSPreflight(w, r) {
 		return
 	}
 	if !s.opsTokenOK(r) {

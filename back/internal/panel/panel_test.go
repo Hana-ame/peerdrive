@@ -39,6 +39,53 @@ func TestBootstrapInjection(t *testing.T) {
 	}
 }
 
+// TestBootstrapSignalKeyInjection 发现背景：审计 R2 HIGH（2026-10-08）。
+// /peerjs/node 不再返回 signal_key（匿名端点泄露凭据）。面板 bootstrap 改为
+// 从服务端注入 key——面板 HTML 由节点自身托管，注入是可信的。
+//
+// 测试：SetSignalKey 设置的 key 必须出现在产出 HTML 里；空 key 时不注入。
+func TestBootstrapSignalKeyInjection(t *testing.T) {
+	const testKey = "pd-signal-test-key-12345"
+	SetSignalKey(testKey)
+	defer SetSignalKey("")
+
+	req := httptest.NewRequest("GET", "/panel", nil)
+	req.Host = "127.0.0.1:3000"
+	rec := httptest.NewRecorder()
+	Handler("/panel").ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	// key 必须以 JS 字面量注入（"key" 参数被设置）
+	if !strings.Contains(body, testKey) {
+		t.Error("bootstrap HTML 里找不到注入的 signal key")
+	}
+	// 必须设置 key 参数
+	if !strings.Contains(body, "u.searchParams.set('key'") {
+		t.Error("bootstrap HTML 里缺少 set('key') 调用")
+	}
+}
+
+// TestBootstrapNoKeyInjection 确认空 key 时不注入（面板退回手填）。
+func TestBootstrapNoKeyInjection(t *testing.T) {
+	SetSignalKey("")
+	defer SetSignalKey("")
+
+	req := httptest.NewRequest("GET", "/panel", nil)
+	req.Host = "127.0.0.1:3000"
+	rec := httptest.NewRecorder()
+	Handler("/panel").ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	// 空 key 时条件必须为 false（if (false) ...），不会设置 key
+	if !strings.Contains(body, "if (false) u.searchParams.set('key'") {
+		t.Error("空 key 时 bootstrap 应该用 if (false) 条件跳过 key 注入")
+	}
+	// 空 key 时不应有 if (true) 条件
+	if strings.Contains(body, "if (true) u.searchParams.set('key'") {
+		t.Error("空 key 时不应用 if (true) 条件注入 key")
+	}
+}
+
 // TestHandlerRejectsOtherPaths 确认精确匹配：面板不能吃掉同前缀的其它 API。
 func TestHandlerRejectsOtherPaths(t *testing.T) {
 	for _, p := range []string{"/panel/peerjs/node", "/panels", "/peerjs/node"} {

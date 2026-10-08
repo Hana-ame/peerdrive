@@ -42,6 +42,21 @@ func PeerJSJS() []byte { return peerjsJS }
 // 标成 application/octet-stream 会被当成下载而不是打开。
 func HTML() []byte { return panelHTML }
 
+// signalKey is the PeerJS signaling key injected into the panel bootstrap at serve
+// time. Set via SetSignalKey before the panel Handler is used.
+//
+// ⚠️ 审计 R2 HIGH（2026-10-08）：/peerjs/node 不再返回 signal_key（它是注册任意
+// peer id 的完整凭据，匿名端点暴露等于凭据泄露，参照 R1 对 signalserver /status 的
+// 修复逻辑）。面板仍然需要 key 才能连信令——但面板是**由节点自身托管**的（同源），
+// 服务端在生成 HTML 时直接注入 key 是可信的，不走匿名 HTTP 端点。
+var signalKey string
+
+// SetSignalKey 设置面板 bootstrap 注入的信令 key。
+//
+// 必须在注册 /panel 路由之前调用（router.go）。空字符串 = 不注入 key
+// （面板退回让用户手填 key，不影响其它字段）。
+func SetSignalKey(key string) { signalKey = key }
+
 // Handler 把面板挂在指定路径上。
 //
 // ⚠️ 路径必须精确匹配，不能用前缀：面板内部会请求同源的 API
@@ -69,6 +84,10 @@ func Handler(path string) http.Handler {
 //
 // 注入点在第一个 <script> 之前，且用 location.search 改写而非替换正文：
 // 面板自己的 URLSearchParams(location.search) 会照常读到。
+//
+// signal_key 不从 /peerjs/node 取（审计 R2 HIGH：那个端点是匿名的，返回 key
+// 等于凭据泄露）。改为在 HTML 生成时由服务端注入——面板 HTML 是由节点自身
+// 托管的，注入是可信的。
 func withBootstrap(html []byte, host, panelPath string) []byte {
 	_ = host // 面板同源，host/port 直接从 location 取即可
 	// 内嵌小脚本：同源 → 反查本节点 ID → 补全 URL 参数 → 直接开始连接。
@@ -78,7 +97,7 @@ func withBootstrap(html []byte, host, panelPath string) []byte {
     // 已经手填过就别动（用户显式指定优先于自动推断）
     if (u.searchParams.get('node')) return;
     u.searchParams.set('auto', '1');
-    // 向托管本页的节点问两件事：我是谁 + 我在哪个信令上。
+    // 向托管本页的节点问：我是谁 + 我在哪个信令上。
     // ⚠️ 信令参数必须问节点，不能用 location：**面板要连的是「这个节点所在的
     // 信令」**，不是托管面板的那个 HTTP 端口。实测填本机 3000 会 ws 404。
     fetch(%s).then(r => r.json()).then(j => {
@@ -86,16 +105,19 @@ func withBootstrap(html []byte, host, panelPath string) []byte {
       u.searchParams.set('node', j.id);
       if (j.signal_host) u.searchParams.set('host', j.signal_host);
       if (j.signal_port) u.searchParams.set('port', j.signal_port);
-      if (j.signal_key)  u.searchParams.set('key', j.signal_key);
       if (j.signal_path) u.searchParams.set('path', j.signal_path);
       u.searchParams.set('secure', j.signal_secure ? '1' : '0');
+      // signal_key 由服务端注入（不经 /peerjs/node 泄露）
+      if (%v) u.searchParams.set('key', %s);
       history.replaceState(null, '', u.toString());
       location.reload();
     }).catch(() => {});
   } catch (e) { /* 推断失败就退回手填，不影响面板本身 */ }
 })();`
 
-	js := fmt.Sprintf(bs, jsonStr("/peerjs/node"))
+	js := fmt.Sprintf(bs, jsonStr("/peerjs/node"),
+		signalKey != "",
+		jsonStr(signalKey))
 	tag := "<script>" + js + "</script>\n"
 	idx := strings.Index(string(html), "<script>")
 	if idx < 0 {

@@ -441,6 +441,10 @@ func (rt *Router) Engine() *gin.Engine {
 	// 再挂 catch-all 通配会直接 panic
 	//   catch-all wildcard '*any' in new path '/panel/*any' conflicts with existing path segment ''
 	// 面板没有子资源，精确匹配 /panel 与 /panel/ 两个形态就够。
+	//
+	// 审计 R2 HIGH：/peerjs/node 不再返回 signal_key，面板 bootstrap 改为
+	// 从服务端注入 key（panel.SetSignalKey）。必须在注册 Handler 之前设置。
+	panel.SetSignalKey(cfg.PeerJSKey)
 	panelMux := http.NewServeMux()
 	panelMux.Handle("/panel", panel.Handler("/panel"))
 	panelMux.Handle("/panel/", panel.Handler("/panel"))
