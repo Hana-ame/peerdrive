@@ -21,8 +21,8 @@ require (
 )
 
 require (
+	github.com/Hana-ame/go-signalframe v0.0.0 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
-	golang.org/x/crypto v0.50.0 // indirect
 	lukechampine.com/uint128 v1.2.0 // indirect
 	modernc.org/cc/v3 v3.40.0 // indirect
 	modernc.org/ccgo/v3 v3.16.13 // indirect
@@ -164,6 +164,11 @@ replace github.com/Hana-ame/go-peerjs => ./peerjs
 
 replace github.com/Hana-ame/go-peerdrive-bt => ./p2p_bt
 
-require github.com/Hana-ame/go-peerserver v0.0.0
+replace github.com/Hana-ame/go-signalframe => ./signalframe
+
+require (
+	github.com/Hana-ame/go-peerserver v0.0.0
+	golang.org/x/crypto v0.50.0
+)
 
 replace github.com/Hana-ame/go-peerserver => ./signalserver
