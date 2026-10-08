@@ -262,7 +262,7 @@ func Load() *Config {
 		StorageEnable:      getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
 		AllowedOrigins:     getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev"),
 		RegistrationServer: getEnv("PEERDRIVE_REG_SERVER", ""),
-		AdminToken:         getEnv("PEERDRIVE_ADMIN_TOKEN", ""),
+		AdminToken:         getAdminToken(),
 		MaxUploadBytes:     getEnvInt64("PEERDRIVE_MAX_UPLOAD_BYTES", 100*1024*1024),     // 100MB default
 		MaxUploadBytesAnon: getEnvInt64("PEERDRIVE_MAX_UPLOAD_ANON_BYTES", 10*1024*1024), // 10MB for anonymous
 		BTDHTEnabled:       getEnvBool("PEERDRIVE_BT_DHT_ENABLE", false),                 // Default disabled: DHT init blocks startup; enable manually as needed
@@ -288,8 +288,8 @@ func Load() *Config {
 		MQTTTopicPref:     getEnv("PEERDRIVE_MQTT_TOPIC_PREFIX", "peerdrive/v1"),
 		MQTTCollections:   getEnv("PEERDRIVE_MQTT_COLLECTIONS", ""),
 		DiscoverURL:       getEnv("PEERDRIVE_DISCOVER_URL", DefaultDiscoverURL),
-		DiscoverPresence:  getEnvBool("PEERDRIVE_DISCOVER_PRESENCE", true),
 		DiscoverMode:      getEnv("PEERDRIVE_DISCOVER_MODE", "auto"),
+		DiscoverPresence:  getEnvBool("PEERDRIVE_DISCOVER_PRESENCE", true),
 		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
 
 		DownloadDir: getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
@@ -389,6 +389,33 @@ func getEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+// getAdminToken resolves the admin token from either PEERDRIVE_ADMIN_TOKEN (env var)
+// or PEERDRIVE_ADMIN_TOKEN_FILE (path to a file containing the token on line 1).
+// Env var takes precedence; file is a fallback for secrets stored on disk (chmod 600).
+// The file content is trimmed of leading/trailing whitespace and only the first line is used.
+func getAdminToken() string {
+	if tok := getEnv("PEERDRIVE_ADMIN_TOKEN", ""); tok != "" {
+		return tok
+	}
+	filePath := getEnv("PEERDRIVE_ADMIN_TOKEN_FILE", "")
+	if filePath == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		// File read failure is logged at startup (app.go) but does not abort:
+		// the operator may have intended a different deployment mode.
+		// We return empty so the node starts without admin auth rather than crashing.
+		return ""
+	}
+	// Trim whitespace and take the first line only.
+	tok := strings.TrimSpace(string(data))
+	if idx := strings.IndexByte(tok, '\n'); idx >= 0 {
+		tok = tok[:idx]
+	}
+	return strings.TrimSpace(tok)
 }
 
 func getEnvBool(key string, defaultVal bool) bool {

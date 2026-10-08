@@ -7,7 +7,12 @@ import path from 'node:path'
 // Node 22 原生 WebSocket；二进制用 ArrayBuffer（binaryType 设为 'arraybuffer'）。
 // 默认打本机默认端口（3000）；要打别的端口用 E2E_WS_URL 覆盖。
 const WS_URL = process.env.E2E_WS_URL || 'ws://localhost:3000/ws/peer'
+// 管理面鉴权：admin 帧的 token 字段会被后端注入 Authorization: Bearer
+// （admin.go buildAdminRequest）。E2E 由 workflow 以 E2E_ADMIN_TOKEN 提供，
+// 与节点的 PEERDRIVE_ADMIN_TOKEN 保持一致；未设置时保持匿名（auth 关闭场景）。
+const ADMIN_TOKEN = process.env.E2E_ADMIN_TOKEN || ''
 console.log('WS_URL =', WS_URL)
+console.log('ADMIN_TOKEN =', ADMIN_TOKEN ? 'set (len ' + ADMIN_TOKEN.length + ')' : '(empty — anonymous admin surface)')
 const ws = new WebSocket(WS_URL)
 ws.binaryType = 'arraybuffer'
 const pending = new Map()
@@ -17,7 +22,7 @@ function send(type, payload = {}) {
   const reqId = 'e2e-' + (++seq)
   return new Promise((resolve, reject) => {
     pending.set(reqId, { resolve, reject })
-    ws.send(JSON.stringify({ type, reqId, ...payload }))
+    ws.send(JSON.stringify({ type, reqId, ...(ADMIN_TOKEN ? { token: ADMIN_TOKEN } : {}), ...payload }))
     setTimeout(() => {
       if (pending.has(reqId)) { pending.delete(reqId); reject(new Error('timeout: ' + type + ' ' + reqId)) }
     }, 15000)
@@ -85,6 +90,7 @@ ws.addEventListener('open', async () => {
           type: 'admin', reqId,
           method: 'POST', path: '/files/upload', binary: true,
           filename: 'e2e-admin.txt', size: content.length,
+          ...(ADMIN_TOKEN ? { token: ADMIN_TOKEN } : {}),
         }))
         ws.send(content)
       })
