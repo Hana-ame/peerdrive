@@ -80,19 +80,28 @@ func envOr(k, def string) string {
 // -addr/-key/-tokens/-tls-cert/-tls-key，便于 `peersignal` → `peerdrive signal`
 // 平滑替换。
 func runSignal(args []string) {
+	cfg := config.Load()
 	fs := flag.NewFlagSet("signal", flag.ExitOnError)
-	addr := fs.String("addr", envOr("PEERSIGNAL_ADDR", ":9000"), "listen address")
+	addr := fs.String("addr", cfg.SignalAddr, "listen address")
 	// 默认 key 必须与 `peerdrive all`（config.PeerJSKey，同源 DefaultSignalKey）
 	// 以及独立 peersignal 一致——不一致时同一个二进制里 signal 与 all 连不上
 	// 彼此，且默认配置的节点都连不上（C-8，默认值闸门见 test/deployconsistency）。
-	key := fs.String("key", envOr("PEERSIGNAL_KEY", config.DefaultSignalKey), "API key (client must match)")
-	tokens := fs.String("tokens", os.Getenv("PEERJS_TOKENS"), "signaling token whitelist (comma-separated)")
-	cert := fs.String("tls-cert", os.Getenv("PEERSIGNAL_TLS_CERT"), "TLS certificate (PEM); with -tls-key serves HTTPS/WSS")
-	tlsKey := fs.String("tls-key", os.Getenv("PEERSIGNAL_TLS_KEY"), "TLS private key (PEM)")
-	cors := fs.String("cors-origin", os.Getenv("PEERSIGNAL_CORS"), "CORS allow-list for panel-facing REST endpoints")
+	key := fs.String("key", cfg.PeerJSKey, "API key (client must match)")
+	tokens := fs.String("tokens", cfg.SignalTokens, "signaling token whitelist (comma-separated)")
+	cert := fs.String("tls-cert", cfg.SignalTLSCert, "TLS certificate (PEM); with -tls-key serves HTTPS/WSS")
+	tlsKey := fs.String("tls-key", cfg.SignalTLSKey, "TLS private key (PEM)")
+	cors := fs.String("cors-origin", cfg.SignalCORS, "CORS allow-list for panel-facing REST endpoints")
 	_ = fs.Parse(args)
 
-	h := services.SignalHandler(*key, *tokens, *cors)
+	// Flag overrides applied to cfg so SignalHandler reads the final values.
+	cfg.SignalAddr = *addr
+	cfg.PeerJSKey = *key
+	cfg.SignalTokens = *tokens
+	cfg.SignalTLSCert = *cert
+	cfg.SignalTLSKey = *tlsKey
+	cfg.SignalCORS = *cors
+
+	h := services.SignalHandler(cfg)
 	if err := services.ServeHTTP(*addr, *cert, *tlsKey, h); err != nil {
 		fmt.Fprintf(os.Stderr, "peerdrive signal: %v\n", err)
 		os.Exit(1)

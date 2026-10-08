@@ -216,6 +216,29 @@ type Config struct {
 	AutoExtractMaxRatio   int   // PEERDRIVE_AUTO_EXTRACT_MAX_RATIO: max compression ratio (default 100)
 	AutoExtractMaxFiles   int   // PEERDRIVE_AUTO_EXTRACT_MAX_FILES: max number of extracted files (default 10000)
 	AutoExtractDeleteOrig bool  // PEERDRIVE_AUTO_EXTRACT_DELETE_ORIGINAL: delete archive after extraction (default true)
+
+	// ── Signal subcommand (PEERSIGNAL_* / PEERJS_TOKENS, backward compat with old peersignal binary) ──
+	//
+	// The `peerdrive signal` subcommand preserves the old peersignal env var names so
+	// existing deployment scripts don't break. These fields centralise what was
+	// previously read directly via os.Getenv inside services.go (C-2 fix): all env
+	// parsing now lives in config.Load().
+	SignalAddr    string // PEERSIGNAL_ADDR, default ":9000"
+	SignalTokens  string // PEERJS_TOKENS (comma-separated signalling token whitelist)
+	SignalCORS    string // PEERSIGNAL_CORS (comma-separated CORS allow-list)
+	SignalTLSCert string // PEERSIGNAL_TLS_CERT (PEM; with SignalTLSKey serves HTTPS/WSS)
+	SignalTLSKey  string // PEERSIGNAL_TLS_KEY (PEM)
+	// Rate-limit knobs for the public signal endpoints (N3). Defaults match
+	// cmd/peersignal's -rate-* flags; see SignalRateLimit in internal/services.
+	SignalRateAnnounce float64 // PEERDRIVE_SIGNAL_RATE_ANNOUNCE, default 1
+	SignalRateWS       float64 // PEERDRIVE_SIGNAL_RATE_WS, default 2
+	SignalRateID       float64 // PEERDRIVE_SIGNAL_RATE_ID, default 5
+	// RegDBPath is the registration server's SQLite path (PEERDRIVE_REG_DB).
+	// Empty → falls back to cfg.StorageDir + "/reg.db" then "./reg.db".
+	RegDBPath string
+	// LegacyDBPath is the old "DB_PATH" env var (without PEERDRIVE_ prefix)
+	// used by the reg server's DB path resolution chain.
+	LegacyDBPath string // DB_PATH
 }
 
 // IsOriginAllowed checks whether the given Origin is in the allow list, supporting
@@ -329,6 +352,17 @@ func Load() *Config {
 		DisableSwagger:  os.Getenv("PEERDRIVE_SWAGGER") == "off",
 		Host:            getEnv("PEERDRIVE_HOST", ""),
 		TrustedProxies:  getEnv("PEERDRIVE_TRUSTED_PROXIES", ""),
+
+		SignalAddr:         getEnv("PEERSIGNAL_ADDR", ":9000"),
+		SignalTokens:       getEnv("PEERJS_TOKENS", ""),
+		SignalCORS:         getEnv("PEERSIGNAL_CORS", ""),
+		SignalTLSCert:      getEnv("PEERSIGNAL_TLS_CERT", ""),
+		SignalTLSKey:       getEnv("PEERSIGNAL_TLS_KEY", ""),
+		SignalRateAnnounce: getEnvFloat("PEERDRIVE_SIGNAL_RATE_ANNOUNCE", 1),
+		SignalRateWS:       getEnvFloat("PEERDRIVE_SIGNAL_RATE_WS", 2),
+		SignalRateID:       getEnvFloat("PEERDRIVE_SIGNAL_RATE_ID", 5),
+		RegDBPath:          getEnv("PEERDRIVE_REG_DB", ""),
+		LegacyDBPath:       getEnv("DB_PATH", ""),
 	}
 }
 
