@@ -337,6 +337,70 @@ func (s *PeerJSService) serveList(c Session, r dcResp) {
 	_ = c.SendJSON(dcResp{Type: "list-resp", Files: out, Total: int64(len(out)), ReqID: r.ReqID})
 }
 
+// searchResp search 动词的**响应**帧。请求复用 dcResp（dispatchFrame 已经把它
+// Unmarshal 出来了），响应单独一个结构体——原因只有一个：total 不能带
+// omitempty。
+//
+// dcResp.Total 是共享字段，`json:"total,omitempty"` 不能动：req/meta 的 meta 帧
+// 用它传文件大小，pull 传 -1 表示「对端也不知道大小」，client.js 靠
+// `Number.isFinite(frame.total)` 判断（见 packages/peerdrive-client/src/client.js
+// 的 _failPending / _onMeta）。去掉 omitempty 会让每个不带 size 的帧都多出一个
+// `"total":0`，而 0 是合法文件大小——那等于给客户端塞一个假的「0 字节」信号。
+//
+// 而 search 的 total=0 是**必须出现**的：它是「没搜到」和「命中 0 条」的唯一
+// 区分点，丢了它客户端只能猜。共用字段解决不了这个矛盾，就换结构体。
+type searchResp struct {
+	Type   string     `json:"type"`
+	Files  []FileInfo `json:"files"`
+	Total  int64      `json:"total"`     // 无 omitempty：0 也必须上线
+	Offset int64      `json:"offset"`    // 无 omitempty：翻页状态回显
+	ReqID  string     `json:"reqId,omitempty"`
+}
+
+// serveSearch 处理 search：按 name/path 子串（可选 size 区间）检索未删除映射。
+// 请求 {type:"search", q?, minSize?, maxSize?, offset?, size?} → 响应
+// {type:"search-resp", files, total, offset}
+//
+// total 回**命中总数**（不是本页长度）：对端据此决定要不要再发一页。
+// 只回一页数据时客户端分不清「就这些」和「还有」——这与 list 的 total 语义不同
+// （list 的 total 就是本页长度，见 serveList），别混用。
+//
+// 路径脱敏：redactDisallowedPath 必做，且**不能省**。search 比 list 更危险——
+// 它的匹配条件本身就包含 path：对端可以拿一个猜测的目录前缀去问「有没有匹配的文件」，
+// 即使脱敏把 path 抹成空串，命中与否本身就是一个侧信道信号（能反推出「这台机器上
+// 有没有这个目录」）。这一层脱敏是本 PR 引入的能力上限；把跨根的目录名也藏掉需要
+// 改 file_index 的建模方式（例如把匹配限制在已声明的可读根内），超出本 PR 范围，
+// 但要在这里写清楚，别让下一个人以为 search 天然安全。
+func (s *PeerJSService) serveSearch(c Session, r dcResp) {
+	page, err := s.fileIndex.Search(SearchQuery{
+		Q:       r.Query,
+		MinSize: r.MinSize,
+		MaxSize: r.MaxSize,
+		Offset:  int(r.Offset),
+		// 复用 Size 字段承载 limit —— 与 list 的做法一致（list 也是用 size 当
+		// limit），不新造字段名，免得请求帧里出现两个意思一样的分页参数。
+		Limit: int(r.Size),
+	})
+	if err != nil {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})
+		return
+	}
+	if page.Files == nil {
+		page.Files = []FileInfo{}
+	}
+	out := make([]FileInfo, 0, len(page.Files))
+	for _, f := range page.Files {
+		out = append(out, s.redactDisallowedPath(f))
+	}
+	_ = c.SendJSON(searchResp{
+		Type:   "search-resp",
+		Files:  out,
+		Total:  page.Total,
+		Offset: int64(page.Offset),
+		ReqID:  r.ReqID,
+	})
+}
+
 // serveInfo 处理 info：按 hash 返回文件信息（download 前先查）。
 // 请求 {type:"info", hash} → 响应 {type:"info-resp", hash,size,name,path,seq} | err
 func (s *PeerJSService) serveInfo(c Session, r dcResp) {
