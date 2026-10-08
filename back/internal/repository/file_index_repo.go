@@ -34,6 +34,11 @@ func createFileIndexTable() {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_seq ON file_index(seq)`)
+	// idx_file_index_name: file_index_search.go 的搜索查询键。子串模式 ('%x%')
+	// 用不到 B-tree 索引，它只为前缀/精确匹配加速；代价是一次建索引，换来的是
+	// name 从「未被索引的普通列」变成文档化的可查列。IF NOT EXISTS 对已有部署
+	// 幂等（InitDB 每次启动都会跑到这里）。
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_name ON file_index(name)`)
 }
 
 // UpsertFileIndex registers/updates a mapping (called after create/upload succeeds), returns new seq.
