@@ -117,7 +117,7 @@ func TestSignal_OpenAndForward(t *testing.T) {
 	payload := json.RawMessage(`{"type":"OFFER","connectionId":"c1"}`)
 	require.NoError(t, a.WriteJSON(Message{Type: "OFFER", Dst: "node-b", Payload: payload}))
 	m := readMsg(t, b)
-	assert.Equal(t, "OFFER", m.Type)
+	assert.Equal(t, "OFFER", string(m.Type))
 	assert.Equal(t, "node-a", m.Src, "server must override src")
 	assert.Equal(t, "node-b", m.Dst)
 	assert.Equal(t, payload, m.Payload)
@@ -138,7 +138,7 @@ func TestSignal_OfflineQueue(t *testing.T) {
 	defer b.Close()
 	readMsg(t, b) // OPEN
 	m := readMsg(t, b)
-	assert.Equal(t, "OFFER", m.Type, "after coming online, the offline queue should be resent")
+	assert.Equal(t, "OFFER", string(m.Type), "after coming online, the offline queue should be resent")
 	assert.Equal(t, "node-a", m.Src)
 }
 
@@ -156,7 +156,7 @@ func TestSignal_LeaveBroadcast(t *testing.T) {
 
 	a.Close()
 	m := readMsg(t, b)
-	assert.Equal(t, "LEAVE", m.Type)
+	assert.Equal(t, "LEAVE", string(m.Type))
 	assert.Equal(t, "node-a", m.Src)
 }
 
@@ -176,7 +176,7 @@ func TestSignal_IDTaken(t *testing.T) {
 	require.NoError(t, err)
 	var m Message
 	require.NoError(t, conn2.ReadJSON(&m))
-	assert.Equal(t, "ID-TAKEN", m.Type)
+	assert.Equal(t, "ID-TAKEN", string(m.Type))
 	conn2.Close()
 }
 
@@ -222,7 +222,7 @@ func TestSignal_TokenWhitelist(t *testing.T) {
 	a := dialWS(t, hs, "node-a", "tok-a")
 	defer a.Close()
 	m := readMsg(t, a)
-	assert.Equal(t, "OPEN", m.Type)
+	assert.Equal(t, "OPEN", string(m.Type))
 }
 
 // TestSignal_RejectsReservedID 发现背景：审计 A-12（2026-10-06）。
@@ -251,7 +251,7 @@ func TestSignal_RejectsReservedID(t *testing.T) {
 	a := dialWS(t, hs, "node-a", "tok")
 	defer a.Close()
 	m := readMsg(t, a)
-	assert.Equal(t, "OPEN", m.Type, "valid id should be accepted")
+	assert.Equal(t, "OPEN", string(m.Type), "valid id should be accepted")
 }
 
 // TestDiscover_AnnounceAndQuery Node announces to a room -> query returns online nodes (expired ones evicted).
@@ -676,7 +676,7 @@ func TestHandleDeadDst(t *testing.T) {
 	connB.SetReadDeadline(time.Now().Add(3 * time.Second))
 	var m Message
 	require.NoError(t, connB.ReadJSON(&m))
-	assert.Equal(t, "LEAVE", m.Type)
+	assert.Equal(t, "LEAVE", string(m.Type))
 	assert.Equal(t, "dead-node", m.Src)
 
 	// A's remnants should be cleaned from disc/peerLinks/peerStats/peerColls

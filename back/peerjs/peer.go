@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Hana-ame/go-signalframe"
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
 )
@@ -362,10 +364,14 @@ type peerJSSignaller struct {
 	done      chan struct{} // H7: signaling disconnect notification (closed when readLoop exits due to network error/EOF)
 	doneOnce  sync.Once
 
-	// writeMu serializes WriteJSON: gorilla/websocket does not allow concurrent writes;
-	// concurrent sends from multiple goroutines (heartbeat/ICE candidates/ANSWER) would panic
-	// (actually triggered by 3-node interconnection integration tests).
-	writeMu sync.Mutex
+	// sender serializes writes to the signaling socket: gorilla/websocket does
+	// not allow concurrent writes, so the Sender's lock guards WriteJSON.
+	// Concurrent sends from multiple goroutines (heartbeat/ICE candidates/ANSWER)
+	// used to be serialized by a local writeMu — moved into the shared
+	// signalframe module (see signalframe package docs). The writer is attached
+	// on dial and detached on Close / readLoop exit; Send maps the module's
+	// ErrNotConnected back to the historical "peerjs: not connected" text.
+	sender *signalframe.Sender
 }
 
 func newPeerJSSignaller(id string, opts Options, route MessageHandler) Signaller {
@@ -379,6 +385,7 @@ func newPeerJSSignaller(id string, opts Options, route MessageHandler) Signaller
 		route:  route,
 		closed: make(chan struct{}),
 		done:   make(chan struct{}),
+		sender: signalframe.NewSender(nil, 15*time.Second),
 	}
 }
 
@@ -436,6 +443,7 @@ func (s *peerJSSignaller) dialWS(ctx context.Context) error {
 	s.conn = conn
 	s.connected = true
 	s.mu.Unlock()
+	s.sender.SetWriter(conn)
 
 	go s.readLoop(conn)
 	go s.heartbeatLoop()
@@ -455,6 +463,9 @@ func (s *peerJSSignaller) readLoop(conn *websocket.Conn) {
 			s.connected = false
 		}
 		s.mu.Unlock()
+		if matches {
+			s.sender.SetWriter(nil)
+		}
 		_ = conn.Close()
 		if matches {
 			// H7: non-active close (readLoop exits due to network error/EOF, conn is still the current connection)
@@ -500,17 +511,16 @@ func (s *peerJSSignaller) heartbeatLoop() {
 }
 
 // Send sends a message to the signaling server (the server overwrites src with the client's id).
+// Serialization + write deadline + concurrent-write guard live in signalframe.Sender;
+// ErrNotConnected is mapped back to the historical "peerjs: not connected" text.
 func (s *peerJSSignaller) Send(m Message) error {
-	s.mu.Lock()
-	conn := s.conn
-	s.mu.Unlock()
-	if conn == nil {
-		return fmt.Errorf("peerjs: not connected")
+	if err := s.sender.Send(m); err != nil {
+		if errors.Is(err, signalframe.ErrNotConnected) {
+			return fmt.Errorf("peerjs: not connected")
+		}
+		return err
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
-	return conn.WriteJSON(m)
+	return nil
 }
 
 // OnMessage registers a signaling message callback (injected internally by the framework; users do not need to call it).
@@ -536,6 +546,7 @@ func (s *peerJSSignaller) Close() error {
 		close(s.closed)
 	}
 	s.mu.Unlock()
+	s.sender.SetWriter(nil)
 	return conn.Close()
 }
 

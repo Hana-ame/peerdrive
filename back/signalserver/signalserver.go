@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Hana-ame/go-signalframe"
 	"github.com/gorilla/websocket"
 )
 
@@ -384,8 +385,8 @@ type client struct {
 	id     string
 	token  string
 	conn   *websocket.Conn
-	sendMu sync.Mutex // gorilla does not allow concurrent writes
-	last   time.Time  // last heartbeat
+	sender *signalframe.Sender // serializes writes; owns the write deadline (10s)
+	last   time.Time           // last heartbeat
 }
 
 // queuedMsg is an offline queue entry (with expiry time set at enqueue time).
@@ -395,12 +396,10 @@ type queuedMsg struct {
 }
 
 // Message is a signaling message (consistent with the peerjs client protocol).
-type Message struct {
-	Type    string          `json:"type"`
-	Src     string          `json:"src,omitempty"`
-	Dst     string          `json:"dst,omitempty"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-}
+// Alias of signalframe.Message — the single wire-format definition shared with
+// the peerjs client (back/peerjs). Previously this package kept its own copy;
+// any drift between the two endpoints would silently break OFFER/ANSWER relay.
+type Message = signalframe.Message
 
 // NewServer creates a signaling server.
 func NewServer(key string, opts ...Option) *Server {
@@ -657,7 +656,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		existing.closeConn()
 	}
-	cl := &client{id: id, token: token, conn: conn, last: time.Now()}
+	cl := &client{id: id, token: token, conn: conn, sender: signalframe.NewSender(conn, 10*time.Second), last: time.Now()}
 	s.clients[id] = cl
 	s.mu.Unlock()
 
@@ -1213,16 +1212,14 @@ func (s *Server) wsError(w http.ResponseWriter, msg string) {
 }
 
 func (cl *client) send(m Message) error {
-	cl.sendMu.Lock()
-	defer cl.sendMu.Unlock()
-	cl.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	return cl.conn.WriteJSON(m)
+	// Serialization + write deadline moved into signalframe.Sender: gorilla does
+	// not allow concurrent writes, and a stuck socket must not hold the relay
+	// for longer than the deadline (same 10s as before the move).
+	return cl.sender.Send(m)
 }
 
 func (cl *client) closeConn() {
-	cl.sendMu.Lock()
-	defer cl.sendMu.Unlock()
-	_ = cl.conn.Close()
+	_ = cl.sender.Close()
 }
 
 func raw(s string) json.RawMessage { return json.RawMessage(s) }
