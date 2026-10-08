@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -164,9 +165,13 @@ func TestDownloader_Ensure(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, sum+"\n", string(side))
 
-	fi, err := os.Stat(bin)
-	require.NoError(t, err)
-	assert.NotZero(t, fi.Mode().Perm()&0o111, "the binary must be executable")
+	// Windows has no executable bits — os.Chmod is advisory there (the production code
+	// already treats a chmod failure as non-fatal), so only assert the mode on Unix.
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(bin)
+		require.NoError(t, err)
+		assert.NotZero(t, fi.Mode().Perm()&0o111, "the binary must be executable")
+	}
 }
 
 // TestDownloader_Ensure_NoRedownload ensures a verified binary is reused without touching
@@ -333,14 +338,18 @@ func TestDownloader_Ensure_Validation(t *testing.T) {
 }
 
 // TestDownloader_URLs checks the GitHub release URL layout is the standard one.
+// Discovery background: the CI windows/amd64 cell failed this test — the expected paths were
+// hardcoded with '/' separators while filepath.Join uses '\\' there. Build the expectations
+// with filepath.Join so the assertion pins the layout, not the separator.
 func TestDownloader_URLs(t *testing.T) {
-	d := &Downloader{Repo: "Hana-ame/ech-proxy", Version: "v1.3.0", Asset: assetName, InstallDir: "/x"}
+	installDir := filepath.Join("x")
+	d := &Downloader{Repo: "Hana-ame/ech-proxy", Version: "v1.3.0", Asset: assetName, InstallDir: installDir}
 	assert.Equal(t,
 		"https://github.com/Hana-ame/ech-proxy/releases/download/v1.3.0/checksums.txt", d.ChecksumURL())
 	assert.Equal(t,
 		"https://github.com/Hana-ame/ech-proxy/releases/download/v1.3.0/ech-proxy-windows-amd64.exe", d.AssetURL())
-	assert.Equal(t, "/x/ech-proxy-windows-amd64.exe.sha256", d.SidecarPath())
-	assert.Equal(t, "/x/ech-proxy-windows-amd64.exe", d.BinaryPath())
+	assert.Equal(t, filepath.Join(installDir, assetName+".sha256"), d.SidecarPath())
+	assert.Equal(t, filepath.Join(installDir, assetName), d.BinaryPath())
 }
 
 // TestDownloader_DefaultDownloader wires the documented defaults for the current platform.
