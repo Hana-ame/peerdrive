@@ -217,6 +217,27 @@ type Config struct {
 	AutoExtractMaxFiles   int   // PEERDRIVE_AUTO_EXTRACT_MAX_FILES: max number of extracted files (default 10000)
 	AutoExtractDeleteOrig bool  // PEERDRIVE_AUTO_EXTRACT_DELETE_ORIGINAL: delete archive after extraction (default true)
 
+	// ── iwara.tv via ech-proxy (PEERDRIVE_IWARA_*, optional module) ──
+	//
+	// IwaraEnable is the master switch (PEERDRIVE_IWARA_ENABLE, default **false**).
+	// Why default off: the module downloads and runs an external executable
+	// (ech-proxy) and injects a user-supplied cookie into requests to a
+	// third-party site. Both are risky operations that must be explicitly
+	// opted into.
+	//
+	// When enabled, the module downloads ech-proxy's Windows executable,
+	// verifies it against the published SHA256, starts it as a child process,
+	// and routes iwara.tv API calls through the local TLS proxy. Download
+	// URLs are resolved via the same API flow used by open-source iwara
+	// downloaders (Izumiko/iwaradl, IwaraEnhance/IwaraDownloadTool).
+	IwaraEnable         bool
+	IwaraCookie         string // PEERDRIVE_IWARA_COOKIE: iwara login cookie (e.g. "iwara_session=...")
+	IwaraEchProxyExe    string // PEERDRIVE_IWARA_ECH_PROXY_EXE: local exe path (override auto-download)
+	IwaraEchProxyPort   int    // PEERDRIVE_IWARA_ECH_PROXY_PORT: ech-proxy listen port (default 8443)
+	IwaraEntrySuffix    string // PEERDRIVE_IWARA_ENTRY_SUFFIX: entry domain suffix (default "l.moonchan.xyz")
+	IwaraUpstreamSuffix string // PEERDRIVE_IWARA_UPSTREAM_SUFFIX: upstream domain (default "iwara.tv")
+	IwaraEchProxyVersion string // PEERDRIVE_IWARA_ECH_PROXY_VERSION: ech-proxy release tag (default "v1.3.0")
+
 	// ── Signal subcommand (PEERSIGNAL_* / PEERJS_TOKENS, backward compat with old peersignal binary) ──
 	//
 	// The `peerdrive signal` subcommand preserves the old peersignal env var names so
@@ -331,6 +352,15 @@ func Load() *Config {
 		AutoExtractMaxRatio:   getEnvInt("PEERDRIVE_AUTO_EXTRACT_MAX_RATIO", 100),
 		AutoExtractMaxFiles:   getEnvInt("PEERDRIVE_AUTO_EXTRACT_MAX_FILES", 10000),
 		AutoExtractDeleteOrig: getEnvBool("PEERDRIVE_AUTO_EXTRACT_DELETE_ORIGINAL", true),
+
+		// iwara.tv via ech-proxy (optional module)
+		IwaraEnable:          getEnvBool("PEERDRIVE_IWARA_ENABLE", false),
+		IwaraCookie:          getEnv("PEERDRIVE_IWARA_COOKIE", ""),
+		IwaraEchProxyExe:     getEnv("PEERDRIVE_IWARA_ECH_PROXY_EXE", ""),
+		IwaraEchProxyPort:    getEnvInt("PEERDRIVE_IWARA_ECH_PROXY_PORT", 8443),
+		IwaraEntrySuffix:     getEnv("PEERDRIVE_IWARA_ENTRY_SUFFIX", "l.moonchan.xyz"),
+		IwaraUpstreamSuffix:  getEnv("PEERDRIVE_IWARA_UPSTREAM_SUFFIX", "iwara.tv"),
+		IwaraEchProxyVersion: getEnv("PEERDRIVE_IWARA_ECH_PROXY_VERSION", "v1.3.0"),
 
 		// 2026-10-07: dropped the bogus "ipfs" entry from the default (was
 		// "local,ipfs,ipfsgw,btdht,http"). "ipfs" has not been in the fetcher
