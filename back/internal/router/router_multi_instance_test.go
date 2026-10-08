@@ -359,6 +359,32 @@ func TestNewRouter_PeerJSEnabled_KeepsItsOwnService(t *testing.T) {
 	assert.NotContains(t, bodyB, "node-A", "router B must not have picked up A's service")
 }
 
+// TestPeerJSNode_DoesNotLeakSignalKey 发现背景：审计 R2 HIGH（2026-10-08）。
+// /peerjs/node 是匿名端点，之前返回 signal_key（完整信令凭据）——任何匿名客户端
+// 读一次就拿到了。与 R1 对 signalserver /status 移除 key 的修复逻辑一致。
+func TestPeerJSNode_DoesNotLeakSignalKey(t *testing.T) {
+	t.Parallel()
+
+	svc := transport.NewPeerJSService(testCfg(), defaultTestStorageDir)
+	t.Cleanup(svc.Close)
+
+	rt, err := NewRouter(Deps{Cfg: testCfg(), PeerJSService: svc})
+	require.NoError(t, err)
+
+	engine := newPeerJSEngine(t, rt)
+	_, body := serveGET(engine, "/peerjs/node")
+
+	// signal_key must NOT appear — it is a shared secret (R2 HIGH fix).
+	assert.NotContains(t, body, "signal_key",
+		"/peerjs/node must not return signal_key (anonymous endpoint)")
+	// The other signal_* fields must still be present (panel bootstrap depends on them).
+	assert.Contains(t, body, "signal_host",
+		"/peerjs/node must still return signal_host for panel bootstrap")
+	assert.Contains(t, body, "signal_port")
+	assert.Contains(t, body, "signal_path")
+	assert.Contains(t, body, "signal_secure")
+}
+
 // newPeerJSEngine registers just the PeerJS route group onto its own engine,
 // with no auth in front, and returns it.
 func newPeerJSEngine(t *testing.T, rt *Router) *gin.Engine {

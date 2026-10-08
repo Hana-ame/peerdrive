@@ -721,12 +721,12 @@ func TestHandleID_CORS(t *testing.T) {
 	assert.Empty(t, rec.Body.String(), "preflight should not return a body")
 
 	// The discovery REST endpoints must stay open: the public panel and browser-side
-	// debugging need to read discovery results. **/status is deliberately excluded** since
-	// 2026-10-04 — it enumerates every node on the network and now requires an ops token
-	// (pinned by TestOpsEndpointsRequireToken below).
+	// debugging need to read discovery results. **/status and /discover/leave are
+	// deliberately excluded** — they are ops-facing and now require an ops token
+	// (pinned by TestOpsEndpointsRequireToken / TestLeaveRequiresOpsToken below).
+	// 审计 R2 MEDIUM（2026-10-08）：HandleLeave 也改为 handleCORSPreflight。
 	for name, h := range map[string]http.HandlerFunc{
 		"/discover/announce": srv.HandleAnnounce,
-		"/discover/leave":    srv.HandleLeave,
 		"/discover/nodes":    srv.HandleNodes,
 	} {
 		r := httptest.NewRecorder()
@@ -734,11 +734,18 @@ func TestHandleID_CORS(t *testing.T) {
 		assert.Equal(t, "*", r.Header().Get("Access-Control-Allow-Origin"), name+" missing cross-origin headers")
 	}
 
-	// /status must NOT be readable cross-origin, even before the token check runs.
+	// /status and /discover/leave must NOT be readable cross-origin, even before
+	// the token check runs. 审计 R2 MEDIUM：HandleLeave 原来用 handleCORS（wildcard），
+	// 现为 handleCORSPreflight（无 Allow-Origin），与 HandleStatus 对齐。
 	r := httptest.NewRecorder()
 	srv.HandleStatus(r, httptest.NewRequest(http.MethodGet, "/status", nil))
 	assert.Empty(t, r.Header().Get("Access-Control-Allow-Origin"),
 		"/status must not advertise a wildcard origin")
+
+	r = httptest.NewRecorder()
+	srv.HandleLeave(r, httptest.NewRequest(http.MethodGet, "/discover/leave", nil))
+	assert.Empty(t, r.Header().Get("Access-Control-Allow-Origin"),
+		"/discover/leave must not advertise a wildcard origin (ops endpoint)")
 }
 
 // TestOpsEndpointsRequireToken (2026-10-04) pins the actual security property, not just the

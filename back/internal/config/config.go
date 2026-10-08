@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"peerdrive/internal/log"
 )
 
 // Project-wide public signaling (everyone connects to it, no self-hosting needed).
@@ -403,11 +405,24 @@ func getAdminToken() string {
 	if filePath == "" {
 		return ""
 	}
+	// 审计 R2 MEDIUM（2026-10-08）：文件权限与路径校验。
+	// 注释推荐 chmod 600——检查并在过宽时告警，但不阻断启动
+	//（权限修复需要 root，强制拒绝会让整个节点无法启动）。
+	if fi, err := os.Stat(filePath); err == nil {
+		perm := fi.Mode().Perm()
+		if perm&0077 != 0 {
+			log.LogWarn("config: PEERDRIVE_ADMIN_TOKEN_FILE %s permissions %o — recommended 600 (secret file); group/other-readable mode weakens secret isolation", filePath, perm)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			log.LogWarn("config: PEERDRIVE_ADMIN_TOKEN_FILE %s is a symlink — consider using a regular file to avoid symlink-follow attacks", filePath)
+		}
+	}
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		// File read failure is logged at startup (app.go) but does not abort:
-		// the operator may have intended a different deployment mode.
-		// We return empty so the node starts without admin auth rather than crashing.
+		// 审计 R2 MEDIUM：文件读取失败必须记日志——之前的注释声称
+		// "logged at startup (app.go)" 但实际没有，静默返回空串
+		// 会让操作员误以为 admin auth 已启用。
+		log.LogError("config: PEERDRIVE_ADMIN_TOKEN_FILE %s read failed: %v — admin auth disabled (token empty)", filePath, err)
 		return ""
 	}
 	// Trim whitespace and take the first line only.
