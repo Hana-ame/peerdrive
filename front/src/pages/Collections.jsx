@@ -1,6 +1,8 @@
 // Module 3: Collections — browse local anonymous collections / create new from netdisk files / view entries and download.
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import * as ws from '../ws';
+import { entrySha } from '../lib/collectionTree';
 
 const VIS_LABEL = {
   public: { icon: '🌐', label: 'Public' },
@@ -15,6 +17,7 @@ function fmtTime(ts) {
 }
 
 export default function Collections() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState('list'); // list | create
   const [collections, setCollections] = useState(null);
   const [err, setErr] = useState('');
@@ -93,6 +96,11 @@ export default function Collections() {
     catch (e) { setErr(e?.message || String(e)); }
   };
 
+  // 取数键兼容新旧两种条目格式（sha/hash/providers，见 lib/collectionTree.js）：
+  // 后端落地新格式后 entries[].sha 才是主字段，旧代码只认 e.hash 会让详情页的
+  // 下载按钮在新格式下全部失效。
+  const entryHash = (e) => entrySha(e);
+
   const th = 'text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
 
   return (
@@ -150,17 +158,25 @@ export default function Collections() {
                                 <span className="text-xs text-gray-500">Loading...</span>
                               ) : (
                                 <div>
-                                  <p className="text-xs text-gray-500 mb-2">
-                                    hash: <span className="font-mono text-gray-400 break-all">{detail.hash}</span>
-                                  </p>
+                                  <div className="flex items-center justify-between gap-2 mb-2">
+                                    <p className="text-xs text-gray-500">
+                                      hash: <span className="font-mono text-gray-400 break-all">{detail.hash}</span>
+                                    </p>
+                                    <button
+                                      onClick={() => navigate(`/collection/${detail.hash}`)}
+                                      className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 shrink-0">
+                                      📁 Browse as folders
+                                    </button>
+                                  </div>
                                   {Array.isArray(detail.data.entries) && detail.data.entries.length > 0 ? (
                                     <ul className="space-y-1">
                                       {detail.data.entries.map((e, ei) => (
                                         <li key={ei} className="flex items-center gap-3 text-xs">
                                           <span className="flex-1 truncate text-gray-300">{e.path}</span>
-                                          <span className="font-mono text-xs text-gray-600">{String(e.hash || '').slice(0, 12)}…</span>
-                                          <button onClick={() => downloadEntry(e.hash, e.path)}
-                                            className="px-2 py-0.5 text-xs bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 rounded">Download</button>
+                                          <span className="font-mono text-xs text-gray-600">{String(entryHash(e) || '').slice(0, 12)}…</span>
+                                          <button onClick={() => entryHash(e) && downloadEntry(entryHash(e), e.path)}
+                                            disabled={!entryHash(e)}
+                                            className="px-2 py-0.5 text-xs bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 rounded disabled:opacity-40">Download</button>
                                         </li>
                                       ))}
                                     </ul>

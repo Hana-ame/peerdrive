@@ -8,6 +8,7 @@ import ConnectionStatus from './lib/ConnectionStatus';
 import Connect from './pages/Connect';
 import Drive from './pages/Drive';
 import Collections from './pages/Collections';
+import CollectionView from './pages/CollectionView';
 import Settings from './pages/Settings';
 import Transfers from './pages/Transfers';
 import BT from './pages/BT';
@@ -69,6 +70,8 @@ export default function App() {
             <Route path="/node" element={<NodeControl />} />
             <Route path="/drive" element={<Drive />} />
             <Route path="/collections" element={<Collections />} />
+            <Route path="/collection" element={<CollectionView />} />
+            <Route path="/collection/:hash" element={<CollectionView />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/transfers" element={<Transfers />} />
             <Route path="/bt" element={<BT />} />
