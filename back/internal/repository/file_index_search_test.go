@@ -124,10 +124,26 @@ func TestSearchFileIndex_MissAndEmpty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(6), total)
 	assert.Len(t, fs, 6)
+}
 
-	// 空库上的空查询：零行不报错
+// TestSearchFileIndex_EmptyDB 空库上的空查询：零行不报错。
+//
+// 为什么要单独一个测试而不在 MissAndEmpty 里再 initTestDB 一次：initTestDB 用的是
+// t.TempDir() **文件**库并注册 t.Cleanup(CloseDB)。同一个测试里调第二次，第一个
+// 库的句柄会被第二次 InitDB 顶掉，于是它的 cleanup 关的不是当前 DB——Windows 上
+// TempDir 的 RemoveAll 就报 "The process cannot access the file because it is being
+// used by another process"。Linux 上 unlink 打开中的文件是允许的，所以本地永远绿、
+// 只有 Windows CI 红（这正是 db_test.go 注释里说的那类坑）。一个测试一个库。
+func TestSearchFileIndex_EmptyDB(t *testing.T) {
 	initTestDB(t)
-	fs, total, err = SearchFileIndex(SearchQuery{})
+
+	fs, total, err := SearchFileIndex(SearchQuery{})
+	require.NoError(t, err)
+	assert.Nil(t, fs)
+	assert.Equal(t, int64(0), total)
+
+	// 带 q 的空查询同样不报错
+	fs, total, err = SearchFileIndex(SearchQuery{Q: "anything"})
 	require.NoError(t, err)
 	assert.Nil(t, fs)
 	assert.Equal(t, int64(0), total)
