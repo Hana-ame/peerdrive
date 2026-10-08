@@ -52,6 +52,10 @@ func repoRoot(t *testing.T) string {
 }
 
 // signalKeyRe 匹配形如 pd-signal-<hex> 的信令 key 字面量。
+// 刻意用 {8,} 而非精确长度：key 轮换时只改一处，正则不跟着变。
+// 下限 8 避免匹配误触（如 "pd-signal-test"），但不做上限约束。
+// 刻意用 {8,} 而非精确长度：key 轮换时只改一处，正则不跟着变。
+// 下限 8 避免匹配误触（如 "pd-signal-test"），但不做上限约束。
 var signalKeyRe = regexp.MustCompile(`pd-signal-[0-9a-f]{8,}`)
 
 // signalKeyScanExts 是要参与一致性检查的文本类型。

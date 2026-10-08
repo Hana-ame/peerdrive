@@ -371,6 +371,53 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 		deps.PeerPuller = puller
 	}
 
+	// BT DHT auto-enable (PEERDRIVE_DISCOVER_MODE fallback): when no discovery server is
+	// configured (mode=off or mode=peerjs), auto-enable BT DHT for **file discovery** (BEP-44).
+	// Note: BT DHT is file discovery, not node discovery. Node interconnection still relies on
+	// PEERDRIVE_PEERJS_PEERS static list. This fallback ensures the node can still find files
+	// on the BitTorrent DHT network even without a discovery server.
+	//
+	// We check os.LookupEnv to distinguish "not set" from "explicitly set to false":
+	// getEnvBool returns the default (false) for both cases, so we need the raw env check.
+	if cfg.BTDHTEnabled == false {
+		if _, explicit := os.LookupEnv("PEERDRIVE_BT_DHT_ENABLE"); !explicit {
+			mode := cfg.DiscoverMode
+			if mode == "off" || mode == "peerjs" {
+				cfg.BTDHTEnabled = true
+				log.LogInfo("main: BT DHT auto-enabled (file discovery fallback; discovery mode=%s). "+
+					"Note: BT DHT is for file discovery, not node discovery - node interconnect "+
+					"still relies on PEERDRIVE_PEERJS_PEERS static list", mode)
+			}
+		}
+	}
+
+	// Discovery configuration summary (PEERDRIVE_DISCOVER_MODE):
+	// Print current discovery mode and its concrete URL/broker at startup.
+	{
+		mode := cfg.DiscoverMode
+		if mode == "" {
+			mode = "auto"
+		}
+		switch mode {
+		case "off", "peerjs":
+			log.LogInfo("main: discovery mode=%s (no HTTP/MQTT discovery; nodes connect via PEERDRIVE_PEERJS_PEERS only)", mode)
+		case "discover":
+			log.LogInfo("main: discovery mode=discover, url=%s", cfg.DiscoverURL)
+		case "mqtt":
+			log.LogInfo("main: discovery mode=mqtt, broker=%s", cfg.MQTTBroker)
+		case "auto":
+			if cfg.DiscoverURL != "" {
+				log.LogInfo("main: discovery mode=auto, using HTTP url=%s", cfg.DiscoverURL)
+			} else if cfg.MQTTEnable {
+				log.LogInfo("main: discovery mode=auto, using MQTT broker=%s", cfg.MQTTBroker)
+			} else {
+				log.LogInfo("main: discovery mode=auto, no discovery server configured (no HTTP/MQTT discovery)")
+			}
+		default:
+			log.LogWarn("main: unknown discovery mode=%s, falling back to auto", mode)
+		}
+	}
+
 	// Set up routes (internally injects storageDir/downloader into context)
 	//
 	// Auth configuration is not passed separately any more: NewRouter derives its
