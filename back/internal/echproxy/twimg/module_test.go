@@ -174,7 +174,10 @@ func TestModule_ExposesConfig(t *testing.T) {
 }
 
 // TestNew_Defaults fills every zero field with the documented default.
+// Discovery background: New derives the release asset from the running platform, and there is
+// no darwin-arm64 asset (CI macos arm64 cell). Skip rather than assert a designed failure.
 func TestNew_Defaults(t *testing.T) {
+	skipIfUnsupportedPlatform(t)
 	m, err := New(Config{InstallDir: t.TempDir()})
 	require.NoError(t, err)
 

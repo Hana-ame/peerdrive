@@ -50,15 +50,20 @@ const (
 	ChecksumFile = "checksums.txt"
 )
 
-// assets maps (GOOS, GOARCH) → release asset name. The Windows .exe entries are the
-// stated target of this module; the others are included because the release publishes
-// them, which also makes the module exercisable on a Linux CI box.
+// assets mirrors checksums.txt for v1.3.0 exactly — five assets, no more and no less.
+// Keep the two in sync when DefaultVersion moves.
+//
+// Two notes:
+//   - Go reports GOARCH as "arm64", never "aarch64" (that is the C/Go-cross spelling the
+//     release does not use either), so there is no separate linux-aarch64 entry.
+//   - darwin/arm64 is intentionally absent: the release ships only darwin-amd64. A
+//     darwin-arm64 host therefore takes the explicit-error path instead of being handed
+//     a foreign binary. TestDefaultAsset pins both facts.
 var assets = map[string]string{
 	"windows/amd64": "ech-proxy-windows-amd64.exe",
 	"windows/arm64": "ech-proxy-windows-arm64.exe",
 	"linux/amd64":   "ech-proxy-linux-amd64",
 	"linux/arm64":   "ech-proxy-linux-arm64",
-	"linux/aarch64": "ech-proxy-linux-aarch64",
 	"darwin/amd64":  "ech-proxy-darwin-amd64",
 }
 

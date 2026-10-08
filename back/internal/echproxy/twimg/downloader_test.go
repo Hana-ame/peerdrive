@@ -344,7 +344,11 @@ func TestDownloader_URLs(t *testing.T) {
 }
 
 // TestDownloader_DefaultDownloader wires the documented defaults for the current platform.
+// Discovery background: CI runs this cell natively on macos arm64, and the ech-proxy release
+// ships no darwin-arm64 asset — the module must refuse there, so the test skips instead of
+// asserting a build that is designed to fail.
 func TestDownloader_DefaultDownloader(t *testing.T) {
+	skipIfUnsupportedPlatform(t)
 	d, err := DefaultDownloader(t.TempDir())
 	require.NoError(t, err)
 	assert.Equal(t, DefaultRepo, d.Repo)
