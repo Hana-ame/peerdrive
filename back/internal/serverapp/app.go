@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -33,6 +34,7 @@ import (
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
 	"peerdrive/internal/echproxy"
+	"peerdrive/internal/echproxy/twimg"
 	"peerdrive/internal/extractor"
 	"peerdrive/internal/log"
 	"peerdrive/internal/pathutil"
@@ -500,8 +502,46 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 		if err := mgr.Register(source.NewPeerSource(peerjsSvc)); err != nil {
 			log.LogWarn("main: register peer source: %v", err)
 		}
+
+		// Optional ech-proxy module (PEERDRIVE_ECH_PROXY_ENABLE, default off). It downloads
+		// and runs ech-proxy as a child process, then routes pbs.twimg.com/<path>?<query>
+		// through the local entry host https://twimg-pbs.l.moonchan.xyz:8443/<path>?<query>.
+		// When the flag is off this whole block is skipped, so the URL source keeps the exact
+		// nil-client (http.DefaultClient) path it has always had — the disabled case is a
+		// byte-identical no-op.
+		//
+		// There is deliberately no silent fallback to direct pbs.twimg.com traffic: if the
+		// download, the checksum, the port bind or the spawn fails, startup fails. An
+		// operator who opted into the module must be told it did not come up.
+		var urlClient *http.Client
+		if cfg.ECHProxyEnable {
+			if cfg.URLSourceTemplate == "" {
+				log.LogWarn("main: PEERDRIVE_ECH_PROXY_ENABLE=true but PEERDRIVE_URL_SOURCE_TEMPLATE is " +
+					"empty — the rewrite has no URL source to serve, ech-proxy was not started")
+			} else {
+				mod, err := buildECHProxyModule(cfg)
+				if err != nil {
+					return fail(fmt.Errorf("ech-proxy module: %w", err))
+				}
+				if err := mod.Start(context.Background()); err != nil {
+					return fail(fmt.Errorf("ech-proxy: %w", err))
+				}
+				// Stop after the DB/PeerJS shutdown hooks: the child is not depended on by
+				// anything else, but keeping it inside the same ordered list keeps the log
+				// readable (last-registered runs first).
+				shutdowns = append(shutdowns, func() {
+					if err := mod.Stop(context.Background()); err != nil {
+						log.LogWarn("main: stop ech-proxy: %v", err)
+					}
+				})
+				urlClient = mod.Client()
+				log.LogInfo("main: ech-proxy enabled — %s → %s://%s:%s via %s",
+					twimg.DefaultSrcHost, "https", mod.Entry().EntryHost, mod.Entry().Port, mod.Addr())
+			}
+		}
+
 		if cfg.URLSourceTemplate != "" {
-			if err := mgr.Register(source.NewURLSource(cfg.URLSourceTemplate, nil)); err != nil {
+			if err := mgr.Register(source.NewURLSource(cfg.URLSourceTemplate, urlClient)); err != nil {
 				log.LogWarn("main: register url source: %v", err)
 			}
 		}
@@ -663,4 +703,41 @@ func warnUnsupportedRoots(cfg *config.Config) {
 				c.name, c.val, pathutil.ExplainRootFailure(c.val, err))
 		}
 	}
+}
+
+// buildECHProxyModule translates the PEERDRIVE_ECH_PROXY_* env settings into a twimg.Module.
+// Kept separate from buildRouter so the flag/env mapping is testable in isolation.
+//
+// The entry port is derived from ECHProxyAddr rather than read separately: the rewrite
+// target is the same port the child process listens on, and keeping them in sync here
+// avoids a configuration pair that could silently disagree.
+func buildECHProxyModule(cfg *config.Config) (*twimg.Module, error) {
+	installDir := strings.TrimSpace(cfg.ECHProxyInstallDir)
+	if installDir == "" {
+		installDir = filepath.Join(cfg.StorageDir, "ech-proxy")
+	}
+	return twimg.New(twimg.Config{
+		Entry: twimg.Entry{
+			SrcHost:    twimg.DefaultSrcHost,
+			EntryHost:  cfg.ECHProxyEntryHost,
+			Port:       echProxyEntryPort(cfg.ECHProxyAddr),
+			ListenAddr: cfg.ECHProxyAddr,
+			SkipTLS:    cfg.ECHProxySkipTLS,
+		},
+		Repo:       twimg.DefaultRepo,
+		Version:    cfg.ECHProxyVersion,
+		InstallDir: installDir,
+		IPMode:     cfg.ECHProxyIPMode,
+		Attempts:   cfg.ECHProxyStartAttempts,
+	})
+}
+
+// echProxyEntryPort extracts the port from a "host:port" listen address. config.Validate
+// already guarantees the address parses when the module is enabled, so the fallback only
+// covers defensive callers.
+func echProxyEntryPort(addr string) string {
+	if _, port, err := net.SplitHostPort(addr); err == nil && strings.TrimSpace(port) != "" {
+		return port
+	}
+	return twimg.DefaultPort
 }
