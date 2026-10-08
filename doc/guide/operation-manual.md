@@ -210,6 +210,16 @@ npm run build && npm run preview
 | `PEERDRIVE_BT_DHT_ENABLE` | `true` | BT DHT |
 | `PEERDRIVE_IPFS_GATEWAY_ENABLE` | `true` | IPFS 网关 |
 | `PEERDRIVE_SWAGGER` | `on` | 是否挂 `/swagger` |
+| `PEERDRIVE_ECH_PROXY_ENABLE` | `false` | **ech-proxy 可选模块总开关，默认关**：开后 `pbs.twimg.com` 改写为 `twimg-pbs.l.moonchan.xyz:8443` 经本地 ech-proxy 出网，需要同时配 `PEERDRIVE_URL_SOURCE_TEMPLATE` |
+| `PEERDRIVE_ECH_PROXY_ADDR` | `127.0.0.1:8443` | 子进程监听地址（端口冲突会启动失败，不静默换端口） |
+| `PEERDRIVE_ECH_PROXY_INSTALL_DIR` | 空（=`<PEERDRIVE_STORAGE>/ech-proxy`） | 下载与校验文件存放位置 |
+| `PEERDRIVE_ECH_PROXY_VERSION` | `v1.3.0` | GitHub release 版本 |
+| `PEERDRIVE_ECH_PROXY_SKIP_TLS` | `true` | 跳过本地自签证书校验 |
+| `PEERDRIVE_ECH_PROXY_IP_MODE` | `v4` | 传给 ech-proxy 的 `-ip-mode`（`auto`/`v4`/`v6`） |
+
+> ech-proxy 模块是**下载即运行**：节点自己从 GitHub release 拉 exe + `checksums.txt`，
+> 校验不过 / 拉不到 / 端口被占 / 起不来，一律启动报错——**不会**悄悄退回直连 pbs.twimg.com。
+> 关掉开关时行为与无此模块的节点完全一致（不下载、不起子进程、不改写 URL）。
 
 全部变量见 [`doc/guide/single-binary-guide.md`](single-binary-guide.md) §5
 与 `back/internal/config/config.go`。

@@ -68,9 +68,9 @@ func TestGetEnvBool_ParsesFalseValues(t *testing.T) {
 // the wildcard logic from regressing.
 func TestIsOriginAllowed(t *testing.T) {
 	tests := []struct {
-		name     string
-		origins  string
-		origin   string
+		name      string
+		origins   string
+		origin    string
 		wantAllow bool
 	}{
 		// star allows everything
@@ -104,6 +104,144 @@ func TestIsOriginAllowed(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{AllowedOrigins: tt.origins}
 			assert.Equal(t, tt.wantAllow, cfg.IsOriginAllowed(tt.origin))
+		})
+	}
+}
+
+// unsetECHProxyEnv clears every PEERDRIVE_ECH_PROXY_* variable so a test observes the
+// documented defaults instead of whatever the developer's shell happens to export.
+func unsetECHProxyEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{
+		"PEERDRIVE_ECH_PROXY_ENABLE", "PEERDRIVE_ECH_PROXY_ADDR",
+		"PEERDRIVE_ECH_PROXY_INSTALL_DIR", "PEERDRIVE_ECH_PROXY_VERSION",
+		"PEERDRIVE_ECH_PROXY_ENTRY_HOST", "PEERDRIVE_ECH_PROXY_SKIP_TLS",
+		"PEERDRIVE_ECH_PROXY_IP_MODE", "PEERDRIVE_ECH_PROXY_START_ATTEMPTS",
+	} {
+		os.Unsetenv(k)
+		t.Cleanup(func() { os.Unsetenv(k) })
+	}
+}
+
+// TestLoad_ECHProxyDefaults covers the "optional module, default off" contract: with no
+// environment set at all the flag is false and every other setting sits on its documented
+// default, so a node that never mentions ech-proxy behaves exactly as before.
+func TestLoad_ECHProxyDefaults(t *testing.T) {
+	unsetECHProxyEnv(t)
+	cfg := Load()
+
+	assert.Equal(t, false, cfg.ECHProxyEnable, "the module must be opt-in")
+	assert.Equal(t, "127.0.0.1:8443", cfg.ECHProxyAddr)
+	assert.Equal(t, "", cfg.ECHProxyInstallDir, "empty means <PEERDRIVE_STORAGE>/ech-proxy, resolved by the caller")
+	assert.Equal(t, "v1.3.0", cfg.ECHProxyVersion)
+	assert.Equal(t, "twimg-pbs.l.moonchan.xyz", cfg.ECHProxyEntryHost)
+	assert.Equal(t, true, cfg.ECHProxySkipTLS, "the local proxy serves a self-signed cert")
+	assert.Equal(t, "v4", cfg.ECHProxyIPMode)
+	assert.Equal(t, 3, cfg.ECHProxyStartAttempts)
+}
+
+// TestLoad_ECHProxyEnvOverrides proves each env var reaches its field with the right type.
+func TestLoad_ECHProxyEnvOverrides(t *testing.T) {
+	unsetECHProxyEnv(t)
+	os.Setenv("PEERDRIVE_ECH_PROXY_ENABLE", "1")
+	os.Setenv("PEERDRIVE_ECH_PROXY_ADDR", "127.0.0.1:9443")
+	os.Setenv("PEERDRIVE_ECH_PROXY_INSTALL_DIR", "/var/lib/peerdrive/ech-proxy")
+	os.Setenv("PEERDRIVE_ECH_PROXY_VERSION", "v1.3.1")
+	os.Setenv("PEERDRIVE_ECH_PROXY_ENTRY_HOST", "twimg-pbs.l.moonchan.xyz")
+	os.Setenv("PEERDRIVE_ECH_PROXY_SKIP_TLS", "false")
+	os.Setenv("PEERDRIVE_ECH_PROXY_IP_MODE", "auto")
+	os.Setenv("PEERDRIVE_ECH_PROXY_START_ATTEMPTS", "7")
+	for _, k := range []string{
+		"PEERDRIVE_ECH_PROXY_ENABLE", "PEERDRIVE_ECH_PROXY_ADDR", "PEERDRIVE_ECH_PROXY_INSTALL_DIR",
+		"PEERDRIVE_ECH_PROXY_VERSION", "PEERDRIVE_ECH_PROXY_ENTRY_HOST", "PEERDRIVE_ECH_PROXY_SKIP_TLS",
+		"PEERDRIVE_ECH_PROXY_IP_MODE", "PEERDRIVE_ECH_PROXY_START_ATTEMPTS",
+	} {
+		t.Cleanup(func() { os.Unsetenv(k) })
+	}
+
+	cfg := Load()
+	assert.Equal(t, true, cfg.ECHProxyEnable)
+	assert.Equal(t, "127.0.0.1:9443", cfg.ECHProxyAddr)
+	assert.Equal(t, "/var/lib/peerdrive/ech-proxy", cfg.ECHProxyInstallDir)
+	assert.Equal(t, "v1.3.1", cfg.ECHProxyVersion)
+	assert.Equal(t, "twimg-pbs.l.moonchan.xyz", cfg.ECHProxyEntryHost)
+	assert.Equal(t, false, cfg.ECHProxySkipTLS)
+	assert.Equal(t, "auto", cfg.ECHProxyIPMode)
+	assert.Equal(t, 7, cfg.ECHProxyStartAttempts)
+}
+
+// echProxyTestConfig is a Config that passes every other Validate rule, so a test can
+// isolate the ech-proxy checks.
+func echProxyTestConfig() *Config {
+	return &Config{
+		Port: "3000", DBPath: "./peerdrive.db", StorageDir: "./storage",
+		DownloadDir: "./downloads", MaxPeers: 8,
+		PeerJSPort: "443", DiscoverMode: "auto",
+		ECHProxyEnable: true, ECHProxyAddr: "127.0.0.1:8443",
+		ECHProxyVersion: "v1.3.0", ECHProxyEntryHost: "twimg-pbs.l.moonchan.xyz",
+		ECHProxyIPMode: "v4", ECHProxyStartAttempts: 3,
+	}
+}
+
+// TestValidate_ECHProxyEnabled_AcceptsDefaults is the happy path: the documented default
+// values are legal, so `PEERDRIVE_ECH_PROXY_ENABLE=true` alone must start.
+func TestValidate_ECHProxyEnabled_AcceptsDefaults(t *testing.T) {
+	assert.NoError(t, Validate(echProxyTestConfig()))
+}
+
+// TestValidate_ECHProxyEnabled_InvalidValues is the fail-fast contract: every misconfigured
+// value is rejected at startup instead of degrading at runtime.
+func TestValidate_ECHProxyEnabled_InvalidValues(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		mutate  func(*Config)
+		errHint string
+	}{
+		{"empty version", func(c *Config) { c.ECHProxyVersion = "  " }, "PEERDRIVE_ECH_PROXY_VERSION cannot be empty"},
+		{"empty entry host", func(c *Config) { c.ECHProxyEntryHost = "" }, "PEERDRIVE_ECH_PROXY_ENTRY_HOST cannot be empty"},
+		{"bad ip mode", func(c *Config) { c.ECHProxyIPMode = "v8" }, "PEERDRIVE_ECH_PROXY_IP_MODE"},
+		{"zero attempts", func(c *Config) { c.ECHProxyStartAttempts = 0 }, "PEERDRIVE_ECH_PROXY_START_ATTEMPTS"},
+		{"negative attempts", func(c *Config) { c.ECHProxyStartAttempts = -2 }, "PEERDRIVE_ECH_PROXY_START_ATTEMPTS"},
+		{"empty addr", func(c *Config) { c.ECHProxyAddr = "  " }, "PEERDRIVE_ECH_PROXY_ADDR cannot be empty"},
+		{"addr without port", func(c *Config) { c.ECHProxyAddr = "127.0.0.1" }, "not a valid host:port"},
+		{"addr with bad port", func(c *Config) { c.ECHProxyAddr = "127.0.0.1:0" }, "has an invalid port"},
+		{"addr with high port", func(c *Config) { c.ECHProxyAddr = "127.0.0.1:70000" }, "has an invalid port"},
+		{"addr with non-numeric port", func(c *Config) { c.ECHProxyAddr = "127.0.0.1:bad" }, "has an invalid port"},
+		{"addr with empty host", func(c *Config) { c.ECHProxyAddr = ":8443" }, "has an empty host"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := echProxyTestConfig()
+			tt.mutate(cfg)
+			err := Validate(cfg)
+			assert.Error(t, err, "%s must fail validation", tt.name)
+			if err != nil {
+				assert.Contains(t, err.Error(), tt.errHint)
+			}
+		})
+	}
+}
+
+// TestValidate_ECHProxyDisabled_IgnoresBadValues is the mirror image of the previous test:
+// with the flag off, junk in the ech-proxy settings must not block startup, because a
+// disabled module must never affect a node's ability to boot.
+func TestValidate_ECHProxyDisabled_IgnoresBadValues(t *testing.T) {
+	cfg := echProxyTestConfig()
+	cfg.ECHProxyEnable = false
+	cfg.ECHProxyVersion = ""
+	cfg.ECHProxyEntryHost = ""
+	cfg.ECHProxyIPMode = "not-a-mode"
+	cfg.ECHProxyStartAttempts = 0
+	cfg.ECHProxyAddr = "not-an-address"
+	assert.NoError(t, Validate(cfg))
+}
+
+// TestValidate_ECHProxyAllIPModes enumerates the accepted -ip-mode values.
+func TestValidate_ECHProxyAllIPModes(t *testing.T) {
+	for _, mode := range []string{"", "auto", "v4", "v6"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := echProxyTestConfig()
+			cfg.ECHProxyIPMode = mode
+			assert.NoError(t, Validate(cfg), "ip-mode %q must be accepted", mode)
 		})
 	}
 }

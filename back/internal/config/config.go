@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"runtime"
 	"strconv"
@@ -147,6 +148,25 @@ type Config struct {
 	DownloadTimeoutSecs int
 
 	ForwardRules string // PEERDRIVE_FORWARD_RULES: "key1:8080,key2:8443" (forwarding auth whitelist; key is the credential; recommend chmod 600 on config file)
+
+	// ── Optional ech-proxy module (PEERDRIVE_ECH_PROXY_ENABLE, default OFF) ──
+	// When enabled, https://pbs.twimg.com/<path>?<q> is rewritten to
+	// https://twimg-pbs.l.moonchan.xyz:8443/<path>?<q> and routed through a local
+	// ech-proxy subprocess that the node downloads itself from the GitHub release channel.
+	// Disabled means the module's code never runs at all: no download, no child process,
+	// no rewrite — behaviour is identical to a node without the module.
+	//
+	// There is no silent fallback: if the download, the checksum, the port bind or the
+	// spawn fails, startup fails with an explicit error. A half-configured rewrite that
+	// quietly went direct would defeat the purpose of the module.
+	ECHProxyEnable        bool    // PEERDRIVE_ECH_PROXY_ENABLE (default false)
+	ECHProxyAddr          string  // PEERDRIVE_ECH_PROXY_ADDR (default 127.0.0.1:8443)
+	ECHProxyInstallDir    string  // PEERDRIVE_ECH_PROXY_INSTALL_DIR (default <PEERDRIVE_STORAGE>/ech-proxy)
+	ECHProxyVersion       string  // PEERDRIVE_ECH_PROXY_VERSION (default v1.3.0)
+	ECHProxyEntryHost     string  // PEERDRIVE_ECH_PROXY_ENTRY_HOST (default twimg-pbs.l.moonchan.xyz)
+	ECHProxySkipTLS       bool    // PEERDRIVE_ECH_PROXY_SKIP_TLS (default true: the proxy uses a local self-signed cert)
+	ECHProxyIPMode        string  // PEERDRIVE_ECH_PROXY_IP_MODE (default v4; also "auto", "v6", "")
+	ECHProxyStartAttempts int     // PEERDRIVE_ECH_PROXY_START_ATTEMPTS (default 3)
 
 	// ── HTTP hardening (see internal/router/middleware.go) ──
 	// RateLimitRPS is the per-IP request rate limit (PEERDRIVE_RATE_LIMIT_RPS, 0 = unlimited).
@@ -347,6 +367,15 @@ func Load() *Config {
 
 		ForwardRules: getEnv("PEERDRIVE_FORWARD_RULES", ""),
 
+		ECHProxyEnable:        getEnvBool("PEERDRIVE_ECH_PROXY_ENABLE", false),
+		ECHProxyAddr:          getEnv("PEERDRIVE_ECH_PROXY_ADDR", "127.0.0.1:8443"),
+		ECHProxyInstallDir:    getEnv("PEERDRIVE_ECH_PROXY_INSTALL_DIR", ""),
+		ECHProxyVersion:       getEnv("PEERDRIVE_ECH_PROXY_VERSION", "v1.3.0"),
+		ECHProxyEntryHost:     getEnv("PEERDRIVE_ECH_PROXY_ENTRY_HOST", "twimg-pbs.l.moonchan.xyz"),
+		ECHProxySkipTLS:       getEnvBool("PEERDRIVE_ECH_PROXY_SKIP_TLS", true),
+		ECHProxyIPMode:        getEnv("PEERDRIVE_ECH_PROXY_IP_MODE", "v4"),
+		ECHProxyStartAttempts: getEnvInt("PEERDRIVE_ECH_PROXY_START_ATTEMPTS", 3),
+
 		RateLimitRPS:    getEnvFloat("PEERDRIVE_RATE_LIMIT_RPS", 30),
 		DisableCSP:      os.Getenv("PEERDRIVE_CSP") == "off",
 		DisableSwagger:  os.Getenv("PEERDRIVE_SWAGGER") == "off",
@@ -412,6 +441,39 @@ func Validate(c *Config) error {
 	}
 	if c.DiscoverMode == "mqtt" && !c.MQTTEnable {
 		errs = append(errs, "PEERDRIVE_DISCOVER_MODE=mqtt requires PEERDRIVE_MQTT_ENABLE=true")
+	}
+
+	// ech-proxy: validate only when the optional module is enabled, so a node that never
+	// turns it on cannot be broken by a stale default. Every check is a hard startup
+	// error — the module refuses to start half-configured rather than degrading silently.
+	if c.ECHProxyEnable {
+		if strings.TrimSpace(c.ECHProxyVersion) == "" {
+			errs = append(errs, "PEERDRIVE_ECH_PROXY_VERSION cannot be empty when ech-proxy is enabled")
+		}
+		if strings.TrimSpace(c.ECHProxyEntryHost) == "" {
+			errs = append(errs, "PEERDRIVE_ECH_PROXY_ENTRY_HOST cannot be empty when ech-proxy is enabled")
+		}
+		switch c.ECHProxyIPMode {
+		case "", "auto", "v4", "v6":
+			// valid
+		default:
+			errs = append(errs, fmt.Sprintf("PEERDRIVE_ECH_PROXY_IP_MODE=%q is invalid (valid: auto, v4, v6)", c.ECHProxyIPMode))
+		}
+		if c.ECHProxyStartAttempts < 1 {
+			errs = append(errs, fmt.Sprintf("PEERDRIVE_ECH_PROXY_START_ATTEMPTS=%d must be >= 1", c.ECHProxyStartAttempts))
+		}
+		if addr := strings.TrimSpace(c.ECHProxyAddr); addr == "" {
+			errs = append(errs, "PEERDRIVE_ECH_PROXY_ADDR cannot be empty when ech-proxy is enabled")
+		} else {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("PEERDRIVE_ECH_PROXY_ADDR=%q is not a valid host:port", addr))
+			} else if strings.TrimSpace(host) == "" {
+				errs = append(errs, fmt.Sprintf("PEERDRIVE_ECH_PROXY_ADDR=%q has an empty host", addr))
+			} else if n, err := strconv.Atoi(port); err != nil || n <= 0 || n > 65535 {
+				errs = append(errs, fmt.Sprintf("PEERDRIVE_ECH_PROXY_ADDR=%q has an invalid port %q", addr, port))
+			}
+		}
 	}
 
 	if len(errs) == 0 {
