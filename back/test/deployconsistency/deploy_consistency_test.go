@@ -428,11 +428,11 @@ func TestSignalKeyDefaultsAreUnified(t *testing.T) {
 	//    config，只能用它自己那侧、同样指向权威值的 signalserver.DefaultKey。
 	for _, c := range []struct{ rel, want, why string }{
 		{"back/cmd/peerdrive/subcommands.go",
-			`envOr("PEERSIGNAL_KEY", config.DefaultSignalKey)`,
-			"peerdrive signal 的 -key 默认值"},
-		{"back/internal/services/services.go",
-			`envOr("PEERSIGNAL_KEY", config.DefaultSignalKey)`,
-			"SignalConfig / UnifiedMux(nil) 的默认值"},
+			`cfg.PeerJSKey`,
+			"peerdrive signal 的 -key 默认值（via config.Load → DefaultSignalKey）"},
+		{"back/internal/config/config.go",
+			`PeerJSKey:    getEnv("PEERDRIVE_PEERJS_KEY", DefaultSignalKey)`,
+			"config.Load 的权威默认值"},
 		{"back/signalserver/cmd/peersignal/main.go",
 			`flag.String("key", signalserver.DefaultKey`,
 			"独立 peersignal 的 -key 默认值"},

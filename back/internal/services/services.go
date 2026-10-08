@@ -16,8 +16,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"strconv"
 	"strings"
 
 	signalserver "github.com/Hana-ame/go-peerserver"
@@ -32,11 +30,14 @@ import (
 // registerSignalRoutes 登记同一份清单）。改这里等于改那个文件——两边分叉会让
 // 「peerdrive signal」和旧的 peersignal 行为不同，是个隐蔽的坑
 // （三处装配点由 signals_compat_test.go 专门对拍）。
-func SignalHandler(key, tokens, corsOrigin string) http.Handler {
-	return newSignalMux(key, tokens, corsOrigin)
+func SignalHandler(cfg *config.Config) http.Handler {
+	return newSignalMux(cfg)
 }
 
-func newSignalMux(key, tokens, corsOrigin string) *http.ServeMux {
+func newSignalMux(cfg *config.Config) *http.ServeMux {
+	key := cfg.PeerJSKey
+	tokens := cfg.SignalTokens
+	corsOrigin := cfg.SignalCORS
 	var opts []signalserver.Option
 	if tokens != "" {
 		opts = append(opts, signalserver.WithTokenWhitelist(strings.Split(tokens, ",")))
@@ -44,7 +45,7 @@ func newSignalMux(key, tokens, corsOrigin string) *http.ServeMux {
 	if corsOrigin != "" {
 		opts = append(opts, signalserver.WithCORSOrigins(strings.Split(corsOrigin, ",")))
 	}
-	opts = append(opts, signalserver.WithRateLimit(SignalRateLimit()))
+	opts = append(opts, signalserver.WithRateLimit(SignalRateLimit(cfg)))
 	srv := signalserver.NewServer(key, opts...)
 	srv.Start() // 后台清理过期离线队列（H3）
 
@@ -89,28 +90,15 @@ func registerSignalRoutes(mux *http.ServeMux, srv *signalserver.Server) {
 // 默认值与 cmd/peersignal 的 -rate-* 保持一致，理由见那里的注释。
 // 设为 0 或非法值退回默认：**不提供「关掉限流」**，因为这些端点按设计就是
 // 公开的，速率是唯一防线。
-func SignalRateLimit() signalserver.RateLimitConfig {
+func SignalRateLimit(cfg *config.Config) signalserver.RateLimitConfig {
 	return signalserver.RateLimitConfig{
-		AnnounceRPS:   signalRate("PEERDRIVE_SIGNAL_RATE_ANNOUNCE", 1),
+		AnnounceRPS:   cfg.SignalRateAnnounce,
 		AnnounceBurst: 10,
-		WSRPS:         signalRate("PEERDRIVE_SIGNAL_RATE_WS", 2),
+		WSRPS:         cfg.SignalRateWS,
 		WSBurst:       20,
-		IDRPS:         signalRate("PEERDRIVE_SIGNAL_RATE_ID", 5),
+		IDRPS:         cfg.SignalRateID,
 		IDBurst:       20,
 	}
-}
-
-// signalRate 读一个限流速率；未配置/非法时用默认值。
-func signalRate(env string, def float64) float64 {
-	v := os.Getenv(env)
-	if v == "" {
-		return def
-	}
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil || f <= 0 {
-		return def
-	}
-	return f
 }
 
 // RegPatterns 是注册服务的全部路由。UnifiedMux 依赖它把路由逐条搬进总 mux，
@@ -152,45 +140,10 @@ func ServeHTTP(addr, certFile, keyFile string, h http.Handler) error {
 	return http.ListenAndServe(addr, h)
 }
 
-// SignalConfig 从环境变量读信令配置，沿用旧 peersignal 的变量名。
-//
-// 变量名与旧独立二进制一致（PEERSIGNAL_ADDR / PEERSIGNAL_KEY /
-// PEERJS_TOKENS / PEERSIGNAL_CORS / PEERSIGNAL_TLS_CERT / PEERSIGNAL_TLS_KEY），
-// 所以 `peerdrive signal` 可直接替换旧部署里的 peersignal。
-func SignalConfig() (addr, key, tokens, cors, cert, keyFile string) {
-	addr = envOr("PEERSIGNAL_ADDR", ":9000")
-	// 默认值必须是权威信令 key（config.DefaultSignalKey），不是 peerjs：
-	// `peerdrive all` 走 config.PeerJSKey（同源），两边默认值不一致就等于同一个
-	// 二进制里 signal 与 all 连不上彼此（C-8）。对拍的默认值闸门见
-	// test/deployconsistency。
-	key = envOr("PEERSIGNAL_KEY", config.DefaultSignalKey)
-	tokens = os.Getenv("PEERJS_TOKENS")
-	cors = os.Getenv("PEERSIGNAL_CORS")
-	cert = os.Getenv("PEERSIGNAL_TLS_CERT")
-	keyFile = os.Getenv("PEERSIGNAL_TLS_KEY")
-	return
-}
-
-// RegAddr 返回注册服务的监听地址，沿用旧服务的 PORT/HOST 变量名。
-func RegAddr() string {
-	port := envOr("PORT", "4000")
-	host := os.Getenv("HOST") // 空 = 全网卡（与原服务一致）
-	return joinHostPort(host, port)
-}
-
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
-}
-
-func joinHostPort(host, port string) string {
-	if host == "" {
-		return ":" + port
-	}
-	return host + ":" + port
-}
+	// (C-2 fix) SignalConfig / RegAddr / envOr / joinHostPort removed:
+	// all signal-subcommand env parsing now lives in config.Load().
+	// The `peerdrive signal` subcommand reads its defaults from config.Load()
+	// and overrides them with flag values before calling SignalHandler(cfg).
 
 // UnifiedMux 把主服务、信令、注册服务合并到一个 http.Handler（同一端口）。
 //
@@ -211,28 +164,23 @@ func UnifiedMux(cfg *config.Config, ginHandler http.Handler) (*http.ServeMux, *r
 	mux := http.NewServeMux()
 
 	// cfg 允许为 nil：测试里只想验证路由归属时不必构造整个配置。
-	// nil 时退回环境变量 / 默认值，行为与 peerdrive signal 单跑时一致——
-	// 所以这里必须和 subcommands.go / SignalConfig 用**同一个**权威默认值（C-8）。
-	cors, sigKey := "", config.DefaultSignalKey
-	if cfg != nil {
-		cors, sigKey = cfg.AllowedOrigins, cfg.PeerJSKey
-	} else {
-		cors = os.Getenv("PEERDRIVE_ALLOWED_ORIGINS")
-		sigKey = envOr("PEERSIGNAL_KEY", config.DefaultSignalKey)
+	// nil 时用 config.Load() 读环境变量（C-2 fix：不再在 services.go 直读 env）。
+	if cfg == nil {
+		cfg = config.Load()
 	}
 
 	// 信令：显式登记，不用 newSignalMux 的 "/" 兜底（那是面板，会被主服务挡掉）。
 	sigOpts := []signalserver.Option{}
-	if toks := os.Getenv("PEERJS_TOKENS"); toks != "" {
+	if toks := cfg.SignalTokens; toks != "" {
 		sigOpts = append(sigOpts, signalserver.WithTokenWhitelist(strings.Split(toks, ",")))
 	}
-	if cors != "" {
+	if cors := cfg.AllowedOrigins; cors != "" {
 		sigOpts = append(sigOpts, signalserver.WithCORSOrigins(strings.Split(cors, ",")))
 	}
 	// 与 newSignalMux 读同一个限流来源（SignalRateLimit）——这两条装配路径
 	// 必须同时加限流，否则 `peerdrive all` 的信令端点又变回无限流。
-	sigOpts = append(sigOpts, signalserver.WithRateLimit(SignalRateLimit()))
-	sig := signalserver.NewServer(sigKey, sigOpts...)
+	sigOpts = append(sigOpts, signalserver.WithRateLimit(SignalRateLimit(cfg)))
+	sig := signalserver.NewServer(cfg.PeerJSKey, sigOpts...)
 	sig.Start()
 	// 与 newSignalMux 读同一份路由清单（registerSignalRoutes）。
 	registerSignalRoutes(mux, sig)
@@ -330,13 +278,16 @@ func withPrefix(prefix, pattern string) string {
 }
 
 func regDBPath(cfg *config.Config) string {
-	if p := os.Getenv("DB_PATH"); p != "" {
+	if cfg == nil {
+		cfg = config.Load()
+	}
+	if p := cfg.LegacyDBPath; p != "" {
 		return p
 	}
-	if p := os.Getenv("PEERDRIVE_REG_DB"); p != "" {
+	if p := cfg.RegDBPath; p != "" {
 		return p
 	}
-	if cfg != nil && cfg.StorageDir != "" {
+	if cfg.StorageDir != "" {
 		return cfg.StorageDir + "/reg.db"
 	}
 	return "./reg.db"

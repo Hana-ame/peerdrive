@@ -14,11 +14,13 @@ import (
 	"strings"
 	"time"
 	"testing"
+
+	"peerdrive/internal/config"
 )
 
 // TestSignalRoutesIndependent 单独跑信令时，全部 6 条路由都要在。
 func TestSignalRoutesIndependent(t *testing.T) {
-	mux := SignalHandler("k", "", "")
+	mux := SignalHandler(&config.Config{PeerJSKey: "k"})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
