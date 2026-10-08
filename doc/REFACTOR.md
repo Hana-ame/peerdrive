@@ -860,6 +860,24 @@ Fix: anchor as `/react/` and `/go/` (consistent with same section's `/docs/`). `
 > Also `.gitignore` writing "root directory temp dirs" must add leading `/` — without `/`
 > directory rules match **at any level**.
 
+### 3.21 Collection Module: Content-Addressed path+sha+preview JSON (2026-10-09)
+
+独立后端模块 `back/internal/collection/`（仅主模块 internal 用 → internal 包，参照 hashmap 先例；
+peerjs/signalserver/p2p_bt/signalframe 是独立库，无人会 import 它，故不建子模块）。
+
+- **Collection 本体 = JSON**：`{version, entries:[{path, sha, preview}]}`。`preview` 是条目预览图/
+  缩略图文件的 sha（可为空 = 无预览）。刻意极简——与 SQLite `collections` 表 / `AnonCollection`
+  （visibility/owner/tags/providers/版本链）区分，本模块只有 path+sha(+preview)。
+- **存 sha-文件系统**：`storageDir/<sha[:2]>/<sha>`，与 `anon_repo.SaveCollection`、`source.LocalSource`
+  CAS 回退、transport serveFile 同一布局。sha = **canonical JSON** 的 sha256（entries 先按
+  path/sha/preview 排序 → 同内容必同 sha，内容寻址确定性）。写路径走 `pathutil.SafeWriteFileAny`
+  （AGENTS 硬要求），不依赖 repository/DB。
+- **读出/响应**：`Load/ReadJSON(storageDir, sha)` 本地读出；peerjs 通道**零改动**可用——collection
+  就是普通 sha 文件，对端 `req` 帧经 LocalSource 未命中 file_index 时回退 CAS 即取到（与
+  NETDISK §M3 `FetchManifest` "content-addressed JSON, fetch by hash through the same req channel" 一致）。
+- **校验**：sha/preview 一律 strict 64hex（拼 CAS 路径用，大写会断路径）；path 非空且唯一；
+  Load 校验内容 sha 与地址一致（防文件与地址不符）。
+
 ## 5. E2E Pitfalls Encountered (All Fixed)
 
 | Pitfall | Fix |
