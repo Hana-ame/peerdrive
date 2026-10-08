@@ -3,10 +3,13 @@ module github.com/Hana-ame/go-peerjs
 go 1.26.2
 
 require (
+	github.com/Hana-ame/go-signalframe v0.0.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/pion/webrtc/v4 v4.1.2
 	github.com/stretchr/testify v1.11.1
 )
+
+replace github.com/Hana-ame/go-signalframe => ../signalframe
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect

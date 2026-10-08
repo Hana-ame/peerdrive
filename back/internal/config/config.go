@@ -159,14 +159,14 @@ type Config struct {
 	// There is no silent fallback: if the download, the checksum, the port bind or the
 	// spawn fails, startup fails with an explicit error. A half-configured rewrite that
 	// quietly went direct would defeat the purpose of the module.
-	ECHProxyEnable        bool    // PEERDRIVE_ECH_PROXY_ENABLE (default false)
-	ECHProxyAddr          string  // PEERDRIVE_ECH_PROXY_ADDR (default 127.0.0.1:8443)
-	ECHProxyInstallDir    string  // PEERDRIVE_ECH_PROXY_INSTALL_DIR (default <PEERDRIVE_STORAGE>/ech-proxy)
-	ECHProxyVersion       string  // PEERDRIVE_ECH_PROXY_VERSION (default v1.3.0)
-	ECHProxyEntryHost     string  // PEERDRIVE_ECH_PROXY_ENTRY_HOST (default twimg-pbs.l.moonchan.xyz)
-	ECHProxySkipTLS       bool    // PEERDRIVE_ECH_PROXY_SKIP_TLS (default true: the proxy uses a local self-signed cert)
-	ECHProxyIPMode        string  // PEERDRIVE_ECH_PROXY_IP_MODE (default v4; also "auto", "v6", "")
-	ECHProxyStartAttempts int     // PEERDRIVE_ECH_PROXY_START_ATTEMPTS (default 3)
+	ECHProxyEnable        bool   // PEERDRIVE_ECH_PROXY_ENABLE (default false)
+	ECHProxyAddr          string // PEERDRIVE_ECH_PROXY_ADDR (default 127.0.0.1:8443)
+	ECHProxyInstallDir    string // PEERDRIVE_ECH_PROXY_INSTALL_DIR (default <PEERDRIVE_STORAGE>/ech-proxy)
+	ECHProxyVersion       string // PEERDRIVE_ECH_PROXY_VERSION (default v1.3.0)
+	ECHProxyEntryHost     string // PEERDRIVE_ECH_PROXY_ENTRY_HOST (default twimg-pbs.l.moonchan.xyz)
+	ECHProxySkipTLS       bool   // PEERDRIVE_ECH_PROXY_SKIP_TLS (default true: the proxy uses a local self-signed cert)
+	ECHProxyIPMode        string // PEERDRIVE_ECH_PROXY_IP_MODE (default v4; also "auto", "v6", "")
+	ECHProxyStartAttempts int    // PEERDRIVE_ECH_PROXY_START_ATTEMPTS (default 3)
 
 	// ── HTTP hardening (see internal/router/middleware.go) ──
 	// RateLimitRPS is the per-IP request rate limit (PEERDRIVE_RATE_LIMIT_RPS, 0 = unlimited).
@@ -236,6 +236,27 @@ type Config struct {
 	AutoExtractMaxRatio   int   // PEERDRIVE_AUTO_EXTRACT_MAX_RATIO: max compression ratio (default 100)
 	AutoExtractMaxFiles   int   // PEERDRIVE_AUTO_EXTRACT_MAX_FILES: max number of extracted files (default 10000)
 	AutoExtractDeleteOrig bool  // PEERDRIVE_AUTO_EXTRACT_DELETE_ORIGINAL: delete archive after extraction (default true)
+
+	// ── iwara.tv via ech-proxy (PEERDRIVE_IWARA_*, optional module) ──
+	//
+	// IwaraEnable is the master switch (PEERDRIVE_IWARA_ENABLE, default **false**).
+	// Why default off: the module downloads and runs an external executable
+	// (ech-proxy) and injects a user-supplied cookie into requests to a
+	// third-party site. Both are risky operations that must be explicitly
+	// opted into.
+	//
+	// When enabled, the module downloads ech-proxy's Windows executable,
+	// verifies it against the published SHA256, starts it as a child process,
+	// and routes iwara.tv API calls through the local TLS proxy. Download
+	// URLs are resolved via the same API flow used by open-source iwara
+	// downloaders (Izumiko/iwaradl, IwaraEnhance/IwaraDownloadTool).
+	IwaraEnable          bool
+	IwaraCookie          string // PEERDRIVE_IWARA_COOKIE: iwara login cookie (e.g. "iwara_session=...")
+	IwaraEchProxyExe     string // PEERDRIVE_IWARA_ECH_PROXY_EXE: local exe path (override auto-download)
+	IwaraEchProxyPort    int    // PEERDRIVE_IWARA_ECH_PROXY_PORT: ech-proxy listen port (default 8443)
+	IwaraEntrySuffix     string // PEERDRIVE_IWARA_ENTRY_SUFFIX: entry domain suffix (default "l.moonchan.xyz")
+	IwaraUpstreamSuffix  string // PEERDRIVE_IWARA_UPSTREAM_SUFFIX: upstream domain (default "iwara.tv")
+	IwaraEchProxyVersion string // PEERDRIVE_IWARA_ECH_PROXY_VERSION: ech-proxy release tag (default "v1.3.0")
 
 	// ── Signal subcommand (PEERSIGNAL_* / PEERJS_TOKENS, backward compat with old peersignal binary) ──
 	//
@@ -337,9 +358,9 @@ func Load() *Config {
 		DiscoverPresence:  getEnvBool("PEERDRIVE_DISCOVER_PRESENCE", true),
 		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
 
-		DownloadDir: getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
+		DownloadDir:    getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
 		FolderMaxDepth: getEnvInt("PEERDRIVE_FOLDER_MAX_DEPTH", 0), // 0=unlimited (full recursion; >0 limits depth)
-		MaxPeers:    getEnvInt("PEERDRIVE_MAX_PEERS", 8),
+		MaxPeers:       getEnvInt("PEERDRIVE_MAX_PEERS", 8),
 
 		ShareEnable:      getEnvBool("PEERDRIVE_SHARE_ENABLE", false),
 		ShareCollections: getEnv("PEERDRIVE_SHARE_COLLECTIONS", ""),
@@ -351,6 +372,15 @@ func Load() *Config {
 		AutoExtractMaxRatio:   getEnvInt("PEERDRIVE_AUTO_EXTRACT_MAX_RATIO", 100),
 		AutoExtractMaxFiles:   getEnvInt("PEERDRIVE_AUTO_EXTRACT_MAX_FILES", 10000),
 		AutoExtractDeleteOrig: getEnvBool("PEERDRIVE_AUTO_EXTRACT_DELETE_ORIGINAL", true),
+
+		// iwara.tv via ech-proxy (optional module)
+		IwaraEnable:          getEnvBool("PEERDRIVE_IWARA_ENABLE", false),
+		IwaraCookie:          getEnv("PEERDRIVE_IWARA_COOKIE", ""),
+		IwaraEchProxyExe:     getEnv("PEERDRIVE_IWARA_ECH_PROXY_EXE", ""),
+		IwaraEchProxyPort:    getEnvInt("PEERDRIVE_IWARA_ECH_PROXY_PORT", 8443),
+		IwaraEntrySuffix:     getEnv("PEERDRIVE_IWARA_ENTRY_SUFFIX", "l.moonchan.xyz"),
+		IwaraUpstreamSuffix:  getEnv("PEERDRIVE_IWARA_UPSTREAM_SUFFIX", "iwara.tv"),
+		IwaraEchProxyVersion: getEnv("PEERDRIVE_IWARA_ECH_PROXY_VERSION", "v1.3.0"),
 
 		// 2026-10-07: dropped the bogus "ipfs" entry from the default (was
 		// "local,ipfs,ipfsgw,btdht,http"). "ipfs" has not been in the fetcher
@@ -376,11 +406,11 @@ func Load() *Config {
 		ECHProxyIPMode:        getEnv("PEERDRIVE_ECH_PROXY_IP_MODE", "v4"),
 		ECHProxyStartAttempts: getEnvInt("PEERDRIVE_ECH_PROXY_START_ATTEMPTS", 3),
 
-		RateLimitRPS:    getEnvFloat("PEERDRIVE_RATE_LIMIT_RPS", 30),
-		DisableCSP:      os.Getenv("PEERDRIVE_CSP") == "off",
-		DisableSwagger:  os.Getenv("PEERDRIVE_SWAGGER") == "off",
-		Host:            getEnv("PEERDRIVE_HOST", ""),
-		TrustedProxies:  getEnv("PEERDRIVE_TRUSTED_PROXIES", ""),
+		RateLimitRPS:   getEnvFloat("PEERDRIVE_RATE_LIMIT_RPS", 30),
+		DisableCSP:     os.Getenv("PEERDRIVE_CSP") == "off",
+		DisableSwagger: os.Getenv("PEERDRIVE_SWAGGER") == "off",
+		Host:           getEnv("PEERDRIVE_HOST", ""),
+		TrustedProxies: getEnv("PEERDRIVE_TRUSTED_PROXIES", ""),
 
 		SignalAddr:         getEnv("PEERSIGNAL_ADDR", ":9000"),
 		SignalTokens:       getEnv("PEERJS_TOKENS", ""),
@@ -473,6 +503,24 @@ func Validate(c *Config) error {
 			} else if n, err := strconv.Atoi(port); err != nil || n <= 0 || n > 65535 {
 				errs = append(errs, fmt.Sprintf("PEERDRIVE_ECH_PROXY_ADDR=%q has an invalid port %q", addr, port))
 			}
+		}
+	}
+
+	// Both ech-proxy consumers (the iwara module and the pbs.twimg.com module) spawn their
+	// own ech-proxy instance, and each one binds a local listener. iwara's listen host is
+	// hardcoded to 127.0.0.1 (see echproxy.ModuleConfig.Normalize), so at their shared
+	// defaults both would fight over 127.0.0.1:8443. Surface that here as a configuration
+	// error instead of as a late, cryptic "port already in use" from one of the two spawns.
+	if c.ECHProxyEnable && c.IwaraEnable {
+		host, port, err := net.SplitHostPort(strings.TrimSpace(c.ECHProxyAddr))
+		if err != nil {
+			host, port = "", ""
+		}
+		iwaraAddr := "127.0.0.1:" + strconv.Itoa(c.IwaraEchProxyPort)
+		if host == "127.0.0.1" && port == strconv.Itoa(c.IwaraEchProxyPort) {
+			errs = append(errs, "PEERDRIVE_ECH_PROXY_ADDR="+c.ECHProxyAddr+
+				" conflicts with the iwara module's listen address "+iwaraAddr+
+				" (PEERDRIVE_IWARA_ECH_PROXY_PORT) — give one module a different address")
 		}
 	}
 

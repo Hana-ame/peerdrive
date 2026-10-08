@@ -37,6 +37,11 @@ func (r *Router) injectControllerDeps() {
 	// (for /peerjs/share*) and the transport (for `share` frames).
 	controller.InitNodeShareController(r.deps.NodeShare)
 	controller.InitPeerPuller(r.deps.PeerPuller)
+	// File index search: /peerjs/files/search (local) + /peerjs/nodes/:peer/search (remote).
+	// PeerJSService itself implements the three methods of the controller's narrow
+	// fileIndexSearcher interface (Search / RequestSearch / ConnectedPeerIDs), so the
+	// injection is a direct pass-through with no adapter layer.
+	controller.InitFileSearchController(r.deps.PeerJSService)
 }
 
 // isLoopbackRemote checks if TCP peer is local (RemoteAddr like 127.0.0.1:54321 / [::1]:54321).
@@ -115,8 +120,23 @@ func (rt *Router) registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 	r.GET("/peerjs/nodes", controller.GetNodeMarket)
 	r.GET("/peerjs/nodes/joined", controller.GetJoinedNodes)
 	r.GET("/peerjs/nodes/:peer/shares", controller.GetPeerShares)
+	// ── File index search (feat/file-index-search) ──
+	// /peerjs/nodes/:peer/search: ask a peer about its index. Auth required: unlike
+	// /peerjs/nodes/:peer/shares (returns only the explicitly shared scope), search
+	// returns hits from the peer's **full local index** — strictly more sensitive
+	// information, so gate it at the same level as /peerjs/share (when no
+	// registration server is configured, auth passes through internally = single-machine mode).
+	r.GET("/peerjs/nodes/:peer/search", auth, controller.SearchPeerFiles)
 	r.POST("/peerjs/nodes/join", auth, controller.JoinNode)
 	r.DELETE("/peerjs/nodes/join", auth, controller.LeaveNode)
+
+	// GET /peerjs/files/search: search **this node's** index (admin panel's find-a-file box).
+	// Also auth-attached: response contains local file names/paths/sizes, same category as
+	// GET /peerjs/share. This endpoint does not depend on /peerjs being enabled on the
+	// remote side — it reads the local SQLite, so it makes more sense to register it in
+	// the /files group; it lives under /peerjs only because FileIndexService belongs to
+	// that service set, and moving it later is a one-line change.
+	r.GET("/peerjs/files/search", auth, controller.SearchLocalFiles)
 
 	// ── This node's shared scope (doc/NETDISK.md M2.6) ──
 	// Read also has auth: response contains local file names/sizes, which is admin surface info;

@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -38,6 +39,17 @@ const verbWaitTimeout = 15 * time.Second
 // 对应错误。连接关闭用 st.binDone（cleanupConn 会 close）感知，不需要
 // 等待槽里再挂一个 done channel。
 func (s *PeerJSService) requestVerb(peerID, reqType string, timeout time.Duration) ([]byte, error) {
+	return s.requestVerbPayload(peerID, dcReq{Type: reqType}, timeout)
+}
+
+// requestVerbPayload 与 requestVerb 同语义，但请求帧可带任意字段（search 的
+// q/minSize/maxSize/offset/limit 就走这里）。
+//
+// 为什么参数用 dcReq 而不是 any：dcReq 是「出站请求」的既有载体，加字段到它上面
+// 是安全的——它是**只发不收**的结构（出站不解析它），而 dcResp 才是收发共用的。
+// 用 any 会把「这个帧长什么样」的知识散到调用方。
+func (s *PeerJSService) requestVerbPayload(peerID string, req dcReq, timeout time.Duration) ([]byte, error) {
+	reqType := req.Type
 	s.mu.Lock()
 	conn := s.conns[peerID]
 	s.mu.Unlock()
@@ -58,7 +70,8 @@ func (s *PeerJSService) requestVerb(peerID, reqType string, timeout time.Duratio
 		delete(st.verbWaits, reqID)
 		st.mu.Unlock()
 	}
-	if err := conn.SendJSON(dcReq{Type: reqType, ReqID: reqID}); err != nil {
+	req.ReqID = reqID
+	if err := conn.SendJSON(req); err != nil {
 		cleanup()
 		return nil, err
 	}
@@ -107,6 +120,61 @@ func (s *PeerJSService) RequestShares(peerID string) (ShareSnapshot, error) {
 		resp.Files = []ShareFileInfo{}
 	}
 	return resp.ShareSnapshot, nil
+}
+
+// ErrPeerSearchUnsupported 对端不支持 search 动词（老版本节点）。
+var ErrPeerSearchUnsupported = errors.New("peer does not support the search verb")
+
+// RequestSearch 向直连对端发 search 帧，检索**对端**的文件索引。
+//
+// 与 RequestShares 的区别在语义上很重要：share 帧取的是对端**显式声明对外共享**的
+// 范围（运营者开了开关才有内容），search 取的是对端**本地全量索引**——所以对端必须
+// 自己设了 PSK 才应该理我们（search 在 servedVerbs 白名单里，见 psk.go）。
+// 调用方（HTTP 层）必须对此负责：未设 PSK 的节点上这个端点要么不注册，要么挂 auth。
+//
+// **对端版本兼容**：老对端的 dispatchFrame 没有 search 分支，会把它落到 default
+// → routeResponse → 无匹配等待槽 → 静默丢弃。也就是说光靠超时无法区分
+// 「对端是老版本」与「对端卡住了」。所以本方法用 requestVerbPayload 的超时做一次
+// **能力探测**：search 超时就直接归因为 ErrPeerSearchUnsupported，让上层回 501 而不是
+// 让用户对着一个 502 等满 15 秒。已支持的节点走的是正常快路径（毫秒级），
+// 不会命中这个分支。代价是：对端「支持但很慢」也会被报成不支持——这是可接受的
+// 误报方向（宁可说不支持让人手动重试，也不要说「坏网关」让人以为节点挂了）。
+//
+// 返回的 SearchPage.Total 是对端报的命中总数；Offset 回显请求的 offset
+// （负值已在对端归零）。
+func (s *PeerJSService) RequestSearch(peerID string, q SearchQuery) (*SearchPage, error) {
+	// 请求帧用 dcReq + 搜索字段：dcReq 是只发出站的载体，Query/MinSize/MaxSize
+	// 挂在它上面只为随帧发出（服务端 dispatchFrame 会把入站帧 Unmarshal 成
+	// dcResp，两个结构体的同名 json tag 对齐即可）。
+	req := dcReq{Type: "search", Offset: int64(q.Offset), Size: int64(q.Limit)}
+	raw, err := s.requestVerbPayload(peerID, searchOutFrame(req, q), verbWaitTimeout)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "timed out") {
+			return nil, fmt.Errorf("%w: %v", ErrPeerSearchUnsupported, err)
+		}
+		return nil, err
+	}
+	var resp struct {
+		searchResp
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("peerjs: bad search response: %w", err)
+	}
+	// 空数组兜底：对端可能回 null（旧实现/异常），调用方不该为此崩
+	if resp.Files == nil {
+		resp.Files = []FileInfo{}
+	}
+	return &SearchPage{Files: resp.Files, Total: resp.Total, Offset: int(resp.Offset)}, nil
+}
+
+// searchOutFrame 把 SearchQuery 填进出站帧。单独一个函数是为了让「请求帧的
+// 字段布局」只有一处定义——出站构造与 serveSearch 的解析必须逐字对齐，
+// 分开放迟早会对不上。
+func searchOutFrame(req dcReq, q SearchQuery) dcReq {
+	req.Query = q.Q
+	req.MinSize = q.MinSize
+	req.MaxSize = q.MaxSize
+	return req
 }
 
 // maxPeerFetchSize 远端声明上限（H6 修复）：data 帧声明的块大小/文件大小

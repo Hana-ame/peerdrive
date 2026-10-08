@@ -220,6 +220,12 @@ npm run build && npm run preview
 > ech-proxy 模块是**下载即运行**：节点自己从 GitHub release 拉 exe + `checksums.txt`，
 > 校验不过 / 拉不到 / 端口被占 / 起不来，一律启动报错——**不会**悄悄退回直连 pbs.twimg.com。
 > 关掉开关时行为与无此模块的节点完全一致（不下载、不起子进程、不改写 URL）。
+>
+> **和 iwara 模块的端口冲突**：`PEERDRIVE_IWARA_ENABLE=true` 的 iwara 模块会各起一个
+> ech-proxy 实例，绑定 `127.0.0.1:<PEERDRIVE_IWARA_ECH_PROXY_PORT>`（host 写死 127.0.0.1）。
+> 两个模块默认都是 8443，同时开启会在 `config.Validate()` 直接报错（提示改哪一个的地址）。
+> 想让两个都跑：把其中一个挪到别的端口，例如
+> `PEERDRIVE_ECH_PROXY_ADDR=127.0.0.1:8444` 或 `PEERDRIVE_IWARA_ECH_PROXY_PORT=8444`。
 
 全部变量见 [`doc/guide/single-binary-guide.md`](single-binary-guide.md) §5
 与 `back/internal/config/config.go`。

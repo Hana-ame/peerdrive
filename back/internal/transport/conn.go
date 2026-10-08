@@ -67,6 +67,14 @@ type dcReq struct {
 	Size   int64    `json:"size"`
 	ReqID  string   `json:"reqId,omitempty"`
 	Trace  []string `json:"trace,omitempty"`
+	// search 动词的查询字段（出站 RequestSearch 用；入站由 dispatchFrame
+	// Unmarshal 进 dcResp，两边 json tag 逐字对齐即可）。
+	// dcReq 是**只发不收**的结构（服务端不拿它解析任何东西），所以在这里
+	// 挂搜索专用字段不会和 dcResp 的同名 tag 打架。Size 复用为 limit
+	// ——与 serveSearch 的读法一致。
+	Query   string `json:"q,omitempty"`
+	MinSize *int64 `json:"minSize,omitempty"`
+	MaxSize *int64 `json:"maxSize,omitempty"`
 }
 
 // traceCtxKey context key (exported as TraceKey for source package to read; type is
@@ -78,7 +86,7 @@ type traceCtxKey struct{}
 var TraceKey = traceCtxKey{}
 
 // dcResp general response frame: shared by fetch responses (meta/data/done/err) and file
-// index verb responses (created/uploaded/ack/list-resp/info-resp/deleted/sync-resp).
+// index verb responses (created/uploaded/ack/list-resp/search-resp/info-resp/deleted/sync-resp).
 type dcResp struct {
 	Type    string     `json:"type"`
 	Hash    string     `json:"hash,omitempty"`
@@ -98,6 +106,16 @@ type dcResp struct {
 	URL     string     `json:"url,omitempty"`   // pull: address for this node to fetch (pull.go)
 	Psk     string     `json:"psk,omitempty"`   // psk-auth: peer's presented pre-shared key (psk.go)
 	Code    string     `json:"code,omitempty"`  // machine-readable error code in err frames (consumers branch on code)
+	// search 动词的查询字段（file_index_search.go）。**不放进独立结构体**是有意的：
+	// dispatchFrame 把每个入站文本帧统一 Unmarshal 成 dcResp，搜索请求得走同一条路；
+	// 拆成第二个结构体意味着要在 dispatch 里为它再开一次 Unmarshal 分支。
+	//
+	// MinSize/MaxSize 用 **指针** 而非 int64：size=0 是合法值（空文件在索引里
+	// 就是 0），omitempty 的 int64 分不出「没传」和「传了 0」，指针则天然分得开，
+	// 也才能表达「只限下界不加上界」。null / 缺省 → nil → 不施加该条件。
+	Query   string `json:"q,omitempty"`        // search: 子串（name 或 path）
+	MinSize *int64 `json:"minSize,omitempty"` // search: size 下界（含）
+	MaxSize *int64 `json:"maxSize,omitempty"` // search: size 上界（含）
 }
 
 // connState records the request state machine and response routing for a connection.
@@ -373,6 +391,12 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 			go s.servePull(c, r)
 		case "list":
 			go s.serveList(c, r)
+		case "search":
+			// 文件索引子串检索（serveSearch）。与 list 同一道门禁、同一条
+			// 响应路径，只是多一个 q 条件——单独 verb 而不是 list 的可选参数，
+			// 是为了让「无 q 的全量列」与「带 q 的检索」在协议上互不影响：
+			// 老对端发 list 的行为一个字都不会变。
+			go s.serveSearch(c, r)
 		case "share":
 			// Peer asks "what did you share" (share.go, netdisk target M2): **only returns
 			// explicitly shared scope**, strictly distinct from list (local management list

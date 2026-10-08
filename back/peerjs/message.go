@@ -7,24 +7,26 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/Hana-ame/go-signalframe"
 	"github.com/pion/webrtc/v4"
 )
 
 // MessageType is the signaling message type.
-// Extensibility: string type; custom message types can be used directly as literals without modifying the library.
-type MessageType string
+// Alias of signalframe.MessageType: the frame construction/serialization/send
+// logic lives in the shared signalframe module (see signalframe package docs).
+type MessageType = signalframe.MessageType
 
 // Standard types (consistent with peerjs-server's MessageType enum).
 const (
-	MsgOpen      MessageType = "OPEN"
-	MsgLeave     MessageType = "LEAVE"
-	MsgCandidate MessageType = "CANDIDATE"
-	MsgOffer     MessageType = "OFFER"
-	MsgAnswer    MessageType = "ANSWER"
-	MsgExpire    MessageType = "EXPIRE"
-	MsgHeartbeat MessageType = "HEARTBEAT"
-	MsgIDTaken   MessageType = "ID-TAKEN"
-	MsgError     MessageType = "ERROR"
+	MsgOpen      MessageType = signalframe.MsgOpen
+	MsgLeave     MessageType = signalframe.MsgLeave
+	MsgCandidate MessageType = signalframe.MsgCandidate
+	MsgOffer     MessageType = signalframe.MsgOffer
+	MsgAnswer    MessageType = signalframe.MsgAnswer
+	MsgExpire    MessageType = signalframe.MsgExpire
+	MsgHeartbeat MessageType = signalframe.MsgHeartbeat
+	MsgIDTaken   MessageType = signalframe.MsgIDTaken
+	MsgError     MessageType = signalframe.MsgError
 )
 
 // ConnectionType is the connection type (consistent with peerjs ConnectionType).
@@ -34,24 +36,12 @@ const (
 )
 
 // Message is the generic message transported between the signaling server and a peer.
-// payload is arbitrary JSON; its specific structure is determined by the message type (see OfferPayload, etc.).
-type Message struct {
-	Type    MessageType     `json:"type"`
-	Src     string          `json:"src,omitempty"`
-	Dst     string          `json:"dst,omitempty"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-}
+// Alias of signalframe.Message (the single wire-format definition).
+type Message = signalframe.Message
 
 // NewMessage constructs a message directed at dst.
 func NewMessage(t MessageType, dst string, payload any) Message {
-	m := Message{Type: t, Dst: dst}
-	if payload != nil {
-		b, err := json.Marshal(payload)
-		if err == nil {
-			m.Payload = b
-		}
-	}
-	return m
+	return signalframe.NewMessage(t, dst, payload)
 }
 
 // OfferPayload is the payload for an OFFER message (constructed by peerjs negotiator._makeOffer).

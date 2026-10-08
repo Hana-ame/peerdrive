@@ -56,7 +56,11 @@ const pskErrCode = "PSK_REQUIRED"
 var servedVerbs = map[string]bool{
 	"req": true, "create": true, "upload": true, "list": true,
 	"share": true, "info": true, "delete": true, "sync": true,
-	"pull": true, // Network ingestion (pull.go): lets a node make an outbound request on
+	// search: 同 list —— 对端让它检索本地索引，是「对端让我做事」且会枚举本地
+	// 元数据（文件名/路径/大小），必须与 list 一样过门禁，不能因为「新加的」
+	// 就漏在名单外。
+	"search": true,
+	"pull":   true, // Network ingestion (pull.go): lets a node make an outbound request on
 	// behalf of the peer, the most gate-worthy verb of all
 	"fwd-open": true, "fwd-auth": true, "fwd-data": true, "fwd-close": true,
 }

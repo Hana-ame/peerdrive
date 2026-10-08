@@ -23,6 +23,8 @@ import (
 //	create   {type:"create", path}            → created {hash,size,name,path}
 //	upload   {type:"upload", name,size}       流式：meta → data×N → uploaded {hash,path}
 //	list     {type:"list", offset?,limit?}    → list-resp {files,total}
+//	search   {type:"search", q?,minSize?,maxSize?,offset?,limit?}
+//	                                       → search-resp {files,total,offset}（子串匹配 name/path）
 //	info     {type:"info", hash}              → info-resp {hash,size,name,path,seq}
 //	download 复用现有 req（返回文件信息由 info 承担）
 //	sync     {type:"sync", seq}               → sync-resp {files,lastSeq}（metadata 增量同步）
@@ -582,6 +584,58 @@ func (s *FileIndexService) List(offset, limit int) ([]FileInfo, error) {
 		out = append(out, FileInfo{Hash: r.Hash, Path: r.Path, Name: r.Name, Size: r.Size, Seq: r.Seq})
 	}
 	return out, nil
+}
+
+// SearchQuery FileIndexService.Search 的查询参数（= repository.SearchQuery 的
+// 传输层别名，见 Search）。
+type SearchQuery = repository.SearchQuery
+
+// 搜索分页边界的传输层别名（定义在 repository，这里转发给 HTTP/控制器层用——
+// 它们不该为了一个数字而 import repository）。
+const (
+	SearchDefaultLimit = repository.SearchDefaultLimit
+	SearchMaxLimit     = repository.SearchMaxLimit
+)
+
+// SearchPage 搜索结果的一页。
+type SearchPage struct {
+	Files  []FileInfo
+	Total  int64 // 命中总数（不是本页长度）—— 调用方据此判断还有没有下一页
+	Offset int   // 本页起点（回显，便于调用方翻页）
+}
+
+// Search 在文件索引里按文件名/路径子串检索（可选 size 区间过滤）。
+//
+// 与 List 的分工：List 是「全量清单 + 分页」，运维者翻页找文件；Search 是
+// 「我知道大概叫什么」，一次查完。两者共用 file_index 表，语义差别只在
+// WHERE 条件与默认 limit（List 默认 1000 全量口径，Search 默认 100 分页口径）。
+//
+// 匹配语义（repository.SearchFileIndex 里有完整论证）：
+//   - q 对 **name 和 path 都做子串匹配**（basename 之外还能按目录搜）
+//   - ASCII 大小写不敏感；空 q = 不按名称过滤
+//   - % _ \ 按字面量处理（不当通配符）
+//   - deleted 行永不返回
+//
+// limit 的 clamp 语义与 List 相同（远端可控值必须兜上限），但上限取
+// repository.SearchMaxLimit 而不是写死 1000 —— 单一出处，避免两处数字漂移。
+func (s *FileIndexService) Search(q SearchQuery) (*SearchPage, error) {
+	if q.Limit > repository.SearchMaxLimit {
+		q.Limit = repository.SearchMaxLimit
+	}
+	rows, total, err := repository.SearchFileIndex(q)
+	if err != nil {
+		return nil, err
+	}
+	if q.Offset < 0 {
+		q.Offset = 0
+	}
+	// 返回空切片而非 nil：调用方（HTTP/帧）直接 JSON 编码，nil 会变成
+	// "files":null，前端得额外判空分支。
+	out := make([]FileInfo, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, FileInfo{Hash: r.Hash, Path: r.Path, Name: r.Name, Size: r.Size, Seq: r.Seq})
+	}
+	return &SearchPage{Files: out, Total: total, Offset: q.Offset}, nil
 }
 
 // Info 按 hash 返回文件信息（download 前先 info 拿 name/path/size）。

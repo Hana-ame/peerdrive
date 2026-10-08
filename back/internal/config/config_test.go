@@ -245,3 +245,56 @@ func TestValidate_ECHProxyAllIPModes(t *testing.T) {
 		})
 	}
 }
+
+// echProxyConflictConfig returns a config with both ech-proxy consumers enabled at their
+// shared defaults (127.0.0.1:8443), which is the pair that must not be allowed to boot.
+func echProxyConflictConfig() *Config {
+	cfg := echProxyTestConfig()
+	cfg.ECHProxyAddr = "127.0.0.1:8443"
+	cfg.IwaraEnable = true
+	cfg.IwaraEchProxyPort = 8443
+	return cfg
+}
+
+// TestValidate_ECHProxyIwaraAddrConflict: both modules each spawn their own ech-proxy
+// instance and each binds a local listener, so leaving both at the default address makes
+// them fight over 127.0.0.1:8443. Report it at startup as a config error rather than as a
+// late, cryptic bind failure from whichever module happened to spawn second.
+func TestValidate_ECHProxyIwaraAddrConflict(t *testing.T) {
+	err := Validate(echProxyConflictConfig())
+	assert.Error(t, err)
+	if err != nil {
+		assert.Contains(t, err.Error(), "conflicts with the iwara module's listen address 127.0.0.1:8443")
+	}
+}
+
+// TestValidate_ECHProxyIwaraAddrDiffer: either module moved to its own address resolves the
+// conflict — this is the supported way to run both at once.
+func TestValidate_ECHProxyIwaraAddrDiffer(t *testing.T) {
+	cfg := echProxyConflictConfig()
+	cfg.IwaraEchProxyPort = 8444
+	assert.NoError(t, Validate(cfg), "different iwara port must be accepted")
+
+	cfg = echProxyConflictConfig()
+	cfg.ECHProxyAddr = "127.0.0.1:8444"
+	assert.NoError(t, Validate(cfg), "different twimg address must be accepted")
+}
+
+// TestValidate_ECHProxyIwaraNonLoopbackTwimg: the iwara module binds 127.0.0.1, so a
+// non-loopback twimg address never collides with it.
+func TestValidate_ECHProxyIwaraNonLoopbackTwimg(t *testing.T) {
+	cfg := echProxyConflictConfig()
+	cfg.ECHProxyAddr = "0.0.0.0:8443"
+	assert.NoError(t, Validate(cfg), "non-loopback twimg address cannot collide with iwara")
+}
+
+// TestValidate_ECHProxyIwaraDisabledNeither: the check only applies when both modules are on.
+func TestValidate_ECHProxyIwaraDisabledNeither(t *testing.T) {
+	cfg := echProxyConflictConfig()
+	cfg.ECHProxyEnable = false
+	assert.NoError(t, Validate(cfg), "disabled twimg module must not trip the check")
+
+	cfg = echProxyConflictConfig()
+	cfg.IwaraEnable = false
+	assert.NoError(t, Validate(cfg), "disabled iwara module must not trip the check")
+}

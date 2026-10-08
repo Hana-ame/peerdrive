@@ -33,6 +33,7 @@ import (
 
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
+	"peerdrive/internal/echproxy"
 	"peerdrive/internal/echproxy/twimg"
 	"peerdrive/internal/extractor"
 	"peerdrive/internal/log"
@@ -371,6 +372,44 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 				cfg.AutoExtractMaxSize, cfg.AutoExtractMaxRatio, cfg.AutoExtractMaxFiles, cfg.AutoExtractDeleteOrig)
 		}
 		deps.PeerPuller = puller
+	}
+
+	// ── iwara.tv via ech-proxy (optional module, PEERDRIVE_IWARA_ENABLE) ──
+	// When enabled, downloads the ech-proxy Windows executable, verifies it
+	// against the published SHA256, starts it as a child process, and creates
+	// an IwaraClient that routes API calls through the local TLS proxy.
+	// Default off: the module runs an external process and injects a user
+	// cookie into third-party requests — both are risky operations that must
+	// be explicitly opted into.
+	if cfg.IwaraEnable {
+		iwaraCfg := &echproxy.ModuleConfig{
+			Enable:        true,
+			IWARACookie:   cfg.IwaraCookie,
+			EchProxyDir:   "echproxy",
+			EchProxyExeName: echproxy.DefaultEchProxyExeName,
+			EchProxyVersion: cfg.IwaraEchProxyVersion,
+			EntrySuffix:   cfg.IwaraEntrySuffix,
+			UpstreamSuffix: cfg.IwaraUpstreamSuffix,
+			EntryPort:     strconv.Itoa(cfg.IwaraEchProxyPort),
+		}
+		iwaraCfg.Normalize()
+
+		pm := echproxy.NewProcessManager(iwaraCfg)
+		client := echproxy.NewIwaraClient(iwaraCfg)
+
+		// Attempt to start ech-proxy. If it fails (non-Windows, port conflict,
+		// download failure), the IwaraClient still works for direct API access
+		// (without ech-proxy URL rewriting).
+		if err := pm.Start(context.Background()); err != nil {
+			log.LogWarn("main: ech-proxy not started (%v); iwara direct API access still available", err)
+		} else {
+			// Route iwara.tv API calls through the local ech-proxy.
+			rewriter := echproxy.RewriterFromConfig(iwaraCfg)
+			client.SetRewriter(&rewriter)
+			log.LogInfo("main: iwara/ech-proxy enabled (version=%s port=%d entry_suffix=%s)",
+				cfg.IwaraEchProxyVersion, cfg.IwaraEchProxyPort, cfg.IwaraEntrySuffix)
+			defer pm.Stop()
+		}
 	}
 
 	// BT DHT auto-enable (PEERDRIVE_DISCOVER_MODE fallback): when no discovery server is

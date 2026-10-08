@@ -598,6 +598,16 @@ func (s *PeerJSService) EnsureConnection(peerID string) {
 // 统一文件管理需要复用同一份 file_index 的路径决策与元数据）。
 func (s *PeerJSService) FileIndex() *FileIndexService { return s.fileIndex }
 
+// Search 搜本节点的文件索引（controller.fileIndexSearcher 接口的实现之一）。
+//
+// 只是一层转发：本地搜索不需要 PeerJS 连接、不需要信令，纯 SQLite 查询。
+// 之所以挂在 PeerJSService 上而不是让 controller 直接拿 FileIndex()，是为了让
+// controller 依赖一个**窄接口**（Search / RequestSearch / ConnectedPeerIDs 三个方法），
+// 单测能塞假实现，不必为测一个 handler 起一整个 PeerJSService。
+func (s *PeerJSService) Search(q SearchQuery) (*SearchPage, error) {
+	return s.fileIndex.Search(q)
+}
+
 // SetFileRouter 装配多源文件路由（source.Manager，第 3 项优化 2026-08-18）：
 // serveFile 由此路由「本地 → 对端 → URL 模板」。nil 可清除（退回本地语义）。
 func (s *PeerJSService) SetFileRouter(r FileRouter) { s.router = r }
