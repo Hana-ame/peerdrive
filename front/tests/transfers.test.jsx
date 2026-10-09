@@ -13,12 +13,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act, fireEvent } from '@testing-library/react'
 
 const { adminMock } = vi.hoisted(() => ({ adminMock: vi.fn() }))
-vi.mock('../src/ws.js', () => ({
-  admin: adminMock,
-}))
-vi.mock('../src/platform/transport-ws', () => ({
-  admin: adminMock,
-}))
+vi.mock('../src/ws.js', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...Object.fromEntries(Object.keys(actual).map((k) => [k, typeof actual[k] === 'function' ? vi.fn() : actual[k]])),
+    admin: adminMock,
+  }
+})
+vi.mock('../src/platform/transport-ws', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...Object.fromEntries(Object.keys(actual).map((k) => [k, typeof actual[k] === 'function' ? vi.fn() : actual[k]])),
+    admin: adminMock,
+  }
+})
 
 import Transfers from '../src/pages/Transfers'
 

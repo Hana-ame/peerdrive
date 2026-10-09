@@ -29,12 +29,20 @@ import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 
 const { adminMock } = vi.hoisted(() => ({ adminMock: vi.fn() }))
-vi.mock('../src/ws.js', () => ({
-  admin: adminMock,
-}))
-vi.mock('../src/platform/transport-ws', () => ({
-  admin: adminMock,
-}))
+vi.mock('../src/ws.js', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...Object.fromEntries(Object.keys(actual).map((k) => [k, typeof actual[k] === 'function' ? vi.fn() : actual[k]])),
+    admin: adminMock,
+  }
+})
+vi.mock('../src/platform/transport-ws', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...Object.fromEntries(Object.keys(actual).map((k) => [k, typeof actual[k] === 'function' ? vi.fn() : actual[k]])),
+    admin: adminMock,
+  }
+})
 
 import Iwara, { fmtDuration, fmtCount, fmtDate, iwaraUrl, parseIds } from '../src/pages/Iwara'
 
