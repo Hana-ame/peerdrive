@@ -2,13 +2,13 @@
 
 > 对应 Issue: #165  
 > 状态: 评估完成，技术路线与接口设计已确立  
-> 关联 Issue: #163 (SMB 数据源评估), #106 (OpenList 数据源), #56 (OpenListSource), #59 (Source interface 统一), #111 (资源访问权限), #115 (架构划分总纲)
+> 关联 Issue: #163 (SMB 数据源评估), #106 (OpenList 数据源), #56 (OpenListSource), #59 (Source interface 统一), #111 (资源访问权限), #115 (架构划分总纲), #193 (统一出口抽象 `doc/UNIFIED-EGRESS-ABSTRACTION.md`)
 
 ---
 
 ## 1. 架构定位：数据源客户端，而非对外服务
 
-Peerdrive 自身的内容对外暴露链路已经由 PeerJS 信令 + WebRTC DataChannel、局域网直连、HTTP/WebSocket 统一承载（遵循 `doc/ROADMAP.md` 与 `doc/NETDISK.md`）。
+Peerdrive 自身的内容对外暴露链路已经由 PeerJS 信令 + WebRTC DataChannel、局域网直连、HTTP/WebSocket 统一承载（遵循 `doc/ROADMAP.md`、`doc/NETDISK.md` 与统一出口规范 `doc/UNIFIED-EGRESS-ABSTRACTION.md`）。
 
 本功能定位**明确且严格为取数客户端（Data Source Client）**：
 - Peerdrive 作为 WebDAV 客户端连接到用户配置的外部 WebDAV 服务（例如 Nextcloud、Alist、Seafile、坚果云、InfiniCLOUD 等）。

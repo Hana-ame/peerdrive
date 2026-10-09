@@ -57,6 +57,8 @@ Peerdrive 架构不再依赖单一的一维划分，而是由三个正交视角�
    - 由 `internal/httpd` 托管的标准 HTTP/1.1 端点（`/status`, `/discover/*`, `/files/download`）；
    - 主要用于服务初始化、探针与向后兼容旧客户端，前端生产环境全面收敛于 WS 与 PeerJS。
 
+> **统一出口抽象 (Unified Egress Abstraction)**：数据输出到消费端（HTTP / WS / PeerJS 三选一）的统一分发管线与流泵抽象详见 `doc/UNIFIED-EGRESS-ABSTRACTION.md`。
+
 ### 1.3 视角 C：部署面与打包边界（Deployment Surface）
 
 1. **主二进制可执行程序 (`cmd/peerdrive`)**：
