@@ -49,17 +49,17 @@ type goldenFile struct {
 }
 
 type goldenVec struct {
-	Name      string      `json:"name"`
-	Op        string      `json:"op"`
-	Header    any         `json:"header,omitempty"`
-	BodyLen   int         `json:"body_len,omitempty"`
-	BodyHead  string      `json:"body_head_b64,omitempty"`
-	Raw       *frameRec   `json:"raw,omitempty"`
-	Frames    []frameRec  `json:"frames,omitempty"`
-	Delivered *delivered  `json:"delivered,omitempty"`
-	Reply     []frameRec  `json:"reply,omitempty"`
-	Closed    *bool       `json:"closed,omitempty"`
-	Note      string      `json:"note"`
+	Name      string     `json:"name"`
+	Op        string     `json:"op"`
+	Header    any        `json:"header,omitempty"`
+	BodyLen   int        `json:"body_len,omitempty"`
+	BodyHead  string     `json:"body_head_b64,omitempty"`
+	Raw       *frameRec  `json:"raw,omitempty"`
+	Frames    []frameRec `json:"frames,omitempty"`
+	Delivered *delivered `json:"delivered,omitempty"`
+	Reply     []frameRec `json:"reply,omitempty"`
+	Closed    *bool      `json:"closed,omitempty"`
+	Note      string     `json:"note"`
 }
 
 type delivered struct {
@@ -311,20 +311,20 @@ func captureReadVectors(t *testing.T) []goldenVec {
 			note:      "binary over the read limit: close 1009 written back",
 		},
 		{
-			name: "read.badopcode",
-			build: func() []byte { return clientFrame(0x07, []byte("nope")) },
+			name:      "read.badopcode",
+			build:     func() []byte { return clientFrame(0x07, []byte("nope")) },
 			wantClose: true,
 			note:      "reserved opcode: protocol error, close 1002 written back",
 		},
 		{
-			name: "read.close.normal",
-			build: func() []byte { return clientFrame(0x08, []byte{0x03, 0xe8}) }, // 1000
+			name:      "read.close.normal",
+			build:     func() []byte { return clientFrame(0x08, []byte{0x03, 0xe8}) }, // 1000
 			wantClose: true,
 			note:      "client close 1000: session closes, close frame echoed back",
 		},
 		{
-			name: "read.close.abnormal",
-			build: func() []byte { return clientFrame(0x08, []byte{0x03, 0xe9}) }, // 1001
+			name:      "read.close.abnormal",
+			build:     func() []byte { return clientFrame(0x08, []byte{0x03, 0xe9}) }, // 1001
 			wantClose: true,
 			note:      "client close 1001: session closes",
 		},
@@ -604,7 +604,7 @@ func expectClosed(t *testing.T, name string, ch <-chan struct{}) {
 
 func hexA(b []byte) string { return fmt.Sprintf("%x", b) }
 func b64(b []byte) string  { return base64.StdEncoding.EncodeToString(b) }
-func min16(n int) int      {
+func min16(n int) int {
 	if n < 16 {
 		return n
 	}
@@ -645,8 +645,88 @@ func clientFrame(opcode byte, payload []byte) []byte {
 	return append(b, out...)
 }
 
+// wsaECONNReset / wsaECONNAborted are Windows's WSA* codes for "the peer
+// tore this connection down". They must be listed explicitly because on Windows
+// syscall.ECONNRESET is a POSIX-style APPLICATION_ERROR value
+// (APPLICATION_ERROR+iota = 0x20000000+offset) that never equals what wsarecv
+// on the Windows CI runner for exactly that reason (read.overlimit.text:
+// "wsarecv: An existing connection was forcibly closed by the remote host").
+// 10053/10054 are not valid Linux or macOS errnos (max ~133), so listing them
+// is a no-op off Windows.
+const (
+	wsaECONNAborted syscall.Errno = 10053
+	wsaECONNReset   syscall.Errno = 10054
+)
+
+// isConnClosed reports whether err means the peer tore the connection down.
+// The golden harness uses this to treat a closing peer as normal end of stream
+// rather than a test failure.
+func isConnClosed(err error) bool {
+	return errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNABORTED) ||
+		errors.Is(err, wsaECONNReset) ||
+		errors.Is(err, wsaECONNAborted)
+}
+
+// TestIsConnClosed_ForcedRST 发现背景：golden harness 曾在 Windows CI 上红过
+// （read.overlimit.text: "wsarecv: An existing connection was forcibly closed
+// by the remote host"）——syscall.ECONNRESET 在 Windows 上是 POSIX 风格的
+// APPLICATION_ERROR 值，与 wsarecv 实际返回的 WSAECONNRESET(10054) 永不相等，
+// errors.Is 静默不匹配，读到的错被当成真失败。这里用 SO_LINGER=0 强制发 RST
+// （而不是干净的 FIN/EOF）复现「对端把连接撕掉」，把这个平台差异钉在测试里。
+func TestIsConnClosed_ForcedRST(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err == nil {
+			accepted <- c
+		}
+	}()
+
+	cl, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer cl.Close()
+
+	var peer net.Conn
+	select {
+	case peer = <-accepted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("accept timeout")
+	}
+
+	// 先塞一个字节，再硬关：SO_LINGER=0 让内核回 RST，读端拿到的就是
+	// ECONNRESET 类错误，而不是会被 io.EOF 兜住的干净 EOF。
+	_, _ = peer.Write([]byte("x"))
+	if tcp, ok := peer.(*net.TCPConn); ok {
+		_ = tcp.SetLinger(0)
+	}
+	peer.Close()
+
+	// 可能先读到那个字节，再读到 RST：循环到出现错误为止。
+	cl.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var buf [1]byte
+	var readErr error
+	for i := 0; i < 100 && readErr == nil; i++ {
+		_, readErr = cl.Read(buf[:])
+	}
+	if readErr == nil {
+		t.Fatal("never saw a read error after a forced RST")
+	}
+	if !isConnClosed(readErr) {
+		t.Fatalf("isConnClosed(%v) = false; want true", readErr)
+	}
+}
+
 // drainFrames reads up to max frames. max<0 means "until the deadline".
-// End of stream (EOF, a short read, ECONNRESET from a closing peer, or a
+// End of stream (EOF, a short read, a peer that tore the connection down, or a
 // deadline) is not an error: the caller decides whether the frames it got are
 // what it expected. Anything else is a real failure.
 func drainFrames(t *testing.T, cl net.Conn, max int, wait time.Duration) ([]frameRec, error) {
@@ -658,7 +738,7 @@ func drainFrames(t *testing.T, cl net.Conn, max int, wait time.Duration) ([]fram
 		fr, err := readRawFrame(cl)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
-				errors.Is(err, syscall.ECONNRESET) || isTimeout(err) {
+				isConnClosed(err) || isTimeout(err) {
 				break
 			}
 			return out, err
