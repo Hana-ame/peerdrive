@@ -330,6 +330,10 @@ var openlistEnvKeys = []string{
 	"PEERDRIVE_OPENLIST_PRIORITY",
 	"PEERDRIVE_OPENLIST_TIMEOUT_SECS",
 	"PEERDRIVE_OPENLIST_VERIFY",
+	"PEERDRIVE_OPENLIST_CRAWL",
+	"PEERDRIVE_OPENLIST_CRAWL_ROOT",
+	"PEERDRIVE_OPENLIST_CRAWL_CONCURRENCY",
+	"PEERDRIVE_OPENLIST_CRAWL_TIMEOUT_SECS",
 }
 
 func unsetOpenListEnv(t *testing.T) {
@@ -354,6 +358,10 @@ func TestLoad_OpenListDefaults(t *testing.T) {
 	assert.Equal(t, 900, cfg.OpenListPriority, "after local/peer/url, which all default to 0")
 	assert.Equal(t, 120, cfg.OpenListTimeoutSecs)
 	assert.Equal(t, true, cfg.OpenListVerify, "content addressing is on unless told otherwise")
+	assert.Equal(t, false, cfg.OpenListCrawl, "crawler is disabled by default")
+	assert.Equal(t, "/", cfg.OpenListCrawlRoot)
+	assert.Equal(t, 4, cfg.OpenListCrawlConcurrency)
+	assert.Equal(t, 30, cfg.OpenListCrawlTimeoutSecs)
 }
 
 // TestLoad_OpenListEnvOverrides proves each env var reaches its field with the
@@ -369,6 +377,10 @@ func TestLoad_OpenListEnvOverrides(t *testing.T) {
 	os.Setenv("PEERDRIVE_OPENLIST_PRIORITY", "50")
 	os.Setenv("PEERDRIVE_OPENLIST_TIMEOUT_SECS", "30")
 	os.Setenv("PEERDRIVE_OPENLIST_VERIFY", "false")
+	os.Setenv("PEERDRIVE_OPENLIST_CRAWL", "true")
+	os.Setenv("PEERDRIVE_OPENLIST_CRAWL_ROOT", "/public")
+	os.Setenv("PEERDRIVE_OPENLIST_CRAWL_CONCURRENCY", "8")
+	os.Setenv("PEERDRIVE_OPENLIST_CRAWL_TIMEOUT_SECS", "45")
 	for _, k := range openlistEnvKeys {
 		t.Cleanup(func() { os.Unsetenv(k) })
 	}
@@ -382,6 +394,10 @@ func TestLoad_OpenListEnvOverrides(t *testing.T) {
 	assert.Equal(t, 50, cfg.OpenListPriority)
 	assert.Equal(t, 30, cfg.OpenListTimeoutSecs)
 	assert.Equal(t, false, cfg.OpenListVerify)
+	assert.Equal(t, true, cfg.OpenListCrawl)
+	assert.Equal(t, "/public", cfg.OpenListCrawlRoot)
+	assert.Equal(t, 8, cfg.OpenListCrawlConcurrency)
+	assert.Equal(t, 45, cfg.OpenListCrawlTimeoutSecs)
 }
 
 // TestLoad_UnifiedNamespaceEnv tests that PEERDRIVE_PORT and PEERDRIVE_DB_PATH
