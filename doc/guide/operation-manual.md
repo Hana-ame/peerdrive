@@ -33,6 +33,14 @@ cd peerdrive
 | `feat/stage2-e2e-test` | 旧的多二进制结构，**已冻结**，仅供历史追溯 |
 | `frontend` | 旧的前端独立分支，已并入 `refactor` 的 `front/` |
 
+### 1.1 开发协作与 CI 门禁纪律
+
+日常协作与 PR 合并流程请严格遵循 [`doc/COLLABORATION.md`](../COLLABORATION.md)：
+- **严禁红着合并**：必须等待 GitHub Actions 的 30/30 项检查全绿后方可合并。
+- **甄别连坐窗口**：排查失败时先确认主干基线，避免混淆合并后的连锁构建。
+- **防范 API 限流**：提交历史与状态查询优先使用本地 Git 命令（`git log` / `git diff`）。
+- **防范工作区污染**：任务开始与收尾必须确保 `git status --porcelain` 为空。
+
 ---
 
 ## 2. 编译与启动
