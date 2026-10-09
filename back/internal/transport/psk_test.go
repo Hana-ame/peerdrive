@@ -295,3 +295,41 @@ func TestPSK_UnauthedConnectionClosedAfterTimeout(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	assert.True(t, sess.Closed(), "unauthed session must be closed after pskAuthTimeout")
 }
+
+// TestPSK_PreBindConnFrameNotDropped
+// 发现背景：CI 面板 E2E（run 37911874004）—— panel 连接后 server 从未收到
+// psk-auth，30s 后 pskAuthTimeout 关连接，manifest 全部 15s TIMEOUT。
+// 根因：bindConn 在 OnOpen 回调内注册 OnMessage，但 peer 的 psk-auth 帧可能在
+// OnOpen 触发后、bindConn 执行前到达，pion 级 dc.OnMessage 读到 c.onMessage==nil
+// 则静默丢弃。2026-10-06 修复仅覆盖 bindConn 内部的 yield 窗口，未覆盖
+// bindConn 调用前的窗口。
+//
+// 本测试验证：OnMessage 在 OnOpen 之前注册（即 bindConnPrepared 的调用方式），
+// 即使 psk-auth 帧在 bindConnPrepared 之前到达也能被正确接收并回复 psk-ok。
+func TestPSK_PreBindConnFrameNotDropped(t *testing.T) {
+	svc := newTestPeerJSService(t)
+	svc.cfg.PeerPSK = "s3cret"
+
+	sess := &fakeSession{id: "peer-x"}
+
+	// Simulate the fix: create st and register OnMessage BEFORE bindConnPrepared.
+	st := &connState{
+		fetches:   make(map[string]*fetchState),
+		verbWaits: make(map[string]chan []byte),
+		binCh:     make(chan binaryChunk, 16),
+		binDone:   make(chan struct{}),
+		fwdCh:     make(chan fwdChunk, 16),
+	}
+	sess.OnMessage(func(msg peerjs.Frame) { svc.dispatchFrame(sess, st, msg) })
+	sess.OnClose(func() { svc.cleanupConn(sess, st) })
+
+	// Inject psk-auth BEFORE bindConnPrepared (simulating pre-bindConn frame arrival).
+	sess.onMessage(pskFrame(t, map[string]any{"type": "psk-auth", "psk": "s3cret"}))
+
+	// Now bind the connection (simulating OnOpen callback).
+	svc.bindConnPrepared(sess, st, nil)
+
+	// Verify psk-ok was sent (the frame was received despite arriving before bindConnPrepared).
+	_, ok := waitSent(sess, "psk-ok", 2*time.Second)
+	assert.True(t, ok, "psk-auth must be received and psk-ok sent, even if frame arrived before bindConnPrepared")
+}
