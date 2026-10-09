@@ -367,6 +367,7 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 			log.LogInfo("main: auto-extract enabled (max_size=%d max_ratio=%d max_files=%d delete_orig=%v)",
 				cfg.AutoExtractMaxSize, cfg.AutoExtractMaxRatio, cfg.AutoExtractMaxFiles, cfg.AutoExtractDeleteOrig)
 		}
+		puller.RecoverIncompleteTasks()
 		deps.PeerPuller = puller
 	}
 

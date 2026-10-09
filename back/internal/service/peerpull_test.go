@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -39,6 +40,16 @@ func (f *fakePullSource) OpenStream(peerID, hash string, offset, size int64) (io
 	data, ok := f.content[hash]
 	if !ok {
 		return nil, errors.New("not found")
+	}
+	if offset > 0 {
+		if offset > int64(len(data)) {
+			data = nil
+		} else {
+			data = data[offset:]
+		}
+	}
+	if size >= 0 && int64(len(data)) > size {
+		data = data[:size]
 	}
 	if f.block != nil {
 		return &blockingReader{data: data, release: f.block}, nil
@@ -458,6 +469,16 @@ func (f *flakyPullSource) OpenStream(peerID, hash string, offset, size int64) (i
 	if !ok {
 		return nil, errors.New("not found")
 	}
+	if offset > 0 {
+		if offset > int64(len(data)) {
+			data = nil
+		} else {
+			data = data[offset:]
+		}
+	}
+	if size >= 0 && int64(len(data)) > size {
+		data = data[:size]
+	}
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
@@ -488,9 +509,6 @@ func TestPullRetriesAfterConnectionDrop(t *testing.T) {
 	}
 	if got := src.openCount(); got != 3 {
 		t.Fatalf("openCount = %d, want 3 (1 initial + 2 retries)", got)
-	}
-	if len(*registered) != 1 {
-		t.Fatalf("registered %d paths, want exactly 1", len(*registered))
 	}
 	if len(*registered) != 1 {
 		t.Fatalf("registered %d paths, want exactly 1", len(*registered))
@@ -548,5 +566,142 @@ func TestPullDoesNotRetryNonTransientError(t *testing.T) {
 	}
 	if !retryablePullErr(errors.New("unexpected EOF")) {
 		t.Fatal("EOF must be retryable")
+	}
+}
+
+// 发现背景：Issue #212 断点续传测试 —— 当磁盘已存在部分 .part 文件时，Start 必须以 PullResuming
+// 状态启动，并且从已有 offset 续传，合并校验全文件 SHA-256 并完成落盘。
+func TestPullResumeFromExistingPart(t *testing.T) {
+	fullContent := []byte("hello world this is a resumable transfer test payload with enough bytes")
+	h := hashOf(fullContent)
+	src := &fakePullSource{content: map[string][]byte{h: fullContent}}
+	p, root, registered := newPullerForTest(t, src, nil)
+
+	// 事先写入前 20 个字节到 .part 文件中
+	partBytes := fullContent[:20]
+	pulledDir := filepath.Join(root, "pulled")
+	if err := os.MkdirAll(pulledDir, 0o755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	partPath := filepath.Join(pulledDir, "resumable.txt.part")
+	if err := os.WriteFile(partPath, partBytes, 0o644); err != nil {
+		t.Fatalf("write part failed: %v", err)
+	}
+
+	job, err := p.Start("peer-a", h, "resumable.txt", "resumable.txt", "")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	if job.Status != PullResuming {
+		t.Fatalf("initial job status = %v, want %v", job.Status, PullResuming)
+	}
+	if job.Received != int64(len(partBytes)) {
+		t.Fatalf("initial job received = %d, want %d", job.Received, len(partBytes))
+	}
+
+	done := waitJob(t, p, job.ID)
+	if done.Status != PullDone {
+		t.Fatalf("status = %v, want PullDone (err=%s)", done.Status, done.Error)
+	}
+
+	targetPath := filepath.Join(pulledDir, "resumable.txt")
+	gotData, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read target failed: %v", err)
+	}
+	if !bytes.Equal(gotData, fullContent) {
+		t.Fatalf("content mismatch: got %q, want %q", gotData, fullContent)
+	}
+
+	// 确认 .part 与 .meta 已被清理
+	if _, err := os.Stat(partPath); !os.IsNotExist(err) {
+		t.Fatalf(".part file should be cleaned up after completion")
+	}
+	if _, err := os.Stat(partPath + ".meta"); !os.IsNotExist(err) {
+		t.Fatalf(".part.meta file should be cleaned up after completion")
+	}
+	if len(*registered) != 1 {
+		t.Fatalf("expected 1 registered path, got %d", len(*registered))
+	}
+}
+
+// 发现背景：Issue #212 启动恢复测试 —— 进程重启后扫描 .part 与 .part.meta 文件，
+// 自动恢复为 PullResuming 状态并继续断点续传。
+func TestPullStartupRecovery(t *testing.T) {
+	fullContent := []byte("startup recovery content that should resume properly across process restart")
+	h := hashOf(fullContent)
+	src := &fakePullSource{content: map[string][]byte{h: fullContent}}
+
+	root := t.TempDir()
+	pulledDir := filepath.Join(root, "pulled")
+	if err := os.MkdirAll(pulledDir, 0o755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	partBytes := fullContent[:30]
+	partPath := filepath.Join(pulledDir, "recovery.txt.part")
+	if err := os.WriteFile(partPath, partBytes, 0o644); err != nil {
+		t.Fatalf("write part failed: %v", err)
+	}
+
+	meta := pullJobMeta{
+		ID:        "pull-recovered-1",
+		Peer:      "peer-b",
+		Hash:      h,
+		Name:      "recovery.txt",
+		Path:      "recovery.txt",
+		Total:     int64(len(fullContent)),
+		CreatedAt: time.Now().Add(-5 * time.Minute),
+	}
+	metaBytes, _ := json.Marshal(meta)
+	if err := os.WriteFile(partPath+".meta", metaBytes, 0o644); err != nil {
+		t.Fatalf("write meta failed: %v", err)
+	}
+
+	// 创建新的 Puller 模拟重启
+	p := NewPeerPuller(root)
+	p.SetSource(src)
+	var registered []string
+	var regMu sync.Mutex
+	p.SetFileAccess(
+		func(hash string) bool { return false },
+		func(path string) (string, int64, error) {
+			regMu.Lock()
+			registered = append(registered, path)
+			regMu.Unlock()
+			return h, int64(len(fullContent)), nil
+		},
+	)
+
+	recovered := p.RecoverIncompleteTasks()
+	if len(recovered) != 1 {
+		t.Fatalf("RecoverIncompleteTasks returned %d jobs, want 1", len(recovered))
+	}
+	job := recovered[0]
+	if job.Status != PullResuming {
+		t.Fatalf("recovered job status = %v, want %v", job.Status, PullResuming)
+	}
+	if job.Received != int64(len(partBytes)) {
+		t.Fatalf("recovered job received = %d, want %d", job.Received, len(partBytes))
+	}
+
+	done := waitJob(t, p, job.ID)
+	if done.Status != PullDone {
+		t.Fatalf("status = %v, want PullDone (err=%s)", done.Status, done.Error)
+	}
+
+	targetPath := filepath.Join(pulledDir, "recovery.txt")
+	gotData, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read target failed: %v", err)
+	}
+	if !bytes.Equal(gotData, fullContent) {
+		t.Fatalf("content mismatch: got %q, want %q", gotData, fullContent)
+	}
+	if _, err := os.Stat(partPath); !os.IsNotExist(err) {
+		t.Fatalf(".part should be removed after completion")
+	}
+	if _, err := os.Stat(partPath + ".meta"); !os.IsNotExist(err) {
+		t.Fatalf(".part.meta should be removed after completion")
 	}
 }

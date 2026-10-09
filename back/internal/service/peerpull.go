@@ -28,6 +28,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -47,6 +48,7 @@ type PullStatus string
 
 const (
 	PullRunning   PullStatus = "running"
+	PullResuming  PullStatus = "resuming"
 	PullDone      PullStatus = "done"
 	PullFailed    PullStatus = "failed"
 	PullCancelled PullStatus = "cancelled"
@@ -121,6 +123,9 @@ func NewPeerPuller(downloadRoot string) *PeerPuller {
 	if downloadRoot == "" {
 		downloadRoot = "./downloads"
 	}
+	if abs, err := filepath.Abs(downloadRoot); err == nil {
+		downloadRoot = abs
+	}
 	return &PeerPuller{
 		downloadRoot: downloadRoot,
 		jobs:         make(map[string]*PullJob),
@@ -128,6 +133,43 @@ func NewPeerPuller(downloadRoot string) *PeerPuller {
 		closers:      make(map[string]io.Closer),
 		sem:          make(chan struct{}, pullConcurrency),
 	}
+}
+
+// pullJobMeta 落地到 .part.meta 文件的断点续传元数据。
+type pullJobMeta struct {
+	ID        string    `json:"id"`
+	Peer      string    `json:"peer"`
+	Hash      string    `json:"hash"`
+	Name      string    `json:"name"`
+	Path      string    `json:"path"`
+	Coll      string    `json:"collection,omitempty"`
+	Total     int64     `json:"total"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// saveJobMeta 将任务元数据原子落盘到 metaPath（.part.meta）。
+func (p *PeerPuller) saveJobMeta(job *PullJob, metaPath string) error {
+	p.mu.Lock()
+	meta := pullJobMeta{
+		ID:        job.ID,
+		Peer:      job.Peer,
+		Hash:      job.Hash,
+		Name:      job.Name,
+		Path:      job.Path,
+		Coll:      job.Coll,
+		Total:     job.Total,
+		CreatedAt: job.Started,
+	}
+	p.mu.Unlock()
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	tmpMeta := metaPath + ".tmp"
+	if err := os.WriteFile(tmpMeta, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmpMeta, metaPath)
 }
 
 // SetSource 注入数据面（main 装 transport.PeerJSService）。
@@ -164,21 +206,56 @@ func (p *PeerPuller) Start(peer, hash, name, relPath, coll string) (*PullJob, er
 	if name == "" || name == "." || name == string(filepath.Separator) {
 		name = hash[:12] // 对端没给名字：用 hash 前缀当文件名，至少能落到盘上
 	}
+	p.mu.Lock()
+	// 如果已有相同 hash 的活跃任务，直接复用，避免并发重复拉取同一文件
+	for _, j := range p.jobs {
+		if !j.Done() && j.Hash == hash {
+			snap := *j
+			p.mu.Unlock()
+			return &snap, nil
+		}
+	}
+	p.mu.Unlock()
+
+	status := PullRunning
+	var initialReceived int64
+	var initialTotal int64 = -1
+	target, _ := p.targetPath(&PullJob{Hash: hash, Name: name, Path: relPath})
+	if target != "" {
+		tmp := target + ".part"
+		metaPath := tmp + ".meta"
+		if fi, err := os.Stat(tmp); err == nil && fi.Mode().IsRegular() && fi.Size() > 0 {
+			status = PullResuming
+			initialReceived = fi.Size()
+		}
+		if raw, err := os.ReadFile(metaPath); err == nil {
+			var m pullJobMeta
+			if json.Unmarshal(raw, &m) == nil && m.Total > 0 {
+				initialTotal = m.Total
+			}
+		}
+	}
+
 	job := &PullJob{
-		ID:      newJobID(),
-		Peer:    peer,
-		Hash:    hash,
-		Name:    name,
-		Path:    relPath,
-		Coll:    coll,
-		Total:   -1,
-		Status:  PullRunning,
-		Started: time.Now(),
+		ID:       newJobID(),
+		Peer:     peer,
+		Hash:     hash,
+		Name:     name,
+		Path:     relPath,
+		Coll:     coll,
+		Total:    initialTotal,
+		Received: initialReceived,
+		Status:   status,
+		Started:  time.Now(),
 	}
 	p.mu.Lock()
 	p.jobs[job.ID] = job
 	p.pruneLocked()
 	p.mu.Unlock()
+
+	if target != "" {
+		_ = p.saveJobMeta(job, target+".part.meta")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p.mu.Lock()
@@ -297,6 +374,11 @@ func (p *PeerPuller) Cancel(id string) error {
 	if closer != nil {
 		_ = closer.Close()
 	}
+	target, _ := p.targetPath(j)
+	if target != "" {
+		_ = os.Remove(target + ".part")
+		_ = os.Remove(target + ".part.meta")
+	}
 	return nil
 }
 
@@ -345,12 +427,17 @@ func retryablePullErr(err error) bool {
 	return false
 }
 
-// run 执行一次拉取：跳过检查 → 流式下载（带进度）→ 校验 → 落盘登记。
+// run 执行一次拉取：跳过检查 → 流式下载（带进度与断点续传）→ 校验 → 落盘登记。
 func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 	// 并发闸：等一个名额（可被取消打断）
 	select {
 	case p.sem <- struct{}{}:
 	case <-ctx.Done():
+		target, _ := p.targetPath(job)
+		if target != "" {
+			_ = os.Remove(target + ".part")
+			_ = os.Remove(target + ".part.meta")
+		}
 		p.finish(job, PullCancelled, "", time.Time{})
 		return
 	}
@@ -379,9 +466,7 @@ func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 	tmp := target + ".part"
 
 	// ②+③ 合并成可重试的一轮：开流 → 写 .part → 校验 → rename → 登记。
-	// 每次重试都从零开始（.part 用 O_TRUNC 截断重写，哈希也重新算）：
-	// transport.OpenStream 没有 Range 语义，半截数据没法续，只能重下。
-	// 内容寻址保证重下不会拿到不同内容——这正是这里能安全重试的前提。
+	// 支持断点续传：若已有 .part 文件，先读取已有字节并预先计算哈希，随后从断点续传。
 	var lastErr error
 	for attempt := 0; attempt < pullAttempts; attempt++ {
 		if attempt > 0 {
@@ -417,7 +502,56 @@ func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 // 返回 ok=true 表示已经 finish 过（无论成功还是终态失败），调用方直接返回；
 // ok=false + err 表示这是一次**值得重试**的瞬时故障，err 里是原因。
 func (p *PeerPuller) fetchOnce(ctx context.Context, job *PullJob, target, tmp string) (bool, error) {
-	stream, err := p.source.OpenStream(job.Peer, job.Hash, 0, -1)
+	metaPath := tmp + ".meta"
+	_ = p.saveJobMeta(job, metaPath)
+
+	var partOffset int64 = 0
+	h := sha256.New()
+
+	if fi, statErr := os.Stat(tmp); statErr == nil && fi.Mode().IsRegular() && fi.Size() > 0 {
+		if job.Total > 0 && fi.Size() > job.Total {
+			_ = os.Truncate(tmp, 0)
+		} else {
+			existingFile, oErr := os.Open(tmp)
+			if oErr == nil {
+				n, cpErr := io.Copy(h, existingFile)
+				_ = existingFile.Close()
+				if cpErr == nil && n == fi.Size() {
+					partOffset = n
+					p.mu.Lock()
+					job.Received = partOffset
+					p.mu.Unlock()
+				} else {
+					h.Reset()
+					_ = os.Truncate(tmp, 0)
+					partOffset = 0
+				}
+			}
+		}
+	}
+
+	// 极端情况：.part 文件已经完整落盘（且达到已知 total），直接校验并完成
+	if partOffset > 0 && job.Total > 0 && partOffset == job.Total {
+		sum := hex.EncodeToString(h.Sum(nil))
+		if sum == job.Hash {
+			_ = os.Remove(metaPath)
+			if err := os.Rename(tmp, target); err != nil {
+				_ = os.Remove(tmp)
+				p.finish(job, PullFailed, "rename: "+err.Error(), time.Time{})
+				return true, nil
+			}
+			p.finishSaved(job, target, partOffset)
+			return true, nil
+		}
+		h.Reset()
+		_ = os.Truncate(tmp, 0)
+		partOffset = 0
+		p.mu.Lock()
+		job.Received = 0
+		p.mu.Unlock()
+	}
+
+	stream, err := p.source.OpenStream(job.Peer, job.Hash, partOffset, -1)
 	if err != nil {
 		return false, fmt.Errorf("open stream: %w", err)
 	}
@@ -431,70 +565,76 @@ func (p *PeerPuller) fetchOnce(ctx context.Context, job *PullJob, target, tmp st
 		p.mu.Unlock()
 	}()
 
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	var f *os.File
+	if partOffset > 0 {
+		f, err = os.OpenFile(tmp, os.O_WRONLY|os.O_APPEND, 0o644)
+	} else {
+		f, err = os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	}
 	if err != nil {
 		p.finish(job, PullFailed, "open temp: "+err.Error(), time.Time{})
 		return true, nil // 本地 I/O 失败，不重试
 	}
 
-	h := sha256.New()
-	written, cpErr := p.copyWithProgress(ctx, f, stream, h, job)
+	written, cpErr := p.copyWithProgress(ctx, f, stream, h, job, partOffset, metaPath)
 	closeErr := f.Close()
 	if cpErr != nil {
-		_ = os.Remove(tmp)
 		if ctx.Err() != nil {
+			_ = os.Remove(tmp)
+			_ = os.Remove(metaPath)
 			p.finish(job, PullCancelled, "", time.Time{})
 			return true, nil
 		}
+		// 网络/传输错误：保留 .part 与 .meta 文件供断点续传，不删除！
+		_ = p.saveJobMeta(job, metaPath)
 		return false, cpErr
 	}
 	if closeErr != nil {
 		_ = os.Remove(tmp)
+		_ = os.Remove(metaPath)
 		p.finish(job, PullFailed, "close temp: "+closeErr.Error(), time.Time{})
 		return true, nil
 	}
 
 	// ④ 内容寻址校验：对端给的内容必须真的等于请求的 hash
-	// （否则等于接受对端往本节点写任意内容——服务端 serveFile 的完整性
-	// 校验只在"读回来"时做，落盘这一步必须自己验。）
 	sum := hex.EncodeToString(h.Sum(nil))
 	if sum != job.Hash {
 		_ = os.Remove(tmp)
+		_ = os.Remove(metaPath)
 		p.finish(job, PullFailed, fmt.Sprintf("hash mismatch: got %s", sum[:12]), time.Time{})
 		return true, nil
 	}
-	// ⑤ rename 成正式名 + 登记进 file_index（"我的文件"可见、可被 serveFile 服务）
+	_ = os.Remove(metaPath)
+	// ⑤ rename 成正式名 + 登记进 file_index
 	if err := os.Rename(tmp, target); err != nil {
 		_ = os.Remove(tmp)
 		p.finish(job, PullFailed, "rename: "+err.Error(), time.Time{})
 		return true, nil
 	}
+	p.finishSaved(job, target, partOffset+written)
+	return true, nil
+}
+
+// finishSaved 完成保存落盘后的登记、解包与终态处理。
+func (p *PeerPuller) finishSaved(job *PullJob, target string, totalBytes int64) {
 	ended := time.Now()
 	if p.register != nil {
 		if _, _, err := p.register(target); err != nil {
-			// 登记失败不代表内容没保存：文件已在盘上，只是"我的文件"看不到。
-			// 报 failed 会把"保存成功"误报成失败，这里报 done + 错误提示。
 			log.LogWarn("peerpull: register %s failed: %v", target, err)
 			p.finish(job, PullDone, "saved but not indexed: "+err.Error(), ended)
 			p.mu.Lock()
 			job.SavedTo = target
 			p.mu.Unlock()
-			return true, nil
+			return
 		}
 	}
 
-	// ⑥ 自动解包（可选）：如果文件是压缩包且 extractor 已启用，自动解压到 sibling 目录。
-	// 解包失败不影响拉取本身（文件已保存 + 已登记），只记录警告——自动解包只是增强，
-	// 不能让对端用伪造压缩包拖垮/阻断正常拉取流程。
 	if p.extractor != nil && p.extractor.ShouldExtract(filepath.Base(target)) {
 		destDir := target + "_extracted"
 		extracted, err := p.extractor.Extract(target, destDir)
 		if err != nil {
 			log.LogWarn("peerpull: auto-extract %s failed: %v", target, err)
 		} else if len(extracted) > 0 && p.register != nil {
-			// 把解包后的文件逐个登记进 file_index，与主文件同等待遇
-			//（extracted 的 FullName 都在 downloadRoot/_extracted 下，
-			// register 内部的 pathutil 边界会再次兜底校验）。
 			registered := 0
 			for _, ef := range extracted {
 				if _, _, regErr := p.register(ef.FullName); regErr != nil {
@@ -510,14 +650,13 @@ func (p *PeerPuller) fetchOnce(ctx context.Context, job *PullJob, target, tmp st
 
 	p.mu.Lock()
 	job.SavedTo = target
-	job.Received = written
+	job.Received = totalBytes
 	p.mu.Unlock()
 	p.finish(job, PullDone, "", ended)
-	return true, nil
 }
 
 // copyWithProgress 流式拷贝并更新进度（进度按块更新，够前端画进度条）。
-func (p *PeerPuller) copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, h io.Writer, job *PullJob) (int64, error) {
+func (p *PeerPuller) copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, h io.Writer, job *PullJob, initialOffset int64, metaPath string) (int64, error) {
 	buf := make([]byte, 64*1024)
 	var written int64
 	for {
@@ -533,11 +672,15 @@ func (p *PeerPuller) copyWithProgress(ctx context.Context, dst io.Writer, src io
 			written += int64(n)
 			p.mu.Lock()
 			if !job.Done() {
-				job.Received = written
+				job.Received = initialOffset + written
+				job.Status = PullRunning
 				// 对端 meta 帧可能晚于首块到达：每轮尝试刷新总大小
 				if job.Total <= 0 {
 					if tr, ok := src.(totalReporter); ok {
 						job.Total = tr.Total()
+						if job.Total > 0 {
+							_ = p.saveJobMeta(job, metaPath)
+						}
 					}
 				}
 			}
@@ -550,6 +693,78 @@ func (p *PeerPuller) copyWithProgress(ctx context.Context, dst io.Writer, src io
 			return written, rerr
 		}
 	}
+}
+
+// RecoverIncompleteTasks 扫描 downloadRoot/pulled 目录下的 .part 文件，
+// 将其映射回 PullJob 并恢复为 resuming 状态启动断点续传。
+func (p *PeerPuller) RecoverIncompleteTasks() []*PullJob {
+	pulledDir := filepath.Join(p.downloadRoot, "pulled")
+	if _, err := os.Stat(pulledDir); err != nil {
+		return nil
+	}
+	var recovered []*PullJob
+	_ = filepath.Walk(pulledDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".part") {
+			return nil
+		}
+		metaPath := path + ".meta"
+		raw, readErr := os.ReadFile(metaPath)
+		if readErr != nil {
+			return nil
+		}
+		var meta pullJobMeta
+		if jsonErr := json.Unmarshal(raw, &meta); jsonErr != nil || meta.Hash == "" || meta.Peer == "" {
+			return nil
+		}
+		// 若该 hash 已经在本地索引中（之前已下载完成），清理残余 .part
+		if p.isLocal != nil && p.isLocal(meta.Hash) {
+			_ = os.Remove(path)
+			_ = os.Remove(metaPath)
+			return nil
+		}
+		p.mu.Lock()
+		for _, existing := range p.jobs {
+			if !existing.Done() && existing.Hash == meta.Hash {
+				p.mu.Unlock()
+				return nil
+			}
+		}
+		job := &PullJob{
+			ID:       meta.ID,
+			Peer:     meta.Peer,
+			Hash:     meta.Hash,
+			Name:     meta.Name,
+			Path:     meta.Path,
+			Coll:     meta.Coll,
+			Total:    meta.Total,
+			Received: info.Size(),
+			Status:   PullResuming,
+			Started:  meta.CreatedAt,
+		}
+		if job.ID == "" {
+			job.ID = newJobID()
+		}
+		if job.Started.IsZero() {
+			job.Started = time.Now()
+		}
+		p.jobs[job.ID] = job
+		p.pruneLocked()
+		p.mu.Unlock()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		p.mu.Lock()
+		p.cancels[job.ID] = cancel
+		snap := *job
+		p.mu.Unlock()
+
+		go p.run(ctx, job)
+		recovered = append(recovered, &snap)
+		return nil
+	})
+	return recovered
 }
 
 // targetPath 计算最终保存路径：<root>/pulled/<清洗后的相对路径>。

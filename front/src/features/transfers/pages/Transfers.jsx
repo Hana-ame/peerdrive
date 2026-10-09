@@ -36,6 +36,8 @@ function statusMeta(j) {
       return { label: 'Failed', cls: 'text-red-400 border-red-400/20 bg-red-400/10' };
     case 'cancelled':
       return { label: 'Cancelled', cls: 'text-gray-400 border-gray-400/20 bg-gray-400/10' };
+    case 'resuming':
+      return { label: 'Resuming', cls: 'text-blue-400 border-blue-400/20 bg-blue-400/10' };
     case 'running':
     default:
       return { label: 'Running', cls: 'text-yellow-400 border-yellow-400/20 bg-yellow-400/10' };
@@ -56,7 +58,7 @@ function Spinner() {
 // ProgressCell: bar + pct + rate + ETA; indeterminate (peer declared no size,
 // total=-1) renders a pulsing full-width muted bar with the byte count only.
 function ProgressCell({ job, rateBps }) {
-  const running = job.status === 'running' || !job.status;
+  const running = job.status === 'running' || job.status === 'resuming' || !job.status;
   const pct = progressPct(job.received, job.total);
   const eta = running ? estEtaSeconds(job.total, job.received, rateBps) : null;
 
@@ -125,7 +127,7 @@ export default function Transfers() {
   }, []);
 
   const hasRunning = useMemo(
-    () => Array.isArray(jobs) && jobs.some((j) => j.status === 'running' || !j.status),
+    () => Array.isArray(jobs) && jobs.some((j) => j.status === 'running' || j.status === 'resuming' || !j.status),
     [jobs]);
 
   useEffect(() => { load(); }, [load]);
@@ -189,7 +191,7 @@ export default function Transfers() {
               <tbody>
                 {jobs.map((j, i) => {
                   const meta = statusMeta(j);
-                  const running = j.status === 'running' || !j.status;
+                  const running = j.status === 'running' || j.status === 'resuming' || !j.status;
                   const rate = rates.get(j.id) ?? null;
                   // Failure tooltip (B15): PullJob.Error holds the backend reason
                   // (sha256 mismatch / read failed / "after N attempts" — see
