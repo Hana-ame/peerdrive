@@ -8,6 +8,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import * as ws from '../src/ws'
+import * as transportWs from '../src/platform/transport-ws'
+import * as transportStatus from '../src/platform/transport-ws/status'
 
 // Construct a mock WebSocket: manually inject onmessage for direct frame feeding
 function makeMockSock() {
@@ -357,3 +359,39 @@ describe('downloadToFile error handling', () => {
     ws.__test._reset()
   })
 })
+
+// Discovery context (issue #62): ws.js was decomposed into platform/transport-ws.
+// These tests verify that direct platform/transport-ws imports and the isolated
+// status state machine adhere strictly to the expected API contracts.
+describe('platform/transport-ws module contracts', () => {
+  it('exports identical API surface from transport-ws and ws facade', () => {
+    // 发现背景：重构后保持 ws.js 作为向后兼容门面，需保证所有导出方法和 __test 钩子一致
+    expect(typeof transportWs.admin).toBe('function')
+    expect(typeof transportWs.upload).toBe('function')
+    expect(typeof transportWs.stat).toBe('function')
+    expect(typeof transportWs.download).toBe('function')
+    expect(typeof transportWs.downloadStream).toBe('function')
+    expect(typeof transportWs.downloadToFile).toBe('function')
+    expect(typeof transportWs.getStatus).toBe('function')
+    expect(typeof transportWs.onStatus).toBe('function')
+    expect(transportWs.getStatus).toBe(transportStatus.getStatus)
+    expect(transportWs.onStatus).toBe(transportStatus.onStatus)
+  })
+
+  it('status module handles subscriptions and unsubscriptions without leak', () => {
+    // 发现背景：Issue #62 将状态机拆为独立 status 模块，必须验证监听器注册、即时触发和退订
+    transportStatus.resetStatus()
+    expect(transportStatus.getStatus()).toBe('idle')
+    const calls = []
+    const unsub = transportStatus.onStatus((s) => calls.push(s))
+    expect(calls).toEqual(['idle'])
+    transportStatus.setStatus('connecting')
+    expect(calls).toEqual(['idle', 'connecting'])
+    expect(transportStatus.getStatus()).toBe('connecting')
+    unsub()
+    transportStatus.setStatus('open')
+    expect(calls).toEqual(['idle', 'connecting'])
+    transportStatus.resetStatus()
+  })
+})
+
