@@ -1,10 +1,11 @@
-# WS client module (front/src/ws.js)
+# WS client module (front/src/platform/transport-ws/ + front/src/ws.js shim)
 
 > Layer membership: AOP ⑧ Frontend aspect (doc/LAYERS.md §1). The frame protocol client
-> between the browser and the local node `/ws/peer` session —— management-plane admin
+> between the browser and the local node `/ws/peer` session (implementation located in
+> `front/src/platform/transport-ws/`, re-exported via `front/src/ws.js` shim) —— management-plane admin
 > verb, binary upload, req verb file fetch all happen on this one WS connection;
 > `api.js`'s `request()` all goes through it. Authoritative protocol definition is in
-> REFACTOR.md §3.10/§4 and NODE-API.md §2.4; this doc only covers the frontend
+> REFACTOR.md §3.10/§4 and NODE-API.md §2.4; this doc covers the frontend
 > implementation and pitfalls.
 
 ## Responsibilities

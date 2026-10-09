@@ -1,161 +1,167 @@
-# Architecture layering and membership guide (AOP aspects)
+# Architecture Layering and Membership Guide (LAYERS.md v2)
 
-> 2026-08-18 · Decision document for "which layer to put new code in". One-line criterion:
-> **mechanism → peerjs; protocol semantics → transport; business → controller/service;
-> management convergence → admin aspect**.
-> Relationship to other docs in this project: REFACTOR.md is a refactoring record
-> (pitfalls/decisions); this doc is "layer membership rules".
+> 2026-10-09 · Master Architecture Specification · Version 2.0  
+> Decision document for "which layer, which process, and which access modality new code belongs to".  
+> One-line criterion: **mechanism → peerjs/wsconn; protocol semantics → transport; business → controller/service; management convergence → admin aspect**.  
+> Related documents: `doc/ROADMAP.md` (development order), `doc/NETDISK.md` (drive requirements), `doc/REFACTOR.md` (refactoring log & protocol frame specs).
 
 ---
 
-## 1. Layer overview (8 aspects)
+## 1. Architecture Multi-Perspective Model (三维正交视角)
+
+Peerdrive 架构不再依赖单一的一维划分，而是由三个正交视角共同确立模块归属：
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  ① Signaling/transport primitives layer  back/peerjs (standalone go.mod) │
-│     PeerJS signaling, WS/WebRTC connections, flow control, frame sending │
-│     ← zero business knowledge, independently reusable │
-│       (github.com/Hana-ame/go-peerjs, main go.mod replace reference) │
-├─────────────────────────────────────────────────────┤
-│  ② Frame protocol layer  internal/transport         │
-│     Session state machine, verb dispatch, req fetch, upload, port forwarding │
-│     ← knows "frames/verbs", not "business semantics" │
-├─────────────────────────────────────────────────────┤
-│  ③ Management aspect  transport/admin.go + router assembly │
-│     Local sessions only → internally forwards to gin engine │
-│     ← cross-cutting: converges management operations, reuses all controllers │
-├─────────────────────────────────────────────────────┤
-│  ④ Business core  controller → service → repository │
-│     HTTP semantic business (files/collections/auth/BT/IPFS/sync) │
-│     ← unaware whether being forwarded via WS frames or called directly over HTTP │
-├─────────────────────────────────────────────────────┤
-│  ⑤ Data aspect  repository (SQLite file_index etc.) │
-├─────────────────────────────────────────────────────┤
-│  ⑥ Discovery aspect  mqtt_discovery / http_discovery / │
-│     signalserver (self-hosted signaling cmd/peerserver) │
-├─────────────────────────────────────────────────────┤
-│  ⑦ External capability aspect  p2p_bt (go-peerdrive-bt standalone library) │
-├─────────────────────────────────────────────────────┤
-│  ⑧ Frontend aspect  front/src/ws.js (WS client)     │
-│     api.js (business semantics wrapper) │
-└─────────────────────────────────────────────────────┘
+       [ 视角 B: 访问形态 Access Modality ]
+       (Local / PeerJS / WS / HTTP)
+                    │
+                    ▼
+┌────────────────────────────────────────────────────────┐
+│         视角 A: AOP 职责切面 (Core Responsibility)      │
+│  ① Primitives → ② Transport → ③ Admin → ④ Core        │
+│  → ⑤ Data → ⑥ Discovery → ⑦ External → ⑧ Frontend      │
+└────────────────────────────────────────────────────────┘
+                    ▲
+                    │
+       [ 视角 C: 部署面 Deployment & Packaging ]
+       (Standalone Go Modules / Single Binary / Packages)
 ```
 
-## 2. Dependency direction (unidirectional, acyclic, don't break)
+### 1.1 视角 A：AOP 职责切面（8 Aspects）
 
-```
-peerjs ← transport ← router ← controller ← service ← repository
-   ↑                        ↑
-   └──── admin internal forwarding ────┘    (③ cross-cuts ②④, direction unidirectional:
-                                              transport→router→controller)
-
-⑥ Discovery  ←  consumed by transport (PeerJSService assembly)
-⑦ External  ←  consumed by service/controller
-⑧ Frontend  ←  independent process, only communicates with ② WS sessions + ③ admin verb
-```
-
-**Rule**: higher layers can depend on lower layers; lower layers never depend on higher
-ones. If new code needs a "reverse reference" (e.g. transport importing controller), it
-is in the wrong layer.
-
-## 3. Decision criteria (three questions to set the layer)
-
-Answer three questions before adding a new feature:
-
-| Question | Answer → Membership |
-|---|---|
-| Does it change "**how it's transmitted**" (channel/buffer/flow control/frame-sending primitives)? | → **① peerjs** |
-| Does it define "**what's transmitted**" (new verb, frame format, connection state machine)? | → **② transport** |
-| Does it implement "**why transmit**" (specific capability, business rules)? | → **④ controller/service** |
-| Is it "**management operation convergence**" (local management of this node, not a data stream)? | → **③ admin aspect** |
-
-Typical follow-up: **Does this feature require changes to the frame protocol?**
-- Yes → it belongs to ② transport (frame protocol is transport layer's private matter)
-- No, only buffer/channel → ① peerjs
-- Pure rules/data organization → ④
-
-## 4. Placement decision table (common feature landing points)
-
-| Feature | Membership layer | Landing (file/pattern) |
+| 切面 | 范围与代表包 | 职责边界与核心原则 |
 |---|---|---|
-| Inter-node file transfer (req fetch) | ② transport | Existing: inbound.go (responding) + outbound.go (initiating) + conn.go (dispatch) |
-| New data verb (push/peer upload/resume) | ② transport | Add case in conn.go dispatch; inbound/outbound each implement their role |
-| Chunking/resume (protocol-level) | ② transport | Extend existing verb semantics, keep the "header+binary blocks atomically continuous" constraint |
-| Underlying flow control/buffering improvement | ① peerjs | connection.go's SendFrame (already has built-in low-watermark flow control) |
-| New transport channel (QUIC/direct UDP replacing WebRTC) | ① peerjs | transport.go's DataChannel interface —— new implementation only swaps the lower layer, upper layers zero change |
-| BT data transferred via peerjs | ④ + ② | service organizes business, goes through ②'s FetchFromPeer/requestFile semantic API for data plane |
-| Management-initiated transfer ("push to a node") | ③ entry + ② execution | admin verb only converges management operations; actual data still goes via ②'s verb (admin has 64MB limit, doesn't carry sustained data streams) |
-| New discovery method | ⑥ | Implement Discovery interface, PeerJSService assembly |
-| New frontend management UI | ⑧ | api.js wrapper → ws.js's admin()/upload()/download() |
-| Auth/permission refinement (roles) | ③ + ④ | Add session-level verification in admin aspect; business rules in ④ |
+| **① 传输原语层** | `back/peerjs` (`github.com/Hana-ame/go-peerjs`), `back/signalframe`, `internal/wsconn` | WebRTC DataChannel 与 WebSocket 连接管理、帧编解码、底层读写调度。**零业务语义，零 internal/* 依赖**。 |
+| **② 帧协议层** | `internal/transport` (`conn.go`, `inbound.go`, `outbound.go`, `share.go`, `forward.go`) | 帧动词分发 (`req/meta/data/done/err`, `share/share-resp`, `fwd-*`)、状态机泵、背压。知晓帧格式，不知晓业务模型。 |
+| **③ 管理收敛切面** | `internal/transport/admin.go`, `internal/router` 挂载 | 仅限本地 WS 会话；将 `admin` 帧内部转交 Gin 引擎 `ServeHTTP`，复用全部控制器。**严禁暴露给 WebRTC**。 |
+| **④ 业务核心层** | `internal/controller`, `internal/service`, `internal/source`, `internal/downloader`, `internal/model` | HTTP/业务语义业务编排（文件/合集/分享范围 `nodeshare`/多源调度/任务）。不感知上层是直接 HTTP 还是 WS 转发。 |
+| **⑤ 数据持久化层** | `internal/repository` (SQLite `file_index`, `collections`, `file_meta`), 本地 CAS (`storage/{h[:2]}/{h}`) | 数据模型 CRUD、文件索引、CAS 存储根。无网络传输逻辑。 |
+| **⑥ 节点发现切面** | `internal/transport/http_discovery.go`, `internal/transport/mqtt_discovery.go`, `back/signalserver` | 内容房间与 Presence 房间发现、心跳与节点在线清单。不携带业务正文。 |
+| **⑦ 外部协议切面** | `back/p2p_bt` (`github.com/Hana-ame/go-peerdrive-bt`), `internal/echcore`, `internal/echproxy`, `internal/provider` | 外部网络互通（BitTorrent BEP 44/51、ECH 出口代理、IPFS 客户端）。 |
+| **⑧ 前端表现切面** | `front/src/platform/transport-ws/`, `front/src/features/`, `packages/peerdrive-client`, `packages/peerdrive-media` | 纯客户端 UI、WebRTC 消费端面板、媒体播放组件。仅通过 WS 会话与 WebRTC DataChannel 交互。 |
 
-## 5. Absolute prohibitions per layer (violating = wrong layer)
+### 1.2 视角 B：访问形态（4 Access Modalities）
 
-| Layer | Forbidden |
-|---|---|
-| ① peerjs | Knowing any business verb, importing internal/*, containing business terms like "file/collection/BT" |
-| ② transport | Importing controller/service/repository; implementing specific business rules |
-| ③ admin | Carrying sustained binary data streams (>64MB directly rejected; large files go via ② req verb) |
-| ④ Business core | Directly operating WebSocket/peerjs connections (only via ②'s semantic API) |
-| ⑥ Discovery | Transmitting business data (only exchanges peerId/connection info) |
-| Frontend | Directly fetching local HTTP endpoints (except /ws/peer upgrade; LEGACY routes for old clients/curl only) |
+系统内的所有数据访问严格归纳为四种形态：
+1. **Local（本地直读）**：
+   - 本地 CAS 存储 (`storage/`)、本地 SQLite 索引 (`file_index`) 与本地声明目录；
+   - 零网络协议封装，通过 `os.Root` / `pathutil` 安全边界保护。
+2. **PeerJS（P2P 直连数据面）**：
+   - 基于 PeerJS 信令协商的 WebRTC DataChannel 连接；
+   - 承载 `req/meta/data/done`（文件拉取）、`share/share-resp`（共享清单浏览）与 `fwd-*`（安全端口转发）；
+   - **绝对禁止**响应任何 `admin` 管理动词。
+3. **WS（本地浏览器管理面）**：
+   - 浏览器与本地节点之间的 `/ws/peer` 长连接（经 `internal/wsconn` 升级与调度）；
+   - 标识为 `session.ID() == "local"`，具有执行 `admin/admin-resp/admin-bin` 动词的权威。
+4. **HTTP（传统 REST / 媒体直连）**：
+   - 由 `internal/httpd` 托管的标准 HTTP/1.1 端点（`/status`, `/discover/*`, `/files/download`）；
+   - 主要用于服务初始化、探针与向后兼容旧客户端，前端生产环境全面收敛于 WS 与 PeerJS。
 
-## 6. Existing code boundary checks (2026-08-18 status)
+### 1.3 视角 C：部署面与打包边界（Deployment Surface）
 
-- **admin.go** (③) internally constructs *http.Request → gin engine ServeHTTP, reusing
-  all controllers —— this is "convergence" not "business", consistent with ③'s definition
-- **conn.go** (②) serveAdmin rejects non-local connections by session ID —— permission
-  decision at the protocol layer entry, business layer unaware, correct
-- **peerjs_service.go** (② assembly) holds peerjs.Peer + connection management —— no
-  business logic, correct
-- **controller dual entry** (HTTP direct call + admin internal forwarding) is by design
-  (zero duplication), not a violation: business layer only recognizes *http.Request,
-  unaware of the source
-- Only boundary to note: **port forwarding (forward.go)** semantically leans toward
-  "mechanism", but protocol-level verbs (fwd-open/challenge/...) in ② are reasonable
-  —— its verb semantics belong to transport; if the underlying tunnel implementation
-  needs to be independent it can be extracted above peerjs, below transport
+1. **主二进制可执行程序 (`cmd/peerdrive`)**：
+   - 单二进制产物（`-tags nosqlite`，5 平台跨平台构建）；
+   - 支持 `serve` (节点服务), `signal` (内嵌信令), `reg` (注册服务), `all` (全家桶) 四大子命令。
+2. **独立 Go 模块（独立的 `go.mod` 仓库镜像）**：
+   - `back/peerjs` (`github.com/Hana-ame/go-peerjs`, tag 同步)
+   - `back/signalserver` (`github.com/Hana-ame/go-peersignal`, tag 同步)
+   - `back/p2p_bt` (`github.com/Hana-ame/go-peerdrive-bt`, tag 同步)
+   - `back/signalframe` (共享协议帧基础库)
+3. **独立 NPM 客户端分发包**：
+   - `packages/peerdrive-client`：零依赖，可单文件构建为独立公共面板 `dist/panel.html`；
+   - `packages/peerdrive-media`：独立 WebRTC 媒体播放组件。
 
-## 7. Recommended change flow
+---
 
-When adding a new capability, modify code in this order:
+## 2. 依赖方向与单向无环原则
 
-1. Three questions to set the layer (§3) → determine landing point
-2. If landing in ②: first check frame protocol constraints in conn.go's header comment
-   (atomic header+blocks, expect state machine, request timeout/cancel semantics), then
-   write dispatch + role implementations
-3. If landing in ①: only touch peerjs module (standalone go.mod), run
-   `cd back/peerjs && go test ./... -race`
-4. If involving management plane: admin only does entry forwarding, data streams still
-   go through ②
-5. Tests and docs: corresponding layer unit tests + REFACTOR.md records (pitfalls/
-   decisions); if this table has new feature types, add them here too
+```text
+[① 原语层: peerjs / wsconn]
+       ▲
+       │ (implements Session & Frame transport)
+[② 协议层: internal/transport]
+       ▲
+       │ (assembles HTTP engine)
+[③ 管理切面: transport/admin.go] ──forwards──► [internal/router]
+                                                    │
+                                                    ▼
+                                           [④ 业务层: controller]
+                                                    │
+                                                    ▼
+                                           [④ 核心: service / source]
+                                                    │
+                                                    ▼
+                                           [⑤ 数据层: repository]
+```
 
-## 8. Maintainer-perspective module grouping (2026-08-19 doc grouping)
+### 规则：
+- **单向无环**：高层可以依赖低层，低层绝对禁止反向导入高层。
+- **同层隔离**：`internal/source` 不得直接依赖 `internal/controller`；`internal/transport` 不得导入 `internal/service` 或 `internal/repository`。
 
-> This grouping does not change code structure and does not change §1–§7 layering rules;
-> it is only for quick locating during daily discussions, repository indexing, and PR
-> classification. It is "two views of the same system" relative to the 8 aspects in §1.
+---
 
-| Group | Main code scope | Corresponding §1 layers | Responsibility summary |
-|---|---|---|---|
-| **File Source module** | `internal/source`, `internal/downloader`, `internal/transport/file_index.go`; external protocol sources: `internal/provider/ipfs.go`, `back/p2p_bt`, download/pin branches in `internal/controller`, `front/src/pages/IPFS.jsx`, `front/src/pages/BT.jsx`（BT 与 DHT 浏览已合为同一页） | ② + ⑤ + ⑦ | Where files come from / go to: local, Peer, URL, IPFS, BT, unified manager, download, index, upload sessions |
-| **Control module** | `internal/controller`, `internal/service`, `internal/repository`, `internal/model` | ④ + ⑤ | Business control, service orchestration, persistence, model definitions; unaware whether being forwarded via WS frames |
-| **Peer module** | PeerJS core of `internal/transport`: `peerjs_service.go`, `conn.go`, `inbound.go`, `outbound.go`, `file_index.go` | ② | Node identity, frame protocol, inbound/outbound request semantics, file index sync |
-| **Network connection module** | Connection carriers of `internal/transport`: `ws_session.go`, `rtc_session.go`, `http_discovery.go`, `mqtt_discovery.go`, `forward.go`; `back/peerjs`, `back/signalserver` | ① + ⑥ | Low-level connections, signaling, discovery, port forwarding tunnels |
-| **Routing (core)** | Assembly relationships of `internal/router`, `internal/transport/admin.go` | ③ + routing essence | Combining all modules: HTTP routes, collection/file dispatch, admin internal forwarding, source routing assembly |
+## 3. 冲突裁决优先级（Arbitration Rules）
 
-Boundary notes:
+当新模块的设计在多个视角下发生归属冲突时，按以下优先级决断：
 
-- `file_index.go` is physically in `internal/transport`, but semantically leans toward
-  File Source/storage index; doc grouping places it in Source, code location not yet
-  migrated.
-- IPFS/BT current code is scattered across external capability packages like `provider`/
-  `downloader`/`p2p_bt`, and has not yet directly implemented `internal/source.Source`
-  interface; but semantically they are all Sources of "fetching files from external
-  networks", so the doc groups them by semantics into the Source group.
-- `admin.go` is also physically in `internal/transport`, but it's the cross-cutting
-  aspect "management operations converge through local WS to gin/controller"; doc
-  grouping places it in routing/assembly.
-- The boundary between `Peer` and `Network connection` is: Peer is about "protocol and
-  semantics", network connection is about "low-level connections and signaling".
+1. **第 1 优先级：安全性与访问形态隔离（视角 B）**
+   - 任何涉及管理控制、配置修改的代码必须受限于 Local WS 形态；绝不能因为方便而暴露在 WebRTC 协议帧中。
+2. **第 2 优先级：AOP 单向依赖与纯粹性（视角 A）**
+   - 原语层（`peerjs`, `wsconn`）绝对不能掺杂业务语义（禁止出现 file/collection/bt 概念）；业务层不能直接操纵裸网络 Socket。
+3. **第 3 优先级：部署单元解耦（视角 C）**
+   - 若某组件仅服务于当前主程序且无外部复用诉求（如 `internal/wsconn`, `internal/httpd`），优先作为 `internal/*` 包；若被多个独立二进制或开源项目共享，必须剥离为独立 `go.mod`。
+
+---
+
+## 4. 近期新增关键模块归位录（6 个月增量回填）
+
+| 模块 / 包 | 物理路径 | 视角 A 归属 | 视角 B 归属 | 视角 C 归属 | 核心设计意图说明 |
+|---|---|---|---|---|---|
+| `httpd` | `back/internal/httpd` | 基础设施宿主 | HTTP 承载 | 主程序内部包 | 封装 TCP 监听、优雅停机、健康探针与端口自协商 |
+| `wsconn` | `back/internal/wsconn` | ① 传输原语层 | WS 传输 | 主程序内部包 | WebSocket 握手升级、二进制帧分包、心跳与读写调度 |
+| `source` | `back/internal/source` | ④ 业务核心层 | Local / Peer / HTTP | 主程序内部包 | 统一多源内容寻址契约 (`Source` interface: local/sha/peer/url/ech/openlist/webdav) |
+| `nodeshare` | `back/internal/service` | ④ 业务核心层 | PeerJS / Local | 主程序内部包 | 显式共享范围管控（目录、合集、单文件），三级权限分级 (`public`/`unlisted`/`private`) |
+| `echcore` / `echproxy` | `back/internal/echcore` | ⑦ 外部协议切面 | HTTP 出口代理 | 主程序内部包 | 规避上游特定网络封锁的 ECH 出口与 IP 族策略控制 |
+| `peerjs/xor` | `back/peerjs/xor.go` | ① 传输原语层 | PeerJS | 独立模块子功能 | 数据面轻量混淆，防止被深度包检测拦截 |
+| 前端 WS 客户端 | `front/src/platform/transport-ws` | ⑧ 前端表现切面 | WS 客户端 | 前端内部架构 | 前端底层长连接与帧分派引擎，提供 `admin()`, `upload()`, `download()` |
+| 前端功能域 | `front/src/features/*` | ⑧ 前端表现切面 | 业务交互 | 前端内部架构 | 按网盘、市场、传输等业务域组织的高层组件与状态机 |
+
+---
+
+## 5. 新功能落点四维判定流程
+
+在增加任何新代码前，按以下流程判定：
+
+```text
+[ 新功能/新需求 ]
+       │
+       ├─► 1. [访问形态判断]：它是给谁用的？
+       │      ├─ 浏览器本地管理？ ──► 走 WS admin 动词
+       │      ├─ 跨节点 P2P 数据互传？ ──► 走 PeerJS 数据帧
+       │      └─ 本地文件/索引？ ──► 走 Local / Repository
+       │
+       ├─► 2. [传输与协议判断]：是否改变了传输机制或协议帧？
+       │      ├─ 改变了连接/流控/底层分包？ ──► ① 原语层 (peerjs / wsconn)
+       │      ├─ 增加了新的跨节点帧动词？ ──► ② 协议层 (transport)
+       │      └─ 否（复用现有帧或本地操作） ──► ④ 业务层 (controller/service/source)
+       │
+       ├─► 3. [业务逻辑分类]：
+       │      ├─ 数据源取数？ ──► 接入 internal/source.Source
+       │      ├─ 共享与网盘控制？ ──► 接入 internal/service/nodeshare
+       │      └─ 数据库表结构变更？ ──► 接入 internal/repository + schema_migrations
+       │
+       └─► 4. [打包边界判断]：
+              ├─ 是否需跨独立模块共享？ ──► 独立 go.mod 模块
+              └─ 否 ──► back/internal/*
+```
+
+---
+
+## 6. 各层绝对禁令（Checklist）
+
+- ❌ **① peerjs / wsconn**：禁止 import 任何 `internal/*` 业务包；禁止出现业务词汇（如 file, collection, nodeshare）。
+- ❌ **② transport**：禁止 import `controller`, `service`, `repository`；禁止在帧分派中直接执行 SQL 或业务修改。
+- ❌ **③ admin**：禁止承载长期大二进制数据流（超过 64MB 的文件拉取必须走 ② `req` 动词）；禁止允许非 local 会话调用。
+- ❌ **④ controller/service**：禁止直接操作原生 WebSocket 或 WebRTC 连接；必须通过 `transport.Session` 抽象。
+- ❌ **⑥ discovery**：禁止传输业务文件内容；仅允许交换节点存在性、在线心跳与网络拓扑。
+- ❌ **⑧ 前端**：禁止在生产环境下直接向后端发散发起传统 HTTP API 请求；所有管理面操作统一收敛至 WS 会话的 `admin` 帧。

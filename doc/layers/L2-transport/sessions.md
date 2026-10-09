@@ -23,7 +23,7 @@ The two paths are physically completely different (gorilla/websocket's `*websock
 `*peerjs.Connection`), but the frame protocol must be exactly the same — otherwise the frontend has to maintain two sets of codecs
 and the backend would have to write two copies of every verb handler. The `Session` interface contains the difference in the adaptation layer:
 
-- **WSSession** (ws_session.go): gorilla WebSocket adaptation + keepalive (read timeout / ping-pong)
+- **WSSession** (ws_session.go): bridges `internal/wsconn.Session` into `transport.Session` + keepalive (read timeout / ping-pong)
 - **rtcSession** (rtc_session.go): `*peerjs.Connection` adaptation (the peer node via public cloud signaling)
 
 conn.go's `bindConn` only knows `Session`: fetchReader's frame receiving, serveFile's frame sending,
@@ -32,8 +32,11 @@ and OnClose cleanup are all transport-agnostic.
 ### Position in AOP ②
 
 ```
-① peerjs: *peerjs.Connection (DataChannel + SendFrame atomic frames + flow control)
-         ↑ adapted by rtc_session.go
+① Primitives: 
+    ├── peerjs: *peerjs.Connection (DataChannel + SendFrame atomic frames + flow control)
+    │     ↑ adapted by rtc_session.go
+    └── wsconn: WebSocket transport core (readLoop / write deadlines / framing)
+          ↑ adapted by ws_session.go
 ② transport
     ├── ws_session.go / rtc_session.go  ← this document (Session abstraction, direction-neutral)
     ├── conn.go  bindConn (consumes only Session)
@@ -42,7 +45,7 @@ and OnClose cleanup are all transport-agnostic.
 ```
 
 - Upstream: the ① peerjs module (the `peerjs.Frame`, `peerjs.DataChannel` types are borrowed by the
-  interface); gorilla/websocket (the direct dependency for local WS).
+  interface); internal/wsconn (the transport core for local WS).
 - Downstream: conn.go's dispatch pump, the inbound/outbound roles, admin.go (serveAdmin distinguishes
   local sessions via `c.ID()=="local"`).
 
