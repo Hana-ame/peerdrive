@@ -20,7 +20,7 @@ import (
 	"peerdrive/internal/model"
 	"peerdrive/internal/pathutil"
 	"peerdrive/internal/repository"
-	"peerdrive/internal/transport"
+	"peerdrive/pkg/urlguard"
 
 	"github.com/gin-gonic/gin"
 )
@@ -373,7 +373,7 @@ func (s *FileService) ResolveURL(rawURL string, followRedirects bool) (hash stri
 	// Measured before the fix: POST /files/register_url with
 	// {"url":"http://127.0.0.1:<node port>/peerjs/share"} returned 201 and stored the node's
 	// own admin response as a file. Shared guard so the two surfaces cannot drift again.
-	if err := transport.GuardExternalURL(rawURL); err != nil {
+	if err := urlguard.GuardExternalURL(rawURL); err != nil {
 		log.LogWarn("file-svc: ResolveURL rejected %s: %v", rawURL, err)
 		return "", "", 0, nil, "", fmt.Errorf("URL rejected by SSRF guard: %w", err)
 	}
@@ -393,7 +393,7 @@ func (s *FileService) ResolveURL(rawURL string, followRedirects bool) (hash stri
 				if len(via) >= 10 {
 					return fmt.Errorf("redirect exceeds 10 hops, aborting")
 				}
-				if err := transport.GuardExternalURL(req.URL.String()); err != nil {
+				if err := urlguard.GuardExternalURL(req.URL.String()); err != nil {
 					return fmt.Errorf("redirect target rejected: %w", err)
 				}
 				return nil

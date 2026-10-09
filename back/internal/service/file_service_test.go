@@ -12,7 +12,7 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/repository"
-	"peerdrive/internal/transport"
+	"peerdrive/pkg/urlguard"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -332,8 +332,8 @@ func TestResolveURL_SSRFGuard(t *testing.T) {
 // "reject everything": a syntactically valid public https URL must pass the check.
 // (It is only checked, not fetched — no network in a unit test.)
 func TestGuardExternalURL_AcceptsPublicHost(t *testing.T) {
-	assert.NoError(t, transport.GuardExternalURL("https://example.com/file.zip"))
-	assert.NoError(t, transport.GuardExternalURL("http://example.com/a.bin"))
+	assert.NoError(t, urlguard.GuardExternalURL("https://example.com/file.zip"))
+	assert.NoError(t, urlguard.GuardExternalURL("http://example.com/a.bin"))
 }
 
 // TestUpload_RegistersFileIndex is the regression guard for the bug found 2026-10-04:

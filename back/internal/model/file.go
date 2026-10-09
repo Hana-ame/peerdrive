@@ -58,3 +58,14 @@ type IPFSPin struct {
 	Filename string `json:"filename"`
 	PinnedAt string `json:"pinned_at"`
 }
+
+// FileInfo represents file information in index and listings.
+type FileInfo struct {
+	Hash   string `json:"hash"`
+	Path   string `json:"path"`
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	Seq    int64  `json:"seq"`
+	Delete bool   `json:"delete,omitempty"` // sync: tombstone
+}
+

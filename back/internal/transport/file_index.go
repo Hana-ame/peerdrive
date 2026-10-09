@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"peerdrive/internal/log"
+	"peerdrive/internal/model"
 	"peerdrive/internal/pathutil"
 	"peerdrive/internal/repository"
 	"peerdrive/pkg/hashutil"
@@ -193,14 +194,7 @@ func (s *FileIndexService) Close() {
 }
 
 // FileInfo 对外返回的文件信息。
-type FileInfo struct {
-	Hash   string `json:"hash"`
-	Path   string `json:"path"`
-	Name   string `json:"name"`
-	Size   int64  `json:"size"`
-	Seq    int64  `json:"seq"`
-	Delete bool   `json:"delete,omitempty"` // sync 用：tombstone
-}
+type FileInfo = model.FileInfo
 
 // Create 登记外部文件：计算 sha256，落盘映射（不复制文件，仅索引绝对路径）。
 // 安全：只允许根目录内文件（H2），防止对端登记任意绝对路径后经 req 读取。

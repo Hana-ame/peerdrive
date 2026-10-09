@@ -49,6 +49,8 @@ run_layer() { # name cmd
 echo "== AOP 分层测试 =="
 echo "ROOT: $ROOT"
 
+# L0 依赖边界守卫（LAYERS.md / REFACTOR §8）
+run_layer "L0-deps" 'bash scripts/check-layer-deps.sh'
 # L1 信令/传输原语（独立 go.mod，-race）
 run_layer "L1-peerjs" 'cd back/peerjs && go test ./... -count=1 -race'
 # L2 帧协议层（transport 包，剥掉 L3 admin 子集）

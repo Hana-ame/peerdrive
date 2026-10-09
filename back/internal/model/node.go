@@ -9,6 +9,10 @@ package model
 
 import "time"
 
+// PresenceRoom node-level "presence room" — all nodes with node-level interconnection
+// join this room (transport.PresenceRoom, fixed sha256("peerdrive/presence/v1")).
+const PresenceRoom = "405265e56dfcc1047e9fcd13125fd343d93214eb3219f7cd5bb8927a8994d15a"
+
 // NodeShares node share summary (only reports counts, not content).
 //
 // Why only report counts: announce's loadInfo is broadcast to all queryers via the discovery server,

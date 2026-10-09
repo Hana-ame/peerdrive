@@ -53,7 +53,6 @@ import (
 	"peerdrive/internal/config"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
-	"peerdrive/internal/transport"
 )
 
 // NodeShare 共享范围服务。
@@ -81,13 +80,13 @@ type NodeShare struct {
 	// repository/transport 的具体装配（也便于单测注入假数据）。
 	anonGet  func(hash string) (*model.AnonCollection, error)
 	anonList func() ([]model.AnonCollectionSummary, error)
-	fileList func() ([]transport.FileInfo, error)
+	fileList func() ([]model.FileInfo, error)
 	// fileInfo 按 hash 查单个文件（file_index.Info）。
 	//
 	// 为什么必须有它：fileList 有 1000 条上限，节点登记的文件超过 1000 条时
 	// 新上传的文件不在那一页里——勾选了却既列不出来也共享不出去，用户看到的是
 	// "我勾了，但什么都没发生"。按 hash 单独查不受分页影响。
-	fileInfo func(hash string) (*transport.FileInfo, error)
+	fileInfo func(hash string) (*model.FileInfo, error)
 }
 
 // NewNodeShare 从配置 + 已保存的运行时状态构造。
@@ -131,11 +130,11 @@ func (s *NodeShare) SetAnonAccess(
 }
 
 // SetFileLister 注入文件索引列举器（main 装 fileIndex.List 适配）。
-func (s *NodeShare) SetFileLister(fn func() ([]transport.FileInfo, error)) { s.fileList = fn }
+func (s *NodeShare) SetFileLister(fn func() ([]model.FileInfo, error)) { s.fileList = fn }
 
 // SetFileInfoReader 注入按 hash 查单个文件的读取器（main 装 fileIndex.Info）。
 // 缺失时按 hash 的兜底查找不可用（勾选仍会记录，只是大节点上列不出来）。
-func (s *NodeShare) SetFileInfoReader(fn func(hash string) (*transport.FileInfo, error)) {
+func (s *NodeShare) SetFileInfoReader(fn func(hash string) (*model.FileInfo, error)) {
 	s.fileInfo = fn
 }
 
