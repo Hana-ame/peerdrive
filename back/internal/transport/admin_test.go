@@ -235,7 +235,7 @@ func TestAdminBinaryUpload(t *testing.T) {
 // the first version of adminUploadState stored only file metadata and dropped the declaration frame's
 // token, so serveAdminUploadComplete built the internal request with an empty token.
 func TestAdminBinaryUploadToken(t *testing.T) {
-	content := []byte("token-preserving-upload")
+	content := []byte("upload-preserve-sample-payload")
 
 	var mu sync.Mutex
 	var gotAuth string

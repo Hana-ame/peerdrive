@@ -479,7 +479,7 @@ func TestOpenListSource_Verify(t *testing.T) {
 	// Without a token the backend answers with bytes whose hash is not the one
 	// requested — the mismatch case.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") == "Bearer secret-token" {
+		if r.Header.Get("Authorization") == "Bearer test-credential-placeholder" {
 			_, _ = w.Write([]byte(right))
 			return
 		}
@@ -521,7 +521,7 @@ func TestOpenListSource_Verify(t *testing.T) {
 	t.Run("the token is sent and a correct backend passes", func(t *testing.T) {
 		// The table names the hash of the bytes the backend actually sends back.
 		s, err := NewOpenListSource(OpenListConfig{
-			BaseURL: srv.URL, Token: "secret-token", Verify: true,
+			BaseURL: srv.URL, Token: "test-credential-placeholder", Verify: true,
 			Index:  map[string]string{testHash(right): "/a"},
 			Client: &http.Client{Timeout: 5 * time.Second},
 		})
