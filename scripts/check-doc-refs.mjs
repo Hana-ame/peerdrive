@@ -159,7 +159,7 @@ for (const doc of docs) {
       }
       const total = lineCount.get(target)
       if (total !== undefined && hi > total) {
-        outOfRange.push({ where: `${rel}:${i + 1}`, ref: `${path}:${m[2]}`, target, hi, total })
+        outOfRange.push({ where: `${rel}:${i + 1}`, ref: `${path}:${m[3]}`, target, hi, total })
       }
     }
   })
