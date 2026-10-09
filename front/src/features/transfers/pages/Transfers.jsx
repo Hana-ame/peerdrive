@@ -101,6 +101,7 @@ export default function Transfers() {
   const [jobs, setJobs] = useState(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [aria2Status, setAria2Status] = useState(null); // { enabled, connected, version }
 
   // RateTracker lives in a ref: it must survive re-renders but not trigger them.
   const trackerRef = useRef(null);
@@ -110,13 +111,17 @@ export default function Transfers() {
 
   const load = useCallback(async () => {
     try {
-      const res = await ws.admin('GET', '/p2p/pull');
+      const [res, aria2Res] = await Promise.all([
+        ws.admin('GET', '/p2p/pull'),
+        ws.admin('GET', '/p2p/aria2/status').catch(() => null),
+      ]);
       const list = Array.isArray(res) ? res : Array.isArray(res?.jobs) ? res.jobs : [];
       const now = Date.now();
       const elapsed = lastTickRef.current ? now - lastTickRef.current : 0;
       lastTickRef.current = now;
       setRates(trackerRef.current.update(list, elapsed));
       setJobs(list);
+      if (aria2Res) setAria2Status(aria2Res);
       setErr('');
     } catch (e) {
       // Keep the last list on screen (a blip shouldn't blank the table); surface
@@ -139,6 +144,20 @@ export default function Transfers() {
     return () => clearInterval(t);
   }, [hasRunning, load]);
 
+  const toggleAria2 = async () => {
+    if (!aria2Status) return;
+    const next = !aria2Status.enabled;
+    setBusy(true);
+    try {
+      await ws.admin('POST', '/p2p/aria2/toggle', { enabled: next });
+      await load();
+    } catch (e) {
+      setErr('Failed to toggle aria2: ' + (e?.message || String(e)));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const cancel = async (job) => {
     setBusy(true);
     try {
@@ -153,12 +172,30 @@ export default function Transfers() {
   return (
     <div className="p-4 sm:p-8 overflow-y-auto h-full">
       <div className="max-w-5xl mx-auto">
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
           <div>
             <h1 className="text-2xl font-bold">Transfer Tasks</h1>
             <p className="text-sm text-gray-500 mt-0.5">Cross-node pull tasks</p>
           </div>
-          <button onClick={load} disabled={busy} className="btn-ghost">Refresh</button>
+          <div className="flex items-center gap-2">
+            {aria2Status && (
+              <button
+                type="button"
+                onClick={toggleAria2}
+                disabled={busy}
+                className={`text-xs px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 transition-colors ${
+                  aria2Status.enabled
+                    ? 'border-brand-500/40 bg-brand-500/10 text-brand-300'
+                    : 'border-white/10 bg-white/[0.04] text-gray-400 hover:text-gray-200'
+                }`}
+                title={aria2Status.enabled ? `aria2c connected (v${aria2Status.version || '?'})` : 'aria2c integration disabled'}
+              >
+                <span className={`w-2 h-2 rounded-full ${aria2Status.enabled ? (aria2Status.connected ? 'bg-green-400' : 'bg-yellow-400 animate-pulse') : 'bg-gray-500'}`} />
+                <span>aria2c: {aria2Status.enabled ? (aria2Status.connected ? 'Active' : 'Connecting') : 'Off'}</span>
+              </button>
+            )}
+            <button onClick={load} disabled={busy} className="btn-ghost">Refresh</button>
+          </div>
         </div>
 
         {err && (

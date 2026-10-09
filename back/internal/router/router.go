@@ -319,6 +319,11 @@ func (rt *Router) Engine() *gin.Engine {
 		p2p.POST("/pull", authRequired, controller.StartPull)
 		p2p.POST("/pull/collection", authRequired, controller.StartPullCollection)
 		p2p.POST("/pull/cancel", authRequired, controller.CancelPull)
+
+		// aria2c plugin integration routes (Issue #236)
+		p2p.GET("/aria2/status", controller.GetAria2Status)
+		p2p.POST("/aria2/toggle", authRequired, controller.SetAria2Enabled)
+		p2p.POST("/aria2/download", authRequired, controller.Aria2AddURI)
 	}
 
 	// BitTorrent routes
