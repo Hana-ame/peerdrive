@@ -74,6 +74,18 @@ describe('Transfers page', () => {
     expect(screen.getByText(/250 B \/ 1\.00 KB/)).toBeTruthy()
   })
 
+  it('resuming job shows Resuming badge, progress percent and byte totals without reset', async () => {
+    adminMock.mockResolvedValueOnce({ jobs: [runningJob({ status: 'resuming', received: 400, total: 1000 })] })
+    render(<Transfers />)
+    await flush()
+    expect(screen.getByText('big.iso')).toBeTruthy()
+    expect(screen.getByText('Resuming')).toBeTruthy()
+    // 400/1000 → 40%
+    expect(screen.getByText('40%')).toBeTruthy()
+    expect(screen.getByText(/400 B \/ 1\.00 KB/)).toBeTruthy()
+    expect(screen.getByText('Cancel')).toBeTruthy()
+  })
+
   it('unknown size (total=-1) renders indeterminate bar + received only, no fake percent', async () => {
     adminMock.mockResolvedValueOnce({ jobs: [runningJob({ total: -1, received: 4000 })] })
     render(<Transfers />)

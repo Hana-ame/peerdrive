@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -169,6 +170,99 @@ func TestOpenStream_ConnClosed(t *testing.T) {
 
 	_, err = io.ReadAll(r)
 	require.Error(t, err, "after connection close, reading must return an error")
+}
+
+// TestOpenStream_NonZeroOffset 验证 non-zero offset 的流式请求与读取：
+// 1. 发送帧携带请求的 offset 与 size
+// 2. reader 报告对应 Offset()
+// 3. 读取局部数据块不触发全量 sha256 校验错误
+// 发现背景：Issue #212 断点续传需要 fetchReader 支持 non-zero offset 请求，传递 offset 给对端，并且不因局部块而触发全量 sha256 校验失败。
+func TestOpenStream_NonZeroOffset(t *testing.T) {
+	svc := newTestPeerJSService(t)
+	sess := bindFakeConn(t, svc, "peerA")
+
+	fullContent := []byte("0123456789abcdefghijklmnopqrstuvwxyz")
+	hash := hex.EncodeToString(sha256.New().Sum(fullContent))
+	offset := int64(10)
+	size := int64(16)
+	partialContent := fullContent[offset : offset+size]
+
+	var pumpMu sync.Mutex
+	sess.OnMessage(func(msg peerjs.Frame) {
+		if !msg.IsText {
+			return
+		}
+		var r dcResp
+		_ = json.Unmarshal(msg.Data, &r)
+		pumpMu.Lock()
+		defer pumpMu.Unlock()
+		svc.routeResponse(svc.stateFor(sess), r, nil)
+	})
+
+	r, err := svc.OpenStream("peerA", hash, offset, size)
+	require.NoError(t, err)
+	defer r.Close()
+
+	// 验证 Offset() 接口
+	if offRep, ok := r.(interface{ Offset() int64 }); ok {
+		assert.Equal(t, offset, offRep.Offset(), "fetchReader 必须正确返回请求的 offset")
+	} else {
+		t.Fatal("fetchReader must implement Offset() int64")
+	}
+
+	// 检查发送的 req 帧
+	var reqID string
+	var reqOffset, reqSize int64
+	sess.mu.Lock()
+	for _, m := range sess.sent {
+		if m["type"] == "req" {
+			reqID, _ = m["reqId"].(string)
+			if o, ok := m["offset"].(float64); ok {
+				reqOffset = int64(o)
+			}
+			if s, ok := m["size"].(float64); ok {
+				reqSize = int64(s)
+			}
+		}
+	}
+	sess.mu.Unlock()
+	require.NotEmpty(t, reqID)
+	assert.Equal(t, offset, reqOffset, "req frame 必须包含请求的 offset")
+	assert.Equal(t, size, reqSize, "req frame 必须包含请求的 size")
+
+	// 注入 meta 响应（声明全文件大小为 36）
+	sess.feed(peerjsFrameText(fmt.Sprintf(`{"type":"meta","hash":"%s","total":%d,"reqId":"%s"}`, hash, len(fullContent), reqID)))
+
+	feedData := func(s int, payload []byte) {
+		st := svc.stateFor(sess)
+		st.mu.Lock()
+		f := st.expect
+		st.mu.Unlock()
+		require.NotNil(t, f)
+		select {
+		case f.q <- payload:
+			f.received += int64(s)
+			if f.received >= f.size {
+				st.mu.Lock()
+				st.expect = nil
+				st.mu.Unlock()
+			}
+		case <-f.closed:
+		}
+	}
+
+	// 发送 partial data 块并完成
+	sess.feed(peerjsFrameText(fmt.Sprintf(`{"type":"data","size":%d,"reqId":"%s"}`, len(partialContent), reqID)))
+	feedData(len(partialContent), partialContent)
+	sess.feed(peerjsFrameText(fmt.Sprintf(`{"type":"done","size":%d,"reqId":"%s"}`, len(partialContent), reqID)))
+
+	got, err := io.ReadAll(r)
+	require.NoError(t, err, "non-zero offset 流式读取不应因未全量校验而失败")
+	assert.Equal(t, partialContent, got, "读取内容必须等于指定 offset 的局部数据")
+
+	if totRep, ok := r.(interface{ Total() int64 }); ok {
+		assert.Equal(t, int64(len(fullContent)), totRep.Total(), "Total 必须返回 meta 中的文件全量大小")
+	}
 }
 
 // errConnClosedForTest test error marker (cannot use io.EOF -- ReadAll treats EOF as normal end).

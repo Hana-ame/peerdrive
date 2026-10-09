@@ -319,6 +319,7 @@ func (s *PeerJSService) openStream(c Session, hash string, offset, size int64, t
 		f:       f,
 		ctx:     s.ctx,
 		hash:    hash,
+		offset:  offset,
 		verify:  offset == 0 && size < 0, // 全量请求 → 读完校验 sha256（H5）
 		cleanup: cleanup,
 	}, nil
@@ -341,6 +342,7 @@ type fetchReader struct {
 	f       *fetchState
 	ctx     context.Context
 	hash    string
+	offset  int64
 	verify  bool
 	cleanup func()
 
@@ -348,6 +350,11 @@ type fetchReader struct {
 	h   hash.Hash
 	eof bool
 	err error
+}
+
+// Offset 对端请求的起始偏移量（非零表示 Range / 续传读取）。
+func (r *fetchReader) Offset() int64 {
+	return r.offset
 }
 
 // Total 对端在 meta 帧里声明的文件总大小；-1 = 尚未收到 meta / 对端未声明。
