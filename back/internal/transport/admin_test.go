@@ -457,6 +457,195 @@ func TestAdminRejectedOnSpoofedLocalID(t *testing.T) {
 	}
 }
 
+// TestRemoteControl_DisabledByDefaultRejects 发现背景：Issue #234。
+// 遥控功能必须默认关闭（RemoteControlEnable=false）。当对端试图发起远程控制 admin 帧时，
+// 必须严格拒绝，返回 UNAUTHORIZED 错误帧，防止未授权管理面暴露。
+func TestRemoteControl_DisabledByDefaultRejects(t *testing.T) {
+	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
+		t.Error("remote admin frame must not trigger handler when remote control is disabled")
+		return http.StatusInternalServerError, nil, "", nil
+	})
+	svc.cfg.RemoteControlEnable = false
+	svc.cfg.RemoteControlToken = "secret-token"
+
+	sess := &fakeSession{id: "remote-peer-1"}
+	svc.BindLocal(sess)
+	raw, _ := json.Marshal(map[string]any{
+		"type":   "admin",
+		"method": "GET",
+		"path":   "/api/status",
+		"token":  "secret-token",
+		"reqId":  "rc-disabled",
+	})
+	svc.serveAdmin(sess, svc.pending[sess], raw)
+
+	frames := sess.sentFrames()
+	if len(frames) != 1 || frames[0].header["type"] != "err" {
+		t.Fatalf("should return err frame, got %v", sess.sentTypes())
+	}
+	if code, _ := frames[0].header["code"].(string); code != "UNAUTHORIZED" {
+		t.Fatalf("want code UNAUTHORIZED, got %q", code)
+	}
+}
+
+// TestRemoteControl_AuthorizedWithToken 发现背景：Issue #234。
+// 当配置 RemoteControlEnable=true 并且提供了正确的 RemoteControlToken 时，
+// 远程 WebRTC 对端发送的 admin 帧应被成功鉴权并转发给内部 adminHandler，
+// 且请求附带 Authorization: Bearer <token> 请求头。
+func TestRemoteControl_AuthorizedWithToken(t *testing.T) {
+	var gotAuth, gotMethod, gotPath string
+	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
+		gotAuth = req.Header.Get("Authorization")
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		return http.StatusOK, []byte(`{"status":"running"}`), "application/json", nil
+	})
+	svc.cfg.RemoteControlEnable = true
+	svc.cfg.RemoteControlToken = "valid-secret-token"
+
+	sess := &fakeSession{id: "authorized-peer"}
+	svc.BindLocal(sess)
+	raw, _ := json.Marshal(map[string]any{
+		"type":   "admin",
+		"method": "POST",
+		"path":   "/api/command",
+		"token":  "valid-secret-token",
+		"reqId":  "rc-ok",
+	})
+	svc.serveAdmin(sess, svc.pending[sess], raw)
+
+	// Wait briefly for goroutine dispatchAdmin to complete
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(sess.sentFrames()) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	frames := sess.sentFrames()
+	if len(frames) != 1 || frames[0].header["type"] != "admin-resp" {
+		t.Fatalf("should return admin-resp frame, got %v", sess.sentTypes())
+	}
+	if status, _ := frames[0].header["status"].(float64); int(status) != http.StatusOK {
+		t.Fatalf("want status 200, got %v", status)
+	}
+	if gotAuth != "Bearer valid-secret-token" {
+		t.Fatalf("want Authorization Bearer valid-secret-token, got %q", gotAuth)
+	}
+	if gotMethod != "POST" || gotPath != "/api/command" {
+		t.Fatalf("unexpected forwarded req: %s %s", gotMethod, gotPath)
+	}
+}
+
+// TestRemoteControl_UnauthorizedTokenRejected 发现背景：Issue #234。
+// 当 RemoteControlEnable=true 时，如果对端未提供 token 或提供了错误 token，
+// 必须立即返回 UNAUTHORIZED 错误帧，不得转发到 adminHandler。
+func TestRemoteControl_UnauthorizedTokenRejected(t *testing.T) {
+	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
+		t.Error("adminHandler should not be invoked on wrong token")
+		return http.StatusInternalServerError, nil, "", nil
+	})
+	svc.cfg.RemoteControlEnable = true
+	svc.cfg.RemoteControlToken = "correct-token"
+
+	sess := &fakeSession{id: "attacker-peer"}
+	svc.BindLocal(sess)
+
+	// Case 1: Wrong token
+	rawWrong, _ := json.Marshal(map[string]any{
+		"type":   "admin",
+		"method": "GET",
+		"path":   "/api/status",
+		"token":  "wrong-token",
+		"reqId":  "rc-wrong",
+	})
+	svc.serveAdmin(sess, svc.pending[sess], rawWrong)
+
+	frames := sess.sentFrames()
+	if len(frames) != 1 || frames[0].header["type"] != "err" {
+		t.Fatalf("should return err frame, got %v", sess.sentTypes())
+	}
+	if code, _ := frames[0].header["code"].(string); code != "UNAUTHORIZED" {
+		t.Fatalf("want code UNAUTHORIZED, got %q", code)
+	}
+
+	// Case 2: Empty token
+	sessEmpty := &fakeSession{id: "empty-peer"}
+	svc.BindLocal(sessEmpty)
+	rawEmpty, _ := json.Marshal(map[string]any{
+		"type":   "admin",
+		"method": "GET",
+		"path":   "/api/status",
+		"reqId":  "rc-empty",
+	})
+	svc.serveAdmin(sessEmpty, svc.pending[sessEmpty], rawEmpty)
+
+	framesEmpty := sessEmpty.sentFrames()
+	if len(framesEmpty) != 1 || framesEmpty[0].header["type"] != "err" {
+		t.Fatalf("should return err frame on empty token, got %v", sessEmpty.sentTypes())
+	}
+	if code, _ := framesEmpty[0].header["code"].(string); code != "UNAUTHORIZED" {
+		t.Fatalf("want code UNAUTHORIZED on empty token, got %q", code)
+	}
+}
+
+// TestRemoteControl_CustomAuthorizer 发现背景：Issue #234。
+// 验证 SetRemoteControlAuthorizer 自定义鉴权钩子能够精确覆盖 peerId、token 及路径检查。
+func TestRemoteControl_CustomAuthorizer(t *testing.T) {
+	var handlerCalled bool
+	svc := testAdminSvc(t, func(req *http.Request) (int, []byte, string, error) {
+		handlerCalled = true
+		return http.StatusOK, []byte(`{"ok":true}`), "application/json", nil
+	})
+	svc.cfg.RemoteControlEnable = true
+
+	// Custom authorizer only allows peer "manager-1" on path "/api/status"
+	svc.SetRemoteControlAuthorizer(func(peerID, token, method, path string) bool {
+		return peerID == "manager-1" && token == "m-token" && path == "/api/status"
+	})
+
+	// Allowed call
+	sessOk := &fakeSession{id: "manager-1"}
+	svc.BindLocal(sessOk)
+	rawOk, _ := json.Marshal(map[string]any{
+		"type":   "admin",
+		"method": "GET",
+		"path":   "/api/status",
+		"token":  "m-token",
+		"reqId":  "rc-custom-ok",
+	})
+	svc.serveAdmin(sessOk, svc.pending[sessOk], rawOk)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if handlerCalled {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !handlerCalled {
+		t.Fatal("handler should be called for authorized custom check")
+	}
+
+	// Disallowed call (wrong path)
+	sessFail := &fakeSession{id: "manager-1"}
+	svc.BindLocal(sessFail)
+	rawFail, _ := json.Marshal(map[string]any{
+		"type":   "admin",
+		"method": "POST",
+		"path":   "/api/dangerous",
+		"token":  "m-token",
+		"reqId":  "rc-custom-fail",
+	})
+	svc.serveAdmin(sessFail, svc.pending[sessFail], rawFail)
+
+	framesFail := sessFail.sentFrames()
+	if len(framesFail) != 1 || framesFail[0].header["type"] != "err" {
+		t.Fatalf("should return err for disallowed path, got %v", sessFail.sentTypes())
+	}
+}
+
 // TestAdminUploadChunkWriteFail a temporary file write failure (a closed file -> os.ErrClosed) must
 // clean up the temp file and handle and reply with an err frame -- this path used to return without
 // cleaning up, leaking the file + fd permanently (found in the 2026-08-18 code review). Defensive

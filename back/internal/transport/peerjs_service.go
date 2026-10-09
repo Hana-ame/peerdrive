@@ -126,6 +126,10 @@ type PeerJSService struct {
 	disconnectMu    sync.Mutex
 	disconnectHooks []func(peerID string)
 
+	// Remote control authorizer (Issue #234): validates remote admin execution.
+	remoteAuthMu     sync.RWMutex
+	remoteAuthorizer func(peerID, token, method, path string) bool
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -722,6 +726,13 @@ func (s *PeerJSService) notifyDisconnect(peerID string) {
 // SetExtraPeers 注入运行时追加的常驻对端（节点市场「加入节点」清单）。
 // 语义见 extraPeers 字段注释：重连后自动拨号，不受发现拨号预算限制。
 func (s *PeerJSService) SetExtraPeers(fn func() []string) { s.extraPeers = fn }
+
+// SetRemoteControlAuthorizer sets a custom callback to validate remote control commands (Issue #234).
+func (s *PeerJSService) SetRemoteControlAuthorizer(fn func(peerID, token, method, path string) bool) {
+	s.remoteAuthMu.Lock()
+	defer s.remoteAuthMu.Unlock()
+	s.remoteAuthorizer = fn
+}
 
 // EnsureConnection 幂等拨号：已连接/正在连接则无事发生。
 // 供「加入节点」即时生效用——不等下一次发现轮询（最长 10s）+ 拨号，

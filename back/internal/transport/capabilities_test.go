@@ -226,3 +226,19 @@ func TestCapabilities_PSKHandshakePiggyback(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, []string{CapReq, CapShare}, caps)
 }
+
+// TestCapabilities_RemoteControlAdminCapability verifies that CapAdmin is only advertised
+// when RemoteControlEnable is true.
+// 发现背景：Issue #234（遥控功能验证：RemoteControlEnable 开启时才在 capability 中通告 admin）。
+func TestCapabilities_RemoteControlAdminCapability(t *testing.T) {
+	svc := newTestPeerJSService(t)
+	svc.cfg.RemoteControlEnable = false
+	capsDisabled := svc.currentLocalCaps()
+	assert.NotContains(t, capsDisabled, CapAdmin)
+
+	svc.cfg.RemoteControlEnable = true
+	capsEnabled := svc.currentLocalCaps()
+	assert.Contains(t, capsEnabled, CapAdmin)
+	assert.Equal(t, CapAdmin, VerbRequiredCap("admin"))
+}
+
