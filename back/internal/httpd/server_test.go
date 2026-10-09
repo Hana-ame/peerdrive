@@ -18,12 +18,14 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"io"
 	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -194,8 +196,14 @@ func TestServeReturnsPortConflict(t *testing.T) {
 	go func() { errCh <- srv.Serve(context.Background()) }()
 	select {
 	case err := <-errCh:
+		// 比 errno 而不是错误文本：同一个 EADDRINUSE，Linux 的措辞是
+		// "address already in use"，Windows 是 "Only one usage of each socket
+		// address (protocol/network address/port) is normally permitted"。
+		// 比对字符串会让这条断言只在其中一个平台上成立。errors.Is 走的是
+		// net.OpError → *os.SyscallError → syscall.Errno 这条链，跨平台一致。
 		require.Error(t, err, "binding an occupied port must fail")
-		assert.Contains(t, err.Error(), "address already in use")
+		require.Truef(t, errors.Is(err, syscall.EADDRINUSE),
+			"binding an occupied port must fail with EADDRINUSE, got %v", err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("Serve did not return on a port conflict")
 	}
