@@ -595,6 +595,66 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 				log.LogWarn("main: register url source: %v", err)
 			}
 		}
+
+		// Optional OpenList source (PEERDRIVE_OPENLIST_ENABLE, default off).
+		//
+		// OpenList cannot be imported — its driver layer lives under internal/,
+		// which Go's import rules keep outside this module — so this reaches it
+		// over HTTP instead. Only /p/*path is used: it streams the bytes through
+		// the OpenList process and honours Range, whereas /d/*path 302-redirects
+		// to the cloud provider's direct URL and would let a request bypass the
+		// source's sha256 check entirely.
+		//
+		// OpenList has no trustworthy content hash of its own, so the hash→path
+		// mapping comes from an operator-supplied table. A missing or malformed
+		// table fails startup instead of registering a source that could serve
+		// nothing — an explicitly opted-in data source must be told it did not
+		// come up, the same rule the ech-proxy and exhentai modules follow.
+		//
+		// When the flag is off this whole block is skipped: nothing is
+		// constructed and nothing is registered, so a node that never enables it
+		// stays byte-identical to one without the source.
+		if cfg.OpenListEnable {
+			if cfg.OpenListBaseURL == "" {
+				log.LogWarn("main: PEERDRIVE_OPENLIST_ENABLE=true but PEERDRIVE_OPENLIST_BASE_URL is " +
+					"empty — the openlist source was not registered")
+			} else if cfg.OpenListIndexPath == "" {
+				log.LogWarn("main: PEERDRIVE_OPENLIST_ENABLE=true but PEERDRIVE_OPENLIST_INDEX_FILE is " +
+					"empty — without a hash→path table the source could serve nothing")
+			} else {
+				index, err := source.LoadOpenListIndex(cfg.OpenListIndexPath)
+				if err != nil {
+					return fail(err)
+				}
+				// A bounded client, not http.DefaultClient: an unresponsive
+				// OpenList must not be able to hold a fetch slot forever.
+				olClient := &http.Client{Timeout: time.Duration(cfg.OpenListTimeoutSecs) * time.Second}
+				if urlClient != nil {
+					// Reuse the egress module's transport (ech-proxy / exhentai)
+					// so an OpenList sitting behind ECH keeps working. Those
+					// transports pass non-matching hosts straight through, which
+					// is what happens for any OpenList that is not one of them.
+					olClient.Transport = urlClient.Transport
+				}
+				olSrc, err := source.NewOpenListSource(source.OpenListConfig{
+					Name:     cfg.OpenListName,
+					BaseURL:  cfg.OpenListBaseURL,
+					Client:   olClient,
+					Token:    cfg.OpenListToken,
+					Index:    index,
+					Verify:   cfg.OpenListVerify,
+					Priority: cfg.OpenListPriority,
+				})
+				if err != nil {
+					return fail(err)
+				}
+				if err := mgr.Register(olSrc); err != nil {
+					log.LogWarn("main: register openlist source: %v", err)
+				}
+				log.LogInfo("main: openlist source enabled — %s, %d indexed files",
+					olSrc.Name(), olSrc.Count())
+			}
+		}
 		deps.SourceManager = mgr
 		// serveFile multi-source routing (3rd optimization on 2026-08-18): when a peer req
 		// misses locally, fall back to the peer/URL template (loop prevention via dcReq.Trace).
