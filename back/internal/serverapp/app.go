@@ -42,6 +42,7 @@ import (
 	"peerdrive/internal/router"
 	"peerdrive/internal/service"
 	"peerdrive/internal/source"
+	"peerdrive/internal/twitterpic"
 	"peerdrive/internal/transport"
 )
 
@@ -250,6 +251,10 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	// there is no longer a window in which the router could observe a half-wired
 	// dependency set.
 	var peerjsSvc *transport.PeerJSService
+	// urlClient 提升到函数作用域（原来在 ech-proxy 块内声明）：twitter-pic
+	// 模块在 PeerJS 块外装配，也要能复用 ech-proxy/exhentai 可能产生的出口
+	// client（其 Transport 走 ech-proxy 出口）。nil = 直连默认 client。
+	var urlClient *http.Client
 	if cfg.PeerJSEnable {
 		log.LogInfo("main: initializing PeerJS WebRTC service")
 		peerjsSvc = transport.NewPeerJSService(cfg, storageDir)
@@ -508,7 +513,6 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 		// There is deliberately no silent fallback to direct pbs.twimg.com traffic: if the
 		// download, the checksum, the port bind or the spawn fails, startup fails. An
 		// operator who opted into the module must be told it did not come up.
-		var urlClient *http.Client
 		if cfg.ECHProxyEnable {
 			if cfg.URLSourceTemplate == "" {
 				log.LogWarn("main: PEERDRIVE_ECH_PROXY_ENABLE=true but PEERDRIVE_URL_SOURCE_TEMPLATE is " +
@@ -655,6 +659,31 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 		// HTTP download root requests already use mgr; here we reuse the same instance to keep
 		// routing order consistent.
 		peerjsSvc.SetFileRouter(mgr)
+	}
+
+	// Optional twitter-pic gallery module (PEERDRIVE_TWITTERPIC_ENABLE, default
+	// off). twitter-pic-go 数据面的 peerdrive 整合：按「一个 user 作为一个
+	// collection」把图库用户拉进 sha-文件系统（摄取媒体 + 内容寻址集合 JSON）。
+	// 无子进程、无本地监听——纯出站 HTTP（API + 媒体下载），client 复用上面
+	// ech-proxy/exhentai 模块可能产生的 urlClient（其 Transport 走出口；nil 时
+	// 直连）。放在 PeerJS 块之外（与 iwara 同先例）：模块不依赖对端互联，
+	// PeerJS 关闭的节点同样可用。开关关掉时整块跳过：默认节点与未启用时
+	// 逐字节等价（零变化）。
+	if cfg.TwitterPicEnable {
+		svc, err := twitterpic.NewService(twitterpic.ServiceConfig{
+			BaseURL:    cfg.TwitterPicBaseURL,
+			ProxyBase:  cfg.TwitterPicProxyBase,
+			StorageDir: cfg.StorageDir,
+			MaxFiles:   cfg.TwitterPicMaxFiles,
+			MaxBytes:   cfg.TwitterPicMaxBytes,
+			Timeout:    time.Duration(cfg.TwitterPicTimeout) * time.Second,
+			Client:     urlClient,
+		})
+		if err != nil {
+			return fail(fmt.Errorf("twitter-pic module: %w", err))
+		}
+		deps.TwitterPic = svc
+		log.LogInfo("main: twitter-pic module enabled — %s", svc.BaseURL())
 	}
 
 	// Hand the assembled dependency set to the router in one call.

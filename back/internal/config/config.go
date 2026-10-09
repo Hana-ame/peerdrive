@@ -308,6 +308,27 @@ type Config struct {
 	ExhentaiConfigInsecure bool   // PEERDRIVE_EXHENTA_CONFIG_INSECURE (default false)
 	ExhentaiConfigAuth     string // PEERDRIVE_EXHENTA_CONFIG_AUTH (default ""): Authorization header value for config fetches
 
+	// ── twitter-pic gallery (PEERDRIVE_TWITTERPIC_*, optional module) ──
+	//
+	// TwitterPicEnable is the master switch (PEERDRIVE_TWITTERPIC_ENABLE, default
+	// **false**). It is the twitter-pic-go data surface integrated into peerdrive
+	// as "one user = one collection": the module pulls a gallery user's timeline
+	// from the twitter-pic API, ingests the media into the sha-file system and
+	// emits a content-addressed collection JSON per user (see internal/twitterpic).
+	//
+	// Why default off: the module downloads media from a third-party site on
+	// demand and writes into the node's storage; like the iwara/exhentai
+	// modules it is an explicit opt-in.
+	//
+	// Empty string values defer to the package defaults (twitterpic.DefaultBaseURL
+	// / DefaultProxyBase), so defaults live in one place.
+	TwitterPicEnable    bool   // PEERDRIVE_TWITTERPIC_ENABLE (default false)
+	TwitterPicBaseURL   string // PEERDRIVE_TWITTERPIC_BASE_URL (default https://x.moonchan.xyz/api/twitter)
+	TwitterPicProxyBase string // PEERDRIVE_TWITTERPIC_PROXY_BASE (default https://pbs.moonchan.xyz): ech-url 备选基址
+	TwitterPicMaxFiles  int    // PEERDRIVE_TWITTERPIC_MAX_FILES: 媒体摄取上限（0 = 全部）
+	TwitterPicMaxBytes  int64  // PEERDRIVE_TWITTERPIC_MAX_BYTES: 单文件摄取上限（0 = 不限）
+	TwitterPicTimeout   int    // PEERDRIVE_TWITTERPIC_TIMEOUT_SECS: 单请求超时秒数（默认 20）
+
 	// ── Signal subcommand (PEERSIGNAL_* / PEERJS_TOKENS, backward compat with old peersignal binary) ──
 	//
 	// The `peerdrive signal` subcommand preserves the old peersignal env var names so
@@ -446,6 +467,14 @@ func Load() *Config {
 		ExhentaiConfigURL:      getEnv("PEERDRIVE_EXHENTA_CONFIG_URL", ""),
 		ExhentaiConfigInsecure: getEnvBool("PEERDRIVE_EXHENTA_CONFIG_INSECURE", false),
 		ExhentaiConfigAuth:     getEnv("PEERDRIVE_EXHENTA_CONFIG_AUTH", ""),
+
+		// twitter-pic gallery (optional module)
+		TwitterPicEnable:    getEnvBool("PEERDRIVE_TWITTERPIC_ENABLE", false),
+		TwitterPicBaseURL:   getEnv("PEERDRIVE_TWITTERPIC_BASE_URL", ""),
+		TwitterPicProxyBase: getEnv("PEERDRIVE_TWITTERPIC_PROXY_BASE", ""),
+		TwitterPicMaxFiles:  getEnvInt("PEERDRIVE_TWITTERPIC_MAX_FILES", 0),
+		TwitterPicMaxBytes:  getEnvInt64("PEERDRIVE_TWITTERPIC_MAX_BYTES", 0),
+		TwitterPicTimeout:   getEnvInt("PEERDRIVE_TWITTERPIC_TIMEOUT_SECS", 20),
 
 		// 2026-10-07: dropped the bogus "ipfs" entry from the default (was
 		// "local,ipfs,ipfsgw,btdht,http"). "ipfs" has not been in the fetcher
