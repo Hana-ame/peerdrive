@@ -104,14 +104,17 @@ function Nav() {
   );
 }
 
+import { AppProvider } from './context/AppContext';
+
 export default function App() {
   useEffect(() => { registerSW(); }, []);
   return (
     <HashRouter>
-      <div className="flex flex-col h-screen text-gray-200">
-        <Nav />
-        <div className="flex-1 overflow-hidden">
-          <Suspense fallback={<RouteLoading />}>
+      <AppProvider>
+        <div className="flex flex-col h-screen text-gray-200">
+          <Nav />
+          <div className="flex-1 overflow-hidden">
+            <Suspense fallback={<RouteLoading />}>
             <Routes>
               <Route path="/" element={<Connect />} />
               <Route path="/node" element={<NodeControl />} />
@@ -131,6 +134,7 @@ export default function App() {
           </Suspense>
         </div>
       </div>
-    </HashRouter>
-  );
+    </AppProvider>
+  </HashRouter>
+);
 }
