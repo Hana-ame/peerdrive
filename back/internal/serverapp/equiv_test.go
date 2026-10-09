@@ -257,7 +257,19 @@ var volatileKeys = map[string]bool{"uptime_sec": true, "request_id": true}
 
 // canonicalBody turns a response body into a stable digest: JSON bodies are
 // parsed, volatile fields dropped and re-marshalled (encoding/json sorts map
-// keys, so the output is canonical), everything else is hashed as-is.
+// keys, so the output is canonical), everything else is hashed after normalising
+// CRLF to LF.
+//
+// Why the CRLF normalisation: /panel and /peerjs.min.js come from files in the
+// working tree (//go:embed in internal/panel), so the bytes they serve depend on
+// how the checkout converted line endings. A windows-latest runner checks out
+// with core.autocrlf=true, so the same git blob is served as CRLF there and as LF
+// on the other four platforms — hashing the raw bytes made the golden
+// platform-bound and go-build.yml's windows cell failed while the rest passed.
+// That is a checkout artefact, present identically pre- and post-split, not a
+// response regression. The invariant that matters — "the shell split did not
+// change what is served" — is preserved: a real content change still changes the
+// digest (asserted by TestCanonicalBodyNormalisesCRLF).
 func canonicalBody(ct string, body []byte) (string, string) {
 	if strings.HasPrefix(ct, "application/json") {
 		var v any
@@ -273,8 +285,38 @@ func canonicalBody(ct string, body []byte) (string, string) {
 			}
 		}
 	}
-	h := sha256.Sum256(body)
+	h := sha256.Sum256([]byte(strings.ReplaceAll(string(body), "\r\n", "\n")))
 	return "raw", hex.EncodeToString(h[:])
+}
+
+// TestCanonicalBodyNormalisesCRLF 发现背景：go-build.yml 的 windows-latest 那格
+// 让 TestGoldenEndpointDigest 红了，而另外四个平台全绿。
+//
+// 原因是 /panel 与 /peerjs.min.js 的响应体来自工作树里的文件（internal/panel
+// 的 //go:embed），窗口 runner 用 core.autocrlf=true 检出，同一份 git blob 在
+// Windows 上被换成 CRLF 后内嵌进二进制——差异是检出产物，分解前后完全一致，
+// 不是响应回归。于是摘要必须做 CRLF→LF 归一化才可能在多平台上共用一份金标。
+// 这里锁住两件事：归一化只吞掉换行符差异，任何真实内容变化仍然改摘要。
+func TestCanonicalBodyNormalisesCRLF(t *testing.T) {
+	base := []byte("alpha\nbeta\n")
+	crlf := []byte("alpha\r\nbeta\r\n")
+
+	_, shaLF := canonicalBody("text/plain", base)
+	_, shaCRLF := canonicalBody("text/plain", crlf)
+	if shaLF != shaCRLF {
+		t.Fatalf("CRLF and LF spellings of the same text must digest identically: %s != %s", shaLF, shaCRLF)
+	}
+
+	// A real change must still be caught: only the line-ending difference is folded.
+	_, shaChanged := canonicalBody("text/plain", []byte("alpha\nbeta\nchanged\n"))
+	if shaChanged == shaLF {
+		t.Fatalf("a real content change must change the digest, both gave %s", shaLF)
+	}
+
+	_, shaSame := canonicalBody("text/plain", []byte("alpha\nbeta\nchanged\n"))
+	if shaSame != shaChanged {
+		t.Fatalf("digesting is not deterministic: %s != %s", shaSame, shaChanged)
+	}
 }
 
 func endpointDigest(t *testing.T) []string {
