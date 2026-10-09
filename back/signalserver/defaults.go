@@ -7,7 +7,7 @@ package signalserver
 //
 // This value is the peerdrive ecosystem's *authoritative* signal key. It is the same
 // string the peerdrive client hardcodes for the project signaling
-// (back/peerjs/peer.go DefaultOptions) and the same default config.Load() applies to
+// (back/peerjs/signalling/options.go DefaultOptions) and the same default config.Load() applies to
 // PEERDRIVE_PEERJS_KEY (back/internal/config/config.go DefaultSignalKey). It is also
 // what the online deployment documents (AGENTS.md 「线上部署」).
 //

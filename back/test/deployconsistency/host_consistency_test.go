@@ -1,15 +1,19 @@
 // host_consistency_test.go — 信令主机名的「改了一处忘了另一处」闸门。
 //
 // 和 deploy_consistency_test.go 里的 key 一致性是同一类缺陷，只是换了个值。
-// 信令主机名同样分散硬编码在 4 个非注释位置：
+// 信令主机名同样分散硬编码在非注释位置：
 //
 //	back/internal/config/config.go   DefaultSignalHost（权威值）
-//	back/peerjs/peer.go              DefaultOptions 的 Host
+//	back/peerjs/signalling/options.go signalling.DefaultOptions 的 Host
 //	back/cmd/echclient/main.go       opts.Host
 //	packages/peerdrive-client/panel/{template.html,app.js}
 //
 // 上一轮轮换 key 时我手工同步了 7 个位置；主机名没有对应测试，
 // 一旦迁移到新的信令域就同样会漏。
+//
+// 2026-10 peerjs 信令传输拆包（feat/peerjs-split）：DefaultOptions 的 Host 由
+// back/peerjs/peer.go 搬到 back/peerjs/signalling/options.go，peerjs.DefaultOptions
+// 改为委托 signalling.DefaultOptions，故字面量只剩一份——漂移面从 5 处降到 4 处。
 package main
 
 import (
@@ -78,7 +82,7 @@ func TestSignalHostIsConsistentAcrossRepo(t *testing.T) {
 
 	files := []string{
 		"back/internal/config/config.go",
-		"back/peerjs/peer.go",
+		"back/peerjs/signalling/options.go",
 		"back/cmd/echclient/main.go",
 		"packages/peerdrive-client/panel/template.html",
 		"packages/peerdrive-client/panel/app.js",

@@ -1,6 +1,8 @@
 package peerjs
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -361,4 +363,14 @@ func (c *Connection) handleOffer(sdp *webrtc.SessionDescription) error {
 	}
 	payload := AnswerPayload{SDP: &answer, Type: ConnData, ConnectionID: c.ID}
 	return c.peer.Send(NewMessage(MsgAnswer, c.PeerID, payload))
+}
+
+// randHex generates n bytes of random hex. Used only for WebRTC connection IDs
+// (the connectionId signaling routing key); the signaling layer keeps its own
+// copy of the helper in the signalling package so the two packages do not need
+// to share utilities.
+func randHex(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
