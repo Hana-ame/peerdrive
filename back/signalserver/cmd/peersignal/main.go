@@ -11,6 +11,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"flag"
 	"fmt"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/Hana-ame/go-peerserver"
+	"github.com/Hana-ame/go-peerserver/tracker"
 )
 
 func main() {
@@ -49,6 +51,21 @@ func main() {
 	rateWSBurst := flag.Int("rate-ws-burst", 20, "burst for -rate-ws")
 	rateID := flag.Float64("rate-id", 5, "per-IP requests/s for GET /peerjs/id (0 = unlimited)")
 	rateIDBurst := flag.Int("rate-id-burst", 20, "burst for -rate-id")
+
+	// BitTorrent HTTP tracker (BEP 12 announce + BEP 31 scrape).
+	// When -bt-tracker is set, the server exposes /announce, /scrape, and
+	// /tracker/bans alongside the signaling endpoints. Ban management reuses
+	// the -ops-token gate. The ban file is persisted to disk for restart
+	// resilience; peer state is ephemeral (trackers are stateless by convention).
+	btTracker := flag.Bool("bt-tracker", false,
+		"enable BitTorrent HTTP tracker (/announce, /scrape). Ban management at /tracker/bans "+
+			"requires -ops-token. Ban state persists to -bt-bans-file.")
+	btBansFile := flag.String("bt-bans-file", "tracker_bans.json",
+		"JSON file for tracker ban persistence (restart-resilient). Empty = no persistence.")
+	btInterval := flag.Int("bt-interval", 900,
+		"announce interval in seconds (default 900 = 15 minutes, BT standard)")
+	btMaxPeers := flag.Int("bt-max-peers", 100,
+		"max peers per info_hash (default 100)")
 	flag.Parse()
 
 	var opts []signalserver.Option
@@ -77,6 +94,28 @@ func main() {
 	srv.Start() // background sweeper: clean up expired offline queues (H3)
 
 	mux := http.NewServeMux()
+
+	// BitTorrent HTTP tracker (BEP 12/31) — mounted before the signal routes
+	// so that /announce doesn't get shadowed by the dashboard catch-all "/".
+	// Ban management at /tracker/bans reuses the server's ops-token gate.
+	if *btTracker {
+		btOpts := []tracker.Option{}
+		if *btBansFile != "" {
+			btOpts = append(btOpts, tracker.WithBanFile(*btBansFile))
+		}
+		btOpts = append(btOpts, tracker.WithAnnounceInterval(*btInterval))
+		btOpts = append(btOpts, tracker.WithMaxPeers(*btMaxPeers))
+		// Ban management auth reuses the ops token protocol: ?token= or
+		// Authorization: Bearer. Empty ops-token = ban management disabled.
+		btOpts = append(btOpts, tracker.WithBanAuth(btBanAuth(*opsToken)))
+		btTrackerInst := tracker.NewTracker(btOpts...)
+		mux.HandleFunc("/announce", btTrackerInst.HandleAnnounce)
+		mux.HandleFunc("/scrape", btTrackerInst.HandleScrape)
+		mux.HandleFunc("/tracker/bans", btTrackerInst.HandleBans())
+		log.Printf("bt-tracker: enabled (interval=%ds maxPeers=%d bansFile=%q)", *btInterval, *btMaxPeers, *btBansFile)
+		log.Printf("bt-tracker: ban management at /tracker/bans (requires -ops-token)")
+	}
+
 	// PeerJS-compatible signaling endpoints
 	mux.HandleFunc("/peerjs", srv.HandleWS)
 	mux.HandleFunc("/peerjs/id", srv.HandleID)
@@ -93,6 +132,27 @@ func main() {
 
 	if err := Serve(*addr, *tlsCert, *tlsKey, mux); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// btBanAuth returns an auth function that checks the ops token using the same
+// protocol as signalserver's opsTokenOK: ?token= or Authorization: Bearer.
+// Empty token = always deny (ban management disabled by default).
+func btBanAuth(opsToken string) func(*http.Request) bool {
+	return func(r *http.Request) bool {
+		if opsToken == "" {
+			return false
+		}
+		var presented string
+		if t := r.URL.Query().Get("token"); t != "" {
+			presented = t
+		} else if h := r.Header.Get("Authorization"); len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
+			presented = strings.TrimSpace(h[7:])
+		}
+		if presented == "" {
+			return false
+		}
+		return subtle.ConstantTimeCompare([]byte(presented), []byte(opsToken)) == 1
 	}
 }
 

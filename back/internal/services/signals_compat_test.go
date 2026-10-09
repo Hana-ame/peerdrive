@@ -95,7 +95,10 @@ func TestSignalWiringParityAcrossAllThreePlaces(t *testing.T) {
 
 	// services.go：registerSignalRoutes 登记 6 条共享路由；另外两处面板挂法
 	//（单跑 "/"、合并 "/_signal"）不属于共享承诺，先剔掉。
-	servicesShared := without(servicesRoutes, "/", "/_signal")
+	// Tracker routes (/announce, /scrape, /tracker/bans) are a separate
+	// feature and are not part of the signal-parity contract.
+	servicesShared := without(servicesRoutes, "/", "/_signal",
+		"/announce", "/scrape", "/tracker/bans")
 	if got, want := sorted(servicesShared), sorted(signalSharedRoutes); !equalStrings(got, want) {
 		t.Errorf("services.go 登记的信令路由 = %v，期望 %v。\n"+
 			"  这 6 条是 peerdrive signal / all 的共同承诺；\n"+
@@ -104,7 +107,10 @@ func TestSignalWiringParityAcrossAllThreePlaces(t *testing.T) {
 	}
 
 	// main.go：6 条共享路由 + 面板 "/" + 运维端点 "/status/key"。
-	standaloneShared := without(standaloneRoutes, "/", "/status/key")
+	// Tracker routes (/announce, /scrape, /tracker/bans) are a separate
+	// feature and are not part of the signal-parity contract.
+	standaloneShared := without(standaloneRoutes, "/", "/status/key",
+		"/announce", "/scrape", "/tracker/bans")
 	if got, want := sorted(standaloneShared), sorted(signalSharedRoutes); !equalStrings(got, want) {
 		t.Errorf("独立 peersignal 登记的信令路由 = %v，期望 %v。\n"+
 			"  它必须与 peerdrive signal/all 逐条一致（另加面板 \"/\" 与运维 \"/status/key\"）。",

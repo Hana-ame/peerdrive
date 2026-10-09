@@ -6,7 +6,11 @@
 // Server struct in signalserver.go stays focused on state and behaviour.
 package signalserver
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/Hana-ame/go-peerserver/tracker"
+)
 
 // Option is a signaling server configuration option.
 type Option func(*Server)
@@ -133,5 +137,15 @@ func WithRateLimit(cfg RateLimitConfig) Option {
 		if cfg.IDRPS > 0 {
 			s.idLim = newTokenBucket(cfg.IDRPS, cfg.IDBurst)
 		}
+	}
+}
+
+// WithTracker sets the BitTorrent HTTP tracker server. When provided, the
+// server exposes GET /announce, GET /scrape, and /tracker/bans alongside the
+// existing signaling endpoints. The tracker's ban management auth uses the
+// server's opsToken gate (same as /status).
+func WithTracker(tr *tracker.Tracker) Option {
+	return func(s *Server) {
+		s.tracker = tr
 	}
 }

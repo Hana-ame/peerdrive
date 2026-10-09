@@ -72,6 +72,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Hana-ame/go-peerserver/tracker"
 	"peerdrive/internal/ratelimit"
 )
 
@@ -142,6 +143,12 @@ type Server struct {
 	loginLimiter    *ratelimit.Limiter // 昂贵（bcrypt 比对）+ 可爆破
 	relayLimiter    *ratelimit.Limiter // 廉价写库，但会污染中继名录
 	loginBackoff    *ratelimit.Backoff // 账号级退避（防爆破的主力，限流只是兜底）
+
+	// tracker is an optional BitTorrent HTTP tracker server (BEP 12/31).
+	// When set, /announce, /scrape, and /tracker/bans are served alongside
+	// the registration endpoints. Ban management uses JWT auth (Bearer token),
+	// and user-level bans map to regserver usernames via JWT verification.
+	tracker *tracker.Tracker
 }
 
 // New 打开（或创建）指定路径的库并返回服务实例。
@@ -218,7 +225,39 @@ func (s *Server) PingDB() error {
 	return s.db.Ping()
 }
 
-// Handler 返回带全部 9 条路由的 http.Handler。
+// SetTracker sets the BitTorrent HTTP tracker server. When provided, the
+// server exposes GET /announce, GET /scrape, and /tracker/bans alongside
+// the registration endpoints. Ban management at /tracker/bans uses JWT
+// Bearer auth (same protocol as /auth/whoami). The tracker's verifyUser
+// callback uses the server's JWT verification, so announce requests with
+// a valid Bearer token are automatically associated with the user's identity.
+func (s *Server) SetTracker(tr *tracker.Tracker) {
+	s.tracker = tr
+}
+
+// SetupTracker creates a BitTorrent HTTP tracker with the given options,
+// wires JWT auth (ban management + user→peer_id mapping), and returns the
+// tracker. The regserver's JWT verification (verifyToken) is used for
+// both: ban management at /tracker/bans accepts any valid Bearer JWT,
+// and announce requests with a valid Bearer token are associated with
+// the user's identity for user-level bans.
+//
+// Typical usage:
+//
+//	tr := srv.SetupTracker(tracker.WithBanFile("tracker_bans.json"),
+//	    tracker.WithAnnounceInterval(900), tracker.WithMaxPeers(100))
+//	srv.SetTracker(tr)
+func (s *Server) SetupTracker(opts ...tracker.Option) *tracker.Tracker {
+	// Prepend auth options before user-supplied options so they take
+	// precedence (user can override if needed).
+	allOpts := append([]tracker.Option{
+		tracker.WithBanAuth(s.jwtBanAuth()),
+		tracker.WithVerifyUser(s.jwtVerifyUser()),
+	}, opts...)
+	return tracker.NewTracker(allOpts...)
+}
+
+// Handler 返回带全部路由的 http.Handler。
 //
 // 路由与原独立仓逐条一致，改这里等于改原仓的实现——
 // peerdrive 的 auth_middleware.go 依赖 GET /auth/whoami，动了会静默改鉴权行为。
@@ -237,6 +276,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /p2p/relay/register", s.rateLimit(s.relayLimiter)(s.relayRegister))
 	mux.HandleFunc("POST /p2p/relay/heartbeat", s.rateLimit(s.relayLimiter)(s.relayHeartbeat))
 	mux.HandleFunc("GET /p2p/relay/list", s.relayList)
+
+	// BitTorrent HTTP tracker routes (BEP 12/31) — mounted after the reg
+	// routes. Ban management at /tracker/bans uses JWT Bearer auth, same
+	// protocol as /auth/whoami.
+	if s.tracker != nil {
+		mux.HandleFunc("/announce", s.tracker.HandleAnnounce)
+		mux.HandleFunc("/scrape", s.tracker.HandleScrape)
+		mux.HandleFunc("/tracker/bans", s.tracker.HandleBans())
+	}
+
 	return mux
 }
 
