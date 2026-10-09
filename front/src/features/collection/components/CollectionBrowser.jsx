@@ -14,7 +14,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as ws from '../../../platform/transport-ws';
 import { buildTree, descend, basename, entrySha, previewSha } from '../../../platform/shared/collectionTree';
 import { fmtBytes } from '../../../platform/shared/format';
+import { kindOf, mimeOf } from '../../../platform/shared/mime';
 import { previewBlobCache, previewLimit } from '../../../lib/cache';
+import FilePreviewModal from '../../../components/netdisk/FilePreviewModal';
 
 // usePreviewCache：按 preview sha 缓存 blob URL + 去重并发请求。
 // 升级为模块级 previewBlobCache（带 32MB 内存预算与 LRU revoke 回收）：
@@ -108,10 +110,19 @@ export default function CollectionBrowser({ collection, onError }) {
     onError?.(msg);
   };
 
-  // 访问：有 preview → 弹大图；无 preview → 退化为下载
+  // 访问：有 preview sha → 弹预览弹窗；无 preview sha → 退化为下载（若用户点 Preview 按钮则弹 MIME 分流预览）
   const openFile = (node) => {
-    if (previewSha(node.entry)) { setModal(node); return; }
+    if (previewSha(node.entry)) {
+      setModal(node);
+      return;
+    }
     downloadFile(node);
+  };
+
+  const isPreviewable = (node) => {
+    if (previewSha(node.entry)) return true;
+    const kind = kindOf(node.name, node.entry?.mime);
+    return Boolean(kind);
   };
 
   const downloadFile = async (node) => {
@@ -171,7 +182,7 @@ export default function CollectionBrowser({ collection, onError }) {
                 <button
                   onClick={() => openFile(node)}
                   className="shrink-0 rounded-lg focus:outline-none"
-                  title={previewSha(node.entry) ? 'View preview' : 'No preview — download file'}>
+                  title={isPreviewable(node) ? 'View preview' : 'No preview — download file'}>
                   <PreviewThumb sha={previewSha(node.entry)} loadPreview={loadPreview} size={40} />
                 </button>
                 <div className="flex-1 min-w-0">
@@ -203,32 +214,21 @@ export default function CollectionBrowser({ collection, onError }) {
         </div>
       )}
 
-      {/* 大图弹窗：预览文件访问（按 preview sha 取数），附真实文件下载 */}
+      {/* 媒体预览弹窗：MIME 分流预览（图片、视频、音频、PDF、代码/文本），附真实文件下载 */}
       {modal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6" onClick={closeModal}>
-          <div
-            className="card-surface max-w-3xl w-full p-5 rounded-xl max-h-full overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-4 mb-3">
-              <div className="min-w-0">
-                <div className="text-sm font-medium text-gray-200 truncate">{basename(modal.entry.path)}</div>
-                <div className="text-[11px] text-gray-500 mt-0.5 font-mono break-all">
-                  sha: {entrySha(modal.entry).slice(0, 16)}…
-                  {modal.entry.size != null ? ` · ${fmtBytes(modal.entry.size)}` : ''}
-                </div>
-              </div>
-              <button onClick={closeModal} className="text-gray-500 hover:text-white text-lg leading-none shrink-0">✕</button>
-            </div>
-            <div className="flex justify-center bg-white/[0.03] rounded-lg p-2">
-              <PreviewThumb sha={previewSha(modal.entry)} loadPreview={loadPreview} size={420} />
-            </div>
-            <div className="flex gap-2 mt-3 justify-end">
-              <button onClick={() => downloadFile(modal)} className="btn-brand">Download file</button>
-              <button onClick={closeModal} className="btn-ghost">Close</button>
-            </div>
-          </div>
-        </div>
+        <FilePreviewModal
+          file={{
+            hash: previewSha(modal.entry) || entrySha(modal.entry),
+            filename: basename(modal.entry.path) || modal.name,
+            size: modal.entry.size,
+            mime_type: modal.entry.mime,
+          }}
+          fetchBlob={(sha) => ws.download(sha)}
+          onClose={closeModal}
+          onDownload={() => downloadFile(modal)}
+        />
       )}
     </div>
   );
+
 }

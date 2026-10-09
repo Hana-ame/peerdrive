@@ -4,41 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { getNodeSession, clearNodeSession } from '../../../lib/nodeSession';
 import { fmtBytes } from '../../../platform/shared/format';
-
-
-// ── Preview support: classify by file name extension (image / video / audio / text) ──
-const IMG_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif'];
-const VID_EXT = ['mp4', 'webm', 'mov', 'm4v', 'ogv'];
-const AUD_EXT = ['mp3', 'wav', 'flac', 'ogg', 'oga', 'aac', 'm4a', 'opus'];
-const TXT_EXT = ['txt', 'md', 'markdown', 'json', 'js', 'ts', 'jsx', 'tsx', 'py', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'hpp', 'xml', 'html', 'htm', 'css', 'scss', 'yaml', 'yml', 'csv', 'log', 'sql', 'sh', 'toml', 'ini', 'conf'];
-
-function extOf(name) {
-  const m = String(name || '').toLowerCase().match(/\.([a-z0-9]+)$/);
-  return m ? m[1] : '';
-}
-
-function kindOf(name) {
-  const ext = extOf(name);
-  if (IMG_EXT.includes(ext)) return 'image';
-  if (VID_EXT.includes(ext)) return 'video';
-  if (AUD_EXT.includes(ext)) return 'audio';
-  if (TXT_EXT.includes(ext)) return 'text';
-  return null;
-}
-
-function mimeOf(name) {
-  const ext = extOf(name);
-  const map = {
-    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
-    webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', avif: 'image/avif',
-    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/x-m4v', ogv: 'video/ogg',
-    mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', oga: 'audio/ogg',
-    aac: 'audio/aac', m4a: 'audio/m4a', opus: 'audio/opus',
-    txt: 'text/plain', md: 'text/markdown', json: 'application/json', csv: 'text/csv',
-    html: 'text/html', htm: 'text/html', xml: 'text/xml', css: 'text/css', js: 'text/javascript',
-  };
-  return map[ext] || '';
-}
+import { extOf, kindOf, mimeOf } from '../../../platform/shared/mime';
 
 export default function NodeControl() {
   const navigate = useNavigate();
