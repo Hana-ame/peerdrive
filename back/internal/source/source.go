@@ -138,7 +138,7 @@ type FileMeta struct {
 type Source interface {
 	// Name 唯一标识（注册键，Manager 拒绝重复名）。
 	Name() string
-	// Type 分类标签：local / sha / peer / url / ech / ipfs（仅用于展示与排查）。
+	// Type 分类标签：local / sha / peer / url / ech / openlist / webdav（仅用于展示与排查；历史 ipfs 仅在控制台暂存未独立成源）。
 	Type() string
 	// Capabilities 声明能力位（见 Capability）。
 	Capabilities() Capability
