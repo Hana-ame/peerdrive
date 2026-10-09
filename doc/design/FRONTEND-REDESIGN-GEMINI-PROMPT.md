@@ -24,10 +24,14 @@
 
 # 现状（可信输入，直接采用）
 - 技术栈：React 19 + Vite + Tailwind + react-router-dom v7；vitest/happy-dom 测试。
-- 页面 9 个：Connect(25) 连接引导 / NodeControl(461) 节点主控 / Drive(154) 文件浏览 / Collections(250) 合集列表 / CollectionView(151) 合集文件夹式浏览+预览 / Settings(187) 设置 / Transfers(248) 传输 / BT(96) / IPFS(90)。路由 App.jsx 共 10 条，Nav 只暴露首页「/」，其余页面靠直链进入。
-- 共享层：ws.js(547) 本地 WebSocket 单连接，admin 管理面 + download/downloadToFile 取数面合一，9 处 import，帧协议对应 back/transport conn.go——唯一通信契约；lib/：collectionTree(177 纯函数)、format(117)、nodeSession(17 全局可变单例)、swBridge(67)；pd-client/(1543) 为 packages/peerdrive-client 的内嵌副本且已漂移；components/：PeerJSConnect、ConnectionStatus。
-- 后端已模块化（前端需呼应）：collection（path+sha+preview JSON）、文件索引搜索、echcore（ECH 客户端）、echproxy 可选模块（iwara/twimg/exhentai）、signalframe/hashmap、统一 Source 抽象（进行中）。
-- 已知痛点：pd-client 副本漂移；fmtBytes 4 份重复；nodeSession 全局可变单例；Nav 残缺、信息架构不完整。
+- 页面与功能域：已按功能域组织在 `front/src/features/*`（bt, collection, drive, ipfs, iwara, node, settings, transfers），旧 `front/src/pages/*` 作为 re-export shim 保留。路由包含深链支持（如 `/drive/:hash`），Nav 已按导航分组。
+- 架构分层：
+  - 传输层：`front/src/platform/transport-ws/`（client.js, index.js, status.js）负责本地 WebSocket 单长连接管理与帧协议，`ws.js` 为向前兼容导出层；
+  - 共享工具：`front/src/platform/shared/` 合并收敛了 format (fmtBytes 收敛)、swBridge、collectionTree；
+  - 依赖管理：原 `pd-client/` 内嵌副本已彻底移除，前端直接依赖本地独立包 `packages/peerdrive-client`；
+  - 性能优化：首屏动态分包与 peerjs 动态 import 已落地，支持清单流式下载与 LRU 缓存。
+- 后端呼应：collection（path+sha+preview JSON）、文件索引搜索、nodeshare 共享分级、统一 Source 抽象（local/sha/peer/url/ech/openlist/webdav）。
+- 当前剩余核心挑战：界面视觉层缺乏系统化 Design Tokens、缺少统一组件库抽象（`index.css` `@layer components` 待演进为 `ui-kit`）、需要完成「数据面」与「内容面」的主题与交互调优。
 
 # 设计目标（范围与不变量）
 保留（不可破坏）：React+Vite+Tailwind+react-router 技术栈；ws.js 通信契约与帧协议；全部 9 个功能面。
