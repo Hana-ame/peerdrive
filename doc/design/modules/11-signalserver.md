@@ -19,7 +19,7 @@
 - `client`: One online signaling connection — `id/token/conn`, `sendMu` (gorilla doesn't allow concurrent writes, serialized writes), `last` (last heartbeat) (`back/signalserver/signalserver.go:162-169`).
 - `queuedMsg`: Offline queue entry — `msg Message` + `expire time.Time` (with expiry time on enqueue) (`back/signalserver/signalserver.go:171-175`).
 - `Message`: `{Type,Src,Dst,Payload}` consistent with peerjs client protocol, Payload is arbitrary JSON (`back/signalserver/signalserver.go:177-183`).
-- `NodeInfo` / `GraphLink` / `PeerStats`: Discovery API response and internal statistics structures (`back/signalserver/signalserver.go:561-670`).
+- `NodeInfo` / `GraphLink` / `PeerStats`: Discovery API response and internal statistics structures (`back/signalserver/discovery.go:157-281`).
 - `Option`: Functional config item, only implementation `WithTokenWhitelist` (takes effect only when tokens non-empty, `back/signalserver/signalserver.go:54-75`).
 
 **Signaling main flow** (`HandleWS`, `back/signalserver/signalserver.go:246-296`):
