@@ -575,7 +575,7 @@ func (s *PeerJSService) connectLoop(peerID string) {
 			verbWaits: make(map[string]chan []byte),
 			binCh:     make(chan binaryChunk, 16),
 			binDone:   make(chan struct{}),
-			fwdCh:     make(chan fwdChunk, 16),
+			fwdCh:     make(chan fwdChunk, 64),
 		}
 
 		// Register OnMessage BEFORE OnOpen — closes the race window where the
@@ -650,7 +650,7 @@ func (s *PeerJSService) onIncomingConnection(c *peerjs.Connection) {
 		verbWaits: make(map[string]chan []byte),
 		binCh:     make(chan binaryChunk, 16),
 		binDone:   make(chan struct{}),
-		fwdCh:     make(chan fwdChunk, 16),
+		fwdCh:     make(chan fwdChunk, 64),
 	}
 
 	// Register OnMessage BEFORE OnOpen — closes the race window where the

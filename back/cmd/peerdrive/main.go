@@ -66,6 +66,8 @@ func main() {
 		os.Exit(runDemo(args))
 	case "mcp":
 		runMCP(args)
+	case "tun", "fwd":
+		runTun(args)
 	case "version", "--version", "-v":
 		fmt.Printf("peerdrive %s\n", version.Version)
 	case "help", "--help", "-h":
@@ -78,7 +80,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `peerdrive — 单二进制：主服务 + 信令 + 注册认证 + MCP
+	fmt.Fprint(os.Stderr, `peerdrive — 单二进制：主服务 + 信令 + 注册认证 + MCP + 端口穿透 (p2ptun)
 
 用法:
   peerdrive demo         一条命令跑通全链路（信令+两节点+跨节点传文件+校验）
@@ -86,6 +88,7 @@ func usage() {
   peerdrive signal       只起信令 + 节点发现
   peerdrive reg          只起注册 / 认证 / 中继登记
   peerdrive all          三者同进程、同端口起（端口=主服务的 PEERDRIVE_PORT）
+  peerdrive tun          基于 PeerJS 互联建立端口转发与内网穿透（参考 p2ptun）
   peerdrive mcp          启动 MCP (Model Context Protocol) stdio 交互服务
   peerdrive version      打印版本
   peerdrive help         本帮助
