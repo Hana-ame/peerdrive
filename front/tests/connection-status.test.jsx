@@ -14,6 +14,15 @@ const { onStatusMock, adminMock } = vi.hoisted(() => ({
   onStatusMock: vi.fn(),
   adminMock: vi.fn(),
 }))
+vi.mock('../src/platform/transport-ws/status', () => ({
+  getStatus: () => 'idle',
+  onStatus: onStatusMock,
+}))
+vi.mock('../src/platform/transport-ws', () => ({
+  getStatus: () => 'idle',
+  onStatus: onStatusMock,
+  admin: adminMock,
+}))
 vi.mock('../src/ws.js', () => ({
   getStatus: () => 'idle',
   onStatus: onStatusMock,

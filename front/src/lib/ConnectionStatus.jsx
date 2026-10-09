@@ -12,7 +12,8 @@
 // "Reconnecting…" to match reality, and the click affordance forces an immediate
 // retry for users who won't wait out the backoff.
 import React, { useEffect, useState } from 'react';
-import * as ws from '../ws';
+import { getStatus, onStatus } from '../platform/transport-ws/status';
+import { admin } from '../platform/transport-ws';
 
 // Map status → visual + copy. Unknown future states fall back to the neutral one
 // rather than crashing the nav.
@@ -24,12 +25,12 @@ const STATE = {
 };
 
 export default function ConnectionStatus() {
-  const [status, setStatus] = useState(() => ws.getStatus());
+  const [status, setStatus] = useState(() => getStatus());
 
   useEffect(() => {
     // onStatus fires immediately with the current state, then on every change;
     // the returned function unsubscribes (module-level Set — leak-free for remounts).
-    const off = ws.onStatus(setStatus);
+    const off = onStatus(setStatus);
     return off;
   }, []);
 
@@ -43,7 +44,7 @@ export default function ConnectionStatus() {
       // /ping probe — the lightest endpoint (controller/ping.go returns pong) —
       // both forces an immediate retry now and drives the pill back to
       // "connecting → Connected" without waiting for the next user action.
-      ws.admin('GET', '/ping').catch(() => {});
+      admin('GET', '/ping').catch(() => {});
     } catch {}
   };
 
