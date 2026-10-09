@@ -117,10 +117,21 @@ func (f *fakeSignallerServer) closeAll() {
 }
 
 // client returns the most recent client socket (test helper).
+//
+// 发现背景：Dial 返回只意味着 gorilla/websocket 的 101 握手已完成，
+// 但 handleWS 里的 f.clients = append(...) 发生在 u.Upgrade 返回之后，
+// 客户端 Dial 返回之后、服务端 append 之前有一个极短的窗口。
+// 不 Eventually 的话 TestContract_MalformedFramesSkipped 和
+// TestContract_OverSizedFrameDropsConnection 会 ~1/500 偶发 "no client connected"。
 func (f *fakeSignallerServer) client(t *testing.T) *websocket.Conn {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return len(f.clients) > 0
+	}, 2*time.Second, time.Millisecond, "no client connected")
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	require.NotEmpty(t, f.clients, "no client connected")
 	return f.clients[len(f.clients)-1]
 }
 
