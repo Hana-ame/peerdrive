@@ -278,6 +278,12 @@ func sessionRank(s Session) string {
 // TestPeerPullSavesToLocalDrive fails ~1/4 with "open stream: peerjs: connection not
 // bound" — dedup window race).
 func (s *PeerJSService) bindConn(c Session) {
+	if s.IsPeerBlocked(c.ID()) {
+		log.LogWarn("peerjs: bindConn for blocked peer %s rejected", c.ID())
+		c.Close()
+		return
+	}
+
 	s.mu.Lock()
 	old := s.conns[c.ID()]
 	s.mu.Unlock()
@@ -378,6 +384,9 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 			// for receipt, see psk.go)
 		}
 		if s.pskGate(c, st, r) {
+			return
+		}
+		if s.anonGate(c, st, r) {
 			return
 		}
 		switch r.Type {
