@@ -77,6 +77,10 @@ Still outside CI: 4 external-network gated cases, `front/tests/*.mjs` (2 remaini
 - **Package distribution** (2026-09-21 measured): transport 119 · service 108 · controller 98 · pathutil 96 ·
   source 32 · config 24 · downloader 20 · provider 17 · model 13 · repository 13 · server 7 · router 3
   (pathutil and the four-layer penetration matrix are new from 2026-09-20/21, so it grew the most)
+- **New modules (2026-10-09)**: `internal/collection`（多备选 source + metadata 扩展、Fetch/监视）
+  and `internal/twitterpic`（twitter-pic 图库整合：user→collection 生成器 + 文件源访问监视）
+  carry their own package tests (`go test -tags nosqlite ./internal/collection/ ./internal/twitterpic/ -count=1`),
+  plus controller tests `TestTwitterPic*` and config default tests.
 - **Prerequisite**: `-tags nosqlite` is a hard constraint (dual SQLite driver CGO conflict).
 - **What it cannot prove**: injected fake dependencies make cross-module combinations like "the index A just wrote is exactly the table B reads" **invalid** —— this is precisely why the `file_index` defect escaped.
 

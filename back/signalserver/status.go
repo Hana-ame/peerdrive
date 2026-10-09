@@ -84,7 +84,7 @@ func (s *Server) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
 		// ⚠️ 这里原来回 `s.key`。2026-10-06 实测线上
 		//   `curl https://peersignal.moonchan.xyz/status` 直接返回
-		//   {"key":"pd-signal-b9447b406828e500", ...}，无需任何凭据。
+		//   {"key":"pd-signal-<redacted>", ...}，无需任何凭据。
 		// 于是「把 key 藏进二进制、轮换 git 里的硬编码」这条路走不通——
 		// 任何匿名客户端读一次 /status 就拿到了，轮换没有意义。
 		//

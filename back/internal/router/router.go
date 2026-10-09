@@ -17,6 +17,8 @@
 //   /actions/*         — merge/fork (POST; /actions/pull removed with TaskService 2026-08-19)
 //   /:user/:coll/*     — download files from collection entries (GET)
 //   /collections/search — public collection search (GET)
+//   /ipfs/*            — IPFS gateway download (GET)
+//   /iwara/video/:id   — iwara.tv video metadata + resolution list (GET, optional module)
 //   /peerjs/*          — PeerJS node discovery + /ws/peer local session
 //   /swagger/*         — Swagger UI page (GET)
 
@@ -260,6 +262,38 @@ func (rt *Router) Engine() *gin.Engine {
 	// Liveness / readiness probes (see controller/health.go for the semantic difference between the two)
 	r.GET("/health", controller.Health)
 	r.GET("/ready", controller.Ready)
+
+	// iwara.tv metadata (front/iwara page). Optional module: only registered when
+	// the operator enabled PEERDRIVE_IWARA_ENABLE, so a default node never
+	// advertises a third-party proxy it is not configured for.
+	//
+	// Auth: like the other read-only endpoints (/collections GET, /shares GET),
+	// no token is required — the request only resolves a download URL for the
+	// caller, it does not read node files. The injected cookie is the node
+	// owner's, so a public deployment should keep this behind the admin token or
+	// a firewall rather than exposing the listen port.
+	if rt.deps.IwaraClient != nil {
+		controller.InitIwaraClient(rt.deps.IwaraClient)
+		r.GET("/iwara/video/:id", controller.GetIwaraVideo)
+	}
+
+	// twitter-pic gallery (twitter-pic-go 数据面的 peerdrive 整合). Optional
+	// module: only registered when the operator enabled PEERDRIVE_TWITTERPIC_ENABLE,
+	// so a default node never advertises a third-party puller it is not
+	// configured for (同 iwara/exhentai 的可选模块先例).
+	//
+	// Auth: 列表/读出/监视为只读端点，不加 token（与 /collections GET 一致）；
+	// build 会写节点 storage（摄取媒体 + 集合落 sha-文件系统），挂 authRequired。
+	if rt.deps.TwitterPic != nil {
+		controller.InitTwitterPic(rt.deps.TwitterPic)
+		xg := r.Group("/twitterpic")
+		{
+			xg.GET("/users", controller.TwitterPicUsers)
+			xg.POST("/users/:username/build", authRequired, controller.TwitterPicBuild)
+			xg.GET("/collections/:sha", controller.TwitterPicCollection)
+			xg.GET("/fetch-stats", controller.TwitterPicFetchStats)
+		}
+	}
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256Local)
 	r.GET("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
 	r.GET("/ipfs/:cid", controller.DownloadByCID)

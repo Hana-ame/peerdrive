@@ -159,6 +159,13 @@ body {
   }
 }
 
+/* The iwara page (src/pages/Iwara.jsx) deliberately adds no CSS of its own: it
+   is a netdisk-style browser (grid cards + one card-surface table, like
+   Drive.jsx) and reuses the shared Tailwind utilities and .card-surface /
+   .input-base / .btn-brand / .btn-ghost component classes. An earlier cut had a
+   forum-post skeleton (.iwara-bbs / .authorbox / .tiptop / .readbot) and it was
+   deleted — the layout reference was wrong. */
+
 /* ── Show mobile-only elements ── */
 .show-on-mobile {
   display: none !important;

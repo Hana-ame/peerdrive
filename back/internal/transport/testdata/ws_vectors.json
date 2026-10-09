@@ -1,0 +1,395 @@
+{
+  "generated_at": "2026-10-09T02:55:22Z",
+  "go_version": "go1.26.2",
+  "gorilla_websocket": "v1.5.3",
+  "vectors": [
+    {
+      "name": "sendjson.h00",
+      "op": "sendjson",
+      "header": {
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offset": 0,
+        "reqId": "r1",
+        "size": 65536,
+        "type": "req"
+      },
+      "frames": [
+        {
+          "hex": "817e007e7b2268617368223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c226f6666736574223a302c227265714964223a227231222c2273697a65223a36353533362c2274797065223a22726571227d0a",
+          "len": 130
+        }
+      ],
+      "note": "single text frame, 130 bytes on the wire"
+    },
+    {
+      "name": "sendjson.h01",
+      "op": "sendjson",
+      "header": {
+        "name": "a/b.txt",
+        "reqId": "r1",
+        "size": 12345,
+        "type": "meta"
+      },
+      "frames": [
+        {
+          "hex": "813b7b226e616d65223a22612f622e747874222c227265714964223a227231222c2273697a65223a31323334352c2274797065223a226d657461227d0a",
+          "len": 61
+        }
+      ],
+      "note": "single text frame, 61 bytes on the wire"
+    },
+    {
+      "name": "sendjson.h02",
+      "op": "sendjson",
+      "header": {
+        "offset": 12345,
+        "reqId": "r1",
+        "type": "done"
+      },
+      "frames": [
+        {
+          "hex": "812c7b226f6666736574223a31323334352c227265714964223a227231222c2274797065223a22646f6e65227d0a",
+          "len": 46
+        }
+      ],
+      "note": "single text frame, 46 bytes on the wire"
+    },
+    {
+      "name": "sendjson.h03",
+      "op": "sendjson",
+      "header": {
+        "msg": "sha256 mismatch",
+        "reqId": "r1",
+        "type": "err"
+      },
+      "frames": [
+        {
+          "hex": "81347b226d7367223a22736861323536206d69736d61746368222c227265714964223a227231222c2274797065223a22657272227d0a",
+          "len": 54
+        }
+      ],
+      "note": "single text frame, 54 bytes on the wire"
+    },
+    {
+      "name": "sendjson.h04",
+      "op": "sendjson",
+      "header": {
+        "reqId": "s1",
+        "type": "share"
+      },
+      "frames": [
+        {
+          "hex": "811e7b227265714964223a227331222c2274797065223a227368617265227d0a",
+          "len": 32
+        }
+      ],
+      "note": "single text frame, 32 bytes on the wire"
+    },
+    {
+      "name": "sendjson.h05",
+      "op": "sendjson",
+      "header": {
+        "method": "GET",
+        "path": "/peerjs/node?x=1",
+        "reqId": "a1",
+        "type": "admin"
+      },
+      "frames": [
+        {
+          "hex": "81477b226d6574686f64223a22474554222c2270617468223a222f706565726a732f6e6f64653f783d31222c227265714964223a226131222c2274797065223a2261646d696e227d0a",
+          "len": 73
+        }
+      ],
+      "note": "single text frame, 73 bytes on the wire"
+    },
+    {
+      "name": "sendjson.h06",
+      "op": "sendjson",
+      "header": {
+        "name": "\u003cscript\u003e\u0026\"q\"中文",
+        "reqId": "u1",
+        "type": "meta"
+      },
+      "frames": [
+        {
+          "hex": "814a7b226e616d65223a225c75303033637363726970745c75303033655c75303032365c22715c22e4b8ade69687222c227265714964223a227531222c2274797065223a226d657461227d0a",
+          "len": 76
+        }
+      ],
+      "note": "single text frame, 76 bytes on the wire"
+    },
+    {
+      "name": "sendjson.h07",
+      "op": "sendjson",
+      "header": {
+        "body": {
+          "hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "offset": 0,
+          "peer": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 1048576
+        },
+        "method": "POST",
+        "path": "/peerjs/fetch",
+        "reqId": "a2",
+        "type": "admin"
+      },
+      "frames": [
+        {
+          "hex": "817e00e47b22626f6479223a7b2268617368223a2263636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363222c226f6666736574223a302c2270656572223a2262626262626262626262626262626262626262626262626262626262626262626262626262626262222c2273697a65223a313034383537367d2c226d6574686f64223a22504f5354222c2270617468223a222f706565726a732f6665746368222c227265714964223a226132222c2274797065223a2261646d696e227d0a",
+          "len": 232
+        }
+      ],
+      "note": "single text frame, 232 bytes on the wire"
+    },
+    {
+      "name": "sendframe.body000000",
+      "op": "sendframe",
+      "header": {
+        "offset": 4096,
+        "reqId": "d1",
+        "type": "data"
+      },
+      "frames": [
+        {
+          "hex": "812b7b226f6666736574223a343039362c227265714964223a226431222c2274797065223a2264617461227d0a",
+          "len": 45
+        }
+      ],
+      "note": "empty body writes only the header frame"
+    },
+    {
+      "name": "sendframe.body000001",
+      "op": "sendframe",
+      "header": {
+        "offset": 4096,
+        "reqId": "d1",
+        "type": "data"
+      },
+      "body_len": 1,
+      "body_head_b64": "DQ==",
+      "frames": [
+        {
+          "hex": "812b7b226f6666736574223a343039362c227265714964223a226431222c2274797065223a2264617461227d0a",
+          "len": 45
+        },
+        {
+          "hex": "82010d",
+          "len": 3
+        }
+      ],
+      "note": "text header + binary body, 1 bytes"
+    },
+    {
+      "name": "sendframe.body000100",
+      "op": "sendframe",
+      "header": {
+        "offset": 4096,
+        "reqId": "d1",
+        "type": "data"
+      },
+      "body_len": 100,
+      "body_head_b64": "DRQbIikwNz5FTFNaYWhvdg==",
+      "frames": [
+        {
+          "hex": "812b7b226f6666736574223a343039362c227265714964223a226431222c2274797065223a2264617461227d0a",
+          "len": 45
+        },
+        {
+          "hex": "82640d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2",
+          "len": 102
+        }
+      ],
+      "note": "text header + binary body, 100 bytes"
+    },
+    {
+      "name": "sendframe.body000200",
+      "op": "sendframe",
+      "header": {
+        "offset": 4096,
+        "reqId": "d1",
+        "type": "data"
+      },
+      "body_len": 200,
+      "body_head_b64": "DRQbIikwNz5FTFNaYWhvdg==",
+      "frames": [
+        {
+          "hex": "812b7b226f6666736574223a343039362c227265714964223a226431222c2274797065223a2264617461227d0a",
+          "len": 45
+        },
+        {
+          "hex": "827e00c80d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e",
+          "len": 204
+        }
+      ],
+      "note": "text header + binary body, 200 bytes"
+    },
+    {
+      "name": "sendframe.body065537",
+      "op": "sendframe",
+      "header": {
+        "offset": 4096,
+        "reqId": "d1",
+        "type": "data"
+      },
+      "body_len": 65537,
+      "body_head_b64": "DRQbIikwNz5FTFNaYWhvdg==",
+      "frames": [
+        {
+          "hex": "812b7b226f6666736574223a343039362c227265714964223a226431222c2274797065223a2264617461227d0a",
+          "len": 45
+        },
+        {
+          "head_hex": "827f00000000000100010d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980",
+          "len": 65547
+        }
+      ],
+      "note": "text header + binary body, 65537 bytes"
+    },
+    {
+      "name": "read.text",
+      "op": "read",
+      "raw": {
+        "hex": "81fc3702a3d44c20cbb5446a81ee1567c6b15267c6b15267c6b15267c6b15267c6b15267c6b15267c6b15267c6b15267c6b15267c6b15267c6b15267c6b15267c6b15267c6b15267c6b15267c6b152208ff65864c5a7527681ee072e81a65273eab0153881a60e208ff6446bd9b1153892e405368ff6437bd3b1153881a6527381a9",
+        "len": 130
+      },
+      "delivered": {
+        "is_text": true,
+        "data_len": 124,
+        "data_head_b64": "eyJoYXNoIjoiZWVlZWVlZQ=="
+      },
+      "note": "text frame → IsText=true, payload preserved"
+    },
+    {
+      "name": "read.binary",
+      "op": "read",
+      "raw": {
+        "hex": "82fe02003702a3d4c8fc5e28ccf85a2cc0f45620c4f05224d8ec4e38dce84a3cd0e44630d4e04234e8dc7e08ecd87a0ce0d47600e4d07204f8cc6e18fcc86a1cf0c46610f4c0621488bc1e688cb81a6c80b4166084b0126498ac0e789ca80a7c90a4067094a00274a89c3e48ac983a4ca0943640a4903244b88c2e58bc882a5cb0842650b4802254487cdea84c78daac4074d6a04470d2a4586cceb85c68cabc5064c6b05460c2b4685cfe886c58fa8c6054f6806450f284784cee987c48ea9c7044e6907440e294083c9ee80c389aec003496e0043092e4182c8ef81c288afc102486f0142082f4281cbec82c18bacc2014b6c02410b2c4380caed83c08aadc3004a62bc9ff5f2fcdfb5b23c1f75727c5f3533bd9ef4f3fddeb4b33d1e74737d5e3430be9df7f0feddb7b03e1d77707e5d3731bf9cf6f1ffdcb6b13f1c76717f5c3636b89bf1f6f8dbb1b6381b7176785b3137b99af0f7f9dab0b7391a7077795a3034ba99f3f4fad9b3b43a1973747a593335bb98f2f5fbd8b2b53b1872757b58323ab497fdfaf4d7bdba34177d7a74573d3bb596fcfbf5d6bcbb35167c7b75563c38b695fff8f6d5bfb836157f7876553f39b794fef9f7d4beb937147e7977543e3eb093f9fef0d3b9be3013797e7053393fb192f8fff1d2b8bf3112787f7152383cb291fbfcf2d1bbbc32117b7c72513b3db390fafdf3d0babd331075c2acafe582ecefa5422",
+        "len": 520
+      },
+      "delivered": {
+        "is_text": false,
+        "data_len": 512,
+        "data_head_b64": "//79/Pv6+fj39vX08/Lx8A=="
+      },
+      "note": "binary frame → IsText=false, payload preserved"
+    },
+    {
+      "name": "read.unicode",
+      "op": "read",
+      "raw": {
+        "hex": "81ad3702a3d44c20cdb55a6781ee15e61b79d19424fb4763d7bc6b7791e4053ac0a05b208ff6437bd3b1153881b95276c2f64a",
+        "len": 51
+      },
+      "delivered": {
+        "is_text": true,
+        "data_len": 45,
+        "data_head_b64": "eyJuYW1lIjoi5Lit5paHLw=="
+      },
+      "note": "utf-8 payload including U+2028"
+    },
+    {
+      "name": "read.escapes",
+      "op": "read",
+      "raw": {
+        "hex": "81b13702a3d44c20cdb55a6781ee155ed6e40731c0ac6b7793e40467ffa1073291e26b20d28815208ff6437bd3b1153881b95276c2f64a",
+        "len": 55
+      },
+      "delivered": {
+        "is_text": true,
+        "data_len": 49,
+        "data_head_b64": "eyJuYW1lIjoiXHUwMDNjeA=="
+      },
+      "note": "json-escaped characters round-trip"
+    },
+    {
+      "name": "read.overlimit.text",
+      "op": "read",
+      "raw": {
+        "head_hex": "81ff00000000000300643702a3d44f7adbac4f7adbac4f7adbac4f7adbac4f7adbac4f7adbac4f7adbac4f7adbac4f7adbac4f7adbac4f7adbac4f7adbac4f7a",
+        "len": 196722
+      },
+      "reply": [
+        {
+          "hex": "880203f1",
+          "len": 4
+        }
+      ],
+      "closed": true,
+      "note": "over the read limit: no callback, session closes, close 1009 written back"
+    },
+    {
+      "name": "read.overlimit.binary",
+      "op": "read",
+      "raw": {
+        "head_hex": "82ff00000000000300013702a3d43702a3d43702a3d43702a3d43702a3d43702a3d43702a3d43702a3d43702a3d43702a3d43702a3d43702a3d43702a3d43702",
+        "len": 196623
+      },
+      "reply": [
+        {
+          "hex": "880203f1",
+          "len": 4
+        }
+      ],
+      "closed": true,
+      "note": "binary over the read limit: close 1009 written back"
+    },
+    {
+      "name": "read.badopcode",
+      "op": "read",
+      "raw": {
+        "hex": "87843702a3d4596dd3b1",
+        "len": 10
+      },
+      "reply": [
+        {
+          "hex": "880e03ea626164206f70636f64652037",
+          "len": 16
+        }
+      ],
+      "closed": true,
+      "note": "reserved opcode: protocol error, close 1002 written back"
+    },
+    {
+      "name": "read.close.normal",
+      "op": "read",
+      "raw": {
+        "hex": "88823702a3d434ea",
+        "len": 8
+      },
+      "reply": [
+        {
+          "hex": "880203e8",
+          "len": 4
+        }
+      ],
+      "closed": true,
+      "note": "client close 1000: session closes, close frame echoed back"
+    },
+    {
+      "name": "read.close.abnormal",
+      "op": "read",
+      "raw": {
+        "hex": "88823702a3d434eb",
+        "len": 8
+      },
+      "reply": [
+        {
+          "hex": "880203e9",
+          "len": 4
+        }
+      ],
+      "closed": true,
+      "note": "client close 1001: session closes"
+    },
+    {
+      "name": "read.truncated",
+      "op": "read",
+      "raw": {
+        "hex": "82e43702a3d43702a3d4",
+        "len": 10
+      },
+      "closed": true,
+      "note": "header promises 100 bytes, only the header is sent: read fails, session closes"
+    }
+  ]
+}

@@ -8,9 +8,9 @@
 package controller
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
+
+	"peerdrive/internal/httpd"
 )
 
 // Ping godoc
@@ -20,6 +20,11 @@ import (
 // @Produce plain
 // @Success 200 {string} string "pong"
 // @Router /ping [get]
+//
+// The response is produced by httpd.PingHandler: the shell package owns the
+// probe's response bytes so /ping, /health and /ready cannot drift apart in
+// Content-Type or field order. The swag tags above stay here because swag
+// reads this package.
 func Ping(c *gin.Context) {
-	c.String(http.StatusOK, "pong")
+	httpd.PingHandler(c.Writer, c.Request)
 }

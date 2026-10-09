@@ -71,7 +71,9 @@ func TestNew_ValidationErrors(t *testing.T) {
 	}{
 		{name: "empty path", entries: []Entry{{Path: "", SHA: valid}}, wantErr: "empty path"},
 		{name: "whitespace path", entries: []Entry{{Path: "  ", SHA: valid}}, wantErr: "empty path"},
-		{name: "empty sha", entries: []Entry{{Path: "a", SHA: ""}}, wantErr: "invalid sha"},
+		// 发现背景: 多备选源扩展后 sha 可为空（条目可纯远端备选）；但一个条目
+		// 至少要有一种可取的备选，否则「能解析却永远取不到文件」。
+		{name: "no alternative", entries: []Entry{{Path: "a", SHA: ""}}, wantErr: "no fetchable alternative"},
 		{name: "short sha", entries: []Entry{{Path: "a", SHA: "abc"}}, wantErr: "invalid sha"},
 		{name: "non-hex sha", entries: []Entry{{Path: "a", SHA: strings.Repeat("z", 64)}}, wantErr: "invalid sha"},
 		{name: "uppercase sha", entries: []Entry{{Path: "a", SHA: strings.ToUpper(valid)}}, wantErr: "invalid sha"},

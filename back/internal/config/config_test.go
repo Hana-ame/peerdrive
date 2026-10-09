@@ -23,6 +23,26 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.WebRTCTURNServer)
 }
 
+// TestLoad_TwitterPicDefaultsOff pins the "开关关 = 零变化" contract at the
+// config level: the twitter-pic module (twitter-pic-go 数据面的 peerdrive 整合)
+// defaults to disabled, and the empty string values defer to the package
+// defaults (twitterpic.DefaultBaseURL / DefaultProxyBase) rather than being
+// baked into config.
+func TestLoad_TwitterPicDefaultsOff(t *testing.T) {
+	os.Unsetenv("PEERDRIVE_TWITTERPIC_ENABLE")
+	os.Unsetenv("PEERDRIVE_TWITTERPIC_BASE_URL")
+	os.Unsetenv("PEERDRIVE_TWITTERPIC_PROXY_BASE")
+	os.Unsetenv("PEERDRIVE_TWITTERPIC_MAX_FILES")
+	os.Unsetenv("PEERDRIVE_TWITTERPIC_TIMEOUT_SECS")
+	cfg := Load()
+
+	assert.False(t, cfg.TwitterPicEnable, "默认关：不显式开启不拉任何第三方数据")
+	assert.Equal(t, "", cfg.TwitterPicBaseURL, "空 = 由 twitterpic 包默认")
+	assert.Equal(t, "", cfg.TwitterPicProxyBase)
+	assert.Equal(t, 0, cfg.TwitterPicMaxFiles)
+	assert.Equal(t, 20, cfg.TwitterPicTimeout)
+}
+
 func TestGetEnv_DefaultWhenNotSet(t *testing.T) {
 	os.Unsetenv("TEST_GET_ENV_KEY")
 	assert.Equal(t, "fallback", getEnv("TEST_GET_ENV_KEY", "fallback"))
@@ -297,4 +317,69 @@ func TestValidate_ECHProxyIwaraDisabledNeither(t *testing.T) {
 	cfg = echProxyConflictConfig()
 	cfg.IwaraEnable = false
 	assert.NoError(t, Validate(cfg), "disabled iwara module must not trip the check")
+}
+
+// openlistEnvKeys is the full set the module reads. Tests must unset all of
+// them, or a stale value from the operator's shell leaks into the assertion.
+var openlistEnvKeys = []string{
+	"PEERDRIVE_OPENLIST_ENABLE",
+	"PEERDRIVE_OPENLIST_BASE_URL",
+	"PEERDRIVE_OPENLIST_INDEX_FILE",
+	"PEERDRIVE_OPENLIST_TOKEN",
+	"PEERDRIVE_OPENLIST_NAME",
+	"PEERDRIVE_OPENLIST_PRIORITY",
+	"PEERDRIVE_OPENLIST_TIMEOUT_SECS",
+	"PEERDRIVE_OPENLIST_VERIFY",
+}
+
+func unsetOpenListEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range openlistEnvKeys {
+		os.Unsetenv(k)
+	}
+}
+
+// TestLoad_OpenListDefaults is the safety property the whole module hangs on:
+// with no configuration at all the source is disabled, so a node that never
+// enables it constructs and registers nothing.
+func TestLoad_OpenListDefaults(t *testing.T) {
+	unsetOpenListEnv(t)
+	cfg := Load()
+
+	assert.Equal(t, false, cfg.OpenListEnable, "the module must be opt-in")
+	assert.Equal(t, "", cfg.OpenListBaseURL)
+	assert.Equal(t, "", cfg.OpenListIndexPath)
+	assert.Equal(t, "", cfg.OpenListToken)
+	assert.Equal(t, "openlist", cfg.OpenListName)
+	assert.Equal(t, 900, cfg.OpenListPriority, "after local/peer/url, which all default to 0")
+	assert.Equal(t, 120, cfg.OpenListTimeoutSecs)
+	assert.Equal(t, true, cfg.OpenListVerify, "content addressing is on unless told otherwise")
+}
+
+// TestLoad_OpenListEnvOverrides proves each env var reaches its field with the
+// right type — an operator sets eight variables, so a wrong type mapping shows
+// up as a silent fallback to the default.
+func TestLoad_OpenListEnvOverrides(t *testing.T) {
+	unsetOpenListEnv(t)
+	os.Setenv("PEERDRIVE_OPENLIST_ENABLE", "1")
+	os.Setenv("PEERDRIVE_OPENLIST_BASE_URL", "https://ol.example.com")
+	os.Setenv("PEERDRIVE_OPENLIST_INDEX_FILE", "/etc/peerdrive/openlist-index.json")
+	os.Setenv("PEERDRIVE_OPENLIST_TOKEN", "secret")
+	os.Setenv("PEERDRIVE_OPENLIST_NAME", "my-openlist")
+	os.Setenv("PEERDRIVE_OPENLIST_PRIORITY", "50")
+	os.Setenv("PEERDRIVE_OPENLIST_TIMEOUT_SECS", "30")
+	os.Setenv("PEERDRIVE_OPENLIST_VERIFY", "false")
+	for _, k := range openlistEnvKeys {
+		t.Cleanup(func() { os.Unsetenv(k) })
+	}
+
+	cfg := Load()
+	assert.Equal(t, true, cfg.OpenListEnable)
+	assert.Equal(t, "https://ol.example.com", cfg.OpenListBaseURL)
+	assert.Equal(t, "/etc/peerdrive/openlist-index.json", cfg.OpenListIndexPath)
+	assert.Equal(t, "secret", cfg.OpenListToken)
+	assert.Equal(t, "my-openlist", cfg.OpenListName)
+	assert.Equal(t, 50, cfg.OpenListPriority)
+	assert.Equal(t, 30, cfg.OpenListTimeoutSecs)
+	assert.Equal(t, false, cfg.OpenListVerify)
 }

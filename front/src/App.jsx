@@ -1,19 +1,21 @@
 // Frontend rebuild (Module 1, 2026-09-25): app shell + routing.
 // Home page = node search / connect (PeerJS consumer); other modules are being
 // rebuilt one by one (in-construction placeholder).
-import React, { useEffect } from 'react';
+import React, { useEffect, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { registerSW } from './lib/swBridge';
 import ConnectionStatus from './lib/ConnectionStatus';
-import Connect from './pages/Connect';
-import Drive from './pages/Drive';
-import Collections from './features/collection/pages/Collections';
-import CollectionView from './features/collection/pages/CollectionView';
-import Settings from './pages/Settings';
-import Transfers from './pages/Transfers';
-import BT from './pages/BT';
-import IPFS from './pages/IPFS';
-import NodeControl from './pages/NodeControl';
+
+const Connect = lazy(() => import('./pages/Connect'));
+const Drive = lazy(() => import('./pages/Drive'));
+const Collections = lazy(() => import('./features/collection/pages/Collections'));
+const CollectionView = lazy(() => import('./features/collection/pages/CollectionView'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Transfers = lazy(() => import('./pages/Transfers'));
+const BT = lazy(() => import('./pages/BT'));
+const IPFS = lazy(() => import('./pages/IPFS'));
+const NodeControl = lazy(() => import('./pages/NodeControl'));
+const Iwara = lazy(() => import('./pages/Iwara'));
 
 // In-construction placeholder page (Modules 2, 3, 4, 5, 6 to be replaced one by one)
 function Placeholder({ title }) {
@@ -27,11 +29,26 @@ function Placeholder({ title }) {
   );
 }
 
+function RouteLoading() {
+  return (
+    <div className="p-8 h-full overflow-y-auto flex items-center justify-center">
+      <div className="flex items-center gap-3 text-gray-400">
+        <div className="w-4 h-4 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />
+        <span className="text-sm">Loading...</span>
+      </div>
+    </div>
+  );
+}
+
 // Navigation only keeps currently active entries (2026-09-26: netdisk/collections/
 // transfers/BT/IPFS/settings are temporarily unused and hidden from nav; page
-// routes are kept, so direct URL access still works)
+// routes are kept, so direct URL access still works). The iwara page is a
+// standalone viewer that works without the rest of the netdisk chain (its data
+// comes from the echproxy iwara client, not from the local file index), so it
+// is linked from the nav.
 const NAV = [
   { to: '/', label: 'Connect' },
+  { to: '/iwara', label: 'Iwara' },
 ];
 
 function Nav() {
@@ -65,19 +82,23 @@ export default function App() {
       <div className="flex flex-col h-screen text-gray-200">
         <Nav />
         <div className="flex-1 overflow-hidden">
-          <Routes>
-            <Route path="/" element={<Connect />} />
-            <Route path="/node" element={<NodeControl />} />
-            <Route path="/drive" element={<Drive />} />
-            <Route path="/collections" element={<Collections />} />
-            <Route path="/collection" element={<CollectionView />} />
-            <Route path="/collection/:hash" element={<CollectionView />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/transfers" element={<Transfers />} />
-            <Route path="/bt" element={<BT />} />
-            <Route path="/ipfs" element={<IPFS />} />
-            <Route path="*" element={<Placeholder title="Page Not Found" />} />
-          </Routes>
+          <Suspense fallback={<RouteLoading />}>
+            <Routes>
+              <Route path="/" element={<Connect />} />
+              <Route path="/node" element={<NodeControl />} />
+              <Route path="/drive" element={<Drive />} />
+              <Route path="/collections" element={<Collections />} />
+              <Route path="/collection" element={<CollectionView />} />
+              <Route path="/collection/:hash" element={<CollectionView />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/transfers" element={<Transfers />} />
+              <Route path="/bt" element={<BT />} />
+              <Route path="/ipfs" element={<IPFS />} />
+              <Route path="/iwara" element={<Iwara />} />
+              <Route path="/iwara/:id" element={<Iwara />} />
+              <Route path="*" element={<Placeholder title="Page Not Found" />} />
+            </Routes>
+          </Suspense>
         </div>
       </div>
     </BrowserRouter>

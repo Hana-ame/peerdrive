@@ -81,6 +81,16 @@ func (c *IwaraClient) SetBaseURL(baseURL string) {
 	c.baseURL = baseURL
 }
 
+// SetHTTPClient swaps in a different *http.Client. Tests point it at an
+// in-process mock via httptest.Server.Client(), which carries the mock's TLS
+// roots. Exported sibling of SetBaseURL: both exist only so a caller outside
+// this package (the controller tests) can aim the client at a fake API.
+func (c *IwaraClient) SetHTTPClient(cl *http.Client) {
+	if cl != nil {
+		c.client = cl
+	}
+}
+
 // SetRewriter enables routing all iwara API requests through the local
 // ech-proxy by rewriting the request URL host. Pass nil to disable.
 func (c *IwaraClient) SetRewriter(r *Rewriter) {
@@ -210,7 +220,9 @@ type VideoInfo struct {
 
 // ResolutionInfo is one entry of the resolution list returned by the
 // file-resolution endpoint. Src.Download is a protocol-relative CDN URL
-// (e.g. "//v-f007-...-v.ihstatic.com/...").
+// (e.g. "//v-f007-...-v.ihstatic.com/..."); DownloadURL is the same value with
+// an "https:" scheme applied (computed by fetchResolutions, never sent by the
+// API) so callers can hand it to a browser directly.
 type ResolutionInfo struct {
 	ID   string `json:"id"`
 	Name string `json:"name"` // "Source" = highest quality
@@ -218,6 +230,7 @@ type ResolutionInfo struct {
 		View     string `json:"view"`
 		Download string `json:"download"`
 	} `json:"src"`
+	DownloadURL string `json:"downloadUrl,omitempty"`
 }
 
 // ResolveDownloadURL resolves an iwara video ID to a direct CDN download URL.
@@ -239,22 +252,48 @@ func (c *IwaraClient) ResolveDownloadURL(ctx context.Context, videoID string) (s
 		return "", "", fmt.Errorf("iwara: empty video ID")
 	}
 
-	// Step 1: video info.
+	info, err := c.fetchVideoInfo(ctx, videoID)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Steps 2+3: resolve the CDN URL from the file-resolution endpoint.
+	dl, name, err := c.pickSourceResolution(ctx, info)
+	if err != nil {
+		return "", "", err
+	}
+	return dl, name, nil
+}
+
+// fetchVideoPayload is step 1 of the download flow: GET {base}/video/{id},
+// decoded into both the typed VideoInfo (the fields the download flow needs)
+// and a raw map (so the metadata endpoint can probe field spellings that
+// VideoInfo does not declare — see meta.go). One request, two decodes of the
+// same body, which is why the body is buffered before decoding.
+func (c *IwaraClient) fetchVideoPayload(ctx context.Context, videoID string) (VideoInfo, map[string]any, error) {
+	var info VideoInfo
 	videoURL, _ := url.Parse(c.baseURL + "/video/" + url.PathEscape(videoID))
 	resp, err := c.Do(ctx, http.MethodGet, videoURL.String(), nil)
 	if err != nil {
-		return "", "", fmt.Errorf("iwara: video info: %w", err)
+		return info, nil, fmt.Errorf("iwara: video info: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("iwara: video info: HTTP %d", resp.StatusCode)
+		return info, nil, fmt.Errorf("iwara: video info: HTTP %d", resp.StatusCode)
 	}
-	var info VideoInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return "", "", fmt.Errorf("iwara: video info decode: %w", err)
+	rawBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return info, nil, fmt.Errorf("iwara: video info read: %w", err)
+	}
+	if err := json.Unmarshal(rawBytes, &info); err != nil {
+		return info, nil, fmt.Errorf("iwara: video info decode: %w", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(rawBytes, &raw); err != nil {
+		return info, nil, fmt.Errorf("iwara: video info decode raw: %w", err)
 	}
 	if info.FileUrl == "" {
-		return "", "", fmt.Errorf("iwara: video %q has no fileUrl", videoID)
+		return info, nil, fmt.Errorf("iwara: video %q has no fileUrl", videoID)
 	}
 	if info.File.ID == "" {
 		// Fallback: the API sometimes omits file.id; derive it from the path.
@@ -262,21 +301,37 @@ func (c *IwaraClient) ResolveDownloadURL(ctx context.Context, videoID string) (s
 			info.File.ID = info.FileUrl[i+1:]
 		}
 	}
+	return info, raw, nil
+}
 
-	// Step 2: resolve the CDN URL.
+// fetchVideoInfo is the download flow's typed view of step 1.
+func (c *IwaraClient) fetchVideoInfo(ctx context.Context, videoID string) (VideoInfo, error) {
+	info, _, err := c.fetchVideoPayload(ctx, videoID)
+	return info, err
+}
+
+// fetchResolutions is step 2: GET {FileUrl} with the X-Version signing header
+// → the full resolution list. Every entry carries the CDN download URL with an
+// "https:" scheme prefix already applied (the API returns protocol-relative
+// "//host/path" values).
+//
+// Shared by ResolveDownloadURL (which picks "Source") and GetVideoMeta (which
+// returns all of them). Kept separate from the request builder because it is
+// the one place that must compute the X-Version signature correctly.
+func (c *IwaraClient) fetchResolutions(ctx context.Context, info VideoInfo) ([]ResolutionInfo, error) {
 	parsed, err := url.Parse(info.FileUrl)
 	if err != nil {
-		return "", "", fmt.Errorf("iwara: fileUrl parse: %w", err)
+		return nil, fmt.Errorf("iwara: fileUrl parse: %w", err)
 	}
 	expires := parsed.Query().Get("expires")
 	if expires == "" {
-		return "", "", fmt.Errorf("iwara: fileUrl has no expires parameter")
+		return nil, fmt.Errorf("iwara: fileUrl has no expires parameter")
 	}
 	xversion := SHA1Hex(info.File.ID + "_" + expires + "_" + xVersionSecret)
 
 	xreq, err := http.NewRequestWithContext(ctx, http.MethodGet, info.FileUrl, nil)
 	if err != nil {
-		return "", "", fmt.Errorf("iwara: resolution request: %w", err)
+		return nil, fmt.Errorf("iwara: resolution request: %w", err)
 	}
 	// Send the resolution request through the same path (cookie + headers +
 	// optional ech-proxy rewrite).
@@ -300,36 +355,52 @@ func (c *IwaraClient) ResolveDownloadURL(ctx context.Context, videoID string) (s
 
 	xresp, err := c.client.Do(xreq)
 	if err != nil {
-		return "", "", fmt.Errorf("iwara: resolution: %w", err)
+		return nil, fmt.Errorf("iwara: resolution: %w", err)
 	}
 	defer xresp.Body.Close()
 	if xresp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("iwara: resolution: HTTP %d", xresp.StatusCode)
+		return nil, fmt.Errorf("iwara: resolution: HTTP %d", xresp.StatusCode)
 	}
 	var resolutions []ResolutionInfo
 	if err := json.NewDecoder(xresp.Body).Decode(&resolutions); err != nil {
-		return "", "", fmt.Errorf("iwara: resolution decode: %w", err)
+		return nil, fmt.Errorf("iwara: resolution decode: %w", err)
 	}
+	for i := range resolutions {
+		resolutions[i].DownloadURL = schemePrefix(resolutions[i].Src.Download)
+	}
+	return resolutions, nil
+}
 
-	// Step 3: pick the "Source" resolution (highest quality); fall back to
-	// the first entry when the list is empty or has no "Source" entry.
-	var dl string
-	var name string
+// pickSourceResolution is step 3: pick the "Source" resolution (highest
+// quality); fall back to the first entry when the list is empty or has no
+// "Source" entry. Returns the download URL and the resolution name.
+func (c *IwaraClient) pickSourceResolution(ctx context.Context, info VideoInfo) (string, string, error) {
+	resolutions, err := c.fetchResolutions(ctx, info)
+	if err != nil {
+		return "", "", err
+	}
 	for _, r := range resolutions {
-		if r.Name == "Source" {
-			dl = "https:" + r.Src.Download
-			name = r.Name
-			break
+		if r.Name == "Source" && r.DownloadURL != "" {
+			return r.DownloadURL, r.Name, nil
 		}
 	}
-	if dl == "" && len(resolutions) > 0 {
-		dl = "https:" + resolutions[0].Src.Download
-		name = resolutions[0].Name
+	if len(resolutions) > 0 && resolutions[0].DownloadURL != "" {
+		return resolutions[0].DownloadURL, resolutions[0].Name, nil
 	}
-	if dl == "" {
-		return "", "", fmt.Errorf("iwara: no download URL in resolution list (length %d)", len(resolutions))
+	return "", "", fmt.Errorf("iwara: no download URL in resolution list (length %d)", len(resolutions))
+}
+
+// schemePrefix applies the "https:" scheme to a protocol-relative CDN URL.
+// The resolution API returns "//host/path" values; the callers emit full URLs
+// so the browser (or the frontend's download link) can use them directly.
+func schemePrefix(protocolRelative string) string {
+	if strings.HasPrefix(protocolRelative, "//") {
+		return "https:" + protocolRelative
 	}
-	return dl, name, nil
+	if protocolRelative == "" {
+		return ""
+	}
+	return protocolRelative
 }
 
 // ParseVideoID extracts an iwara video ID from a www.iwara.tv/videos/{id}

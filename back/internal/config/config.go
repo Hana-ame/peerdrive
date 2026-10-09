@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"runtime"
 	"strconv"
@@ -86,6 +87,17 @@ type Config struct {
 	PeerJSSecure bool   // PEERDRIVE_PEERJS_SECURE, default true
 	PeerJSPeers  string // PEERDRIVE_PEERJS_PEERS, comma-separated peer node ids for auto-interconnection on startup
 
+	// PeerJSXOREnable 数据面 XOR 混淆总开关（PEERDRIVE_PEERJS_XOR_ENABLE,
+	// 默认 false）。false = 现状明文，与浏览器 peerjs / peerdrive-client 互操作
+	// 不受影响；true = 本节点所有 WebRTC DataChannel 帧（req/meta/data/done/err/
+	// psk-auth/fwd/admin 等）在库层做 XOR（见 back/peerjs/xor.go 设计契约）。
+	// 定位：轻量混淆（防明文嗅探），不是强加密——防定向破解请用 PSK + 可信信令。
+	PeerJSXOREnable bool
+	// PeerJSXORKey 每连接密钥派生种子（PEERDRIVE_PEERJS_XOR_KEY）。
+	// 开启时两端节点必须配置同一把 key（每连接再按 connectionId 派生，见
+	// back/peerjs/xor.go）；key 不一致的对端解出垃圾帧、确定性失败。
+	PeerJSXORKey string
+
 	// PeerPSK is the node access pre-shared key (PEERDRIVE_PSK, default empty = open mode).
 	//
 	// When set: any peer must present the **same** key on this connection before this node
@@ -140,6 +152,33 @@ type Config struct {
 	// declares CapStream (Range chunks); otherwise CapFile (full fetch).
 	// Example: https://example.com/ipfs/%s or https://example.com/f/%s?off=%d&size=%d
 	URLSourceTemplate string
+
+	// ── OpenList source (PEERDRIVE_OPENLIST_*, optional data source) ──
+	//
+	// OpenListEnable is the master switch (PEERDRIVE_OPENLIST_ENABLE, default **false**).
+	// Why default off: the node would otherwise issue requests to an
+	// operator-configured third-party aggregation layer for hashes it does not
+	// have locally. Opt-in keeps a node that never configures it byte-identical
+	// to one without the source: nothing is constructed and no registration happens.
+	//
+	// OpenList cannot be imported — its driver layer lives under internal/, which
+	// Go's import rules confine to its own module — so the backend is reached over
+	// its HTTP API. Only /p/*path is usable: it streams the bytes through the
+	// OpenList process and honours Range, whereas /d/*path 302-redirects to the
+	// cloud provider's direct URL and would bypass this source's sha256 check.
+	//
+	// OpenList has no trustworthy content hash of its own, so the hash→path mapping
+	// comes from an operator-supplied index file (OpenListIndexPath). Until a
+	// crawler builds that table, it is static; OpenListSource.Reload is the seam
+	// that delivery will use.
+	OpenListEnable      bool   // PEERDRIVE_OPENLIST_ENABLE (default false)
+	OpenListBaseURL     string // PEERDRIVE_OPENLIST_BASE_URL: scheme+host, no trailing /p
+	OpenListIndexPath   string // PEERDRIVE_OPENLIST_INDEX_FILE: hash→path JSON table
+	OpenListToken       string // PEERDRIVE_OPENLIST_TOKEN: sent as Authorization: Bearer ***
+	OpenListName        string // PEERDRIVE_OPENLIST_NAME (default "openlist")
+	OpenListPriority    int    // PEERDRIVE_OPENLIST_PRIORITY (default 900: after local/peer/url)
+	OpenListTimeoutSecs int    // PEERDRIVE_OPENLIST_TIMEOUT_SECS (default 120)
+	OpenListVerify      bool   // PEERDRIVE_OPENLIST_VERIFY (default true: hash full fetches)
 
 	DownloadDir         string
 	FolderMaxDepth      int // PEERDRIVE_FOLDER_MAX_DEPTH: register_folder max recursion depth (default 1 = scan current directory only)
@@ -258,6 +297,49 @@ type Config struct {
 	IwaraUpstreamSuffix  string // PEERDRIVE_IWARA_UPSTREAM_SUFFIX: upstream domain (default "iwara.tv")
 	IwaraEchProxyVersion string // PEERDRIVE_IWARA_ECH_PROXY_VERSION: ech-proxy release tag (default "v1.3.0")
 
+	// ── ExHentai routing (PEERDRIVE_EXHENTA_*, optional module) ──
+	//
+	// ExhentaiEnable is the master switch (PEERDRIVE_EXHENTA_ENABLE, default **false**).
+	// Why default off: the module rewrites requests to a third-party gallery through
+	// an operator-configured mirror, and the routing table it uses carries a login
+	// cookie. Like the iwara module above, that is an explicit opt-in.
+	//
+	// When enabled with no ExhentaiConfigURL the module runs on a built-in table
+	// (exhentai.org / e-hentai.org → ex.4545810.xyz) and its requests are only
+	// available to the node's own URL sources. With ExhentaiConfigURL set, the
+	// routing table is fetched from that URL and re-fetched in the background, so
+	// an operator changes the table by pushing a document — no restart.
+	//
+	// Unlike the ech-proxy modules above, there is no subprocess and no silent
+	// fallback to "direct": a bad or unreachable config URL means the module runs
+	// on the built-in table and logs the failure. A node must never fail to boot
+	// because a config server is down.
+	ExhentaiEnable         bool   // PEERDRIVE_EXHENTA_ENABLE (default false)
+	ExhentaiConfigURL      string // PEERDRIVE_EXHENTA_CONFIG_URL (default "")
+	ExhentaiConfigInsecure bool   // PEERDRIVE_EXHENTA_CONFIG_INSECURE (default false)
+	ExhentaiConfigAuth     string // PEERDRIVE_EXHENTA_CONFIG_AUTH (default ""): Authorization header value for config fetches
+
+	// ── twitter-pic gallery (PEERDRIVE_TWITTERPIC_*, optional module) ──
+	//
+	// TwitterPicEnable is the master switch (PEERDRIVE_TWITTERPIC_ENABLE, default
+	// **false**). It is the twitter-pic-go data surface integrated into peerdrive
+	// as "one user = one collection": the module pulls a gallery user's timeline
+	// from the twitter-pic API, ingests the media into the sha-file system and
+	// emits a content-addressed collection JSON per user (see internal/twitterpic).
+	//
+	// Why default off: the module downloads media from a third-party site on
+	// demand and writes into the node's storage; like the iwara/exhentai
+	// modules it is an explicit opt-in.
+	//
+	// Empty string values defer to the package defaults (twitterpic.DefaultBaseURL
+	// / DefaultProxyBase), so defaults live in one place.
+	TwitterPicEnable    bool   // PEERDRIVE_TWITTERPIC_ENABLE (default false)
+	TwitterPicBaseURL   string // PEERDRIVE_TWITTERPIC_BASE_URL (default https://x.moonchan.xyz/api/twitter)
+	TwitterPicProxyBase string // PEERDRIVE_TWITTERPIC_PROXY_BASE (default https://pbs.moonchan.xyz): ech-url 备选基址
+	TwitterPicMaxFiles  int    // PEERDRIVE_TWITTERPIC_MAX_FILES: 媒体摄取上限（0 = 全部）
+	TwitterPicMaxBytes  int64  // PEERDRIVE_TWITTERPIC_MAX_BYTES: 单文件摄取上限（0 = 不限）
+	TwitterPicTimeout   int    // PEERDRIVE_TWITTERPIC_TIMEOUT_SECS: 单请求超时秒数（默认 20）
+
 	// ── Signal subcommand (PEERSIGNAL_* / PEERJS_TOKENS, backward compat with old peersignal binary) ──
 	//
 	// The `peerdrive signal` subcommand preserves the old peersignal env var names so
@@ -347,6 +429,10 @@ func Load() *Config {
 		PeerJSID:     getEnv("PEERDRIVE_PEERJS_ID", ""),
 		PeerJSSecure: getEnvBool("PEERDRIVE_PEERJS_SECURE", true),
 		PeerJSPeers:  getEnv("PEERDRIVE_PEERJS_PEERS", ""),
+		// 注意：本块列对齐是 deployconsistency 测试钉死的格式（逐字节 grep），
+		// 新行只能追加、不能重排既有行的列（C-8）。
+		PeerJSXOREnable: getEnvBool("PEERDRIVE_PEERJS_XOR_ENABLE", false),
+		PeerJSXORKey:    getEnv("PEERDRIVE_PEERJS_XOR_KEY", ""),
 		PeerPSK:      getEnv("PEERDRIVE_PSK", ""),
 
 		MQTTEnable:        getEnvBool("PEERDRIVE_MQTT_ENABLE", false),
@@ -357,6 +443,15 @@ func Load() *Config {
 		DiscoverMode:      getEnv("PEERDRIVE_DISCOVER_MODE", "auto"),
 		DiscoverPresence:  getEnvBool("PEERDRIVE_DISCOVER_PRESENCE", true),
 		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
+
+		OpenListEnable:      getEnvBool("PEERDRIVE_OPENLIST_ENABLE", false),
+		OpenListBaseURL:     getEnv("PEERDRIVE_OPENLIST_BASE_URL", ""),
+		OpenListIndexPath:   getEnv("PEERDRIVE_OPENLIST_INDEX_FILE", ""),
+		OpenListToken:       getEnv("PEERDRIVE_OPENLIST_TOKEN", ""),
+		OpenListName:        getEnv("PEERDRIVE_OPENLIST_NAME", "openlist"),
+		OpenListPriority:    getEnvInt("PEERDRIVE_OPENLIST_PRIORITY", 900),
+		OpenListTimeoutSecs: getEnvInt("PEERDRIVE_OPENLIST_TIMEOUT_SECS", 120),
+		OpenListVerify:      getEnvBool("PEERDRIVE_OPENLIST_VERIFY", true),
 
 		DownloadDir:    getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
 		FolderMaxDepth: getEnvInt("PEERDRIVE_FOLDER_MAX_DEPTH", 0), // 0=unlimited (full recursion; >0 limits depth)
@@ -381,6 +476,20 @@ func Load() *Config {
 		IwaraEntrySuffix:     getEnv("PEERDRIVE_IWARA_ENTRY_SUFFIX", "l.moonchan.xyz"),
 		IwaraUpstreamSuffix:  getEnv("PEERDRIVE_IWARA_UPSTREAM_SUFFIX", "iwara.tv"),
 		IwaraEchProxyVersion: getEnv("PEERDRIVE_IWARA_ECH_PROXY_VERSION", "v1.3.0"),
+
+		// ExHentai routing (optional module)
+		ExhentaiEnable:         getEnvBool("PEERDRIVE_EXHENTA_ENABLE", false),
+		ExhentaiConfigURL:      getEnv("PEERDRIVE_EXHENTA_CONFIG_URL", ""),
+		ExhentaiConfigInsecure: getEnvBool("PEERDRIVE_EXHENTA_CONFIG_INSECURE", false),
+		ExhentaiConfigAuth:     getEnv("PEERDRIVE_EXHENTA_CONFIG_AUTH", ""),
+
+		// twitter-pic gallery (optional module)
+		TwitterPicEnable:    getEnvBool("PEERDRIVE_TWITTERPIC_ENABLE", false),
+		TwitterPicBaseURL:   getEnv("PEERDRIVE_TWITTERPIC_BASE_URL", ""),
+		TwitterPicProxyBase: getEnv("PEERDRIVE_TWITTERPIC_PROXY_BASE", ""),
+		TwitterPicMaxFiles:  getEnvInt("PEERDRIVE_TWITTERPIC_MAX_FILES", 0),
+		TwitterPicMaxBytes:  getEnvInt64("PEERDRIVE_TWITTERPIC_MAX_BYTES", 0),
+		TwitterPicTimeout:   getEnvInt("PEERDRIVE_TWITTERPIC_TIMEOUT_SECS", 20),
 
 		// 2026-10-07: dropped the bogus "ipfs" entry from the default (was
 		// "local,ipfs,ipfsgw,btdht,http"). "ipfs" has not been in the fetcher
@@ -452,6 +561,11 @@ func Validate(c *Config) error {
 			errs = append(errs, fmt.Sprintf("PEERDRIVE_PEERJS_PORT=%q is not a valid port", p))
 		}
 	}
+	// XOR 开关与密钥的交叉校验：开了却没配密钥 = 配置错误，启动期拦截
+	// （库层会防御性降级明文并告警，但那是兜底不是预期状态）。
+	if c.PeerJSXOREnable && strings.TrimSpace(c.PeerJSXORKey) == "" {
+		errs = append(errs, "PEERDRIVE_PEERJS_XOR_ENABLE=true requires PEERDRIVE_PEERJS_XOR_KEY to be set")
+	}
 	if c.MaxPeers <= 0 {
 		errs = append(errs, fmt.Sprintf("PEERDRIVE_MAX_PEERS=%d must be positive", c.MaxPeers))
 	}
@@ -521,6 +635,19 @@ func Validate(c *Config) error {
 			errs = append(errs, "PEERDRIVE_ECH_PROXY_ADDR="+c.ECHProxyAddr+
 				" conflicts with the iwara module's listen address "+iwaraAddr+
 				" (PEERDRIVE_IWARA_ECH_PROXY_PORT) — give one module a different address")
+		}
+	}
+
+	// The ExHentai config URL is where an operator publishes the routing table.
+	// The module accepts an empty value (built-in table only), but a typo here
+	// would otherwise only surface as a repeated "config fetch failed" log line
+	// after a successful boot. Check the scheme now, while it is still a
+	// configuration error rather than a runtime one.
+	if c.ExhentaiEnable && strings.TrimSpace(c.ExhentaiConfigURL) != "" {
+		u, err := url.Parse(strings.TrimSpace(c.ExhentaiConfigURL))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			errs = append(errs, "PEERDRIVE_EXHENTA_CONFIG_URL="+c.ExhentaiConfigURL+
+				" is not a valid http:// or https:// URL")
 		}
 	}
 

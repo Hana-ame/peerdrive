@@ -2,15 +2,14 @@ package router
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 
 	hashutil "peerdrive/pkg/hashutil"
 
 	"peerdrive/internal/controller"
 	"peerdrive/internal/transport"
+	"peerdrive/internal/wsconn"
 )
 
 // injectControllerDeps hands the PeerJS-backed dependencies to the controller
@@ -42,21 +41,6 @@ func (r *Router) injectControllerDeps() {
 	// fileIndexSearcher interface (Search / RequestSearch / ConnectedPeerIDs), so the
 	// injection is a direct pass-through with no adapter layer.
 	controller.InitFileSearchController(r.deps.PeerJSService)
-}
-
-// isLoopbackRemote checks if TCP peer is local (RemoteAddr like 127.0.0.1:54321 / [::1]:54321).
-//
-// Why only check RemoteAddr and not X-Forwarded-For: behind a reverse proxy, XFF
-// trust is partly client-controlled (PEERDRIVE_TRUSTED_PROXIES), and this is a
-// security boundary — better to be conservative. In reverse-proxy deployments,
-// browser requests always carry an Origin header, so the whitelist path works fine.
-func isLoopbackRemote(remote string) bool {
-	host := remote
-	if i := strings.LastIndex(host, ":"); i >= 0 {
-		host = host[:i] // IPv4: strip port
-	}
-	host = strings.Trim(host, "[]") // IPv6: [::1] → ::1
-	return host == "127.0.0.1" || host == "::1" || host == "localhost"
 }
 
 // registerPeerJSRoutes registers PeerJS node discovery and interconnection routes.
@@ -193,25 +177,18 @@ func (rt *Router) registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 	// (text frame = JSON control header, binary frame = data block); browser local connection
 	// needs no hole-punching/signaling.
 	// Note: different from legacy /ws/signal, /ws/transfer (old self-built signaling).
+	//
+	// The origin decision is wsconn.OriginPolicy; it is built once here rather than
+	// per request because peerjsCfg is already captured as a local above. A nil
+	// peerjsCfg means "no allowlist configured" and is expressed as a nil Allow
+	// (accept) — IsOriginAllowed dereferences the config, so it must not be
+	// reachable through a nil pointer.
+	var originAllow func(string) bool
+	if peerjsCfg != nil {
+		originAllow = peerjsCfg.IsOriginAllowed
+	}
+	upgrader := wsconn.NewUpgrader(wsconn.OriginPolicy{Allow: originAllow})
 	r.GET("/ws/peer", func(c *gin.Context) {
-		upgrader := websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				// Local session security boundary: only allow configured Origins (same as HTTP CORS whitelist)
-				origin := r.Header.Get("Origin")
-				if origin == "" {
-					// Most requests without Origin aren't from browsers (scripts / curl / wscat).
-					// Previously all were allowed = if the port is reachable, full admin surface access,
-					// and WSSession.IsLocal() is always true, so it was also treated as "self"
-					// (private shared content was visible). Now only connections truly from localhost:
-					// browser handshakes always carry Origin, so normal frontend is unaffected.
-					return isLoopbackRemote(r.RemoteAddr)
-				}
-				if peerjsCfg == nil {
-					return true
-				}
-				return peerjsCfg.IsOriginAllowed(origin)
-			},
-		}
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "websocket upgrade failed"})

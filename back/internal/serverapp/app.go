@@ -24,24 +24,25 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
 	"peerdrive/internal/echproxy"
+	"peerdrive/internal/echproxy/exhentai"
 	"peerdrive/internal/echproxy/twimg"
 	"peerdrive/internal/extractor"
+	"peerdrive/internal/httpd"
 	"peerdrive/internal/log"
 	"peerdrive/internal/pathutil"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
 	"peerdrive/internal/service"
 	"peerdrive/internal/source"
+	"peerdrive/internal/twitterpic"
 	"peerdrive/internal/transport"
 )
 
@@ -63,22 +64,13 @@ func Load() (*config.Config, func(), error) {
 	return cfg, func() {}, nil
 }
 
-// ListenAddr 返回主服务的监听地址。
+// ListenAddr 返回主服务的监听地址（host 空 = 监听所有网卡）。
+//
+// 实现已搬到 internal/httpd；这里保留一个薄包装，因为 cmd/peerdrive 的
+// runAll 也用它拼监听地址——两处拼法不同会让「合并模式」和「单独 serve」
+// 在 IPv6 host 上产生不同的地址串（JoinHostPort 会加方括号）。
 func ListenAddr(cfg *config.Config) string {
-	return net.JoinHostPort(cfg.Host, cfg.Port)
-}
-
-// isLoopbackListen reports whether the given host listens on loopback only.
-// Empty host = listen on all interfaces (0.0.0.0), which is non-loopback.
-func isLoopbackListen(host string) bool {
-	if host == "" {
-		return false
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	return ip.IsLoopback()
+	return httpd.JoinHostPort(cfg.Host, cfg.Port)
 }
 
 // validateAuthStartup checks that a non-loopback deployment has an auth backend configured,
@@ -91,7 +83,7 @@ func isLoopbackListen(host string) bool {
 // explicit opt-in for that dangerous configuration.
 func validateAuthStartup(cfg *config.Config) error {
 	addr := ListenAddr(cfg)
-	if isLoopbackListen(cfg.Host) {
+	if httpd.IsLoopback(cfg.Host) {
 		return nil // loopback only — safe
 	}
 	if cfg.RegistrationServer != "" {
@@ -259,6 +251,10 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	// there is no longer a window in which the router could observe a half-wired
 	// dependency set.
 	var peerjsSvc *transport.PeerJSService
+	// urlClient 提升到函数作用域（原来在 ech-proxy 块内声明）：twitter-pic
+	// 模块在 PeerJS 块外装配，也要能复用 ech-proxy/exhentai 可能产生的出口
+	// client（其 Transport 走 ech-proxy 出口）。nil = 直连默认 client。
+	var urlClient *http.Client
 	if cfg.PeerJSEnable {
 		log.LogInfo("main: initializing PeerJS WebRTC service")
 		peerjsSvc = transport.NewPeerJSService(cfg, storageDir)
@@ -383,19 +379,23 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	// be explicitly opted into.
 	if cfg.IwaraEnable {
 		iwaraCfg := &echproxy.ModuleConfig{
-			Enable:        true,
-			IWARACookie:   cfg.IwaraCookie,
-			EchProxyDir:   "echproxy",
+			Enable:          true,
+			IWARACookie:     cfg.IwaraCookie,
+			EchProxyDir:     "echproxy",
 			EchProxyExeName: echproxy.DefaultEchProxyExeName,
 			EchProxyVersion: cfg.IwaraEchProxyVersion,
-			EntrySuffix:   cfg.IwaraEntrySuffix,
-			UpstreamSuffix: cfg.IwaraUpstreamSuffix,
-			EntryPort:     strconv.Itoa(cfg.IwaraEchProxyPort),
+			EntrySuffix:     cfg.IwaraEntrySuffix,
+			UpstreamSuffix:  cfg.IwaraUpstreamSuffix,
+			EntryPort:       strconv.Itoa(cfg.IwaraEchProxyPort),
 		}
 		iwaraCfg.Normalize()
 
 		pm := echproxy.NewProcessManager(iwaraCfg)
 		client := echproxy.NewIwaraClient(iwaraCfg)
+		// Expose the client to the HTTP surface (GET /iwara/video/:id for the
+		// front/iwara page). The route is optional in router.Deps, so a default
+		// node without PEERDRIVE_IWARA_ENABLE never advertises it.
+		deps.IwaraClient = client
 
 		// Attempt to start ech-proxy. If it fails (non-Windows, port conflict,
 		// download failure), the IwaraClient still works for direct API access
@@ -513,7 +513,6 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 		// There is deliberately no silent fallback to direct pbs.twimg.com traffic: if the
 		// download, the checksum, the port bind or the spawn fails, startup fails. An
 		// operator who opted into the module must be told it did not come up.
-		var urlClient *http.Client
 		if cfg.ECHProxyEnable {
 			if cfg.URLSourceTemplate == "" {
 				log.LogWarn("main: PEERDRIVE_ECH_PROXY_ENABLE=true but PEERDRIVE_URL_SOURCE_TEMPLATE is " +
@@ -540,9 +539,118 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 			}
 		}
 
+		// Optional ExHentai module (PEERDRIVE_EXHENTA_ENABLE, default off).
+		//
+		// Unlike the two ech-proxy modules above there is no subprocess and no
+		// local listener: the backend host is reached directly, so the module is
+		// a pure http.RoundTripper that rewrites the authority of matching URLs.
+		// It stacks on top of whatever urlClient the ech-proxy module produced —
+		// the two modules serve different hosts and do not conflict.
+		//
+		// When the flag is off this whole block is skipped, so a node that never
+		// enables it stays byte-identical to one without the module: nothing is
+		// constructed and urlClient is still nil when the URL source is built.
+		if cfg.ExhentaiEnable {
+			if cfg.URLSourceTemplate == "" {
+				log.LogWarn("main: PEERDRIVE_EXHENTA_ENABLE=true but PEERDRIVE_URL_SOURCE_TEMPLATE is " +
+					"empty — the rewrite has no URL source to serve, the module was not started")
+			} else {
+				mod, err := exhentai.New(exhentai.Config{
+					ConfigURL:         cfg.ExhentaiConfigURL,
+					AllowInsecureHTTP: cfg.ExhentaiConfigInsecure,
+					HTTPBase:          urlClient,
+					AuthHeaders:       exhentaiAuthHeaders(cfg.ExhentaiConfigAuth),
+					// log.LogInfo has the exact signature the module expects.
+					Logf: log.LogInfo,
+				})
+				if err != nil {
+					// A malformed config URL is a misconfiguration, so it fails
+					// loudly here the way the ech-proxy module does. A reachable
+					// URL that later goes down is not: that degrades to the
+					// built-in table at runtime, which is deliberate — an
+					// operator's config server must not be able to take the node
+					// down with it.
+					return fail(fmt.Errorf("exhentai module: %w", err))
+				}
+				if err := mod.Start(context.Background()); err != nil {
+					return fail(fmt.Errorf("exhentai: %w", err))
+				}
+				shutdowns = append(shutdowns, func() {
+					if err := mod.Stop(context.Background()); err != nil {
+						log.LogWarn("main: stop exhentai module: %v", err)
+					}
+				})
+				urlClient = mod.Client()
+				if src := mod.Snapshot(); src.Version != "" {
+					log.LogInfo("main: exhentai module enabled — routing table %q from %s (%d rules)",
+						src.Version, src.Source, len(src.Config.Rules))
+				}
+			}
+		}
+
 		if cfg.URLSourceTemplate != "" {
 			if err := mgr.Register(source.NewURLSource(cfg.URLSourceTemplate, urlClient)); err != nil {
 				log.LogWarn("main: register url source: %v", err)
+			}
+		}
+
+		// Optional OpenList source (PEERDRIVE_OPENLIST_ENABLE, default off).
+		//
+		// OpenList cannot be imported — its driver layer lives under internal/,
+		// which Go's import rules keep outside this module — so this reaches it
+		// over HTTP instead. Only /p/*path is used: it streams the bytes through
+		// the OpenList process and honours Range, whereas /d/*path 302-redirects
+		// to the cloud provider's direct URL and would let a request bypass the
+		// source's sha256 check entirely.
+		//
+		// OpenList has no trustworthy content hash of its own, so the hash→path
+		// mapping comes from an operator-supplied table. A missing or malformed
+		// table fails startup instead of registering a source that could serve
+		// nothing — an explicitly opted-in data source must be told it did not
+		// come up, the same rule the ech-proxy and exhentai modules follow.
+		//
+		// When the flag is off this whole block is skipped: nothing is
+		// constructed and nothing is registered, so a node that never enables it
+		// stays byte-identical to one without the source.
+		if cfg.OpenListEnable {
+			if cfg.OpenListBaseURL == "" {
+				log.LogWarn("main: PEERDRIVE_OPENLIST_ENABLE=true but PEERDRIVE_OPENLIST_BASE_URL is " +
+					"empty — the openlist source was not registered")
+			} else if cfg.OpenListIndexPath == "" {
+				log.LogWarn("main: PEERDRIVE_OPENLIST_ENABLE=true but PEERDRIVE_OPENLIST_INDEX_FILE is " +
+					"empty — without a hash→path table the source could serve nothing")
+			} else {
+				index, err := source.LoadOpenListIndex(cfg.OpenListIndexPath)
+				if err != nil {
+					return fail(err)
+				}
+				// A bounded client, not http.DefaultClient: an unresponsive
+				// OpenList must not be able to hold a fetch slot forever.
+				olClient := &http.Client{Timeout: time.Duration(cfg.OpenListTimeoutSecs) * time.Second}
+				if urlClient != nil {
+					// Reuse the egress module's transport (ech-proxy / exhentai)
+					// so an OpenList sitting behind ECH keeps working. Those
+					// transports pass non-matching hosts straight through, which
+					// is what happens for any OpenList that is not one of them.
+					olClient.Transport = urlClient.Transport
+				}
+				olSrc, err := source.NewOpenListSource(source.OpenListConfig{
+					Name:     cfg.OpenListName,
+					BaseURL:  cfg.OpenListBaseURL,
+					Client:   olClient,
+					Token:    cfg.OpenListToken,
+					Index:    index,
+					Verify:   cfg.OpenListVerify,
+					Priority: cfg.OpenListPriority,
+				})
+				if err != nil {
+					return fail(err)
+				}
+				if err := mgr.Register(olSrc); err != nil {
+					log.LogWarn("main: register openlist source: %v", err)
+				}
+				log.LogInfo("main: openlist source enabled — %s, %d indexed files",
+					olSrc.Name(), olSrc.Count())
 			}
 		}
 		deps.SourceManager = mgr
@@ -551,6 +659,31 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 		// HTTP download root requests already use mgr; here we reuse the same instance to keep
 		// routing order consistent.
 		peerjsSvc.SetFileRouter(mgr)
+	}
+
+	// Optional twitter-pic gallery module (PEERDRIVE_TWITTERPIC_ENABLE, default
+	// off). twitter-pic-go 数据面的 peerdrive 整合：按「一个 user 作为一个
+	// collection」把图库用户拉进 sha-文件系统（摄取媒体 + 内容寻址集合 JSON）。
+	// 无子进程、无本地监听——纯出站 HTTP（API + 媒体下载），client 复用上面
+	// ech-proxy/exhentai 模块可能产生的 urlClient（其 Transport 走出口；nil 时
+	// 直连）。放在 PeerJS 块之外（与 iwara 同先例）：模块不依赖对端互联，
+	// PeerJS 关闭的节点同样可用。开关关掉时整块跳过：默认节点与未启用时
+	// 逐字节等价（零变化）。
+	if cfg.TwitterPicEnable {
+		svc, err := twitterpic.NewService(twitterpic.ServiceConfig{
+			BaseURL:    cfg.TwitterPicBaseURL,
+			ProxyBase:  cfg.TwitterPicProxyBase,
+			StorageDir: cfg.StorageDir,
+			MaxFiles:   cfg.TwitterPicMaxFiles,
+			MaxBytes:   cfg.TwitterPicMaxBytes,
+			Timeout:    time.Duration(cfg.TwitterPicTimeout) * time.Second,
+			Client:     urlClient,
+		})
+		if err != nil {
+			return fail(fmt.Errorf("twitter-pic module: %w", err))
+		}
+		deps.TwitterPic = svc
+		log.LogInfo("main: twitter-pic module enabled — %s", svc.BaseURL())
 	}
 
 	// Hand the assembled dependency set to the router in one call.
@@ -593,42 +726,21 @@ func RunHTTP(addr string, h http.Handler) {
 	// The admin surface has no account system; "who can reach this port" is its only boundary.
 	// If the admin panel is only used locally, setting PEERDRIVE_HOST=127.0.0.1 is the
 	// cheapest wall.
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           h,
-		ReadHeaderTimeout: 15 * time.Second,
+	srv, err := httpd.New(httpd.Config{
+		Addr: addr,
+		// ReadHeaderTimeout 是最低限度的 Slowloris 防护（gin 的 r.Run() 不设这个）。
+		ReadHeaderTimeout: httpd.DefaultReadHeaderTimeout,
+		// LogPrefix 保持 "main"：这些日志是运维判断「主服务起没起来、怎么退的」
+		// 的，改前缀会让 grep "main:" 之类的检索语句全部失效。
+		LogPrefix: "main",
+	}, h)
+	if err != nil {
+		// 只能来自空 addr 或 nil handler，属于装配 bug 而非配置问题：直接 Fatal。
+		stdlog.Fatalf("main: build HTTP server: %v", err)
 	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		log.LogInfo("main: starting HTTP server on %s", addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		}
-	}()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	select {
-	case err := <-errCh:
-		log.LogError("main: HTTP server failed: %v", err)
-	case <-quit:
-		log.LogInfo("main: shutting down server")
-	}
-
-	// Graceful shutdown: first stop accepting new requests, then give in-progress requests
-	// some time to finish (whether the half-written file from an in-progress pull/upload
-	// can complete depends on this 20-second window).
-	// After timeout, force-close — we can't hold the shutdown open indefinitely for one slow
-	// request (container orchestrators will SIGKILL).
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.LogWarn("main: graceful shutdown timed out, forcing close: %v", err)
-		if err := srv.Close(); err != nil {
-			log.LogWarn("main: force close: %v", err)
-		}
-	}
+	// Run 返回的 error 只可能来自 ListenAndServe 失败，而 httpd.Serve 已经打过
+	// 「main: HTTP server failed: %v」；重复打只会让退出日志看起来像两次故障。
+	_ = srv.Run(context.Background())
 	log.LogInfo("main: stopped")
 }
 
@@ -711,6 +823,20 @@ func warnUnsupportedRoots(cfg *config.Config) {
 // The entry port is derived from ECHProxyAddr rather than read separately: the rewrite
 // target is the same port the child process listens on, and keeping them in sync here
 // avoids a configuration pair that could silently disagree.
+// exhentaiAuthHeaders turns the single config-auth env value into the header map
+// the exhentai module attaches to its config fetches. An empty value yields nil
+// so the module does not send an empty Authorization header.
+//
+// The value is the Authorization header *value*, not the header name:
+// PEERDRIVE_EXHENTA_CONFIG_AUTH="Bearer <token>" produces "Authorization: Bearer <token>".
+func exhentaiAuthHeaders(value string) map[string]string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return map[string]string{"Authorization": value}
+}
+
 func buildECHProxyModule(cfg *config.Config) (*twimg.Module, error) {
 	installDir := strings.TrimSpace(cfg.ECHProxyInstallDir)
 	if installDir == "" {

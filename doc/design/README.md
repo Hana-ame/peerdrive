@@ -29,7 +29,7 @@
 | 09 | [modules/09-transport.md](modules/09-transport.md) | transport | `back/internal/transport/` | P2P session state machine + verb dispatch |
 | 10 | [modules/10-peerjs.md](modules/10-peerjs.md) | peerjs | `back/peerjs/` | PeerJS protocol library |
 | 11 | [modules/11-signalserver.md](modules/11-signalserver.md) | signalserver | `back/signalserver/` | Signaling + discovery (pure in-memory) |
-| 12 | [modules/12-media-node.md](modules/12-media-node.md) | media-node | `back/cmd/media-node/` + `back/ech/` | ECH media chain |
+| 12 | [modules/12-media-node.md](modules/12-media-node.md) | media-node | `back/cmd/media-node/` + `back/internal/echcore/` | ECH media chain |
 | 13 | [modules/13-frontend.md](modules/13-frontend.md) | frontend | `front/src/` | Web consumer |
 | 14 | [modules/14-nodestate.md](modules/14-nodestate.md) | nodestate | `back/internal/nodestate/` | Runtime shared state |
 

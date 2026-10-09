@@ -11,60 +11,54 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
+	"strconv"
 	"syscall"
 
+	"github.com/Hana-ame/go-peerserver/tracker"
 	"peerdrive/internal/config"
+	"peerdrive/internal/httpd"
 	"peerdrive/internal/log"
 	"peerdrive/internal/regserver"
 	"peerdrive/internal/serverapp"
 	"peerdrive/internal/services"
 )
 
-// normalizePort 让 PORT 两种写法都能用。
+// normalizePort 已搬到 internal/httpd（httpd.NormalizePort）：它是「监听地址
+// 怎么拼」的通用问题，三个子命令都会碰到，实现与测试都在那里。
 //
-// 旧 reg-server 收的是裸端口号（`PORT=4000` → `":" + port`），
-// 而监听地址习惯写成 `HOST:PORT`（`:4000` / `127.0.0.1:4000`）。
-// 两种都见过，所以都支持——但不能一律拼冒号，
-// 否则 `HOST=127.0.0.1 PORT=4000` 会被拼成 `127.0.0.1:127.0.0.1:4000`。
 // regAddrFromEnv 解析 reg 子命令的监听地址。
 //
 // ⚠️ PORT 沿用旧 reg-server 的写法：不带冒号（"4000"）是常态——旧实现是
 // `addr := ":" + port`。若直接把 PORT 当监听地址传下去，`PORT=4000` 会报
 // "address 4000: missing port in address"，等于把还能跑的旧部署脚本弄坏。
+// 所以这里过一遍 httpd.NormalizePort，而不是把 PORT 原样当监听地址用。
 //
 // 单独成函数而不是内联在 runReg 里，是为了让测试能调到**同一个**入口：
 // 上一版测试直接调 normalizePort，摘掉 runReg 里的调用照样绿；
 // 再一版调 regAddrFromEnv，可它有自己的实现，跟 runReg 那个 flag 无关，还是绿。
 func regAddrFromEnv() string {
-	return normalizePort(envOr("PORT", ":4000"))
+	return httpd.NormalizePort(envOr("PORT", ":4000"))
 }
 
 // regFlagSet 构造 reg 子命令的 flag 定义。
 //
 // 抽出来是为了让测试能拿到**真实的那一份**：前几版的护栏都是「测辅助函数、
 // 不测调用点」，把 runReg 改回 envOr("PORT", ":4000") 照样绿。
-// 现在 runReg 与测试读同一个 FlagSet，摘掉 normalizePort 即失败。
+// 现在 runReg 与测试读同一个 FlagSet，摘掉 httpd.NormalizePort 即失败。
 func regFlagSet() *flag.FlagSet {
 	fs := flag.NewFlagSet("reg", flag.ContinueOnError)
 	fs.String("addr", regAddrFromEnv(), "listen address")
 	fs.String("db", "", "sqlite path (default: $DB_PATH → $PEERDRIVE_REG_DB → ./reg.db)")
 	fs.String("tls-cert", os.Getenv("PEERDRIVE_REG_TLS_CERT"), "TLS certificate (PEM)")
 	fs.String("tls-key", os.Getenv("PEERDRIVE_REG_TLS_KEY"), "TLS private key (PEM)")
+	// BitTorrent HTTP tracker (BEP 12/31). When enabled, the reg server
+	// also serves /announce, /scrape, and /tracker/bans. Ban management
+	// uses JWT Bearer auth (same as /auth/whoami).
+	fs.Bool("bt-tracker", false, "enable BitTorrent HTTP tracker (/announce, /scrape)")
+	fs.String("bt-bans-file", "tracker_bans.json", "JSON file for tracker ban persistence")
+	fs.Int("bt-interval", 900, "announce interval in seconds (default 900 = 15 min)")
+	fs.Int("bt-max-peers", 100, "max peers per info_hash (default 100)")
 	return fs
-}
-
-func normalizePort(p string) string {
-	if p == "" {
-		return ":4000"
-	}
-	if strings.Contains(p, ":") {
-		return p // 已是 host:port 或 :port
-	}
-	if strings.Contains(p, ".") { // 纯 IP，没有端口
-		return p + ":4000"
-	}
-	return ":" + p
 }
 
 func envOr(k, def string) string {
@@ -72,6 +66,13 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// mustInt parses a string to int, returning the default (0) on parse error.
+// Used for tracker config flags that fall back to tracker.NewTracker defaults.
+func mustInt(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
 }
 
 // runSignal 起信令 + 节点发现，阻塞直到出错或收到退出信号。
@@ -115,6 +116,10 @@ func runReg(args []string) {
 	dbPath := fs.Lookup("db")
 	cert := fs.Lookup("tls-cert")
 	tlsKey := fs.Lookup("tls-key")
+	btTracker := fs.Lookup("bt-tracker")
+	btBansFile := fs.Lookup("bt-bans-file")
+	btInterval := fs.Lookup("bt-interval")
+	btMaxPeers := fs.Lookup("bt-max-peers")
 	_ = fs.Parse(args)
 
 	srv, err := regserver.New(dbPath.DefValue)
@@ -124,7 +129,23 @@ func runReg(args []string) {
 	}
 	defer srv.Close()
 
-	log.LogInfo("reg: listening on %s", *addr)
+	// BitTorrent HTTP tracker (BEP 12/31) — ban management uses JWT auth,
+	// user-level bans map to regserver usernames via JWT verification.
+	if btTracker.Value.String() == "true" {
+		btOpts := []tracker.Option{
+			tracker.WithAnnounceInterval(mustInt(btInterval.Value.String())),
+			tracker.WithMaxPeers(mustInt(btMaxPeers.Value.String())),
+		}
+		if btBansFile.Value.String() != "" {
+			btOpts = append(btOpts, tracker.WithBanFile(btBansFile.Value.String()))
+		}
+		tr := srv.SetupTracker(btOpts...)
+		srv.SetTracker(tr)
+		log.LogInfo("reg: bt-tracker enabled (interval=%d maxPeers=%d bansFile=%q)",
+			mustInt(btInterval.Value.String()), mustInt(btMaxPeers.Value.String()), btBansFile.Value.String())
+	}
+
+	log.LogInfo("reg: listening on %s", addr.Value.String())
 	if err := srv.Serve(addr.Value.String(), cert.Value.String(), tlsKey.Value.String()); err != nil {
 		fmt.Fprintf(os.Stderr, "peerdrive reg: %v\n", err)
 		os.Exit(1)

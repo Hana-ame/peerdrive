@@ -336,6 +336,7 @@ func retryablePullErr(err error) bool {
 	msg := err.Error()
 	// 对端没在我们请求之前就准备好（会话刚建立时的竞态），重试有意义
 	if strings.Contains(msg, "no connection to") || strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "connection not bound") ||
 		strings.Contains(msg, "use of closed network connection") ||
 		strings.Contains(msg, "connection reset") || strings.Contains(msg, "EOF") ||
 		strings.Contains(msg, "broken pipe") || strings.Contains(msg, "i/o timeout") {

@@ -7,7 +7,6 @@
 // Extracted as an independent component: shared by the Settings node-connect
 // section and the home page (Plaza).
 import React, { useState, useRef, useEffect } from 'react';
-import Peer from 'peerjs';
 import { connectToPeer, discoverNodes } from './pd-client';
 import { setNodeSession, clearNodeSession } from './nodeSession';
 
@@ -66,6 +65,7 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
     setPdError('');
     setPdShare(null);
     try {
+      const Peer = await import('peerjs').then(m => m.default || m);
       const client = await connectToPeer(Peer, target, {
         peerOptions: {
           host: sigHost.trim() || DEFAULT_SIG.host,

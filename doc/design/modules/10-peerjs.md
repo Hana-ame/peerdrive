@@ -2,19 +2,19 @@
 
 - **Code location**: `back/peerjs` (independent go.mod, module path `github.com/Hana-ame/go-peerjs`, see `back/peerjs/go.mod:1`; main repository requires it at `back/go.mod:7` and replaces with `replace github.com/Hana-ame/go-peerjs => ./peerjs` pointing to local directory at `back/go.mod:160`)
 - **One-line function**: PeerJS compatible signaling client + WebRTC DataChannel transport primitives (connection / messaging / signaling / flow control), pure in-memory connection state, does not persist any state.
-- **Dependencies**: `gorilla/websocket v1.5.3` (signaling WS client, `back/peerjs/go.mod:6`), `pion/webrtc/v4 v4.1.2` (PeerConnection / DataChannel / ICE, `back/peerjs/go.mod:7`); tests use `stretchr/testify` (`back/peerjs/go.mod:8`); standard library `crypto/rand` (token/connectionId generation, `back/peerjs/peer.go:6,319-329`), `net/http` (fetch random ID, `back/peerjs/peer.go:11,543-578`), `sync`/`time`. Does not depend on any upper-level framework (no gin / sqlite).
+- **Dependencies**: `gorilla/websocket v1.5.3` (signaling WS client, `back/peerjs/go.mod:6`), `pion/webrtc/v4 v4.1.2` (PeerConnection / DataChannel / ICE, `back/peerjs/go.mod:7`); tests use `stretchr/testify` (`back/peerjs/go.mod:8`); standard library `crypto/rand` (token/connectionId generation, `back/peerjs/signalling/id.go:34-43`, `back/peerjs/connection.go:372-376`), `net/http` (fetch random ID, `back/peerjs/signalling/peerjs_signaller.go:9,225-260`), `sync`/`time`. Does not depend on any upper-level framework (no gin / sqlite).
 - **Depended upon by**: Main consumer is `back/internal/transport/peerjs_service.go` (`PeerJSService` holds `*peerjs.Peer`, `back/internal/transport/peerjs_service.go:26,38-41`); `back/internal/transport/rtc_session.go:4,11-39` adapts `*peerjs.Connection` to unified `Session`; `back/internal/transport/ws_session.go:9,15-29`'s `Session` interface signature directly uses this library's `peerjs.Frame` type (WS sessions reuse same frame protocol); `back/internal/transport/conn.go:36` frame protocol core references; independent consumer `back/cmd/media-node/main.go:46` (media node), `back/cmd/echclient/main.go:15` (verification client); test references in `back/test/integration/{live,selfhosted}_test.go`, `back/internal/source/peer_test.go`, `back/internal/transport/{conn,psk,peerjs_service,forward,stream}_test.go`. Also has independent repo mirror `github.com/Hana-ame/go-peerjs` (tag=v0.1.0 synced, see `AGENTS.md:24-27`).
 
 ## 1. Logic
 
 **Module positioning**: Transport primitives (signaling + data plane), business frame protocol (verb) defined by upper layer — consistent with "format-agnostic" principle (`back/peerjs/message.go:1-4`, `back/peerjs/README.md:6-7`).
 
-**Three-layer structure + one transport abstraction** (layering rationale: each can be independently replaced/tested, see `back/peerjs/README.md:91-98`):
+**Three-layer structure + one transport abstraction** (layering rationale: each can be independently replaced/tested, see `back/peerjs/README.md:91-98`). Since 2026-10-09 the signaling *transport* lives in the `signalling` subpackage (`back/peerjs/signalling`, same independent module) — it imports only `signalframe` + `gorilla/websocket`, so the WebRTC stack (`pion/webrtc`) no longer reaches the transport layer. The Peer root package keeps the DataChannel data plane and the routing/consumer side (`route`/`handleOffer`/`handleLeave`/connection registry).
 
 | Layer | Responsibility | Code |
 |---|---|---|
-| `Signaller` | Signaling channel abstraction: register node, send/receive signaling messages; current implementation is PeerJS protocol (`peerJSSignaller`) | `back/peerjs/signaller.go:12-30`, `back/peerjs/peer.go:352-369` |
-| `Peer` | Node role: signaling routing (OFFER/ANSWER/CANDIDATE/LEAVE/EXPIRE etc. dispatch), connection registry (one-to-many), lifecycle; proactive initiation (`Connect`) and passive reception (`OnConnection`) | `back/peerjs/peer.go:35-44,168-215` |
+| `Signaller` | Signaling channel abstraction: register node, send/receive signaling messages; current implementation is PeerJS protocol (`peerJSSignaller`) | `back/peerjs/signalling/signalling.go:50-69`, `back/peerjs/signalling/peerjs_signaller.go:20-41` |
+| `Peer` | Node role: signaling routing (OFFER/ANSWER/CANDIDATE/LEAVE/EXPIRE etc. dispatch), connection registry (one-to-many), lifecycle; proactive initiation (`Connect`) and passive reception (`OnConnection`) | `back/peerjs/peer.go:25-33`, `back/peerjs/peer.go:157-204` |
 | `Connection` | One WebRTC DataConnection: SDP exchange, ICE candidate forwarding, frame sending (text/binary/atomic header+body), built-in write buffer flow control, open/message/close events | `back/peerjs/connection.go:24-57` |
 | `DataChannel` interface | Data plane transport abstraction, `Connection` only depends on this interface (not bound to pion concrete type), current implementation is `pionChannel` (pion/webrtc DataChannel adapter) | `back/peerjs/transport.go:15-26,29-56` |
 
@@ -22,15 +22,15 @@
 
 - Message types consistent with peerjs-server enum: `OPEN/LEAVE/CANDIDATE/OFFER/ANSWER/EXPIRE/HEARTBEAT/ID-TAKEN/ERROR` (`back/peerjs/message.go:18-28`); `Message{Type,Src,Dst,Payload}`, Payload is arbitrary JSON (`back/peerjs/message.go:38-43`).
 - Connection payloads: `OfferPayload` (SDP + type + connectionId + label + reliable + serialization="raw", `back/peerjs/connection.go:339-346`), `AnswerPayload`, `CandidatePayload` (`back/peerjs/message.go:57-80`).
-- Registration flow: When ID specified, directly connect WS; when not specified, first `GET /id?ts=…&version=…` to get server-assigned random ID (validated by `validID` before use), then establish WS (`back/peerjs/peer.go:396-408,543-578`).
-- WS address format: `wss://host:port/peerjs?key=&id=&token=&version=1.5.4` (`back/peerjs/peer.go:410-427`; version constant see `peer.go:22`); `src` overridden by server (`back/peerjs/peer.go:502` comments).
-- Keepalive: Client sends `HEARTBEAT` every `PingInterval` (default 5s); receiving server `HEARTBEAT` does not respond, no side effects (`back/peerjs/peer.go:483-500,173-175`).
-- Routing dispatch: `ANSWER/CANDIDATE` finds existing connection by `connectionId` in payload then passes to `conn.handleMessage`; `OFFER` creates new connection (answerer); `EXPIRE` closes corresponding connection (let upper layer reconnect); `LEAVE` closes all connections for that remote; `ERROR/ID-TAKEN` logs (`back/peerjs/peer.go:168-215`).
+- Registration flow: When ID specified, directly connect WS; when not specified, first `GET /id?ts=…&version=…` to get server-assigned random ID (validated by `validID` before use), then establish WS (`back/peerjs/signalling/peerjs_signaller.go:64-86,225-260`).
+- WS address format: `wss://host:port/peerjs?key=&id=&token=&version=1.5.4` (`back/peerjs/signalling/peerjs_signaller.go:97-105`; version constant `back/peerjs/signalling/id.go:11`); `src` overridden by server (`back/peerjs/signalling/peerjs_signaller.go:184` comment).
+- Keepalive: Client sends `HEARTBEAT` every `PingInterval` (default 5s); receiving server `HEARTBEAT` does not respond, no side effects (`back/peerjs/signalling/peerjs_signaller.go:165-182`, `back/peerjs/peer.go:162-164`).
+- Routing dispatch: `ANSWER/CANDIDATE` finds existing connection by `connectionId` in payload then passes to `conn.handleMessage`; `OFFER` creates new connection (answerer); `EXPIRE` closes corresponding connection (let upper layer reconnect); `LEAVE` closes all connections for that remote; `ERROR/ID-TAKEN` logs (`back/peerjs/peer.go:157-204`).
 
 **Two connection establishment paths** (symmetric, no direction distinction, `back/internal/transport/peerjs_service.go:13-14`):
 
-- Offerer: `Peer.Connect(ctx, dst, label)` → `newConnection` creates PC, `CreateDataChannel(label, Ordered=true)`, `makeOffer` sends `OFFER` (`back/peerjs/peer.go:136-141`, `back/peerjs/connection.go:225-286,330-348`).
-- Answerer: After receiving `OFFER`, `handleOffer` uses **offerer's connectionId** to create connection, `SetRemoteDescription`, returns `ANSWER`: `back/peerjs/peer.go:217-254`, `back/peerjs/connection.go:350-364`.
+- Offerer: `Peer.Connect(ctx, dst, label)` → `newConnection` creates PC, `CreateDataChannel(label, Ordered=true)`, `makeOffer` sends `OFFER` (`back/peerjs/peer.go:125-131`, `back/peerjs/connection.go:225-286,330-348`).
+- Answerer: After receiving `OFFER`, `handleOffer` uses **offerer's connectionId** to create connection, `SetRemoteDescription`, returns `ANSWER`: `back/peerjs/peer.go:207-242`, `back/peerjs/connection.go:350-364`.
 - ICE: Local candidates `OnICECandidate` → manually wrap `CANDIDATE` and forward via signaling (pion does not auto-send, `back/peerjs/connection.go:252-265`); remote candidates injected via `conn.handleMessage`'s `AddICECandidate` (`back/peerjs/connection.go:203-218`).
 
 **DataChannel frame protocol** (`back/peerjs/connection.go:345,349-364`):
