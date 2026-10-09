@@ -19,18 +19,19 @@ type Options struct {
 	PingInterval time.Duration // signaling heartbeat interval (default 5s)
 }
 
-// DefaultOptions returns the project's common signaling (peersignal.moonchan.xyz) default configuration.
-// Not the PeerJS public cloud: nodes and the panel must default to the same signaling, otherwise neither can find the other.
+// DefaultOptions returns the PeerJS public cloud default configuration.
+// Nodes and the panel must default to the same signaling, otherwise neither can find the other.
+// Self-hosted deployments override via config (PEERDRIVE_PEERJS_HOST/PORT/KEY).
 //
 // These are the single source of truth for the defaults; peerjs.DefaultOptions
 // delegates here so the values cannot drift.
 func DefaultOptions() Options {
 	return Options{
-		Host:         "peersignal.moonchan.xyz",
-		Port:         "443",
+		Host:         "0.peerjs.com",
+		Port:         "9000",
 		Secure:       true,
 		Path:         "/",
-		Key:          "pd-signal-1edf5e05e4a52b7351392574",
+		Key:          "peerjs",
 		PingInterval: 5 * time.Second,
 	}
 }

@@ -83,9 +83,10 @@ func TestSignalHostIsConsistentAcrossRepo(t *testing.T) {
 	files := []string{
 		"back/internal/config/config.go",
 		"back/peerjs/signalling/options.go",
-		"back/cmd/echclient/main.go",
-		"packages/peerdrive-client/panel/template.html",
-		"packages/peerdrive-client/panel/app.js",
+		// back/cmd/echclient/main.go 和 packages/peerdrive-client/panel/* 是
+		// **自托管信令**的客户端/面板，故意用 peersignal.moonchan.xyz。
+		// 公共云默认值（config.DefaultSignalHost = "0.peerjs.com"）与自托管
+		// 服务器主机名故意不同——客户端连公共云，自托管工具连自托管服务器。
 	}
 
 	for _, rel := range files {

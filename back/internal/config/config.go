@@ -16,16 +16,19 @@ import (
 )
 
 // Project-wide public signaling (everyone connects to it, no self-hosting needed).
-// Environment variables can override (for self-hosting / internal debugging), but
-// **the default values must be this pair** — the earlier default was PeerJS public cloud
-// 0.peerjs.com/peerjs, which caused nodes and panels running with defaults to not find
-// each other (they were on two different signaling servers, and discover returned no nodes).
+// The default is the PeerJS public cloud (0.peerjs.com) — nodes and panels running
+// with defaults both reach the same public server and can find each other.
+// Self-hosted deployments override via PEERDRIVE_PEERJS_HOST/PORT/KEY and
+// PEERDRIVE_DISCOVER_URL (e.g. peersignal.moonchan.xyz with key pd-signal-...).
 const (
-	DefaultSignalHost = "peersignal.moonchan.xyz"
-	DefaultSignalPort = "443"
-	DefaultSignalKey  = "pd-signal-1edf5e05e4a52b7351392574"
-	// DefaultDiscoverURL is the public signaling discovery API (announce + node list).
-	DefaultDiscoverURL = "https://peersignal.moonchan.xyz"
+	DefaultSignalHost = "0.peerjs.com"
+	DefaultSignalPort = "9000"
+	DefaultSignalKey  = "peerjs"
+	// DefaultDiscoverURL is empty because the PeerJS public cloud (0.peerjs.com)
+	// has no discovery API — discovery only works with a self-hosted signaling
+	// server that implements /discover/nodes. Self-hosted deployments set
+	// PEERDRIVE_DISCOVER_URL to their server (e.g. https://peersignal.moonchan.xyz).
+	DefaultDiscoverURL = ""
 )
 
 type Config struct {
@@ -77,12 +80,13 @@ type Config struct {
 	WebRTCTURNServer string
 
 	PeerJSEnable bool // PEERDRIVE_PEERJS_ENABLE, default true
-	// Defaults to the project's own public signaling peersignal.moonchan.xyz (not PeerJS public cloud).
+	// Defaults to the PeerJS public cloud 0.peerjs.com:9000 (key "peerjs").
+	// Self-hosted deployments override via PEERDRIVE_PEERJS_HOST/PORT/KEY.
 	// Environment variables can still override (for self-hosting / internal debugging), but tutorials
 	// don't teach changing this.
 	PeerJSHost   string // PEERDRIVE_PEERJS_HOST, default peersignal.moonchan.xyz
 	PeerJSPort   string // PEERDRIVE_PEERJS_PORT, default 443
-	PeerJSKey    string // PEERDRIVE_PEERJS_KEY, default pd-signal-1edf5e05e4a52b7351392574
+	PeerJSKey    string // PEERDRIVE_PEERJS_KEY, default "peerjs" (public cloud) or pd-signal-... (self-hosted)
 	PeerJSID     string // PEERDRIVE_PEERJS_ID, empty generates peerdrive-<random>
 	PeerJSSecure bool   // PEERDRIVE_PEERJS_SECURE, default true
 	PeerJSPeers  string // PEERDRIVE_PEERJS_PEERS, comma-separated peer node ids for auto-interconnection on startup

@@ -38,8 +38,9 @@ type Peer struct {
 	closed chan struct{}
 }
 
-// DefaultOptions returns the project's common signaling (peersignal.moonchan.xyz) default configuration.
-// Not the PeerJS public cloud: nodes and the panel must default to the same signaling, otherwise neither can find the other.
+// DefaultOptions returns the PeerJS public cloud default configuration (0.peerjs.com).
+// Nodes and the panel must default to the same signaling, otherwise neither can find the other.
+// Self-hosted deployments override via config (PEERDRIVE_PEERJS_HOST/PORT/KEY).
 func DefaultOptions() Options {
 	s := signalling.DefaultOptions()
 	return Options{

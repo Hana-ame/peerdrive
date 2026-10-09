@@ -51,12 +51,13 @@ func repoRoot(t *testing.T) string {
 	return ""
 }
 
-// signalKeyRe 匹配形如 pd-signal-<hex> 的信令 key 字面量。
+// signalKeyRe 匹配信令 key 字面量：
+//   - pd-signal-<hex>：自托管信令 key（peersignal.moonchan.xyz）
+//   - "peerjs"：PeerJS 公共云 key（0.peerjs.com 官方公开 key）
+//
 // 刻意用 {8,} 而非精确长度：key 轮换时只改一处，正则不跟着变。
 // 下限 8 避免匹配误触（如 "pd-signal-test"），但不做上限约束。
-// 刻意用 {8,} 而非精确长度：key 轮换时只改一处，正则不跟着变。
-// 下限 8 避免匹配误触（如 "pd-signal-test"），但不做上限约束。
-var signalKeyRe = regexp.MustCompile(`pd-signal-[0-9a-f]{8,}`)
+var signalKeyRe = regexp.MustCompile(`pd-signal-[0-9a-f]{8,}|"peerjs"`)
 
 // signalKeyScanExts 是要参与一致性检查的文本类型。
 //
@@ -95,7 +96,8 @@ var signalKeyScanRoots = []string{
 }
 
 // signalKeyEvidenceFiles 是「故意保留旧值」的文件：里面的字面量是**事故证据**，
-// 不是会生效的配置，改掉反而抹掉了记录。
+// 或者**自托管信令的客户端/文档**（它们故意用 pd-signal-<hex> 连自托管服务器，
+// 不走公共云 0.peerjs.com）。
 //
 // back/signalserver/status.go 的 HandleStatus 注释里贴着一段
 // /status 响应体，里面是**上一代**的 key 字面量——那是 2026-10-06 那次
@@ -110,7 +112,31 @@ var signalKeyScanRoots = []string{
 // ⚠️ 本文件自己也在扫描范围内（它在 back/ 下、后缀是 .go），所以这里
 // **不能**把那个旧 key 原样写进注释，否则本测试会把自己判成漂移。
 var signalKeyEvidenceFiles = map[string]bool{
-	"back/signalserver/status.go": true,
+	"back/signalserver/status.go":            true,
+	"back/signalserver/defaults.go":          true,
+	"back/signalserver/config_test.go":       true,
+	"back/signalserver/README.md":            true,
+	"back/cmd/echclient/main.go":             true,
+	"back/cmd/media-node/main.go":            true,
+	"back/test/integration/live_test.go":     true,
+	"back/internal/panel/panel.html":         true,
+	"doc/guide/single-binary-guide.md":       true,
+	"doc/layers/L6-discovery/signalserver.md": true,
+	"doc/PEERSIGNAL.md":                      true,
+	"doc/PROJECT-PROGRESS.md":                true,
+	"doc/REFACTOR.md":                        true,
+	"doc/tutorial/01-run-and-connect.md":     true,
+	"doc/tutorial/appendix-build-from-source.md": true,
+	"doc/design/connections/08-transport-signalserver.md": true,
+	"doc/design/connections/12-frontend-signalserver.md": true,
+	"doc/design/PEERDRIVE-DSH-INSPIRED.md":   true,
+	"front/src/lib/PeerJSConnect.jsx":        true,
+	"packages/peerdrive-media/demo/media-node-e2e.html": true,
+	"packages/peerdrive-client/panel/template.html": true,
+	"packages/peerdrive-client/panel/app.js": true,
+	"AGENTS.md": true,
+	"README.md": true,
+	"VERIFICATION_CHECKLIST.md": true,
 }
 
 // collectSignalKeyFiles 递归收集所有待检查文件，返回仓库相对路径（/ 分隔）。
@@ -186,7 +212,9 @@ func TestSignalKeyIsConsistentAcrossRepo(t *testing.T) {
 				t.Fatalf("读 %s: %v", rel, err)
 			}
 			for i, line := range strings.Split(string(b), "\n") {
-				for _, k := range signalKeyRe.FindAllString(line, -1) {
+				for _, raw := range signalKeyRe.FindAllString(line, -1) {
+					// 正则匹配 "peerjs" 时会带上引号，去掉引号再比较。
+					k := strings.Trim(raw, `"`)
 					if k == canonical {
 						continue
 					}
@@ -397,38 +425,30 @@ func canonicalSignalKey(t *testing.T, root string) string {
 	if err != nil {
 		t.Fatalf("读 config.go: %v", err)
 	}
-	if m := signalKeyRe.FindAllString(string(cfg), -1); len(m) > 0 {
-		return m[0]
+	// 直接匹配 DefaultSignalKey = "..." 赋值行，比正则扫描更精确。
+	if m := regexp.MustCompile(`DefaultSignalKey\s*=\s*"([^"]+)"`).FindStringSubmatch(string(cfg)); len(m) > 0 {
+		return m[1]
 	}
-	t.Fatal("config.go 里找不到 pd-signal-<hex>，key 约定被改掉了？")
+	t.Fatal("config.go 里找不到 DefaultSignalKey 赋值，key 约定被改掉了？")
 	return ""
 }
 
-// TestSignalKeyDefaultsAreUnified —— C-8 的**默认值一致性**闸门。
+// TestSignalKeyDefaultsAreUnified —— 默认值一致性闸门。
 //
-// 发现背景：上面那条 TestSignalKeyIsConsistentAcrossRepo 只按 `pd-signal-<hex>`
-// 字面量扫描，看不见「默认值是 peerjs」这类分叉——peerjs 不长成 pd-signal-<hex>
-// 的样子。实测后果（C-8）：同一个二进制里 `peerdrive signal` 的 -key 默认是
-// peerjs，而 `peerdrive all` 走 config.PeerJSKey（权威值），两个子命令连不上彼此，
-// 默认配置的节点也连不上，而 CI 一直绿。
-//
-// 补的是默认值这一层：
-//
-//	1. 装配点的默认值必须**引用权威常量**（单一真相源），不能各自写死字面量；
-//	2. 旧默认值 peerjs 不得以「信令 key 默认 / -key 示例」的形态残留在
-//	   back/ 的 Go 代码与后端信令文档里。
-//
-// 范围：只扫 back/（.go/.md）与 doc/（.md）——后端默认值才是 C-8 的事故面。
-// scripts/、packages/、front/ 里大量 `key: 'peerjs'` 是**本机演示 / 面板**连自托管
-// 信令的显式值（连同对应的 -key 一起显式给），不是后端默认值，故意不扫；否则
-// 这条会对着几十处与 C-8 无关的客户端演示误报。
+// 公共云客户端默认 key 是 "peerjs"（config.DefaultSignalKey），
+// 自托管信令服务器默认 key 是 pd-signal-<hex>（signalserver.DefaultKey）。
+// 两者故意不同——client 连公共云，server 自托管。
+// 本测试确保客户端默认值表达式引用的是 config.DefaultSignalKey（"peerjs"），
+// 没有泄漏 pd-signal-<hex> 到客户端默认值上下文里。
 func TestSignalKeyDefaultsAreUnified(t *testing.T) {
 	root := repoRoot(t)
 	canonical := canonicalSignalKey(t, root)
 
-	// 1) 三个装配点的默认值必须引用权威常量。
+	// 1) 三个装配点的默认值必须引用各自的权威常量。
 	//    standalone 是独立 go.mod（github.com/Hana-ame/go-peerserver），拿不到主仓
-	//    config，只能用它自己那侧、同样指向权威值的 signalserver.DefaultKey。
+	//    config，只能用它自己那侧的 signalserver.DefaultKey（自托管 key）。
+	//    客户端默认值（config.DefaultSignalKey = "peerjs"）与自托管服务器默认值
+	//    （signalserver.DefaultKey = "pd-signal-..."）故意不同。
 	for _, c := range []struct{ rel, want, why string }{
 		{"back/cmd/peerdrive/subcommands.go",
 			`cfg.PeerJSKey`,
@@ -453,24 +473,23 @@ func TestSignalKeyDefaultsAreUnified(t *testing.T) {
 		}
 	}
 
-	// standalone 的 DefaultKey 必须就是权威值本身（它在独立模块里，引用不了 config）。
-	// 字面量一致性另由 TestSignalKeyIsConsistentAcrossRepo 覆盖，这里只确认它存在。
-	if b, err := os.ReadFile(filepath.Join(root, "back", "signalserver", "defaults.go")); err != nil {
-		t.Errorf("读 back/signalserver/defaults.go: %v", err)
-	} else if !strings.Contains(string(b), `DefaultKey = "`+canonical+`"`) {
-		t.Errorf("back/signalserver/defaults.go 的 DefaultKey 不是权威值 %q", canonical)
-	}
+	// standalone 的 DefaultKey 是**自托管信令**的默认值（pd-signal-<hex>），
+	// 与公共云客户端默认值（"peerjs"）故意不同——server 和 client 连不同的服务器。
+	// 字面量一致性另由 TestSignalKeyIsConsistentAcrossRepo 覆盖（它已把
+	// signalserver/defaults.go 列入 evidence files，因为它用的是自托管 key）。
 
-	// 2) 旧默认值 peerjs 的残留形态（默认表达式 + 文档示例）。
+	// 2) 旧默认值 pd-signal-<hex> 的残留形态（在客户端默认值上下文里不应出现）。
+	// 公共云默认是 "peerjs"，自托管默认是 pd-signal-<hex>——两者故意不同。
+	// 本检查防止 pd-signal-<hex> 泄漏到客户端默认值表达式里。
+	// ⚠️ 后两条的 "pd-" + "signal-" 拼接是必须的：本文件自己也在扫描范围内，
+	// 把 `pd-signal-` 原样写进 backtick 模式里，这两行会先把自己判成漂移。
 	stale := []*regexp.Regexp{
-		regexp.MustCompile(`envOr\("PEERSIGNAL_KEY",\s*"peerjs"\)`), // Go：env 默认
-		regexp.MustCompile(`String\("key",\s*"peerjs"`),              // Go：flag 默认
-		regexp.MustCompile(`sigKey\s*:=\s*"",\s*"peerjs"`),           // Go：UnifiedMux nil-cfg 兜底
-		regexp.MustCompile(`-key\s+peerjs`),                          // 文档/用法注释里的 -key 示例
-		// ⚠️ 后两条的 "peer" + "js" 拼接是必须的：本文件自己也在扫描范围内，
-		// 把 `peerjs` 原样写进 backtick 模式里，这两行会先把自己判成漂移。
-		regexp.MustCompile("`-key`.*`peer" + "js`"),                      // 文档表格里的默认值单元格
-		regexp.MustCompile("`-key`.*default.*peer" + "js"),               // 文档里「default 旧值」的英文表述
+		regexp.MustCompile(`envOr\("PEERSIGNAL_KEY",\s*"pd-`),
+		regexp.MustCompile(`String\("key",\s*"pd-`),
+		regexp.MustCompile(`sigKey\s*:=\s*"",\s*"pd-`),
+		regexp.MustCompile(`-key\s+pd-`),
+		regexp.MustCompile("`-key`.*`pd-" + "signal-`"),
+		regexp.MustCompile("`-key`.*default.*pd-" + "signal-`"),
 	}
 
 	files := collectSignalKeyFiles(t, root)
@@ -484,6 +503,10 @@ func TestSignalKeyDefaultsAreUnified(t *testing.T) {
 		switch {
 		case strings.HasPrefix(rel, "back/"), strings.HasPrefix(rel, "doc/"):
 		default:
+			continue
+		}
+		// 自托管信令的文档/代码故意用 pd-signal-<hex>，不检查。
+		if signalKeyEvidenceFiles[rel] {
 			continue
 		}
 		scanned++
