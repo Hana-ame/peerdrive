@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams } from 'react-router-dom';
 import * as ws from '../../../platform/transport-ws';
 import { fmtBytes } from '../../../platform/shared/format';
+import { STORAGE_KEY_API_BASE } from '../../../platform/shared/storageKeys';
 
 function fmtTime(ts) {
   if (!ts) return '—';
@@ -148,7 +149,7 @@ export default function Drive() {
       const r = await ws.admin('POST', '/shares', { hash: f.hash, type: 'file', filename: f.filename });
       const token = r?.token;
       if (token) {
-        const base = localStorage.getItem('peerdrive_api_base') || 'https://wsl-3000.moonchan.xyz';
+        const base = localStorage.getItem(STORAGE_KEY_API_BASE) || 'https://wsl-3000.moonchan.xyz';
         setShareLink(`${base}/s/${token}`);
       } else {
         setShareLink('');

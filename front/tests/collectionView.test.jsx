@@ -25,6 +25,12 @@ vi.mock('../src/ws.js', () => ({
   admin: adminMock,
   downloadToFile: downloadToFileMock,
 }))
+vi.mock('../src/platform/transport-ws', () => ({
+  download: downloadMock,
+  downloadStream: downloadStreamMock,
+  admin: adminMock,
+  downloadToFile: downloadToFileMock,
+}))
 
 import CollectionBrowser from '../src/features/collection/components/CollectionBrowser'
 import CollectionView from '../src/features/collection/pages/CollectionView'

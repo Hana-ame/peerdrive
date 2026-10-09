@@ -18,7 +18,7 @@
 // found" (a JSON {"error": ...}) instead of guessing from the status code.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import * as ws from '../../../ws';
+import * as ws from '../../../platform/transport-ws';
 
 // SAMPLE_ENTRY keeps the layout inspectable when the node has no iwara module.
 // It is marked sample:true so the cards render a badge and never show a fake
