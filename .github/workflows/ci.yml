@@ -182,5 +182,8 @@ jobs:
           cache: npm
           cache-dependency-path: front/package-lock.json
       - run: npm ci
+      - name: 校验 pd-client 内嵌副本已删除（防回归）
+        run: test ! -d src/lib/pd-client
       - run: npm test
       - run: npm run build
+
