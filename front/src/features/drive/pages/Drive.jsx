@@ -71,6 +71,11 @@ export default function Drive() {
   const [editingTagFile, setEditingTagFile] = useState(null); // file object
   const [tagInputText, setTagInputText] = useState('');
   const [previewFile, setPreviewFile] = useState(null); // file object to preview
+  const [castFile, setCastFile] = useState(null);
+  const [screens, setScreens] = useState([]);
+  const [targetScreenId, setTargetScreenId] = useState('');
+  const [targetChannel, setTargetChannel] = useState('default');
+  const [castStatus, setCastStatus] = useState('');
 
   const load = useCallback(async () => {
     setErr('');
@@ -190,6 +195,73 @@ export default function Drive() {
       setEditingTagFile(null);
     } catch (ex) {
       setErr(ex?.message || String(ex));
+    }
+  };
+
+  // Remote Display Cast Management (Issue #243)
+  const openCastModal = async (f) => {
+    setCastFile(f);
+    setCastStatus('');
+    try {
+      const res = await ws.admin('GET', '/display/screens');
+      const list = Array.isArray(res) ? res : [];
+      setScreens(list);
+      if (list.length > 0) {
+        setTargetScreenId(list[0].id);
+        setTargetChannel(list[0].channel || 'default');
+      } else {
+        setTargetScreenId('');
+        setTargetChannel('default');
+      }
+    } catch {
+      setScreens([]);
+    }
+  };
+
+  const handleCast = async () => {
+    if (!castFile) return;
+    setBusy(true);
+    setCastStatus('Casting to screen...');
+    try {
+      const ext = (castFile.filename || '').split('.').pop().toLowerCase();
+      let mediaType = 'image';
+      if (['mp4', 'mkv', 'webm', 'mov', 'avi'].includes(ext)) mediaType = 'video';
+      else if (['mp3', 'wav', 'flac', 'ogg', 'aac'].includes(ext)) mediaType = 'audio';
+
+      await ws.admin('POST', '/display/cast', {
+        targetSessionId: targetScreenId,
+        channel: targetChannel,
+        mediaType,
+        hash: castFile.hash,
+        title: castFile.filename,
+        autoplay: true,
+      });
+      setCastStatus('Cast successful!');
+    } catch (ex) {
+      setCastStatus('Cast failed: ' + (ex?.message || String(ex)));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCastControl = async (action) => {
+    try {
+      if (action === 'clear') {
+        await ws.admin('POST', '/display/clear', {
+          targetSessionId: targetScreenId,
+          channel: targetChannel,
+        });
+        setCastStatus('Screen cleared');
+      } else {
+        await ws.admin('POST', '/display/control', {
+          targetSessionId: targetScreenId,
+          channel: targetChannel,
+          controlAction: action,
+        });
+        setCastStatus(`Control ${action} sent`);
+      }
+    } catch (ex) {
+      setCastStatus('Control failed: ' + (ex?.message || String(ex)));
     }
   };
 
@@ -432,6 +504,7 @@ export default function Drive() {
                       <button onClick={() => onDownload(f)} className="text-[11px] text-gray-400 hover:text-gray-200">Download</button>
                     </div>
                     <div className="flex items-center gap-1">
+                      <button onClick={() => openCastModal(f)} className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-brand-300" title="Cast to screen">Cast</button>
                       <button onClick={() => onCopyDeepLink(f)} className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300">
                         {copiedHash === f.hash ? 'Copied' : 'Link'}
                       </button>
@@ -511,7 +584,8 @@ export default function Drive() {
                       <td className={td + ' text-gray-500 whitespace-nowrap'}>{f.mime_type || '—'}</td>
                       <td className={td + ' text-gray-500 whitespace-nowrap'}>{fmtTime(f.created_at)}</td>
                       <td className={td + ' text-right whitespace-nowrap'}>
-                        <button onClick={() => setPreviewFile(f)} className="text-[11px] px-2 py-1 rounded bg-brand-500/15 text-brand-300 hover:bg-brand-500/25 mr-1 font-medium">Preview</button>
+                        <button onClick={() => openCastModal(f)} className="text-[11px] px-2 py-1 rounded bg-brand-500/15 text-brand-300 hover:bg-brand-500/25 mr-1 font-medium" title="Cast to screen">Cast</button>
+                        <button onClick={() => setPreviewFile(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Preview</button>
                         <button onClick={() => onDownload(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Download</button>
                         <button onClick={() => onCopyDeepLink(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">
                           {copiedHash === f.hash ? 'Copied' : 'Link'}
@@ -566,6 +640,106 @@ export default function Drive() {
             onClose={() => setPreviewFile(null)}
             onDownload={(f) => onDownload(f)}
           />
+        )}
+
+        {/* Remote Screen Cast Modal (Issue #243) */}
+        {castFile && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setCastFile(null)}>
+            <div className="card-surface max-w-md w-full p-5 rounded-xl border border-white/10" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-base font-semibold text-gray-200">投屏展示 (Cast to Screen)</h3>
+                <button onClick={() => setCastFile(null)} className="text-gray-400 hover:text-white text-sm">✕</button>
+              </div>
+
+              <div className="bg-white/[0.03] p-3 rounded-lg border border-white/5 mb-4">
+                <div className="text-xs text-gray-300 font-medium truncate">{castFile.filename}</div>
+                <div className="text-[11px] text-gray-500 font-mono mt-0.5 truncate">{castFile.hash}</div>
+              </div>
+
+              <div className="space-y-3 mb-4">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">目标屏幕 / 频道</label>
+                  {screens.length > 0 ? (
+                    <select
+                      value={targetScreenId}
+                      onChange={(e) => {
+                        const sId = e.target.value;
+                        setTargetScreenId(sId);
+                        const found = screens.find(s => s.id === sId);
+                        if (found) setTargetChannel(found.channel || 'default');
+                      }}
+                      className="input-base w-full text-xs"
+                    >
+                      {screens.map(s => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.id}) - 频道: {s.channel}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="text-xs text-amber-400/90 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
+                      当前无在线受控屏幕。请在 TV/另一台设备打开 <span className="font-mono underline">/display</span> 页面。
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">广播频道 (可选)</label>
+                  <input
+                    type="text"
+                    value={targetChannel}
+                    onChange={(e) => setTargetChannel(e.target.value)}
+                    placeholder="default"
+                    className="input-base w-full text-xs"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">留空或选择特定屏幕时直达该屏幕；填写频道时同步广播至频道内所有大屏。</p>
+                </div>
+
+                {castStatus && (
+                  <div className={`text-xs p-2.5 rounded-lg border ${
+                    castStatus.includes('failed')
+                      ? 'bg-red-500/10 border-red-500/20 text-red-400'
+                      : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                  }`}>
+                    {castStatus}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => handleCastControl('play')}
+                    className="text-xs px-2.5 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300"
+                    title="播放"
+                  >
+                    ▶
+                  </button>
+                  <button
+                    onClick={() => handleCastControl('pause')}
+                    className="text-xs px-2.5 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300"
+                    title="暂停"
+                  >
+                    ⏸
+                  </button>
+                  <button
+                    onClick={() => handleCastControl('clear')}
+                    className="text-xs px-2.5 py-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400"
+                    title="清空屏幕"
+                  >
+                    清空
+                  </button>
+                </div>
+
+                <div className="flex gap-2">
+                  <button onClick={() => setCastFile(null)} className="btn-ghost text-xs">关闭</button>
+                  <button onClick={handleCast} disabled={busy} className="btn-brand text-xs">
+                    {busy ? '投屏中...' : '投屏到此屏幕'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

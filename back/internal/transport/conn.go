@@ -539,6 +539,8 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 			// Client-side handshake responses (OpenForward waiting) — routed to same slot
 			// as file fetch responses
 			s.routeForwardResponse(st, r)
+		case "display":
+			go s.serveDisplay(c, st, msg.Data)
 		default:
 			s.routeResponse(st, r, msg.Data)
 		}
@@ -633,6 +635,9 @@ func (s *PeerJSService) cleanupConn(c Session, st *connState) {
 	s.pendingMu.Unlock()
 	if deleted && c.ID() != "local" {
 		s.notifyDisconnect(c.ID())
+	}
+	if s.displayMgr != nil {
+		s.displayMgr.Unregister(c)
 	}
 	if st == nil {
 		return

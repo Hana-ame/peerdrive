@@ -130,6 +130,9 @@ type PeerJSService struct {
 	remoteAuthMu     sync.RWMutex
 	remoteAuthorizer func(peerID, token, method, path string) bool
 
+	// Display manager (Issue #243): tracks controlled screens and channel sync.
+	displayMgr *DisplayManager
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -155,6 +158,7 @@ func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
 		forwardRules: make(map[string][]int),
 		fwNonces:     make(map[string]*fwdNonce),
 		localCaps:    append([]string(nil), DefaultNodeCapabilities...),
+		displayMgr:   NewDisplayManager(),
 		closed:       make(chan struct{}),
 		ctx:          ctx,
 		cancel:       cancel,

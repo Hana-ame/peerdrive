@@ -37,6 +37,7 @@ func (r *Router) injectControllerDeps() {
 	controller.InitNodeShareController(r.deps.NodeShare)
 	controller.InitPeerPuller(r.deps.PeerPuller)
 	controller.InitAria2Bridge(r.deps.Aria2Bridge)
+	controller.InitDisplayController(r.deps.PeerJSService)
 	// File index search: /peerjs/files/search (local) + /peerjs/nodes/:peer/search (remote).
 	// PeerJSService itself implements the three methods of the controller's narrow
 	// fileIndexSearcher interface (Search / RequestSearch / ConnectedPeerIDs), so the
@@ -200,7 +201,14 @@ func (rt *Router) registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "websocket upgrade failed"})
 			return
 		}
-		sess := transport.NewWSSession("local", conn)
+		sessID := c.Query("id")
+		if sessID == "" {
+			sessID = c.Query("session")
+		}
+		if sessID == "" {
+			sessID = "local"
+		}
+		sess := transport.NewWSSession(sessID, conn)
 		peerjsService.BindLocal(sess)
 	})
 }

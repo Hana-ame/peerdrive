@@ -270,6 +270,24 @@ function nextReqId() {
   return 'w' + Date.now().toString(36) + '-' + reqSeq.toString(36)
 }
 
+const messageListeners = new Set()
+
+// onMessage registers a callback for incoming text frames
+export function onMessage(fn) {
+  messageListeners.add(fn)
+  return () => messageListeners.delete(fn)
+}
+
+// sendFrame sends a raw frame over the WebSocket connection
+export function sendFrame(frame) {
+  ensureConnected()
+  if (sock && sock.readyState === WebSocket.OPEN) {
+    sock.send(typeof frame === 'string' ? frame : JSON.stringify(frame))
+    return true
+  }
+  return false
+}
+
 // handleText text frame dispatch: admin responses are routed by reqId; req pull responses (meta/data headers/
 // done/err) are routed to the corresponding download request.
 function handleText(text) {
@@ -280,6 +298,14 @@ function handleText(text) {
     return
   }
   if (!msg || !msg.type) return
+
+  messageListeners.forEach((fn) => {
+    try {
+      fn(msg)
+    } catch (e) {
+      console.error('onMessage listener error:', e)
+    }
+  })
 
   switch (msg.type) {
     case 'admin-resp': {
@@ -635,6 +661,7 @@ export const __test = {
       if (p.timer) clearTimeout(p.timer)
     }
     pending.clear()
+    messageListeners.clear()
     binaryExpect = null
   },
   _binaryExpect: () => binaryExpect,

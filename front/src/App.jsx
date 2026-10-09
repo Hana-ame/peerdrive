@@ -16,6 +16,7 @@ const BT = lazy(() => import('./features/bt/pages/BT'));
 const IPFS = lazy(() => import('./features/ipfs/pages/IPFS'));
 const NodeControl = lazy(() => import('./features/node/pages/NodeControl'));
 const Iwara = lazy(() => import('./features/iwara/pages/Iwara'));
+const Display = lazy(() => import('./features/display/pages/Display'));
 
 // In-construction placeholder page (Modules 2, 3, 4, 5, 6 to be replaced one by one)
 function Placeholder({ title }) {
@@ -43,10 +44,11 @@ function RouteLoading() {
 import * as ws from './platform/transport-ws';
 
 // Navigation groups (Issue #77):
-// - Always available (standalone/consumer pages): Connect (/), Iwara (/iwara)
+// - Always available (standalone/consumer pages): Connect (/), Display (/display), Iwara (/iwara)
 // - Available when connected to local node: Drive, NodeControl, Collections, Transfers, BT, IPFS, Settings
 const ALWAYS_NAV = [
   { to: '/', label: 'Connect', icon: '🌐' },
+  { to: '/display', label: 'Display', icon: '📺' },
   { to: '/iwara', label: 'Iwara', icon: '🎬' },
 ];
 
@@ -144,6 +146,8 @@ export default function App() {
                 <Route path="/ipfs" element={<IPFS />} />
                 <Route path="/iwara" element={<Iwara />} />
                 <Route path="/iwara/:id" element={<Iwara />} />
+                <Route path="/display" element={<Display />} />
+                <Route path="/display/:channel" element={<Display />} />
                 <Route path="*" element={<Placeholder title="Page Not Found" />} />
               </Routes>
             </Suspense>
