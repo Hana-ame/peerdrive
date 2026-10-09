@@ -68,13 +68,11 @@ func TestWSPeer_OriginPolicyEndToEnd(t *testing.T) {
 	t.Run("allowlisted origin is accepted and binds a local session", func(t *testing.T) {
 		u, _, err := dial(srvA, "http://panel.local")
 		require.NoError(t, err, "an allowlisted Origin must be upgraded")
-		u.Close()
-
-		// bindConn registers the session under the literal "local".
-		conns := svcA.Connections()
-		if _, ok := conns["local"]; !ok {
-			t.Fatalf("no local session was registered; connections = %v", conns)
+		if !awaitLocalSession(t, svcA) {
+			u.Close()
+			t.Fatalf("no local session was registered; connections = %v", svcA.Connections())
 		}
+		u.Close()
 	})
 
 	// 2. Origin outside the allowlist → the handshake is refused. gorilla
@@ -98,10 +96,11 @@ func TestWSPeer_OriginPolicyEndToEnd(t *testing.T) {
 	t.Run("origin-less request from loopback is accepted", func(t *testing.T) {
 		u, _, err := dial(srvC, "")
 		require.NoError(t, err, "an Origin-less 127.0.0.1 handshake must be accepted")
-		u.Close()
-		if _, ok := svcC.Connections()["local"]; !ok {
-			t.Fatalf("no local session was registered")
+		if !awaitLocalSession(t, svcC) {
+			u.Close()
+			t.Fatalf("no local session was registered; connections = %v", svcC.Connections())
 		}
+		u.Close()
 	})
 
 	// 4. Allowlist configured, but the request carries no Origin and comes
@@ -172,6 +171,30 @@ func TestWSPeer_OriginPolicyEndToEnd(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "Bad Request")
 		assert.Contains(t, w.Body.String(), `{"error":"websocket upgrade failed"}`)
 	})
+}
+
+// awaitLocalSession 轮询等 /ws/peer 的 handler 完成 NewWSSession + BindLocal，
+// 返回是否等到「local」这条会话。
+//
+// 发现背景：gorilla 的 Upgrade 一写完 101，客户端的 websocket.Dial 就返回了，
+// 而 NewWSSession + BindLocal 还在 handler 里排队。原先写成
+// 「dial → u.Close() → 立刻读 Connections()」，两头都是竞态：darwin amd64 CI
+// 上红过一次（"no local session was registered; connections = map[]"）；而且
+// 反过来也不安全——先 Close 再查，服务端读循环可能已经退出、把会话注销了，
+// 于是「明明注册过」也会被读成空。
+//
+// 所以顺序必须是「先等到会话挂上（此时连接还开着，注册项不会消失）再 Close」。
+// 真没注册时最多等 3 秒再报错。
+func awaitLocalSession(t *testing.T, svc *transport.PeerJSService) bool {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := svc.Connections()["local"]; ok {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
 }
 
 // setHandshakeHeaders makes a plain request look like a WebSocket handshake
