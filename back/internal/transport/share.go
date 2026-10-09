@@ -57,13 +57,17 @@ type ShareSnapshot struct {
 }
 
 // shareResp is the share frame response. It embeds ShareSnapshot so the JSON is flat
-// ({type,collections,files,dirs,total,reqId}), requiring only one layer of parsing on the frontend.
+// ({type,collections,files,dirs,total,reqId,token}), requiring only one layer of parsing on the frontend.
 type shareResp struct {
 	Type string `json:"type"`
 	ShareSnapshot
 	Total int    `json:"total"`
 	ReqID string `json:"reqId,omitempty"`
+	Token string `json:"token,omitempty"` // Phase 7: optional responder identity token
 }
+
+// ShareProviderWithToken is an extended sharing-scope reader that accepts both the peer ID and an optional token (Phase 7).
+type ShareProviderWithToken func(peerID, token string) ShareSnapshot
 
 // SetShareProvider injects the node's sharing-scope reader (main wires
 // service.NodeShare.SnapshotFor). The argument is the requesting peer's ID — friends can see private entries.
@@ -71,6 +75,20 @@ type shareResp struct {
 func (s *PeerJSService) SetShareProvider(p func(peerID string) ShareSnapshot) {
 	s.shareMu.Lock()
 	s.shareProvider = p
+	s.shareMu.Unlock()
+}
+
+// SetShareProviderWithToken injects an extended sharing-scope reader accepting requester token (Phase 7 identity plugin point).
+func (s *PeerJSService) SetShareProviderWithToken(p ShareProviderWithToken) {
+	s.shareMu.Lock()
+	s.shareProviderWithToken = p
+	s.shareMu.Unlock()
+}
+
+// SetShareTokenGenerator injects a generator for responder identity token included in share-resp frames (Phase 7 identity plugin point).
+func (s *PeerJSService) SetShareTokenGenerator(gen func(peerID string) string) {
+	s.shareMu.Lock()
+	s.shareTokenGenerator = gen
 	s.shareMu.Unlock()
 }
 
@@ -178,8 +196,18 @@ func (s *PeerJSService) shareLoadInfo() map[string]any {
 // this filtering is done inside service.NodeShare.SnapshotFor.
 func (s *PeerJSService) serveShare(c Session, r dcResp) {
 	snap := ShareSnapshot{}
-	if p := s.currentShareProvider(); p != nil {
-		snap = p(c.ID())
+	s.shareMu.RLock()
+	tokenProv := s.shareProviderWithToken
+	shareProv := s.shareProvider
+	tokenGen := s.shareTokenGenerator
+	s.shareMu.RUnlock()
+
+	// Phase 7: r.Token contains optional requester identity/token.
+	// Ignored by default in Phase 6; in Phase 7, verified or passed to provider.
+	if tokenProv != nil {
+		snap = tokenProv(c.ID(), r.Token)
+	} else if shareProv != nil {
+		snap = shareProv(c.ID())
 	}
 	// Ensure JSON contains [] instead of null: the frontend list renderer doesn't need null checks
 	if snap.Collections == nil {
@@ -189,7 +217,17 @@ func (s *PeerJSService) serveShare(c Session, r dcResp) {
 		snap.Files = []ShareFileInfo{}
 	}
 	total := len(snap.Collections) + len(snap.Files)
-	_ = c.SendJSON(shareResp{Type: "share-resp", ShareSnapshot: snap, Total: total, ReqID: r.ReqID})
+	var respToken string
+	if tokenGen != nil {
+		respToken = tokenGen(c.ID())
+	}
+	_ = c.SendJSON(shareResp{
+		Type:          "share-resp",
+		ShareSnapshot: snap,
+		Total:         total,
+		ReqID:         r.ReqID,
+		Token:         respToken,
+	})
 }
 
 // ServeShareForTest exports serveShare execution for integration/matrix tests.

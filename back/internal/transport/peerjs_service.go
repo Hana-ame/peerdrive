@@ -83,13 +83,23 @@ type PeerJSService struct {
 	//
 	// 入参是请求者的节点 ID：share 帧走的是已建立的连接，对端 id 是已知的，
 	// 所以"好友能看到 private 清单"可以实现（否则给了权限却没给目录）。
-	shareMu       sync.RWMutex
-	shareProvider func(peerID string) ShareSnapshot
+	shareMu                sync.RWMutex
+	shareProvider          func(peerID string) ShareSnapshot
+	shareProviderWithToken ShareProviderWithToken
+	shareTokenGenerator    func(peerID string) string
 
 	// shareGate 下载门禁（share.go）：按 hash 判断请求者能否取回。
 	// 与 shareProvider 分开注入：清单（share 帧）与下载（req 帧）是两条路径，
 	// 门禁只在 req 上生效——unlisted 的内容不出现在清单里，但 req 要放行。
 	shareGate ShareGate
+
+	// authorizer 身份与门禁验证器（authorizer.go，Phase 7 预埋插件点）。
+	// nil 时由 defaultAuthorizer 代理 shareGate + isSelfSession。
+	authorizer        Authorizer
+	defaultAuthorizer *DefaultAuthorizer
+
+	// defaultCredentialFunc 节点级出站请求身份凭据提供者（Phase 7 预埋）。
+	defaultCredentialFunc func(peerID string) string
 
 	// forward 转发授权规则（key 原文 → 端口白名单）与待验证质询（forward.go）。
 	// 规则即凭证：运行时动态增删（端点）与配置装载（SetForwardRules）共用同一锁。
@@ -119,7 +129,7 @@ func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
 		id = "peerdrive-" + randHex8()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &PeerJSService{
+	svc := &PeerJSService{
 		cfg:          cfg,
 		storageDir:   storageDir,
 		id:           id,
@@ -135,6 +145,8 @@ func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
 		ctx:          ctx,
 		cancel:       cancel,
 	}
+	svc.defaultAuthorizer = NewDefaultAuthorizer(svc.currentShareGate)
+	return svc
 }
 
 // ID 返回本节点在信令网络中的 peer id。

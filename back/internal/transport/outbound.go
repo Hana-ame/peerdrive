@@ -71,6 +71,9 @@ func (s *PeerJSService) requestVerbPayload(peerID string, req dcReq, timeout tim
 		st.mu.Unlock()
 	}
 	req.ReqID = reqID
+	if req.Token == "" {
+		req.Token = s.credentialFor(conn, st)
+	}
 	if err := conn.SendJSON(req); err != nil {
 		cleanup()
 		return nil, err
@@ -299,7 +302,16 @@ func (s *PeerJSService) openStream(c Session, hash string, offset, size int64, t
 		})
 	}
 
-	if err := c.SendJSON(dcReq{Type: "req", Hash: hash, Offset: offset, Size: size, ReqID: reqID, Trace: trace}); err != nil {
+	token := s.credentialFor(c, st)
+	if err := c.SendJSON(dcReq{
+		Type:   "req",
+		Hash:   hash,
+		Offset: offset,
+		Size:   size,
+		ReqID:  reqID,
+		Trace:  trace,
+		Token:  token,
+	}); err != nil {
 		cleanup()
 		return nil, err
 	}
@@ -545,3 +557,45 @@ func (s *PeerJSService) routeResponse(st *connState, r dcResp, raw []byte) {
 		failFetch(f, "peerjs: %s", r.Msg)
 	}
 }
+
+// SetConnectionCredentialFunc registers a connection-level credential callback for a specific peer (Phase 7 identity plugin point).
+func (s *PeerJSService) SetConnectionCredentialFunc(peerID string, fn CredentialFunc) {
+	s.mu.Lock()
+	conn := s.conns[peerID]
+	s.mu.Unlock()
+	if conn == nil {
+		return
+	}
+	if st := s.stateFor(conn); st != nil {
+		st.mu.Lock()
+		st.credentialFunc = fn
+		st.mu.Unlock()
+	}
+}
+
+// SetDefaultCredentialFunc registers a default credential callback for outgoing requests by peer ID (Phase 7 identity plugin point).
+func (s *PeerJSService) SetDefaultCredentialFunc(fn func(peerID string) string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.defaultCredentialFunc = fn
+}
+
+// credentialFor resolves the credential/token for an outgoing request on conn (Phase 7).
+func (s *PeerJSService) credentialFor(conn Session, st *connState) string {
+	if st != nil {
+		st.mu.Lock()
+		credFn := st.credentialFunc
+		st.mu.Unlock()
+		if credFn != nil {
+			return credFn()
+		}
+	}
+	s.mu.Lock()
+	defaultFn := s.defaultCredentialFunc
+	s.mu.Unlock()
+	if defaultFn != nil && conn != nil {
+		return defaultFn(conn.ID())
+	}
+	return ""
+}
+
