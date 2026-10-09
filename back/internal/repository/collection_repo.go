@@ -25,7 +25,7 @@ import (
 
 // CreateCollection creates a new collection for the given user, returns the collection ID.
 func CreateCollection(username, collectionName string) (int, error) {
-	res, err := DB.Exec(`INSERT INTO collections (username, collection_name, tags) VALUES (?, ?, '')`,
+	res, err := db.Exec(`INSERT INTO collections (username, collection_name, tags) VALUES (?, ?, '')`,
 		username, collectionName)
 	if err != nil {
 		return 0, err
@@ -39,7 +39,7 @@ func CreateCollectionWithVisibility(username, collectionName, visibility string)
 	if visibility == "" {
 		visibility = "public"
 	}
-	res, err := DB.Exec(`INSERT INTO collections (username, collection_name, visibility, tags, follow_redirects) VALUES (?, ?, ?, '', 1)`,
+	res, err := db.Exec(`INSERT INTO collections (username, collection_name, visibility, tags, follow_redirects) VALUES (?, ?, ?, '', 1)`,
 		username, collectionName, visibility)
 	if err != nil {
 		return 0, err
@@ -54,7 +54,7 @@ func CreateCollectionWithTags(username, collectionName, visibility string, tags 
 		visibility = "public"
 	}
 	tagsJSON := model.MarshalTags(tags)
-	res, err := DB.Exec(`INSERT INTO collections (username, collection_name, visibility, tags, follow_redirects) VALUES (?, ?, ?, ?, 1)`,
+	res, err := db.Exec(`INSERT INTO collections (username, collection_name, visibility, tags, follow_redirects) VALUES (?, ?, ?, ?, 1)`,
 		username, collectionName, visibility, tagsJSON)
 	if err != nil {
 		return 0, err
@@ -73,7 +73,7 @@ func CreateCollectionWithFull(username, collectionName, visibility string, follo
 		fr = 1
 	}
 	tagsJSON := model.MarshalTags(tags)
-	res, err := DB.Exec(`INSERT INTO collections (username, collection_name, visibility, tags, follow_redirects) VALUES (?, ?, ?, ?, ?)`,
+	res, err := db.Exec(`INSERT INTO collections (username, collection_name, visibility, tags, follow_redirects) VALUES (?, ?, ?, ?, ?)`,
 		username, collectionName, visibility, tagsJSON, fr)
 	if err != nil {
 		return 0, err
@@ -85,14 +85,14 @@ func CreateCollectionWithFull(username, collectionName, visibility string, follo
 // UpdateCollectionTags replaces the collection's tag list.
 func UpdateCollectionTags(username, collectionName string, tags []string) error {
 	tagsJSON := model.MarshalTags(tags)
-	_, err := DB.Exec(`UPDATE collections SET tags = ? WHERE username = ? AND collection_name = ?`,
+	_, err := db.Exec(`UPDATE collections SET tags = ? WHERE username = ? AND collection_name = ?`,
 		tagsJSON, username, collectionName)
 	return err
 }
 
 // SetCollectionVisibility updates the collection's visibility attribute.
 func SetCollectionVisibility(username, collectionName, visibility string) error {
-	_, err := DB.Exec(`UPDATE collections SET visibility = ? WHERE username = ? AND collection_name = ?`,
+	_, err := db.Exec(`UPDATE collections SET visibility = ? WHERE username = ? AND collection_name = ?`,
 		visibility, username, collectionName)
 	return err
 }
@@ -100,7 +100,7 @@ func SetCollectionVisibility(username, collectionName, visibility string) error 
 // GetOrCreateCollection queries a collection by username and name; auto-creates if not found.
 func GetOrCreateCollection(username, collectionName string) (int, error) {
 	var id int
-	err := DB.QueryRow(`SELECT id FROM collections WHERE username = ? AND collection_name = ?`,
+	err := db.QueryRow(`SELECT id FROM collections WHERE username = ? AND collection_name = ?`,
 		username, collectionName).Scan(&id)
 	if err == sql.ErrNoRows {
 		return CreateCollection(username, collectionName)
@@ -110,14 +110,14 @@ func GetOrCreateCollection(username, collectionName string) (int, error) {
 
 // UpdateCurrentHash updates the collection's current_hash pointer (pointing to the latest anonymous collection snapshot).
 func UpdateCurrentHash(collectionID int, hash string) error {
-	_, err := DB.Exec(`UPDATE collections SET current_hash = ? WHERE id = ?`, hash, collectionID)
+	_, err := db.Exec(`UPDATE collections SET current_hash = ? WHERE id = ?`, hash, collectionID)
 	return err
 }
 
 // ListCollections queries all collections for a given user, ordered by creation time descending.
 // M11: No LIMIT → full-table materialization; LIMIT 1000.
 func ListCollections(username string) ([]model.Collection, error) {
-	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? ORDER BY created_at DESC LIMIT 1000`, username)
+	rows, err := db.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? ORDER BY created_at DESC LIMIT 1000`, username)
 	if err != nil {
 		return nil, err
 	}
@@ -140,9 +140,9 @@ func ListPublicCollections(q string) ([]model.Collection, error) {
 	var rows *sql.Rows
 	var err error
 	if q != "" {
-		rows, err = DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE visibility = 'public' AND (username LIKE ? OR collection_name LIKE ?) ORDER BY created_at DESC LIMIT 1000`, "%"+q+"%", "%"+q+"%")
+		rows, err = db.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE visibility = 'public' AND (username LIKE ? OR collection_name LIKE ?) ORDER BY created_at DESC LIMIT 1000`, "%"+q+"%", "%"+q+"%")
 	} else {
-		rows, err = DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE visibility = 'public' ORDER BY created_at DESC LIMIT 1000`)
+		rows, err = db.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE visibility = 'public' ORDER BY created_at DESC LIMIT 1000`)
 	}
 	if err != nil {
 		return nil, err
@@ -161,7 +161,7 @@ func ListPublicCollections(q string) ([]model.Collection, error) {
 
 // GetCollection queries a single collection by username and name; returns (nil, nil) if not found.
 func GetCollection(username, collectionName string) (*model.Collection, error) {
-	c, err := model.ScanCollection(DB.QueryRow(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? AND collection_name = ?`,
+	c, err := model.ScanCollection(db.QueryRow(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE username = ? AND collection_name = ?`,
 		username, collectionName))
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -212,7 +212,7 @@ func SearchCollectionsWithFilters(query string, tags []string, visibility string
 
 	sqlStr := fmt.Sprintf(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections %s ORDER BY created_at DESC LIMIT 100`, whereClause)
 
-	rows, err := DB.Query(sqlStr, args...)
+	rows, err := db.Query(sqlStr, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +236,7 @@ func SearchCollectionsWithFilters(query string, tags []string, visibility string
 func AddCollectionEntry(collectionID int, path, fileHash string) error {
 	providers := []model.Provider{{Type: "sha256", Value: fileHash}}
 	providersJSON, _ := json.Marshal(providers)
-	_, err := DB.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash, providers_json) VALUES (?, ?, ?, ?)
+	_, err := db.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash, providers_json) VALUES (?, ?, ?, ?)
 		ON CONFLICT(collection_id, path) DO UPDATE SET file_hash = excluded.file_hash, providers_json = excluded.providers_json`,
 		collectionID, path, fileHash, string(providersJSON))
 	return err
@@ -255,7 +255,7 @@ func AddProviderCollectionEntry(collectionID int, path string, providers []model
 		providers = []model.Provider{}
 	}
 	providersJSON, _ := json.Marshal(providers)
-	_, err := DB.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash, providers_json) VALUES (?, ?, ?, ?)
+	_, err := db.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash, providers_json) VALUES (?, ?, ?, ?)
 		ON CONFLICT(collection_id, path) DO UPDATE SET file_hash = excluded.file_hash, providers_json = excluded.providers_json`,
 		collectionID, path, primaryHash, string(providersJSON))
 	return err
@@ -263,7 +263,7 @@ func AddProviderCollectionEntry(collectionID int, path string, providers []model
 
 // RemoveCollectionEntry removes the entry for a given path from a collection.
 func RemoveCollectionEntry(collectionID int, path string) error {
-	_, err := DB.Exec(`DELETE FROM collection_entries WHERE collection_id = ? AND path = ?`,
+	_, err := db.Exec(`DELETE FROM collection_entries WHERE collection_id = ? AND path = ?`,
 		collectionID, path)
 	return err
 }
@@ -272,7 +272,7 @@ func RemoveCollectionEntry(collectionID int, path string) error {
 func GetCollectionEntry(collectionID int, path string) (*model.CollectionEntry, error) {
 	var e model.CollectionEntry
 	var pj sql.NullString
-	err := DB.QueryRow(`SELECT id, collection_id, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ? AND path = ?`,
+	err := db.QueryRow(`SELECT id, collection_id, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ? AND path = ?`,
 		collectionID, path).Scan(&e.ID, &e.CollectionID, &e.Path, &e.FileHash, &pj)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -290,7 +290,7 @@ func GetCollectionEntry(collectionID int, path string) (*model.CollectionEntry, 
 // M11: Entry count is the collection's data body, theoretically must be full... but maliciously constructed large collections cause full-table materialization.
 // Limit to 10000 (normal collection sync batches are far smaller; abnormally large collections need pagination refactoring, not full memory blowup).
 func ListCollectionEntries(collectionID int) ([]model.CollectionEntry, error) {
-	rows, err := DB.Query(`SELECT id, collection_id, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ? LIMIT 10000`, collectionID)
+	rows, err := db.Query(`SELECT id, collection_id, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ? LIMIT 10000`, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +311,7 @@ func ListCollectionEntries(collectionID int) ([]model.CollectionEntry, error) {
 // CreateVersion creates a new version snapshot record for a collection, returns version ID and version number.
 func CreateVersion(collectionID int, commitMsg string, parentVersionID *int) (int, int, error) {
 	var maxVer int
-	err := DB.QueryRow(`SELECT COALESCE(MAX(version_number), 0) FROM collection_versions WHERE collection_id = ?`,
+	err := db.QueryRow(`SELECT COALESCE(MAX(version_number), 0) FROM collection_versions WHERE collection_id = ?`,
 		collectionID).Scan(&maxVer)
 	if err != nil {
 		return 0, 0, err
@@ -319,10 +319,10 @@ func CreateVersion(collectionID int, commitMsg string, parentVersionID *int) (in
 	newVer := maxVer + 1
 	var res sql.Result
 	if parentVersionID != nil {
-		res, err = DB.Exec(`INSERT INTO collection_versions (collection_id, version_number, commit_message, parent_version_id) VALUES (?, ?, ?, ?)`,
+		res, err = db.Exec(`INSERT INTO collection_versions (collection_id, version_number, commit_message, parent_version_id) VALUES (?, ?, ?, ?)`,
 			collectionID, newVer, commitMsg, *parentVersionID)
 	} else {
-		res, err = DB.Exec(`INSERT INTO collection_versions (collection_id, version_number, commit_message) VALUES (?, ?, ?)`,
+		res, err = db.Exec(`INSERT INTO collection_versions (collection_id, version_number, commit_message) VALUES (?, ?, ?)`,
 			collectionID, newVer, commitMsg)
 	}
 	if err != nil {
@@ -334,7 +334,7 @@ func CreateVersion(collectionID int, commitMsg string, parentVersionID *int) (in
 
 // SnapshotVersionEntries copies the collection's current entries (including providers_json) into version_entries.
 func SnapshotVersionEntries(versionID, collectionID int) error {
-	_, err := DB.Exec(`INSERT INTO version_entries (version_id, path, file_hash, providers_json) SELECT ?, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ?`,
+	_, err := db.Exec(`INSERT INTO version_entries (version_id, path, file_hash, providers_json) SELECT ?, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ?`,
 		versionID, collectionID)
 	return err
 }
@@ -342,7 +342,7 @@ func SnapshotVersionEntries(versionID, collectionID int) error {
 // GetVersionLog returns the collection's version history, ordered by version number descending.
 // M11: No LIMIT → unlimited version history full-table materialization; limit to 1000 (UI only shows recent versions for rollback).
 func GetVersionLog(collectionID int) ([]model.CollectionVersion, error) {
-	rows, err := DB.Query(`SELECT id, collection_id, version_number, commit_message, created_at, parent_version_id FROM collection_versions WHERE collection_id = ? ORDER BY version_number DESC LIMIT 1000`, collectionID)
+	rows, err := db.Query(`SELECT id, collection_id, version_number, commit_message, created_at, parent_version_id FROM collection_versions WHERE collection_id = ? ORDER BY version_number DESC LIMIT 1000`, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -361,7 +361,7 @@ func GetVersionLog(collectionID int) ([]model.CollectionVersion, error) {
 // GetVersionEntries queries all entries in a specified version snapshot (including providers_json).
 // M11: Same as ListCollectionEntries, limit to 10000.
 func GetVersionEntries(versionID int) ([]model.VersionEntry, error) {
-	rows, err := DB.Query(`SELECT id, version_id, path, file_hash, COALESCE(providers_json, '') FROM version_entries WHERE version_id = ? LIMIT 10000`, versionID)
+	rows, err := db.Query(`SELECT id, version_id, path, file_hash, COALESCE(providers_json, '') FROM version_entries WHERE version_id = ? LIMIT 10000`, versionID)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +385,7 @@ func RestoreVersionEntries(versionID, collectionID int) error {
 	if err != nil {
 		return err
 	}
-	tx, err := DB.Begin()
+	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}

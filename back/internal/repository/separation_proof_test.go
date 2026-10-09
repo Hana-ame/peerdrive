@@ -94,13 +94,13 @@ func mustCount(t *testing.T, table, hash string) int {
 // general abstraction).
 func CountByHash(table, col, hash string) (int, error) {
 	var n int
-	err := DB.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE `+col+` = ?`, hash).Scan(&n)
+	err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE `+col+` = ?`, hash).Scan(&n)
 	return n, err
 }
 
 // CountAll Counts total rows in a table (proof helper).
 func CountAll(table string) (int, error) {
 	var n int
-	err := DB.QueryRow(`SELECT COUNT(*) FROM ` + table + ``).Scan(&n)
+	err := db.QueryRow(`SELECT COUNT(*) FROM ` + table + ``).Scan(&n)
 	return n, err
 }

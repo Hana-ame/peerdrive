@@ -34,9 +34,21 @@ const (
 	FileTypeAnonCollection = model.FileTypeAnonCollection
 )
 
-var DB *sql.DB
+// db is the package-level SQLite database handle, private to this package.
+// External callers should use GetDB(), OpenDB(), or SetDB() instead of accessing package globals directly.
+var db *sql.DB
 
-// CloseDB closes the global connection and nils out DB (idempotent).
+// GetDB returns the active database connection.
+func GetDB() *sql.DB {
+	return db
+}
+
+// SetDB sets the active database connection (used for testing or explicit dependency injection).
+func SetDB(d *sql.DB) {
+	db = d
+}
+
+// CloseDB closes the global connection and nils out db (idempotent).
 //
 // Why it exists: **open database files cannot be deleted on Windows**. Tests use
 // t.TempDir() to create databases; at the end testing calls RemoveAll on the whole
@@ -47,25 +59,33 @@ var DB *sql.DB
 // Production path (process exit) does not call it — the process goes away and the
 // handle is naturally reclaimed.
 func CloseDB() error {
-	if DB == nil {
+	if db == nil {
 		return nil
 	}
-	err := DB.Close()
-	DB = nil
+	err := db.Close()
+	db = nil
 	return err
+}
+
+// CloseHandle closes the provided database handle safely.
+func CloseHandle(d *sql.DB) error {
+	if d == nil {
+		return nil
+	}
+	return d.Close()
 }
 
 // Ping checks whether the metadata database is reachable (used by /ready probe).
 //
-// Why wrap instead of exposing DB to controller: DB is a package-level variable;
+// Why wrap instead of exposing DB to controller: db is a package-level variable;
 // passing it out equals giving upper layers the entire database handle. Once the
 // layering boundary is breached, it's impossible to close it again. The probe only
 // needs a yes/no.
 func Ping() error {
-	if DB == nil {
+	if db == nil {
 		return errors.New("database not initialized")
 	}
-	return DB.Ping()
+	return db.Ping()
 }
 
 // isMemoryDB checks if this is an in-process in-memory database (":memory:").
@@ -93,13 +113,12 @@ func dsn(dbPath string) string {
 	return dbPath + dsnSuffix()
 }
 
-// InitDB initializes the SQLite database connection and executes all table-creation DDL,
-// including file_meta, file_providers, collections, and other tables.
-func InitDB(dbPath string) error {
-	var err error
-	DB, err = sql.Open(sqliteDriver, dsn(dbPath))
+// OpenDB opens and initializes a SQLite database at dbPath, creating all schema tables,
+// and returns the isolated *sql.DB handle without mutating package-level state.
+func OpenDB(dbPath string) (*sql.DB, error) {
+	targetDB, err := sql.Open(sqliteDriver, dsn(dbPath))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Connection pool: the default (unlimited) is unusable with SQLite — each write
@@ -109,23 +128,44 @@ func InitDB(dbPath string) error {
 	// 8 for file DBs (enough for concurrent reads; write conflicts are queued by
 	// busy_timeout instead of erroring immediately).
 	if isMemoryDB(dbPath) {
-		DB.SetMaxOpenConns(1)
-		DB.SetMaxIdleConns(1)
-		DB.SetConnMaxLifetime(0) // once a connection is recycled, in-memory DB tables are gone
+		targetDB.SetMaxOpenConns(1)
+		targetDB.SetMaxIdleConns(1)
+		targetDB.SetConnMaxLifetime(0) // once a connection is recycled, in-memory DB tables are gone
 	} else {
-		DB.SetMaxOpenConns(8)
-		DB.SetMaxIdleConns(4)
-		DB.SetConnMaxLifetime(30 * time.Minute)
+		targetDB.SetMaxOpenConns(8)
+		targetDB.SetMaxIdleConns(4)
+		targetDB.SetConnMaxLifetime(30 * time.Minute)
 	}
 
 	// Ping before table creation: sql.Open is lazy (doesn't error on wrong connection),
 	// real failure happens at first Exec. Make it an explicit error at startup,
 	// otherwise ops sees "table creation failed" — a symptom that hides the root cause
 	// elsewhere (unwritable path / nonexistent directory / driver degraded to stub).
-	if err := DB.Ping(); err != nil {
-		return err
+	if err := targetDB.Ping(); err != nil {
+		_ = targetDB.Close()
+		return nil, err
 	}
 
+	if err := initTables(targetDB); err != nil {
+		_ = targetDB.Close()
+		return nil, err
+	}
+
+	return targetDB, nil
+}
+
+// InitDB initializes the SQLite database connection, executes all table-creation DDL,
+// and sets the package-level default handle.
+func InitDB(dbPath string) error {
+	d, err := OpenDB(dbPath)
+	if err != nil {
+		return err
+	}
+	db = d
+	return nil
+}
+
+func initTables(targetDB *sql.DB) error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS local_collection_sync (
 		collection_hash TEXT PRIMARY KEY,
@@ -212,7 +252,7 @@ func InitDB(dbPath string) error {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);	`
 
-	if _, err := DB.Exec(schema); err != nil {
+	if _, err := targetDB.Exec(schema); err != nil {
 		return err
 	}
 
@@ -222,35 +262,37 @@ func InitDB(dbPath string) error {
 	// table, disk failure) were also swallowed, making failed migrations untraceable.
 	// Now all go through migrationExec: duplicate column logs debug only, other errors
 	// log warn for traceability.
-	migrationExec(`ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`)
-	migrationExec(`ALTER TABLE collections ADD COLUMN visibility TEXT DEFAULT 'public'`)
-	migrationExec(`ALTER TABLE collections ADD COLUMN tags TEXT DEFAULT ''`)
-	migrationExec(`ALTER TABLE collections ADD COLUMN follow_redirects INTEGER DEFAULT 1`)
-	migrationExec(`ALTER TABLE file_meta ADD COLUMN cid TEXT DEFAULT ''`)
-	migrationExec(`ALTER TABLE collection_entries ADD COLUMN providers_json TEXT DEFAULT ''`)
-	migrationExec(`ALTER TABLE version_entries ADD COLUMN providers_json TEXT DEFAULT ''`)
-	InitShareTable()
+	migrationExec(targetDB, `ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`)
+	migrationExec(targetDB, `ALTER TABLE collections ADD COLUMN visibility TEXT DEFAULT 'public'`)
+	migrationExec(targetDB, `ALTER TABLE collections ADD COLUMN tags TEXT DEFAULT ''`)
+	migrationExec(targetDB, `ALTER TABLE collections ADD COLUMN follow_redirects INTEGER DEFAULT 1`)
+	migrationExec(targetDB, `ALTER TABLE file_meta ADD COLUMN cid TEXT DEFAULT ''`)
+	migrationExec(targetDB, `ALTER TABLE collection_entries ADD COLUMN providers_json TEXT DEFAULT ''`)
+	migrationExec(targetDB, `ALTER TABLE version_entries ADD COLUMN providers_json TEXT DEFAULT ''`)
+	InitShareTableOn(targetDB)
 
 	// Migration: create ipfs_pins table for pinned CIDs.
-	DB.Exec(`CREATE TABLE IF NOT EXISTS ipfs_pins (
+	if _, err := targetDB.Exec(`CREATE TABLE IF NOT EXISTS ipfs_pins (
 		cid TEXT PRIMARY KEY,
 		hash TEXT NOT NULL DEFAULT '',
 		size INTEGER DEFAULT 0,
 		filename TEXT DEFAULT '',
 		pinned_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	)`)
+	)`); err != nil {
+		return err
+	}
 	// File index table: sha256 → absolute path mapping + sync cursor (independent of old file_meta)
-	createFileIndexTable()
+	createFileIndexTableOn(targetDB)
 	// SHA tags table: sha256 → tag mapping (Issue #91)
-	createShaTagsTable()
+	createShaTagsTableOn(targetDB)
 	return nil
 }
 
 // migrationExec executes idempotent migration statements. Duplicate column name
 // is the expected result of re-running migrations — only logs debug. Other errors
 // (missing table, I/O failure, etc.) log warn for traceability (L9).
-func migrationExec(stmt string) {
-	if _, err := DB.Exec(stmt); err != nil {
+func migrationExec(targetDB *sql.DB, stmt string) {
+	if _, err := targetDB.Exec(stmt); err != nil {
 		if strings.Contains(err.Error(), "duplicate column") {
 			log.LogDebug("db: migration skipped (already applied): %s", err)
 		} else {

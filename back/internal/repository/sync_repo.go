@@ -19,7 +19,7 @@ func (r *SyncRepository) UpsertSyncState(sync *model.LocalCollectionSync) error 
 	includeJSON, _ := json.Marshal(sync.IncludeFilter)
 	excludeJSON, _ := json.Marshal(sync.ExcludeFilter)
 
-	_, err := DB.Exec(`
+	_, err := db.Exec(`
 		INSERT INTO local_collection_sync (collection_hash, local_path, include_filter, exclude_filter, synced_at)
 		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(collection_hash) DO UPDATE SET
@@ -35,7 +35,7 @@ func (r *SyncRepository) UpsertSyncState(sync *model.LocalCollectionSync) error 
 func (r *SyncRepository) GetSyncState(hash string) (*model.LocalCollectionSync, error) {
 	var s model.LocalCollectionSync
 	var includeStr, excludeStr string
-	err := DB.QueryRow(`SELECT collection_hash, local_path, include_filter, exclude_filter, synced_at FROM local_collection_sync WHERE collection_hash = ?`, hash).
+	err := db.QueryRow(`SELECT collection_hash, local_path, include_filter, exclude_filter, synced_at FROM local_collection_sync WHERE collection_hash = ?`, hash).
 		Scan(&s.CollectionHash, &s.LocalPath, &includeStr, &excludeStr, &s.SyncedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -51,7 +51,7 @@ func (r *SyncRepository) GetSyncState(hash string) (*model.LocalCollectionSync, 
 
 // UpsertFileSyncState inserts or updates the sync state for a file in a collection (isSaved marks whether save to disk succeeded).
 func (r *SyncRepository) UpsertFileSyncState(hash, path string, isSaved bool) error {
-	_, err := DB.Exec(`
+	_, err := db.Exec(`
 		INSERT INTO local_sync_files (collection_hash, file_path, is_saved, last_modified)
 		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(collection_hash, file_path) DO UPDATE SET
@@ -64,7 +64,7 @@ func (r *SyncRepository) UpsertFileSyncState(hash, path string, isSaved bool) er
 // GetSyncFiles queries all file sync state records for a specified collection.
 // M11: No LIMIT → full-table materialization; limit to 1000 (local sync state records are usually far fewer).
 func (r *SyncRepository) GetSyncFiles(hash string) ([]model.LocalSyncFile, error) {
-	rows, err := DB.Query(`SELECT id, collection_hash, file_path, is_saved, last_modified FROM local_sync_files WHERE collection_hash = ? LIMIT 1000`, hash)
+	rows, err := db.Query(`SELECT id, collection_hash, file_path, is_saved, last_modified FROM local_sync_files WHERE collection_hash = ? LIMIT 1000`, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +85,6 @@ func (r *SyncRepository) GetSyncFiles(hash string) ([]model.LocalSyncFile, error
 
 // ClearSyncFiles deletes all file sync records for a specified collection (called before re-sync).
 func (r *SyncRepository) ClearSyncFiles(hash string) error {
-	_, err := DB.Exec(`DELETE FROM local_sync_files WHERE collection_hash = ?`, hash)
+	_, err := db.Exec(`DELETE FROM local_sync_files WHERE collection_hash = ?`, hash)
 	return err
 }

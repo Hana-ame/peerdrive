@@ -398,7 +398,7 @@ func TestSearchFileIndex_IndexColumn(t *testing.T) {
 	seedRows(t, testDataset())
 
 	var n int
-	err := DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master
+	err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master
 		WHERE type='index' AND name='idx_file_index_name'`).Scan(&n)
 	require.NoError(t, err)
 	assert.Equal(t, 1, n, "idx_file_index_name 必须存在")
