@@ -12,7 +12,7 @@
 //   - Download 按钮走 ws.downloadToFile(sha, basename)，与 Drive 页同一取数通道。
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as ws from '../../../platform/transport-ws';
-import { buildTree, descend, basename, entrySha, previewSha } from '../../../platform/shared/collectionTree';
+import { buildTree, descend, basename, entrySha, previewSha, fetchableSource } from '../../../platform/shared/collectionTree';
 import { fmtBytes } from '../../../platform/shared/format';
 import { kindOf, mimeOf } from '../../../platform/shared/mime';
 import { previewBlobCache, previewLimit } from '../../../lib/cache';
@@ -125,13 +125,40 @@ export default function CollectionBrowser({ collection, onError }) {
     return Boolean(kind);
   };
 
+  const triggerBrowserDownload = (url, fileName) => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   const downloadFile = async (node) => {
-    const sha = entrySha(node.entry);
-    if (!sha) return; // 无取数键的脏条目按钮置灰，见 collectionTree.normalizeEntry
-    try {
-      await ws.downloadToFile(sha, node.name);
-    } catch (e) {
-      fail(e);
+    const src = fetchableSource(node.entry);
+    if (!src) return;
+    const fileName = node.entry?.name || node.name;
+    if (src.type === 'sha') {
+      try {
+        await ws.downloadToFile(src.value, fileName);
+        return;
+      } catch (e) {
+        // 若 sha 下载失败但条目包含备选 URL/ECHURL/private，尝试回退下载
+        const s = node.entry?.source;
+        const fallbackUrl = s?.url || s?.['ech-url'] || s?.private?.url;
+        if (!fallbackUrl) {
+          fail(e);
+          return;
+        }
+        triggerBrowserDownload(fallbackUrl, fileName);
+        return;
+      }
+    }
+    // 远程 URL / ECH-URL 备选源
+    if (src.value) {
+      triggerBrowserDownload(src.value, fileName);
     }
   };
 
@@ -177,7 +204,7 @@ export default function CollectionBrowser({ collection, onError }) {
                 </button>
               </li>
             ) : (
-              // 文件行：缩略图(可点访问) + 名称/大小 + Open/Download
+              // 文件行：缩略图(可点访问) + 名称/大小/元数据 + Open/Download
               <li key={`f-${node.name}-${i}`} className="flex items-center gap-3 px-3 py-2 hover:bg-white/[0.02]">
                 <button
                   onClick={() => openFile(node)}
@@ -186,10 +213,18 @@ export default function CollectionBrowser({ collection, onError }) {
                   <PreviewThumb sha={previewSha(node.entry)} loadPreview={loadPreview} size={40} />
                 </button>
                 <div className="flex-1 min-w-0">
-                  <div className="truncate text-sm text-gray-200">{node.name}</div>
+                  <div className="flex items-center gap-2 truncate text-sm text-gray-200">
+                    <span className="truncate">{node.entry?.name || node.name}</span>
+                    {node.entry?.source && (
+                      <span className="px-1 py-0.2 rounded text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 uppercase shrink-0 font-mono">
+                        {fetchableSource(node.entry)?.type || 'src'}
+                      </span>
+                    )}
+                  </div>
                   <div className="text-[11px] text-gray-600">
                     {fmtBytes(node.entry.size)}
                     {node.entry.mime ? ` · ${node.entry.mime}` : ''}
+                    {node.entry.created_at ? ` · ${new Date(node.entry.created_at * 1000).toLocaleDateString()}` : ''}
                   </div>
                 </div>
                 <button
@@ -199,7 +234,7 @@ export default function CollectionBrowser({ collection, onError }) {
                 </button>
                 <button
                   onClick={() => downloadFile(node)}
-                  disabled={!entrySha(node.entry)}
+                  disabled={!fetchableSource(node.entry)}
                   className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed">
                   Download
                 </button>
