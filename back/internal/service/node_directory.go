@@ -30,7 +30,6 @@ import (
 
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
-	"peerdrive/internal/transport"
 )
 
 // joinedFileName 加入清单的相对文件名（位于 storageDir 下）。
@@ -328,7 +327,7 @@ func (d *NodeDirectory) fetchOnline(ctx context.Context) []discoveredNode {
 	}
 	nodes := d.getNodes(ctx, "")
 	if len(nodes) == 0 {
-		nodes = d.getNodes(ctx, transport.PresenceRoom)
+		nodes = d.getNodes(ctx, model.PresenceRoom)
 	}
 	return nodes
 }

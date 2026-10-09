@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"peerdrive/internal/transport"
+	"peerdrive/internal/model"
 )
 
 // Unified test background: node market directory (doc/NETDISK.md M1).
@@ -193,7 +193,7 @@ func TestNodeDirectoryMarketFallsBackToPresenceRoom(t *testing.T) {
 		coll := r.URL.Query().Get("coll")
 		calls = append(calls, coll)
 		nodes := []map[string]any{}
-		if coll == transport.PresenceRoom {
+		if coll == model.PresenceRoom {
 			nodes = append(nodes, map[string]any{"peerId": "peer-presence"})
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"nodes": nodes})
@@ -206,7 +206,7 @@ func TestNodeDirectoryMarketFallsBackToPresenceRoom(t *testing.T) {
 	if len(nodes) != 1 || nodes[0].PeerID != "peer-presence" {
 		t.Fatalf("market = %+v, want peer-presence from presence room", nodes)
 	}
-	if len(calls) != 2 || calls[0] != "" || calls[1] != transport.PresenceRoom {
+	if len(calls) != 2 || calls[0] != "" || calls[1] != model.PresenceRoom {
 		t.Fatalf("discover calls = %v, want [\"\" presenceRoom]", calls)
 	}
 }

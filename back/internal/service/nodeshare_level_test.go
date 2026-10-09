@@ -20,14 +20,13 @@ import (
 	"testing"
 
 	"peerdrive/internal/model"
-	"peerdrive/internal/transport"
 )
 
 // TestNodeSharePublicListedAndDownloadable public: listed, anyone can fetch.
 func TestNodeSharePublicListedAndDownloadable(t *testing.T) {
 	base := t.TempDir()
 	h := sha("a1")
-	s := newScopeShare(t, base, true, []transport.FileInfo{
+	s := newScopeShare(t, base, true, []model.FileInfo{
 		{Hash: h, Name: "a.txt", Path: filepath.Join(base, "a.txt"), Size: 1},
 	})
 	if _, err := s.SetFilesShared([]string{h}, true, model.LevelPublic); err != nil {
@@ -50,7 +49,7 @@ func TestNodeSharePublicListedAndDownloadable(t *testing.T) {
 func TestNodeShareUnlistedHiddenButDownloadable(t *testing.T) {
 	base := t.TempDir()
 	h := sha("b1")
-	s := newScopeShare(t, base, true, []transport.FileInfo{
+	s := newScopeShare(t, base, true, []model.FileInfo{
 		{Hash: h, Name: "a.txt", Path: filepath.Join(base, "a.txt"), Size: 1},
 	})
 	if _, err := s.SetFilesShared([]string{h}, true, model.LevelUnlisted); err != nil {
@@ -72,7 +71,7 @@ func TestNodeShareUnlistedHiddenButDownloadable(t *testing.T) {
 func TestNodeSharePrivateOnlyFriendsAndSelf(t *testing.T) {
 	base := t.TempDir()
 	h := sha("c1")
-	s := newScopeShare(t, base, true, []transport.FileInfo{
+	s := newScopeShare(t, base, true, []model.FileInfo{
 		{Hash: h, Name: "a.txt", Path: filepath.Join(base, "a.txt"), Size: 1},
 	})
 	if _, err := s.SetFilesShared([]string{h}, true, model.LevelPrivate); err != nil {
@@ -105,7 +104,7 @@ func TestNodeShareLoosestLevelWins(t *testing.T) {
 	base := t.TempDir()
 	dir := filepath.Join(base, "media")
 	h := sha("d1")
-	s := newScopeShare(t, base, true, []transport.FileInfo{
+	s := newScopeShare(t, base, true, []model.FileInfo{
 		{Hash: h, Name: "a.txt", Path: filepath.Join(dir, "a.txt"), Size: 1},
 	})
 	if _, err := s.Update(ScopePatch{Dirs: &[]ShareItem{{ID: dir, Level: model.LevelUnlisted}}}); err != nil {
@@ -123,7 +122,7 @@ func TestNodeShareLoosestLevelWins(t *testing.T) {
 		t.Fatalf("loosest must win (public), listed=%d", len(snap.Files))
 	}
 	// the reverse: dir public + file private, still public (the dir is looser)
-	s2 := newScopeShare(t, base, true, []transport.FileInfo{
+	s2 := newScopeShare(t, base, true, []model.FileInfo{
 		{Hash: h, Name: "a.txt", Path: filepath.Join(dir, "a.txt"), Size: 1},
 	})
 	if _, err := s2.Update(ScopePatch{Dirs: &[]ShareItem{{ID: dir, Level: model.LevelPublic}}}); err != nil {
@@ -144,7 +143,7 @@ func TestNodeShareLoosestLevelWins(t *testing.T) {
 func TestNodeShareInvalidLevelRejected(t *testing.T) {
 	base := t.TempDir()
 	h := sha("e1")
-	s := newScopeShare(t, base, true, []transport.FileInfo{
+	s := newScopeShare(t, base, true, []model.FileInfo{
 		{Hash: h, Name: "a.txt", Path: filepath.Join(base, "a.txt"), Size: 1},
 	})
 	if _, err := s.SetFilesShared([]string{h}, true, "pubilc"); err == nil {
@@ -172,7 +171,7 @@ func TestNodeShareInvalidLevelRejected(t *testing.T) {
 func TestNodeShareSetLevelOverrides(t *testing.T) {
 	base := t.TempDir()
 	h := sha("a3")
-	s := newScopeShare(t, base, true, []transport.FileInfo{
+	s := newScopeShare(t, base, true, []model.FileInfo{
 		{Hash: h, Name: "a.txt", Path: filepath.Join(base, "a.txt"), Size: 1},
 	})
 	if _, err := s.SetFilesShared([]string{h}, true, model.LevelPublic); err != nil {
@@ -193,7 +192,7 @@ func TestNodeShareSetLevelOverrides(t *testing.T) {
 func TestNodeShareLevelPersistedAcrossRestart(t *testing.T) {
 	base := t.TempDir()
 	h := sha("a2")
-	files := []transport.FileInfo{{Hash: h, Name: "a.txt", Path: filepath.Join(base, "a.txt"), Size: 1}}
+	files := []model.FileInfo{{Hash: h, Name: "a.txt", Path: filepath.Join(base, "a.txt"), Size: 1}}
 	s1 := newScopeShare(t, base, true, files)
 	if _, err := s1.Update(ScopePatch{Friends: &[]string{"buddy"}}); err != nil {
 		t.Fatalf("friends: %v", err)
@@ -222,7 +221,7 @@ func TestNodeShareLevelPersistedAcrossRestart(t *testing.T) {
 func TestNodeShareLegacyStringItemsStillPublic(t *testing.T) {
 	base := t.TempDir()
 	h := sha("b2")
-	files := []transport.FileInfo{{Hash: h, Name: "a.txt", Path: filepath.Join(base, "a.txt"), Size: 1}}
+	files := []model.FileInfo{{Hash: h, Name: "a.txt", Path: filepath.Join(base, "a.txt"), Size: 1}}
 	writeScopeFile(t, base, `{"enable":true,"dirs":[],"files":["`+h+`"],"collections":[]}`)
 	s := newScopeShare(t, base, false, files)
 	if got := len(s.Scope().Files); got != 1 {

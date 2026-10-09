@@ -20,15 +20,15 @@ import (
 	"testing"
 
 	"peerdrive/internal/config"
-	"peerdrive/internal/transport"
+	"peerdrive/internal/model"
 )
 
 // newScopeShare builds a share service with only fake file-index data, persisting to storageDir.
 // Pass an empty storageDir for in-memory mode.
-func newScopeShare(t *testing.T, storageDir string, enable bool, files []transport.FileInfo) *NodeShare {
+func newScopeShare(t *testing.T, storageDir string, enable bool, files []model.FileInfo) *NodeShare {
 	t.Helper()
 	s := NewNodeShare(testShareCfg(enable, "", ""), storageDir)
-	s.SetFileLister(func() ([]transport.FileInfo, error) { return files, nil })
+	s.SetFileLister(func() ([]model.FileInfo, error) { return files, nil })
 	return s
 }
 
@@ -42,7 +42,7 @@ func newScopeShare(t *testing.T, storageDir string, enable bool, files []transpo
 func TestNodeShareRuntimeChoiceBeatsEnvAfterRestart(t *testing.T) {
 	dir := t.TempDir()
 	h := sha("f1")
-	files := []transport.FileInfo{{Hash: h, Name: "a.txt", Path: filepath.Join(dir, "a.txt"), Size: 3}}
+	files := []model.FileInfo{{Hash: h, Name: "a.txt", Path: filepath.Join(dir, "a.txt"), Size: 3}}
 
 	// first start: config says enable=false
 	s1 := newScopeShare(t, dir, false, files)
@@ -112,7 +112,7 @@ func TestNodeShareSingleFileOutsideDirs(t *testing.T) {
 	shared := filepath.Join(base, "shared")
 	other := filepath.Join(base, "other")
 	h1, h2 := sha("11"), sha("22")
-	files := []transport.FileInfo{
+	files := []model.FileInfo{
 		{Hash: h1, Name: "in.txt", Path: filepath.Join(shared, "in.txt"), Size: 1},
 		{Hash: h2, Name: "out.txt", Path: filepath.Join(other, "out.txt"), Size: 2},
 	}
@@ -149,7 +149,7 @@ func TestNodeShareCandidateFilesFlags(t *testing.T) {
 	base := t.TempDir()
 	shared := filepath.Join(base, "shared")
 	h1, h2 := sha("31"), sha("32")
-	files := []transport.FileInfo{
+	files := []model.FileInfo{
 		{Hash: h1, Name: "in.txt", Path: filepath.Join(shared, "in.txt"), Size: 1},
 		{Hash: h2, Name: "out.txt", Path: filepath.Join(base, "out.txt"), Size: 2},
 	}
@@ -193,7 +193,7 @@ func TestNodeShareUpdatePartialKeepsOthers(t *testing.T) {
 	dir := t.TempDir()
 	shared := filepath.Join(dir, "shared")
 	h := sha("41")
-	s := newScopeShare(t, dir, true, []transport.FileInfo{{Hash: h, Name: "a", Path: filepath.Join(shared, "a")}})
+	s := newScopeShare(t, dir, true, []model.FileInfo{{Hash: h, Name: "a", Path: filepath.Join(shared, "a")}})
 	if _, err := s.Update(ScopePatch{Dirs: &[]ShareItem{{ID: shared}}}); err != nil {
 		t.Fatalf("update dirs: %v", err)
 	}
@@ -254,12 +254,12 @@ func TestNodeShareSelectedFileBeyondIndexPage(t *testing.T) {
 	base := t.TempDir()
 	onPage := sha("aa")
 	offPage := sha("bb")
-	s := newScopeShare(t, base, true, []transport.FileInfo{
+	s := newScopeShare(t, base, true, []model.FileInfo{
 		{Hash: onPage, Name: "page.txt", Path: filepath.Join(base, "page.txt"), Size: 1},
 	})
-	s.SetFileInfoReader(func(hash string) (*transport.FileInfo, error) {
+	s.SetFileInfoReader(func(hash string) (*model.FileInfo, error) {
 		if hash == offPage {
-			return &transport.FileInfo{Hash: offPage, Name: "offpage.txt", Path: filepath.Join(base, "offpage.txt"), Size: 7}, nil
+			return &model.FileInfo{Hash: offPage, Name: "offpage.txt", Path: filepath.Join(base, "offpage.txt"), Size: 7}, nil
 		}
 		return nil, fmt.Errorf("not found: %s", hash)
 	})

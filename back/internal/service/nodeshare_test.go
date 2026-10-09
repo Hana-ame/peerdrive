@@ -15,7 +15,6 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/model"
-	"peerdrive/internal/transport"
 )
 
 func sha(hex string) string {
@@ -36,7 +35,7 @@ func testShareCfg(enable bool, colls, dirs string) *config.Config {
 }
 
 // newShareWith builds a share service wired to fake data sources.
-func newShareWith(t *testing.T, cfg *config.Config, colls map[string]*model.AnonCollection, list []model.AnonCollectionSummary, files []transport.FileInfo) *NodeShare {
+func newShareWith(t *testing.T, cfg *config.Config, colls map[string]*model.AnonCollection, list []model.AnonCollectionSummary, files []model.FileInfo) *NodeShare {
 	t.Helper()
 	// empty storageDir = in-memory mode (no disk writes): unit tests only care
 	// about resolution semantics; persistence is covered separately by the
@@ -51,7 +50,7 @@ func newShareWith(t *testing.T, cfg *config.Config, colls map[string]*model.Anon
 		},
 		func() ([]model.AnonCollectionSummary, error) { return list, nil },
 	)
-	s.SetFileLister(func() ([]transport.FileInfo, error) { return files, nil })
+	s.SetFileLister(func() ([]model.FileInfo, error) { return files, nil })
 	return s
 }
 
@@ -70,7 +69,7 @@ func TestNodeShareDisabledByDefault(t *testing.T) {
 	cfg := testShareCfg(false, pub, "/tmp")
 	s := newShareWith(t, cfg, map[string]*model.AnonCollection{
 		pub: {FriendlyName: "pub", Entries: []model.AnonCollectionEntry{{Path: "a.txt", Providers: []model.Provider{{Type: "sha256", Value: sha("b")}}}}},
-	}, nil, []transport.FileInfo{{Hash: sha("c"), Name: "c.txt", Path: "/tmp/c.txt"}})
+	}, nil, []model.FileInfo{{Hash: sha("c"), Name: "c.txt", Path: "/tmp/c.txt"}})
 
 	snap := s.Snapshot()
 	if len(snap.Collections) != 0 || len(snap.Files) != 0 || len(snap.Dirs) != 0 {
@@ -194,7 +193,7 @@ func TestNodeShareDirPrefixFilter(t *testing.T) {
 	deleted := filepath.Join(dir, "gone.txt")
 
 	cfg := testShareCfg(true, "", dir)
-	s := newShareWith(t, cfg, nil, nil, []transport.FileInfo{
+	s := newShareWith(t, cfg, nil, nil, []model.FileInfo{
 		{Hash: sha("a"), Name: "inside.txt", Path: inside, Size: 10},
 		{Hash: sha("b"), Name: "nested.txt", Path: nested, Size: 20},
 		{Hash: sha("c"), Name: "outside.txt", Path: outside, Size: 30},
@@ -225,7 +224,7 @@ func TestNodeShareDirPrefixFilter(t *testing.T) {
 // were read as "no filter", then PEERDRIVE_SHARE_ENABLE=true alone would leak the entire file_index.
 func TestNodeShareNoDirsMeansNoFiles(t *testing.T) {
 	cfg := testShareCfg(true, "", "")
-	s := newShareWith(t, cfg, nil, nil, []transport.FileInfo{
+	s := newShareWith(t, cfg, nil, nil, []model.FileInfo{
 		{Hash: sha("a"), Name: "a.txt", Path: "/whatever/a.txt"},
 	})
 	if got := len(s.Snapshot().Files); got != 0 {

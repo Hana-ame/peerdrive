@@ -7,10 +7,9 @@ import (
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/pathutil"
-	"peerdrive/internal/transport"
 )
 
-func (s *NodeShare) Snapshot() transport.ShareSnapshot { return s.SnapshotFor("") }
+func (s *NodeShare) Snapshot() model.ShareSnapshot { return s.SnapshotFor("") }
 
 // SnapshotFor 解析请求者可见的共享范围（share 帧的数据源）。
 //
@@ -19,10 +18,10 @@ func (s *NodeShare) Snapshot() transport.ShareSnapshot { return s.SnapshotFor(""
 // 东西能取，否则 private 就成了"给了权限但没给目录"。
 //
 // 未开启共享 → 空快照（不是错误：对方未共享内容是合法业务状态）。
-func (s *NodeShare) SnapshotFor(peerID string) transport.ShareSnapshot {
-	snap := transport.ShareSnapshot{
-		Collections: []transport.ShareCollectionInfo{},
-		Files:       []transport.ShareFileInfo{},
+func (s *NodeShare) SnapshotFor(peerID string) model.ShareSnapshot {
+	snap := model.ShareSnapshot{
+		Collections: []model.ShareCollectionInfo{},
+		Files:       []model.ShareFileInfo{},
 	}
 	sc := s.Scope()
 	if !sc.Enable {
@@ -232,21 +231,21 @@ func (s *NodeShare) CandidateFiles() []ShareFileItem {
 //
 // friend：请求者是好友时，private 级别的合集也列出来（否则好友拿到了权限却
 // 不知道有什么）。unlisted 永远不列——它的语义就是"不列出"。
-func (s *NodeShare) collectionsSnapshotFor(items []ShareItem, friend bool) []transport.ShareCollectionInfo {
+func (s *NodeShare) collectionsSnapshotFor(items []ShareItem, friend bool) []model.ShareCollectionInfo {
 	if s.anonGet == nil {
-		return []transport.ShareCollectionInfo{}
+		return []model.ShareCollectionInfo{}
 	}
 	list := make([]ShareItem, 0, len(items))
 	for _, it := range items {
 		if it.ID == shareAllToken {
 			// "all" = 所有 public 合集，级别沿用这条声明的级别
 			if s.anonList == nil {
-				return []transport.ShareCollectionInfo{}
+				return []model.ShareCollectionInfo{}
 			}
 			all, err := s.anonList()
 			if err != nil {
 				log.LogWarn("nodeshare: list collections failed: %v", err)
-				return []transport.ShareCollectionInfo{}
+				return []model.ShareCollectionInfo{}
 			}
 			for _, c := range all {
 				// 空 visibility 视为 public（与 model.EffectiveVisibility 一致）
@@ -259,7 +258,7 @@ func (s *NodeShare) collectionsSnapshotFor(items []ShareItem, friend bool) []tra
 		list = append(list, it)
 	}
 
-	out := make([]transport.ShareCollectionInfo, 0, len(list))
+	out := make([]model.ShareCollectionInfo, 0, len(list))
 	for _, it := range list {
 		coll, err := s.anonGet(it.ID)
 		if err != nil || coll == nil {
@@ -275,14 +274,14 @@ func (s *NodeShare) collectionsSnapshotFor(items []ShareItem, friend bool) []tra
 		if lvl == model.LevelUnlisted || (lvl == model.LevelPrivate && !friend) {
 			continue
 		}
-		info := transport.ShareCollectionInfo{
+		info := model.ShareCollectionInfo{
 			Hash:    it.ID,
 			Name:    coll.FriendlyName,
 			Tags:    coll.Tags,
-			Entries: make([]transport.ShareEntryInfo, 0, len(coll.Entries)),
+			Entries: make([]model.ShareEntryInfo, 0, len(coll.Entries)),
 		}
 		for _, e := range coll.Entries {
-			info.Entries = append(info.Entries, transport.ShareEntryInfo{
+			info.Entries = append(info.Entries, model.ShareEntryInfo{
 				Path: e.Path,
 				Hash: e.GetPrimaryHash(),
 				Mime: e.GetPrimaryMime(),
@@ -304,13 +303,13 @@ func (s *NodeShare) collectionsSnapshotFor(items []ShareItem, friend bool) []tra
 // 空 dirs 且空 files = 不共享任何文件（不是共享全部）：这是"默认关"在文件
 // 维度的体现，空值被当成"不过滤"等于 PEERDRIVE_SHARE_ENABLE=true 就泄露
 // 整个 file_index。
-func (s *NodeShare) filesSnapshotFor(sc ShareScope, friend bool) []transport.ShareFileInfo {
+func (s *NodeShare) filesSnapshotFor(sc ShareScope, friend bool) []model.ShareFileInfo {
 	files := s.resolveFiles(sc)
 	sel := make(map[string]ShareItem, len(sc.Files))
 	for _, it := range sc.Files {
 		sel[it.ID] = it
 	}
-	out := make([]transport.ShareFileInfo, 0, len(files))
+	out := make([]model.ShareFileInfo, 0, len(files))
 	for _, f := range files {
 		if f.Path == "" || f.Delete {
 			continue
@@ -327,7 +326,7 @@ func (s *NodeShare) filesSnapshotFor(sc ShareScope, friend bool) []transport.Sha
 		if lvl == "" || lvl == model.LevelUnlisted || (lvl == model.LevelPrivate && !friend) {
 			continue
 		}
-		out = append(out, transport.ShareFileInfo{
+		out = append(out, model.ShareFileInfo{
 			Hash: f.Hash,
 			Name: f.Name,
 			// 只回相对展示路径，不回本机绝对路径（对外最小信息原则，
@@ -345,8 +344,8 @@ func (s *NodeShare) filesSnapshotFor(sc ShareScope, friend bool) []transport.Sha
 // 登记的文件超过 1000 条时新上传的文件不在那一页里。只按那一页过滤的话，用户
 // 勾了它却既列不出来也共享不出去——看到的现象是"我勾了，但什么都没发生"。
 // 按 hash 单查不受分页影响，勾选过的文件永远算数。
-func (s *NodeShare) resolveFiles(sc ShareScope) []transport.FileInfo {
-	out := make([]transport.FileInfo, 0, len(sc.Files))
+func (s *NodeShare) resolveFiles(sc ShareScope) []model.FileInfo {
+	out := make([]model.FileInfo, 0, len(sc.Files))
 	seen := make(map[string]bool, len(sc.Files))
 	if s.fileList != nil {
 		files, err := s.fileList()

@@ -11,22 +11,15 @@ import (
 	"time"
 
 	"peerdrive/internal/log"
+	"peerdrive/internal/model"
 )
 
 // PresenceRoom node-level "presence room" — all nodes with node-level interconnection
 // enabled join it, so they can discover each other even without any shared content hash
 // (the foundational capability of the interconnection layer).
 //
-// Why a sha256 literal instead of a readable name like "_presence":
-// Discovery server collection fields may enforce "must be 64hex" validation in different
-// implementations — peerdrive's own signalserver only trims without validating, but online
-// signaling is maintained by wintools, so we can't assume leniency. Using a readable name
-// that gets 400-rejected would cause the entire announce to fail, and content chunk rooms
-// wouldn't be registered either (discovery fully broken), with costs far outweighing benefits.
-// This value = sha256("peerdrive/presence/v1"): it's valid 64hex, and due to SHA256's
-// preimage resistance, collision with any real content/collection hash is computationally
-// impossible.
-const PresenceRoom = "405265e56dfcc1047e9fcd13125fd343d93214eb3219f7cd5bb8927a8994d15a"
+// Aliased to model.PresenceRoom for backward compatibility across transport.
+const PresenceRoom = model.PresenceRoom
 
 // HTTPDiscovery room discovery via self-hosted signaling server (replaces MQTT public broker).
 // Self-hosted servers naturally know all online nodes (all connect for signaling), so

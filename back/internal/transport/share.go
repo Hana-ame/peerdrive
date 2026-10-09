@@ -22,39 +22,20 @@ package transport
 // total = len(collections)+len(files); the server computes and sends it (the frontend card displays
 // "N items total" directly, without having to sum two categories itself). When sharing is off, respond with an **empty**
 // share-resp rather than an error: the empty state is a valid business state (the peer shared nothing), and the frontend renders
-// "this node has no shared content" without needing an error branch.
+import "peerdrive/internal/model"
 
 // ShareFileInfo is a single file in the sharing manifest.
-type ShareFileInfo struct {
-	Hash string `json:"hash"`
-	Name string `json:"name"`
-	Path string `json:"path,omitempty"` // Display path relative to the root directory (no absolute local path)
-	Size int64  `json:"size"`
-	Mime string `json:"mime,omitempty"`
-}
+type ShareFileInfo = model.ShareFileInfo
 
 // ShareEntryInfo is a file link for an entry within a collection.
-type ShareEntryInfo struct {
-	Path string `json:"path"`
-	Hash string `json:"hash"`
-	Mime string `json:"mime,omitempty"`
-}
+type ShareEntryInfo = model.ShareEntryInfo
 
 // ShareCollectionInfo is a collection packaged for sharing.
-type ShareCollectionInfo struct {
-	Hash    string            `json:"hash"`
-	Name    string            `json:"name,omitempty"`
-	Size    int64             `json:"size,omitempty"` // Entry count (reuses the size name to stay consistent with the frontend card)
-	Tags    []string          `json:"tags,omitempty"`
-	Entries []ShareEntryInfo  `json:"entries"`
-}
+type ShareCollectionInfo = model.ShareCollectionInfo
 
 // ShareSnapshot is the complete result of one share query.
-type ShareSnapshot struct {
-	Collections []ShareCollectionInfo `json:"collections"`
-	Files       []ShareFileInfo       `json:"files"`
-	Dirs        []string              `json:"dirs,omitempty"`
-}
+type ShareSnapshot = model.ShareSnapshot
+
 
 // shareResp is the share frame response. It embeds ShareSnapshot so the JSON is flat
 // ({type,collections,files,dirs,total,reqId,token}), requiring only one layer of parsing on the frontend.
