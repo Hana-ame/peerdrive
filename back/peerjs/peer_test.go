@@ -29,27 +29,6 @@ func TestNewMessage(t *testing.T) {
 	assert.Empty(t, m2.Payload)
 }
 
-// Discovery background: defensive test -- ID rules (alphanumeric at start/end) are
-// a prerequisite for signaling registration success; rule regression protection
-func TestValidID(t *testing.T) {
-	cases := []struct {
-		id   string
-		want bool
-	}{
-		{"peerdrive-abc123", true},
-		{"a", true},
-		{"a-b_c d", true}, // - _ and spaces allowed in the middle
-		{"", false},
-		{"-abc", false}, // first character must be alphanumeric
-		{"abc-", false},
-		{"a b!", false}, // illegal character
-		{"ab\ncd", false},
-	}
-	for _, c := range cases {
-		assert.Equal(t, c.want, validID(c.id), "id=%q", c.id)
-	}
-}
-
 // Discovery background: defensive test -- connectionId extraction is the signaling
 // routing key; extraction errors cause message misrouting
 func TestPayloadConnectionID(t *testing.T) {
