@@ -38,15 +38,6 @@ export default function Display() {
 
   // Track WS connection and register screen
   useEffect(() => {
-    const unbindStatus = ws.onStatus((st) => {
-      setConnected(st === 'open');
-      if (st === 'open') {
-        registerScreen();
-      } else {
-        setRegistered(false);
-      }
-    });
-
     const registerScreen = () => {
       ws.sendFrame({
         type: 'display',
@@ -84,6 +75,15 @@ export default function Display() {
         })
         .catch(() => {});
     };
+
+    const unbindStatus = ws.onStatus((st) => {
+      setConnected(st === 'open');
+      if (st === 'open') {
+        registerScreen();
+      } else {
+        setRegistered(false);
+      }
+    });
 
     if (ws.getStatus() === 'open') {
       registerScreen();

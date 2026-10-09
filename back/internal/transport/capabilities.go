@@ -117,7 +117,7 @@ var capBitToString = map[CapBit]string{
 	BitAuth:    CapAuth,
 	BitAdmin:   CapAdmin,
 	BitDisplay: CapDisplay,
-	CapStream:  BitStream,
+	BitStream:  CapStream,
 }
 
 // CapsToBitset converts a slice of capability strings into a CapBit bitmask.
