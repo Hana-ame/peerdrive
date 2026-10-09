@@ -1,6 +1,7 @@
 // Module ②: My Cloud Drive —— file management for this node (goes through WS admin frames to the backend)
 // List / upload / download / delete / generate share links.
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams } from 'react-router-dom';
 import * as ws from '../ws';
 
 function fmtBytes(n) {
@@ -19,10 +20,12 @@ function fmtTime(ts) {
 }
 
 export default function Drive() {
+  const { hash: deepHash } = useParams();
   const [files, setFiles] = useState(null); // null = loading
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [shareLink, setShareLink] = useState('');
+  const [copiedHash, setCopiedHash] = useState('');
   const fileRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -78,6 +81,15 @@ export default function Drive() {
     } catch (ex) { setErr(ex?.message || String(ex)); }
   };
 
+  const onCopyDeepLink = (f) => {
+    const origin = window.location.origin;
+    const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+    const url = `${origin}${base}/drive/${f.hash}`;
+    navigator.clipboard?.writeText(url);
+    setCopiedHash(f.hash);
+    setTimeout(() => setCopiedHash(''), 2000);
+  };
+
   const th = 'text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
   const td = 'px-3 py-2';
 
@@ -131,19 +143,39 @@ export default function Drive() {
                 </tr>
               </thead>
               <tbody>
-                {files.map((f, i) => (
-                  <tr key={f.hash || i} className="border-t border-white/[0.04] hover:bg-white/[0.02]">
-                    <td className={td + ' text-gray-200 max-w-[260px] truncate'}>{f.filename}</td>
-                    <td className={td + ' text-gray-500 whitespace-nowrap'}>{fmtBytes(f.size)}</td>
-                    <td className={td + ' text-gray-500 whitespace-nowrap'}>{f.mime_type || '—'}</td>
-                    <td className={td + ' text-gray-500 whitespace-nowrap'}>{fmtTime(f.created_at)}</td>
-                    <td className={td + ' text-right whitespace-nowrap'}>
-                      <button onClick={() => onDownload(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Download</button>
-                      <button onClick={() => onShare(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Share</button>
-                      <button onClick={() => onDelete(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">Delete</button>
-                    </td>
-                  </tr>
-                ))}
+                {files.map((f, i) => {
+                  const isTarget = deepHash && f.hash === deepHash;
+                  return (
+                    <tr
+                      key={f.hash || i}
+                      className={`border-t border-white/[0.04] transition-colors ${
+                        isTarget
+                          ? 'bg-brand-500/15 border-l-2 border-l-brand-400 hover:bg-brand-500/20'
+                          : 'hover:bg-white/[0.02]'
+                      }`}
+                    >
+                      <td className={td + ' text-gray-200 max-w-[260px] truncate'}>
+                        <div className="flex items-center gap-1.5">
+                          {isTarget && (
+                            <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-400 shrink-0" title="Deep linked" />
+                          )}
+                          <span className="truncate">{f.filename}</span>
+                        </div>
+                      </td>
+                      <td className={td + ' text-gray-500 whitespace-nowrap'}>{fmtBytes(f.size)}</td>
+                      <td className={td + ' text-gray-500 whitespace-nowrap'}>{f.mime_type || '—'}</td>
+                      <td className={td + ' text-gray-500 whitespace-nowrap'}>{fmtTime(f.created_at)}</td>
+                      <td className={td + ' text-right whitespace-nowrap'}>
+                        <button onClick={() => onDownload(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Download</button>
+                        <button onClick={() => onCopyDeepLink(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">
+                          {copiedHash === f.hash ? 'Copied' : 'Link'}
+                        </button>
+                        <button onClick={() => onShare(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Share</button>
+                        <button onClick={() => onDelete(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">Delete</button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
