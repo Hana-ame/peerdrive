@@ -22,7 +22,9 @@ require (
 
 require (
 	github.com/Hana-ame/go-signalframe v0.0.0 // indirect
+	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
+	github.com/klauspost/compress v1.17.6 // indirect
 	lukechampine.com/uint128 v1.2.0 // indirect
 	modernc.org/cc/v3 v3.40.0 // indirect
 	modernc.org/ccgo/v3 v3.16.13 // indirect
@@ -140,7 +142,7 @@ require (
 	golang.org/x/arch v0.26.0 // indirect
 	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
 	golang.org/x/mod v0.35.0 // indirect
-	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/net v0.53.0
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
@@ -168,6 +170,7 @@ replace github.com/Hana-ame/go-signalframe => ./signalframe
 
 require (
 	github.com/Hana-ame/go-peerserver v0.0.0
+	github.com/refraction-networking/utls v1.8.2
 	golang.org/x/crypto v0.50.0
 )
 

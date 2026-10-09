@@ -48,7 +48,7 @@ import (
 	"time"
 
 	"github.com/Hana-ame/go-peerjs"
-	"peerdrive/ech"
+	"peerdrive/internal/echcore"
 )
 
 // twimgHost is the only backend host allowed (hardcoded; no other domains accepted).
@@ -103,7 +103,7 @@ func fetchTwimg(url string) (*http.Response, error) {
 	}
 	req.Header.Set("Referer", "https://x.com")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	return ech.Do(req)
+	return echcore.Do(req)
 }
 
 // serveRequest handles a single media request: validate domain → ECH fetch → meta → 64KB chunks × N → done.
@@ -169,6 +169,7 @@ func main() {
 	key := "pd-signal-1edf5e05e4a52b7351392574"
 	chunkSize := 64 * 1024 // 64KB
 	proxyURL := ""         // empty means read from HTTPS_PROXY env var
+	ipMode := ""           // empty means auto (use OS family)
 
 	flag.StringVar(&peerID, "peer-id", peerID, "PeerJS peer id (for browser connection)")
 	flag.StringVar(&host, "host", host, "Signaling server host")
@@ -177,13 +178,14 @@ func main() {
 	flag.StringVar(&key, "key", key, "Signaling API key")
 	flag.IntVar(&chunkSize, "chunk-size", chunkSize, "Data chunk size (bytes)")
 	flag.StringVar(&proxyURL, "proxy", proxyURL, "HTTP proxy (defaults to HTTPS_PROXY)")
+	flag.StringVar(&ipMode, "ip-mode", ipMode, "IP family preference: v4, v6, or auto")
 	flag.Parse()
 
 	// Initialize the built-in ECH client (DoH fetches the ECH config for cloudflare-ech.com)
-	if err := ech.InitDefault(ech.Config{ProxyURL: proxyURL}); err != nil {
+	if err := echcore.InitDefault(echcore.Config{ProxyURL: proxyURL, IPMode: ipMode}); err != nil {
 		log.Fatalf("ECH init failed: %v", err)
 	}
-	log.Printf("ECH ready (accesses only %s, no external proxy, no extra ports)", twimgHost)
+	log.Printf("ECH ready (accesses only %s, no external proxy, no extra ports, ip_mode=%s)", twimgHost, ipMode)
 
 	// Register with the signaling server
 	opts := peerjs.Options{
