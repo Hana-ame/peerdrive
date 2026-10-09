@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"peerdrive/internal/config"
-	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 )
@@ -275,10 +274,10 @@ func (s *Server) callTool(name string, args map[string]any) (string, error) {
 		}
 
 		type searchOutput struct {
-			Total   int                      `json:"total"`
-			Count   int                      `json:"count"`
-			Offset  int                      `json:"offset"`
-			Results []repository.FileIndexRow `json:"results"`
+			Total   int64                  `json:"total"`
+			Count   int                    `json:"count"`
+			Offset  int                    `json:"offset"`
+			Results []repository.FileIndex `json:"results"`
 		}
 
 		out := searchOutput{
