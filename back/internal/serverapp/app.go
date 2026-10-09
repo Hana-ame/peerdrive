@@ -24,12 +24,9 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
-	"time"
 
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
@@ -37,6 +34,7 @@ import (
 	"peerdrive/internal/echproxy/exhentai"
 	"peerdrive/internal/echproxy/twimg"
 	"peerdrive/internal/extractor"
+	"peerdrive/internal/httpd"
 	"peerdrive/internal/log"
 	"peerdrive/internal/pathutil"
 	"peerdrive/internal/repository"
@@ -64,22 +62,13 @@ func Load() (*config.Config, func(), error) {
 	return cfg, func() {}, nil
 }
 
-// ListenAddr 返回主服务的监听地址。
+// ListenAddr 返回主服务的监听地址（host 空 = 监听所有网卡）。
+//
+// 实现已搬到 internal/httpd；这里保留一个薄包装，因为 cmd/peerdrive 的
+// runAll 也用它拼监听地址——两处拼法不同会让「合并模式」和「单独 serve」
+// 在 IPv6 host 上产生不同的地址串（JoinHostPort 会加方括号）。
 func ListenAddr(cfg *config.Config) string {
-	return net.JoinHostPort(cfg.Host, cfg.Port)
-}
-
-// isLoopbackListen reports whether the given host listens on loopback only.
-// Empty host = listen on all interfaces (0.0.0.0), which is non-loopback.
-func isLoopbackListen(host string) bool {
-	if host == "" {
-		return false
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	return ip.IsLoopback()
+	return httpd.JoinHostPort(cfg.Host, cfg.Port)
 }
 
 // validateAuthStartup checks that a non-loopback deployment has an auth backend configured,
@@ -92,7 +81,7 @@ func isLoopbackListen(host string) bool {
 // explicit opt-in for that dangerous configuration.
 func validateAuthStartup(cfg *config.Config) error {
 	addr := ListenAddr(cfg)
-	if isLoopbackListen(cfg.Host) {
+	if httpd.IsLoopback(cfg.Host) {
 		return nil // loopback only — safe
 	}
 	if cfg.RegistrationServer != "" {
@@ -707,42 +696,21 @@ func RunHTTP(addr string, h http.Handler) {
 	// The admin surface has no account system; "who can reach this port" is its only boundary.
 	// If the admin panel is only used locally, setting PEERDRIVE_HOST=127.0.0.1 is the
 	// cheapest wall.
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           h,
-		ReadHeaderTimeout: 15 * time.Second,
+	srv, err := httpd.New(httpd.Config{
+		Addr: addr,
+		// ReadHeaderTimeout 是最低限度的 Slowloris 防护（gin 的 r.Run() 不设这个）。
+		ReadHeaderTimeout: httpd.DefaultReadHeaderTimeout,
+		// LogPrefix 保持 "main"：这些日志是运维判断「主服务起没起来、怎么退的」
+		// 的，改前缀会让 grep "main:" 之类的检索语句全部失效。
+		LogPrefix: "main",
+	}, h)
+	if err != nil {
+		// 只能来自空 addr 或 nil handler，属于装配 bug 而非配置问题：直接 Fatal。
+		stdlog.Fatalf("main: build HTTP server: %v", err)
 	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		log.LogInfo("main: starting HTTP server on %s", addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		}
-	}()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	select {
-	case err := <-errCh:
-		log.LogError("main: HTTP server failed: %v", err)
-	case <-quit:
-		log.LogInfo("main: shutting down server")
-	}
-
-	// Graceful shutdown: first stop accepting new requests, then give in-progress requests
-	// some time to finish (whether the half-written file from an in-progress pull/upload
-	// can complete depends on this 20-second window).
-	// After timeout, force-close — we can't hold the shutdown open indefinitely for one slow
-	// request (container orchestrators will SIGKILL).
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.LogWarn("main: graceful shutdown timed out, forcing close: %v", err)
-		if err := srv.Close(); err != nil {
-			log.LogWarn("main: force close: %v", err)
-		}
-	}
+	// Run 返回的 error 只可能来自 ListenAndServe 失败，而 httpd.Serve 已经打过
+	// 「main: HTTP server failed: %v」；重复打只会让退出日志看起来像两次故障。
+	_ = srv.Run(context.Background())
 	log.LogInfo("main: stopped")
 }
 

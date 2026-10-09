@@ -17,36 +17,35 @@ import (
 
 	"github.com/Hana-ame/go-peerserver/tracker"
 	"peerdrive/internal/config"
+	"peerdrive/internal/httpd"
 	"peerdrive/internal/log"
 	"peerdrive/internal/regserver"
 	"peerdrive/internal/serverapp"
 	"peerdrive/internal/services"
 )
 
-// normalizePort 让 PORT 两种写法都能用。
+// normalizePort 已搬到 internal/httpd（httpd.NormalizePort）：它是「监听地址
+// 怎么拼」的通用问题，三个子命令都会碰到，实现与测试都在那里。
 //
-// 旧 reg-server 收的是裸端口号（`PORT=4000` → `":" + port`），
-// 而监听地址习惯写成 `HOST:PORT`（`:4000` / `127.0.0.1:4000`）。
-// 两种都见过，所以都支持——但不能一律拼冒号，
-// 否则 `HOST=127.0.0.1 PORT=4000` 会被拼成 `127.0.0.1:127.0.0.1:4000`。
 // regAddrFromEnv 解析 reg 子命令的监听地址。
 //
 // ⚠️ PORT 沿用旧 reg-server 的写法：不带冒号（"4000"）是常态——旧实现是
 // `addr := ":" + port`。若直接把 PORT 当监听地址传下去，`PORT=4000` 会报
 // "address 4000: missing port in address"，等于把还能跑的旧部署脚本弄坏。
+// 所以这里过一遍 httpd.NormalizePort，而不是把 PORT 原样当监听地址用。
 //
 // 单独成函数而不是内联在 runReg 里，是为了让测试能调到**同一个**入口：
 // 上一版测试直接调 normalizePort，摘掉 runReg 里的调用照样绿；
 // 再一版调 regAddrFromEnv，可它有自己的实现，跟 runReg 那个 flag 无关，还是绿。
 func regAddrFromEnv() string {
-	return normalizePort(envOr("PORT", ":4000"))
+	return httpd.NormalizePort(envOr("PORT", ":4000"))
 }
 
 // regFlagSet 构造 reg 子命令的 flag 定义。
 //
 // 抽出来是为了让测试能拿到**真实的那一份**：前几版的护栏都是「测辅助函数、
 // 不测调用点」，把 runReg 改回 envOr("PORT", ":4000") 照样绿。
-// 现在 runReg 与测试读同一个 FlagSet，摘掉 normalizePort 即失败。
+// 现在 runReg 与测试读同一个 FlagSet，摘掉 httpd.NormalizePort 即失败。
 func regFlagSet() *flag.FlagSet {
 	fs := flag.NewFlagSet("reg", flag.ContinueOnError)
 	fs.String("addr", regAddrFromEnv(), "listen address")
@@ -61,19 +60,6 @@ func regFlagSet() *flag.FlagSet {
 	fs.Int("bt-interval", 900, "announce interval in seconds (default 900 = 15 min)")
 	fs.Int("bt-max-peers", 100, "max peers per info_hash (default 100)")
 	return fs
-}
-
-func normalizePort(p string) string {
-	if p == "" {
-		return ":4000"
-	}
-	if strings.Contains(p, ":") {
-		return p // 已是 host:port 或 :port
-	}
-	if strings.Contains(p, ".") { // 纯 IP，没有端口
-		return p + ":4000"
-	}
-	return ":" + p
 }
 
 func envOr(k, def string) string {

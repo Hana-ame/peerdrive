@@ -2,35 +2,9 @@ package main
 
 import "testing"
 
-// TestNormalizePort 旧 reg-server 收的是裸端口号（PORT=4000），
-// 监听地址习惯写 HOST:PORT（:4000 / 127.0.0.1:4000）。两种都得能用。
-//
-// 这不是洁癖：写成 `PORT=4000` 跑到 `listen tcp: address 4000:
-// missing port in address`，等于把还能跑的旧部署脚本弄坏——
-// 而迁移指南第一条承诺就是"旧部署脚本不需要改"。
-func TestNormalizePort(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"4000", ":4000"},                    // 旧 reg-server 的写法
-		{":4000", ":4000"},                   // 已经带冒号
-		{"127.0.0.1:4000", "127.0.0.1:4000"}, // 带 host
-		{"127.0.0.1", "127.0.0.1:4000"},      // 纯 IP，补端口
-		{"", ":4000"},                        // 空值回默认
-	}
-	for _, c := range cases {
-		if got := normalizePort(c.in); got != c.want {
-			t.Errorf("normalizePort(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-// TestNormalizePortNeverDoublesPrefix 回归护栏：不能一律拼冒号，
-// 否则 HOST=127.0.0.1 会被拼成 127.0.0.1:127.0.0.1:4000。
-func TestNormalizePortNeverDoublesPrefix(t *testing.T) {
-	got := normalizePort("127.0.0.1:4000")
-	if got != "127.0.0.1:4000" {
-		t.Errorf("normalizePort(%q) = %q, 冒号被重复拼接", "127.0.0.1:4000", got)
-	}
-}
+// normalizePort 的测试随代码搬到了 internal/httpd/addr_test.go
+// （TestNormalizePort / TestNormalizePortNeverDoublesPrefix）——这里只剩
+// reg 子命令 flag 装配的护栏。
 
 // TestRegFlagDefaultNormalization 守住 runReg **真正用的那份** flag 定义。
 //
@@ -40,7 +14,7 @@ func TestNormalizePortNeverDoublesPrefix(t *testing.T) {
 //  2. 改测 regAddrFromEnv —— 它有自己的实现，跟 runReg 那个 flag 无关，
 //     把 runReg 改回 envOr("PORT", ":4000") 还是绿。
 //
-// 现在 runReg 与测试读同一个 regFlagSet()，摘掉 normalizePort 即失败。
+// 现在 runReg 与测试读同一个 regFlagSet()，摘掉 httpd.NormalizePort 即失败。
 func TestRegFlagDefaultNormalization(t *testing.T) {
 	t.Setenv("PORT", "4000")
 	fs := regFlagSet()

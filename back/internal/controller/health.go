@@ -8,19 +8,20 @@
 //   readiness (/ready): can it serve traffic. If it fails, drain traffic and wait for recovery.
 //     So it must actually query dependencies (here, the metadata database).
 // /ping is retained: a legacy endpoint that load balancers and old scripts still use.
+//
+// The response bodies themselves live in internal/httpd (PingHandler /
+// LivenessHandler / ReadinessHandler): the shell package owns the probe bytes
+// so the three probes cannot drift apart in Content-Type or JSON key order.
+// This file keeps the dependency wiring (InitHealth), the swag tags and the
+// documentation of the semantics above.
 
 package controller
 
 import (
-	"net/http"
-	"time"
-
 	"github.com/gin-gonic/gin"
-)
 
-// startedAt is the process start time, used by /health to return uptime (container orchestrators
-// use this to determine if the container was repeatedly restarted).
-var startedAt = time.Now()
+	"peerdrive/internal/httpd"
+)
 
 // dbPing is the "is the database alive?" probe injected by the assembly layer (Router.Engine in the router package).
 //
@@ -43,10 +44,7 @@ func InitHealth(ping func() error) {
 // @Success 200 {object} map[string]interface{}
 // @Router /health [get]
 func Health(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status":     "ok",
-		"uptime_sec": int64(time.Since(startedAt).Seconds()),
-	})
+	httpd.LivenessHandler(c.Writer, c.Request)
 }
 
 // Ready godoc
@@ -58,20 +56,8 @@ func Health(c *gin.Context) {
 // @Failure 503 {object} map[string]interface{}
 // @Router /ready [get]
 func Ready(c *gin.Context) {
-	if dbPing == nil {
-		// If not wired up, treat as not ready: better to let the probe go red than pretend everything is
-		// fine — a readiness that always returns 200 is more dangerous than no readiness at all (it
-		// fools the orchestration system).
-		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable", "reason": "health check not wired"})
-		return
-	}
-	// Ping actually takes a connection and executes a query; only when the database file is deleted,
-	// permissions are lost, or handles are exhausted will this go red.
-	// No separate timeout: database/sql's Ping uses context, and this probe's timeout is controlled
-	// by the caller (the orchestration system).
-	if err := dbPing(); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable", "reason": "database ping failed"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	// If not wired up, treat as not ready: better to let the probe go red than pretend everything is
+	// fine — a readiness that always returns 200 is more dangerous than no readiness at all (it
+	// fools the orchestration system).
+	httpd.ReadinessHandler(dbPing)(c.Writer, c.Request)
 }
