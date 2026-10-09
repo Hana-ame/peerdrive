@@ -34,7 +34,7 @@ func TestMCPServer(t *testing.T) {
 
 	// Insert test file index entry
 	fileHash := strings.Repeat("a", 64)
-	if err := repository.UpsertFileIndex(fileHash, filepath.Join(storageDir, "hello.txt"), 100); err != nil {
+	if _, err := repository.UpsertFileIndex(fileHash, filepath.Join(storageDir, "hello.txt"), "hello.txt", 100, false); err != nil {
 		t.Fatalf("UpsertFileIndex: %v", err)
 	}
 
