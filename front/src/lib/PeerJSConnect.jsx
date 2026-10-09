@@ -7,7 +7,7 @@
 // Extracted as an independent component: shared by the Settings node-connect
 // section and the home page (Plaza).
 import React, { useState, useRef, useEffect } from 'react';
-import { connectToPeer, discoverNodes } from './pd-client';
+import { connectToPeer, discoverNodes } from 'peerdrive-client';
 import { setNodeSession, clearNodeSession } from './nodeSession';
 import { fmtBytes } from './format';
 

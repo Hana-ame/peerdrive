@@ -12,6 +12,7 @@ export default defineConfig({
     alias: {
       '@platform': path.resolve(__dirname, './src/platform'),
       '@shared': path.resolve(__dirname, './src/platform/shared'),
+      'peerdrive-client': path.resolve(__dirname, '../packages/peerdrive-client/src'),
     },
   },
   build: { sourcemap: false },

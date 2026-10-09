@@ -182,5 +182,11 @@ jobs:
           cache: npm
           cache-dependency-path: front/package-lock.json
       - run: npm ci
+      - name: 断言 front/src/lib/pd-client 内嵌副本已删除（防回归）
+        run: |
+          if [ -d src/lib/pd-client ]; then
+            echo "错误: front/src/lib/pd-client 不应存在，统一使用 packages/peerdrive-client"
+            exit 1
+          fi
       - run: npm test
       - run: npm run build
