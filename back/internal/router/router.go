@@ -276,6 +276,24 @@ func (rt *Router) Engine() *gin.Engine {
 		controller.InitIwaraClient(rt.deps.IwaraClient)
 		r.GET("/iwara/video/:id", controller.GetIwaraVideo)
 	}
+
+	// twitter-pic gallery (twitter-pic-go 数据面的 peerdrive 整合). Optional
+	// module: only registered when the operator enabled PEERDRIVE_TWITTERPIC_ENABLE,
+	// so a default node never advertises a third-party puller it is not
+	// configured for (同 iwara/exhentai 的可选模块先例).
+	//
+	// Auth: 列表/读出/监视为只读端点，不加 token（与 /collections GET 一致）；
+	// build 会写节点 storage（摄取媒体 + 集合落 sha-文件系统），挂 authRequired。
+	if rt.deps.TwitterPic != nil {
+		controller.InitTwitterPic(rt.deps.TwitterPic)
+		xg := r.Group("/twitterpic")
+		{
+			xg.GET("/users", controller.TwitterPicUsers)
+			xg.POST("/users/:username/build", authRequired, controller.TwitterPicBuild)
+			xg.GET("/collections/:sha", controller.TwitterPicCollection)
+			xg.GET("/fetch-stats", controller.TwitterPicFetchStats)
+		}
+	}
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256Local)
 	r.GET("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
 	r.GET("/ipfs/:cid", controller.DownloadByCID)

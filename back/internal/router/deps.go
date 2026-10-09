@@ -50,6 +50,7 @@ import (
 	"peerdrive/internal/echproxy"
 	"peerdrive/internal/service"
 	"peerdrive/internal/source"
+	"peerdrive/internal/twitterpic"
 	"peerdrive/internal/transport"
 )
 
@@ -107,6 +108,14 @@ type Deps struct {
 	// into third-party requests, so it stays off unless opted into). When set,
 	// GET /iwara/video/:id serves the page its title/cover/resolution list.
 	IwaraClient *echproxy.IwaraClient
+
+	// TwitterPic is the twitter-pic gallery integration service
+	// (internal/twitterpic). nil → the /twitterpic/* endpoints are not registered
+	// (PEERDRIVE_TWITTERPIC_ENABLE=false is the default: the module pulls media
+	// from a third-party site into the node's storage, so it stays off unless
+	// opted into). When set, it serves user→collection builds, respond-by-sha
+	// collection reads and the fetch-source monitor snapshot.
+	TwitterPic *twitterpic.Service
 }
 
 // Router owns one fully-assembled HTTP surface plus the auth state that goes

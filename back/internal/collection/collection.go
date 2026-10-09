@@ -1,6 +1,7 @@
 // Package collection implements a minimal content-addressed "collection": a JSON
-// document listing files as {path, sha, preview} entries, stored in peerdrive's
-// sha-file system (content-addressed storage, CAS) keyed by its own SHA-256.
+// document listing files as {path, sha, preview, source, metadata} entries, stored
+// in peerdrive's sha-file system (content-addressed storage, CAS) keyed by its
+// own SHA-256.
 //
 // A collection is therefore an ordinary sha file: it is saved like any other file
 // (storageDir/<sha[:2]>/<sha>, the same layout anon_repo.SaveCollection uses),
@@ -10,19 +11,37 @@
 //
 // Distinct from the SQLite collections table and model.AnonCollection (which carry
 // visibility / owner / tags / providers / version chains): this module is
-// intentionally minimal — path + sha (+ optional preview sha) per entry, nothing
-// else. It is a backend-only internal package: no other go.mod consumes it
+// intentionally lean — path + sha (+ optional preview sha) plus, since the
+// multi-alternative-source extension (2026-10-09), an optional per-entry `source`
+// object (sha / url / ech-url / private.url — any one available is enough to
+// fetch the file) and optional file metadata (name / mime / created_at /
+// modified_at / size). All new fields are omitempty, so documents written by the
+// pre-extension format still parse and keep their sha addresses; new documents
+// only gain the extra fields when they carry data.
+//
+// Fetch semantics: Entry.Fetch tries the alternatives in priority order
+// sha → ech-url → url → private.url and returns the first stream that works,
+// recording every attempt in a FetchMonitor so the fallback trajectory and the
+// per-source success distribution stay observable (see fetch.go / monitor.go).
+// The sha alternative is resolved by an injected SHAOpener (the source.Manager /
+// ShaSource / a CAS read satisfy it); the http alternatives go through an
+// injected *http.Client. Collection itself stays free of the source package so
+// its dependency leaf stays shallow.
+//
+// It is a backend-only internal package: no other go.mod consumes it
 // (peerjs / signalserver / p2p_bt / signalframe are independent libraries), so it
 // lives under internal/ rather than as a submodule (hashmap precedent).
 package collection
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -37,6 +56,27 @@ import (
 // model.AnonCollection rejects Version < 1 on read.
 const Version = 1
 
+// SourceRef is a file entry's multi-alternative fetch source: the same logical
+// file addressed through several channels. Any non-empty alternative is enough
+// to fetch the file — "one of them works" is the fetch contract (see Fetch).
+//   - SHA: the content is already in the sha-file system (or resolvable by
+//     content address via a SHAOpener), the hot path.
+//   - ECHURL: reachable through ECH / an ech-proxy entry (cold path).
+//   - URL: direct URL (cold path).
+//   - Private: a private URL, only fetched when the node is authorized (the
+//     caller decides authorization; the format only carries the address).
+type SourceRef struct {
+	SHA     string      `json:"sha,omitempty"`
+	URL     string      `json:"url,omitempty"`
+	ECHURL  string      `json:"ech-url,omitempty"`
+	Private *PrivateURL `json:"private,omitempty"`
+}
+
+// PrivateURL is the private-URL alternative of a source.
+type PrivateURL struct {
+	URL string `json:"url,omitempty"`
+}
+
 // Entry is one file in a collection.
 type Entry struct {
 	// Path is the display path of the file inside the collection (relative path
@@ -48,11 +88,30 @@ type Entry struct {
 	// system. Strict lowercase is required: it is used verbatim to build the CAS
 	// path storageDir/<sha[:2]>/<sha> and for file_index lookups, both of which
 	// store lowercase — accepting uppercase would silently miss both.
+	// Optional only when the entry carries at least one other fetchable
+	// alternative (Source.URL / ECHURL / private.url / Source.SHA); a remote-only
+	// entry has sha == "" until its content is ingested into the sha-fs.
 	SHA string `json:"sha"`
 	// Preview is the 64-hex lowercase SHA-256 of a preview/thumbnail file
 	// (usually an image) in the sha-file system; empty means no preview.
 	// Same strictness as SHA (it is a sha-fs address too).
 	Preview string `json:"preview,omitempty"`
+	// Name is the file name for display and as the default download name. When
+	// set it must be a bare name (no path separators). Empty = derived from Path.
+	Name string `json:"name,omitempty"`
+	// MIME is the file media type (e.g. image/jpeg, video/mp4) used by consumers
+	// for type switching and preview rendering. Empty = unknown.
+	MIME string `json:"mime,omitempty"`
+	// CreatedAt / ModifiedAt are Unix seconds of creation/modification as known
+	// by the data source. 0 = unknown (field omitted). Stored as Unix seconds —
+	// compact in JSON, unambiguous, and what the API surface already uses.
+	CreatedAt  int64 `json:"created_at,omitempty"`
+	ModifiedAt int64 `json:"modified_at,omitempty"`
+	// Size is the file size in bytes when known; 0 = unknown.
+	Size int64 `json:"size,omitempty"`
+	// Source carries the multi-alternative fetch sources of the file. nil = the
+	// entry is sha-only (the pre-extension shape, still fully valid).
+	Source *SourceRef `json:"source,omitempty"`
 }
 
 // Collection is the JSON document stored in the sha-file system.
@@ -63,10 +122,16 @@ type Collection struct {
 
 // Validate checks the version and every entry:
 //   - version must equal Version;
-//   - path must be non-empty (whitespace-only counts as empty);
-//   - sha must be a strict 64-hex SHA-256 (see hashutil.IsStrictSHA256);
-//   - preview must be empty or a strict 64-hex SHA-256;
-//   - paths must be unique (duplicate path would render ambiguously as a folder).
+//   - path must be non-empty (whitespace-only counts as empty) and unique;
+//   - the entry must carry at least one fetchable alternative — sha, or one of
+//     source.{sha, url, ech-url, private.url} (an entry nobody can fetch is
+//     useless even if it parses);
+//   - sha / preview / source.sha must be empty or strict 64-hex SHA-256
+//     (see hashutil.IsStrictSHA256);
+//   - source url / ech-url / private.url must be absolute http(s) URLs;
+//   - top-level sha and source.sha, when both set, must agree;
+//   - name, when set, must be a bare file name (no path separators / CR/LF);
+//   - created_at / modified_at / size must be non-negative when set.
 func (c *Collection) Validate() error {
 	if c == nil {
 		return errors.New("collection: nil collection")
@@ -79,11 +144,30 @@ func (c *Collection) Validate() error {
 		if strings.TrimSpace(e.Path) == "" {
 			return fmt.Errorf("collection: entries[%d]: empty path", i)
 		}
-		if !hashutil.IsStrictSHA256(e.SHA) {
+		if !hasAlternative(e) {
+			return fmt.Errorf("collection: entries[%d]: no fetchable alternative (need sha or source url/ech-url/private.url)", i)
+		}
+		if e.SHA != "" && !hashutil.IsStrictSHA256(e.SHA) {
 			return fmt.Errorf("collection: entries[%d]: invalid sha %q", i, e.SHA)
 		}
 		if e.Preview != "" && !hashutil.IsStrictSHA256(e.Preview) {
 			return fmt.Errorf("collection: entries[%d]: invalid preview sha %q", i, e.Preview)
+		}
+		if e.Source != nil {
+			if err := e.Source.validate(); err != nil {
+				return fmt.Errorf("collection: entries[%d]: %w", i, err)
+			}
+			// Two sha fields naming different content is a contradiction the
+			// fetch path cannot resolve; reject instead of picking one silently.
+			if e.Source.SHA != "" && e.SHA != "" && e.Source.SHA != e.SHA {
+				return fmt.Errorf("collection: entries[%d]: conflicting sha alternatives (%s vs %s)", i, e.SHA, e.Source.SHA)
+			}
+		}
+		if e.Name != "" && (strings.ContainsAny(e.Name, `/\`) || strings.ContainsAny(e.Name, "\r\n")) {
+			return fmt.Errorf("collection: entries[%d]: invalid name %q (must be a bare file name)", i, e.Name)
+		}
+		if e.CreatedAt < 0 || e.ModifiedAt < 0 || e.Size < 0 {
+			return fmt.Errorf("collection: entries[%d]: negative metadata (created_at/modified_at/size)", i)
 		}
 		if _, dup := seen[e.Path]; dup {
 			return fmt.Errorf("collection: entries[%d]: duplicate path %q", i, e.Path)
@@ -93,10 +177,64 @@ func (c *Collection) Validate() error {
 	return nil
 }
 
+// hasAlternative reports whether the entry carries at least one fetchable source.
+func hasAlternative(e Entry) bool {
+	if e.SHA != "" {
+		return true
+	}
+	if e.Source == nil {
+		return false
+	}
+	if e.Source.SHA != "" || e.Source.URL != "" || e.Source.ECHURL != "" {
+		return true
+	}
+	return e.Source.Private != nil && e.Source.Private.URL != ""
+}
+
+func (s *SourceRef) validate() error {
+	if s.SHA != "" && !hashutil.IsStrictSHA256(s.SHA) {
+		return fmt.Errorf("invalid source sha %q", s.SHA)
+	}
+	for name, u := range map[string]string{"url": s.URL, "ech-url": s.ECHURL} {
+		if err := validateSourceURL(name, u); err != nil {
+			return err
+		}
+	}
+	if s.Private != nil {
+		if err := validateSourceURL("private.url", s.Private.URL); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateSourceURL accepts an absolute http(s) URL. A remote alternative is
+// fetched verbatim, so control characters that could smuggle headers or path
+// confusion are rejected at the boundary.
+func validateSourceURL(name, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	if strings.ContainsAny(raw, "\r\n") {
+		return fmt.Errorf("invalid source %s: must not contain line breaks", name)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid source %s %q: %w", name, raw, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("invalid source %s %q: scheme must be http or https", name, raw)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("invalid source %s %q: missing host", name, raw)
+	}
+	return nil
+}
+
 // New builds a collection from entries: validates them, normalizes nil → empty,
-// and sorts canonically (path, sha, preview) so identical content always yields
-// the same sha regardless of input order. Content-addressing determinism is the
-// same reason repository.SaveCollection sorts entries by path before marshaling.
+// and sorts canonically so identical content always yields the same sha
+// regardless of input order. Content-addressing determinism is the same reason
+// repository.SaveCollection sorts entries by path before marshaling.
 func New(entries []Entry) (*Collection, error) {
 	c := &Collection{Version: Version, Entries: entries}
 	if c.Entries == nil {
@@ -106,13 +244,25 @@ func New(entries []Entry) (*Collection, error) {
 		return nil, err
 	}
 	sort.SliceStable(c.Entries, func(i, j int) bool {
-		if c.Entries[i].Path != c.Entries[j].Path {
-			return c.Entries[i].Path < c.Entries[j].Path
+		a, b := c.Entries[i], c.Entries[j]
+		if a.Path != b.Path {
+			return a.Path < b.Path
 		}
-		if c.Entries[i].SHA != c.Entries[j].SHA {
-			return c.Entries[i].SHA < c.Entries[j].SHA
+		if a.SHA != b.SHA {
+			return a.SHA < b.SHA
 		}
-		return c.Entries[i].Preview < c.Entries[j].Preview
+		if a.Preview != b.Preview {
+			return a.Preview < b.Preview
+		}
+		// Entries identical in path/sha/preview still differ in the extended
+		// fields (source/name/mime/times/size). Tie-break on the canonical JSON
+		// so the total order is a pure function of content — identical content
+		// in a different input order must not mint a second CAS address. For
+		// pre-extension entries (path/sha/preview only) equality means the JSON
+		// is equal too, so the old ordering is preserved exactly.
+		bj, _ := json.Marshal(a)
+		cj, _ := json.Marshal(b)
+		return bytes.Compare(bj, cj) < 0
 	})
 	return c, nil
 }
@@ -176,8 +326,8 @@ func Save(storageDir string, c *Collection) (string, error) {
 // system and returns its sha. The document is parsed and re-serialized to its
 // canonical form first, so only structurally valid collections enter the CAS
 // (the bytes could come from a peer). All file operations are rooted at
-// storageDir via pathutil.Safe*Any — repo-wide rule: no path derived from
-// input may be written with a bare os.WriteFile.
+// storageDir via pathutil.SafeWriteFileAny — repo-wide rule: no path derived
+// from input may be written with a bare os.WriteFile.
 func SaveJSON(storageDir string, data []byte) (string, error) {
 	if strings.TrimSpace(storageDir) == "" {
 		return "", errors.New("collection: empty storage dir")
@@ -190,14 +340,48 @@ func SaveJSON(storageDir string, data []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(canon)
+	return StoreFile(storageDir, canon)
+}
+
+// StoreFile writes arbitrary content-addressed bytes into the sha-file system
+// (CAS) and returns their sha256. This is the generic "put content into the
+// sha-fs" write used both for collection documents (via SaveJSON) and for
+// ingested media files; content addressing makes the write idempotent (same
+// bytes land on the same path).
+func StoreFile(storageDir string, data []byte) (string, error) {
+	if strings.TrimSpace(storageDir) == "" {
+		return "", errors.New("collection: empty storage dir")
+	}
+	sum := sha256.Sum256(data)
 	sha := hex.EncodeToString(sum[:])
 	// SafeWriteFileAny auto-creates parent directories; content addressing
 	// makes the overwrite harmless (same bytes on the same path).
-	if err := pathutil.SafeWriteFileAny([]string{storageDir}, casPath(storageDir, sha), canon, 0o644); err != nil {
-		return "", fmt.Errorf("collection: save: %w", err)
+	if err := pathutil.SafeWriteFileAny([]string{storageDir}, casPath(storageDir, sha), data, 0o644); err != nil {
+		return "", fmt.Errorf("collection: store file: %w", err)
 	}
 	return sha, nil
+}
+
+// ReadFile reads arbitrary content-addressed bytes by sha from the sha-file
+// system. Unlike ReadJSON it does not require the bytes to be a collection
+// document — it is the read side of StoreFile (ingested media, previews, …).
+func ReadFile(storageDir, sha string) ([]byte, error) {
+	if strings.TrimSpace(storageDir) == "" {
+		return nil, errors.New("collection: empty storage dir")
+	}
+	if !hashutil.IsStrictSHA256(sha) {
+		return nil, fmt.Errorf("collection: invalid sha %q", sha)
+	}
+	filePath := casPath(storageDir, sha)
+	if _, err := os.Stat(filePath); err != nil {
+		return nil, fmt.Errorf("collection: not found locally: %w", err)
+	}
+	f, err := pathutil.SafeOpen(storageDir, filePath)
+	if err != nil {
+		return nil, fmt.Errorf("collection: open %s: %w", filePath, err)
+	}
+	defer f.Close()
+	return io.ReadAll(f)
 }
 
 // ReadJSON reads the raw collection JSON bytes addressed by sha from the

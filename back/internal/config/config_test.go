@@ -23,6 +23,26 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.WebRTCTURNServer)
 }
 
+// TestLoad_TwitterPicDefaultsOff pins the "开关关 = 零变化" contract at the
+// config level: the twitter-pic module (twitter-pic-go 数据面的 peerdrive 整合)
+// defaults to disabled, and the empty string values defer to the package
+// defaults (twitterpic.DefaultBaseURL / DefaultProxyBase) rather than being
+// baked into config.
+func TestLoad_TwitterPicDefaultsOff(t *testing.T) {
+	os.Unsetenv("PEERDRIVE_TWITTERPIC_ENABLE")
+	os.Unsetenv("PEERDRIVE_TWITTERPIC_BASE_URL")
+	os.Unsetenv("PEERDRIVE_TWITTERPIC_PROXY_BASE")
+	os.Unsetenv("PEERDRIVE_TWITTERPIC_MAX_FILES")
+	os.Unsetenv("PEERDRIVE_TWITTERPIC_TIMEOUT_SECS")
+	cfg := Load()
+
+	assert.False(t, cfg.TwitterPicEnable, "默认关：不显式开启不拉任何第三方数据")
+	assert.Equal(t, "", cfg.TwitterPicBaseURL, "空 = 由 twitterpic 包默认")
+	assert.Equal(t, "", cfg.TwitterPicProxyBase)
+	assert.Equal(t, 0, cfg.TwitterPicMaxFiles)
+	assert.Equal(t, 20, cfg.TwitterPicTimeout)
+}
+
 func TestGetEnv_DefaultWhenNotSet(t *testing.T) {
 	os.Unsetenv("TEST_GET_ENV_KEY")
 	assert.Equal(t, "fallback", getEnv("TEST_GET_ENV_KEY", "fallback"))
