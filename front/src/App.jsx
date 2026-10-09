@@ -40,36 +40,65 @@ function RouteLoading() {
   );
 }
 
-// Navigation only keeps currently active entries (2026-09-26: netdisk/collections/
-// transfers/BT/IPFS/settings are temporarily unused and hidden from nav; page
-// routes are kept, so direct URL access still works). The iwara page is a
-// standalone viewer that works without the rest of the netdisk chain (its data
-// comes from the echproxy iwara client, not from the local file index), so it
-// is linked from the nav.
-const NAV = [
+import * as ws from './ws';
+
+// Navigation groups (Issue #77):
+// - Always available (standalone/consumer pages): Connect (/), Iwara (/iwara)
+// - Available when connected to local node: Drive, NodeControl, Collections, Transfers, BT, IPFS, Settings
+const ALWAYS_NAV = [
   { to: '/', label: 'Connect' },
   { to: '/iwara', label: 'Iwara' },
 ];
 
+const CONNECTED_NAV = [
+  { to: '/drive', label: 'Drive' },
+  { to: '/node', label: 'Node' },
+  { to: '/collections', label: 'Collections' },
+  { to: '/transfers', label: 'Transfers' },
+  { to: '/bt', label: 'BT' },
+  { to: '/ipfs', label: 'IPFS' },
+  { to: '/settings', label: 'Settings' },
+];
+
 function Nav() {
+  const [isOpen, setIsOpen] = React.useState(ws.getStatus() === 'open');
+
+  React.useEffect(() => {
+    return ws.onStatus((status) => {
+      setIsOpen(status === 'open');
+    });
+  }, []);
+
   return (
     <nav className="h-14 bg-surface-raised/70 backdrop-blur-xl border-b border-white/[0.06] flex items-center px-3 md:px-6 gap-1 md:gap-2 shrink-0">
       <Link to="/" className="text-lg font-bold bg-gradient-to-r from-brand-300 via-brand-400 to-cyan-300 bg-clip-text text-transparent tracking-tight mr-4 shrink-0">Peerdrive</Link>
       <div className="hidden md:flex items-center gap-1">
-        {NAV.map(it => (
+        {ALWAYS_NAV.map(it => (
           <Link key={it.to} to={it.to}
             className="text-sm text-gray-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors">{it.label}</Link>
         ))}
+        {isOpen && (
+          <>
+            <span className="w-px h-4 bg-white/10 mx-1.5" />
+            {CONNECTED_NAV.map(it => (
+              <Link key={it.to} to={it.to}
+                className="text-sm text-gray-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors">{it.label}</Link>
+            ))}
+          </>
+        )}
       </div>
       <div className="md:hidden flex items-center gap-1 ml-auto">
-        {NAV.map(it => (
+        {ALWAYS_NAV.map(it => (
           <Link key={it.to} to={it.to} className="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded hover:bg-white/[0.06]">{it.label}</Link>
         ))}
+        {isOpen && (
+          <div className="flex items-center gap-1 border-l border-white/10 pl-1 ml-1">
+            <Link to="/drive" className="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded hover:bg-white/[0.06]">Drive</Link>
+            <Link to="/collections" className="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded hover:bg-white/[0.06]">Collections</Link>
+          </div>
+        )}
       </div>
-      {/* Live local-node session pill (audit P7): subscribes to ws.onStatus — the nav
-          used to carry zero connection signal. ml-auto right-aligns it on desktop (the
-          md:hidden block above it is display:none there, so two ml-autos don't fight);
-          on mobile it shares the trailing space with the compact nav links. */}
+      {/* Live local-node session pill */}
       <ConnectionStatus />
     </nav>
   );
@@ -87,6 +116,7 @@ export default function App() {
               <Route path="/" element={<Connect />} />
               <Route path="/node" element={<NodeControl />} />
               <Route path="/drive" element={<Drive />} />
+              <Route path="/drive/:hash" element={<Drive />} />
               <Route path="/collections" element={<Collections />} />
               <Route path="/collection" element={<CollectionView />} />
               <Route path="/collection/:hash" element={<CollectionView />} />
