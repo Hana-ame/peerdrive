@@ -11,6 +11,7 @@ import DataState from '../../../components/netdisk/DataState';
 import DriveGridView from '../components/DriveGridView';
 import DriveListView from '../components/DriveListView';
 import CastModal from '../components/CastModal';
+import ContextMenu from '../../../components/netdisk/ContextMenu';
 
 const CATEGORIES = [
   { id: 'all', label: 'All Files', icon: '📁' },
@@ -72,6 +73,28 @@ export default function Drive() {
   const [targetScreenId, setTargetScreenId] = useState('');
   const [targetChannel, setTargetChannel] = useState('default');
   const [castStatus, setCastStatus] = useState('');
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, file } | null
+
+  const handleContextMenu = (e, file) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      file,
+    });
+  };
+
+  const handleContainerContextMenu = (e) => {
+    // Only trigger if right-clicking outside of file cards/rows
+    if (e.target.closest('[data-context-target]')) return;
+    e.preventDefault();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      file: null, // blank canvas context
+    });
+  };
 
   const load = useCallback(async () => {
     setErr('');
@@ -304,7 +327,7 @@ export default function Drive() {
   const td = 'px-3 py-2';
 
   return (
-    <div className="p-4 sm:p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto h-full" onContextMenu={handleContainerContextMenu}>
       <div className="max-w-5xl mx-auto">
         {/* Header toolbar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
@@ -457,6 +480,7 @@ export default function Drive() {
               copiedHash={copiedHash}
               onShare={onShare}
               onDelete={onDelete}
+              onContextMenu={handleContextMenu}
             />
           ) : (
             <DriveListView
@@ -472,6 +496,7 @@ export default function Drive() {
               copiedHash={copiedHash}
               onShare={onShare}
               onDelete={onDelete}
+              onContextMenu={handleContextMenu}
             />
           )}
         </DataState>
@@ -530,6 +555,33 @@ export default function Drive() {
           handleCastControl={handleCastControl}
           onClose={() => setCastFile(null)}
         />
+
+        {/* Custom Context Menu (Issue #252) */}
+        {contextMenu && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            onClose={() => setContextMenu(null)}
+            items={
+              contextMenu.file
+                ? [
+                    { label: '预览文件 (Preview)', icon: '👁️', onClick: () => setPreviewFile(contextMenu.file) },
+                    { label: '下载 (Download)', icon: '⬇️', onClick: () => onDownload(contextMenu.file) },
+                    { label: '投屏到大屏 (Cast)', icon: '📺', onClick: () => openCastModal(contextMenu.file) },
+                    { divider: true },
+                    { label: '复制文件链接 (Copy Link)', icon: '🔗', onClick: () => onCopyDeepLink(contextMenu.file) },
+                    { label: '对外共享 (Share)', icon: '📤', onClick: () => onShare(contextMenu.file) },
+                    { label: '编辑标签 (Tags)', icon: '🏷️', onClick: () => openTagEditor(contextMenu.file) },
+                    { divider: true },
+                    { label: '删除 (Delete)', icon: '🗑️', danger: true, onClick: () => onDelete(contextMenu.file) },
+                  ]
+                : [
+                    { label: '上传文件 (Upload)', icon: '⬆️', onClick: () => fileRef.current?.click() },
+                    { label: '刷新列表 (Refresh)', icon: '🔄', onClick: load },
+                  ]
+            }
+          />
+        )}
       </div>
     </div>
   );

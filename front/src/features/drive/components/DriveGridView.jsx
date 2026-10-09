@@ -14,6 +14,7 @@ export default function DriveGridView({
   copiedHash,
   onShare,
   onDelete,
+  onContextMenu,
 }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
@@ -25,7 +26,8 @@ export default function DriveGridView({
         return (
           <div
             key={f.hash || i}
-            className={`card-surface p-4 rounded-xl border transition-all flex flex-col justify-between group ${
+            onContextMenu={(e) => onContextMenu?.(e, f)}
+            className={`card-surface p-4 rounded-xl border transition-all flex flex-col justify-between group cursor-pointer ${
               isTarget
                 ? 'border-brand-500 bg-brand-500/10'
                 : 'border-white/[0.06] hover:border-brand-500/40'
