@@ -445,4 +445,3 @@ func TestLoad_TURNCredentialsDefaultEmpty(t *testing.T) {
 	assert.Equal(t, "", cfg.WebRTCTURNUsername)
 	assert.Equal(t, "", cfg.WebRTCTURNPassword)
 }
-}
