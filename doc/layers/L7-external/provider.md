@@ -159,7 +159,7 @@ Note **it is a separate system from SourceManager in L4-core/source.md**: source
 "IPFS gateway fetch"; downloader and controller consume them independently, without bypassing
 each other.
 
-## Usage example: PinCID full chain (controller/p2p.go:938-999)
+## Usage example: PinCID full chain (controller/p2p.go:78-138)
 
 ```
 POST /ipfs/pin/:cid

@@ -79,7 +79,7 @@ front/
 全量将 `.jsx` 批量改为 `.tsx` 会产生巨量编译类型报错，迫使开发者大量编写 `any` 或耗费数周时间填补第三方库缺失的声明，严重拖慢网盘功能迭代与 #113 前端重设计承接。
 
 **最优折中解法**：
-1. 在 `front/src/types/` 下维护核心契约声明 `peerdrive.d.ts`：
+1. 在 `src/types/` 下维护核心契约声明 `peerdrive.d.ts`：
    ```typescript
    export interface ShareEntry {
      path: string;
@@ -129,7 +129,7 @@ front/
    - 提交 PR 1：引入 Prettier，执行全量无破坏格式化。
    - 提交 PR 2：引入 ESLint Flat Config + CI 门禁。
 2. **中期（配合契约重构）**：
-   - 建立 `front/src/types/contracts.d.ts` 规范核心数据实体。
+   - 建立 `src/types/contracts.d.ts` 规范核心数据实体。
    - 核心服务层（`api.js`、`client.js`、`useDrive.js`）启用 `// @ts-check`。
 3. **长期（不建议）**：
    - 维持 JSX 为主流业务展现层，不进行全量 `.tsx` 迁移，保持敏捷度与零构建阻抗。

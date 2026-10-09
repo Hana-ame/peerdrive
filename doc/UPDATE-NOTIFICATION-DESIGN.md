@@ -107,5 +107,5 @@ Peerdrive 拥有多元的分发矩阵：
 
 ## 6. 实施规划
 
-- **PR 1（后端通道）**：在 `back/internal/update` 落地基于 ETag/304 的轻量版本拉取器与状态存储，接入 `serverapp` 状态端点；
+- **PR 1（后端通道）**：在 `internal/update` 落地基于 ETag/304 的轻量版本拉取器与状态存储，接入 `serverapp` 状态端点；
 - **PR 2（前端/CLI 消费）**：在 Settings 页面与 `peerdrive version` CLI 输出中接入新版本提示。

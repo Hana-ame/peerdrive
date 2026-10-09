@@ -11,7 +11,7 @@
 Issue #113 提出的核心硬约束是：**「视觉重设计必须排在 #64 / #65 之后，在稳定的结构上做」**。
 
 经仓库实读核查，前置重构已全量落地并合入主干：
-1. **数据层定型（#64 / PR #97）**：✅ 已完成。`front/src/pd-client` 内嵌副本已彻底删除，前端直接依赖 `packages/peerdrive-client`。
+1. **数据层定型（#64 / PR #97）**：✅ 已完成。`src/pd-client` 内嵌副本已彻底删除，前端直接依赖 `packages/peerdrive-client`。
 2. **目录位置定型（#65）**：✅ 已完成。所有 8 个核心页面已迁入 `front/src/features/*`（`bt`, `collection`, `drive`, `ipfs`, `iwara`, `node`, `settings`, `transfers`），旧 `pages/` 为纯导出 shim。
 3. **传输与工具层解耦（#94 / #96）**：✅ 已完成。`platform/transport-ws` 与 `platform/shared` 已成为稳固的基础设施。
 
@@ -26,7 +26,7 @@ Issue #113 提出的核心硬约束是：**「视觉重设计必须排在 #64 / 
 ### 2.1 目录规范红线（严禁逆向退化）
 - **禁止**在 `front/src/pages/` 重新堆砌业务实现；
 - 遵循领域分层规范：
-  - 基础无业务含义组件 $\rightarrow$ `front/src/components/ui/`（或 `ui-kit`）；
+  - 基础无业务含义组件 $\rightarrow$ `src/components/ui/`（或 `ui-kit`）；
   - 领域特定视图与组件 $\rightarrow$ `front/src/features/<domain>/components/`；
   - 状态流转与 API 封装 $\rightarrow$ 维持 `platform/transport-ws` 统一长连接与帧调度。
 
@@ -66,7 +66,7 @@ Issue #113 提出的核心硬约束是：**「视觉重设计必须排在 #64 / 
 - **数据面（Dashboard Context）**：深灰/暗色底（`#0d1117`），等宽数字（`font-mono`），高对比度状态色（绿/蓝/黄/红）；
 - **内容面（Drive Context）**：中性浅色/深色自适应，大留白，网格图片卡片与文件层级优先。
 
-### 3.2 阶段 2：原子级组件库构建（`front/src/components/ui/`）
+### 3.2 阶段 2：原子级组件库构建（`src/components/ui/`）
 将零散的内联 Tailwind 类收敛为无状态受控组件：
 1. `Button`：支持 `primary`, `secondary`, `danger`, `ghost` 变体与 loading 状态；
 2. `Badge`：针对 P2P 状态展示（如 `Direct`, `Relay`, `Public`, `Private`）；

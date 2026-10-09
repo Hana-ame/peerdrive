@@ -74,7 +74,7 @@
   sqlite3 peerdrive.db ".backup 'backup-peerdrive-$(date +%F).db'"
   sqlite3 storage/reg.db ".backup 'backup-reg-$(date +%F).db'"
   ```
-- 在运维文档（`doc/guide/OPERATOR.md`）明确注明两库角色分工，避免管理员遗漏 `reg.db`。
+- 在运维文档（`doc/guide/operation-manual.md`）明确注明两库角色分工，避免管理员遗漏 `reg.db`。
 
 ### 4.3 独立的 Schema 版本演进 (#151 配套)
 - 两库各自独立维护 `PRAGMA user_version` 版本号。
