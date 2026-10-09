@@ -73,8 +73,12 @@ func newBTClient(dataDir string, listenAddr string) *BTClient {
 	if listenAddr != "" {
 		cfg.SetListenAddr(listenAddr)
 	}
-	cfg.Seed = false
-	cfg.NoUpload = true
+	// Seeding enabled: the client will upload to peers after download completion.
+	// Previously NoUpload=true + Seed=false blocked all upload, making StartSeed a no-op
+	// because t.seeding() checks cl.config.NoUpload/Seed in addition to dataUploadDisallowed.
+	// Per-torrent upload is still controllable via StopSeed (DisallowDataUpload).
+	cfg.Seed = true
+	cfg.NoUpload = false
 	cfg.DisableUTP = true
 
 	cl, err := torrent.NewClient(cfg)
