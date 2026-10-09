@@ -16,6 +16,9 @@ const { adminMock } = vi.hoisted(() => ({ adminMock: vi.fn() }))
 vi.mock('../src/ws.js', () => ({
   admin: adminMock,
 }))
+vi.mock('../src/platform/transport-ws', () => ({
+  admin: adminMock,
+}))
 
 import Transfers from '../src/pages/Transfers'
 

@@ -12,7 +12,7 @@
 // running (2s) and stop polling once everything reaches a terminal state,
 // instead of hammering the admin plane from an idle page.
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import * as ws from '../../../platform/transport-ws';
+import * as ws from '../../../ws';
 import {
   fmtBytes, fmtRate, fmtEta, progressPct, estEtaSeconds, RateTracker,
 } from '../../../platform/shared/format';
