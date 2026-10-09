@@ -13,5 +13,7 @@ export {
   download,
   downloadStream,
   downloadToFile,
+  onMessage,
+  sendFrame,
   __test,
 } from './client.js'

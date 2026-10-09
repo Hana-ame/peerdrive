@@ -326,6 +326,16 @@ func (rt *Router) Engine() *gin.Engine {
 		p2p.POST("/aria2/download", authRequired, controller.Aria2AddURI)
 	}
 
+	// Remote screen display & synchronization routes (Issue #243)
+	display := r.Group("/display")
+	{
+		display.GET("/screens", controller.ListDisplayScreens)
+		display.GET("/status", controller.GetDisplayStatus)
+		display.POST("/cast", authRequired, controller.CastDisplay)
+		display.POST("/control", authRequired, controller.ControlDisplay)
+		display.POST("/clear", authRequired, controller.ClearDisplay)
+	}
+
 	// BitTorrent routes
 	bt := r.Group("/bt")
 	{
