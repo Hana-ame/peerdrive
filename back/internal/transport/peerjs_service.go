@@ -104,6 +104,9 @@ type PeerJSService struct {
 	adminMu      sync.Mutex
 	adminHandler AdminHandler
 
+	// blocklist 节点黑名单与准入管理（admission.go）。
+	blocklist *PeerBlocklist
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -125,6 +128,7 @@ func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
 		pending:      make(map[Session]*connState),
 		connecting:   make(map[string]struct{}),
 		fileIndex:    NewFileIndexService(cfg.DownloadDir),
+		blocklist:    NewPeerBlocklist(storageDir, cfg.PeerBlocklist),
 		forwardRules: make(map[string][]int),
 		fwNonces:     make(map[string]*fwdNonce),
 		closed:       make(chan struct{}),
@@ -344,7 +348,7 @@ func (s *PeerJSService) BindLocal(sess Session) {
 // ——所以发现触发的拨号受 PEERDRIVE_MAX_PEERS 约束（静态 PEERS 是运营者
 // 显式声明，不受限，见 startLoop）。
 func (s *PeerJSService) onDiscoveredPeer(peerID string) {
-	if peerID == "" || peerID == s.id {
+	if peerID == "" || peerID == s.id || s.IsPeerBlocked(peerID) {
 		return
 	}
 	s.mu.Lock()
@@ -492,6 +496,10 @@ func (s *PeerJSService) connectLoop(peerID string) {
 		if s.ctx.Err() != nil {
 			return
 		}
+		if s.IsPeerBlocked(peerID) {
+			log.LogWarn("peerjs: connectLoop to blocked peer %s cancelled", peerID)
+			return
+		}
 		s.peerMu.Lock()
 		peer := s.peer
 		s.peerMu.Unlock()
@@ -579,6 +587,12 @@ func (s *PeerJSService) connectLoop(peerID string) {
 // c.onMessage==nil 则静默丢弃 → 门禁永不打开 → 30s pskAuthTimeout 关连接。
 // 前移后 OnMessage 在 OnOpen 触发前已就位，无论帧何时到达都能被 dispatchFrame 收到。
 func (s *PeerJSService) onIncomingConnection(c *peerjs.Connection) {
+	if s.IsPeerBlocked(c.PeerID) {
+		log.LogWarn("peerjs: incoming connection from blocked peer %s rejected", c.PeerID)
+		c.Close()
+		return
+	}
+
 	sess := newRTCSession(c)
 
 	// Dedup check before st creation (avoids st leak on dedup).
@@ -608,6 +622,11 @@ func (s *PeerJSService) onIncomingConnection(c *peerjs.Connection) {
 	sess.OnClose(func() { s.cleanupConn(sess, st) })
 
 	c.OnOpen(func(c *peerjs.Connection) {
+		if s.IsPeerBlocked(c.PeerID) {
+			log.LogWarn("peerjs: connection opened from blocked peer %s rejected", c.PeerID)
+			c.Close()
+			return
+		}
 		s.bindConnPrepared(sess, st, old)
 		log.LogInfo("peerjs: incoming connection from %s (conn=%s)", c.PeerID, c.ID)
 	})
@@ -649,7 +668,7 @@ func (s *PeerJSService) SetExtraPeers(fn func() []string) { s.extraPeers = fn }
 // 用户点"加入"后界面上的"直连"状态要尽快点亮。
 // 复用 connectLoop 的 connecting 去重（同一 peerID 不会开两条连接）。
 func (s *PeerJSService) EnsureConnection(peerID string) {
-	if peerID == "" || peerID == s.id {
+	if peerID == "" || peerID == s.id || s.IsPeerBlocked(peerID) {
 		return
 	}
 	s.mu.Lock()

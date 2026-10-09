@@ -13,6 +13,7 @@ package controller
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"peerdrive/internal/log"
@@ -166,4 +167,55 @@ func LeaveNode(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "left", "peer": peer})
+}
+
+// GetPeerBlocklist handles GET /peerjs/blocklist.
+func GetPeerBlocklist(c *gin.Context) {
+	if peerShareSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "peerjs service unavailable"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": peerShareSvc.BlockedPeers()})
+}
+
+// BlockPeerRequest payload for POST /peerjs/blocklist.
+type BlockPeerRequest struct {
+	PeerID string `json:"peer_id"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// PostPeerBlocklist handles POST /peerjs/blocklist.
+func PostPeerBlocklist(c *gin.Context) {
+	if peerShareSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "peerjs service unavailable"})
+		return
+	}
+	var req BlockPeerRequest
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.PeerID) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "peer_id is required"})
+		return
+	}
+	if err := peerShareSvc.BlockPeer(req.PeerID, req.Reason); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "blocked", "peer_id": req.PeerID})
+}
+
+// DeletePeerBlocklist handles DELETE /peerjs/blocklist/:peer.
+func DeletePeerBlocklist(c *gin.Context) {
+	if peerShareSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "peerjs service unavailable"})
+		return
+	}
+	peer := c.Param("peer")
+	if strings.TrimSpace(peer) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "peer parameter is required"})
+		return
+	}
+	if err := peerShareSvc.UnblockPeer(peer); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "unblocked", "peer_id": peer})
 }

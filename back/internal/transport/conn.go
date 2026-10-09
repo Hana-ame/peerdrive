@@ -282,6 +282,12 @@ func sessionRank(s Session) string {
 // Production callers (onIncomingConnection, connectLoop) use bindConnPrepared directly
 // with handlers registered before OnOpen to close the pre-bindConn frame-drop race.
 func (s *PeerJSService) bindConn(c Session) {
+	if s.IsPeerBlocked(c.ID()) {
+		log.LogWarn("peerjs: bindConn for blocked peer %s rejected", c.ID())
+		c.Close()
+		return
+	}
+
 	s.mu.Lock()
 	old := s.conns[c.ID()]
 	s.mu.Unlock()
@@ -397,6 +403,9 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 			// for receipt, see psk.go)
 		}
 		if s.pskGate(c, st, r) {
+			return
+		}
+		if s.anonGate(c, st, r) {
 			return
 		}
 		switch r.Type {

@@ -109,6 +109,12 @@ type Config struct {
 	// To distinguish permissions per user, use the registration server auth (doc/modules/auth), not here.
 	PeerPSK string
 
+	// PeerBlocklist comma-separated peer node IDs blocked from connecting (PEERDRIVE_PEER_BLOCKLIST).
+	PeerBlocklist string
+	// PeerAnonPolicy controls inbound admission policy for anonymous (unauthenticated) peers (PEERDRIVE_ANON_POLICY).
+	// Valid values: "open" (default), "share_only", "deny".
+	PeerAnonPolicy string
+
 	MQTTEnable      bool   // PEERDRIVE_MQTT_ENABLE, default false (MQTT shard room discovery)
 	MQTTBroker      string // PEERDRIVE_MQTT_BROKER, default tcp://broker.emqx.io:1883
 	MQTTTopicPref   string // PEERDRIVE_MQTT_TOPIC_PREFIX, default peerdrive/v1
@@ -428,6 +434,8 @@ func DefaultConfig() *Config {
 		PeerJSXOREnable:    false,
 		PeerJSXORKey:       "",
 		PeerPSK:            "",
+		PeerBlocklist:      "",
+		PeerAnonPolicy:     "open",
 		MQTTEnable:         false,
 		MQTTBroker:         "tcp://broker.emqx.io:1883",
 		MQTTTopicPref:      "peerdrive/v1",
@@ -536,6 +544,8 @@ func Load() *Config {
 		PeerJSXOREnable: getEnvBool("PEERDRIVE_PEERJS_XOR_ENABLE", false),
 		PeerJSXORKey:    getEnv("PEERDRIVE_PEERJS_XOR_KEY", ""),
 		PeerPSK:      getEnv("PEERDRIVE_PSK", ""),
+		PeerBlocklist:  getEnv("PEERDRIVE_PEER_BLOCKLIST", ""),
+		PeerAnonPolicy: getEnv("PEERDRIVE_ANON_POLICY", "open"),
 
 		MQTTEnable:        getEnvBool("PEERDRIVE_MQTT_ENABLE", false),
 		MQTTBroker:        getEnv("PEERDRIVE_MQTT_BROKER", "tcp://broker.emqx.io:1883"),
@@ -670,6 +680,13 @@ func Validate(c *Config) error {
 	}
 	if c.MaxPeers <= 0 {
 		errs = append(errs, fmt.Sprintf("PEERDRIVE_MAX_PEERS=%d must be positive", c.MaxPeers))
+	}
+
+	switch c.PeerAnonPolicy {
+	case "", "open", "share_only", "deny":
+		// valid
+	default:
+		errs = append(errs, fmt.Sprintf("PEERDRIVE_ANON_POLICY=%q is invalid (valid: open, share_only, deny)", c.PeerAnonPolicy))
 	}
 
 	// DiscoverMode 合法性 + 交叉校验：模式与依赖项不符时启动期就拦，

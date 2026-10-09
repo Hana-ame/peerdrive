@@ -114,6 +114,11 @@ func (rt *Router) registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 	r.POST("/peerjs/nodes/join", auth, controller.JoinNode)
 	r.DELETE("/peerjs/nodes/join", auth, controller.LeaveNode)
 
+	// ── Peer blocklist & admission control (Issue #89) ──
+	r.GET("/peerjs/blocklist", controller.GetPeerBlocklist)
+	r.POST("/peerjs/blocklist", auth, controller.PostPeerBlocklist)
+	r.DELETE("/peerjs/blocklist/:peer", auth, controller.DeletePeerBlocklist)
+
 	// GET /peerjs/files/search: search **this node's** index (admin panel's find-a-file box).
 	// Also auth-attached: response contains local file names/paths/sizes, same category as
 	// GET /peerjs/share. This endpoint does not depend on /peerjs being enabled on the
