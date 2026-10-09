@@ -4,7 +4,9 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams } from 'react-router-dom';
 import * as ws from '../../../platform/transport-ws';
 import { fmtBytes } from '../../../platform/shared/format';
+import { kindOf, mimeOf } from '../../../platform/shared/mime';
 import { STORAGE_KEY_API_BASE } from '../../../platform/shared/storageKeys';
+import FilePreviewModal from '../../../components/netdisk/FilePreviewModal';
 
 function fmtTime(ts) {
   if (!ts) return '—';
@@ -67,6 +69,7 @@ export default function Drive() {
   const [fileTags, setFileTags] = useState({}); // hash -> string[]
   const [editingTagFile, setEditingTagFile] = useState(null); // file object
   const [tagInputText, setTagInputText] = useState('');
+  const [previewFile, setPreviewFile] = useState(null); // file object to preview
 
   const load = useCallback(async () => {
     setErr('');
@@ -415,7 +418,16 @@ export default function Drive() {
                   </div>
 
                   <div className="mt-3 pt-2 border-t border-white/[0.04] flex items-center justify-between">
-                    <button onClick={() => onDownload(f)} className="text-[11px] text-brand-400 hover:text-brand-300">Download</button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setPreviewFile(f)}
+                        className="text-[11px] text-brand-400 hover:text-brand-300 font-medium"
+                      >
+                        Preview
+                      </button>
+                      <span className="text-gray-600 text-xs">•</span>
+                      <button onClick={() => onDownload(f)} className="text-[11px] text-gray-400 hover:text-gray-200">Download</button>
+                    </div>
                     <div className="flex items-center gap-1">
                       <button onClick={() => onCopyDeepLink(f)} className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300">
                         {copiedHash === f.hash ? 'Copied' : 'Link'}
@@ -463,7 +475,13 @@ export default function Drive() {
                           {isTarget && (
                             <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-400 shrink-0" title="Deep linked" />
                           )}
-                          <span className="truncate">{f.filename}</span>
+                          <button
+                            onClick={() => setPreviewFile(f)}
+                            className="truncate text-left hover:text-brand-300 transition-colors cursor-pointer"
+                            title="Click to preview"
+                          >
+                            {f.filename}
+                          </button>
                         </div>
                       </td>
                       <td className={td + ' text-xs text-gray-400 max-w-[150px]'}>
@@ -490,6 +508,7 @@ export default function Drive() {
                       <td className={td + ' text-gray-500 whitespace-nowrap'}>{f.mime_type || '—'}</td>
                       <td className={td + ' text-gray-500 whitespace-nowrap'}>{fmtTime(f.created_at)}</td>
                       <td className={td + ' text-right whitespace-nowrap'}>
+                        <button onClick={() => setPreviewFile(f)} className="text-[11px] px-2 py-1 rounded bg-brand-500/15 text-brand-300 hover:bg-brand-500/25 mr-1 font-medium">Preview</button>
                         <button onClick={() => onDownload(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Download</button>
                         <button onClick={() => onCopyDeepLink(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">
                           {copiedHash === f.hash ? 'Copied' : 'Link'}
@@ -534,7 +553,18 @@ export default function Drive() {
             </div>
           </div>
         )}
+
+        {/* In-line Preview Modal */}
+        {previewFile && (
+          <FilePreviewModal
+            file={previewFile}
+            fetchBlob={(hash) => ws.download(hash)}
+            onClose={() => setPreviewFile(null)}
+            onDownload={(f) => onDownload(f)}
+          />
+        )}
       </div>
     </div>
   );
 }
+
