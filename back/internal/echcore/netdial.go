@@ -98,9 +98,13 @@ func rootCAs() *x509.CertPool {
 	if pool == nil {
 		pool = x509.NewCertPool()
 	}
+	prefix := os.Getenv("PEERDRIVE_PREFIX")
+	if prefix == "" {
+		prefix = os.Getenv("PREFIX")
+	}
 	paths := []string{
 		"/data/data/com.termux/files/usr/etc/tls/cert.pem",
-		os.Getenv("PREFIX") + "/etc/tls/cert.pem",
+		prefix + "/etc/tls/cert.pem",
 	}
 	for _, p := range paths {
 		if p == "/etc/tls/cert.pem" || p == "" {

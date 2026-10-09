@@ -261,6 +261,11 @@ Windows 那格不再跳过 `go test`；本机没装 Go 也能验：
 | `PEERDRIVE_PSK` | - | 节点访问预共享密钥。空 = 开放（谁连上都服务）；设了 = 对端必须在连接上出示同一把密钥，否则回 `PSK_REQUIRED`。**只做准入，不做身份/分级**（详见 `doc/NETDISK.md` §9） |
 | `PEERDRIVE_ALLOW_HARDLINKS` | - | `=1` 放行有多个名字的文件（硬链接）。默认拒绝——硬链接没有方向，判不出它在允许根外还有没有别的名字。pnpm `node_modules` / `cp -l` 备份目录需要开 |
 | `PEERDRIVE_ALLOW_UNSAFE_ROOT` | - | `=1` 允许把 storage / download / share dir 配成**卷根**（`/`、`C:\`）。默认拒绝启动：那等于把整盘共享出去，几乎都是配错（env 没展开之类） |
+| `PEERDRIVE_PORT` | 3000 | HTTP 服务监听端口（向后兼容回退旧 `PORT`） |
+| `PEERDRIVE_DB_PATH` | ./peerdrive.db | 主数据库路径（向后兼容回退旧 `DB_PATH`） |
+| `PEERDRIVE_REG_DB` | ./reg.db | 注册服务数据库路径（向后兼容回退旧 `DB_PATH`） |
+| `PEERDRIVE_JWT_SECRET` | - | 注册服务 JWT 鉴权密钥（向后兼容回退旧 `JWT_SECRET`） |
+| `PEERDRIVE_PREFIX` | - | Termux 根证书目录前缀覆盖（向后兼容回退旧 `PREFIX`） |
 
 ## 线上部署（cloudcone 自托管信令）
 

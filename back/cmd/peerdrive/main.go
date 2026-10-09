@@ -96,12 +96,13 @@ func usage() {
 }
 
 // resolveDBPath 让注册服务复用主服务已经算好的存储目录，避免
-// PEERDRIVE_STORAGE 与 DB_PATH 各指一处、把数据写散。
+// PEERDRIVE_STORAGE 与 PEERDRIVE_REG_DB/DB_PATH 各指一处、把数据写散。
 func resolveDBPath(storageDir string) string {
-	if p := os.Getenv("DB_PATH"); p != "" {
+	if p := os.Getenv("PEERDRIVE_REG_DB"); p != "" {
 		return p
 	}
-	if p := os.Getenv("PEERDRIVE_REG_DB"); p != "" {
+	if p := os.Getenv("DB_PATH"); p != "" {
+		log.LogWarn("main: DB_PATH is deprecated for reg.db, use PEERDRIVE_REG_DB instead")
 		return p
 	}
 	if storageDir != "" {

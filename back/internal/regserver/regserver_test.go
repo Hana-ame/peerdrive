@@ -307,3 +307,43 @@ func TestNewTestServerClosesDbOnCleanup(t *testing.T) {
 			"(on Windows an unclosed .db makes t.TempDir's RemoveAll fail)")
 	}
 }
+
+// TestResolveJWTSecretAndDBPath tests unified namespace resolution for PEERDRIVE_REG_DB and PEERDRIVE_JWT_SECRET.
+// 发现背景：Issue #152 要求统一环境变量命名空间并保留向后兼容别名。
+func TestResolveJWTSecretAndDBPath(t *testing.T) {
+	t.Run("PEERDRIVE_JWT_SECRET takes precedence", func(t *testing.T) {
+		t.Setenv("JWT_SECRET", "legacy-secret")
+		t.Setenv("PEERDRIVE_JWT_SECRET", "unified-secret")
+		secret, ok := ResolveJWTSecret()
+		if !ok || secret != "unified-secret" {
+			t.Fatalf("expected unified-secret, got %q (ok=%v)", secret, ok)
+		}
+	})
+
+	t.Run("Legacy JWT_SECRET fallback", func(t *testing.T) {
+		t.Setenv("JWT_SECRET", "legacy-secret")
+		os.Unsetenv("PEERDRIVE_JWT_SECRET")
+		secret, ok := ResolveJWTSecret()
+		if !ok || secret != "legacy-secret" {
+			t.Fatalf("expected legacy-secret, got %q (ok=%v)", secret, ok)
+		}
+	})
+
+	t.Run("PEERDRIVE_REG_DB takes precedence", func(t *testing.T) {
+		t.Setenv("DB_PATH", "/tmp/legacy.db")
+		t.Setenv("PEERDRIVE_REG_DB", "/tmp/unified-reg.db")
+		path := ResolveDBPath()
+		if path != "/tmp/unified-reg.db" {
+			t.Fatalf("expected /tmp/unified-reg.db, got %q", path)
+		}
+	})
+
+	t.Run("Legacy DB_PATH fallback for reg.db", func(t *testing.T) {
+		t.Setenv("DB_PATH", "/tmp/legacy.db")
+		os.Unsetenv("PEERDRIVE_REG_DB")
+		path := ResolveDBPath()
+		if path != "/tmp/legacy.db" {
+			t.Fatalf("expected /tmp/legacy.db, got %q", path)
+		}
+	})
+}

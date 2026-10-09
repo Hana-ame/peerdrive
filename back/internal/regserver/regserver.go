@@ -75,6 +75,7 @@ import (
 
 	"github.com/Hana-ame/go-peerserver/tracker"
 	"peerdrive/internal/httpd"
+	"peerdrive/internal/log"
 	"peerdrive/internal/ratelimit"
 )
 
@@ -153,15 +154,28 @@ type Server struct {
 	tracker *tracker.Tracker
 }
 
+// ResolveJWTSecret reads PEERDRIVE_JWT_SECRET first, falling back to legacy JWT_SECRET.
+// Uses os.LookupEnv to distinguish unset from empty, and warns when legacy variable is used.
+func ResolveJWTSecret() (string, bool) {
+	if val, ok := os.LookupEnv("PEERDRIVE_JWT_SECRET"); ok && val != "" {
+		return val, true
+	}
+	if val, ok := os.LookupEnv("JWT_SECRET"); ok && val != "" {
+		log.LogWarn("regserver: JWT_SECRET is deprecated, use PEERDRIVE_JWT_SECRET instead")
+		return val, true
+	}
+	return "", false
+}
+
 // New 打开（或创建）指定路径的库并返回服务实例。
-// dbPath 为空时按 DB_PATH → PEERDRIVE_REG_DB → ./reg.db 解析。
+// dbPath 为空时按 PEERDRIVE_REG_DB → DB_PATH → ./reg.db 解析。
 // secret 为空直接报错——空密钥会让任何人伪造 token。
 func New(dbPath string) (*Server, error) {
 	if dbPath == "" {
 		dbPath = ResolveDBPath()
 	}
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
+	secret, ok := ResolveJWTSecret()
+	if !ok || secret == "" {
 		return nil, errors.New("JWT_SECRET is required")
 	}
 	s := &Server{
@@ -195,13 +209,14 @@ func regRate(env string, def float64) float64 {
 	return f
 }
 
-// ResolveDBPath 按 DB_PATH → PEERDRIVE_REG_DB → ./reg.db 的顺序解析库路径。
-// 沿用原服务的变量名，避免改部署脚本；PEERDRIVE_REG_DB 是主仓风格别名。
+// ResolveDBPath 按 PEERDRIVE_REG_DB → DB_PATH → ./reg.db 的顺序解析库路径。
+// PEERDRIVE_REG_DB 是主仓风格命名，DB_PATH 保留作为向后兼容别名。
 func ResolveDBPath() string {
-	if p := os.Getenv("DB_PATH"); p != "" {
+	if p := os.Getenv("PEERDRIVE_REG_DB"); p != "" {
 		return p
 	}
-	if p := os.Getenv("PEERDRIVE_REG_DB"); p != "" {
+	if p := os.Getenv("DB_PATH"); p != "" {
+		log.LogWarn("regserver: DB_PATH is deprecated, use PEERDRIVE_REG_DB instead")
 		return p
 	}
 	return "./reg.db"

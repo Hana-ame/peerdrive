@@ -383,3 +383,36 @@ func TestLoad_OpenListEnvOverrides(t *testing.T) {
 	assert.Equal(t, 30, cfg.OpenListTimeoutSecs)
 	assert.Equal(t, false, cfg.OpenListVerify)
 }
+
+// TestLoad_UnifiedNamespaceEnv tests that PEERDRIVE_PORT and PEERDRIVE_DB_PATH
+// take precedence over legacy PORT and DB_PATH, while legacy variables still work as fallbacks.
+// 发现背景：Issue #152 指出 PORT/DB_PATH 等无 PEERDRIVE_ 前缀造成命名混乱与误用。
+func TestLoad_UnifiedNamespaceEnv(t *testing.T) {
+	t.Run("PEERDRIVE_PORT precedence over PORT", func(t *testing.T) {
+		t.Setenv("PORT", "8000")
+		t.Setenv("PEERDRIVE_PORT", "9000")
+		cfg := Load()
+		assert.Equal(t, "9000", cfg.Port)
+	})
+
+	t.Run("Legacy PORT fallback", func(t *testing.T) {
+		t.Setenv("PORT", "8080")
+		os.Unsetenv("PEERDRIVE_PORT")
+		cfg := Load()
+		assert.Equal(t, "8080", cfg.Port)
+	})
+
+	t.Run("PEERDRIVE_DB_PATH precedence over DB_PATH", func(t *testing.T) {
+		t.Setenv("DB_PATH", "/tmp/legacy.db")
+		t.Setenv("PEERDRIVE_DB_PATH", "/tmp/unified.db")
+		cfg := Load()
+		assert.Equal(t, "/tmp/unified.db", cfg.DBPath)
+	})
+
+	t.Run("Legacy DB_PATH fallback", func(t *testing.T) {
+		t.Setenv("DB_PATH", "/tmp/legacy.db")
+		os.Unsetenv("PEERDRIVE_DB_PATH")
+		cfg := Load()
+		assert.Equal(t, "/tmp/legacy.db", cfg.DBPath)
+	})
+}
