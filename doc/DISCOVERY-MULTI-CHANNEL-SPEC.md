@@ -2,7 +2,8 @@
 
 > 对应 Issue: #147  
 > 状态: 架构规范与需求确立（按 Issue 边界：明确需求与实测行为基准，待后续单通道实测后实施）  
-> 关联 Issue: #146 (DHT 发现层), #145 (双栈策略), #144 (NAT/TURN), #90 (发现层外移), #115 (架构总纲)
+> 关联 Issue: #201 (本地回环与 Lobby Fallback), #146 (DHT 发现层), #145 (双栈策略), #144 (NAT/TURN), #90 (发现层外移), #115 (架构总纲)
+> 补充规范: [`doc/design/DISCOVERY-FALLBACK-LOBBY-SPEC.md`](doc/design/DISCOVERY-FALLBACK-LOBBY-SPEC.md)
 
 ---
 
