@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
+	"github.com/Hana-ame/go-peerserver/tracker"
 	"peerdrive/internal/config"
 	"peerdrive/internal/log"
 	"peerdrive/internal/regserver"
@@ -51,6 +53,13 @@ func regFlagSet() *flag.FlagSet {
 	fs.String("db", "", "sqlite path (default: $DB_PATH → $PEERDRIVE_REG_DB → ./reg.db)")
 	fs.String("tls-cert", os.Getenv("PEERDRIVE_REG_TLS_CERT"), "TLS certificate (PEM)")
 	fs.String("tls-key", os.Getenv("PEERDRIVE_REG_TLS_KEY"), "TLS private key (PEM)")
+	// BitTorrent HTTP tracker (BEP 12/31). When enabled, the reg server
+	// also serves /announce, /scrape, and /tracker/bans. Ban management
+	// uses JWT Bearer auth (same as /auth/whoami).
+	fs.Bool("bt-tracker", false, "enable BitTorrent HTTP tracker (/announce, /scrape)")
+	fs.String("bt-bans-file", "tracker_bans.json", "JSON file for tracker ban persistence")
+	fs.Int("bt-interval", 900, "announce interval in seconds (default 900 = 15 min)")
+	fs.Int("bt-max-peers", 100, "max peers per info_hash (default 100)")
 	return fs
 }
 
@@ -72,6 +81,13 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// mustInt parses a string to int, returning the default (0) on parse error.
+// Used for tracker config flags that fall back to tracker.NewTracker defaults.
+func mustInt(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
 }
 
 // runSignal 起信令 + 节点发现，阻塞直到出错或收到退出信号。
@@ -115,6 +131,10 @@ func runReg(args []string) {
 	dbPath := fs.Lookup("db")
 	cert := fs.Lookup("tls-cert")
 	tlsKey := fs.Lookup("tls-key")
+	btTracker := fs.Lookup("bt-tracker")
+	btBansFile := fs.Lookup("bt-bans-file")
+	btInterval := fs.Lookup("bt-interval")
+	btMaxPeers := fs.Lookup("bt-max-peers")
 	_ = fs.Parse(args)
 
 	srv, err := regserver.New(dbPath.DefValue)
@@ -124,7 +144,23 @@ func runReg(args []string) {
 	}
 	defer srv.Close()
 
-	log.LogInfo("reg: listening on %s", *addr)
+	// BitTorrent HTTP tracker (BEP 12/31) — ban management uses JWT auth,
+	// user-level bans map to regserver usernames via JWT verification.
+	if btTracker.Value.String() == "true" {
+		btOpts := []tracker.Option{
+			tracker.WithAnnounceInterval(mustInt(btInterval.Value.String())),
+			tracker.WithMaxPeers(mustInt(btMaxPeers.Value.String())),
+		}
+		if btBansFile.Value.String() != "" {
+			btOpts = append(btOpts, tracker.WithBanFile(btBansFile.Value.String()))
+		}
+		tr := srv.SetupTracker(btOpts...)
+		srv.SetTracker(tr)
+		log.LogInfo("reg: bt-tracker enabled (interval=%d maxPeers=%d bansFile=%q)",
+			mustInt(btInterval.Value.String()), mustInt(btMaxPeers.Value.String()), btBansFile.Value.String())
+	}
+
+	log.LogInfo("reg: listening on %s", addr.Value.String())
 	if err := srv.Serve(addr.Value.String(), cert.Value.String(), tlsKey.Value.String()); err != nil {
 		fmt.Fprintf(os.Stderr, "peerdrive reg: %v\n", err)
 		os.Exit(1)

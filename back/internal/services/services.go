@@ -16,9 +16,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 
 	signalserver "github.com/Hana-ame/go-peerserver"
+	"github.com/Hana-ame/go-peerserver/tracker"
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/regserver"
@@ -205,6 +208,33 @@ func UnifiedMux(cfg *config.Config, ginHandler http.Handler) (*http.ServeMux, *r
 			continue
 		}
 		mux.Handle(p, regMux)
+	}
+
+	// BitTorrent HTTP tracker (BEP 12/31) for the all-in-one mode.
+	// When PEERDRIVE_BT_TRACKER is set, the unified mux also serves
+	// /announce, /scrape, and /tracker/bans. Ban management uses JWT
+	// Bearer auth (same protocol as /auth/whoami).
+	if os.Getenv("PEERDRIVE_BT_TRACKER") == "1" || os.Getenv("PEERDRIVE_BT_TRACKER") == "true" {
+		btOpts := []tracker.Option{
+			tracker.WithBanFile(os.Getenv("PEERDRIVE_BT_BANS_FILE")),
+		}
+		if v := os.Getenv("PEERDRIVE_BT_INTERVAL"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				btOpts = append(btOpts, tracker.WithAnnounceInterval(n))
+			}
+		}
+		if v := os.Getenv("PEERDRIVE_BT_MAX_PEERS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				btOpts = append(btOpts, tracker.WithMaxPeers(n))
+			}
+		}
+		tr := reg.SetupTracker(btOpts...)
+		reg.SetTracker(tr)
+		// Re-fetch the handler with tracker routes included.
+		regMux = reg.Handler().(*http.ServeMux)
+		mux.Handle("/announce", regMux)
+		mux.Handle("/scrape", regMux)
+		mux.Handle("/tracker/bans", regMux)
 	}
 
 	// 主服务兜底

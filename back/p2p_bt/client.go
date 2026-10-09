@@ -46,14 +46,15 @@ type downloadState struct {
 
 // BTClient manages BitTorrent download tasks.
 type BTClient struct {
-	cl          *torrent.Client
-	dataDir     string
-	onComplete  OnTorrentComplete
-	mu          sync.RWMutex
-	downloads   map[string]*downloadState
-	customPeers map[string][]string
-	torrentData map[string][]byte // infohash -> raw .torrent bytes
-	autoSeed    map[string]bool   // infohashes to auto-start seeding on completion
+	cl             *torrent.Client
+	dataDir        string
+	onComplete     OnTorrentComplete
+	mu             sync.RWMutex
+	downloads      map[string]*downloadState
+	customPeers    map[string][]string
+	torrentData    map[string][]byte // infohash -> raw .torrent bytes
+	autoSeed       map[string]bool   // infohashes to auto-start seeding on completion
+	publicTrackers []string          // fallback public trackers (empty = no injection)
 }
 
 // NewBTClient creates a BT client instance (default listen port).
@@ -91,6 +92,23 @@ func newBTClient(dataDir string, listenAddr string) *BTClient {
 		torrentData: make(map[string][]byte),
 		autoSeed:    make(map[string]bool),
 	}
+
+	// Public tracker fallback: when a torrent has no announce list, inject
+	// these public HTTP trackers so the client can still find peers.
+	// Configurable via PEERDRIVE_BT_PUBLIC_TRACKERS (comma-separated URLs);
+	// defaults to the built-in list in tracker_list.go.
+	if envList := os.Getenv("PEERDRIVE_BT_PUBLIC_TRACKERS"); envList != "" {
+		for _, t := range strings.Split(envList, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				client.publicTrackers = append(client.publicTrackers, t)
+			}
+		}
+		LogInfo("bt-client: public trackers from env: %d", len(client.publicTrackers))
+	} else {
+		client.publicTrackers = append([]string(nil), defaultPublicTrackers...)
+	}
+
 	LogInfo("bt-client: created, dataDir=%s", dataDir)
 	return client
 }
@@ -120,6 +138,11 @@ func (c *BTClient) AddTorrentBytes(data []byte) (*TorrentMeta, error) {
 		return nil, fmt.Errorf("torrent %s already added", ih)
 	}
 	c.mu.Unlock()
+
+	// Inject public trackers if the torrent has no announce list.
+	// This ensures the client can find peers even for torrents with zero
+	// trackers (common in private or older torrents).
+	c.injectPublicTrackers(mi)
 
 	t, err := c.cl.AddTorrent(mi)
 	if err != nil {
@@ -167,6 +190,9 @@ func (c *BTClient) AddMagnetURI(uri string) (*TorrentMeta, error) {
 		return nil, fmt.Errorf("torrent %s already added", ih)
 	}
 	c.mu.Unlock()
+
+	// Inject public trackers into the magnet spec if no trackers are present.
+	c.injectPublicTrackersToSpec(spec)
 
 	t, _, err := c.cl.AddTorrentSpec(spec)
 	if err != nil {
@@ -217,6 +243,50 @@ func (c *BTClient) AddMagnetURI(uri string) (*TorrentMeta, error) {
 	}
 
 	return meta, nil
+}
+
+// injectPublicTrackers modifies the MetaInfo's announce list in-place,
+// adding public trackers if the torrent has no existing announce list.
+// If the torrent already has trackers, no change is made — this avoids
+// duplicating endpoints and respects private tracker configurations.
+func (c *BTClient) injectPublicTrackers(mi *metainfo.MetaInfo) {
+	if len(c.publicTrackers) == 0 {
+		return
+	}
+	// Convert existing announce list to flat []string.
+	var existing []string
+	if mi.AnnounceList.OverridesAnnounce(mi.Announce) {
+		for _, tier := range mi.AnnounceList {
+			existing = append(existing, tier...)
+		}
+	} else if mi.Announce != "" {
+		existing = []string{mi.Announce}
+	}
+	merged := mergePublicTrackers(existing)
+	if len(merged) == len(existing) {
+		return // no change
+	}
+	// Put the merged list into a single tier (tier order doesn't matter
+	// for anacrolix's concurrent tracker contact).
+	mi.AnnounceList = metainfo.AnnounceList{merged}
+	mi.Announce = "" // AnnounceList takes precedence when non-empty.
+}
+
+// injectPublicTrackersToSpec modifies a TorrentSpec's tracker list in-place,
+// adding public trackers if the magnet URI has no existing trackers.
+func (c *BTClient) injectPublicTrackersToSpec(spec *torrent.TorrentSpec) {
+	if len(c.publicTrackers) == 0 {
+		return
+	}
+	var existing []string
+	for _, tier := range spec.Trackers {
+		existing = append(existing, tier...)
+	}
+	merged := mergePublicTrackers(existing)
+	if len(merged) == len(existing) {
+		return // no change
+	}
+	spec.Trackers = [][]string{merged}
 }
 
 // AddTorrent is a backward-compatible method — adds a download from a TorrentMeta.

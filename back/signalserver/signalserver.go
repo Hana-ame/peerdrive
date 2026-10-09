@@ -19,6 +19,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Hana-ame/go-peerserver/tracker"
 )
 
 type Server struct {
@@ -51,6 +53,11 @@ type Server struct {
 	peerLinks map[string]map[string]time.Time // peerId → neighbor peerId → lastSeen (for graph)
 	peerColls map[string][]string             // peerId -> collections
 	peerStats map[string]*PeerStats           // peerId -> stats
+
+	// tracker is an optional BitTorrent HTTP tracker server (BEP 12/31).
+	// When set, /announce, /scrape, and /tracker/bans are served alongside
+	// the signaling endpoints. See WithTracker in config.go.
+	tracker *tracker.Tracker
 }
 
 // NewServer creates a signaling server.
