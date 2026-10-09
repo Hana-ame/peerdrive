@@ -23,7 +23,7 @@
 | `back/internal/downloader/` | **本地访问** | 是 | 统一调度底层 Source 获取流并落盘 | 取数调度引擎 |
 | `back/internal/source/` | **本地访问 / 接缝** | **核心接缝** | 定义 `source.Source` 接口；将 Local, URL, PeerJS, ECH 统一为取数源 | 访问形态的关键抽象接缝 |
 | `back/peerjs/` (独立模块) | **P2P 访问** | 否 | 独立 PeerJS 协议客户端实现与 DataChannel 管理 | 独立 repo: `go-peerjs` |
-| `back/internal/transport/` | **P2P 访问 / 混装** | **是 (历史混装)** | 承载 `peerjs_service.go` (P2P)、`psk.go` (准入)，同时也承载了 `admin.go` (WS 管理面转发) | 历史包膨胀，未来建议按通道拆分 |
+| `back/internal/transport/` | **P2P 访问 / 混装** | **是 (历史混装)** | 承载 `peerjs_service.go` (P2P)、`gate.go` (准入/门禁)，同时也承载了 `admin.go` (WS 管理面转发) | 历史包膨胀，已按职责拆分文件 |
 | `back/internal/wsconn/` | **WS 管理** | 否 | WebSocket 会话生命周期与底层帧通道管理 | 已从 transport 拆出 |
 | `back/internal/httpd/` | **HTTP 端点** | 否 | HTTP 监听地址规范化、端口绑定基础设施 | 监听网络层 |
 | `back/internal/router/` | **HTTP 端点** | 是 | 注册全局 HTTP 路由；挂载 `/ws/peer` WS 升级点 | 路由总装配 |

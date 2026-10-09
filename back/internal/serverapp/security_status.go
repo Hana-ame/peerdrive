@@ -45,7 +45,7 @@ type securityFinding struct {
 func collectSecurityFindings(cfg *config.Config, share *service.NodeShare) []securityFinding {
 	var out []securityFinding
 
-	// 1. Inbound P2P gate: the PSK's only real gate. transport/psk.go:60 pskEnabled() is
+	// 1. Inbound P2P gate: the PSK's only real gate. transport/gate.go:154 pskEnabled() is
 	//    literally cfg.PeerPSK != "", so an empty value means open.
 	if cfg.PeerPSK == "" {
 		out = append(out, securityFinding{

@@ -1,14 +1,19 @@
 package transport
 
-// psk_test.go: Behavioral contract for the pre-shared key gate (psk.go).
+// gate_test.go: Behavioral contracts for admission, access control, and identity gates (gate.go).
 //
-// Why a separate file: the gate's failure mode is *silent* -- the worst case is not
-// an error, but "forgot to block" or "blocked the wrong thing" (blocking our own
-// responses). Both manifest as "mysterious timeouts" in a real network and are
-// extremely costly to debug. So here we nail down every pass/block boundary.
+// Covers:
+//   - Part 1: PSK admission gate contracts & timing invariants
+//   - Part 2: Session locality gate (isSelfSession)
+//   - Part 3: Share download gate (ShareGate)
+//   - Part 4: Identity & authorization gate (Authorizer & DefaultAuthorizer)
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -38,6 +43,18 @@ func waitSent(s *fakeSession, typ string, d time.Duration) (map[string]any, bool
 		time.Sleep(10 * time.Millisecond)
 	}
 	return nil, false
+}
+
+// tokenAuthorizer is a mock Phase 7 Authorizer that grants access if token matches expected.
+type tokenAuthorizer struct {
+	expectedToken string
+}
+
+func (a *tokenAuthorizer) AuthorizeDownload(session Session, hash string, token string) bool {
+	if isSelfSession(session) {
+		return true
+	}
+	return token == a.expectedToken
 }
 
 // TestPSK_OpenModeNoGate No PSK configured = open mode: a peer that never presents
@@ -200,9 +217,6 @@ func (f *fakeSession) messageHandler() func(peerjs.Frame) {
 // pskRaceSession models the real shape of "inbound frame arrives concurrently
 // with our auth frame": on the first SendJSON (the psk-auth inside bindConn),
 // synchronously deliver the peer's psk-auth to the already-registered OnMessage.
-// On a real device, dc.OnOpen (running bindConn) and dc.OnMessage are two
-// concurrent callbacks, and sending may yield, so the peer's very first frame sent
-// at the moment of open can arrive before registration completes.
 type pskRaceSession struct {
 	*fakeSession
 	fired     bool
@@ -224,15 +238,7 @@ func (s *pskRaceSession) SendJSON(v any) error {
 
 // TestPSK_AuthArrivingDuringBindIsNotDropped A psk-auth that arrives during
 // bindConn must **not** be dropped.
-//
-// Discovery background (2026-09-21, CI panel E2E flaky red): the symptom was that
-// the panel clearly sent the PSK but kept receiving "this node requires a pre-
-// shared key". The node log only showed the psk-auth we sent -- no psk-ok and no
-// mismatch, meaning the peer's frame was never seen. Root cause: inside bindConn,
-// OnMessage was attached *after* pskSendAuth, and the library silently drops frames
-// when the callback is nil. This test is a race condition: if OnMessage is moved
-// back after sending, delivered will be false and the entire connection stays stuck
-// on the gate forever (subsequent verbs are all rejected, with no error).
+// 发现背景 (2026-09-21, CI panel E2E flaky red): OnMessage 必须在 pskSendAuth 之前挂载。
 func TestPSK_AuthArrivingDuringBindIsNotDropped(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	svc.cfg.PeerPSK = "s3cret"
@@ -251,21 +257,16 @@ func TestPSK_AuthArrivingDuringBindIsNotDropped(t *testing.T) {
 // TestPSK_SpoofedLocalIDNotExempt 发现背景：审计 A-9（2026-10-06）。
 // 旧实现用 `c.ID() == "local"` 豁免 PSK 门禁；攻击者注册 ?id=local 即可跳过。
 // 修后用 isSelfSession 类型断言，rtcSession 未实现 IsLocal() 故自动落空。
-// 本用例构造 id="local" 但 local=false 的 fakeSession（模拟 WebRTC 对端自报 local），
-// 断言 pskGate 仍然拦截 servedVerbs。
 func TestPSK_SpoofedLocalIDNotExempt(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	svc.cfg.PeerPSK = "s3cret"
-	// id="local" 模拟信令自报，但 local=false 表示非本地 WS 会话
 	sess := &fakeSession{id: "local", local: false}
 	svc.bindConn(sess)
 
-	// pskSendAuth 应该被调用（因为 isSelfSession 返回 false）
 	sentTypes := sess.sentTypes()
 	require.NotEmpty(t, sentTypes)
 	assert.Equal(t, "psk-auth", sentTypes[0], "spoofed local-id session must still present PSK")
 
-	// servedVerbs 应该被 pskGate 拦截
 	svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{"type": "share", "reqId": "r1"}))
 	foundErr := false
 	for _, f := range sess.sentFrames()[1:] {
@@ -279,8 +280,6 @@ func TestPSK_SpoofedLocalIDNotExempt(t *testing.T) {
 
 // TestPSK_UnauthedConnectionClosedAfterTimeout
 // 发现背景：C-13（审计）— 未认证连接无超时，资源耗尽向量。
-// bindConn 无条件起 goroutine 并登记 connState，未出示 psk-auth 的连接会常驻。
-// 攻击者反复握手建连但不认证，可耗尽 connState + 2 goroutine。
 func TestPSK_UnauthedConnectionClosedAfterTimeout(t *testing.T) {
 	old := pskAuthTimeout
 	pskAuthTimeout = 100 * time.Millisecond
@@ -291,28 +290,18 @@ func TestPSK_UnauthedConnectionClosedAfterTimeout(t *testing.T) {
 	sess := &fakeSession{id: "peer-x"}
 	svc.bindConn(sess)
 
-	// Wait for the timer to fire and close the session (no psk-auth is sent).
 	time.Sleep(200 * time.Millisecond)
 	assert.True(t, sess.Closed(), "unauthed session must be closed after pskAuthTimeout")
 }
 
 // TestPSK_PreBindConnFrameNotDropped
-// 发现背景：CI 面板 E2E（run 37911874004）—— panel 连接后 server 从未收到
-// psk-auth，30s 后 pskAuthTimeout 关连接，manifest 全部 15s TIMEOUT。
-// 根因：bindConn 在 OnOpen 回调内注册 OnMessage，但 peer 的 psk-auth 帧可能在
-// OnOpen 触发后、bindConn 执行前到达，pion 级 dc.OnMessage 读到 c.onMessage==nil
-// 则静默丢弃。2026-10-06 修复仅覆盖 bindConn 内部的 yield 窗口，未覆盖
-// bindConn 调用前的窗口。
-//
-// 本测试验证：OnMessage 在 OnOpen 之前注册（即 bindConnPrepared 的调用方式），
+// 发现背景：CI 面板 E2E（run 37911874004）—— OnMessage 在 OnOpen 之前注册，
 // 即使 psk-auth 帧在 bindConnPrepared 之前到达也能被正确接收并回复 psk-ok。
 func TestPSK_PreBindConnFrameNotDropped(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	svc.cfg.PeerPSK = "s3cret"
 
 	sess := &fakeSession{id: "peer-x"}
-
-	// Simulate the fix: create st and register OnMessage BEFORE bindConnPrepared.
 	st := &connState{
 		fetches:   make(map[string]*fetchState),
 		verbWaits: make(map[string]chan []byte),
@@ -323,13 +312,146 @@ func TestPSK_PreBindConnFrameNotDropped(t *testing.T) {
 	sess.OnMessage(func(msg peerjs.Frame) { svc.dispatchFrame(sess, st, msg) })
 	sess.OnClose(func() { svc.cleanupConn(sess, st) })
 
-	// Inject psk-auth BEFORE bindConnPrepared (simulating pre-bindConn frame arrival).
 	sess.onMessage(pskFrame(t, map[string]any{"type": "psk-auth", "psk": "s3cret"}))
-
-	// Now bind the connection (simulating OnOpen callback).
 	svc.bindConnPrepared(sess, st, nil)
 
-	// Verify psk-ok was sent (the frame was received despite arriving before bindConnPrepared).
 	_, ok := waitSent(sess, "psk-ok", 2*time.Second)
 	assert.True(t, ok, "psk-auth must be received and psk-ok sent, even if frame arrived before bindConnPrepared")
+}
+
+// TestAuthorizer_DefaultBehavior verifies that DefaultAuthorizer faithfully reproduces
+// the pre-Phase 7 gate behavior (ShareGate + local WS session check).
+// 发现背景：Phase 7 预埋 Authorizer 接口，默认必须 100% 行为等价于原 ShareGate，不得影响未接入 Phase 7 的现有节点。
+func TestAuthorizer_DefaultBehavior(t *testing.T) {
+	initTestDB(t)
+	svc := newShareTestService(t)
+	content := []byte("default-authorizer-content")
+	sum := sha256.Sum256(content)
+	hash := hex.EncodeToString(sum[:])
+
+	dlDir := t.TempDir()
+	svc.cfg.DownloadDir = dlDir
+	svc.fileIndex = NewFileIndexService(dlDir)
+	t.Cleanup(svc.fileIndex.Close)
+
+	inRoot := filepath.Join(dlDir, "test-file.txt")
+	require.NoError(t, os.WriteFile(inRoot, content, 0o644))
+	_, err := svc.fileIndex.Create(inRoot)
+	require.NoError(t, err)
+
+	svc.SetShareGate(fakeShareGate{private: hash, friends: []string{"friend-peer"}})
+
+	stranger := &fakeSession{id: "stranger-peer"}
+	svc.serveFile(stranger, dcReq{Type: "req", Hash: hash, Size: -1, ReqID: "r1"})
+	require.Equal(t, []string{"err"}, stranger.sentTypes(), "stranger should be denied for private file")
+
+	friend := &fakeSession{id: "friend-peer"}
+	svc.serveFile(friend, dcReq{Type: "req", Hash: hash, Size: -1, ReqID: "r2"})
+	require.Equal(t, []string{"meta", "data", "done"}, friend.sentFrameTypes(), "friend should be allowed")
+
+	self := &fakeSession{id: "local-client", local: true}
+	svc.serveFile(self, dcReq{Type: "req", Hash: hash, Size: -1, ReqID: "r3"})
+	require.Equal(t, []string{"meta", "data", "done"}, self.sentFrameTypes(), "local session should always be allowed")
+}
+
+// TestAuthorizer_CustomAuthorizerPluginPoint verifies that SetAuthorizer allows injecting
+// a custom token-based authorizer without modifying the transport serveFile dispatch logic.
+// 发现背景：Phase 7 (Identity) 到来时需直接注入身份验证逻辑，验证此注入点是否有效支持 token 鉴权与重置回退。
+func TestAuthorizer_CustomAuthorizerPluginPoint(t *testing.T) {
+	initTestDB(t)
+	svc := newShareTestService(t)
+	content := []byte("custom-authorizer-content")
+	sum := sha256.Sum256(content)
+	hash := hex.EncodeToString(sum[:])
+
+	dlDir := t.TempDir()
+	svc.cfg.DownloadDir = dlDir
+	svc.fileIndex = NewFileIndexService(dlDir)
+	t.Cleanup(svc.fileIndex.Close)
+
+	inRoot := filepath.Join(dlDir, "token-file.txt")
+	require.NoError(t, os.WriteFile(inRoot, content, 0o644))
+	_, err := svc.fileIndex.Create(inRoot)
+	require.NoError(t, err)
+
+	svc.SetAuthorizer(&tokenAuthorizer{expectedToken: "valid-token-123"})
+
+	p1 := &fakeSession{id: "any-peer"}
+	svc.serveFile(p1, dcReq{Type: "req", Hash: hash, Size: -1, ReqID: "r1"})
+	require.Equal(t, []string{"err"}, p1.sentTypes(), "peer without token should be denied")
+
+	p2 := &fakeSession{id: "any-peer"}
+	svc.serveFile(p2, dcReq{Type: "req", Hash: hash, Size: -1, ReqID: "r2", Token: "wrong-token"})
+	require.Equal(t, []string{"err"}, p2.sentTypes(), "peer with wrong token should be denied")
+
+	p3 := &fakeSession{id: "any-peer"}
+	svc.serveFile(p3, dcReq{Type: "req", Hash: hash, Size: -1, ReqID: "r3", Token: "valid-token-123"})
+	require.Equal(t, []string{"meta", "data", "done"}, p3.sentFrameTypes(), "peer with valid token should be allowed")
+
+	svc.SetAuthorizer(nil)
+	p4 := &fakeSession{id: "any-peer"}
+	svc.serveFile(p4, dcReq{Type: "req", Hash: hash, Size: -1, ReqID: "r4"})
+	require.Equal(t, []string{"meta", "data", "done"}, p4.sentFrameTypes(), "without gate configured, default authorizer allows public content")
+}
+
+// TestShare_TokenPluginPoints verifies requester token propagation in share frames
+// and responder token generation in share-resp frames.
+// 发现背景：Phase 7 中 share 帧需要支持可选的 requester token 及响应的身份标识，验证此注入点可用性。
+func TestShare_TokenPluginPoints(t *testing.T) {
+	svc := newShareTestService(t)
+
+	var receivedPeerID, receivedToken string
+	svc.SetShareProviderWithToken(func(peerID, token string) ShareSnapshot {
+		receivedPeerID = peerID
+		receivedToken = token
+		if token == "secret-pass" {
+			return ShareSnapshot{
+				Files: []ShareFileInfo{{Hash: "hash-secret", Name: "secret.txt", Size: 42}},
+			}
+		}
+		return ShareSnapshot{}
+	})
+
+	svc.SetShareTokenGenerator(func(peerID string) string {
+		return "responder-identity-token"
+	})
+
+	sess := &fakeSession{id: "requester-node"}
+	svc.serveShare(sess, dcResp{Type: "share", ReqID: "s1", Token: "secret-pass"})
+
+	require.Equal(t, "requester-node", receivedPeerID)
+	require.Equal(t, "secret-pass", receivedToken)
+
+	frames := sess.sentFrames()
+	require.Len(t, frames, 1)
+	header := frames[0].header
+	require.Equal(t, "share-resp", header["type"])
+	require.Equal(t, "responder-identity-token", header["token"])
+	require.Equal(t, float64(1), header["total"])
+}
+
+// TestCredentialFunc_PluginPoint verifies connection-level credentialFunc and service-level fallback.
+// 发现背景：Phase 7 中 FetchFromPeer / OpenStreamFrom 需要支持连接级凭据附加，验证 credentialFunc 注入与回调。
+func TestCredentialFunc_PluginPoint(t *testing.T) {
+	svc := newShareTestService(t)
+
+	peerConn := &fakeSession{id: "peer-target"}
+	st := &connState{fetches: make(map[string]*fetchState), verbWaits: make(map[string]chan []byte)}
+	svc.conns["peer-target"] = peerConn
+	svc.pending[peerConn] = st
+
+	cred := svc.credentialFor(peerConn, st)
+	require.Empty(t, cred)
+
+	svc.SetDefaultCredentialFunc(func(peerID string) string {
+		return "default-token-for-" + peerID
+	})
+	credDefault := svc.credentialFor(peerConn, st)
+	require.Equal(t, "default-token-for-peer-target", credDefault)
+
+	svc.SetConnectionCredentialFunc("peer-target", func() string {
+		return "connection-specific-token"
+	})
+	credConn := svc.credentialFor(peerConn, st)
+	require.Equal(t, "connection-specific-token", credConn)
 }

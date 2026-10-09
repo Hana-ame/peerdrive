@@ -109,7 +109,7 @@ type dcResp struct {
 	Hmac    string     `json:"hmac,omitempty"`  // fwd-auth: HMAC-SHA256(key, nonce)
 	Port    int        `json:"port,omitempty"`  // fwd-open: client-declared target port
 	URL     string     `json:"url,omitempty"`   // pull: address for this node to fetch (pull.go)
-	Psk     string     `json:"psk,omitempty"`   // psk-auth: peer's presented pre-shared key (psk.go)
+	Psk     string     `json:"psk,omitempty"`   // psk-auth: peer's presented pre-shared key (gate.go)
 	Code    string     `json:"code,omitempty"`  // machine-readable error code in err frames (consumers branch on code)
 	Token   string     `json:"token,omitempty"` // Phase 7: optional requester/responder identity token
 	// search 动词的查询字段（file_index_search.go）。**不放进独立结构体**是有意的：
@@ -168,7 +168,7 @@ type connState struct {
 	fwdHs *fwdHandshake
 	fwdCh chan fwdChunk // fwd chunks → connection-level worker writes tunnel (bounded backpressure, same as binCh)
 
-	// pskOK whether the peer has passed this node's pre-shared key verification (psk.go gate).
+	// pskOK whether the peer has passed this node's pre-shared key verification (gate.go gate).
 	// Only affects "whether this node serves it", not its responses to our own requests
 	// (responses go through routeResponse; we have no reason to block our own data).
 	pskOK bool
@@ -400,14 +400,14 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 			return
 		}
 		// PSK gate: handle handshake frames first, then filter "make me work" inbound
-		// verbs with the gate (psk.go). Before peer presents, these verbs all return err.
+		// verbs with the gate (gate.go). Before peer presents, these verbs all return err.
 		if r.Type == "psk-auth" {
 			s.servePskAuth(c, st, r.Psk)
 			return
 		}
 		if r.Type == "psk-ok" || r.Type == "psk-err" {
 			return // Client-side handshake receipts: not needed here (presenter doesn't wait
-			// for receipt, see psk.go)
+			// for receipt, see gate.go)
 		}
 		if s.pskGate(c, st, r) {
 			return

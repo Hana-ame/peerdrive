@@ -132,7 +132,7 @@ var ErrPeerSearchUnsupported = errors.New("peer does not support the search verb
 //
 // 与 RequestShares 的区别在语义上很重要：share 帧取的是对端**显式声明对外共享**的
 // 范围（运营者开了开关才有内容），search 取的是对端**本地全量索引**——所以对端必须
-// 自己设了 PSK 才应该理我们（search 在 servedVerbs 白名单里，见 psk.go）。
+// 自己设了 PSK 才应该理我们（search 在 servedVerbs 白名单里，见 gate.go）。
 // 调用方（HTTP 层）必须对此负责：未设 PSK 的节点上这个端点要么不注册，要么挂 auth。
 //
 // **对端版本兼容**：老对端的 dispatchFrame 没有 search 分支，会把它落到 default

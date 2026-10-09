@@ -88,12 +88,12 @@ type PeerJSService struct {
 	shareProviderWithToken ShareProviderWithToken
 	shareTokenGenerator    func(peerID string) string
 
-	// shareGate 下载门禁（share.go）：按 hash 判断请求者能否取回。
+	// shareGate 下载门禁（gate.go）：按 hash 判断请求者能否取回。
 	// 与 shareProvider 分开注入：清单（share 帧）与下载（req 帧）是两条路径，
 	// 门禁只在 req 上生效——unlisted 的内容不出现在清单里，但 req 要放行。
 	shareGate ShareGate
 
-	// authorizer 身份与门禁验证器（authorizer.go，Phase 7 预埋插件点）。
+	// authorizer 身份与门禁验证器（gate.go，Phase 7 预埋插件点）。
 	// nil 时由 defaultAuthorizer 代理 shareGate + isSelfSession。
 	authorizer        Authorizer
 	defaultAuthorizer *DefaultAuthorizer
