@@ -42,8 +42,12 @@ func NewLocalSource(storageDir string, fileIndex *transport.FileIndexService) *L
 func (s *LocalSource) Name() string { return s.name }
 func (s *LocalSource) Type() string { return "local" }
 
-// Capabilities local disk natively supports streaming ranges (os.File Seek/ReadAt).
-func (s *LocalSource) Capabilities() Capability { return CapStream }
+// Capabilities local disk natively supports streaming ranges (os.File Seek/ReadAt) and
+// Info (file_index/CAS stat) → CapStream|CapMeta.
+//
+// 不做 CapVerify：本地写入路径（上传 Complete）已经算过 sha256 并登记进 file_index，
+// 读回来再算一遍是浪费（与 serveFile 行为一致）。内容寻址的校验发生在「进入存储」那一刻。
+func (s *LocalSource) Capabilities() Capability { return CapStream | CapMeta }
 
 func (s *LocalSource) Priority() int {
 	s.mu.RLock()
