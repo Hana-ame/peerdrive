@@ -106,9 +106,9 @@ func TestMCPServer(t *testing.T) {
 
 	// 4. Test tools/call read_collection (create dummy collection first)
 	coll := &model.AnonCollection{
-		Version:     1,
-		Name:        "test-collection",
-		CreatedTime: 1234567890,
+		Version:      1,
+		FriendlyName: "test-collection",
+		CreatedAt:    "2026-10-09T00:00:00Z",
 		Entries: []model.AnonCollectionEntry{
 			{Name: "item1.txt", Hash: fileHash, Size: 100},
 		},
