@@ -336,6 +336,16 @@ func (rt *Router) Engine() *gin.Engine {
 		display.POST("/clear", authRequired, controller.ClearDisplay)
 	}
 
+	// P2P live stream distribution routes (Issue #244)
+	stream := r.Group("/stream")
+	{
+		stream.GET("/list", controller.ListStreams)
+		stream.GET("/:id/manifest", controller.GetStreamManifest)
+		stream.POST("/create", authRequired, controller.CreateStream)
+		stream.POST("/:id/chunk", authRequired, controller.PushStreamChunk)
+		stream.POST("/:id/close", authRequired, controller.CloseStream)
+	}
+
 	// BitTorrent routes
 	bt := r.Group("/bt")
 	{

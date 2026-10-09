@@ -57,6 +57,15 @@ export default function Display() {
       });
       setRegistered(true);
 
+      const streamParam = searchParams.get('stream');
+      if (streamParam) {
+        ws.sendFrame({
+          type: 'stream',
+          action: 'sub',
+          streamId: streamParam,
+        });
+      }
+
       // Query current state for channel sync
       ws.admin('GET', `/display/status?channel=${encodeURIComponent(channel)}`)
         .then((st) => {
@@ -88,11 +97,19 @@ export default function Display() {
           action: 'unregister',
           sessionId: screenId,
         });
+        const streamParam = searchParams.get('stream');
+        if (streamParam) {
+          ws.sendFrame({
+            type: 'stream',
+            action: 'unsub',
+            streamId: streamParam,
+          });
+        }
       }
     };
-  }, [channel, screenId, screenName]);
+  }, [channel, screenId, screenName, searchParams]);
 
-  // Listen to incoming display frames
+  // Listen to incoming display and stream frames
   useEffect(() => {
     const unbindMessage = ws.onMessage((msg) => {
       if (!msg) return;
@@ -112,6 +129,26 @@ export default function Display() {
         } else if (msg.action === 'control') {
           handleControlAction(msg);
         } else if (msg.action === 'clear') {
+          setMedia(null);
+        }
+      } else if (msg.type === 'stream') {
+        if (msg.action === 'chunk' && msg.chunk) {
+          const chunk = msg.chunk;
+          let mType = 'image';
+          if (chunk.mimeType?.startsWith('video/') || chunk.hash?.endsWith('.mp4')) mType = 'video';
+          else if (chunk.mimeType?.startsWith('audio/')) mType = 'audio';
+
+          setMedia({
+            mediaType: mType,
+            hash: chunk.hash,
+            title: `${chunk.title || 'Live Segment'} #${chunk.seq}`,
+            autoplay: true,
+            loop: false,
+            isLiveStream: true,
+            streamId: msg.streamId,
+            seq: chunk.seq,
+          });
+        } else if (msg.action === 'close') {
           setMedia(null);
         }
       }
@@ -221,6 +258,12 @@ export default function Display() {
           <span className="font-medium text-gray-200">{screenName}</span>
           <span className="text-gray-500">|</span>
           <span className="text-gray-400">频道: {channel}</span>
+          {media?.isLiveStream && (
+            <span className="flex items-center gap-1.5 bg-red-500/20 text-red-400 px-2.5 py-0.5 rounded-full border border-red-500/30 text-[11px] font-semibold animate-pulse ml-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+              LIVE #{media.seq}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

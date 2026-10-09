@@ -133,6 +133,9 @@ type PeerJSService struct {
 	// Display manager (Issue #243): tracks controlled screens and channel sync.
 	displayMgr *DisplayManager
 
+	// Stream manager (Issue #244): P2P live stream chunk broadcast and subscriptions.
+	streamMgr *StreamManager
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -159,6 +162,7 @@ func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
 		fwNonces:     make(map[string]*fwdNonce),
 		localCaps:    append([]string(nil), DefaultNodeCapabilities...),
 		displayMgr:   NewDisplayManager(),
+		streamMgr:    NewStreamManager(),
 		closed:       make(chan struct{}),
 		ctx:          ctx,
 		cancel:       cancel,

@@ -43,6 +43,8 @@ const (
 	CapAdmin = "admin"
 	// CapDisplay allows remote screen sync and public display screen control (Issue #243).
 	CapDisplay = "display"
+	// CapStream allows P2P live stream chunk broadcast and subscription based on file SHA (Issue #244).
+	CapStream = "stream"
 )
 
 // Machine-readable capability error codes.
@@ -61,11 +63,12 @@ var KnownCapabilities = map[string]bool{
 	CapAuth:    true,
 	CapAdmin:   true,
 	CapDisplay: true,
+	CapStream:  true,
 }
 
 // DefaultNodeCapabilities represents the full capability set of a standard peerdrive Go node.
 var DefaultNodeCapabilities = []string{
-	CapReq, CapShare, CapIndex, CapPull, CapForward, CapDisplay,
+	CapReq, CapShare, CapIndex, CapPull, CapForward, CapDisplay, CapStream,
 }
 
 // MinimalCapabilities is the minimal feature baseline when capabilities are omitted in a handshake frame.
@@ -90,6 +93,7 @@ const (
 	BitAuth
 	BitAdmin
 	BitDisplay
+	BitStream
 )
 
 var capStringToBit = map[string]CapBit{
@@ -101,6 +105,7 @@ var capStringToBit = map[string]CapBit{
 	CapAuth:    BitAuth,
 	CapAdmin:   BitAdmin,
 	CapDisplay: BitDisplay,
+	CapStream:  BitStream,
 }
 
 var capBitToString = map[CapBit]string{
@@ -112,6 +117,7 @@ var capBitToString = map[CapBit]string{
 	BitAuth:    CapAuth,
 	BitAdmin:   CapAdmin,
 	BitDisplay: CapDisplay,
+	CapStream:  BitStream,
 }
 
 // CapsToBitset converts a slice of capability strings into a CapBit bitmask.
@@ -221,6 +227,8 @@ func VerbRequiredCap(verb string) string {
 		return CapAdmin
 	case "display":
 		return CapDisplay
+	case "stream":
+		return CapStream
 	default:
 		return ""
 	}

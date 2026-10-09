@@ -541,6 +541,8 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 			s.routeForwardResponse(st, r)
 		case "display":
 			go s.serveDisplay(c, st, msg.Data)
+		case "stream":
+			go s.serveStream(c, st, msg.Data)
 		default:
 			s.routeResponse(st, r, msg.Data)
 		}
@@ -638,6 +640,9 @@ func (s *PeerJSService) cleanupConn(c Session, st *connState) {
 	}
 	if s.displayMgr != nil {
 		s.displayMgr.Unregister(c)
+	}
+	if s.streamMgr != nil {
+		s.streamMgr.UnregisterSession(c)
 	}
 	if st == nil {
 		return
