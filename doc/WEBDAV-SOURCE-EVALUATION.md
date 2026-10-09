@@ -12,7 +12,7 @@ Peerdrive 自身的内容对外暴露链路已经由 PeerJS 信令 + WebRTC Data
 
 本功能定位**明确且严格为取数客户端（Data Source Client）**：
 - Peerdrive 作为 WebDAV 客户端连接到用户配置的外部 WebDAV 服务（例如 Nextcloud、Alist、Seafile、坚果云、InfiniCLOUD 等）。
-- 将外部 WebDAV 中的文件作为 Peerdrive 的后端取数来源之一，注册至 `back/internal/source.Manager` 中。
+- 将外部 WebDAV 中的文件作为 Peerdrive 的后端取数来源之一，注册至 `back/internal/source` 中的 `Manager`。
 - **不实现 WebDAV 服务端**（避免引入过多的协议维护负担与安全攻击面）。
 
 ---

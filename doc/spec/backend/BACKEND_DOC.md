@@ -113,8 +113,8 @@
 | `POST` | `/p2p/fetch` | `controller.FetchCollection` | `internal/controller/p2p.go:101` | JSON: `{"hash": "<sha256>"}` | `200` `model.AnonCollection`. `404` if not found on P2P network. 60s timeout. |
 | `POST` | `/p2p/sync` | `controller.SyncFromPeer` | `internal/controller/p2p.go:122` | JSON: `{"peer_id": "...", "hash": "...", "file_hashes": ["..."], "target_dir": "..."}` | `200` `{synced: [...], count: int, saved_to: "..."}`. Fetches collection from peer if hash provided, then downloads each file. 120s timeout. |
 | `POST` | `/p2p/push` | `controller.PushSync` | `internal/controller/p2p.go:198` | JSON: `{"hash": "...", "entries": [...], "target_dir": "..."}` | `200` `{entries, target_dir, message}`. Resolves entries from hash if provided. |
-| `POST` | `/p2p/request-file` | `controller.RequestFile` | `internal/controller/p2p.go:249` | JSON: `{"hash": "<sha256>", "peer_ids": ["..."]}` | `200` `{hash, requested: int, responses: int, details: [{hash, error\|size}]}`. Broadcasts file request to specified peer IDs. |
-| `GET` | `/p2p/ws/info` | `controller.WSInfo` | `internal/controller/p2p.go:294` | — | `200` `{ws_connections: int, ws_endpoint: "/ws/transfer", message_types: ["request","response","ping","pong"]}` |
+| `POST` | `/p2p/request-file` | `controller.RequestFile` | `internal/controller/p2p.go` | JSON: `{"hash": "<sha256>", "peer_ids": ["..."]}` | `200` `{hash, requested: int, responses: int, details: [{hash, error\|size}]}`. Broadcasts file request to specified peer IDs. |
+| `GET` | `/p2p/ws/info` | `controller.WSInfo` | `internal/controller/p2p.go` | — | `200` `{ws_connections: int, ws_endpoint: "/ws/transfer", message_types: ["request","response","ping","pong"]}` |
 | `GET` | `/ws/transfer` | (inline in router) | `internal/router/router.go:169` | WebSocket upgrade | WebSocket connection for bidirectional file transfer via P2P |
 
 ### 2.8 Local Sync (`/local`)

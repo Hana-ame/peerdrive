@@ -38,6 +38,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"peerdrive/internal/log"
 	"peerdrive/internal/serverapp"
 	"peerdrive/internal/version"
 )

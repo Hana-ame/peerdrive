@@ -616,13 +616,17 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 			if cfg.OpenListBaseURL == "" {
 				log.LogWarn("main: PEERDRIVE_OPENLIST_ENABLE=true but PEERDRIVE_OPENLIST_BASE_URL is " +
 					"empty — the openlist source was not registered")
-			} else if cfg.OpenListIndexPath == "" {
-				log.LogWarn("main: PEERDRIVE_OPENLIST_ENABLE=true but PEERDRIVE_OPENLIST_INDEX_FILE is " +
-					"empty — without a hash→path table the source could serve nothing")
+			} else if cfg.OpenListIndexPath == "" && !cfg.OpenListCrawl {
+				log.LogWarn("main: PEERDRIVE_OPENLIST_ENABLE=true but neither PEERDRIVE_OPENLIST_INDEX_FILE " +
+					"nor PEERDRIVE_OPENLIST_CRAWL is set — without an index or crawler the source could serve nothing")
 			} else {
-				index, err := source.LoadOpenListIndex(cfg.OpenListIndexPath)
-				if err != nil {
-					return fail(err)
+				var index map[string]string
+				if cfg.OpenListIndexPath != "" {
+					var err error
+					index, err = source.LoadOpenListIndex(cfg.OpenListIndexPath)
+					if err != nil {
+						return fail(err)
+					}
 				}
 				// A bounded client, not http.DefaultClient: an unresponsive
 				// OpenList must not be able to hold a fetch slot forever.
@@ -651,6 +655,44 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 				}
 				log.LogInfo("main: openlist source enabled — %s, %d indexed files",
 					olSrc.Name(), olSrc.Count())
+
+				if cfg.OpenListCrawl {
+					crawlerTimeout := time.Duration(cfg.OpenListCrawlTimeoutSecs) * time.Second
+					if crawlerTimeout <= 0 {
+						crawlerTimeout = 30 * time.Second
+					}
+					crawlerClient := &http.Client{Timeout: crawlerTimeout}
+					if urlClient != nil {
+						crawlerClient.Transport = urlClient.Transport
+					}
+					crawler, err := source.NewOpenListCrawler(source.OpenListCrawlerConfig{
+						BaseURL:     cfg.OpenListBaseURL,
+						Client:      crawlerClient,
+						Token:       cfg.OpenListToken,
+						Concurrency: cfg.OpenListCrawlConcurrency,
+						Timeout:     crawlerTimeout,
+					})
+					if err != nil {
+						log.LogWarn("main: init openlist crawler failed: %v", err)
+					} else {
+						rootPath := cfg.OpenListCrawlRoot
+						if rootPath == "" {
+							rootPath = "/"
+						}
+						log.LogInfo("main: starting background openlist crawler for root %q (concurrency=%d)",
+							rootPath, cfg.OpenListCrawlConcurrency)
+						go func() {
+							crawlCtx := context.Background()
+							if err := crawler.CrawlAndReload(crawlCtx, rootPath, olSrc); err != nil {
+								log.LogWarn("main: background openlist crawler finished with error: %v (indexed files: %d)",
+									err, olSrc.Count())
+							} else {
+								log.LogInfo("main: background openlist crawler finished successfully (%d files indexed)",
+									olSrc.Count())
+							}
+						}()
+					}
+				}
 			}
 		}
 		deps.SourceManager = mgr

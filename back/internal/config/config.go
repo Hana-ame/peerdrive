@@ -187,8 +187,12 @@ type Config struct {
 	OpenListToken       string // PEERDRIVE_OPENLIST_TOKEN: sent as Authorization: Bearer ***
 	OpenListName        string // PEERDRIVE_OPENLIST_NAME (default "openlist")
 	OpenListPriority    int    // PEERDRIVE_OPENLIST_PRIORITY (default 900: after local/peer/url)
-	OpenListTimeoutSecs int    // PEERDRIVE_OPENLIST_TIMEOUT_SECS (default 120)
-	OpenListVerify      bool   // PEERDRIVE_OPENLIST_VERIFY (default true: hash full fetches)
+	OpenListTimeoutSecs      int    // PEERDRIVE_OPENLIST_TIMEOUT_SECS (default 120)
+	OpenListVerify           bool   // PEERDRIVE_OPENLIST_VERIFY (default true: hash full fetches)
+	OpenListCrawl            bool   // PEERDRIVE_OPENLIST_CRAWL (default false: crawl remote OpenList /api/fs/list on startup)
+	OpenListCrawlRoot        string // PEERDRIVE_OPENLIST_CRAWL_ROOT (default "/": remote root path to crawl)
+	OpenListCrawlConcurrency int    // PEERDRIVE_OPENLIST_CRAWL_CONCURRENCY (default 4)
+	OpenListCrawlTimeoutSecs int    // PEERDRIVE_OPENLIST_CRAWL_TIMEOUT_SECS (default 30)
 
 	DownloadDir         string
 	FolderMaxDepth      int // PEERDRIVE_FOLDER_MAX_DEPTH: register_folder max recursion depth (default 1 = scan current directory only)
@@ -454,8 +458,12 @@ func DefaultConfig() *Config {
 		OpenListToken:       "",
 		OpenListName:        "openlist",
 		OpenListPriority:    900,
-		OpenListTimeoutSecs: 120,
-		OpenListVerify:      true,
+		OpenListTimeoutSecs:         120,
+		OpenListVerify:              true,
+		OpenListCrawl:               false,
+		OpenListCrawlRoot:           "/",
+		OpenListCrawlConcurrency:    4,
+		OpenListCrawlTimeoutSecs:    30,
 		DownloadDir:         "./downloads",
 		FolderMaxDepth:      0,
 		MaxPeers:            8,
@@ -590,8 +598,12 @@ func Load() *Config {
 		OpenListToken:       getEnv("PEERDRIVE_OPENLIST_TOKEN", ""),
 		OpenListName:        getEnv("PEERDRIVE_OPENLIST_NAME", "openlist"),
 		OpenListPriority:    getEnvInt("PEERDRIVE_OPENLIST_PRIORITY", 900),
-		OpenListTimeoutSecs: getEnvInt("PEERDRIVE_OPENLIST_TIMEOUT_SECS", 120),
-		OpenListVerify:      getEnvBool("PEERDRIVE_OPENLIST_VERIFY", true),
+		OpenListTimeoutSecs:      getEnvInt("PEERDRIVE_OPENLIST_TIMEOUT_SECS", 120),
+		OpenListVerify:           getEnvBool("PEERDRIVE_OPENLIST_VERIFY", true),
+		OpenListCrawl:            getEnvBool("PEERDRIVE_OPENLIST_CRAWL", false),
+		OpenListCrawlRoot:        getEnv("PEERDRIVE_OPENLIST_CRAWL_ROOT", "/"),
+		OpenListCrawlConcurrency: getEnvInt("PEERDRIVE_OPENLIST_CRAWL_CONCURRENCY", 4),
+		OpenListCrawlTimeoutSecs: getEnvInt("PEERDRIVE_OPENLIST_CRAWL_TIMEOUT_SECS", 30),
 
 		DownloadDir:    getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
 		FolderMaxDepth: getEnvInt("PEERDRIVE_FOLDER_MAX_DEPTH", 0), // 0=unlimited (full recursion; >0 limits depth)

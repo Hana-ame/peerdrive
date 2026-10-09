@@ -21,7 +21,7 @@ curl -X POST http://localhost:3000/peerjs/fetch \
   -d '{"peer":"peerdrive-abc123","hash":"<64hex>","offset":0,"size":-1}' -o file.bin
 ```
 
-### 1.2 Port Forwarding (`controller/p2p.go:695`)
+### 1.2 Port Forwarding (`controller/p2p_forward.go:30`)
 
 | Endpoint | Method | Auth | Usage |
 |---|---|---|---|
