@@ -240,6 +240,14 @@ func (s *Server) PingDB() error {
 	return s.db.Ping()
 }
 
+// DB returns the underlying sql.DB handle (used for testing and cross-database schema assertions).
+func (s *Server) DB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
+}
+
 // SetTracker sets the BitTorrent HTTP tracker server. When provided, the
 // server exposes GET /announce, GET /scrape, and /tracker/bans alongside
 // the registration endpoints. Ban management at /tracker/bans uses JWT
