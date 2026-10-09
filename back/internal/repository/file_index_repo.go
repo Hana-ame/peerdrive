@@ -77,6 +77,9 @@ func UpsertFileIndex(hash, path, name string, size int64, deleted bool) (int64, 
 
 // GetFileIndex queries mapping by hash (not deleted — tombstones are only exposed through SyncSince).
 func GetFileIndex(hash string) (*FileIndex, error) {
+	if DB == nil {
+		return nil, sql.ErrNoRows
+	}
 	row := DB.QueryRow(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
 		FROM file_index WHERE hash = ? AND deleted = 0`, hash)
 	return scanFileIndex(row)
@@ -84,6 +87,9 @@ func GetFileIndex(hash string) (*FileIndex, error) {
 
 // ListFileIndex lists all non-deleted mappings (ordered by seq ascending, supports pagination).
 func ListFileIndex(offset, limit int) ([]FileIndex, error) {
+	if DB == nil {
+		return nil, nil
+	}
 	if limit <= 0 {
 		limit = 1000
 	}
