@@ -68,6 +68,22 @@ JWT_SECRET=xxx ./peerdrive all
 见 `driver_pure.go`；有 cgo 时走 `mattn/go-sqlite3`，见 `driver_cgo.go`——与
 `back/internal/repository/` 的切分口径一致）。
 
+## 文件结构（2026-10-09 起按功能拆分）
+
+原 `regserver.go` 656 行单文件按功能拆成 6 个文件，行为逐字不变：
+
+| 文件 | 职责 |
+|---|---|
+| `regserver.go` | `Server` 结构 + `New`/`Handler`/`Serve`/`Close`/`PingDB`/`ResolveDBPath` + `rateLimit` 中间件 |
+| `jwt.go` | JWT 签发与校验（HS256 手写，`tokenTTL`、`b64url`、`newToken`、`newTokenFrom`、`verifyToken`） |
+| `auth.go` | JSON 工具（`writeJSON`/`writeErr`）+ Bearer 认证中间件（`authRequired`/`authInfoOf`） |
+| `db.go` | SQLite 打开与 schema（`openDB`，表 `users`/`relay_nodes`） |
+| `handlers_auth.go` | `/auth/*` + `/ping` + `/api/health` handler + bcrypt 辅助（`dummyHash`/`validHash`） |
+| `handlers_relay.go` | `/p2p/relay/*` handler + addrs 序列化（`stringifyAddrs`/`parseAddrs`） |
+
+不建独立 go.mod（参照 `internal/hashmap`：仅主模块 internal 用→internal 包）；
+不建子包（`Server` 结构持有 db/jwtSecret/限流器，拆子包会破坏构造器与测试）。
+
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
