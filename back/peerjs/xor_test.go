@@ -68,7 +68,7 @@ func TestXOR_RoundTrip_Table(t *testing.T) {
 	}
 	for i, d := range data {
 		t.Run(fmt.Sprintf("data-%d-len-%d", i, len(d)), func(t *testing.T) {
-			key := deriveXORKey(fmt.Sprintf("secret-%d", i), fmt.Sprintf("conn-%d", i))
+			key := deriveXORKey(fmt.Sprintf("test-key-%d", i), fmt.Sprintf("conn-%d", i))
 			ct := xorApply(d, key)
 			require.Equal(t, len(d), len(ct), "ciphertext length must equal plaintext length")
 			require.Equal(t, d, xorApply(ct, key), "round-trip")
@@ -83,11 +83,11 @@ func TestXOR_RoundTrip_Table(t *testing.T) {
 // Discovery background: 连接级密钥的契约——connID 由 offerer 生成、经 OFFER
 // 传给 answerer 复用，这是两端无需额外握手就能拿到同一密钥的依据。
 func TestXOR_DeriveKey_BothEndsConsistent(t *testing.T) {
-	secret := "shared-secret"
+	secret := "test-xor-shared-seed"
 	connID := "conn-from-offerer"
 	require.Equal(t, deriveXORKey(secret, connID), deriveXORKey(secret, connID))
 	require.NotEqual(t, deriveXORKey(secret, connID), deriveXORKey(secret, "conn-other"))
-	require.NotEqual(t, deriveXORKey(secret, connID), deriveXORKey("other-secret", connID))
+	require.NotEqual(t, deriveXORKey(secret, connID), deriveXORKey("test-other-seed", connID))
 	// 派生 == SHA-256(secret + ":" + connID)（与实现注释一致）
 	sum := sha256.Sum256([]byte(secret + ":" + connID))
 	require.Equal(t, sum[:], deriveXORKey(secret, connID))
@@ -99,8 +99,8 @@ func TestXOR_DeriveKey_BothEndsConsistent(t *testing.T) {
 // Discovery background: 兼容性契约——错 key 的帧在收侧解出垃圾，文本帧 JSON
 // 解析失败被丢弃 → 取文件确定性失败，而不是静默返回损坏数据。
 func TestXOR_WrongKey_Mismatch(t *testing.T) {
-	keyA := deriveXORKey("secret-a", "conn-1")
-	keyB := deriveXORKey("secret-b", "conn-1")
+	keyA := deriveXORKey("test-xor-seed-a", "conn-1")
+	keyB := deriveXORKey("test-xor-seed-b", "conn-1")
 	plain := []byte(`{"type":"req","hash":"abcd"}`)
 	ct := xorApply(plain, keyA)
 	got := xorApply(ct, keyB)
@@ -419,8 +419,8 @@ func TestXOR_RealDualPeer_WrongKey_Garbage(t *testing.T) {
 	hs := srv.up()
 	defer hs.Close()
 
-	pA := newRelayPeer(t, hs, "xor-a", "secret-a", true)
-	pB := newRelayPeer(t, hs, "xor-b", "secret-b", true) // 不同 secret
+	pA := newRelayPeer(t, hs, "xor-a", "test-xor-seed-a", true)
+	pB := newRelayPeer(t, hs, "xor-b", "test-xor-seed-b", true) // 不同 secret
 
 	aCh := make(chan Frame, 8)
 	pA.OnConnection(func(c *Connection) {

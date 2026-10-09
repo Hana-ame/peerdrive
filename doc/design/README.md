@@ -90,3 +90,4 @@
 - [SHA-ACL-INFERENCE-SPEC.md](SHA-ACL-INFERENCE-SPEC.md) — Content-addressed SHA-level ACL and source type inference specification (#202)
 - [PEERJS-CONCURRENCY-MATRIX-AUDIT.md](PEERJS-CONCURRENCY-MATRIX-AUDIT.md) — PeerJS multi-client concurrency matrix audit specification (#205)
 - [DOC-REFS-EVALUATION-SPEC.md](DOC-REFS-EVALUATION-SPEC.md) — doc-refs job trigger conditions and failure grading audit specification (#206)
+- [SECRET-SCANNING-DISCIPLINE-SPEC.md](SECRET-SCANNING-DISCIPLINE-SPEC.md) — GitHub secret scanning and test placeholder discipline specification (#207)

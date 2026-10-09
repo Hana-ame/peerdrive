@@ -77,14 +77,14 @@ func TestTwoRouters_DifferentAdminTokens_IndependentAuth(t *testing.T) {
 		return rt
 	}
 
-	strict := newRouterWithToken("token-A")
-	permissive := newRouterWithToken("token-B")
+	strict := newRouterWithToken("test-mock-auth-A")
+	permissive := newRouterWithToken("test-mock-auth-B")
 
 	probe := func(rt *Router) *httptest.ResponseRecorder {
 		// A tiny engine over the same Authenticator, so the assertion targets the
 		// auth middleware rather than the full route table (which needs a DB).
 		engine := newAuthTestEngine(rt.auth)
-		return authRequest(engine, "/protected", "Bearer token-A")
+		return authRequest(engine, "/protected", "Bearer test-mock-auth-A")
 	}
 
 	assert.Equal(t, http.StatusOK, probe(strict).Code,
@@ -135,18 +135,18 @@ func TestTwoAuthenticators_TokenCachesAreNotShared(t *testing.T) {
 	// Write through A's cache. (Calling the unexported cache methods directly is
 	// the point: no remote server is involved, so the test stays offline and
 	// deterministic, while still exercising the exact map that used to be shared.)
-	a.tokenCache.put("token-1", "alice", "user")
+	a.tokenCache.put("test-cache-key-1", "alice", "user")
 
 	assert.Equal(t, 1, a.tokenCache.len(), "A must see its own entry")
 	assert.Equal(t, 0, b.tokenCache.len(), "B must NOT see A's entry — caches are per-instance")
 
 	// B's cache knows nothing about that token, so B is forced to do its own
 	// validation rather than trusting A's result.
-	_, _, ok := b.tokenCache.get("token-1")
+	_, _, ok := b.tokenCache.get("test-cache-key-1")
 	assert.False(t, ok, "a token cached by A must not be visible to B")
 
 	// B caches its own entry independently; A's count must not move.
-	b.tokenCache.put("token-2", "bob", "user")
+	b.tokenCache.put("test-cache-key-2", "bob", "user")
 	assert.Equal(t, 1, a.tokenCache.len(), "B's write must not reach A")
 	assert.Equal(t, 1, b.tokenCache.len())
 }
@@ -176,7 +176,7 @@ func TestTwoRouters_ConcurrentConstruction_IndependentDeps(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			token := "token-" + string(rune('A'+i))
+			token := "mock-auth-key-" + string(rune('A'+i))
 			cfg := testCfg(func(c *config.Config) { c.AdminToken = token })
 			rt, err := NewRouter(Deps{Cfg: cfg})
 			if err != nil {
@@ -194,7 +194,7 @@ func TestTwoRouters_ConcurrentConstruction_IndependentDeps(t *testing.T) {
 		assert.Equal(t, http.StatusOK,
 			authRequest(b.engine, "/protected", "Bearer "+b.token).Code,
 			"router %d must accept its own token", i)
-		other := "token-" + string(rune('A'+(i+1)%instances))
+		other := "mock-auth-key-" + string(rune('A'+(i+1)%instances))
 		assert.Equal(t, http.StatusUnauthorized,
 			authRequest(b.engine, "/protected", "Bearer "+other).Code,
 			"router %d must reject another instance's token", i)

@@ -74,12 +74,12 @@ func TestAuthRequired_BothEmpty_AuthDisabledPassesThrough(t *testing.T) {
 // /protected 必须对错令牌 401、对正确令牌 200。这是本特性（C-14 follow-up）的核心断言。
 func TestAuthRequired_AdminToken_WrongToken401_RightToken200(t *testing.T) {
 	t.Parallel()
-	r := newAuthTestEngine(localTokenAuth("secret-token"))
+	r := newAuthTestEngine(localTokenAuth("test-credential-placeholder"))
 
 	wrong := authRequest(r, "/protected", "Bearer wrong")
 	assert.Equal(t, http.StatusUnauthorized, wrong.Code, "wrong admin token must 401")
 
-	right := authRequest(r, "/protected", "Bearer secret-token")
+	right := authRequest(r, "/protected", "Bearer test-credential-placeholder")
 	assert.Equal(t, http.StatusOK, right.Code, "correct admin token must pass")
 }
 
@@ -87,7 +87,7 @@ func TestAuthRequired_AdminToken_WrongToken401_RightToken200(t *testing.T) {
 // /protected 必须 401——避免"设了又等于没设"的错觉。
 func TestAuthRequired_AdminToken_MissingHeader401(t *testing.T) {
 	t.Parallel()
-	r := newAuthTestEngine(localTokenAuth("secret-token"))
+	r := newAuthTestEngine(localTokenAuth("test-credential-placeholder"))
 
 	w := authRequest(r, "/protected", "")
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -96,7 +96,7 @@ func TestAuthRequired_AdminToken_MissingHeader401(t *testing.T) {
 // TestAuthRequired_AdminToken_BadFormat401: 非 Bearer 格式的 Authorization 头必须 401。
 func TestAuthRequired_AdminToken_BadFormat401(t *testing.T) {
 	t.Parallel()
-	r := newAuthTestEngine(localTokenAuth("secret-token"))
+	r := newAuthTestEngine(localTokenAuth("test-credential-placeholder"))
 
 	w := authRequest(r, "/protected", "Basic abc")
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -107,7 +107,7 @@ func TestAuthRequired_AdminToken_BadFormat401(t *testing.T) {
 // 前端面板/公共页依赖"匿名也能进、authenticated=false"的合约。
 func TestAuthOptional_AdminToken_SetsAuthenticated(t *testing.T) {
 	t.Parallel()
-	a := localTokenAuth("secret-token")
+	a := localTokenAuth("test-credential-placeholder")
 
 	r := gin.New()
 	r.Use(a.AuthOptional())
@@ -121,7 +121,7 @@ func TestAuthOptional_AdminToken_SetsAuthenticated(t *testing.T) {
 
 	authed := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
-	req.Header.Set("Authorization", "Bearer secret-token")
+	req.Header.Set("Authorization", "Bearer test-credential-placeholder")
 	r.ServeHTTP(authed, req)
 	assert.Equal(t, `{"authenticated":true}`, authed.Body.String())
 }
@@ -143,7 +143,7 @@ func TestAuthRequired_RegServerSet_NoLocalTokenStillRequiresRemoteValidation(t *
 // 设了 AdminToken 也不影响匿名访问公共路由。
 func TestAuthRequired_AdminToken_AnonymousOpenRoute(t *testing.T) {
 	t.Parallel()
-	r := newAuthTestEngine(localTokenAuth("secret-token"))
+	r := newAuthTestEngine(localTokenAuth("test-credential-placeholder"))
 
 	w := authRequest(r, "/open", "")
 	assert.Equal(t, http.StatusOK, w.Code, "public routes stay open in local token mode")
@@ -175,7 +175,7 @@ func TestAuthRequired_RegServerSet_EmptyHeader401(t *testing.T) {
 func TestValidateToken_NoRegServer_ReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	// authDisabled()=false（有 AdminToken）但 regServerURL 为空
-	a := localTokenAuth("secret-token")
+	a := localTokenAuth("test-credential-placeholder")
 
 	u, role := a.validateToken("any")
 	assert.Equal(t, "", u)

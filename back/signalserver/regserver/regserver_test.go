@@ -161,12 +161,12 @@ func TestExpiredTokenRejects(t *testing.T) {
 
 // TestTokenStableAcrossRestarts 验签不依赖进程内状态：换一个 jwtSecret 就该失效。
 func TestTokenWrongSecretRejected(t *testing.T) {
-	a := newBareServer(t, "secret-a")
+	a := newBareServer(t, "test-jwt-key-a")
 	tok, err := a.newToken("u", "user")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := newBareServer(t, "secret-b")
+	b := newBareServer(t, "test-jwt-key-b")
 	if _, _, err := b.verifyToken(tok); err == nil {
 		t.Error("token verified under different secret")
 	}

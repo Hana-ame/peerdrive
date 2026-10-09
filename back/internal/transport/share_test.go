@@ -144,7 +144,7 @@ func TestShareLoadInfoCountsOnly(t *testing.T) {
 	svc.cfg.PeerPSK = "a-real-key"
 	svc.SetShareProvider(func(peerID string) ShareSnapshot {
 		return ShareSnapshot{
-			Collections: []ShareCollectionInfo{{Hash: "secret-hash"}},
+			Collections: []ShareCollectionInfo{{Hash: "test-unlisted-hash"}},
 			Files:       []ShareFileInfo{{Hash: "f1"}, {Hash: "f2"}},
 			Dirs:        []string{"/data"},
 		}
@@ -154,7 +154,7 @@ func TestShareLoadInfoCountsOnly(t *testing.T) {
 		t.Fatal("loadInfo should not be nil")
 	}
 	raw, _ := json.Marshal(li)
-	if contains(string(raw), "secret-hash") || contains(string(raw), "f1") {
+	if contains(string(raw), "test-unlisted-hash") || contains(string(raw), "f1") {
 		t.Fatalf("loadInfo leaked specific hashes: %s", raw)
 	}
 	shares, ok := li["shares"].(map[string]any)
