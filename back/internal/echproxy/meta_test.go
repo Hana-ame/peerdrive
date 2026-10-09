@@ -220,3 +220,24 @@ func TestApplyMetaCandidatesCandidateKeys(t *testing.T) {
 		t.Errorf("duration/views fallback = %d/%d, want 5/9", meta.Duration, meta.Views)
 	}
 }
+
+// TestApplyMetaCandidates_MissingTitleLogsDefensively verifies that when payload lacks
+// title candidates, parsing finishes safely with empty title without panic.
+//
+// 发现背景：Issue #102。真实 api.iwara.tv 若出现字段名漂移或特殊无 title 响应，
+// 解析必须安全完成并触发防御性日志，而不是崩溃或破坏其余元数据。
+func TestApplyMetaCandidates_MissingTitleLogsDefensively(t *testing.T) {
+	meta := &VideoMeta{ID: "vid123"}
+	raw := map[string]any{
+		"unrecognized_field": "val",
+		"uploader":           "author_only",
+	}
+	applyMetaCandidates(meta, raw)
+	if meta.Title != "" {
+		t.Errorf("title = %q, want empty", meta.Title)
+	}
+	if meta.Author != "author_only" {
+		t.Errorf("author = %q, want author_only", meta.Author)
+	}
+}
+
