@@ -1,7 +1,8 @@
 # Connection 12: frontend ↔ signalserver (consumer-side dialing)
 
 - **Modules involved**: `../modules/13-frontend.md` and `../modules/11-signalserver.md`
-- **Code locations**: A side `front/src/lib/PeerJSConnect.jsx` (UI component + `DEFAULT_SIG` + `connectTo`/`handleSearch`) and `front/src/lib/pd-client/` (`connectToPeer` `client.js:987-1022`, `discoverNodes` `client.js:907-935`, `PeerDriveClient` state machine `client.js:121-...`, frame protocol `protocol.js:3-24`); B side `back/signalserver/signalserver.go` (`HandleWS` `:246-296`, `readLoop`/`route` `:298-356`, `HandleNodes` `:568-638`)
+- **Code locations**: A side `front/src/lib/PeerJSConnect.jsx` (UI component + `DEFAULT_SIG` + `connectTo`/`handleSearch`) and `packages/peerdrive-client/src/` (`connectToPeer` `client.js:987-1022`, `discoverNodes` `client.js:907-935`, `PeerDriveClient` state machine `client.js:121-...`, frame protocol `protocol.js:3-24`); B side `back/signalserver/signalserver.go` (`HandleWS` `:246-296`, `readLoop`/`route` `:298-356`, `HandleNodes` `:568-638`)
+
 - **Direction**: A→B primary, split into two surfaces: **signaling surface** (A initiates WS dial → B forwards OFFER/ANSWER/CANDIDATE/HEARTBEAT → A gets DataChannel then goes P2P, decoupled from B); **discovery surface** (A→B single HTTP `GET /discover/nodes`, B returns online node list). B→A only occurs during `handleDeadDst`/`removeClient` broadcasting LEAVE (`signalserver.go:388-401, 426-446`), considered bidirectional.
 
 ## 1. Connection Method
