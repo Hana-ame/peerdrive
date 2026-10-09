@@ -89,6 +89,9 @@ func (p *Pipeline) Serve(req EgressRequest, sink EgressSink) error {
 
 	// 针对超出非空文件尾的 Range 请求直接返回 416
 	if total > 0 && actualOffset >= total {
+		if hs, ok := sink.(*HTTPEgressSink); ok {
+			hs.SetTotalSize(total)
+		}
 		_ = sink.WriteError("RANGE_NOT_SATISFIABLE", "requested range not satisfiable", 416)
 		return ErrRangeNotSatisfiable
 	}
@@ -113,6 +116,7 @@ func (p *Pipeline) Serve(req EgressRequest, sink EgressSink) error {
 		MimeType:    GuessMimeType(req.MimeType, req.Filename, nil),
 		ETag:        fmt.Sprintf("\"%s\"", req.Hash),
 		ReqID:       req.ReqID,
+		IsRange:     req.IsRange,
 	}
 
 	if err := sink.WriteMeta(meta); err != nil {

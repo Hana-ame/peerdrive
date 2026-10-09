@@ -96,10 +96,18 @@ type EgressRequest struct {
     Trace      []string        // 回源防环跟踪链（当前节点追加自己 ID）
     ReqID      string          // 请求标识（PeerJS/WS 用于响应关联；HTTP 可用于追踪日志）
     ClientID   string          // 消费端标识（对端 peerID、SessionID 或 RemoteAddr）
+    Filename   string          // 可选文件名（用于推导 MIME 类型与 Content-Disposition）
+    MimeType   string          // 可选显式 MIME 类型
+    IsRange    bool            // 标记该请求是否由显式 Range 标头发起（影响 206 状态码决策）
     IsLocal    bool            // 是否为本地管理会话（WS local / 127.0.0.1）
     Context    context.Context // 生命周期控制上下文
 }
 ```
+
+同时在 `internal/egress/range.go` 提供标准的 RFC 7233 语法解析工具：
+- `ParseRangeHeader(rangeVal, totalSize) (offset, size, isSatisfiable, ok)`：完整解析封闭区间（`bytes=N-M`）、开放区间（`bytes=N-`）、后缀区间（`bytes=-N`）；
+- `NewRequestFromHTTP(r, hash, totalSize) (req, satisfiable)`：一键从 HTTP Request 映射标准 `EgressRequest`；
+- `FormatContentRange(offset, size, total)`：格式化输出标准 `Content-Range: bytes N-M/total`。
 
 ### 3.2 统一响应接收器接口：`EgressSink`
 输出端适配器只需实现 `EgressSink` 接口，负责将通用数据事件翻译为对应传输协议的具体动作：
@@ -116,6 +124,7 @@ type EgressMeta struct {
     MimeType    string // MIME 类型（如 video/mp4, image/png, application/octet-stream）
     ETag        string // HTTP 缓存指纹（即 hash 或带引号指纹）
     ReqID       string // 对应的请求 ID
+    IsRange     bool   // 标记本次下发是否为 Range 分片响应（影响 206 状态码决策）
 }
 
 // EgressSink 协议输出适配器接口
@@ -249,16 +258,17 @@ func (p *Pipeline) Serve(req EgressRequest, sink EgressSink) error {
 ### 4.1 HTTP Egress 适配器 (`HTTPEgressSink`)
 - **适用场景**：
   - 浏览器原生 `<video>` / `<audio>` 播放、直接下载、cURL 请求、第三方播放器挂载。
-- **协议语义映射**：
+- **协议语义映射与 RFC 7233 严格对齐**：
   - `WriteMeta`：
-    - 若 `meta.Offset > 0` 或 `meta.ContentSize < meta.TotalSize`，返回 HTTP 状态码 `206 Partial Content`，并填充响应头：
+    - 若 `meta.IsRange`（显式出示了 Range 标头，如 `<video>` 请求 `bytes=0-` 或 `bytes=0-1`）或 `meta.Offset > 0` 或 `meta.ContentSize < meta.TotalSize`，严格返回 HTTP 状态码 `206 Partial Content`，并填充响应头：
       - `Content-Range: bytes <offset>-<offset+size-1>/<total>`
       - `Accept-Ranges: bytes`
-    - 若全量请求，返回 `200 OK`，填充 `Content-Length: <total>`；
+    - 若全量无 Range 请求，返回 `200 OK`，填充 `Content-Length: <total>`；
     - 填充 `Content-Type: <mime>`，`ETag: <etag>`，`Cache-Control: public, max-age=31536000, immutable`（CAS 内容不可变，天然可强缓存）；
   - `WriteChunk`：直接调用 `ResponseWriter.Write(chunk)`；若支持 `http.Flusher`，每块写入后按需 Flush；
   - `WriteDone`：正常返回结束；
-  - `WriteError`：若 Header 尚未发出，返回对应状态码（404/416/500）与标准 JSON 错误体。
+  - `WriteError`：若 Header 尚未发出，返回对应状态码（404/416/500）与标准 JSON 错误体；若状态码为 `416 Requested Range Not Satisfiable`，按照 RFC 7233 §4.4 规范强制注入 `Content-Range: bytes */<total>`。
+  - **流式无缓冲基线**：全面消除 `os.ReadFile` 整文件读入内存模式，底层直接通过 64KB 块池或 `http.ServeContent` 边读边下发，实现大文件（GB 级媒体）零 OOM 风险。
 
 ### 4.2 WebSocket Egress 适配器 (`WebSocketEgressSink`)
 - **适用场景**：
@@ -335,14 +345,15 @@ func (p *Pipeline) Serve(req EgressRequest, sink EgressSink) error {
 
 ## 6. 三阶段实施计划
 
-- **阶段 1：设计规范与接口契约固化（本 Issue #193 与 PR 落地）**
+- **阶段 1：设计规范与接口契约固化（已完成 - Issue #193 / PR #194）**
   - 明确数据提供端（WebDAV）与消费端（HTTP/WS/PeerJS）的二元正交关系；
   - 确立 `EgressRequest`、`EgressSink`、`Pipeline` 的结构与行为规范；
   - 保持与 `doc/LAYERS.md` 及既有代码体系的 100% 引用兼容。
-- **阶段 2：后端核心管道实现与 `serveFile` 重构**
-  - 在 `internal/egress` 建立管道包；
-  - 将 `back/internal/transport/inbound.go` 的 `serveFile` 下发逻辑重构为使用 `PeerJSEgressSink`；
-  - 补充针对不同 Sink 的单元测试与背压模拟测试。
-- **阶段 3：全出口统一收敛与 WebDAV 客户端接入**
-  - 将 HTTP 下载与 WS `admin-bin` 迁移至 `egress.Pipeline`；
-  - 依照 #165 规范正式接入 `WebDAVSource`，完成「WebDAV 提供端 $\rightarrow$ 统一出口 $\rightarrow$ 三选一消费端」的完整闭环。
+- **阶段 2：后端核心管道实现、Range 寻址强化与控制器收敛（已完成 - Issue #195, #197 / PR #196）**
+  - 在 `internal/egress` 建立核心模型、块池（64KB）、管道 `Pipeline` 与三大适配器（`HTTPEgressSink`、`WebSocketEgressSink`、`PeerJSEgressSink`）；
+  - 实现标准 RFC 7233 Range 解析（`range.go`：支持封闭、开放、后缀区间与 416 协议防护）；
+  - 控制器流式改造：`controller/download.go` 全面消除 `os.ReadFile` 整文件内存加载，收敛 Range 解析；
+  - 23 组单元测试全覆盖（含 Safari/Chrome `<video>` 探测与分块流式下发断言）。
+- **阶段 3：全出口统一收敛与 WebDAV 客户端接入（进行中）**
+  - 依照 #165 规范正式在 `internal/source/` 接入 `WebDAVSource`（作为数据源提供端）；
+  - 完成「WebDAV 提供端 $\rightarrow$ `source.Manager` 调度 $\rightarrow$ `egress.Pipeline` $\rightarrow$ HTTP/WS/PeerJS 三选一消费端」的完整闭环。
