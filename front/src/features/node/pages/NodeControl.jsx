@@ -212,7 +212,7 @@ export default function NodeControl() {
   }
 
   return (
-    <div className="p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto h-full">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>

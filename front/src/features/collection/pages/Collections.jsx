@@ -142,7 +142,7 @@ export default function Collections() {
   const th = 'text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
 
   return (
-    <div className="p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto h-full">
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-5">
           <div>
@@ -290,8 +290,8 @@ export default function Collections() {
                 })}
               </div>
             ) : (
-              <div className="card-surface overflow-hidden">
-                <table className="w-full text-sm">
+              <div className="card-surface overflow-x-auto">
+                <table className="w-full text-sm min-w-[560px]">
                   <thead className="bg-white/[0.03]">
                     <tr>
                       <th className={th}>Name</th>

@@ -110,11 +110,11 @@ export default function FilePreviewModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 sm:p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-2 sm:p-6"
       onClick={onClose}
     >
       <div
-        className="card-surface max-w-4xl w-full p-5 rounded-2xl max-h-[92vh] flex flex-col shadow-2xl border border-white/[0.08]"
+        className="card-surface max-w-4xl w-full p-3 sm:p-5 rounded-2xl max-h-[92vh] flex flex-col shadow-2xl border border-white/[0.08]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

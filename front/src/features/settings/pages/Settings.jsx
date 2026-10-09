@@ -88,7 +88,7 @@ export default function Settings() {
   const input = 'w-full bg-white/[0.06] px-2.5 py-1.5 text-xs font-mono rounded border border-white/[0.1] focus:outline-none focus:border-brand-500';
 
   return (
-    <div className="p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto h-full">
       <div className="max-w-3xl mx-auto space-y-6">
         <div>
           <h1 className="text-2xl font-bold">Settings</h1>
