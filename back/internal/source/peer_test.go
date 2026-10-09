@@ -724,3 +724,102 @@ type countingReadCloser struct {
 
 func (c *countingReadCloser) Read([]byte) (int, error) { return 0, io.EOF }
 func (c *countingReadCloser) Close() error             { c.closeCount++; return nil }
+
+// TestPeerSource_PeerLocksRemovedOnDisconnect verifies that when a peer disconnects,
+// its entry in PeerSource.peerLocks is synchronously removed via the OnPeerDisconnect hook.
+// 发现背景 (Issue #214): PeerSource.peerLocks (sync.Map) 早期只增不减，走向公网 marketplace
+// 后可能累积大量陌生节点的锁导致内存压力。
+func TestPeerSource_PeerLocksRemovedOnDisconnect(t *testing.T) {
+	_, sess, ps := newRaceSvc(t, "peerA", "peerB")
+
+	// Trigger lock initialization via collectPeers
+	pids, locks := ps.collectPeers()
+	require.Len(t, pids, 2)
+	for _, l := range locks {
+		l.Unlock()
+	}
+
+	assert.True(t, ps.HasPeerLock("peerA"))
+	assert.True(t, ps.HasPeerLock("peerB"))
+	assert.Equal(t, 2, ps.PeerLocksCount())
+
+	// Close peerA session -> should synchronously trigger RemoveLock
+	sess[0].Close()
+
+	assert.False(t, ps.HasPeerLock("peerA"), "peerA lock must be removed after disconnect")
+	assert.True(t, ps.HasPeerLock("peerB"), "peerB lock must be retained while still connected")
+	assert.Equal(t, 1, ps.PeerLocksCount())
+}
+
+// TestPeerSource_BusyLockDeferredRemoval verifies that when a peer disconnects while its
+// lock is held by an active stream, TryLock probing defers removal until the stream closes.
+// 发现背景 (Issue #214): 流拉取过程中远端断开连接，若直接强删可能与正在运行的流互斥状态发生竞态。
+// TryLock 探测保证进行中的任务不受影响，并在 reader.Close() 时安全清理。
+func TestPeerSource_BusyLockDeferredRemoval(t *testing.T) {
+	_, sess, ps := newRaceSvc(t, "peerA")
+
+	pids, locks := ps.collectPeers()
+	require.Len(t, pids, 1)
+	heldLock := locks[0] // heldLock is currently locked by collectPeers
+
+	// Simulate peerA disconnecting while heldLock is busy
+	sess[0].Close()
+
+	// Direct call to RemoveLock should return false because TryLock fails
+	removed := ps.RemoveLock("peerA")
+	assert.False(t, removed, "RemoveLock must return false when lock is held by active stream")
+	assert.True(t, ps.HasPeerLock("peerA"), "busy lock must not be deleted while in flight")
+
+	// Wrap in peerReadCloser and Close it
+	prc := &peerReadCloser{
+		r:      &countingReadCloser{},
+		mu:     heldLock,
+		peerID: "peerA",
+		ps:     ps,
+	}
+
+	require.NoError(t, prc.Close())
+	assert.False(t, ps.HasPeerLock("peerA"), "lock must be removed after reader Close releases it")
+}
+
+// TestPeerSource_SweepStaleLocks_MaxPeersGuard verifies the MAX_PEERS guard fallback:
+// stale entries for disconnected peers are swept when threshold is exceeded.
+// 发现背景 (Issue #214): MAX_PEERS 守卫兜底机制，防止极端异常情况下（如未走正常断开路径）
+// sync.Map 条目泄漏。
+func TestPeerSource_SweepStaleLocks_MaxPeersGuard(t *testing.T) {
+	_, sess, ps := newRaceSvc(t, "peerActive")
+	_ = sess
+
+	// Populate multiple stale locks for non-existent peers
+	for i := 0; i < 20; i++ {
+		staleID := "stale-" + strconv.Itoa(i)
+		muI, _ := ps.peerLocks.LoadOrStore(staleID, &sync.Mutex{})
+		_ = muI
+		ps.lockCount.Add(1)
+	}
+
+	assert.True(t, ps.PeerLocksCount() >= 20)
+
+	// SweepStaleLocks directly
+	removed := ps.SweepStaleLocks()
+	assert.Equal(t, 20, removed, "all 20 stale disconnected locks must be swept")
+	assert.Equal(t, 0, ps.PeerLocksCount())
+
+	// Re-add stale locks to test automatic trigger in collectPeers
+	for i := 0; i < 20; i++ {
+		staleID := "stale-auto-" + strconv.Itoa(i)
+		ps.peerLocks.Store(staleID, &sync.Mutex{})
+		ps.lockCount.Add(1)
+	}
+
+	// Calling collectPeers with active peer should trigger SweepStaleLocks
+	pids, locks := ps.collectPeers()
+	require.Len(t, pids, 1)
+	require.Equal(t, "peerActive", pids[0])
+	locks[0].Unlock()
+
+	// The stale ones should have been cleaned up by collectPeers guard
+	assert.False(t, ps.HasPeerLock("stale-auto-0"))
+	assert.True(t, ps.HasPeerLock("peerActive"))
+	assert.Equal(t, 1, ps.PeerLocksCount())
+}
