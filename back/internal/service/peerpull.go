@@ -147,9 +147,8 @@ type pullJobMeta struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// saveJobMeta 将任务元数据原子落盘到 metaPath（.part.meta）。
-func (p *PeerPuller) saveJobMeta(job *PullJob, metaPath string) error {
-	p.mu.Lock()
+// saveJobMetaLocked 将任务元数据原子落盘到 metaPath（.part.meta）。调用方必须持有 p.mu。
+func (p *PeerPuller) saveJobMetaLocked(job *PullJob, metaPath string) error {
 	meta := pullJobMeta{
 		ID:        job.ID,
 		Peer:      job.Peer,
@@ -160,9 +159,11 @@ func (p *PeerPuller) saveJobMeta(job *PullJob, metaPath string) error {
 		Total:     job.Total,
 		CreatedAt: job.Started,
 	}
-	p.mu.Unlock()
 	data, err := json.Marshal(meta)
 	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
 		return err
 	}
 	tmpMeta := metaPath + ".tmp"
@@ -170,6 +171,13 @@ func (p *PeerPuller) saveJobMeta(job *PullJob, metaPath string) error {
 		return err
 	}
 	return os.Rename(tmpMeta, metaPath)
+}
+
+// saveJobMeta 加锁将任务元数据落盘到 metaPath。
+func (p *PeerPuller) saveJobMeta(job *PullJob, metaPath string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.saveJobMetaLocked(job, metaPath)
 }
 
 // SetSource 注入数据面（main 装 transport.PeerJSService）。
@@ -679,7 +687,7 @@ func (p *PeerPuller) copyWithProgress(ctx context.Context, dst io.Writer, src io
 					if tr, ok := src.(totalReporter); ok {
 						job.Total = tr.Total()
 						if job.Total > 0 {
-							_ = p.saveJobMeta(job, metaPath)
+							_ = p.saveJobMetaLocked(job, metaPath)
 						}
 					}
 				}
