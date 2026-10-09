@@ -82,15 +82,37 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #52525b; border-radius: 3px; }
 
-/* ── Mobile-first touch targets ── */
+/* ── Mobile-first touch targets & Safe Areas ── */
 @media (max-width: 768px) {
-  button, a, input, select, textarea {
+  /* Prevent iOS auto-zoom on form inputs */
+  input, select, textarea {
+    font-size: 16px;
+  }
+  .touch-target {
     min-height: 44px;
-    font-size: 16px; /* prevent iOS zoom on focus */
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .touch-friendly {
     padding: 12px 16px;
   }
+}
+
+/* ── Safe areas support for notch & home bar (iOS / Android) ── */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+.safe-area-top {
+  padding-top: max(var(--safe-top), 0px);
+}
+.safe-area-bottom {
+  padding-bottom: max(var(--safe-bottom), 0px);
 }
 
 /* ── PWA standalone mode / safe areas ── */

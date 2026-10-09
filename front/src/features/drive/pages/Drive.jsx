@@ -236,7 +236,7 @@ export default function Drive() {
   const td = 'px-3 py-2';
 
   return (
-    <div className="p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto h-full">
       <div className="max-w-5xl mx-auto">
         {/* Header toolbar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
@@ -445,8 +445,8 @@ export default function Drive() {
           </div>
         ) : (
           /* List View Mode */
-          <div className="card-surface overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="card-surface overflow-x-auto">
+            <table className="w-full text-sm min-w-[560px]">
               <thead className="bg-white/[0.03]">
                 <tr>
                   <th className={th}>Name</th>

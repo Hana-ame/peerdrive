@@ -8,7 +8,7 @@ import PeerJSConnect from '../../../lib/PeerJSConnect';
 export default function Connect() {
   const navigate = useNavigate();
   return (
-    <div className="p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto h-full">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-2xl font-bold mb-1">Node Search / Connect</h1>
         <p className="text-sm text-gray-500 mb-6">

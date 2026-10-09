@@ -46,32 +46,40 @@ import * as ws from './platform/transport-ws';
 // - Always available (standalone/consumer pages): Connect (/), Iwara (/iwara)
 // - Available when connected to local node: Drive, NodeControl, Collections, Transfers, BT, IPFS, Settings
 const ALWAYS_NAV = [
-  { to: '/', label: 'Connect' },
-  { to: '/iwara', label: 'Iwara' },
+  { to: '/', label: 'Connect', icon: '🌐' },
+  { to: '/iwara', label: 'Iwara', icon: '🎬' },
 ];
 
 const CONNECTED_NAV = [
-  { to: '/drive', label: 'Drive' },
-  { to: '/node', label: 'Node' },
-  { to: '/collections', label: 'Collections' },
-  { to: '/transfers', label: 'Transfers' },
-  { to: '/bt', label: 'BT' },
-  { to: '/ipfs', label: 'IPFS' },
-  { to: '/settings', label: 'Settings' },
+  { to: '/drive', label: 'Drive', icon: '☁️' },
+  { to: '/node', label: 'Node', icon: '💻' },
+  { to: '/collections', label: 'Collections', icon: '📦' },
+  { to: '/transfers', label: 'Transfers', icon: '⚡' },
+  { to: '/bt', label: 'BT', icon: '🧲' },
+  { to: '/ipfs', label: 'IPFS', icon: '🧊' },
+  { to: '/settings', label: 'Settings', icon: '⚙️' },
 ];
 
-function Nav() {
-  const [isOpen, setIsOpen] = React.useState(ws.getStatus() === 'open');
+import { MobileNavDrawer, MobileBottomBar } from './components/MobileNav';
 
-  React.useEffect(() => {
-    return ws.onStatus((status) => {
-      setIsOpen(status === 'open');
-    });
-  }, []);
-
+function Nav({ onOpenDrawer, isOpen }) {
   return (
-    <nav className="h-14 bg-surface-raised/70 backdrop-blur-xl border-b border-white/[0.06] flex items-center px-3 md:px-6 gap-1 md:gap-2 shrink-0">
-      <Link to="/" className="text-lg font-bold bg-gradient-to-r from-brand-300 via-brand-400 to-cyan-300 bg-clip-text text-transparent tracking-tight mr-4 shrink-0">Peerdrive</Link>
+    <nav className="h-14 bg-surface-raised/70 backdrop-blur-xl border-b border-white/[0.06] flex items-center px-3 md:px-6 gap-2 shrink-0 select-none">
+      {/* Mobile Drawer Toggle */}
+      <button
+        type="button"
+        onClick={onOpenDrawer}
+        className="md:hidden p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/[0.08] transition-colors -ml-1"
+        aria-label="Open menu drawer"
+        data-testid="mobile-menu-button"
+      >
+        <span className="text-lg leading-none">☰</span>
+      </button>
+
+      <Link to="/" className="text-lg font-bold bg-gradient-to-r from-brand-300 via-brand-400 to-cyan-300 bg-clip-text text-transparent tracking-tight mr-2 md:mr-4 shrink-0">
+        Peerdrive
+      </Link>
+
       <div className="hidden md:flex items-center gap-1">
         {ALWAYS_NAV.map(it => (
           <Link key={it.to} to={it.to}
@@ -87,17 +95,7 @@ function Nav() {
           </>
         )}
       </div>
-      <div className="md:hidden flex items-center gap-1 ml-auto">
-        {ALWAYS_NAV.map(it => (
-          <Link key={it.to} to={it.to} className="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded hover:bg-white/[0.06]">{it.label}</Link>
-        ))}
-        {isOpen && (
-          <div className="flex items-center gap-1 border-l border-white/10 pl-1 ml-1">
-            <Link to="/drive" className="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded hover:bg-white/[0.06]">Drive</Link>
-            <Link to="/collections" className="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded hover:bg-white/[0.06]">Collections</Link>
-          </div>
-        )}
-      </div>
+
       {/* Live local-node session pill */}
       <ConnectionStatus />
     </nav>
@@ -107,34 +105,54 @@ function Nav() {
 import { AppProvider } from './context/AppContext';
 
 export default function App() {
-  useEffect(() => { registerSW(); }, []);
+  const [isOpen, setIsOpen] = React.useState(ws.getStatus() === 'open');
+  const [drawerOpen, setDrawerOpen] = React.useState(false);
+
+  useEffect(() => {
+    registerSW();
+    return ws.onStatus((status) => {
+      setIsOpen(status === 'open');
+    });
+  }, []);
+
   return (
     <HashRouter>
       <AppProvider>
         <div className="flex flex-col h-screen text-gray-200">
-          <Nav />
-          <div className="flex-1 overflow-hidden">
+          <Nav onOpenDrawer={() => setDrawerOpen(true)} isOpen={isOpen} />
+
+          <MobileNavDrawer
+            isOpen={drawerOpen}
+            onClose={() => setDrawerOpen(false)}
+            connected={isOpen}
+            navItems={{ always: ALWAYS_NAV, connected: CONNECTED_NAV }}
+          />
+
+          <div className="flex-1 overflow-hidden has-mobile-nav md:pb-0">
             <Suspense fallback={<RouteLoading />}>
-            <Routes>
-              <Route path="/" element={<Connect />} />
-              <Route path="/node" element={<NodeControl />} />
-              <Route path="/drive" element={<Drive />} />
-              <Route path="/drive/:hash" element={<Drive />} />
-              <Route path="/collections" element={<Collections />} />
-              <Route path="/collection" element={<CollectionView />} />
-              <Route path="/collection/:hash" element={<CollectionView />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/transfers" element={<Transfers />} />
-              <Route path="/bt" element={<BT />} />
-              <Route path="/ipfs" element={<IPFS />} />
-              <Route path="/iwara" element={<Iwara />} />
-              <Route path="/iwara/:id" element={<Iwara />} />
-              <Route path="*" element={<Placeholder title="Page Not Found" />} />
-            </Routes>
-          </Suspense>
+              <Routes>
+                <Route path="/" element={<Connect />} />
+                <Route path="/node" element={<NodeControl />} />
+                <Route path="/drive" element={<Drive />} />
+                <Route path="/drive/:hash" element={<Drive />} />
+                <Route path="/collections" element={<Collections />} />
+                <Route path="/collection" element={<CollectionView />} />
+                <Route path="/collection/:hash" element={<CollectionView />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/transfers" element={<Transfers />} />
+                <Route path="/bt" element={<BT />} />
+                <Route path="/ipfs" element={<IPFS />} />
+                <Route path="/iwara" element={<Iwara />} />
+                <Route path="/iwara/:id" element={<Iwara />} />
+                <Route path="*" element={<Placeholder title="Page Not Found" />} />
+              </Routes>
+            </Suspense>
+          </div>
+
+          <MobileBottomBar connected={isOpen} />
         </div>
-      </div>
-    </AppProvider>
-  </HashRouter>
-);
+      </AppProvider>
+    </HashRouter>
+  );
 }
+
