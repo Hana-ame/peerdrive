@@ -241,6 +241,8 @@ func InitDB(dbPath string) error {
 	)`)
 	// File index table: sha256 → absolute path mapping + sync cursor (independent of old file_meta)
 	createFileIndexTable()
+	// SHA tags table: sha256 → tag mapping (Issue #91)
+	createShaTagsTable()
 	return nil
 }
 
