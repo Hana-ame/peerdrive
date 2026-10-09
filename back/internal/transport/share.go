@@ -191,3 +191,9 @@ func (s *PeerJSService) serveShare(c Session, r dcResp) {
 	total := len(snap.Collections) + len(snap.Files)
 	_ = c.SendJSON(shareResp{Type: "share-resp", ShareSnapshot: snap, Total: total, ReqID: r.ReqID})
 }
+
+// ServeShareForTest exports serveShare execution for integration/matrix tests.
+func (s *PeerJSService) ServeShareForTest(c Session, reqID string) {
+	s.serveShare(c, dcResp{Type: "share", ReqID: reqID})
+}
+
