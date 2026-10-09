@@ -12,8 +12,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
-	"time"
 	"testing"
+	"time"
 
 	"peerdrive/internal/config"
 )
@@ -356,41 +356,6 @@ func TestConflictingRegRouteMovedToPrefix(t *testing.T) {
 	})
 }
 
-// TestWithPrefixKeepsMethod withPrefix 不能靠切片拼路径——
-// 方法名长度一变（POST/DELETE 比 GET 长）就拼错，且会悄悄丢掉方法词。
-func TestWithPrefixKeepsMethod(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"GET /ping", "GET /_reg/ping"},
-		{"POST /auth/register", "POST /_reg/auth/register"},
-		{"DELETE /a-very-long-path", "DELETE /_reg/a-very-long-path"},
-		{"/no-method", "/_reg/no-method"},
-	}
-	for _, c := range cases {
-		if got := withPrefix("/_reg", c.in); got != c.want {
-			t.Errorf("withPrefix(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-// TestStripPrefixRewritesPath 内层 handler 必须看到剥掉前缀后的路径，
-// 否则注册服务自己的 ServeMux（写死 "/ping"）会匹配不到。
-func TestStripPrefixRewritesPath(t *testing.T) {
-	var seen string
-	h := stripPrefix("/_reg", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = r.URL.Path
-	}))
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/_reg/ping", nil))
-	if seen != "/ping" {
-		t.Errorf("inner handler saw %q, want /ping", seen)
-	}
-
-	// 恰好等于前缀时应还原成根路径：signalserver 的 HandleDashboard 硬判
-	// Path != "/" 就 404，空串会被它误判。
-	h2 := stripPrefix("/_signal", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = r.URL.Path
-	}))
-	h2.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/_signal", nil))
-	if seen != "/" {
-		t.Errorf("inner handler saw %q, want / (empty path breaks HandleDashboard)", seen)
-	}
-}
+// TestWithPrefixKeepsMethod 与 TestStripPrefixRewritesPath 随被测代码一起搬到了
+// internal/httpd/mux_test.go（那里测的是导出的 httpd.WithPrefix / httpd.StripPrefix）。
+// 本文件保留的仍是 UnifiedMux 的装配行为（regPrefix 仍在这里生效）。

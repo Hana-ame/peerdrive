@@ -64,6 +64,7 @@
 package regserver
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -73,6 +74,7 @@ import (
 	"time"
 
 	"github.com/Hana-ame/go-peerserver/tracker"
+	"peerdrive/internal/httpd"
 	"peerdrive/internal/ratelimit"
 )
 
@@ -292,14 +294,17 @@ func (s *Server) Handler() http.Handler {
 // Serve 在 addr 上启动并阻塞，直到出错。
 // 只给 certFile 或 keyFile 其一即报错——静默降级成明文会让「以为在跑 HTTPS」
 // 的部署上线，代价远大于启动失败。
+//
+// 实现已搬到 internal/httpd（密钥加载、半参数报错、普通 Serve 都在那里）；
+// 签名 (addr, certFile, keyFile) 保持不变，runReg 按这个顺序传参。
 func (s *Server) Serve(addr, certFile, keyFile string) error {
-	h := s.Handler()
-	if certFile != "" && keyFile != "" {
-		srv := &http.Server{Addr: addr, Handler: h}
-		return srv.ListenAndServeTLS(certFile, keyFile)
+	srv, err := httpd.New(httpd.Config{
+		Addr:     addr,
+		CertFile: certFile,
+		KeyFile:  keyFile,
+	}, s.Handler())
+	if err != nil {
+		return err
 	}
-	if certFile != "" || keyFile != "" {
-		return fmt.Errorf("TLS requires both cert and key (cert=%q key=%q)", certFile, keyFile)
-	}
-	return http.ListenAndServe(addr, h)
+	return srv.Serve(context.Background())
 }

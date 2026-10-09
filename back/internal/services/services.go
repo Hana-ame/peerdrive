@@ -11,11 +11,8 @@
 package services
 
 import (
-	"crypto/tls"
-	"errors"
-	"fmt"
+	"context"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -24,6 +21,7 @@ import (
 	"github.com/Hana-ame/go-peerserver/tracker"
 
 	"peerdrive/internal/config"
+	"peerdrive/internal/httpd"
 	"peerdrive/internal/regserver"
 )
 
@@ -124,29 +122,26 @@ func RegHandler(dbPath string) (*regserver.Server, error) {
 //
 // 与 signalserver.Serve 同语义：只给其一即报错退出，不做静默降级——
 // 静默降级会让「以为在跑 HTTPS 其实是 HTTP」上线，代价远大于启动失败。
+//
+// 实现已搬到 internal/httpd：这一层只负责把参数拼成 httpd.Config。签名保持
+// (addr, certFile, keyFile, h) 不变，因为 runSignal 与 runAll 都按这个顺序
+// 传参，改签名等于改两个子命令。
 func ServeHTTP(addr, certFile, keyFile string, h http.Handler) error {
-	if certFile != "" && keyFile != "" {
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-		if err != nil {
-			return fmt.Errorf("load TLS keypair: %w", err)
-		}
-		srv := &http.Server{
-			Addr:      addr,
-			Handler:   h,
-			TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
-		}
-		return srv.ListenAndServeTLS("", "")
+	s, err := httpd.New(httpd.Config{
+		Addr:     addr,
+		CertFile: certFile,
+		KeyFile:  keyFile,
+	}, h)
+	if err != nil {
+		return err
 	}
-	if certFile != "" || keyFile != "" {
-		return errors.New("TLS requires both -tls-cert and -tls-key (only one given)")
-	}
-	return http.ListenAndServe(addr, h)
+	return s.Serve(context.Background())
 }
 
-	// (C-2 fix) SignalConfig / RegAddr / envOr / joinHostPort removed:
-	// all signal-subcommand env parsing now lives in config.Load().
-	// The `peerdrive signal` subcommand reads its defaults from config.Load()
-	// and overrides them with flag values before calling SignalHandler(cfg).
+// (C-2 fix) SignalConfig / RegAddr / envOr / joinHostPort removed:
+// all signal-subcommand env parsing now lives in config.Load().
+// The `peerdrive signal` subcommand reads its defaults from config.Load()
+// and overrides them with flag values before calling SignalHandler(cfg).
 
 // UnifiedMux 把主服务、信令、注册服务合并到一个 http.Handler（同一端口）。
 //
@@ -191,7 +186,7 @@ func UnifiedMux(cfg *config.Config, ginHandler http.Handler) (*http.ServeMux, *r
 	// 而合并模式下 "/" 归主服务兜底，所以面板在这里是拿不到的。
 	// 改挂 /_signal 面板 + 剥前缀，让合并模式下也能开面板——
 	// 否则 `peerdrive all` 的运维就失去了唯一的信令可视化入口。
-	mux.Handle("/_signal", stripPrefix("/_signal", http.HandlerFunc(sig.HandleDashboard)))
+	mux.Handle("/_signal", httpd.StripPrefix("/_signal", http.HandlerFunc(sig.HandleDashboard)))
 
 	// 注册服务：整块挂同一个 Handler——它的 Handler() 内部已按 9 条路由分派，
 	// 交给 ServeMux 顶层路由比逐条搬运更不容易漏。
@@ -204,7 +199,7 @@ func UnifiedMux(cfg *config.Config, ginHandler http.Handler) (*http.ServeMux, *r
 		if conflictsMainRoute(p) {
 			// 见 prefixConflicts 的说明：静默换语义是最坏的一类破坏，
 			// 宁可不挂。挂到 /_reg 前缀下仍然可达。
-			mux.Handle(withPrefix(regPrefix, p), stripPrefix(regPrefix, regMux))
+			mux.Handle(httpd.WithPrefix(regPrefix, p), httpd.StripPrefix(regPrefix, regMux))
 			continue
 		}
 		mux.Handle(p, regMux)
@@ -265,47 +260,10 @@ func conflictsMainRoute(pattern string) bool {
 	return hit
 }
 
-// stripPrefix 剥掉路径前缀后再交给内层 handler。
-//
-// 为什么必须剥：注册服务自己的 Handler() 内部是一个 ServeMux，它的路由写死在
-// "/ping"、"/auth/login"。外层把模式改成 "/_reg/ping" 之后，请求到达内层时
-// r.URL.Path 仍是 "/_reg/ping"，内层匹配不到 "/ping" —— 直接挂会得到 404。
-// 这里复制一份 request 并改写 Path，让内层以为路径没变过。
-func stripPrefix(prefix string, h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, prefix) {
-			stripped := strings.TrimPrefix(r.URL.Path, prefix)
-			if stripped == "" {
-				// 恰好等于前缀（如 /_signal）：剥完是空串，
-				// 而 HandleDashboard 硬判 Path != "/"，空串会被它当 404。
-				// 所以要补回根路径——这是「/prefix == /」这个挂法的语义。
-				stripped = "/"
-			}
-			r2 := new(http.Request)
-			*r2 = *r
-			r2.URL = new(url.URL)
-			*r2.URL = *r.URL
-			r2.URL.Path = stripped
-			if r2.URL.RawPath != "" {
-				r2.URL.RawPath = stripped
-			}
-			r = r2
-		}
-		h.ServeHTTP(w, r)
-	})
-}
-
-// withPrefix 给 "METHOD /path" 形式的模式加上路径前缀。
-// "GET /ping" -> "GET /_reg/ping"。
-//
-// 不要用切片拼（如 p[4:]）：那依赖方法名的长度，POST/DELETE 一变长就拼错，
-// 且会悄悄丢掉方法词——得到 " /auth/register" 这种非法模式。
-func withPrefix(prefix, pattern string) string {
-	if i := strings.IndexByte(pattern, ' '); i >= 0 {
-		return pattern[:i+1] + prefix + pattern[i+1:]
-	}
-	return prefix + pattern
-}
+// stripPrefix / withPrefix 已搬到 internal/httpd（httpd.StripPrefix /
+// httpd.WithPrefix）：它们是纯请求形状改造，不含任何 peerdrive 业务知识。
+// 本文件保留 regPrefix 与 prefixConflicts——「哪些路由撞名、搬到哪个前缀」
+// 才是本层该负责的判断。
 
 func regDBPath(cfg *config.Config) string {
 	if cfg == nil {
