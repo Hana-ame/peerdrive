@@ -80,4 +80,12 @@ type Options struct {
 	Token        string             // empty means randomly generated
 	PingInterval time.Duration      // signaling heartbeat interval (default 5s)
 	ICEServers   []webrtc.ICEServer // WebRTC ICE/TURN server list
+
+	// XOREnable 数据面 XOR 混淆开关（默认 false = 现状明文，与浏览器 peerjs
+	// 客户端互操作不受影响）。开启时两端必须配置同一 XORKey，否则对端解出
+	// 垃圾帧、确定性失败（见 xor.go 头注释的设计契约）。
+	XOREnable bool
+	// XORKey 每连接密钥派生种子（secret）。XOREnable=true 且 XORKey 为空 →
+	// 视为关闭并告警（防御；上层 config.Validate 已在启动期拦截该组合）。
+	XORKey string
 }

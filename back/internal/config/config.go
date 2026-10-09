@@ -87,6 +87,17 @@ type Config struct {
 	PeerJSSecure bool   // PEERDRIVE_PEERJS_SECURE, default true
 	PeerJSPeers  string // PEERDRIVE_PEERJS_PEERS, comma-separated peer node ids for auto-interconnection on startup
 
+	// PeerJSXOREnable 数据面 XOR 混淆总开关（PEERDRIVE_PEERJS_XOR_ENABLE,
+	// 默认 false）。false = 现状明文，与浏览器 peerjs / peerdrive-client 互操作
+	// 不受影响；true = 本节点所有 WebRTC DataChannel 帧（req/meta/data/done/err/
+	// psk-auth/fwd/admin 等）在库层做 XOR（见 back/peerjs/xor.go 设计契约）。
+	// 定位：轻量混淆（防明文嗅探），不是强加密——防定向破解请用 PSK + 可信信令。
+	PeerJSXOREnable bool
+	// PeerJSXORKey 每连接密钥派生种子（PEERDRIVE_PEERJS_XOR_KEY）。
+	// 开启时两端节点必须配置同一把 key（每连接再按 connectionId 派生，见
+	// back/peerjs/xor.go）；key 不一致的对端解出垃圾帧、确定性失败。
+	PeerJSXORKey string
+
 	// PeerPSK is the node access pre-shared key (PEERDRIVE_PSK, default empty = open mode).
 	//
 	// When set: any peer must present the **same** key on this connection before this node
@@ -397,6 +408,10 @@ func Load() *Config {
 		PeerJSID:     getEnv("PEERDRIVE_PEERJS_ID", ""),
 		PeerJSSecure: getEnvBool("PEERDRIVE_PEERJS_SECURE", true),
 		PeerJSPeers:  getEnv("PEERDRIVE_PEERJS_PEERS", ""),
+		// 注意：本块列对齐是 deployconsistency 测试钉死的格式（逐字节 grep），
+		// 新行只能追加、不能重排既有行的列（C-8）。
+		PeerJSXOREnable: getEnvBool("PEERDRIVE_PEERJS_XOR_ENABLE", false),
+		PeerJSXORKey:    getEnv("PEERDRIVE_PEERJS_XOR_KEY", ""),
 		PeerPSK:      getEnv("PEERDRIVE_PSK", ""),
 
 		MQTTEnable:        getEnvBool("PEERDRIVE_MQTT_ENABLE", false),
@@ -516,6 +531,11 @@ func Validate(c *Config) error {
 		if n, err := strconv.Atoi(p); err != nil || n <= 0 || n > 65535 {
 			errs = append(errs, fmt.Sprintf("PEERDRIVE_PEERJS_PORT=%q is not a valid port", p))
 		}
+	}
+	// XOR 开关与密钥的交叉校验：开了却没配密钥 = 配置错误，启动期拦截
+	// （库层会防御性降级明文并告警，但那是兜底不是预期状态）。
+	if c.PeerJSXOREnable && strings.TrimSpace(c.PeerJSXORKey) == "" {
+		errs = append(errs, "PEERDRIVE_PEERJS_XOR_ENABLE=true requires PEERDRIVE_PEERJS_XOR_KEY to be set")
 	}
 	if c.MaxPeers <= 0 {
 		errs = append(errs, fmt.Sprintf("PEERDRIVE_MAX_PEERS=%d must be positive", c.MaxPeers))

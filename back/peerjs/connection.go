@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -54,9 +55,17 @@ type Connection struct {
 	onMessage func(Frame)
 	onClose   func(*Connection)
 
+	// xorKey 数据面 XOR 混淆密钥（见 xor.go 设计契约）：newConnection 派生，
+	// 此后不可变；nil = 关闭（恒等变换，现状零变化）。发送侧 Send/SendText/
+	// SendFrame 与收侧 attach 的 OnMessage 共用，编解码对称。
+	xorKey []byte
+
 	closeOnce sync.Once
 	done      chan struct{}
 }
+
+// xor 对一帧数据做对称 XOR（nil key = 恒等，关闭态零开销零变化）。
+func (c *Connection) xor(data []byte) []byte { return xorApply(data, c.xorKey) }
 
 // Done returns the connection-close notification (triggered on Close or peer disconnect).
 func (c *Connection) Done() <-chan struct{} { return c.done }
@@ -92,6 +101,7 @@ func (c *Connection) Open() bool {
 // Send sends binary data.
 // Note: pion's dc.Send([]byte) sends a binary frame (SCTP PPID 53),
 // distinguishable from a text frame (PPID 51) on the receiver side — the protocol relies on this distinction to route "data chunks vs. control headers."
+// XOR 混淆（开启时）在落线前应用：对端 attach 的 OnMessage 对称解密后才见到明文。
 func (c *Connection) Send(data []byte) error {
 	c.dcMu.RLock()
 	dc := c.dc
@@ -99,12 +109,14 @@ func (c *Connection) Send(data []byte) error {
 	if dc == nil || !dc.Open() {
 		return fmt.Errorf("peerjs: connection not open")
 	}
-	return dc.Send(data)
+	return dc.Send(c.xor(data))
 }
 
 // SendText sends a text frame (for JSON control headers).
 // Pitfall: must use a text frame. If a JSON header is sent via Send([]byte), the peer (peerjs browser side
 // / this library's peer) will misidentify the header as a binary data chunk and discard/mismatch it.
+// XOR 混淆（开启时）同样作用于文本帧——数据面全帧加密，头部（hash/offset/size/reqId）
+// 不裸奔。
 func (c *Connection) SendText(s string) error {
 	c.dcMu.RLock()
 	dc := c.dc
@@ -112,7 +124,7 @@ func (c *Connection) SendText(s string) error {
 	if dc == nil || !dc.Open() {
 		return fmt.Errorf("peerjs: connection not open")
 	}
-	return dc.SendText(s)
+	return dc.SendText(string(c.xor([]byte(s))))
 }
 
 // SendJSON sends a JSON text message (equivalent to SendText(json(v))).
@@ -145,7 +157,7 @@ func (c *Connection) SendFrame(header any, body []byte) error {
 	if dc == nil || !dc.Open() {
 		return fmt.Errorf("peerjs: connection not open")
 	}
-	if err := dc.SendText(string(hb)); err != nil {
+	if err := dc.SendText(string(c.xor(hb))); err != nil {
 		return err
 	}
 	if len(body) == 0 {
@@ -164,7 +176,9 @@ func (c *Connection) SendFrame(header any, body []byte) error {
 			return fmt.Errorf("peerjs: flow control timeout (slow consumer)")
 		}
 	}
-	return dc.Send(body)
+	// XOR 加密在流控等待之后、落线之前：密文与明文等长，bufferedAmount 记账
+	// 不受影响；xorApply 新分配（不改写调用方池化 buffer，见 xor.go）。
+	return dc.Send(c.xor(body))
 }
 
 // DataChannel returns the underlying data channel (advanced usage: flow control, close, etc.).
@@ -242,6 +256,15 @@ func (p *Peer) newConnection(dst, label string, offered bool, iceServers []webrt
 		done:     make(chan struct{}),
 		lowWater: make(chan struct{}, 1),
 	}
+	// XOR 每连接密钥派生（见 xor.go 设计契约）：connID 此时已确定（offerer
+	// 生成 / answerer 复用 OFFER 里的 connectionId），两端派生一致，无需额外
+	// 握手轮次。空 secret + enable 视为关闭并告警（防御；上层 config.Validate
+	// 启动期已拦截该组合）。
+	if p.xorEnabled && p.xorSecret != "" {
+		conn.xorKey = deriveXORKey(p.xorSecret, connID)
+	} else if p.xorEnabled {
+		log.Printf("peerjs: XOR enabled but XORKey empty, falling back to plaintext")
+	}
 	// On ICE failure/disconnect, clean up the connection immediately to avoid leaks (same behavior as peerjs-client negotiator)
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		switch state {
@@ -315,6 +338,10 @@ func (c *Connection) attach(dc DataChannel) {
 		}
 	})
 	dc.OnMessage(func(f Frame) {
+		// XOR 解密（对称，关闭态恒等）：必须在回调分发前完成——上层
+		// （transport dispatchFrame）拿到的必须是明文帧。与发送侧
+		// Send/SendText/SendFrame 共用同一把连接级密钥。
+		f.Data = c.xor(f.Data)
 		c.handlerMu.Lock()
 		h := c.onMessage
 		c.handlerMu.Unlock()

@@ -27,6 +27,12 @@ type Peer struct {
 	onConn     ConnectionHandler
 	iceServers []webrtc.ICEServer
 
+	// xorEnabled/xorSecret 数据面 XOR 混淆配置（见 xor.go）：NewPeer 从
+	// Options 读取；NewPeerWithSignaller 路径经 SetXOR 注入。newConnection
+	// 读取（与 iceServers 同一模式：在 Connect 前配置好，不在拨号中改动）。
+	xorEnabled bool
+	xorSecret  string
+
 	mu     sync.Mutex
 	conns  map[string]*Connection
 	closed chan struct{}
@@ -55,6 +61,7 @@ func NewPeer(id string, opts Options) *Peer {
 		closed: make(chan struct{}),
 	}
 	p.iceServers = opts.ICEServers // Options injects ICE servers (SetICEServers has been merged into Options)
+	p.xorEnabled, p.xorSecret = opts.XOREnable, opts.XORKey
 	p.signaller = signalling.NewPeerJSSignaller(id, signallingFromOptions(opts), p.route)
 	return p
 }
@@ -101,6 +108,15 @@ func (p *Peer) SetICEServers(servers []webrtc.ICEServer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.iceServers = servers
+}
+
+// SetXOR 配置数据面 XOR 混淆（见 xor.go 的设计契约）。
+// NewPeer 已从 Options.XOREnable/XORKey 读取；此方法只服务于
+// NewPeerWithSignaller（自定义信令）路径，必须在 Connect 拨号前调用。
+func (p *Peer) SetXOR(enable bool, key string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.xorEnabled, p.xorSecret = enable, key
 }
 
 // ID returns the peer's identifier (valid after Dial succeeds).

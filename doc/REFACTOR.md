@@ -878,6 +878,38 @@ peerjs/signalserver/p2p_bt/signalframe 是独立库，无人会 import 它，故
 - **校验**：sha/preview 一律 strict 64hex（拼 CAS 路径用，大写会断路径）；path 非空且唯一；
   Load 校验内容 sha 与地址一致（防文件与地址不符）。
 
+### 3.22 PeerJS Data-plane XOR Obfuscation (2026-10-09, feat/peerjs-xor)
+
+`back/peerjs` 库层给 DataChannel 数据面加 XOR 混淆（轻量保护，非强加密）。
+设计契约（详见 `back/peerjs/xor.go` 头注释）：
+
+- **加密点**：库层 `Connection` 的发送侧（Send/SendText/SendFrame）与收侧
+  （attach 的 OnMessage）——数据面上**全帧**（text+bin：req/meta/data/done/err/
+  psk-auth/fwd/admin 等）统一对称 XOR。业务层（transport）零改动，帧协议原样。
+  候选对比：业务层 data 帧 payload 只保护文件内容、JSON 头（hash/offset/size/
+  reqId）仍明文且其它 verb 全漏；pion dc 层无统一收口。选库层：单一收口 +
+  "peerjs 传输数据"字面全覆盖。
+- **密钥**：每连接派生 `key = SHA-256(secret || ":" || connID)`。connID 由
+  offerer 生成、经 OFFER 传给 answerer 复用（既有信令握手），两端 newConnection
+  即得同一 key，**零额外握手**。secret 本地配置（`PEERDRIVE_PEERJS_XOR_KEY`），
+  不走信令交换（信令面 signalframe 保持明文）。
+- **开关**：`Options.XOREnable/XORKey`，默认关 = 恒等，线缆字节与现状一致，
+  浏览器 peerjs / peerdrive-client / media 互操作不受影响。开启要求两端同版本
+  同 secret；错 key 解出垃圾 → 文本帧 JSON 解析失败被丢 → 取文件确定性失败
+  （不静默损坏）。主模块 env：`PEERDRIVE_PEERJS_XOR_ENABLE`（默认 false）+
+  `PEERDRIVE_PEERJS_XOR_KEY`；Validate 拦"开了没配 key"。
+- **流式边界**：帧级独立加密（每帧从头按 `key[i%len(key)]`，无跨帧状态），
+  serveFile 64KB 分块各自独立、块边界天然对齐。XOR 自逆，编解码同一函数。
+- **测试**：peerjs 模块表驱动（已知向量/round-trip/派生一致性/错 key/流式分块/
+  关=恒等）+ fakeDC 线缆断言 + **转发式信令 + 本机 WebRTC 真实双 peer**
+  （同 secret 往返明文一致；错 secret 传输照常、应用层垃圾，`-race` 5 连跑）；
+  主模块集成 `TestXOR_TwoNodesFetch_ShaMatch`（全量+分片取回 sha 一致）、
+  `TestXOR_ConcurrentFetch_Race`（8 路并发取回）。
+- **取舍**：XOR 是混淆不是加密（同明文同 key 同密文、模式可统计），定位
+  防明文嗅探/偶然窥视；防定向破解用 PSK + 可信信令。**镜像同步**：改动在
+  `back/peerjs/`（独立 repo `github.com/Hana-ame/go-peerjs`），合并后需按
+  §3.14 流程镜像。
+
 ## 5. E2E Pitfalls Encountered (All Fixed)
 
 | Pitfall | Fix |
