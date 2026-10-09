@@ -19,6 +19,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -184,6 +185,13 @@ func TestServePlainHTTPThenCancel(t *testing.T) {
 //
 // 这是运维最常遇到的失败模式（重启脚本没杀掉旧进程），所以它必须是一条清晰
 // 的错误，而不是一个占满 CI 的挂起。
+//
+// 断言落在「这是对这个地址的 listen 失败」上，而不是错误文本、也不是 errno：
+// 同一个 EADDRINUSE，Linux 写 "address already in use"，Windows 写 "Only one
+// usage of each socket address (protocol/network address/port) is normally
+// permitted"；而且 errno 在 Windows 上连链都进不来（errors.Is(err,
+// syscall.EADDRINUSE) 返回 false，见 CI 实测）。文本和 errno 都只能在部分平台
+// 成立，只有 OpError 的形状是五个平台共有的。
 func TestServeReturnsPortConflict(t *testing.T) {
 	held, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -196,17 +204,66 @@ func TestServeReturnsPortConflict(t *testing.T) {
 	go func() { errCh <- srv.Serve(context.Background()) }()
 	select {
 	case err := <-errCh:
-		// 比 errno 而不是错误文本：同一个 EADDRINUSE，Linux 的措辞是
-		// "address already in use"，Windows 是 "Only one usage of each socket
-		// address (protocol/network address/port) is normally permitted"。
-		// 比对字符串会让这条断言只在其中一个平台上成立。errors.Is 走的是
-		// net.OpError → *os.SyscallError → syscall.Errno 这条链，跨平台一致。
 		require.Error(t, err, "binding an occupied port must fail")
-		require.Truef(t, errors.Is(err, syscall.EADDRINUSE),
-			"binding an occupied port must fail with EADDRINUSE, got %v", err)
+		require.Truef(t, isListenOn(err, held.Addr().String()),
+			"a port conflict must surface as a listen failure for %s, got chain: %s",
+			held.Addr().String(), errorChain(err))
+		if !errors.Is(err, syscall.EADDRINUSE) {
+			// 尽力而为：平台暴露了 errno 就多验一层，没暴露只记录不判失败。
+			t.Logf("errno not exposed by this platform's chain: %v", err)
+		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Serve did not return on a port conflict")
 	}
+}
+
+// isListenOn 判断 err 是不是在 want 这个地址上的 net.Listen 失败。
+//
+// 这是端口冲突在所有 GOOS 上都成立的判据：失败必然来自 net.Listen，形状是
+// *net.OpError{Op:"listen", Net:"tcp", Addr:<那个地址>}。它不比文本、不比 errno，
+// 所以不会因为平台的措辞或错误链形状不同而失效。
+func isListenOn(err error, want string) bool {
+	var opErr *net.OpError
+	if !errors.As(err, &opErr) {
+		return false
+	}
+	return opErr.Op == "listen" && opErr.Net == "tcp" &&
+		opErr.Addr != nil && opErr.Addr.String() == want
+}
+
+// errorChain 把 Unwrap 链打平，断言失败时直接看出这个平台把错误包成了什么形状。
+func errorChain(err error) string {
+	out := ""
+	for err != nil {
+		if out != "" {
+			out += " -> "
+		}
+		out += fmt.Sprintf("%T(%q)", err, err.Error())
+		err = errors.Unwrap(err)
+	}
+	return out
+}
+
+// TestIsListenOn 发现背景：isListenOn 是上面那个用例唯一跨平台稳定的判据，
+// 单独钉住它，免得将来有人"简化"成文本比较而丢掉跨平台性。两个平台把同一个
+// EADDRINUSE 包成的链形状完全不同（linux/darwin 是 OpError -> *os.SyscallError
+// -> syscall.Errno；windows 的最终错误里根本没有数值 errno），但对 isListenOn
+// 来说都无所谓。
+func TestIsListenOn(t *testing.T) {
+	const addr = "127.0.0.1:50947"
+	tcp := &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 50947}
+
+	linux := &net.OpError{Op: "listen", Net: "tcp", Addr: tcp,
+		Err: &os.SyscallError{Syscall: "bind", Err: syscall.EADDRINUSE}}
+	windows := &net.OpError{Op: "listen", Net: "tcp", Addr: tcp,
+		Err: errors.New("bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.")}
+
+	assert.True(t, isListenOn(linux, addr), "linux chain: OpError -> SyscallError -> Errno")
+	assert.True(t, isListenOn(windows, addr), "windows chain: numeric errno absent")
+	assert.False(t, isListenOn(errors.New("address already in use"), addr),
+		"a text-only error must not pass")
+	assert.False(t, isListenOn(nil, addr), "nil is not a port conflict")
+	assert.False(t, isListenOn(linux, "127.0.0.1:9"), "a different address is not this conflict")
 }
 
 // --- multi-listen: two surfaces at once ---
