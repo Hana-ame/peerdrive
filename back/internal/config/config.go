@@ -49,6 +49,13 @@ type Config struct {
 	// Deliberately NOT reusing PEERDRIVE_PSK: PSK is a P2P DataChannel secret;
 	// leaking it to HTTP would expose it in browser devtools/logs.
 	AdminToken string
+
+	// RemoteControlEnable allows remote control administration via WebRTC/PeerJS channels (PEERDRIVE_REMOTE_CONTROL_ENABLE, default false).
+	// When false (default), admin verbs are strictly rejected on non-local sessions (Issue #234).
+	RemoteControlEnable bool
+	// RemoteControlToken is the pre-shared secret required to authenticate remote control commands (PEERDRIVE_REMOTE_CONTROL_TOKEN).
+	// If empty, falls back to AdminToken.
+	RemoteControlToken string
 	// 2026-10-04: removed the three dead fields PublicAccessDomain / NodeAuthToken /
 	// RegServerURL.
 	// Why deletion instead of implementation:
@@ -430,8 +437,10 @@ func DefaultConfig() *Config {
 		StorageEnable:      true,
 		AllowedOrigins:     "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev",
 		RegistrationServer: "",
-		AdminToken:         "",
-		MaxUploadBytes:     100 * 1024 * 1024,
+		AdminToken:          "",
+		RemoteControlEnable: false,
+		RemoteControlToken:  "",
+		MaxUploadBytes:      100 * 1024 * 1024,
 		MaxUploadBytesAnon: 10 * 1024 * 1024,
 		BTDHTEnabled:       false,
 		BTDHTListenAddr:    ":6881",
@@ -564,9 +573,11 @@ func Load() *Config {
 		StorageDir:         getEnv("PEERDRIVE_STORAGE", "./storage"),
 		StorageEnable:      getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
 		AllowedOrigins:     getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev"),
-		RegistrationServer: getEnv("PEERDRIVE_REG_SERVER", ""),
-		AdminToken:         getAdminToken(),
-		MaxUploadBytes:     getEnvInt64("PEERDRIVE_MAX_UPLOAD_BYTES", 100*1024*1024),     // 100MB default
+		RegistrationServer:  getEnv("PEERDRIVE_REG_SERVER", ""),
+		AdminToken:          getAdminToken(),
+		RemoteControlEnable: getEnvBool("PEERDRIVE_REMOTE_CONTROL_ENABLE", false),
+		RemoteControlToken:  getEnv("PEERDRIVE_REMOTE_CONTROL_TOKEN", ""),
+		MaxUploadBytes:      getEnvInt64("PEERDRIVE_MAX_UPLOAD_BYTES", 100*1024*1024),     // 100MB default
 		MaxUploadBytesAnon: getEnvInt64("PEERDRIVE_MAX_UPLOAD_ANON_BYTES", 10*1024*1024), // 10MB for anonymous
 		BTDHTEnabled:       getEnvBool("PEERDRIVE_BT_DHT_ENABLE", false),                 // Default disabled: DHT init blocks startup; enable manually as needed
 
@@ -732,6 +743,9 @@ func Validate(c *Config) error {
 	}
 	if c.MaxPeers <= 0 {
 		errs = append(errs, fmt.Sprintf("PEERDRIVE_MAX_PEERS=%d must be positive", c.MaxPeers))
+	}
+	if c.RemoteControlEnable && strings.TrimSpace(c.RemoteControlToken) == "" && strings.TrimSpace(c.AdminToken) == "" {
+		errs = append(errs, "PEERDRIVE_REMOTE_CONTROL_ENABLE=true requires PEERDRIVE_REMOTE_CONTROL_TOKEN or PEERDRIVE_ADMIN_TOKEN to be set for security")
 	}
 
 	switch c.PeerAnonPolicy {

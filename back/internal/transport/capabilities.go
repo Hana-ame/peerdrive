@@ -39,6 +39,8 @@ const (
 	CapForward = "fwd"
 	// CapAuth reserved for Phase 7 identity / challenge-auth plugins.
 	CapAuth = "auth"
+	// CapAdmin allows remote control / administrative execution over authenticated channels (Issue #234).
+	CapAdmin = "admin"
 )
 
 // Machine-readable capability error codes.
@@ -55,6 +57,7 @@ var KnownCapabilities = map[string]bool{
 	CapPull:    true,
 	CapForward: true,
 	CapAuth:    true,
+	CapAdmin:   true,
 }
 
 // DefaultNodeCapabilities represents the full capability set of a standard peerdrive Go node.
@@ -82,6 +85,7 @@ const (
 	BitPull
 	BitForward
 	BitAuth
+	BitAdmin
 )
 
 var capStringToBit = map[string]CapBit{
@@ -91,6 +95,7 @@ var capStringToBit = map[string]CapBit{
 	CapPull:    BitPull,
 	CapForward: BitForward,
 	CapAuth:    BitAuth,
+	CapAdmin:   BitAdmin,
 }
 
 var capBitToString = map[CapBit]string{
@@ -100,6 +105,7 @@ var capBitToString = map[CapBit]string{
 	BitPull:    CapPull,
 	BitForward: CapForward,
 	BitAuth:    CapAuth,
+	BitAdmin:   CapAdmin,
 }
 
 // CapsToBitset converts a slice of capability strings into a CapBit bitmask.
@@ -205,6 +211,8 @@ func VerbRequiredCap(verb string) string {
 		return CapPull
 	case "fwd-open", "fwd-auth", "fwd-data", "fwd-close":
 		return CapForward
+	case "admin":
+		return CapAdmin
 	default:
 		return ""
 	}
@@ -229,7 +237,11 @@ func (s *PeerJSService) currentLocalCaps() []string {
 	if len(s.localCaps) > 0 {
 		return s.localCaps
 	}
-	return DefaultNodeCapabilities
+	caps := append([]string(nil), DefaultNodeCapabilities...)
+	if s.cfg != nil && s.cfg.RemoteControlEnable {
+		caps = append(caps, CapAdmin)
+	}
+	return caps
 }
 
 // SetRequiredCapabilities sets strict capability requirements that remote peers must support.
