@@ -32,13 +32,11 @@ export function normalizeEntry(entry) {
   const path = typeof entry.path === 'string' ? entry.path.trim() : ''
   if (!path) return null
 
-  // 取数键优先级：新格式 sha > 旧格式 hash > providers[].sha256.value。
-  // 为什么先取 entry.sha 再取 entry.hash：新格式落地后 sha 是主字段；hash 只是
-  // 后端 MarshalJSON 为了旧客户端兼容顺带输出的（anon.go MarshalJSON），两者
-  // 内容等价，先主后次即可。
+  // 取数键优先级：新格式 sha > 旧格式 hash > providers[].sha256.value > source.sha
   let sha = typeof entry.sha === 'string' ? entry.sha : ''
   if (!sha && typeof entry.hash === 'string') sha = entry.hash
-  let mime = typeof entry.mime_type === 'string' ? entry.mime_type : ''
+  if (!sha && entry.source && typeof entry.source.sha === 'string') sha = entry.source.sha
+  let mime = typeof entry.mime === 'string' && entry.mime ? entry.mime : (typeof entry.mime_type === 'string' ? entry.mime_type : '')
   if (Array.isArray(entry.providers)) {
     for (const p of entry.providers) {
       if (!p) continue
@@ -47,11 +45,30 @@ export function normalizeEntry(entry) {
     }
   }
 
-  // preview 只认约定字段名（可空字符串/缺省），不猜别名：契约越宽越难对齐，
-  // 后端 PR 按本文档字段名实现即可。
+  // preview 只认约定字段名（可空字符串/缺省），不猜别名
   const preview = typeof entry.preview === 'string' ? entry.preview : ''
   const size = typeof entry.size === 'number' && Number.isFinite(entry.size) ? entry.size : null
-  return { path, sha, preview, size, mime }
+  const res = { path, sha, preview, size, mime }
+  if (typeof entry.name === 'string' && entry.name.trim()) res.name = entry.name.trim()
+  if (typeof entry.created_at === 'number' && entry.created_at > 0) res.created_at = entry.created_at
+  if (typeof entry.modified_at === 'number' && entry.modified_at > 0) res.modified_at = entry.modified_at
+  if (entry.source && typeof entry.source === 'object') res.source = entry.source
+  return res
+}
+
+// fetchableSource 解析条目的最佳取数来源（sha > url > ech-url > private.url）
+export function fetchableSource(entry) {
+  const norm = normalizeEntry(entry)
+  if (!norm) return null
+  if (norm.sha) return { type: 'sha', value: norm.sha }
+  const s = norm.source
+  if (s) {
+    if (typeof s.sha === 'string' && s.sha) return { type: 'sha', value: s.sha }
+    if (typeof s.url === 'string' && s.url) return { type: 'url', value: s.url }
+    if (typeof s['ech-url'] === 'string' && s['ech-url']) return { type: 'ech-url', value: s['ech-url'] }
+    if (s.private && typeof s.private.url === 'string' && s.private.url) return { type: 'private', value: s.private.url }
+  }
+  return null
 }
 
 // splitPath 把条目 path 切成段数组（叶子段是文件名，其余是目录名）。

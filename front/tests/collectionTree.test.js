@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  normalizeEntry, splitPath, basename, buildTree, descend, entrySha, previewSha,
+  normalizeEntry, splitPath, basename, buildTree, descend, entrySha, previewSha, fetchableSource,
 } from '../src/features/collection/lib/collectionTree'
 
 const SHA = (c) => c.repeat(64) // 64-hex fake sha
@@ -20,6 +20,37 @@ describe('normalizeEntry', () => {
   it('new format (path/sha/preview) passes through', () => {
     const e = normalizeEntry({ path: 'photos/a.jpg', sha: SHA('a'), preview: SHA('b'), size: 1024, mime_type: 'image/jpeg' })
     expect(e).toEqual({ path: 'photos/a.jpg', sha: SHA('a'), preview: SHA('b'), size: 1024, mime: 'image/jpeg' })
+  })
+  it('multi-source entry with metadata parses name, dates, source', () => {
+    const raw = {
+      path: 'videos/clip.mp4',
+      sha: SHA('v'),
+      name: 'Custom Clip',
+      mime: 'video/mp4',
+      created_at: 1710000000,
+      modified_at: 1710000500,
+      size: 5000000,
+      source: { url: 'https://cdn.example.com/clip.mp4' },
+    }
+    const norm = normalizeEntry(raw)
+    expect(norm.name).toBe('Custom Clip')
+    expect(norm.mime).toBe('video/mp4')
+    expect(norm.created_at).toBe(1710000000)
+    expect(norm.modified_at).toBe(1710000500)
+    expect(norm.source).toEqual({ url: 'https://cdn.example.com/clip.mp4' })
+  })
+  it('fetchableSource resolves sha > url > ech-url > private.url', () => {
+    const withSha = { path: 'a.txt', sha: SHA('a'), source: { url: 'https://x.com/a.txt' } }
+    expect(fetchableSource(withSha)).toEqual({ type: 'sha', value: SHA('a') })
+
+    const remoteOnly = { path: 'b.txt', source: { url: 'https://x.com/b.txt' } }
+    expect(fetchableSource(remoteOnly)).toEqual({ type: 'url', value: 'https://x.com/b.txt' })
+
+    const echOnly = { path: 'c.txt', source: { 'ech-url': 'https://x.com/c.txt' } }
+    expect(fetchableSource(echOnly)).toEqual({ type: 'ech-url', value: 'https://x.com/c.txt' })
+
+    const privateOnly = { path: 'd.txt', source: { private: { url: 'https://priv.x.com/d.txt' } } }
+    expect(fetchableSource(privateOnly)).toEqual({ type: 'private', value: 'https://priv.x.com/d.txt' })
   })
   it('empty/absent preview stays empty (no preview → placeholder)', () => {
     expect(normalizeEntry({ path: 'a.txt', sha: SHA('a') }).preview).toBe('')
