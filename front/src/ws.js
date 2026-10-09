@@ -86,6 +86,8 @@ const HEARTBEAT_MS = 25000 // heartbeat interval
 const STALE_MS = 60000 // no frame received for this long → treat the connection as dead
 const RETRY_MIN_MS = 1000
 const RETRY_MAX_MS = 30000
+const REQ_TIMEOUT_MS = 60000 // per-request timeout protection against lost frames
+const CONNECT_TIMEOUT_MS = 5000 // timeout waiting for CONNECTING -> OPEN
 
 let hbTimer = null
 let retryTimer = null
@@ -114,6 +116,83 @@ export function onStatus(cb) {
   statusListeners.add(cb)
   try { cb(status) } catch {}
   return () => statusListeners.delete(cb)
+}
+
+// abortPending cleans up a pending entry, clears its timeout timer, and releases any binaryExpect slot
+// currently claimed by it (preventing late frames from contaminating subsequent binary transfers).
+function abortPending(reqId, err) {
+  const p = pending.get(reqId)
+  if (!p) return
+  if (p.timer) {
+    clearTimeout(p.timer)
+    p.timer = null
+  }
+  pending.delete(reqId)
+  if (binaryExpect && binaryExpect.reqId === reqId) {
+    binaryExpect = null
+  }
+  if (err && p.reject) {
+    try { p.reject(err) } catch {}
+  }
+}
+
+function armTimeout(reqId) {
+  const p = pending.get(reqId)
+  if (!p) return
+  if (p.timer) clearTimeout(p.timer)
+  p.timer = setTimeout(() => {
+    abortPending(reqId, new Error('ws: request timeout'))
+  }, REQ_TIMEOUT_MS)
+}
+
+function setPending(reqId, entry) {
+  pending.set(reqId, entry)
+  armTimeout(reqId)
+}
+
+function ensureOpenSync() {
+  connect()
+  return !!sock && sock.readyState === WebSocket.OPEN
+}
+
+function ensureOpen() {
+  connect()
+  if (sock && sock.readyState === WebSocket.OPEN) {
+    return Promise.resolve()
+  }
+  if (sock && (sock.readyState === WebSocket.CONNECTING || status === 'connecting')) {
+    return new Promise((resolve, reject) => {
+      let timeoutTimer = null
+      let unsubscribe = null
+
+      const cleanup = () => {
+        if (timeoutTimer) {
+          clearTimeout(timeoutTimer)
+          timeoutTimer = null
+        }
+        if (unsubscribe) {
+          unsubscribe()
+          unsubscribe = null
+        }
+      }
+
+      timeoutTimer = setTimeout(() => {
+        cleanup()
+        reject(new Error('ws: connection timeout waiting for open'))
+      }, CONNECT_TIMEOUT_MS)
+
+      unsubscribe = onStatus((newStatus) => {
+        if (newStatus === 'open') {
+          cleanup()
+          resolve()
+        } else if (newStatus === 'closed') {
+          cleanup()
+          reject(new Error('ws: connection closed before open'))
+        }
+      })
+    })
+  }
+  return Promise.reject(new Error('ws: not connected'))
 }
 
 function stopHeartbeat() {
@@ -184,7 +263,10 @@ function connect() {
     // mocks shouldn't connect to a real network after being disconnected.
     const owned = !!sock._wsOwned
     stopHeartbeat()
-    for (const [, p] of pending) p.reject(new Error('ws: connection closed'))
+    for (const [, p] of pending) {
+      if (p.timer) clearTimeout(p.timer)
+      p.reject(new Error('ws: connection closed'))
+    }
     pending.clear()
     binaryExpect = null
     sock = null
@@ -217,6 +299,7 @@ function handleText(text) {
     case 'admin-resp': {
       const p = pending.get(msg.reqId)
       if (!p) return
+      if (p.timer) clearTimeout(p.timer)
       pending.delete(msg.reqId)
       if (msg.status >= 400) {
         const err = new Error((msg.body && (msg.body.error || msg.body.message)) || `HTTP ${msg.status}`)
@@ -232,6 +315,7 @@ function handleText(text) {
       // Binary file stream response header: declares "the next binary frame belongs to this admin download"
       const p = pending.get(msg.reqId)
       if (!p) return
+      armTimeout(msg.reqId)
       binaryExpect = { type: 'admin', reqId: msg.reqId, size: msg.size || 0, got: 0, chunks: [] }
       if (binaryExpect.size === 0) {
         // Empty file / empty response has no following binary frame; the expect must be cleared immediately;
@@ -246,6 +330,7 @@ function handleText(text) {
       // (consistent with the server-side connection-level expect semantics; data header + chunk are atomically contiguous)
       const p = pending.get(msg.reqId)
       if (!p || (p.kind !== 'download' && p.kind !== 'stream')) return
+      armTimeout(msg.reqId)
       binaryExpect = { type: p.kind, reqId: msg.reqId, size: msg.size || 0, got: 0, chunks: [] }
       if (binaryExpect.size === 0) {
         // Empty chunk (rare): clear the expectation immediately, wait for the next frame
@@ -258,6 +343,7 @@ function handleText(text) {
       // stat requests (offset=0 size=0, only probing size, no data sent) take total and resolve
       const p = pending.get(msg.reqId)
       if (!p || p.kind !== 'stat') return
+      if (p.timer) clearTimeout(p.timer)
       pending.delete(msg.reqId)
       p.resolve(msg.total || 0)
       return
@@ -267,6 +353,7 @@ function handleText(text) {
       if (!p || (p.kind !== 'download' && p.kind !== 'stream')) return
       if (msg.type === 'done') {
         // done frame: transfer complete, the collected data's size was declared by the previous data header
+        if (p.timer) clearTimeout(p.timer)
         pending.delete(msg.reqId)
         binaryExpect = null
         if (p.kind === 'stream') {
@@ -281,8 +368,7 @@ function handleText(text) {
     case 'err': {
       const p = pending.get(msg.reqId)
       if (!p) return
-      pending.delete(msg.reqId)
-      p.reject(new Error(msg.msg || 'peer fetch failed'))
+      abortPending(msg.reqId, new Error(msg.msg || 'peer fetch failed'))
       return
     }
     default:
@@ -296,6 +382,7 @@ function handleText(text) {
 function handleBinary(data) {
   if (!binaryExpect) return
   const e = binaryExpect
+  armTimeout(e.reqId)
   e.got += data.byteLength
   e.chunks.push(data)
   if (e.size !== undefined && e.got >= e.size) {
@@ -316,6 +403,7 @@ function handleBinary(data) {
 
 // finishBinaryExpect finishes collecting a binary response: assembles a Uint8Array and resolves.
 function finishBinaryExpect(p, e) {
+  if (p.timer) clearTimeout(p.timer)
   const arr = new Uint8Array(e.got)
   let off = 0
   for (const c of e.chunks) {
@@ -339,41 +427,46 @@ function assemble(p) {
 
 // admin generic admin request (JSON) → response JSON object.
 export function admin(method, path, body = null) {
-  connect()
-  if (!sock || sock.readyState !== WebSocket.OPEN) {
-    return Promise.reject(new Error('ws: not connected'))
+  const send = () => {
+    const reqId = nextReqId()
+    const frame = { type: 'admin', method, path, body, token: readToken(), reqId }
+    return new Promise((resolve, reject) => {
+      setPending(reqId, { resolve, reject })
+      try {
+        sock.send(JSON.stringify(frame))
+      } catch (err) {
+        abortPending(reqId, err)
+      }
+    })
   }
-  const reqId = nextReqId()
-  const frame = { type: 'admin', method, path, body, token: readToken(), reqId }
-  return new Promise((resolve, reject) => {
-    pending.set(reqId, { resolve, reject })
-    sock.send(JSON.stringify(frame))
-  })
+  if (ensureOpenSync()) return send()
+  return ensureOpen().then(send)
 }
 
 // upload chunked upload: admin binary declaration frame + contiguous binary chunks (reusing the same WS connection).
 // field: multipart field name (default "file"); path: upload endpoint (default /files/upload;
 // BT torrent upload uses /bt/torrent + field "torrent").
-// The readyState guard is consistent with admin()/download(): sock.send throws synchronously with
-// InvalidStateError while CONNECTING; a throw inside the executor does reject, but the pending entry leaks until
-// onclose clears it (discovery background: code review 2026-08-18, three entry-point guards were inconsistent).
 export function upload(file, fileName, field = 'file', path = '/files/upload') {
-  connect()
-  if (!sock || sock.readyState !== WebSocket.OPEN) {
-    return Promise.reject(new Error('ws: not connected'))
+  const send = () => {
+    const reqId = nextReqId()
+    const name = fileName || (file && file.name) || 'file'
+    return new Promise((resolve, reject) => {
+      setPending(reqId, { resolve, reject })
+      const decl = {
+        type: 'admin', method: 'POST', path,
+        binary: true, filename: name, field, size: file.size,
+        token: readToken(), reqId,
+      }
+      try {
+        sock.send(JSON.stringify(decl))
+        pumpBinary(file, reqId)
+      } catch (err) {
+        abortPending(reqId, err)
+      }
+    })
   }
-  const reqId = nextReqId()
-  const name = fileName || (file && file.name) || 'file'
-  return new Promise((resolve, reject) => {
-    pending.set(reqId, { resolve, reject })
-    const decl = {
-      type: 'admin', method: 'POST', path,
-      binary: true, filename: name, field, size: file.size,
-      token: readToken(), reqId,
-    }
-    sock.send(JSON.stringify(decl))
-    pumpBinary(file, reqId)
-  })
+  if (ensureOpenSync()) return send()
+  return ensureOpen().then(send)
 }
 
 // pumpBinary streams out file binary chunks (Streams API preferred, FileReader fallback).
@@ -383,11 +476,7 @@ function pumpBinary(file, reqId) {
     sock.send(buf)
   }
   const fail = (err) => {
-    const p = pending.get(reqId)
-    if (p) {
-      pending.delete(reqId)
-      p.reject(err)
-    }
+    abortPending(reqId, err)
   }
   if (file.stream && typeof file.stream === 'function') {
     const reader = file.stream().getReader()
@@ -430,16 +519,20 @@ function pumpBinary(file, reqId) {
 // The server sends data headers + binary frames in 64KB chunks; the frontend collects according to the size declared by the data header.
 // Note: full in-memory assembly; for large files use downloadStream (emit-as-you-receive) or downloadToFile.
 export function download(hash, offset = 0, size = -1) {
-  connect()
-  if (!sock || sock.readyState !== WebSocket.OPEN) {
-    return Promise.reject(new Error('ws: not connected'))
+  const send = () => {
+    const reqId = nextReqId()
+    const p = { kind: 'download', chunks: [], total: 0 }
+    return new Promise((resolve, reject) => {
+      setPending(reqId, { ...p, resolve, reject })
+      try {
+        sock.send(JSON.stringify({ type: 'req', hash, offset, size, reqId }))
+      } catch (err) {
+        abortPending(reqId, err)
+      }
+    })
   }
-  const reqId = nextReqId()
-  const p = { kind: 'download', chunks: [], total: 0 }
-  return new Promise((resolve, reject) => {
-    pending.set(reqId, { ...p, resolve, reject })
-    sock.send(JSON.stringify({ type: 'req', hash, offset, size, reqId }))
-  })
+  if (ensureOpenSync()) return send()
+  return ensureOpen().then(send)
 }
 
 // downloadStream: streaming download (ReadableStream). Data chunks are enqueued as they arrive (once per 64KB chunk);
@@ -450,26 +543,31 @@ export function download(hash, offset = 0, size = -1) {
 // preventing pending leaks and late frames contaminating subsequent requests (leak protection from the same source as
 // upload abort; discovery background: code review 2026-08-18).
 export function downloadStream(hash, offset = 0, size = -1) {
-  connect()
-  if (!sock || sock.readyState !== WebSocket.OPEN) {
-    return Promise.reject(new Error('ws: not connected'))
-  }
   const reqId = nextReqId()
   return new ReadableStream({
     start(controller) {
-      pending.set(reqId, {
-        kind: 'stream',
-        controller,
-        resolve: () => {},
-        // stream reject = pump the error into the stream (await reader.read() throws)
-        reject: (err) => controller.error(err),
-      })
-      sock.send(JSON.stringify({ type: 'req', hash, offset, size, reqId }))
+      const send = () => {
+        setPending(reqId, {
+          kind: 'stream',
+          controller,
+          resolve: () => {},
+          // stream reject = pump the error into the stream (await reader.read() throws)
+          reject: (err) => controller.error(err),
+        })
+        try {
+          sock.send(JSON.stringify({ type: 'req', hash, offset, size, reqId }))
+        } catch (err) {
+          abortPending(reqId, err)
+        }
+      }
+      if (ensureOpenSync()) {
+        send()
+      } else {
+        ensureOpen().then(send).catch(err => controller.error(err))
+      }
     },
     cancel() {
-      const p = pending.get(reqId)
-      if (p && p.kind === 'stream') pending.delete(reqId)
-      if (binaryExpect && binaryExpect.reqId === reqId) binaryExpect = null
+      abortPending(reqId)
     },
   })
 }
@@ -479,15 +577,19 @@ export function downloadStream(hash, offset = 0, size = -1) {
 // Used to probe size before download (e.g. getBlobUrl's large-file preview threshold). The local WS connection
 // routes concurrently by reqId, so it doesn't interfere with the subsequent download.
 export function stat(hash) {
-  connect()
-  if (!sock || sock.readyState !== WebSocket.OPEN) {
-    return Promise.reject(new Error('ws: not connected'))
+  const send = () => {
+    const reqId = nextReqId()
+    return new Promise((resolve, reject) => {
+      setPending(reqId, { kind: 'stat', resolve, reject })
+      try {
+        sock.send(JSON.stringify({ type: 'req', hash, offset: 0, size: 0, reqId }))
+      } catch (err) {
+        abortPending(reqId, err)
+      }
+    })
   }
-  const reqId = nextReqId()
-  return new Promise((resolve, reject) => {
-    pending.set(reqId, { kind: 'stat', resolve, reject })
-    sock.send(JSON.stringify({ type: 'req', hash, offset: 0, size: 0, reqId }))
-  })
+  if (ensureOpenSync()) return send()
+  return ensureOpen().then(send)
 }
 
 // downloadToFile downloads and triggers a browser save. Prefers the File System Access API
@@ -530,6 +632,9 @@ export const __test = {
   handleText,
   handleBinary,
   pending,
+  abortPending,
+  REQ_TIMEOUT_MS,
+  CONNECT_TIMEOUT_MS,
   _setSock: (s) => { sock = s },
   // _reset must also clear the heartbeat/reconnect timers: if they're left between unit tests, a mock injected by an
   // earlier test, once disconnected, schedules a real reconnect (connecting to the default backend), surfacing as a
@@ -539,7 +644,11 @@ export const __test = {
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
     retryDelay = RETRY_MIN_MS
     status = 'idle'
+    statusListeners.clear()
     sock = null
+    for (const [, p] of pending) {
+      if (p.timer) clearTimeout(p.timer)
+    }
     pending.clear()
     binaryExpect = null
   },
