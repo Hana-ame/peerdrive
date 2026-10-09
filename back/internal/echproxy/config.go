@@ -45,7 +45,10 @@
 // https://iwara-api.l.moonchan.xyz:8443/video/xyz.
 package echproxy
 
-import "strings"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // Default ech-proxy release coordinates (Hana-ame/ech-proxy, v1.3.0).
 const (
@@ -193,12 +196,16 @@ func (c *ModuleConfig) ExeName() string {
 }
 
 // ExePath returns the local file path of the ech-proxy executable.
+// filepath.Join (not "/" concatenation) is required: the ech-proxy binary is
+// only ever built for Windows, and CI's windows-amd64 job compares this value
+// against filepath.Join(dir, name), which yields "\" there. Hardcoding "/"
+// made TestEnsureExe / TestEnsureExeCorruptVerifies fail on every Windows run.
 func (c *ModuleConfig) ExePath() string {
 	dir := strings.TrimRight(c.EchProxyDir, "/")
 	if dir == "" {
 		return c.EchProxyExeName
 	}
-	return dir + "/" + c.EchProxyExeName
+	return filepath.Join(dir, c.EchProxyExeName)
 }
 
 // ChecksumsURL returns the checksums.txt download URL for the configured
