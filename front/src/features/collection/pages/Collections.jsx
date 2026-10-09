@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as ws from '../../../platform/transport-ws';
 import { entrySha } from '../../../platform/shared/collectionTree';
+import DataState from '../../../components/netdisk/DataState';
 
 const VIS_LABEL = {
   public: { icon: '🌐', label: 'Public' },
@@ -232,23 +233,24 @@ export default function Collections() {
               )}
             </div>
 
-            {collections === null ? (
-              <div className="text-center py-16 text-gray-500 text-sm">Loading...</div>
-            ) : filteredCollections.length === 0 ? (
-              <div className="text-center py-20 text-gray-500 border-2 border-dashed border-white/10 rounded-card">
-                {collections.length === 0 ? (
-                  <>
-                    <p>No collections yet</p>
-                    <p className="text-xs text-gray-600 mt-1">Click "New Collection" to create from netdisk files.</p>
-                  </>
-                ) : (
-                  <>
-                    <p>No matching collections found</p>
-                    <p className="text-xs text-gray-600 mt-1">Try clearing your search query or tag filter.</p>
-                  </>
-                )}
-              </div>
-            ) : viewMode === 'grid' ? (
+            <DataState
+              loading={collections === null}
+              error={err}
+              empty={filteredCollections.length === 0}
+              onRetry={loadList}
+              skeletonType={viewMode === 'grid' ? 'cards' : 'table'}
+              skeletonRows={6}
+              emptyProps={{
+                icon: '📦',
+                title: collections?.length === 0 ? 'No collections yet' : 'No matching collections found',
+                description: collections?.length === 0
+                  ? 'Click "New Collection" to create one from your netdisk files.'
+                  : 'Try clearing your search query or tag filter.',
+                actionLabel: collections?.length === 0 ? '+ New Collection' : null,
+                onAction: openCreate,
+              }}
+            >
+              {viewMode === 'grid' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {filteredCollections.map((c, i) => {
                   const v = VIS_LABEL[c.visibility] || VIS_LABEL.public;
@@ -375,6 +377,7 @@ export default function Collections() {
                 </table>
               </div>
             )}
+            </DataState>
           </div>
         )}
 
