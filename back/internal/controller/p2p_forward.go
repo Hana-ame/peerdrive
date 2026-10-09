@@ -162,7 +162,14 @@ func ListForwardSessions(c *gin.Context) {
 	tunnels := []gin.H{}
 	if forwardPeer != nil {
 		for _, t := range forwardPeer.ListForwardStreams() {
-			tunnels = append(tunnels, gin.H{"peer_id": t.PeerID, "port": t.Port, "key_id": t.KeyID})
+			tunnels = append(tunnels, gin.H{
+				"peer_id":    t.PeerID,
+				"port":       t.Port,
+				"key_id":     t.KeyID,
+				"bytes_in":   t.BytesIn,
+				"bytes_out":  t.BytesOut,
+				"created_at": t.CreatedAt,
+			})
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"listeners": listeners, "tunnels": tunnels})

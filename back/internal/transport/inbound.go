@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"peerdrive/internal/log"
@@ -496,9 +497,11 @@ func (s *PeerJSService) fwdWorker(c Session, st *connState) {
 		select {
 		case ch := <-st.fwdCh:
 			// 写失败（隧道已关/对端断开）静默丢弃：转发是尽力而为的流。
-			if _, err := ch.fw.out.Write(ch.data); err != nil {
+			if n, err := ch.fw.out.Write(ch.data); err != nil {
 				log.LogDebug("peerjs: fwd write drop: %v", err)
 				ch.fw.out.Close()
+			} else {
+				atomic.AddUint64(&ch.fw.bytesIn, uint64(n))
 			}
 		case <-st.binDone:
 			return

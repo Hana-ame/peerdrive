@@ -331,7 +331,7 @@ func (s *PeerJSService) bindConnInternal(c Session, isLocal bool) {
 		verbWaits: make(map[string]chan []byte),
 		binCh:     make(chan binaryChunk, 16),
 		binDone:   make(chan struct{}),
-		fwdCh:     make(chan fwdChunk, 16),
+		fwdCh:     make(chan fwdChunk, 64),
 		isLocal:   isLocal,
 	}
 

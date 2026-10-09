@@ -38,6 +38,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"peerdrive/internal/log"
@@ -64,12 +65,15 @@ type fwdNonce struct {
 //   - 服务端（被转发方）：out = dial 127.0.0.1:port 的 TCP 连接
 //   - 客户端（发起方）：out = net.Pipe 的服务端端（返回给调用方的是 client 端）
 type fwdStream struct {
-	reqID   string
-	keyID   string // 授权 key 前 16 hex（审计日志用，不落全量）
-	port    int
-	out     net.Conn
-	pending bool // fwd-data 头已到、期待下一个二进制块（单槽声明，见 conn.go 泵内路由）
-	closed  bool
+	reqID     string
+	keyID     string // 授权 key 前 16 hex（审计日志用，不落全量）
+	port      int
+	out       net.Conn
+	pending   bool // fwd-data 头已到、期待下一个二进制块（单槽声明，见 conn.go 泵内路由）
+	closed    bool
+	bytesIn   uint64
+	bytesOut  uint64
+	createdAt time.Time
 }
 
 // fwdHandshake 客户端侧握手等待状态（连接级单槽）。
@@ -146,7 +150,14 @@ func (s *PeerJSService) ListForwardStreams() []ForwardStreamInfo {
 		st := s.stateFor(c)
 		st.mu.Lock()
 		if st.fwd != nil && !st.fwd.closed {
-			out = append(out, ForwardStreamInfo{PeerID: c.ID(), Port: st.fwd.port, KeyID: st.fwd.keyID})
+			out = append(out, ForwardStreamInfo{
+				PeerID:    c.ID(),
+				Port:      st.fwd.port,
+				KeyID:     st.fwd.keyID,
+				BytesIn:   atomic.LoadUint64(&st.fwd.bytesIn),
+				BytesOut:  atomic.LoadUint64(&st.fwd.bytesOut),
+				CreatedAt: st.fwd.createdAt,
+			})
 		}
 		st.mu.Unlock()
 	}
@@ -155,9 +166,12 @@ func (s *PeerJSService) ListForwardStreams() []ForwardStreamInfo {
 
 // ForwardStreamInfo 活跃转发隧道快照（list 端点展示）。
 type ForwardStreamInfo struct {
-	PeerID string `json:"peer_id"`
-	Port   int    `json:"port"`
-	KeyID  string `json:"key_id"`
+	PeerID    string    `json:"peer_id"`
+	Port      int       `json:"port"`
+	KeyID     string    `json:"key_id"`
+	BytesIn   uint64    `json:"bytes_in"`
+	BytesOut  uint64    `json:"bytes_out"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // CloseForwardStream 主动断开到指定 peer 的转发隧道（POST /p2p/forward/close 用）。
@@ -293,10 +307,11 @@ func (s *PeerJSService) serveForwardAuth(c Session, st *connState, r dcResp) {
 		return
 	}
 	fw := &fwdStream{
-		reqID: r.ReqID,
-		keyID: matchedKey[:min(16, len(matchedKey))],
-		port:  n.port,
-		out:   tcpConn,
+		reqID:     r.ReqID,
+		keyID:     matchedKey[:min(16, len(matchedKey))],
+		port:      n.port,
+		out:       tcpConn,
+		createdAt: time.Now(),
 	}
 	st.mu.Lock()
 	st.fwd = fw
@@ -327,6 +342,7 @@ func (s *PeerJSService) forwardPump(c Session, st *connState, fw *fwdStream) {
 	for {
 		n, err := fw.out.Read(buf)
 		if n > 0 {
+			atomic.AddUint64(&fw.bytesOut, uint64(n))
 			if serr := c.SendFrame(dcResp{Type: "fwd-data", ReqID: fw.reqID}, buf[:n]); serr != nil {
 				break
 			}
@@ -453,10 +469,11 @@ func (s *PeerJSService) OpenForward(ctx context.Context, peerID, key string, por
 	// 建管道：调用方拿 client 端，pump 读 server 端（数据双向透传）
 	client, server := net.Pipe()
 	fw := &fwdStream{
-		reqID: hs.reqID,
-		keyID: key[:min(16, len(key))],
-		port:  port,
-		out:   server,
+		reqID:     hs.reqID,
+		keyID:     key[:min(16, len(key))],
+		port:      port,
+		out:       server,
+		createdAt: time.Now(),
 	}
 	st.mu.Lock()
 	st.fwd = fw
