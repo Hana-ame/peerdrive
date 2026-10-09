@@ -23,7 +23,9 @@
 // Frame protocol (consistent with the browser-side peerdrive-media;
 // DataChannel JSON text frames + binary chunks):
 //   browser → node: {"type":"url","url":"https://video-cf.twimg.com/...","reqId":"1"}
-//   node  → browser: {"type":"meta","status":200,"mime":"video/mp4","size":N,"reqId":"1"}
+//   browser → node: {"type":"req","hash":"<64hex>","offset":0,"size":-1,"reqId":"1"}
+//   browser → node: {"type":"sha","sha":"<64hex>","reqId":"1"}
+//   node  → browser: {"type":"meta","status":200,"mime":"video/mp4","size":N,"total":N,"hash":"...","reqId":"1"}
 //   node  → browser: <binary chunk × N>
 //   node  → browser: {"type":"done","reqId":"1"}
 //   node  → browser: {"type":"err","msg":"...","reqId":"1"}
@@ -42,6 +44,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -49,7 +52,17 @@ import (
 
 	"github.com/Hana-ame/go-peerjs"
 	"peerdrive/internal/echcore"
+	"peerdrive/internal/repository"
+	"peerdrive/internal/source"
+	"peerdrive/internal/transport"
 )
+
+// dataSender decouples sending frames from concrete *peerjs.Connection so unit tests
+// can assert frames without spinning up WebRTC peer connections.
+type dataSender interface {
+	SendJSON(v any) error
+	Send(data []byte) error
+}
 
 // twimgHost is the only backend host allowed (hardcoded; no other domains accepted).
 const twimgHost = "video-cf.twimg.com"
@@ -61,9 +74,13 @@ const twimgURLPrefix = "https://" + twimgHost + "/"
 type Msg struct {
 	Type   string `json:"type"`
 	URL    string `json:"url,omitempty"`
+	Hash   string `json:"hash,omitempty"`
+	SHA    string `json:"sha,omitempty"`
+	Offset int64  `json:"offset,omitempty"`
 	ReqID  string `json:"reqId,omitempty"`
 	Mime   string `json:"mime,omitempty"`
 	Size   int64  `json:"size,omitempty"`
+	Total  int64  `json:"total,omitempty"`
 	Status int    `json:"status,omitempty"`
 	Msg    string `json:"msg,omitempty"`
 }
@@ -107,7 +124,7 @@ func fetchTwimg(url string) (*http.Response, error) {
 }
 
 // serveRequest handles a single media request: validate domain → ECH fetch → meta → 64KB chunks × N → done.
-func serveRequest(conn *peerjs.Connection, msg Msg, chunkSize int) {
+func serveRequest(conn dataSender, msg Msg, chunkSize int) {
 	reqID := msg.ReqID
 	url := msg.URL
 	if url == "" {
@@ -135,7 +152,7 @@ func serveRequest(conn *peerjs.Connection, msg Msg, chunkSize int) {
 
 	mime := guessMime(url, resp.Header.Get("Content-Type"))
 	size := resp.ContentLength // -1 = unknown (streaming with no content-length)
-	_ = conn.SendJSON(Msg{Type: "meta", Status: resp.StatusCode, Mime: mime, Size: size, ReqID: reqID})
+	_ = conn.SendJSON(Msg{Type: "meta", Status: resp.StatusCode, Mime: mime, Size: size, Total: size, ReqID: reqID})
 
 	// Stream chunked transfer (pion's Connection.SendFrame has built-in low-water flow control)
 	buf := make([]byte, chunkSize)
@@ -160,6 +177,99 @@ func serveRequest(conn *peerjs.Connection, msg Msg, chunkSize int) {
 	log.Printf("[req %s] done, %d bytes", reqID, sent)
 }
 
+// serveShaRequest handles SHA/content-addressed file requests:
+// browser sends either:
+//   {"type":"req","hash":"<64hex>","offset":0,"size":-1,"reqId":"..."}
+//   {"type":"sha","sha":"<64hex>","reqId":"..."}
+// It verifies the hash, reads bytes via the unified source.Manager, sends meta,
+// streams chunks, and sends a done frame (matching peerdrive's frame protocol).
+func serveShaRequest(conn dataSender, msg Msg, sourceMgr *source.Manager, chunkSize int) {
+	reqID := msg.ReqID
+	hash := strings.ToLower(strings.TrimSpace(msg.Hash))
+	if hash == "" {
+		hash = strings.ToLower(strings.TrimSpace(msg.SHA))
+	}
+	if hash == "" {
+		_ = conn.SendJSON(Msg{Type: "err", ReqID: reqID, Msg: "hash or sha required"})
+		return
+	}
+	if len(hash) != 64 {
+		_ = conn.SendJSON(Msg{Type: "err", ReqID: reqID, Msg: "invalid hash: must be 64-char hex"})
+		return
+	}
+	for _, c := range hash {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			_ = conn.SendJSON(Msg{Type: "err", ReqID: reqID, Msg: "invalid hash: non-hex character"})
+			return
+		}
+	}
+	if chunkSize <= 0 {
+		chunkSize = 64 * 1024
+	}
+	log.Printf("[req %s] sha %s", reqID, hash)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	var (
+		rc  io.ReadCloser
+		err error
+	)
+	if msg.Offset > 0 || msg.Size > 0 {
+		rc, err = sourceMgr.OpenRange(ctx, hash, msg.Offset, msg.Size)
+	} else {
+		rc, err = sourceMgr.Open(ctx, hash)
+	}
+	if err != nil {
+		_ = conn.SendJSON(Msg{Type: "err", ReqID: reqID, Hash: hash, Msg: "fetch failed: " + err.Error()})
+		return
+	}
+	defer rc.Close()
+
+	var size int64 = -1
+	mime := "application/octet-stream"
+	if fi, infoErr := sourceMgr.Info(ctx, hash); infoErr == nil && fi != nil {
+		if fi.Size > 0 {
+			size = fi.Size
+		}
+		if fi.Name != "" {
+			mime = guessMime(fi.Name, "")
+		}
+	}
+
+	// Send meta frame: carries both size (peerdrive-media format) and total (peerjs format)
+	_ = conn.SendJSON(Msg{
+		Type:   "meta",
+		Status: 200,
+		Mime:   mime,
+		Size:   size,
+		Total:  size,
+		Hash:   hash,
+		ReqID:  reqID,
+	})
+
+	buf := make([]byte, chunkSize)
+	sent := int64(0)
+	for {
+		n, rerr := rc.Read(buf)
+		if n > 0 {
+			if serr := conn.Send(buf[:n]); serr != nil {
+				return
+			}
+			sent += int64(n)
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			_ = conn.SendJSON(Msg{Type: "err", ReqID: reqID, Hash: hash, Msg: "read failed: " + rerr.Error()})
+			return
+		}
+	}
+	_ = conn.SendJSON(Msg{Type: "done", ReqID: reqID, Hash: hash})
+	log.Printf("[req %s] sha %s done, %d bytes", reqID, hash, sent)
+}
+
 // main only parses signaling parameters and runs the media node — no HTTP ports are listened on.
 func main() {
 	peerID := "media-node"
@@ -170,6 +280,10 @@ func main() {
 	chunkSize := 64 * 1024 // 64KB
 	proxyURL := ""         // empty means read from HTTPS_PROXY env var
 	ipMode := ""           // empty means auto (use OS family)
+	storageDir := os.Getenv("PEERDRIVE_STORAGE")
+	if storageDir == "" {
+		storageDir = "./storage"
+	}
 
 	flag.StringVar(&peerID, "peer-id", peerID, "PeerJS peer id (for browser connection)")
 	flag.StringVar(&host, "host", host, "Signaling server host")
@@ -179,6 +293,7 @@ func main() {
 	flag.IntVar(&chunkSize, "chunk-size", chunkSize, "Data chunk size (bytes)")
 	flag.StringVar(&proxyURL, "proxy", proxyURL, "HTTP proxy (defaults to HTTPS_PROXY)")
 	flag.StringVar(&ipMode, "ip-mode", ipMode, "IP family preference: v4, v6, or auto")
+	flag.StringVar(&storageDir, "storage", storageDir, "Storage directory (for CAS and local file index)")
 	flag.Parse()
 
 	// Initialize the built-in ECH client (DoH fetches the ECH config for cloudflare-ech.com)
@@ -186,6 +301,22 @@ func main() {
 		log.Fatalf("ECH init failed: %v", err)
 	}
 	log.Printf("ECH ready (accesses only %s, no external proxy, no extra ports, ip_mode=%s)", twimgHost, ipMode)
+
+	// Initialize database for local file_index if available
+	dbPath := os.Getenv("PEERDRIVE_DB")
+	if dbPath == "" {
+		dbPath = filepath.Join(storageDir, "peerdrive.db")
+	}
+	if err := repository.InitDB(dbPath); err != nil {
+		log.Printf("repository init db warning: %v", err)
+	}
+
+	// Initialize unified source manager (local disk file_index + CAS)
+	fileIndex := transport.NewFileIndexService(storageDir)
+	sourceMgr := source.New()
+	if err := sourceMgr.Register(source.NewLocalSource(storageDir, fileIndex)); err != nil {
+		log.Printf("source manager: register local source warning: %v", err)
+	}
 
 	// Register with the signaling server
 	opts := peerjs.Options{
@@ -251,6 +382,8 @@ func main() {
 			switch msg.Type {
 			case "url":
 				go serveRequest(conn, msg, chunkSize)
+			case "req", "sha":
+				go serveShaRequest(conn, msg, sourceMgr, chunkSize)
 			case "ping-ack":
 				// Keepalive response (lastActive already refreshed)
 			}
