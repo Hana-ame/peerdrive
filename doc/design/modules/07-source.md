@@ -13,7 +13,7 @@ Unified file retrieval abstraction (`back/internal/source/source.go:1-18`): Anyt
 
 - `Source` interface (`back/internal/source/source.go:51-72`): `Name()` (registry key) / `Type()` (local/peer/url/ipfs classification) / `Capabilities()` / `Priority()` / `SetPriority()` / `Available()` (soft health check, false means router skips) / `Open(ctx, hash, offset, size)` (streaming, requires CapStream) / `Fetch(ctx, hash)` (whole, requires CapFile) / `Info(ctx, hash)` (optional metadata; returns `nil, nil` if unsupported).
 - `Capability` bit flags (`back/internal/source/source.go:30-39`): `CapFile` (whole fetch) and `CapStream` (streaming/chunked read) can be combined. Large files must use CapStream — 8GB full buffer would OOM (same file comments, `source.go:8-10`, also see `manager.go:150-152`).
-- Utility functions `IsStream`/`IsFile` (`source.go:75-78`), `FileMeta` (`Hash/Size/Name/Path`, `Path` only meaningful for local, `source.go:42-48`), unified entry defense `validHash` (must be 64-char lowercase hex, `source.go:100-106`, `back/pkg/hashutil/hashutil.go:60-72`).
+- Utility functions `IsStream`/`IsFile` (`source.go:75-78`), `FileMeta` (`Hash/Size/Name/Path`, `Path` only meaningful for local, `source.go:42-48`), unified entry defense `validHash` (must be 64-char lowercase hex, `source.go:100-106`, `back/pkg/hashutil/hashutil.go:60-62`).
 - Unified stats `Stats` (Success/Fail/Bytes/LastErr/LastAt, `source.go:81-87`) and management snapshot `SourceStatus` (JSON-ified, `source.go:90-98`).
 
 ### 1.2 SourceManager Registry and Routing
