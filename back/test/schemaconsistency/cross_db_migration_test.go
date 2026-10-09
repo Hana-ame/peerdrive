@@ -116,10 +116,10 @@ func TestCrossDBSchemaConsistency_PartialFailureAndNonRollbackSemantics(t *testi
 	require.Error(t, err, "invalid DDL must return error to caller")
 
 	// 验证非法 DDL 发生后，此前迁移好的表与结构保持完整（无误导性静默回滚）
-	var userTableCount int
-	err = mainHandle.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'`).Scan(&userTableCount)
+	var fileIndexTableCount int
+	err = mainHandle.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='file_index'`).Scan(&fileIndexTableCount)
 	require.NoError(t, err)
-	assert.Equal(t, 1, userTableCount, "pre-existing tables must remain intact after partial failure")
+	assert.Equal(t, 1, fileIndexTableCount, "pre-existing tables must remain intact after partial failure")
 
 	// 2. 验证主库遭遇 DDL 错误并不影响随后 regserver 独立库的正常初始化
 	regSrv, err := regserver.New(regDBPath)
@@ -131,7 +131,7 @@ func TestCrossDBSchemaConsistency_PartialFailureAndNonRollbackSemantics(t *testi
 
 // TestCrossDBSchemaConsistency_FieldCompatibility 验证跨库数据实体的字段规格与类型兼容性。
 // 发现背景：Issue #204 指出 relay_nodes.peer_id 与主库 peer_id 及发现层数据流向需格式兼容；
-// regserver users.username 与主库 collections.owner 需类型一致，防止因模式偏离造成跨组件运行时断裂。
+// regserver users.username 与主库 collections.username 需类型一致，防止因模式偏离造成跨组件运行时断裂。
 func TestCrossDBSchemaConsistency_FieldCompatibility(t *testing.T) {
 	t.Setenv("PEERDRIVE_JWT_SECRET", "test-secret-at-least-32-chars-long-for-consistency-testing")
 
@@ -152,11 +152,11 @@ func TestCrossDBSchemaConsistency_FieldCompatibility(t *testing.T) {
 	_, err = regSrv.DB().Exec(`INSERT INTO relay_nodes (peer_id, addrs) VALUES (?, ?)`, testPeerID, "127.0.0.1:9000")
 	require.NoError(t, err, "peer_id should be accepted into regserver relay_nodes")
 
-	// 2. 验证 username 跨库约束：regserver 用户名可作为主库 collection 的合规 owner
+	// 2. 验证 username 跨库约束：regserver 用户名可作为主库 collection 的合规 username (owner)
 	testUsername := "operator_alice"
 	_, err = regSrv.DB().Exec(`INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)`, testUsername, "$2a$10$hash", "admin")
 	require.NoError(t, err, "username should be accepted into regserver users")
 
-	_, err = mainHandle.Exec(`INSERT INTO collections (name, owner, visibility) VALUES (?, ?, ?)`, "shared_archive", testUsername, "public")
+	_, err = mainHandle.Exec(`INSERT INTO collections (collection_name, username, visibility) VALUES (?, ?, ?)`, "shared_archive", testUsername, "public")
 	require.NoError(t, err, "regserver username should seamlessly function as collection owner in main DB")
 }
