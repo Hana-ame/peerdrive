@@ -396,6 +396,10 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 
 		pm := echproxy.NewProcessManager(iwaraCfg)
 		client := echproxy.NewIwaraClient(iwaraCfg)
+		// Expose the client to the HTTP surface (GET /iwara/video/:id for the
+		// front/iwara page). The route is optional in router.Deps, so a default
+		// node without PEERDRIVE_IWARA_ENABLE never advertises it.
+		deps.IwaraClient = client
 
 		// Attempt to start ech-proxy. If it fails (non-Windows, port conflict,
 		// download failure), the IwaraClient still works for direct API access

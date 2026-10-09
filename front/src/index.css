@@ -159,6 +159,99 @@ body {
   }
 }
 
+/* ── iwara 页面：BBS 帖子版式骨架（仿 bbs.imoutolove.me/read.php 的 tpc_content）──
+   全部限定在 .iwara-bbs 作用域内：全站 rem 基线是 22px（html{font-size:22px}），
+   而帖子正文是 14px 绝对像素，混用 rem 会把 .f14 放大到 20px+，所以这里一律 px。
+   .fl/.fr 浮动方向、.gray 次级文字、.f12/.f14 字号、.tpc_content 帖子容器、
+   .r_one/.r_two 行、.authorbox 左栏 ~185px、.readbot 底部操作条。 */
+.iwara-bbs .fl { float: left; }
+.iwara-bbs .fr { float: right; }
+.iwara-bbs .gray { color: #8b93a1; }
+.iwara-bbs .f12 { font-size: 12px; line-height: 1.7; }
+.iwara-bbs .f14 { font-size: 14px; line-height: 1.95; color: #c9ced6; }
+.iwara-bbs a { color: #6ea8fe; text-decoration: none; }
+.iwara-bbs a:hover { text-decoration: underline; }
+
+.iwara-bbs .tpc_content {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  overflow: hidden;
+}
+/* 左右两列：左栏固定 185px（帖子作者信息区），右栏自适应 */
+.iwara-bbs .r_one { display: flex; align-items: stretch; }
+.iwara-bbs .r_two { border-top: 1px solid rgba(255, 255, 255, 0.07); }
+
+.iwara-bbs .authorbox {
+  width: 185px;
+  flex: 0 0 185px;
+  padding: 14px 12px;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+}
+.iwara-bbs .post { flex: 1 1 auto; min-width: 0; padding: 12px 16px 14px; }
+
+/* tiptop：楼层徽标 + 发布时间 + 操作下拉 + 字号切换 */
+.iwara-bbs .tiptop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 10px;
+}
+.iwara-bbs .floor {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: #a5b4fc;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.iwara-bbs .subject_tpc {
+  margin: 0 0 12px;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: #e5e7eb;
+  word-break: break-word;
+}
+
+/* 正文媒体：图片无边框 + 680px 上限（原版帖子正文宽度上限） */
+.iwara-bbs .posttext img {
+  border: 0;
+  max-width: 680px;
+  width: 100%;
+  border-radius: 6px;
+  display: block;
+}
+
+/* 底部操作条：顶端 / 回复 / 引用 */
+.iwara-bbs .readbot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* 窄屏：左栏收起成顶部横条（185px 定宽在手机上太宽） */
+@media (max-width: 768px) {
+  .iwara-bbs .r_one { flex-direction: column; }
+  .iwara-bbs .authorbox {
+    width: 100%;
+    flex: 1 1 auto;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  }
+}
+
 /* ── Show mobile-only elements ── */
 .show-on-mobile {
   display: none !important;
