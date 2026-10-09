@@ -22,7 +22,12 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"peerdrive/internal/egress"
 )
+
+// 静态接口约束：确保 Manager 满足统一出口管线 ContentProvider 契约
+var _ egress.ContentProvider = (*Manager)(nil)
 
 // Manager manages all Sources uniformly.
 type Manager struct {
