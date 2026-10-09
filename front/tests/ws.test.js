@@ -265,6 +265,65 @@ describe('ws.js client', () => {
 
     vi.unstubAllGlobals()
   })
+
+  it('queues admin requests when CONNECTING and dispatches once OPEN', async () => {
+    const sock = makeMockSock()
+    sock.readyState = WebSocket.CONNECTING
+    ws.__test._setSock(sock)
+    const p = ws.admin('GET', '/files')
+    expect(sock.sent.length).toBe(0)
+
+    // Simulate connection opening
+    sock.readyState = WebSocket.OPEN
+    if (sock.onopen) sock.onopen()
+
+    // Once open, the queued request is sent
+    await vi.waitFor(() => { expect(sock.sent.length).toBe(1) })
+    const f = JSON.parse(sock.sent[0])
+    expect(f.type).toBe('admin')
+    expect(f.path).toBe('/files')
+
+    feedText(sock, { type: 'admin-resp', status: 200, body: { files: [] }, reqId: f.reqId })
+    await expect(p).resolves.toEqual({ files: [] })
+  })
+
+  it('rejects queued requests when socket closes before opening', async () => {
+    const sock = makeMockSock()
+    sock.readyState = WebSocket.CONNECTING
+    ws.__test._setSock(sock)
+    const p = ws.admin('GET', '/files')
+
+    // Simulate failure to connect
+    sock.readyState = WebSocket.CLOSED
+    if (sock.onclose) sock.onclose()
+
+    await expect(p).rejects.toThrow('ws: connection closed before open')
+  })
+
+  it('aborts pending request on 60s timeout and clears binaryExpect', async () => {
+    vi.useFakeTimers()
+    try {
+      const sock = makeMockSock()
+      ws.__test._setSock(sock)
+      const p = ws.admin('GET', '/slow-endpoint')
+      const f = JSON.parse(sock.sent[0])
+
+      // Simulate partial response: admin-bin header received
+      feedText(sock, { type: 'admin-bin', status: 200, size: 1024, reqId: f.reqId })
+      expect(ws.__test._binaryExpect()).not.toBeNull()
+      expect(ws.__test._binaryExpect().reqId).toBe(f.reqId)
+
+      // Advance clock past 60s
+      vi.advanceTimersByTime(61000)
+
+      await expect(p).rejects.toThrow('ws: request timeout')
+      expect(ws.__test.pending.has(f.reqId)).toBe(false)
+      // binaryExpect must be cleaned up to prevent subsequent binary pollution
+      expect(ws.__test._binaryExpect()).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 // Discovery context: code review 2026-08-19 — downloadToFile should fall back to the
