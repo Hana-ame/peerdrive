@@ -64,7 +64,8 @@ func (s *URLSource) Name() string { return s.name }
 func (s *URLSource) Type() string { return "url" }
 
 // Capabilities determined by template: contains %d (offset/size params) → streaming chunks.
-func (s *URLSource) Capabilities() Capability { return s.caps }
+// 整文件取回/整文件打开都做 sha256 校验 → CapVerify（内容寻址基线）。
+func (s *URLSource) Capabilities() Capability { return s.caps | CapVerify }
 
 func (s *URLSource) Priority() int {
 	s.mu.RLock()
@@ -138,7 +139,7 @@ func (s *URLSource) Open(ctx context.Context, hash string, offset, size int64) (
 	}
 	// Full request (offset==0 && size<0) → verify sha256 during read (content-addressed fallback)
 	if offset == 0 && size < 0 {
-		return &verifyReadCloser{r: body, hash: hash}, nil
+		return &verifyReadCloser{r: body, hash: hash, label: "url"}, nil
 	}
 	return body, nil
 }
@@ -179,13 +180,20 @@ func (s *URLSource) Info(ctx context.Context, hash string) (*FileMeta, error) {
 }
 
 // verifyReadCloser verifies sha256 after reading completes (content-addressed fallback —
-// URL source content may be tampered with; without verification, corrupted content would
-// be treated as the addressed file). Verification runs at EOF: success → returns io.EOF;
-// failure → returns hash mismatch error (ReadAll will catch it).
+// remote sources (URL/ECH/peer) may return tampered or truncated content; without verification,
+// corrupt content would be treated as the addressed file). Verification runs at EOF: success →
+// returns io.EOF; failure → returns a hash mismatch error (ReadAll catches it).
+//
+// label 是错误前缀（"url" / "ech" / ...）：本类型被 url.go 与 ech.go 共用（同一份
+// 内容寻址校验语义，不复制两份），所以错误信息带上来源标签便于排查。
+//
+// h 在第一次 Read 时初始化（不是第一次写入数据时）——空文件的 Read 立即返回 n=0/EOF，
+// 若延后到 n>0 才初始化，h 会是 nil，空文件会被误判成 hash mismatch。
 type verifyReadCloser struct {
-	r    io.ReadCloser
-	hash string
-	h    hash.Hash
+	r     io.ReadCloser
+	hash  string
+	label string
+	h     hash.Hash
 
 	done bool
 	err  error
@@ -195,17 +203,17 @@ func (v *verifyReadCloser) Read(p []byte) (int, error) {
 	if v.done {
 		return 0, v.err
 	}
+	if v.h == nil {
+		v.h = sha256.New()
+	}
 	n, err := v.r.Read(p)
 	if n > 0 {
-		if v.h == nil {
-			v.h = sha256.New()
-		}
 		v.h.Write(p[:n])
 	}
 	if err == io.EOF {
 		v.done = true
-		if v.h == nil || hex.EncodeToString(v.h.Sum(nil)) != v.hash {
-			v.err = fmt.Errorf("url: content hash mismatch for %s", v.hash)
+		if hex.EncodeToString(v.h.Sum(nil)) != v.hash {
+			v.err = fmt.Errorf("%s: content hash mismatch for %s", v.label, v.hash)
 		} else {
 			v.err = io.EOF
 		}
