@@ -514,12 +514,36 @@ func DefaultConfig() *Config {
 	}
 }
 
+// resolvePort reads PEERDRIVE_PORT first, falling back to legacy PORT with a warning.
+func resolvePort() string {
+	if p := os.Getenv("PEERDRIVE_PORT"); p != "" {
+		return p
+	}
+	if p := os.Getenv("PORT"); p != "" {
+		log.LogWarn("config: PORT is deprecated, use PEERDRIVE_PORT instead")
+		return p
+	}
+	return "3000"
+}
+
+// resolveMainDBPath reads PEERDRIVE_DB_PATH first, falling back to legacy DB_PATH with a warning.
+func resolveMainDBPath() string {
+	if p := os.Getenv("PEERDRIVE_DB_PATH"); p != "" {
+		return p
+	}
+	if p := os.Getenv("DB_PATH"); p != "" {
+		log.LogWarn("config: DB_PATH is deprecated, use PEERDRIVE_DB_PATH instead")
+		return p
+	}
+	return "./peerdrive.db"
+}
+
 // Load reads PEERDRIVE_* environment variables and returns the full configuration struct,
 // using defaults for unset items.
 func Load() *Config {
 	return &Config{
-		Port:               getEnv("PORT", "3000"),
-		DBPath:             getEnv("PEERDRIVE_DB_PATH", "./peerdrive.db"),
+		Port:               resolvePort(),
+		DBPath:             resolveMainDBPath(),
 		StorageDir:         getEnv("PEERDRIVE_STORAGE", "./storage"),
 		StorageEnable:      getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
 		AllowedOrigins:     getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev"),
