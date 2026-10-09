@@ -34,6 +34,7 @@ import (
 	_ "peerdrive/docs"
 	"peerdrive/internal/config"
 	"peerdrive/internal/echproxy"
+	"peerdrive/internal/echproxy/exhentai"
 	"peerdrive/internal/echproxy/twimg"
 	"peerdrive/internal/extractor"
 	"peerdrive/internal/log"
@@ -383,14 +384,14 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	// be explicitly opted into.
 	if cfg.IwaraEnable {
 		iwaraCfg := &echproxy.ModuleConfig{
-			Enable:        true,
-			IWARACookie:   cfg.IwaraCookie,
-			EchProxyDir:   "echproxy",
+			Enable:          true,
+			IWARACookie:     cfg.IwaraCookie,
+			EchProxyDir:     "echproxy",
 			EchProxyExeName: echproxy.DefaultEchProxyExeName,
 			EchProxyVersion: cfg.IwaraEchProxyVersion,
-			EntrySuffix:   cfg.IwaraEntrySuffix,
-			UpstreamSuffix: cfg.IwaraUpstreamSuffix,
-			EntryPort:     strconv.Itoa(cfg.IwaraEchProxyPort),
+			EntrySuffix:     cfg.IwaraEntrySuffix,
+			UpstreamSuffix:  cfg.IwaraUpstreamSuffix,
+			EntryPort:       strconv.Itoa(cfg.IwaraEchProxyPort),
 		}
 		iwaraCfg.Normalize()
 
@@ -537,6 +538,55 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 				urlClient = mod.Client()
 				log.LogInfo("main: ech-proxy enabled — %s → %s://%s:%s via %s",
 					twimg.DefaultSrcHost, "https", mod.Entry().EntryHost, mod.Entry().Port, mod.Addr())
+			}
+		}
+
+		// Optional ExHentai module (PEERDRIVE_EXHENTA_ENABLE, default off).
+		//
+		// Unlike the two ech-proxy modules above there is no subprocess and no
+		// local listener: the backend host is reached directly, so the module is
+		// a pure http.RoundTripper that rewrites the authority of matching URLs.
+		// It stacks on top of whatever urlClient the ech-proxy module produced —
+		// the two modules serve different hosts and do not conflict.
+		//
+		// When the flag is off this whole block is skipped, so a node that never
+		// enables it stays byte-identical to one without the module: nothing is
+		// constructed and urlClient is still nil when the URL source is built.
+		if cfg.ExhentaiEnable {
+			if cfg.URLSourceTemplate == "" {
+				log.LogWarn("main: PEERDRIVE_EXHENTA_ENABLE=true but PEERDRIVE_URL_SOURCE_TEMPLATE is " +
+					"empty — the rewrite has no URL source to serve, the module was not started")
+			} else {
+				mod, err := exhentai.New(exhentai.Config{
+					ConfigURL:         cfg.ExhentaiConfigURL,
+					AllowInsecureHTTP: cfg.ExhentaiConfigInsecure,
+					HTTPBase:          urlClient,
+					AuthHeaders:       exhentaiAuthHeaders(cfg.ExhentaiConfigAuth),
+					// log.LogInfo has the exact signature the module expects.
+					Logf: log.LogInfo,
+				})
+				if err != nil {
+					// A malformed config URL is a misconfiguration, so it fails
+					// loudly here the way the ech-proxy module does. A reachable
+					// URL that later goes down is not: that degrades to the
+					// built-in table at runtime, which is deliberate — an
+					// operator's config server must not be able to take the node
+					// down with it.
+					return fail(fmt.Errorf("exhentai module: %w", err))
+				}
+				if err := mod.Start(context.Background()); err != nil {
+					return fail(fmt.Errorf("exhentai: %w", err))
+				}
+				shutdowns = append(shutdowns, func() {
+					if err := mod.Stop(context.Background()); err != nil {
+						log.LogWarn("main: stop exhentai module: %v", err)
+					}
+				})
+				urlClient = mod.Client()
+				if src := mod.Snapshot(); src.Version != "" {
+					log.LogInfo("main: exhentai module enabled — routing table %q from %s (%d rules)",
+						src.Version, src.Source, len(src.Config.Rules))
+				}
 			}
 		}
 
@@ -711,6 +761,20 @@ func warnUnsupportedRoots(cfg *config.Config) {
 // The entry port is derived from ECHProxyAddr rather than read separately: the rewrite
 // target is the same port the child process listens on, and keeping them in sync here
 // avoids a configuration pair that could silently disagree.
+// exhentaiAuthHeaders turns the single config-auth env value into the header map
+// the exhentai module attaches to its config fetches. An empty value yields nil
+// so the module does not send an empty Authorization header.
+//
+// The value is the Authorization header *value*, not the header name:
+// PEERDRIVE_EXHENTA_CONFIG_AUTH="Bearer <token>" produces "Authorization: Bearer <token>".
+func exhentaiAuthHeaders(value string) map[string]string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return map[string]string{"Authorization": value}
+}
+
 func buildECHProxyModule(cfg *config.Config) (*twimg.Module, error) {
 	installDir := strings.TrimSpace(cfg.ECHProxyInstallDir)
 	if installDir == "" {
