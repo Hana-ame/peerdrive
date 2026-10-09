@@ -20,7 +20,7 @@ describe('platform/shared exports and compatibility', () => {
     expect(shared.estEtaSeconds).toBe(formatOriginal.estEtaSeconds)
 
     expect(shared.fmtBytes(1500)).toBe('1.50 KB')
-    expect(shared.fmtRate(2000000)).toBe('2.0 MB/s')
+    expect(shared.fmtRate(2000000)).toBe('2.00 MB/s')
     expect(shared.fmtEta(65)).toBe('1m 5s')
   })
 
