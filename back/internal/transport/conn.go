@@ -242,54 +242,56 @@ func sessionRank(s Session) string {
 	return ""
 }
 
-// dedupConn same-peer dual-connection dedup decision (2026-08-19): mutual dialing (A↔B
-// dialing each other simultaneously) or reconnection races leave two connections under the
-// same peerID — conns map keyed by peerID keeps only one, the other becomes an orphan:
-// connState persists in pending map, uploadWorker/fwdWorker goroutine leaks, wasting a
-// WebRTC connection resource. Returns the eliminated connection (caller Close's it outside
-// the lock — holding-lock Close deadlock trap in REFACTOR §5; eliminated connection's
-// OnClose cleanup has `s.conns[c.ID()] == c` value-equality guard, won't mistakenly
-// delete the retained connection). keepOld=true means conns already points back to the old
-// connection (old connState/worker already in place; caller must not create state for the
-// new connection).
-// Exception: local WS sessions are not deduped — multiple browser tabs each have a local
-// session; actively closing old tab's connection would interrupt its in-progress inbound
-// service.
-// ⚠️ Retention policy must be consistent on both ends (connection-level UUID lexicographic
-// comparison, smaller wins): with mutual dialing, both ends see two connections {own dial,
-// peer's incoming}; if each keeps its own outgoing connection, the retained one is exactly
-// the broken link the other side already closed (integration test
-// TestSelfHostedSignalAndDiscover occasionally fails due to this — discovery background:
-// after dedup batch went live, integration test failed 1/4 of the time, fetch timeout
-// 10.5s). Connection UUID is visible on both ends with the same value → both take the
-// lexicographically smaller → both retain the same physical connection. fakeSession has
-// no connection UUID (equal rank) → retains the new connection (test double semantics).
-func (s *PeerJSService) dedupConn(c Session, old Session) (loser Session, keepOld bool) {
-	if old == nil || old == c || c.ID() == "local" {
-		return nil, false
-	}
-	if sessionRank(old) < sessionRank(c) {
-		s.mu.Lock()
-		s.conns[c.ID()] = old
-		s.mu.Unlock()
-		log.LogInfo("peerjs: dedup connection to %s, closing newer", c.ID())
-		return c, true
-	}
-	log.LogInfo("peerjs: dedup connection to %s, closing stale", c.ID())
-	return old, false
-}
-
+// bindConn binds the message dispatch for a connection: parses JSON header, routes by reqId,
+// appends binary chunks to expect state.
+// Trap: this connection is "full-duplex reused" — it both serves the peer's req (serveFile)
+// and receives responses for our own outgoing requests (routeResponse). They are
+// distinguished by frame type + reqId:
+//   - Text frame with type being a verb (req/create/upload/list/info/delete/sync) →
+//     inbound role responds
+//   - Text frame with other types → outbound role responses, routed by reqId
+//   - Binary frame → data chunk, routing decision (belongs to upload or expect) done in
+//     pump, disk IO delegated to connection-level worker (H5, see inbound.go uploadWorker)
+//
+// connRanker connection-level UUID (implemented by rtcSession; WSSession/fakeSession
+// don't have it, returning "" means incomparable).
+//
+// Dedup policy (2026-08-19, inlined from former dedupConn): same-peer dual-connection
+// dedup — mutual dialing (A↔B dialing each other simultaneously) or reconnection races
+// leave two connections under the same peerID. Retention policy must be consistent on
+// both ends (connection-level UUID lexicographic comparison, smaller wins): with mutual
+// dialing, both ends see two connections {own dial, peer's incoming}; if each keeps its
+// own outgoing connection, the retained one is exactly the broken link the other side
+// already closed (integration test TestSelfHostedSignalAndDiscover occasionally fails due
+// to this — discovery background: after dedup batch went live, integration test failed
+// 1/4 of the time, fetch timeout 10.5s). Connection UUID is visible on both ends with the
+// same value → both take the lexicographically smaller → both retain the same physical
+// connection. fakeSession has no connection UUID (equal rank) → retains the new connection
+// (test double semantics). Exception: local WS sessions are not deduped — multiple browser
+// tabs each have a local session; actively closing old tab's connection would interrupt
+// its in-progress inbound service.
+//
+// ⚠️ State-before-conns ordering: the connState is created in s.pending BEFORE the
+// connection is registered in s.conns. This eliminates the race where OpenStream or
+// requestVerbPayload reads a connection from s.conns before its state is registered in
+// s.pending, which would return "peerjs: connection not bound" (CI discovery:
+// TestPeerPullSavesToLocalDrive fails ~1/4 with "open stream: peerjs: connection not
+// bound" — dedup window race).
 func (s *PeerJSService) bindConn(c Session) {
 	s.mu.Lock()
 	old := s.conns[c.ID()]
-	s.conns[c.ID()] = c
 	s.mu.Unlock()
-	if loser, keepOld := s.dedupConn(c, old); loser != nil {
-		loser.Close()
-		if keepOld {
-			return
-		}
+
+	// Dedup decision (before touching conns map; eliminates "not bound" race).
+	keepOld := old != nil && old != c && c.ID() != "local" &&
+		sessionRank(old) < sessionRank(c)
+	if keepOld {
+		log.LogInfo("peerjs: dedup connection to %s, closing newer", c.ID())
+		c.Close()
+		return
 	}
+
+	// State before conns: OpenStream reads conns then looks up pending.
 	st := &connState{
 		fetches:   make(map[string]*fetchState),
 		verbWaits: make(map[string]chan []byte),
@@ -300,6 +302,15 @@ func (s *PeerJSService) bindConn(c Session) {
 	s.pendingMu.Lock()
 	s.pending[c] = st
 	s.pendingMu.Unlock()
+
+	s.mu.Lock()
+	s.conns[c.ID()] = c
+	s.mu.Unlock()
+
+	if old != nil && old != c && c.ID() != "local" {
+		log.LogInfo("peerjs: dedup connection to %s, closing stale", c.ID())
+		old.Close()
+	}
 
 	// ⚠️ OnMessage MUST be registered **before doing anything that may yield**.
 	// Discovery background: CI panel E2E occasionally shows "psk: this node requires
