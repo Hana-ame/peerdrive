@@ -1,0 +1,93 @@
+name: Layered Tests (AOP)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - refactor
+      - base
+      - docs
+      - "feat/*"
+      - "fix/*"
+      - "module/*"
+      - "*-agent"
+      - "*-frontend"
+    tags: ['v*']
+  pull_request:
+    branches: [main, master, refactor]
+  workflow_dispatch:
+    inputs:
+      integration:
+        description: 'Run integration test layer (--integration)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  layers:
+    name: AOP Layer Validation (L1-L8 + LB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: front
+        run: npm ci
+
+      - name: Pre-download Go Modules
+        run: |
+          (cd back && go mod download)
+          (cd back/peerjs && go mod download)
+          (cd back/signalserver && go mod download)
+          (cd back/p2p_bt && go mod download)
+
+      - name: Run AOP Layered Tests
+        id: run_layers
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.integration }}" = "true" ]; then
+            ARGS="--integration"
+          fi
+          bash scripts/test-layers.sh $ARGS
+
+      - name: Print Failed Layer Logs
+        if: failure()
+        run: |
+          echo "========================================"
+          echo "Dumping layer test failure logs:"
+          echo "========================================"
+          for f in /tmp/layer-test-*.log; do
+            if [ -f "$f" ]; then
+              echo ">>> $f <<<"
+              cat "$f"
+              echo ""
+            fi
+          done
+
+      - name: Upload Layer Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: layer-test-logs
+          path: /tmp/layer-test-*.log
+          if-no-files-found: ignore
