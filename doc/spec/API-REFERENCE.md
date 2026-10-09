@@ -1702,13 +1702,40 @@ Get WebRTC STUN/TURN configuration.
 curl http://127.0.0.1:3000/p2p/webrtc/info
 ```
 
-**Response**:
+**Response** (TURN 未配置):
 ```json
 {
   "stun_server": "stun:stun.l.google.com:19302",
+  "turn_configured": false
+}
+```
+
+**Response** (TURN 已配置、匿名 TURN):
+```json
+{
+  "stun_server": "stun:stun.l.google.com:19302",
+  "turn_configured": true,
   "turn_server": "turn:turn.example.com:3478"
 }
 ```
+
+**Response** (TURN 已配置、带静态凭据):
+```json
+{
+  "stun_server": "stun:stun.l.google.com:19302",
+  "turn_configured": true,
+  "turn_server": "turn:turn.example.com:3478",
+  "turn_username": "peerdrive",
+  "turn_password": "s3cret"
+}
+```
+
+> `turn_username` / `turn_password` 来自 `PEERDRIVE_WEBRTC_TURN_USER` /
+> `PEERDRIVE_WEBRTC_TURN_PASS`（#144）。静态 TURN 凭据本就用于分发给不受信的对端，
+> 因此随 URL 一并下发不额外泄露任何东西；但**只设了 TURN URL 而没设凭据**时，
+> 认证 TURN 服务器会拒绝 Allocate、relay candidate 永不产生——这正是对称 NAT
+> 依赖的路径，所以两种情况必须能区分：`turn_configured` 只表示 URL 已配置，
+> 不代表凭据齐全。
 
 ---
 

@@ -78,6 +78,13 @@ type Config struct {
 
 	WebRTCSTUNServer string
 	WebRTCTURNServer string
+	// WebRTCTURNUsername / WebRTCTURNPassword are the TURN static-auth credentials (#144).
+	// Why separate fields instead of only parsing them out of WebRTCTURNServer:
+	// TURN URLs may legitimately carry userinfo, but production TURN (coturn) issues
+	// time-limited credentials whose rotation must not require rewriting the URL list.
+	// Empty username = no credentials (an anonymous TURN server), which stays valid.
+	WebRTCTURNUsername string
+	WebRTCTURNPassword string
 
 	PeerJSEnable bool // PEERDRIVE_PEERJS_ENABLE, default true
 	// Defaults to the PeerJS public cloud 0.peerjs.com:9000 (key "peerjs").
@@ -432,6 +439,8 @@ func DefaultConfig() *Config {
 		IPFSGateways:       "https://ipfs.io,https://cloudflare-ipfs.com,https://dweb.link",
 		WebRTCSTUNServer:   "stun:stun.l.google.com:19302",
 		WebRTCTURNServer:   "",
+		WebRTCTURNUsername: "",
+		WebRTCTURNPassword: "",
 		PeerJSEnable:       true,
 		PeerJSHost:         DefaultSignalHost,
 		PeerJSPort:         DefaultSignalPort,
@@ -567,6 +576,9 @@ func Load() *Config {
 
 		WebRTCSTUNServer: getEnv("PEERDRIVE_WEBRTC_STUN", "stun:stun.l.google.com:19302"),
 		WebRTCTURNServer: getEnv("PEERDRIVE_WEBRTC_TURN", ""),
+
+		WebRTCTURNUsername: getEnv("PEERDRIVE_WEBRTC_TURN_USER", ""),
+		WebRTCTURNPassword: getEnv("PEERDRIVE_WEBRTC_TURN_PASS", ""),
 
 		PeerJSEnable: getEnvBool("PEERDRIVE_PEERJS_ENABLE", true),
 		PeerJSHost:   getEnv("PEERDRIVE_PEERJS_HOST", DefaultSignalHost),

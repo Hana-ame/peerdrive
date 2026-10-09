@@ -123,7 +123,7 @@ func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
 		cfg:          cfg,
 		storageDir:   storageDir,
 		id:           id,
-		iceServers:   parseICEServers(cfg.WebRTCSTUNServer, cfg.WebRTCTURNServer),
+		iceServers:   parseICEServers(cfg.WebRTCSTUNServer, cfg.WebRTCTURNServer, cfg.WebRTCTURNUsername, cfg.WebRTCTURNPassword),
 		conns:        make(map[string]Session),
 		pending:      make(map[Session]*connState),
 		connecting:   make(map[string]struct{}),
@@ -713,14 +713,37 @@ func randHex8() string {
 	return hex.EncodeToString(b)
 }
 
-func parseICEServers(stun, turn string) []webrtc.ICEServer {
+// parseICEServers builds the ICE server list handed to pion/webrtc (node side) and
+// mirrored to browsers via GET /p2p/webrtc/info.
+//
+// #144: TURN used to be emitted as a bare `webrtc.ICEServer{URLs: ...}` with no
+// Username/Password/CredentialType. A TURN Allocate request without credentials is
+// rejected by any authenticated server, so the relayed candidate never appears —
+// which is exactly the case symmetric NAT depends on, i.e. configuring TURN silently
+// did nothing. Credentials are now carried explicitly.
+//
+// turnUser/turnPass come from PEERDRIVE_WEBRTC_TURN_USER / _PASS. They may be empty
+// (anonymous TURN), in which case the server entry stays credential-free and
+// CredentialType is left unset — pion only requires it alongside a username.
+func parseICEServers(stun, turn, turnUser, turnPass string) []webrtc.ICEServer {
 	var out []webrtc.ICEServer
 	if stun != "" {
 		out = append(out, webrtc.ICEServer{URLs: []string{stun}})
 	}
 	if turn != "" {
 		urls := strings.Split(turn, ",")
-		out = append(out, webrtc.ICEServer{URLs: urls})
+		srv := webrtc.ICEServer{URLs: urls}
+		if turnUser != "" || turnPass != "" {
+			srv.Username = turnUser
+			// Pion's ICEServer field is `Credential interface{}` (the W3C name is
+			// "credential"); with CredentialType password it must hold the string
+			// password. CredentialType is declared whenever any credential was
+			// supplied — leaving it unset makes Pion attempt an unauthenticated
+			// Allocate, which is precisely the silent failure #144 reported.
+			srv.Credential = turnPass
+			srv.CredentialType = webrtc.ICECredentialTypePassword
+		}
+		out = append(out, srv)
 	}
 	return out
 }
