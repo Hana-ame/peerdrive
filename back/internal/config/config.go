@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"runtime"
 	"strconv"
@@ -258,6 +259,28 @@ type Config struct {
 	IwaraUpstreamSuffix  string // PEERDRIVE_IWARA_UPSTREAM_SUFFIX: upstream domain (default "iwara.tv")
 	IwaraEchProxyVersion string // PEERDRIVE_IWARA_ECH_PROXY_VERSION: ech-proxy release tag (default "v1.3.0")
 
+	// ── ExHentai routing (PEERDRIVE_EXHENTA_*, optional module) ──
+	//
+	// ExhentaiEnable is the master switch (PEERDRIVE_EXHENTA_ENABLE, default **false**).
+	// Why default off: the module rewrites requests to a third-party gallery through
+	// an operator-configured mirror, and the routing table it uses carries a login
+	// cookie. Like the iwara module above, that is an explicit opt-in.
+	//
+	// When enabled with no ExhentaiConfigURL the module runs on a built-in table
+	// (exhentai.org / e-hentai.org → ex.4545810.xyz) and its requests are only
+	// available to the node's own URL sources. With ExhentaiConfigURL set, the
+	// routing table is fetched from that URL and re-fetched in the background, so
+	// an operator changes the table by pushing a document — no restart.
+	//
+	// Unlike the ech-proxy modules above, there is no subprocess and no silent
+	// fallback to "direct": a bad or unreachable config URL means the module runs
+	// on the built-in table and logs the failure. A node must never fail to boot
+	// because a config server is down.
+	ExhentaiEnable         bool   // PEERDRIVE_EXHENTA_ENABLE (default false)
+	ExhentaiConfigURL      string // PEERDRIVE_EXHENTA_CONFIG_URL (default "")
+	ExhentaiConfigInsecure bool   // PEERDRIVE_EXHENTA_CONFIG_INSECURE (default false)
+	ExhentaiConfigAuth     string // PEERDRIVE_EXHENTA_CONFIG_AUTH (default ""): Authorization header value for config fetches
+
 	// ── Signal subcommand (PEERSIGNAL_* / PEERJS_TOKENS, backward compat with old peersignal binary) ──
 	//
 	// The `peerdrive signal` subcommand preserves the old peersignal env var names so
@@ -381,6 +404,12 @@ func Load() *Config {
 		IwaraEntrySuffix:     getEnv("PEERDRIVE_IWARA_ENTRY_SUFFIX", "l.moonchan.xyz"),
 		IwaraUpstreamSuffix:  getEnv("PEERDRIVE_IWARA_UPSTREAM_SUFFIX", "iwara.tv"),
 		IwaraEchProxyVersion: getEnv("PEERDRIVE_IWARA_ECH_PROXY_VERSION", "v1.3.0"),
+
+		// ExHentai routing (optional module)
+		ExhentaiEnable:         getEnvBool("PEERDRIVE_EXHENTA_ENABLE", false),
+		ExhentaiConfigURL:      getEnv("PEERDRIVE_EXHENTA_CONFIG_URL", ""),
+		ExhentaiConfigInsecure: getEnvBool("PEERDRIVE_EXHENTA_CONFIG_INSECURE", false),
+		ExhentaiConfigAuth:     getEnv("PEERDRIVE_EXHENTA_CONFIG_AUTH", ""),
 
 		// 2026-10-07: dropped the bogus "ipfs" entry from the default (was
 		// "local,ipfs,ipfsgw,btdht,http"). "ipfs" has not been in the fetcher
@@ -521,6 +550,19 @@ func Validate(c *Config) error {
 			errs = append(errs, "PEERDRIVE_ECH_PROXY_ADDR="+c.ECHProxyAddr+
 				" conflicts with the iwara module's listen address "+iwaraAddr+
 				" (PEERDRIVE_IWARA_ECH_PROXY_PORT) — give one module a different address")
+		}
+	}
+
+	// The ExHentai config URL is where an operator publishes the routing table.
+	// The module accepts an empty value (built-in table only), but a typo here
+	// would otherwise only surface as a repeated "config fetch failed" log line
+	// after a successful boot. Check the scheme now, while it is still a
+	// configuration error rather than a runtime one.
+	if c.ExhentaiEnable && strings.TrimSpace(c.ExhentaiConfigURL) != "" {
+		u, err := url.Parse(strings.TrimSpace(c.ExhentaiConfigURL))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			errs = append(errs, "PEERDRIVE_EXHENTA_CONFIG_URL="+c.ExhentaiConfigURL+
+				" is not a valid http:// or https:// URL")
 		}
 	}
 
