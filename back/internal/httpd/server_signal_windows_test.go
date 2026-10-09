@@ -47,12 +47,10 @@ func TestRunShutsDownOnContextCancel(t *testing.T) {
 		done <- srv.Run(ctx)
 	}()
 
-	require.Eventually(t, func() bool {
-		return srv.Addr() != ""
-	}, 2*time.Second, 10*time.Millisecond)
+	addr := waitAddr(t, srv)
 
 	// Verify server responds
-	resp, err := http.Get("http://" + srv.Addr() + "/echo?msg=windows-ok")
+	resp, err := http.Get("http://" + addr + "/echo?msg=windows-ok")
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
