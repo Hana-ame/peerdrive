@@ -97,17 +97,20 @@ var signalKeyScanRoots = []string{
 // signalKeyEvidenceFiles 是「故意保留旧值」的文件：里面的字面量是**事故证据**，
 // 不是会生效的配置，改掉反而抹掉了记录。
 //
-// back/signalserver/signalserver.go 的 HandleStatus 注释里贴着一段
+// back/signalserver/status.go 的 HandleStatus 注释里贴着一段
 // /status 响应体，里面是**上一代**的 key 字面量——那是 2026-10-06 那次
 // /status 匿名泄漏的现场记录（注释明确写了「无需任何凭据」），
 // 它的作用是解释「为什么 key 必须从 /status 里拿掉」以及为什么当时
 // 「轮换 git 里的硬编码」这条路无效。把它改成当前 key 等于伪造证据——
 // 读者会以为当时泄漏的就是今天这个值。
 //
+// （2026-10-08 结构重构：HandleStatus 从 signalserver.go 拆到 status.go，
+// 注释随之迁移，证据文件路径同步更新。）
+//
 // ⚠️ 本文件自己也在扫描范围内（它在 back/ 下、后缀是 .go），所以这里
 // **不能**把那个旧 key 原样写进注释，否则本测试会把自己判成漂移。
 var signalKeyEvidenceFiles = map[string]bool{
-	"back/signalserver/signalserver.go": true,
+	"back/signalserver/status.go": true,
 }
 
 // collectSignalKeyFiles 递归收集所有待检查文件，返回仓库相对路径（/ 分隔）。
