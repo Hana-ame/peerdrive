@@ -478,7 +478,6 @@ func TestRunRefreshesInBackground(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	cancel()
 
 	mu.Lock()
 	after := n
@@ -488,10 +487,15 @@ func TestRunRefreshesInBackground(t *testing.T) {
 	}
 	// The handler counts a request before Sync has installed the snapshot it
 	// returned, so poll for the version rather than asserting on the count.
+	// Do NOT cancel the context here: the Run goroutine needs the context
+	// alive to complete its second Sync and install the v2 snapshot. If we
+	// cancel before the Sync finishes, the HTTP request fails with context
+	// cancellation and the version stays at v1 — a flake on slow runners.
 	deadline = time.Now().Add(2 * time.Second)
 	for store.Version() != "v2" && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
+	cancel() // Now safe to cancel: version is confirmed v2.
 	if v := store.Version(); v != "v2" {
 		t.Fatalf("version = %q, want v2 (hot reload)", v)
 	}
