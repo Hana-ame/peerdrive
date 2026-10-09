@@ -193,7 +193,11 @@ func TestEntry_Fetch_AllFail(t *testing.T) {
 	for _, a := range recent {
 		require.False(t, a.OK)
 		require.NotEmpty(t, a.Err)
-		require.NotZero(t, a.Duration)
+		// 发现背景: Windows 上 time.Now 是 100ns 粒度，loopback 拒绝连接可在一个
+		// tick 内完成，Duration 会实测为 0——断言「耗时被记录」不能依赖时钟粒度，
+		// 改为断言尝试时刻 At 已记录（绝对时刻不会为 0）。
+		require.False(t, a.At.IsZero(), "attempt time must be recorded")
+		require.GreaterOrEqual(t, a.Duration, time.Duration(0))
 	}
 }
 
