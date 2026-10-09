@@ -12,3 +12,18 @@ import { cleanup } from '@testing-library/react'
 afterEach(() => {
   cleanup()
 })
+
+if (typeof window !== 'undefined') {
+  class MockIntersectionObserver {
+    constructor(callback) {
+      this.callback = callback
+    }
+    observe(target) {
+      this.callback([{ isIntersecting: true, target }])
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+  window.IntersectionObserver = MockIntersectionObserver
+  global.IntersectionObserver = MockIntersectionObserver
+}
