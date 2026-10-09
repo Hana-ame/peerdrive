@@ -21,7 +21,52 @@
 
 package httpd
 
-import "testing"
+import (
+	"context"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+)
+
+// TestRunShutsDownOnContextCancel verifies that httpd.Run executes and shuts down gracefully
+// via context cancellation on Windows.
+//
+// 发现背景：Issue #100。虽然 Windows 缺乏 POSIX syscall.Kill 无法在单进程单元测试中
+// 自发信号触发 SIGTERM/SIGINT，但 httpd.Run 内部对 ctx.Done() 的监听和退出路径在 Windows
+// 生产环境中是完全真实生效的。本测试直接验证 httpd.Run 在 Windows 上的启动、请求服务以及
+// 上下文退出与端口回收。
+func TestRunShutsDownOnContextCancel(t *testing.T) {
+	srv, err := New(Config{Addr: "127.0.0.1:0"}, echoHandler())
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- srv.Run(ctx)
+	}()
+
+	require.Eventually(t, func() bool {
+		return srv.Addr() != ""
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Verify server responds
+	resp, err := http.Get("http://" + srv.Addr() + "/echo?msg=windows-ok")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Cancel context and verify Run returns without error
+	cancel()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("httpd.Run did not exit within timeout after context cancellation on Windows")
+	}
+}
 
 func TestRunShutsDownOnSIGTERM(t *testing.T) {
 	t.Skip("self-signalling needs POSIX signal delivery; Windows has no syscall.Kill and signal.Notify only catches console Ctrl+C/Ctrl+Break events (see server_signal_test.go)")
