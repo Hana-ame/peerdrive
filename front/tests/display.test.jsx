@@ -146,4 +146,33 @@ describe('Display.jsx page (Issue #243)', () => {
       })
     );
   });
+
+  it('receives stream chunk frames and renders media with LIVE badge (Issue #244)', () => {
+    render(
+      <MemoryRouter>
+        <Display />
+      </MemoryRouter>
+    );
+
+    act(() => {
+      if (messageHandler) {
+        messageHandler({
+          type: 'stream',
+          action: 'chunk',
+          streamId: 'live-camera',
+          chunk: {
+            seq: 42,
+            hash: 'stream-hash-42',
+            mimeType: 'image/jpeg',
+            title: 'Cam Feed',
+          },
+        });
+      }
+    });
+
+    const img = screen.getByRole('img');
+    expect(img).toBeInTheDocument();
+    expect(img).toHaveAttribute('src', '/files/download/stream-hash-42');
+    expect(screen.getByText(/LIVE #42/i)).toBeInTheDocument();
+  });
 });
