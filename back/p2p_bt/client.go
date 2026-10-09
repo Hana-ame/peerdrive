@@ -257,6 +257,7 @@ func (c *BTClient) watchDownload(ds *downloadState) {
 	for range ticker.C {
 		c.mu.RLock()
 		_, exists := c.downloads[ds.infoHashHex]
+		curStatus := ds.status // read under lock to avoid race with Pause/Resume
 		c.mu.RUnlock()
 		if !exists {
 			return
@@ -270,7 +271,7 @@ func (c *BTClient) watchDownload(ds *downloadState) {
 		}
 
 		length := t.Length()
-		if length > 0 && t.BytesCompleted() >= length && ds.status == "downloading" {
+		if length > 0 && t.BytesCompleted() >= length && curStatus == "downloading" {
 			c.finalizeDownload(ds)
 			return
 		}
@@ -278,12 +279,10 @@ func (c *BTClient) watchDownload(ds *downloadState) {
 }
 
 func (c *BTClient) finalizeDownload(ds *downloadState) {
-	ds.completed = true
-	ds.status = "completed"
-
 	t := ds.t
 	dataRoot := filepath.Join(c.dataDir, t.Name())
 
+	// I/O work: read files and compute hashes (no lock needed).
 	var completedFiles []CompletedFile
 	for _, f := range t.Files() {
 		var absPath string
@@ -316,24 +315,32 @@ func (c *BTClient) finalizeDownload(ds *downloadState) {
 		})
 	}
 
+	// State update under write lock to avoid races with Pause/Resume/GetDownload.
+	c.mu.Lock()
+	ds.completed = true
+	ds.status = "completed"
 	ds.files = completedFiles
 
 	if ds.doneCh != nil {
 		close(ds.doneCh)
 	}
 
-	if c.onComplete != nil && len(completedFiles) > 0 {
+	shouldAutoSeed := false
+	if c.autoSeed[ds.infoHashHex] {
+		shouldAutoSeed = true
+	}
+	c.mu.Unlock()
 
-		// Check the auto-seed flag
-		c.mu.RLock()
-		shouldAutoSeed := c.autoSeed[ds.infoHashHex]
-		c.mu.RUnlock()
-		if shouldAutoSeed {
-			LogInfo("bt-client: auto-seeding %s", ds.infoHashHex)
-			ds.t.AllowDataUpload()
-			ds.seeding = true
-			ds.status = "seeding"
-		}
+	if shouldAutoSeed {
+		c.mu.Lock()
+		LogInfo("bt-client: auto-seeding %s", ds.infoHashHex)
+		ds.t.AllowDataUpload()
+		ds.seeding = true
+		ds.status = "seeding"
+		c.mu.Unlock()
+	}
+
+	if c.onComplete != nil && len(completedFiles) > 0 {
 		LogInfo("bt-client: firing onComplete for %s (%d files)", ds.infoHashHex, len(completedFiles))
 		c.onComplete(ds.infoHashHex, completedFiles)
 	}
@@ -351,6 +358,11 @@ func (c *BTClient) GetDownload(infohash string) *DownloadStatus {
 	if !ok {
 		return nil
 	}
+	// Hold the read lock while building status to prevent data races
+	// with PauseDownload/ResumeDownload which write ds.status without
+	// holding the write lock.
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.buildStatus(ds)
 }
 
@@ -398,37 +410,41 @@ func (c *BTClient) buildStatus(ds *downloadState) *DownloadStatus {
 // ---- Pause/Resume ----
 
 func (c *BTClient) PauseDownload(infohash string) error {
-	c.mu.RLock()
+	c.mu.Lock()
 	ds, ok := c.downloads[infohash]
-	c.mu.RUnlock()
 	if !ok {
+		c.mu.Unlock()
 		return fmt.Errorf("download %s not found", infohash)
 	}
 
 	if ds.status != "downloading" {
+		c.mu.Unlock()
 		return fmt.Errorf("download %s is not in progress (status=%s)", infohash, ds.status)
 	}
 
 	ds.t.DisallowDataDownload()
 	ds.status = "paused"
+	c.mu.Unlock()
 	LogInfo("bt-client: paused download %s (%s)", infohash, ds.name)
 	return nil
 }
 
 func (c *BTClient) ResumeDownload(infohash string) error {
-	c.mu.RLock()
+	c.mu.Lock()
 	ds, ok := c.downloads[infohash]
-	c.mu.RUnlock()
 	if !ok {
+		c.mu.Unlock()
 		return fmt.Errorf("download %s not found", infohash)
 	}
 
 	if ds.status != "paused" {
+		c.mu.Unlock()
 		return fmt.Errorf("download %s is not paused (status=%s)", infohash, ds.status)
 	}
 
 	ds.t.AllowDataDownload()
 	ds.status = "downloading"
+	c.mu.Unlock()
 	LogInfo("bt-client: resumed download %s (%s)", infohash, ds.name)
 	return nil
 }
@@ -532,41 +548,46 @@ func (c *BTClient) HasTorrentBytes(infohash string) bool {
 // ---- Seeding ----
 
 func (c *BTClient) StartSeed(infohash string) error {
-	c.mu.RLock()
+	c.mu.Lock()
 	ds, ok := c.downloads[infohash]
-	c.mu.RUnlock()
 	if !ok {
+		c.mu.Unlock()
 		return fmt.Errorf("download %s not found", infohash)
 	}
 
 	if ds.status != "completed" {
+		c.mu.Unlock()
 		return fmt.Errorf("download %s has status %q, need 'completed' to seed", infohash, ds.status)
 	}
 	if ds.seeding {
+		c.mu.Unlock()
 		return fmt.Errorf("already seeding %s", infohash)
 	}
 
 	ds.t.AllowDataUpload()
 	ds.seeding = true
+	c.mu.Unlock()
 
 	LogInfo("bt-client: started seeding %s (%s)", infohash, ds.name)
 	return nil
 }
 
 func (c *BTClient) StopSeed(infohash string) error {
-	c.mu.RLock()
+	c.mu.Lock()
 	ds, ok := c.downloads[infohash]
-	c.mu.RUnlock()
 	if !ok {
+		c.mu.Unlock()
 		return fmt.Errorf("download %s not found", infohash)
 	}
 
 	if !ds.seeding {
+		c.mu.Unlock()
 		return fmt.Errorf("not currently seeding %s", infohash)
 	}
 
 	ds.t.DisallowDataUpload()
 	ds.seeding = false
+	c.mu.Unlock()
 
 	LogInfo("bt-client: stopped seeding %s", infohash)
 	return nil
