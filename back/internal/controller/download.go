@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"peerdrive/internal/downloader"
+	"peerdrive/internal/egress"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/provider"
@@ -93,7 +94,7 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 }
 
-// DownloadBySHA256Local handles GET /sha256sum/:sha256, reading only from local storage without P2P fallback.
+// DownloadBySHA256Local handles GET /sha256sum/:sha256, reading directly from local storage with RFC 7233 streaming and Range support.
 func DownloadBySHA256Local(c *gin.Context) {
 	hash := c.Param("sha256")
 	if !hashutil.IsValidSHA256(hash) {
@@ -108,11 +109,19 @@ func DownloadBySHA256Local(c *gin.Context) {
 	sd, _ := c.Get("storageDir")
 	storageDir, _ := sd.(string)
 	path := filepath.Join(storageDir, hash[:2], hash)
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found on disk"})
 		return
 	}
+	defer f.Close()
+
+	st, err := f.Stat()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "stat failed"})
+		return
+	}
+
 	fn := hash
 	if meta.Filename != "" {
 		fn = meta.Filename
@@ -125,7 +134,8 @@ func DownloadBySHA256Local(c *gin.Context) {
 	if meta.Gziped {
 		c.Header("Content-Encoding", "gzip")
 	}
-	c.Data(http.StatusOK, "application/octet-stream", data)
+	// http.ServeContent 原生支持流式传输与 RFC 7233 Range / 206 Partial Content / ETag / If-Range
+	http.ServeContent(c.Writer, c.Request, fn, st.ModTime(), f)
 }
 
 // DownloadByCID handles GET /ipfs/:cid, looking up the file by its IPFS CID and
@@ -274,53 +284,11 @@ func UniversalDownloadRefresh(c *gin.Context) {
 
 // parseRangeHeader parses an HTTP Range header and returns start/end byte indices and total size.
 // Supports standard range (bytes=N-M), open-ended (bytes=N-), and suffix (bytes=-N).
-// Source: legacy/relay.go ParseRange (batch 2 migration, pure function with no external dependencies).
+// Delegated to egress.ParseRangeHeader for unified RFC 7233 compliance across all egress outlets.
 func parseRangeHeader(rangeVal string, fileSize int64) (start, end int64, ok bool) {
-	if fileSize <= 0 {
+	offset, size, isSatisfiable, valid := egress.ParseRangeHeader(rangeVal, fileSize)
+	if !valid || !isSatisfiable {
 		return 0, 0, false
 	}
-	if !strings.HasPrefix(rangeVal, "bytes=") {
-		return 0, 0, false
-	}
-	rangeVal = strings.TrimPrefix(rangeVal, "bytes=")
-
-	parts := strings.SplitN(rangeVal, "-", 2)
-	if len(parts) != 2 {
-		return 0, 0, false
-	}
-
-	startStr := strings.TrimSpace(parts[0])
-	endStr := strings.TrimSpace(parts[1])
-
-	// Suffix range: "bytes=-500" → last 500 bytes.
-	if startStr == "" {
-		suffix, err := strconv.ParseInt(endStr, 10, 64)
-		if err != nil || suffix <= 0 {
-			return 0, 0, false
-		}
-		if suffix > fileSize {
-			suffix = fileSize
-		}
-		return fileSize - suffix, fileSize - 1, true
-	}
-
-	start, err := strconv.ParseInt(startStr, 10, 64)
-	if err != nil || start < 0 || start >= fileSize {
-		return 0, 0, false
-	}
-
-	// Open-ended range: "bytes=500-" → from start to end of file.
-	if endStr == "" {
-		return start, fileSize - 1, true
-	}
-
-	end, err = strconv.ParseInt(endStr, 10, 64)
-	if err != nil || end < start {
-		return 0, 0, false
-	}
-	if end >= fileSize {
-		end = fileSize - 1
-	}
-
-	return start, end, true
+	return offset, offset + size - 1, true
 }

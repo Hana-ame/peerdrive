@@ -67,6 +67,7 @@ type EgressRequest struct {
 	ClientID string          // 消费对端标识（PeerID / SessionID / RemoteAddr）
 	Filename string          // 可选文件名（用于推导 MIME 类型与 Content-Disposition）
 	MimeType string          // 可选明确指定的 MIME 类型
+	IsRange  bool            // 标记该请求是否由显式 Range 头发起（影响 206 状态码决策）
 	IsLocal  bool            // 是否为本地管理会话
 	Context  context.Context // 请求上下文生命周期控制
 }
@@ -80,6 +81,7 @@ type EgressMeta struct {
 	MimeType    string // MIME 类型（如 video/mp4, application/octet-stream）
 	ETag        string // 缓存指纹（即 hash 或带引号指纹）
 	ReqID       string // 对应的请求 ID
+	IsRange     bool   // 标记本次下发是否为 Range 分片响应（影响 206 状态码决策）
 }
 
 // EgressSink 协议输出适配器接口（消费端下发接收器）。
