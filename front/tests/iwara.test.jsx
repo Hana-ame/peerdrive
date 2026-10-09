@@ -1,15 +1,28 @@
-// Iwara.jsx tests — the BBS-post-styled iwara viewer.
+// Iwara.jsx tests — the netdisk-style iwara browser.
 //
-// Discovery context (2026-10, iwara page): the page's contract is "one iwara
-// video renders as one BBS post" — left author column, tiptop floor badge +
-// op menu + font switch, h1 title, 14px body with a capped cover image and a
-// resolution table whose rows are real CDN download links. The risks pinned
-// here are: the layout must actually carry the iwara data (a post that looks
-// right but drops the resolution table is useless), the download link must be
-// the https CDN URL the backend signed (not a placeholder), and when the node
-// has no iwara module the page must degrade to the demo entry with an honest
-// message instead of rendering a fake video as if it were real. ws is mocked
-// entirely — no network, and the demo entry loads no external image.
+// Discovery context (2026-10, iwara page): the first cut of this page rendered
+// each video as a BBS forum post (author sidebar, floor badges, "only show OP",
+// font-size toggles, reply/quote actions) and the page's contract was written
+// around that shape. That reference was wrong — this is a content browser, so
+// the page now follows Drive.jsx / CollectionView.jsx: a header with a
+// grid/list toggle, an input bar, then either preview cards or one table of
+// rows, each carrying cover + title + author + duration + views and a per-row
+// quality select + download / copy-link / open-source action group.
+//
+// What the tests pin now: the layout must carry the iwara data (a card or row
+// that looks right but drops the resolution data is useless), the download link
+// must be the https CDN URL the backend signed rather than a placeholder, the
+// quality select must actually change which URL is downloaded, and when the
+// node has no iwara module the page must fall back to labelled sample data with
+// an honest message instead of rendering a fake video as if it were real.
+// ws is mocked entirely — no network, and the sample entry loads no image.
+//
+// Vitest gotcha kept from the previous revision: a mock set up with
+// mockRejectedValue / mockImplementation(() => Promise.reject(e)) eagerly
+// creates Promise.reject(e) at setup time, so the tick before the page awaits
+// it is already an unhandled rejection and the test fails with the bare error
+// even though the page catches and renders it. mockRejectedValueOnce is used
+// per result instead, which defers creation until the call happens.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
@@ -20,12 +33,12 @@ vi.mock('../src/ws.js', () => ({
   admin: adminMock,
 }))
 
-import Iwara, { fmtDuration, fmtCount, fmtDate, iwaraUrl } from '../src/pages/Iwara'
+import Iwara, { fmtDuration, fmtCount, fmtDate, iwaraUrl, parseIds } from '../src/pages/Iwara'
 
-// A resolved metadata payload, shaped exactly as controller.GetIwaraVideo returns it.
+// Shaped exactly as controller.GetIwaraVideo returns it (echproxy.VideoMeta).
 const video = (over = {}) => ({
   id: 'ab12cd34',
-  title: '【IwaraTool】I站下载器 v2.1 发布',
+  title: 'iwara tool v2.1 release',
   status: 'published',
   rating: 'general',
   author: 'IwaraTool',
@@ -34,13 +47,19 @@ const video = (over = {}) => ({
   duration: 182,
   views: 12800,
   uploaded: 1728000000,
-  file: { id: 'f-1', name: 'iwara-tool-v2.1.mp4' },
   resolutions: [
     { id: 'src', name: 'Source', downloadUrl: 'https://v-f007.v.ihstatic.com/src.mp4?token=t1' },
     { id: 'hi', name: '1080p', downloadUrl: 'https://v-f007.v.ihstatic.com/hi.mp4?token=t2' },
   ],
   ...over,
 })
+
+// ws.admin rejects with the backend body attached as .data.
+const wsErr = (msg, data) => {
+  const e = new Error(msg)
+  e.data = data
+  return e
+}
 
 function renderAt(path) {
   return render(
@@ -57,258 +76,320 @@ async function flush(times = 8) {
   for (let i = 0; i < times; i++) await act(async () => { await Promise.resolve() })
 }
 
-// parseIn: type ids into the input box and click 解析, then let the promise settle.
-// Every test that needs real (non-demo) data goes through this path, because the
-// page ships with the demo entry and only replaces it with a real response.
-async function parseIn(values, mockResults) {
-  // 用 mockResolvedValueOnce / mockRejectedValueOnce（懒创建），不要用默认的
-  // mockRejectedValue：vitest 在调用 mockRejectedValue 那一刻就 eager 地构造
-  // Promise.reject(...)，页面 await 到它之前的那个 tick 已构成 unhandled
-  // rejection，用例会被判失败（返回值渲染是正常的，纯属计时器问题）。
-  const results = Array.isArray(mockResults) ? mockResults : [mockResults]
-  for (const r of results) {
-    if (r instanceof Error) adminMock.mockRejectedValueOnce(r)
-    else adminMock.mockResolvedValueOnce(r)
+// parentWalk: nearest ancestor matching fn. The grid card carries title, author,
+// duration and views in separate siblings, so querying the title only reaches a
+// leaf span — walk up to the card to assert the card as a whole carries the data.
+function parentWalk(el, fn, depth = 12) {
+  let n = el
+  for (let i = 0; i < depth && n; i++) {
+    if (fn(n)) return n
+    n = n.parentElement
   }
-  renderAt('/iwara')
-  fireEvent.change(screen.getByLabelText(/iwara URL or video id/i), { target: { value: values } })
-  fireEvent.click(screen.getByText('解析'))
-  await flush()
+  return null
 }
 
+const theTitle = (t) => parentWalk(screen.getByText(t), (n) => /card-surface/.test(n.className || ''))
+
+// resolveIn: queue one mock result per id, type the ids into the input box and
+// click Resolve, then let the promises settle.
+async function resolveIn(values, results) {
+  results.forEach((r) => {
+    if (r && r.error) adminMock.mockRejectedValueOnce(r.error)
+    else adminMock.mockResolvedValueOnce(r.value)
+  })
+  const box = screen.getByRole('textbox', { name: /iwara url or video id/i })
+  fireEvent.change(box, { target: { value: values } })
+  fireEvent.click(screen.getByRole('button', { name: /^Resolve$/ }))
+  await flush()
+  return values
+}
+
+beforeEach(() => {
+  adminMock.mockReset()
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText: vi.fn(async () => {}) },
+    configurable: true,
+  })
+})
+
 describe('format helpers', () => {
-  it('fmtDuration renders m:ss / h:mm:ss and a placeholder for unknown', () => {
-    expect(fmtDuration(182)).toBe('3:02')
-    expect(fmtDuration(3671)).toBe('1:01:11')
+  it('renders durations as m:ss and h:mm:ss, and missing as an em dash', () => {
     expect(fmtDuration(0)).toBe('—')
-    expect(fmtDuration(null)).toBe('—')
+    expect(fmtDuration(undefined)).toBe('—')
+    expect(fmtDuration(182)).toBe('3:02')
+    expect(fmtDuration(3600)).toBe('1:00:00')
+    expect(fmtDuration(3661)).toBe('1:01:01')
   })
 
-  it('fmtCount abbreviates large view counts and shows a placeholder for none', () => {
+  it('compacts view counts so the column stays narrow', () => {
+    expect(fmtCount(0)).toBe('—')
     expect(fmtCount(950)).toBe('950')
     expect(fmtCount(12800)).toBe('12.8k')
-    expect(fmtCount(1200000)).toBe('1.2M')
-    expect(fmtCount(0)).toBe('—')
+    expect(fmtCount(1500000)).toBe('1.5M')
   })
 
-  it('fmtDate renders unix seconds and a placeholder for 0', () => {
-    // 1728000000 is a fixed point in time; assert the shape, not the zone.
-    expect(fmtDate(1728000000)).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
+  it('renders unix seconds as a local timestamp and zero as an em dash', () => {
     expect(fmtDate(0)).toBe('—')
+    expect(fmtDate(null)).toBe('—')
+    // 1728000000 = 2024-10-04T05:20:00Z; only the shape is asserted, since the
+    // timezone differs per runner and the value itself is not the contract.
+    expect(fmtDate(1728000000)).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
   })
 
-  it('iwaraUrl builds the canonical deep link', () => {
-    expect(iwaraUrl({ id: 'ab12cd34' })).toBe('https://www.iwara.tv/videos/ab12cd34')
-  })
-})
-
-describe('BBS post layout + iwara data', () => {
-  beforeEach(() => adminMock.mockReset())
-
-  it('renders the post skeleton: author column, tiptop, h1 title, body, bottom action bar', async () => {
-    await parseIn('ab12cd34', video())
-    // 左栏作者信息区
-    expect(screen.getByText('IwaraTool')).toBeTruthy()
-    expect(screen.getByText('UID')).toBeTruthy()
-    // tiptop 楼层徽标 + 操作下拉 + 字号切换
-    expect(screen.getByText(/楼层 1/)).toBeTruthy()
-    expect(screen.getByText('楼主')).toBeTruthy()
-    expect(screen.getByText('操作 ▾')).toBeTruthy()
-    expect(screen.getByText('A-')).toBeTruthy()
-    expect(screen.getByText('A+')).toBeTruthy()
-    // h1 标题区
-    expect(screen.getByRole('heading', { level: 1, name: /I站下载器/ })).toBeTruthy()
-    // 底部操作条
-    expect(screen.getByText('↑ 顶端')).toBeTruthy()
-    expect(screen.getByText(/↩ 回复/)).toBeTruthy()
-    expect(screen.getByText(/❞ 引用/)).toBeTruthy()
+  it('builds the source page URL from the video id', () => {
+    expect(iwaraUrl(video())).toBe('https://www.iwara.tv/videos/ab12cd34')
   })
 
-  it('renders the iwara entry data: author stats, duration, views, resolution options, download link', async () => {
-    await parseIn('ab12cd34', video())
-    // 左栏竖排统计（uid / 精华 / 观看 / 时长）
-    expect(screen.getByText('u-7788')).toBeTruthy()
-    expect(screen.getByText('general')).toBeTruthy()
-    expect(screen.getByText('3:02')).toBeTruthy()
-    expect(screen.getByText('12.8k')).toBeTruthy()
-    // 分辨率选项行
-    expect(screen.getByText('Source')).toBeTruthy()
-    expect(screen.getByText('1080p')).toBeTruthy()
-    // 下载入口：真实的 CDN URL，不是占位符
-    // 每个清晰度各有一个下载链接
-    const links = screen.getAllByRole('link', { name: /下载/ })
-    expect(links).toHaveLength(2)
-    expect(links[0].getAttribute('href')).toBe('https://v-f007.v.ihstatic.com/src.mp4?token=t1')
-    expect(links[1].getAttribute('href')).toBe('https://v-f007.v.ihstatic.com/hi.mp4?token=t2')
-    expect(links[0].getAttribute('download')).not.toBeNull()
-    // 入口链接回到 iwara 原页面
-    expect(screen.getByRole('link', { name: '打开 Iwara 原页面' }).getAttribute('href'))
-      .toBe('https://www.iwara.tv/videos/ab12cd34')
-    // 源文件名（卖点段落和底部各出现一次）+ 分辨率计数
-    expect(screen.getAllByText(/iwara-tool-v2\.1\.mp4/).length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText(/2 个下载入口/)).toBeTruthy()
-  })
-
-  it('renders a cover image when the backend returns one', async () => {
-    await parseIn('ab12cd34', video())
-    const img = screen.getByAltText(/cover of/)
-    expect(img.getAttribute('src')).toBe('https://img.iwara.tv/thumb/ab12cd34.jpg')
-  })
-
-  it('the demo entry shows no fake download link and no external image', () => {
-    renderAt('/iwara')
-    // demo entry: downloadUrl 为空 → 不存在可点的下载链接
-    expect(screen.queryByRole('link', { name: /下载/ })).toBeNull()
-    expect(screen.getByText('示例条目 · 无封面')).toBeTruthy()
-    // 页面明确标注这是演示数据
-    expect(screen.getByText(/示例条目为演示数据/)).toBeTruthy()
-    expect(screen.queryByRole('img')).toBeNull()
+  it('splits a pasted batch on spaces, commas and full-width commas', () => {
+    expect(parseIds('')).toEqual([])
+    expect(parseIds(null)).toEqual([])
+    expect(parseIds('  ab12cd34  ef56  ')).toEqual(['ab12cd34', 'ef56'])
+    expect(parseIds('ab12cd34,ef56')).toEqual(['ab12cd34', 'ef56'])
+    expect(parseIds('ab12cd34，ef56\u3001')).toEqual(['ab12cd34', 'ef56'])
   })
 })
 
-describe('interactions', () => {
-  beforeEach(() => adminMock.mockReset())
-
-  it('the font switch changes the post body font size', () => {
+describe('netdisk layout', () => {
+  it('starts in grid view showing the labelled sample entry with no live data', () => {
     renderAt('/iwara')
-    // h1 与 .posttext 是同级兄弟，不是祖孙关系，所以取父节点再向下找
-    const posttext = () =>
-      screen.getByRole('heading', { level: 1, name: /版式示例条目/ })
-        .parentElement.querySelector('.posttext')
-    // 默认 14px（.f14 原版正文）
-    expect(posttext().style.fontSize).toBe('14px')
-    fireEvent.click(screen.getByText('A+'))
-    expect(posttext().style.fontSize).toBe('16px')
-    fireEvent.click(screen.getByText('A-'))
-    expect(posttext().style.fontSize).toBe('12px')
+    expect(screen.getByRole('heading', { name: 'Iwara' })).toBeTruthy()
+    expect(screen.getByText('Sample video (placeholder)')).toBeTruthy()
+    // The grid card shows the cover placeholder and the sample badge.
+    expect(screen.getByText('No preview')).toBeTruthy()
+    expect(screen.getByText('Sample data')).toBeTruthy()
+    // And it never pretends to have a download link.
+    const dl = screen.getByText('Download')
+    expect(dl.getAttribute('href')).toBeNull()
+    expect(dl.getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByText(/iwara module is not enabled on this node/)).toBeTruthy()
+    expect(adminMock).not.toHaveBeenCalled()
   })
 
-  it('只看楼主 keeps only the anchored author, 屏蔽 hides that author', async () => {
-    await parseIn('ab12cd34 ee55ff66', [
-      video(),
-      video({ id: 'ee55ff66', title: '另一位作者的作品', author: 'OtherUP', authorId: 'u-2' }),
+  it('renders resolved videos as grid cards carrying the iwara data', async () => {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34', [{ value: video() }])
+    expect(adminMock).toHaveBeenCalledWith('GET', '/iwara/video/ab12cd34')
+    const card = theTitle('iwara tool v2.1 release')
+    expect(card.textContent).toContain('IwaraTool')
+    expect(card.textContent).toContain('3:02')
+    expect(card.textContent).toContain('12.8k')
+    expect(card.textContent).toContain('views')
+    // The cover image is the real one, not the placeholder.
+    expect(screen.getByRole('img', { name: /preview of iwara tool/ }).getAttribute('src'))
+      .toBe('https://img.iwara.tv/thumb/ab12cd34.jpg')
+    // Resolving real data clears the sample notice.
+    expect(screen.queryByText(/iwara module is not enabled/)).toBeNull()
+  })
+
+  it('switches from grid to a table list with the netdisk columns', async () => {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34', [{ value: video() }])
+    expect(screen.queryByRole('table')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^List$/ }))
+    const head = screen.getByRole('table').querySelector('thead').textContent
+    for (const col of ['Preview', 'Title', 'Author', 'Duration', 'Views', 'Uploaded', 'Actions']) {
+      expect(head).toContain(col)
+    }
+  })
+
+  it('shows the uploaded date and an em dash when it is missing', async () => {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34 ef56', [
+      { value: video({ title: 'first' }) },
+      { value: video({ id: 'ef56', title: 'second', author: 'Other', uploaded: 0 }) },
     ])
-    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(2)
-
-    // 只看楼主（第一个帖子的作者）→ 只剩一个帖子
-    fireEvent.click(screen.getAllByRole('button', { name: '操作 ▾' })[0])
-    fireEvent.click(screen.getAllByRole('menuitem', { name: '只看楼主' })[0])
-    await flush()
-    let headings = screen.getAllByRole('heading', { level: 1 })
-    expect(headings).toHaveLength(1)
-    expect(headings[0].textContent).toContain('I站下载器')
-    expect(screen.getByText(/只看 OtherUP|只看 IwaraTool/)).toBeTruthy()
-
-    // 取消只看，再屏蔽同一作者 → 只剩另一个作者
-    fireEvent.click(screen.getByText('×'))
-    await flush()
-    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(2)
-    fireEvent.click(screen.getAllByRole('button', { name: '操作 ▾' })[0])
-    fireEvent.click(screen.getAllByRole('menuitem', { name: /屏蔽/ })[0])
-    await flush()
-    headings = screen.getAllByRole('heading', { level: 1 })
-    expect(headings).toHaveLength(1)
-    expect(headings[0].textContent).toContain('另一位作者')
+    fireEvent.click(screen.getByRole('button', { name: /^List$/ }))
+    const rows = screen.getByRole('table').querySelectorAll('tbody tr')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].textContent).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
+    expect(rows[1].textContent).toContain('—')
   })
 
-  it('回复 and 引用 copy BBS-style text to the clipboard', async () => {
-    const writeMock = vi.fn().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText: writeMock }, configurable: true })
-
+  it('shows a placeholder when the backend returned no cover url', async () => {
     renderAt('/iwara')
-    fireEvent.click(screen.getByText('↑ 顶端')) // also verifies the button is wired
-    fireEvent.click(screen.getByText(/↩ 回复/))
-    await flush()
-    expect(writeMock).toHaveBeenLastCalledWith(expect.stringContaining('回复 IwaraTool 的《'))
+    await resolveIn('ab12cd34', [{ value: video({ cover: '' }) }])
+    expect(screen.getByText('No preview')).toBeTruthy()
+  })
 
-    fireEvent.click(screen.getByText(/❞ 引用/))
-    await flush()
-    const last = writeMock.mock.calls[writeMock.mock.calls.length - 1][0]
-    expect(last).toContain('> 【IwaraTool】')
-    expect(last).toContain('https://www.iwara.tv/videos/demo-0001')
+  it('restores the sample entry from the Sample button', async () => {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34', [{ value: video() }])
+    expect(screen.getByText('iwara tool v2.1 release')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^Sample$/ }))
+    expect(screen.getByText('Sample video (placeholder)')).toBeTruthy()
+    expect(screen.getByText('Sample data, not a real video')).toBeTruthy()
+  })
+})
+
+describe('row actions', () => {
+  it('downloads the quality the user picked, switching when it changes', async () => {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34', [{ value: video() }])
+    const pick = screen.getByRole('combobox', { name: /quality for iwara tool v2.1 release/i, strict: false })
+    expect(pick.value).toBe('Source') // first resolution is the default
+    const download = () => screen.getAllByRole('link', { name: /Download/ })[0]
+    expect(download().getAttribute('href'))
+      .toBe('https://v-f007.v.ihstatic.com/src.mp4?token=t1')
+    fireEvent.change(pick, { target: { value: '1080p' } })
+    expect(download().getAttribute('href'))
+      .toBe('https://v-f007.v.ihstatic.com/hi.mp4?token=t2')
+  })
+
+  it('hides the quality select when only one resolution exists', async () => {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34', [{ value: video({ resolutions: [{ name: 'Source', downloadUrl: 'https://cdn/x.mp4' }] }) }])
+    expect(screen.queryByRole('combobox', { name: /quality for/ })).toBeNull()
+    expect(screen.getAllByRole('link', { name: /Download/ })[0].getAttribute('href')).toBe('https://cdn/x.mp4')
+  })
+
+  it('copies the picked download url to the clipboard and reports it', async () => {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34', [{ value: video() }])
+    fireEvent.click(screen.getByRole('button', { name: /Copy link/ }))
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalled())
+    expect(navigator.clipboard.writeText)
+      .toHaveBeenCalledWith('https://v-f007.v.ihstatic.com/src.mp4?token=t1')
+    await waitFor(() => expect(screen.getByText('Copied')).toBeTruthy())
+  })
+
+  it('links Open to the iwara source page', async () => {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34', [{ value: video() }])
+    const open = screen.getAllByRole('link', { name: /^Open$/i, strict: false })[0]
+    expect(open.getAttribute('href')).toBe('https://www.iwara.tv/videos/ab12cd34')
+  })
+})
+
+describe('filtering', () => {
+  async function withTwoAuthors() {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34 ef56', [
+      { value: video({ title: 'tool release', author: 'IwaraTool' }) },
+      { value: video({ id: 'ef56', title: 'other clip', author: 'OtherUploader' }) },
+    ])
+  }
+
+  it('lists distinct authors in the author filter', async () => {
+    await withTwoAuthors()
+    const filter = screen.getByRole('combobox', { name: /filter by author/i })
+    const options = [...filter.options].map((o) => o.textContent)
+    expect(options).toContain('All authors')
+    expect(options).toContain('IwaraTool')
+    expect(options).toContain('OtherUploader')
+  })
+
+  it('narrows the visible entries when an author is selected', async () => {
+    await withTwoAuthors()
+    expect(screen.getByText(/2 entries/)).toBeTruthy()
+    fireEvent.change(screen.getByRole('combobox', { name: /filter by author/i }), { target: { value: 'OtherUploader' } })
+    expect(screen.getByText(/1 entry/)).toBeTruthy()
+    expect(screen.getByText('other clip')).toBeTruthy()
+    expect(screen.queryByText('tool release')).toBeNull()
+  })
+
+  it('searches title and author text', async () => {
+    await withTwoAuthors()
+    const box = screen.getByRole('textbox', { name: /search entries/i })
+    fireEvent.change(box, { target: { value: 'OTHERUP' } })
+    expect(screen.getByText('other clip')).toBeTruthy()
+    expect(screen.queryByText('tool release')).toBeNull()
+    fireEvent.change(box, { target: { value: 'release' } })
+    expect(screen.getByText('tool release')).toBeTruthy()
+  })
+
+  it('shows the empty state when a filter matches nothing', async () => {
+    await withTwoAuthors()
+    fireEvent.change(screen.getByRole('textbox', { name: /search entries/i }), { target: { value: 'zzzz-no-match' } })
+    expect(screen.getByText('No entries')).toBeTruthy()
+    expect(screen.getByText(/Clear the filters/)).toBeTruthy()
+    expect(screen.queryByRole('table')).toBeNull()
   })
 })
 
 describe('data source', () => {
-  beforeEach(() => adminMock.mockReset())
-
-  it('fetches each pasted id over the admin channel and drops the demo entry', async () => {
-    await parseIn('ab12cd34 ee55ff66', [
-      video(),
-      video({ id: 'ee55ff66', title: '另一个视频', author: 'AnotherUP' }),
+  it('splits a pasted batch of ids', async () => {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34 ef56', [
+      { value: video() },
+      { value: video({ id: 'ef56' }) },
     ])
-    expect(adminMock).toHaveBeenCalledTimes(2)
-    // ws.admin(method, path) — body 省略时默认参数不进入调用记录
     expect(adminMock.mock.calls[0]).toEqual(['GET', '/iwara/video/ab12cd34'])
-    expect(adminMock.mock.calls[1]).toEqual(['GET', '/iwara/video/ee55ff66'])
-    // 两个 id 都返回同一个 mock 值，所以是 2 条
-    expect(screen.getByText(/已解析 2 条/)).toBeTruthy()
-    // demo 条目被真实数据替换
-    expect(screen.queryByRole('heading', { level: 1, name: /版式示例条目/ })).toBeNull()
+    expect(adminMock.mock.calls[1]).toEqual(['GET', '/iwara/video/ef56'])
   })
 
-  it('reports partial failure when only some ids resolve', async () => {
-    const err = Object.assign(new Error('iwara: video "gone" not found'), {
-      status: 404, data: { error: 'iwara: video "gone" not found' },
-    })
-    await parseIn('ab12cd34 gone', [video(), err])
-    expect(screen.getByText(/已解析 1 条，1 条失败/)).toBeTruthy()
+  it('encodes a pasted url before putting it in the path', async () => {
+    renderAt('/iwara')
+    await resolveIn('https://www.iwara.tv/videos/ab12cd34?foo=1', [{ value: video() }])
+    expect(adminMock.mock.calls[0]).toEqual(['GET', '/iwara/video/https%3A%2F%2Fwww.iwara.tv%2Fvideos%2Fab12cd34%3Ffoo%3D1'])
   })
 
-  it('a deep link /iwara/:id parses that id on mount', async () => {
-    adminMock.mockResolvedValue(video())
-    renderAt('/iwara/zz99yy88')
+  it('deep links: /iwara/:id resolves on mount', async () => {
+    adminMock.mockResolvedValueOnce(video({ id: 'ef56' }))
+    renderAt('/iwara/ef56')
     await flush()
     expect(adminMock).toHaveBeenCalledTimes(1)
-    expect(adminMock.mock.calls[0][1]).toBe('/iwara/video/zz99yy88')
+    expect(adminMock.mock.calls[0]).toEqual(['GET', '/iwara/video/ef56'])
   })
 
-  it('accepts a full iwara URL as the id', async () => {
-    await parseIn('https://www.iwara.tv/videos/ab12cd34', video())
-    // encodeURIComponent 后的路径透传给后端，由 ParseVideoID 归一化
-    expect(adminMock.mock.calls[0][1])
-      .toBe('/iwara/video/' + encodeURIComponent('https://www.iwara.tv/videos/ab12cd34'))
-  })
-
-  it('falls back to the demo entry with an honest message when the route is missing', async () => {
-    // gin 的未注册路由返回字符串体 "404 page not found"（不是 JSON）
-    await parseIn('ab12cd34', Object.assign(new Error('HTTP 404'), { status: 404, data: '404 page not found' }))
-    expect(screen.getByText(/未启用 iwara 模块/)).toBeTruthy()
-    // 版式仍然可见
-    expect(screen.getByRole('heading', { level: 1, name: /版式示例条目/ })).toBeTruthy()
-  })
-
-  it('shows the backend error when the module is on but the video cannot be resolved', async () => {
-    await parseIn('gone', Object.assign(new Error('iwara: video "gone" not found'), {
-      status: 404, data: { error: 'iwara: video "gone" not found' },
-    }))
-    expect(screen.getByText(/not found/)).toBeTruthy()
-    // 不假装成功：错误可见，示例条目仍在（版式可看）
-    expect(screen.getByRole('heading', { level: 1, name: /版式示例条目/ })).toBeTruthy()
-  })
-
-  it('tells the user to connect when the ws session is offline', async () => {
-    await parseIn('ab12cd34', new Error('ws: not connected'))
-    expect(screen.getByText(/未连接到本地节点/)).toBeTruthy()
-  })
-
-  it('rejects an empty input without calling the backend', async () => {
-    adminMock.mockResolvedValue(video())
+  it('keeps the ids that worked when some fail', async () => {
     renderAt('/iwara')
-    fireEvent.change(screen.getByLabelText(/iwara URL or video id/i), { target: { value: '   ' } })
-    // 提交按钮在空输入时是 disabled 的
-    const submit = screen.getByRole('button', { name: /解析/ })
-    expect(submit.disabled).toBe(true)
-    await flush()
-    expect(adminMock).not.toHaveBeenCalled()
+    await resolveIn('ab12cd34 noper', [
+      { value: video() },
+      { error: wsErr('HTTP 404', { error: 'video not found' }) },
+    ])
+    expect(screen.getByText('iwara tool v2.1 release')).toBeTruthy()
+    expect(screen.getByText(/Resolved 1 of 2/)).toBeTruthy()
+    expect(screen.getByText(/1 failed/)).toBeTruthy()
   })
 
-  it('the 示例条目 button reloads the demo entry and clears a previous error', async () => {
-    await parseIn('ab12cd34', Object.assign(new Error('HTTP 404'), { status: 404, data: '404 page not found' }))
-    expect(screen.getByText(/未启用 iwara 模块/)).toBeTruthy()
-    fireEvent.click(screen.getByText('示例条目'))
+  it('rejects an empty input without calling ws', () => {
+    renderAt('/iwara')
+    fireEvent.click(screen.getByRole('button', { name: /^Resolve$/ }))
+    expect(adminMock).not.toHaveBeenCalled()
+    expect(screen.getByText('Enter an iwara URL or video id')).toBeTruthy()
+  })
+
+  it('shows Resolving… and disables the button while a request is in flight', async () => {
+    renderAt('/iwara')
+    let settle
+    adminMock.mockReturnValue(new Promise((r) => { settle = r }))
+    const box = screen.getByRole('textbox', { name: /iwara url or video id/i })
+    fireEvent.change(box, { target: { value: 'ab12cd34' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Resolve$/ }))
+    await flush(1)
+    const busy = screen.getByRole('button', { name: /^Resolving\.\.\.$/ })
+    expect(busy.disabled).toBe(true)
+    await act(async () => { settle(video()) })
     await flush()
-    expect(screen.queryByText(/未启用 iwara 模块/)).toBeNull()
-    expect(screen.getByText(/示例条目（演示数据/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Resolve$/ })).toBeTruthy()
+    expect(screen.getByText('iwara tool v2.1 release')).toBeTruthy()
+  })
+
+  it('falls back to sample data when the module is disabled (gin string 404 body)', async () => {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34', [{ error: wsErr('HTTP 404', '404 page not found') }])
+    expect(screen.getByText(/does not have the iwara module enabled/)).toBeTruthy()
+    expect(screen.getByText(/Showing sample data/)).toBeTruthy()
+    expect(screen.getByText('Sample video (placeholder)')).toBeTruthy()
+  })
+
+  it('shows the backend error instead of pretending success', async () => {
+    renderAt('/iwara')
+    await resolveIn('noper', [{ error: wsErr('HTTP 404', { error: 'iwara: video not found' }) }])
+    expect(screen.getByText('HTTP 404')).toBeTruthy()
+    expect(screen.queryByText('iwara tool v2.1 release')).toBeNull()
+  })
+
+  it('reports an offline ws session separately from a backend error', async () => {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34', [{ error: wsErr('ws: not connected') }])
+    expect(screen.getByText(/Not connected to a local node/)).toBeTruthy()
+  })
+
+  it('ignores null bodies instead of crashing the renderers', async () => {
+    renderAt('/iwara')
+    await resolveIn('ab12cd34', [{ value: null }])
+    expect(screen.queryByText('iwara tool v2.1 release')).toBeNull()
+    expect(screen.getByText('Sample video (placeholder)')).toBeTruthy()
   })
 })
