@@ -18,6 +18,7 @@ import (
 	"peerdrive/internal/config"
 	"peerdrive/internal/httpd"
 	"peerdrive/internal/log"
+	"peerdrive/internal/mcp"
 	"peerdrive/internal/regserver"
 	"peerdrive/internal/serverapp"
 	"peerdrive/internal/services"
@@ -199,4 +200,11 @@ func runAll(args []string) {
 	<-quit
 	log.LogInfo("all: shutting down")
 	shutdownMain()
+}
+
+func runMCP(args []string) {
+	if err := mcp.RunStdio(); err != nil {
+		fmt.Fprintf(os.Stderr, "peerdrive mcp: %v\n", err)
+		os.Exit(1)
+	}
 }
