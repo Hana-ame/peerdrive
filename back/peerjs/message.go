@@ -76,7 +76,10 @@ type Options struct {
 	Secure       bool               // wss/https
 	Path         string             // path prefix for self-hosted server (default "/")
 	Key          string             // API key (default "peerjs")
-	ID           string             // node ID; empty means the server assigns a random ID
+	// Deprecated: ID is never read by the signalling client or NewPeer. The authoritative
+	// node ID is determined solely by the positional `id` argument to NewPeer and signaller.ID().
+	// Setting this field has no effect and is retained only for backward API compatibility.
+	ID string // node ID; unused, see deprecation note
 	Token        string             // empty means randomly generated
 	PingInterval time.Duration      // signaling heartbeat interval (default 5s)
 	ICEServers   []webrtc.ICEServer // WebRTC ICE/TURN server list
