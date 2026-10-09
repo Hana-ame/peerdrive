@@ -113,7 +113,11 @@ func TestService_EndToEnd(t *testing.T) {
 	for _, a := range recent {
 		require.Equal(t, collection.AltECHURL, a.Alt)
 		require.True(t, a.OK)
-		require.NotZero(t, a.Duration)
+		// 发现背景: Windows 上 time.Now 可能是粗粒度系统时钟，快速 loopback
+		// 请求实测 Duration 为 0——断言「尝试被记录」用绝对时刻 At，不依赖
+		// 时钟粒度。
+		require.False(t, a.At.IsZero(), "attempt time must be recorded")
+		require.GreaterOrEqual(t, a.Duration, time.Duration(0))
 		require.Equal(t, int64(len("a1-bytes")), a.Bytes)
 	}
 
