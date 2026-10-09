@@ -10,7 +10,7 @@
 // 路由：/collection/:hash 直接按 sha 加载；/collection 无参时给输入面板。
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import * as ws from '../ws';
+import * as ws from '../../../ws';
 import CollectionBrowser from '../components/CollectionBrowser';
 
 // parseManifest：校验并规整 collection 对象。为什么这里强制 entries 存在：

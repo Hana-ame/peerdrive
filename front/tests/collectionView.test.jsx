@@ -24,8 +24,8 @@ vi.mock('../src/ws.js', () => ({
   downloadToFile: downloadToFileMock,
 }))
 
-import CollectionBrowser from '../src/components/CollectionBrowser'
-import CollectionView from '../src/pages/CollectionView'
+import CollectionBrowser from '../src/features/collection/components/CollectionBrowser'
+import CollectionView from '../src/features/collection/pages/CollectionView'
 
 const SHA = (c) => c.repeat(64)
 const bytes = (s) => new TextEncoder().encode(s)
