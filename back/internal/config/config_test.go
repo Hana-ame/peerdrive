@@ -416,3 +416,33 @@ func TestLoad_UnifiedNamespaceEnv(t *testing.T) {
 		assert.Equal(t, "/tmp/legacy.db", cfg.DBPath)
 	})
 }
+
+// TestLoad_TURNCredentialsEnv 覆盖 #144 新增的两个 TURN 凭据变量。
+//
+// 发现背景：TURN URL 一直能配（PEERDRIVE_WEBRTC_TURN），但没有任何变量能填
+// 凭据 —— 认证 TURN 服务器会拒绝无凭据的 Allocate，relay candidate 永不产生，
+// 于是「配了 TURN 也没用」且无处可查。这里钉住两个新变量真的被读进来，
+// 免得哪天变量名写错、静默退回空串（那正好复现原 bug）。
+func TestLoad_TURNCredentialsEnv(t *testing.T) {
+	t.Setenv("PEERDRIVE_WEBRTC_TURN", "turn:turn.example.com:3478")
+	t.Setenv("PEERDRIVE_WEBRTC_TURN_USER", "peerdrive")
+	t.Setenv("PEERDRIVE_WEBRTC_TURN_PASS", "test-only-not-a-credential")
+
+	cfg := Load()
+	assert.Equal(t, "turn:turn.example.com:3478", cfg.WebRTCTURNServer)
+	assert.Equal(t, "peerdrive", cfg.WebRTCTURNUsername)
+	assert.Equal(t, "test-only-not-a-credential", cfg.WebRTCTURNPassword)
+}
+
+// TestLoad_TURNCredentialsDefaultEmpty 保证默认部署不受影响：
+// 不设新变量时必须是空串（= 匿名 TURN 的旧行为），不能让默认配置凭空
+// 带上一组凭据去撞所有 TURN 服务器。
+func TestLoad_TURNCredentialsDefaultEmpty(t *testing.T) {
+	os.Unsetenv("PEERDRIVE_WEBRTC_TURN_USER")
+	os.Unsetenv("PEERDRIVE_WEBRTC_TURN_PASS")
+
+	cfg := Load()
+	assert.Equal(t, "", cfg.WebRTCTURNUsername)
+	assert.Equal(t, "", cfg.WebRTCTURNPassword)
+}
+}
