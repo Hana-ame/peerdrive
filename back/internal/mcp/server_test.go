@@ -3,7 +3,10 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -110,11 +113,17 @@ func TestMCPServer(t *testing.T) {
 		FriendlyName: "test-collection",
 		CreatedAt:    "2026-10-09T00:00:00Z",
 		Entries: []model.AnonCollectionEntry{
-			{Name: "item1.txt", Hash: fileHash, Size: 100},
+			{
+				Path: "item1.txt",
+				Providers: []model.Provider{
+					{Type: "sha256", Value: fileHash},
+				},
+			},
 		},
 	}
 	collJSON, _ := json.Marshal(coll)
-	collHash := sha256Hex(collJSON)
+	h := sha256.Sum256(collJSON)
+	collHash := hex.EncodeToString(h[:])
 	collDir := filepath.Join(storageDir, collHash[:2])
 	_ = os.MkdirAll(collDir, 0755)
 	if err := os.WriteFile(filepath.Join(collDir, collHash), collJSON, 0644); err != nil {
