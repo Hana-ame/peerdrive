@@ -88,3 +88,4 @@
 - [doc/NODE.md](../NODE.md), [doc/NODE-API.md](../NODE-API.md) — Node concepts and node API
 - [DISCOVERY-FALLBACK-LOBBY-SPEC.md](DISCOVERY-FALLBACK-LOBBY-SPEC.md) — Loopback node discovery and lobby fallback specification (#201)
 - [SHA-ACL-INFERENCE-SPEC.md](SHA-ACL-INFERENCE-SPEC.md) — Content-addressed SHA-level ACL and source type inference specification (#202)
+- [PEERJS-CONCURRENCY-MATRIX-AUDIT.md](PEERJS-CONCURRENCY-MATRIX-AUDIT.md) — PeerJS multi-client concurrency matrix audit specification (#205)
