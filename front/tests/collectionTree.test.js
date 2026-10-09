@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   normalizeEntry, splitPath, basename, buildTree, descend, entrySha, previewSha,
-} from '../src/lib/collectionTree'
+} from '../src/features/collection/lib/collectionTree'
 
 const SHA = (c) => c.repeat(64) // 64-hex fake sha
 

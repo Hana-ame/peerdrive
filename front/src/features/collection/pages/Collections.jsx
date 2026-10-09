@@ -1,7 +1,7 @@
 // Module 3: Collections — browse local anonymous collections / create new from netdisk files / view entries and download.
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import * as ws from '../ws';
+import * as ws from '../../../ws';
 import { entrySha } from '../lib/collectionTree';
 
 const VIS_LABEL = {
