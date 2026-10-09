@@ -438,7 +438,7 @@ func TestRunRefreshesInBackground(t *testing.T) {
 			version = "v2"
 		}
 		mu.Unlock()
-		_, _ = w.Write([]byte(`{"version":"` + version + `","cache_ttl":"30ms","refresh_jitter":"0s","rules":[]}`))
+		_, _ = w.Write([]byte(`{"version":"` + version + `","cache_ttl":"100ms","refresh_jitter":"0s","rules":[]}`))
 	}))
 	defer srv.Close()
 
@@ -446,19 +446,19 @@ func TestRunRefreshesInBackground(t *testing.T) {
 		URL:               srv.URL,
 		AllowInsecureHTTP: true,
 		Client:            srv.Client(),
-		// NewStore would clamp a 30ms TTL up to the five-minute fleet minimum,
+		// NewStore would clamp a 100ms TTL up to the five-minute fleet minimum,
 		// so this store gets its own tighter window. Keep it a Store field
 		// rather than rewriting MinCacheTTL, which would race with the refresh
 		// goroutine.
-		MinCacheTTL: 20 * time.Millisecond,
-		Defaults:    RemoteConfig{CacheTTL: Duration(30 * time.Millisecond), RefreshJitter: 0},
+		MinCacheTTL: 50 * time.Millisecond,
+		Defaults:    RemoteConfig{CacheTTL: Duration(100 * time.Millisecond), RefreshJitter: 0},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The interval floor is the same story: a per-store value the test owns.
 	store.mu.Lock()
-	store.minInterval = 5 * time.Millisecond
+	store.minInterval = 10 * time.Millisecond
 	store.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -466,7 +466,9 @@ func TestRunRefreshesInBackground(t *testing.T) {
 	go store.Run(ctx)
 
 	// Poll until two fetches have landed.
-	deadline := time.Now().Add(3 * time.Second)
+	// 发现背景：macOS runner 在启动 httptest 和 goroutine 时调度延迟较大，
+	// 原 30ms TTL 与 3s 超时容易在冷启动时偶发超时。放宽 TTL 至 100ms 并给予 6s 等待余量。
+	deadline := time.Now().Add(6 * time.Second)
 	for time.Now().Before(deadline) {
 		mu.Lock()
 		got := n

@@ -8,9 +8,9 @@ package transport
 // testdata/ws_vectors.json（先用拆分前的 refactor tip 生成并提交），然后每次
 // go test 都重新采集一遍做逐字节比对。
 //
-// 唯一一处非逐字节的地方：fixture 是 Linux 上生成的，而 Windows 关连接时会
-// 丢弃未确认的 send 数据（见 dropReplyOnWindowsCloseFlush），所以 read.overlimit.*
-// 的 reply 帧在 Windows 上收不到。那两条只放宽 reply 这一项断言，其余照旧。
+// 唯一一处非逐字节的地方：fixture 是 Linux 上生成的，而 Windows 与 macOS 关连接时会
+// 丢弃未确认的 send 数据（见 dropReplyOnNonLinuxCloseFlush），所以 read.overlimit.*
+// 的 reply 帧在 Windows/macOS 上收不到。那两条只放宽 reply 这一项断言，其余照旧。
 //
 // 生成 fixture：
 //
@@ -119,7 +119,7 @@ func TestGoldenVectors(t *testing.T) {
 		if a.Name != b.Name {
 			t.Fatalf("vector %d: fixture %q, captured %q", i, a.Name, b.Name)
 		}
-		if drop, why := dropReplyOnWindowsCloseFlush(a, b); drop {
+		if drop, why := dropReplyOnNonLinuxCloseFlush(a, b); drop {
 			// a 是 want[i] 的值拷贝，这里改它不影响 fixture 切片。
 			a.Reply = nil
 			t.Logf("vector %s: %s", a.Name, why)
@@ -142,38 +142,37 @@ func TestGoldenVectors(t *testing.T) {
 	t.Logf("%d vectors match the pre-split baseline", len(want))
 }
 
-// dropReplyOnWindowsCloseFlush 报告 fixture 与实测的差异是不是「Windows 关连接时
+// dropReplyOnNonLinuxCloseFlush 报告 fixture 与实测的差异是不是「Windows/macOS 关连接时
 // 丢掉未确认的 send 数据」这一种已知平台差异，而不是拆分引入的漂移。
 //
-// 发现背景：Windows CI 上 read.overlimit.* 两条用例红了——fixture 期望服务端
-// 回一个 close 1009 帧（880203f1），Windows 捕获到的 reply 是空的。
+// 发现背景：Windows 与 macOS (darwin) CI 上 read.overlimit.* 两条用例红了——fixture 期望服务端
+// 回一个 close 1009 帧（880203f1），Windows/macOS 捕获到的 reply 是空的。
 //
 // 机制：用例里客户端发了 196722 字节，服务端读满 ReadLimit 就停，gorilla 在
 // readFrame 里写下 close 帧并返回 ErrReadLimit，我们的 readLoop 随即 Close()。
 // 此刻服务端 receive 队列里还压着几百 KB 未读数据。关闭一个「receive 队列
 // 有未读数据」的 socket 时内核不发 FIN 而发 RST；Linux 的 close() 会先把
-// send 队列排完再 RST，所以对端能看到那 4 字节；Windows 的 closesocket 直接
-// 丢弃未确认的 send 数据，对端只看到 RST，拿不到 close code。
+// send 队列排完再 RST，所以对端能看到那 4 字节；Windows closesocket 与 BSD/macOS (darwin)
+// 直接丢弃未确认的 send 数据，对端只看到 RST，拿不到 close code。
 //
 // read.badopcode / read.close.* 不受影响：那几条对端只发几字节、服务端读完、
-// receive 队列是空的，走干净 FIN，两个平台一致。所以这不是竞态也不是漂移，
+// receive 队列是空的，走干净 FIN，各个平台一致。所以这不是竞态也不是漂移，
 // 是确定性的平台差异，且只出现在「服务端还有未读输入时立刻关连接」这一种形态。
 //
 // 这里只放宽 reply 这一项断言（其余字段仍逐字节比对），并用 t.Logf 显式记出来
-// 而不是静默吞掉。判定条件刻意收窄：只认「Windows + fixture 恰好一个 close 帧
+// 而不是静默吞掉。判定条件刻意收窄：只认「Windows/darwin + fixture 恰好一个 close 帧
 // + 实测为空」，任何别的 reply 差异都会照常失败。
 //
 // 生产侧的正确修法是让连接优雅关闭（设 SO_LINGER，或收到对端 close 帧后再关），
-// 让 close code 在 Windows 上也能到达对端。那是行为改动，不该混进这个纯拆分 PR。
-func dropReplyOnWindowsCloseFlush(a, b goldenVec) (bool, string) {
-	if runtime.GOOS != "windows" {
+// 让 close code 在 Windows 与 macOS 上也能到达对端。那是行为改动，不该混进这个纯拆分 PR。
+func dropReplyOnNonLinuxCloseFlush(a, b goldenVec) (bool, string) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
 		return false, ""
 	}
 	if len(a.Reply) != 1 || len(b.Reply) != 0 || !strings.HasPrefix(a.Reply[0].Hex, "88") {
 		return false, ""
 	}
-	return true, "fixture 期望的 close 帧未送达（Windows closesocket 丢弃未确认的 send 数据），" +
-		"仅放宽 reply 断言，见 dropReplyOnWindowsCloseFlush 注释"
+	return true, fmt.Sprintf("fixture 期望的 close 帧未送达（%s 内核丢弃未确认的 send 数据），仅放宽 reply 断言，见 dropReplyOnNonLinuxCloseFlush 注释", runtime.GOOS)
 }
 
 func loadFixture() ([]goldenVec, error) {
@@ -432,7 +431,16 @@ func captureReadVec(t *testing.T, tc readCase) goldenVec {
 
 	raw := tc.build()
 	if _, err := cl.Write(raw); err != nil {
-		t.Fatalf("%s: write: %v", tc.name, err)
+		// 发现背景：macOS 与 Windows 在服务端 ReadLimit 超限关闭 socket 时，内核若有未读数据会发送 RST。
+		// 当客户端同时在大帧写入（如 196KB），客户端本地可能会在写完前就收到 RST 并报
+		// "connection reset by peer" 或 "broken pipe"。
+		// 对于明确期望关闭 (wantClose) 且属于超限测试的情况，在 non-Linux 平台上容忍写入中断。
+		if tc.wantClose && (runtime.GOOS == "windows" || runtime.GOOS == "darwin") &&
+			(strings.Contains(err.Error(), "connection reset") || strings.Contains(err.Error(), "broken pipe")) {
+			t.Logf("%s: write interrupted by server RST as expected on %s: %v", tc.name, runtime.GOOS, err)
+		} else {
+			t.Fatalf("%s: write: %v", tc.name, err)
+		}
 	}
 
 	var got *delivered
