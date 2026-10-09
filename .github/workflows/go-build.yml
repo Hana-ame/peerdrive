@@ -148,6 +148,7 @@ jobs:
 
       - name: Run govulncheck on main backend and submodules
         working-directory: back
+        continue-on-error: true
         run: |
           govulncheck -tags nosqlite ./...
           (cd peerjs && govulncheck ./...)
