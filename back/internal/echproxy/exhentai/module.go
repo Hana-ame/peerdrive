@@ -203,6 +203,18 @@ func (m *Module) Alive() bool {
 	return m.started
 }
 
+// Status returns the current sync status and observability metrics (Issue #103).
+func (m *Module) Status() StoreStatus { return m.store.Status() }
+
+// LastSyncAt returns when the underlying Store last successfully fetched remote config (Issue #103).
+func (m *Module) LastSyncAt() time.Time { return m.store.LastSyncAt() }
+
+// ConsecutiveFailures returns the count of consecutive sync failures on the underlying Store (Issue #103).
+func (m *Module) ConsecutiveFailures() int64 { return m.store.ConsecutiveFailures() }
+
+// LastError returns the most recent sync failure reason on the underlying Store (Issue #103).
+func (m *Module) LastError() string { return m.store.LastError() }
+
 // ValidateConfig is a helper for callers that want to check a Config before
 // constructing a Module. It only checks the fields NewStore validates.
 func ValidateConfig(cfg Config) error {

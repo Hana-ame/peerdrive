@@ -602,3 +602,94 @@ func TestCustomNow(t *testing.T) {
 		t.Fatalf("expires = %v", store.Load().Expires)
 	}
 }
+
+func TestSyncFailureObservability(t *testing.T) {
+	// 发现背景：Issue #103 ExHentai Store.Sync 失败可编程信号与健康可观测性
+	var fail bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail {
+			http.Error(w, "server down", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"v1","cache_ttl":"30m","rules":[]}`))
+	}))
+	defer srv.Close()
+
+	clock := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	store, err := NewStore(StoreOptions{
+		URL:               srv.URL,
+		AllowInsecureHTTP: true,
+		Client:            srv.Client(),
+		Now:               func() time.Time { return clock },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. 初次同步成功
+	res := store.Sync(context.Background())
+	if res != FetchUpdated {
+		t.Fatalf("expected FetchUpdated, got %v", res)
+	}
+	if store.ConsecutiveFailures() != 0 {
+		t.Fatalf("expected 0 consecutive failures, got %d", store.ConsecutiveFailures())
+	}
+	if !store.LastSyncAt().Equal(clock) {
+		t.Fatalf("expected LastSyncAt = %v, got %v", clock, store.LastSyncAt())
+	}
+	if store.LastError() != "" {
+		t.Fatalf("expected empty LastError, got %q", store.LastError())
+	}
+
+	// 2. 模拟配置服务器宕机 (500)
+	fail = true
+	res = store.Sync(context.Background())
+	if res != FetchFailed {
+		t.Fatalf("expected FetchFailed, got %v", res)
+	}
+	if store.ConsecutiveFailures() != 1 {
+		t.Fatalf("expected 1 consecutive failure, got %d", store.ConsecutiveFailures())
+	}
+	if !strings.Contains(store.LastError(), "HTTP 500") {
+		t.Fatalf("expected LastError to mention HTTP 500, got %q", store.LastError())
+	}
+	// 上次成功时间应保持不变
+	if !store.LastSyncAt().Equal(clock) {
+		t.Fatalf("LastSyncAt should remain unchanged at %v, got %v", clock, store.LastSyncAt())
+	}
+
+	// 3. 再次失败，连续失败计数累加
+	res = store.Sync(context.Background())
+	if res != FetchFailed {
+		t.Fatalf("expected FetchFailed, got %v", res)
+	}
+	if store.ConsecutiveFailures() != 2 {
+		t.Fatalf("expected 2 consecutive failures, got %d", store.ConsecutiveFailures())
+	}
+
+	// 4. Status() 聚合状态准确
+	status := store.Status()
+	if status.ConsecutiveFailures != 2 || status.Failed != 2 || status.Fetches != 3 {
+		t.Fatalf("unexpected status snapshot: %+v", status)
+	}
+
+	// 5. 恢复成功，连续失败归零，LastSyncAt 更新
+	fail = false
+	newClock := clock.Add(10 * time.Minute)
+	clock = newClock
+	res = store.Sync(context.Background())
+	if res != FetchUpdated {
+		t.Fatalf("expected FetchUpdated, got %v", res)
+	}
+	if store.ConsecutiveFailures() != 0 {
+		t.Fatalf("consecutive failures should reset to 0, got %d", store.ConsecutiveFailures())
+	}
+	if !store.LastSyncAt().Equal(newClock) {
+		t.Fatalf("LastSyncAt should be updated to %v, got %v", newClock, store.LastSyncAt())
+	}
+	if store.LastError() != "" {
+		t.Fatalf("LastError should clear on recovery, got %q", store.LastError())
+	}
+}
+
