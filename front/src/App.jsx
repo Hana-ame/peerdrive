@@ -6,16 +6,16 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { registerSW } from './lib/swBridge';
 import ConnectionStatus from './lib/ConnectionStatus';
 
-const Connect = lazy(() => import('./pages/Connect'));
-const Drive = lazy(() => import('./pages/Drive'));
+const Connect = lazy(() => import('./features/connect/pages/Connect'));
+const Drive = lazy(() => import('./features/drive/pages/Drive'));
 const Collections = lazy(() => import('./features/collection/pages/Collections'));
 const CollectionView = lazy(() => import('./features/collection/pages/CollectionView'));
-const Settings = lazy(() => import('./pages/Settings'));
-const Transfers = lazy(() => import('./pages/Transfers'));
-const BT = lazy(() => import('./pages/BT'));
-const IPFS = lazy(() => import('./pages/IPFS'));
-const NodeControl = lazy(() => import('./pages/NodeControl'));
-const Iwara = lazy(() => import('./pages/Iwara'));
+const Settings = lazy(() => import('./features/settings/pages/Settings'));
+const Transfers = lazy(() => import('./features/transfers/pages/Transfers'));
+const BT = lazy(() => import('./features/bt/pages/BT'));
+const IPFS = lazy(() => import('./features/ipfs/pages/IPFS'));
+const NodeControl = lazy(() => import('./features/node/pages/NodeControl'));
+const Iwara = lazy(() => import('./features/iwara/pages/Iwara'));
 
 // In-construction placeholder page (Modules 2, 3, 4, 5, 6 to be replaced one by one)
 function Placeholder({ title }) {
