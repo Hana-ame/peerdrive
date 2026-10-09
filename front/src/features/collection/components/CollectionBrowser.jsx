@@ -14,7 +14,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as ws from '../../../ws';
 import { buildTree, descend, basename, entrySha, previewSha } from '../lib/collectionTree';
 import { fmtBytes } from '../../../lib/format';
-import { previewBlobCache } from '../../../lib/cache';
+import { previewBlobCache, previewLimit } from '../../../lib/cache';
 
 // usePreviewCache：按 preview sha 缓存 blob URL + 去重并发请求。
 // 升级为模块级 previewBlobCache（带 32MB 内存预算与 LRU revoke 回收）：
@@ -25,7 +25,7 @@ function usePreviewCache() {
   return useCallback((sha) => {
     if (previewBlobCache.has(sha)) return Promise.resolve(previewBlobCache.get(sha));
     if (inflight.current.has(sha)) return inflight.current.get(sha);
-    const p = ws.download(sha)
+    const p = previewLimit(() => ws.download(sha))
       .then((bytes) => {
         // 取数通道与文件下载同一条（ws.download → req 帧），预览文件也是
         // sha-文件系统里的内容寻址对象，字节回来直接包成 blob。
@@ -44,28 +44,47 @@ function usePreviewCache() {
 }
 
 // PreviewThumb：预览缩略图。status 四态 none(无 preview)/loading/ok/error，
-// 无 preview 与取数失败都落到占位（前者无数据、后者避免红叉误导——失败可能只是
-// 该节点本地没有这份预览文件，不代表文件本体不可用）。
+// 增加 IntersectionObserver 按需加载：只有当缩略图滚动进入视口时才触发 loadPreview。
 function PreviewThumb({ sha, loadPreview, size = 40 }) {
-  const [state, setState] = useState({ status: sha ? 'loading' : 'none', url: '' });
+  const [state, setState] = useState({ status: sha ? 'idle' : 'none', url: '' });
+  const [isVisible, setIsVisible] = useState(false);
+  const elRef = useRef(null);
+
   useEffect(() => {
     if (!sha) { setState({ status: 'none', url: '' }); return; }
+    if (!('IntersectionObserver' in window)) {
+      setIsVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setIsVisible(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '100px' });
+
+    if (elRef.current) observer.observe(elRef.current);
+    return () => observer.disconnect();
+  }, [sha]);
+
+  useEffect(() => {
+    if (!sha || !isVisible) return;
     let alive = true;
     setState({ status: 'loading', url: '' });
     loadPreview(sha)
       .then((url) => { if (alive) setState({ status: 'ok', url }); })
       .catch(() => { if (alive) setState({ status: 'error', url: '' }); });
     return () => { alive = false; };
-  }, [sha, loadPreview]);
+  }, [sha, isVisible, loadPreview]);
 
   const box = { width: size, height: size };
   if (state.status === 'ok') {
-    return <img src={state.url} alt="preview" style={box} className="object-cover rounded-lg bg-white/[0.04] shrink-0" />;
+    return <img ref={elRef} src={state.url} alt="preview" style={box} className="object-cover rounded-lg bg-white/[0.04] shrink-0" />;
   }
-  // 占位：无 preview 用 📄，取数失败用 ⚠️，加载中用转圈
+  // 占位：无 preview 用 📄，取数失败用 ⚠️，加载中用转圈，未进视口 idle 用 📄
   const icon = state.status === 'error' ? '⚠️' : state.status === 'loading' ? '⏳' : '📄';
   return (
-    <div style={box} className="flex items-center justify-center rounded-lg bg-white/[0.05] text-lg shrink-0" aria-label="no preview">
+    <div ref={elRef} style={box} className="flex items-center justify-center rounded-lg bg-white/[0.05] text-lg shrink-0" aria-label="no preview">
       {icon}
     </div>
   );

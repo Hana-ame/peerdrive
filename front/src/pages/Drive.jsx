@@ -21,6 +21,7 @@ function fmtTime(ts) {
 
 export default function Drive() {
   const { hash: deepHash } = useParams();
+  const [currentDir, setCurrentDir] = useState('');
   const [files, setFiles] = useState(null); // null = loading
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,13 +32,32 @@ export default function Drive() {
   const load = useCallback(async () => {
     setErr('');
     try {
-      const res = await ws.admin('GET', '/files');
+      // 优先尝试目录浏览端点 /files/browse?path=（支持层级目录与按需取数），不可用时回落全量 /files
+      let res;
+      try {
+        const query = currentDir ? `?path=${encodeURIComponent(currentDir)}` : '';
+        res = await ws.admin('GET', `/files/browse${query}`);
+        if (Array.isArray(res)) {
+          // 归一化 DirEntry 到文件列表格式
+          res = res.map(e => ({
+            hash: e.hash || '',
+            filename: e.name || '',
+            size: e.size || 0,
+            mime_type: e.is_dir ? 'folder' : (e.mime || ''),
+            created_at: e.mod_time || '',
+            isDir: Boolean(e.is_dir),
+            path: e.path || '',
+          }));
+        }
+      } catch {
+        res = await ws.admin('GET', '/files');
+      }
       setFiles(Array.isArray(res) ? res : []);
     } catch (e) {
       setErr(e?.message || String(e));
       setFiles([]);
     }
-  }, []);
+  }, [currentDir]);
   useEffect(() => { load(); }, [load]);
 
   const onPick = async (e) => {

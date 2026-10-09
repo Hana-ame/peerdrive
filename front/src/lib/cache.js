@@ -98,3 +98,45 @@ export const previewBlobCache = new LRUCache({
     }
   },
 });
+
+// pLimit: limits concurrency of async tasks to avoid flooding WebSocket / network
+export function pLimit(concurrency = 4) {
+  let active = 0;
+  const queue = [];
+
+  const run = (fn, resolve, reject) => {
+    active++;
+    Promise.resolve()
+      .then(fn)
+      .then(
+        (val) => {
+          active--;
+          if (queue.length > 0) {
+            const next = queue.shift();
+            run(next.fn, next.resolve, next.reject);
+          }
+          resolve(val);
+        },
+        (err) => {
+          active--;
+          if (queue.length > 0) {
+            const next = queue.shift();
+            run(next.fn, next.resolve, next.reject);
+          }
+          reject(err);
+        }
+      );
+  };
+
+  return function (fn) {
+    return new Promise((resolve, reject) => {
+      if (active < concurrency) {
+        run(fn, resolve, reject);
+      } else {
+        queue.push({ fn, resolve, reject });
+      }
+    });
+  };
+}
+
+export const previewLimit = pLimit(4);
