@@ -3,14 +3,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { getNodeSession, clearNodeSession } from '../lib/nodeSession';
+import { fmtBytes } from '../lib/format';
 
-function fmtBytes(n) {
-  if (!n || n === 0) return '—';
-  const u = ['B', 'KB', 'MB', 'GB'];
-  let v = n, i = 0;
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  return v.toFixed(v < 10 ? 1 : 0) + ' ' + u[i];
-}
 
 // ── Preview support: classify by file name extension (image / video / audio / text) ──
 const IMG_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif'];
