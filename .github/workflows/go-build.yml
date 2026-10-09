@@ -141,3 +141,15 @@ jobs:
         env:
           CGO_ENABLED: 0
         run: go build -o /dev/null ./...
+
+      # 依赖漏洞扫描（Issue #142）：覆盖 utls / x/crypto / quic-go 与三个独立子模块。
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck on main backend and submodules
+        working-directory: back
+        run: |
+          govulncheck -tags nosqlite ./...
+          (cd peerjs && govulncheck ./...)
+          (cd signalserver && govulncheck ./...)
+          (cd p2p_bt && govulncheck ./...)
