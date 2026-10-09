@@ -21,6 +21,7 @@ export default function DriveListView({
   copiedHash,
   onShare,
   onDelete,
+  onContextMenu,
 }) {
   const th = 'text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
   const td = 'px-3 py-2';
@@ -47,7 +48,8 @@ export default function DriveListView({
             return (
               <tr
                 key={f.hash || i}
-                className={`border-t border-white/[0.04] transition-colors ${
+                onContextMenu={(e) => onContextMenu?.(e, f)}
+                className={`border-t border-white/[0.04] transition-colors cursor-pointer ${
                   isTarget
                     ? 'bg-brand-500/15 border-l-2 border-l-brand-400 hover:bg-brand-500/20'
                     : 'hover:bg-white/[0.02]'
