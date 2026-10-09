@@ -64,7 +64,7 @@ var signalKeyRe = regexp.MustCompile(`pd-signal-[0-9a-f]{8,}`)
 // 于是 key 在 Go 代码里漂了，但文档里的那 12 处（AGENTS/README/教程/demo/…）
 // 一个都没被扫到——**漂移检测只覆盖了它写代码时想着的那几类文件**。
 // 2026-10-06 实测：config.go 已经是 1edf5e05…，而线上部署文档（AGENTS.md）
-// 还写着 b9447b40…，两者指向两台不同的信令，按文档配置会连不上。
+// 还写着 pd-signal-<redacted-prefix>…，两者指向两台不同的信令，按文档配置会连不上。
 // 列清单的写法天然漏：新增一个写死 key 的文件时没人会顺手去改这个数组。
 var signalKeyScanExts = map[string]bool{
 	".go":   true,
