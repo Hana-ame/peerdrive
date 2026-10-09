@@ -142,6 +142,33 @@ type Config struct {
 	// Example: https://example.com/ipfs/%s or https://example.com/f/%s?off=%d&size=%d
 	URLSourceTemplate string
 
+	// ── OpenList source (PEERDRIVE_OPENLIST_*, optional data source) ──
+	//
+	// OpenListEnable is the master switch (PEERDRIVE_OPENLIST_ENABLE, default **false**).
+	// Why default off: the node would otherwise issue requests to an
+	// operator-configured third-party aggregation layer for hashes it does not
+	// have locally. Opt-in keeps a node that never configures it byte-identical
+	// to one without the source: nothing is constructed and no registration happens.
+	//
+	// OpenList cannot be imported — its driver layer lives under internal/, which
+	// Go's import rules confine to its own module — so the backend is reached over
+	// its HTTP API. Only /p/*path is usable: it streams the bytes through the
+	// OpenList process and honours Range, whereas /d/*path 302-redirects to the
+	// cloud provider's direct URL and would bypass this source's sha256 check.
+	//
+	// OpenList has no trustworthy content hash of its own, so the hash→path mapping
+	// comes from an operator-supplied index file (OpenListIndexPath). Until a
+	// crawler builds that table, it is static; OpenListSource.Reload is the seam
+	// that delivery will use.
+	OpenListEnable      bool   // PEERDRIVE_OPENLIST_ENABLE (default false)
+	OpenListBaseURL     string // PEERDRIVE_OPENLIST_BASE_URL: scheme+host, no trailing /p
+	OpenListIndexPath   string // PEERDRIVE_OPENLIST_INDEX_FILE: hash→path JSON table
+	OpenListToken       string // PEERDRIVE_OPENLIST_TOKEN: sent as Authorization: Bearer ***
+	OpenListName        string // PEERDRIVE_OPENLIST_NAME (default "openlist")
+	OpenListPriority    int    // PEERDRIVE_OPENLIST_PRIORITY (default 900: after local/peer/url)
+	OpenListTimeoutSecs int    // PEERDRIVE_OPENLIST_TIMEOUT_SECS (default 120)
+	OpenListVerify      bool   // PEERDRIVE_OPENLIST_VERIFY (default true: hash full fetches)
+
 	DownloadDir         string
 	FolderMaxDepth      int // PEERDRIVE_FOLDER_MAX_DEPTH: register_folder max recursion depth (default 1 = scan current directory only)
 	MaxPeers            int
@@ -380,6 +407,15 @@ func Load() *Config {
 		DiscoverMode:      getEnv("PEERDRIVE_DISCOVER_MODE", "auto"),
 		DiscoverPresence:  getEnvBool("PEERDRIVE_DISCOVER_PRESENCE", true),
 		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
+
+		OpenListEnable:      getEnvBool("PEERDRIVE_OPENLIST_ENABLE", false),
+		OpenListBaseURL:     getEnv("PEERDRIVE_OPENLIST_BASE_URL", ""),
+		OpenListIndexPath:   getEnv("PEERDRIVE_OPENLIST_INDEX_FILE", ""),
+		OpenListToken:       getEnv("PEERDRIVE_OPENLIST_TOKEN", ""),
+		OpenListName:        getEnv("PEERDRIVE_OPENLIST_NAME", "openlist"),
+		OpenListPriority:    getEnvInt("PEERDRIVE_OPENLIST_PRIORITY", 900),
+		OpenListTimeoutSecs: getEnvInt("PEERDRIVE_OPENLIST_TIMEOUT_SECS", 120),
+		OpenListVerify:      getEnvBool("PEERDRIVE_OPENLIST_VERIFY", true),
 
 		DownloadDir:    getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
 		FolderMaxDepth: getEnvInt("PEERDRIVE_FOLDER_MAX_DEPTH", 0), // 0=unlimited (full recursion; >0 limits depth)
