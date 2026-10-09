@@ -116,6 +116,10 @@ type Deps struct {
 	// opted into). When set, it serves user→collection builds, respond-by-sha
 	// collection reads and the fetch-source monitor snapshot.
 	TwitterPic *twitterpic.Service
+
+	// Aria2Bridge is the aria2c RPC integration bridge (Issue #236).
+	// nil → aria2 features disabled.
+	Aria2Bridge *service.Aria2Bridge
 }
 
 // Router owns one fully-assembled HTTP surface plus the auth state that goes

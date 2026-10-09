@@ -214,6 +214,15 @@ type Config struct {
 	DownloadOrder       string
 	DownloadTimeoutSecs int
 
+	// ── Optional aria2c plugin integration (PEERDRIVE_ARIA2_*, Issue #236) ──
+	// When Aria2Enable is false (default): no aria2 client or worker starts, zero overhead.
+	// When true: aria2 RPC bridge is active, enabling multi-connection accelerated downloading
+	// and transfer task synchronization.
+	Aria2Enable      bool   // PEERDRIVE_ARIA2_ENABLE (default false)
+	Aria2RPCURL      string // PEERDRIVE_ARIA2_RPC_URL (default "http://127.0.0.1:6800/jsonrpc")
+	Aria2RPCSecret   string // PEERDRIVE_ARIA2_RPC_SECRET (optional secret token)
+	Aria2DownloadDir string // PEERDRIVE_ARIA2_DIR (target directory, defaults to DownloadDir)
+
 	ForwardRules string // PEERDRIVE_FORWARD_RULES: "key1:8080,key2:8443" (forwarding auth whitelist; key is the credential; recommend chmod 600 on config file)
 
 	// ── Optional ech-proxy module (PEERDRIVE_ECH_PROXY_ENABLE, default OFF) ──
@@ -632,6 +641,11 @@ func Load() *Config {
 		FolderMaxDepth: getEnvInt("PEERDRIVE_FOLDER_MAX_DEPTH", 0), // 0=unlimited (full recursion; >0 limits depth)
 		MaxPeers:       getEnvInt("PEERDRIVE_MAX_PEERS", 8),
 
+		Aria2Enable:      getEnvBool("PEERDRIVE_ARIA2_ENABLE", false),
+		Aria2RPCURL:      getEnv("PEERDRIVE_ARIA2_RPC_URL", "http://127.0.0.1:6800/jsonrpc"),
+		Aria2RPCSecret:   getEnv("PEERDRIVE_ARIA2_RPC_SECRET", ""),
+		Aria2DownloadDir: getEnv("PEERDRIVE_ARIA2_DIR", ""),
+
 		ShareEnable:      getEnvBool("PEERDRIVE_SHARE_ENABLE", false),
 		ShareCollections: getEnv("PEERDRIVE_SHARE_COLLECTIONS", ""),
 		ShareDirs:        getEnv("PEERDRIVE_SHARE_DIRS", ""),
@@ -833,6 +847,18 @@ func Validate(c *Config) error {
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			errs = append(errs, "PEERDRIVE_EXHENTA_CONFIG_URL="+c.ExhentaiConfigURL+
 				" is not a valid http:// or https:// URL")
+		}
+	}
+
+	if c.Aria2Enable {
+		rpcURL := strings.TrimSpace(c.Aria2RPCURL)
+		if rpcURL == "" {
+			errs = append(errs, "PEERDRIVE_ARIA2_RPC_URL cannot be empty when aria2 is enabled")
+		} else {
+			u, err := url.Parse(rpcURL)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
+				errs = append(errs, fmt.Sprintf("PEERDRIVE_ARIA2_RPC_URL=%q is not a valid RPC URL", rpcURL))
+			}
 		}
 	}
 

@@ -181,4 +181,28 @@ describe('Transfers page', () => {
     await flush()
     expect(screen.getByText('2.00 KB/s')).toBeTruthy()
   })
+
+  it('renders aria2 status badge and toggles via button click', async () => {
+    adminMock.mockImplementation((method, path) => {
+      if (path === '/p2p/aria2/status') {
+        return Promise.resolve({ enabled: true, connected: true, version: '1.36.0' })
+      }
+      if (path === '/p2p/aria2/toggle') {
+        return Promise.resolve({ enabled: false })
+      }
+      return Promise.resolve({ jobs: [] })
+    })
+
+    render(<Transfers />)
+    await flush()
+
+    const ariaBtn = screen.getByText(/aria2c: Active/)
+    expect(ariaBtn).toBeTruthy()
+
+    fireEvent.click(ariaBtn)
+    await flush()
+
+    expect(adminMock).toHaveBeenCalledWith('POST', '/p2p/aria2/toggle', { enabled: false })
+  })
 })
+

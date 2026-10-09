@@ -24,10 +24,19 @@ import (
 // peerPuller injected by main.
 var peerPuller *service.PeerPuller
 
+// aria2Bridge injected by main.
+var aria2Bridge *service.Aria2Bridge
+
 // InitPeerPuller injects the cross-node pull service.
 func InitPeerPuller(p *service.PeerPuller) {
 	log.LogDebug("ctrl-peer-pull: InitPeerPuller")
 	peerPuller = p
+}
+
+// InitAria2Bridge injects the aria2 bridge service.
+func InitAria2Bridge(a *service.Aria2Bridge) {
+	log.LogDebug("ctrl-peer-pull: InitAria2Bridge")
+	aria2Bridge = a
 }
 
 // ListPullJobs handles GET /p2p/pull.
@@ -180,3 +189,63 @@ func CancelPull(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "cancelled", "id": req.ID})
 }
+
+// GetAria2Status handles GET /p2p/aria2/status (Issue #236).
+func GetAria2Status(c *gin.Context) {
+	if aria2Bridge == nil {
+		c.JSON(http.StatusOK, gin.H{"enabled": false, "connected": false})
+		return
+	}
+	enabled := aria2Bridge.IsEnabled()
+	if !enabled {
+		c.JSON(http.StatusOK, gin.H{"enabled": false, "connected": false})
+		return
+	}
+	ver, err := aria2Bridge.GetVersion(c.Request.Context())
+	c.JSON(http.StatusOK, gin.H{
+		"enabled":   true,
+		"connected": err == nil,
+		"version":   ver,
+		"error":     func() string { if err != nil { return err.Error() }; return "" }(),
+	})
+}
+
+// SetAria2Enabled handles POST /p2p/aria2/toggle {enabled: bool} (Issue #236).
+func SetAria2Enabled(c *gin.Context) {
+	if aria2Bridge == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "aria2 bridge not initialized"})
+		return
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload, boolean 'enabled' required"})
+		return
+	}
+	aria2Bridge.SetEnabled(req.Enabled)
+	c.JSON(http.StatusOK, gin.H{"enabled": aria2Bridge.IsEnabled()})
+}
+
+// Aria2AddURI handles POST /p2p/aria2/download {uri, filename?} (Issue #236).
+func Aria2AddURI(c *gin.Context) {
+	if aria2Bridge == nil || !aria2Bridge.IsEnabled() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "aria2 integration is disabled"})
+		return
+	}
+	var req struct {
+		URI      string `json:"uri"`
+		Filename string `json:"filename"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.URI == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "uri is required"})
+		return
+	}
+	gid, err := aria2Bridge.AddURI(c.Request.Context(), req.URI, req.Filename)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"gid": gid, "uri": req.URI, "filename": req.Filename})
+}
+

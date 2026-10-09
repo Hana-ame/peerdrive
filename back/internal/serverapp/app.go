@@ -729,6 +729,15 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 		log.LogInfo("main: twitter-pic module enabled — %s", svc.BaseURL())
 	}
 
+	// aria2c plugin integration bridge (Issue #236).
+	// Always instantiate lightweight bridge to allow runtime toggle via /p2p/aria2/toggle.
+	// When cfg.Aria2Enable is false, it initializes in disabled state with 0 background workers.
+	aria2Bridge := service.NewAria2Bridge(cfg)
+	deps.Aria2Bridge = aria2Bridge
+	if cfg.Aria2Enable {
+		log.LogInfo("main: aria2 plugin enabled (rpc=%s)", cfg.Aria2RPCURL)
+	}
+
 	// Hand the assembled dependency set to the router in one call.
 	// NewRouter validates it before registering anything, so a wiring mistake
 	// surfaces as a startup error with a message naming the field, rather than as

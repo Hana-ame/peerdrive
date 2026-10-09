@@ -36,6 +36,7 @@ func (r *Router) injectControllerDeps() {
 	// (for /peerjs/share*) and the transport (for `share` frames).
 	controller.InitNodeShareController(r.deps.NodeShare)
 	controller.InitPeerPuller(r.deps.PeerPuller)
+	controller.InitAria2Bridge(r.deps.Aria2Bridge)
 	// File index search: /peerjs/files/search (local) + /peerjs/nodes/:peer/search (remote).
 	// PeerJSService itself implements the three methods of the controller's narrow
 	// fileIndexSearcher interface (Search / RequestSearch / ConnectedPeerIDs), so the
