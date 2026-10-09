@@ -130,25 +130,26 @@ describe('Transfers page', () => {
     adminMock.mockResolvedValue({ jobs: [runningJob()] })
     render(<Transfers />)
     await flush()
-    expect(adminMock).toHaveBeenCalledTimes(1)
-    await tick(2000)
+    // load() calls /p2p/pull and /p2p/aria2/status concurrently
     expect(adminMock).toHaveBeenCalledTimes(2)
     await tick(2000)
-    expect(adminMock).toHaveBeenCalledTimes(3)
+    expect(adminMock).toHaveBeenCalledTimes(4)
+    await tick(2000)
+    expect(adminMock).toHaveBeenCalledTimes(6)
   })
 
   it('stops polling once no job is running (idle page must not hammer the admin plane)', async () => {
     adminMock.mockResolvedValue({ jobs: [runningJob()] })
     render(<Transfers />)
     await flush()
-    expect(adminMock).toHaveBeenCalledTimes(1)
-    await tick(2000) // load 2 — still running
     expect(adminMock).toHaveBeenCalledTimes(2)
+    await tick(2000) // load 2 — still running
+    expect(adminMock).toHaveBeenCalledTimes(4)
 
     // backend now reports everything terminal
     adminMock.mockResolvedValue({ jobs: [runningJob({ status: 'done', received: 1000 })] })
     await tick(2000) // load 3 sees done → hasRunning false → interval cleared
-    expect(adminMock).toHaveBeenCalledTimes(3)
+    expect(adminMock).toHaveBeenCalledTimes(6)
 
     const frozen = adminMock.mock.calls.length
     await tick(10000)
