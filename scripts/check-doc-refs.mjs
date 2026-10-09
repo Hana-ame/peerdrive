@@ -208,6 +208,17 @@ if (process.env.ALL) show('同名文件歧义（裸文件名简写，需人工�
 else if (realAmbiguous.length) console.log(`  （另有 ${realAmbiguous.length} 处裸文件名简写无法自动定位，ALL=1 展开）`)
 
 const bad = realMissing.length + outOfRange.length
+if (process.env.GITHUB_ACTIONS) {
+  for (const r of realMissing) {
+    const [file, line] = r.where.split(':')
+    console.log(`::error file=${file},line=${line}::文档引用失效：路径 '${r.ref}' 不存在`)
+  }
+  for (const r of outOfRange) {
+    const [file, line] = r.where.split(':')
+    console.log(`::error file=${file},line=${line}::文档引用行号越界：'${r.ref}' 超出目标文件 ${r.target} (只有 ${r.total} 行)`)
+  }
+}
+
 if (bad && !WARN_ONLY) {
   console.log(`\nRESULT: ${bad} 处需要处理`)
   process.exit(1)
