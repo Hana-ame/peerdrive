@@ -117,6 +117,11 @@ type PeerJSService struct {
 	// blocklist 节点黑名单与准入管理（admission.go）。
 	blocklist *PeerBlocklist
 
+	// Capability negotiation (Issue #213).
+	capsMu       sync.RWMutex
+	localCaps    []string
+	requiredCaps []string
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -141,6 +146,7 @@ func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
 		blocklist:    NewPeerBlocklist(storageDir, cfg.PeerBlocklist),
 		forwardRules: make(map[string][]int),
 		fwNonces:     make(map[string]*fwdNonce),
+		localCaps:    append([]string(nil), DefaultNodeCapabilities...),
 		closed:       make(chan struct{}),
 		ctx:          ctx,
 		cancel:       cancel,
@@ -350,7 +356,7 @@ func (s *PeerJSService) startLoop() {
 // DataChannel 完全一致）。本地会话以 "local" 注册，FetchFromPeer("local", ...)
 // 即可复用同一拉取路径（出站角色，见 outbound.go）。
 func (s *PeerJSService) BindLocal(sess Session) {
-	s.bindConn(sess)
+	s.bindConnInternal(sess, true)
 	log.LogInfo("peerjs: local session bound (id=%s)", sess.ID())
 }
 

@@ -389,6 +389,12 @@ func (s *PeerJSService) OpenForward(ctx context.Context, peerID, key string, por
 		return nil, fmt.Errorf("peerjs: no connection to %s", peerID)
 	}
 	st := s.stateFor(c)
+	if st == nil {
+		return nil, fmt.Errorf("peerjs: connection not bound")
+	}
+	if !isSelfSession(c) && !st.hasCapability(CapForward) {
+		return nil, fmt.Errorf("peerjs: peer %s lacks capability %q", peerID, CapForward)
+	}
 	st.mu.Lock()
 	if st.fwd != nil && !st.fwd.closed {
 		st.mu.Unlock()

@@ -162,9 +162,12 @@ func (s *PeerJSService) pskSendAuth(c Session) {
 	if !s.pskEnabled() || isSelfSession(c) {
 		return
 	}
-	// Use a plain map instead of dcResp: dcResp has many omitempty fields, making the frame
-	// fatter; we only need two fields here.
-	if err := c.SendJSON(map[string]string{"type": "psk-auth", "psk": s.cfg.PeerPSK}); err != nil {
+	caps := s.currentLocalCaps()
+	if err := c.SendJSON(dcResp{
+		Type:         "psk-auth",
+		Psk:          s.cfg.PeerPSK,
+		Capabilities: caps,
+	}); err != nil {
 		log.LogWarn("peerjs: send psk-auth to %s failed: %v", c.ID(), err)
 		return
 	}
@@ -175,11 +178,11 @@ func (s *PeerJSService) pskSendAuth(c Session) {
 // Uses constant-time compare, and **doesn't close the connection on failure**: lets the
 // peer retry with the correct key, and also lets it receive an explicit err on the next
 // verb (closing would only make it see a timeout, harder to debug).
-func (s *PeerJSService) servePskAuth(c Session, st *connState, got string) {
+func (s *PeerJSService) servePskAuth(c Session, st *connState, r dcResp) {
 	if !s.pskEnabled() {
 		return // Open mode: peer sent extra auth, ignore (forward compatible)
 	}
-	if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.PeerPSK)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(r.Psk), []byte(s.cfg.PeerPSK)) != 1 {
 		_ = c.SendJSON(dcResp{Type: "psk-err", Msg: "psk: key mismatch", Code: pskErrCode})
 		log.LogWarn("peerjs: psk mismatch from %s, rejected", c.ID())
 		return
@@ -187,7 +190,19 @@ func (s *PeerJSService) servePskAuth(c Session, st *connState, got string) {
 	st.mu.Lock()
 	st.pskOK = true
 	st.mu.Unlock()
-	_ = c.SendJSON(dcResp{Type: "psk-ok"})
+
+	remoteCaps := r.Capabilities
+	if len(remoteCaps) == 0 && len(r.Caps) > 0 {
+		remoteCaps = r.Caps
+	}
+	if remoteCaps != nil {
+		s.negotiateCapabilities(c, st, remoteCaps, "")
+	}
+
+	_ = c.SendJSON(dcResp{
+		Type:         "psk-ok",
+		Capabilities: s.currentLocalCaps(),
+	})
 	log.LogInfo("peerjs: psk ok from %s", c.ID())
 }
 
