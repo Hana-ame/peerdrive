@@ -82,6 +82,19 @@ type Snapshot struct {
 	Expires time.Time
 }
 
+// StoreStatus reports the synchronization state and error metrics of a Store (Issue #103).
+type StoreStatus struct {
+	URL                 string    `json:"url"`
+	Version             string    `json:"version"`
+	Source              string    `json:"source"`
+	Fetches             int64     `json:"fetches"`
+	Unchanged           int64     `json:"unchanged"`
+	Failed              int64     `json:"failed"`
+	ConsecutiveFailures int64     `json:"consecutive_failures"`
+	LastSyncAt          time.Time `json:"last_sync_at,omitempty"`
+	LastError           string    `json:"last_error,omitempty"`
+}
+
 // StoreOptions configures a Store.
 type StoreOptions struct {
 	// URL is the config document URL. Empty = built-in table only, never fetch.
@@ -138,9 +151,12 @@ type Store struct {
 
 	authHeaders map[string]string
 
-	fetches          int64
-	failedFetches    int64
-	unchangedFetches int64
+	fetches             int64
+	failedFetches       int64
+	unchangedFetches    int64
+	consecutiveFailures int64
+	lastSyncAt          time.Time
+	lastError           string
 }
 
 // NewStore builds a Store. It never performs network I/O; call Sync for that.
@@ -237,6 +253,42 @@ func (s *Store) Stats() (fetches, unchanged, failed int64) {
 	return atomic.LoadInt64(&s.fetches), atomic.LoadInt64(&s.unchangedFetches), atomic.LoadInt64(&s.failedFetches)
 }
 
+// ConsecutiveFailures returns the count of consecutive failed sync attempts (Issue #103).
+func (s *Store) ConsecutiveFailures() int64 {
+	return atomic.LoadInt64(&s.consecutiveFailures)
+}
+
+// LastSyncAt returns when the last successful config fetch occurred (Issue #103).
+func (s *Store) LastSyncAt() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastSyncAt
+}
+
+// LastError returns the error string from the most recent sync failure, or empty if healthy (Issue #103).
+func (s *Store) LastError() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastError
+}
+
+// Status returns a point-in-time snapshot of the Store's sync state and error metrics (Issue #103).
+func (s *Store) Status() StoreStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return StoreStatus{
+		URL:                 s.url,
+		Version:             s.cfg.Version,
+		Source:              s.cfg.Source,
+		Fetches:             atomic.LoadInt64(&s.fetches),
+		Unchanged:           atomic.LoadInt64(&s.unchangedFetches),
+		Failed:              atomic.LoadInt64(&s.failedFetches),
+		ConsecutiveFailures: atomic.LoadInt64(&s.consecutiveFailures),
+		LastSyncAt:          s.lastSyncAt,
+		LastError:           s.lastError,
+	}
+}
+
 // Sync performs one fetch. It is safe to call repeatedly; it is used at Start
 // and again by Run. A failing Sync never removes the current snapshot, so the
 // caller can ignore the error and keep serving with what it has.
@@ -278,9 +330,12 @@ func (s *Store) Sync(ctx context.Context) FetchResult {
 		// Unchanged: renew freshness only. The document is still authoritative.
 		atomic.AddInt64(&s.fetches, 1)
 		atomic.AddInt64(&s.unchangedFetches, 1)
+		atomic.StoreInt64(&s.consecutiveFailures, 0)
 		s.mu.Lock()
 		s.cfg.Expires = s.now().Add(s.cfg.Config.CacheTTL.Duration())
 		s.cfg.Source = "remote-unchanged"
+		s.lastSyncAt = s.now()
+		s.lastError = ""
 		snap := s.cfg
 		s.mu.Unlock()
 		s.logf("exhentai: config %s unchanged (%s, %s)", snap.Version, snap.Source, time.Since(start).Round(time.Millisecond))
@@ -292,6 +347,7 @@ func (s *Store) Sync(ctx context.Context) FetchResult {
 		// having one. Other codes are transient and keep the last-known-good.
 		atomic.AddInt64(&s.fetches, 1)
 		atomic.AddInt64(&s.failedFetches, 1)
+		atomic.AddInt64(&s.consecutiveFailures, 1)
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		s.mu.Lock()
 		switch resp.StatusCode {
@@ -301,10 +357,12 @@ func (s *Store) Sync(ctx context.Context) FetchResult {
 		default:
 			s.cfg.Expires = s.now().Add(s.cfg.Config.CacheTTL.Duration())
 		}
+		s.lastError = fmt.Sprintf("HTTP %d", resp.StatusCode)
 		snap := s.cfg
+		failed := atomic.LoadInt64(&s.consecutiveFailures)
 		s.mu.Unlock()
-		s.logf("exhentai: config fetch %s -> HTTP %d, keeping %s (%s); body: %.120q",
-			s.url, resp.StatusCode, snap.Version, snap.Source, string(body))
+		s.logf("exhentai: config fetch %s -> HTTP %d, keeping %s (%s, consecutive failures: %d); body: %.120q",
+			s.url, resp.StatusCode, snap.Version, snap.Source, failed, string(body))
 		return FetchFailed
 	}
 
@@ -343,9 +401,12 @@ func (s *Store) Sync(ctx context.Context) FetchResult {
 	}
 	s.etag = etag
 	s.modified = modified
+	s.lastSyncAt = s.now()
+	s.lastError = ""
 	snap := s.cfg
 	s.mu.Unlock()
 
+	atomic.StoreInt64(&s.consecutiveFailures, 0)
 	atomic.AddInt64(&s.fetches, 1)
 	s.logf("exhentai: config %s -> %s (%d rules, %s, %s)", oldVer, snap.Version,
 		len(nd.Rules), snap.Source, time.Since(start).Round(time.Millisecond))
@@ -356,9 +417,11 @@ func (s *Store) Sync(ctx context.Context) FetchResult {
 func (s *Store) recordFailure(ctx context.Context, reason string) {
 	atomic.AddInt64(&s.fetches, 1)
 	atomic.AddInt64(&s.failedFetches, 1)
+	atomic.AddInt64(&s.consecutiveFailures, 1)
 	s.mu.Lock()
+	s.lastError = reason
 	snap := s.cfg
-	failed := atomic.LoadInt64(&s.failedFetches)
+	failed := atomic.LoadInt64(&s.consecutiveFailures)
 	s.mu.Unlock()
 	s.logf("exhentai: config fetch failed (%s), keeping %s from %s (consecutive failures: %d)",
 		reason, snap.Version, snap.Source, failed)
