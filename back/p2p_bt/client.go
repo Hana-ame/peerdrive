@@ -98,20 +98,16 @@ func newBTClient(dataDir string, listenAddr string) *BTClient {
 	}
 
 	// Public tracker fallback: when a torrent has no announce list, inject
-	// these public HTTP trackers so the client can still find peers.
-	// Configurable via PEERDRIVE_BT_PUBLIC_TRACKERS (comma-separated URLs);
-	// defaults to the built-in list in tracker_list.go.
-	if envList := os.Getenv("PEERDRIVE_BT_PUBLIC_TRACKERS"); envList != "" {
-		for _, t := range strings.Split(envList, ",") {
-			t = strings.TrimSpace(t)
-			if t != "" {
-				client.publicTrackers = append(client.publicTrackers, t)
-			}
-		}
-		LogInfo("bt-client: public trackers from env: %d", len(client.publicTrackers))
-	} else {
-		client.publicTrackers = append([]string(nil), defaultPublicTrackers...)
-	}
+	// these public trackers so the client can still find peers.
+	//
+	// The list is assembled by buildPublicTrackers (tracker_list.go):
+	//   - Base: PEERDRIVE_BT_PUBLIC_TRACKERS (env) if set, else curated ~50 subset
+	//   - Plus: dynamic fetch from newtrackon/ngosang (if enabled, default on)
+	//   - Deduplicated (trailing-slash aware)
+	//
+	// Dynamic fetch failure is non-fatal: falls back to the base list.
+	client.publicTrackers = buildPublicTrackers(LoadTrackerConfig())
+	LogInfo("bt-client: public trackers: %d", len(client.publicTrackers))
 
 	LogInfo("bt-client: created, dataDir=%s", dataDir)
 	return client
@@ -266,7 +262,7 @@ func (c *BTClient) injectPublicTrackers(mi *metainfo.MetaInfo) {
 	} else if mi.Announce != "" {
 		existing = []string{mi.Announce}
 	}
-	merged := mergePublicTrackers(existing)
+	merged := mergePublicTrackers(existing, c.publicTrackers)
 	if len(merged) == len(existing) {
 		return // no change
 	}
@@ -286,7 +282,7 @@ func (c *BTClient) injectPublicTrackersToSpec(spec *torrent.TorrentSpec) {
 	for _, tier := range spec.Trackers {
 		existing = append(existing, tier...)
 	}
-	merged := mergePublicTrackers(existing)
+	merged := mergePublicTrackers(existing, c.publicTrackers)
 	if len(merged) == len(existing) {
 		return // no change
 	}
