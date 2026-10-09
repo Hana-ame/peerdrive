@@ -7,6 +7,7 @@ import { fmtBytes } from '../../../platform/shared/format';
 import { kindOf, mimeOf } from '../../../platform/shared/mime';
 import { STORAGE_KEY_API_BASE } from '../../../platform/shared/storageKeys';
 import FilePreviewModal from '../../../components/netdisk/FilePreviewModal';
+import DataState from '../../../components/netdisk/DataState';
 
 function fmtTime(ts) {
   if (!ts) return '—';
@@ -356,23 +357,24 @@ export default function Drive() {
         </div>
 
         {/* Content list or grid */}
-        {files === null ? (
-          <div className="text-center py-16 text-gray-500 text-sm">Loading...</div>
-        ) : filteredFiles.length === 0 ? (
-          <div className="text-center py-20 text-gray-500 border-2 border-dashed border-white/10 rounded-card">
-            {files.length === 0 ? (
-              <>
-                <p className="mb-2">No files yet</p>
-                <p className="text-xs text-gray-600">Click "Upload File" in the top right or register local paths on the backend.</p>
-              </>
-            ) : (
-              <>
-                <p className="mb-2">No matching files found</p>
-                <p className="text-xs text-gray-600">Try adjusting your search query, category, or tag filter.</p>
-              </>
-            )}
-          </div>
-        ) : viewMode === 'grid' ? (
+        <DataState
+          loading={files === null}
+          error={err}
+          empty={filteredFiles.length === 0}
+          onRetry={load}
+          skeletonType={viewMode === 'grid' ? 'cards' : 'table'}
+          skeletonRows={8}
+          emptyProps={{
+            icon: '☁️',
+            title: files?.length === 0 ? 'No files yet' : 'No matching files found',
+            description: files?.length === 0
+              ? 'Click "Upload File" in the top right or register local paths on the backend.'
+              : 'Try adjusting your search query, category, or tag filter.',
+            actionLabel: files?.length === 0 ? '+ Upload File' : null,
+            onAction: () => fileRef.current?.click(),
+          }}
+        >
+          {viewMode === 'grid' ? (
           /* Grid View Mode */
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
             {filteredFiles.map((f, i) => {
@@ -523,6 +525,7 @@ export default function Drive() {
             </table>
           </div>
         )}
+        </DataState>
 
         {/* Tag Editor Modal */}
         {editingTagFile && (
