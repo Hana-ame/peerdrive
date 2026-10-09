@@ -98,4 +98,46 @@ describe('ConnectionStatus', () => {
     unmount()
     expect(unsub).toHaveBeenCalledTimes(1)
   })
+
+  it('fetches and displays node, signaling server, and auth details when open (Issue #218)', async () => {
+    adminMock.mockImplementation((method, path) => {
+      if (path === '/peerjs/node') {
+        return Promise.resolve({
+          id: 'node-12345678abcdef',
+          peers: ['peer-1', 'peer-2'],
+          signal_host: 'peersignal.test.xyz',
+          signal_port: 9000,
+        })
+      }
+      if (path === '/p2p/auth/status') {
+        return Promise.resolve({
+          authenticated: true,
+          username: 'alice',
+          operator: 'alice-operator',
+        })
+      }
+      return Promise.resolve({ pong: 'pong' })
+    })
+
+    render(<ConnectionStatus />)
+    emit('open')
+
+    expect(adminMock).toHaveBeenCalledWith('GET', '/peerjs/node')
+    expect(adminMock).toHaveBeenCalledWith('GET', '/p2p/auth/status')
+
+    // Click pill to open details dropdown
+    const pill = screen.getByTestId('connection-status')
+    await act(async () => {
+      fireEvent.click(pill)
+    })
+
+    const details = screen.getByTestId('connection-details')
+    expect(details).toBeDefined()
+    expect(screen.getByTestId('detail-node-id').textContent).toBe('node-12345678abcdef')
+    expect(screen.getByTestId('detail-peer-count').textContent).toBe('2')
+    expect(screen.getByTestId('detail-signal-server').textContent).toBe('peersignal.test.xyz:9000')
+    expect(screen.getByTestId('detail-username').textContent).toBe('alice')
+    expect(screen.getByTestId('detail-operator').textContent).toBe('alice-operator')
+  })
 })
+
