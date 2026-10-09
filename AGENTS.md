@@ -250,6 +250,7 @@ Windows 那格不再跳过 `go test`；本机没装 Go 也能验：
 |---|---|---|
 | `PEERDRIVE_PEERJS_ENABLE/ID/PEERS` | true/-/- | PeerJS 信令；PEERS 逗号分隔对端自动互联 |
 | `PEERDRIVE_PEERJS_HOST/PORT/KEY` | 0.peerjs.com/443/peerjs | 可指向自托管 peersignal |
+| `PEERDRIVE_PEERJS_XOR_ENABLE/KEY` | false/- | 数据面 XOR 混淆（`back/peerjs/xor.go`，**轻量混淆非强加密**）。开 = 两端节点须配同一把 KEY（按连接派生，零额外握手）；关 = 现状明文、浏览器客户端不受影响。错 key 对端确定性失败 |
 | `PEERDRIVE_DISCOVER_URL` | - | 自托管发现 API（优先于 MQTT） |
 | `PEERDRIVE_DISCOVER_PRESENCE` | true | 节点级「存在房间」：让**零共享 collection** 的节点也能互相发现。关掉退回纯内容分片发现 |
 | `PEERDRIVE_MAX_PEERS` | 8 | 发现触发的拨号上限（防存在房间退化成 O(n²) 全互联）。静态 `PEERJS_PEERS` 不受限 |

@@ -192,6 +192,10 @@ func (s *PeerJSService) startLoop() {
 		opts.Port = s.cfg.PeerJSPort
 		opts.Secure = s.cfg.PeerJSSecure
 		opts.Key = s.cfg.PeerJSKey
+		// 数据面 XOR 混淆（back/peerjs/xor.go）：默认关 = 现状明文；开启时
+		// 与对端节点互操作要求两端同 key（浏览器 peerjs 客户端不参与 XOR）。
+		opts.XOREnable = s.cfg.PeerJSXOREnable
+		opts.XORKey = s.cfg.PeerJSXORKey
 		if opts.Host == "" {
 			opts.Host = config.DefaultSignalHost
 		}
