@@ -6,7 +6,7 @@
 - **Depended upon by** (all injected via `back/internal/serverapp/app.go`):
   - `back/internal/serverapp/app.go:52-71`: `config.Load()` + `config.Validate(cfg)` (validation failure `stdlog.Fatalf`) + volume root check/`os.Root` probing (implemented in main package, operating on config values);
   - `back/internal/router`: `SetupRouter(cfg)` (`back/internal/router/router.go:44`), `SetPeerJSConfig(cfg)` (`back/internal/router/peerjs_routes.go:50-52`);
-  - `back/internal/transport`: `NewPeerJSService(cfg, storageDir)` (`back/internal/transport/peerjs_service.go:113`), PSK gate reads `cfg.PeerPSK` (`back/internal/transport/psk.go:54,66`), cross-node pull limit reads `cfg.MaxUploadBytes` (`back/internal/transport/pull.go:79-80`);
+  - `back/internal/transport`: `NewPeerJSService(cfg, storageDir)` (`back/internal/transport/peerjs_service.go:113`), PSK gate reads `cfg.PeerPSK` (`back/internal/transport/gate.go:154`), cross-node pull limit reads `cfg.MaxUploadBytes` (`back/internal/transport/pull.go:79-80`);
   - `back/internal/service`: `AnonService{config: cfg}` (`back/internal/service/anon_service.go:25-28`), `NewNodeShare(cfg, storageDir)` (`back/internal/serverapp/app.go:134`), `NewNodeDirectory(storageDir, cfg.DiscoverURL)` (`back/internal/serverapp/app.go:120`), `FileService` upload limit/directory depth (`back/internal/service/file_service.go:309,836-841`);
   - `back/internal/controller`: `WebRTCInfoHandler(cfg)` (`back/internal/controller/webrtc.go:12-23`);
   - `back/internal/source`: URL source templates registered via main (`back/internal/serverapp/app.go:224-228`);

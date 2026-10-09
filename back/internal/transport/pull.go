@@ -8,7 +8,7 @@
 // This is the first "passive outbound request" in this node, so it's inherently a risk
 // surface: anyone who can connect can specify a URL, equivalent to using the node as a proxy.
 // Three constraints are all mandatory:
-//  1. Must pass the PSK gate (psk.go servedVerbs) — nodes with keys configured can only be
+//  1. Must pass the PSK gate (gate.go servedVerbs) — nodes with keys configured can only be
 //     used by key holders;
 //  2. SSRF protection (guardPullURL): reject non-http(s), reject internal/local/link-local
 //     addresses, and every redirect hop must be re-validated (otherwise a 302 bypasses the

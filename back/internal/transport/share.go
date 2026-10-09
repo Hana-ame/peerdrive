@@ -99,47 +99,6 @@ func (s *PeerJSService) currentShareProvider() func(peerID string) ShareSnapshot
 	return s.shareProvider
 }
 
-// ShareGate is a download gate: determines whether a given hash can be sent to the requester (doc/NETDISK.md §12.6).
-//
-// Why separate the manifest from downloads: the essential difference between the three tiers lies in "list or not" and "give or not"
-// (unlisted = don't list but give). A single provider can only answer "what's in the manifest," not
-// "can this hash be fetched."
-//
-// Only private blocks access: public / unlisted / undeclared all pass through — content-addressed retrieval is this
-// system's existing behavior, and PSK is the admission gate. Blocking "undeclared" would even break basic
-// self-checks like "upload → retrieve by hash to verify."
-//
-// self = this node's local channel (HTTP management API / local WS direct connection), always "self."
-type ShareGate interface {
-	AllowsDownload(peerID, hash string, self bool) bool
-}
-
-// SetShareGate injects the download gate (main wires service.NodeShare). nil = no gating.
-func (s *PeerJSService) SetShareGate(g ShareGate) {
-	s.shareMu.Lock()
-	s.shareGate = g
-	s.shareMu.Unlock()
-}
-
-// currentShareGate takes a locked snapshot of the download gate.
-func (s *PeerJSService) currentShareGate() ShareGate {
-	s.shareMu.RLock()
-	defer s.shareMu.RUnlock()
-	return s.shareGate
-}
-
-// isSelfSession determines whether the session comes from "self" (local WS direct connection, i.e., the admin panel/dashboard
-// connecting via /ws/peer locally).
-//
-// Why it's needed: the semantics of private is "only self and friends can download." On a P2P connection, the only
-// identifier available is the peer's self-reported peer id. The operator's own panel also gets a random id (which may differ each time),
-// so identity cannot be determined by id. A connection coming through the local WS is this node's management channel by definition,
-// and it IS "self."
-func isSelfSession(c Session) bool {
-	ls, ok := c.(interface{ IsLocal() bool })
-	return ok && ls.IsLocal()
-}
-
 // shareLoadInfo is the sharing summary reported during announce (loadInfo.shares); it contains only **counts**.
 // Why not report specific hashes: announce is broadcast by the discovery server to all queryers; reporting hashes
 // would publicly reveal "what this node holds." Counts are sufficient for the marketplace card's guiding info; details are obtained
@@ -157,7 +116,7 @@ func (s *PeerJSService) shareLoadInfo() map[string]any {
 		return nil
 	}
 	// 2026-10-04: when no PSK is configured this node serves **anyone** who reaches it
-	// (transport/psk.go pskEnabled() is literally cfg.PeerPSK != ""), so the announce body is a
+	// (transport/gate.go pskEnabled() is literally cfg.PeerPSK != ""), so the announce body is a
 	// public description of a node that has no admission control at all. Measured on the live
 	// deployment: GET /status returned this node's dir/file/collection counts to any caller.
 	//

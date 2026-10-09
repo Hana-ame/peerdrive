@@ -81,7 +81,7 @@ SHA256 hashes are converted to CIDv1 and announced on the IPFS DHT, while also a
 | Cross-node save | `service/peerpull.go` + `GET/POST /p2p/pull*` | Streaming to disk -> recompute sha256 -> register index, with progress / cancel / dedup skip |
 | Sharing scope | `service/nodeshare.go` + `share` verb + `GET/PUT /peerjs/share` | **Strictly distinguished** from `list`: `list` is the local admin index in full, only for trusted peers; `share` is the operator's explicitly declared external scope. Three sources take the union (directory / individual file hash / collection), modifiable at runtime and persisted; the volume root directory is rejected at the entry. Each carries one sharing level (`model.Level*`), multiple matches take the loosest; `private` is gated on `req` by `ShareGate` |
 | Path safety | `back/internal/pathutil` | This is the only place for the check (`Within/WithinAny`); **read boundary != write boundary**; reads go through `SafeOpen` (`os.Root`), writes through `SafeWriteFileAny` etc., eliminating the TOCTOU of "check then open by path"; hard links judged by **the open handle's** `nlink` |
-| Admission (PSK) | `transport/psk.go` | First frame `psk-auth` from this side after connection establishment; only gates verbs where "the peer asks me to do work", **never gates response frames**; `local` sessions are exempt |
+| Admission (PSK) | `transport/gate.go` | First frame `psk-auth` from this side after connection establishment; only gates verbs where "the peer asks me to do work", **never gates response frames**; `local` sessions are exempt |
 | Consumer SDK | `packages/peerdrive-client/src/` | **Transport-agnostic**: only requires `{on, send, open, close}` to be passed in, this package does not import peerjs; ships its own **incremental** sha256 (WebCrypto's `digest()` is one-shot, conflicts with streaming pull) |
 | Public panel | Same package `panel/` -> build artifact `dist/panel.html` | Single file, source inlined, opens via `file://`, can be hosted on any static space; after changing `src/` or `panel/` **must** `npm run build:panel` (CI `check:panel` catches drift) |
 | Node admin console | `front/src/pages/{Drive,Market,Peers,PeerDetail,Transfers}` | Operator view, calls the node's HTTP API, **requires the backend to be running** -- a different thing from the public panel |
@@ -290,7 +290,7 @@ security: all gates closed (inbound PSK / admin-surface auth / public roster / S
 > **Why `PEERDRIVE_PSK` is not forced by default**: forcing it would make every existing deployment fail to start
 > (the env block in `doc/tutorial/01-run-and-connect.md` §1.3 has no PSK, and the public panel does not present one by default),
 > CI has no coverage of the PSK path, and PSK itself is a **shared key with no identity** — it can only answer
-> "does the other side know this key", not "who is the other side" (see `back/internal/transport/psk.go`).
+> "does the other side know this key", not "who is the other side" (see `back/internal/transport/gate.go`).
 > So: report first, then add gates as the deployment scenario requires.
 
 > **About `PEERDRIVE_AUTH_TOKEN`**: it has been **removed** (2026-10-04). It was never an inbound gate to begin with —
