@@ -9,8 +9,8 @@
 在 Peerdrive 架构中，节点本质为自托管与去中心化文件网络节点，而「注册/中转/发现/DNS」等基础设施角色往往由长期在线的中枢实例或公共服务提供。现状四项技术点的代码分布如下：
 
 ### 1.1 注册服务 (`regserver`)
-- **物理位置**：`back/internal/regserver/`
-- **代码结构**（已在 PR #42 中完成单文件解构）：
+- **物理位置**：`back/signalserver/regserver/`
+- **代码结构**（已在 Issue #200 中完成独立模块解耦）：
   - `regserver.go`：Server 结构体装配、速率限制与生命周期（`New`, `Handler`, `Serve`, `Close`）。
   - `jwt.go`：JWT 签发与校验（HS256，字节级兼容原独立版本）。
   - `auth.go`：JSON 工具与 `net/http` 原生 Bearer 认证中间件（无 Gin 依赖）。
@@ -19,17 +19,15 @@
   - `handlers_relay.go`：`/p2p/relay/*` 路由处理与地址序列化。
   - `tracker_auth.go`：BitTorrent tracker 的 `/tracker/bans` 封禁管理与 JWT 适配。
 - **依赖耦合分析**：
-  - **入向引用（谁依赖它）**：仅有 3 处，均位于装配与外层边界：
-    - `back/cmd/peerdrive/subcommands.go`（`runReg` 子命令）
+  - **入向引用（谁依赖它）**：均位于装配与外层边界：
+    - `back/cmd/peerdrive/subcommands.go`（`runReg` 与 `runHub` 子命令）
     - `back/internal/services/services.go`（`UnifiedMux` 多服务挂载）
-    - `back/internal/nodestate/nodestate.go`
-  - **出向引用（它依赖谁）**：仅依赖 2 个 `internal` 包：
-    - `peerdrive/internal/httpd`（地址规范化）
-    - `peerdrive/internal/ratelimit`（请求令牌桶限流）
+    - `back/signalserver/cmd/peerserver/main.go`（独立辅助二进制）
+  - **出向引用（它依赖谁）**：零 `peerdrive/internal/*` 依赖，纯净标准库与独立模块内部 `tracker`。
 
 ### 1.2 中转服务 (`relay`)
 - **物理现状**：仓库内并无独立的 `internal/relay` 包。
-- **实现位置**：所有中继登记与心跳逻辑已全部收敛在 `back/internal/regserver/handlers_relay.go`：
+- **实现位置**：所有中继登记与心跳逻辑已全部收敛在 `back/signalserver/regserver/handlers_relay.go`：
   - `POST /p2p/relay/register`（幂等 upsert 节点地址与负载）
   - `POST /p2p/relay/heartbeat`（心跳保活更新）
   - `GET  /p2p/relay/list`（查询在线中继节点）
@@ -40,7 +38,7 @@
   - `http_discovery.go`（HTTP 轮询自托管信令发现 API）
   - `mqtt_discovery.go`（MQTT 公共 broker 分片房间广播与监听）
 - **服务端形态**：**已经是独立模块**：
-  - `back/signalserver/` 拥有独立的 `go.mod`（`github.com/Hana-ame/go-peersignal`，tag v0.1.0 同步），并产出独立二进制 `cmd/peersignal`。
+  - `back/signalserver/` 拥有独立的 `go.mod`（`github.com/Hana-ame/go-peerserver`，tag v0.1.0 同步），并产出独立二进制 `cmd/peersignal` 与 `cmd/peerserver`。
   - 主模块通过 `PEERDRIVE_DISCOVER_URL` 与自托管信令发现 API 交互。
 
 ### 1.4 DNS 解析与发现 (`DNS`)
@@ -53,9 +51,9 @@
 
 Go 编译器的 `internal/` 访问控制规则强制规定：`internal` 目录下的包只能被同父级目录树下的包导入。
 
-如果将 `back/internal/regserver` 移出 `back/` 主模块（例如成为独立模块或外部 repo）：
-1. **外部无法反向引用 internal**：挪出后的 `regserver` 将无法导入 `peerdrive/internal/httpd` 与 `peerdrive/internal/ratelimit`。
-2. **主模块无法跨树引用**：如果挪为独立模块，主模块也不能再使用 `peerdrive/internal/regserver`，必须通过独立 module 路径引入。
+`back/signalserver/regserver` 已成功迁出主模块 `internal/`，成为独立模块 `go-peerserver` 的子包：
+1. **消除对 internal 的所有依赖**：解耦后不再导入 `peerdrive/internal/*`，自包含令牌桶、退避与端口规范化。
+2. **主模块跨模块引入**：主模块通过 `github.com/Hana-ame/go-peerserver/regserver` 引入。
 
 ### 应对模式对比
 

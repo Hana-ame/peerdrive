@@ -7,19 +7,23 @@ package main
 // （复制一份会迟早分叉）。
 
 import (
+	"crypto/subtle"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 
+	signalserver "github.com/Hana-ame/go-peerserver"
+	"github.com/Hana-ame/go-peerserver/regserver"
 	"github.com/Hana-ame/go-peerserver/tracker"
 	"peerdrive/internal/config"
 	"peerdrive/internal/httpd"
 	"peerdrive/internal/log"
 	"peerdrive/internal/mcp"
-	"peerdrive/internal/regserver"
 	"peerdrive/internal/serverapp"
 	"peerdrive/internal/services"
 )
@@ -208,3 +212,108 @@ func runMCP(args []string) {
 		os.Exit(1)
 	}
 }
+
+// runHub runs the standalone public infrastructure hub (signaling + room discovery + tracker + regserver/relay).
+// Aligned with cmd/peerserver: single port, zero CAS file engine, zero peerdrive.db.
+func runHub(args []string) {
+	fs := flag.NewFlagSet("hub", flag.ExitOnError)
+	addr := fs.String("addr", ":9000", "listen address")
+	key := fs.String("key", config.DefaultSignalKey, "PeerJS API key")
+	tokens := fs.String("tokens", "", "signaling token whitelist")
+	opsToken := fs.String("ops-token", "", "credential for ops endpoints (/status, /status/key)")
+	cert := fs.String("tls-cert", "", "TLS certificate (PEM)")
+	tlsKey := fs.String("tls-key", "", "TLS private key (PEM)")
+	cors := fs.String("cors-origin", "", "CORS allow-list")
+
+	btTracker := fs.Bool("bt-tracker", false, "enable BitTorrent HTTP tracker")
+	btBansFile := fs.String("bt-bans-file", "tracker_bans.json", "JSON file for tracker ban persistence")
+	btInterval := fs.Int("bt-interval", 900, "announce interval in seconds")
+	btMaxPeers := fs.Int("bt-max-peers", 100, "max peers per info_hash")
+
+	dbPath := fs.String("db", "", "sqlite path for regserver (default: $PEERDRIVE_REG_DB -> $DB_PATH -> ./reg.db)")
+	jwtSecret := fs.String("jwt-secret", "", "JWT secret for regserver")
+	_ = fs.Parse(args)
+
+	if *jwtSecret != "" {
+		_ = os.Setenv("PEERDRIVE_JWT_SECRET", *jwtSecret)
+	}
+
+	var sigOpts []signalserver.Option
+	if *tokens != "" {
+		sigOpts = append(sigOpts, signalserver.WithTokenWhitelist(strings.Split(*tokens, ",")))
+	}
+	if *opsToken != "" {
+		sigOpts = append(sigOpts, signalserver.WithOpsToken(*opsToken))
+	}
+	if *cors != "" {
+		sigOpts = append(sigOpts, signalserver.WithCORSOrigins(strings.Split(*cors, ",")))
+	}
+	sigOpts = append(sigOpts, signalserver.WithRateLimit(signalserver.RateLimitConfig{
+		AnnounceRPS: 1, AnnounceBurst: 10,
+		WSRPS: 2, WSBurst: 20,
+		IDRPS: 5, IDBurst: 20,
+	}))
+
+	sigSrv := signalserver.NewServer(*key, sigOpts...)
+	sigSrv.Start()
+
+	regSrv, err := regserver.New(*dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "peerdrive hub: regserver init failed: %v\n", err)
+		os.Exit(1)
+	}
+	defer regSrv.Close()
+
+	if *btTracker {
+		btOpts := []tracker.Option{
+			tracker.WithAnnounceInterval(*btInterval),
+			tracker.WithMaxPeers(*btMaxPeers),
+		}
+		if *btBansFile != "" {
+			btOpts = append(btOpts, tracker.WithBanFile(*btBansFile))
+		}
+		if *opsToken != "" {
+			btOpts = append(btOpts, tracker.WithBanAuth(func(r *http.Request) bool {
+				if *opsToken == "" {
+					return false
+				}
+				presented := r.URL.Query().Get("token")
+				if presented == "" {
+					if h := r.Header.Get("Authorization"); len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
+						presented = strings.TrimSpace(h[7:])
+					}
+				}
+				return subtle.ConstantTimeCompare([]byte(presented), []byte(*opsToken)) == 1
+			}))
+		}
+		tr := regSrv.SetupTracker(btOpts...)
+		regSrv.SetTracker(tr)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/peerjs", sigSrv.HandleWS)
+	mux.HandleFunc("/peerjs/id", sigSrv.HandleID)
+	mux.HandleFunc("/discover/announce", sigSrv.HandleAnnounce)
+	mux.HandleFunc("/discover/leave", sigSrv.HandleLeave)
+	mux.HandleFunc("/discover/nodes", sigSrv.HandleNodes)
+	mux.HandleFunc("/status", sigSrv.HandleStatus)
+	mux.HandleFunc("/status/key", sigSrv.HandleOpsKey)
+
+	regMux := regSrv.Handler()
+	for _, p := range services.RegPatterns {
+		mux.Handle(p, regMux)
+	}
+	if *btTracker {
+		mux.Handle("/announce", regMux)
+		mux.Handle("/scrape", regMux)
+		mux.Handle("/tracker/bans", regMux)
+	}
+	mux.HandleFunc("/", sigSrv.HandleDashboard)
+
+	log.LogInfo("hub: unified public infrastructure on %s (signaling + discovery + tracker + regserver/relay)", *addr)
+	if err := services.ServeHTTP(*addr, *cert, *tlsKey, mux); err != nil {
+		fmt.Fprintf(os.Stderr, "peerdrive hub: %v\n", err)
+		os.Exit(1)
+	}
+}
+

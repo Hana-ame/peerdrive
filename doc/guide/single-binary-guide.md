@@ -398,5 +398,5 @@ go test -tags nosqlite ./...
 | `doc/PEERSIGNAL.md` | 信令协议细节 |
 | `doc/NODE-API.md` | 节点 HTTP 接口 |
 | `doc/guide/USER_MANUAL.md` | 普通用户使用手册 |
-| `back/internal/regserver/README.md` | 注册服务内部说明 |
+| `back/signalserver/regserver/README.md` | 注册服务内部说明 |
 | `doc/guide/operation-manual.md` | 开发环境运维（⚠️ 部分章节较旧） |

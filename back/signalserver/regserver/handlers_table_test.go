@@ -16,8 +16,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"testing"
-
-	"peerdrive/internal/ratelimit"
 )
 
 // newUnlimitedTestServer 起一个限流桶 burst 足够大的 Server，用于
@@ -36,9 +34,9 @@ func newUnlimitedTestServer(t *testing.T) *http.ServeMux {
 	}
 	t.Cleanup(func() { _ = srv.Close() })
 	// 把三个桶都调到「测试期间不会触达」的大小。
-	srv.registerLimiter = ratelimit.New(1000, 1000)
-	srv.loginLimiter = ratelimit.New(1000, 1000)
-	srv.relayLimiter = ratelimit.New(1000, 1000)
+	srv.registerLimiter = NewLimiter(1000, 1000)
+	srv.loginLimiter = NewLimiter(1000, 1000)
+	srv.relayLimiter = NewLimiter(1000, 1000)
 	return srv.Handler().(*http.ServeMux)
 }
 
