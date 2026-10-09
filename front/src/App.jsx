@@ -2,7 +2,7 @@
 // Home page = node search / connect (PeerJS consumer); other modules are being
 // rebuilt one by one (in-construction placeholder).
 import React, { useEffect, Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { HashRouter, Routes, Route, Link } from 'react-router-dom';
 import { registerSW } from './platform/shared/swBridge';
 import ConnectionStatus from './lib/ConnectionStatus';
 
@@ -107,7 +107,7 @@ function Nav() {
 export default function App() {
   useEffect(() => { registerSW(); }, []);
   return (
-    <BrowserRouter basename={import.meta.env.BASE_URL}>
+    <HashRouter>
       <div className="flex flex-col h-screen text-gray-200">
         <Nav />
         <div className="flex-1 overflow-hidden">
@@ -131,6 +131,6 @@ export default function App() {
           </Suspense>
         </div>
       </div>
-    </BrowserRouter>
+    </HashRouter>
   );
 }

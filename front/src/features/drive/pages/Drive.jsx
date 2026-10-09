@@ -164,7 +164,8 @@ export default function Drive() {
   const onCopyDeepLink = (f) => {
     const origin = window.location.origin;
     const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-    const url = `${origin}${base}/drive/${f.hash}`;
+    // Hash router: append #/drive/:hash (no server SPA fallback needed)
+    const url = `${origin}${base}#/drive/${f.hash}`;
     navigator.clipboard?.writeText(url);
     setCopiedHash(f.hash);
     setTimeout(() => setCopiedHash(''), 2000);
