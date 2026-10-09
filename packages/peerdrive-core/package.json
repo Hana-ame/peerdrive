@@ -1,0 +1,18 @@
+{
+  "name": "peerdrive-core",
+  "version": "0.1.0",
+  "description": "Shared frame protocol state machine and connection serial dispatcher for peerdrive clients",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["peerdrive", "peerjs", "webrtc", "statemachine", "protocol"],
+  "exports": {
+    ".": "./src/index.js",
+    "./protocol": "./src/protocol.js",
+    "./dispatcher": "./src/dispatcher.js"
+  },
+  "files": ["src", "README.md"],
+  "sideEffects": false,
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  }
+}
