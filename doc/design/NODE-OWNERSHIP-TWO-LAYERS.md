@@ -35,7 +35,7 @@
 
 ## 2. 现状：两层已经存在，只是没有连起来
 
-`back/internal/regserver/regserver.go` 的 `openDB()`（189 行起）建了**两张独立
+`back/signalserver/regserver/db.go` 的 `openDB()`（30 行起）建了**两张独立
 的表**：
 
 ```sql

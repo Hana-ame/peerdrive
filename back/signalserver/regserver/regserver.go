@@ -64,19 +64,17 @@
 package regserver
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Hana-ame/go-peerserver/tracker"
-	"peerdrive/internal/httpd"
-	"peerdrive/internal/log"
-	"peerdrive/internal/ratelimit"
 )
 
 // ---------------------------------------------------------------------------
@@ -104,11 +102,11 @@ import (
 //
 // 放在本文件（而不是 auth.go）是因为它是与 authRequired 并列的另一类中间件，
 // 但只在 Handler 装配时用——与 Server 的生命周期绑定，不跨功能块。
-func (s *Server) rateLimit(l *ratelimit.Limiter) func(http.HandlerFunc) http.HandlerFunc {
+func (s *Server) rateLimit(l *Limiter) func(http.HandlerFunc) http.HandlerFunc {
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			if !l.Allow(ratelimit.ClientIP(r)) {
-				ratelimit.TooManyRequests(w, time.Second)
+			if !l.Allow(ClientIP(r)) {
+				TooManyRequests(w, time.Second)
 				return
 			}
 			next(w, r)
@@ -142,10 +140,10 @@ type Server struct {
 	// 与 1 字节查询的 whoami 共用一个 30rps 的桶，前者每秒最多只能过 ~10 次，
 	// 后者却还有富余——一档就等于把最贵的端点限死在最低档。
 	// 所以按「代价」分三档，而不是全站一刀切。
-	registerLimiter *ratelimit.Limiter // 昂贵（bcrypt）+ 可刷号
-	loginLimiter    *ratelimit.Limiter // 昂贵（bcrypt 比对）+ 可爆破
-	relayLimiter    *ratelimit.Limiter // 廉价写库，但会污染中继名录
-	loginBackoff    *ratelimit.Backoff // 账号级退避（防爆破的主力，限流只是兜底）
+	registerLimiter *Limiter // 昂贵（bcrypt）+ 可刷号
+	loginLimiter    *Limiter // 昂贵（bcrypt 比对）+ 可爆破
+	relayLimiter    *Limiter // 廉价写库，但会污染中继名录
+	loginBackoff    *Backoff // 账号级退避（防爆破的主力，限流只是兜底）
 
 	// tracker is an optional BitTorrent HTTP tracker server (BEP 12/31).
 	// When set, /announce, /scrape, and /tracker/bans are served alongside
@@ -161,7 +159,7 @@ func ResolveJWTSecret() (string, bool) {
 		return val, true
 	}
 	if val, ok := os.LookupEnv("JWT_SECRET"); ok && val != "" {
-		log.LogWarn("regserver: JWT_SECRET is deprecated, use PEERDRIVE_JWT_SECRET instead")
+		log.Printf("[WARN] regserver: JWT_SECRET is deprecated, use PEERDRIVE_JWT_SECRET instead")
 		return val, true
 	}
 	return "", false
@@ -179,11 +177,11 @@ func New(dbPath string) (*Server, error) {
 		return nil, errors.New("JWT_SECRET is required")
 	}
 	s := &Server{
-		jwtSecret:      []byte(secret),
-		registerLimiter: ratelimit.New(regRate("PEERDRIVE_REG_RATE_REGISTER", 0.5), 3),
-		loginLimiter:    ratelimit.New(regRate("PEERDRIVE_REG_RATE_LOGIN", 1), 5),
-		relayLimiter:    ratelimit.New(regRate("PEERDRIVE_REG_RATE_RELAY", 2), 20),
-		loginBackoff:    ratelimit.DefaultBackoff(),
+		jwtSecret:       []byte(secret),
+		registerLimiter: NewLimiter(regRate("PEERDRIVE_REG_RATE_REGISTER", 0.5), 3),
+		loginLimiter:    NewLimiter(regRate("PEERDRIVE_REG_RATE_LOGIN", 1), 5),
+		relayLimiter:    NewLimiter(regRate("PEERDRIVE_REG_RATE_RELAY", 2), 20),
+		loginBackoff:    DefaultBackoff(),
 	}
 	if err := s.openDB(dbPath); err != nil {
 		return nil, fmt.Errorf("db open failed: %w", err)
@@ -216,7 +214,7 @@ func ResolveDBPath() string {
 		return p
 	}
 	if p := os.Getenv("DB_PATH"); p != "" {
-		log.LogWarn("regserver: DB_PATH is deprecated, use PEERDRIVE_REG_DB instead")
+		log.Printf("[WARN] regserver: DB_PATH is deprecated, use PEERDRIVE_REG_DB instead")
 		return p
 	}
 	return "./reg.db"
@@ -306,20 +304,31 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// NormalizePort turns a bare port or a host:port string into a listen address.
+// The default ":4000" is the registration server's historical port.
+func NormalizePort(p string) string {
+	if p == "" {
+		return ":4000"
+	}
+	if strings.Contains(p, ":") {
+		return p
+	}
+	if strings.Contains(p, ".") {
+		return p + ":4000"
+	}
+	return ":" + p
+}
+
 // Serve 在 addr 上启动并阻塞，直到出错。
 // 只给 certFile 或 keyFile 其一即报错——静默降级成明文会让「以为在跑 HTTPS」
 // 的部署上线，代价远大于启动失败。
-//
-// 实现已搬到 internal/httpd（密钥加载、半参数报错、普通 Serve 都在那里）；
-// 签名 (addr, certFile, keyFile) 保持不变，runReg 按这个顺序传参。
 func (s *Server) Serve(addr, certFile, keyFile string) error {
-	srv, err := httpd.New(httpd.Config{
-		Addr:     addr,
-		CertFile: certFile,
-		KeyFile:  keyFile,
-	}, s.Handler())
-	if err != nil {
-		return err
+	addr = NormalizePort(addr)
+	if certFile == "" && keyFile == "" {
+		return http.ListenAndServe(addr, s.Handler())
 	}
-	return srv.Serve(context.Background())
+	if certFile == "" || keyFile == "" {
+		return errors.New("TLS requires both certFile and keyFile")
+	}
+	return http.ListenAndServeTLS(addr, certFile, keyFile, s.Handler())
 }

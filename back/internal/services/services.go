@@ -22,7 +22,8 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/httpd"
-	"peerdrive/internal/regserver"
+
+	"github.com/Hana-ame/go-peerserver/regserver"
 )
 
 // SignalHandler 构造信令 + 节点发现的 http.Handler（不监听端口）。

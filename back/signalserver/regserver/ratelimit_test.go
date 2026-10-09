@@ -21,8 +21,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"peerdrive/internal/ratelimit"
 )
 
 // ratelimitForTest 造一个测试用的令牌桶。
@@ -31,13 +29,13 @@ import (
 // 本包最贵的被放行请求是 register（真跑 bcrypt cost10，约 60-100ms），
 // 若 rps 给到 2，三次 bcrypt 的耗时就能回填约半个令牌，测试会变得依赖机器快慢。
 // 0.01 rps 时两次请求之间最多回填 0.001 个令牌，可确定性地认为桶不会自行恢复。
-func ratelimitForTest(rps float64, burst int) *ratelimit.Limiter {
-	return ratelimit.New(rps, burst)
+func ratelimitForTest(rps float64, burst int) *Limiter {
+	return NewLimiter(rps, burst)
 }
 
 // ratelimitBackoffForTest 造一个低阈值的退避器，默认参数会拖慢测试。
-func ratelimitBackoffForTest(threshold int) *ratelimit.Backoff {
-	return ratelimit.NewBackoff(ratelimit.BackoffParams{
+func ratelimitBackoffForTest(threshold int) *Backoff {
+	return NewBackoff(BackoffParams{
 		Threshold: threshold,
 		Base:      time.Hour, // 一旦触发就足以观察，不真的去等
 		Max:       time.Hour,

@@ -60,6 +60,8 @@ func main() {
 		runReg(args)
 	case "all":
 		runAll(args)
+	case "hub":
+		runHub(args)
 	case "demo":
 		os.Exit(runDemo(args))
 	case "mcp":
