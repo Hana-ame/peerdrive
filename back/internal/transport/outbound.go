@@ -60,6 +60,10 @@ func (s *PeerJSService) requestVerbPayload(peerID string, req dcReq, timeout tim
 	if st == nil {
 		return nil, fmt.Errorf("peerjs: connection not bound")
 	}
+	reqCap := VerbRequiredCap(reqType)
+	if reqCap != "" && !isSelfSession(conn) && !st.hasCapability(reqCap) {
+		return nil, fmt.Errorf("peerjs: peer %s lacks capability %q", peerID, reqCap)
+	}
 	reqID := uuid.NewString()
 	ch := make(chan []byte, 1)
 	st.mu.Lock()
@@ -282,6 +286,9 @@ func (s *PeerJSService) openStream(c Session, hash string, offset, size int64, t
 	st := s.stateFor(c)
 	if st == nil {
 		return nil, fmt.Errorf("peerjs: connection not bound")
+	}
+	if !isSelfSession(c) && !st.hasCapability(CapReq) {
+		return nil, fmt.Errorf("peerjs: peer %s lacks capability %q", c.ID(), CapReq)
 	}
 	st.mu.Lock()
 	st.fetches[reqID] = f

@@ -76,6 +76,10 @@ type dcReq struct {
 	Query   string `json:"q,omitempty"`
 	MinSize *int64 `json:"minSize,omitempty"`
 	MaxSize *int64 `json:"maxSize,omitempty"`
+
+	// Capabilities declared capabilities in open / cap handshake frames (Issue #213)
+	Capabilities []string `json:"capabilities,omitempty"`
+	Caps         []string `json:"caps,omitempty"` // alias for capabilities
 }
 
 // traceCtxKey context key (exported as TraceKey for source package to read; type is
@@ -122,6 +126,10 @@ type dcResp struct {
 	Query   string `json:"q,omitempty"`        // search: 子串（name 或 path）
 	MinSize *int64 `json:"minSize,omitempty"` // search: size 下界（含）
 	MaxSize *int64 `json:"maxSize,omitempty"` // search: size 上界（含）
+
+	// Capabilities declared capabilities in open / cap / psk-auth / psk-ok handshake frames (Issue #213)
+	Capabilities []string `json:"capabilities,omitempty"`
+	Caps         []string `json:"caps,omitempty"` // alias for capabilities
 }
 
 // connState records the request state machine and response routing for a connection.
@@ -172,6 +180,12 @@ type connState struct {
 	// Only affects "whether this node serves it", not its responses to our own requests
 	// (responses go through routeResponse; we have no reason to block our own data).
 	pskOK bool
+
+	// Capability negotiation state (Issue #213).
+	capNegotiated bool
+	capSent       bool
+	caps          map[string]bool
+	isLocal       bool
 }
 
 // fwdChunk a chunk of forwarding data to be written to the tunnel (ownership carried
@@ -289,6 +303,10 @@ func sessionRank(s Session) string {
 // Production callers (onIncomingConnection, connectLoop) use bindConnPrepared directly
 // with handlers registered before OnOpen to close the pre-bindConn frame-drop race.
 func (s *PeerJSService) bindConn(c Session) {
+	s.bindConnInternal(c, false)
+}
+
+func (s *PeerJSService) bindConnInternal(c Session, isLocal bool) {
 	if s.IsPeerBlocked(c.ID()) {
 		log.LogWarn("peerjs: bindConn for blocked peer %s rejected", c.ID())
 		c.Close()
@@ -314,6 +332,7 @@ func (s *PeerJSService) bindConn(c Session) {
 		binCh:     make(chan binaryChunk, 16),
 		binDone:   make(chan struct{}),
 		fwdCh:     make(chan fwdChunk, 16),
+		isLocal:   isLocal,
 	}
 
 	// ⚠️ OnMessage MUST be registered **before doing anything that may yield**.
@@ -369,7 +388,7 @@ func (s *PeerJSService) bindConnPrepared(c Session, st *connState, old Session) 
 	// If the peer doesn't present psk-auth within pskAuthTimeout, close the connection.
 	// The timer checks st.pskOK (set by servePskAuth) — if the peer authenticates first,
 	// the timer callback is a no-op. If the connection closes early, c.Close() is a no-op.
-	if s.pskEnabled() && !isSelfSession(c) {
+	if s.pskEnabled() && !isSelfSession(c) && !st.isLocal {
 		time.AfterFunc(pskAuthTimeout, func() {
 			st.mu.Lock()
 			ok := st.pskOK
@@ -381,8 +400,12 @@ func (s *PeerJSService) bindConnPrepared(c Session, st *connState, old Session) 
 		})
 	}
 
-	// PSK gate: if a key is configured, present it (our first frame).
-	s.pskSendAuth(c)
+	if !st.isLocal {
+		// PSK gate: if a key is configured, present it (our first frame).
+		s.pskSendAuth(c)
+		// Capability announcement: if PSK is disabled, exchange supported capabilities on open (Issue #213).
+		s.capSendAnnouncement(c, st)
+	}
 }
 
 // dispatchFrame connection message pump: parses JSON header, routes by reqId, appends
@@ -402,17 +425,48 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 		// PSK gate: handle handshake frames first, then filter "make me work" inbound
 		// verbs with the gate (gate.go). Before peer presents, these verbs all return err.
 		if r.Type == "psk-auth" {
-			s.servePskAuth(c, st, r.Psk)
+			s.servePskAuth(c, st, r)
 			return
 		}
-		if r.Type == "psk-ok" || r.Type == "psk-err" {
+		if r.Type == "psk-ok" {
+			remoteCaps := r.Capabilities
+			if len(remoteCaps) == 0 && len(r.Caps) > 0 {
+				remoteCaps = r.Caps
+			}
+			if remoteCaps != nil {
+				s.negotiateCapabilities(c, st, remoteCaps, "")
+			}
+			return
+		}
+		if r.Type == "psk-err" {
 			return // Client-side handshake receipts: not needed here (presenter doesn't wait
 			// for receipt, see gate.go)
+		}
+		// Capability negotiation handshake: cap/open frames (Issue #213)
+		if r.Type == "cap" || r.Type == "open" {
+			s.serveCap(c, st, r)
+			return
 		}
 		if s.pskGate(c, st, r) {
 			return
 		}
 		if s.anonGate(c, st, r) {
+			return
+		}
+
+		// Capability check for inbound verbs (Issue #213):
+		// Unrecognized or unsupported capabilities result in explicit CAPABILITY_UNSUPPORTED
+		// error frames instead of silent frame drops.
+		reqCap := VerbRequiredCap(r.Type)
+		if reqCap != "" && !isSelfSession(c) && !st.hasCapability(reqCap) {
+			_ = c.SendJSON(dcResp{
+				Type:  "err",
+				Code:  ErrCodeCapUnsupported,
+				Msg:   fmt.Sprintf("capability %q not supported on this connection", reqCap),
+				ReqID: r.ReqID,
+				Hash:  r.Hash,
+			})
+			log.LogWarn("peerjs: verb %q from %s rejected: lacks capability %q", r.Type, c.ID(), reqCap)
 			return
 		}
 		switch r.Type {
