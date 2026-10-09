@@ -1,17 +1,10 @@
 // ConnectionStatus.jsx — live WS-session pill in the app nav.
 //
-// Why this exists (audit P7): ws.js has exported onStatus() since the migration,
-// but nothing subscribed — the UI could not tell "connecting to the local node"
-// apart from "the backend is down", so on a disconnect users saw buttons that did
-// nothing, with no idea whether to wait or refresh (the very problem documented
-// above ws.js:97). Syncthing's event-driven status (benchmark B14) is the model:
-// subscribe to the state machine, render it, never poll for it.
-//
-// The pill reflects ws.js's own status machine: idle / connecting / open / closed.
-// "closed" is not fatal — ws.js auto-reconnects with backoff — so the label says
-// "Reconnecting…" to match reality, and the click affordance forces an immediate
-// retry for users who won't wait out the backoff.
-import React, { useEffect, useState } from 'react';
+// Why this exists (audit P7 / Issue #218): ws.js has exported onStatus() since the migration.
+// Issue #218: displays not just binary connection status, but also node identity (peer ID),
+// signaling server (host:port), and authentication status (username / operator).
+// Event-driven: onStatus() triggers metadata fetch once on 'open', without continuous polling.
+import React, { useEffect, useState, useRef } from 'react';
 import { getStatus, onStatus } from '../platform/transport-ws/status';
 import { admin } from '../platform/transport-ws';
 
@@ -26,39 +19,142 @@ const STATE = {
 
 export default function ConnectionStatus() {
   const [status, setStatus] = useState(() => getStatus());
+  const [nodeInfo, setNodeInfo] = useState(null);
+  const [authInfo, setAuthInfo] = useState(null);
+  const [showDetails, setShowDetails] = useState(false);
+  const containerRef = useRef(null);
 
   useEffect(() => {
     // onStatus fires immediately with the current state, then on every change;
     // the returned function unsubscribes (module-level Set — leak-free for remounts).
-    const off = onStatus(setStatus);
+    const off = onStatus((s) => {
+      setStatus(s);
+      if (s === 'open') {
+        admin('GET', '/peerjs/node')
+          .then((data) => setNodeInfo(data))
+          .catch(() => {});
+        admin('GET', '/p2p/auth/status')
+          .then((data) => setAuthInfo(data))
+          .catch(() => {});
+      } else {
+        setNodeInfo(null);
+        setAuthInfo(null);
+        setShowDetails(false);
+      }
+    });
     return off;
   }, []);
 
+  useEffect(() => {
+    if (!showDetails) return;
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setShowDetails(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showDetails]);
+
   const cur = STATE[status] || STATE.idle;
 
-  const retry = (e) => {
+  const handleClick = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    try {
-      // admin() lazily connects (ensureConnected semantics inside ws.js), so this
-      // /ping probe — the lightest endpoint (controller/ping.go returns pong) —
-      // both forces an immediate retry now and drives the pill back to
-      // "connecting → Connected" without waiting for the next user action.
-      admin('GET', '/ping').catch(() => {});
-    } catch {}
+    if (status === 'open') {
+      setShowDetails((prev) => !prev);
+    } else {
+      try {
+        // admin() lazily connects (ensureConnected semantics inside ws.js), so this
+        // /ping probe — the lightest endpoint (controller/ping.go returns pong) —
+        // both forces an immediate retry now and drives the pill back to
+        // "connecting → Connected" without waiting for the next user action.
+        admin('GET', '/ping').catch(() => {});
+      } catch {}
+    }
   };
 
+  const nodeLabel = status === 'open' && nodeInfo?.id
+    ? `Connected (${nodeInfo.id.slice(0, 8)})`
+    : cur.label;
+
   return (
-    <button
-      type="button"
-      onClick={retry}
-      title={`Local node session: ${status}${status === 'closed' ? ' (auto-retry with backoff; click to retry now)' : ''}`}
-      className={`ml-auto shrink-0 flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-white/[0.08] bg-white/[0.04] ${cur.text} hover:bg-white/[0.08] transition-colors`}
-      data-testid="connection-status"
-      data-status={status}
-    >
-      <span className={`w-2 h-2 rounded-full ${cur.dot}`} aria-hidden="true" />
-      {cur.label}
-    </button>
+    <div className="relative ml-auto shrink-0" ref={containerRef}>
+      <button
+        type="button"
+        onClick={handleClick}
+        title={`Local node session: ${status}${status === 'closed' ? ' (auto-retry with backoff; click to retry now)' : ''}`}
+        className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-white/[0.08] bg-white/[0.04] ${cur.text} hover:bg-white/[0.08] transition-colors focus:outline-none`}
+        data-testid="connection-status"
+        data-status={status}
+      >
+        <span className={`w-2 h-2 rounded-full ${cur.dot}`} aria-hidden="true" />
+        <span>{nodeLabel}</span>
+      </button>
+
+      {showDetails && status === 'open' && (
+        <div
+          data-testid="connection-details"
+          className="absolute right-0 top-full mt-2 w-72 p-3 rounded-lg shadow-xl border border-white/[0.12] bg-gray-900/95 backdrop-blur text-xs z-50 text-gray-200 space-y-2.5"
+        >
+          <div className="flex items-center justify-between border-b border-white/[0.08] pb-1.5 font-medium text-gray-300">
+            <span>Connection Details</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-300 font-mono">
+              Live
+            </span>
+          </div>
+
+          <div className="space-y-1">
+            <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Node Identity</div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-400">Peer ID:</span>
+              <span
+                data-testid="detail-node-id"
+                className="font-mono text-[11px] text-gray-200 truncate max-w-[170px]"
+                title={nodeInfo?.id || 'Unknown'}
+              >
+                {nodeInfo?.id || 'Unknown'}
+              </span>
+            </div>
+            {nodeInfo?.peers && (
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400">Peers Online:</span>
+                <span data-testid="detail-peer-count" className="font-mono text-gray-200">
+                  {nodeInfo.peers.length}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-1 border-t border-white/[0.06] pt-1.5">
+            <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Signaling Server</div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-400">Server:</span>
+              <span data-testid="detail-signal-server" className="font-mono text-[11px] text-gray-200 truncate max-w-[170px]">
+                {nodeInfo?.signal_host ? `${nodeInfo.signal_host}:${nodeInfo.signal_port || 443}` : 'Default cloud'}
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-1 border-t border-white/[0.06] pt-1.5">
+            <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Account / Auth</div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-400">User:</span>
+              <span data-testid="detail-username" className="font-mono text-gray-200 truncate max-w-[170px]">
+                {authInfo?.username || (authInfo?.authenticated ? 'Authenticated' : 'Guest')}
+              </span>
+            </div>
+            {authInfo?.operator && (
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400">Operator:</span>
+                <span data-testid="detail-operator" className="font-mono text-gray-200 truncate max-w-[170px]">
+                  {authInfo.operator}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
