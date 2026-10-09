@@ -9,6 +9,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { connectToPeer, discoverNodes } from './pd-client';
 import { setNodeSession, clearNodeSession } from './nodeSession';
+import { fmtBytes } from './format';
+
 
 const DEFAULT_SIG = {
   host: 'peersignal.moonchan.xyz',
@@ -48,13 +50,6 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
   const [searchStatus, setSearchStatus] = useState('idle'); // idle|searching|error
   const [searchErr, setSearchErr] = useState('');
 
-  const fmtBytes = (n) => {
-    if (!n || n === 0) return '—';
-    const u = ['B', 'KB', 'MB', 'GB'];
-    let v = n, i = 0;
-    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-    return v.toFixed(v < 10 ? 1 : 0) + ' ' + u[i];
-  };
 
   // Dial core: connect directly by the passed peerId (doesn't depend on state;
   // the search-list click can call it immediately)
