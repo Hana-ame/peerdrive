@@ -183,10 +183,10 @@ func (p *PeerPuller) Start(peer, hash, name, relPath, coll string) (*PullJob, er
 	ctx, cancel := context.WithCancel(context.Background())
 	p.mu.Lock()
 	p.cancels[job.ID] = cancel
+	snap := *job
 	p.mu.Unlock()
 
 	go p.run(ctx, job)
-	snap := *job
 	return &snap, nil
 }
 
@@ -532,11 +532,13 @@ func (p *PeerPuller) copyWithProgress(ctx context.Context, dst io.Writer, src io
 			_, _ = h.Write(buf[:n])
 			written += int64(n)
 			p.mu.Lock()
-			job.Received = written
-			// 对端 meta 帧可能晚于首块到达：每轮尝试刷新总大小
-			if job.Total <= 0 {
-				if tr, ok := src.(totalReporter); ok {
-					job.Total = tr.Total()
+			if !job.Done() {
+				job.Received = written
+				// 对端 meta 帧可能晚于首块到达：每轮尝试刷新总大小
+				if job.Total <= 0 {
+					if tr, ok := src.(totalReporter); ok {
+						job.Total = tr.Total()
+					}
 				}
 			}
 			p.mu.Unlock()
