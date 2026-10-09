@@ -277,6 +277,10 @@ func sessionRank(s Session) string {
 // s.pending, which would return "peerjs: connection not bound" (CI discovery:
 // TestPeerPullSavesToLocalDrive fails ~1/4 with "open stream: peerjs: connection not
 // bound" — dedup window race).
+// bindConn creates connState, registers OnMessage/OnClose, and calls bindConnPrepared.
+// Kept for backward compatibility with test callers that do not pre-create state.
+// Production callers (onIncomingConnection, connectLoop) use bindConnPrepared directly
+// with handlers registered before OnOpen to close the pre-bindConn frame-drop race.
 func (s *PeerJSService) bindConn(c Session) {
 	if s.IsPeerBlocked(c.ID()) {
 		log.LogWarn("peerjs: bindConn for blocked peer %s rejected", c.ID())
@@ -297,25 +301,12 @@ func (s *PeerJSService) bindConn(c Session) {
 		return
 	}
 
-	// State before conns: OpenStream reads conns then looks up pending.
 	st := &connState{
 		fetches:   make(map[string]*fetchState),
 		verbWaits: make(map[string]chan []byte),
 		binCh:     make(chan binaryChunk, 16),
 		binDone:   make(chan struct{}),
 		fwdCh:     make(chan fwdChunk, 16),
-	}
-	s.pendingMu.Lock()
-	s.pending[c] = st
-	s.pendingMu.Unlock()
-
-	s.mu.Lock()
-	s.conns[c.ID()] = c
-	s.mu.Unlock()
-
-	if old != nil && old != c && c.ID() != "local" {
-		log.LogInfo("peerjs: dedup connection to %s, closing stale", c.ID())
-		old.Close()
 	}
 
 	// ⚠️ OnMessage MUST be registered **before doing anything that may yield**.
@@ -332,6 +323,34 @@ func (s *PeerJSService) bindConn(c Session) {
 	// outbound semantics.
 	c.OnMessage(func(msg peerjs.Frame) { s.dispatchFrame(c, st, msg) })
 	c.OnClose(func() { s.cleanupConn(c, st) })
+
+	s.bindConnPrepared(c, st, old)
+}
+
+// bindConnPrepared binds a connection with a pre-created connState.
+// st and OnMessage/OnClose MUST be registered by the caller **before** the
+// DataChannel opens — closing the race window where the peer's psk-auth frame
+// arrives before bindConn registers OnMessage and is silently dropped by the
+// pion-level dc.OnMessage callback (which checks c.onMessage == nil).
+//
+// 2026-10-06 fix (bindConn) covered only the yield window inside pskSendAuth.
+// This function extends early-registration to the bindConn-call window itself,
+// which is the second, uncovered race: frames arriving between DataChannel open
+// and bindConn execution are now received.
+func (s *PeerJSService) bindConnPrepared(c Session, st *connState, old Session) {
+	// State before conns: OpenStream reads conns then looks up pending.
+	s.pendingMu.Lock()
+	s.pending[c] = st
+	s.pendingMu.Unlock()
+
+	s.mu.Lock()
+	s.conns[c.ID()] = c
+	s.mu.Unlock()
+
+	if old != nil && old != c && c.ID() != "local" {
+		log.LogInfo("peerjs: dedup connection to %s, closing stale", c.ID())
+		old.Close()
+	}
 
 	go s.uploadWorker(c, st)
 	// Forwarding write worker separated from upload worker (2026-08-18): large upload

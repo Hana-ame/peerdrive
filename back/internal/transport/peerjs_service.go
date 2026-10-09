@@ -517,9 +517,38 @@ func (s *PeerJSService) connectLoop(peerID string) {
 			}
 			continue
 		}
+
+		sess := newRTCSession(conn)
+
+		// Dedup check before st creation (avoids st leak on dedup).
+		s.mu.Lock()
+		old := s.conns[sess.ID()]
+		s.mu.Unlock()
+		keepOld := old != nil && old != sess && sess.ID() != "local" &&
+			sessionRank(old) < sessionRank(sess)
+		if keepOld {
+			log.LogInfo("peerjs: dedup connection to %s, closing newer", sess.ID())
+			conn.Close()
+			continue
+		}
+
+		// Create st BEFORE OnOpen to prevent pre-bindConn frame drops.
+		st := &connState{
+			fetches:   make(map[string]*fetchState),
+			verbWaits: make(map[string]chan []byte),
+			binCh:     make(chan binaryChunk, 16),
+			binDone:   make(chan struct{}),
+			fwdCh:     make(chan fwdChunk, 16),
+		}
+
+		// Register OnMessage BEFORE OnOpen — closes the race window where the
+		// peer's psk-auth arrives before bindConn and is silently dropped.
+		sess.OnMessage(func(msg peerjs.Frame) { s.dispatchFrame(sess, st, msg) })
+		sess.OnClose(func() { s.cleanupConn(sess, st) })
+
 		opened := make(chan struct{})
 		conn.OnOpen(func(c *peerjs.Connection) {
-			s.bindConn(newRTCSession(c))
+			s.bindConnPrepared(sess, st, old)
 			select {
 			case <-opened:
 			default:
@@ -551,19 +580,54 @@ func (s *PeerJSService) connectLoop(peerID string) {
 // 此时 DataChannel 尚未 open，过早注册会让 FetchFromPeer 拿到未就绪连接
 // （发现背景：双向发现时双端同时发起连接，B 侧 answerer 连接未 open 即被使用，
 // 报 "connection not open"）。
+//
+// 2026-10-09 竞态修复：st 与 OnMessage/OnClose 的创建前移至 OnOpen 之前。
+// 原实现（2026-10-06 修复后）仍留有一个窗口：peer 的 psk-auth 帧在 DataChannel
+// open 后、bindConn 注册 OnMessage 前到达 → pion 级 dc.OnMessage 读到
+// c.onMessage==nil 则静默丢弃 → 门禁永不打开 → 30s pskAuthTimeout 关连接。
+// 前移后 OnMessage 在 OnOpen 触发前已就位，无论帧何时到达都能被 dispatchFrame 收到。
 func (s *PeerJSService) onIncomingConnection(c *peerjs.Connection) {
 	if s.IsPeerBlocked(c.PeerID) {
 		log.LogWarn("peerjs: incoming connection from blocked peer %s rejected", c.PeerID)
 		c.Close()
 		return
 	}
+
+	sess := newRTCSession(c)
+
+	// Dedup check before st creation (avoids st leak on dedup).
+	s.mu.Lock()
+	old := s.conns[sess.ID()]
+	s.mu.Unlock()
+	keepOld := old != nil && old != sess && sess.ID() != "local" &&
+		sessionRank(old) < sessionRank(sess)
+	if keepOld {
+		log.LogInfo("peerjs: dedup connection to %s, closing newer", sess.ID())
+		c.Close()
+		return
+	}
+
+	// Create st BEFORE OnOpen to prevent pre-bindConn frame drops.
+	st := &connState{
+		fetches:   make(map[string]*fetchState),
+		verbWaits: make(map[string]chan []byte),
+		binCh:     make(chan binaryChunk, 16),
+		binDone:   make(chan struct{}),
+		fwdCh:     make(chan fwdChunk, 16),
+	}
+
+	// Register OnMessage BEFORE OnOpen — closes the race window where the
+	// peer's psk-auth arrives before bindConn and is silently dropped.
+	sess.OnMessage(func(msg peerjs.Frame) { s.dispatchFrame(sess, st, msg) })
+	sess.OnClose(func() { s.cleanupConn(sess, st) })
+
 	c.OnOpen(func(c *peerjs.Connection) {
 		if s.IsPeerBlocked(c.PeerID) {
 			log.LogWarn("peerjs: connection opened from blocked peer %s rejected", c.PeerID)
 			c.Close()
 			return
 		}
-		s.bindConn(newRTCSession(c))
+		s.bindConnPrepared(sess, st, old)
 		log.LogInfo("peerjs: incoming connection from %s (conn=%s)", c.PeerID, c.ID)
 	})
 }
