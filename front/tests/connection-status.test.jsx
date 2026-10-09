@@ -14,20 +14,32 @@ const { onStatusMock, adminMock } = vi.hoisted(() => ({
   onStatusMock: vi.fn(),
   adminMock: vi.fn(),
 }))
-vi.mock('../src/platform/transport-ws/status', () => ({
-  getStatus: () => 'idle',
-  onStatus: onStatusMock,
-}))
-vi.mock('../src/platform/transport-ws', () => ({
-  getStatus: () => 'idle',
-  onStatus: onStatusMock,
-  admin: adminMock,
-}))
-vi.mock('../src/ws.js', () => ({
-  getStatus: () => 'idle',
-  onStatus: onStatusMock,
-  admin: adminMock,
-}))
+vi.mock('../src/platform/transport-ws/status', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...Object.fromEntries(Object.keys(actual).map((k) => [k, typeof actual[k] === 'function' ? vi.fn() : actual[k]])),
+    getStatus: () => 'idle',
+    onStatus: onStatusMock,
+  }
+})
+vi.mock('../src/platform/transport-ws', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...Object.fromEntries(Object.keys(actual).map((k) => [k, typeof actual[k] === 'function' ? vi.fn() : actual[k]])),
+    getStatus: () => 'idle',
+    onStatus: onStatusMock,
+    admin: adminMock,
+  }
+})
+vi.mock('../src/ws.js', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...Object.fromEntries(Object.keys(actual).map((k) => [k, typeof actual[k] === 'function' ? vi.fn() : actual[k]])),
+    getStatus: () => 'idle',
+    onStatus: onStatusMock,
+    admin: adminMock,
+  }
+})
 
 import ConnectionStatus from '../src/lib/ConnectionStatus'
 

@@ -19,18 +19,26 @@ const { downloadMock, downloadStreamMock, adminMock, downloadToFileMock } = vi.h
   adminMock: vi.fn(),
   downloadToFileMock: vi.fn(),
 }))
-vi.mock('../src/ws.js', () => ({
-  download: downloadMock,
-  downloadStream: downloadStreamMock,
-  admin: adminMock,
-  downloadToFile: downloadToFileMock,
-}))
-vi.mock('../src/platform/transport-ws', () => ({
-  download: downloadMock,
-  downloadStream: downloadStreamMock,
-  admin: adminMock,
-  downloadToFile: downloadToFileMock,
-}))
+vi.mock('../src/ws.js', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...Object.fromEntries(Object.keys(actual).map((k) => [k, typeof actual[k] === 'function' ? vi.fn() : actual[k]])),
+    download: downloadMock,
+    downloadStream: downloadStreamMock,
+    admin: adminMock,
+    downloadToFile: downloadToFileMock,
+  }
+})
+vi.mock('../src/platform/transport-ws', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...Object.fromEntries(Object.keys(actual).map((k) => [k, typeof actual[k] === 'function' ? vi.fn() : actual[k]])),
+    download: downloadMock,
+    downloadStream: downloadStreamMock,
+    admin: adminMock,
+    downloadToFile: downloadToFileMock,
+  }
+})
 
 import CollectionBrowser from '../src/features/collection/components/CollectionBrowser'
 import CollectionView from '../src/features/collection/pages/CollectionView'
