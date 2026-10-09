@@ -87,7 +87,7 @@ func SearchFileIndex(q SearchQuery) ([]FileIndex, int64, error) {
 	where := strings.Join(conds, " AND ")
 
 	var total int64
-	if err := DB.QueryRow("SELECT COUNT(*) FROM file_index WHERE "+where, args...).Scan(&total); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM file_index WHERE "+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count file_index: %w", err)
 	}
 
@@ -103,7 +103,7 @@ func SearchFileIndex(q SearchQuery) ([]FileIndex, int64, error) {
 		offset = 0
 	}
 
-	rows, err := DB.Query("SELECT hash, path, name, size, deleted, seq, created_at, updated_at "+
+	rows, err := db.Query("SELECT hash, path, name, size, deleted, seq, created_at, updated_at "+
 		"FROM file_index WHERE "+where+" ORDER BY seq DESC LIMIT ? OFFSET ?",
 		append(args, limit, offset)...)
 	if err != nil {

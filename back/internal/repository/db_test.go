@@ -24,8 +24,8 @@ func initTestDB(t *testing.T) {
 // closing should not error (idempotent).
 func TestCloseDB(t *testing.T) {
 	initTestDB(t)
-	require.NotNil(t, DB)
+	require.NotNil(t, GetDB())
 	require.NoError(t, CloseDB(), "close should succeed")
-	require.Nil(t, DB, "DB should be nil after closing, to avoid leaving closed connections for continued use")
+	require.Nil(t, GetDB(), "DB should be nil after closing, to avoid leaving closed connections for continued use")
 	require.NoError(t, CloseDB(), "repeated closing should be idempotent")
 }

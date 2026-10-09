@@ -15,7 +15,7 @@ import (
 // GetFileMeta queries file metadata by hash; returns (nil, nil) if not found.
 func GetFileMeta(hash string) (*model.FileMeta, error) {
 	var m model.FileMeta
-	err := DB.QueryRow(
+	err := db.QueryRow(
 		`SELECT hash, size, created_at, mime_type, gziped, filename, type, cid FROM file_meta WHERE hash = ?`,
 		hash,
 	).Scan(&m.Hash, &m.Size, &m.CreatedAt, &m.MimeType, &m.Gziped, &m.Filename, &m.Type, &m.CID)
@@ -31,7 +31,7 @@ func GetFileMeta(hash string) (*model.FileMeta, error) {
 // GetFileMetaByCID queries file metadata by CID; returns (nil, nil) if not found.
 func GetFileMetaByCID(cid string) (*model.FileMeta, error) {
 	var m model.FileMeta
-	err := DB.QueryRow(
+	err := db.QueryRow(
 		`SELECT hash, size, created_at, mime_type, gziped, filename, type, cid FROM file_meta WHERE cid = ?`,
 		cid,
 	).Scan(&m.Hash, &m.Size, &m.CreatedAt, &m.MimeType, &m.Gziped, &m.Filename, &m.Type, &m.CID)
@@ -47,7 +47,7 @@ func GetFileMetaByCID(cid string) (*model.FileMeta, error) {
 // InsertFileMeta inserts a new file metadata record, automatically computing and storing the CID.
 func InsertFileMeta(meta *model.FileMeta) error {
 	cid := hashutil.SHA256ToCID(meta.Hash)
-	_, err := DB.Exec(
+	_, err := db.Exec(
 		`INSERT INTO file_meta (hash, size, mime_type, gziped, filename, type, cid) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		meta.Hash, meta.Size, meta.MimeType, meta.Gziped, meta.Filename, meta.Type, cid,
 	)
@@ -58,7 +58,7 @@ func InsertFileMeta(meta *model.FileMeta) error {
 
 // GetFileProviders queries all available providers for a given hash, prioritizing local type.
 func GetFileProviders(hash string) ([]model.FileProvider, error) {
-	rows, err := DB.Query(
+	rows, err := db.Query(
 		`SELECT id, hash, provider_type, path, available FROM file_providers WHERE hash = ? AND available = 1 ORDER BY CASE provider_type WHEN 'local' THEN 0 ELSE 1 END ASC, id ASC`,
 		hash,
 	)
@@ -79,7 +79,7 @@ func GetFileProviders(hash string) ([]model.FileProvider, error) {
 
 // InsertFileProvider adds a new provider (e.g. local/http) for a given hash.
 func InsertFileProvider(hash, providerType, path string) error {
-	_, err := DB.Exec(
+	_, err := db.Exec(
 		`INSERT INTO file_providers (hash, provider_type, path) VALUES (?, ?, ?)`,
 		hash, providerType, path,
 	)
@@ -88,7 +88,7 @@ func InsertFileProvider(hash, providerType, path string) error {
 
 // MarkProviderUnavailable marks the specified provider as unavailable.
 func MarkProviderUnavailable(id int) error {
-	_, err := DB.Exec(`UPDATE file_providers SET available = 0 WHERE id = ?`, id)
+	_, err := db.Exec(`UPDATE file_providers SET available = 0 WHERE id = ?`, id)
 	return err
 }
 
@@ -118,7 +118,7 @@ func ListAllFiles(sortBy string) ([]model.FileListItem, error) {
 		ORDER BY ` + orderCol + ` DESC
 		LIMIT 1000` // M11: No LIMIT → full-table materialization → memory DoS with many files (frontend pagination not implemented)
 
-	rows, err := DB.Query(query)
+	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -133,4 +133,13 @@ func ListAllFiles(sortBy string) ([]model.FileListItem, error) {
 		out = append(out, f)
 	}
 	return out, nil
+}
+
+// DeleteFileMetaAndProviders deletes both provider mappings and metadata for a hash.
+func DeleteFileMetaAndProviders(hash string) error {
+	if _, err := db.Exec(`DELETE FROM file_providers WHERE hash = ?`, hash); err != nil {
+		return err
+	}
+	_, err := db.Exec(`DELETE FROM file_meta WHERE hash = ?`, hash)
+	return err
 }

@@ -23,7 +23,14 @@ type FileIndex struct {
 // createFileIndexTable creates the table. seq increments on each upsert/delete;
 // incremental sync between nodes fetches by seq.
 func createFileIndexTable() {
-	DB.Exec(`CREATE TABLE IF NOT EXISTS file_index (
+	createFileIndexTableOn(db)
+}
+
+func createFileIndexTableOn(d *sql.DB) {
+	if d == nil {
+		return
+	}
+	d.Exec(`CREATE TABLE IF NOT EXISTS file_index (
 		hash TEXT PRIMARY KEY,
 		path TEXT NOT NULL,
 		name TEXT DEFAULT '',
@@ -33,12 +40,12 @@ func createFileIndexTable() {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
-	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_seq ON file_index(seq)`)
+	d.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_seq ON file_index(seq)`)
 	// idx_file_index_name: file_index_search.go 的搜索查询键。子串模式 ('%x%')
 	// 用不到 B-tree 索引，它只为前缀/精确匹配加速；代价是一次建索引，换来的是
 	// name 从「未被索引的普通列」变成文档化的可查列。IF NOT EXISTS 对已有部署
 	// 幂等（InitDB 每次启动都会跑到这里）。
-	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_name ON file_index(name)`)
+	d.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_name ON file_index(name)`)
 }
 
 // UpsertFileIndex registers/updates a mapping (called after create/upload succeeds), returns new seq.
@@ -48,7 +55,7 @@ func createFileIndexTable() {
 // Merged into the same transaction: SELECT and INSERT complete atomically within one write
 // transaction (SQLite's serial write guarantee ensures monotonicity).
 func UpsertFileIndex(hash, path, name string, size int64, deleted bool) (int64, error) {
-	tx, err := DB.Begin()
+	tx, err := db.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("begin file_index tx: %w", err)
 	}
@@ -77,23 +84,23 @@ func UpsertFileIndex(hash, path, name string, size int64, deleted bool) (int64, 
 
 // GetFileIndex queries mapping by hash (not deleted — tombstones are only exposed through SyncSince).
 func GetFileIndex(hash string) (*FileIndex, error) {
-	if DB == nil {
+	if db == nil {
 		return nil, sql.ErrNoRows
 	}
-	row := DB.QueryRow(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
+	row := db.QueryRow(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
 		FROM file_index WHERE hash = ? AND deleted = 0`, hash)
 	return scanFileIndex(row)
 }
 
 // ListFileIndex lists all non-deleted mappings (ordered by seq ascending, supports pagination).
 func ListFileIndex(offset, limit int) ([]FileIndex, error) {
-	if DB == nil {
+	if db == nil {
 		return nil, nil
 	}
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := DB.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
+	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
 		FROM file_index WHERE deleted = 0 ORDER BY seq DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
@@ -114,7 +121,7 @@ func ListFileIndex(offset, limit int) ([]FileIndex, error) {
 // Defense: since comes from remote sync verb; unbounded change records cause full-table scan + materialization.
 // Add LIMIT as backstop (discard extreme values when peer's cursor is far behind).
 func ListFileIndexSince(since int64) ([]FileIndex, error) {
-	rows, err := DB.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
+	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
 		FROM file_index WHERE seq > ? ORDER BY seq ASC LIMIT 1000`, since)
 	if err != nil {
 		return nil, err

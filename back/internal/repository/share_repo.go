@@ -21,7 +21,7 @@ func CreateShare(hash, shareType, filename string) (*model.ShareLink, error) {
 	now := time.Now().UTC()
 	exp := now.Add(30 * 24 * time.Hour) // 30 days expiry
 
-	_, err := DB.Exec(`INSERT INTO share_links (token, hash, type, filename, created_at, expires_at)
+	_, err := db.Exec(`INSERT INTO share_links (token, hash, type, filename, created_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?)`, token, hash, shareType, filename, now, exp)
 	if err != nil {
 		return nil, err
@@ -44,7 +44,7 @@ func CreateShare(hash, shareType, filename string) (*model.ShareLink, error) {
 func GetShareByToken(token string) (*model.ShareLink, error) {
 	var s model.ShareLink
 	var exp sql.NullTime
-	err := DB.QueryRow(`SELECT id, token, hash, type, COALESCE(filename,''), created_at, expires_at
+	err := db.QueryRow(`SELECT id, token, hash, type, COALESCE(filename,''), created_at, expires_at
 		FROM share_links WHERE token = ? AND (expires_at IS NULL OR expires_at > datetime('now'))`,
 		token).Scan(&s.ID, &s.Token, &s.Hash, &s.Type, &s.Filename, &s.CreatedAt, &exp)
 	if err != nil {
@@ -59,7 +59,7 @@ func GetShareByToken(token string) (*model.ShareLink, error) {
 
 // ListShares returns all unexpired share links, ordered by creation time descending, max 100.
 func ListShares() ([]model.ShareLink, error) {
-	rows, err := DB.Query(`SELECT id, token, hash, type, COALESCE(filename,''), created_at, expires_at
+	rows, err := db.Query(`SELECT id, token, hash, type, COALESCE(filename,''), created_at, expires_at
 		FROM share_links WHERE expires_at IS NULL OR expires_at > datetime('now')
 		ORDER BY created_at DESC LIMIT 100`)
 	if err != nil {
@@ -85,7 +85,14 @@ func ListShares() ([]model.ShareLink, error) {
 
 // InitShareTable creates the share_links table (if it doesn't exist).
 func InitShareTable() {
-	DB.Exec(`CREATE TABLE IF NOT EXISTS share_links (
+	InitShareTableOn(db)
+}
+
+func InitShareTableOn(d *sql.DB) {
+	if d == nil {
+		return
+	}
+	d.Exec(`CREATE TABLE IF NOT EXISTS share_links (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		token TEXT UNIQUE NOT NULL,
 		hash TEXT NOT NULL,

@@ -14,7 +14,7 @@ import (
 
 // InsertPin inserts a new pin record (or replaces an existing one).
 func InsertPin(cid, hash, filename string, size int64) error {
-	_, err := DB.Exec(
+	_, err := db.Exec(
 		`INSERT INTO ipfs_pins (cid, hash, size, filename, pinned_at)
 		 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
 		 ON CONFLICT(cid) DO UPDATE SET
@@ -30,7 +30,7 @@ func InsertPin(cid, hash, filename string, size int64) error {
 // ListPins returns all pinned CIDs, most recently pinned first.
 // M11: No LIMIT → full-table materialization with many pins; pin count has no business cap, add LIMIT as backstop.
 func ListPins() ([]model.IPFSPin, error) {
-	rows, err := DB.Query(
+	rows, err := db.Query(
 		`SELECT cid, hash, size, filename, pinned_at
 		 FROM ipfs_pins ORDER BY pinned_at DESC LIMIT 1000`,
 	)
@@ -53,7 +53,7 @@ func ListPins() ([]model.IPFSPin, error) {
 // GetPin retrieves a single pin by CID.
 func GetPin(cid string) (*model.IPFSPin, error) {
 	var p model.IPFSPin
-	err := DB.QueryRow(
+	err := db.QueryRow(
 		`SELECT cid, hash, size, filename, pinned_at
 		 FROM ipfs_pins WHERE cid = ?`, cid,
 	).Scan(&p.CID, &p.Hash, &p.Size, &p.Filename, &p.PinnedAt)
@@ -68,14 +68,14 @@ func GetPin(cid string) (*model.IPFSPin, error) {
 
 // RemovePin deletes a pin record by CID.
 func RemovePin(cid string) error {
-	_, err := DB.Exec(`DELETE FROM ipfs_pins WHERE cid = ?`, cid)
+	_, err := db.Exec(`DELETE FROM ipfs_pins WHERE cid = ?`, cid)
 	return err
 }
 
 // PinExists returns true if the given CID is already pinned.
 func PinExists(cid string) (bool, error) {
 	var count int
-	err := DB.QueryRow(`SELECT COUNT(*) FROM ipfs_pins WHERE cid = ?`, cid).Scan(&count)
+	err := db.QueryRow(`SELECT COUNT(*) FROM ipfs_pins WHERE cid = ?`, cid).Scan(&count)
 	if err != nil {
 		return false, err
 	}

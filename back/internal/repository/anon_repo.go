@@ -93,7 +93,7 @@ func ListAnonCollections(storageDir string) ([]model.AnonCollectionSummary, erro
 	if storageDir == "" {
 		storageDir = anonStorageDir
 	}
-	rows, err := DB.Query(
+	rows, err := db.Query(
 		`SELECT hash, created_at FROM file_meta WHERE type = ? ORDER BY created_at DESC LIMIT 1000`,
 		FileTypeAnonCollection,
 	)

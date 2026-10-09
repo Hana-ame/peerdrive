@@ -690,8 +690,9 @@ func (s *FileService) Delete(hash string) error {
 			}
 		}
 	}
-	repository.DB.Exec(`DELETE FROM file_providers WHERE hash = ?`, hash)
-	repository.DB.Exec(`DELETE FROM file_meta WHERE hash = ?`, hash)
+	if err := repository.DeleteFileMetaAndProviders(hash); err != nil {
+		log.LogWarn("file-svc: Delete %s failed to clean repository: %v", hash, err)
+	}
 	log.LogInfo("file-svc: Delete %s completed", hash)
 	return nil
 }

@@ -1,31 +1,36 @@
 package repository
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 )
 
 // createShaTagsTable initializes the sha_tags mapping table.
 func createShaTagsTable() {
-	if DB == nil {
+	createShaTagsTableOn(db)
+}
+
+func createShaTagsTableOn(d *sql.DB) {
+	if d == nil {
 		return
 	}
-	DB.Exec(`CREATE TABLE IF NOT EXISTS sha_tags (
+	d.Exec(`CREATE TABLE IF NOT EXISTS sha_tags (
 		sha TEXT NOT NULL,
 		tag TEXT NOT NULL,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY(sha, tag)
 	)`)
-	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_sha_tags_tag ON sha_tags(tag)`)
-	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_sha_tags_sha ON sha_tags(sha)`)
+	d.Exec(`CREATE INDEX IF NOT EXISTS idx_sha_tags_tag ON sha_tags(tag)`)
+	d.Exec(`CREATE INDEX IF NOT EXISTS idx_sha_tags_sha ON sha_tags(sha)`)
 }
 
 // GetShaTags retrieves all tags associated with a specific file SHA.
 func GetShaTags(sha string) ([]string, error) {
-	if DB == nil {
+	if db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
-	rows, err := DB.Query(`SELECT tag FROM sha_tags WHERE sha = ? ORDER BY tag ASC`, strings.TrimSpace(sha))
+	rows, err := db.Query(`SELECT tag FROM sha_tags WHERE sha = ? ORDER BY tag ASC`, strings.TrimSpace(sha))
 	if err != nil {
 		return nil, err
 	}
@@ -47,11 +52,11 @@ func GetShaTags(sha string) ([]string, error) {
 
 // SetShaTags replaces all tags for a file SHA with the provided list.
 func SetShaTags(sha string, tags []string) error {
-	if DB == nil {
+	if db == nil {
 		return fmt.Errorf("database not initialized")
 	}
 	sha = strings.TrimSpace(sha)
-	tx, err := DB.Begin()
+	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
@@ -78,28 +83,28 @@ func AddShaTag(sha, tag string) error {
 	if tag == "" {
 		return nil
 	}
-	if DB == nil {
+	if db == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	_, err := DB.Exec(`INSERT OR IGNORE INTO sha_tags (sha, tag) VALUES (?, ?)`, strings.TrimSpace(sha), tag)
+	_, err := db.Exec(`INSERT OR IGNORE INTO sha_tags (sha, tag) VALUES (?, ?)`, strings.TrimSpace(sha), tag)
 	return err
 }
 
 // RemoveShaTag removes a tag from a file SHA.
 func RemoveShaTag(sha, tag string) error {
-	if DB == nil {
+	if db == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	_, err := DB.Exec(`DELETE FROM sha_tags WHERE sha = ? AND tag = ?`, strings.TrimSpace(sha), strings.TrimSpace(tag))
+	_, err := db.Exec(`DELETE FROM sha_tags WHERE sha = ? AND tag = ?`, strings.TrimSpace(sha), strings.TrimSpace(tag))
 	return err
 }
 
 // ListShasByTag finds all file SHAs with the given tag.
 func ListShasByTag(tag string) ([]string, error) {
-	if DB == nil {
+	if db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
-	rows, err := DB.Query(`SELECT sha FROM sha_tags WHERE tag = ? ORDER BY created_at DESC`, strings.TrimSpace(tag))
+	rows, err := db.Query(`SELECT sha FROM sha_tags WHERE tag = ? ORDER BY created_at DESC`, strings.TrimSpace(tag))
 	if err != nil {
 		return nil, err
 	}
@@ -121,10 +126,10 @@ func ListShasByTag(tag string) ([]string, error) {
 
 // SearchFilesByTag returns file_index records for files matching the given tag.
 func SearchFilesByTag(tag string) ([]FileIndex, error) {
-	if DB == nil {
+	if db == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
-	rows, err := DB.Query(`
+	rows, err := db.Query(`
 		SELECT f.hash, f.path, f.name, f.size, f.deleted, f.seq, f.created_at, f.updated_at
 		FROM file_index f
 		INNER JOIN sha_tags t ON f.hash = t.sha
