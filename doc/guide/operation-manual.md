@@ -264,3 +264,87 @@ A: 集成测试漏了 `-p 1`；或用了「删掉校验逻辑」的负向对照�
 
 **Q: 前端页面 API 404**
 A: 检查 `front/src/api.js` 第一行的 `API_BASE` 是否指向正确后端。
+
+---
+
+## 8. Release 操作手册（版本发布与打版流程）
+
+本节规范 Peerdrive 项目从预检、打 Tag、自动化构建出包、前端与镜像联动到异常回滚的全流程。对应 CI/CD 工作流为 [`.github/workflows/release.yml`](../../.github/workflows/release.yml)。
+
+### 8.1 打 Tag 的前置条件与命名规范
+
+在创建版本 Tag 之前，必须满足以下硬性准入要求：
+
+1. **主干 CI 门禁全绿**：
+   - 目标提交（通常为 `refactor` 或 `main`）上的 GitHub Actions 必须 100% 通过（30/30 项检查全绿）。
+   - 重点包含：
+     - 后端核心：`backend`（`go vet` + `go test -tags nosqlite` + 单二进制编译）
+     - 集成测试：`integration`（脱外网、`-p 1` 串行）
+     - 独立子模块：`signalserver`（`go-peerserver`）、`peerjs`（`go-peerjs`）
+     - 消费端与前端：`client-package`（含 `check:panel` 一致性校验）、`media-package`、`frontend`
+     - 交叉构建矩阵：`go-build.yml`（5 大平台交叉编译及 Windows 单测）
+     - 文档索引完整性：`doc-refs`（`node scripts/check-doc-refs.mjs` 零失效）
+2. **Tag 命名规范**：
+   - 必须采用严格的语义化版本格式：`vMAJOR.MINOR.PATCH`（例如 `v0.3.0`、`v0.3.1`）。
+   - **必须带小写 `v` 前缀**（`release.yml` 触发模式为 `tags: ['v*']`，若无 `v` 前缀将不会触发自动化发布）。
+
+### 8.2 dry_run 门禁预检机制与用法
+
+在正式推送 Git Tag 之前，强烈建议使用 `workflow_dispatch` 手动触发 Release 工作流的预检：
+
+- **语义与用途**：
+  - `release.yml` 包含 `dry_run` 输入参数（布尔型，默认 `true`）。
+  - 在 `dry_run=true` 模式下，工作流将完整执行 `gate`（全面测试）与 `build`（五平台交叉构建与资产打包），但**自动跳过 `release` 作业**（不出包、不创建 GitHub Release、不公开资产）。
+  - 用于验证「在发布流水线环境下，门禁与多平台打包能否确定性跑通」，防止推 Tag 后因打包失败留下脏 Release。
+- **触发命令**：
+  ```bash
+  # 通过 GitHub CLI 手动触发预检流水线
+  gh workflow run release.yml -f dry_run=true
+  ```
+
+### 8.3 自动化出包流程与产物清单
+
+当预检通过后，通过推送 Git Tag 触发正式打版：
+
+```bash
+# 本地打 tag 并推送到远端
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+#### 工作流阶段流转
+1. **`gate` 作业**（发版门禁，`ubuntu-latest`）：
+   - 执行后端测试构建、集成测试（`-p 1`）、子模块测试及面板一致性校验；测试失败则立即阻断流水线。
+2. **`build` 作业**（交叉矩阵编译）：
+   - 强制使用 `CGO_ENABLED=0` 与 `-tags nosqlite`。
+   - 注入构建版本号：`-ldflags="-s -w -X peerdrive/internal/version.Version=v0.3.0"`。
+   - 生成 5 平台单一自包含二进制资产：
+     - `peerdrive-linux-amd64`
+     - `peerdrive-linux-arm64`
+     - `peerdrive-windows-amd64.exe`
+     - `peerdrive-darwin-amd64`
+     - `peerdrive-darwin-arm64`
+3. **`release` 作业**（资产归档与发布）：
+   - 自动汇总各构建矩阵的产物至 `dist/`，调用 `softprops/action-gh-release@v2` 创建对应 GitHub Release 并上传资产。
+
+### 8.4 前端 Pages 与子模块镜像联动
+
+出包完成后，按以下顺序确认外围依赖与站点的联动更新：
+
+1. **前端托管站点（`pages.yml`）**：
+   - `pages.yml` 部署生产面板与 Web 客户端至 GitHub Pages。
+   - 在新版本发布后，确保 `refactor` 分支最新的前端代码已成功部署，并通过线上回探检测。
+2. **独立子模块仓库镜像同步（`doc/MIRROR-SYNC.md`）**：
+   - 独立模块仓库：`github.com/Hana-ame/go-peerjs` 与 `github.com/Hana-ame/go-peerserver`。
+   - 依据 [`doc/MIRROR-SYNC.md`](../MIRROR-SYNC.md) 指引，将主仓中子模块的增量提交与对应版本 Tag（`v0.3.0`）镜像推送至各自独立仓库，确保下游 Go 模块使用者能够通过标准 `go get` 获取到同名版本的子模块。
+
+### 8.5 回滚与缺陷修复纪律
+
+在版本发布过程中必须严格遵守以下工程规范：
+
+- **Git Tag 不可变定律**：
+  - **严禁**对已推送到远端的 Release Tag 执行 `git tag -d` 删除重建或 `git push --force` 覆盖！
+  - 覆盖已发布的 Tag 会破坏下游 Go proxy 缓存校验和（`checksum mismatch` 错误）以及包管理器的依赖哈希完整性。
+- **缺陷处置流程**：
+  - 若已发布的二进制包或版本存在严重缺陷，一律**禁止就地修改 Tag**；
+  - 处置流程：立即在分支上提交修复 Commit，通过 CI 验证后，打新的递增补丁版本 Tag（例如 `v0.3.1`），重新走完打版流程发布新 Release，并在旧 Release 说明中注明已被新版本取代。
