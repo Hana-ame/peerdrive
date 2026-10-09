@@ -20,8 +20,11 @@ package echproxy
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+
+	"peerdrive/internal/log"
 )
 
 // VideoMeta is the JSON the iwara page renders: enough of the /video/{id}
@@ -59,6 +62,12 @@ type VideoMetaResolution struct {
 
 // candidateKeys maps one semantic field to the spellings the iwara API has used
 // across versions. The first key present in the payload wins.
+//
+// 核对背景（Issue #102）：
+// 候选键参考了开源 iwara 下载器已知字段映射及当前公开接口历史变迁。
+// 真实 api.iwara.tv 在无 ech-proxy 及有效会话 cookie 时会被 Cloudflare 拦截 (403)，
+// 因此本表包含常见兼容命名。为防字段漂移导致静默丢失，applyMetaCandidates 中增加了
+// 防御性日志记录（见下文 applyMetaCandidates）。
 var candidateKeys = map[string][]string{
 	"title":    {"title", "name", "caption"},
 	"slug":     {"slug", "url"},
@@ -204,5 +213,17 @@ func applyMetaCandidates(meta *VideoMeta, raw map[string]any) {
 		if v := str([]string{"id"}); v != "" {
 			meta.ID = v
 		}
+	}
+
+	// Defensive check (Issue #102): title is the essential field for video metadata.
+	// If it remains empty after scanning candidates, log keys present in the raw payload
+	// to aid debugging when iwara API schema drifts.
+	if meta.Title == "" && len(raw) > 0 {
+		keys := make([]string, 0, len(raw))
+		for k := range raw {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		log.LogWarn("iwara: parsed metadata has empty title for video %s; raw payload keys: %v", meta.ID, keys)
 	}
 }
