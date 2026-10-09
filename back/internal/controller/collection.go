@@ -124,16 +124,37 @@ func ListCollections(c *gin.Context) {
 // @Description Search collections by username or collection name
 // @Tags collections
 // @Produce json
-// @Param q query string true "Search query"
+// @Param q query string false "Search query"
+// @Param tag query string false "Single tag to filter"
+// @Param tags query string false "Comma-separated tags to filter"
+// @Param visibility query string false "Visibility filter (public, all, restricted, private)"
 // @Success 200 {object} map[string]interface{} "data array of collections"
 // @Router /collections/search [get]
 func SearchCollections(c *gin.Context) {
 	q := c.Query("q")
-	if q == "" {
+	tag := c.Query("tag")
+	tagsParam := c.Query("tags")
+	visibility := c.Query("visibility")
+
+	var tagList []string
+	if tag != "" {
+		tagList = append(tagList, strings.TrimSpace(tag))
+	}
+	if tagsParam != "" {
+		for _, part := range strings.Split(tagsParam, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				tagList = append(tagList, part)
+			}
+		}
+	}
+
+	if q == "" && len(tagList) == 0 {
 		c.JSON(http.StatusOK, gin.H{"data": []model.Collection{}})
 		return
 	}
-	cols, err := collSvc.Search(q)
+
+	cols, err := collSvc.SearchWithFilters(q, tagList, visibility)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

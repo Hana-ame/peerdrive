@@ -17,6 +17,8 @@ package repository
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"peerdrive/internal/model"
 )
@@ -170,12 +172,52 @@ func GetCollection(username, collectionName string) (*model.Collection, error) {
 // SearchCollections fuzzy searches public collections by username or collection name.
 // M11: LIKE %q% with no LIMIT → full-table scan + materialization; limit to 100 results (sufficient for search).
 func SearchCollections(query string) ([]model.Collection, error) {
-	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE (username LIKE ? OR collection_name LIKE ?) AND visibility = 'public' ORDER BY created_at DESC LIMIT 100`,
-		"%"+query+"%", "%"+query+"%")
+	return SearchCollectionsWithFilters(query, nil, "public")
+}
+
+// SearchCollectionsWithFilters fuzzy searches collections with query, tags, and visibility filters.
+// AND semantics: all supplied tags must match, and query matches username or collection_name.
+func SearchCollectionsWithFilters(query string, tags []string, visibility string) ([]model.Collection, error) {
+	var conditions []string
+	var args []interface{}
+
+	if visibility != "" && visibility != "all" {
+		conditions = append(conditions, "visibility = ?")
+		args = append(args, visibility)
+	} else if visibility == "" {
+		// Default to public collections for security
+		conditions = append(conditions, "visibility = 'public'")
+	}
+
+	if strings.TrimSpace(query) != "" {
+		conditions = append(conditions, "(username LIKE ? OR collection_name LIKE ?)")
+		qArg := "%" + strings.TrimSpace(query) + "%"
+		args = append(args, qArg, qArg)
+	}
+
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			// tags is stored as a JSON string array e.g. ["tag1","tag2"]
+			// matching %"tag"% ensures strict token matching
+			conditions = append(conditions, "tags LIKE ?")
+			args = append(args, fmt.Sprintf("%%\"%s\"%%", t))
+		}
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	sqlStr := fmt.Sprintf(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections %s ORDER BY created_at DESC LIMIT 100`, whereClause)
+
+	rows, err := DB.Query(sqlStr, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+
 	var cols []model.Collection
 	for rows.Next() {
 		c, err := model.ScanCollection(rows)
@@ -184,7 +226,10 @@ func SearchCollections(query string) ([]model.Collection, error) {
 		}
 		cols = append(cols, *c)
 	}
-	return cols, nil
+	if cols == nil {
+		cols = []model.Collection{}
+	}
+	return cols, rows.Err()
 }
 
 // AddCollectionEntry inserts or updates a path->fileHash mapping in a collection (upsert semantics), also storing providers_json.

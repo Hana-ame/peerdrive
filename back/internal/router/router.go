@@ -424,6 +424,14 @@ func (rt *Router) Engine() *gin.Engine {
 		collections.POST("/:id/:collection_name/tags", authRequired, controller.UpdateCollectionTags)
 	}
 
+	// Tags (Issue #91: tag / collection system extension)
+	tagsGroup := r.Group("/tags")
+	{
+		tagsGroup.GET("/sha/:sha", controller.GetShaTags)
+		tagsGroup.POST("/sha/:sha", authRequired, controller.SetShaTags)
+		tagsGroup.GET("/search", controller.SearchTags)
+	}
+
 	// Local sync (write with auth, read open)
 	sync := r.Group("/local")
 	{

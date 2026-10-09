@@ -32,6 +32,11 @@ func (s *CollectionService) Search(q string) ([]model.Collection, error) {
 	return repository.SearchCollections(q)
 }
 
+// SearchWithFilters performs search across collections with optional query, tags filter, and visibility.
+func (s *CollectionService) SearchWithFilters(q string, tags []string, visibility string) ([]model.Collection, error) {
+	return repository.SearchCollectionsWithFilters(q, tags, visibility)
+}
+
 // ListPublic lists all public collections; when q is non-empty, filters by username/collection name.
 func (s *CollectionService) ListPublic(q string) ([]model.Collection, error) {
 	return repository.ListPublicCollections(q)
