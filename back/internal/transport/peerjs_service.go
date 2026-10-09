@@ -122,6 +122,10 @@ type PeerJSService struct {
 	localCaps    []string
 	requiredCaps []string
 
+	// Disconnect hooks (Issue #214): notified when an active peer connection is cleaned up.
+	disconnectMu    sync.Mutex
+	disconnectHooks []func(peerID string)
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -186,6 +190,9 @@ func (s *PeerJSService) Close() {
 	s.conns = make(map[string]Session)
 	s.mu.Unlock()
 	for _, c := range conns {
+		if c.ID() != "local" {
+			s.notifyDisconnect(c.ID())
+		}
 		c.Close()
 	}
 	s.peerMu.Lock()
@@ -675,6 +682,41 @@ func (s *PeerJSService) ConnectedPeerIDs() map[string]bool {
 		out[id] = true
 	}
 	return out
+}
+
+// HasConnection reports whether a connection currently exists for peerID.
+func (s *PeerJSService) HasConnection(peerID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conns[peerID] != nil
+}
+
+// MaxPeers returns the configured maximum peer connections (PEERDRIVE_MAX_PEERS).
+func (s *PeerJSService) MaxPeers() int {
+	if s == nil {
+		return 8
+	}
+	return s.maxPeers()
+}
+
+// OnPeerDisconnect registers a callback invoked when an active peer connection is cleaned up (Issue #214).
+func (s *PeerJSService) OnPeerDisconnect(fn func(peerID string)) {
+	if fn == nil {
+		return
+	}
+	s.disconnectMu.Lock()
+	defer s.disconnectMu.Unlock()
+	s.disconnectHooks = append(s.disconnectHooks, fn)
+}
+
+// notifyDisconnect invokes all registered peer disconnect hooks.
+func (s *PeerJSService) notifyDisconnect(peerID string) {
+	s.disconnectMu.Lock()
+	hooks := append([]func(peerID string){}, s.disconnectHooks...)
+	s.disconnectMu.Unlock()
+	for _, h := range hooks {
+		h(peerID)
+	}
 }
 
 // SetExtraPeers 注入运行时追加的常驻对端（节点市场「加入节点」清单）。

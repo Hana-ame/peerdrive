@@ -201,6 +201,9 @@ func (s *PeerJSService) BlockPeer(peerID, reason string) error {
 	}
 	s.mu.Unlock()
 	if ok && conn != nil {
+		if peerID != "local" {
+			s.notifyDisconnect(peerID)
+		}
 		log.LogInfo("peerjs: terminating active connection to newly blocked peer %s", peerID)
 		conn.Close()
 	}

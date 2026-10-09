@@ -10,6 +10,7 @@ package transport
 import (
 	"encoding/json"
 	"io"
+	"sync"
 	"testing"
 
 	peerjs "github.com/Hana-ame/go-peerjs"
@@ -176,4 +177,55 @@ func TestConnState_AdminUpOverlap(t *testing.T) {
 	// both declarations go through the empty-file path, so the worker never writes to disk
 	types := sess.sentTypes()
 	assert.Contains(t, types, "err", "should receive err frame when old admin declaration is replaced")
+}
+
+// TestOnPeerDisconnect_TriggeredOnCleanup verifies that OnPeerDisconnect callbacks are invoked
+// when a non-local session is removed from conns, and not invoked for local sessions or dedup-retained sessions.
+// 发现背景 (Issue #214): PeerSource 需要在连接断开时清理 peerLocks，PeerJSService 需提供可靠的断开通知。
+func TestOnPeerDisconnect_TriggeredOnCleanup(t *testing.T) {
+	svc := newTestPeerJSService(t)
+
+	var disconnected []string
+	var mu sync.Mutex
+	svc.OnPeerDisconnect(func(peerID string) {
+		mu.Lock()
+		disconnected = append(disconnected, peerID)
+		mu.Unlock()
+	})
+
+	// 1. Regular peer session disconnect
+	peerA := &fakeSession{id: "peerA"}
+	svc.bindConn(peerA)
+	require.True(t, svc.HasConnection("peerA"))
+
+	peerA.Close()
+	require.False(t, svc.HasConnection("peerA"))
+
+	mu.Lock()
+	assert.Equal(t, []string{"peerA"}, disconnected)
+	mu.Unlock()
+
+	// 2. Local session disconnect should NOT trigger hook
+	localSess := &fakeSession{id: "local", local: true}
+	svc.bindConn(localSess)
+	localSess.Close()
+
+	mu.Lock()
+	assert.Equal(t, []string{"peerA"}, disconnected, "local session disconnect must not trigger hook")
+	mu.Unlock()
+
+	// 3. Dedup replacement: replacing peerB with fresh should not trigger hook for stale
+	staleB := &fakeSession{id: "peerB"}
+	freshB := &fakeSession{id: "peerB"}
+	svc.bindConn(staleB)
+	svc.bindConn(freshB)
+
+	mu.Lock()
+	assert.Equal(t, []string{"peerA"}, disconnected, "dedup-replaced connection should not trigger disconnect while peer still has active connection")
+	mu.Unlock()
+
+	freshB.Close()
+	mu.Lock()
+	assert.Equal(t, []string{"peerA", "peerB"}, disconnected, "disconnect should trigger when peerB has no remaining connections")
+	mu.Unlock()
 }

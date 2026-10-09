@@ -622,13 +622,18 @@ func (s *PeerJSService) cleanupConn(c Session, st *connState) {
 	s.mu.Lock()
 	// Value-equality guard: dedup-eliminated connection cleanup won't mistakenly delete
 	// retained connection (conns[c.ID()] already overwritten by retained connection during dedup).
+	deleted := false
 	if s.conns[c.ID()] == c {
 		delete(s.conns, c.ID())
+		deleted = true
 	}
 	s.mu.Unlock()
 	s.pendingMu.Lock()
 	delete(s.pending, c)
 	s.pendingMu.Unlock()
+	if deleted && c.ID() != "local" {
+		s.notifyDisconnect(c.ID())
+	}
 	if st == nil {
 		return
 	}
