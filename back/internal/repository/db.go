@@ -19,6 +19,7 @@ package repository
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -256,19 +257,12 @@ func initTables(targetDB *sql.DB) error {
 		return err
 	}
 
-	// Migration: migrate from old files table to new tables.
-	// L9: original implementation silently ignored all ALTER errors — duplicate column
-	// on repeated migration is expected idempotent behavior, but real errors (missing
-	// table, disk failure) were also swallowed, making failed migrations untraceable.
-	// Now all go through migrationExec: duplicate column logs debug only, other errors
-	// log warn for traceability.
-	migrationExec(targetDB, `ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`)
-	migrationExec(targetDB, `ALTER TABLE collections ADD COLUMN visibility TEXT DEFAULT 'public'`)
-	migrationExec(targetDB, `ALTER TABLE collections ADD COLUMN tags TEXT DEFAULT ''`)
-	migrationExec(targetDB, `ALTER TABLE collections ADD COLUMN follow_redirects INTEGER DEFAULT 1`)
-	migrationExec(targetDB, `ALTER TABLE file_meta ADD COLUMN cid TEXT DEFAULT ''`)
-	migrationExec(targetDB, `ALTER TABLE collection_entries ADD COLUMN providers_json TEXT DEFAULT ''`)
-	migrationExec(targetDB, `ALTER TABLE version_entries ADD COLUMN providers_json TEXT DEFAULT ''`)
+	// Migration tracking and execution (Issue #151):
+	// Tables are tracked in schema_migrations table and PRAGMA user_version.
+	// Migration errors are propagated so partial/corrupt states fail fast instead of being silently swallowed.
+	if err := applyMigrations(targetDB); err != nil {
+		return err
+	}
 	InitShareTableOn(targetDB)
 
 	// Migration: create ipfs_pins table for pinned CIDs.
@@ -288,15 +282,96 @@ func initTables(targetDB *sql.DB) error {
 	return nil
 }
 
-// migrationExec executes idempotent migration statements. Duplicate column name
-// is the expected result of re-running migrations — only logs debug. Other errors
-// (missing table, I/O failure, etc.) log warn for traceability (L9).
-func migrationExec(targetDB *sql.DB, stmt string) {
-	if _, err := targetDB.Exec(stmt); err != nil {
-		if strings.Contains(err.Error(), "duplicate column") {
-			log.LogDebug("db: migration skipped (already applied): %s", err)
-		} else {
-			log.LogWarn("db: migration failed: %v (stmt: %s)", err, stmt)
+type migration struct {
+	version int
+	name    string
+	stmt    string
+}
+
+// schemaMigrations tracks table modifications in sequential order.
+var schemaMigrations = []migration{
+	{version: 1, name: "collections_add_current_hash", stmt: `ALTER TABLE collections ADD COLUMN current_hash TEXT DEFAULT NULL`},
+	{version: 2, name: "collections_add_visibility", stmt: `ALTER TABLE collections ADD COLUMN visibility TEXT DEFAULT 'public'`},
+	{version: 3, name: "collections_add_tags", stmt: `ALTER TABLE collections ADD COLUMN tags TEXT DEFAULT ''`},
+	{version: 4, name: "collections_add_follow_redirects", stmt: `ALTER TABLE collections ADD COLUMN follow_redirects INTEGER DEFAULT 1`},
+	{version: 5, name: "file_meta_add_cid", stmt: `ALTER TABLE file_meta ADD COLUMN cid TEXT DEFAULT ''`},
+	{version: 6, name: "collection_entries_add_providers_json", stmt: `ALTER TABLE collection_entries ADD COLUMN providers_json TEXT DEFAULT ''`},
+	{version: 7, name: "version_entries_add_providers_json", stmt: `ALTER TABLE version_entries ADD COLUMN providers_json TEXT DEFAULT ''`},
+}
+
+// applyMigrations applies unapplied schema migrations and updates PRAGMA user_version.
+// 发现背景：Issue #151 指出原先 8 条 ALTER 依赖字符串匹配吞掉错误，缺乏版本记录。
+func applyMigrations(targetDB *sql.DB) error {
+	if _, err := targetDB.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		return fmt.Errorf("create schema_migrations table: %w", err)
+	}
+
+	applied := make(map[int]bool)
+	rows, err := targetDB.Query(`SELECT version FROM schema_migrations`)
+	if err != nil {
+		return fmt.Errorf("query applied schema_migrations: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v int
+		if err := rows.Scan(&v); err != nil {
+			return err
+		}
+		applied[v] = true
+	}
+
+	latestVersion := 0
+	for _, m := range schemaMigrations {
+		if m.version > latestVersion {
+			latestVersion = m.version
+		}
+		if applied[m.version] {
+			continue
+		}
+
+		if _, err := targetDB.Exec(m.stmt); err != nil {
+			// For existing legacy databases where columns were already added prior to schema_migrations table:
+			if strings.Contains(err.Error(), "duplicate column") {
+				log.LogDebug("db: migration %d (%s) skipped (duplicate column in legacy db): %s", m.version, m.name, err)
+			} else {
+				return fmt.Errorf("db: migration %d (%s) failed: %w (stmt: %s)", m.version, m.name, err, m.stmt)
+			}
+		}
+
+		if _, err := targetDB.Exec(`INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)`, m.version, m.name); err != nil {
+			return fmt.Errorf("record migration %d (%s): %w", m.version, m.name, err)
 		}
 	}
+
+	if _, err := targetDB.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, latestVersion)); err != nil {
+		return fmt.Errorf("update pragma user_version: %w", err)
+	}
+
+	return nil
+}
+
+// GetUserVersion queries SQLite PRAGMA user_version for the database.
+func GetUserVersion(targetDB *sql.DB) (int, error) {
+	var version int
+	if err := targetDB.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
+// migrationExec executes a single migration statement with error reporting.
+func migrationExec(targetDB *sql.DB, stmt string) error {
+	_, err := targetDB.Exec(stmt)
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate column") {
+			log.LogDebug("db: migration skipped (already applied): %s", err)
+			return nil
+		}
+		return fmt.Errorf("migration failed: %w (stmt: %s)", err, stmt)
+	}
+	return nil
 }
