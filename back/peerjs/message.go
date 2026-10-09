@@ -71,15 +71,25 @@ type CandidatePayload struct {
 
 // Options is the signaling client configuration. New configuration items should maintain backward compatibility (default values do not change existing behavior).
 type Options struct {
-	Host         string // signaling server address (default 0.peerjs.com)
-	Port         string
-	Secure       bool               // wss/https
-	Path         string             // path prefix for self-hosted server (default "/")
-	Key          string             // API key (default "peerjs")
-	// Deprecated: ID is never read by the signalling client or NewPeer. The authoritative
-	// node ID is determined solely by the positional `id` argument to NewPeer and signaller.ID().
-	// Setting this field has no effect and is retained only for backward API compatibility.
-	ID string // node ID; unused, see deprecation note
+	Host   string // signaling server address (default 0.peerjs.com)
+	Port   string
+	Secure bool   // wss/https
+	Path   string // path prefix for self-hosted server (default "/")
+	Key    string // API key (default "peerjs")
+	// Deprecated: this field is never read (#140).
+	//
+	// The node ID is the id argument of NewPeer (and of NewPeerJSSignaller one
+	// level down), and that is the only authoritative source — Peer.ID() reads
+	// signaller.ID(), never this field. Setting it is silently ignored, which was
+	// a trap: the old comment ("empty means the server assigns a random ID")
+	// implied a non-empty value would be honoured.
+	//
+	// Kept rather than deleted on purpose: this module is mirrored to the
+	// independent repo github.com/Hana-ame/go-peerjs, and removing an exported
+	// field would be a breaking change for its downstream users. To be deleted in
+	// a future major version. Mirror note: the sibling signalling.Options already
+	// documents that the ID lives in the constructor argument, not in Options.
+	ID           string             //nolint:staticcheck // deprecated: never read, see above
 	Token        string             // empty means randomly generated
 	PingInterval time.Duration      // signaling heartbeat interval (default 5s)
 	ICEServers   []webrtc.ICEServer // WebRTC ICE/TURN server list
