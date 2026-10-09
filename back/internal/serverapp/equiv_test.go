@@ -22,6 +22,21 @@
 // Both goldens were captured from the tree *before* the split and are unchanged
 // by it: this file is green both before and after, which is the equivalence proof.
 //
+// 维护与重捕获指南（Issue #104）：
+//
+// 1. 见到 equiv 测试红了怎么办：
+//    - 若是【新增路由/端点】：检查是否是预期功能演进（如 PR #120 新增 tags 路由）。
+//      确认为有意新增且通过审查后，按下方步骤 2 重捕获金标。
+//    - 若是【响应体/鉴权变更】：严禁盲目重捕获！检查是否意外破坏了路由鉴权、状态码
+//      或错误响应语义。
+//
+// 2. 金标重捕获流程（在当前合法 ref 上）：
+//    - 路由表更新：运行 `go test -tags nosqlite -v ./internal/serverapp/ -run TestGoldenRouteTable`，
+//      从错误信息中的 GOT 列表中复制新行数与完整列表，更新 goldenRouteTable 常量。
+//    - 端点摘要更新：运行 `go test -tags nosqlite -v ./internal/serverapp/ -run TestGoldenEndpointDigest`，
+//      从输出中获取实际 digest，核验无误后替换 goldenEndpointDigest 常量。
+//    - 核验：重捕获后必须运行 `go test -tags nosqlite ./internal/serverapp/...` 确认全绿。
+//
 // Discovery background: HTTP shell split PR (internal/httpd), task requires
 // route-table comparison plus an httptest end-to-end check as the equivalence gate.
 package serverapp
@@ -399,6 +414,6 @@ func TestGoldenEndpointDigest(t *testing.T) {
 		}
 	}
 	if len(bad) > 0 {
-		t.Errorf("endpoint behavior diverged from the pre-split capture:\n%s", strings.Join(bad, "\n"))
+		t.Errorf("endpoint behavior diverged from the pre-split capture:\n%s\n\nGOT:\n%s", strings.Join(bad, "\n"), gotStr)
 	}
 }
