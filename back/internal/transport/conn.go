@@ -67,6 +67,7 @@ type dcReq struct {
 	Size   int64    `json:"size"`
 	ReqID  string   `json:"reqId,omitempty"`
 	Trace  []string `json:"trace,omitempty"`
+	Token  string   `json:"token,omitempty"` // Phase 7: optional auth credential/token
 	// search 动词的查询字段（出站 RequestSearch 用；入站由 dispatchFrame
 	// Unmarshal 进 dcResp，两边 json tag 逐字对齐即可）。
 	// dcReq 是**只发不收**的结构（服务端不拿它解析任何东西），所以在这里
@@ -84,6 +85,10 @@ type traceCtxKey struct{}
 // TraceKey fallback chain context key: value is []string (already-passed node id chain,
 // excluding current node — current node is appended by caller before passing downstream).
 var TraceKey = traceCtxKey{}
+
+// CredentialFunc provides an authentication credential/token for requests over a connection (Phase 7 identity placeholder).
+// Returns an empty string by default in Phase 6; populated in Phase 7.
+type CredentialFunc func() string
 
 // dcResp general response frame: shared by fetch responses (meta/data/done/err) and file
 // index verb responses (created/uploaded/ack/list-resp/search-resp/info-resp/deleted/sync-resp).
@@ -106,6 +111,7 @@ type dcResp struct {
 	URL     string     `json:"url,omitempty"`   // pull: address for this node to fetch (pull.go)
 	Psk     string     `json:"psk,omitempty"`   // psk-auth: peer's presented pre-shared key (psk.go)
 	Code    string     `json:"code,omitempty"`  // machine-readable error code in err frames (consumers branch on code)
+	Token   string     `json:"token,omitempty"` // Phase 7: optional requester/responder identity token
 	// search 动词的查询字段（file_index_search.go）。**不放进独立结构体**是有意的：
 	// dispatchFrame 把每个入站文本帧统一 Unmarshal 成 dcResp，搜索请求得走同一条路；
 	// 拆成第二个结构体意味着要在 dispatch 里为它再开一次 Unmarshal 分支。
@@ -124,10 +130,11 @@ type dcResp struct {
 //   - fetches/expect: outbound role (outbound.go requestFile/routeResponse)
 //   - pendingUpload/binCh/binDone: inbound role (inbound.go serveUploadBegin/uploadWorker)
 type connState struct {
-	mu            sync.Mutex
-	expect        *fetchState            // current expected binary data chunk download request
-	fetches       map[string]*fetchState // reqId → download request
-	pendingUpload *uploadState           // current receiving streaming upload (only one at a time per connection)
+	mu             sync.Mutex
+	expect         *fetchState            // current expected binary data chunk download request
+	fetches        map[string]*fetchState // reqId → download request
+	pendingUpload  *uploadState           // current receiving streaming upload (only one at a time per connection)
+	credentialFunc CredentialFunc        // connection-level credential callback (Phase 7)
 
 	// verbWaits one-shot JSON response waiting slots (share-type "request-response" verbs):
 	// reqId → raw response frame bytes. Separate from fetches because file fetching is
@@ -417,6 +424,7 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 				Offset: r.Offset,
 				Size:   r.Size,
 				ReqID:  r.ReqID,
+				Token:  r.Token,
 			}
 			go s.serveFile(c, req)
 		case "create":

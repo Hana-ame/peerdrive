@@ -68,9 +68,10 @@ func (s *PeerJSService) serveFile(c Session, req dcReq) {
 		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "invalid hash", ReqID: req.ReqID})
 		return
 	}
-	// 共享级别门禁（doc/NETDISK.md §12.6）：private 的内容只给好友和自己。
-	// 只挡 private——public / unlisted / 未声明都放行（理由见 ShareGate 注释）。
-	if g := s.currentShareGate(); g != nil && !g.AllowsDownload(c.ID(), req.Hash, isSelfSession(c)) {
+	// 共享级别门禁（doc/NETDISK.md §12.6 / ROADMAP Phase 7 身份插件点）：
+	// 默认由 DefaultAuthorizer 代理 ShareGate + isSelfSession 判定（行为严格等价）。
+	// Phase 7 可通过 SetAuthorizer 注入强身份（签名/Token）校验器。
+	if auth := s.currentAuthorizer(); auth != nil && !auth.AuthorizeDownload(c, req.Hash, req.Token) {
 		log.LogInfo("peerjs: deny private download hash=%s peer=%s", req.Hash, c.ID())
 		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "private", ReqID: req.ReqID})
 		return
