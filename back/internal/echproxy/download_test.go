@@ -26,6 +26,14 @@ type mockIwaraServer struct {
 	sawXSite       atomic.Bool
 	sawXVersion    atomic.Bool
 	lastXVersion   string
+	// Optional metadata for the VideoMeta tests (meta.go reads author / cover /
+	// duration / views out of the same /video/{id} payload). Left empty by the
+	// download tests, which do not care about them.
+	author   string
+	authorID string
+	cover    string
+	duration float64
+	views    float64
 }
 
 func newMockIwaraServer(t *testing.T) *mockIwaraServer {
@@ -47,12 +55,29 @@ func newMockIwaraServer(t *testing.T) *mockIwaraServer {
 func (m *mockIwaraServer) handleVideoInfo(w http.ResponseWriter, r *http.Request) {
 	m.assertCommonHeaders(r)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	payload := map[string]any{
 		"id":      m.videoID,
 		"title":   "Mock Video",
 		"file":    map[string]string{"id": m.fileID, "name": "abc.mp4"},
 		"fileUrl": m.Server.URL + "/files/" + m.fileID + "/resolution?expires=" + m.expires + "&sig=x",
-	})
+	}
+	if m.author != "" {
+		payload["author"] = m.author
+		if m.authorID != "" {
+			payload["authorId"] = m.authorID
+		}
+	}
+	if m.cover != "" {
+		// coverUrl (not cover) is the spelling the metadata decoder probes first.
+		payload["coverUrl"] = m.cover
+	}
+	if m.duration > 0 {
+		payload["duration"] = m.duration
+	}
+	if m.views > 0 {
+		payload["views"] = m.views
+	}
+	json.NewEncoder(w).Encode(payload)
 }
 
 func (m *mockIwaraServer) handleResolution(w http.ResponseWriter, r *http.Request) {

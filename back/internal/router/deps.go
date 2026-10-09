@@ -47,6 +47,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"peerdrive/internal/config"
+	"peerdrive/internal/echproxy"
 	"peerdrive/internal/service"
 	"peerdrive/internal/source"
 	"peerdrive/internal/transport"
@@ -99,6 +100,13 @@ type Deps struct {
 	// /sources/* management endpoints are not registered at all, and the BT/IPFS
 	// controls are not wired into it. Same meaning as SetSourceManager(nil).
 	SourceManager *source.Manager
+
+	// IwaraClient is the iwara.tv metadata client (internal/echproxy). nil → the
+	// /iwara/* endpoints are not registered (PEERDRIVE_IWARA_ENABLE=false is the
+	// default: the module spawns an external process and injects a user cookie
+	// into third-party requests, so it stays off unless opted into). When set,
+	// GET /iwara/video/:id serves the page its title/cover/resolution list.
+	IwaraClient *echproxy.IwaraClient
 }
 
 // Router owns one fully-assembled HTTP surface plus the auth state that goes

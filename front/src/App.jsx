@@ -14,6 +14,7 @@ import Transfers from './pages/Transfers';
 import BT from './pages/BT';
 import IPFS from './pages/IPFS';
 import NodeControl from './pages/NodeControl';
+import Iwara from './pages/Iwara';
 
 // In-construction placeholder page (Modules 2, 3, 4, 5, 6 to be replaced one by one)
 function Placeholder({ title }) {
@@ -29,9 +30,13 @@ function Placeholder({ title }) {
 
 // Navigation only keeps currently active entries (2026-09-26: netdisk/collections/
 // transfers/BT/IPFS/settings are temporarily unused and hidden from nav; page
-// routes are kept, so direct URL access still works)
+// routes are kept, so direct URL access still works). The iwara page is a
+// standalone viewer that works without the rest of the netdisk chain (its data
+// comes from the echproxy iwara client, not from the local file index), so it
+// is linked from the nav.
 const NAV = [
   { to: '/', label: 'Connect' },
+  { to: '/iwara', label: 'Iwara' },
 ];
 
 function Nav() {
@@ -76,6 +81,8 @@ export default function App() {
             <Route path="/transfers" element={<Transfers />} />
             <Route path="/bt" element={<BT />} />
             <Route path="/ipfs" element={<IPFS />} />
+            <Route path="/iwara" element={<Iwara />} />
+            <Route path="/iwara/:id" element={<Iwara />} />
             <Route path="*" element={<Placeholder title="Page Not Found" />} />
           </Routes>
         </div>
