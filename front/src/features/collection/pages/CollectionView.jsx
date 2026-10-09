@@ -22,11 +22,27 @@ function parseManifest(data) {
   return data;
 }
 
-// decodeBytes：ws.download 返回 Uint8Array，UTF-8 解码成 JSON 文本。
-// 为什么用 TextDecoder 而不是 String.fromCharCode：后者对多字节 UTF-8 会乱码，
-// 条目 path 可能含非 ASCII 文件名（如中文/日文），必须按 UTF-8 解。
-function decodeBytes(bytes) {
-  return new TextDecoder('utf-8').decode(bytes);
+// readStreamAsText：从 ReadableStream 流式读取并用 TextDecoder('utf-8', { stream: true }) 增量解码。
+// 避免 ws.download 的全量 Uint8Array 内存堆积，降低大 manifest 峰值内存。
+async function readStreamAsText(readableStream) {
+  const reader = readableStream.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let result = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        result += decoder.decode();
+        break;
+      }
+      if (value) {
+        result += decoder.decode(value, { stream: true });
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return result;
 }
 
 export default function CollectionView() {
@@ -40,10 +56,12 @@ export default function CollectionView() {
     setLastErr('');
     setState({ phase: 'loading', collection: null, source: sha });
     try {
-      // 首选：内容寻址直取（节点上任何集合 JSON 都能拿，不依赖本地管理面登记）
+      // 首选：内容寻址直取（使用 ws.downloadStream 流式读取，避免全量字节数组常驻内存）
       let data;
       try {
-        data = parseManifest(JSON.parse(decodeBytes(await ws.download(sha))));
+        const stream = ws.downloadStream(sha);
+        const text = await readStreamAsText(stream);
+        data = parseManifest(JSON.parse(text));
       } catch (e) {
         // 兜底：本地管理面端点。直取失败不一定是格式问题（可能 hash 指向的不是
         // JSON），兜底失败的信息更有价值，所以这里的错误被下面的 catch 覆盖。

@@ -13,13 +13,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 
-const { downloadMock, adminMock, downloadToFileMock } = vi.hoisted(() => ({
+const { downloadMock, downloadStreamMock, adminMock, downloadToFileMock } = vi.hoisted(() => ({
   downloadMock: vi.fn(),
+  downloadStreamMock: vi.fn(),
   adminMock: vi.fn(),
   downloadToFileMock: vi.fn(),
 }))
 vi.mock('../src/ws.js', () => ({
   download: downloadMock,
+  downloadStream: downloadStreamMock,
   admin: adminMock,
   downloadToFile: downloadToFileMock,
 }))
@@ -44,11 +46,23 @@ const sample = {
 
 beforeEach(() => {
   downloadMock.mockReset()
+  downloadStreamMock.mockReset()
   adminMock.mockReset()
   downloadToFileMock.mockReset()
   // 默认：preview 取数成功（返回 3 字节假图）
   downloadMock.mockResolvedValue(new Uint8Array([1, 2, 3]))
 })
+
+function createMockStream(chunks) {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk)
+      }
+      controller.close()
+    },
+  })
+}
 
 async function flush() {
   await act(async () => { await Promise.resolve() })
@@ -158,7 +172,7 @@ describe('CollectionView page', () => {
   )
 
   it('loads a collection by sha (content-addressed JSON) and browses it', async () => {
-    downloadMock.mockResolvedValueOnce(bytes(JSON.stringify(sample)))
+    downloadStreamMock.mockReturnValueOnce(createMockStream([bytes(JSON.stringify(sample))]))
     renderAt('/collection/' + SHA('c'))
     await flush()
     expect(screen.getByText('demo pack')).toBeTruthy()
@@ -167,7 +181,9 @@ describe('CollectionView page', () => {
   })
 
   it('falls back to the admin endpoint when the sha does not decode as JSON', async () => {
-    downloadMock.mockRejectedValueOnce(new Error('not local'))
+    downloadStreamMock.mockImplementationOnce(() => {
+      throw new Error('not local')
+    })
     adminMock.mockResolvedValueOnce(sample)
     renderAt('/collection/' + SHA('c'))
     await flush()
