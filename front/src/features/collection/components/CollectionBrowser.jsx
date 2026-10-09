@@ -11,9 +11,9 @@
 //     点缩略图/Open 弹大图（访问）；无 preview → 占位图标，Open 退化为下载；
 //   - Download 按钮走 ws.downloadToFile(sha, basename)，与 Drive 页同一取数通道。
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import * as ws from '../../../ws';
-import { buildTree, descend, basename, entrySha, previewSha } from '../lib/collectionTree';
-import { fmtBytes } from '../../../lib/format';
+import * as ws from '../../../platform/transport-ws';
+import { buildTree, descend, basename, entrySha, previewSha } from '../../../platform/shared/collectionTree';
+import { fmtBytes } from '../../../platform/shared/format';
 import { previewBlobCache, previewLimit } from '../../../lib/cache';
 
 // usePreviewCache：按 preview sha 缓存 blob URL + 去重并发请求。

@@ -1,10 +1,14 @@
-// Module ④: Settings —— connection mode (WS admin plane / PeerJS), backend address, authentication (reg server register/login).
 import React, { useState, useEffect, useCallback } from 'react';
 import * as ws from '../../../platform/transport-ws';
 import PeerJSConnect from '../../../lib/PeerJSConnect';
+import {
+  STORAGE_KEY_API_BASE,
+  STORAGE_KEY_AUTH_TOKEN,
+  STORAGE_KEY_REG_SERVER_URL,
+} from '../../../platform/shared/storageKeys';
 
 function getApiBase() {
-  return localStorage.getItem('peerdrive_api_base') || 'https://wsl-3000.moonchan.xyz';
+  return localStorage.getItem(STORAGE_KEY_API_BASE) || 'https://wsl-3000.moonchan.xyz';
 }
 
 export default function Settings() {
@@ -14,7 +18,7 @@ export default function Settings() {
   const [err, setErr] = useState('');
 
   // Authentication (reg server)
-  const [regUrl, setRegUrl] = useState(localStorage.getItem('peerdrive_reg_server_url') || 'https://account.moonchan.xyz');
+  const [regUrl, setRegUrl] = useState(localStorage.getItem(STORAGE_KEY_REG_SERVER_URL) || 'https://account.moonchan.xyz');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [authUser, setAuthUser] = useState('');
@@ -34,7 +38,7 @@ export default function Settings() {
   const saveBase = () => {
     const url = apiBaseInput.trim();
     if (!url) return;
-    localStorage.setItem('peerdrive_api_base', url.startsWith('http') ? url : 'https://' + url);
+    localStorage.setItem(STORAGE_KEY_API_BASE, url.startsWith('http') ? url : 'https://' + url);
     setErr('Backend address saved. Please refresh the page to take effect.');
     setTimeout(() => window.location.reload(), 800);
   };
@@ -60,7 +64,7 @@ export default function Settings() {
       const d = await regCall(`/auth/${kind}`, { username: username.trim(), password });
       const token = d?.token;
       if (token) {
-        localStorage.setItem('peerdrive_auth_token', token);
+        localStorage.setItem(STORAGE_KEY_AUTH_TOKEN, token);
         setAuthUser(d.username || username.trim());
         setPassword('');
       } else {
@@ -72,12 +76,12 @@ export default function Settings() {
   };
 
   const logout = () => {
-    localStorage.removeItem('peerdrive_auth_token');
+    localStorage.removeItem(STORAGE_KEY_AUTH_TOKEN);
     setAuthUser('');
   };
 
   useEffect(() => {
-    setAuthUser(localStorage.getItem('peerdrive_auth_token') ? 'Authenticated (local token present)' : '');
+    setAuthUser(localStorage.getItem(STORAGE_KEY_AUTH_TOKEN) ? 'Authenticated (local token present)' : '');
   }, []);
 
   const label = 'block text-xs text-gray-400 mb-1';
@@ -149,7 +153,7 @@ export default function Settings() {
             <label className={label}>Registration Server URL</label>
             <input value={regUrl} onChange={e => {
               setRegUrl(e.target.value);
-              localStorage.setItem('peerdrive_reg_server_url', e.target.value);
+              localStorage.setItem(STORAGE_KEY_REG_SERVER_URL, e.target.value);
             }} className={input} />
           </div>
           {authUser ? (

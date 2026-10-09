@@ -3,7 +3,7 @@
 // rebuilt one by one (in-construction placeholder).
 import React, { useEffect, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
-import { registerSW } from './lib/swBridge';
+import { registerSW } from './platform/shared/swBridge';
 import ConnectionStatus from './lib/ConnectionStatus';
 
 const Connect = lazy(() => import('./features/node/pages/Connect'));
@@ -40,7 +40,7 @@ function RouteLoading() {
   );
 }
 
-import * as ws from './ws';
+import * as ws from './platform/transport-ws';
 
 // Navigation groups (Issue #77):
 // - Always available (standalone/consumer pages): Connect (/), Iwara (/iwara)

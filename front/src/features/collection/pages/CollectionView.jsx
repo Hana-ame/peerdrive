@@ -10,7 +10,7 @@
 // 路由：/collection/:hash 直接按 sha 加载；/collection 无参时给输入面板。
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import * as ws from '../../../ws';
+import * as ws from '../../../platform/transport-ws';
 import CollectionBrowser from '../components/CollectionBrowser';
 
 import { manifestCache } from '../../../lib/cache';

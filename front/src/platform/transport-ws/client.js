@@ -53,18 +53,25 @@ const BIN_CHUNK = 64 * 1024
 // admin-bin or data header (guaranteed by backend SendFrame atomic contiguity, do not change).
 let binaryExpect = null
 
+import {
+  STORAGE_KEY_API_BASE,
+  STORAGE_KEY_AUTH_TOKEN,
+  STORAGE_KEY_AUTH_KEY,
+  STORAGE_KEY_AUTH_HEADER_ENABLED,
+} from '../shared/storageKeys.js'
+
 // Sync the token with api.js (see the localStorage key at api.js AUTH_TOKEN_KEY)
 function readToken() {
-  const frag = localStorage.getItem('peerdrive_auth_token')
+  const frag = localStorage.getItem(STORAGE_KEY_AUTH_TOKEN)
   if (frag) return frag
-  if (localStorage.getItem('peerdrive_auth_header_enabled') === 'true') {
-    return localStorage.getItem('peerdrive_auth_key') || ''
+  if (localStorage.getItem(STORAGE_KEY_AUTH_HEADER_ENABLED) === 'true') {
+    return localStorage.getItem(STORAGE_KEY_AUTH_KEY) || ''
   }
   return ''
 }
 
 function getWsBase() {
-  return localStorage.getItem('peerdrive_api_base') || 'https://wsl-3000.moonchan.xyz'
+  return localStorage.getItem(STORAGE_KEY_API_BASE) || 'https://wsl-3000.moonchan.xyz'
 }
 
 /* ── Connection state, heartbeat and auto-reconnect ──

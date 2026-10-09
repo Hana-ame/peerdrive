@@ -10,8 +10,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { connectToPeer, discoverNodes } from 'peerdrive-client';
 import { setNodeSession, clearNodeSession } from './nodeSession';
 
-import { fmtBytes } from './format';
-
+import { fmtBytes } from '../platform/shared/format';
+import { STORAGE_KEY_PANEL_PREFS } from '../platform/shared/storageKeys';
 
 const DEFAULT_SIG = {
   host: 'peersignal.moonchan.xyz',
@@ -23,14 +23,14 @@ const DEFAULT_SIG = {
 
 function getStableMyId() {
   try {
-    const data = JSON.parse(localStorage.getItem('peerdrive.panel.v1') || '{}');
+    const data = JSON.parse(localStorage.getItem(STORAGE_KEY_PANEL_PREFS) || '{}');
     if (data.myId) return data.myId;
   } catch (e) { /* ignore */ }
   const id = 'pd-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   try {
-    const data = JSON.parse(localStorage.getItem('peerdrive.panel.v1') || '{}');
+    const data = JSON.parse(localStorage.getItem(STORAGE_KEY_PANEL_PREFS) || '{}');
     data.myId = id;
-    localStorage.setItem('peerdrive.panel.v1', JSON.stringify(data));
+    localStorage.setItem(STORAGE_KEY_PANEL_PREFS, JSON.stringify(data));
   } catch (e) { /* ignore */ }
   return id;
 }
