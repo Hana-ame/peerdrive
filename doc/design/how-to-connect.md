@@ -28,7 +28,7 @@
 | 09 | [transport P2P transport](modules/09-transport.md) | `back/internal/transport/` | Session state machine + verb dispatch (req/index/forward/share/pull/admin), discovery client |
 | 10 | [peerjs protocol library](modules/10-peerjs.md) | `back/peerjs/` | PeerJS signaling + WebRTC DataChannel primitives, zero business knowledge |
 | 11 | [signalserver signaling & discovery](modules/11-signalserver.md) | `back/signalserver/` | Self-hosted PeerJS signaling + room discovery (pure in-memory state) |
-| 12 | [media-node ECH media chain](modules/12-media-node.md) | `back/cmd/media-node/` + `back/ech/` | Standalone binary: ECH domain-fronted direct connection to twimg media CDN |
+| 12 | [media-node ECH media chain](modules/12-media-node.md) | `back/cmd/media-node/` + `back/internal/echcore/` | Standalone binary: ECH domain-fronted direct connection to twimg media CDN |
 | 13 | [frontend Web consumer](modules/13-frontend.md) | `front/src/` | React SPA: local WS session for admin plane + PeerJS dialing consumer |
 | 14 | [nodestate shared state](modules/14-nodestate.md) | `back/internal/nodestate/` | operator/reg/peerID in-process shared state (independent package breaking circular imports) |
 
