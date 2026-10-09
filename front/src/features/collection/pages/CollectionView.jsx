@@ -13,6 +13,8 @@ import { useParams } from 'react-router-dom';
 import * as ws from '../../../ws';
 import CollectionBrowser from '../components/CollectionBrowser';
 
+import { manifestCache } from '../../../lib/cache';
+
 // parseManifest：校验并规整 collection 对象。为什么这里强制 entries 存在：
 // 文件夹视图的输入契约是"有 entries 数组的集合 JSON"，缺了它没有可展示的结构，
 // 早失败比渲染出一个空文件夹更诚实。
@@ -54,6 +56,13 @@ export default function CollectionView() {
 
   const loadBySha = useCallback(async (sha) => {
     setLastErr('');
+    // 缓存优先：内容寻址保证 sha 对应的 manifest 永不改变
+    const cached = manifestCache.get(sha);
+    if (cached) {
+      setState({ phase: 'ready', collection: cached, source: sha });
+      return;
+    }
+
     setState({ phase: 'loading', collection: null, source: sha });
     try {
       // 首选：内容寻址直取（使用 ws.downloadStream 流式读取，避免全量字节数组常驻内存）
@@ -67,6 +76,7 @@ export default function CollectionView() {
         // JSON），兜底失败的信息更有价值，所以这里的错误被下面的 catch 覆盖。
         data = parseManifest(await ws.admin('GET', `/anon/collections/${sha}`));
       }
+      manifestCache.set(sha, data);
       setState({ phase: 'ready', collection: data, source: sha });
     } catch (e) {
       setLastErr(e?.message || String(e));

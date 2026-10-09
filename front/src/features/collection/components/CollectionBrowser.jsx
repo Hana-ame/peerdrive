@@ -14,30 +14,23 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as ws from '../../../ws';
 import { buildTree, descend, basename, entrySha, previewSha } from '../lib/collectionTree';
 import { fmtBytes } from '../../../lib/format';
+import { previewBlobCache } from '../../../lib/cache';
 
 // usePreviewCache：按 preview sha 缓存 blob URL + 去重并发请求。
-// 为什么在组件级缓存而不每次 new 一个：同一目录下多个缩略图/大图弹窗可能引用
-// 同一个 preview sha（同一张图出现在多个集合条目里很常见），逐次下载是浪费；
-// 为什么卸载时统一 revoke：blob URL 不复用会泄漏内存，happy-dom/浏览器都是如此，
-// 卸载组件时清掉本组件创建的全部 URL。
+// 升级为模块级 previewBlobCache（带 32MB 内存预算与 LRU revoke 回收）：
+// 跨组件导航与同一合集多次浏览均可命中缓存，无需重复下载。
 function usePreviewCache() {
-  const cache = useRef(new Map()); // preview sha → blob URL
   const inflight = useRef(new Map()); // preview sha → Promise<blob URL>（并发去重）
-  useEffect(() => () => {
-    for (const url of cache.current.values()) {
-      try { URL.revokeObjectURL(url) } catch { /* revoke 失败不影响卸载 */ }
-    }
-    cache.current.clear();
-  }, []);
+
   return useCallback((sha) => {
-    if (cache.current.has(sha)) return Promise.resolve(cache.current.get(sha));
+    if (previewBlobCache.has(sha)) return Promise.resolve(previewBlobCache.get(sha));
     if (inflight.current.has(sha)) return inflight.current.get(sha);
     const p = ws.download(sha)
       .then((bytes) => {
         // 取数通道与文件下载同一条（ws.download → req 帧），预览文件也是
         // sha-文件系统里的内容寻址对象，字节回来直接包成 blob。
         const url = URL.createObjectURL(new Blob([bytes]));
-        cache.current.set(sha, url);
+        previewBlobCache.set(sha, url, bytes.byteLength || 0);
         inflight.current.delete(sha);
         return url;
       })

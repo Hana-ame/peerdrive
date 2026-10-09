@@ -28,6 +28,7 @@ vi.mock('../src/ws.js', () => ({
 
 import CollectionBrowser from '../src/features/collection/components/CollectionBrowser'
 import CollectionView from '../src/features/collection/pages/CollectionView'
+import { manifestCache, previewBlobCache } from '../src/lib/cache'
 
 const SHA = (c) => c.repeat(64)
 const bytes = (s) => new TextEncoder().encode(s)
@@ -45,6 +46,8 @@ const sample = {
 }
 
 beforeEach(() => {
+  manifestCache.clear()
+  previewBlobCache.clear()
   downloadMock.mockReset()
   downloadStreamMock.mockReset()
   adminMock.mockReset()
