@@ -32,6 +32,11 @@ func (s *CollectionService) Search(q string) ([]model.Collection, error) {
 	return repository.SearchCollections(q)
 }
 
+// SearchWithFilter performs fuzzy search among public collections with optional tag filter.
+func (s *CollectionService) SearchWithFilter(q, tag string) ([]model.Collection, error) {
+	return repository.SearchCollectionsWithFilter(q, tag, "public")
+}
+
 // ListPublic lists all public collections; when q is non-empty, filters by username/collection name.
 func (s *CollectionService) ListPublic(q string) ([]model.Collection, error) {
 	return repository.ListPublicCollections(q)

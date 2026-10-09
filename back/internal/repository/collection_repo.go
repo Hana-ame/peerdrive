@@ -17,6 +17,7 @@ package repository
 import (
 	"database/sql"
 	"encoding/json"
+	"strings"
 
 	"peerdrive/internal/model"
 )
@@ -170,8 +171,33 @@ func GetCollection(username, collectionName string) (*model.Collection, error) {
 // SearchCollections fuzzy searches public collections by username or collection name.
 // M11: LIKE %q% with no LIMIT → full-table scan + materialization; limit to 100 results (sufficient for search).
 func SearchCollections(query string) ([]model.Collection, error) {
-	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections WHERE (username LIKE ? OR collection_name LIKE ?) AND visibility = 'public' ORDER BY created_at DESC LIMIT 100`,
-		"%"+query+"%", "%"+query+"%")
+	return SearchCollectionsWithFilter(query, "", "public")
+}
+
+// SearchCollectionsWithFilter searches collections with optional query, tag filter, and visibility constraint (Issue #91).
+func SearchCollectionsWithFilter(query, tag, visibility string) ([]model.Collection, error) {
+	if DB == nil {
+		return nil, nil
+	}
+	conds := []string{}
+	args := []any{}
+	if visibility != "" {
+		conds = append(conds, "visibility = ?")
+		args = append(args, visibility)
+	}
+	if q := strings.TrimSpace(query); q != "" {
+		conds = append(conds, "(username LIKE ? OR collection_name LIKE ?)")
+		args = append(args, "%"+q+"%", "%"+q+"%")
+	}
+	if t := strings.TrimSpace(tag); t != "" {
+		conds = append(conds, "tags LIKE ?")
+		args = append(args, "%"+t+"%")
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = " WHERE " + strings.Join(conds, " AND ")
+	}
+	rows, err := DB.Query(`SELECT id, username, collection_name, current_hash, visibility, follow_redirects, tags, created_at FROM collections`+where+` ORDER BY created_at DESC LIMIT 100`, args...)
 	if err != nil {
 		return nil, err
 	}

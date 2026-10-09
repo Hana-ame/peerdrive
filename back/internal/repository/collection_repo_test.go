@@ -143,4 +143,22 @@ func TestCollectionRepo_Tags(t *testing.T) {
 	if col == nil {
 		t.Fatal("collection not found")
 	}
+
+	// 发现背景：Issue #91 验证 SearchCollectionsWithFilter 的 tag 与 query 组合过滤
+	res, err := SearchCollectionsWithFilter("", "updated", "public")
+	if err != nil {
+		t.Fatalf("SearchCollectionsWithFilter failed: %v", err)
+	}
+	if len(res) != 1 || res[0].CollectionName != "tagged" {
+		t.Fatalf("expected 1 result with name 'tagged', got %v", res)
+	}
+
+	// 搜索不存在的 tag
+	resEmpty, err := SearchCollectionsWithFilter("", "non-existent", "public")
+	if err != nil {
+		t.Fatalf("SearchCollectionsWithFilter failed: %v", err)
+	}
+	if len(resEmpty) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(resEmpty))
+	}
 }

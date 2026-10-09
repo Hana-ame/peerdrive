@@ -121,19 +121,21 @@ func ListCollections(c *gin.Context) {
 
 // SearchCollections godoc
 // @Summary Search collections
-// @Description Search collections by username or collection name
+// @Description Search collections by username, collection name, or tag
 // @Tags collections
 // @Produce json
-// @Param q query string true "Search query"
+// @Param q query string false "Search query"
+// @Param tag query string false "Tag filter"
 // @Success 200 {object} map[string]interface{} "data array of collections"
 // @Router /collections/search [get]
 func SearchCollections(c *gin.Context) {
 	q := c.Query("q")
-	if q == "" {
+	tag := c.Query("tag")
+	if q == "" && tag == "" {
 		c.JSON(http.StatusOK, gin.H{"data": []model.Collection{}})
 		return
 	}
-	cols, err := collSvc.Search(q)
+	cols, err := collSvc.SearchWithFilter(q, tag)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

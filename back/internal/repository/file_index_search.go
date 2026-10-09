@@ -40,6 +40,7 @@ import (
 // （seq 单调递增，与登记时间同序）。
 type SearchQuery struct {
 	Q       string
+	Tag     string
 	MinSize *int64
 	MaxSize *int64
 	Offset  int
@@ -66,6 +67,9 @@ const (
 // 排序：seq DESC（最新登记的在前），与 ListFileIndex 一致——两次翻页之间插入的
 // 新文件会「挤掉」末尾条目，这是可接受的（分页游标是 offset 而非游标值）。
 func SearchFileIndex(q SearchQuery) ([]FileIndex, int64, error) {
+	if DB == nil {
+		return nil, 0, nil
+	}
 	conds := []string{"deleted = 0"}
 	args := make([]any, 0, 4)
 
@@ -75,6 +79,10 @@ func SearchFileIndex(q SearchQuery) ([]FileIndex, int64, error) {
 		// 会一条都回不了。
 		conds = append(conds, "(`name` LIKE ? ESCAPE '\\' OR `path` LIKE ? ESCAPE '\\')")
 		args = append(args, pat, pat)
+	}
+	if tag := strings.ToLower(strings.TrimSpace(q.Tag)); tag != "" {
+		conds = append(conds, "hash IN (SELECT sha FROM sha_tags WHERE tag = ?)")
+		args = append(args, tag)
 	}
 	if q.MinSize != nil {
 		conds = append(conds, "size >= ?")
