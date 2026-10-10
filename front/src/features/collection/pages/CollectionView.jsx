@@ -15,6 +15,8 @@ import CollectionBrowser from '../components/CollectionBrowser';
 
 import { manifestCache } from '../../../lib/cache';
 
+import { getNodeSession } from '../../../lib/nodeSession';
+
 // parseManifest：校验并规整 collection 对象。为什么这里强制 entries 存在：
 // 文件夹视图的输入契约是"有 entries 数组的集合 JSON"，缺了它没有可展示的结构，
 // 早失败比渲染出一个空文件夹更诚实。
@@ -65,17 +67,70 @@ export default function CollectionView() {
 
     setState({ phase: 'loading', collection: null, source: sha });
     try {
-      // 首选：内容寻址直取（使用 ws.downloadStream 流式读取，避免全量字节数组常驻内存）
       let data;
-      try {
-        const stream = ws.downloadStream(sha);
-        const text = await readStreamAsText(stream);
-        data = parseManifest(JSON.parse(text));
-      } catch (e) {
-        // 兜底：本地管理面端点。直取失败不一定是格式问题（可能 hash 指向的不是
-        // JSON），兜底失败的信息更有价值，所以这里的错误被下面的 catch 覆盖。
-        data = parseManifest(await ws.admin('GET', `/anon/collections/${sha}`));
+      const session = getNodeSession();
+      // 如果明确是无 WS 连接但有 PeerJS 客户端，优先从 PeerJS 共享范围读取
+      if (session?.client && typeof ws.getStatus === 'function' && ws.getStatus() === 'closed') {
+        try {
+          const snap = await session.client.shares();
+          const match = (snap?.collections || []).find(c => c.hash === sha || c.name === sha);
+          if (match && Array.isArray(match.entries)) {
+            data = parseManifest({
+              hash: match.hash,
+              friendly_name: match.name,
+              entries: match.entries,
+              tags: match.tags,
+              created_at: '',
+            });
+          }
+        } catch { /* ignore */ }
       }
+
+      // 首选：内容寻址直取（使用 ws.downloadStream 流式读取）
+      if (!data) {
+        try {
+          const stream = ws.downloadStream(sha);
+          const text = await readStreamAsText(stream);
+          data = parseManifest(JSON.parse(text));
+        } catch {
+          try {
+            data = parseManifest(await ws.admin('GET', `/anon/collections/${sha}`));
+          } catch (adminErr) {
+            // 兜底：若 WS 取数失败且存在 PeerJS 会话，尝试 PeerJS shares 或 stream
+            if (session?.client) {
+              try {
+                const snap = await session.client.shares();
+                const match = (snap?.collections || []).find(c => c.hash === sha || c.name === sha);
+                if (match && Array.isArray(match.entries)) {
+                  data = parseManifest({
+                    hash: match.hash,
+                    friendly_name: match.name,
+                    entries: match.entries,
+                    tags: match.tags,
+                    created_at: '',
+                  });
+                }
+              } catch { /* ignore */ }
+              if (!data) {
+                const chunks = [];
+                for await (const chunk of session.client.stream(sha)) {
+                  chunks.push(chunk);
+                }
+                const blob = new Blob(chunks);
+                const text = await blob.text();
+                data = parseManifest(JSON.parse(text));
+              }
+            } else {
+              throw adminErr;
+            }
+          }
+        }
+      }
+
+      if (!data) {
+        throw new Error('Failed to load collection manifest');
+      }
+
       manifestCache.set(sha, data);
       setState({ phase: 'ready', collection: data, source: sha });
     } catch (e) {

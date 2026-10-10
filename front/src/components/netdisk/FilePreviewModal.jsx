@@ -49,6 +49,19 @@ export default function FilePreviewModal({
         if (file.url) {
           if (active) {
             setBlobUrl(file.url);
+            if (kind === 'text') {
+              try {
+                const res = await fetch(file.url);
+                const txt = await res.text();
+                if (txt.length > MAX_TEXT_PREVIEW_BYTES) {
+                  setIsTruncated(true);
+                  setTextContent(txt.slice(0, MAX_TEXT_PREVIEW_BYTES));
+                } else {
+                  setIsTruncated(false);
+                  setTextContent(txt);
+                }
+              } catch { /* ignore */ }
+            }
             setLoading(false);
           }
           return;

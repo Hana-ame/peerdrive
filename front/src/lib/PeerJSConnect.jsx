@@ -21,6 +21,18 @@ const DEFAULT_SIG = {
   secure: true,
 };
 
+const CAP_LABELS = {
+  req: { name: '下载', title: '内容寻址文件拉取/下载 (req)' },
+  share: { name: '共享', title: '共享清单查询 (share)' },
+  index: { name: '索引', title: '文件索引与检索 (index)' },
+  pull: { name: '转存', title: '跨节点拉取与转存 (pull)' },
+  display: { name: '投屏', title: '大屏协同展示与控制 (display)' },
+  stream: { name: '直播流', title: '实时流媒体分片广播 (stream)' },
+  fwd: { name: '转发', title: '端口穿透与转发 (fwd)' },
+  bt: { name: 'BT', title: 'BitTorrent 传输支持 (bt)' },
+  ipfs: { name: 'IPFS', title: 'IPFS 内容解析寻址 (ipfs)' },
+};
+
 function getStableMyId() {
   try {
     const data = JSON.parse(localStorage.getItem(STORAGE_KEY_PANEL_PREFS) || '{}');
@@ -211,9 +223,18 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
                     {caps.length > 0 && (
                       <div className="flex flex-wrap items-center gap-1 mt-1 text-[10px] text-gray-500">
                         <span className="text-gray-400">能力:</span>
-                        {caps.map((c) => (
-                          <span key={c} className="px-1 py-0.2 bg-white/[0.04] rounded text-gray-400 font-mono">{c}</span>
-                        ))}
+                        {caps.map((c) => {
+                          const info = CAP_LABELS[c] || { name: c, title: c };
+                          return (
+                            <span
+                              key={c}
+                              title={info.title}
+                              className="px-1.5 py-0.5 bg-white/[0.05] hover:bg-white/[0.1] cursor-help rounded text-gray-300 font-mono transition-colors"
+                            >
+                              {info.name} <span className="text-gray-500 text-[9px]">({c})</span>
+                            </span>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

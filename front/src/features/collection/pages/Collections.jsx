@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import * as ws from '../../../platform/transport-ws';
 import { entrySha } from '../../../platform/shared/collectionTree';
 import DataState from '../../../components/netdisk/DataState';
+import { getNodeSession, onNodeSession } from '../../../lib/nodeSession';
 
 const VIS_LABEL = {
   public: { icon: '🌐', label: 'Public' },
@@ -22,6 +23,13 @@ export default function Collections() {
   const [collections, setCollections] = useState(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [peerSession, setPeerSession] = useState(() => getNodeSession());
+
+  useEffect(() => {
+    return onNodeSession((s) => {
+      setPeerSession(s);
+    });
+  }, []);
 
   // Create-mode state
   const [files, setFiles] = useState([]);
@@ -43,11 +51,67 @@ export default function Collections() {
 
   const loadList = useCallback(async () => {
     setErr('');
+    if (peerSession?.client && ws.getStatus() !== 'open') {
+      try {
+        const snap = await peerSession.client.shares();
+        const colls = (snap?.collections || []).map((c, i) => ({
+          hash: c.hash || `c-${i}`,
+          current_hash: c.hash || `c-${i}`,
+          friendly_name: c.name || c.hash || 'Unnamed Collection',
+          entry_count: c.size ?? (Array.isArray(c.entries) ? c.entries.length : 0),
+          entries: (c.entries || []).map(e => ({
+            path: e.path || e.name || 'unnamed',
+            hash: e.hash || '',
+            mime_type: e.mime || '',
+            providers: [{ type: 'sha256', value: e.hash || '', mime_type: e.mime || '' }],
+          })),
+          tags: c.tags || [],
+          visibility: c.access_policy || 'public',
+          version: 1,
+          is_protected: Boolean(c.is_protected),
+          created_at: '',
+          isRemotePeer: true,
+        }));
+        setCollections(colls);
+        return;
+      } catch {
+        // Fall back to attempting ws.admin
+      }
+    }
+
     try {
       const res = await ws.admin('GET', '/anon/collections');
       setCollections(Array.isArray(res) ? res : []);
-    } catch (e) { setErr(e?.message || String(e)); setCollections([]); }
-  }, []);
+    } catch (e) {
+      if (peerSession?.client) {
+        try {
+          const snap = await peerSession.client.shares();
+          const colls = (snap?.collections || []).map((c, i) => ({
+            hash: c.hash || `c-${i}`,
+            current_hash: c.hash || `c-${i}`,
+            friendly_name: c.name || c.hash || 'Unnamed Collection',
+            entry_count: c.size ?? (Array.isArray(c.entries) ? c.entries.length : 0),
+            entries: (c.entries || []).map(e => ({
+              path: e.path || e.name || 'unnamed',
+              hash: e.hash || '',
+              mime_type: e.mime || '',
+              providers: [{ type: 'sha256', value: e.hash || '', mime_type: e.mime || '' }],
+            })),
+            tags: c.tags || [],
+            visibility: c.access_policy || 'public',
+            version: 1,
+            is_protected: Boolean(c.is_protected),
+            created_at: '',
+            isRemotePeer: true,
+          }));
+          setCollections(colls);
+          return;
+        } catch { /* ignore */ }
+      }
+      setErr(e?.message || String(e));
+      setCollections([]);
+    }
+  }, [peerSession]);
   useEffect(() => { loadList(); }, [loadList]);
 
   const openCreate = async () => {
@@ -103,14 +167,46 @@ export default function Collections() {
   };
 
   const openDetail = async (c) => {
-    if (detail?.hash === (c.hash || c.current_hash)) { setDetail(null); return; }
+    const targetHash = c.hash || c.current_hash;
+    if (detail?.hash === targetHash) { setDetail(null); return; }
     setErr('');
     setUnlockPasscode('');
-    setDetail({ hash: c.hash || c.current_hash, data: null });
+    setDetail({ hash: targetHash, data: null });
+
+    if (Array.isArray(c.entries) && c.entries.length > 0) {
+      setDetail({ hash: targetHash, data: c });
+      return;
+    }
+
     try {
-      const d = await ws.admin('GET', `/anon/collections/${c.hash || c.current_hash}`);
-      setDetail({ hash: c.hash || c.current_hash, data: d });
+      const d = await ws.admin('GET', `/anon/collections/${targetHash}`);
+      setDetail({ hash: targetHash, data: d });
     } catch (e) {
+      if (peerSession?.client) {
+        try {
+          const snap = await peerSession.client.shares();
+          const match = (snap?.collections || []).find(col => col.hash === targetHash);
+          if (match) {
+            setDetail({
+              hash: targetHash,
+              data: {
+                hash: match.hash,
+                friendly_name: match.name,
+                entries: (match.entries || []).map(entry => ({
+                  path: entry.path || entry.name || 'unnamed',
+                  hash: entry.hash || '',
+                  mime_type: entry.mime || '',
+                  providers: [{ type: 'sha256', value: entry.hash || '', mime_type: entry.mime || '' }],
+                })),
+                tags: match.tags || [],
+                is_protected: Boolean(match.is_protected),
+                visibility: match.access_policy || 'public',
+              },
+            });
+            return;
+          }
+        } catch { /* ignore */ }
+      }
       setErr(e?.message || String(e));
       setDetail(null);
     }
@@ -131,6 +227,11 @@ export default function Collections() {
 
   const downloadEntry = async (hash, path) => {
     try {
+      const fname = (path || 'download').split('/').pop();
+      if (peerSession?.client) {
+        await peerSession.client.saveAs(hash, fname);
+        return;
+      }
       const query = unlockPasscode ? `?passcode=${encodeURIComponent(unlockPasscode.trim())}` : '';
       await ws.downloadToFile(hash, path || 'download', query);
     }

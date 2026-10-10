@@ -17,6 +17,7 @@ import { fmtBytes } from '../../../platform/shared/format';
 import { kindOf, mimeOf } from '../../../platform/shared/mime';
 import { previewBlobCache, previewLimit } from '../../../lib/cache';
 import FilePreviewModal from '../../../components/netdisk/FilePreviewModal';
+import { getNodeSession } from '../../../lib/nodeSession';
 
 // usePreviewCache：按 preview sha 缓存 blob URL + 去重并发请求。
 // 升级为模块级 previewBlobCache（带 32MB 内存预算与 LRU revoke 回收）：
@@ -27,12 +28,35 @@ function usePreviewCache() {
   return useCallback((sha) => {
     if (previewBlobCache.has(sha)) return Promise.resolve(previewBlobCache.get(sha));
     if (inflight.current.has(sha)) return inflight.current.get(sha);
-    const p = previewLimit(() => ws.download(sha))
-      .then((bytes) => {
-        // 取数通道与文件下载同一条（ws.download → req 帧），预览文件也是
-        // sha-文件系统里的内容寻址对象，字节回来直接包成 blob。
-        const url = URL.createObjectURL(new Blob([bytes]));
-        previewBlobCache.set(sha, url, bytes.byteLength || 0);
+
+    const fetchBytes = async () => {
+      const session = getNodeSession();
+      if (session?.client && ws.getStatus() !== 'open') {
+        const chunks = [];
+        for await (const chunk of session.client.stream(sha)) {
+          chunks.push(chunk);
+        }
+        return new Blob(chunks);
+      }
+      try {
+        const bytes = await ws.download(sha);
+        return new Blob([bytes]);
+      } catch (e) {
+        if (session?.client) {
+          const chunks = [];
+          for await (const chunk of session.client.stream(sha)) {
+            chunks.push(chunk);
+          }
+          return new Blob(chunks);
+        }
+        throw e;
+      }
+    };
+
+    const p = previewLimit(fetchBytes)
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        previewBlobCache.set(sha, url, blob.size || 0);
         inflight.current.delete(sha);
         return url;
       })
@@ -110,7 +134,7 @@ export default function CollectionBrowser({ collection, onError }) {
     onError?.(msg);
   };
 
-  // 访问：有 preview sha → 弹预览弹窗；无 preview sha → 退化为下载（若用户点 Preview 按钮则弹 MIME 分流预览）
+  // 访问：有 preview sha → 弹预览弹窗；无 preview sha → 退化为下载（见 issue 测试契约）
   const openFile = (node) => {
     if (previewSha(node.entry)) {
       setModal(node);
@@ -120,9 +144,7 @@ export default function CollectionBrowser({ collection, onError }) {
   };
 
   const isPreviewable = (node) => {
-    if (previewSha(node.entry)) return true;
-    const kind = kindOf(node.name, node.entry?.mime);
-    return Boolean(kind);
+    return Boolean(previewSha(node.entry));
   };
 
   const triggerBrowserDownload = (url, fileName) => {
@@ -139,12 +161,28 @@ export default function CollectionBrowser({ collection, onError }) {
   const downloadFile = async (node) => {
     const src = fetchableSource(node.entry);
     if (!src) return;
-    const fileName = node.entry?.name || node.name;
+    const fileName = node.entry?.name || basename(node.entry?.path) || node.name;
     if (src.type === 'sha') {
+      const session = getNodeSession();
+      if (session?.client && ws.getStatus() !== 'open') {
+        try {
+          await session.client.saveAs(src.value, fileName);
+          return;
+        } catch (e) {
+          fail(e);
+          return;
+        }
+      }
       try {
         await ws.downloadToFile(src.value, fileName);
         return;
       } catch (e) {
+        if (session?.client) {
+          try {
+            await session.client.saveAs(src.value, fileName);
+            return;
+          } catch { /* fall through to fallbackUrl */ }
+        }
         // 若 sha 下载失败但条目包含备选 URL/ECHURL/private，尝试回退下载
         const s = node.entry?.source;
         const fallbackUrl = s?.url || s?.['ech-url'] || s?.private?.url;
@@ -258,7 +296,30 @@ export default function CollectionBrowser({ collection, onError }) {
             size: modal.entry.size,
             mime_type: modal.entry.mime,
           }}
-          fetchBlob={(sha) => ws.download(sha)}
+          fetchBlob={async (sha) => {
+            const effectiveType = modal.entry.mime || mimeOf(basename(modal.entry.path) || modal.name, '') || 'application/octet-stream';
+            const session = getNodeSession();
+            if (session?.client && ws.getStatus() !== 'open') {
+              const chunks = [];
+              for await (const chunk of session.client.stream(sha)) {
+                chunks.push(chunk);
+              }
+              return new Blob(chunks, { type: effectiveType });
+            }
+            try {
+              const u8 = await ws.download(sha);
+              return new Blob([u8], { type: effectiveType });
+            } catch (e) {
+              if (session?.client) {
+                const chunks = [];
+                for await (const chunk of session.client.stream(sha)) {
+                  chunks.push(chunk);
+                }
+                return new Blob(chunks, { type: effectiveType });
+              }
+              throw e;
+            }
+          }}
           onClose={closeModal}
           onDownload={() => downloadFile(modal)}
         />
