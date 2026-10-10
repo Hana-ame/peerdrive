@@ -11,11 +11,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	peerjs "github.com/Hana-ame/go-peerjs"
 	"peerdrive/internal/config"
 	"peerdrive/internal/transport"
 )
 
 // display_test.go — Display controller HTTP endpoints test suite (Issue #243).
+
+type fakeDisplaySession struct {
+	id string
+}
+
+func (f *fakeDisplaySession) ID() string                              { return f.id }
+func (f *fakeDisplaySession) SendJSON(v any) error                    { return nil }
+func (f *fakeDisplaySession) SendFrame(header any, body []byte) error { return nil }
+func (f *fakeDisplaySession) OnMessage(fn func(peerjs.Frame))         {}
+func (f *fakeDisplaySession) OnClose(fn func())                       {}
+func (f *fakeDisplaySession) Close()                                  {}
 
 func setupDisplayTest(t *testing.T) (*gin.Engine, *transport.PeerJSService) {
 	gin.SetMode(gin.TestMode)
@@ -51,7 +63,7 @@ func TestDisplayController_Endpoints(t *testing.T) {
 	assert.Empty(t, screens)
 
 	// 2. Register a screen on the transport layer
-	fakeSess := transport.NewWSSession("mock-tv", nil)
+	fakeSess := &fakeDisplaySession{id: "mock-tv"}
 	svc.DisplayManager().Register(fakeSess, "mock-tv", "living-room", "Main TV")
 
 	// List again

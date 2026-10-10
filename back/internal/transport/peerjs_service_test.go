@@ -25,9 +25,10 @@ import (
 // OpenStream, and the forward tests). Close fires the OnClose callback + marks closed (simulating the
 // real connection-close cleanup path -- the bindConn same-peer dedup test relies on this behaviour).
 type fakeSession struct {
-	id   string
-	mu   sync.Mutex
-	sent []map[string]any
+	id       string
+	mu       sync.Mutex
+	sent     []map[string]any
+	sentJSON [][]byte
 	// frames full frame records (including SendFrame's binary body) -- used by the forward data-passthrough assertions
 	frames []fakeFrame
 
@@ -55,6 +56,7 @@ func (f *fakeSession) SendJSON(v any) error {
 	_ = json.Unmarshal(b, &m)
 	f.mu.Lock()
 	f.sent = append(f.sent, m)
+	f.sentJSON = append(f.sentJSON, b)
 	f.frames = append(f.frames, fakeFrame{header: m})
 	f.mu.Unlock()
 	return nil
@@ -65,6 +67,7 @@ func (f *fakeSession) SendFrame(header any, body []byte) error {
 	_ = json.Unmarshal(b, &m)
 	f.mu.Lock()
 	f.sent = append(f.sent, m)
+	f.sentJSON = append(f.sentJSON, b)
 	f.frames = append(f.frames, fakeFrame{header: m, body: body})
 	f.mu.Unlock()
 	return nil
@@ -159,6 +162,8 @@ func newTestPeerJSServiceWithIndex(t *testing.T, idx *FileIndexService) *PeerJSS
 		forwardRules: map[string][]int{},
 		fwNonces:     map[string]*fwdNonce{},
 		fileIndex:    idx,
+		displayMgr:   NewDisplayManager(),
+		streamMgr:    NewStreamManager(),
 		ctx:          context.Background(),
 	}
 }
@@ -577,4 +582,37 @@ func TestDiscoveryMode_UnknownFallsBackToAuto(t *testing.T) {
 	assert.False(t, shouldHTTP)
 	assert.True(t, shouldMQTT, "unknown mode falls back to auto semantics")
 	assert.Equal(t, "auto", mode)
+}
+
+func hashOf(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
+
+func peerjsFrameText(s string) peerjs.Frame {
+	return peerjs.Frame{IsText: true, Data: []byte(s)}
+}
+
+// bindFakeConn binds fakeSession to svc (conns + pending) and returns session without starting uploadWorker.
+func bindFakeConn(t *testing.T, svc *PeerJSService, id string) *fakeSession {
+	t.Helper()
+	sess := &fakeSession{id: id}
+	st := &connState{
+		fetches: make(map[string]*fetchState),
+		binCh:   make(chan binaryChunk, 16),
+		binDone: make(chan struct{}),
+	}
+	svc.mu.Lock()
+	if svc.conns == nil {
+		svc.conns = make(map[string]Session)
+	}
+	svc.conns[id] = sess
+	svc.mu.Unlock()
+	svc.pendingMu.Lock()
+	if svc.pending == nil {
+		svc.pending = make(map[Session]*connState)
+	}
+	svc.pending[sess] = st
+	svc.pendingMu.Unlock()
+	return sess
 }

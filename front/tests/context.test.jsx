@@ -2,16 +2,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import React from 'react'
 
-const { onStatusMock, adminMock } = vi.hoisted(() => ({
+const { onStatusMock, adminMock, getStatusMock } = vi.hoisted(() => ({
   onStatusMock: vi.fn(),
   adminMock: vi.fn(),
+  getStatusMock: vi.fn(() => 'idle'),
 }))
 
 vi.mock('../src/platform/transport-ws/status', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...Object.fromEntries(Object.keys(actual).map((k) => [k, typeof actual[k] === 'function' ? vi.fn() : actual[k]])),
-    getStatus: () => 'idle',
+    getStatus: getStatusMock,
     onStatus: onStatusMock,
   }
 })
@@ -20,7 +21,7 @@ vi.mock('../src/platform/transport-ws', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...Object.fromEntries(Object.keys(actual).map((k) => [k, typeof actual[k] === 'function' ? vi.fn() : actual[k]])),
-    getStatus: () => 'idle',
+    getStatus: getStatusMock,
     onStatus: onStatusMock,
     admin: adminMock,
   }
@@ -30,7 +31,7 @@ vi.mock('../src/ws.js', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...Object.fromEntries(Object.keys(actual).map((k) => [k, typeof actual[k] === 'function' ? vi.fn() : actual[k]])),
-    getStatus: () => 'idle',
+    getStatus: getStatusMock,
     onStatus: onStatusMock,
     admin: adminMock,
   }
@@ -39,6 +40,7 @@ vi.mock('../src/ws.js', async (importOriginal) => {
 import { AppProvider, useNodeState, useTransferState, useAppContext } from '../src/context/AppContext'
 
 beforeEach(() => {
+  getStatusMock.mockReturnValue('idle')
   onStatusMock.mockReset()
   adminMock.mockReset()
   onStatusMock.mockImplementation((cb) => {
@@ -48,6 +50,7 @@ beforeEach(() => {
 })
 
 function emit(s) {
+  getStatusMock.mockReturnValue(s)
   const setter = onStatusMock.mock.calls[0][0]
   act(() => { setter(s) })
 }
@@ -140,6 +143,7 @@ describe('AppContext (Issue #217)', () => {
     }
 
     onStatusMock.mockImplementation((cb) => {
+      getStatusMock.mockReturnValue('open')
       cb('open')
       return () => {}
     })
