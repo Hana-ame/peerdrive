@@ -510,6 +510,13 @@ func (u *UploadSession) completeLocked() (bool, *FileInfo, error, *os.File) {
 	if err := u.file.Sync(); err != nil {
 		return false, nil, err, nil
 	}
+	// 在 Windows 上打开的文件删不掉、重命名不了。
+	// 必须在 hashFile 与 os.Rename 之前先关掉文件句柄。
+	toClose := u.file
+	u.file = nil
+	if closeErr := toClose.Close(); closeErr != nil {
+		return false, nil, fmt.Errorf("close upload file: %w", closeErr), nil
+	}
 	h, err := hashFile(u.path)
 	if err != nil {
 		return false, nil, err, nil
@@ -549,10 +556,7 @@ func (u *UploadSession) completeLocked() (bool, *FileInfo, error, *os.File) {
 	log.LogInfo("file-index: upload complete hash=%s size=%d path=%s name=%s", h, u.size, u.path, u.name)
 	fi := &FileInfo{Hash: h, Path: u.path, Name: u.name, Size: u.size, Seq: seq}
 	u.done, u.doneInfo = true, fi
-	// 句柄交回调用方在锁外关闭；置 nil 让后续 WriteAt/Complete 走 done/aborted 分支
-	f := u.file
-	u.file = nil
-	return true, fi, nil, f
+	return true, fi, nil, nil
 }
 
 // Abort 中止会话并删除目标文件（幂等；reap 摘除句柄后调用无副作用）。
