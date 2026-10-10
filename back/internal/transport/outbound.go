@@ -187,6 +187,10 @@ func searchOutFrame(req dcReq, q SearchQuery) dcReq {
 	req.Query = q.Q
 	req.MinSize = q.MinSize
 	req.MaxSize = q.MaxSize
+	req.Tag = q.Tag
+	req.Category = q.Category
+	req.SortBy = q.SortBy
+	req.SortOrder = q.SortOrder
 	return req
 }
 

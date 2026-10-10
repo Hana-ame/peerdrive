@@ -569,7 +569,7 @@ func DefaultConfig() *Config {
 // Load reads PEERDRIVE_* environment variables and returns the full configuration struct,
 // using defaults for unset items.
 func Load() *Config {
-	return &Config{
+	cfg := &Config{
 		Port:               resolvePort(),
 		DBPath:             resolveMainDBPath(),
 		StorageDir:         getEnv("PEERDRIVE_STORAGE", "./storage"),

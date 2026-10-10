@@ -396,10 +396,14 @@ type searchResp struct {
 // 但要在这里写清楚，别让下一个人以为 search 天然安全。
 func (s *PeerJSService) serveSearch(c Session, r dcResp) {
 	page, err := s.fileIndex.Search(SearchQuery{
-		Q:       r.Query,
-		MinSize: r.MinSize,
-		MaxSize: r.MaxSize,
-		Offset:  int(r.Offset),
+		Q:         r.Query,
+		MinSize:   r.MinSize,
+		MaxSize:   r.MaxSize,
+		Tag:       r.Tag,
+		Category:  r.Category,
+		SortBy:    r.SortBy,
+		SortOrder: r.SortOrder,
+		Offset:    int(r.Offset),
 		// 复用 Size 字段承载 limit —— 与 list 的做法一致（list 也是用 size 当
 		// limit），不新造字段名，免得请求帧里出现两个意思一样的分页参数。
 		Limit: int(r.Size),

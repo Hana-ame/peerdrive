@@ -69,12 +69,15 @@ export default function Drive() {
     });
   }, []);
 
-  // Netdisk Features: Search, Category, ViewMode, Tags
+  // Netdisk Features: Search, Category, ViewMode, Tags, Sorting
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedTag, setSelectedTag] = useState('');
   const [viewMode, setViewMode] = useState('list'); // list | grid
+  const [sortBy, setSortBy] = useState('time'); // 'time' | 'name' | 'size'
+  const [sortOrder, setSortOrder] = useState('desc'); // 'asc' | 'desc'
   const [fileTags, setFileTags] = useState({}); // hash -> string[]
+  const [globalTagCounts, setGlobalTagCounts] = useState([]);
   const [editingTagFile, setEditingTagFile] = useState(null); // file object
   const [tagInputText, setTagInputText] = useState('');
   const [previewFile, setPreviewFile] = useState(null); // file object to preview
@@ -84,6 +87,22 @@ export default function Drive() {
   const [targetChannel, setTargetChannel] = useState('default');
   const [castStatus, setCastStatus] = useState('');
   const [contextMenu, setContextMenu] = useState(null); // { x, y, file } | null
+
+  const loadTagsSummary = useCallback(async () => {
+    try {
+      const res = await ws.admin('GET', '/tags/summary');
+      const list = res?.data || res?.tags || [];
+      if (Array.isArray(list)) {
+        setGlobalTagCounts(list);
+      }
+    } catch {
+      // offline / not available
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTagsSummary();
+  }, [loadTagsSummary]);
 
   const handleContextMenu = (e, file) => {
     e.preventDefault();
@@ -179,22 +198,17 @@ export default function Drive() {
       }
       setFiles(fileList);
 
-      // Fetch tags for files that have hashes
+      // Fetch tags for files in a single batch request (eliminates N+1 network waterfall)
       const hashes = fileList.map(f => f.hash).filter(Boolean);
-      const tagsMap = {};
-      await Promise.all(
-        hashes.map(async (h) => {
-          try {
-            const data = await ws.admin('GET', `/tags/sha/${h}`);
-            if (Array.isArray(data?.tags)) {
-              tagsMap[h] = data.tags;
-            }
-          } catch {
-            // tag endpoint might not have entry yet
-          }
-        })
-      );
-      setFileTags(prev => ({ ...prev, ...tagsMap }));
+      if (hashes.length > 0) {
+        try {
+          const res = await ws.admin('POST', '/tags/batch', { shas: hashes });
+          const batchTags = res?.tags || res?.data || {};
+          setFileTags(prev => ({ ...prev, ...batchTags }));
+        } catch {
+          // tag endpoint might not be available
+        }
+      }
     } catch (e) {
       // If peerSession is also not present, display connection guide
       if (!peerSession?.client) {
@@ -302,6 +316,7 @@ export default function Drive() {
       await ws.admin('POST', `/tags/sha/${editingTagFile.hash}`, { tags });
       setFileTags(prev => ({ ...prev, [editingTagFile.hash]: tags }));
       setEditingTagFile(null);
+      loadTagsSummary();
     } catch (ex) {
       setErr(ex?.message || String(ex));
     }
@@ -374,8 +389,11 @@ export default function Drive() {
     }
   };
 
-  // Distinct tags and counts
+  // Distinct tags and counts (prefers global aggregate counts)
   const allTagsWithCounts = useMemo(() => {
+    if (globalTagCounts && globalTagCounts.length > 0) {
+      return globalTagCounts;
+    }
     const map = {};
     Object.values(fileTags).forEach(tagList => {
       if (Array.isArray(tagList)) {
@@ -385,12 +403,12 @@ export default function Drive() {
       }
     });
     return Object.entries(map).map(([tag, count]) => ({ tag, count }));
-  }, [fileTags]);
+  }, [globalTagCounts, fileTags]);
 
-  // Filtering files
+  // Filtering & sorting files
   const filteredFiles = useMemo(() => {
     if (!files) return [];
-    return files.filter(f => {
+    const list = files.filter(f => {
       // 1. Directory search / match
       const matchQuery = !searchQuery.trim() ||
         f.filename.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -411,7 +429,19 @@ export default function Drive() {
 
       return matchQuery && matchCategory && matchTag;
     });
-  }, [files, searchQuery, selectedCategory, selectedTag, fileTags]);
+
+    return list.sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === 'name') {
+        cmp = (a.filename || '').localeCompare(b.filename || '');
+      } else if (sortBy === 'size') {
+        cmp = (a.size || 0) - (b.size || 0);
+      } else {
+        cmp = String(a.created_at || '').localeCompare(String(b.created_at || ''));
+      }
+      return sortOrder === 'asc' ? cmp : -cmp;
+    });
+  }, [files, searchQuery, selectedCategory, selectedTag, fileTags, sortBy, sortOrder]);
 
   const th = 'text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
   const td = 'px-3 py-2';
@@ -428,6 +458,28 @@ export default function Drive() {
             <p className="text-sm text-gray-500 mt-0.5">Files registered on this node (content-addressed storage)</p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Sorting controls */}
+            <div className="flex items-center bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.06] text-xs">
+              <span className="text-gray-500 pl-2 pr-1 text-[11px]">Sort:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="bg-transparent text-gray-300 text-xs py-1 pr-1 outline-none cursor-pointer"
+                title="Sort field"
+              >
+                <option value="time" className="bg-gray-900 text-white">Date</option>
+                <option value="name" className="bg-gray-900 text-white">Name</option>
+                <option value="size" className="bg-gray-900 text-white">Size</option>
+              </select>
+              <button
+                onClick={() => setSortOrder(o => o === 'asc' ? 'desc' : 'asc')}
+                className="px-2 py-1 text-gray-400 hover:text-white transition-colors text-xs font-mono"
+                title={sortOrder === 'asc' ? 'Ascending (click for Descending)' : 'Descending (click for Ascending)'}
+              >
+                {sortOrder === 'asc' ? '▲' : '▼'}
+              </button>
+            </div>
+            {/* View mode toggle */}
             <div className="flex items-center bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.06] text-xs">
               <button
                 onClick={() => setViewMode('list')}

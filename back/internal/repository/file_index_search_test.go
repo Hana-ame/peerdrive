@@ -403,3 +403,165 @@ func TestSearchFileIndex_IndexColumn(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, n, "idx_file_index_name 必须存在")
 }
+
+// TestSearchFileIndex_SecurityAndInjection 验证 SQL 注入防护与排序字段白名单。
+//
+// 发现背景：新增 Tag、Category、SortBy、SortOrder 等动态检索字段，若直接字符串拼接进
+// SQL 或 WHERE / ORDER BY 子句，将构成严重 SQL 注入漏洞（可导致脱库、篡改或 DoS）。
+// 本测试针对恶意注入 payload 进行表驱动攻击验证，断言查询平稳降级、表结构与数据完好无损。
+func TestSearchFileIndex_SecurityAndInjection(t *testing.T) {
+	initTestDB(t)
+	seedRows(t, testDataset())
+
+	injectionPayloads := []struct {
+		name  string
+		query SearchQuery
+	}{
+		{
+			name:  "SortBy drop table injection",
+			query: SearchQuery{SortBy: "seq; DROP TABLE file_index; --"},
+		},
+		{
+			name:  "SortBy union select injection",
+			query: SearchQuery{SortBy: "name UNION SELECT 1,2,3,4,5,6,7,8,9,10 --"},
+		},
+		{
+			name:  "SortOrder injection",
+			query: SearchQuery{SortOrder: "ASC; DROP TABLE file_index; --"},
+		},
+		{
+			name:  "Tag boolean injection",
+			query: SearchQuery{Tag: "' OR '1'='1"},
+		},
+		{
+			name:  "Category SQL injection",
+			query: SearchQuery{Category: "'; DROP TABLE file_index; --"},
+		},
+	}
+
+	for _, tc := range injectionPayloads {
+		t.Run(tc.name, func(t *testing.T) {
+			fs, total, err := SearchFileIndex(tc.query)
+			require.NoError(t, err, "注入 payload 应被安全白名单或参数化处理，不得引发 SQL 语法错误")
+			// 验证表依然存在且未被删除
+			var count int
+			checkErr := db.QueryRow("SELECT COUNT(*) FROM file_index").Scan(&count)
+			require.NoError(t, checkErr)
+			assert.Equal(t, 7, count, "file_index 表数据量必须完好")
+
+			// 对于非法 Tag 或非法 Category，结果应当为 0 或合理匹配，而非全表泄漏
+			if tc.query.Tag != "" {
+				assert.Equal(t, int64(0), total)
+				assert.Empty(t, fs)
+			}
+		})
+	}
+}
+
+// TestSearchFileIndex_TagAndCategoryFilter 验证标签关联过滤、分类/扩展名过滤与多维排序。
+//
+// 发现背景：文件管理系统需要服务端支持标签联动过滤、按媒体类型（如 docs/images/videos/audio）
+// 以及待审区 inbox 过滤，并支持按名称、大小、时间等维度正反向排序。
+func TestSearchFileIndex_TagAndCategoryFilter(t *testing.T) {
+	initTestDB(t)
+	hashes := seedRows(t, testDataset())
+	// hashes[0]: album01.mp3 (size 100)
+	// hashes[1]: album02.mp3 (size 200)
+	// hashes[2]: film.mov (size 1000)
+	// hashes[3]: clip-2.mov (size 1000)
+	// hashes[4]: Report (2026).pdf (size 50)
+	// hashes[5]: README.txt (size 10)
+
+	// 打上测试标签
+	require.NoError(t, AddShaTag(hashes[0], "favorite"))
+	require.NoError(t, AddShaTag(hashes[0], "music"))
+	require.NoError(t, AddShaTag(hashes[1], "music"))
+	require.NoError(t, AddShaTag(hashes[4], "work"))
+
+	// 1. Tag 过滤
+	t.Run("Filter by Tag", func(t *testing.T) {
+		fs, total, err := SearchFileIndex(SearchQuery{Tag: "music"})
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), total)
+		assert.Equal(t, []string{"album01.mp3", "album02.mp3"}, namesOf(fs))
+
+		fs, total, err = SearchFileIndex(SearchQuery{Tag: "favorite"})
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), total)
+		assert.Equal(t, []string{"album01.mp3"}, namesOf(fs))
+
+		fs, total, err = SearchFileIndex(SearchQuery{Tag: "nonexistent"})
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), total)
+		assert.Empty(t, fs)
+	})
+
+	// 2. Category 过滤 (audio, videos, docs)
+	t.Run("Filter by Category", func(t *testing.T) {
+		// audio -> .mp3
+		fs, total, err := SearchFileIndex(SearchQuery{Category: "audio"})
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), total)
+		assert.Equal(t, []string{"album01.mp3", "album02.mp3"}, namesOf(fs))
+
+		// videos -> .mov
+		fs, total, err = SearchFileIndex(SearchQuery{Category: "videos"})
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), total)
+		assert.Equal(t, []string{"clip-2.mov", "film.mov"}, namesOf(fs))
+
+		// docs -> .pdf, .txt
+		fs, total, err = SearchFileIndex(SearchQuery{Category: "docs"})
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), total)
+		assert.Equal(t, []string{"README.txt", "Report (2026).pdf"}, namesOf(fs))
+	})
+
+	// 3. Custom Exts 过滤
+	t.Run("Filter by Custom Exts", func(t *testing.T) {
+		fs, total, err := SearchFileIndex(SearchQuery{Exts: []string{"pdf", "mov"}})
+		require.NoError(t, err)
+		assert.Equal(t, int64(3), total) // film.mov, clip-2.mov, Report (2026).pdf
+		assert.Equal(t, []string{"Report (2026).pdf", "clip-2.mov", "film.mov"}, namesOf(fs))
+	})
+
+	// 4. 多维排序测试
+	t.Run("Sorting", func(t *testing.T) {
+		// 按名称升序 (name ASC)
+		fs, _, err := SearchFileIndex(SearchQuery{SortBy: "name", SortOrder: "asc"})
+		require.NoError(t, err)
+		require.Len(t, fs, 6)
+		assert.Equal(t, "README.txt", fs[0].Name)
+		assert.Equal(t, "Report (2026).pdf", fs[1].Name)
+		assert.Equal(t, "album01.mp3", fs[2].Name)
+
+		// 按大小升序 (size ASC)
+		fs, _, err = SearchFileIndex(SearchQuery{SortBy: "size", SortOrder: "asc"})
+		require.NoError(t, err)
+		require.Len(t, fs, 6)
+		assert.Equal(t, "README.txt", fs[0].Name) // 10 bytes
+		assert.Equal(t, int64(10), fs[0].Size)
+		assert.Equal(t, "Report (2026).pdf", fs[1].Name) // 50 bytes
+		assert.Equal(t, int64(50), fs[1].Size)
+
+		// 按大小降序 (size DESC)
+		fs, _, err = SearchFileIndex(SearchQuery{SortBy: "size", SortOrder: "desc"})
+		require.NoError(t, err)
+		require.Len(t, fs, 6)
+		assert.Equal(t, int64(1000), fs[0].Size)
+		assert.Equal(t, int64(1000), fs[1].Size)
+	})
+
+	// 5. 组合过滤：Tag + Category + Q
+	t.Run("Combined filter", func(t *testing.T) {
+		fs, total, err := SearchFileIndex(SearchQuery{
+			Q:        "album",
+			Category: "audio",
+			Tag:      "favorite",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), total)
+		assert.Equal(t, "album01.mp3", fs[0].Name)
+	})
+}
+

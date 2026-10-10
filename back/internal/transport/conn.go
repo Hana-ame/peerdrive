@@ -74,9 +74,13 @@ type dcReq struct {
 	// dcReq 是**只发不收**的结构（服务端不拿它解析任何东西），所以在这里
 	// 挂搜索专用字段不会和 dcResp 的同名 tag 打架。Size 复用为 limit
 	// ——与 serveSearch 的读法一致。
-	Query   string `json:"q,omitempty"`
-	MinSize *int64 `json:"minSize,omitempty"`
-	MaxSize *int64 `json:"maxSize,omitempty"`
+	Query     string `json:"q,omitempty"`
+	MinSize   *int64 `json:"minSize,omitempty"`
+	MaxSize   *int64 `json:"maxSize,omitempty"`
+	Tag       string `json:"tag,omitempty"`
+	Category  string `json:"category,omitempty"`
+	SortBy    string `json:"sortBy,omitempty"`
+	SortOrder string `json:"sortOrder,omitempty"`
 
 	// Capabilities declared capabilities in open / cap handshake frames (Issue #213)
 	Capabilities []string `json:"capabilities,omitempty"`
@@ -126,9 +130,13 @@ type dcResp struct {
 	// MinSize/MaxSize 用 **指针** 而非 int64：size=0 是合法值（空文件在索引里
 	// 就是 0），omitempty 的 int64 分不出「没传」和「传了 0」，指针则天然分得开，
 	// 也才能表达「只限下界不加上界」。null / 缺省 → nil → 不施加该条件。
-	Query   string `json:"q,omitempty"`        // search: 子串（name 或 path）
-	MinSize *int64 `json:"minSize,omitempty"` // search: size 下界（含）
-	MaxSize *int64 `json:"maxSize,omitempty"` // search: size 上界（含）
+	Query     string `json:"q,omitempty"`        // search: 子串（name 或 path）
+	MinSize   *int64 `json:"minSize,omitempty"`  // search: size 下界（含）
+	MaxSize   *int64 `json:"maxSize,omitempty"`  // search: size 上界（含）
+	Tag       string `json:"tag,omitempty"`      // search: 标签过滤
+	Category  string `json:"category,omitempty"` // search: 分类过滤
+	SortBy    string `json:"sortBy,omitempty"`   // search: 排序字段
+	SortOrder string `json:"sortOrder,omitempty"`// search: 排序方向
 
 	// Capabilities declared capabilities in open / cap / psk-auth / psk-ok handshake frames (Issue #213)
 	Capabilities []string `json:"capabilities,omitempty"`

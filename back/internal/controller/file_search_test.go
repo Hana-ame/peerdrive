@@ -303,3 +303,34 @@ func TestParseSearchQuery_LimitNotClampedAtHandler(t *testing.T) {
 	q := parseSearchQuery(c)
 	assert.Equal(t, 1<<20, q.Limit, "handler 不做上限 clamp（唯一出入口在 service/repository）")
 }
+
+// TestParseSearchQuery_AdvancedFilters 验证 tag, category, sortBy, sortOrder 的解析与兼容。
+//
+// 发现背景：文件管理系统增强了标签、分类与排序支持，前端可能传 camelCase 或 snake_case
+// 参数（如 sortBy / sort_by, sortOrder / sort_order），必须均被正确解析并剔除首尾空白。
+func TestParseSearchQuery_AdvancedFilters(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// 1. camelCase 参数与带空白的 tag / category
+	w1 := httptest.NewRecorder()
+	c1, _ := gin.CreateTestContext(w1)
+	c1.Request = httptest.NewRequest(http.MethodGet, "/?tag=+work+&category=+docs+&sortBy=name&sortOrder=asc", nil)
+
+	q1 := parseSearchQuery(c1)
+	assert.Equal(t, "work", q1.Tag)
+	assert.Equal(t, "docs", q1.Category)
+	assert.Equal(t, "name", q1.SortBy)
+	assert.Equal(t, "asc", q1.SortOrder)
+
+	// 2. snake_case 参数回退
+	w2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(w2)
+	c2.Request = httptest.NewRequest(http.MethodGet, "/?sort_by=size&sort_order=desc", nil)
+
+	q2 := parseSearchQuery(c2)
+	assert.Equal(t, "size", q2.SortBy)
+	assert.Equal(t, "desc", q2.SortOrder)
+	assert.Empty(t, q2.Tag)
+	assert.Empty(t, q2.Category)
+}
+

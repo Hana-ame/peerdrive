@@ -425,6 +425,7 @@ func (rt *Router) Engine() *gin.Engine {
 	files := r.Group("/files")
 	{
 		files.GET("", controller.ListFiles)
+		files.GET("/search", authRequired, controller.SearchLocalFiles)
 		files.POST("/upload", authRequired, controller.UploadFile)
 		files.POST("/register_local", authRequired, controller.RegisterLocalFile)
 		files.POST("/register_url", authRequired, controller.RegisterURL)
@@ -457,6 +458,9 @@ func (rt *Router) Engine() *gin.Engine {
 	{
 		tagsGroup.GET("/sha/:sha", controller.GetShaTags)
 		tagsGroup.POST("/sha/:sha", authRequired, controller.SetShaTags)
+		tagsGroup.POST("/batch", controller.BatchGetShaTags)
+		tagsGroup.GET("/summary", controller.GetAllTagsSummary)
+		tagsGroup.GET("", controller.GetAllTagsSummary)
 		tagsGroup.GET("/search", controller.SearchTags)
 	}
 

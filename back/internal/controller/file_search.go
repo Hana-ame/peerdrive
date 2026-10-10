@@ -61,8 +61,18 @@ func InitFileSearchController(s fileIndexSearcher) {
 // 操作，退化比报错好。真正的非法值（limit=abc）同样退回默认值。
 func parseSearchQuery(c *gin.Context) transport.SearchQuery {
 	q := transport.SearchQuery{
-		Q:     c.Query("q"),
-		Limit: transport.SearchDefaultLimit,
+		Q:         c.Query("q"),
+		Tag:       strings.TrimSpace(c.Query("tag")),
+		Category:  strings.TrimSpace(c.Query("category")),
+		SortBy:    strings.TrimSpace(c.Query("sortBy")),
+		SortOrder: strings.TrimSpace(c.Query("sortOrder")),
+		Limit:     transport.SearchDefaultLimit,
+	}
+	if q.SortBy == "" {
+		q.SortBy = strings.TrimSpace(c.Query("sort_by"))
+	}
+	if q.SortOrder == "" {
+		q.SortOrder = strings.TrimSpace(c.Query("sort_order"))
 	}
 	if v := c.Query("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

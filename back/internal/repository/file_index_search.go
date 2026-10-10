@@ -38,12 +38,27 @@ import (
 // created_at/updated_at 是 DATETIME 字符串，为它们加范围过滤会把「搜索」变成
 // 「任意查询构造器」，收益不明显。要按时间排序已经由 ORDER BY seq 近似覆盖
 // （seq 单调递增，与登记时间同序）。
+// CategoryExtensions 将逻辑文件分类映射为预设的小写文件扩展名集合。
+var CategoryExtensions = map[string][]string{
+	"docs":     {"pdf", "doc", "docx", "txt", "md", "rtf", "odt", "csv", "xls", "xlsx", "ppt", "pptx"},
+	"images":   {"jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico"},
+	"videos":   {"mp4", "mkv", "avi", "mov", "webm", "flv", "wmv"},
+	"audio":    {"mp3", "wav", "flac", "aac", "ogg", "m4a", "wma"},
+	"archives": {"zip", "rar", "7z", "tar", "gz", "bz2", "xz"},
+	"code":     {"js", "ts", "jsx", "tsx", "go", "py", "rs", "c", "cpp", "h", "java", "html", "css", "json", "sh", "yaml", "yml"},
+}
+
 type SearchQuery struct {
-	Q       string
-	MinSize *int64
-	MaxSize *int64
-	Offset  int
-	Limit   int
+	Q         string   // name 或 path 的子串匹配（不分大小写）
+	Tag       string   // 标签过滤：关联 sha_tags 校验
+	Category  string   // 分类过滤：docs, images, videos, audio, archives, code, inbox
+	Exts      []string // 扩展名自定义过滤
+	SortBy    string   // 排序字段白名单：name, size, time, seq
+	SortOrder string   // 排序方向：asc, desc
+	MinSize   *int64
+	MaxSize   *int64
+	Offset    int
+	Limit     int
 }
 
 // 搜索分页边界。导出，让 transport/service 层与 repository 共用同一组数，
@@ -67,7 +82,7 @@ const (
 // 新文件会「挤掉」末尾条目，这是可接受的（分页游标是 offset 而非游标值）。
 func SearchFileIndex(q SearchQuery) ([]FileIndex, int64, error) {
 	conds := []string{"deleted = 0"}
-	args := make([]any, 0, 4)
+	args := make([]any, 0, 8)
 
 	if pat := escapeLikePattern(q.Q); pat != "" {
 		// 用括号包住 OR：整个条件列表是 AND 连接的，不括号会变成
@@ -84,6 +99,42 @@ func SearchFileIndex(q SearchQuery) ([]FileIndex, int64, error) {
 		conds = append(conds, "size <= ?")
 		args = append(args, *q.MaxSize)
 	}
+
+	// 标签过滤（与 sha_tags 建立关联）
+	if tag := strings.TrimSpace(q.Tag); tag != "" {
+		conds = append(conds, "EXISTS (SELECT 1 FROM sha_tags WHERE sha_tags.sha = file_index.hash AND sha_tags.tag = ?)")
+		args = append(args, tag)
+	}
+
+	// 分类过滤（标准分类 / inbox 待审态）
+	if cat := strings.ToLower(strings.TrimSpace(q.Category)); cat != "" && cat != "all" {
+		if cat == "inbox" {
+			conds = append(conds, "is_inbox = 1")
+		} else if extensions, found := CategoryExtensions[cat]; found {
+			orClauses := make([]string, 0, len(extensions))
+			for _, ext := range extensions {
+				orClauses = append(orClauses, "`name` LIKE ? ESCAPE '\\'")
+				args = append(args, "%."+escapeLikeExact(ext))
+			}
+			conds = append(conds, "("+strings.Join(orClauses, " OR ")+")")
+		}
+	}
+
+	// 自定义扩展名列表过滤
+	if len(q.Exts) > 0 {
+		orClauses := make([]string, 0, len(q.Exts))
+		for _, ext := range q.Exts {
+			cleanExt := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(ext)), ".")
+			if cleanExt != "" {
+				orClauses = append(orClauses, "`name` LIKE ? ESCAPE '\\'")
+				args = append(args, "%."+escapeLikeExact(cleanExt))
+			}
+		}
+		if len(orClauses) > 0 {
+			conds = append(conds, "("+strings.Join(orClauses, " OR ")+")")
+		}
+	}
+
 	where := strings.Join(conds, " AND ")
 
 	var total int64
@@ -103,9 +154,41 @@ func SearchFileIndex(q SearchQuery) ([]FileIndex, int64, error) {
 		offset = 0
 	}
 
-	rows, err := db.Query("SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox "+
-		"FROM file_index WHERE "+where+" ORDER BY seq DESC LIMIT ? OFFSET ?",
-		append(args, limit, offset)...)
+	// 严格白名单排序，防御 SQL 注入
+	var orderCol string
+	switch strings.ToLower(strings.TrimSpace(q.SortBy)) {
+	case "name", "filename":
+		orderCol = "name"
+	case "size":
+		orderCol = "size"
+	case "time", "date", "created", "created_at":
+		orderCol = "created_at"
+	case "updated", "updated_at":
+		orderCol = "updated_at"
+	case "seq":
+		orderCol = "seq"
+	default:
+		orderCol = "seq"
+	}
+
+	var orderDir string
+	if strings.EqualFold(strings.TrimSpace(q.SortOrder), "asc") {
+		orderDir = "ASC"
+	} else {
+		orderDir = "DESC"
+	}
+
+	var orderClause string
+	if orderCol == "seq" {
+		orderClause = fmt.Sprintf("ORDER BY seq %s", orderDir)
+	} else {
+		orderClause = fmt.Sprintf("ORDER BY %s %s, seq DESC", orderCol, orderDir)
+	}
+
+	query := fmt.Sprintf("SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox "+
+		"FROM file_index WHERE %s %s LIMIT ? OFFSET ?", where, orderClause)
+
+	rows, err := db.Query(query, append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search file_index: %w", err)
 	}
@@ -140,3 +223,10 @@ func escapeLikePattern(s string) string {
 	repl := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return "%" + repl.Replace(s) + "%"
 }
+
+// escapeLikeExact 对精准匹配片段（如扩展名）转义 LIKE 特殊字符。
+func escapeLikeExact(s string) string {
+	repl := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return repl.Replace(s)
+}
+
