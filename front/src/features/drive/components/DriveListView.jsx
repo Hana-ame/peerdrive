@@ -22,6 +22,8 @@ export default function DriveListView({
   onShare,
   onDelete,
   onContextMenu,
+  onApproveInbox,
+  onRejectInbox,
 }) {
   const th = 'text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
   const td = 'px-3 py-2';
@@ -94,14 +96,23 @@ export default function DriveListView({
                 <td className={td + ' text-gray-500 whitespace-nowrap'}>{f.mime_type || '—'}</td>
                 <td className={td + ' text-gray-500 whitespace-nowrap'}>{fmtTime(f.created_at)}</td>
                 <td className={td + ' text-right whitespace-nowrap'}>
-                  <button onClick={() => openCastModal(f)} className="text-[11px] px-2 py-1 rounded bg-brand-500/15 text-brand-300 hover:bg-brand-500/25 mr-1 font-medium" title="Cast to screen">Cast</button>
-                  <button onClick={() => setPreviewFile(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Preview</button>
-                  <button onClick={() => onDownload(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Download</button>
-                  <button onClick={() => onCopyDeepLink(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">
-                    {copiedHash === f.hash ? 'Copied' : 'Link'}
-                  </button>
-                  <button onClick={() => onShare(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Share</button>
-                  <button onClick={() => onDelete(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">Delete</button>
+                  {f.isInbox ? (
+                    <>
+                      <button onClick={() => onApproveInbox?.(f)} className="text-[11px] px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 mr-1 font-medium" title="Approve into main drive">Approve</button>
+                      <button onClick={() => onRejectInbox?.(f)} className="text-[11px] px-2 py-1 rounded bg-red-500/20 text-red-300 hover:bg-red-500/30 font-medium" title="Reject and delete">Reject</button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => openCastModal(f)} className="text-[11px] px-2 py-1 rounded bg-brand-500/15 text-brand-300 hover:bg-brand-500/25 mr-1 font-medium" title="Cast to screen">Cast</button>
+                      <button onClick={() => setPreviewFile(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Preview</button>
+                      <button onClick={() => onDownload(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Download</button>
+                      <button onClick={() => onCopyDeepLink(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">
+                        {copiedHash === f.hash ? 'Copied' : 'Link'}
+                      </button>
+                      <button onClick={() => onShare(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Share</button>
+                      <button onClick={() => onDelete(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">Delete</button>
+                    </>
+                  )}
                 </td>
               </tr>
             );

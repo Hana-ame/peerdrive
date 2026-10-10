@@ -434,6 +434,9 @@ func (rt *Router) Engine() *gin.Engine {
 		files.DELETE("/:hash", authRequired, controller.DeleteFile)
 		files.POST("/copy", authRequired, controller.CopyFile)
 		files.POST("/diff", authRequired, controller.DiffVersions)
+		files.GET("/inbox", authRequired, controller.ListInboxFiles)
+		files.POST("/inbox/approve", authRequired, controller.ApproveInboxFile)
+		files.DELETE("/inbox/:hash", authRequired, controller.RejectInboxFile)
 	}
 
 	// Collection management (write operations with auth)

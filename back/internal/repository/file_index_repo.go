@@ -10,14 +10,16 @@ import (
 // Independent of old file_meta/file_providers tables: semantically focused (mapping + sync cursor),
 // does not affect old file service logic.
 type FileIndex struct {
-	Hash      string
-	Path      string
-	Name      string
-	Size      int64
-	Deleted   bool
-	Seq       int64 // monotonically increasing sync cursor (for metadata incremental sync)
-	CreatedAt string
-	UpdatedAt string
+	Hash           string
+	Path           string
+	Name           string
+	Size           int64
+	Deleted        bool
+	Seq            int64 // monotonically increasing sync cursor (for metadata incremental sync)
+	CreatedAt      string
+	UpdatedAt      string
+	UploaderPeerID string // remote peer ID who uploaded the file, or empty if local owner
+	IsInbox        bool   // true if uploaded by remote peer and pending quarantine review
 }
 
 // createFileIndexTable creates the table. seq increments on each upsert/delete;
@@ -38,23 +40,24 @@ func createFileIndexTableOn(d *sql.DB) {
 		deleted INTEGER DEFAULT 0,
 		seq INTEGER NOT NULL DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		uploader_peer_id TEXT DEFAULT '',
+		is_inbox INTEGER DEFAULT 0
 	)`)
+	_, _ = d.Exec(`ALTER TABLE file_index ADD COLUMN uploader_peer_id TEXT DEFAULT ''`)
+	_, _ = d.Exec(`ALTER TABLE file_index ADD COLUMN is_inbox INTEGER DEFAULT 0`)
 	d.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_seq ON file_index(seq)`)
-	// idx_file_index_name: file_index_search.go 的搜索查询键。子串模式 ('%x%')
-	// 用不到 B-tree 索引，它只为前缀/精确匹配加速；代价是一次建索引，换来的是
-	// name 从「未被索引的普通列」变成文档化的可查列。IF NOT EXISTS 对已有部署
-	// 幂等（InitDB 每次启动都会跑到这里）。
 	d.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_name ON file_index(name)`)
+	d.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_inbox ON file_index(is_inbox)`)
 }
 
 // UpsertFileIndex registers/updates a mapping (called after create/upload succeeds), returns new seq.
-// M10: original implementation had nextFileIndexSeq() as SELECT MAX+1 then separate INSERT —
-// with database/sql connection pool's multiple connections writing concurrently, two requests
-// could read the same MAX → seq collision, sync cursor chaos.
-// Merged into the same transaction: SELECT and INSERT complete atomically within one write
-// transaction (SQLite's serial write guarantee ensures monotonicity).
 func UpsertFileIndex(hash, path, name string, size int64, deleted bool) (int64, error) {
+	return UpsertFileIndexWithMeta(hash, path, name, size, deleted, "", false)
+}
+
+// UpsertFileIndexWithMeta registers/updates a mapping with uploader provenance and inbox quarantine metadata (Issue #267).
+func UpsertFileIndexWithMeta(hash, path, name string, size int64, deleted bool, uploaderPeerID string, isInbox bool) (int64, error) {
 	tx, err := db.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("begin file_index tx: %w", err)
@@ -66,13 +69,15 @@ func UpsertFileIndex(hash, path, name string, size int64, deleted bool) (int64, 
 		return 0, fmt.Errorf("read file_index max seq: %w", err)
 	}
 	seq := last.Int64 + 1
-	_, err = tx.Exec(`INSERT INTO file_index (hash, path, name, size, deleted, seq)
-		VALUES (?, ?, ?, ?, ?, ?)
+	_, err = tx.Exec(`INSERT INTO file_index (hash, path, name, size, deleted, seq, uploader_peer_id, is_inbox)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(hash) DO UPDATE SET
 			path=excluded.path, name=excluded.name, size=excluded.size,
 			deleted=excluded.deleted, seq=excluded.seq,
+			uploader_peer_id=CASE WHEN excluded.uploader_peer_id != '' THEN excluded.uploader_peer_id ELSE file_index.uploader_peer_id END,
+			is_inbox=excluded.is_inbox,
 			updated_at=CURRENT_TIMESTAMP`,
-		hash, path, name, size, boolToInt(deleted), seq)
+		hash, path, name, size, boolToInt(deleted), seq, uploaderPeerID, boolToInt(isInbox))
 	if err != nil {
 		return 0, fmt.Errorf("upsert file_index: %w", err)
 	}
@@ -87,7 +92,7 @@ func GetFileIndex(hash string) (*FileIndex, error) {
 	if db == nil {
 		return nil, sql.ErrNoRows
 	}
-	row := db.QueryRow(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
+	row := db.QueryRow(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox
 		FROM file_index WHERE hash = ? AND deleted = 0`, hash)
 	return scanFileIndex(row)
 }
@@ -100,7 +105,7 @@ func ListFileIndex(offset, limit int) ([]FileIndex, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
+	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox
 		FROM file_index WHERE deleted = 0 ORDER BY seq DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
@@ -117,11 +122,45 @@ func ListFileIndex(offset, limit int) ([]FileIndex, error) {
 	return out, rows.Err()
 }
 
+// ListInboxFiles lists all quarantined files uploaded by external peers (Issue #267).
+func ListInboxFiles(offset, limit int) ([]FileIndex, error) {
+	if db == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox
+		FROM file_index WHERE deleted = 0 AND is_inbox = 1 ORDER BY seq DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FileIndex
+	for rows.Next() {
+		f, err := scanFileIndex(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *f)
+	}
+	return out, rows.Err()
+}
+
+// ApproveInboxFile approves a quarantined file, integrating it into host storage index (Issue #267).
+func ApproveInboxFile(hash string) error {
+	if db == nil {
+		return nil
+	}
+	_, err := db.Exec(`UPDATE file_index SET is_inbox = 0, updated_at = CURRENT_TIMESTAMP WHERE hash = ?`, hash)
+	return err
+}
+
 // ListFileIndexSince incremental sync: returns all changes with seq greater than since (including delete markers).
 // Defense: since comes from remote sync verb; unbounded change records cause full-table scan + materialization.
 // Add LIMIT as backstop (discard extreme values when peer's cursor is far behind).
 func ListFileIndexSince(since int64) ([]FileIndex, error) {
-	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at
+	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox
 		FROM file_index WHERE seq > ? ORDER BY seq ASC LIMIT 1000`, since)
 	if err != nil {
 		return nil, err
@@ -150,10 +189,12 @@ type rowScanner interface {
 func scanFileIndex(r rowScanner) (*FileIndex, error) {
 	var f FileIndex
 	var deleted int
-	if err := r.Scan(&f.Hash, &f.Path, &f.Name, &f.Size, &deleted, &f.Seq, &f.CreatedAt, &f.UpdatedAt); err != nil {
+	var isInbox int
+	if err := r.Scan(&f.Hash, &f.Path, &f.Name, &f.Size, &deleted, &f.Seq, &f.CreatedAt, &f.UpdatedAt, &f.UploaderPeerID, &isInbox); err != nil {
 		return nil, err
 	}
 	f.Deleted = deleted != 0
+	f.IsInbox = isInbox != 0
 	return &f, nil
 }
 

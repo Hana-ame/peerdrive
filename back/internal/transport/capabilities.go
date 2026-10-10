@@ -45,6 +45,12 @@ const (
 	CapDisplay = "display"
 	// CapStream allows P2P live stream chunk broadcast and subscription based on file SHA (Issue #244).
 	CapStream = "stream"
+	// CapBT allows BitTorrent integration and transfers (Issue #263).
+	CapBT = "bt"
+	// CapIPFS allows IPFS bridge and content resolution (Issue #263).
+	CapIPFS = "ipfs"
+	// CapIwara allows Iwara integration and media fetching (Issue #263).
+	CapIwara = "iwara"
 )
 
 // Machine-readable capability error codes.
@@ -64,11 +70,14 @@ var KnownCapabilities = map[string]bool{
 	CapAdmin:   true,
 	CapDisplay: true,
 	CapStream:  true,
+	CapBT:      true,
+	CapIPFS:    true,
+	CapIwara:   true,
 }
 
 // DefaultNodeCapabilities represents the full capability set of a standard peerdrive Go node.
 var DefaultNodeCapabilities = []string{
-	CapReq, CapShare, CapIndex, CapPull, CapForward, CapDisplay, CapStream,
+	CapReq, CapShare, CapIndex, CapPull, CapDisplay, CapStream,
 }
 
 // MinimalCapabilities is the minimal feature baseline when capabilities are omitted in a handshake frame.
@@ -248,16 +257,38 @@ func (s *PeerJSService) LocalCapabilities() []string {
 	return append([]string(nil), s.currentLocalCaps()...)
 }
 
-// currentLocalCaps returns the current local capabilities slice (falling back to DefaultNodeCapabilities).
+// computeLocalCaps builds the active capability set from node configuration (Issue #263).
+func (s *PeerJSService) computeLocalCaps() []string {
+	caps := []string{CapReq, CapShare, CapIndex, CapPull, CapDisplay, CapStream}
+	if s.cfg != nil {
+		if s.cfg.PortFwdEnable || s.cfg.ForwardRules != "" {
+			caps = append(caps, CapForward)
+		}
+		if s.cfg.BTEnable || s.cfg.BTDHTEnabled {
+			caps = append(caps, CapBT)
+		}
+		if s.cfg.IPFSEnable {
+			caps = append(caps, CapIPFS)
+		}
+		if s.cfg.IwaraEnable {
+			caps = append(caps, CapIwara)
+		}
+		if s.cfg.RemoteControlEnable {
+			caps = append(caps, CapAdmin)
+		}
+	} else {
+		// When cfg is nil (e.g. lightweight test stub), include default forward capability
+		caps = append(caps, CapForward)
+	}
+	return caps
+}
+
+// currentLocalCaps returns the current local capabilities slice (falling back to computeLocalCaps).
 func (s *PeerJSService) currentLocalCaps() []string {
 	if len(s.localCaps) > 0 {
 		return s.localCaps
 	}
-	caps := append([]string(nil), DefaultNodeCapabilities...)
-	if s.cfg != nil && s.cfg.RemoteControlEnable {
-		caps = append(caps, CapAdmin)
-	}
-	return caps
+	return s.computeLocalCaps()
 }
 
 // SetRequiredCapabilities sets strict capability requirements that remote peers must support.

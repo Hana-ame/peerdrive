@@ -69,6 +69,20 @@ func (s *PeerJSService) serveFile(c Session, req dcReq) {
 		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "invalid hash", ReqID: req.ReqID})
 		return
 	}
+	// QoS Concurrency Guard (Issue #269): protect uplink bandwidth & thread pool
+	if !isSelfSession(c) && s.qos != nil {
+		if !s.qos.TryAcquire() {
+			log.LogWarn("peerjs: upload concurrency limit reached, rejecting req from %s", c.ID())
+			_ = c.SendJSON(dcResp{
+				Type:  "err",
+				Code:  "RATE_LIMITED",
+				Msg:   "upload concurrency limit reached, try again later",
+				ReqID: req.ReqID,
+			})
+			return
+		}
+		defer s.qos.Release()
+	}
 	// 共享级别门禁（doc/NETDISK.md §12.6 / ROADMAP Phase 7 身份插件点）：
 	// 默认由 DefaultAuthorizer 代理 ShareGate + isSelfSession 判定（行为严格等价）。
 	// Phase 7 可通过 SetAuthorizer 注入强身份（签名/Token）校验器。
@@ -169,6 +183,9 @@ func (s *PeerJSService) serveFile(c Session, req dcReq) {
 	for {
 		n, err := r.Read(buf)
 		if n > 0 {
+			if !isSelfSession(c) && s.qos != nil {
+				s.qos.Throttle(int64(n))
+			}
 			if err := c.SendFrame(dcResp{Type: "data", Hash: req.Hash, Offset: req.Offset + sent, Size: int64(n), ReqID: req.ReqID}, buf[:n]); err != nil {
 				return
 			}
@@ -268,7 +285,11 @@ func (s *PeerJSService) serveUploadBegin(c Session, st *connState, r dcResp) {
 		_ = c.SendJSON(dcResp{Type: "err", Msg: "offset must be chunk-aligned", ReqID: r.ReqID})
 		return
 	}
-	sess, err := s.fileIndex.BeginUpload(r.Name, r.Size)
+	uploaderPeerID := ""
+	if !isSelfSession(c) && !st.isLocal {
+		uploaderPeerID = c.ID()
+	}
+	sess, err := s.fileIndex.BeginUploadForPeer(r.Name, r.Size, uploaderPeerID)
 	if err != nil {
 		_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})
 		return

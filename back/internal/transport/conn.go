@@ -114,8 +114,10 @@ type dcResp struct {
 	Port    int        `json:"port,omitempty"`  // fwd-open: client-declared target port
 	URL     string     `json:"url,omitempty"`   // pull: address for this node to fetch (pull.go)
 	Psk     string     `json:"psk,omitempty"`   // psk-auth: peer's presented pre-shared key (gate.go)
-	Code    string     `json:"code,omitempty"`  // machine-readable error code in err frames (consumers branch on code)
-	Token   string     `json:"token,omitempty"` // Phase 7: optional requester/responder identity token
+	Code     string     `json:"code,omitempty"`     // machine-readable error code in err frames (consumers branch on code)
+	Token    string     `json:"token,omitempty"`    // Phase 7: optional requester/responder identity token
+	Passcode string     `json:"passcode,omitempty"` // collection-level passcode (Issue #268)
+	Passkey  string     `json:"passkey,omitempty"`  // alias for passcode
 	// search 动词的查询字段（file_index_search.go）。**不放进独立结构体**是有意的：
 	// dispatchFrame 把每个入站文本帧统一 Unmarshal 成 dcResp，搜索请求得走同一条路；
 	// 拆成第二个结构体意味着要在 dispatch 里为它再开一次 Unmarshal 分支。
