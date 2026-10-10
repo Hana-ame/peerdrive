@@ -389,16 +389,16 @@ export default function Drive() {
               <button
                 onClick={() => setViewMode('list')}
                 className={`px-2.5 py-1 rounded transition-colors ${viewMode === 'list' ? 'bg-brand-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}
-                title="List View"
+                title="Detailed Information List"
               >
-                ☰ List
+                ☰ Details
               </button>
               <button
                 onClick={() => setViewMode('grid')}
                 className={`px-2.5 py-1 rounded transition-colors ${viewMode === 'grid' ? 'bg-brand-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}
-                title="Grid View"
+                title="Thumbnail Cards View"
               >
-                ▦ Grid
+                ▦ Thumbnails
               </button>
             </div>
             <button
