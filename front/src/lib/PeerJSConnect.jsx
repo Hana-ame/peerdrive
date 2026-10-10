@@ -184,16 +184,46 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
           </span>
         </div>
         {searchStatus === 'done' && foundNodes && foundNodes.length > 0 && (
-          <ul className="mt-2 space-y-1">
-            {foundNodes.map((n, i) => (
-              <li key={i} className="flex items-center gap-2 text-xs bg-white/[0.04] px-2 py-1.5 rounded border border-white/[0.05]">
-                <span className="flex-1 truncate text-gray-300 font-mono">{n.peerId}</span>
-                <span className="text-gray-500 shrink-0">{n.nodeType || ''}</span>
-                <span className="text-gray-600 shrink-0">{Array.isArray(n.collections) ? n.collections.length + ' collections' : ''}</span>
-                <button onClick={() => handleJoinFound(n.peerId)}
-                  className="px-2 py-0.5 text-xs bg-brand-600 text-white rounded hover:bg-brand-500 shrink-0">Connect</button>
-              </li>
-            ))}
+          <ul className="mt-2 space-y-1.5">
+            {foundNodes.map((n, i) => {
+              const auth = n.loadInfo?.auth || (n.loadInfo?.shares?.countsHidden ? 'open' : 'open');
+              const isPsk = auth === 'psk' || Boolean(n.psk);
+              const sharesCount = typeof n.loadInfo?.shares_count === 'number'
+                ? n.loadInfo.shares_count
+                : (n.loadInfo?.shares?.collections ?? (Array.isArray(n.collections) ? n.collections.length : 0));
+              const caps = Array.isArray(n.loadInfo?.caps) ? n.loadInfo.caps : [];
+
+              return (
+                <li key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs bg-white/[0.04] p-2.5 rounded-lg border border-white/[0.06] hover:bg-white/[0.06] transition-colors">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono text-gray-200 font-medium truncate max-w-[200px] sm:max-w-[280px]" title={n.peerId}>{n.peerId}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${isPsk ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}>
+                        {isPsk ? '🔒 需密码' : '🔓 公开免密'}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-white/[0.06] text-gray-400 font-mono">
+                        {sharesCount > 0 ? `📦 ${sharesCount}个公开合集` : '📭 暂无公开内容'}
+                      </span>
+                      {n.nodeType && (
+                        <span className="text-[10px] text-gray-500 font-mono">[{n.nodeType}]</span>
+                      )}
+                    </div>
+                    {caps.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1 mt-1 text-[10px] text-gray-500">
+                        <span className="text-gray-400">能力:</span>
+                        {caps.map((c) => (
+                          <span key={c} className="px-1 py-0.2 bg-white/[0.04] rounded text-gray-400 font-mono">{c}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => handleJoinFound(n.peerId)}
+                    className="self-end sm:self-center px-3 py-1 text-xs bg-brand-600 text-white rounded-lg hover:bg-brand-500 shrink-0 transition-colors font-medium">
+                    连接 (Connect)
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
         {searchStatus === 'done' && foundNodes && foundNodes.length === 0 && (

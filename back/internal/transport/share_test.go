@@ -223,6 +223,8 @@ func TestShareLoadInfo_HidesCountsWithoutPSK(t *testing.T) {
 
 		info := svc.shareLoadInfo()
 		assert.NotNil(t, info, "payload must stay non-nil so the node is still announced")
+		assert.Equal(t, "open", info["auth"], "Issue #266: open nodes report auth=open")
+		assert.NotNil(t, info["caps"], "Issue #266: caps list present")
 		_, hasCount := counted(t, info)
 		assert.False(t, hasCount, "no files count may be published without a PSK")
 
@@ -239,6 +241,8 @@ func TestShareLoadInfo_HidesCountsWithoutPSK(t *testing.T) {
 		})
 
 		info := svc.shareLoadInfo()
+		assert.Equal(t, "psk", info["auth"], "Issue #266: psk nodes report auth=psk")
+		assert.NotNil(t, info["caps"], "Issue #266: caps list present")
 		got, hasCount := counted(t, info)
 		assert.True(t, hasCount, "with a PSK the counts should be published again")
 		assert.Equal(t, float64(2), got)

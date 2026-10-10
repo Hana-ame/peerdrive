@@ -158,6 +158,11 @@ func TestPeerJSService_AnonPolicy_ShareOnly(t *testing.T) {
 	assert.False(t, blocked, "share verb must be allowed in share_only policy")
 	assert.Empty(t, sess.sentFrames)
 
+	// 1b. "req" verb should also be allowed (to download shared files)
+	blocked = svc.anonGate(sess, st, dcResp{Type: "req", ReqID: "r1b"})
+	assert.False(t, blocked, "req verb must be allowed in share_only policy")
+	assert.Empty(t, sess.sentFrames)
+
 	// 2. "list" verb should be blocked
 	blocked = svc.anonGate(sess, st, dcResp{Type: "list", ReqID: "r2"})
 	assert.True(t, blocked, "list verb must be rejected for anonymous peer")
