@@ -101,20 +101,17 @@
 
 ---
 
-## 3. 结合 Cloudflare 边缘缓存的双层降本体系
+## 3. 纯 P2P 架构与权威源回退边界
 
-在回源至源站或中心节点时，Peerdrive 与 Cloudflare 边缘缓存深度协同：
+经架构复审确认，Peerdrive **不存在 Cloudflare 等商业 CDN 双层兜底体系**，纯粹作为基于 WebRTC 的去中心化内容寻址网盘：
 
-1. **强缓存响应头**：
-   - 所有静态哈希内容的 HTTP 输出（`HTTPEgressSink`）保持输出：
-     ```http
-     Cache-Control: public, max-age=31536000, immutable
-     ETag: "<sha256>"
-     Accept-Ranges: bytes
-     ```
-2. **双层卸载机制**：
-   - **第一层（P2P 节点层）**：在线 Peer 之间通过 WebRTC 直接换取切片，命中率目标 30%~60%，节省公网出口；
-   - **第二层（CDN 边缘层）**：P2P 未命中的切片回源至 Cloudflare 节点。由于内容不可变（`immutable`），Cloudflare Edge 命中缓存，避免直接穿透至源站 VPS。
+1. **权威源回退定位**：
+   - 调度器中的回退源（`originSource`）仅对接本地已配置的权威数据源（如本地 CAS、指定存储源或离线备份源）；
+   - 不依赖、不假设存在公网商业 CDN 边缘节点进行切片缓存；
+2. **纯对等互联优势**：
+   - 所有多节点并行拉取完全在对等节点间通过 WebRTC DataChannel 展开；
+   - 节点自主去中心化协作，无任何中心化 CDN 账单或中间人依赖。
+
 
 ---
 
