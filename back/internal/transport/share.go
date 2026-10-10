@@ -96,6 +96,12 @@ func (s *PeerJSService) shareLoadInfo() map[string]any {
 	if p == nil {
 		return nil
 	}
+	auth := "open"
+	if s.cfg != nil && s.cfg.PeerPSK != "" {
+		auth = "psk"
+	}
+	caps := s.currentLocalCaps()
+
 	// 2026-10-04: when no PSK is configured this node serves **anyone** who reaches it
 	// (transport/gate.go pskEnabled() is literally cfg.PeerPSK != ""), so the announce body is a
 	// public description of a node that has no admission control at all. Measured on the live
@@ -112,6 +118,8 @@ func (s *PeerJSService) shareLoadInfo() map[string]any {
 	// is the startup warning from cmd/server/security_status.go.
 	if s.cfg == nil || s.cfg.PeerPSK == "" {
 		return map[string]any{
+			"auth": auth,
+			"caps": caps,
 			"shares": map[string]any{
 				"countsHidden": true,
 				"reason":       "no PSK configured — counts hidden from the public roster",
@@ -120,6 +128,9 @@ func (s *PeerJSService) shareLoadInfo() map[string]any {
 	}
 	snap := p("")
 	return map[string]any{
+		"auth":         auth,
+		"caps":         caps,
+		"shares_count": len(snap.Collections),
 		"shares": map[string]any{
 			"collections": len(snap.Collections),
 			"files":       len(snap.Files),

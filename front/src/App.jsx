@@ -43,16 +43,17 @@ function RouteLoading() {
 
 import * as ws from './platform/transport-ws';
 
-// Navigation groups (Issue #77):
+// Navigation groups (Issue #77 / Issue #265):
 // - Always available (standalone/consumer pages): Connect (/), Display (/display), Iwara (/iwara)
-// - Available when connected to local node: Drive, NodeControl, Collections, Transfers, BT, IPFS, Settings
+// - Available for Local Node Owner (WS open): Drive, NodeControl, Collections, Transfers, BT, IPFS, Settings
+// - Available for Remote Guest (WebRTC Peer): Shared Collections, Shared Drive, Transfers
 const ALWAYS_NAV = [
   { to: '/', label: 'Connect', icon: '🌐' },
   { to: '/display', label: 'Display', icon: '📺' },
   { to: '/iwara', label: 'Iwara', icon: '🎬' },
 ];
 
-const CONNECTED_NAV = [
+const OWNER_NAV = [
   { to: '/drive', label: 'Drive', icon: '☁️' },
   { to: '/node', label: 'Node', icon: '💻' },
   { to: '/collections', label: 'Collections', icon: '📦' },
@@ -62,9 +63,15 @@ const CONNECTED_NAV = [
   { to: '/settings', label: 'Settings', icon: '⚙️' },
 ];
 
+const GUEST_NAV = [
+  { to: '/collections', label: 'Collections', icon: '📦' },
+  { to: '/drive', label: 'Drive', icon: '☁️' },
+  { to: '/transfers', label: 'Transfers', icon: '⚡' },
+];
+
 import { MobileNavDrawer, MobileBottomBar } from './components/MobileNav';
 
-function Nav({ onOpenDrawer, isOpen }) {
+function Nav({ onOpenDrawer, isOpen, isGuest, peerId, navItems }) {
   return (
     <nav className="h-14 bg-surface-raised/70 backdrop-blur-xl border-b border-white/[0.06] flex items-center px-3 md:px-6 gap-2 shrink-0 select-none">
       {/* Mobile Drawer Toggle */}
@@ -82,6 +89,12 @@ function Nav({ onOpenDrawer, isOpen }) {
         Peerdrive
       </Link>
 
+      {isGuest && peerId && (
+        <span className="hidden lg:inline-flex items-center text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-mono mr-2" title={`WebRTC 访客模式: ${peerId}`}>
+          访客 · {peerId.slice(0, 8)}
+        </span>
+      )}
+
       <div className="hidden md:flex items-center gap-1">
         {ALWAYS_NAV.map(it => (
           <Link key={it.to} to={it.to}
@@ -90,7 +103,7 @@ function Nav({ onOpenDrawer, isOpen }) {
         {isOpen && (
           <>
             <span className="w-px h-4 bg-white/10 mx-1.5" />
-            {CONNECTED_NAV.map(it => (
+            {navItems.map(it => (
               <Link key={it.to} to={it.to}
                 className="text-sm text-gray-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors">{it.label}</Link>
             ))}
@@ -108,16 +121,17 @@ import { AppProvider } from './context/AppContext';
 import { getNodeSession, onNodeSession } from './lib/nodeSession';
 
 export default function App() {
-  const [isOpen, setIsOpen] = React.useState(ws.getStatus() === 'open' || Boolean(getNodeSession()));
+  const [isWsOpen, setIsWsOpen] = React.useState(ws.getStatus() === 'open');
+  const [peerSession, setPeerSession] = React.useState(() => getNodeSession());
   const [drawerOpen, setDrawerOpen] = React.useState(false);
 
   useEffect(() => {
     registerSW();
     const offWs = ws.onStatus((status) => {
-      setIsOpen(status === 'open' || Boolean(getNodeSession()));
+      setIsWsOpen(status === 'open');
     });
     const offNode = onNodeSession((sess) => {
-      setIsOpen(ws.getStatus() === 'open' || Boolean(sess));
+      setPeerSession(sess);
     });
     return () => {
       offWs();
@@ -125,17 +139,28 @@ export default function App() {
     };
   }, []);
 
+  const isPeerOpen = Boolean(peerSession?.client && peerSession?.peerId);
+  const isOpen = isWsOpen || isPeerOpen;
+  const isGuest = !isWsOpen && isPeerOpen;
+  const currentNav = isGuest ? GUEST_NAV : OWNER_NAV;
+
   return (
     <HashRouter>
       <AppProvider>
         <div className="flex flex-col h-screen text-gray-200">
-          <Nav onOpenDrawer={() => setDrawerOpen(true)} isOpen={isOpen} />
+          <Nav
+            onOpenDrawer={() => setDrawerOpen(true)}
+            isOpen={isOpen}
+            isGuest={isGuest}
+            peerId={peerSession?.peerId}
+            navItems={currentNav}
+          />
 
           <MobileNavDrawer
             isOpen={drawerOpen}
             onClose={() => setDrawerOpen(false)}
             connected={isOpen}
-            navItems={{ always: ALWAYS_NAV, connected: CONNECTED_NAV }}
+            navItems={{ always: ALWAYS_NAV, connected: currentNav }}
           />
 
           <div className="flex-1 overflow-hidden has-mobile-nav md:pb-0">

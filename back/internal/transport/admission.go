@@ -248,11 +248,11 @@ func (s *PeerJSService) anonGate(c Session, st *connState, r dcResp) bool {
 
 	switch policy {
 	case "share_only":
-		// Only "share" and handshake frames are allowed for anonymous peers.
-		if r.Type != "share" && servedVerbs[r.Type] {
+		// Only "share", "req", and handshake frames are allowed for anonymous peers.
+		if r.Type != "share" && r.Type != "req" && servedVerbs[r.Type] {
 			_ = c.SendJSON(dcResp{
 				Type:  "err",
-				Msg:   "admission: anonymous access restricted (only share is permitted)",
+				Msg:   "admission: anonymous access restricted (only share and req are permitted)",
 				Code:  "ANON_RESTRICTED",
 				ReqID: r.ReqID,
 				Hash:  r.Hash,
