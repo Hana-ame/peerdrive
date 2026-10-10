@@ -19,15 +19,17 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Group core React stack into a single cacheable chunk.
-          // These are stable across deploys; only app code changes invalidate the cache.
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          // peerjs is already dynamically imported (await import('peerjs')) in
-          // PeerJSConnect.jsx, so Rollup produces a separate chunk for it.
-          // Naming it here ensures consistent output naming and prevents it
-          // from being accidentally inlined into vendor-react.
-          'vendor-peerjs': ['peerjs'],
+        manualChunks(id) {
+          if (
+            id.includes('node_modules/react/') ||
+            id.includes('node_modules/react-dom/') ||
+            id.includes('node_modules/react-router')
+          ) {
+            return 'vendor-react'
+          }
+          if (id.includes('node_modules/peerjs')) {
+            return 'vendor-peerjs'
+          }
         },
       },
     },
