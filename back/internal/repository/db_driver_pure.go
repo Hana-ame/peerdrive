@@ -19,9 +19,15 @@ import _ "modernc.org/sqlite"
 
 const sqliteDriver = "sqlite"
 
-// dsnSuffix — see the same-named function in db_driver_cgo.go for rationale
-// (why busy_timeout / foreign_keys are needed, and why each driver has its own
-// version).
-// Syntax difference: modernc uses `_pragma=busy_timeout(5000)`, mattn uses
-// `_busy_timeout=5000`.
-func dsnSuffix() string { return "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)" }
+// dsnSuffix — see the same-named function in db_driver_cgo.go for the full
+// rationale (why busy_timeout / foreign_keys / journal_mode=WAL /
+// synchronous=NORMAL are needed, and why each driver has its own version).
+//
+// Syntax difference: modernc uses `_pragma=name(value)`, mattn uses
+// `_name=value`. This file also keeps the `PRAGMA journal_mode=WAL` guarantee
+// in the DSN — modernc, unlike mattn, does NOT auto-promote synchronous to
+// NORMAL when journal_mode=WAL is set, so the explicit `_synchronous=NORMAL`
+// is required here for both drivers to be equivalent.
+func dsnSuffix() string {
+	return "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+}

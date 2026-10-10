@@ -15,6 +15,8 @@ import _ "modernc.org/sqlite"
 
 const sqliteDriver = "sqlite"
 
-// dsnSuffix 见 driver_cgo.go 的同名函数（为什么需要 busy_timeout）。
+// dsnSuffix 见 driver_cgo.go 的同名函数（为什么需要 busy_timeout / WAL）。
 // 语法差异：modernc 用 `_pragma=busy_timeout(5000)`，mattn 用 `_busy_timeout=5000`。
-func dsnSuffix() string { return "?_pragma=busy_timeout(5000)" }
+func dsnSuffix() string {
+	return "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+}

@@ -18,4 +18,9 @@ const sqliteDriver = "sqlite3"
 
 // dsnSuffix 返回连接串后缀。驱动语法不同，故两个文件各写一份——
 // 把驱动放错文件的后果是构建静默出错（能编译，跑起来才炸）。
-func dsnSuffix() string { return "?_busy_timeout=5000" }
+//
+// 与 internal/repository/db_driver_cgo.go 同步：除了 busy_timeout 之外也加
+// WAL + synchronous=NORMAL（Issue #277）。注册服务是「小 KV 写入」负载，
+// WAL 的收益不如主库明显，但保持两个库配置一致能避免后续排查时的心智负担，
+// 且 WAL 对这种负载无副作用（-wal 文件极小）。
+func dsnSuffix() string { return "?_busy_timeout=5000&_journal_mode=WAL&_synchronous=NORMAL" }
