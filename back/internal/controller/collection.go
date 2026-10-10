@@ -30,7 +30,9 @@ import (
 	"net/http"
 	"strings"
 
+	"peerdrive/internal/log"
 	"peerdrive/internal/model"
+	"peerdrive/internal/repository"
 	"peerdrive/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -210,6 +212,15 @@ func GetCollection(c *gin.Context) {
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
+		}
+	}
+	// CAS-DB consistency check (Issue #279): when both CAS and DB entries
+	// are available, compare entry counts to detect silent divergence.
+	if col.CurrentHash != nil && *col.CurrentHash != "" {
+		dbEntries, dbErr := repository.ListCollectionEntries(col.ID)
+		if dbErr == nil && len(dbEntries) != len(entries) {
+			log.LogWarn("collection: CAS/DB entry count mismatch for %s/%s: CAS=%d DB=%d (cid=%s) — CAS preferred, DB may be stale",
+				username, collectionName, len(entries), len(dbEntries), *col.CurrentHash)
 		}
 	}
 	if entries == nil {

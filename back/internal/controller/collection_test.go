@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 
 	"github.com/gin-gonic/gin"
@@ -147,6 +148,56 @@ func TestGetCollection(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "getuser", col["username"])
 	assert.Equal(t, "get-coll", col["collection_name"])
+}
+
+// TestGetCollection_CASDBConsistencyCheck verifies that the CAS/DB entry count
+// mismatch is detected when a collection has a CurrentHash (CAS pointer) but
+// DB entries have diverged.
+// 发现背景 (Issue #279): collection_entries (DB) and AnonCollection JSON (CAS)
+// 各自更新、无同步机制，可以静默分歧。本测试验证读取时的一致性断言能检测到分歧。
+func TestGetCollection_CASDBConsistencyCheck(t *testing.T) {
+	tmpDir, cleanup := setupCollectionTest(t)
+	defer cleanup()
+
+	// 1. Create collection and add 2 entries via DB
+	w := httptest.NewRecorder()
+	c := newTestContext(w)
+	c.Set("storageDir", tmpDir)
+	setJSONBody(c, http.MethodPost, `{"username":"casetest","collection_name":"test-coll"}`)
+	CreateCollection(c)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Add two entries to DB
+	err := repository.AddCollectionEntry(1, "file1.txt", "aaaa")
+	assert.NoError(t, err)
+	err = repository.AddCollectionEntry(1, "file2.txt", "bbbb")
+	assert.NoError(t, err)
+
+	// 2. Set a fake CurrentHash (simulate CAS pointer without actual CAS file)
+	casHash := "fakedc0000000000000000000000000000000000000000000000000000000000000"
+	err = repository.UpdateCurrentHash(1, casHash)
+	assert.NoError(t, err)
+
+	// 3. GetCollection should still return 200 (CAS read fails → fallback to DB)
+	w2 := httptest.NewRecorder()
+	c2 := newTestContext(w2)
+	c2.Set("storageDir", tmpDir)
+	c2.Params = gin.Params{
+		{Key: "username", Value: "casetest"},
+		{Key: "collection_name", Value: "test-coll"},
+	}
+	GetCollection(c2)
+	assert.Equal(t, http.StatusOK, w2.Code)
+
+	// 4. Response should have 2 entries (from DB fallback, since CAS file doesn't exist)
+	var resp2 map[string]json.RawMessage
+	err = json.Unmarshal(w2.Body.Bytes(), &resp2)
+	assert.NoError(t, err)
+
+	var entries []model.CollectionEntry
+	err = json.Unmarshal(resp2["entries"], &entries)
+	assert.NoError(t, err)
+	assert.Len(t, entries, 2)
 }
 
 func TestGetCollection_NotFound(t *testing.T) {
