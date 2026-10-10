@@ -58,6 +58,7 @@ func TestPull_Success(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	sess := &fakeSession{id: "peer-x"}
 	svc.bindConn(sess)
+	svc.SetPeerCapabilitiesForTest("peer-x", []string{CapReq, CapShare, CapPull})
 
 	svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{
 		"type": "pull", "url": srv.URL + "/remote.txt", "name": "pulled.txt", "reqId": "r1",
@@ -83,6 +84,7 @@ func TestPull_RejectsNonHTTP(t *testing.T) {
 		svc := newTestPeerJSService(t)
 		sess := &fakeSession{id: "peer-x"}
 		svc.bindConn(sess)
+		svc.SetPeerCapabilitiesForTest("peer-x", []string{CapReq, CapShare, CapPull})
 
 		svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{
 			"type": "pull", "url": raw, "reqId": "r",
@@ -126,6 +128,7 @@ func TestPull_RejectsUserInfo(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	sess := &fakeSession{id: "peer-x"}
 	svc.bindConn(sess)
+	svc.SetPeerCapabilitiesForTest("peer-x", []string{CapReq, CapShare, CapPull})
 	svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{"type": "pull", "reqId": "r-empty"}))
 	h, ok := waitSent(sess, "err", 2*time.Second)
 	require.True(t, ok)
@@ -146,6 +149,7 @@ func TestPull_RejectsRedirectToInternal(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	sess := &fakeSession{id: "peer-x"}
 	svc.bindConn(sess)
+	svc.SetPeerCapabilitiesForTest("peer-x", []string{CapReq, CapShare, CapPull})
 
 	svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{
 		"type": "pull", "url": pub.URL + "/hop", "reqId": "r-redir",
@@ -170,6 +174,7 @@ func TestPull_HTTPErrorStatus(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	sess := &fakeSession{id: "peer-x"}
 	svc.bindConn(sess)
+	svc.SetPeerCapabilitiesForTest("peer-x", []string{CapReq, CapShare, CapPull})
 
 	svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{
 		"type": "pull", "url": srv.URL + "/missing", "reqId": "r-404",
@@ -198,6 +203,7 @@ func TestPull_SizeCap(t *testing.T) {
 	svc.cfg.MaxUploadBytes = 64 * 1024
 	sess := &fakeSession{id: "peer-x"}
 	svc.bindConn(sess)
+	svc.SetPeerCapabilitiesForTest("peer-x", []string{CapReq, CapShare, CapPull})
 
 	svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{
 		"type": "pull", "url": srv.URL + "/big", "name": "big.bin", "reqId": "r-cap",
@@ -229,6 +235,7 @@ func TestPull_NameFallsBackToURLBasename(t *testing.T) {
 	svc := newTestPeerJSService(t)
 	sess := &fakeSession{id: "peer-x"}
 	svc.bindConn(sess)
+	svc.SetPeerCapabilitiesForTest("peer-x", []string{CapReq, CapShare, CapPull})
 
 	svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{
 		"type": "pull", "url": srv.URL + "/deep/path/report.csv", "reqId": "r-name",

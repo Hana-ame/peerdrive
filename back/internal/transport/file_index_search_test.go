@@ -345,6 +345,7 @@ func TestSearchVerb_Dispatched(t *testing.T) {
 
 	sess := &fakeSession{id: "peer-x"}
 	svc.bindConn(sess)
+	svc.SetPeerCapabilitiesForTest("peer-x", []string{CapReq, CapShare, CapIndex})
 	require.NotNil(t, svc.pending[sess], "bindConn 应登记 connState")
 
 	svc.dispatchFrame(sess, svc.pending[sess], pskFrame(t, map[string]any{

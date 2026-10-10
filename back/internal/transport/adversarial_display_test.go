@@ -24,6 +24,7 @@ func TestAdversarial_Display_UnauthorizedPeerRejected(t *testing.T) {
 
 	attacker := &fakeSession{id: "attacker-peer-99"}
 	svc.bindConn(attacker)
+	svc.SetPeerCapabilitiesForTest("attacker-peer-99", []string{CapReq, CapShare, CapDisplay})
 
 	localScreen := &fakeSession{id: "local-screen-target"}
 	svc.BindLocal(localScreen)

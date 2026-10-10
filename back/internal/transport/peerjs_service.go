@@ -301,7 +301,9 @@ func (s *PeerJSService) startLoop() {
 			if pid == "" || pid == s.id {
 				continue
 			}
-			go s.connectLoop(pid)
+			if s.tryReserveDial(pid, false) {
+				go s.connectLoop(pid)
+			}
 		}
 		// 连接「市场里加入」的常驻对端（与静态 PEERS 同等地位，见 extraPeers 注释）
 		if s.extraPeers != nil {
@@ -310,7 +312,9 @@ func (s *PeerJSService) startLoop() {
 				if pid == "" || pid == s.id {
 					continue
 				}
-				go s.connectLoop(pid)
+				if s.tryReserveDial(pid, false) {
+					go s.connectLoop(pid)
+				}
 			}
 		}
 
@@ -421,25 +425,56 @@ func (s *PeerJSService) onDiscoveredPeer(peerID string) {
 	if ok {
 		return
 	}
-	if !s.discoveryDialAllowed() {
-		log.LogDebug("peerjs: discovery dial to %s skipped (max peers %d reached)", peerID, s.maxPeers())
+	if !s.tryReserveDial(peerID, true) {
+		log.LogDebug("peerjs: discovery dial to %s skipped (max peers %d reached or already dialing)", peerID, s.maxPeers())
 		return
 	}
 	go s.connectLoop(peerID)
 }
 
-// discoveryDialAllowed 是否还有发现拨号预算（对端节点数 < PEERDRIVE_MAX_PEERS）。
+// tryReserveDial atomically checks dial budget and registers peerID into s.connecting if allowed (Issue #283).
+// If isDiscovery is true, both established conns and in-flight connecting dials are capped by PEERDRIVE_MAX_PEERS.
+func (s *PeerJSService) tryReserveDial(peerID string, isDiscovery bool) bool {
+	s.connectingMu.Lock()
+	defer s.connectingMu.Unlock()
+	if _, ok := s.connecting[peerID]; ok {
+		return false
+	}
+	if isDiscovery {
+		s.mu.Lock()
+		n := 0
+		for id := range s.conns {
+			if id != "local" {
+				n++
+			}
+		}
+		s.mu.Unlock()
+		if (n + len(s.connecting)) >= s.maxPeers() {
+			return false
+		}
+	}
+	s.connecting[peerID] = struct{}{}
+	return true
+}
+
+// discoveryDialAllowed 是否还有发现拨号预算（已建连接 + 正在拨号中的 in-flight 连接 < PEERDRIVE_MAX_PEERS）。
 // 计预算时排除 "local"：那是浏览器直连本节点的本地 WS 会话，不是对端节点。
+// Issue #283：预算检查纳入 in-flight 拨号计数（s.connecting），防止瞬时突发发现穿透 MAX_PEERS。
 func (s *PeerJSService) discoveryDialAllowed() bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	n := 0
 	for id := range s.conns {
 		if id != "local" {
 			n++
 		}
 	}
-	return n < s.maxPeers()
+	s.mu.Unlock()
+
+	s.connectingMu.Lock()
+	inFlight := len(s.connecting)
+	s.connectingMu.Unlock()
+
+	return (n + inFlight) < s.maxPeers()
 }
 
 // maxPeers 互联层拨号上限（配置 PEERDRIVE_MAX_PEERS，<=0 视为不限）。
@@ -543,10 +578,6 @@ func (s *PeerJSService) collectionHashes() []string {
 // 同时触发，双 connectLoop 会开两条重复连接（之前靠 conns map 覆盖兜底）。
 func (s *PeerJSService) connectLoop(peerID string) {
 	s.connectingMu.Lock()
-	if _, ok := s.connecting[peerID]; ok {
-		s.connectingMu.Unlock()
-		return
-	}
 	s.connecting[peerID] = struct{}{}
 	s.connectingMu.Unlock()
 	defer func() {

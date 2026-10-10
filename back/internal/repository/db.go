@@ -152,6 +152,14 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	// Issue #277: Enable WAL mode on file databases to eliminate reader/writer blocking.
+	if !isMemoryDB(dbPath) {
+		var mode string
+		if err := targetDB.QueryRow("PRAGMA journal_mode = WAL;").Scan(&mode); err != nil {
+			log.LogWarn("db: PRAGMA journal_mode=WAL query: %v", err)
+		}
+	}
+
 	return targetDB, nil
 }
 

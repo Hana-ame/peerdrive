@@ -113,7 +113,7 @@ describe('psk/被门禁拦下时的错误分类', () => {
 describe('psk/帧格式', () => {
   it('pskAuthFrame 与 Go 侧字段逐字对齐', () => {
     const f = JSON.parse(pskAuthFrame('s3cret'))
-    assert.deepEqual(Object.keys(f).sort(), ['psk', 'type', 'v'])
+    assert.deepEqual(Object.keys(f).sort(), ['psk', 'type'])
     assert.equal(f.type, 'psk-auth')
     assert.equal(f.psk, 's3cret')
   })

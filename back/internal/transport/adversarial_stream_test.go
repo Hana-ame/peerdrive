@@ -115,6 +115,7 @@ func TestAdversarial_Stream_RemotePubWithoutToken(t *testing.T) {
 
 	attacker := &fakeSession{id: "remote-unauthorized-streamer"}
 	svc.bindConn(attacker)
+	svc.SetPeerCapabilitiesForTest("remote-unauthorized-streamer", []string{CapReq, CapShare, CapStream})
 
 	// 1. Remote pub without token -> UNAUTHORIZED
 	svc.dispatchFrame(attacker, svc.pending[attacker], peerjs.Frame{

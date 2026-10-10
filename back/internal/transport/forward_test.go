@@ -70,6 +70,7 @@ func bindFakeServer(t *testing.T, svc *PeerJSService, sess *fakeSession) *connSt
 	svc.conns[sess.id] = sess
 	svc.mu.Unlock()
 	svc.bindConn(sess)
+	svc.SetPeerCapabilitiesForTest(sess.id, []string{CapReq, CapShare, CapForward})
 	st := svc.stateFor(sess)
 	require.NotNil(t, st)
 	return st

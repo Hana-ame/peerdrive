@@ -126,6 +126,18 @@ func TestDiscoveryDialAllowed_MaxPeers(t *testing.T) {
 		svc.conns["real"] = &fakeSession{id: "real"}
 		assert.False(t, svc.discoveryDialAllowed())
 	})
+
+	t.Run("in-flight connecting dials consume discovery budget (Issue #283)", func(t *testing.T) {
+		svc := newWithConns(2, "a")
+		assert.True(t, svc.discoveryDialAllowed())
+		svc.connecting["dialing-b"] = struct{}{}
+		assert.False(t, svc.discoveryDialAllowed(), "in-flight connecting dial must consume budget")
+
+		// tryReserveDial for discovery also rejects when budget is exhausted
+		assert.False(t, svc.tryReserveDial("dialing-c", true))
+		// but non-discovery static dials are allowed
+		assert.True(t, svc.tryReserveDial("static-c", false))
+	})
 }
 
 // TestMaxPeers_ZeroMeansUnlimited explicitly locks the maxPeers fallback semantics (<=0 ⇒ a huge value).

@@ -85,9 +85,9 @@ var MinimalCapabilities = []string{
 	CapReq, CapShare,
 }
 
-// LegacyCapabilities represents the default capabilities assigned to legacy peers that send no capability frames.
+// LegacyCapabilities represents the default minimal capabilities assigned to legacy peers that send no capability frames (opt-out baseline, Issue #281).
 var LegacyCapabilities = []string{
-	CapReq, CapShare, CapIndex, CapPull, CapForward,
+	CapReq, CapShare,
 }
 
 // CapBit bitmask representation of capabilities for bitwise operations.
@@ -334,6 +334,23 @@ func (s *PeerJSService) PeerCapabilities(peerID string) ([]string, bool) {
 	return CapsFromMap(st.caps), true
 }
 
+// SetPeerCapabilitiesForTest sets peer capabilities directly on a connection for testing purposes (Issue #281).
+func (s *PeerJSService) SetPeerCapabilitiesForTest(peerID string, caps []string) {
+	s.mu.Lock()
+	conn := s.conns[peerID]
+	s.mu.Unlock()
+	if conn == nil {
+		return
+	}
+	st := s.stateFor(conn)
+	if st == nil {
+		return
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.caps = CapsToMap(caps)
+}
+
 // HasCapability checks whether a specific connection currently supports a capability.
 func (s *PeerJSService) HasCapability(peerID string, cap string) bool {
 	s.mu.Lock()
@@ -357,7 +374,13 @@ func (st *connState) hasCapability(cap string) bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.caps == nil {
-		return true // un-negotiated legacy node fallback
+		// Issue #281: Unnegotiated legacy peers fallback to LegacyCapabilities (minimal opt-out baseline).
+		for _, c := range LegacyCapabilities {
+			if c == cap {
+				return true
+			}
+		}
+		return false
 	}
 	return st.caps[cap]
 }

@@ -24,4 +24,5 @@ const sqliteDriver = "sqlite"
 // version).
 // Syntax difference: modernc uses `_pragma=busy_timeout(5000)`, mattn uses
 // `_busy_timeout=5000`.
-func dsnSuffix() string { return "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)" }
+// Issue #277: journal_mode(WAL) enables Write-Ahead Logging to eliminate reader/writer blocking.
+func dsnSuffix() string { return "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)" }

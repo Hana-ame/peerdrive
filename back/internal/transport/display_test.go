@@ -168,6 +168,7 @@ func TestDisplay_RemoteAuthVerification(t *testing.T) {
 
 	remotePeer := &fakeSession{id: "remote-peer-1"}
 	svc.bindConn(remotePeer)
+	svc.SetPeerCapabilitiesForTest("remote-peer-1", []string{CapReq, CapShare, CapDisplay})
 
 	// Register a local display screen
 	localDisplay := &fakeSession{id: "local-screen"}

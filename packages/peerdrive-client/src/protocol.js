@@ -58,14 +58,14 @@ export function nextReqId() {
 // reqFrame constructs file fetch request frame (initiated by the requesting role).
 // size uses -1 to mean "read to end of file", consistent with Go-side semantics (negative = unlimited).
 export function reqFrame(hash, { offset = 0, size = -1, reqId } = {}) {
-  return JSON.stringify({ type: 'req', hash, offset, size, reqId, v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'req', hash, offset, size, reqId })
 }
 
 // shareFrame constructs share manifest query frame (different from list frame: list is the local
 // management index full set, only open to trusted peers; share is the operator's **explicitly
 // declared** external sharing scope).
 export function shareFrame(reqId) {
-  return JSON.stringify({ type: 'share', reqId, v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'share', reqId })
 }
 
 // pskAuthFrame constructs pre-shared key frame (PSK auth, see doc/NETDISK.md's "PSK Auth").
@@ -83,7 +83,7 @@ export function shareFrame(reqId) {
 //     the server needs to store plaintext for comparison anyway. What we're guarding against is "strangers
 //     connecting", not eavesdropping.
 export function pskAuthFrame(psk) {
-  return JSON.stringify({ type: 'psk-auth', psk: String(psk ?? ''), v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'psk-auth', psk: String(psk ?? '') })
 }
 
 // PSK_REQUIRED is the machine-readable error code that Go-side auth returns in err frames.
@@ -102,7 +102,7 @@ export const UPLOAD_CHUNK = 64 * 1024
 // the caller just follows along.
 export function uploadFrame(reqId, name, size, offset = 0) {
   return JSON.stringify({
-    type: 'upload', name, size, offset, reqId, v: PROTOCOL_VERSION,
+    type: 'upload', name, size, offset, reqId,
   })
 }
 
@@ -113,7 +113,7 @@ export function uploadFrame(reqId, name, size, offset = 0) {
 // protection (public http/https only, size limit), and always subject to PSK auth
 // (back/internal/transport/pull.go).
 export function pullFrame(reqId, url, name = '') {
-  return JSON.stringify({ type: 'pull', url, name, reqId, v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'pull', url, name, reqId })
 }
 
 // parseFrame parses text frames. Returns null for "not this protocol's control frame" (non-JSON,

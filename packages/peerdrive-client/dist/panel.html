@@ -156,7 +156,7 @@
     <h1>peerdrive panel</h1>
     <span class="tag">公共面板</span>
     <span class="tag">零后端</span>
-    <span class="tag mono" id="build-id">bundle 25d7f10b</span>
+    <span class="tag mono" id="build-id">bundle 03a4dbc9</span>
     <span class="grow"></span>
     <span class="mono dim" style="display:flex;align-items:center;gap:6px">
       我的节点 id：<span id="my-id">（未连接）</span>
@@ -544,14 +544,14 @@ function nextReqId() {
 // reqFrame constructs file fetch request frame (initiated by the requesting role).
 // size uses -1 to mean "read to end of file", consistent with Go-side semantics (negative = unlimited).
 function reqFrame(hash, { offset = 0, size = -1, reqId } = {}) {
-  return JSON.stringify({ type: 'req', hash, offset, size, reqId, v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'req', hash, offset, size, reqId })
 }
 
 // shareFrame constructs share manifest query frame (different from list frame: list is the local
 // management index full set, only open to trusted peers; share is the operator's **explicitly
 // declared** external sharing scope).
 function shareFrame(reqId) {
-  return JSON.stringify({ type: 'share', reqId, v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'share', reqId })
 }
 
 // pskAuthFrame constructs pre-shared key frame (PSK auth, see doc/NETDISK.md's "PSK Auth").
@@ -569,7 +569,7 @@ function shareFrame(reqId) {
 //     the server needs to store plaintext for comparison anyway. What we're guarding against is "strangers
 //     connecting", not eavesdropping.
 function pskAuthFrame(psk) {
-  return JSON.stringify({ type: 'psk-auth', psk: String(psk ?? ''), v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'psk-auth', psk: String(psk ?? '') })
 }
 
 // PSK_REQUIRED is the machine-readable error code that Go-side auth returns in err frames.
@@ -588,7 +588,7 @@ const UPLOAD_CHUNK = 64 * 1024
 // the caller just follows along.
 function uploadFrame(reqId, name, size, offset = 0) {
   return JSON.stringify({
-    type: 'upload', name, size, offset, reqId, v: PROTOCOL_VERSION,
+    type: 'upload', name, size, offset, reqId,
   })
 }
 
@@ -599,7 +599,7 @@ function uploadFrame(reqId, name, size, offset = 0) {
 // protection (public http/https only, size limit), and always subject to PSK auth
 // (back/internal/transport/pull.go).
 function pullFrame(reqId, url, name = '') {
-  return JSON.stringify({ type: 'pull', url, name, reqId, v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'pull', url, name, reqId })
 }
 
 // parseFrame parses text frames. Returns null for "not this protocol's control frame" (non-JSON,
