@@ -22,6 +22,11 @@
 //                Binary frames×N (each block chunkSize, no separate header declaration — blocks belong to this channel)
 //                {"type":"done","reqId":"..."}
 //   or failure:  {"type":"err","msg":"...","reqId":"..."}
+//
+// Note: PROTOCOL_VERSION (Issue #278) was previously included as `v: 1` in
+// url frames. Removed because Go's dcReq/dcResp never had a version field —
+// the field was dead payload on the Go side. Version negotiation is handled
+// by the capability handshake (Issue #213, `cap` frames), not frame-level v.
 
 export const PROTOCOL_VERSION = 1
 
@@ -34,7 +39,7 @@ export const CHUNK_SIZE = 64 * 1024
 
 // makeUrlRequest constructs resource request frame (web → node).
 export function makeUrlRequest(url, reqId) {
-  return JSON.stringify({ type: 'url', url, reqId, v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'url', url, reqId })
 }
 
 // parseFrame parses text frame JSON; returns null for non-JSON.

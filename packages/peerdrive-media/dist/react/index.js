@@ -17,8 +17,7 @@ function f(e, t) {
 	return JSON.stringify({
 		type: "url",
 		url: e,
-		reqId: t,
-		v: 1
+		reqId: t
 	});
 }
 function p(e) {

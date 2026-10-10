@@ -2594,8 +2594,7 @@ function _t(e, t) {
 	return JSON.stringify({
 		type: "url",
 		url: e,
-		reqId: t,
-		v: 1
+		reqId: t
 	});
 }
 function vt(e) {
@@ -2903,7 +2902,7 @@ async function Ot(e, t) {
 		});
 		X && X.postMessage({
 			type: "pdm-load-response",
-			reqId: t,
+			reqId: t
 			blob: n.blob,
 			mime: n.mime,
 			size: n.size
@@ -2911,7 +2910,7 @@ async function Ot(e, t) {
 	} catch (e) {
 		X && X.postMessage({
 			type: "pdm-load-response",
-			reqId: t,
+			reqId: t
 			error: e.message
 		});
 	}
