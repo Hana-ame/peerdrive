@@ -254,9 +254,9 @@ type Config struct {
 	// DisableCSP disables Content-Security-Policy (PEERDRIVE_CSP=off).
 	// Only an escape hatch for when embedding third-party pages or old-browser compatibility breaks. Default on.
 	DisableCSP bool
-	// DisableSwagger disables /swagger/* (PEERDRIVE_SWAGGER=off). Default on:
-	// it publishes all endpoints and parameter structures, which on public deployments is like
-	// handing over a map to attackers.
+	// DisableSwagger disables /swagger/* (PEERDRIVE_SWAGGER=on to enable). Default **off** (Issue #282):
+	// Swagger UI exposes the full API surface, lowering the attack barrier on public deployments.
+	// Enable explicitly only when you need API docs and accept the security tradeoff.
 	DisableSwagger bool
 	// Host is the listen address (PEERDRIVE_HOST, default empty = listen on all interfaces).
 	//
@@ -539,7 +539,7 @@ func DefaultConfig() *Config {
 		ECHProxyStartAttempts: 3,
 		RateLimitRPS:          30,
 		DisableCSP:            false,
-		DisableSwagger:        false,
+		DisableSwagger:        true,
 		Host:                  "",
 		TrustedProxies:        "",
 		SignalAddr:            ":9000",
@@ -693,7 +693,7 @@ func Load() *Config {
 
 		RateLimitRPS:   getEnvFloat("PEERDRIVE_RATE_LIMIT_RPS", 30),
 		DisableCSP:     os.Getenv("PEERDRIVE_CSP") == "off",
-		DisableSwagger: os.Getenv("PEERDRIVE_SWAGGER") == "off",
+		DisableSwagger: os.Getenv("PEERDRIVE_SWAGGER") == "on",
 		Host:           getEnv("PEERDRIVE_HOST", ""),
 		TrustedProxies: getEnv("PEERDRIVE_TRUSTED_PROXIES", ""),
 

@@ -87,14 +87,13 @@ func collectSecurityFindings(cfg *config.Config, share *service.NodeShare) []sec
 		})
 	}
 
-	// 4. Swagger: on by default; router.go:398 is enabled as long as !cfg.DisableSwagger.
-	//    Publicly announces the complete endpoint and parameter structure.
+	// 4. Swagger: default **off** since Issue #282. If still enabled, warn.
 	if !cfg.DisableSwagger {
 		out = append(out, securityFinding{
 			Level:  "warn",
-			Title:  "Swagger API docs are public (PEERDRIVE_SWAGGER not off)",
+			Title:  "Swagger API docs are public (PEERDRIVE_SWAGGER=on)",
 			Detail: "/swagger/index.html exposes the endpoint and parameter structure of all 105+ endpoints without a credential",
-			Remedy: "set PEERDRIVE_SWAGGER=off",
+			Remedy: "set PEERDRIVE_SWAGGER=off (default) or remove PEERDRIVE_SWAGGER=on",
 		})
 	}
 
