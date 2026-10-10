@@ -26,8 +26,8 @@ func (f *fakeDisplaySession) ID() string                              { return f
 func (f *fakeDisplaySession) SendJSON(v any) error                    { return nil }
 func (f *fakeDisplaySession) SendFrame(header any, body []byte) error { return nil }
 func (f *fakeDisplaySession) OnMessage(fn func(peerjs.Frame))         {}
-func (f *fakeDisplaySession) Close() error                            { return nil }
-func (f *fakeDisplaySession) Closed() bool                            { return false }
+func (f *fakeDisplaySession) OnClose(fn func())                       {}
+func (f *fakeDisplaySession) Close()                                  {}
 
 func setupDisplayTest(t *testing.T) (*gin.Engine, *transport.PeerJSService) {
 	gin.SetMode(gin.TestMode)
