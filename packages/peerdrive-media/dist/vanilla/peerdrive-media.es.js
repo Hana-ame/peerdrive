@@ -2590,12 +2590,13 @@ var z = /*#__PURE__*/ function(e) {
 		this._api.listAllPeers().then((t) => e(t)).catch((e) => this._abort(B.ServerError, e));
 	}
 }, gt = ht;
+//#endregion
+//#region src/protocol.js
 function _t(e, t) {
 	return JSON.stringify({
 		type: "url",
 		url: e,
-		reqId: t,
-		v: 1
+		reqId: t
 	});
 }
 function vt(e) {

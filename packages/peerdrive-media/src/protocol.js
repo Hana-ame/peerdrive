@@ -24,6 +24,10 @@
 //   or failure:  {"type":"err","msg":"...","reqId":"..."}
 
 export const PROTOCOL_VERSION = 1
+// NOTE (Issue #278): The `v` field is no longer sent in frames. The Go side
+// (dcReq/dcResp in conn.go) never consumed it — it was a dead field that
+// created the false impression that version negotiation existed. Version
+// negotiation will use capability bits (Issue #213) instead of a version number.
 
 // CHUNK_SIZE data block size: 64KB.
 // Caveat: raw mode doesn't have peerjs binary mode's chunker (chunkedMTU auto-fragmentation),
@@ -34,7 +38,7 @@ export const CHUNK_SIZE = 64 * 1024
 
 // makeUrlRequest constructs resource request frame (web → node).
 export function makeUrlRequest(url, reqId) {
-  return JSON.stringify({ type: 'url', url, reqId, v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'url', url, reqId })
 }
 
 // parseFrame parses text frame JSON; returns null for non-JSON.

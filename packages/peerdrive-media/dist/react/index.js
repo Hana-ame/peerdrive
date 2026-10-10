@@ -13,12 +13,13 @@ function u({ peer: e, signaling: n, children: r }) {
 function d() {
 	return n(l);
 }
+//#endregion
+//#region src/protocol.js
 function f(e, t) {
 	return JSON.stringify({
 		type: "url",
 		url: e,
-		reqId: t,
-		v: 1
+		reqId: t
 	});
 }
 function p(e) {

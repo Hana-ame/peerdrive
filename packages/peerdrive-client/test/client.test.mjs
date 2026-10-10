@@ -126,7 +126,7 @@ describe('client/fetch 正常路径', () => {
     assert.equal(client.stats.failures, 0)
 
     const req = conn.framesOf('req')[0]
-    assert.deepEqual(Object.keys(req).sort(), ['hash', 'offset', 'reqId', 'size', 'type', 'v'])
+    assert.deepEqual(Object.keys(req).sort(), ['hash', 'offset', 'reqId', 'size', 'type'])
     assert.equal(req.type, 'req')
     assert.equal(req.hash, hash)
     assert.equal(req.offset, 0)
