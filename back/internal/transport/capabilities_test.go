@@ -248,3 +248,33 @@ func TestCapabilities_RemoteControlAdminCapability(t *testing.T) {
 	assert.Equal(t, CapAdmin, VerbRequiredCap("admin"))
 }
 
+// TestCapabilities_P2PTunAndThroughput verifies bitset conversion and negotiation for p2ptun and throughput.
+// 发现背景：Issue #315 与 Issue #316（整合 p2ptun 端口转发与 WebRTC 高吞吐自适应分片协商）。
+func TestCapabilities_P2PTunAndThroughput(t *testing.T) {
+	caps := []string{CapP2PTun, CapHighThroughput, CapHeavyTraffic}
+	mask := CapsToBitset(caps)
+	assert.True(t, mask&(BitP2PTun|BitHighThroughput|BitHeavyTraffic) == BitP2PTun|BitHighThroughput|BitHeavyTraffic)
+
+	recovered := CapsFromBitset(mask)
+	assert.Contains(t, recovered, CapP2PTun)
+	assert.Contains(t, recovered, CapHighThroughput)
+	assert.Contains(t, recovered, CapHeavyTraffic)
+
+	// Filter known
+	filtered := FilterKnown(caps)
+	assert.Len(t, filtered, 3)
+
+	// Adaptive chunk size calculation
+	assert.Equal(t, StandardDefaultChunkSize, AdaptiveChunkSize(100*time.Millisecond, false))
+	assert.Equal(t, MaxThroughputChunkSize, AdaptiveChunkSize(10*time.Millisecond, true))
+	assert.Equal(t, HighThroughputChunkSize, AdaptiveChunkSize(50*time.Millisecond, true))
+	assert.Equal(t, StandardDefaultChunkSize, AdaptiveChunkSize(150*time.Millisecond, true))
+
+	// Buffer pool test
+	buf := GetThroughputBuffer()
+	require.NotNil(t, buf)
+	assert.GreaterOrEqual(t, cap(*buf), HighThroughputChunkSize)
+	PutThroughputBuffer(buf)
+}
+
+

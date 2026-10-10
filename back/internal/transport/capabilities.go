@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"peerdrive/internal/log"
 )
@@ -51,6 +53,12 @@ const (
 	CapIPFS = "ipfs"
 	// CapIwara allows Iwara integration and media fetching (Issue #263).
 	CapIwara = "iwara"
+	// CapP2PTun allows multiplexed TCP port tunneling over WebRTC DataChannel (Issue #315).
+	CapP2PTun = "p2ptun"
+	// CapHighThroughput allows adaptive chunking and channel bonding (Issue #316).
+	CapHighThroughput = "throughput"
+	// CapHeavyTraffic allows event-driven backpressure streaming (Issue #316).
+	CapHeavyTraffic = "streaming"
 )
 
 // Machine-readable capability error codes.
@@ -61,18 +69,21 @@ const (
 
 // KnownCapabilities contains all valid capability identifiers in this implementation.
 var KnownCapabilities = map[string]bool{
-	CapReq:     true,
-	CapShare:   true,
-	CapIndex:   true,
-	CapPull:    true,
-	CapForward: true,
-	CapAuth:    true,
-	CapAdmin:   true,
-	CapDisplay: true,
-	CapStream:  true,
-	CapBT:      true,
-	CapIPFS:    true,
-	CapIwara:   true,
+	CapReq:            true,
+	CapShare:          true,
+	CapIndex:          true,
+	CapPull:           true,
+	CapForward:        true,
+	CapAuth:           true,
+	CapAdmin:          true,
+	CapDisplay:        true,
+	CapStream:         true,
+	CapBT:             true,
+	CapIPFS:           true,
+	CapIwara:          true,
+	CapP2PTun:         true,
+	CapHighThroughput: true,
+	CapHeavyTraffic:   true,
 }
 
 // DefaultNodeCapabilities represents the full capability set of a standard peerdrive Go node.
@@ -103,30 +114,82 @@ const (
 	BitAdmin
 	BitDisplay
 	BitStream
+	BitP2PTun
+	BitHighThroughput
+	BitHeavyTraffic
 )
 
 var capStringToBit = map[string]CapBit{
-	CapReq:     BitReq,
-	CapShare:   BitShare,
-	CapIndex:   BitIndex,
-	CapPull:    BitPull,
-	CapForward: BitForward,
-	CapAuth:    BitAuth,
-	CapAdmin:   BitAdmin,
-	CapDisplay: BitDisplay,
-	CapStream:  BitStream,
+	CapReq:            BitReq,
+	CapShare:          BitShare,
+	CapIndex:          BitIndex,
+	CapPull:           BitPull,
+	CapForward:        BitForward,
+	CapAuth:           BitAuth,
+	CapAdmin:          BitAdmin,
+	CapDisplay:        BitDisplay,
+	CapStream:         BitStream,
+	CapP2PTun:         BitP2PTun,
+	CapHighThroughput: BitHighThroughput,
+	CapHeavyTraffic:   BitHeavyTraffic,
 }
 
 var capBitToString = map[CapBit]string{
-	BitReq:     CapReq,
-	BitShare:   CapShare,
-	BitIndex:   CapIndex,
-	BitPull:    CapPull,
-	BitForward: CapForward,
-	BitAuth:    CapAuth,
-	BitAdmin:   CapAdmin,
-	BitDisplay: CapDisplay,
-	BitStream:  CapStream,
+	BitReq:            CapReq,
+	BitShare:          CapShare,
+	BitIndex:          CapIndex,
+	BitPull:           CapPull,
+	BitForward:        CapForward,
+	BitAuth:           CapAuth,
+	BitAdmin:          CapAdmin,
+	BitDisplay:        CapDisplay,
+	BitStream:         CapStream,
+	BitP2PTun:         CapP2PTun,
+	BitHighThroughput: CapHighThroughput,
+	BitHeavyTraffic:   CapHeavyTraffic,
+}
+
+// StandardDefaultChunkSize is the standard 64KB chunk size.
+const StandardDefaultChunkSize = 64 * 1024
+
+// HighThroughputChunkSize is the 256KB chunk size for low-latency / LAN transfers (Issue #316).
+const HighThroughputChunkSize = 256 * 1024
+
+// MaxThroughputChunkSize is the 1MB max chunk size for heavy streaming (Issue #316).
+const MaxThroughputChunkSize = 1024 * 1024
+
+// AdaptiveChunkSize computes the optimal transfer chunk size based on RTT and high throughput negotiation (Issue #316).
+func AdaptiveChunkSize(rtt time.Duration, highThroughput bool) int {
+	if !highThroughput {
+		return StandardDefaultChunkSize
+	}
+	if rtt > 0 && rtt < 20*time.Millisecond {
+		return MaxThroughputChunkSize
+	}
+	if rtt > 0 && rtt < 80*time.Millisecond {
+		return HighThroughputChunkSize
+	}
+	return StandardDefaultChunkSize
+}
+
+var throughputPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, HighThroughputChunkSize)
+		return &b
+	},
+}
+
+// GetThroughputBuffer acquires a 256KB chunk buffer from the zero-copy pool (Issue #316).
+func GetThroughputBuffer() *[]byte {
+	return throughputPool.Get().(*[]byte)
+}
+
+// PutThroughputBuffer returns a chunk buffer to the zero-copy pool (Issue #316).
+func PutThroughputBuffer(b *[]byte) {
+	if b != nil && cap(*b) >= HighThroughputChunkSize {
+		*b = (*b)[:HighThroughputChunkSize]
+		throughputPool.Put(b)
+	}
 }
 
 // CapsToBitset converts a slice of capability strings into a CapBit bitmask.
