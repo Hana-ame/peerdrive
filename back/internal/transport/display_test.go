@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	peerjs "github.com/Hana-ame/go-peerjs"
-	"peerdrive/internal/config"
 )
 
 // display_test.go — Display manager and remote display control tests (Issue #243).
