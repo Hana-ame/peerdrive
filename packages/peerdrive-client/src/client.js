@@ -638,7 +638,10 @@ export class PeerDriveClient {
 
   _onDataHead(frame) {
     const p = this._pend.get(frame.reqId)
-    if (!p) return // late frame (cancelled/ended): discard
+    if (!p) {
+      this._expect = null // late frame (cancelled/ended): discard and clear expect
+      return
+    }
     p.touch()
     const size = Number(frame.size)
     // Same limit as Go-side H6: block size must be positive and not exceed protocol limit, otherwise

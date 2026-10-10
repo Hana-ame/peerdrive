@@ -39,6 +39,18 @@ export function swControlled() {
   return typeof navigator !== 'undefined' && !!navigator.serviceWorker?.controller;
 }
 
+// Asynchronously wait for SW activation if not yet controlling (prevents missing streamable requests)
+export async function ensureSWReady() {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return false;
+  if (navigator.serviceWorker.controller) return true;
+  try {
+    await navigator.serviceWorker.ready;
+    return !!navigator.serviceWorker.controller;
+  } catch {
+    return false;
+  }
+}
+
 // The message listener must be registered early (even before the SW becomes the
 // controller), otherwise the SW's stream requests won't be received
 if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
@@ -53,15 +65,28 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
       port.postMessage({ error: 'no active peer connection' });
       return;
     }
+
+    const abortCtrl = new AbortController();
+    port.onmessage = (e) => {
+      if (e.data?.abort) {
+        abortCtrl.abort();
+      }
+    };
+
     (async () => {
       try {
-        for await (const chunk of client.stream(d.hash, { offset: d.offset, size: d.size })) {
+        for await (const chunk of client.stream(d.hash, { offset: d.offset, size: d.size, signal: abortCtrl.signal })) {
+          if (abortCtrl.signal.aborted) break;
           const buf = chunk.slice().buffer;
           port.postMessage({ chunk: buf }, [buf]);
         }
-        port.postMessage({ done: true });
+        if (!abortCtrl.signal.aborted) {
+          port.postMessage({ done: true });
+        }
       } catch (e) {
-        port.postMessage({ error: e?.message || String(e) });
+        if (!abortCtrl.signal.aborted) {
+          port.postMessage({ error: e?.message || String(e) });
+        }
       }
     })();
   });

@@ -134,17 +134,20 @@ export default function CollectionBrowser({ collection, onError }) {
     onError?.(msg);
   };
 
-  // 访问：有 preview sha → 弹预览弹窗；无 preview sha → 退化为下载（见 issue 测试契约）
+  // 访问：可预览（显式 preview sha 或音视频/文本媒体）→ 弹预览弹窗；不可预览 → 退化为下载（见 issue 测试契约）
+  const isPreviewable = (node) => {
+    if (previewSha(node.entry)) return true;
+    const name = node.entry?.name || basename(node.entry?.path) || node.name;
+    const kind = kindOf(name, node.entry?.mime);
+    return kind === 'video' || kind === 'audio' || kind === 'text';
+  };
+
   const openFile = (node) => {
-    if (previewSha(node.entry)) {
+    if (isPreviewable(node)) {
       setModal(node);
       return;
     }
     downloadFile(node);
-  };
-
-  const isPreviewable = (node) => {
-    return Boolean(previewSha(node.entry));
   };
 
   const triggerBrowserDownload = (url, fileName) => {
@@ -268,7 +271,7 @@ export default function CollectionBrowser({ collection, onError }) {
                 <button
                   onClick={() => openFile(node)}
                   className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 shrink-0">
-                  {previewSha(node.entry) ? 'Preview' : 'Open'}
+                  {isPreviewable(node) ? 'Preview' : 'Open'}
                 </button>
                 <button
                   onClick={() => downloadFile(node)}
@@ -288,42 +291,49 @@ export default function CollectionBrowser({ collection, onError }) {
       )}
 
       {/* 媒体预览弹窗：MIME 分流预览（图片、视频、音频、PDF、代码/文本），附真实文件下载 */}
-      {modal && (
-        <FilePreviewModal
-          file={{
-            hash: previewSha(modal.entry) || entrySha(modal.entry),
-            filename: basename(modal.entry.path) || modal.name,
-            size: modal.entry.size,
-            mime_type: modal.entry.mime,
-          }}
-          fetchBlob={async (sha) => {
-            const effectiveType = modal.entry.mime || mimeOf(basename(modal.entry.path) || modal.name, '') || 'application/octet-stream';
-            const session = getNodeSession();
-            if (session?.client && ws.getStatus() !== 'open') {
-              const chunks = [];
-              for await (const chunk of session.client.stream(sha)) {
-                chunks.push(chunk);
-              }
-              return new Blob(chunks, { type: effectiveType });
-            }
-            try {
-              const u8 = await ws.download(sha);
-              return new Blob([u8], { type: effectiveType });
-            } catch (e) {
-              if (session?.client) {
+      {modal && (() => {
+        const modalName = basename(modal.entry.path) || modal.name;
+        const modalKind = kindOf(modalName, modal.entry.mime);
+        const modalHash = (modalKind === 'video' || modalKind === 'audio')
+          ? (entrySha(modal.entry) || previewSha(modal.entry))
+          : (previewSha(modal.entry) || entrySha(modal.entry));
+        return (
+          <FilePreviewModal
+            file={{
+              hash: modalHash,
+              filename: modalName,
+              size: modal.entry.size,
+              mime_type: modal.entry.mime,
+            }}
+            fetchBlob={async (sha) => {
+              const effectiveType = modal.entry.mime || mimeOf(modalName, '') || 'application/octet-stream';
+              const session = getNodeSession();
+              if (session?.client && ws.getStatus() !== 'open') {
                 const chunks = [];
                 for await (const chunk of session.client.stream(sha)) {
                   chunks.push(chunk);
                 }
                 return new Blob(chunks, { type: effectiveType });
               }
-              throw e;
-            }
-          }}
-          onClose={closeModal}
-          onDownload={() => downloadFile(modal)}
-        />
-      )}
+              try {
+                const u8 = await ws.download(sha);
+                return new Blob([u8], { type: effectiveType });
+              } catch (e) {
+                if (session?.client) {
+                  const chunks = [];
+                  for await (const chunk of session.client.stream(sha)) {
+                    chunks.push(chunk);
+                  }
+                  return new Blob(chunks, { type: effectiveType });
+                }
+                throw e;
+              }
+            }}
+            onClose={closeModal}
+            onDownload={() => downloadFile(modal)}
+          />
+        );
+      })()}
     </div>
   );
 

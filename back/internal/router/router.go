@@ -295,7 +295,9 @@ func (rt *Router) Engine() *gin.Engine {
 		}
 	}
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256Local)
+	r.HEAD("/sha256sum/:sha256", controller.DownloadBySHA256Local)
 	r.GET("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
+	r.HEAD("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
 	r.GET("/ipfs/:cid", controller.DownloadByCID)
 
 	// Universal multi-protocol download endpoints.

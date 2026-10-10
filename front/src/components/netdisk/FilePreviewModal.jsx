@@ -11,8 +11,9 @@
 import React, { useState, useEffect } from 'react';
 import { fmtBytes } from '../../platform/shared/format';
 import { kindOf, mimeOf, MAX_TEXT_PREVIEW_BYTES } from '../../platform/shared/mime';
-import { swControlled } from '../../platform/shared/swBridge';
+import { swControlled, ensureSWReady } from '../../platform/shared/swBridge';
 import { getNodeSession } from '../../lib/nodeSession';
+import { STORAGE_KEY_API_BASE } from '../../platform/shared/storageKeys';
 
 export default function FilePreviewModal({
   file, // { hash, filename, size, mime_type, ... }
@@ -25,6 +26,7 @@ export default function FilePreviewModal({
   const [blobUrl, setBlobUrl] = useState('');
   const [textContent, setTextContent] = useState('');
   const [isTruncated, setIsTruncated] = useState(false);
+  const [isStream, setIsStream] = useState(false);
 
   const filename = file?.filename || file?.name || 'file';
   const explicitMime = file?.mime_type || file?.mime || '';
@@ -44,6 +46,7 @@ export default function FilePreviewModal({
 
       setLoading(true);
       setError('');
+      setIsStream(false);
 
       try {
         if (file.url) {
@@ -67,20 +70,40 @@ export default function FilePreviewModal({
           return;
         }
 
-        // SW 边下边播与 206 Range 支持：
-        // 仅当：① 为音视频 ② Service Worker 已激活 ③ 存在远程 Peer 客户端连接时，
-        // 才构造 /swdrive/ URL 由 SW 拦截向 DataChannel 发起分片请求。
-        // 若在本地 WS 模式或无远程 Peer 时，直接回退走常规 fetchBlob 获得 Blob URL。
+        // 边下边播与 206 Range 支持：
+        // 1. 若为远程 PeerJS 模式 (hasPeerClient)：
+        //    使用 Service Worker 拦截 /swdrive/ 发起 206 Range 分片流式传输。
+        //    若 SW 尚未 claim，异步等待 ensureSWReady()。
+        // 2. 若在本地 WS/HTTP 模式且有 apiBase / 相对地址可达：
+        //    直接构造 /sha256sum/:hash/:name 进行原生 HTTP 206 Range 流式点播。
+        // 3. 仅当上述流式路径不可行时，才回退全量 fetchBlob。
+        const isMedia = kind === 'video' || kind === 'audio';
         const hasPeerClient = Boolean(getNodeSession()?.client);
-        const isMediaStreamable = (kind === 'video' || kind === 'audio') && swControlled() && hasPeerClient;
-        if (isMediaStreamable) {
-          const base = import.meta.env.BASE_URL || '/';
-          const swDriveUrl = `${base}swdrive/${encodeURIComponent(file.hash)}?name=${encodeURIComponent(filename)}${file.size ? '&size=' + file.size : ''}`;
-          if (active) {
-            setBlobUrl(swDriveUrl);
+
+        if (isMedia) {
+          if (hasPeerClient) {
+            let ready = swControlled();
+            if (!ready) {
+              ready = await ensureSWReady();
+            }
+            if (ready && active) {
+              const base = import.meta.env.BASE_URL || '/';
+              const swDriveUrl = `${base}swdrive/${encodeURIComponent(file.hash)}?name=${encodeURIComponent(filename)}${file.size ? '&size=' + file.size : ''}`;
+              setIsStream(true);
+              setBlobUrl(swDriveUrl);
+              setLoading(false);
+              return;
+            }
+          } else {
+            // 本地 WS/HTTP 模式：直接走原生 206 Range 点播（即时起播，零内存占用）
+            const rawBase = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_API_BASE) || '' : '';
+            const apiBase = rawBase.replace(/\/+$/, '');
+            const localStreamUrl = `${apiBase}/sha256sum/${encodeURIComponent(file.hash)}/${encodeURIComponent(filename)}`;
+            setIsStream(true);
+            setBlobUrl(localStreamUrl);
             setLoading(false);
+            return;
           }
-          return;
         }
 
         if (!fetchBlob) {
@@ -154,9 +177,14 @@ export default function FilePreviewModal({
             <h2 className="text-base font-semibold text-gray-100 truncate flex items-center gap-2">
               <span>{filename}</span>
             </h2>
-            <div className="text-xs text-gray-400 mt-1 flex items-center gap-2 font-mono">
+            <div className="text-xs text-gray-400 mt-1 flex items-center gap-2 font-mono flex-wrap">
               {file.size != null && <span>{fmtBytes(file.size)}</span>}
               {effectiveMime && <span>• {effectiveMime}</span>}
+              {isStream && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 font-sans font-medium flex items-center gap-1">
+                  <span>⚡</span> 边下边播 (Range 流式)
+                </span>
+              )}
               {file.hash && <span className="text-gray-500 truncate max-w-[200px]">SHA: {file.hash.slice(0, 16)}…</span>}
             </div>
           </div>
@@ -222,12 +250,14 @@ export default function FilePreviewModal({
                     controls
                     autoPlay
                     playsInline
+                    crossOrigin="anonymous"
                     className="max-w-full max-h-[60vh] rounded bg-black"
                     onError={async () => {
-                      // 1. 若使用的是 /swdrive/ 流式地址且播放失败，尝试回退到 fetchBlob 整体加载
+                      // 1. 若使用的是流式地址且播放失败，尝试回退到 fetchBlob 整体加载
                       if (fetchBlob && !blobUrl.startsWith('blob:')) {
                         try {
                           setLoading(true);
+                          setIsStream(false);
                           const data = await fetchBlob(file.hash);
                           const b = data instanceof Blob ? data : new Blob([data], { type: effectiveMime || 'video/mp4' });
                           const nextUrl = URL.createObjectURL(b);
@@ -270,14 +300,19 @@ export default function FilePreviewModal({
                     src={blobUrl}
                     controls
                     autoPlay
+                    crossOrigin="anonymous"
                     className="w-full max-w-md"
                     onError={async () => {
                       if (fetchBlob && !blobUrl.startsWith('blob:')) {
                         try {
+                          setLoading(true);
+                          setIsStream(false);
                           const data = await fetchBlob(file.hash);
                           const b = data instanceof Blob ? data : new Blob([data], { type: effectiveMime || 'audio/mpeg' });
                           setBlobUrl(URL.createObjectURL(b));
+                          setLoading(false);
                         } catch (err) {
+                          setLoading(false);
                           setError('Audio playback failed: ' + (err?.message || String(err)));
                         }
                       }

@@ -154,7 +154,7 @@ function servePeerDriveStream(request) {
     const total = Number.isFinite(sizeParam) && sizeParam > 0 ? sizeParam : null;
 
     // Range 解析（支持播放器 seek）：bytes=a-b / bytes=a- / bytes=-n
-    const range = parseRangeHeader(request.headers.get('Range'));
+    const range = parseRangeHeader(request.headers.get('Range') || request.headers.get('range'));
     let offset = 0;
     let reqLen = null; // 请求段长度（null=全量）
     let status = 200;
@@ -181,6 +181,11 @@ function servePeerDriveStream(request) {
       let ctrl = null;
       const stream = new ReadableStream({
         start(c) { ctrl = c; },
+        cancel() {
+          try {
+            chan.port1.postMessage({ abort: true });
+          } catch { /* channel already closed */ }
+        },
       });
       chan.port1.onmessage = (ev) => {
         const m = ev.data;
@@ -196,13 +201,18 @@ function servePeerDriveStream(request) {
         [chan.port2]
       );
 
-      const headers = { 'Accept-Ranges': 'bytes', 'Content-Type': guessMimeSw(name) };
+      const headers = {
+        'Accept-Ranges': 'bytes',
+        'Content-Type': guessMimeSw(name),
+        'Cache-Control': 'no-cache',
+      };
       if (status === 206 && total != null) {
         const end = reqLen != null ? offset + reqLen - 1 : total - 1;
         headers['Content-Range'] = 'bytes ' + offset + '-' + end + '/' + total;
         if (reqLen != null) headers['Content-Length'] = String(reqLen);
       } else if (status === 206) {
         headers['Content-Range'] = 'bytes ' + offset + '-' + (reqLen != null ? offset + reqLen - 1 : '*') + '/' + '*';
+        if (reqLen != null) headers['Content-Length'] = String(reqLen);
       } else if (total != null) {
         headers['Content-Length'] = String(total); // 全量 + 真实长度：播放器才知道可 seek
       }
