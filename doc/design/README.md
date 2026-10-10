@@ -91,3 +91,4 @@
 - [PEERJS-CONCURRENCY-MATRIX-AUDIT.md](PEERJS-CONCURRENCY-MATRIX-AUDIT.md) — PeerJS multi-client concurrency matrix audit specification (#205)
 - [DOC-REFS-EVALUATION-SPEC.md](DOC-REFS-EVALUATION-SPEC.md) — doc-refs job trigger conditions and failure grading audit specification (#206)
 - [SECRET-SCANNING-DISCIPLINE-SPEC.md](SECRET-SCANNING-DISCIPLINE-SPEC.md) — GitHub secret scanning and test placeholder discipline specification (#207)
+- [FRONTEND-ROUTING-HASHROUTER-ADR.md](FRONTEND-ROUTING-HASHROUTER-ADR.md) — 前端路由形态决策记录（HashRouter；file:// 收益 vs panel 注入覆盖的权衡、复核触发条件与回切条件）(#286)
