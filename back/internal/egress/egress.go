@@ -3,6 +3,20 @@ package egress
 // egress.go: 统一消费出口核心模型与抽象契约。
 // 架构定位：解耦数据源提供端（Ingress / source.Source）与消费下发端（Egress / HTTP, WS, PeerJS）。
 // 详见规范文档 doc/UNIFIED-EGRESS-ABSTRACTION.md。
+//
+// Status: UNWIRED (Issue #273)
+// The egress Pipeline (Pipeline + HTTPSink/WSink/PeerJSSink) is fully
+// implemented and tested but has zero external consumers — HTTP/WS/PeerJS
+// download paths still use their legacy pipelines. Only ParseRangeHeader
+// (range.go) and ContentProvider (type assertion in source/manager.go)
+// are actively used.
+//
+// Two options (Issue #273, decide and act):
+//   1. Wire up: integrate download paths with the egress Pipeline
+//   2. Trim: remove Pipeline and sinks, keep only ParseRangeHeader + ContentProvider
+//
+// Until resolved, the unwired code is frozen — do not add new sinks or
+// Pipeline features. The tests still pass, but the code is dead weight.
 
 import (
 	"context"
