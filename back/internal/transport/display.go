@@ -3,6 +3,7 @@ package transport
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -178,9 +179,48 @@ func (m *DisplayManager) GetState(channel string) *DisplayState {
 	return &copyState
 }
 
+func is64Hex(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < 64; i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func validateDisplayPayload(cmd DisplayFrame) error {
+	if cmd.URL != "" {
+		lower := strings.ToLower(strings.TrimSpace(cmd.URL))
+		if strings.HasPrefix(lower, "javascript:") ||
+			strings.HasPrefix(lower, "file:") ||
+			strings.HasPrefix(lower, "data:") ||
+			strings.HasPrefix(lower, "vbscript:") {
+			return fmt.Errorf("disallowed or dangerous URL scheme in display payload: %s", cmd.URL)
+		}
+		if strings.Contains(lower, "://") && !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+			return fmt.Errorf("unsupported URL scheme in display payload: %s", cmd.URL)
+		}
+	}
+	if cmd.Hash != "" {
+		// Defense against path traversal and control characters in file hash
+		if strings.Contains(cmd.Hash, "..") || strings.ContainsAny(cmd.Hash, "/\\\x00") {
+			return fmt.Errorf("invalid file hash in display payload: path traversal characters disallowed")
+		}
+	}
+	return nil
+}
+
 // Cast commands content to be displayed on target screen(s).
 // Enforces: target session must be registered in display mode.
 func (m *DisplayManager) Cast(from Session, targetID, channel string, cmd DisplayFrame) error {
+	if err := validateDisplayPayload(cmd); err != nil {
+		return err
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

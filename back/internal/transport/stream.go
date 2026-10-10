@@ -3,6 +3,7 @@ package transport
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -86,6 +87,13 @@ func (m *StreamManager) CreateStream(pub Session, streamID, title, mimeType stri
 	if streamID == "" {
 		return nil, fmt.Errorf("streamId cannot be empty")
 	}
+
+	if existing, ok := m.streams[streamID]; ok && existing.manifest.Active {
+		if existing.publisher != nil && pub != nil && existing.publisher.ID() != pub.ID() {
+			return nil, fmt.Errorf("stream %q is already active and owned by publisher %s", streamID, existing.manifest.Publisher)
+		}
+	}
+
 	if title == "" {
 		title = "Live Stream " + streamID
 	}
@@ -129,9 +137,19 @@ func (m *StreamManager) PushChunk(pub Session, streamID string, chunk StreamChun
 		return nil, fmt.Errorf("stream %q is not active", streamID)
 	}
 
+	if rec.publisher != nil && pub != nil && rec.publisher.ID() != pub.ID() {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("session %s is not authorized to push chunks to stream %q", pub.ID(), streamID)
+	}
+
 	if chunk.Hash == "" {
 		m.mu.Unlock()
 		return nil, fmt.Errorf("chunk hash cannot be empty")
+	}
+
+	if strings.Contains(chunk.Hash, "..") || strings.ContainsAny(chunk.Hash, "/\\\x00") {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("invalid chunk hash %q: path traversal characters disallowed", chunk.Hash)
 	}
 
 	rec.manifest.CurrentSeq++
@@ -207,6 +225,11 @@ func (m *StreamManager) CloseStream(pub Session, streamID string) error {
 	if !ok {
 		m.mu.Unlock()
 		return fmt.Errorf("stream %q not found", streamID)
+	}
+
+	if rec.publisher != nil && pub != nil && rec.publisher.ID() != pub.ID() {
+		m.mu.Unlock()
+		return fmt.Errorf("session %s is not authorized to close stream %q", pub.ID(), streamID)
 	}
 
 	rec.manifest.Active = false
