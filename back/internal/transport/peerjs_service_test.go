@@ -162,6 +162,8 @@ func newTestPeerJSServiceWithIndex(t *testing.T, idx *FileIndexService) *PeerJSS
 		forwardRules: map[string][]int{},
 		fwNonces:     map[string]*fwdNonce{},
 		fileIndex:    idx,
+		displayMgr:   NewDisplayManager(),
+		streamMgr:    NewStreamManager(),
 		ctx:          context.Background(),
 	}
 }

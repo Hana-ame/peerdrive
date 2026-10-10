@@ -111,7 +111,7 @@ func routeTable(t *testing.T) []string {
 
 // goldenRouteTable was captured from the tree before the HTTP shell was split
 // into internal/httpd. Do not regenerate from a modified tree.
-const goldenRouteTable = `92
+const goldenRouteTable = `105
 DELETE /bt/download/:infohash
 DELETE /collections/:id/:collection_name/entries/*path
 DELETE /files/:hash
@@ -132,6 +132,8 @@ GET /collections/:id
 GET /collections/:id/*filepath
 GET /collections/public
 GET /collections/search
+GET /display/screens
+GET /display/status
 GET /download/:hash
 GET /download/:hash/sources
 GET /files
@@ -142,6 +144,7 @@ GET /ipfs/:cid
 GET /ipfs/gateways
 GET /ipfs/pins
 GET /local/status/:hash
+GET /p2p/aria2/status
 GET /p2p/auth/status
 GET /p2p/forward/list
 GET /p2p/pull
@@ -155,6 +158,8 @@ GET /s/:token
 GET /sha256sum/:sha256
 GET /sha256sum/:sha256/:filename
 GET /shares
+GET /stream/:id/manifest
+GET /stream/list
 GET /swagger/*any
 GET /tags/search
 GET /tags/sha/:sha
@@ -186,6 +191,9 @@ POST /collections/register-folder
 POST /collections/register-local
 POST /collections/register-url
 POST /collections/upload
+POST /display/cast
+POST /display/clear
+POST /display/control
 POST /download/:hash/refresh
 POST /files/copy
 POST /files/diff
@@ -195,6 +203,8 @@ POST /files/register_url
 POST /files/upload
 POST /ipfs/pin/:cid
 POST /local/save
+POST /p2p/aria2/download
+POST /p2p/aria2/toggle
 POST /p2p/forward/close
 POST /p2p/forward/connect
 POST /p2p/forward/create
@@ -202,6 +212,9 @@ POST /p2p/pull
 POST /p2p/pull/cancel
 POST /p2p/pull/collection
 POST /shares
+POST /stream/:id/chunk
+POST /stream/:id/close
+POST /stream/create
 POST /tags/sha/:sha
 PUT /anon/collections/:hash/visibility`
 
@@ -211,12 +224,12 @@ PUT /anon/collections/:hash/visibility`
 // regression when a router assembly is refactored — fails here with a diff.
 func TestGoldenRouteTable(t *testing.T) {
 	got := routeTable(t)
-	if len(got) != 92 {
-		t.Fatalf("route count = %d, want 92; the assembled router registers a different number of routes\nGOT:\n%s",
+	if len(got) != 105 {
+		t.Fatalf("route count = %d, want 105; the assembled router registers a different number of routes\nGOT:\n%s",
 			len(got), strings.Join(got, "\n"))
 	}
 	want := strings.Split(strings.TrimSpace(goldenRouteTable), "\n")
-	if want[0] != "92" {
+	if want[0] != "105" {
 		t.Fatalf("internal error: golden header is %q", want[0])
 	}
 	want = want[1:]
