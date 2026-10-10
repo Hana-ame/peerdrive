@@ -17,16 +17,16 @@ func TestSchemaMigrationVersionTracking(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = CloseHandle(handle) })
 
-		// PRAGMA user_version must match latest migration version (7)
+		// PRAGMA user_version must match latest migration version (8)
 		ver, err := GetUserVersion(handle)
 		require.NoError(t, err)
-		require.Equal(t, 7, ver, "fresh DB must have user_version = 7")
+		require.Equal(t, 8, ver, "fresh DB must have user_version = 8")
 
-		// schema_migrations table must contain all 7 migrations
+		// schema_migrations table must contain all 8 migrations
 		var count int
 		err = handle.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count)
 		require.NoError(t, err)
-		require.Equal(t, 7, count, "fresh DB must record all 7 applied migrations")
+		require.Equal(t, 8, count, "fresh DB must record all 8 applied migrations")
 	})
 
 	t.Run("RepeatedOpenIsIdempotent", func(t *testing.T) {
@@ -42,12 +42,12 @@ func TestSchemaMigrationVersionTracking(t *testing.T) {
 
 		ver, err := GetUserVersion(handle2)
 		require.NoError(t, err)
-		require.Equal(t, 7, ver)
+		require.Equal(t, 8, ver)
 
 		var count int
 		err = handle2.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count)
 		require.NoError(t, err)
-		require.Equal(t, 7, count)
+		require.Equal(t, 8, count)
 	})
 
 	t.Run("MigrationFailureReturnsErrorNotSwallowed", func(t *testing.T) {
