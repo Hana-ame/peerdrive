@@ -705,3 +705,97 @@ func TestPullStartupRecovery(t *testing.T) {
 		t.Fatalf(".part.meta should be removed after completion")
 	}
 }
+
+// midStreamFailSource 模拟传输中途（例如写入部分字节后）发生网络断开，后续重试应从断点 offset 续传。
+// 发现背景 (Issue #276): 验证 FetchFromPeer/peerpull 失败重试时，能够消费已落盘的 .part 字节数，
+// 传入非零 offset 进行续传，而不是从 0 全量重下。
+type midStreamFailSource struct {
+	mu      sync.Mutex
+	data    []byte
+	offsets []int64
+	fails   int
+}
+
+func (m *midStreamFailSource) OpenStream(peerID, hash string, offset, size int64) (io.ReadCloser, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.offsets = append(m.offsets, offset)
+	if offset > int64(len(m.data)) {
+		return io.NopCloser(bytes.NewReader(nil)), nil
+	}
+	slice := m.data[offset:]
+	if len(m.offsets) <= m.fails {
+		// 第一次尝试：提供前 25 字节后返回 unexpected EOF
+		split := 25
+		if split > len(slice) {
+			split = len(slice) / 2
+		}
+		return &midFailReader{data: slice[:split], err: errors.New("unexpected EOF")}, nil
+	}
+	return io.NopCloser(bytes.NewReader(slice)), nil
+}
+
+type midFailReader struct {
+	data []byte
+	err  error
+	read bool
+}
+
+func (r *midFailReader) Read(p []byte) (int, error) {
+	if !r.read && len(r.data) > 0 {
+		r.read = true
+		n := copy(p, r.data)
+		return n, nil
+	}
+	return 0, r.err
+}
+
+func (r *midFailReader) Close() error { return nil }
+
+func TestPullMidStreamDropResume(t *testing.T) {
+	fullContent := []byte("a very long payload that gets interrupted midstream and then resumed from offset")
+	h := hashOf(fullContent)
+	src := &midStreamFailSource{
+		data:  fullContent,
+		fails: 1,
+	}
+	p, root, registered := newPullerForTest(t, src, nil)
+
+	job, err := p.Start("peer-a", h, "midstream.bin", "midstream.bin", "")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	done := waitJob(t, p, job.ID)
+	if done.Status != PullDone {
+		t.Fatalf("status = %v, want PullDone (err=%s)", done.Status, done.Error)
+	}
+
+	src.mu.Lock()
+	offsets := append([]int64(nil), src.offsets...)
+	src.mu.Unlock()
+
+	// 必须至少重试 1 次且第二次 offset 为第一次读取的 25 字节（断点续传而非从 0 重来）
+	if len(offsets) < 2 {
+		t.Fatalf("expected at least 2 attempts, got %d", len(offsets))
+	}
+	if offsets[0] != 0 {
+		t.Errorf("first attempt offset = %d, want 0", offsets[0])
+	}
+	if offsets[1] != 25 {
+		t.Errorf("second attempt offset = %d, want 25 (Issue #276 resume from partial)", offsets[1])
+	}
+
+	targetPath := filepath.Join(root, "pulled", "midstream.bin")
+	gotData, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read target failed: %v", err)
+	}
+	if !bytes.Equal(gotData, fullContent) {
+		t.Fatalf("content mismatch: got %q, want %q", gotData, fullContent)
+	}
+	if len(*registered) != 1 {
+		t.Fatalf("registered %d files, want 1", len(*registered))
+	}
+}
+
