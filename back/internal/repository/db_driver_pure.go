@@ -24,4 +24,7 @@ const sqliteDriver = "sqlite"
 // version).
 // Syntax difference: modernc uses `_pragma=busy_timeout(5000)`, mattn uses
 // `_busy_timeout=5000`.
-func dsnSuffix() string { return "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)" }
+// See db_driver_cgo.go for why journal_mode=WAL is required (Issue #277).
+// Syntax difference: modernc uses `_pragma=journal_mode(WAL)`, mattn uses
+// `_journal_mode=WAL`.
+func dsnSuffix() string { return "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)" }
