@@ -58,16 +58,15 @@ func authRequest(r *gin.Engine, path, authHeader string) *httptest.ResponseRecor
 	return w
 }
 
-// TestAuthRequired_BothEmpty_AuthDisabledPassesThrough: 无 reg server、无 AdminToken
-// 时认证关闭，AuthRequired 直接放行（本地单机模式）。
-// 发现背景：这是 refactor 既有语义（authDisabled()），不是新行为——
-// 新行为是"设了 AdminToken 后同一路由会 401"，见下一个测试。
-func TestAuthRequired_BothEmpty_AuthDisabledPassesThrough(t *testing.T) {
+// TestAuthRequired_BothEmpty_Returns503: 无 reg server、无 AdminToken 时，
+// AuthRequired 返回 503（Issue #282：管理面必须配认证，不再默认放行）。
+// 旧行为：authDisabled() 直接放行（本地单机模式），导致公网部署无认证即可操作管理面。
+func TestAuthRequired_BothEmpty_Returns503(t *testing.T) {
 	t.Parallel()
 	r := newAuthTestEngine(authDisabledAuth())
 
 	w := authRequest(r, "/protected", "")
-	assert.Equal(t, http.StatusOK, w.Code, "no auth backend configured -> pass through")
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code, "no auth backend configured -> 503")
 }
 
 // TestAuthRequired_AdminToken_WrongToken401_RightToken200: 只设 AdminToken（登录服务关）时，

@@ -399,7 +399,7 @@ GET     /swagger/index.html              -> 200 ct="text/html; charset=utf-8"   
 GET     /panel                           -> 200 ct="text/html; charset=utf-8"       kind=raw  sha=1f63099d8f01e074b8e351820743a78863e1ca11a16343f69cf878ed5cbcdd01
 GET     /peerjs.min.js                   -> 200 ct="application/javascript; charset=utf-8" kind=raw  sha=7604d8c31bec4f134b0d15c2d80b1d095ea18af005354f439f14291fcd7b4168
 GET     /no-such-path                    -> 404 ct="text/plain"                     kind=raw  sha=99eb12f2ab3c4866a353e098ffa3cb7a967e617c49b98480394ec5d8ea92b094
-POST    /collections/register-local      -> 400 ct="application/json; charset=utf-8" kind=json sha=2b9fbe63dc1aeedc22c8e3f74b4d5ec422b0ac295d05cf8e0281e25834c83723
+POST    /collections/register-local      -> 503 ct="application/json; charset=utf-8" kind=json sha=7d0dc66ad427dd85149325e08adb1246d7f6858068a8c4d58f4f34dc46096f74
 GET     /sha256sum/deadbeef              -> 400 ct="application/json; charset=utf-8" kind=json sha=7a24c7053ae7e859c766d06fac0a1ff91772127f72c157ed5adc73b395190316
 OPTIONS /collections                     -> 204 ct=""                               kind=raw  sha=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 GET     /collections/search              -> 200 ct="application/json; charset=utf-8" kind=json sha=8fe32e407a1038ee38753b70e5374b3a46d6ae9d5f16cd5b73c53abaca8f5ed0

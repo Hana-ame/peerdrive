@@ -102,15 +102,21 @@ func (a *Authenticator) AuthOptional() gin.HandlerFunc {
 	}
 }
 
-// AuthRequired rejects requests without a valid Bearer token, returns 401.
+// AuthRequired rejects requests without a valid Bearer token.
 // Auth mode selection (in priority order):
 //  1. regServerURL != "" → remote registration server whoami validation
 //  2. adminToken != "" → local constant-time Bearer comparison
-//  3. both empty → auth disabled, pass through (local single-machine mode)
+//  3. both empty → 503 Service Unavailable (Issue #282: admin surface must not be
+//     exposed without authentication; configure PEERDRIVE_ADMIN_TOKEN or
+//     PEERDRIVE_REG_SERVER, or bind to localhost). Previously this passed through,
+//     making every HTTP admin route world-open in default config.
 func (a *Authenticator) AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if a.authDisabled() {
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error":  "admin auth not configured",
+				"detail": "set PEERDRIVE_ADMIN_TOKEN or PEERDRIVE_REG_SERVER to enable admin surface",
+			})
 			return
 		}
 		auth := c.GetHeader("Authorization")

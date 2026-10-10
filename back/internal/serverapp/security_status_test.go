@@ -25,7 +25,7 @@ func defaultCfg() *config.Config {
 		RegistrationServer: "",
 		AdminToken:         "",
 		DiscoverPresence:   true,
-		DisableSwagger:     false,
+		DisableSwagger:     true,
 	}
 }
 
@@ -48,7 +48,6 @@ func TestSecurityStatus_DefaultConfigReportsAllOpen(t *testing.T) {
 		"inbound P2P has no gate (PEERDRIVE_PSK empty)",
 		"HTTP admin surface has no auth (PEERDRIVE_REG_SERVER empty)",
 		"node is present in the public roster (PEERDRIVE_DISCOVER_PRESENCE=true)",
-		"Swagger API docs are public (PEERDRIVE_SWAGGER not off)",
 	}
 	for _, want := range warnWanted {
 		lvl, ok := got[want]
@@ -95,11 +94,11 @@ func TestSecurityStatus_HardenedConfigReportsNothing(t *testing.T) {
 // warning — guards against a future edit that returns early after the first finding.
 func TestSecurityStatus_SwaggerOnly(t *testing.T) {
 	cfg := defaultCfg()
-	cfg.DisableSwagger = true
+	cfg.DisableSwagger = false // explicitly enable Swagger to test the warning
 
 	got := titles(collectSecurityFindings(cfg, nil))
-	if _, ok := got["Swagger API docs are public (PEERDRIVE_SWAGGER not off)"]; ok {
-		t.Error("Swagger warning should be gone after PEERDRIVE_SWAGGER=off")
+	if _, ok := got["Swagger API docs are public (PEERDRIVE_SWAGGER=on)"]; !ok {
+		t.Error("Swagger warning should appear when Swagger is explicitly enabled")
 	}
 	if _, ok := got["inbound P2P has no gate (PEERDRIVE_PSK empty)"]; !ok {
 		t.Error("PSK warning must survive when only Swagger was disabled")

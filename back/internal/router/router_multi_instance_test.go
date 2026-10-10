@@ -108,9 +108,9 @@ func TestTwoRouters_OneAuthDisabled_OtherAuthEnforced(t *testing.T) {
 	openEngine := newAuthTestEngine(open.auth)
 	guardedEngine := newAuthTestEngine(guarded.auth)
 
-	assert.Equal(t, http.StatusOK,
+	assert.Equal(t, http.StatusServiceUnavailable,
 		authRequest(openEngine, "/protected", "").Code,
-		"auth-disabled router passes anonymous through")
+		"auth-disabled router returns 503 (Issue #282: no more pass-through)")
 	assert.Equal(t, http.StatusUnauthorized,
 		authRequest(guardedEngine, "/protected", "").Code,
 		"the disabled router must not have weakened its neighbor")
