@@ -67,7 +67,9 @@ export default function ConnectionStatus() {
 
   // 1. Signaling server state (Peersignal)
   // If local WS is open, signal host is from nodeInfo; if peerSession is active, from peerSession.signalHost
-  const signalHost = nodeInfo?.signal_host || peerSession?.signalHost || 'peersignal.moonchan.xyz';
+  const signalHost = nodeInfo?.signal_host
+    ? `${nodeInfo.signal_host}${nodeInfo.signal_port ? `:${nodeInfo.signal_port}` : ''}`
+    : (peerSession?.signalHost ? `${peerSession.signalHost}${peerSession.signalPort ? `:${peerSession.signalPort}` : ''}` : 'peersignal.moonchan.xyz');
   const isSignalLive = (status === 'open' && Boolean(nodeInfo?.id)) || Boolean(peerSession?.client);
 
   // 2. Node connection state (Local WS vs Remote WebRTC Peer)
@@ -130,7 +132,7 @@ export default function ConnectionStatus() {
           aria-hidden="true"
         />
         <span className="font-mono text-[11px]">
-          信令: {signalHost.split('.')[0]} {isSignalLive ? '✓' : '—'}
+          信令: {signalHost.split(':')[0].split('.')[0]} {isSignalLive ? '✓' : '—'}
         </span>
       </button>
 
@@ -170,7 +172,11 @@ export default function ConnectionStatus() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-gray-400">信令服务器:</span>
-              <span className="font-mono text-[11px] text-gray-200 truncate max-w-[170px]" title={signalHost}>
+              <span
+                data-testid="detail-signal-server"
+                className="font-mono text-[11px] text-gray-200 truncate max-w-[170px]"
+                title={signalHost}
+              >
                 {signalHost}
               </span>
             </div>
@@ -201,16 +207,36 @@ export default function ConnectionStatus() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-gray-400">Node ID:</span>
-                  <span className="font-mono text-[11px] text-gray-200 truncate max-w-[170px]" title={nodeInfo?.id || 'Local'}>
+                  <span
+                    data-testid="detail-node-id"
+                    className="font-mono text-[11px] text-gray-200 truncate max-w-[170px]"
+                    title={nodeInfo?.id || 'Local'}
+                  >
                     {nodeInfo?.id || 'Local'}
                   </span>
                 </div>
+                {nodeInfo?.peers && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Peers Online:</span>
+                    <span data-testid="detail-peer-count" className="font-mono text-gray-200">
+                      {nodeInfo.peers.length}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-gray-400">身份认证:</span>
-                  <span className="font-mono text-gray-200 truncate max-w-[170px]">
-                    {authInfo?.username || (authInfo?.authenticated ? 'Authenticated' : '本地运营者')}
+                  <span data-testid="detail-username" className="font-mono text-gray-200 truncate max-w-[170px]">
+                    {authInfo?.username || (authInfo?.authenticated ? 'User' : '本地运营者')}
                   </span>
                 </div>
+                {authInfo?.operator && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Operator:</span>
+                    <span data-testid="detail-operator" className="font-mono text-gray-200 truncate max-w-[170px]">
+                      {authInfo.operator}
+                    </span>
+                  </div>
+                )}
               </>
             )}
 

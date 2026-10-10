@@ -250,27 +250,60 @@ func (s *FileIndexService) WriteFile(name string, r io.Reader) (*FileInfo, error
 	if err := os.MkdirAll(s.uploadDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create upload dir: %w", err)
 	}
-	path := filepath.Join(s.uploadDir, sanitizeName(name))
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	tmpPath := filepath.Join(s.uploadDir, sanitizeName(name))
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open write target: %w", err)
 	}
 	if _, err := io.Copy(f, r); err != nil {
 		f.Close()
-		_ = os.Remove(path)
+		_ = os.Remove(tmpPath)
 		return nil, fmt.Errorf("write file: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
+		_ = os.Remove(tmpPath)
 		return nil, fmt.Errorf("close file: %w", err)
 	}
-	fi, err := s.Create(path)
+	st, err := os.Stat(tmpPath)
 	if err != nil {
-		_ = os.Remove(path)
+		_ = os.Remove(tmpPath)
 		return nil, err
 	}
-	log.LogInfo("file-index: write-file name=%s hash=%s size=%d path=%s", name, fi.Hash, fi.Size, fi.Path)
-	return fi, nil
+	h, err := hashFile(tmpPath)
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return nil, err
+	}
+	// Default to raw file with no extension, named by sha
+	destPath := filepath.Join(s.uploadDir, h)
+	if destPath != tmpPath {
+		if _, err := os.Stat(destPath); err == nil {
+			_ = os.Remove(tmpPath)
+		} else {
+			if err := os.Rename(tmpPath, destPath); err != nil {
+				_ = os.Remove(tmpPath)
+				return nil, err
+			}
+		}
+	}
+	seq, err := repository.UpsertFileIndex(h, destPath, name, st.Size(), false)
+	if err != nil {
+		return nil, err
+	}
+	if existing, _ := repository.GetFileMeta(h); existing == nil {
+		_ = repository.InsertFileMeta(&model.FileMeta{
+			Hash:     h,
+			Size:     st.Size(),
+			Filename: name,
+			Type:     model.FileTypeBlob,
+		})
+	} else if existing.Filename == "" && name != "" {
+		_ = repository.UpdateFileMetaFilename(h, name)
+	}
+	_ = repository.InsertFileProvider(h, "local", destPath)
+
+	log.LogInfo("file-index: write-file name=%s hash=%s size=%d path=%s", name, h, st.Size(), destPath)
+	return &FileInfo{Hash: h, Path: destPath, Name: name, Size: st.Size(), Seq: seq}, nil
 }
 
 // uploadChunkSize 上传位图粒度（分片对齐单位）。
@@ -287,6 +320,7 @@ type UploadSession struct {
 	mu        sync.Mutex
 	name      string
 	path      string
+	uploadDir string
 	file      *os.File
 	size      int64    // 声明总大小
 	roots     []string // 写边界（BeginUpload 时定下来，Abort/reap 删文件时共用）
@@ -333,13 +367,14 @@ func (s *FileIndexService) BeginUpload(name string, size int64) (*UploadSession,
 	// 位图按 64 chunk/word 分配（曾按 chunk 数分配导致末 word 判满逻辑失效）
 	totalChunks := (size + uploadChunkSize - 1) / uploadChunkSize
 	sess := &UploadSession{
-		name:   name,
-		path:   path,
-		file:   f,
-		roots:  s.writeRoots(),
-		size:   size,
-		bitmap: make([]uint64, (totalChunks+63)/64),
-		last:   time.Now(),
+		name:      name,
+		path:      path,
+		uploadDir: s.uploadDir,
+		file:      f,
+		roots:     s.writeRoots(),
+		size:      size,
+		bitmap:    make([]uint64, (totalChunks+63)/64),
+		last:      time.Now(),
 	}
 	// 断点续传：已有文件大小 → 重建位图（[0, min(size, fsize)) 视为已写）。
 	// 坑：空洞/错序可能被误标已写，最终 Commit 的 sha256 校验兜底（不匹配则整体失败）。
@@ -475,21 +510,53 @@ func (u *UploadSession) completeLocked() (bool, *FileInfo, error, *os.File) {
 	if err := u.file.Sync(); err != nil {
 		return false, nil, err, nil
 	}
+	// 在 Windows 上打开的文件删不掉、重命名不了。
+	// 必须在 hashFile 与 os.Rename 之前先关掉文件句柄。
+	toClose := u.file
+	u.file = nil
+	if closeErr := toClose.Close(); closeErr != nil {
+		return false, nil, fmt.Errorf("close upload file: %w", closeErr), nil
+	}
 	h, err := hashFile(u.path)
 	if err != nil {
 		return false, nil, err, nil
+	}
+	// Default to raw file with no extension, named by its sha
+	destDir := u.uploadDir
+	if destDir == "" {
+		destDir = filepath.Dir(u.path)
+	}
+	destPath := filepath.Join(destDir, h)
+	if destPath != u.path {
+		if _, err := os.Stat(destPath); err == nil {
+			_ = os.Remove(u.path)
+		} else {
+			if err := os.Rename(u.path, destPath); err != nil {
+				return false, nil, err, nil
+			}
+		}
+		u.path = destPath
 	}
 	seq, err := repository.UpsertFileIndex(h, u.path, u.name, u.size, false)
 	if err != nil {
 		return false, nil, err, nil
 	}
-	log.LogInfo("file-index: upload complete hash=%s size=%d path=%s", h, u.size, u.path)
+	if existing, _ := repository.GetFileMeta(h); existing == nil {
+		_ = repository.InsertFileMeta(&model.FileMeta{
+			Hash:     h,
+			Size:     u.size,
+			Filename: u.name,
+			Type:     model.FileTypeBlob,
+		})
+	} else if existing.Filename == "" && u.name != "" {
+		_ = repository.UpdateFileMetaFilename(h, u.name)
+	}
+	_ = repository.InsertFileProvider(h, "local", u.path)
+
+	log.LogInfo("file-index: upload complete hash=%s size=%d path=%s name=%s", h, u.size, u.path, u.name)
 	fi := &FileInfo{Hash: h, Path: u.path, Name: u.name, Size: u.size, Seq: seq}
 	u.done, u.doneInfo = true, fi
-	// 句柄交回调用方在锁外关闭；置 nil 让后续 WriteAt/Complete 走 done/aborted 分支
-	f := u.file
-	u.file = nil
-	return true, fi, nil, f
+	return true, fi, nil, nil
 }
 
 // Abort 中止会话并删除目标文件（幂等；reap 摘除句柄后调用无副作用）。

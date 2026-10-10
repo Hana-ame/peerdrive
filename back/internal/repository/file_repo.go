@@ -54,6 +54,15 @@ func InsertFileMeta(meta *model.FileMeta) error {
 	return err
 }
 
+// UpdateFileMetaFilename updates the filename in file_meta if it is currently empty.
+func UpdateFileMetaFilename(hash, filename string) error {
+	if db == nil || hash == "" || filename == "" {
+		return nil
+	}
+	_, err := db.Exec(`UPDATE file_meta SET filename = ? WHERE hash = ? AND (filename IS NULL OR filename = '')`, filename, hash)
+	return err
+}
+
 // ─── file_providers ─────────────────────────────────────
 
 // GetFileProviders queries all available providers for a given hash, prioritizing local type.

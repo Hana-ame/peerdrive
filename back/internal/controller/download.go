@@ -111,6 +111,14 @@ func DownloadBySHA256Local(c *gin.Context) {
 	path := filepath.Join(storageDir, hash[:2], hash)
 	f, err := os.Open(path)
 	if err != nil {
+		if localPath, pErr := fileSvc.GetLocalPath(hash); pErr == nil {
+			if f2, oErr := os.Open(localPath); oErr == nil {
+				f = f2
+				path = localPath
+			}
+		}
+	}
+	if f == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found on disk"})
 		return
 	}

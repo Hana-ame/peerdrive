@@ -68,19 +68,19 @@ describe('ConnectionStatus', () => {
     expect(onStatusMock).toHaveBeenCalledTimes(1)
     const pill = screen.getByTestId('connection-status')
     expect(pill.dataset.status).toBe('idle')
-    expect(pill.textContent).toContain('Not connected')
+    expect(pill.textContent).toMatch(/未连接|Not connected/)
   })
 
   it('reacts to every state transition: connecting/open/closed', () => {
     render(<ConnectionStatus />)
     emit('connecting')
-    expect(screen.getByTestId('connection-status').textContent).toContain('Connecting…')
+    expect(screen.getByTestId('connection-status').textContent).toMatch(/连接中…|Connecting…/)
     emit('open')
-    expect(screen.getByTestId('connection-status').textContent).toContain('Connected')
+    expect(screen.getByTestId('connection-status').textContent).toMatch(/WS 本地|Connected/)
     emit('closed')
     // 'closed' must NOT say "Disconnected" — ws.js auto-reconnects with backoff,
     // and copy that implies permanence makes users refresh instead of wait.
-    expect(screen.getByTestId('connection-status').textContent).toContain('Reconnecting…')
+    expect(screen.getByTestId('connection-status').textContent).toMatch(/重连中…|Reconnecting…/)
     expect(screen.getByTestId('connection-status').dataset.status).toBe('closed')
   })
 
