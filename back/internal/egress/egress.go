@@ -1,3 +1,21 @@
+// Package egress 统一消费出口抽象（EXPERIMENTAL / 未接线）。
+//
+// 当前状态（2026-10，Issue #273 评估结论）：
+//   - Pipeline + 三大 Sink（HTTP/WS/PeerJS）**未被任何消费端实际调用**；
+//     HTTP 面走 `http.ServeContent`（DownloadBySHA256Local）或整文件读入
+//     （DownloadBySHA256Internal），WS 面走 admin-bin 单帧一次性下发，
+//     PeerJS 面走 transport/inbound.go:serveFile 自带分块循环。
+//   - **唯一真实消费者**：`controller/download.go` 的 `ParseRangeHeader`
+//     （RFC 7233 Range 解析），已接入 `handleRangeRequest`，**不能删**。
+//   - `source.Manager` 通过 `var _ egress.ContentProvider = (*Manager)(nil)`
+//     静态断言满足 ContentProvider 契约，为未来接线预留钩子。
+//
+// 决策：**冻结**，暂不接线、暂不瘦身。接线会回归现状已实现的安全/流控能力
+// （QoS 限流、Authorizer 门禁、http.ServeContent 的 If-Range/ETag 条件请求）。
+// 详细评估与"下一次接线的前置条件"见：
+//   doc/design/EGRESS-ABSTRACTION-EVALUATION.md
+//
+// 原设计稿（#193/#195/#197）：doc/UNIFIED-EGRESS-ABSTRACTION.md
 package egress
 
 // egress.go: 统一消费出口核心模型与抽象契约。
