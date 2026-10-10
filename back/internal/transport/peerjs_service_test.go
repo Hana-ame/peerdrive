@@ -590,3 +590,27 @@ func hashOf(s string) string {
 func peerjsFrameText(s string) peerjs.Frame {
 	return peerjs.Frame{IsText: true, Data: []byte(s)}
 }
+
+// bindFakeConn binds fakeSession to svc (conns + pending) and returns session without starting uploadWorker.
+func bindFakeConn(t *testing.T, svc *PeerJSService, id string) *fakeSession {
+	t.Helper()
+	sess := &fakeSession{id: id}
+	st := &connState{
+		fetches: make(map[string]*fetchState),
+		binCh:   make(chan binaryChunk, 16),
+		binDone: make(chan struct{}),
+	}
+	svc.mu.Lock()
+	if svc.conns == nil {
+		svc.conns = make(map[string]Session)
+	}
+	svc.conns[id] = sess
+	svc.mu.Unlock()
+	svc.pendingMu.Lock()
+	if svc.pending == nil {
+		svc.pending = make(map[Session]*connState)
+	}
+	svc.pending[sess] = st
+	svc.pendingMu.Unlock()
+	return sess
+}
