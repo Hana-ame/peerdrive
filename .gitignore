@@ -6,6 +6,12 @@
 # Database
 peerdrive.db
 *.db
+*.db-shm
+*.db-wal
+
+# Runtime & Logs
+*.pid
+logs/
 
 # Compiled binaries
 #
