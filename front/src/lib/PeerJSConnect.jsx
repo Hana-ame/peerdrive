@@ -40,6 +40,7 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
   const [sigPort, setSigPort] = useState(String(DEFAULT_SIG.port));
   const [sigKey, setSigKey] = useState(DEFAULT_SIG.key);
   const [targetPeerId, setTargetPeerId] = useState('');
+  const [psk, setPsk] = useState('');
   const myIdRef = useRef(getStableMyId());
   const [pdClient, setPdClient] = useState(null);
   const [pdStatus, setPdStatus] = useState('idle'); // idle|connecting|online|error
@@ -72,6 +73,7 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
           id: myIdRef.current,
         },
         connOptions: { serialization: 'raw', reliable: true },
+        psk: psk.trim(),
         timeoutMs: 15000,
       });
       setPdClient(client);
@@ -80,7 +82,15 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
       setPdStatus('online');
       // Store in global session (for the node control page), and trigger the
       // "jump on successful connect" callback
-      setNodeSession({ client, peerId: target, myId: myIdRef.current });
+      setNodeSession({
+        client,
+        peerId: target,
+        myId: myIdRef.current,
+        psk: psk.trim(),
+        pskAuthenticated: Boolean(psk.trim() && client.pskState === 'ok'),
+        signalHost: sigHost.trim() || DEFAULT_SIG.host,
+        signalPort: Number(sigPort.trim()) || DEFAULT_SIG.port,
+      });
       onConnected?.(client, target);
     } catch (e) {
       setPdStatus('error');
@@ -197,6 +207,12 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
           <input value={targetPeerId} onChange={e => setTargetPeerId(e.target.value)}
             placeholder="peerdrive-xxxxxxxx"
             className={inputCls + ' flex-1'}
+            onKeyDown={e => { if (e.key === 'Enter') handleConnect(); }} />
+          <input value={psk} onChange={e => setPsk(e.target.value)}
+            type="password"
+            placeholder="PSK key (optional / 留空为游客)"
+            className={inputCls + ' w-44'}
+            title="Pre-shared key (if required by node)"
             onKeyDown={e => { if (e.key === 'Enter') handleConnect(); }} />
           <button onClick={handleConnect} disabled={!targetPeerId.trim() || pdStatus === 'connecting'}
             className="px-3 py-1 text-xs bg-brand-600 text-white rounded-lg hover:bg-brand-500 disabled:opacity-40 whitespace-nowrap">Connect</button>

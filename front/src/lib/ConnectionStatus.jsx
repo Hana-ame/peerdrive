@@ -65,21 +65,49 @@ export default function ConnectionStatus() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showDetails]);
 
-  // Connection state resolution: WS has highest fidelity if open, otherwise peerSession if active
+  // 1. Signaling server state (Peersignal)
+  // If local WS is open, signal host is from nodeInfo; if peerSession is active, from peerSession.signalHost
+  const signalHost = nodeInfo?.signal_host || peerSession?.signalHost || 'peersignal.moonchan.xyz';
+  const isSignalLive = (status === 'open' && Boolean(nodeInfo?.id)) || Boolean(peerSession?.client);
+
+  // 2. Node connection state (Local WS vs Remote WebRTC Peer)
   const isWsOpen = status === 'open';
   const isPeerOpen = Boolean(peerSession?.client && peerSession?.peerId);
-  const isLive = isWsOpen || isPeerOpen;
+  const isNodeLive = isWsOpen || isPeerOpen;
 
-  const cur = isWsOpen
-    ? (STATE[status] || STATE.idle)
-    : isPeerOpen
-      ? { dot: 'bg-green-400', text: 'text-green-300', label: `Peer: ${peerSession.peerId.slice(0, 8)}` }
-      : (STATE[status] || STATE.idle);
+  // Authentication & Role Label
+  // - WS: admin/user
+  // - PeerJS: PSK验证 (if psk present and valid), or 游客 (Guest)
+  let nodeRoleLabel = '未连接';
+  let nodeBadgeColor = 'text-gray-400';
+  let nodeDotColor = 'bg-gray-500';
+
+  if (isWsOpen) {
+    const user = authInfo?.username || (authInfo?.authenticated ? 'User' : 'WS 本地');
+    nodeRoleLabel = `WS 本地 (${user})`;
+    nodeBadgeColor = 'text-green-300';
+    nodeDotColor = 'bg-green-400';
+  } else if (isPeerOpen) {
+    const peerShort = peerSession.peerId.slice(0, 8);
+    const hasPsk = Boolean(peerSession.psk || peerSession.client?.psk);
+    const authType = hasPsk ? 'PSK验证' : '游客';
+    nodeRoleLabel = `Peer: ${peerShort} [${authType}]`;
+    nodeBadgeColor = 'text-emerald-300';
+    nodeDotColor = 'bg-emerald-400';
+  } else if (status === 'connecting') {
+    nodeRoleLabel = '连接中…';
+    nodeBadgeColor = 'text-yellow-300';
+    nodeDotColor = 'bg-yellow-400 animate-pulse';
+  } else if (status === 'closed') {
+    nodeRoleLabel = '重连中…';
+    nodeBadgeColor = 'text-red-300';
+    nodeDotColor = 'bg-red-400 animate-pulse';
+  }
 
   const handleClick = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (isLive) {
+    if (isNodeLive || isSignalLive) {
       setShowDetails((prev) => !prev);
     } else {
       try {
@@ -88,101 +116,131 @@ export default function ConnectionStatus() {
     }
   };
 
-  const nodeLabel = isWsOpen && nodeInfo?.id
-    ? `Connected (${nodeInfo.id.slice(0, 8)})`
-    : isPeerOpen
-      ? `Connected (Peer: ${peerSession.peerId.slice(0, 8)})`
-      : cur.label;
-
   return (
-    <div className="relative ml-auto shrink-0" ref={containerRef}>
+    <div className="relative ml-auto shrink-0 flex items-center gap-2" ref={containerRef}>
+      {/* Pill ①: Peersignal 信令服务器状态 */}
       <button
         type="button"
         onClick={handleClick}
-        title={isPeerOpen ? `Connected to remote peer: ${peerSession.peerId}` : `Local node session: ${status}`}
-        className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-white/[0.08] bg-white/[0.04] ${cur.text} hover:bg-white/[0.08] transition-colors focus:outline-none`}
-        data-testid="connection-status"
-        data-status={isLive ? 'open' : status}
+        title={`信令服务器: ${signalHost} (${isSignalLive ? '已连接' : '未连接'})`}
+        className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-white/[0.08] bg-white/[0.04] text-gray-300 hover:bg-white/[0.08] transition-colors focus:outline-none"
       >
-        <span className={`w-2 h-2 rounded-full ${cur.dot}`} aria-hidden="true" />
-        <span>{nodeLabel}</span>
+        <span
+          className={`w-2 h-2 rounded-full ${isSignalLive ? 'bg-sky-400' : 'bg-gray-500'}`}
+          aria-hidden="true"
+        />
+        <span className="font-mono text-[11px]">
+          信令: {signalHost.split('.')[0]} {isSignalLive ? '✓' : '—'}
+        </span>
       </button>
 
-      {showDetails && isLive && (
+      {/* Pill ②: 节点连接状态 (WS 本地 / PeerJS PSK验证 / 游客) */}
+      <button
+        type="button"
+        onClick={handleClick}
+        title={isPeerOpen ? `WebRTC Node: ${peerSession.peerId}` : `Node session: ${status}`}
+        className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-white/[0.08] bg-white/[0.04] ${nodeBadgeColor} hover:bg-white/[0.08] transition-colors focus:outline-none`}
+        data-testid="connection-status"
+        data-status={isNodeLive ? 'open' : status}
+      >
+        <span className={`w-2 h-2 rounded-full ${nodeDotColor}`} aria-hidden="true" />
+        <span>{nodeRoleLabel}</span>
+      </button>
+
+      {/* 详细信息弹窗 */}
+      {showDetails && (
         <div
           data-testid="connection-details"
-          className="absolute right-0 top-full mt-2 w-72 p-3 rounded-lg shadow-xl border border-white/[0.12] bg-gray-900/95 backdrop-blur text-xs z-50 text-gray-200 space-y-2.5"
+          className="absolute right-0 top-full mt-2 w-80 p-3.5 rounded-lg shadow-xl border border-white/[0.12] bg-gray-900/95 backdrop-blur text-xs z-50 text-gray-200 space-y-3"
         >
           <div className="flex items-center justify-between border-b border-white/[0.08] pb-1.5 font-medium text-gray-300">
-            <span>{isPeerOpen && !isWsOpen ? 'Remote Peer Details' : 'Connection Details'}</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-300 font-mono">
-              Live
+            <span>连接状态详情 (Dual-Channel)</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${isNodeLive ? 'bg-green-500/20 text-green-300' : 'bg-gray-700 text-gray-400'}`}>
+              {isNodeLive ? 'Active' : 'Offline'}
             </span>
           </div>
 
+          {/* 信令层信息 */}
           <div className="space-y-1">
-            <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">
-              {isPeerOpen && !isWsOpen ? 'Remote Node' : 'Node Identity'}
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-gray-400">Peer ID:</span>
-              <span
-                data-testid="detail-node-id"
-                className="font-mono text-[11px] text-gray-200 truncate max-w-[170px]"
-                title={nodeInfo?.id || peerSession?.peerId || 'Unknown'}
-              >
-                {nodeInfo?.id || peerSession?.peerId || 'Unknown'}
+            <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold flex items-center justify-between">
+              <span>① 信令网络 (PeerSignal)</span>
+              <span className={isSignalLive ? 'text-sky-300' : 'text-gray-500'}>
+                {isSignalLive ? '● Connected' : '○ Standby'}
               </span>
             </div>
-            {isPeerOpen && peerSession?.myId && (
+            <div className="flex items-center justify-between">
+              <span className="text-gray-400">信令服务器:</span>
+              <span className="font-mono text-[11px] text-gray-200 truncate max-w-[170px]" title={signalHost}>
+                {signalHost}
+              </span>
+            </div>
+            {peerSession?.myId && (
               <div className="flex items-center justify-between">
-                <span className="text-gray-400">My Client ID:</span>
+                <span className="text-gray-400">本地客户端 ID:</span>
                 <span className="font-mono text-[11px] text-gray-300 truncate max-w-[170px]" title={peerSession.myId}>
                   {peerSession.myId}
                 </span>
               </div>
             )}
-            {nodeInfo?.peers && (
-              <div className="flex items-center justify-between">
-                <span className="text-gray-400">Peers Online:</span>
-                <span data-testid="detail-peer-count" className="font-mono text-gray-200">
-                  {nodeInfo.peers.length}
-                </span>
-              </div>
-            )}
           </div>
 
-          {isWsOpen && (
-            <>
-              <div className="space-y-1 border-t border-white/[0.06] pt-1.5">
-                <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Signaling Server</div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-400">Server:</span>
-                  <span data-testid="detail-signal-server" className="font-mono text-[11px] text-gray-200 truncate max-w-[170px]">
-                    {nodeInfo?.signal_host ? `${nodeInfo.signal_host}:${nodeInfo.signal_port || 443}` : 'Default cloud'}
-                  </span>
-                </div>
-              </div>
+          {/* 节点层信息 */}
+          <div className="space-y-1 border-t border-white/[0.06] pt-2">
+            <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold flex items-center justify-between">
+              <span>② 存储节点 (Node Session)</span>
+              <span className={isNodeLive ? 'text-emerald-300' : 'text-gray-500'}>
+                {isWsOpen ? 'WS 本地' : isPeerOpen ? 'WebRTC 远端' : '未连接'}
+              </span>
+            </div>
 
-              <div className="space-y-1 border-t border-white/[0.06] pt-1.5">
-                <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Account / Auth</div>
+            {isWsOpen && (
+              <>
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-400">User:</span>
-                  <span data-testid="detail-username" className="font-mono text-gray-200 truncate max-w-[170px]">
-                    {authInfo?.username || (authInfo?.authenticated ? 'Authenticated' : 'Guest')}
+                  <span className="text-gray-400">模式:</span>
+                  <span className="text-gray-200">WebSocket 管理面 (本地)</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">Node ID:</span>
+                  <span className="font-mono text-[11px] text-gray-200 truncate max-w-[170px]" title={nodeInfo?.id || 'Local'}>
+                    {nodeInfo?.id || 'Local'}
                   </span>
                 </div>
-                {authInfo?.operator && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-400">Operator:</span>
-                    <span data-testid="detail-operator" className="font-mono text-gray-200 truncate max-w-[170px]">
-                      {authInfo.operator}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">身份认证:</span>
+                  <span className="font-mono text-gray-200 truncate max-w-[170px]">
+                    {authInfo?.username || (authInfo?.authenticated ? 'Authenticated' : '本地运营者')}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {isPeerOpen && (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">模式:</span>
+                  <span className="text-gray-200">WebRTC P2P DataChannel</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">对端 Peer ID:</span>
+                  <span className="font-mono text-[11px] text-gray-200 truncate max-w-[170px]" title={peerSession.peerId}>
+                    {peerSession.peerId}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">准入身份:</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${Boolean(peerSession.psk || peerSession.client?.psk) ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                    {Boolean(peerSession.psk || peerSession.client?.psk) ? 'PSK 预共享密钥已验证' : '游客访问 (Guest)'}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {!isNodeLive && (
+              <p className="text-gray-500 text-[11px] py-1">
+                未连接到任何本地或远程存储节点。可前往 Plaza 搜索并连接公网节点。
+              </p>
+            )}
+          </div>
 
           {isPeerOpen && (
             <div className="border-t border-white/[0.06] pt-2 flex justify-end">
@@ -192,9 +250,9 @@ export default function ConnectionStatus() {
                   clearNodeSession();
                   setShowDetails(false);
                 }}
-                className="px-2 py-1 text-[11px] bg-red-500/20 text-red-300 hover:bg-red-500/30 rounded border border-red-500/30 transition-colors"
+                className="px-2.5 py-1 text-[11px] bg-red-500/20 text-red-300 hover:bg-red-500/30 rounded border border-red-500/30 transition-colors"
               >
-                Disconnect Peer
+                断开节点连接 (Disconnect)
               </button>
             </div>
           )}
