@@ -107,7 +107,12 @@ func (s *PeerJSService) requestVerbPayload(peerID string, req dcReq, timeout tim
 // 这是「市场/我的节点 → 对方节点详情页看到文件链接」的数据来源，
 // 也是跨节点拉取合集（M3）的入口：先拿清单，再按 entry hash 拉内容。
 func (s *PeerJSService) RequestShares(peerID string) (ShareSnapshot, error) {
-	raw, err := s.requestVerb(peerID, "share", verbWaitTimeout)
+	return s.RequestSharesWithPasscode(peerID, "")
+}
+
+// RequestSharesWithPasscode queries direct peer's share manifest with an optional collection passcode (Issue #268).
+func (s *PeerJSService) RequestSharesWithPasscode(peerID, passcode string) (ShareSnapshot, error) {
+	raw, err := s.requestVerbPayload(peerID, dcReq{Type: "share", Passcode: passcode, Token: passcode}, verbWaitTimeout)
 	if err != nil {
 		return ShareSnapshot{}, err
 	}
@@ -128,6 +133,7 @@ func (s *PeerJSService) RequestShares(peerID string) (ShareSnapshot, error) {
 	}
 	return resp.ShareSnapshot, nil
 }
+
 
 // ErrPeerSearchUnsupported 对端不支持 search 动词（老版本节点）。
 var ErrPeerSearchUnsupported = errors.New("peer does not support the search verb")

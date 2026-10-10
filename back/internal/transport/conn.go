@@ -68,6 +68,7 @@ type dcReq struct {
 	ReqID  string   `json:"reqId,omitempty"`
 	Trace  []string `json:"trace,omitempty"`
 	Token  string   `json:"token,omitempty"` // Phase 7: optional auth credential/token
+	Passcode string `json:"passcode,omitempty"` // collection-level passcode (Issue #268)
 	// search 动词的查询字段（出站 RequestSearch 用；入站由 dispatchFrame
 	// Unmarshal 进 dcResp，两边 json tag 逐字对齐即可）。
 	// dcReq 是**只发不收**的结构（服务端不拿它解析任何东西），所以在这里
