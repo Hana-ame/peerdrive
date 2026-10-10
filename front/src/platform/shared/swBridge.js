@@ -13,8 +13,9 @@ export async function registerSW() {
   if (registered) return;
   registered = true;
   try {
-    const base = import.meta.env.BASE_URL || '/';
-    const swUrl = new URL('service-worker.js', base).toString();
+    const base = (import.meta.env.BASE_URL || '/').replace(/\/+$/, '') + '/';
+    const origin = (typeof window !== 'undefined' && window.location?.origin) ? window.location.origin : 'http://localhost';
+    const swUrl = new URL(base + 'service-worker.js', origin).href;
     const reg = await navigator.serviceWorker.register(swUrl);
     // If SW has already taken control (controller is non-null), this page can
     // intercept /swdrive directly, no reload needed
@@ -74,17 +75,25 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     };
 
     (async () => {
+      const t0 = performance.now();
+      let bytesSent = 0;
       try {
+        console.log(`[swBridge] Stream start: hash=${d.hash?.slice(0, 8)} offset=${d.offset} size=${d.size}`);
         for await (const chunk of client.stream(d.hash, { offset: d.offset, size: d.size, signal: abortCtrl.signal })) {
           if (abortCtrl.signal.aborted) break;
+          bytesSent += chunk.byteLength;
           const buf = chunk.slice().buffer;
           port.postMessage({ chunk: buf }, [buf]);
         }
         if (!abortCtrl.signal.aborted) {
+          const sec = (performance.now() - t0) / 1000;
+          const mbps = sec > 0 ? (bytesSent / sec / (1024 * 1024)).toFixed(2) : '0';
+          console.log(`[swBridge] Stream done: hash=${d.hash?.slice(0, 8)} sent=${bytesSent} bytes in ${sec.toFixed(2)}s (${mbps} MB/s)`);
           port.postMessage({ done: true });
         }
       } catch (e) {
         if (!abortCtrl.signal.aborted) {
+          console.warn(`[swBridge] Stream error: hash=${d.hash?.slice(0, 8)}`, e);
           port.postMessage({ error: e?.message || String(e) });
         }
       }

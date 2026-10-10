@@ -125,7 +125,7 @@ export default function ConnectionStatus() {
         type="button"
         onClick={handleClick}
         title={`信令服务器: ${signalHost} (${isSignalLive ? '已连接' : '未连接'})`}
-        className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-white/[0.08] bg-white/[0.04] text-gray-300 hover:bg-white/[0.08] transition-colors focus:outline-none"
+        className="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-white/[0.08] bg-white/[0.04] text-gray-300 hover:bg-white/[0.08] transition-colors focus:outline-none"
       >
         <span
           className={`w-2 h-2 rounded-full ${isSignalLive ? 'bg-sky-400' : 'bg-gray-500'}`}

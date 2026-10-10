@@ -74,8 +74,10 @@ export default function Collections() {
         }));
         setCollections(colls);
         return;
-      } catch {
-        // Fall back to attempting ws.admin
+      } catch (err) {
+        setErr('无法获取远程节点共享合集: ' + (err?.message || String(err)));
+        setCollections([]);
+        return;
       }
     }
 
@@ -83,31 +85,6 @@ export default function Collections() {
       const res = await ws.admin('GET', '/anon/collections');
       setCollections(Array.isArray(res) ? res : []);
     } catch (e) {
-      if (peerSession?.client) {
-        try {
-          const snap = await peerSession.client.shares();
-          const colls = (snap?.collections || []).map((c, i) => ({
-            hash: c.hash || `c-${i}`,
-            current_hash: c.hash || `c-${i}`,
-            friendly_name: c.name || c.hash || 'Unnamed Collection',
-            entry_count: c.size ?? (Array.isArray(c.entries) ? c.entries.length : 0),
-            entries: (c.entries || []).map(e => ({
-              path: e.path || e.name || 'unnamed',
-              hash: e.hash || '',
-              mime_type: e.mime || '',
-              providers: [{ type: 'sha256', value: e.hash || '', mime_type: e.mime || '' }],
-            })),
-            tags: c.tags || [],
-            visibility: c.access_policy || 'public',
-            version: 1,
-            is_protected: Boolean(c.is_protected),
-            created_at: '',
-            isRemotePeer: true,
-          }));
-          setCollections(colls);
-          return;
-        } catch { /* ignore */ }
-      }
       setErr(e?.message || String(e));
       setCollections([]);
     }

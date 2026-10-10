@@ -59,6 +59,19 @@ import {
   STORAGE_KEY_AUTH_KEY,
   STORAGE_KEY_AUTH_HEADER_ENABLED,
 } from '../shared/storageKeys.js'
+import { getNodeSession, onNodeSession } from '../../lib/nodeSession.js'
+
+// When an active PeerJS WebRTC node session is established, disable WS retry timer
+if (typeof onNodeSession === 'function') {
+  onNodeSession((session) => {
+    if (session?.client) {
+      if (retryTimer) {
+        clearTimeout(retryTimer)
+        retryTimer = null
+      }
+    }
+  })
+}
 
 // Sync the token with api.js (see the localStorage key at api.js AUTH_TOKEN_KEY)
 function readToken() {
@@ -137,11 +150,15 @@ function setPending(reqId, entry) {
 }
 
 function ensureOpenSync() {
+  if (getNodeSession?.()?.client) return false
   connect()
   return !!sock && sock.readyState === WebSocket.OPEN
 }
 
 function ensureOpen() {
+  if (getNodeSession?.()?.client) {
+    return Promise.reject(new Error('peerjs session active: ws transport disabled'))
+  }
   connect()
   if (sock && sock.readyState === WebSocket.OPEN) {
     return Promise.resolve()
@@ -207,10 +224,11 @@ function startHeartbeat() {
 
 function scheduleReconnect() {
   if (retryTimer) return
+  if (getNodeSession?.()?.client) return
   retryTimer = setTimeout(() => {
     retryTimer = null
     try {
-      connect()
+      if (!getNodeSession?.()?.client) connect()
     } catch {}
   }, retryDelay)
   retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS)
@@ -219,6 +237,7 @@ function scheduleReconnect() {
 // connect establishes the WS connection (idempotent: returns immediately if already connected; already-initialized handlers aren't reattached).
 // Single-connection reuse: the browser and the local node share one session, and all requests are routed concurrently by reqId.
 function connect() {
+  if (getNodeSession?.()?.client) return
   if (!sock) {
     sock = new WebSocket(wsUrl(getWsBase()) + '/ws/peer')
     // Only connections we created ourselves need heartbeat and auto-reconnect (test-injected mocks don't carry this flag)
@@ -257,7 +276,7 @@ function connect() {
     binaryExpect = null
     sock = null
     setStatus('closed')
-    if (owned) scheduleReconnect()
+    if (owned && !getNodeSession?.()?.client) scheduleReconnect()
   }
   sock.onerror = () => {
     // After onerror, the browser will always follow up with onclose; the reconnect logic lives uniformly there, here we just clean up

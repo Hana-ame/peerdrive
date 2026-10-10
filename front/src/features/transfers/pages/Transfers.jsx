@@ -13,6 +13,7 @@
 // instead of hammering the admin plane from an idle page.
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import * as ws from '../../../platform/transport-ws';
+import { getNodeSession } from '../../../lib/nodeSession';
 import {
   fmtBytes, fmtRate, fmtEta, progressPct, estEtaSeconds, RateTracker,
 } from '../../../platform/shared/format';
@@ -110,6 +111,10 @@ export default function Transfers() {
   const [rates, setRates] = useState(() => new Map());
 
   const load = useCallback(async () => {
+    if (getNodeSession?.()?.client) {
+      setJobs((prev) => (prev === null ? [] : prev));
+      return;
+    }
     try {
       const [res, aria2Res] = await Promise.all([
         ws.admin('GET', '/p2p/pull'),

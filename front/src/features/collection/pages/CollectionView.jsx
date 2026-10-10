@@ -86,43 +86,39 @@ export default function CollectionView() {
         } catch { /* ignore */ }
       }
 
-      // 首选：内容寻址直取（使用 ws.downloadStream 流式读取）
       if (!data) {
-        try {
-          const stream = ws.downloadStream(sha);
-          const text = await readStreamAsText(stream);
-          data = parseManifest(JSON.parse(text));
-        } catch {
+        if (session?.client) {
+          // WebRTC PeerJS 会话活跃：严格走 PeerJS 获取，不尝试 WS
           try {
-            data = parseManifest(await ws.admin('GET', `/anon/collections/${sha}`));
-          } catch (adminErr) {
-            // 兜底：若 WS 取数失败且存在 PeerJS 会话，尝试 PeerJS shares 或 stream
-            if (session?.client) {
-              try {
-                const snap = await session.client.shares();
-                const match = (snap?.collections || []).find(c => c.hash === sha || c.name === sha);
-                if (match && Array.isArray(match.entries)) {
-                  data = parseManifest({
-                    hash: match.hash,
-                    friendly_name: match.name,
-                    entries: match.entries,
-                    tags: match.tags,
-                    created_at: '',
-                  });
-                }
-              } catch { /* ignore */ }
-              if (!data) {
-                const chunks = [];
-                for await (const chunk of session.client.stream(sha)) {
-                  chunks.push(chunk);
-                }
-                const blob = new Blob(chunks);
-                const text = await blob.text();
-                data = parseManifest(JSON.parse(text));
-              }
-            } else {
-              throw adminErr;
+            const snap = await session.client.shares();
+            const match = (snap?.collections || []).find(c => c.hash === sha || c.name === sha);
+            if (match && Array.isArray(match.entries)) {
+              data = parseManifest({
+                hash: match.hash,
+                friendly_name: match.name,
+                entries: match.entries,
+                tags: match.tags,
+                created_at: '',
+              });
             }
+          } catch { /* ignore */ }
+          if (!data) {
+            const chunks = [];
+            for await (const chunk of session.client.stream(sha)) {
+              chunks.push(chunk);
+            }
+            const blob = new Blob(chunks);
+            const text = await blob.text();
+            data = parseManifest(JSON.parse(text));
+          }
+        } else {
+          // 本地/WS 模式
+          try {
+            const stream = ws.downloadStream(sha);
+            const text = await readStreamAsText(stream);
+            data = parseManifest(JSON.parse(text));
+          } catch {
+            data = parseManifest(await ws.admin('GET', `/anon/collections/${sha}`));
           }
         }
       }

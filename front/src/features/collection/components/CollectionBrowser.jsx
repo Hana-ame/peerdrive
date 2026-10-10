@@ -31,26 +31,15 @@ function usePreviewCache() {
 
     const fetchBytes = async () => {
       const session = getNodeSession();
-      if (session?.client && ws.getStatus() !== 'open') {
+      if (session?.client) {
         const chunks = [];
         for await (const chunk of session.client.stream(sha)) {
           chunks.push(chunk);
         }
         return new Blob(chunks);
       }
-      try {
-        const bytes = await ws.download(sha);
-        return new Blob([bytes]);
-      } catch (e) {
-        if (session?.client) {
-          const chunks = [];
-          for await (const chunk of session.client.stream(sha)) {
-            chunks.push(chunk);
-          }
-          return new Blob(chunks);
-        }
-        throw e;
-      }
+      const bytes = await ws.download(sha);
+      return new Blob([bytes]);
     };
 
     const p = previewLimit(fetchBytes)
@@ -167,9 +156,19 @@ export default function CollectionBrowser({ collection, onError }) {
     const fileName = node.entry?.name || basename(node.entry?.path) || node.name;
     if (src.type === 'sha') {
       const session = getNodeSession();
-      if (session?.client && ws.getStatus() !== 'open') {
+      if (session?.client) {
         try {
-          await session.client.saveAs(src.value, fileName);
+          const t0 = performance.now();
+          console.log(`[CollectionBrowser] Downloading ${fileName} (${src.value})`);
+          await session.client.saveAs(src.value, fileName, {
+            onProgress: ({ received, total }) => {
+              const sec = (performance.now() - t0) / 1000;
+              const mbps = sec > 0 ? (received / sec / (1024 * 1024)).toFixed(2) : '0';
+              console.log(`[CollectionBrowser] Download ${fileName}: ${received}/${total} (${mbps} MB/s)`);
+            }
+          });
+          const totalSec = ((performance.now() - t0) / 1000).toFixed(2);
+          console.log(`[CollectionBrowser] Download finished: ${fileName} in ${totalSec}s`);
           return;
         } catch (e) {
           fail(e);
@@ -308,26 +307,15 @@ export default function CollectionBrowser({ collection, onError }) {
             fetchBlob={async (sha) => {
               const effectiveType = modal.entry.mime || mimeOf(modalName, '') || 'application/octet-stream';
               const session = getNodeSession();
-              if (session?.client && ws.getStatus() !== 'open') {
+              if (session?.client) {
                 const chunks = [];
                 for await (const chunk of session.client.stream(sha)) {
                   chunks.push(chunk);
                 }
                 return new Blob(chunks, { type: effectiveType });
               }
-              try {
-                const u8 = await ws.download(sha);
-                return new Blob([u8], { type: effectiveType });
-              } catch (e) {
-                if (session?.client) {
-                  const chunks = [];
-                  for await (const chunk of session.client.stream(sha)) {
-                    chunks.push(chunk);
-                  }
-                  return new Blob(chunks, { type: effectiveType });
-                }
-                throw e;
-              }
+              const u8 = await ws.download(sha);
+              return new Blob([u8], { type: effectiveType });
             }}
             onClose={closeModal}
             onDownload={() => downloadFile(modal)}

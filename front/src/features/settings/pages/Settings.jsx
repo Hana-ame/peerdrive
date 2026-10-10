@@ -25,6 +25,10 @@ export default function Settings() {
   const [authErr, setAuthErr] = useState('');
 
   const testPing = useCallback(async () => {
+    if (ws.getStatus() !== 'open') {
+      setPingOk(false);
+      return;
+    }
     setPingOk(null);
     try {
       await ws.admin('GET', '/ping');

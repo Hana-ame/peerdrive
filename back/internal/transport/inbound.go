@@ -69,6 +69,8 @@ func (s *PeerJSService) serveFile(c Session, req dcReq) {
 		_ = c.SendJSON(dcResp{Type: "err", Hash: req.Hash, Msg: "invalid hash", ReqID: req.ReqID})
 		return
 	}
+	startTime := time.Now()
+	log.LogInfo("peerjs: serveFile start hash=%s peer=%s offset=%d size=%d", req.Hash, c.ID(), req.Offset, req.Size)
 	// QoS Concurrency Guard (Issue #269): protect uplink bandwidth & thread pool
 	if !isSelfSession(c) && s.qos != nil {
 		if !s.qos.TryAcquire() {
@@ -200,6 +202,13 @@ func (s *PeerJSService) serveFile(c Session, req dcReq) {
 			return
 		}
 	}
+	elapsed := time.Since(startTime)
+	sec := elapsed.Seconds()
+	mbps := 0.0
+	if sec > 0 {
+		mbps = float64(sent) / sec / (1024 * 1024)
+	}
+	log.LogInfo("peerjs: serveFile done hash=%s peer=%s sent=%d bytes in %v (%.2f MB/s)", req.Hash, c.ID(), sent, elapsed, mbps)
 	_ = c.SendJSON(dcResp{Type: "done", Hash: req.Hash, Offset: req.Offset, Size: sent, ReqID: req.ReqID})
 }
 

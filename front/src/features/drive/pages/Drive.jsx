@@ -89,6 +89,7 @@ export default function Drive() {
   const [contextMenu, setContextMenu] = useState(null); // { x, y, file } | null
 
   const loadTagsSummary = useCallback(async () => {
+    if (peerSession?.client) return; // PeerJS mode doesn't have local tags admin endpoint
     try {
       const res = await ws.admin('GET', '/tags/summary');
       const list = res?.data || res?.tags || [];
@@ -98,7 +99,7 @@ export default function Drive() {
     } catch {
       // offline / not available
     }
-  }, []);
+  }, [peerSession]);
 
   useEffect(() => {
     loadTagsSummary();
@@ -127,7 +128,7 @@ export default function Drive() {
 
   const load = useCallback(async () => {
     setErr('');
-    // If WebRTC peerSession is active and WS is not connected, load files from remote peer
+    // If WebRTC peerSession is active, strictly load files from remote peer via shares
     if (peerSession?.client) {
       try {
         const shareData = await peerSession.client.shares();
@@ -148,7 +149,9 @@ export default function Drive() {
         setFiles(fileList);
         return;
       } catch (e) {
-        // Fall back to attempting WS admin
+        setErr('无法获取远程节点共享文件: ' + (e?.message || String(e)));
+        setFiles([]);
+        return;
       }
     }
 
@@ -240,7 +243,18 @@ export default function Drive() {
   const onDownload = async (f) => {
     try {
       if (peerSession?.client) {
-        await peerSession.client.saveAs(f.hash, f.filename);
+        console.log(`[Drive Download] Starting download for ${f.filename} (${f.hash})`);
+        const t0 = performance.now();
+        await peerSession.client.saveAs(f.hash, f.filename, {
+          onProgress: ({ received, total }) => {
+            const sec = (performance.now() - t0) / 1000;
+            const pct = total > 0 ? ((received / total) * 100).toFixed(1) : '?';
+            const mbps = sec > 0 ? (received / sec / (1024 * 1024)).toFixed(2) : '0';
+            console.log(`[Drive Download] ${f.filename}: ${received}/${total} (${pct}%) at ${mbps} MB/s`);
+          }
+        });
+        const totalSec = ((performance.now() - t0) / 1000).toFixed(2);
+        console.log(`[Drive Download] Finished ${f.filename} in ${totalSec}s`);
       } else {
         await ws.downloadToFile(f.hash, f.filename);
       }
@@ -451,15 +465,15 @@ export default function Drive() {
       <div className="max-w-5xl mx-auto">
         {/* Header toolbar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 truncate">
               <span>☁️ My Cloud Drive</span>
             </h1>
-            <p className="text-sm text-gray-500 mt-0.5">Files registered on this node (content-addressed storage)</p>
+            <p className="text-xs sm:text-sm text-gray-500 mt-0.5 truncate">Files registered on this node (content-addressed storage)</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 max-w-full">
             {/* Sorting controls */}
-            <div className="flex items-center bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.06] text-xs">
+            <div className="flex items-center bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.06] text-xs shrink-0">
               <span className="text-gray-500 pl-2 pr-1 text-[11px]">Sort:</span>
               <select
                 value={sortBy}
@@ -480,7 +494,7 @@ export default function Drive() {
               </button>
             </div>
             {/* View mode toggle */}
-            <div className="flex items-center bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.06] text-xs">
+            <div className="flex items-center bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.06] text-xs shrink-0">
               <button
                 onClick={() => setViewMode('list')}
                 className={`px-2.5 py-1 rounded transition-colors ${viewMode === 'list' ? 'bg-brand-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}
@@ -499,7 +513,7 @@ export default function Drive() {
             <button
               onClick={() => fileRef.current?.click()}
               disabled={busy}
-              className="btn-brand shrink-0"
+              className="btn-brand shrink-0 text-xs sm:text-sm py-1.5 px-3"
             >
               {busy ? 'Uploading...' : '+ Upload File'}
             </button>
