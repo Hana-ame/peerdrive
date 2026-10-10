@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"peerdrive/internal/config"
@@ -24,7 +25,11 @@ func setupAnonSecurityTestRouter(t *testing.T) (*gin.Engine, *service.AnonServic
 	_ = repository.InitDB(":memory:")
 	r := gin.New()
 	cfg := config.Load()
-	cfg.StorageDir = t.TempDir()
+	tempDir := t.TempDir()
+	if realDir, err := filepath.EvalSymlinks(tempDir); err == nil {
+		tempDir = realDir
+	}
+	cfg.StorageDir = tempDir
 	cfg.StorageEnable = true
 
 	r.Use(func(c *gin.Context) {

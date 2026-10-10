@@ -22,7 +22,11 @@ func setupFileTestRouter(t *testing.T) (*gin.Engine, string) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	cfg := config.Load()
-	cfg.StorageDir = t.TempDir()
+	tempDir := t.TempDir()
+	if realDir, err := filepath.EvalSymlinks(tempDir); err == nil {
+		tempDir = realDir
+	}
+	cfg.StorageDir = tempDir
 	cfg.StorageEnable = true
 	dir := cfg.StorageDir
 	r.Use(func(c *gin.Context) {

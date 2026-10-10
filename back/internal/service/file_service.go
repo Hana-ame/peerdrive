@@ -204,14 +204,16 @@ func (s *FileService) allowedRoots() []string {
 			roots = append(roots, s.cfg.DownloadDir)
 		}
 	}
-	// Unify by real paths: if an allowed root is a symlink (e.g. ~/Downloads → /mnt/c/...), Eval
-	// to the real path, otherwise RegisterFolder(Eval'd real path) and root(symlink) would never match.
-	out := make([]string, 0, len(roots))
+	// Unify by real paths: if an allowed root is a symlink (e.g. ~/Downloads → /mnt/c/..., or macOS
+	// /var → /private/var), retain both the configured path and the resolved real path.
+	// Otherwise, paths constructed directly from s.storageDir (e.g. upload to /var/folders/...)
+	// would fail pickRoot against an allowed root that was rewritten to /private/var/folders/...
+	out := make([]string, 0, len(roots)*2)
 	for _, r := range roots {
-		if real, err := filepath.EvalSymlinks(r); err == nil {
-			r = real
-		}
 		out = append(out, r)
+		if real, err := filepath.EvalSymlinks(r); err == nil && real != r {
+			out = append(out, real)
+		}
 	}
 	return out
 }
