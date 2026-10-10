@@ -461,3 +461,31 @@ func TestLoad_TURNCredentialsDefaultEmpty(t *testing.T) {
 	assert.Equal(t, "", cfg.WebRTCTURNUsername)
 	assert.Equal(t, "", cfg.WebRTCTURNPassword)
 }
+
+// TestLoad_NodeModeDummyEnforcement 验证 Dummy Node 模式下的被动执行约束。
+// 发现背景：Issue #324 要求在 dummy node 模式下自动关闭自主发现与共享宣告，保持最小暴露面。
+func TestLoad_NodeModeDummyEnforcement(t *testing.T) {
+	t.Setenv("PEERDRIVE_NODE_MODE", "dummy")
+	t.Setenv("PEERDRIVE_SHARE_ENABLE", "true")
+	t.Setenv("PEERDRIVE_DISCOVER_PRESENCE", "true")
+
+	cfg := Load()
+	assert.True(t, cfg.IsDummyMode())
+	assert.Equal(t, "dummy", cfg.NodeMode)
+	assert.Equal(t, "off", cfg.DiscoverMode, "dummy node must turn off autonomous discovery")
+	assert.False(t, cfg.DiscoverPresence, "dummy node must turn off presence room")
+	assert.False(t, cfg.ShareEnable, "dummy node must turn off active share scope broadcast")
+}
+
+// TestLoad_NodeRole 验证节点拓扑角色配置。
+// 发现背景：Issue #322 要求支持将公网 IP 节点配置为 supernode 拓扑中继枢纽。
+func TestLoad_NodeRole(t *testing.T) {
+	t.Setenv("PEERDRIVE_NODE_ROLE", "supernode")
+	cfg := Load()
+	assert.Equal(t, "supernode", cfg.NodeRole)
+
+	os.Unsetenv("PEERDRIVE_NODE_ROLE")
+	cfgDefault := Load()
+	assert.Equal(t, "peer", cfgDefault.NodeRole)
+}
+

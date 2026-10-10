@@ -226,6 +226,15 @@ type Config struct {
 	MaxConcurrentStreams int   // PEERDRIVE_MAX_CONCURRENT_STREAMS: limit active outgoing download streams (default 8)
 	MaxUploadSpeed       int64 // PEERDRIVE_MAX_UPLOAD_SPEED: global outgoing speed limit in bytes/sec (default 0 = unlimited)
 
+	// NodeMode sets the operating mode (PEERDRIVE_NODE_MODE, default "standard").
+	// When set to "dummy" (Issue #324), peerdrive acts as a passive executor:
+	// autonomous discovery, presence rooms, and active share announcements are disabled.
+	NodeMode string
+
+	// NodeRole sets the topological role of this node (PEERDRIVE_NODE_ROLE, default "peer").
+	// Options: "peer", "supernode", "edge" (Issue #322).
+	NodeRole string
+
 	// ── Optional ech-proxy module (PEERDRIVE_ECH_PROXY_ENABLE, default OFF) ──
 	// When enabled, https://pbs.twimg.com/<path>?<q> is rewritten to
 	// https://twimg-pbs.l.moonchan.xyz:8443/<path>?<q> and routed through a local
@@ -552,6 +561,8 @@ func DefaultConfig() *Config {
 		SignalRateID:          5,
 		RegDBPath:             "",
 		LegacyDBPath:          "",
+		NodeMode:              "standard",
+		NodeRole:              "peer",
 	}
 }
 
@@ -707,5 +718,23 @@ func Load() *Config {
 		SignalRateID:       getEnvFloat("PEERDRIVE_SIGNAL_RATE_ID", 5),
 		RegDBPath:          getEnv("PEERDRIVE_REG_DB", ""),
 		LegacyDBPath:       getEnv("DB_PATH", ""),
+		NodeMode:           getEnv("PEERDRIVE_NODE_MODE", "standard"),
+		NodeRole:           getEnv("PEERDRIVE_NODE_ROLE", "peer"),
 	}
+
+	// In dummy mode (Issue #324), peerdrive acts purely as a passive worker:
+	// disable autonomous discovery, presence rooms, and active share announcements.
+	if strings.ToLower(strings.TrimSpace(cfg.NodeMode)) == "dummy" {
+		cfg.DiscoverMode = "off"
+		cfg.DiscoverPresence = false
+		cfg.ShareEnable = false
+	}
+
+	return cfg
 }
+
+// IsDummyMode returns true if the node is configured as a dummy passive executor (Issue #324).
+func (c *Config) IsDummyMode() bool {
+	return c != nil && strings.ToLower(strings.TrimSpace(c.NodeMode)) == "dummy"
+}
+
