@@ -18,13 +18,10 @@ package serverapp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	stdlog "log"
-	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"

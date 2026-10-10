@@ -583,3 +583,7 @@ func hashOf(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
 }
+
+func peerjsFrameText(s string) peerjs.Frame {
+	return peerjs.Frame{IsText: true, Data: []byte(s)}
+}
