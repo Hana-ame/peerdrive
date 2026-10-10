@@ -12,9 +12,19 @@
 // 待未来架构重构（如引入专职的全局 Session Store / Context）后再行解耦，避免在页面迁移期间引入回归风险。
 
 let session = null; // { client, peerId }
+const listeners = new Set();
+
+export function onNodeSession(cb) {
+  listeners.add(cb);
+  cb(session);
+  return () => listeners.delete(cb);
+}
 
 export function setNodeSession(s) {
   session = s;
+  listeners.forEach(cb => {
+    try { cb(session); } catch (e) { console.error('nodeSession listener error:', e); }
+  });
 }
 
 export function getNodeSession() {
@@ -26,4 +36,7 @@ export function clearNodeSession() {
     try { session.client.close(); } catch (e) { /* ignore */ }
   }
   session = null;
+  listeners.forEach(cb => {
+    try { cb(null); } catch (e) { console.error('nodeSession listener error:', e); }
+  });
 }

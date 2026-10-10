@@ -83,8 +83,10 @@ func NewNodeDirectory(storageDir, discoverURL string) *NodeDirectory {
 	if storageDir == "" {
 		storageDir = "."
 	}
+	discURL := strings.TrimRight(strings.TrimSpace(discoverURL), "/")
+	discURL = strings.TrimSuffix(discURL, "/discover")
 	d := &NodeDirectory{
-		discoverURL: strings.TrimRight(strings.TrimSpace(discoverURL), "/"),
+		discoverURL: discURL,
 		path:        filepath.Join(storageDir, joinedFileName),
 		http:        &http.Client{Timeout: 10 * time.Second},
 		joined:      make(map[string]time.Time),

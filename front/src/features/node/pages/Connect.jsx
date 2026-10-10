@@ -16,7 +16,7 @@ export default function Connect() {
         </p>
         <div className="bg-white/[0.03] rounded-card border border-white/[0.06] p-5">
           <PeerJSConnect
-            onConnected={() => navigate('/node')}
+            onConnected={() => navigate('/drive')}
           />
         </div>
       </div>

@@ -105,16 +105,24 @@ function Nav({ onOpenDrawer, isOpen }) {
 }
 
 import { AppProvider } from './context/AppContext';
+import { getNodeSession, onNodeSession } from './lib/nodeSession';
 
 export default function App() {
-  const [isOpen, setIsOpen] = React.useState(ws.getStatus() === 'open');
+  const [isOpen, setIsOpen] = React.useState(ws.getStatus() === 'open' || Boolean(getNodeSession()));
   const [drawerOpen, setDrawerOpen] = React.useState(false);
 
   useEffect(() => {
     registerSW();
-    return ws.onStatus((status) => {
-      setIsOpen(status === 'open');
+    const offWs = ws.onStatus((status) => {
+      setIsOpen(status === 'open' || Boolean(getNodeSession()));
     });
+    const offNode = onNodeSession((sess) => {
+      setIsOpen(ws.getStatus() === 'open' || Boolean(sess));
+    });
+    return () => {
+      offWs();
+      offNode();
+    };
   }, []);
 
   return (

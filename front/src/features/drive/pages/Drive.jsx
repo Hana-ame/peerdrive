@@ -1,8 +1,9 @@
 // Module ②: My Cloud Drive —— file management for this node (goes through WS admin frames to the backend)
 // List / upload / download / delete / generate share links / categorize / tag files.
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import * as ws from '../../../platform/transport-ws';
+import { getNodeSession, onNodeSession } from '../../../lib/nodeSession';
 import { fmtBytes } from '../../../platform/shared/format';
 import { kindOf, mimeOf } from '../../../platform/shared/mime';
 import { STORAGE_KEY_API_BASE } from '../../../platform/shared/storageKeys';
@@ -51,13 +52,21 @@ function getFileIcon(f) {
 
 export default function Drive() {
   const { hash: deepHash } = useParams();
+  const navigate = useNavigate();
   const [currentDir, setCurrentDir] = useState('');
   const [files, setFiles] = useState(null); // null = loading
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [shareLink, setShareLink] = useState('');
   const [copiedHash, setCopiedHash] = useState('');
+  const [peerSession, setPeerSession] = useState(() => getNodeSession());
   const fileRef = useRef(null);
+
+  useEffect(() => {
+    return onNodeSession((s) => {
+      setPeerSession(s);
+    });
+  }, []);
 
   // Netdisk Features: Search, Category, ViewMode, Tags
   const [searchQuery, setSearchQuery] = useState('');
@@ -98,6 +107,28 @@ export default function Drive() {
 
   const load = useCallback(async () => {
     setErr('');
+    // If WebRTC peerSession is active and WS is not connected, load files from remote peer
+    if (peerSession?.client) {
+      try {
+        const shareData = await peerSession.client.shares();
+        const rawFiles = shareData?.files || [];
+        const fileList = rawFiles.map(e => ({
+          hash: e.hash || '',
+          filename: e.path || e.name || 'unnamed',
+          size: e.size || 0,
+          mime_type: kindOf(e.path || e.name) || '',
+          created_at: '',
+          isDir: false,
+          path: e.path || e.name || '',
+          isRemotePeer: true,
+        }));
+        setFiles(fileList);
+        return;
+      } catch (e) {
+        // Fall back to attempting WS admin
+      }
+    }
+
     try {
       let res;
       try {
@@ -137,10 +168,15 @@ export default function Drive() {
       );
       setFileTags(prev => ({ ...prev, ...tagsMap }));
     } catch (e) {
-      setErr(e?.message || String(e));
+      // If peerSession is also not present, display connection guide
+      if (!peerSession?.client) {
+        setErr('');
+      } else {
+        setErr(e?.message || String(e));
+      }
       setFiles([]);
     }
-  }, [currentDir]);
+  }, [currentDir, peerSession]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -160,11 +196,22 @@ export default function Drive() {
   };
 
   const onDownload = async (f) => {
-    try { await ws.downloadToFile(f.hash, f.filename); }
-    catch (ex) { setErr(ex?.message || String(ex)); }
+    try {
+      if (peerSession?.client) {
+        await peerSession.client.saveAs(f.hash, f.filename);
+      } else {
+        await ws.downloadToFile(f.hash, f.filename);
+      }
+    } catch (ex) {
+      setErr(ex?.message || String(ex));
+    }
   };
 
   const onDelete = async (f) => {
+    if (f.isRemotePeer) {
+      alert('Cannot delete files on a remote peer.');
+      return;
+    }
     if (!confirm(`Delete "${f.filename}"?`)) return;
     try {
       await ws.admin('DELETE', `/files/${f.hash}`);
@@ -458,12 +505,20 @@ export default function Drive() {
           skeletonRows={8}
           emptyProps={{
             icon: '☁️',
-            title: files?.length === 0 ? 'No files yet' : 'No matching files found',
-            description: files?.length === 0
-              ? 'Click "Upload File" in the top right or register local paths on the backend.'
-              : 'Try adjusting your search query, category, or tag filter.',
-            actionLabel: files?.length === 0 ? '+ Upload File' : null,
-            onAction: () => fileRef.current?.click(),
+            title: !peerSession?.client && files?.length === 0
+              ? 'No connected node'
+              : files?.length === 0 ? 'No files available' : 'No matching files found',
+            description: !peerSession?.client && files?.length === 0
+              ? 'Connect to an online node in Plaza to access files, or connect a local backend.'
+              : files?.length === 0
+                ? (peerSession?.client ? 'This remote node has not shared any public files yet.' : 'Click "Upload File" in the top right or register local paths on the backend.')
+                : 'Try adjusting your search query, category, or tag filter.',
+            actionLabel: !peerSession?.client && files?.length === 0
+              ? 'Find & Connect Node'
+              : (files?.length === 0 && !peerSession?.client ? '+ Upload File' : null),
+            onAction: !peerSession?.client && files?.length === 0
+              ? () => navigate('/')
+              : () => fileRef.current?.click(),
           }}
         >
           {viewMode === 'grid' ? (
@@ -535,7 +590,16 @@ export default function Drive() {
         {previewFile && (
           <FilePreviewModal
             file={previewFile}
-            fetchBlob={(hash) => ws.download(hash)}
+            fetchBlob={async (hash) => {
+              if (peerSession?.client) {
+                const chunks = [];
+                for await (const chunk of peerSession.client.stream(hash)) {
+                  chunks.push(chunk);
+                }
+                return new Blob(chunks, { type: previewFile.mime_type || 'application/octet-stream' });
+              }
+              return ws.download(hash);
+            }}
             onClose={() => setPreviewFile(null)}
             onDownload={(f) => onDownload(f)}
           />

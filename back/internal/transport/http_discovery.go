@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,6 +53,8 @@ func (d *HTTPDiscovery) SetShareInfo(fn func() map[string]any) { d.shareInfo = f
 
 // NewHTTPDiscovery creates the discovery component.
 func NewHTTPDiscovery(baseURL, peerID string, collections []string, onPeer func(peerID string), peers ...func() []string) *HTTPDiscovery {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	baseURL = strings.TrimSuffix(baseURL, "/discover")
 	ctx, cancel := context.WithCancel(context.Background())
 	var peersFn func() []string
 	if len(peers) > 0 {
