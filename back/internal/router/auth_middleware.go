@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -113,6 +114,10 @@ func (a *Authenticator) AuthOptional() gin.HandlerFunc {
 func (a *Authenticator) AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if a.authDisabled() {
+			if os.Getenv("PEERDRIVE_ALLOW_NO_AUTH") == "1" {
+				c.Next()
+				return
+			}
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
 				"error":  "admin auth not configured",
 				"detail": "set PEERDRIVE_ADMIN_TOKEN or PEERDRIVE_REG_SERVER to enable admin surface",
