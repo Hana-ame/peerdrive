@@ -188,6 +188,55 @@ func TestCapabilities_LegacyClientCompatibility(t *testing.T) {
 	assert.True(t, ok, "legacy peer without cap frame must succeed on standard verbs without regression")
 }
 
+// TestCapabilities_LegacyOptOutDefault verifies that un-negotiated peers get
+// the minimal capability set (opt-out default) rather than the full set.
+// 发现背景：Issue #281（LegacyCapabilities 默认全功能 → 改 opt-out 最小集）。
+// Legacy peers that omit the cap frame must NOT implicitly gain
+// CapIndex/CapPull/CapForward — those require explicit negotiation.
+func TestCapabilities_LegacyOptOutDefault(t *testing.T) {
+	svc := newTestPeerJSService(t)
+	sess := &fakeSession{id: "legacy-optout"}
+	svc.bindConn(sess)
+
+	// No cap frame sent — connection is un-negotiated.
+	caps, ok := svc.PeerCapabilities("legacy-optout")
+	require.True(t, ok)
+	// Default must be the minimal set, NOT the old full set.
+	assert.Equal(t, []string{CapReq, CapShare}, caps,
+		"un-negotiated peer must get minimal capabilities, not full set")
+
+	// Minimal capabilities (req, share) must be allowed.
+	assert.True(t, svc.HasCapability("legacy-optout", CapReq))
+	assert.True(t, svc.HasCapability("legacy-optout", CapShare))
+
+	// Non-minimal capabilities must be denied to un-negotiated peers.
+	assert.False(t, svc.HasCapability("legacy-optout", CapIndex),
+		"CapIndex must NOT be granted to un-negotiated legacy peer")
+	assert.False(t, svc.HasCapability("legacy-optout", CapPull),
+		"CapPull must NOT be granted to un-negotiated legacy peer")
+	assert.False(t, svc.HasCapability("legacy-optout", CapForward),
+		"CapForward must NOT be granted to un-negotiated legacy peer")
+	assert.False(t, svc.HasCapability("legacy-optout", CapAdmin),
+		"CapAdmin must NOT be granted to un-negotiated legacy peer")
+	assert.False(t, svc.HasCapability("legacy-optout", CapDisplay),
+		"CapDisplay must NOT be granted to un-negotiated legacy peer")
+
+	// Attempt an index verb — must be rejected.
+	svc.dispatchFrame(sess, svc.pending[sess], peerjs.Frame{
+		IsText: true,
+		Data:   []byte(`{"type":"list","reqId":"r-list"}`),
+	})
+	var errFrame map[string]any
+	for _, f := range sess.sentFrames() {
+		if f.header["type"] == "err" && f.header["reqId"] == "r-list" {
+			errFrame = f.header
+			break
+		}
+	}
+	require.NotNil(t, errFrame, "legacy peer without cap must get explicit CAPABILITY_UNSUPPORTED for index verb")
+	assert.Equal(t, ErrCodeCapUnsupported, errFrame["code"])
+}
+
 // TestCapabilities_PSKHandshakePiggyback verifies capabilities are negotiated inside psk-auth / psk-ok without extra frames.
 // 发现背景：Issue #213（PSK 门禁模式下 capabilities 伴随 psk-auth 与 psk-ok 完成握手）。
 func TestCapabilities_PSKHandshakePiggyback(t *testing.T) {

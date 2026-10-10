@@ -85,9 +85,22 @@ var MinimalCapabilities = []string{
 	CapReq, CapShare,
 }
 
-// LegacyCapabilities represents the default capabilities assigned to legacy peers that send no capability frames.
+// LegacyCapabilities represents the default capabilities assigned to legacy peers
+// that send no capability frames.
+//
+// Why minimal (opt-out default): Before this change LegacyCapabilities was the
+// full feature set, so any un-negotiated peer (no cap frame, e.g. old clients
+// or third-party peers) silently gained CapIndex/CapPull/CapForward — a large
+// attack surface that grows as new verbs are added. The fix makes the default
+// the minimal set (CapReq + CapShare), with additional capabilities requiring
+// explicit opt-in during handshake.
+//
+// Compatibility note: legacy peers that do not send cap frames will be rejected
+// for CapIndex/CapPull/CapForward verbs. This is intentional — it prevents
+// arbitrary un-negotiated connections from triggering index management, remote
+// URL ingestion, or port forwarding without consent.
 var LegacyCapabilities = []string{
-	CapReq, CapShare, CapIndex, CapPull, CapForward,
+	CapReq, CapShare,
 }
 
 // CapBit bitmask representation of capabilities for bitwise operations.
@@ -353,11 +366,21 @@ func (s *PeerJSService) HasCapability(peerID string, cap string) bool {
 }
 
 // hasCapability checks if connState has the given capability (thread-safe).
+// When capabilities have not been negotiated (st.caps == nil), falls back to
+// LegacyCapabilities (minimal opt-out default) rather than granting all
+// capabilities to un-negotiated peers.
 func (st *connState) hasCapability(cap string) bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.caps == nil {
-		return true // un-negotiated legacy node fallback
+		// Un-negotiated legacy peer: check against the minimal legacy set,
+		// NOT "return true" (which would be an opt-in default).
+		for _, lc := range LegacyCapabilities {
+			if lc == cap {
+				return true
+			}
+		}
+		return false
 	}
 	return st.caps[cap]
 }
