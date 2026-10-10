@@ -44,13 +44,12 @@ function RouteLoading() {
 import * as ws from './platform/transport-ws';
 
 // Navigation groups (Issue #77 / Issue #265):
-// - Always available (standalone/consumer pages): Connect (/), Display (/display), Iwara (/iwara)
-// - Available for Local Node Owner (WS open): Drive, NodeControl, Collections, Transfers, BT, IPFS, Settings
+// - Always available (standalone/consumer pages): Connect (/), Display (/display)
+// - Available for Local Node Owner (WS open): Drive, NodeControl, Collections, Transfers, BT, IPFS, Iwara, Settings
 // - Available for Remote Guest (WebRTC Peer): Shared Collections, Shared Drive, Transfers
 const ALWAYS_NAV = [
   { to: '/', label: 'Connect', icon: '🌐' },
   { to: '/display', label: 'Display', icon: '📺' },
-  { to: '/iwara', label: 'Iwara', icon: '🎬' },
 ];
 
 const OWNER_NAV = [
@@ -60,6 +59,7 @@ const OWNER_NAV = [
   { to: '/transfers', label: 'Transfers', icon: '⚡' },
   { to: '/bt', label: 'BT', icon: '🧲' },
   { to: '/ipfs', label: 'IPFS', icon: '🧊' },
+  { to: '/iwara', label: 'Iwara', icon: '🎬' },
   { to: '/settings', label: 'Settings', icon: '⚙️' },
 ];
 

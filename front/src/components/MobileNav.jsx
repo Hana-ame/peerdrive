@@ -95,7 +95,7 @@ export function MobileBottomBar({ connected }) {
           { to: '/collections', label: 'Collections', icon: '📦' },
           { to: '/transfers', label: 'Transfers', icon: '⚡' },
         ]
-      : [{ to: '/iwara', label: 'Iwara', icon: '🎬' }]),
+      : [{ to: '/display', label: 'Display', icon: '📺' }]),
   ];
 
   return (
