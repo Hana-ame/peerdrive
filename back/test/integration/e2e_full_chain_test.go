@@ -40,6 +40,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -197,8 +198,15 @@ func TestEndToEnd_FullChainLifecycle(t *testing.T) {
 
 	// 7. Verify Capability Handshake between Node A and Node B
 	t.Log("Step 2: Verifying Capability Negotiation...")
-	capsAB, ok := svcB.PeerCapabilities(svcA.ID())
-	require.True(t, ok, "Node B must have negotiated capabilities with Node A")
+	var capsAB []string
+	require.Eventually(t, func() bool {
+		caps, ok := svcB.PeerCapabilities(svcA.ID())
+		if !ok {
+			return false
+		}
+		capsAB = caps
+		return slices.Contains(caps, transport.CapHighThroughput) && slices.Contains(caps, transport.CapP2PTun)
+	}, 10*time.Second, 100*time.Millisecond, "High throughput mode and P2PTun must be negotiated between Node A and Node B")
 	require.Contains(t, capsAB, transport.CapReq)
 	require.Contains(t, capsAB, transport.CapShare)
 	require.Contains(t, capsAB, transport.CapHighThroughput, "High throughput mode must be negotiated")
@@ -334,8 +342,15 @@ func TestEndToEnd_FullChainLifecycle(t *testing.T) {
 	waitConnections(t, svcC, map[string]bool{svcB.ID(): true}, 60*time.Second)
 
 	// Node C capability negotiation with Node B
-	capsBC, ok := svcC.PeerCapabilities(svcB.ID())
-	require.True(t, ok)
+	var capsBC []string
+	require.Eventually(t, func() bool {
+		caps, ok := svcC.PeerCapabilities(svcB.ID())
+		if !ok {
+			return false
+		}
+		capsBC = caps
+		return slices.Contains(caps, transport.CapReq) && slices.Contains(caps, transport.CapShare)
+	}, 10*time.Second, 100*time.Millisecond, "Node C must negotiate capabilities with Node B")
 	require.Contains(t, capsBC, transport.CapReq)
 	require.Contains(t, capsBC, transport.CapShare)
 	// Node C did not advertise CapP2PTun or CapHighThroughput, so negotiated intersection must NOT contain them
