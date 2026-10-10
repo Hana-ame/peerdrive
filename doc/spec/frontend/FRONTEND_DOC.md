@@ -8,12 +8,12 @@
 |--------|--------|
 | **Framework** | Vite 8 + React 19 (JSX) |
 | **Styling** | Tailwind CSS 3.4 |
-| **Routing** | React Router DOM 7 (`BrowserRouter`) |
+| **Routing** | React Router DOM 7 (`HashRouter`) |
 | **State** | React Context (`AppContext` + `PageContext`) |
 | **Testing** | Vitest 4 + @testing-library/react + happy-dom |
 | **Node** | >= 22.12 or >= 20.19 |
 | **LLM Integration** | OpenAI-compatible chat/completions (17 function-calling tools, SSE streaming) |
-| **Deployment** | Cloudflare Pages — `public/_redirects` required for SPA fallback |
+| **Deployment** | GitHub Pages (HashRouter → no SPA fallback needed) |
 
 ### Build & Run
 
