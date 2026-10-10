@@ -49,6 +49,8 @@ func demoEnv(dir, id string, sigPort int, peers, shareDirs string) []string {
 		// 写成后者会被静默忽略、节点照常起在默认 3000 —— 演示里表现为
 		// "bind: address already in use"。与 reg 子命令的 PORT 坑同一类。
 		"PORT="+strconv.Itoa(sigPort),
+		"PEERDRIVE_HOST=127.0.0.1",
+		"PEERDRIVE_ALLOW_NO_AUTH=1",
 		"PEERDRIVE_PEERJS_ENABLE=true",
 		"PEERDRIVE_PEERJS_HOST=127.0.0.1",
 		"PEERDRIVE_PEERJS_PORT="+strconv.Itoa(demoSignalPort),
