@@ -2,6 +2,7 @@ package repository
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -59,5 +60,37 @@ func TestSchemaMigrationVersionTracking(t *testing.T) {
 
 		err = migrationExec(handle, `ALTER TABLE nonexistent_table ADD COLUMN foo TEXT`)
 		require.Error(t, err, "migration on nonexistent table must return an error and not be swallowed")
+	})
+}
+
+// TestWALModeEnabledForFileDB verifies that WAL journal mode is enabled for
+// file-backed databases (Issue #277).
+// 发现背景：Issue #277 指出 SQLite 默认 DELETE journal mode 下读写并发阻塞，
+// WAL 模式允许单写者 + 多读者无锁并发。
+func TestWALModeEnabledForFileDB(t *testing.T) {
+	t.Run("FileDBUsesWALMode", func(t *testing.T) {
+		dbPath := filepath.Join(t.TempDir(), "wal.db")
+		handle, err := OpenDB(dbPath)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = CloseHandle(handle) })
+
+		var mode string
+		err = handle.QueryRow(`PRAGMA journal_mode`).Scan(&mode)
+		require.NoError(t, err)
+		require.Equal(t, "wal", strings.ToLower(mode), "file-backed DB must use WAL journal mode")
+	})
+
+	t.Run("MemoryDBSkipsWAL", func(t *testing.T) {
+		// In-memory DBs do not support WAL — OpenDB must not attempt to set it.
+		handle, err := OpenDB(":memory:")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = CloseHandle(handle) })
+
+		var mode string
+		err = handle.QueryRow(`PRAGMA journal_mode`).Scan(&mode)
+		require.NoError(t, err)
+		// In-memory DBs default to MEMORY journal mode, which is fine.
+		// The key assertion is that OpenDB did not error trying to set WAL.
+		require.NotEqual(t, "", mode, "in-memory DB must have a valid journal mode")
 	})
 }

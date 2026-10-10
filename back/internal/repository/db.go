@@ -147,6 +147,26 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	// Enable WAL (Write-Ahead Logging) for file-backed databases (Issue #277).
+	//
+	// Why: SQLite's default DELETE journal mode serialises readers and writers,
+	// causing "database is locked" under the concurrent access pattern peerdrive
+	// sees (multi-node access, frequent upload/download/sync). WAL allows one
+	// writer plus unlimited concurrent readers without blocking.
+	//
+	// Why here (not in dsnSuffix): WAL is a persistent database-level setting,
+	// not a per-connection pragma. Setting it once on open avoids redundant
+	// PRAGMA calls on every new pool connection.
+	//
+	// Why skip in-memory DBs: :memory: databases are ephemeral per-connection
+	// and do not support WAL — attempting to set it would error. The isMemoryDB
+	// check above already distinguishes file-backed from in-memory.
+	if !isMemoryDB(dbPath) && !strings.HasPrefix(dbPath, "file:") {
+		if _, err := targetDB.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+			log.LogWarn("db: failed to enable WAL mode (falling back to DELETE): %v", err)
+		}
+	}
+
 	if err := initTables(targetDB); err != nil {
 		_ = targetDB.Close()
 		return nil, err
