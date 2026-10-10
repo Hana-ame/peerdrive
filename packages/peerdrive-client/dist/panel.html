@@ -156,7 +156,7 @@
     <h1>peerdrive panel</h1>
     <span class="tag">公共面板</span>
     <span class="tag">零后端</span>
-    <span class="tag mono" id="build-id">bundle 25d7f10b</span>
+    <span class="tag mono" id="build-id">bundle c128d0f8</span>
     <span class="grow"></span>
     <span class="mono dim" style="display:flex;align-items:center;gap:6px">
       我的节点 id：<span id="my-id">（未连接）</span>
@@ -544,14 +544,14 @@ function nextReqId() {
 // reqFrame constructs file fetch request frame (initiated by the requesting role).
 // size uses -1 to mean "read to end of file", consistent with Go-side semantics (negative = unlimited).
 function reqFrame(hash, { offset = 0, size = -1, reqId } = {}) {
-  return JSON.stringify({ type: 'req', hash, offset, size, reqId, v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'req', hash, offset, size, reqId })
 }
 
 // shareFrame constructs share manifest query frame (different from list frame: list is the local
 // management index full set, only open to trusted peers; share is the operator's **explicitly
 // declared** external sharing scope).
 function shareFrame(reqId) {
-  return JSON.stringify({ type: 'share', reqId, v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'share', reqId })
 }
 
 // pskAuthFrame constructs pre-shared key frame (PSK auth, see doc/NETDISK.md's "PSK Auth").
@@ -568,8 +568,20 @@ function shareFrame(reqId) {
 //  2. **Key transmitted in plaintext**. DataChannel enforces DTLS, the key won't be exposed on the wire;
 //     the server needs to store plaintext for comparison anyway. What we're guarding against is "strangers
 //     connecting", not eavesdropping.
-function pskAuthFrame(psk) {
-  return JSON.stringify({ type: 'psk-auth', psk: String(psk ?? ''), v: PROTOCOL_VERSION })
+// CLIENT_CAPABILITIES declares the capabilities supported by peerdrive-client.
+const CLIENT_CAPABILITIES = ['req', 'share', 'index', 'pull']
+
+function pskAuthFrame(psk, capabilities = CLIENT_CAPABILITIES) {
+  const payload = { type: 'psk-auth', psk: String(psk ?? '') }
+  if (Array.isArray(capabilities) && capabilities.length > 0) {
+    payload.capabilities = capabilities
+  }
+  return JSON.stringify(payload)
+}
+
+// capFrame constructs capability negotiation handshake frame.
+function capFrame(capabilities = CLIENT_CAPABILITIES) {
+  return JSON.stringify({ type: 'cap', capabilities: capabilities || CLIENT_CAPABILITIES })
 }
 
 // PSK_REQUIRED is the machine-readable error code that Go-side auth returns in err frames.
@@ -588,7 +600,7 @@ const UPLOAD_CHUNK = 64 * 1024
 // the caller just follows along.
 function uploadFrame(reqId, name, size, offset = 0) {
   return JSON.stringify({
-    type: 'upload', name, size, offset, reqId, v: PROTOCOL_VERSION,
+    type: 'upload', name, size, offset, reqId,
   })
 }
 
@@ -599,7 +611,7 @@ function uploadFrame(reqId, name, size, offset = 0) {
 // protection (public http/https only, size limit), and always subject to PSK auth
 // (back/internal/transport/pull.go).
 function pullFrame(reqId, url, name = '') {
-  return JSON.stringify({ type: 'pull', url, name, reqId, v: PROTOCOL_VERSION })
+  return JSON.stringify({ type: 'pull', url, name, reqId })
 }
 
 // parseFrame parses text frames. Returns null for "not this protocol's control frame" (non-JSON,
@@ -837,7 +849,7 @@ class PeerDriveClient {
     // 真实 WebRTC 下回执是异步的，所以这个 bug 只在同步回执下暴露，更难察觉。
     this.pskState = 'sent'
     try {
-      this.conn.send(pskAuthFrame(this.psk))
+      this.conn.send(pskAuthFrame(this.psk, this.opts.capabilities || CLIENT_CAPABILITIES))
     } catch {
       this.pskState = 'none' // can't send, treat as not configured: let peer tell us via err
     }
@@ -1234,6 +1246,12 @@ class PeerDriveClient {
       case 'share-resp':
       case 'pulled':
         return this._onVerbReply(frame)
+      case 'cap': {
+        try {
+          this.conn.send(capFrame(this.opts.capabilities || CLIENT_CAPABILITIES))
+        } catch {}
+        return
+      }
       case 'psk-ok':
         this.pskState = 'ok'
         this.pskError = null
@@ -1791,7 +1809,7 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
 }
 
 // ---- 导出（对应 src/index.js 的 export *） ----
-  const api = { DEFAULT_MAX_BUFFER_BYTES, ERR, MAX_FILE_BYTES, PROTOCOL_VERSION, PSK_REQUIRED, PeerDriveClient, PeerDriveError, Sha256, UPLOAD_CHUNK, baseName, concatChunks, connect, connectToPeer, discoverNodes, guessMime, isBinaryFrame, isValidHash, nextReqId, parseFrame, pskAuthFrame, pullFrame, reqFrame, sha256Hex, shareFrame, toUint8Array, uploadFrame }
+  const api = { CLIENT_CAPABILITIES, DEFAULT_MAX_BUFFER_BYTES, ERR, MAX_FILE_BYTES, PROTOCOL_VERSION, PSK_REQUIRED, PeerDriveClient, PeerDriveError, Sha256, UPLOAD_CHUNK, baseName, capFrame, concatChunks, connect, connectToPeer, discoverNodes, guessMime, isBinaryFrame, isValidHash, nextReqId, parseFrame, pskAuthFrame, pullFrame, reqFrame, sha256Hex, shareFrame, toUint8Array, uploadFrame }
   if (typeof window !== 'undefined') { window.PeerDrive = api }
   if (typeof globalThis !== 'undefined') { globalThis.PeerDriveBuiltin = api }
 })()</script>

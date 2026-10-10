@@ -226,6 +226,7 @@ cd front && npm run build
 | [design/PEERDRIVE-DSH-INSPIRED.md](design/PEERDRIVE-DSH-INSPIRED.md) | Compositional architecture design inspired by dsh (profile/bundle/patch) |
 | [design/FRONTEND-DSH-INSPIRED.md](design/FRONTEND-DSH-INSPIRED.md) | Frontend compositional design inspired by dsh (bundle manifest + registry + profile) |
 | [design/FRONTEND-DSH-KERNEL.md](design/FRONTEND-DSH-KERNEL.md) | Frontend kernel bootstrap/module/slot/transport design inspired by dsh |
+| [design/ADR-001-ROUTER-CHOICE.md](design/ADR-001-ROUTER-CHOICE.md) | Architecture Decision Record: Routing Strategy (HashRouter vs BrowserRouter trade-offs) |
 | [FILE-REFERENCE.md](FILE-REFERENCE.md) | Complete project file path and description manual (~240 files) |
 
 ### spec — Technical Specifications

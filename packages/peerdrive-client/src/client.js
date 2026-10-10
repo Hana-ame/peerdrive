@@ -18,10 +18,12 @@
 
 import { Sha256 } from './sha256.js'
 import {
+  CLIENT_CAPABILITIES,
   DEFAULT_MAX_BUFFER_BYTES,
   MAX_FILE_BYTES,
   UPLOAD_CHUNK,
   baseName as baseNameOf,
+  capFrame,
   concatChunks,
   guessMime,
   isBinaryFrame,
@@ -169,7 +171,7 @@ export class PeerDriveClient {
     // 真实 WebRTC 下回执是异步的，所以这个 bug 只在同步回执下暴露，更难察觉。
     this.pskState = 'sent'
     try {
-      this.conn.send(pskAuthFrame(this.psk))
+      this.conn.send(pskAuthFrame(this.psk, this.opts.capabilities || CLIENT_CAPABILITIES))
     } catch {
       this.pskState = 'none' // can't send, treat as not configured: let peer tell us via err
     }
@@ -566,6 +568,12 @@ export class PeerDriveClient {
       case 'share-resp':
       case 'pulled':
         return this._onVerbReply(frame)
+      case 'cap': {
+        try {
+          this.conn.send(capFrame(this.opts.capabilities || CLIENT_CAPABILITIES))
+        } catch {}
+        return
+      }
       case 'psk-ok':
         this.pskState = 'ok'
         this.pskError = null

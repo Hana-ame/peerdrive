@@ -27,6 +27,12 @@ func TestSchemaMigrationVersionTracking(t *testing.T) {
 		err = handle.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count)
 		require.NoError(t, err)
 		require.Equal(t, 7, count, "fresh DB must record all 7 applied migrations")
+
+		// Issue #277: File databases must use WAL journal mode
+		var journalMode string
+		err = handle.QueryRow(`PRAGMA journal_mode`).Scan(&journalMode)
+		require.NoError(t, err)
+		require.Equal(t, "wal", journalMode, "file DB must be in WAL journal mode")
 	})
 
 	t.Run("RepeatedOpenIsIdempotent", func(t *testing.T) {

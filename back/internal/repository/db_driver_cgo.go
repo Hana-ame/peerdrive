@@ -36,4 +36,5 @@ const sqliteDriver = "sqlite3"
 // collections, etc.). Without these cascades are just paper constraints —
 // delete a collection and entries become orphans, showing rows pointing to
 // nonexistent content.
-func dsnSuffix() string { return "?_busy_timeout=5000&_foreign_keys=1" }
+// Issue #277: journal_mode=WAL enables Write-Ahead Logging to eliminate reader/writer blocking.
+func dsnSuffix() string { return "?_busy_timeout=5000&_foreign_keys=1&_journal_mode=WAL" }

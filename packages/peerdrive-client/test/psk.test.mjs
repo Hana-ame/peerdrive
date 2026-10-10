@@ -21,6 +21,7 @@ describe('psk/出示时机', () => {
     const frames = conn.frames()
     assert.equal(frames[0].type, 'psk-auth', '第一个帧必须是 psk-auth')
     assert.equal(frames[0].psk, 's3cret')
+    assert.deepEqual(frames[0].capabilities, ['req', 'share', 'index', 'pull'])
     assert.equal(frames[1].type, 'share')
     // 2026-10-06：原来是 assert.equal(client.pskState, 'sent')。
     // 那条断言其实**把一个 bug 钉住了**：_sendPskAuth 原来是先 send 再置 'sent'，
@@ -113,9 +114,10 @@ describe('psk/被门禁拦下时的错误分类', () => {
 describe('psk/帧格式', () => {
   it('pskAuthFrame 与 Go 侧字段逐字对齐', () => {
     const f = JSON.parse(pskAuthFrame('s3cret'))
-    assert.deepEqual(Object.keys(f).sort(), ['psk', 'type', 'v'])
+    assert.deepEqual(Object.keys(f).sort(), ['capabilities', 'psk', 'type'])
     assert.equal(f.type, 'psk-auth')
     assert.equal(f.psk, 's3cret')
+    assert.deepEqual(f.capabilities, ['req', 'share', 'index', 'pull'])
   })
 })
 

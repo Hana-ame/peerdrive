@@ -134,6 +134,7 @@ func TestStream_RemoteAuthVerification(t *testing.T) {
 
 	remotePeer := &fakeSession{id: "remote-pub"}
 	svc.bindConn(remotePeer)
+	svc.SetPeerCapabilitiesForTest("remote-pub", []string{CapReq, CapShare, CapStream})
 
 	// 1. Remote peer attempts pub without token -> REJECTED
 	svc.dispatchFrame(remotePeer, svc.pending[remotePeer], peerjs.Frame{

@@ -186,6 +186,12 @@ func TestCapabilities_LegacyClientCompatibility(t *testing.T) {
 
 	_, ok := waitSent(sess, "share-resp", 2*time.Second)
 	assert.True(t, ok, "legacy peer without cap frame must succeed on standard verbs without regression")
+
+	caps, ok := svc.PeerCapabilities("legacy-peer")
+	require.True(t, ok)
+	assert.Equal(t, []string{CapReq, CapShare}, caps, "unnegotiated legacy peer must receive minimal capabilities (opt-out baseline, Issue #281)")
+	assert.False(t, svc.HasCapability("legacy-peer", CapForward))
+	assert.False(t, svc.HasCapability("legacy-peer", CapIndex))
 }
 
 // TestCapabilities_PSKHandshakePiggyback verifies capabilities are negotiated inside psk-auth / psk-ok without extra frames.

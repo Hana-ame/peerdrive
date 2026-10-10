@@ -24,7 +24,7 @@ const HASH = 'a'.repeat(64)
 describe('protocol/reqFrame', () => {
   it('字段名与 Go 侧 dcReq 逐字一致', () => {
     const f = JSON.parse(reqFrame(HASH, { offset: 0, size: -1, reqId: 'r1' }))
-    assert.deepEqual(f, { type: 'req', hash: HASH, offset: 0, size: -1, reqId: 'r1', v: 1 })
+    assert.deepEqual(f, { type: 'req', hash: HASH, offset: 0, size: -1, reqId: 'r1' })
   })
 
   it('默认 offset=0 / size=-1（读到文件末尾）', () => {
