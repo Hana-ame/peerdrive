@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -165,6 +167,20 @@ func (a *Aria2Bridge) callRPC(ctx context.Context, method string, params ...any)
 
 // AddURI sends an HTTP/HTTPS/FTP URI to aria2 for download.
 func (a *Aria2Bridge) AddURI(ctx context.Context, uri string, outFilename string) (string, error) {
+	// Scheme validation: strictly allow only safe download protocols
+	lowerURI := strings.ToLower(strings.TrimSpace(uri))
+	if !strings.HasPrefix(lowerURI, "http://") && !strings.HasPrefix(lowerURI, "https://") && !strings.HasPrefix(lowerURI, "ftp://") && !strings.HasPrefix(lowerURI, "sftp://") {
+		return "", fmt.Errorf("unsupported or disallowed download URI scheme: %s", uri)
+	}
+
+	// Path traversal protection: outFilename must be a clean, single-level filename
+	if outFilename != "" {
+		clean := filepath.Clean(outFilename)
+		if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") || strings.ContainsAny(outFilename, "/\\") || filepath.Base(clean) != clean {
+			return "", fmt.Errorf("invalid filename for download: path traversal characters disallowed")
+		}
+	}
+
 	options := map[string]any{}
 	a.mu.RLock()
 	if a.targetDir != "" {
