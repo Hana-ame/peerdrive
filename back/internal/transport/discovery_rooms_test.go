@@ -126,6 +126,42 @@ func TestDiscoveryDialAllowed_MaxPeers(t *testing.T) {
 		svc.conns["real"] = &fakeSession{id: "real"}
 		assert.False(t, svc.discoveryDialAllowed())
 	})
+
+	// 发现背景 (Issue #283): MAX_PEERS 预算应含 in-flight 拨号——ICE 协商期
+	// (1-3s) 内 conns 不增加，突发发现事件可同时发起大量拨号穿透预算。
+	// connecting map 跟踪 in-flight 拨号，应计入预算。
+	t.Run("in-flight dials count toward budget", func(t *testing.T) {
+		svc := newTestPeerJSService(t)
+		svc.cfg.MaxPeers = 2
+
+		// Simulate 1 established + 1 in-flight: should be at limit.
+		svc.conns["established"] = &fakeSession{id: "established"}
+		svc.connectingMu.Lock()
+		svc.connecting["inflight"] = struct{}{}
+		svc.connectingMu.Unlock()
+		assert.False(t, svc.discoveryDialAllowed(),
+			"1 established + 1 in-flight must consume the budget of 2")
+
+		// Remove the in-flight dial, now there's room again.
+		svc.connectingMu.Lock()
+		delete(svc.connecting, "inflight")
+		svc.connectingMu.Unlock()
+		assert.True(t, svc.discoveryDialAllowed(),
+			"after in-flight dial completes, budget is available again")
+	})
+
+	t.Run("only in-flight (no established) also counts toward budget", func(t *testing.T) {
+		svc := newTestPeerJSService(t)
+		svc.cfg.MaxPeers = 2
+
+		// Simulate 2 in-flight dials: budget exhausted even with 0 established.
+		svc.connectingMu.Lock()
+		svc.connecting["a"] = struct{}{}
+		svc.connecting["b"] = struct{}{}
+		svc.connectingMu.Unlock()
+		assert.False(t, svc.discoveryDialAllowed(),
+			"2 in-flight dials with 0 established must consume budget of 2")
+	})
 }
 
 // TestMaxPeers_ZeroMeansUnlimited explicitly locks the maxPeers fallback semantics (<=0 ⇒ a huge value).

@@ -430,6 +430,12 @@ func (s *PeerJSService) onDiscoveredPeer(peerID string) {
 
 // discoveryDialAllowed 是否还有发现拨号预算（对端节点数 < PEERDRIVE_MAX_PEERS）。
 // 计预算时排除 "local"：那是浏览器直连本节点的本地 WS 会话，不是对端节点。
+//
+// Also counts in-flight dials (connecting map) toward the budget (Issue #283):
+// between Connect() and OnOpen, ICE negotiation takes 1-3s. If a burst of
+// discovery events all pass the budget check simultaneously, they all start
+// dials, and the actual connection count briefly exceeds MAX_PEERS — the
+// window where the budget is effectively bypassed.
 func (s *PeerJSService) discoveryDialAllowed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -439,7 +445,12 @@ func (s *PeerJSService) discoveryDialAllowed() bool {
 			n++
 		}
 	}
-	return n < s.maxPeers()
+	// In-flight dials also consume budget: a dial that is in progress but
+	// not yet in conns should count against the limit.
+	s.connectingMu.Lock()
+	inflight := len(s.connecting)
+	s.connectingMu.Unlock()
+	return n+inflight < s.maxPeers()
 }
 
 // maxPeers 互联层拨号上限（配置 PEERDRIVE_MAX_PEERS，<=0 视为不限）。
