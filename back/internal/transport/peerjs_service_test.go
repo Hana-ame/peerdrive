@@ -578,3 +578,8 @@ func TestDiscoveryMode_UnknownFallsBackToAuto(t *testing.T) {
 	assert.True(t, shouldMQTT, "unknown mode falls back to auto semantics")
 	assert.Equal(t, "auto", mode)
 }
+
+func hashOf(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}

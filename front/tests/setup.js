@@ -1,6 +1,8 @@
-import { afterEach } from 'vitest'
+import { afterEach, expect } from 'vitest'
 import { cleanup } from '@testing-library/react'
-import '@testing-library/jest-dom'
+import * as matchers from '@testing-library/jest-dom/matchers'
+
+expect.extend(matchers)
 
 // 2026-10-07: the global `vi.mock('../src/api.js')` was removed together with
 // src/api.js. That module was a zombie: no page or component imported it (all
