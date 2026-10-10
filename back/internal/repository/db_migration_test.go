@@ -17,22 +17,49 @@ func TestSchemaMigrationVersionTracking(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = CloseHandle(handle) })
 
-		// PRAGMA user_version must match latest migration version (7)
+		// PRAGMA user_version must match latest migration version (9)
 		ver, err := GetUserVersion(handle)
 		require.NoError(t, err)
-		require.Equal(t, 7, ver, "fresh DB must have user_version = 7")
+		require.Equal(t, 9, ver, "fresh DB must have user_version = 9")
 
-		// schema_migrations table must contain all 7 migrations
+		// schema_migrations table must contain all 9 migrations
 		var count int
 		err = handle.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count)
-		require.NoError(t, err)
-		require.Equal(t, 7, count, "fresh DB must record all 7 applied migrations")
+		require.Equal(t, 9, count, "fresh DB must record all 9 applied migrations")
 
 		// Issue #277: File databases must use WAL journal mode
 		var journalMode string
 		err = handle.QueryRow(`PRAGMA journal_mode`).Scan(&journalMode)
 		require.NoError(t, err)
 		require.Equal(t, "wal", journalMode, "file DB must be in WAL journal mode")
+	})
+
+	t.Run("VersionTablesHaveIndexes", func(t *testing.T) {
+		// 发现背景：Issue #275 指出 collection_versions.collection_id 与
+		// version_entries.version_id 缺索引，GetVersionLog/GetVersionEntries 退化为全表扫描。
+		// 迁移 v8/v9 补上两条 CREATE INDEX IF NOT EXISTS，本用例锁定索引存在。
+		dbPath := filepath.Join(t.TempDir(), "indexed.db")
+		handle, err := OpenDB(dbPath)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = CloseHandle(handle) })
+
+		// Verify idx_cv_collection_id exists on collection_versions
+		var idxCount int
+		err = handle.QueryRow(`
+			SELECT COUNT(*) FROM sqlite_master
+			WHERE type='index' AND name='idx_cv_collection_id' AND tbl_name='collection_versions'
+		`).Scan(&idxCount)
+		require.NoError(t, err)
+		require.Equal(t, 1, idxCount, "idx_cv_collection_id must exist on collection_versions")
+
+		// Verify idx_ve_version_id exists on version_entries
+		idxCount = 0
+		err = handle.QueryRow(`
+			SELECT COUNT(*) FROM sqlite_master
+			WHERE type='index' AND name='idx_ve_version_id' AND tbl_name='version_entries'
+		`).Scan(&idxCount)
+		require.NoError(t, err)
+		require.Equal(t, 1, idxCount, "idx_ve_version_id must exist on version_entries")
 	})
 
 	t.Run("RepeatedOpenIsIdempotent", func(t *testing.T) {
@@ -48,12 +75,12 @@ func TestSchemaMigrationVersionTracking(t *testing.T) {
 
 		ver, err := GetUserVersion(handle2)
 		require.NoError(t, err)
-		require.Equal(t, 7, ver)
+		require.Equal(t, 9, ver)
 
 		var count int
 		err = handle2.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count)
 		require.NoError(t, err)
-		require.Equal(t, 7, count)
+		require.Equal(t, 9, count)
 	})
 
 	t.Run("MigrationFailureReturnsErrorNotSwallowed", func(t *testing.T) {
