@@ -428,17 +428,24 @@ func (s *PeerJSService) onDiscoveredPeer(peerID string) {
 	go s.connectLoop(peerID)
 }
 
-// discoveryDialAllowed 是否还有发现拨号预算（对端节点数 < PEERDRIVE_MAX_PEERS）。
+// discoveryDialAllowed 是否还有发现拨号预算（对端节点数 + 在途拨号数 < PEERDRIVE_MAX_PEERS）。
 // 计预算时排除 "local"：那是浏览器直连本节点的本地 WS 会话，不是对端节点。
+// Issue #283: 在途拨号（connecting）也计入预算，防止发现回调并发触发超过 MAX_PEERS 条连接。
 func (s *PeerJSService) discoveryDialAllowed() bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	n := 0
 	for id := range s.conns {
 		if id != "local" {
 			n++
 		}
 	}
+	s.mu.Unlock()
+
+	// Count in-flight (connecting) peers toward the budget (Issue #283).
+	s.connectingMu.Lock()
+	n += len(s.connecting)
+	s.connectingMu.Unlock()
+
 	return n < s.maxPeers()
 }
 
