@@ -3,6 +3,7 @@ package urlguard
 import (
 	"net"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -45,3 +46,31 @@ func TestGuardPullIP(t *testing.T) {
 	assert.NoError(t, GuardPullIP(net.ParseIP("8.8.8.8")))
 	assert.NoError(t, GuardPullIP(net.ParseIP("1.1.1.1")))
 }
+
+// TestSafeDialContext_BlocksPrivateAndLoopback 发现背景：防止 DNS rebinding 攻击穿透外部 URL 检查。
+func TestSafeDialContext_BlocksPrivateAndLoopback(t *testing.T) {
+	dialFn := SafeDialContext(nil)
+
+	// Direct loopback IP
+	_, err := dialFn(t.Context(), "tcp", "127.0.0.1:8080")
+	assert.Error(t, err, "direct loopback dial must be rejected")
+
+	// Direct private IP
+	_, err = dialFn(t.Context(), "tcp", "10.0.0.1:80")
+	assert.Error(t, err, "direct private IP dial must be rejected")
+
+	// Direct cloud metadata IP
+	_, err = dialFn(t.Context(), "tcp", "169.254.169.254:80")
+	assert.Error(t, err, "cloud metadata IP dial must be rejected")
+
+	// Localhost hostname
+	_, err = dialFn(t.Context(), "tcp", "localhost:80")
+	assert.Error(t, err, "localhost dial must be rejected")
+
+	// SafeClient initialization check
+	client := NewSafeClient(5 * time.Second)
+	assert.NotNil(t, client)
+	assert.NotNil(t, client.Transport)
+	assert.Equal(t, 5*time.Second, client.Timeout)
+}
+

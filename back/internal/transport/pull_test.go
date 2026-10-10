@@ -32,14 +32,19 @@ func allowOnly(t *testing.T, rawURL string) {
 	t.Helper()
 	u, err := url.Parse(rawURL)
 	require.NoError(t, err)
-	old := pullGuard
+	oldGuard := pullGuard
+	oldTransport := pullTransport
 	pullGuard = func(x *url.URL) error {
 		if x.Host == u.Host {
 			return nil
 		}
 		return guardPullURL(x)
 	}
-	t.Cleanup(func() { pullGuard = old })
+	pullTransport = http.DefaultTransport
+	t.Cleanup(func() {
+		pullGuard = oldGuard
+		pullTransport = oldTransport
+	})
 }
 
 // TestPull_Success Normal pull: content lands in the index, and the hash in the

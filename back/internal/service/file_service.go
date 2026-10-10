@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/log"
@@ -430,26 +431,26 @@ func (s *FileService) ResolveURL(rawURL string, followRedirects bool) (hash stri
 		return "", "", 0, nil, "", fmt.Errorf("URL rejected by SSRF guard: %w", err)
 	}
 
-	client := http.DefaultClient
+	safeTransport := urlguard.NewSafeTransport()
+	client := &http.Client{
+		Timeout:   5 * time.Minute,
+		Transport: safeTransport,
+	}
 	if !followRedirects {
-		client = &http.Client{
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
 		}
 	} else {
 		// Per-hop redirect validation: checking only the first hop lets a public URL 302 to
 		// 127.0.0.1 straight back into the internal network. Same reasoning as pull.go.
-		client = &http.Client{
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 10 {
-					return fmt.Errorf("redirect exceeds 10 hops, aborting")
-				}
-				if err := urlguard.GuardExternalURL(req.URL.String()); err != nil {
-					return fmt.Errorf("redirect target rejected: %w", err)
-				}
-				return nil
-			},
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("redirect exceeds 10 hops, aborting")
+			}
+			if err := urlguard.GuardExternalURL(req.URL.String()); err != nil {
+				return fmt.Errorf("redirect target rejected: %w", err)
+			}
+			return nil
 		}
 	}
 
@@ -465,10 +466,21 @@ func (s *FileService) ResolveURL(rawURL string, followRedirects bool) (hash stri
 		return "", "", 0, nil, "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
-	body, err = io.ReadAll(resp.Body)
+	maxLimit := s.cfg.MaxUploadBytes
+	if maxLimit <= 0 {
+		maxLimit = 100 * 1024 * 1024 // 100MB default fallback limit
+	}
+	if cl := resp.ContentLength; cl > maxLimit {
+		return "", "", 0, nil, "", fmt.Errorf("content length %d exceeds maximum allowed limit of %d bytes", cl, maxLimit)
+	}
+
+	body, err = io.ReadAll(io.LimitReader(resp.Body, maxLimit+1))
 	if err != nil {
 		log.LogError("file-svc: ResolveURL read body failed: %v", err)
 		return "", "", 0, nil, "", fmt.Errorf("read body: %w", err)
+	}
+	if int64(len(body)) > maxLimit {
+		return "", "", 0, nil, "", fmt.Errorf("response body exceeds maximum allowed limit of %d bytes", maxLimit)
 	}
 
 	h := sha256.Sum256(body)
@@ -905,6 +917,10 @@ func (s *FileService) CopyFile(hash string, destPath string) (string, error) {
 
 // ReadFile reads a file's bytes from content-addressed storage or via providers.
 func (s *FileService) ReadFile(hash string) ([]byte, error) {
+	if !isValidHash(hash) {
+		return nil, fmt.Errorf("invalid hash %q", hash)
+	}
+
 	// Try content-addressed paths first
 	candidates := []string{
 		filepath.Join(s.storageDir, hash[:2], hash),
@@ -928,18 +944,31 @@ func (s *FileService) ReadFile(hash string) ([]byte, error) {
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(s.storageDir, path)
 			}
-			data, err := os.ReadFile(path)
-			if err == nil {
-				return data, nil
+			if s.isPathAllowed(path) {
+				f, err := s.openAllowed(path)
+				if err == nil {
+					data, readErr := io.ReadAll(f)
+					_ = f.Close()
+					if readErr == nil {
+						return data, nil
+					}
+				}
 			}
 		}
 		if p.ProviderType == "http" && p.Available {
-			resp, err := http.Get(p.Path)
-			if err == nil {
-				data, readErr := io.ReadAll(resp.Body)
-				resp.Body.Close()
-				if readErr == nil {
-					return data, nil
+			if err := urlguard.GuardExternalURL(p.Path); err == nil {
+				client := urlguard.NewSafeClient(15 * time.Second)
+				resp, err := client.Get(p.Path)
+				if err == nil {
+					maxBytes := s.cfg.MaxUploadBytes
+					if maxBytes <= 0 {
+						maxBytes = 100 * 1024 * 1024
+					}
+					data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+					_ = resp.Body.Close()
+					if readErr == nil && len(data) > 0 {
+						return data, nil
+					}
 				}
 			}
 		}

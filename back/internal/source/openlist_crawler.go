@@ -94,13 +94,21 @@ func (c *OpenListCrawler) CrawlDirectory(ctx context.Context, rootPath string) (
 	}
 
 	var allFiles []string
-	var walkDir func(dirPath string) error
-	walkDir = func(dirPath string) error {
+	visited := make(map[string]bool)
+	const maxCrawlDepth = 32
+
+	var walkDir func(dirPath string, depth int) error
+	walkDir = func(dirPath string, depth int) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
+
+		if depth > maxCrawlDepth || visited[dirPath] {
+			return nil
+		}
+		visited[dirPath] = true
 
 		items, err := c.listFS(ctx, dirPath)
 		if err != nil {
@@ -110,7 +118,7 @@ func (c *OpenListCrawler) CrawlDirectory(ctx context.Context, rootPath string) (
 		for _, item := range items {
 			fullPath := path.Join(dirPath, item.Name)
 			if item.IsDir {
-				if err := walkDir(fullPath); err != nil {
+				if err := walkDir(fullPath, depth+1); err != nil {
 					return err
 				}
 			} else {
@@ -120,7 +128,7 @@ func (c *OpenListCrawler) CrawlDirectory(ctx context.Context, rootPath string) (
 		return nil
 	}
 
-	if err := walkDir(rootPath); err != nil {
+	if err := walkDir(rootPath, 0); err != nil {
 		return nil, err
 	}
 
@@ -220,7 +228,11 @@ func (c *OpenListCrawler) listFS(ctx context.Context, dirPath string) ([]OpenLis
 
 func (c *OpenListCrawler) fetchFileHash(ctx context.Context, filePath string) (string, error) {
 	cleanBase := strings.TrimRight(c.cfg.BaseURL, "/")
-	fileURL := cleanBase + "/p" + filePath
+	p := filePath
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	fileURL := cleanBase + "/p" + p
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
 	if err != nil {

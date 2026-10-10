@@ -112,7 +112,8 @@ func (s *PeerJSService) fetchIntoIndex(rawURL, name string, maxBytes int64) (*Fi
 	defer cancel()
 
 	client := &http.Client{
-		Timeout: pullTimeout,
+		Timeout:   pullTimeout,
+		Transport: pullTransport,
 		// Per-hop redirect validation: checking only the first hop lets a public URL 302
 		// to 127.0.0.1 penetrate into the internal network.
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -177,6 +178,10 @@ func (l *limitedPuller) Read(p []byte) (int, error) {
 // Tests only allow "letting through a specific host", everything else still goes through the
 // real check, so replacement implementations can't take shortcuts with `return nil`.
 var pullGuard = guardPullURL
+
+// pullTransport is the HTTP transport used by fetchIntoIndex. Defaults to urlguard.NewSafeTransport()
+// which prevents DNS rebinding and internal network dials at the socket layer.
+var pullTransport http.RoundTripper = urlguard.NewSafeTransport()
 
 // GuardExternalURL is the SSRF guard for **any** caller-supplied outbound URL.
 // Delegates to peerdrive/pkg/urlguard.GuardExternalURL.
