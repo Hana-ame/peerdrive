@@ -175,6 +175,7 @@ const EXEMPT = new Set([
   'doc/design/FRONTEND-DSH-INSPIRED.md',
   'doc/design/FRONTEND-DSH-KERNEL.md',
   'doc/design/PEERDRIVE-DSH-INSPIRED.md',
+  'doc/design/JOB-PUSH-VERB-DESIGN.md',
   'doc/guide/operation-manual.md',
   'doc/NETDISK.md',
   'doc/REFACTOR.md',
