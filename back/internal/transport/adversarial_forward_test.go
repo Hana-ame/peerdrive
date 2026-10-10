@@ -19,6 +19,7 @@ import (
 // 发现背景：Issue #257（攻击对抗：针对端口转发 Nonce 质询重放攻击防御）。
 func TestAdversarial_Forward_ReplayAttack(t *testing.T) {
 	svc := newTestPeerJSService(t)
+	svc.cfg.PortFwdEnable = true // include CapForward in local capabilities
 	echoPort, stopEcho := startEchoServer(t, "srv")
 	defer stopEcho()
 	svc.SetForwardRules(map[string][]int{"legit-key": {echoPort}})
@@ -49,6 +50,7 @@ func TestAdversarial_Forward_ReplayAttack(t *testing.T) {
 // 发现背景：Issue #257（攻击对抗：端口扫描与非白名单端口越权穿透防御）。
 func TestAdversarial_Forward_PortScanningBypass(t *testing.T) {
 	svc := newTestPeerJSService(t)
+	svc.cfg.PortFwdEnable = true // include CapForward in local capabilities
 	echoPort, stopEcho := startEchoServer(t, "srv")
 	defer stopEcho()
 	// Whitelist only echoPort
@@ -97,6 +99,7 @@ func TestAdversarial_Forward_PortScanningBypass(t *testing.T) {
 // 发现背景：Issue #257（攻击对抗：伪造 HMAC 签名与签名位翻转篡改防御）。
 func TestAdversarial_Forward_CorruptedHMACAndSignatureTampering(t *testing.T) {
 	svc := newTestPeerJSService(t)
+	svc.cfg.PortFwdEnable = true // include CapForward in local capabilities
 	echoPort, stopEcho := startEchoServer(t, "srv")
 	defer stopEcho()
 	svc.SetForwardRules(map[string][]int{"secret-key-1": {echoPort}})
@@ -132,6 +135,7 @@ func TestAdversarial_Forward_CorruptedHMACAndSignatureTampering(t *testing.T) {
 // 发现背景：Issue #257（攻击对抗：质询表内存洪水与 DoS 防御）。
 func TestAdversarial_Forward_ChallengePoolFlooding(t *testing.T) {
 	svc := newTestPeerJSService(t)
+	svc.cfg.PortFwdEnable = true // include CapForward in local capabilities
 	svc.SetForwardRules(map[string][]int{"key": {8080}})
 
 	sess := &fakeSession{id: "flooder-client"}

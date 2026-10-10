@@ -72,6 +72,14 @@ func bindFakeServer(t *testing.T, svc *PeerJSService, sess *fakeSession) *connSt
 	svc.bindConn(sess)
 	st := svc.stateFor(sess)
 	require.NotNil(t, st)
+
+	// Negotiate full capabilities (Issue #281: un-negotiated peers get MinimalCapabilities only).
+	// Tests that use this helper expect full capabilities unless they explicitly test
+	// the un-negotiated path.
+	svc.dispatchFrame(sess, svc.pending[sess], peerjs.Frame{
+		IsText: true,
+		Data:   []byte(`{"type":"cap","capabilities":["req","share","index","pull","fwd","display","stream","admin"]}`),
+	})
 	return st
 }
 

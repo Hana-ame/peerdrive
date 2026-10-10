@@ -23,7 +23,9 @@ import (
 // 2. Both sides announce supported capabilities during open handshake.
 // 3. Negotiated capabilities are the intersection: local ∩ remote.
 // 4. Unknown capability identifiers are strictly discarded (forward-compatible).
-// 5. Omission of capability declarations defaults to MinimalCapabilities, preserving existing client compatibility.
+// 5. Omission of capability declarations defaults to MinimalCapabilities (Issue #281:
+//    un-negotiated peers get minimal, not full, capabilities — only explicitly
+//    negotiated peers upgrade to full feature set).
 // 6. Capability mismatches (when specific required capabilities are unmet) explicitly reject or degrade with machine-readable error codes.
 
 const (
@@ -329,7 +331,10 @@ func (s *PeerJSService) PeerCapabilities(peerID string) ([]string, bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.caps == nil {
-		return append([]string(nil), LegacyCapabilities...), true
+		// Un-negotiated peer: fall back to MinimalCapabilities (Issue #281:
+		// un-negotiated peers get minimal, not full, capabilities — only
+		// explicitly negotiated peers upgrade to full feature set).
+		return append([]string(nil), MinimalCapabilities...), true
 	}
 	return CapsFromMap(st.caps), true
 }
@@ -353,11 +358,13 @@ func (s *PeerJSService) HasCapability(peerID string, cap string) bool {
 }
 
 // hasCapability checks if connState has the given capability (thread-safe).
+// Un-negotiated peers (st.caps == nil) fall back to MinimalCapabilities (Issue #281).
 func (st *connState) hasCapability(cap string) bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.caps == nil {
-		return true // un-negotiated legacy node fallback
+		// Un-negotiated legacy peer: only MinimalCapabilities are available.
+		return containsString(MinimalCapabilities, cap)
 	}
 	return st.caps[cap]
 }
@@ -451,4 +458,14 @@ func (s *PeerJSService) negotiateCapabilities(c Session, st *connState, remoteRa
 			ReqID:        reqID,
 		})
 	}
+}
+
+// containsString checks if a string is present in a slice.
+func containsString(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
