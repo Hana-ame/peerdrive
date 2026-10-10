@@ -324,6 +324,7 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 		// permissions are granted but the directory is hidden). Share frames go over an established
 		// connection, so the peer id is known.
 		peerjsSvc.SetShareProvider(share.SnapshotFor)
+		peerjsSvc.SetShareProviderWithToken(share.SnapshotForToken)
 		// Download gate: private content is only served to friends and self (req frames, see ShareGate for details).
 		peerjsSvc.SetShareGate(share)
 		nodeDir.SetShareSummary(share.Summary)

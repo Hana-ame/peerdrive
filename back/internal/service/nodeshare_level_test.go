@@ -327,3 +327,65 @@ func TestNodeShareCollectionManifestFollowsLevel(t *testing.T) {
 		t.Fatal("unlisted collection entry must still be downloadable")
 	}
 }
+
+// TestNodeShareProtectedCollection_PasscodeRequired verifies that protected collections
+// hide entries unless matching passcode is provided.
+// 发现背景：Issue #268（Collection 级独立提取码与分级可见性）。
+func TestNodeShareProtectedCollection_PasscodeRequired(t *testing.T) {
+	base := t.TempDir()
+	h := sha("aa")
+	cid := sha("bb")
+	colls := map[string]*model.AnonCollection{
+		cid: {
+			FriendlyName: "protected package",
+			AccessPolicy: model.AccessPolicyProtected,
+			Passcode:     "secret123",
+			Entries:      []model.AnonCollectionEntry{{Path: "secret.txt", Hash: h}},
+		},
+	}
+	for k := range colls {
+		for i := range colls[k].Entries {
+			colls[k].Entries[i].Normalize()
+		}
+	}
+	s := newScopeShare(t, base, true, nil)
+	s.SetAnonAccess(func(hash string) (*model.AnonCollection, error) { return colls[hash], nil },
+		func() ([]model.AnonCollectionSummary, error) { return nil, nil })
+
+	if _, err := s.Update(ScopePatch{Collections: &[]ShareItem{{ID: cid, Level: model.LevelPublic}}}); err != nil {
+		t.Fatalf("collections: %v", err)
+	}
+
+	// 1. Without passcode: collection metadata returned, but entries hidden and marked protected
+	snapNoPass := s.SnapshotForToken("stranger", "")
+	if len(snapNoPass.Collections) != 1 {
+		t.Fatalf("expected 1 collection, got %d", len(snapNoPass.Collections))
+	}
+	c0 := snapNoPass.Collections[0]
+	if !c0.IsProtected {
+		t.Fatal("collection must be marked as protected without passcode")
+	}
+	if len(c0.Entries) != 0 {
+		t.Fatalf("entries must be hidden without passcode, got %d entries", len(c0.Entries))
+	}
+
+	// 2. With wrong passcode: entries still hidden
+	snapWrongPass := s.SnapshotForToken("stranger", "wrong-code")
+	if !snapWrongPass.Collections[0].IsProtected || len(snapWrongPass.Collections[0].Entries) != 0 {
+		t.Fatal("wrong passcode must not unlock entries")
+	}
+
+	// 3. With correct passcode: entries unlocked
+	snapCorrectPass := s.SnapshotForToken("stranger", "secret123")
+	cUnlocked := snapCorrectPass.Collections[0]
+	if cUnlocked.IsProtected {
+		t.Fatal("correct passcode must mark collection as unlocked")
+	}
+	if len(cUnlocked.Entries) != 1 {
+		t.Fatalf("expected 1 entry unlocked, got %d", len(cUnlocked.Entries))
+	}
+	if cUnlocked.Entries[0].Hash != h {
+		t.Fatalf("unlocked entry hash mismatch: %s != %s", cUnlocked.Entries[0].Hash, h)
+	}
+}
+

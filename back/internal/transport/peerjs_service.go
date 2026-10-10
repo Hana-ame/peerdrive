@@ -136,6 +136,9 @@ type PeerJSService struct {
 	// Stream manager (Issue #244): P2P live stream chunk broadcast and subscriptions.
 	streamMgr *StreamManager
 
+	// QoS Concurrency & Rate Limiter (Issue #269).
+	qos *QoSGuard
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -143,30 +146,54 @@ type PeerJSService struct {
 // NewPeerJSService 创建 PeerJS 文件服务。节点 ID 默认 <prefix>-<随机hex>，
 // 常驻在线后其他 peer（浏览器或节点）可通过该 ID 直连。
 func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
-	id := cfg.PeerJSID
+	id := ""
+	if cfg != nil {
+		id = cfg.PeerJSID
+	}
 	if id == "" {
 		id = "peerdrive-" + randHex8()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	var stun, turn, turnU, turnP, bl string
+	if cfg != nil {
+		stun = cfg.WebRTCSTUNServer
+		turn = cfg.WebRTCTURNServer
+		turnU = cfg.WebRTCTURNUsername
+		turnP = cfg.WebRTCTURNPassword
+		bl = cfg.PeerBlocklist
+	}
+	downloadDir := ""
+	if cfg != nil {
+		downloadDir = cfg.DownloadDir
+	}
 	svc := &PeerJSService{
 		cfg:          cfg,
 		storageDir:   storageDir,
 		id:           id,
-		iceServers:   parseICEServers(cfg.WebRTCSTUNServer, cfg.WebRTCTURNServer, cfg.WebRTCTURNUsername, cfg.WebRTCTURNPassword),
+		iceServers:   parseICEServers(stun, turn, turnU, turnP),
 		conns:        make(map[string]Session),
 		pending:      make(map[Session]*connState),
 		connecting:   make(map[string]struct{}),
-		fileIndex:    NewFileIndexService(cfg.DownloadDir),
-		blocklist:    NewPeerBlocklist(storageDir, cfg.PeerBlocklist),
+		fileIndex:    NewFileIndexService(downloadDir),
+		blocklist:    NewPeerBlocklist(storageDir, bl),
 		forwardRules: make(map[string][]int),
 		fwNonces:     make(map[string]*fwdNonce),
-		localCaps:    append([]string(nil), DefaultNodeCapabilities...),
 		displayMgr:   NewDisplayManager(),
 		streamMgr:    NewStreamManager(),
 		closed:       make(chan struct{}),
 		ctx:          ctx,
 		cancel:       cancel,
 	}
+	svc.localCaps = svc.computeLocalCaps()
+	maxStreams := int64(8)
+	if cfg != nil && cfg.MaxConcurrentStreams > 0 {
+		maxStreams = int64(cfg.MaxConcurrentStreams)
+	}
+	uploadSpeed := int64(0)
+	if cfg != nil && cfg.MaxUploadSpeed > 0 {
+		uploadSpeed = cfg.MaxUploadSpeed
+	}
+	svc.qos = NewQoSGuard(maxStreams, uploadSpeed)
 	svc.defaultAuthorizer = NewDefaultAuthorizer(svc.currentShareGate)
 	return svc
 }

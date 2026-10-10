@@ -153,10 +153,16 @@ func (s *PeerJSService) serveShare(c Session, r dcResp) {
 	tokenGen := s.shareTokenGenerator
 	s.shareMu.RUnlock()
 
-	// Phase 7: r.Token contains optional requester identity/token.
-	// Ignored by default in Phase 6; in Phase 7, verified or passed to provider.
+	// Passcode or Token for collection authentication (Issue #268)
+	token := r.Token
+	if token == "" && r.Passcode != "" {
+		token = r.Passcode
+	}
+	if token == "" && r.Passkey != "" {
+		token = r.Passkey
+	}
 	if tokenProv != nil {
-		snap = tokenProv(c.ID(), r.Token)
+		snap = tokenProv(c.ID(), token)
 	} else if shareProv != nil {
 		snap = shareProv(c.ID())
 	}

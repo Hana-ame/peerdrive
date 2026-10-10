@@ -38,8 +38,10 @@ func CreateAnonCollection(c *gin.Context) {
 		Tags         []string                    `json:"tags"`
 		// Visibility/AccessList correspond to the frontend's "public access / restricted to specified / private only" options.
 		// Old frontends without these two fields → visibility empty string → service layer defaults to public, behavior unchanged.
-		Visibility string   `json:"visibility"`
-		AccessList []string `json:"access_list"`
+		Visibility   string                      `json:"visibility"`
+		AccessList   []string                    `json:"access_list"`
+		AccessPolicy string                      `json:"access_policy"`
+		Passcode     string                      `json:"passcode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -50,11 +52,12 @@ func CreateAnonCollection(c *gin.Context) {
 	// (private collections are unreadable by anyone when unowned, so the frontend should disable the "private only" option when not logged in).
 	owner := nodestate.GetOperator()
 
-	hash, err := anonSvc.CreateCollectionWithVisibility(req.FriendlyName, req.Entries, req.Tags, req.Visibility, req.AccessList, owner)
+	hash, err := anonSvc.CreateCollectionWithPolicy(req.FriendlyName, req.Entries, req.Tags, req.Visibility, req.AccessList, req.AccessPolicy, req.Passcode, owner)
 	if err != nil {
 		msg := err.Error()
 		switch {
-		case strings.Contains(msg, "invalid visibility"), strings.Contains(msg, "access_list required"):
+		case strings.Contains(msg, "invalid visibility"), strings.Contains(msg, "access_list required"),
+			strings.Contains(msg, "invalid access policy"), strings.Contains(msg, "passcode required"):
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		case strings.Contains(msg, "invalid path"), strings.Contains(msg, "invalid hash"), strings.Contains(msg, "invalid providers"):
@@ -65,7 +68,7 @@ func CreateAnonCollection(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"hash": hash, "visibility": req.Visibility, "owner": owner})
+	c.JSON(http.StatusCreated, gin.H{"hash": hash, "visibility": req.Visibility, "access_policy": req.AccessPolicy, "owner": owner})
 }
 
 // SetAnonCollectionVisibility godoc
@@ -138,10 +141,26 @@ func GetAnonCollection(c *gin.Context) {
 	// Gotcha: this previously used GetCollectionByHash for a raw read — once you have the hash of a content-addressed
 	// JSON, anyone can fetch it, making the three permission tiers meaningless (downloads already check visibility via
 	// DownloadAnonFile, but the metadata endpoint was missing it = bypass). The current node operator is used as the requester identity.
-	coll, err := anonSvc.GetCollectionVisibleTo(hash, nodestate.GetOperator())
+	operator := nodestate.GetOperator()
+	coll, err := anonSvc.GetCollectionVisibleTo(hash, operator)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
+	}
+	passcode := c.Query("passcode")
+	if passcode == "" {
+		passcode = c.GetHeader("X-Passcode")
+	}
+	// Issue #268: If protected and passcode doesn't match, hide entries and mark is_protected: true
+	if coll.EffectiveAccessPolicy() == model.AccessPolicyProtected && operator == "" {
+		if passcode != coll.Passcode {
+			masked := *coll
+			masked.Entries = []model.AnonCollectionEntry{}
+			masked.IsProtected = true
+			masked.Passcode = ""
+			c.JSON(http.StatusOK, masked)
+			return
+		}
 	}
 	c.JSON(http.StatusOK, coll)
 }
@@ -160,10 +179,22 @@ func DownloadAnonFile(c *gin.Context) {
 	hash := c.Param("hash")
 	filePath := strings.TrimPrefix(c.Param("filepath"), "/")
 
-	coll, err := anonSvc.GetCollectionVisibleTo(hash, nodestate.GetOperator())
+	operator := nodestate.GetOperator()
+	coll, err := anonSvc.GetCollectionVisibleTo(hash, operator)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
+	}
+
+	if coll.EffectiveAccessPolicy() == model.AccessPolicyProtected && operator == "" {
+		passcode := c.Query("passcode")
+		if passcode == "" {
+			passcode = c.GetHeader("X-Passcode")
+		}
+		if passcode != coll.Passcode {
+			c.JSON(http.StatusForbidden, gin.H{"error": "passcode required or invalid for protected collection"})
+			return
+		}
 	}
 
 	var targetEntry *model.AnonCollectionEntry
@@ -228,6 +259,8 @@ func ForkAnonCollection(c *gin.Context) {
 		FriendlyName string                      `json:"friendly_name"`
 		AddEntries   []model.AnonCollectionEntry `json:"add_entries"`
 		RemovePaths  []string                    `json:"remove_paths"`
+		AccessPolicy string                      `json:"access_policy"`
+		Passcode     string                      `json:"passcode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -279,11 +312,20 @@ func ForkAnonCollection(c *gin.Context) {
 	if forkOwner == "" {
 		forkOwner = operator
 	}
-	hash, err := anonSvc.CreateCollectionWithVisibility(
-		friendlyName, newEntries, src.Tags, src.Visibility, src.AccessList, forkOwner)
+	policy := req.AccessPolicy
+	if policy == "" {
+		policy = src.EffectiveAccessPolicy()
+	}
+	passcode := req.Passcode
+	if passcode == "" {
+		passcode = src.Passcode
+	}
+	hash, err := anonSvc.CreateCollectionWithPolicy(
+		friendlyName, newEntries, src.Tags, src.Visibility, src.AccessList, policy, passcode, forkOwner)
 	if err != nil {
 		msg := err.Error()
-		if strings.Contains(msg, "invalid visibility") || strings.Contains(msg, "access_list required") {
+		if strings.Contains(msg, "invalid visibility") || strings.Contains(msg, "access_list required") ||
+			strings.Contains(msg, "invalid access policy") || strings.Contains(msg, "passcode required") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}

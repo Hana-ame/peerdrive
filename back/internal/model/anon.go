@@ -110,6 +110,12 @@ type AnonCollection struct {
 	AccessList []string `json:"access_list,omitempty"`
 	// Owner is the publisher account (node operator), private collections only allow access to the Owner.
 	Owner string `json:"owner,omitempty"`
+	// AccessPolicy: public / protected (requires passcode) / private (owner only) (Issue #268).
+	AccessPolicy string `json:"access_policy,omitempty"`
+	// Passcode is the extraction key required to unlock entries in protected mode (Issue #268).
+	Passcode string `json:"passcode,omitempty"`
+	// IsProtected is true if entries are locked behind a passcode (Issue #268).
+	IsProtected bool `json:"is_protected,omitempty"`
 }
 
 // visibility value constants: one-to-one mapping with the frontend three options, the backend only accepts these three strings.
@@ -117,6 +123,13 @@ const (
 	VisibilityPublic     = "public"
 	VisibilityRestricted = "restricted"
 	VisibilityPrivate    = "private"
+)
+
+// Access policy constants (Issue #268).
+const (
+	AccessPolicyPublic    = "public"
+	AccessPolicyProtected = "protected"
+	AccessPolicyPrivate   = "private"
 )
 
 // IsValidVisibility validates visibility values; empty string is treated as unset (valid, equivalent to public).
@@ -128,12 +141,38 @@ func IsValidVisibility(v string) bool {
 	return false
 }
 
+// IsValidAccessPolicy validates access policy values; empty string is treated as unset (valid, equivalent to public).
+func IsValidAccessPolicy(p string) bool {
+	switch p {
+	case "", AccessPolicyPublic, AccessPolicyProtected, AccessPolicyPrivate:
+		return true
+	}
+	return false
+}
+
 // EffectiveVisibility returns the visibility after fallback: historical collections without this field → public.
 func (c *AnonCollection) EffectiveVisibility() string {
 	if c == nil || c.Visibility == "" {
 		return VisibilityPublic
 	}
 	return c.Visibility
+}
+
+// EffectiveAccessPolicy returns the access policy after fallback (Issue #268).
+func (c *AnonCollection) EffectiveAccessPolicy() string {
+	if c == nil {
+		return AccessPolicyPublic
+	}
+	if c.AccessPolicy != "" {
+		return c.AccessPolicy
+	}
+	if c.Visibility == VisibilityPrivate {
+		return AccessPolicyPrivate
+	}
+	if c.Passcode != "" {
+		return AccessPolicyProtected
+	}
+	return AccessPolicyPublic
 }
 
 // CanView determines whether a requester (account name) can view the collection.

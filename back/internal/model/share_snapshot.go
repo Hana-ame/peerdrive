@@ -18,11 +18,13 @@ type ShareEntryInfo struct {
 
 // ShareCollectionInfo is a collection packaged for sharing.
 type ShareCollectionInfo struct {
-	Hash    string           `json:"hash"`
-	Name    string           `json:"name,omitempty"`
-	Size    int64            `json:"size,omitempty"` // Entry count (reuses the size name to stay consistent with the frontend card)
-	Tags    []string         `json:"tags,omitempty"`
-	Entries []ShareEntryInfo `json:"entries"`
+	Hash         string           `json:"hash"`
+	Name         string           `json:"name,omitempty"`
+	Size         int64            `json:"size,omitempty"` // Entry count (reuses the size name to stay consistent with the frontend card)
+	Tags         []string         `json:"tags,omitempty"`
+	Entries      []ShareEntryInfo `json:"entries"`
+	AccessPolicy string           `json:"access_policy,omitempty"` // public | protected | private (Issue #268)
+	IsProtected  bool             `json:"is_protected,omitempty"`  // true if locked pending passcode (Issue #268)
 }
 
 // ShareSnapshot is the complete result of one share query.

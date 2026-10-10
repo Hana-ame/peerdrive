@@ -16,6 +16,7 @@ import ContextMenu from '../../../components/netdisk/ContextMenu';
 
 const CATEGORIES = [
   { id: 'all', label: 'All Files', icon: '📁' },
+  { id: 'inbox', label: 'Inbox (待审)', icon: '📥' },
   { id: 'docs', label: 'Documents', icon: '📄', ext: ['pdf', 'doc', 'docx', 'txt', 'md', 'rtf', 'odt', 'csv', 'xls', 'xlsx', 'ppt', 'pptx'] },
   { id: 'images', label: 'Images', icon: '🖼️', ext: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'] },
   { id: 'videos', label: 'Videos', icon: '🎬', ext: ['mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv'] },
@@ -134,7 +135,21 @@ export default function Drive() {
 
     try {
       let fileList = [];
-      if (!currentDir) {
+      if (selectedCategory === 'inbox') {
+        const res = await ws.admin('GET', '/files/inbox');
+        const raw = Array.isArray(res) ? res : [];
+        fileList = raw.map(e => ({
+          hash: e.hash || '',
+          filename: e.filename || 'unnamed',
+          size: e.size || 0,
+          mime_type: mimeOf(e.filename, e.mime_type),
+          created_at: e.created_at || '',
+          isDir: false,
+          path: e.path || '',
+          isInbox: true,
+          uploader: e.uploader_peer_id || '',
+        }));
+      } else if (!currentDir) {
         // Root directory: fetch registered cloud drive files (full hashes, mime types, sizes)
         const res = await ws.admin('GET', '/files');
         const raw = Array.isArray(res) ? res : [];
@@ -189,7 +204,7 @@ export default function Drive() {
       }
       setFiles([]);
     }
-  }, [currentDir, peerSession]);
+  }, [currentDir, peerSession, selectedCategory]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -228,6 +243,21 @@ export default function Drive() {
     if (!confirm(`Delete "${f.filename}"?`)) return;
     try {
       await ws.admin('DELETE', `/files/${f.hash}`);
+      await load();
+    } catch (ex) { setErr(ex?.message || String(ex)); }
+  };
+
+  const onApproveInbox = async (f) => {
+    try {
+      await ws.admin('POST', '/files/inbox/approve', { hash: f.hash });
+      await load();
+    } catch (ex) { setErr(ex?.message || String(ex)); }
+  };
+
+  const onRejectInbox = async (f) => {
+    if (!confirm(`Reject and delete quarantined file "${f.filename}"?`)) return;
+    try {
+      await ws.admin('DELETE', `/files/inbox/${f.hash}`);
       await load();
     } catch (ex) { setErr(ex?.message || String(ex)); }
   };
@@ -565,6 +595,8 @@ export default function Drive() {
               onShare={onShare}
               onDelete={onDelete}
               onContextMenu={handleContextMenu}
+              onApproveInbox={onApproveInbox}
+              onRejectInbox={onRejectInbox}
             />
           )}
         </DataState>

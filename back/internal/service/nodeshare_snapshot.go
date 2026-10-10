@@ -17,8 +17,8 @@ func (s *NodeShare) Snapshot() model.ShareSnapshot { return s.SnapshotFor("") }
 // 带过来），所以"好友能看到我的 private 清单"是可以实现的——好友也得知道有哪些
 // 东西能取，否则 private 就成了"给了权限但没给目录"。
 //
-// 未开启共享 → 空快照（不是错误：对方未共享内容是合法业务状态）。
-func (s *NodeShare) SnapshotFor(peerID string) model.ShareSnapshot {
+// SnapshotForToken resolves sharing scope with an optional requester passcode/token (Issue #268).
+func (s *NodeShare) SnapshotForToken(peerID string, token string) model.ShareSnapshot {
 	snap := model.ShareSnapshot{
 		Collections: []model.ShareCollectionInfo{},
 		Files:       []model.ShareFileInfo{},
@@ -28,7 +28,7 @@ func (s *NodeShare) SnapshotFor(peerID string) model.ShareSnapshot {
 		return snap
 	}
 	friend := sc.isFriend(peerID)
-	snap.Collections = s.collectionsSnapshotFor(sc.Collections, friend)
+	snap.Collections = s.collectionsSnapshotFor(sc.Collections, friend, token)
 	snap.Files = s.filesSnapshotFor(sc, friend)
 	// 只回 public 目录的路径摘要：private/unlisted 目录的存在本身就是信息
 	for _, d := range sc.Dirs {
@@ -37,6 +37,11 @@ func (s *NodeShare) SnapshotFor(peerID string) model.ShareSnapshot {
 		}
 	}
 	return snap
+}
+
+// SnapshotFor 解析请求者可见的共享范围（share 帧的数据源）。
+func (s *NodeShare) SnapshotFor(peerID string) model.ShareSnapshot {
+	return s.SnapshotForToken(peerID, "")
 }
 
 // Summary 共享摘要（announce loadInfo 用，只含数量）。
@@ -231,7 +236,7 @@ func (s *NodeShare) CandidateFiles() []ShareFileItem {
 //
 // friend：请求者是好友时，private 级别的合集也列出来（否则好友拿到了权限却
 // 不知道有什么）。unlisted 永远不列——它的语义就是"不列出"。
-func (s *NodeShare) collectionsSnapshotFor(items []ShareItem, friend bool) []model.ShareCollectionInfo {
+func (s *NodeShare) collectionsSnapshotFor(items []ShareItem, friend bool, token string) []model.ShareCollectionInfo {
 	if s.anonGet == nil {
 		return []model.ShareCollectionInfo{}
 	}
@@ -267,27 +272,38 @@ func (s *NodeShare) collectionsSnapshotFor(items []ShareItem, friend bool) []mod
 			continue
 		}
 		lvl := it.EffectiveLevel()
-		if vis := coll.EffectiveVisibility(); vis != model.VisibilityPublic {
+		policy := coll.EffectiveAccessPolicy()
+		if policy == model.AccessPolicyPrivate || coll.EffectiveVisibility() != model.VisibilityPublic {
 			// 见文件头安全边界第 2 条：AccessList 无法校验 → 按 private 处理
 			lvl = model.LevelPrivate
 		}
 		if lvl == model.LevelUnlisted || (lvl == model.LevelPrivate && !friend) {
 			continue
 		}
+		isProtected := false
+		if policy == model.AccessPolicyProtected {
+			if token == "" || token != coll.Passcode {
+				isProtected = true
+			}
+		}
 		info := model.ShareCollectionInfo{
-			Hash:    it.ID,
-			Name:    coll.FriendlyName,
-			Tags:    coll.Tags,
-			Entries: make([]model.ShareEntryInfo, 0, len(coll.Entries)),
+			Hash:         it.ID,
+			Name:         coll.FriendlyName,
+			Tags:         coll.Tags,
+			AccessPolicy: policy,
+			IsProtected:  isProtected,
+			Entries:      make([]model.ShareEntryInfo, 0, len(coll.Entries)),
 		}
-		for _, e := range coll.Entries {
-			info.Entries = append(info.Entries, model.ShareEntryInfo{
-				Path: e.Path,
-				Hash: e.GetPrimaryHash(),
-				Mime: e.GetPrimaryMime(),
-			})
+		if !isProtected {
+			for _, e := range coll.Entries {
+				info.Entries = append(info.Entries, model.ShareEntryInfo{
+					Path: e.Path,
+					Hash: e.GetPrimaryHash(),
+					Mime: e.GetPrimaryMime(),
+				})
+			}
 		}
-		info.Size = int64(len(info.Entries))
+		info.Size = int64(len(coll.Entries))
 		out = append(out, info)
 	}
 	return out

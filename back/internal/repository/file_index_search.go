@@ -103,7 +103,7 @@ func SearchFileIndex(q SearchQuery) ([]FileIndex, int64, error) {
 		offset = 0
 	}
 
-	rows, err := db.Query("SELECT hash, path, name, size, deleted, seq, created_at, updated_at "+
+	rows, err := db.Query("SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox "+
 		"FROM file_index WHERE "+where+" ORDER BY seq DESC LIMIT ? OFFSET ?",
 		append(args, limit, offset)...)
 	if err != nil {

@@ -326,11 +326,13 @@ type UploadSession struct {
 	roots     []string // 写边界（BeginUpload 时定下来，Abort/reap 删文件时共用）
 	bitmap    []uint64
 	fullWords int // 非末 word 中已满 64 chunk 的数量——Complete O(1) 判满
-	seq       int64
-	last      time.Time // 最后活动时间（过期清理用）
-	aborted   bool      // reap 摘除句柄后置位：WriteAt/Complete 见之即错（M7 竞态修复）
-	done      bool      // 已完成：句柄已关闭，重复 Complete 直接返回缓存结果
-	doneInfo  *FileInfo // done=true 时缓存的文件信息（多 source 各自 Complete 都要拿到）
+	seq            int64
+	last           time.Time // 最后活动时间（过期清理用）
+	aborted        bool      // reap 摘除句柄后置位：WriteAt/Complete 见之即错（M7 竞态修复）
+	done           bool      // 已完成：句柄已关闭，重复 Complete 直接返回缓存结果
+	doneInfo       *FileInfo // done=true 时缓存的文件信息（多 source 各自 Complete 都要拿到）
+	uploaderPeerID string
+	isInbox        bool
 }
 
 // DeclaredSize 返回声明总大小（BeginUpload 同名复用一致性校验用）。
@@ -342,12 +344,21 @@ func (u *UploadSession) DeclaredSize() int64 {
 
 // BeginUpload 开始/继续一个分片上传会话（同 name 幂等复用）。
 func (s *FileIndexService) BeginUpload(name string, size int64) (*UploadSession, error) {
+	return s.BeginUploadForPeer(name, size, "")
+}
+
+// BeginUploadForPeer starts or resumes an upload session, quarantining external peer uploads into inbox/ (Issue #267).
+func (s *FileIndexService) BeginUploadForPeer(name string, size int64, uploaderPeerID string) (*UploadSession, error) {
 	if size < 0 || size > 8*1024*1024*1024 { // 上限 8GB，防恶意声明
 		return nil, fmt.Errorf("invalid size %d", size)
 	}
 	s.upMu.Lock()
 	defer s.upMu.Unlock()
-	if sess, ok := s.uploads[name]; ok {
+	sessKey := name
+	if uploaderPeerID != "" {
+		sessKey = uploaderPeerID + ":" + name
+	}
+	if sess, ok := s.uploads[sessKey]; ok {
 		sess.last = time.Now()
 		// M7：同名会话复用必须 size 一致——位图按旧 size 建，声明不一致会导致
 		// 续传偏移错乱、末 chunk 判满错误。不一致直接拒绝（多 source 本就应同 size）
@@ -356,10 +367,16 @@ func (s *FileIndexService) BeginUpload(name string, size int64) (*UploadSession,
 		}
 		return sess, nil
 	}
-	if err := os.MkdirAll(s.uploadDir, 0o755); err != nil {
+	targetDir := s.uploadDir
+	isInbox := false
+	if uploaderPeerID != "" {
+		targetDir = filepath.Join(s.uploadDir, "inbox")
+		isInbox = true
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(s.uploadDir, sanitizeName(name))
+	path := filepath.Join(targetDir, sanitizeName(name))
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open upload file: %w", err)
@@ -367,14 +384,16 @@ func (s *FileIndexService) BeginUpload(name string, size int64) (*UploadSession,
 	// 位图按 64 chunk/word 分配（曾按 chunk 数分配导致末 word 判满逻辑失效）
 	totalChunks := (size + uploadChunkSize - 1) / uploadChunkSize
 	sess := &UploadSession{
-		name:      name,
-		path:      path,
-		uploadDir: s.uploadDir,
-		file:      f,
-		roots:     s.writeRoots(),
-		size:      size,
-		bitmap:    make([]uint64, (totalChunks+63)/64),
-		last:      time.Now(),
+		name:           name,
+		path:           path,
+		uploadDir:      targetDir,
+		file:           f,
+		roots:          s.writeRoots(),
+		size:           size,
+		bitmap:         make([]uint64, (totalChunks+63)/64),
+		last:           time.Now(),
+		uploaderPeerID: uploaderPeerID,
+		isInbox:        isInbox,
 	}
 	// 断点续传：已有文件大小 → 重建位图（[0, min(size, fsize)) 视为已写）。
 	// 坑：空洞/错序可能被误标已写，最终 Commit 的 sha256 校验兜底（不匹配则整体失败）。
@@ -537,7 +556,7 @@ func (u *UploadSession) completeLocked() (bool, *FileInfo, error, *os.File) {
 		}
 		u.path = destPath
 	}
-	seq, err := repository.UpsertFileIndex(h, u.path, u.name, u.size, false)
+	seq, err := repository.UpsertFileIndexWithMeta(h, u.path, u.name, u.size, false, u.uploaderPeerID, u.isInbox)
 	if err != nil {
 		return false, nil, err, nil
 	}

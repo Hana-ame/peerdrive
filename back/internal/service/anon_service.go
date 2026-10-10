@@ -77,10 +77,6 @@ func (s *AnonService) CreateCollection(name string, entries []model.AnonCollecti
 }
 
 // CreateCollectionWithVisibility creates an anonymous collection with visibility settings.
-// Pitfall: collections are content-addressed (hash = JSON content digest), so once
-// visibility/access_list/owner are written into the JSON they participate in the digest --
-// changing permissions equals generating a new collection with a new hash. Callers must
-// use the returned value as the new identity.
 func (s *AnonService) CreateCollectionWithVisibility(
 	name string,
 	entries []model.AnonCollectionEntry,
@@ -89,12 +85,36 @@ func (s *AnonService) CreateCollectionWithVisibility(
 	accessList []string,
 	owner string,
 ) (string, error) {
-	defer log.LogDuration("AnonService.CreateCollectionWithVisibility")()
-	log.LogDebug("anon-svc: CreateCollectionWithVisibility name=%s entries=%d visibility=%s owner=%s",
-		name, len(entries), visibility, owner)
+	return s.CreateCollectionWithPolicy(name, entries, tags, visibility, accessList, "", "", owner)
+}
+
+// CreateCollectionWithPolicy creates an anonymous collection with visibility and access policy settings (Issue #268).
+func (s *AnonService) CreateCollectionWithPolicy(
+	name string,
+	entries []model.AnonCollectionEntry,
+	tags []string,
+	visibility string,
+	accessList []string,
+	accessPolicy string,
+	passcode string,
+	owner string,
+) (string, error) {
+	defer log.LogDuration("AnonService.CreateCollectionWithPolicy")()
+	log.LogDebug("anon-svc: CreateCollectionWithPolicy name=%s entries=%d visibility=%s policy=%s owner=%s",
+		name, len(entries), visibility, accessPolicy, owner)
 
 	if !model.IsValidVisibility(visibility) {
 		err := fmt.Errorf("invalid visibility: %s", visibility)
+		log.LogError("anon-svc: %v", err)
+		return "", err
+	}
+	if !model.IsValidAccessPolicy(accessPolicy) {
+		err := fmt.Errorf("invalid access policy: %s", accessPolicy)
+		log.LogError("anon-svc: %v", err)
+		return "", err
+	}
+	if accessPolicy == model.AccessPolicyProtected && passcode == "" {
+		err := fmt.Errorf("passcode required for protected access policy")
 		log.LogError("anon-svc: %v", err)
 		return "", err
 	}
@@ -131,6 +151,8 @@ func (s *AnonService) CreateCollectionWithVisibility(
 	coll := model.NewAnonCollection(name, entries, tags)
 	coll.Visibility = visibility
 	coll.AccessList = accessList
+	coll.AccessPolicy = accessPolicy
+	coll.Passcode = passcode
 	coll.Owner = owner
 	jsonBytes, err := json.MarshalIndent(coll, "", "  ")
 	if err != nil {

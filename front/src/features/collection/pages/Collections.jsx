@@ -29,6 +29,8 @@ export default function Collections() {
   const [name, setName] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [visibility, setVisibility] = useState('public');
+  const [accessPolicy, setAccessPolicy] = useState('public');
+  const [passcode, setPasscode] = useState('');
 
   // Search & filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,6 +39,7 @@ export default function Collections() {
 
   // Detail-mode state
   const [detail, setDetail] = useState(null); // {hash, data}
+  const [unlockPasscode, setUnlockPasscode] = useState('');
 
   const loadList = useCallback(async () => {
     setErr('');
@@ -53,6 +56,9 @@ export default function Collections() {
     setSelected([]);
     setName('');
     setTagsInput('');
+    setVisibility('public');
+    setAccessPolicy('public');
+    setPasscode('');
     try {
       const res = await ws.admin('GET', '/files');
       setFiles(Array.isArray(res) ? res : []);
@@ -67,6 +73,10 @@ export default function Collections() {
     if (!name.trim()) { setErr('Please enter a collection name'); return; }
     const chosen = files.filter(f => selected.includes(f.hash));
     if (chosen.length === 0) { setErr('Please select at least one file'); return; }
+    if (accessPolicy === 'protected' && !passcode.trim()) {
+      setErr('Please enter a passcode for protected access policy');
+      return;
+    }
     const entries = chosen.map(f => ({
       path: f.filename,
       providers: [{ type: 'sha256', value: f.hash, mime_type: f.mime_type }],
@@ -83,6 +93,8 @@ export default function Collections() {
         entries,
         tags,
         visibility,
+        access_policy: accessPolicy,
+        passcode: accessPolicy === 'protected' ? passcode.trim() : '',
       });
       setTab('list');
       await loadList();
@@ -93,6 +105,7 @@ export default function Collections() {
   const openDetail = async (c) => {
     if (detail?.hash === (c.hash || c.current_hash)) { setDetail(null); return; }
     setErr('');
+    setUnlockPasscode('');
     setDetail({ hash: c.hash || c.current_hash, data: null });
     try {
       const d = await ws.admin('GET', `/anon/collections/${c.hash || c.current_hash}`);
@@ -103,8 +116,24 @@ export default function Collections() {
     }
   };
 
+  const unlockProtected = async (hash) => {
+    if (!unlockPasscode.trim()) return;
+    setBusy(true);
+    try {
+      const d = await ws.admin('GET', `/anon/collections/${hash}?passcode=${encodeURIComponent(unlockPasscode.trim())}`);
+      setDetail({ hash, data: d });
+    } catch (e) {
+      setErr(e?.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const downloadEntry = async (hash, path) => {
-    try { await ws.downloadToFile(hash, path || 'download'); }
+    try {
+      const query = unlockPasscode ? `?passcode=${encodeURIComponent(unlockPasscode.trim())}` : '';
+      await ws.downloadToFile(hash, path || 'download', query);
+    }
     catch (e) { setErr(e?.message || String(e)); }
   };
 
@@ -350,6 +379,26 @@ export default function Collections() {
                                         📁 Browse as folders
                                       </button>
                                     </div>
+                                    {detail.data?.is_protected && (
+                                      <div className="flex items-center gap-2 mb-3 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-200 text-xs">
+                                        <span>🔒 Protected collection (entries hidden). Enter passcode:</span>
+                                        <input
+                                          type="password"
+                                          placeholder="Passcode / 提取码"
+                                          value={unlockPasscode}
+                                          onChange={e => setUnlockPasscode(e.target.value)}
+                                          className="input-base text-xs py-1 px-2 w-36"
+                                          onKeyDown={e => { if (e.key === 'Enter') unlockProtected(detail.hash); }}
+                                        />
+                                        <button
+                                          onClick={() => unlockProtected(detail.hash)}
+                                          disabled={busy || !unlockPasscode.trim()}
+                                          className="btn-brand text-xs py-1 px-2.5"
+                                        >
+                                          Unlock
+                                        </button>
+                                      </div>
+                                    )}
                                     {Array.isArray(detail.data.entries) && detail.data.entries.length > 0 ? (
                                       <ul className="space-y-1">
                                         {detail.data.entries.map((e, ei) => (
@@ -410,6 +459,38 @@ export default function Collections() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1.5">Access Policy (Extraction Mode)</label>
+              <div className="flex gap-1 mb-2">
+                <button type="button" onClick={() => setAccessPolicy('public')}
+                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                    accessPolicy === 'public' ? 'bg-brand-600 text-white' : 'bg-white/[0.04] text-gray-400 hover:text-white'
+                  }`}>
+                  🌐 Open
+                </button>
+                <button type="button" onClick={() => setAccessPolicy('protected')}
+                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                    accessPolicy === 'protected' ? 'bg-amber-600 text-white' : 'bg-white/[0.04] text-gray-400 hover:text-white'
+                  }`}>
+                  🔑 Protected (Passcode)
+                </button>
+                <button type="button" onClick={() => setAccessPolicy('private')}
+                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                    accessPolicy === 'private' ? 'bg-red-600 text-white' : 'bg-white/[0.04] text-gray-400 hover:text-white'
+                  }`}>
+                  🔒 Private
+                </button>
+              </div>
+              {accessPolicy === 'protected' && (
+                <input
+                  type="text"
+                  value={passcode}
+                  onChange={e => setPasscode(e.target.value)}
+                  placeholder="Set extraction passcode / 提取码"
+                  className="input-base max-w-md text-xs mt-1"
+                />
+              )}
             </div>
             <div>
               <label className="block text-xs text-gray-400 mb-1.5">Select Netdisk Files ({selected.length} selected)</label>

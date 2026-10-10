@@ -217,7 +217,14 @@ type Config struct {
 	Aria2RPCSecret   string // PEERDRIVE_ARIA2_RPC_SECRET (optional secret token)
 	Aria2DownloadDir string // PEERDRIVE_ARIA2_DIR (target directory, defaults to DownloadDir)
 
-	ForwardRules string // PEERDRIVE_FORWARD_RULES: "key1:8080,key2:8443" (forwarding auth whitelist; key is the credential; recommend chmod 600 on config file)
+	ForwardRules  string // PEERDRIVE_FORWARD_RULES: "key1:8080,key2:8443" (forwarding auth whitelist; key is the credential; recommend chmod 600 on config file)
+	PortFwdEnable bool   // PEERDRIVE_PORTFWD_ENABLE: opt-in master switch for port forwarding (default false, Issue #263)
+	BTEnable      bool   // PEERDRIVE_BT_ENABLE: opt-in master switch for BitTorrent integration (default false, Issue #263)
+	IPFSEnable    bool   // PEERDRIVE_IPFS_ENABLE: opt-in master switch for IPFS bridge (default false, Issue #263)
+
+	// QoS Concurrency & Rate Limiting (Issue #269)
+	MaxConcurrentStreams int   // PEERDRIVE_MAX_CONCURRENT_STREAMS: limit active outgoing download streams (default 8)
+	MaxUploadSpeed       int64 // PEERDRIVE_MAX_UPLOAD_SPEED: global outgoing speed limit in bytes/sec (default 0 = unlimited)
 
 	// ── Optional ech-proxy module (PEERDRIVE_ECH_PROXY_ENABLE, default OFF) ──
 	// When enabled, https://pbs.twimg.com/<path>?<q> is rewritten to
@@ -517,6 +524,11 @@ func DefaultConfig() *Config {
 		DownloadOrder:          "local,ipfsgw,btdht,http",
 		DownloadTimeoutSecs:    30,
 		ForwardRules:           "",
+		PortFwdEnable:          false,
+		BTEnable:               false,
+		IPFSEnable:             false,
+		MaxConcurrentStreams:   8,
+		MaxUploadSpeed:         0,
 		ECHProxyEnable:        false,
 		ECHProxyAddr:          "127.0.0.1:8443",
 		ECHProxyInstallDir:    "",
@@ -664,6 +676,11 @@ func Load() *Config {
 		DownloadTimeoutSecs: getEnvInt("PEERDRIVE_DOWNLOAD_TIMEOUT", 30),
 
 		ForwardRules: getEnv("PEERDRIVE_FORWARD_RULES", ""),
+		PortFwdEnable: getEnvBool("PEERDRIVE_PORTFWD_ENABLE", false),
+		BTEnable:      getEnvBool("PEERDRIVE_BT_ENABLE", false),
+		IPFSEnable:    getEnvBool("PEERDRIVE_IPFS_ENABLE", false),
+		MaxConcurrentStreams: getEnvInt("PEERDRIVE_MAX_CONCURRENT_STREAMS", 8),
+		MaxUploadSpeed:       getEnvInt64("PEERDRIVE_MAX_UPLOAD_SPEED", 0),
 
 		ECHProxyEnable:        getEnvBool("PEERDRIVE_ECH_PROXY_ENABLE", false),
 		ECHProxyAddr:          getEnv("PEERDRIVE_ECH_PROXY_ADDR", "127.0.0.1:8443"),
