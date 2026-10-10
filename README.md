@@ -1,4 +1,6 @@
 # Peerdrive
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 [![Peerdrive CI](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml/badge.svg)](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml)
 
 Peerdrive is a multi-protocol file collection manager, supporting SHA256 content-addressed storage, URL references, P2P transport and BitTorrent downloads. Through the unified abstraction of **Collection + Provider**, it integrates local files, HTTP resources and PeerJS/WebRTC interconnection into a single system.
@@ -15,9 +17,9 @@ Provider   = { type: "sha256" | "url", value: hash | url }
 
 Strip away the independent "file" concept -- everything is a collection. A file = a single-entry collection + sha256 provider.
 
-### Dual DHT architecture
+### Hybrid Interconnect & Multi-Source Retrieval
 
-SHA256 hashes are converted to CIDv1 and announced on the IPFS DHT, while also announced as infohashes on the BT DHT. Dual-stack queries merge the results from both networks.
+Rather than relying on legacy single-network DHTs, Peerdrive interconnects nodes via **PeerJS signaling + WebRTC DataChannels** with HTTP/MQTT presence discovery. Multi-protocol content retrieval routes across local storage, connected P2P peers, public IPFS HTTP gateways, optional BitTorrent DHT (`go-peerdrive-bt`), and upstream HTTP mirrors.
 
 ### Key tech stack
 
@@ -25,11 +27,11 @@ SHA256 hashes are converted to CIDv1 and announced on the IPFS DHT, while also a
 |----|------|
 | HTTP | Gin |
 | P2P | PeerJS signaling + WebRTC DataChannel (`back/peerjs/` go-peerjs; discovery: MQTT / self-hosted HTTP) |
-| BT | `github.com/Hana-ame/go-peerdrive-bt` (back/p2p_bt, standalone library) |
+| BT | `github.com/Hana-ame/go-peerdrive-bt` (back/p2p_bt, standalone library, opt-in via `PEERDRIVE_BT_ENABLE`) |
 | Admin surface | Local WS admin verb (frontend all goes through `front/src/ws.js`) |
 | Consumer | `packages/peerdrive-client` (zero-dependency pure browser consumer, goes through `share`/`req` frames; `packages/peerdrive-media` is a URL proxy aimed at img/video) |
-| Storage | SQLite + content-addressed filesystem |
-| Frontend | React 19 + Vite 8 + TailwindCSS 3 |
+| Storage | SQLite + content-addressed filesystem (raw SHA files on disk with DB-backed filename mapping) |
+| Frontend | React 19 + Vite 8 + TailwindCSS 3 (3-tier navigation: ALWAYS, OWNER, GUEST) |
 
 ---
 
@@ -57,15 +59,18 @@ SHA256 hashes are converted to CIDv1 and announced on the IPFS DHT, while also a
 
 | Capability | Description |
 |------|------|
-| Content-addressed storage | Incoming content is always written to disk by sha256 at `storageDir/<hash[0:2]>/<hash>`, naturally deduplicated |
+| Content-addressed storage | Incoming content is written to disk by sha256 (raw SHA-named files without extension, original name in SQLite `file_index` / `file_meta`), naturally deduplicated |
 | File index | `file_index` table persists sha256 -> absolute path, with a seq cursor for incremental sync (`sync` verb) |
-| Multi-protocol content retrieval | The downloader routes by `local -> ipfs -> ipfsgw -> btdht -> http` (order and timeout configurable) |
+| Multi-protocol content retrieval | The downloader routes by `local -> peer -> ipfsgw -> btdht -> http` (order and timeout configurable via `PEERDRIVE_DOWNLOAD_ORDER`) |
 | Node market and joining | Discover nodes on the signaling, after joining write to `joined_nodes.json` and become a resident peer |
-| External sharing scope | `share` verb; **default all off** -- without an explicit declaration, no manifest is exposed externally. Scope can be changed **at runtime**: by directory, by collection, or by checking individual files by hash (`GET/PUT /peerjs/share`, `POST /peerjs/share/files`), persisted to `storageDir/share_scope.json`, no restart needed; environment variables are only first-boot initial values. In the admin console's "My netdisk", per-row checking, **shared directory** add/remove and the friend list all go through these endpoints |
-| Sharing level | Each sharing declaration carries one level: `public` listed and downloadable / `unlisted` not listed but downloadable by hash / `private` only for self and friends (`ShareScope.Friends`). Friends can see private manifests; the download gate is at `transport.ShareGate`; peer id is self-reported, so the list is only reliable when PSK is set (`doc/NETDISK.md` §12.6) |
+| External sharing scope | `share` verb; **default all off** -- without an explicit declaration, no manifest is exposed externally. Scope can be changed **at runtime**: by directory, by collection, or by checking individual files by hash (`GET/PUT /peerjs/share`, `POST /peerjs/share/files`), persisted to `storageDir/share_scope.json`, no restart needed; environment variables are only first-boot initial values. `share_only` policy allows both `share` manifest discovery and `req` data streams |
+| Sharing level & protection | Each sharing declaration carries one level: `public` listed and downloadable / `unlisted` not listed but downloadable by hash / `private` only for self and friends (`ShareScope.Friends`). In addition, collections support three-tier access policies (`public`, `protected`, `private`) and extraction passcodes: protected collections hide file entries until unlocked with passcode |
+| Quarantined Inbox sandbox | Remote peer uploads are quarantined into `storage/inbox/` (`is_inbox = true`) pending host operator review (`GET /files/inbox`, `POST /files/inbox/approve`, `DELETE /files/inbox/:hash`), preventing untrusted data from directly polluting storage |
+| Outbound QoS guard | Outbound stream concurrency limiter (`PEERDRIVE_MAX_CONCURRENT_STREAMS`, default 8) and token bucket upload speed throttler (`PEERDRIVE_MAX_UPLOAD_SPEED`) |
+| Dynamic capabilities | Plaza metadata announces active capabilities (`auth: open|psk`, `caps`, `shares_count`), dynamically negotiated over WebRTC DataChannel (`cap/cap-ack/cap-err`) |
 | Access control | `PEERDRIVE_PSK`: once set, the peer must present the same key on the connection, otherwise all requests return `PSK_REQUIRED` |
 | Admin surface | Local WS `admin` verb, internally reuses all of gin's HTTP controllers; the WebRTC side is intentionally not implemented, to prevent permission exposure |
-| Port forwarding | `fwd-open/challenge/auth/data/close`, HMAC challenge auth + port whitelist |
+| Port forwarding | `fwd-open/challenge/auth/data/close`, HMAC challenge auth + port whitelist (opt-in via `PEERDRIVE_PORTFWD_ENABLE`) |
 
 ---
 
@@ -73,18 +78,20 @@ SHA256 hashes are converted to CIDv1 and announced on the IPFS DHT, while also a
 
 | Feature | Code location | Mechanism |
 |------|----------|------|
-| Frame protocol | `back/internal/transport/conn.go` · `dispatchFrame` (L278) | **One verb table serves both WS and WebRTC**: `req/meta/data/done/err` pull files; `create/upload/list/info/delete/sync` file index; `share` sharing scope; `admin/admin-resp/admin-bin` admin surface; `fwd-*` port forwarding |
+| Frame protocol | `back/internal/transport/conn.go` · `dispatchFrame` (L278) | **One verb table serves both WS and WebRTC**: `req/meta/data/done/err` pull files; `create/upload/list/info/delete/sync` file index; `share` sharing scope; `admin/admin-resp/admin-bin` admin surface; `fwd-*` port forwarding; `cap/cap-ack/cap-err` dynamic capabilities negotiation |
 | Transport | `back/peerjs/` (standalone library `github.com/Hana-ame/go-peerjs`) | PeerJS signaling only forwards SDP/ICE, does not touch the data plane; data goes over WebRTC DataChannel |
 | Discovery | `transport/http_discovery.go` / `mqtt_discovery.go` | Self-hosted HTTP discovery takes precedence over MQTT; there is also a fixed node-level "presence room", letting zero-shared-content nodes interconnect too |
-| Content-addressed persistence | `service/anon_service.go` | `hash[:2]` for directory partitioning; hash length validated before writing (without validation, `hash[:2]` would panic on out-of-bounds, fixed) |
+| Content-addressed persistence | `service/anon_service.go` + `repository/file_index_repo.go` | Raw SHA files on disk + SQLite filename metadata; `hash[:2]` for CAS directory partitioning; hash length validated before writing |
 | File index | `repository/file_index_repo.go` + `service/file_service.go` | SQLite persistence + seq cursor incremental; `sync` verb lets the peer pull only the delta |
 | Cross-node save | `service/peerpull.go` + `GET/POST /p2p/pull*` | Streaming to disk -> recompute sha256 -> register index, with progress / cancel / dedup skip |
-| Sharing scope | `service/nodeshare.go` + `share` verb + `GET/PUT /peerjs/share` | **Strictly distinguished** from `list`: `list` is the local admin index in full, only for trusted peers; `share` is the operator's explicitly declared external scope. Three sources take the union (directory / individual file hash / collection), modifiable at runtime and persisted; the volume root directory is rejected at the entry. Each carries one sharing level (`model.Level*`), multiple matches take the loosest; `private` is gated on `req` by `ShareGate` |
+| Sharing scope | `service/nodeshare.go` + `share` verb + `GET/PUT /peerjs/share` | **Strictly distinguished** from `list`: `list` is the local admin index in full, only for trusted peers; `share` is the operator's explicitly declared external scope. Three sources take the union (directory / individual file hash / collection), modifiable at runtime and persisted; `share_only` policy allows both `share` and `req` |
+| Quarantined Inbox | `controller/file_inbox.go` + `repository/file_index_repo.go` | Remote uploads are written to `storage/inbox/` with `is_inbox=1`, awaiting operator approval or deletion |
+| QoS Guard | `back/internal/transport/qos.go` | Concurrency limit guard (`PEERDRIVE_MAX_CONCURRENT_STREAMS`) and token-bucket bandwidth limiter (`PEERDRIVE_MAX_UPLOAD_SPEED`) |
 | Path safety | `back/internal/pathutil` | This is the only place for the check (`Within/WithinAny`); **read boundary != write boundary**; reads go through `SafeOpen` (`os.Root`), writes through `SafeWriteFileAny` etc., eliminating the TOCTOU of "check then open by path"; hard links judged by **the open handle's** `nlink` |
 | Admission (PSK) | `transport/gate.go` | First frame `psk-auth` from this side after connection establishment; only gates verbs where "the peer asks me to do work", **never gates response frames**; `local` sessions are exempt |
 | Consumer SDK | `packages/peerdrive-client/src/` | **Transport-agnostic**: only requires `{on, send, open, close}` to be passed in, this package does not import peerjs; ships its own **incremental** sha256 (WebCrypto's `digest()` is one-shot, conflicts with streaming pull) |
 | Public panel | Same package `panel/` -> build artifact `dist/panel.html` | Single file, source inlined, opens via `file://`, can be hosted on any static space; after changing `src/` or `panel/` **must** `npm run build:panel` (CI `check:panel` catches drift) |
-| Node admin console | `front/src/pages/{Drive,Market,Peers,PeerDetail,Transfers}` | Operator view, calls the node's HTTP API, **requires the backend to be running** -- a different thing from the public panel |
+| Node admin console | `front/src/features/` | Operator view with 3-tier navigation (`ALWAYS_NAV`, `OWNER_NAV`, `GUEST_NAV`), calls the node's HTTP API, **requires the backend to be running** -- a different thing from the public panel |
 | Online hosting | `https://hana-ame.github.io/peerdrive/` | Auto-deployed by `pages.yml` after push, and **verifies the online version after deploy** (compares this build's fingerprint, preventing verification of a previous version) |
 
 ---
@@ -101,9 +108,9 @@ My node ──join──▶ Node market ──direct connect──▶ Other side
 | Stage | Implementation |
 |---|---|
 | Node market and joining | `service.NodeDirectory` + `GET /peerjs/nodes*`; joined list persisted (`joined_nodes.json`) and becomes a resident peer |
-| Sharing scope | `share` frame + `PEERDRIVE_SHARE_ENABLE/COLLECTIONS/DIRS/FRIENDS` (**default all off**, without declaration no manifest is exposed externally); these are only **initial values**, modified at runtime via `/peerjs/share`, persisted to `share_scope.json`. Each declaration also has three levels `public/unlisted/private` |
+| Sharing scope | `share` frame + `PEERDRIVE_SHARE_ENABLE/COLLECTIONS/DIRS/FRIENDS` (**default all off**, without declaration no manifest is exposed externally); these are only **initial values**, modified at runtime via `/peerjs/share`, persisted to `share_scope.json`. Each declaration also has three levels `public/unlisted/private`. Collections support passcodes and `public`/`protected`/`private` access policies |
 | Cross-node save | `service.PeerPuller` + `GET/POST /p2p/pull*`: streaming pull -> sha256 verify -> to disk -> register file index, with progress/cancel/dedup skip |
-| Netdisk UI | **Public panel** `packages/peerdrive-client/dist/panel.html` (single-file static page, PeerJS direct connect to node, no server needed) + node admin console `front/src/pages/{Drive,Market,Peers,PeerDetail,Transfers}` |
+| Netdisk UI | **Public panel** `packages/peerdrive-client/dist/panel.html` (single-file static page, PeerJS direct connect to node, no server needed) + node admin console `front/src/features/` with 3-tier decoupled navigation |
 | Node-less consumer | `packages/peerdrive-client`: both the panel and SDK originate from it, no local backend needed. The panel has a **fixed id** (`pd-panel-*`, stored in localStorage) -- `private`'s friend list recognizes this id, a random id is as good as filling the list for nothing; each manifest row can generate a **share link** (`?node=&hash=&auto=1`), the concrete action for `unlisted` |
 | Who can connect to my node | **PSK gate** `PEERDRIVE_PSK` (optional): once set, the peer must present the same key on the connection, otherwise all requests return `PSK_REQUIRED` (`doc/NETDISK.md` §9) |
 
@@ -251,6 +258,18 @@ peerdrive
 
 | `PEERDRIVE_PSK` | - | Node access pre-shared key. Empty = open (serves whoever connects); set = peer must present the same key to pull anything (`doc/NETDISK.md` §9) |
 | `PEERDRIVE_ADMIN_TOKEN` | - | Local HTTP admin-surface Bearer token when no `PEERDRIVE_REG_SERVER` is configured. Empty + no reg server = auth disabled (loopback only); non-empty = `Authorization: Bearer <token>` required on authRequired routes |
+| `PEERDRIVE_PEERJS_XOR_ENABLE` / `PEERDRIVE_PEERJS_XOR_KEY` | false / - | Data-plane XOR obfuscation (lightweight obfuscation for WebRTC traffic) |
+| `PEERDRIVE_MAX_CONCURRENT_STREAMS` | 8 | QoS maximum concurrent outgoing data streams per node |
+| `PEERDRIVE_MAX_UPLOAD_SPEED` | 0 | QoS upload speed limit in bytes/sec (token bucket throttler; 0 = unlimited) |
+| `PEERDRIVE_PORTFWD_ENABLE` | false | Opt-in port forwarding capability switch |
+| `PEERDRIVE_BT_ENABLE` | false | Opt-in BitTorrent protocol capability switch |
+| `PEERDRIVE_IPFS_ENABLE` | false | Opt-in IPFS protocol capability switch |
+| `PEERDRIVE_ANON_POLICY` | open | Anonymous peer policy (`open`, `share_only`, `deny`) |
+| `PEERDRIVE_PEER_BLOCKLIST` | - | Comma-separated blocklisted peer IDs |
+| `PEERDRIVE_RATE_LIMIT_RPS` | 30 | Per-IP HTTP rate limit requests per second (0 = unlimited) |
+| `PEERDRIVE_CSP` | on | Content-Security-Policy header (`off` to disable) |
+| `PEERDRIVE_SWAGGER` | on | Swagger API documentation at `/swagger/index.html` (`off` to disable) |
+| `PEERDRIVE_AUTO_EXTRACT` | false | Auto-extract uploaded archives in sandbox directory |
 
 > These `PEERDRIVE_SHARE_*` entries are only **first-boot initial values**: after startup they can be changed any time via `GET/PUT /peerjs/share`
 > and `POST /peerjs/share/files` (by directory / collection / individual file hash), persisted in
@@ -298,17 +317,17 @@ security: all gates closed (inbound PSK / admin-surface auth / public roster / S
 > registration server, and deleting the libp2p stack (`a5b090d`) left the field with no consumer.
 > The admin surface's actual auth switch is `PEERDRIVE_REG_SERVER`.
 
+## Subsystems and Standalone Libraries
 
-## Leftover items
+The Peerdrive monorepo hosts several independent, reusable packages and standalone libraries:
 
-> Note: the following are early legacy modules. **The libp2p stack was entirely
-> deleted on 2026-08-16** (`back/internal/service/p2p.go`, `p2p_dual.go` etc. no longer exist), the current
-> interconnect layer is PeerJS/WebRTC, see `doc/REFACTOR.md`.
+| Subsystem | Description | Path |
+|-----------|-------------|------|
+| `go-peerjs` | Pure Go PeerJS protocol client and WebRTC DataChannel transport (`github.com/Hana-ame/go-peerjs`). | `back/peerjs/` |
+| `go-peersignal` | Lightweight self-hosted Go signaling and discovery server (`github.com/Hana-ame/go-peersignal`, binary `cmd/peersignal`). | `back/signalserver/` |
+| `go-peerdrive-bt` | Mainline BitTorrent DHT capability (`github.com/Hana-ame/go-peerdrive-bt`), opt-in bridge. | `back/p2p_bt/` |
+| `peerdrive-client` | Zero-dependency pure browser consumer SDK and single-file web panel (`dist/panel.html`). | `packages/peerdrive-client/` |
+| `peerdrive-media` | WebRTC DataChannel URL proxy for direct in-browser audio, video, and image streaming. | `packages/peerdrive-media/` |
+| Active Core Services | Unified multi-protocol retrieval (`back/internal/provider/`), content-addressed collection schema (`back/internal/model/anon.go`), and interconnect transport (`back/internal/transport/peerjs_service.go`). | `back/internal/` |
 
-| Module | Value |
-|------|------|
-| `back/p2p_bt/` | BT DHT capability (standalone library `github.com/Hana-ame/go-peerdrive-bt`; **the old README claim "can be used standalone" is wrong** -- it depends on the bridging layer, per REFACTOR.md section 6) |
-| `back/internal/provider/` | Multi-protocol file retrieval abstraction (download pipeline) |
-| `back/internal/model/anon.go` | Content-addressed collection JSON format |
-| `back/internal/transport/peerjs_service.go` | Current interconnect layer: PeerJS signaling + WebRTC DataChannel |
-| `doc/` | Complete architecture decisions and test records |
+> Note: The legacy libp2p stack was completely removed on 2026-08-16 (see `doc/REFACTOR.md` §8 and `doc/archive/LEGACY.md` for historical migration records).

@@ -345,6 +345,105 @@ curl -X POST http://127.0.0.1:3000/files/diff \
 
 ---
 
+### `GET /files/inbox`
+List quarantined files uploaded by remote peers waiting for host approval (Issue #267).
+
+```bash
+curl 'http://127.0.0.1:3000/files/inbox?offset=0&limit=100'
+```
+
+**Query Parameters**:
+- `offset` (optional): Offset pagination start (default: `0`).
+- `limit` (optional): Maximum number of entries to return (default: `100`, max `1000`).
+
+**Response** (200 OK):
+```json
+{
+  "files": [
+    {
+      "Hash": "abc1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "Path": "/path/to/storage/.inbox/upload-abc123...",
+      "Name": "incoming-document.pdf",
+      "Size": 1048576,
+      "Deleted": false,
+      "Seq": 42,
+      "CreatedAt": "2026-10-10T12:00:00Z",
+      "UpdatedAt": "2026-10-10T12:00:00Z",
+      "UploaderPeerID": "peerdrive-remote-peer-id",
+      "IsInbox": true
+    }
+  ],
+  "count": 1
+}
+```
+
+**Fields**:
+- `files`: Array of quarantined `FileIndex` records
+  - `Hash`: 64-character SHA256 checksum of the quarantined file
+  - `Path`: Local quarantined path on the host
+  - `Name`: Original file name reported by the remote peer
+  - `Size`: File size in bytes
+  - `Deleted`: Soft-deletion flag (`false`)
+  - `Seq`: Monotonically increasing sync sequence cursor
+  - `CreatedAt`: Creation timestamp
+  - `UpdatedAt`: Last update timestamp
+  - `UploaderPeerID`: Peer ID of the remote peer who uploaded the file
+  - `IsInbox`: `true` while the file is quarantined awaiting host approval
+- `count`: Number of items returned in `files`
+
+---
+
+### `POST /files/inbox/approve`
+Approve a quarantined file and release it into standard host storage and public file index (Issue #267).
+
+```bash
+curl -X POST http://127.0.0.1:3000/files/inbox/approve \
+  -H "Content-Type: application/json" \
+  -d '{"hash": "abc1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}'
+```
+
+**Request Body**:
+- `hash` (required): 64-character SHA256 hash of the quarantined file to approve
+
+**Response** (200 OK):
+```json
+{
+  "message": "approved",
+  "hash": "abc1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+}
+```
+
+**Error Responses**:
+- `400 Bad Request`: `{"error": "hash is required"}` or `{"error": "invalid sha256 hash"}`
+- `500 Internal Server Error`: `{"error": "<details>"}` on database or file system failure
+
+---
+
+### `DELETE /files/inbox/:hash`
+Reject and permanently delete a quarantined file from storage and the index (Issue #267).
+
+```bash
+curl -X DELETE http://127.0.0.1:3000/files/inbox/abc1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+```
+
+**URL Parameters**:
+- `hash` (required): 64-character SHA256 hash of the quarantined file to reject
+
+**Response** (200 OK):
+```json
+{
+  "message": "rejected and deleted",
+  "hash": "abc1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+}
+```
+
+**Error Responses**:
+- `400 Bad Request`: `{"error": "invalid sha256 hash"}`
+- `404 Not Found`: `{"error": "file not found"}`
+- `500 Internal Server Error`: `{"error": "<details>"}`
+
+---
+
 ## 3. Downloads
 
 ### `GET /sha256sum/:hash`
@@ -629,7 +728,7 @@ curl -o doc.txt http://127.0.0.1:3000/alice/my-collection/docs/readme.txt
 Anonymous collections are immutable, content-addressed collections of `{path, hash}` entries, identified by their SHA256 hash.
 
 ### `POST /anon/collections`
-Create an immutable anonymous collection.
+Create an immutable anonymous collection (supports Access Policy & Passcode, Issue #268).
 
 ```bash
 curl -X POST http://127.0.0.1:3000/anon/collections \
@@ -640,22 +739,39 @@ curl -X POST http://127.0.0.1:3000/anon/collections \
       {"path": "vacation/beach.jpg", "hash": "abc123..."},
       {"path": "vacation/sunset.jpg", "hash": "def456..."}
     ],
-    "tags": ["photos", "vacation"]
+    "tags": ["photos", "vacation"],
+    "access_policy": "protected",
+    "passcode": "secret123"
   }'
 ```
 
 **Request Body**:
 - `friendly_name` (optional): Human-readable name
-- `entries` (required): Array of `{path, hash}` mappings. `path` is the logical file path within the collection, `hash` is the 64-char SHA256.
+- `entries` (required): Array of `{path, hash}` mappings or `{path, providers}`. `path` is the logical file path within the collection, `hash` is the 64-char SHA256.
 - `tags` (optional): Array of string tags
+- `access_policy` (optional, Issue #268): Collection access policy — `public` | `protected` | `private`. Default: `public`.
+  - `public`: Accessible and browsable by anyone without restrictions.
+  - `protected`: Requires a matching `passcode` to reveal file entries and permit file downloads.
+  - `private`: Accessible only by the collection owner / publishing node operator.
+- `passcode` (optional, Issue #268): Unlock key string required when `access_policy` is `protected`.
+- `visibility` (optional): Legacy access scope (`public` | `restricted` | `private`).
+- `access_list` (optional): Account whitelist when `visibility` is `restricted`.
 
 **Response** (201 Created):
 ```json
-{"hash": "collection-sha256-hash..."}
+{
+  "hash": "collection-sha256-hash...",
+  "access_policy": "protected",
+  "visibility": "public",
+  "owner": "operator"
+}
 ```
 
 **Fields**:
 - `hash`: 64-character SHA256 hash that uniquely identifies this collection (computed from its content)
+- `access_policy`: The resolved access policy (`public`, `protected`, or `private`)
+- `visibility`: Visibility setting
+- `owner`: Node operator username who created the collection
 
 ---
 
@@ -693,22 +809,54 @@ curl http://127.0.0.1:3000/anon/collections
 ---
 
 ### `GET /anon/collections/:hash`
-Retrieve an anonymous collection's metadata and entries.
+Retrieve an anonymous collection's metadata and entries (Issue #268).
 
 ```bash
-curl http://127.0.0.1:3000/anon/collections/abc123...
+# Public collection or unlocked via query parameter:
+curl 'http://127.0.0.1:3000/anon/collections/abc123...?passcode=secret123'
+
+# Or unlock via X-Passcode header:
+curl http://127.0.0.1:3000/anon/collections/abc123... \
+  -H "X-Passcode: secret123"
 ```
 
-**Response**:
+**Query Parameters**:
+- `passcode` (optional): Passcode to unlock entries for protected collections.
+
+**Headers**:
+- `X-Passcode` (optional): Alternative request header for passing the collection passcode.
+
+**Response (Unlocked or Public Collection)** (200 OK):
 ```json
 {
-  "version": 1,
+  "version": 2,
   "friendly_name": "My Photos",
   "entries": [
-    {"path": "vacation/beach.jpg", "hash": "abc123..."},
-    {"path": "vacation/sunset.jpg", "hash": "def456..."}
+    {
+      "path": "vacation/beach.jpg",
+      "providers": [{"type": "sha256", "value": "abc123..."}]
+    },
+    {
+      "path": "vacation/sunset.jpg",
+      "providers": [{"type": "sha256", "value": "def456..."}]
+    }
   ],
   "tags": ["photos", "vacation"],
+  "access_policy": "protected",
+  "created_at": "2026-04-28T12:00:00Z"
+}
+```
+
+**Response (Protected Collection Without Passcode)** (200 OK):
+When accessing a protected collection (`access_policy: "protected"`) without the matching passcode (and requester is not the node operator), file entries are hidden and masked:
+```json
+{
+  "version": 2,
+  "friendly_name": "My Photos",
+  "entries": [],
+  "tags": ["photos", "vacation"],
+  "access_policy": "protected",
+  "is_protected": true,
   "created_at": "2026-04-28T12:00:00Z"
 }
 ```
@@ -716,21 +864,42 @@ curl http://127.0.0.1:3000/anon/collections/abc123...
 **Fields**:
 - `version`: Version number
 - `friendly_name`: Human-readable name
-- `entries`: Array of `{path, hash}` mappings
+- `entries`: Array of `{path, providers}` mappings (masked to `[]` when locked)
 - `tags`: Array of tags
+- `access_policy`: Access policy (`public`, `protected`, `private`)
+- `is_protected`: Set to `true` when entries are hidden/locked behind a passcode
 - `created_at`: ISO 8601 creation timestamp
 
 ---
 
 ### `GET /anon/collections/:hash/*filepath`
-Download a specific file from an anonymous collection by collection hash and file path.
+Download a specific file from an anonymous collection by collection hash and file path (Issue #268).
 
 ```bash
-curl -o beach.jpg http://127.0.0.1:3000/anon/collections/abc123.../vacation/beach.jpg
+curl -o beach.jpg 'http://127.0.0.1:3000/anon/collections/abc123.../vacation/beach.jpg?passcode=secret123'
+
+# Or via X-Passcode header:
+curl -o beach.jpg http://127.0.0.1:3000/anon/collections/abc123.../vacation/beach.jpg \
+  -H "X-Passcode: secret123"
 ```
 
+**URL Parameters**:
+- `hash` (required): Collection SHA256 hash
+- `filepath` (required): File path within the collection
+
 **Query Parameters**:
-- `inline=1`: Serve with inline Content-Disposition instead of attachment
+- `passcode` (optional): Passcode required if the collection is protected.
+- `inline` (optional): `inline=1` serves with inline Content-Disposition instead of attachment.
+
+**Headers**:
+- `X-Passcode` (optional): Alternative request header for passing the collection passcode.
+
+**Access Control**:
+- If the collection has `access_policy: "protected"`, accessing this endpoint requires a matching passcode via `?passcode=` or `X-Passcode` header (unless requested by the local node operator).
+- If the passcode is missing or invalid, returns `401 Unauthorized` / `403 Forbidden`:
+  ```json
+  {"error": "passcode required or invalid for protected collection"}
+  ```
 
 **Response**: Binary file stream.
 

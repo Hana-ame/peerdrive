@@ -8,15 +8,20 @@
 peerdrive/
 ├── front/                    React frontend (Vite + TailwindCSS + Vitest)
 │   ├── src/
-│   │   ├── pages/
-│   │   │   ├── AnonCreator/  Collection creation page (three-column layout: filter | preview | edit)
-│   │   │   ├── AnonExplorer/ Collection browsing page
-│   │   │   ├── Plaza/        Collection plaza
-│   │   │   ├── FileManager/  File management
-│   │   │   ├── P2PDashboard/ P2P dashboard
-│   │   │   └── Settings/     Settings
-│   │   ├── components/       Shared components
-│   │   └── api.js            API client
+│   │   ├── features/         Feature-sliced modules
+│   │   │   ├── node/         Node search, connect & control (Connect, NodeControl)
+│   │   │   ├── drive/        Drive & file management (Drive, Grid/List view, Cast)
+│   │   │   ├── collection/   Collections & browser (Collections, CollectionView, Browser)
+│   │   │   ├── transfers/    Transfer manager (Transfers)
+│   │   │   ├── bt/           BitTorrent DHT client (BT)
+│   │   │   ├── ipfs/         IPFS gateway interface (IPFS)
+│   │   │   ├── settings/     System & node settings (Settings)
+│   │   │   ├── display/      Media display & casting (Display)
+│   │   │   └── iwara/        Iwara media integration (Iwara)
+│   │   ├── components/       Shared components (MobileNav, modals, layout)
+│   │   ├── context/          React application contexts (AppContext)
+│   │   ├── lib/              Session, connection status & client helpers
+│   │   └── platform/         Transport bridges (WS, Service Worker)
 │   └── tests/                Frontend tests
 ├── back/                     Go backend (Gin + SQLite + BT DHT), single binary since v0.3.0
 │   ├── cmd/peerdrive/        Entry point (subcommands: demo/serve/signal/reg/all)
@@ -47,17 +52,16 @@ HTTP API (Gin Router)
     → Service (business logic)
       → Provider (data source: local / http / ipfsgw)
       → Repository (SQLite)
-      → P2P (libp2p / BT DHT / WebRTC)
-      → IPFSService (boxo Bitswap + DHT)  ← New
+      → P2P (PeerJS signaling + WebRTC DataChannel / BT DHT)
 ```
 
 | Layer | Location | Responsibility |
 |----|------|------|
 | Router | `back/internal/router/` | Route registration, CORS, Auth middleware |
 | Controller | `back/internal/controller/` | HTTP handling, parameter parsing |
-| Service | `back/internal/service/` | Core logic: file registration/download, collection CRUD/versions, P2P transport/signaling, **IPFSService (boxo Bitswap)** |
+| Service | `back/internal/service/` | Core logic: file registration/download, collection CRUD/versions, P2P transport/signaling, node sharing & directory, cross-node puller |
 | Repository | `back/internal/repository/` | SQLite CRUD |
-| Provider | `back/internal/provider/` | Data source interface: `local` / `http` / `ipfsgw` (IPFS prefers Bitswap) |
+| Provider | `back/internal/provider/` | Data source interface: `local` / `http` / `ipfsgw` |
 | P2P BT | `back/p2p_bt/` | Mainline DHT, BEP44/BEP51, torrent/magnet |
 | Startup assembly | `back/internal/serverapp/` | Assemble router/service/transport; **also prints the "next step" guidance and the clickable `/panel` URL** (since v0.3.2) |
 | Public panel | `back/internal/panel/` | `go:embed` panel.html + peerjs.min.js, served at `/panel`; auto reverse-lookup of node id and signaling (since v0.3.2) |
@@ -85,22 +89,36 @@ HTTP API (Gin Router)
 
 | Module | Frontend | Backend |
 |------|------|------|
-| File Management | `FileManager.jsx`, `Sha256Manager.jsx` | `controller/file.go`, `service/file_service.go` |
-| Collections | `AnonCreator/`, `AnonExplorer/`, `CollectionBuilder.jsx` | `controller/anon.go`, `controller/collection.go`, `service/anon_service.go` |
-| P2P | `P2PDashboard.jsx`, `P2PTopology.jsx`, `WebRTCPeer.jsx` | `service/p2p.go`, `controller/p2p.go` |
-| BT DHT | `BTController.jsx`, `BTPanel.jsx` | `p2p_bt/`, `controller/p2p.go` (BT endpoints) |
-| IPFS | `IPFSPanel.jsx` | `provider/ipfs.go`, `service/ipfs_compat.go` |
-| WebRTC | `WebRTCTransfer.jsx` | `service/p2p.go` (WebRTC signaling) |
-| Authentication | `UserGroupPicker.jsx`, `VisibilityPicker.jsx` | `controller/auth.go`, `service/auth_service.go` |
+| Drive & File Management | `features/drive/` (`Drive.jsx`, `DriveGridView.jsx`, `DriveListView.jsx`, `CastModal.jsx`) | `controller/file.go`, `controller/file_inbox.go`, `service/file_service.go`, `service/file_index_service.go` |
+| Collections | `features/collection/` (`Collections.jsx`, `CollectionView.jsx`, `CollectionBrowser.jsx`) | `controller/anon.go`, `controller/collection.go`, `service/anon_service.go` |
+| Node & Interconnection | `features/node/` (`Connect.jsx`, `NodeControl.jsx`) | `transport/`, `service/node_directory.go`, `service/nodeshare_service.go` |
+| Transfers & Puller | `features/transfers/` (`Transfers.jsx`) | `service/peer_puller.go`, `controller/p2p.go` |
+| BT DHT | `features/bt/` (`BT.jsx`) | `p2p_bt/`, `controller/p2p.go` (BT endpoints) |
+| IPFS | `features/ipfs/` (`IPFS.jsx`) | `provider/ipfs.go`, `controller/ipfs.go` |
+| Media Display | `features/display/` (`Display.jsx`) | Media casting and presentation |
+| Iwara Integration | `features/iwara/` (`Iwara.jsx`) | `controller/iwara.go`, `service/iwara_service.go` |
+| Settings | `features/settings/` (`Settings.jsx`) | `controller/system.go` |
+| Authentication & Session | `lib/` session auth, `platform/transport-ws.js` | `controller/auth.go`, `service/auth_service.go`, `router/auth_middleware.go` |
+
+### Frontend Navigation Architecture (3-Tier)
+
+Frontend navigation in `front/src/App.jsx` dynamically adapts to the connection state across three tiers:
+
+| Tier | Navigation Items | Description / Visibility |
+|------|-------------------|--------------------------|
+| **`ALWAYS_NAV`** | Connect (`/`), Display (`/display`), Iwara (`/iwara`) | Standalone and consumer-facing pages; always visible. |
+| **`OWNER_NAV`** | Drive (`/drive`), Node (`/node`), Collections (`/collections`), Transfers (`/transfers`), BT (`/bt`), IPFS (`/ipfs`), Settings (`/settings`) | Active when a local Node WebSocket session is open (`ws`). Provides full host management. |
+| **`GUEST_NAV`** | Collections (`/collections`), Drive (`/drive`), Transfers (`/transfers`) | Active when connected to a remote peer via WebRTC guest mode (`isGuest`). Exposes only remote shared content and transfers. |
 
 ## Data Flow
 
 ```
-Upload:   front → POST /files/upload → Controller → FileService → Provider(local) → SQLite
-Download: front → GET /sha256sum/:hash → Controller → Downloader → Provider → Response
-P2P:      Node ← libp2p DHT → Discover Peers → WS/WebRTC Transfer
-BT:       Node ← Mainline DHT → Find Peers → Torrent Download
-Collection: front → POST /anon/collections → AnonService → CollectionRepo → JSON → SHA256
+Upload:      front → POST /files/upload → Controller → FileService → Provider(local) → SQLite
+Download:    front → GET /sha256sum/:hash → Controller → Downloader → Provider → Response
+P2P WebRTC:  Node ← PeerJS Signaling / HTTP Discovery / MQTT → DataChannel (req/share/list/sync/fwd)
+BT DHT:      Node ← Mainline DHT → Find Peers → Torrent Download
+Collection:  front → POST /anon/collections → AnonService → CollectionRepo → JSON → SHA256
+Cross-Pull:  Node A (PeerPuller) → WebRTC req/data stream → Node B → Safe disk write + FileIndex
 ```
 
 ## Quick Start
@@ -122,45 +140,67 @@ npm ci && npm run dev
 
 ## Testing
 
+> **Note**: Peerdrive follows a **CI-only verification model** (all CI matrix jobs run automatically via GitHub Actions).
+> For the authoritative testing guide, selection table, and command reference across all 14 components, consult [`doc/testing/README.md`](testing/README.md).
+
 ```bash
-# Backend unit tests
-cd back && go test ./... -count=1
+# Backend unit tests (nosqlite tag required)
+cd back && go test -tags nosqlite ./... -count=1
 
-# E2E full endpoint tests
-cd back && bash test/e2e-all.sh
-
-# P2P dual-node tests
-cd back && bash test/p2p.sh
-
-# Frontend tests
+# Frontend tests (Vitest)
 cd front && npm test
 
 # Frontend build
 cd front && npm run build
+
+# End-to-end full netdisk chain local demo (dual-node + self-hosted signaling + PSK verification)
+./scripts/netdisk-local-demo.sh
 ```
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |------|--------|------|
-| `PORT` | `3000` | Backend port |
+| `PORT` / `PEERDRIVE_PORT` | `3000` | Backend HTTP API port |
+| `PEERDRIVE_HOST` | Empty (`0.0.0.0`) | Listen address (e.g. `127.0.0.1` for local-only admin isolation) |
 | `PEERDRIVE_STORAGE` | `./storage` | File storage directory |
-| `PEERDRIVE_P2P_ENABLE` | `true` | Enable libp2p |
-| `PEERDRIVE_P2P_LISTEN` | `/ip4/0.0.0.0/tcp/0` | P2P listen address |
-| `PEERDRIVE_BT_DHT_ENABLE` | `true` | Enable BT DHT |
-| `PEERDRIVE_MDNS_ENABLE` | `true` | LAN discovery |
-| `PEERDRIVE_RELAY_ENABLE` | `false` | Relay mode |
-| `PEERDRIVE_RELAY_MODE` | `client` | `server` / `client` |
-| `PEERDRIVE_HOLE_PUNCH` | `true` | NAT hole punching |
+| `PEERDRIVE_DB_PATH` | `./peerdrive.db` | SQLite metadata database path |
+| `PEERDRIVE_DOWNLOAD_DIR` | `./downloads` | Downloaded files directory |
+| `PEERDRIVE_PEERJS_ENABLE` | `true` | Enable PeerJS signaling & WebRTC interconnect |
+| `PEERDRIVE_PEERJS_HOST` | `0.peerjs.com` | PeerJS signaling host (override for self-hosted peersignal) |
+| `PEERDRIVE_PEERJS_PORT` | `9000` | PeerJS signaling port (e.g. `443` for TLS proxy) |
+| `PEERDRIVE_PEERJS_KEY` | `peerjs` | PeerJS signaling key |
+| `PEERDRIVE_PEERJS_ID` | Empty | Node PeerJS ID (auto-generates `peerdrive-<random>` if empty) |
+| `PEERDRIVE_PEERJS_PEERS` | Empty | Comma-separated peer IDs for auto-interconnection on startup |
+| `PEERDRIVE_PEERJS_XOR_ENABLE` | `false` | WebRTC DataChannel lightweight XOR wire obfuscation |
+| `PEERDRIVE_PEERJS_XOR_KEY` | Empty | Per-connection XOR derivation seed (both sides must match) |
+| `PEERDRIVE_PSK` | Empty | Pre-shared key for node access admission (open mode if empty) |
+| `PEERDRIVE_SHARE_ENABLE` | `false` | Master switch for external sharing via `share` frame (default off for privacy) |
+| `PEERDRIVE_SHARE_COLLECTIONS` | Empty | Shared collections (comma-separated hashes or `all` for public collections) |
+| `PEERDRIVE_SHARE_DIRS` | Empty | Shared directory paths (comma-separated; must be explicitly declared) |
+| `PEERDRIVE_SHARE_FRIENDS` | Empty | Comma-separated peer IDs allowed access to private-level shares |
+| `PEERDRIVE_DISCOVER_URL` | Empty | Self-hosted signaling discovery API (takes priority over MQTT when set) |
+| `PEERDRIVE_DISCOVER_PRESENCE` | `true` | Node-level presence room discovery: nodes with zero shared collections can also find each other |
+| `PEERDRIVE_DISCOVER_MODE` | `auto` | Discovery mechanism (`auto` / `peerjs` / `discover` / `mqtt` / `off`) |
+| `PEERDRIVE_MAX_PEERS` | `8` | Maximum dials triggered by automatic discovery |
+| `PEERDRIVE_MQTT_ENABLE` | `false` | Enable MQTT content shard room discovery |
+| `PEERDRIVE_MQTT_BROKER` | `tcp://broker.emqx.io:1883` | Public MQTT broker address |
+| `PEERDRIVE_MQTT_COLLECTIONS` | Empty | Comma-separated collection hash shards to watch on MQTT |
+| `PEERDRIVE_BT_ENABLE` | `false` | Opt-in master switch for BitTorrent integration |
+| `PEERDRIVE_BT_DHT_ENABLE` | `false` | Enable BitTorrent mainline DHT |
+| `PEERDRIVE_IPFS_ENABLE` | `false` | Opt-in master switch for IPFS bridge |
+| `PEERDRIVE_IPFS_GATEWAY_ENABLE` | `true` | Enable public IPFS HTTP gateways fallback |
+| `PEERDRIVE_PORTFWD_ENABLE` | `false` | Opt-in master switch for port forwarding v2 |
+| `PEERDRIVE_FORWARD_RULES` | Empty | Port forwarding whitelist credentials (`key1:8080,key2:8443`) |
+| `PEERDRIVE_MAX_CONCURRENT_STREAMS` | `8` | QoS limit for concurrent outgoing download streams |
+| `PEERDRIVE_MAX_UPLOAD_SPEED` | `0` | QoS global outgoing bandwidth limit in bytes/sec (0 = unlimited) |
+| `PEERDRIVE_RATE_LIMIT_RPS` | `30` | Per-IP request rate limit (0 = unlimited) |
+| `PEERDRIVE_CSP` | On | Set to `off` to disable Content-Security-Policy |
+| `PEERDRIVE_TRUSTED_PROXIES` | Empty | Trusted reverse proxies (comma-separated IP/CIDR; empty = only trust RemoteAddr) |
+| `PEERDRIVE_ALLOW_HARDLINKS` | `false` | Set to `1` to allow files with multiple hard links |
+| `PEERDRIVE_ALLOW_UNSAFE_ROOT` | `false` | Set to `1` to allow root volume (`/`, `C:\`) as storage/download directory |
 | `CORS_MODE` | Allowlist | `all` / `localhost` |
 | `VITE_API_BASE` | `http://localhost:3000` | Frontend API base URL |
-| `PEERDRIVE_DISCOVER_URL` | Empty | Self-hosted signaling discovery API (when set, takes priority over MQTT) |
-| `PEERDRIVE_DISCOVER_PRESENCE` | `true` | Node-level "presence room" discovery: nodes with zero shared collections can also discover each other (see [ROADMAP.md](ROADMAP.md) Phase 1, [REFACTOR.md](REFACTOR.md) §3.18) |
-| `PEERDRIVE_MAX_PEERS` | `8` | Dial limit triggered by discovery (prevents full-mesh degradation); static `PEERDRIVE_PEERJS_PEERS` is unlimited |
-| `PEERDRIVE_DB_PATH` | `./peerdrive.db` | SQLite metadata database path (new, 2026-09-23) |
-| `PEERDRIVE_RATE_LIMIT_RPS` | `30` | Per-IP request rate limit, 0=unlimited (new) |
-| `PEERDRIVE_CSP` | On | Set to `off` to disable Content-Security-Policy (new) |
-| `PEERDRIVE_TRUSTED_PROXIES` | Empty | Trusted reverse proxies (IP/CIDR comma-separated or `all`); empty=only trust RemoteAddr (new) |
 
 > Background and remaining items for new additions see [FULLSTACK-AUDIT.md](FULLSTACK-AUDIT.md).
 
@@ -192,7 +232,7 @@ cd front && npm run build
 
 | File | Content |
 |------|------|
-| [spec/API-REFERENCE.md](spec/API-REFERENCE.md) | Complete API reference (105 endpoints) |
+| [spec/API-REFERENCE.md](spec/API-REFERENCE.md) | Complete API reference (107 endpoints) |
 | [spec/REQUIREMENTS.md](spec/REQUIREMENTS.md) | Complete requirements table (130+ items) |
 | [spec/COLLECTION-LOGIC.md](spec/COLLECTION-LOGIC.md) | Complete collection logic trace |
 | [spec/USER-ROLES.md](spec/USER-ROLES.md) | User role model |
