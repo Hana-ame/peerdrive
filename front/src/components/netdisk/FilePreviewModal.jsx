@@ -12,6 +12,7 @@ import React, { useState, useEffect } from 'react';
 import { fmtBytes } from '../../platform/shared/format';
 import { kindOf, mimeOf, MAX_TEXT_PREVIEW_BYTES } from '../../platform/shared/mime';
 import { swControlled } from '../../platform/shared/swBridge';
+import { getNodeSession } from '../../lib/nodeSession';
 
 export default function FilePreviewModal({
   file, // { hash, filename, size, mime_type, ... }
@@ -54,10 +55,11 @@ export default function FilePreviewModal({
         }
 
         // SW 边下边播与 206 Range 支持：
-        // 若当前处于 Service Worker 控制下且为音视频媒体类型，直接构造 /swdrive/ URL
-        // 浏览器 video/audio 播放器将直接发起带有 Range 头的 HTTP 206 请求，
-        // 由 service-worker.js 拦截并通过 MessageChannel 流式索取分片，实现秒开播放和任意 seek。
-        const isMediaStreamable = (kind === 'video' || kind === 'audio') && swControlled();
+        // 仅当：① 为音视频 ② Service Worker 已激活 ③ 存在远程 Peer 客户端连接时，
+        // 才构造 /swdrive/ URL 由 SW 拦截向 DataChannel 发起分片请求。
+        // 若在本地 WS 模式或无远程 Peer 时，直接回退走常规 fetchBlob 获得 Blob URL。
+        const hasPeerClient = Boolean(getNodeSession()?.client);
+        const isMediaStreamable = (kind === 'video' || kind === 'audio') && swControlled() && hasPeerClient;
         if (isMediaStreamable) {
           const base = import.meta.env.BASE_URL || '/';
           const swDriveUrl = `${base}swdrive/${encodeURIComponent(file.hash)}?name=${encodeURIComponent(filename)}${file.size ? '&size=' + file.size : ''}`;
@@ -158,18 +160,30 @@ export default function FilePreviewModal({
         <div className="flex-1 min-h-[300px] max-h-[68vh] overflow-y-auto flex flex-col items-center justify-center bg-black/40 rounded-xl p-3 border border-white/[0.04]">
           {loading && (
             <div className="flex flex-col items-center gap-3 py-16 text-gray-400">
-              <span className="text-2xl animate-spin">⏳</span>
-              <span className="text-xs">Loading preview...</span>
+              <span className="text-3xl animate-spin">⏳</span>
+              <span className="text-sm font-medium text-gray-300">正在加载文件数据...</span>
+              <span className="text-xs text-gray-500 font-mono">
+                {filename} {file?.size != null ? `(${fmtBytes(file.size)})` : ''}
+              </span>
             </div>
           )}
 
           {error && !loading && (
-            <div className="flex flex-col items-center gap-3 py-16 text-center px-4">
+            <div className="flex flex-col items-center gap-3 py-12 text-center px-4 max-w-lg">
               <span className="text-3xl">⚠️</span>
-              <p className="text-sm text-red-400">{error}</p>
-              <p className="text-xs text-gray-500 max-w-md">
-                Unable to render preview directly in browser. You can still download the file to inspect it locally.
+              <p className="text-sm font-medium text-red-400">{error}</p>
+              <p className="text-xs text-gray-400">
+                无法在浏览器中直接内联预览该文件。您可以将其保存到本地设备进行查看。
               </p>
+              {onDownload && (
+                <button
+                  onClick={() => onDownload(file)}
+                  className="btn-brand text-xs px-4 py-2 mt-2 flex items-center gap-2 shadow-lg"
+                >
+                  <span>⬇️ 立即下载文件</span>
+                  {file?.size != null && <span className="font-mono text-[11px]">({fmtBytes(file.size)})</span>}
+                </button>
+              )}
             </div>
           )}
 
@@ -181,29 +195,58 @@ export default function FilePreviewModal({
                     src={blobUrl}
                     alt={filename}
                     className="max-w-full max-h-[62vh] object-contain rounded shadow"
+                    onError={() => {
+                      setError('图片解码或显示失败，文件数据可能不完整。');
+                    }}
                   />
                 </div>
               )}
 
               {kind === 'video' && (
-                <div className="w-full h-full flex items-center justify-center">
+                <div className="w-full h-full flex flex-col items-center justify-center">
                   <video
                     src={blobUrl}
                     controls
                     autoPlay
-                    className="max-w-full max-h-[62vh] rounded bg-black"
+                    playsInline
+                    className="max-w-full max-h-[60vh] rounded bg-black"
                     onError={async () => {
+                      // 1. 若使用的是 /swdrive/ 流式地址且播放失败，尝试回退到 fetchBlob 整体加载
                       if (fetchBlob && !blobUrl.startsWith('blob:')) {
                         try {
+                          setLoading(true);
                           const data = await fetchBlob(file.hash);
                           const b = data instanceof Blob ? data : new Blob([data], { type: effectiveMime || 'video/mp4' });
-                          setBlobUrl(URL.createObjectURL(b));
-                        } catch (err) {
-                          setError('Video playback failed: ' + (err?.message || String(err)));
+                          const nextUrl = URL.createObjectURL(b);
+                          setBlobUrl(nextUrl);
+                          setLoading(false);
+                          return;
+                        } catch {
+                          setLoading(false);
                         }
+                      }
+                      // 2. 格式不兼容提示（特别是 QuickTime MOV 格式）
+                      const isMov = (filename || '').toLowerCase().endsWith('.mov') || effectiveMime === 'video/quicktime';
+                      if (isMov) {
+                        setError('该视频为 MOV (QuickTime) 格式，当前浏览器可能不支持原生硬件解码。建议下载后使用本地播放器查看。');
+                      } else {
+                        setError('视频播放失败：浏览器无法解码该媒体或格式不受支持。');
                       }
                     }}
                   />
+                  {(filename.toLowerCase().endsWith('.mov') || effectiveMime === 'video/quicktime') && (
+                    <div className="mt-2 text-[11px] text-gray-400 flex items-center gap-1.5">
+                      <span>💡 提示：若当前浏览器黑屏或无声音，请</span>
+                      {onDownload && (
+                        <button
+                          onClick={() => onDownload(file)}
+                          className="text-brand-400 hover:text-brand-300 underline font-medium"
+                        >
+                          下载到本地播放
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

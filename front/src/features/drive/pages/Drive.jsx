@@ -113,12 +113,12 @@ export default function Drive() {
         const shareData = await peerSession.client.shares();
         const rawFiles = shareData?.files || [];
         const fileList = rawFiles.map(e => {
-          const fname = e.path || e.name || 'unnamed';
+          const fname = e.name || e.path || 'unnamed';
           return {
             hash: e.hash || '',
             filename: fname,
             size: e.size || 0,
-            mime_type: mimeOf(fname),
+            mime_type: mimeOf(fname, e.mime),
             created_at: '',
             isDir: false,
             path: e.path || e.name || '',
@@ -133,25 +133,35 @@ export default function Drive() {
     }
 
     try {
-      let res;
-      try {
-        const query = currentDir ? `?path=${encodeURIComponent(currentDir)}` : '';
-        res = await ws.admin('GET', `/files/browse${query}`);
-        if (Array.isArray(res)) {
-          res = res.map(e => ({
-            hash: e.hash || '',
-            filename: e.name || '',
-            size: e.size || 0,
-            mime_type: e.is_dir ? 'folder' : (e.mime || ''),
-            created_at: e.mod_time || '',
-            isDir: Boolean(e.is_dir),
-            path: e.path || '',
-          }));
-        }
-      } catch {
-        res = await ws.admin('GET', '/files');
+      let fileList = [];
+      if (!currentDir) {
+        // Root directory: fetch registered cloud drive files (full hashes, mime types, sizes)
+        const res = await ws.admin('GET', '/files');
+        const raw = Array.isArray(res) ? res : [];
+        fileList = raw.map(e => ({
+          hash: e.hash || '',
+          filename: e.filename || e.name || 'unnamed',
+          size: e.size || 0,
+          mime_type: mimeOf(e.filename || e.name, e.mime_type || e.mime),
+          created_at: e.created_at || e.mod_time || '',
+          isDir: false,
+          path: e.provider_path || e.path || '',
+        }));
+      } else {
+        // Subdirectory browsing: query /files/browse?path=...
+        const query = `?path=${encodeURIComponent(currentDir)}`;
+        const res = await ws.admin('GET', `/files/browse${query}`);
+        const raw = Array.isArray(res) ? res : [];
+        fileList = raw.map(e => ({
+          hash: e.hash || '',
+          filename: e.name || e.filename || 'unnamed',
+          size: e.size || 0,
+          mime_type: e.is_dir ? 'folder' : mimeOf(e.name || e.filename, e.mime),
+          created_at: e.mod_time || '',
+          isDir: Boolean(e.is_dir),
+          path: e.path || '',
+        }));
       }
-      const fileList = Array.isArray(res) ? res : [];
       setFiles(fileList);
 
       // Fetch tags for files that have hashes
@@ -594,15 +604,16 @@ export default function Drive() {
           <FilePreviewModal
             file={previewFile}
             fetchBlob={async (hash) => {
+              const effectiveType = mimeOf(previewFile.filename, previewFile.mime_type) || 'application/octet-stream';
               if (peerSession?.client) {
                 const chunks = [];
                 for await (const chunk of peerSession.client.stream(hash)) {
                   chunks.push(chunk);
                 }
-                const effectiveType = mimeOf(previewFile.filename, previewFile.mime_type) || 'application/octet-stream';
                 return new Blob(chunks, { type: effectiveType });
               }
-              return ws.download(hash);
+              const u8 = await ws.download(hash);
+              return new Blob([u8], { type: effectiveType });
             }}
             onClose={() => setPreviewFile(null)}
             onDownload={(f) => onDownload(f)}

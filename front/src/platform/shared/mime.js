@@ -74,14 +74,27 @@ export function extOf(filename) {
 }
 
 // mimeOf resolves the effective MIME type:
-// 1. If explicitMime is non-empty and not 'folder', returns it.
-// 2. Otherwise falls back to extension-based guess.
+// 1. If explicitMime is non-empty and specific, returns it (cleaning parameters like charset).
+// 2. SVG special case: Go http.DetectContentType flags SVG as "text/plain; charset=utf-8",
+//    so svg is always normalized to "image/svg+xml".
+// 3. If explicitMime is generic (text/plain, application/octet-stream), prefers extension-based MIME.
 export function mimeOf(filename, explicitMime = '') {
-  if (explicitMime && explicitMime !== 'folder' && explicitMime !== 'unknown') {
-    return explicitMime.trim().toLowerCase();
-  }
   const ext = extOf(filename);
-  return EXT_TO_MIME[ext] || '';
+  const extMime = EXT_TO_MIME[ext] || '';
+
+  // SVG override: standard library sniffing frequently classifies SVG markup as plain text
+  if (ext === 'svg') {
+    return 'image/svg+xml';
+  }
+
+  if (explicitMime && explicitMime !== 'folder' && explicitMime !== 'unknown') {
+    const clean = explicitMime.trim().toLowerCase().split(';')[0].trim();
+    if ((clean === 'text/plain' || clean === 'application/octet-stream') && extMime) {
+      return extMime;
+    }
+    return clean;
+  }
+  return extMime;
 }
 
 // kindOf categorizes a file into previewable kinds:
