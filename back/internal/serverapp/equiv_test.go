@@ -396,7 +396,7 @@ GET     /health                          -> 200 ct="application/json; charset=ut
 GET     /ready                           -> 503 ct="application/json; charset=utf-8" kind=json sha=771b5996d72d0e3399407b1e53bdf7d1ff809e69edc0476fc0e58de56d9ea0ab
 GET     /p2p/auth/status                 -> 200 ct="application/json; charset=utf-8" kind=json sha=885e0739e84cc31e2fd9139722b1295042e807822fc9ffafa3c9da0b47a97a2a
 GET     /swagger/index.html              -> 200 ct="text/html; charset=utf-8"       kind=raw  sha=b238c541fb6eca4324529c6e97087d872755f782f333b27e2838e6ce40923520
-GET     /panel                           -> 200 ct="text/html; charset=utf-8"       kind=raw  sha=88e57817cfe55ab39ea24c2f79a9c282c9dbf1fe7f243b8d1ccecff00f0a0fc5
+GET     /panel                           -> 200 ct="text/html; charset=utf-8"       kind=raw  sha=c67f0be1b6a583311bb16140aa3545fad4f77875d6d4aaa4dc3477be1af20e05
 GET     /peerjs.min.js                   -> 200 ct="application/javascript; charset=utf-8" kind=raw  sha=7604d8c31bec4f134b0d15c2d80b1d095ea18af005354f439f14291fcd7b4168
 GET     /no-such-path                    -> 404 ct="text/plain"                     kind=raw  sha=99eb12f2ab3c4866a353e098ffa3cb7a967e617c49b98480394ec5d8ea92b094
 POST    /collections/register-local      -> 400 ct="application/json; charset=utf-8" kind=json sha=2b9fbe63dc1aeedc22c8e3f74b4d5ec422b0ac295d05cf8e0281e25834c83723
