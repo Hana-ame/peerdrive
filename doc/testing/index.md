@@ -10,6 +10,7 @@
 | [**scripts/test-layers.sh**](../../scripts/test-layers.sh) | One-click run tests layer by layer by AOP layers (L1-L8 + LB + optional INT) |
 | [**Layer documentation ../layers/README.md**](../layers/README.md) | L1-L8 each layer's responsibilities, key mechanisms, tests, file lists |
 | [**NetDisk manual test ../NETDISK.md §7**](../NETDISK.md#7-local-run-how-to-manually-test-these-features) | End-to-end environment setup + feature-by-feature curl checklist |
+| [**v0.4.0 Manual Verification MANUAL-VERIFICATION-v0.4.0.md**](MANUAL-VERIFICATION-v0.4.0.md) | Peerdrive v0.4.0 人工测试与核心功能验证指南（遥控投屏、流切片广播、端口转发、aria2、移动端 UX） |
 
 ## Scale Snapshot (2026-09-20 actual)
 
