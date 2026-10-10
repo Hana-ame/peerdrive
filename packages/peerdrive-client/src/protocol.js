@@ -82,8 +82,20 @@ export function shareFrame(reqId) {
 //  2. **Key transmitted in plaintext**. DataChannel enforces DTLS, the key won't be exposed on the wire;
 //     the server needs to store plaintext for comparison anyway. What we're guarding against is "strangers
 //     connecting", not eavesdropping.
-export function pskAuthFrame(psk) {
-  return JSON.stringify({ type: 'psk-auth', psk: String(psk ?? '') })
+// CLIENT_CAPABILITIES declares the capabilities supported by peerdrive-client.
+export const CLIENT_CAPABILITIES = ['req', 'share', 'index', 'pull']
+
+export function pskAuthFrame(psk, capabilities = CLIENT_CAPABILITIES) {
+  const payload = { type: 'psk-auth', psk: String(psk ?? '') }
+  if (Array.isArray(capabilities) && capabilities.length > 0) {
+    payload.capabilities = capabilities
+  }
+  return JSON.stringify(payload)
+}
+
+// capFrame constructs capability negotiation handshake frame.
+export function capFrame(capabilities = CLIENT_CAPABILITIES) {
+  return JSON.stringify({ type: 'cap', capabilities: capabilities || CLIENT_CAPABILITIES })
 }
 
 // PSK_REQUIRED is the machine-readable error code that Go-side auth returns in err frames.
