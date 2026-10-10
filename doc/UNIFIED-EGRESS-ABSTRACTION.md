@@ -1,8 +1,17 @@
 # 统一出口抽象架构设计规范 (UNIFIED-EGRESS-ABSTRACTION.md)
 
-> 对应 Issue: #193  
-> 状态: 架构设计完成 · 待分阶段实现  
+> 对应 Issue: #193
+> 状态: **Phase 3 阻塞 · 消费端未接线**（2026-10 评估，见 [`doc/design/EGRESS-ABSTRACTION-EVALUATION.md`](design/EGRESS-ABSTRACTION-EVALUATION.md)）
 > 关联规范: `doc/LAYERS.md` (架构总纲 v2), `doc/WEBDAV-SOURCE-EVALUATION.md` (#165), `doc/ROADMAP.md` (演进阶段), `doc/NETDISK.md` (网盘消费链路)
+
+> **⚠️ 读者须知（2026-10 更新）**：`back/internal/egress` 共 1640 LOC，
+> Pipeline 与三大 Sink 当前**零消费端接入**；仅 `ParseRangeHeader` 被
+> `controller/download.go` 引用。三条消费链路（HTTP / WS admin-bin /
+> PeerJS serveFile）**各走各的老管线**，未收敛到 Pipeline。
+> 决策：**冻结**，暂不接线（会回归 QoS 限流、Authorizer 门禁、
+> `http.ServeContent` 的 If-Range/ETag 语义）、暂不瘦身（`ParseRangeHeader`
+> 有真实消费者不能删；测试覆盖完整是下次接线的脚手架）。
+> **下次接线前置条件**：见评估文档 §5.2。
 
 ---
 
