@@ -11,6 +11,7 @@
 import React, { useState, useEffect } from 'react';
 import { fmtBytes } from '../../platform/shared/format';
 import { kindOf, mimeOf, MAX_TEXT_PREVIEW_BYTES } from '../../platform/shared/mime';
+import { swControlled } from '../../platform/shared/swBridge';
 
 export default function FilePreviewModal({
   file, // { hash, filename, size, mime_type, ... }
@@ -47,6 +48,21 @@ export default function FilePreviewModal({
         if (file.url) {
           if (active) {
             setBlobUrl(file.url);
+            setLoading(false);
+          }
+          return;
+        }
+
+        // SW 边下边播与 206 Range 支持：
+        // 若当前处于 Service Worker 控制下且为音视频媒体类型，直接构造 /swdrive/ URL
+        // 浏览器 video/audio 播放器将直接发起带有 Range 头的 HTTP 206 请求，
+        // 由 service-worker.js 拦截并通过 MessageChannel 流式索取分片，实现秒开播放和任意 seek。
+        const isMediaStreamable = (kind === 'video' || kind === 'audio') && swControlled();
+        if (isMediaStreamable) {
+          const base = import.meta.env.BASE_URL || '/';
+          const swDriveUrl = `${base}swdrive/${encodeURIComponent(file.hash)}?name=${encodeURIComponent(filename)}${file.size ? '&size=' + file.size : ''}`;
+          if (active) {
+            setBlobUrl(swDriveUrl);
             setLoading(false);
           }
           return;
@@ -176,6 +192,17 @@ export default function FilePreviewModal({
                     controls
                     autoPlay
                     className="max-w-full max-h-[62vh] rounded bg-black"
+                    onError={async () => {
+                      if (fetchBlob && !blobUrl.startsWith('blob:')) {
+                        try {
+                          const data = await fetchBlob(file.hash);
+                          const b = data instanceof Blob ? data : new Blob([data], { type: effectiveMime || 'video/mp4' });
+                          setBlobUrl(URL.createObjectURL(b));
+                        } catch (err) {
+                          setError('Video playback failed: ' + (err?.message || String(err)));
+                        }
+                      }
+                    }}
                   />
                 </div>
               )}
@@ -183,7 +210,23 @@ export default function FilePreviewModal({
               {kind === 'audio' && (
                 <div className="w-full py-16 flex flex-col items-center justify-center gap-4">
                   <div className="text-4xl">🎵</div>
-                  <audio src={blobUrl} controls autoPlay className="w-full max-w-md" />
+                  <audio
+                    src={blobUrl}
+                    controls
+                    autoPlay
+                    className="w-full max-w-md"
+                    onError={async () => {
+                      if (fetchBlob && !blobUrl.startsWith('blob:')) {
+                        try {
+                          const data = await fetchBlob(file.hash);
+                          const b = data instanceof Blob ? data : new Blob([data], { type: effectiveMime || 'audio/mpeg' });
+                          setBlobUrl(URL.createObjectURL(b));
+                        } catch (err) {
+                          setError('Audio playback failed: ' + (err?.message || String(err)));
+                        }
+                      }
+                    }}
+                  />
                 </div>
               )}
 
