@@ -563,3 +563,64 @@ func TestFileIndex_WriteFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, fi.Path, info.Path)
 }
+
+// TestFileIndex_UploadRawShaFilename 验证上传文件落盘使用 raw file，无 ext，文件名是 sha，且文件表中保留原始文件名。
+// 发现背景：issue 要求上传的文件默认使用 raw file，没有 ext，文件名是 sha，sha 文件表中保留文件名项目。
+func TestFileIndex_UploadRawShaFilename(t *testing.T) {
+	initTestDB(t)
+	svc := newTestIndex(t)
+
+	// 1. BeginUpload + WriteAt + Complete 链路
+	content := []byte("upload session raw sha filename content")
+	origName := "video_clip.mp4"
+	sess, err := svc.BeginUpload(origName, int64(len(content)))
+	require.NoError(t, err)
+
+	require.NoError(t, sess.WriteAt(0, content))
+	done, fi, err := sess.Complete()
+	require.NoError(t, err)
+	assert.True(t, done)
+
+	// 断言：文件名是 sha，没有 ext
+	baseName := filepath.Base(fi.Path)
+	assert.Equal(t, fi.Hash, baseName)
+	assert.Equal(t, "", filepath.Ext(baseName))
+	assert.Equal(t, origName, fi.Name)
+
+	// 断言：磁盘内容完全一致
+	got, err := os.ReadFile(fi.Path)
+	require.NoError(t, err)
+	assert.Equal(t, content, got)
+
+	// 断言：file_index 中记录了原始文件名
+	idx, err := repository.GetFileIndex(fi.Hash)
+	require.NoError(t, err)
+	require.NotNil(t, idx)
+	assert.Equal(t, origName, idx.Name)
+	assert.Equal(t, fi.Path, idx.Path)
+
+	// 断言：file_meta 中也记录了原始文件名
+	meta, err := repository.GetFileMeta(fi.Hash)
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+	assert.Equal(t, origName, meta.Filename)
+
+	// 2. WriteFile 链路
+	writeContent := []byte("write file raw sha payload")
+	writeName := "archive.tar.gz"
+	fi2, err := svc.WriteFile(writeName, bytes.NewReader(writeContent))
+	require.NoError(t, err)
+	assert.Equal(t, writeName, fi2.Name)
+	base2 := filepath.Base(fi2.Path)
+	assert.Equal(t, fi2.Hash, base2)
+	assert.Equal(t, "", filepath.Ext(base2))
+
+	idx2, err := repository.GetFileIndex(fi2.Hash)
+	require.NoError(t, err)
+	assert.Equal(t, writeName, idx2.Name)
+
+	meta2, err := repository.GetFileMeta(fi2.Hash)
+	require.NoError(t, err)
+	assert.Equal(t, writeName, meta2.Filename)
+}
+

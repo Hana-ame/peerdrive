@@ -370,5 +370,39 @@ func TestUpload_RegistersFileIndex(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "uploaded file %s must appear in file_index", meta.Hash)
-
 }
+
+// TestUpload_RawShaFileWithoutExt verifies that uploaded files are stored as raw files named by their SHA without extensions,
+// and the original filename is properly registered in both file_meta and file_index tables.
+// 发现背景：issue 要求上传的文件默认使用 raw file，没有 ext，文件名是 sha，sha 文件表中保留文件名项目。
+func TestUpload_RawShaFileWithoutExt(t *testing.T) {
+	dir, svc := setupFileServiceTest()
+	defer os.RemoveAll(dir)
+
+	payload := []byte("upload raw sha file test payload")
+	meta, err := svc.Upload(bytes.NewReader(payload), "document.pdf")
+	require.NoError(t, err)
+	require.NotEmpty(t, meta.Hash)
+	assert.Equal(t, "document.pdf", meta.Filename)
+
+	// Check file_meta table
+	savedMeta, err := repository.GetFileMeta(meta.Hash)
+	require.NoError(t, err)
+	require.NotNil(t, savedMeta)
+	assert.Equal(t, "document.pdf", savedMeta.Filename)
+
+	// Check file_index table
+	idx, err := repository.GetFileIndex(meta.Hash)
+	require.NoError(t, err)
+	require.NotNil(t, idx)
+	assert.Equal(t, "document.pdf", idx.Name)
+
+	// Verify on-disk file: raw file, no ext, filename is sha
+	baseName := filepath.Base(idx.Path)
+	assert.Equal(t, meta.Hash, baseName)
+	assert.Equal(t, "", filepath.Ext(baseName))
+	data, err := os.ReadFile(idx.Path)
+	require.NoError(t, err)
+	assert.Equal(t, payload, data)
+}
+

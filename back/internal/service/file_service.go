@@ -47,7 +47,49 @@ func NewFileService(cfg *config.Config) *FileService {
 
 // GetMeta looks up file metadata by hash (M2 convergence: the download controller previously called repository.GetFileMeta directly).
 func (s *FileService) GetMeta(hash string) (*model.FileMeta, error) {
-	return repository.GetFileMeta(hash)
+	meta, err := repository.GetFileMeta(hash)
+	if err == nil && meta != nil {
+		return meta, nil
+	}
+	// Fallback to file_index if not found in file_meta
+	if fi, fiErr := repository.GetFileIndex(hash); fiErr == nil && fi != nil {
+		return &model.FileMeta{
+			Hash:     fi.Hash,
+			Size:     fi.Size,
+			Filename: fi.Name,
+			Type:     model.FileTypeBlob,
+		}, nil
+	}
+	return meta, err
+}
+
+// GetLocalPath returns the on-disk file path for a content hash by checking storageDir, file_index, and local providers.
+func (s *FileService) GetLocalPath(hash string) (string, error) {
+	if s.storageDir != "" {
+		relPath := hash[:2] + "/" + hash
+		fullPath := filepath.Join(s.storageDir, relPath)
+		if _, err := os.Stat(fullPath); err == nil {
+			return fullPath, nil
+		}
+	}
+	if fi, err := repository.GetFileIndex(hash); err == nil && fi != nil && fi.Path != "" {
+		if _, err := os.Stat(fi.Path); err == nil {
+			return fi.Path, nil
+		}
+	}
+	providers, _ := repository.GetFileProviders(hash)
+	for _, p := range providers {
+		if p.ProviderType == "local" {
+			candidate := p.Path
+			if !filepath.IsAbs(candidate) && s.storageDir != "" {
+				candidate = filepath.Join(s.storageDir, candidate)
+			}
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate, nil
+			}
+		}
+	}
+	return "", os.ErrNotExist
 }
 
 // GetMetaByCID looks up file metadata by IPFS CID (M2 convergence: the download controller DownloadByCID).
@@ -590,6 +632,13 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 
 	if existing, _ := repository.GetFileMeta(hash); existing != nil {
 		log.LogInfo("file-svc: Upload %s already exists (hash=%s)", filename, hash)
+		if existing.Filename == "" && filename != "" {
+			existing.Filename = filename
+			_ = repository.UpdateFileMetaFilename(hash, filename)
+		}
+		relPath := hash[:2] + "/" + hash
+		fullPath := filepath.Join(s.storageDir, relPath)
+		_, _ = repository.UpsertFileIndex(hash, fullPath, filename, existing.Size, false)
 		return existing, ErrFileAlreadyExists
 	}
 
