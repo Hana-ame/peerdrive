@@ -3,6 +3,7 @@ package service
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -299,6 +300,17 @@ func (s *AnonService) CommitCollection(
 	commitMessage string,
 	requester string,
 ) (string, error) {
+	return s.CommitCollectionWithPasscode(sourceHash, entries, commitMessage, "", requester)
+}
+
+// CommitCollectionWithPasscode commits modifications to an existing collection with optional passcode verification for protected collections.
+func (s *AnonService) CommitCollectionWithPasscode(
+	sourceHash string,
+	entries []model.AnonCollectionEntry,
+	commitMessage string,
+	passcode string,
+	requester string,
+) (string, error) {
 	defer log.LogDuration("AnonService.CommitCollection")()
 	log.LogDebug("anon-svc: CommitCollection sourceHash=%s entries=%d", sourceHash, len(entries))
 
@@ -306,6 +318,12 @@ func (s *AnonService) CommitCollection(
 	if err != nil {
 		log.LogError("anon-svc: CommitCollection source %s not found: %v", sourceHash, err)
 		return "", fmt.Errorf("source collection not found: %w", err)
+	}
+
+	if src.EffectiveAccessPolicy() == model.AccessPolicyProtected && requester == "" {
+		if subtle.ConstantTimeCompare([]byte(passcode), []byte(src.Passcode)) != 1 {
+			return "", fmt.Errorf("passcode required or invalid for protected collection")
+		}
 	}
 
 	// Normalize: struct literals / old formats may only set Hash without setting Providers --
@@ -380,6 +398,8 @@ func inheritVisibility(dst, src *model.AnonCollection) {
 	dst.Visibility = src.Visibility
 	dst.AccessList = src.AccessList
 	dst.Owner = src.Owner
+	dst.AccessPolicy = src.AccessPolicy
+	dst.Passcode = src.Passcode
 }
 
 func newAnonCollectionWithVersion(name string, entries []model.AnonCollectionEntry, version int, tags []string) *model.AnonCollection {

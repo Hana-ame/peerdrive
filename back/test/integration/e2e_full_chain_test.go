@@ -467,3 +467,127 @@ func (m *mockTestPullSource) OpenStream(peerID, hash string, offset, size int64)
 	}
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
+
+// TestEndToEnd_SecurityBoundariesAndAccessPolicy 发现背景：端到端跨节点交互中，
+// 恶意或未授权对端可能尝试暴力绕过受保护合集口令、请求不存在或恶意哈希探测，
+// 必须全链路验证所有安全门禁在真实信令与 WebRTC DataChannel 下均生效。
+func TestEndToEnd_SecurityBoundariesAndAccessPolicy(t *testing.T) {
+	requireInitDB(t)
+
+	anonDir := t.TempDir()
+	repository.SetAnonStorageDir(anonDir)
+	storageA := t.TempDir()
+	downloadB := t.TempDir()
+
+	// Node A: 发布节点
+	cfgA := config.Load()
+	anonSvcA := service.NewAnonService(cfgA)
+
+	fileAContent := []byte("top-secret-protected-content-007")
+	fileAHash := writeTestFile(t, storageA, fileAContent)
+
+	const passcode = "pass-gate-2026"
+	protCollHash, err := anonSvcA.CreateCollectionWithPolicy(
+		"confidential-docs",
+		[]model.AnonCollectionEntry{
+			{Path: "secret.doc", Providers: []model.Provider{{Type: "sha256", Value: fileAHash, MimeType: "text/plain"}}},
+		},
+		[]string{"security"},
+		model.VisibilityPublic,
+		nil,
+		model.AccessPolicyProtected,
+		passcode,
+		"publisher",
+	)
+	require.NoError(t, err)
+
+	cfgA.PeerJSEnable = true
+	cfgA.PeerJSID = randID("sec-node-a")
+	cfgA.PeerJSHost, cfgA.PeerJSPort = splitHostPort(selfHostedURL)
+	cfgA.PeerJSSecure = false
+	cfgA.PeerJSKey = "testkey"
+	cfgA.BTDHTEnabled = false
+	cfgA.DiscoverURL = selfHostedURL
+	cfgA.DiscoverPresence = true
+	cfgA.MQTTCollections = ""
+	cfgA.ShareEnable = true
+	cfgA.ShareCollections = protCollHash
+	cfgA.DownloadDir = storageA
+
+	svcA := transport.NewPeerJSService(cfgA, storageA)
+	svcA.SetLocalCapabilities([]string{
+		transport.CapReq,
+		transport.CapShare,
+		transport.CapPull,
+	})
+	shareSvcA := service.NewNodeShare(cfgA, "")
+	shareSvcA.SetAnonAccess(anonSvcA.GetCollectionByHash, anonSvcA.ListCollections)
+	svcA.SetShareProvider(shareSvcA.SnapshotFor)
+	svcA.SetShareProviderWithToken(shareSvcA.SnapshotForToken)
+	svcA.Start()
+	t.Cleanup(svcA.Close)
+
+	// Node B: 探测节点
+	cfgB := config.Load()
+	cfgB.PeerJSEnable = true
+	cfgB.PeerJSID = randID("sec-node-b")
+	cfgB.PeerJSHost, cfgB.PeerJSPort = splitHostPort(selfHostedURL)
+	cfgB.PeerJSSecure = false
+	cfgB.PeerJSKey = "testkey"
+	cfgB.BTDHTEnabled = false
+	cfgB.DiscoverURL = selfHostedURL
+	cfgB.DiscoverPresence = true
+	cfgB.MQTTCollections = ""
+	cfgB.DownloadDir = downloadB
+
+	svcB := transport.NewPeerJSService(cfgB, t.TempDir())
+	svcB.SetLocalCapabilities([]string{
+		transport.CapReq,
+		transport.CapShare,
+		transport.CapPull,
+	})
+	svcB.Start()
+	t.Cleanup(svcB.Close)
+
+	// 等待 B 与 A 发现并建立 WebRTC DataChannel
+	waitConnections(t, svcB, map[string]bool{svcA.ID(): true}, 60*time.Second)
+
+	// 1. 无口令查询 share 清单：条目必须被锁定
+	snapNoPass, err := svcB.RequestSharesWithPasscode(svcA.ID(), "")
+	require.NoError(t, err)
+	foundProtected := false
+	for _, c := range snapNoPass.Collections {
+		if c.Name == "confidential-docs" {
+			foundProtected = true
+			require.True(t, c.IsProtected, "protected collection must be marked as protected without passcode")
+			require.Empty(t, c.Entries, "protected collection entries must be hidden")
+		}
+	}
+	require.True(t, foundProtected, "confidential-docs must be returned in manifest")
+
+	// 2. 错误口令查询：条目依然锁定
+	snapWrongPass, err := svcB.RequestSharesWithPasscode(svcA.ID(), "wrong-code")
+	require.NoError(t, err)
+	for _, c := range snapWrongPass.Collections {
+		if c.Name == "confidential-docs" {
+			require.True(t, c.IsProtected, "wrong passcode must keep collection locked")
+			require.Empty(t, c.Entries, "wrong passcode must not reveal entries")
+		}
+	}
+
+	// 3. 正确口令查询：条目解锁
+	snapCorrectPass, err := svcB.RequestSharesWithPasscode(svcA.ID(), passcode)
+	require.NoError(t, err)
+	for _, c := range snapCorrectPass.Collections {
+		if c.Name == "confidential-docs" {
+			require.False(t, c.IsProtected, "correct passcode must unlock collection")
+			require.Len(t, c.Entries, 1, "unlocked collection must reveal entries")
+			require.Equal(t, fileAHash, c.Entries[0].Hash)
+		}
+	}
+
+	// 4. 异常探测：请求损坏/不存在的哈希，必须安全返回错误且不引起 panic 或卡死
+	fakeHash := "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+	_, err = svcB.FetchFromPeer(svcA.ID(), fakeHash, 0, 1024)
+	require.Error(t, err, "fetching non-existent hash must fail gracefully")
+}

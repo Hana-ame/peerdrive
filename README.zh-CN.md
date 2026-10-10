@@ -3,13 +3,7 @@
 
 [![Peerdrive CI](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml/badge.svg)](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml)
 
-Peerdrive 是一个**基于 WebRTC 的 P2P 网盘**：成员节点通过 PeerJS 信令以浏览器原生方式互联，内容按 SHA256 内容寻址存储，由运营者显式声明的共享范围对外暴露，文件可跨节点保存。通过 **Collection + Provider** 的统一抽象，将本地文件、HTTP 资源与 PeerJS/WebRTC 互联融为一体。
-
-> **定位 —— 唯一口径**：基于 WebRTC 的网盘 + 节点市场 + 选中保存；**不是** IPFS/BT 那样的公共内容寻址网络。
-> **账号 / JWT 身份仅为路线图项** —— Phase 7 为「设计就绪、**尚未实现**」（`doc/ROADMAP.md` §7）；当前归属凭的是节点的 `peerId`，而不是账号。
-> 方向与边界：[`doc/PROJECT-VISION.md`](doc/PROJECT-VISION.md)（含 §9 叙事一致性规则）· 开发顺序：[`doc/ROADMAP.md`](doc/ROADMAP.md) · 目标形态：[`doc/NETDISK.md`](doc/NETDISK.md)。
->
-> **可选 / 实验模块**（默认关闭，不属于默认网盘链路）：BitTorrent DHT（`PEERDRIVE_BT_ENABLE`）、IPFS 网关（`PEERDRIVE_IPFS_ENABLE`）、Iwara（`PEERDRIVE_IWARA_ENABLE`）；WebDAV 与 SMB 仍是评估阶段的数据源，尚未落地。
+Peerdrive 是一个多协议文件合集管理器，支持 SHA256 内容寻址存储、URL 引用、P2P 传输与 BitTorrent 下载。通过 **Collection + Provider** 的统一抽象，将本地文件、HTTP 资源与 PeerJS/WebRTC 互联融为一体。
 
 ---
 
@@ -25,7 +19,7 @@ Provider   = { type: "sha256" | "url", value: hash | url }
 
 ### 混合互联与多源检索
 
-Peerdrive 不再依赖传统的单网络 DHT，而是通过 **PeerJS 信令 + WebRTC DataChannel** 以及 HTTP/MQTT 存在发现（presence discovery）实现节点互联。多协议内容检索可在本地存储、已连接的 P2P 对端以及上游 HTTP 镜像之间路由；**公共 IPFS HTTP 网关与 BitTorrent DHT（`go-peerdrive-bt`）属于可选 / 实验模块**，默认关闭（`PEERDRIVE_IPFS_ENABLE`、`PEERDRIVE_BT_ENABLE`），是对同一套路由的扩展。
+Peerdrive 不再依赖传统的单网络 DHT，而是通过 **PeerJS 信令 + WebRTC DataChannel** 以及 HTTP/MQTT 存在发现（presence discovery）实现节点互联。多协议内容检索可在本地存储、已连接的 P2P 对端、公共 IPFS HTTP 网关、可选的 BitTorrent DHT（`go-peerdrive-bt`）以及上游 HTTP 镜像之间进行路由。
 
 ### 关键技术栈
 
@@ -33,9 +27,7 @@ Peerdrive 不再依赖传统的单网络 DHT，而是通过 **PeerJS 信令 + We
 |----|------|
 | HTTP | Gin |
 | P2P | PeerJS 信令 + WebRTC DataChannel（`back/peerjs/` go-peerjs；发现：MQTT / 自托管 HTTP） |
-| BT（可选模块） | `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt，独立库，**默认关闭**，通过 `PEERDRIVE_BT_ENABLE` 可选启用） |
-| IPFS（可选模块） | 检索时的公共网关兜底（**默认关闭**：`PEERDRIVE_IPFS_ENABLE`、`PEERDRIVE_IPFS_GATEWAY_ENABLE`） |
-| 可选模块 | Iwara（`PEERDRIVE_IWARA_ENABLE`）以及 WebDAV / SMB 数据源评估 —— 可选 / 实验，不属于默认网盘链路 |
+| BT | `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt，独立库，通过 `PEERDRIVE_BT_ENABLE` 可选启用） |
 | 管理面 | 本地 WS admin verb（前端全部走 `front/src/ws.js`） |
 | 消费端 | `packages/peerdrive-client`（零依赖纯浏览器消费端，走 `share`/`req` 帧；`packages/peerdrive-media` 是面向 img/video 的 URL 代理） |
 | 存储 | SQLite + 内容寻址文件系统（磁盘原始 SHA 文件，带数据库支撑的文件名映射） |
@@ -50,13 +42,8 @@ Peerdrive 不再依赖传统的单网络 DHT，而是通过 **PeerJS 信令 + We
 > 管理面冒烟 19 项断言（逐项清单、命令与盲区见 `doc/testing/README.md`）。
 >
 > **初次运行？请从 `peerdrive demo` 开始** —— 见下方的[快速开始](#快速开始)。无需任何配置。
->
-> **两个入口，都不需要账号：** *消费端*入口是公共面板 / `packages/peerdrive-client`
-> （浏览并保存共享内容，无需本地节点）；*运营端*入口是你自己的节点 + 管理台
-> （`front/src/features/`，需要后端运行中）。当前归属凭的是节点 `peerId` —— 账号属于 Phase 7
-> （`doc/ROADMAP.md` §7），**尚未实现**。
 
-### 消费端入口 —— 无需运行节点即可使用（公共面板 `dist/panel.html`）
+### 无需运行节点即可使用（公共面板 `dist/panel.html`）
 
 | 能力 | 说明 |
 |------|------|
@@ -68,13 +55,13 @@ Peerdrive 不再依赖传统的单网络 DHT，而是通过 **PeerJS 信令 + We
 | 本地入库 | 选本地文件分片上传（64KB/片，串行，一条连接一个上传流），节点计算 sha256，存入 CAS 并返回 hash |
 | 网络入库 | 给一个 URL 让节点替自己抓取并入库；SSRF 防护只允许公网 http/https，内网/本机地址会被拒绝（**被拒绝是预期行为**） |
 
-### 运营端入口 —— 节点运营者（需要本地节点）
+### 节点运营者
 
 | 能力 | 说明 |
 |------|------|
 | 内容寻址存储 | 写入的内容一律按 sha256 落盘（无扩展名的原始 SHA 命名文件，原始名称保存在 SQLite `file_index` / `file_meta`），天然去重 |
 | 文件索引 | `file_index` 表持久化 sha256 -> 绝对路径，带 seq 游标做增量同步（`sync` verb） |
-| 多协议取内容 | 下载器按 `local -> peer -> ipfsgw -> btdht -> http` 路由（顺序与超时可通过 `PEERDRIVE_DOWNLOAD_ORDER` 配置）；`ipfsgw` 与 `btdht` 两级属于**可选 / 实验模块**，默认关闭（`PEERDRIVE_IPFS_ENABLE`、`PEERDRIVE_BT_ENABLE`） |
+| 多协议取内容 | 下载器按 `local -> peer -> ipfsgw -> btdht -> http` 路由（顺序与超时可通过 `PEERDRIVE_DOWNLOAD_ORDER` 配置） |
 | 节点市场与加入 | 在信令上发现节点，加入后写入 `joined_nodes.json` 并成为常驻对端 |
 | 对外共享范围 | `share` verb；**默认全关** —— 不显式声明就不对外暴露任何清单。范围可在**运行时**修改：按目录、按合集、或按 hash 勾选单个文件（`GET/PUT /peerjs/share`、`POST /peerjs/share/files`），持久化至 `storageDir/share_scope.json`，无需重启；环境变量仅为首次启动的初始值。`share_only` 策略同时允许 `share` 清单发现与 `req` 数据流 |
 | 共享级别与保护 | 每条共享声明包含一个级别：`public` 列出且可下载 / `unlisted` 不列出但凭 hash 可下载 / `private` 仅限自己与好友（`ShareScope.Friends`）。此外，合集支持三级访问策略（`public`、`protected`、`private`）与提取口令：受保护的合集在通过口令解锁前会隐藏文件项 |
@@ -246,8 +233,8 @@ peerdrive
 | `PEERDRIVE_STORAGE_ENABLE` | true | 存储启用 |
 | `PEERDRIVE_MAX_UPLOAD_BYTES` | 100MB | 单文件上传上限 |
 | `PEERDRIVE_MAX_UPLOAD_ANON_BYTES` | 10MB | 匿名上传上限 |
-| `PEERDRIVE_BT_DHT_ENABLE` / `PEERDRIVE_BT_DHT_LISTEN` | true / :6881 | BT DHT 监听器（独立库 go-peerdrive-bt，可选模块 —— DHT*检索*这一级由 `PEERDRIVE_BT_ENABLE` 控制） |
-| `PEERDRIVE_IPFS_GATEWAY_ENABLE` / `PEERDRIVE_IPFS_GATEWAYS` | true / 三网关 | IPFS 网关兜底（可选模块 —— *检索*一级由 `PEERDRIVE_IPFS_ENABLE` 控制） |
+| `PEERDRIVE_BT_DHT_ENABLE` / `PEERDRIVE_BT_DHT_LISTEN` | true / :6881 | BT DHT（独立库 go-peerdrive-bt） |
+| `PEERDRIVE_IPFS_GATEWAY_ENABLE` / `PEERDRIVE_IPFS_GATEWAYS` | true / 三网关 | IPFS 网关兜底 |
 | `PEERDRIVE_WEBRTC_STUN` / `PEERDRIVE_WEBRTC_TURN` | stun.l.google.com / - | ICE 服务器 |
 | `PEERDRIVE_PEERJS_ENABLE` | true | PeerJS 信令（互联层） |
 | `PEERDRIVE_PEERJS_HOST/PORT/KEY` | 0.peerjs.com/443/peerjs | 信令服务器（可指向自托管 peerserver） |

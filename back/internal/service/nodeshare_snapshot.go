@@ -1,6 +1,7 @@
 package service
 
 import (
+	"crypto/subtle"
 	"path/filepath"
 	"time"
 
@@ -282,7 +283,7 @@ func (s *NodeShare) collectionsSnapshotFor(items []ShareItem, friend bool, token
 		}
 		isProtected := false
 		if policy == model.AccessPolicyProtected {
-			if token == "" || token != coll.Passcode {
+			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(coll.Passcode)) != 1 {
 				isProtected = true
 			}
 		}

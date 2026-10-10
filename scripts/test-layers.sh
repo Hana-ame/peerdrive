@@ -71,6 +71,8 @@ run_layer "L6-discovery" 'cd back/signalserver && go test ./... -count=1'
 run_layer "LB-baseline" 'cd back && go test -tags nosqlite ./internal/config/... ./internal/model/... ./internal/provider/... ./internal/router/...'
 # L7 外部能力切面（独立 go.mod）
 run_layer "L7-external" 'cd back/p2p_bt && go test ./... -count=1'
+# L-sec 安全与穿透防线（162条穿透矩阵 + 安全门禁 + 防重入）
+run_layer "L-sec" 'cd back && go test -tags nosqlite -run "TestTraversal|TestAnonCollection|TestSafeDialContext" ./...'
 # L8 前端切面（vitest）
 run_layer "L8-frontend" 'cd front && npm test'
 

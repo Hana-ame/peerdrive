@@ -204,3 +204,56 @@ func TestCommitCollection_EmptyHashRemovesEntry(t *testing.T) {
 	assert.Len(t, deleted.Entries, 1, "empty hash should delete the corresponding entry")
 	assert.Equal(t, "README.md", deleted.Entries[0].Path)
 }
+
+// TestCommitCollection_PreservesPasscodeAndAccessPolicy 发现背景：commit 生成新版本时，
+// 历史实现遗漏了 AccessPolicy 与 Passcode 的继承，导致受密码保护的合集升级后被降级为无保护公开合集。
+func TestCommitCollection_PreservesPasscodeAndAccessPolicy(t *testing.T) {
+	tmpDir, svc := setupAnonServiceTest(t)
+	defer os.RemoveAll(tmpDir)
+
+	hash, err := svc.CreateCollectionWithPolicy("protected-coll", validEntries(), nil,
+		model.VisibilityPublic, nil, model.AccessPolicyProtected, "secret123", "alice")
+	assert.NoError(t, err)
+
+	newHash, err := svc.CommitCollectionWithPasscode(hash, []model.AnonCollectionEntry{
+		{Path: "extra.txt", Hash: "b7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"},
+	}, "add extra", "secret123", "alice")
+	assert.NoError(t, err)
+
+	committed, err := svc.GetCollectionByHash(newHash)
+	assert.NoError(t, err)
+	assert.Equal(t, model.AccessPolicyProtected, committed.EffectiveAccessPolicy(), "commit must inherit AccessPolicyProtected")
+	assert.Equal(t, "secret123", committed.Passcode, "commit must inherit Passcode")
+}
+
+// TestCommitCollection_RequiresPasscodeWhenProtected 发现背景：匿名调用方若对受保护合集执行 commit，
+// 必须出示合集的正确口令，防止未授权第三方篡改受保护合集。
+func TestCommitCollection_RequiresPasscodeWhenProtected(t *testing.T) {
+	tmpDir, svc := setupAnonServiceTest(t)
+	defer os.RemoveAll(tmpDir)
+
+	hash, err := svc.CreateCollectionWithPolicy("protected-coll", validEntries(), nil,
+		model.VisibilityPublic, nil, model.AccessPolicyProtected, "secret123", "")
+	assert.NoError(t, err)
+
+	// 无口令尝试 commit：必须被拒绝
+	_, err = svc.CommitCollectionWithPasscode(hash, []model.AnonCollectionEntry{
+		{Path: "extra.txt", Hash: "b7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"},
+	}, "add extra", "", "")
+	assert.Error(t, err, "anonymous commit without passcode must fail")
+	assert.Contains(t, err.Error(), "passcode required or invalid")
+
+	// 错误口令尝试 commit：必须被拒绝
+	_, err = svc.CommitCollectionWithPasscode(hash, []model.AnonCollectionEntry{
+		{Path: "extra.txt", Hash: "b7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"},
+	}, "add extra", "wrong-passcode", "")
+	assert.Error(t, err, "anonymous commit with wrong passcode must fail")
+	assert.Contains(t, err.Error(), "passcode required or invalid")
+
+	// 正确口令 commit：成功
+	newHash, err := svc.CommitCollectionWithPasscode(hash, []model.AnonCollectionEntry{
+		{Path: "extra.txt", Hash: "b7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"},
+	}, "add extra", "secret123", "")
+	assert.NoError(t, err, "commit with correct passcode must succeed")
+	assert.NotEmpty(t, newHash)
+}

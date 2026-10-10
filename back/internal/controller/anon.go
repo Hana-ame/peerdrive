@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -153,7 +154,7 @@ func GetAnonCollection(c *gin.Context) {
 	}
 	// Issue #268: If protected and passcode doesn't match, hide entries and mark is_protected: true
 	if coll.EffectiveAccessPolicy() == model.AccessPolicyProtected && operator == "" {
-		if passcode != coll.Passcode {
+		if subtle.ConstantTimeCompare([]byte(passcode), []byte(coll.Passcode)) != 1 {
 			masked := *coll
 			masked.Entries = []model.AnonCollectionEntry{}
 			masked.IsProtected = true
@@ -162,7 +163,9 @@ func GetAnonCollection(c *gin.Context) {
 			return
 		}
 	}
-	c.JSON(http.StatusOK, coll)
+	resp := *coll
+	resp.Passcode = ""
+	c.JSON(http.StatusOK, resp)
 }
 
 // DownloadAnonFile godoc
@@ -191,7 +194,7 @@ func DownloadAnonFile(c *gin.Context) {
 		if passcode == "" {
 			passcode = c.GetHeader("X-Passcode")
 		}
-		if passcode != coll.Passcode {
+		if subtle.ConstantTimeCompare([]byte(passcode), []byte(coll.Passcode)) != 1 {
 			c.JSON(http.StatusForbidden, gin.H{"error": "passcode required or invalid for protected collection"})
 			return
 		}
@@ -276,6 +279,21 @@ func ForkAnonCollection(c *gin.Context) {
 		return
 	}
 
+	// Issue #268: If source collection is protected and operator is empty, require valid passcode
+	if src.EffectiveAccessPolicy() == model.AccessPolicyProtected && operator == "" {
+		forkPasscode := req.Passcode
+		if forkPasscode == "" {
+			forkPasscode = c.Query("passcode")
+			if forkPasscode == "" {
+				forkPasscode = c.GetHeader("X-Passcode")
+			}
+		}
+		if subtle.ConstantTimeCompare([]byte(forkPasscode), []byte(src.Passcode)) != 1 {
+			c.JSON(http.StatusForbidden, gin.H{"error": "passcode required or invalid for protected source collection"})
+			return
+		}
+	}
+
 	removeSet := map[string]bool{}
 	for _, p := range req.RemovePaths {
 		removeSet[p] = true
@@ -351,14 +369,27 @@ func CommitAnonCollection(c *gin.Context) {
 		SourceHash    string                      `json:"source_hash"`
 		Entries       []model.AnonCollectionEntry `json:"entries"`
 		CommitMessage string                      `json:"commit_message"`
+		Passcode      string                      `json:"passcode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
-	hash, err := anonSvc.CommitCollection(req.SourceHash, req.Entries, req.CommitMessage, nodestate.GetOperator())
+	passcode := req.Passcode
+	if passcode == "" {
+		passcode = c.Query("passcode")
+		if passcode == "" {
+			passcode = c.GetHeader("X-Passcode")
+		}
+	}
+
+	hash, err := anonSvc.CommitCollectionWithPasscode(req.SourceHash, req.Entries, req.CommitMessage, passcode, nodestate.GetOperator())
 	if err != nil {
+		if strings.Contains(err.Error(), "passcode required or invalid") {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		if strings.Contains(err.Error(), "source collection not found") {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return

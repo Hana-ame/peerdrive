@@ -99,6 +99,27 @@ jobs:
       # 外网用例（公共 MQTT broker / 线上信令）在 CI 里显式不开门：默认门控关闭即跳过
       - run: go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1 -timeout 10m
 
+  # 路径穿透与安全探针：包含四层穿透矩阵、真实节点二进制路径穿透探针与外部共享目录全链路验证。
+  security-probes:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: back/go.sum
+      - name: 四层穿透测试矩阵 (162 条)
+        run: cd back && go test -tags nosqlite -run TestTraversal ./internal/... -count=1
+      - name: 真实节点路径穿透探针
+        run: bash scripts/netdisk-traversal-probe.sh
+      - name: storage 外部共享目录全链路验证
+        run: bash scripts/netdisk-sharedir-outside.sh
+
   # back/peerjs 是独立 go.mod（模块 github.com/Hana-ame/go-peerjs，主仓 replace 指向本地），
   # back 目录的 go test ./... 不会覆盖它，必须单独跑——否则改动只同步到主 repo 却从未 CI。
   peerjs:

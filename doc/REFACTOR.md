@@ -910,6 +910,62 @@ peerjs/signalserver/p2p_bt/signalframe 是独立库，无人会 import 它，故
   `back/peerjs/`（独立 repo `github.com/Hana-ame/go-peerjs`），合并后需按
   §3.14 流程镜像。
 
+### 3.23 全链路 E2E 验证、安全漏洞扫描与深度加固 (2026-10-10)
+
+本轮针对端到端可靠性与安全防线进行了全链路扫描、漏洞修复与自动化测试补充：
+
+1. **端到端生命周期与安全门禁测试 (`back/test/integration/e2e_full_chain_test.go`)**：
+   - `TestEndToEnd_FullChainLifecycle`:
+     - 3 节点（Node A Publisher -> Node B Peer -> Node C Secondary Consumer）真实自托管信令与 WebRTC DataChannel 全链路；
+     - 双向对称 Capability 握手（`CapHighThroughput`, `CapP2PTun`, `CapReq`, `CapShare`）；
+     - WebRTC 直接分块流式拉取（300KB 超大跨分块 payload）；
+     - 受密码保护的合集门禁（`RequestSharesWithPasscode`，无口令隐藏条目，有口令解锁条目）；
+     - 流式落盘与内容寻址校验，写入本地 `file_index`；
+     - 本地重复拉取跳过（Deduplication）；
+     - 节点级级联中继（Node C 自动从 Node B 本地驱动拉取，Node B 自主提供权威文件内容）；
+     - 断点续传测试：预埋未完成 `.part` 文件，从已有字节偏移处继续续传，校验最终哈希一致。
+   - `TestEndToEnd_TamperAndResumeResilience`:
+     - 校验网络传输中载荷篡改被拒绝、临时 `.part` 文件被自动清理、篡改内容拒绝进入 `file_index`。
+   - `TestEndToEnd_SecurityBoundariesAndAccessPolicy`:
+     - 跨节点受保护合集口令强校验、错误口令拦截、不存在哈希探测的优雅报错与无 panic 防护。
+
+2. **安全漏洞排查与防御加固**：
+   - **SSRF 与 DNS Rebinding 防护 (`back/pkg/urlguard/urlguard.go`)**：
+     - 新增 `SafeDialContext`、`NewSafeTransport`、`NewSafeClient`，在底层 Socket 连接建立的瞬间（Dial layer）对解析到的所有候选目标 IP 进行二次校验，封堵通过 DNS Rebinding 绕过外层 URL 检查的攻击路径。
+     - 统一接入 `FileService.ResolveURL`、`FileService.ReadFile`、`PeerJSService.fetchIntoIndex`。
+   - **URL 外部解析内存耗尽（OOM DoS）防护 (`back/internal/service/file_service.go`)**：
+     - `ResolveURL` 增加 5 分钟硬超时与 `io.LimitReader(resp.Body, maxLimit+1)`，严格根据 `MaxUploadBytes`（默认 100MB）做流式截断，防止远程恶意超大响应撑爆内存。
+     - `ReadFile` 入口增加 64 位 strict hash 格式校验（防空串/短串切片 panic），本地 provider 增加 `isPathAllowed` 与 `openAllowed` 校验，HTTP provider 接入 safe client 与 limit reader。
+   - **远端目录遍历递归深度上限 (`back/internal/source/openlist_crawler.go`)**：
+     - `CrawlDirectory` 递归遍历增加 `maxCrawlDepth = 32` 与 `visited` 环路检测，防止恶意循环软链接或深层嵌套引发调用栈溢出（Stack Overflow）。
+   - **受保护合集口令与权限继承 (`back/internal/service/anon_service.go` & `controller/anon.go`)**：
+     - 修复 `inheritVisibility` 遗漏 `AccessPolicy` 与 `Passcode` 导致 Commit 生成新版本后密码保护失效的重大漏洞。
+     - 口令校验全面改为 `subtle.ConstantTimeCompare`，防范计时侧信道攻击。
+     - 修复 `GetAnonCollection` 在解锁状态下回显明文 `passcode` 的数据泄露漏洞；无论任何状态，API 均不暴露明文口令。
+     - 补全 `ForkAnonCollection` 与 `CommitAnonCollection` 对受保护合集的口令准入鉴权，未提供有效口令者拒绝 fork 或 commit（403 Forbidden）。
+   - **路径穿越与文件名规范化 (`back/internal/service/file_service.go` & `controller/download.go`)**：
+     - `Upload` 与 `RegisterLocal` 对传入的文件名强制执行 `filepath.Base(filepath.Clean(name))` 过滤，彻底剥离 `../` 等目录穿越字符。
+     - `FileService` 导出 `OpenAllowed` / `IsPathAllowed`，`DownloadBySHA256Local` 统一改用 `OpenAllowed`，杜绝历史脏数据或恶意数据库注入导致读取 storage 根目录外的越权文件。
+
+3. **CI 测试流水线增强 (`.github/workflows/ci.yml` & `scripts/test-layers.sh`)**：
+   - `ci.yml` 引入独立的 `security-probes` job，包含：
+     - 四层穿透测试矩阵（162 条单测用例，覆盖 pathutil、transport、service、controller 层）；
+     - 真实节点路径穿透探针（`scripts/netdisk-traversal-probe.sh`，直接向运行中的节点发动穿透 payload 测试）；
+     - Storage 外部共享目录全链路验证（`scripts/netdisk-sharedir-outside.sh`）。
+   - `scripts/test-layers.sh` 引入 `L-sec` 安全与穿透防线层。
+
+4. **组合型循环压力与混沌 E2E 测试 (`back/test/integration/e2e_combinatorial_test.go`)**：
+   - `TestEndToEnd_CombinatorialRepetitionAndStress`：
+     - 针对用户需求「组合，重复多个操作步骤以获得」，构建 4 轮连续循环深度组合测试；
+     - 涵盖多尺度动态载荷合成、公开与口令受控合集动态装配、Git 风格分叉变体（CommitCollectionWithPasscode）与不可变性校验；
+     - 动态共享范围发布、WebRTC 远程清单多级口令门禁准入探针；
+     - 跨节点分块流式拉取落盘与 `file_index` 注册；
+     - 内容寻址去重（Dedup Skip）在重复拉取下的幂等性验证；
+     - 远程访客隔离收件箱（Inbox Quarantine）沙箱流式写入，以及宿主节点交替执行「审核批准入库（Approve）」与「拒绝物理清除（Reject）」的严密状态机校验；
+     - 下游二次节点级联服务（Node A -> Node B -> Node C）可靠性；
+     - 周期性注入 5 路高并发切片读取与损坏哈希混沌扰动，确保 WebRTC DataChannel、`sendMu` 与工作池维持零死锁、零状态污染；
+     - 轮次终点断言所有临时 `.part` 文件 100% 自动清理，杜绝资源泄漏。
+
 ## 5. E2E Pitfalls Encountered (All Fixed)
 
 | Pitfall | Fix |

@@ -216,6 +216,11 @@ func (s *FileService) allowedRoots() []string {
 	return out
 }
 
+// IsPathAllowed validates whether absPath falls within the operator-acknowledged root directories.
+func (s *FileService) IsPathAllowed(absPath string) bool {
+	return s.isPathAllowed(absPath)
+}
+
 func (s *FileService) isPathAllowed(absPath string) bool {
 	if s.storageDir == "" {
 		return false
@@ -223,14 +228,18 @@ func (s *FileService) isPathAllowed(absPath string) bool {
 	return pathutil.WithinAny(s.allowedRoots(), absPath)
 }
 
-// openAllowed safely opens absPath within allowed roots (os.Root, resolution and open in one step).
+// OpenAllowed safely opens absPath within allowed roots (os.Root, resolution and open in one step).
 // Do not fall back to os.Open: that leaves a TOCTOU window where the file could be replaced with a symlink
 // between the check and the open.
-func (s *FileService) openAllowed(absPath string) (*os.File, error) {
+func (s *FileService) OpenAllowed(absPath string) (*os.File, error) {
 	if s.storageDir == "" {
 		return nil, fmt.Errorf("path outside storage root")
 	}
 	return pathutil.SafeOpenAny(s.allowedRoots(), absPath)
+}
+
+func (s *FileService) openAllowed(absPath string) (*os.File, error) {
+	return s.OpenAllowed(absPath)
 }
 
 // RegisterLocal computes the SHA256 hash of a local file and registers it in file_meta and file_providers.
@@ -301,6 +310,11 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 	// Derive filename from path if not provided
 	if filename == "" {
 		filename = filepath.Base(absPath)
+	} else {
+		filename = filepath.Base(filepath.Clean(filename))
+		if filename == "." || filename == "/" || filename == "\\" {
+			filename = filepath.Base(absPath)
+		}
 	}
 
 	existing, _ := repository.GetFileMeta(hash)
@@ -615,6 +629,11 @@ func hexDecodeNibble(c byte) (byte, error) {
 // Upload uploads a file to content-addressed storage, computes SHA256 and registers metadata and provider.
 func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta, error) {
 	defer log.LogDuration("FileService.Upload")()
+	cleanName := filepath.Base(filepath.Clean(filename))
+	if cleanName == "." || cleanName == "/" || cleanName == "\\" {
+		cleanName = ""
+	}
+	filename = cleanName
 	log.LogDebug("file-svc: Upload filename=%s", filename)
 
 	if !s.storageEnable {

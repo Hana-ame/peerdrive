@@ -39,7 +39,7 @@ Unit "test cases" = go side `-json` pass lines with `Test` (including subcases);
 | # | Component | Location | Command | Cases | In CI | Needs External Network |
 |---|------|------|------|------|-------|--------|
 | 1 | Backend unit/package tests | `back/` (main module) | `go test -tags nosqlite ./... -count=1` | **622** (16 packages) | ✅ `backend` + `go-build`×4 | ❌ |
-| 2 | Backend integration tests | `back/test/integration/` | `go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1` | **21** pass / 4 skipped | ✅ `integration` | ❌ (self-hosted signaling) |
+| 2 | Backend integration tests | `back/test/integration/` | `go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1` | **22** pass / 4 skipped | ✅ `integration` | ❌ (self-hosted signaling) |
 | 3 | External network integration (manual gated) | Same as 2 | `PEERDRIVE_MQTT_TEST=1` / `PEERDRIVE_LIVE_TEST=1` | 4 test cases | ❌ | ✅ (direct connection, no proxy) |
 | 4 | peerjs module | `back/peerjs/` (independent go.mod) | `go test ./... -count=1 -race` | **23** | ✅ `peerjs` | ❌ |
 | 5 | signalserver module | `back/signalserver/` (independent go.mod) | `go test ./... -count=1` | **23** | ✅ `go-build`·`submodules` | ❌ |
@@ -52,13 +52,16 @@ Unit "test cases" = go side `-json` pass lines with `Test` (including subcases);
 | 11 | Online hosting self-check (Pages) | `packages/peerdrive-client/scripts/verify-pages.mjs` | `node scripts/verify-pages.mjs` | Online 5 assertions | ✅ `pages.yml`·`verify` (deploy then verify back, added 2026-09-21) | ✅ (verifies the online version) |
 | 12 | media package unit tests | `packages/peerdrive-media/` | `npm test` + `npm run build` | **21** | ✅ `media-package` | npm ci needed |
 | 13 | media browser E2E (2) | `packages/peerdrive-media/test/{e2e-browser,media-node-e2e}.mjs` | playwright runner | 10 assertions + … | ❌ **(blind spot)** | ✅ (twimg images + peerjs CDN, also needs media-node running) |
-| 14 | Layered aggregation script | `scripts/test-layers.sh` | `bash scripts/test-layers.sh [--integration]` | Aggregates 1/4/5/6/7 | ❌ (local aggregation) | — |
+| 14 | Layered aggregation script | `scripts/test-layers.sh` | `bash scripts/test-layers.sh [--integration]` | Aggregates L0-L8 + L-sec | ❌ (local aggregation) | — |
 | 15 | Netdisk end-to-end script | `scripts/netdisk-local-demo.sh` | Starts 3 processes running full chain | 12 assertions | ✅ **`e2e.yml`** | ❌ (no external network, local processes) |
 | 16 | Panel browser end-to-end | `packages/peerdrive-client/scripts/verify-panel.mjs` | Real browser clicks on panel | 9 assertions | ✅ **Same `e2e.yml` (reuses previous environment)** | ❌ |
 | 17 | **Zero-config panel** (new in v0.3.2) | `packages/peerdrive-client/scripts/verify-panel-zero-config.mjs` | Opens `/panel` with **zero params**, asserts the panel reverse-looks-up its own node and connects | 3 assertions | ✅ `e2e.yml` (independent node, no PSK) | ❌ |
+| 18 | Live node traversal probe | `scripts/netdisk-traversal-probe.sh` | Live binary + HTTP probe with traversal payloads | 29 assertions | ✅ `ci.yml` `security-probes` | ❌ |
+| 19 | External share directory full-chain | `scripts/netdisk-sharedir-outside.sh` | Live nodes sharing external media directory | 6 assertions | ✅ `ci.yml` `security-probes` | ❌ |
+| 20 | Full-chain lifecycle E2E | `back/test/integration/e2e_full_chain_test.go` | Full publisher -> peer -> consumer chain + security | 3 comprehensive E2E tests | ✅ `ci.yml` `integration` | ❌ (in-process signaling) |
 
-**Total coverage** (2026-10-06 retested): automated (CI) covers 622 + 21 + 101 + 115 = **859**;
-Previously added to CI: signalserver (23) · p2p_bt (7) · Pages online self-check (5) · admin plane smoke (19).
+**Total coverage** (2026-10-10 retested): automated (CI) covers 622 + 24 + 101 + 115 = **862**;
+Previously added to CI: signalserver (23) · p2p_bt (7) · Pages online self-check (5) · admin plane smoke (19) · security probes (`netdisk-traversal-probe.sh` + `netdisk-sharedir-outside.sh`) · full-chain lifecycle E2E (`e2e_full_chain_test.go`).
 Since v0.3.2 the `media-package` job covers the client package; the standalone `signalserver` (23) count
 still applies only when building that submodule separately.
 

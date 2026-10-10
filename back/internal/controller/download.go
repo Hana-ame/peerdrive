@@ -109,12 +109,26 @@ func DownloadBySHA256Local(c *gin.Context) {
 	sd, _ := c.Get("storageDir")
 	storageDir, _ := sd.(string)
 	path := filepath.Join(storageDir, hash[:2], hash)
-	f, err := os.Open(path)
-	if err != nil {
-		if localPath, pErr := fileSvc.GetLocalPath(hash); pErr == nil {
-			if f2, oErr := os.Open(localPath); oErr == nil {
-				f = f2
-				path = localPath
+	var f *os.File
+	var openErr error
+	if fileSvc != nil {
+		f, openErr = fileSvc.OpenAllowed(path)
+		if openErr != nil {
+			if localPath, pErr := fileSvc.GetLocalPath(hash); pErr == nil {
+				if f2, oErr := fileSvc.OpenAllowed(localPath); oErr == nil {
+					f = f2
+					path = localPath
+				}
+			}
+		}
+	} else {
+		f, openErr = os.Open(path)
+		if openErr != nil {
+			if localPath, pErr := fileSvc.GetLocalPath(hash); pErr == nil {
+				if f2, oErr := os.Open(localPath); oErr == nil {
+					f = f2
+					path = localPath
+				}
 			}
 		}
 	}
