@@ -112,16 +112,19 @@ export default function Drive() {
       try {
         const shareData = await peerSession.client.shares();
         const rawFiles = shareData?.files || [];
-        const fileList = rawFiles.map(e => ({
-          hash: e.hash || '',
-          filename: e.path || e.name || 'unnamed',
-          size: e.size || 0,
-          mime_type: kindOf(e.path || e.name) || '',
-          created_at: '',
-          isDir: false,
-          path: e.path || e.name || '',
-          isRemotePeer: true,
-        }));
+        const fileList = rawFiles.map(e => {
+          const fname = e.path || e.name || 'unnamed';
+          return {
+            hash: e.hash || '',
+            filename: fname,
+            size: e.size || 0,
+            mime_type: mimeOf(fname),
+            created_at: '',
+            isDir: false,
+            path: e.path || e.name || '',
+            isRemotePeer: true,
+          };
+        });
         setFiles(fileList);
         return;
       } catch (e) {
@@ -596,7 +599,8 @@ export default function Drive() {
                 for await (const chunk of peerSession.client.stream(hash)) {
                   chunks.push(chunk);
                 }
-                return new Blob(chunks, { type: previewFile.mime_type || 'application/octet-stream' });
+                const effectiveType = mimeOf(previewFile.filename, previewFile.mime_type) || 'application/octet-stream';
+                return new Blob(chunks, { type: effectiveType });
               }
               return ws.download(hash);
             }}
