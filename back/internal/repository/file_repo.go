@@ -152,3 +152,17 @@ func DeleteFileMetaAndProviders(hash string) error {
 	_, err := db.Exec(`DELETE FROM file_meta WHERE hash = ?`, hash)
 	return err
 }
+
+// CheckFileIndexConsistency detects mismatches between file_index (P2P path
+// index) and file_meta (content-addressed metadata). Issue #280: the two
+// tables are maintained independently and can diverge — a hash may exist in
+// file_index but not file_meta (P2P-only file), or vice versa (local-only
+// file). This function returns counts for each mismatch category so callers
+// can log warnings.
+func CheckFileIndexConsistency() (onlyInIndex, onlyInMeta int, err error) {
+	if err = db.QueryRow(`SELECT COUNT(*) FROM file_index WHERE deleted = 0 AND hash NOT IN (SELECT hash FROM file_meta)`).Scan(&onlyInIndex); err != nil {
+		return
+	}
+	err = db.QueryRow(`SELECT COUNT(*) FROM file_meta WHERE hash NOT IN (SELECT hash FROM file_index WHERE deleted = 0)`).Scan(&onlyInMeta)
+	return
+}

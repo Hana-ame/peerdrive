@@ -163,7 +163,17 @@ func (s *FileService) RegisterBTFile(sha256hex string, size int64, srcPath strin
 
 // ListAll lists all blob files (M2 convergence: the file controller ListFiles previously called repository.ListAllFiles directly).
 func (s *FileService) ListAll(sortBy string) ([]model.FileListItem, error) {
-	return repository.ListAllFiles(sortBy)
+	items, err := repository.ListAllFiles(sortBy)
+	if err != nil {
+		return nil, err
+	}
+	// Issue #280: detect file_index vs file_meta divergence and log a warning.
+	// file_index (P2P path index) and file_meta (content-addressed) are
+	// maintained independently and can silently diverge.
+	if onlyIdx, onlyMeta, cerr := repository.CheckFileIndexConsistency(); cerr == nil && (onlyIdx > 0 || onlyMeta > 0) {
+		log.LogWarn("file_index/file_meta divergence: %d hash(es) only in file_index, %d only in file_meta — consider migration (Issue #280)", onlyIdx, onlyMeta)
+	}
+	return items, nil
 }
 
 // isPathAllowed validates whether absPath falls within the **operator-acknowledged root directories**:
