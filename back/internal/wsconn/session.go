@@ -103,11 +103,23 @@ func New(id string, conn Conn, opts Options) *Session {
 // behavior and it is deliberate — the write deadline on a dead socket fires
 // quickly, and adding a separate cancellation channel would make the loop's
 // exit observable through a different path.
+//
+// Head-of-line blocking mitigation (Issue #274): the ping write uses TryLock
+// instead of Lock. If a large data frame (SendFrame) holds sendMu, the
+// heartbeat skips this tick rather than blocking behind the data write.
+// A missed heartbeat is harmless: the next tick fires after PingInterval,
+// and the read deadline (refreshed by pong) keeps the connection alive
+// independently of ping delivery.
 func (s *Session) heartbeatLoop() {
 	t := time.NewTicker(s.opts.PingInterval)
 	defer t.Stop()
 	for range t.C {
-		s.sendMu.Lock()
+		if !s.sendMu.TryLock() {
+			// A data frame or control frame holds the lock. Skip this tick —
+			// the next heartbeat will fire after PingInterval. Missing one
+			// ping does not close the connection (read deadline handles liveness).
+			continue
+		}
 		err := s.conn.WriteControl(OpcodePing, nil, time.Now().Add(s.opts.PingTimeout))
 		s.sendMu.Unlock()
 		if err != nil {
