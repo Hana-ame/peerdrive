@@ -3,6 +3,7 @@ package transport
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -140,27 +141,20 @@ func TestStream_RemoteAuthVerification(t *testing.T) {
 		Data:   []byte(`{"type":"stream","action":"pub","streamId":"live-1","title":"Stream 1","reqId":"r-unauth"}`),
 	})
 
-	require.NotEmpty(t, remotePeer.sentJSON)
-	var errResp dcResp
-	err := json.Unmarshal(remotePeer.sentJSON[len(remotePeer.sentJSON)-1], &errResp)
-	require.NoError(t, err)
-	assert.Equal(t, "err", errResp.Type)
-	assert.Equal(t, "UNAUTHORIZED", errResp.Code)
+	errResp, ok := waitSent(remotePeer, "err", 2*time.Second)
+	require.True(t, ok, "should receive err frame on unauthenticated request")
+	assert.Equal(t, "UNAUTHORIZED", errResp["code"])
 
 	// 2. Remote peer attempts pub with valid token -> SUCCESS
-	remotePeer.sentJSON = nil
 	svc.dispatchFrame(remotePeer, svc.pending[remotePeer], peerjs.Frame{
 		IsText: true,
 		Data:   []byte(`{"type":"stream","action":"pub","streamId":"live-1","title":"Stream 1","token":"stream-secret-token","reqId":"r-auth"}`),
 	})
 
-	require.NotEmpty(t, remotePeer.sentJSON)
-	var okResp StreamFrame
-	err = json.Unmarshal(remotePeer.sentJSON[len(remotePeer.sentJSON)-1], &okResp)
-	require.NoError(t, err)
-	assert.Equal(t, "stream", okResp.Type)
-	assert.Equal(t, "pub-resp", okResp.Action)
-	assert.Equal(t, "live-1", okResp.StreamID)
+	okResp, ok := waitSent(remotePeer, "stream", 2*time.Second)
+	require.True(t, ok, "should receive stream response frame")
+	assert.Equal(t, "pub-resp", okResp["action"])
+	assert.Equal(t, "live-1", okResp["streamId"])
 }
 
 // TestStream_CapabilitiesIntegration verifies that CapStream is registered and recognized.

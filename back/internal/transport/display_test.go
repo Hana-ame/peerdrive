@@ -3,6 +3,7 @@ package transport
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -179,35 +180,25 @@ func TestDisplay_RemoteAuthVerification(t *testing.T) {
 		Data:   []byte(`{"type":"display","action":"show","sessionId":"screen-1","mediaType":"image","hash":"h1","reqId":"r-unauth"}`),
 	})
 
-	require.NotEmpty(t, remotePeer.sentJSON)
-	var resp dcResp
-	err := json.Unmarshal(remotePeer.sentJSON[len(remotePeer.sentJSON)-1], &resp)
-	require.NoError(t, err)
-	assert.Equal(t, "err", resp.Type)
-	assert.Equal(t, "UNAUTHORIZED", resp.Code)
+	errResp, ok := waitSent(remotePeer, "err", 2*time.Second)
+	require.True(t, ok, "should receive err frame on unauthenticated request")
+	assert.Equal(t, "UNAUTHORIZED", errResp["code"])
 
 	// 2. Remote peer attempts display with correct token -> SUCCESS
-	remotePeer.sentJSON = nil
 	svc.dispatchFrame(remotePeer, svc.pending[remotePeer], peerjs.Frame{
 		IsText: true,
 		Data:   []byte(`{"type":"display","action":"show","sessionId":"screen-1","mediaType":"image","hash":"h1","token":"secret-display-token","reqId":"r-auth"}`),
 	})
 
-	require.NotEmpty(t, remotePeer.sentJSON)
-	var successResp DisplayResponse
-	err = json.Unmarshal(remotePeer.sentJSON[len(remotePeer.sentJSON)-1], &successResp)
-	require.NoError(t, err)
-	assert.Equal(t, "display-resp", successResp.Type)
-	assert.Equal(t, "OK", successResp.Code)
+	okResp, ok := waitSent(remotePeer, "display-resp", 2*time.Second)
+	require.True(t, ok, "should receive display-resp frame on authenticated request")
+	assert.Equal(t, "OK", okResp["code"])
 
 	// Local screen should have received the show frame
-	require.NotEmpty(t, localDisplay.sentJSON)
-	var showFrame DisplayFrame
-	err = json.Unmarshal(localDisplay.sentJSON[len(localDisplay.sentJSON)-1], &showFrame)
-	require.NoError(t, err)
-	assert.Equal(t, "display", showFrame.Type)
-	assert.Equal(t, "show", showFrame.Action)
-	assert.Equal(t, "image", showFrame.MediaType)
+	showFrame, ok := waitSent(localDisplay, "display", 2*time.Second)
+	require.True(t, ok, "local display should receive display frame")
+	assert.Equal(t, "show", showFrame["action"])
+	assert.Equal(t, "image", showFrame["mediaType"])
 }
 
 // TestDisplay_CapabilitiesIntegration verifies that CapDisplay is registered and recognized.
