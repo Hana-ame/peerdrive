@@ -3,7 +3,9 @@
 
 [![Peerdrive CI](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml/badge.svg)](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml)
 
-Peerdrive is a multi-protocol file collection manager, supporting SHA256 content-addressed storage, URL references, P2P transport and BitTorrent downloads. Through the unified abstraction of **Collection + Provider**, it integrates local files, HTTP resources and PeerJS/WebRTC interconnection into a single system.
+Peerdrive is a **P2P private file network** with content-addressed collections, SHA256 storage, and PeerJS/WebRTC interconnection. Through the unified **Collection + Provider** abstraction, it integrates local files, HTTP resources, and P2P peer-to-peer transport into a single system.
+
+> **Optional/experimental extensions:** BitTorrent DHT (`PEERDRIVE_BT_ENABLE`, default **off**), IPFS gateway fallback (`PEERDRIVE_IPFS_ENABLE`, default **off**), Iwara source, SMB/WebDAV sources. These are opt-in via environment variables and are not part of the core product. See [Environment variables](#environment-variables) for details.
 
 ---
 
@@ -19,7 +21,7 @@ Strip away the independent "file" concept -- everything is a collection. A file 
 
 ### Hybrid Interconnect & Multi-Source Retrieval
 
-Rather than relying on legacy single-network DHTs, Peerdrive interconnects nodes via **PeerJS signaling + WebRTC DataChannels** with HTTP/MQTT presence discovery. Multi-protocol content retrieval routes across local storage, connected P2P peers, public IPFS HTTP gateways, optional BitTorrent DHT (`go-peerdrive-bt`), and upstream HTTP mirrors.
+Rather than relying on legacy single-network DHTs, Peerdrive interconnects nodes via **PeerJS signaling + WebRTC DataChannels** with HTTP/MQTT presence discovery. Multi-protocol content retrieval routes across local storage, connected P2P peers, upstream HTTP mirrors, and — **optionally** — public IPFS HTTP gateways and BitTorrent DHT (`go-peerdrive-bt`, opt-in via `PEERDRIVE_BT_ENABLE`, default off). The core retrieval path is **local → peer → HTTP**; IPFS/BT are experimental extensions, not required for core functionality.
 
 ### Key tech stack
 
@@ -27,7 +29,7 @@ Rather than relying on legacy single-network DHTs, Peerdrive interconnects nodes
 |----|------|
 | HTTP | Gin |
 | P2P | PeerJS signaling + WebRTC DataChannel (`back/peerjs/` go-peerjs; discovery: MQTT / self-hosted HTTP) |
-| BT | `github.com/Hana-ame/go-peerdrive-bt` (back/p2p_bt, standalone library, opt-in via `PEERDRIVE_BT_ENABLE`) |
+| BT (optional) | `github.com/Hana-ame/go-peerdrive-bt` (back/p2p_bt, standalone library, **opt-in via `PEERDRIVE_BT_ENABLE`, default off**; experimental extension, not core) |
 | Admin surface | Local WS admin verb (frontend all goes through `front/src/ws.js`) |
 | Consumer | `packages/peerdrive-client` (zero-dependency pure browser consumer, goes through `share`/`req` frames; `packages/peerdrive-media` is a URL proxy aimed at img/video) |
 | Storage | SQLite + content-addressed filesystem (raw SHA files on disk with DB-backed filename mapping) |
@@ -42,6 +44,8 @@ Rather than relying on legacy single-network DHTs, Peerdrive interconnects nodes
 > admin-surface smoke 19 assertions (item-by-item list, commands and blind spots in `doc/testing/README.md`).
 >
 > **First run? Start with `peerdrive demo`** — see [Quick start](#quick-start) below. It needs no configuration.
+>
+> **Phase 7 (Identity) is not implemented** — accounts, JWT authentication, user↔node directory, and traffic statistics are design-only (`doc/ROADMAP.md` Phase 7 🔴). The core product works fully at the **peerId level** without accounts. Optional/experimental extensions (BT, IPFS, Iwara, SMB/WebDAV) are marked with ⚠️ below.
 
 ### Usable without running a node (public panel `dist/panel.html`)
 
@@ -325,7 +329,7 @@ The Peerdrive monorepo hosts several independent, reusable packages and standalo
 |-----------|-------------|------|
 | `go-peerjs` | Pure Go PeerJS protocol client and WebRTC DataChannel transport (`github.com/Hana-ame/go-peerjs`). | `back/peerjs/` |
 | `go-peersignal` | Lightweight self-hosted Go signaling and discovery server (`github.com/Hana-ame/go-peersignal`, binary `cmd/peersignal`). | `back/signalserver/` |
-| `go-peerdrive-bt` | Mainline BitTorrent DHT capability (`github.com/Hana-ame/go-peerdrive-bt`), opt-in bridge. | `back/p2p_bt/` |
+| `go-peerdrive-bt` *(optional)* | Mainline BitTorrent DHT capability (`github.com/Hana-ame/go-peerdrive-bt`), opt-in bridge, default off. | `back/p2p_bt/` |
 | `peerdrive-client` | Zero-dependency pure browser consumer SDK and single-file web panel (`dist/panel.html`). | `packages/peerdrive-client/` |
 | `peerdrive-media` | WebRTC DataChannel URL proxy for direct in-browser audio, video, and image streaming. | `packages/peerdrive-media/` |
 | Active Core Services | Unified multi-protocol retrieval (`back/internal/provider/`), content-addressed collection schema (`back/internal/model/anon.go`), and interconnect transport (`back/internal/transport/peerjs_service.go`). | `back/internal/` |

@@ -16,12 +16,15 @@
 
 ## 2. Status Quo: It's a Frankenstein of "Six Things"
 
-1. Multi-protocol downloader — SHA256/IPFS/BT/URL/WebDAV, pulls files from anywhere
+1. Multi-protocol downloader — SHA256/IPFS/BT/URL/WebDAV, pulls files from anywhere  
+   *(BT and IPFS are optional/experimental, opt-in via env vars; see README for defaults)*
 2. Content-addressed collection manager — Collection + Provider
-3. P2P network node — libp2p (legacy) / PeerJS + WebRTC (new interconnection layer)
+3. P2P network node — libp2p (legacy, removed) / PeerJS + WebRTC (current interconnection layer)
 4. Sharing platform — anonymous collections, Plaza, comments, share links
-5. Account system — centralized registration server, user↔node directory, statistics
-6. Operations panel — a pile of P2P/BT/IPFS dashboards (mostly dead code)
+5. Account system — centralized registration server, user↔node directory, statistics  
+   *(Phase 7 of ROADMAP; **design ready, not implemented** — not a current feature)*
+6. Operations panel — a pile of P2P/BT/IPFS dashboards (mostly dead code)  
+   *(legacy; targeted for cleanup per ROADMAP Phase 1-6 priorities)*
 
 ## 3. Historical Trajectory: Three Pivots Have Pointed the Way
 
@@ -40,16 +43,22 @@
 - "Mutually independent and irresponsible nodes" → **authorization must go through identity/token, not blindly trust peerId**
 - Collection tri-state (public/authorized-only/self-only) + Steam-style group sharing → **permissions are a product-level feature, not a security detail**
 
-## 5. Four Pillars
+## 5. Four Pillars (Target State)
 
-| Layer | Responsibility | Technology |
-|---|---|---|
-| Identity Layer (Centralized) | Registration server: JWT/OAuth, user↔node directory, permissions, upload/download stats | Sole public entry point |
-| Storage Layer (Decentralized) | Content-addressed storage + collection tri-state visibility, P2P between member nodes | SQLite + CAS |
-| Transport Layer (P2P) | PeerJS cloud signaling + WebRTC hole punching, browser zero-install direct connect | Self-hosted signaling optional |
-| Access Layer (Optional) | Authorized HTTP tunnel: remote node management / access remote REST API | See doc/HTTP_API_PROXY.md |
+> ⚠️ **Status note (2026-10):** The Identity Layer (Phase 7 of `doc/ROADMAP.md`) is **design ready but not implemented**.  
+> The Access Layer is optional. Until Phase 7 lands, all identity/authorization operates at the **peerId level**  
+> (node identity, no accounts). The core product experience — Collections + WebRTC + sharing scope —  
+> is fully functional without any of the Identity Layer. Do not describe Phase 7 capabilities as available features.
 
-Four user types (USER-ROLES.md): anonymous visitor / authenticated user / anonymous + node / authenticated + node.
+| Layer | Responsibility | Technology | Status |
+|---|---|---|---|
+| Storage Layer (Decentralized) | Content-addressed storage + collection tri-state visibility, P2P between member nodes | SQLite + CAS | 🟢 Implemented |
+| Transport Layer (P2P) | PeerJS cloud signaling + WebRTC hole punching, browser zero-install direct connect | Self-hosted signaling optional | 🟢 Implemented |
+| Identity Layer (Centralized) | Registration server: JWT/OAuth, user↔node directory, permissions, upload/download stats | Sole public entry point | 🔴 Phase 7, not implemented |
+| Access Layer (Optional) | Authorized HTTP tunnel: remote node management / access remote REST API | See doc/HTTP_API_PROXY.md | 🟡 Partial (port forwarding v2) |
+
+Four user types (USER-ROLES.md): anonymous visitor / authenticated user / anonymous + node / authenticated + node.  
+*(The first and third types are fully supported today; the latter two require Phase 7.)*
 
 ## 6. What the Project Should NOT Do (Boundaries)
 
@@ -67,6 +76,11 @@ Therefore it should be built on the group authorization system, not as an indepe
 
 ## 8. Implementation Recommendations
 
-1. Clean up legacy code first (BT/libp2p/WebDAV/dead components), focus on the "Collection + WebRTC + Identity" main pipeline
-2. Unify the permission system: collection tri-state, HTTP tunnel, and node management share one "account → group → permission" model
-3. Advance the HTTP tunnel module following the "module branch + merge + CI/CD" git architecture (today-last-requirements.txt)
+> ⚠️ **Alignment with `doc/ROADMAP.md`:** The implementation order is user-specified (Phases 1-7).  
+> Phase 7 (Identity) is last — do not describe it as a current feature in user-facing docs.
+
+1. Follow the ROADMAP order: Interconnect (P1) → Files (P2) → Combine (P3) → Management Chain (P4) → Scope (P5) → Upload/Download/Save (P6) → Identity (P7)
+2. Clean up legacy code (BT/libp2p/WebDAV/dead components) — these are optional/experimental, not core
+3. The core product is **Collection + WebRTC + sharing scope** — fully functional without accounts (peerId-level identity)
+4. When Phase 7 lands, unify the permission system: collection tri-state, HTTP tunnel, and node management share one "account → group → permission" model
+5. Advance the HTTP tunnel module following the "module branch + merge + CI/CD" git architecture
