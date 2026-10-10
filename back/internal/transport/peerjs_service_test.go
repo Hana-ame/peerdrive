@@ -25,9 +25,10 @@ import (
 // OpenStream, and the forward tests). Close fires the OnClose callback + marks closed (simulating the
 // real connection-close cleanup path -- the bindConn same-peer dedup test relies on this behaviour).
 type fakeSession struct {
-	id   string
-	mu   sync.Mutex
-	sent []map[string]any
+	id       string
+	mu       sync.Mutex
+	sent     []map[string]any
+	sentJSON [][]byte
 	// frames full frame records (including SendFrame's binary body) -- used by the forward data-passthrough assertions
 	frames []fakeFrame
 
@@ -55,6 +56,7 @@ func (f *fakeSession) SendJSON(v any) error {
 	_ = json.Unmarshal(b, &m)
 	f.mu.Lock()
 	f.sent = append(f.sent, m)
+	f.sentJSON = append(f.sentJSON, b)
 	f.frames = append(f.frames, fakeFrame{header: m})
 	f.mu.Unlock()
 	return nil
@@ -65,6 +67,7 @@ func (f *fakeSession) SendFrame(header any, body []byte) error {
 	_ = json.Unmarshal(b, &m)
 	f.mu.Lock()
 	f.sent = append(f.sent, m)
+	f.sentJSON = append(f.sentJSON, b)
 	f.frames = append(f.frames, fakeFrame{header: m, body: body})
 	f.mu.Unlock()
 	return nil
