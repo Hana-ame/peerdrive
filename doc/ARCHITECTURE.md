@@ -210,8 +210,11 @@ React 19 + react-router-dom v7（HashRouter）+ Vite + TailwindCSS + Vitest
 
 ### 路由
 
-`HashRouter`（`#/drive/:hash`、`#/collection/:hash` 等），无 SPA fallback
-依赖，支持 `file://` 协议和任何静态空间部署。
+`HashRouter`（`#/drive/:hash`、`#/collection/:hash` 等），不依赖服务端 SPA
+fallback，可部署到任何静态空间。注意 `file://` 直开成立的是消费端面板
+`dist/panel.html`（独立单文件产物，不含 `front/` 代码），`front/` 本身是多
+chunk 的 ES module 构建，`file://` 不成立。决策记录与权衡见
+`doc/design/FRONTEND-ROUTING-HASHROUTER-ADR.md`。
 
 ### 消费端包
 
