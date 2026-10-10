@@ -23,7 +23,6 @@ import (
 	"io"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"peerdrive/internal/transport"
