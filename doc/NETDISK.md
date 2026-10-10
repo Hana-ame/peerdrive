@@ -5,12 +5,14 @@
 
 ## 0. Goal Statement (Original Semantics)
 
-1. **The frontend is a regular netdisk UI**:
+1. **Operator entry — the frontend is a regular netdisk UI**:
    - Has **your own node** and **other people's nodes**;
    - Can **join nodes** in the **marketplace**;
    - After joining a node, can see **file links** (packaged collections or individual files);
    - Select file -> **Save** -> Download from someone else.
-2. **Also needs a WebRTC pure client consumer**: Fetch files from this P2P network without installing a node.
+2. **Consumer entry — also needs a WebRTC pure client consumer**: Fetch files from this P2P network without installing a node.
+
+These two entries are the only user-facing split in the shipped product — **consumer** (browse & save shared content, no local node) and **operator** (own and manage a node). The account-based four-role model is a Phase 7 target, not the current information architecture (see `doc/PROJECT-VISION.md` §5 and §9).
 
 User's analogy:
 
@@ -125,8 +127,8 @@ Pages:
 - `pages/PeerDetail/index.jsx` — Peer node: **file links** list (collections expandable -> entries; single files),
   select -> "Save to my netdisk" -> M3 fetch -> jump to Transfers page for progress.
 - `pages/Transfers/index.jsx` — Transfer tasks: Progress/cancel/retry.
-- `App.jsx` routing and `Navbar` grouping adjusted; old pages (Plaza/AnonCreator/AnonExplorer/BT/IPFS/Settings)
-  kept in "Advanced" group, not deleted.
+- `App.jsx` routing and `Navbar` grouping adjusted; old pages (Plaza/AnonCreator/AnonExplorer/**BT, IPFS — optional / experimental plugins**/Settings)
+  kept in "Advanced" group, not deleted and not part of the default netdisk path.
 
 ### M5 `module/peer-client` — WebRTC Pure Consumer
 - **Independent package** `packages/peerdrive-client/`: No React/Tailwind dependency, pure vanilla JS + PeerJS.
@@ -204,9 +206,12 @@ M1 (marketplace+join) ─┬─ M2 (share scope) ── M3 (fetch&save)
 
 ## 10. Future Extensions
 
-- **Phase 7 (identity management)**: Replace peerId with account system, marketplace can filter by user
+- **Phase 7 (identity management)**: Replace peerId with account system, marketplace can filter by user —
+  **design ready, not implemented** (`doc/modules/auth/README.md`, `doc/ROADMAP.md` §7); not a shipping capability, do not present it as one
 - **Phase 8 (payment/credit)**: Nodes earn credits for providing large bandwidth/files
-- **Multi-protocol support**: Support HTTP/WebDAV/SFTP as alternative to P2P
+- **Multi-protocol support**: Support HTTP/WebDAV/SFTP as alternative to P2P — optional / experimental plugin
+  territory (BT / IPFS / Iwara behind their own opt-in switches; WebDAV and SMB are evaluation-stage sources),
+  never a default-path feature
 - **Offline sync**: Sync files when node comes back online
 - **Content deduplication**: SHA256 content addressing already deduplicates, can add reference counting
 - **File sharing links**: Generate shareable links with access control

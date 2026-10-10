@@ -2,6 +2,11 @@
 
 > Source: **Strict priority order** explicitly specified by the user on 2026-09-20. This file is the basis for scheduling and trade-offs.
 > Note: distinguish from `doc/archive/report/ROADMAP.md` — that one is the v3.0 historical roadmap (already implemented); this file is the current schedule.
+>
+> **Narrative guardrail**: Phase 7 identity is **not implemented** (see the table below). Until it lands, product-facing docs
+> (`README.md`, `doc/NETDISK.md`, `doc/PROJECT-VISION.md`) must describe ownership as the node `peerId`, not accounts —
+> and must not present accounts/JWT/user↔node directory/statistics as an available capability. Shared positioning and the
+> rules for keeping the four docs consistent: `doc/PROJECT-VISION.md` §9.
 
 ## Order
 

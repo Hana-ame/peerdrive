@@ -3,7 +3,13 @@
 
 [![Peerdrive CI](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml/badge.svg)](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml)
 
-Peerdrive is a multi-protocol file collection manager, supporting SHA256 content-addressed storage, URL references, P2P transport and BitTorrent downloads. Through the unified abstraction of **Collection + Provider**, it integrates local files, HTTP resources and PeerJS/WebRTC interconnection into a single system.
+Peerdrive is a **P2P netdisk over WebRTC**: member nodes connect browser-native through PeerJS signaling, content is stored content-addressed (SHA256) and shared through the operator's explicit share scope, and files can be saved across nodes. Through the unified abstraction of **Collection + Provider**, it integrates local files, HTTP resources and PeerJS/WebRTC interconnection into a single system.
+
+> **Positioning — one source of truth**: netdisk + marketplace + select & save over WebRTC; not a public content-addressing network like IPFS/BT.
+> **Accounts / JWT identity is roadmap-only** — Phase 7 is **design ready, not implemented** (`doc/ROADMAP.md` §7), and ownership today is the node's `peerId`, not an account.
+> Direction and boundaries: [`doc/PROJECT-VISION.md`](doc/PROJECT-VISION.md) (incl. §9 narrative-consistency rules) · development order: [`doc/ROADMAP.md`](doc/ROADMAP.md) · goal shape: [`doc/NETDISK.md`](doc/NETDISK.md).
+>
+> **Optional / experimental plugins** (off by default, outside the default netdisk path): BitTorrent DHT (`PEERDRIVE_BT_ENABLE`), IPFS gateway (`PEERDRIVE_IPFS_ENABLE`), Iwara (`PEERDRIVE_IWARA_ENABLE`); WebDAV and SMB are evaluation-stage sources, not shipped.
 
 ---
 
@@ -19,7 +25,7 @@ Strip away the independent "file" concept -- everything is a collection. A file 
 
 ### Hybrid Interconnect & Multi-Source Retrieval
 
-Rather than relying on legacy single-network DHTs, Peerdrive interconnects nodes via **PeerJS signaling + WebRTC DataChannels** with HTTP/MQTT presence discovery. Multi-protocol content retrieval routes across local storage, connected P2P peers, public IPFS HTTP gateways, optional BitTorrent DHT (`go-peerdrive-bt`), and upstream HTTP mirrors.
+Rather than relying on legacy single-network DHTs, Peerdrive interconnects nodes via **PeerJS signaling + WebRTC DataChannels** with HTTP/MQTT presence discovery. Multi-protocol content retrieval routes across local storage, connected P2P peers, and upstream HTTP mirrors; **public IPFS HTTP gateways and BitTorrent DHT (`go-peerdrive-bt`) are optional / experimental plugins**, off by default (`PEERDRIVE_IPFS_ENABLE`, `PEERDRIVE_BT_ENABLE`), that extend the same routing.
 
 ### Key tech stack
 
@@ -27,7 +33,9 @@ Rather than relying on legacy single-network DHTs, Peerdrive interconnects nodes
 |----|------|
 | HTTP | Gin |
 | P2P | PeerJS signaling + WebRTC DataChannel (`back/peerjs/` go-peerjs; discovery: MQTT / self-hosted HTTP) |
-| BT | `github.com/Hana-ame/go-peerdrive-bt` (back/p2p_bt, standalone library, opt-in via `PEERDRIVE_BT_ENABLE`) |
+| BT (optional plugin) | `github.com/Hana-ame/go-peerdrive-bt` (back/p2p_bt, standalone library, **off by default**, opt-in via `PEERDRIVE_BT_ENABLE`) |
+| IPFS (optional plugin) | Public gateway fallback for retrieval (**off by default**: `PEERDRIVE_IPFS_ENABLE`, `PEERDRIVE_IPFS_GATEWAY_ENABLE`) |
+| Optional modules | Iwara (`PEERDRIVE_IWARA_ENABLE`) and the WebDAV / SMB source evaluations — optional / experimental, outside the default netdisk path |
 | Admin surface | Local WS admin verb (frontend all goes through `front/src/ws.js`) |
 | Consumer | `packages/peerdrive-client` (zero-dependency pure browser consumer, goes through `share`/`req` frames; `packages/peerdrive-media` is a URL proxy aimed at img/video) |
 | Storage | SQLite + content-addressed filesystem (raw SHA files on disk with DB-backed filename mapping) |
@@ -42,8 +50,13 @@ Rather than relying on legacy single-network DHTs, Peerdrive interconnects nodes
 > admin-surface smoke 19 assertions (item-by-item list, commands and blind spots in `doc/testing/README.md`).
 >
 > **First run? Start with `peerdrive demo`** — see [Quick start](#quick-start) below. It needs no configuration.
+>
+> **Two entries, and neither needs an account:** the *consumer* entry is the public panel / `packages/peerdrive-client`
+> (view and save shared content, no local node required); the *operator* entry is your own node plus the management
+> console (`front/src/features/`, backend must be running). Ownership today is the node `peerId` — accounts are Phase 7
+> (`doc/ROADMAP.md` §7), **not implemented**.
 
-### Usable without running a node (public panel `dist/panel.html`)
+### Consumer entry — usable without running a node (public panel `dist/panel.html`)
 
 | Capability | Description |
 |------|------|
@@ -55,13 +68,13 @@ Rather than relying on legacy single-network DHTs, Peerdrive interconnects nodes
 | Local ingest | Select local files for chunked upload (64KB/chunk, serial, one upload stream per connection), the node computes sha256, stores in CAS and returns the hash |
 | Network ingest | Give it a URL and the node fetches and ingests it for you; SSRF protection only allows public http/https, intranet/local addresses are rejected (**rejection is expected behavior**) |
 
-### Node operators
+### Operator entry — node operators (requires a local node)
 
 | Capability | Description |
 |------|------|
 | Content-addressed storage | Incoming content is written to disk by sha256 (raw SHA-named files without extension, original name in SQLite `file_index` / `file_meta`), naturally deduplicated |
 | File index | `file_index` table persists sha256 -> absolute path, with a seq cursor for incremental sync (`sync` verb) |
-| Multi-protocol content retrieval | The downloader routes by `local -> peer -> ipfsgw -> btdht -> http` (order and timeout configurable via `PEERDRIVE_DOWNLOAD_ORDER`) |
+| Multi-protocol content retrieval | The downloader routes by `local -> peer -> ipfsgw -> btdht -> http` (order and timeout configurable via `PEERDRIVE_DOWNLOAD_ORDER`); the `ipfsgw` and `btdht` stages are **optional / experimental plugins**, off by default (`PEERDRIVE_IPFS_ENABLE`, `PEERDRIVE_BT_ENABLE`) |
 | Node market and joining | Discover nodes on the signaling, after joining write to `joined_nodes.json` and become a resident peer |
 | External sharing scope | `share` verb; **default all off** -- without an explicit declaration, no manifest is exposed externally. Scope can be changed **at runtime**: by directory, by collection, or by checking individual files by hash (`GET/PUT /peerjs/share`, `POST /peerjs/share/files`), persisted to `storageDir/share_scope.json`, no restart needed; environment variables are only first-boot initial values. `share_only` policy allows both `share` manifest discovery and `req` data streams |
 | Sharing level & protection | Each sharing declaration carries one level: `public` listed and downloadable / `unlisted` not listed but downloadable by hash / `private` only for self and friends (`ShareScope.Friends`). In addition, collections support three-tier access policies (`public`, `protected`, `private`) and extraction passcodes: protected collections hide file entries until unlocked with passcode |
@@ -233,8 +246,8 @@ peerdrive
 | `PEERDRIVE_STORAGE_ENABLE` | true | Storage enabled |
 | `PEERDRIVE_MAX_UPLOAD_BYTES` | 100MB | Single-file upload cap |
 | `PEERDRIVE_MAX_UPLOAD_ANON_BYTES` | 10MB | Anonymous upload cap |
-| `PEERDRIVE_BT_DHT_ENABLE` / `PEERDRIVE_BT_DHT_LISTEN` | true / :6881 | BT DHT (standalone library go-peerdrive-bt) |
-| `PEERDRIVE_IPFS_GATEWAY_ENABLE` / `PEERDRIVE_IPFS_GATEWAYS` | true / three gateways | IPFS gateway fallback |
+| `PEERDRIVE_BT_DHT_ENABLE` / `PEERDRIVE_BT_DHT_LISTEN` | true / :6881 | BT DHT listener (standalone library go-peerdrive-bt, optional plugin — the DHT *retrieval* stage itself is gated by `PEERDRIVE_BT_ENABLE`) |
+| `PEERDRIVE_IPFS_GATEWAY_ENABLE` / `PEERDRIVE_IPFS_GATEWAYS` | true / three gateways | IPFS gateway fallback (optional plugin — the *retrieval* stage is gated by `PEERDRIVE_IPFS_ENABLE`) |
 | `PEERDRIVE_WEBRTC_STUN` / `PEERDRIVE_WEBRTC_TURN` | stun.l.google.com / - | ICE servers |
 | `PEERDRIVE_PEERJS_ENABLE` | true | PeerJS signaling (interconnect layer) |
 | `PEERDRIVE_PEERJS_HOST/PORT/KEY` | 0.peerjs.com/443/peerjs | Signaling server (can point at self-hosted peerserver) |
@@ -325,7 +338,7 @@ The Peerdrive monorepo hosts several independent, reusable packages and standalo
 |-----------|-------------|------|
 | `go-peerjs` | Pure Go PeerJS protocol client and WebRTC DataChannel transport (`github.com/Hana-ame/go-peerjs`). | `back/peerjs/` |
 | `go-peersignal` | Lightweight self-hosted Go signaling and discovery server (`github.com/Hana-ame/go-peersignal`, binary `cmd/peersignal`). | `back/signalserver/` |
-| `go-peerdrive-bt` | Mainline BitTorrent DHT capability (`github.com/Hana-ame/go-peerdrive-bt`), opt-in bridge. | `back/p2p_bt/` |
+| `go-peerdrive-bt` *(optional plugin)* | Mainline BitTorrent DHT capability (`github.com/Hana-ame/go-peerdrive-bt`), opt-in bridge, default off. | `back/p2p_bt/` |
 | `peerdrive-client` | Zero-dependency pure browser consumer SDK and single-file web panel (`dist/panel.html`). | `packages/peerdrive-client/` |
 | `peerdrive-media` | WebRTC DataChannel URL proxy for direct in-browser audio, video, and image streaming. | `packages/peerdrive-media/` |
 | Active Core Services | Unified multi-protocol retrieval (`back/internal/provider/`), content-addressed collection schema (`back/internal/model/anon.go`), and interconnect transport (`back/internal/transport/peerjs_service.go`). | `back/internal/` |
