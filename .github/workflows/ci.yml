@@ -78,7 +78,7 @@ jobs:
       # 单二进制：主服务 / 信令 / 注册认证都在 cmd/peerdrive 里（子命令）。
       # vet 与 test 已被上面的 ./... 覆盖，构建这一步不覆盖的话它能过测却编不出二进制
       # ——入口侧的链接错误只有真链一次才暴露。
-      - run: go build -tags nosqlite -o peerdrive ./cmd/peerdrive/
+      - run: go build -tags nosqlite -ldflags="-s -w -buildvcs=false" -o peerdrive ./cmd/peerdrive/
 
   # 集成测试：脱外网（TestMain 起全局自托管信令 + 同机 WebRTC），不需要任何代理/凭证。
   # 必须 -p 1：多组测试共享同一个全局自托管信令服务，并行会互相干扰（见 AGENTS.md）。
