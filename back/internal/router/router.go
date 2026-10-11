@@ -316,8 +316,14 @@ func (rt *Router) Engine() *gin.Engine {
 		anon.GET("/collections/:hash", controller.GetAnonCollection)
 		anon.GET("/collections/:hash/*filepath", controller.DownloadAnonFile)
 		anon.POST("/collections/fork", authRequired, controller.ForkAnonCollection)
-		// Visibility change: must go through authRequired (bare PUT would let anyone change anyone's visibility)
+		// Visibility & Permissions change: must go through authRequired
 		anon.PUT("/collections/:hash/visibility", authRequired, controller.SetAnonCollectionVisibility)
+		anon.PUT("/collections/:hash/permissions", authRequired, controller.SetAnonCollectionPermissions)
+		// Entry CRUD & History (Issue #338)
+		anon.POST("/collections/:hash/entries", authRequired, controller.AddAnonCollectionEntry)
+		anon.DELETE("/collections/:hash/entries", authRequired, controller.RemoveAnonCollectionEntry)
+		anon.PUT("/collections/:hash/entries", authRequired, controller.UpdateAnonCollectionEntry)
+		anon.GET("/history/:hash", controller.GetAnonCollectionHistory)
 	}
 
 	// File management (browse/list/verify read-only open; write operations with auth)

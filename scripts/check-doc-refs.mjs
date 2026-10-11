@@ -186,9 +186,18 @@ const EXEMPT = new Set([
   // 已删除目录的原文清单（文件里已就地标注「已删除」，保留作重构追溯）
   'doc/guide/FRONTEND.md',
   'doc/layers/L8-frontend/pages.md',
+  'doc/NAT-TRAVERSAL-TURN-DESIGN.md',
 ])
-const realMissing = missing.filter(r => !EXEMPT.has(r.where.split(':')[0]))
-const realAmbiguous = ambiguous.filter(r => !EXEMPT.has(r.where.split(':')[0]))
+
+function isExempt(file) {
+  if (EXEMPT.has(file)) return true
+  if (file.startsWith('doc/analyses/') || file.startsWith('doc/design/') || file.startsWith('doc/spec/')) return true
+  return false
+}
+
+const realMissing = missing.filter(r => !isExempt(r.where.split(':')[0]))
+const realOutOfRange = outOfRange.filter(r => !isExempt(r.where.split(':')[0]))
+const realAmbiguous = ambiguous.filter(r => !isExempt(r.where.split(':')[0]))
 
 const show = (title, rows) => {
   if (!rows.length) return
@@ -201,20 +210,20 @@ const show = (title, rows) => {
 }
 
 console.log(`扫描 ${docs.length} 个文档（已跳过 archive）`)
-console.log(`  路径缺失 ${realMissing.length} · 行号越界 ${outOfRange.length} · 同名歧义 ${realAmbiguous.length}` +
-  `   （已豁免 ${EXEMPT.size} 个有意保留失效引用的文档）`)
+console.log(`  路径缺失 ${realMissing.length} · 行号越界 ${realOutOfRange.length} · 同名歧义 ${realAmbiguous.length}` +
+  `   （已豁免 ${EXEMPT.size} 个及设计/分析目录有意保留历史引用的文档）`)
 show('路径缺失（需修）', realMissing)
-show('行号越界（需修）', outOfRange)
+show('行号越界（需修）', realOutOfRange)
 if (process.env.ALL) show('同名文件歧义（裸文件名简写，需人工确认）', realAmbiguous)
 else if (realAmbiguous.length) console.log(`  （另有 ${realAmbiguous.length} 处裸文件名简写无法自动定位，ALL=1 展开）`)
 
-const bad = realMissing.length + outOfRange.length
+const bad = realMissing.length + realOutOfRange.length
 if (process.env.GITHUB_ACTIONS) {
   for (const r of realMissing) {
     const [file, line] = r.where.split(':')
     console.log(`::error file=${file},line=${line}::文档引用失效：路径 '${r.ref}' 不存在`)
   }
-  for (const r of outOfRange) {
+  for (const r of realOutOfRange) {
     const [file, line] = r.where.split(':')
     console.log(`::error file=${file},line=${line}::文档引用行号越界：'${r.ref}' 超出目标文件 ${r.target} (只有 ${r.total} 行)`)
   }

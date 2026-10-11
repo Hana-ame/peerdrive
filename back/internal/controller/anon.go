@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"peerdrive/internal/model"
@@ -43,6 +44,8 @@ func CreateAnonCollection(c *gin.Context) {
 		AccessList   []string                    `json:"access_list"`
 		AccessPolicy string                      `json:"access_policy"`
 		Passcode     string                      `json:"passcode"`
+		PSK          string                      `json:"psk"`
+		PSKHash      string                      `json:"psk_hash"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -50,15 +53,19 @@ func CreateAnonCollection(c *gin.Context) {
 	}
 
 	// Owner is the current node operator: only nodes logged into regserver have an account; anonymous nodes get an empty string
-	// (private collections are unreadable by anyone when unowned, so the frontend should disable the "private only" option when not logged in).
 	owner := nodestate.GetOperator()
+	pskVal := req.PSK
+	if pskVal == "" && req.PSKHash != "" {
+		pskVal = req.PSKHash
+	}
 
-	hash, err := anonSvc.CreateCollectionWithPolicy(req.FriendlyName, req.Entries, req.Tags, req.Visibility, req.AccessList, req.AccessPolicy, req.Passcode, owner)
+	hash, err := anonSvc.CreateCollectionWithPolicyAndPSK(req.FriendlyName, req.Entries, req.Tags, req.Visibility, req.AccessList, req.AccessPolicy, req.Passcode, pskVal, owner)
 	if err != nil {
 		msg := err.Error()
 		switch {
 		case strings.Contains(msg, "invalid visibility"), strings.Contains(msg, "access_list required"),
-			strings.Contains(msg, "invalid access policy"), strings.Contains(msg, "passcode required"):
+			strings.Contains(msg, "invalid access policy"), strings.Contains(msg, "passcode required"),
+			strings.Contains(msg, "psk required"):
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		case strings.Contains(msg, "invalid path"), strings.Contains(msg, "invalid hash"), strings.Contains(msg, "invalid providers"):
@@ -152,6 +159,10 @@ func GetAnonCollection(c *gin.Context) {
 	if passcode == "" {
 		passcode = c.GetHeader("X-Passcode")
 	}
+	psk := c.Query("psk")
+	if psk == "" {
+		psk = c.GetHeader("X-PSK")
+	}
 	// Issue #268: If protected and passcode doesn't match, hide entries and mark is_protected: true
 	if coll.EffectiveAccessPolicy() == model.AccessPolicyProtected && operator == "" {
 		if subtle.ConstantTimeCompare([]byte(passcode), []byte(coll.Passcode)) != 1 {
@@ -159,12 +170,26 @@ func GetAnonCollection(c *gin.Context) {
 			masked.Entries = []model.AnonCollectionEntry{}
 			masked.IsProtected = true
 			masked.Passcode = ""
+			masked.PSKHash = ""
+			c.JSON(http.StatusOK, masked)
+			return
+		}
+	}
+	// Issue #338: If PSK protected and PSK doesn't match, hide entries and mark is_protected: true
+	if (coll.PSKHash != "" || coll.EffectiveAccessPolicy() == model.AccessPolicyPSK || coll.EffectiveVisibility() == model.VisibilityPSK) && (operator == "" || operator != coll.Owner) {
+		if !coll.VerifyPSK(psk) {
+			masked := *coll
+			masked.Entries = []model.AnonCollectionEntry{}
+			masked.IsProtected = true
+			masked.Passcode = ""
+			masked.PSKHash = ""
 			c.JSON(http.StatusOK, masked)
 			return
 		}
 	}
 	resp := *coll
 	resp.Passcode = ""
+	resp.PSKHash = ""
 	c.JSON(http.StatusOK, resp)
 }
 
@@ -181,6 +206,11 @@ func GetAnonCollection(c *gin.Context) {
 func DownloadAnonFile(c *gin.Context) {
 	hash := c.Param("hash")
 	filePath := strings.TrimPrefix(c.Param("filepath"), "/")
+	// Dispatch /anon/collections/:hash/history through wildcard route to prevent Gin tree collision with /*filepath
+	if filePath == "history" {
+		GetAnonCollectionHistory(c)
+		return
+	}
 
 	operator := nodestate.GetOperator()
 	coll, err := anonSvc.GetCollectionVisibleTo(hash, operator)
@@ -196,6 +226,18 @@ func DownloadAnonFile(c *gin.Context) {
 		}
 		if subtle.ConstantTimeCompare([]byte(passcode), []byte(coll.Passcode)) != 1 {
 			c.JSON(http.StatusForbidden, gin.H{"error": "passcode required or invalid for protected collection"})
+			return
+		}
+	}
+
+	psk := c.Query("psk")
+	if psk == "" {
+		psk = c.GetHeader("X-PSK")
+	}
+	// Issue #338: PSK verification for file downloads
+	if (coll.PSKHash != "" || coll.EffectiveAccessPolicy() == model.AccessPolicyPSK || coll.EffectiveVisibility() == model.VisibilityPSK) && (operator == "" || operator != coll.Owner) {
+		if !coll.VerifyPSK(psk) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "psk required or invalid for psk-protected collection"})
 			return
 		}
 	}
@@ -370,6 +412,7 @@ func CommitAnonCollection(c *gin.Context) {
 		Entries       []model.AnonCollectionEntry `json:"entries"`
 		CommitMessage string                      `json:"commit_message"`
 		Passcode      string                      `json:"passcode"`
+		PSK           string                      `json:"psk"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -383,10 +426,17 @@ func CommitAnonCollection(c *gin.Context) {
 			passcode = c.GetHeader("X-Passcode")
 		}
 	}
+	psk := req.PSK
+	if psk == "" {
+		psk = c.Query("psk")
+		if psk == "" {
+			psk = c.GetHeader("X-PSK")
+		}
+	}
 
-	hash, err := anonSvc.CommitCollectionWithPasscode(req.SourceHash, req.Entries, req.CommitMessage, passcode, nodestate.GetOperator())
+	hash, err := anonSvc.CommitCollectionWithPasscodeAndPSK(req.SourceHash, req.Entries, req.CommitMessage, passcode, psk, nodestate.GetOperator())
 	if err != nil {
-		if strings.Contains(err.Error(), "passcode required or invalid") {
+		if strings.Contains(err.Error(), "passcode required or invalid") || strings.Contains(err.Error(), "psk required or invalid") {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
 		}
@@ -402,5 +452,232 @@ func CommitAnonCollection(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"hash": hash})
+	c.JSON(http.StatusCreated, gin.H{"hash": hash, "prev_sha": req.SourceHash})
+}
+
+// AddAnonCollectionEntry godoc
+// @Summary      Add or update entry in anonymous collection
+// @Description  Adds or updates a single file entry in an existing collection, generating a new version with prev_sha pointing to parent version.
+// @Tags         anon
+// @Accept       json
+// @Produce      json
+// @Param        hash  path  string  true  "Source Collection SHA256 hash"
+// @Success      201   {object}  map[string]string  "hash, prev_sha, path"
+// @Router       /anon/collections/{hash}/entries [post]
+func AddAnonCollectionEntry(c *gin.Context) {
+	hash := c.Param("hash")
+	var req struct {
+		Entry model.AnonCollectionEntry `json:"entry"`
+		Path  string                    `json:"path"`
+		Hash  string                    `json:"hash"`
+		PSK   string                    `json:"psk"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+	entry := req.Entry
+	if entry.Path == "" && req.Path != "" {
+		entry.Path = req.Path
+		if req.Hash != "" {
+			entry.Hash = req.Hash
+			entry.Normalize()
+		}
+	}
+	psk := req.PSK
+	if psk == "" {
+		psk = c.Query("psk")
+		if psk == "" {
+			psk = c.GetHeader("X-PSK")
+		}
+	}
+	newHash, err := anonSvc.AddCollectionEntry(hash, entry, nodestate.GetOperator(), psk)
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "psk required or invalid") {
+			c.JSON(http.StatusForbidden, gin.H{"error": msg})
+			return
+		}
+		if strings.Contains(msg, "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": msg})
+			return
+		}
+		if strings.Contains(msg, "invalid") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"hash": newHash, "prev_sha": hash, "path": entry.Path})
+}
+
+// RemoveAnonCollectionEntry godoc
+// @Summary      Remove entry from anonymous collection
+// @Description  Removes a file entry by path, generating a new version with prev_sha pointing to parent version.
+// @Tags         anon
+// @Produce      json
+// @Param        hash  path  string  true  "Source Collection SHA256 hash"
+// @Param        path  query string  false "File path within collection"
+// @Success      200   {object}  map[string]string  "hash, prev_sha, removed"
+// @Router       /anon/collections/{hash}/entries [delete]
+func RemoveAnonCollectionEntry(c *gin.Context) {
+	hash := c.Param("hash")
+	path := c.Query("path")
+	var req struct {
+		Path string `json:"path"`
+		PSK  string `json:"psk"`
+	}
+	if c.Request.ContentLength > 0 {
+		_ = c.ShouldBindJSON(&req)
+	}
+	if path == "" {
+		path = req.Path
+	}
+	if path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path required"})
+		return
+	}
+	psk := req.PSK
+	if psk == "" {
+		psk = c.Query("psk")
+		if psk == "" {
+			psk = c.GetHeader("X-PSK")
+		}
+	}
+	newHash, err := anonSvc.RemoveCollectionEntry(hash, path, nodestate.GetOperator(), psk)
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "psk required or invalid") {
+			c.JSON(http.StatusForbidden, gin.H{"error": msg})
+			return
+		}
+		if strings.Contains(msg, "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": msg})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"hash": newHash, "prev_sha": hash, "removed": path})
+}
+
+// UpdateAnonCollectionEntry godoc
+// @Summary      Update entry in anonymous collection
+// @Description  Updates a file entry in an existing collection, generating a new version with prev_sha pointing to parent version.
+// @Tags         anon
+// @Accept       json
+// @Produce      json
+// @Param        hash  path  string  true  "Source Collection SHA256 hash"
+// @Success      200   {object}  map[string]string  "hash, prev_sha, path"
+// @Router       /anon/collections/{hash}/entries [put]
+func UpdateAnonCollectionEntry(c *gin.Context) {
+	hash := c.Param("hash")
+	var req struct {
+		Entry model.AnonCollectionEntry `json:"entry"`
+		Path  string                    `json:"path"`
+		Hash  string                    `json:"hash"`
+		PSK   string                    `json:"psk"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+	entry := req.Entry
+	if entry.Path == "" && req.Path != "" {
+		entry.Path = req.Path
+		if req.Hash != "" {
+			entry.Hash = req.Hash
+			entry.Normalize()
+		}
+	}
+	psk := req.PSK
+	if psk == "" {
+		psk = c.Query("psk")
+		if psk == "" {
+			psk = c.GetHeader("X-PSK")
+		}
+	}
+	newHash, err := anonSvc.UpdateCollectionEntry(hash, entry, nodestate.GetOperator(), psk)
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "psk required or invalid") {
+			c.JSON(http.StatusForbidden, gin.H{"error": msg})
+			return
+		}
+		if strings.Contains(msg, "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": msg})
+			return
+		}
+		if strings.Contains(msg, "invalid") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"hash": newHash, "prev_sha": hash, "path": entry.Path})
+}
+
+// GetAnonCollectionHistory godoc
+// @Summary      Get version history of anonymous collection
+// @Description  Returns backward version history chain along prev_sha pointers.
+// @Tags         anon
+// @Produce      json
+// @Param        hash       path   string true  "Collection SHA256 hash"
+// @Param        max_depth  query  int    false "Maximum versions to traverse (default 50)"
+// @Success      200        {array} model.AnonCollectionSummary "Version history"
+// @Router       /anon/collections/{hash}/history [get]
+func GetAnonCollectionHistory(c *gin.Context) {
+	hash := c.Param("hash")
+	maxDepth := 50
+	if depthStr := c.Query("max_depth"); depthStr != "" {
+		if d, err := strconv.Atoi(depthStr); err == nil && d > 0 {
+			maxDepth = d
+		}
+	}
+	psk := c.Query("psk")
+	if psk == "" {
+		psk = c.GetHeader("X-PSK")
+	}
+	history, err := anonSvc.GetCollectionHistory(hash, maxDepth, nodestate.GetOperator(), psk)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, history)
+}
+
+// SetAnonCollectionPermissions godoc
+// @Summary      Update permissions (visibility / access_policy / PSK) of an anonymous collection
+// @Description  Creates a new collection version with updated permissions and prev_sha pointing to parent version.
+// @Tags         anon
+// @Accept       json
+// @Produce      json
+// @Param        hash  path  string true "Collection SHA256 hash"
+// @Success      200   {object} map[string]string "hash, prev_sha, visibility, access_policy"
+// @Router       /anon/collections/{hash}/permissions [put]
+func SetAnonCollectionPermissions(c *gin.Context) {
+	hash := c.Param("hash")
+	var req struct {
+		Visibility   string   `json:"visibility"`
+		AccessList   []string `json:"access_list"`
+		AccessPolicy string   `json:"access_policy"`
+		PSK          string   `json:"psk"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	newHash, err := anonSvc.UpdateCollectionPermissions(hash, req.Visibility, req.AccessList, req.AccessPolicy, req.PSK, nodestate.GetOperator())
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "invalid") || strings.Contains(msg, "required") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": msg})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"hash": newHash, "prev_sha": hash, "visibility": req.Visibility, "access_policy": req.AccessPolicy})
 }
