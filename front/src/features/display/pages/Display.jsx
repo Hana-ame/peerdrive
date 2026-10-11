@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import * as ws from '../../../ws';
+import DisplayHUD from '../components/DisplayHUD';
+import DisplayMedia from '../components/DisplayMedia';
+import DisplayStandby from '../components/DisplayStandby';
 
 /**
  * Display — Remote controlled display screen and public presentation page (Issue #243).
@@ -244,159 +247,35 @@ export default function Display() {
       <div className="absolute inset-0 bg-radial-gradient from-brand-900/20 via-neutral-950 to-neutral-950 pointer-events-none" />
 
       {/* Top Floating HUD */}
-      <div
-        className={`absolute top-4 left-4 right-4 z-50 flex items-center justify-between transition-opacity duration-300 ${
-          showHud ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        }`}
-      >
-        <div className="flex items-center gap-2 bg-neutral-900/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 text-xs">
-          <span
-            className={`w-2.5 h-2.5 rounded-full ${
-              connected && registered ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'
-            }`}
-          />
-          <span className="font-medium text-gray-200">{screenName}</span>
-          <span className="text-gray-500">|</span>
-          <span className="text-gray-400">频道: {channel}</span>
-          {media?.isLiveStream && (
-            <span className="flex items-center gap-1.5 bg-red-500/20 text-red-400 px-2.5 py-0.5 rounded-full border border-red-500/30 text-[11px] font-semibold animate-pulse ml-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-              LIVE #{media.seq}
-            </span>
-          )}
-        </div>
+      <DisplayHUD
+        showHud={showHud}
+        connected={connected}
+        registered={registered}
+        screenName={screenName}
+        channel={channel}
+        media={media}
+        onClearMedia={() => setMedia(null)}
+        onCopyScreenId={copyScreenId}
+        copied={copied}
+        screenId={screenId}
+        onToggleFullscreen={toggleFullscreen}
+      />
 
-        <div className="flex items-center gap-2">
-          {media && (
-            <button
-              onClick={() => setMedia(null)}
-              className="bg-neutral-900/80 hover:bg-neutral-800 text-xs text-red-400 px-3 py-1.5 rounded-full border border-white/10 transition"
-              title="清空画面 (C)"
-            >
-              清空画面
-            </button>
-          )}
-
-          <button
-            onClick={copyScreenId}
-            className="bg-neutral-900/80 hover:bg-neutral-800 text-xs text-gray-300 px-3 py-1.5 rounded-full border border-white/10 transition"
-            title="复制屏幕ID用于定向遥控"
-          >
-            {copied ? '已复制屏幕ID' : `ID: ${screenId}`}
-          </button>
-
-          <button
-            onClick={toggleFullscreen}
-            className="bg-neutral-900/80 hover:bg-neutral-800 text-xs text-gray-300 p-2 rounded-full border border-white/10 transition"
-            title="全屏切换 (F)"
-          >
-            ⛶
-          </button>
-        </div>
-      </div>
-
-      {/* Main Content Area */}
+      {/* Main Content Area: Media vs Standby */}
       {media ? (
-        <div className="relative w-full h-full flex items-center justify-center">
-          {media.mediaType === 'image' && (
-            <div className="relative w-full h-full flex flex-col items-center justify-center p-4">
-              <img
-                src={getMediaSrc()}
-                alt={media.title || 'Cast Image'}
-                className="max-w-full max-h-[92vh] object-contain rounded-lg shadow-2xl transition-all duration-300"
-              />
-              {media.title && (
-                <div className="absolute bottom-6 bg-black/60 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/10 text-sm text-gray-200 shadow-lg">
-                  {media.title}
-                </div>
-              )}
-            </div>
-          )}
-
-          {media.mediaType === 'video' && (
-            <div className="relative w-full h-full flex flex-col items-center justify-center">
-              <video
-                ref={videoRef}
-                src={getMediaSrc()}
-                autoPlay={media.autoplay !== false}
-                loop={media.loop}
-                controls
-                className="max-w-full max-h-screen object-contain shadow-2xl"
-              />
-              {media.title && (
-                <div className="absolute top-16 left-6 bg-black/60 backdrop-blur-md px-3 py-1 rounded-md text-xs text-gray-300 border border-white/10">
-                  {media.title}
-                </div>
-              )}
-            </div>
-          )}
-
-          {media.mediaType === 'audio' && (
-            <div className="flex flex-col items-center justify-center gap-6 p-8 bg-neutral-900/70 border border-white/10 rounded-2xl backdrop-blur-lg shadow-2xl max-w-md w-full">
-              <div className="w-24 h-24 rounded-full bg-brand-500/20 border border-brand-500/30 flex items-center justify-center text-4xl animate-pulse">
-                🎵
-              </div>
-              <div className="text-center">
-                <h3 className="text-lg font-semibold text-white">{media.title || '音频播放中'}</h3>
-                {media.hash && <p className="text-xs text-gray-400 font-mono mt-1">{media.hash.slice(0, 16)}...</p>}
-              </div>
-              <audio
-                ref={audioRef}
-                src={getMediaSrc()}
-                autoPlay={media.autoplay !== false}
-                loop={media.loop}
-                controls
-                className="w-full"
-              />
-            </div>
-          )}
-
-          {media.mediaType === 'text' && (
-            <div className="max-w-3xl p-12 bg-neutral-900/80 border border-white/10 rounded-2xl backdrop-blur-xl shadow-2xl text-center">
-              <h2 className="text-3xl font-bold mb-4 text-brand-300">{media.title || '展示通知'}</h2>
-              <p className="text-xl text-gray-200 leading-relaxed">{media.url || media.hash}</p>
-            </div>
-          )}
-        </div>
+        <DisplayMedia
+          media={media}
+          mediaSrc={getMediaSrc()}
+          videoRef={videoRef}
+          audioRef={audioRef}
+        />
       ) : (
-        /* Standby / Ambient Idle Screen */
-        <div className="flex flex-col items-center justify-center text-center p-8 z-10 max-w-xl">
-          {/* Clock */}
-          <div className="text-6xl md:text-8xl font-thin tracking-wider font-mono text-gray-200 mb-2">
-            {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-          </div>
-          <div className="text-sm md:text-base text-gray-400 mb-10">
-            {currentTime.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-          </div>
-
-          {/* Screen Card */}
-          <div className="bg-neutral-900/60 border border-white/10 rounded-2xl p-6 backdrop-blur-md shadow-2xl w-full flex flex-col items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-brand-500/10 border border-brand-500/30 flex items-center justify-center text-2xl text-brand-400">
-              📺
-            </div>
-
-            <div>
-              <h1 className="text-xl font-bold text-white tracking-tight">{screenName}</h1>
-              <p className="text-xs text-gray-400 mt-0.5">受控展示大屏已上线，随时接收投屏内容</p>
-            </div>
-
-            <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-lg border border-white/5 font-mono text-xs text-gray-300">
-              <span>屏幕标识:</span>
-              <span className="text-brand-300 font-bold">{screenId}</span>
-              <button
-                onClick={copyScreenId}
-                className="ml-2 text-gray-400 hover:text-white transition"
-                title="复制屏幕ID"
-              >
-                📋
-              </button>
-            </div>
-
-            <div className="text-xs text-gray-500 text-center max-w-sm">
-              在手机或电脑打开 Peerdrive 网盘，在文件菜单点击「投屏」，即可实时将图片或视频推送到此屏幕。
-            </div>
-          </div>
-        </div>
+        <DisplayStandby
+          currentTime={currentTime}
+          screenName={screenName}
+          screenId={screenId}
+          onCopyScreenId={copyScreenId}
+        />
       )}
 
       {/* Bottom Hint */}
