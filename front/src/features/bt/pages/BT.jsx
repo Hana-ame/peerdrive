@@ -1,6 +1,7 @@
 // Module 6: BT — BT DHT / torrent download status and download management (simplified panel).
 import React, { useState, useEffect, useCallback } from 'react';
 import * as ws from '../../../platform/transport-ws';
+import { getNodeSession } from '../../../lib/nodeSession';
 
 export default function BT() {
   const [status, setStatus] = useState(null);
@@ -10,6 +11,11 @@ export default function BT() {
 
   const load = useCallback(async () => {
     setErr('');
+    if (getNodeSession()?.client) {
+      setStatus(null);
+      setDownloads([]);
+      return;
+    }
     try {
       const [st, dl] = await Promise.all([
         ws.admin('GET', '/bt/status').catch(() => null),

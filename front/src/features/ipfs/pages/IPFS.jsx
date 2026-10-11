@@ -1,6 +1,7 @@
 // Module ⑥: IPFS —— pin list and gateway status (simplified panel).
 import React, { useState, useEffect, useCallback } from 'react';
 import * as ws from '../../../platform/transport-ws';
+import { getNodeSession } from '../../../lib/nodeSession';
 
 export default function IPFS() {
   const [pins, setPins] = useState([]);
@@ -10,6 +11,11 @@ export default function IPFS() {
 
   const load = useCallback(async () => {
     setErr('');
+    if (getNodeSession()?.client) {
+      setPins([]);
+      setGateways([]);
+      return;
+    }
     try {
       const [p, g] = await Promise.all([
         ws.admin('GET', '/ipfs/pins').catch(() => []),

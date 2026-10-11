@@ -115,6 +115,10 @@ export default function Drive() {
   const openCastModal = async (f) => {
     setCastFile(f);
     setCastStatus('');
+    if (peerSession?.client || getNodeSession()?.client) {
+      setScreens([]);
+      return;
+    }
     try {
       const res = await ws.admin('GET', '/display/screens');
       const list = Array.isArray(res) ? res : [];

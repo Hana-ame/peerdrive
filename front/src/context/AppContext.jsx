@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { getStatus, onStatus } from '../platform/transport-ws/status';
 import { admin } from '../platform/transport-ws';
 import { RateTracker } from '../platform/shared/format';
+import { getNodeSession } from '../lib/nodeSession';
 
 // NodeContext: Global node session state, node identity, and authentication (Issue #217).
 export const NodeContext = createContext(null);
@@ -16,7 +17,7 @@ export function NodeProvider({ children }) {
   const [loading, setLoading] = useState(false);
 
   const fetchNodeDetails = useCallback(async () => {
-    if (getStatus() !== 'open') return;
+    if (getStatus() !== 'open' || getNodeSession()?.client) return;
     setLoading(true);
     try {
       const [nodeRes, authRes] = await Promise.allSettled([
@@ -73,7 +74,7 @@ export function TransferProvider({ children }) {
   const lastTickRef = useRef(0);
 
   const fetchTransfers = useCallback(async () => {
-    if (getStatus() !== 'open') return;
+    if (getStatus() !== 'open' || getNodeSession()?.client) return;
     setLoading(true);
     try {
       const res = await admin('GET', '/p2p/pull');

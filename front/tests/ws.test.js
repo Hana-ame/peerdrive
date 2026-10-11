@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import * as ws from '../src/ws'
 import * as transportWs from '../src/platform/transport-ws'
 import * as transportStatus from '../src/platform/transport-ws/status'
+import { setNodeSession, clearNodeSession } from '../src/lib/nodeSession'
 
 // Construct a mock WebSocket: manually inject onmessage for direct frame feeding
 function makeMockSock() {
@@ -392,6 +393,112 @@ describe('platform/transport-ws module contracts', () => {
     transportStatus.setStatus('open')
     expect(calls).toEqual(['idle', 'connecting'])
     transportStatus.resetStatus()
+  })
+})
+
+// Discovery context (Issue #335): When PeerJS session is active, local WebSocket transport
+// must remain completely dormant (mutual exclusion: "take either one of the two").
+// WS should not attempt reconnects, should not throw unhandled "ws transport disabled" errors,
+// and admin/download/stat calls must gracefully route through PeerJS shares/stream or safely resolve.
+describe('ws.js dual-channel mutex with PeerJS (Issue #335)', () => {
+  beforeEach(() => {
+    ws.__test._reset()
+    clearNodeSession()
+    localStorage.clear()
+  })
+
+  it('setting active PeerJS session immediately silences WS and transitions status to idle', () => {
+    const sock = makeMockSock()
+    let closed = false
+    sock.close = () => { closed = true }
+    ws.__test._setSock(sock)
+    transportStatus.setStatus('open')
+
+    const mockClient = {
+      shares: vi.fn().mockResolvedValue({ collections: [], files: [] }),
+    }
+    setNodeSession({ peerId: 'peer-abc', client: mockClient })
+
+    expect(closed).toBe(true)
+    expect(ws.getStatus()).toBe('idle')
+  })
+
+  it('admin calls in PeerJS mode resolve safely without throwing transport error', async () => {
+    const mockClient = {
+      shares: vi.fn().mockResolvedValue({
+        collections: [{ name: 'col-1', hash: 'hash1', files: [] }],
+        files: [{ name: 'file-1.txt', hash: 'hash1', size: 100 }],
+      }),
+    }
+    setNodeSession({ peerId: 'remote-node-123', client: mockClient })
+
+    // /ping heartbeat check resolves safely
+    const pingRes = await ws.admin('GET', '/ping')
+    expect(pingRes).toEqual({ pong: 'pong' })
+
+    // /peerjs/node resolves node identity
+    const nodeRes = await ws.admin('GET', '/peerjs/node')
+    expect(nodeRes).toEqual({ id: 'remote-node-123', peers: [] })
+
+    // /anon/collections maps to client.shares()
+    const cols = await ws.admin('GET', '/anon/collections')
+    expect(cols).toEqual([{ name: 'col-1', hash: 'hash1', files: [] }])
+
+    // /files maps to client.shares() files
+    const files = await ws.admin('GET', '/files')
+    expect(files).toEqual([{ name: 'file-1.txt', hash: 'hash1', size: 100 }])
+
+    // other admin calls return safe fallback
+    const stat = await ws.admin('GET', '/system/stats')
+    expect(stat).toBeNull()
+  })
+
+  it('download, downloadStream, downloadToFile, and stat route via client in PeerJS mode', async () => {
+    const streamMock = vi.fn().mockImplementation(async function* (_hash, _opts) {
+      yield new Uint8Array([1, 2, 3])
+    })
+    const saveAsMock = vi.fn().mockResolvedValue(true)
+    const mockClient = {
+      stream: streamMock,
+      saveAs: saveAsMock,
+      shares: vi.fn().mockResolvedValue({
+        files: [{ name: 'test.bin', hash: 'hash99', size: 1234 }],
+      }),
+    }
+    setNodeSession({ peerId: 'peer-xyz', client: mockClient })
+
+    // download
+    const data = await ws.download('hash99')
+    expect(streamMock).toHaveBeenCalledWith('hash99', { offset: 0, size: -1 })
+    expect(Array.from(data)).toEqual([1, 2, 3])
+
+    // stat
+    const meta = await ws.stat('hash99')
+    expect(meta).toEqual({ total: 1234 })
+
+    // downloadToFile
+    const saved = await ws.downloadToFile('hash99', 'out.bin')
+    expect(saved).toBe(true)
+    expect(saveAsMock).toHaveBeenCalledWith('hash99', 'out.bin')
+  })
+
+  it('clearing node session restores Mode A (local WS capability)', async () => {
+    const mockClient = { shares: vi.fn() }
+    setNodeSession({ peerId: 'peer-abc', client: mockClient })
+    expect(ws.getStatus()).toBe('idle')
+
+    // Clear session
+    clearNodeSession()
+
+    // Can set socket and send admin requests as before
+    const sock = makeMockSock()
+    ws.__test._setSock(sock)
+    const p = ws.admin('GET', '/ping')
+    const frame = JSON.parse(sock.sent[0])
+    expect(frame.type).toBe('admin')
+    feedText(sock, { type: 'admin-resp', status: 200, body: { pong: 'ok' }, reqId: frame.reqId })
+    const res = await p
+    expect(res).toEqual({ pong: 'ok' })
   })
 })
 

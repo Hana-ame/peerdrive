@@ -53,9 +53,10 @@ export default function Collections() {
 
   const loadList = useCallback(async () => {
     setErr('');
-    if (peerSession?.client && ws.getStatus() !== 'open') {
+    const client = peerSession?.client || getNodeSession()?.client;
+    if (client) {
       try {
-        const snap = await peerSession.client.shares();
+        const snap = await client.shares();
         const colls = (snap?.collections || []).map((c, i) => ({
           hash: c.hash || `c-${i}`,
           current_hash: c.hash || `c-${i}`,
@@ -87,7 +88,7 @@ export default function Collections() {
       const res = await ws.admin('GET', '/anon/collections');
       setCollections(Array.isArray(res) ? res : []);
     } catch (e) {
-      setErr(e?.message || String(e));
+      setErr('');
       setCollections([]);
     }
   }, [peerSession]);
@@ -157,35 +158,41 @@ export default function Collections() {
       return;
     }
 
+    const client = peerSession?.client || getNodeSession()?.client;
+    if (client) {
+      try {
+        const snap = await client.shares();
+        const match = (snap?.collections || []).find(col => col.hash === targetHash || col.name === targetHash);
+        if (match) {
+          setDetail({
+            hash: targetHash,
+            data: {
+              hash: match.hash,
+              friendly_name: match.name,
+              entries: (match.entries || []).map(entry => ({
+                path: entry.path || entry.name || 'unnamed',
+                hash: entry.hash || '',
+                mime_type: entry.mime || '',
+                providers: [{ type: 'sha256', value: entry.hash || '', mime_type: entry.mime || '' }],
+              })),
+              tags: match.tags || [],
+              is_protected: Boolean(match.is_protected),
+              visibility: match.access_policy || 'public',
+            },
+          });
+          return;
+        }
+      } catch (e) {
+        setErr(e?.message || String(e));
+        setDetail(null);
+        return;
+      }
+    }
+
     try {
       const d = await ws.admin('GET', `/anon/collections/${targetHash}`);
       setDetail({ hash: targetHash, data: d });
     } catch (e) {
-      if (peerSession?.client) {
-        try {
-          const snap = await peerSession.client.shares();
-          const match = (snap?.collections || []).find(col => col.hash === targetHash);
-          if (match) {
-            setDetail({
-              hash: targetHash,
-              data: {
-                hash: match.hash,
-                friendly_name: match.name,
-                entries: (match.entries || []).map(entry => ({
-                  path: entry.path || entry.name || 'unnamed',
-                  hash: entry.hash || '',
-                  mime_type: entry.mime || '',
-                  providers: [{ type: 'sha256', value: entry.hash || '', mime_type: entry.mime || '' }],
-                })),
-                tags: match.tags || [],
-                is_protected: Boolean(match.is_protected),
-                visibility: match.access_policy || 'public',
-              },
-            });
-            return;
-          }
-        } catch { /* ignore */ }
-      }
       setErr(e?.message || String(e));
       setDetail(null);
     }
@@ -193,6 +200,7 @@ export default function Collections() {
 
   const unlockProtected = async (hash) => {
     if (!unlockPasscode.trim()) return;
+    if (peerSession?.client || getNodeSession()?.client) return;
     setBusy(true);
     try {
       const d = await ws.admin('GET', `/anon/collections/${hash}?passcode=${encodeURIComponent(unlockPasscode.trim())}`);

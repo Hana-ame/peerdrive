@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import * as ws from '../../../platform/transport-ws';
 import { mimeOf } from '../../../platform/shared/mime';
 import { STORAGE_KEY_API_BASE } from '../../../platform/shared/storageKeys';
+import { getNodeSession } from '../../../lib/nodeSession';
 
 /**
  * useDriveFiles hook manages Drive file querying (root, browsing, inbox, WebRTC shares),
@@ -19,7 +20,7 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
   const [globalTagCounts, setGlobalTagCounts] = useState([]);
 
   const loadTagsSummary = useCallback(async () => {
-    if (peerSession?.client) return; // PeerJS mode doesn't have local tags admin endpoint
+    if (peerSession?.client || getNodeSession?.()?.client) return; // PeerJS mode doesn't have local tags admin endpoint
     try {
       const res = await ws.admin('GET', '/tags/summary');
       const list = res?.data || res?.tags || [];
@@ -37,10 +38,11 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
 
   const load = useCallback(async () => {
     setErr('');
+    const client = peerSession?.client || getNodeSession?.()?.client;
     // If WebRTC peerSession is active, strictly load files from remote peer via shares
-    if (peerSession?.client) {
+    if (client) {
       try {
-        const shareData = await peerSession.client.shares();
+        const shareData = await client.shares();
         const rawFiles = shareData?.files || [];
         const fileList = rawFiles.map(e => {
           const fname = e.name || e.path || 'unnamed';
@@ -112,7 +114,7 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
 
       // Fetch tags for files in a single batch request (eliminates N+1 network waterfall)
       const hashes = fileList.map(f => f.hash).filter(Boolean);
-      if (hashes.length > 0) {
+      if (!client && hashes.length > 0) {
         try {
           const res = await ws.admin('POST', '/tags/batch', { shas: hashes });
           const batchTags = res?.tags || res?.data || {};
@@ -122,11 +124,7 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
         }
       }
     } catch (e) {
-      if (!peerSession?.client) {
-        setErr('');
-      } else {
-        setErr(e?.message || String(e));
-      }
+      setErr('');
       setFiles([]);
     }
   }, [currentDir, peerSession, selectedCategory]);
