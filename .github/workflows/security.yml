@@ -50,10 +50,22 @@ jobs:
           go-version: "1.26"
           cache-dependency-path: back/go.sum
       - run: go mod download
-      - name: 红队安全回归用例 (XSS / Location 注入 / Content-Disposition)
+      - name: 红队安全回归用例 R1 (XSS / Location 注入 / Content-Disposition)
         run: >-
           go test -tags nosqlite ./internal/controller/
           -run 'TestDownload_|TestShare_|TestSafeFilename|TestIsHTTPURL'
+          -count=1 -v
+
+      # R2（第二轮，全栈）：JSON 请求体上限 / CORS 头白名单 / Origin 通配符
+      # scheme 校验 / 弱 AdminToken 启动拒绝。这些用例是「修完再被绕过」的防线，
+      # 单独命名一步，免得将来有人改 controller 时把它们当 controller 用例删掉。
+      - name: 红队安全回归用例 R2 (JSON 上限 / CORS / Origin / 弱令牌)
+        run: >-
+          go test -tags nosqlite ./internal/router/
+          -run 'TestLimitJSONBody|TestCORS_|TestIsOriginAllowed'
+          -count=1 -v &&
+          go test -tags nosqlite ./internal/serverapp/
+          -run 'TestValidateAuthStartup_RejectsWeakAdminToken|TestValidateAuthStartup_WeakTokenExemptions|TestIsWeakSecret'
           -count=1 -v
 
   # ── Go 静态安全扫描 ───────────────────────────────────────────────────
