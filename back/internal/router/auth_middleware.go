@@ -231,6 +231,12 @@ func (t *tokenCache) len() int {
 	return len(t.m)
 }
 
+// ValidateToken validates a Bearer token and returns (username, role).
+// Returns empty strings if invalid, expired, or unauthenticated.
+func (a *Authenticator) ValidateToken(token string) (string, string) {
+	return a.validateToken(token)
+}
+
 func (a *Authenticator) validateToken(token string) (string, string) {
 	// 只在远端注册服务器模式下被调用（AuthOptional/AuthRequired 已先分流本地令牌），
 	// 用 regServerURL 判空而不是 authDisabled()：AdminToken 已设但 regServer 为空时

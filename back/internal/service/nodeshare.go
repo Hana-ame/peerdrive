@@ -87,6 +87,10 @@ type NodeShare struct {
 	// 新上传的文件不在那一页里——勾选了却既列不出来也共享不出去，用户看到的是
 	// "我勾了，但什么都没发生"。按 hash 单独查不受分页影响。
 	fileInfo func(hash string) (*model.FileInfo, error)
+
+	// tokenVerifier 验证身份令牌并返回用户名的回调函数（Phase 7 身份授权体系注入）。
+	// 当且仅当注册服务器配置时有效；未配置或校验失败时返回空字符串。
+	tokenVerifier func(token string) string
 }
 
 // NewNodeShare 从配置 + 已保存的运行时状态构造。
@@ -136,6 +140,13 @@ func (s *NodeShare) SetFileLister(fn func() ([]model.FileInfo, error)) { s.fileL
 // 缺失时按 hash 的兜底查找不可用（勾选仍会记录，只是大节点上列不出来）。
 func (s *NodeShare) SetFileInfoReader(fn func(hash string) (*model.FileInfo, error)) {
 	s.fileInfo = fn
+}
+
+// SetTokenVerifier 注入身份令牌校验器（Phase 7 身份授权体系注入）。
+func (s *NodeShare) SetTokenVerifier(fn func(token string) string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tokenVerifier = fn
 }
 
 // Enabled 是否开启共享。

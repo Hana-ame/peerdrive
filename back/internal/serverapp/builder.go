@@ -600,6 +600,12 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	if err != nil {
 		return fail(err)
 	}
+	if rt.Authenticator() != nil && share != nil {
+		share.SetTokenVerifier(func(token string) string {
+			u, _ := rt.Authenticator().ValidateToken(token)
+			return u
+		})
+	}
 	r := rt.Engine()
 
 	// Security status summary (security_status.go): print "where exactly is this node open"

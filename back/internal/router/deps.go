@@ -190,6 +190,9 @@ func (r *Router) AuthRequired() gin.HandlerFunc { return r.authRequired }
 // AuthOptional returns this instance's "validate a token if present" middleware.
 func (r *Router) AuthOptional() gin.HandlerFunc { return r.authOptional }
 
+// Authenticator returns this instance's Authenticator.
+func (r *Router) Authenticator() *Authenticator { return r.auth }
+
 // validate checks the dependency set for combinations that cannot serve their
 // documented purpose.
 //

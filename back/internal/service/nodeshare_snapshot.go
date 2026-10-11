@@ -274,9 +274,19 @@ func (s *NodeShare) collectionsSnapshotFor(items []ShareItem, friend bool, token
 		}
 		lvl := it.EffectiveLevel()
 		policy := coll.EffectiveAccessPolicy()
+
+		// Phase 7: Authenticate requester identity using tokenVerifier
+		var requester string
+		if s.tokenVerifier != nil && token != "" {
+			requester = s.tokenVerifier(token)
+		}
+
 		if policy == model.AccessPolicyPrivate || coll.EffectiveVisibility() != model.VisibilityPublic {
-			// 见文件头安全边界第 2 条：AccessList 无法校验 → 按 private 处理
-			lvl = model.LevelPrivate
+			// 若请求者持有有效身份且具备查看权限（如处于 AccessList 或为属主），不降级为 private；
+			// 否则按原有安全策略降级为 private（仅好友可见，未列出则过滤）。
+			if requester == "" || !coll.CanView(requester) {
+				lvl = model.LevelPrivate
+			}
 		}
 		if lvl == model.LevelUnlisted || (lvl == model.LevelPrivate && !friend) {
 			continue
@@ -284,6 +294,16 @@ func (s *NodeShare) collectionsSnapshotFor(items []ShareItem, friend bool, token
 		isProtected := false
 		if policy == model.AccessPolicyProtected {
 			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(coll.Passcode)) != 1 {
+				isProtected = true
+			}
+		}
+		if policy == model.AccessPolicyPSK || coll.PSKHash != "" {
+			if token == "" || !coll.VerifyPSK(token) {
+				isProtected = true
+			}
+		}
+		if policy == model.AccessPolicyRestricted || policy == model.AccessPolicyPrivate {
+			if requester == "" || !coll.CanView(requester) {
 				isProtected = true
 			}
 		}
