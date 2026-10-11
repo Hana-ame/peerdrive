@@ -1,0 +1,150 @@
+name: Peerdrive Security (Red-Team)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - refactor
+      - base
+      - docs
+      - "feat/*"
+      - "fix/*"
+      - "module/*"
+      - "*-agent"
+      - "*-frontend"
+    tags: ['v*']
+  pull_request:
+    branches: [main, master, refactor]
+  schedule:
+    # 每周跑一次全量扫描（含 npm audit），即使没有提交也能发现新披露的依赖漏洞。
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 红队回归测试 ─────────────────────────────────────────────────────
+  # 2026-10-11 UI 对抗审计（audit R3）发现的漏洞都在这里固化成用例，防止回归：
+  #   1. HIGH 存储型 XSS：上传 .html/.js 后经 /sha256sum/:hash?inline=1 以
+  #      text/html / text/javascript 渲染 → 同源 CSP `default-src 'self'` 允许
+  #      <script src>，载荷可执行并读到 localStorage 的 peerdrive_auth_token。
+  #   2. MEDIUM 分享链接 302 Location 注入：/shares 未校验 hash。
+  #   3. MEDIUM follow-redirects URL provider 未约束 scheme。
+  #
+  # 为什么不合并进 ci.yml 的 backend job：安全回归用例会主动构造恶意输入，
+  # 与功能测试混在一起，失败时容易看不出「是功能坏了还是防护漏了」。
+  # 独立 job 失败时一眼定位；也允许单独手动触发做审计复核。
+  redteam-regression:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: back
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: back/go.sum
+      - run: go mod download
+      - name: 红队安全回归用例 (XSS / Location 注入 / Content-Disposition)
+        run: >-
+          go test -tags nosqlite ./internal/controller/
+          -run 'TestDownload_|TestShare_|TestSafeFilename|TestIsHTTPURL'
+          -count=1 -v
+      # 路径穿越矩阵（AGENTS.md §穿透矩阵）：改了任何接受路径的入口都必须绿。
+      - name: 路径穿越矩阵 (TestTraversal)
+        run: go test -tags nosqlite -run TestTraversal ./internal/... -count=1
+
+  # ── Go 静态安全扫描 ───────────────────────────────────────────────────
+  # gosec 覆盖 CWE 级别的问题（命令注入、弱哈希、TLS 校验关闭、路径拼接等）。
+  # severity=medium 起报：low 噪音太大（大量误报在第三方回退路径上），
+  # medium 起是「真实可被利用」的门槛。当前是报告模式（不阻断主干）——
+  # 扫描结果随 artifact 归档，安全项逐条 triage 后再把门槛收紧成 fail。
+  gosec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: back/go.sum
+      - run: go mod download
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - name: 扫描主模块 back/ (tags=nosqlite)
+        working-directory: back
+        run: gosec -tags nosqlite -severity medium -confidence medium -fmt json -out gosec-back.json ./... || echo "::warning::gosec reported findings (see artifact)"
+      # 子模块是独立 go.mod：主模块的 nosqlite tag 不适用，且按 AGENTS.md
+      # 它们在 CI 里走 CGO_ENABLED=0（纯 Go 驱动）。
+      - name: 扫描子模块 signalserver
+        working-directory: back/signalserver
+        env:
+          CGO_ENABLED: "0"
+        run: gosec -severity medium -confidence medium -fmt json -out gosec-signal.json ./... || echo "::warning::gosec reported findings (see artifact)"
+      - name: 扫描子模块 p2p_bt
+        working-directory: back/p2p_bt
+        env:
+          CGO_ENABLED: "0"
+        run: gosec -severity medium -confidence medium -fmt json -out gosec-p2pbt.json ./... || echo "::warning::gosec reported findings (see artifact)"
+      - name: 汇总报告
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob, json
+          total = 0
+          files = sorted(glob.glob("back/gosec-*.json") + glob.glob("back/*/gosec-*.json"))
+          for p in files:
+              try:
+                  data = json.load(open(p))
+              except Exception as e:
+                  print(f"{p}: unreadable ({e})"); continue
+              if not isinstance(data, list): continue
+              n = len(data); total += n
+              print(f"{p}: {n} finding(s)")
+              for f in data[:10]:
+                  print(f"  - [{f.get('severity')}/{f.get('confidence')}] "
+                        f"{f.get('rule_id')} {str(f.get('details'))[:120]} "
+                        f"@ {f.get('file')}:{f.get('line')}")
+          print(f"TOTAL: {total} finding(s)")
+          PY
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gosec-reports
+          path: back/**/gosec-*.json
+          if-no-files-found: ignore
+
+  # ── 前端依赖漏洞 ──────────────────────────────────────────────────────
+  # npm audit 只检查 package-lock 里已声明的依赖。audit-level=high 避免
+  # low/moderate 级别的历史噪音阻断主干；critical/high 才需要处理。
+  npm-audit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [front, packages/peerdrive-client, packages/peerdrive-media]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ${{ matrix.dir }}/package-lock.json
+      - name: 审计运行时依赖漏洞 (high+)
+        run: |
+          cd ${{ matrix.dir }}
+          test -f package-lock.json || { echo "no lockfile in ${{ matrix.dir }} — skip"; exit 0; }
+          npm ci --ignore-scripts --audit=false --no-fund
+          npm audit --audit-level=high --omit=dev
+      - name: 审计 devDependencies 漏洞 (high+)
+        run: |
+          cd ${{ matrix.dir }}
+          test -f package-lock.json || exit 0
+          npm audit --audit-level=high
+        # dev 依赖漏洞不阻断主干（不影响线上产物），只报告。
+        continue-on-error: true
