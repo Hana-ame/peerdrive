@@ -156,7 +156,7 @@
     <h1>peerdrive panel</h1>
     <span class="tag">公共面板</span>
     <span class="tag">零后端</span>
-    <span class="tag mono" id="build-id">bundle c128d0f8</span>
+    <span class="tag mono" id="build-id">bundle bfb30dc3</span>
     <span class="grow"></span>
     <span class="mono dim" style="display:flex;align-items:center;gap:6px">
       我的节点 id：<span id="my-id">（未连接）</span>
@@ -1316,7 +1316,10 @@ class PeerDriveClient {
 
   _onDataHead(frame) {
     const p = this._pend.get(frame.reqId)
-    if (!p) return // late frame (cancelled/ended): discard
+    if (!p) {
+      this._expect = null // late frame (cancelled/ended): discard and clear expect
+      return
+    }
     p.touch()
     const size = Number(frame.size)
     // Same limit as Go-side H6: block size must be positive and not exceed protocol limit, otherwise
