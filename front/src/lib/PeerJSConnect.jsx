@@ -12,6 +12,9 @@ import { setNodeSession, clearNodeSession } from './nodeSession';
 
 import { fmtBytes } from '../platform/shared/format';
 import { STORAGE_KEY_PANEL_PREFS } from '../platform/shared/storageKeys';
+import { useI18n } from '../context/I18nContext';
+import NodeMarketCard from '../features/node/components/NodeMarketCard';
+import NodeBannerPickerModal from '../features/node/components/NodeBannerPickerModal';
 
 const DEFAULT_SIG = {
   host: 'peersignal.moonchan.xyz',
@@ -63,6 +66,10 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
   const [foundNodes, setFoundNodes] = useState(null); // null=not searched | [] = empty
   const [searchStatus, setSearchStatus] = useState('idle'); // idle|searching|error
   const [searchErr, setSearchErr] = useState('');
+  const { t } = useI18n();
+  const [showAdvancedSig, setShowAdvancedSig] = useState(false);
+  const [viewMode, setViewMode] = useState('card');
+  const [bannerModalPeerId, setBannerModalPeerId] = useState(null);
 
 
   // Dial core: connect directly by the passed peerId (doesn't depend on state;
@@ -166,94 +173,168 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
   return (
     <div className={compact ? 'space-y-2' : 'space-y-3'}>
       {!compact && (
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Signaling host</label>
-            <input value={sigHost} onChange={e => setSigHost(e.target.value)} className={inputCls} />
+        <div className="border border-white/[0.06] rounded-xl p-3 bg-white/[0.02]">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              <span>⚙️</span>
+              <span className="font-medium text-gray-300">{t('connect.advSig')}</span>
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-white/[0.05] text-gray-400">
+                {sigHost}:{sigPort}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvancedSig((prev) => !prev)}
+              className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
+            >
+              {showAdvancedSig ? '收起 ▲' : '配置 ▼'}
+            </button>
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Signaling port</label>
-            <input value={sigPort} onChange={e => setSigPort(e.target.value)} className={inputCls} />
-          </div>
-          <div className="col-span-2">
-            <label className="block text-xs text-gray-500 mb-1">Signaling key</label>
-            <input value={sigKey} onChange={e => setSigKey(e.target.value)} className={inputCls} />
-          </div>
+          {showAdvancedSig && (
+            <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-white/[0.06]">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">{t('connect.sigHost')}</label>
+                <input value={sigHost} onChange={e => setSigHost(e.target.value)} className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">{t('connect.sigPort')}</label>
+                <input value={sigPort} onChange={e => setSigPort(e.target.value)} className={inputCls} />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs text-gray-500 mb-1">{t('connect.sigKey')}</label>
+                <input value={sigKey} onChange={e => setSigKey(e.target.value)} className={inputCls} />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-
       {/* Search online nodes */}
-      <div>
-        <div className="flex gap-2">
-          <button onClick={handleSearch} disabled={searchStatus === 'searching'}
-            className="px-3 py-1 text-xs bg-white/[0.06] text-gray-300 rounded-lg hover:bg-white/[0.12] disabled:opacity-40 whitespace-nowrap">
-            {searchStatus === 'searching' ? 'Searching...' : 'Search Online Nodes'}
-          </button>
-          <span className="text-xs self-center">
-            {searchStatus === 'error' && <span className="text-red-400">{searchErr}</span>}
-            {searchStatus === 'done' && <span className="text-gray-400">{foundNodes?.length ?? 0} online nodes</span>}
-          </span>
-        </div>
-        {searchStatus === 'done' && foundNodes && foundNodes.length > 0 && (
-          <ul className="mt-2 space-y-1.5">
-            {foundNodes.map((n, i) => {
-              const auth = n.loadInfo?.auth || (n.loadInfo?.shares?.countsHidden ? 'open' : 'open');
-              const isPsk = auth === 'psk' || Boolean(n.psk);
-              const sharesCount = typeof n.loadInfo?.shares_count === 'number'
-                ? n.loadInfo.shares_count
-                : (n.loadInfo?.shares?.collections ?? (Array.isArray(n.collections) ? n.collections.length : 0));
-              const caps = Array.isArray(n.loadInfo?.caps) ? n.loadInfo.caps : [];
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <button onClick={handleSearch} disabled={searchStatus === 'searching'}
+              className="px-3 py-1.5 text-xs bg-white/[0.06] text-gray-200 rounded-lg hover:bg-white/[0.12] disabled:opacity-40 whitespace-nowrap transition-colors flex items-center gap-1.5">
+              <span>{searchStatus === 'searching' ? '🔄' : '🔍'}</span>
+              <span>{searchStatus === 'searching' ? t('connect.searching') : t('connect.searchNodes')}</span>
+            </button>
+            <span className="text-xs">
+              {searchStatus === 'error' && <span className="text-red-400">{searchErr}</span>}
+              {searchStatus === 'done' && <span className="text-gray-400">{t('connect.onlineCount', { count: foundNodes?.length ?? 0 })}</span>}
+            </span>
+          </div>
 
-              return (
-                <li key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs bg-white/[0.04] p-2.5 rounded-lg border border-white/[0.06] hover:bg-white/[0.06] transition-colors">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-mono text-gray-200 font-medium truncate max-w-[200px] sm:max-w-[280px]" title={n.peerId}>{n.peerId}</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${isPsk ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}>
-                        {isPsk ? '🔒 需密码' : '🔓 公开免密'}
-                      </span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-white/[0.06] text-gray-400 font-mono">
-                        {sharesCount > 0 ? `📦 ${sharesCount}个公开合集` : '📭 暂无公开内容'}
-                      </span>
-                      {n.nodeType && (
-                        <span className="text-[10px] text-gray-500 font-mono">[{n.nodeType}]</span>
+          {searchStatus === 'done' && foundNodes && foundNodes.length > 0 && (
+            <div className="flex items-center gap-1 bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.08]">
+              <button
+                type="button"
+                onClick={() => setViewMode('card')}
+                className={`px-2.5 py-1 text-xs rounded-md transition-colors flex items-center gap-1 ${viewMode === 'card' ? 'bg-brand-600 text-white font-medium shadow' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                <span>🎴</span>
+                <span>{t('connect.cardView')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                className={`px-2.5 py-1 text-xs rounded-md transition-colors flex items-center gap-1 ${viewMode === 'list' ? 'bg-brand-600 text-white font-medium shadow' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                <span>📋</span>
+                <span>{t('connect.listView')}</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {searchStatus === 'done' && foundNodes && foundNodes.length > 0 && (
+          viewMode === 'card' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 mt-2">
+              {foundNodes.map((n) => (
+                <NodeMarketCard
+                  key={n.peerId}
+                  node={n}
+                  onConnect={handleJoinFound}
+                  onPickBanner={(id) => setBannerModalPeerId(id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <ul className="mt-2 space-y-1.5">
+              {foundNodes.map((n, i) => {
+                const auth = n.loadInfo?.auth || (n.loadInfo?.shares?.countsHidden ? 'open' : 'open');
+                const isPsk = auth === 'psk' || Boolean(n.psk);
+                const sharesCount = typeof n.loadInfo?.shares_count === 'number'
+                  ? n.loadInfo.shares_count
+                  : (n.loadInfo?.shares?.collections ?? (Array.isArray(n.collections) ? n.collections.length : 0));
+                const caps = Array.isArray(n.loadInfo?.caps) ? n.loadInfo.caps : [];
+
+                return (
+                  <li key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs bg-white/[0.04] p-2.5 rounded-lg border border-white/[0.06] hover:bg-white/[0.06] transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-mono text-gray-200 font-medium truncate max-w-[200px] sm:max-w-[280px]" title={n.peerId}>{n.peerId}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${isPsk ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}>
+                          {isPsk ? '🔒 需密码' : '🔓 公开免密'}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-white/[0.06] text-gray-400 font-mono">
+                          {sharesCount > 0 ? `📦 ${sharesCount} 个合集` : '📭 暂无公开内容'}
+                        </span>
+                        {n.nodeType && (
+                          <span className="text-[10px] text-gray-500 font-mono">[{n.nodeType}]</span>
+                        )}
+                      </div>
+                      {caps.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1 mt-1 text-[10px] text-gray-500">
+                          <span className="text-gray-400">能力:</span>
+                          {caps.map((c) => {
+                            const info = CAP_LABELS[c] || { name: c, title: c };
+                            return (
+                              <span
+                                key={c}
+                                title={info.title}
+                                className="px-1.5 py-0.5 bg-white/[0.05] hover:bg-white/[0.1] cursor-help rounded text-gray-300 font-mono transition-colors"
+                              >
+                                {info.name} <span className="text-gray-500 text-[9px]">({c})</span>
+                              </span>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
-                    {caps.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1 mt-1 text-[10px] text-gray-500">
-                        <span className="text-gray-400">能力:</span>
-                        {caps.map((c) => {
-                          const info = CAP_LABELS[c] || { name: c, title: c };
-                          return (
-                            <span
-                              key={c}
-                              title={info.title}
-                              className="px-1.5 py-0.5 bg-white/[0.05] hover:bg-white/[0.1] cursor-help rounded text-gray-300 font-mono transition-colors"
-                            >
-                              {info.name} <span className="text-gray-500 text-[9px]">({c})</span>
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                  <button onClick={() => handleJoinFound(n.peerId)}
-                    className="self-end sm:self-center px-3 py-1 text-xs bg-brand-600 text-white rounded-lg hover:bg-brand-500 shrink-0 transition-colors font-medium">
-                    连接 (Connect)
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                    <div className="flex items-center gap-2 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => setBannerModalPeerId(n.peerId)}
+                        className="px-2 py-1 text-xs bg-white/[0.06] text-gray-300 hover:text-white rounded-lg hover:bg-white/[0.12] transition-colors"
+                      >
+                        🎨 换Banner
+                      </button>
+                      <button onClick={() => handleJoinFound(n.peerId)}
+                        className="px-3 py-1 text-xs bg-brand-600 text-white rounded-lg hover:bg-brand-500 shrink-0 transition-colors font-medium">
+                        连接 (Connect)
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )
         )}
         {searchStatus === 'done' && foundNodes && foundNodes.length === 0 && (
-          <p className="text-xs text-gray-600 mt-1.5">No online nodes currently (nodes will be announced via signaling when online).</p>
+          <p className="text-xs text-gray-500 mt-2 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04] text-center">
+            {t('connect.noNodes')}
+          </p>
         )}
       </div>
 
+      <NodeBannerPickerModal
+        peerId={bannerModalPeerId}
+        isOpen={Boolean(bannerModalPeerId)}
+        onClose={() => setBannerModalPeerId(null)}
+      />
+
       <div>
-        {!compact && <label className="block text-xs text-gray-500 mb-1">Target peer id (dial target)</label>}
+        {!compact && <label className="block text-xs text-gray-500 mb-1">{t('connect.targetPeer')}</label>}
         <div className="flex gap-2">
           <input value={targetPeerId} onChange={e => setTargetPeerId(e.target.value)}
             placeholder="peerdrive-xxxxxxxx"
@@ -261,23 +342,27 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
             onKeyDown={e => { if (e.key === 'Enter') handleConnect(); }} />
           <input value={psk} onChange={e => setPsk(e.target.value)}
             type="password"
-            placeholder="PSK key (optional / 留空为游客)"
-            className={inputCls + ' w-44'}
+            placeholder={t('connect.pskPlaceholder')}
+            className={inputCls + ' w-48'}
             title="Pre-shared key (if required by node)"
             onKeyDown={e => { if (e.key === 'Enter') handleConnect(); }} />
           <button onClick={handleConnect} disabled={!targetPeerId.trim() || pdStatus === 'connecting'}
-            className="px-3 py-1 text-xs bg-brand-600 text-white rounded-lg hover:bg-brand-500 disabled:opacity-40 whitespace-nowrap">Connect</button>
+            className="px-3 py-1 text-xs bg-brand-600 text-white rounded-lg hover:bg-brand-500 disabled:opacity-40 whitespace-nowrap">
+            {t('connect.connectBtn')}
+          </button>
           {pdStatus === 'online' && (
             <button onClick={handleDisconnect}
-              className="px-3 py-1 text-xs bg-white/[0.06] text-gray-300 rounded-lg hover:bg-white/[0.12] whitespace-nowrap">Disconnect</button>
+              className="px-3 py-1 text-xs bg-white/[0.06] text-gray-300 rounded-lg hover:bg-white/[0.12] whitespace-nowrap">
+              {t('connect.disconnectBtn')}
+            </button>
           )}
         </div>
       </div>
 
       <div className="text-xs">
-        {pdStatus === 'connecting' && <span className="text-yellow-400">Connecting...</span>}
-        {pdStatus === 'online' && <span className="text-green-400">Connected ✓ (local id: {myIdRef.current})</span>}
-        {pdStatus === 'error' && <span className="text-red-400">Failed: {pdError}</span>}
+        {pdStatus === 'connecting' && <span className="text-yellow-400">{t('connect.connecting')}</span>}
+        {pdStatus === 'online' && <span className="text-green-400">{t('connect.connected')} (local id: {myIdRef.current})</span>}
+        {pdStatus === 'error' && <span className="text-red-400">{t('connect.failed')}{pdError}</span>}
       </div>
 
       {pdStatus === 'online' && (

@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as ws from '../../../platform/transport-ws';
+import { useI18n } from '../../../context/I18nContext';
 
 export default function LocalNodeBanner() {
   const [isWsOpen, setIsWsOpen] = useState(() => ws.getStatus() === 'open');
   const navigate = useNavigate();
+  const { t } = useI18n();
 
   useEffect(() => {
     return ws.onStatus((status) => setIsWsOpen(status === 'open'));
@@ -20,11 +22,11 @@ export default function LocalNodeBanner() {
         </div>
         <div>
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-emerald-300">本地存储节点运行中 (Local Node Online)</span>
+            <span className="font-semibold text-emerald-300">{t('connect.localOnline')}</span>
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono">127.0.0.1:3000</span>
           </div>
           <p className="text-xs text-gray-400 mt-0.5">
-            本地节点已连接，已加载测试数据与合集。可直接进入网盘浏览文件列表与图片缩略图。
+            {t('connect.localDesc')}
           </p>
         </div>
       </div>
@@ -33,13 +35,13 @@ export default function LocalNodeBanner() {
           onClick={() => navigate('/drive')}
           className="px-3.5 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/30 transition-all flex items-center gap-1.5"
         >
-          <span>☁️ 进入我的网盘 (Drive)</span>
+          <span>☁️ {t('connect.goToDrive')}</span>
         </button>
         <button
           onClick={() => navigate('/collections')}
           className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/[0.08] hover:bg-white/[0.14] text-gray-200 border border-white/[0.1] transition-all flex items-center gap-1.5"
         >
-          <span>📦 查看合集 (Collections)</span>
+          <span>📦 {t('connect.goToCollections')}</span>
         </button>
       </div>
     </div>

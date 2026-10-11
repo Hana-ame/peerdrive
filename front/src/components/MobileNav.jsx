@@ -1,5 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import LanguageSelector from './LanguageSelector';
+import { useI18n } from '../context/I18nContext';
 
 /**
  * MobileNavDrawer — Slide-over drawer menu for mobile viewports (Issue #235).
@@ -72,8 +74,9 @@ export function MobileNavDrawer({ isOpen, onClose, connected, navItems }) {
           </div>
         </div>
 
-        <div className="pt-4 border-t border-white/[0.08] text-xs text-gray-500 text-center">
-          Peerdrive WebRTC Node
+        <div className="pt-4 border-t border-white/[0.08] flex items-center justify-between">
+          <span className="text-xs text-gray-500">Peerdrive Node</span>
+          <LanguageSelector />
         </div>
       </div>
     </div>
