@@ -267,3 +267,52 @@ build vcs.modified=true
 前端：`front/package.json` + `package-lock.json`（`react-router-dom` → 7.18.4）。
 
 CI：`ci.yml` / `go-build.yml` / `release.yml` 加 `-buildvcs=false`。
+
+---
+
+## 9. 验证证据
+
+### 9.1 单元 / 集成
+
+- `go test -tags nosqlite ./internal/... ./pkg/...` 全绿
+- `go test -tags nosqlite -run TestTraversal ./internal/...` 穿透矩阵 162 条全绿
+- `go vet -tags nosqlite ./internal/... ./cmd/...` 干净
+- `npm test`（front）163/163；`npm run build` 通过；`npm audit` 中
+  react-router 相关 7 条清零
+
+### 9.2 本地起服务实测（`-buildvcs=false -ldflags="-s -w"`）
+
+| 探针 | 结果 |
+|---|---|
+| 非回环绑定 + `PEERDRIVE_ADMIN_TOKEN=123456` | **拒绝启动**：`refusing to serve host "0.0.0.0": PEERDRIVE_ADMIN_TOKEN is too weak (only 6 chars)` |
+| 非回环绑定 + 强令牌 | 正常启动，`/ping` 返回 `pong` |
+| 回环绑定 + `123456` | **豁免**，正常启动 |
+| 带 token，2 MiB JSON body → `POST /collections` | 请求被拒（bind 错误），服务端只读了 ~1 MiB |
+| 带 token，**100 MiB** JSON body | **0.34s** 内返回拒绝，未读完 body |
+| OPTIONS preflight，`Access-Control-Request-Headers: Authorization, Cookie, X-Internal-Admin, X-PSK` | 回 `Authorization, Content-Type, Accept, X-Request-ID, X-Protocol, X-PSK` —— `Cookie` / `X-Internal-Admin` 不在回包里 |
+| `Origin: https://evil.example.com` | 无 `Access-Control-Allow-Origin` |
+| 响应头 | 有 `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)` |
+| `go version -m` 二进制 | **0 行** `vcs.*` / `debug_info` |
+
+> 说明：无 token 的巨型 JSON 请求会先被认证挡下（401），
+> 此时 body 根本没被读，内存零消耗；`MaxBytesReader` 是对**已认证**
+> 调用方的兜底。
+
+### 9.3 本轮自己踩的两个坑（已修）
+
+1. `-buildvcs=false` 写进了 `-ldflags` 里 —— 它是 `go build` 的开关，
+   不是链接器开关，5 个平台交叉构建全部 `flag provided but not defined: -buildvcs` 失败。
+   已挪到 `-tags` 旁边。
+2. 报告里把线上信令 key 原样引用了一遍，触发了
+   `test/deployconsistency/TestSignalKeyIsConsistentAcrossRepo`：
+   该用例把仓库里所有字面量跟 `config.DefaultSignalKey` 逐个比对，
+   不一致就报漂移（key 写错正是客户端连不上信令的常见原因）。
+   文档引用同样会触发，已改成 `pd-signal-<redacted-24hex>`。
+
+### 9.4 顺手修掉的一个 CI 配置
+
+`e2e.yml` 的管理面冒烟节点用的是 `PEERDRIVE_ADMIN_TOKEN=ci-test-token`
+（13 字符 / 6 种字符），正是新加的那道弱令牌闸门要拦的东西。
+**没有放宽闸门**，而是把 CI 的令牌换成合规的
+`ci-test-token-strong-7x9`（24 字符 / 14 种字符），
+三处（env、`E2E_ADMIN_TOKEN`、零配置面板节点）同步更新。
