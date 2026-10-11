@@ -62,12 +62,12 @@ export default function DriveListView({
               >
                 <td className={td + ' text-gray-200 max-w-[240px] truncate'}>
                   <div className="flex items-center gap-2">
-                    {isImg && f.hash ? (
+                    {(isImg || isVid) && (f.hash || f.sha) ? (
                       <FileThumbnail
-                        sha={f.hash}
+                        sha={f.hash || f.sha}
                         filename={f.filename}
                         mimeType={f.mime_type}
-                        fallbackIcon={icon}
+                        fallbackIcon={isVid ? '🎬' : icon}
                         className="w-7 h-7 rounded shrink-0"
                         imgClassName="w-7 h-7 object-cover rounded"
                       />

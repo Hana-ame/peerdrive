@@ -160,6 +160,11 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 		})
 		anonReader := service.NewAnonService(cfg)
 		share.SetAnonAccess(anonReader.GetCollectionByHash, anonReader.ListCollections)
+		_, _ = anonReader.SeedSampleCollectionIfEmpty(storageDir, func(dir string) {
+			if peerjsSvc != nil {
+				peerjsSvc.FileIndex().AddReadRoot(dir)
+			}
+		})
 		// File sharing filters by directory prefix only; List is internally capped at 1000
 		// (repository layer clamps); when the sharing list exceeds 1000 files, only the first 1000
 		// by sequence order are taken — enough for market display and selection; the real bulk

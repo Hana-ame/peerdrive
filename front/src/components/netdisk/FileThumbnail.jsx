@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as ws from '../../platform/transport-ws';
-import { getNodeSession } from '../../lib/nodeSession';
+import { getNodeSession, onNodeSession } from '../../lib/nodeSession';
 import { previewBlobCache, previewLimit } from '../../lib/cache';
+import { swControlled, ensureSWReady } from '../../platform/shared/swBridge';
+
+const STORAGE_KEY_API_BASE = 'peerdrive.api_base';
 
 /**
- * FileThumbnail renders lazy-loaded image thumbnails for files via content-addressed SHA-256.
+ * FileThumbnail renders lazy-loaded image and video thumbnails for files via content-addressed SHA-256.
  * It uses IntersectionObserver for lazy loading and module-level previewBlobCache with LRU eviction.
  */
 export default function FileThumbnail({
@@ -18,14 +21,22 @@ export default function FileThumbnail({
   const [url, setUrl] = useState('');
   const [status, setStatus] = useState('idle'); // idle | loading | ok | error | none
   const [isVisible, setIsVisible] = useState(false);
+  const [session, setSession] = useState(() => getNodeSession());
   const elRef = useRef(null);
+
+  useEffect(() => {
+    return onNodeSession((s) => setSession(s));
+  }, []);
 
   const ext = (filename || '').split('.').pop().toLowerCase();
   const isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext) ||
     String(mimeType || '').startsWith('image/');
+  const isVid = ['mp4', 'webm', 'ogg', 'mov', 'mkv', 'avi', 'm4v'].includes(ext) ||
+    String(mimeType || '').startsWith('video/');
+  const isMedia = isImg || isVid;
 
   useEffect(() => {
-    if (!sha || !isImg) {
+    if (!sha || !isMedia) {
       setStatus('none');
       return;
     }
@@ -50,10 +61,10 @@ export default function FileThumbnail({
 
     if (elRef.current) observer.observe(elRef.current);
     return () => observer.disconnect();
-  }, [sha, isImg]);
+  }, [sha, isMedia]);
 
   useEffect(() => {
-    if (!sha || !isImg || !isVisible || status === 'ok') return;
+    if (!sha || !isMedia || !isVisible || status === 'ok') return;
 
     if (previewBlobCache.has(sha)) {
       setUrl(previewBlobCache.get(sha));
@@ -64,25 +75,50 @@ export default function FileThumbnail({
     let alive = true;
     setStatus('loading');
 
-    const fetchBytes = async () => {
-      const session = getNodeSession();
-      if (session?.client) {
-        const chunks = [];
-        for await (const chunk of session.client.stream(sha)) {
-          chunks.push(chunk);
+    const loadMediaUrl = async () => {
+      const activeSession = session || getNodeSession();
+
+      // If it's a video and Service Worker or local HTTP is available, use direct streaming URL
+      if (isVid) {
+        if (activeSession?.client) {
+          let ready = swControlled();
+          if (!ready) {
+            ready = await ensureSWReady();
+          }
+          if (ready) {
+            const base = import.meta.env.BASE_URL || '/';
+            return `${base}swdrive/${encodeURIComponent(sha)}?name=${encodeURIComponent(filename || 'video.mp4')}`;
+          }
+        } else if (ws.getStatus() === 'open') {
+          const rawBase = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_API_BASE) || '' : '';
+          const apiBase = rawBase.replace(/\/+$/, '');
+          return `${apiBase}/sha256sum/${encodeURIComponent(sha)}/${encodeURIComponent(filename || 'video.mp4')}`;
         }
-        return new Blob(chunks, { type: mimeType || 'image/jpeg' });
       }
-      const bytes = await ws.download(sha);
-      return new Blob([bytes], { type: mimeType || 'image/jpeg' });
+
+      // Otherwise fetch bytes via P2P stream or WS download
+      const fetchBytes = async () => {
+        if (activeSession?.client) {
+          const chunks = [];
+          for await (const chunk of activeSession.client.stream(sha)) {
+            chunks.push(chunk);
+          }
+          return new Blob(chunks, { type: mimeType || (isVid ? 'video/mp4' : 'image/jpeg') });
+        }
+        const bytes = await ws.download(sha);
+        return new Blob([bytes], { type: mimeType || (isVid ? 'video/mp4' : 'image/jpeg') });
+      };
+
+      const blob = await previewLimit(fetchBytes);
+      const objectUrl = URL.createObjectURL(blob);
+      previewBlobCache.set(sha, objectUrl, blob.size || 0);
+      return objectUrl;
     };
 
-    previewLimit(fetchBytes)
-      .then((blob) => {
+    loadMediaUrl()
+      .then((mediaUrl) => {
         if (!alive) return;
-        const objectUrl = URL.createObjectURL(blob);
-        previewBlobCache.set(sha, objectUrl, blob.size || 0);
-        setUrl(objectUrl);
+        setUrl(mediaUrl);
         setStatus('ok');
       })
       .catch(() => {
@@ -94,7 +130,27 @@ export default function FileThumbnail({
     return () => {
       alive = false;
     };
-  }, [sha, isImg, isVisible, status, mimeType]);
+  }, [sha, isMedia, isVid, isVisible, status, mimeType, session, filename]);
+
+  if (isVid && status === 'ok' && url) {
+    return (
+      <div ref={elRef} className={`relative overflow-hidden ${className}`}>
+        <video
+          src={url}
+          className={imgClassName}
+          preload="metadata"
+          muted
+          playsInline
+          onLoadedData={(e) => {
+            try { e.target.currentTime = 0.1; } catch {}
+          }}
+        />
+        <span className="absolute bottom-1 right-1 px-1 py-0.5 rounded text-[9px] bg-black/60 text-white/90 backdrop-blur-sm pointer-events-none flex items-center gap-0.5">
+          ▶
+        </span>
+      </div>
+    );
+  }
 
   if (isImg && status === 'ok' && url) {
     return (
@@ -104,7 +160,7 @@ export default function FileThumbnail({
     );
   }
 
-  if (isImg && status === 'loading') {
+  if (isMedia && status === 'loading') {
     return (
       <div ref={elRef} className={`relative flex items-center justify-center bg-gray-900/60 ${className}`}>
         <span className="text-xs opacity-50 animate-pulse">⏳</span>

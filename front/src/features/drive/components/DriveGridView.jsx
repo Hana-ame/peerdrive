@@ -43,25 +43,17 @@ export default function DriveGridView({
                 className="relative w-full h-32 rounded-lg bg-black/30 border border-white/[0.04] mb-2.5 flex items-center justify-center overflow-hidden group/thumb"
                 onClick={() => setPreviewFile(f)}
               >
-                {isImg ? (
+                {isImg || isVid ? (
                   <div className="w-full h-full flex items-center justify-center relative">
                     <FileThumbnail
-                      sha={f.hash}
+                      sha={f.hash || f.sha}
                       filename={f.filename}
                       mimeType={f.mime_type}
-                      fallbackIcon={icon}
+                      fallbackIcon={isVid ? '🎬' : icon}
                       className="w-full h-full"
                     />
                     <div className="absolute inset-0 bg-brand-500/10 opacity-0 group-hover/thumb:opacity-100 flex items-center justify-center transition-opacity text-xs font-medium text-brand-300">
-                      Click to Preview
-                    </div>
-                  </div>
-                ) : isVid ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900/60 relative">
-                    <span className="text-3xl mb-1">🎬</span>
-                    <span className="text-[10px] text-gray-400 font-mono uppercase tracking-wider">{ext}</span>
-                    <div className="absolute inset-0 bg-brand-500/10 opacity-0 group-hover/thumb:opacity-100 flex items-center justify-center transition-opacity text-xs font-medium text-brand-300">
-                      Play Video
+                      {isVid ? 'Play Video' : 'Click to Preview'}
                     </div>
                   </div>
                 ) : (

@@ -61,15 +61,16 @@ export default function CollectionDetailRow({
                   const pSha = previewSha(e) || h;
                   const ext = (e.path || '').split('.').pop().toLowerCase();
                   const isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext) || e.mime_type?.startsWith('image/');
+                  const isVid = ['mp4', 'webm', 'ogg', 'mov', 'mkv', 'avi', 'm4v'].includes(ext) || e.mime_type?.startsWith('video/');
 
                   return (
                     <li key={ei} className="flex items-center gap-3 text-xs py-0.5">
-                      {isImg && pSha ? (
+                      {(isImg || isVid) && pSha ? (
                         <FileThumbnail
                           sha={pSha}
                           filename={e.path}
                           mimeType={e.mime_type}
-                          fallbackIcon="🖼️"
+                          fallbackIcon={isVid ? '🎬' : '🖼️'}
                           className="w-7 h-7 rounded shrink-0"
                           imgClassName="w-7 h-7 object-cover rounded"
                         />

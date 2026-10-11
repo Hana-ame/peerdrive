@@ -122,34 +122,34 @@ export default function ConnectionStatus() {
 
   return (
     <div className="relative ml-auto shrink-0 flex items-center gap-2" ref={containerRef}>
-      {/* 信令服务器状态 (Pill ①: 严格无 ☑️ / ✓) */}
+      {/* 信令服务器状态 (Pill ①: 严格无 ☑️ / ✓，窄屏折叠为指示点) */}
       <button
         type="button"
         onClick={handleClick}
         title={t('status.signalTitle', { host: signalHost, status: isSignalLive ? t('status.connected') : t('status.notConnected') })}
-        className="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-white/[0.08] bg-white/[0.04] text-gray-300 hover:bg-white/[0.08] transition-colors focus:outline-none"
+        className="flex items-center gap-1.5 text-xs px-2 py-1 sm:px-2.5 rounded-full border border-white/[0.08] bg-white/[0.04] text-gray-300 hover:bg-white/[0.08] transition-colors focus:outline-none"
         data-testid="signal-status"
       >
         <span
           className={`w-2 h-2 rounded-full ${isSignalLive ? 'bg-sky-400' : 'bg-gray-500'}`}
           aria-hidden="true"
         />
-        <span className="font-mono text-[11px]">
+        <span className="font-mono text-[11px] hidden md:inline">
           {t('status.signal')}: {signalHost.split(':')[0].split('.')[0]}
         </span>
       </button>
 
-      {/* 节点连接状态 (Pill ②: WS 本地 / PeerJS PSK验证 / 游客) */}
+      {/* 节点连接状态 (Pill ②: WS 本地 / PeerJS PSK验证 / 游客，窄屏折叠为指示点) */}
       <button
         type="button"
         onClick={handleClick}
         title={isPeerOpen ? `WebRTC Node: ${peerSession.peerId}` : `Node session: ${status}`}
-        className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-white/[0.08] bg-white/[0.04] ${nodeBadgeColor} hover:bg-white/[0.08] transition-colors focus:outline-none`}
+        className={`flex items-center gap-1.5 text-xs px-2 py-1 sm:px-2.5 rounded-full border border-white/[0.08] bg-white/[0.04] ${nodeBadgeColor} hover:bg-white/[0.08] transition-colors focus:outline-none`}
         data-testid="connection-status"
         data-status={isNodeLive ? 'open' : status}
       >
         <span className={`w-2 h-2 rounded-full ${nodeDotColor}`} aria-hidden="true" />
-        <span>{nodeRoleLabel}</span>
+        <span className="hidden sm:inline">{nodeRoleLabel}</span>
       </button>
 
       {/* 详细信息弹窗 */}
