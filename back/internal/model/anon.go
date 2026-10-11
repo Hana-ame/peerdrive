@@ -5,6 +5,9 @@
 package model
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"time"
 )
@@ -102,7 +105,7 @@ type AnonCollection struct {
 	Entries      []AnonCollectionEntry `json:"entries"`
 	Tags         []string              `json:"tags,omitempty"`
 	CreatedAt    string                `json:"created_at"`
-	// Visibility: public=broadcastable / restricted=only AccessList accounts / private=only Owner.
+	// Visibility: public=broadcastable / restricted=only AccessList accounts / psk=requires PSK / private=only Owner.
 	// Background: 2026-09 frontend "broadcast" changed to three options (public access / specific permissions only / only myself),
 	// old anonymous collections had no permission field, empty values are treated as public for backward compatibility.
 	Visibility string `json:"visibility,omitempty"`
@@ -110,32 +113,39 @@ type AnonCollection struct {
 	AccessList []string `json:"access_list,omitempty"`
 	// Owner is the publisher account (node operator), private collections only allow access to the Owner.
 	Owner string `json:"owner,omitempty"`
-	// AccessPolicy: public / protected (requires passcode) / private (owner only) (Issue #268).
+	// AccessPolicy: public / restricted / psk / protected (requires passcode) / private (Issue #268, Issue #338).
 	AccessPolicy string `json:"access_policy,omitempty"`
 	// Passcode is the extraction key required to unlock entries in protected mode (Issue #268).
 	Passcode string `json:"passcode,omitempty"`
-	// IsProtected is true if entries are locked behind a passcode (Issue #268).
+	// PSKHash is the SHA-256 hash (64-char hex) of the Pre-Shared Key for PSK authentication (Issue #338).
+	PSKHash string `json:"psk_hash,omitempty"`
+	// PrevSHA is the SHA-256 content address of the predecessor/parent collection version (Issue #338).
+	PrevSHA string `json:"prev_sha,omitempty"`
+	// IsProtected is true if entries are locked behind a passcode or PSK (Issue #268, Issue #338).
 	IsProtected bool `json:"is_protected,omitempty"`
 }
 
-// visibility value constants: one-to-one mapping with the frontend three options, the backend only accepts these three strings.
+// visibility value constants: one-to-one mapping with permissions options.
 const (
 	VisibilityPublic     = "public"
 	VisibilityRestricted = "restricted"
+	VisibilityPSK        = "psk"
 	VisibilityPrivate    = "private"
 )
 
-// Access policy constants (Issue #268).
+// Access policy constants (Issue #268, Issue #338).
 const (
-	AccessPolicyPublic    = "public"
-	AccessPolicyProtected = "protected"
-	AccessPolicyPrivate   = "private"
+	AccessPolicyPublic     = "public"
+	AccessPolicyRestricted = "restricted"
+	AccessPolicyPSK        = "psk"
+	AccessPolicyProtected  = "protected"
+	AccessPolicyPrivate    = "private"
 )
 
 // IsValidVisibility validates visibility values; empty string is treated as unset (valid, equivalent to public).
 func IsValidVisibility(v string) bool {
 	switch v {
-	case "", VisibilityPublic, VisibilityRestricted, VisibilityPrivate:
+	case "", VisibilityPublic, VisibilityRestricted, VisibilityPSK, VisibilityPrivate:
 		return true
 	}
 	return false
@@ -144,7 +154,7 @@ func IsValidVisibility(v string) bool {
 // IsValidAccessPolicy validates access policy values; empty string is treated as unset (valid, equivalent to public).
 func IsValidAccessPolicy(p string) bool {
 	switch p {
-	case "", AccessPolicyPublic, AccessPolicyProtected, AccessPolicyPrivate:
+	case "", AccessPolicyPublic, AccessPolicyRestricted, AccessPolicyPSK, AccessPolicyProtected, AccessPolicyPrivate:
 		return true
 	}
 	return false
@@ -158,7 +168,7 @@ func (c *AnonCollection) EffectiveVisibility() string {
 	return c.Visibility
 }
 
-// EffectiveAccessPolicy returns the access policy after fallback (Issue #268).
+// EffectiveAccessPolicy returns the access policy after fallback (Issue #268, Issue #338).
 func (c *AnonCollection) EffectiveAccessPolicy() string {
 	if c == nil {
 		return AccessPolicyPublic
@@ -169,25 +179,64 @@ func (c *AnonCollection) EffectiveAccessPolicy() string {
 	if c.Visibility == VisibilityPrivate {
 		return AccessPolicyPrivate
 	}
+	if c.Visibility == VisibilityRestricted {
+		return AccessPolicyRestricted
+	}
+	if c.Visibility == VisibilityPSK || c.PSKHash != "" {
+		return AccessPolicyPSK
+	}
 	if c.Passcode != "" {
 		return AccessPolicyProtected
 	}
 	return AccessPolicyPublic
 }
 
-// CanView determines whether a requester (account name) can view the collection.
+// VerifyPSK checks if the provided key matches the collection's PSKHash using constant-time comparison.
+// Issue #338: requester supplies raw PSK, verified against SHA-256 hash stored on collection.
+func (c *AnonCollection) VerifyPSK(key string) bool {
+	if c == nil || c.PSKHash == "" || key == "" {
+		return false
+	}
+	sum := sha256.Sum256([]byte(key))
+	keyHex := hex.EncodeToString(sum[:])
+	return subtle.ConstantTimeCompare([]byte(keyHex), []byte(c.PSKHash)) == 1
+}
+
+// CanAccess checks whether a requester (account name) or PSK key satisfies access permissions.
+// Issue #338: Supports independent permissions:
+// 1. Owner always has access (if authenticated).
+// 2. PSK policy / PSKHash: granted if VerifyPSK(psk) == true.
+// 3. Restricted: granted if requester is in AccessList.
+// 4. Private: granted if requester == Owner.
+// 5. Public: granted to everyone.
+func (c *AnonCollection) CanAccess(requester, psk string) bool {
+	if c == nil {
+		return false
+	}
+	if requester != "" && c.Owner != "" && requester == c.Owner {
+		return true
+	}
+	if c.PSKHash != "" || c.EffectiveAccessPolicy() == AccessPolicyPSK || c.EffectiveVisibility() == VisibilityPSK {
+		return c.VerifyPSK(psk)
+	}
+	return c.CanView(requester)
+}
+
+// CanView determines whether a requester (account name) can view the collection without a PSK.
 // Semantics: public allows everyone; restricted allows Owner + AccessList; private only allows Owner.
-// Pitfall: empty requester represents an unauthenticated request; do not allow private/restricted based on this alone —
-// otherwise any P2P sync without identity could pull restricted collections.
+// Pitfall: empty requester represents an unauthenticated request; do not allow private/restricted based on this alone.
 func (c *AnonCollection) CanView(requester string) bool {
 	if c == nil {
 		return false
 	}
+	if requester != "" && c.Owner != "" && requester == c.Owner {
+		return true
+	}
 	switch c.EffectiveVisibility() {
+	case VisibilityPSK:
+		// Metadata shell can be viewed by anyone; entry contents and downloads are locked behind PSK
+		return true
 	case VisibilityRestricted:
-		if requester != "" && requester == c.Owner {
-			return true
-		}
 		for _, a := range c.AccessList {
 			if requester != "" && a == requester {
 				return true
@@ -239,7 +288,10 @@ type AnonCollectionSummary struct {
 	Tags         []string `json:"tags,omitempty"`
 	EntryCount   int      `json:"entry_count"`
 	CreatedAt    string   `json:"created_at"`
-	// Visibility / Owner for the list page to directly display permission tier on collection cards (frontend three-option backfill).
-	Visibility string `json:"visibility,omitempty"`
-	Owner      string `json:"owner,omitempty"`
+	// Visibility / Owner for the list page to directly display permission tier on collection cards.
+	Visibility   string   `json:"visibility,omitempty"`
+	Owner        string   `json:"owner,omitempty"`
+	PrevSHA      string   `json:"prev_sha,omitempty"`
+	AccessPolicy string   `json:"access_policy,omitempty"`
+	HasPSK       bool     `json:"has_psk,omitempty"`
 }

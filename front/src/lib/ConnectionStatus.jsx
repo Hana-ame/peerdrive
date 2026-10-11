@@ -8,6 +8,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { getStatus, onStatus } from '../platform/transport-ws/status';
 import { admin } from '../platform/transport-ws';
 import { onNodeSession, clearNodeSession } from './nodeSession';
+import { useI18n } from '../context/I18nContext';
 
 // Map status → visual + copy. Unknown future states fall back to the neutral one
 // rather than crashing the nav.
@@ -19,6 +20,7 @@ const STATE = {
 };
 
 export default function ConnectionStatus() {
+  const { t } = useI18n();
   const [status, setStatus] = useState(() => getStatus());
   const [nodeInfo, setNodeInfo] = useState(null);
   const [authInfo, setAuthInfo] = useState(null);
@@ -80,28 +82,28 @@ export default function ConnectionStatus() {
   // Authentication & Role Label
   // - WS: admin/user
   // - PeerJS: PSK验证 (if psk present and valid), or 游客 (Guest)
-  let nodeRoleLabel = '未连接';
+  let nodeRoleLabel = t('status.notConnected');
   let nodeBadgeColor = 'text-gray-400';
   let nodeDotColor = 'bg-gray-500';
 
   if (isWsOpen) {
-    const user = authInfo?.username || (authInfo?.authenticated ? 'User' : 'WS 本地');
-    nodeRoleLabel = `WS 本地 (${user})`;
+    const user = authInfo?.username || (authInfo?.authenticated ? 'User' : t('status.wsLocal'));
+    nodeRoleLabel = `${t('status.wsLocal')} (${user})`;
     nodeBadgeColor = 'text-green-300';
     nodeDotColor = 'bg-green-400';
   } else if (isPeerOpen) {
     const peerShort = peerSession.peerId.slice(0, 8);
     const hasPsk = Boolean(peerSession.psk || peerSession.client?.psk);
-    const authType = hasPsk ? 'PSK验证' : '游客';
+    const authType = hasPsk ? t('status.pskAuth') : t('status.guest');
     nodeRoleLabel = `Peer: ${peerShort} [${authType}]`;
     nodeBadgeColor = 'text-emerald-300';
     nodeDotColor = 'bg-emerald-400';
   } else if (status === 'connecting') {
-    nodeRoleLabel = '连接中…';
+    nodeRoleLabel = t('status.connecting');
     nodeBadgeColor = 'text-yellow-300';
     nodeDotColor = 'bg-yellow-400 animate-pulse';
   } else if (status === 'closed') {
-    nodeRoleLabel = '重连中…';
+    nodeRoleLabel = t('status.reconnecting');
     nodeBadgeColor = 'text-red-300';
     nodeDotColor = 'bg-red-400 animate-pulse';
   }
@@ -119,41 +121,42 @@ export default function ConnectionStatus() {
   };
 
   return (
-    <div className="relative ml-auto shrink-0 flex items-center gap-2" ref={containerRef}>
-      {/* Pill ①: Peersignal 信令服务器状态 */}
+    <div className="relative ml-auto shrink-0 flex items-center gap-1.5 sm:gap-2" ref={containerRef}>
+      {/* 信令服务器状态 (Pill ①: 严格无 ☑️ / ✓，窄屏折叠为指示点) */}
       <button
         type="button"
         onClick={handleClick}
-        title={`信令服务器: ${signalHost} (${isSignalLive ? '已连接' : '未连接'})`}
-        className="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-white/[0.08] bg-white/[0.04] text-gray-300 hover:bg-white/[0.08] transition-colors focus:outline-none"
+        title={t('status.signalTitle', { host: signalHost, status: isSignalLive ? t('status.connected') : t('status.notConnected') })}
+        className="flex items-center gap-0 md:gap-1.5 text-xs p-1.5 md:px-2.5 md:py-1 rounded-full border border-white/[0.08] bg-white/[0.04] text-gray-300 hover:bg-white/[0.08] transition-colors focus:outline-none"
+        data-testid="signal-status"
       >
         <span
           className={`w-2 h-2 rounded-full ${isSignalLive ? 'bg-sky-400' : 'bg-gray-500'}`}
           aria-hidden="true"
         />
-        <span className="font-mono text-[11px]">
-          信令: {signalHost.split(':')[0].split('.')[0]} {isSignalLive ? '✓' : '—'}
+        <span className="font-mono text-[11px] hidden md:inline">
+          {t('status.signal')}: {signalHost.split(':')[0].split('.')[0]}
         </span>
       </button>
 
-      {/* Pill ②: 节点连接状态 (WS 本地 / PeerJS PSK验证 / 游客) */}
+      {/* 节点连接状态 (Pill ②: WS 本地 / PeerJS PSK验证 / 游客，窄屏折叠为指示点) */}
       <button
         type="button"
         onClick={handleClick}
         title={isPeerOpen ? `WebRTC Node: ${peerSession.peerId}` : `Node session: ${status}`}
-        className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-white/[0.08] bg-white/[0.04] ${nodeBadgeColor} hover:bg-white/[0.08] transition-colors focus:outline-none`}
+        className={`flex items-center gap-0 md:gap-1.5 text-xs p-1.5 md:px-2.5 md:py-1 rounded-full border border-white/[0.08] bg-white/[0.04] ${nodeBadgeColor} hover:bg-white/[0.08] transition-colors focus:outline-none`}
         data-testid="connection-status"
         data-status={isNodeLive ? 'open' : status}
       >
         <span className={`w-2 h-2 rounded-full ${nodeDotColor}`} aria-hidden="true" />
-        <span>{nodeRoleLabel}</span>
+        <span className="hidden md:inline">{nodeRoleLabel}</span>
       </button>
 
       {/* 详细信息弹窗 */}
       {showDetails && (
         <div
           data-testid="connection-details"
-          className="absolute right-0 top-full mt-2 w-80 p-3.5 rounded-lg shadow-xl border border-white/[0.12] bg-gray-900/95 backdrop-blur text-xs z-50 text-gray-200 space-y-3"
+          className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-1.5rem)] p-3.5 rounded-lg shadow-xl border border-white/[0.12] bg-gray-900/95 backdrop-blur text-xs z-50 text-gray-200 space-y-3"
         >
           <div className="flex items-center justify-between border-b border-white/[0.08] pb-1.5 font-medium text-gray-300">
             <span>连接状态详情 (Dual-Channel)</span>

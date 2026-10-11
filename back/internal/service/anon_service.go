@@ -100,8 +100,23 @@ func (s *AnonService) CreateCollectionWithPolicy(
 	passcode string,
 	owner string,
 ) (string, error) {
-	defer log.LogDuration("AnonService.CreateCollectionWithPolicy")()
-	log.LogDebug("anon-svc: CreateCollectionWithPolicy name=%s entries=%d visibility=%s policy=%s owner=%s",
+	return s.CreateCollectionWithPolicyAndPSK(name, entries, tags, visibility, accessList, accessPolicy, passcode, "", owner)
+}
+
+// CreateCollectionWithPolicyAndPSK creates an anonymous collection with visibility, access policy, and PSK key settings (Issue #338).
+func (s *AnonService) CreateCollectionWithPolicyAndPSK(
+	name string,
+	entries []model.AnonCollectionEntry,
+	tags []string,
+	visibility string,
+	accessList []string,
+	accessPolicy string,
+	passcode string,
+	psk string,
+	owner string,
+) (string, error) {
+	defer log.LogDuration("AnonService.CreateCollectionWithPolicyAndPSK")()
+	log.LogDebug("anon-svc: CreateCollectionWithPolicyAndPSK name=%s entries=%d visibility=%s policy=%s owner=%s",
 		name, len(entries), visibility, accessPolicy, owner)
 
 	if !model.IsValidVisibility(visibility) {
@@ -116,6 +131,11 @@ func (s *AnonService) CreateCollectionWithPolicy(
 	}
 	if accessPolicy == model.AccessPolicyProtected && passcode == "" {
 		err := fmt.Errorf("passcode required for protected access policy")
+		log.LogError("anon-svc: %v", err)
+		return "", err
+	}
+	if (accessPolicy == model.AccessPolicyPSK || visibility == model.VisibilityPSK) && psk == "" {
+		err := fmt.Errorf("psk required for psk access policy")
 		log.LogError("anon-svc: %v", err)
 		return "", err
 	}
@@ -154,6 +174,14 @@ func (s *AnonService) CreateCollectionWithPolicy(
 	coll.AccessList = accessList
 	coll.AccessPolicy = accessPolicy
 	coll.Passcode = passcode
+	if psk != "" {
+		if len(psk) == 64 && isValidHash(psk) {
+			coll.PSKHash = psk
+		} else {
+			coll.PSKHash = sha256Hex([]byte(psk))
+		}
+		coll.IsProtected = true
+	}
 	coll.Owner = owner
 	jsonBytes, err := json.MarshalIndent(coll, "", "  ")
 	if err != nil {
@@ -276,6 +304,7 @@ func (s *AnonService) UpdateCollectionVisibility(hash, visibility string, access
 	}
 
 	dst := *src
+	dst.PrevSHA = hash
 	dst.Visibility = visibility
 	dst.AccessList = accessList
 	if dst.Owner == "" && requester != "" {
@@ -284,23 +313,70 @@ func (s *AnonService) UpdateCollectionVisibility(hash, visibility string, access
 	return s.saveCollectionJSON(&dst)
 }
 
+// UpdateCollectionPermissions modifies visibility, access policy, and PSK settings (Issue #338).
+// Setting PrevSHA maintains a git-like history pointer.
+func (s *AnonService) UpdateCollectionPermissions(
+	hash string,
+	visibility string,
+	accessList []string,
+	accessPolicy string,
+	psk string,
+	requester string,
+) (string, error) {
+	defer log.LogDuration("AnonService.UpdateCollectionPermissions")()
+	if visibility != "" && !model.IsValidVisibility(visibility) {
+		return "", fmt.Errorf("invalid visibility: %s", visibility)
+	}
+	if accessPolicy != "" && !model.IsValidAccessPolicy(accessPolicy) {
+		return "", fmt.Errorf("invalid access policy: %s", accessPolicy)
+	}
+	if visibility == model.VisibilityRestricted && len(accessList) == 0 {
+		return "", fmt.Errorf("access_list required for restricted visibility")
+	}
+
+	src, err := s.GetCollectionByHash(hash)
+	if err != nil {
+		return "", err
+	}
+	if src.Owner != "" && src.Owner != requester {
+		log.LogWarn("anon-svc: UpdateCollectionPermissions denied hash=%s owner=%s requester=%q", hash, src.Owner, requester)
+		return "", fmt.Errorf("collection not found")
+	}
+
+	dst := *src
+	dst.PrevSHA = hash
+	if visibility != "" {
+		dst.Visibility = visibility
+	}
+	if accessList != nil {
+		dst.AccessList = accessList
+	}
+	if accessPolicy != "" {
+		dst.AccessPolicy = accessPolicy
+	}
+	if psk != "" {
+		if len(psk) == 64 && isValidHash(psk) {
+			dst.PSKHash = psk
+		} else {
+			dst.PSKHash = sha256Hex([]byte(psk))
+		}
+		dst.IsProtected = true
+	}
+	if dst.Owner == "" && requester != "" {
+		dst.Owner = requester
+	}
+	return s.saveCollectionJSON(&dst)
+}
+
 // CommitCollection creates a new version based on the source collection, supporting
 // adding/updating/deleting entries, and auto-incrementing the version number.
-//
-// Permission inheritance (fixed 2026-09-19): changing the collection hash equals
-// replacing the JSON entirely, so permission fields (Visibility/AccessList/Owner)
-// that are not explicitly inherited will be lost -> a restricted/private collection
-// would revert to public after a single commit, exposing its content under the new hash.
-// Therefore, all permission fields from the source collection are copied as a group;
-// unauthorized access (requester cannot see the source) is rejected directly,
-// consistent with GetCollectionVisibleTo semantics (cannot see = does not exist).
 func (s *AnonService) CommitCollection(
 	sourceHash string,
 	entries []model.AnonCollectionEntry,
 	commitMessage string,
 	requester string,
 ) (string, error) {
-	return s.CommitCollectionWithPasscode(sourceHash, entries, commitMessage, "", requester)
+	return s.CommitCollectionWithPasscodeAndPSK(sourceHash, entries, commitMessage, "", "", requester)
 }
 
 // CommitCollectionWithPasscode commits modifications to an existing collection with optional passcode verification for protected collections.
@@ -311,13 +387,32 @@ func (s *AnonService) CommitCollectionWithPasscode(
 	passcode string,
 	requester string,
 ) (string, error) {
-	defer log.LogDuration("AnonService.CommitCollection")()
+	return s.CommitCollectionWithPasscodeAndPSK(sourceHash, entries, commitMessage, passcode, "", requester)
+}
+
+// CommitCollectionWithPasscodeAndPSK commits modifications with passcode and PSK verification, setting prev_sha to parent version (Issue #338).
+func (s *AnonService) CommitCollectionWithPasscodeAndPSK(
+	sourceHash string,
+	entries []model.AnonCollectionEntry,
+	commitMessage string,
+	passcode string,
+	psk string,
+	requester string,
+) (string, error) {
+	defer log.LogDuration("AnonService.CommitCollectionWithPasscodeAndPSK")()
 	log.LogDebug("anon-svc: CommitCollection sourceHash=%s entries=%d", sourceHash, len(entries))
 
-	src, err := s.GetCollectionVisibleTo(sourceHash, requester)
+	src, err := s.GetCollectionByHash(sourceHash)
 	if err != nil {
 		log.LogError("anon-svc: CommitCollection source %s not found: %v", sourceHash, err)
 		return "", fmt.Errorf("source collection not found: %w", err)
+	}
+
+	if !src.CanAccess(requester, psk) {
+		if src.PSKHash != "" || src.EffectiveAccessPolicy() == model.AccessPolicyPSK || src.EffectiveVisibility() == model.VisibilityPSK {
+			return "", fmt.Errorf("psk required or invalid for psk-protected collection")
+		}
+		return "", fmt.Errorf("source collection not found")
 	}
 
 	if src.EffectiveAccessPolicy() == model.AccessPolicyProtected && requester == "" {
@@ -326,9 +421,7 @@ func (s *AnonService) CommitCollectionWithPasscode(
 		}
 	}
 
-	// Normalize: struct literals / old formats may only set Hash without setting Providers --
-	// without normalization, "just adding a file" would be misinterpreted as "deleting that entry"
-	// (empty providers).
+	// Normalize: struct literals / old formats may only set Hash without setting Providers
 	for i := range entries {
 		entries[i].Normalize()
 	}
@@ -339,13 +432,6 @@ func (s *AnonService) CommitCollectionWithPasscode(
 			log.LogError("anon-svc: CommitCollection invalid path: %s", e.Path)
 			return "", err
 		}
-		// Empty providers = delete this entry (API convention is documented in the
-		// CommitAnonCollection comments in controller/anon.go: non-empty hash = add/update,
-		// empty hash = delete).
-		// Pitfall: if we applied CreateCollection's validation here and rejected empty
-		// providers directly, the removeEmpty branch below would never be reached --
-		// "commit to delete an entry" would return 400 on empty-hash requests,
-		// making the feature effectively nonexistent.
 		if len(e.Providers) > 0 && !strings.HasSuffix(e.Path, "/") && !isValidProviders(e.Providers) {
 			err := fmt.Errorf("invalid providers for path: %s", e.Path)
 			log.LogError("anon-svc: CommitCollection invalid providers for path: %s", e.Path)
@@ -373,6 +459,7 @@ func (s *AnonService) CommitCollectionWithPasscode(
 	}
 	if removeEmpty {
 		coll := newAnonCollectionWithVersion(src.FriendlyName, sortedEntries, src.Version+1, src.Tags)
+		coll.PrevSHA = sourceHash
 		inheritVisibility(coll, src)
 		return s.saveCollectionJSON(coll)
 	}
@@ -382,8 +469,183 @@ func (s *AnonService) CommitCollectionWithPasscode(
 	})
 
 	coll := newAnonCollectionWithVersion(src.FriendlyName, sortedEntries, src.Version+1, src.Tags)
+	coll.PrevSHA = sourceHash
 	inheritVisibility(coll, src)
 	return s.saveCollectionJSON(coll)
+}
+
+// AddCollectionEntry adds or updates a single file entry in an existing collection, generating a new version with prev_sha pointing to sourceHash (Issue #338).
+func (s *AnonService) AddCollectionEntry(sourceHash string, entry model.AnonCollectionEntry, requester, psk string) (string, error) {
+	defer log.LogDuration("AnonService.AddCollectionEntry")()
+	src, err := s.GetCollectionByHash(sourceHash)
+	if err != nil {
+		return "", fmt.Errorf("source collection not found: %w", err)
+	}
+	if !src.CanAccess(requester, psk) {
+		if src.PSKHash != "" || src.EffectiveAccessPolicy() == model.AccessPolicyPSK || src.EffectiveVisibility() == model.VisibilityPSK {
+			return "", fmt.Errorf("psk required or invalid for psk-protected collection")
+		}
+		return "", fmt.Errorf("source collection not found")
+	}
+
+	entry.Normalize()
+	if entry.Path == "" || !isRelativePath(entry.Path) || strings.Contains(entry.Path, "..") {
+		return "", fmt.Errorf("invalid path: %s", entry.Path)
+	}
+	if !strings.HasSuffix(entry.Path, "/") && !isValidProviders(entry.Providers) {
+		return "", fmt.Errorf("invalid providers for path: %s", entry.Path)
+	}
+
+	found := false
+	newEntries := make([]model.AnonCollectionEntry, len(src.Entries))
+	for i, e := range src.Entries {
+		if e.Path == entry.Path {
+			newEntries[i] = entry
+			found = true
+		} else {
+			newEntries[i] = e
+		}
+	}
+	if !found {
+		newEntries = append(newEntries, entry)
+	}
+
+	coll := newAnonCollectionWithVersion(src.FriendlyName, newEntries, src.Version+1, src.Tags)
+	coll.PrevSHA = sourceHash
+	inheritVisibility(coll, src)
+	return s.saveCollectionJSON(coll)
+}
+
+// RemoveCollectionEntry removes an entry by path, generating a new version with prev_sha pointing to sourceHash (Issue #338).
+func (s *AnonService) RemoveCollectionEntry(sourceHash, entryPath string, requester, psk string) (string, error) {
+	defer log.LogDuration("AnonService.RemoveCollectionEntry")()
+	src, err := s.GetCollectionByHash(sourceHash)
+	if err != nil {
+		return "", fmt.Errorf("source collection not found: %w", err)
+	}
+	if !src.CanAccess(requester, psk) {
+		if src.PSKHash != "" || src.EffectiveAccessPolicy() == model.AccessPolicyPSK || src.EffectiveVisibility() == model.VisibilityPSK {
+			return "", fmt.Errorf("psk required or invalid for psk-protected collection")
+		}
+		return "", fmt.Errorf("source collection not found")
+	}
+
+	found := false
+	newEntries := make([]model.AnonCollectionEntry, 0, len(src.Entries))
+	for _, e := range src.Entries {
+		if e.Path == entryPath {
+			found = true
+			continue
+		}
+		newEntries = append(newEntries, e)
+	}
+	if !found {
+		return "", fmt.Errorf("entry not found: %s", entryPath)
+	}
+
+	coll := newAnonCollectionWithVersion(src.FriendlyName, newEntries, src.Version+1, src.Tags)
+	coll.PrevSHA = sourceHash
+	inheritVisibility(coll, src)
+	return s.saveCollectionJSON(coll)
+}
+
+// UpdateCollectionEntry updates an existing file entry in a collection, generating a new version with prev_sha pointing to sourceHash (Issue #338).
+func (s *AnonService) UpdateCollectionEntry(sourceHash string, entry model.AnonCollectionEntry, requester, psk string) (string, error) {
+	defer log.LogDuration("AnonService.UpdateCollectionEntry")()
+	src, err := s.GetCollectionByHash(sourceHash)
+	if err != nil {
+		return "", fmt.Errorf("source collection not found: %w", err)
+	}
+	if !src.CanAccess(requester, psk) {
+		if src.PSKHash != "" || src.EffectiveAccessPolicy() == model.AccessPolicyPSK || src.EffectiveVisibility() == model.VisibilityPSK {
+			return "", fmt.Errorf("psk required or invalid for psk-protected collection")
+		}
+		return "", fmt.Errorf("source collection not found")
+	}
+
+	entry.Normalize()
+	if entry.Path == "" || !isRelativePath(entry.Path) || strings.Contains(entry.Path, "..") {
+		return "", fmt.Errorf("invalid path: %s", entry.Path)
+	}
+	if !strings.HasSuffix(entry.Path, "/") && !isValidProviders(entry.Providers) {
+		return "", fmt.Errorf("invalid providers for path: %s", entry.Path)
+	}
+
+	found := false
+	newEntries := make([]model.AnonCollectionEntry, len(src.Entries))
+	for i, e := range src.Entries {
+		if e.Path == entry.Path {
+			newEntries[i] = entry
+			found = true
+		} else {
+			newEntries[i] = e
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("entry not found: %s", entry.Path)
+	}
+
+	coll := newAnonCollectionWithVersion(src.FriendlyName, newEntries, src.Version+1, src.Tags)
+	coll.PrevSHA = sourceHash
+	inheritVisibility(coll, src)
+	return s.saveCollectionJSON(coll)
+}
+
+// GetCollectionHistory traverses backward along the prev_sha chain from startHash (Issue #338).
+func (s *AnonService) GetCollectionHistory(startHash string, maxDepth int, requester, psk string) ([]*model.AnonCollectionSummary, error) {
+	defer log.LogDuration("AnonService.GetCollectionHistory")()
+	if !isValidHash(startHash) {
+		return nil, fmt.Errorf("invalid start hash")
+	}
+	if maxDepth <= 0 || maxDepth > 200 {
+		maxDepth = 50
+	}
+
+	visited := make(map[string]bool)
+	currHash := startHash
+	history := make([]*model.AnonCollectionSummary, 0)
+
+	for currHash != "" && len(history) < maxDepth {
+		if visited[currHash] {
+			break // Cycle detection
+		}
+		visited[currHash] = true
+
+		coll, err := s.GetCollectionByHash(currHash)
+		if err != nil {
+			break
+		}
+		if !coll.CanAccess(requester, psk) {
+			break
+		}
+
+		preview := make([]string, 0, 3)
+		for i, e := range coll.Entries {
+			if i >= 3 {
+				break
+			}
+			preview = append(preview, e.Path)
+		}
+
+		summary := &model.AnonCollectionSummary{
+			Hash:         currHash,
+			FriendlyName: coll.FriendlyName,
+			NamePreview:  strings.Join(preview, ", "),
+			Version:      coll.Version,
+			Tags:         coll.Tags,
+			EntryCount:   len(coll.Entries),
+			CreatedAt:    coll.CreatedAt,
+			Visibility:   coll.EffectiveVisibility(),
+			Owner:        coll.Owner,
+			PrevSHA:      coll.PrevSHA,
+			AccessPolicy: coll.EffectiveAccessPolicy(),
+			HasPSK:       coll.PSKHash != "",
+		}
+		history = append(history, summary)
+		currHash = coll.PrevSHA
+	}
+
+	return history, nil
 }
 
 // inheritVisibility copies the permission triple from the source collection to the derived
@@ -400,6 +662,8 @@ func inheritVisibility(dst, src *model.AnonCollection) {
 	dst.Owner = src.Owner
 	dst.AccessPolicy = src.AccessPolicy
 	dst.Passcode = src.Passcode
+	dst.PSKHash = src.PSKHash
+	dst.IsProtected = src.IsProtected
 }
 
 func newAnonCollectionWithVersion(name string, entries []model.AnonCollectionEntry, version int, tags []string) *model.AnonCollection {

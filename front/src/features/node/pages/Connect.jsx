@@ -4,15 +4,20 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import PeerJSConnect from '../../../lib/PeerJSConnect';
+import LocalNodeBanner from '../components/LocalNodeBanner';
+import { useI18n } from '../../../context/I18nContext';
 
 export default function Connect() {
   const navigate = useNavigate();
+  const { t } = useI18n();
+
   return (
-    <div className="p-4 sm:p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden h-full max-w-full">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-2xl font-bold mb-1">Node Search / Connect</h1>
+        <LocalNodeBanner />
+        <h1 className="text-2xl font-bold mb-1">{t('connect.title')}</h1>
         <p className="text-sm text-gray-500 mb-6">
-          Search online nodes or enter a peer id to connect; on successful connection, enter the Node Control page.
+          {t('connect.subtitle')}
         </p>
         <div className="bg-white/[0.03] rounded-card border border-white/[0.06] p-5">
           <PeerJSConnect

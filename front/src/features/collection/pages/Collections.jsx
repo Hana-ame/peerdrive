@@ -4,6 +4,8 @@ import * as ws from '../../../platform/transport-ws';
 import { entrySha } from '../../../platform/shared/collectionTree';
 import DataState from '../../../components/netdisk/DataState';
 import { getNodeSession, onNodeSession } from '../../../lib/nodeSession';
+import CreateCollectionForm from '../components/CreateCollectionForm';
+import CollectionDetailRow from '../components/CollectionDetailRow';
 
 const VIS_LABEL = {
   public: { icon: '🌐', label: 'Public' },
@@ -23,13 +25,30 @@ export default function Collections() {
   const [collections, setCollections] = useState(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [wsStatus, setWsStatus] = useState(() => ws.getStatus());
   const [peerSession, setPeerSession] = useState(() => getNodeSession());
 
   useEffect(() => {
-    return onNodeSession((s) => {
-      setPeerSession(s);
-    });
+    const offWs = ws.onStatus((s) => setWsStatus(s));
+    const offSession = onNodeSession((s) => setPeerSession(s));
+    return () => {
+      offWs();
+      offSession();
+    };
   }, []);
+
+  const activeSession = peerSession?.client ? peerSession : getNodeSession();
+  const hasPeerClient = Boolean(activeSession?.client);
+  const isWsOpen = wsStatus === 'open';
+  const isGuest = hasPeerClient || (!isWsOpen && Boolean(activeSession?.peerId));
+  const canCreate = isWsOpen && !hasPeerClient;
+
+  // Enforce permission separation: if visitor mode becomes active, force list mode
+  useEffect(() => {
+    if ((isGuest || !canCreate) && tab === 'create') {
+      setTab('list');
+    }
+  }, [isGuest, canCreate, tab]);
 
   // Create-mode state
   const [files, setFiles] = useState([]);
@@ -51,9 +70,10 @@ export default function Collections() {
 
   const loadList = useCallback(async () => {
     setErr('');
-    if (peerSession?.client && ws.getStatus() !== 'open') {
+    const client = peerSession?.client || getNodeSession()?.client;
+    if (client) {
       try {
-        const snap = await peerSession.client.shares();
+        const snap = await client.shares();
         const colls = (snap?.collections || []).map((c, i) => ({
           hash: c.hash || `c-${i}`,
           current_hash: c.hash || `c-${i}`,
@@ -85,13 +105,17 @@ export default function Collections() {
       const res = await ws.admin('GET', '/anon/collections');
       setCollections(Array.isArray(res) ? res : []);
     } catch (e) {
-      setErr(e?.message || String(e));
+      setErr('');
       setCollections([]);
     }
   }, [peerSession]);
   useEffect(() => { loadList(); }, [loadList]);
 
   const openCreate = async () => {
+    if (!canCreate) {
+      setErr(isGuest ? 'Visitors have read-only access and cannot create collections' : 'Node connection required to create collections');
+      return;
+    }
     setErr('');
     setTab('create');
     setSelected([]);
@@ -111,6 +135,10 @@ export default function Collections() {
   };
 
   const create = async () => {
+    if (!canCreate) {
+      setErr('Permission denied: visitors cannot create collections');
+      return;
+    }
     if (!name.trim()) { setErr('Please enter a collection name'); return; }
     const chosen = files.filter(f => selected.includes(f.hash));
     if (chosen.length === 0) { setErr('Please select at least one file'); return; }
@@ -155,35 +183,41 @@ export default function Collections() {
       return;
     }
 
+    const client = peerSession?.client || getNodeSession()?.client;
+    if (client) {
+      try {
+        const snap = await client.shares();
+        const match = (snap?.collections || []).find(col => col.hash === targetHash || col.name === targetHash);
+        if (match) {
+          setDetail({
+            hash: targetHash,
+            data: {
+              hash: match.hash,
+              friendly_name: match.name,
+              entries: (match.entries || []).map(entry => ({
+                path: entry.path || entry.name || 'unnamed',
+                hash: entry.hash || '',
+                mime_type: entry.mime || '',
+                providers: [{ type: 'sha256', value: entry.hash || '', mime_type: entry.mime || '' }],
+              })),
+              tags: match.tags || [],
+              is_protected: Boolean(match.is_protected),
+              visibility: match.access_policy || 'public',
+            },
+          });
+          return;
+        }
+      } catch (e) {
+        setErr(e?.message || String(e));
+        setDetail(null);
+        return;
+      }
+    }
+
     try {
       const d = await ws.admin('GET', `/anon/collections/${targetHash}`);
       setDetail({ hash: targetHash, data: d });
     } catch (e) {
-      if (peerSession?.client) {
-        try {
-          const snap = await peerSession.client.shares();
-          const match = (snap?.collections || []).find(col => col.hash === targetHash);
-          if (match) {
-            setDetail({
-              hash: targetHash,
-              data: {
-                hash: match.hash,
-                friendly_name: match.name,
-                entries: (match.entries || []).map(entry => ({
-                  path: entry.path || entry.name || 'unnamed',
-                  hash: entry.hash || '',
-                  mime_type: entry.mime || '',
-                  providers: [{ type: 'sha256', value: entry.hash || '', mime_type: entry.mime || '' }],
-                })),
-                tags: match.tags || [],
-                is_protected: Boolean(match.is_protected),
-                visibility: match.access_policy || 'public',
-              },
-            });
-            return;
-          }
-        } catch { /* ignore */ }
-      }
       setErr(e?.message || String(e));
       setDetail(null);
     }
@@ -191,6 +225,7 @@ export default function Collections() {
 
   const unlockProtected = async (hash) => {
     if (!unlockPasscode.trim()) return;
+    if (peerSession?.client || getNodeSession()?.client) return;
     setBusy(true);
     try {
       const d = await ws.admin('GET', `/anon/collections/${hash}?passcode=${encodeURIComponent(unlockPasscode.trim())}`);
@@ -249,14 +284,29 @@ export default function Collections() {
   const th = 'text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
 
   return (
-    <div className="p-4 sm:p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden h-full max-w-full">
       <div className="max-w-5xl mx-auto">
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 mb-5">
           <div>
-            <h1 className="text-2xl font-bold">Collections</h1>
-            <p className="text-sm text-gray-500 mt-0.5">Content-addressed versioned file collections (anonymous / hash-addressed)</p>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <h1 className="text-2xl font-bold">Collections</h1>
+              <div className="flex items-center bg-white/[0.06] p-0.5 rounded-lg text-xs shrink-0 border border-white/[0.08]">
+                <button type="button" onClick={() => navigate('/drive')} className="px-2.5 py-1 rounded text-gray-400 hover:text-white transition-colors">Files</button>
+                <span className="px-2.5 py-1 rounded bg-brand-600 text-white font-medium">Collections</span>
+              </div>
+              {isGuest && (
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium shrink-0">
+                  Visitor (Read Only)
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {isGuest
+                ? 'Browsing public collections shared by remote peer node'
+                : 'Content-addressed versioned file collections (anonymous / hash-addressed)'}
+            </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {tab === 'list' && (
               <div className="flex items-center bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.06] text-xs">
                 <button
@@ -275,7 +325,43 @@ export default function Collections() {
                 </button>
               </div>
             )}
-            <button onClick={openCreate} className="btn-brand">+ New Collection</button>
+            <button
+              onClick={loadList}
+              className="btn-ghost !px-2.5 !py-1 !text-xs text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+              title="Refresh collections"
+            >
+              <span>🔄</span>
+              <span>Refresh</span>
+            </button>
+            {tab === 'list' ? (
+              <button
+                disabled={!canCreate}
+                onClick={canCreate ? openCreate : undefined}
+                className={canCreate
+                  ? "btn-brand !px-3 !py-1 !text-xs flex items-center gap-1.5 shadow-sm"
+                  : "!px-3 !py-1 !text-xs flex items-center gap-1.5 rounded-lg bg-white/[0.04] text-gray-500 border border-white/[0.08] cursor-not-allowed select-none opacity-60 transition-colors"
+                }
+                title={
+                  canCreate
+                    ? "Create a new collection from local files"
+                    : (isGuest
+                        ? "Visitors cannot create collections (read-only)"
+                        : "Node connection required to create collections")
+                }
+              >
+                <span className={canCreate ? "" : "opacity-50"}>➕</span>
+                <span>New Collection</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setTab('list')}
+                className="btn-ghost !px-3 !py-1 !text-xs text-gray-300 hover:text-white flex items-center gap-1.5"
+                title="Back to Collections list"
+              >
+                <span>←</span>
+                <span>Back to List</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -349,12 +435,14 @@ export default function Collections() {
               skeletonRows={6}
               emptyProps={{
                 icon: '📦',
-                title: collections?.length === 0 ? 'No collections yet' : 'No matching collections found',
-                description: collections?.length === 0
-                  ? 'Click "New Collection" to create one from your netdisk files.'
-                  : 'Try clearing your search query or tag filter.',
-                actionLabel: collections?.length === 0 ? '+ New Collection' : null,
-                onAction: openCreate,
+                title: isGuest
+                  ? (collections?.length === 0 ? 'No shared collections' : 'No matching collections found')
+                  : (collections?.length === 0 ? 'No collections yet' : 'No matching collections found'),
+                description: isGuest
+                  ? (collections?.length === 0 ? 'This remote node has not shared any public collections.' : 'Try clearing your search query or tag filter.')
+                  : (collections?.length === 0 ? 'Click "New Collection" to create one from your netdisk files.' : 'Try clearing your search query or tag filter.'),
+                actionLabel: (!isGuest && canCreate && collections?.length === 0) ? '+ New Collection' : null,
+                onAction: (!isGuest && canCreate) ? openCreate : null,
               }}
             >
               {viewMode === 'grid' ? (
@@ -397,7 +485,7 @@ export default function Collections() {
                 })}
               </div>
             ) : (
-              <div className="card-surface overflow-x-auto">
+              <div className="card-surface overflow-x-auto max-w-full">
                 <table className="w-full text-sm min-w-[560px]">
                   <thead className="bg-white/[0.03]">
                     <tr>
@@ -441,61 +529,16 @@ export default function Collections() {
                             <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{fmtTime(c.created_at)}</td>
                           </tr>
                           {detail?.hash === (c.hash || c.current_hash) && (
-                            <tr className="bg-white/[0.02]">
-                              <td colSpan={6} className="px-4 py-3">
-                                {detail.data === null ? (
-                                  <span className="text-xs text-gray-500">Loading...</span>
-                                ) : (
-                                  <div>
-                                    <div className="flex items-center justify-between gap-2 mb-2">
-                                      <p className="text-xs text-gray-500">
-                                        hash: <span className="font-mono text-gray-400 break-all">{detail.hash}</span>
-                                      </p>
-                                      <button
-                                        onClick={() => navigate(`/collection/${detail.hash}`)}
-                                        className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 shrink-0">
-                                        📁 Browse as folders
-                                      </button>
-                                    </div>
-                                    {detail.data?.is_protected && (
-                                      <div className="flex items-center gap-2 mb-3 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-200 text-xs">
-                                        <span>🔒 Protected collection (entries hidden). Enter passcode:</span>
-                                        <input
-                                          type="password"
-                                          placeholder="Passcode / 提取码"
-                                          value={unlockPasscode}
-                                          onChange={e => setUnlockPasscode(e.target.value)}
-                                          className="input-base text-xs py-1 px-2 w-36"
-                                          onKeyDown={e => { if (e.key === 'Enter') unlockProtected(detail.hash); }}
-                                        />
-                                        <button
-                                          onClick={() => unlockProtected(detail.hash)}
-                                          disabled={busy || !unlockPasscode.trim()}
-                                          className="btn-brand text-xs py-1 px-2.5"
-                                        >
-                                          Unlock
-                                        </button>
-                                      </div>
-                                    )}
-                                    {Array.isArray(detail.data.entries) && detail.data.entries.length > 0 ? (
-                                      <ul className="space-y-1">
-                                        {detail.data.entries.map((e, ei) => (
-                                          <li key={ei} className="flex items-center gap-3 text-xs">
-                                            <span className="flex-1 truncate text-gray-300">{e.path}</span>
-                                            <span className="font-mono text-xs text-gray-600">{String(entryHash(e) || '').slice(0, 12)}…</span>
-                                            <button onClick={() => entryHash(e) && downloadEntry(entryHash(e), e.path)}
-                                              disabled={!entryHash(e)}
-                                              className="px-2 py-0.5 text-xs bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 rounded disabled:opacity-40">Download</button>
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    ) : (
-                                      <p className="text-xs text-gray-600">This collection has no entries.</p>
-                                    )}
-                                  </div>
-                                )}
-                              </td>
-                            </tr>
+                            <CollectionDetailRow
+                              detail={detail}
+                              navigate={navigate}
+                              unlockPasscode={unlockPasscode}
+                              setUnlockPasscode={setUnlockPasscode}
+                              unlockProtected={unlockProtected}
+                              downloadEntry={downloadEntry}
+                              entryHash={entryHash}
+                              busy={busy}
+                            />
                           )}
                         </React.Fragment>
                       );
@@ -508,94 +551,26 @@ export default function Collections() {
           </div>
         )}
 
-        {tab === 'create' && (
-          <div className="card-surface p-5 space-y-4">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">Collection Name</label>
-              <input value={name} onChange={e => setName(e.target.value)} placeholder="Collection name"
-                className="input-base max-w-md" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">Tags (comma-separated)</label>
-              <input
-                value={tagsInput}
-                onChange={e => setTagsInput(e.target.value)}
-                placeholder="e.g. photos, project-alpha, backup"
-                className="input-base max-w-md text-xs"
-              />
-              <p className="text-[11px] text-gray-500 mt-1">Optional tags to organize and search collections.</p>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">Visibility</label>
-              <div className="flex gap-1">
-                {Object.entries(VIS_LABEL).map(([k, v]) => (
-                  <button key={k} onClick={() => setVisibility(k)}
-                    className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
-                      visibility === k ? 'bg-brand-600 text-white' : 'bg-white/[0.04] text-gray-400 hover:text-white'
-                    }`}>
-                    {v.icon} {v.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">Access Policy (Extraction Mode)</label>
-              <div className="flex gap-1 mb-2">
-                <button type="button" onClick={() => setAccessPolicy('public')}
-                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
-                    accessPolicy === 'public' ? 'bg-brand-600 text-white' : 'bg-white/[0.04] text-gray-400 hover:text-white'
-                  }`}>
-                  🌐 Open
-                </button>
-                <button type="button" onClick={() => setAccessPolicy('protected')}
-                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
-                    accessPolicy === 'protected' ? 'bg-amber-600 text-white' : 'bg-white/[0.04] text-gray-400 hover:text-white'
-                  }`}>
-                  🔑 Protected (Passcode)
-                </button>
-                <button type="button" onClick={() => setAccessPolicy('private')}
-                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
-                    accessPolicy === 'private' ? 'bg-red-600 text-white' : 'bg-white/[0.04] text-gray-400 hover:text-white'
-                  }`}>
-                  🔒 Private
-                </button>
-              </div>
-              {accessPolicy === 'protected' && (
-                <input
-                  type="text"
-                  value={passcode}
-                  onChange={e => setPasscode(e.target.value)}
-                  placeholder="Set extraction passcode / 提取码"
-                  className="input-base max-w-md text-xs mt-1"
-                />
-              )}
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">Select Netdisk Files ({selected.length} selected)</label>
-              {files.length === 0 ? (
-                <p className="text-xs text-gray-600">No files in netdisk yet. Go to "My Cloud Drive" to upload first.</p>
-              ) : (
-                <ul className="border border-white/[0.06] rounded-lg divide-y divide-white/[0.04] max-h-72 overflow-y-auto">
-                  {files.map((f, i) => (
-                    <li key={f.hash || i}
-                      onClick={() => toggleFile(f.hash)}
-                      className={`flex items-center gap-3 px-3 py-2 text-xs cursor-pointer hover:bg-white/[0.03] ${
-                        selected.includes(f.hash) ? 'bg-brand-500/10' : ''
-                      }`}>
-                      <input type="checkbox" readOnly checked={selected.includes(f.hash)} className="accent-brand-500 pointer-events-none" />
-                      <span className="flex-1 truncate text-gray-300">{f.filename}</span>
-                      <span className="text-gray-500 shrink-0">{f.size} B</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <button onClick={create} disabled={busy || selected.length === 0}
-                className="btn-brand">Create Collection</button>
-              <button onClick={() => setTab('list')} className="btn-ghost">Cancel</button>
-            </div>
-          </div>
+        {tab === 'create' && canCreate && (
+          <CreateCollectionForm
+            name={name}
+            setName={setName}
+            tagsInput={tagsInput}
+            setTagsInput={setTagsInput}
+            visibility={visibility}
+            setVisibility={setVisibility}
+            accessPolicy={accessPolicy}
+            setAccessPolicy={setAccessPolicy}
+            passcode={passcode}
+            setPasscode={setPasscode}
+            files={files}
+            selected={selected}
+            toggleFile={toggleFile}
+            create={create}
+            busy={busy}
+            onCancel={() => setTab('list')}
+            visLabels={VIS_LABEL}
+          />
         )}
       </div>
     </div>

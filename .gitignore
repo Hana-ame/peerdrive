@@ -30,6 +30,8 @@ logs/
 /back/peersignal
 /back/server
 /back/reg-server
+/peerdrive-bin
+/run/
 *.exe
 *.out
 

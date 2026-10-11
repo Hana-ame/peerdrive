@@ -257,3 +257,224 @@ func TestCommitCollection_RequiresPasscodeWhenProtected(t *testing.T) {
 	assert.NoError(t, err, "commit with correct passcode must succeed")
 	assert.NotEmpty(t, newHash)
 }
+
+// 发现背景 (Issue #338)：合集独立权限支持 PSK（预共享密钥），合集内仅持久化 PSK 的 SHA-256 哈希，
+// 访问者出示明文密钥进行 SHA-256 恒定时间命中比对，严禁在任何地方明文存储或返回 PSK。
+func TestAnonCollection_PSKVerification(t *testing.T) {
+	key := "my-secret-preshared-key-2026"
+	coll := &model.AnonCollection{
+		Owner:        "alice",
+		Visibility:   model.VisibilityPSK,
+		AccessPolicy: model.AccessPolicyPSK,
+	}
+	// 计算并设置 PSKHash
+	sum := sha256Hex([]byte(key))
+	coll.PSKHash = sum
+
+	// 正确 PSK 命中
+	assert.True(t, coll.VerifyPSK(key), "correct PSK must verify successfully")
+	// 错误 PSK 失败
+	assert.False(t, coll.VerifyPSK("wrong-key"), "wrong PSK must fail verification")
+	// 空 PSK 失败
+	assert.False(t, coll.VerifyPSK(""), "empty PSK must fail verification")
+}
+
+// 发现背景 (Issue #338)：合集支持独立权限控制（公开、指定人员 access_list、PSK 哈希命中、仅自己 private），
+// 各种请求者与 PSK 参数传入时必须准确判定访问权限（CanAccess）。
+func TestAnonCollection_CanAccessIndependentPolicies(t *testing.T) {
+	key := "psk-token-999"
+	pskHash := sha256Hex([]byte(key))
+
+	// 1. 公开合集 (Public)
+	pubColl := &model.AnonCollection{Visibility: model.VisibilityPublic, AccessPolicy: model.AccessPolicyPublic}
+	assert.True(t, pubColl.CanAccess("", ""), "public collection accessible to unauthenticated")
+	assert.True(t, pubColl.CanAccess("anyone", ""), "public collection accessible to anyone")
+
+	// 2. 指定人员合集 (Restricted / AccessList)
+	restrColl := &model.AnonCollection{
+		Owner:      "alice",
+		Visibility: model.VisibilityRestricted,
+		AccessList: []string{"bob", "carol"},
+	}
+	assert.True(t, restrColl.CanAccess("alice", ""), "owner should access restricted")
+	assert.True(t, restrColl.CanAccess("bob", ""), "whitelisted user bob should access restricted")
+	assert.False(t, restrColl.CanAccess("dave", ""), "non-whitelisted user dave should be denied")
+	assert.False(t, restrColl.CanAccess("", ""), "unauthenticated request denied for restricted")
+
+	// 3. PSK 合集
+	pskColl := &model.AnonCollection{
+		Owner:        "alice",
+		Visibility:   model.VisibilityPSK,
+		AccessPolicy: model.AccessPolicyPSK,
+		PSKHash:      pskHash,
+	}
+	assert.True(t, pskColl.CanAccess("alice", ""), "owner should access PSK collection without key")
+	assert.True(t, pskColl.CanAccess("", key), "unauthenticated with matching PSK should access")
+	assert.True(t, pskColl.CanAccess("stranger", key), "stranger with matching PSK should access")
+	assert.False(t, pskColl.CanAccess("stranger", "wrong"), "stranger with wrong PSK denied")
+	assert.False(t, pskColl.CanAccess("", ""), "unauthenticated without PSK denied")
+
+	// 4. 私有合集 (Private)
+	privColl := &model.AnonCollection{
+		Owner:        "alice",
+		Visibility:   model.VisibilityPrivate,
+		AccessPolicy: model.AccessPolicyPrivate,
+	}
+	assert.True(t, privColl.CanAccess("alice", ""), "owner should access private")
+	assert.False(t, privColl.CanAccess("bob", ""), "non-owner denied for private")
+	assert.False(t, privColl.CanAccess("", ""), "unauthenticated denied for private")
+}
+
+// 发现背景 (Issue #338)：合集条目增删改（Add / Update / Remove）必须每次递增版本并生成指向上一个版本的
+// prev_sha 指针，形成 Git 式的版本演进链，修改后能完整溯源前序版本。
+func TestAnonCollection_EntryCRUDAndPrevSHA(t *testing.T) {
+	tmpDir, svc := setupAnonServiceTest(t)
+	defer os.RemoveAll(tmpDir)
+
+	initialEntries := []model.AnonCollectionEntry{
+		{Path: "file1.txt", Hash: "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"},
+	}
+
+	// 1. 创建初始版本 A
+	hashA, err := svc.CreateCollectionWithPolicy("my-repo", initialEntries, []string{"v1"},
+		model.VisibilityPublic, nil, model.AccessPolicyPublic, "", "alice")
+	assert.NoError(t, err)
+	collA, err := svc.GetCollectionByHash(hashA)
+	assert.NoError(t, err)
+	assert.Empty(t, collA.PrevSHA, "initial collection must have empty prev_sha")
+	assert.Equal(t, 2, collA.Version)
+	assert.Len(t, collA.Entries, 1)
+
+	// 2. 添加条目 (AddCollectionEntry) -> 生成版本 B
+	newEntry := model.AnonCollectionEntry{
+		Path: "file2.txt",
+		Hash: "b7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434b",
+	}
+	hashB, err := svc.AddCollectionEntry(hashA, newEntry, "alice", "")
+	assert.NoError(t, err)
+	assert.NotEqual(t, hashA, hashB)
+
+	collB, err := svc.GetCollectionByHash(hashB)
+	assert.NoError(t, err)
+	assert.Equal(t, hashA, collB.PrevSHA, "version B must have prev_sha pointing to version A")
+	assert.Equal(t, 3, collB.Version, "version should increment to 3")
+	assert.Len(t, collB.Entries, 2)
+
+	// 3. 更改条目 (UpdateCollectionEntry) -> 生成版本 C
+	updatedEntry := model.AnonCollectionEntry{
+		Path: "file1.txt",
+		Hash: "c7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434c",
+	}
+	hashC, err := svc.UpdateCollectionEntry(hashB, updatedEntry, "alice", "")
+	assert.NoError(t, err)
+	assert.NotEqual(t, hashB, hashC)
+
+	collC, err := svc.GetCollectionByHash(hashC)
+	assert.NoError(t, err)
+	assert.Equal(t, hashB, collC.PrevSHA, "version C must have prev_sha pointing to version B")
+	assert.Equal(t, 4, collC.Version, "version should increment to 4")
+	assert.Len(t, collC.Entries, 2)
+	assert.Equal(t, "c7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434c", collC.Entries[0].GetPrimaryHash())
+
+	// 4. 删除条目 (RemoveCollectionEntry) -> 生成版本 D
+	hashD, err := svc.RemoveCollectionEntry(hashC, "file2.txt", "alice", "")
+	assert.NoError(t, err)
+	assert.NotEqual(t, hashC, hashD)
+
+	collD, err := svc.GetCollectionByHash(hashD)
+	assert.NoError(t, err)
+	assert.Equal(t, hashC, collD.PrevSHA, "version D must have prev_sha pointing to version C")
+	assert.Equal(t, 5, collD.Version, "version should increment to 5")
+	assert.Len(t, collD.Entries, 1)
+	assert.Equal(t, "file1.txt", collD.Entries[0].Path)
+}
+
+// 发现背景 (Issue #338)：验证能够沿 prev_sha 完整回溯版本历史（从 D -> C -> B -> A）。
+func TestAnonCollection_HistoryTraversal(t *testing.T) {
+	tmpDir, svc := setupAnonServiceTest(t)
+	defer os.RemoveAll(tmpDir)
+
+	// 构造 3 个版本链：A -> B -> C
+	hashA, err := svc.CreateCollectionWithPolicy("history-repo", []model.AnonCollectionEntry{
+		{Path: "init.txt", Hash: "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"},
+	}, nil, model.VisibilityPublic, nil, model.AccessPolicyPublic, "", "alice")
+	assert.NoError(t, err)
+
+	hashB, err := svc.AddCollectionEntry(hashA, model.AnonCollectionEntry{
+		Path: "step2.txt", Hash: "b7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434b",
+	}, "alice", "")
+	assert.NoError(t, err)
+
+	hashC, err := svc.AddCollectionEntry(hashB, model.AnonCollectionEntry{
+		Path: "step3.txt", Hash: "c7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434c",
+	}, "alice", "")
+	assert.NoError(t, err)
+
+	history, err := svc.GetCollectionHistory(hashC, 10, "alice", "")
+	assert.NoError(t, err)
+	assert.Len(t, history, 3, "history should contain 3 commits from C back to A")
+
+	// 校验链序
+	assert.Equal(t, hashC, history[0].Hash)
+	assert.Equal(t, hashB, history[0].PrevSHA)
+	assert.Equal(t, hashB, history[1].Hash)
+	assert.Equal(t, hashA, history[1].PrevSHA)
+	assert.Equal(t, hashA, history[2].Hash)
+	assert.Empty(t, history[2].PrevSHA)
+}
+
+// 发现背景 (Issue #338)：非 Owner 针对 PSK 保护合集执行增删改条目操作时，必须出示正确 PSK，
+// 否则即便拥有当前版本的 SHA 也被严密拦截。
+func TestAnonCollection_EntryCRUDRequiresPSK(t *testing.T) {
+	tmpDir, svc := setupAnonServiceTest(t)
+	defer os.RemoveAll(tmpDir)
+
+	psk := "topsecret123"
+	hashA, err := svc.CreateCollectionWithPolicyAndPSK("psk-repo", []model.AnonCollectionEntry{
+		{Path: "data.txt", Hash: "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"},
+	}, nil, model.VisibilityPSK, nil, model.AccessPolicyPSK, "", psk, "alice")
+	assert.NoError(t, err)
+
+	// 陌生人无 PSK 尝试添加条目：拒绝
+	_, err = svc.AddCollectionEntry(hashA, model.AnonCollectionEntry{
+		Path: "hacked.txt", Hash: "b7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434b",
+	}, "", "")
+	assert.Error(t, err)
+
+	// 陌生人错误 PSK 尝试添加条目：拒绝
+	_, err = svc.AddCollectionEntry(hashA, model.AnonCollectionEntry{
+		Path: "hacked.txt", Hash: "b7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434b",
+	}, "", "wrong-key")
+	assert.Error(t, err)
+
+	// 陌生人正确 PSK 添加条目：成功
+	hashB, err := svc.AddCollectionEntry(hashA, model.AnonCollectionEntry{
+		Path: "hacked.txt", Hash: "b7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434b",
+	}, "", psk)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, hashB)
+
+	collB, err := svc.GetCollectionByHash(hashB)
+	assert.NoError(t, err)
+	assert.Equal(t, hashA, collB.PrevSHA)
+	assert.True(t, collB.VerifyPSK(psk), "PSKHash must be inherited by version B")
+}
+
+// 发现背景 (Issue #338)：通过 UpdateCollectionPermissions 修改权限时，同样必须记录 prev_sha 指针。
+func TestAnonCollection_UpdatePermissionsPrevSHA(t *testing.T) {
+	tmpDir, svc := setupAnonServiceTest(t)
+	defer os.RemoveAll(tmpDir)
+
+	hashA, err := svc.CreateCollectionWithPolicy("perm-repo", validEntries(), nil,
+		model.VisibilityPublic, nil, model.AccessPolicyPublic, "", "alice")
+	assert.NoError(t, err)
+
+	newHash, err := svc.UpdateCollectionPermissions(hashA, model.VisibilityPSK, nil, model.AccessPolicyPSK, "new-psk-key", "alice")
+	assert.NoError(t, err)
+	assert.NotEqual(t, hashA, newHash)
+
+	updated, err := svc.GetCollectionByHash(newHash)
+	assert.NoError(t, err)
+	assert.Equal(t, hashA, updated.PrevSHA, "permission update must link prev_sha to previous version")
+	assert.True(t, updated.VerifyPSK("new-psk-key"))
+}

@@ -92,7 +92,7 @@ export default function Settings() {
   const input = 'w-full bg-white/[0.06] px-2.5 py-1.5 text-xs font-mono rounded border border-white/[0.1] focus:outline-none focus:border-brand-500';
 
   return (
-    <div className="p-4 sm:p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden h-full max-w-full">
       <div className="max-w-3xl mx-auto space-y-6">
         <div>
           <h1 className="text-2xl font-bold">Settings</h1>
@@ -106,7 +106,7 @@ export default function Settings() {
         {/* Connection mode */}
         <section className="card-surface p-5 space-y-3">
           <h2 className="text-sm font-semibold text-gray-200">Connection Mode</h2>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             <button onClick={() => setConnMode('ws')}
               className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
                 connMode === 'ws' ? 'bg-brand-600 text-white' : 'bg-white/[0.04] text-gray-400 hover:text-white'
@@ -162,7 +162,7 @@ export default function Settings() {
           </div>
           {authUser ? (
             <div className="text-xs text-gray-300 flex items-center gap-3">
-              <span className="text-green-400">✓ {authUser}</span>
+              <span className="text-green-400">{authUser}</span>
               <button onClick={logout} className="px-2 py-1 text-[11px] bg-white/[0.05] hover:bg-white/[0.1] rounded text-gray-300">Logout</button>
             </div>
           ) : (

@@ -139,5 +139,18 @@ describe('ConnectionStatus', () => {
     expect(screen.getByTestId('detail-username').textContent).toBe('alice')
     expect(screen.getByTestId('detail-operator').textContent).toBe('alice-operator')
   })
+
+  it('Signaling server pill strictly does not contain checkmark symbols (✓ / ☑️) (Issue #339)', () => {
+    render(<ConnectionStatus />)
+    const signalPill = screen.getByTestId('signal-status')
+    expect(signalPill).toBeDefined()
+    expect(signalPill.textContent).not.toContain('✓')
+    expect(signalPill.textContent).not.toContain('☑️')
+
+    // Even when connection transitions to open
+    emit('open')
+    expect(signalPill.textContent).not.toContain('✓')
+    expect(signalPill.textContent).not.toContain('☑️')
+  })
 })
 

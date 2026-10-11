@@ -26,8 +26,12 @@ if ! command -v node >/dev/null 2>&1 && [ -d "$HOME/.nvm/versions/node" ]; then
   export PATH
 fi
 
-# go 命令代理（AGENTS.md：出网走宿主机代理 10809；GOPROXY 走 goproxy.cn 加速）
-export HTTPS_PROXY="${HTTPS_PROXY:-http://172.29.80.1:10809}"
+# go 命令代理：优先读取已有环境变量或 ~/script/env.source 动态解析，避免写死导致连接超时
+if [ -f "$HOME/script/env.source" ]; then
+  # shellcheck source=/dev/null
+  . "$HOME/script/env.source"
+fi
+export HTTPS_PROXY="${HTTPS_PROXY:-}"
 export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
 
 PASS=0

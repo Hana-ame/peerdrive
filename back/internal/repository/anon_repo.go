@@ -136,6 +136,9 @@ func ListAnonCollections(storageDir string) ([]model.AnonCollectionSummary, erro
 				// Do not pass an empty string to the frontend, or the three-option UI has no default highlight.
 				summary.Visibility = coll.EffectiveVisibility()
 				summary.Owner = coll.Owner
+				summary.PrevSHA = coll.PrevSHA
+				summary.AccessPolicy = coll.EffectiveAccessPolicy()
+				summary.HasPSK = coll.PSKHash != ""
 			}
 		}
 		results = append(results, summary)

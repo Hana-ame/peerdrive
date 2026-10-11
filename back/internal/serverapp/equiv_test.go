@@ -111,7 +111,8 @@ func routeTable(t *testing.T) []string {
 
 // goldenRouteTable was captured from the tree before the HTTP shell was split
 // into internal/httpd. Do not regenerate from a modified tree.
-const goldenRouteTable = `114
+const goldenRouteTable = `119
+DELETE /anon/collections/:hash/entries
 DELETE /bt/download/:infohash
 DELETE /collections/:id/:collection_name/entries/*path
 DELETE /files/:hash
@@ -121,6 +122,7 @@ GET /:username/:collection_name/*filepath
 GET /anon/collections
 GET /anon/collections/:hash
 GET /anon/collections/:hash/*filepath
+GET /anon/history/:hash
 GET /bt/bep51/sample
 GET /bt/download/:infohash
 GET /bt/download/:infohash/magnet
@@ -173,6 +175,7 @@ HEAD /sha256sum/:sha256/:filename
 POST /actions/fork
 POST /actions/merge
 POST /anon/collections
+POST /anon/collections/:hash/entries
 POST /anon/collections/commit
 POST /anon/collections/fork
 POST /bt/announce
@@ -225,6 +228,8 @@ POST /stream/:id/close
 POST /stream/create
 POST /tags/batch
 POST /tags/sha/:sha
+PUT /anon/collections/:hash/entries
+PUT /anon/collections/:hash/permissions
 PUT /anon/collections/:hash/visibility`
 
 // TestGoldenRouteTable pins the whole assembled route surface.
@@ -233,12 +238,12 @@ PUT /anon/collections/:hash/visibility`
 // regression when a router assembly is refactored — fails here with a diff.
 func TestGoldenRouteTable(t *testing.T) {
 	got := routeTable(t)
-	if len(got) != 114 {
-		t.Fatalf("route count = %d, want 114; the assembled router registers a different number of routes\nGOT:\n%s",
+	if len(got) != 119 {
+		t.Fatalf("route count = %d, want 119; the assembled router registers a different number of routes\nGOT:\n%s",
 			len(got), strings.Join(got, "\n"))
 	}
 	want := strings.Split(strings.TrimSpace(goldenRouteTable), "\n")
-	if want[0] != "114" {
+	if want[0] != "119" {
 		t.Fatalf("internal error: golden header is %q", want[0])
 	}
 	want = want[1:]

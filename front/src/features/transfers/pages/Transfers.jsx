@@ -175,14 +175,14 @@ export default function Transfers() {
   const th = 'text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
 
   return (
-    <div className="p-4 sm:p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden h-full max-w-full">
       <div className="max-w-5xl mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
           <div>
             <h1 className="text-2xl font-bold">Transfer Tasks</h1>
             <p className="text-sm text-gray-500 mt-0.5">Cross-node pull tasks</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {aria2Status && (
               <button
                 type="button"
@@ -218,7 +218,7 @@ export default function Transfers() {
             <p className="text-xs text-gray-600 mt-1">Cross-node pulls are initiated from "Node Market / Peer Sharing".</p>
           </div>
         ) : (
-          <div className="card-surface overflow-x-auto">
+          <div className="card-surface overflow-x-auto max-w-full">
             <table className="w-full text-sm min-w-[580px]">
               <thead className="bg-white/[0.03]">
                 <tr>

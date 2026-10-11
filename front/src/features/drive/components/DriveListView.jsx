@@ -1,5 +1,6 @@
 import React from 'react';
 import { fmtBytes } from '../../../platform/shared/format';
+import FileThumbnail from '../../../components/netdisk/FileThumbnail';
 
 function fmtTime(ts) {
   if (!ts) return '—';
@@ -46,6 +47,9 @@ export default function DriveListView({
             const isTarget = deepHash && f.hash === deepHash;
             const tags = fileTags[f.hash] || [];
             const icon = getFileIcon(f);
+            const ext = (f.filename || '').split('.').pop().toLowerCase();
+            const isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext) || f.mime_type?.startsWith('image/');
+            const isVid = ['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext) || f.mime_type?.startsWith('video/');
 
             return (
               <tr
@@ -59,7 +63,18 @@ export default function DriveListView({
               >
                 <td className={td + ' text-gray-200 max-w-[240px] truncate'}>
                   <div className="flex items-center gap-2">
-                    <span className="text-base">{icon}</span>
+                    {(isImg || isVid) && (f.hash || f.sha) ? (
+                      <FileThumbnail
+                        sha={f.hash || f.sha}
+                        filename={f.filename}
+                        mimeType={f.mime_type}
+                        fallbackIcon={isVid ? '🎬' : icon}
+                        className="w-7 h-7 rounded shrink-0"
+                        imgClassName="w-7 h-7 object-cover rounded"
+                      />
+                    ) : (
+                      <span className="text-base">{icon}</span>
+                    )}
                     {isTarget && (
                       <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-400 shrink-0" title="Deep linked" />
                     )}

@@ -1,6 +1,7 @@
 // Module ⑥: IPFS —— pin list and gateway status (simplified panel).
 import React, { useState, useEffect, useCallback } from 'react';
 import * as ws from '../../../platform/transport-ws';
+import { getNodeSession } from '../../../lib/nodeSession';
 
 export default function IPFS() {
   const [pins, setPins] = useState([]);
@@ -10,6 +11,11 @@ export default function IPFS() {
 
   const load = useCallback(async () => {
     setErr('');
+    if (getNodeSession()?.client) {
+      setPins([]);
+      setGateways([]);
+      return;
+    }
     try {
       const [p, g] = await Promise.all([
         ws.admin('GET', '/ipfs/pins').catch(() => []),
@@ -31,9 +37,9 @@ export default function IPFS() {
   };
 
   return (
-    <div className="p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden h-full max-w-full">
       <div className="max-w-5xl mx-auto">
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
           <div>
             <h1 className="text-2xl font-bold">IPFS</h1>
             <p className="text-sm text-gray-500 mt-0.5">Content-addressed download / pin management</p>

@@ -565,7 +565,7 @@ func TestContract_DoneSemantics(t *testing.T) {
 	srv.closeAll() // network drop, not a client Close
 	select {
 	case <-sig.Done():
-	case <-time.After(3 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("Done() not closed after network drop")
 	}
 

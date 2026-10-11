@@ -61,7 +61,7 @@ import {
 } from '../shared/storageKeys.js'
 import { getNodeSession, onNodeSession } from '../../lib/nodeSession.js'
 
-// When an active PeerJS WebRTC node session is established, disable WS retry timer
+// When an active PeerJS WebRTC node session is established, completely deactivate WS transport
 if (typeof onNodeSession === 'function') {
   onNodeSession((session) => {
     if (session?.client) {
@@ -69,6 +69,15 @@ if (typeof onNodeSession === 'function') {
         clearTimeout(retryTimer)
         retryTimer = null
       }
+      stopHeartbeat()
+      if (sock) {
+        try {
+          sock._suppressReconnect = true
+          sock.close()
+        } catch {}
+        sock = null
+      }
+      setStatus('idle')
     }
   })
 }
@@ -84,7 +93,12 @@ function readToken() {
 }
 
 function getWsBase() {
-  return localStorage.getItem(STORAGE_KEY_API_BASE) || 'https://wsl-3000.moonchan.xyz'
+  const custom = localStorage.getItem(STORAGE_KEY_API_BASE)
+  if (custom) return custom
+  if (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    return 'http://127.0.0.1:3000'
+  }
+  return 'https://wsl-3000.moonchan.xyz'
 }
 
 /* ── Connection state, heartbeat and auto-reconnect ──
@@ -157,7 +171,7 @@ function ensureOpenSync() {
 
 function ensureOpen() {
   if (getNodeSession?.()?.client) {
-    return Promise.reject(new Error('peerjs session active: ws transport disabled'))
+    return Promise.resolve()
   }
   connect()
   if (sock && sock.readyState === WebSocket.OPEN) {
@@ -267,6 +281,7 @@ function connect() {
     // owned must be captured before clearing: only connections we created ourselves schedule auto-reconnect; test-injected
     // mocks shouldn't connect to a real network after being disconnected.
     const owned = !!sock._wsOwned
+    const suppress = !!sock._suppressReconnect
     stopHeartbeat()
     for (const [, p] of pending) {
       if (p.timer) clearTimeout(p.timer)
@@ -275,8 +290,12 @@ function connect() {
     pending.clear()
     binaryExpect = null
     sock = null
-    setStatus('closed')
-    if (owned && !getNodeSession?.()?.client) scheduleReconnect()
+    if (!suppress && !getNodeSession?.()?.client) {
+      setStatus('closed')
+      if (owned) scheduleReconnect()
+    } else {
+      setStatus('idle')
+    }
   }
   sock.onerror = () => {
     // After onerror, the browser will always follow up with onclose; the reconnect logic lives uniformly there, here we just clean up
@@ -459,7 +478,59 @@ function assemble(p) {
 /* ── Admin plane (admin / upload / stat) ── */
 
 // admin generic admin request (JSON) → response JSON object.
-export function admin(method, path, body = null) {
+export async function admin(method, path, body = null) {
+  const session = getNodeSession?.()
+  if (session?.client) {
+    // Mode B: Remote PeerJS WebRTC session active.
+    // Remote nodes do not implement local daemon admin routes.
+    // Provide safe, non-throwing responses to prevent unhandled rejections:
+    if (path === '/anon/collections') {
+      try {
+        const snap = await session.client.shares()
+        return snap?.collections || []
+      } catch {
+        return []
+      }
+    }
+    if (path.startsWith('/anon/collections/')) {
+      const hash = path.split('/anon/collections/')[1]?.split('?')[0]
+      try {
+        const snap = await session.client.shares()
+        const match = (snap?.collections || []).find(c => c.hash === hash || c.name === hash)
+        return match || { entries: [] }
+      } catch {
+        return { entries: [] }
+      }
+    }
+    if (path === '/files') {
+      try {
+        const snap = await session.client.shares()
+        return snap?.files || []
+      } catch {
+        return []
+      }
+    }
+    if (path === '/ping') {
+      return { pong: 'pong' }
+    }
+    if (path === '/peerjs/node') {
+      return { id: session.peerId, peers: [] }
+    }
+    if (path === '/p2p/auth/status') {
+      return { authenticated: Boolean(session.psk), username: session.psk ? 'PSK' : 'Guest' }
+    }
+    if (path === '/tags/summary') {
+      return { data: [], tags: [] }
+    }
+    if (path === '/tags/batch') {
+      return { tags: {} }
+    }
+    if (path === '/display/screens' || path === '/p2p/pull' || path === '/bt/downloads' || path === '/ipfs/pins' || path === '/files/inbox') {
+      return []
+    }
+    return null
+  }
+
   const send = () => {
     const reqId = nextReqId()
     const frame = { type: 'admin', method, path, body, token: readToken(), reqId }
@@ -552,7 +623,23 @@ function pumpBinary(file, reqId) {
 // meta{total} then goes straight to done without sending data (see the size semantics in back inbound.go).
 // Used to probe size before download (e.g. getBlobUrl's large-file preview threshold). The local WS connection
 // routes concurrently by reqId, so it doesn't interfere with the subsequent download.
-export function stat(hash) {
+// stat queries the total file size: sends a req request for 0 bytes (offset=0 size=0), the server replies
+// meta{total} then goes straight to done without sending data (see the size semantics in back inbound.go).
+// Used to probe size before download (e.g. getBlobUrl's large-file preview threshold). The local WS connection
+// routes concurrently by reqId, so it doesn't interfere with the subsequent download.
+export async function stat(hash) {
+  const session = getNodeSession?.()
+  if (session?.client) {
+    try {
+      const snap = await session.client.shares()
+      const f = (snap?.files || []).find(it => it.hash === hash)
+      if (f && typeof f.size === 'number') {
+        return { total: f.size }
+      }
+    } catch {}
+    return { total: 0 }
+  }
+
   const send = () => {
     const reqId = nextReqId()
     return new Promise((resolve, reject) => {
@@ -573,7 +660,23 @@ export function stat(hash) {
 // download pulls a file via the req verb (sha256 content addressing), returning a Uint8Array.
 // The server sends data headers + binary frames in 64KB chunks; the frontend collects according to the size declared by the data header.
 // Note: full in-memory assembly; for large files use downloadStream (emit-as-you-receive) or downloadToFile.
-export function download(hash, offset = 0, size = -1) {
+export async function download(hash, offset = 0, size = -1) {
+  const session = getNodeSession?.()
+  if (session?.client) {
+    const chunks = []
+    for await (const chunk of session.client.stream(hash, { offset, size })) {
+      chunks.push(chunk)
+    }
+    const totalLen = chunks.reduce((acc, c) => acc + c.byteLength, 0)
+    const out = new Uint8Array(totalLen)
+    let cur = 0
+    for (const c of chunks) {
+      out.set(c, cur)
+      cur += c.byteLength
+    }
+    return out
+  }
+
   const send = () => {
     const reqId = nextReqId()
     const p = { kind: 'download', chunks: [], total: 0 }
@@ -598,6 +701,31 @@ export function download(hash, offset = 0, size = -1) {
 // preventing pending leaks and late frames contaminating subsequent requests (leak protection from the same source as
 // upload abort; discovery background: code review 2026-08-18).
 export function downloadStream(hash, offset = 0, size = -1) {
+  const session = getNodeSession?.()
+  if (session?.client) {
+    let iterator = null
+    return new ReadableStream({
+      start() {
+        iterator = session.client.stream(hash, { offset, size })[Symbol.asyncIterator]()
+      },
+      async pull(controller) {
+        try {
+          const { value, done } = await iterator.next()
+          if (done) {
+            controller.close()
+          } else {
+            controller.enqueue(value)
+          }
+        } catch (err) {
+          controller.error(err)
+        }
+      },
+      cancel() {
+        try { iterator?.return?.() } catch {}
+      }
+    })
+  }
+
   const reqId = nextReqId()
   return new ReadableStream({
     start(controller) {
@@ -633,7 +761,12 @@ export function downloadStream(hash, offset = 0, size = -1) {
 // Discovery background: code review 2026-08-18 — the original implementation download() assembled everything in memory,
 // which would OOM directly on large-file saves under the 8GB upload limit.
 export async function downloadToFile(hash, filename) {
+  const session = getNodeSession?.()
   const name = filename || hash
+  if (session?.client && typeof session.client.saveAs === 'function') {
+    return session.client.saveAs(hash, name)
+  }
+
   if (window.showSaveFilePicker) {
     const handle = await window.showSaveFilePicker({ suggestedName: name })
     const writable = await handle.createWritable()
