@@ -53,6 +53,17 @@ func (s *Server) openDB(path string) error {
 			registered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_heartbeat DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS user_nodes (
+			peer_id TEXT PRIMARY KEY,
+			username TEXT NOT NULL,
+			endpoints TEXT DEFAULT '[]',
+			capabilities TEXT DEFAULT '{}',
+			version TEXT DEFAULT '',
+			visibility TEXT DEFAULT 'public',
+			registered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_nodes_username_last_seen ON user_nodes(username, last_seen)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := d.Exec(stmt); err != nil {

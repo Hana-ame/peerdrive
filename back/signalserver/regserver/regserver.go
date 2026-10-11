@@ -300,6 +300,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /p2p/relay/heartbeat", s.rateLimit(s.relayLimiter)(s.relayHeartbeat))
 	mux.HandleFunc("GET /p2p/relay/list", s.relayList)
 
+	// User <-> Node Directory routes (API-DESIGN.md §6 / Phase 7)
+	mux.HandleFunc("POST /nodes/register", s.rateLimit(s.relayLimiter)(s.authRequired(s.nodeRegister)))
+	mux.HandleFunc("POST /nodes/heartbeat", s.rateLimit(s.relayLimiter)(s.nodeHeartbeat))
+	mux.HandleFunc("DELETE /nodes/{peer_id}", s.authRequired(s.nodeDelete))
+	mux.HandleFunc("GET /nodes/{peer_id}", s.nodeGet)
+	mux.HandleFunc("GET /users/{username}/nodes", s.userNodesGet)
+
 	// BitTorrent HTTP tracker routes (BEP 12/31) — mounted after the reg
 	// routes. Ban management at /tracker/bans uses JWT Bearer auth, same
 	// protocol as /auth/whoami.
