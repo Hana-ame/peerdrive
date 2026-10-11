@@ -25,13 +25,29 @@ export default function Collections() {
   const [collections, setCollections] = useState(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [wsStatus, setWsStatus] = useState(() => ws.getStatus());
   const [peerSession, setPeerSession] = useState(() => getNodeSession());
 
   useEffect(() => {
-    return onNodeSession((s) => {
-      setPeerSession(s);
-    });
+    const offWs = ws.onStatus((s) => setWsStatus(s));
+    const offSession = onNodeSession((s) => setPeerSession(s));
+    return () => {
+      offWs();
+      offSession();
+    };
   }, []);
+
+  const isWsOpen = wsStatus === 'open';
+  const isPeerOpen = Boolean(peerSession?.client && peerSession?.peerId);
+  const isGuest = !isWsOpen && isPeerOpen;
+  const canCreate = isWsOpen && !isGuest;
+
+  // Enforce permission separation: if visitor mode becomes active, force list mode
+  useEffect(() => {
+    if ((isGuest || !canCreate) && tab === 'create') {
+      setTab('list');
+    }
+  }, [isGuest, canCreate, tab]);
 
   // Create-mode state
   const [files, setFiles] = useState([]);
@@ -95,6 +111,10 @@ export default function Collections() {
   useEffect(() => { loadList(); }, [loadList]);
 
   const openCreate = async () => {
+    if (!canCreate) {
+      setErr(isGuest ? 'Visitors have read-only access and cannot create collections' : 'Node connection required to create collections');
+      return;
+    }
     setErr('');
     setTab('create');
     setSelected([]);
@@ -114,6 +134,10 @@ export default function Collections() {
   };
 
   const create = async () => {
+    if (!canCreate) {
+      setErr('Permission denied: visitors cannot create collections');
+      return;
+    }
     if (!name.trim()) { setErr('Please enter a collection name'); return; }
     const chosen = files.filter(f => selected.includes(f.hash));
     if (chosen.length === 0) { setErr('Please select at least one file'); return; }
@@ -269,8 +293,17 @@ export default function Collections() {
                 <button type="button" onClick={() => navigate('/drive')} className="px-2.5 py-1 rounded text-gray-400 hover:text-white transition-colors">Files</button>
                 <span className="px-2.5 py-1 rounded bg-brand-600 text-white font-medium">Collections</span>
               </div>
+              {isGuest && (
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium shrink-0">
+                  Visitor (Read Only)
+                </span>
+              )}
             </div>
-            <p className="text-sm text-gray-500 mt-0.5">Content-addressed versioned file collections (anonymous / hash-addressed)</p>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {isGuest
+                ? 'Browsing public collections shared by remote peer node'
+                : 'Content-addressed versioned file collections (anonymous / hash-addressed)'}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             {tab === 'list' && (
@@ -299,6 +332,27 @@ export default function Collections() {
               <span>🔄</span>
               <span>Refresh</span>
             </button>
+            {canCreate && (
+              tab === 'list' ? (
+                <button
+                  onClick={openCreate}
+                  className="btn-brand !px-3 !py-1 !text-xs flex items-center gap-1.5 shadow-sm"
+                  title="Create a new collection from local files"
+                >
+                  <span>➕</span>
+                  <span>New Collection</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => setTab('list')}
+                  className="btn-ghost !px-3 !py-1 !text-xs text-gray-300 hover:text-white flex items-center gap-1.5"
+                  title="Back to Collections list"
+                >
+                  <span>←</span>
+                  <span>Back to List</span>
+                </button>
+              )
+            )}
           </div>
         </div>
 
@@ -372,12 +426,14 @@ export default function Collections() {
               skeletonRows={6}
               emptyProps={{
                 icon: '📦',
-                title: collections?.length === 0 ? 'No collections yet' : 'No matching collections found',
-                description: collections?.length === 0
-                  ? 'Click "New Collection" to create one from your netdisk files.'
-                  : 'Try clearing your search query or tag filter.',
-                actionLabel: collections?.length === 0 ? '+ New Collection' : null,
-                onAction: openCreate,
+                title: isGuest
+                  ? (collections?.length === 0 ? 'No shared collections' : 'No matching collections found')
+                  : (collections?.length === 0 ? 'No collections yet' : 'No matching collections found'),
+                description: isGuest
+                  ? (collections?.length === 0 ? 'This remote node has not shared any public collections.' : 'Try clearing your search query or tag filter.')
+                  : (collections?.length === 0 ? 'Click "New Collection" to create one from your netdisk files.' : 'Try clearing your search query or tag filter.'),
+                actionLabel: (!isGuest && canCreate && collections?.length === 0) ? '+ New Collection' : null,
+                onAction: (!isGuest && canCreate) ? openCreate : null,
               }}
             >
               {viewMode === 'grid' ? (
@@ -486,7 +542,7 @@ export default function Collections() {
           </div>
         )}
 
-        {tab === 'create' && (
+        {tab === 'create' && canCreate && (
           <CreateCollectionForm
             name={name}
             setName={setName}
