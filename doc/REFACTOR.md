@@ -1113,3 +1113,37 @@ go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1
 
 **Build environment pitfall**: go commands need `HTTPS_PROXY=http://172.29.80.1:10809 GOPROXY=https://goproxy.cn,direct`
 (WSL outbound goes through host machine proxy, opencode environment unsets proxy). cloudcone 443 exception (direct connection).
+
+## 9. 模块化与 AOP 架构重构记录（2026-10）
+
+> 背景：针对早期迭代中膨胀的超大文件（500~800行）与多职责杂糅模块，在保持 100% 路由路径、参数名、帧协议动词与 JSON Schema 兼容的前提下，实施高内聚、微模块化拆分。
+> 核心目标：代码达到**“几句话就能看懂”**的直观度，且**极其方便 AI Agent 索引与检索，杜绝无关上下文噪音**。
+
+### 9.1 重构批次与 GitHub Issue 闭环对照表
+
+| 批次 | Issue | 重构目标文件 | 拆出子模块 | 职责解耦与 Agent 检索优化 |
+|---|---|---|---|---|
+| **Batch 1** | [#328](https://github.com/Hana-ame/peerdrive/issues/328) | `service/file_service.go`<br>`transport/file_index.go`<br>`transport/peerjs_service.go` | `file_register.go`<br>`file_boundary.go`<br>`file_url.go`<br>`upload_session.go`<br>`peerjs_dialer.go`<br>`DriveGridView.jsx`<br>`DriveListView.jsx`<br>`CastModal.jsx`<br>`TagEditorModal.jsx` | 剥离跨盘边界判定与 URL 摄取；抽离分片上传会话；前端网盘列表/卡片/弹窗解耦。 |
+| **Batch 2** | [#329](https://github.com/Hana-ame/peerdrive/issues/329) | `controller/p2p_bt.go`<br>`controller/collection.go` | `p2p_bt_dht.go`<br>`collection_entries.go`<br>`collection_version.go` | 剥离 BT DHT 网络状态与 BEP44/51 协议；剥离合集条目增删与版本回滚/标签/可见性控制。 |
+| **Batch 3** | [#330](https://github.com/Hana-ame/peerdrive/issues/330) | `serverapp/app.go`<br>`source/pcdn.go`<br>`Collections.jsx` | `serverapp/builder.go`<br>`source/pcdn_score.go`<br>`source/pcdn_scheduler.go`<br>`CreateCollectionForm.jsx`<br>`CollectionDetailRow.jsx` | 剥离 600 行全系统 DI 依赖注入；剥离 PCDN 评分矩阵与分块工作管线；抽离合集抽屉表单与详情展开行。 |
+| **Batch 4** | [#331](https://github.com/Hana-ame/peerdrive/issues/331) | `service/peerpull.go`<br>`router/router.go`<br>`Drive.jsx` | `service/peerpull_resume.go`<br>`router/controllers.go`<br>`DriveToolbar.jsx`<br>`DriveCategoryBar.jsx` | 剥离断点续传 `.part.meta` 崩溃恢复；解耦路由层对 6 个领域模块的依赖；网盘主页面抽离工具栏与分类栏。 |
+| **Batch 5** | [#332](https://github.com/Hana-ame/peerdrive/issues/332) | `node/pages/NodeControl.jsx`<br>`display/pages/Display.jsx`<br>`iwara/pages/Iwara.jsx` | `NodeGuestView.jsx`<br>`NodeDisconnectedView.jsx`<br>`NodeHeader.jsx`<br>`NodeShareList.jsx`<br>`NodeMediaPreview.jsx`<br>`DownloadProgressBar.jsx`<br>`DisplayHUD.jsx`<br>`DisplayMedia.jsx`<br>`DisplayStandby.jsx`<br>`IwaraVideoList.jsx`<br>`utils/formatters.js` | 彻底拆分受控大屏与节点控制台，主页面精炼为纯粹流程编排（JSX < 40 行）；Agent 查进度/时钟/格式化直接点查微模块，零上下文污染。 |
+
+### 9.2 模块化与 Agent 上下文友好规范
+1. **顶层只做编排**：页面或入口组件只做路由状态守卫与大粒度组件组装，读者与 Agent 5~10 秒内即可扫完主逻辑。
+2. **微组件原子化**：
+   - 权限拦截、空状态各自独立成盒（`XxxGuestView`、`XxxDisconnectedView`）；
+   - 展示列表独立成盒（`XxxShareList`、`XxxVideoList`）；
+   - 模态框与全屏弹层独立成盒（`XxxMediaPreview`、`XxxModal`）；
+   - 浮动条与进度条独立成微组件（`DownloadProgressBar`、`DisplayHUD`）；
+   - 格式化计算与纯算法一律抽离为无状态纯函数（`utils/formatters.js`）。
+3. **消除 Agent Context Pollution（上下文污染）**：
+   - Agent 定向维护特定特性时，无需读入整页 500 行的无关 JSX、CSS 和触摸事件监听，直接查阅目标微组件（<50 行），单次检索 Token 消耗降低 80%~90%，极大提升自动化代码生成的准确度。
+
+### 9.3 “不可拆”与“绝不可动”的架构底线
+在重构推进中，严禁教条主义式的“见长就拆”。以下四大文件是系统的核心基石，在工程规范上**绝对禁止再拆**：
+- **`back/internal/config/config.go` (740 行)**：单一结构体不能跨文件声明；且配置项必须维持单一事实来源（SSOT）。
+- **`back/internal/echcore/ech.go` (767 行)**：RFC 8744 TLS ECH 与 HPKE 密码学状态机，包含精确的二进制切片绝对偏移量（outerCH/innerCH），切分会带来内存越界风险并破坏密码学安全不变量。
+- **`back/internal/transport/conn.go` (696 行)**：WebRTC DataChannel 最小并发内核。所有业务 Verb 早已抽离至 `inbound.go`/`outbound.go`，内核仅剩 `sync.Mutex` 与原子 Expect 管道，再拆会引发死锁与竞态。
+- **`front/src/platform/transport-ws/client.js` (687 行)**：浏览器端唯一 WS 单例客户端，维护事件循环与二进制分片成对配对（`binaryExpect`），拆散会导致模块循环引用与流帧错位。
+
