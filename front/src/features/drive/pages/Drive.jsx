@@ -234,7 +234,7 @@ export default function Drive() {
   }, [files, searchQuery, selectedCategory, selectedTag, fileTags, sortBy, sortOrder]);
 
   return (
-    <div className="p-4 sm:p-8 overflow-y-auto h-full" onContextMenu={handleContainerContextMenu}>
+    <div className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden h-full max-w-full" onContextMenu={handleContainerContextMenu}>
       <div className="max-w-5xl mx-auto">
         {/* Header toolbar */}
         <DriveToolbar

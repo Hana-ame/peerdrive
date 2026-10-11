@@ -284,11 +284,11 @@ export default function Collections() {
   const th = 'text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
 
   return (
-    <div className="p-4 sm:p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden h-full max-w-full">
       <div className="max-w-5xl mx-auto">
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 mb-5">
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <h1 className="text-2xl font-bold">Collections</h1>
               <div className="flex items-center bg-white/[0.06] p-0.5 rounded-lg text-xs shrink-0 border border-white/[0.08]">
                 <button type="button" onClick={() => navigate('/drive')} className="px-2.5 py-1 rounded text-gray-400 hover:text-white transition-colors">Files</button>
@@ -306,7 +306,7 @@ export default function Collections() {
                 : 'Content-addressed versioned file collections (anonymous / hash-addressed)'}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {tab === 'list' && (
               <div className="flex items-center bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.06] text-xs">
                 <button
@@ -485,7 +485,7 @@ export default function Collections() {
                 })}
               </div>
             ) : (
-              <div className="card-surface overflow-x-auto">
+              <div className="card-surface overflow-x-auto max-w-full">
                 <table className="w-full text-sm min-w-[560px]">
                   <thead className="bg-white/[0.03]">
                     <tr>

@@ -113,8 +113,10 @@ function Nav({ onOpenDrawer, isOpen, isGuest, peerId, navItems }) {
       </div>
 
       {/* Language Selector + Live local-node session pill */}
-      <div className="ml-auto flex items-center gap-2">
-        <LanguageSelector />
+      <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+        <div className="hidden sm:flex items-center">
+          <LanguageSelector />
+        </div>
         <ConnectionStatus />
       </div>
     </nav>
@@ -152,7 +154,7 @@ export default function App() {
     <HashRouter>
       <I18nProvider>
         <AppProvider>
-          <div className="flex flex-col h-screen text-gray-200">
+          <div className="flex flex-col h-screen text-gray-200 w-full max-w-full overflow-x-hidden">
             <Nav
               onOpenDrawer={() => setDrawerOpen(true)}
               isOpen={isOpen}

@@ -12,7 +12,7 @@ export default function Connect() {
   const { t } = useI18n();
 
   return (
-    <div className="p-4 sm:p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden h-full max-w-full">
       <div className="max-w-4xl mx-auto">
         <LocalNodeBanner />
         <h1 className="text-2xl font-bold mb-1">{t('connect.title')}</h1>

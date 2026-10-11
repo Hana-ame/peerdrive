@@ -49,6 +49,7 @@ export default function DriveListView({
             const icon = getFileIcon(f);
             const ext = (f.filename || '').split('.').pop().toLowerCase();
             const isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext) || f.mime_type?.startsWith('image/');
+            const isVid = ['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext) || f.mime_type?.startsWith('video/');
 
             return (
               <tr

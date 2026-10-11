@@ -121,13 +121,13 @@ export default function ConnectionStatus() {
   };
 
   return (
-    <div className="relative ml-auto shrink-0 flex items-center gap-2" ref={containerRef}>
+    <div className="relative ml-auto shrink-0 flex items-center gap-1.5 sm:gap-2" ref={containerRef}>
       {/* 信令服务器状态 (Pill ①: 严格无 ☑️ / ✓，窄屏折叠为指示点) */}
       <button
         type="button"
         onClick={handleClick}
         title={t('status.signalTitle', { host: signalHost, status: isSignalLive ? t('status.connected') : t('status.notConnected') })}
-        className="flex items-center gap-1.5 text-xs px-2 py-1 sm:px-2.5 rounded-full border border-white/[0.08] bg-white/[0.04] text-gray-300 hover:bg-white/[0.08] transition-colors focus:outline-none"
+        className="flex items-center gap-0 md:gap-1.5 text-xs p-1.5 md:px-2.5 md:py-1 rounded-full border border-white/[0.08] bg-white/[0.04] text-gray-300 hover:bg-white/[0.08] transition-colors focus:outline-none"
         data-testid="signal-status"
       >
         <span
@@ -144,19 +144,19 @@ export default function ConnectionStatus() {
         type="button"
         onClick={handleClick}
         title={isPeerOpen ? `WebRTC Node: ${peerSession.peerId}` : `Node session: ${status}`}
-        className={`flex items-center gap-1.5 text-xs px-2 py-1 sm:px-2.5 rounded-full border border-white/[0.08] bg-white/[0.04] ${nodeBadgeColor} hover:bg-white/[0.08] transition-colors focus:outline-none`}
+        className={`flex items-center gap-0 md:gap-1.5 text-xs p-1.5 md:px-2.5 md:py-1 rounded-full border border-white/[0.08] bg-white/[0.04] ${nodeBadgeColor} hover:bg-white/[0.08] transition-colors focus:outline-none`}
         data-testid="connection-status"
         data-status={isNodeLive ? 'open' : status}
       >
         <span className={`w-2 h-2 rounded-full ${nodeDotColor}`} aria-hidden="true" />
-        <span className="hidden sm:inline">{nodeRoleLabel}</span>
+        <span className="hidden md:inline">{nodeRoleLabel}</span>
       </button>
 
       {/* 详细信息弹窗 */}
       {showDetails && (
         <div
           data-testid="connection-details"
-          className="absolute right-0 top-full mt-2 w-80 p-3.5 rounded-lg shadow-xl border border-white/[0.12] bg-gray-900/95 backdrop-blur text-xs z-50 text-gray-200 space-y-3"
+          className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-1.5rem)] p-3.5 rounded-lg shadow-xl border border-white/[0.12] bg-gray-900/95 backdrop-blur text-xs z-50 text-gray-200 space-y-3"
         >
           <div className="flex items-center justify-between border-b border-white/[0.08] pb-1.5 font-medium text-gray-300">
             <span>连接状态详情 (Dual-Channel)</span>

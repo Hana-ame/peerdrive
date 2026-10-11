@@ -210,7 +210,7 @@ export default function NodeControl() {
 
   // 5. Clean Layout Orchestration
   return (
-    <div className="p-4 sm:p-8 overflow-y-auto h-full">
+    <div className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden h-full max-w-full">
       <div className="max-w-4xl mx-auto">
         <NodeHeader session={session} onDisconnect={disconnect} />
 

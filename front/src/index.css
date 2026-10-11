@@ -2,9 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 根字号 16px → 22px：Tailwind 的字号/间距用 rem，整体等比放大（2026-09-25 前端重做后字号偏小；18px 仍被嫌小，继续放大） */
+/* 根字号 16px → 22px：Tailwind 的字号/间距用 rem，大屏整体等比放大；移动端恢复 16px 保证紧凑与防止横向撑爆 */
 html {
   font-size: 22px;
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+@media (max-width: 640px) {
+  html {
+    font-size: 16px;
+  }
 }
 
 @layer base {
@@ -73,6 +80,8 @@ body {
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   background-color: #101014;
+  overflow-x: hidden;
+  max-width: 100vw;
   /* 顶部柔光：给近黑的底一点品牌色环境光，避免死板 */
   background-image: radial-gradient(ellipse 90% 45% at 50% -12%, rgb(99 102 241 / 0.1), transparent);
   background-attachment: fixed;
