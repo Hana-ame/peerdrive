@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 export default function DriveToolbar({
   sortBy,
@@ -14,9 +15,15 @@ export default function DriveToolbar({
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
       <div className="min-w-0">
-        <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 truncate">
-          <span>☁️ My Cloud Drive</span>
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 truncate">
+            <span>☁️ My Cloud Drive</span>
+          </h1>
+          <div className="flex items-center bg-white/[0.06] p-0.5 rounded-lg text-xs shrink-0 border border-white/[0.08]">
+            <span className="px-2.5 py-1 rounded bg-brand-600 text-white font-medium">Files</span>
+            <Link to="/collections" className="px-2.5 py-1 rounded text-gray-400 hover:text-white transition-colors">Collections</Link>
+          </div>
+        </div>
         <p className="text-xs sm:text-sm text-gray-500 mt-0.5 truncate">Files registered on this node (content-addressed storage)</p>
       </div>
       <div className="flex flex-wrap items-center gap-2 max-w-full">

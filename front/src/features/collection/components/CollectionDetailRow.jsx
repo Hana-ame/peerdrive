@@ -1,4 +1,6 @@
 import React from 'react';
+import FileThumbnail from '../../../components/netdisk/FileThumbnail';
+import { previewSha } from '../../../platform/shared/collectionTree';
 
 export default function CollectionDetailRow({
   detail,
@@ -53,23 +55,42 @@ export default function CollectionDetailRow({
               </div>
             )}
             {Array.isArray(detail.data.entries) && detail.data.entries.length > 0 ? (
-              <ul className="space-y-1">
-                {detail.data.entries.map((e, ei) => (
-                  <li key={ei} className="flex items-center gap-3 text-xs">
-                    <span className="flex-1 truncate text-gray-300">{e.path}</span>
-                    <span className="font-mono text-xs text-gray-600">
-                      {String(entryHash(e) || '').slice(0, 12)}…
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => entryHash(e) && downloadEntry(entryHash(e), e.path)}
-                      disabled={!entryHash(e)}
-                      className="px-2 py-0.5 text-xs bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 rounded disabled:opacity-40"
-                    >
-                      Download
-                    </button>
-                  </li>
-                ))}
+              <ul className="space-y-1.5">
+                {detail.data.entries.map((e, ei) => {
+                  const h = entryHash(e);
+                  const pSha = previewSha(e) || h;
+                  const ext = (e.path || '').split('.').pop().toLowerCase();
+                  const isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext) || e.mime_type?.startsWith('image/');
+
+                  return (
+                    <li key={ei} className="flex items-center gap-3 text-xs py-0.5">
+                      {isImg && pSha ? (
+                        <FileThumbnail
+                          sha={pSha}
+                          filename={e.path}
+                          mimeType={e.mime_type}
+                          fallbackIcon="🖼️"
+                          className="w-7 h-7 rounded shrink-0"
+                          imgClassName="w-7 h-7 object-cover rounded"
+                        />
+                      ) : (
+                        <span className="text-base shrink-0">📄</span>
+                      )}
+                      <span className="flex-1 truncate text-gray-300">{e.path}</span>
+                      <span className="font-mono text-xs text-gray-600">
+                        {String(h || '').slice(0, 12)}…
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => h && downloadEntry(h, e.path)}
+                        disabled={!h}
+                        className="px-2 py-0.5 text-xs bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 rounded disabled:opacity-40"
+                      >
+                        Download
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="text-xs text-gray-600">This collection has no entries.</p>

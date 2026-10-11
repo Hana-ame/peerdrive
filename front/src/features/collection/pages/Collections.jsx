@@ -255,7 +255,13 @@ export default function Collections() {
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="text-2xl font-bold">Collections</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold">Collections</h1>
+              <div className="flex items-center bg-white/[0.06] p-0.5 rounded-lg text-xs shrink-0 border border-white/[0.08]">
+                <button type="button" onClick={() => navigate('/drive')} className="px-2.5 py-1 rounded text-gray-400 hover:text-white transition-colors">Files</button>
+                <span className="px-2.5 py-1 rounded bg-brand-600 text-white font-medium">Collections</span>
+              </div>
+            </div>
             <p className="text-sm text-gray-500 mt-0.5">Content-addressed versioned file collections (anonymous / hash-addressed)</p>
           </div>
           <div className="flex items-center gap-2">

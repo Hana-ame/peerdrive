@@ -84,7 +84,12 @@ function readToken() {
 }
 
 function getWsBase() {
-  return localStorage.getItem(STORAGE_KEY_API_BASE) || 'https://wsl-3000.moonchan.xyz'
+  const custom = localStorage.getItem(STORAGE_KEY_API_BASE)
+  if (custom) return custom
+  if (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    return 'http://127.0.0.1:3000'
+  }
+  return 'https://wsl-3000.moonchan.xyz'
 }
 
 /* ── Connection state, heartbeat and auto-reconnect ──
