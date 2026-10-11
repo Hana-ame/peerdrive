@@ -97,6 +97,8 @@ jobs:
         run: |
           python3 - <<'PY'
           import glob, json
+          # gosec -fmt json 输出的是 {"Issues": [...], "Stats": ...}，不是裸数组；
+          # 两种形态都兼容，老版本 gosec 出的是数组。
           total = 0
           files = sorted(glob.glob("back/gosec-*.json") + glob.glob("back/*/gosec-*.json"))
           for p in files:
@@ -104,14 +106,16 @@ jobs:
                   data = json.load(open(p))
               except Exception as e:
                   print(f"{p}: unreadable ({e})"); continue
-              if not isinstance(data, list): continue
-              n = len(data); total += n
-              print(f"{p}: {n} finding(s)")
-              for f in data[:10]:
+              issues = data.get("Issues", []) if isinstance(data, dict) else data
+              if not isinstance(issues, list):
+                  print(f"{p}: unexpected shape {type(data).__name__}"); continue
+              total += len(issues)
+              print(f"{p}: {len(issues)} finding(s)")
+              for f in issues[:12]:
+                  loc = f"{f.get('file')}:{f.get('line')}"
                   print(f"  - [{f.get('severity')}/{f.get('confidence')}] "
-                        f"{f.get('rule_id')} {str(f.get('details'))[:120]} "
-                        f"@ {f.get('file')}:{f.get('line')}")
-          print(f"TOTAL: {total} finding(s)")
+                        f"{f.get('rule_id')} {str(f.get('details'))[:100]} @ {loc}")
+          print(f"TOTAL: {total} finding(s) — 报告模式，不阻断；逐条 triage 后收紧成硬门禁")
           PY
       - name: Upload report
         if: always()
