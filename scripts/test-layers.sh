@@ -6,9 +6,11 @@
 # -skip/-run 拆开）、跨包一组（L4-L5）、独立前端 vitest（L8）。
 # 脚本跑到最后汇总，任一层失败即非零退出（不中途停，一次拿全部结果）。
 #
-# 用法: bash scripts/test-layers.sh [--integration]
+# 用法: bash scripts/test-layers.sh [--integration] [--full]
 #   --integration  追加真实信令集成段（需外网+代理；公共信令上必须 -p 1 串行，
 #                  多组测试并行会互相干扰——AGENTS.md 硬性约束）
+#   --full         追加 CI 全量对齐门禁（文档引用体检、client 单测与面板校验、
+#                  部署一致性校验、安全穿透探针等）
 # 失败日志: /tmp/layer-test-<层>.log
 #
 # ⚠️ 本脚本**不等于** `back` 的全量测试：`cd back && go test -tags nosqlite ./...`
@@ -17,7 +19,13 @@
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INTEGRATION=0
-[[ "${1:-}" == "--integration" ]] && INTEGRATION=1
+FULL=0
+for arg in "$@"; do
+  case "$arg" in
+    --integration) INTEGRATION=1 ;;
+    --full|--ci) FULL=1 ;;
+  esac
+done
 
 # node 常见是经 nvm 装的：PATH 里可能压根没有 node，L8 前端那层会因此假 FAIL。
 # 这里把最高版本的 nvm node 补进 PATH（已能找到 node 时不动）。
@@ -83,6 +91,18 @@ run_layer "L8-frontend" 'cd front && npm test'
 if [ "$INTEGRATION" = "1" ]; then
   # 集成段：真实公共信令 + 公共 broker（需外网/代理），必须 -p 1 串行
   run_layer "INT" 'cd back && go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1'
+fi
+
+if [ "$FULL" = "1" ]; then
+  # 全量 CI 门禁对齐（Issue #337 解决本地与 CI 脱节）：
+  # 1. 文档引用体检（对应 ci.yml doc-refs）
+  run_layer "FULL-docs" 'node scripts/check-doc-refs.mjs'
+  # 2. 消费端包状态机与面板构建校验（对应 ci.yml client-package）
+  run_layer "FULL-client" 'cd packages/peerdrive-client && node --test && npm run check:panel'
+  # 3. 部署与配置一致性门禁（对应 ci.yml backend deployconsistency）
+  run_layer "FULL-deploy" 'cd back && go test -tags nosqlite ./test/deployconsistency/ -count=1'
+  # 4. 节点穿透探针与外部共享目录（对应 ci.yml security-probes）
+  run_layer "FULL-probes" 'bash scripts/netdisk-traversal-probe.sh && bash scripts/netdisk-sharedir-outside.sh'
 fi
 
 echo "========================"

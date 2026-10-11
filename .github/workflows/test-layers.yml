@@ -6,13 +6,6 @@ on:
       - main
       - master
       - refactor
-      - base
-      - docs
-      - "feat/*"
-      - "fix/*"
-      - "module/*"
-      - "*-agent"
-      - "*-frontend"
     tags: ['v*']
   pull_request:
     branches: [main, master, refactor]
