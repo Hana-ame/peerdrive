@@ -162,221 +162,221 @@ export default function FilePreviewModal({
     };
   }, [file, fetchBlob, effectiveMime, kind]);
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose?.();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-2 sm:p-6"
+      className="fixed inset-0 z-50 flex flex-col bg-black/95 backdrop-blur-xl text-gray-100 select-none overflow-hidden"
       onClick={onClose}
     >
+      {/* Sleek Top Navigation Bar */}
       <div
-        className="card-surface max-w-4xl w-full p-3 sm:p-5 rounded-2xl max-h-[92vh] flex flex-col shadow-2xl border border-white/[0.08]"
+        className="h-14 px-4 sm:px-6 flex items-center justify-between gap-4 border-b border-white/[0.08] bg-black/40 backdrop-blur-md shrink-0 z-10"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4 mb-4 pb-3 border-b border-white/[0.06]">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="text-xl">
+            {kind === 'image' ? '🖼️' : kind === 'video' ? '🎬' : kind === 'audio' ? '🎵' : kind === 'pdf' ? '📑' : kind === 'text' ? '📝' : '📄'}
+          </span>
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-gray-100 truncate flex items-center gap-2">
-              <span>{filename}</span>
+            <h2 className="text-sm font-semibold text-gray-100 truncate flex items-center gap-2">
+              <span title={filename}>{filename}</span>
             </h2>
-            <div className="text-xs text-gray-400 mt-1 flex items-center gap-2 font-mono flex-wrap">
+            <div className="text-[11px] text-gray-400 flex items-center gap-2 font-mono flex-wrap">
               {file.size != null && <span>{fmtBytes(file.size)}</span>}
-              {effectiveMime && <span>• {effectiveMime}</span>}
+              {effectiveMime && <span className="hidden sm:inline">• {effectiveMime}</span>}
               {isStream && (
                 <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 font-sans font-medium flex items-center gap-1">
                   <span>⚡</span> 边下边播 (Range 流式)
                 </span>
               )}
-              {file.hash && <span className="text-gray-500 truncate max-w-[200px]">SHA: {file.hash.slice(0, 16)}…</span>}
             </div>
           </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {onDownload && (
+            <button
+              onClick={() => onDownload(file)}
+              className="btn-brand text-xs px-3 py-1.5 flex items-center gap-1.5 shadow-md"
+            >
+              <span>⬇️</span>
+              <span>Download file</span>
+            </button>
+          )}
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.05] transition-colors leading-none"
+            className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-white rounded-lg hover:bg-white/[0.1] transition-colors leading-none text-base"
             aria-label="Close"
           >
             ✕
           </button>
         </div>
+      </div>
 
-        {/* Content body */}
-        <div className="flex-1 min-h-[300px] max-h-[68vh] overflow-y-auto flex flex-col items-center justify-center bg-black/40 rounded-xl p-3 border border-white/[0.04]">
-          {loading && (
-            <div className="flex flex-col items-center gap-3 py-16 text-gray-400">
-              <span className="text-3xl animate-spin">⏳</span>
-              <span className="text-sm font-medium text-gray-300">正在加载文件数据...</span>
-              <span className="text-xs text-gray-500 font-mono">
-                {filename} {file?.size != null ? `(${fmtBytes(file.size)})` : ''}
-              </span>
-            </div>
-          )}
-
-          {error && !loading && (
-            <div className="flex flex-col items-center gap-3 py-12 text-center px-4 max-w-lg">
-              <span className="text-3xl">⚠️</span>
-              <p className="text-sm font-medium text-red-400">{error}</p>
-              <p className="text-xs text-gray-400">
-                无法在浏览器中直接内联预览该文件。您可以将其保存到本地设备进行查看。
-              </p>
-              {onDownload && (
-                <button
-                  onClick={() => onDownload(file)}
-                  className="btn-brand text-xs px-4 py-2 mt-2 flex items-center gap-2 shadow-lg"
-                >
-                  <span>⬇️ 立即下载文件</span>
-                  {file?.size != null && <span className="font-mono text-[11px]">({fmtBytes(file.size)})</span>}
-                </button>
-              )}
-            </div>
-          )}
-
-          {!loading && !error && (
-            <>
-              {kind === 'image' && (
-                <div className="flex items-center justify-center w-full h-full p-2">
-                  <img
-                    src={blobUrl}
-                    alt={filename}
-                    className="max-w-full max-h-[62vh] object-contain rounded shadow"
-                    onError={() => {
-                      setError('图片解码或显示失败，文件数据可能不完整。');
-                    }}
-                  />
-                </div>
-              )}
-
-              {kind === 'video' && (
-                <div className="w-full h-full flex flex-col items-center justify-center">
-                  <video
-                    src={blobUrl}
-                    controls
-                    autoPlay
-                    playsInline
-                    crossOrigin="anonymous"
-                    className="max-w-full max-h-[60vh] rounded bg-black"
-                    onError={async () => {
-                      // 1. 若使用的是流式地址且播放失败，尝试回退到 fetchBlob 整体加载
-                      if (fetchBlob && !blobUrl.startsWith('blob:')) {
-                        try {
-                          setLoading(true);
-                          setIsStream(false);
-                          const data = await fetchBlob(file.hash);
-                          const b = data instanceof Blob ? data : new Blob([data], { type: effectiveMime || 'video/mp4' });
-                          const nextUrl = URL.createObjectURL(b);
-                          setBlobUrl(nextUrl);
-                          setLoading(false);
-                          return;
-                        } catch {
-                          setLoading(false);
-                        }
-                      }
-                      // 2. 格式不兼容提示（特别是 QuickTime MOV 格式）
-                      const isMov = (filename || '').toLowerCase().endsWith('.mov') || effectiveMime === 'video/quicktime';
-                      if (isMov) {
-                        setError('该视频为 MOV (QuickTime) 格式，当前浏览器可能不支持原生硬件解码。建议下载后使用本地播放器查看。');
-                      } else {
-                        setError('视频播放失败：浏览器无法解码该媒体或格式不受支持。');
-                      }
-                    }}
-                  />
-                  {(filename.toLowerCase().endsWith('.mov') || effectiveMime === 'video/quicktime') && (
-                    <div className="mt-2 text-[11px] text-gray-400 flex items-center gap-1.5">
-                      <span>💡 提示：若当前浏览器黑屏或无声音，请</span>
-                      {onDownload && (
-                        <button
-                          onClick={() => onDownload(file)}
-                          className="text-brand-400 hover:text-brand-300 underline font-medium"
-                        >
-                          下载到本地播放
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {kind === 'audio' && (
-                <div className="w-full py-16 flex flex-col items-center justify-center gap-4">
-                  <div className="text-4xl">🎵</div>
-                  <audio
-                    src={blobUrl}
-                    controls
-                    autoPlay
-                    crossOrigin="anonymous"
-                    className="w-full max-w-md"
-                    onError={async () => {
-                      if (fetchBlob && !blobUrl.startsWith('blob:')) {
-                        try {
-                          setLoading(true);
-                          setIsStream(false);
-                          const data = await fetchBlob(file.hash);
-                          const b = data instanceof Blob ? data : new Blob([data], { type: effectiveMime || 'audio/mpeg' });
-                          setBlobUrl(URL.createObjectURL(b));
-                          setLoading(false);
-                        } catch (err) {
-                          setLoading(false);
-                          setError('Audio playback failed: ' + (err?.message || String(err)));
-                        }
-                      }
-                    }}
-                  />
-                </div>
-              )}
-
-              {kind === 'pdf' && (
-                <div className="w-full h-[62vh]">
-                  <iframe
-                    src={blobUrl}
-                    title={filename}
-                    className="w-full h-full rounded border-0 bg-white"
-                  />
-                </div>
-              )}
-
-              {kind === 'text' && (
-                <div className="w-full h-full flex flex-col">
-                  {isTruncated && (
-                    <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-lg mb-2">
-                      ⚠️ File exceeds 1MB limit. Previewing the first 1 MB only.
-                    </div>
-                  )}
-                  <pre className="flex-1 w-full p-3 font-mono text-xs text-gray-200 bg-black/50 rounded-lg overflow-auto whitespace-pre-wrap break-all select-text border border-white/[0.04]">
-                    {textContent}
-                  </pre>
-                </div>
-              )}
-
-              {!kind && (
-                <div className="flex flex-col items-center gap-3 py-16 text-center">
-                  <span className="text-4xl">📄</span>
-                  <p className="text-sm text-gray-300">Preview not supported for this file type</p>
-                  <p className="text-xs text-gray-500">MIME: {effectiveMime || 'application/octet-stream'}</p>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Footer actions */}
-        <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-white/[0.06]">
-          <div className="text-xs text-gray-500">
-            {kind ? `Preview: ${kind.toUpperCase()}` : 'Binary file'}
+      {/* Main Full-Screen Display Area (No bounding frame box) */}
+      <div
+        className="flex-1 min-h-0 w-full h-full relative flex items-center justify-center overflow-hidden p-0 sm:p-2"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {loading && (
+          <div className="flex flex-col items-center gap-3 py-16 text-gray-400">
+            <span className="text-4xl animate-spin">⏳</span>
+            <span className="text-sm font-medium text-gray-300">正在加载文件数据...</span>
+            <span className="text-xs text-gray-500 font-mono">
+              {filename} {file?.size != null ? `(${fmtBytes(file.size)})` : ''}
+            </span>
           </div>
-          <div className="flex items-center gap-2">
+        )}
+
+        {error && !loading && (
+          <div className="flex flex-col items-center gap-3 py-12 text-center px-4 max-w-lg">
+            <span className="text-4xl">⚠️</span>
+            <p className="text-sm font-medium text-red-400">{error}</p>
+            <p className="text-xs text-gray-400">
+              无法在浏览器中直接内联预览该文件。您可以将其保存到本地设备进行查看。
+            </p>
             {onDownload && (
               <button
                 onClick={() => onDownload(file)}
-                className="btn-brand text-xs px-3 py-1.5"
+                className="btn-brand text-xs px-4 py-2 mt-2 flex items-center gap-2 shadow-lg"
               >
-                Download file
+                <span>⬇️ 立即下载文件</span>
+                {file?.size != null && <span className="font-mono text-[11px]">({fmtBytes(file.size)})</span>}
               </button>
             )}
-            <button
-              onClick={onClose}
-              className="btn-ghost text-xs px-3 py-1.5"
-            >
-              Close
-            </button>
           </div>
-        </div>
+        )}
+
+        {!loading && !error && (
+          <>
+            {kind === 'image' && (
+              <div className="w-full h-full flex items-center justify-center p-2 sm:p-4">
+                <img
+                  src={blobUrl}
+                  alt={filename}
+                  className="max-w-full max-h-full object-contain select-none transition-transform shadow-2xl"
+                  onError={() => {
+                    setError('图片解码或显示失败，文件数据可能不完整。');
+                  }}
+                />
+              </div>
+            )}
+
+            {kind === 'video' && (
+              <div className="w-full h-full flex flex-col items-center justify-center bg-black">
+                <video
+                  src={blobUrl}
+                  controls
+                  autoPlay
+                  playsInline
+                  crossOrigin="anonymous"
+                  className="w-full h-full max-h-full object-contain bg-black"
+                  onError={async () => {
+                    if (fetchBlob && !blobUrl.startsWith('blob:')) {
+                      try {
+                        setLoading(true);
+                        setIsStream(false);
+                        const data = await fetchBlob(file.hash);
+                        const b = data instanceof Blob ? data : new Blob([data], { type: effectiveMime || 'video/mp4' });
+                        const nextUrl = URL.createObjectURL(b);
+                        setBlobUrl(nextUrl);
+                        setLoading(false);
+                        return;
+                      } catch {
+                        setLoading(false);
+                      }
+                    }
+                    const isMov = (filename || '').toLowerCase().endsWith('.mov') || effectiveMime === 'video/quicktime';
+                    if (isMov) {
+                      setError('该视频为 MOV (QuickTime) 格式，当前浏览器可能不支持原生硬件解码。建议下载后使用本地播放器查看。');
+                    } else {
+                      setError('视频播放失败：浏览器无法解码该媒体或格式不受支持。');
+                    }
+                  }}
+                />
+              </div>
+            )}
+
+            {kind === 'audio' && (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-6 p-6">
+                <div className="w-24 h-24 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-5xl shadow-2xl">
+                  🎵
+                </div>
+                <div className="text-center">
+                  <h3 className="text-base font-medium text-gray-200">{filename}</h3>
+                  <p className="text-xs text-gray-400 mt-1 font-mono">{fmtBytes(file.size)}</p>
+                </div>
+                <audio
+                  src={blobUrl}
+                  controls
+                  autoPlay
+                  crossOrigin="anonymous"
+                  className="w-full max-w-lg"
+                  onError={async () => {
+                    if (fetchBlob && !blobUrl.startsWith('blob:')) {
+                      try {
+                        setLoading(true);
+                        setIsStream(false);
+                        const data = await fetchBlob(file.hash);
+                        const b = data instanceof Blob ? data : new Blob([data], { type: effectiveMime || 'audio/mpeg' });
+                        setBlobUrl(URL.createObjectURL(b));
+                        setLoading(false);
+                      } catch (err) {
+                        setLoading(false);
+                        setError('Audio playback failed: ' + (err?.message || String(err)));
+                      }
+                    }
+                  }}
+                />
+              </div>
+            )}
+
+            {kind === 'pdf' && (
+              <div className="w-full h-full">
+                <iframe
+                  src={blobUrl}
+                  title={filename}
+                  className="w-full h-full border-0 bg-white"
+                />
+              </div>
+            )}
+
+            {kind === 'text' && (
+              <div className="w-full h-full flex flex-col p-3 sm:p-6 max-w-6xl mx-auto">
+                {isTruncated && (
+                  <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-lg mb-2 shrink-0">
+                    ⚠️ File exceeds 1MB limit. Previewing the first 1 MB only.
+                  </div>
+                )}
+                <pre className="flex-1 w-full p-4 font-mono text-xs sm:text-sm text-gray-200 bg-black/60 rounded-xl overflow-auto whitespace-pre-wrap break-all select-text border border-white/[0.06] shadow-inner">
+                  {textContent}
+                </pre>
+              </div>
+            )}
+
+            {!kind && (
+              <div className="flex flex-col items-center gap-3 py-16 text-center">
+                <span className="text-5xl">📄</span>
+                <p className="text-sm text-gray-300">Preview not supported for this file type</p>
+                <p className="text-xs text-gray-500 font-mono">MIME: {effectiveMime || 'application/octet-stream'}</p>
+                {onDownload && (
+                  <button onClick={() => onDownload(file)} className="btn-brand text-xs px-4 py-2 mt-2">
+                    Download file
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

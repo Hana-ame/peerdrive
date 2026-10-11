@@ -162,7 +162,7 @@ export default function Settings() {
           </div>
           {authUser ? (
             <div className="text-xs text-gray-300 flex items-center gap-3">
-              <span className="text-green-400">✓ {authUser}</span>
+              <span className="text-green-400">{authUser}</span>
               <button onClick={logout} className="px-2 py-1 text-[11px] bg-white/[0.05] hover:bg-white/[0.1] rounded text-gray-300">Logout</button>
             </div>
           ) : (

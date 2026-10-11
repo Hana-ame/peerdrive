@@ -24,7 +24,7 @@ export default function NodeHeader({ session, onDisconnect }) {
           </div>
           <div>
             <span className="block text-[10px] text-gray-500 mb-1">Status</span>
-            <span className="text-green-400">Connected ✓</span>
+            <span className="text-green-400">Connected</span>
           </div>
         </div>
       </div>

@@ -92,12 +92,6 @@ function Nav({ onOpenDrawer, isOpen, isGuest, peerId, navItems }) {
         Peerdrive
       </Link>
 
-      {isGuest && peerId && (
-        <span className="hidden lg:inline-flex items-center text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-mono mr-2" title={`WebRTC 访客模式: ${peerId}`}>
-          {t('nav.guest')} · {peerId.slice(0, 8)}
-        </span>
-      )}
-
       <div className="hidden md:flex items-center gap-1">
         {ALWAYS_NAV.map(it => (
           <Link key={it.to} to={it.to}

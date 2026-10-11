@@ -283,7 +283,14 @@ export default function Collections() {
                 </button>
               </div>
             )}
-            <button onClick={openCreate} className="btn-brand">+ New Collection</button>
+            <button
+              onClick={loadList}
+              className="btn-ghost !px-2.5 !py-1 !text-xs text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+              title="Refresh collections"
+            >
+              <span>🔄</span>
+              <span>Refresh</span>
+            </button>
           </div>
         </div>
 
