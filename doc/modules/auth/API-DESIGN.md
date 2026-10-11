@@ -736,16 +736,11 @@ server".
 
 ## 10. Integration points with existing code
 
-| Requirement | Current state | Gap |
+| Requirement | Current state | Gap / Implementation Status |
 |---|---|---|
-| User register/login/JWT | regserver already has `/auth/register`, `/auth/login`, `/auth/whoami` | JWT algorithm TBD (see 7.4); OAuth not done (recommend not to) |
-| Node-side auth middleware | `AuthOptional`/`AuthRequired`, token forwarded to regserver for validation (section 3) | Remote validation per request → should add local cache (TTL = token remaining validity) |
-| Account ↔ node directory | Only relay anonymous registration (section 4) | **All of section 6 not done**; collection `Owner` currently takes `nodestate.GetOperator()`, source is this layer |
-| Traffic statistics | None | **All of section 7 not done** (including countersign, challenge, tolerance) |
-| Restricted collection cross-node | P2P sync doesn't carry requester → only this node readable (REFACTOR §3.16) | Need section 8's identity binding to bring requester into sync requests |
-| relay | Port forwarding v2 implemented (REFACTOR §3.9) + relay register/heartbeat/list (section 4) | Relay traffic statistics and node directory visibility |
-
-**Recommended implementation order**: 6 (directory, minimum dependencies, immediately
-supports owner semantics) → 8 (identity binding, unlocks restricted collection
-cross-node) → 7 (statistics, depends on 6's node identity and countersigning key) →
-8/9 relay statistics.
+| User register/login/JWT | regserver has `/auth/register`, `/auth/login`, `/auth/whoami` | ✅ Implemented; JWT HS256 with rate limiting & backoff |
+| Node-side auth middleware | `AuthOptional`/`AuthRequired`, token forwarded to regserver | ✅ Implemented with local memory cache (`tokenCacheTTL = 30s`) |
+| Account ↔ node directory | Section 6 implemented in `back/signalserver/regserver` | ✅ Implemented: `POST /nodes/register`, `POST /nodes/heartbeat`, `DELETE /nodes/{peer_id}`, `GET /nodes/{peer_id}`, `GET /users/{username}/nodes` with anti-squatting & 3-tier visibility |
+| Restricted collection cross-node | Section 8 implemented in `NodeShare` + `serverapp` | ✅ Implemented: `NodeShare.SetTokenVerifier` + `Authenticator.ValidateToken` unlocks restricted/private collections matching `coll.CanView(requester)` in `share-resp` frames |
+| Traffic statistics | Section 7 | 🟡 Future extension (Phase 8: countersigning, challenge, tolerance) |
+| relay | Port forwarding v2 implemented (REFACTOR §3.9) + relay register/heartbeat/list (section 4) | Relay endpoints active; relay traffic statistics deferred to Phase 8 |

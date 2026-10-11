@@ -3,10 +3,11 @@
 > Source: **Strict priority order** explicitly specified by the user on 2026-09-20. This file is the basis for scheduling and trade-offs.
 > Note: distinguish from `doc/archive/report/ROADMAP.md` — that one is the v3.0 historical roadmap (already implemented); this file is the current schedule.
 >
-> **Narrative guardrail**: Phase 7 identity is **not implemented** (see the table below). Until it lands, product-facing docs
-> (`README.md`, `doc/NETDISK.md`, `doc/PROJECT-VISION.md`) must describe ownership as the node `peerId`, not accounts —
-> and must not present accounts/JWT/user↔node directory/statistics as an available capability. Shared positioning and the
-> rules for keeping the four docs consistent: `doc/PROJECT-VISION.md` §9.
+> **Narrative guardrail**: Phase 7 identity is **implemented** with strict dual-track sovereign preservation.
+> Standalone nodes operate 100% account-free using peerId + PSK (Sovereign Mode), while federated nodes connect
+> to a registration server for account directories and token-based cross-node restricted collection access (Federated Mode).
+> Product-facing docs (`README.md`, `doc/NETDISK.md`, `doc/PROJECT-VISION.md`) describe both entries cleanly.
+> Shared positioning and narrative consistency rules: `doc/PROJECT-VISION.md` §9.
 
 ## Order
 
@@ -16,22 +17,21 @@
 | 2 | **Files** | Content-addressed storage + file index + file transfer primitives | 🟢 Mostly ready |
 | 3 | **Combine** | Interconnect × Files = cross-node file fetch/serve | 🟢 Mostly ready |
 | 4 | **Management Chain** | Management plane (control channel): issuing commands to nodes/files | 🟡 Partially ready |
-| 5 | **File Scope Management** | Which files/directories are under management and at what scope they're visible externally | 🟢 Ready on this node side (cross-node restricted content still pending Phase 7) |
+| 5 | **File Scope Management** | Which files/directories are under management and at what scope they're visible externally | 🟢 Ready (includes cross-node restricted content unlocking via Phase 7 identity tokens) |
 | 6 | **Upload/Download/Save** | Complete closed loop for upload / download / persistent save | 🟢 Mostly ready (cross-node save + progress/cancel + no-node consumer) |
-| 7 | **Identity Management** | Accounts, authentication, authorization (who is who, what can who do) | 🔴 Design ready, not implemented |
+| 7 | **Identity Management** | Accounts, authentication, authorization (user↔node directory, token validation, cross-node restricted collection access) | 🟢 Implemented (Dual-track architecture: sovereign mode + federated identity mode) |
 
 Do the above first. Don't skip levels if lower layers aren't stable — for example, "File Scope Management" depends on "Management Chain" to distribute scopes,
 and "Identity Management" depends on earlier phases to get "ownership" working with node identity first.
 
-## Hard Constraint: No Account Dependencies Before Phase 7
+## Hard Constraint: Dual-Track Sovereign Architecture (Preserved in Phase 7)
 
-"Identity management last" does not mean "write the code last"; rather, **the first 6 phases must not treat accounts as a prerequisite on the path**:
+"Identity management last" guided the architecture: **the core features never treat accounts as a prerequisite**:
 
-- Interconnect, files, and management chain all operate at the **node level** (peerId); full functionality without querying regserver;
-- When an "ownership" concept is needed, use peerId first; Phase 7 will layer on the `account ↔ peerId` mapping;
-- Current manifestation: the "restricted to specified permissions" tier for anonymous collections is currently only usable within the same node
-  (remote sync requests don't yet carry requester identity); cross-node sharing of restricted collections waits for Phase 7
-  — see `doc/REFACTOR.md` §3.16 known limitations and `doc/modules/auth/API-DESIGN.md` §6.
+- Interconnect, files, and management chain operate at the **node level** (peerId); full standalone functionality without querying regserver (Sovereign Mode);
+- Phase 7 layered on the `account ↔ peerId` directory and identity token validation without breaking sovereign node capabilities:
+  - When regserver is unconfigured, nodes operate 100% offline using peerId + PSK admission;
+  - When regserver is configured, nodes register to the directory (`/nodes/register`) and cross-node requests with valid tokens unlock restricted collections (`coll.CanView(requester)`).
 
 ---
 
@@ -118,10 +118,10 @@ Previously only had defensive `IsPathAllowed` (rejecting unauthorized paths), wi
 - Files return only basename + relative path, not local absolute paths.
 - announce reports shared **count** summary (`loadInfo.shares`), marketplace cards have guidance info without leaking content.
 
-**Still not done (waiting for Phase 7)**: Identity propagation for cross-node restricted content — remote requests don't carry requester identity, so the "restricted to specified permissions" tier is currently only usable within the same node.
+**Implemented in Phase 7**: Identity propagation for cross-node restricted content — `NodeShare.SetTokenVerifier` + `Authenticator.ValidateToken` allow remote requests with valid user tokens to unlock restricted collections (`coll.CanView(requester)`). Anonymous requests or non-matching tokens continue to downgrade to private (hidden from strangers), ensuring the 3-tier security model works seamlessly across nodes.
 
 **Acceptance**: Integration `TestShareProtocolContract` — A explicitly shares a collection → B gets an identical list via the `share` frame (including entry path/hash/mime) → successfully fetches content directly by entry hash → nodes with sharing disabled return an empty list.
-14 unit tests covering default off / `all` only with public / skipping restricted private / ignoring invalid hashes / directory prefix boundary (`/data/share2` not matched by `/data/share`) / frame field name contract.
+14 unit tests covering default off / `all` only with public / skipping restricted private / ignoring invalid hashes / directory prefix boundary (`/data/share2` not matched by `/data/share`) / frame field name contract. Plus `TestNodeShareRestrictedCollectionTokenUnlock` covering cross-node token verification and restricted collection unlocking.
 
 ## 6. Upload/Download/Save
 
@@ -145,4 +145,17 @@ Previously only had defensive `IsPathAllowed` (rejecting unauthorized paths), wi
 
 ## 7. Identity Management
 
-**Design ready, not implemented**: `doc/modules/auth/API-DESIGN.md` (JWT/accounts, user↔node directory, traffic statistics anti-fraud, encrypted channels) + `README.md` index. See §10 of that document for suggested implementation order.
+**Implemented (Phase 7 Deliverables)**:
+- **Registration Server User ↔ Node Directory** (`back/signalserver/regserver`, `API-DESIGN.md` §6):
+  - SQLite `user_nodes` schema tracking `peer_id`, `username`, `endpoints`, `capabilities`, `version`, `visibility`, `registered_at`, `last_seen`.
+  - `POST /nodes/register` (Bearer auth required, idempotent upsert, anti-squatting 5-minute active lease check, 3-tier visibility `public` / `registered` / `private`).
+  - `POST /nodes/heartbeat` (updates `last_seen`).
+  - `DELETE /nodes/{peer_id}` (operator or admin deregistration).
+  - `GET /nodes/{peer_id}` (visibility filtering: public for everyone, registered for authenticated users, private returns 404 to unauthorized callers).
+  - `GET /users/{username}/nodes` (lists active nodes for user).
+- **Cross-Node Identity Verification** (`back/internal/service/nodeshare.go` & `serverapp`, `API-DESIGN.md` §8):
+  - `NodeShare.SetTokenVerifier` wired to `Authenticator.ValidateToken` via registration server `GET /auth/whoami`.
+  - Token verified requester checked against `coll.CanView(requester)`. If matched, restricted/private collections are unlocked and returned in `share-resp` frames.
+- **Dual-Track Invariant Preserved**:
+  - Standalone/sovereign nodes without registration servers operate 100% offline via peerId + PSK admission without any regression.
+- **Future extensions (Phase 8)**: Traffic statistics anti-fraud & Ed25519 countersigning (`API-DESIGN.md` §7).

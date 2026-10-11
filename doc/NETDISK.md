@@ -206,8 +206,8 @@ M1 (marketplace+join) ─┬─ M2 (share scope) ── M3 (fetch&save)
 
 ## 10. Future Extensions
 
-- **Phase 7 (identity management)**: Replace peerId with account system, marketplace can filter by user —
-  **design ready, not implemented** (`doc/modules/auth/README.md`, `doc/ROADMAP.md` §7); not a shipping capability, do not present it as one
+- **Phase 7 (identity management)**: User ↔ node directory (`/nodes/*`) and cross-node token verification for restricted collections (`coll.CanView(requester)`) —
+  **implemented** (`back/signalserver/regserver`, `doc/ROADMAP.md` §7). Standalone nodes remain sovereign and account-free (dual-track invariant).
 - **Phase 8 (payment/credit)**: Nodes earn credits for providing large bandwidth/files
 - **Multi-protocol support**: Support HTTP/WebDAV/SFTP as alternative to P2P — optional / experimental plugin
   territory (BT / IPFS / Iwara behind their own opt-in switches; WebDAV and SMB are evaluation-stage sources),

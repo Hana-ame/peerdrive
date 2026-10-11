@@ -3,7 +3,11 @@
 
 [![Peerdrive CI](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml/badge.svg)](https://github.com/Hana-ame/peerdrive/actions/workflows/ci.yml)
 
-Peerdrive 是一个多协议文件合集管理器，支持 SHA256 内容寻址存储、URL 引用、P2P 传输与 BitTorrent 下载。通过 **Collection + Provider** 的统一抽象，将本地文件、HTTP 资源与 PeerJS/WebRTC 互联融为一体。
+Peerdrive 是一个 **基于 WebRTC 的 P2P 去中心化网盘**：成员节点通过 PeerJS 信令在浏览器原生互联，内容按 SHA256 内容寻址存储并通过运营者显式声明的共享范围进行分发，支持跨节点文件拉取与持久化保存。通过 **Collection + Provider** 的统一抽象，将本地文件、HTTP 资源与 PeerJS/WebRTC 互联融为一体。
+
+> **定位与双轨身份模型**：WebRTC 原生网盘 + 节点市场 + 选中保存；非 IPFS/BT 式公网内容寻址。
+> 默认运行于**主权节点模式**（零账号依赖，完全离线自主，基于 peerId + PSK 准入）；配置注册服务器时可选激活 **Phase 7 联邦身份模式**（用户↔节点目录，跨节点身份令牌校验，受限合集跨节点访问）。
+> 方向与边界：[`doc/PROJECT-VISION.md`](doc/PROJECT-VISION.md) · 开发顺序：[`doc/ROADMAP.md`](doc/ROADMAP.md) · 网盘目标：[`doc/NETDISK.md`](doc/NETDISK.md)。
 
 ---
 
@@ -42,6 +46,8 @@ Peerdrive 不再依赖传统的单网络 DHT，而是通过 **PeerJS 信令 + We
 > 管理面冒烟 19 项断言（逐项清单、命令与盲区见 `doc/testing/README.md`）。
 >
 > **初次运行？请从 `peerdrive demo` 开始** —— 见下方的[快速开始](#快速开始)。无需任何配置。
+>
+> **双入口且默认无需账号**：消费端入口为公共面板 / `packages/peerdrive-client`（浏览与保存共享文件，无需本地节点）；运营者入口为本地节点加管理台（`front/src/features/`，需后端运行）。主权模式下所有权默认为节点 `peerId`；连接注册服务器时可选激活联邦身份与跨节点受限合集访问（Phase 7）。
 
 ### 无需运行节点即可使用（公共面板 `dist/panel.html`）
 
