@@ -12,44 +12,9 @@ import DataState from '../../../components/netdisk/DataState';
 import DriveGridView from '../components/DriveGridView';
 import DriveListView from '../components/DriveListView';
 import CastModal from '../components/CastModal';
+import TagEditorModal from '../components/TagEditorModal';
 import ContextMenu from '../../../components/netdisk/ContextMenu';
-
-const CATEGORIES = [
-  { id: 'all', label: 'All Files', icon: '📁' },
-  { id: 'inbox', label: 'Inbox (待审)', icon: '📥' },
-  { id: 'docs', label: 'Documents', icon: '📄', ext: ['pdf', 'doc', 'docx', 'txt', 'md', 'rtf', 'odt', 'csv', 'xls', 'xlsx', 'ppt', 'pptx'] },
-  { id: 'images', label: 'Images', icon: '🖼️', ext: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'] },
-  { id: 'videos', label: 'Videos', icon: '🎬', ext: ['mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv'] },
-  { id: 'audio', label: 'Audio', icon: '🎵', ext: ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'wma'] },
-  { id: 'archives', label: 'Archives', icon: '📦', ext: ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'] },
-  { id: 'code', label: 'Code', icon: '💻', ext: ['js', 'ts', 'jsx', 'tsx', 'go', 'py', 'rs', 'c', 'cpp', 'h', 'java', 'html', 'css', 'json', 'sh'] },
-];
-
-function getFileExt(filename) {
-  const parts = String(filename || '').split('.');
-  return parts.length > 1 ? parts.pop().toLowerCase() : '';
-}
-
-function getFileCategory(f) {
-  if (f.isDir) return 'folder';
-  const ext = getFileExt(f.filename);
-  for (const cat of CATEGORIES) {
-    if (cat.ext && cat.ext.includes(ext)) return cat.id;
-  }
-  const mime = String(f.mime_type || '').toLowerCase();
-  if (mime.startsWith('image/')) return 'images';
-  if (mime.startsWith('video/')) return 'videos';
-  if (mime.startsWith('audio/')) return 'audio';
-  if (mime.startsWith('text/')) return 'docs';
-  return 'other';
-}
-
-function getFileIcon(f) {
-  if (f.isDir) return '📁';
-  const cat = getFileCategory(f);
-  const found = CATEGORIES.find(c => c.id === cat);
-  return found ? found.icon : '📄';
-}
+import { CATEGORIES, getFileIcon } from '../utils/categories';
 
 export default function Drive() {
   const { hash: deepHash } = useParams();
@@ -668,34 +633,13 @@ export default function Drive() {
         </DataState>
 
         {/* Tag Editor Modal */}
-        {editingTagFile && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setEditingTagFile(null)}>
-            <div className="card-surface max-w-md w-full p-5 rounded-xl border border-white/10" onClick={e => e.stopPropagation()}>
-              <h3 className="text-base font-semibold text-gray-200 mb-2">Edit File Tags</h3>
-              <p className="text-xs text-gray-400 mb-3 truncate">
-                File: <span className="text-gray-200">{editingTagFile.filename}</span>
-              </p>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Tags (comma-separated)</label>
-                  <input
-                    type="text"
-                    value={tagInputText}
-                    onChange={(e) => setTagInputText(e.target.value)}
-                    placeholder="e.g. project, invoice, favorite"
-                    className="input-base w-full text-xs"
-                    autoFocus
-                  />
-                  <p className="text-[11px] text-gray-500 mt-1">Tags are associated with this file's content hash (SHA256).</p>
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <button onClick={() => setEditingTagFile(null)} className="btn-ghost text-xs">Cancel</button>
-                  <button onClick={saveTags} className="btn-brand text-xs">Save Tags</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <TagEditorModal
+          file={editingTagFile}
+          tagInputText={tagInputText}
+          setTagInputText={setTagInputText}
+          onSave={saveTags}
+          onClose={() => setEditingTagFile(null)}
+        />
 
         {/* In-line Preview Modal */}
         {previewFile && (
