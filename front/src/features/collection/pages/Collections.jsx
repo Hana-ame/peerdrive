@@ -37,10 +37,11 @@ export default function Collections() {
     };
   }, []);
 
+  const activeSession = peerSession?.client ? peerSession : getNodeSession();
+  const hasPeerClient = Boolean(activeSession?.client);
   const isWsOpen = wsStatus === 'open';
-  const isPeerOpen = Boolean(peerSession?.client && peerSession?.peerId);
-  const isGuest = !isWsOpen && isPeerOpen;
-  const canCreate = isWsOpen && !isGuest;
+  const isGuest = hasPeerClient || (!isWsOpen && Boolean(activeSession?.peerId));
+  const canCreate = isWsOpen && !hasPeerClient;
 
   // Enforce permission separation: if visitor mode becomes active, force list mode
   useEffect(() => {
@@ -332,26 +333,34 @@ export default function Collections() {
               <span>🔄</span>
               <span>Refresh</span>
             </button>
-            {canCreate && (
-              tab === 'list' ? (
-                <button
-                  onClick={openCreate}
-                  className="btn-brand !px-3 !py-1 !text-xs flex items-center gap-1.5 shadow-sm"
-                  title="Create a new collection from local files"
-                >
-                  <span>➕</span>
-                  <span>New Collection</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => setTab('list')}
-                  className="btn-ghost !px-3 !py-1 !text-xs text-gray-300 hover:text-white flex items-center gap-1.5"
-                  title="Back to Collections list"
-                >
-                  <span>←</span>
-                  <span>Back to List</span>
-                </button>
-              )
+            {tab === 'list' ? (
+              <button
+                disabled={!canCreate}
+                onClick={canCreate ? openCreate : undefined}
+                className={canCreate
+                  ? "btn-brand !px-3 !py-1 !text-xs flex items-center gap-1.5 shadow-sm"
+                  : "!px-3 !py-1 !text-xs flex items-center gap-1.5 rounded-lg bg-white/[0.04] text-gray-500 border border-white/[0.08] cursor-not-allowed select-none opacity-60 transition-colors"
+                }
+                title={
+                  canCreate
+                    ? "Create a new collection from local files"
+                    : (isGuest
+                        ? "Visitors cannot create collections (read-only)"
+                        : "Node connection required to create collections")
+                }
+              >
+                <span className={canCreate ? "" : "opacity-50"}>➕</span>
+                <span>New Collection</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setTab('list')}
+                className="btn-ghost !px-3 !py-1 !text-xs text-gray-300 hover:text-white flex items-center gap-1.5"
+                title="Back to Collections list"
+              >
+                <span>←</span>
+                <span>Back to List</span>
+              </button>
             )}
           </div>
         </div>

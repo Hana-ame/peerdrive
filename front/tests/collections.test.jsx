@@ -49,9 +49,11 @@ describe('Collections.jsx guest vs owner permission separation (Issue #336)', ()
       </MemoryRouter>
     )
 
-    // Owner header shows "New Collection" button
+    // Owner header shows enabled "New Collection" button
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /New Collection/i })).toBeDefined()
+      const btn = screen.getByRole('button', { name: /New Collection/i })
+      expect(btn).toBeDefined()
+      expect(btn.hasAttribute('disabled')).toBe(false)
     })
 
     // Visitor badge must not be visible
@@ -71,7 +73,7 @@ describe('Collections.jsx guest vs owner permission separation (Issue #336)', ()
     })
   })
 
-  it('Visitor mode: shows "Visitor (Read Only)" badge, hides "+ New Collection", read-only empty state', async () => {
+  it('Visitor mode: shows "Visitor (Read Only)" badge, disables "+ New Collection" (grayed out), read-only empty state', async () => {
     ws.__setStatus('closed')
     const mockClient = {
       shares: vi.fn().mockResolvedValue({ collections: [], files: [] }),
@@ -89,13 +91,41 @@ describe('Collections.jsx guest vs owner permission separation (Issue #336)', ()
       expect(screen.getByText(/Visitor \(Read Only\)/i)).toBeDefined()
     })
 
-    // Header "+ New Collection" button must NOT be rendered
-    expect(screen.queryByRole('button', { name: /New Collection/i })).toBeNull()
+    // Header "+ New Collection" button MUST be present but disabled (grayed out)
+    const newBtn = screen.getByRole('button', { name: /New Collection/i })
+    expect(newBtn).toBeDefined()
+    expect(newBtn.hasAttribute('disabled')).toBe(true)
+    expect(newBtn.className).toContain('cursor-not-allowed')
+    expect(newBtn.getAttribute('title')).toContain('Visitors cannot create collections')
 
     // Empty state shows read-only message without action button
     expect(screen.getByText('No shared collections')).toBeDefined()
     expect(screen.getByText(/This remote node has not shared any public collections/i)).toBeDefined()
     expect(screen.queryByRole('button', { name: /\+ New Collection/i })).toBeNull()
+  })
+
+  it('Visitor mode with local WS open: when browsing remote peer, button is disabled and grayed out', async () => {
+    ws.__setStatus('open')
+    const mockClient = {
+      shares: vi.fn().mockResolvedValue({ collections: [], files: [] }),
+    }
+    setNodeSession({ peerId: 'remote-node-1', client: mockClient })
+
+    render(
+      <MemoryRouter>
+        <Collections />
+      </MemoryRouter>
+    )
+
+    // Visitor badge is displayed despite local WS being open
+    await waitFor(() => {
+      expect(screen.getByText(/Visitor \(Read Only\)/i)).toBeDefined()
+    })
+
+    const newBtn = screen.getByRole('button', { name: /New Collection/i })
+    expect(newBtn).toBeDefined()
+    expect(newBtn.hasAttribute('disabled')).toBe(true)
+    expect(newBtn.className).toContain('cursor-not-allowed')
   })
 
   it('Visitor mode: loads and displays shared collections from remote client', async () => {
@@ -127,7 +157,8 @@ describe('Collections.jsx guest vs owner permission separation (Issue #336)', ()
       expect(screen.getByText(/Visitor \(Read Only\)/i)).toBeDefined()
     })
 
-    // Still no "+ New Collection" button for visitor
-    expect(screen.queryByRole('button', { name: /New Collection/i })).toBeNull()
+    // Header "+ New Collection" is disabled
+    const newBtn = screen.getByRole('button', { name: /New Collection/i })
+    expect(newBtn.hasAttribute('disabled')).toBe(true)
   })
 })
