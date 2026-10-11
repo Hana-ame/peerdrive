@@ -280,7 +280,7 @@ func TestGoldenRouteTable(t *testing.T) {
 // windows cell went red while the other four platforms passed. Pinning that
 // golden was pinning a crash, not behavior, on three of the five platforms.
 // The routes themselves are not left uncovered: TestGoldenRouteTable pins all
-// 89 registrations, these four included.
+// 114 registrations, these four included.
 var equivProbe = []struct {
 	method, path string
 	header       map[string]string
