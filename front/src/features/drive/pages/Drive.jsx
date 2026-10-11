@@ -13,8 +13,10 @@ import DriveGridView from '../components/DriveGridView';
 import DriveListView from '../components/DriveListView';
 import CastModal from '../components/CastModal';
 import TagEditorModal from '../components/TagEditorModal';
+import DriveToolbar from '../components/DriveToolbar';
+import DriveCategoryBar from '../components/DriveCategoryBar';
 import ContextMenu from '../../../components/netdisk/ContextMenu';
-import { CATEGORIES, getFileIcon } from '../utils/categories';
+import { getFileIcon } from '../utils/categories';
 
 export default function Drive() {
   const { hash: deepHash } = useParams();
@@ -429,62 +431,17 @@ export default function Drive() {
     <div className="p-4 sm:p-8 overflow-y-auto h-full" onContextMenu={handleContainerContextMenu}>
       <div className="max-w-5xl mx-auto">
         {/* Header toolbar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
-          <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 truncate">
-              <span>☁️ My Cloud Drive</span>
-            </h1>
-            <p className="text-xs sm:text-sm text-gray-500 mt-0.5 truncate">Files registered on this node (content-addressed storage)</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 max-w-full">
-            {/* Sorting controls */}
-            <div className="flex items-center bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.06] text-xs shrink-0">
-              <span className="text-gray-500 pl-2 pr-1 text-[11px]">Sort:</span>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="bg-transparent text-gray-300 text-xs py-1 pr-1 outline-none cursor-pointer"
-                title="Sort field"
-              >
-                <option value="time" className="bg-gray-900 text-white">Date</option>
-                <option value="name" className="bg-gray-900 text-white">Name</option>
-                <option value="size" className="bg-gray-900 text-white">Size</option>
-              </select>
-              <button
-                onClick={() => setSortOrder(o => o === 'asc' ? 'desc' : 'asc')}
-                className="px-2 py-1 text-gray-400 hover:text-white transition-colors text-xs font-mono"
-                title={sortOrder === 'asc' ? 'Ascending (click for Descending)' : 'Descending (click for Ascending)'}
-              >
-                {sortOrder === 'asc' ? '▲' : '▼'}
-              </button>
-            </div>
-            {/* View mode toggle */}
-            <div className="flex items-center bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.06] text-xs shrink-0">
-              <button
-                onClick={() => setViewMode('list')}
-                className={`px-2.5 py-1 rounded transition-colors ${viewMode === 'list' ? 'bg-brand-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}
-                title="Detailed Information List"
-              >
-                ☰ Details
-              </button>
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`px-2.5 py-1 rounded transition-colors ${viewMode === 'grid' ? 'bg-brand-600 text-white font-medium' : 'text-gray-400 hover:text-white'}`}
-                title="Thumbnail Cards View"
-              >
-                ▦ Thumbnails
-              </button>
-            </div>
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={busy}
-              className="btn-brand shrink-0 text-xs sm:text-sm py-1.5 px-3"
-            >
-              {busy ? 'Uploading...' : '+ Upload File'}
-            </button>
-            <input ref={fileRef} type="file" className="hidden" onChange={onPick} />
-          </div>
-        </div>
+        <DriveToolbar
+          sortBy={sortBy}
+          setSortBy={setSortBy}
+          sortOrder={sortOrder}
+          setSortOrder={setSortOrder}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          busy={busy}
+          onPick={onPick}
+          fileRef={fileRef}
+        />
 
         {err && (
           <div className="mb-4 text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
@@ -498,76 +455,16 @@ export default function Drive() {
           </div>
         )}
 
-        {/* Category Toolbar (All / Documents / Images / Videos / Audio / Archives / Code) */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-3 text-xs border-b border-white/[0.06]">
-          {CATEGORIES.map(cat => (
-            <button
-              key={cat.id}
-              onClick={() => setSelectedCategory(cat.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
-                selectedCategory === cat.id
-                  ? 'bg-brand-600/30 text-brand-300 border border-brand-500/40 font-medium'
-                  : 'text-gray-400 hover:text-white hover:bg-white/[0.04]'
-              }`}
-            >
-              <span>{cat.icon}</span>
-              <span>{cat.label}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Search & Tag Filter Bar */}
-        <div className="mb-4 space-y-2">
-          <div className="relative">
-            <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500 text-xs">
-              🔍
-            </span>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search files by name, hash, or tags..."
-              className="input-base pl-9 w-full text-xs"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-white text-xs"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-
-          {allTagsWithCounts.length > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap text-xs">
-              <span className="text-gray-500 text-[11px] mr-1">Tags:</span>
-              <button
-                onClick={() => setSelectedTag('')}
-                className={`px-2 py-0.5 rounded-full border transition-colors text-[11px] ${
-                  selectedTag === ''
-                    ? 'bg-brand-600 text-white border-brand-500'
-                    : 'bg-white/[0.04] text-gray-400 border-white/[0.08] hover:text-white'
-                }`}
-              >
-                All
-              </button>
-              {allTagsWithCounts.map(({ tag, count }) => (
-                <button
-                  key={tag}
-                  onClick={() => setSelectedTag(selectedTag === tag ? '' : tag)}
-                  className={`px-2 py-0.5 rounded-full border transition-colors text-[11px] ${
-                    selectedTag === tag
-                      ? 'bg-brand-600 text-white border-brand-500'
-                      : 'bg-white/[0.04] text-gray-400 border-white/[0.08] hover:text-white'
-                  }`}
-                >
-                  #{tag} <span className="opacity-60 text-[10px]">({count})</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* Category Toolbar & Search Filter Bar */}
+        <DriveCategoryBar
+          selectedCategory={selectedCategory}
+          setSelectedCategory={setSelectedCategory}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          selectedTag={selectedTag}
+          setSelectedTag={setSelectedTag}
+          allTagsWithCounts={allTagsWithCounts}
+        />
 
         {/* Content list or grid */}
         <DataState
