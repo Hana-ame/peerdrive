@@ -9,8 +9,8 @@ package source
 // 核心机制：
 // 1. 逻辑分片切分 (ChunkTask Slicing)：将大文件或 Range 请求划分为固定大小的分片（默认 1MB）。
 // 2. 节点质量评分矩阵 (PeerScoreMatrix)：跟踪每个在线 Peer 的 RTT、EWMA 传输速率，并具备
-//    连续失败熔断机制（Circuit Breaker），保证优先将后续切片派发给最优节点。
-// 3. 多路并行分片调度器 (ChunkScheduler)：并发 Worker 池向评分最高的 Peer 派发切片抓取任务。
+//    连续失败熔断机制（Circuit Breaker），保证优先将后续切片派发给最优节点（见 pcdn_score.go）。
+// 3. 多路并行分片调度器 (ChunkScheduler)：并发 Worker 池向评分最高的 Peer 派发切片抓取任务（见 pcdn_scheduler.go）。
 // 4. 切片级即时回源 (Per-Chunk Fallback)：当某分片在 Peer 传输中失败或超时，自动切换至
 //    预配置的 Origin 源（HTTP CDN / Cloudflare / 本地源）拉取该分片，下游消费者零感知无缝重组。
 // 5. 内容寻址安全基线：声明 CapStream | CapVerify，整文件请求在 EOF 处自动复用
@@ -21,11 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"sync"
 	"time"
-
-	"peerdrive/internal/transport"
 )
 
 // DefaultPCDNChunkSize 默认 PCDN 切片大小：1MB。
@@ -36,173 +33,6 @@ const DefaultPCDNWorkerCount = 4
 
 // DefaultPCDNChunkTimeout 单切片对端拉取超时阈值（超时即触发回源）。
 const DefaultPCDNChunkTimeout = 3 * time.Second
-
-// PCDNPeerService 抽象 PCDN 所需的底层 P2P 传输能力（松耦合设计，方便单元测试与模拟）。
-type PCDNPeerService interface {
-	Connections() map[string]transport.Session
-	OpenStreamFrom(peerID, hash string, offset, size int64, trace []string) (io.ReadCloser, error)
-	ID() string
-}
-
-// PeerScore 单个对端节点的质量指标卡。
-type PeerScore struct {
-	PeerID              string        `json:"peer_id"`
-	RTT                 time.Duration `json:"rtt"`
-	ThroughputBps       float64       `json:"throughput_bps"`
-	SuccessCount        int64         `json:"success_count"`
-	FailureCount        int64         `json:"failure_count"`
-	ConsecutiveFailures int           `json:"consecutive_failures"`
-	CircuitBrokenUntil  time.Time     `json:"circuit_broken_until"`
-}
-
-// PeerScoreMatrix 节点质量评分矩阵：多协程安全，负责各 Peer 性能评分与熔断状态维护。
-type PeerScoreMatrix struct {
-	mu                     sync.RWMutex
-	scores                 map[string]*PeerScore
-	alpha                  float64       // EWMA 权重系数，默认 0.3
-	maxConsecutiveFailures int           // 熔断阈值，默认连续失败 3 次
-	cooldownDuration       time.Duration // 熔断冷却时间，默认 30 秒
-}
-
-// NewPeerScoreMatrix 创建节点质量评分矩阵。
-func NewPeerScoreMatrix() *PeerScoreMatrix {
-	return &PeerScoreMatrix{
-		scores:                 make(map[string]*PeerScore),
-		alpha:                  0.3,
-		maxConsecutiveFailures: 3,
-		cooldownDuration:       30 * time.Second,
-	}
-}
-
-// RecordSuccess 记录一次成功切片传输的指标并更新 EWMA 吞吐。
-func (m *PeerScoreMatrix) RecordSuccess(peerID string, rtt time.Duration, bytes int64, duration time.Duration) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	score, ok := m.scores[peerID]
-	if !ok {
-		score = &PeerScore{PeerID: peerID}
-		m.scores[peerID] = score
-	}
-
-	score.SuccessCount++
-	score.ConsecutiveFailures = 0
-	score.CircuitBrokenUntil = time.Time{}
-
-	// 更新滑动平均 RTT
-	if score.RTT == 0 {
-		score.RTT = rtt
-	} else {
-		score.RTT = time.Duration(0.7*float64(score.RTT) + 0.3*float64(rtt))
-	}
-
-	// 计算并更新 EWMA 吞吐速率（bytes/sec）
-	if duration > 0 {
-		currentBps := float64(bytes) / duration.Seconds()
-		if score.ThroughputBps == 0 {
-			score.ThroughputBps = currentBps
-		} else {
-			score.ThroughputBps = m.alpha*currentBps + (1.0-m.alpha)*score.ThroughputBps
-		}
-	}
-}
-
-// RecordFailure 记录一次切片获取失败；达到阈值时触发熔断。
-func (m *PeerScoreMatrix) RecordFailure(peerID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	score, ok := m.scores[peerID]
-	if !ok {
-		score = &PeerScore{PeerID: peerID}
-		m.scores[peerID] = score
-	}
-
-	score.FailureCount++
-	score.ConsecutiveFailures++
-	if score.ConsecutiveFailures >= m.maxConsecutiveFailures {
-		score.CircuitBrokenUntil = time.Now().Add(m.cooldownDuration)
-	}
-}
-
-// IsAvailable 判断指定 Peer 当前是否可用（未处于熔断冷却中）。
-func (m *PeerScoreMatrix) IsAvailable(peerID string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	score, ok := m.scores[peerID]
-	if !ok {
-		return true // 无历史记录的对端默认可用
-	}
-	if !score.CircuitBrokenUntil.IsZero() && time.Now().Before(score.CircuitBrokenUntil) {
-		return false
-	}
-	return true
-}
-
-// RankPeers 对候选节点按照综合得分排序（优先可用性、吞吐量由高到低、RTT 由低到高）。
-func (m *PeerScoreMatrix) RankPeers(candidates []string) []string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	type ranked struct {
-		id        string
-		available bool
-		tput      float64
-		rtt       time.Duration
-	}
-
-	now := time.Now()
-	list := make([]ranked, len(candidates))
-	for i, id := range candidates {
-		sc, ok := m.scores[id]
-		avail := true
-		var tput float64
-		var rtt time.Duration
-		if ok {
-			if !sc.CircuitBrokenUntil.IsZero() && now.Before(sc.CircuitBrokenUntil) {
-				avail = false
-			}
-			tput = sc.ThroughputBps
-			rtt = sc.RTT
-		}
-		list[i] = ranked{id: id, available: avail, tput: tput, rtt: rtt}
-	}
-
-	sort.SliceStable(list, func(i, j int) bool {
-		// 1. 熔断端靠后
-		if list[i].available != list[j].available {
-			return list[i].available
-		}
-		// 2. 吞吐更高者优先
-		if list[i].tput != list[j].tput {
-			return list[i].tput > list[j].tput
-		}
-		// 3. RTT 较低者优先
-		if list[i].rtt != list[j].rtt {
-			return list[i].rtt < list[j].rtt
-		}
-		return list[i].id < list[j].id
-	})
-
-	out := make([]string, len(list))
-	for i, r := range list {
-		out[i] = r.id
-	}
-	return out
-}
-
-// Snapshot 导出当前所有节点的质量评分镜像，供管理面与可观测性 API 展示。
-func (m *PeerScoreMatrix) Snapshot() map[string]PeerScore {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	out := make(map[string]PeerScore, len(m.scores))
-	for k, v := range m.scores {
-		out[k] = *v
-	}
-	return out
-}
 
 // PCDNConfig PCDN 调度引擎运行参数配置。
 type PCDNConfig struct {
@@ -321,20 +151,6 @@ func (s *PCDNSource) ScoreMatrix() *PeerScoreMatrix {
 	return s.matrix
 }
 
-// chunkTask 单个切片调度任务。
-type chunkTask struct {
-	index  int
-	offset int64
-	size   int64
-}
-
-// chunkResult 切片获取结果。
-type chunkResult struct {
-	index int
-	data  []byte
-	err   error
-}
-
 // Open 流式打开分片内容：流水线调度、多 Peer 并发、失败即时回源。
 func (s *PCDNSource) Open(ctx context.Context, hash string, offset, size int64) (io.ReadCloser, error) {
 	if err := validHash(hash); err != nil {
@@ -381,123 +197,6 @@ func (s *PCDNSource) Open(ctx context.Context, hash string, offset, size int64) 
 		}
 	}
 	return reader, nil
-}
-
-// planTasks 将指定区间切分为逻辑切片。
-func (s *PCDNSource) planTasks(offset, size int64) []chunkTask {
-	var tasks []chunkTask
-	rem := size
-	cur := offset
-	idx := 0
-	for rem > 0 {
-		take := s.cfg.ChunkSize
-		if rem < take {
-			take = rem
-		}
-		tasks = append(tasks, chunkTask{
-			index:  idx,
-			offset: cur,
-			size:   take,
-		})
-		cur += take
-		rem -= take
-		idx++
-	}
-	return tasks
-}
-
-// runPipeline 执行分片流水线与有序下发。
-func (s *PCDNSource) runPipeline(
-	ctx context.Context,
-	hash string,
-	offset, size int64,
-	tasks []chunkTask,
-	pw *io.PipeWriter,
-) {
-	// 若区间无法静态预先切片（未指定 size 且 origin.Info 为未知），降级回逐块流式拉取
-	if len(tasks) == 0 && size < 0 {
-		s.streamSequentialUnknownSize(ctx, hash, offset, pw)
-		return
-	}
-
-	// 若切片为空，直接关闭管道
-	if len(tasks) == 0 {
-		_ = pw.Close()
-		return
-	}
-
-	// 任务下发通道与结果收集
-	taskChan := make(chan chunkTask, len(tasks))
-	for _, t := range tasks {
-		taskChan <- t
-	}
-	close(taskChan)
-
-	resultChan := make(chan chunkResult, len(tasks))
-
-	// 启动 Worker 协程池
-	numWorkers := s.cfg.WorkerCount
-	if numWorkers > len(tasks) {
-		numWorkers = len(tasks)
-	}
-	if numWorkers <= 0 {
-		numWorkers = 1
-	}
-
-	var wg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for task := range taskChan {
-				select {
-				case <-ctx.Done():
-					resultChan <- chunkResult{index: task.index, err: ctx.Err()}
-					return
-				default:
-				}
-				data, err := s.fetchChunkWithFallback(ctx, hash, task.offset, task.size)
-				resultChan <- chunkResult{index: task.index, data: data, err: err}
-			}
-		}()
-	}
-
-	// 独立协程等待所有任务完成后关闭结果通道
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	// 有序重组缓冲池：按序号顺序将切片写入管道
-	received := make(map[int][]byte)
-	nextIndex := 0
-
-	for res := range resultChan {
-		if res.err != nil {
-			_ = pw.CloseWithError(fmt.Errorf("chunk %d failed: %w", res.index, res.err))
-			return
-		}
-		received[res.index] = res.data
-
-		// 按序刷出就绪切片
-		for {
-			data, ready := received[nextIndex]
-			if !ready {
-				break
-			}
-			delete(received, nextIndex)
-			if len(data) > 0 {
-				if _, err := pw.Write(data); err != nil {
-					_ = pw.CloseWithError(err)
-					return
-				}
-			}
-			nextIndex++
-		}
-	}
-
-	// 所有切片下发完毕
-	_ = pw.Close()
 }
 
 // fetchChunkWithFallback 尝试通过最优 Peer 获取分片；遇错或超时即时回源。
@@ -613,47 +312,6 @@ func (s *PCDNSource) collectRankedPeers() []string {
 		return nil
 	}
 	return s.matrix.RankPeers(candidates)
-}
-
-// streamSequentialUnknownSize 处理总大小完全未知时的顺序切片拉取与下发。
-func (s *PCDNSource) streamSequentialUnknownSize(
-	ctx context.Context,
-	hash string,
-	offset int64,
-	pw *io.PipeWriter,
-) {
-	cur := offset
-	for {
-		select {
-		case <-ctx.Done():
-			_ = pw.CloseWithError(ctx.Err())
-			return
-		default:
-		}
-
-		data, err := s.fetchChunkWithFallback(ctx, hash, cur, s.cfg.ChunkSize)
-		if err != nil {
-			// 如果读取到 EOF 或失败，安全终止
-			_ = pw.CloseWithError(err)
-			return
-		}
-		if len(data) == 0 {
-			_ = pw.Close()
-			return
-		}
-
-		if _, err := pw.Write(data); err != nil {
-			_ = pw.CloseWithError(err)
-			return
-		}
-
-		// 若获取的数据小于单切片大小，代表已到达文件末尾
-		if int64(len(data)) < s.cfg.ChunkSize {
-			_ = pw.Close()
-			return
-		}
-		cur += int64(len(data))
-	}
 }
 
 // emptyReader 空数据读取器。
