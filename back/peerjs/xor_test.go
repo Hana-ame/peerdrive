@@ -289,13 +289,36 @@ func (r *relaySignaller) handleWS(w http.ResponseWriter, req *http.Request) {
 			continue // HEARTBEAT 等无路由目标的消息
 		}
 		m.Src = id // 真实服务器覆写 src
-		r.mu.Lock()
-		dst := r.clients[m.Dst]
-		r.mu.Unlock()
+		var dst *safeWS
+		for retry := 0; retry < 50; retry++ {
+			r.mu.Lock()
+			dst = r.clients[m.Dst]
+			r.mu.Unlock()
+			if dst != nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 		if dst != nil {
 			_ = dst.WriteJSON(m)
 		}
 	}
+}
+
+// waitClient 等待指定 id 的客户端在 relay 注册完成（消除并发 Dial 竞态）。
+func (r *relaySignaller) waitClient(t *testing.T, id string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r.mu.Lock()
+		_, ok := r.clients[id]
+		r.mu.Unlock()
+		if ok {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("relay: client %s did not register in time", id)
 }
 
 // xorPeerOptions 构造指向 relay 的信令 Options（显式 id、长心跳间隔防噪声、
@@ -316,11 +339,12 @@ func xorPeerOptions(host, port, id, secret string, xorOn bool) Options {
 }
 
 // newRelayPeer 起一个连到 relay 的 Peer（显式 id，免 /id 端点）。
-func newRelayPeer(t *testing.T, hs *httptest.Server, id, secret string, xorOn bool) *Peer {
+func newRelayPeer(t *testing.T, srv *relaySignaller, hs *httptest.Server, id, secret string, xorOn bool) *Peer {
 	t.Helper()
 	host, port, _ := strings.Cut(strings.TrimPrefix(hs.URL, "http://"), ":")
 	p := NewPeer(id, xorPeerOptions(host, port, id, secret, xorOn))
 	require.NoError(t, p.Dial(context.Background()))
+	srv.waitClient(t, id)
 	t.Cleanup(p.Close)
 	return p
 }
@@ -364,8 +388,8 @@ func TestXOR_RealDualPeer_RoundTrip(t *testing.T) {
 	hs := srv.up()
 	defer hs.Close()
 
-	pA := newRelayPeer(t, hs, "xor-a", "shared-secret", true)
-	pB := newRelayPeer(t, hs, "xor-b", "shared-secret", true)
+	pA := newRelayPeer(t, srv, hs, "xor-a", "shared-secret", true)
+	pB := newRelayPeer(t, srv, hs, "xor-b", "shared-secret", true)
 
 	// A（answerer）侧收帧通道 + 回发通道
 	type recv struct {
@@ -419,8 +443,8 @@ func TestXOR_RealDualPeer_WrongKey_Garbage(t *testing.T) {
 	hs := srv.up()
 	defer hs.Close()
 
-	pA := newRelayPeer(t, hs, "xor-a", "test-xor-seed-a", true)
-	pB := newRelayPeer(t, hs, "xor-b", "test-xor-seed-b", true) // 不同 secret
+	pA := newRelayPeer(t, srv, hs, "xor-a", "test-xor-seed-a", true)
+	pB := newRelayPeer(t, srv, hs, "xor-b", "test-xor-seed-b", true) // 不同 secret
 
 	aCh := make(chan Frame, 8)
 	pA.OnConnection(func(c *Connection) {
