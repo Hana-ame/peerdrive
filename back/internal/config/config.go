@@ -189,12 +189,12 @@ type Config struct {
 	// comes from an operator-supplied index file (OpenListIndexPath). Until a
 	// crawler builds that table, it is static; OpenListSource.Reload is the seam
 	// that delivery will use.
-	OpenListEnable      bool   // PEERDRIVE_OPENLIST_ENABLE (default false)
-	OpenListBaseURL     string // PEERDRIVE_OPENLIST_BASE_URL: scheme+host, no trailing /p
-	OpenListIndexPath   string // PEERDRIVE_OPENLIST_INDEX_FILE: hash→path JSON table
-	OpenListToken       string // PEERDRIVE_OPENLIST_TOKEN: sent as Authorization: Bearer ***
-	OpenListName        string // PEERDRIVE_OPENLIST_NAME (default "openlist")
-	OpenListPriority    int    // PEERDRIVE_OPENLIST_PRIORITY (default 900: after local/peer/url)
+	OpenListEnable           bool   // PEERDRIVE_OPENLIST_ENABLE (default false)
+	OpenListBaseURL          string // PEERDRIVE_OPENLIST_BASE_URL: scheme+host, no trailing /p
+	OpenListIndexPath        string // PEERDRIVE_OPENLIST_INDEX_FILE: hash→path JSON table
+	OpenListToken            string // PEERDRIVE_OPENLIST_TOKEN: sent as Authorization: Bearer ***
+	OpenListName             string // PEERDRIVE_OPENLIST_NAME (default "openlist")
+	OpenListPriority         int    // PEERDRIVE_OPENLIST_PRIORITY (default 900: after local/peer/url)
 	OpenListTimeoutSecs      int    // PEERDRIVE_OPENLIST_TIMEOUT_SECS (default 120)
 	OpenListVerify           bool   // PEERDRIVE_OPENLIST_VERIFY (default true: hash full fetches)
 	OpenListCrawl            bool   // PEERDRIVE_OPENLIST_CRAWL (default false: crawl remote OpenList /api/fs/list on startup)
@@ -260,6 +260,15 @@ type Config struct {
 	// volume), while blocking "a script spamming the API". Upload/cross-node pull endpoints, which
 	// consume real bandwidth, are also protected by this.
 	RateLimitRPS float64
+	// MaxJSONBodyBytes caps the body of JSON requests (PEERDRIVE_MAX_JSON_BODY_BYTES, 0 = unlimited).
+	// Default 1 MiB.
+	//
+	// Why this exists (red-team R2, DoS): every c.ShouldBindJSON call reads the whole
+	// request body into memory with no size cap, so an unauthenticated caller could send a
+	// multi-gigabyte JSON body and OOM the node. Multipart uploads already carry their own
+	// MaxUploadBytes cap; only the JSON surface was uncapped. Legitimate JSON payloads in
+	// this API are tiny (a hash, a filename, a share request), so 1 MiB is generous.
+	MaxJSONBodyBytes int64
 	// DisableCSP disables Content-Security-Policy (PEERDRIVE_CSP=off).
 	// Only an escape hatch for when embedding third-party pages or old-browser compatibility breaks. Default on.
 	DisableCSP bool
@@ -425,13 +434,18 @@ func (c *Config) IsOriginAllowed(origin string) bool {
 		if o == "*" || strings.EqualFold(origin, o) {
 			return true
 		}
-		// Subdomain wildcard: supports both "*.example.com" and "https://*.example.com" formats
+		// Subdomain wildcard: supports both "*.example.com" and "https://*.example.com" formats.
+		// Red-team R2: when the operator wrote an explicit scheme (https://*.example.com) it is
+		// enforced — "https://*.pages.dev" must not match "http://evil.pages.dev". A bare
+		// "*.example.com" with no scheme keeps matching any scheme (backward compatible).
 		if strings.HasPrefix(o, "*.") || strings.Contains(o, "://*.") {
 			pattern := o
+			scheme := ""
 			if idx := strings.Index(o, "://*"); idx >= 0 {
-				pattern = o[idx+3:] // "https://*.example.com" → "*.example.com"
+				scheme = strings.ToLower(o[:idx+3]) // "https://"
+				pattern = o[idx+3:]                 // "https://*.example.com" → "*.example.com"
 			}
-			if strings.HasSuffix(origin, pattern[1:]) {
+			if strings.HasSuffix(origin, pattern[1:]) && (scheme == "" || strings.HasPrefix(strings.ToLower(origin), scheme)) {
 				return true
 			}
 		}
@@ -450,119 +464,120 @@ func DefaultRootPath() string {
 // DefaultConfig returns the default configuration struct without reading environment variables.
 func DefaultConfig() *Config {
 	return &Config{
-		Port:               "3000",
-		DBPath:             "./peerdrive.db",
-		StorageDir:         "./storage",
-		StorageEnable:      true,
-		AllowedOrigins:     "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev",
-		RegistrationServer: "",
-		AdminToken:          "",
-		RemoteControlEnable: false,
-		RemoteControlToken:  "",
-		MaxUploadBytes:      100 * 1024 * 1024,
-		MaxUploadBytesAnon: 10 * 1024 * 1024,
-		BTDHTEnabled:       false,
-		BTDHTListenAddr:    ":6881",
-		IPFSGatewayEnable:  true,
-		IPFSGateways:       "https://ipfs.io,https://cloudflare-ipfs.com,https://dweb.link",
-		WebRTCSTUNServer:   "stun:stun.l.google.com:19302",
-		WebRTCTURNServer:   "",
-		WebRTCTURNUsername: "",
-		WebRTCTURNPassword: "",
-		PeerJSEnable:       true,
-		PeerJSHost:         DefaultSignalHost,
-		PeerJSPort:         DefaultSignalPort,
-		PeerJSKey:          DefaultSignalKey,
-		PeerJSID:           "",
-		PeerJSSecure:       true,
-		PeerJSPeers:        "",
-		PeerJSXOREnable:    false,
-		PeerJSXORKey:       "",
-		PeerPSK:            "",
-		PeerBlocklist:      "",
-		PeerAnonPolicy:     "open",
-		MQTTEnable:         false,
-		MQTTBroker:         "tcp://broker.emqx.io:1883",
-		MQTTTopicPref:      "peerdrive/v1",
-		MQTTCollections:    "",
-		DiscoverURL:        DefaultDiscoverURL,
-		DiscoverMode:       "auto",
-		DiscoverPresence:   true,
-		URLSourceTemplate:  "",
-		OpenListEnable:     false,
-		OpenListBaseURL:     "",
-		OpenListIndexPath:   "",
-		OpenListToken:       "",
-		OpenListName:        "openlist",
-		OpenListPriority:    900,
-		OpenListTimeoutSecs:         120,
-		OpenListVerify:              true,
-		OpenListCrawl:               false,
-		OpenListCrawlRoot:           "/",
-		OpenListCrawlConcurrency:    4,
-		OpenListCrawlTimeoutSecs:    30,
-		DownloadDir:         "./downloads",
-		FolderMaxDepth:      0,
-		MaxPeers:            8,
-		ShareEnable:         false,
-		ShareCollections:    "",
-		ShareDirs:           "",
-		ShareFriends:        "",
-		AutoExtract:         false,
-		AutoExtractMaxSize:  500 * 1024 * 1024,
-		AutoExtractMaxRatio: 100,
-		AutoExtractMaxFiles: 10000,
-		AutoExtractDeleteOrig: true,
-		IwaraEnable:          false,
-		IwaraCookie:          "",
-		IwaraEchProxyExe:     "",
-		IwaraEchProxyPort:    8443,
-		IwaraEntrySuffix:     "l.moonchan.xyz",
-		IwaraUpstreamSuffix:  "iwara.tv",
-		IwaraEchProxyVersion: "v1.3.0",
-		ExhentaiEnable:         false,
-		ExhentaiConfigURL:      "",
-		ExhentaiConfigInsecure: false,
-		ExhentaiConfigAuth:     "",
-		TwitterPicEnable:       false,
-		TwitterPicBaseURL:      "",
-		TwitterPicProxyBase:    "",
-		TwitterPicMaxFiles:     0,
-		TwitterPicMaxBytes:     0,
-		TwitterPicTimeout:      20,
-		DownloadOrder:          "local,ipfsgw,btdht,http",
-		DownloadTimeoutSecs:    30,
-		ForwardRules:           "",
-		PortFwdEnable:          false,
-		BTEnable:               false,
-		IPFSEnable:             false,
-		MaxConcurrentStreams:   8,
-		MaxUploadSpeed:         0,
-		ECHProxyEnable:        false,
-		ECHProxyAddr:          "127.0.0.1:8443",
-		ECHProxyInstallDir:    "",
-		ECHProxyVersion:       "v1.3.0",
-		ECHProxyEntryHost:     "twimg-pbs.l.moonchan.xyz",
-		ECHProxySkipTLS:       true,
-		ECHProxyIPMode:        "v4",
-		ECHProxyStartAttempts: 3,
-		RateLimitRPS:          30,
-		DisableCSP:            false,
-		DisableSwagger:        true,
-		Host:                  "",
-		TrustedProxies:        "",
-		SignalAddr:            ":9000",
-		SignalTokens:          "",
-		SignalCORS:            "",
-		SignalTLSCert:         "",
-		SignalTLSKey:          "",
-		SignalRateAnnounce:    1,
-		SignalRateWS:          2,
-		SignalRateID:          5,
-		RegDBPath:             "",
-		LegacyDBPath:          "",
-		NodeMode:              "standard",
-		NodeRole:              "peer",
+		Port:                     "3000",
+		DBPath:                   "./peerdrive.db",
+		StorageDir:               "./storage",
+		StorageEnable:            true,
+		AllowedOrigins:           "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev",
+		RegistrationServer:       "",
+		AdminToken:               "",
+		RemoteControlEnable:      false,
+		RemoteControlToken:       "",
+		MaxUploadBytes:           100 * 1024 * 1024,
+		MaxUploadBytesAnon:       10 * 1024 * 1024,
+		BTDHTEnabled:             false,
+		BTDHTListenAddr:          ":6881",
+		IPFSGatewayEnable:        true,
+		IPFSGateways:             "https://ipfs.io,https://cloudflare-ipfs.com,https://dweb.link",
+		WebRTCSTUNServer:         "stun:stun.l.google.com:19302",
+		WebRTCTURNServer:         "",
+		WebRTCTURNUsername:       "",
+		WebRTCTURNPassword:       "",
+		PeerJSEnable:             true,
+		PeerJSHost:               DefaultSignalHost,
+		PeerJSPort:               DefaultSignalPort,
+		PeerJSKey:                DefaultSignalKey,
+		PeerJSID:                 "",
+		PeerJSSecure:             true,
+		PeerJSPeers:              "",
+		PeerJSXOREnable:          false,
+		PeerJSXORKey:             "",
+		PeerPSK:                  "",
+		PeerBlocklist:            "",
+		PeerAnonPolicy:           "open",
+		MQTTEnable:               false,
+		MQTTBroker:               "tcp://broker.emqx.io:1883",
+		MQTTTopicPref:            "peerdrive/v1",
+		MQTTCollections:          "",
+		DiscoverURL:              DefaultDiscoverURL,
+		DiscoverMode:             "auto",
+		DiscoverPresence:         true,
+		URLSourceTemplate:        "",
+		OpenListEnable:           false,
+		OpenListBaseURL:          "",
+		OpenListIndexPath:        "",
+		OpenListToken:            "",
+		OpenListName:             "openlist",
+		OpenListPriority:         900,
+		OpenListTimeoutSecs:      120,
+		OpenListVerify:           true,
+		OpenListCrawl:            false,
+		OpenListCrawlRoot:        "/",
+		OpenListCrawlConcurrency: 4,
+		OpenListCrawlTimeoutSecs: 30,
+		DownloadDir:              "./downloads",
+		FolderMaxDepth:           0,
+		MaxPeers:                 8,
+		ShareEnable:              false,
+		ShareCollections:         "",
+		ShareDirs:                "",
+		ShareFriends:             "",
+		AutoExtract:              false,
+		AutoExtractMaxSize:       500 * 1024 * 1024,
+		AutoExtractMaxRatio:      100,
+		AutoExtractMaxFiles:      10000,
+		AutoExtractDeleteOrig:    true,
+		IwaraEnable:              false,
+		IwaraCookie:              "",
+		IwaraEchProxyExe:         "",
+		IwaraEchProxyPort:        8443,
+		IwaraEntrySuffix:         "l.moonchan.xyz",
+		IwaraUpstreamSuffix:      "iwara.tv",
+		IwaraEchProxyVersion:     "v1.3.0",
+		ExhentaiEnable:           false,
+		ExhentaiConfigURL:        "",
+		ExhentaiConfigInsecure:   false,
+		ExhentaiConfigAuth:       "",
+		TwitterPicEnable:         false,
+		TwitterPicBaseURL:        "",
+		TwitterPicProxyBase:      "",
+		TwitterPicMaxFiles:       0,
+		TwitterPicMaxBytes:       0,
+		TwitterPicTimeout:        20,
+		DownloadOrder:            "local,ipfsgw,btdht,http",
+		DownloadTimeoutSecs:      30,
+		ForwardRules:             "",
+		PortFwdEnable:            false,
+		BTEnable:                 false,
+		IPFSEnable:               false,
+		MaxConcurrentStreams:     8,
+		MaxUploadSpeed:           0,
+		ECHProxyEnable:           false,
+		ECHProxyAddr:             "127.0.0.1:8443",
+		ECHProxyInstallDir:       "",
+		ECHProxyVersion:          "v1.3.0",
+		ECHProxyEntryHost:        "twimg-pbs.l.moonchan.xyz",
+		ECHProxySkipTLS:          true,
+		ECHProxyIPMode:           "v4",
+		ECHProxyStartAttempts:    3,
+		RateLimitRPS:             30,
+		MaxJSONBodyBytes:         1 * 1024 * 1024,
+		DisableCSP:               false,
+		DisableSwagger:           true,
+		Host:                     "",
+		TrustedProxies:           "",
+		SignalAddr:               ":9000",
+		SignalTokens:             "",
+		SignalCORS:               "",
+		SignalTLSCert:            "",
+		SignalTLSKey:             "",
+		SignalRateAnnounce:       1,
+		SignalRateWS:             2,
+		SignalRateID:             5,
+		RegDBPath:                "",
+		LegacyDBPath:             "",
+		NodeMode:                 "standard",
+		NodeRole:                 "peer",
 	}
 }
 
@@ -570,18 +585,18 @@ func DefaultConfig() *Config {
 // using defaults for unset items.
 func Load() *Config {
 	cfg := &Config{
-		Port:               resolvePort(),
-		DBPath:             resolveMainDBPath(),
-		StorageDir:         getEnv("PEERDRIVE_STORAGE", "./storage"),
-		StorageEnable:      getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
-		AllowedOrigins:     getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev"),
+		Port:                resolvePort(),
+		DBPath:              resolveMainDBPath(),
+		StorageDir:          getEnv("PEERDRIVE_STORAGE", "./storage"),
+		StorageEnable:       getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
+		AllowedOrigins:      getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev"),
 		RegistrationServer:  getEnv("PEERDRIVE_REG_SERVER", ""),
 		AdminToken:          getAdminToken(),
 		RemoteControlEnable: getEnvBool("PEERDRIVE_REMOTE_CONTROL_ENABLE", false),
 		RemoteControlToken:  getEnv("PEERDRIVE_REMOTE_CONTROL_TOKEN", ""),
 		MaxUploadBytes:      getEnvInt64("PEERDRIVE_MAX_UPLOAD_BYTES", 100*1024*1024),     // 100MB default
-		MaxUploadBytesAnon: getEnvInt64("PEERDRIVE_MAX_UPLOAD_ANON_BYTES", 10*1024*1024), // 10MB for anonymous
-		BTDHTEnabled:       getEnvBool("PEERDRIVE_BT_DHT_ENABLE", false),                 // Default disabled: DHT init blocks startup; enable manually as needed
+		MaxUploadBytesAnon:  getEnvInt64("PEERDRIVE_MAX_UPLOAD_ANON_BYTES", 10*1024*1024), // 10MB for anonymous
+		BTDHTEnabled:        getEnvBool("PEERDRIVE_BT_DHT_ENABLE", false),                 // Default disabled: DHT init blocks startup; enable manually as needed
 
 		BTDHTListenAddr:   getEnv("PEERDRIVE_BT_DHT_LISTEN", ":6881"),
 		IPFSGatewayEnable: getEnvBool("PEERDRIVE_IPFS_GATEWAY_ENABLE", true),
@@ -604,9 +619,9 @@ func Load() *Config {
 		// 新行只能追加、不能重排既有行的列（C-8）。
 		PeerJSXOREnable: getEnvBool("PEERDRIVE_PEERJS_XOR_ENABLE", false),
 		PeerJSXORKey:    getEnv("PEERDRIVE_PEERJS_XOR_KEY", ""),
-		PeerPSK:      getEnv("PEERDRIVE_PSK", ""),
-		PeerBlocklist:  getEnv("PEERDRIVE_PEER_BLOCKLIST", ""),
-		PeerAnonPolicy: getEnv("PEERDRIVE_ANON_POLICY", "open"),
+		PeerPSK:         getEnv("PEERDRIVE_PSK", ""),
+		PeerBlocklist:   getEnv("PEERDRIVE_PEER_BLOCKLIST", ""),
+		PeerAnonPolicy:  getEnv("PEERDRIVE_ANON_POLICY", "open"),
 
 		MQTTEnable:        getEnvBool("PEERDRIVE_MQTT_ENABLE", false),
 		MQTTBroker:        getEnv("PEERDRIVE_MQTT_BROKER", "tcp://broker.emqx.io:1883"),
@@ -617,12 +632,12 @@ func Load() *Config {
 		DiscoverPresence:  getEnvBool("PEERDRIVE_DISCOVER_PRESENCE", true),
 		URLSourceTemplate: getEnv("PEERDRIVE_URL_SOURCE_TEMPLATE", ""),
 
-		OpenListEnable:      getEnvBool("PEERDRIVE_OPENLIST_ENABLE", false),
-		OpenListBaseURL:     getEnv("PEERDRIVE_OPENLIST_BASE_URL", ""),
-		OpenListIndexPath:   getEnv("PEERDRIVE_OPENLIST_INDEX_FILE", ""),
-		OpenListToken:       getEnv("PEERDRIVE_OPENLIST_TOKEN", ""),
-		OpenListName:        getEnv("PEERDRIVE_OPENLIST_NAME", "openlist"),
-		OpenListPriority:    getEnvInt("PEERDRIVE_OPENLIST_PRIORITY", 900),
+		OpenListEnable:           getEnvBool("PEERDRIVE_OPENLIST_ENABLE", false),
+		OpenListBaseURL:          getEnv("PEERDRIVE_OPENLIST_BASE_URL", ""),
+		OpenListIndexPath:        getEnv("PEERDRIVE_OPENLIST_INDEX_FILE", ""),
+		OpenListToken:            getEnv("PEERDRIVE_OPENLIST_TOKEN", ""),
+		OpenListName:             getEnv("PEERDRIVE_OPENLIST_NAME", "openlist"),
+		OpenListPriority:         getEnvInt("PEERDRIVE_OPENLIST_PRIORITY", 900),
 		OpenListTimeoutSecs:      getEnvInt("PEERDRIVE_OPENLIST_TIMEOUT_SECS", 120),
 		OpenListVerify:           getEnvBool("PEERDRIVE_OPENLIST_VERIFY", true),
 		OpenListCrawl:            getEnvBool("PEERDRIVE_OPENLIST_CRAWL", false),
@@ -686,10 +701,10 @@ func Load() *Config {
 		DownloadOrder:       getEnv("PEERDRIVE_DOWNLOAD_ORDER", "local,ipfsgw,btdht,http"),
 		DownloadTimeoutSecs: getEnvInt("PEERDRIVE_DOWNLOAD_TIMEOUT", 30),
 
-		ForwardRules: getEnv("PEERDRIVE_FORWARD_RULES", ""),
-		PortFwdEnable: getEnvBool("PEERDRIVE_PORTFWD_ENABLE", false),
-		BTEnable:      getEnvBool("PEERDRIVE_BT_ENABLE", false),
-		IPFSEnable:    getEnvBool("PEERDRIVE_IPFS_ENABLE", false),
+		ForwardRules:         getEnv("PEERDRIVE_FORWARD_RULES", ""),
+		PortFwdEnable:        getEnvBool("PEERDRIVE_PORTFWD_ENABLE", false),
+		BTEnable:             getEnvBool("PEERDRIVE_BT_ENABLE", false),
+		IPFSEnable:           getEnvBool("PEERDRIVE_IPFS_ENABLE", false),
 		MaxConcurrentStreams: getEnvInt("PEERDRIVE_MAX_CONCURRENT_STREAMS", 8),
 		MaxUploadSpeed:       getEnvInt64("PEERDRIVE_MAX_UPLOAD_SPEED", 0),
 
@@ -702,11 +717,12 @@ func Load() *Config {
 		ECHProxyIPMode:        getEnv("PEERDRIVE_ECH_PROXY_IP_MODE", "v4"),
 		ECHProxyStartAttempts: getEnvInt("PEERDRIVE_ECH_PROXY_START_ATTEMPTS", 3),
 
-		RateLimitRPS:   getEnvFloat("PEERDRIVE_RATE_LIMIT_RPS", 30),
-		DisableCSP:     os.Getenv("PEERDRIVE_CSP") == "off",
-		DisableSwagger: os.Getenv("PEERDRIVE_SWAGGER") == "on",
-		Host:           getEnv("PEERDRIVE_HOST", ""),
-		TrustedProxies: getEnv("PEERDRIVE_TRUSTED_PROXIES", ""),
+		RateLimitRPS:     getEnvFloat("PEERDRIVE_RATE_LIMIT_RPS", 30),
+		MaxJSONBodyBytes: getEnvInt64("PEERDRIVE_MAX_JSON_BODY_BYTES", 1*1024*1024), // JSON body cap (DoS hardening)
+		DisableCSP:       os.Getenv("PEERDRIVE_CSP") == "off",
+		DisableSwagger:   os.Getenv("PEERDRIVE_SWAGGER") == "on",
+		Host:             getEnv("PEERDRIVE_HOST", ""),
+		TrustedProxies:   getEnv("PEERDRIVE_TRUSTED_PROXIES", ""),
 
 		SignalAddr:         getEnv("PEERSIGNAL_ADDR", ":9000"),
 		SignalTokens:       getEnv("PEERJS_TOKENS", ""),
@@ -737,4 +753,3 @@ func Load() *Config {
 func (c *Config) IsDummyMode() bool {
 	return c != nil && strings.ToLower(strings.TrimSpace(c.NodeMode)) == "dummy"
 }
-

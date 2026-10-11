@@ -5,11 +5,11 @@ package router
 // POST /sources/:name/priority   -> Adjust routing priority at runtime (body: {"priority": n})
 
 import (
-	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"peerdrive/internal/controller"
 	"peerdrive/internal/source"
 )
 
@@ -114,9 +114,11 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 			return
 		}
 		defer file.Close()
-		data, err := io.ReadAll(file)
+		// Cap the read (red-team R2 DoS): io.ReadAll on a multipart part has no limit,
+		// so a body that declares a gigabyte allocates a gigabyte.
+		data, err := controller.ReadCappedBody(file, controller.MaxTorrentBytes)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read torrent file"})
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "torrent file too large"})
 			return
 		}
 		bc := sourceManager.GetBTControl()

@@ -322,11 +322,34 @@ func UniversalDownload(c *gin.Context) {
 	ctx := c.Request.Context()
 	data, protocol, err := universalDownloader.Download(ctx, hash)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		// Generic message: err.Error() carries fetcher names, gateway URLs and upstream
+		// status text. Useful in the operator's logs, but it leaks internal topology to
+		// the caller, so log it instead (red-team R2, info disclosure).
+		log.LogDebug("ctrl-download: universal download %s failed: %v", hash, err)
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
 	}
 
 	c.Header("X-Protocol", protocol)
+
+	// Shared response-header policy (red-team R3): these outlets used to write a bare
+	// c.Data with no Content-Disposition and no CSP — a weaker posture than /sha256sum
+	// for the same content. Route through setDownloadHeaders so every download egress
+	// gets the same whitelist / strict CSP / sanitized filename, plus Range support.
+	meta, _ := fileSvc.GetMeta(hash)
+	fn := hash
+	if meta != nil && meta.Filename != "" {
+		fn = meta.Filename
+	}
+	setDownloadHeaders(c, fn, c.Query("inline") == "1")
+	if meta != nil && meta.Gziped {
+		c.Header("Content-Encoding", "gzip")
+	}
+	if rng := c.GetHeader("Range"); rng != "" {
+		if handled := handleRangeRequest(c, data, rng); handled {
+			return
+		}
+	}
 	c.Data(http.StatusOK, "application/octet-stream", data)
 }
 
@@ -368,11 +391,34 @@ func UniversalDownloadRefresh(c *gin.Context) {
 	ctx := c.Request.Context()
 	data, protocol, err := universalDownloader.Download(ctx, hash)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		// Generic message: err.Error() carries fetcher names, gateway URLs and upstream
+		// status text. Useful in the operator's logs, but it leaks internal topology to
+		// the caller, so log it instead (red-team R2, info disclosure).
+		log.LogDebug("ctrl-download: universal download %s failed: %v", hash, err)
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
 	}
 
 	c.Header("X-Protocol", protocol)
+
+	// Shared response-header policy (red-team R3): these outlets used to write a bare
+	// c.Data with no Content-Disposition and no CSP — a weaker posture than /sha256sum
+	// for the same content. Route through setDownloadHeaders so every download egress
+	// gets the same whitelist / strict CSP / sanitized filename, plus Range support.
+	meta, _ := fileSvc.GetMeta(hash)
+	fn := hash
+	if meta != nil && meta.Filename != "" {
+		fn = meta.Filename
+	}
+	setDownloadHeaders(c, fn, c.Query("inline") == "1")
+	if meta != nil && meta.Gziped {
+		c.Header("Content-Encoding", "gzip")
+	}
+	if rng := c.GetHeader("Range"); rng != "" {
+		if handled := handleRangeRequest(c, data, rng); handled {
+			return
+		}
+	}
 	c.Data(http.StatusOK, "application/octet-stream", data)
 }
 

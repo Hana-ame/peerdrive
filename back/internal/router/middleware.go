@@ -86,6 +86,10 @@ func SecurityHeaders(disableCSP bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-Frame-Options", "SAMEORIGIN")
+		// Permissions-Policy: this node never needs a camera, mic, geolocation,
+		// payment sheet, USB handle, or fullscreen from an embedded frame. Deny by
+		// default so a page served here (the panel, swagger) can never claim them.
+		c.Header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)")
 		c.Header("Referrer-Policy", "no-referrer")
 		c.Header("Cross-Origin-Opener-Policy", "same-origin")
 		// /panel 与 /swagger 同理：公共面板是单文件内联（4 段 <script> + style），
@@ -259,6 +263,32 @@ func RateLimit(rps float64, burst int) gin.HandlerFunc {
 			return
 		}
 		l.sweep(now)
+		c.Next()
+	}
+}
+
+// ── Request body guard (red-team R2) ────────────────────────────────────────
+
+// LimitJSONBody caps the size of JSON request bodies.
+//
+// Why it exists: every c.ShouldBindJSON / c.GetRawData call reads the entire body
+// into memory with no limit. There were 30+ such call sites, all unauthenticated
+// except where AuthRequired happened to sit ahead, so any anonymous caller could
+// POST a multi-gigabyte body and OOM the node. Multipart uploads already carry
+// their own MaxUploadBytes cap, which is why only the JSON surface was uncapped.
+//
+// Only application/json-ish bodies are capped: multipart uploads, raw file
+// streams, and the WebRTC/WS forwarding paths must not be truncated here, they
+// have their own size handling. maxBytes <= 0 disables the cap.
+func LimitJSONBody(maxBytes int64) gin.HandlerFunc {
+	if maxBytes <= 0 {
+		return func(c *gin.Context) { c.Next() }
+	}
+	return func(c *gin.Context) {
+		ct := strings.ToLower(c.Request.Header.Get("Content-Type"))
+		if strings.Contains(ct, "json") {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		}
 		c.Next()
 	}
 }

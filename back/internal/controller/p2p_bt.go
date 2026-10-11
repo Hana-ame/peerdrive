@@ -4,6 +4,7 @@ package controller
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,7 +36,7 @@ func BTTorrentUpload(c *gin.Context) {
 		return
 	}
 
-	file, header, err := c.Request.FormFile("torrent")
+	file, _, err := c.Request.FormFile("torrent")
 	if err != nil {
 		log.LogWarn("ctrl-p2p: BTTorrentUpload missing torrent file: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing torrent file"})
@@ -43,10 +44,14 @@ func BTTorrentUpload(c *gin.Context) {
 	}
 	defer file.Close()
 
-	data := make([]byte, header.Size)
-	if _, err := file.Read(data); err != nil {
+	// Cap the read (red-team R2 DoS): header.Size comes straight from the multipart
+	// Content-Length, which the caller controls. `make([]byte, header.Size)` on a body
+	// that declares 10 GiB allocated 10 GiB before a single byte arrived. Also a single
+	// Read() is not guaranteed to fill the buffer; io.ReadAll is.
+	data, err := ReadCappedBody(file, MaxTorrentBytes)
+	if err != nil {
 		log.LogError("ctrl-p2p: BTTorrentUpload read failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read torrent file"})
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "torrent file too large"})
 		return
 	}
 
@@ -422,4 +427,29 @@ func BTSeedCollection(c *gin.Context) {
 		"total":    meta.TotalSize,
 		"status":   "seeding",
 	})
+}
+
+// maxTorrentBytes caps the .torrent body accepted by /bt/torrent and
+// /sources/bt/torrent. Torrent files are normally well under 1 MiB; 16 MiB is a
+// very generous ceiling that still stops a caller from declaring a gigabyte body.
+const MaxTorrentBytes = 16 << 20
+
+// ReadCappedBody reads r into memory, refusing bodies larger than max.
+//
+// Why it exists (red-team R2 DoS): multipart form parts report header.Size from
+// the client-controlled Content-Length. `make([]byte, header.Size)` allocates that
+// much before any byte arrives, and io.ReadAll has no limit at all — either is a
+// one-request memory-exhaustion primitive on an authenticated route. Returns an
+// error both when the body is over max and when it is exactly max (it may have
+// more data after the cap), so callers cannot silently truncate a torrent.
+func ReadCappedBody(r io.Reader, max int64) ([]byte, error) {
+	lim := io.LimitReader(r, max+1)
+	data, err := io.ReadAll(lim)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("body exceeds %d bytes", max)
+	}
+	return data, nil
 }
