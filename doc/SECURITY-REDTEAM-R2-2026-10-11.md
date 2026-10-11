@@ -165,7 +165,7 @@ build vcs.modified=true
 
 | 发现 | 类型 | 说明 |
 |---|---|---|
-| 信令 key 硬编码且公开（`pd-signal-1edf5e05e4a52b7351392574`，
+| 信令 key 硬编码且公开（`pd-signal-<redacted-24hex>`，
   `signalserver/defaults.go:24` + 前端 + AGENTS.md 明文） | **协议取舍** | PeerJS 协议本身就是共享 key；WS 升级只校验 `key == s.key`。
   任何能读到 key 的人可注册任意 peer id。运营者应以 `PEERSIGNAL_KEY` 轮换 |
 | 信令消息零认证（OFFER/ANSWER/CANDIDATE/LEAVE 覆盖 `m.Src = cl.id` 后直接 route） | **协议取舍** | 信任客户端是 PeerJS 设计；每 OFFER 创建一个 pion PC → DoS 面 |
