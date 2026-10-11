@@ -1,12 +1,10 @@
 // Module ②: My Cloud Drive —— file management for this node (goes through WS admin frames to the backend)
 // List / upload / download / delete / generate share links / categorize / tag files.
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import * as ws from '../../../platform/transport-ws';
 import { getNodeSession, onNodeSession } from '../../../lib/nodeSession';
-import { fmtBytes } from '../../../platform/shared/format';
-import { kindOf, mimeOf } from '../../../platform/shared/mime';
-import { STORAGE_KEY_API_BASE } from '../../../platform/shared/storageKeys';
+import { mimeOf } from '../../../platform/shared/mime';
 import FilePreviewModal from '../../../components/netdisk/FilePreviewModal';
 import DataState from '../../../components/netdisk/DataState';
 import DriveGridView from '../components/DriveGridView';
@@ -16,19 +14,14 @@ import TagEditorModal from '../components/TagEditorModal';
 import DriveToolbar from '../components/DriveToolbar';
 import DriveCategoryBar from '../components/DriveCategoryBar';
 import ContextMenu from '../../../components/netdisk/ContextMenu';
-import { getFileIcon } from '../utils/categories';
+import { getFileIcon, getFileCategory } from '../utils/categories';
+import { useDriveFiles } from '../hooks/useDriveFiles';
 
 export default function Drive() {
   const { hash: deepHash } = useParams();
   const navigate = useNavigate();
-  const [currentDir, setCurrentDir] = useState('');
-  const [files, setFiles] = useState(null); // null = loading
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [shareLink, setShareLink] = useState('');
-  const [copiedHash, setCopiedHash] = useState('');
-  const [peerSession, setPeerSession] = useState(() => getNodeSession());
   const fileRef = useRef(null);
+  const [peerSession, setPeerSession] = useState(() => getNodeSession());
 
   useEffect(() => {
     return onNodeSession((s) => {
@@ -36,41 +29,46 @@ export default function Drive() {
     });
   }, []);
 
-  // Netdisk Features: Search, Category, ViewMode, Tags, Sorting
+  // UI State: Search, Category, ViewMode, Tags, Sorting
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedTag, setSelectedTag] = useState('');
   const [viewMode, setViewMode] = useState('list'); // list | grid
   const [sortBy, setSortBy] = useState('time'); // 'time' | 'name' | 'size'
   const [sortOrder, setSortOrder] = useState('desc'); // 'asc' | 'desc'
-  const [fileTags, setFileTags] = useState({}); // hash -> string[]
-  const [globalTagCounts, setGlobalTagCounts] = useState([]);
-  const [editingTagFile, setEditingTagFile] = useState(null); // file object
+
+  // Modal / Interaction State
+  const [editingTagFile, setEditingTagFile] = useState(null);
   const [tagInputText, setTagInputText] = useState('');
-  const [previewFile, setPreviewFile] = useState(null); // file object to preview
+  const [previewFile, setPreviewFile] = useState(null);
   const [castFile, setCastFile] = useState(null);
   const [screens, setScreens] = useState([]);
   const [targetScreenId, setTargetScreenId] = useState('');
   const [targetChannel, setTargetChannel] = useState('default');
   const [castStatus, setCastStatus] = useState('');
-  const [contextMenu, setContextMenu] = useState(null); // { x, y, file } | null
+  const [contextMenu, setContextMenu] = useState(null);
 
-  const loadTagsSummary = useCallback(async () => {
-    if (peerSession?.client) return; // PeerJS mode doesn't have local tags admin endpoint
-    try {
-      const res = await ws.admin('GET', '/tags/summary');
-      const list = res?.data || res?.tags || [];
-      if (Array.isArray(list)) {
-        setGlobalTagCounts(list);
-      }
-    } catch {
-      // offline / not available
-    }
-  }, [peerSession]);
-
-  useEffect(() => {
-    loadTagsSummary();
-  }, [loadTagsSummary]);
+  // File loading, CRUD actions, and tag metadata hook (Issue #334)
+  const {
+    files,
+    err,
+    setErr,
+    busy,
+    setBusy,
+    shareLink,
+    copiedHash,
+    fileTags,
+    globalTagCounts,
+    load,
+    onPick,
+    onDownload,
+    onDelete,
+    onApproveInbox,
+    onRejectInbox,
+    onShare,
+    onCopyDeepLink,
+    saveFileTags,
+  } = useDriveFiles({ peerSession, selectedCategory, fileRef });
 
   const handleContextMenu = (e, file) => {
     e.preventDefault();
@@ -83,204 +81,16 @@ export default function Drive() {
   };
 
   const handleContainerContextMenu = (e) => {
-    // Only trigger if right-clicking outside of file cards/rows
     if (e.target.closest('[data-context-target]')) return;
     e.preventDefault();
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
-      file: null, // blank canvas context
+      file: null,
     });
   };
 
-  const load = useCallback(async () => {
-    setErr('');
-    // If WebRTC peerSession is active, strictly load files from remote peer via shares
-    if (peerSession?.client) {
-      try {
-        const shareData = await peerSession.client.shares();
-        const rawFiles = shareData?.files || [];
-        const fileList = rawFiles.map(e => {
-          const fname = e.name || e.path || 'unnamed';
-          return {
-            hash: e.hash || '',
-            filename: fname,
-            size: e.size || 0,
-            mime_type: mimeOf(fname, e.mime),
-            created_at: '',
-            isDir: false,
-            path: e.path || e.name || '',
-            isRemotePeer: true,
-          };
-        });
-        setFiles(fileList);
-        return;
-      } catch (e) {
-        setErr('无法获取远程节点共享文件: ' + (e?.message || String(e)));
-        setFiles([]);
-        return;
-      }
-    }
-
-    try {
-      let fileList = [];
-      if (selectedCategory === 'inbox') {
-        const res = await ws.admin('GET', '/files/inbox');
-        const raw = Array.isArray(res) ? res : [];
-        fileList = raw.map(e => ({
-          hash: e.hash || '',
-          filename: e.filename || 'unnamed',
-          size: e.size || 0,
-          mime_type: mimeOf(e.filename, e.mime_type),
-          created_at: e.created_at || '',
-          isDir: false,
-          path: e.path || '',
-          isInbox: true,
-          uploader: e.uploader_peer_id || '',
-        }));
-      } else if (!currentDir) {
-        // Root directory: fetch registered cloud drive files (full hashes, mime types, sizes)
-        const res = await ws.admin('GET', '/files');
-        const raw = Array.isArray(res) ? res : [];
-        fileList = raw.map(e => ({
-          hash: e.hash || '',
-          filename: e.filename || e.name || 'unnamed',
-          size: e.size || 0,
-          mime_type: mimeOf(e.filename || e.name, e.mime_type || e.mime),
-          created_at: e.created_at || e.mod_time || '',
-          isDir: false,
-          path: e.provider_path || e.path || '',
-        }));
-      } else {
-        // Subdirectory browsing: query /files/browse?path=...
-        const query = `?path=${encodeURIComponent(currentDir)}`;
-        const res = await ws.admin('GET', `/files/browse${query}`);
-        const raw = Array.isArray(res) ? res : [];
-        fileList = raw.map(e => ({
-          hash: e.hash || '',
-          filename: e.name || e.filename || 'unnamed',
-          size: e.size || 0,
-          mime_type: e.is_dir ? 'folder' : mimeOf(e.name || e.filename, e.mime),
-          created_at: e.mod_time || '',
-          isDir: Boolean(e.is_dir),
-          path: e.path || '',
-        }));
-      }
-      setFiles(fileList);
-
-      // Fetch tags for files in a single batch request (eliminates N+1 network waterfall)
-      const hashes = fileList.map(f => f.hash).filter(Boolean);
-      if (hashes.length > 0) {
-        try {
-          const res = await ws.admin('POST', '/tags/batch', { shas: hashes });
-          const batchTags = res?.tags || res?.data || {};
-          setFileTags(prev => ({ ...prev, ...batchTags }));
-        } catch {
-          // tag endpoint might not be available
-        }
-      }
-    } catch (e) {
-      // If peerSession is also not present, display connection guide
-      if (!peerSession?.client) {
-        setErr('');
-      } else {
-        setErr(e?.message || String(e));
-      }
-      setFiles([]);
-    }
-  }, [currentDir, peerSession, selectedCategory]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const onPick = async (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setBusy(true);
-    try {
-      await ws.upload(f, f.name, 'file', '/files/upload');
-      await load();
-    } catch (ex) {
-      setErr(ex?.message || String(ex));
-    } finally {
-      setBusy(false);
-      if (fileRef.current) fileRef.current.value = '';
-    }
-  };
-
-  const onDownload = async (f) => {
-    try {
-      if (peerSession?.client) {
-        console.log(`[Drive Download] Starting download for ${f.filename} (${f.hash})`);
-        const t0 = performance.now();
-        await peerSession.client.saveAs(f.hash, f.filename, {
-          onProgress: ({ received, total }) => {
-            const sec = (performance.now() - t0) / 1000;
-            const pct = total > 0 ? ((received / total) * 100).toFixed(1) : '?';
-            const mbps = sec > 0 ? (received / sec / (1024 * 1024)).toFixed(2) : '0';
-            console.log(`[Drive Download] ${f.filename}: ${received}/${total} (${pct}%) at ${mbps} MB/s`);
-          }
-        });
-        const totalSec = ((performance.now() - t0) / 1000).toFixed(2);
-        console.log(`[Drive Download] Finished ${f.filename} in ${totalSec}s`);
-      } else {
-        await ws.downloadToFile(f.hash, f.filename);
-      }
-    } catch (ex) {
-      setErr(ex?.message || String(ex));
-    }
-  };
-
-  const onDelete = async (f) => {
-    if (f.isRemotePeer) {
-      alert('Cannot delete files on a remote peer.');
-      return;
-    }
-    if (!confirm(`Delete "${f.filename}"?`)) return;
-    try {
-      await ws.admin('DELETE', `/files/${f.hash}`);
-      await load();
-    } catch (ex) { setErr(ex?.message || String(ex)); }
-  };
-
-  const onApproveInbox = async (f) => {
-    try {
-      await ws.admin('POST', '/files/inbox/approve', { hash: f.hash });
-      await load();
-    } catch (ex) { setErr(ex?.message || String(ex)); }
-  };
-
-  const onRejectInbox = async (f) => {
-    if (!confirm(`Reject and delete quarantined file "${f.filename}"?`)) return;
-    try {
-      await ws.admin('DELETE', `/files/inbox/${f.hash}`);
-      await load();
-    } catch (ex) { setErr(ex?.message || String(ex)); }
-  };
-
-  const onShare = async (f) => {
-    try {
-      const r = await ws.admin('POST', '/shares', { hash: f.hash, type: 'file', filename: f.filename });
-      const token = r?.token;
-      if (token) {
-        const base = localStorage.getItem(STORAGE_KEY_API_BASE) || 'https://wsl-3000.moonchan.xyz';
-        setShareLink(`${base}/s/${token}`);
-      } else {
-        setShareLink('');
-      }
-    } catch (ex) { setErr(ex?.message || String(ex)); }
-  };
-
-  const onCopyDeepLink = (f) => {
-    const origin = window.location.origin;
-    const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-    // Hash router: append #/drive/:hash (no server SPA fallback needed)
-    const url = `${origin}${base}#/drive/${f.hash}`;
-    navigator.clipboard?.writeText(url);
-    setCopiedHash(f.hash);
-    setTimeout(() => setCopiedHash(''), 2000);
-  };
-
-  // Tag Management
+  // Tag Editor
   const openTagEditor = (f) => {
     setEditingTagFile(f);
     const existing = fileTags[f.hash] || [];
@@ -294,16 +104,14 @@ export default function Drive() {
       .map(t => t.trim())
       .filter(Boolean);
     try {
-      await ws.admin('POST', `/tags/sha/${editingTagFile.hash}`, { tags });
-      setFileTags(prev => ({ ...prev, [editingTagFile.hash]: tags }));
+      await saveFileTags(editingTagFile.hash, tags);
       setEditingTagFile(null);
-      loadTagsSummary();
     } catch (ex) {
       setErr(ex?.message || String(ex));
     }
   };
 
-  // Remote Display Cast Management (Issue #243)
+  // Remote Display Cast (Issue #243)
   const openCastModal = async (f) => {
     setCastFile(f);
     setCastStatus('');
@@ -390,19 +198,16 @@ export default function Drive() {
   const filteredFiles = useMemo(() => {
     if (!files) return [];
     const list = files.filter(f => {
-      // 1. Directory search / match
       const matchQuery = !searchQuery.trim() ||
         f.filename.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (f.hash && f.hash.toLowerCase().includes(searchQuery.toLowerCase())) ||
         ((fileTags[f.hash] || []).some(t => t.toLowerCase().includes(searchQuery.toLowerCase())));
 
-      // 2. Category match
       let matchCategory = true;
       if (selectedCategory !== 'all') {
         matchCategory = getFileCategory(f) === selectedCategory;
       }
 
-      // 3. Tag match
       let matchTag = true;
       if (selectedTag) {
         matchTag = (fileTags[f.hash] || []).includes(selectedTag);
@@ -423,9 +228,6 @@ export default function Drive() {
       return sortOrder === 'asc' ? cmp : -cmp;
     });
   }, [files, searchQuery, selectedCategory, selectedTag, fileTags, sortBy, sortOrder]);
-
-  const th = 'text-left text-xs uppercase tracking-wider text-gray-500 px-3 py-2 font-medium';
-  const td = 'px-3 py-2';
 
   return (
     <div className="p-4 sm:p-8 overflow-y-auto h-full" onContextMenu={handleContainerContextMenu}>
@@ -448,6 +250,7 @@ export default function Drive() {
             {err}
           </div>
         )}
+
         {shareLink && (
           <div className="mb-4 text-xs text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 break-all">
             Share link: <span className="font-mono text-brand-300">{shareLink}</span>
@@ -604,4 +407,3 @@ export default function Drive() {
     </div>
   );
 }
-

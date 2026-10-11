@@ -1,0 +1,294 @@
+package transport
+
+import (
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"peerdrive/internal/log"
+)
+
+// stream_manager.go — P2P live stream state, manifests, and chunk playlist management (Issue #244, #334).
+//
+// Background & Mechanism:
+// "服务 peerdrive 文件的方式，提供文件 sha，然后所有人互相抓"
+// 1. Live stream publisher continuously releases media segments / chunks, each addressed by its SHA256 hash.
+// 2. The stream manifest maintains the live segment sequence and sliding window.
+// 3. Subscribers receive chunk announcements via WebRTC/WS, and pull the content-addressed files from
+//    the publisher or any peer that has already retrieved that chunk.
+// 4. Fully decentralized distribution alleviates upstream bandwidth pressure on the origin broadcaster.
+
+const maxStreamChunkWindow = 50
+
+// StreamChunk represents a single content-addressed live stream segment.
+type StreamChunk struct {
+	Seq       int64   `json:"seq"`
+	Hash      string  `json:"hash"` // 64-hex SHA-256 of the media segment
+	Size      int64   `json:"size,omitempty"`
+	Duration  float64 `json:"duration,omitempty"` // segment duration in seconds
+	MimeType  string  `json:"mimeType,omitempty"` // e.g. "video/mp4", "image/jpeg"
+	Timestamp int64   `json:"timestamp"`
+	Title     string  `json:"title,omitempty"`
+}
+
+// StreamManifest describes an active live stream channel and its recent segment playlist.
+type StreamManifest struct {
+	StreamID   string        `json:"streamId"`
+	Title      string        `json:"title"`
+	Publisher  string        `json:"publisher"`
+	MimeType   string        `json:"mimeType"`
+	Active     bool          `json:"active"`
+	CurrentSeq int64         `json:"currentSeq"`
+	CreatedAt  time.Time     `json:"createdAt"`
+	UpdatedAt  time.Time     `json:"updatedAt"`
+	Chunks     []StreamChunk `json:"chunks"`
+}
+
+// StreamFrame wire protocol frame for live streaming.
+type StreamFrame struct {
+	Type     string            `json:"type"`                // always "stream"
+	Action   string            `json:"action"`              // "pub", "chunk", "sub", "unsub", "list", "manifest", "close"
+	StreamID string            `json:"streamId,omitempty"`
+	Title    string            `json:"title,omitempty"`
+	MimeType string            `json:"mimeType,omitempty"`
+	Chunk    *StreamChunk      `json:"chunk,omitempty"`
+	Manifest *StreamManifest   `json:"manifest,omitempty"`
+	Streams  []*StreamManifest `json:"streams,omitempty"`
+	Token    string            `json:"token,omitempty"`
+	ReqID    string            `json:"reqId,omitempty"`
+}
+
+type streamRecord struct {
+	manifest    *StreamManifest
+	subscribers map[Session]bool
+	publisher   Session
+}
+
+// StreamManager manages live stream channels, subscriptions, and chunk broadcasting.
+type StreamManager struct {
+	mu      sync.RWMutex
+	streams map[string]*streamRecord
+}
+
+// NewStreamManager creates a new StreamManager instance.
+func NewStreamManager() *StreamManager {
+	return &StreamManager{
+		streams: make(map[string]*streamRecord),
+	}
+}
+
+// CreateStream registers a new live stream channel.
+func (m *StreamManager) CreateStream(pub Session, streamID, title, mimeType string) (*StreamManifest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if streamID == "" {
+		return nil, fmt.Errorf("streamId cannot be empty")
+	}
+
+	if existing, ok := m.streams[streamID]; ok && existing.manifest.Active {
+		if existing.publisher != nil && pub != nil && existing.publisher.ID() != pub.ID() {
+			return nil, fmt.Errorf("stream %q is already active and owned by publisher %s", streamID, existing.manifest.Publisher)
+		}
+	}
+
+	if title == "" {
+		title = "Live Stream " + streamID
+	}
+	if mimeType == "" {
+		mimeType = "video/mp4"
+	}
+
+	pubID := "local"
+	if pub != nil {
+		pubID = pub.ID()
+	}
+
+	manifest := &StreamManifest{
+		StreamID:   streamID,
+		Title:      title,
+		Publisher:  pubID,
+		MimeType:   mimeType,
+		Active:     true,
+		CurrentSeq: 0,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+		Chunks:     make([]StreamChunk, 0),
+	}
+
+	m.streams[streamID] = &streamRecord{
+		manifest:    manifest,
+		subscribers: make(map[Session]bool),
+		publisher:   pub,
+	}
+
+	log.LogInfo("stream: created stream %s (title=%s, publisher=%s)", streamID, title, pubID)
+	return manifest, nil
+}
+
+// PushChunk publishes a new media segment SHA to the stream and broadcasts it to all subscribers.
+func (m *StreamManager) PushChunk(pub Session, streamID string, chunk StreamChunk) (*StreamChunk, error) {
+	m.mu.Lock()
+	rec, ok := m.streams[streamID]
+	if !ok || !rec.manifest.Active {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("stream %q is not active", streamID)
+	}
+
+	if rec.publisher != nil && pub != nil && rec.publisher.ID() != pub.ID() {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("session %s is not authorized to push chunks to stream %q", pub.ID(), streamID)
+	}
+
+	if chunk.Hash == "" {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("chunk hash cannot be empty")
+	}
+
+	if strings.Contains(chunk.Hash, "..") || strings.ContainsAny(chunk.Hash, "/\\\x00") {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("invalid chunk hash %q: path traversal characters disallowed", chunk.Hash)
+	}
+
+	rec.manifest.CurrentSeq++
+	chunk.Seq = rec.manifest.CurrentSeq
+	if chunk.Timestamp == 0 {
+		chunk.Timestamp = time.Now().UnixMilli()
+	}
+	if chunk.MimeType == "" {
+		chunk.MimeType = rec.manifest.MimeType
+	}
+
+	rec.manifest.Chunks = append(rec.manifest.Chunks, chunk)
+	if len(rec.manifest.Chunks) > maxStreamChunkWindow {
+		rec.manifest.Chunks = rec.manifest.Chunks[len(rec.manifest.Chunks)-maxStreamChunkWindow:]
+	}
+	rec.manifest.UpdatedAt = time.Now()
+
+	subs := make([]Session, 0, len(rec.subscribers))
+	for s := range rec.subscribers {
+		subs = append(subs, s)
+	}
+	m.mu.Unlock()
+
+	// Broadcast chunk to all subscribers
+	frame := StreamFrame{
+		Type:     "stream",
+		Action:   "chunk",
+		StreamID: streamID,
+		Chunk:    &chunk,
+	}
+	for _, s := range subs {
+		_ = s.SendJSON(frame)
+	}
+
+	log.LogDebug("stream: chunk #%d (sha=%s) broadcast to %d subscribers on %s", chunk.Seq, chunk.Hash, len(subs), streamID)
+	return &chunk, nil
+}
+
+// Subscribe registers a viewer session to receive real-time chunk notifications for a stream.
+func (m *StreamManager) Subscribe(viewer Session, streamID string) (*StreamManifest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	rec, ok := m.streams[streamID]
+	if !ok {
+		return nil, fmt.Errorf("stream %q not found", streamID)
+	}
+
+	if viewer != nil {
+		rec.subscribers[viewer] = true
+	}
+
+	copyManifest := *rec.manifest
+	copyManifest.Chunks = append([]StreamChunk(nil), rec.manifest.Chunks...)
+	log.LogInfo("stream: session %s subscribed to stream %s", viewer.ID(), streamID)
+	return &copyManifest, nil
+}
+
+// Unsubscribe removes a viewer session from a stream channel.
+func (m *StreamManager) Unsubscribe(viewer Session, streamID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if rec, ok := m.streams[streamID]; ok {
+		delete(rec.subscribers, viewer)
+	}
+}
+
+// CloseStream closes a live stream channel and informs all subscribers.
+func (m *StreamManager) CloseStream(pub Session, streamID string) error {
+	m.mu.Lock()
+	rec, ok := m.streams[streamID]
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("stream %q not found", streamID)
+	}
+
+	if rec.publisher != nil && pub != nil && rec.publisher.ID() != pub.ID() {
+		m.mu.Unlock()
+		return fmt.Errorf("session %s is not authorized to close stream %q", pub.ID(), streamID)
+	}
+
+	rec.manifest.Active = false
+	rec.manifest.UpdatedAt = time.Now()
+	subs := make([]Session, 0, len(rec.subscribers))
+	for s := range rec.subscribers {
+		subs = append(subs, s)
+	}
+	m.mu.Unlock()
+
+	frame := StreamFrame{
+		Type:     "stream",
+		Action:   "close",
+		StreamID: streamID,
+	}
+	for _, s := range subs {
+		_ = s.SendJSON(frame)
+	}
+
+	log.LogInfo("stream: closed stream %s", streamID)
+	return nil
+}
+
+// ListStreams returns all currently active streams.
+func (m *StreamManager) ListStreams() []*StreamManifest {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var res []*StreamManifest
+	for _, r := range m.streams {
+		cp := *r.manifest
+		cp.Chunks = append([]StreamChunk(nil), r.manifest.Chunks...)
+		res = append(res, &cp)
+	}
+	return res
+}
+
+// GetManifest returns the current manifest and chunk playlist for a stream.
+func (m *StreamManager) GetManifest(streamID string) (*StreamManifest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	rec, ok := m.streams[streamID]
+	if !ok {
+		return nil, fmt.Errorf("stream %q not found", streamID)
+	}
+	cp := *rec.manifest
+	cp.Chunks = append([]StreamChunk(nil), rec.manifest.Chunks...)
+	return &cp, nil
+}
+
+// UnregisterSession cleans up any subscriptions or streams associated with the closing session.
+func (m *StreamManager) UnregisterSession(sess Session) {
+	if sess == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, rec := range m.streams {
+		delete(rec.subscribers, sess)
+	}
+}
