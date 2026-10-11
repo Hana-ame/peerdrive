@@ -111,7 +111,7 @@ func ListCollections(c *gin.Context) {
 	username := c.Param("username")
 	cols, err := collSvc.List(username)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if cols == nil {
@@ -157,7 +157,7 @@ func SearchCollections(c *gin.Context) {
 
 	cols, err := collSvc.SearchWithFilters(q, tagList, visibility)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if cols == nil {
@@ -181,7 +181,7 @@ func GetCollection(c *gin.Context) {
 	collectionName := c.Param("collection_name")
 	col, err := collSvc.Get(username, collectionName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if col == nil {
@@ -209,7 +209,7 @@ func GetCollection(c *gin.Context) {
 	if entries == nil {
 		entries, err = collSvc.ListEntries(col.ID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			writeInternalError(c, err)
 			return
 		}
 	}
@@ -240,7 +240,7 @@ func ListPublicCollections(c *gin.Context) {
 	q := c.Query("q")
 	cols, err := collSvc.ListPublic(q)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if cols == nil {

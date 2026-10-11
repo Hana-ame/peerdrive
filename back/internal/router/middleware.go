@@ -76,13 +76,24 @@ func RequestIDFrom(c *gin.Context) string {
 
 // SecurityHeaders sets a set of default security response headers.
 //
-// CSP enabled by default, but /swagger/* and /panel/* are exceptions: both are
-// single-file HTML pages with inline scripts/styles (Swagger's official UI relies
-// on inline scripts and eval); CSP turns them into blank pages. Admin console pages are not served by this process (front is separately
-// deployed), so strict CSP has no business side effects. If compatibility issues
-// arise, use PEERDRIVE_CSP=off to disable.
+// CSP is on by default. /swagger/* and /panel/* get a RELAXED CSP instead of
+// none: both are single-file HTML pages with inline scripts/styles (Swagger's
+// official UI relies on inline scripts and eval; the panel is built as one
+// self-contained file so it can be opened via file:// or any static host).
+// Relaxing script-src/style-src for those two prefixes is unavoidable without
+// turning the panel into a multi-file build, but the directives that are NOT
+// about inline code are still enforced — so the exemption is a partial rather
+// than total surrender (see inlineHTMLCSP). Admin console pages are not served
+// by this process (front is separately deployed), so strict CSP has no business
+// side effects. If compatibility issues arise, use PEERDRIVE_CSP=off.
 func SecurityHeaders(disableCSP bool) gin.HandlerFunc {
 	csp := "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+	// inlineHTMLCSP: the strict policy plus only what a single-file page needs.
+	// object-src 'none' still blocks Flash/Java/<object> plugins, base-uri 'self'
+	// still blocks <base href> exfiltration, frame-ancestors 'self' still blocks
+	// clickjacking. Only inline script/style is allowed — strictly better than
+	// sending no CSP at all, which is what this branch used to do.
+	inlineHTMLCSP := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
 	return func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-Frame-Options", "SAMEORIGIN")
@@ -92,15 +103,23 @@ func SecurityHeaders(disableCSP bool) gin.HandlerFunc {
 		c.Header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)")
 		c.Header("Referrer-Policy", "no-referrer")
 		c.Header("Cross-Origin-Opener-Policy", "same-origin")
-		// /panel 与 /swagger 同理：公共面板是单文件内联（4 段 <script> + style），
-		// 严格 CSP 会把内联全部拦掉，面板打开是一张空白页 —— 实测踩到：
-		// 浏览器控制台报 "Executing inline script violates ... default-src 'self'"，
-		// 自动连接的前置脚本根本没跑。
-		// 放宽只针对这一个前缀，且其余指令（object-src/base-uri/frame-ancestors）不放宽。
-		inlineHTML := strings.HasPrefix(c.Request.URL.Path, "/swagger") ||
-			strings.HasPrefix(c.Request.URL.Path, "/panel")
-		if !disableCSP && !inlineHTML {
-			c.Header("Content-Security-Policy", csp)
+		// /panel 与 /swagger：单文件内联页面（4 段 <script> + style），完全不给
+		// CSP 时浏览器控制台报 "Executing inline script violates ... default-src
+		// 'self'"，自动连接的前置脚本根本不会跑 —— 实测踩过。但仍降级成
+		// inlineHTMLCSP 而不是跳过 CSP：object-src / base-uri / frame-ancestors
+		// 这三条与 inline 无关，照旧生效。放宽仅限这两个前缀，其余路径仍是 csp。
+		// 注意必须按路径段匹配（"/panel" 或 "/panel/..."），不能裸用
+		// strings.HasPrefix —— 那会让 /panels、/swaggerish 这类无关路径也拿到
+		// 放宽策略（红队 R2 实测踩到）。
+		p := c.Request.URL.Path
+		inlineHTML := p == "/swagger" || strings.HasPrefix(p, "/swagger/") ||
+			p == "/panel" || strings.HasPrefix(p, "/panel/")
+		if !disableCSP {
+			if inlineHTML {
+				c.Header("Content-Security-Policy", inlineHTMLCSP)
+			} else {
+				c.Header("Content-Security-Policy", csp)
+			}
 		}
 		c.Next()
 	}

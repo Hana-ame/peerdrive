@@ -99,7 +99,11 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	upgrader := websocket.Upgrader{
-		CheckOrigin: func(*http.Request) bool { return true }, // self-hosted, whitelist configured by the caller
+		// Red-team R2: was hard-coded to true, which left the signalling socket
+		// outside the WithCORSOrigins allow-list that the REST endpoints honor.
+		// Empty allow-list still accepts everything, so nothing changes unless an
+		// operator opts in.
+		CheckOrigin: s.originAllowed,
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

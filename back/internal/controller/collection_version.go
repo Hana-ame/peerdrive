@@ -37,7 +37,7 @@ func CommitCollection(c *gin.Context) {
 	}
 	col, err := collSvc.Get(username, collectionName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if col == nil {
@@ -48,7 +48,7 @@ func CommitCollection(c *gin.Context) {
 	// 1. Get current workspace entries
 	entries, err := collSvc.ListEntries(col.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
@@ -66,20 +66,20 @@ func CommitCollection(c *gin.Context) {
 	storageDir := c.MustGet("storageDir").(string)
 	hash, err := collSvc.SaveAnon(anonColl, storageDir)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create snapshot: " + err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
 	// 4. Update current_hash
 	if err := collSvc.UpdateCurrentHash(col.ID, hash); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update current hash: " + err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
 	// 5. Original version snapshot logic (preserves history)
 	versions, err := collSvc.VersionLog(col.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	var parentID *int
@@ -88,11 +88,11 @@ func CommitCollection(c *gin.Context) {
 	}
 	verID, verNum, err := collSvc.CreateVersion(col.ID, req.CommitMessage, parentID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if err := collSvc.SnapshotEntries(verID, col.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
@@ -114,7 +114,7 @@ func GetVersionLog(c *gin.Context) {
 	collectionName := c.Param("collection_name")
 	col, err := collSvc.Get(username, collectionName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if col == nil {
@@ -123,7 +123,7 @@ func GetVersionLog(c *gin.Context) {
 	}
 	versions, err := collSvc.VersionLog(col.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if versions == nil {
@@ -155,7 +155,7 @@ func RollbackCollection(c *gin.Context) {
 	}
 	col, err := collSvc.Get(username, collectionName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if col == nil {
@@ -163,7 +163,7 @@ func RollbackCollection(c *gin.Context) {
 		return
 	}
 	if err := collSvc.RestoreVersion(vid, col.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
@@ -217,7 +217,7 @@ func SetCollectionVisibility(c *gin.Context) {
 		return
 	}
 	if err := collSvc.SetVisibility(username, collectionName, req.Visibility); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "ok"})
@@ -246,7 +246,7 @@ func UpdateCollectionTags(c *gin.Context) {
 		return
 	}
 	if err := collSvc.UpdateTags(username, collectionName, req.Tags); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "ok"})

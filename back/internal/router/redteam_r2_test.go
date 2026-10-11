@@ -211,3 +211,77 @@ func TestIsOriginAllowed_DefaultsAreAnAllowList(t *testing.T) {
 	// A random third-party origin is not the default answer.
 	require.False(t, cfg.IsOriginAllowed("https://random.github.io"))
 }
+
+// TestSecurityHeaders_CSP — CSP is always emitted (except the explicit off switch),
+// and the single-file pages get the relaxed variant rather than none.
+//
+// 发现背景（红队 R2）：/panel 与 /swagger 原先是「完全不给 CSP」——单文件内联页面
+// 确实需要 inline script，但「完全不给」同时放掉了 object-src / base-uri /
+// frame-ancestors 三条与 inline 无关的硬保护。修复为降级到 inlineHTMLCSP，
+// 本用例把「这两个前缀也必须带 CSP、且三条硬保护不放宽」钉死。
+func TestSecurityHeaders_CSP(t *testing.T) {
+	t.Parallel()
+	strict := "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+	relaxed := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/api/files", strict},    // JSON API: strict
+		{"/download/abc", strict}, // file download: strict
+		{"/", strict},             // root: strict
+		{"/panel", relaxed},       // single-file inline panel: relaxed, NOT absent
+		{"/panel/", relaxed},
+		{"/panel/peerjs.min.js", relaxed},
+		{"/swagger", relaxed},
+		{"/swagger/index.html", relaxed},
+		{"/swagger/", relaxed},
+		{"/panels", strict}, // prefix must not match: /panels is NOT /panel
+		{"/swaggerish", strict},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, tc.path, nil)
+			SecurityHeaders(false)(c)
+			assert.Equal(t, tc.want, w.Header().Get("Content-Security-Policy"),
+				"path %s", tc.path)
+		})
+	}
+}
+
+// TestSecurityHeaders_CSPStillHardenedOnRelaxed — the relaxed policy must keep
+// the three directives that have nothing to do with inline code. That is the
+// whole point of the fix: the exemption is partial, not total.
+func TestSecurityHeaders_CSPStillHardenedOnRelaxed(t *testing.T) {
+	t.Parallel()
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/panel", nil)
+	SecurityHeaders(false)(c)
+
+	csp := w.Header().Get("Content-Security-Policy")
+	require.NotEmpty(t, csp)
+	assert.Contains(t, csp, "object-src 'none'", "plugins must stay blocked on the panel")
+	assert.Contains(t, csp, "base-uri 'self'", "<base href> exfiltration must stay blocked")
+	assert.Contains(t, csp, "frame-ancestors 'self'", "clickjacking protection must stay")
+	assert.NotContains(t, csp, "unsafe-eval", "'unsafe-eval' must never appear")
+}
+
+// TestSecurityHeaders_DisabledCSP — PEERDRIVE_CSP=off still disables it entirely,
+// so an operator can escape a bad configuration.
+func TestSecurityHeaders_DisabledCSP(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"/api/files", "/panel", "/swagger/"} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, path, nil)
+		SecurityHeaders(true)(c)
+		assert.Empty(t, w.Header().Get("Content-Security-Policy"), "path %s", path)
+		// The other hardening headers are not tied to the CSP switch.
+		assert.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
+		assert.Equal(t, "SAMEORIGIN", w.Header().Get("X-Frame-Options"))
+	}
+}

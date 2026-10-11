@@ -127,7 +127,7 @@ func SearchLocalFiles(c *gin.Context) {
 	page, err := fileSearchSvc.Search(parseSearchQuery(c))
 	if err != nil {
 		log.LogWarn("ctrl-file-search: local search failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	searchResponseJSON(c, page)

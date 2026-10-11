@@ -355,16 +355,16 @@ func BTSeedCollection(c *gin.Context) {
 		srcPath := filepath.Join(storageDir, entry.Hash[:2], entry.Hash)
 		dstPath := filepath.Join(rootDir, entry.Path)
 		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create dir: " + err.Error()})
+			writeInternalError(c, err)
 			return
 		}
 		src, err := os.ReadFile(srcPath)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file " + entry.Path})
+			writeInternalError(c, err)
 			return
 		}
 		if err := os.WriteFile(dstPath, src, 0644); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write file " + entry.Path})
+			writeInternalError(c, err)
 			return
 		}
 	}
@@ -374,7 +374,7 @@ func BTSeedCollection(c *gin.Context) {
 		PieceLength: 256 * 1024,
 	}
 	if err := info.BuildFromFilePath(rootDir); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build torrent info: " + err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
@@ -383,7 +383,7 @@ func BTSeedCollection(c *gin.Context) {
 	}
 	var buf bytes.Buffer
 	if err := mi.Write(&buf); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode torrent: " + err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	torrentBytes := buf.Bytes()
@@ -399,12 +399,12 @@ func BTSeedCollection(c *gin.Context) {
 		srcPath := filepath.Join(storageDir, entry.Hash[:2], entry.Hash)
 		dstPath := filepath.Join(dataRoot, entry.Path)
 		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create bt dir: " + err.Error()})
+			writeInternalError(c, err)
 			return
 		}
 		src, _ := os.ReadFile(srcPath)
 		if err := os.WriteFile(dstPath, src, 0644); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to copy to bt dir: " + err.Error()})
+			writeInternalError(c, err)
 			return
 		}
 	}

@@ -149,7 +149,7 @@ func UnpinCID(c *gin.Context) {
 	pin, err := pinSvc.Get(cidParam)
 	if err != nil {
 		log.LogError("ctrl-p2p: UnpinCID lookup failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if pin == nil {
@@ -159,7 +159,7 @@ func UnpinCID(c *gin.Context) {
 
 	if err := pinSvc.Remove(cidParam); err != nil {
 		log.LogError("ctrl-p2p: UnpinCID remove failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
@@ -173,7 +173,7 @@ func ListPins(c *gin.Context) {
 	pins, err := pinSvc.List()
 	if err != nil {
 		log.LogError("ctrl-p2p: ListPins failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if pins == nil {

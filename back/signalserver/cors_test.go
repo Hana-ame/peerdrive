@@ -13,8 +13,8 @@ import (
 // 旧实现只通过集成测试间接覆盖，缺少对 OPTIONS vs 非 OPTIONS 的表驱动覆盖。
 func TestHandleCORSPreflight(t *testing.T) {
 	tests := []struct {
-		name       string
-		method     string
+		name        string
+		method      string
 		wantHandled bool
 	}{
 		{"OPTIONS preflight", http.MethodOptions, true},
@@ -120,6 +120,45 @@ func TestHandleCORS(t *testing.T) {
 			handled := srv.handleCORS(w, r)
 			assert.Equal(t, tt.wantHandled, handled)
 			assert.Equal(t, tt.wantACAO, w.Header().Get("Access-Control-Allow-Origin"))
+		})
+	}
+}
+
+// TestOriginAllowed 表驱动测试 WS 升级的 Origin 判定。
+// 发现背景（红队 R2）：upgrader.CheckOrigin 曾硬编码为 true，导致
+// WithCORSOrigins 只约束 REST 端点、信令 socket 完全不受约束——攻击者页面
+// 仍可向任意 peer id 发 OFFER（每个 OFFER 在目标节点上产生一次 WebRTC 分配）。
+// 本用例把「配了白名单就必须真的拦住跨域 socket」钉死，同时守住向后兼容：
+// 不配白名单必须全放行（file:// 面板 Origin 是 "null"，历史行为不能变）。
+func TestOriginAllowed(t *testing.T) {
+	tests := []struct {
+		name      string
+		origins   []string
+		origin    string
+		wantAllow bool
+	}{
+		{"no allow-list: accept everything", nil, "https://evil.example.com", true},
+		{"no allow-list: null origin (file:// panel)", nil, "null", true},
+		{"no allow-list: no Origin header (Go dialer)", nil, "", true},
+		{"empty allow-list: accept", []string{}, "https://evil.example.com", true},
+
+		{"list set: matching origin", []string{"https://panel.example.com"}, "https://panel.example.com", true},
+		{"list set: case-insensitive match", []string{"https://panel.example.com"}, "HTTPS://PANEL.example.com", true},
+		{"list set: other origin rejected", []string{"https://panel.example.com"}, "https://evil.example.com", false},
+		{"list set: wildcard allows all", []string{"*"}, "https://evil.example.com", true},
+		{"list set: null origin accepted", []string{"null"}, "null", true},
+		{"list set: null origin rejected when not listed", []string{"https://panel.example.com"}, "null", false},
+		{"list set: no Origin header accepted", []string{"https://panel.example.com"}, "", true},
+		{"list set: prefix must not match", []string{"https://panel.example.com"}, "https://panel.example.com.evil.example.com", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewServer("testkey", WithCORSOrigins(tt.origins))
+			r := httptest.NewRequest(http.MethodGet, "/peerjs?token=testkey&id=x", nil)
+			if tt.origin != "" {
+				r.Header.Set("Origin", tt.origin)
+			}
+			assert.Equal(t, tt.wantAllow, s.originAllowed(r))
 		})
 	}
 }

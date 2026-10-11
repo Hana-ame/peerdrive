@@ -1,0 +1,29 @@
+# GitHub Pages response headers for the Peerdrive web UI.
+#
+# Discovered in the red-team R2 audit: the full UI was deployed to Pages with
+# **no security headers at all** — no CSP, no nosniff, no X-Frame-Options.
+# Every response from pages.dev carrying the admin JWT's localStorage scope was
+# completely unprotected. GitHub Pages honours a `_headers` file in the
+# published artifact (docs.github.com/en/pages/getting-started-with-github-pages
+# / "Setting custom HTTP headers"), and vite copies public/ verbatim into dist/,
+# so this file needs no workflow change to ship.
+#
+# Everything below is a pure add-on to responses that had none. No existing
+# behaviour depends on the absence of these headers.
+#
+# connect-src is deliberately wide (self + http: + https: + ws: + wss:). It
+# cannot be locked to 'self': the UI talks to an operator-selected node
+# (peerdrive_api_base in localStorage, default https://wsl-3000.moonchan.xyz)
+# over HTTP + WebSocket, and to the signalling host as well. Locking it would
+# break the product for every non-self deployment. The value CSP still gives
+# here is the other directives — object-src 'none' blocks plugins,
+# base-uri 'self' blocks <base href> exfiltration, frame-ancestors 'self'
+# blocks clickjacking, and default-src 'self' with NO 'unsafe-inline' means an
+# injected <script> or an event-handler attribute cannot run. That is the one
+# thing that turns a stored-XSS primitive into something readable.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)
+  Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'; connect-src 'self' ws: wss: http: https:

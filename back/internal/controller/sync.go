@@ -30,7 +30,7 @@ func (c *SyncController) SaveLocal(ctx *gin.Context) {
 	}
 
 	if err := c.syncSvc.SaveToDisk(req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(ctx, err)
 		return
 	}
 
