@@ -6,7 +6,7 @@
 Peerdrive is a **P2P netdisk over WebRTC**: member nodes connect browser-native through PeerJS signaling, content is stored content-addressed (SHA256) and shared through the operator's explicit share scope, and files can be saved across nodes. Through the unified abstraction of **Collection + Provider**, it integrates local files, HTTP resources and PeerJS/WebRTC interconnection into a single system.
 
 > **Positioning — one source of truth**: netdisk + marketplace + select & save over WebRTC; not a public content-addressing network like IPFS/BT.
-> **Accounts / JWT identity is roadmap-only** — Phase 7 is **design ready, not implemented** (`doc/ROADMAP.md` §7), and ownership today is the node's `peerId`, not an account.
+> **Dual-Track Identity**: Standalone nodes are **100% sovereign and account-free** (ownership is the node's `peerId` + PSK admission); when configured with a registration server, **Phase 7 federated identity** enables user↔node directory and cross-node token access.
 > Direction and boundaries: [`doc/PROJECT-VISION.md`](doc/PROJECT-VISION.md) (incl. §9 narrative-consistency rules) · development order: [`doc/ROADMAP.md`](doc/ROADMAP.md) · goal shape: [`doc/NETDISK.md`](doc/NETDISK.md).
 >
 > **Optional / experimental plugins** (off by default, outside the default netdisk path): BitTorrent DHT (`PEERDRIVE_BT_ENABLE`), IPFS gateway (`PEERDRIVE_IPFS_ENABLE`), Iwara (`PEERDRIVE_IWARA_ENABLE`); WebDAV and SMB are evaluation-stage sources, not shipped.
@@ -51,10 +51,10 @@ Rather than relying on legacy single-network DHTs, Peerdrive interconnects nodes
 >
 > **First run? Start with `peerdrive demo`** — see [Quick start](#quick-start) below. It needs no configuration.
 >
-> **Two entries, and neither needs an account:** the *consumer* entry is the public panel / `packages/peerdrive-client`
+> **Two entries, and sovereign mode needs no account:** the *consumer* entry is the public panel / `packages/peerdrive-client`
 > (view and save shared content, no local node required); the *operator* entry is your own node plus the management
-> console (`front/src/features/`, backend must be running). Ownership today is the node `peerId` — accounts are Phase 7
-> (`doc/ROADMAP.md` §7), **not implemented**.
+> console (`front/src/features/`, backend must be running). Ownership defaults to the node `peerId` (sovereign mode);
+> nodes configured with a registration server optionally gain account directory and cross-node token access (Phase 7).
 
 ### Consumer entry — usable without running a node (public panel `dist/panel.html`)
 

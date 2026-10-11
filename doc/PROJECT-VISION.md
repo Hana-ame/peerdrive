@@ -8,18 +8,15 @@
 
 ## 1. One-Sentence Positioning
 
-> **P2P Netdisk over WebRTC: storage-decentralized, peerId-trusted today, identity-anchored later.**
+> **P2P Netdisk over WebRTC: storage-decentralized, peerId-sovereign by default, identity-federated when configured.**
 >
 > A netdisk: member nodes connect browser-native via PeerJS signaling + WebRTC, content is stored content-addressed
-> (SHA256) and shared through the operator's explicit share scope. Ownership and access today rest on the node's own
-> peerId (plus the optional PSK admission gate) — **not on accounts**.
+> (SHA256) and shared through the operator's explicit share scope.
+> Ownership and access operate on a **Dual-Track architecture**:
+> 1. **Sovereign Track (Default)**: Fully standalone and account-free, using the node's own peerId and PSK admission.
+> 2. **Federated Track (Phase 7)**: Nodes register to the registration server directory and verify requester tokens to unlock restricted collections across nodes.
 > Analogy: **P2P version of self-hosted NAS + Resilio Sync shared folders** (netdisk + marketplace + select & save),
 > not a public network like IPFS/BT.
->
-> ⚠️ **Identity is roadmap-only.** Accounts / JWT / user↔node directory / statistics are Phase 7: `doc/ROADMAP.md` §7
-> marks Identity Management as **design ready, not implemented**, and its hard constraint forbids account dependencies
-> in phases 1-6 (`doc/modules/auth/README.md`). The identity content below describes the *target direction*, not a
-> shipping capability — do not present it as one in `README.md` / `doc/NETDISK.md` / `doc/ROADMAP.md`.
 
 ## 2. Status Quo: It's a Frankenstein of "Six Things"
 
@@ -28,10 +25,8 @@
 2. Content-addressed collection manager — Collection + Provider
 3. P2P network node — libp2p (legacy, removed) / PeerJS + WebRTC (current interconnection layer)
 4. Sharing platform — anonymous collections, Plaza, comments, share links
-5. Account system — centralized registration server, user↔node directory, statistics  
-   *(Phase 7 of ROADMAP; **design ready, not implemented** — not a current feature. The registration server binary and
-   the node-side auth middleware exist, but the user↔node directory and statistics described here do not —
-   `doc/modules/auth/README.md`)*
+5. Account system — centralized registration server (`regserver`), user↔node directory, JWT token verification  
+   *(Phase 7 of ROADMAP; **implemented**: user↔node directory with anti-squatting & 3-tier visibility, plus cross-node token verification)*
 6. Operations panel — a pile of P2P/BT/IPFS dashboards (mostly dead code)  
    *(legacy; targeted for cleanup per ROADMAP Phase 1-6 priorities, `doc/archive/LEGACY.md`)*
 
@@ -45,32 +40,26 @@
 
 **Conclusion: All three pivots point the same way — not building a public full mesh, building a small-group private network with identity endorsement.**
 
-*What shipped vs what is still a target:* the collection tri-state, the share scope and the P2P save pipeline are
-built; "identity endorsement" is the Phase 7 target. Until it lands, the private-domain trust rests on the node peerId
-plus the optional PSK gate — not on accounts (`doc/ROADMAP.md` §Hard Constraints).
+*What shipped vs what is still a target:* the collection tri-state, the share scope, the P2P save pipeline, and Phase 7
+identity endorsement (user↔node directory + cross-node token verification) are all built and active. Future extensions
+include traffic statistics & billing (Phase 8).
 
 ## 4. Key Constraint Signals
 
 - Historical conclusion: **public content-addressing is a dead direction** (don't compete with IPFS)
 - "User scenarios almost never allow http/https connections" → **browser-native WebRTC direct connect** is the core experience, not an option
 - "Mutually independent and irresponsible nodes" → **authorization must not blindly trust peerId**. Today that is met
-  at node level (peerId + PSK admission + the operator's explicit share scope, no accounts involved); "authorization
-  through identity/token" is the Phase 7 upgrade and is **not implemented** — `doc/ROADMAP.md` forbids account
-  dependencies before then
+  at both node level (peerId + PSK admission + the operator's explicit share scope) and identity level (Phase 7 user tokens
+  and registration directory)
 - Collection tri-state (public/authorized-only/self-only) + Steam-style group sharing → **permissions are a product-level feature, not a security detail**
 
 ## 5. Four Pillars (Target State)
-
-> ⚠️ **Status note (2026-10):** The Identity Layer (Phase 7 of `doc/ROADMAP.md`) is **design ready but not implemented**.  
-> The Access Layer is optional. Until Phase 7 lands, all identity/authorization operates at the **peerId level**  
-> (node identity, no accounts). The core product experience — Collections + WebRTC + sharing scope —  
-> is fully functional without any of the Identity Layer. Do not describe Phase 7 capabilities as available features.
 
 | Layer | Responsibility | Technology | Status |
 |---|---|---|---|
 | Storage Layer (Decentralized) | Content-addressed storage + collection tri-state visibility, P2P between member nodes | SQLite + CAS | 🟢 Implemented |
 | Transport Layer (P2P) | PeerJS cloud signaling + WebRTC hole punching, browser zero-install direct connect | Self-hosted signaling optional | 🟢 Implemented |
-| Identity Layer (Centralized) | Registration server: JWT/OAuth, user↔node directory, permissions, upload/download stats | Not yet a public entry point; ownership is the node peerId | 🔴 Phase 7, not implemented |
+| Identity Layer (Centralized / Federated) | Registration server: JWT authentication, user↔node directory, 3-tier visibility, cross-node token verification | Dual-track: sovereign mode + federated mode | 🟢 Implemented (Phase 7) |
 | Access Layer (Optional) | Authorized HTTP tunnel: remote node management / access remote REST API | See doc/HTTP_API_PROXY.md | 🟡 Partial (port forwarding v2) |
 
 **Shipped user model** (what the UI actually splits on today): **consumer** — guest viewing and saving shared content
@@ -100,15 +89,11 @@ but its gate is a per-tunnel HMAC secret — **not account identity**. The ident
 
 ## 8. Implementation Recommendations
 
-> ⚠️ **Alignment with `doc/ROADMAP.md`:** The implementation order is user-specified (Phases 1-7).  
-> Phase 7 (Identity) is last — do not describe it as a current feature in user-facing docs.
-
-1. Follow the ROADMAP order: Interconnect (P1) → Files (P2) → Combine (P3) → Management Chain (P4) → Scope (P5) → Upload/Download/Save (P6) → Identity (P7)
-2. Clean up legacy code (BT/libp2p/WebDAV/dead components), focus on the **Collection + WebRTC + netdisk** main pipeline;
-   BT / IPFS stay optional / experimental plugins behind `PEERDRIVE_BT_ENABLE` / `PEERDRIVE_IPFS_ENABLE`
-3. The core product is **Collection + WebRTC + sharing scope** — fully functional without accounts (peerId-level identity)
-4. When Phase 7 lands, unify the permission system: collection tri-state, HTTP tunnel, and node management share one "account → group → permission" model
-5. Advance the HTTP tunnel module following the "module branch + merge + CI/CD" git architecture
+1. The core product remains **Collection + WebRTC + sharing scope** — fully functional without accounts in sovereign mode (peerId-level identity).
+2. Phase 7 Identity brings registration server account directory and cross-node token verification without imposing account prerequisites on sovereign nodes.
+3. Clean up legacy code (BT/libp2p/WebDAV/dead components), focus on the **Collection + WebRTC + netdisk** main pipeline;
+   BT / IPFS stay optional / experimental plugins behind `PEERDRIVE_BT_ENABLE` / `PEERDRIVE_IPFS_ENABLE`.
+4. Permission integration: collection tri-state, access lists, and cross-node tokens share the verified username abstraction (`coll.CanView(username)`).
 
 ## 9. Narrative Consistency (README / NETDISK / ROADMAP / this doc)
 
@@ -116,17 +101,15 @@ One positioning, four documents — same wording, different depth:
 
 | Doc | Owns |
 |---|---|
-| `README.md` / `README.zh-CN.md` | What works today: **consumer entry** (public panel, no node) and **operator entry** (node + management console); optional plugins marked as such |
+| `README.md` / `README.zh-CN.md` | What works today: **consumer entry** (public panel, no node) and **operator entry** (node + management console); optional plugins marked as such; dual-track sovereign & federated mode |
 | `doc/NETDISK.md` | Goal shape + module breakdown (M1-M6) of the netdisk pipeline, incl. plan-vs-actual deviations |
-| `doc/ROADMAP.md` | Development order, and the hard constraint: **no account dependencies before Phase 7** |
-| this doc | Direction / boundaries / rationale; every identity claim is marked roadmap-only |
+| `doc/ROADMAP.md` | Development order, and the hard constraint: **sovereign mode operates account-free** |
+| this doc | Direction / boundaries / rationale; dual-track architecture definitions |
 
 Rules of thumb when editing any of them:
 
-- **Identity = roadmap.** Accounts / JWT / user↔node directory / statistics are Phase 7 — design ready, **not implemented**
-  (`doc/modules/auth/README.md`). Never describe them as available today; until Phase 7, ownership is the node peerId.
+- **Dual-Track Identity.** Core features run 100% account-free via peerId + PSK (sovereign mode). When configured, registration server provides user↔node directory and cross-node token access (federated mode).
 - **Two entries, not four personas.** Consumer (view & save shared content, no local node) vs operator (own and manage a node).
-  The account-based four-role model is a Phase 7 target, not the current information architecture.
 - **Optional / experimental plugins.** BT, IPFS and Iwara sit behind their own opt-in switches, and WebDAV / SMB are
   evaluation-stage sources (`doc/WEBDAV-SOURCE-EVALUATION.md`, `doc/SMB-INTERFACE-EVALUATION.md`). None of them is part of
   the default netdisk path — document them as plugins, never as core features.

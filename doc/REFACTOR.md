@@ -624,9 +624,9 @@ mixes `+08:00` with `Z`).
 restricted no list error, level switch produces new hash and old hash snapshot unchanged, Owner privilege escalation reject,
 privilege escalation manifests as not found) and `front/tests/VisibilityPicker.test.jsx` ⚠️(该测试文件已不存在).
 
-**Known limitations**: P2P sync path (remote peer pulling collections) doesn't yet carry requester identity, so remote
-uniformly treats as `requester=""` — restricted/private collections currently only readable on this node, cross-node sharing
-restricted collections awaits "registration auth service" online then bring account into sync requests (see `doc/modules/auth`).
+**Known limitations (✅ Resolved in §3.24 Phase 7)**: P2P sync / share path previously didn't carry requester identity.
+Phase 7 introduces `NodeShare.SetTokenVerifier` + `Authenticator.ValidateToken`, allowing remote requests with valid Bearer tokens
+to be authenticated against the registration server and unlock restricted collections (`coll.CanView(requester)`) in `share-resp` frames.
 
 ### 3.17 Dedup Race Residual Window: Outbound Pull Adds One Retry (2026-09-19)
 
@@ -979,6 +979,38 @@ peerjs/signalserver/p2p_bt/signalframe 是独立库，无人会 import 它，故
 | **Calling `conn.Close()` while holding lock deadlock** (Go mutex non-reentrant): handleOffer duplicate connectionId cleanup, handleLeave closing peer connection | Only collect inside lock, Close after unlocking |
 | **WS concurrent write panic**: `gorilla/websocket` doesn't allow concurrent WriteJSON, heartbeat/ICE candidates/ANSWER multi-goroutine concurrent (3-node interconnect test triggered) | signaller added writeMu serialization |
 | **Concurrent flow control deadlock**: old impl each serveFile registered own `OnBufferedAmountLow` (pion replacement callback) — concurrent requests only last registrant receives low water level event, others deadlock waiting when bufferedAmount exceeds threshold (4 concurrent × 2MB integration test reproduced, before fix stuck until timeout) | Flow control sunk to `peerjs.Connection.SendFrame` (attach-time global single callback registration + lowWater broadcast), serveFile zero flow control code; waiting available uses c.done to exit (connection close no hang) |
+
+### 3.24 Phase 7 身份管理与受限合集跨节点访问落地 (2026-10-11)
+
+**背景与目标**：
+落实 ROADMAP 最终阶段（Phase 7 身份管理与授权，`doc/modules/auth/API-DESIGN.md` §6、§8 与 Issue #348），同时**严格保持双轨主权不变性**：
+1. **主权节点轨（默认）**：零账号依赖，基于 PeerId + PSK 准入完全离线可用，不引入任何中心化强依赖。
+2. **联邦身份轨（配置激活）**：配置 `PEERDRIVE_REG_SERVER` 时，支持节点与运营者账号双向绑定、三级可见性目录查询、防占坑租约心跳，以及基于身份令牌的跨节点受限合集解锁。
+
+**主要改动与实现**：
+1. **注册服务器用户↔节点名录**（`back/signalserver/regserver`）：
+   - `db.go` 新增 `user_nodes` 表持久化 `peer_id`、`username`、`endpoints`、`capabilities`、`version`、`visibility`、`registered_at`、`last_seen`，并建立 `(username, last_seen)` 组合索引。
+   - `handlers_nodes.go` 实现 5 个标准端点：
+     - `POST /nodes/register`：需 Bearer 认证，幂等 upsert；具备防占坑检查（若 `peer_id` 已被其他用户登记且活跃心跳在 5 分钟内，返回 409 Conflict；过期或同一用户允许换绑更新）。
+     - `POST /nodes/heartbeat`：刷新节点 `last_seen`。
+     - `DELETE /nodes/{peer_id}`：属主或 admin 注销节点。
+     - `GET /nodes/{peer_id}`：分级可见性查询（`public` 所有人可查属主；`registered` 需认证；`private` 仅属主/admin 可见，未授权返回 404 不泄露存在性）。
+     - `GET /users/{username}/nodes`：查询用户拥有的活跃节点，自动过滤离线节点（5 分钟无心跳视为离线）。
+   - 接入限流桶与 Go 1.22 原生 ServeMux 路由装配。
+2. **跨节点身份验证与受限合集解锁**（`back/internal/service/nodeshare` + `serverapp`）：
+   - `Authenticator` 导出 `ValidateToken(token string) (string, string)`，并暴露于 `Router`。
+   - `NodeShare` 引入 `tokenVerifier func(token string) string` 回调，由 `serverapp.buildRouter` 统一装配。
+   - `collectionsSnapshotFor`：在响应 `share` 帧时，若请求携带用户 token 且经校验为有效 `username`：
+     - 检查 `coll.CanView(username)`。若请求者在合集的 `AccessList` 中或为 `Owner`，该受限合集**不降级为 private**，并在 `share-resp` 中解锁其完整条目列表！
+     - 若未携带 token 或校验失败，优雅降级为既有行为（非好友过滤，或返回受保护壳体）。
+3. **前端合集模块极致拆分**（Issue #346）：
+   - 将 579 行单体 `Collections.jsx` 重构为 6 个微组件与自定义 Hook（`CollectionHeader.jsx`、`CollectionToolbar.jsx`、`CollectionGridView.jsx`、`CollectionTableView.jsx`、`useCollections.js`），顶层主文件收敛至 ~70 行纯编排，达到零噪音上下文索引标准。
+
+**验证结果**：
+- `regserver` 完整单元测试集（含 `nodes_test.go` 4 组生命周期与可见性用例）：PASS
+- `nodeshare_token_test.go` 跨节点令牌校验与解锁断言：PASS
+- `bash scripts/test-layers.sh`：11/11 全绿
+- GitHub Actions CI（矩阵交叉编译、AOP 分层、E2E 浏览器）：31/31 全绿
 
 ## 5.1 Test System
 
