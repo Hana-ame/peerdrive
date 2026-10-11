@@ -120,23 +120,7 @@ export default function ConnectionStatus() {
 
   return (
     <div className="relative ml-auto shrink-0 flex items-center gap-2" ref={containerRef}>
-      {/* Pill ①: Peersignal 信令服务器状态 */}
-      <button
-        type="button"
-        onClick={handleClick}
-        title={`信令服务器: ${signalHost} (${isSignalLive ? '已连接' : '未连接'})`}
-        className="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-white/[0.08] bg-white/[0.04] text-gray-300 hover:bg-white/[0.08] transition-colors focus:outline-none"
-      >
-        <span
-          className={`w-2 h-2 rounded-full ${isSignalLive ? 'bg-sky-400' : 'bg-gray-500'}`}
-          aria-hidden="true"
-        />
-        <span className="font-mono text-[11px]">
-          信令: {signalHost.split(':')[0].split('.')[0]} {isSignalLive ? '✓' : '—'}
-        </span>
-      </button>
-
-      {/* Pill ②: 节点连接状态 (WS 本地 / PeerJS PSK验证 / 游客) */}
+      {/* 节点连接状态 (WS 本地 / PeerJS PSK验证 / 游客) */}
       <button
         type="button"
         onClick={handleClick}
