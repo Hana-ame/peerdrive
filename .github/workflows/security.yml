@@ -174,3 +174,102 @@ jobs:
           test -f package-lock.json || exit 0
           npm audit --audit-level=high
         continue-on-error: true
+
+  # ── 依赖漏洞扫描（OSV-Scanner）────────────────────────────────────────
+  # 把仓库内全部 lockfile（back / peerjs / signalserver / p2p_bt 四个独立
+  # go.mod + front / peerdrive-media 两个 package-lock.json）对着 OSV 数据库
+  # （osv.dev：Go vuln DB + GitHub Advisory）做依赖版本漏洞匹配。
+  # 与 gosec 的分工：gosec 是 Go 静态分析（CWE 级）；OSV 是「锁定的依赖版本
+  # 是否落在已知漏洞区间」（GO-/GHSA- 级）。与 npm-audit 的分工：npm-audit
+  # 只看 npm 锁文件；OSV 补上 Go 模块这条完全没覆盖的面。
+  #
+  # 首扫读数（2026-10-13，refactor @ 8669913）：97 组发现，其中 12 组
+  # call-graph 确认可达（back: pion/dtls、pion/stun、quic-go；p2p_bt:
+  # gorilla/websocket + x/net×4；peerjs: pion/dtls、pion/stun）。
+  # 当前是报告模式（不阻断主干）：发现随 artifact 归档、摘要打印到日志，
+  # 逐条 triage 并升级依赖后，把 continue-on-error 去掉换成硬门禁。
+  osv-dependency-scan:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OSV-Scanner (pinned v2.7.0)
+        # 直接取官方预编译二进制（免 go install 构建时间）。升级：改 URL 里的
+        # 版本号，行为以 https://google.github.io/osv-scanner 文档为准。
+        run: |
+          curl -sL --max-time 120 \
+            "https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_amd64" \
+            -o osv-scanner
+          chmod +x osv-scanner
+          ./osv-scanner --version
+      - name: 扫描全部依赖 lockfile（Go 模块 + npm）
+        # 有发现时 osv-scanner 以 exit 1 退出；报告模式不阻断主干。
+        continue-on-error: true
+        run: |
+          ./osv-scanner scan source -r . --format json --output-file osv-results.json \
+            || echo "::warning::OSV-Scanner 报告了依赖漏洞，见下方摘要与 artifact"
+      - name: 汇总报告
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+
+          def short(p):
+              for tok in ('back/', 'front/', 'packages/'):
+                  i = p.find('/' + tok)
+                  if i >= 0:
+                      return p[i + 1:]
+                  if p.startswith(tok):
+                      return p
+              return '/'.join(p.split('/')[-2:])
+
+          try:
+              data = json.load(open('osv-results.json'))
+          except Exception as e:
+              print(f"osv-results.json 解析失败: {e}")
+              raise SystemExit(1)
+
+          total = 0
+          by_src = {}
+          called = []
+          for r in data.get('results', []):
+              src = short(r.get('source', {}).get('path', '?'))
+              for p in r.get('packages', []) or []:
+                  pkg = p.get('package', {}).get('name', '?')
+                  ver = p.get('package', {}).get('version', '?')
+                  for g in p.get('groups', []) or []:
+                      ids = g.get('ids', []) or []
+                      vid = ids[0] if ids else '?'
+                      sev = g.get('max_severity', '?')
+                      ea = g.get('experimental_analysis') or {}
+                      is_called = any(v.get('called') for v in ea.values())
+                      fixed = None
+                      for v in p.get('vulnerabilities', []) or []:
+                          for a in v.get('affected', []) or []:
+                              for rng in a.get('ranges', []) or []:
+                                  for ev in rng.get('events', []) or []:
+                                      if 'fixed' in ev:
+                                          fixed = ev['fixed']
+                      total += 1
+                      by_src[src] = by_src.get(src, 0) + 1
+                      mark = ' ★call-graph 可达' if is_called else ''
+                      print(f"  [{sev}] {vid} {pkg}@{ver} -> {fixed or '无修复'} ({src}){mark}")
+                      if is_called:
+                          called.append((sev, vid, pkg, ver, fixed))
+          print(f"TOTAL: {total} 组依赖漏洞发现（OSV 数据库）")
+          print(f"call-graph 确认可达: {len(called)} 组")
+          for src, n in sorted(by_src.items(), key=lambda x: -x[1]):
+              print(f"  {src}: {n}")
+          if called:
+              print("★ 可达项（优先级最高，先 triage 这些）:")
+              for sev, vid, pkg, ver, fixed in called:
+                  print(f"  [{sev}] {vid} {pkg}@{ver} -> {fixed or '无修复'}")
+          PY
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-scanner-reports
+          path: osv-results.json
+          if-no-files-found: ignore
