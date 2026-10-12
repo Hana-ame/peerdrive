@@ -145,9 +145,13 @@ jobs:
   #   1. 矩阵只列**有 lockfile** 的包。packages/peerdrive-client 是零运行时依赖
   #      的纯 ESM 源码，没有 package-lock.json——列进去会让 setup-node 的
   #      cache-dependency-path 解析失败，整个 job 在拉依赖前就红。
-  #   2. 两个 audit step 都是 continue-on-error（报告模式）。首次接入就发现
-  #      front 有 high 级依赖告警，与本次安全修复无关；先让门禁可见、由人 triage
-  #      依赖升级，等清单清空了再把 continue-on-error 去掉换成硬门禁。
+  #   2. 分级门禁（2026-10-13 生效，依据本地实测读数）：
+  #      - 运行时依赖（--omit=dev，high+）→ **硬门禁**：front / packages
+  #        peerdrive-media 的 prod audit 均为 0 漏洞，任何 prod high+ 直接红灯。
+  #      - devDependencies（high+）→ 仍报告模式：front 5 high（braces 链）、
+  #        media 9（3 moderate / 2 high / 4 critical）全部是构建/测试期 dev
+  #        依赖，运行时不可达（--omit=dev 的 prod 门禁已覆盖运行面）；
+  #        dev 依赖升级列为独立一轮，triage 清零后再把该步转硬门禁。
   npm-audit:
     runs-on: ubuntu-latest
     strategy:
@@ -161,13 +165,12 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: ${{ matrix.dir }}/package-lock.json
-      - name: 审计运行时依赖漏洞 (high+, 报告模式)
+      - name: 审计运行时依赖漏洞 (high+, 硬门禁)
         run: |
           cd ${{ matrix.dir }}
           test -f package-lock.json || { echo "no lockfile — skip"; exit 0; }
           npm ci --ignore-scripts --audit=false --no-fund
           npm audit --audit-level=high --omit=dev
-        continue-on-error: true
       - name: 审计 devDependencies 漏洞 (high+, 报告模式)
         run: |
           cd ${{ matrix.dir }}
@@ -184,10 +187,16 @@ jobs:
   # 只看 npm 锁文件；OSV 补上 Go 模块这条完全没覆盖的面。
   #
   # 首扫读数（2026-10-13，refactor @ 8669913）：97 组发现，其中 12 组
-  # call-graph 确认可达（back: pion/dtls、pion/stun、quic-go；p2p_bt:
-  # gorilla/websocket + x/net×4；peerjs: pion/dtls、pion/stun）。
-  # 当前是报告模式（不阻断主干）：发现随 artifact 归档、摘要打印到日志，
-  # 逐条 triage 并升级依赖后，把 continue-on-error 去掉换成硬门禁。
+  # call-graph 确认可达；依赖升级轮（PR #356 → aa87f97）后**可达清零**
+  # （45 组全不可达）。本轮起门禁语义：
+  #   - 扫描步骤容忍「不可达噪音」：osv-scanner 的 exit 1 = 任意发现
+  #     （含不可达），直接 fail 会误杀 45 组噪音 → continue-on-error 保留，
+  #     发现仍随 artifact 归档、摘要打印到日志；
+  #   - 「汇总报告」步骤做**可达级硬门禁**：call-graph 可达（called=True）> 0
+  #     时 ::error:: + exit 1（红灯），= 0 时通过。
+  #   判据取 called=True：只拦「真会被执行到」的漏洞；不可达发现（dev 依赖、
+  #   无调用链的传递库）不阻断 PR，避免误杀。osv-scanner 的 called 分析详见
+  #   https://google.github.io/osv-scanner（experimental call analysis）。
   osv-dependency-scan:
     runs-on: ubuntu-latest
     env:
@@ -204,12 +213,13 @@ jobs:
           chmod +x osv-scanner
           ./osv-scanner --version
       - name: 扫描全部依赖 lockfile（Go 模块 + npm）
-        # 有发现时 osv-scanner 以 exit 1 退出；报告模式不阻断主干。
+        # osv-scanner 有任意发现（含不可达）就 exit 1；这里容忍噪音，
+        # 硬门禁在下方「汇总报告」步骤按 call-graph 可达（called=True）判定。
         continue-on-error: true
         run: |
           ./osv-scanner scan source -r . --format json --output-file osv-results.json \
             || echo "::warning::OSV-Scanner 报告了依赖漏洞，见下方摘要与 artifact"
-      - name: 汇总报告
+      - name: 汇总报告 + 可达漏洞硬门禁
         if: always()
         run: |
           python3 - <<'PY'
@@ -265,6 +275,11 @@ jobs:
               print("★ 可达项（优先级最高，先 triage 这些）:")
               for sev, vid, pkg, ver, fixed in called:
                   print(f"  [{sev}] {vid} {pkg}@{ver} -> {fixed or '无修复'}")
+              # ── 硬门禁：call-graph 可达漏洞直接红灯 ──
+              print(f"::error::OSV-Scanner 发现 {len(called)} 组 call-graph 可达漏洞，"
+                    "硬门禁拦截——请升级对应依赖后重跑")
+              raise SystemExit(1)
+          print("可达漏洞硬门禁：0 组，通过 ✓")
           PY
       - name: Upload report
         if: always()
