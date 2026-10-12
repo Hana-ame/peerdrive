@@ -6,6 +6,7 @@ import (
 
 	"peerdrive/internal/model"
 	"peerdrive/internal/service"
+	"peerdrive/pkg/hashutil"
 
 	"github.com/gin-gonic/gin"
 )
@@ -31,6 +32,22 @@ func CreateShare(c *gin.Context) {
 	}
 	if req.Type != "file" && req.Type != "collection" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "type must be file or collection"})
+		return
+	}
+	// Red-team finding R3 (medium): AccessShare builds a 302 Location from
+	// share.Hash without validating it, so a share created with hash="../etc/passwd"
+	// redirected to "Location: /etc/passwd". The path is always rooted at "/" so it
+	// can't escape the origin, but the unvalidated value is still an injection point
+	// for anything that reuses the Location. Validate the shape here (single source
+	// of truth: hashutil.IsValidSHA256) so the stored value can never carry a path.
+	if !hashutil.IsValidSHA256(req.Hash) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "hash must be a 64-char sha256"})
+		return
+	}
+	// filename is echoed back to JSON consumers (ListShares / AccessShare callers);
+	// cap it so a megabyte-long name can't be used as a memory/disk amplifier.
+	if len(req.Filename) > 255 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "filename too long"})
 		return
 	}
 
@@ -64,6 +81,12 @@ func AccessShare(c *gin.Context) {
 		return
 	}
 
+	// Validate before building the redirect target: rows written before CreateShare
+	// started validating can still hold arbitrary strings in `hash`.
+	if !hashutil.IsValidSHA256(share.Hash) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "share not found or expired"})
+		return
+	}
 	// Redirect based on type
 	if share.Type == "collection" {
 		c.Redirect(http.StatusFound, "/anon/collections/"+share.Hash)

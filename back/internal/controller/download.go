@@ -70,11 +70,7 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 		if meta != nil && meta.Filename != "" {
 			fn = meta.Filename
 		}
-		if c.Query("inline") == "1" {
-			c.Header("Content-Disposition", "inline; filename="+fn)
-		} else {
-			c.Header("Content-Disposition", "attachment; filename="+fn)
-		}
+		setDownloadHeaders(c, fn, c.Query("inline") == "1")
 		if meta != nil && meta.Gziped {
 			c.Header("Content-Encoding", "gzip")
 		}
@@ -148,16 +144,92 @@ func DownloadBySHA256Local(c *gin.Context) {
 	if meta.Filename != "" {
 		fn = meta.Filename
 	}
-	if c.Query("inline") == "1" {
-		c.Header("Content-Disposition", "inline; filename="+fn)
-	} else {
-		c.Header("Content-Disposition", "attachment; filename="+fn)
-	}
+	setDownloadHeaders(c, fn, c.Query("inline") == "1")
 	if meta.Gziped {
 		c.Header("Content-Encoding", "gzip")
 	}
 	// http.ServeContent 原生支持流式传输与 RFC 7233 Range / 206 Partial Content / ETag / If-Range
 	http.ServeContent(c.Writer, c.Request, fn, st.ModTime(), f)
+}
+
+// ── Download response headers (security-critical) ────────────────────────────
+//
+// Why this helper exists (red-team finding R3, HIGH stored XSS):
+// `/sha256sum/:hash` used to hand `http.ServeContent` the attacker-chosen upload
+// filename, which made the server *guess* the response Content-Type from the
+// extension (.html → text/html, .js → text/javascript, .svg → image/svg+xml).
+// Combined with `?inline=1` (Content-Disposition: inline) an attacker uploaded a
+// page, anyone visiting `/sha256sum/<hash>?inline=1` got it rendered as HTML on
+// this origin. The global CSP is `default-src 'self'`, which permits same-origin
+// `<script src>` — so a second uploaded .js file made the payload fully
+// exploitable (verified in a real browser: document.title was set by the stored
+// payload). Same-origin JS can additionally read the admin frontend's
+// localStorage (`peerdrive_auth_token` / `peerdrive_auth_key`, see
+// front/src/platform/shared/storageKeys.js) whenever the panel is deployed on
+// this origin → full node takeover.
+//
+// Fix: the filename must never decide the Content-Type. Only a tight whitelist of
+// preview-safe media types is honoured for inline requests; everything else is
+// served as application/octet-stream (download, never parse). A strict CSP is
+// pinned on the blob response as belt-and-braces so that even a type that slips
+// through cannot execute script.
+//
+// NOTE: `?inline=1` is not used anywhere in the shipped frontend/panel (grep for
+// `inline=` in front/src and packages/peerdrive-client returns nothing), so this
+// only affects third-party integrations that asked for inline rendering.
+
+// inlinePreviewTypes maps the small set of file extensions that are safe to
+// render inline: images (no script execution) and plain text. Deliberately
+// excludes text/html, text/xml, application/xhtml+xml, image/svg+xml,
+// application/javascript and text/javascript — all of which can execute script
+// when rendered as a document.
+var inlinePreviewTypes = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".bmp":  "image/bmp",
+	".ico":  "image/x-icon",
+	".txt":  "text/plain; charset=utf-8",
+	".log":  "text/plain; charset=utf-8",
+	".csv":  "text/plain; charset=utf-8",
+}
+
+// blobCSP is pinned on every blob response. It blocks script execution outright:
+// even if a text/html body were ever served, no inline script, inline handler,
+// or external script could run. Media-only documents are unaffected.
+const blobCSP = "default-src 'none'; script-src 'none'; object-src 'none'; " +
+	"style-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+// setDownloadHeaders writes Content-Type / Content-Disposition / CSP for a blob
+// download. filename is attacker-controlled (it comes from the uploaded multipart
+// name or the stored file_meta.filename), so it is treated as hostile in both
+// uses: it only selects an extension for the inline whitelist lookup, and it is
+// sanitised before being placed in the header.
+func setDownloadHeaders(c *gin.Context, filename string, inline bool) {
+	ctype := "application/octet-stream"
+	if inline {
+		if t, ok := inlinePreviewTypes[strings.ToLower(filepath.Ext(filename))]; ok {
+			ctype = t
+		}
+	}
+	c.Header("Content-Type", ctype)
+	if inline {
+		c.Header("Content-Disposition", "inline; filename=\""+safeFilename(filename)+"\"")
+	} else {
+		c.Header("Content-Disposition", "attachment; filename=\""+safeFilename(filename)+"\"")
+	}
+	c.Header("Content-Security-Policy", blobCSP)
+}
+
+// safeFilename strips characters that could break out of the Content-Disposition
+// parameter (quote, CR, LF, backslash) or be interpreted as control data by a
+// header parser. The rest of the name is preserved so downloads still save with
+// a readable name.
+func safeFilename(name string) string {
+	repl := strings.NewReplacer("\r", "", "\n", "", "\x00", "", `"`, "", `'`, "", `\\`, "")
+	return repl.Replace(name)
 }
 
 // DownloadByCID handles GET /ipfs/:cid, looking up the file by its IPFS CID and

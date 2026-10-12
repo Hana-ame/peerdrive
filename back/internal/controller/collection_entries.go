@@ -3,6 +3,7 @@ package controller
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"peerdrive/internal/model"
@@ -133,9 +134,34 @@ func DownloadCollectionFile(c *gin.Context) {
 				c.JSON(http.StatusOK, gin.H{"url": p.Value, "follow_redirects": false})
 				return
 			}
+			// Red-team finding R3 (medium, open redirect): p.Value is an
+			// operator-stored URL and is placed verbatim into the 302 Location
+			// header. Restrict it to absolute http(s) targets — javascript:,
+			// data: and protocol-relative values would either execute script in
+			// some browsers or redirect visitors off the operator's declared
+			// intent. Only the scheme is constrained; the host is the operator's
+			// own choice (that is the point of the feature).
+			if !isHTTPURL(p.Value) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "url provider is not an absolute http(s) url"})
+				return
+			}
 			c.Redirect(http.StatusFound, p.Value)
 			return
 		}
 	}
 	c.JSON(http.StatusNotFound, gin.H{"error": "no usable provider found"})
+}
+
+// isHTTPURL reports whether s is an absolute http(s) URL. Used to constrain the
+// Location target of the follow-redirects feature (see DownloadCollectionFile).
+func isHTTPURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" || !u.IsAbs() {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		return true
+	}
+	return false
 }
