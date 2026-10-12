@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"peerdrive/internal/log"
 	"github.com/gin-gonic/gin"
+	"peerdrive/internal/log"
 )
 
 // fwdListener local proxy listener (established by connect endpoint): each local
@@ -100,7 +100,7 @@ func ConnectForwardSession(c *gin.Context) {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", req.LocalPort))
 	if err != nil {
 		log.LogWarn("ctrl-p2p: ConnectForwardSession listen failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	fl := &fwdListener{key: req.Key, targetPeer: req.TargetPeer, ln: ln}
@@ -207,4 +207,3 @@ func CloseForwardSession(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "closed", "closed_listeners": closed})
 }
-

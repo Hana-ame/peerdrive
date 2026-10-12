@@ -332,8 +332,19 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func randHex8() string {
-	b := make([]byte, 4)
+func randHex8() string { return randHexN(4) }
+
+// randHexN returns n random bytes as a hex string.
+//
+// Why it exists (red-team R2, H-2): the node's PeerJS id was
+// "peerdrive-"+randHex8() — only 32 bits of entropy. The signalling plane trusts
+// the id as identity, so a client that guesses a victim's id while the victim is
+// offline can hijack its identity (receive its signalling messages, announce under
+// it). 32 bits is inside brute-force range; 128 bits is not. Length is bounded
+// downstream (http_discovery caps peer ids at 128 chars), so doubling the length
+// is safe.
+func randHexN(n int) string {
+	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }

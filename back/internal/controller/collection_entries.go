@@ -37,7 +37,7 @@ func AddEntry(c *gin.Context) {
 	}
 	collID, err := collSvc.GetOrCreate(username, collectionName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if len(req.Providers) > 0 {
@@ -49,7 +49,7 @@ func AddEntry(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "entry added"})
@@ -72,7 +72,7 @@ func RemoveEntry(c *gin.Context) {
 	path := strings.TrimPrefix(c.Param("path"), "/")
 	col, err := collSvc.Get(username, collectionName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if col == nil {
@@ -80,7 +80,7 @@ func RemoveEntry(c *gin.Context) {
 		return
 	}
 	if err := collSvc.RemoveEntry(col.ID, path); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "entry removed"})
@@ -103,7 +103,7 @@ func DownloadCollectionFile(c *gin.Context) {
 	filePath := strings.TrimPrefix(c.Param("filepath"), "/")
 	col, err := collSvc.Get(username, collectionName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if col == nil {
@@ -112,7 +112,7 @@ func DownloadCollectionFile(c *gin.Context) {
 	}
 	entry, err := collSvc.GetEntry(col.ID, filePath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if entry == nil {

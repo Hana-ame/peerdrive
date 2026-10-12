@@ -196,7 +196,7 @@ func PostPeerBlocklist(c *gin.Context) {
 		return
 	}
 	if err := peerShareSvc.BlockPeer(req.PeerID, req.Reason); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "blocked", "peer_id": req.PeerID})
@@ -214,7 +214,7 @@ func DeletePeerBlocklist(c *gin.Context) {
 		return
 	}
 	if err := peerShareSvc.UnblockPeer(peer); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "unblocked", "peer_id": peer})

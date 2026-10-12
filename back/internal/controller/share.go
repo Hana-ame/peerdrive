@@ -53,7 +53,7 @@ func CreateShare(c *gin.Context) {
 
 	share, err := shareSvc.Create(req.Hash, req.Type, req.Filename)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
@@ -101,7 +101,7 @@ func AccessShare(c *gin.Context) {
 func ListShares(c *gin.Context) {
 	shares, err := shareSvc.List()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if shares == nil {

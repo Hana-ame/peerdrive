@@ -38,12 +38,20 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+
 	"peerdrive/internal/log"
 	"peerdrive/internal/serverapp"
 	"peerdrive/internal/version"
 )
 
 func main() {
+	// Production mode (red-team R2): gin's default debug mode keeps duplicate-route
+	// panics and verbose framework logging on. Only the binary entry point sets the
+	// process mode — the router package must not, because it is also imported by
+	// tests that rely on debug-mode assertions.
+	gin.SetMode(gin.ReleaseMode)
+
 	args := os.Args[1:]
 	cmd := "serve"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {

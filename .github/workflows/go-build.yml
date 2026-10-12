@@ -49,7 +49,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         # 单二进制（v0.3.0）：主服务 / 信令 / 注册认证是它的子命令。
-        run: go build -tags nosqlite -ldflags="-s -w" -o peerdrive${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/peerdrive/
+        run: go build -tags nosqlite -buildvcs=false -ldflags="-s -w" -o peerdrive${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/peerdrive/
 
       # Windows 也跑测试，不再跳过（2026-09-20）。
       #

@@ -56,7 +56,7 @@ func BTAnnounce(c *gin.Context) {
 	}
 	if err := btSvc.Announce(req.Hash); err != nil {
 		log.LogError("ctrl-p2p: BTAnnounce %s failed: %v", req.Hash, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	log.LogInfo("ctrl-p2p: BTAnnounce %s successful", req.Hash)
@@ -82,7 +82,7 @@ func BTFindProviders(c *gin.Context) {
 	peers, err := btSvc.FindProviders(req.Hash)
 	if err != nil {
 		log.LogError("ctrl-p2p: BTFindProviders %s failed: %v", req.Hash, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	log.LogInfo("ctrl-p2p: BTFindProviders %s found %d peers", req.Hash, len(peers))
@@ -134,7 +134,7 @@ func BEP44Put(c *gin.Context) {
 	target, err := btSvc.PutImmutable(rawData)
 	if err != nil {
 		log.LogError("ctrl-p2p: BEP44Put failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
@@ -199,7 +199,7 @@ func BEP51Sample(c *gin.Context) {
 	samples, err := btSvc.DiscoverInfohashes(200)
 	if err != nil {
 		log.LogError("ctrl-p2p: BEP51Sample failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 

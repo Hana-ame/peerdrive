@@ -198,10 +198,79 @@ func TestValidateAuthStartup_NonLoopbackWithAdminToken(t *testing.T) {
 	cfg := defaultCfg()
 	cfg.Host = "0.0.0.0"
 	cfg.RegistrationServer = ""
-	cfg.AdminToken = "ci-test-token"
+	// 16+ chars, 8+ distinct chars: satisfies the weak-token gate added in red-team R2.
+	cfg.AdminToken = "ci-test-token-strong-7x9"
 	os.Setenv("PEERDRIVE_ALLOW_NO_AUTH", "")
 	defer os.Unsetenv("PEERDRIVE_ALLOW_NO_AUTH")
+	os.Setenv("PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN", "")
+	defer os.Unsetenv("PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN")
 
 	err := validateAuthStartup(cfg)
 	require.NoError(t, err, "non-loopback with AdminToken must pass (C-14 follow-up)")
+}
+
+// TestValidateAuthStartup_RejectsWeakAdminToken — red-team R2.
+// 发现背景：AuthRequired 用常量时间比较，非回环部署还有按 IP 限速（默认 30 rps）。
+// 这两层对高熵令牌有效，对 "123456" 这种短令牌无效——限速救不了低熵。因此把检查
+// 前移到启动期：非回环 + 弱令牌直接拒绝启动，除非显式 PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN=1。
+func TestValidateAuthStartup_RejectsWeakAdminToken(t *testing.T) {
+	for _, weak := range []struct{
+		token, why string
+	}{
+		{"123456", "too short"},
+		{"password", "too short"},
+		{"aaaaaaaaaaaaaaaa", "low distinct-char count"},
+	} {
+		t.Run(weak.why, func(t *testing.T) {
+			cfg := defaultCfg()
+			cfg.Host = "0.0.0.0"
+			cfg.RegistrationServer = ""
+			cfg.AdminToken = weak.token
+			os.Setenv("PEERDRIVE_ALLOW_NO_AUTH", "")
+			os.Setenv("PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN", "")
+			defer os.Unsetenv("PEERDRIVE_ALLOW_NO_AUTH")
+			defer os.Unsetenv("PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN")
+
+			err := validateAuthStartup(cfg)
+			require.Error(t, err, "weak admin token must be refused on a non-loopback bind")
+			require.Contains(t, err.Error(), "PEERDRIVE_ADMIN_TOKEN is too weak")
+		})
+	}
+}
+
+// TestValidateAuthStartup_WeakTokenExemptions — red-team R2.
+// 回环绑定（无法被远程暴力破解）与显式 opt-out 都必须放行，否则本地/单机部署会被
+// 启动校验误杀。
+func TestValidateAuthStartup_WeakTokenExemptions(t *testing.T) {
+	t.Run("loopback exempt", func(t *testing.T) {
+		cfg := defaultCfg()
+		cfg.Host = "127.0.0.1"
+		cfg.RegistrationServer = ""
+		cfg.AdminToken = "123456"
+		os.Setenv("PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN", "")
+		defer os.Unsetenv("PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN")
+		require.NoError(t, validateAuthStartup(cfg))
+	})
+	t.Run("explicit opt-out", func(t *testing.T) {
+		cfg := defaultCfg()
+		cfg.Host = "0.0.0.0"
+		cfg.RegistrationServer = ""
+		cfg.AdminToken = "123456"
+		os.Setenv("PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN", "1")
+		defer os.Unsetenv("PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN")
+		require.NoError(t, validateAuthStartup(cfg))
+	})
+}
+
+// TestIsWeakSecret — red-team R2, 直接单测判定边界。
+func TestIsWeakSecret(t *testing.T) {
+	weak := []string{"", "123456", "password", "abcd1234abcd1234", "aaaaaaaaaaaaaaaa"}
+	for _, s := range weak {
+		got, why := isWeakSecret(s)
+		require.True(t, got, "must be weak (%s): %q", why, s)
+	}
+	for _, s := range []string{"abcd1234WXYZ9876", "correct-horse-battery-staple"} {
+		got, why := isWeakSecret(s)
+		require.False(t, got, "must be strong (got %s): %q", why, s)
+	}
 }

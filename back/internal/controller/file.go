@@ -72,7 +72,7 @@ func UploadFile(c *gin.Context) {
 	}
 	if err != nil {
 		log.LogError("ctrl-file: UploadFile %s failed: %v", header.Filename, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
@@ -183,7 +183,7 @@ func VerifyFile(c *gin.Context) {
 	meta, err := fileSvc.Verify(hash)
 	if err != nil {
 		log.LogError("ctrl-file: VerifyFile %s failed: %v", hash, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if meta == nil {
@@ -213,7 +213,7 @@ func DeleteFile(c *gin.Context) {
 
 	if err := fileSvc.Delete(hash); err != nil {
 		log.LogError("ctrl-file: DeleteFile %s failed: %v", hash, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
@@ -276,13 +276,13 @@ func DiffVersions(c *gin.Context) {
 	entriesA, err := collSvc.VersionEntries(req.VersionA)
 	if err != nil {
 		log.LogError("ctrl-file: DiffVersions version A %d: %v", req.VersionA, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	entriesB, err := collSvc.VersionEntries(req.VersionB)
 	if err != nil {
 		log.LogError("ctrl-file: DiffVersions version B %d: %v", req.VersionB, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	mapA := make(map[string]string)
@@ -330,7 +330,7 @@ func ListFiles(c *gin.Context) {
 	items, err := fileSvc.ListAll(sortBy)
 	if err != nil {
 		log.LogError("ctrl-file: ListFiles failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if items == nil {

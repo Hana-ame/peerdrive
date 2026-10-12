@@ -40,12 +40,12 @@ func CreateAnonCollection(c *gin.Context) {
 		Tags         []string                    `json:"tags"`
 		// Visibility/AccessList correspond to the frontend's "public access / restricted to specified / private only" options.
 		// Old frontends without these two fields → visibility empty string → service layer defaults to public, behavior unchanged.
-		Visibility   string                      `json:"visibility"`
-		AccessList   []string                    `json:"access_list"`
-		AccessPolicy string                      `json:"access_policy"`
-		Passcode     string                      `json:"passcode"`
-		PSK          string                      `json:"psk"`
-		PSKHash      string                      `json:"psk_hash"`
+		Visibility   string   `json:"visibility"`
+		AccessList   []string `json:"access_list"`
+		AccessPolicy string   `json:"access_policy"`
+		Passcode     string   `json:"passcode"`
+		PSK          string   `json:"psk"`
+		PSKHash      string   `json:"psk_hash"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -72,7 +72,7 @@ func CreateAnonCollection(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
@@ -128,7 +128,7 @@ func SetAnonCollectionVisibility(c *gin.Context) {
 func ListAnonCollections(c *gin.Context) {
 	colls, err := anonSvc.ListCollections()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, colls)
@@ -389,7 +389,7 @@ func ForkAnonCollection(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"hash": hash})
@@ -448,7 +448,7 @@ func CommitAnonCollection(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
@@ -506,7 +506,7 @@ func AddAnonCollectionEntry(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"hash": newHash, "prev_sha": hash, "path": entry.Path})
@@ -556,7 +556,7 @@ func RemoveAnonCollectionEntry(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": msg})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"hash": newHash, "prev_sha": hash, "removed": path})
@@ -613,7 +613,7 @@ func UpdateAnonCollectionEntry(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"hash": newHash, "prev_sha": hash, "path": entry.Path})

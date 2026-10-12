@@ -206,7 +206,12 @@ func GetAria2Status(c *gin.Context) {
 		"enabled":   true,
 		"connected": err == nil,
 		"version":   ver,
-		"error":     func() string { if err != nil { return err.Error() }; return "" }(),
+		"error": func() string {
+			if err != nil {
+				return err.Error()
+			}
+			return ""
+		}(),
 	})
 }
 
@@ -248,4 +253,3 @@ func Aria2AddURI(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"gid": gid, "uri": req.URI, "filename": req.Filename})
 }
-

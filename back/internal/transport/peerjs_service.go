@@ -148,7 +148,7 @@ func NewPeerJSService(cfg *config.Config, storageDir string) *PeerJSService {
 		id = cfg.PeerJSID
 	}
 	if id == "" {
-		id = "peerdrive-" + randHex8()
+		id = "peerdrive-" + randHexN(16) // 128 bits: the signalling plane trusts this as identity
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	var stun, turn, turnU, turnP, bl string
@@ -407,8 +407,6 @@ func (s *PeerJSService) BindLocal(sess Session) {
 	log.LogInfo("peerjs: local session bound (id=%s)", sess.ID())
 }
 
-
-
 // Connections 返回当前活跃的节点连接（按远端 peer id）。
 func (s *PeerJSService) Connections() map[string]Session {
 	s.mu.Lock()
@@ -516,5 +514,3 @@ func (s *PeerJSService) Search(q SearchQuery) (*SearchPage, error) {
 // SetFileRouter 装配多源文件路由（source.Manager，第 3 项优化 2026-08-18）：
 // serveFile 由此路由「本地 → 对端 → URL 模板」。nil 可清除（退回本地语义）。
 func (s *PeerJSService) SetFileRouter(r FileRouter) { s.router = r }
-
-

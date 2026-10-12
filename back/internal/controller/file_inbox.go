@@ -2,10 +2,10 @@ package controller
 
 import (
 	"net/http"
-	"os"
 	"strconv"
 
 	"peerdrive/internal/log"
+	"peerdrive/internal/pathutil"
 	"peerdrive/internal/repository"
 	"peerdrive/pkg/hashutil"
 
@@ -27,7 +27,7 @@ func ListInboxFiles(c *gin.Context) {
 	files, err := repository.ListInboxFiles(offset, limit)
 	if err != nil {
 		log.LogWarn("ctrl-inbox: ListInboxFiles error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if files == nil {
@@ -53,7 +53,7 @@ func ApproveInboxFile(c *gin.Context) {
 
 	if err := repository.ApproveInboxFile(req.Hash); err != nil {
 		log.LogWarn("ctrl-inbox: ApproveInboxFile error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "approved", "hash": req.Hash})
@@ -75,10 +75,16 @@ func RejectInboxFile(c *gin.Context) {
 	}
 
 	if fi.Path != "" {
-		_ = os.Remove(fi.Path)
+		// The path came from the file_index table, so treat it as untrusted input
+		// (red-team R2): os.Remove follows symlinks in every parent, which turns
+		// "delete a file inside storage" into "delete any file on the host". Route it
+		// through pathutil so the removal stays inside the allowed roots.
+		if err := pathutil.SafeRemoveAny([]string{c.GetString("storageDir")}, fi.Path); err != nil {
+			log.LogDebug("ctrl-inbox: refuse to remove %s: %v", fi.Path, err)
+		}
 	}
 	if _, err := repository.DeleteFileIndex(hash); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "rejected and deleted", "hash": hash})

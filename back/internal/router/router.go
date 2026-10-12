@@ -29,6 +29,7 @@ import (
 	"net/http/httptest"
 	"strings"
 
+	"peerdrive/internal/config"
 	"peerdrive/internal/controller"
 	"peerdrive/internal/log"
 	"peerdrive/internal/panel"
@@ -50,6 +51,53 @@ import (
 //     that want two surfaces build two Routers with two Deps values.
 //   - The engine is cached on the Router, so `Engine()` is idempotent in the sense
 //     that later calls return the same engine rather than rebuilding it.
+//
+// corsAllowedHeaders is the explicit cross-origin header allow-list. Anything not
+// listed is refused by the browser preflight. Keep this short: every entry is a
+// header a cross-origin page may attach to this node (red-team R2).
+const corsAllowedHeaders = "Authorization, Content-Type, Accept, X-Request-ID, X-Protocol, X-PSK"
+
+// corsMiddleware builds the CORS handler for one Router.
+//
+// Extracted from Engine so the header policy is unit-testable (red-team R2).
+func corsMiddleware(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// L8: original implementation returned `Allow-Origin: *` + `Allow-Credentials: true`
+		// even for non-whitelisted Origins — malicious web pages (without credentials) could
+		// still cross-origin read local API responses, making the whitelist useless.
+		// Now: only whitelisted Origins get origin echoed back (+credentials is then legal);
+		// others don't get Allow-Origin set (browser blocks reading the response). No Origin
+		// (same-origin/curl) doesn't get CORS headers — same-origin requests don't need CORS
+		// authorization anyway.
+		origin := c.Request.Header.Get("Origin")
+		allowOrigin := ""
+		if origin != "" {
+			if cfg.IsOriginAllowed(origin) {
+				allowOrigin = origin
+				c.Header("Vary", "Origin")
+			}
+		}
+		if allowOrigin != "" {
+			c.Header("Access-Control-Allow-Origin", allowOrigin)
+			c.Header("Access-Control-Allow-Credentials", "true")
+		}
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+		// Echoing Access-Control-Request-Headers back (the old behaviour) made every
+		// header a browser-approved cross-origin header, so a malicious page could preflight
+		// with Authorization + any custom header and, combined with the origin echo, turn a
+		// leaked token into a remotely-usable one from any origin. Allow-list instead.
+		c.Header("Access-Control-Allow-Headers", corsAllowedHeaders)
+		c.Header("Access-Control-Max-Age", "86400")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	}
+}
+
+// Router.Engine builds the gin engine
+
 func (rt *Router) Engine() *gin.Engine {
 	if rt.engine != nil {
 		return rt.engine
@@ -60,9 +108,15 @@ func (rt *Router) Engine() *gin.Engine {
 	// unstructured text and duplicates with AccessLog below. Explicit assembly here:
 	// Recovery (outermost, recovers panics) + RequestID + SecurityHeaders +
 	// structured access logging + rate limiting.
+	// corsAllowedHeaders is the explicit cross-origin header allow-list. Anything not listed
+	// is refused by the browser preflight. Keep this short: every entry is a header a
+	// cross-origin page may attach to this node (red-team R2).
+	const corsAllowedHeaders = "Authorization, Content-Type, Accept, X-Request-ID, X-Protocol, X-PSK"
+
 	r := gin.New()
 	r.Use(gin.Recovery())
-	r.Use(RequestID(), SecurityHeaders(cfg.DisableCSP), AccessLog(), RateLimit(cfg.RateLimitRPS, 0))
+	r.Use(RequestID(), SecurityHeaders(cfg.DisableCSP), AccessLog(),
+		RateLimit(cfg.RateLimitRPS, 0), LimitJSONBody(cfg.MaxJSONBodyBytes))
 	r.RedirectTrailingSlash = false
 	r.RedirectFixedPath = false
 
@@ -93,35 +147,7 @@ func (rt *Router) Engine() *gin.Engine {
 		c.Next()
 	})
 
-	r.Use(func(c *gin.Context) {
-		// L8: original implementation returned `Allow-Origin: *` + `Allow-Credentials: true`
-		// even for non-whitelisted Origins — malicious web pages (without credentials) could
-		// still cross-origin read local API responses, making the whitelist useless.
-		// Now: only whitelisted Origins get origin echoed back (+credentials is then legal);
-		// others don't get Allow-Origin set (browser blocks reading the response). No Origin
-		// (same-origin/curl) doesn't get CORS headers — same-origin requests don't need CORS
-		// authorization anyway.
-		origin := c.Request.Header.Get("Origin")
-		allowOrigin := ""
-		if origin != "" {
-			if cfg.IsOriginAllowed(origin) {
-				allowOrigin = origin
-				c.Header("Vary", "Origin")
-			}
-		}
-		if allowOrigin != "" {
-			c.Header("Access-Control-Allow-Origin", allowOrigin)
-			c.Header("Access-Control-Allow-Credentials", "true")
-		}
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
-		c.Header("Access-Control-Allow-Headers", c.Request.Header.Get("Access-Control-Request-Headers"))
-		c.Header("Access-Control-Max-Age", "86400")
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-		c.Next()
-	})
+	r.Use(corsMiddleware(cfg))
 
 	// Auth middleware — validates Bearer tokens via registration server or local admin token.
 	// Sets "authenticated" and "username" in Gin context for downstream handlers.

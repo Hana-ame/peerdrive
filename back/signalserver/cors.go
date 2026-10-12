@@ -65,6 +65,40 @@ func (s *Server) allowCORSFor(w http.ResponseWriter, r *http.Request) {
 	// Not allow-listed: fall through with no Allow-Origin, so the browser blocks it.
 }
 
+// originAllowed decides whether r's Origin may open a connection to this server.
+//
+// Red-team R2: the WS upgrade used to hard-code CheckOrigin to true, so the
+// WithCORSOrigins allow-list only ever applied to the REST endpoints. An operator
+// who tightened the discovery API (turning it back from a one-fetch network census
+// into something only their own panel may read) still had every web page on the
+// internet able to open a signalling socket and fire OFFERs at arbitrary peer ids
+// — which is a per-offer WebRTC allocation on the target node, unauthenticated.
+//
+// The WS handshake needs no Access-Control-* headers, so the same allow-list is
+// reused for the two jobs:
+//
+//   - no list configured -> accept everything, byte-for-byte the historical
+//     behaviour, so the panel served from file:// (Origin "null") or from any
+//     static host keeps working without configuration;
+//   - list configured -> only listed Origins (case-insensitive, "*" = wildcard);
+//   - no Origin header -> accept. Non-browser clients (curl, this repo's own Go
+//     dialer) send none, and blocking them would break node-to-node signalling.
+func (s *Server) originAllowed(r *http.Request) bool {
+	if len(s.corsOrigins) == 0 {
+		return true
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	for _, allowed := range s.corsOrigins {
+		if allowed == "*" || strings.EqualFold(origin, allowed) {
+			return true
+		}
+	}
+	return false
+}
+
 // handleCORS writes cross-origin headers and handles preflight; returns true when the request is fully handled and the caller should return immediately.
 func (s *Server) handleCORS(w http.ResponseWriter, r *http.Request) bool {
 	s.allowCORSFor(w, r)

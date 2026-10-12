@@ -39,7 +39,7 @@ func ForkCollection(c *gin.Context) {
 
 	source, err := collSvc.Get(req.SourceUsername, req.SourceCollName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if source == nil {
@@ -55,19 +55,19 @@ func ForkCollection(c *gin.Context) {
 
 	entries, err := collSvc.ListEntries(source.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	for _, e := range entries {
 		providers := e.BuildProviders()
 		if len(providers) > 0 && e.ProvidersJSON != "" {
 			if err := collSvc.AddProviderEntry(localID, e.Path, providers); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				writeInternalError(c, err)
 				return
 			}
 		} else {
 			if err := collSvc.AddEntry(localID, e.Path, e.FileHash); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				writeInternalError(c, err)
 				return
 			}
 		}

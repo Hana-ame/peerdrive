@@ -52,7 +52,7 @@ func MergeFromSource(c *gin.Context) {
 
 	local, err := collSvc.Get(req.Username, req.CollectionName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if local == nil {
@@ -62,7 +62,7 @@ func MergeFromSource(c *gin.Context) {
 
 	source, err := collSvc.Get(req.SourceUsername, req.SourceCollName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	if source == nil {
@@ -72,12 +72,12 @@ func MergeFromSource(c *gin.Context) {
 
 	localEntries, err := collSvc.ListEntries(local.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	sourceEntries, err := collSvc.ListEntries(source.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 
@@ -138,7 +138,7 @@ func MergeFromSource(c *gin.Context) {
 
 	for path, providers := range merged {
 		if err := collSvc.AddProviderEntry(local.ID, path, providers); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			writeInternalError(c, err)
 			return
 		}
 	}

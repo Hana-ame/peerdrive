@@ -19,7 +19,7 @@ func GetShaTags(c *gin.Context) {
 	sha := c.Param("sha")
 	tags, err := repository.GetShaTags(sha)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	// 同时回显 data 与 tags，兼容前端不同消费点（data.data vs data.tags）
@@ -45,7 +45,7 @@ func SetShaTags(c *gin.Context) {
 		return
 	}
 	if err := repository.SetShaTags(sha, req.Tags); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "tags": req.Tags, "data": req.Tags, "sha": sha})
@@ -75,7 +75,7 @@ func BatchGetShaTags(c *gin.Context) {
 	}
 	tagsMap, err := repository.GetBatchShaTags(shas)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": tagsMap, "tags": tagsMap})
@@ -90,7 +90,7 @@ func BatchGetShaTags(c *gin.Context) {
 func GetAllTagsSummary(c *gin.Context) {
 	tagCounts, err := repository.GetAllTagsWithCounts()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": tagCounts, "tags": tagCounts, "total": len(tagCounts)})
@@ -111,7 +111,7 @@ func SearchTags(c *gin.Context) {
 	}
 	files, err := repository.SearchFilesByTag(tag)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": files, "tag": tag})

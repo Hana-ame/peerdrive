@@ -64,6 +64,52 @@ func ListenAddr(cfg *config.Config) string {
 // is the only one who can reach the port. But on a non-loopback deployment (e.g.
 // PEERDRIVE_HOST=0.0.0.0), every authRequired route is wide open. This check forces an
 // explicit opt-in for that dangerous configuration.
+// validateAdminTokenStrength rejects a too-weak PEERDRIVE_ADMIN_TOKEN on a
+// non-loopback deployment (red-team R2).
+//
+// Why it exists: AuthRequired compares the Bearer token with a constant-time
+// compare, and the per-IP rate limiter caps a remote brute-force at
+// PEERDRIVE_RATE_LIMIT_RPS (default 30). That is a fine defence for a
+// high-entropy token and a meaningless one for a short one — "123456" is
+// exhausted in well under a second of single-connection traffic, and 30 rps of
+// attempts is still a comfortable pace for a script. The limiter cannot rescue a
+// low-entropy secret, so the check moves to startup, where a misconfiguration
+// fails fast instead of shipping an open admin surface.
+//
+// Opt-out: PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN=1 (the local/single-user deployments
+// that intentionally use a short token still work; loopback hosts are exempt
+// because the caller cannot brute-force them remotely).
+func validateAdminTokenStrength(token, host string) error {
+	if httpd.IsLoopback(host) {
+		return nil
+	}
+	if os.Getenv("PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN") == "1" {
+		log.LogWarn("main: PEERDRIVE_ADMIN_TOKEN is short on a non-loopback bind (%s); PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN=1 set, continuing", host)
+		return nil
+	}
+	if weak, why := isWeakSecret(token); weak {
+		return fmt.Errorf("refusing to serve host %q: PEERDRIVE_ADMIN_TOKEN is too weak (%s); set a token of at least 16 chars with at least 9 distinct chars, or PEERDRIVE_ALLOW_WEAK_ADMIN_TOKEN=1 to override", host, why)
+	}
+	return nil
+}
+
+// isWeakSecret reports whether a secret looks brute-forceable. Deliberately simple:
+// character count plus distinct-symbol count catches the realistic weak cases
+// ("123456", "password", "abcd1234") without a dictionary or shannon check.
+func isWeakSecret(s string) (bool, string) {
+	if len(s) < 16 {
+		return true, fmt.Sprintf("only %d chars", len(s))
+	}
+	distinct := map[rune]struct{}{}
+	for _, r := range s {
+		distinct[r] = struct{}{}
+	}
+	if len(distinct) < 9 {
+		return true, fmt.Sprintf("only %d distinct chars", len(distinct))
+	}
+	return false, ""
+}
+
 func validateAuthStartup(cfg *config.Config) error {
 	addr := ListenAddr(cfg)
 	if httpd.IsLoopback(cfg.Host) {
@@ -73,6 +119,9 @@ func validateAuthStartup(cfg *config.Config) error {
 		return nil // remote auth backend configured — safe
 	}
 	if cfg.AdminToken != "" {
+		if err := validateAdminTokenStrength(cfg.AdminToken, cfg.Host); err != nil {
+			return err
+		}
 		return nil // local admin token configured — safe (C-14 follow-up: login service off, HTTP surface still gated)
 	}
 	if os.Getenv("PEERDRIVE_ALLOW_NO_AUTH") == "1" {
