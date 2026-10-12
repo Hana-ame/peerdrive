@@ -288,3 +288,64 @@ jobs:
           name: osv-scanner-reports
           path: osv-results.json
           if-no-files-found: ignore
+
+  # ── 依赖许可证合规（OSV-Scanner 内置 --licenses，复用同一 pin 二进制）───
+  # 2026-10-13 首扫（refactor @ 446e8ca）基线：MIT 414 / BSD-3 82 / Apache-2.0 51 /
+  # MPL-2.0 42 / ISC 20 / BSD-2 14 / CC-BY-4.0 1 / EPL-2.0 1 / MIT OR X11 1 /
+  # UNKNOWN 6；**无 GPL/AGPL/SSPL 强 copyleft**。
+  # UNKNOWN 明细（基线，均待补齐 license 字段或核实）：
+  #   go-llsqlite/adapter、multiformats/go-base36（Go）、electron-to-chromium、
+  #   options（npm）、**peerdrive-client（本仓自己的包，未声明 license 字段，可直接修）**。
+  # 报告模式（不阻断主干）：打印分布 + 违规清单，UNKNOWN/GPL 类出现时 ::warning::。
+  # 硬门禁（--licenses="允许列表"）属业务许可证策略，团队定案后收紧。
+  license-scan:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OSV-Scanner (pinned v2.7.0)
+        run: |
+          curl -sL --max-time 120 \
+            "https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_amd64" \
+            -o osv-scanner
+          chmod +x osv-scanner
+      - name: 扫描许可证分布 + 违规清单（报告模式）
+        # allowlist=当前观测到的许可证集合（基线）：
+        # 分布外的项即为 UNKNOWN 或新引入的许可证，逐条 triage。
+        run: |
+          ./osv-scanner --licenses="MIT,BSD-3-Clause,Apache-2.0,MPL-2.0,ISC,BSD-2-Clause,CC-BY-4.0,EPL-2.0" \
+            ./back ./back/p2p_bt ./back/peerjs ./back/signalserver \
+            ./front ./packages/peerdrive-media > /tmp/license.txt 2>&1 || true
+          python3 - <<'PY'
+          import re
+          txt = open('/tmp/license.txt').read()
+          dist = re.findall(r'^\| (\S[^|]*?) *\| *(\d+) *\|$', txt, re.M)
+          print('== 许可证分布 ==')
+          for name, n in dist:
+              print(f'  {name.strip():16s} {n}')
+          viol = []
+          seen = set()
+          in_viol = False
+          for ln in txt.splitlines():
+              if 'LICENSE VIOLATION' in ln:
+                  in_viol = True
+                  continue
+              if in_viol and ln.startswith('|'):
+                  parts = [p.strip() for p in ln.strip('|').split('|')]
+                  if len(parts) >= 5 and parts[0] != 'LICENSE VIOLATION':
+                      key = tuple(parts[:3])
+                      if key not in seen:
+                          seen.add(key)
+                          viol.append(key)
+          print('== LICENSE VIOLATION ==')
+          for lic, eco, pkg in viol:
+              print(f'  [{lic}] {eco}: {pkg}')
+          # MIT OR X11 是宽容双许可（非 SPDX 单 id 无法进 allowlist），不算违规
+          flagged = [v for v in viol
+                     if v[0].upper().split('-')[0] in ('UNKNOWN', 'GPL', 'AGPL', 'SSPL')]
+          print(f'分布 {len(dist)} 类 | 违规 {len(viol)} 项 | 标记(UNKNOWN/GPL类) {len(flagged)} 项')
+          if flagged:
+              print('::warning::许可证检查：存在 UNKNOWN/GPL 类许可证，见上方清单'
+                    '（报告模式，业务策略定案后转硬门禁）')
+          PY
