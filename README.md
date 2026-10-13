@@ -246,7 +246,7 @@ peerdrive
 | `PEERDRIVE_STORAGE_ENABLE` | true | Storage enabled |
 | `PEERDRIVE_MAX_UPLOAD_BYTES` | 100MB | Single-file upload cap |
 | `PEERDRIVE_MAX_UPLOAD_ANON_BYTES` | 10MB | Anonymous upload cap |
-| `PEERDRIVE_BT_DHT_ENABLE` / `PEERDRIVE_BT_DHT_LISTEN` | true / :6881 | BT DHT listener (standalone library go-peerdrive-bt, optional plugin — the DHT *retrieval* stage itself is gated by `PEERDRIVE_BT_ENABLE`) |
+| `PEERDRIVE_BT_DHT_ENABLE` / `PEERDRIVE_BT_DHT_LISTEN` | false / :6881 | BT DHT listener (default off — DHT init blocks startup; standalone library go-peerdrive-bt, optional plugin — the DHT *retrieval* stage itself is gated by `PEERDRIVE_BT_ENABLE`) |
 | `PEERDRIVE_IPFS_GATEWAY_ENABLE` / `PEERDRIVE_IPFS_GATEWAYS` | true / three gateways | IPFS gateway fallback (optional plugin — the *retrieval* stage is gated by `PEERDRIVE_IPFS_ENABLE`) |
 | `PEERDRIVE_WEBRTC_STUN` / `PEERDRIVE_WEBRTC_TURN` | stun.l.google.com / - | ICE servers |
 | `PEERDRIVE_PEERJS_ENABLE` | true | PeerJS signaling (interconnect layer) |
