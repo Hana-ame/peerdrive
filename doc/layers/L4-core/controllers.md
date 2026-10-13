@@ -232,6 +232,8 @@ Sub-group routes (router.go:196-244):
 | POST /p2p/forward/connect | `ConnectForwardSession` | authRequired; `{key, target_peer, local_port, port?}` → starts a listener on 127.0.0.1, idempotent (an existing listener with the same key returns directly) |
 | GET /p2p/forward/list | `ListForwardSessions` | `{listeners, tunnels}` (tunnels come from `ListForwardStreams`) |
 | POST /p2p/forward/close | `CloseForwardSession` | authRequired; closes the listener by key, drops the tunnel by peer_id |
+| DELETE /p2p/forward/listeners/:key | `CloseForwardSession` | authRequired; same handler, key from the URL (Issue #354) |
+| DELETE /p2p/forward/tunnels/:peer_id | `CloseForwardSession` | authRequired; same handler, peer_id from the URL (Issue #354) |
 
 Forwarding mechanism (p2p.go:713-847): the package-level map `fwdListeners` manages listeners; `acceptForwardTunnels`
 does, for each local TCP, `forwardPeer.OpenForward(ctx, targetPeer, key, targetPort)` (30s timeout) →

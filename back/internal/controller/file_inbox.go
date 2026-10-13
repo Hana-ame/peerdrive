@@ -36,27 +36,45 @@ func ListInboxFiles(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"files": files, "count": len(files)})
 }
 
-// ApproveInboxFile handles POST /files/inbox/approve (Issue #267).
-// Releases a quarantined file from inbox into standard host storage.
+// ApproveInboxFile handles POST /files/inbox/approve (JSON body {"hash": ...}) and
+// POST /files/inbox/:hash/approve (Issue #353). Both spellings reach the same
+// repository call, so approve keeps the legacy body contract while gaining a path
+// parameter that is symmetric with RejectInboxFile's DELETE /files/inbox/:hash.
 func ApproveInboxFile(c *gin.Context) {
-	var req struct {
-		Hash string `json:"hash" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	hash, ok := inboxHashFromContext(c)
+	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "hash is required"})
 		return
 	}
-	if !hashutil.IsStrictSHA256(req.Hash) {
+	if !hashutil.IsStrictSHA256(hash) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256 hash"})
 		return
 	}
 
-	if err := repository.ApproveInboxFile(req.Hash); err != nil {
+	if err := repository.ApproveInboxFile(hash); err != nil {
 		log.LogWarn("ctrl-inbox: ApproveInboxFile error: %v", err)
 		writeInternalError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "approved", "hash": req.Hash})
+	c.JSON(http.StatusOK, gin.H{"message": "approved", "hash": hash})
+}
+
+// inboxHashFromContext resolves the hash an inbox mutation applies to: the URL
+// path parameter wins (/files/inbox/:hash/approve), the JSON body is the
+// fallback for the legacy POST /files/inbox/approve (Issue #353). ok=false means
+// no path parameter and a missing or unparseable body.
+func inboxHashFromContext(c *gin.Context) (hash string, ok bool) {
+	hash = c.Param("hash")
+	if hash == "" {
+		var req struct {
+			Hash string `json:"hash" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			return "", false
+		}
+		hash = req.Hash
+	}
+	return hash, true
 }
 
 // RejectInboxFile handles DELETE /files/inbox/:hash (Issue #267).

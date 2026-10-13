@@ -419,6 +419,20 @@ curl -X POST http://127.0.0.1:3000/files/inbox/approve \
 
 ---
 
+### `POST /files/inbox/:hash/approve`
+RESTful alias of the endpoint above: the hash comes from the URL path instead of the JSON
+body, symmetric with `DELETE /files/inbox/:hash` (Issue #353). Same handler, same response,
+same error set; the body endpoint stays unchanged for existing clients.
+
+```bash
+curl -X POST http://127.0.0.1:3000/files/inbox/abc1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef/approve
+```
+
+**Path Parameter**:
+- `hash` (required): 64-character SHA256 hash of the quarantined file to approve
+
+---
+
 ### `DELETE /files/inbox/:hash`
 Reject and permanently delete a quarantined file from storage and the index (Issue #267).
 
@@ -2408,6 +2422,29 @@ curl -X POST http://127.0.0.1:3000/p2p/forward/close \
 ```json
 {"status": "closed"}
 ```
+
+---
+
+### `DELETE /p2p/forward/listeners/:key` / `DELETE /p2p/forward/tunnels/:peer_id`
+RESTful close aliases (Issue #354): the target comes from the URL path instead of the JSON
+body. The same handler runs, so `POST /p2p/forward/close` keeps its original body contract.
+
+```bash
+curl -X DELETE http://127.0.0.1:3000/p2p/forward/listeners/my-ssh
+curl -X DELETE http://127.0.0.1:3000/p2p/forward/tunnels/peer1
+```
+
+**Path Parameter**:
+- `key` / `peer_id` (required): listener key to close, or peer id whose tunnels are dropped
+
+**Response**:
+```json
+{"status": "closed", "closed_listeners": 1}
+```
+
+**Error Responses**:
+- `404 Not Found`: `{"error": "no matching forward session"}` when the listener key matches
+  nothing and no peer id was given
 
 ---
 
