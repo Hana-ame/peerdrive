@@ -92,8 +92,8 @@ type Config struct {
 	// Self-hosted deployments override via PEERDRIVE_PEERJS_HOST/PORT/KEY.
 	// Environment variables can still override (for self-hosting / internal debugging), but tutorials
 	// don't teach changing this.
-	PeerJSHost   string // PEERDRIVE_PEERJS_HOST, default peersignal.moonchan.xyz
-	PeerJSPort   string // PEERDRIVE_PEERJS_PORT, default 443
+	PeerJSHost   string // PEERDRIVE_PEERJS_HOST, default 0.peerjs.com
+	PeerJSPort   string // PEERDRIVE_PEERJS_PORT, default 9000 (DefaultSignalPort); 0.peerjs.com actually serves on 443 — Issue #372
 	PeerJSKey    string // PEERDRIVE_PEERJS_KEY, default "peerjs" (public cloud) or pd-signal-... (self-hosted)
 	PeerJSID     string // PEERDRIVE_PEERJS_ID, empty generates peerdrive-<random>
 	PeerJSSecure bool   // PEERDRIVE_PEERJS_SECURE, default true
@@ -203,7 +203,7 @@ type Config struct {
 	OpenListCrawlTimeoutSecs int    // PEERDRIVE_OPENLIST_CRAWL_TIMEOUT_SECS (default 30)
 
 	DownloadDir         string
-	FolderMaxDepth      int // PEERDRIVE_FOLDER_MAX_DEPTH: register_folder max recursion depth (default 1 = scan current directory only)
+	FolderMaxDepth      int // PEERDRIVE_FOLDER_MAX_DEPTH: register_folder max recursion depth (default 0 = unlimited full recursion; >0 caps depth)
 	MaxPeers            int
 	DownloadOrder       string
 	DownloadTimeoutSecs int
@@ -272,9 +272,12 @@ type Config struct {
 	// DisableCSP disables Content-Security-Policy (PEERDRIVE_CSP=off).
 	// Only an escape hatch for when embedding third-party pages or old-browser compatibility breaks. Default on.
 	DisableCSP bool
-	// DisableSwagger disables /swagger/* (PEERDRIVE_SWAGGER=on to enable). Default **off** (Issue #282):
-	// Swagger UI exposes the full API surface, lowering the attack barrier on public deployments.
-	// Enable explicitly only when you need API docs and accept the security tradeoff.
+	// DisableSwagger disables /swagger/* (PEERDRIVE_SWAGGER=off to disable). Default **on**.
+	// Swagger UI publishes every endpoint with its parameter structure, which is a free attack
+	// map for public deployments, so production should set PEERDRIVE_SWAGGER=off. The contract
+	// mirrors DisableCSP (both default on, "off" disables) and the README flag table; before
+	// 2026-10-14 the env check was inverted (PEERDRIVE_SWAGGER=off *enabled* the docs and
+	// =on disabled them), so the documented escape hatch did nothing.
 	DisableSwagger bool
 	// Host is the listen address (PEERDRIVE_HOST, default empty = listen on all interfaces).
 	//
@@ -730,7 +733,7 @@ func Load() *Config {
 		RateLimitRPS:     getEnvFloat("PEERDRIVE_RATE_LIMIT_RPS", 30),
 		MaxJSONBodyBytes: getEnvInt64("PEERDRIVE_MAX_JSON_BODY_BYTES", 1*1024*1024), // JSON body cap (DoS hardening)
 		DisableCSP:       os.Getenv("PEERDRIVE_CSP") == "off",
-		DisableSwagger:   os.Getenv("PEERDRIVE_SWAGGER") == "on",
+		DisableSwagger:   getEnv("PEERDRIVE_SWAGGER", "on") == "off",
 		Host:             getEnv("PEERDRIVE_HOST", ""),
 		TrustedProxies:   getEnv("PEERDRIVE_TRUSTED_PROXIES", ""),
 

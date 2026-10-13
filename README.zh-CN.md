@@ -239,7 +239,7 @@ peerdrive
 | `PEERDRIVE_STORAGE_ENABLE` | true | 存储启用 |
 | `PEERDRIVE_MAX_UPLOAD_BYTES` | 100MB | 单文件上传上限 |
 | `PEERDRIVE_MAX_UPLOAD_ANON_BYTES` | 10MB | 匿名上传上限 |
-| `PEERDRIVE_BT_DHT_ENABLE` / `PEERDRIVE_BT_DHT_LISTEN` | true / :6881 | BT DHT（独立库 go-peerdrive-bt） |
+| `PEERDRIVE_BT_DHT_ENABLE` / `PEERDRIVE_BT_DHT_LISTEN` | false / :6881 | BT DHT（默认关：DHT 初始化会阻塞启动；独立库 go-peerdrive-bt） |
 | `PEERDRIVE_IPFS_GATEWAY_ENABLE` / `PEERDRIVE_IPFS_GATEWAYS` | true / 三网关 | IPFS 网关兜底 |
 | `PEERDRIVE_WEBRTC_STUN` / `PEERDRIVE_WEBRTC_TURN` | stun.l.google.com / - | ICE 服务器 |
 | `PEERDRIVE_PEERJS_ENABLE` | true | PeerJS 信令（互联层） |
