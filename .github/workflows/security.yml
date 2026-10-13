@@ -216,6 +216,9 @@ jobs:
   #     发现仍随 artifact 归档、摘要打印到日志；
   #   - 「汇总报告」步骤做**可达级硬门禁**：call-graph 可达（called=True）> 0
   #     时 ::error:: + exit 1（红灯），= 0 时通过。
+  #   - **直接依赖可修复漏洞硬门禁**（2026-10-13 由 paho.mqtt GO-2025-4173 引入）：
+  #     各 go.mod 直接依赖（非 indirect）且有 fixed 版本的发现 → 硬 fail。
+  #     直接依赖升级低风险、不该留噪音；无修复版（x/crypto GO-2026-5932）豁免。
   #   判据取 called=True：只拦「真会被执行到」的漏洞；不可达发现（dev 依赖、
   #   无调用链的传递库）不阻断 PR，避免误杀。osv-scanner 的 called 分析详见
   #   https://google.github.io/osv-scanner（experimental call analysis）。
@@ -302,6 +305,57 @@ jobs:
                     "硬门禁拦截——请升级对应依赖后重跑")
               raise SystemExit(1)
           print("可达漏洞硬门禁：0 组，通过 ✓")
+
+          # ── 硬门禁②：直接依赖且有可用修复版本的漏洞 ──
+          # 2026-10-13 由 paho.mqtt GO-2025-4173（back 直接依赖，6.3，修复版 1.5.1）
+          # 引入：直接依赖即使 call-graph 不可达（当前判据），一旦将来被新用法
+          # 触达就是编码边界 bug；且直接依赖升级是低风险动作，不该留噪音。
+          # 谓词 = 各 go.mod require 块内的非 indirect 包 × 有 fixed 版本的发现；
+          # 无修复版（如 x/crypto GO-2026-5932）天然豁免。修复 paho 后现 0 项。
+          import re as _re
+          def _direct_deps(gomod):
+              s = set()
+              try:
+                  txt = open(gomod).read()
+              except OSError:
+                  return s
+              for m in _re.finditer(r'require \(([^)]*)\)', txt, _re.S):
+                  for ln in m.group(1).splitlines():
+                      ln = ln.strip()
+                      if ln and not ln.startswith('//') and '// indirect' not in ln and '=>' not in ln:
+                          s.add(ln.split()[0])
+              return s
+          _direct = {}
+          for _gm in ['back/go.mod', 'back/p2p_bt/go.mod', 'back/peerjs/go.mod',
+                      'back/signalframe/go.mod', 'back/signalserver/go.mod']:
+              _direct[_gm] = _direct_deps(_gm)
+          fixable_direct = []
+          for r in data.get('results', []):
+              src = r.get('source', {}).get('path', '')
+              gm = next((gm for gm in _direct if gm in src), None)
+              if not gm:
+                  continue
+              for p in r.get('packages', []) or []:
+                  pkg = p.get('package', {}).get('name')
+                  if pkg not in _direct[gm]:
+                      continue
+                  for g in p.get('groups', []) or []:
+                      ids = g.get('ids', ['?'])[0]
+                      fx = None
+                      for v in p.get('vulnerabilities', []) or []:
+                          for a in v.get('affected', []) or []:
+                              for rng in a.get('ranges', []) or []:
+                                  for ev in rng.get('events', []) or []:
+                                      if 'fixed' in ev:
+                                          fx = ev['fixed']
+                      if fx:
+                          fixable_direct.append((ids, pkg, fx, gm))
+          if fixable_direct:
+              for ids, pkg, fx, gm in fixable_direct:
+                  print(f"::error::直接依赖 {pkg} 有可修复漏洞 {ids}"
+                        f"（修复版 {fx}，{gm}）——硬门禁拦截，请升级后重跑")
+              raise SystemExit(1)
+          print("直接依赖可修复漏洞硬门禁：0 组，通过 ✓")
           PY
       - name: Upload report
         if: always()

@@ -6,7 +6,7 @@ require (
 	github.com/Hana-ame/go-peerdrive-bt v0.0.0
 	github.com/Hana-ame/go-peerjs v0.0.0
 	github.com/anacrolix/torrent v1.61.0
-	github.com/eclipse/paho.mqtt.golang v1.4.3
+	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
