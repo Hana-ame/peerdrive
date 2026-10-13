@@ -32,8 +32,8 @@ require (
 	github.com/pion/turn/v4 v4.0.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
-	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
