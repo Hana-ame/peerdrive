@@ -241,8 +241,21 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 			EntrySuffix:     cfg.IwaraEntrySuffix,
 			UpstreamSuffix:  cfg.IwaraUpstreamSuffix,
 			EntryPort:       strconv.Itoa(cfg.IwaraEchProxyPort),
+			EntrySkipTLS:    cfg.IwaraEntrySkipTLS,
 		}
 		iwaraCfg.Normalize()
+
+		// TLS verification of the iwara ech-proxy entry (PEERDRIVE_IWARA_ENTRY_SKIP_TLS,
+		// default true = today's behaviour). Log it either way so the security posture is
+		// visible in startup output instead of being implied by an absent warning.
+		if iwaraCfg.EntrySkipTLS {
+			log.LogWarn("main: iwara ech-proxy entry TLS verification is DISABLED — %s serves a self-signed cert "+
+				"(loopback only, so no network exposure). Set PEERDRIVE_IWARA_ENTRY_SKIP_TLS=false to require a "+
+				"chain-issued entry cert", iwaraCfg.ListenAddr)
+		} else {
+			log.LogInfo("main: iwara ech-proxy entry TLS verification ENABLED (chain enforced for %s)",
+				iwaraCfg.ListenAddr)
+		}
 
 		pm := echproxy.NewProcessManager(iwaraCfg)
 		client := echproxy.NewIwaraClient(iwaraCfg)
@@ -390,6 +403,17 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 				urlClient = mod.Client()
 				log.LogInfo("main: ech-proxy enabled — %s → %s://%s:%s via %s",
 					twimg.DefaultSrcHost, "https", mod.Entry().EntryHost, mod.Entry().Port, mod.Addr())
+				// Same trust model as the iwara module above: the entry is a loopback-only
+				// child process with a self-signed cert, so skipping verification is the
+				// default (PEERDRIVE_ECH_PROXY_SKIP_TLS). Say so at startup either way.
+				if mod.Entry().SkipTLS {
+					log.LogWarn("main: ech-proxy entry TLS verification is DISABLED — %s serves a self-signed "+
+						"cert (loopback only, so no network exposure). Set PEERDRIVE_ECH_PROXY_SKIP_TLS=false to "+
+						"require a chain-issued entry cert", mod.Addr())
+				} else {
+					log.LogInfo("main: ech-proxy entry TLS verification ENABLED (chain enforced for %s)",
+						mod.Addr())
+				}
 			}
 		}
 

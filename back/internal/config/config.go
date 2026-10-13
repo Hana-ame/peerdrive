@@ -352,6 +352,12 @@ type Config struct {
 	IwaraEntrySuffix     string // PEERDRIVE_IWARA_ENTRY_SUFFIX: entry domain suffix (default "l.moonchan.xyz")
 	IwaraUpstreamSuffix  string // PEERDRIVE_IWARA_UPSTREAM_SUFFIX: upstream domain (default "iwara.tv")
 	IwaraEchProxyVersion string // PEERDRIVE_IWARA_ECH_PROXY_VERSION: ech-proxy release tag (default "v1.3.0")
+	// IwaraEntrySkipTLS skips TLS chain verification for the iwara ech-proxy entry
+	// host (default **true**: the entry is the local 127.0.0.1:<port> proxy, which
+	// serves a self-signed cert that is not in the system trust store). Set false in a
+	// deployment that owns *.l.moonchan.xyz with a chain-issued cert; the trust model
+	// behind both defaults is documented in doc/guide/operation-manual.md §6.
+	IwaraEntrySkipTLS bool
 
 	// ── ExHentai routing (PEERDRIVE_EXHENTA_*, optional module) ──
 	//
@@ -534,6 +540,7 @@ func DefaultConfig() *Config {
 		IwaraEntrySuffix:         "l.moonchan.xyz",
 		IwaraUpstreamSuffix:      "iwara.tv",
 		IwaraEchProxyVersion:     "v1.3.0",
+		IwaraEntrySkipTLS:        true,
 		ExhentaiEnable:           false,
 		ExhentaiConfigURL:        "",
 		ExhentaiConfigInsecure:   false,
@@ -673,6 +680,9 @@ func Load() *Config {
 		IwaraEntrySuffix:     getEnv("PEERDRIVE_IWARA_ENTRY_SUFFIX", "l.moonchan.xyz"),
 		IwaraUpstreamSuffix:  getEnv("PEERDRIVE_IWARA_UPSTREAM_SUFFIX", "iwara.tv"),
 		IwaraEchProxyVersion: getEnv("PEERDRIVE_IWARA_ECH_PROXY_VERSION", "v1.3.0"),
+		// Default true = today's behaviour (self-signed local proxy). Operators with a
+		// chain-issued *.moonchan.xyz cert set this to false to require full verification.
+		IwaraEntrySkipTLS: getEnvBool("PEERDRIVE_IWARA_ENTRY_SKIP_TLS", true),
 
 		// ExHentai routing (optional module)
 		ExhentaiEnable:         getEnvBool("PEERDRIVE_EXHENTA_ENABLE", false),

@@ -137,10 +137,16 @@ func NewTransport() *http.Transport {
 			if v, ok := ctx.Value(tlsSkipKey{}).(bool); ok {
 				skip = v
 			}
+			// skip is per-backend and default false: the default mirror is
+			// Cloudflare-fronted with a valid chain, so verification stays on unless an
+			// operator explicitly opts a private/self-signed backend into
+			// skip_tls. The ech-proxy entry modules (iwara, twimg) have the inverse
+			// default because their entry is a loopback-only child process — see
+			// doc/guide/operation-manual.md §6 for the trust model.
 			cfg := &tls.Config{
 				MinVersion:         tls.VersionTLS12,
 				ServerName:         serverName,
-				InsecureSkipVerify: skip,
+				InsecureSkipVerify: skip, // #nosec G402 -- per-backend opt-in for self-signed private mirrors
 			}
 			return tls.DialWithDialer(d, network, dialAddr, cfg)
 		},
