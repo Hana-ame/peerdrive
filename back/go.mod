@@ -23,7 +23,7 @@ require (
 require (
 	github.com/Hana-ame/go-signalframe v0.0.0 // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
-	github.com/klauspost/compress v1.17.6 // indirect
+	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 )
