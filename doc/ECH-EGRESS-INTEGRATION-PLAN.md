@@ -27,6 +27,7 @@ Peerdrive 节点的出网数据通信（Egress）严格分为两大并立通道�
        │
        ▼
 [PR2: echproxy 去 exe 化] ──► 移除 ProcessManager，exhentai/twimg 统一使用 echcore 库内拨号
+        │                          ✓ 已交付 (PR #376, 2026-10-14)
        │
        ▼
 [PR3: source 统一收敛 Egress] ──► URLSource / EchSource 均支持透明注入 Egress 实例
@@ -39,8 +40,8 @@ Peerdrive 节点的出网数据通信（Egress）严格分为两大并立通道�
 
 ## 3. PR2 详细设计：echproxy 去 exe 化
 
-### 3.1 现状缺陷
-历史实现的 `back/internal/echproxy/process.go` 引入了 `ProcessManager`：
+### 3.1 现状缺陷（✓ 已交付 PR #376）
+历史实现的 echproxy 包 process.go 文件引入了 `ProcessManager`（该文件已于 PR #376 删除）：
 - 在运行时联网下载外部 `ech-proxy` 可执行二进制文件；
 - 本地监听 `127.0.0.1:8443`；
 - 通过 `RoundTripper` 将流量重写至本地端口代理转发。
