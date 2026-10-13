@@ -75,11 +75,7 @@ func (rt *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 //
 // TLS: ServerName is left unset so http.Transport derives it from the rewritten URL
 // host (twimg-pbs.l.moonchan.xyz) — that is the SNI ech-proxy routes on. SkipTLS skips
-// chain verification for the local proxy's self-signed cert; it is default true (see
-// DefaultEntry) because the entry is a loopback-only child process whose cert is not in
-// the system trust store, and false in a deployment that owns the entry domain with a
-// chain-issued cert. The same trust model is documented in
-// doc/guide/operation-manual.md §6 (shared with the iwara module).
+// chain verification for the local proxy's self-signed cert.
 func NewTransport(entry Entry) (*http.Transport, error) {
 	if err := entry.Validate(); err != nil {
 		return nil, err
@@ -93,10 +89,8 @@ func NewTransport(entry Entry) (*http.Transport, error) {
 			return d.DialContext(ctx, network, addr)
 		},
 		TLSClientConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-			// entry.SkipTLS is the PEERDRIVE_ECH_PROXY_SKIP_TLS knob: default true for the
-			// loopback self-signed entry, false for a chain-issued deployment.
-			InsecureSkipVerify: entry.SkipTLS, // #nosec G402 -- local loopback proxy, self-signed by design
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: entry.SkipTLS,
 		},
 		TLSHandshakeTimeout: 10 * time.Second,
 		MaxIdleConns:        32,

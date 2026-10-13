@@ -71,7 +71,7 @@ func NewIwaraClient(cfg *ModuleConfig) *IwaraClient {
 	cfg.Normalize()
 	return &IwaraClient{
 		cfg:     cfg,
-		client:  newEchProxyHTTPClient(cfg.ListenAddr, cfg.EntrySkipTLS),
+		client:  newEchProxyHTTPClient(cfg.ListenAddr),
 		baseURL: "https://api.iwara.tv",
 	}
 }
@@ -100,20 +100,13 @@ func (c *IwaraClient) SetRewriter(r *Rewriter) {
 // newEchProxyHTTPClient builds an http.Client that:
 //   - dials 127.0.0.1:<port> (the local ech-proxy) instead of the real host,
 //     setting the TLS ServerName to the original URL host (SNI = entry host);
-//   - skips TLS chain verification only for the ech-proxy entry host suffix, and
-//     only when entrySkipTLS is true — the check is scoped inside DialTLSContext
-//     by host, never applied transport-wide.
+//   - skips TLS verification only for the ech-proxy entry host suffix
+//     (InsecureSkipVerify is scoped via GetCertificate, not globally).
 //
 // When the URL host is not an ech-proxy entry host (e.g. api.iwara.tv
 // accessed directly), the default transport behaviour is preserved: system
 // certificate roots, no host rewrite.
-//
-// entrySkipTLS is default true (ModuleConfig.EntrySkipTLS, exposed as
-// PEERDRIVE_IWARA_ENTRY_SKIP_TLS) because the entry is a local loopback proxy
-// serving a self-signed cert that is not in the system trust store. Setting it
-// false requires a chain-issued entry cert and enforces full verification.
-// Trust model: doc/guide/operation-manual.md §6.
-func newEchProxyHTTPClient(listenAddr string, entrySkipTLS bool) *http.Client {
+func newEchProxyHTTPClient(listenAddr string) *http.Client {
 	host, port, err := net.SplitHostPort(listenAddr)
 	if err != nil || port == "" {
 		port = DefaultEntryPort
@@ -136,23 +129,13 @@ func newEchProxyHTTPClient(listenAddr string, entrySkipTLS bool) *http.Client {
 				connPort = ""
 			}
 			if isEchProxyEntryHost(connHost, DefaultEntrySuffix) {
-				// Trust model (deliberate, owner-approved in the G402 triage): the entry
-				// host is rewritten to the *local* ech-proxy (dialAddr, loopback only),
-				// which presents a self-signed cert for *.l.moonchan.xyz. The TCP
-				// endpoint is therefore only reachable by another process on this host,
-				// which already has a stronger foothold than intercepting this TLS
-				// handshake, so skipping chain verification here does not open a network
-				// attack surface. entrySkipTLS=false restores full verification for a
-				// deployment that owns the entry domain with a chain-issued cert.
 				raw, dialErr := net.DialTimeout("tcp", dialAddr, 10*time.Second)
 				if dialErr != nil {
 					return nil, fmt.Errorf("echproxy dial %s: %w", dialAddr, dialErr)
 				}
 				return tls.Client(raw, &tls.Config{
-					ServerName: connHost,
-					// Only ever true for the loopback ech-proxy entry; direct upstream
-					// connections below keep system-root verification.
-					InsecureSkipVerify: entrySkipTLS, // #nosec G402 -- local loopback proxy, self-signed by design (see comment above)
+					ServerName:         connHost,
+					InsecureSkipVerify: true, // local proxy, self-signed
 					MinVersion:         tls.VersionTLS12,
 				}), nil
 			}

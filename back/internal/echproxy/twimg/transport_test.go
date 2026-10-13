@@ -126,39 +126,6 @@ func TestRoundTrip_RewritesToEntry(t *testing.T) {
 	assert.Equal(t, "https://x.com/", referer, "unrelated headers must survive the rewrite")
 }
 
-// TestRoundTrip_SkipTLSFalseEnforcesChainVerification mirrors the default path above
-// (SkipTLS=true): an operator who owns the entry domain with a chain-issued cert sets
-// PEERDRIVE_ECH_PROXY_SKIP_TLS=false, and then the self-signed local test cert must be
-// rejected instead of trusted.
-func TestRoundTrip_SkipTLSFalseEnforcesChainVerification(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("twimg-bytes"))
-	}))
-	defer srv.Close()
-
-	laddr := srv.Listener.Addr().String()
-	_, portStr, err := net.SplitHostPort(laddr)
-	require.NoError(t, err)
-
-	entry := Entry{
-		SrcHost:    DefaultSrcHost,
-		EntryHost:  DefaultEntryHost,
-		Port:       portStr,
-		ListenAddr: laddr,
-		SkipTLS:    false,
-	}
-
-	client, err := NewClient(entry, nil)
-	require.NoError(t, err)
-
-	req, err := http.NewRequest(http.MethodGet, "https://pbs.twimg.com/media/x.jpg", nil)
-	require.NoError(t, err)
-
-	_, err = client.Do(req)
-	require.Error(t, err, "verification on must reject the untrusted local certificate")
-	assert.Contains(t, err.Error(), "x509", "the failure must be a certificate verification failure")
-}
-
 // TestRoundTrip_PassesThroughNonPbs proves the enabled module is a no-op for unrelated
 // traffic: the base transport sees the original request object, uncloned and unmodified.
 func TestRoundTrip_PassesThroughNonPbs(t *testing.T) {

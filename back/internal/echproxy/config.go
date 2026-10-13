@@ -125,17 +125,6 @@ type ModuleConfig struct {
 	// upstream hosts, so binding to 0.0.0.0 would turn it into an open proxy.
 	ListenAddr string
 
-	// EntrySkipTLS skips TLS chain verification when this client dials the
-	// ech-proxy entry host (default **true**, applied by NewModuleConfig — the
-	// entry is the local loopback proxy, whose self-signed cert is not in the
-	// system trust store). A caller that builds a ModuleConfig literal directly
-	// must set it explicitly; the twimg sibling module documents the same default
-	// on twimg.Entry.SkipTLS. Set false when the entry is served by a cert with a
-	// valid chain (a deployment that owns *.l.moonchan.xyz), then verification is
-	// enforced. Exposed as PEERDRIVE_IWARA_ENTRY_SKIP_TLS; see
-	// doc/guide/operation-manual.md §6 for the trust model.
-	EntrySkipTLS bool
-
 	// FixedCookies is an extra set of cookies injected by ech-proxy itself
 	// (upstream.json "cookie" / "headers" mechanism) — a comma-separated list of
 	// name=value pairs. Unlike IWARACookie (which this module injects per
@@ -159,7 +148,6 @@ func NewModuleConfig() ModuleConfig {
 		ReleaseBaseURL:  DefaultReleaseBaseURL,
 		EchProxyDir:     "./echproxy",
 		ListenAddr:      "127.0.0.1:" + DefaultEntryPort,
-		EntrySkipTLS:    true,
 	}
 }
 
