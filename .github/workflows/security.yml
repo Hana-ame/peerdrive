@@ -349,3 +349,86 @@ jobs:
               print('::warning::许可证检查：存在 UNKNOWN/GPL 类许可证，见上方清单'
                     '（报告模式，业务策略定案后转硬门禁）')
           PY
+
+  # ── HTTP 安全头 E2E 门禁 ─────────────────────────────────────────────
+  # R2/R3 在 middleware.go SecurityHeaders() 实现的安全头契约（nosniff /
+  # X-Frame-Options / Permissions-Policy / Referrer-Policy / Cross-Origin-
+  # Opener-Policy / 按路径分发的 CSP），redteam_r2_test.go 有单测断言；
+  # 本 job 用**真实起服 + curl** 做 E2E 复核（覆盖中间件挂载与真实响应链），
+  # 并持续上报「当前缺失的头」。
+  # 2026-10-13 首跑本地实测读数：契约头 5 项全端点齐备（含 400/404 响应），
+  # 严格 CSP 与 inlineHTMLCSP（/panel、/swagger/*）按路径正确分发；
+  # **Strict-Transport-Security (HSTS) 缺失**——进程内 HTTP 起服，HSTS 属
+  # 部署在 TLS 之后的代码轮补，本 job 以 ::warning:: 持续通报（不阻断）。
+  # 门禁语义：契约头缺失/值不符 → 硬 fail（防回归）；HSTS 缺失 → 通报。
+  security-headers:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: back/go.sum
+      - name: 构建 server (tags=nosqlite)
+        working-directory: back
+        run: go build -tags nosqlite -o /tmp/peerdrive-server ./cmd/server/
+      - name: 起服务（最小配置）
+        run: |
+          mkdir -p /tmp/pd-hdr/storage
+          env PORT=43111 \
+            PEERDRIVE_PEERJS_ENABLE=false \
+            PEERDRIVE_BT_DHT_ENABLE=false \
+            PEERDRIVE_IPFS_GATEWAY_ENABLE=false \
+            PEERDRIVE_ALLOW_NO_AUTH=1 \
+            PEERDRIVE_STORAGE=/tmp/pd-hdr/storage \
+            /tmp/peerdrive-server > /tmp/pd-hdr/server.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null -m 5 http://127.0.0.1:43111/ping && break
+            sleep 1
+          done
+          curl -sf -o /dev/null -m 5 http://127.0.0.1:43111/ping \
+            || { echo "::error::server 未在 30s 内起服"; tail -20 /tmp/pd-hdr/server.log; exit 1; }
+      - name: 安全头契约门禁 + HSTS 通报
+        run: |
+          python3 - <<'PY'
+          import subprocess, sys
+          # 契约 = R2/R3 已实现的头集合（全部路径生效，含 4xx 响应）
+          contract = {
+              'x-content-type-options': 'nosniff',
+              'x-frame-options': 'SAMEORIGIN',
+              'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)',
+              'referrer-policy': 'no-referrer',
+              'cross-origin-opener-policy': 'same-origin',
+          }
+          paths = ['/ping', '/panel', '/swagger/index.html', '/sha256sum/nonexistent', '/']
+          fails, hsts_seen = [], False
+          for p in paths:
+              out = subprocess.run(['curl', '-s', '-D', '-', '-o', '/dev/null', '-m', '8',
+                                    f'http://127.0.0.1:43111{p}'],
+                                   capture_output=True, text=True).stdout
+              hdrs = {}
+              for ln in out.splitlines():
+                  if ':' in ln and not ln.startswith(('HTTP/', '#')):
+                      k, v = ln.split(':', 1)
+                      hdrs[k.strip().lower()] = v.strip()
+              missing = [k for k in contract if k not in hdrs]
+              wrong = [f"{k}={hdrs[k]}" for k in contract if k in hdrs and hdrs[k] != contract[k]]
+              csp = hdrs.get('content-security-policy')
+              if missing: fails.append(f"{p}: 缺失 {missing}")
+              if wrong: fails.append(f"{p}: 值不符 {wrong}")
+              if not csp: fails.append(f"{p}: 缺 Content-Security-Policy")
+              if 'frame-ancestors' not in (csp or ''): fails.append(f"{p}: CSP 缺 frame-ancestors")
+              if hdrs.get('strict-transport-security'): hsts_seen = True
+              print(f"{p}: nosniff={hdrs.get('x-content-type-options','-')} "
+                    f"XFO={hdrs.get('x-frame-options','-')} COOP={hdrs.get('cross-origin-opener-policy','-')} "
+                    f"CSP={'有' if csp else '无'} inline={'unsafe-inline' in (csp or '')}")
+          if not hsts_seen:
+              print('::warning::HSTS (Strict-Transport-Security) 缺失——部署在 TLS 之后应由服务端补，属代码轮')
+          if fails:
+              for f in fails:
+                  print(f'::error::{f}')
+              raise SystemExit(1)
+          print('安全头契约门禁：全部通过 ✓')
+          PY
