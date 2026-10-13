@@ -51,22 +51,43 @@ jobs:
           cache-dependency-path: back/go.sum
       - run: go mod download
       - name: 红队安全回归用例 R1 (XSS / Location 注入 / Content-Disposition)
-        run: >-
-          go test -tags nosqlite ./internal/controller/
-          -run 'TestDownload_|TestShare_|TestSafeFilename|TestIsHTTPURL'
-          -count=1 -v
+        # 2026-10-13 加「套件空转防护」：若 0 个用例运行（测试被删/改名/过滤器
+        # 漏配）则硬 fail——安全回归门禁绝不允许静默空转。PASS 数打印可见。
+        run: |
+          go test -tags nosqlite ./internal/controller/ \
+            -run 'TestDownload_|TestShare_|TestSafeFilename|TestIsHTTPURL' \
+            -count=1 -v > /tmp/rt-r1.log 2>&1 || { tail -30 /tmp/rt-r1.log; exit 1; }
+          n=$(grep -cE '^--- PASS' /tmp/rt-r1.log || true)
+          echo "R1 红队回归 PASS 数: $n（预期 ≥9：Download×5 + Share×2 + SafeFilename + IsHTTPURL）"
+          if [ "$n" -eq 0 ]; then
+            echo "::error::红队回归 R1 0 个用例运行——套件可能被删/改名，禁止空转"
+            exit 1
+          fi
 
       # R2（第二轮，全栈）：JSON 请求体上限 / CORS 头白名单 / Origin 通配符
-      # scheme 校验 / 弱 AdminToken 启动拒绝。这些用例是「修完再被绕过」的防线，
+      # scheme 校验 / 安全头契约（TestSecurityHeaders，2026-10-13 补进隔离门禁）/
+      # 弱 AdminToken 与启动姿态（TestSecurityStatus / TestValidateAuthStartup_，
+      # 2026-10-13 补进隔离门禁）。这些用例是「修完再被绕过」的防线，
       # 单独命名一步，免得将来有人改 controller 时把它们当 controller 用例删掉。
-      - name: 红队安全回归用例 R2 (JSON 上限 / CORS / Origin / 弱令牌)
-        run: >-
-          go test -tags nosqlite ./internal/router/
-          -run 'TestLimitJSONBody|TestCORS_|TestIsOriginAllowed'
-          -count=1 -v &&
-          go test -tags nosqlite ./internal/serverapp/
-          -run 'TestValidateAuthStartup_RejectsWeakAdminToken|TestValidateAuthStartup_WeakTokenExemptions|TestIsWeakSecret'
-          -count=1 -v
+      - name: 红队安全回归用例 R2 (JSON 上限 / CORS / Origin / 安全头 / 启动姿态 / 弱令牌)
+        # 过滤器扩展后（2026-10-13）：router 11 例（JSON 上限 4 + CORS 2 +
+        # Origin 2 + 安全头 3）、serverapp 13 例（启动姿态 7 + 状态 5 + 弱密钥 1）。
+        # 同样带空转防护（0 用例运行即 fail）。
+        run: |
+          go test -tags nosqlite ./internal/router/ \
+            -run 'TestLimitJSONBody|TestCORS_|TestIsOriginAllowed|TestSecurityHeaders' \
+            -count=1 -v > /tmp/rt-r2a.log 2>&1 || { tail -30 /tmp/rt-r2a.log; exit 1; }
+          na=$(grep -cE '^--- PASS' /tmp/rt-r2a.log || true)
+          echo "R2 router PASS 数: $na（预期 11）"
+          go test -tags nosqlite ./internal/serverapp/ \
+            -run 'TestSecurityStatus|TestValidateAuthStartup_|TestIsWeakSecret' \
+            -count=1 -v > /tmp/rt-r2b.log 2>&1 || { tail -30 /tmp/rt-r2b.log; exit 1; }
+          nb=$(grep -cE '^--- PASS' /tmp/rt-r2b.log || true)
+          echo "R2 serverapp PASS 数: $nb（预期 13）"
+          if [ "$na" -eq 0 ] || [ "$nb" -eq 0 ]; then
+            echo "::error::红队回归 R2 0 个用例运行——套件可能被删/改名，禁止空转"
+            exit 1
+          fi
 
   # ── Go 静态安全扫描 ───────────────────────────────────────────────────
   # gosec 覆盖 CWE 级别的问题（命令注入、弱哈希、TLS 校验关闭、路径拼接等）。
