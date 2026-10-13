@@ -369,11 +369,17 @@ jobs:
   # 2026-10-13 首扫（refactor @ 446e8ca）基线：MIT 414 / BSD-3 82 / Apache-2.0 51 /
   # MPL-2.0 42 / ISC 20 / BSD-2 14 / CC-BY-4.0 1 / EPL-2.0 1 / MIT OR X11 1 /
   # UNKNOWN 6；**无 GPL/AGPL/SSPL 强 copyleft**。
-  # UNKNOWN 明细（基线，均待补齐 license 字段或核实）：
-  #   go-llsqlite/adapter、multiformats/go-base36（Go）、electron-to-chromium、
-  #   options（npm）、**peerdrive-client（本仓自己的包，未声明 license 字段，可直接修）**。
-  # 报告模式（不阻断主干）：打印分布 + 违规清单，UNKNOWN/GPL 类出现时 ::warning::。
-  # 硬门禁（--licenses="允许列表"）属业务许可证策略，团队定案后收紧。
+  # UNKNOWN 溯源（2026-10-13 逐项核实，多为解析伪影而非策略缺口）：
+  #   - go-llsqlite/adapter：实际 **MPL-2.0**（本在 allowlist）——deps.dev 对
+  #     pseudo-version 解析失败；
+  #   - electron-to-chromium：实际 **ISC**（本在 allowlist）——同上解析失败；
+  #   - multiformats/go-base36：仓库无可断言 LICENSE（GitHub=NOASSERTION）→ 待核；
+  #   - options (npm v0.0.6)：npm 元数据无 license、仓库失修 → 待核；
+  #   - peerdrive-client：本仓本地包（file: 依赖，不在 npm registry）→ 解析伪影，
+  #     license 字段已声明 MIT；front/package.json 缺 license 字段已于 2026-10-13 补 MIT。
+  # 门禁语义（2026-10-13 策略定案）：
+  #   - **GPL/AGPL/SSPL 强 copyleft → 硬 fail**（本仓禁止引入强 copyleft，现 0 项）；
+  #   - UNKNOWN → ::warning:: 通报（解析限制或待核项，逐条 triage）。
   license-scan:
     runs-on: ubuntu-latest
     env:
@@ -418,12 +424,21 @@ jobs:
           for lic, eco, pkg in viol:
               print(f'  [{lic}] {eco}: {pkg}')
           # MIT OR X11 是宽容双许可（非 SPDX 单 id 无法进 allowlist），不算违规
-          flagged = [v for v in viol
-                     if v[0].upper().split('-')[0] in ('UNKNOWN', 'GPL', 'AGPL', 'SSPL')]
-          print(f'分布 {len(dist)} 类 | 违规 {len(viol)} 项 | 标记(UNKNOWN/GPL类) {len(flagged)} 项')
-          if flagged:
-              print('::warning::许可证检查：存在 UNKNOWN/GPL 类许可证，见上方清单'
-                    '（报告模式，业务策略定案后转硬门禁）')
+          copyleft = [v for v in viol
+                      if v[0].upper().split('-')[0] in ('GPL', 'AGPL', 'SSPL')]
+          unknown = [v for v in viol if v[0].upper() == 'UNKNOWN']
+          print(f'分布 {len(dist)} 类 | 违规 {len(viol)} 项 | '
+                f'强copyleft {len(copyleft)} 项 | UNKNOWN {len(unknown)} 项')
+          # ── 硬门禁：强 copyleft（GPL/AGPL/SSPL）直接红灯 ──
+          if copyleft:
+              for lic, eco, pkg in copyleft:
+                  print(f'::error::强 copyleft 许可证 [{lic}] {eco}: {pkg}'
+                        '——本仓禁止引入 GPL/AGPL/SSPL，硬门禁拦截')
+              raise SystemExit(1)
+          print('强 copyleft 许可证门禁：0 项，通过 ✓')
+          if unknown:
+              print('::warning::许可证检查：存在 UNKNOWN 项（多为 deps.dev 解析伪影或'
+                    '待核项，见 job 注释溯源），报告模式不阻断，逐条 triage')
           PY
 
   # ── HTTP 安全头 E2E 门禁 ─────────────────────────────────────────────
