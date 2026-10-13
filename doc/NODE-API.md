@@ -29,6 +29,8 @@ curl -X POST http://localhost:3000/peerjs/fetch \
 | `/p2p/forward/connect` | POST | Required | Start loopback listener on this end: `{key, target_peer, local_port, port?}` (`local_port` required for this-end listening; `port` optional target port, 0/omitted = determined by target node rules for unique port) |
 | `/p2p/forward/list` | GET | None | Active listeners and tunnels: `{"listeners":[{id,target_peer,local_port}], "tunnels":[{peer_id,port,key_id}]}` |
 | `/p2p/forward/close` | POST | Required | Close forwarding: `{key?}` closes listener matching key, `{peer_id?}` disconnects all tunnels for specified peer |
+| `/p2p/forward/listeners/:key` | DELETE | Required | Same as close, key from the URL (Issue #354) |
+| `/p2p/forward/tunnels/:peer_id` | DELETE | Required | Same as close with `peer_id` from the URL (Issue #354) |
 
 ### 1.3 Unified Source Management (`source_routes.go`)
 

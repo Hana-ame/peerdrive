@@ -175,22 +175,21 @@ func ListForwardSessions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"listeners": listeners, "tunnels": tunnels})
 }
 
-// CloseForwardSession handles POST /p2p/forward/close, closes the local listener for the specified key
-// (active tunnels are naturally closed at both ends; use peer_id to disconnect all tunnels to a specified peer).
+// CloseForwardSession handles POST /p2p/forward/close (JSON body {"key"} / {"peer_id"}) plus the
+// RESTful aliases DELETE /p2p/forward/listeners/:key and DELETE /p2p/forward/tunnels/:peer_id
+// (Issue #354). It closes the local listener for the specified key (active tunnels are naturally
+// closed at both ends; pass peer_id instead to disconnect all tunnels to a specified peer).
 func CloseForwardSession(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: CloseForwardSession")
-	var req struct {
-		Key    string `json:"key"`
-		PeerID string `json:"peer_id,omitempty"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	key, peerID, ok := closeForwardTarget(c)
+	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 	closed := 0
 	fwdListenersMu.Lock()
 	for k, fl := range fwdListeners {
-		if req.Key != "" && fl.key != req.Key {
+		if key != "" && fl.key != key {
 			continue
 		}
 		fl.ln.Close()
@@ -198,12 +197,31 @@ func CloseForwardSession(c *gin.Context) {
 		closed++
 	}
 	fwdListenersMu.Unlock()
-	if forwardPeer != nil && req.PeerID != "" {
-		forwardPeer.CloseForwardStream(req.PeerID)
+	if forwardPeer != nil && peerID != "" {
+		forwardPeer.CloseForwardStream(peerID)
 	}
-	if closed == 0 && req.PeerID == "" {
+	if closed == 0 && peerID == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "no matching forward session"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "closed", "closed_listeners": closed})
+}
+
+// closeForwardTarget resolves which session a close call targets: the URL path
+// parameters win (/p2p/forward/listeners/:key, /p2p/forward/tunnels/:peer_id),
+// the JSON body is the fallback for the legacy POST /p2p/forward/close
+// (Issue #354). ok=false means no path parameter and a missing or unparseable body.
+func closeForwardTarget(c *gin.Context) (key, peerID string, ok bool) {
+	key, peerID = c.Param("key"), c.Param("peer_id")
+	if key == "" && peerID == "" {
+		var body struct {
+			Key    string `json:"key"`
+			PeerID string `json:"peer_id,omitempty"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			return "", "", false
+		}
+		key, peerID = body.Key, body.PeerID
+	}
+	return key, peerID, true
 }

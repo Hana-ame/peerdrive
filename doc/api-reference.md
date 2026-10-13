@@ -231,6 +231,8 @@ The endpoints below call an external registration server; the URL is configured 
 | POST | `/p2p/forward/connect` | Connect to a forwarding session |
 | GET | `/p2p/forward/list` | List active forwards |
 | POST | `/p2p/forward/close` | Close a forwarding session |
+| DELETE | `/p2p/forward/listeners/:key` | Close the listener matching the key (RESTful alias of close) |
+| DELETE | `/p2p/forward/tunnels/:peer_id` | Drop all tunnels to the peer (RESTful alias of close) |
 
 ### Additional BT Endpoints
 

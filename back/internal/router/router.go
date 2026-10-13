@@ -238,6 +238,10 @@ func (rt *Router) Engine() *gin.Engine {
 		p2p.POST("/forward/connect", authRequired, controller.ConnectForwardSession)
 		p2p.GET("/forward/list", controller.ListForwardSessions)
 		p2p.POST("/forward/close", authRequired, controller.CloseForwardSession)
+		// RESTful close aliases (Issue #354): same handler, target from the URL instead
+		// of the JSON body. POST /forward/close keeps its original body contract.
+		p2p.DELETE("/forward/listeners/:key", authRequired, controller.CloseForwardSession)
+		p2p.DELETE("/forward/tunnels/:peer_id", authRequired, controller.CloseForwardSession)
 		// Cross-node pull & save (cloud drive target M3): pull peer files/collections to this node's disk.
 		// Read list is open (consistent with other status endpoints); start/cancel are write operations with auth.
 		p2p.GET("/pull", controller.ListPullJobs)
@@ -368,6 +372,9 @@ func (rt *Router) Engine() *gin.Engine {
 		files.POST("/diff", authRequired, controller.DiffVersions)
 		files.GET("/inbox", authRequired, controller.ListInboxFiles)
 		files.POST("/inbox/approve", authRequired, controller.ApproveInboxFile)
+		// RESTful approve alias (Issue #353): hash from the URL instead of the JSON
+		// body, symmetric with the DELETE /inbox/:hash reject route below.
+		files.POST("/inbox/:hash/approve", authRequired, controller.ApproveInboxFile)
 		files.DELETE("/inbox/:hash", authRequired, controller.RejectInboxFile)
 	}
 
