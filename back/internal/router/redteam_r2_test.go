@@ -283,5 +283,25 @@ func TestSecurityHeaders_DisabledCSP(t *testing.T) {
 		// The other hardening headers are not tied to the CSP switch.
 		assert.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
 		assert.Equal(t, "SAMEORIGIN", w.Header().Get("X-Frame-Options"))
+		assert.Equal(t, "max-age=31536000", w.Header().Get("Strict-Transport-Security"),
+			"path %s: HSTS must not be tied to the CSP switch either", path)
+	}
+}
+
+// TestSecurityHeaders_HSTS — Strict-Transport-Security must be present on every
+// response so browsers force HTTPS once the node is deployed behind TLS.
+// max-age=31536000 (1y) per OWASP production guidance; includeSubDomains is
+// deliberately NOT set: this is a BYO-deployment binary and operators may host
+// non-HTTPS subdomains on the same domain. Browsers ignore HSTS on plain HTTP
+// and on raw IP/LAN addresses, so the header is inert until TLS + hostname.
+func TestSecurityHeaders_HSTS(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"/", "/ping", "/panel", "/swagger/", "/api/files"} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, path, nil)
+		SecurityHeaders(false)(c)
+		assert.Equal(t, "max-age=31536000", w.Header().Get("Strict-Transport-Security"),
+			"path %s", path)
 	}
 }

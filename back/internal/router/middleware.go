@@ -103,6 +103,13 @@ func SecurityHeaders(disableCSP bool) gin.HandlerFunc {
 		c.Header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)")
 		c.Header("Referrer-Policy", "no-referrer")
 		c.Header("Cross-Origin-Opener-Policy", "same-origin")
+		// Strict-Transport-Security (HSTS)：进程内是纯 HTTP（TLS 由部署层终止），
+		// 浏览器只在 HTTPS 响应上生效该头、且对裸 IP/局域网地址不生效——所以对
+		// 纯 HTTP 或 LAN 部署是无害的，一旦挂在 TLS + 域名之后即强制 HTTPS 升级。
+		// max-age=31536000（1 年，OWASP 生产建议）；**故意不带 includeSubDomains**：
+		// 本二进制是 BYO 部署，运营者可能在同一域下有未上 TLS 的子域，带上会
+		// 硬性锁死它们造成可用性风险；includeSubDomains 留给运营者自行决定。
+		c.Header("Strict-Transport-Security", "max-age=31536000")
 		// /panel 与 /swagger：单文件内联页面（4 段 <script> + style），完全不给
 		// CSP 时浏览器控制台报 "Executing inline script violates ... default-src
 		// 'self'"，自动连接的前置脚本根本不会跑 —— 实测踩过。但仍降级成

@@ -70,15 +70,16 @@ jobs:
       # 2026-10-13 补进隔离门禁）。这些用例是「修完再被绕过」的防线，
       # 单独命名一步，免得将来有人改 controller 时把它们当 controller 用例删掉。
       - name: 红队安全回归用例 R2 (JSON 上限 / CORS / Origin / 安全头 / 启动姿态 / 弱令牌)
-        # 过滤器扩展后（2026-10-13）：router 11 例（JSON 上限 4 + CORS 2 +
-        # Origin 2 + 安全头 3）、serverapp 13 例（启动姿态 7 + 状态 5 + 弱密钥 1）。
+        # 过滤器扩展后（2026-10-13）：router 12 例（JSON 上限 4 + CORS 2 +
+        # Origin 2 + 安全头 4——含 2026-10-13 HSTS 代码轮新增 TestSecurityHeaders_HSTS）、
+        # serverapp 13 例（启动姿态 7 + 状态 5 + 弱密钥 1）。
         # 同样带空转防护（0 用例运行即 fail）。
         run: |
           go test -tags nosqlite ./internal/router/ \
             -run 'TestLimitJSONBody|TestCORS_|TestIsOriginAllowed|TestSecurityHeaders' \
             -count=1 -v > /tmp/rt-r2a.log 2>&1 || { tail -30 /tmp/rt-r2a.log; exit 1; }
           na=$(grep -cE '^--- PASS' /tmp/rt-r2a.log || true)
-          echo "R2 router PASS 数: $na（预期 11）"
+          echo "R2 router PASS 数: $na（预期 12）"
           go test -tags nosqlite ./internal/serverapp/ \
             -run 'TestSecurityStatus|TestValidateAuthStartup_|TestIsWeakSecret' \
             -count=1 -v > /tmp/rt-r2b.log 2>&1 || { tail -30 /tmp/rt-r2b.log; exit 1; }
@@ -374,14 +375,14 @@ jobs:
   # ── HTTP 安全头 E2E 门禁 ─────────────────────────────────────────────
   # R2/R3 在 middleware.go SecurityHeaders() 实现的安全头契约（nosniff /
   # X-Frame-Options / Permissions-Policy / Referrer-Policy / Cross-Origin-
-  # Opener-Policy / 按路径分发的 CSP），redteam_r2_test.go 有单测断言；
-  # 本 job 用**真实起服 + curl** 做 E2E 复核（覆盖中间件挂载与真实响应链），
-  # 并持续上报「当前缺失的头」。
-  # 2026-10-13 首跑本地实测读数：契约头 5 项全端点齐备（含 400/404 响应），
-  # 严格 CSP 与 inlineHTMLCSP（/panel、/swagger/*）按路径正确分发；
-  # **Strict-Transport-Security (HSTS) 缺失**——进程内 HTTP 起服，HSTS 属
-  # 部署在 TLS 之后的代码轮补，本 job 以 ::warning:: 持续通报（不阻断）。
-  # 门禁语义：契约头缺失/值不符 → 硬 fail（防回归）；HSTS 缺失 → 通报。
+  # Opener-Policy / Strict-Transport-Security / 按路径分发的 CSP），
+  # redteam_r2_test.go 有单测断言；本 job 用**真实起服 + curl** 做 E2E 复核
+  # （覆盖中间件挂载与真实响应链）。
+  # 2026-10-13 首跑读数为 5 项契约 + 按路径分发的 CSP（含 400/404 响应）；
+  # **HSTS 当时缺失**（第三轮发现）——本轮（PR #361）代码层已补
+  # `max-age=31536000`（BYO 部署、故意不带 includeSubDomains，见 middleware.go
+  # 注释），并**升为本契约项**：缺失/值不符 → 硬 fail。
+  # 门禁语义：契约头缺失/值不符 → 硬 fail（防回归）。
   security-headers:
     runs-on: ubuntu-latest
     env:
@@ -411,20 +412,21 @@ jobs:
           done
           curl -sf -o /dev/null -m 5 http://127.0.0.1:43111/ping \
             || { echo "::error::server 未在 30s 内起服"; tail -20 /tmp/pd-hdr/server.log; exit 1; }
-      - name: 安全头契约门禁 + HSTS 通报
+      - name: 安全头契约门禁
         run: |
           python3 - <<'PY'
           import subprocess, sys
-          # 契约 = R2/R3 已实现的头集合（全部路径生效，含 4xx 响应）
+          # 契约 = R2/R3 + HSTS（2026-10-13 代码轮补）已实现的头集合（全部路径生效，含 4xx 响应）
           contract = {
               'x-content-type-options': 'nosniff',
               'x-frame-options': 'SAMEORIGIN',
               'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)',
               'referrer-policy': 'no-referrer',
               'cross-origin-opener-policy': 'same-origin',
+              'strict-transport-security': 'max-age=31536000',
           }
           paths = ['/ping', '/panel', '/swagger/index.html', '/sha256sum/nonexistent', '/']
-          fails, hsts_seen = [], False
+          fails = []
           for p in paths:
               out = subprocess.run(['curl', '-s', '-D', '-', '-o', '/dev/null', '-m', '8',
                                     f'http://127.0.0.1:43111{p}'],
@@ -441,12 +443,10 @@ jobs:
               if wrong: fails.append(f"{p}: 值不符 {wrong}")
               if not csp: fails.append(f"{p}: 缺 Content-Security-Policy")
               if 'frame-ancestors' not in (csp or ''): fails.append(f"{p}: CSP 缺 frame-ancestors")
-              if hdrs.get('strict-transport-security'): hsts_seen = True
               print(f"{p}: nosniff={hdrs.get('x-content-type-options','-')} "
                     f"XFO={hdrs.get('x-frame-options','-')} COOP={hdrs.get('cross-origin-opener-policy','-')} "
+                    f"HSTS={hdrs.get('strict-transport-security','-')} "
                     f"CSP={'有' if csp else '无'} inline={'unsafe-inline' in (csp or '')}")
-          if not hsts_seen:
-              print('::warning::HSTS (Strict-Transport-Security) 缺失——部署在 TLS 之后应由服务端补，属代码轮')
           if fails:
               for f in fails:
                   print(f'::error::{f}')
