@@ -313,12 +313,10 @@ func TestRouteNoRules(t *testing.T) {
 func TestRouteHeadersAndCookie(t *testing.T) {
 	st, err := NewRouter(storeWith(ruleFor([]string{"exhentai.org"},
 		Backend{
-			Host:      "ex.4545810.xyz",
-			Scheme:    "https",
-			Cookie:    "ipb_member_id=123; ipb_pass_hash=abc; igneous=def",
-			Headers:   map[string]string{"User-Agent": "test-agent", "X-Custom": "v"},
-			LocalAddr: "127.0.0.1:8443",
-			SkipTLS:   true,
+			Host:    "ex.4545810.xyz",
+			Scheme:  "https",
+			Cookie:  "ipb_member_id=123; ipb_pass_hash=abc; igneous=def",
+			Headers: map[string]string{"User-Agent": "test-agent", "X-Custom": "v"},
 		})))
 	if err != nil {
 		t.Fatal(err)
@@ -332,9 +330,6 @@ func TestRouteHeadersAndCookie(t *testing.T) {
 	}
 	if route.Headers["User-Agent"] != "test-agent" || route.Headers["X-Custom"] != "v" {
 		t.Fatalf("headers = %v", route.Headers)
-	}
-	if route.LocalAddr != "127.0.0.1:8443" || !route.SkipTLS {
-		t.Fatalf("local/tls = %q %v", route.LocalAddr, route.SkipTLS)
 	}
 	if route.BackendHost != "ex.4545810.xyz" {
 		t.Fatalf("backend host = %q", route.BackendHost)

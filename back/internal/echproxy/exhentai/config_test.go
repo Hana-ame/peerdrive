@@ -138,16 +138,6 @@ func TestBackendNormalize(t *testing.T) {
 			in:   Backend{Host: "h", Weight: -3},
 			want: Backend{Host: "h", Scheme: "https", Weight: 1},
 		},
-		{
-			name: "local_addr must be host:port",
-			in:   Backend{Host: "h", LocalAddr: "not-a-port"},
-			want: Backend{}, wantErr: "not host:port",
-		},
-		{
-			name: "local_addr valid",
-			in:   Backend{Host: "ex.l.moonchan.xyz", LocalAddr: "127.0.0.1:8443"},
-			want: Backend{Host: "ex.l.moonchan.xyz", Scheme: "https", Weight: 1, LocalAddr: "127.0.0.1:8443"},
-		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

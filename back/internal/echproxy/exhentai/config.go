@@ -22,21 +22,16 @@
 //
 // How it differs from the sibling modules
 // ---------------------------------------
-// The parent package (iwara) and the twimg sibling both download ech-proxy and
-// run it as a child process, because their upstreams are only reachable through
-// ECH domain fronting. ex.4545810.xyz is Cloudflare-fronted and directly
-// reachable (cf-cache-status, cf-ray present in the response), so this module
-// needs no subprocess: it is a plain host-rewriting http.RoundTripper.
-//
-// The Backend.LocalAddr escape hatch keeps the ech-proxy option open anyway:
-// point a backend at "ex.l.moonchan.xyz" with LocalAddr "127.0.0.1:8443" and
-// the rewritten URL's host becomes the SNI that a locally managed ech-proxy
-// routes on, exactly as twimg.Entry.ListenAddr works. Same contract, optional.
+// The parent package (iwara) and the twimg sibling both reach upstreams only
+// through ECH domain fronting, and both do it in-process via internal/echcore
+// (no subprocess, no local listener). ex.4545810.xyz is Cloudflare-fronted and
+// directly reachable (cf-cache-status, cf-ray present in the response), so this
+// module needs no ECH at all: it is a plain host-rewriting http.RoundTripper
+// with the default system roots.
 //
 // This stays under internal/echproxy/ for the same reason twimg does: each
 // upstream domain keeps its own subpackage so unrelated lifecycle code does not
-// share type names. back/ech is a different thing entirely (in-process ECH) and
-// is not merged with any of this.
+// share type names.
 //
 // Configuration delivery contract
 // -------------------------------
@@ -88,7 +83,6 @@ package exhentai
 import (
 	"errors"
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -200,15 +194,6 @@ type Backend struct {
 	// Weight is the relative share of traffic a backend receives when a rule
 	// lists several. Zero or negative is treated as 1.
 	Weight int `json:"weight,omitempty"`
-	// SkipTLS accepts the backend's certificate without chain verification.
-	// Only meaningful for private/self-signed backends; the default mirror is
-	// Cloudflare-fronted with a valid chain, so this stays false.
-	SkipTLS bool `json:"skip_tls,omitempty"`
-	// LocalAddr, when non-empty, is the TCP dial target instead of resolving
-	// Host — the ech-proxy deployment shape, where Host is the SNI
-	// ("ex.l.moonchan.xyz") and LocalAddr is the local listener
-	// ("127.0.0.1:8443"). Mirrors twimg.Entry.ListenAddr.
-	LocalAddr string `json:"local_addr,omitempty"`
 }
 
 // normalize fills documented defaults and reports validation errors before any
@@ -242,11 +227,6 @@ func (b *Backend) normalize() error {
 	}
 	if b.Weight <= 0 {
 		b.Weight = 1
-	}
-	if b.LocalAddr != "" {
-		if _, _, err := net.SplitHostPort(b.LocalAddr); err != nil {
-			return fmt.Errorf("exhentai: backend %q local_addr %q is not host:port: %w", b.Host, b.LocalAddr, err)
-		}
 	}
 	return nil
 }

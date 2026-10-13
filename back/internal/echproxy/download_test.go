@@ -3,7 +3,6 @@ package echproxy
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -312,76 +311,6 @@ func TestDoCookieInjection(t *testing.T) {
 	resp2.Body.Close()
 	if gotCookie2 != "" {
 		t.Errorf("empty config cookie must not set a Cookie header, got %q", gotCookie2)
-	}
-}
-
-// recordingRT is a RoundTripper that records the request it receives and
-// returns an empty OK response. Used to verify URL rewriting without any
-// network I/O.
-type recordingRT struct {
-	req *http.Request
-}
-
-func (r *recordingRT) RoundTrip(req *http.Request) (*http.Response, error) {
-	r.req = req.Clone(req.Context())
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader("")),
-		Header:     make(http.Header),
-	}, nil
-}
-
-// TestDoRewriteThroughEchProxy verifies that when a Rewriter is attached,
-// the request URL is rewritten to the ech-proxy entry host before sending.
-//
-// Discovery background: the "iwara URL 改写（只动 host）" requirement is
-// satisfied by the Rewriter + IwaraClient.SetRewriter pairing. This test
-// exercises the integration: client.Do rewrites the URL and the rewritten
-// URL is what reaches the wire.
-func TestDoRewriteThroughEchProxy(t *testing.T) {
-	rt := &recordingRT{}
-
-	cfg := NewModuleConfig()
-	client := NewIwaraClient(&cfg)
-	client.client = &http.Client{Transport: rt}
-
-	r := NewRewriter(cfg.UpstreamSuffix, cfg.EntrySuffix, cfg.EntryPrefix, cfg.EntryPort)
-	client.SetRewriter(&r)
-
-	// Request a www.iwara.tv URL; the Rewriter must rewrite it to the
-	// entry host before the transport sees it.
-	resp, err := client.Do(context.Background(), http.MethodGet, "https://www.iwara.tv/videos/abc", nil)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
-	resp.Body.Close()
-
-	if rt.req == nil {
-		t.Fatal("RoundTripper was not called")
-	}
-	entryHost := strings.TrimSuffix(cfg.EntryPrefix, "-") + "." + cfg.EntrySuffix
-	if !strings.Contains(rt.req.Host, entryHost) {
-		t.Errorf("request Host = %q, want to contain entry host %q", rt.req.Host, entryHost)
-	}
-	if rt.req.URL.Path != "/videos/abc" {
-		t.Errorf("request path = %q, want /videos/abc (host-only rewrite)", rt.req.URL.Path)
-	}
-	if rt.req.URL.Query().Get("x") != "" {
-		t.Error("unexpected query parameter")
-	}
-
-	// Non-iwara URL must NOT be rewritten.
-	rt2 := &recordingRT{}
-	client2 := NewIwaraClient(&cfg)
-	client2.client = &http.Client{Transport: rt2}
-	client2.SetRewriter(&r)
-	resp2, err := client2.Do(context.Background(), http.MethodGet, "https://example.com/videos/abc", nil)
-	if err != nil {
-		t.Fatalf("Do: %v", err)
-	}
-	resp2.Body.Close()
-	if rt2.req.Host != "example.com" {
-		t.Errorf("non-iwara Host = %q, want example.com (should not be rewritten)", rt2.req.Host)
 	}
 }
 

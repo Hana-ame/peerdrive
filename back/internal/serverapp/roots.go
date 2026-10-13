@@ -3,9 +3,7 @@ package serverapp
 import (
 	"errors"
 	"fmt"
-	"net"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"peerdrive/internal/config"
@@ -80,37 +78,18 @@ func warnUnsupportedRoots(cfg *config.Config) {
 	}
 }
 
-// buildECHProxyModule translates the PEERDRIVE_ECH_PROXY_* env settings into a twimg.Module.
-// Kept separate from buildRouter so the flag/env mapping is testable in isolation.
+// buildECHProxyModule translates the PEERDRIVE_ECH_PROXY_* env settings into a
+// twimg.Module. Kept separate from buildRouter so the flag/env mapping is
+// testable in isolation.
+//
+// Only the IP family setting is carried over. The in-process ECH client needs
+// no entry host, listen address, TLS-skip flag, release channel or install
+// directory — it spawns no subprocess and binds no address.
 func buildECHProxyModule(cfg *config.Config) (*twimg.Module, error) {
-	installDir := strings.TrimSpace(cfg.ECHProxyInstallDir)
-	if installDir == "" {
-		installDir = filepath.Join(cfg.StorageDir, "ech-proxy")
-	}
 	return twimg.New(twimg.Config{
-		Entry: twimg.Entry{
-			SrcHost:    twimg.DefaultSrcHost,
-			EntryHost:  cfg.ECHProxyEntryHost,
-			Port:       echProxyEntryPort(cfg.ECHProxyAddr),
-			ListenAddr: cfg.ECHProxyAddr,
-			SkipTLS:    cfg.ECHProxySkipTLS,
-		},
-		Repo:       twimg.DefaultRepo,
-		Version:    cfg.ECHProxyVersion,
-		InstallDir: installDir,
-		IPMode:     cfg.ECHProxyIPMode,
-		Attempts:   cfg.ECHProxyStartAttempts,
+		SrcHost: twimg.DefaultSrcHost,
+		IPMode:  cfg.ECHProxyIPMode,
 	})
-}
-
-// echProxyEntryPort extracts the port from a "host:port" listen address. config.Validate
-// already guarantees the address parses when the module is enabled, so the fallback only
-// covers defensive callers.
-func echProxyEntryPort(addr string) string {
-	if _, port, err := net.SplitHostPort(addr); err == nil && strings.TrimSpace(port) != "" {
-		return port
-	}
-	return twimg.DefaultPort
 }
 
 // exhentaiAuthHeaders turns the single config-auth env value into the header map

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"peerdrive/internal/config"
+	"peerdrive/internal/echcore"
 	"peerdrive/internal/echproxy"
 	"peerdrive/internal/echproxy/exhentai"
 	"peerdrive/internal/echproxy/twimg"
@@ -224,46 +225,33 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 		deps.PeerPuller = puller
 	}
 
-	// ── iwara.tv via ech-proxy (optional module, PEERDRIVE_IWARA_ENABLE) ──
-	// When enabled, downloads the ech-proxy Windows executable, verifies it
-	// against the published SHA256, starts it as a child process, and creates
-	// an IwaraClient that routes API calls through the local TLS proxy.
-	// Default off: the module runs an external process and injects a user
-	// cookie into third-party requests — both are risky operations that must
-	// be explicitly opted into.
+	// ── iwara.tv via in-process ECH (optional module, PEERDRIVE_IWARA_ENABLE) ──
+	// Egress is the in-process ECH domain-fronting client (internal/echcore).
+	// ech-proxy is NOT spawned as a subprocess: there is no local listener, no
+	// downloaded executable, no self-signed certificate, and therefore no TLS
+	// verification to skip.
+	// Default off: the module injects a user cookie into third-party requests,
+	// which must be explicitly opted into.
 	if cfg.IwaraEnable {
 		iwaraCfg := &echproxy.ModuleConfig{
-			Enable:          true,
-			IWARACookie:     cfg.IwaraCookie,
-			EchProxyDir:     "echproxy",
-			EchProxyExeName: echproxy.DefaultEchProxyExeName,
-			EchProxyVersion: cfg.IwaraEchProxyVersion,
-			EntrySuffix:     cfg.IwaraEntrySuffix,
-			UpstreamSuffix:  cfg.IwaraUpstreamSuffix,
-			EntryPort:       strconv.Itoa(cfg.IwaraEchProxyPort),
+			Enable:      true,
+			IWARACookie: cfg.IwaraCookie,
 		}
 		iwaraCfg.Normalize()
 
-		pm := echproxy.NewProcessManager(iwaraCfg)
 		client := echproxy.NewIwaraClient(iwaraCfg)
 		// Expose the client to the HTTP surface (GET /iwara/video/:id for the
 		// front/iwara page). The route is optional in router.Deps, so a default
 		// node without PEERDRIVE_IWARA_ENABLE never advertises it.
 		deps.IwaraClient = client
 
-		// Attempt to start ech-proxy. If it fails (non-Windows, port conflict,
-		// download failure), the IwaraClient still works for direct API access
-		// (without ech-proxy URL rewriting).
-		if err := pm.Start(context.Background()); err != nil {
-			log.LogWarn("main: ech-proxy not started (%v); iwara direct API access still available", err)
-		} else {
-			// Route iwara.tv API calls through the local ech-proxy.
-			rewriter := echproxy.RewriterFromConfig(iwaraCfg)
-			client.SetRewriter(&rewriter)
-			log.LogInfo("main: iwara/ech-proxy enabled (version=%s port=%d entry_suffix=%s)",
-				cfg.IwaraEchProxyVersion, cfg.IwaraEchProxyPort, cfg.IwaraEntrySuffix)
-			defer pm.Stop()
+		// Warm the ECH config once so the first request does not pay the DoH
+		// round trip, and start the 5-minute key refresh loop. Not fatal: Do()
+		// fetches the config on demand if the cache is still empty.
+		if err := echcore.InitDefault(echcore.Config{IPMode: "v4"}); err != nil {
+			log.LogWarn("main: iwara/ech: ECH init failed (%v); requests will fetch ECH config on demand", err)
 		}
+		log.LogInfo("main: iwara/ech enabled (in-process ECH domain fronting, ip_mode=v4, no local server)")
 	}
 
 	// BT DHT auto-enable (PEERDRIVE_DISCOVER_MODE fallback): when no discovery server is
@@ -357,20 +345,20 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 			log.LogWarn("main: register peer source: %v", err)
 		}
 
-		// Optional ech-proxy module (PEERDRIVE_ECH_PROXY_ENABLE, default off). It downloads
-		// and runs ech-proxy as a child process, then routes pbs.twimg.com/<path>?<query>
-		// through the local entry host https://twimg-pbs.l.moonchan.xyz:8443/<path>?<query>.
+		// Optional twimg module (PEERDRIVE_ECH_PROXY_ENABLE, default off). It routes
+		// pbs.twimg.com/<path>?<query> through the in-process ECH domain-fronting client
+		// (internal/echcore). No subprocess, no local listener, no self-signed cert.
 		// When the flag is off this whole block is skipped, so the URL source keeps the exact
 		// nil-client (http.DefaultClient) path it has always had — the disabled case is a
 		// byte-identical no-op.
 		//
-		// There is deliberately no silent fallback to direct pbs.twimg.com traffic: if the
-		// download, the checksum, the port bind or the spawn fails, startup fails. An
-		// operator who opted into the module must be told it did not come up.
+		// There is deliberately no silent fallback to direct pbs.twimg.com traffic: pbs.twimg.com
+		// is blocked from mainland China, so a node that opted into the module must get ECH
+		// egress, not a working-looking direct dial that times out per request.
 		if cfg.ECHProxyEnable {
 			if cfg.URLSourceTemplate == "" {
 				log.LogWarn("main: PEERDRIVE_ECH_PROXY_ENABLE=true but PEERDRIVE_URL_SOURCE_TEMPLATE is " +
-					"empty — the rewrite has no URL source to serve, ech-proxy was not started")
+					"empty — the rewrite has no URL source to serve, the module was not started")
 			} else {
 				mod, err := buildECHProxyModule(cfg)
 				if err != nil {
@@ -379,17 +367,17 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 				if err := mod.Start(context.Background()); err != nil {
 					return fail(fmt.Errorf("ech-proxy: %w", err))
 				}
-				// Stop after the DB/PeerJS shutdown hooks: the child is not depended on by
-				// anything else, but keeping it inside the same ordered list keeps the log
-				// readable (last-registered runs first).
+				// Stop after the DB/PeerJS shutdown hooks to keep the ordered
+				// shutdown list readable (last-registered runs first). It is a
+				// no-op: the in-process ECH client owns no subprocess.
 				shutdowns = append(shutdowns, func() {
 					if err := mod.Stop(context.Background()); err != nil {
 						log.LogWarn("main: stop ech-proxy: %v", err)
 					}
 				})
 				urlClient = mod.Client()
-				log.LogInfo("main: ech-proxy enabled — %s → %s://%s:%s via %s",
-					twimg.DefaultSrcHost, "https", mod.Entry().EntryHost, mod.Entry().Port, mod.Addr())
+				log.LogInfo("main: ech-proxy enabled — %s via in-process ECH domain fronting (no local server)",
+					twimg.DefaultSrcHost)
 			}
 		}
 
