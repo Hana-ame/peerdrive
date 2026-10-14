@@ -46,6 +46,13 @@ var (
 	operator string
 )
 
+// SetOperator configures the node operator username (injected at server startup from PEERDRIVE_OPERATOR).
+func SetOperator(op string) {
+	mu.Lock()
+	defer mu.Unlock()
+	operator = op
+}
+
 // GetOperator returns the node operator (empty string = anonymous).
 func GetOperator() string {
 	mu.Lock()

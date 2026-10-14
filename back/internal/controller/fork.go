@@ -36,6 +36,9 @@ func ForkCollection(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
+	if !requireCollectionOwner(c, req.Username) {
+		return
+	}
 
 	source, err := collSvc.Get(req.SourceUsername, req.SourceCollName)
 	if err != nil {

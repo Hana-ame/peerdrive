@@ -36,6 +36,7 @@ type Config struct {
 
 	AllowedOrigins     string
 	RegistrationServer string
+	Operator           string // PEERDRIVE_OPERATOR: node owner username for anonymous collection ownership
 	// AdminToken is the local HTTP admin-surface Bearer token when no registration
 	// server is configured (PEERDRIVE_ADMIN_TOKEN, default empty). When
 	// RegistrationServer == "" and AdminToken != "": AuthRequired compares incoming
@@ -480,8 +481,9 @@ func DefaultConfig() *Config {
 		DBPath:                   "./peerdrive.db",
 		StorageDir:               "./storage",
 		StorageEnable:            true,
-		AllowedOrigins:           "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev",
+		AllowedOrigins:           "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev",
 		RegistrationServer:       "",
+		Operator:                 "",
 		AdminToken:               "",
 		RemoteControlEnable:      false,
 		RemoteControlToken:       "",
@@ -591,8 +593,9 @@ func Load() *Config {
 		DBPath:              resolveMainDBPath(),
 		StorageDir:          getEnv("PEERDRIVE_STORAGE", "./storage"),
 		StorageEnable:       getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
-		AllowedOrigins:      getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev,https://*.pages.dev"),
+		AllowedOrigins:      getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev"),
 		RegistrationServer:  getEnv("PEERDRIVE_REG_SERVER", ""),
+		Operator:            getEnv("PEERDRIVE_OPERATOR", ""),
 		AdminToken:          getAdminToken(),
 		RemoteControlEnable: getEnvBool("PEERDRIVE_REMOTE_CONTROL_ENABLE", false),
 		RemoteControlToken:  getEnv("PEERDRIVE_REMOTE_CONTROL_TOKEN", ""),
