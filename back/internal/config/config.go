@@ -595,9 +595,9 @@ func Load() *Config {
 		WebRTCTURNUsername: getEnv("PEERDRIVE_WEBRTC_TURN_USER", ""),
 		WebRTCTURNPassword: getEnv("PEERDRIVE_WEBRTC_TURN_PASS", ""),
 
-		PeerJSEnable: getEnvBool("PEERDRIVE_PEERJS_ENABLE", true),
+		PeerJSEnable:  getEnvBool("PEERDRIVE_PEERJS_ENABLE", true),
 		PeerJSURL:   getEnv("PEERDRIVE_PEERJS_URL", DefaultPeerJSURL),
-		PeerJSKey:   getEnv("PEERDRIVE_PEERJS_KEY", DefaultSignalKey),
+		PeerJSKey:    getEnv("PEERDRIVE_PEERJS_KEY", DefaultSignalKey),
 		PeerJSID:    getEnv("PEERDRIVE_PEERJS_ID", ""),
 		PeerJSPeers: getEnv("PEERDRIVE_PEERJS_PEERS", ""),
 		// 注意：本块列对齐是 deployconsistency 测试钉死的格式（逐字节 grep），
