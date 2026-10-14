@@ -118,3 +118,15 @@ func getEnvInt(key string, defaultVal int) int {
 	}
 	return defaultVal
 }
+
+// getEnvIntAllowZero 同 getEnvInt，但允许显式 0——用于「0 有语义」的配置
+// （如 PEERDRIVE_UPDATE_INTERVAL_HOURS：0 = 只在启动时查一次）。
+func getEnvIntAllowZero(key string, defaultVal int) int {
+	if val, ok := os.LookupEnv(key); ok {
+		n, err := strconv.Atoi(val)
+		if err == nil && n >= 0 {
+			return n
+		}
+	}
+	return defaultVal
+}

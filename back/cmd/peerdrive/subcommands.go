@@ -26,6 +26,7 @@ import (
 	"peerdrive/internal/mcp"
 	"peerdrive/internal/serverapp"
 	"peerdrive/internal/services"
+	"peerdrive/internal/update"
 )
 
 // normalizePort 已搬到 internal/httpd（httpd.NormalizePort）：它是「监听地址
@@ -200,6 +201,10 @@ func runAll(args []string) {
 			fmt.Fprintf(os.Stderr, "peerdrive all: %v\n", err)
 		}
 	}()
+
+	// 可选自动更新检查（PEERDRIVE_AUTO_UPDATE，默认关）：与 serve 一致——
+	// 只提示新版本，不替换运行中的二进制（见 internal/update 包注释）。
+	update.StartupCheck(cfg)
 
 	<-quit
 	log.LogInfo("all: shutting down")

@@ -13,6 +13,8 @@
 //	peerdrive signal          只起信令 + 节点发现（等价于旧的 peersignal）
 //	peerdrive reg             只起注册/认证/中继登记（等价于旧的 peerdrive-reg-server）
 //	peerdrive all             三者起在同一个进程、同一个端口（端口取主服务的）
+//	peerdrive check-update    检查是否有新版本（0=最新 / 1=检查失败 / 3=有新版本）
+//	peerdrive update          下载新版本并原子替换（sha256 校验、旧版留 .bak、失败回滚）
 //	peerdrive version         打印版本
 //
 // 向后兼容：旧的无子命令调用（`peerdrive-server` 直接跑）与全部既有环境变量
@@ -76,6 +78,10 @@ func main() {
 		runMCP(args)
 	case "tun", "fwd":
 		runTun(args)
+	case "check-update":
+		os.Exit(runCheckUpdate())
+	case "update":
+		os.Exit(runUpdate())
 	case "version", "--version", "-v":
 		fmt.Printf("peerdrive %s\n", version.Version)
 	case "help", "--help", "-h":
@@ -98,6 +104,8 @@ func usage() {
   peerdrive all          三者同进程、同端口起（端口=主服务的 PEERDRIVE_PORT）
   peerdrive tun          基于 PeerJS 互联建立端口转发与内网穿透（参考 p2ptun）
   peerdrive mcp          启动 MCP (Model Context Protocol) stdio 交互服务
+  peerdrive check-update 检查是否有新版本（0=最新 / 1=检查失败 / 3=有新版本）
+  peerdrive update       下载新版本并原子替换（校验 sha256、旧版留 .bak、失败回滚）
   peerdrive version      打印版本
   peerdrive help         本帮助
 

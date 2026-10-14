@@ -152,6 +152,44 @@ jobs:
           find . -type f -name 'peerdrive-*' -exec cp -v {} dist/ \;
           ls -l dist
 
+      # 生成校验与清单资产（自动更新的数据源，见 back/internal/update）：
+      #   checksums.txt —— sha256sum -c 可直接校验的文本清单（人用）。
+      #   latest.json    —— 机器可读清单：version + 各平台资产 {name,os,arch,url,sha256}。
+      #                     程序的版本比对 / 完整性校验都读它（PEERDRIVE_UPDATE_URL
+      #                      默认指向本文件）。sha256 与 checksums.txt 从同一批文件
+      #                      生成，同源一致。
+      # 注意：版本串与构建步的 ldflags 注入用同一个表达式
+      # （${{ github.event.inputs.tag || github.ref_name }}），保证 latest.json 里的
+      # version 与二进制内嵌 version 永远一致。
+      - name: 生成 checksums.txt + latest.json
+        run: |
+          set -eu
+          (cd dist && sha256sum peerdrive-* > checksums.txt)
+          python3 - <<'PY'
+          import hashlib, json, os
+          ver = "${{ github.event.inputs.tag || github.ref_name }}"
+          repo = "${{ github.repository }}"
+          assets = []
+          for fn in sorted(os.listdir("dist")):
+              if not fn.startswith("peerdrive-"):
+                  continue
+              with open(os.path.join("dist", fn), "rb") as f:
+                  digest = hashlib.sha256(f.read()).hexdigest()
+              stem = fn[:-4] if fn.endswith(".exe") else fn
+              _, osn, arch = stem.split("-", 2)
+              assets.append({
+                  "name": fn,
+                  "os": osn,
+                  "arch": arch,
+                  "url": f"https://github.com/{repo}/releases/download/{ver}/{fn}",
+                  "sha256": digest,
+              })
+          with open("dist/latest.json", "w") as f:
+              json.dump({"version": ver, "assets": assets}, f, indent=2)
+              f.write("\n")
+          PY
+          ls -l dist
+
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

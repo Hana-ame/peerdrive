@@ -415,6 +415,21 @@ type Config struct {
 	// LegacyDBPath is the old "DB_PATH" env var (without PEERDRIVE_ prefix)
 	// used by the reg server's DB path resolution chain.
 	LegacyDBPath string // DB_PATH
+
+	// ── Auto update (PEERDRIVE_AUTO_UPDATE, default **false**) ──
+	//
+	// AutoUpdate 打开时，serve/all 启动后异步检查最新版本并**提示**（log），
+	// 不自动替换运行中的二进制；应用走显式的 `peerdrive update` 子命令
+	// （下载 → sha256 校验 → 原子替换，带 .bak 与失败回滚）。
+	// 默认关：不开这个 env 时整个流程零网络请求，行为与升级前完全一致。
+	AutoUpdate bool
+	// UpdateURL 覆盖更新检查源（PEERDRIVE_UPDATE_URL）；默认
+	// https://github.com/Hana-ame/peerdrive/releases/latest/download/latest.json
+	// （release.yml 生成的机器可读清单）。可指向任意镜像。
+	UpdateURL string
+	// UpdateIntervalHours 是周期性检查间隔小时数（PEERDRIVE_UPDATE_INTERVAL_HOURS，
+	// 默认 24；0 = 只在启动时查一次）。
+	UpdateIntervalHours int
 }
 
 // IsOriginAllowed checks whether the given Origin is in the allow list, supporting
@@ -697,6 +712,11 @@ func Load() *Config {
 		DisableSwagger:   getEnv("PEERDRIVE_SWAGGER", "on") == "off",
 		Host:             getEnv("PEERDRIVE_HOST", ""),
 		TrustedProxies:   getEnv("PEERDRIVE_TRUSTED_PROXIES", ""),
+
+		// Auto update: default off — zero network requests unless opted in.
+		AutoUpdate:          getEnvBool("PEERDRIVE_AUTO_UPDATE", false),
+		UpdateURL:           getEnv("PEERDRIVE_UPDATE_URL", ""),
+		UpdateIntervalHours: getEnvIntAllowZero("PEERDRIVE_UPDATE_INTERVAL_HOURS", 24),
 
 		SignalAddr:         getEnv("PEERSIGNAL_ADDR", ":9000"),
 		SignalTokens:       getEnv("PEERJS_TOKENS", ""),
