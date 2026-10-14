@@ -27,6 +27,7 @@ import (
 	"peerdrive/internal/config"
 	"peerdrive/internal/httpd"
 	"peerdrive/internal/log"
+	"peerdrive/internal/update"
 )
 
 // @title Peerdrive API
@@ -172,6 +173,11 @@ func RunServe() {
 		Port:    cfg.Port,
 		Storage: cfg.StorageDir,
 	}, panelFilePath())
+
+	// 可选自动更新检查（PEERDRIVE_AUTO_UPDATE，默认关 = 零网络请求）：
+	// 打开时后台异步检查最新版本并提示，不替换运行中的二进制（替换走
+	// `peerdrive update`，见 internal/update 的包注释）。
+	update.StartupCheck(cfg)
 
 	addr := ListenAddr(cfg)
 	RunHTTP(addr, r)
