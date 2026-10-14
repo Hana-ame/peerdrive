@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-
 	dht "github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/dht/v2/bep44"
 	"github.com/anacrolix/dht/v2/int160"
@@ -134,7 +133,9 @@ func (s *BTDHTService) PutMutable(
 	put := bep44.Put{
 		V:    v,
 		Salt: salt,
-		Seq:  int64(seq),
+		// #nosec G115 -- bep44 协议 Put.Seq 字段就是 int64；seq 来自调用方
+		// （应用层计数器），实际值域远小于 2^63，不会溢出。
+		Seq: int64(seq),
 	}
 	// Set public key.
 	pk := [32]byte{}
@@ -227,6 +228,8 @@ func (s *BTDHTService) GetMutable(
 		return nil, 0, err
 	}
 	if r.Seq != nil {
+		// #nosec G115 -- 响应方返回的 Seq 按协议是 int64 非负数（bep44 规范），
+		// 转 uint64 仅为调用方统一类型；对端给负值属协议违规，非本端溢出。
 		seq = uint64(*r.Seq)
 	}
 	return raw, seq, nil

@@ -91,6 +91,8 @@ func compactEncode(peers []PeerAddr) []byte {
 			continue // IPv6 not representable in compact format
 		}
 		buf = append(buf, ip4[0], ip4[1], ip4[2], ip4[3])
+		// #nosec G115 -- 有意截断：紧凑 IPv4 peer 格式就是高 8 位 + 低 8 位两个
+		// byte（uint16 端口拆两字节），不是数值转换，无溢出语义。
 		buf = append(buf, byte(p.Port>>8), byte(p.Port))
 	}
 	return buf

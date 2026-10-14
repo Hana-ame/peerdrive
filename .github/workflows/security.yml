@@ -92,9 +92,18 @@ jobs:
 
   # ── Go 静态安全扫描 ───────────────────────────────────────────────────
   # gosec 覆盖 CWE 级别的问题（命令注入、弱哈希、TLS 校验关闭、路径拼接等）。
-  # severity=medium 起报：low 噪音太大（大量误报在第三方回退路径上），
-  # medium 起是「真实可被利用」的门槛。当前是报告模式（不阻断主干）——
-  # 扫描结果随 artifact 归档，安全项逐条 triage 后再把门槛收紧成 fail。
+  #
+  # 门禁语义（2026-10-15 从报告模式收紧为 HIGH 硬门禁，issue #379 方案 C）：
+  #   - `-severity high`：只对 HIGH 级 finding 硬 fail（job 红），MEDIUM 级
+  #     仍走报告模式（artifact + 汇总打印），不阻断 merge。理由：87 项 MEDIUM
+  #     中 80 项是 G301/G302/G304/G306/G107（文件权限/路径，Go 生态误报率极高），
+  #     转硬门禁会永久误杀；HIGH 级 19 项已逐条 triage（1 修 + 18 项 #nosec
+  #     接受风险，见 #379 与 peerdrive-triage-r10 节点）。
+  #   - **gosec 版本 pin v2.29.0**（2026-10-15）：v2.29.0 相对 triage 时的
+  #     v2.22.7 新增 G703（路径穿越 taint）/G704（SSRF taint）/G122（WalkDir
+  #     race）规则，@latest 会让门禁随上游新规则漂移。升版 = 先本地
+  #     `gosec -severity high -confidence medium` 三模块复扫、对新 finding 逐条
+  #     triage（修或 #nosec 接受风险）后再改 pin，并同步更新本条注释。
   gosec:
     runs-on: ubuntu-latest
     steps:
@@ -109,23 +118,23 @@ jobs:
           go mod download -C back
           go mod download -C back/signalserver
           go mod download -C back/p2p_bt
-      - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
-      - name: 扫描主模块 back/ (tags=nosqlite)
+      - name: Install gosec (pinned v2.29.0)
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+      - name: 扫描主模块 back/ (tags=nosqlite, HIGH 硬门禁)
         working-directory: back
-        run: gosec -tags nosqlite -severity medium -confidence medium -fmt json -out gosec-back.json ./... || echo "::warning::gosec reported findings (see artifact)"
+        run: gosec -tags nosqlite -severity high -confidence medium -fmt json -out gosec-back.json ./...
       # 子模块是独立 go.mod：主模块的 nosqlite tag 不适用，且按 AGENTS.md
       # 它们在 CI 里走 CGO_ENABLED=0（纯 Go 驱动）。
-      - name: 扫描子模块 signalserver
+      - name: 扫描子模块 signalserver (HIGH 硬门禁)
         working-directory: back/signalserver
         env:
           CGO_ENABLED: "0"
-        run: gosec -severity medium -confidence medium -fmt json -out gosec-signal.json ./... || echo "::warning::gosec reported findings (see artifact)"
-      - name: 扫描子模块 p2p_bt
+        run: gosec -severity high -confidence medium -fmt json -out gosec-signal.json ./...
+      - name: 扫描子模块 p2p_bt (HIGH 硬门禁)
         working-directory: back/p2p_bt
         env:
           CGO_ENABLED: "0"
-        run: gosec -severity medium -confidence medium -fmt json -out gosec-p2pbt.json ./... || echo "::warning::gosec reported findings (see artifact)"
+        run: gosec -severity high -confidence medium -fmt json -out gosec-p2pbt.json ./...
       - name: 汇总报告
         if: always()
         run: |
@@ -149,7 +158,7 @@ jobs:
                   loc = f"{f.get('file')}:{f.get('line')}"
                   print(f"  - [{f.get('severity')}/{f.get('confidence')}] "
                         f"{f.get('rule_id')} {str(f.get('details'))[:100]} @ {loc}")
-          print(f"TOTAL: {total} finding(s) — 报告模式，不阻断；逐条 triage 后收紧成硬门禁")
+          print(f"TOTAL: {total} finding(s) — severity=high 下应为 0；任何 HIGH finding 已使上方扫描步骤 fail（硬门禁），本汇总仅供留痕")
           PY
       - name: Upload report
         if: always()

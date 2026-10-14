@@ -181,10 +181,10 @@ var (
 )
 
 const (
-	shellDomain     = "cloudflare-ech.com"
-	dialTimeout     = OpTimeout
-	dohTimeout      = OpTimeout
-	defaultDohURL   = "https://moonchan.xyz/doh"
+	shellDomain   = "cloudflare-ech.com"
+	dialTimeout   = OpTimeout
+	dohTimeout    = OpTimeout
+	defaultDohURL = "https://moonchan.xyz/doh"
 )
 
 func fetchECHConfig(ctx context.Context, domain string) ([]byte, error) {
@@ -264,11 +264,11 @@ func fetchECHConfigOnce(ctx context.Context, domain, dohURL string) ([]byte, err
 // config stores mutable global configuration.
 // Uses atomic.Pointer for lock-free safe read/write.
 type config struct {
-	dohURL    string
-	dialIP    string
-	ipMode    string
-	proxyURL  string
-	shellDom  string
+	dohURL   string
+	dialIP   string
+	ipMode   string
+	proxyURL string
+	shellDom string
 }
 
 var cfgPtr atomic.Pointer[config]
@@ -466,7 +466,7 @@ func dialTCP(ctx context.Context, host, port, ipMode string, timeout time.Durati
 			log.Printf("Upstream egress: %s via %s (IP_MODE=%s, family chosen by the OS)",
 				family, tcpAddr.String(), mode)
 			if mode == "" {
-				log.Printf("Some upstreams reject IPv6 sources (e.g. pixiv returns a static 403 "+
+				log.Printf("Some upstreams reject IPv6 sources (e.g. pixiv returns a static 403 " +
 					"'Access blocked'); set ip_mode: v4 in config to pin the family.")
 			}
 		})
@@ -630,6 +630,10 @@ func NewDefault() (*Client, error) {
 
 // Do executes an HTTP request dispatched via ECH domain fronting.
 // req.Host is set to the true target domain for Inner SNI.
+// #nosec G704 -- 通用 ECH HTTP 客户端 API（sink 层标记）。SSRF 防护在调用方：
+// 用户可控 URL 走 pkg/urlguard.GuardExternalURL（R2/R3 固化的
+// scheme/localhost/内网 IP 校验）；本函数仅被固定上游（twimg/iwara）与
+// authRequired 的 operator 配置数据源调用。
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	if req.Host == "" {
 		req.Host = req.URL.Host
@@ -639,6 +643,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 
 // DoWithAddr is like Do, but allows specifying a target domain (for
 // direct-IP scenarios).
+// #nosec G704 -- 同上：host 参数仅来自固定上游/operator 配置，非远程输入。
 func (c *Client) DoWithAddr(req *http.Request, host string) (*http.Response, error) {
 	req.Host = host
 	return c.inner.Do(req)
