@@ -44,6 +44,7 @@ function RouteLoading() {
 import * as ws from './platform/transport-ws';
 import { I18nProvider, useI18n } from './context/I18nContext';
 import LanguageSelector from './components/LanguageSelector';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Navigation groups (Issue #77 / Issue #265):
 // - Always available (standalone/consumer pages): Connect (/), Display (/display)
@@ -171,8 +172,9 @@ export default function App() {
             />
 
             <div className="flex-1 overflow-hidden has-mobile-nav md:pb-0">
-              <Suspense fallback={<RouteLoading />}>
-                <Routes>
+              <ErrorBoundary>
+                <Suspense fallback={<RouteLoading />}>
+                  <Routes>
                   <Route path="/" element={<Connect />} />
                   <Route path="/node" element={<NodeControl />} />
                   <Route path="/drive" element={<Drive />} />
@@ -189,8 +191,9 @@ export default function App() {
                   <Route path="/display" element={<Display />} />
                   <Route path="/display/:channel" element={<Display />} />
                   <Route path="*" element={<Placeholder title="Page Not Found" />} />
-                </Routes>
-              </Suspense>
+                  </Routes>
+                </Suspense>
+              </ErrorBoundary>
             </div>
 
             <MobileBottomBar connected={isOpen} />
