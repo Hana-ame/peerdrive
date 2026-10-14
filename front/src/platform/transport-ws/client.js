@@ -62,9 +62,11 @@ import {
 import { getNodeSession, onNodeSession } from '../../lib/nodeSession.js'
 
 // When an active PeerJS WebRTC node session is established, completely deactivate WS transport
+let pausedByPeerSession = false
 if (typeof onNodeSession === 'function') {
   onNodeSession((session) => {
     if (session?.client) {
+      pausedByPeerSession = true
       if (retryTimer) {
         clearTimeout(retryTimer)
         retryTimer = null
@@ -78,6 +80,9 @@ if (typeof onNodeSession === 'function') {
         sock = null
       }
       setStatus('idle')
+    } else if (pausedByPeerSession) {
+      pausedByPeerSession = false
+      connect()
     }
   })
 }
