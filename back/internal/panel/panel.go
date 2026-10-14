@@ -103,10 +103,13 @@ func withBootstrap(html []byte, host, panelPath string) []byte {
     fetch(%s).then(r => r.json()).then(j => {
       if (!j || !j.id) return;
       u.searchParams.set('node', j.id);
-      if (j.signal_host) u.searchParams.set('host', j.signal_host);
-      if (j.signal_port) u.searchParams.set('port', j.signal_port);
-      if (j.signal_path) u.searchParams.set('path', j.signal_path);
-      u.searchParams.set('secure', j.signal_secure ? '1' : '0');
+      if (j.signal_url) u.searchParams.set('url', j.signal_url);
+      else {
+        if (j.signal_host) u.searchParams.set('host', j.signal_host);
+        if (j.signal_port) u.searchParams.set('port', j.signal_port);
+        if (j.signal_path) u.searchParams.set('path', j.signal_path);
+        u.searchParams.set('secure', j.signal_secure ? '1' : '0');
+      }
       // signal_key 由服务端注入（不经 /peerjs/node 泄露）
       if (%v) u.searchParams.set('key', %s);
       history.replaceState(null, '', u.toString());

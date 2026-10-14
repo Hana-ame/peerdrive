@@ -517,8 +517,6 @@ else
 fi
 echo ""
 echo "节点配置:"
-echo "  PEERDRIVE_PEERJS_HOST=${DOMAIN}"
-echo "  PEERDRIVE_PEERJS_PORT=443"
-echo "  PEERDRIVE_PEERJS_SECURE=true"
+echo "  PEERDRIVE_PEERJS_URL=https://${DOMAIN}"
 echo "  PEERDRIVE_PEERJS_KEY=${KEY}"
 echo "  PEERDRIVE_DISCOVER_URL=https://${DOMAIN}"

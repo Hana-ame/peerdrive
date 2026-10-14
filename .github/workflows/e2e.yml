@@ -76,10 +76,10 @@ jobs:
           PEERDRIVE_SHARE_ENABLE: "true"
           PEERDRIVE_SHARE_DIRS: /tmp/pdadmin/root/downloads/shared
           PEERDRIVE_PEERJS_ENABLE: "true"
-          PEERDRIVE_PEERJS_HOST: 127.0.0.1
-          PEERDRIVE_PEERJS_PORT: "9100"
+          PEERDRIVE_PEERJS_URL: http://127.0.0.1:9100
+          
           PEERDRIVE_PEERJS_KEY: peerjs
-          PEERDRIVE_PEERJS_SECURE: "false"
+          
           PEERDRIVE_PEERJS_ID: admin-smoke
           PEERDRIVE_BT_DHT_ENABLE: "false"
           PEERDRIVE_IPFS_GATEWAY_ENABLE: "false"
@@ -137,10 +137,8 @@ jobs:
             PEERDRIVE_STORAGE=/tmp/pdzero/root \
             PEERDRIVE_DOWNLOAD_DIR=/tmp/pdzero/root/downloads \
             PEERDRIVE_PEERJS_ENABLE=true \
-            PEERDRIVE_PEERJS_HOST=127.0.0.1 \
-            PEERDRIVE_PEERJS_PORT=9100 \
+            PEERDRIVE_PEERJS_URL=http://127.0.0.1:9100 
             PEERDRIVE_PEERJS_KEY=peerjs \
-            PEERDRIVE_PEERJS_SECURE=false \
             PEERDRIVE_DISCOVER_URL=http://127.0.0.1:9100 \
             PEERDRIVE_BT_DHT_ENABLE=false \
             PEERDRIVE_IPFS_GATEWAY_ENABLE=false \

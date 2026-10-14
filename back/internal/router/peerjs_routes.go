@@ -92,6 +92,7 @@ func (rt *Router) registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 			"psk_peers": pskOK,
 		}
 		if peerjsCfg != nil {
+			resp["signal_url"] = peerjsCfg.PeerJSURL
 			resp["signal_host"] = peerjsCfg.PeerJSHost
 			resp["signal_port"] = peerjsCfg.PeerJSPort
 			resp["signal_path"] = "/"
