@@ -2,7 +2,7 @@ package echproxy
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- iwara X-Version header requires SHA1
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -357,7 +357,7 @@ func ParseVideoID(rawURL string) (string, bool) {
 // SHA1Hex computes the SHA1 hex digest of s. (X-Version uses SHA1, not
 // SHA256 — see the open-source iwara downloaders.)
 func SHA1Hex(s string) string {
-	h := sha1.New()
+	h := sha1.New() // #nosec G401 -- iwara X-Version header requires SHA1 (not SHA256)
 	h.Write([]byte(s))
 	return hex.EncodeToString(h.Sum(nil))
 }

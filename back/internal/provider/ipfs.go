@@ -218,6 +218,6 @@ func sleepBackoff(attempt int) {
 	base := float64(defaultBaseInterval)
 	ceil := float64(defaultMaxInterval)
 	delay := time.Duration(math.Min(base*math.Pow(2, float64(attempt-1)), ceil))
-	jitter := time.Duration(float64(delay) * (0.75 + rand.Float64()*0.5))
+	jitter := time.Duration(float64(delay) * (0.75 + rand.Float64()*0.5)) // #nosec G404 -- jitter for exponential backoff, not security-sensitive
 	time.Sleep(jitter)
 }

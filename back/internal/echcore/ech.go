@@ -147,7 +147,7 @@ func doDohRequest(ctx context.Context, urlStr string) (*http.Response, error) {
 		}
 		uParsed, _ := url.Parse(urlStr)
 		if uParsed != nil {
-			tr.TLSClientConfig = &tls.Config{ServerName: uParsed.Host}
+			tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, ServerName: uParsed.Host}
 		}
 	} else if cfg.ipMode != "" {
 		tr = tr.Clone()

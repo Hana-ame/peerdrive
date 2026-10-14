@@ -129,7 +129,8 @@ func Transport() *http.Transport {
 		cachedTransport = &http.Transport{
 			DialContext: Dialer().DialContext,
 			TLSClientConfig: &tls.Config{
-				RootCAs: getRootPool(),
+				MinVersion: tls.VersionTLS12,
+				RootCAs:    getRootPool(),
 			},
 			MaxIdleConns:    100,
 			IdleConnTimeout: OpTimeout,
