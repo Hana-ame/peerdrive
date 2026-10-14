@@ -70,6 +70,9 @@ func (p *PeerPuller) RecoverIncompleteTasks() []*PullJob {
 			return nil
 		}
 		metaPath := path + ".meta"
+		// #nosec G122 -- WalkDir 回调内立即使用的 path/metaPath 本就是回调参数
+		// （WalkDir 文档推荐用法）；扫描的是本地 downloadRoot/pulled，同机威胁
+		// 模型下无并发换文件面。
 		raw, readErr := os.ReadFile(metaPath)
 		if readErr != nil {
 			return nil
@@ -80,8 +83,10 @@ func (p *PeerPuller) RecoverIncompleteTasks() []*PullJob {
 		}
 		// 若该 hash 已经在本地索引中（之前已下载完成），清理残余 .part
 		if p.isLocal != nil && p.isLocal(meta.Hash) {
-			_ = os.Remove(path)
-			_ = os.Remove(metaPath)
+			// #nosec G122 -- 同回调内移除本地残余文件，非 WalkDir 跨回调滥用
+			// （扫描本地 downloadRoot/pulled，同机威胁模型无并发换文件面）。
+			_ = os.Remove(path)     // #nosec G122 -- 同上，行内标注
+			_ = os.Remove(metaPath) // #nosec G122 -- 同上，行内标注
 			return nil
 		}
 		p.mu.Lock()

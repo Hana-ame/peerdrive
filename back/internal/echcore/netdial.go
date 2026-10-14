@@ -110,6 +110,8 @@ func rootCAs() *x509.CertPool {
 		if p == "/etc/tls/cert.pem" || p == "" {
 			continue
 		}
+		// #nosec G703 -- p 是硬编码常量路径列表（Termux CA / 常见安装位置的
+		// CA 证书），非用户输入；taint 分析把切片迭代当污点源是误报。
 		if pem, err := os.ReadFile(p); err == nil {
 			pool.AppendCertsFromPEM(pem)
 		}
@@ -118,7 +120,7 @@ func rootCAs() *x509.CertPool {
 }
 
 var (
-	transportOnce sync.Once
+	transportOnce   sync.Once
 	cachedTransport *http.Transport
 )
 
@@ -132,8 +134,8 @@ func Transport() *http.Transport {
 				MinVersion: tls.VersionTLS12,
 				RootCAs:    getRootPool(),
 			},
-			MaxIdleConns:    100,
-			IdleConnTimeout: OpTimeout,
+			MaxIdleConns:      100,
+			IdleConnTimeout:   OpTimeout,
 			ForceAttemptHTTP2: true,
 		}
 	})

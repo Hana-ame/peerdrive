@@ -363,6 +363,10 @@ func BTSeedCollection(c *gin.Context) {
 			writeInternalError(c, err)
 			return
 		}
+		// #nosec G703 -- entry.Path 来自 GetAnonByHash 的存储内 collection，
+		// 其路径在创建时已被 anon_service 校验（isRelativePath + 拒绝含 ".."），
+		// 相对无 ".." 的路径 Join 进 rootDir/dataRoot 不会逃逸；taint 把
+		// collectionHash（HTTP 入参）当源是传递性误报。
 		if err := os.WriteFile(dstPath, src, 0644); err != nil {
 			writeInternalError(c, err)
 			return
@@ -403,6 +407,8 @@ func BTSeedCollection(c *gin.Context) {
 			return
 		}
 		src, _ := os.ReadFile(srcPath)
+		// #nosec G703 -- 同上：entry.Path 创建时已校验（相对 + 无 ".."），
+		// Join(dataRoot, path) 不逃逸；srcPath 由存储内 hash 构成。
 		if err := os.WriteFile(dstPath, src, 0644); err != nil {
 			writeInternalError(c, err)
 			return

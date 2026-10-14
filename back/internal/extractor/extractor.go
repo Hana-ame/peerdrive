@@ -243,7 +243,14 @@ func (e *Extractor) extractZip(srcPath, destDir string, archiveSize int64) ([]Ex
 		}
 		// Cumulative-size hard limit decided up front from the (potentially
 		// lying) header, and again enforced per-write by countingWriter.
-		if totalExtracted+int64(f.UncompressedSize64) > e.cfg.MaxSize {
+		// Compare in uint64: int64(f.UncompressedSize64) could wrap negative for
+		// a hostile header (2^63+), bypassing this up-front check. countingWriter
+		// still caps the real byte stream, but the advisory check must not be
+		// evadable by conversion overflow.
+		// #nosec G115 -- uint64(totalExtracted) 安全：totalExtracted 是只增
+		// 计数器且被 countingWriter 钉在 MaxSize 内（≥0 不变量）；真正的硬
+		// 上限是逐写计数的 countingWriter，此 up-front 检查仅作快速失败。
+		if uint64(totalExtracted)+f.UncompressedSize64 > uint64(e.cfg.MaxSize) {
 			return nil, fmt.Errorf("extraction size limit exceeded: %d + %d > %d", totalExtracted, f.UncompressedSize64, e.cfg.MaxSize)
 		}
 		rel, err := resolveEntry(f.Name, destDir)

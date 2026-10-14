@@ -384,8 +384,8 @@ func (s *PeerJSService) serveList(c Session, r dcResp) {
 type searchResp struct {
 	Type   string     `json:"type"`
 	Files  []FileInfo `json:"files"`
-	Total  int64      `json:"total"`     // 无 omitempty：0 也必须上线
-	Offset int64      `json:"offset"`    // 无 omitempty：翻页状态回显
+	Total  int64      `json:"total"`  // 无 omitempty：0 也必须上线
+	Offset int64      `json:"offset"` // 无 omitempty：翻页状态回显
 	ReqID  string     `json:"reqId,omitempty"`
 }
 
@@ -535,6 +535,8 @@ func (s *PeerJSService) fwdWorker(c Session, st *connState) {
 				log.LogDebug("peerjs: fwd write drop: %v", err)
 				ch.fw.out.Close()
 			} else {
+				// #nosec G115 -- n 是 io.Writer.Write 返回的字节数，契约保证
+				// n>=0（负值仅在 err!=nil 时出现，已走上面的失败分支）。
 				atomic.AddUint64(&ch.fw.bytesIn, uint64(n))
 			}
 		case <-st.binDone:

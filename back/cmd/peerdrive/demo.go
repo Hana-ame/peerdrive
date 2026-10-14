@@ -203,6 +203,8 @@ func runDemo(args []string) int {
 	for _, d := range []string{
 		filepath.Join(dir, "a"), filepath.Join(dir, "b"),
 	} {
+		// #nosec G703 -- demo CLI 本地演示：dir 是 --dir 参数/固定默认值，
+		// 清理的是自己刚创建的演示目录，无远程输入面。
 		if err := os.RemoveAll(d); err != nil {
 			fmt.Fprintf(os.Stderr, "清理旧演示目录失败: %v\n", err)
 			return 1
@@ -214,6 +216,7 @@ func runDemo(args []string) int {
 		filepath.Join(dir, "a", "root"),
 		filepath.Join(dir, "b", "root", "downloads"),
 	} {
+		// #nosec G703 -- 同上：创建的是 demo 自有的固定目录结构。
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			fmt.Fprintf(os.Stderr, "准备目录失败: %v\n", err)
 			return 1
@@ -223,6 +226,7 @@ func runDemo(args []string) int {
 	// 造一个待分享的文件——没有真实数据的话，「传了一个文件」是空话。
 	payload := []byte("peerdrive demo：这份内容会从节点 A 传给节点 B，并按 sha256 校验。\n")
 	src := filepath.Join(shareDir, "hello.txt")
+	// #nosec G703 -- 固定文件名写进 demo 自有目录，非输入。
 	if err := os.WriteFile(src, payload, 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "造测试文件失败: %v\n", err)
 		return 1
@@ -251,6 +255,8 @@ func runDemo(args []string) int {
 	// 共用一个 cwd 就等于两个节点共用一个数据库，joined_nodes / 节点目录互相污染，
 	// 演示会表现得像「市场里看不到对方」。
 	start := func(name, sub, cwd string, env []string) (*demoProc, error) {
+		// #nosec G703 -- 日志文件名来自 demo 内部固定命名（name 是 demo 自己
+		// 传入的常量 "a"/"b"），非用户输入。
 		f, err := os.Create(filepath.Join(dir, name+".log"))
 		if err != nil {
 			return nil, err
@@ -415,6 +421,8 @@ func runDemo(args []string) int {
 	var got []byte
 	var vErr error
 	for time.Now().Before(verifyDeadline) {
+		// #nosec G703 -- dest 是 demo 流程中 A 传 B 的文件落盘路径
+		// （demo 自有目录 + 共享流程返回的文件名），本地演示闭环。
 		got, vErr = os.ReadFile(dest)
 		if vErr == nil && len(got) > 0 {
 			break

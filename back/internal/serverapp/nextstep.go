@@ -152,6 +152,7 @@ func PrintNextStep(i NextStepInfo, panelFile string) {
 
 	fmt.Print(b.String())
 }
+
 // panelFilePath 找公共面板单文件（packages/peerdrive-client/dist/panel.html）。
 //
 // 找不到就返回空——启动指引会据此省略「打开面板」那一段。
@@ -163,6 +164,8 @@ func PrintNextStep(i NextStepInfo, panelFile string) {
 //  3. 常见的安装位置
 func panelFilePath() string {
 	if p := os.Getenv("PEERDRIVE_PANEL"); p != "" {
+		// #nosec G703 -- p 是部署者显式配置的面板路径（env），不是远程输入；
+		// 单机威胁模型下配置即信任，无路径穿越面。
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
