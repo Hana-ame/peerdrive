@@ -339,6 +339,9 @@ func (p *PeerPuller) Cancel(id string) error {
 		// 避免在 Windows 下对仍处于打开状态的 .part 文件调用 os.Remove 触发句柄冲突。
 		target, _ := p.targetPath(j)
 		if target != "" {
+			// codeql[go/path-injection] -- target 经 targetPath 清洗
+			// （sanitizeRelPath + Abs 包含校验），非用户原始路径
+			// codeql[go/path-injection] -- 同上
 			_ = os.Remove(target + ".part")
 			_ = os.Remove(target + ".part.meta")
 		}
