@@ -14,6 +14,7 @@ import (
 	"peerdrive/internal/echproxy"
 	"peerdrive/internal/echproxy/exhentai"
 	"peerdrive/internal/echproxy/twimg"
+	"peerdrive/internal/embedding"
 	"peerdrive/internal/extractor"
 	"peerdrive/internal/log"
 	"peerdrive/internal/pathutil"
@@ -252,6 +253,41 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 			log.LogWarn("main: iwara/ech: ECH init failed (%v); requests will fetch ECH config on demand", err)
 		}
 		log.LogInfo("main: iwara/ech enabled (in-process ECH domain fronting, ip_mode=v4, no local server)")
+	}
+
+	// ── standalone EmbeddingGemma embeddings (optional module, PEERDRIVE_EMBEDDING_ENABLE) ──
+	// The service is always operator-managed: llama-server --embedding, or Ollama
+	// through its OpenAI-compatible layer. peerdrive never loads a model,
+	// downloads a weight, or runs inference — it only POSTs to an HTTP endpoint.
+	// Default off: enabling it makes the node ship text to a third-party
+	// inference process, which must be explicitly opted into.
+	if cfg.EmbeddingEnable {
+		client := embedding.New(embedding.Config{
+			URL:         cfg.EmbeddingURL,
+			Model:       cfg.EmbeddingModel,
+			TimeoutSecs: cfg.EmbeddingTimeoutSecs,
+			APIKey:      cfg.EmbeddingAPIKey,
+			ExpectedDim: cfg.EmbeddingExpectedDim,
+		})
+		// Expose the client to the HTTP surface (POST /embedding/v1/embed and
+		// friends). The route is optional in router.Deps, so a default node
+		// without PEERDRIVE_EMBEDDING_ENABLE never advertises it.
+		deps.EmbeddingClient = client
+
+		// Probe once at startup. Deliberately capped at 5s and non-fatal: the
+		// operator may legitimately boot peerdrive before the embedding service,
+		// and a wedged service must not take the node down with it. The route
+		// reports the failure per request instead of hiding it.
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		probeErr := client.Ping(probeCtx)
+		probeCancel()
+		if probeErr != nil {
+			log.LogWarn("main: embedding: service not reachable at %s (%v); /embedding/* will fail per request until it is up",
+				embedding.URLForStatus(cfg.EmbeddingURL), probeErr)
+		}
+		log.LogInfo("main: embedding enabled (model=%s, expected_dim=%d, url=%s, timeout=%ds)",
+			cfg.EmbeddingModel, cfg.EmbeddingExpectedDim,
+			embedding.URLForStatus(cfg.EmbeddingURL), cfg.EmbeddingTimeoutSecs)
 	}
 
 	// BT DHT auto-enable (PEERDRIVE_DISCOVER_MODE fallback): when no discovery server is

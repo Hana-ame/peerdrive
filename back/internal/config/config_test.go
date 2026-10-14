@@ -308,6 +308,95 @@ func TestLoad_OpenListEnvOverrides(t *testing.T) {
 	assert.Equal(t, 45, cfg.OpenListCrawlTimeoutSecs)
 }
 
+// embeddingEnvKeys is the full set the module reads. Tests must unset all of
+// them: a test that only clears some sees the residue of the one before it and
+// passes or fails for the wrong reason.
+var embeddingEnvKeys = []string{
+	"PEERDRIVE_EMBEDDING_ENABLE",
+	"PEERDRIVE_EMBEDDING_URL",
+	"PEERDRIVE_EMBEDDING_MODEL",
+	"PEERDRIVE_EMBEDDING_TIMEOUT_SECS",
+	"PEERDRIVE_EMBEDDING_API_KEY",
+	"PEERDRIVE_EMBEDDING_DIM",
+}
+
+func unsetEmbeddingEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range embeddingEnvKeys {
+		os.Unsetenv(k)
+	}
+}
+
+// TestLoad_EmbeddingDefaults is the safety property the whole module hangs on:
+// with no configuration at all the module is disabled, so a node that never
+// enables it constructs no client, registers no route, and never sends a byte
+// to any inference service.
+func TestLoad_EmbeddingDefaults(t *testing.T) {
+	unsetEmbeddingEnv(t)
+	cfg := Load()
+
+	assert.Equal(t, false, cfg.EmbeddingEnable, "the module must be opt-in")
+	assert.Equal(t, DefaultEmbeddingURL, cfg.EmbeddingURL)
+	assert.Equal(t, "http://127.0.0.1:8080/v1/embeddings", cfg.EmbeddingURL,
+		"the default must match llama-server's own default binding, so enabling the module needs no other config")
+	assert.Equal(t, "embeddinggemma-2", cfg.EmbeddingModel)
+	assert.Equal(t, 30, cfg.EmbeddingTimeoutSecs, "embedding is a real forward pass, but must still be bounded")
+	assert.Equal(t, "", cfg.EmbeddingAPIKey, "llama-server and Ollama need no key")
+	assert.Equal(t, 768, cfg.EmbeddingExpectedDim, "EmbeddingGemma's output dimension; a mismatch must fail loudly")
+	assert.Equal(t, DefaultEmbeddingDim, cfg.EmbeddingExpectedDim)
+}
+
+// TestLoad_EmbeddingEnvOverrides proves each env var reaches its field with the
+// right type — an operator sets six variables, so a wrong type mapping shows up
+// as a silent fallback to the default.
+func TestLoad_EmbeddingEnvOverrides(t *testing.T) {
+	unsetEmbeddingEnv(t)
+	os.Setenv("PEERDRIVE_EMBEDDING_ENABLE", "1")
+	os.Setenv("PEERDRIVE_EMBEDDING_URL", "http://10.0.0.2:11434/v1/embeddings")
+	os.Setenv("PEERDRIVE_EMBEDDING_MODEL", "nomic-embed-text")
+	os.Setenv("PEERDRIVE_EMBEDDING_TIMEOUT_SECS", "10")
+	os.Setenv("PEERDRIVE_EMBEDDING_API_KEY", "secret")
+	os.Setenv("PEERDRIVE_EMBEDDING_DIM", "1024")
+	for _, k := range embeddingEnvKeys {
+		t.Cleanup(func() { os.Unsetenv(k) })
+	}
+
+	cfg := Load()
+	assert.Equal(t, true, cfg.EmbeddingEnable)
+	assert.Equal(t, "http://10.0.0.2:11434/v1/embeddings", cfg.EmbeddingURL)
+	assert.Equal(t, "nomic-embed-text", cfg.EmbeddingModel)
+	assert.Equal(t, 10, cfg.EmbeddingTimeoutSecs)
+	assert.Equal(t, "secret", cfg.EmbeddingAPIKey)
+	assert.Equal(t, 1024, cfg.EmbeddingExpectedDim, "a different model needs a different expected dimension")
+}
+
+// TestLoad_EmbeddingZeroDimDisablesCheck lets an operator point at a model whose
+// width they do not want pinned: DIM=0 turns the validation off instead of
+// falling back to the 768 default.
+func TestLoad_EmbeddingZeroDimDisablesCheck(t *testing.T) {
+	unsetEmbeddingEnv(t)
+	os.Setenv("PEERDRIVE_EMBEDDING_ENABLE", "1")
+	os.Setenv("PEERDRIVE_EMBEDDING_DIM", "0")
+	for _, k := range embeddingEnvKeys {
+		t.Cleanup(func() { os.Unsetenv(k) })
+	}
+	cfg := Load()
+	assert.Equal(t, 0, cfg.EmbeddingExpectedDim)
+}
+
+// TestLoad_EmbeddingDefaultsUntouchedByOtherModules proves the new fields do not
+// perturb anything already there: the safety of "default off, zero behaviour
+// change" only means anything if the existing defaults are bit-identical.
+func TestLoad_EmbeddingDefaultsUntouchedByOtherModules(t *testing.T) {
+	unsetEmbeddingEnv(t)
+	unsetOpenListEnv(t)
+	cfg := Load()
+	assert.Equal(t, false, cfg.OpenListEnable)
+	assert.Equal(t, "openlist", cfg.OpenListName)
+	assert.Equal(t, 900, cfg.OpenListPriority)
+	assert.Equal(t, false, cfg.IwaraEnable, "an unrelated optional module must be unaffected")
+}
+
 // TestLoad_UnifiedNamespaceEnv tests that PEERDRIVE_PORT and PEERDRIVE_DB_PATH
 // take precedence over legacy PORT and DB_PATH, while legacy variables still work as fallbacks.
 // 发现背景：Issue #152 指出 PORT/DB_PATH 等无 PEERDRIVE_ 前缀造成命名混乱与误用。

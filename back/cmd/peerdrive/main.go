@@ -82,6 +82,8 @@ func main() {
 		os.Exit(runCheckUpdate())
 	case "update":
 		os.Exit(runUpdate())
+	case "embed":
+		os.Exit(runEmbed(args))
 	case "version", "--version", "-v":
 		fmt.Printf("peerdrive %s\n", version.Version)
 	case "help", "--help", "-h":
@@ -106,6 +108,7 @@ func usage() {
   peerdrive mcp          启动 MCP (Model Context Protocol) stdio 交互服务
   peerdrive check-update 检查是否有新版本（0=最新 / 1=检查失败 / 3=有新版本）
   peerdrive update       下载新版本并原子替换（校验 sha256、旧版留 .bak、失败回滚）
+  peerdrive embed        对独立 EmbeddingGemma 服务做一次 embedding（--ping 探测）
   peerdrive version      打印版本
   peerdrive help         本帮助
 

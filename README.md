@@ -277,6 +277,12 @@ peerdrive
 | `PEERDRIVE_PORTFWD_ENABLE` | false | Opt-in port forwarding capability switch |
 | `PEERDRIVE_BT_ENABLE` | false | Opt-in BitTorrent protocol capability switch |
 | `PEERDRIVE_IPFS_ENABLE` | false | Opt-in IPFS protocol capability switch |
+| `PEERDRIVE_EMBEDDING_ENABLE` | **false** | Opt-in standalone EmbeddingGemma embeddings. Default off: enabling it makes the node ship text to an operator-configured inference service (`llama-server --embedding`, or Ollama's OpenAI-compatible layer) and register `/embedding/v1/*`. peerdrive never loads a model or runs inference itself — `doc/modules/embedding/README.md`, `scripts/start-embeddinggemma.bat` |
+| `PEERDRIVE_EMBEDDING_URL` | http://127.0.0.1:8080/v1/embeddings | Full embeddings endpoint (not a base URL — the client POSTs to exactly this string) |
+| `PEERDRIVE_EMBEDDING_MODEL` | embeddinggemma-2 | Model name sent in the request |
+| `PEERDRIVE_EMBEDDING_TIMEOUT_SECS` | 30 | Per-request timeout |
+| `PEERDRIVE_EMBEDDING_API_KEY` | - | Sent as `Authorization: Bearer <key>`; empty = no header (llama-server ignores it) |
+| `PEERDRIVE_EMBEDDING_DIM` | 768 | Expected vector dimension; a response with a different width is rejected. `0` disables the check |
 | `PEERDRIVE_ANON_POLICY` | open | Anonymous peer policy (`open`, `share_only`, `deny`) |
 | `PEERDRIVE_PEER_BLOCKLIST` | - | Comma-separated blocklisted peer IDs |
 | `PEERDRIVE_RATE_LIMIT_RPS` | 30 | Per-IP HTTP rate limit requests per second (0 = unlimited) |
