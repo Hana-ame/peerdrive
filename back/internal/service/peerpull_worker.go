@@ -187,11 +187,11 @@ func (p *PeerPuller) fetchOnce(ctx context.Context, job *PullJob, target, tmp st
 	}
 
 	if ctx.Err() != nil {
-		// codeql[go/path-injection] -- tmp/metaPath 已由 targetPath 清洗
-		// （sanitizeRelPath 去掉 .. / 绝对 / 控制字符 + Abs 包含校验），
-		// CodeQL 不识别自定义清洗器故报假阳，见 peerpull.go targetPath 注释。
-		// codeql[go/path-injection] -- 同上，.meta 同源派生
+		// tmp/metaPath 已由 targetPath 清洗（sanitizeRelPath 去 .. / 绝对 /
+		// 控制字符 + Abs 包含校验），CodeQL 未建模自定义清洗器故报假阳。
+		// codeql[go/path-injection]
 		_ = os.Remove(tmp)
+		// codeql[go/path-injection]
 		_ = os.Remove(metaPath)
 		p.finish(job, PullCancelled, "", time.Time{})
 		return true, nil
@@ -200,9 +200,10 @@ func (p *PeerPuller) fetchOnce(ctx context.Context, job *PullJob, target, tmp st
 	stream, err := p.source.OpenStream(job.Peer, job.Hash, partOffset, -1)
 	if err != nil {
 		if ctx.Err() != nil {
-			// codeql[go/path-injection] -- 同上：路径经 sanitizeRelPath+包含校验
-			// codeql[go/path-injection] -- 同上
+			// 同上：路径经 sanitizeRelPath+包含校验，假阳。
+			// codeql[go/path-injection]
 			_ = os.Remove(tmp)
+			// codeql[go/path-injection]
 			_ = os.Remove(metaPath)
 			p.finish(job, PullCancelled, "", time.Time{})
 			return true, nil
@@ -213,9 +214,10 @@ func (p *PeerPuller) fetchOnce(ctx context.Context, job *PullJob, target, tmp st
 	if ctx.Err() != nil {
 		p.mu.Unlock()
 		_ = stream.Close()
-		// codeql[go/path-injection] -- 同上：已清洗路径
-		// codeql[go/path-injection] -- 同上
+		// 同上：已清洗路径，假阳。
+		// codeql[go/path-injection]
 		_ = os.Remove(tmp)
+		// codeql[go/path-injection]
 		_ = os.Remove(metaPath)
 		p.finish(job, PullCancelled, "", time.Time{})
 		return true, nil
