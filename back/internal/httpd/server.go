@@ -133,7 +133,7 @@ func New(cfg Config, h http.Handler) (*Server, error) {
 		if err != nil {
 			return nil, fmt.Errorf("httpd: load TLS keypair: %w", err)
 		}
-		tlsCfg = &tls.Config{Certificates: []tls.Certificate{pair}}
+		tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}}
 	}
 
 	st := cfg.ShutdownTimeout

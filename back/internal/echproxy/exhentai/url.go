@@ -242,7 +242,7 @@ func pickBackend(backends []Backend) Backend {
 }
 
 // weightedRoll is indirection so tests can pin the draw.
-var weightedRoll = func(total int) int { return rand.IntN(total) }
+var weightedRoll = func(total int) int { return rand.IntN(total) } // #nosec G404 -- load-balancing distribution, not security-sensitive
 
 // pickBackend's randomness comes from math/rand/v2, which is auto-seeded since
 // Go 1.20, so concurrent requests need no explicit seeding. The distribution

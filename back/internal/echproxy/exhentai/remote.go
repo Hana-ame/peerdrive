@@ -460,7 +460,7 @@ func (s *Store) nextRefresh() time.Duration {
 	if base < floor {
 		base = floor
 	}
-	add := time.Duration(rand.Int64N(int64(jitter.Nanoseconds())))
+	add := time.Duration(rand.Int64N(int64(jitter.Nanoseconds()))) // #nosec G404 -- TTL jitter, not security-sensitive
 	return base + add
 }
 
