@@ -307,6 +307,7 @@ var schemaMigrations = []migration{
 	{version: 7, name: "version_entries_add_providers_json", stmt: `ALTER TABLE version_entries ADD COLUMN providers_json TEXT DEFAULT ''`},
 	{version: 8, name: "version_tables_add_indexes", stmt: `CREATE INDEX IF NOT EXISTS idx_cv_collection_id ON collection_versions(collection_id)`},
 	{version: 9, name: "version_entries_add_index", stmt: `CREATE INDEX IF NOT EXISTS idx_ve_version_id ON version_entries(version_id)`},
+	{version: 10, name: "version_tables_add_unique_coll_ver", stmt: `CREATE UNIQUE INDEX IF NOT EXISTS idx_cv_coll_ver_unique ON collection_versions(collection_id, version_number)`},
 }
 
 // applyMigrations applies unapplied schema migrations and updates PRAGMA user_version.

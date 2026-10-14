@@ -119,6 +119,11 @@ func (s *CollectionService) SnapshotEntries(versionID, collectionID int) error {
 	return repository.SnapshotVersionEntries(versionID, collectionID)
 }
 
+// CommitSnapshotTx atomically creates a version, copies workspace entries, and updates current_hash.
+func (s *CollectionService) CommitSnapshotTx(collectionID int, commitMsg, snapshotHash string) (int, int, error) {
+	return repository.CommitCollectionSnapshotTx(collectionID, commitMsg, snapshotHash)
+}
+
 // VersionLog returns the version history.
 func (s *CollectionService) VersionLog(collectionID int) ([]model.CollectionVersion, error) {
 	return repository.GetVersionLog(collectionID)
