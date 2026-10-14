@@ -257,10 +257,15 @@ function scheduleReconnect() {
 // Single-connection reuse: the browser and the local node share one session, and all requests are routed concurrently by reqId.
 function connect() {
   if (getNodeSession?.()?.client) return
+  // 2026-10-15 (patch 04 回归修复): 捕获本 socket 局部引用 s——onclose 闭包读
+  // 模块级 sock 会在旧 socket 异步 close 与新连接交错时读到 null/其他连接标志
+  // （sock._wsOwned 空引用崩溃；审计补丁 04 的 session 清除→connect() 让测试
+  // 环境真正走到该路径才暴露）。
   if (!sock) {
-    sock = new WebSocket(wsUrl(getWsBase()) + '/ws/peer')
+    const s = new WebSocket(wsUrl(getWsBase()) + '/ws/peer')
     // Only connections we created ourselves need heartbeat and auto-reconnect (test-injected mocks don't carry this flag)
-    sock._wsOwned = true
+    s._wsOwned = true
+    sock = s
     setStatus('connecting')
   }
   // Idempotent handler attachment: mocks/existing sockets (test-injected) can also go through the same init path
@@ -283,10 +288,11 @@ function connect() {
   }
   sock.onclose = () => {
     // Connection dropped: reject all pending (callers treat it as a network error), clear sock to wait for reconnect.
-    // owned must be captured before clearing: only connections we created ourselves schedule auto-reconnect; test-injected
-    // mocks shouldn't connect to a real network after being disconnected.
-    const owned = !!sock._wsOwned
-    const suppress = !!sock._suppressReconnect
+    // owned/suppress 必须读 THIS socket(cur) 而非模块级 sock——async close 可能
+    // 与新连接交错；test-injected mocks 不应走真实重连。
+    const cur = sock
+    const owned = !!cur?._wsOwned
+    const suppress = !!cur?._suppressReconnect
     stopHeartbeat()
     for (const [, p] of pending) {
       if (p.timer) clearTimeout(p.timer)
@@ -294,7 +300,7 @@ function connect() {
     }
     pending.clear()
     binaryExpect = null
-    sock = null
+    if (sock === cur) sock = null
     if (!suppress && !getNodeSession?.()?.client) {
       setStatus('closed')
       if (owned) scheduleReconnect()
