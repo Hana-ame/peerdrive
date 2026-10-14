@@ -186,6 +186,11 @@ func (rt *Router) Engine() *gin.Engine {
 	r.GET("/health", controller.Health)
 	r.GET("/ready", controller.Ready)
 
+	// ── API v1 group ──
+	// All API routes are prefixed with /api/v1. Health checks (/ping, /health,
+	// /ready) and non-API routes (/panel, /swagger, /peerjs.min.js) remain at root.
+	v1 := r.Group("/api/v1")
+
 	// iwara.tv metadata (front/iwara page). Optional module: only registered when
 	// the operator enabled PEERDRIVE_IWARA_ENABLE, so a default node never
 	// advertises a third-party proxy it is not configured for.
@@ -197,7 +202,7 @@ func (rt *Router) Engine() *gin.Engine {
 	// a firewall rather than exposing the listen port.
 	if rt.deps.IwaraClient != nil {
 		controller.InitIwaraClient(rt.deps.IwaraClient)
-		r.GET("/iwara/video/:id", controller.GetIwaraVideo)
+		v1.GET("/iwara/video/:id", controller.GetIwaraVideo)
 	}
 
 	// twitter-pic gallery (twitter-pic-go 数据面的 peerdrive 整合). Optional
@@ -209,7 +214,7 @@ func (rt *Router) Engine() *gin.Engine {
 	// build 会写节点 storage（摄取媒体 + 集合落 sha-文件系统），挂 authRequired。
 	if rt.deps.TwitterPic != nil {
 		controller.InitTwitterPic(rt.deps.TwitterPic)
-		xg := r.Group("/twitterpic")
+		xg := v1.Group("/twitterpic")
 		{
 			xg.GET("/users", controller.TwitterPicUsers)
 			xg.POST("/users/:username/build", authRequired, controller.TwitterPicBuild)
@@ -217,19 +222,19 @@ func (rt *Router) Engine() *gin.Engine {
 			xg.GET("/fetch-stats", controller.TwitterPicFetchStats)
 		}
 	}
-	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256Local)
-	r.HEAD("/sha256sum/:sha256", controller.DownloadBySHA256Local)
-	r.GET("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
-	r.HEAD("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
-	r.GET("/ipfs/:cid", controller.DownloadByCID)
+	v1.GET("/sha256sum/:sha256", controller.DownloadBySHA256Local)
+	v1.HEAD("/sha256sum/:sha256", controller.DownloadBySHA256Local)
+	v1.GET("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
+	v1.HEAD("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
+	v1.GET("/ipfs/:cid", controller.DownloadByCID)
 
 	// Universal multi-protocol download endpoints.
-	r.GET("/download/:hash", controller.UniversalDownload)
-	r.GET("/download/:hash/sources", controller.UniversalDownloadSources)
-	r.POST("/download/:hash/refresh", authRequired, controller.UniversalDownloadRefresh)
+	v1.GET("/download/:hash", controller.UniversalDownload)
+	v1.GET("/download/:hash/sources", controller.UniversalDownloadSources)
+	v1.POST("/download/:hash/refresh", authRequired, controller.UniversalDownloadRefresh)
 
 	// P2P routes (batch 2 simplification: libp2p legacy stack endpoints removed, kept auth status/WebRTC info/port forwarding)
-	p2p := r.Group("/p2p")
+	p2p := v1.Group("/p2p")
 	{
 		p2p.GET("/auth/status", controller.AuthStatus)
 		p2p.GET("/webrtc/info", controller.WebRTCInfoHandler(cfg))
@@ -256,7 +261,7 @@ func (rt *Router) Engine() *gin.Engine {
 	}
 
 	// Remote screen display & synchronization routes (Issue #243)
-	display := r.Group("/display")
+	display := v1.Group("/display")
 	{
 		display.GET("/screens", controller.ListDisplayScreens)
 		display.GET("/status", controller.GetDisplayStatus)
@@ -266,7 +271,7 @@ func (rt *Router) Engine() *gin.Engine {
 	}
 
 	// P2P live stream distribution routes (Issue #244)
-	stream := r.Group("/stream")
+	stream := v1.Group("/stream")
 	{
 		stream.GET("/list", controller.ListStreams)
 		stream.GET("/:id/manifest", controller.GetStreamManifest)
@@ -276,7 +281,7 @@ func (rt *Router) Engine() *gin.Engine {
 	}
 
 	// BitTorrent routes
-	bt := r.Group("/bt")
+	bt := v1.Group("/bt")
 	{
 		bt.GET("/status", controller.BTDHTStatus)
 		bt.POST("/announce", authRequired, controller.BTAnnounce)
@@ -303,7 +308,7 @@ func (rt *Router) Engine() *gin.Engine {
 	}
 
 	// IPFS routes (batch 2 simplification: Bitswap compatibility layer removed; kept HTTP gateway pin/query)
-	ipfs := r.Group("/ipfs")
+	ipfs := v1.Group("/ipfs")
 	{
 		// IPFS pin routes
 		ipfs.POST("/pin/:cid", authRequired, controller.PinCID)
@@ -319,7 +324,7 @@ func (rt *Router) Engine() *gin.Engine {
 	// service can't start at all.
 	// Fix: removed all redirects (frontend already uses new paths directly), conflicting
 	// routes merged into dispatchers (dispatchCreateCollection / dispatchGetCollection / dispatchGetTree).
-	coll := r.Group("/collections")
+	coll := v1.Group("/collections")
 	{
 		// POST /collections dispatch: body with username goes user system, otherwise anonymous collection
 		coll.POST("", authRequired, dispatchCreateCollection)
@@ -338,7 +343,7 @@ func (rt *Router) Engine() *gin.Engine {
 	}
 
 	// Anonymous Collection routes (public read; create/commit/fork are write operations with auth)
-	anon := r.Group("/anon")
+	anon := v1.Group("/anon")
 	{
 		anon.POST("/collections", authRequired, controller.CreateAnonCollection)
 		anon.GET("/collections", controller.ListAnonCollections)
@@ -357,7 +362,7 @@ func (rt *Router) Engine() *gin.Engine {
 	}
 
 	// File management (browse/list/verify read-only open; write operations with auth)
-	files := r.Group("/files")
+	files := v1.Group("/files")
 	{
 		files.GET("", controller.ListFiles)
 		files.GET("/search", authRequired, controller.SearchLocalFiles)
@@ -379,7 +384,7 @@ func (rt *Router) Engine() *gin.Engine {
 	}
 
 	// Collection management (write operations with auth)
-	collections := r.Group("/collections")
+	collections := v1.Group("/collections")
 	{
 		collections.GET("/public", controller.ListPublicCollections)
 		collections.GET("/search", controller.SearchCollections)
@@ -392,7 +397,7 @@ func (rt *Router) Engine() *gin.Engine {
 	}
 
 	// Tags (Issue #91: tag / collection system extension)
-	tagsGroup := r.Group("/tags")
+	tagsGroup := v1.Group("/tags")
 	{
 		tagsGroup.GET("/sha/:sha", controller.GetShaTags)
 		tagsGroup.POST("/sha/:sha", authRequired, controller.SetShaTags)
@@ -403,7 +408,7 @@ func (rt *Router) Engine() *gin.Engine {
 	}
 
 	// Local sync (write with auth, read open)
-	sync := r.Group("/local")
+	sync := v1.Group("/local")
 	{
 		sync.POST("/save", authRequired, syncCtrl.SaveLocal)
 		sync.GET("/status/:hash", syncCtrl.GetStatus)
@@ -412,22 +417,22 @@ func (rt *Router) Engine() *gin.Engine {
 	// (removed: conflicts with real routes; frontend already uses /collections/fork|merge|pull directly)
 
 	// Collaboration actions
-	actions := r.Group("/actions")
+	actions := v1.Group("/actions")
 	{
 		actions.POST("/merge", authRequired, controller.MergeFromSource)
 		actions.POST("/fork", authRequired, controller.ForkCollection)
 	}
 
 	// Public collection file download
-	r.GET("/:username/:collection_name/*filepath", controller.DownloadCollectionFile)
+	v1.GET("/:username/:collection_name/*filepath", controller.DownloadCollectionFile)
 
 	// Share links (create with auth; read by token public)
-	shares := r.Group("/shares")
+	shares := v1.Group("/shares")
 	{
 		shares.POST("", authRequired, controller.CreateShare)
 		shares.GET("", authRequired, controller.ListShares)
 	}
-	r.GET("/s/:token", controller.AccessShare)
+	v1.GET("/s/:token", controller.AccessShare)
 
 	// Swagger: enabled by default. It publishes all endpoints (105) with parameter structures,
 	// which is essentially giving away a free attack map for public deployments —

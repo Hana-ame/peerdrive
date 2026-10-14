@@ -64,7 +64,9 @@ func (rt *Router) registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 		return
 	}
 	peerjsCfg := rt.deps.PeerJSCfg
-	r.GET("/peerjs/node", func(c *gin.Context) {
+	// /api/v1 prefix for all peerjs routes
+	v1 := r.Group("/api/v1")
+	v1.GET("/peerjs/node", func(c *gin.Context) {
 		conns := peerjsService.Connections()
 		peers := make([]string, 0, len(conns))
 		for pid := range conns {
@@ -105,23 +107,23 @@ func (rt *Router) registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 	// Listing is read-only open (same level as /peerjs/node, "discovery" info); join/leave are write operations
 	// → attached with auth (AuthRequired passes through internally when no registration server = single-machine mode).
 	// Semantics: marketplace = online nodes from discovery server ∪ locally joined list (kept offline too).
-	r.GET("/peerjs/nodes", controller.GetNodeMarket)
-	r.GET("/peerjs/nodes/joined", controller.GetJoinedNodes)
-	r.GET("/peerjs/nodes/:peer/shares", controller.GetPeerShares)
+	v1.GET("/peerjs/nodes", controller.GetNodeMarket)
+	v1.GET("/peerjs/nodes/joined", controller.GetJoinedNodes)
+	v1.GET("/peerjs/nodes/:peer/shares", controller.GetPeerShares)
 	// ── File index search (feat/file-index-search) ──
 	// /peerjs/nodes/:peer/search: ask a peer about its index. Auth required: unlike
 	// /peerjs/nodes/:peer/shares (returns only the explicitly shared scope), search
 	// returns hits from the peer's **full local index** — strictly more sensitive
 	// information, so gate it at the same level as /peerjs/share (when no
 	// registration server is configured, auth passes through internally = single-machine mode).
-	r.GET("/peerjs/nodes/:peer/search", auth, controller.SearchPeerFiles)
-	r.POST("/peerjs/nodes/join", auth, controller.JoinNode)
-	r.DELETE("/peerjs/nodes/join", auth, controller.LeaveNode)
+	v1.GET("/peerjs/nodes/:peer/search", auth, controller.SearchPeerFiles)
+	v1.POST("/peerjs/nodes/join", auth, controller.JoinNode)
+	v1.DELETE("/peerjs/nodes/join", auth, controller.LeaveNode)
 
 	// ── Peer blocklist & admission control (Issue #89) ──
-	r.GET("/peerjs/blocklist", controller.GetPeerBlocklist)
-	r.POST("/peerjs/blocklist", auth, controller.PostPeerBlocklist)
-	r.DELETE("/peerjs/blocklist/:peer", auth, controller.DeletePeerBlocklist)
+	v1.GET("/peerjs/blocklist", controller.GetPeerBlocklist)
+	v1.POST("/peerjs/blocklist", auth, controller.PostPeerBlocklist)
+	v1.DELETE("/peerjs/blocklist/:peer", auth, controller.DeletePeerBlocklist)
 
 	// GET /peerjs/files/search: search **this node's** index (admin panel's find-a-file box).
 	// Also auth-attached: response contains local file names/paths/sizes, same category as
@@ -129,15 +131,15 @@ func (rt *Router) registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 	// remote side — it reads the local SQLite, so it makes more sense to register it in
 	// the /files group; it lives under /peerjs only because FileIndexService belongs to
 	// that service set, and moving it later is a one-line change.
-	r.GET("/peerjs/files/search", auth, controller.SearchLocalFiles)
+	v1.GET("/peerjs/files/search", auth, controller.SearchLocalFiles)
 
 	// ── This node's shared scope (doc/NETDISK.md M2.6) ──
 	// Read also has auth: response contains local file names/sizes, which is admin surface info;
 	// when no registration server is configured, AuthRequired passes through internally (single-machine mode).
 	// Deliberately named differently from /peerjs/nodes/:peer/shares which queries the peer's share list.
-	r.GET("/peerjs/share", auth, controller.GetNodeShare)
-	r.PUT("/peerjs/share", auth, controller.PutNodeShare)
-	r.POST("/peerjs/share/files", auth, controller.PostNodeShareFiles)
+	v1.GET("/peerjs/share", auth, controller.GetNodeShare)
+	v1.PUT("/peerjs/share", auth, controller.PutNodeShare)
+	v1.POST("/peerjs/share/files", auth, controller.PostNodeShareFiles)
 
 	// POST /peerjs/fetch {peer, hash, offset?, size?} fetch sha256 content from peer node
 	// H4: this endpoint holds the entire response buffer in memory (service's 8GB cap only prevents
@@ -145,7 +147,7 @@ func (rt *Router) registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 	// + single fetch limit 64MB; large files should use /ws/peer chunked transfer.
 	// Frontend doesn't use this endpoint (integration tests call service.FetchFromPeer directly),
 	// no compatibility impact from tightening.
-	r.POST("/peerjs/fetch", auth, func(c *gin.Context) {
+	v1.POST("/peerjs/fetch", auth, func(c *gin.Context) {
 		var body struct {
 			Peer   string `json:"peer"`
 			Hash   string `json:"hash"`
@@ -192,6 +194,9 @@ func (rt *Router) registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 	// peerjsCfg means "no allowlist configured" and is expressed as a nil Allow
 	// (accept) — IsOriginAllowed dereferences the config, so it must not be
 	// reachable through a nil pointer.
+	//
+	// Note: /ws/peer stays at root level (not under /api/v1) because it's a WebSocket
+	// endpoint, not a REST API. Item 3 will split it into /ws/admin and /ws/data.
 	var originAllow func(string) bool
 	if peerjsCfg != nil {
 		originAllow = peerjsCfg.IsOriginAllowed
