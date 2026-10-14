@@ -23,10 +23,11 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 	if sourceManager == nil {
 		return
 	}
-	r.GET("/sources", authRequired, func(c *gin.Context) {
+	v1 := r.Group("/api/v1")
+	v1.GET("/sources", authRequired, func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"sources": sourceManager.Snapshot()})
 	})
-	r.POST("/sources/:name/priority", authRequired, func(c *gin.Context) {
+	v1.POST("/sources/:name/priority", authRequired, func(c *gin.Context) {
 		var body struct {
 			Priority int `json:"priority"`
 		}
@@ -46,7 +47,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 	// with other write operations); this is the first step of converging "how
 	// files enter the local source" from scattered controllers into a unified
 	// source management plane.
-	r.POST("/sources/local/add", authRequired, func(c *gin.Context) {
+	v1.POST("/sources/local/add", authRequired, func(c *gin.Context) {
 		var body struct {
 			Path string `json:"path"`
 		}
@@ -76,7 +77,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 			"path":     meta.Path,
 		})
 	})
-	r.POST("/sources/local/write", authRequired, func(c *gin.Context) {
+	v1.POST("/sources/local/write", authRequired, func(c *gin.Context) {
 		file, header, err := c.Request.FormFile("file")
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
@@ -107,7 +108,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 	})
 
 	// BT control plane: download torrent / magnet / manage tasks
-	r.POST("/sources/bt/torrent", authRequired, func(c *gin.Context) {
+	v1.POST("/sources/bt/torrent", authRequired, func(c *gin.Context) {
 		file, _, err := c.Request.FormFile("torrent")
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "torrent file is required"})
@@ -133,7 +134,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		c.JSON(http.StatusCreated, meta)
 	})
-	r.POST("/sources/bt/magnet", authRequired, func(c *gin.Context) {
+	v1.POST("/sources/bt/magnet", authRequired, func(c *gin.Context) {
 		var body struct {
 			URI string `json:"uri"`
 		}
@@ -153,7 +154,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		c.JSON(http.StatusCreated, meta)
 	})
-	r.GET("/sources/bt/downloads", authRequired, func(c *gin.Context) {
+	v1.GET("/sources/bt/downloads", authRequired, func(c *gin.Context) {
 		bc := sourceManager.GetBTControl()
 		if bc == nil {
 			c.JSON(http.StatusNotImplemented, gin.H{"error": "BT control not configured"})
@@ -161,7 +162,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		c.JSON(http.StatusOK, gin.H{"downloads": bc.ListDownloads()})
 	})
-	r.GET("/sources/bt/download/:infohash", authRequired, func(c *gin.Context) {
+	v1.GET("/sources/bt/download/:infohash", authRequired, func(c *gin.Context) {
 		bc := sourceManager.GetBTControl()
 		if bc == nil {
 			c.JSON(http.StatusNotImplemented, gin.H{"error": "BT control not configured"})
@@ -174,7 +175,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		c.JSON(http.StatusOK, ds)
 	})
-	r.POST("/sources/bt/download/:infohash/pause", authRequired, func(c *gin.Context) {
+	v1.POST("/sources/bt/download/:infohash/pause", authRequired, func(c *gin.Context) {
 		bc := sourceManager.GetBTControl()
 		if bc == nil {
 			c.JSON(http.StatusNotImplemented, gin.H{"error": "BT control not configured"})
@@ -186,7 +187,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
-	r.POST("/sources/bt/download/:infohash/resume", authRequired, func(c *gin.Context) {
+	v1.POST("/sources/bt/download/:infohash/resume", authRequired, func(c *gin.Context) {
 		bc := sourceManager.GetBTControl()
 		if bc == nil {
 			c.JSON(http.StatusNotImplemented, gin.H{"error": "BT control not configured"})
@@ -198,7 +199,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
-	r.DELETE("/sources/bt/download/:infohash", authRequired, func(c *gin.Context) {
+	v1.DELETE("/sources/bt/download/:infohash", authRequired, func(c *gin.Context) {
 		bc := sourceManager.GetBTControl()
 		if bc == nil {
 			c.JSON(http.StatusNotImplemented, gin.H{"error": "BT control not configured"})
@@ -212,7 +213,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 	})
 
 	// IPFS control plane: pin / unpin / list / gateway status
-	r.POST("/sources/ipfs/pin/:cid", authRequired, func(c *gin.Context) {
+	v1.POST("/sources/ipfs/pin/:cid", authRequired, func(c *gin.Context) {
 		ic := sourceManager.GetIPFSControl()
 		if ic == nil {
 			c.JSON(http.StatusNotImplemented, gin.H{"error": "IPFS control not configured"})
@@ -225,7 +226,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		c.JSON(http.StatusCreated, pi)
 	})
-	r.DELETE("/sources/ipfs/pin/:cid", authRequired, func(c *gin.Context) {
+	v1.DELETE("/sources/ipfs/pin/:cid", authRequired, func(c *gin.Context) {
 		ic := sourceManager.GetIPFSControl()
 		if ic == nil {
 			c.JSON(http.StatusNotImplemented, gin.H{"error": "IPFS control not configured"})
@@ -237,7 +238,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
-	r.GET("/sources/ipfs/pins", authRequired, func(c *gin.Context) {
+	v1.GET("/sources/ipfs/pins", authRequired, func(c *gin.Context) {
 		ic := sourceManager.GetIPFSControl()
 		if ic == nil {
 			c.JSON(http.StatusNotImplemented, gin.H{"error": "IPFS control not configured"})
@@ -250,7 +251,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		c.JSON(http.StatusOK, gin.H{"pins": pins})
 	})
-	r.GET("/sources/ipfs/gateways", authRequired, func(c *gin.Context) {
+	v1.GET("/sources/ipfs/gateways", authRequired, func(c *gin.Context) {
 		ic := sourceManager.GetIPFSControl()
 		if ic == nil {
 			c.JSON(http.StatusNotImplemented, gin.H{"error": "IPFS control not configured"})

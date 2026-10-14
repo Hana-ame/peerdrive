@@ -350,8 +350,8 @@ func TestNewRouter_PeerJSEnabled_KeepsItsOwnService(t *testing.T) {
 	engineA := newPeerJSEngine(t, rtA)
 	engineB := newPeerJSEngine(t, rtB)
 
-	_, bodyA := serveGET(engineA, "/peerjs/node")
-	_, bodyB := serveGET(engineB, "/peerjs/node")
+	_, bodyA := serveGET(engineA, "/api/v1/peerjs/node")
+	_, bodyB := serveGET(engineB, "/api/v1/peerjs/node")
 
 	assert.Contains(t, bodyA, "node-A", "router A's /peerjs/node must report node A")
 	assert.Contains(t, bodyB, "node-B", "router B's /peerjs/node must report node B")
@@ -372,7 +372,7 @@ func TestPeerJSNode_DoesNotLeakSignalKey(t *testing.T) {
 	require.NoError(t, err)
 
 	engine := newPeerJSEngine(t, rt)
-	_, body := serveGET(engine, "/peerjs/node")
+	_, body := serveGET(engine, "/api/v1/peerjs/node")
 
 	// signal_key must NOT appear — it is a shared secret (R2 HIGH fix).
 	assert.NotContains(t, body, "signal_key",
