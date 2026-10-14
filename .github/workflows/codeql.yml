@@ -1,0 +1,75 @@
+name: CodeQL (Go dataflow)
+
+# 为什么加这一层（2026-10-14 评估结论：真缺口）：
+# 现有安全 CI 的静态分析只有 gosec（语法规则匹配，CWE 级，无跨函数数据流）
+# 与 osv-scanner（依赖版本匹配）。CodeQL 提供**跨函数污点分析**
+# （request → sink 的整条数据流），能抓到 gosec 看不到的 XSS / 路径注入 /
+# 命令注入 / SSRF 变体。2026-10 红队轮人工抓到的存储型 XSS
+# （/sha256sum/:hash?inline=1）、Location 头注入、URL scheme 未约束均属此类
+# ——当时 gosec 一条都没报，是人工审计找到的。
+#
+# 门禁语义：**报告模式**（与 gosec 一致，不阻断 merge）：SARIF 上传到
+# GitHub code scanning（Security 标签页可见告警），逐条 triage 后再决定
+# 是否收紧为硬门禁。新增查询/语言时先在报告模式观察误报率。
+#
+# 构建面说明：与仓库其他 job 保持一致用 `-tags nosqlite`（纯 Go sqlite 驱动、
+# 发布二进制同一条路径）；三个独立 go.mod（back / signalserver / p2p_bt）
+# 全部构建，保证 extractor 都能看到。
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - refactor
+      - base
+      - docs
+      - "feat/*"
+      - "fix/*"
+      - "module/*"
+      - "*-agent"
+      - "*-frontend"
+  pull_request:
+    branches: [main, master, refactor]
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: back/go.sum
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: go
+          # 默认 security 查询集；如误报率可控再评估 security-extended。
+
+      # 自定义构建（不用 autobuild 的默认 `go build ./...`）：
+      # 默认命令会以 cgo 编译 mattn/go-sqlite3 且不带 nosqlite tag，
+      # 与仓库所有 CI job 的构建面（-tags nosqlite）不一致；显式给出
+      # 与 gosec/测试一致的构建命令，extractor 跟踪的即发布面。
+      - name: Build (tags=nosqlite, 与 gosec/测试同一构建面)
+        working-directory: back
+        run: |
+          go build -tags nosqlite ./...
+          (cd signalserver && go build -tags nosqlite ./...)
+          (cd p2p_bt && go build -tags nosqlite ./...)
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
