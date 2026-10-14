@@ -334,11 +334,17 @@ func (p *PeerPuller) Cancel(id string) error {
 	}
 	if closer != nil {
 		_ = closer.Close()
-	}
-	target, _ := p.targetPath(j)
-	if target != "" {
-		_ = os.Remove(target + ".part")
-		_ = os.Remove(target + ".part.meta")
+	} else {
+		// 仅当 worker 尚未进入流式读写阶段（无活跃 closer 句柄）时才在此处兜底清理，
+		// 避免在 Windows 下对仍处于打开状态的 .part 文件调用 os.Remove 触发句柄冲突。
+		target, _ := p.targetPath(j)
+		if target != "" {
+			// target 经 targetPath 清洗（sanitizeRelPath + Abs 包含校验），假阳。
+			// codeql[go/path-injection]
+			_ = os.Remove(target + ".part")
+			// codeql[go/path-injection]
+			_ = os.Remove(target + ".part.meta")
+		}
 	}
 	return nil
 }

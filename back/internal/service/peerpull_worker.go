@@ -186,11 +186,42 @@ func (p *PeerPuller) fetchOnce(ctx context.Context, job *PullJob, target, tmp st
 		p.mu.Unlock()
 	}
 
+	if ctx.Err() != nil {
+		// tmp/metaPath 已由 targetPath 清洗（sanitizeRelPath 去 .. / 绝对 /
+		// 控制字符 + Abs 包含校验），CodeQL 未建模自定义清洗器故报假阳。
+		// codeql[go/path-injection]
+		_ = os.Remove(tmp)
+		// codeql[go/path-injection]
+		_ = os.Remove(metaPath)
+		p.finish(job, PullCancelled, "", time.Time{})
+		return true, nil
+	}
+
 	stream, err := p.source.OpenStream(job.Peer, job.Hash, partOffset, -1)
 	if err != nil {
+		if ctx.Err() != nil {
+			// 同上：路径经 sanitizeRelPath+包含校验，假阳。
+			// codeql[go/path-injection]
+			_ = os.Remove(tmp)
+			// codeql[go/path-injection]
+			_ = os.Remove(metaPath)
+			p.finish(job, PullCancelled, "", time.Time{})
+			return true, nil
+		}
 		return false, fmt.Errorf("open stream: %w", err)
 	}
 	p.mu.Lock()
+	if ctx.Err() != nil {
+		p.mu.Unlock()
+		_ = stream.Close()
+		// 同上：已清洗路径，假阳。
+		// codeql[go/path-injection]
+		_ = os.Remove(tmp)
+		// codeql[go/path-injection]
+		_ = os.Remove(metaPath)
+		p.finish(job, PullCancelled, "", time.Time{})
+		return true, nil
+	}
 	p.closers[job.ID] = stream
 	p.mu.Unlock()
 	defer func() {
@@ -213,13 +244,13 @@ func (p *PeerPuller) fetchOnce(ctx context.Context, job *PullJob, target, tmp st
 
 	written, cpErr := p.copyWithProgress(ctx, f, stream, h, job, partOffset, metaPath)
 	closeErr := f.Close()
+	if ctx.Err() != nil {
+		_ = os.Remove(tmp)
+		_ = os.Remove(metaPath)
+		p.finish(job, PullCancelled, "", time.Time{})
+		return true, nil
+	}
 	if cpErr != nil {
-		if ctx.Err() != nil {
-			_ = os.Remove(tmp)
-			_ = os.Remove(metaPath)
-			p.finish(job, PullCancelled, "", time.Time{})
-			return true, nil
-		}
 		// 网络/传输错误：保留 .part 与 .meta 文件供断点续传，不删除！
 		_ = p.saveJobMeta(job, metaPath)
 		return false, cpErr
