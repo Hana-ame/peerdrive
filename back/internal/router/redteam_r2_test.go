@@ -202,10 +202,15 @@ func TestIsOriginAllowed_SchemeOnSubdomainWildcard(t *testing.T) {
 
 // TestIsOriginAllowed_DefaultsAreAnAllowList — 默认值必须是显式白名单，
 // 而不是"空 = 全放行"。空值只应在运营者显式配置时出现。
+// 2026-10-15（审计补丁 SEC-04）：默认去掉 `https://*.pages.dev` 通配后，
+// 本用例从"必须含通配"改为"必须不含公开可注册通配"——通配域人人可注册，
+// 默认白名单只保留精确 origin。
 func TestIsOriginAllowed_DefaultsAreAnAllowList(t *testing.T) {
 	t.Parallel()
 	cfg := config.DefaultConfig()
-	assert.Contains(t, cfg.AllowedOrigins, "*", "default should at least document itself via a wildcard entry")
+	require.NotEmpty(t, cfg.AllowedOrigins, "default must be an explicit allowlist, never empty = allow-all")
+	require.NotContains(t, cfg.AllowedOrigins, "*",
+		"default must not contain a public-wildcard entry: *.pages.dev is registerable by anyone (SEC-04); keep exact origins only")
 	// The operator's own front-end stays reachable.
 	require.True(t, cfg.IsOriginAllowed("https://peerdrive.pages.dev"))
 	// A random third-party origin is not the default answer.

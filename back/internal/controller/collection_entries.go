@@ -25,6 +25,9 @@ import (
 // @Router /collections/{username}/{collection_name}/entries [post]
 func AddEntry(c *gin.Context) {
 	username := collectionUsername(c)
+	if !requireCollectionOwner(c, username) {
+		return
+	}
 	collectionName := c.Param("collection_name")
 	var req struct {
 		Path      string           `json:"path"`
@@ -68,6 +71,9 @@ func AddEntry(c *gin.Context) {
 // @Router /collections/{username}/{collection_name}/entries/{path} [delete]
 func RemoveEntry(c *gin.Context) {
 	username := collectionUsername(c)
+	if !requireCollectionOwner(c, username) {
+		return
+	}
 	collectionName := c.Param("collection_name")
 	path := strings.TrimPrefix(c.Param("path"), "/")
 	col, err := collSvc.Get(username, collectionName)

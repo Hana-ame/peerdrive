@@ -49,6 +49,9 @@ func MergeFromSource(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
+	if !requireCollectionOwner(c, req.Username) {
+		return
+	}
 
 	local, err := collSvc.Get(req.Username, req.CollectionName)
 	if err != nil {

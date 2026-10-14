@@ -16,6 +16,7 @@ import (
 	"peerdrive/internal/echproxy/twimg"
 	"peerdrive/internal/extractor"
 	"peerdrive/internal/log"
+	"peerdrive/internal/nodestate"
 	"peerdrive/internal/pathutil"
 	"peerdrive/internal/repository"
 	"peerdrive/internal/router"
@@ -85,8 +86,9 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	})
 	log.LogInfo("main: database initialized")
 
-	// Initialize the anonymous storage directory (same directory as regular files)
+	// Initialize the anonymous storage directory and node operator identity
 	repository.SetAnonStorageDir(storageDir)
+	nodestate.SetOperator(cfg.Operator)
 
 	// Initialize PeerJS signaling + WebRTC file service (the Go node acts as a persistent
 	// peer providing files, interconnecting with browsers and other nodes via PeerJS signaling).

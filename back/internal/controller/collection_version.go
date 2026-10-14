@@ -27,6 +27,9 @@ import (
 // @Router /collections/{username}/{collection_name}/commit [post]
 func CommitCollection(c *gin.Context) {
 	username := collectionUsername(c)
+	if !requireCollectionOwner(c, username) {
+		return
+	}
 	collectionName := c.Param("collection_name")
 	var req struct {
 		CommitMessage string `json:"commit_message"`
@@ -127,6 +130,9 @@ func GetVersionLog(c *gin.Context) {
 // @Router /collections/{username}/{collection_name}/rollback/{version_id} [post]
 func RollbackCollection(c *gin.Context) {
 	username := collectionUsername(c)
+	if !requireCollectionOwner(c, username) {
+		return
+	}
 	collectionName := c.Param("collection_name")
 	versionID := c.Param("version_id")
 	var vid int
@@ -190,6 +196,9 @@ func RollbackCollection(c *gin.Context) {
 // @Router /collections/{username}/{collection_name}/visibility [post]
 func SetCollectionVisibility(c *gin.Context) {
 	username := collectionUsername(c)
+	if !requireCollectionOwner(c, username) {
+		return
+	}
 	collectionName := c.Param("collection_name")
 	var req struct {
 		Visibility string `json:"visibility"`
@@ -228,6 +237,9 @@ func SetCollectionVisibility(c *gin.Context) {
 // @Router /collections/{username}/{collection_name}/tags [post]
 func UpdateCollectionTags(c *gin.Context) {
 	username := collectionUsername(c)
+	if !requireCollectionOwner(c, username) {
+		return
+	}
 	collectionName := c.Param("collection_name")
 	var req struct {
 		Tags []string `json:"tags"`

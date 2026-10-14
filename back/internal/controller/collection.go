@@ -60,6 +60,20 @@ func collectionUsername(c *gin.Context) string {
 	return username
 }
 
+// requireCollectionOwner enforces horizontal authorization (anti-IDOR) when remote user authentication is active.
+// Local AdminToken sessions or single-node no-auth mode have empty context "username" and are permitted as node owner.
+func requireCollectionOwner(c *gin.Context, targetUsername string) bool {
+	authedUser := c.GetString("username")
+	if authedUser == "" {
+		return true
+	}
+	if authedUser == targetUsername || c.GetString("role") == "admin" {
+		return true
+	}
+	c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: cannot modify another user's collection"})
+	return false
+}
+
 // CreateCollection godoc
 // @Summary Create a new collection
 // @Description Create a named collection for a user. Duplicate (username, collection_name) returns 409.
@@ -81,6 +95,9 @@ func CreateCollection(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if !requireCollectionOwner(c, req.Username) {
 		return
 	}
 	var id int
