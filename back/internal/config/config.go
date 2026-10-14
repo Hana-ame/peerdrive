@@ -235,24 +235,15 @@ type Config struct {
 	// Options: "peer", "supernode", "edge" (Issue #322).
 	NodeRole string
 
-	// ── Optional ech-proxy module (PEERDRIVE_ECH_PROXY_ENABLE, default OFF) ──
-	// When enabled, https://pbs.twimg.com/<path>?<q> is rewritten to
-	// https://twimg-pbs.l.moonchan.xyz:8443/<path>?<q> and routed through a local
-	// ech-proxy subprocess that the node downloads itself from the GitHub release channel.
-	// Disabled means the module's code never runs at all: no download, no child process,
-	// no rewrite — behaviour is identical to a node without the module.
-	//
-	// There is no silent fallback: if the download, the checksum, the port bind or the
-	// spawn fails, startup fails with an explicit error. A half-configured rewrite that
-	// quietly went direct would defeat the purpose of the module.
-	ECHProxyEnable        bool   // PEERDRIVE_ECH_PROXY_ENABLE (default false)
-	ECHProxyAddr          string // PEERDRIVE_ECH_PROXY_ADDR (default 127.0.0.1:8443)
-	ECHProxyInstallDir    string // PEERDRIVE_ECH_PROXY_INSTALL_DIR (default <PEERDRIVE_STORAGE>/ech-proxy)
-	ECHProxyVersion       string // PEERDRIVE_ECH_PROXY_VERSION (default v1.3.0)
-	ECHProxyEntryHost     string // PEERDRIVE_ECH_PROXY_ENTRY_HOST (default twimg-pbs.l.moonchan.xyz)
-	ECHProxySkipTLS       bool   // PEERDRIVE_ECH_PROXY_SKIP_TLS (default true: the proxy uses a local self-signed cert)
-	ECHProxyIPMode        string // PEERDRIVE_ECH_PROXY_IP_MODE (default v4; also "auto", "v6", "")
-	ECHProxyStartAttempts int    // PEERDRIVE_ECH_PROXY_START_ATTEMPTS (default 3)
+	// ── Optional twimg ECH module (PEERDRIVE_ECH_PROXY_ENABLE, default OFF) ──
+	// When enabled, https://pbs.twimg.com/<path>?<q> is sent through the
+	// in-process ECH domain-fronting client (internal/echcore): the request goes
+	// to cloudflare-ech.com with pbs.twimg.com encrypted inside the ClientHello.
+	// No subprocess is spawned, no address is bound, no certificate is managed.
+	// Disabled means the module's code never runs at all — behaviour is identical
+	// to a node without the module.
+	ECHProxyEnable bool   // PEERDRIVE_ECH_PROXY_ENABLE (default false)
+	ECHProxyIPMode string // PEERDRIVE_ECH_PROXY_IP_MODE (default v4; also "auto", "v6", "")
 
 	// ── HTTP hardening (see internal/router/middleware.go) ──
 	// RateLimitRPS is the per-IP request rate limit (PEERDRIVE_RATE_LIMIT_RPS, 0 = unlimited).
@@ -335,32 +326,20 @@ type Config struct {
 	AutoExtractMaxFiles   int   // PEERDRIVE_AUTO_EXTRACT_MAX_FILES: max number of extracted files (default 10000)
 	AutoExtractDeleteOrig bool  // PEERDRIVE_AUTO_EXTRACT_DELETE_ORIGINAL: delete archive after extraction (default true)
 
-	// ── iwara.tv via ech-proxy (PEERDRIVE_IWARA_*, optional module) ──
+	// ── iwara.tv via in-process ECH (PEERDRIVE_IWARA_*, optional module) ──
 	//
 	// IwaraEnable is the master switch (PEERDRIVE_IWARA_ENABLE, default **false**).
-	// Why default off: the module downloads and runs an external executable
-	// (ech-proxy) and injects a user-supplied cookie into requests to a
-	// third-party site. Both are risky operations that must be explicitly
-	// opted into.
+	// Why default off: the module injects a user-supplied cookie into requests to
+	// a third-party site, which must be explicitly opted into. Egress is the
+	// in-process ECH client (internal/echcore) — no subprocess and no local
+	// listener — so the only thing being opted into is the cookie injection.
 	//
-	// When enabled, the module downloads ech-proxy's Windows executable,
-	// verifies it against the published SHA256, starts it as a child process,
-	// and routes iwara.tv API calls through the local TLS proxy. Download
-	// URLs are resolved via the same API flow used by open-source iwara
-	// downloaders (Izumiko/iwaradl, IwaraEnhance/IwaraDownloadTool).
-	IwaraEnable          bool
-	IwaraCookie          string // PEERDRIVE_IWARA_COOKIE: iwara login cookie (e.g. "iwara_session=...")
-	IwaraEchProxyExe     string // PEERDRIVE_IWARA_ECH_PROXY_EXE: local exe path (override auto-download)
-	IwaraEchProxyPort    int    // PEERDRIVE_IWARA_ECH_PROXY_PORT: ech-proxy listen port (default 8443)
-	IwaraEntrySuffix     string // PEERDRIVE_IWARA_ENTRY_SUFFIX: entry domain suffix (default "l.moonchan.xyz")
-	IwaraUpstreamSuffix  string // PEERDRIVE_IWARA_UPSTREAM_SUFFIX: upstream domain (default "iwara.tv")
-	IwaraEchProxyVersion string // PEERDRIVE_IWARA_ECH_PROXY_VERSION: ech-proxy release tag (default "v1.3.0")
-	// IwaraEntrySkipTLS skips TLS chain verification for the iwara ech-proxy entry
-	// host (default **true**: the entry is the local 127.0.0.1:<port> proxy, which
-	// serves a self-signed cert that is not in the system trust store). Set false in a
-	// deployment that owns *.l.moonchan.xyz with a chain-issued cert; the trust model
-	// behind both defaults is documented in doc/guide/operation-manual.md §6.
-	IwaraEntrySkipTLS bool
+	// When enabled, iwara.tv API calls go through ECH domain fronting at
+	// cloudflare-ech.com. Download URLs are resolved via the same API flow used
+	// by open-source iwara downloaders (Izumiko/iwaradl,
+	// IwaraEnhance/IwaraDownloadTool).
+	IwaraEnable bool
+	IwaraCookie string // PEERDRIVE_IWARA_COOKIE: iwara login cookie (e.g. "iwara_session=...")
 
 	// ── ExHentai routing (PEERDRIVE_EXHENTA_*, optional module) ──
 	//
@@ -538,12 +517,6 @@ func DefaultConfig() *Config {
 		AutoExtractDeleteOrig:    true,
 		IwaraEnable:              false,
 		IwaraCookie:              "",
-		IwaraEchProxyExe:         "",
-		IwaraEchProxyPort:        8443,
-		IwaraEntrySuffix:         "l.moonchan.xyz",
-		IwaraUpstreamSuffix:      "iwara.tv",
-		IwaraEchProxyVersion:     "v1.3.0",
-		IwaraEntrySkipTLS:        true,
 		ExhentaiEnable:           false,
 		ExhentaiConfigURL:        "",
 		ExhentaiConfigInsecure:   false,
@@ -563,13 +536,7 @@ func DefaultConfig() *Config {
 		MaxConcurrentStreams:     8,
 		MaxUploadSpeed:           0,
 		ECHProxyEnable:           false,
-		ECHProxyAddr:             "127.0.0.1:8443",
-		ECHProxyInstallDir:       "",
-		ECHProxyVersion:          "v1.3.0",
-		ECHProxyEntryHost:        "twimg-pbs.l.moonchan.xyz",
-		ECHProxySkipTLS:          true,
 		ECHProxyIPMode:           "v4",
-		ECHProxyStartAttempts:    3,
 		RateLimitRPS:             30,
 		MaxJSONBodyBytes:         1 * 1024 * 1024,
 		DisableCSP:               false,
@@ -675,17 +642,9 @@ func Load() *Config {
 		AutoExtractMaxFiles:   getEnvInt("PEERDRIVE_AUTO_EXTRACT_MAX_FILES", 10000),
 		AutoExtractDeleteOrig: getEnvBool("PEERDRIVE_AUTO_EXTRACT_DELETE_ORIGINAL", true),
 
-		// iwara.tv via ech-proxy (optional module)
-		IwaraEnable:          getEnvBool("PEERDRIVE_IWARA_ENABLE", false),
-		IwaraCookie:          getEnv("PEERDRIVE_IWARA_COOKIE", ""),
-		IwaraEchProxyExe:     getEnv("PEERDRIVE_IWARA_ECH_PROXY_EXE", ""),
-		IwaraEchProxyPort:    getEnvInt("PEERDRIVE_IWARA_ECH_PROXY_PORT", 8443),
-		IwaraEntrySuffix:     getEnv("PEERDRIVE_IWARA_ENTRY_SUFFIX", "l.moonchan.xyz"),
-		IwaraUpstreamSuffix:  getEnv("PEERDRIVE_IWARA_UPSTREAM_SUFFIX", "iwara.tv"),
-		IwaraEchProxyVersion: getEnv("PEERDRIVE_IWARA_ECH_PROXY_VERSION", "v1.3.0"),
-		// Default true = today's behaviour (self-signed local proxy). Operators with a
-		// chain-issued *.moonchan.xyz cert set this to false to require full verification.
-		IwaraEntrySkipTLS: getEnvBool("PEERDRIVE_IWARA_ENTRY_SKIP_TLS", true),
+		// iwara.tv via in-process ECH (optional module)
+		IwaraEnable: getEnvBool("PEERDRIVE_IWARA_ENABLE", false),
+		IwaraCookie: getEnv("PEERDRIVE_IWARA_COOKIE", ""),
 
 		// ExHentai routing (optional module)
 		ExhentaiEnable:         getEnvBool("PEERDRIVE_EXHENTA_ENABLE", false),
@@ -721,14 +680,8 @@ func Load() *Config {
 		MaxConcurrentStreams: getEnvInt("PEERDRIVE_MAX_CONCURRENT_STREAMS", 8),
 		MaxUploadSpeed:       getEnvInt64("PEERDRIVE_MAX_UPLOAD_SPEED", 0),
 
-		ECHProxyEnable:        getEnvBool("PEERDRIVE_ECH_PROXY_ENABLE", false),
-		ECHProxyAddr:          getEnv("PEERDRIVE_ECH_PROXY_ADDR", "127.0.0.1:8443"),
-		ECHProxyInstallDir:    getEnv("PEERDRIVE_ECH_PROXY_INSTALL_DIR", ""),
-		ECHProxyVersion:       getEnv("PEERDRIVE_ECH_PROXY_VERSION", "v1.3.0"),
-		ECHProxyEntryHost:     getEnv("PEERDRIVE_ECH_PROXY_ENTRY_HOST", "twimg-pbs.l.moonchan.xyz"),
-		ECHProxySkipTLS:       getEnvBool("PEERDRIVE_ECH_PROXY_SKIP_TLS", true),
-		ECHProxyIPMode:        getEnv("PEERDRIVE_ECH_PROXY_IP_MODE", "v4"),
-		ECHProxyStartAttempts: getEnvInt("PEERDRIVE_ECH_PROXY_START_ATTEMPTS", 3),
+		ECHProxyEnable: getEnvBool("PEERDRIVE_ECH_PROXY_ENABLE", false),
+		ECHProxyIPMode: getEnv("PEERDRIVE_ECH_PROXY_IP_MODE", "v4"),
 
 		RateLimitRPS:     getEnvFloat("PEERDRIVE_RATE_LIMIT_RPS", 30),
 		MaxJSONBodyBytes: getEnvInt64("PEERDRIVE_MAX_JSON_BODY_BYTES", 1*1024*1024), // JSON body cap (DoS hardening)

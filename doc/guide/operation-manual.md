@@ -218,34 +218,23 @@ npm run build && npm run preview
 | `PEERDRIVE_BT_DHT_ENABLE` | `true` | BT DHT |
 | `PEERDRIVE_IPFS_GATEWAY_ENABLE` | `true` | IPFS 网关 |
 | `PEERDRIVE_SWAGGER` | `on` | 是否挂 `/swagger` |
-| `PEERDRIVE_ECH_PROXY_ENABLE` | `false` | **ech-proxy 可选模块总开关，默认关**：开后 `pbs.twimg.com` 改写为 `twimg-pbs.l.moonchan.xyz:8443` 经本地 ech-proxy 出网，需要同时配 `PEERDRIVE_URL_SOURCE_TEMPLATE` |
-| `PEERDRIVE_ECH_PROXY_ADDR` | `127.0.0.1:8443` | 子进程监听地址（端口冲突会启动失败，不静默换端口） |
-| `PEERDRIVE_ECH_PROXY_INSTALL_DIR` | 空（=`<PEERDRIVE_STORAGE>/ech-proxy`） | 下载与校验文件存放位置 |
-| `PEERDRIVE_ECH_PROXY_VERSION` | `v1.3.0` | GitHub release 版本 |
-| `PEERDRIVE_ECH_PROXY_SKIP_TLS` | `true` | 跳过本地自签证书校验（信任模型见本节末尾） |
-| `PEERDRIVE_IWARA_ENTRY_SKIP_TLS` | `true` | iwara 模块的 ech-proxy entry 跳过自签证书校验（同上信任模型） |
-| `PEERDRIVE_ECH_PROXY_IP_MODE` | `v4` | 传给 ech-proxy 的 `-ip-mode`（`auto`/`v4`/`v6`） |
+| `PEERDRIVE_ECH_PROXY_ENABLE` | `false` | **twimg ECH 可选模块总开关，默认关**：开后 `pbs.twimg.com` 经进程内 ECH 域前置出网（`cloudflare-ech.com`，真实 host 加密在 ClientHello 内），需要同时配 `PEERDRIVE_URL_SOURCE_TEMPLATE` |
+| `PEERDRIVE_ECH_PROXY_IP_MODE` | `v4` | ECH 出口 IP 族（`auto`/`v4`/`v6`/空） |
+| `PEERDRIVE_IWARA_ENABLE` | `false` | **iwara ECH 可选模块总开关，默认关**：开后 `iwara.tv` 经进程内 ECH 出网 |
+| `PEERDRIVE_IWARA_COOKIE` | 空 | iwara 登录 cookie；留空 = 匿名（仅公开内容） |
 
-> ech-proxy 模块是**下载即运行**：节点自己从 GitHub release 拉 exe + `checksums.txt`，
-> 校验不过 / 拉不到 / 端口被占 / 起不来，一律启动报错——**不会**悄悄退回直连 pbs.twimg.com。
-> 关掉开关时行为与无此模块的节点完全一致（不下载、不起子进程、不改写 URL）。
+> ech-proxy 模块是**进程内 ECH**（PR #376 起）：请求直接经 `internal/echcore`
+> 域前置到 `cloudflare-ech.com`，真实目标 host 加密在 TLS ClientHello 内。
+> 没有本地监听、没有子进程、没有自签证书，因此也没有任何 `InsecureSkipVerify`
+> 跳过——上游证书仍按系统根校验。关掉开关时行为与无此模块的节点完全一致
+> （不配置 ECH 出口、不走 iwara 代码路径）。
 >
-> **和 iwara 模块的端口冲突**：`PEERDRIVE_IWARA_ENABLE=true` 的 iwara 模块会各起一个
-> ech-proxy 实例，绑定 `127.0.0.1:<PEERDRIVE_IWARA_ECH_PROXY_PORT>`（host 写死 127.0.0.1）。
-> 两个模块默认都是 8443，同时开启会在 `config.Validate()` 直接报错（提示改哪一个的地址）。
-> 想让两个都跑：把其中一个挪到别的端口，例如
-> `PEERDRIVE_ECH_PROXY_ADDR=127.0.0.1:8444` 或 `PEERDRIVE_IWARA_ECH_PROXY_PORT=8444`。
->
-> **ech-proxy entry 的 TLS 信任模型**（`PEERDRIVE_ECH_PROXY_SKIP_TLS` /
-> `PEERDRIVE_IWARA_ENTRY_SKIP_TLS`，均默认 `true`）：两个 ech-proxy 模块把出网请求改写到
-> **本地** entry（`127.0.0.1:<port>`，host 写死 loopback，不对外暴露），entry 的自签证书
-> 不在系统信任库里，所以默认跳过证书链校验。威胁边界：能拦截这条 TLS 的进程已经在同一台
-> 机器上，威胁强度高于网络中间人，跳过校验不新增网络攻击面——这是 gosec G402 的定案（方案 B：
-> 保留默认 + 启动日志明确告警，不做证书 pinning）。启动时无论开关如何都会打印
-> `TLS verification is DISABLED / ENABLED` 一行，便于在日志里确认当前姿态。
-> **什么时候设 `false`**：自己持有 `*.l.moonchan.xyz` 并拿到 CA 签发的证书时，两个变量都设
-> `false` 即可启用完整链校验（此时证书链不合法会直接连接失败，不会静默放行）。
-> 默认不做证书 pinning，因此 ech-proxy 升级换了新证书也不会导致功能中断。
+> 历史上这里曾是「下载 exe + 校验 sha256 + 拉起子进程 + 绑 127.0.0.1:8443 +
+> 自签证书」的形态，需要配 `PEERDRIVE_ECH_PROXY_ADDR` / `_INSTALL_DIR` /
+> `_VERSION` / `_ENTRY_HOST` / `_SKIP_TLS` / `_START_ATTEMPTS` 与
+> `PEERDRIVE_IWARA_ECH_PROXY_PORT`。这些变量在 PR #376 已全部删除：本地
+> server 已不存在，留着只会静默忽略。`Validate()` 里对应的 127.0.0.1:8443
+> 端口冲突检查也一并移除。
 
 全部变量见 [`doc/guide/single-binary-guide.md`](single-binary-guide.md) §5
 与 `back/internal/config/config.go`。

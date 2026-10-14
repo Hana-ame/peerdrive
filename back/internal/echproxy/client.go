@@ -3,17 +3,16 @@ package echproxy
 import (
 	"context"
 	"crypto/sha1"
-	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
+
+	"peerdrive/internal/echcore"
 )
 
 // xVersionSecret is the X-Version signing constant used by the iwara API
@@ -41,28 +40,25 @@ const xVersionSecret = "mSvL05GfEmeEmsEYfGCnVpEjYgTJraJN"
 //	GET "https:" + ResolutionInfo.Src.Download  → the video bytes
 //
 // The download URL itself is a Cloudflare-fronted CDN URL; it is returned
-// as-is so callers can decide whether to fetch it directly or through
-// ech-proxy (see Rewriter).
+// as-is so callers can decide how to fetch it. Requests sent by this client
+// always go through in-process ECH domain fronting (internal/echcore).
 type IwaraClient struct {
 	cfg    *ModuleConfig
 	client *http.Client
 	// baseURL is the API base URL (default "https://api.iwara.tv"). Override
 	// for testing.
 	baseURL string
-	// RewriteHosts, when non-nil, rewrites iwara.tv hosts in every request
-	// URL before sending (routes the API calls through the local ech-proxy).
-	// nil = direct API access (the default when ech-proxy is not running).
-	RewriteHosts *Rewriter
 }
 
 // NewIwaraClient builds an IwaraClient from a ModuleConfig.
 //
-// The HTTP client is constructed with the iwara User-Agent and a TLS config
-// that skips certificate verification for the ech-proxy entry host
-// (l.moonchan.xyz), which is only reachable through the local proxy whose
-// certificate is not in the system trust store. Direct api.iwara.tv access
-// (no ech-proxy) keeps the default system roots, because that host is
-// Cloudflare-fronted with a valid cert.
+// The HTTP client routes every request through the in-process ECH
+// domain-fronting client (internal/echcore). That is not an optimisation but
+// a requirement: api.iwara.tv is Cloudflare-fronted and blocked from mainland
+// China, so a direct dial times out after the caller's deadline. ECH sends the
+// request to cloudflare-ech.com with the true target encrypted inside the
+// ClientHello, and the upstream certificate is verified against the default
+// system roots — no certificate verification is skipped anywhere.
 func NewIwaraClient(cfg *ModuleConfig) *IwaraClient {
 	if cfg == nil {
 		def := NewModuleConfig()
@@ -71,7 +67,7 @@ func NewIwaraClient(cfg *ModuleConfig) *IwaraClient {
 	cfg.Normalize()
 	return &IwaraClient{
 		cfg:     cfg,
-		client:  newEchProxyHTTPClient(cfg.ListenAddr, cfg.EntrySkipTLS),
+		client:  newECHHTTPClient(),
 		baseURL: "https://api.iwara.tv",
 	}
 }
@@ -91,114 +87,30 @@ func (c *IwaraClient) SetHTTPClient(cl *http.Client) {
 	}
 }
 
-// SetRewriter enables routing all iwara API requests through the local
-// ech-proxy by rewriting the request URL host. Pass nil to disable.
-func (c *IwaraClient) SetRewriter(r *Rewriter) {
-	c.RewriteHosts = r
-}
-
-// newEchProxyHTTPClient builds an http.Client that:
-//   - dials 127.0.0.1:<port> (the local ech-proxy) instead of the real host,
-//     setting the TLS ServerName to the original URL host (SNI = entry host);
-//   - skips TLS chain verification only for the ech-proxy entry host suffix, and
-//     only when entrySkipTLS is true — the check is scoped inside DialTLSContext
-//     by host, never applied transport-wide.
+// newECHHTTPClient builds an http.Client whose every request goes through the
+// in-process ECH domain-fronting client (internal/echcore).
 //
-// When the URL host is not an ech-proxy entry host (e.g. api.iwara.tv
-// accessed directly), the default transport behaviour is preserved: system
-// certificate roots, no host rewrite.
-//
-// entrySkipTLS is default true (ModuleConfig.EntrySkipTLS, exposed as
-// PEERDRIVE_IWARA_ENTRY_SKIP_TLS) because the entry is a local loopback proxy
-// serving a self-signed cert that is not in the system trust store. Setting it
-// false requires a chain-issued entry cert and enforces full verification.
-// Trust model: doc/guide/operation-manual.md §6.
-func newEchProxyHTTPClient(listenAddr string, entrySkipTLS bool) *http.Client {
-	host, port, err := net.SplitHostPort(listenAddr)
-	if err != nil || port == "" {
-		port = DefaultEntryPort
-	}
-	dialAddr := net.JoinHostPort(host, port)
-
-	tr := &http.Transport{
-		ForceAttemptHTTP2: true,
-		MaxIdleConns:      32,
-		IdleConnTimeout:   90 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
-		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			// addr is "<host>:<port>" as the caller resolved it. If the host
-			// is an ech-proxy entry host, redirect the TCP dial to the local
-			// proxy but keep the SNI as the entry host (ech-proxy presents a
-			// cert for *.l.moonchan.xyz).
-			connHost, connPort, splitErr := net.SplitHostPort(addr)
-			if splitErr != nil {
-				connHost = addr
-				connPort = ""
-			}
-			if isEchProxyEntryHost(connHost, DefaultEntrySuffix) {
-				// Trust model (deliberate, owner-approved in the G402 triage): the entry
-				// host is rewritten to the *local* ech-proxy (dialAddr, loopback only),
-				// which presents a self-signed cert for *.l.moonchan.xyz. The TCP
-				// endpoint is therefore only reachable by another process on this host,
-				// which already has a stronger foothold than intercepting this TLS
-				// handshake, so skipping chain verification here does not open a network
-				// attack surface. entrySkipTLS=false restores full verification for a
-				// deployment that owns the entry domain with a chain-issued cert.
-				raw, dialErr := net.DialTimeout("tcp", dialAddr, 10*time.Second)
-				if dialErr != nil {
-					return nil, fmt.Errorf("echproxy dial %s: %w", dialAddr, dialErr)
-				}
-				return tls.Client(raw, &tls.Config{
-					ServerName: connHost,
-					// Only ever true for the loopback ech-proxy entry; direct upstream
-					// connections below keep system-root verification.
-					InsecureSkipVerify: entrySkipTLS, // #nosec G402 -- local loopback proxy, self-signed by design (see comment above)
-					MinVersion:         tls.VersionTLS12,
-				}), nil
-			}
-			// Direct upstream: normal dial, system roots.
-			d := &net.Dialer{Timeout: 10 * time.Second}
-			raw, dialErr := d.DialContext(ctx, network, net.JoinHostPort(connHost, connPort))
-			if dialErr != nil {
-				return nil, dialErr
-			}
-			return tls.Client(raw, &tls.Config{
-				ServerName: connHost,
-				MinVersion: tls.VersionTLS12,
-			}), nil
-		},
-	}
-
+// The previous implementation dialed 127.0.0.1:<port> instead of the real
+// host and set InsecureSkipVerify=true for the loopback proxy's self-signed
+// certificate. That listener is gone: ech-proxy is no longer spawned as a
+// subprocess, so there is no local server, no self-signed certificate, and no
+// verification to skip. The TLS handshake is performed by echcore against
+// cloudflare-ech.com's own ECH configuration, and the upstream certificate is
+// checked against the default system roots.
+func newECHHTTPClient() *http.Client {
 	return &http.Client{
-		Transport: tr,
+		Transport: echcore.RoundTripper{},
 		Timeout:   0, // no overall timeout: large file downloads stream
 	}
 }
 
-// isEchProxyEntryHost reports whether host belongs to the ech-proxy entry
-// namespace (e.g. "iwara-api.l.moonchan.xyz" ends with ".l.moonchan.xyz").
-func isEchProxyEntryHost(host, entrySuffix string) bool {
-	return strings.HasSuffix(strings.ToLower(host), "."+entrySuffix)
-}
-
 // Do sends an HTTP request to an iwara URL, injecting the iwara headers
-// (Origin/X-Site/Referer) and the user's login cookie. The request URL is
-// rewritten through the local ech-proxy when c.RewriteHosts is set.
+// (Origin/X-Site/Referer) and the user's login cookie. The URL is sent as-is:
+// ECH domain fronting reaches iwara.tv without any host rewrite.
 func (c *IwaraClient) Do(ctx context.Context, method, rawURL string, body io.Reader) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("iwara: new request: %w", err)
-	}
-
-	// Rewire the host through the local ech-proxy (optional).
-	if c.RewriteHosts != nil {
-		rewritten, _ := c.RewriteHosts.Rewrite(req.URL.String())
-		if rewritten != req.URL.String() {
-			if nu, perr := url.Parse(rewritten); perr == nil {
-				req.URL = nu
-				req.Host = nu.Host // update the Host header to match
-			}
-		}
 	}
 
 	// Standard iwara headers (mirror the ech-proxy upstream.json headers).
@@ -222,12 +134,12 @@ func (c *IwaraClient) Do(ctx context.Context, method, rawURL string, body io.Rea
 // VideoInfo is the response of GET https://api.iwara.tv/video/{id}.
 // Only the fields the module needs are declared.
 type VideoInfo struct {
-	ID      string `json:"id"`
-	Slug    string `json:"slug"`
-	Title   string `json:"title"`
-	Status  string `json:"status"`
-	Rating  string `json:"rating"`
-	File    struct {
+	ID     string `json:"id"`
+	Slug   string `json:"slug"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Rating string `json:"rating"`
+	File   struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 		Path string `json:"path"`
@@ -350,16 +262,8 @@ func (c *IwaraClient) fetchResolutions(ctx context.Context, info VideoInfo) ([]R
 	if err != nil {
 		return nil, fmt.Errorf("iwara: resolution request: %w", err)
 	}
-	// Send the resolution request through the same path (cookie + headers +
-	// optional ech-proxy rewrite).
-	if c.RewriteHosts != nil {
-		rewritten, _ := c.RewriteHosts.Rewrite(xreq.URL.String())
-		if rewritten != xreq.URL.String() {
-			if nu, perr := url.Parse(rewritten); perr == nil {
-				xreq.URL = nu
-			}
-		}
-	}
+	// Same egress as the API calls above (ECH + cookie + iwara headers); the
+	// URL is the protocol-relative fileUrl as returned by the API, sent as-is.
 	for k, v := range IwaraHeaders(c.cfg.IWARAHost) {
 		xreq.Header.Set(k, v)
 	}

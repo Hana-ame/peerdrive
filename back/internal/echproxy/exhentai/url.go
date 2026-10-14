@@ -38,10 +38,6 @@ type Route struct {
 	Cookie string
 	// BackendHost is the rewritten authority (without port), for logging.
 	BackendHost string
-	// LocalAddr overrides the TCP dial target. Empty = resolve BackendHost.
-	LocalAddr string
-	// SkipTLS disables certificate chain verification for this backend.
-	SkipTLS bool
 }
 
 // Router resolves request URLs against the live snapshot. It is deliberately a
@@ -175,8 +171,6 @@ func (r *Router) Route(raw string) (*Route, error) {
 		Headers:     b.Headers,
 		Cookie:      b.Cookie,
 		BackendHost: b.Host,
-		LocalAddr:   b.LocalAddr,
-		SkipTLS:     b.SkipTLS,
 	}, nil
 }
 
