@@ -8,6 +8,7 @@ package signalserver
 
 import (
 	"strings"
+	"time"
 
 	"github.com/Hana-ame/go-peerserver/tracker"
 )
@@ -147,5 +148,21 @@ func WithRateLimit(cfg RateLimitConfig) Option {
 func WithTracker(tr *tracker.Tracker) Option {
 	return func(s *Server) {
 		s.tracker = tr
+	}
+}
+
+// WithPingInterval sets the server's proactive WS Ping interval
+// (RFC 6455 §5.5.2). The default is 20s: with a 60s read deadline, up to 3
+// missed pings is tolerated before the connection is dropped, and 20s is
+// comfortably above the peerjs default heartbeat interval (5s) so protocol-
+// level pings never interfere with the legacy text-frame heartbeat from older
+// clients.
+//
+// Set to a shorter value in tests to compress the timeline.
+func WithPingInterval(d time.Duration) Option {
+	return func(s *Server) {
+		if d > 0 {
+			s.pingInterval = d
+		}
 	}
 }

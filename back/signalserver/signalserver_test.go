@@ -1060,3 +1060,157 @@ func TestAnnounceRejectsReservedPeerID(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode,
 		"announce with valid peerId must succeed")
 }
+
+
+// TestSignalServerSendsPingOnInterval verifies the RFC 6455 §5.5.2 keep-alive
+// by intercepting server pings via the client's PingHandler. (The v1 test using
+// NextReader is kept below for reference but does not work because gorilla's
+// NextReader only returns data frames — control frames like Ping/Pong are
+// processed internally by advanceFrame and never reach the caller.)
+//
+// Discovery background: 2026-10-14 P0-1 refactor — the server proactively
+// sends WS Ping control frames on a fixed interval. A conforming client
+// (browsers, `ws`, gorilla) auto-pongs at the protocol layer, and the
+// server's PongHandler keeps the read deadline fresh.
+func TestSignalServerSendsPingOnInterval(t *testing.T) {
+	_, hs := testServerWithOpts(t, WithPingInterval(100*time.Millisecond))
+	conn := dialWS(t, hs, "node-ping-v2", "tok-ping-v2")
+	defer conn.Close()
+
+	// Read the initial OPEN message
+	require.Equal(t, Message{Type: "OPEN"}, readMsg(t, conn))
+
+	// Install a client-side PingHandler that records the ping and sends a Pong.
+	// (Gorilla's default PingHandler auto-pongs but is not observable; this one
+	// signals a channel so the test can wait for it.)
+	pingReceived := make(chan struct{}, 10)
+	conn.SetPingHandler(func(message string) error {
+		select {
+		case pingReceived <- struct{}{}:
+		default:
+		}
+		// Manually pong (the default handler is overridden; RFC 6455 §5.5.2
+		// requires a Pong reply, so we send it explicitly).
+		return conn.WriteControl(
+			websocket.PongMessage, []byte(message), time.Now().Add(5*time.Second))
+	})
+
+	// The PingHandler is only invoked while a read is in progress (gorilla
+	// processes control frames in advanceFrame, which is called from
+	// NextReader/ReadMessage). Start a reader goroutine so pings are actually
+	// dispatched to the handler.
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	go func() {
+		for {
+			_, _, err := conn.NextReader()
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Wait for at least one ping from the server.
+	select {
+	case <-pingReceived:
+		// Got a ping, good.
+	case <-time.After(2 * time.Second):
+		t.Fatal("server must send a WS Ping within 2s of a fresh dial")
+	}
+}
+
+// TestSignalServerPongsIncomingClientPing verifies the server's default
+// gorilla PingHandler auto-pongs a client-sent Ping (RFC 6455 §5.5.2).
+// (The v1 test is kept for reference but does not work for the same reason as
+// the v2 above — control frames are not surfaced by NextReader.)
+func TestSignalServerPongsIncomingClientPing(t *testing.T) {
+
+	_, hs := testServer(t)
+	conn := dialWS(t, hs, "node-cping-v2", "tok-cping-v2")
+	defer conn.Close()
+
+	// Drain the initial OPEN
+	readMsg(t, conn)
+
+	// Client sends a Ping; the server's default gorilla PingHandler auto-pongs
+	require.NoError(t, conn.WriteControl(
+		websocket.PingMessage, []byte("hello"), time.Now().Add(5*time.Second)))
+
+	// Install a client-side PongHandler that records the pong.
+	pongReceived := make(chan struct{}, 1)
+	conn.SetPongHandler(func(string) error {
+		select {
+		case pongReceived <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+
+	// The server should auto-pong. Wait for it.
+	// We need to trigger a read to process the pong; use ReadMessage in a
+	// goroutine. Actually, the PongHandler is called from within the read
+	// loop, so we need to have a read in progress. Let's set a deadline and
+	// try to read — the pong should be processed before the deadline fires.
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	go func() {
+		for {
+			_, _, err := conn.NextReader()
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-pongReceived:
+		// Got a pong, good.
+	case <-time.After(3 * time.Second):
+		t.Fatal("server must auto-pong a client Ping (RFC 6455 §5.5.2)")
+	}
+}
+
+// TestSignalPingPongKeepsConnectionAliveWithoutHeartbeat verifies the
+// connection stays alive when the client auto-pongs server pings, without
+// sending any application-layer HEARTBEAT text frame.
+func TestSignalPingPongKeepsConnectionAliveWithoutHeartbeat(t *testing.T) {
+	_, hs := testServerWithOpts(t, WithPingInterval(20*time.Millisecond))
+	conn := dialWS(t, hs, "node-alive-v2", "tok-alive-v2")
+	defer conn.Close()
+
+	// Read the initial OPEN message
+	readMsg(t, conn)
+
+	// Wait 300ms; with 20ms pingInterval, the server should have sent ~15 pings.
+	// If the client auto-pongs each, the connection stays alive.
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify the connection is still alive by reading a message (the server
+	// doesn't send data messages, so we expect a read timeout). Instead,
+	// just verify that a ping still arrives after the sleep.
+	pingReceived := make(chan struct{}, 10)
+	conn.SetPingHandler(func(message string) error {
+		select {
+		case pingReceived <- struct{}{}:
+		default:
+		}
+		return conn.WriteControl(
+			websocket.PongMessage, []byte(message), time.Now().Add(5*time.Second))
+	})
+
+	// Trigger a read to process any pending pings.
+	conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	go func() {
+		for {
+			_, _, err := conn.NextReader()
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-pingReceived:
+		// Connection is alive and pings are flowing.
+	case <-time.After(1 * time.Second):
+		t.Fatal("connection should still be alive after 300ms without HEARTBEAT")
+	}
+}

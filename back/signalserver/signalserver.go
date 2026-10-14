@@ -29,6 +29,7 @@ type Server struct {
 	path           string
 	queueTTL       time.Duration   // offline queue TTL (used for OFFER expiry)
 	heartbeatTTL   time.Duration   // discovery heartbeat expiry time
+	pingInterval   time.Duration   // RFC 6455 proactive Ping interval (default 20s)
 	tokenWhitelist map[string]bool // allowed signaling tokens (nil/empty = unrestricted)
 	// corsOrigins is the explicit CORS allow-list (nil/empty = wildcard "*", the historical behavior).
 	// See WithCORSOrigins and allowCORS for why the default stays permissive.
@@ -70,6 +71,7 @@ func NewServer(key string, opts ...Option) *Server {
 		path:         "",
 		queueTTL:     30 * time.Second,
 		heartbeatTTL: 90 * time.Second,
+		pingInterval: 20 * time.Second,
 		startedAt:    time.Now(),
 		clients:      make(map[string]*client),
 		queues:       make(map[string][]queuedMsg),
