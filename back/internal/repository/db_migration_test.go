@@ -17,15 +17,15 @@ func TestSchemaMigrationVersionTracking(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = CloseHandle(handle) })
 
-		// PRAGMA user_version must match latest migration version (9)
+		// PRAGMA user_version must match latest migration version (10)
 		ver, err := GetUserVersion(handle)
 		require.NoError(t, err)
-		require.Equal(t, 9, ver, "fresh DB must have user_version = 9")
+		require.Equal(t, 10, ver, "fresh DB must have user_version = 10")
 
-		// schema_migrations table must contain all 9 migrations
+		// schema_migrations table must contain all 10 migrations
 		var count int
 		err = handle.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count)
-		require.Equal(t, 9, count, "fresh DB must record all 9 applied migrations")
+		require.Equal(t, 10, count, "fresh DB must record all 10 applied migrations")
 
 		// Issue #277: File databases must use WAL journal mode
 		var journalMode string
@@ -75,12 +75,12 @@ func TestSchemaMigrationVersionTracking(t *testing.T) {
 
 		ver, err := GetUserVersion(handle2)
 		require.NoError(t, err)
-		require.Equal(t, 9, ver)
+		require.Equal(t, 10, ver)
 
 		var count int
 		err = handle2.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count)
 		require.NoError(t, err)
-		require.Equal(t, 9, count)
+		require.Equal(t, 10, count)
 	})
 
 	t.Run("MigrationFailureReturnsErrorNotSwallowed", func(t *testing.T) {

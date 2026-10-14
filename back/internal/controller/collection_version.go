@@ -70,28 +70,9 @@ func CommitCollection(c *gin.Context) {
 		return
 	}
 
-	// 4. Update current_hash
-	if err := collSvc.UpdateCurrentHash(col.ID, hash); err != nil {
-		writeInternalError(c, err)
-		return
-	}
-
-	// 5. Original version snapshot logic (preserves history)
-	versions, err := collSvc.VersionLog(col.ID)
+	// 4. Atomically record version snapshot, copy entries, and update current_hash in one transaction
+	_, verNum, err := collSvc.CommitSnapshotTx(col.ID, req.CommitMessage, hash)
 	if err != nil {
-		writeInternalError(c, err)
-		return
-	}
-	var parentID *int
-	if len(versions) > 0 {
-		parentID = &versions[0].ID
-	}
-	verID, verNum, err := collSvc.CreateVersion(col.ID, req.CommitMessage, parentID)
-	if err != nil {
-		writeInternalError(c, err)
-		return
-	}
-	if err := collSvc.SnapshotEntries(verID, col.ID); err != nil {
 		writeInternalError(c, err)
 		return
 	}
@@ -167,19 +148,29 @@ func RollbackCollection(c *gin.Context) {
 		return
 	}
 
-	// Regenerate CID
+	// Regenerate CID while preserving multi-source Providers (URL / ECH / SHA256)
 	entries, err := collSvc.ListEntries(col.ID)
-	if err == nil {
-		anonEntries := make([]model.AnonCollectionEntry, 0, len(entries))
-		for _, e := range entries {
-			anonEntries = append(anonEntries, model.AnonCollectionEntry{Path: e.Path, Hash: e.FileHash})
-		}
-		anonColl := model.NewAnonCollection("", anonEntries, nil)
-		storageDir := c.MustGet("storageDir").(string)
-		hash, err := collSvc.SaveAnon(anonColl, storageDir)
-		if err == nil {
-			collSvc.UpdateCurrentHash(col.ID, hash)
-		}
+	if err != nil {
+		writeInternalError(c, err)
+		return
+	}
+	anonEntries := make([]model.AnonCollectionEntry, 0, len(entries))
+	for _, e := range entries {
+		anonEntries = append(anonEntries, model.AnonCollectionEntry{
+			Path:      e.Path,
+			Providers: e.BuildProviders(),
+		})
+	}
+	anonColl := model.NewAnonCollection("", anonEntries, nil)
+	storageDir := c.MustGet("storageDir").(string)
+	hash, err := collSvc.SaveAnon(anonColl, storageDir)
+	if err != nil {
+		writeInternalError(c, err)
+		return
+	}
+	if err := collSvc.UpdateCurrentHash(col.ID, hash); err != nil {
+		writeInternalError(c, err)
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "rolled back"})

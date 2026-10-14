@@ -339,6 +339,56 @@ func SnapshotVersionEntries(versionID, collectionID int) error {
 	return err
 }
 
+// CommitCollectionSnapshotTx atomically creates a new version, snapshots all workspace entries,
+// and updates collections.current_hash within a single SQLite transaction.
+func CommitCollectionSnapshotTx(collectionID int, commitMsg, snapshotHash string) (int, int, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+
+	var maxVer int
+	var parentID sql.NullInt64
+	err = tx.QueryRow(`SELECT id, version_number FROM collection_versions WHERE collection_id = ? ORDER BY version_number DESC LIMIT 1`,
+		collectionID).Scan(&parentID, &maxVer)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, 0, err
+	}
+	newVer := maxVer + 1
+
+	var res sql.Result
+	if parentID.Valid {
+		res, err = tx.Exec(`INSERT INTO collection_versions (collection_id, version_number, commit_message, parent_version_id) VALUES (?, ?, ?, ?)`,
+			collectionID, newVer, commitMsg, int(parentID.Int64))
+	} else {
+		res, err = tx.Exec(`INSERT INTO collection_versions (collection_id, version_number, commit_message) VALUES (?, ?, ?)`,
+			collectionID, newVer, commitMsg)
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	verID64, err := res.LastInsertId()
+	if err != nil {
+		return 0, 0, err
+	}
+	verID := int(verID64)
+
+	if _, err := tx.Exec(`INSERT INTO version_entries (version_id, path, file_hash, providers_json) SELECT ?, path, file_hash, COALESCE(providers_json, '') FROM collection_entries WHERE collection_id = ?`,
+		verID, collectionID); err != nil {
+		return 0, 0, err
+	}
+
+	if _, err := tx.Exec(`UPDATE collections SET current_hash = ? WHERE id = ?`, snapshotHash, collectionID); err != nil {
+		return 0, 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return verID, newVer, nil
+}
+
 // GetVersionLog returns the collection's version history, ordered by version number descending.
 // M11: No LIMIT → unlimited version history full-table materialization; limit to 1000 (UI only shows recent versions for rollback).
 func GetVersionLog(collectionID int) ([]model.CollectionVersion, error) {
