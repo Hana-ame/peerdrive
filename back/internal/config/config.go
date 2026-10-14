@@ -4,6 +4,7 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -15,9 +16,10 @@ import (
 // Self-hosted deployments override via PEERDRIVE_PEERJS_HOST/PORT/KEY and
 // PEERDRIVE_DISCOVER_URL (e.g. peersignal.moonchan.xyz with key pd-signal-...).
 const (
-	DefaultSignalHost = "0.peerjs.com"
-	DefaultSignalPort = "9000"
-	DefaultSignalKey  = "peerjs"
+	DefaultSignalHost  = "0.peerjs.com"
+	DefaultSignalPort  = "9000"
+	DefaultSignalKey   = "peerjs"
+	DefaultPeerJSURL   = "https://0.peerjs.com"
 	// DefaultDiscoverURL is empty because the PeerJS public cloud (0.peerjs.com)
 	// has no discovery API — discovery only works with a self-hosted signaling
 	// server that implements /discover/nodes. Self-hosted deployments set
@@ -88,15 +90,22 @@ type Config struct {
 	WebRTCTURNPassword string
 
 	PeerJSEnable bool // PEERDRIVE_PEERJS_ENABLE, default true
-	// Defaults to the PeerJS public cloud 0.peerjs.com:9000 (key "peerjs").
-	// Self-hosted deployments override via PEERDRIVE_PEERJS_HOST/PORT/KEY.
-	// Environment variables can still override (for self-hosting / internal debugging), but tutorials
-	// don't teach changing this.
-	PeerJSHost   string // PEERDRIVE_PEERJS_HOST, default 0.peerjs.com
-	PeerJSPort   string // PEERDRIVE_PEERJS_PORT, default 9000 (DefaultSignalPort); 0.peerjs.com actually serves on 443 — Issue #372
+	// PeerJSURL is the signaling server URL (PEERDRIVE_PEERJS_URL, default
+	// https://0.peerjs.com). The URL may optionally include a port
+	// (https://domain:port) or omit it for the default port (443 for HTTPS,
+	// 80 for HTTP). This replaces the separate PEERDRIVE_PEERJS_HOST/PORT/SECURE
+	// env vars; the old vars are no longer read (breaking change, #377).
+	//
+	// Derived fields (populated from the URL, do not set directly):
+	//   - PeerJSHost: hostname (no scheme, no port)
+	//   - PeerJSPort: port (empty if default for scheme)
+	//   - PeerJSSecure: true if scheme is https/wss
+	PeerJSURL string // PEERDRIVE_PEERJS_URL, default https://0.peerjs.com
+	PeerJSHost   string // derived from PeerJSURL
+	PeerJSPort   string // derived from PeerJSURL
 	PeerJSKey    string // PEERDRIVE_PEERJS_KEY, default "peerjs" (public cloud) or pd-signal-... (self-hosted)
 	PeerJSID     string // PEERDRIVE_PEERJS_ID, empty generates peerdrive-<random>
-	PeerJSSecure bool   // PEERDRIVE_PEERJS_SECURE, default true
+	PeerJSSecure bool   // derived from PeerJSURL scheme
 	PeerJSPeers  string // PEERDRIVE_PEERJS_PEERS, comma-separated peer node ids for auto-interconnection on startup
 
 	// PeerJSXOREnable 数据面 XOR 混淆总开关（PEERDRIVE_PEERJS_XOR_ENABLE,
@@ -472,6 +481,7 @@ func DefaultConfig() *Config {
 		WebRTCTURNUsername:       "",
 		WebRTCTURNPassword:       "",
 		PeerJSEnable:             true,
+		PeerJSURL:                DefaultPeerJSURL,
 		PeerJSHost:               DefaultSignalHost,
 		PeerJSPort:               DefaultSignalPort,
 		PeerJSKey:                DefaultSignalKey,
@@ -586,12 +596,10 @@ func Load() *Config {
 		WebRTCTURNPassword: getEnv("PEERDRIVE_WEBRTC_TURN_PASS", ""),
 
 		PeerJSEnable: getEnvBool("PEERDRIVE_PEERJS_ENABLE", true),
-		PeerJSHost:   getEnv("PEERDRIVE_PEERJS_HOST", DefaultSignalHost),
-		PeerJSPort:   getEnv("PEERDRIVE_PEERJS_PORT", DefaultSignalPort),
-		PeerJSKey:    getEnv("PEERDRIVE_PEERJS_KEY", DefaultSignalKey),
-		PeerJSID:     getEnv("PEERDRIVE_PEERJS_ID", ""),
-		PeerJSSecure: getEnvBool("PEERDRIVE_PEERJS_SECURE", true),
-		PeerJSPeers:  getEnv("PEERDRIVE_PEERJS_PEERS", ""),
+		PeerJSURL:   getEnv("PEERDRIVE_PEERJS_URL", DefaultPeerJSURL),
+		PeerJSKey:   getEnv("PEERDRIVE_PEERJS_KEY", DefaultSignalKey),
+		PeerJSID:    getEnv("PEERDRIVE_PEERJS_ID", ""),
+		PeerJSPeers: getEnv("PEERDRIVE_PEERJS_PEERS", ""),
 		// 注意：本块列对齐是 deployconsistency 测试钉死的格式（逐字节 grep），
 		// 新行只能追加、不能重排既有行的列（C-8）。
 		PeerJSXOREnable: getEnvBool("PEERDRIVE_PEERJS_XOR_ENABLE", false),
@@ -710,6 +718,32 @@ func Load() *Config {
 		cfg.DiscoverMode = "off"
 		cfg.DiscoverPresence = false
 		cfg.ShareEnable = false
+	}
+
+	// Parse PeerJSURL into derived Host/Port/Secure fields (#377).
+	// The old PEERDRIVE_PEERJS_HOST/PORT/SECURE env vars are no longer read;
+	// the URL is the single source of truth.
+	if cfg.PeerJSURL != "" {
+		u, err := url.Parse(cfg.PeerJSURL)
+		if err == nil && u.Host != "" {
+			cfg.PeerJSHost = u.Hostname()
+			if u.Port() != "" {
+				cfg.PeerJSPort = u.Port()
+			} else {
+				// Default ports: 443 for https, 80 for http
+				switch u.Scheme {
+				case "https", "wss":
+					cfg.PeerJSPort = "443"
+					cfg.PeerJSSecure = true
+				case "http", "ws":
+					cfg.PeerJSPort = "80"
+					cfg.PeerJSSecure = false
+				default:
+					cfg.PeerJSPort = DefaultSignalPort
+					cfg.PeerJSSecure = true
+				}
+			}
+		}
 	}
 
 	return cfg
