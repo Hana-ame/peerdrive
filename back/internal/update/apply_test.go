@@ -29,6 +29,13 @@ func TestApplyToSuccess(t *testing.T) {
 	defer srv.Close()
 
 	current := newFakeCurrent(t, []byte("old-binary"))
+	// Windows 没有 POSIX 权限位（写 0755 实际得到 0666），所以不能断言绝对
+	// 权限值，改断言「替换后权限与原文件一致」——这才是 chmod 保权要守的
+	// 不变量，且在所有平台成立。
+	origMode, err := os.Stat(current)
+	if err != nil {
+		t.Fatal(err)
+	}
 	asset := &Asset{Name: "peerdrive-test-bin", URL: srv.URL, SHA256: hexDigest(t, newData)}
 
 	if err := applyTo(context.Background(), asset, current); err != nil {
@@ -50,10 +57,10 @@ func TestApplyToSuccess(t *testing.T) {
 	if string(bak) != "old-binary" {
 		t.Fatalf(".bak content = %q, want old-binary", bak)
 	}
-	// 权限保留。
+	// 权限保留：新文件权限与原文件一致。
 	st, err := os.Stat(current)
-	if err != nil || st.Mode().Perm() != 0o755 {
-		t.Fatalf("current mode = %v, %v; want 0755", st.Mode(), err)
+	if err != nil || st.Mode().Perm() != origMode.Mode().Perm() {
+		t.Fatalf("current mode = %v, %v; want %v (same as original)", st.Mode(), err, origMode.Mode().Perm())
 	}
 	// 无残留临时文件。
 	leftover, _ := filepath.Glob(filepath.Join(filepath.Dir(current), ".peerdrive-update-*.tmp"))
