@@ -284,8 +284,14 @@ func TestStartPullCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	// wait until it really starts reading (first chunk written)
-	time.Sleep(50 * time.Millisecond)
+	// 确定性等待首块写入（避免高负载 CI 节点上固定 50ms sleep 尚未进入 OpenStream 的竞态）
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cur, ok := p.Get(job.ID); ok && cur.Received > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if err := p.Cancel(job.ID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
