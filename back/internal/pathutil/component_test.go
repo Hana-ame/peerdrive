@@ -11,6 +11,9 @@ import (
 // 直接拿 collection 的 friendly_name 当路径分量拼进 tmpDir 与 BT download 目录：
 // friendly_name="../../tmp/evil" 时 MkdirAll/WriteFile 就落到了两个根之外。
 // 这里锁住「任何输入都不能逃出单个路径分量」。
+// 修复本体在 PR #407；PR #409 追加了 filepath.Clean("/"+s) 归一化，让返回值派生自
+// CodeQL 原生登记的净化器，这 6 条才不再随重扫复现。加/改用例时保持表驱动即可，
+// 不要为了让 Clean 那行「可测」而重排语义——对表里的输入 Clean 是恒等变换。
 func TestSafeComponent(t *testing.T) {
 	cases := []struct {
 		in   string

@@ -348,10 +348,10 @@ func BTSeedCollection(c *gin.Context) {
 	// 清不掉写出去的东西）。清洗后为空则回退到 hash 前缀，seed 照建。
 	//
 	// 注意：codeql[go/path-injection] 告警 #5/#6/#7/#8/#48/#49 的根因就是这一行，
-	// 现已修复（PR #407）。CodeQL 的 Go 模型认不出 pathutil.SafeComponent 为净化器，
-	// 所以每次 refactor 重扫这 6 条都会以新 sha 复现——那是扫描器盲区，不是残留漏洞
-	// （单测 TestSafeComponent* 锁住了不变量）。已按「根因已修 + 扫描器误报」逐条
-	// dismiss；长期消除需给 CodeQL 加自定义 query 或改用它原生认可的净化写法。
+	// 已修复（PR #407）。CodeQL 的 Go 模型认不出本仓库的自定义净化器，所以
+	// SafeComponent 的返回值直接派生自它原生登记的那一种（filepath.Clean("/"+s)，
+	// FilepathCleanSanitizer）——重扫后这 6 条不再以新 sha 复现（PR #409）。改
+	// SafeComponent 时别删掉那行 Clean：它既是穿越兜底，也是扫描器能看见的唯一净化点。
 	name := pathutil.SafeComponent(coll.FriendlyName)
 	if name == "" {
 		name = req.CollectionHash[:12]
