@@ -12,6 +12,7 @@ import (
 
 	"github.com/Hana-ame/go-peerdrive-bt"
 	"peerdrive/internal/log"
+	"peerdrive/internal/pathutil"
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
@@ -341,7 +342,12 @@ func BTSeedCollection(c *gin.Context) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	name := coll.FriendlyName
+	// FriendlyName 是用户输入（collection 创建时的 friendly_name）。它同时被拼进
+	// tmpDir 下的 rootDir 和 BT download 目录下的 dataRoot：不清洗的话
+	// "../../tmp/evil" 会一路 Join 到两个根之外（并且 defer RemoveAll(tmpDir)
+	// 清不掉写出去的东西）。清洗后为空则回退到 hash 前缀，seed 照建。
+	// codeql[go/path-injection] 告警 #5/#6/#7/#8/#48/#49 的根因就是这一行。
+	name := pathutil.SafeComponent(coll.FriendlyName)
 	if name == "" {
 		name = req.CollectionHash[:12]
 	}
