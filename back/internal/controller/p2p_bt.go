@@ -347,14 +347,16 @@ func BTSeedCollection(c *gin.Context) {
 	// "../../tmp/evil" 会一路 Join 到两个根之外（并且 defer RemoveAll(tmpDir)
 	// 清不掉写出去的东西）。清洗后为空则回退到 hash 前缀，seed 照建。
 	//
-	// 注意：codeql[go/path-injection] 告警 #5/#6/#7/#8/#48/#49 的根因就是这一行，
-	// 现已修复（PR #407）。CodeQL 的 Go 模型认不出 pathutil.SafeComponent 为净化器，
-	// 所以每次 refactor 重扫这 6 条都会以新 sha 复现——那是扫描器盲区，不是残留漏洞
-	// （单测 TestSafeComponent* 锁住了不变量）。已按「根因已修 + 扫描器误报」逐条
-	// dismiss；长期消除需给 CodeQL 加自定义 query 或改用它原生认可的净化写法。
+	// 注意：codeql[go/path-injection] 告警 #5/#6/#7/#8/#48/#49 的 source 都是本函数的
+	// req.CollectionHash（ShouldBindJSON 绑定进来的），6 条 sink 全部经 name 流入
+	// （rootDir / dataRoot / dstPath）。所以 name 的两个赋值都必须过 SafeComponent——
+	// 直接赋 req.CollectionHash[:12] 会让污点绕开 SafeComponent 里的净化点，告警随重扫
+	// 以新 sha 复现（PR #407 只修了 FriendlyName 那支）。hash 是 40 位十六进制，
+	// SafeComponent 对它恒等，语义不变。同理别删 SafeComponent 里那行 filepath.Clean：
+	// 它是 CodeQL 认得的净化器（FilepathCleanSanitizer），也是穿越兜底。
 	name := pathutil.SafeComponent(coll.FriendlyName)
 	if name == "" {
-		name = req.CollectionHash[:12]
+		name = pathutil.SafeComponent(req.CollectionHash[:12])
 	}
 	rootDir := filepath.Join(tmpDir, name)
 	if err := os.MkdirAll(rootDir, 0755); err != nil {

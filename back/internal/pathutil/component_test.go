@@ -11,6 +11,9 @@ import (
 // 直接拿 collection 的 friendly_name 当路径分量拼进 tmpDir 与 BT download 目录：
 // friendly_name="../../tmp/evil" 时 MkdirAll/WriteFile 就落到了两个根之外。
 // 这里锁住「任何输入都不能逃出单个路径分量」。
+// 修复本体在 PR #407；PR #409 追加了 filepath.Clean("/"+s) 归一化，让返回值派生自
+// CodeQL 原生登记的净化器，这 6 条才不再随重扫复现。加/改用例时保持表驱动即可，
+// 不要为了让 Clean 那行「可测」而重排语义——对表里的输入 Clean 是恒等变换。
 func TestSafeComponent(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -49,6 +52,11 @@ func TestSafeComponent(t *testing.T) {
 		{"my collection", "my collection"},
 		{"a.b.c", "a.b.c"},
 		{"合集-测试", "合集-测试"},
+		// BT seed 的 friendly_name 为空时回退到 hash 前缀，同样过一遍 SafeComponent
+		// （p2p_bt.go）。hash 是十六进制，必须原样保留——改成别的值会让同一 collection
+		// 的 seed 目录名不一致，BT 库找不到已写入的文件。
+		{"abcdef123456", "abcdef123456"},
+		{"0123456789ab", "0123456789ab"},
 		// 超长截到 255 字节，且截断后不以 '.' 结尾
 		{strings.Repeat("x", 300), strings.Repeat("x", 255)},
 		{strings.Repeat("x", 256) + "..", strings.Repeat("x", 255)},
