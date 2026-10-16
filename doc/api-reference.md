@@ -269,6 +269,18 @@ The endpoints below call an external registration server; the URL is configured 
 |------|------|
 | GET | `/relay/proxy` |
 
+### Embeddings (optional module, `PEERDRIVE_EMBEDDING_ENABLE`)
+
+All authRequired. Not registered at all when the module is off.
+See [`doc/modules/embedding/README.md`](modules/embedding/README.md).
+
+| Method | Path | Description |
+|------|------|------|
+| POST | `/embedding/v1/embed` | `{"text"}` → `{"model","dim","embedding","elapsed_ms"}` |
+| POST | `/embedding/v1/embed/batch` | `{"texts":[...]}` → `{"model","dim","count","embeddings","elapsed_ms"}` (max 512) |
+| POST | `/embedding/v1/ping` | Reachability probe: one embedding, `200`/`502` with `ok` + `elapsed_ms` |
+| GET | `/embedding/v1/status` | Config only, no inference; credentials stripped from the URL |
+
 ### Swagger UI
 
 | Method | Path |

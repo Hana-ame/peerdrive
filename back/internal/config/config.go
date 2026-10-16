@@ -25,6 +25,17 @@ const (
 	// server that implements /discover/nodes. Self-hosted deployments set
 	// PEERDRIVE_DISCOVER_URL to their server (e.g. https://peersignal.moonchan.xyz).
 	DefaultDiscoverURL = ""
+
+	// Standalone EmbeddingGemma service (PEERDRIVE_EMBEDDING_*). Kept in their
+	// own group at the end of this block so adding them does not reflow the
+	// column alignment of the PeerJS constants above.
+	DefaultEmbeddingURL         = "http://127.0.0.1:8080/v1/embeddings"
+	DefaultEmbeddingModel       = "embeddinggemma-2"
+	DefaultEmbeddingTimeoutSecs = 30
+	// DefaultEmbeddingDim is EmbeddingGemma's output dimension. The client
+	// validates every response against it so a misconfigured model fails loudly
+	// instead of returning the wrong vector width to callers silently.
+	DefaultEmbeddingDim = 768
 )
 
 type Config struct {
@@ -211,6 +222,34 @@ type Config struct {
 	OpenListCrawlRoot        string // PEERDRIVE_OPENLIST_CRAWL_ROOT (default "/": remote root path to crawl)
 	OpenListCrawlConcurrency int    // PEERDRIVE_OPENLIST_CRAWL_CONCURRENCY (default 4)
 	OpenListCrawlTimeoutSecs int    // PEERDRIVE_OPENLIST_CRAWL_TIMEOUT_SECS (default 30)
+
+	// ── Standalone EmbeddingGemma service (PEERDRIVE_EMBEDDING_*, optional) ──
+	//
+	// EmbeddingEnable is the master switch (PEERDRIVE_EMBEDDING_ENABLE, default
+	// false). Default off because enabling it makes the node ship its text to an
+	// operator-configured inference service and register an HTTP endpoint that
+	// spends that service's compute. Opt-in keeps a node that never configures it
+	// byte-identical to one without the module: nothing is constructed, no route
+	// is registered, and no network call is ever made.
+	//
+	// The service is always standalone. peerdrive never loads a model, never
+	// downloads weights, and never runs inference itself — it only speaks the
+	// OpenAI-compatible /v1/embeddings wire format, which llama-server implements
+	// natively and Ollama serves through its OpenAI-compatible layer. "开着玩"
+	// therefore means the operator runs `llama-server -m embeddinggemma.gguf
+	// --embedding` themselves (scripts/start-embeddinggemma.bat) and points
+	// EmbeddingURL at it.
+	//
+	// EmbeddingURL is the *full* endpoint, not a base URL: the client POSTs to
+	// exactly this string. That matches how llama-server exposes the route
+	// (/v1/embeddings) and keeps a gateway that serves embeddings under a
+	// different prefix usable without a code change.
+	EmbeddingEnable      bool   // PEERDRIVE_EMBEDDING_ENABLE (default false)
+	EmbeddingURL         string // PEERDRIVE_EMBEDDING_URL (default http://127.0.0.1:8080/v1/embeddings)
+	EmbeddingModel       string // PEERDRIVE_EMBEDDING_MODEL (default "embeddinggemma-2")
+	EmbeddingTimeoutSecs int    // PEERDRIVE_EMBEDDING_TIMEOUT_SECS (default 30)
+	EmbeddingAPIKey      string // PEERDRIVE_EMBEDDING_API_KEY (default "": llama-server ignores it, gateways need it)
+	EmbeddingExpectedDim int    // PEERDRIVE_EMBEDDING_DIM (default 768; 0 disables the check)
 
 	DownloadDir         string
 	FolderMaxDepth      int // PEERDRIVE_FOLDER_MAX_DEPTH: register_folder max recursion depth (default 0 = unlimited full recursion; >0 caps depth)
@@ -530,6 +569,16 @@ func DefaultConfig() *Config {
 		OpenListCrawlRoot:        "/",
 		OpenListCrawlConcurrency: 4,
 		OpenListCrawlTimeoutSecs: 30,
+
+		// Own alignment group (blank lines both sides) so adding embedding fields
+		// cannot reflow the DownloadDir run's columns.
+		EmbeddingEnable:      false,
+		EmbeddingURL:         DefaultEmbeddingURL,
+		EmbeddingModel:       DefaultEmbeddingModel,
+		EmbeddingTimeoutSecs: DefaultEmbeddingTimeoutSecs,
+		EmbeddingAPIKey:      "",
+		EmbeddingExpectedDim: DefaultEmbeddingDim,
+
 		DownloadDir:              "./downloads",
 		FolderMaxDepth:           0,
 		MaxPeers:                 8,
@@ -647,6 +696,19 @@ func Load() *Config {
 		OpenListCrawlRoot:        getEnv("PEERDRIVE_OPENLIST_CRAWL_ROOT", "/"),
 		OpenListCrawlConcurrency: getEnvInt("PEERDRIVE_OPENLIST_CRAWL_CONCURRENCY", 4),
 		OpenListCrawlTimeoutSecs: getEnvInt("PEERDRIVE_OPENLIST_CRAWL_TIMEOUT_SECS", 30),
+
+		// Own alignment group (blank lines both sides) so adding embedding fields
+		// cannot reflow the DownloadDir run's columns.
+		EmbeddingEnable:      getEnvBool("PEERDRIVE_EMBEDDING_ENABLE", false),
+		EmbeddingURL:         getEnv("PEERDRIVE_EMBEDDING_URL", DefaultEmbeddingURL),
+		EmbeddingModel:       getEnv("PEERDRIVE_EMBEDDING_MODEL", DefaultEmbeddingModel),
+		EmbeddingTimeoutSecs: getEnvInt("PEERDRIVE_EMBEDDING_TIMEOUT_SECS", DefaultEmbeddingTimeoutSecs),
+		EmbeddingAPIKey:      getEnv("PEERDRIVE_EMBEDDING_API_KEY", ""),
+		// AllowZero: PEERDRIVE_EMBEDDING_DIM=0 is meaningful — it disables the
+		// dimension check so the node can talk to a model whose width the
+		// operator does not want pinned. getEnvInt rejects 0 and would fall back
+		// to 768, the opposite of what was asked for.
+		EmbeddingExpectedDim: getEnvIntAllowZero("PEERDRIVE_EMBEDDING_DIM", DefaultEmbeddingDim),
 
 		DownloadDir:    getEnv("PEERDRIVE_DOWNLOAD_DIR", "./downloads"),
 		FolderMaxDepth: getEnvInt("PEERDRIVE_FOLDER_MAX_DEPTH", 0), // 0=unlimited (full recursion; >0 limits depth)

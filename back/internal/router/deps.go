@@ -48,10 +48,11 @@ import (
 
 	"peerdrive/internal/config"
 	"peerdrive/internal/echproxy"
+	"peerdrive/internal/embedding"
 	"peerdrive/internal/service"
 	"peerdrive/internal/source"
-	"peerdrive/internal/twitterpic"
 	"peerdrive/internal/transport"
+	"peerdrive/internal/twitterpic"
 )
 
 // Deps is everything the router needs from the assembly layer.
@@ -120,6 +121,15 @@ type Deps struct {
 	// Aria2Bridge is the aria2c RPC integration bridge (Issue #236).
 	// nil → aria2 features disabled.
 	Aria2Bridge *service.Aria2Bridge
+
+	// EmbeddingClient is the OpenAI-compatible client for a standalone
+	// EmbeddingGemma service (internal/embedding). nil → the /embedding/*
+	// endpoints are not registered (PEERDRIVE_EMBEDDING_ENABLE=false is the
+	// default: enabling it makes the node ship text to an operator-configured
+	// inference service, so it stays off unless opted into). When set it serves
+	// POST /embedding/v1/embed, /embedding/v1/embed/batch, /embedding/v1/ping and
+	// GET /embedding/v1/status.
+	EmbeddingClient *embedding.Client
 }
 
 // Router owns one fully-assembled HTTP surface plus the auth state that goes

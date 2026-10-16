@@ -19,6 +19,7 @@
 //   /collections/search — public collection search (GET)
 //   /ipfs/*            — IPFS gateway download (GET)
 //   /iwara/video/:id   — iwara.tv video metadata + resolution list (GET, optional module)
+//   /embedding/v1/*    — standalone EmbeddingGemma embeddings (POST embed/batch/ping, GET status; optional module, authRequired)
 //   /peerjs/*          — PeerJS node discovery + /ws/peer local session
 //   /swagger/*         — Swagger UI page (GET)
 
@@ -215,6 +216,25 @@ func (rt *Router) Engine() *gin.Engine {
 			xg.POST("/users/:username/build", authRequired, controller.TwitterPicBuild)
 			xg.GET("/collections/:sha", controller.TwitterPicCollection)
 			xg.GET("/fetch-stats", controller.TwitterPicFetchStats)
+		}
+	}
+
+	// standalone EmbeddingGemma embeddings (internal/embedding). Optional module:
+	// only registered when the operator enabled PEERDRIVE_EMBEDDING_ENABLE, so a
+	// default node never advertises an endpoint that spends an operator's
+	// inference compute (同 iwara/exhentai/twitterpic 的可选模块先例).
+	//
+	// Auth: every endpoint is authRequired. Embedding burns the compute of a
+	// third-party inference process, so an anonymous caller reaching this route
+	// could pin the operator's GPU with large requests.
+	if rt.deps.EmbeddingClient != nil {
+		controller.InitEmbeddingClient(rt.deps.EmbeddingClient)
+		eg := r.Group("/embedding/v1")
+		{
+			eg.POST("/embed", authRequired, controller.EmbedText)
+			eg.POST("/embed/batch", authRequired, controller.EmbedBatch)
+			eg.POST("/ping", authRequired, controller.EmbedPing)
+			eg.GET("/status", authRequired, controller.EmbedStatus)
 		}
 	}
 	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256Local)
