@@ -20,11 +20,12 @@ import (
 //
 // 返回值必须直接派生自 `filepath.Clean("/"+s)`（见函数末尾那一步）：CodeQL 的 Go
 // 数据流模型认不出本仓库的自定义净化器，但它原生登记了 `filepath.Clean("/"+e)` 是
-// path-traversal 净化器（FilepathCleanSanitizer）。返回值直接从 Clean 的结果派生，
-// 污点就在那一步被掐断——否则 code-scanning 告警 #5/#6/#7/#8/#48/#49 每次重扫都会
-// 以新 sha 复现。那行 Clean 也不是装饰：对正常输入它是恒等变换（上面的 Map 已换掉
-// 分隔符），但在有人改坏字符表、分隔符漏换时，Clean 仍能把穿越收敛到根之下
-// （filepath.Join(root, 结果) 不逃逸），并顺带把 "." / ".." 归一成空串。
+// path-traversal 净化器（FilepathCleanSanitizer），barrier 就在 Clean 的结果节点上。
+// 污点在那里被掐断，返回值及其后续变换全部无污点——否则 code-scanning 告警
+// #5/#6/#7/#8/#48/#49 每次重扫都会以新 sha 复现。那行 Clean 也不是装饰：对正常输入
+// 它是恒等变换（上面的 Map 已换掉分隔符），但在有人改坏字符表、分隔符漏掉时，
+// Clean 仍能把穿越收敛到根之下（filepath.Join(root, 结果) 不逃逸），并顺带把
+// "." / ".." 归一成空串。
 func SafeComponent(name string) string {
 	// 非法字符替换成 '_'；控制字符直接丢弃（rename/展示都会出问题）。
 	// ':' 一起换掉：Windows 上是卷名/交替数据流（ADS）的入口。
@@ -43,9 +44,10 @@ func SafeComponent(name string) string {
 	// 连字符截完再判一次，`".."`/`"..."` 这类截完会变空。
 	s = strings.TrimRight(s, ". ")
 	// 归一化：绝对化后 Clean 会吃掉残留的 .. 与冗余分隔符，Join 到任何根下都不逃逸；
-	// "." / ".." 会被归一成空串。TrimPrefix 把 Clean 补回的根 "/" 去掉。
+	// "." / ".." 会被归一成空串。Windows 的 filepath.Clean 用 '\' 作分隔符，
+	// 先 ToSlash 换回 '/' 再去掉 Clean 补回的根。
 	// 这行也是 CodeQL 能看见的净化点（见函数头注释），不要删。
-	s = strings.TrimPrefix(filepath.Clean("/"+s), "/")
+	s = strings.TrimPrefix(filepath.ToSlash(filepath.Clean("/"+s)), "/")
 	if s == "" || s == "." || s == ".." {
 		return ""
 	}

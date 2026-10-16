@@ -52,6 +52,11 @@ func TestSafeComponent(t *testing.T) {
 		{"my collection", "my collection"},
 		{"a.b.c", "a.b.c"},
 		{"合集-测试", "合集-测试"},
+		// BT seed 的 friendly_name 为空时回退到 hash 前缀，同样过一遍 SafeComponent
+		// （p2p_bt.go）。hash 是十六进制，必须原样保留——改成别的值会让同一 collection
+		// 的 seed 目录名不一致，BT 库找不到已写入的文件。
+		{"abcdef123456", "abcdef123456"},
+		{"0123456789ab", "0123456789ab"},
 		// 超长截到 255 字节，且截断后不以 '.' 结尾
 		{strings.Repeat("x", 300), strings.Repeat("x", 255)},
 		{strings.Repeat("x", 256) + "..", strings.Repeat("x", 255)},
