@@ -214,7 +214,8 @@ func (s *PeerJSService) serveAdmin(c Session, st *connState, raw []byte) {
 		}
 		f, err := os.CreateTemp("", "peerdrive-admin-upload-*")
 		if err != nil {
-			c.SendJSON(dcResp{Type: "err", Msg: "upload temp file failed: " + err.Error(), ReqID: ar.ReqID})
+			log.LogError("peerjs-admin: upload temp file failed: %v", err)
+			c.SendJSON(dcResp{Type: "err", Msg: "upload temp file creation failed", ReqID: ar.ReqID})
 			return
 		}
 		st.mu.Lock()
@@ -295,7 +296,8 @@ func (s *PeerJSService) adminUploadChunk(c Session, au *adminUploadState, data [
 			// fd persists). Same cleanup semantics as aborted branch; aborted branch is below.
 			// Discovery background: code review 2026-08-18 (previously only aborted branch cleaned).
 			au.cleanupTemp()
-			_ = c.SendJSON(dcResp{Type: "err", Msg: "admin upload write failed: " + err.Error(), ReqID: au.reqID})
+			log.LogError("peerjs-admin: upload write failed: %v", err)
+			_ = c.SendJSON(dcResp{Type: "err", Msg: "admin upload write failed", ReqID: au.reqID})
 			return
 		}
 	}
@@ -333,7 +335,8 @@ func (s *PeerJSService) serveAdminUploadComplete(c Session, au *adminUploadState
 		reqPath = "/files/upload"
 	}
 	if _, err := au.f.Seek(0, io.SeekStart); err != nil {
-		c.SendJSON(dcResp{Type: "err", Msg: "upload rewind failed: " + err.Error(), ReqID: au.reqID})
+		log.LogError("peerjs-admin: upload rewind failed: %v", err)
+		c.SendJSON(dcResp{Type: "err", Msg: "upload rewind failed", ReqID: au.reqID})
 		return
 	}
 	pr, pw := io.Pipe()
@@ -382,7 +385,8 @@ func (s *PeerJSService) buildAdminRequest(method, path string, body io.Reader, c
 func (s *PeerJSService) dispatchAdmin(c Session, req *http.Request, reqID string) {
 	status, respBody, contentType, err := s.adminHandler(req)
 	if err != nil {
-		c.SendJSON(adminResp{Type: "admin-resp", Status: http.StatusInternalServerError, Body: ginH{"error": err.Error()}, ReqID: reqID})
+		log.LogError("peerjs-admin: dispatchAdmin failed: %v", err)
+		c.SendJSON(adminResp{Type: "admin-resp", Status: http.StatusInternalServerError, Body: ginH{"error": "internal server error"}, ReqID: reqID})
 		return
 	}
 	// Response classification: JSON → admin-resp; text → admin-resp (string body);

@@ -86,14 +86,14 @@ func PutNodeShare(c *gin.Context) {
 	}
 	var patch service.ScopePatch
 	if err := c.ShouldBindJSON(&patch); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body: " + sanitizeErr(err, "request failed")})
 		return
 	}
 	scope, err := nodeShareSvc.Update(patch)
 	if err != nil {
 		// Validation failures (volume root directory / invalid hash / invalid level) are user input
 		// issues → 400, not 500
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -125,12 +125,12 @@ func PostNodeShareFiles(c *gin.Context) {
 		Level  string   `json:"level"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body: " + sanitizeErr(err, "request failed")})
 		return
 	}
 	scope, err := nodeShareSvc.SetFilesShared(body.Hashes, body.Shared, body.Level)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{

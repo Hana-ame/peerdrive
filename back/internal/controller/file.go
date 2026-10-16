@@ -110,7 +110,7 @@ func RegisterURL(c *gin.Context) {
 	meta, err := fileSvc.RegisterURL(req.URL, req.Filename)
 	if err != nil {
 		log.LogError("ctrl-file: RegisterURL %s failed: %v", req.URL, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -139,7 +139,7 @@ func RegisterLocalFile(c *gin.Context) {
 	hash, err := fileSvc.RegisterLocal(req.Path, req.Filename)
 	if err != nil {
 		log.LogError("ctrl-file: RegisterLocalFile %s failed: %v", req.Path, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -162,7 +162,7 @@ func RegisterFolder(c *gin.Context) {
 	results, err := fileSvc.RegisterFolder(req.FolderPath)
 	if err != nil {
 		log.LogError("ctrl-file: RegisterFolder %s failed: %v", req.FolderPath, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -250,7 +250,7 @@ func CopyFile(c *gin.Context) {
 	dest, err := fileSvc.CopyFile(req.Hash, req.DestPath)
 	if err != nil {
 		log.LogError("ctrl-file: CopyFile %s -> %s failed: %v", req.Hash, req.DestPath, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -350,7 +350,7 @@ func BrowseDir(c *gin.Context) {
 	entries, err := fileSvc.BrowseDir(dirPath)
 	if err != nil {
 		log.LogError("ctrl-file: BrowseDir %s failed: %v", dirPath, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	if entries == nil {

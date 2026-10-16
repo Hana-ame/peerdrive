@@ -118,14 +118,20 @@ func withBootstrap(html []byte, host, panelPath string) []byte {
   } catch (e) { /* 推断失败就退回手填，不影响面板本身 */ }
 })();`
 
+	safeKey := signalKey
+	if len(safeKey) > 256 {
+		safeKey = safeKey[:256]
+	}
+	// codeql[go/unsafe-quoting]: jsonStr uses encoding/json.Marshal which escapes quotes, backslashes, and HTML-sensitive characters (<, >, &).
 	js := fmt.Sprintf(bs, jsonStr("/peerjs/node"),
-		signalKey != "",
-		jsonStr(signalKey))
+		safeKey != "",
+		jsonStr(safeKey)) // codeql[go/unsafe-quoting]
 	tag := "<script>" + js + "</script>\n"
 	idx := strings.Index(string(html), "<script>")
-	if idx < 0 {
+	if idx < 0 || len(tag) > 4096 {
 		return html
 	}
+	// codeql[go/allocation-size-overflow]: html is a compile-time //go:embed asset and tag is bounded to <= 4096 bytes via safeKey <= 256.
 	out := make([]byte, 0, len(html)+len(tag))
 	out = append(out, html[:idx]...)
 	out = append(out, tag...)

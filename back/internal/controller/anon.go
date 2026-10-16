@@ -61,7 +61,7 @@ func CreateAnonCollection(c *gin.Context) {
 
 	hash, err := anonSvc.CreateCollectionWithPolicyAndPSK(req.FriendlyName, req.Entries, req.Tags, req.Visibility, req.AccessList, req.AccessPolicy, req.Passcode, pskVal, owner)
 	if err != nil {
-		msg := err.Error()
+		msg := sanitizeErr(err, "invalid request")
 		switch {
 		case strings.Contains(msg, "invalid visibility"), strings.Contains(msg, "access_list required"),
 			strings.Contains(msg, "invalid access policy"), strings.Contains(msg, "passcode required"),
@@ -107,7 +107,7 @@ func SetAnonCollectionVisibility(c *gin.Context) {
 	}
 	newHash, err := anonSvc.UpdateCollectionVisibility(hash, req.Visibility, req.AccessList, nodestate.GetOperator())
 	if err != nil {
-		msg := err.Error()
+		msg := sanitizeErr(err, "invalid request")
 		if strings.Contains(msg, "invalid visibility") || strings.Contains(msg, "access_list required") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
@@ -308,7 +308,7 @@ func ForkAnonCollection(c *gin.Context) {
 		Passcode     string                      `json:"passcode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -383,7 +383,7 @@ func ForkAnonCollection(c *gin.Context) {
 	hash, err := anonSvc.CreateCollectionWithPolicy(
 		friendlyName, newEntries, src.Tags, src.Visibility, src.AccessList, policy, passcode, forkOwner)
 	if err != nil {
-		msg := err.Error()
+		msg := sanitizeErr(err, "invalid request")
 		if strings.Contains(msg, "invalid visibility") || strings.Contains(msg, "access_list required") ||
 			strings.Contains(msg, "invalid access policy") || strings.Contains(msg, "passcode required") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
@@ -436,16 +436,17 @@ func CommitAnonCollection(c *gin.Context) {
 
 	hash, err := anonSvc.CommitCollectionWithPasscodeAndPSK(req.SourceHash, req.Entries, req.CommitMessage, passcode, psk, nodestate.GetOperator())
 	if err != nil {
-		if strings.Contains(err.Error(), "passcode required or invalid") || strings.Contains(err.Error(), "psk required or invalid") {
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		msg := sanitizeErr(err, "request failed")
+		if strings.Contains(msg, "passcode required or invalid") || strings.Contains(msg, "psk required or invalid") {
+			c.JSON(http.StatusForbidden, gin.H{"error": msg})
 			return
 		}
-		if strings.Contains(err.Error(), "source collection not found") {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		if strings.Contains(msg, "source collection not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": msg})
 			return
 		}
-		if strings.Contains(err.Error(), "invalid") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if strings.Contains(msg, "invalid") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
 		writeInternalError(c, err)
@@ -473,7 +474,7 @@ func AddAnonCollectionEntry(c *gin.Context) {
 		PSK   string                    `json:"psk"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + sanitizeErr(err, "request failed")})
 		return
 	}
 	entry := req.Entry
@@ -493,7 +494,7 @@ func AddAnonCollectionEntry(c *gin.Context) {
 	}
 	newHash, err := anonSvc.AddCollectionEntry(hash, entry, nodestate.GetOperator(), psk)
 	if err != nil {
-		msg := err.Error()
+		msg := sanitizeErr(err, "invalid request")
 		if strings.Contains(msg, "psk required or invalid") {
 			c.JSON(http.StatusForbidden, gin.H{"error": msg})
 			return
@@ -547,7 +548,7 @@ func RemoveAnonCollectionEntry(c *gin.Context) {
 	}
 	newHash, err := anonSvc.RemoveCollectionEntry(hash, path, nodestate.GetOperator(), psk)
 	if err != nil {
-		msg := err.Error()
+		msg := sanitizeErr(err, "invalid request")
 		if strings.Contains(msg, "psk required or invalid") {
 			c.JSON(http.StatusForbidden, gin.H{"error": msg})
 			return
@@ -580,7 +581,7 @@ func UpdateAnonCollectionEntry(c *gin.Context) {
 		PSK   string                    `json:"psk"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + sanitizeErr(err, "request failed")})
 		return
 	}
 	entry := req.Entry
@@ -600,7 +601,7 @@ func UpdateAnonCollectionEntry(c *gin.Context) {
 	}
 	newHash, err := anonSvc.UpdateCollectionEntry(hash, entry, nodestate.GetOperator(), psk)
 	if err != nil {
-		msg := err.Error()
+		msg := sanitizeErr(err, "invalid request")
 		if strings.Contains(msg, "psk required or invalid") {
 			c.JSON(http.StatusForbidden, gin.H{"error": msg})
 			return
@@ -642,7 +643,7 @@ func GetAnonCollectionHistory(c *gin.Context) {
 	}
 	history, err := anonSvc.GetCollectionHistory(hash, maxDepth, nodestate.GetOperator(), psk)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, history)
@@ -671,7 +672,7 @@ func SetAnonCollectionPermissions(c *gin.Context) {
 	}
 	newHash, err := anonSvc.UpdateCollectionPermissions(hash, req.Visibility, req.AccessList, req.AccessPolicy, req.PSK, nodestate.GetOperator())
 	if err != nil {
-		msg := err.Error()
+		msg := sanitizeErr(err, "invalid request")
 		if strings.Contains(msg, "invalid") || strings.Contains(msg, "required") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return

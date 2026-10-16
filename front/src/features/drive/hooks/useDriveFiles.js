@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import * as ws from '../../../platform/transport-ws';
 import { mimeOf } from '../../../platform/shared/mime';
 import { STORAGE_KEY_API_BASE } from '../../../platform/shared/storageKeys';
+import { buildFileUrl } from '../../../platform/shared';
 import { getNodeSession } from '../../../lib/nodeSession';
 
 /**
  * useDriveFiles hook manages Drive file querying (root, browsing, inbox, WebRTC shares),
- * uploading, downloading, deleting, inbox quarantine approvals, share link generation,
- * and tag metadata (Issue #334).
+ * uploading, downloading (via unified PeerJS/WS/HTTP queue with live progress bar),
+ * deleting, inbox quarantine approvals, share link generation, and canonical SHA256 URLs.
  */
 export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef } = {}) {
   const [currentDir, setCurrentDir] = useState('');
@@ -20,7 +21,7 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
   const [globalTagCounts, setGlobalTagCounts] = useState([]);
 
   const loadTagsSummary = useCallback(async () => {
-    if (peerSession?.client || getNodeSession?.()?.client) return; // PeerJS mode doesn't have local tags admin endpoint
+    if (peerSession?.client || getNodeSession?.()?.client) return;
     try {
       const res = await ws.admin('GET', '/tags/summary');
       const list = res?.data || res?.tags || [];
@@ -39,12 +40,11 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
   const load = useCallback(async () => {
     setErr('');
     const client = peerSession?.client || getNodeSession?.()?.client;
-    // If WebRTC peerSession is active, strictly load files from remote peer via shares
     if (client) {
       try {
         const shareData = await client.shares();
         const rawFiles = shareData?.files || [];
-        const fileList = rawFiles.map(e => {
+        const fileList = rawFiles.map((e) => {
           const fname = e.name || e.path || 'unnamed';
           return {
             hash: e.hash || '',
@@ -71,7 +71,7 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
       if (selectedCategory === 'inbox') {
         const res = await ws.admin('GET', '/files/inbox');
         const raw = Array.isArray(res) ? res : [];
-        fileList = raw.map(e => ({
+        fileList = raw.map((e) => ({
           hash: e.hash || '',
           filename: e.filename || 'unnamed',
           size: e.size || 0,
@@ -83,10 +83,9 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
           uploader: e.uploader_peer_id || '',
         }));
       } else if (!currentDir) {
-        // Root directory: fetch registered cloud drive files (full hashes, mime types, sizes)
         const res = await ws.admin('GET', '/files');
         const raw = Array.isArray(res) ? res : [];
-        fileList = raw.map(e => ({
+        fileList = raw.map((e) => ({
           hash: e.hash || '',
           filename: e.filename || e.name || 'unnamed',
           size: e.size || 0,
@@ -96,11 +95,10 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
           path: e.provider_path || e.path || '',
         }));
       } else {
-        // Subdirectory browsing: query /files/browse?path=...
         const query = `?path=${encodeURIComponent(currentDir)}`;
         const res = await ws.admin('GET', `/files/browse${query}`);
         const raw = Array.isArray(res) ? res : [];
-        fileList = raw.map(e => ({
+        fileList = raw.map((e) => ({
           hash: e.hash || '',
           filename: e.name || e.filename || 'unnamed',
           size: e.size || 0,
@@ -112,18 +110,17 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
       }
       setFiles(fileList);
 
-      // Fetch tags for files in a single batch request (eliminates N+1 network waterfall)
-      const hashes = fileList.map(f => f.hash).filter(Boolean);
+      const hashes = fileList.map((f) => f.hash).filter(Boolean);
       if (!client && hashes.length > 0) {
         try {
           const res = await ws.admin('POST', '/tags/batch', { shas: hashes });
           const batchTags = res?.tags || res?.data || {};
-          setFileTags(prev => ({ ...prev, ...batchTags }));
+          setFileTags((prev) => ({ ...prev, ...batchTags }));
         } catch {
           // tag endpoint might not be available
         }
       }
-    } catch (e) {
+    } catch {
       setErr('');
       setFiles([]);
     }
@@ -148,24 +145,10 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
     }
   };
 
+  // Unified download through ws.downloadToFile (routes PeerJS -> WS -> HTTP and updates globalProgressHub)
   const onDownload = async (f) => {
     try {
-      if (peerSession?.client) {
-        console.log(`[Drive Download] Starting download for ${f.filename} (${f.hash})`);
-        const t0 = performance.now();
-        await peerSession.client.saveAs(f.hash, f.filename, {
-          onProgress: ({ received, total }) => {
-            const sec = (performance.now() - t0) / 1000;
-            const pct = total > 0 ? ((received / total) * 100).toFixed(1) : '?';
-            const mbps = sec > 0 ? (received / sec / (1024 * 1024)).toFixed(2) : '0';
-            console.log(`[Drive Download] ${f.filename}: ${received}/${total} (${pct}%) at ${mbps} MB/s`);
-          }
-        });
-        const totalSec = ((performance.now() - t0) / 1000).toFixed(2);
-        console.log(`[Drive Download] Finished ${f.filename} in ${totalSec}s`);
-      } else {
-        await ws.downloadToFile(f.hash, f.filename);
-      }
+      await ws.downloadToFile(f.hash, f.filename, { size: f.size });
     } catch (ex) {
       setErr(ex?.message || String(ex));
     }
@@ -219,10 +202,20 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
     }
   };
 
+  // Generates a canonical self-contained SHA256 file URL (#/f/<sha256>[?peer=<peerId>&name=<filename>])
   const onCopyDeepLink = (f) => {
     const origin = window.location.origin;
-    const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-    const url = `${origin}${base}#/drive/${f.hash}`;
+    const base = (import.meta.env?.BASE_URL || '/').replace(/\/$/, '');
+    const sess = peerSession || getNodeSession?.();
+    let url = `${origin}${base}#/f/${f.hash}`;
+    try {
+      url = buildFileUrl(f.hash, {
+        baseUrl: `${origin}${base}`,
+        peerId: sess?.peerId || '',
+        filename: f.filename || '',
+        mode: 'spa',
+      });
+    } catch {}
     navigator.clipboard?.writeText(url);
     setCopiedHash(f.hash);
     setTimeout(() => setCopiedHash(''), 2000);
@@ -230,7 +223,7 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
 
   const saveFileTags = async (hash, tags) => {
     await ws.admin('POST', `/tags/sha/${hash}`, { tags });
-    setFileTags(prev => ({ ...prev, [hash]: tags }));
+    setFileTags((prev) => ({ ...prev, [hash]: tags }));
     await loadTagsSummary();
   };
 

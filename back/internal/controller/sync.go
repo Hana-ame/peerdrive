@@ -46,7 +46,7 @@ func (c *SyncController) GetStatus(ctx *gin.Context) {
 
 	status, err := c.syncSvc.GetStatus(hash)
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusNotFound, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 

@@ -357,6 +357,7 @@ func ParseVideoID(rawURL string) (string, bool) {
 // SHA1Hex computes the SHA1 hex digest of s. (X-Version uses SHA1, not
 // SHA256 — see the open-source iwara downloaders.)
 func SHA1Hex(s string) string {
+	// codeql[go/weak-sensitive-data-hashing]: SHA1 is mandated by upstream iwara.tv X-Version protocol specification, not used for password hashing.
 	h := sha1.New() // #nosec G401 -- iwara X-Version header requires SHA1 (not SHA256)
 	h.Write([]byte(s))
 	return hex.EncodeToString(h.Sum(nil))

@@ -1,18 +1,32 @@
 {
   "name": "peerdrive-core",
   "version": "0.1.0",
-  "description": "Shared frame protocol state machine and connection serial dispatcher for peerdrive clients",
+  "description": "Single source of truth for Peerdrive frame protocol, incremental SHA-256, canonical URLs, frame dispatcher, and multi-transport queue/progress hub",
   "type": "module",
   "license": "MIT",
-  "keywords": ["peerdrive", "peerjs", "webrtc", "statemachine", "protocol"],
+  "keywords": [
+    "peerdrive",
+    "peerjs",
+    "webrtc",
+    "statemachine",
+    "protocol",
+    "queue",
+    "progress"
+  ],
   "exports": {
     ".": "./src/index.js",
     "./protocol": "./src/protocol.js",
-    "./dispatcher": "./src/dispatcher.js"
+    "./sha256": "./src/sha256.js",
+    "./dispatcher": "./src/dispatcher.js",
+    "./url": "./src/url.js",
+    "./queue": "./src/queue.js"
   },
-  "files": ["src", "README.md"],
+  "files": [
+    "src",
+    "README.md"
+  ],
   "sideEffects": false,
   "scripts": {
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test test/core.test.mjs test/security.test.mjs"
   }
 }

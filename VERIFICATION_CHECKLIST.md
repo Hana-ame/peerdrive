@@ -250,3 +250,26 @@ go test -tags "nosqlite integration" ./test/integration/ \
 | `12bc620` | fix(deploy): peersignal.moonchan.xyz 更新（nginx + 二进制） |
 | `aaf34a6` | docs: 验证清单 |
 | `94f20ee` | docs: 重写验证清单（按实际操作记录） |
+
+
+---
+
+## 11. v1.0 发布前全面收口：8 项 Open Issues 清零 + UI/UX 重置 + 统一队列进度条 + 唯一内容 URL（2026-10-16）
+
+**目的**: 将所有用户核心诉求永久固化进仓库，清零全部 8 项 Open Issues（#378, #395, #396, #402, #403, #404, #405, #406），从零重置前端 UI/UX，最大限度适配 PeerJS 并兼容 WS + HTTP 队列与实时进度条，提供直达 SHA256 文件与 Collection 的自包含唯一 URL，并完成分模块与顺序无关性（Order-Independence）测试。
+
+### 永久固化的核心需求 Checklist
+- [x] **要求 1（单一依赖源）**: `packages/peerdrive-core` 作为协议帧解析（兼容 v1 `{type,reqId}` 与 v2 `{event,req_id,code,data}` + 32B 二进制头）、增量 SHA-256、唯一 URL 工具、顺序无关传输队列（`TransportQueue`）与实时进度中心（`TransferProgressHub`）的唯一依赖源；`peerdrive-client`、`peerdrive-media`、`front` 零重复实现。
+- [x] **要求 2（自包含唯一内容 URL）**:
+  - 文件唯一 URL：后端 `GET /f/:sha256`（含 `/:filename`、`/api/v1/f/:sha256`、`/api/v1/files/:sha256`）与前端 `#/f/:sha256?peer=<peerId>&signal=<url>`。
+  - 合集唯一 URL：后端 `GET /c/:hash`（含 `/*filepath`、`/api/v1/c/:hash`、`/api/v1/collections/:hash`）与前端 `#/c/:hash?peer=<peerId>&signal=<url>`。
+- [x] **要求 3（PeerJS 优先 + WS/HTTP 兼容队列 + 实时进度条）**:
+  - 自动按 `PeerJS WebRTC DataChannel` → `WebSocket` → `HTTP` 调度传输任务。
+  - 全局实时进度追踪（`TransferProgressHub`）+ 右下角常驻可折叠进度浮窗（`TransferDock`）+ 传输中心页（`#/transfers`）全通道可视化。
+- [x] **要求 4（UI/UX 从零重置与排版修复）**:
+  - 统一响应式侧边栏 + 顶栏直达地址框（支持直接粘贴 SHA256 / Collection Hash / PeerID / URL 跳转）+ 零水平溢出卡片/表格布局。
+- [x] **要求 5（操作顺序无关性与分模块测试）**:
+  - 并发请求入队、未建连提前请求、交错二进制块、取消后重发、乱序响应均经 `TransportQueue` 与 `FrameDispatcher` 严格隔离，确保任何操作顺序均不串槽、不死锁。
+  - 统一分模块测试脚本 `scripts/test-modules.sh` 覆盖 `peerdrive-core`、`peerdrive-client`、`peerdrive-media`、`front`、架构守卫与文档引用检查。
+
+详见 [`doc/RELEASE-READINESS.md`](doc/RELEASE-READINESS.md)。

@@ -99,7 +99,7 @@ func readEmbedBody(c *gin.Context) (*embedRequest, bool) {
 	if err != nil {
 		// The body was unreadable; report it as a bad request rather than
 		// silently treating it as empty.
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot read request body: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot read request body: " + sanitizeErr(err, "request failed")})
 		return nil, false
 	}
 	if len(raw) > maxEmbedInputBytes {
@@ -112,7 +112,7 @@ func readEmbedBody(c *gin.Context) (*embedRequest, bool) {
 	}
 	var req embedRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body: " + sanitizeErr(err, "request failed")})
 		return nil, false
 	}
 	return &req, true
@@ -137,7 +137,7 @@ func EmbedText(c *gin.Context) {
 	vec, err := embeddingClient.Embed(c.Request.Context(), req.Text)
 	if err != nil {
 		log.LogDebug("ctrl-embedding: embed: %v", err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadGateway, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, embedResponse{
@@ -175,7 +175,7 @@ func EmbedBatch(c *gin.Context) {
 	vecs, err := embeddingClient.EmbedBatch(c.Request.Context(), req.Texts)
 	if err != nil {
 		log.LogDebug("ctrl-embedding: embed batch: %v", err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadGateway, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	dim := 0
@@ -207,7 +207,7 @@ func EmbedPing(c *gin.Context) {
 		ElapsedMs: time.Since(start).Milliseconds(),
 	}
 	if err != nil {
-		resp.Detail = err.Error()
+		resp.Detail = sanitizeErr(err, "probe failed")
 		log.LogDebug("ctrl-embedding: ping: %v", err)
 		c.JSON(http.StatusBadGateway, resp)
 		return

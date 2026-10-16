@@ -156,11 +156,11 @@ func SearchPeerFiles(c *gin.Context) {
 	page, err := fileSearchSvc.RequestSearch(peer, parseSearchQuery(c))
 	if err != nil {
 		if errors.Is(err, transport.ErrPeerSearchUnsupported) {
-			c.JSON(http.StatusNotImplemented, gin.H{"error": err.Error(), "peer": peer})
+			c.JSON(http.StatusNotImplemented, gin.H{"error": sanitizeErr(err, "request failed"), "peer": peer})
 			return
 		}
 		log.LogWarn("ctrl-file-search: search %s failed: %v", peer, err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadGateway, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	searchResponseJSON(c, page)

@@ -324,3 +324,10 @@ Windows 那格不再跳过 `go test`；本机没装 Go 也能验：
 - 部署更新：当前从 wintools 仓库构建并部署 peersignal；若改用 peerdrive/back/signalserver，
   请同步更新本段并确保 `PEERDRIVE_DISCOVER_URL` 指向对应发现 API
 - `PEERDRIVE_P2P_ENABLE` 已删除（2026-08-16 批2，libp2p 栈移除）
+
+
+## v1.0 发布规范与核心不变量（2026-10-16 永久固化）
+
+1. **单一依赖源（Single Source of Truth）**：所有 JS 端协议帧解析（兼容 `{type,reqId}` 与 `{event,req_id,code,data}` + 32B 二进制头 `PD02`）、增量 SHA-256、自包含唯一 URL 生成与解析、多通道顺序无关传输队列（`TransportQueue`）与实时进度追踪（`TransferProgressHub`）统一维护于 `packages/peerdrive-core`，由 `peerdrive-client`、`peerdrive-media` 与 `front` 直接引用或重导出，严禁重复实现。
+2. **自包含唯一内容 URL**：任何 SHA256 文件均可通过 `/f/<sha256>`（后端）或 `#/f/<sha256>?peer=<peerId>`（前端）直接唯一定位访问；任何 Collection 均可通过 `/c/<hash>`（后端）或 `#/c/<hash>?peer=<peerId>`（前端）直接唯一定位访问。
+3. **PeerJS 优先 + WS / HTTP 队列兼容 + 实时进度条 + 顺序无关保证**：详见 [`doc/RELEASE-READINESS.md`](doc/RELEASE-READINESS.md)。

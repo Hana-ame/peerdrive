@@ -1,33 +1,40 @@
-// CollectionView.jsx — collection display page: input a collection (sha or parsed
-// JSON) and browse it as a folder tree (see CollectionBrowser).
+// CollectionView.jsx — Self-contained canonical Collection page (#/c/:hash and #/collection/:hash).
 //
-// 加载路径：
-//   1. 按 collection sha：collection 本身就是保存在 sha-文件系统里的 JSON（内容寻址），
-//      所以首选 ws.download(sha)（req 帧，与文件取数同一通道）拿字节 → JSON.parse；
-//      拿不到（非 JSON / 节点上没有）时兜底走本地管理面 GET /anon/collections/{hash}
-//      （当前后端返回的是 providers 旧格式，归一化层同样能读）。
-//   2. 粘贴已解析/手写的 collection JSON：直接进入浏览，不经过网络。
-// 路由：/collection/:hash 直接按 sha 加载；/collection 无参时给输入面板。
+// Supports loading any collection manifest across:
+//   1. PeerJS WebRTC DataChannel (auto-connecting to ?peer=<peerId> if specified in URL)
+//   2. Local WebSocket (/ws/peer downloadStream or /anon/collections/:hash)
+//   3. Direct HTTP (/c/:hash fallback)
+//   4. Pasted Collection JSON
+//
+// Security & Anti-Malicious-AI Hardening:
+//   - Parses JSON exclusively via safeJsonParse (blocking __proto__ prototype pollution & deep nesting bombs)
+//   - Sanitizes all manifest entries via sanitizeCollectionManifest (stripping "../" traversal, Bidi spoofing,
+//     and flagging Indirect Prompt Injection payloads)
+//   - Validates ?signal= URLs via validateSignalOrApiUrl before PeerJS dial
 import React, { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import * as ws from '../../../platform/transport-ws';
 import CollectionBrowser from '../components/CollectionBrowser';
-
 import { manifestCache } from '../../../lib/cache';
+import { getNodeSession, setNodeSession } from '../../../lib/nodeSession';
+import {
+  buildCollectionUrl,
+  safeJsonParse,
+  sanitizeCollectionManifest,
+  sanitizeUntrustedText,
+  validateSignalOrApiUrl,
+  MAX_MANIFEST_BYTES,
+} from '../../../../../packages/peerdrive-core/src/index.js';
 
-import { getNodeSession } from '../../../lib/nodeSession';
-
-// parseManifest：校验并规整 collection 对象。为什么这里强制 entries 存在：
-// 文件夹视图的输入契约是"有 entries 数组的集合 JSON"，缺了它没有可展示的结构，
-// 早失败比渲染出一个空文件夹更诚实。
 function parseManifest(data) {
-  if (!data || typeof data !== 'object') throw new Error('collection JSON is not an object');
-  if (!Array.isArray(data.entries)) throw new Error('collection JSON is missing "entries" array');
-  return data;
+  return sanitizeCollectionManifest(data);
 }
 
-// readStreamAsText：从 ReadableStream 流式读取并用 TextDecoder('utf-8', { stream: true }) 增量解码。
-// 避免 ws.download 的全量 Uint8Array 内存堆积，降低大 manifest 峰值内存。
+function parseManifestText(rawText) {
+  const obj = safeJsonParse(rawText, { maxBytes: MAX_MANIFEST_BYTES, throwOnError: true });
+  return sanitizeCollectionManifest(obj);
+}
+
 async function readStreamAsText(readableStream) {
   const reader = readableStream.getReader();
   const decoder = new TextDecoder('utf-8');
@@ -50,15 +57,19 @@ async function readStreamAsText(readableStream) {
 }
 
 export default function CollectionView() {
-  const { hash } = useParams(); // 路由 /collection/:hash
-  const [input, setInput] = useState(hash || ''); // 输入框里的 sha
-  const [json, setJson] = useState(''); // 粘贴 JSON 文本
+  const { hash } = useParams();
+  const [searchParams] = useSearchParams();
+  const queryPeer = sanitizeUntrustedText(searchParams.get('peer') || searchParams.get('node') || '', 64);
+  const querySignal = searchParams.get('signal') || searchParams.get('url') || '';
+
+  const [input, setInput] = useState(hash || '');
+  const [json, setJson] = useState('');
   const [lastErr, setLastErr] = useState('');
+  const [copiedMode, setCopiedMode] = useState('');
   const [state, setState] = useState({ phase: hash ? 'loading' : 'input', collection: null, source: '' });
 
   const loadBySha = useCallback(async (sha) => {
     setLastErr('');
-    // 缓存优先：内容寻址保证 sha 对应的 manifest 永不改变
     const cached = manifestCache.get(sha);
     if (cached) {
       setState({ phase: 'ready', collection: cached, source: sha });
@@ -68,12 +79,39 @@ export default function CollectionView() {
     setState({ phase: 'loading', collection: null, source: sha });
     try {
       let data;
-      const session = getNodeSession();
-      // 如果明确是无 WS 连接但有 PeerJS 客户端，优先从 PeerJS 共享范围读取
+      let session = getNodeSession();
+
+      // Auto-dial PeerJS if URL carries ?peer=<peerId> and not yet connected
+      if (queryPeer && (!session?.client || session.peerId !== queryPeer)) {
+        try {
+          const { connectToPeer } = await import('peerdrive-client');
+          const PeerModule = await import('peerjs');
+          const PeerCtor = PeerModule.Peer || PeerModule.default?.Peer || PeerModule.default;
+          if (PeerCtor) {
+            const sigOpts = {};
+            if (querySignal) {
+              const sigCheck = validateSignalOrApiUrl(querySignal);
+              if (sigCheck.valid && sigCheck.url) {
+                const u = sigCheck.url;
+                sigOpts.host = u.hostname;
+                sigOpts.port = u.port ? Number(u.port) : u.protocol === 'https:' || u.protocol === 'wss:' ? 443 : 80;
+                sigOpts.secure = u.protocol === 'https:' || u.protocol === 'wss:';
+                sigOpts.path = u.pathname || '/';
+              }
+            }
+            const client = await connectToPeer(PeerCtor, queryPeer, sigOpts);
+            session = { client, peerId: queryPeer, signalUrl: sigOpts.host ? querySignal : '' };
+            setNodeSession(session);
+          }
+        } catch {
+          /* continue to existing session or WS/HTTP fallback */
+        }
+      }
+
       if (session?.client && typeof ws.getStatus === 'function' && ws.getStatus() === 'closed') {
         try {
           const snap = await session.client.shares();
-          const match = (snap?.collections || []).find(c => c.hash === sha || c.name === sha);
+          const match = (snap?.collections || []).find((c) => c.hash === sha || c.name === sha);
           if (match && Array.isArray(match.entries)) {
             data = parseManifest({
               hash: match.hash,
@@ -83,15 +121,16 @@ export default function CollectionView() {
               created_at: '',
             });
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
 
       if (!data) {
         if (session?.client) {
-          // WebRTC PeerJS 会话活跃：严格走 PeerJS 获取，不尝试 WS
           try {
             const snap = await session.client.shares();
-            const match = (snap?.collections || []).find(c => c.hash === sha || c.name === sha);
+            const match = (snap?.collections || []).find((c) => c.hash === sha || c.name === sha);
             if (match && Array.isArray(match.entries)) {
               data = parseManifest({
                 hash: match.hash,
@@ -101,7 +140,9 @@ export default function CollectionView() {
                 created_at: '',
               });
             }
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
           if (!data) {
             const chunks = [];
             for await (const chunk of session.client.stream(sha)) {
@@ -109,16 +150,23 @@ export default function CollectionView() {
             }
             const blob = new Blob(chunks);
             const text = await blob.text();
-            data = parseManifest(JSON.parse(text));
+            data = parseManifestText(text);
           }
         } else {
-          // 本地/WS 模式
           try {
             const stream = ws.downloadStream(sha);
             const text = await readStreamAsText(stream);
-            data = parseManifest(JSON.parse(text));
+            data = parseManifestText(text);
           } catch {
-            data = parseManifest(await ws.admin('GET', `/anon/collections/${sha}`));
+            try {
+              data = parseManifest(await ws.admin('GET', `/anon/collections/${sha}`));
+            } catch {
+              // HTTP direct fallback via canonical /c/:hash endpoint
+              const resp = await fetch(`/c/${sha}`);
+              if (resp.ok) {
+                data = parseManifestText(await resp.text());
+              }
+            }
           }
         }
       }
@@ -130,22 +178,42 @@ export default function CollectionView() {
       manifestCache.set(sha, data);
       setState({ phase: 'ready', collection: data, source: sha });
     } catch (e) {
-      setLastErr(e?.message || String(e));
+      setLastErr(sanitizeUntrustedText(e?.message || String(e), 512));
       setState({ phase: 'error', collection: null, source: sha });
     }
-  }, []);
+  }, [queryPeer, querySignal]);
 
-  // hash 参数变化（路由跳转）→ 重新加载
-  useEffect(() => { if (hash) loadBySha(hash); }, [hash, loadBySha]);
+  useEffect(() => {
+    if (hash) loadBySha(hash);
+  }, [hash, loadBySha]);
 
   const loadJson = () => {
     try {
-      const data = parseManifest(JSON.parse(json));
+      const data = parseManifestText(json);
       setLastErr('');
       setState({ phase: 'ready', collection: data, source: 'pasted JSON' });
     } catch (e) {
-      setLastErr(e?.message || String(e));
+      setLastErr(sanitizeUntrustedText(e?.message || String(e), 512));
     }
+  };
+
+  const copyCanonicalCollectionLink = (mode = 'spa') => {
+    if (!state.source || state.source === 'pasted JSON') return;
+    try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const base = (import.meta.env?.BASE_URL || '/').replace(/\/$/, '');
+      const session = getNodeSession();
+      const url = buildCollectionUrl(state.source, {
+        baseUrl: `${origin}${base}`,
+        peerId: session?.peerId || queryPeer || '',
+        signalUrl: querySignal && validateSignalOrApiUrl(querySignal).valid ? querySignal : '',
+        name: state.collection?.friendly_name || '',
+        mode,
+      });
+      navigator.clipboard?.writeText(url);
+      setCopiedMode(mode);
+      setTimeout(() => setCopiedMode(''), 2000);
+    } catch {}
   };
 
   const inputPanel = (
@@ -159,7 +227,12 @@ export default function CollectionView() {
             placeholder="64-hex sha of the collection JSON"
             className="input-base flex-1 font-mono text-xs"
           />
-          <button onClick={() => input.trim() && loadBySha(input.trim())} className="btn-brand shrink-0">Load</button>
+          <button
+            onClick={() => input.trim() && loadBySha(input.trim())}
+            className="btn-brand shrink-0"
+          >
+            Load
+          </button>
         </div>
         <p className="text-[11px] text-gray-600 mt-1.5">
           The collection itself is a JSON stored in the sha filesystem — enter its sha to fetch it by content address.
@@ -175,7 +248,9 @@ export default function CollectionView() {
           placeholder={'{\n  "friendly_name": "demo",\n  "entries": [\n    { "path": "photos/a.jpg", "sha": "<64hex>", "preview": "<64hex>" }\n  ]\n}'}
           className="input-base w-full font-mono text-xs"
         />
-        <button onClick={loadJson} className="btn-brand mt-2">Browse JSON</button>
+        <button onClick={loadJson} className="btn-brand mt-2">
+          Browse JSON
+        </button>
       </div>
     </div>
   );
@@ -188,36 +263,78 @@ export default function CollectionView() {
             <h1 className="text-2xl font-bold">Collection</h1>
             <p className="text-sm text-gray-500 mt-0.5">Browse a collection manifest as a folder tree</p>
           </div>
-          {state.phase !== 'input' && (
-            <button onClick={() => setState({ phase: 'input', collection: null, source: '' })} className="btn-ghost">Load another</button>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {state.phase === 'ready' && state.source && state.source !== 'pasted JSON' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => copyCanonicalCollectionLink('spa')}
+                  className="btn-ghost text-xs"
+                >
+                  {copiedMode === 'spa' ? '✓ 已复制合集链接' : '🔗 复制唯一 URL (#/c/)'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyCanonicalCollectionLink('http')}
+                  className="btn-ghost text-xs"
+                >
+                  {copiedMode === 'http' ? '✓ 已复制直链' : '🌐 复制 HTTP 直链 (/c/)'}
+                </button>
+              </>
+            )}
+            {state.phase !== 'input' && (
+              <button
+                onClick={() => setState({ phase: 'input', collection: null, source: '' })}
+                className="btn-ghost"
+              >
+                Load another
+              </button>
+            )}
+          </div>
         </div>
 
         {lastErr && (
-          <div className="mb-4 text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">{lastErr}</div>
+          <div className="mb-4 text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+            {lastErr}
+          </div>
+        )}
+
+        {state.collection?._security?.aiInjectionSuspected && (
+          <div className="mb-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3.5 py-2.5">
+            🛡️ 安全网关提示：该合集清单中检测到异常控制字符或疑似恶意 AI 提示词注入载荷，已完成自动净化隔离。
+          </div>
         )}
 
         {state.phase === 'input' && inputPanel}
 
         {state.phase === 'loading' && (
-          <div className="text-center py-16 text-gray-500 text-sm">Loading collection {state.source.slice(0, 16)}…</div>
+          <div className="text-center py-16 text-gray-500 text-sm">
+            Loading collection {state.source.slice(0, 16)}…
+          </div>
         )}
 
         {state.phase === 'error' && (
           <div className="text-center py-16 text-gray-500 text-sm">
             <p>Could not load collection {state.source.slice(0, 16)}…</p>
-            <button onClick={() => setState({ phase: 'input', collection: null, source: '' })} className="btn-ghost mt-4">Back to input</button>
+            <button
+              onClick={() => setState({ phase: 'input', collection: null, source: '' })}
+              className="btn-ghost mt-4"
+            >
+              Back to input
+            </button>
           </div>
         )}
 
         {state.phase === 'ready' && state.collection && (
           <div>
-            <div className="text-xs text-gray-500 mb-3 flex items-center gap-1 flex-wrap">
+            <div className="text-xs text-gray-500 mb-3 flex items-center gap-2 flex-wrap">
               {typeof state.collection.friendly_name === 'string' && state.collection.friendly_name && (
-                <span>{state.collection.friendly_name}</span>
+                <span className="font-medium text-gray-300">{state.collection.friendly_name}</span>
               )}
               {state.source && state.source !== 'pasted JSON' && (
-                <span className="font-mono">{state.source.slice(0, 16)}…</span>
+                <span className="font-mono text-brand-300" title={state.source}>
+                  {state.source.slice(0, 16)}…
+                </span>
               )}
               <span>{state.collection.entries.length} entries</span>
             </div>

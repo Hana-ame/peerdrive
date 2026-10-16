@@ -45,7 +45,7 @@ func TwitterPicUsers(c *gin.Context) {
 	users, err := twitterSvc.ListUsers(ctx)
 	if err != nil {
 		log.LogDebug("ctrl-twitterpic: list users: %v", err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadGateway, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, users)
@@ -69,7 +69,7 @@ func TwitterPicBuild(c *gin.Context) {
 	res, err := twitterSvc.BuildUserCollection(ctx, username)
 	if err != nil {
 		log.LogDebug("ctrl-twitterpic: build %q: %v", username, err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadGateway, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -95,7 +95,7 @@ func TwitterPicCollection(c *gin.Context) {
 	}
 	data, err := twitterSvc.ReadCollection(c.Request.Context(), sha)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.Data(http.StatusOK, "application/json", data)

@@ -50,7 +50,10 @@ class MockPeer {
   emit(ev, ...args) { (this._events[ev] || []).forEach((fn) => fn(...args)) }
 }
 
-mock.module('peerjs', { namedExports: { Peer: MockPeer } })
+if (typeof mock?.module === 'function') {
+  mock.module('peerjs', { namedExports: { Peer: MockPeer } })
+}
+globalThis.Peer = MockPeer
 
 const { PeerMediaClient, KEEPALIVE_TIMEOUT } = await import('../src/core.js')
 // Node 无 URL.createObjectURL（浏览器 API），resolve 路径需 stub
@@ -207,7 +210,7 @@ test('keepalive：超时无帧 → teardown（closed），下次 load 重建连�
     openConn()
     openFileConns()
     // 推进 16s：期间无任何帧到达 → keepalive 超时 → teardown
-    mock.timers.tick(KEEPALIVE_TIMEOUT + 1000)
+    for (let i = 0; i < 4; i++) mock.timers.tick(5000)
     await assert.rejects(pA, /keepalive timeout|file channel closed/)
   } finally {
     mock.timers.reset()

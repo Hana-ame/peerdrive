@@ -18,7 +18,11 @@ import { dirname, join } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
-const src = readFileSync(join(root, 'panel', 'app.js'), 'utf8')
+const src = [
+  readFileSync(join(root, 'panel', 'app.js'), 'utf8'),
+  existsSync(join(root, 'panel', 'app-shares.js')) ? readFileSync(join(root, 'panel', 'app-shares.js'), 'utf8') : '',
+  existsSync(join(root, 'panel', 'app-transfers.js')) ? readFileSync(join(root, 'panel', 'app-transfers.js'), 'utf8') : '',
+].join('\n')
 const tpl = readFileSync(join(root, 'panel', 'template.html'), 'utf8')
 const distPath = join(root, 'dist', 'panel.html')
 const dist = existsSync(distPath) ? readFileSync(distPath, 'utf8') : ''

@@ -52,7 +52,7 @@ func ForkCollection(c *gin.Context) {
 
 	localID, err := collSvc.CreatePlain(req.Username, req.CollectionName)
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		c.JSON(http.StatusConflict, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 

@@ -39,6 +39,7 @@ func (s *FileService) ImportGatewayData(cid string, data []byte) (string, error)
 		Type:     model.FileTypeBlob,
 	})
 	_ = repository.InsertFileProvider(hashStr, "local", relPath)
+	_, _ = repository.UpsertFileIndex(hashStr, fullPath, cid, int64(len(data)), false)
 	return hashStr, nil
 }
 
@@ -79,6 +80,7 @@ func (s *FileService) RegisterBTFile(sha256hex string, size int64, srcPath strin
 	if err := repository.InsertFileProvider(sha256hex, "local", relPath); err != nil {
 		log.LogWarn("file-svc: RegisterBTFile InsertFileProvider: %v", err)
 	}
+	_, _ = repository.UpsertFileIndex(sha256hex, destPath, filepath.Base(srcPath), size, false)
 	return nil
 }
 

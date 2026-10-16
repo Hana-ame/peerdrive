@@ -57,7 +57,7 @@ func CastDisplay(c *gin.Context) {
 		Volume          *float64 `json:"volume"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + sanitizeErr(err, "request failed")})
 		return
 	}
 	if displayPeer == nil || displayPeer.DisplayManager() == nil {
@@ -79,7 +79,7 @@ func CastDisplay(c *gin.Context) {
 		Volume:    req.Volume,
 	}
 	if err := displayPeer.DisplayManager().Cast(nil, req.TargetSessionID, req.Channel, cmd); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -95,7 +95,7 @@ func ControlDisplay(c *gin.Context) {
 		Volume          *float64 `json:"volume"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + sanitizeErr(err, "request failed")})
 		return
 	}
 	if displayPeer == nil || displayPeer.DisplayManager() == nil {
@@ -112,7 +112,7 @@ func ControlDisplay(c *gin.Context) {
 		Volume:        req.Volume,
 	}
 	if err := displayPeer.DisplayManager().Control(nil, req.TargetSessionID, req.Channel, cmd); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -130,7 +130,7 @@ func ClearDisplay(c *gin.Context) {
 		return
 	}
 	if err := displayPeer.DisplayManager().Clear(nil, req.TargetSessionID, req.Channel); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})

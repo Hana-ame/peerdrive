@@ -2,16 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 根字号 16px → 22px：Tailwind 的字号/间距用 rem，大屏整体等比放大；移动端恢复 16px 保证紧凑与防止横向撑爆 */
+/* 标准 16px 根字号基准：修复此前 html 22px 导致的 rem 与 px 比例失调、顶栏挤压折行及卡片横向溢出问题 */
 html {
-  font-size: 22px;
+  font-size: 16px;
+  line-height: 1.5;
   overflow-x: hidden;
   max-width: 100vw;
+  box-sizing: border-box;
 }
-@media (max-width: 640px) {
-  html {
-    font-size: 16px;
-  }
+
+*, *::before, *::after {
+  box-sizing: inherit;
 }
 
 @layer base {
@@ -24,52 +25,45 @@ html {
     --color-danger: #ef4444;
     --color-info: #06b6d4;
 
-    --color-bg-base: #101014;
-    --color-bg-card: #191920;
-    --color-bg-raised: #21212a;
-    --color-bg-hover: #2a2a34;
-    --color-border-subtle: rgba(255, 255, 255, 0.06);
-    --color-border-card: #2b2b34;
+    --color-bg-base: #0d0e12;
+    --color-bg-card: #15171e;
+    --color-bg-raised: #1c1f28;
+    --color-bg-hover: #252936;
+    --color-border-subtle: rgba(255, 255, 255, 0.07);
+    --color-border-card: #262936;
 
     --radius-sm: 0.375rem;
     --radius-md: 0.5rem;
-    --radius-lg: 0.875rem;
+    --radius-lg: 0.75rem;
     --radius-full: 9999px;
   }
 }
 
-/* ── 统一组件工具类（2026-09-24 UI 风格批次）──
-   设计 token 见 tailwind.config.js（brand / surface / shadow / radius）;
-   这些类把「主按钮/幽灵按钮/输入框/徽章/卡片」收敛成一套，新代码优先引用。 */
 @layer components {
-  /* 主按钮：brand 渐变 + 微高光 + hover 抬升。替代刺眼的默认 blue-600 */
   .btn-brand {
     @apply inline-flex items-center justify-center gap-1.5 rounded-lg
       bg-gradient-to-b from-brand-500 to-brand-600 text-white text-sm font-medium
-      px-4 py-2 transition-all select-none
-      shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_6px_18px_-6px_rgba(99,102,241,0.55)]
+      px-3.5 py-2 transition-all select-none whitespace-nowrap
+      shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_14px_-4px_rgba(99,102,241,0.5)]
       hover:from-brand-400 hover:to-brand-600
-      hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_8px_22px_-6px_rgba(99,102,241,0.7)]
+      hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_6px_18px_-4px_rgba(99,102,241,0.65)]
       active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
   }
-  /* 次级按钮：白 4% 底 + 细描边，深色玻璃风 */
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-1.5 rounded-lg
       bg-white/[0.04] border border-white/10 text-gray-300 text-sm font-medium
-      px-4 py-2 transition-all select-none
-      hover:bg-white/[0.08] hover:text-white active:scale-[0.98];
+      px-3.5 py-2 transition-all select-none whitespace-nowrap
+      hover:bg-white/[0.08] hover:text-white active:scale-[0.98]
+      disabled:opacity-50 disabled:pointer-events-none;
   }
-  /* 输入框 / 文本框 */
   .input-base {
     @apply w-full rounded-lg bg-white/[0.04] border border-white/10
-      text-sm text-gray-200 placeholder-gray-500 px-3.5 py-2.5 transition-all
+      text-sm text-gray-200 placeholder-gray-500 px-3.5 py-2 transition-all
       focus:outline-none focus:border-brand-400/60 focus:ring-2 focus:ring-brand-500/20;
   }
-  /* 软徽章：半透明底色 + 细描边 */
   .badge-soft {
-    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border;
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border whitespace-nowrap;
   }
-  /* 标准卡片：surface 分层的默认面孔 */
   .card-surface {
     @apply rounded-card bg-surface-card border border-surface-border shadow-card;
   }
@@ -77,23 +71,30 @@ html {
 
 body {
   margin: 0;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
-  background-color: #101014;
+  background-color: var(--color-bg-base);
+  color: #e4e4e7;
   overflow-x: hidden;
   max-width: 100vw;
-  /* 顶部柔光：给近黑的底一点品牌色环境光，避免死板 */
-  background-image: radial-gradient(ellipse 90% 45% at 50% -12%, rgb(99 102 241 / 0.1), transparent);
+  background-image: radial-gradient(ellipse 85% 40% at 50% -10%, rgba(99, 102, 241, 0.12), transparent);
   background-attachment: fixed;
 }
 
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #52525b; border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #52525b; }
 
-/* ── Mobile-first touch targets & Safe Areas ── */
+.no-scrollbar, .scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar, .scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 @media (max-width: 768px) {
-  /* Prevent iOS auto-zoom on form inputs */
   input, select, textarea {
     font-size: 16px;
   }
@@ -107,121 +108,14 @@ body {
   .touch-friendly {
     padding: 12px 16px;
   }
-}
-
-/* ── Safe areas support for notch & home bar (iOS / Android) ── */
-:root {
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --safe-left: env(safe-area-inset-left, 0px);
-  --safe-right: env(safe-area-inset-right, 0px);
-}
-
-.safe-area-top {
-  padding-top: max(var(--safe-top), 0px);
-}
-.safe-area-bottom {
-  padding-bottom: max(var(--safe-bottom), 0px);
-}
-
-/* ── PWA standalone mode / safe areas ── */
-@media (display-mode: standalone) {
-  .pwa-safe-top {
-    padding-top: env(safe-area-inset-top, 0px);
-  }
-  .pwa-safe-bottom {
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-  }
-}
-
-/* ── Pull-to-refresh indicator ── */
-.pull-indicator {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: #a1a1aa;
-  font-size: 12px;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  pointer-events: none;
-  z-index: 100;
-}
-.pull-indicator.visible {
-  opacity: 1;
-}
-
-/* ── Smooth page transitions ── */
-.page-enter {
-  opacity: 0;
-  transform: translateY(10px);
-}
-.page-enter-active {
-  opacity: 1;
-  transform: translateY(0);
-  transition: all 0.2s ease;
-}
-
-/* ── Android-style ripple effect ── */
-.ripple {
-  position: relative;
-  overflow: hidden;
-}
-.ripple::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%), rgba(255,255,255,0.15) 0%, transparent 60%);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  pointer-events: none;
-}
-.ripple:active::after {
-  opacity: 1;
-  transition: opacity 0s;
-}
-
-/* ── Raise AI assistant button above mobile bottom nav ── */
-@media (max-width: 768px) {
-  button.fixed.bottom-6.z-40 {
-    bottom: 80px !important;
-  }
-}
-
-/* ── Bottom safe area for mobile nav ── */
-.mobile-nav-safe {
-  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
-}
-
-/* ── Hide scrollbar for horizontal-scroll containers ── */
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
-}
-
-/* ── Hide desktop-only elements on mobile ── */
-@media (max-width: 768px) {
   .hide-on-mobile {
     display: none !important;
   }
+  .has-mobile-nav {
+    padding-bottom: 72px;
+  }
 }
 
-/* The iwara page (src/pages/Iwara.jsx) deliberately adds no CSS of its own: it
-   is a netdisk-style browser (grid cards + one card-surface table, like
-   Drive.jsx) and reuses the shared Tailwind utilities and .card-surface /
-   .input-base / .btn-brand / .btn-ghost component classes. An earlier cut had a
-   forum-post skeleton (.iwara-bbs / .authorbox / .tiptop / .readbot) and it was
-   deleted — the layout reference was wrong. */
-
-/* ── Show mobile-only elements ── */
 .show-on-mobile {
   display: none !important;
 }
@@ -231,9 +125,12 @@ body {
   }
 }
 
-/* ── Bottom padding for mobile content to avoid nav overlap ── */
-@media (max-width: 768px) {
-  .has-mobile-nav {
-    padding-bottom: 72px;
-  }
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
 }
+
+.safe-area-top { padding-top: max(var(--safe-top), 0px); }
+.safe-area-bottom, .mobile-nav-safe { padding-bottom: max(var(--safe-bottom), 0px); }

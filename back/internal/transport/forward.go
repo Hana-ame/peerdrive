@@ -117,6 +117,12 @@ func (s *PeerJSService) SetForwardRules(rules map[string][]int) {
 	}
 }
 
+// maxForwardRules and maxPortsPerRule cap runtime forwarding rules (Issue #402).
+const (
+	maxForwardRules = 64
+	maxPortsPerRule = 32
+)
+
 // AddForwardRule 运行时追加授权规则（POST /p2p/forward/create 用，不持久化）。
 func (s *PeerJSService) AddForwardRule(key string, port int) error {
 	if key == "" || port <= 0 || port > 65535 {
@@ -125,7 +131,19 @@ func (s *PeerJSService) AddForwardRule(key string, port int) error {
 	s.forwardMu.Lock()
 	defer s.forwardMu.Unlock()
 	s.ensureForwardMaps()
-	s.forwardRules[key] = append(s.forwardRules[key], port)
+	existing, exists := s.forwardRules[key]
+	if !exists && len(s.forwardRules) >= maxForwardRules {
+		return errors.New("maximum forward rules limit reached")
+	}
+	for _, p := range existing {
+		if p == port {
+			return nil // idempotent duplicate port
+		}
+	}
+	if len(existing) >= maxPortsPerRule {
+		return errors.New("maximum ports per forward rule reached")
+	}
+	s.forwardRules[key] = append(existing, port)
 	return nil
 }
 

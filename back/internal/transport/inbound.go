@@ -267,7 +267,35 @@ func (s *PeerJSService) redactDisallowedPath(fi FileInfo) FileInfo {
 
 // serveCreate 处理 create：登记外部文件（sha256 → 绝对路径，不复制文件）。
 // 请求 {type:"create", path} → 响应 {type:"created", hash,size,name,path,seq} | err
+func (s *PeerJSService) isUntrustedRemoteWhenAuthConfigured(c Session) bool {
+	if isSelfSession(c) {
+		return false
+	}
+	if s.cfg == nil {
+		return false
+	}
+	if s.cfg.AdminToken == "" && s.cfg.AuthServerURL == "" && s.cfg.PeerPSK == "" {
+		return false
+	}
+	s.pendingMu.Lock()
+	st := s.pending[c]
+	s.pendingMu.Unlock()
+	if st != nil {
+		st.mu.Lock()
+		ok := st.isLocal || st.pskOK
+		st.mu.Unlock()
+		if ok {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *PeerJSService) serveCreate(c Session, r dcResp) {
+	if s.isUntrustedRemoteWhenAuthConfigured(c) {
+		_ = c.SendJSON(dcResp{Type: "err", Code: "FORBIDDEN", Msg: "permission denied: create requires local session or PSK", ReqID: r.ReqID})
+		return
+	}
 	if r.Path == "" {
 		_ = c.SendJSON(dcResp{Type: "err", Msg: "path required", ReqID: r.ReqID})
 		return
@@ -453,6 +481,10 @@ func (s *PeerJSService) serveInfo(c Session, r dcResp) {
 // 请求 {type:"delete", hash} → 响应 {type:"deleted", hash, seq}
 // L6：响应补 seq（REFACTOR §4 协议要求 deleted{hash,seq}），对端 sync 游标跟踪删除。
 func (s *PeerJSService) serveDelete(c Session, r dcResp) {
+	if s.isUntrustedRemoteWhenAuthConfigured(c) {
+		_ = c.SendJSON(dcResp{Type: "err", Code: "FORBIDDEN", Msg: "permission denied: delete requires local session or PSK", ReqID: r.ReqID})
+		return
+	}
 	seq, err := s.fileIndex.Delete(r.Hash)
 	if err != nil {
 		_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})

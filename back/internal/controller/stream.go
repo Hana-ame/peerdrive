@@ -39,7 +39,7 @@ func GetStreamManifest(c *gin.Context) {
 	}
 	manifest, err := streamPeer.StreamManager().GetManifest(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, manifest)
@@ -53,7 +53,7 @@ func CreateStream(c *gin.Context) {
 		MimeType string `json:"mimeType"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + sanitizeErr(err, "request failed")})
 		return
 	}
 	if streamPeer == nil || streamPeer.StreamManager() == nil {
@@ -62,7 +62,7 @@ func CreateStream(c *gin.Context) {
 	}
 	manifest, err := streamPeer.StreamManager().CreateStream(nil, req.StreamID, req.Title, req.MimeType)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, manifest)
@@ -80,7 +80,7 @@ func PushStreamChunk(c *gin.Context) {
 		Timestamp int64   `json:"timestamp"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + sanitizeErr(err, "request failed")})
 		return
 	}
 	if streamPeer == nil || streamPeer.StreamManager() == nil {
@@ -97,7 +97,7 @@ func PushStreamChunk(c *gin.Context) {
 	}
 	res, err := streamPeer.StreamManager().PushChunk(nil, id, chunk)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, res)
@@ -111,7 +111,7 @@ func CloseStream(c *gin.Context) {
 		return
 	}
 	if err := streamPeer.StreamManager().CloseStream(nil, id); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "closed"})

@@ -34,7 +34,10 @@ package transport
 //     carries it
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"strings"
 	"fmt"
 	"net"
 	"sync"
@@ -427,10 +430,84 @@ func (s *PeerJSService) bindConnPrepared(c Session, st *connState, old Session) 
 //     (discovery background: initial version went async, all upload chunks lost)
 //   - fwd-data header (forwarding chunk declaration): same header-chunk contiguity
 //     constraint as file transfer; in-pump frame-ordered processing means no race
+
+// BinaryHeader32Magic identifies a v2 self-routing 32-byte binary frame header (#378 A7):
+// [0..4]:   "PD02" magic (4B)
+// [4..20]:  req_id ASCII/UTF-8 padded with NUL bytes (16B)
+// [20..28]: offset uint64 big-endian (8B)
+// [28..32]: flags uint32 big-endian (4B)
+// Followed immediately by the raw payload bytes.
+var binaryHeader32Magic = []byte{'P', 'D', '0', '2'}
+
+func parseBinaryHeader32(raw []byte) (reqID string, offset int64, payload []byte, ok bool) {
+	if len(raw) < 32 || !bytes.Equal(raw[:4], binaryHeader32Magic) {
+		return "", 0, raw, false
+	}
+	idBytes := bytes.TrimRight(raw[4:20], "\x00")
+	reqID = string(idBytes)
+	offset = int64(binary.BigEndian.Uint64(raw[20:28]))
+	return reqID, offset, raw[32:], reqID != ""
+}
+
+// eventToLegacyType maps v2 dot-namespaced event names (#378 A4/B2) to canonical internal verbs.
+var eventToLegacyType = map[string]string{
+	"file.req":       "req",
+	"file.meta":      "meta",
+	"file.data":      "data",
+	"file.done":      "done",
+	"file.err":       "err",
+	"share.req":      "share",
+	"share.resp":     "share-resp",
+	"auth.psk":       "psk-auth",
+	"auth.psk_ok":    "psk-ok",
+	"auth.psk_err":   "psk-err",
+	"admin.request":  "admin",
+	"admin.response": "admin-resp",
+	"admin.binary":   "admin-bin",
+	"tunnel.open":    "fwd-open",
+	"tunnel.auth":    "fwd-auth",
+	"tunnel.data":    "fwd-data",
+	"tunnel.close":   "fwd-close",
+}
+
+// normalizeInboundResp normalizes a v2 envelope {"event":"...","req_id":"...","data":{...}}
+// into dcResp fields so both v1 and v2 clients interoperate seamlessly (#378).
+func normalizeInboundResp(raw []byte, r *dcResp) {
+	if r.Type != "" && r.ReqID != "" {
+		return
+	}
+	var env struct {
+		Event string          `json:"event"`
+		ReqID string          `json:"req_id"`
+		Code  any             `json:"code"`
+		Data  json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return
+	}
+	if len(env.Data) > 0 && env.Data[0] == '{' {
+		_ = json.Unmarshal(env.Data, r)
+	}
+	if r.Type == "" && env.Event != "" {
+		if mapped, ok := eventToLegacyType[env.Event]; ok {
+			r.Type = mapped
+		} else {
+			r.Type = strings.ReplaceAll(env.Event, ".", "-")
+		}
+	}
+	if r.ReqID == "" && env.ReqID != "" {
+		r.ReqID = env.ReqID
+	}
+}
+
 func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame) {
 	if msg.IsText {
 		var r dcResp
-		if err := json.Unmarshal(msg.Data, &r); err != nil || r.Type == "" {
+		if err := json.Unmarshal(msg.Data, &r); err != nil {
+			return
+		}
+		normalizeInboundResp(msg.Data, &r)
+		if r.Type == "" {
 			return
 		}
 		// PSK gate: handle handshake frames first, then filter "make me work" inbound
@@ -558,6 +635,26 @@ func (s *PeerJSService) dispatchFrame(c Session, st *connState, msg peerjs.Frame
 			s.routeResponse(st, r, msg.Data)
 		}
 		return
+	}
+	// Binary data chunk: support both v2 32-byte self-routing header ("PD02" + req_id)
+	// and v1 contiguous expect routing (#378 A7).
+	if hdrReqID, _, payload, hasHdr := parseBinaryHeader32(msg.Data); hasHdr {
+		st.mu.Lock()
+		fByID := st.fetches[hdrReqID]
+		st.mu.Unlock()
+		if fByID != nil {
+			select {
+			case fByID.q <- payload:
+				st.mu.Lock()
+				fByID.received += int64(len(payload))
+				if st.expect == fByID && fByID.received >= fByID.size {
+					st.expect = nil
+				}
+				st.mu.Unlock()
+			case <-fByID.closed:
+			}
+			return
+		}
 	}
 	// Binary data chunk: routing decision in pump (cheap, maintains ordering consistency
 	// with text frames); disk IO (WriteAt/Complete) delegated to connection-level worker (H5)

@@ -241,6 +241,16 @@ func (rt *Router) Engine() *gin.Engine {
 	r.HEAD("/sha256sum/:sha256", controller.DownloadBySHA256Local)
 	r.GET("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
 	r.HEAD("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
+
+	// Canonical self-contained content-addressed URLs for SHA256 files and Collections:
+	//   GET/HEAD /f/:sha256[/:filename] — direct file access by SHA256 (with Range, ETag, ?meta=1)
+	//   GET      /c/:hash[/*filepath]   — direct collection manifest or entry access by SHA256
+	r.GET("/f/:sha256", controller.DirectFileBySHA256)
+	r.HEAD("/f/:sha256", controller.DirectFileBySHA256)
+	r.GET("/f/:sha256/:filename", controller.DirectFileBySHA256)
+	r.HEAD("/f/:sha256/:filename", controller.DirectFileBySHA256)
+	r.GET("/c/:hash", controller.DirectCollectionByHash)
+	r.GET("/c/:hash/*filepath", controller.DirectCollectionByHash)
 	r.GET("/ipfs/:cid", controller.DownloadByCID)
 
 	// Universal multi-protocol download endpoints.
@@ -501,15 +511,29 @@ func (rt *Router) Engine() *gin.Engine {
 	// got a verb, and WebRTC connections don't handle admin (serveAdmin rejects by session ID),
 	// admin surface is only exposed to local WS.
 	// Frontend api.js no longer directly fetches HTTP after migration, all goes through /ws/peer admin frames.
+	// Support /api/v1 prefix across all HTTP routes and WS admin forwarding (#378 A1):
+	// Requests arriving as /api/v1/<path> are transparently dispatched to /<path> on the engine.
+	r.NoRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/") || c.Request.URL.Path == "/api/v1" {
+			trimmed := strings.TrimPrefix(c.Request.URL.Path, "/api/v1")
+			if trimmed == "" {
+				trimmed = "/"
+			}
+			c.Request.URL.Path = trimmed
+			c.Request.URL.RawPath = ""
+			r.HandleContext(c)
+			return
+		}
+		c.String(http.StatusNotFound, "404 page not found")
+	})
+
 	if peerjsSvc := rt.deps.PeerJSService; peerjsSvc != nil {
 		peerjsSvc.SetAdminHandler(func(req *http.Request) (int, []byte, string, error) {
-			// Internally forwarded requests have no TCP source (they come from an established local WS session);
-			// without setting RemoteAddr, ClientIP() is an empty string, and rate limiting would bucket
-			// all admin requests into the same "unknown source" bucket — admin console 429 after a few clicks.
-			// Tagging as localhost is semantically correct: admin surface already only serves local WS
-			// (serveAdmin rejects remote by session ID).
 			if req.RemoteAddr == "" {
 				req.RemoteAddr = "127.0.0.1:0"
+			}
+			if strings.HasPrefix(req.URL.Path, "/api/v1/") {
+				req.URL.Path = strings.TrimPrefix(req.URL.Path, "/api/v1")
 			}
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)

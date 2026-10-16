@@ -60,7 +60,7 @@ func DownloadBySHA256Internal(c *gin.Context, hash string) {
 		ctx := c.Request.Context()
 		data, protocol, err := universalDownloader.Download(ctx, hash)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": sanitizeErr(err, "request failed")})
 			return
 		}
 		c.Header("X-Protocol", protocol)

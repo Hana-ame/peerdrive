@@ -111,7 +111,7 @@ func routeTable(t *testing.T) []string {
 
 // goldenRouteTable was captured from the tree before the HTTP shell was split
 // into internal/httpd. Do not regenerate from a modified tree.
-const goldenRouteTable = `122
+const goldenRouteTable = `128
 DELETE /anon/collections/:hash/entries
 DELETE /bt/download/:infohash
 DELETE /collections/:id/:collection_name/entries/*path
@@ -132,6 +132,8 @@ GET /bt/download/:infohash/torrent
 GET /bt/downloads
 GET /bt/stats
 GET /bt/status
+GET /c/:hash
+GET /c/:hash/*filepath
 GET /collections
 GET /collections/:id
 GET /collections/:id/*filepath
@@ -141,6 +143,8 @@ GET /display/screens
 GET /display/status
 GET /download/:hash
 GET /download/:hash/sources
+GET /f/:sha256
+GET /f/:sha256/:filename
 GET /files
 GET /files/browse
 GET /files/inbox
@@ -172,6 +176,8 @@ GET /tags
 GET /tags/search
 GET /tags/sha/:sha
 GET /tags/summary
+HEAD /f/:sha256
+HEAD /f/:sha256/:filename
 HEAD /sha256sum/:sha256
 HEAD /sha256sum/:sha256/:filename
 POST /actions/fork
@@ -241,12 +247,12 @@ PUT /anon/collections/:hash/visibility`
 // regression when a router assembly is refactored — fails here with a diff.
 func TestGoldenRouteTable(t *testing.T) {
 	got := routeTable(t)
-	if len(got) != 122 {
-		t.Fatalf("route count = %d, want 122; the assembled router registers a different number of routes\nGOT:\n%s",
+	if len(got) != 128 {
+		t.Fatalf("route count = %d, want 128; the assembled router registers a different number of routes\nGOT:\n%s",
 			len(got), strings.Join(got, "\n"))
 	}
 	want := strings.Split(strings.TrimSpace(goldenRouteTable), "\n")
-	if want[0] != "122" {
+	if want[0] != "128" {
 		t.Fatalf("internal error: golden header is %q", want[0])
 	}
 	want = want[1:]
@@ -410,7 +416,7 @@ GET     /health                          -> 200 ct="application/json; charset=ut
 GET     /ready                           -> 503 ct="application/json; charset=utf-8" kind=json sha=771b5996d72d0e3399407b1e53bdf7d1ff809e69edc0476fc0e58de56d9ea0ab
 GET     /p2p/auth/status                 -> 200 ct="application/json; charset=utf-8" kind=json sha=885e0739e84cc31e2fd9139722b1295042e807822fc9ffafa3c9da0b47a97a2a
 GET     /swagger/index.html              -> 200 ct="text/html; charset=utf-8"       kind=raw  sha=b238c541fb6eca4324529c6e97087d872755f782f333b27e2838e6ce40923520
-GET     /panel                           -> 200 ct="text/html; charset=utf-8"       kind=raw  sha=0f833259cb9027dc6ce532bbe38e8ddeab385039703085c6e4435c76f4452b1a
+GET     /panel                           -> 200 ct="text/html; charset=utf-8"       kind=raw  sha=082278e645e31cdfca29d8de39a18c1f590a432ae83d0b448738cc2f8003c15e
 GET     /peerjs.min.js                   -> 200 ct="application/javascript; charset=utf-8" kind=raw  sha=7604d8c31bec4f134b0d15c2d80b1d095ea18af005354f439f14291fcd7b4168
 GET     /no-such-path                    -> 404 ct="text/plain"                     kind=raw  sha=99eb12f2ab3c4866a353e098ffa3cb7a967e617c49b98480394ec5d8ea92b094
 POST    /collections/register-local      -> 503 ct="application/json; charset=utf-8" kind=json sha=7d0dc66ad427dd85149325e08adb1246d7f6858068a8c4d58f4f34dc46096f74

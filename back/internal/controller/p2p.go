@@ -101,7 +101,7 @@ func PinCID(c *gin.Context) {
 	data, err := ipfsGatewayProvider.FetchByCID(ctx, cidParam)
 	if err != nil {
 		log.LogError("ctrl-p2p: PinCID fetch %s failed: %v", cidParam, err)
-		c.JSON(http.StatusNotFound, gin.H{"error": "failed to fetch CID from gateways: " + err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"error": "failed to fetch CID from gateways: " + sanitizeErr(err, "request failed")})
 		return
 	}
 

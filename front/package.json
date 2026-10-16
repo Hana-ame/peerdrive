@@ -1,17 +1,21 @@
 {
   "name": "peerdrive-web",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:node": "node --test tests/node/transport_and_url.test.mjs tests/node/security_and_permissions.test.mjs",
+    "lint": "eslint src tests",
+    "format": "prettier --write \"src/**/*.{js,jsx,css,ts}\" \"tests/**/*.{js,jsx,mjs}\""
   },
   "dependencies": {
     "peerdrive-client": "file:../packages/peerdrive-client",
+    "peerdrive-core": "file:../packages/peerdrive-core",
     "peerjs": "^1.5.5",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
@@ -23,8 +27,10 @@
     "@testing-library/react": "^16.3.2",
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.20",
+    "eslint": "^9.15.0",
     "happy-dom": "^20.9.0",
     "postcss": "^8.5.29",
+    "prettier": "^3.4.2",
     "tailwindcss": "^3.4.17",
     "vite": "^8.3.4",
     "vitest": "^4.1.11"

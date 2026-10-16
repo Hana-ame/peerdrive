@@ -89,7 +89,7 @@ func GetPeerShares(c *gin.Context) {
 	snap, err := peerShareSvc.RequestShares(peer)
 	if err != nil {
 		log.LogWarn("ctrl-node-market: request shares from %s failed: %v", peer, err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadGateway, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -145,7 +145,7 @@ func JoinNode(c *gin.Context) {
 	}
 	if err := nodeDir.Join(req.Peer); err != nil {
 		log.LogWarn("ctrl-node-market: join %s failed: %v", req.Peer, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "joined", "peer": req.Peer})
@@ -163,7 +163,7 @@ func LeaveNode(c *gin.Context) {
 		return
 	}
 	if err := nodeDir.Leave(peer); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "left", "peer": peer})

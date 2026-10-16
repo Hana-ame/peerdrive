@@ -3,7 +3,7 @@
 // ② Listen for the SW's pd-fetch messages: SW requests a segment (Range) of a
 //    hash → use the current PeerJS client.stream(hash, {offset, size}) to
 //    send back in chunks, implementing resumable preview of large files.
-import { getNodeSession } from '../../lib/nodeSession';
+import { getNodeSession } from '../../lib/nodeSession.js';
 
 let registered = false;
 const RELOAD_FLAG = 'pd-sw-reloaded';

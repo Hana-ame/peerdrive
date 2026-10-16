@@ -175,7 +175,7 @@ func BEP44Get(c *gin.Context) {
 	data, err := btSvc.GetImmutable(target)
 	if err != nil {
 		log.LogError("ctrl-p2p: BEP44Get failed: %v", err)
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 

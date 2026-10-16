@@ -19,10 +19,14 @@
 // util object (no Peer), Peer is only on named exports. Empirical test (2026-08-18 browser E2E
 // exposed): in IIFE, Peer destructured as undefined → "yt is not a constructor".
 // Three-way fallback: namespace named export (vite/ESM) → CJS default (Node) → default.default.
-import peerjsPkg from 'peerjs'
-import * as peerjsNS from 'peerjs'
-const Peer =
-  peerjsNS.Peer || peerjsPkg.Peer || (peerjsPkg.default && peerjsPkg.default.Peer)
+let DefaultPeer = globalThis.Peer || null
+try {
+  const peerjsNS = await import('peerjs')
+  const peerjsPkg = peerjsNS.default || peerjsNS
+  DefaultPeer = peerjsNS.Peer || peerjsPkg.Peer || (peerjsPkg.default && peerjsPkg.default.Peer) || DefaultPeer
+} catch {
+  /* Fallback to globalThis.Peer in test/browser-global environments */
+}
 import {
   makeUrlRequest, parseFrame, isBinaryFrame, toUint8Array, nextReqId,
 } from './protocol.js'
@@ -237,7 +241,8 @@ class ConnectionSlot {
   open() {
     const sig = this.signaling
     const dbg = typeof window !== 'undefined' && window.__PDM_DEBUG ? 3 : 0
-    const peer = new Peer(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
+    const PeerCtor = globalThis.Peer || DefaultPeer
+    const peer = new PeerCtor(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
       host: sig.host, port: sig.port, secure: sig.secure, key: sig.key, path: sig.path || '/',
       config: sig.config || { iceServers: [] },
       debug: dbg,
@@ -246,6 +251,7 @@ class ConnectionSlot {
     const timeout = setTimeout(() => {
       if (!this.ready && !this.closed) this.failAll('peerjs signaling timeout')
     }, 15000)
+    timeout.unref?.()
     peer.on('error', (err) => {
       clearTimeout(timeout)
       if (!this.ready && !this.closed) this.failAll(`peerjs error: ${err?.type || err}`)
@@ -289,6 +295,7 @@ class ConnectionSlot {
   // handleControlData handles control channel data (only receives ping-ack).
   handleControlData(data) {
     this.lastActive = Date.now()
+    this._kaTicks = 0
     if (typeof data === 'string') {
       const msg = parseFrame(data)
       if (msg?.type === 'ping-ack') return // keepalive response
@@ -298,6 +305,7 @@ class ConnectionSlot {
   // handleFileData handles file channel data.
   handleFileData(reqId, data) {
     this.lastActive = Date.now()
+    this._kaTicks = 0
     const p = this.pending.get(reqId)
     if (!p) return
 
@@ -345,9 +353,11 @@ class ConnectionSlot {
   // startKeepalive starts the disconnect detection timer (called after controlConn opens).
   startKeepalive() {
     this.lastActive = Date.now()
+    this._kaTicks = 0
     this.kaTimer = setInterval(() => {
       if (this.closed) { clearInterval(this.kaTimer); return }
-      if (Date.now() - this.lastActive > KEEPALIVE_TIMEOUT) {
+      this._kaTicks = (this._kaTicks || 0) + 1
+      if (Date.now() - this.lastActive > KEEPALIVE_TIMEOUT || this._kaTicks * KEEPALIVE_INTERVAL >= KEEPALIVE_TIMEOUT) {
         clearInterval(this.kaTimer)
         this.teardown('keepalive timeout')
         return
@@ -358,6 +368,7 @@ class ConnectionSlot {
         }
       } catch { /* connection dead, timeout fallback */ }
     }, KEEPALIVE_INTERVAL)
+    this.kaTimer.unref?.()
   }
 
   // warmUp pre-warms the channel pool to reduce first-request latency.

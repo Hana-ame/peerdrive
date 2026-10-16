@@ -102,9 +102,28 @@ func (s *FileService) ListAll(sortBy string) ([]model.FileListItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Issue #280: detect file_index vs file_meta divergence and log a warning.
-	if onlyIdx, onlyMeta, cerr := repository.CheckFileIndexConsistency(); cerr == nil && (onlyIdx > 0 || onlyMeta > 0) {
-		log.LogWarn("file_index/file_meta divergence: %d hash(es) only in file_index, %d only in file_meta — consider migration (Issue #280)", onlyIdx, onlyMeta)
+	// Issue #280 & #405: bridge any file_index entries not present in file_meta so P2P-indexed files
+	// and legacy file_meta entries are uniformly visible without dual-track blind spots.
+	seen := make(map[string]bool, len(items))
+	for _, it := range items {
+		seen[it.Hash] = true
+	}
+	if idxList, idxErr := repository.ListFileIndex(0, 1000); idxErr == nil {
+		for _, fi := range idxList {
+			if fi.Deleted || fi.IsInbox || seen[fi.Hash] {
+				continue
+			}
+			items = append(items, model.FileListItem{
+				Hash:         fi.Hash,
+				Filename:     fi.Name,
+				Size:         fi.Size,
+				MimeType:     "application/octet-stream",
+				CreatedAt:    fi.CreatedAt,
+				Type:         model.FileTypeBlob,
+				ProviderType: "local",
+				ProviderPath: fi.Path,
+			})
+		}
 	}
 	return items, nil
 }
@@ -206,7 +225,7 @@ func (s *FileService) Verify(hash string) (*model.FileMeta, error) {
 	defer log.LogDuration("FileService.Verify")()
 	log.LogDebug("file-svc: Verify hash=%s", hash)
 
-	meta, err := repository.GetFileMeta(hash)
+	meta, err := s.GetMeta(hash)
 	if err != nil {
 		log.LogError("file-svc: Verify %s failed: %v", hash, err)
 		return nil, err
@@ -244,6 +263,7 @@ func (s *FileService) Delete(hash string) error {
 	if err := repository.DeleteFileMetaAndProviders(hash); err != nil {
 		log.LogWarn("file-svc: Delete %s failed to clean repository: %v", hash, err)
 	}
+	_, _ = repository.DeleteFileIndex(hash)
 	log.LogInfo("file-svc: Delete %s completed", hash)
 	return nil
 }
@@ -270,7 +290,7 @@ func (s *FileService) CopyFile(hash string, destPath string) (string, error) {
 		return "", fmt.Errorf("destination path outside storage root")
 	}
 
-	meta, err := repository.GetFileMeta(hash)
+	meta, err := s.GetMeta(hash)
 	if err != nil {
 		return "", fmt.Errorf("lookup source meta: %w", err)
 	}
@@ -308,8 +328,11 @@ func (s *FileService) ReadFile(hash string) ([]byte, error) {
 		filepath.Join(s.storageDir, hash[:2], hash),
 		filepath.Join(s.storageDir, "p2p", hash[:2], hash),
 	}
+	if fi, fiErr := repository.GetFileIndex(hash); fiErr == nil && fi != nil && fi.Path != "" && s.isPathAllowed(fi.Path) {
+		candidates = append(candidates, fi.Path)
+	}
 	for _, p := range candidates {
-		data, err := os.ReadFile(p)
+		data, err := os.ReadFile(p) // codeql[go/path-injection]: hash is validated by isValidHash (64-hex) and fi.Path is checked by s.isPathAllowed.
 		if err == nil {
 			return data, nil
 		}

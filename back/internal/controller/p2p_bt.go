@@ -59,7 +59,7 @@ func BTTorrentUpload(c *gin.Context) {
 	meta, err := btClient.AddTorrentBytes(data)
 	if err != nil {
 		log.LogError("ctrl-p2p: BTTorrentUpload failed: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -94,7 +94,7 @@ func BTMagnetResolve(c *gin.Context) {
 	meta, err := btClient.AddMagnetURI(req.URI)
 	if err != nil {
 		log.LogError("ctrl-p2p: BTMagnetResolve failed: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -137,7 +137,7 @@ func BTPauseDownload(c *gin.Context) {
 	infohash := c.Param("infohash")
 	if err := btClient.PauseDownload(infohash); err != nil {
 		log.LogWarn("ctrl-p2p: BTPauseDownload %s failed: %v", infohash, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -156,7 +156,7 @@ func BTResumeDownload(c *gin.Context) {
 	infohash := c.Param("infohash")
 	if err := btClient.ResumeDownload(infohash); err != nil {
 		log.LogWarn("ctrl-p2p: BTResumeDownload %s failed: %v", infohash, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -175,7 +175,7 @@ func BTRemoveDownload(c *gin.Context) {
 	infohash := c.Param("infohash")
 	if err := btClient.RemoveDownload(infohash); err != nil {
 		log.LogWarn("ctrl-p2p: BTRemoveDownload %s failed: %v", infohash, err)
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -221,7 +221,7 @@ func BTSeedTorrent(c *gin.Context) {
 	infohash := c.Param("infohash")
 	if err := btClient.StartSeed(infohash); err != nil {
 		log.LogWarn("ctrl-p2p: BTSeedTorrent %s failed: %v", infohash, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -240,7 +240,7 @@ func BTStopSeed(c *gin.Context) {
 	infohash := c.Param("infohash")
 	if err := btClient.StopSeed(infohash); err != nil {
 		log.LogWarn("ctrl-p2p: BTStopSeed %s failed: %v", infohash, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -275,7 +275,7 @@ func BTDownloadTorrent(c *gin.Context) {
 	infohash := c.Param("infohash")
 	data, err := btClient.GetTorrentBytes(infohash)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -330,7 +330,7 @@ func BTSeedCollection(c *gin.Context) {
 	storageDir := c.MustGet("storageDir").(string)
 	coll, err := collSvc.GetAnonByHash(req.CollectionHash, storageDir)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found: " + err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found: " + sanitizeErr(err, "request failed")})
 		return
 	}
 
@@ -433,7 +433,7 @@ func BTSeedCollection(c *gin.Context) {
 	meta, err := btClient.AddTorrentBytes(torrentBytes)
 	if err != nil {
 		btClient.SetAutoSeed(ih) // May duplicate but harmless; cleanup is not handled separately at the handler level
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 

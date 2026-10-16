@@ -68,7 +68,7 @@ func StartPull(c *gin.Context) {
 	job, err := peerPuller.Start(req.Peer, req.Hash, req.Name, req.Path, "")
 	if err != nil {
 		log.LogWarn("ctrl-peer-pull: start pull from %s failed: %v", req.Peer, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"job": job})
@@ -96,7 +96,7 @@ func StartPullCollection(c *gin.Context) {
 	}
 	snap, err := peerShareSvc.RequestShares(req.Peer)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadGateway, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	var found bool
@@ -184,7 +184,7 @@ func CancelPull(c *gin.Context) {
 		return
 	}
 	if err := peerPuller.Cancel(req.ID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "cancelled", "id": req.ID})
@@ -208,7 +208,7 @@ func GetAria2Status(c *gin.Context) {
 		"version":   ver,
 		"error": func() string {
 			if err != nil {
-				return err.Error()
+				return sanitizeErr(err, "pull failed")
 			}
 			return ""
 		}(),
@@ -248,7 +248,7 @@ func Aria2AddURI(c *gin.Context) {
 	}
 	gid, err := aria2Bridge.AddURI(c.Request.Context(), req.URI, req.Filename)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"gid": gid, "uri": req.URI, "filename": req.Filename})

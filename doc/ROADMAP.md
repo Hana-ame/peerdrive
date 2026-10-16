@@ -159,3 +159,11 @@ Previously only had defensive `IsPathAllowed` (rejecting unauthorized paths), wi
 - **Dual-Track Invariant Preserved**:
   - Standalone/sovereign nodes without registration servers operate 100% offline via peerId + PSK admission without any regression.
 - **Future extensions (Phase 8)**: Traffic statistics anti-fraud & Ed25519 countersigning (`API-DESIGN.md` §7).
+
+
+---
+
+## v1.0 发布就绪度与收口 Checklist（2026-10-16）
+
+- 全部 7 个阶段（PeerJS 互联 → 文件 → 组合 → 管理链路 → 文件范围管理 → 上传下载保存 → 身份管理）与最后 8 项遗留 Open Issues（#378, #395, #396, #402, #403, #404, #405, #406）已全部闭环。
+- 完整发布评估、唯一内容 URL 规范、多通道队列进度条架构与分模块测试清单见 [`doc/RELEASE-READINESS.md`](RELEASE-READINESS.md)。

@@ -14,6 +14,10 @@ import (
 	"peerdrive/internal/log"
 )
 
+// maxActiveFwdListeners caps concurrent local loopback forwarding listeners to prevent
+// local port and goroutine exhaustion (Issue #402).
+const maxActiveFwdListeners = 32
+
 // fwdListener local proxy listener (established by connect endpoint): each local
 // TCP connection received on the loopback port -> one forwarding tunnel (OpenForward).
 type fwdListener struct {
@@ -49,7 +53,7 @@ func CreateForwardSession(c *gin.Context) {
 	}
 	if err := forwardPeer.AddForwardRule(req.Key, req.Port); err != nil {
 		log.LogError("ctrl-p2p: CreateForwardSession failed: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "invalid forward rule")})
 		return
 	}
 	log.LogInfo("ctrl-p2p: CreateForwardSession rule added port=%d", req.Port)
@@ -95,6 +99,12 @@ func ConnectForwardSession(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "connected", "local_port": req.LocalPort})
 		return
 	}
+	// Enforce active listener quota (Issue #402) before opening a new loopback socket.
+	if len(fwdListeners) >= maxActiveFwdListeners {
+		fwdListenersMu.Unlock()
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "maximum active forward listeners reached"})
+		return
+	}
 	fwdListenersMu.Unlock()
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", req.LocalPort))
@@ -105,6 +115,12 @@ func ConnectForwardSession(c *gin.Context) {
 	}
 	fl := &fwdListener{key: req.Key, targetPeer: req.TargetPeer, ln: ln}
 	fwdListenersMu.Lock()
+	if len(fwdListeners) >= maxActiveFwdListeners {
+		fwdListenersMu.Unlock()
+		_ = ln.Close()
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "maximum active forward listeners reached"})
+		return
+	}
 	fwdListeners[key2] = fl
 	fwdListenersMu.Unlock()
 	go acceptForwardTunnels(fl, req.Port)
@@ -172,12 +188,12 @@ func ListForwardSessions(c *gin.Context) {
 			})
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"listeners": listeners, "tunnels": tunnels})
+	c.JSON(http.StatusOK, gin.H{"listeners": listeners, "tunnels": tunnels, "max_listeners": maxActiveFwdListeners})
 }
 
 // CloseForwardSession handles POST /p2p/forward/close (JSON body {"key"} / {"peer_id"}) plus the
 // RESTful aliases DELETE /p2p/forward/listeners/:key and DELETE /p2p/forward/tunnels/:peer_id
-// (Issue #354). It closes the local listener for the specified key (active tunnels are naturally
+// (Issue #354 / #402). It closes the local listener for the specified key (active tunnels are naturally
 // closed at both ends; pass peer_id instead to disconnect all tunnels to a specified peer).
 func CloseForwardSession(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: CloseForwardSession")
@@ -189,7 +205,10 @@ func CloseForwardSession(c *gin.Context) {
 	closed := 0
 	fwdListenersMu.Lock()
 	for k, fl := range fwdListeners {
-		if key != "" && fl.key != key {
+		if key != "" && fl.key != key && k != key {
+			continue
+		}
+		if peerID != "" && key == "" && fl.targetPeer != peerID {
 			continue
 		}
 		fl.ln.Close()
@@ -214,6 +233,10 @@ func CloseForwardSession(c *gin.Context) {
 func closeForwardTarget(c *gin.Context) (key, peerID string, ok bool) {
 	key, peerID = c.Param("key"), c.Param("peer_id")
 	if key == "" && peerID == "" {
+		key = c.Query("key")
+		peerID = c.Query("peer_id")
+	}
+	if key == "" && peerID == "" {
 		var body struct {
 			Key    string `json:"key"`
 			PeerID string `json:"peer_id,omitempty"`
@@ -222,6 +245,9 @@ func closeForwardTarget(c *gin.Context) (key, peerID string, ok bool) {
 			return "", "", false
 		}
 		key, peerID = body.Key, body.PeerID
+	}
+	if key == "" && peerID == "" {
+		return "", "", false
 	}
 	return key, peerID, true
 }

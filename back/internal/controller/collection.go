@@ -110,7 +110,7 @@ func CreateCollection(c *gin.Context) {
 		id, err = collSvc.Create(req.Username, req.CollectionName, req.Visibility, nil, nil)
 	}
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		c.JSON(http.StatusConflict, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id, "username": req.Username, "collection_name": req.CollectionName, "visibility": req.Visibility})

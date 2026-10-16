@@ -67,7 +67,7 @@ func GetIwaraVideo(c *gin.Context) {
 	meta, err := iwaraClient.GetVideoMeta(ctx, raw)
 	if err != nil {
 		log.LogDebug("ctrl-iwara: video %q: %v", raw, err)
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 	c.JSON(http.StatusOK, meta)

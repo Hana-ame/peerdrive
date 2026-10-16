@@ -14,7 +14,7 @@
   "files": ["src", "demo", "dist", "panel", "scripts", "README.md"],
   "sideEffects": false,
   "scripts": {
-    "test": "node --test \"test/*.test.mjs\"",
+    "test": "node --test test/*.test.mjs",
     "build": "node scripts/build-panel.mjs",
     "build:panel": "node scripts/build-panel.mjs",
     "check:panel": "node scripts/build-panel.mjs --check",

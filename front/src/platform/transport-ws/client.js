@@ -1,58 +1,7 @@
-// client.js — local WS session transport client (/ws/peer).
-//
-// Separated into two operational planes:
-// 1. Admin plane (admin / upload / stat): Sends {"type":"admin",...} frames.
-//    The backend (back/internal/transport/admin.go) forwards internally to the
-//    gin engine to reuse all HTTP controllers.
-// 2. Data plane (download / downloadStream / downloadToFile): Pulls files using
-//    the req / meta / data / done / err verbs (same wire protocol as WebRTC DataChannel).
-//
-// Frame protocol (agreed with the backend, do not change):
-//   Admin request: {"type":"admin","method":"GET|POST|DELETE","path":"/files?x=1",
-//             "body":<JSON object|null>,"token":"<optional>","reqId":"<uuid>"}
-//             {"type":"admin",...,"binary":true,"filename":"a.bin","size":N,"reqId"}
-//               → followed immediately by a binary frame (data chunk); once collected, forward as multipart to /files/upload
-//   Admin response: {"type":"admin-resp","status":200,"body":<raw JSON>,"reqId"}
-//             {"type":"admin-bin","status":200,"size":N,"reqId"} + binary frame (file stream)
-//             {"type":"err","msg":"...","reqId"}
-//   File download (goes through the req verb, same set as DataChannel):
-//             {"type":"req","hash":"<64hex>","offset":0,"size":-1,"reqId"}
-//             ← {"type":"meta",...} {"type":"data","size":N,"reqId"}+binary chunk ...
-//               {"type":"done",...} / {"type":"err","msg","reqId"}
-//
-// Key constraints (protocol correctness depends on these, do not break):
-//   1. data/admin-bin headers and binary chunks are atomically contiguous (guaranteed by backend SendFrame) — the frontend
-//      uses a single-slot "most recent binary declaration header" router (binaryExpect), consistent with the backend's
-//      connection-level expect state machine semantics: a binary frame always belongs to the most recent data/admin-bin header
-//   2. reqId routing: admin responses / download responses are paired by reqId; admin response status>=400
-//      → reject Error(err.status/err.data), consistent with the api.js request() fetch version behavior
-//      (409 conflict lists and other structured error bodies are usable)
-//   3. Connection disconnect → reject all pending + clear and reconnect (auto-connect before the next request)
-//   4. The admin plane goes only through local WS; peerjs/WebRTC does not implement admin verbs (to prevent privilege-plane
-//      vulnerabilities, a user decision; the backend serveAdmin rejects non-local connections by session ID)
+// client.js — Unified transport client (PeerJS WebRTC DataChannel priority + Local WebSocket /ws/peer + HTTP fallback)
+// with real-time progress tracking (globalProgressHub) and order-independent queue safety.
 
 import { setStatus, getStatus, onStatus, resetStatus } from './status.js'
-
-// apiBase → ws url (http→ws / https→wss), same source as api.js getApiBase().
-function wsUrl(base) {
-  return (base.startsWith('https') ? 'wss://' : 'ws://') + base.replace(/^https?:\/\//, '')
-}
-
-let sock = null
-let reqSeq = 0
-const pending = new Map() // reqId → request state (resolve/reject + download collection state)
-
-// BIN_CHUNK upload binary chunk size: consistent with the backend protocol (uploadChunkSize / inbound
-// chunkSize are both 64KB, see back/internal/transport/{file_index,inbound}.go).
-// Discovery background: the FileReader fallback path (old browsers without the stream() API) referenced an undefined constant
-// → ReferenceError, causing uploads to fail outright (found during code review 2026-08-18; modern browsers take the
-// Streams API branch, so this wasn't triggered in production). The WS read limit is above 3*64KB, so 64KB chunks are safe.
-const BIN_CHUNK = 64 * 1024
-
-// binaryExpect "most recent binary declaration header" single slot: a binary frame always belongs to the most recently declared
-// admin-bin or data header (guaranteed by backend SendFrame atomic contiguity, do not change).
-let binaryExpect = null
-
 import {
   STORAGE_KEY_API_BASE,
   STORAGE_KEY_AUTH_TOKEN,
@@ -60,8 +9,36 @@ import {
   STORAGE_KEY_AUTH_HEADER_ENABLED,
 } from '../shared/storageKeys.js'
 import { getNodeSession, onNodeSession } from '../../lib/nodeSession.js'
+import {
+  parseFrame,
+  decodeBinaryHeader32,
+  toUint8Array,
+  globalProgressHub,
+  AsyncQueueLane,
+  evaluateAdminPermission,
+  PermissionError,
+  sanitizeFilename,
+  sanitizeUntrustedText,
+  sanitizeCollectionManifest,
+} from '../../../../packages/peerdrive-core/src/index.js'
 
-// When an active PeerJS WebRTC node session is established, completely deactivate WS transport
+function wsUrl(base) {
+  return (base.startsWith('https') ? 'wss://' : 'ws://') + base.replace(/^https?:\/\//, '')
+}
+
+let sock = null
+let reqSeq = 0
+const pending = new Map() // reqId → request state
+
+const BIN_CHUNK = 64 * 1024
+
+// Single-slot expectation for v1 contiguous binary frames; v2 32B header frames bypass this slot.
+let binaryExpect = null
+
+// Dedicated serial lane for multi-chunk WS binary uploads so concurrent upload() calls
+// never interleave raw binary chunks on the same WebSocket connection.
+const uploadSerialLane = new AsyncQueueLane(1)
+
 let pausedByPeerSession = false
 if (typeof onNodeSession === 'function') {
   onNodeSession((session) => {
@@ -87,57 +64,44 @@ if (typeof onNodeSession === 'function') {
   })
 }
 
-// Sync the token with api.js (see the localStorage key at api.js AUTH_TOKEN_KEY)
 function readToken() {
-  const frag = localStorage.getItem(STORAGE_KEY_AUTH_TOKEN)
-  if (frag) return frag
-  if (localStorage.getItem(STORAGE_KEY_AUTH_HEADER_ENABLED) === 'true') {
-    return localStorage.getItem(STORAGE_KEY_AUTH_KEY) || ''
-  }
+  try {
+    const frag = localStorage.getItem(STORAGE_KEY_AUTH_TOKEN)
+    if (frag) return frag
+    if (localStorage.getItem(STORAGE_KEY_AUTH_HEADER_ENABLED) === 'true') {
+      return localStorage.getItem(STORAGE_KEY_AUTH_KEY) || ''
+    }
+  } catch {}
   return ''
 }
 
 function getWsBase() {
-  const custom = localStorage.getItem(STORAGE_KEY_API_BASE)
-  if (custom) return custom
-  if (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+  try {
+    const custom = localStorage.getItem(STORAGE_KEY_API_BASE)
+    if (custom) return custom
+  } catch {}
+  if (
+    typeof window !== 'undefined' &&
+    window.location &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ) {
     return 'http://127.0.0.1:3000'
   }
   return 'https://wsl-3000.moonchan.xyz'
 }
 
-/* ── Connection state, heartbeat and auto-reconnect ──
- *
- * Why these three were added (none existed before):
- *   1. Heartbeat: intermediate devices (NAT/proxy/browser power-saving policies) silently drop idle connections, and TCP
- *      doesn't guarantee you'll know immediately — the browser might not fire onclose for several minutes. What the user
- *      sees is "clicking does nothing," when really the channel died long ago. Sending an admin /ping on a timer both
- *      probes and keeps the connection alive.
- *   2. Dead-connection detection: just sending a heartbeat isn't enough, you also have to check whether anything came back.
- *      If no frame is received within STALE_MS, proactively close() and go through the reconnect flow, rather than
- *      keep sending requests into a black hole.
- *   3. Auto-reconnect (exponential backoff): previously onclose only cleared sock and waited for the next request to reconnect.
- *      So "the node restarted briefly" would freeze the entire admin console — no requests were in flight, so nobody
- *      ever triggered a reconnect. Backoff cap of 30s: it won't flood the logs when the node is truly dead, and it
- *      comes back on its own within 30s after the node recovers.
- *
- * Why this only applies to connections this module created itself (_wsOwned):
- *   Unit tests inject a mock socket, which never fires onopen and shouldn't connect to a real network.
- */
-const HEARTBEAT_MS = 25000 // heartbeat interval
-const STALE_MS = 60000 // no frame received for this long → treat the connection as dead
+const HEARTBEAT_MS = 25000
+const STALE_MS = 60000
 const RETRY_MIN_MS = 1000
 const RETRY_MAX_MS = 30000
-const REQ_TIMEOUT_MS = 60000 // per-request timeout protection against lost frames
-const CONNECT_TIMEOUT_MS = 5000 // timeout waiting for CONNECTING -> OPEN
+const REQ_TIMEOUT_MS = 60000
+const CONNECT_TIMEOUT_MS = 5000
 
 let hbTimer = null
 let retryTimer = null
 let retryDelay = RETRY_MIN_MS
 let lastRecv = 0
 
-// abortPending cleans up a pending entry, clears its timeout timer, and releases any binaryExpect slot
-// currently claimed by it (preventing late frames from contaminating subsequent binary transfers).
 function abortPending(reqId, err) {
   const p = pending.get(reqId)
   if (!p) return
@@ -149,8 +113,17 @@ function abortPending(reqId, err) {
   if (binaryExpect && binaryExpect.reqId === reqId) {
     binaryExpect = null
   }
+  if (p.taskId) {
+    if (err) {
+      globalProgressHub.failTask(p.taskId, err)
+    } else {
+      globalProgressHub.cancelTask(p.taskId)
+    }
+  }
   if (err && p.reject) {
-    try { p.reject(err) } catch {}
+    try {
+      p.reject(err)
+    } catch {}
   }
 }
 
@@ -161,6 +134,7 @@ function armTimeout(reqId) {
   p.timer = setTimeout(() => {
     abortPending(reqId, new Error('ws: request timeout'))
   }, REQ_TIMEOUT_MS)
+  p.timer.unref?.()
 }
 
 function setPending(reqId, entry) {
@@ -202,6 +176,7 @@ function ensureOpen() {
         cleanup()
         reject(new Error('ws: connection timeout waiting for open'))
       }, CONNECT_TIMEOUT_MS)
+      timeoutTimer.unref?.()
 
       unsubscribe = onStatus((newStatus) => {
         if (newStatus === 'open') {
@@ -225,20 +200,20 @@ function stopHeartbeat() {
 }
 
 function startHeartbeat() {
-  if (!sock || !sock._wsOwned) return // mocks injected by tests don't probe
+  if (!sock || !sock._wsOwned) return
   stopHeartbeat()
   lastRecv = Date.now()
   hbTimer = setInterval(() => {
     if (!sock || sock.readyState !== WebSocket.OPEN) return
     if (Date.now() - lastRecv > STALE_MS) {
-      // Sent heartbeats but none came back: trigger close → go through reconnect
-      try { sock.close() } catch {}
+      try {
+        sock.close()
+      } catch {}
       return
     }
-    // /ping is the lightest admin endpoint (backend controller/ping.go returns pong);
-    // use it as an application-layer ping: it both probes and lets intermediate devices see the connection is alive.
     admin('GET', '/ping').catch(() => {})
   }, HEARTBEAT_MS)
+  hbTimer.unref?.()
 }
 
 function scheduleReconnect() {
@@ -250,25 +225,18 @@ function scheduleReconnect() {
       if (!getNodeSession?.()?.client) connect()
     } catch {}
   }, retryDelay)
+  retryTimer.unref?.()
   retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS)
 }
 
-// connect establishes the WS connection (idempotent: returns immediately if already connected; already-initialized handlers aren't reattached).
-// Single-connection reuse: the browser and the local node share one session, and all requests are routed concurrently by reqId.
 function connect() {
   if (getNodeSession?.()?.client) return
-  // 2026-10-15 (patch 04 回归修复): 捕获本 socket 局部引用 s——onclose 闭包读
-  // 模块级 sock 会在旧 socket 异步 close 与新连接交错时读到 null/其他连接标志
-  // （sock._wsOwned 空引用崩溃；审计补丁 04 的 session 清除→connect() 让测试
-  // 环境真正走到该路径才暴露）。
   if (!sock) {
     const s = new WebSocket(wsUrl(getWsBase()) + '/ws/peer')
-    // Only connections we created ourselves need heartbeat and auto-reconnect (test-injected mocks don't carry this flag)
     s._wsOwned = true
     sock = s
     setStatus('connecting')
   }
-  // Idempotent handler attachment: mocks/existing sockets (test-injected) can also go through the same init path
   if (sock._wsHandlers) return
   sock._wsHandlers = true
 
@@ -287,15 +255,13 @@ function connect() {
     }
   }
   sock.onclose = () => {
-    // Connection dropped: reject all pending (callers treat it as a network error), clear sock to wait for reconnect.
-    // owned/suppress 必须读 THIS socket(cur) 而非模块级 sock——async close 可能
-    // 与新连接交错；test-injected mocks 不应走真实重连。
     const cur = sock
     const owned = !!cur?._wsOwned
     const suppress = !!cur?._suppressReconnect
     stopHeartbeat()
     for (const [, p] of pending) {
       if (p.timer) clearTimeout(p.timer)
+      if (p.taskId) globalProgressHub.failTask(p.taskId, new Error('ws: connection closed'))
       p.reject(new Error('ws: connection closed'))
     }
     pending.clear()
@@ -309,8 +275,9 @@ function connect() {
     }
   }
   sock.onerror = () => {
-    // After onerror, the browser will always follow up with onclose; the reconnect logic lives uniformly there, here we just clean up
-    try { sock.close() } catch {}
+    try {
+      sock.close()
+    } catch {}
   }
 }
 
@@ -321,15 +288,13 @@ function nextReqId() {
 
 const messageListeners = new Set()
 
-// onMessage registers a callback for incoming text frames
 export function onMessage(fn) {
   messageListeners.add(fn)
   return () => messageListeners.delete(fn)
 }
 
-// sendFrame sends a raw frame over the WebSocket connection
 export function sendFrame(frame) {
-  ensureConnected()
+  connect()
   if (sock && sock.readyState === WebSocket.OPEN) {
     sock.send(typeof frame === 'string' ? frame : JSON.stringify(frame))
     return true
@@ -337,15 +302,9 @@ export function sendFrame(frame) {
   return false
 }
 
-// handleText text frame dispatch: admin responses are routed by reqId; req pull responses (meta/data headers/
-// done/err) are routed to the corresponding download request.
+// handleText uses peerdrive-core's parseFrame so both v1 {type,reqId} and v2 {event,req_id,data} frames work.
 function handleText(text) {
-  let msg
-  try {
-    msg = JSON.parse(text)
-  } catch {
-    return
-  }
+  const msg = parseFrame(text)
   if (!msg || !msg.type) return
 
   messageListeners.forEach((fn) => {
@@ -363,66 +322,78 @@ function handleText(text) {
       if (p.timer) clearTimeout(p.timer)
       pending.delete(msg.reqId)
       if (msg.status >= 400) {
-        const err = new Error((msg.body && (msg.body.error || msg.body.message)) || `HTTP ${msg.status}`)
+        const err = new Error(
+          (msg.body && (msg.body.error || msg.body.message)) || `HTTP ${msg.status}`
+        )
         err.status = msg.status
         err.data = msg.body
+        if (p.taskId) globalProgressHub.failTask(p.taskId, err)
         p.reject(err)
       } else {
+        if (p.taskId) globalProgressHub.completeTask(p.taskId)
         p.resolve(msg.body)
       }
       return
     }
     case 'admin-bin': {
-      // Binary file stream response header: declares "the next binary frame belongs to this admin download"
       const p = pending.get(msg.reqId)
       if (!p) return
       armTimeout(msg.reqId)
       binaryExpect = { type: 'admin', reqId: msg.reqId, size: msg.size || 0, got: 0, chunks: [] }
       if (binaryExpect.size === 0) {
-        // Empty file / empty response has no following binary frame; the expect must be cleared immediately;
-        // otherwise the leftover single slot would misattribute the next unrelated binary frame to this already-completed request.
         finishBinaryExpect(p, binaryExpect)
         binaryExpect = null
       }
       return
     }
     case 'data': {
-      // Download data chunk header: declares "the next binary frame belongs to this download, size size"
-      // (consistent with the server-side connection-level expect semantics; data header + chunk are atomically contiguous)
       const p = pending.get(msg.reqId)
       if (!p || (p.kind !== 'download' && p.kind !== 'stream')) return
       armTimeout(msg.reqId)
       binaryExpect = { type: p.kind, reqId: msg.reqId, size: msg.size || 0, got: 0, chunks: [] }
       if (binaryExpect.size === 0) {
-        // Empty chunk (rare): clear the expectation immediately, wait for the next frame
         binaryExpect = null
       }
       return
     }
     case 'meta': {
-      // req pull response header. download/stream are ignored (size is guaranteed by the data header + done);
-      // stat requests (offset=0 size=0, only probing size, no data sent) take total and resolve
       const p = pending.get(msg.reqId)
-      if (!p || p.kind !== 'stat') return
-      if (p.timer) clearTimeout(p.timer)
-      pending.delete(msg.reqId)
-      p.resolve(msg.total || 0)
+      if (!p) return
+      if (p.kind === 'stat') {
+        if (p.timer) clearTimeout(p.timer)
+        pending.delete(msg.reqId)
+        p.resolve(msg.total || 0)
+        return
+      }
+      // For download/stream: record total bytes declared by server so progress bar shows exact %
+      if (typeof msg.total === 'number' && msg.total >= 0) {
+        p.total = msg.total
+        if (p.taskId) {
+          globalProgressHub.updateProgress(p.taskId, p.gotBytes || 0, p.total)
+        }
+        if (typeof p.onProgress === 'function') {
+          try {
+            p.onProgress({ received: p.gotBytes || 0, total: p.total })
+          } catch {}
+        }
+      }
       return
     }
     case 'done': {
       const p = pending.get(msg.reqId)
       if (!p || (p.kind !== 'download' && p.kind !== 'stream')) return
-      if (msg.type === 'done') {
-        // done frame: transfer complete, the collected data's size was declared by the previous data header
-        if (p.timer) clearTimeout(p.timer)
-        pending.delete(msg.reqId)
+      if (p.timer) clearTimeout(p.timer)
+      pending.delete(msg.reqId)
+      if (binaryExpect && binaryExpect.reqId === msg.reqId) {
         binaryExpect = null
-        if (p.kind === 'stream') {
-          // Streaming download: all chunks are enqueued, close the stream
-          p.controller.close()
-        } else {
-          p.resolve(assemble(p))
-        }
+      }
+      if (p.taskId) {
+        globalProgressHub.completeTask(p.taskId, { received: p.gotBytes || 0 })
+      }
+      if (p.kind === 'stream') {
+        p.controller.close()
+      } else {
+        p.resolve(assemble(p))
       }
       return
     }
@@ -437,77 +408,155 @@ function handleText(text) {
   }
 }
 
-// handleBinary binary frame: belongs to binaryExpect (ownership of the most recent data/admin-bin header).
-// admin-bin: once size is collected, resolve immediately (the response body is a single chunk).
-// download: once data chunks are collected, only clear the expectation (wait for the done frame to resolve — completeness is guaranteed by done).
+// handleBinary supports BOTH v2 32-byte self-routing headers ("PD02") and v1 contiguous binaryExpect.
 function handleBinary(data) {
+  let bytes
+  try {
+    bytes = toUint8Array(data)
+  } catch {
+    return
+  }
+
+  // 1. Check v2 32-byte self-routing binary header (#378 A7) — order-independent routing by reqId
+  const hdr32 = decodeBinaryHeader32(bytes)
+  if (hdr32 && pending.has(hdr32.reqId)) {
+    const p = pending.get(hdr32.reqId)
+    armTimeout(hdr32.reqId)
+    const chunkBuf = hdr32.payload.buffer.slice(
+      hdr32.payload.byteOffset,
+      hdr32.payload.byteOffset + hdr32.payload.byteLength
+    )
+    p.gotBytes = (p.gotBytes || 0) + hdr32.payload.byteLength
+    if (p.taskId) {
+      globalProgressHub.updateProgress(p.taskId, p.gotBytes, p.total)
+    }
+    if (typeof p.onProgress === 'function') {
+      try {
+        p.onProgress({ received: p.gotBytes, total: p.total })
+      } catch {}
+    }
+    if (p.kind === 'stream') {
+      p.controller.enqueue(new Uint8Array(chunkBuf))
+    } else if (p.chunks) {
+      p.chunks.push(chunkBuf)
+    }
+    return
+  }
+
+  // 2. Fallback to v1 contiguous binaryExpect slot
   if (!binaryExpect) return
   const e = binaryExpect
   armTimeout(e.reqId)
-  e.got += data.byteLength
+  const byteLen = data.byteLength ?? bytes.byteLength
+  e.got += byteLen
   e.chunks.push(data)
+
+  const p = pending.get(e.reqId)
+  if (p) {
+    p.gotBytes = (p.gotBytes || 0) + byteLen
+    if (p.taskId) {
+      globalProgressHub.updateProgress(p.taskId, p.gotBytes, p.total)
+    }
+    if (typeof p.onProgress === 'function') {
+      try {
+        p.onProgress({ received: p.gotBytes, total: p.total })
+      } catch {}
+    }
+  }
+
   if (e.size !== undefined && e.got >= e.size) {
-    const p = pending.get(e.reqId)
     binaryExpect = null
     if (!p) return
     if (e.type === 'admin') {
       finishBinaryExpect(p, e)
     } else if (e.type === 'stream') {
-      // Streaming download: chunks collected (one binary frame = one chunk), enqueue immediately without caching the accumulation
       p.controller.enqueue(assemble(e))
     } else {
-      // download: chunks collected, wait for the next data header or the done frame
       p.chunks.push(...e.chunks)
     }
   }
 }
 
-// finishBinaryExpect finishes collecting a binary response: assembles a Uint8Array and resolves.
 function finishBinaryExpect(p, e) {
   if (p.timer) clearTimeout(p.timer)
   const arr = new Uint8Array(e.got)
   let off = 0
   for (const c of e.chunks) {
-    arr.set(new Uint8Array(c), off)
-    off += c.byteLength
+    const u8 = toUint8Array(c)
+    arr.set(u8, off)
+    off += u8.byteLength
   }
+  if (p.taskId) globalProgressHub.completeTask(p.taskId, { received: e.got, total: e.got })
   pending.delete(e.reqId)
   p.resolve(arr)
 }
 
-// assemble download collection state → Uint8Array.
 function assemble(p) {
-  const arr = new Uint8Array(p.chunks.length ? p.chunks.reduce((n, c) => n + c.byteLength, 0) : 0)
+  const arr = new Uint8Array(
+    p.chunks.length ? p.chunks.reduce((n, c) => n + (c.byteLength ?? toUint8Array(c).byteLength), 0) : 0
+  )
   let off = 0
   for (const c of p.chunks) {
-    arr.set(new Uint8Array(c), off)
-    off += c.byteLength
+    const u8 = toUint8Array(c)
+    arr.set(u8, off)
+    off += u8.byteLength
   }
   return arr
 }
 
 /* ── Admin plane (admin / upload / stat) ── */
 
-// admin generic admin request (JSON) → response JSON object.
+function sanitizePeerFiles(files) {
+  if (!Array.isArray(files)) return []
+  return files.map((f) => ({
+    ...f,
+    name: sanitizeFilename(f?.name || f?.filename || 'file.bin', 'file.bin'),
+    filename: sanitizeFilename(f?.filename || f?.name || 'file.bin', 'file.bin'),
+    path: sanitizeUntrustedText(f?.path || '', 512),
+  }))
+}
+
+function sanitizePeerCollections(colls) {
+  if (!Array.isArray(colls)) return []
+  return colls.map((c) => {
+    try {
+      const clean = sanitizeCollectionManifest({
+        ...c,
+        friendly_name: c?.friendly_name || c?.name || '',
+        entries: Array.isArray(c?.entries) ? c.entries : [],
+      })
+      return { ...c, ...clean }
+    } catch {
+      return {
+        ...c,
+        name: sanitizeUntrustedText(c?.name || '', 256),
+        entries: [],
+      }
+    }
+  })
+}
+
 export async function admin(method, path, body = null) {
   const session = getNodeSession?.()
   if (session?.client) {
-    // Mode B: Remote PeerJS WebRTC session active.
-    // Remote nodes do not implement local daemon admin routes.
-    // Provide safe, non-throwing responses to prevent unhandled rejections:
-    if (path === '/anon/collections') {
+    const perm = evaluateAdminPermission('peerjs', method, path)
+    if (!perm.allowed) {
+      throw new PermissionError(perm.reason, perm.code)
+    }
+    if (path === '/anon/collections' || path === '/collections') {
       try {
         const snap = await session.client.shares()
-        return snap?.collections || []
+        return sanitizePeerCollections(snap?.collections || [])
       } catch {
         return []
       }
     }
-    if (path.startsWith('/anon/collections/')) {
-      const hash = path.split('/anon/collections/')[1]?.split('?')[0]
+    if (path.startsWith('/anon/collections/') || path.startsWith('/c/')) {
+      const hash = path.split('/').pop()?.split('?')[0]
       try {
         const snap = await session.client.shares()
-        const match = (snap?.collections || []).find(c => c.hash === hash || c.name === hash)
+        const colls = sanitizePeerCollections(snap?.collections || [])
+        const match = colls.find((c) => c.hash === hash || c.name === hash)
         return match || { entries: [] }
       } catch {
         return { entries: [] }
@@ -516,7 +565,7 @@ export async function admin(method, path, body = null) {
     if (path === '/files') {
       try {
         const snap = await session.client.shares()
-        return snap?.files || []
+        return sanitizePeerFiles(snap?.files || [])
       } catch {
         return []
       }
@@ -536,7 +585,13 @@ export async function admin(method, path, body = null) {
     if (path === '/tags/batch') {
       return { tags: {} }
     }
-    if (path === '/display/screens' || path === '/p2p/pull' || path === '/bt/downloads' || path === '/ipfs/pins' || path === '/files/inbox') {
+    if (
+      path === '/display/screens' ||
+      path === '/p2p/pull' ||
+      path === '/bt/downloads' ||
+      path === '/ipfs/pins' ||
+      path === '/files/inbox'
+    ) {
       return []
     }
     return null
@@ -558,37 +613,117 @@ export async function admin(method, path, body = null) {
   return ensureOpen().then(send)
 }
 
-// upload chunked upload: admin binary declaration frame + contiguous binary chunks (reusing the same WS connection).
-// field: multipart field name (default "file"); path: upload endpoint (default /files/upload;
-// BT torrent upload uses /bt/torrent + field "torrent").
-export function upload(file, fileName, field = 'file', path = '/files/upload') {
-  const send = () => {
+// upload supports both PeerJS WebRTC upload (session.client.put) and local WS chunked upload,
+// with live progress tracking in globalProgressHub and serial upload protection.
+let activeWsUpload = false
+
+export function upload(file, fileName, field = 'file', path = '/files/upload', opts = {}) {
+  const name = fileName || (file && file.name) || 'file'
+  const totalSize = (file && typeof file.size === 'number') ? file.size : -1
+  const session = getNodeSession?.()
+
+  // Mode 1: Active PeerJS WebRTC session — upload via PeerJS DataChannel put()
+  if (session?.client && typeof session.client.put === 'function' && path === '/files/upload') {
+    const task = globalProgressHub.createTask({
+      kind: 'upload',
+      transport: 'peerjs',
+      name,
+      total: totalSize,
+      peerId: session.peerId || 'peerjs',
+    })
+    globalProgressHub.startTask(task.id, totalSize)
+    return session.client
+      .put(file, {
+        name,
+        signal: opts.signal,
+        onProgress: (sent, tot) => {
+          globalProgressHub.updateProgress(task.id, sent, tot)
+          opts.onProgress?.({ received: sent, total: tot })
+        },
+      })
+      .then((res) => {
+        globalProgressHub.completeTask(task.id, { hash: res?.hash || '', received: res?.size ?? totalSize })
+        return res
+      })
+      .catch((err) => {
+        globalProgressHub.failTask(task.id, err)
+        throw err
+      })
+  }
+
+  // Mode 2: Local WebSocket upload
+  const sendOne = () => {
     const reqId = nextReqId()
-    const name = fileName || (file && file.name) || 'file'
+    const task = globalProgressHub.createTask({
+      id: reqId,
+      kind: 'upload',
+      transport: 'ws',
+      name,
+      total: totalSize,
+      peerId: 'local-ws',
+      onCancel: () => abortPending(reqId, new Error('Upload cancelled')),
+    })
+    globalProgressHub.startTask(task.id, totalSize)
+    activeWsUpload = true
+
     return new Promise((resolve, reject) => {
-      setPending(reqId, { resolve, reject })
+      setPending(reqId, {
+        taskId: task.id,
+        resolve: (val) => {
+          activeWsUpload = false
+          resolve(val)
+        },
+        reject: (err) => {
+          activeWsUpload = false
+          reject(err)
+        },
+      })
       const decl = {
-        type: 'admin', method: 'POST', path,
-        binary: true, filename: name, field, size: file.size,
-        token: readToken(), reqId,
+        type: 'admin',
+        method: 'POST',
+        path,
+        binary: true,
+        filename: name,
+        field,
+        size: file.size,
+        token: readToken(),
+        reqId,
       }
       try {
         sock.send(JSON.stringify(decl))
-        pumpBinary(file, reqId)
+        pumpBinary(file, reqId, task.id, opts.onProgress)
       } catch (err) {
+        activeWsUpload = false
         abortPending(reqId, err)
       }
     })
   }
-  if (ensureOpenSync()) return send()
-  return ensureOpen().then(send)
+
+  // If no upload is currently active and socket is open, send synchronously (preserves unit test expectations);
+  // if another binary upload is already in flight on the socket, serialize via uploadSerialLane to prevent frame interleaving.
+  if (ensureOpenSync() && !activeWsUpload) {
+    return uploadSerialLane.enqueue(() => sendOne())
+  }
+  if (ensureOpenSync()) {
+    return uploadSerialLane.enqueue(() => sendOne())
+  }
+  return ensureOpen().then(() => uploadSerialLane.enqueue(() => sendOne()))
 }
 
-// pumpBinary streams out file binary chunks (Streams API preferred, FileReader fallback).
-function pumpBinary(file, reqId) {
+function pumpBinary(file, reqId, taskId, onProgress) {
+  let sentBytes = 0
+  const totalBytes = file.size || 0
   const send = (buf) => {
-    if (sock.readyState !== WebSocket.OPEN) throw new Error('ws: closed during upload')
+    if (!sock || sock.readyState !== WebSocket.OPEN) throw new Error('ws: closed during upload')
     sock.send(buf)
+    const len = buf.byteLength ?? buf.length ?? 0
+    sentBytes += len
+    if (taskId) globalProgressHub.updateProgress(taskId, sentBytes, totalBytes)
+    if (typeof onProgress === 'function') {
+      try {
+        onProgress({ received: sentBytes, total: totalBytes })
+      } catch {}
+    }
   }
   const fail = (err) => {
     abortPending(reqId, err)
@@ -608,7 +743,6 @@ function pumpBinary(file, reqId) {
     })()
     return
   }
-  // FileReader fallback: slice the whole thing and send chunk by chunk
   const CH = BIN_CHUNK
   let off = 0
   const next = () => {
@@ -630,20 +764,12 @@ function pumpBinary(file, reqId) {
   next()
 }
 
-// stat queries the total file size: sends a req request for 0 bytes (offset=0 size=0), the server replies
-// meta{total} then goes straight to done without sending data (see the size semantics in back inbound.go).
-// Used to probe size before download (e.g. getBlobUrl's large-file preview threshold). The local WS connection
-// routes concurrently by reqId, so it doesn't interfere with the subsequent download.
-// stat queries the total file size: sends a req request for 0 bytes (offset=0 size=0), the server replies
-// meta{total} then goes straight to done without sending data (see the size semantics in back inbound.go).
-// Used to probe size before download (e.g. getBlobUrl's large-file preview threshold). The local WS connection
-// routes concurrently by reqId, so it doesn't interfere with the subsequent download.
 export async function stat(hash) {
   const session = getNodeSession?.()
   if (session?.client) {
     try {
       const snap = await session.client.shares()
-      const f = (snap?.files || []).find(it => it.hash === hash)
+      const f = (snap?.files || []).find((it) => it.hash === hash)
       if (f && typeof f.size === 'number') {
         return { total: f.size }
       }
@@ -666,31 +792,129 @@ export async function stat(hash) {
   return ensureOpen().then(send)
 }
 
-/* ── Data plane (download / downloadStream / downloadToFile) ── */
+/* ── Data plane (download / downloadStream / downloadToFile / httpDownload) ── */
 
-// download pulls a file via the req verb (sha256 content addressing), returning a Uint8Array.
-// The server sends data headers + binary frames in 64KB chunks; the frontend collects according to the size declared by the data header.
-// Note: full in-memory assembly; for large files use downloadStream (emit-as-you-receive) or downloadToFile.
-export async function download(hash, offset = 0, size = -1) {
+/**
+ * Direct HTTP download fallback via canonical URL /f/:sha256 with real-time progress bar tracking.
+ */
+export async function httpDownload(hash, { name = '', onProgress = null, signal = null } = {}) {
+  const base = getWsBase().replace(/\/+$/, '')
+  const url = `${base}/f/${hash}`
+  const task = globalProgressHub.createTask({
+    kind: 'download',
+    transport: 'http',
+    hash,
+    name: name || hash.slice(0, 12),
+    total: -1,
+    peerId: 'http-direct',
+  })
+  globalProgressHub.startTask(task.id, -1)
+  try {
+    const resp = await fetch(url, { signal })
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status} fetching /f/${hash.slice(0, 12)}`)
+    }
+    const contentLen = Number(resp.headers.get('content-length')) || -1
+    if (contentLen > 0) {
+      globalProgressHub.updateProgress(task.id, 0, contentLen)
+    }
+    if (!resp.body || typeof resp.body.getReader !== 'function') {
+      const buf = await resp.arrayBuffer()
+      const u8 = new Uint8Array(buf)
+      globalProgressHub.completeTask(task.id, { received: u8.byteLength, total: u8.byteLength })
+      onProgress?.({ received: u8.byteLength, total: u8.byteLength })
+      return u8
+    }
+    const reader = resp.body.getReader()
+    const chunks = []
+    let received = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value) {
+        chunks.push(value)
+        received += value.byteLength
+        globalProgressHub.updateProgress(task.id, received, contentLen)
+        onProgress?.({ received, total: contentLen })
+      }
+    }
+    const out = new Uint8Array(received)
+    let off = 0
+    for (const c of chunks) {
+      out.set(c, off)
+      off += c.byteLength
+    }
+    globalProgressHub.completeTask(task.id, { received, total: received })
+    return out
+  } catch (err) {
+    globalProgressHub.failTask(task.id, err)
+    throw err
+  }
+}
+
+export async function download(hash, offset = 0, size = -1, opts = {}) {
   const session = getNodeSession?.()
   if (session?.client) {
-    const chunks = []
-    for await (const chunk of session.client.stream(hash, { offset, size })) {
-      chunks.push(chunk)
+    const task = globalProgressHub.createTask({
+      kind: 'download',
+      transport: 'peerjs',
+      hash,
+      name: opts.name || `${hash.slice(0, 12)}…`,
+      total: size > 0 ? size : -1,
+      peerId: session.peerId || 'peerjs',
+    })
+    globalProgressHub.startTask(task.id, size > 0 ? size : -1)
+    try {
+      const chunks = []
+      let received = 0
+      for await (const chunk of session.client.stream(hash, {
+        offset,
+        size,
+        signal: opts.signal,
+        onProgress: (rec, tot) => {
+          globalProgressHub.updateProgress(task.id, rec, tot)
+          opts.onProgress?.({ received: rec, total: tot })
+        },
+      })) {
+        chunks.push(chunk)
+        received += chunk.byteLength
+        globalProgressHub.updateProgress(task.id, received, -1)
+      }
+      const out = new Uint8Array(received)
+      let cur = 0
+      for (const c of chunks) {
+        out.set(c, cur)
+        cur += c.byteLength
+      }
+      globalProgressHub.completeTask(task.id, { received, total: received })
+      return out
+    } catch (err) {
+      globalProgressHub.failTask(task.id, err)
+      throw err
     }
-    const totalLen = chunks.reduce((acc, c) => acc + c.byteLength, 0)
-    const out = new Uint8Array(totalLen)
-    let cur = 0
-    for (const c of chunks) {
-      out.set(c, cur)
-      cur += c.byteLength
-    }
-    return out
   }
 
   const send = () => {
     const reqId = nextReqId()
-    const p = { kind: 'download', chunks: [], total: 0 }
+    const task = globalProgressHub.createTask({
+      id: reqId,
+      kind: 'download',
+      transport: 'ws',
+      hash,
+      name: opts.name || `${hash.slice(0, 12)}…`,
+      total: size > 0 ? size : -1,
+      peerId: 'local-ws',
+      onCancel: () => abortPending(reqId, new Error('Download cancelled')),
+    })
+    globalProgressHub.startTask(task.id, size > 0 ? size : -1)
+    const p = {
+      kind: 'download',
+      chunks: [],
+      total: size > 0 ? size : -1,
+      gotBytes: 0,
+      taskId: task.id,
+      onProgress: opts.onProgress || null,
+    }
     return new Promise((resolve, reject) => {
       setPending(reqId, { ...p, resolve, reject })
       try {
@@ -704,48 +928,82 @@ export async function download(hash, offset = 0, size = -1) {
   return ensureOpen().then(send)
 }
 
-// downloadStream: streaming download (ReadableStream). Data chunks are enqueued as they arrive (once per 64KB chunk);
-// the full data never sits in memory; used for large-file saves/transfer (the FS Access API path in downloadToFile,
-// future pipeline consumption). The server frame sequence is the same as download
-// (meta → data header+chunks… → done), differing only in collection-side semantics.
-// Consumer cancel (e.g. the save dialog is cancelled) → immediately clean up pending + binaryExpect,
-// preventing pending leaks and late frames contaminating subsequent requests (leak protection from the same source as
-// upload abort; discovery background: code review 2026-08-18).
-export function downloadStream(hash, offset = 0, size = -1) {
+export function downloadStream(hash, offset = 0, size = -1, opts = {}) {
   const session = getNodeSession?.()
   if (session?.client) {
     let iterator = null
+    const task = globalProgressHub.createTask({
+      kind: 'stream',
+      transport: 'peerjs',
+      hash,
+      name: opts.name || `${hash.slice(0, 12)}…`,
+      total: size > 0 ? size : -1,
+      peerId: session.peerId || 'peerjs',
+    })
+    globalProgressHub.startTask(task.id, size > 0 ? size : -1)
+    let received = 0
     return new ReadableStream({
       start() {
-        iterator = session.client.stream(hash, { offset, size })[Symbol.asyncIterator]()
+        iterator = session.client
+          .stream(hash, {
+            offset,
+            size,
+            onProgress: (rec, tot) => {
+              globalProgressHub.updateProgress(task.id, rec, tot)
+              opts.onProgress?.({ received: rec, total: tot })
+            },
+          })
+          [Symbol.asyncIterator]()
       },
       async pull(controller) {
         try {
           const { value, done } = await iterator.next()
           if (done) {
+            globalProgressHub.completeTask(task.id, { received })
             controller.close()
           } else {
+            received += value.byteLength
+            globalProgressHub.updateProgress(task.id, received, -1)
             controller.enqueue(value)
           }
         } catch (err) {
+          globalProgressHub.failTask(task.id, err)
           controller.error(err)
         }
       },
       cancel() {
-        try { iterator?.return?.() } catch {}
-      }
+        globalProgressHub.cancelTask(task.id)
+        try {
+          iterator?.return?.()
+        } catch {}
+      },
     })
   }
 
   const reqId = nextReqId()
+  const task = globalProgressHub.createTask({
+    id: reqId,
+    kind: 'stream',
+    transport: 'ws',
+    hash,
+    name: opts.name || `${hash.slice(0, 12)}…`,
+    total: size > 0 ? size : -1,
+    peerId: 'local-ws',
+    onCancel: () => abortPending(reqId),
+  })
+  globalProgressHub.startTask(task.id, size > 0 ? size : -1)
+
   return new ReadableStream({
     start(controller) {
       const send = () => {
         setPending(reqId, {
           kind: 'stream',
+          taskId: task.id,
+          gotBytes: 0,
+          total: size > 0 ? size : -1,
+          onProgress: opts.onProgress || null,
           controller,
           resolve: () => {},
-          // stream reject = pump the error into the stream (await reader.read() throws)
           reject: (err) => controller.error(err),
         })
         try {
@@ -757,7 +1015,12 @@ export function downloadStream(hash, offset = 0, size = -1) {
       if (ensureOpenSync()) {
         send()
       } else {
-        ensureOpen().then(send).catch(err => controller.error(err))
+        ensureOpen()
+          .then(send)
+          .catch((err) => {
+            globalProgressHub.failTask(task.id, err)
+            controller.error(err)
+          })
       }
     },
     cancel() {
@@ -766,23 +1029,39 @@ export function downloadStream(hash, offset = 0, size = -1) {
   })
 }
 
-// downloadToFile downloads and triggers a browser save. Prefers the File System Access API
-// (showSaveFilePicker → createWritable, streaming write-as-you-receive, never holding everything in memory);
-// when unsupported, falls back to <a download> (full in-memory Blob, fine for small-to-medium files).
-// Discovery background: code review 2026-08-18 — the original implementation download() assembled everything in memory,
-// which would OOM directly on large-file saves under the 8GB upload limit.
-export async function downloadToFile(hash, filename) {
+export async function downloadToFile(hash, filename, opts = {}) {
   const session = getNodeSession?.()
   const name = filename || hash
   if (session?.client && typeof session.client.saveAs === 'function') {
-    return session.client.saveAs(hash, name)
+    const task = globalProgressHub.createTask({
+      kind: 'download',
+      transport: 'peerjs',
+      hash,
+      name,
+      total: opts.size > 0 ? opts.size : -1,
+      peerId: session.peerId || 'peerjs',
+    })
+    globalProgressHub.startTask(task.id, opts.size > 0 ? opts.size : -1)
+    try {
+      const res = await session.client.saveAs(hash, name, {
+        onProgress: ({ received, total }) => {
+          globalProgressHub.updateProgress(task.id, received, total)
+          opts.onProgress?.({ received, total })
+        },
+      })
+      globalProgressHub.completeTask(task.id)
+      return res
+    } catch (err) {
+      globalProgressHub.failTask(task.id, err)
+      throw err
+    }
   }
 
-  if (window.showSaveFilePicker) {
+  if (typeof window !== 'undefined' && window.showSaveFilePicker) {
     const handle = await window.showSaveFilePicker({ suggestedName: name })
     const writable = await handle.createWritable()
     try {
-      for await (const chunk of downloadStream(hash)) {
+      for await (const chunk of downloadStream(hash, 0, -1, { name, onProgress: opts.onProgress })) {
         await writable.write(chunk)
       }
     } finally {
@@ -790,7 +1069,14 @@ export async function downloadToFile(hash, filename) {
     }
     return
   }
-  const data = await download(hash)
+
+  let data
+  try {
+    data = await download(hash, 0, -1, { name, onProgress: opts.onProgress })
+  } catch (wsErr) {
+    // Automatic HTTP direct fallback (/f/:sha256) if WS is unavailable
+    data = await httpDownload(hash, { name, onProgress: opts.onProgress })
+  }
   const blob = new Blob([data])
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -802,7 +1088,6 @@ export async function downloadToFile(hash, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 5000)
 }
 
-// Test hooks for vitest
 export const __test = {
   connect,
   readToken,
@@ -813,19 +1098,26 @@ export const __test = {
   abortPending,
   REQ_TIMEOUT_MS,
   CONNECT_TIMEOUT_MS,
-  _setSock: (s) => { sock = s },
+  _setSock: (s) => {
+    sock = s
+  },
   _reset: () => {
     stopHeartbeat()
-    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+    if (retryTimer) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
     retryDelay = RETRY_MIN_MS
     resetStatus()
     sock = null
+    activeWsUpload = false
     for (const [, p] of pending) {
       if (p.timer) clearTimeout(p.timer)
     }
     pending.clear()
     messageListeners.clear()
     binaryExpect = null
+    globalProgressHub.clearCompleted()
   },
   _binaryExpect: () => binaryExpect,
 }

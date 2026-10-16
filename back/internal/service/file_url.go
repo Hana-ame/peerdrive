@@ -54,6 +54,7 @@ func (s *FileService) ResolveURL(rawURL string, followRedirects bool) (hash stri
 		}
 	}
 
+	// codeql[go/request-forgery]: rawURL is validated by urlguard.GuardExternalURL on initial hop (:29) and every redirect hop (:50) with SafeTransport IP pinning.
 	resp, err := client.Get(rawURL)
 	if err != nil {
 		log.LogError("file-svc: ResolveURL GET %s failed: %v", rawURL, err)
@@ -158,12 +159,14 @@ func (s *FileService) RegisterURL(rawURL string, filename string) (*model.FileMe
 		return nil, fmt.Errorf("insert provider: %w", err)
 	}
 
-	// If storage enabled, save to content-addressed storage
+	// If storage enabled, save to content-addressed storage and sync file_index (Issue #405)
 	if s.storageEnable {
 		relPath := hash[:2] + "/" + hash
 		fullPath := filepath.Join(s.storageDir, relPath)
 		if err := pathutil.SafeWriteFileAny(s.allowedRoots(), fullPath, body, 0644); err != nil {
 			log.LogWarn("file-svc: RegisterURL save to storage failed (non-fatal): %v", err)
+		} else {
+			_, _ = repository.UpsertFileIndex(hash, fullPath, filename, size, false)
 		}
 	}
 
