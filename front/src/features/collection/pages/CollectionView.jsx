@@ -158,15 +158,7 @@ export default function CollectionView() {
             const text = await readStreamAsText(stream);
             data = parseManifestText(text);
           } catch {
-            try {
-              data = parseManifest(await ws.admin('GET', `/anon/collections/${sha}`));
-            } catch {
-              // HTTP direct fallback via canonical /c/:hash endpoint
-              const resp = await fetch(`/c/${sha}`);
-              if (resp.ok) {
-                data = parseManifestText(await resp.text());
-              }
-            }
+            data = parseManifest(await ws.admin('GET', `/anon/collections/${sha}`));
           }
         }
       }

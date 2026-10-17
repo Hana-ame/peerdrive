@@ -8,7 +8,6 @@ export {
   download,
   downloadStream,
   downloadToFile,
-  httpDownload,
   onMessage,
   sendFrame,
   __test,

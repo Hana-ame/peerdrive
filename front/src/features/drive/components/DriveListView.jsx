@@ -18,8 +18,6 @@ export default function DriveListView({
   setPreviewFile,
   onDownload,
   openCastModal,
-  onCopyDeepLink,
-  copiedHash,
   onShare,
   onDelete,
   onContextMenu,
@@ -121,9 +119,6 @@ export default function DriveListView({
                       <button onClick={() => openCastModal(f)} className="text-[11px] px-2 py-1 rounded bg-brand-500/15 text-brand-300 hover:bg-brand-500/25 mr-1 font-medium" title="Cast to screen">Cast</button>
                       <button onClick={() => setPreviewFile(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Preview</button>
                       <button onClick={() => onDownload(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Download</button>
-                      <button onClick={() => onCopyDeepLink(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">
-                        {copiedHash === f.hash ? 'Copied' : 'Link'}
-                      </button>
                       <button onClick={() => onShare(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300 mr-1">Share</button>
                       <button onClick={() => onDelete(f)} className="text-[11px] px-2 py-1 rounded bg-white/[0.05] hover:bg-red-500/20 text-gray-300 hover:text-red-300">Delete</button>
                     </>

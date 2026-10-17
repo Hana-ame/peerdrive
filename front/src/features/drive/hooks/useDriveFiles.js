@@ -2,13 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import * as ws from '../../../platform/transport-ws';
 import { mimeOf } from '../../../platform/shared/mime';
 import { STORAGE_KEY_API_BASE } from '../../../platform/shared/storageKeys';
-import { buildFileUrl } from '../../../platform/shared';
 import { getNodeSession } from '../../../lib/nodeSession';
 
 /**
  * useDriveFiles hook manages Drive file querying (root, browsing, inbox, WebRTC shares),
  * uploading, downloading (via unified PeerJS/WS/HTTP queue with live progress bar),
- * deleting, inbox quarantine approvals, share link generation, and canonical SHA256 URLs.
+ * deleting, inbox quarantine approvals, and share link generation.
  */
 export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef } = {}) {
   const [currentDir, setCurrentDir] = useState('');
@@ -16,7 +15,6 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [shareLink, setShareLink] = useState('');
-  const [copiedHash, setCopiedHash] = useState('');
   const [fileTags, setFileTags] = useState({}); // hash -> string[]
   const [globalTagCounts, setGlobalTagCounts] = useState([]);
 
@@ -202,25 +200,6 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
     }
   };
 
-  // Generates a canonical self-contained SHA256 file URL (#/f/<sha256>[?peer=<peerId>&name=<filename>])
-  const onCopyDeepLink = (f) => {
-    const origin = window.location.origin;
-    const base = (import.meta.env?.BASE_URL || '/').replace(/\/$/, '');
-    const sess = peerSession || getNodeSession?.();
-    let url = `${origin}${base}#/f/${f.hash}`;
-    try {
-      url = buildFileUrl(f.hash, {
-        baseUrl: `${origin}${base}`,
-        peerId: sess?.peerId || '',
-        filename: f.filename || '',
-        mode: 'spa',
-      });
-    } catch {}
-    navigator.clipboard?.writeText(url);
-    setCopiedHash(f.hash);
-    setTimeout(() => setCopiedHash(''), 2000);
-  };
-
   const saveFileTags = async (hash, tags) => {
     await ws.admin('POST', `/tags/sha/${hash}`, { tags });
     setFileTags((prev) => ({ ...prev, [hash]: tags }));
@@ -238,7 +217,6 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
     setBusy,
     shareLink,
     setShareLink,
-    copiedHash,
     fileTags,
     setFileTags,
     globalTagCounts,
@@ -250,7 +228,6 @@ export function useDriveFiles({ peerSession, selectedCategory = 'all', fileRef }
     onApproveInbox,
     onRejectInbox,
     onShare,
-    onCopyDeepLink,
     saveFileTags,
   };
 }

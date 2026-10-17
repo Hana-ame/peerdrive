@@ -56,7 +56,6 @@ export default function Drive() {
     busy,
     setBusy,
     shareLink,
-    copiedHash,
     fileTags,
     globalTagCounts,
     load,
@@ -66,7 +65,6 @@ export default function Drive() {
     onApproveInbox,
     onRejectInbox,
     onShare,
-    onCopyDeepLink,
     saveFileTags,
   } = useDriveFiles({ peerSession, selectedCategory, fileRef });
 
@@ -309,8 +307,6 @@ export default function Drive() {
               setPreviewFile={setPreviewFile}
               onDownload={onDownload}
               openCastModal={openCastModal}
-              onCopyDeepLink={onCopyDeepLink}
-              copiedHash={copiedHash}
               onShare={onShare}
               onDelete={onDelete}
               onContextMenu={handleContextMenu}
@@ -325,8 +321,6 @@ export default function Drive() {
               setPreviewFile={setPreviewFile}
               onDownload={onDownload}
               openCastModal={openCastModal}
-              onCopyDeepLink={onCopyDeepLink}
-              copiedHash={copiedHash}
               onShare={onShare}
               onDelete={onDelete}
               onContextMenu={handleContextMenu}
@@ -394,7 +388,6 @@ export default function Drive() {
                     { label: '下载 (Download)', icon: '⬇️', onClick: () => onDownload(contextMenu.file) },
                     { label: '投屏到大屏 (Cast)', icon: '📺', onClick: () => openCastModal(contextMenu.file) },
                     { divider: true },
-                    { label: '复制文件链接 (Copy Link)', icon: '🔗', onClick: () => onCopyDeepLink(contextMenu.file) },
                     { label: '对外共享 (Share)', icon: '📤', onClick: () => onShare(contextMenu.file) },
                     { label: '编辑标签 (Tags)', icon: '🏷️', onClick: () => openTagEditor(contextMenu.file) },
                     { divider: true },

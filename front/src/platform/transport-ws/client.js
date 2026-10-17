@@ -792,65 +792,7 @@ export async function stat(hash) {
   return ensureOpen().then(send)
 }
 
-/* ── Data plane (download / downloadStream / downloadToFile / httpDownload) ── */
-
-/**
- * Direct HTTP download fallback via canonical URL /f/:sha256 with real-time progress bar tracking.
- */
-export async function httpDownload(hash, { name = '', onProgress = null, signal = null } = {}) {
-  const base = getWsBase().replace(/\/+$/, '')
-  const url = `${base}/f/${hash}`
-  const task = globalProgressHub.createTask({
-    kind: 'download',
-    transport: 'http',
-    hash,
-    name: name || hash.slice(0, 12),
-    total: -1,
-    peerId: 'http-direct',
-  })
-  globalProgressHub.startTask(task.id, -1)
-  try {
-    const resp = await fetch(url, { signal })
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status} fetching /f/${hash.slice(0, 12)}`)
-    }
-    const contentLen = Number(resp.headers.get('content-length')) || -1
-    if (contentLen > 0) {
-      globalProgressHub.updateProgress(task.id, 0, contentLen)
-    }
-    if (!resp.body || typeof resp.body.getReader !== 'function') {
-      const buf = await resp.arrayBuffer()
-      const u8 = new Uint8Array(buf)
-      globalProgressHub.completeTask(task.id, { received: u8.byteLength, total: u8.byteLength })
-      onProgress?.({ received: u8.byteLength, total: u8.byteLength })
-      return u8
-    }
-    const reader = resp.body.getReader()
-    const chunks = []
-    let received = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (value) {
-        chunks.push(value)
-        received += value.byteLength
-        globalProgressHub.updateProgress(task.id, received, contentLen)
-        onProgress?.({ received, total: contentLen })
-      }
-    }
-    const out = new Uint8Array(received)
-    let off = 0
-    for (const c of chunks) {
-      out.set(c, off)
-      off += c.byteLength
-    }
-    globalProgressHub.completeTask(task.id, { received, total: received })
-    return out
-  } catch (err) {
-    globalProgressHub.failTask(task.id, err)
-    throw err
-  }
-}
+/* ── Data plane (download / downloadStream / downloadToFile) ── */
 
 export async function download(hash, offset = 0, size = -1, opts = {}) {
   const session = getNodeSession?.()
@@ -1070,13 +1012,7 @@ export async function downloadToFile(hash, filename, opts = {}) {
     return
   }
 
-  let data
-  try {
-    data = await download(hash, 0, -1, { name, onProgress: opts.onProgress })
-  } catch (wsErr) {
-    // Automatic HTTP direct fallback (/f/:sha256) if WS is unavailable
-    data = await httpDownload(hash, { name, onProgress: opts.onProgress })
-  }
+  const data = await download(hash, 0, -1, { name, onProgress: opts.onProgress })
   const blob = new Blob([data])
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
