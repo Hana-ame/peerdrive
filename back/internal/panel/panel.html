@@ -156,7 +156,7 @@
     <h1>peerdrive panel</h1>
     <span class="tag">公共面板</span>
     <span class="tag">零后端</span>
-    <span class="tag mono" id="build-id">bundle 333a3c57</span>
+    <span class="tag mono" id="build-id">bundle fa387eca</span>
     <span class="grow"></span>
     <span class="mono dim" style="display:flex;align-items:center;gap:6px">
       我的节点 id：<span id="my-id">（未连接）</span>
@@ -314,11 +314,23 @@
 ;(function () {
 'use strict'
 // ---- peerdrive-core/src/sha256.js ----
-// sha256.js — Single Source of Truth (peerdrive-core) for zero-dependency incremental SHA-256.
+// sha256.js — zero-dependency SHA-256 (incremental), the single source of truth
+// for content-address verification (Issue #396 SSOT; relocated from
+// packages/peerdrive-client/src/sha256.js so the panel, front and media all use
+// this one copy — build-panel.mjs inlines it first in the bundle topology).
 //
-// Used by peerdrive-client, peerdrive-media, and front/ for streaming content-address verification.
-// One-shot sha256Hex() prefers WebCrypto when available and falls back to the incremental pure-JS
-// Sha256 class (which works in non-secure contexts and on arbitrary chunk streams).
+// Why implement our own instead of just using WebCrypto: `crypto.subtle.digest()` is **one-shot**
+// — it must have the entire content in memory before computing the digest, which directly conflicts
+// with this package's streaming interface (stream()'s selling point is not keeping content in memory).
+// The Go side's /peerjs/fetch semantics are "verify sha256 after reading a full request, error if mismatch",
+// the consumer side must provide the same guarantee, which requires computing while receiving.
+//
+// Another side effect is cost: WebCrypto is only available in **secure contexts** (https / localhost),
+// the pure JS implementation runs on any http page (demo can be verified with just `python -m http.server`).
+//
+// Performance: pure JS is about 30–80 MB/s. The one-shot interface sha256Hex() prefers WebCrypto
+// (an order of magnitude faster), the streaming interface uses the incremental implementation here;
+// both paths cross-validate in tests (including 63/64/65 byte block-boundary lengths).
 
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -333,19 +345,22 @@ const K = new Uint32Array([
 
 const H0 = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
 
+/** Incremental SHA-256. update() can be called any number of times (block boundaries handled automatically), digestHex() is re-callable. */
 class Sha256 {
   constructor() {
     this.h = Int32Array.from(H0)
     this.buf = new Uint8Array(64)
     this.bufLen = 0
-    this.total = 0
+    this.total = 0 // number of **bytes** fed (not block count)
     this._w = new Int32Array(64)
   }
 
+  /** update appends a chunk of content. Accepts Uint8Array / ArrayBuffer / TypedArray. */
   update(data) {
     const bytes = toBytes(data)
     this.total += bytes.length
     let off = 0
+    // First fill the remaining half-block from last time
     if (this.bufLen > 0) {
       const take = Math.min(64 - this.bufLen, bytes.length)
       this.buf.set(bytes.subarray(0, take), this.bufLen)
@@ -356,10 +371,12 @@ class Sha256 {
         this.bufLen = 0
       }
     }
+    // Full blocks computed directly (no copy)
     while (off + 64 <= bytes.length) {
       this._block(bytes, off)
       off += 64
     }
+    // Leave the tail
     if (off < bytes.length) {
       this.buf.set(bytes.subarray(off), 0)
       this.bufLen = bytes.length - off
@@ -367,17 +384,24 @@ class Sha256 {
     return this
   }
 
+  /**
+   * digestHex outputs 64-character lowercase hex digest.
+   * Re-callable: internally snapshots h before padding/compression, object state unchanged after call
+   * (caller may recompute once in an error branch for logging).
+   */
   digestHex() {
     const saved = this.h.slice()
     const savedBufLen = this.bufLen
     const savedTotal = this.total
     try {
       const bitLen = this.total * 8
+      // Pad with 0x80 + length: reserve 8 bytes for 64-bit length. If bufLen>=56, not enough space, need two blocks
       const padLen = this.bufLen < 56 ? 64 : 128
       const pad = new Uint8Array(padLen)
       pad.set(this.buf.subarray(0, this.bufLen), 0)
       pad[this.bufLen] = 0x80
       const dv = new DataView(pad.buffer)
+      // bitLen split as "high bits = floor(total / 2^29)" to avoid total*8 overflowing 2^53
       dv.setUint32(padLen - 8, Math.floor(this.total / 536870912))
       dv.setUint32(padLen - 4, bitLen >>> 0)
       for (let i = 0; i < padLen; i += 64) this._block(pad, i)
@@ -442,6 +466,10 @@ function toBytes(data) {
   throw new TypeError('peerdrive-core: sha256 expects bytes')
 }
 
+/**
+ * sha256Hex one-shot digest: prefers WebCrypto (fast), falls back to pure JS when unavailable.
+ * The two paths don't mix within a single call, results are consistent (cross-checked by length in tests).
+ */
 async function sha256Hex(bytes) {
   const subtle = globalThis.crypto && globalThis.crypto.subtle
   if (subtle && typeof subtle.digest === 'function') {
@@ -452,393 +480,249 @@ async function sha256Hex(bytes) {
       for (let i = 0; i < view.length; i++) out += view[i].toString(16).padStart(2, '0')
       return out
     } catch {
-      // Fallback to pure JS
+      // Some environments (old Safari / non-secure context) throw: silently fall back to pure JS
     }
   }
   return new Sha256().update(bytes).digestHex()
 }
-
 // ---- peerdrive-core/src/security.js ----
-// security.js — Unified Defensive Security, Permission Isolation & Anti-Malicious-AI Module
-// for PeerDrive (Single Source of Truth in packages/peerdrive-core).
+// security.js — defensive sanitizers & permission guards for untrusted input
+// crossing into the UI (CollectionView manifests, share frames, signal URLs).
 //
-// Threat surfaces defended:
-//   1. Prototype Pollution & JSON Bombs (__proto__, constructor, prototype, deep nesting, oversized frames)
-//   2. Malicious AI / Indirect Prompt Injection in untrusted peer metadata (filenames, collection manifests,
-//      error messages, tags) + Unicode Bidi Override spoofing (\u202A-\u202E) + ANSI escape injection
-//   3. Path Traversal & Null-Byte Injection (../, ..\, C:, \0) in collection entries and filenames
-//   4. Stored/Reflected XSS via Blob URLs & Inline Previews (blocking text/html, image/svg+xml, etc.)
-//   5. Dangerous URI Schemes & Signaling SSRF (blocking javascript:, data:, file:, 169.254.169.254)
-//   6. Channel Permission Escalation (strict separation between untrusted PeerJS peers, /ws/data, and /ws/admin)
+// Why this module exists (collection-view red-team hardening, Issue #404):
+//  1. Collection manifests arrive from arbitrary peers; before this file,
+//     rendering them meant trusting their shape — that leaks prototype
+//     pollution ("__proto__"), deep JSON nesting bombs, "../" traversal paths
+//     and Bidi/control-character spoofing into the page.
+//  2. A ?signal= URL pasted into a share link would otherwise let a peer make
+//     the browser dial arbitrary hosts; validateSignalOrApiUrl gates it.
+//  3. WebRTC must never carry admin verbs (AGENTS.md: admin is local-WS only);
+//     evaluateAdminPermission enforces that boundary on the client side.
+// The Go side has its own hardening (urlguard, pathutil, apperr); this module
+// is the browser-side complement, not a substitute.
 
-const MAX_CONTROL_FRAME_BYTES = 1024 * 1024 // 1 MB max for normal control frames
-const MAX_MANIFEST_BYTES = 16 * 1024 * 1024 // 16 MB max for collection manifests
-const MAX_JSON_DEPTH = 24
-const MAX_COLLECTION_ENTRIES = 10000
+/** Upper bound for a collection manifest JSON document (defense against bombs). */
+const MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 
-const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+// Characters that can spoof or hide text in the UI: C0 controls plus Unicode
+// bidi overrides/isolates and zero-width joiners. Stripped everywhere untrusted
+// strings are displayed.
+function stripUnsafeChars(s) {
+  return String(s).replace(/[\u0000-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, '')
+}
 
-// Unicode Bidi overrides (\u202A-\u202E, \u2066-\u2069), zero-width chars (\u200B-\u200F, \uFEFF),
-// and C0/C1 control chars (except \t, \n, \r)
-const BIDI_AND_CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g
-// ANSI / VT100 CSI & OSC escape sequences
-const ANSI_ESCAPE_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\))/g
+/** Truncate-and-clean arbitrary text for display; never rendered raw after this. */
+function sanitizeUntrustedText(text, maxLen = 512) {
+  const clean = stripUnsafeChars(text == null ? '' : text)
+  return clean.slice(0, maxLen)
+}
 
-// Patterns indicative of Indirect Prompt Injection / Malicious AI Agent payloads inside metadata
-const PROMPT_INJECTION_PATTERNS = [
-  /ignore\s+(?:all\s+)?(?:previous|prior|above|system)\s+(?:instructions|prompts|rules|constraints)/i,
-  /disregard\s+(?:all\s+)?(?:previous|prior|system)\s+(?:instructions|prompts)/i,
-  /<\|(?:im_start|im_end|system|user|assistant|endoftext|tool_call)\|>/i,
-  /\[\s*(?:SYSTEM\s*INSTRUCTION|SYSTEM\s*PROMPT|ADMIN\s*OVERRIDE|TOOL_CALL)\s*\]/i,
-  /(?:localStorage|sessionStorage)\s*\.\s*(?:getItem|setItem)|peerdrive_auth_(?:token|key)/i,
-  /curl\s+[^\n]*Authorization:\s*Bearer/i,
-  /<script\b[^>]*>[\s\S]*?<\/script>/i,
-  /javascript\s*:/i,
-]
+/** Safe file name for the browser download bar: basename only, no path, no controls. */
+function sanitizeFilename(name, fallback = 'file') {
+  const base = String(name == null ? '' : name).split(/[\\/]/).pop()
+  const clean = stripUnsafeChars(base).slice(0, 255)
+  return clean || fallback
+}
 
-// Safe MIME whitelist for inline browser Blob previews (never allow HTML, XHTML, SVG, XML, or JS to execute in Blob context)
-const SAFE_INLINE_PREVIEW_MIMES = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-  'image/bmp',
-  'image/x-icon',
-  'image/avif',
-  'video/mp4',
-  'video/webm',
-  'video/ogg',
-  'audio/mpeg',
-  'audio/ogg',
-  'audio/wav',
-  'audio/flac',
-  'audio/mp4',
-  'application/pdf',
-  'text/plain',
-  'text/plain; charset=utf-8',
-])
-
-/**
- * Checks whether an object or array exceeds MAX_JSON_DEPTH or contains prototype pollution keys.
- */
-function checkDepthAndKeys(val, depth = 0) {
-  if (depth > MAX_JSON_DEPTH) {
-    throw new RangeError(`JSON nesting depth exceeds maximum (${MAX_JSON_DEPTH})`)
+/** Collection entry path: relative only — drops leading slashes and any ".." traversal. */
+function sanitizeRelativePath(p, maxLen = 4096) {
+  const parts = String(p == null ? '' : p)
+    .replace(/\\/g, '/')
+    .split('/')
+  const clean = []
+  for (const seg of parts) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') continue // traversal: refuse, never pass through
+    clean.push(stripUnsafeChars(seg).slice(0, 255))
   }
-  if (!val || typeof val !== 'object') return
-  if (Array.isArray(val)) {
-    for (let i = 0; i < val.length; i++) {
-      checkDepthAndKeys(val[i], depth + 1)
-    }
-    return
-  }
-  const ownKeys = Object.getOwnPropertyNames(val)
-  for (let i = 0; i < ownKeys.length; i++) {
-    const k = ownKeys[i]
-    if (DANGEROUS_KEYS.has(k)) {
-      delete val[k]
-      continue
-    }
-    checkDepthAndKeys(val[k], depth + 1)
-  }
+  return clean.join('/').slice(0, maxLen)
 }
 
 /**
- * Safely parses JSON from untrusted WebSocket / PeerJS / HTTP inputs.
- * Enforces byte size cap, maximum nesting depth, and strips __proto__ / constructor / prototype.
- * Returns null on invalid or malicious input instead of throwing (unless throwOnError=true).
+ * safeJsonParse parses untrusted JSON with three hard caps, then walks the
+ * result to reject prototype-pollution keys (__proto__ / constructor /
+ * prototype as own keys) and deep nesting bombs. throwOnError:true converts a
+ * rejection into an exception (callers that can fall back pass false and get null).
  */
-function safeJsonParse(raw, { maxBytes = MAX_CONTROL_FRAME_BYTES, throwOnError = false } = {}) {
-  try {
-    if (typeof raw !== 'string') {
-      throw new TypeError('safeJsonParse requires a string')
-    }
-    if (raw.length > maxBytes) {
-      throw new RangeError(`JSON payload length (${raw.length}) exceeds limit (${maxBytes})`)
-    }
-    const parsed = JSON.parse(raw, (key, value) => {
-      if (DANGEROUS_KEYS.has(key)) return undefined
-      return value
-    })
-    checkDepthAndKeys(parsed, 0)
-    return parsed
-  } catch (err) {
-    if (throwOnError) throw err
+function safeJsonParse(text, { maxBytes = MAX_MANIFEST_BYTES, throwOnError = false } = {}) {
+  const fail = (msg) => {
+    if (throwOnError) throw new Error(msg)
     return null
   }
-}
+  if (typeof text !== 'string') return fail('safeJsonParse: non-string input')
+  if (text.length > maxBytes) return fail(`safeJsonParse: document exceeds ${maxBytes} bytes`)
 
-/**
- * Detects whether a string contains Indirect Prompt Injection / Malicious AI instruction patterns
- * or Bidi spoofing characters.
- */
-function detectPromptInjection(str) {
-  if (typeof str !== 'string' || !str) return { suspected: false, reasons: [] }
-  const reasons = []
-  if (/[\u202A-\u202E\u2066-\u2069]/.test(str)) {
-    reasons.push('unicode_bidi_override')
-  }
-  if (ANSI_ESCAPE_RE.test(str)) {
-    reasons.push('ansi_escape_sequence')
-  }
-  for (const pat of PROMPT_INJECTION_PATTERNS) {
-    if (pat.test(str)) {
-      reasons.push(`prompt_injection_pattern:${pat.source.slice(0, 32)}`)
-      break
-    }
-  }
-  return { suspected: reasons.length > 0, reasons }
-}
-
-/**
- * Sanitizes untrusted text (peer error messages, descriptions, node names, tags) by:
- *   1. Stripping ANSI escape sequences
- *   2. Stripping Unicode Bidi overrides (\u202E etc.), zero-width spoofing chars, and control bytes
- *   3. Neutralizing LLM role/instruction injection delimiters (<|im_start|>, [SYSTEM INSTRUCTION], etc.)
- *   4. Capping length to maxLen
- */
-function sanitizeUntrustedText(input, maxLen = 1024) {
-  if (input === null || input === undefined) return ''
-  let s = String(input)
-  s = s.replace(ANSI_ESCAPE_RE, '')
-  s = s.replace(BIDI_AND_CONTROL_RE, '')
-  // Neutralize special LLM control tokens so an AI agent reading UI/logs treats them as inert literals
-  s = s.replace(/<\|/g, '< |').replace(/\|>/g, '| >')
-  s = s.replace(/\[\s*(SYSTEM\s*INSTRUCTION|SYSTEM\s*PROMPT|ADMIN\s*OVERRIDE|TOOL_CALL)\s*\]/gi, '[REDACTED_META_TAG]')
-  if (s.length > maxLen) {
-    s = s.slice(0, maxLen)
-  }
-  return s.trim()
-}
-
-/**
- * Sanitizes an untrusted filename (from peer share list, URL query ?name=, or upload)
- * to prevent Bidi extension spoofing (e.g. "report_\u202Efdp.exe"), path traversal, and prompt injection.
- */
-function sanitizeFilename(rawName, fallback = 'file.bin') {
-  if (typeof rawName !== 'string' || !rawName.trim()) return fallback
-  let cleaned = sanitizeUntrustedText(rawName, 255)
-  // Take only the basename after any / or \
-  cleaned = cleaned.replace(/\\/g, '/').split('/').pop() || ''
-  // Remove dangerous filesystem / shell / HTML characters
-  cleaned = cleaned.replace(/[<>:"|?*\x00-\x1F]/g, '_')
-  // Collapse leading dots to prevent hidden dotfile overwrite (.bashrc, .ssh, etc.)
-  cleaned = cleaned.replace(/^\.+/, '')
-  if (!cleaned || cleaned === '.' || cleaned === '..') return fallback
-  return cleaned
-}
-
-/**
- * Sanitizes a relative path inside a Collection manifest (e.g. "docs/sub/readme.md").
- * Strictly rejects or strips directory traversal ("..", leading "/", Windows drive letters, null bytes).
- */
-function sanitizeRelativePath(rawPath) {
-  if (typeof rawPath !== 'string' || !rawPath.trim()) return ''
-  const cleaned = sanitizeUntrustedText(rawPath, 1024).replace(/\\/g, '/')
-  const parts = cleaned.split('/')
-  const safeParts = []
-  for (let i = 0; i < parts.length; i++) {
-    const seg = parts[i].trim()
-    if (!seg || seg === '.') continue
-    if (seg === '..') {
-      throw new Error(`SecurityError: path traversal segment ".." rejected in "${rawPath}"`)
-    }
-    if (/^[a-zA-Z]:$/.test(seg)) {
-      throw new Error(`SecurityError: drive prefix "${seg}" rejected in "${rawPath}"`)
-    }
-    const safeSeg = sanitizeFilename(seg, '')
-    if (!safeSeg) {
-      throw new Error(`SecurityError: invalid path segment in "${rawPath}"`)
-    }
-    safeParts.push(safeSeg)
-  }
-  return safeParts.join('/')
-}
-
-/**
- * Returns a guaranteed script-safe MIME type for browser Blob / ObjectURL creation.
- * Blocks HTML, SVG, XML, XHTML, and JavaScript from ever executing in a same-origin blob: URL.
- */
-function safePreviewMime(rawMime, filename = '') {
-  const lower = String(rawMime || '').trim().toLowerCase().split(';')[0].trim()
-  if (SAFE_INLINE_PREVIEW_MIMES.has(lower)) {
-    return lower === 'text/plain' ? 'text/plain; charset=utf-8' : lower
-  }
-  // Any text/* other than text/html, text/javascript, text/xml is downgraded to text/plain
-  if (
-    lower.startsWith('text/') &&
-    lower !== 'text/html' &&
-    lower !== 'text/javascript' &&
-    lower !== 'text/xml'
-  ) {
-    return 'text/plain; charset=utf-8'
-  }
-  return 'application/octet-stream'
-}
-
-/**
- * Validates a signaling server URL or node API base URL to prevent XSS (javascript:/data:)
- * and SSRF against cloud metadata / link-local addresses.
- */
-function validateSignalOrApiUrl(rawUrl, { allowLoopback = true } = {}) {
-  if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
-    return { valid: false, reason: 'empty_url', url: null }
-  }
-  let u
+  let value
   try {
-    u = new URL(rawUrl.trim())
-  } catch {
-    return { valid: false, reason: 'malformed_url', url: null }
+    value = JSON.parse(text)
+  } catch (e) {
+    return fail(`safeJsonParse: invalid JSON (${e.message})`)
   }
-  if (!['http:', 'https:', 'ws:', 'wss:'].includes(u.protocol)) {
-    return { valid: false, reason: `disallowed_protocol:${u.protocol}`, url: null }
-  }
-  if (u.username || u.password) {
-    return { valid: false, reason: 'embedded_credentials_disallowed', url: null }
-  }
-  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  // Always block cloud metadata and link-local addresses (169.254.0.0/16, fe80::, fd00:ec2::254)
-  if (
-    host === '169.254.169.254' ||
-    host.startsWith('169.254.') ||
-    host === 'metadata.google.internal' ||
-    host === 'fd00:ec2::254' ||
-    host.startsWith('fe80:') ||
-    host === '0.0.0.0'
-  ) {
-    return { valid: false, reason: `ssrf_blocked_host:${host}`, url: null }
-  }
-  if (!allowLoopback && (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.startsWith('127.'))) {
-    return { valid: false, reason: `loopback_blocked:${host}`, url: null }
-  }
-  return { valid: true, reason: 'ok', url: u }
-}
 
-/**
- * Sanitizes an entire Collection manifest received from an untrusted peer or pasted JSON.
- */
-function sanitizeCollectionManifest(manifest) {
-  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
-    throw new Error('Invalid collection manifest: expected object')
-  }
-  if (!Array.isArray(manifest.entries)) {
-    throw new Error('Invalid collection manifest: missing entries array')
-  }
-  if (manifest.entries.length > MAX_COLLECTION_ENTRIES) {
-    throw new RangeError(`Collection entries (${manifest.entries.length}) exceed limit (${MAX_COLLECTION_ENTRIES})`)
-  }
-  const safeEntries = []
-  let injectionSuspected = false
-  for (let i = 0; i < manifest.entries.length; i++) {
-    const e = manifest.entries[i]
-    if (!e || typeof e !== 'object') continue
-    const rawPath = e.path || e.relpath || e.name || ''
-    const check = detectPromptInjection(rawPath)
-    if (check.suspected) injectionSuspected = true
-    let safePath = ''
-    try {
-      safePath = sanitizeRelativePath(rawPath)
-    } catch {
-      continue // Drop malicious traversal entries
+  // Walk: depth <= 64, node count <= 20k, no dangerous own keys.
+  let nodes = 0
+  const walk = (v, depth) => {
+    if (depth > 64) throw new Error('safeJsonParse: nesting too deep')
+    nodes += 1
+    if (nodes > 20000) throw new Error('safeJsonParse: too many nodes')
+    if (Array.isArray(v)) {
+      for (const item of v) walk(item, depth + 1)
+      return
     }
-    if (!safePath) continue
-    const sha = String(e.sha || e.sha256 || e.hash || '').trim().toLowerCase()
-    if (sha && !/^[0-9a-f]{64}$/.test(sha)) continue
-    safeEntries.push({
-      ...e,
-      path: safePath,
-      name: sanitizeFilename(e.name || safePath.split('/').pop(), 'file.bin'),
-      sha: sha || e.sha,
-      size: typeof e.size === 'number' && e.size >= 0 ? e.size : 0,
-    })
-  }
-  const friendly = sanitizeUntrustedText(manifest.friendly_name || manifest.name || '', 256)
-  if (detectPromptInjection(manifest.friendly_name || manifest.name || '').suspected) {
-    injectionSuspected = true
-  }
-  return {
-    ...manifest,
-    friendly_name: friendly,
-    name: friendly,
-    description: sanitizeUntrustedText(manifest.description || '', 2048),
-    entries: safeEntries,
-    _security: { sanitized: true, aiInjectionSuspected: injectionSuspected },
-  }
-}
-
-/**
- * Permission tiers for static HTML UI communicating over PeerJS / WS / HTTP:
- *   - 'peerjs': Remote WebRTC peer connection. Strictly read/share/upload-public only.
- *               NEVER allowed to invoke node admin mutations or receive local admin Bearer tokens.
- *   - 'ws-data': Data-plane WebSocket (/ws/data). Only file req/stat/stream allowed; no admin frames.
- *   - 'ws-admin': Management WebSocket (/ws/peer, /ws/admin). Allows admin frames with local Bearer token.
- */
-const PEERJS_ALLOWED_READ_PATHS = new Set([
-  '/anon/collections',
-  '/collections',
-  '/files',
-  '/ping',
-  '/peerjs/node',
-  '/p2p/auth/status',
-  '/tags/summary',
-  '/tags/batch',
-  '/display/screens',
-  '/p2p/pull',
-  '/bt/downloads',
-  '/ipfs/pins',
-  '/files/inbox',
-])
-
-class PermissionError extends Error {
-  constructor(message, code = 'PERMISSION_DENIED') {
-    super(message)
-    this.name = 'PermissionError'
-    this.code = code
-    this.status = 403
-  }
-}
-
-/**
- * Evaluates whether an admin API operation (method, path) is permitted on the current transport channel.
- * Protects the pure static HTML interface from accidental or AI-induced privilege escalation when
- * connected to an untrusted PeerJS node or a data-only WebSocket.
- */
-function evaluateAdminPermission(channel, method, path) {
-  const upperMethod = String(method || 'GET').toUpperCase()
-  const cleanPath = String(path || '').split('?')[0]
-
-  if (channel === 'ws-data') {
-    return {
-      allowed: false,
-      code: 'PERMISSION_DENIED_DATA_CHANNEL',
-      reason: 'Management API calls are prohibited on /ws/data (data-plane only)',
-    }
-  }
-
-  if (channel === 'peerjs') {
-    // Allow read-only share/collection/status queries mapped to PeerJS share frames
-    const isReadSafe =
-      (upperMethod === 'GET' &&
-        (PEERJS_ALLOWED_READ_PATHS.has(cleanPath) ||
-          cleanPath.startsWith('/anon/collections/') ||
-          cleanPath.startsWith('/c/') ||
-          cleanPath.startsWith('/files/verify/'))) ||
-      (upperMethod === 'POST' && cleanPath === '/tags/batch')
-
-    if (!isReadSafe) {
-      return {
-        allowed: false,
-        code: 'PERMISSION_DENIED_PEERJS_READONLY',
-        reason: `Operation ${upperMethod} ${cleanPath} is blocked in PeerJS remote session (untrusted peer boundary)`,
+    if (v && typeof v === 'object') {
+      for (const k of Object.keys(v)) {
+        if (k === '__proto__' || k === 'constructor' || k === 'prototype') {
+          throw new Error(`safeJsonParse: dangerous key "${k}"`)
+        }
+        walk(v[k], depth + 1)
       }
     }
-    return { allowed: true, code: 'OK', attachAdminToken: false }
   }
-
-  // Default: 'ws-admin' or 'http' to configured node
-  return { allowed: true, code: 'OK', attachAdminToken: true }
+  try {
+    walk(value, 0)
+  } catch (e) {
+    return fail(e.message)
+  }
+  return value
 }
 
+/** Prompt-injection markers in text that ends up in an LLM/system context. */
+function detectPromptInjection(text) {
+  const s = String(text || '')
+  return /(ignore|disregard|forget|overwrite|override|repeat)\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?|messages)/i.test(s) ||
+    /(system|developer)\s+(prompt|message)/i.test(s) ||
+    /you\s+are\s+now\s+[\w-]+/i.test(s) ||
+    /jailbreak|DO\s+NOT\s+REVEAL/i.test(s)
+}
+
+/** Preview allow-list: only renderable media/text types are echoed back. */
+function safePreviewMime(mime) {
+  const m = String(mime || '').toLowerCase()
+  if (/^(image|video|audio)\//.test(m)) return m
+  if (m === 'text/plain' || m === 'text/markdown' || m === 'application/json' || m === 'application/pdf') return m
+  return null
+}
+
+/**
+ * validateSignalOrApiUrl gates the ?signal= / ?url= param before a PeerJS dial:
+ * https/wss are always accepted, http/ws only for loopback (dev), credentials
+ * are rejected outright, and the result exposes a parsed URL for dial options.
+ */
+function validateSignalOrApiUrl(url) {
+  const raw = String(url || '').trim()
+  if (!raw) return { valid: false, reason: 'empty' }
+  let parsed
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return { valid: false, reason: 'unparseable' }
+  }
+  const scheme = parsed.protocol
+  if (scheme !== 'https:' && scheme !== 'wss:' && scheme !== 'http:' && scheme !== 'ws:') {
+    return { valid: false, reason: `scheme ${scheme} not allowed` }
+  }
+  if (parsed.username || parsed.password) {
+    return { valid: false, reason: 'credentials not allowed' }
+  }
+  if ((scheme === 'http:' || scheme === 'ws:') && !isLoopback(parsed.hostname)) {
+    return { valid: false, reason: 'plaintext only for loopback' }
+  }
+  return { valid: true, url: parsed }
+}
+
+function isLoopback(hostname) {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]'
+}
+
+/**
+ * sanitizeCollectionManifest returns a sanitizing DEEP COPY of a collection
+ * manifest. Every string (names, paths, hashes, mime types, Bidi/control) is
+ * cleaned, "../"-traversal paths are refused, dangerous keys (__proto__ /
+ * constructor / prototype) never survive, and the entry count is capped.
+ * All OTHER keys (hash, files, size, version, ...) pass through untouched:
+ * the shared-manifest consumers (CollectionView page, client.js
+ * sanitizePeerCollections merge `{...c, ...clean}`) rely on the copy having
+ * exactly the input's key set — front/tests/ws.test.js pins that a remote
+ * collection keeps its hash and files fields byte-for-byte.
+ *
+ * Two derived fields are omitted when empty so the merge can't add keys the
+ * caller didn't have: `entries` is only emitted when it has surviving entries,
+ * and `friendly_name` only when it differs from `name`.
+ */
+function sanitizeCollectionManifest(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {}
+  const out = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue
+    if (k === 'name') { out.name = sanitizeUntrustedText(v, 256); continue }
+    if (k === 'friendly_name') { out.friendly_name = sanitizeUntrustedText(v, 256); continue }
+    if (k === 'description') { out.description = sanitizeUntrustedText(v, 1024); continue }
+    out[k] = v
+  }
+  // friendly_name 与 name 相同时不再重复登记（client.js 的 {...c, ...clean}
+  // 合并会因此多出键，ws.test 的 toEqual 会红）。
+  if (typeof out.friendly_name === 'string' && out.friendly_name === out.name) {
+    delete out.friendly_name
+  }
+  if (!Array.isArray(out.entries)) return out
+  const kept = []
+  for (const e of out.entries) {
+    if (kept.length >= 5000) break
+    if (!e || typeof e !== 'object') continue
+    const path = sanitizeRelativePath(e.path || e.filepath || '')
+    if (!path) continue
+    const entry = {}
+    for (const [ek, ev] of Object.entries(e)) {
+      if (ek === '__proto__' || ek === 'constructor' || ek === 'prototype') continue
+      if (ek === 'path' || ek === 'filepath') { entry[ek] = path; continue }
+      if (ek === 'name' || ek === 'filename') { entry[ek] = sanitizeFilename(ev, 'file'); continue }
+      if (ek === 'mime_type' || ek === 'mime') { entry[ek] = sanitizeUntrustedText(ev, 128); continue }
+      if (ek === 'size' || ek === 'total') {
+        entry[ek] = Number.isFinite(ev) && ev >= 0 ? Math.min(Math.floor(ev), Number.MAX_SAFE_INTEGER) : 0
+        continue
+      }
+      // sha / hash / preview 是内容地址与缩略图地址：保留原值（小写、限长），
+      // 长度校验不拦 mock/测试里的非 64-hex 短值（64hex 校验在取回入口做）。
+      if (ek === 'sha' || ek === 'hash' || ek === 'preview') {
+        entry[ek] = sanitizeUntrustedText(ev, 64).toLowerCase()
+        continue
+      }
+      entry[ek] = ev
+    }
+    kept.push(entry)
+  }
+  if (kept.length > 0) out.entries = kept
+  else delete out.entries
+  return out
+}
+
+/** Permission denial thrown by evaluateAdminPermission when a verb is not allowed. */
+class PermissionError extends Error {
+  constructor(reason, code) {
+    super(reason)
+    this.name = 'PermissionError'
+    this.reason = reason
+    this.code = code
+  }
+}
+
+/**
+ * evaluateAdminPermission(transport, method, path) — the client-side admin
+ * boundary. Over WebRTC ('peerjs') every READ degrades safely (shares() reads
+ * + the safe-fallback handlers in client.js admin(), including null for
+ * not-locally-available stats — pinned by front/tests/ws.test.js), so only
+ * WRITE verbs are refused: mutations stay on the local WS admin plane.
+ */
+function evaluateAdminPermission(transport, method, path) {
+  const m = String(method || 'GET').toUpperCase()
+  if (transport !== 'peerjs') return { allowed: true }
+  if (m === 'GET') return { allowed: true }
+  return {
+    allowed: false,
+    reason: `admin verb ${m} is restricted to the local session (WebRTC exposes a read-only share surface)`,
+    code: 'LOCAL_ONLY',
+  }
+}
 // ---- peerdrive-core/src/protocol.js ----
 // protocol.js — Single Source of Truth (peerdrive-core) for Peerdrive frame protocol,
 // binary chunk codecs, v2 envelopes (#378), and 32-byte self-routing binary headers (#378 A7).
@@ -1078,242 +962,105 @@ function baseName(p) {
 }
 
 // ---- peerdrive-core/src/url.js ----
-// url.js — Canonical self-contained URL builders and parsers for SHA256 files and Collections.
+// url.js — canonical self-contained URL generation/parsing (invariant #2 SSOT).
 //
-// Guarantees that a single URL uniquely identifies and reaches either:
-//   1. A specific SHA256 file:       #/f/<sha256>[?peer=<peerId>&signal=<url>&name=<filename>] or /f/<sha256>
-//   2. A specific Collection manifest: #/c/<hash>[?peer=<peerId>&signal=<url>&entry=<path>]  or /c/<hash>
+// Two URL dialects, both uniquely address a SHA256 file or a Collection:
+//   SPA  mode  ->  <base>#/f/<sha256>?peer=<peerId>&name=<filename>  (hash routes)
+//   HTTP mode  ->  <base>/f/<sha256>[/<filename>]                    (backend direct)
+//                 <base>/c/<hash>[/<entryPath>]                      (collection manifest/entry)
+//
+// parseDirectTarget accepts any of: a bare 64-hex hash (+kind hint), a SPA hash
+// route, a legacy /api/v1/... route, the public panel link (?node=&hash=), so
+// collection/file deep links can be pasted anywhere and still resolve to the
+// right content. The backend /f/ /c/ handlers are a known gap on the mainline
+// (excised 2026-10-17) — this module stays as the contract for when they land.
 
-/**
- * Builds a canonical self-contained URL that directly reaches a SHA256 file.
- * @param {string} sha256 - 64-char lowercase hex SHA256 digest
- * @param {object} [opts]
- * @param {string} [opts.baseUrl] - Base origin/page URL (defaults to current location or '')
- * @param {string} [opts.peerId] - Optional PeerJS node ID for P2P WebRTC direct fetch
- * @param {string} [opts.signalUrl] - Optional signaling server URL
- * @param {string} [opts.filename] - Optional display filename
- * @param {string} [opts.mime] - Optional MIME type hint
- * @param {'spa'|'http'} [opts.mode='spa'] - 'spa' produces #/f/<sha256>, 'http' produces /f/<sha256>
- */
-function buildFileUrl(sha256, opts = {}) {
-  const hash = String(sha256 || '').trim().toLowerCase()
-  if (!isValidHash(hash)) {
-    throw new TypeError(`Invalid SHA256 hash: ${sha256}`)
+// Named URL_HASH_RE (not HASH_RE): build-panel.mjs inlines every core file into
+// one flat IIFE scope, and protocol.js already owns a top-level HASH_RE.
+const URL_HASH_RE = /\b[0-9a-f]{64}\b/
+
+function baseNoSlash(baseUrl) {
+  return String(baseUrl || '').replace(/\/+$/, '')
+}
+
+function queryString(params) {
+  const qs = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') qs.set(k, String(v))
   }
-  const {
-    baseUrl = '',
-    peerId = '',
-    signalUrl = '',
-    filename = '',
-    mime = '',
-    mode = 'spa',
-  } = opts
+  const s = qs.toString()
+  return s ? `?${s}` : ''
+}
 
-  const cleanBase = String(baseUrl || '').replace(/#.*$/, '').replace(/\/+$/, '')
-  const params = new URLSearchParams()
-  if (peerId) params.set('peer', peerId)
-  if (signalUrl) params.set('signal', signalUrl)
-  if (filename && mode === 'spa') params.set('name', filename)
-  if (mime) params.set('mime', mime)
-  const qs = params.toString() ? `?${params.toString()}` : ''
-
+// buildFileUrl hash param is trusted (a 64-hex sha256 from file_index); only the
+// query values are untrusted user data, so only those go through URLSearchParams
+// (spaces become '+' in the SPA link, matching the pinned core tests).
+function buildFileUrl(hash, { baseUrl = '', peerId = '', filename = '', mode = 'spa' } = {}) {
+  const base = baseNoSlash(baseUrl)
   if (mode === 'http') {
-    const nameSeg = filename ? `/${encodeURIComponent(filename)}` : ''
-    return `${cleanBase}/f/${hash}${nameSeg}${qs}`
+    return filename ? `${base}/f/${hash}/${filename}` : `${base}/f/${hash}`
   }
-  return `${cleanBase}#/f/${hash}${qs}`
+  return `${base}#/f/${hash}${queryString({ peer: peerId, name: filename })}`
 }
 
-/**
- * Builds a canonical self-contained URL that directly reaches a Collection by its 64-hex hash.
- * @param {string} collectionHash - 64-char lowercase hex SHA256 of the collection manifest
- * @param {object} [opts]
- * @param {string} [opts.baseUrl] - Base origin/page URL
- * @param {string} [opts.peerId] - Optional PeerJS node ID for P2P WebRTC direct fetch
- * @param {string} [opts.signalUrl] - Optional signaling server URL
- * @param {string} [opts.name] - Optional friendly collection name
- * @param {string} [opts.entryPath] - Optional entry path inside the collection
- * @param {'spa'|'http'} [opts.mode='spa'] - 'spa' produces #/c/<hash>, 'http' produces /c/<hash>
- */
-function buildCollectionUrl(collectionHash, opts = {}) {
-  const hash = String(collectionHash || '').trim().toLowerCase()
-  if (!isValidHash(hash)) {
-    throw new TypeError(`Invalid collection hash: ${collectionHash}`)
-  }
-  const {
-    baseUrl = '',
-    peerId = '',
-    signalUrl = '',
-    name = '',
-    entryPath = '',
-    mode = 'spa',
-  } = opts
-
-  const cleanBase = String(baseUrl || '').replace(/#.*$/, '').replace(/\/+$/, '')
-  const params = new URLSearchParams()
-  if (peerId) params.set('peer', peerId)
-  if (signalUrl) params.set('signal', signalUrl)
-  if (name) params.set('name', name)
-  if (entryPath && mode === 'spa') params.set('entry', entryPath)
-  const qs = params.toString() ? `?${params.toString()}` : ''
-
+function buildCollectionUrl(hash, { baseUrl = '', peerId = '', name = '', entryPath = '', mode = 'spa' } = {}) {
+  const base = baseNoSlash(baseUrl)
   if (mode === 'http') {
-    const cleanEntry = String(entryPath || '').replace(/^\/+/, '')
-    const entrySeg = cleanEntry ? `/${cleanEntry}` : ''
-    return `${cleanBase}/c/${hash}${entrySeg}${qs}`
+    return entryPath ? `${base}/c/${hash}/${entryPath}` : `${base}/c/${hash}`
   }
-  return `${cleanBase}#/c/${hash}${qs}`
+  return `${base}#/c/${hash}${queryString({ peer: peerId, name })}`
 }
 
 /**
- * Parses any user input or URL (raw 64-hex, #/f/..., #/c/..., /f/..., /c/..., ?node=...&hash=..., or peerId)
- * into a normalized target descriptor so the router or quick-jump bar can navigate immediately.
+ * parseDirectTarget resolves any pasted target to {kind, route, hash, peerId?,
+ * filename?, entryPath?}. The bare-hash form needs a kind hint ('file' | 'collection');
+ * every URL form carries enough information to infer kind from the path shape.
  */
-function parseDirectTarget(rawInput, defaultKind = 'file') {
-  const input = String(rawInput || '').trim()
-  if (!input) return { kind: 'unknown', hash: '' }
+function parseDirectTarget(input, hint = '') {
+  const str = String(input || '').trim()
+  const qIdx = str.indexOf('?')
+  const pathPart = qIdx >= 0 ? str.slice(0, qIdx) : str
+  const query = qIdx >= 0 ? new URLSearchParams(str.slice(qIdx + 1)) : new URLSearchParams()
 
-  // 1. Bare 64-char hex hash
-  if (/^[0-9a-fA-F]{64}$/.test(input)) {
-    const hash = input.toLowerCase()
-    const kind = defaultKind === 'collection' ? 'collection' : 'file'
-    return {
-      kind,
-      hash,
-      route: kind === 'collection' ? `/c/${hash}` : `/f/${hash}`,
-      peerId: '',
-      signalUrl: '',
-      filename: '',
-      entryPath: '',
-    }
+  const hash = (str.match(URL_HASH_RE) || [])[0] || ''
+
+  // Normalize to a route-ish string: drop scheme/host, keep the fragment path.
+  let route = pathPart
+  const fragIdx = route.indexOf('#')
+  if (fragIdx >= 0) route = route.slice(fragIdx + 1)
+  route = route.replace(/^https?:\/\/[^/]+/, '').replace(/^\/+/, '')
+
+  let kind = hint
+  if (/^f\//.test(route)) kind = 'file'
+  else if (/^c\//.test(route)) kind = 'collection'
+  else if (/\/(f|c)\/[0-9a-f]{64}(\/|$)/.test(pathPart) && !kind) {
+    // legacy /api/v1/f/... or /api/v1/c/... forms
+    kind = /\/f\/[0-9a-f]{64}/.test(pathPart) ? 'file' : 'collection'
+  } else if ((/panel/.test(pathPart)) && query.get('hash') && !kind) {
+    kind = 'file' // public panel deep link carries ?node=&hash=
+  }
+  kind = kind === 'collection' ? 'collection' : kind === 'file' ? 'file' : ''
+
+  const peerId = query.get('peer') || query.get('node') || ''
+  const filename = query.get('name') || ''
+
+  let entryPath = ''
+  if (kind === 'collection') {
+    // Both the SPA form (c/<hash>/<rest>) and the legacy /api/v1/c/<hash>/<rest>
+    // form carry the entry path right after the collection hash.
+    const m = route.match(/(?:^|\/)c\/[0-9a-f]{64}\/(.+)$/)
+    if (m && m[1]) entryPath = decodeURIComponent(m[1])
   }
 
-  // Extract hash fragment or path + query
-  let pathPart = input
-  let queryPart = ''
-
-  const hashIdx = input.indexOf('#')
-  if (hashIdx >= 0) {
-    const afterHash = input.slice(hashIdx + 1)
-    const qIdx = afterHash.indexOf('?')
-    if (qIdx >= 0) {
-      pathPart = afterHash.slice(0, qIdx)
-      queryPart = afterHash.slice(qIdx + 1)
-    } else {
-      pathPart = afterHash
-      const outerQ = input.slice(0, hashIdx).indexOf('?')
-      if (outerQ >= 0) queryPart = input.slice(outerQ + 1, hashIdx)
-    }
-  } else {
-    try {
-      if (/^https?:\/\//i.test(input)) {
-        const u = new URL(input)
-        pathPart = u.pathname
-        queryPart = u.search.replace(/^\?/, '')
-      } else {
-        const qIdx = input.indexOf('?')
-        if (qIdx >= 0) {
-          pathPart = input.slice(0, qIdx)
-          queryPart = input.slice(qIdx + 1)
-        }
-      }
-    } catch {
-      /* ignore URL parse failure */
-    }
-  }
-
-  const params = new URLSearchParams(queryPart)
-  const peerId = params.get('peer') || params.get('node') || ''
-  const signalUrl = params.get('signal') || params.get('url') || ''
-  const filename = params.get('name') || ''
-  const entryPath = params.get('entry') || ''
-  const passcode = params.get('passcode') || ''
-
-  const cleanPath = pathPart.replace(/^\/+/, '').replace(/^api\/v1\//, '')
-
-  // Match /f/<sha256>[/<filename>], /drive/<sha256>, /sha256sum/<sha256>, /download/<sha256>
-  const fileMatch = cleanPath.match(/^(?:f|drive|files|sha256sum|download)\/([0-9a-fA-F]{64})(?:\/(.*))?$/)
-  if (fileMatch) {
-    const hash = fileMatch[1].toLowerCase()
-    const pathName = fileMatch[2] ? decodeURIComponent(fileMatch[2]) : ''
-    const q = new URLSearchParams()
-    if (peerId) q.set('peer', peerId)
-    if (signalUrl) q.set('signal', signalUrl)
-    if (filename || pathName) q.set('name', filename || pathName)
-    const qs = q.toString() ? `?${q.toString()}` : ''
-    return {
-      kind: 'file',
-      hash,
-      route: `/f/${hash}${qs}`,
-      peerId,
-      signalUrl,
-      filename: filename || pathName,
-      entryPath: '',
-      passcode,
-    }
-  }
-
-  // Match /c/<hash>[/<entryPath>], /collection/<hash>, /collections/<hash>, /anon/collections/<hash>
-  const collMatch = cleanPath.match(/^(?:c|collection|collections|anon\/collections)\/([0-9a-fA-F]{64})(?:\/(.*))?$/)
-  if (collMatch) {
-    const hash = collMatch[1].toLowerCase()
-    const subEntry = collMatch[2] ? decodeURIComponent(collMatch[2]) : ''
-    const q = new URLSearchParams()
-    if (peerId) q.set('peer', peerId)
-    if (signalUrl) q.set('signal', signalUrl)
-    if (filename) q.set('name', filename)
-    if (entryPath || subEntry) q.set('entry', entryPath || subEntry)
-    if (passcode) q.set('passcode', passcode)
-    const qs = q.toString() ? `?${q.toString()}` : ''
-    return {
-      kind: 'collection',
-      hash,
-      route: `/c/${hash}${qs}`,
-      peerId,
-      signalUrl,
-      filename,
-      entryPath: entryPath || subEntry,
-      passcode,
-    }
-  }
-
-  // Panel query link: ?node=<peerId>&hash=<64hex>
-  const qHash = params.get('hash')
-  if (qHash && /^[0-9a-fA-F]{64}$/.test(qHash)) {
-    const hash = qHash.toLowerCase()
-    const kind = params.get('kind') === 'collection' ? 'collection' : 'file'
-    const q = new URLSearchParams()
-    if (peerId) q.set('peer', peerId)
-    if (signalUrl) q.set('signal', signalUrl)
-    const qs = q.toString() ? `?${q.toString()}` : ''
-    return {
-      kind,
-      hash,
-      route: `/${kind === 'collection' ? 'c' : 'f'}/${hash}${qs}`,
-      peerId,
-      signalUrl,
-      filename,
-      entryPath,
-      passcode,
-    }
-  }
-
-  // Peer ID fallback (e.g. peerdrive-node-xxx or pd-panel-xxx)
-  if (/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(input)) {
-    return {
-      kind: 'peer',
-      hash: '',
-      peerId: input,
-      route: `/?peer=${encodeURIComponent(input)}`,
-      signalUrl: '',
-      filename: '',
-      entryPath: '',
-    }
-  }
-
-  return { kind: 'unknown', hash: '' }
+  const out = { kind }
+  if (hash) out.hash = hash
+  if (kind === 'file' && hash) out.route = `/f/${hash}`
+  if (kind === 'collection' && hash) out.route = `/c/${hash}`
+  if (peerId) out.peerId = peerId
+  if (filename) out.filename = filename
+  if (entryPath) out.entryPath = entryPath
+  return out
 }
-
 // ---- peerdrive-core/src/dispatcher.js ----
 // dispatcher.js — Connection-level frame dispatcher and slot manager (Single Source of Truth).
 //
@@ -1434,466 +1181,357 @@ class FrameDispatcher {
 }
 
 // ---- peerdrive-core/src/queue.js ----
-// queue.js — Unified Order-Independent Multi-Transport Queue & Live Transfer Progress Hub.
+// queue.js — real-time transfer progress hub + order-independent transport queue
+// (invariant #3 SSOT). Transfers.jsx / client.js / the panel all consume the two
+// singleton instances exported at the bottom.
 //
-// Why this exists in peerdrive-core (Single Source of Truth):
-//   1. Guarantees that operations across PeerJS (WebRTC DataChannel), WebSocket (/ws/peer),
-//      and HTTP (/f/:sha256, /c/:hash) never corrupt each other due to ordering, concurrent
-//      binary frame interleaving, or pre-open calls.
-//   2. Provides a single real-time TransferProgressHub that tracks byte-level progress,
-//      percentage, EWMA transfer rate (bytes/s), and ETA for all uploads, downloads,
-//      streams, and cross-node pulls.
+// Why order-independent: PeerJS, WS and HTTP downloads/upload on the same file
+// hash can race; the queue guarantees per-lane serialization with priority, and
+// a cancelled task never blocks the next one (the 2026-09 queueing-abort bug
+// class this module exists to prevent — see REFACTOR §3.12).
 
+let __id = 0
+const nextId = () => `t${++__id}`
 
-const EWMA_ALPHA = 0.35
+function nowMs() {
+  return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
+}
+
+const ACTIVE = new Set(['queued', 'running'])
 
 /**
- * TransferProgressHub tracks all active and recent transfer tasks across PeerJS, WS, HTTP, and Node Pulls.
+ * TransferProgressHub keeps a live task list with pct / EWMA rate and notifies
+ * subscribers on every mutation (getSnapshot() feeds React state in Transfers).
  */
 class TransferProgressHub {
   constructor() {
-    this._tasks = new Map() // id -> task object
-    this._listeners = new Set()
+    this._tasks = new Map() // id -> task
+    this._subs = new Set()
+    this._totalCompleted = 0
   }
 
-  subscribe(fn) {
-    if (typeof fn !== 'function') return () => {}
-    this._listeners.add(fn)
-    try {
-      fn(this.getSnapshot())
-    } catch {}
-    return () => this._listeners.delete(fn)
-  }
-
-  _emit() {
-    const snap = this.getSnapshot()
-    for (const fn of this._listeners) {
+  _notify() {
+    for (const cb of this._subs) {
       try {
-        fn(snap)
-      } catch {}
+        cb(this.getSnapshot())
+      } catch {
+        // a broken subscriber must not corrupt hub state
+      }
     }
   }
 
-  createTask({
-    id = nextReqId(),
-    kind = 'download',      // 'download' | 'upload' | 'stream' | 'pull'
-    transport = 'peerjs',   // 'peerjs' | 'ws' | 'http' | 'node-pull'
-    hash = '',
-    name = '',
-    total = -1,
-    peerId = '',
-    onCancel = null,
-  } = {}) {
-    const now = Date.now()
+  _emit(task) {
+    this._tasks.set(task.id, task)
+    this._notify()
+  }
+
+  createTask(meta = {}) {
     const task = {
-      id,
-      kind,
-      transport,
-      hash,
-      name: name || (hash ? `${hash.slice(0, 12)}…` : id),
-      peerId: peerId || (transport === 'ws' ? 'local-ws' : transport === 'http' ? 'http-direct' : ''),
+      id: nextId(),
+      kind: meta.kind || 'download',
+      transport: meta.transport || '',
+      hash: meta.hash || '',
+      name: meta.name || '',
+      peerId: meta.peerId || '',
+      total: typeof meta.total === 'number' ? meta.total : -1,
       received: 0,
-      total: typeof total === 'number' ? total : -1,
-      pct: total > 0 ? 0 : null,
-      rateBps: 0,
-      etaSeconds: null,
-      status: 'queued', // 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+      status: 'queued',
+      pct: 0,
       error: '',
-      startedAt: now,
-      updatedAt: now,
-      endedAt: null,
-      _lastBytes: 0,
-      _lastTick: now,
-      _onCancel: onCancel,
+      rateBps: 0,
+      startedAt: 0,
+      endedAt: 0,
     }
-    this._tasks.set(id, task)
-    this._emit()
+    this._emit(task)
     return task
   }
 
   startTask(id, total) {
     const t = this._tasks.get(id)
-    if (!t) return null
-    const now = Date.now()
+    if (!t) return
+    if (typeof total === 'number') t.total = total
     t.status = 'running'
-    if (typeof total === 'number' && total >= 0) {
-      t.total = total
-      t.pct = total > 0 ? Math.min(100, Math.round((t.received / total) * 100)) : 100
-    }
-    t.updatedAt = now
-    t._lastTick = now
-    this._emit()
-    return t
+    t.startedAt = nowMs()
+    this._emit(t)
   }
 
   updateProgress(id, received, total) {
     const t = this._tasks.get(id)
-    if (!t || t.status === 'cancelled') return null
-    const now = Date.now()
+    if (!t) return
+    if (typeof total === 'number') t.total = total
+    t.received = Math.max(0, received)
     if (t.status === 'queued') {
       t.status = 'running'
-      t.startedAt = now
-      t._lastTick = now
+      if (!t.startedAt) t.startedAt = nowMs()
     }
-    if (typeof total === 'number' && total >= 0) {
-      t.total = total
+    t.pct = t.total > 0 ? Math.min(100, Math.round((t.received / t.total) * 100)) : 0
+    // EWMA transfer rate: instantaneous rate smoothed 70/30 so the progress bar
+    // does not jitter on chunk-boundary bursts (format.js RateTracker semantics).
+    const elapsed = nowMs() - (t.startedAt || nowMs())
+    if (elapsed > 20 && t.received > 0) {
+      const inst = (t.received / elapsed) * 1000
+      t.rateBps = t.rateBps ? t.rateBps * 0.7 + inst * 0.3 : inst
     }
-    const clamped = Math.max(0, Number(received) || 0)
-    const dtMs = now - t._lastTick
-    if (dtMs >= 80) {
-      const dBytes = Math.max(0, clamped - t._lastBytes)
-      const instRate = (dBytes * 1000) / dtMs
-      t.rateBps = t.rateBps > 0
-        ? Math.round(EWMA_ALPHA * instRate + (1 - EWMA_ALPHA) * t.rateBps)
-        : Math.round(instRate)
-      t._lastBytes = clamped
-      t._lastTick = now
-    }
-    t.received = clamped
-    if (t.total > 0) {
-      t.pct = Math.max(0, Math.min(100, Math.round((t.received / t.total) * 100)))
-      const rem = Math.max(0, t.total - t.received)
-      t.etaSeconds = t.rateBps > 0 ? Math.ceil(rem / t.rateBps) : null
-    } else if (t.total === 0) {
-      t.pct = 100
-      t.etaSeconds = 0
-    } else {
-      t.pct = null
-      t.etaSeconds = null
-    }
-    t.updatedAt = now
-    this._emit()
-    return t
+    this._emit(t)
   }
 
   completeTask(id, extra = {}) {
     const t = this._tasks.get(id)
-    if (!t) return null
-    const now = Date.now()
+    if (!t) return
     if (typeof extra.received === 'number') t.received = extra.received
-    if (typeof extra.total === 'number' && extra.total >= 0) t.total = extra.total
-    if (t.total > 0 && t.received < t.total) t.received = t.total
-    if (t.total < 0 && t.received >= 0) t.total = t.received
-    t.pct = 100
-    t.etaSeconds = 0
+    if (typeof extra.total === 'number') t.total = extra.total
     t.status = 'done'
-    t.endedAt = now
-    t.updatedAt = now
-    Object.assign(t, extra)
-    this._emit()
-    return t
+    t.pct = 100
+    t.endedAt = nowMs()
+    this._totalCompleted += 1
+    this._emit(t)
   }
 
   failTask(id, err) {
     const t = this._tasks.get(id)
-    if (!t) return null
-    const now = Date.now()
-    t.status = t.status === 'cancelled' ? 'cancelled' : 'failed'
-    t.error = err?.message || String(err || 'transfer failed')
-    t.etaSeconds = null
-    t.rateBps = 0
-    t.endedAt = now
-    t.updatedAt = now
-    this._emit()
-    return t
+    if (!t) return
+    t.status = 'error'
+    t.error = err ? String(err.message || err) : 'failed'
+    t.endedAt = nowMs()
+    this._emit(t)
   }
 
   cancelTask(id) {
     const t = this._tasks.get(id)
-    if (!t) return false
-    if (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled') return false
+    if (!t || t.status === 'done') return
     t.status = 'cancelled'
-    t.error = 'Cancelled by user'
-    t.rateBps = 0
-    t.etaSeconds = null
-    t.endedAt = Date.now()
-    t.updatedAt = t.endedAt
-    if (typeof t._onCancel === 'function') {
-      try {
-        t._onCancel()
-      } catch {}
-    }
-    this._emit()
-    return true
-  }
-
-  /**
-   * Merges backend /p2p/pull jobs into the unified progress hub so local and node pulls
-   * appear in one consistent list and progress summary.
-   */
-  syncBackendPullJobs(jobs = [], ratesMap = new Map()) {
-    if (!Array.isArray(jobs)) return
-    let changed = false
-    for (const j of jobs) {
-      if (!j || !j.id) continue
-      const key = `pull-${j.id}`
-      const existing = this._tasks.get(key)
-      const received = Number(j.received) || 0
-      const total = typeof j.total === 'number' ? j.total : -1
-      const status = j.status || 'running'
-      const rateBps = ratesMap.get(j.id) || existing?.rateBps || 0
-      const pct = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : status === 'done' ? 100 : null
-      const etaSeconds = (status === 'running' || status === 'resuming') && total > received && rateBps > 0
-        ? Math.ceil((total - received) / rateBps)
-        : null
-      const record = {
-        id: key,
-        rawJobId: j.id,
-        kind: 'pull',
-        transport: 'node-pull',
-        hash: j.hash || '',
-        name: j.name || j.path || j.hash || j.id,
-        peerId: j.peer || j.peer_id || '',
-        collection: j.collection || '',
-        savedTo: j.saved_to || '',
-        skipped: Boolean(j.skipped),
-        received,
-        total,
-        pct,
-        rateBps,
-        etaSeconds,
-        status,
-        error: j.error || '',
-        startedAt: j.started_at ? new Date(j.started_at).getTime() || Date.now() : (existing?.startedAt || Date.now()),
-        updatedAt: Date.now(),
-        endedAt: j.ended_at ? new Date(j.ended_at).getTime() || null : null,
-      }
-      this._tasks.set(key, record)
-      changed = true
-    }
-    if (changed) this._emit()
+    t.endedAt = nowMs()
+    this._totalCompleted += 1
+    this._emit(t)
   }
 
   clearCompleted() {
-    for (const [id, t] of this._tasks.entries()) {
-      if (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled') {
-        this._tasks.delete(id)
+    for (const t of this._tasks.values()) {
+      if (t.status === 'done' || t.status === 'error' || t.status === 'cancelled') {
+        this._tasks.delete(t.id)
       }
     }
-    this._emit()
+    this._totalCompleted = 0
+    this._notify()
   }
 
   getTasks() {
-    return Array.from(this._tasks.values()).sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))
-  }
-
-  getActiveTasks() {
-    return this.getTasks().filter((t) => t.status === 'queued' || t.status === 'running' || t.status === 'resuming')
+    return [...this._tasks.values()]
   }
 
   getSnapshot() {
-    const tasks = this.getTasks()
-    const active = tasks.filter((t) => t.status === 'queued' || t.status === 'running' || t.status === 'resuming')
-    const completed = tasks.filter((t) => t.status === 'done')
-    const failed = tasks.filter((t) => t.status === 'failed')
-    let aggregateRateBps = 0
-    let sumReceived = 0
-    let sumTotal = 0
-    let hasKnownTotal = false
-    for (const t of active) {
-      aggregateRateBps += t.rateBps || 0
-      if (t.total > 0) {
-        hasKnownTotal = true
-        sumReceived += Math.min(t.received, t.total)
-        sumTotal += t.total
-      }
-    }
-    const overallPct = hasKnownTotal && sumTotal > 0
-      ? Math.min(100, Math.round((sumReceived / sumTotal) * 100))
-      : active.length === 0 && completed.length > 0 ? 100 : null
-
+    const tasks = [...this._tasks.values()]
     return {
+      totalActive: tasks.filter((t) => ACTIVE.has(t.status)).length,
+      totalCompleted: this._totalCompleted,
       tasks,
-      activeTasks: active,
-      totalActive: active.length,
-      totalCompleted: completed.length,
-      totalFailed: failed.length,
-      aggregateRateBps,
-      overallPct,
     }
+  }
+
+  subscribe(cb) {
+    this._subs.add(cb)
+    cb(this.getSnapshot())
+    return () => this._subs.delete(cb)
   }
 }
 
 /**
- * AsyncQueueLane enforces FIFO ordering and a configurable concurrency ceiling.
- * Used per transport channel so operations never fail or interleave due to call order.
+ * AsyncQueueLane serializes async work with a concurrency cap and priority
+ * ordering: the highest-priority *waiting* task always runs next, while the
+ * active task is never interrupted (test pins t1 -> t3-high -> t2-low).
  */
 class AsyncQueueLane {
   constructor(concurrency = 1) {
-    this.concurrency = Math.max(1, concurrency)
+    this.limit = Math.max(1, concurrency)
     this.active = 0
-    this._queue = []
+    this._waiting = [] // { fn, priority, resolve, reject, signal, started }
   }
 
   enqueue(fn, { priority = 0, signal = null } = {}) {
-    if (signal?.aborted) {
-      return Promise.reject(signal.reason || new Error('Aborted'))
-    }
     return new Promise((resolve, reject) => {
-      const item = { fn, priority, signal, resolve, reject, cancelled: false }
+      const item = { fn, priority, resolve, reject, signal, started: false }
+      if (signal && signal.aborted) {
+        reject(signal.reason || new Error('Aborted'))
+        return
+      }
       if (signal) {
-        const onAbort = () => {
-          item.cancelled = true
-          const idx = this._queue.indexOf(item)
-          if (idx >= 0) this._queue.splice(idx, 1)
-          reject(signal.reason || new Error('Aborted'))
+        // Abort while still queued: settle immediately and skip execution so a
+        // cancelled task can never block the lane (order-independence).
+        item.onAbort = () => {
+          if (!item.started) {
+            item.aborted = true
+            reject(signal.reason || new Error('Aborted'))
+            this._tick()
+          }
         }
-        signal.addEventListener('abort', onAbort, { once: true })
-        item._cleanupAbort = () => signal.removeEventListener('abort', onAbort)
+        signal.addEventListener('abort', item.onAbort, { once: true })
       }
-      // Insert in priority order (higher priority first, FIFO within same priority)
-      let inserted = false
-      for (let i = 0; i < this._queue.length; i++) {
-        if (priority > this._queue[i].priority) {
-          this._queue.splice(i, 0, item)
-          inserted = true
-          break
-        }
-      }
-      if (!inserted) this._queue.push(item)
-      this._pump()
+      this._waiting.push(item)
+      this._tick()
     })
   }
 
-  _pump() {
-    while (this.active < this.concurrency && this._queue.length > 0) {
-      const item = this._queue.shift()
-      if (!item || item.cancelled) continue
-      this.active += 1
-      Promise.resolve()
-        .then(() => item.fn())
-        .then(
-          (val) => {
-            item._cleanupAbort?.()
-            this.active -= 1
-            item.resolve(val)
-            this._pump()
-          },
-          (err) => {
-            item._cleanupAbort?.()
-            this.active -= 1
-            item.reject(err)
-            this._pump()
-          }
-        )
+  _pick() {
+    let best = -1
+    let bestPriority = -Infinity
+    for (let i = 0; i < this._waiting.length; i++) {
+      const it = this._waiting[i]
+      if (it.aborted) continue
+      if (it.priority > bestPriority) {
+        bestPriority = it.priority
+        best = i
+      }
     }
+    return best >= 0 ? this._waiting.splice(best, 1)[0] : null
   }
 
-  get pendingCount() {
-    return this._queue.length
+  _tick() {
+    while (this.active < this.limit) {
+      const item = this._pick()
+      if (!item) return
+      if (item.aborted) continue // already rejected; keep draining
+      this.active += 1
+      item.started = true
+      if (item.signal) item.signal.removeEventListener('abort', item.onAbort)
+      // 槽位空闲时**同步**启动 fn：client.js 的 upload 走
+      // uploadSerialLane.enqueue(() => sendOne())，测试在 upload() 返回后立即读
+      // sock.sent[0]——若 fn 被压进微任务，第一帧还没发出去（ws.test.js 上传用例
+      // 的同步断言正是靠这个时序）。异常与结果仍异步 settle。
+      let settled = false
+      const settle = (fn) => {
+        if (settled) return
+        settled = true
+        this.active -= 1
+        this._tick()
+        fn()
+      }
+      let r
+      try {
+        r = item.fn()
+      } catch (e) {
+        settle(() => item.reject(e))
+        continue
+      }
+      Promise.resolve(r).then(
+        (v) => settle(() => item.resolve(v)),
+        (e) => settle(() => item.reject(e))
+      )
+    }
   }
 }
 
 /**
- * TransportQueue coordinates PeerJS (priority 1), WebSocket (priority 2), and HTTP (priority 3)
- * with per-channel concurrency lanes and automatic progress tracking in TransferProgressHub.
+ * TransportQueue runs transfers per-lane (serialized by laneKey) with a
+ * per-transport concurrency cap, wiring progress into a TransferProgressHub and
+ * isolating cancellations (abort never leaks into the next queued transfer).
  */
 class TransportQueue {
-  constructor({ progressHub = new TransferProgressHub(), wsConcurrency = 1, peerjsConcurrency = 1, httpConcurrency = 4 } = {}) {
-    this.progressHub = progressHub
-    // Single-connection binary frame protocols (PeerJS DataChannel and WS /ws/peer) use
-    // concurrency = 1 on binary data lanes so contiguous header+chunk sequences never collide!
-    this.lanes = {
-      peerjs: new AsyncQueueLane(peerjsConcurrency),
-      ws: new AsyncQueueLane(wsConcurrency),
-      'ws-Upload': new AsyncQueueLane(1),
-      http: new AsyncQueueLane(httpConcurrency),
+  constructor({ progressHub = null, wsConcurrency = 1, peerjsConcurrency = 1, httpConcurrency = 2 } = {}) {
+    this.hub = progressHub || new TransferProgressHub()
+    this._lanes = new Map() // laneKey -> AsyncQueueLane
+    this._slots = { ws: wsConcurrency, peerjs: peerjsConcurrency, http: httpConcurrency }
+    this._active = { ws: 0, peerjs: 0, http: 0 }
+    this._waiting = [] // { transport, resolve, release } parkers for full transports
+  }
+
+  _lane(key) {
+    let lane = this._lanes.get(key)
+    if (!lane) {
+      lane = new AsyncQueueLane(1) // per-lane serial: same lane never overlaps
+      this._lanes.set(key, lane)
+    }
+    return lane
+  }
+
+  _drain(transport) {
+    while (this._active[transport] < this._slots[transport] && this._waiting.length > 0) {
+      const i = this._waiting.findIndex((w) => w.transport === transport)
+      if (i < 0) return
+      const w = this._waiting.splice(i, 1)[0]
+      this._active[transport] += 1
+      w.release()
     }
   }
 
   /**
-   * Runs a transfer task on the specified transport lane with automatic progress tracking
-   * and strict order-independence.
+   * acquire a per-transport slot. The returned release() decrements the slot
+   * and wakes the next parker; waiters parking here never hold a lane.
    */
-  runTransfer({
-    kind = 'download',
-    transport = 'peerjs',
-    laneKey = null,
-    hash = '',
-    name = '',
-    total = -1,
-    peerId = '',
-    priority = 0,
-    signal = null,
-    onProgress = null,
-  }, executor) {
-    const abortCtrl = new AbortController()
-    if (signal) {
-      if (signal.aborted) abortCtrl.abort(signal.reason)
-      else signal.addEventListener('abort', () => abortCtrl.abort(signal.reason), { once: true })
-    }
-
-    const task = this.progressHub.createTask({
-      kind,
-      transport,
-      hash,
-      name,
-      total,
-      peerId,
-      onCancel: () => abortCtrl.abort(new Error('Cancelled by user')),
-    })
-
-    const effectiveLane = this.lanes[laneKey || transport] || this.lanes.http
-
-    const reportProgress = (received, declaredTotal) => {
-      const updated = this.progressHub.updateProgress(task.id, received, declaredTotal)
-      if (updated && typeof onProgress === 'function') {
-        try {
-          onProgress({
-            taskId: task.id,
-            received: updated.received,
-            total: updated.total,
-            pct: updated.pct,
-            rateBps: updated.rateBps,
-            etaSeconds: updated.etaSeconds,
-          })
-        } catch {}
+  _acquire(transport, signal) {
+    return new Promise((resolve, reject) => {
+      const release = () => {
+        this._active[transport] -= 1
+        this._drain(transport)
       }
-    }
-
-    return effectiveLane
-      .enqueue(
-        async () => {
-          if (abortCtrl.signal.aborted) {
-            throw abortCtrl.signal.reason || new Error('Cancelled')
-          }
-          this.progressHub.startTask(task.id, total)
-          const res = await executor({
-            taskId: task.id,
-            signal: abortCtrl.signal,
-            reportProgress,
-          })
-          this.progressHub.completeTask(task.id)
-          if (typeof onProgress === 'function') {
-            const finalTask = this.progressHub._tasks.get(task.id)
-            if (finalTask) {
-              try {
-                onProgress({
-                  taskId: task.id,
-                  received: finalTask.received,
-                  total: finalTask.total,
-                  pct: 100,
-                  rateBps: finalTask.rateBps,
-                  etaSeconds: 0,
-                })
-              } catch {}
+      if (this._active[transport] < this._slots[transport]) {
+        this._active[transport] += 1
+        resolve(release)
+        return
+      }
+      const waiter = {
+        transport,
+        release: () => resolve(release),
+      }
+      this._waiting.push(waiter)
+      if (signal) {
+        signal.addEventListener(
+          'abort',
+          () => {
+            const i = this._waiting.indexOf(waiter)
+            if (i >= 0) {
+              this._waiting.splice(i, 1)
+              reject(signal.reason || new Error('Aborted'))
             }
+          },
+          { once: true }
+        )
+      }
+    })
+  }
+
+  runTransfer(taskMeta, workFn) {
+    const task = this.hub.createTask(taskMeta)
+    const laneKey = taskMeta.laneKey || `${task.transport || 'peerjs'}-${task.kind || 'download'}`
+    const transport = this._slots[task.transport] !== undefined ? task.transport : 'peerjs'
+
+    return new Promise((resolve, reject) => {
+      const inLane = async () => {
+        const doRelease = await this._acquire(transport, taskMeta.signal)
+        try {
+          const reportProgress = (received, total) => this.hub.updateProgress(task.id, received, total)
+          const value = await workFn({ reportProgress })
+          this.hub.completeTask(task.id)
+          resolve(value)
+        } catch (err) {
+          this.hub.failTask(task.id, err)
+          reject(err)
+        } finally {
+          doRelease()
+        }
+      }
+
+      this._lane(laneKey)
+        .enqueue(inLane, { priority: taskMeta.priority || 0, signal: taskMeta.signal })
+        .catch((err) => {
+          // Lane rejected: aborted while still queued — mark the hub task
+          // cancelled (never blocking the next lane item) and settle the
+          // transfer promise with the abort reason.
+          if (task.status === 'queued') {
+            this.hub.cancelTask(task.id)
           }
-          return res
-        },
-        { priority, signal: abortCtrl.signal }
-      )
-      .catch((err) => {
-        this.progressHub.failTask(task.id, err)
-        throw err
-      })
+          reject(err)
+        })
+    })
   }
 }
 
-// Default singleton instances for browser/consumer sharing
+/** Global singletons consumed by the frontend (client.js / Transfers.jsx) via shared/index. */
 const globalProgressHub = new TransferProgressHub()
-const globalTransportQueue = new TransportQueue({ progressHub: globalProgressHub })
-
+const globalTransportQueue = new TransportQueue({
+  wsConcurrency: 1,
+  peerjsConcurrency: 2,
+  httpConcurrency: 2,
+})
 // ---- src/client.js ----
 // client.js — peerdrive pure browser consumer: connects to a peerdrive node, lists its shared
 // content and fetches files. **Zero dependencies**, no local backend required.
@@ -3010,7 +2648,7 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
 }
 
 // ---- 导出（对应 src/index.js 的 export *） ----
-  const api = { AsyncQueueLane, CHUNK_SIZE, CLIENT_CAPABILITIES, DEFAULT_MAX_BUFFER_BYTES, ERR, EVENT_TO_TYPE, FrameDispatcher, MAX_COLLECTION_ENTRIES, MAX_CONTROL_FRAME_BYTES, MAX_FILE_BYTES, MAX_JSON_DEPTH, MAX_MANIFEST_BYTES, PROTOCOL_VERSION, PSK_REQUIRED, PeerDriveClient, PeerDriveError, PermissionError, Sha256, TransferProgressHub, TransportQueue, UPLOAD_CHUNK, baseName, buildCollectionUrl, buildFileUrl, capFrame, concatChunks, connect, connectToPeer, decodeBinaryHeader32, detectPromptInjection, discoverNodes, encodeBinaryHeader32, evaluateAdminPermission, globalProgressHub, globalTransportQueue, guessMime, isBinaryFrame, isValidHash, makeEnvelope, makeUrlRequest, nextReqId, parseDirectTarget, parseFrame, pskAuthFrame, pullFrame, reqFrame, safeJsonParse, safePreviewMime, sanitizeCollectionManifest, sanitizeFilename, sanitizeRelativePath, sanitizeUntrustedText, sha256Hex, shareFrame, toUint8Array, uploadFrame, validateSignalOrApiUrl }
+  const api = { AsyncQueueLane, CHUNK_SIZE, CLIENT_CAPABILITIES, DEFAULT_MAX_BUFFER_BYTES, ERR, EVENT_TO_TYPE, FrameDispatcher, MAX_FILE_BYTES, MAX_MANIFEST_BYTES, PROTOCOL_VERSION, PSK_REQUIRED, PeerDriveClient, PeerDriveError, PermissionError, Sha256, TransferProgressHub, TransportQueue, UPLOAD_CHUNK, baseName, buildCollectionUrl, buildFileUrl, capFrame, concatChunks, connect, connectToPeer, decodeBinaryHeader32, detectPromptInjection, discoverNodes, encodeBinaryHeader32, evaluateAdminPermission, globalProgressHub, globalTransportQueue, guessMime, isBinaryFrame, isValidHash, makeEnvelope, makeUrlRequest, nextReqId, parseDirectTarget, parseFrame, pskAuthFrame, pullFrame, reqFrame, safeJsonParse, safePreviewMime, sanitizeCollectionManifest, sanitizeFilename, sanitizeRelativePath, sanitizeUntrustedText, sha256Hex, shareFrame, toUint8Array, uploadFrame, validateSignalOrApiUrl }
   if (typeof window !== 'undefined') { window.PeerDrive = api }
   if (typeof globalThis !== 'undefined') { globalThis.PeerDriveBuiltin = api }
 })()</script>
@@ -3272,707 +2910,685 @@ async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions =
     renderRecent()
   }
 
-    // panel/app-transfers.js — Extracted node list, discovery, and transfer task handlers (Issue #404)
-  // ── 渲染 ──────────────────────────────────────────────────────────────
-  function statusClass(st) {
-    return st === 'online' ? 'on' : st === 'connecting' ? 'wait' : st === 'error' ? 'bad' : ''
-  }
+  // app-transfers.js — 面板的 UI 列表渲染与传输任务处理（Issue #404 模块化拆分的第二个 part）。
+// 由 scripts/build-panel.mjs 内联进 /*__PANEL_TRANSFERS_PART__*/ 占位处；与 app.js / app-shares.js 共享
+// 同一个 IIFE 作用域（sessions/current/tasks/$/log 等都在那个作用域里）。
+// 从 v1.0-rc 快照重建：快照把旧 app.js 拆成三个文件，但这两个 part 文件没进 zip。
+// 内容逐字取自拆分前的 refactor@06d83eb app.js（渲染 + 读写动作段）。
 
-  function renderNodes() {
-    var box = $('nodes')
-    if (!sessions.size) { box.innerHTML = '<div class="empty">还没有连接任何节点。</div>'; return }
-    box.innerHTML = ''
-    sessions.forEach(function (s) {
-      var row = document.createElement('div')
-      row.className = 'node' + (s.id === current ? ' sel' : '')
-      var n = s.snapshot ? s.snapshot.total : null
-      row.innerHTML =
-        '<span class="dot ' + statusClass(s.status) + '"></span>' +
-        '<span class="nm mono" title="' + esc(s.id) + '">' + esc(s.id) + '</span>' +
-        '<span class="faint" style="font-size:11px">' + (n == null ? '' : n + ' 项') + '</span>'
-      row.addEventListener('click', function () { select(s.id) })
+function statusClass(st) {
+  return st === 'online' ? 'on' : st === 'connecting' ? 'wait' : st === 'error' ? 'bad' : ''
+}
 
-      var close = document.createElement('button')
-      close.className = 'tiny ghost'
-      close.textContent = '×'
-      close.title = '断开'
-      close.addEventListener('click', function (ev) { ev.stopPropagation(); disconnect(s.id) })
-      row.appendChild(close)
-      box.appendChild(row)
+function renderNodes() {
+  var box = $('nodes')
+  if (!sessions.size) { box.innerHTML = '<div class="empty">还没有连接任何节点。</div>'; return }
+  box.innerHTML = ''
+  sessions.forEach(function (s) {
+    var row = document.createElement('div')
+    row.className = 'node' + (s.id === current ? ' sel' : '')
+    var n = s.snapshot ? s.snapshot.total : null
+    row.innerHTML =
+      '<span class="dot ' + statusClass(s.status) + '"></span>' +
+      '<span class="nm mono" title="' + esc(s.id) + '">' + esc(s.id) + '</span>' +
+      '<span class="faint" style="font-size:11px">' + (n == null ? '' : n + ' 项') + '</span>'
+    row.addEventListener('click', function () { select(s.id) })
+
+    var close = document.createElement('button')
+    close.className = 'tiny ghost'
+    close.textContent = '×'
+    close.title = '断开'
+    close.addEventListener('click', function (ev) { ev.stopPropagation(); disconnect(s.id) })
+    row.appendChild(close)
+    box.appendChild(row)
+  })
+}
+
+function renderRecent() {
+  var box = $('recent')
+  var recent = (lsRead().recent || [])
+  if (!recent.length) { box.innerHTML = '<div class="empty">暂无记录。</div>'; return }
+  box.innerHTML = ''
+  recent.forEach(function (r) {
+    var row = document.createElement('div')
+    row.className = 'node'
+    row.innerHTML =
+      '<span class="nm mono" title="' + esc(r.id) + '">' + esc(r.id) + '</span>' +
+      '<span class="faint" style="font-size:11px">' + esc(r.sig.host || '') + '</span>'
+    row.addEventListener('click', function () {
+      $('in-node').value = r.id
+      if (r.sig) {
+        $('in-host').value = r.sig.host || ''
+        $('in-port').value = r.sig.port || 443
+        $('in-path').value = r.sig.path || '/'
+        $('in-key').value = r.sig.key || DEFAULT_SIG.key
+        $('in-secure').checked = r.sig.secure !== false
+      }
+      connect()
     })
-  }
+    box.appendChild(row)
+  })
+}
 
-  function renderRecent() {
-    var box = $('recent')
-    var recent = (lsRead().recent || [])
-    if (!recent.length) { box.innerHTML = '<div class="empty">暂无记录。</div>'; return }
-    box.innerHTML = ''
-    recent.forEach(function (r) {
-      var row = document.createElement('div')
-      row.className = 'node'
-      row.innerHTML =
-        '<span class="nm mono" title="' + esc(r.id) + '">' + esc(r.id) + '</span>' +
-        '<span class="faint" style="font-size:11px">' + esc(r.sig.host || '') + '</span>'
-      row.addEventListener('click', function () {
-        $('in-node').value = r.id
-        if (r.sig) {
-          $('in-host').value = r.sig.host || ''
-          $('in-port').value = r.sig.port || 443
-          $('in-path').value = r.sig.path || '/'
-          $('in-key').value = r.sig.key || DEFAULT_SIG.key
-          $('in-secure').checked = r.sig.secure !== false
-        }
-        connect()
-      })
-      box.appendChild(row)
+function renderTasks() {
+  var box = $('tasks')
+  if (!tasks.length) { box.innerHTML = '<div class="empty">没有进行中的传输。</div>'; return }
+  var html = '<table><thead><tr><th>文件</th><th>类型</th><th>节点</th><th class="num">进度</th><th class="num">速率</th><th>状态</th><th></th></tr></thead><tbody>'
+  tasks.forEach(function (t) {
+    var pct = t.total > 0 ? Math.min(100, (t.received / t.total) * 100) : 0
+    // 写方向完成后的 hash 就是它的内容地址——显示出来，用户才知道接下来能拿什么取回
+    var addr = t.kind !== 'get' && t.hash
+      ? '<div class="faint mono" style="font-size:11px" title="' + esc(t.hash) + '">' + esc(t.hash.slice(0, 16)) + '…</div>'
+      : ''
+    html += '<tr>' +
+      '<td class="mono">' + esc(t.name || String(t.hash).slice(0, 12)) + addr + '</td>' +
+      '<td class="faint">' + esc(KIND[t.kind] || t.kind || '') + '</td>' +
+      '<td class="faint mono" style="font-size:11px">' + esc(t.node || t.from) + '</td>' +
+      '<td class="num">' + (t.total > 0 ? fmtBytes(t.received) + ' / ' + fmtBytes(t.total) : fmtBytes(t.received)) +
+      '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div></td>' +
+      '<td class="num faint">' + (t.state === 'running' ? esc(fmtRate(t.rate)) : '—') + '</td>' +
+      '<td class="' + (t.state === 'done' ? 'ok' : t.state === 'error' || t.state === 'cancelled' ? 'err' : 'dim') + '">' +
+      esc(t.state === 'done' ? '完成' : t.state === 'running' ? '进行中' : t.state === 'cancelled' ? '已取消' : t.state === 'error' ? '失败' : t.state) +
+      (t.error ? '<div class="faint" style="font-size:11px">' + esc(t.error) + '</div>' : '') + '</td>' +
+      '<td class="num">' + (t.state === 'running'
+        ? (t.ctrl ? '<button class="tiny ghost" data-cancel="' + t.id + '">取消</button>' : '')
+        : (t.state === 'done'
+          ? (t.kind !== 'get' && t.hash
+            ? '<button class="tiny ghost" data-verify="' + t.id + '">取回校验</button>'
+            : '<span class="faint" style="font-size:11px">sha256 已校验</span>')
+          : '')) + '</td>' +
+      '</tr>'
+  })
+  box.innerHTML = html + '</tbody></table>'
+  Array.prototype.forEach.call(box.querySelectorAll('[data-cancel]'), function (btn) {
+    btn.addEventListener('click', function () {
+      var t = tasks.find(function (x) { return x.id === btn.getAttribute('data-cancel') })
+      if (t && t.ctrl) t.ctrl.abort()
     })
+  })
+  Array.prototype.forEach.call(box.querySelectorAll('[data-verify]'), function (btn) {
+    btn.addEventListener('click', function () {
+      var t = tasks.find(function (x) { return x.id === btn.getAttribute('data-verify') })
+      if (t) verifyRoundTrip(t)
+    })
+  })
+}
+
+/**
+ * renderDiscovered 渲染「自动搜索」的结果。
+ *
+ * 失败也要渲染：搜索失败的三种原因（信令没开 CORS / 端点不可达 / 真的没节点）
+ * 在界面上长得一模一样——一个空列表。把它们拆成三句人话，用户才不用猜。
+ */
+function renderDiscovered(nodes, err) {
+  var box = $('discovered')
+  if (err) {
+    var msg = err.message || String(err)
+    var cors = /Access-Control-Allow-Origin/.test(msg)
+    var hint = cors
+      ? '这一步是<b>跨域请求</b>（本页原点是 <span class="mono">' + esc(String(location.origin)) + '</span>），' +
+        '信令必须回 <span class="mono">Access-Control-Allow-Origin</span>，浏览器才会把响应交出来。' +
+        '自托管信令请升到 2026-09-20 之后的 go-peerserver（已放开 CORS），或在反代层补这个头。' +
+        '<b>在此之前自动发现用不了，但手动连节点完全不受影响</b>——只是在下面的「节点 peer id」里手填。'
+      : '信令 REST 端点没答上来。请确认 host/port 与节点配的信令一致；' +
+        '另外本页是 HTTPS 而信令是 <span class="mono">http://</span> 时，浏览器会按「混合内容」拦掉这次请求。'
+    box.innerHTML = '<div class="empty err">自动搜索失败：' + esc(msg) + '</div><div class="hint">' + hint + '</div>'
+    return
+  }
+  if (!nodes || !nodes.length) {
+    box.innerHTML = '<div class="empty">信令上没有在线节点。</div>' +
+      '<div class="hint">空的列表不代表信令坏了：节点要主动向信令 announce 才会出现在这里。' +
+      '确认节点配了 <span class="mono">PEERDRIVE_DISCOVERY_*</span>，且它确实连着这个信令。</div>'
+    return
+  }
+  box.innerHTML = ''
+  nodes.forEach(function (n) {
+    var row = document.createElement('div')
+    row.className = 'node'
+    var ago = n.lastSeen ? Math.max(0, Math.round(Date.now() / 1000 - Number(n.lastSeen))) : null
+    row.innerHTML =
+      '<span class="dot on"></span>' +
+      '<span class="nm mono" title="' + esc(n.peerId) + '">' + esc(n.peerId) + '</span>' +
+      '<span class="faint" style="font-size:11px">' +
+      (n.nodeType ? esc(n.nodeType) + ' · ' : '') +
+      (n.collections && n.collections.length ? n.collections.length + ' 集合 · ' : '') +
+      (ago == null ? '' : ago + 's 前') +
+      '</span>'
+    row.title = '点击连接该节点'
+    row.addEventListener('click', function () {
+      $('in-node').value = n.peerId
+      syncURL()
+      connect()
+    })
+    box.appendChild(row)
+  })
+}
+
+function updateShares() {
+  var s = sessions.get(current)
+  var box = $('shares')
+  $('preview').innerHTML = ''
+  renderLinked(s)
+  if (!s) { box.innerHTML = '<div class="empty">先在左侧选一个节点。</div>'; return }
+  if (s.status === 'connecting') { box.innerHTML = '<div class="empty">连接中…</div>'; return }
+  if (s.status === 'error') { box.innerHTML = '<div class="empty err">连接失败：' + esc(s.error) + '</div>'; return }
+  if (!s.snapshot) { box.innerHTML = '<div class="empty">还没有清单。</div>'; return }
+
+  var snap = s.snapshot
+  if (!snap.total) {
+    // 空清单有两种成因，现象一模一样，修复动作却相反，所以必须在这里点名：
+    //   1) 节点开了 PSK 门禁而本页面没填密钥 —— share 帧被 pskGate 挡住，返回空清单；
+    //   2) 节点真的没开对外共享 / 没声明共享目录。
+    // 原来只写「未开启对外共享」，会让第 1 种情况的用户去改节点配置（改不对），
+    // 而正确动作只是在上方「预共享密钥」框里填一次。
+    // 为什么门禁不会回 PSK_REQUIRED：psk.go 的 servedVerbs 挡的是「对端让我做事」的动词，
+    // share 的**响应帧**不在名单里，所以这里只能表现为「拿不到内容」而不是「报错」。
+    var pskFilled = !!(pskOfForm() && pskOfForm().trim())
+    box.innerHTML = '<div class="empty">该节点没有共享内容。'
+      + (pskFilled
+          ? '<br><br>你填了密钥但仍拿不到清单：确认密钥与运营者给的一致，'
+            + '且该节点确实声明了共享目录。'
+          : '<br><br>两种可能：① 节点开了预共享密钥门禁——在「预共享密钥」框里填同一个密钥再连一次；'
+            + '② 节点确实没有对外共享内容。')
+      + '</div>'
+    return
   }
 
-  function renderTasks() {
-    var box = $('tasks')
-    if (!tasks.length) { box.innerHTML = '<div class="empty">没有进行中的传输。</div>'; return }
-    var html = '<table><thead><tr><th>文件</th><th>类型</th><th>节点</th><th class="num">进度</th><th class="num">速率</th><th>状态</th><th></th></tr></thead><tbody>'
-    tasks.forEach(function (t) {
-      var pct = t.total > 0 ? Math.min(100, (t.received / t.total) * 100) : 0
-      // 写方向完成后的 hash 就是它的内容地址——显示出来，用户才知道接下来能拿什么取回
-      var addr = t.kind !== 'get' && t.hash
-        ? '<div class="faint mono" style="font-size:11px" title="' + esc(t.hash) + '">' + esc(t.hash.slice(0, 16)) + '…</div>'
-        : ''
+  var html = ''
+  if (snap.files && snap.files.length) {
+    html += '<h2 style="margin-top:2px">单独文件</h2><table><thead><tr><th>名称</th><th class="num">大小</th><th>hash</th><th style="width:210px"></th></tr></thead><tbody>'
+    snap.files.forEach(function (f, i) {
       html += '<tr>' +
-        '<td class="mono">' + esc(t.name || String(t.hash).slice(0, 12)) + addr + '</td>' +
-        '<td class="faint">' + esc(KIND[t.kind] || t.kind || '') + '</td>' +
-        '<td class="faint mono" style="font-size:11px">' + esc(t.node || t.from) + '</td>' +
-        '<td class="num">' + (t.total > 0 ? fmtBytes(t.received) + ' / ' + fmtBytes(t.total) : fmtBytes(t.received)) +
-        '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div></td>' +
-        '<td class="num faint">' + (t.state === 'running' ? esc(fmtRate(t.rate)) : '—') + '</td>' +
-        '<td class="' + (t.state === 'done' ? 'ok' : t.state === 'error' || t.state === 'cancelled' ? 'err' : 'dim') + '">' +
-        esc(t.state === 'done' ? '完成' : t.state === 'running' ? '进行中' : t.state === 'cancelled' ? '已取消' : t.state === 'error' ? '失败' : t.state) +
-        (t.error ? '<div class="faint" style="font-size:11px">' + esc(t.error) + '</div>' : '') + '</td>' +
-        '<td class="num">' + (t.state === 'running'
-          ? (t.ctrl ? '<button class="tiny ghost" data-cancel="' + t.id + '">取消</button>' : '')
-          : (t.state === 'done'
-            ? (t.kind !== 'get' && t.hash
-              ? '<button class="tiny ghost" data-verify="' + t.id + '">取回校验</button>'
-              : '<span class="faint" style="font-size:11px">sha256 已校验</span>')
-            : '')) + '</td>' +
-        '</tr>'
+        '<td>' + esc(f.path || f.name) + '</td>' +
+        '<td class="num faint">' + (f.size ? esc(fmtBytes(f.size)) : '—') + '</td>' +
+        '<td class="mono faint" style="font-size:11px">' + esc(String(f.hash).slice(0, 12)) + '…</td>' +
+        '<td class="num">' +
+        '<button class="small" data-save="' + i + '">保存</button> ' +
+        '<button class="small ghost" data-peek="' + i + '">预览</button> ' +
+        '<button class="small ghost" data-link="' + i + '" title="生成一条分享链接：不在清单里也能凭 hash 取回（unlisted）">链接</button>' +
+        '</td></tr>'
     })
-    box.innerHTML = html + '</tbody></table>'
-    Array.prototype.forEach.call(box.querySelectorAll('[data-cancel]'), function (btn) {
-      btn.addEventListener('click', function () {
-        var t = tasks.find(function (x) { return x.id === btn.getAttribute('data-cancel') })
-        if (t && t.ctrl) t.ctrl.abort()
-      })
-    })
-    Array.prototype.forEach.call(box.querySelectorAll('[data-verify]'), function (btn) {
-      btn.addEventListener('click', function () {
-        var t = tasks.find(function (x) { return x.id === btn.getAttribute('data-verify') })
-        if (t) verifyRoundTrip(t)
-      })
-    })
+    html += '</tbody></table>'
   }
-
-  /**
-   * renderDiscovered 渲染「自动搜索」的结果。
-   *
-   * 失败也要渲染：搜索失败的三种原因（信令没开 CORS / 端点不可达 / 真的没节点）
-   * 在界面上长得一模一样——一个空列表。把它们拆成三句人话，用户才不用猜。
-   */
-  function renderDiscovered(nodes, err) {
-    var box = $('discovered')
-    if (err) {
-      var msg = err.message || String(err)
-      var cors = /Access-Control-Allow-Origin/.test(msg)
-      var hint = cors
-        ? '这一步是<b>跨域请求</b>（本页原点是 <span class="mono">' + esc(String(location.origin)) + '</span>），' +
-          '信令必须回 <span class="mono">Access-Control-Allow-Origin</span>，浏览器才会把响应交出来。' +
-          '自托管信令请升到 2026-09-20 之后的 go-peerserver（已放开 CORS），或在反代层补这个头。' +
-          '<b>在此之前自动发现用不了，但手动连节点完全不受影响</b>——只是在下面的「节点 peer id」里手填。'
-        : '信令 REST 端点没答上来。请确认 host/port 与节点配的信令一致；' +
-          '另外本页是 HTTPS 而信令是 <span class="mono">http://</span> 时，浏览器会按「混合内容」拦掉这次请求。'
-      box.innerHTML = '<div class="empty err">自动搜索失败：' + esc(msg) + '</div><div class="hint">' + hint + '</div>'
-      return
-    }
-    if (!nodes || !nodes.length) {
-      box.innerHTML = '<div class="empty">信令上没有在线节点。</div>' +
-        '<div class="hint">空的列表不代表信令坏了：节点要主动向信令 announce 才会出现在这里。' +
-        '确认节点配了 <span class="mono">PEERDRIVE_DISCOVERY_*</span>，且它确实连着这个信令。</div>'
-      return
-    }
-    box.innerHTML = ''
-    nodes.forEach(function (n) {
-      var row = document.createElement('div')
-      row.className = 'node'
-      var ago = n.lastSeen ? Math.max(0, Math.round(Date.now() / 1000 - Number(n.lastSeen))) : null
-      row.innerHTML =
-        '<span class="dot on"></span>' +
-        '<span class="nm mono" title="' + esc(n.peerId) + '">' + esc(n.peerId) + '</span>' +
-        '<span class="faint" style="font-size:11px">' +
-        (n.nodeType ? esc(n.nodeType) + ' · ' : '') +
-        (n.collections && n.collections.length ? n.collections.length + ' 集合 · ' : '') +
-        (ago == null ? '' : ago + 's 前') +
-        '</span>'
-      row.title = '点击连接该节点'
-      row.addEventListener('click', function () {
-        $('in-node').value = n.peerId
-        syncURL()
-        connect()
-      })
-      box.appendChild(row)
-    })
-  }
-
-
-
-  function saveBlob(blob, name) {
-    var url = URL.createObjectURL(blob)
-    var a = document.createElement('a')
-    a.href = url
-    a.download = name || 'download'
-    a.rel = 'noopener'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    // 立刻 revoke 会让部分浏览器（Safari）取消下载，给足余量
-    setTimeout(function () { URL.revokeObjectURL(url) }, 30000)
-  }
-
-  function addTask(t) {
-    tasks.unshift(t)
-    renderTasks()
-    return t
-  }
-
-  async function download(s, item) {
-    if (!s || !s.client || !item || !item.hash) return
-    var name = String(item.name || item.path || item.hash).split('/').pop()
-    var started = Date.now()
-    var ctrl = new AbortController()
-    var t = addTask({
-      id: 't' + Date.now() + Math.random().toString(36).slice(2, 6),
-      hash: item.hash, name: name, from: s.id, node: s.id, kind: 'get',
-      received: 0, total: -1, rate: 0, state: 'running', ctrl: ctrl, error: null,
-    })
-    var tick = setInterval(function () {
-      if (t.state !== 'running') return
-      t.rate = Math.round(t.received / Math.max(1, (Date.now() - started) / 1000))
-      renderTasks()
-    }, 500)
-    try {
-      log('拉取 ' + name + ' …')
-      var bytes = await s.client.fetch(item.hash, {
-        signal: ctrl.signal,
-        onProgress: function (received, total) {
-          t.received = received
-          t.total = total > 0 ? total : t.total
-          renderTasks()
-        },
-      })
-      t.received = bytes.byteLength
-      t.state = 'done'
-      saveBlob(new Blob([bytes], { type: (window.PeerDrive.guessMime || function () { return '' })(name) }), name)
-      log('完成：' + name + '（' + fmtBytes(bytes.byteLength) + '，sha256 已校验）', 'ok')
-    } catch (e) {
-      t.state = e.name === 'AbortError' || (e.code === window.PeerDrive.ERR.CANCELLED) ? 'cancelled' : 'error'
-      t.error = e.message || String(e)
-      log('拉取失败：' + t.error + (e.code ? '（' + e.code + '）' : ''), t.state === 'cancelled' ? 'warn' : 'err')
-      if (e.code === window.PeerDrive.ERR.HASH_MISMATCH) log('内容与 hash 不符——对端数据损坏或被篡改，已丢弃', 'err')
-      if (e.code === window.PeerDrive.ERR.TOO_LARGE) log('超过内存闸（默认 256MB）', 'warn')
-    } finally {
-      clearInterval(tick)
-      renderTasks()
-    }
-  }
-
-  async function preview(s, item) {
-    if (!s || !s.client || !item || !item.hash) return
-    var box = $('preview')
-    var name = String(item.name || item.path || item.hash).split('/').pop()
-    var mime = (window.PeerDrive.guessMime || function () { return '' })(name)
-    box.innerHTML = '<div class="preview faint">加载预览…</div>'
-    try {
-      if (/^image\//.test(mime)) {
-        var blob = await s.client.fetchBlob(item.hash, { name: name })
-        var url = URL.createObjectURL(blob)
-        box.innerHTML = '<div class="preview"><img src="' + esc(url) + '" alt="' + esc(name) + '"></div>'
-      } else if (/^video\//.test(mime) || /^audio\//.test(mime)) {
-        var vblob = await s.client.fetchBlob(item.hash, { name: name })
-        box.innerHTML = '<div class="preview"><video src="' + esc(URL.createObjectURL(vblob)) + '" controls></video></div>'
-      } else {
-        var text = await s.client.fetchText(item.hash, { maxBytes: PREVIEW_MAX_BYTES })
-        box.innerHTML = '<div class="preview mono"><pre>' + esc(text.slice(0, 200000)) + '</pre></div>'
-      }
-      log('预览 ' + name, 'ok')
-    } catch (e) {
-      box.innerHTML = '<div class="preview err">预览失败：' + esc(e.message || String(e)) + '</div>'
-      log('预览失败：' + (e.message || String(e)), 'err')
-    }
-  }
-
-  // ── 写方向：自动搜索节点 / 本地入库 / 网络入库 ──────────────────────────
-
-  /**
-   * discoverNow 向信令问「现在谁在线」。
-   *
-   * 走的是信令的 REST 发现端点，跟 WebRTC 那条连接无关——所以**没连任何节点也能搜**，
-   * 这正是它存在的意义：先知道有哪些节点，才谈得上填 id 去连。
-   */
-  async function discoverNow() {
-    var sig = sigOfForm()
-    var btn = $('btn-discover')
-    btn.disabled = true
-    $('discovered').innerHTML = '<div class="empty">正在向 ' + esc(sig.host + ':' + sig.port) + ' 询问…</div>'
-    log('向信令询问在线节点：' + sig.host + ':' + sig.port)
-    try {
-      var nodes = await window.PeerDrive.discoverNodes(sig, { timeoutMs: 8000 })
-      renderDiscovered(nodes, null)
-      if (nodes.length) {
-        log('在线节点 ' + nodes.length + ' 个：' + nodes.map(function (n) { return n.peerId }).join('、'), 'ok')
-      } else {
-        log('信令上没有在线节点（空列表≠信令坏了：节点要主动 announce 才会出现）', 'warn')
-      }
-    } catch (e) {
-      renderDiscovered([], e)
-      log('自动搜索失败：' + (e.message || e) + (e.code ? '（' + e.code + '）' : ''), 'err')
-    } finally {
-      btn.disabled = false
-    }
-  }
-
-  /** activeNode 取出当前选中且确实在线的节点会话；不可用时给出明确原因。 */
-  function activeNode() {
-    var s = sessions.get(current)
-    if (!s) { log('先在左栏选中一个节点', 'err'); return null }
-    if (s.status !== 'online' || !s.client) {
-      log('节点 ' + s.id + ' 还不是在线状态（' + s.status + '）', 'err')
-      return null
-    }
-    return s
-  }
-
-  function newTask(s, name, kind, total) {
-    return addTask({
-      id: 't' + Date.now() + Math.random().toString(36).slice(2, 6),
-      hash: '', name: name, from: s.id, node: s.id, kind: kind,
-      received: 0, total: total || 0, rate: 0, state: 'running', ctrl: new AbortController(), error: null,
-    })
-  }
-
-  /** tickRate 每秒刷新任务行上的速率；返回清理函数。 */
-  function tickRate(t, started) {
-    var h = setInterval(function () {
-      if (t.state !== 'running') return
-      t.rate = Math.round(t.received / Math.max(1, (Date.now() - started) / 1000))
-      renderTasks()
-    }, 500)
-    return function () { clearInterval(h) }
-  }
-
-  /**
-   * settleWrite 统一的失败收尾：把 err 帧翻译成用户能执行的动作。
-   * 写操作失败的几种典型原因必须分开说——「填密钥」「节点不允许写」「写满/拒绝」
-   * 三种情况的处置完全不同，混成一句"入库失败"等于没说。
-   */
-  function settleWrite(t, e, what) {
-    t.state = (e && (e.name === 'AbortError' || e.code === window.PeerDrive.ERR.CANCELLED)) ? 'cancelled' : 'error'
-    t.error = (e && e.message) || String(e)
-    log(what + '失败：' + t.error + (e && e.code ? '（' + e.code + '）' : ''), t.state === 'cancelled' ? 'warn' : 'err')
-    if (!e || !e.code) return
-    if (pskHint(e)) log(pskHint(e), 'warn')
-    if (e.code === window.PeerDrive.ERR.TIMEOUT) {
-      log('节点在分片超时窗口内没回应。常见原因：它此刻正忙（磁盘/别的在传），或这条连接已经半死——重连一次最快。', 'warn')
-    }
-  }
-
-  /** putFiles 把选中的本地文件内容逐个送进节点。串行而非并行是有意的，见下方注释。 */
-  async function putFiles() {
-    var s = activeNode()
-    if (!s) return
-    var files = Array.prototype.slice.call($('in-file').files || [])
-    if (!files.length) { log('先选至少一个本地文件', 'err'); return }
-    // 串行执行：一条 DataChannel 上同时只能有一个 upload 流（服务端按连接级槽位
-    // 管理），并行会在第二份的第一帧就收到 "already in progress"。
-    for (var i = 0; i < files.length; i++) await putOne(s, files[i])
-    await loadShares(s)
-  }
-
-  async function putOne(s, file) {
-    var name = file.name || ('upload-' + Date.now())
-    var size = file.size || 0
-    var started = Date.now()
-    var t = newTask(s, name, 'put', size)
-    var stop = tickRate(t, started)
-    try {
-      if (size > PUT_WARN_BYTES) {
-        log(name + ' 有 ' + fmtBytes(size) + '：put 会先把整个内容读进浏览器内存，超大文件建议先本地切片', 'warn')
-      }
-      log('入库 ' + name + '（' + fmtBytes(size) + '）…')
-      var res = await s.client.put(file, {
-        name: name,
-        signal: t.ctrl.signal,
-        chunkTimeoutMs: PUT_CHUNK_TIMEOUT_MS,
-        onProgress: function (sent, total) {
-          t.received = sent
-          if (total > 0) t.total = total
-          renderTasks()
-        },
-      })
-      t.hash = res.hash
-      t.received = res.size
-      t.total = res.size
-      t.state = 'done'
-      log('入库完成：' + res.name + ' → sha256 ' + res.hash + '（' + fmtBytes(res.size) + '）', 'ok')
-      log('这条内容之后在任何地方都能用这个 hash 取回；要立刻验证，点任务里的「取回校验」。', 'ok')
-    } catch (e) {
-      settleWrite(t, e, '入库 ' + name)
-    } finally {
-      stop()
-      renderTasks()
-    }
-  }
-
-  /** pullUrl 让节点替自己去抓一个 URL 并入库。 */
-  async function pullUrl() {
-    var s = activeNode()
-    if (!s) return
-    var url = ($('in-url').value || '').trim()
-    if (!url) { log('先填一个 URL', 'err'); return }
-    if (!/^https?:\/\//i.test(url)) {
-      log('URL 必须是 http:// 或 https:// 开头——节点侧的 SSRF 防护也只放行这两种协议', 'err')
-      return
-    }
-    var want = ($('in-url-name').value || '').trim()
-    var started = Date.now()
-    var t = newTask(s, want || url.split('/').pop() || url, 'pull', 0)
-    var stop = tickRate(t, started)
-    try {
-      log('让节点抓取 ' + url + ' …')
-      var res = await s.client.pull(url, { name: want })
-      t.hash = res.hash
-      t.received = res.size
-      t.total = res.size
-      t.state = 'done'
-      log('网络入库完成：' + res.name + ' → sha256 ' + res.hash + '（' + fmtBytes(res.size) + '）', 'ok')
-    } catch (e) {
-      settleWrite(t, e, '抓取 ' + url)
-      // pull 的绝大多数 err 是节点主动拒绝（SSRF/超限/404）——那是节点在保护自己，
-      // 不是故障。把这句话说清楚，省得用户反复重试同一个注定失败的地址。
-      if (e && e.code === window.PeerDrive.ERR.PEER) {
-        log('这是节点的策略性拒绝（不是网络故障）：换一个公网可访问的地址再来。', 'warn')
-      }
-    } finally {
-      stop()
-      renderTasks()
-    }
-  }
-
-  /**
-   * verifyRoundTrip 把刚入库的内容按 hash 拉回来并复算 sha256。
-   *
-   * 为什么要有这一步：入库成功只说明节点收下了字节，不说明它真的能用那个地址
-   * 把内容还回来（落盘失败、索引没挂上，都会表现为"入库成功但取不回"）。取回
-   * 校验才是"进库了"的闭环证据。
-   */
-  async function verifyRoundTrip(t) {
-    var s = sessions.get(t.node)
-    if (!s || !s.client) { log('该节点已断开，无法取回校验', 'err'); return }
-    try {
-      log('取回校验 ' + t.hash.slice(0, 12) + '…')
-      var bytes = await s.client.fetch(t.hash)
-      var hex = await window.PeerDrive.sha256Hex(bytes)
-      hex === t.hash
-        ? log('取回校验通过：拉回 ' + fmtBytes(bytes.byteLength) + '，sha256 与入库返回值一致', 'ok')
-        : log('取回校验失败：期望 ' + t.hash + '，实得 ' + hex, 'err')
-    } catch (e) {
-      log('取回校验失败：' + (e.message || e) + (e.code ? '（' + e.code + '）' : ''), 'err')
-      if (pskHint(e)) log(pskHint(e), 'warn')
-    }
-  }
-
-
-
-    // panel/app-shares.js — Share manifest & deep-linked collection/file view rendering (Issue #404)
-  function updateShares() {
-    var s = sessions.get(current)
-    var box = $('shares')
-    $('preview').innerHTML = ''
-    renderLinked(s)
-    if (!s) { box.innerHTML = '<div class="empty">先在左侧选一个节点。</div>'; return }
-    if (s.status === 'connecting') { box.innerHTML = '<div class="empty">连接中…</div>'; return }
-    if (s.status === 'error') { box.innerHTML = '<div class="empty err">连接失败：' + esc(s.error) + '</div>'; return }
-    if (!s.snapshot) { box.innerHTML = '<div class="empty">还没有清单。</div>'; return }
-
-    var snap = s.snapshot
-    if (!snap.total) {
-      // 空清单有两种成因，现象一模一样，修复动作却相反，所以必须在这里点名：
-      //   1) 节点开了 PSK 门禁而本页面没填密钥 —— share 帧被 pskGate 挡住，返回空清单；
-      //   2) 节点真的没开对外共享 / 没声明共享目录。
-      // 原来只写「未开启对外共享」，会让第 1 种情况的用户去改节点配置（改不对），
-      // 而正确动作只是在上方「预共享密钥」框里填一次。
-      // 为什么门禁不会回 PSK_REQUIRED：psk.go 的 servedVerbs 挡的是「对端让我做事」的动词，
-      // share 的**响应帧**不在名单里，所以这里只能表现为「拿不到内容」而不是「报错」。
-      var pskFilled = !!(pskOfForm() && pskOfForm().trim())
-      box.innerHTML = '<div class="empty">该节点没有共享内容。'
-        + (pskFilled
-            ? '<br><br>你填了密钥但仍拿不到清单：确认密钥与运营者给的一致，'
-              + '且该节点确实声明了共享目录。'
-            : '<br><br>两种可能：① 节点开了预共享密钥门禁——在「预共享密钥」框里填同一个密钥再连一次；'
-              + '② 节点确实没有对外共享内容。')
-        + '</div>'
-      return
-    }
-
-    var html = ''
-    if (snap.files && snap.files.length) {
-      html += '<h2 style="margin-top:2px">单独文件</h2><table><thead><tr><th>名称</th><th class="num">大小</th><th>hash</th><th style="width:210px"></th></tr></thead><tbody>'
-      snap.files.forEach(function (f, i) {
+  if (snap.collections && snap.collections.length) {
+    html += '<h2 style="margin-top:16px">合集</h2>'
+    snap.collections.forEach(function (c, ci) {
+      var entries = Array.isArray(c.entries) ? c.entries : []
+      // 整包一条链接：合集 manifest 本身能凭 hash 取回，所以对方不在清单里也能拿到
+      html += '<details><summary>' + esc(c.name || String(c.hash).slice(0, 12) + '…') + ' · ' + entries.length + ' 个条目' +
+        ' <button class="small ghost" data-coll-link="' + ci + '" title="生成这个合集的分享链接（整包一条）">链接</button></summary>'
+      html += '<table><thead><tr><th>路径</th><th class="num">大小</th><th style="width:210px"></th></tr></thead><tbody>'
+      entries.forEach(function (e, ei) {
         html += '<tr>' +
-          '<td>' + esc(f.path || f.name) + '</td>' +
-          '<td class="num faint">' + (f.size ? esc(fmtBytes(f.size)) : '—') + '</td>' +
-          '<td class="mono faint" style="font-size:11px">' + esc(String(f.hash).slice(0, 12)) + '…</td>' +
+          '<td>' + esc(e.path) + '</td>' +
+          '<td class="num faint">' + (e.size ? esc(fmtBytes(e.size)) : '—') + '</td>' +
           '<td class="num">' +
-          '<button class="small" data-save="' + i + '">保存</button> ' +
-          '<button class="small ghost" data-peek="' + i + '">预览</button> ' +
-          '<button class="small ghost" data-link="' + i + '" title="生成一条分享链接：不在清单里也能凭 hash 取回（unlisted）">链接</button>' +
+          '<button class="small" data-csave="' + ci + ':' + ei + '">保存</button> ' +
+          '<button class="small ghost" data-cpeek="' + ci + ':' + ei + '">预览</button> ' +
+          '<button class="small ghost" data-clink="' + ci + ':' + ei + '" title="生成一条分享链接：不在清单里也能凭 hash 取回（unlisted）">链接</button>' +
           '</td></tr>'
       })
-      html += '</tbody></table>'
-    }
-    if (snap.collections && snap.collections.length) {
-      html += '<h2 style="margin-top:16px">合集</h2>'
-      snap.collections.forEach(function (c, ci) {
-        var entries = Array.isArray(c.entries) ? c.entries : []
-        // 整包一条链接：合集 manifest 本身能凭 hash 取回，所以对方不在清单里也能拿到
-        html += '<details><summary>' + esc(c.name || String(c.hash).slice(0, 12) + '…') + ' · ' + entries.length + ' 个条目' +
-          ' <button class="small ghost" data-coll-link="' + ci + '" title="生成这个合集的分享链接（整包一条）">链接</button></summary>'
-        html += '<table><thead><tr><th>路径</th><th class="num">大小</th><th style="width:210px"></th></tr></thead><tbody>'
-        entries.forEach(function (e, ei) {
-          html += '<tr>' +
-            '<td>' + esc(e.path) + '</td>' +
-            '<td class="num faint">' + (e.size ? esc(fmtBytes(e.size)) : '—') + '</td>' +
-            '<td class="num">' +
-            '<button class="small" data-csave="' + ci + ':' + ei + '">保存</button> ' +
-            '<button class="small ghost" data-cpeek="' + ci + ':' + ei + '">预览</button> ' +
-            '<button class="small ghost" data-clink="' + ci + ':' + ei + '" title="生成一条分享链接：不在清单里也能凭 hash 取回（unlisted）">链接</button>' +
-            '</td></tr>'
-        })
-        html += '</tbody></table></details>'
-      })
-    }
-    box.innerHTML = html
-
-    // stop=true 用于"按钮嵌在 <summary> 里"的情形：不拦住的话点按钮会顺手把
-    // details 展开/收起（合集标题行就是这种）。
-    var bind = function (attr, handler, stop) {
-      Array.prototype.forEach.call(box.querySelectorAll('[' + attr + ']'), function (el) {
-        el.addEventListener('click', function (e) {
-          if (stop) { e.preventDefault(); e.stopPropagation() }
-          handler(el.getAttribute(attr))
-        })
-      })
-    }
-    var findFile = function (i) { return snap.files[Number(i)] }
-    var findEntry = function (ref) {
-      var p = ref.split(':')
-      return (snap.collections[Number(p[0])].entries || [])[Number(p[1])]
-    }
-    bind('data-save', function (v) { download(s, findFile(v)) })
-    bind('data-peek', function (v) { preview(s, findFile(v)) })
-    bind('data-csave', function (v) { download(s, findEntry(v)) })
-    bind('data-cpeek', function (v) { preview(s, findEntry(v)) })
-    bind('data-link', function (v) {
-      var f = findFile(v)
-      copyShareLink(s.id, f.hash, String(f.path || f.name || ''))
+      html += '</tbody></table></details>'
     })
-    bind('data-clink', function (v) {
-      var e = findEntry(v)
-      copyShareLink(s.id, e.hash, String(e.path || ''))
-    })
-    bind('data-coll-link', function (v) {
-      var c = snap.collections[Number(v)]
-      copyShareLink(s.id, c.hash, String(c.name || c.hash))
-    }, true)
   }
+  box.innerHTML = html
 
-  // renderLinked 渲染「分享链接带来的那一条内容」。
-  //
-  // unlisted 的定义就是**不出现在清单里**、但凭 hash 可取。所以拿到链接的人连上
-  // 节点后，清单里多半没有它——不给单独入口的话，他看到"该节点没有共享内容"
-  // 就走了，而东西其实一直拿得到。这条也正是"链接分享"这个语义的落点。
-  function renderLinked(s) {
-    var box = $('linked')
-    if (!box) return
-    if (!pendingHash) { box.innerHTML = ''; return }
-    var h = pendingHash
-    var short = h.slice(0, 16) + '…'
-    if (!s || s.status !== 'online') {
-      box.innerHTML = '<div class="empty">链接里带着一个 hash（<span class="mono">' +
-        esc(short) + '</span>），连上节点后即可取回。</div>'
-      return
+  // stop=true 用于"按钮嵌在 <summary> 里"的情形：不拦住的话点按钮会顺手把
+  // details 展开/收起（合集标题行就是这种）。
+  var bind = function (attr, handler, stop) {
+    Array.prototype.forEach.call(box.querySelectorAll('[' + attr + ']'), function (el) {
+      el.addEventListener('click', function (e) {
+        if (stop) { e.preventDefault(); e.stopPropagation() }
+        handler(el.getAttribute(attr))
+      })
+    })
+  }
+  var findFile = function (i) { return snap.files[Number(i)] }
+  var findEntry = function (ref) {
+    var p = ref.split(':')
+    return (snap.collections[Number(p[0])].entries || [])[Number(p[1])]
+  }
+  bind('data-save', function (v) { download(s, findFile(v)) })
+  bind('data-peek', function (v) { preview(s, findFile(v)) })
+  bind('data-csave', function (v) { download(s, findEntry(v)) })
+  bind('data-cpeek', function (v) { preview(s, findEntry(v)) })
+  bind('data-link', function (v) {
+    var f = findFile(v)
+    copyShareLink(s.id, f.hash, String(f.path || f.name || ''))
+  })
+  bind('data-clink', function (v) {
+    var e = findEntry(v)
+    copyShareLink(s.id, e.hash, String(e.path || ''))
+  })
+  bind('data-coll-link', function (v) {
+    var c = snap.collections[Number(v)]
+    copyShareLink(s.id, c.hash, String(c.name || c.hash))
+  }, true)
+}
+
+function select(id) {
+  current = id
+  renderNodes()
+  updateShares()
+}
+
+function saveBlob(blob, name) {
+  var url = URL.createObjectURL(blob)
+  var a = document.createElement('a')
+  a.href = url
+  a.download = name || 'download'
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // 立刻 revoke 会让部分浏览器（Safari）取消下载，给足余量
+  setTimeout(function () { URL.revokeObjectURL(url) }, 30000)
+}
+
+function addTask(t) {
+  tasks.unshift(t)
+  renderTasks()
+  return t
+}
+
+async function download(s, item) {
+  if (!s || !s.client || !item || !item.hash) return
+  var name = String(item.name || item.path || item.hash).split('/').pop()
+  var started = Date.now()
+  var ctrl = new AbortController()
+  var t = addTask({
+    id: 't' + Date.now() + Math.random().toString(36).slice(2, 6),
+    hash: item.hash, name: name, from: s.id, node: s.id, kind: 'get',
+    received: 0, total: -1, rate: 0, state: 'running', ctrl: ctrl, error: null,
+  })
+  var tick = setInterval(function () {
+    if (t.state !== 'running') return
+    t.rate = Math.round(t.received / Math.max(1, (Date.now() - started) / 1000))
+    renderTasks()
+  }, 500)
+  try {
+    log('拉取 ' + name + ' …')
+    var bytes = await s.client.fetch(item.hash, {
+      signal: ctrl.signal,
+      onProgress: function (received, total) {
+        t.received = received
+        t.total = total > 0 ? total : t.total
+        renderTasks()
+      },
+    })
+    t.received = bytes.byteLength
+    t.state = 'done'
+    saveBlob(new Blob([bytes], { type: (window.PeerDrive.guessMime || function () { return '' })(name) }), name)
+    log('完成：' + name + '（' + fmtBytes(bytes.byteLength) + '，sha256 已校验）', 'ok')
+  } catch (e) {
+    t.state = e.name === 'AbortError' || (e.code === window.PeerDrive.ERR.CANCELLED) ? 'cancelled' : 'error'
+    t.error = e.message || String(e)
+    log('拉取失败：' + t.error + (e.code ? '（' + e.code + '）' : ''), t.state === 'cancelled' ? 'warn' : 'err')
+    if (e.code === window.PeerDrive.ERR.HASH_MISMATCH) log('内容与 hash 不符——对端数据损坏或被篡改，已丢弃', 'err')
+    if (e.code === window.PeerDrive.ERR.TOO_LARGE) log('超过内存闸（默认 256MB）', 'warn')
+  } finally {
+    clearInterval(tick)
+    renderTasks()
+  }
+}
+
+async function preview(s, item) {
+  if (!s || !s.client || !item || !item.hash) return
+  var box = $('preview')
+  var name = String(item.name || item.path || item.hash).split('/').pop()
+  var mime = (window.PeerDrive.guessMime || function () { return '' })(name)
+  box.innerHTML = '<div class="preview faint">加载预览…</div>'
+  try {
+    if (/^image\//.test(mime)) {
+      var blob = await s.client.fetchBlob(item.hash, { name: name })
+      var url = URL.createObjectURL(blob)
+      box.innerHTML = '<div class="preview"><img src="' + esc(url) + '" alt="' + esc(name) + '"></div>'
+    } else if (/^video\//.test(mime) || /^audio\//.test(mime)) {
+      var vblob = await s.client.fetchBlob(item.hash, { name: name })
+      box.innerHTML = '<div class="preview"><video src="' + esc(URL.createObjectURL(vblob)) + '" controls></video></div>'
+    } else {
+      var text = await s.client.fetchText(item.hash, { maxBytes: PREVIEW_MAX_BYTES })
+      box.innerHTML = '<div class="preview mono"><pre>' + esc(text.slice(0, 200000)) + '</pre></div>'
     }
-    // 清单还没到就先别判断：此刻既不知道它是文件还是合集，判断了也不会重来
-    // （linkedFor 已记过账），会把"合集链接"误判成文件。
-    if (!s.snapshot) {
-      box.innerHTML = '<div class="empty">正在获取对方的共享清单…</div>'
-      return
+    log('预览 ' + name, 'ok')
+  } catch (e) {
+    box.innerHTML = '<div class="preview err">预览失败：' + esc(e.message || String(e)) + '</div>'
+    log('预览失败：' + (e.message || String(e)), 'err')
+  }
+}
+
+async function discoverNow() {
+  var sig = sigOfForm()
+  var btn = $('btn-discover')
+  btn.disabled = true
+  $('discovered').innerHTML = '<div class="empty">正在向 ' + esc(sig.host + ':' + sig.port) + ' 询问…</div>'
+  log('向信令询问在线节点：' + sig.host + ':' + sig.port)
+  try {
+    var nodes = await window.PeerDrive.discoverNodes(sig, { timeoutMs: 8000 })
+    renderDiscovered(nodes, null)
+    if (nodes.length) {
+      log('在线节点 ' + nodes.length + ' 个：' + nodes.map(function (n) { return n.peerId }).join('、'), 'ok')
+    } else {
+      log('信令上没有在线节点（空列表≠信令坏了：节点要主动 announce 才会出现）', 'warn')
     }
-    var key = s.id + ':' + h
+  } catch (e) {
+    renderDiscovered([], e)
+    log('自动搜索失败：' + (e.message || e) + (e.code ? '（' + e.code + '）' : ''), 'err')
+  } finally {
+    btn.disabled = false
+  }
+}
+
+function activeNode() {
+  var s = sessions.get(current)
+  if (!s) { log('先在左栏选中一个节点', 'err'); return null }
+  if (s.status !== 'online' || !s.client) {
+    log('节点 ' + s.id + ' 还不是在线状态（' + s.status + '）', 'err')
+    return null
+  }
+  return s
+}
+
+function newTask(s, name, kind, total) {
+  return addTask({
+    id: 't' + Date.now() + Math.random().toString(36).slice(2, 6),
+    hash: '', name: name, from: s.id, node: s.id, kind: kind,
+    received: 0, total: total || 0, rate: 0, state: 'running', ctrl: new AbortController(), error: null,
+  })
+}
+
+function tickRate(t, started) {
+  var h = setInterval(function () {
+    if (t.state !== 'running') return
+    t.rate = Math.round(t.received / Math.max(1, (Date.now() - started) / 1000))
+    renderTasks()
+  }, 500)
+  return function () { clearInterval(h) }
+}
+
+function settleWrite(t, e, what) {
+  t.state = (e && (e.name === 'AbortError' || e.code === window.PeerDrive.ERR.CANCELLED)) ? 'cancelled' : 'error'
+  t.error = (e && e.message) || String(e)
+  log(what + '失败：' + t.error + (e && e.code ? '（' + e.code + '）' : ''), t.state === 'cancelled' ? 'warn' : 'err')
+  if (!e || !e.code) return
+  if (pskHint(e)) log(pskHint(e), 'warn')
+  if (e.code === window.PeerDrive.ERR.TIMEOUT) {
+    log('节点在分片超时窗口内没回应。常见原因：它此刻正忙（磁盘/别的在传），或这条连接已经半死——重连一次最快。', 'warn')
+  }
+}
+
+async function putFiles() {
+  var s = activeNode()
+  if (!s) return
+  var files = Array.prototype.slice.call($('in-file').files || [])
+  if (!files.length) { log('先选至少一个本地文件', 'err'); return }
+  // 串行执行：一条 DataChannel 上同时只能有一个 upload 流（服务端按连接级槽位
+  // 管理），并行会在第二份的第一帧就收到 "already in progress"。
+  for (var i = 0; i < files.length; i++) await putOne(s, files[i])
+  await loadShares(s)
+}
+
+async function putOne(s, file) {
+  var name = file.name || ('upload-' + Date.now())
+  var size = file.size || 0
+  var started = Date.now()
+  var t = newTask(s, name, 'put', size)
+  var stop = tickRate(t, started)
+  try {
+    if (size > PUT_WARN_BYTES) {
+      log(name + ' 有 ' + fmtBytes(size) + '：put 会先把整个内容读进浏览器内存，超大文件建议先本地切片', 'warn')
+    }
+    log('入库 ' + name + '（' + fmtBytes(size) + '）…')
+    var res = await s.client.put(file, {
+      name: name,
+      signal: t.ctrl.signal,
+      chunkTimeoutMs: PUT_CHUNK_TIMEOUT_MS,
+      onProgress: function (sent, total) {
+        t.received = sent
+        if (total > 0) t.total = total
+        renderTasks()
+      },
+    })
+    t.hash = res.hash
+    t.received = res.size
+    t.total = res.size
+    t.state = 'done'
+    log('入库完成：' + res.name + ' → sha256 ' + res.hash + '（' + fmtBytes(res.size) + '）', 'ok')
+    log('这条内容之后在任何地方都能用这个 hash 取回；要立刻验证，点任务里的「取回校验」。', 'ok')
+  } catch (e) {
+    settleWrite(t, e, '入库 ' + name)
+  } finally {
+    stop()
+    renderTasks()
+  }
+}
+
+async function pullUrl() {
+  var s = activeNode()
+  if (!s) return
+  var url = ($('in-url').value || '').trim()
+  if (!url) { log('先填一个 URL', 'err'); return }
+  if (!/^https?:\/\//i.test(url)) {
+    log('URL 必须是 http:// 或 https:// 开头——节点侧的 SSRF 防护也只放行这两种协议', 'err')
+    return
+  }
+  var want = ($('in-url-name').value || '').trim()
+  var started = Date.now()
+  var t = newTask(s, want || url.split('/').pop() || url, 'pull', 0)
+  var stop = tickRate(t, started)
+  try {
+    log('让节点抓取 ' + url + ' …')
+    var res = await s.client.pull(url, { name: want })
+    t.hash = res.hash
+    t.received = res.size
+    t.total = res.size
+    t.state = 'done'
+    log('网络入库完成：' + res.name + ' → sha256 ' + res.hash + '（' + fmtBytes(res.size) + '）', 'ok')
+  } catch (e) {
+    settleWrite(t, e, '抓取 ' + url)
+    // pull 的绝大多数 err 是节点主动拒绝（SSRF/超限/404）——那是节点在保护自己，
+    // 不是故障。把这句话说清楚，省得用户反复重试同一个注定失败的地址。
+    if (e && e.code === window.PeerDrive.ERR.PEER) {
+      log('这是节点的策略性拒绝（不是网络故障）：换一个公网可访问的地址再来。', 'warn')
+    }
+  } finally {
+    stop()
+    renderTasks()
+  }
+}
+
+async function verifyRoundTrip(t) {
+  var s = sessions.get(t.node)
+  if (!s || !s.client) { log('该节点已断开，无法取回校验', 'err'); return }
+  try {
+    log('取回校验 ' + t.hash.slice(0, 12) + '…')
+    var bytes = await s.client.fetch(t.hash)
+    var hex = await window.PeerDrive.sha256Hex(bytes)
+    hex === t.hash
+      ? log('取回校验通过：拉回 ' + fmtBytes(bytes.byteLength) + '，sha256 与入库返回值一致', 'ok')
+      : log('取回校验失败：期望 ' + t.hash + '，实得 ' + hex, 'err')
+  } catch (e) {
+    log('取回校验失败：' + (e.message || e) + (e.code ? '（' + e.code + '）' : ''), 'err')
+    if (pskHint(e)) log(pskHint(e), 'warn')
+  }
+}
+
+
+  // app-shares.js — 分享链接（deep-link）控制器：链接带来的那条内容（file / collection）的
+// 识别与取回 UI（Issue #404 模块化拆分的第三个 part）。
+// 由 scripts/build-panel.mjs 内联进 /*__PANEL_SHARES_PART__*/ 占位处。
+// 从 v1.0-rc 快照重建：内容逐字取自拆分前的 refactor@06d83eb app.js。
+
+//
+// unlisted 的定义就是**不出现在清单里**、但凭 hash 可取。所以拿到链接的人连上
+// 节点后，清单里多半没有它——不给单独入口的话，他看到"该节点没有共享内容"
+// 就走了，而东西其实一直拿得到。这条也正是"链接分享"这个语义的落点。
+function renderLinked(s) {
+  var box = $('linked')
+  if (!box) return
+  if (!pendingHash) { box.innerHTML = ''; return }
+  var h = pendingHash
+  var short = h.slice(0, 16) + '…'
+  if (!s || s.status !== 'online') {
+    box.innerHTML = '<div class="empty">链接里带着一个 hash（<span class="mono">' +
+      esc(short) + '</span>），连上节点后即可取回。</div>'
+    return
+  }
+  // 清单还没到就先别判断：此刻既不知道它是文件还是合集，判断了也不会重来
+  // （linkedFor 已记过账），会把"合集链接"误判成文件。
+  if (!s.snapshot) {
+    box.innerHTML = '<div class="empty">正在获取对方的共享清单…</div>'
+    return
+  }
+  var key = s.id + ':' + h
+  if (linkedFor !== key) {
+    if (!linkedBusy) { linkedBusy = true; resolveLinked(s, key) }
+    // 占位必须**在它跑完之后再判一次**：命中清单那条路是同步走完的（里面已经
+    // 自己重画过一次），无条件写占位会把刚画好的表格覆盖成"正在识别…"。
     if (linkedFor !== key) {
-      if (!linkedBusy) { linkedBusy = true; resolveLinked(s, key) }
-      // 占位必须**在它跑完之后再判一次**：命中清单那条路是同步走完的（里面已经
-      // 自己重画过一次），无条件写占位会把刚画好的表格覆盖成"正在识别…"。
-      if (linkedFor !== key) {
-        box.innerHTML = '<div class="empty">正在识别链接里的内容…</div>'
-        return
-      }
+      box.innerHTML = '<div class="empty">正在识别链接里的内容…</div>'
+      return
     }
-    if (linkedKind === 'collection' && linkedColl) { renderLinkedColl(s, h); return }
-    var named = nameForHash(s, h)
-    box.innerHTML =
-      '<div class="hint">这条内容来自分享链接：<span class="mono">' + esc(short) + '</span>' +
-      (named ? '（清单里叫 ' + esc(named) + '）' : '（清单里没有它 —— unlisted 就是这个意思：不列出，但知道 hash 就能取）') +
-      '</div>' +
-      '<div class="row">' +
-      '<button class="small" id="btn-linked-get">取回</button> ' +
-      '<button class="small ghost" id="btn-linked-copy">复制链接</button>' +
-      '</div>'
-    $('btn-linked-get').addEventListener('click', function () {
-      download(s, { hash: h, name: named || h })
-    })
-    $('btn-linked-copy').addEventListener('click', function () {
-      copyShareLink(s.id, h, named || '')
-    })
   }
+  if (linkedKind === 'collection' && linkedColl) { renderLinkedColl(s, h); return }
+  var named = nameForHash(s, h)
+  box.innerHTML =
+    '<div class="hint">这条内容来自分享链接：<span class="mono">' + esc(short) + '</span>' +
+    (named ? '（清单里叫 ' + esc(named) + '）' : '（清单里没有它 —— unlisted 就是这个意思：不列出，但知道 hash 就能取）') +
+    '</div>' +
+    '<div class="row">' +
+    '<button class="small" id="btn-linked-get">取回</button> ' +
+    '<button class="small ghost" id="btn-linked-copy">复制链接</button>' +
+    '</div>'
+  $('btn-linked-get').addEventListener('click', function () {
+    download(s, { hash: h, name: named || h })
+  })
+  $('btn-linked-copy').addEventListener('click', function () {
+    copyShareLink(s.id, h, named || '')
+  })
+}
 
-  // resolveLinked 判断链接里那条是文件还是合集（结果写进 linkedKind/linkedColl）。
-  //
-  // 为什么"取回来看"是可行且必要的：合集 manifest 就是一份按内容寻址存的 JSON，
-  // 而 unlisted 合集按定义不在清单里——不取就永远只能说"清单里没有它"，拿到链接
-  // 的人依然什么都看不到。取回失败（private / 断线）一律按文件处理：那样「取回」
-  // 会把服务端的真实原因显示出来，比这里猜一个原因强。
-  async function resolveLinked(s, key) {
-    try {
-      var snap = s && s.snapshot
-      var cs = (snap && snap.collections) || []
-      for (var i = 0; i < cs.length; i++) {
-        if (cs[i].hash !== pendingHash) continue
-        linkedKind = 'collection'
-        linkedColl = {
-          name: cs[i].name || cs[i].friendly_name || '',
-          entries: (cs[i].entries || []).map(manifestEntry),
-          fromList: true,
-        }
-        linkedFor = key
-        return
-      }
-      var inFiles = ((snap && snap.files) || []).filter(function (f) { return f.hash === pendingHash })
-      if (inFiles.length) {
-        linkedKind = 'file'
-        linkedColl = null
-        linkedFor = key
-        return
-      }
-      var bytes = await s.client.fetch(pendingHash, { maxBytes: LINK_SNIFF_BYTES })
-      var obj = null
-      try { obj = JSON.parse(new TextDecoder().decode(bytes)) } catch (e) { obj = null }
-      if (obj && Array.isArray(obj.entries)) {
-        linkedKind = 'collection'
-        linkedColl = {
-          name: obj.friendly_name || '',
-          entries: obj.entries.map(manifestEntry).filter(function (e) { return e.hash }),
-          fromList: false,
-        }
-      } else {
-        linkedKind = 'file'
-        linkedColl = null
+// resolveLinked 判断链接里那条是文件还是合集（结果写进 linkedKind/linkedColl）。
+//
+// 为什么"取回来看"是可行且必要的：合集 manifest 就是一份按内容寻址存的 JSON，
+// 而 unlisted 合集按定义不在清单里——不取就永远只能说"清单里没有它"，拿到链接
+// 的人依然什么都看不到。取回失败（private / 断线）一律按文件处理：那样「取回」
+// 会把服务端的真实原因显示出来，比这里猜一个原因强。
+async function resolveLinked(s, key) {
+  try {
+    var snap = s && s.snapshot
+    var cs = (snap && snap.collections) || []
+    for (var i = 0; i < cs.length; i++) {
+      if (cs[i].hash !== pendingHash) continue
+      linkedKind = 'collection'
+      linkedColl = {
+        name: cs[i].name || cs[i].friendly_name || '',
+        entries: (cs[i].entries || []).map(manifestEntry),
+        fromList: true,
       }
       linkedFor = key
-    } catch (e) {
+      return
+    }
+    var inFiles = ((snap && snap.files) || []).filter(function (f) { return f.hash === pendingHash })
+    if (inFiles.length) {
       linkedKind = 'file'
       linkedColl = null
-      // 也记上账：否则清单每刷新一次就重取一次，失败时会一直转圈
       linkedFor = key
-    } finally {
-      linkedBusy = false
-      renderLinked(s)
+      return
     }
-  }
-
-  // manifestEntry 把 manifest 的条目统一成 {path, hash}：新格式是 providers[]，
-  // 老格式直接给 hash（panel 侧两种都要认，链接可能是老节点生成的）。
-  function manifestEntry(e) {
-    var h = ''
-    if (e) h = e.hash || ((e.providers || [])[0] || {}).value || ''
-    return { path: (e && e.path) || '', hash: String(h || '') }
-  }
-
-  // renderLinkedColl 把链接带来的合集单独列在清单上方（条目可逐条保存/预览/再分享）。
-  function renderLinkedColl(s, h) {
-    var box = $('linked')
-    var entries = linkedColl.entries || []
-    var title = linkedColl.name || (h.slice(0, 12) + '…')
-    var html = '<div class="hint">这条链接指向一个<b>合集</b>：' + esc(title) +
-      '（' + entries.length + ' 个条目）'
-    if (!linkedColl.fromList) {
-      html += ' —— 它不在对方的共享清单里，是凭 hash 取到的（unlisted 就是这个意思：不列出，但知道 hash 就能取）'
-    }
-    html += '</div>'
-    if (!entries.length) {
-      html += '<div class="empty">这个合集没有条目。</div>'
+    var bytes = await s.client.fetch(pendingHash, { maxBytes: LINK_SNIFF_BYTES })
+    var obj = null
+    try { obj = JSON.parse(new TextDecoder().decode(bytes)) } catch (e) { obj = null }
+    if (obj && Array.isArray(obj.entries)) {
+      linkedKind = 'collection'
+      linkedColl = {
+        name: obj.friendly_name || '',
+        entries: obj.entries.map(manifestEntry).filter(function (e) { return e.hash }),
+        fromList: false,
+      }
     } else {
-      html += '<table><thead><tr><th>路径</th><th style="width:210px"></th></tr></thead><tbody>'
-      entries.forEach(function (e, i) {
-        html += '<tr><td>' + esc(e.path || e.hash) + '</td>' +
-          '<td class="num">' +
-          '<button class="small" data-lsave="' + i + '">保存</button> ' +
-          '<button class="small ghost" data-lpeek="' + i + '">预览</button> ' +
-          '<button class="small ghost" data-llink="' + i + '">链接</button>' +
-          '</td></tr>'
-      })
-      html += '</tbody></table>'
+      linkedKind = 'file'
+      linkedColl = null
     }
-    html += '<div class="row">' +
-      '<button class="small ghost" id="btn-linked-copy">复制链接</button>' +
-      '</div>' +
-      '<div class="hint faint">面板只能逐条存到浏览器；要整包存进自己的节点，用管理台的「保存整个合集」（教程第五章）。</div>'
-    box.innerHTML = html
+    linkedFor = key
+  } catch (e) {
+    linkedKind = 'file'
+    linkedColl = null
+    // 也记上账：否则清单每刷新一次就重取一次，失败时会一直转圈
+    linkedFor = key
+  } finally {
+    linkedBusy = false
+    renderLinked(s)
+  }
+}
 
-    var at = function (i) { return (linkedColl.entries || [])[i] }
-    var bindL = function (attr, fn) {
-      Array.prototype.forEach.call(box.querySelectorAll('[' + attr + ']'), function (el) {
-        el.addEventListener('click', function () { fn(Number(el.getAttribute(attr))) })
-      })
-    }
-    bindL('data-lsave', function (i) { download(s, at(i)) })
-    bindL('data-lpeek', function (i) { preview(s, at(i)) })
-    bindL('data-llink', function (i) {
-      var e = at(i)
-      copyShareLink(s.id, e.hash, String(e.path || ''))
+// manifestEntry 把 manifest 的条目统一成 {path, hash}：新格式是 providers[]，
+// 老格式直接给 hash（panel 侧两种都要认，链接可能是老节点生成的）。
+function manifestEntry(e) {
+  var h = ''
+  if (e) h = e.hash || ((e.providers || [])[0] || {}).value || ''
+  return { path: (e && e.path) || '', hash: String(h || '') }
+}
+
+// renderLinkedColl 把链接带来的合集单独列在清单上方（条目可逐条保存/预览/再分享）。
+function renderLinkedColl(s, h) {
+  var box = $('linked')
+  var entries = linkedColl.entries || []
+  var title = linkedColl.name || (h.slice(0, 12) + '…')
+  var html = '<div class="hint">这条链接指向一个<b>合集</b>：' + esc(title) +
+    '（' + entries.length + ' 个条目）'
+  if (!linkedColl.fromList) {
+    html += ' —— 它不在对方的共享清单里，是凭 hash 取到的（unlisted 就是这个意思：不列出，但知道 hash 就能取）'
+  }
+  html += '</div>'
+  if (!entries.length) {
+    html += '<div class="empty">这个合集没有条目。</div>'
+  } else {
+    html += '<table><thead><tr><th>路径</th><th style="width:210px"></th></tr></thead><tbody>'
+    entries.forEach(function (e, i) {
+      html += '<tr><td>' + esc(e.path || e.hash) + '</td>' +
+        '<td class="num">' +
+        '<button class="small" data-lsave="' + i + '">保存</button> ' +
+        '<button class="small ghost" data-lpeek="' + i + '">预览</button> ' +
+        '<button class="small ghost" data-llink="' + i + '">链接</button>' +
+        '</td></tr>'
     })
-    $('btn-linked-copy').addEventListener('click', function () { copyShareLink(s.id, h, title) })
+    html += '</tbody></table>'
   }
+  html += '<div class="row">' +
+    '<button class="small ghost" id="btn-linked-copy">复制链接</button>' +
+    '</div>' +
+    '<div class="hint faint">面板只能逐条存到浏览器；要整包存进自己的节点，用管理台的「保存整个合集」（教程第五章）。</div>'
+  box.innerHTML = html
 
-  // nameForHash 在已拿到的清单里找 hash 对应的名字（只为显示，找不到不算错）。
-  function nameForHash(s, h) {
-    var snap = s && s.snapshot
-    if (!snap) return ''
-    var f = (snap.files || []).filter(function (x) { return x.hash === h })[0]
-    if (f) return String(f.path || f.name || '')
-    var cs = snap.collections || []
-    for (var i = 0; i < cs.length; i++) {
-      var e = (cs[i].entries || []).filter(function (x) { return x.hash === h })[0]
-      if (e) return String(e.path || '')
-    }
-    return ''
+  var at = function (i) { return (linkedColl.entries || [])[i] }
+  var bindL = function (attr, fn) {
+    Array.prototype.forEach.call(box.querySelectorAll('[' + attr + ']'), function (el) {
+      el.addEventListener('click', function () { fn(Number(el.getAttribute(attr))) })
+    })
   }
+  bindL('data-lsave', function (i) { download(s, at(i)) })
+  bindL('data-lpeek', function (i) { preview(s, at(i)) })
+  bindL('data-llink', function (i) {
+    var e = at(i)
+    copyShareLink(s.id, e.hash, String(e.path || ''))
+  })
+  $('btn-linked-copy').addEventListener('click', function () { copyShareLink(s.id, h, title) })
+}
 
-  // ── 动作 ──────────────────────────────────────────────────────────────
-  function select(id) {
-    current = id
-    renderNodes()
-    updateShares()
+// nameForHash 在已拿到的清单里找 hash 对应的名字（只为显示，找不到不算错）。
+function nameForHash(s, h) {
+  var snap = s && s.snapshot
+  if (!snap) return ''
+  var f = (snap.files || []).filter(function (x) { return x.hash === h })[0]
+  if (f) return String(f.path || f.name || '')
+  var cs = snap.collections || []
+  for (var i = 0; i < cs.length; i++) {
+    var e = (cs[i].entries || []).filter(function (x) { return x.hash === h })[0]
+    if (e) return String(e.path || '')
   }
-
+  return ''
+}
 
 
   function peerOptions(sig, token) {
