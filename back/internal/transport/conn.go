@@ -39,6 +39,7 @@ import (
 	"encoding/json"
 	"strings"
 	"fmt"
+	"math"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -445,7 +446,14 @@ func parseBinaryHeader32(raw []byte) (reqID string, offset int64, payload []byte
 	}
 	idBytes := bytes.TrimRight(raw[4:20], "\x00")
 	reqID = string(idBytes)
-	offset = int64(binary.BigEndian.Uint64(raw[20:28]))
+	// #nosec G115 -- 帧头的 offset 来自对端，先按 uint64 读出并做 MaxInt64 界内校验：
+	// 越界的偏移量无法作为文件偏移使用（当前 conn.go:641 调用点也只消费 reqID/payload，
+	// offset 未参与寻址），直接拒绝该帧而不是让 int64 转换发生回绕。
+	rawOffset := binary.BigEndian.Uint64(raw[20:28])
+	if rawOffset > uint64(math.MaxInt64) {
+		return "", 0, raw, false
+	}
+	offset = int64(rawOffset)
 	return reqID, offset, raw[32:], reqID != ""
 }
 
