@@ -274,7 +274,13 @@ func (s *PeerJSService) isUntrustedRemoteWhenAuthConfigured(c Session) bool {
 	if s.cfg == nil {
 		return false
 	}
-	if s.cfg.AdminToken == "" && s.cfg.AuthServerURL == "" && s.cfg.PeerPSK == "" {
+	// AuthServerURL does not exist on Config in any version of this repo; the
+	// repo's "remote auth configured" concept is RegistrationServer
+	// (config.go:49, also what security_status.go consults to decide auth
+	// mode). Align with it so a registration-enabled node also gates untrusted
+	// remotes on the create verb; the gate is AdminToken ∥ RegistrationServer
+	// ∥ PeerPSK. (Issue #395 / v1.0-rc snapshot compile fix.)
+	if s.cfg.AdminToken == "" && s.cfg.RegistrationServer == "" && s.cfg.PeerPSK == "" {
 		return false
 	}
 	s.pendingMu.Lock()
