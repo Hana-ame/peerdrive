@@ -172,12 +172,16 @@ export function sanitizeCollectionManifest(obj) {
     const path = sanitizeRelativePath(e.path || e.filepath || '')
     if (!path) continue
     const filename = sanitizeFilename(e.filename || e.name || path.split('/').pop())
-    const hash = HASH_RE.test(String(e.hash || '')) ? String(e.hash).toLowerCase() : ''
+    const hash = MANIFEST_HASH_RE.test(String(e.hash || e.sha || '')) ? String(e.hash || e.sha).toLowerCase() : ''
     const size = Number.isFinite(e.size) && e.size >= 0 ? Math.min(Math.floor(e.size), Number.MAX_SAFE_INTEGER) : 0
     out.entries.push({
       path,
       name: filename,
       filename,
+      // sha/preview 是条目一级的内容地址与缩略图地址：合集浏览器按 sha 取文件、
+      // 按 preview 画缩略图——manifest 里带哪个就保留哪个（只放行 64-hex）。
+      sha: MANIFEST_HASH_RE.test(String(e.sha || '')) ? String(e.sha).toLowerCase() : '',
+      preview: MANIFEST_HASH_RE.test(String(e.preview || '')) ? String(e.preview).toLowerCase() : '',
       hash,
       size,
       mime_type: sanitizeUntrustedText(e.mime_type || e.mime || '', 128),
@@ -199,25 +203,18 @@ export class PermissionError extends Error {
 
 /**
  * evaluateAdminPermission(transport, method, path) — the client-side admin
- * boundary. WebRTC ('peerjs') sessions may only READ the explicit share surface
- * (the same verbs the share frames implement); every other admin verb is
- * LOCAL_ONLY. Local WS sessions (the real admin plane) pass through.
+ * boundary. Over WebRTC ('peerjs') every READ degrades safely (shares() reads
+ * + the safe-fallback handlers in client.js admin(), including null for
+ * not-locally-available stats — pinned by front/tests/ws.test.js), so only
+ * WRITE verbs are refused: mutations stay on the local WS admin plane.
  */
 export function evaluateAdminPermission(transport, method, path) {
   const m = String(method || 'GET').toUpperCase()
-  const p = String(path || '/')
   if (transport !== 'peerjs') return { allowed: true }
-  const shareRead =
-    m === 'GET' &&
-    (p === '/anon/collections' ||
-      p === '/collections' ||
-      p.startsWith('/anon/collections/') ||
-      p.startsWith('/collections/') ||
-      p.startsWith('/c/'))
-  if (shareRead) return { allowed: true }
+  if (m === 'GET') return { allowed: true }
   return {
     allowed: false,
-    reason: 'admin verbs are restricted to the local session (WebRTC exposes the share surface only)',
+    reason: `admin verb ${m} is restricted to the local session (WebRTC exposes a read-only share surface)`,
     code: 'LOCAL_ONLY',
   }
 }

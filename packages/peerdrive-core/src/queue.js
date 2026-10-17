@@ -210,20 +210,29 @@ export class AsyncQueueLane {
       this.active += 1
       item.started = true
       if (item.signal) item.signal.removeEventListener('abort', item.onAbort)
-      Promise.resolve()
-        .then(() => item.fn())
-        .then(
-          (v) => {
-            item.resolve(v)
-          },
-          (e) => {
-            item.reject(e)
-          }
-        )
-        .finally(() => {
-          this.active -= 1
-          this._tick()
-        })
+      // 槽位空闲时**同步**启动 fn：client.js 的 upload 走
+      // uploadSerialLane.enqueue(() => sendOne())，测试在 upload() 返回后立即读
+      // sock.sent[0]——若 fn 被压进微任务，第一帧还没发出去（ws.test.js 上传用例
+      // 的同步断言正是靠这个时序）。异常与结果仍异步 settle。
+      let settled = false
+      const settle = (fn) => {
+        if (settled) return
+        settled = true
+        this.active -= 1
+        this._tick()
+        fn()
+      }
+      let r
+      try {
+        r = item.fn()
+      } catch (e) {
+        settle(() => item.reject(e))
+        continue
+      }
+      Promise.resolve(r).then(
+        (v) => settle(() => item.resolve(v)),
+        (e) => settle(() => item.reject(e))
+      )
     }
   }
 }
