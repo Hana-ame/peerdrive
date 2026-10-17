@@ -444,9 +444,10 @@ describe('ws.js dual-channel mutex with PeerJS (Issue #335)', () => {
     const cols = await ws.admin('GET', '/anon/collections')
     expect(cols).toEqual([{ name: 'col-1', hash: 'hash1', files: [] }])
 
-    // /files maps to client.shares() files
+    // /files maps to client.shares() files（snapshot 的 sanitizePeerFiles 会补
+// filename/path 两个清洗字段，钉实际形状）
     const files = await ws.admin('GET', '/files')
-    expect(files).toEqual([{ name: 'file-1.txt', hash: 'hash1', size: 100 }])
+    expect(files).toEqual([{ name: 'file-1.txt', filename: 'file-1.txt', path: '', hash: 'hash1', size: 100 }])
 
     // other admin calls return safe fallback
     const stat = await ws.admin('GET', '/system/stats')
