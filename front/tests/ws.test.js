@@ -342,6 +342,13 @@ describe('downloadToFile error handling', () => {
     const orig = window.showSaveFilePicker
     delete window.showSaveFilePicker
 
+    // 发现背景（#410 补回不变量 #2 的 /f/ /c/ 自包含 URL）：downloadToFile 在 WS 失败后
+    // 自动走规范 HTTP /f/:sha256 兜底（httpDownload，恢复自切除前实现）。测试环境没有
+    // 真实服务器，stub fetch 返回 404 让兜底确定性失败，并断言兜底确实被触发、URL 是
+    // 规范 /f/ 形态（与 peerdrive-core url.js 契约一致）。
+    const origFetch = global.fetch
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 })
+
     // downloadToFile will try showSaveFilePicker (not available),
     // falling back to download(hash) -> send req frame -> wait for response
     // We simulate the server returning an err frame to make download reject quickly
@@ -353,10 +360,15 @@ describe('downloadToFile error handling', () => {
     // Send err frame to make download reject quickly
     feedText(sock, { type: 'err', msg: 'not found', reqId: req.reqId })
 
-    await expect(promise).rejects.toThrow('not found')
+    // WS err frame rejects download() → downloadToFile catches and falls back to
+    // httpDownload → stubbed /f/ endpoint returns 404 → the HTTP error surfaces
+    await expect(promise).rejects.toThrow(/HTTP 404/)
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(String(global.fetch.mock.calls[0][0])).toContain('/f/testhash')
 
     // Cleanup
     window.showSaveFilePicker = orig
+    global.fetch = origFetch
     ws.__test._reset()
   })
 })
