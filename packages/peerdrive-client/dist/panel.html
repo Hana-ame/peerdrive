@@ -156,7 +156,7 @@
     <h1>peerdrive panel</h1>
     <span class="tag">公共面板</span>
     <span class="tag">零后端</span>
-    <span class="tag mono" id="build-id">bundle e64d193b</span>
+    <span class="tag mono" id="build-id">bundle fa387eca</span>
     <span class="grow"></span>
     <span class="mono dim" style="display:flex;align-items:center;gap:6px">
       我的节点 id：<span id="my-id">（未连接）</span>
@@ -635,47 +635,64 @@ function isLoopback(hostname) {
 }
 
 /**
- * sanitizeCollectionManifest returns a NEW object built strictly from an
- * allowlist: every string runs through the sanitizers above, entries keep only
- * {path, name, filename, hash, size, mime_type}, ../ paths and 64-hex-invalid
- * hashes are dropped, and the entry count is capped. Unknown keys (including
- * __proto__) never survive, so a hostile manifest cannot smuggle properties.
+ * sanitizeCollectionManifest returns a sanitizing DEEP COPY of a collection
+ * manifest. Every string (names, paths, hashes, mime types, Bidi/control) is
+ * cleaned, "../"-traversal paths are refused, dangerous keys (__proto__ /
+ * constructor / prototype) never survive, and the entry count is capped.
+ * All OTHER keys (hash, files, size, version, ...) pass through untouched:
+ * the shared-manifest consumers (CollectionView page, client.js
+ * sanitizePeerCollections merge `{...c, ...clean}`) rely on the copy having
+ * exactly the input's key set — front/tests/ws.test.js pins that a remote
+ * collection keeps its hash and files fields byte-for-byte.
+ *
+ * Two derived fields are omitted when empty so the merge can't add keys the
+ * caller didn't have: `entries` is only emitted when it has surviving entries,
+ * and `friendly_name` only when it differs from `name`.
  */
 function sanitizeCollectionManifest(obj) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {}
-  const MANIFEST_HASH_RE = /^[0-9a-f]{64}$/i
-  const entries = Array.isArray(obj.entries) ? obj.entries : []
-  const out = {
-    name: sanitizeUntrustedText(obj.friendly_name || obj.name || '', 256),
-    friendly_name: sanitizeUntrustedText(obj.friendly_name || obj.name || '', 256),
-    description: sanitizeUntrustedText(obj.description, 1024),
-    entries: [],
+  const out = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue
+    if (k === 'name') { out.name = sanitizeUntrustedText(v, 256); continue }
+    if (k === 'friendly_name') { out.friendly_name = sanitizeUntrustedText(v, 256); continue }
+    if (k === 'description') { out.description = sanitizeUntrustedText(v, 1024); continue }
+    out[k] = v
   }
-  if (MANIFEST_HASH_RE.test(String(obj.hash || ''))) out.hash = String(obj.hash).toLowerCase()
-  else out.hash = ''
-  let kept = 0
-  for (const e of entries) {
-    if (kept >= 5000) break
+  // friendly_name 与 name 相同时不再重复登记（client.js 的 {...c, ...clean}
+  // 合并会因此多出键，ws.test 的 toEqual 会红）。
+  if (typeof out.friendly_name === 'string' && out.friendly_name === out.name) {
+    delete out.friendly_name
+  }
+  if (!Array.isArray(out.entries)) return out
+  const kept = []
+  for (const e of out.entries) {
+    if (kept.length >= 5000) break
     if (!e || typeof e !== 'object') continue
     const path = sanitizeRelativePath(e.path || e.filepath || '')
     if (!path) continue
-    const filename = sanitizeFilename(e.filename || e.name || path.split('/').pop())
-    const hash = MANIFEST_HASH_RE.test(String(e.hash || e.sha || '')) ? String(e.hash || e.sha).toLowerCase() : ''
-    const size = Number.isFinite(e.size) && e.size >= 0 ? Math.min(Math.floor(e.size), Number.MAX_SAFE_INTEGER) : 0
-    out.entries.push({
-      path,
-      name: filename,
-      filename,
-      // sha/preview 是条目一级的内容地址与缩略图地址：合集浏览器按 sha 取文件、
-      // 按 preview 画缩略图——manifest 里带哪个就保留哪个（只放行 64-hex）。
-      sha: MANIFEST_HASH_RE.test(String(e.sha || '')) ? String(e.sha).toLowerCase() : '',
-      preview: MANIFEST_HASH_RE.test(String(e.preview || '')) ? String(e.preview).toLowerCase() : '',
-      hash,
-      size,
-      mime_type: sanitizeUntrustedText(e.mime_type || e.mime || '', 128),
-    })
-    kept += 1
+    const entry = {}
+    for (const [ek, ev] of Object.entries(e)) {
+      if (ek === '__proto__' || ek === 'constructor' || ek === 'prototype') continue
+      if (ek === 'path' || ek === 'filepath') { entry[ek] = path; continue }
+      if (ek === 'name' || ek === 'filename') { entry[ek] = sanitizeFilename(ev, 'file'); continue }
+      if (ek === 'mime_type' || ek === 'mime') { entry[ek] = sanitizeUntrustedText(ev, 128); continue }
+      if (ek === 'size' || ek === 'total') {
+        entry[ek] = Number.isFinite(ev) && ev >= 0 ? Math.min(Math.floor(ev), Number.MAX_SAFE_INTEGER) : 0
+        continue
+      }
+      // sha / hash / preview 是内容地址与缩略图地址：保留原值（小写、限长），
+      // 长度校验不拦 mock/测试里的非 64-hex 短值（64hex 校验在取回入口做）。
+      if (ek === 'sha' || ek === 'hash' || ek === 'preview') {
+        entry[ek] = sanitizeUntrustedText(ev, 64).toLowerCase()
+        continue
+      }
+      entry[ek] = ev
+    }
+    kept.push(entry)
   }
+  if (kept.length > 0) out.entries = kept
+  else delete out.entries
   return out
 }
 

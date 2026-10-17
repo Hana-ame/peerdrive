@@ -469,17 +469,19 @@ describe('ws.js dual-channel mutex with PeerJS (Issue #335)', () => {
 
     // download
     const data = await ws.download('hash99')
-    expect(streamMock).toHaveBeenCalledWith('hash99', { offset: 0, size: -1 })
+    // snapshot 的 client.js 在 stream 选项里带上了 signal/onProgress（进度中枢接线），
+    // 旧断言是精确对象——用 objectContaining 只钉 offset/size 这两个协议字段
+    expect(streamMock).toHaveBeenCalledWith('hash99', expect.objectContaining({ offset: 0, size: -1 }))
     expect(Array.from(data)).toEqual([1, 2, 3])
 
     // stat
     const meta = await ws.stat('hash99')
     expect(meta).toEqual({ total: 1234 })
 
-    // downloadToFile
+    // downloadToFile（snapshot 的 client.js 第 3 参带 onProgress，同样只钉前两个）
     const saved = await ws.downloadToFile('hash99', 'out.bin')
     expect(saved).toBe(true)
-    expect(saveAsMock).toHaveBeenCalledWith('hash99', 'out.bin')
+    expect(saveAsMock).toHaveBeenCalledWith('hash99', 'out.bin', expect.anything())
   })
 
   it('clearing node session restores Mode A (local WS capability)', async () => {
