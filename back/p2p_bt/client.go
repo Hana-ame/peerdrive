@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -418,3 +419,432 @@ func (c *BTClient) finalizeDownload(ds *downloadState) {
 		ds.infoHashHex, ds.name, len(completedFiles))
 }
 
+// ---- Progress queries ----
+
+func (c *BTClient) GetDownload(infohash string) *DownloadStatus {
+	c.mu.RLock()
+	ds, ok := c.downloads[infohash]
+	c.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	// Hold the read lock while building status to prevent data races
+	// with PauseDownload/ResumeDownload which write ds.status without
+	// holding the write lock.
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.buildStatus(ds)
+}
+
+func (c *BTClient) ListDownloads() []DownloadStatus {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	result := make([]DownloadStatus, 0, len(c.downloads))
+	for _, ds := range c.downloads {
+		result = append(result, *c.buildStatus(ds))
+	}
+	return result
+}
+
+func (c *BTClient) buildStatus(ds *downloadState) *DownloadStatus {
+	t := ds.t
+	stats := t.Stats()
+
+	totalSize := t.Length()
+	piecesTotal := 0
+	if info := t.Info(); info != nil {
+		piecesTotal = info.NumPieces()
+	}
+
+	errStr := ""
+	if ds.err != nil {
+		errStr = ds.err.Error()
+	}
+
+	return &DownloadStatus{
+		InfoHash:    ds.infoHashHex,
+		Name:        ds.name,
+		TotalSize:   totalSize,
+		Downloaded:  t.BytesCompleted(),
+		PiecesTotal: piecesTotal,
+		PiecesDone:  stats.PiecesComplete,
+		Peers:       stats.TotalPeers,
+		Speed:       0,
+		Status:      ds.status,
+		Error:       errStr,
+		Seeding:     ds.seeding,
+	}
+}
+
+// ---- Pause/Resume ----
+
+func (c *BTClient) PauseDownload(infohash string) error {
+	c.mu.Lock()
+	ds, ok := c.downloads[infohash]
+	if !ok {
+		c.mu.Unlock()
+		return fmt.Errorf("download %s not found", infohash)
+	}
+
+	if ds.status != "downloading" {
+		c.mu.Unlock()
+		return fmt.Errorf("download %s is not in progress (status=%s)", infohash, ds.status)
+	}
+
+	ds.t.DisallowDataDownload()
+	ds.status = "paused"
+	c.mu.Unlock()
+	LogInfo("bt-client: paused download %s (%s)", infohash, ds.name)
+	return nil
+}
+
+func (c *BTClient) ResumeDownload(infohash string) error {
+	c.mu.Lock()
+	ds, ok := c.downloads[infohash]
+	if !ok {
+		c.mu.Unlock()
+		return fmt.Errorf("download %s not found", infohash)
+	}
+
+	if ds.status != "paused" {
+		c.mu.Unlock()
+		return fmt.Errorf("download %s is not paused (status=%s)", infohash, ds.status)
+	}
+
+	ds.t.AllowDataDownload()
+	ds.status = "downloading"
+	c.mu.Unlock()
+	LogInfo("bt-client: resumed download %s (%s)", infohash, ds.name)
+	return nil
+}
+
+// ---- Removal ----
+
+func (c *BTClient) RemoveDownload(infohash string) error {
+	c.mu.Lock()
+	ds, ok := c.downloads[infohash]
+	if !ok {
+		c.mu.Unlock()
+		return fmt.Errorf("download %s not found", infohash)
+	}
+	delete(c.downloads, infohash)
+	delete(c.torrentData, infohash)
+	delete(c.autoSeed, infohash)
+	c.mu.Unlock()
+
+	ds.t.Drop()
+
+	// Remove the data directory
+	dataDir := filepath.Join(c.dataDir, ds.name)
+	if dataDir != "" && dataDir != c.dataDir {
+		if err := os.RemoveAll(dataDir); err != nil {
+			LogWarn("bt-client: remove data dir %s: %v", dataDir, err)
+		}
+	}
+
+	LogInfo("bt-client: removed download %s (%s)", infohash, ds.name)
+	return nil
+}
+
+// ---- Torrent data and Magnet ----
+
+// GetTorrentBytes returns the raw .torrent file bytes. For downloads added from a magnet link, exports from the library if metadata is available.
+func (c *BTClient) GetTorrentBytes(infohash string) ([]byte, error) {
+	c.mu.RLock()
+	data, ok := c.torrentData[infohash]
+	c.mu.RUnlock()
+	if ok {
+		return data, nil
+	}
+
+	c.mu.RLock()
+	ds, dsOk := c.downloads[infohash]
+	c.mu.RUnlock()
+	if !dsOk {
+		return nil, fmt.Errorf("download not found: %s", infohash)
+	}
+
+	mi := ds.t.Metainfo()
+	if len(mi.InfoBytes) == 0 {
+		return nil, fmt.Errorf("metadata not yet available for %s", infohash)
+	}
+	var buf bytes.Buffer
+	if err := mi.Write(&buf); err != nil {
+		return nil, fmt.Errorf("failed to encode torrent: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// GetMagnetURI generates a magnet link URI for the specified download.
+func (c *BTClient) GetMagnetURI(infohash string) string {
+	c.mu.RLock()
+	ds, ok := c.downloads[infohash]
+	c.mu.RUnlock()
+	if !ok {
+		return ""
+	}
+
+	uri := fmt.Sprintf("magnet:?xt=urn:btih:%s", ds.infoHashHex)
+	if ds.name != "" && ds.name != ds.infoHashHex {
+		uri += "&dn=" + ds.name
+	}
+	mi := ds.t.Metainfo()
+	if len(mi.InfoBytes) > 0 {
+		for _, tier := range mi.UpvertedAnnounceList() {
+			for _, tr := range tier {
+				uri += "&tr=" + tr
+			}
+		}
+	}
+	return uri
+}
+
+// SetAutoSeed marks the specified infohash to auto-start seeding after download completion.
+func (c *BTClient) SetAutoSeed(infohash string) {
+	c.mu.Lock()
+	c.autoSeed[infohash] = true
+	c.mu.Unlock()
+}
+
+// HasTorrentBytes checks whether torrent bytes are stored for the specified infohash.
+func (c *BTClient) HasTorrentBytes(infohash string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	_, ok := c.torrentData[infohash]
+	return ok
+}
+
+// ---- Seeding ----
+
+func (c *BTClient) StartSeed(infohash string) error {
+	c.mu.Lock()
+	ds, ok := c.downloads[infohash]
+	if !ok {
+		c.mu.Unlock()
+		return fmt.Errorf("download %s not found", infohash)
+	}
+
+	if ds.status != "completed" {
+		c.mu.Unlock()
+		return fmt.Errorf("download %s has status %q, need 'completed' to seed", infohash, ds.status)
+	}
+	if ds.seeding {
+		c.mu.Unlock()
+		return fmt.Errorf("already seeding %s", infohash)
+	}
+
+	ds.t.AllowDataUpload()
+	ds.seeding = true
+	c.mu.Unlock()
+
+	LogInfo("bt-client: started seeding %s (%s)", infohash, ds.name)
+	return nil
+}
+
+func (c *BTClient) StopSeed(infohash string) error {
+	c.mu.Lock()
+	ds, ok := c.downloads[infohash]
+	if !ok {
+		c.mu.Unlock()
+		return fmt.Errorf("download %s not found", infohash)
+	}
+
+	if !ds.seeding {
+		c.mu.Unlock()
+		return fmt.Errorf("not currently seeding %s", infohash)
+	}
+
+	ds.t.DisallowDataUpload()
+	ds.seeding = false
+	c.mu.Unlock()
+
+	LogInfo("bt-client: stopped seeding %s", infohash)
+	return nil
+}
+
+func (c *BTClient) IsSeeding(infohash string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	ds, ok := c.downloads[infohash]
+	return ok && ds.seeding
+}
+
+func (c *BTClient) ListSeeders() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	keys := make([]string, 0)
+	for k, ds := range c.downloads {
+		if ds.seeding {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+// ---- Peer manual management ----
+
+func (c *BTClient) AddPeer(infohash, addr string) {
+	c.mu.Lock()
+	c.customPeers[infohash] = append(c.customPeers[infohash], addr)
+	c.mu.Unlock()
+
+	LogInfo("bt-client: AddPeer infohash=%s addr=%s", infohash, addr)
+}
+
+func (c *BTClient) GetCustomPeers(infohash string) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	peers := c.customPeers[infohash]
+	result := make([]string, len(peers))
+	copy(result, peers)
+	return result
+}
+
+// ---- Global statistics ----
+
+func (c *BTClient) GetGlobalStats() *GlobalStats {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	stats := &GlobalStats{}
+	if globalDHT != nil {
+		stats.DHTNodes = globalDHT.NumNodes()
+	}
+
+	for _, ds := range c.downloads {
+		switch ds.status {
+		case "downloading":
+			stats.ActiveTorrents++
+		case "paused":
+			stats.PausedTorrents++
+		case "completed":
+			stats.Completed++
+		case "error":
+			stats.Errors++
+		default:
+			stats.ActiveTorrents++
+		}
+		stats.TotalDown += ds.t.BytesCompleted()
+	}
+
+	return stats
+}
+
+// ---- Lifecycle ----
+
+func (c *BTClient) Close() {
+	LogInfo("bt-client: closing")
+	c.cl.Close()
+}
+
+// ---- File access ----
+
+func (c *BTClient) ListDownloadFiles(infohash string) ([]CompletedFile, bool) {
+	c.mu.RLock()
+	ds, ok := c.downloads[infohash]
+	c.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	return ds.files, ds.status == "completed"
+}
+
+func (c *BTClient) ReadFileReader(filePath string) (io.ReadCloser, error) {
+	return os.Open(filePath)
+}
+
+func (c *BTClient) GetDownloadDir() string {
+	return c.dataDir
+}
+
+// ---- Helper functions ----
+
+// torrentMetaFromLibrary extracts TorrentMeta from library types (used for HTTP API responses).
+func torrentMetaFromLibrary(mi *metainfo.MetaInfo, t *torrent.Torrent) *TorrentMeta {
+	info := t.Info()
+	if info == nil {
+		meta := &TorrentMeta{
+			InfoHashHex: mi.HashInfoBytes().HexString(),
+		}
+		// Try to parse Info to get the name
+		if parsed, err := mi.UnmarshalInfo(); err == nil {
+			meta.Name = parsed.BestName()
+		}
+		return meta
+	}
+
+	meta := &TorrentMeta{
+		Name:        info.Name,
+		PieceLength: info.PieceLength,
+		TotalSize:   info.TotalLength(),
+		InfoHashHex: mi.HashInfoBytes().HexString(),
+		InfoHash:    mi.HashInfoBytes().Bytes(),
+	}
+
+	if len(info.Files) == 0 {
+		meta.IsSingleFile = true
+		meta.Files = []TorrentFile{{Path: info.Name, Size: info.Length}}
+	} else {
+		for _, f := range info.Files {
+			path := strings.Join(f.Path, "/")
+			meta.Files = append(meta.Files, TorrentFile{Path: path, Size: f.Length})
+		}
+	}
+
+	// Extract Announce URLs
+	for _, tier := range mi.UpvertedAnnounceList() {
+		meta.AnnounceList = append(meta.AnnounceList, tier...)
+	}
+
+	// Extract piece hashes (one SHA1 per 20 bytes)
+	numPieces := len(info.Pieces) / 20
+	meta.Pieces = make([][]byte, numPieces)
+	meta.PiecesHex = make([]string, numPieces)
+	for i := 0; i < numPieces; i++ {
+		hash := info.Pieces[i*20 : i*20+20]
+		meta.Pieces[i] = hash
+		meta.PiecesHex[i] = hex.EncodeToString(hash)
+	}
+
+	return meta
+}
+
+// metaFromTorrent extracts TorrentMeta from a completed Torrent object.
+func metaFromTorrent(t *torrent.Torrent) *TorrentMeta {
+	info := t.Info()
+	if info == nil {
+		return nil
+	}
+
+	meta := &TorrentMeta{
+		Name:        info.Name,
+		PieceLength: info.PieceLength,
+		TotalSize:   info.TotalLength(),
+		InfoHashHex: t.InfoHash().HexString(),
+		InfoHash:    t.InfoHash().Bytes(),
+	}
+
+	if len(info.Files) == 0 {
+		meta.IsSingleFile = true
+		meta.Files = []TorrentFile{{Path: info.Name, Size: info.Length}}
+	} else {
+		for _, f := range info.Files {
+			path := strings.Join(f.Path, "/")
+			meta.Files = append(meta.Files, TorrentFile{Path: path, Size: f.Length})
+		}
+	}
+
+	numPieces := len(info.Pieces) / 20
+	meta.Pieces = make([][]byte, numPieces)
+	meta.PiecesHex = make([]string, numPieces)
+	for i := 0; i < numPieces; i++ {
+		hash := info.Pieces[i*20 : i*20+20]
+		meta.Pieces[i] = hash
+		meta.PiecesHex[i] = hex.EncodeToString(hash)
+	}
+
+	return meta
+}
