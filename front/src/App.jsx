@@ -1,4 +1,4 @@
-// App.jsx — Reset UI/UX App Shell with Canonical Collection URL routing (#/c/:hash),
+// App.jsx — Reset UI/UX App Shell with Direct Canonical URL routing (#/f/:sha256 & #/c/:hash),
 // Quick Address/Hash Jump Bar, and Mobile-First Responsive Shell.
 import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { HashRouter, Routes, Route, Link, useNavigate } from 'react-router-dom';
@@ -19,6 +19,7 @@ const Collections = lazy(() => import('./features/collection/pages/Collections')
 const CollectionView = lazy(() => import('./features/collection/pages/CollectionView'));
 const Settings = lazy(() => import('./features/settings/pages/Settings'));
 const Transfers = lazy(() => import('./features/transfers/pages/Transfers'));
+const DirectFileView = lazy(() => import('./features/direct/pages/DirectFileView'));
 const BT = lazy(() => import('./features/bt/pages/BT'));
 const IPFS = lazy(() => import('./features/ipfs/pages/IPFS'));
 const NodeControl = lazy(() => import('./features/node/pages/NodeControl'));
@@ -227,6 +228,9 @@ export default function App() {
                     <Route path="/node" element={<NodeControl />} />
                     <Route path="/drive" element={<Drive />} />
                     <Route path="/drive/:hash" element={<Drive />} />
+                    {/* Canonical self-contained SHA256 file URL (invariant #2) */}
+                    <Route path="/f/:sha256" element={<DirectFileView />} />
+                    <Route path="/files/:sha256" element={<DirectFileView />} />
                     {/* Canonical self-contained Collection URL */}
                     <Route path="/c/:hash" element={<CollectionView />} />
                     <Route path="/collections" element={<Collections />} />

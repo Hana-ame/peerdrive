@@ -241,6 +241,17 @@ func (rt *Router) Engine() *gin.Engine {
 	r.HEAD("/sha256sum/:sha256", controller.DownloadBySHA256Local)
 	r.GET("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
 	r.HEAD("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
+
+	// Canonical self-contained content-addressed URLs for SHA256 files and Collections
+	// (invariant #2, Issue #410 — restored after the 2026-10-17 excision d2d2830):
+	//   GET/HEAD /f/:sha256[/:filename] — direct file access by SHA256 (with Range, ETag, ?meta=1)
+	//   GET      /c/:hash[/*filepath]   — direct collection manifest or entry access by SHA256
+	r.GET("/f/:sha256", controller.DirectFileBySHA256)
+	r.HEAD("/f/:sha256", controller.DirectFileBySHA256)
+	r.GET("/f/:sha256/:filename", controller.DirectFileBySHA256)
+	r.HEAD("/f/:sha256/:filename", controller.DirectFileBySHA256)
+	r.GET("/c/:hash", controller.DirectCollectionByHash)
+	r.GET("/c/:hash/*filepath", controller.DirectCollectionByHash)
 	r.GET("/ipfs/:cid", controller.DownloadByCID)
 
 	// Universal multi-protocol download endpoints.

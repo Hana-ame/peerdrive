@@ -97,6 +97,18 @@ func DownloadBySHA256Local(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sha256 format"})
 		return
 	}
+	downloadLocalByHash(c, hash, "")
+}
+
+// downloadLocalByHash serves a locally stored file by its sha256 with
+// http.ServeContent (streaming + RFC 7233 Range / 206 / ETag / If-Range).
+//
+// urlFilename is the optional filename carried by a canonical /f/:sha256/<name>
+// URL; when non-empty it names the download (sanitized by setDownloadHeaders
+// like any hostile filename), otherwise the DB meta.Filename, otherwise the
+// hash itself. /sha256sum/:sha256 and /f/:sha256 both funnel through here so
+// the two direct-by-hash surfaces cannot drift.
+func downloadLocalByHash(c *gin.Context, hash, urlFilename string) {
 	meta, err := fileSvc.GetMeta(hash)
 	if err != nil || meta == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
@@ -140,9 +152,12 @@ func DownloadBySHA256Local(c *gin.Context) {
 		return
 	}
 
-	fn := hash
-	if meta.Filename != "" {
+	fn := urlFilename
+	if fn == "" {
 		fn = meta.Filename
+	}
+	if fn == "" {
+		fn = hash
 	}
 	setDownloadHeaders(c, fn, c.Query("inline") == "1")
 	if meta.Gziped {

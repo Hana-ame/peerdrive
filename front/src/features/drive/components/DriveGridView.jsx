@@ -11,6 +11,8 @@ export default function DriveGridView({
   setPreviewFile,
   onDownload,
   openCastModal,
+  onCopyDeepLink,
+  copiedHash,
   onShare,
   onDelete,
   onContextMenu,
@@ -108,6 +110,9 @@ export default function DriveGridView({
               </div>
               <div className="flex items-center gap-1">
                 <button onClick={() => openCastModal(f)} className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-brand-300" title="Cast to screen">Cast</button>
+                <button onClick={() => onCopyDeepLink(f)} className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300">
+                  {copiedHash === f.hash ? 'Copied' : 'Link'}
+                </button>
                 <button onClick={() => onShare(f)} className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300">Share</button>
                 <button onClick={() => onDelete(f)} className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-red-500/20 text-red-400">✕</button>
               </div>

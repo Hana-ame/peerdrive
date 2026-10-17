@@ -19,11 +19,10 @@
 
 ## 已知缺口（2026-10-17 主干合入时记录）
 
-- **不变量 #2 的后端半被临时切除**：`/f/:sha256` 与 `/c/:hash` 的 HTTP handler
-  （`DirectFileBySHA256` / `DirectCollectionByHash`）从未在 v1.0-rc 源快照中出现，
-  主干上对应路由已移除（记录见 `proj-peerdrive-v1.0rc-merge-20261017`）。前端 `#/f/` SPA 路由、
-  Drive「复制文件链接」与 `/f/` `/c/` HTTP 兜底一并移除；`#/c/` SPA 路由保留。
-  该特性后续按「Issue → feature 分支 → 实现 → 评审 → 合并」补回。
+- ~~**不变量 #2 的后端半被临时切除**~~ → **已补回（Issue #410，feature 分支 `feat/f-c-content-urls`）**：
+  `/f/:sha256` 与 `/c/:hash` 后端 handler（`DirectFileBySHA256` / `DirectCollectionByHash`）及 6 行路由、
+  前端 `#/f/` SPA 路由 / `DirectFileView`、Drive「复制文件链接」、`/f/` `/c/` HTTP 兜底
+  已按 `peerdrive-core/src/url.js` 契约恢复（URL 生成/解析 SSOT 自始未动）。
 - 公共面板（`packages/peerdrive-client/panel`）的传输浮层 `TransferDock` 组件同样未在快照中，
   主干上已从 App 壳移除（传输进度仍可在 Transfers 页查看）。
 
