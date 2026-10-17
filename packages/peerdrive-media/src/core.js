@@ -20,12 +20,25 @@
 // exposed): in IIFE, Peer destructured as undefined → "yt is not a constructor".
 // Three-way fallback: namespace named export (vite/ESM) → CJS default (Node) → default.default.
 let DefaultPeer = globalThis.Peer || null
-try {
-  const peerjsNS = await import('peerjs')
-  const peerjsPkg = peerjsNS.default || peerjsNS
-  DefaultPeer = peerjsNS.Peer || peerjsPkg.Peer || (peerjsPkg.default && peerjsPkg.default.Peer) || DefaultPeer
-} catch {
-  /* Fallback to globalThis.Peer in test/browser-global environments */
+// 为什么不用顶层 await：vite 的 IIFE 产物不支持顶层 await（构建直接失败）；而 Peer 的
+// 创建本来就设计成 open() 时才 lazy（见 core.test.mjs「Peer 实例是 open() 时 lazy 创建的」），
+// 所以这里改成惰性加载——open() 里 await peerjsReady() 再取 DefaultPeer。
+let peerjsPromise = null
+function peerjsReady() {
+  if (!peerjsPromise) {
+    peerjsPromise = (async () => {
+      try {
+        const peerjsNS = await import('peerjs')
+        const peerjsPkg = peerjsNS.default || peerjsNS
+        DefaultPeer = peerjsNS.Peer || peerjsPkg.Peer || (peerjsPkg.default && peerjsPkg.default.Peer) || globalThis.Peer || null
+      } catch {
+        /* Fallback to globalThis.Peer in test/browser-global environments */
+        DefaultPeer = globalThis.Peer || null
+      }
+      return DefaultPeer
+    })()
+  }
+  return peerjsPromise
 }
 import {
   makeUrlRequest, parseFrame, isBinaryFrame, toUint8Array, nextReqId,
@@ -238,10 +251,14 @@ class ConnectionSlot {
   }
 
   // open establishes the full link to Node-side peer (Peer signaling + control DataChannel).
-  open() {
+  async open() {
     const sig = this.signaling
     const dbg = typeof window !== 'undefined' && window.__PDM_DEBUG ? 3 : 0
-    const PeerCtor = globalThis.Peer || DefaultPeer
+    const PeerCtor = globalThis.Peer || (await peerjsReady())
+    if (!PeerCtor) {
+      this.failAll('peerjs 不可用：等 window.Peer 就绪，或确认 dynamic import 成功')
+      return
+    }
     const peer = new PeerCtor(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
       host: sig.host, port: sig.port, secure: sig.secure, key: sig.key, path: sig.path || '/',
       config: sig.config || { iceServers: [] },
