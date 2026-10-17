@@ -1,5 +1,5 @@
 // App.jsx — Reset UI/UX App Shell with Canonical Collection URL routing (#/c/:hash),
-// Quick Address/Hash Jump Bar, and Global Live Transfer Progress Dock (TransferDock).
+// Quick Address/Hash Jump Bar, and Mobile-First Responsive Shell.
 import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { HashRouter, Routes, Route, Link, useNavigate } from 'react-router-dom';
 import { registerSW } from './platform/shared/swBridge';
@@ -10,7 +10,6 @@ import { I18nProvider, useI18n } from './context/I18nContext';
 import LanguageSelector from './components/LanguageSelector';
 import ErrorBoundary from './components/ErrorBoundary';
 import { MobileNavDrawer, MobileBottomBar } from './components/MobileNav';
-import TransferDock from './components/TransferDock';
 import { AppProvider } from './context/AppContext';
 import { getNodeSession, onNodeSession } from './lib/nodeSession';
 
@@ -247,7 +246,6 @@ export default function App() {
               </ErrorBoundary>
             </div>
 
-            <TransferDock />
             <MobileBottomBar connected={isOpen} />
           </div>
         </AppProvider>
