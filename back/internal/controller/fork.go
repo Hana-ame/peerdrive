@@ -50,30 +50,16 @@ func ForkCollection(c *gin.Context) {
 		return
 	}
 
-	localID, err := collSvc.CreatePlain(req.Username, req.CollectionName)
-	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": sanitizeErr(err, "request failed")})
-		return
-	}
-
 	entries, err := collSvc.ListEntries(source.ID)
 	if err != nil {
 		writeInternalError(c, err)
 		return
 	}
-	for _, e := range entries {
-		providers := e.BuildProviders()
-		if len(providers) > 0 && e.ProvidersJSON != "" {
-			if err := collSvc.AddProviderEntry(localID, e.Path, providers); err != nil {
-				writeInternalError(c, err)
-				return
-			}
-		} else {
-			if err := collSvc.AddEntry(localID, e.Path, e.FileHash); err != nil {
-				writeInternalError(c, err)
-				return
-			}
-		}
+
+	localID, err := collSvc.ForkTx(req.Username, req.CollectionName, entries)
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": sanitizeErr(err, "request failed")})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{

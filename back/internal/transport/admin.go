@@ -53,6 +53,17 @@ import (
 // chunked fetch (frontend ws.js download path).
 const adminBinMax = 64 << 20
 
+// maxAdminUploadBytes returns the configured MaxUploadBytes (PEERDRIVE_MAX_UPLOAD_BYTES)
+// when positive, falling back to adminBinMax (64MB) when unconfigured.
+// Fixes FULLSTACK-AUDIT §2 item 9: previously WS binary uploads ignored PEERDRIVE_MAX_UPLOAD_BYTES
+// and hardcoded adminBinMax, causing inconsistent upload limits between HTTP and WS admin console.
+func (s *PeerJSService) maxAdminUploadBytes() int64 {
+	if s != nil && s.cfg != nil && s.cfg.MaxUploadBytes > 0 {
+		return s.cfg.MaxUploadBytes
+	}
+	return adminBinMax
+}
+
 // adminUploadTimeout upload collection timeout: if browser declares binary upload but
 // sends no data chunks, it would permanently occupy the slot (same as M6 fix for upload
 // verb). Timeout aborts and cleans up temp file.
@@ -208,7 +219,7 @@ func (s *PeerJSService) serveAdmin(c Session, st *connState, raw []byte) {
 	if ar.Binary {
 		// Allow size==0 (empty file upload), symmetric with fileIndex upload verb's
 		// empty file handling; only negative or over-limit is rejected.
-		if ar.Size < 0 || ar.Size > adminBinMax {
+		if ar.Size < 0 || ar.Size > s.maxAdminUploadBytes() {
 			c.SendJSON(dcResp{Type: "err", Msg: "invalid admin upload size", ReqID: ar.ReqID})
 			return
 		}

@@ -84,6 +84,7 @@ export async function createPeerMediaServer({
   allow = () => false,
   fetchImpl = globalThis.fetch,
   chunkSize = CHUNK_SIZE,
+  fetchTimeoutMs = 30000,
   onRequest,
 } = {}) {
   if (!peerId) throw new Error('peerdrive-media: peerId is required')
@@ -154,7 +155,14 @@ export async function createPeerMediaServer({
       if (!url || typeof url !== 'string') { sendErr('invalid url'); return }
       if (!allow(url)) { sendErr('url not allowed'); return }
 
-      const resp = await fetchImpl(url)
+      const ac = new AbortController()
+      const fetchTimer = fetchTimeoutMs > 0 ? setTimeout(() => ac.abort(new Error('upstream fetch timeout')), fetchTimeoutMs) : null
+      let resp
+      try {
+        resp = await fetchImpl(url, { signal: ac.signal })
+      } finally {
+        if (fetchTimer) clearTimeout(fetchTimer)
+      }
       if (!resp.ok) {
         sendErr(`upstream ${resp.status}`)
         return
@@ -168,12 +176,25 @@ export async function createPeerMediaServer({
         // Streaming read + chunking + backpressure: blocks sent directly (raw mode has no chunker fragmentation).
         // chunk is Uint8Array (Node fetch stream), wrtc send accepts ArrayBufferView.
         for await (const chunk of resp.body) {
+          if (conn.open === false) {
+            throw new Error('peer connection closed during stream')
+          }
           const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk)
           for (let off = 0; off < bytes.length; off += chunkSize) {
+            if (conn.open === false) {
+              throw new Error('peer connection closed during stream')
+            }
             const piece = bytes.subarray(off, off + chunkSize)
             conn.send(piece)
             sent += piece.length
             while (conn.dataChannel && conn.dataChannel.bufferedAmount > LOW_WATER) {
+              if (
+                conn.open === false ||
+                conn.dataChannel.readyState === 'closed' ||
+                conn.dataChannel.readyState === 'closing'
+              ) {
+                throw new Error('dataChannel closed while waiting on backpressure')
+              }
               await sleep(10) // backpressure: pause stream reading when peer is slow
             }
           }

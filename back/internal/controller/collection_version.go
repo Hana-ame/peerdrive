@@ -149,19 +149,14 @@ func RollbackCollection(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
 	}
-	if err := collSvc.RestoreVersion(vid, col.ID); err != nil {
-		writeInternalError(c, err)
-		return
-	}
-
-	// Regenerate CID while preserving multi-source Providers (URL / ECH / SHA256)
-	entries, err := collSvc.ListEntries(col.ID)
+	// Read target version entries first and generate snapshot before mutating DB in one transaction
+	verEntries, err := collSvc.VersionEntries(vid)
 	if err != nil {
 		writeInternalError(c, err)
 		return
 	}
-	anonEntries := make([]model.AnonCollectionEntry, 0, len(entries))
-	for _, e := range entries {
+	anonEntries := make([]model.AnonCollectionEntry, 0, len(verEntries))
+	for _, e := range verEntries {
 		anonEntries = append(anonEntries, model.AnonCollectionEntry{
 			Path:      e.Path,
 			Providers: e.BuildProviders(),
@@ -174,7 +169,7 @@ func RollbackCollection(c *gin.Context) {
 		writeInternalError(c, err)
 		return
 	}
-	if err := collSvc.UpdateCurrentHash(col.ID, hash); err != nil {
+	if err := collSvc.RestoreVersionWithHashTx(vid, col.ID, hash); err != nil {
 		writeInternalError(c, err)
 		return
 	}

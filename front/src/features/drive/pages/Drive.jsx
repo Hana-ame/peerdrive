@@ -1,5 +1,6 @@
-// Module ②: My Cloud Drive —— file management for this node (goes through WS admin frames to the backend)
-// List / upload / download / delete / generate share links / categorize / tag files.
+// Module ②: My Cloud Drive —— Top-level page orchestration (AGENTS.md §1 compliant).
+// File CRUD lives in hooks/useDriveFiles.js; remote casting in hooks/useDriveCast.js;
+// category/menu builders in utils/{categories,contextMenuItems}.js.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import * as ws from '../../../platform/transport-ws';
@@ -15,7 +16,9 @@ import DriveToolbar from '../components/DriveToolbar';
 import DriveCategoryBar from '../components/DriveCategoryBar';
 import ContextMenu from '../../../components/netdisk/ContextMenu';
 import { getFileIcon, getFileCategory } from '../utils/categories';
+import { buildDriveContextMenuItems } from '../utils/contextMenuItems';
 import { useDriveFiles } from '../hooks/useDriveFiles';
+import { useDriveCast } from '../hooks/useDriveCast';
 
 export default function Drive() {
   const { hash: deepHash } = useParams();
@@ -23,32 +26,20 @@ export default function Drive() {
   const fileRef = useRef(null);
   const [peerSession, setPeerSession] = useState(() => getNodeSession());
 
-  useEffect(() => {
-    return onNodeSession((s) => {
-      setPeerSession(s);
-    });
-  }, []);
+  useEffect(() => onNodeSession((s) => setPeerSession(s)), []);
 
-  // UI State: Search, Category, ViewMode, Tags, Sorting
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedTag, setSelectedTag] = useState('');
-  const [viewMode, setViewMode] = useState('list'); // list | grid
-  const [sortBy, setSortBy] = useState('time'); // 'time' | 'name' | 'size'
-  const [sortOrder, setSortOrder] = useState('desc'); // 'asc' | 'desc'
+  const [viewMode, setViewMode] = useState('list');
+  const [sortBy, setSortBy] = useState('time');
+  const [sortOrder, setSortOrder] = useState('desc');
 
-  // Modal / Interaction State
   const [editingTagFile, setEditingTagFile] = useState(null);
   const [tagInputText, setTagInputText] = useState('');
   const [previewFile, setPreviewFile] = useState(null);
-  const [castFile, setCastFile] = useState(null);
-  const [screens, setScreens] = useState([]);
-  const [targetScreenId, setTargetScreenId] = useState('');
-  const [targetChannel, setTargetChannel] = useState('default');
-  const [castStatus, setCastStatus] = useState('');
   const [contextMenu, setContextMenu] = useState(null);
 
-  // File loading, CRUD actions, and tag metadata hook (Issue #334)
   const {
     files,
     err,
@@ -70,39 +61,40 @@ export default function Drive() {
     saveFileTags,
   } = useDriveFiles({ peerSession, selectedCategory, fileRef });
 
+  const {
+    castFile,
+    setCastFile,
+    screens,
+    targetScreenId,
+    setTargetScreenId,
+    targetChannel,
+    setTargetChannel,
+    castStatus,
+    openCastModal,
+    handleCast,
+    handleCastControl,
+  } = useDriveCast({ peerSession, setBusy });
+
   const handleContextMenu = (e, file) => {
     e.preventDefault();
     e.stopPropagation();
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      file,
-    });
+    setContextMenu({ x: e.clientX, y: e.clientY, file });
   };
 
   const handleContainerContextMenu = (e) => {
     if (e.target.closest('[data-context-target]')) return;
     e.preventDefault();
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      file: null,
-    });
+    setContextMenu({ x: e.clientX, y: e.clientY, file: null });
   };
 
-  // Tag Editor
   const openTagEditor = (f) => {
     setEditingTagFile(f);
-    const existing = fileTags[f.hash] || [];
-    setTagInputText(existing.join(', '));
+    setTagInputText((fileTags[f.hash] || []).join(', '));
   };
 
   const saveTags = async () => {
     if (!editingTagFile) return;
-    const tags = tagInputText
-      .split(',')
-      .map(t => t.trim())
-      .filter(Boolean);
+    const tags = tagInputText.split(',').map((t) => t.trim()).filter(Boolean);
     try {
       await saveFileTags(editingTagFile.hash, tags);
       setEditingTagFile(null);
@@ -111,86 +103,12 @@ export default function Drive() {
     }
   };
 
-  // Remote Display Cast (Issue #243)
-  const openCastModal = async (f) => {
-    setCastFile(f);
-    setCastStatus('');
-    if (peerSession?.client || getNodeSession()?.client) {
-      setScreens([]);
-      return;
-    }
-    try {
-      const res = await ws.admin('GET', '/display/screens');
-      const list = Array.isArray(res) ? res : [];
-      setScreens(list);
-      if (list.length > 0) {
-        setTargetScreenId(list[0].id);
-        setTargetChannel(list[0].channel || 'default');
-      } else {
-        setTargetScreenId('');
-        setTargetChannel('default');
-      }
-    } catch {
-      setScreens([]);
-    }
-  };
-
-  const handleCast = async () => {
-    if (!castFile) return;
-    setBusy(true);
-    setCastStatus('Casting to screen...');
-    try {
-      const ext = (castFile.filename || '').split('.').pop().toLowerCase();
-      let mediaType = 'image';
-      if (['mp4', 'mkv', 'webm', 'mov', 'avi'].includes(ext)) mediaType = 'video';
-      else if (['mp3', 'wav', 'flac', 'ogg', 'aac'].includes(ext)) mediaType = 'audio';
-
-      await ws.admin('POST', '/display/cast', {
-        targetSessionId: targetScreenId,
-        channel: targetChannel,
-        mediaType,
-        hash: castFile.hash,
-        title: castFile.filename,
-        autoplay: true,
-      });
-      setCastStatus('Cast successful!');
-    } catch (ex) {
-      setCastStatus('Cast failed: ' + (ex?.message || String(ex)));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleCastControl = async (action) => {
-    try {
-      if (action === 'clear') {
-        await ws.admin('POST', '/display/clear', {
-          targetSessionId: targetScreenId,
-          channel: targetChannel,
-        });
-        setCastStatus('Screen cleared');
-      } else {
-        await ws.admin('POST', '/display/control', {
-          targetSessionId: targetScreenId,
-          channel: targetChannel,
-          controlAction: action,
-        });
-        setCastStatus(`Control ${action} sent`);
-      }
-    } catch (ex) {
-      setCastStatus('Control failed: ' + (ex?.message || String(ex)));
-    }
-  };
-
-  // Distinct tags and counts (prefers global aggregate counts)
   const allTagsWithCounts = useMemo(() => {
-    if (globalTagCounts && globalTagCounts.length > 0) {
-      return globalTagCounts;
-    }
+    if (globalTagCounts && globalTagCounts.length > 0) return globalTagCounts;
     const map = {};
-    Object.values(fileTags).forEach(tagList => {
+    Object.values(fileTags).forEach((tagList) => {
       if (Array.isArray(tagList)) {
-        tagList.forEach(t => {
+        tagList.forEach((t) => {
           if (t) map[t] = (map[t] || 0) + 1;
         });
       }
@@ -198,45 +116,48 @@ export default function Drive() {
     return Object.entries(map).map(([tag, count]) => ({ tag, count }));
   }, [globalTagCounts, fileTags]);
 
-  // Filtering & sorting files
   const filteredFiles = useMemo(() => {
     if (!files) return [];
-    const list = files.filter(f => {
-      const matchQuery = !searchQuery.trim() ||
-        f.filename.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (f.hash && f.hash.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        ((fileTags[f.hash] || []).some(t => t.toLowerCase().includes(searchQuery.toLowerCase())));
-
-      let matchCategory = true;
-      if (selectedCategory !== 'all') {
-        matchCategory = getFileCategory(f) === selectedCategory;
-      }
-
-      let matchTag = true;
-      if (selectedTag) {
-        matchTag = (fileTags[f.hash] || []).includes(selectedTag);
-      }
-
-      return matchQuery && matchCategory && matchTag;
-    });
-
-    return list.sort((a, b) => {
-      let cmp = 0;
-      if (sortBy === 'name') {
-        cmp = (a.filename || '').localeCompare(b.filename || '');
-      } else if (sortBy === 'size') {
-        cmp = (a.size || 0) - (b.size || 0);
-      } else {
-        cmp = String(a.created_at || '').localeCompare(String(b.created_at || ''));
-      }
-      return sortOrder === 'asc' ? cmp : -cmp;
-    });
+    const q = searchQuery.trim().toLowerCase();
+    return files
+      .filter((f) => {
+        const matchQuery =
+          !q ||
+          f.filename.toLowerCase().includes(q) ||
+          (f.hash && f.hash.toLowerCase().includes(q)) ||
+          (fileTags[f.hash] || []).some((t) => t.toLowerCase().includes(q));
+        const matchCategory = selectedCategory === 'all' || getFileCategory(f) === selectedCategory;
+        const matchTag = !selectedTag || (fileTags[f.hash] || []).includes(selectedTag);
+        return matchQuery && matchCategory && matchTag;
+      })
+      .sort((a, b) => {
+        let cmp = 0;
+        if (sortBy === 'name') cmp = (a.filename || '').localeCompare(b.filename || '');
+        else if (sortBy === 'size') cmp = (a.size || 0) - (b.size || 0);
+        else cmp = String(a.created_at || '').localeCompare(String(b.created_at || ''));
+        return sortOrder === 'asc' ? cmp : -cmp;
+      });
   }, [files, searchQuery, selectedCategory, selectedTag, fileTags, sortBy, sortOrder]);
+
+  const viewProps = {
+    files: filteredFiles,
+    deepHash,
+    fileTags,
+    getFileIcon,
+    openTagEditor,
+    setPreviewFile,
+    onDownload,
+    openCastModal,
+    onCopyDeepLink,
+    copiedHash,
+    onShare,
+    onDelete,
+    onContextMenu: handleContextMenu,
+  };
 
   return (
     <div className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden h-full max-w-full" onContextMenu={handleContainerContextMenu}>
       <div className="max-w-5xl mx-auto">
-        {/* Header toolbar */}
         <DriveToolbar
           sortBy={sortBy}
           setSortBy={setSortBy}
@@ -258,11 +179,10 @@ export default function Drive() {
         {shareLink && (
           <div className="mb-4 text-xs text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 break-all">
             Share link: <span className="font-mono text-brand-300">{shareLink}</span>
-            <button onClick={() => { navigator.clipboard?.writeText(shareLink); }} className="ml-2 text-gray-500 hover:text-white">Copy</button>
+            <button onClick={() => navigator.clipboard?.writeText(shareLink)} className="ml-2 text-gray-500 hover:text-white">Copy</button>
           </div>
         )}
 
-        {/* Category Toolbar & Search Filter Bar */}
         <DriveCategoryBar
           selectedCategory={selectedCategory}
           setSelectedCategory={setSelectedCategory}
@@ -273,7 +193,6 @@ export default function Drive() {
           allTagsWithCounts={allTagsWithCounts}
         />
 
-        {/* Content list or grid */}
         <DataState
           loading={files === null}
           error={err}
@@ -300,43 +219,16 @@ export default function Drive() {
           }}
         >
           {viewMode === 'grid' ? (
-            <DriveGridView
-              files={filteredFiles}
-              deepHash={deepHash}
-              fileTags={fileTags}
-              getFileIcon={getFileIcon}
-              openTagEditor={openTagEditor}
-              setPreviewFile={setPreviewFile}
-              onDownload={onDownload}
-              openCastModal={openCastModal}
-              onCopyDeepLink={onCopyDeepLink}
-              copiedHash={copiedHash}
-              onShare={onShare}
-              onDelete={onDelete}
-              onContextMenu={handleContextMenu}
-            />
+            <DriveGridView {...viewProps} />
           ) : (
             <DriveListView
-              files={filteredFiles}
-              deepHash={deepHash}
-              fileTags={fileTags}
-              getFileIcon={getFileIcon}
-              openTagEditor={openTagEditor}
-              setPreviewFile={setPreviewFile}
-              onDownload={onDownload}
-              openCastModal={openCastModal}
-              onCopyDeepLink={onCopyDeepLink}
-              copiedHash={copiedHash}
-              onShare={onShare}
-              onDelete={onDelete}
-              onContextMenu={handleContextMenu}
+              {...viewProps}
               onApproveInbox={onApproveInbox}
               onRejectInbox={onRejectInbox}
             />
           )}
         </DataState>
 
-        {/* Tag Editor Modal */}
         <TagEditorModal
           file={editingTagFile}
           tagInputText={tagInputText}
@@ -345,7 +237,6 @@ export default function Drive() {
           onClose={() => setEditingTagFile(null)}
         />
 
-        {/* In-line Preview Modal */}
         {previewFile && (
           <FilePreviewModal
             file={previewFile}
@@ -353,9 +244,7 @@ export default function Drive() {
               const effectiveType = mimeOf(previewFile.filename, previewFile.mime_type) || 'application/octet-stream';
               if (peerSession?.client) {
                 const chunks = [];
-                for await (const chunk of peerSession.client.stream(hash)) {
-                  chunks.push(chunk);
-                }
+                for await (const chunk of peerSession.client.stream(hash)) chunks.push(chunk);
                 return new Blob(chunks, { type: effectiveType });
               }
               const u8 = await ws.download(hash);
@@ -366,7 +255,6 @@ export default function Drive() {
           />
         )}
 
-        {/* Remote Screen Cast Modal (Issue #243) */}
         <CastModal
           castFile={castFile}
           screens={screens}
@@ -381,30 +269,23 @@ export default function Drive() {
           onClose={() => setCastFile(null)}
         />
 
-        {/* Custom Context Menu (Issue #252) */}
         {contextMenu && (
           <ContextMenu
             x={contextMenu.x}
             y={contextMenu.y}
             onClose={() => setContextMenu(null)}
-            items={
-              contextMenu.file
-                ? [
-                    { label: '预览文件 (Preview)', icon: '👁️', onClick: () => setPreviewFile(contextMenu.file) },
-                    { label: '下载 (Download)', icon: '⬇️', onClick: () => onDownload(contextMenu.file) },
-                    { label: '投屏到大屏 (Cast)', icon: '📺', onClick: () => openCastModal(contextMenu.file) },
-                    { divider: true },
-                    { label: '复制文件链接 (Copy Link)', icon: '🔗', onClick: () => onCopyDeepLink(contextMenu.file) },
-                    { label: '对外共享 (Share)', icon: '📤', onClick: () => onShare(contextMenu.file) },
-                    { label: '编辑标签 (Tags)', icon: '🏷️', onClick: () => openTagEditor(contextMenu.file) },
-                    { divider: true },
-                    { label: '删除 (Delete)', icon: '🗑️', danger: true, onClick: () => onDelete(contextMenu.file) },
-                  ]
-                : [
-                    { label: '上传文件 (Upload)', icon: '⬆️', onClick: () => fileRef.current?.click() },
-                    { label: '刷新列表 (Refresh)', icon: '🔄', onClick: load },
-                  ]
-            }
+            items={buildDriveContextMenuItems({
+              file: contextMenu.file,
+              setPreviewFile,
+              onDownload,
+              openCastModal,
+              onCopyDeepLink,
+              onShare,
+              openTagEditor,
+              onDelete,
+              fileRef,
+              load,
+            })}
           />
         )}
       </div>

@@ -47,6 +47,10 @@ type Server struct {
 	startedAt time.Time // server startup time
 	msgCount  int64     // total forwarded message count (atomic access)
 
+	startOnce sync.Once
+	stopOnce  sync.Once
+	done      chan struct{}
+
 	mu        sync.Mutex
 	clients   map[string]*client              // id → online connection
 	queues    map[string][]queuedMsg          // dst → messages pending forwarding
@@ -73,6 +77,7 @@ func NewServer(key string, opts ...Option) *Server {
 		heartbeatTTL: 90 * time.Second,
 		pingInterval: 20 * time.Second,
 		startedAt:    time.Now(),
+		done:         make(chan struct{}),
 		clients:      make(map[string]*client),
 		queues:       make(map[string][]queuedMsg),
 		disc:         make(map[string]map[string]time.Time),
@@ -91,23 +96,61 @@ func NewServer(key string, opts ...Option) *Server {
 // to exhaust server memory). When the limit is exceeded, drop the oldest (signaling messages expire anyway, so dropping old is more reasonable than dropping new).
 const maxQueuedPerDst = 100
 
+// maxQueueTargets caps the total number of distinct offline destination peer IDs
+// held in s.queues simultaneously. Without this cap, an attacker can send OFFERs to
+// millions of random nonexistent dst IDs and exhaust server memory even though each
+// individual dst is capped at maxQueuedPerDst.
+const maxQueueTargets = 4096
+
 // Start launches a background sweeper: periodically cleans up expired queue entries and empty queues.
 // Background: expiry cleanup was originally only done in flushQueue (when dst comes online); if dst never connects, expired messages accumulate.
+// Idempotent via startOnce; stops cleanly when Close() is called.
 func (s *Server) Start() {
-	go func() {
-		t := time.NewTicker(30 * time.Second)
-		defer t.Stop()
-		for range t.C {
-			s.sweepQueues()
-			s.sweepDiscovery()
+	s.startOnce.Do(func() {
+		go func() {
+			t := time.NewTicker(30 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-s.done:
+					return
+				case <-t.C:
+					s.sweepQueues()
+					s.sweepDiscovery()
+				}
+			}
+		}()
+	})
+}
+
+// Close stops the background sweeper goroutine and closes all active client WebSocket connections.
+// Safe to call multiple times (idempotent).
+func (s *Server) Close() {
+	s.stopOnce.Do(func() {
+		if s.done != nil {
+			close(s.done)
 		}
-	}()
+		s.mu.Lock()
+		var active []*client
+		for _, cl := range s.clients {
+			active = append(active, cl)
+		}
+		s.clients = make(map[string]*client)
+		s.queues = make(map[string][]queuedMsg)
+		s.mu.Unlock()
+		for _, cl := range active {
+			cl.closeConn()
+		}
+	})
 }
 
 func (s *Server) sweepQueues() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now()
+	s.sweepQueuesLocked(time.Now())
+}
+
+func (s *Server) sweepQueuesLocked(now time.Time) {
 	for dst, q := range s.queues {
 		kept := q[:0]
 		for _, qm := range q {
@@ -200,9 +243,17 @@ func (s *Server) route(m Message) {
 	}
 	// Enqueue: replay after the target comes online (OFFER/ANSWER/CANDIDATE)
 	// H3: unbounded queue → OOM. When exceeding maxQueuedPerDst, drop the oldest.
+	// Also guard total distinct offline dst keys via maxQueueTargets.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	q := append(s.queues[m.Dst], queuedMsg{msg: m, expire: time.Now().Add(s.queueTTL)})
+	now := time.Now()
+	if _, exists := s.queues[m.Dst]; !exists && len(s.queues) >= maxQueueTargets {
+		s.sweepQueuesLocked(now)
+		if len(s.queues) >= maxQueueTargets {
+			return
+		}
+	}
+	q := append(s.queues[m.Dst], queuedMsg{msg: m, expire: now.Add(s.queueTTL)})
 	if len(q) > maxQueuedPerDst {
 		q = q[len(q)-maxQueuedPerDst:]
 	}

@@ -128,7 +128,8 @@ func runReg(args []string) {
 	btMaxPeers := fs.Lookup("bt-max-peers")
 	_ = fs.Parse(args)
 
-	srv, err := regserver.New(dbPath.DefValue)
+	// Fix: use dbPath.Value.String() instead of dbPath.DefValue (which is always "").
+	srv, err := regserver.New(dbPath.Value.String())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "peerdrive reg: %v\n", err)
 		os.Exit(1)
@@ -177,6 +178,10 @@ func runAll(args []string) {
 		fmt.Fprintf(os.Stderr, "peerdrive all: %v\n", err)
 		os.Exit(1)
 	}
+	if err := serverapp.ValidateAuthStartup(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "peerdrive all: %v\n", err)
+		os.Exit(1)
+	}
 
 	ginH, shutdownMain, err := serverapp.BuildRouter(cfg)
 	if err != nil {
@@ -186,6 +191,7 @@ func runAll(args []string) {
 
 	mux, reg, err := services.UnifiedMux(cfg, ginH)
 	if err != nil {
+		shutdownMain()
 		fmt.Fprintf(os.Stderr, "peerdrive all: %v\n", err)
 		os.Exit(1)
 	}
@@ -196,19 +202,26 @@ func runAll(args []string) {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	errCh := make(chan error, 1)
 	go func() {
-		if err := services.ServeHTTP(addr, *cert, *tlsKey, mux); err != nil {
-			fmt.Fprintf(os.Stderr, "peerdrive all: %v\n", err)
-		}
+		errCh <- services.ServeHTTP(addr, *cert, *tlsKey, mux)
 	}()
 
 	// 可选自动更新检查（PEERDRIVE_AUTO_UPDATE，默认关）：与 serve 一致——
 	// 只提示新版本，不替换运行中的二进制（见 internal/update 包注释）。
 	update.StartupCheck(cfg)
 
-	<-quit
-	log.LogInfo("all: shutting down")
-	shutdownMain()
+	select {
+	case err := <-errCh:
+		shutdownMain()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "peerdrive all: %v\n", err)
+			os.Exit(1)
+		}
+	case <-quit:
+		log.LogInfo("all: shutting down")
+		shutdownMain()
+	}
 }
 
 func runMCP(args []string) {

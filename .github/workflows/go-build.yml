@@ -68,7 +68,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: back/peerdrive-server*
+          path: back/peerdrive*
 
   # 独立 go.mod 的子模块（doc/testing 的盲区清单里有它们）：
   # signalserver（信令，含 wss 与 CORS 用例）与 p2p_bt（BT/DHT）。
@@ -93,6 +93,18 @@ jobs:
       # go vet 单独一步：`go test` 不产出二进制、也不走 vet 分析，
       # 独立 module 的静态检查只有在这一步里跑。与主模块 backend job 的
       # vet/test/build 三步对齐，避免 signalserver 只测不 vet。
+      - name: Vet signalframe
+        working-directory: back/signalframe
+        env:
+          CGO_ENABLED: 0
+        run: go vet ./...
+
+      - name: Test signalframe
+        working-directory: back/signalframe
+        env:
+          CGO_ENABLED: 0
+        run: go test -count=1 ./...
+
       - name: Vet signalserver
         working-directory: back/signalserver
         env:
@@ -159,6 +171,7 @@ jobs:
         continue-on-error: true
         run: |
           govulncheck -tags nosqlite ./...
+          (cd signalframe && govulncheck ./...)
           (cd peerjs && govulncheck ./...)
           (cd signalserver && govulncheck ./...)
           (cd p2p_bt && govulncheck ./...)
