@@ -453,3 +453,111 @@ func RestoreVersionEntries(versionID, collectionID int) error {
 	}
 	return tx.Commit()
 }
+
+// ForkCollectionTx atomically creates the destination collection and copies all source entries
+// inside a single SQLite transaction. If any insert fails, the entire fork rolls back so no
+// empty or half-populated collection record is left behind (fixes FULLSTACK-AUDIT §2 item 6).
+func ForkCollectionTx(username, collectionName string, entries []model.CollectionEntry) (int, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(`INSERT INTO collections (username, collection_name, tags) VALUES (?, ?, '')`,
+		username, collectionName)
+	if err != nil {
+		return 0, err
+	}
+	id64, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	localID := int(id64)
+
+	for _, e := range entries {
+		providers := e.BuildProviders()
+		primaryHash := e.FileHash
+		if primaryHash == "" {
+			for _, p := range providers {
+				if p.Type == "sha256" && p.Value != "" {
+					primaryHash = p.Value
+					break
+				}
+			}
+		}
+		if providers == nil {
+			providers = []model.Provider{}
+		}
+		providersJSON, _ := json.Marshal(providers)
+		if _, err := tx.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash, providers_json) VALUES (?, ?, ?, ?)
+			ON CONFLICT(collection_id, path) DO UPDATE SET file_hash = excluded.file_hash, providers_json = excluded.providers_json`,
+			localID, e.Path, primaryHash, string(providersJSON)); err != nil {
+			return 0, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return localID, nil
+}
+
+// UpsertCollectionEntriesTx atomically upserts a batch of path->providers entries into a collection
+// within a single SQLite transaction (used by MergeFromSource to prevent partial merge state).
+func UpsertCollectionEntriesTx(collectionID int, merged map[string][]model.Provider) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for path, providers := range merged {
+		primaryHash := ""
+		for _, p := range providers {
+			if p.Type == "sha256" && p.Value != "" {
+				primaryHash = p.Value
+				break
+			}
+		}
+		if providers == nil {
+			providers = []model.Provider{}
+		}
+		providersJSON, _ := json.Marshal(providers)
+		if _, err := tx.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash, providers_json) VALUES (?, ?, ?, ?)
+			ON CONFLICT(collection_id, path) DO UPDATE SET file_hash = excluded.file_hash, providers_json = excluded.providers_json`,
+			collectionID, path, primaryHash, string(providersJSON)); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// RestoreVersionAndUpdateHashTx atomically replaces workspace entries from a version snapshot
+// and updates collections.current_hash in a single transaction.
+func RestoreVersionAndUpdateHashTx(versionID, collectionID int, snapshotHash string) error {
+	entries, err := GetVersionEntries(versionID)
+	if err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM collection_entries WHERE collection_id = ?`, collectionID); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if _, err := tx.Exec(`INSERT INTO collection_entries (collection_id, path, file_hash, providers_json) VALUES (?, ?, ?, ?)`,
+			collectionID, e.Path, e.FileHash, e.ProvidersJSON); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`UPDATE collections SET current_hash = ? WHERE id = ?`, snapshotHash, collectionID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

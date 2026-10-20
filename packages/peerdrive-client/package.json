@@ -4,14 +4,32 @@
   "description": "Zero-dependency browser consumer for peerdrive: connect to a peerdrive node over WebRTC, list what it shares, and pull files. Transport-agnostic (PeerJS DataConnection or anything with on/send).",
   "type": "module",
   "license": "MIT",
-  "keywords": ["peerdrive", "peerjs", "webrtc", "p2p", "datachannel", "netdisk", "consumer"],
+  "keywords": [
+    "peerdrive",
+    "peerjs",
+    "webrtc",
+    "p2p",
+    "datachannel",
+    "netdisk",
+    "consumer"
+  ],
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
     "./client": "./src/client.js",
     "./protocol": "./src/protocol.js",
     "./sha256": "./src/sha256.js"
   },
-  "files": ["src", "demo", "dist", "panel", "scripts", "README.md"],
+  "files": [
+    "src",
+    "demo",
+    "dist",
+    "panel",
+    "scripts",
+    "README.md"
+  ],
   "sideEffects": false,
   "scripts": {
     "test": "node --test test/*.test.mjs",
@@ -25,5 +43,6 @@
   },
   "devDependencies": {
     "peerjs-server": "^0.2.9"
-  }
+  },
+  "types": "./src/index.d.ts"
 }

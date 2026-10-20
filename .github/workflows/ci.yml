@@ -135,7 +135,7 @@ jobs:
         with:
           go-version: "1.26"
       - run: go vet ./...
-      - run: go test ./... -count=1
+      - run: go test -race ./... -count=1
 
   # packages/peerdrive-media：21 个用例（含 wrtc 的 node↔node E2E），dist 入库前必跑。
   media-package:
@@ -174,6 +174,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: 测试 peerdrive-core 单一协议与安全底座
+        run: npm --prefix ../peerdrive-core test
       - run: npm test
       - run: npm run check:panel
       - name: 校验内嵌进二进制的 panel/peerjs 副本与 dist/ 一致
@@ -207,6 +209,8 @@ jobs:
       - run: npm ci
       - name: 校验 pd-client 内嵌副本已删除（防回归）
         run: test ! -d src/lib/pd-client
+      - run: npm run lint
+      - run: npm run test:node
       - run: npm test
       - run: npm run build
 

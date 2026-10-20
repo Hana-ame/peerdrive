@@ -111,6 +111,13 @@ func isWeakSecret(s string) (bool, string) {
 	return false, ""
 }
 
+// ValidateAuthStartup checks that a non-loopback deployment has an auth backend configured,
+// or has explicitly opted out with PEERDRIVE_ALLOW_NO_AUTH=1.
+// Exported so `peerdrive all` and `peerdrive serve` share the exact same startup security gate.
+func ValidateAuthStartup(cfg *config.Config) error {
+	return validateAuthStartup(cfg)
+}
+
 func validateAuthStartup(cfg *config.Config) error {
 	addr := ListenAddr(cfg)
 	if httpd.IsLoopback(cfg.Host) {

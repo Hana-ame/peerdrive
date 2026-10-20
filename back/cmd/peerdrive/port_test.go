@@ -33,3 +33,18 @@ func TestRegFlagSetHasExpectedFlags(t *testing.T) {
 		}
 	}
 }
+
+// TestRegFlagCustomDBPathIsParsed 守住 runReg 的 -db 参数解析。
+//
+// 发现背景：runReg 原先写的是 regserver.New(dbPath.DefValue)，而 DefValue 恒为
+// flag 定义时的默认值 ""，导致命令行传入 `peerdrive reg -db /custom/reg.db` 被静默丢弃。
+func TestRegFlagCustomDBPathIsParsed(t *testing.T) {
+	fs := regFlagSet()
+	if err := fs.Parse([]string{"-db", "/tmp/custom-reg.db"}); err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	got := fs.Lookup("db").Value.String()
+	if got != "/tmp/custom-reg.db" {
+		t.Errorf("reg -db parsed value = %q, want \"/tmp/custom-reg.db\"", got)
+	}
+}

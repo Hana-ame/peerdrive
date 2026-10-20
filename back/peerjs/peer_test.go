@@ -550,3 +550,21 @@ func TestConnectedPeers(t *testing.T) {
 	dup.Close()
 	assert.Empty(t, p.ConnectedPeers())
 }
+
+// TestConnect_ContextCanceledAndClosedPeer 验证 Connect 响应 ctx 取消及 Peer 关闭状态。
+// 发现背景：Connect 签名接收了 ctx 且注释声明用于取消握手，但原实现从未读取 ctx，
+// 且直接无锁读取 p.iceServers 与 SetICEServers 存在并发竞争。
+func TestConnect_ContextCanceledAndClosedPeer(t *testing.T) {
+	p, _ := newTestPeer()
+
+	// 1. 已取消的 context 必须立即返回错误且不创建残留连接
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := p.Connect(ctx, "remote-peer", "data")
+	assert.ErrorIs(t, err, context.Canceled)
+
+	// 2. Peer 关闭后调用 Connect 必须返回错误
+	p.Close()
+	_, errClosed := p.Connect(context.Background(), "remote-peer", "data")
+	assert.Error(t, errClosed)
+}

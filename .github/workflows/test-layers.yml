@@ -50,6 +50,7 @@ jobs:
       - name: Pre-download Go Modules
         run: |
           (cd back && go mod download)
+          (cd back/signalframe && go mod download)
           (cd back/peerjs && go mod download)
           (cd back/signalserver && go mod download)
           (cd back/p2p_bt && go mod download)

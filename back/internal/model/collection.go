@@ -128,3 +128,17 @@ type VersionEntry struct {
 	FileHash      string `db:"file_hash" json:"file_hash"`
 	ProvidersJSON string `db:"providers_json" json:"-"`
 }
+
+// BuildProviders reconstructs the full providers array from file_hash and providers_json on a version snapshot entry.
+func (e *VersionEntry) BuildProviders() []Provider {
+	if e.ProvidersJSON != "" {
+		var providers []Provider
+		if err := json.Unmarshal([]byte(e.ProvidersJSON), &providers); err == nil && len(providers) > 0 {
+			return providers
+		}
+	}
+	if e.FileHash != "" {
+		return []Provider{{Type: "sha256", Value: e.FileHash}}
+	}
+	return []Provider{}
+}

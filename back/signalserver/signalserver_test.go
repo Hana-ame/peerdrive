@@ -1214,3 +1214,23 @@ func TestSignalPingPongKeepsConnectionAliveWithoutHeartbeat(t *testing.T) {
 		t.Fatal("connection should still be alive after 300ms without HEARTBEAT")
 	}
 }
+
+// TestServerCloseStopsSweeperAndDisconnectsClients 验证 Server.Close() 幂等退出后台协程并清理连接。
+// 发现背景：Start() 原先启动无退出通道的 ticker 协程，在测试或服务重启时导致 goroutine 泄漏。
+func TestServerCloseStopsSweeperAndDisconnectsClients(t *testing.T) {
+	srv, hs := testServerWithOpts(t)
+	conn := dialWS(t, hs, "node-close-test", "tok-close-test")
+	defer conn.Close()
+	readMsg(t, conn)
+
+	// 多次调用 Close 必须幂等且不 panic
+	srv.Close()
+	srv.Close()
+
+	srv.mu.Lock()
+	clientCount := len(srv.clients)
+	srv.mu.Unlock()
+	if clientCount != 0 {
+		t.Fatalf("expected 0 clients after Close(), got %d", clientCount)
+	}
+}

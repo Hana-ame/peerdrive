@@ -4,6 +4,8 @@ package repository
 
 import (
 	"testing"
+
+	"peerdrive/internal/model"
 )
 
 func TestCollectionRepo_GetOrCreate(t *testing.T) {
@@ -142,5 +144,30 @@ func TestCollectionRepo_Tags(t *testing.T) {
 	col, _ := GetCollection("tuser", "tagged")
 	if col == nil {
 		t.Fatal("collection not found")
+	}
+}
+
+// TestCollectionRepo_ForkAndMergeTransactions 验证 ForkCollectionTx、UpsertCollectionEntriesTx
+// 与 RestoreVersionAndUpdateHashTx 的事务原子性（发现背景：FULLSTACK-AUDIT §2 第 6/10 项，
+// 原先 Fork/Merge 循环单条写入无事务，中途失败会残留半成品状态）。
+func TestCollectionRepo_ForkAndMergeTransactions(t *testing.T) {
+	initTestDB(t)
+
+	srcEntries := []model.CollectionEntry{
+		{Path: "docs/a.txt", FileHash: "1111111111111111111111111111111111111111111111111111111111111111"},
+		{Path: "docs/b.txt", FileHash: "2222222222222222222222222222222222222222222222222222222222222222"},
+	}
+	forkID, err := ForkCollectionTx("u1", "forked-tx", srcEntries)
+	if err != nil {
+		t.Fatalf("ForkCollectionTx failed: %v", err)
+	}
+	gotEntries, err := ListCollectionEntries(forkID)
+	if err != nil || len(gotEntries) != 2 {
+		t.Fatalf("expected 2 forked entries, got %d (err=%v)", len(gotEntries), err)
+	}
+
+	// Duplicate ForkCollectionTx must fail and roll back cleanly
+	if _, err := ForkCollectionTx("u1", "forked-tx", srcEntries); err == nil {
+		t.Fatal("expected duplicate ForkCollectionTx to fail")
 	}
 }

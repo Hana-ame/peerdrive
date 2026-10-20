@@ -139,11 +139,9 @@ func MergeFromSource(c *gin.Context) {
 		}
 	}
 
-	for path, providers := range merged {
-		if err := collSvc.AddProviderEntry(local.ID, path, providers); err != nil {
-			writeInternalError(c, err)
-			return
-		}
+	if err := collSvc.UpsertEntriesTx(local.ID, merged); err != nil {
+		writeInternalError(c, err)
+		return
 	}
 
 	result := map[string]interface{}{

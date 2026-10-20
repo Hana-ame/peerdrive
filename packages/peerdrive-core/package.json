@@ -14,12 +14,16 @@
     "progress"
   ],
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
     "./protocol": "./src/protocol.js",
     "./sha256": "./src/sha256.js",
     "./dispatcher": "./src/dispatcher.js",
     "./url": "./src/url.js",
-    "./queue": "./src/queue.js"
+    "./queue": "./src/queue.js",
+    "./security": "./src/security.js"
   },
   "files": [
     "src",
@@ -28,5 +32,6 @@
   "sideEffects": false,
   "scripts": {
     "test": "node --test test/core.test.mjs test/security.test.mjs"
-  }
+  },
+  "types": "./src/index.d.ts"
 }

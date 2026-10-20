@@ -180,3 +180,45 @@ func TestValidateToken_NoRegServer_ReturnsEmpty(t *testing.T) {
 	assert.Equal(t, "", u)
 	assert.Equal(t, "", role)
 }
+
+// TestRequireRole_AdminTokenAndRoleEnforcement 验证 RBAC 中间件 RequireRole 的角色鉴权逻辑
+// （发现背景：FULLSTACK-AUDIT §2 第 2 项指出 whoami 返回了 role 但全仓无角色授权守卫）。
+func TestRequireRole_AdminTokenAndRoleEnforcement(t *testing.T) {
+	t.Parallel()
+
+	// 模拟注册服务器 whoami：根据 token 返回不同 role
+	regSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("Authorization") {
+		case "Bearer token-admin":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"username":"alice","role":"admin"}`))
+		case "Bearer token-operator":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"username":"bob","role":"operator"}`))
+		case "Bearer token-viewer":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"username":"carol","role":"viewer"}`))
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
+	t.Cleanup(regSrv.Close)
+
+	a := regServerAuth(regSrv.URL)
+	r := gin.New()
+	r.GET("/ops", a.AuthRequired(), a.RequireRole("operator"), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"role": c.GetString("role")})
+	})
+
+	// viewer 角色访问 operator 路由 -> 403 Forbidden
+	wViewer := authRequest(r, "/ops", "Bearer token-viewer")
+	assert.Equal(t, http.StatusForbidden, wViewer.Code)
+
+	// operator 角色访问 -> 200 OK
+	wOp := authRequest(r, "/ops", "Bearer token-operator")
+	assert.Equal(t, http.StatusOK, wOp.Code)
+
+	// admin 角色天然拥有最高权限 -> 200 OK
+	wAdm := authRequest(r, "/ops", "Bearer token-admin")
+	assert.Equal(t, http.StatusOK, wAdm.Code)
+}

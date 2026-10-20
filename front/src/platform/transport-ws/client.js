@@ -64,8 +64,14 @@ if (typeof onNodeSession === 'function') {
   })
 }
 
+// readToken prefers short-lived sessionStorage credentials (FULLSTACK-AUDIT §2 item 1)
+// before falling back to localStorage for backward compatibility.
 function readToken() {
   try {
+    if (typeof sessionStorage !== 'undefined') {
+      const sessFrag = sessionStorage.getItem(STORAGE_KEY_AUTH_TOKEN)
+      if (sessFrag) return sessFrag
+    }
     const frag = localStorage.getItem(STORAGE_KEY_AUTH_TOKEN)
     if (frag) return frag
     if (localStorage.getItem(STORAGE_KEY_AUTH_HEADER_ENABLED) === 'true') {
@@ -75,10 +81,21 @@ function readToken() {
   return ''
 }
 
+// getWsBase resolves the backend endpoint in priority order:
+//   1. Explicit user override in localStorage (STORAGE_KEY_API_BASE)
+//   2. Build-time environment variable VITE_API_BASE (FULLSTACK-AUDIT §1 item 14 & §4)
+//   3. Localhost loopback auto-detection (http://127.0.0.1:3000)
+//   4. Production HTTPS fallback domain
 function getWsBase() {
   try {
     const custom = localStorage.getItem(STORAGE_KEY_API_BASE)
     if (custom) return custom
+  } catch {}
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) {
+      const envBase = String(import.meta.env.VITE_API_BASE).trim().replace(/\/+$/, '')
+      if (envBase) return envBase
+    }
   } catch {}
   if (
     typeof window !== 'undefined' &&

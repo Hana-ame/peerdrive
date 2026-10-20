@@ -85,6 +85,7 @@ func (a *Authenticator) AuthOptional() gin.HandlerFunc {
 		if a.regServerURL == "" {
 			if a.adminToken != "" && constantTimeEqual(parts[1], a.adminToken) {
 				c.Set("authenticated", true)
+				c.Set("role", "admin")
 			} else {
 				c.Set("authenticated", false)
 			}
@@ -141,6 +142,7 @@ func (a *Authenticator) AuthRequired() gin.HandlerFunc {
 				return
 			}
 			c.Set("authenticated", true)
+			c.Set("role", "admin")
 			c.Next()
 			return
 		}
@@ -280,4 +282,38 @@ func (a *Authenticator) queryWhoami(token string) (string, string) {
 		return "", ""
 	}
 	return result.Username, result.Role
+}
+
+// RequireRole enforces role-based access control (RBAC, FULLSTACK-AUDIT §2 item 2)
+// after AuthRequired has authenticated the request.
+//
+// Rules:
+//  1. When auth is disabled and PEERDRIVE_ALLOW_NO_AUTH=1 is set (local single-machine mode),
+//     requests pass through.
+//  2. The "admin" role (including local AdminToken authentication) is always permitted.
+//  3. Otherwise, the context "role" from registration server /auth/whoami must match one of
+//     allowedRoles (case-insensitive), or 403 Forbidden is returned.
+func (a *Authenticator) RequireRole(allowedRoles ...string) gin.HandlerFunc {
+	allowed := make(map[string]bool, len(allowedRoles)+1)
+	allowed["admin"] = true
+	for _, r := range allowedRoles {
+		trimmed := strings.ToLower(strings.TrimSpace(r))
+		if trimmed != "" {
+			allowed[trimmed] = true
+		}
+	}
+	return func(c *gin.Context) {
+		if a.authDisabled() && os.Getenv("PEERDRIVE_ALLOW_NO_AUTH") == "1" {
+			c.Next()
+			return
+		}
+		role := strings.ToLower(strings.TrimSpace(c.GetString("role")))
+		if role != "" && allowed[role] {
+			c.Next()
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error": "insufficient role permissions",
+		})
+	}
 }

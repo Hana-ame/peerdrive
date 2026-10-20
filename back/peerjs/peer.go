@@ -143,7 +143,37 @@ func (p *Peer) Connect(ctx context.Context, dst, label string) (*Connection, err
 	if dst == "" {
 		return nil, fmt.Errorf("peerjs: empty remote id")
 	}
-	return p.newConnection(dst, label, true, p.iceServers, "")
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	p.mu.Lock()
+	select {
+	case <-p.closed:
+		p.mu.Unlock()
+		return nil, fmt.Errorf("peerjs: peer is closed")
+	default:
+	}
+	servers := p.iceServers
+	p.mu.Unlock()
+
+	conn, err := p.newConnection(dst, label, true, servers, "")
+	if err != nil {
+		return nil, err
+	}
+	if ctx != nil && ctx.Done() != nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+				if !conn.Open() {
+					conn.Close()
+				}
+			case <-conn.Done():
+			}
+		}()
+	}
+	return conn, nil
 }
 
 // Close closes the signaling connection and cleans up all WebRTC connections.

@@ -63,13 +63,17 @@ check_no_import "peerdrive/internal/repository" "peerdrive/internal/controller" 
 check_no_import "peerdrive/internal/repository" "peerdrive/internal/transport" \
   "repository is L5 data persistence and must not import transport"
 
-# 5. peerjs 独立模块严禁 import 主程序 internal 包
-PEERJS_IMPORTS=$(cd "$BACK/peerjs" && go list -f '{{range .Imports}}{{println .}}{{end}}' ./... 2>/dev/null || true)
-if echo "$PEERJS_IMPORTS" | grep -E "peerdrive/internal" >/dev/null 2>&1; then
-  echo -e "${RED}[VIOLATION]${NC} peerjs module imports peerdrive/internal!"
-  echo "  Reason: peerjs is an independent L1 transport primitive module and must have 0 internal dependencies"
-  FAIL=1
-fi
+# 5. 四个独立 go.mod 子模块（peerjs / signalframe / signalserver / p2p_bt）严禁反向 import 主程序 internal 包
+for submod in peerjs signalframe signalserver p2p_bt; do
+  if [ -d "$BACK/$submod" ]; then
+    SUB_IMPORTS=$(cd "$BACK/$submod" && go list -f '{{range .Imports}}{{println .}}{{end}}' ./... 2>/dev/null || true)
+    if echo "$SUB_IMPORTS" | grep -E "peerdrive/internal" >/dev/null 2>&1; then
+      echo -e "${RED}[VIOLATION]${NC} $submod module imports peerdrive/internal!"
+      echo "  Reason: $submod is an independent submodule and must have 0 dependencies on peerdrive/internal"
+      FAIL=1
+    fi
+  fi
+done
 
 if [ "$FAIL" -eq 0 ]; then
   echo -e "${GREEN}✓ All layer dependency rules satisfied (0 violations).${NC}"

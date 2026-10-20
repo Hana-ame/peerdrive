@@ -4,7 +4,16 @@
   "description": "PeerJS-powered media loading: load a URL resource from a Node.js peer over WebRTC DataChannel and render it as <img>/<video> in React or vanilla JS.",
   "type": "module",
   "license": "MIT",
-  "keywords": ["peerjs", "webrtc", "p2p", "media", "react", "img", "video", "datachannel"],
+  "keywords": [
+    "peerjs",
+    "webrtc",
+    "p2p",
+    "media",
+    "react",
+    "img",
+    "video",
+    "datachannel"
+  ],
   "exports": {
     ".": {
       "types": "./dist/react/index.d.ts",
@@ -16,9 +25,14 @@
       "import": "./dist/vanilla/peerdrive-media.es.js",
       "default": "./dist/vanilla/peerdrive-media.iife.js"
     },
-    "./node": "./src/node/server.js"
+    "./node": "./src/node/server.js",
+    "./sw": "./src/sw.js"
   },
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "vite build --config vite.react.config.js && vite build --config vite.vanilla.config.js && cp src/react/index.d.ts dist/react/index.d.ts",
     "test": "node --experimental-test-module-mocks --test \"test/*.test.mjs\"",

@@ -150,3 +150,18 @@ func (s *CollectionService) GetAnonByHash(hash, storageDir string) (*model.AnonC
 func (s *CollectionService) SaveAnon(coll *model.AnonCollection, storageDir string) (string, error) {
 	return repository.SaveCollection(coll, storageDir)
 }
+
+// ForkTx atomically creates a collection and copies all source entries in a single transaction.
+func (s *CollectionService) ForkTx(username, collectionName string, entries []model.CollectionEntry) (int, error) {
+	return repository.ForkCollectionTx(username, collectionName, entries)
+}
+
+// UpsertEntriesTx atomically upserts multiple path->providers entries in a single transaction.
+func (s *CollectionService) UpsertEntriesTx(collectionID int, merged map[string][]model.Provider) error {
+	return repository.UpsertCollectionEntriesTx(collectionID, merged)
+}
+
+// RestoreVersionWithHashTx atomically restores version entries and updates current_hash in one transaction.
+func (s *CollectionService) RestoreVersionWithHashTx(versionID, collectionID int, snapshotHash string) error {
+	return repository.RestoreVersionAndUpdateHashTx(versionID, collectionID, snapshotHash)
+}

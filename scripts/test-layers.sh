@@ -63,8 +63,8 @@ echo "ROOT: $ROOT"
 
 # L0 依赖边界守卫（LAYERS.md / REFACTOR §8）
 run_layer "L0-deps" 'bash scripts/check-layer-deps.sh'
-# L1 信令/传输原语（独立 go.mod，-race）
-run_layer "L1-peerjs" 'cd back/peerjs && go test ./... -count=1 -race'
+# L1 信令帧与传输原语（独立 go.mod：signalframe + peerjs -race）
+run_layer "L1-peerjs" 'cd back/signalframe && go test ./... -count=1 && cd ../peerjs && go test ./... -count=1 -race'
 # L2 帧协议层（transport 包，剥掉 L3 admin 子集）
 run_layer "L2-transport" 'cd back && go test -tags nosqlite ./internal/transport/ -count=1 -skip "^TestAdmin"'
 # L3 管理面切面（与 L2 同包，单跑 admin 子集）
@@ -97,8 +97,8 @@ if [ "$FULL" = "1" ]; then
   # 全量 CI 门禁对齐（Issue #337 解决本地与 CI 脱节）：
   # 1. 文档引用体检（对应 ci.yml doc-refs）
   run_layer "FULL-docs" 'node scripts/check-doc-refs.mjs'
-  # 2. 消费端包状态机与面板构建校验（对应 ci.yml client-package）
-  run_layer "FULL-client" 'cd packages/peerdrive-client && node --test && npm run check:panel'
+  # 2. 核心协议包与消费端包状态机及面板构建校验（对应 ci.yml client-package）
+  run_layer "FULL-client" 'cd packages/peerdrive-core && npm test && cd ../peerdrive-client && npm test && npm run check:panel'
   # 3. 部署与配置一致性门禁（对应 ci.yml backend deployconsistency）
   run_layer "FULL-deploy" 'cd back && go test -tags nosqlite ./test/deployconsistency/ -count=1'
   # 4. 节点穿透探针与外部共享目录（对应 ci.yml security-probes）
