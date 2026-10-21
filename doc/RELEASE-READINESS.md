@@ -17,14 +17,15 @@
    `peerdrive-core/src/queue.js`（`TransportQueue` / `TransferProgressHub` / `AsyncQueueLane`），
    front 的面板与 Transfers 页消费同一对单例（`globalProgressHub` / `globalTransportQueue`）。
 
-## 已知缺口（2026-10-17 主干合入时记录）
+## 已知缺口修复记录（2026-10 主干合入与收口）
 
 - ~~**不变量 #2 的后端半被临时切除**~~ → **已补回（Issue #410，feature 分支 `feat/f-c-content-urls`）**：
   `/f/:sha256` 与 `/c/:hash` 后端 handler（`DirectFileBySHA256` / `DirectCollectionByHash`）及 6 行路由、
   前端 `#/f/` SPA 路由 / `DirectFileView`、Drive「复制文件链接」、`/f/` `/c/` HTTP 兜底
   已按 `peerdrive-core/src/url.js` 契约恢复（URL 生成/解析 SSOT 自始未动）。
-- 公共面板（`packages/peerdrive-client/panel`）的传输浮层 `TransferDock` 组件同样未在快照中，
-  主干上已从 App 壳移除（传输进度仍可在 Transfers 页查看）。
+- ~~**传输浮层 `TransferDock` 组件未在快照中**~~ → **已补回（`front/src/components/netdisk/TransferDock.jsx`）**：
+  订阅 `globalProgressHub` 单例，在 `front/src/App.jsx` 全局挂载右下角可折叠实时进度浮窗，并与低认知负荷详情抽屉
+  `front/src/components/netdisk/FileInspectorDrawer.jsx` 共同完成网盘体验闭环（详见 `doc/design/LOW-COGNITIVE-LOAD-UX.md`）。
 
 ## 分模块测试清单（入口）
 
@@ -35,7 +36,7 @@
 | integration | `go test -tags "nosqlite integration" ./test/integration/ -p 1` | ci.yml integration（脱外网） |
 | peerjs | `back/peerjs` 独立 go.mod 全量 | ci.yml peerjs |
 | peerdrive-core | `node --test`（core.test.mjs：协议/URL/队列/SHA-256） | ci.yml client-package |
-| peerdrive-client | `npm test`（61 用例，含面板契约面板契约 panel-contract） + `npm run build:panel`（check:panel 拦漂移） | ci.yml client-package |
+| peerdrive-client | `npm test`（61 用例，含面板契约 panel-contract） + `npm run build:panel`（check:panel 拦漂移） | ci.yml client-package |
 | peerdrive-media | `npm run build` + `npm test`（21）+ 浏览器 E2E（本机 Firefox） | ci.yml media-package + 手动 |
 | front | `npm test`（vitest） + `npm run build` | ci.yml frontend |
 | 端到端 | `.github/workflows/e2e.yml`：真起信令 + 两节点 8 项断言 + bundled chromium 点面板 9 项断言 | e2e.yml |
