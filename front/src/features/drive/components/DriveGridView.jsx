@@ -9,6 +9,7 @@ export default function DriveGridView({
   getFileIcon,
   openTagEditor,
   setPreviewFile,
+  setInspectedFile,
   onDownload,
   openCastModal,
   onCopyDeepLink,
@@ -63,16 +64,28 @@ export default function DriveGridView({
                   </div>
                 )}
 
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openTagEditor(f);
-                  }}
-                  className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 text-[10px] px-1.5 py-0.5 rounded bg-black/60 hover:bg-black/90 text-gray-300 transition-opacity"
-                  title="Manage Tags"
-                >
-                  🏷️
-                </button>
+                <div className="absolute top-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setInspectedFile?.(f);
+                    }}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 hover:bg-black/90 text-gray-200"
+                    title="文件与分布式节点详情"
+                  >
+                    ⓘ
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openTagEditor(f);
+                    }}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 hover:bg-black/90 text-gray-300"
+                    title="Manage Tags"
+                  >
+                    🏷️
+                  </button>
+                </div>
               </div>
 
               <h3
@@ -84,7 +97,17 @@ export default function DriveGridView({
               </h3>
               <div className="flex items-center justify-between text-[11px] text-gray-500 mt-1">
                 <span>{fmtBytes(f.size)}</span>
-                <span className="font-mono text-[10px] text-gray-600">{f.hash ? f.hash.slice(0, 8) : ''}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setInspectedFile?.(f);
+                  }}
+                  className="text-[10px] text-emerald-400/80 hover:text-emerald-300 flex items-center gap-0.5"
+                  title="点击查看完整 SHA-256 指纹与存储状态"
+                >
+                  <span>✓ 已校验</span>
+                </button>
               </div>
               {tags.length > 0 && (
                 <div className="flex gap-1 flex-wrap mt-2">

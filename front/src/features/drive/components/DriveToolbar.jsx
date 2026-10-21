@@ -11,6 +11,10 @@ export default function DriveToolbar({
   busy,
   onPick,
   fileRef,
+  fileCount = 0,
+  totalBytes = '0 B',
+  isRemotePeer = false,
+  peerId = '',
 }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
@@ -23,8 +27,15 @@ export default function DriveToolbar({
             <span className="px-2.5 py-1 rounded bg-brand-600 text-white font-medium">Files</span>
             <Link to="/collections" className="px-2.5 py-1 rounded text-gray-400 hover:text-white transition-colors">Collections</Link>
           </div>
+          <span className="px-2.5 py-0.5 rounded-full text-[11px] bg-white/[0.04] border border-white/[0.08] text-gray-300 font-mono">
+            {fileCount} 项 · {totalBytes}
+          </span>
         </div>
-        <p className="text-xs sm:text-sm text-gray-500 mt-0.5 truncate">Files registered on this node (content-addressed storage)</p>
+        <p className="text-xs sm:text-sm text-gray-500 mt-0.5 truncate">
+          {isRemotePeer
+            ? `⚡ 正在浏览远程节点 (${peerId.slice(0, 12)}) 共享的公开网盘 · 支持在线预览与一键转存`
+            : 'Files registered on this node (content-addressed storage · 支持直接拖拽文件到此页面上传)'}
+        </p>
       </div>
       <div className="flex flex-wrap items-center gap-2 max-w-full">
         {/* Sorting controls */}
@@ -65,13 +76,15 @@ export default function DriveToolbar({
             ▦ Thumbnails
           </button>
         </div>
-        <button
-          onClick={() => fileRef.current?.click()}
-          disabled={busy}
-          className="btn-brand shrink-0 text-xs sm:text-sm py-1.5 px-3"
-        >
-          {busy ? 'Uploading...' : '+ Upload File'}
-        </button>
+        {!isRemotePeer && (
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={busy}
+            className="btn-brand shrink-0 text-xs sm:text-sm py-1.5 px-3"
+          >
+            {busy ? 'Uploading...' : '+ Upload File'}
+          </button>
+        )}
         <input ref={fileRef} type="file" className="hidden" onChange={onPick} />
       </div>
     </div>
