@@ -159,14 +159,20 @@ func (s *FileService) RegisterURL(rawURL string, filename string) (*model.FileMe
 		return nil, fmt.Errorf("insert provider: %w", err)
 	}
 
-	// If storage enabled, save to content-addressed storage and sync file_index (Issue #405)
+	// If storage enabled, save to content-addressed storage and register through the
+	// unified write (index + mirror). The http provider above is still recorded
+	// because URL-only rows have no local path to index; URL-provider retirement is
+	// tracked as a remaining M2 step (doc/TODO-SIMPLIFY.md).
 	if s.storageEnable {
 		relPath := hash[:2] + "/" + hash
 		fullPath := filepath.Join(s.storageDir, relPath)
 		if err := pathutil.SafeWriteFileAny(s.allowedRoots(), fullPath, body, 0644); err != nil {
 			log.LogWarn("file-svc: RegisterURL save to storage failed (non-fatal): %v", err)
 		} else {
-			_, _ = repository.UpsertFileIndex(hash, fullPath, filename, size, false)
+			_, _ = repository.RegisterFile(repository.FileRecord{
+				Hash: hash, Path: fullPath, Name: filename, Size: size,
+				Kind: model.FileTypeBlob, MimeType: mimeType, ProviderPath: relPath,
+			})
 		}
 	}
 

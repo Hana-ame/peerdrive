@@ -121,7 +121,7 @@ func PinCID(c *gin.Context) {
 		_ = os.MkdirAll(filepath.Dir(fullPath), 0755)
 		_ = os.WriteFile(fullPath, data, 0644)
 
-		_ = pinSvc.InsertMeta(hashStr, cidParam, int64(len(data)), relPath)
+		_ = pinSvc.InsertMeta(hashStr, cidParam, int64(len(data)), relPath, storageDir)
 
 	}
 

@@ -4,6 +4,8 @@
 package service
 
 import (
+	"path/filepath"
+
 	"peerdrive/internal/model"
 	"peerdrive/internal/repository"
 )
@@ -32,15 +34,19 @@ func (s *PinService) List() ([]model.IPFSPin, error) {
 	return repository.ListPins()
 }
 
-// InsertMeta registers file metadata + local provider (called after pin cache is written to disk).
-func (s *PinService) InsertMeta(hash, filename string, size int64, relPath string) error {
-	if err := repository.InsertFileMeta(&model.FileMeta{
-		Hash:     hash,
-		Size:     size,
-		Filename: filename,
-		Type:     model.FileTypeBlob,
-	}); err != nil {
-		return err
-	}
-	return repository.InsertFileProvider(hash, "local", relPath)
+// InsertMeta registers a pinned file after its cache is written to disk.
+//
+// Issue #405: takes storageDir so the unified write can record the absolute path
+// (file_index.path is matched against share-dir prefixes). The old meta+provider
+// pair left pinned files out of the P2P index entirely.
+func (s *PinService) InsertMeta(hash, filename string, size int64, relPath, storageDir string) error {
+	_, err := repository.RegisterFile(repository.FileRecord{
+		Hash:         hash,
+		Path:         filepath.Join(storageDir, relPath),
+		Name:         filename,
+		Size:         size,
+		Kind:         model.FileTypeBlob,
+		ProviderPath: relPath,
+	})
+	return err
 }

@@ -23,15 +23,15 @@ const uploadChunkSize = 64 * 1024
 //
 // 位图语义：chunk i 到位 = 字节 [i*64KB, (i+1)*64KB) 已写。Commit 仅在位图全满时进行。
 type UploadSession struct {
-	mu        sync.Mutex
-	name      string
-	path      string
-	uploadDir string
-	file      *os.File
-	size      int64    // 声明总大小
-	roots     []string // 写边界（BeginUpload 时定下来，Abort/reap 删文件时共用）
-	bitmap    []uint64
-	fullWords int // 非末 word 中已满 64 chunk 的数量——Complete O(1) 判满
+	mu             sync.Mutex
+	name           string
+	path           string
+	uploadDir      string
+	file           *os.File
+	size           int64    // 声明总大小
+	roots          []string // 写边界（BeginUpload 时定下来，Abort/reap 删文件时共用）
+	bitmap         []uint64
+	fullWords      int // 非末 word 中已满 64 chunk 的数量——Complete O(1) 判满
 	seq            int64
 	last           time.Time // 最后活动时间（过期清理用）
 	aborted        bool      // reap 摘除句柄后置位：WriteAt/Complete 见之即错（M7 竞态修复）
@@ -250,21 +250,15 @@ func (u *UploadSession) completeLocked() (bool, *FileInfo, error, *os.File) {
 		}
 		u.path = destPath
 	}
-	seq, err := repository.UpsertFileIndexWithMeta(h, u.path, u.name, u.size, false, u.uploaderPeerID, u.isInbox)
+	// Issue #405: unified write, preserving the uploader/is_inbox provenance flags.
+	seq, err := repository.RegisterFile(repository.FileRecord{
+		Hash: h, Path: u.path, Name: u.name, Size: u.size,
+		Kind: model.FileTypeBlob, ProviderPath: u.path,
+		UploaderPeerID: u.uploaderPeerID, IsInbox: u.isInbox,
+	})
 	if err != nil {
 		return false, nil, err, nil
 	}
-	if existing, _ := repository.GetFileMeta(h); existing == nil {
-		_ = repository.InsertFileMeta(&model.FileMeta{
-			Hash:     h,
-			Size:     u.size,
-			Filename: u.name,
-			Type:     model.FileTypeBlob,
-		})
-	} else if existing.Filename == "" && u.name != "" {
-		_ = repository.UpdateFileMetaFilename(h, u.name)
-	}
-	_ = repository.InsertFileProvider(h, "local", u.path)
 
 	log.LogInfo("file-index: upload complete hash=%s size=%d path=%s name=%s", h, u.size, u.path, u.name)
 	fi := &FileInfo{Hash: h, Path: u.path, Name: u.name, Size: u.size, Seq: seq}

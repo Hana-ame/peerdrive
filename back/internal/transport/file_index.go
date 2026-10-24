@@ -231,7 +231,11 @@ func (s *FileIndexService) Create(path string) (*FileInfo, error) {
 	if err != nil {
 		abs = path
 	}
-	seq, err := repository.UpsertFileIndex(h, abs, filepath.Base(path), st.Size(), false)
+	// Issue #405: locally created files go through the unified write (index + mirror).
+	seq, err := repository.RegisterFile(repository.FileRecord{
+		Hash: h, Path: abs, Name: filepath.Base(path), Size: st.Size(),
+		Kind: model.FileTypeBlob, ProviderPath: abs,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -286,27 +290,19 @@ func (s *FileIndexService) WriteFile(name string, r io.Reader) (*FileInfo, error
 			}
 		}
 	}
-	seq, err := repository.UpsertFileIndex(h, destPath, name, st.Size(), false)
+	// Issue #405: one transaction for index + legacy mirrors (the old triplet could
+	// leave meta/provider rows behind if the index write failed).
+	seq, err := repository.RegisterFile(repository.FileRecord{
+		Hash: h, Path: destPath, Name: name, Size: st.Size(),
+		Kind: model.FileTypeBlob, ProviderPath: destPath,
+	})
 	if err != nil {
 		return nil, err
 	}
-	if existing, _ := repository.GetFileMeta(h); existing == nil {
-		_ = repository.InsertFileMeta(&model.FileMeta{
-			Hash:     h,
-			Size:     st.Size(),
-			Filename: name,
-			Type:     model.FileTypeBlob,
-		})
-	} else if existing.Filename == "" && name != "" {
-		_ = repository.UpdateFileMetaFilename(h, name)
-	}
-	_ = repository.InsertFileProvider(h, "local", destPath)
 
 	log.LogInfo("file-index: write-file name=%s hash=%s size=%d path=%s", name, h, st.Size(), destPath)
 	return &FileInfo{Hash: h, Path: destPath, Name: name, Size: st.Size(), Seq: seq}, nil
 }
-
-
 
 // List 列出全部未删除映射。
 func (s *FileIndexService) List(offset, limit int) ([]FileInfo, error) {

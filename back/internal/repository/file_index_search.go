@@ -81,7 +81,9 @@ const (
 // 排序：seq DESC（最新登记的在前），与 ListFileIndex 一致——两次翻页之间插入的
 // 新文件会「挤掉」末尾条目，这是可接受的（分页游标是 offset 而非游标值）。
 func SearchFileIndex(q SearchQuery) ([]FileIndex, int64, error) {
-	conds := []string{"deleted = 0"}
+	// kind = 'blob': anon-collection manifests now live in file_index (Issue #405)
+	// but are not files and must not show up in the file search UI.
+	conds := []string{"deleted = 0", "kind = 'blob'"}
 	args := make([]any, 0, 8)
 
 	if pat := escapeLikePattern(q.Q); pat != "" {
@@ -185,7 +187,7 @@ func SearchFileIndex(q SearchQuery) ([]FileIndex, int64, error) {
 		orderClause = fmt.Sprintf("ORDER BY %s %s, seq DESC", orderCol, orderDir)
 	}
 
-	query := fmt.Sprintf("SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox "+
+	query := fmt.Sprintf("SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin "+
 		"FROM file_index WHERE %s %s LIMIT ? OFFSET ?", where, orderClause)
 
 	rows, err := db.Query(query, append(args, limit, offset)...)
@@ -229,4 +231,3 @@ func escapeLikeExact(s string) string {
 	repl := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return repl.Replace(s)
 }
-

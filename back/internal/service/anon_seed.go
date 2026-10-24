@@ -58,8 +58,11 @@ func (s *AnonService) SeedSampleCollectionIfEmpty(storageDir string, addReadRoot
 				continue
 			}
 
-			// Register in repository file_index
-			_, _ = repository.UpsertFileIndex(hash, fullPath, name, info.Size(), false)
+			// Register through the unified write (Issue #405).
+			_, _ = repository.RegisterFile(repository.FileRecord{
+				Hash: hash, Path: fullPath, Name: name, Size: info.Size(),
+				Kind: model.FileTypeBlob, ProviderPath: fullPath,
+			})
 			readDirs[homeDir] = struct{}{}
 
 			entries = append(entries, model.AnonCollectionEntry{
@@ -78,7 +81,10 @@ func (s *AnonService) SeedSampleCollectionIfEmpty(storageDir string, addReadRoot
 		_ = os.WriteFile(samplePath, content, 0644)
 		h := sha256.Sum256(content)
 		hashStr := hex.EncodeToString(h[:])
-		_, _ = repository.UpsertFileIndex(hashStr, samplePath, "welcome_peerdrive.txt", int64(len(content)), false)
+		_, _ = repository.RegisterFile(repository.FileRecord{
+			Hash: hashStr, Path: samplePath, Name: "welcome_peerdrive.txt", Size: int64(len(content)),
+			Kind: model.FileTypeBlob, ProviderPath: samplePath,
+		})
 		readDirs[storageDir] = struct{}{}
 
 		entries = append(entries, model.AnonCollectionEntry{

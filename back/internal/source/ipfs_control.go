@@ -56,17 +56,13 @@ func (c *ipfsController) PinCID(cid string) (*PinInfo, error) {
 	if err := repository.InsertPin(cid, hash, cid, int64(len(data))); err != nil {
 		log.LogWarn("source/ipfs: insert pin %s: %v", cid, err)
 	}
-	// Register file_meta + provider
-	if err := repository.InsertFileMeta(&model.FileMeta{
-		Hash:     hash,
-		Size:     int64(len(data)),
-		Filename: cid,
-		Type:     model.FileTypeBlob,
-	}); err != nil && !strings.Contains(err.Error(), "UNIQUE") {
-		log.LogWarn("source/ipfs: insert meta %s: %v", hash, err)
-	}
-	if err := repository.InsertFileProvider(hash, "local", relPath); err != nil {
-		log.LogWarn("source/ipfs: insert provider %s: %v", hash, err)
+	// Issue #405: unified write. The old meta+provider-only registration left
+	// pinned files invisible to file_index (P2P list/share and index-first reads).
+	if _, err := repository.RegisterFile(repository.FileRecord{
+		Hash: hash, Path: absPath, Name: cid, Size: int64(len(data)),
+		Kind: model.FileTypeBlob, ProviderPath: relPath,
+	}); err != nil {
+		log.LogWarn("source/ipfs: register file %s: %v", hash, err)
 	}
 	log.LogInfo("source/ipfs: pin cid=%s hash=%s size=%d", cid, hash, len(data))
 	return &PinInfo{CID: cid, Hash: hash, Size: int64(len(data)), Filename: cid}, nil
