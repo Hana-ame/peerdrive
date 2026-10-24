@@ -19,6 +19,14 @@ import (
 // test fixes "the two indexes don't fill each other" as executable evidence —
 // otherwise any claim that "BT-downloaded files can be pulled by peers" would
 // need to be re-proven.
+//
+// Issue #405 update: local writers now go through RegisterFile, which fills
+// file_index and the legacy mirror in one transaction (see
+// TestRegisterFile_DualWritesWithUnifiedOrigin and file_backfill_test.go). The
+// separation asserted here therefore no longer describes the write path for
+// local files — it pins the *deliberate* one-sided case: raw UpsertFileIndex
+// (P2P sync / remote paths) never writes the legacy mirror, and legacy-only
+// rows are what the startup backfill exists to import.
 func TestDataModelSeparationProof(t *testing.T) {
 	dir := t.TempDir()
 	initTestDB(t)
@@ -72,15 +80,15 @@ func TestDataModelSeparationProof(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, pathB, fi2.Path, "new path file should be in file_index with correct path")
 
-	// ══ Conclusion 6: two tables have symmetric row counts → no 1:1 mirror/
-	// sync job exists ══
+	// ══ Conclusion 6: raw index upserts are one-sided → a legacy-only DB is a
+	// real migration source, hence the startup backfill (#405) ══
 	totIndex, err := CountAll("file_index")
 	require.NoError(t, err)
 	totMeta, err := CountAll("file_meta")
 	require.NoError(t, err)
 	assert.Equal(t, 1, totIndex, "file_index only has the new path entry")
 	assert.Equal(t, 1, totMeta, "file_meta only has the legacy path entry")
-	t.Logf("separation proof: file_index=%d rows / file_meta=%d rows, no cross rows", totIndex, totMeta)
+	t.Logf("separation proof (index-only writes): file_index=%d rows / file_meta=%d rows, no cross rows", totIndex, totMeta)
 }
 
 func mustCount(t *testing.T, table, hash string) int {

@@ -91,6 +91,17 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	repository.SetAnonStorageDir(storageDir)
 	nodestate.SetOperator(cfg.Operator)
 
+	// Issue #405: one-time (idempotent) upgrade pass — import pre-#405
+	// file_meta/file_providers rows into the authoritative file_index so
+	// index-first reads can find files written by the legacy binary. Additive
+	// only: the legacy rows are kept, so rolling back the binary is safe.
+	if stats, err := repository.BackfillFileIndexFromLegacy(storageDir); err != nil {
+		log.LogWarn("main: file_index legacy backfill failed (will retry next start): %v", err)
+	} else if stats.Imported > 0 || stats.SkippedMissingFile > 0 {
+		log.LogInfo("main: file_index legacy backfill done (imported=%d skipped_missing=%d skipped_no_path=%d)",
+			stats.Imported, stats.SkippedMissingFile, stats.SkippedNoPath)
+	}
+
 	// Initialize PeerJS signaling + WebRTC file service (the Go node acts as a persistent
 	// peer providing files, interconnecting with browsers and other nodes via PeerJS signaling).
 	// The default signaling server is the public cloud 0.peerjs.com; in production, set

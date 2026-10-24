@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -45,21 +46,40 @@ func NewFileService(cfg *config.Config) *FileService {
 }
 
 // GetMeta looks up file metadata by hash (M2 convergence: the download controller previously called repository.GetFileMeta directly).
+//
+// Issue #405 read convergence: file_index is consulted first and is authoritative;
+// file_meta is now a compatibility mirror (RegisterFile) and remains only as a
+// fallback for rows from a pre-#405 database that the startup backfill skipped
+// (e.g. bytes already gone). Same order for every metadata consumer below.
 func (s *FileService) GetMeta(hash string) (*model.FileMeta, error) {
+	if fi, fiErr := repository.GetFileIndex(hash); fiErr == nil && fi != nil && fi.Path != "" {
+		return metaFromIndex(fi), nil
+	}
 	meta, err := repository.GetFileMeta(hash)
 	if err == nil && meta != nil {
 		return meta, nil
 	}
-	// Fallback to file_index if not found in file_meta
-	if fi, fiErr := repository.GetFileIndex(hash); fiErr == nil && fi != nil {
-		return &model.FileMeta{
-			Hash:     fi.Hash,
-			Size:     fi.Size,
-			Filename: fi.Name,
-			Type:     model.FileTypeBlob,
-		}, nil
-	}
 	return meta, err
+}
+
+// metaFromIndex projects the unified index row onto the model.FileMeta shape the
+// controllers already speak — keeps the JSON contract identical while the storage
+// backing it moves from file_meta to file_index.
+func metaFromIndex(fi *repository.FileIndex) *model.FileMeta {
+	kind := fi.Kind
+	if kind == "" {
+		kind = model.FileTypeBlob
+	}
+	return &model.FileMeta{
+		Hash:      fi.Hash,
+		Size:      fi.Size,
+		CreatedAt: fi.CreatedAt,
+		MimeType:  fi.MimeType,
+		Gziped:    fi.Gziped,
+		Filename:  fi.Name,
+		Type:      kind,
+		CID:       fi.CID,
+	}
 }
 
 // GetLocalPath returns the on-disk file path for a content hash by checking storageDir, file_index, and local providers.
@@ -92,40 +112,83 @@ func (s *FileService) GetLocalPath(hash string) (string, error) {
 }
 
 // GetMetaByCID looks up file metadata by IPFS CID (M2 convergence: the download controller DownloadByCID).
+// Issue #405: index-first; file_meta is only the legacy fallback.
 func (s *FileService) GetMetaByCID(cid string) (*model.FileMeta, error) {
+	if fi, fiErr := repository.GetFileIndexByCID(cid); fiErr == nil && fi != nil {
+		return metaFromIndex(fi), nil
+	}
 	return repository.GetFileMetaByCID(cid)
 }
 
 // ListAll lists all blob files (M2 convergence: the file controller ListFiles previously called repository.ListAllFiles directly).
+//
+// Issue #405 read convergence: the unified index is the primary source; file_meta
+// rows are appended only when their hash is not in the index (rows the startup
+// backfill could not import). Sorting is done here because the two sources use
+// different SQL shapes but the API contract is a single sorted list.
 func (s *FileService) ListAll(sortBy string) ([]model.FileListItem, error) {
-	items, err := repository.ListAllFiles(sortBy)
+	idxList, err := repository.ListFileIndex(0, 1000)
 	if err != nil {
 		return nil, err
 	}
-	// Issue #280 & #405: bridge any file_index entries not present in file_meta so P2P-indexed files
-	// and legacy file_meta entries are uniformly visible without dual-track blind spots.
-	seen := make(map[string]bool, len(items))
-	for _, it := range items {
-		seen[it.Hash] = true
+	items := make([]model.FileListItem, 0, len(idxList))
+	seen := make(map[string]bool, len(idxList))
+	for _, fi := range idxList {
+		if fi.IsInbox || fi.Path == "" {
+			continue
+		}
+		mimeType := fi.MimeType
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		items = append(items, model.FileListItem{
+			Hash:         fi.Hash,
+			Filename:     fi.Name,
+			Size:         fi.Size,
+			MimeType:     mimeType,
+			CreatedAt:    fi.CreatedAt,
+			Type:         model.FileTypeBlob,
+			ProviderType: "local",
+			ProviderPath: fi.Path,
+		})
+		seen[fi.Hash] = true
 	}
-	if idxList, idxErr := repository.ListFileIndex(0, 1000); idxErr == nil {
-		for _, fi := range idxList {
-			if fi.Deleted || fi.IsInbox || seen[fi.Hash] {
+
+	// Legacy fallback for pre-#405 rows the backfill skipped (missing bytes) or for
+	// databases read by a process that never ran the startup backfill (tests/CLI).
+	if legacy, lerr := repository.ListAllFiles(sortBy); lerr == nil {
+		for _, it := range legacy {
+			if seen[it.Hash] {
 				continue
 			}
-			items = append(items, model.FileListItem{
-				Hash:         fi.Hash,
-				Filename:     fi.Name,
-				Size:         fi.Size,
-				MimeType:     "application/octet-stream",
-				CreatedAt:    fi.CreatedAt,
-				Type:         model.FileTypeBlob,
-				ProviderType: "local",
-				ProviderPath: fi.Path,
-			})
+			items = append(items, it)
+			seen[it.Hash] = true
 		}
 	}
+
+	sortFileList(items, sortBy)
 	return items, nil
+}
+
+// sortFileList mirrors the old SQL ORDER BY (all descending, default created_at)
+// so the API's ordering contract survives the move to an in-memory merge.
+func sortFileList(items []model.FileListItem, sortBy string) {
+	less := func(i, j int) bool {
+		a, b := items[i], items[j]
+		switch sortBy {
+		case "path":
+			return a.ProviderPath > b.ProviderPath
+		case "name":
+			return a.Filename > b.Filename
+		case "type":
+			return a.MimeType > b.MimeType
+		case "size":
+			return a.Size > b.Size
+		default:
+			return a.CreatedAt > b.CreatedAt
+		}
+	}
+	sort.SliceStable(items, less)
 }
 
 // Upload uploads a file to content-addressed storage, computes SHA256 and registers metadata and provider.
@@ -181,7 +244,18 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 		}
 		relPath := hash[:2] + "/" + hash
 		fullPath := filepath.Join(s.storageDir, relPath)
-		_, _ = repository.UpsertFileIndex(hash, fullPath, filename, existing.Size, false)
+		// Issue #405: the unified write keeps the index authoritative and refreshes
+		// the legacy mirrors instead of writing the index leg alone.
+		_, _ = repository.RegisterFile(repository.FileRecord{
+			Hash:         hash,
+			Path:         fullPath,
+			Name:         existing.Filename,
+			Size:         existing.Size,
+			Kind:         model.FileTypeBlob,
+			MimeType:     existing.MimeType,
+			Gziped:       existing.Gziped,
+			ProviderPath: relPath,
+		})
 		return existing, ErrFileAlreadyExists
 	}
 
@@ -201,19 +275,19 @@ func (s *FileService) Upload(reader io.Reader, filename string) (*model.FileMeta
 		Filename: filename,
 		Type:     repository.FileTypeBlob,
 	}
-	if err := repository.InsertFileMeta(meta); err != nil {
-		log.LogError("file-svc: Upload insert meta failed: %v", err)
-		return nil, fmt.Errorf("insert meta: %w", err)
-	}
-
-	if err := repository.InsertFileProvider(hash, "local", relPath); err != nil {
-		log.LogError("file-svc: Upload insert provider failed: %v", err)
-		return nil, fmt.Errorf("insert provider: %w", err)
-	}
-
-	// Sync-register file_index
-	if _, err := repository.UpsertFileIndex(hash, fullPath, filename, size, false); err != nil {
-		log.LogWarn("file-svc: Upload upsert file_index %s failed: %v", hash, err)
+	// Issue #405: one transaction writes file_index (authority) + file_meta/provider
+	// mirrors, so an upload can no longer leave the two tracks out of sync.
+	if _, err := repository.RegisterFile(repository.FileRecord{
+		Hash:         hash,
+		Path:         fullPath,
+		Name:         filename,
+		Size:         size,
+		Kind:         model.FileTypeBlob,
+		MimeType:     mimeType,
+		ProviderPath: relPath,
+	}); err != nil {
+		log.LogError("file-svc: Upload register file failed: %v", err)
+		return nil, fmt.Errorf("register file: %w", err)
 	}
 
 	log.LogInfo("file-svc: Upload %s completed (hash=%s, size=%d)", filename, hash, size)

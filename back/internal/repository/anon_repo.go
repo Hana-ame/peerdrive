@@ -49,13 +49,15 @@ func SaveCollection(coll *model.AnonCollection, storageDir string) (string, erro
 	}
 
 	relPath := fmt.Sprintf("%s/%s", hashStr[:2], hashStr)
-	_ = InsertFileMeta(&model.FileMeta{
-		Hash:     hashStr,
-		Gziped:   false,
-		Filename: fmt.Sprintf("anon_%s.json", hashStr),
-		Type:     FileTypeAnonCollection,
+	// Issue #405: one unified write for index + mirrors, same as AnonService.
+	_, _ = RegisterFile(FileRecord{
+		Hash:         hashStr,
+		Path:         filePath,
+		Name:         fmt.Sprintf("anon_%s.json", hashStr),
+		Kind:         FileTypeAnonCollection,
+		MimeType:     "application/json",
+		ProviderPath: relPath,
 	})
-	_ = InsertFileProvider(hashStr, "local", relPath)
 
 	return hashStr, nil
 }
@@ -89,25 +91,22 @@ func GetAnonCollectionByHash(hash, storageDir string) (*model.AnonCollection, er
 // ListAnonCollections returns summaries of all registered anonymous collections (including name preview and tags), ordered by creation time descending.
 // M11: No LIMIT → full-table materialization with os.ReadFile per row (file I/O × N) at thousands of collections.
 // Frontend only shows recent collections; a 1000-row cap is sufficient.
+//
+// Issue #405 read convergence: collections are looked up in file_index (kind =
+// anon_collection) instead of file_meta.type. Pre-#405 databases are migrated by
+// BackfillFileIndexFromLegacy at startup, so no dual read remains here.
 func ListAnonCollections(storageDir string) ([]model.AnonCollectionSummary, error) {
 	if storageDir == "" {
 		storageDir = anonStorageDir
 	}
-	rows, err := db.Query(
-		`SELECT hash, created_at FROM file_meta WHERE type = ? ORDER BY created_at DESC LIMIT 1000`,
-		FileTypeAnonCollection,
-	)
+	rows, err := ListAnonCollectionIndex(0, 1000)
 	if err != nil {
 		return nil, fmt.Errorf("query anon collections: %w", err)
 	}
-	defer rows.Close()
 
 	var results []model.AnonCollectionSummary
-	for rows.Next() {
-		var hash, createdAt string
-		if err := rows.Scan(&hash, &createdAt); err != nil {
-			continue
-		}
+	for _, fi := range rows {
+		hash, createdAt := fi.Hash, fi.CreatedAt
 		summary := model.AnonCollectionSummary{
 			Hash:      hash,
 			CreatedAt: createdAt,

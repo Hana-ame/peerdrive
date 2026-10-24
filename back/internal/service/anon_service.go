@@ -202,15 +202,18 @@ func (s *AnonService) CreateCollectionWithPolicyAndPSK(
 	}
 
 	relPath := filepath.Join(hash[:2], hash)
-	_ = repository.InsertFileMeta(&model.FileMeta{
-		Hash:     hash,
-		Size:     int64(len(jsonBytes)),
-		MimeType: "application/json",
-		Filename: "anon_collection.json",
-		Gziped:   false,
-		Type:     repository.FileTypeAnonCollection,
+	// Issue #405: collections are local CAS objects too, so they must enter the
+	// unified index (kind=anon_collection) — the old meta/provider-only write made
+	// them invisible to index-first reads and impossible to backfill from here.
+	_, _ = repository.RegisterFile(repository.FileRecord{
+		Hash:         hash,
+		Path:         targetPath,
+		Name:         "anon_collection.json",
+		Size:         int64(len(jsonBytes)),
+		Kind:         model.FileTypeAnonCollection,
+		MimeType:     "application/json",
+		ProviderPath: relPath,
 	})
-	_ = repository.InsertFileProvider(hash, "local", relPath)
 
 	log.LogInfo("anon-svc: CreateCollection %s -> hash=%s", name, hash)
 	return hash, nil
@@ -272,15 +275,18 @@ func (s *AnonService) saveCollectionJSON(coll *model.AnonCollection) (string, er
 	}
 
 	relPath := filepath.Join(hash[:2], hash)
-	_ = repository.InsertFileMeta(&model.FileMeta{
-		Hash:     hash,
-		Size:     int64(len(jsonBytes)),
-		MimeType: "application/json",
-		Filename: "anon_collection.json",
-		Gziped:   false,
-		Type:     repository.FileTypeAnonCollection,
+	// Issue #405: collections are local CAS objects too, so they must enter the
+	// unified index (kind=anon_collection) — the old meta/provider-only write made
+	// them invisible to index-first reads and impossible to backfill from here.
+	_, _ = repository.RegisterFile(repository.FileRecord{
+		Hash:         hash,
+		Path:         targetPath,
+		Name:         "anon_collection.json",
+		Size:         int64(len(jsonBytes)),
+		Kind:         model.FileTypeAnonCollection,
+		MimeType:     "application/json",
+		ProviderPath: relPath,
 	})
-	_ = repository.InsertFileProvider(hash, "local", relPath)
 
 	return hash, nil
 }

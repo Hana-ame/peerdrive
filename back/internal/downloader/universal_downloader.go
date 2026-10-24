@@ -86,6 +86,14 @@ func (f *LocalFetcher) Fetch(_ context.Context, hash string) ([]byte, error) {
 		}
 	}
 
+	// Issue #405 read convergence: the unified index is authoritative; provider
+	// rows below are only a legacy fallback for un-backfilled databases.
+	if fi, err := repository.GetFileIndex(hash); err == nil && fi != nil && fi.Path != "" {
+		if data, err := os.ReadFile(fi.Path); err == nil {
+			return data, nil
+		}
+	}
+
 	// Fallback: check DB for registered local providers.
 	providers, err := repository.GetFileProviders(hash)
 	if err != nil {
@@ -391,15 +399,14 @@ func (d *UniversalDownloader) cacheToLocal(hash string, data []byte) {
 		log.LogWarn("downloader: cache write failed: %v", err)
 		return
 	}
-	// Insert meta (ignore conflict so re-caching is idempotent).
-	_ = repository.InsertFileMeta(&model.FileMeta{
-		Hash:     hash,
-		Size:     int64(len(data)),
-		Gziped:   false,
-		Filename: hash,
-		Type:     repository.FileTypeBlob,
-	})
-	repository.InsertFileProvider(hash, "local", relPath)
+	// Issue #405: unified write (idempotent upsert) so a cached download is also
+	// visible to file_index consumers instead of only the legacy tables.
+	if _, err := repository.RegisterFile(repository.FileRecord{
+		Hash: hash, Path: fullPath, Name: hash, Size: int64(len(data)),
+		Kind: model.FileTypeBlob, ProviderPath: relPath,
+	}); err != nil {
+		log.LogWarn("downloader: cache register file failed: %v", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -441,8 +448,11 @@ func (d *UniversalDownloader) ClearLocalCache(hash string) {
 			log.LogDebug("downloader: cleared local cache for %s at %s", hash, p)
 		}
 	}
+	// Issue #405: tombstone the unified index too, otherwise an index-first reader
+	// would keep seeing the cleared file.
+	_, _ = repository.DeleteFileIndex(hash)
 	// Mark existing local providers unavailable so the downloader
-	// won't pick them up.
+	// won't pick them up (legacy mirror).
 	providers, _ := repository.GetFileProviders(hash)
 	for _, p := range providers {
 		if p.ProviderType == "local" && p.Available {

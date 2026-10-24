@@ -29,9 +29,9 @@ type JSONRPCRequest struct {
 
 // JSONRPCResponse represents an outgoing JSON-RPC 2.0 response.
 type JSONRPCResponse struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      any    `json:"id,omitempty"`
-	Result  any    `json:"result,omitempty"`
+	JSONRPC string    `json:"jsonrpc"`
+	ID      any       `json:"id,omitempty"`
+	Result  any       `json:"result,omitempty"`
 	Error   *RPCError `json:"error,omitempty"`
 }
 
@@ -236,7 +236,7 @@ func (s *Server) listTools() []ToolDefinition {
 			Name:        "read_collection",
 			Description: "Read metadata and file entries of a Peerdrive collection by its 64-hex SHA-256 hash.",
 			InputSchema: map[string]any{
-				"type": "object",
+				"type":     "object",
 				"required": []string{"hash"},
 				"properties": map[string]any{
 					"hash": map[string]any{
@@ -323,6 +323,11 @@ func RunStdio() error {
 		return fmt.Errorf("init db: %w", err)
 	}
 	defer repository.CloseDB()
+
+	// Issue #405: same idempotent legacy→file_index upgrade pass as the HTTP node.
+	if _, err := repository.BackfillFileIndexFromLegacy(cfg.StorageDir); err != nil {
+		fmt.Fprintf(os.Stderr, "file_index backfill: %v\n", err)
+	}
 
 	srv := NewServer(cfg)
 	return srv.Run(context.Background(), os.Stdin, os.Stdout)

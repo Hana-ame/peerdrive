@@ -32,14 +32,11 @@ func (s *FileService) ImportGatewayData(cid string, data []byte) (string, error)
 	if err := os.WriteFile(fullPath, data, 0644); err != nil {
 		return "", err
 	}
-	_ = repository.InsertFileMeta(&model.FileMeta{
-		Hash:     hashStr,
-		Size:     int64(len(data)),
-		Filename: cid,
-		Type:     model.FileTypeBlob,
+	// Issue #405: unified write (index authority + can't-forget mirrors).
+	_, _ = repository.RegisterFile(repository.FileRecord{
+		Hash: hashStr, Path: fullPath, Name: cid, Size: int64(len(data)),
+		Kind: model.FileTypeBlob, ProviderPath: relPath,
 	})
-	_ = repository.InsertFileProvider(hashStr, "local", relPath)
-	_, _ = repository.UpsertFileIndex(hashStr, fullPath, cid, int64(len(data)), false)
 	return hashStr, nil
 }
 
@@ -69,18 +66,15 @@ func (s *FileService) RegisterBTFile(sha256hex string, size int64, srcPath strin
 	if _, err := io.Copy(output, input); err != nil {
 		return err
 	}
-	if err := repository.InsertFileMeta(&model.FileMeta{
-		Hash:     sha256hex,
-		Size:     size,
-		Filename: filepath.Base(srcPath),
-		Type:     model.FileTypeBlob,
+	// Issue #405: unified write. RegisterFile returns an error; the BT completion
+	// callback used to ignore every DB error, so keep that contract (warn, don't
+	// abort the download) while still surfacing it in the log.
+	if _, err := repository.RegisterFile(repository.FileRecord{
+		Hash: sha256hex, Path: destPath, Name: filepath.Base(srcPath), Size: size,
+		Kind: model.FileTypeBlob, ProviderPath: relPath,
 	}); err != nil {
-		log.LogWarn("file-svc: RegisterBTFile InsertFileMeta: %v", err)
+		log.LogWarn("file-svc: RegisterBTFile RegisterFile: %v", err)
 	}
-	if err := repository.InsertFileProvider(sha256hex, "local", relPath); err != nil {
-		log.LogWarn("file-svc: RegisterBTFile InsertFileProvider: %v", err)
-	}
-	_, _ = repository.UpsertFileIndex(sha256hex, destPath, filepath.Base(srcPath), size, false)
 	return nil
 }
 
@@ -159,24 +153,14 @@ func (s *FileService) RegisterLocal(path, filename string) (string, error) {
 		}
 	}
 
-	existing, _ := repository.GetFileMeta(hash)
-	if existing == nil {
-		_ = repository.InsertFileMeta(&model.FileMeta{
-			Hash:     hash,
-			Size:     size,
-			MimeType: mimeType,
-			Gziped:   false,
-			Filename: filename,
-			Type:     repository.FileTypeBlob,
-		})
-	}
-
-	_ = repository.InsertFileProvider(hash, "local", absPath)
-
-	// Sync-register file_index (hash -> absolute path): this index is the only source of truth
-	// for "what files this node can serve externally".
-	if _, err := repository.UpsertFileIndex(hash, absPath, filename, size, false); err != nil {
-		log.LogWarn("file-svc: RegisterLocal upsert file_index %s failed: %v", hash, err)
+	// Issue #405: single unified write. The old code did meta-only-if-absent +
+	// provider + index separately, so a failure between statements left the tracks
+	// divergent; RegisterFile merges the three rules into one transaction.
+	if _, err := repository.RegisterFile(repository.FileRecord{
+		Hash: hash, Path: absPath, Name: filename, Size: size,
+		Kind: model.FileTypeBlob, MimeType: mimeType, ProviderPath: absPath,
+	}); err != nil {
+		log.LogWarn("file-svc: RegisterLocal RegisterFile %s failed: %v", hash, err)
 	}
 
 	log.LogInfo("file-svc: RegisterLocal %s -> hash=%s size=%d", absPath, hash, size)

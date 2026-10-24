@@ -1012,6 +1012,7 @@ peerjs/signalserver/p2p_bt/signalframe 是独立库，无人会 import 它，故
 - `bash scripts/test-layers.sh`：11/11 全绿
 - GitHub Actions CI（矩阵交叉编译、AOP 分层、E2E 浏览器）：31/31 全绿
 
+<<<<<<< HEAD
 ### 3.25 协议层去重收尾：media 产物重新生成 + 单一源守卫（2026-10-25，Issue #396）
 
 **复核（baseline `666fff5` → `refactor` @ `491f286`）**：
@@ -1040,6 +1041,26 @@ peerjs/signalserver/p2p_bt/signalframe 是独立库，无人会 import 它，故
 `cd back && go build -tags nosqlite ./...`；负向注入复制实现时守卫按预期失败。
 
 **回滚**：`git revert <merge-sha>` 恢复旧 dist 与旧 CI；源码层 re-export 不受影响。
+
+### 3.26 数据模型收敛 Step 1：file_index 成为唯一权威索引 (#405, 2026-10-25)
+
+**背景**：外部审计 ISSUE-10（P2 数据模型简化）指出 `file_meta` + `file_providers` 与后来的统一索引 `file_index`（sha256 → 绝对路径 + seq 同步游标）长期双轨并存。基准 `666fff5` 时两表仍在建表语句里；复核当前 `refactor`（`491f286`）确认**不是死表**——两表有 15 处生产写点（10 个文件）、10 类读方（清单见 PR #405 取证表），因此不能按「死表删除」处理。
+
+**本次落地的是三步迁移的第 1 步（不停写、不删表）**：
+
+1. **权威索引扩列**（`repository/file_index_repo.go`）：`file_index` 增加 `kind / mime_type / gziped / cid / origin`。沿用该表既有的「CREATE 全列 + ALTER 忽略 duplicate column」自迁移方式（它与 `uploader_peer_id/is_inbox` 同一模式；`file_index` 在建表顺序上晚于 `applyMigrations`，不能挂版本号迁移）。
+2. **单一写入口** `repository.RegisterFile(FileRecord)`：一个事务写 ① 权威 `file_index` 行（`origin='unified'`）② `file_meta` 兼容镜像 ③ `file_providers` local 镜像。原先每个写方各写三条语句，anon 合集、IPFS pin、通用下载器都漏了 index 那条；现在新写方不可能再漏一条腿。`UpsertFileIndex*` 保留为**纯 index 写**（P2P sync / Create 的远端路径不能伪造本地 meta），文档在函数头注明。
+3. **启动回填** `repository.BackfillFileIndexFromLegacy(storageDir)`：把旧库中 `file_meta` 有、`file_index` 无的行导入 index（`origin='legacy_backfill'`，kind/mime/cid 一并带过去），只增不删，幂等；provider 缺失时回退 CAS 布局 `<storage>/<h[:2]>/<h>`，文件已丢失的旧行跳过并计数（不对外广告坏文件）。`serverapp` / `mcp` / `media-node` 三个启动点都调用。
+4. **读路径 index-first**：`FileService.GetMeta/GetMetaByCID/ListAll`、`repository.ListAnonCollections`、`downloader.LocalFetcher` 都先读 `file_index`，`file_meta` 只作旧库兜底；`ListFileIndex/ListFileIndexSince/ListInboxFiles/search` 过滤 `kind='blob'`，防止合集 JSON 泄进 P2P list/share 面。`ClearLocalCache` 同时给 index 打 tombstone，避免 index-first 读到已清理的缓存。
+
+**为什么这一步可以单独合并**：镜像仍在、旧行不删，回滚到旧二进制后 `file_meta` 仍可读；新二进制对旧库的改动只有增列 + 增行。**未完成项**（停写镜像、URL provider 收敛、删表）与验证口径写在 `doc/TODO-SIMPLIFY.md` M2。
+
+**验证**：
+- 新增 `repository/file_backfill_test.go`：旧 schema 库（手工 DDL）打开即补列 → 回填 2 行/跳过 2 行（http-only 无本地路径、stale 文件缺失）→ 第二次回填 imported=0；旧表行数不变。
+- 新增 `repository` 双写用例：`RegisterFile` 同时写 index + 镜像且 `origin=unified`、重复注册不重复 provider、`UpsertFileIndex` 仍保持 index-only。
+- 新增 `service/file_convergence_test.go`：故意把 `file_meta.filename` 改成 stale 值，`GetMeta`/`ListAll` 必须给 index 的名字且不重复；CID 查询走 index；删除后两条轨都查不到。
+- `cd back && go build -tags nosqlite ./... && go vet -tags nosqlite ./... && go test -tags nosqlite ./... -count=1`：全绿（37 个包）。
+>>>>>>> d4b7fe5 (refactor(db): 收敛遗留 file_meta/file_providers 到 file_index（#405 Step 1）)
 
 ## 5.1 Test System
 
