@@ -81,7 +81,7 @@ CI 连续全红，最终回退了 16 个文件。典型后果：面板稳定身�
 - **第三方独立包 `peerdrive-media`**（`packages/peerdrive-media/`，无独立 repo）：浏览器经 PeerJS 信令 + WebRTC DataChannel 从 Node 端加载 URL 资源渲染 img/video。三入口：react /
   vanilla（IIFE+CDN）/ node（createPeerMediaServer）。npm 依赖用
   `github:Hana-ame/peerdrive#v0.1.0`（主 repo tag）。（`@v0.1.0` 语法 npm 不认）。
-  **改动后必须**：`npm run build`（dist 入库）+ `npm test`（21）+
+  **改动后必须**：`npm run check:dist`（build + 入库 dist 比对）+ `npm test`（22）+
   浏览器 E2E（`node ~/.claude/skills/playwright-test/scripts/test-runner.mjs
   test/e2e-browser.mjs`，10 项，本机 Firefox）。
   协议：connection 级串行、raw 序列化、64KB 块、背压 4MB。坑与浏览器 E2E

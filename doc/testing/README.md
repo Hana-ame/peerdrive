@@ -50,7 +50,7 @@ Unit "test cases" = go side `-json` pass lines with `Test` (including subcases);
 | 9 | client package unit tests | `packages/peerdrive-client/` | `npm test` (zero dependencies) | **115** | ✅ `client-package` | ❌ |
 | 10 | client public panel + browser self-check | `packages/peerdrive-client/{dist,scripts}` | `npm run check:panel`·`node scripts/verify-panel.mjs` | Panel 9 assertions | ✅ `check:panel` (artifact consistency) | ✅ **peerjs no longer fetched from CDN since v0.3.2** (embedded in the binary; CI also byte-compares the two copies) |
 | 11 | Online hosting self-check (Pages) | `packages/peerdrive-client/scripts/verify-pages.mjs` | `node scripts/verify-pages.mjs` | Online 5 assertions | ✅ `pages.yml`·`verify` (deploy then verify back, added 2026-09-21) | ✅ (verifies the online version) |
-| 12 | media package unit tests | `packages/peerdrive-media/` | `npm test` + `npm run build` | **21** | ✅ `media-package` | npm ci needed |
+| 12 | media package unit tests | `packages/peerdrive-media/` | `npm test` + `npm run check:dist` | **22** | ✅ `media-package` | npm ci needed |
 | 13 | media browser E2E (2) | `packages/peerdrive-media/test/{e2e-browser,media-node-e2e}.mjs` | playwright runner | 10 assertions + … | ❌ **(blind spot)** | ✅ (twimg images + peerjs CDN, also needs media-node running) |
 | 14 | Layered aggregation script | `scripts/test-layers.sh` | `bash scripts/test-layers.sh [--integration]` | Aggregates L0-L8 + L-sec | ❌ (local aggregation) | — |
 | 15 | Netdisk end-to-end script | `scripts/netdisk-local-demo.sh` | Starts 3 processes running full chain | 12 assertions | ✅ **`e2e.yml`** | ❌ (no external network, local processes) |

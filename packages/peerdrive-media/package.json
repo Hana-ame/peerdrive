@@ -35,6 +35,7 @@
   ],
   "scripts": {
     "build": "vite build --config vite.react.config.js && vite build --config vite.vanilla.config.js && cp src/react/index.d.ts dist/react/index.d.ts",
+    "check:dist": "npm run build && node scripts/check-dist.mjs",
     "test": "node --experimental-test-module-mocks --test \"test/*.test.mjs\"",
     "demo:signal": "peerjs --port 9100 --path /",
     "demo:server": "node demo/node-server.mjs",

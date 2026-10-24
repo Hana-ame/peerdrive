@@ -1012,6 +1012,35 @@ peerjs/signalserver/p2p_bt/signalframe 是独立库，无人会 import 它，故
 - `bash scripts/test-layers.sh`：11/11 全绿
 - GitHub Actions CI（矩阵交叉编译、AOP 分层、E2E 浏览器）：31/31 全绿
 
+### 3.25 协议层去重收尾：media 产物重新生成 + 单一源守卫（2026-10-25，Issue #396）
+
+**复核（baseline `666fff5` → `refactor` @ `491f286`）**：
+- 源码层的三份实现已由 `87d0a22`（v1.0-rc snapshot）收敛：`packages/peerdrive-core/src/protocol.js` 是唯一实现；
+  `packages/peerdrive-client/src/protocol.js`（6 行）与 `packages/peerdrive-media/src/protocol.js`（2 行）
+  只剩 `export * from '../../peerdrive-core/src/...'`；`front/package.json` 自该 commit 起声明
+  `"peerdrive-core": "file:../packages/peerdrive-core"`，源码直接 import core。
+- **但产物层仍有一份旧实现**：`packages/peerdrive-media/dist/{react/index.js,vanilla/*.js}` 是去重前的构建产物，
+  仍内嵌旧 media 协议（`JSON.parse` 版 `parseFrame`，只认 `{type}`；错误串 `peerdrive-media: unsupported
+  binary frame type`），不认 v2 `{event,req_id}` envelope 与 `PD02` 32B 头。源码改了、dist 忘了重建，
+  消费者拿到的仍是旧副本——这正是 issue 担心的漂移，只是发生在入库产物上。
+
+**修复**：
+1. 用当前源码重新生成 media dist：三个发布文件改由 core 的 `parseFrame` + `safeJsonParse` 驱动，旧副本消失。
+2. `vite.vanilla.config.js` 设 `codeSplitting: false`：`src/core.js` 懒加载 peerjs，Vite 8 默认把 ES 产物拆成
+   `peerdrive-media.es.js` + 带 hash 的 `bundler-*.js`；根 `.gitignore` 忽略 `dist/`，产物靠 `git add -f` 入库，
+   新 chunk 会被漏掉。保持单文件 ES 产物 = 维持既有发布契约。
+3. 新增 `packages/peerdrive-core/test/protocol-ssot.test.mjs`：静态断言七个协议原语（`parseFrame` /
+   `isBinaryFrame` / `toUint8Array` / `encodeBinaryHeader32` / `decodeBinaryHeader32` / `FrameDispatcher` /
+   `Sha256`）只在 core 定义、client/media 的 protocol.js 只能是 re-export、front 仍声明并 import core；
+   重新出现第二份实现即 CI 红（已用临时副本做过负向注入验证）。
+4. media `check:dist` 接入 CI：build 后 `git add -f dist` 再 `git diff --cached --exit-code -- dist`，
+   过期/缺失产物直接失败。
+
+**验证**：core 29 / client 123 / media 22 用例，front vitest + vite build，`npm run check:dist`，
+`cd back && go build -tags nosqlite ./...`；负向注入复制实现时守卫按预期失败。
+
+**回滚**：`git revert <merge-sha>` 恢复旧 dist 与旧 CI；源码层 re-export 不受影响。
+
 ## 5.1 Test System
 
 Unit tests (no network, run under race):
