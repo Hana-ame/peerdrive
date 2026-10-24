@@ -203,6 +203,13 @@ const putFile = process.env.PUT_FILE || (() => {
 })()
 const putBytes = readFileSync(putFile)
 const putExpect = createHash('sha256').update(putBytes).digest('hex')
+// [8.5] 低认知负荷改版后写操作区（本地/网络入库）默认收折在 <details> 里（渐进式披露），
+//       DOM ID 契约未动但按钮不可见 —— 先展开高级区，再走原来的入库流程。
+const writeDetails = page.locator('details', { has: page.locator('#btn-put') })
+if (!(await writeDetails.evaluate((el) => el.open))) {
+  await writeDetails.locator('summary').click()
+}
+await page.locator('#btn-put').waitFor({ state: 'visible' })
 await page.setInputFiles('#in-file', putFile)
 await page.locator('#btn-put').click()
 const putDone = await waitLog(/入库完成：.*→ sha256 ([0-9a-f]{64})/, 60000)
