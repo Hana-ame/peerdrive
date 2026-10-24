@@ -1,4 +1,4 @@
-// index.d.ts — React 入口类型声明（精简手写，覆盖主要 API）。
+// index.d.ts — React entry type declarations (minimal hand-written, covering main APIs).
 import type { ReactNode, CSSProperties, ImgHTMLAttributes, VideoHTMLAttributes } from 'react'
 
 export interface SignalingOptions {
@@ -11,7 +11,7 @@ export interface SignalingOptions {
 
 export interface LoadResult {
   blob: Blob
-  /** objectURL，用完需 URL.revokeObjectURL() */
+  /** objectURL; must call URL.revokeObjectURL() after use */
   blobUrl: string
   mime: string
   size: number

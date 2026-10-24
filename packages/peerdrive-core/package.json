@@ -31,7 +31,8 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "test": "node --test test/core.test.mjs test/security.test.mjs"
+    "test": "node --test test/core.test.mjs test/security.test.mjs test/protocol-ssot.test.mjs",
+    "test:ssot": "node --test test/protocol-ssot.test.mjs"
   },
   "types": "./src/index.d.ts"
 }

@@ -150,6 +150,7 @@ Multiple components loading the same peer share one DataConnection (reqId multip
 
 ```bash
 npm run build    # dist/react (ESM) + dist/vanilla (IIFE + ESM)
+npm run check:dist  # build + assert the committed dist/ matches the source (CI gate, #396)
 npm test         # protocol unit tests + dual-end E2E (local signaling, runs offline)
 ```
 

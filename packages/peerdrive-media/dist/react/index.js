@@ -1,19 +1,56 @@
 import { createContext as e, createElement as t, useContext as n, useEffect as r, useRef as i, useState as a } from "react";
-import * as o from "peerjs";
-import s from "peerjs";
-import { jsx as c } from "react/jsx-runtime";
+import { jsx as o } from "react/jsx-runtime";
 //#region src/react/context.js
-var l = e({});
-function u({ peer: e, signaling: n, children: r }) {
-	return t(l.Provider, { value: {
+var s = e({});
+function c({ peer: e, signaling: n, children: r }) {
+	return t(s.Provider, { value: {
 		peer: e,
 		signaling: n
 	} }, r);
 }
-function d() {
-	return n(l);
+function l() {
+	return n(s);
 }
-function f(e, t) {
+//#endregion
+//#region ../peerdrive-core/src/security.js
+var u = 8388608;
+function d(e, { maxBytes: t = u, throwOnError: n = !1 } = {}) {
+	let r = (e) => {
+		if (n) throw Error(e);
+		return null;
+	};
+	if (typeof e != "string") return r("safeJsonParse: non-string input");
+	if (e.length > t) return r(`safeJsonParse: document exceeds ${t} bytes`);
+	let i;
+	try {
+		i = JSON.parse(e);
+	} catch (e) {
+		return r(`safeJsonParse: invalid JSON (${e.message})`);
+	}
+	let a = 0, o = (e, t) => {
+		if (t > 64) throw Error("safeJsonParse: nesting too deep");
+		if (a += 1, a > 2e4) throw Error("safeJsonParse: too many nodes");
+		if (Array.isArray(e)) {
+			for (let n of e) o(n, t + 1);
+			return;
+		}
+		if (e && typeof e == "object") for (let n of Object.keys(e)) {
+			if (n === "__proto__" || n === "constructor" || n === "prototype") throw Error(`safeJsonParse: dangerous key "${n}"`);
+			o(e[n], t + 1);
+		}
+	};
+	try {
+		o(i, 0);
+	} catch (e) {
+		return r(e.message);
+	}
+	return i;
+}
+var f = 0;
+function p() {
+	return f = f + 1 & 1048575, `${Date.now().toString(36)}-${f.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+function m(e, t) {
 	return JSON.stringify({
 		type: "url",
 		url: e,
@@ -21,38 +58,77 @@ function f(e, t) {
 		v: 1
 	});
 }
-function p(e) {
-	try {
-		let t = JSON.parse(e);
-		if (typeof t == "object" && t && typeof t.type == "string") return t;
-	} catch {}
+var h = {
+	"file.req": "req",
+	"file.meta": "meta",
+	"file.data": "data",
+	"file.done": "done",
+	"file.err": "err",
+	"share.req": "share",
+	"share.resp": "share-resp",
+	"auth.psk": "psk-auth",
+	"auth.psk_ok": "psk-ok",
+	"auth.psk_err": "psk-err",
+	"admin.request": "admin",
+	"admin.response": "admin-resp",
+	"admin.binary": "admin-bin",
+	"tunnel.open": "fwd-open",
+	"tunnel.auth": "fwd-auth",
+	"tunnel.data": "fwd-data",
+	"tunnel.close": "fwd-close"
+};
+function g(e) {
+	if (typeof e != "string") return null;
+	let t = d(e, {
+		maxBytes: u,
+		throwOnError: !1
+	});
+	if (!t || typeof t != "object" || Array.isArray(t)) return null;
+	if (typeof t.type == "string") return t;
+	if (typeof t.event == "string") {
+		let e = h[t.event] || t.event.replace(/\./g, "-"), n = {
+			...t.data && typeof t.data == "object" && !Array.isArray(t.data) ? t.data : {},
+			...t,
+			type: e
+		};
+		return t.req_id && !n.reqId && (n.reqId = t.req_id), n;
+	}
 	return null;
 }
-function m(e) {
-	return typeof e != "string" && !!(e instanceof ArrayBuffer || ArrayBuffer.isView(e) || typeof Blob < "u" && e instanceof Blob);
+function _(e) {
+	return typeof e != "string" && !!(typeof ArrayBuffer < "u" && e instanceof ArrayBuffer || typeof ArrayBuffer < "u" && ArrayBuffer.isView(e) || typeof Blob < "u" && e instanceof Blob);
 }
-function h(e) {
+function v(e) {
 	if (e instanceof Uint8Array) return e;
-	if (e instanceof ArrayBuffer) return new Uint8Array(e);
-	if (ArrayBuffer.isView(e)) return new Uint8Array(e.buffer, e.byteOffset, e.byteLength);
-	throw Error("peerdrive-media: unsupported binary frame type");
-}
-function g() {
-	return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+	if (typeof ArrayBuffer < "u" && e instanceof ArrayBuffer) return new Uint8Array(e);
+	if (typeof ArrayBuffer < "u" && ArrayBuffer.isView(e)) return new Uint8Array(e.buffer, e.byteOffset, e.byteLength);
+	throw TypeError("peerdrive-core: unsupported binary frame type");
 }
 //#endregion
 //#region src/core.js
-var _ = o.Peer || s.Peer || s.default && s.default.Peer, v = {
+var y = globalThis.Peer || null, b = null;
+function x() {
+	return b ||= (async () => {
+		try {
+			let e = await import("peerjs"), t = e.default || e;
+			y = e.Peer || t.Peer || t.default && t.default.Peer || globalThis.Peer || null;
+		} catch {
+			y = globalThis.Peer || null;
+		}
+		return y;
+	})(), b;
+}
+var S = {
 	host: "0.peerjs.com",
 	port: 443,
 	secure: !0,
 	key: "peerjs",
 	path: "/"
-}, y = 5e3;
-function b(e) {
+}, C = 5e3;
+function w(e) {
 	return `${e.host}:${e.port}:${e.key}:${e.path || "/"}`;
 }
-var x = class {
+var T = class {
 	constructor(e, t) {
 		this.peerId = e, this.signaling = t, this.peer = null, this.controlConn = null, this.ready = !1, this.closed = !1, this.opening = !1, this.pending = /* @__PURE__ */ new Map(), this.lastActive = 0, this.kaTimer = null, this.pool = [], this.inUse = /* @__PURE__ */ new Set(), this.poolSize = 2;
 	}
@@ -89,7 +165,7 @@ var x = class {
 		this.sendFileRequest(e, t, n, r);
 	}
 	sendFileRequest(e, t, n, r) {
-		let i = g(), a, o = !1;
+		let i = p(), a, o = !1;
 		this.pool.length > 0 ? (a = this.pool.shift(), o = !0) : a = this.peer.connect(this.peerId, {
 			reliable: !0,
 			serialization: "raw",
@@ -123,14 +199,14 @@ var x = class {
 			r.addEventListener("abort", e), s._onAbort = e;
 		}
 		if (this.pending.set(i, s), o) try {
-			a.send(f(e, i));
+			a.send(m(e, i));
 		} catch (e) {
 			this.pending.delete(i), s.cleanup(), n(e);
 		}
 		else {
 			let t = () => {
 				try {
-					a.send(f(e, i));
+					a.send(m(e, i));
 				} catch (e) {
 					this.pending.delete(i), s.cleanup(), n(e);
 				}
@@ -150,8 +226,13 @@ var x = class {
 		};
 		a.on("error", u), s._listeners.error = u;
 	}
-	open() {
-		let e = this.signaling, t = typeof window < "u" && window.__PDM_DEBUG ? 3 : 0, n = new _(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
+	async open() {
+		let e = this.signaling, t = typeof window < "u" && window.__PDM_DEBUG ? 3 : 0, n = globalThis.Peer || await x();
+		if (!n) {
+			this.failAll("peerjs 不可用：等 window.Peer 就绪，或确认 dynamic import 成功");
+			return;
+		}
+		let r = new n(`pd-b-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`, {
 			host: e.host,
 			port: e.port,
 			secure: e.secure,
@@ -160,20 +241,20 @@ var x = class {
 			config: e.config || { iceServers: [] },
 			debug: t
 		});
-		this.peer = n;
-		let r = setTimeout(() => {
+		this.peer = r;
+		let i = setTimeout(() => {
 			!this.ready && !this.closed && this.failAll("peerjs signaling timeout");
 		}, 15e3);
-		n.on("error", (e) => {
-			clearTimeout(r), !this.ready && !this.closed && this.failAll(`peerjs error: ${e?.type || e}`);
-		}), n.on("open", () => {
-			let e = n.connect(this.peerId, {
+		i.unref?.(), r.on("error", (e) => {
+			clearTimeout(i), !this.ready && !this.closed && this.failAll(`peerjs error: ${e?.type || e}`);
+		}), r.on("open", () => {
+			let e = r.connect(this.peerId, {
 				reliable: !0,
 				serialization: "raw",
 				label: "control"
 			});
 			this.controlConn = e, e.on("open", () => {
-				if (clearTimeout(r), this.opening = !1, this.ready = !0, this.startKeepalive(), this._waitingForReady && this._waitingForReady.length) {
+				if (clearTimeout(i), this.opening = !1, this.ready = !0, this.startKeepalive(), this._waitingForReady && this._waitingForReady.length) {
 					let e = this._waitingForReady;
 					this._waitingForReady = null;
 					for (let t of e) t.signal && t.signal.removeEventListener("abort", t._onAbort), this.sendFileRequest(t.url, t.resolve, t.reject, t.signal);
@@ -185,18 +266,18 @@ var x = class {
 		});
 	}
 	handleControlData(e) {
-		this.lastActive = Date.now(), typeof e != "string" || p(e)?.type;
+		this.lastActive = Date.now(), this._kaTicks = 0, typeof e != "string" || g(e)?.type;
 	}
 	handleFileData(e, t) {
-		this.lastActive = Date.now();
+		this.lastActive = Date.now(), this._kaTicks = 0;
 		let n = this.pending.get(e);
 		if (!n) return;
-		if (m(t)) {
-			let e = h(t);
+		if (_(t)) {
+			let e = v(t);
 			n.chunks.push(e), n.got += e.length;
 			return;
 		}
-		let r = p(t);
+		let r = g(t);
 		if (r) switch (r.type) {
 			case "meta":
 				n.mime = r.mime || "application/octet-stream", n.size = r.size || 0, r.status >= 400 && (this.pending.delete(e), n.cleanup(), n.reject(/* @__PURE__ */ Error(`peerdrive-media: upstream ${r.status}`)));
@@ -220,19 +301,19 @@ var x = class {
 		}
 	}
 	startKeepalive() {
-		this.lastActive = Date.now(), this.kaTimer = setInterval(() => {
+		this.lastActive = Date.now(), this._kaTicks = 0, this.kaTimer = setInterval(() => {
 			if (this.closed) {
 				clearInterval(this.kaTimer);
 				return;
 			}
-			if (Date.now() - this.lastActive > 15e3) {
+			if (this._kaTicks = (this._kaTicks || 0) + 1, Date.now() - this.lastActive > 15e3 || this._kaTicks * 5e3 >= 15e3) {
 				clearInterval(this.kaTimer), this.teardown("keepalive timeout");
 				return;
 			}
 			try {
 				this.controlConn && this.controlConn.send(JSON.stringify({ type: "ping" }));
 			} catch {}
-		}, y);
+		}, C), this.kaTimer.unref?.();
 	}
 	warmUp() {
 		let e = [];
@@ -277,28 +358,28 @@ var x = class {
 		} catch {}
 		this.peer = null, this.controlConn = null;
 	}
-}, S = new class {
+}, E = new class {
 	constructor() {
 		this.slots = /* @__PURE__ */ new Map();
 	}
-	async load(e, { peer: t, signaling: n = v, signal: r } = {}) {
+	async load(e, { peer: t, signaling: n = S, signal: r } = {}) {
 		if (!t) throw Error("peerdrive-media: peer (node peer id) is required");
 		if (!e || typeof e != "string") throw Error("peerdrive-media: url is required");
-		let i = `${b(n)}|${t}`, a = this.slots.get(i);
-		if ((!a || a.closed) && (a = new x(t, n), this.slots.set(i, a)), r?.aborted) throw new DOMException("aborted", "AbortError");
+		let i = `${w(n)}|${t}`, a = this.slots.get(i);
+		if ((!a || a.closed) && (a = new T(t, n), this.slots.set(i, a)), r?.aborted) throw new DOMException("aborted", "AbortError");
 		return new Promise((t, n) => {
 			a.request(e, t, n, r);
 		});
 	}
-	dispose(e, t = v) {
-		let n = `${b(t)}|${e}`, r = this.slots.get(n);
+	dispose(e, t = S) {
+		let n = `${w(t)}|${e}`, r = this.slots.get(n);
 		r && (r.failAll("disposed"), this.slots.delete(n));
 	}
 }();
 //#endregion
 //#region src/react/usePeerMedia.js
-function C({ url: e, peer: t, signaling: n } = {}) {
-	let o = d(), s = t || o.peer, c = n || o.signaling, [l, u] = a({
+function D({ url: e, peer: t, signaling: n } = {}) {
+	let o = l(), s = t || o.peer, c = n || o.signaling, [u, d] = a({
 		status: "idle",
 		src: null,
 		mime: null,
@@ -306,7 +387,7 @@ function C({ url: e, peer: t, signaling: n } = {}) {
 	}), [f, p] = a(0), m = i(null);
 	return r(() => {
 		if (!s || !e) {
-			u({
+			d({
 				status: "idle",
 				src: null,
 				mime: null,
@@ -315,12 +396,12 @@ function C({ url: e, peer: t, signaling: n } = {}) {
 			return;
 		}
 		let t = new AbortController();
-		return u({
+		return d({
 			status: "loading",
 			src: null,
 			mime: null,
 			error: null
-		}), S.load(e, {
+		}), E.load(e, {
 			peer: s,
 			signaling: c,
 			signal: t.signal
@@ -329,14 +410,14 @@ function C({ url: e, peer: t, signaling: n } = {}) {
 				URL.revokeObjectURL(e.blobUrl);
 				return;
 			}
-			m.current = e.blobUrl, u({
+			m.current = e.blobUrl, d({
 				status: "ready",
 				src: e.blobUrl,
 				mime: e.mime,
 				error: null
 			});
 		}).catch((e) => {
-			e.name !== "AbortError" && u({
+			e.name !== "AbortError" && d({
 				status: "error",
 				src: null,
 				mime: null,
@@ -351,81 +432,81 @@ function C({ url: e, peer: t, signaling: n } = {}) {
 		c,
 		f
 	]), {
-		...l,
+		...u,
 		reload: () => p((e) => e + 1)
 	};
 }
 //#endregion
 //#region src/react/components.jsx
-function w(e) {
+function O(e) {
 	return typeof e == "string" && e.startsWith("image/");
 }
-function T(e) {
+function k(e) {
 	return typeof e == "string" && e.startsWith("video/");
 }
-function E(e, { loading: t, error: n }) {
-	return e.status === "loading" ? t ?? /* @__PURE__ */ c("span", {
+function A(e, { loading: t, error: n }) {
+	return e.status === "loading" ? t ?? /* @__PURE__ */ o("span", {
 		className: "pm-loading",
 		children: "loading…"
-	}) : e.status === "error" ? n ?? /* @__PURE__ */ c("span", {
+	}) : e.status === "error" ? n ?? /* @__PURE__ */ o("span", {
 		className: "pm-error",
 		children: String(e.error?.message || e.error)
 	}) : null;
 }
-function D({ url: e, peer: t, signaling: n, alt: r = "", loading: i, error: a, ...o }) {
-	let s = C({
+function j({ url: e, peer: t, signaling: n, alt: r = "", loading: i, error: a, ...s }) {
+	let c = D({
 		url: e,
 		peer: t,
 		signaling: n
 	});
-	return s.status === "ready" ? /* @__PURE__ */ c("img", {
-		src: s.src,
+	return c.status === "ready" ? /* @__PURE__ */ o("img", {
+		src: c.src,
 		alt: r,
-		...o
-	}) : E(s, {
+		...s
+	}) : A(c, {
 		loading: i,
 		error: a
 	});
 }
-function O({ url: e, peer: t, signaling: n, controls: r = !0, loading: i, error: a, ...o }) {
-	let s = C({
+function M({ url: e, peer: t, signaling: n, controls: r = !0, loading: i, error: a, ...s }) {
+	let c = D({
 		url: e,
 		peer: t,
 		signaling: n
 	});
-	return s.status === "ready" ? /* @__PURE__ */ c("video", {
-		src: s.src,
+	return c.status === "ready" ? /* @__PURE__ */ o("video", {
+		src: c.src,
 		controls: r,
-		...o
-	}) : E(s, {
+		...s
+	}) : A(c, {
 		loading: i,
 		error: a
 	});
 }
-function k({ url: e, peer: t, signaling: n, loading: r, error: i, imgProps: a = {}, videoProps: o = {} }) {
-	let s = C({
+function N({ url: e, peer: t, signaling: n, loading: r, error: i, imgProps: a = {}, videoProps: s = {} }) {
+	let c = D({
 		url: e,
 		peer: t,
 		signaling: n
 	});
-	return s.status === "ready" ? w(s.mime) ? /* @__PURE__ */ c("img", {
-		src: s.src,
+	return c.status === "ready" ? O(c.mime) ? /* @__PURE__ */ o("img", {
+		src: c.src,
 		alt: "",
 		...a
-	}) : T(s.mime) ? /* @__PURE__ */ c("video", {
-		src: s.src,
+	}) : k(c.mime) ? /* @__PURE__ */ o("video", {
+		src: c.src,
 		controls: !0,
-		...o
-	}) : /* @__PURE__ */ c("a", {
-		href: s.src,
+		...s
+	}) : /* @__PURE__ */ o("a", {
+		href: c.src,
 		download: !0,
 		target: "_blank",
 		rel: "noreferrer",
 		children: e
-	}) : E(s, {
+	}) : A(c, {
 		loading: r,
 		error: i
 	});
 }
 //#endregion
-export { v as DEFAULT_SIGNALING, D as PeerImage, k as PeerMedia, l as PeerMediaContext, u as PeerMediaProvider, O as PeerVideo, S as defaultClient, C as usePeerMedia };
+export { S as DEFAULT_SIGNALING, j as PeerImage, N as PeerMedia, s as PeerMediaContext, c as PeerMediaProvider, M as PeerVideo, E as defaultClient, D as usePeerMedia };

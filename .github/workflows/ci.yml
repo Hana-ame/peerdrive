@@ -137,7 +137,8 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./... -count=1
 
-  # packages/peerdrive-media：21 个用例（含 wrtc 的 node↔node E2E），dist 入库前必跑。
+  # packages/peerdrive-media：22 个用例（含 wrtc 的 node↔node E2E）。
+  # dist 入库时曾漏重建：旧协议实现一直留在产物里（#396），所以构建后强制比对 dist。
   media-package:
     runs-on: ubuntu-latest
     defaults:
@@ -152,7 +153,8 @@ jobs:
           cache-dependency-path: packages/peerdrive-media/package-lock.json
       - run: npm ci
       - run: npm test
-      - run: npm run build
+      - name: 构建并校验入库 dist 与源码一致（#396 防旧协议实现再次入库）
+        run: npm run check:dist
 
   # packages/peerdrive-client：纯 WebRTC 消费端（61 个用例，覆盖协议状态机 +
   # 增量 SHA-256）。刻意零依赖——所以这里不需要 npm ci：没有 lock 文件、
