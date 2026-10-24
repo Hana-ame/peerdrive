@@ -182,7 +182,7 @@ different surface.
 | `back/internal/embedding/client_test.go` | 26 tests, all against `httptest` servers — no live service needed |
 | `back/internal/controller/embedding.go` | The four HTTP handlers |
 | `back/internal/router/router.go` | Route registration, gated on `deps.EmbeddingClient != nil` |
-| `back/cmd/peerdrive/embed.go` | `peerdrive embed` subcommand |
+| `back/internal/cli/embed.go` | `peerdrive embed` subcommand |
 | `scripts/start-embeddinggemma.bat` | Windows one-click service launcher |
 
 ## Startup behaviour

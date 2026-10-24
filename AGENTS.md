@@ -149,6 +149,8 @@ CI 连续全红，最终回退了 16 个文件。典型后果：面板稳定身�
   - `.github/workflows/go-build.yml`：5 个平台交叉构建矩阵
     （linux amd64/arm64、windows amd64、darwin amd64/arm64），
     `go build -tags nosqlite ./cmd/peerdrive/`（单二进制：serve/signal/reg/all 四个子命令）+ 非 Windows 跑 `go test -tags nosqlite ./...`。
+    windows 格另编两个平台入口：`./cmd/peerdrive-win/`（系统托盘）与
+    `./cmd/peerdrive-win7/`（386 最小引用，Win7 老机器，入口分化见 doc/MODULE-MAP.md）。
     **跨平台的调度差异会放大时序敏感的竞态**，只在本机 Linux 跑通不代表这里绿——
     2026-09-20 就是靠它暴露了 `internal/source` 一个 ~1% 的竞速用例偶发失败
     （本机 `-count=400` 也能复现，见 REFACTOR §3.20）。
@@ -175,7 +177,7 @@ CI 连续全红，最终回退了 16 个文件。典型后果：面板稳定身�
 | workflow | 触发 | 覆盖 |
 |---|---|---|
 | `ci.yml` | push 到 `main`/`master`/`refactor`/`base`/`docs`/`feat/*`/`fix/*`/`module/*`/`*-agent`/`*-frontend`，或 tag `v*`；PR 到 `main`/`master`/`refactor` | `backend`（`go vet` + `go test` + 构建 `./cmd/peerdrive/`）、`integration`（脱外网，`-p 1` 串行）、`peerjs` 独立模块、`media-package`、`client-package`（`npm test` + `check:panel` + 与内嵌副本逐字节比对）、`frontend`（`npm test` + `npm run build`）、`doc-refs` |
-| `go-build.yml` | push / PR（任意分支） | `build`：5 平台交叉构建 + `go test -tags nosqlite ./...`（**Windows 那格也跑测试**，2026-09-20 起不再跳过）；`submodules`：`back/signalserver` 与 `back/p2p_bt` 的 vet/test/build，外加集成测试的 vet 与编译 |
+| `go-build.yml` | push / PR（任意分支） | `build`：5 平台交叉构建（windows 格另编 `./cmd/peerdrive-win/` 托盘入口与 `./cmd/peerdrive-win7/` 386 最小入口）+ `go test -tags nosqlite ./...`（**Windows 那格也跑测试**，2026-09-20 起不再跳过）；`submodules`：`back/signalserver` 与 `back/p2p_bt` 的 vet/test/build，外加集成测试的 vet 与编译 |
 | `e2e.yml` | PR；push 到 `refactor` 且动到 `back/**` 等；手动 | 真起信令 + 两节点跑通链路断言，再用 bundled chromium 真实浏览器点面板 |
 | `pages.yml` | push 到 `refactor` 且动到 `front/**`；手动 | 构建并部署前端站点，部署后回探线上 |
 | `release.yml` | tag `v*`；手动（`dry_run` 默认开，只跑门禁不出包） | `gate` 不绿就不出包——发版门禁长在 release 自己身上（workflow 之间没有 `needs`） |

@@ -1,4 +1,4 @@
-package main
+package cli
 
 // check-update / update 两个子命令的实现。
 //

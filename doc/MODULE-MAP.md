@@ -1,6 +1,6 @@
 # Peerdrive Module Map
 
-> 数据截至 `refactor` @ `6d21408`（2026-10-13）。单仓库多模块：Go 模块在 `back/` 下平铺，
+> 数据截至 `feat/platform-build-entries`（2026-10-24，平台入口分化；基线 `refactor` @ `6d21408`）。单仓库多模块：Go 模块在 `back/` 下平铺，
 > 前端/npm 包在 `front/` + `packages/` 下。
 
 ## 构建期依赖图
@@ -8,7 +8,7 @@
 ```mermaid
 graph LR
   subgraph GO["Go 模块（单仓 monorepo）"]
-    SERVER["peerdrive 二进制<br/>back/cmd/peerdrive + cmd/server<br/>(节点主服务)"]
+    SERVER["peerdrive 二进制<br/>back/cmd/peerdrive · peerdrive-win · peerdrive-win7<br/>internal/cli 调度 + internal/tray 托盘（Win only）"]
     PEERJS["go-peerjs<br/>back/peerjs<br/>WebRTC DataChannel 协议"]
     BT["go-peerdrive-bt<br/>back/p2p_bt<br/>BT DHT 发现"]
     SF["go-signalframe<br/>back/signalframe<br/>信令帧协议"]
@@ -57,7 +57,7 @@ graph LR
 
 | 模块 | 位置 | 职责 | 依赖 |
 |---|---|---|---|
-| peerdrive（server） | back/（cmd/server、cmd/peerdrive） | 节点主服务：HTTP REST、存储、P2P 拉取、内嵌面板/peerjs 副本 | peerjs、p2p_bt、signalframe(i)、signalserver |
+| peerdrive（server） | back/（cmd/peerdrive、cmd/peerdrive-win、cmd/peerdrive-win7、cmd/server；internal/cli、internal/tray） | 节点主服务：HTTP REST、存储、P2P 拉取、内嵌面板/peerjs 副本；平台入口分化见下节 | peerjs、p2p_bt、signalframe(i)、signalserver |
 | go-peerjs | back/peerjs | WebRTC DataChannel 协议库（拨号/分片/增量 SHA-256） | signalframe、pion/webrtc/v4 |
 | go-peerdrive-bt | back/p2p_bt | BT DHT 节点发现模块 | anacrolix/torrent |
 | go-signalframe | back/signalframe | 信令帧协议（信号与 WS 帧定义），leaf | 无 |
@@ -78,3 +78,27 @@ graph LR
 3. **发现双通道**：HTTP/WS 信令（signalserver）+ BT DHT（p2p_bt）两条节点发现路径。
 4. **面板内嵌**：front 构建出 panel.html，server 二进制内嵌并在 /panel 服务（CI 校验内嵌副本与 dist/ 一致）；
    `pd-client` 内嵌副本已删除（防回归）。
+
+## 平台入口分化（2026-10-24）
+
+一个调度核心（`back/internal/cli`）+ 四个薄入口。入口之间**零逻辑复制**：差别只在
+启动时传的平台选项，serve/signal/reg/all 等全部子命令走同一份代码。
+
+| 入口 | 构建命令 | 目标平台 | 托盘 | import 面 |
+|---|---|---|---|---|
+| `back/cmd/peerdrive/` | `make build` | linux / darwin / windows 通用 | 无 | internal/cli（全子命令） |
+| `back/cmd/peerdrive-win/` | `make build-win` | windows | 有 | 同左 + `Options.Tray=true` |
+| `back/cmd/peerdrive-win7/` | `make build-win7` | windows（GOARCH=386） | 无 | 仅 gin + serverapp + version，与 `back/cmd/server/` 同级 |
+| `back/cmd/server/` | `make build-server` | 通用（向后兼容） | 无 | 仅 gin + serverapp |
+
+- **托盘只在 Windows 编译进二进制**：`back/internal/tray` 用 `//go:build windows`
+  分流；非 Windows 平台 `Available()` 恒假，链接期不带任何 Win32 代码。
+  实现是 LazyDLL 直调 user32/shell32（x/sys 早已不包装这些 API），无新增模块依赖。
+- **运行期开关**：`PEERDRIVE_TRAY=0` 强制关闭托盘（服务化、CI、远程桌面场景）。
+- **Win7 工具链 caveat**：Go 1.22+ 运行时不再支持 Win7（最后支持 1.21）。当前
+  `back/go.mod` 为 `go 1.26.2`，要在 Win7 上运行需先 `go mod edit -go=1.21`
+  再用 Go ≤1.21 工具链构建 `./cmd/peerdrive-win7/`。该入口只用长期稳定 API，
+  老工具链下无语法/标准库障碍。
+- **32 位编译**：`back/internal/downloader` 的 8GB 单次拉取上限已定型为 `int64`——
+  未定型常量在 386 上是编译期错误（`overflows int`），修完后整模块
+  windows/386 可编（CI 的 windows 格覆盖 `./cmd/peerdrive-win7/` 的 386 构建）。

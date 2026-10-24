@@ -460,7 +460,7 @@ func TestSignalKeyDefaultsAreUnified(t *testing.T) {
 	//    客户端默认值（config.DefaultSignalKey = "peerjs"）与自托管服务器默认值
 	//    （signalserver.DefaultKey = "pd-signal-..."）故意不同。
 	for _, c := range []struct{ rel, want, why string }{
-		{"back/cmd/peerdrive/subcommands.go",
+		{"back/internal/cli/subcommands.go",
 			`cfg.PeerJSKey`,
 			"peerdrive signal 的 -key 默认值（via config.Load → DefaultSignalKey）"},
 		{"back/internal/config/config.go",
