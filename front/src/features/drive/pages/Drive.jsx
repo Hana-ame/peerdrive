@@ -1,12 +1,14 @@
 // Module ②: My Cloud Drive —— Top-level page orchestration (AGENTS.md §1 compliant).
 // File CRUD lives in hooks/useDriveFiles.js; remote casting in hooks/useDriveCast.js;
-// category/menu builders in utils/{categories,contextMenuItems}.js.
+// progressive-disclosure metadata lives in FileInspectorDrawer.jsx.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import * as ws from '../../../platform/transport-ws';
 import { getNodeSession, onNodeSession } from '../../../lib/nodeSession';
 import { mimeOf } from '../../../platform/shared/mime';
+import { fmtBytes } from '../../../platform/shared/format';
 import FilePreviewModal from '../../../components/netdisk/FilePreviewModal';
+import FileInspectorDrawer from '../../../components/netdisk/FileInspectorDrawer';
 import DataState from '../../../components/netdisk/DataState';
 import DriveGridView from '../components/DriveGridView';
 import DriveListView from '../components/DriveListView';
@@ -38,7 +40,9 @@ export default function Drive() {
   const [editingTagFile, setEditingTagFile] = useState(null);
   const [tagInputText, setTagInputText] = useState('');
   const [previewFile, setPreviewFile] = useState(null);
+  const [inspectedFile, setInspectedFile] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
 
   const {
     files,
@@ -85,6 +89,22 @@ export default function Drive() {
     if (e.target.closest('[data-context-target]')) return;
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY, file: null });
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+    const dropped = e.dataTransfer?.files?.[0];
+    if (!dropped || peerSession?.client) return;
+    setBusy(true);
+    try {
+      await ws.upload(dropped, dropped.name, 'file', '/files/upload');
+      await load();
+    } catch (ex) {
+      setErr(ex?.message || String(ex));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const openTagEditor = (f) => {
@@ -139,6 +159,11 @@ export default function Drive() {
       });
   }, [files, searchQuery, selectedCategory, selectedTag, fileTags, sortBy, sortOrder]);
 
+  const totalBytes = useMemo(
+    () => (files || []).reduce((acc, f) => acc + (Number(f.size) || 0), 0),
+    [files]
+  );
+
   const viewProps = {
     files: filteredFiles,
     deepHash,
@@ -146,6 +171,7 @@ export default function Drive() {
     getFileIcon,
     openTagEditor,
     setPreviewFile,
+    setInspectedFile,
     onDownload,
     openCastModal,
     onCopyDeepLink,
@@ -156,7 +182,25 @@ export default function Drive() {
   };
 
   return (
-    <div className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden h-full max-w-full" onContextMenu={handleContainerContextMenu}>
+    <div
+      className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden h-full max-w-full relative"
+      onContextMenu={handleContainerContextMenu}
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (!peerSession?.client) setIsDraggingOver(true);
+      }}
+      onDragLeave={() => setIsDraggingOver(false)}
+      onDrop={handleDrop}
+    >
+      {isDraggingOver && (
+        <div className="fixed inset-4 z-30 rounded-2xl border-2 border-dashed border-brand-400 bg-brand-500/15 backdrop-blur-xs flex items-center justify-center pointer-events-none">
+          <div className="px-6 py-4 rounded-xl bg-surface-card border border-brand-400/40 text-center shadow-2xl">
+            <p className="text-base font-semibold text-brand-200">📥 释放鼠标立即上传至网盘</p>
+            <p className="text-xs text-gray-400 mt-1">自动计算 SHA-256 指纹并执行内容寻址去重</p>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-5xl mx-auto">
         <DriveToolbar
           sortBy={sortBy}
@@ -168,6 +212,10 @@ export default function Drive() {
           busy={busy}
           onPick={onPick}
           fileRef={fileRef}
+          fileCount={files?.length ?? 0}
+          totalBytes={fmtBytes(totalBytes)}
+          isRemotePeer={Boolean(peerSession?.client)}
+          peerId={peerSession?.peerId}
         />
 
         {err && (
@@ -208,7 +256,7 @@ export default function Drive() {
             description: !peerSession?.client && files?.length === 0
               ? 'Connect to an online node in Plaza to access files, or connect a local backend.'
               : files?.length === 0
-                ? (peerSession?.client ? 'This remote node has not shared any public files yet.' : 'Click "Upload File" in the top right or register local paths on the backend.')
+                ? (peerSession?.client ? 'This remote node has not shared any public files yet.' : 'Click "Upload File" in the top right or drag & drop files anywhere on this page.')
                 : 'Try adjusting your search query, category, or tag filter.',
             actionLabel: !peerSession?.client && files?.length === 0
               ? 'Find & Connect Node'
@@ -235,6 +283,21 @@ export default function Drive() {
           setTagInputText={setTagInputText}
           onSave={saveTags}
           onClose={() => setEditingTagFile(null)}
+        />
+
+        <FileInspectorDrawer
+          file={inspectedFile}
+          tags={inspectedFile ? (fileTags[inspectedFile.hash] || []) : []}
+          icon={inspectedFile ? getFileIcon(inspectedFile) : '📄'}
+          copiedHash={copiedHash}
+          onClose={() => setInspectedFile(null)}
+          onPreview={(f) => setPreviewFile(f)}
+          onDownload={(f) => onDownload(f)}
+          onCopyDeepLink={(f) => onCopyDeepLink(f)}
+          onShare={(f) => onShare(f)}
+          onOpenTagEditor={(f) => openTagEditor(f)}
+          onOpenCastModal={(f) => openCastModal(f)}
+          onDelete={(f) => onDelete(f)}
         />
 
         {previewFile && (

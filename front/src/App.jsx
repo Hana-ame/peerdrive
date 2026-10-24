@@ -1,7 +1,7 @@
-// App.jsx — Reset UI/UX App Shell with Direct Canonical URL routing (#/f/:sha256 & #/c/:hash),
-// Quick Address/Hash Jump Bar, and Mobile-First Responsive Shell.
+// App.jsx — Low-Cognitive-Load Cloud Drive Shell with Direct Canonical URL routing (#/f/:sha256 & #/c/:hash),
+// Smart Omni-Jump Bar, Progressive-Disclosure Navigation, and Floating TransferDock.
 import React, { useEffect, useState, Suspense, lazy } from 'react';
-import { HashRouter, Routes, Route, Link, useNavigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { registerSW } from './platform/shared/swBridge';
 import { parseDirectTarget } from './platform/shared';
 import ConnectionStatus from './lib/ConnectionStatus';
@@ -10,6 +10,7 @@ import { I18nProvider, useI18n } from './context/I18nContext';
 import LanguageSelector from './components/LanguageSelector';
 import ErrorBoundary from './components/ErrorBoundary';
 import { MobileNavDrawer, MobileBottomBar } from './components/MobileNav';
+import TransferDock from './components/netdisk/TransferDock';
 import { AppProvider } from './context/AppContext';
 import { getNodeSession, onNodeSession } from './lib/nodeSession';
 
@@ -49,25 +50,28 @@ function RouteLoading() {
 }
 
 const ALWAYS_NAV = [
-  { to: '/', label: 'Connect', labelKey: 'nav.connect', icon: '🌐' },
-  { to: '/display', label: 'Display', labelKey: 'nav.display', icon: '📺' },
+  { to: '/', label: 'Connect', labelKey: 'nav.connect', icon: '🌐', core: true },
+  { to: '/display', label: 'Display', labelKey: 'nav.display', icon: '📺', core: false },
 ];
 
+// 为什么按 core 与扩展分层（认知负荷优化，Hick's Law）：
+// 主工作区仅突出「我的网盘 / 合集管理 / 传输列表」3 个高频核心入口；
+// 节点底层控制与可选插件（BT/IPFS/Iwara/设置）收束至右侧次级区，避免 10 个平铺标签造成视觉轰炸。
 const OWNER_NAV = [
-  { to: '/drive', label: 'Drive', labelKey: 'nav.drive', icon: '☁️' },
-  { to: '/node', label: 'Node', labelKey: 'nav.node', icon: '💻' },
-  { to: '/collections', label: 'Collections', labelKey: 'nav.collections', icon: '📦' },
-  { to: '/transfers', label: 'Transfers', labelKey: 'nav.transfers', icon: '⚡' },
-  { to: '/bt', label: 'BT', labelKey: 'nav.bt', icon: '🧲' },
-  { to: '/ipfs', label: 'IPFS', labelKey: 'nav.ipfs', icon: '🧊' },
-  { to: '/iwara', label: 'Iwara', labelKey: 'nav.iwara', icon: '🎬' },
-  { to: '/settings', label: 'Settings', labelKey: 'nav.settings', icon: '⚙️' },
+  { to: '/drive', label: 'Drive', labelKey: 'nav.drive', icon: '☁️', core: true },
+  { to: '/collections', label: 'Collections', labelKey: 'nav.collections', icon: '📦', core: true },
+  { to: '/transfers', label: 'Transfers', labelKey: 'nav.transfers', icon: '⚡', core: true },
+  { to: '/node', label: 'Node', labelKey: 'nav.node', icon: '💻', core: false },
+  { to: '/bt', label: 'BT', labelKey: 'nav.bt', icon: '🧲', core: false },
+  { to: '/ipfs', label: 'IPFS', labelKey: 'nav.ipfs', icon: '🧊', core: false },
+  { to: '/iwara', label: 'Iwara', labelKey: 'nav.iwara', icon: '🎬', core: false },
+  { to: '/settings', label: 'Settings', labelKey: 'nav.settings', icon: '⚙️', core: false },
 ];
 
 const GUEST_NAV = [
-  { to: '/collections', label: 'Collections', labelKey: 'nav.collections', icon: '📦' },
-  { to: '/drive', label: 'Drive', labelKey: 'nav.drive', icon: '☁️' },
-  { to: '/transfers', label: 'Transfers', labelKey: 'nav.transfers', icon: '⚡' },
+  { to: '/drive', label: 'Drive', labelKey: 'nav.drive', icon: '☁️', core: true },
+  { to: '/collections', label: 'Collections', labelKey: 'nav.collections', icon: '📦', core: true },
+  { to: '/transfers', label: 'Transfers', labelKey: 'nav.transfers', icon: '⚡', core: true },
 ];
 
 function QuickJumpInput() {
@@ -77,7 +81,10 @@ function QuickJumpInput() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const target = parseDirectTarget(val, kind);
+    const raw = val.trim();
+    if (!raw) return;
+    // 智能识别：若粘贴内容自带 /f/、/c/、?hash= 等 URL 特征，无需用户手选下拉框即可自动推断
+    const target = parseDirectTarget(raw, kind);
     if (target.kind === 'unknown' || !target.route) return;
     navigate(target.route);
     setVal('');
@@ -86,8 +93,9 @@ function QuickJumpInput() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="hidden lg:flex items-center gap-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1 max-w-xs"
+      className="hidden lg:flex items-center gap-1 bg-white/[0.04] border border-white/[0.08] rounded-xl px-2.5 py-1 max-w-xs focus-within:border-brand-400/50 transition-colors"
       data-testid="quick-jump-form"
+      title="智能直达栏：直接粘贴分享链接、文件 SHA256 或合集 Hash 即可秒开"
     >
       <select
         value={kind}
@@ -95,20 +103,20 @@ function QuickJumpInput() {
         aria-label="Direct address target type"
         className="bg-transparent text-[11px] text-gray-400 focus:outline-none cursor-pointer"
       >
-        <option value="file" className="bg-gray-900">SHA 文件</option>
-        <option value="collection" className="bg-gray-900">合集 Hash</option>
+        <option value="file" className="bg-gray-900">📄 文件</option>
+        <option value="collection" className="bg-gray-900">📦 合集</option>
       </select>
       <input
         type="text"
         value={val}
         onChange={(e) => setVal(e.target.value)}
-        placeholder="粘贴 SHA256 / 合集 URL 直达…"
+        placeholder="粘贴分享链接或唯一码直达…"
         className="bg-transparent text-xs text-gray-200 placeholder-gray-500 focus:outline-none w-40 font-mono"
         data-testid="quick-jump-input"
       />
       <button
         type="submit"
-        className="text-[11px] px-1.5 py-0.5 rounded bg-brand-500/20 text-brand-300 hover:bg-brand-500/30 transition-colors"
+        className="text-[11px] px-2 py-0.5 rounded-md bg-brand-500/20 text-brand-300 hover:bg-brand-500/30 transition-colors font-medium"
       >
         直达
       </button>
@@ -118,6 +126,19 @@ function QuickJumpInput() {
 
 function Nav({ onOpenDrawer, isOpen, navItems }) {
   const { t } = useI18n();
+  const location = useLocation();
+  const coreItems = navItems.filter((it) => it.core);
+  const extItems = navItems.filter((it) => !it.core);
+
+  const navLinkCls = (to) => {
+    const active = location.pathname === to || (to !== '/' && location.pathname.startsWith(to + '/'));
+    return `text-sm px-2.5 py-1.5 rounded-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+      active
+        ? 'bg-brand-500/20 text-brand-200 font-medium border border-brand-500/30'
+        : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
+    }`;
+  };
+
   return (
     <nav className="h-14 bg-surface-raised/85 backdrop-blur-xl border-b border-white/[0.08] flex items-center px-3 md:px-6 gap-2 shrink-0 select-none">
       {/* Mobile Drawer Toggle */}
@@ -140,26 +161,28 @@ function Nav({ onOpenDrawer, isOpen, navItems }) {
 
       <div className="hidden md:flex items-center gap-1 min-w-0 overflow-x-auto no-scrollbar">
         {ALWAYS_NAV.map((it) => (
-          <Link
-            key={it.to}
-            to={it.to}
-            className="text-sm text-gray-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors whitespace-nowrap"
-          >
-            {it.labelKey ? t(it.labelKey) : it.label}
+          <Link key={it.to} to={it.to} className={navLinkCls(it.to)}>
+            <span>{it.labelKey ? t(it.labelKey) : it.label}</span>
           </Link>
         ))}
         {isOpen && (
           <>
             <span className="w-px h-4 bg-white/10 mx-1 shrink-0" />
-            {navItems.map((it) => (
-              <Link
-                key={it.to}
-                to={it.to}
-                className="text-sm text-gray-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors whitespace-nowrap"
-              >
-                {it.labelKey ? t(it.labelKey) : it.label}
+            {coreItems.map((it) => (
+              <Link key={it.to} to={it.to} className={navLinkCls(it.to)}>
+                <span>{it.labelKey ? t(it.labelKey) : it.label}</span>
               </Link>
             ))}
+            {extItems.length > 0 && (
+              <>
+                <span className="w-px h-4 bg-white/10 mx-1 shrink-0" />
+                {extItems.map((it) => (
+                  <Link key={it.to} to={it.to} className={navLinkCls(it.to)}>
+                    <span>{it.labelKey ? t(it.labelKey) : it.label}</span>
+                  </Link>
+                ))}
+              </>
+            )}
           </>
         )}
       </div>
@@ -250,6 +273,7 @@ export default function App() {
               </ErrorBoundary>
             </div>
 
+            <TransferDock />
             <MobileBottomBar connected={isOpen} />
           </div>
         </AppProvider>
