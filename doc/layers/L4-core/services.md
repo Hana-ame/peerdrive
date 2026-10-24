@@ -33,7 +33,10 @@ with confused dependency directions and no rule to follow. This layer's goals:
 
 | File | One-line responsibility | Key exports |
 |---|---|---|
-| anon_service.go | Anonymous collections (content-addressed JSON storage): create/read/list/version commit | `AnonService`: `CreateCollection`, `GetCollectionByHash`, `ListCollections`, `CommitCollection` |
+| anon_service.go | Anonymous collection core: service struct, validation/storage helpers, creation | `AnonService`: `CreateCollection`, `CreateCollectionWithVisibility`, `CreateCollectionWithPolicy`, `CreateCollectionWithPolicyAndPSK` |
+| anon_collection_read.go | Read path: load by hash, list summaries, visibility filtering | `AnonService`: `GetCollectionByHash`, `ListCollections`, `GetCollectionVisibleTo` |
+| anon_collection_permissions.go | Permission updates producing new hashes (visibility/access policy/PSK) | `AnonService`: `UpdateCollectionVisibility`, `UpdateCollectionPermissions` |
+| anon_collection_versions.go | Version commits, entry add/remove/update, history chain | `AnonService`: `CommitCollection`, `CommitCollectionWithPasscode`, `CommitCollectionWithPasscodeAndPSK`, `AddCollectionEntry`, `RemoveCollectionEntry`, `UpdateCollectionEntry`, `GetCollectionHistory` |
 | auth_service.go | User register/login/logout/authkey verification (bcrypt) | `AuthService`: `Register`, `Login`, `Logout`, `ValidateKey`; `ErrInvalidCredentials` |
 | collection_service.go | User collection domain use cases (the M2 transparent forwarding layer) | `CollectionService`: `Get/List/Search/ListPublic/Create/CreatePlain/GetOrCreate/SetVisibility/UpdateTags/UpdateCurrentHash/ListEntries/GetEntry/AddEntry/AddProviderEntry/RemoveEntry/CreateVersion/SnapshotEntries/VersionLog/VersionEntries/RestoreVersion/GetAnonByHash/SaveAnon` |
 | file_service.go | File upload/register/verify/delete/copy/browse/metadata (including the security boundary) | `FileService`: `Upload`, `RegisterLocal`, `RegisterFolder`, `RegisterURL`, `ResolveURL`, `Verify`, `Delete`, `BrowseDir`, `CopyFile`, `ReadFile`, `MaxUploadBytes`, `GetMeta`, `GetMetaByCID`, `ImportGatewayData`, `RegisterBTFile`, `ListAll`; `ErrStorageDisabled`, `ErrFileAlreadyExists` |
@@ -79,7 +82,7 @@ data from being read back and deleted (comment at file_service.go:551-556).
 
 ### 3. AnonService's content-addressed collections
 
-An anonymous collection = a JSON file on disk, hash = the sha256 of the JSON content (anon_service.go:101-133):
+An anonymous collection = a JSON file on disk, hash = the sha256 of the JSON content (anon_service.go:74-217):
 
 - **Validation**: an entry path must be relative (`isRelativePath` + `..` forbidden); a file entry must carry legal
   providers (`isValidProviders`: a 64hex sha256 or an http/https url); a directory entry (path ending with "/") is exempt from providers
@@ -178,9 +181,9 @@ service (this layer)
 4. **Delete only removes "local providers inside storage"** (file_service.go:557-564): a provider path
    must pass isPathInStorage before os.Remove — historically os.Remove on any provider path = arbitrary
    file deletion (same class as H1).
-5. **Anonymous collection hash stability depends on sorting** (anon_service.go:97-99): entries must be sorted before
+5. **Anonymous collection hash stability depends on sorting** (anon_service.go:166-169): entries must be sorted before
    marshaling; adding fields/changing the marshal format changes every historical hash (the immutability contract of content addressing).
-6. **The version gate on GetAnonCollectionByHash**: Version < 1 is rejected (anon_service.go:159-162) —
+6. **The version gate on GetAnonCollectionByHash**: Version < 1 is rejected (anon_collection_read.go:39-42) —
    preventing old-format/half-written files from being parsed as a legal collection.
 7. **authkey single-value overwrite**: each user has only one valid authkey (UpdateAuthKey overwrites) — multi-device logins
    kick each other off; this is by design (no multi-session concept).
@@ -196,7 +199,7 @@ service (this layer)
 | File | Test | Background of discovery |
 |---|---|---|
 | anon_service_test.go | `TestCreateCollection_ValidEntries/PathTraversal/InvalidHash/EmptyEntries/EmptyPath/DirEntryWithoutProvider/FileWithoutProvider/AbsolutePath`, `TestGetCollection_ByHash/NonexistentHash`, `TestForkCollection`, `TestDownloadFile_FromCollectionEntry` | legacy (the anonymous collection create/validate/read main chain) |
-| anon_service_test.go | `TestGetCollection_InvalidHashNoPanic` | **2026-08-16 transport layer review H1: GetCollectionByHash sliced hash[:2] without validating the hash — a short hash panicked out of bounds and killed the process, and ".."-like values escaped the storage directory**; fix: isValidHash at the entry point (anon_service.go:143-146) |
+| anon_service_test.go | `TestGetCollection_InvalidHashNoPanic` | **2026-08-16 transport layer review H1: GetCollectionByHash sliced hash[:2] without validating the hash — a short hash panicked out of bounds and killed the process, and ".."-like values escaped the storage directory**; fix: isValidHash at the entry point (anon_collection_read.go:19-26) |
 | file_service_test.go | `TestNewFileService`, `TestRegisterLocal(_NonexistentPath/_StorageDisabled/_EmptyFilename)`, `TestRegisterFolder`, `TestVerify(_Nonexistent)`, `TestDelete(_StorageDisabled)`, `TestRegisterURLDefaultFilename` | legacy |
 | file_service_test.go | `TestRegisterLocalOutsideStorageRootRejected` | **F2: RegisterLocal accepted any absolute path + LocalFetcher provider readback = anonymous arbitrary file reading (could read /etc/shadow)**; fix: anchor the root with isPathInStorage |
 | file_service_test.go | `TestCopyFileOutsideStorageRootRejected` | **F3: CopyFile could write to anywhere (absolute paths passed through / `../` escape), and combined with the public upload could write authorized_keys**; fix: validate the target is inside the storage root before writing |
@@ -208,7 +211,10 @@ service (this layer)
 
 ```
 back/internal/service/
-├── anon_service.go       anonymous collections (content-addressed JSON storage + version commit)
+├── anon_service.go       anonymous collection core (struct/helpers/create)
+├── anon_collection_read.go        read path (get/list/visibility filter)
+├── anon_collection_permissions.go permission updates (new hashes)
+├── anon_collection_versions.go    version commits/entry ops/history
 ├── anon_service_test.go  anonymous collection tests (includes 1 H1 background-of-discovery entry)
 ├── auth_service.go       bcrypt authentication (72-byte cap / authkey)
 ├── collection_service.go user collection transparent forwarding layer (M2)
