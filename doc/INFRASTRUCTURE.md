@@ -20,7 +20,7 @@
   - `tracker_auth.go`：BitTorrent tracker 的 `/tracker/bans` 封禁管理与 JWT 适配。
 - **依赖耦合分析**：
   - **入向引用（谁依赖它）**：均位于装配与外层边界：
-    - `back/cmd/peerdrive/subcommands.go`（`runReg` 与 `runHub` 子命令）
+    - `back/internal/cli/subcommands.go`（`runReg` 与 `runHub` 子命令）
     - `back/internal/services/services.go`（`UnifiedMux` 多服务挂载）
     - `back/signalserver/cmd/peerserver/main.go`（独立辅助二进制）
   - **出向引用（它依赖谁）**：零 `peerdrive/internal/*` 依赖，纯净标准库与独立模块内部 `tracker`。

@@ -1,4 +1,4 @@
-package main
+package cli
 
 // serve / signal / reg / all 四个子命令的实现。
 //
@@ -26,6 +26,7 @@ import (
 	"peerdrive/internal/mcp"
 	"peerdrive/internal/serverapp"
 	"peerdrive/internal/services"
+	"peerdrive/internal/tray"
 	"peerdrive/internal/update"
 )
 
@@ -167,7 +168,10 @@ func runReg(args []string) {
 // 端口：取主服务的 PEERDRIVE_HOST/PORT。信令与注册服务的旧端口变量
 // （PEERSIGNAL_ADDR / PORT）在合并模式下**不生效**——同端口下它们没有意义，
 // 留着会让人误以为还在分别监听。要分别监听请用 serve / signal / reg。
-func runAll(args []string) {
+//
+// opts.Tray：Windows 入口（cmd/peerdrive-win）下，HTTP 起来之后挂系统托盘，
+// 主 goroutine 交给托盘消息循环；用户从托盘退出时关停主服务返回。
+func runAll(args []string, opts Options) {
 	fs := flag.NewFlagSet("all", flag.ExitOnError)
 	cert := fs.String("tls-cert", os.Getenv("PEERDRIVE_TLS_CERT"), "TLS certificate (PEM)")
 	tlsKey := fs.String("tls-key", os.Getenv("PEERDRIVE_TLS_KEY"), "TLS private key (PEM)")
@@ -210,6 +214,23 @@ func runAll(args []string) {
 	// 可选自动更新检查（PEERDRIVE_AUTO_UPDATE，默认关）：与 serve 一致——
 	// 只提示新版本，不替换运行中的二进制（见 internal/update 包注释）。
 	update.StartupCheck(cfg)
+
+	// 托盘路径：HTTP 已在 goroutine 里跑，主 goroutine 交给托盘消息循环
+	// （Windows 上消息循环必须待在创建窗口的那个线程上）。退出时走
+	// shutdownMain 并返回，与 serve 的托盘路径语义一致。
+	if opts.trayEnabled() {
+		ready := serverapp.ReadyInfo{
+			Addr:     addr,
+			PanelURL: serverapp.BrowserPanelURL(cfg.Host, cfg.Port, *cert != ""),
+			DriveURL: serverapp.BrowserBaseURL(cfg.Host, cfg.Port, *cert != "") + "/",
+		}
+		if err := tray.Run(trayConfig(ready)); err != nil {
+			fmt.Fprintf(os.Stderr, "peerdrive all: tray: %v\n", err)
+		}
+		log.LogInfo("all: tray quit — shutting down")
+		shutdownMain()
+		return
+	}
 
 	select {
 	case err := <-errCh:
@@ -334,4 +355,3 @@ func runHub(args []string) {
 		os.Exit(1)
 	}
 }
-

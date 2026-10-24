@@ -41,6 +41,25 @@ func browserReachableHost(host string) string {
 	}
 }
 
+// BrowserBaseURL 拼浏览器可打开的节点根地址（scheme://host:port，无尾斜杠）。
+//
+// 导出给平台外壳用（Windows 托盘的「打开面板 / 打开网盘」菜单）：
+// host 折叠规则与启动横幅共用 browserReachableHost——托盘给错的地址比
+// 不给更糟，用户会以为节点没起来。serve 恒为 http；`all` 带 -tls-cert 时
+// 为 https（调用方按配置传 secure）。
+func BrowserBaseURL(host, port string, secure bool) string {
+	scheme := "http"
+	if secure {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s", scheme, net.JoinHostPort(browserReachableHost(host), port))
+}
+
+// BrowserPanelURL 拼内嵌面板地址（BrowserBaseURL + /panel）。
+func BrowserPanelURL(host, port string, secure bool) string {
+	return BrowserBaseURL(host, port, secure) + "/panel"
+}
+
 // lanIP 找一张非回环的 IPv4 地址，给同一局域网内的浏览器用。
 // 找不到就返回空——宁可不填，也不要给一个连不上的。
 func lanIP() string {

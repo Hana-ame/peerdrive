@@ -12,7 +12,7 @@
 // One code on purpose: `peerdrive embed` is a building block, so callers get a
 // plain success/failure signal rather than a taxonomy.
 
-package main
+package cli
 
 import (
 	"bufio"

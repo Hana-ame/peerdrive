@@ -148,9 +148,13 @@ type HTTPURLFetcher struct {
 	httpClient *http.Client
 }
 
-// maxURLFetchSize URL provider single-fetch limit (M5):
-// Same as the peerjs upload limit (8GB), prevents malicious/runaway URLs from returning infinite streams.
-const maxURLFetchSize = 8 * 1024 * 1024 * 1024
+// maxURLFetchSize URL provider 单次拉取上限（M5）：与 peerjs 上传上限一致
+// （8GB），防止恶意/失控 URL 返回无限流。
+// 显式声明为 int64：8GB 超出 32 位平台的 int 范围——未定型常量在
+// `len(data) > maxURLFetchSize` 处会直接编译失败（windows/386 报
+// "maxURLFetchSize overflows int"）。io.LimitReader 收 int64，比较时
+// len(data) 显式转 int64，两条路径都不再依赖平台 int 宽度。
+const maxURLFetchSize int64 = 8 * 1024 * 1024 * 1024
 
 func (f *HTTPURLFetcher) Name() string { return "http" }
 
@@ -187,7 +191,7 @@ func (f *HTTPURLFetcher) Fetch(ctx context.Context, hash string) ([]byte, error)
 		if err != nil {
 			continue
 		}
-		if len(data) > maxURLFetchSize {
+		if int64(len(data)) > maxURLFetchSize {
 			log.LogWarn("downloader: http provider %s returned oversized payload for %s", p.Path, hash)
 			continue
 		}

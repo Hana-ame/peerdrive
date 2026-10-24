@@ -139,8 +139,43 @@ func validateAuthStartup(cfg *config.Config) error {
 	return fmt.Errorf("refusing to serve %s (non-loopback) with no auth backend; set PEERDRIVE_REG_SERVER, PEERDRIVE_ADMIN_TOKEN, or PEERDRIVE_ALLOW_NO_AUTH=1 to override", addr)
 }
 
+// ReadyInfo 是 serve 起来之后交给「平台外壳」的信息包。
+//
+// 目前唯一的外壳是 Windows 系统托盘（internal/tray，由 cmd/peerdrive-win
+// 经 cli.Options.Tray 接入）：它需要知道监听地址和浏览器该打开的 URL。
+// 放在这里而不是让外壳自己拼：URL 的 host 折叠规则（监听在 0.0.0.0 时
+// 浏览器要开 127.0.0.1）与启动横幅同一份实现，见 BrowserPanelURL。
+type ReadyInfo struct {
+	// Addr 是实际监听地址（host:port），原样给托盘提示用。
+	Addr string
+	// PanelURL 是浏览器打开内嵌面板的地址（http://127.0.0.1:3000/panel）。
+	PanelURL string
+	// DriveURL 是网盘视图地址（面板根路径）。
+	DriveURL string
+	// NodeID 是本节点 ID，托盘提示里带上便于多开时分辨。
+	NodeID string
+}
+
 // RunServe is the Peerdrive server entry point; it initializes the DB, P2P, HTTP router and listens on the port.
 func RunServe() {
+	runServe(nil)
+}
+
+// RunServeOnReady 与 RunServe 同一份启动流程，差别只在 HTTP 起来之后：
+// 主 goroutine 交给 onReady（Windows 托盘消息循环），onReady 返回即关停退出。
+//
+// 为什么钩子放在这里而不是让调用方起 goroutine 自己包：serve 的装配
+// （配置校验 → BuildRouterWithInfo → 启动横幅 → StartupCheck → Listen）
+// 是一整块，复制到外壳里迟早分叉；而「起来之后干什么」恰恰是平台差异，
+// 用钩子分开，两边都只有一份。
+//
+// 约束：onReady 返回后本函数会 shutdown 并 os.Exit(0)——托盘「退出」的语义
+// 就是结束进程，HTTP 服务 goroutine 随之终止。正常前台运行请用 RunServe。
+func RunServeOnReady(onReady func(ReadyInfo) error) {
+	runServe(onReady)
+}
+
+func runServe(onReady func(ReadyInfo) error) {
 	log.LogInfo("main: Peerdrive server starting")
 
 	cfg := config.Load()
@@ -187,7 +222,26 @@ func RunServe() {
 	update.StartupCheck(cfg)
 
 	addr := ListenAddr(cfg)
-	RunHTTP(addr, r)
+	if onReady == nil {
+		RunHTTP(addr, r)
+		return
+	}
+	// 平台外壳路径：HTTP 进 goroutine，主 goroutine 交给外壳。
+	// RunHTTP 自己不返回错误（内部 Fatalf / 打日志），无需 errCh。
+	go func() { RunHTTP(addr, r) }()
+	if err := onReady(ReadyInfo{
+		Addr:     addr,
+		PanelURL: BrowserPanelURL(cfg.Host, cfg.Port, false),
+		DriveURL: BrowserBaseURL(cfg.Host, cfg.Port, false) + "/",
+		NodeID:   info.NodeID,
+	}); err != nil {
+		log.LogWarn("main: platform shell exited with error: %v", err)
+	}
+	log.LogInfo("main: platform shell requested quit — shutting down")
+	// 显式 shutdown 后直接退出：defer 的 shutdown 在 os.Exit 时不会跑，
+	// 而 HTTP goroutine 此时还阻塞在 Serve 上，靠进程退出终止。
+	shutdown()
+	os.Exit(0)
 }
 
 // BuildRouter 初始化 DB、PeerJS 服务、source manager 并返回 HTTP handler。

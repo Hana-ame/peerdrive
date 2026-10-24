@@ -12,7 +12,7 @@
 // ⚠️ 链路步骤与 scripts/netdisk-local-demo.sh **保持一致**（同样的路由、同样的
 // 环境变量、同样的校验口径）。改这里就要同步改那边，否则两个「演示」会各自
 // 漂移，读者看到的现象不一样，那比没有更糟。
-package main
+package cli
 
 import (
 	"bytes"
