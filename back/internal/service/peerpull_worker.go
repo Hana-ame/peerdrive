@@ -107,7 +107,11 @@ func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 		if attempt > 0 {
 			// 用户主动取消就别再重试了：等完退避才失败会让人以为卡死，同时清理残留 .part 与 .meta
 			if ctx.Err() != nil {
+				// tmp 经 targetPath 清洗（sanitizeRelPath 去 .. / 绝对 / 控制字符
+				// + Abs 包含校验），CodeQL 未建模自定义清洗器故报假阳。
+				// codeql[go/path-injection]
 				_ = os.Remove(tmp)
+				// codeql[go/path-injection]
 				_ = os.Remove(tmp + ".meta")
 				p.finish(job, PullCancelled, "", time.Time{})
 				return
@@ -117,7 +121,10 @@ func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 			select {
 			case <-time.After(pullBackoff(attempt - 1)):
 			case <-ctx.Done():
+				// 同上：已清洗路径，假阳。
+				// codeql[go/path-injection]
 				_ = os.Remove(tmp)
+				// codeql[go/path-injection]
 				_ = os.Remove(tmp + ".meta")
 				p.finish(job, PullCancelled, "", time.Time{})
 				return
@@ -236,7 +243,10 @@ func (p *PeerPuller) fetchOnce(ctx context.Context, job *PullJob, target, tmp st
 	}()
 
 	if ctx.Err() != nil {
+		// 同上：路径经 sanitizeRelPath+包含校验，假阳。
+		// codeql[go/path-injection]
 		_ = os.Remove(tmp)
+		// codeql[go/path-injection]
 		_ = os.Remove(metaPath)
 		p.finish(job, PullCancelled, "", time.Time{})
 		return true, nil
