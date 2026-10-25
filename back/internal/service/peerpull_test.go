@@ -415,6 +415,10 @@ func TestSanitizeRelPath(t *testing.T) {
 		"./a/./b":            filepath.Join("a", "b"),
 		"a//b":               filepath.Join("a", "b"),
 		"c:evil?.txt":        "c_evil_.txt",
+		// 遍历段由 Clean("/" + x) 解析而非逐段丢弃："a" 先被 ".." 抵消掉，
+		// 最终落在 "b.txt"（旧实现是丢弃 ".." 得 "a/b.txt"；两者均被约束在
+		// pulled/ 内，此处锁定 Clean 语义）。
+		"a/../../b.txt": filepath.Join("b.txt"),
 	}
 	for in, want := range cases {
 		if got := sanitizeRelPath(in); got != want {
