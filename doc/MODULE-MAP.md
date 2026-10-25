@@ -1,6 +1,6 @@
 # Peerdrive Module Map
 
-> 数据截至 `feat/platform-build-entries`（2026-10-24，平台入口分化；基线 `refactor` @ `6d21408`）。单仓库多模块：Go 模块在 `back/` 下平铺，
+> 数据截至 `feat/win7-tray-patched-sdk`（2026-10-25，Win7 托盘入口改补丁 SDK 构建；基线 `refactor` @ `e738078`）。单仓库多模块：Go 模块在 `back/` 下平铺，
 > 前端/npm 包在 `front/` + `packages/` 下。
 
 ## 构建期依赖图
@@ -88,17 +88,22 @@ graph LR
 |---|---|---|---|---|
 | `back/cmd/peerdrive/` | `make build` | linux / darwin / windows 通用 | 无 | internal/cli（全子命令） |
 | `back/cmd/peerdrive-win/` | `make build-win` | windows | 有 | 同左 + `Options.Tray=true` |
-| `back/cmd/peerdrive-win7/` | `make build-win7` | windows（GOARCH=386） | 无 | 仅 gin + serverapp + version，与 `back/cmd/server/` 同级 |
+| `back/cmd/peerdrive-win7/` | `make build-win7`（→ `scripts/build-win7.sh`，补丁 SDK） | windows 386 + amd64（Win7~11） | 有 | 同 `peerdrive-win`（cli 全量子命令） |
 | `back/cmd/server/` | `make build-server` | 通用（向后兼容） | 无 | 仅 gin + serverapp |
 
 - **托盘只在 Windows 编译进二进制**：`back/internal/tray` 用 `//go:build windows`
   分流；非 Windows 平台 `Available()` 恒假，链接期不带任何 Win32 代码。
   实现是 LazyDLL 直调 user32/shell32（x/sys 早已不包装这些 API），无新增模块依赖。
 - **运行期开关**：`PEERDRIVE_TRAY=0` 强制关闭托盘（服务化、CI、远程桌面场景）。
-- **Win7 工具链 caveat**：Go 1.22+ 运行时不再支持 Win7（最后支持 1.21）。当前
-  `back/go.mod` 为 `go 1.26.2`，要在 Win7 上运行需先 `go mod edit -go=1.21`
-  再用 Go ≤1.21 工具链构建 `./cmd/peerdrive-win7/`。该入口只用长期稳定 API，
-  老工具链下无语法/标准库障碍。
+- **Win7 工具链：XTLS/go-win7 补丁 SDK**（2026-10-25 起，方案借鉴 Xray-core
+  与上游 ech-proxy）。官方 Go 1.21.5+ 运行时启动阶段调用
+  `bcryptprimitives.dll!ProcessPrng`，Win7 没有该 DLL，进程以
+  `Exception 0xc0000005 (PC=0x0 in asmstdcall)` 崩在起跑线上——这就是
+  「官方最后支持 Win7 的 Go 是 1.21」的由来。`scripts/build-win7.sh` 自动
+  下载补丁 SDK（默认 `patched-1.26.7`）并锁 `GOTOOLCHAIN=local`，
+  `back/go.mod`（go 1.26.2）与依赖树**完全不动**，产物兼容 Win7~11 的
+  386/amd64。CI 由 go-build.yml 的独立 `build-win7` job 覆盖。备选（不推荐）：
+  官方 Go 1.21.4 + 依赖树整体降级。
 - **32 位编译**：`back/internal/downloader` 的 8GB 单次拉取上限已定型为 `int64`——
   未定型常量在 386 上是编译期错误（`overflows int`），修完后整模块
-  windows/386 可编（CI 的 windows 格覆盖 `./cmd/peerdrive-win7/` 的 386 构建）。
+  windows/386 可编（CI 的 `build-win7` job 覆盖 386 产物）。

@@ -51,13 +51,12 @@ jobs:
         # 单二进制（v0.3.0）：主服务 / 信令 / 注册认证是它的子命令。
         run: go build -tags nosqlite -buildvcs=false -ldflags="-s -w" -o peerdrive${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/peerdrive/
 
-      # 平台入口（2026-10-24）：Windows 桌面入口带系统托盘（./cmd/peerdrive-win/），
-      # Win7 老机器用最小引用入口（./cmd/peerdrive-win7/，386）。两者都只在
-      # Windows 上编得出意义（internal/tray 是 //go:build windows），所以挂在
-      # windows 矩阵格下，不新增矩阵维度。托盘入口随格子的 GOARCH 编；win7
-      # 入口固定 386——它的目标机器就是 32 位老机，而整模块 386 编译依赖
-      # internal/downloader 的 8GB 上限已定型为 int64（未定型常量在 386 上
-      # 编译期溢出，2026-10-24 修）。
+      # 平台入口（2026-10-24 起）：Windows 桌面入口带系统托盘
+      # （./cmd/peerdrive-win/），只在 Windows 上编得出意义（internal/tray 是
+      # //go:build windows），所以挂在 windows 矩阵格下，不新增矩阵维度。
+      # 托盘入口随格子的 GOARCH 编。Win7 入口（./cmd/peerdrive-win7/，同为
+      # 托盘版）不在这里编——它必须用 XTLS/go-win7 补丁 SDK（官方 Go 在 Win7
+      # 启动即崩），由下方独立的 build-win7 job 负责。
       - name: Build tray entry (windows only)
         if: matrix.goos == 'windows'
         env:
@@ -65,14 +64,6 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: go build -tags nosqlite -buildvcs=false -ldflags="-s -w" -o peerdrive-win.exe ./cmd/peerdrive-win/
-
-      - name: Build win7 entry (windows only, 386)
-        if: matrix.goos == 'windows'
-        env:
-          GOOS: windows
-          GOARCH: 386
-          CGO_ENABLED: 0
-        run: go build -tags nosqlite -buildvcs=false -ldflags="-s -w" -o peerdrive-win7.exe ./cmd/peerdrive-win7/
 
       # Windows 也跑测试，不再跳过（2026-09-20）。
       #
@@ -92,6 +83,29 @@ jobs:
         with:
           name: peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}
           path: back/peerdrive*
+
+  # Win7 兼容构建（2026-10-25，XTLS/go-win7 补丁 SDK）：
+  # 官方 Go 1.21.5+ 运行时启动阶段调用 bcryptprimitives.dll!ProcessPrng，
+  # Win7 没有该 DLL，进程以 Exception 0xc0000005 崩在起跑线上。用补丁 SDK
+  # 出兼容 Win7~11 的 386/amd64 托盘版二进制；go.mod 与依赖树不动。
+  # 单独 job 而不是塞进 windows 矩阵格：补丁 SDK 与 runner 的 GOOS 无关
+  # （纯交叉编译），且不该让整条矩阵的 Windows 构建都拖一次 SDK 下载。
+  # 脚本与本地一致（scripts/build-win7.sh），CI 不复制构建逻辑。
+  build-win7:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Win7-compatible binaries (patched SDK)
+        run: bash scripts/build-win7.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peerdrive-win7-patched
+          path: back/dist/peerdrive-win7-*.exe
 
   # 独立 go.mod 的子模块（doc/testing 的盲区清单里有它们）：
   # signalserver（信令，含 wss 与 CORS 用例）与 p2p_bt（BT/DHT）。

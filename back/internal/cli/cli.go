@@ -35,9 +35,12 @@
 // 平台入口（cmd/ 下三个 main 共用本包，不复制任何调度逻辑）：
 //
 //	cmd/peerdrive       默认入口（linux/darwin/windows 通用）：无托盘
-//	cmd/peerdrive-win    Windows 入口：serve/all 起系统托盘（Options.Tray）
-//	cmd/peerdrive-win7   Windows 7 最小入口：只有 serve/version/help，
-//	                     不走本包，直接复用 serverapp.RunServe
+//	cmd/peerdrive-win    Windows 入口：serve/all 起系统托盘（Options.Tray），
+//	                     stock Go 构建，目标 Win10/11 amd64
+//	cmd/peerdrive-win7   Windows 7 入口：同为托盘入口，用 XTLS/go-win7 补丁
+//	                     SDK 构建（官方 Go 1.21.5+ 在 Win7 启动即崩），
+//	                     386 为主 + amd64，产物兼容 Win7~11
+//	                     （scripts/build-win7.sh）
 //
 // 托盘只在 Windows 编译进二进制（internal/tray 的 build tag），其他平台
 // Available() 恒假，链接期不带任何 Win32 代码。

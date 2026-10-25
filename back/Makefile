@@ -26,13 +26,13 @@ build-server:
 build-win:
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -tags $(TAGS) -buildvcs=false -ldflags="-s -w" -o peerdrive-win.exe ./cmd/peerdrive-win/
 
-# Windows 7 最小入口：只 import gin + serverapp + version（与 cmd/server 同级），
-# 托盘/自动更新/tun/mcp/demo 全不进 import 图——老机器要的只是「起服务 + 面板」。
-# ⚠️ 工具链：Go 1.22+ 运行时不再支持 Win7（最后支持 1.21）。当前 go.mod 为
-# go 1.26.2，要在 Win7 上跑需先 `go mod edit -go=1.21` 再用 Go ≤1.21 构建
-# （详见 doc/MODULE-MAP.md「平台入口分化」一节）。
+# Windows 7 入口（托盘版）：用 XTLS/go-win7 补丁版 SDK 构建，产物兼容
+# Win7~11（386 为主 + amd64）。官方 Go 1.21.5+ 运行时在 Win7 启动即崩
+# （bcryptprimitives.dll!ProcessPrng 缺失，Exception 0xc0000005），补丁 SDK
+# 打掉该依赖且 go.mod/依赖树不动。脚本自动下载 SDK 并锁 GOTOOLCHAIN=local，
+# 产物落 back/dist/（详见 scripts/build-win7.sh 与 doc/MODULE-MAP.md）。
 build-win7:
-	CGO_ENABLED=0 GOOS=windows GOARCH=386 $(GO) build -tags $(TAGS) -buildvcs=false -ldflags="-s -w" -o peerdrive-win7.exe ./cmd/peerdrive-win7/
+	bash ../scripts/build-win7.sh
 
 # 运行主模块与全部独立 go.mod 子模块测试
 test:
@@ -58,4 +58,5 @@ vet:
 	done
 
 clean:
-	rm -f peerdrive peerdrive.exe server peerdrive-win.exe peerdrive-win7.exe
+	rm -f peerdrive peerdrive.exe server peerdrive-win.exe
+	rm -rf dist
