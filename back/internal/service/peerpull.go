@@ -438,8 +438,16 @@ func newJobID() string {
 }
 
 // sanitizeRelPath 把对端给的相对路径清洗成安全相对路径。
-// 规则：统一分隔符 → 丢弃空段/"."/".."/绝对前缀 → 段内去掉控制字符。
-// 返回空串表示无法安全化（调用方回退到文件名/hash）。
+// 规则：统一分隔符 → 段内去掉控制字符/保留字符 → filepath.Clean("/"+x)
+// 解析 "." / ".." / 空段 → 去掉锚定前缀。返回空串表示无法安全化
+// （调用方回退到文件名/hash）。
+//
+// 遍历防护刻意交给 Clean("/" + x) 而不是逐段丢弃 ".."："/" 前缀把路径锚在
+// 根，越根的 ".." 被根吸收（Clean("/../../etc") = "/etc"），与旧的手工丢段
+// 语义等价。更重要的是这个形状是 CodeQL go/path-injection 查询原生建模的
+// sanitizer（TaintedPathCustomizations.qll 的 FilepathCleanSanitizer 匹配
+// Clean("/" + e)，屏障挂在 Clean 返回值上）——污点在此断流，peerpull 的
+// path-injection 告警家族由此根治，不再逐条依赖抑制注释或 API 销案。
 func sanitizeRelPath(p string) string {
 	if p == "" {
 		return ""
@@ -449,10 +457,8 @@ func sanitizeRelPath(p string) string {
 	out := make([]string, 0, len(segs))
 	for _, s := range segs {
 		s = strings.TrimSpace(s)
-		if s == "" || s == "." || s == ".." {
-			continue
-		}
-		// 控制字符与 Windows 保留字符会让 rename/展示出问题
+		// 控制字符与 Windows 保留字符会让 rename/展示出问题；
+		// "." / ".." 不在此处丢弃，交给下面的 Clean 解析（真正干活的是它）
 		s = strings.Map(func(r rune) rune {
 			if r < 0x20 || r == 0x7f {
 				return -1
@@ -468,5 +474,11 @@ func sanitizeRelPath(p string) string {
 		}
 		out = append(out, s)
 	}
-	return strings.Join(out, string(filepath.Separator))
+	cleaned := filepath.Clean("/" + strings.Join(out, "/"))
+	cleaned = strings.TrimPrefix(cleaned, string(filepath.Separator))
+	if cleaned == "" {
+		// Clean("/") = "/"：输入整体由遍历/空段构成，没有可用相对路径。
+		return ""
+	}
+	return cleaned
 }
