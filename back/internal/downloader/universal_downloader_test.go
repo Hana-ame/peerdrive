@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -464,5 +465,27 @@ func TestBuildFetchers_UnknownProtocol(t *testing.T) {
 	fetchers := d.Fetchers()
 	if len(fetchers) != 2 {
 		t.Fatalf("expected 2 fetchers (unknown skipped), got %d", len(fetchers))
+	}
+}
+
+// TestDownload_InvalidHashRejected the hash boundary on Download: an unvalidated
+// hash would reach LocalFetcher's hash[:2] and panic (short string) or traverse
+// via Join. Callers validate upstream; the downloader is the last line of defense.
+func TestDownload_InvalidHashRejected(t *testing.T) {
+	d := NewUniversalDownloader(nil, t.TempDir(), "local", 30*time.Second, nil)
+	for _, h := range []string{"", "x", "../../etc/passwd", "A" + strings.Repeat("0", 63)} {
+		if _, _, err := d.Download(context.Background(), h); err == nil {
+			t.Errorf("Download(%q): expected rejection, got nil error", h)
+		}
+	}
+}
+
+// TestClearLocalCache_InvalidHashNoPanic the same boundary on ClearLocalCache:
+// invalid hashes must be a silent no-op, never a hash[:2] panic or a
+// traversal-flavored os.Remove.
+func TestClearLocalCache_InvalidHashNoPanic(t *testing.T) {
+	d := NewUniversalDownloader(nil, t.TempDir(), "local", 30*time.Second, nil)
+	for _, h := range []string{"", "x", "..", "../../etc/passwd", "A" + strings.Repeat("0", 63)} {
+		d.ClearLocalCache(h) // must not panic
 	}
 }

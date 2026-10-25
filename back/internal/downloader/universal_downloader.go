@@ -450,6 +450,13 @@ func (d *UniversalDownloader) CheckSources(ctx context.Context, hash string) map
 
 // ClearLocalCache clears the local cache for the given hash; the next download will re-fetch from the network.
 func (d *UniversalDownloader) ClearLocalCache(hash string) {
+	// Defense: same boundary as Download — an unvalidated hash would panic at
+	// hash[:2] below (short string) or traverse via Join. The refresh endpoint
+	// validates upstream; this is the last line of defense.
+	if !hashutil.IsStrictSHA256(hash) {
+		log.LogDebug("downloader: clear cache skipped, invalid hash %q", hash)
+		return
+	}
 	// Remove from standard content-addressed paths.
 	paths := []string{
 		filepath.Join(d.storageDir, hash[:2], hash),
