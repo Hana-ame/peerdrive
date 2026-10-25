@@ -152,6 +152,32 @@ func TestHTTPURLFetcher_IsAvailable(t *testing.T) {
 	}
 }
 
+// allowLoopbackProviderURL 临时放行回环 provider URL，返回的 restore 必须 defer。
+// 背景：SSRF 防护是两层——URL 闸门（urlguard.GuardExternalURL）+ 安全客户端
+// 的 SafeDialContext（拨号前复核 IP），两层都按设计拦截 127.0.0.1，而 httptest
+// 服务器恰好绑在回环上。本 helper 只放第一层；第二层由调用方把 fetcher 的
+// httpClient 换成测试服务器的客户端绕过。闸门本身的拦截行为由
+// TestHTTPURLFetcher_BlocksInternalURL 验证，不依赖本 helper。
+func allowLoopbackProviderURL(t *testing.T) func() {
+	t.Helper()
+	orig := guardProviderURL
+	guardProviderURL = func(string) error { return nil }
+	return func() { guardProviderURL = orig }
+}
+
+// withLoopbackHTTPClient 把 UniversalDownloader 里的 HTTPURLFetcher 客户端换成
+// 测试服务器的客户端。NewUniversalDownloader 内置 urlguard.NewSafeClient，其
+// SafeDialContext 会拦截回环拨号——「本地优先落空 → http 回退成功」这条降级
+// 路径因此永远跑不到，需要测试侧换客户端（生产路径保持双层防护）。
+func withLoopbackHTTPClient(t *testing.T, d *UniversalDownloader, server *httptest.Server) {
+	t.Helper()
+	for _, f := range d.fetchers {
+		if hf, ok := f.(*HTTPURLFetcher); ok {
+			hf.httpClient = server.Client()
+		}
+	}
+}
+
 func TestHTTPURLFetcher_FetchFromServer(t *testing.T) {
 	dir := t.TempDir()
 	repository.InitDB(filepath.Join(dir, "test.db"))
@@ -167,17 +193,46 @@ func TestHTTPURLFetcher_FetchFromServer(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// httptest 绑 127.0.0.1，被 SSRF 双层防护合法拦截；本测试关心的是拉取路径，
+	// 临时放行（闸门行为见 TestHTTPURLFetcher_BlocksInternalURL）。
+	defer allowLoopbackProviderURL(t)()
+
 	// Register the HTTP provider in DB.
 	repository.InsertFileMeta(&model.FileMeta{Hash: hashStr, Size: int64(len(data)), Filename: hashStr, Type: repository.FileTypeBlob})
 	repository.InsertFileProvider(hashStr, "http", server.URL)
 
-	f := &HTTPURLFetcher{}
+	f := &HTTPURLFetcher{httpClient: server.Client()}
 	result, err := f.Fetch(context.Background(), hashStr)
 	if err != nil {
 		t.Fatalf("HTTPURLFetcher.Fetch failed: %v", err)
 	}
 	if string(result) != string(data) {
 		t.Errorf("expected %q, got %q", data, result)
+	}
+}
+
+// TestHTTPURLFetcher_BlocksInternalURL 验证 SSRF 闸门在默认状态下带电：
+// 回环地址的 provider 必须被跳过（不替换 guardProviderURL，直接断言）。
+func TestHTTPURLFetcher_BlocksInternalURL(t *testing.T) {
+	dir := t.TempDir()
+	repository.InitDB(filepath.Join(dir, "test.db"))
+	t.Cleanup(func() { _ = repository.CloseDB() })
+
+	data := []byte("should never be fetched")
+	hash := sha256.Sum256(data)
+	hashStr := hex.EncodeToString(hash[:])
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("loopback provider must be blocked before any connection is made")
+		w.Write(data)
+	}))
+	defer server.Close()
+
+	repository.InsertFileMeta(&model.FileMeta{Hash: hashStr, Size: int64(len(data)), Filename: hashStr, Type: repository.FileTypeBlob})
+	repository.InsertFileProvider(hashStr, "http", server.URL)
+
+	if _, err := (&HTTPURLFetcher{}).Fetch(context.Background(), hashStr); err == nil {
+		t.Fatal("expected error when the only http provider is a blocked internal URL")
 	}
 }
 
@@ -280,11 +335,16 @@ func TestDownload_Fallback(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// 同 TestHTTPURLFetcher_FetchFromServer：放开 URL 闸门 + 换掉安全客户端，
+	// 以覆盖 http 回退路径。
+	defer allowLoopbackProviderURL(t)()
+
 	repository.InsertFileMeta(&model.FileMeta{Hash: hashStr, Size: int64(len(data)), Filename: hashStr, Type: repository.FileTypeBlob})
 	repository.InsertFileProvider(hashStr, "http", server.URL)
 
 	// Create downloader with order that forces fallback: local first (no file), then http.
 	d := NewUniversalDownloader(nil, dir, "local,http", 30*time.Second, nil)
+	withLoopbackHTTPClient(t, d, server)
 
 	result, protocol, err := d.Download(context.Background(), hashStr)
 	if err != nil {

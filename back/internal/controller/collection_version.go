@@ -149,6 +149,24 @@ func RollbackCollection(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found"})
 		return
 	}
+	// Verify that target version_id actually belongs to col.ID (prevent cross-collection version IDOR)
+	versions, err := collSvc.VersionLog(col.ID)
+	if err != nil {
+		writeInternalError(c, err)
+		return
+	}
+	belongsToCol := false
+	for _, v := range versions {
+		if v.ID == vid && v.CollectionID == col.ID {
+			belongsToCol = true
+			break
+		}
+	}
+	if !belongsToCol {
+		c.JSON(http.StatusNotFound, gin.H{"error": "version not found in collection"})
+		return
+	}
+
 	// Read target version entries first and generate snapshot before mutating DB in one transaction
 	verEntries, err := collSvc.VersionEntries(vid)
 	if err != nil {

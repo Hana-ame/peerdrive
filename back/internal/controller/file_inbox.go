@@ -91,6 +91,10 @@ func RejectInboxFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
 	}
+	if !fi.IsInbox {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file is not in inbox"})
+		return
+	}
 
 	if fi.Path != "" {
 		// The path came from the file_index table, so treat it as untrusted input

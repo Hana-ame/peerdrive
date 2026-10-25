@@ -114,13 +114,10 @@ func (p *PeerPuller) RecoverIncompleteTasks() []*PullJob {
 		if job.Started.IsZero() {
 			job.Started = time.Now()
 		}
-		p.jobs[job.ID] = job
-		p.pruneLocked()
-		p.mu.Unlock()
-
 		ctx, cancel := context.WithCancel(context.Background())
-		p.mu.Lock()
+		p.jobs[job.ID] = job
 		p.cancels[job.ID] = cancel
+		p.pruneLocked()
 		snap := *job
 		p.mu.Unlock()
 

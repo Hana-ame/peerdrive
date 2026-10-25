@@ -183,6 +183,11 @@ describe('Module 2: Canonical Self-Contained URLs for SHA256 Files & Collections
     assert.equal(t5.kind, 'file')
     assert.equal(t5.hash, SAMPLE_HASH)
     assert.equal(t5.peerId, 'peer-xyz')
+
+    // Malformed percent encoding and path traversal in entryPath must not throw or escape
+    const t6 = parseDirectTarget(`http://127.0.0.1:3000/c/${COLL_HASH}/..%2F..%2Fsecret/%E0%A4%A`)
+    assert.equal(t6.kind, 'collection')
+    assert.equal(t6.entryPath, 'secret/%E0%A4%A')
   })
 })
 
@@ -253,6 +258,8 @@ describe('Module 3: TransferProgressHub & Order-Independent TransportQueue', () 
     assert.equal(r1, 'ok-1')
     assert.equal(r3, 'ok-3')
     assert.deepEqual(order, ['start-1', 'end-1', 'start-3', 'end-3'])
+    const tasks = hub.getTasks()
+    assert.equal(tasks[1].status, 'cancelled')
   })
 
   it('respects priority ordering in AsyncQueueLane without corrupting active execution', async () => {

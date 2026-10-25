@@ -34,6 +34,7 @@ import (
 	"peerdrive/internal/provider"
 	"peerdrive/internal/repository"
 	"peerdrive/pkg/hashutil"
+	"peerdrive/pkg/urlguard"
 )
 
 // ---------------------------------------------------------------------------
@@ -147,6 +148,14 @@ func (f *BTDHTFetcher) Fetch(ctx context.Context, hash string) ([]byte, error) {
 // HTTPURLFetcher
 // ---------------------------------------------------------------------------
 
+// guardProviderURL 是 http provider 出站前的 SSRF 闸门，默认指向
+// urlguard.GuardExternalURL（scheme/user-info/localhost/解析后逐 IP 校验）。
+// 包级 var 只为测试留一条缝：httptest 服务器绑在 127.0.0.1，被闸门**合法**
+// 拦截，测试需临时放行才能覆盖「拉取成功」路径；闸门本身的行为由
+// TestHTTPURLFetcher_BlocksInternalURL 单独验证（不替换、直接断言拦截）。
+// 生产路径永不替换这个 var。
+var guardProviderURL = urlguard.GuardExternalURL
+
 // HTTPURLFetcher checks file_providers for "http"-type entries and fetches
 // from the registered URL.
 type HTTPURLFetcher struct {
@@ -175,10 +184,14 @@ func (f *HTTPURLFetcher) Fetch(ctx context.Context, hash string) ([]byte, error)
 	}
 	client := f.httpClient
 	if client == nil {
-		client = http.DefaultClient // Defense: fallback when NewUniversalDownloader doesn't inject
+		client = urlguard.NewSafeClient(30 * time.Second)
 	}
 	for _, p := range providers {
 		if p.ProviderType != "http" || !p.Available {
+			continue
+		}
+		if err := guardProviderURL(p.Path); err != nil {
+			log.LogWarn("downloader: blocked unsafe http provider URL %s for %s: %v", p.Path, hash, err)
 			continue
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.Path, nil)
@@ -295,9 +308,8 @@ func (d *UniversalDownloader) buildFetchers(order string, btSvc *p2p_bt.BTDHTSer
 			return NewBTDHTFetcher(btSvc, d.storageDir)
 		},
 		"http": func() ProtocolFetcher {
-			// M5: URL provider uses a client with timeout (Download's per-fetcher
-			// context bounds overall time, client timeout prevents single-request hang)
-			return &HTTPURLFetcher{httpClient: &http.Client{Timeout: d.timeout}}
+			// M5 + SSRF guard: URL provider uses urlguard.NewSafeClient with timeout
+			return &HTTPURLFetcher{httpClient: urlguard.NewSafeClient(d.timeout)}
 		},
 	}
 

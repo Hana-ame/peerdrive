@@ -30,7 +30,13 @@ func NewAnonService(cfg *config.Config) *AnonService {
 }
 
 func isRelativePath(p string) bool {
-	return !filepath.IsAbs(p) && !strings.HasPrefix(p, "/")
+	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`) {
+		return false
+	}
+	if strings.Contains(p, `\`) || strings.Contains(p, ":") || strings.IndexByte(p, 0) >= 0 {
+		return false
+	}
+	return true
 }
 
 var hashRe = regexp.MustCompile(`^[a-f0-9]{64}$`)

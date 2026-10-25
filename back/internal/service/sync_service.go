@@ -4,12 +4,12 @@ package service
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"peerdrive/internal/downloader"
 	"peerdrive/internal/model"
+	"peerdrive/internal/pathutil"
 	"peerdrive/internal/repository"
 )
 
@@ -29,8 +29,8 @@ func NewSyncService(syncRepo *repository.SyncRepository, uniDl *downloader.Unive
 
 // SaveToDisk syncs collection files to local disk, supporting path filtering (include/exclude) and sync state tracking.
 func (s *SyncService) SaveToDisk(req model.SaveLocalRequest) error {
-	// 1. Path Traversal Prevention
-	if strings.Contains(req.LocalPath, "..") {
+	// 1. Path Traversal & Volume Root Prevention
+	if strings.TrimSpace(req.LocalPath) == "" || strings.Contains(req.LocalPath, "..") {
 		return fmt.Errorf("path traversal detected: '..' is not allowed in local path")
 	}
 
@@ -38,12 +38,16 @@ func (s *SyncService) SaveToDisk(req model.SaveLocalRequest) error {
 	if err != nil {
 		return fmt.Errorf("invalid target path: %w", err)
 	}
+	if pathutil.IsUnsafeRoot(absTargetDir) {
+		return fmt.Errorf("refusing to sync into unsafe volume root: %s", absTargetDir)
+	}
 
 	// 2. Get Collection Content
 	anonColl, err := repository.GetAnonCollectionByHash(req.CollectionHash, s.storageDir)
 	if err != nil {
 		return fmt.Errorf("failed to get collection metadata: %w", err)
 	}
+	anonColl.NormalizeEntries()
 
 	// 3. Filter Files
 	filesToSave := s.filterFiles(anonColl.Entries, req.Include, req.Exclude)
@@ -62,7 +66,8 @@ func (s *SyncService) SaveToDisk(req model.SaveLocalRequest) error {
 
 	// 5. Save Files to Disk
 	for _, entry := range filesToSave {
-		if err := s.saveFile(req.CollectionHash, absTargetDir, entry.Path, entry.Hash); err != nil {
+		fileHash := entry.GetPrimaryHash()
+		if err := s.saveFile(req.CollectionHash, absTargetDir, entry.Path, fileHash); err != nil {
 			// Log error but continue with other files
 			fmt.Printf("Error saving file %s: %v\n", entry.Path, err)
 			s.syncRepo.UpsertFileSyncState(req.CollectionHash, entry.Path, false)
@@ -111,20 +116,15 @@ func (s *SyncService) GetStatus(hash string) (*model.SyncStatusResponse, error) 
 
 func (s *SyncService) saveFile(hash, targetDir, relPath, fileHash string) error {
 	// Path Traversal Prevention (again, for the file path)
-	if strings.Contains(relPath, "..") {
+	if relPath == "" || !isRelativePath(relPath) || strings.Contains(relPath, "..") {
 		return fmt.Errorf("path traversal detected in file path: %s", relPath)
 	}
 
 	fullPath := filepath.Join(targetDir, relPath)
 
-	// Final Root Validation
-	if !strings.HasPrefix(fullPath, targetDir) {
+	// Authoritative Root Validation via pathutil.Within
+	if !pathutil.Within(targetDir, fullPath) {
 		return fmt.Errorf("path traversal attempt: %s is outside %s", fullPath, targetDir)
-	}
-
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		return err
 	}
 
 	// Download from CAS via downloader.UniversalDownloader
@@ -134,8 +134,8 @@ func (s *SyncService) saveFile(hash, targetDir, relPath, fileHash string) error 
 		return err
 	}
 
-	// Write to disk
-	return os.WriteFile(fullPath, data, 0644)
+	// Write to disk atomically within targetDir root via pathutil.SafeWriteFileAny
+	return pathutil.SafeWriteFileAny([]string{targetDir}, fullPath, data, 0o644)
 }
 
 func (s *SyncService) filterFiles(entries []model.AnonCollectionEntry, include, exclude []string) []model.AnonCollectionEntry {

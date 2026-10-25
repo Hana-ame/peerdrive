@@ -11,6 +11,8 @@
 // right content. The backend /f/ /c/ handlers are a known gap on the mainline
 // (excised 2026-10-17) — this module stays as the contract for when they land.
 
+import { sanitizeRelativePath } from './security.js'
+
 // Named URL_HASH_RE (not HASH_RE): build-panel.mjs inlines every core file into
 // one flat IIFE scope, and protocol.js already owns a top-level HASH_RE.
 const URL_HASH_RE = /\b[0-9a-f]{64}\b/
@@ -85,7 +87,17 @@ export function parseDirectTarget(input, hint = '') {
     // Both the SPA form (c/<hash>/<rest>) and the legacy /api/v1/c/<hash>/<rest>
     // form carry the entry path right after the collection hash.
     const m = route.match(/(?:^|\/)c\/[0-9a-f]{64}\/(.+)$/)
-    if (m && m[1]) entryPath = decodeURIComponent(m[1])
+    if (m && m[1]) {
+      const normalizedSlashes = m[1].replace(/%2f/gi, '/').replace(/%5c/gi, '/')
+      const decodedSegs = normalizedSlashes.split('/').map((seg) => {
+        try {
+          return decodeURIComponent(seg)
+        } catch {
+          return seg
+        }
+      })
+      entryPath = sanitizeRelativePath(decodedSegs.join('/'))
+    }
   }
 
   const out = { kind }

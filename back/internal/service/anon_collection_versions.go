@@ -118,6 +118,11 @@ func (s *AnonService) CommitCollectionWithPasscodeAndPSK(
 
 // AddCollectionEntry adds or updates a single file entry in an existing collection, generating a new version with prev_sha pointing to sourceHash (Issue #338).
 func (s *AnonService) AddCollectionEntry(sourceHash string, entry model.AnonCollectionEntry, requester, psk string) (string, error) {
+	return s.AddCollectionEntryWithPasscode(sourceHash, entry, requester, "", psk)
+}
+
+// AddCollectionEntryWithPasscode adds or updates a single file entry with both passcode and PSK verification.
+func (s *AnonService) AddCollectionEntryWithPasscode(sourceHash string, entry model.AnonCollectionEntry, requester, passcode, psk string) (string, error) {
 	defer log.LogDuration("AnonService.AddCollectionEntry")()
 	src, err := s.GetCollectionByHash(sourceHash)
 	if err != nil {
@@ -128,6 +133,11 @@ func (s *AnonService) AddCollectionEntry(sourceHash string, entry model.AnonColl
 			return "", fmt.Errorf("psk required or invalid for psk-protected collection")
 		}
 		return "", fmt.Errorf("source collection not found")
+	}
+	if src.EffectiveAccessPolicy() == model.AccessPolicyProtected && requester == "" {
+		if subtle.ConstantTimeCompare([]byte(passcode), []byte(src.Passcode)) != 1 {
+			return "", fmt.Errorf("passcode required or invalid for protected collection")
+		}
 	}
 
 	entry.Normalize()
@@ -160,6 +170,11 @@ func (s *AnonService) AddCollectionEntry(sourceHash string, entry model.AnonColl
 
 // RemoveCollectionEntry removes an entry by path, generating a new version with prev_sha pointing to sourceHash (Issue #338).
 func (s *AnonService) RemoveCollectionEntry(sourceHash, entryPath string, requester, psk string) (string, error) {
+	return s.RemoveCollectionEntryWithPasscode(sourceHash, entryPath, requester, "", psk)
+}
+
+// RemoveCollectionEntryWithPasscode removes an entry by path with both passcode and PSK verification.
+func (s *AnonService) RemoveCollectionEntryWithPasscode(sourceHash, entryPath string, requester, passcode, psk string) (string, error) {
 	defer log.LogDuration("AnonService.RemoveCollectionEntry")()
 	src, err := s.GetCollectionByHash(sourceHash)
 	if err != nil {
@@ -170,6 +185,11 @@ func (s *AnonService) RemoveCollectionEntry(sourceHash, entryPath string, reques
 			return "", fmt.Errorf("psk required or invalid for psk-protected collection")
 		}
 		return "", fmt.Errorf("source collection not found")
+	}
+	if src.EffectiveAccessPolicy() == model.AccessPolicyProtected && requester == "" {
+		if subtle.ConstantTimeCompare([]byte(passcode), []byte(src.Passcode)) != 1 {
+			return "", fmt.Errorf("passcode required or invalid for protected collection")
+		}
 	}
 
 	found := false
@@ -193,6 +213,11 @@ func (s *AnonService) RemoveCollectionEntry(sourceHash, entryPath string, reques
 
 // UpdateCollectionEntry updates an existing file entry in a collection, generating a new version with prev_sha pointing to sourceHash (Issue #338).
 func (s *AnonService) UpdateCollectionEntry(sourceHash string, entry model.AnonCollectionEntry, requester, psk string) (string, error) {
+	return s.UpdateCollectionEntryWithPasscode(sourceHash, entry, requester, "", psk)
+}
+
+// UpdateCollectionEntryWithPasscode updates an existing file entry with both passcode and PSK verification.
+func (s *AnonService) UpdateCollectionEntryWithPasscode(sourceHash string, entry model.AnonCollectionEntry, requester, passcode, psk string) (string, error) {
 	defer log.LogDuration("AnonService.UpdateCollectionEntry")()
 	src, err := s.GetCollectionByHash(sourceHash)
 	if err != nil {
@@ -203,6 +228,11 @@ func (s *AnonService) UpdateCollectionEntry(sourceHash string, entry model.AnonC
 			return "", fmt.Errorf("psk required or invalid for psk-protected collection")
 		}
 		return "", fmt.Errorf("source collection not found")
+	}
+	if src.EffectiveAccessPolicy() == model.AccessPolicyProtected && requester == "" {
+		if subtle.ConstantTimeCompare([]byte(passcode), []byte(src.Passcode)) != 1 {
+			return "", fmt.Errorf("passcode required or invalid for protected collection")
+		}
 	}
 
 	entry.Normalize()
@@ -235,6 +265,11 @@ func (s *AnonService) UpdateCollectionEntry(sourceHash string, entry model.AnonC
 
 // GetCollectionHistory traverses backward along the prev_sha chain from startHash (Issue #338).
 func (s *AnonService) GetCollectionHistory(startHash string, maxDepth int, requester, psk string) ([]*model.AnonCollectionSummary, error) {
+	return s.GetCollectionHistoryWithPasscode(startHash, maxDepth, requester, "", psk)
+}
+
+// GetCollectionHistoryWithPasscode traverses backward along prev_sha with passcode and PSK verification.
+func (s *AnonService) GetCollectionHistoryWithPasscode(startHash string, maxDepth int, requester, passcode, psk string) ([]*model.AnonCollectionSummary, error) {
 	defer log.LogDuration("AnonService.GetCollectionHistory")()
 	if !isValidHash(startHash) {
 		return nil, fmt.Errorf("invalid start hash")
@@ -259,6 +294,11 @@ func (s *AnonService) GetCollectionHistory(startHash string, maxDepth int, reque
 		}
 		if !coll.CanAccess(requester, psk) {
 			break
+		}
+		if coll.EffectiveAccessPolicy() == model.AccessPolicyProtected && requester == "" {
+			if subtle.ConstantTimeCompare([]byte(passcode), []byte(coll.Passcode)) != 1 {
+				break
+			}
 		}
 
 		preview := make([]string, 0, 3)

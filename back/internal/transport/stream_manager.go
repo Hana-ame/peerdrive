@@ -197,13 +197,15 @@ func (m *StreamManager) Subscribe(viewer Session, streamID string) (*StreamManif
 		return nil, fmt.Errorf("stream %q not found", streamID)
 	}
 
+	viewerID := "local"
 	if viewer != nil {
 		rec.subscribers[viewer] = true
+		viewerID = viewer.ID()
 	}
 
 	copyManifest := *rec.manifest
 	copyManifest.Chunks = append([]StreamChunk(nil), rec.manifest.Chunks...)
-	log.LogInfo("stream: session %s subscribed to stream %s", viewer.ID(), streamID)
+	log.LogInfo("stream: session %s subscribed to stream %s", viewerID, streamID)
 	return &copyManifest, nil
 }
 

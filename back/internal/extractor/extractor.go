@@ -93,6 +93,18 @@ func New(cfg Config) *Extractor {
 	return &Extractor{cfg: cfg}
 }
 
+// maxBudget computes the effective cumulative extraction byte limit from MaxSize and archiveSize * MaxRatio.
+func (e *Extractor) maxBudget(archiveSize int64) int64 {
+	limit := e.cfg.MaxSize
+	if archiveSize > 0 && e.cfg.MaxRatio > 0 {
+		ratioLimit := archiveSize * int64(e.cfg.MaxRatio)
+		if ratioLimit > 0 && ratioLimit < limit {
+			limit = ratioLimit
+		}
+	}
+	return limit
+}
+
 // ShouldExtract checks if a file should be auto-extracted based on its extension.
 func (e *Extractor) ShouldExtract(filename string) bool {
 	if !e.cfg.Enabled {
@@ -234,6 +246,7 @@ func (e *Extractor) extractZip(srcPath, destDir string, archiveSize int64) ([]Ex
 	defer r.Close()
 	var files []ExtractedFile
 	totalExtracted := int64(0)
+	maxTotal := e.maxBudget(archiveSize)
 	for _, f := range r.File {
 		if len(files) >= e.cfg.MaxFiles {
 			return files, fmt.Errorf("file count limit exceeded: %d", e.cfg.MaxFiles)
@@ -250,8 +263,8 @@ func (e *Extractor) extractZip(srcPath, destDir string, archiveSize int64) ([]Ex
 		// #nosec G115 -- uint64(totalExtracted) 安全：totalExtracted 是只增
 		// 计数器且被 countingWriter 钉在 MaxSize 内（≥0 不变量）；真正的硬
 		// 上限是逐写计数的 countingWriter，此 up-front 检查仅作快速失败。
-		if uint64(totalExtracted)+f.UncompressedSize64 > uint64(e.cfg.MaxSize) {
-			return nil, fmt.Errorf("extraction size limit exceeded: %d + %d > %d", totalExtracted, f.UncompressedSize64, e.cfg.MaxSize)
+		if uint64(totalExtracted)+f.UncompressedSize64 > uint64(maxTotal) {
+			return nil, fmt.Errorf("extraction size limit exceeded: %d + %d > %d", totalExtracted, f.UncompressedSize64, maxTotal)
 		}
 		rel, err := resolveEntry(f.Name, destDir)
 		if err != nil {
@@ -261,7 +274,7 @@ func (e *Extractor) extractZip(srcPath, destDir string, archiveSize int64) ([]Ex
 		if err != nil {
 			return nil, fmt.Errorf("open entry %s: %w", f.Name, err)
 		}
-		out, hw, _, err := e.writeEntry(destDir, rel, e.cfg.MaxSize-totalExtracted)
+		out, hw, _, err := e.writeEntry(destDir, rel, maxTotal-totalExtracted)
 		if err != nil {
 			rc.Close()
 			return nil, err
@@ -300,6 +313,7 @@ func (e *Extractor) extractTar(srcPath, destDir string, archiveSize int64, reade
 	tr := tar.NewReader(r)
 	var files []ExtractedFile
 	totalExtracted := int64(0)
+	maxTotal := e.maxBudget(archiveSize)
 
 	// Track created files so success can be reported and failures cleaned.
 	created := map[string]bool{}
@@ -336,16 +350,16 @@ func (e *Extractor) extractTar(srcPath, destDir string, archiveSize int64, reade
 			cleanup()
 			return files, fmt.Errorf("file count limit exceeded: %d", e.cfg.MaxFiles)
 		}
-		if totalExtracted+header.Size > e.cfg.MaxSize {
+		if totalExtracted+header.Size > maxTotal {
 			cleanup()
-			return nil, fmt.Errorf("extraction size limit exceeded: %d + %d > %d", totalExtracted, header.Size, e.cfg.MaxSize)
+			return nil, fmt.Errorf("extraction size limit exceeded: %d + %d > %d", totalExtracted, header.Size, maxTotal)
 		}
 		rel, err := resolveEntry(header.Name, destDir)
 		if err != nil {
 			cleanup()
 			return nil, fmt.Errorf("unsafe path %q: %w", header.Name, err)
 		}
-		out, hw, _, err := e.writeEntry(destDir, rel, e.cfg.MaxSize-totalExtracted)
+		out, hw, _, err := e.writeEntry(destDir, rel, maxTotal-totalExtracted)
 		if err != nil {
 			cleanup()
 			return nil, err
@@ -411,7 +425,7 @@ func (e *Extractor) extractGz(srcPath, destDir string, archiveSize int64) ([]Ext
 	if base == "" {
 		return nil, fmt.Errorf("cannot derive output name from %s", filepath.Base(srcPath))
 	}
-	out, hw, _, err := e.writeEntry(destDir, base, e.cfg.MaxSize)
+	out, hw, _, err := e.writeEntry(destDir, base, e.maxBudget(archiveSize))
 	if err != nil {
 		return nil, err
 	}

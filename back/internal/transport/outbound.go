@@ -449,6 +449,9 @@ func (r *fetchReader) Read(p []byte) (int, error) {
 				default:
 				}
 				r.finish(nil)
+				if r.err != nil {
+					return 0, r.err
+				}
 				return 0, io.EOF
 			}
 		case err := <-r.f.errCh:
@@ -466,11 +469,18 @@ func (r *fetchReader) Read(p []byte) (int, error) {
 
 // finish 幂等结束：标记 eof、记录错误、执行清理（delete 路由表 + close closed）。
 // 全量请求 EOF 时校验 sha256（H5 内容寻址兜底）。
-func (r *fetchReader) finish(err error) {	if r.eof {
+// 注意：即使对端发送 0 个数据块（r.h == nil，如 meta{total:0} + done{size:0}），
+// 当 r.verify 为真时也必须初始化 sha256.New() 并校验空内容哈希（e3b0c442...），
+// 防止恶意对端用 0 字节响应绕过任意非空文件的哈希校验。
+func (r *fetchReader) finish(err error) {
+	if r.eof {
 		return
 	}
 	r.eof = true
-	if err == nil && r.verify && r.h != nil {
+	if err == nil && r.verify {
+		if r.h == nil {
+			r.h = sha256.New()
+		}
 		sum := hex.EncodeToString(r.h.Sum(nil))
 		if sum != r.hash {
 			err = fmt.Errorf("peerjs: content hash mismatch for %s", r.hash)
@@ -622,4 +632,3 @@ func (s *PeerJSService) credentialFor(conn Session, st *connState) string {
 	}
 	return ""
 }
-

@@ -5,13 +5,18 @@ package router
 // POST /sources/:name/priority   -> Adjust routing priority at runtime (body: {"priority": n})
 
 import (
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"peerdrive/internal/apperr"
 	"peerdrive/internal/controller"
 	"peerdrive/internal/source"
 )
+
+// maxSourceWriteBytes caps multipart file uploads on /sources/local/write (8 GB, matching upload_session.go).
+const maxSourceWriteBytes int64 = 8 * 1024 * 1024 * 1024
 
 // registerSourceRoutes registers the source management endpoints.
 // Background: SourceManager comes from this Router's Deps (constructor injection —
@@ -35,7 +40,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 			return
 		}
 		if err := sourceManager.SetPriority(c.Param("name"), body.Priority); err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": apperr.Sanitize(err, "source not found")})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -66,7 +71,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		meta, err := lc.AddLocalFile(body.Path)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": apperr.Sanitize(err, "request failed")})
 			return
 		}
 		c.JSON(http.StatusCreated, gin.H{
@@ -77,6 +82,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		})
 	})
 	r.POST("/sources/local/write", authRequired, func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSourceWriteBytes)
 		file, header, err := c.Request.FormFile("file")
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
@@ -93,9 +99,9 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 			c.JSON(http.StatusNotImplemented, gin.H{"error": "local source does not support control"})
 			return
 		}
-		meta, err := lc.WriteFile(header.Filename, file)
+		meta, err := lc.WriteFile(header.Filename, io.LimitReader(file, maxSourceWriteBytes))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": apperr.Sanitize(err, "request failed")})
 			return
 		}
 		c.JSON(http.StatusCreated, gin.H{
@@ -128,7 +134,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		meta, err := bc.DownloadTorrent(data)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": apperr.Sanitize(err, "request failed")})
 			return
 		}
 		c.JSON(http.StatusCreated, meta)
@@ -148,7 +154,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		meta, err := bc.DownloadMagnet(body.URI)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": apperr.Sanitize(err, "request failed")})
 			return
 		}
 		c.JSON(http.StatusCreated, meta)
@@ -181,7 +187,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 			return
 		}
 		if err := bc.PauseDownload(c.Param("infohash")); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": apperr.Sanitize(err, "request failed")})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -193,7 +199,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 			return
 		}
 		if err := bc.ResumeDownload(c.Param("infohash")); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": apperr.Sanitize(err, "request failed")})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -205,7 +211,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 			return
 		}
 		if err := bc.RemoveDownload(c.Param("infohash")); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": apperr.Sanitize(err, "request failed")})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -220,7 +226,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		pi, err := ic.PinCID(c.Param("cid"))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": apperr.Sanitize(err, "request failed")})
 			return
 		}
 		c.JSON(http.StatusCreated, pi)
@@ -232,7 +238,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 			return
 		}
 		if err := ic.UnpinCID(c.Param("cid")); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": apperr.Sanitize(err, "request failed")})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -245,7 +251,7 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		pins, err := ic.ListPins()
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": apperr.Sanitize(err, "request failed")})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"pins": pins})
@@ -258,10 +264,9 @@ func (rt *Router) registerSourceRoutes(r *gin.Engine, authRequired gin.HandlerFu
 		}
 		status, err := ic.GatewayStatus()
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": apperr.Sanitize(err, "request failed")})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"gateways": status})
 	})
-
 }

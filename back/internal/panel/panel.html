@@ -182,7 +182,7 @@
     <h1>☁️ peerdrive panel</h1>
     <span class="tag">分布式网盘</span>
     <span class="tag">WebRTC 直连 · 零后端</span>
-    <span class="tag mono" id="build-id">bundle fa387eca</span>
+    <span class="tag mono" id="build-id">bundle 476a7527</span>
     <span class="grow"></span>
     <span class="mono dim" style="display:flex;align-items:center;gap:6px">
       我的节点 id：<span id="my-id">（未连接）</span>
@@ -638,10 +638,11 @@ function detectPromptInjection(text) {
     /jailbreak|DO\s+NOT\s+REVEAL/i.test(s)
 }
 
-/** Preview allow-list: only renderable media/text types are echoed back. */
+/** Preview allow-list: only renderable media/text types are echoed back (blocks SVG XSS). */
 function safePreviewMime(mime) {
-  const m = String(mime || '').toLowerCase()
-  if (/^(image|video|audio)\//.test(m)) return m
+  const m = String(mime || '').trim().toLowerCase()
+  if (m === 'image/svg+xml' || m.startsWith('image/svg')) return null
+  if (/^(image|video|audio)\/[a-z0-9.+-]+$/.test(m)) return m
   if (m === 'text/plain' || m === 'text/markdown' || m === 'application/json' || m === 'application/pdf') return m
   return null
 }
@@ -1018,6 +1019,7 @@ function baseName(p) {
 // right content. The backend /f/ /c/ handlers are a known gap on the mainline
 // (excised 2026-10-17) — this module stays as the contract for when they land.
 
+
 // Named URL_HASH_RE (not HASH_RE): build-panel.mjs inlines every core file into
 // one flat IIFE scope, and protocol.js already owns a top-level HASH_RE.
 const URL_HASH_RE = /\b[0-9a-f]{64}\b/
@@ -1092,7 +1094,17 @@ function parseDirectTarget(input, hint = '') {
     // Both the SPA form (c/<hash>/<rest>) and the legacy /api/v1/c/<hash>/<rest>
     // form carry the entry path right after the collection hash.
     const m = route.match(/(?:^|\/)c\/[0-9a-f]{64}\/(.+)$/)
-    if (m && m[1]) entryPath = decodeURIComponent(m[1])
+    if (m && m[1]) {
+      const normalizedSlashes = m[1].replace(/%2f/gi, '/').replace(/%5c/gi, '/')
+      const decodedSegs = normalizedSlashes.split('/').map((seg) => {
+        try {
+          return decodeURIComponent(seg)
+        } catch {
+          return seg
+        }
+      })
+      entryPath = sanitizeRelativePath(decodedSegs.join('/'))
+    }
   }
 
   const out = { kind }
@@ -1502,6 +1514,10 @@ class TransportQueue {
    */
   _acquire(transport, signal) {
     return new Promise((resolve, reject) => {
+      if (signal && signal.aborted) {
+        reject(signal.reason || new Error('Aborted'))
+        return
+      }
       const release = () => {
         this._active[transport] -= 1
         this._drain(transport)
@@ -1546,7 +1562,11 @@ class TransportQueue {
           this.hub.completeTask(task.id)
           resolve(value)
         } catch (err) {
-          this.hub.failTask(task.id, err)
+          if (taskMeta.signal && taskMeta.signal.aborted) {
+            this.hub.cancelTask(task.id)
+          } else {
+            this.hub.failTask(task.id, err)
+          }
           reject(err)
         } finally {
           doRelease()
@@ -1559,7 +1579,7 @@ class TransportQueue {
           // Lane rejected: aborted while still queued — mark the hub task
           // cancelled (never blocking the next lane item) and settle the
           // transfer promise with the abort reason.
-          if (task.status === 'queued') {
+          if (task.status === 'queued' || (taskMeta.signal && taskMeta.signal.aborted)) {
             this.hub.cancelTask(task.id)
           }
           reject(err)

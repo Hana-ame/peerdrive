@@ -67,9 +67,12 @@ describe('peerdrive-core/security: URL, MIME, Prompt Injection & Manifest Guards
     assert.equal(detectPromptInjection('Normal file description for vacation photos'), false)
   })
 
-  it('validates preview MIME allow-list', () => {
+  it('validates preview MIME allow-list and blocks SVG XSS', () => {
     assert.equal(safePreviewMime('image/png'), 'image/png')
     assert.equal(safePreviewMime('application/pdf'), 'application/pdf')
+    assert.equal(safePreviewMime('image/svg+xml'), null)
+    assert.equal(safePreviewMime('IMAGE/SVG+XML'), null)
+    assert.equal(safePreviewMime('image/png; evil=1'), null)
     assert.equal(safePreviewMime('text/html'), null)
     assert.equal(safePreviewMime('application/x-msdownload'), null)
   })
