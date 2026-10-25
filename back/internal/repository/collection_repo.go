@@ -431,6 +431,13 @@ func GetVersionEntries(versionID int) ([]model.VersionEntry, error) {
 
 // RestoreVersionEntries rolls back collection entries to a specified version's snapshot within a transaction (delete then insert, including providers_json).
 func RestoreVersionEntries(versionID, collectionID int) error {
+	var ownerCollID int
+	if err := db.QueryRow(`SELECT collection_id FROM collection_versions WHERE id = ?`, versionID).Scan(&ownerCollID); err != nil {
+		return err
+	}
+	if ownerCollID != collectionID {
+		return fmt.Errorf("version %d does not belong to collection %d", versionID, collectionID)
+	}
 	entries, err := GetVersionEntries(versionID)
 	if err != nil {
 		return err
@@ -537,6 +544,13 @@ func UpsertCollectionEntriesTx(collectionID int, merged map[string][]model.Provi
 // RestoreVersionAndUpdateHashTx atomically replaces workspace entries from a version snapshot
 // and updates collections.current_hash in a single transaction.
 func RestoreVersionAndUpdateHashTx(versionID, collectionID int, snapshotHash string) error {
+	var ownerCollID int
+	if err := db.QueryRow(`SELECT collection_id FROM collection_versions WHERE id = ?`, versionID).Scan(&ownerCollID); err != nil {
+		return err
+	}
+	if ownerCollID != collectionID {
+		return fmt.Errorf("version %d does not belong to collection %d", versionID, collectionID)
+	}
 	entries, err := GetVersionEntries(versionID)
 	if err != nil {
 		return err

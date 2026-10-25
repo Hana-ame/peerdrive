@@ -3,6 +3,7 @@ package router
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -17,7 +18,12 @@ import (
 func dispatchCreateCollection(c *gin.Context) {
 	raw, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		controller.CreateAnonCollection(c)
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(raw))

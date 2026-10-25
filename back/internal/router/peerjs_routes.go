@@ -82,6 +82,10 @@ func (rt *Router) registerPeerJSRoutes(r *gin.Engine, auth gin.HandlerFunc) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "peer and hash required"})
 			return
 		}
+		if body.Offset < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "offset must be non-negative"})
+			return
+		}
 		const maxPeerjsHTTPFetch = 64 << 20
 		if body.Size <= 0 {
 			body.Size = -1

@@ -209,20 +209,17 @@ func (p *PeerPuller) Start(peer, hash, name, relPath, coll string) (*PullJob, er
 		Status:   status,
 		Started:  time.Now(),
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	p.mu.Lock()
 	p.jobs[job.ID] = job
+	p.cancels[job.ID] = cancel
 	p.pruneLocked()
+	snap := *job
 	p.mu.Unlock()
 
 	if target != "" {
 		_ = p.saveJobMeta(job, target+".part.meta")
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	p.mu.Lock()
-	p.cancels[job.ID] = cancel
-	snap := *job
-	p.mu.Unlock()
 
 	go p.run(ctx, job)
 	return &snap, nil

@@ -107,10 +107,11 @@ export function detectPromptInjection(text) {
     /jailbreak|DO\s+NOT\s+REVEAL/i.test(s)
 }
 
-/** Preview allow-list: only renderable media/text types are echoed back. */
+/** Preview allow-list: only renderable media/text types are echoed back (blocks SVG XSS). */
 export function safePreviewMime(mime) {
-  const m = String(mime || '').toLowerCase()
-  if (/^(image|video|audio)\//.test(m)) return m
+  const m = String(mime || '').trim().toLowerCase()
+  if (m === 'image/svg+xml' || m.startsWith('image/svg')) return null
+  if (/^(image|video|audio)\/[a-z0-9.+-]+$/.test(m)) return m
   if (m === 'text/plain' || m === 'text/markdown' || m === 'application/json' || m === 'application/pdf') return m
   return null
 }

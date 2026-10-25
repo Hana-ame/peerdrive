@@ -328,6 +328,14 @@ func (s *PeerJSService) serveUploadBegin(c Session, st *connState, r dcResp) {
 		_ = c.SendJSON(dcResp{Type: "err", Msg: "offset must be chunk-aligned", ReqID: r.ReqID})
 		return
 	}
+	if r.Size == 0 && offset != 0 {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: "offset beyond size", ReqID: r.ReqID})
+		return
+	}
+	if r.Size > 0 && offset >= r.Size {
+		_ = c.SendJSON(dcResp{Type: "err", Msg: "offset beyond size", ReqID: r.ReqID})
+		return
+	}
 	uploaderPeerID := ""
 	if !isSelfSession(c) && !st.isLocal {
 		uploaderPeerID = c.ID()
@@ -340,10 +348,6 @@ func (s *PeerJSService) serveUploadBegin(c Session, st *connState, r dcResp) {
 	if r.Size == 0 {
 		// 空文件没有 data 帧可发，这里直接完成，避免连接级 pendingUpload 卡到
 		// 30s stale 清理（且旧实现 size<=0 直接把空文件上传拒之门外）
-		if offset != 0 {
-			_ = c.SendJSON(dcResp{Type: "err", Msg: "offset beyond size", ReqID: r.ReqID})
-			return
-		}
 		done, fi, err := sess.Complete()
 		if err != nil {
 			_ = c.SendJSON(dcResp{Type: "err", Msg: err.Error(), ReqID: r.ReqID})

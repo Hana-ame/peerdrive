@@ -276,6 +276,10 @@ export class TransportQueue {
    */
   _acquire(transport, signal) {
     return new Promise((resolve, reject) => {
+      if (signal && signal.aborted) {
+        reject(signal.reason || new Error('Aborted'))
+        return
+      }
       const release = () => {
         this._active[transport] -= 1
         this._drain(transport)
@@ -320,7 +324,11 @@ export class TransportQueue {
           this.hub.completeTask(task.id)
           resolve(value)
         } catch (err) {
-          this.hub.failTask(task.id, err)
+          if (taskMeta.signal && taskMeta.signal.aborted) {
+            this.hub.cancelTask(task.id)
+          } else {
+            this.hub.failTask(task.id, err)
+          }
           reject(err)
         } finally {
           doRelease()
@@ -333,7 +341,7 @@ export class TransportQueue {
           // Lane rejected: aborted while still queued — mark the hub task
           // cancelled (never blocking the next lane item) and settle the
           // transfer promise with the abort reason.
-          if (task.status === 'queued') {
+          if (task.status === 'queued' || (taskMeta.signal && taskMeta.signal.aborted)) {
             this.hub.cancelTask(task.id)
           }
           reject(err)

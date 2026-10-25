@@ -13,6 +13,7 @@ import (
 	"github.com/Hana-ame/go-peerdrive-bt"
 	"peerdrive/internal/log"
 	"peerdrive/internal/pathutil"
+	"peerdrive/pkg/hashutil"
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
@@ -326,6 +327,10 @@ func BTSeedCollection(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "collection_hash is required"})
 		return
 	}
+	if !hashutil.IsValidSHA256(req.CollectionHash) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid collection_hash"})
+		return
+	}
 
 	storageDir := c.MustGet("storageDir").(string)
 	coll, err := collSvc.GetAnonByHash(req.CollectionHash, storageDir)
@@ -333,6 +338,7 @@ func BTSeedCollection(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "collection not found: " + sanitizeErr(err, "request failed")})
 		return
 	}
+	coll.NormalizeEntries()
 
 	// Create a temp directory and write collection files for BuildFromFilePath.
 	tmpDir, err := os.MkdirTemp("", "peerdrive-seed-")
@@ -365,8 +371,17 @@ func BTSeedCollection(c *gin.Context) {
 	}
 
 	for _, entry := range coll.Entries {
-		srcPath := filepath.Join(storageDir, entry.Hash[:2], entry.Hash)
+		h := entry.GetPrimaryHash()
+		if !hashutil.IsValidSHA256(h) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "entry has no valid sha256 provider"})
+			return
+		}
+		srcPath := filepath.Join(storageDir, h[:2], h)
 		dstPath := filepath.Join(rootDir, entry.Path)
+		if !pathutil.Within(rootDir, dstPath) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid entry path"})
+			return
+		}
 		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 			writeInternalError(c, err)
 			return
@@ -413,8 +428,13 @@ func BTSeedCollection(c *gin.Context) {
 		return
 	}
 	for _, entry := range coll.Entries {
-		srcPath := filepath.Join(storageDir, entry.Hash[:2], entry.Hash)
+		h := entry.GetPrimaryHash()
+		srcPath := filepath.Join(storageDir, h[:2], h)
 		dstPath := filepath.Join(dataRoot, entry.Path)
+		if !pathutil.Within(dataRoot, dstPath) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid entry path"})
+			return
+		}
 		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 			writeInternalError(c, err)
 			return

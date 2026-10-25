@@ -190,15 +190,33 @@ func is64Hex(s string) bool {
 
 func validateDisplayPayload(cmd DisplayFrame) error {
 	if cmd.URL != "" {
-		lower := strings.ToLower(strings.TrimSpace(cmd.URL))
-		if strings.HasPrefix(lower, "javascript:") ||
-			strings.HasPrefix(lower, "file:") ||
-			strings.HasPrefix(lower, "data:") ||
-			strings.HasPrefix(lower, "vbscript:") {
+		// Strip C0 control characters and whitespace before scheme inspection (blocks java\tscript: bypass)
+		cleaned := strings.Map(func(r rune) rune {
+			if r <= 0x20 || r == 0x7f {
+				return -1
+			}
+			return r
+		}, strings.ToLower(cmd.URL))
+		if strings.HasPrefix(cleaned, "javascript:") ||
+			strings.HasPrefix(cleaned, "file:") ||
+			strings.HasPrefix(cleaned, "data:") ||
+			strings.HasPrefix(cleaned, "vbscript:") ||
+			strings.HasPrefix(cleaned, "blob:") ||
+			strings.HasPrefix(cleaned, "about:") {
 			return fmt.Errorf("disallowed or dangerous URL scheme in display payload: %s", cmd.URL)
 		}
-		if strings.Contains(lower, "://") && !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		if strings.Contains(cleaned, "://") && !strings.HasPrefix(cleaned, "http://") && !strings.HasPrefix(cleaned, "https://") {
 			return fmt.Errorf("unsupported URL scheme in display payload: %s", cmd.URL)
+		}
+		// Reject any non-relative URL with an unknown scheme prefix before the first slash
+		if colonIdx := strings.IndexByte(cleaned, ':'); colonIdx >= 0 {
+			slashIdx := strings.IndexByte(cleaned, '/')
+			if slashIdx < 0 || colonIdx < slashIdx {
+				scheme := cleaned[:colonIdx]
+				if scheme != "http" && scheme != "https" {
+					return fmt.Errorf("unsupported URL scheme in display payload: %s", cmd.URL)
+				}
+			}
 		}
 	}
 	if cmd.Hash != "" {

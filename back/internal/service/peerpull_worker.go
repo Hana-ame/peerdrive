@@ -105,8 +105,10 @@ func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 	var lastErr error
 	for attempt := 0; attempt < pullAttempts; attempt++ {
 		if attempt > 0 {
-			// 用户主动取消就别再重试了：等完退避才失败会让人以为卡死
+			// 用户主动取消就别再重试了：等完退避才失败会让人以为卡死，同时清理残留 .part 与 .meta
 			if ctx.Err() != nil {
+				_ = os.Remove(tmp)
+				_ = os.Remove(tmp + ".meta")
 				p.finish(job, PullCancelled, "", time.Time{})
 				return
 			}
@@ -115,6 +117,8 @@ func (p *PeerPuller) run(ctx context.Context, job *PullJob) {
 			select {
 			case <-time.After(pullBackoff(attempt - 1)):
 			case <-ctx.Done():
+				_ = os.Remove(tmp)
+				_ = os.Remove(tmp + ".meta")
 				p.finish(job, PullCancelled, "", time.Time{})
 				return
 			}
@@ -230,6 +234,13 @@ func (p *PeerPuller) fetchOnce(ctx context.Context, job *PullJob, target, tmp st
 		delete(p.closers, job.ID)
 		p.mu.Unlock()
 	}()
+
+	if ctx.Err() != nil {
+		_ = os.Remove(tmp)
+		_ = os.Remove(metaPath)
+		p.finish(job, PullCancelled, "", time.Time{})
+		return true, nil
+	}
 
 	var f *os.File
 	if partOffset > 0 {

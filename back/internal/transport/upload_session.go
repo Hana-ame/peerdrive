@@ -60,9 +60,10 @@ func (s *FileIndexService) BeginUploadForPeer(name string, size int64, uploaderP
 	}
 	s.upMu.Lock()
 	defer s.upMu.Unlock()
-	sessKey := name
+	cleanName := sanitizeName(name)
+	sessKey := cleanName
 	if uploaderPeerID != "" {
-		sessKey = uploaderPeerID + ":" + name
+		sessKey = uploaderPeerID + ":" + cleanName
 	}
 	if sess, ok := s.uploads[sessKey]; ok {
 		sess.last = time.Now()
@@ -82,7 +83,7 @@ func (s *FileIndexService) BeginUploadForPeer(name string, size int64, uploaderP
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(targetDir, sanitizeName(name))
+	path := filepath.Join(targetDir, cleanName)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open upload file: %w", err)
@@ -115,7 +116,7 @@ func (s *FileIndexService) BeginUploadForPeer(name string, size int64, uploaderP
 			sess.setBit(rebuilt / uploadChunkSize)
 		}
 	}
-	s.uploads[name] = sess
+	s.uploads[sessKey] = sess
 	log.LogInfo("file-index: upload session begin name=%s size=%d path=%s", name, size, path)
 	return sess, nil
 }
