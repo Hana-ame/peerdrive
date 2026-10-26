@@ -221,3 +221,32 @@ func TestAdversarial_Display_MalformedFramesAndFuzzing(t *testing.T) {
 		})
 	}
 }
+
+// TestAdversarial_Display_RegisterNilSessionNoPanic 验证 Register 在 sess 为 nil 且
+// id 为空时不会 panic。
+// 发现背景：回查 PR #419 项 11 时发现 Register 是 display_manager.go 里唯一没有 nil
+// sess 防护的方法（Unregister/Cast/Control/Clear 都有）。sess 来自活跃的 WS 连接，
+// 今天恒非 nil，但 id 为空时 sess.ID() 一旦碰到 nil 就会 panic 掉整个 transport
+// goroutine；调用方 display.go 紧接着解引用 screen.Channel，返回 nil 只是把 panic
+// 换个位置。这里的期望是：返回合法的非 nil screen，id 退化成空串。
+func TestAdversarial_Display_RegisterNilSessionNoPanic(t *testing.T) {
+	m := NewDisplayManager()
+
+	require.NotPanics(t, func() {
+		screen := m.Register(nil, "", "default", "")
+		require.NotNil(t, screen, "Register must not return nil: display.go dereferences screen.Channel")
+		assert.Equal(t, "", screen.ID, "no session id available, empty is the honest value")
+		assert.Equal(t, "default", screen.Channel)
+		assert.Equal(t, "Screen-", screen.Name)
+	})
+
+	// 显式给了 id 时，sess 是否为 nil 都不影响结果。SessionID 记录的是会话自己的
+	// id（取自 sess.ID()），与显式传入的 screen id 是两回事——sess 为 nil 时就是空串。
+	require.NotPanics(t, func() {
+		screen := m.Register(nil, "explicit-id", "", "My Screen")
+		require.NotNil(t, screen)
+		assert.Equal(t, "explicit-id", screen.ID)
+		assert.Equal(t, "", screen.SessionID)
+		assert.Equal(t, "My Screen", screen.Name)
+	})
+}

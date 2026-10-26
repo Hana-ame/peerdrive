@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"peerdrive/internal/collection"
 	"peerdrive/internal/twitterpic"
 )
 
@@ -62,6 +63,11 @@ func TestTwitterPic_Disabled_503(t *testing.T) {
 // a fake gallery backend: POST build → 200 with collection sha; GET by sha →
 // canonical JSON bytes; GET fetch-stats → per-alternative monitor snapshot.
 func TestTwitterPic_BuildAndRespondBySHA(t *testing.T) {
+	// 假图库后端起在 httptest 的 127.0.0.1，媒体 URL 也被劫持到这里——SSRF 闸门
+	// 会把它当成内网目标拦掉。本用例验端到端 HTTP 契约，不是 SSRF；闸门本身由
+	// collection 包的 fetch_guard_test.go 覆盖。
+	collection.SetGuardCollectionFetch(false)
+	t.Cleanup(func() { collection.SetGuardCollectionFetch(true) })
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/" && r.URL.Query().Get("list") == "users":

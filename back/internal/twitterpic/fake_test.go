@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"peerdrive/internal/collection"
 )
 
 // fakeAPI 是一个可配置的假后端。
@@ -35,6 +37,12 @@ type fakeAPI struct {
 
 // newFakeAPI 启动假后端。
 func newFakeAPI(t *testing.T) *fakeAPI {
+	t.Helper()
+	// 假后端起在 httptest 的 127.0.0.1，媒体 URL 也被劫持到这里——SSRF 闸门会
+	// 把它当成内网目标拦掉。本包的测试验的是摄取/降级/分页流程，不是 SSRF，所以
+	// 统一在假后端入口关掉闸门；闸门本身由 collection 包的 fetch_guard_test.go 覆盖。
+	collection.SetGuardCollectionFetch(false)
+	t.Cleanup(func() { collection.SetGuardCollectionFetch(true) })
 	f := &fakeAPI{
 		t:          t,
 		metas:      make(map[string]*UserMeta),

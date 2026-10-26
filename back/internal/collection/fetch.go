@@ -27,9 +27,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"peerdrive/internal/log"
+	"peerdrive/pkg/urlguard"
 )
 
 // 备选源名字（监控统计键，同时也是汇报里的稳定标识）。
@@ -60,8 +62,41 @@ func (opt FetchOptions) client() *http.Client {
 	if opt.Client != nil {
 		return opt.Client
 	}
+	// 闸门开着且调用方没注入 client 时，回退到带 SafeDialContext 的 client，
+	// 而不是 http.DefaultClient。两个原因：DefaultClient 没有超时，一个对端塞进
+	// 合集条目的黑洞 IP 能一直占着这条 goroutine；而且它不做任何目标 IP 校验，
+	// 302 跳到内网地址会在 dial 层被直接放行。
+	if guardCollectionFetch {
+		return guardedClient()
+	}
 	return http.DefaultClient
 }
+
+// guardedClient 进程级共享的安全 client。30s 超时对齐 urlguard.NewSafeClient 的
+// 默认值。
+var (
+	guardedClientOnce sync.Once
+	guardedClientV    *http.Client
+)
+
+func guardedClient() *http.Client {
+	guardedClientOnce.Do(func() { guardedClientV = urlguard.NewSafeClient(30 * time.Second) })
+	return guardedClientV
+}
+
+// guardCollectionFetch 控制集合条目的 url 备选要不要过 SSRF 闸门。
+//
+// 默认开。集合条目里的 Source.URL / ECHURL / Private.URL 是对端可控的：匿名合集
+// 可由任何有权限的用户创建并同步过来，而这条链最终落到本节点的一个出站 HTTP
+// 请求上。闸门开着时拦 127.0.0.1 / 192.168.x / 169.254.169.254(IMDS) 一类内网
+// 目标；关掉用于「自建内网图床合集」这种合法但需要运维显式接受的场景。
+var guardCollectionFetch = true
+
+// SetGuardCollectionFetch 在启动期由 serverapp 调用一次。
+func SetGuardCollectionFetch(on bool) { guardCollectionFetch = on }
+
+// GuardCollectionFetchEnabled 供启动日志与自检确认当前姿态。
+func GuardCollectionFetchEnabled() bool { return guardCollectionFetch }
 
 // Alt 是一个备选源的描述。
 type Alt struct {
@@ -154,6 +189,15 @@ func (e *Entry) fetchAlt(ctx context.Context, a Alt, opt FetchOptions) (io.ReadC
 
 // fetchHTTP GET 一个备选 URL，返回响应体与已知字节数（Content-Length；未知为 0）。
 func fetchHTTP(ctx context.Context, client *http.Client, rawURL string) (io.ReadCloser, int64, error) {
+	// 闸门：URL 来自集合条目，经 collection.New 的 JSON 解析进来，而集合可以被
+	// 对端同步/由第三方创建。只校验 scheme+host 不够——validateSourceURL 会放行
+	// https://169.254.169.254/ 和 https://127.0.0.1:8080/admin。这里在发起请求前
+	// 做 IP 归属校验；client 侧的 SafeDialContext 是第二层，堵 302/DNS rebinding。
+	if guardCollectionFetch {
+		if err := urlguard.GuardExternalURL(rawURL); err != nil {
+			return nil, 0, fmt.Errorf("ssrf guard: %w", err)
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, 0, err
