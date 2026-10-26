@@ -23,6 +23,7 @@ package router
 // These tests pin the fixes so none of them can silently regress.
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -118,6 +119,83 @@ func TestLimitJSONBody_ZeroDisables(t *testing.T) {
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, "maxBytes=0 must leave the body uncapped")
+}
+
+// TestLimitJSONBody_DeclaredLengthOverLimit — Content-Length 声明超限时在 middleware
+// 层直接回受控的 JSON 413，handler 一次都不该跑。
+// 发现背景：回查 PR #419 时发现「超限后 handler 的 c.JSON 被吞」。Content-Length
+// 这条路径能给出确定的 413 语义（而不是落到 handler 变 400），所以在这里断言。
+func TestLimitJSONBody_DeclaredLengthOverLimit(t *testing.T) {
+	t.Parallel()
+	e := bindProbe(1024)
+	handlerRan := false
+	e2 := gin.New()
+	e2.Use(LimitJSONBody(1024))
+	e2.POST("/probe", func(c *gin.Context) {
+		handlerRan = true
+		var body struct {
+			Hash string `json:"hash"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.AbortWithStatus(http.StatusRequestEntityTooLarge)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"hash": body.Hash})
+	})
+
+	// Content-Length 显式声明 4096 > 1024，但真实 body 只给了小 body——
+	// middleware 必须在读 body 之前就拒掉。
+	req := httptest.NewRequest(http.MethodPost, "/probe", strings.NewReader(`{"hash":"abc"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Length", "4096")
+	w := httptest.NewRecorder()
+	e2.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "declared over-limit body must be refused with 413")
+	require.False(t, handlerRan, "handler must not run once the declared length is rejected")
+	assert.Contains(t, w.Body.String(), "request body too large", "413 body must be the JSON error, not plaintext")
+	_ = e
+}
+
+// TestLimitJSONBody_HandlerCanSeeMaxBytesError — 真实字节超限（Content-Length 缺失
+// 或谎报）时，handler 能通过 *http.MaxBytesError 识别出「请求体过大」并返回正确的
+// 413，而不是笼统的 400。
+// 发现背景：回查 PR #419 时发现超限的 JSON 请求最终都落成 400（ShouldBindJSON 失败
+// → c.JSON(400)），语义不对。Content-Length 预检覆盖绝大多数情况，剩下的谎报客户端
+// 需要 handler 自己识别——这个用例把识别方式钉住，也给 handler 一个范式。
+func TestLimitJSONBody_HandlerCanSeeMaxBytesError(t *testing.T) {
+	t.Parallel()
+	e := gin.New()
+	e.Use(LimitJSONBody(1024))
+	e.POST("/probe", func(c *gin.Context) {
+		var body struct {
+			Hash string `json:"hash"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			var mbErr *http.MaxBytesError
+			if errors.As(err, &mbErr) {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large", "limit": mbErr.Limit})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"hash": body.Hash})
+	})
+
+	big := strings.Repeat("a", 2048)
+	body := `{"hash":"` + big + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/probe", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// 不带 Content-Length、ContentLength 置 -1（未知长度 / chunked）：预检拿不到
+	// 声明值，只能落到 MaxBytesReader 按真实字节数拦。
+	req.ContentLength = -1
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "handler must map MaxBytesError to 413, not 400")
+	assert.Contains(t, w.Body.String(), "request body too large")
+	assert.Contains(t, w.Body.String(), `"limit":1024`)
 }
 
 // TestCORS_AllowHeadersIsAnAllowList — red-team R2.
