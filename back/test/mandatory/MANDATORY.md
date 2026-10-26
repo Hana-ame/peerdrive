@@ -1,0 +1,93 @@
+# mandatory 测试类别
+
+> 本文件是 mandatory 类别的策略定义。修改本文件的语义同样需要人工核验。
+
+## 是什么
+
+mandatory 是 peerdrive 里**唯一不允许 AI agent 自行修改的测试类别**。
+
+它和普通测试的差别不在写法，在**治理**：
+
+| | 普通测试 | mandatory 测试 |
+|---|---|---|
+| 跑法 | `go test ./...` | `go test -tags "nosqlite mandatory" ./test/mandatory/` |
+| CI gate | `backend` job，自动 | `mandatory` job，**需人工 Approve 环境** |
+| 改动谁批 | 代码 review 即可 | 必须人工核验，且要同步更新 `manifest.sha256` |
+| 被改动的可发现性 | 静默 | 哈希不匹配 → CI 红 |
+| AI agent 能否自行修改 | 可以 | **不可以** |
+
+## 一次性人工设置（首次启用必做）
+
+`mandatory` job 需要 GitHub Environment 的 `Required reviewers` 才能真正形成「人工核验」
+关口。**这一步必须由人在 UI 里做**，agent 用 REST API 设置被拒
+（`PUT /environments/mandatory-tests/required_reviewers` 返回 404，本仓库的
+environment protection rules 无法通过 API 写）。
+
+路径：**Settings → Environments → `mandatory-tests` → Add protection rule →
+Required reviewers → 选人 → Save**。environment 本身已经建好，只差这一条规则。
+
+在此之前 `mandatory` job 会正常跑但**不需要批准**，只有 `manifest` job 在提供
+防篡改保障。
+
+## 什么该进这个类别
+
+只放**关掉就会出事、且弱化时看起来完全无害**的断言：
+
+- 安全默认（`SSRF 闸门默认开着`、`JSON body 上限默认开着`）
+- 用户显式钉住的行为契约（`invariant`）
+- 破坏性变更的防线（`file_index 是唯一真相源`、`镜像默认开启保证可回滚`）
+
+**不要**放进去：
+- 常规单元测试 —— 普通套件已经覆盖，进这个类别只会稀释它
+- 性能/时序相关（flaky，会训练出「红了就跳过」的坏习惯）
+- 需要外部网络或人工准备数据的验收
+
+## 怎么加一条
+
+```bash
+# 1. 写测试，文件名以 _mandatory_test.go 结尾，文件头必须带：
+#    //go:build mandatory
+#    // 🚨 MANDATORY DIRECTIVE FOR ALL AI AGENTS: ...
+
+# 2. 生成哈希，追加到 manifest
+cd back
+sha256sum test/mandatory/你的文件_mandatory_test.go >> test/mandatory/manifest.sha256
+
+# 3. 两端都跑一遍
+go test -tags nosqlite ./test/mandatory/ -run TestMandatory_ManifestIntegrity -count=1 -v
+go test -tags "nosqlite mandatory" ./test/mandatory/ -count=1 -v
+```
+
+## 怎么改 / 删一条
+
+**必须由人做**。步骤和上面一样，但 PR 里要写清楚为什么原有的 invariant 不再成立。
+
+AI agent 不得自行编辑以下任何内容：
+- `test/mandatory/*_mandatory_test.go`（除新增）
+- `test/mandatory/manifest.sha256`
+- `test/mandatory/verify_test.go`
+- `test/mandatory/MANDATORY.md`
+- `.github/workflows/mandatory.yml`
+
+## 本机制的边界（诚实声明）
+
+哈希只能证明「文件没变」，不能证明「改动是合法的」。以下情形本机制挡不住：
+
+1. **同一个 PR 里同时改测试 + 改 manifest** —— 哈希会匹配，检查通过。
+   挡这一层的不是哈希，是 `mandatory-tests` 环境的 `required_reviewers`：
+   那个 job 需要人工点 Approve，reviewer 就是这一层的核验人。
+   而这个 workflow 文件本身也在 manifest 里，所以「把 gate 删掉」也会被检出。
+2. **把整个目录删掉** —— `go test` 会报「package not found」而不是哈希失败，
+   但 `.github/workflows/mandatory.yml` 仍在 manifest 里，那条会红。
+3. **agent 在本地改了文件但不提交** —— 工作区层面无法强制，只能靠 review。
+
+所以准确的说法是：**mandatory 类别把「改动是否合法」从代码问题变成了一道
+需要人签字的关口**，而不是用哈希把篡改完全封死。
+
+## 相关文件
+
+- `test/mandatory/verify_test.go` —— 看门狗，默认套件每次都会跑
+- `test/mandatory/manifest.sha256` —— 哈希清单，防篡改的唯一凭证
+- `.github/workflows/mandatory.yml` —— 两个 CI gate
+- `test/user_invariants/` —— 用户更早建立的 invariant 测试，已在 manifest 里受保护
+  （尚未迁到 `//go:build mandatory` 标签下；是否迁移待人工决定）
