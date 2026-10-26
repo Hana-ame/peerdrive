@@ -91,6 +91,13 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	repository.SetAnonStorageDir(storageDir)
 	nodestate.SetOperator(cfg.Operator)
 
+	// Issue #405 Step 2: the legacy file_meta/file_providers mirror is on by
+	// default; an operator gray-rolls it off (PEERDRIVE_LEGACY_META_MIRROR=0) to
+	// prove no reader still depends on those tables before Step 3 drops them.
+	// Set it before the backfill below so a disabled mirror is never only partly
+	// in effect while startup writes happen.
+	repository.SetLegacyMetaMirror(cfg.LegacyMetaMirror)
+
 	// Issue #405: one-time (idempotent) upgrade pass — import pre-#405
 	// file_meta/file_providers rows into the authoritative file_index so
 	// index-first reads can find files written by the legacy binary. Additive
@@ -100,6 +107,26 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	} else if stats.Imported > 0 || stats.SkippedMissingFile > 0 {
 		log.LogInfo("main: file_index legacy backfill done (imported=%d skipped_missing=%d skipped_no_path=%d)",
 			stats.Imported, stats.SkippedMissingFile, stats.SkippedNoPath)
+	}
+
+	// Issue #405 Step 2: migrate legacy http providers into file_index.remote_url
+	// so the URL-provider leg stops depending on file_providers.
+	if rst, err := repository.BackfillRemoteURLsFromLegacy(); err != nil {
+		log.LogWarn("main: remote_url legacy backfill failed (will retry next start): %v", err)
+	} else if rst.Filled > 0 || rst.Imported > 0 {
+		log.LogInfo("main: remote_url legacy backfill done (filled=%d imported=%d)", rst.Filled, rst.Imported)
+	}
+
+	// Issue #405 Step 2 startup self-check: the two backfills above guarantee
+	// that no legacy row is left out of file_index (URL-only rows are covered by
+	// remote_url), so a non-zero onlyInMeta is a real regression. Warn instead of
+	// aborting — an operator may be deliberately mid-migration on an old database,
+	// and the reads are index-first either way.
+	if onlyInIndex, onlyInMeta, err := repository.CheckFileIndexConsistency(); err != nil {
+		log.LogWarn("main: file_index/file_meta consistency check failed: %v", err)
+	} else if onlyInMeta != 0 {
+		log.LogWarn("main: %d file_meta rows are not in file_index (onlyInIndex=%d): legacy metadata out of sync, check the backfill logs above",
+			onlyInMeta, onlyInIndex)
 	}
 
 	// Initialize PeerJS signaling + WebRTC file service (the Go node acts as a persistent

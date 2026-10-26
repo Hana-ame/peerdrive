@@ -135,45 +135,30 @@ func (s *FileService) RegisterURL(rawURL string, filename string) (*model.FileMe
 		filename = autoFilename
 	}
 
-	// Insert into file_meta (skip if already exists)
-	existing, _ := repository.GetFileMeta(hash)
-	if existing == nil {
-		err = repository.InsertFileMeta(&model.FileMeta{
-			Hash:     hash,
-			Size:     size,
-			MimeType: mimeType,
-			Gziped:   false,
-			Filename: filename,
-			Type:     repository.FileTypeBlob,
-		})
-		if err != nil {
-			log.LogError("file-svc: RegisterURL insert meta failed: %v", err)
-			return nil, fmt.Errorf("insert meta: %w", err)
-		}
-	}
-
-	// Insert file_provider (type "http", path = url)
-	err = repository.InsertFileProvider(hash, "http", rawURL)
-	if err != nil {
-		log.LogError("file-svc: RegisterURL insert provider failed: %v", err)
-		return nil, fmt.Errorf("insert provider: %w", err)
-	}
-
-	// If storage enabled, save to content-addressed storage and register through the
-	// unified write (index + mirror). The http provider above is still recorded
-	// because URL-only rows have no local path to index; URL-provider retirement is
-	// tracked as a remaining M2 step (doc/TODO-SIMPLIFY.md).
+	// Issue #405 Step 2: one unified write replaces the old
+	// InsertFileMeta + InsertFileProvider("http") [+ RegisterFile] triplet.
+	// remote_url carries the URL-provider leg into file_index, so file_providers
+	// no longer needs provider_type='http' rows — this pair was the only real
+	// reader/writer of that table (see doc/TODO-SIMPLIFY.md M2).
+	var (
+		fullPath string
+		relPath  string
+	)
 	if s.storageEnable {
-		relPath := hash[:2] + "/" + hash
-		fullPath := filepath.Join(s.storageDir, relPath)
+		relPath = hash[:2] + "/" + hash
+		fullPath = filepath.Join(s.storageDir, relPath)
 		if err := pathutil.SafeWriteFileAny(s.allowedRoots(), fullPath, body, 0644); err != nil {
 			log.LogWarn("file-svc: RegisterURL save to storage failed (non-fatal): %v", err)
-		} else {
-			_, _ = repository.RegisterFile(repository.FileRecord{
-				Hash: hash, Path: fullPath, Name: filename, Size: size,
-				Kind: model.FileTypeBlob, MimeType: mimeType, ProviderPath: relPath,
-			})
+			fullPath, relPath = "", ""
 		}
+	}
+	if _, err := repository.RegisterFile(repository.FileRecord{
+		Hash: hash, Path: fullPath, Name: filename, Size: size,
+		Kind: model.FileTypeBlob, MimeType: mimeType,
+		RemoteURL: rawURL, ProviderPath: relPath,
+	}); err != nil {
+		log.LogError("file-svc: RegisterURL register file failed: %v", err)
+		return nil, fmt.Errorf("register file: %w", err)
 	}
 
 	meta := &model.FileMeta{

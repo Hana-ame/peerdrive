@@ -156,8 +156,7 @@ func (f *BTDHTFetcher) Fetch(ctx context.Context, hash string) ([]byte, error) {
 // 生产路径永不替换这个 var。
 var guardProviderURL = urlguard.GuardExternalURL
 
-// HTTPURLFetcher checks file_providers for "http"-type entries and fetches
-// from the registered URL.
+// HTTPURLFetcher fetches a hash's bytes from the remote URL registered for it.
 type HTTPURLFetcher struct {
 	// httpClient with timeout (M5): the original implementation used http.DefaultClient with no timeout,
 	// a slow URL provider would hang Download permanently (the download endpoint would hang too).
@@ -178,7 +177,7 @@ func (f *HTTPURLFetcher) Name() string { return "http" }
 func (f *HTTPURLFetcher) IsAvailable() bool { return true }
 
 func (f *HTTPURLFetcher) Fetch(ctx context.Context, hash string) ([]byte, error) {
-	providers, err := repository.GetFileProviders(hash)
+	urls, err := f.urlsFor(hash)
 	if err != nil {
 		return nil, fmt.Errorf("http: db lookup failed: %w", err)
 	}
@@ -186,15 +185,12 @@ func (f *HTTPURLFetcher) Fetch(ctx context.Context, hash string) ([]byte, error)
 	if client == nil {
 		client = urlguard.NewSafeClient(30 * time.Second)
 	}
-	for _, p := range providers {
-		if p.ProviderType != "http" || !p.Available {
+	for _, rawURL := range urls {
+		if err := guardProviderURL(rawURL); err != nil {
+			log.LogWarn("downloader: blocked unsafe http provider URL %s for %s: %v", rawURL, hash, err)
 			continue
 		}
-		if err := guardProviderURL(p.Path); err != nil {
-			log.LogWarn("downloader: blocked unsafe http provider URL %s for %s: %v", p.Path, hash, err)
-			continue
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.Path, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 		if err != nil {
 			continue
 		}
@@ -213,12 +209,44 @@ func (f *HTTPURLFetcher) Fetch(ctx context.Context, hash string) ([]byte, error)
 			continue
 		}
 		if int64(len(data)) > maxURLFetchSize {
-			log.LogWarn("downloader: http provider %s returned oversized payload for %s", p.Path, hash)
+			log.LogWarn("downloader: http provider %s returned oversized payload for %s", rawURL, hash)
 			continue
 		}
 		return data, nil
 	}
 	return nil, fmt.Errorf("http: no URL provider found for %s", hash)
+}
+
+// urlsFor collects the remote URLs registered for a hash, index-first.
+//
+// Issue #405 Step 2: file_index.remote_url is authoritative (RegisterURL writes
+// it through RegisterFile). Legacy file_providers rows with provider_type='http'
+// — pre-#405 databases, or mirrors still being written while
+// PEERDRIVE_LEGACY_META_MIRROR is on — are appended after it, so an upgrade
+// never loses URL reachability inside the deprecation window. Duplicates are
+// dropped so a mirrored row is not fetched twice. The per-URL SSRF gate
+// (guardProviderURL) is applied by the caller above, unchanged.
+func (f *HTTPURLFetcher) urlsFor(hash string) ([]string, error) {
+	var urls []string
+	if fi, err := repository.GetFileIndex(hash); err == nil && fi != nil && fi.RemoteURL != "" {
+		urls = append(urls, fi.RemoteURL)
+	}
+	providers, err := repository.GetFileProviders(hash)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(urls))
+	for _, u := range urls {
+		seen[u] = true
+	}
+	for _, p := range providers {
+		if p.ProviderType != "http" || !p.Available || seen[p.Path] {
+			continue
+		}
+		urls = append(urls, p.Path)
+		seen[p.Path] = true
+	}
+	return urls, nil
 }
 
 // ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@ type FileIndex struct {
 	Gziped         bool
 	CID            string
 	Origin         string // how the row got here: unified | legacy | legacy_backfill
+	RemoteURL      string // Issue #405 Step 2: first registered remote URL (replaces file_providers provider_type='http')
 }
 
 // Origin markers for file_index rows (Issue #405).
@@ -65,7 +66,24 @@ type FileRecord struct {
 	UploaderPeerID string
 	IsInbox        bool
 	ProviderPath   string // legacy file_providers.path (relative to storage or absolute); empty → no mirror row
+	RemoteURL      string // remote URL for URL-only files (no local path); converges the http provider
 }
+
+// legacyMetaMirror gates RegisterFile's file_meta/file_providers compatibility
+// writes (Issue #405 Step 2, PEERDRIVE_LEGACY_META_MIRROR).
+//
+// Default true: pre-#405 readers and operator scripts still read the legacy
+// tables, so the mirror stays on by default. The server sets it from config at
+// startup (SetLegacyMetaMirror); it is never read directly by callers. When it is
+// false the legacy tables stop growing, which is the observation window that
+// authorizes Step 3 (DROP TABLE).
+var legacyMetaMirror = true
+
+// SetLegacyMetaMirror switches the RegisterFile legacy mirror on/off (see var).
+func SetLegacyMetaMirror(v bool) { legacyMetaMirror = v }
+
+// LegacyMetaMirrorEnabled reports the current mirror state (tests + ops).
+func LegacyMetaMirrorEnabled() bool { return legacyMetaMirror }
 
 // createFileIndexTable creates the table. seq increments on each upsert/delete;
 // incremental sync between nodes fetches by seq.
@@ -101,7 +119,8 @@ func createFileIndexTableOn(d *sql.DB) {
 		mime_type TEXT DEFAULT '',
 		gziped INTEGER DEFAULT 0,
 		cid TEXT DEFAULT '',
-		origin TEXT DEFAULT 'legacy'
+		origin TEXT DEFAULT 'legacy',
+		remote_url TEXT DEFAULT ''
 	)`)
 	_, _ = d.Exec(`ALTER TABLE file_index ADD COLUMN uploader_peer_id TEXT DEFAULT ''`)
 	_, _ = d.Exec(`ALTER TABLE file_index ADD COLUMN is_inbox INTEGER DEFAULT 0`)
@@ -111,6 +130,9 @@ func createFileIndexTableOn(d *sql.DB) {
 	_, _ = d.Exec(`ALTER TABLE file_index ADD COLUMN gziped INTEGER DEFAULT 0`)
 	_, _ = d.Exec(`ALTER TABLE file_index ADD COLUMN cid TEXT DEFAULT ''`)
 	_, _ = d.Exec(`ALTER TABLE file_index ADD COLUMN origin TEXT DEFAULT 'legacy'`)
+	// Issue #405 Step 2: URL providers converged from file_providers so the table
+	// can stop being read (and then be dropped in Step 3).
+	_, _ = d.Exec(`ALTER TABLE file_index ADD COLUMN remote_url TEXT DEFAULT ''`)
 	d.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_seq ON file_index(seq)`)
 	d.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_name ON file_index(name)`)
 	d.Exec(`CREATE INDEX IF NOT EXISTS idx_file_index_inbox ON file_index(is_inbox)`)
@@ -168,15 +190,25 @@ func upsertFileIndexOnlyTx(tx *sql.Tx, hash, path, name string, size int64, dele
 // RegisterFile is the single write entry for a locally owned file (Issue #405).
 //
 // One transaction writes:
-//  1. the authoritative file_index row (path/name/size/kind/mime/cid + origin='unified'),
-//  2. the legacy file_meta mirror (metadata columns only; never overwrites an existing
-//     non-empty filename, same rule as the old UpdateFileMetaFilename),
+//  1. the authoritative file_index row (path/name/size/kind/mime/cid/remote_url
+//     + origin='unified') — always,
+//  2. the legacy file_meta mirror (metadata columns only; never overwrites an
+//     existing non-empty filename, same rule as the old UpdateFileMetaFilename),
 //  3. the legacy file_providers local row when ProviderPath is set.
 //
-// The mirror exists only for one deprecation window: pre-#405 readers and operator
-// scripts still read file_meta/file_providers. New reads in this tree are
-// index-first (see service.FileService.GetMeta / ListAll), so the mirror can be
-// dropped together with the tables — see doc/TODO-SIMPLIFY.md M2.
+// Legs 2 and 3 are gated by legacyMetaMirror (PEERDRIVE_LEGACY_META_MIRROR,
+// default on, Issue #405 Step 2): the mirror exists only for one deprecation
+// window, since pre-#405 readers and operator scripts still read
+// file_meta/file_providers. New reads in this tree are index-first (see
+// service.FileService.GetMeta / ListAll), so turning the mirror off proves the
+// legacy tables can be dropped in Step 3 — see doc/TODO-SIMPLIFY.md M2.
+//
+// remote_url is first-writer-wins: a hash is content-addressed, so a second URL
+// for the same content is not more correct than the first. Keeping the first URL
+// avoids losing a reachable URL if a later registration points at a dead host.
+// Multiple distinct URLs per hash are no longer tracked (file_providers used to
+// keep every one); that is the accepted Step 2 tradeoff and the mirror above
+// still records them for the remainder of the deprecation window.
 func RegisterFile(rec FileRecord) (int64, error) {
 	if rec.Hash == "" {
 		return 0, fmt.Errorf("register file: empty hash")
@@ -205,8 +237,8 @@ func RegisterFile(rec FileRecord) (int64, error) {
 	// The authoritative row. gziped is only ever promoted to 1 (no writer sets it
 	// to true today, but a re-registration must not silently clear it).
 	if _, err := tx.Exec(`INSERT INTO file_index
-		(hash, path, name, size, deleted, seq, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin)
-		VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+		(hash, path, name, size, deleted, seq, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin, remote_url)
+		VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(hash) DO UPDATE SET
 			path=excluded.path, name=excluded.name, size=excluded.size,
 			deleted=0, seq=excluded.seq,
@@ -216,36 +248,40 @@ func RegisterFile(rec FileRecord) (int64, error) {
 			mime_type=CASE WHEN excluded.mime_type != '' THEN excluded.mime_type ELSE file_index.mime_type END,
 			gziped=CASE WHEN excluded.gziped = 1 THEN 1 ELSE file_index.gziped END,
 			cid=CASE WHEN excluded.cid != '' THEN excluded.cid ELSE file_index.cid END,
+			remote_url=CASE WHEN file_index.remote_url != '' THEN file_index.remote_url ELSE excluded.remote_url END,
 			origin=excluded.origin,
 			updated_at=CURRENT_TIMESTAMP`,
 		rec.Hash, rec.Path, rec.Name, rec.Size, seq,
 		rec.UploaderPeerID, boolToInt(rec.IsInbox),
-		kind, rec.MimeType, boolToInt(rec.Gziped), cid, FileOriginUnified); err != nil {
+		kind, rec.MimeType, boolToInt(rec.Gziped), cid, FileOriginUnified, rec.RemoteURL); err != nil {
 		return 0, fmt.Errorf("register file_index: %w", err)
 	}
 
-	// Legacy mirror: same column set/merge rules as InsertFileMeta + UpdateFileMetaFilename.
-	if _, err := tx.Exec(`INSERT INTO file_meta (hash, size, mime_type, gziped, filename, type, cid)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(hash) DO UPDATE SET
-			size=excluded.size,
-			mime_type=CASE WHEN excluded.mime_type != '' THEN excluded.mime_type ELSE file_meta.mime_type END,
-			gziped=CASE WHEN excluded.gziped = 1 THEN 1 ELSE file_meta.gziped END,
-			filename=CASE WHEN file_meta.filename IS NULL OR file_meta.filename = '' THEN excluded.filename ELSE file_meta.filename END,
-			type=CASE WHEN excluded.type != '' THEN excluded.type ELSE file_meta.type END,
-			cid=CASE WHEN excluded.cid != '' THEN excluded.cid ELSE file_meta.cid END`,
-		rec.Hash, rec.Size, rec.MimeType, boolToInt(rec.Gziped), rec.Name, kind, cid); err != nil {
-		return 0, fmt.Errorf("mirror file_meta: %w", err)
-	}
+	// Legacy mirrors (gated, Issue #405 Step 2). Same column set/merge rules as
+	// InsertFileMeta + UpdateFileMetaFilename.
+	if legacyMetaMirror {
+		if _, err := tx.Exec(`INSERT INTO file_meta (hash, size, mime_type, gziped, filename, type, cid)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(hash) DO UPDATE SET
+				size=excluded.size,
+				mime_type=CASE WHEN excluded.mime_type != '' THEN excluded.mime_type ELSE file_meta.mime_type END,
+				gziped=CASE WHEN excluded.gziped = 1 THEN 1 ELSE file_meta.gziped END,
+				filename=CASE WHEN file_meta.filename IS NULL OR file_meta.filename = '' THEN excluded.filename ELSE file_meta.filename END,
+				type=CASE WHEN excluded.type != '' THEN excluded.type ELSE file_meta.type END,
+				cid=CASE WHEN excluded.cid != '' THEN excluded.cid ELSE file_meta.cid END`,
+			rec.Hash, rec.Size, rec.MimeType, boolToInt(rec.Gziped), rec.Name, kind, cid); err != nil {
+			return 0, fmt.Errorf("mirror file_meta: %w", err)
+		}
 
-	if rec.ProviderPath != "" {
-		if _, err := tx.Exec(`INSERT INTO file_providers (hash, provider_type, path)
-			SELECT ?, 'local', ?
-			WHERE NOT EXISTS (
-				SELECT 1 FROM file_providers WHERE hash = ? AND provider_type = 'local' AND path = ?
-			)`,
-			rec.Hash, rec.ProviderPath, rec.Hash, rec.ProviderPath); err != nil {
-			return 0, fmt.Errorf("mirror file_providers: %w", err)
+		if rec.ProviderPath != "" {
+			if _, err := tx.Exec(`INSERT INTO file_providers (hash, provider_type, path)
+				SELECT ?, 'local', ?
+				WHERE NOT EXISTS (
+					SELECT 1 FROM file_providers WHERE hash = ? AND provider_type = 'local' AND path = ?
+				)`,
+				rec.Hash, rec.ProviderPath, rec.Hash, rec.ProviderPath); err != nil {
+				return 0, fmt.Errorf("mirror file_providers: %w", err)
+			}
 		}
 	}
 
@@ -260,7 +296,7 @@ func GetFileIndex(hash string) (*FileIndex, error) {
 	if db == nil {
 		return nil, sql.ErrNoRows
 	}
-	row := db.QueryRow(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin
+	row := db.QueryRow(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin, remote_url
 		FROM file_index WHERE hash = ? AND deleted = 0`, hash)
 	return scanFileIndex(row)
 }
@@ -270,7 +306,7 @@ func GetFileIndexByCID(cid string) (*FileIndex, error) {
 	if db == nil || cid == "" {
 		return nil, sql.ErrNoRows
 	}
-	row := db.QueryRow(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin
+	row := db.QueryRow(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin, remote_url
 		FROM file_index WHERE cid = ? AND deleted = 0`, cid)
 	return scanFileIndex(row)
 }
@@ -286,7 +322,7 @@ func ListFileIndex(offset, limit int) ([]FileIndex, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin
+	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin, remote_url
 		FROM file_index WHERE deleted = 0 AND kind = 'blob' ORDER BY seq DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
@@ -304,7 +340,7 @@ func ListAnonCollectionIndex(offset, limit int) ([]FileIndex, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin
+	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin, remote_url
 		FROM file_index WHERE deleted = 0 AND kind = ? ORDER BY seq DESC LIMIT ? OFFSET ?`,
 		model.FileTypeAnonCollection, limit, offset)
 	if err != nil {
@@ -322,7 +358,7 @@ func ListInboxFiles(offset, limit int) ([]FileIndex, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin
+	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin, remote_url
 		FROM file_index WHERE deleted = 0 AND is_inbox = 1 AND kind = 'blob' ORDER BY seq DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
@@ -345,7 +381,7 @@ func ApproveInboxFile(hash string) error {
 // Add LIMIT as backstop (discard extreme values when peer's cursor is far behind).
 // kind='blob': collection JSON is node-local state, not part of the file-sync surface.
 func ListFileIndexSince(since int64) ([]FileIndex, error) {
-	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin
+	rows, err := db.Query(`SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin, remote_url
 		FROM file_index WHERE seq > ? AND kind = 'blob' ORDER BY seq ASC LIMIT 1000`, since)
 	if err != nil {
 		return nil, err
@@ -378,7 +414,7 @@ func collectFileIndex(rows *sql.Rows) ([]FileIndex, error) {
 func scanFileIndex(r rowScanner) (*FileIndex, error) {
 	var f FileIndex
 	var deleted, isInbox, gziped int
-	if err := r.Scan(&f.Hash, &f.Path, &f.Name, &f.Size, &deleted, &f.Seq, &f.CreatedAt, &f.UpdatedAt, &f.UploaderPeerID, &isInbox, &f.Kind, &f.MimeType, &gziped, &f.CID, &f.Origin); err != nil {
+	if err := r.Scan(&f.Hash, &f.Path, &f.Name, &f.Size, &deleted, &f.Seq, &f.CreatedAt, &f.UpdatedAt, &f.UploaderPeerID, &isInbox, &f.Kind, &f.MimeType, &gziped, &f.CID, &f.Origin, &f.RemoteURL); err != nil {
 		return nil, err
 	}
 	f.Deleted = deleted != 0
