@@ -29,6 +29,20 @@ Required reviewers → 选人 → Save**。environment 本身已经建好，只�
 在此之前 `mandatory` job 会正常跑但**不需要批准**，只有 `manifest` job 在提供
 防篡改保障。
 
+## 哈希的语义：内容，不是字节布局
+
+**哈希按 LF 归一化后计算** —— `CRLF` 先折叠成 `LF` 再算 sha256。
+
+为什么必须有这一步：防篡改的语义应该是「**内容**没变」，不该被 checkout 的
+行尾策略绑架。Windows 贡献者用 `autocrlf=true`、或 GitHub Actions 的 Windows
+runner 把文本文件 checkout 成 CRLF 时，内容一字未动但字节全变，逐字节哈希
+就会全线误报。
+
+2026-10-26 第一次在 `go-build.yml` 的 `windows-latest` 格子上跑就命中了这个：
+**6 个条目全部 hash mismatch**。加了归一化之后 Linux/Windows 判定一致；
+而且真实篡改仍然会被检出（归一化后再比，剩下的差异只能是真实内容），
+失败信息还会顺带打印「文件里 N 个 CRLF；说明差异不是行尾」，省掉下一轮排查。
+
 ## 什么该进这个类别
 
 只放**关掉就会出事、且弱化时看起来完全无害**的断言：

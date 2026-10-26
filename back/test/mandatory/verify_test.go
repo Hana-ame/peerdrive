@@ -19,6 +19,7 @@ package mandatory
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -98,15 +99,20 @@ func TestMandatory_ManifestIntegrity(t *testing.T) {
 			continue
 		}
 
-		sum := sha256.Sum256(readMust(t, full))
+		sum := sha256.Sum256(normalizeLineEndings(readMust(t, full)))
 		if got := hex.EncodeToString(sum[:]); got != e.hash {
-			failures = append(failures, fmt.Sprintf("%s: hash mismatch\n      manifest: %s\n      actual  : %s",
-				e.rel, e.hash, got))
+			note := ""
+			if cr := countCR(readMust(t, full)); cr > 0 {
+				note = fmt.Sprintf("\n      （文件里 %d 个 CRLF；哈希按 LF 归一化后计算，说明差异不是行尾）", cr)
+			}
+			failures = append(failures, fmt.Sprintf("%s: hash mismatch\n      manifest: %s\n      actual  : %s%s",
+				e.rel, e.hash, got, note))
 			continue
 		}
 
 		// 只要求 .go 测试文件带标记；workflow / manifest 自身不带。
-		if strings.HasSuffix(e.rel, "_test.go") && !strings.Contains(string(readMust(t, full)), mandatoryDirective) {
+		if strings.HasSuffix(e.rel, "_test.go") && !strings.Contains(
+			string(normalizeLineEndings(readMust(t, full))), mandatoryDirective) {
 			failures = append(failures, fmt.Sprintf("%s: mandatory 标记被移除", e.rel))
 		}
 	}
@@ -129,4 +135,21 @@ func readMust(t *testing.T, path string) []byte {
 		t.Fatalf("reading %s: %v", path, err)
 	}
 	return b
+}
+
+// normalizeLineEndings 把 CRLF 归一成 LF 再哈希。
+//
+// 为什么必须有这一步：哈希是防篡改的唯一凭证，它的语义是「内容没变」，
+// 不该被 checkout 的行尾策略绑架。Windows 贡献者用 autocrlf=true 或者
+// GitHub Actions 的 Windows runner 把文本文件 checkout 成 CRLF 时，
+// 内容没变但字节变了，逐字节哈希就会全线误报。2026-10-26 在
+// go-build.yml 的 windows-latest 格子上第一次跑就命中了这个：
+// 6 个条目全部 hash mismatch。归一化之后，LF/CRLF 都不影响判定，
+// 而真正的篡改（改字符、删行、换标记）仍然会被检出。
+func normalizeLineEndings(b []byte) []byte {
+	return bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
+}
+
+func countCR(b []byte) int {
+	return bytes.Count(b, []byte("\r\n"))
 }
