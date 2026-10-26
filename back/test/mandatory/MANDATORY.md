@@ -63,10 +63,12 @@ runner 把文本文件 checkout 成 CRLF 时，内容一字未动但字节全变
 | `test/mandatory/security_defaults_mandatory_test.go` | 安全默认：SSRF 闸门默认拒绝 12 个内网/元数据目标；URL scheme 白名单；`NewSafeClient` 一定带 Transport + Timeout；`MaxJSONBodyBytes` 默认 > 0 |
 | `internal/transport/peerjs_fetch_mandatory_test.go` | **产品的根**：对端经 P2P 连接发 `req` 帧、传 sha256，必须取回真实文件的字节（整文件 + 分片两个用例） |
 | `internal/transport/visibility_matrix_mandatory_test.go` | **权限语义**：公/不列出/私有三档在「列不列」和「给不给」上的分工——陌生人清单只见 public；unlisted 不列出但可取；private 陌生人拒、好友给；不存在的 hash 拒；PSK 是准入不是文件私钥；合集 PSK 未带 token 必须锁住条目 |
+| `internal/router/http_psk_gate_mandatory_test.go` | **HTTP 访问模型**：`/f/`、`/sha256sum/`、`/download/`、`/ipfs/`、`/files` 有门禁，只有 node 自己的 PSK（`X-PSK` 头或 `?psk=`）正确才能进——空/错/前缀/超集/大小写差异一律 401 且不泄漏字节；持正确 PSK 拿全量原始字节（含 `?meta=1` 元数据模式与 `/files` 索引枚举）；密钥逐 node 不可传递；PeerPSK 未配置则不设门禁 |
 
-> 注意第二条不在 `test/mandatory/` 目录下 —— mandatory 类别是**由 build tag + manifest 定义**的，
-> 不绑定目录。这条测试要用 `internal/transport` 的包内符号（`serveFile`、`dispatchFrame`、
-> `fileIndex`）才能真正端到端，所以它就住在被测包的旁边；manifest 是它进这个类别的凭证。
+> 注意后两条不在 `test/mandatory/` 目录下 —— mandatory 类别是**由 build tag + manifest 定义**的，
+> 不绑定目录。这两条测试要分别用 `internal/transport` 和 `internal/router` 的包内符号
+> （`dispatchFrame` / `PSKGate` 接线）才能真正端到端，所以就住在被测包的旁边；
+> manifest 是它们进这个类别的凭证。
 
 ## 怎么加一条
 
@@ -92,6 +94,7 @@ AI agent 不得自行编辑以下任何内容：
 - `test/mandatory/*_mandatory_test.go`（除新增）
 - `internal/transport/peerjs_fetch_mandatory_test.go` —— 也是 mandatory 成员，只是住在被测包旁边
 - `internal/transport/visibility_matrix_mandatory_test.go` —— 同上，权限语义的 mandatory 成员
+- `internal/router/http_psk_gate_mandatory_test.go` —— 同上，HTTP 访问模型的 mandatory 成员
 - `test/mandatory/manifest.sha256`
 - `test/mandatory/verify_test.go`
 - `test/mandatory/MANDATORY.md`

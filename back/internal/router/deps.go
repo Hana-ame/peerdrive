@@ -152,6 +152,12 @@ type Router struct {
 	authOptional gin.HandlerFunc
 	authRequired gin.HandlerFunc
 
+	// pskGate guards the anonymous file-content outlets (/f/, /sha256sum/,
+	// /download/, /ipfs/) and the local file index enumeration (/files...).
+	// Built once here so it captures this Router's cfg.PeerPSK rather than
+	// re-reading config at request time. Empty PeerPSK = gate off.
+	pskGate gin.HandlerFunc
+
 	// engine is the assembled gin engine, created by Engine().
 	engine *gin.Engine
 }
@@ -185,6 +191,7 @@ func NewRouter(deps Deps) (*Router, error) {
 	}
 	r.authOptional = auth.AuthOptional()
 	r.authRequired = auth.AuthRequired()
+	r.pskGate = PSKGate(auth, deps.Cfg.PeerPSK)
 	return r, nil
 }
 

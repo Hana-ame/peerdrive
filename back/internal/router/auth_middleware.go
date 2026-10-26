@@ -65,6 +65,81 @@ func NewAuthenticator(regServerURL, adminToken string) *Authenticator {
 // to automatically tighten. Allow/tighten decisions rely on this check.
 func (a *Authenticator) authDisabled() bool { return a.regServerURL == "" && a.adminToken == "" }
 
+// PSKGate returns the node-level credential gate for the anonymous
+// file-content outlets (/f/, /sha256sum/, /download/, /ipfs/) and the local
+// file-index enumeration routes (/files, /files/browse, /files/verify/:hash).
+//
+// Design (peerdrive HTTP access model):
+//
+//   - HTTP is served by the node itself (same process, same port as the admin
+//     panel), so its credential is the node's own PSK — not a peer identity.
+//     Holding the PSK means "you are talking to this node", which is why a PSK
+//     holder gets FULL access: no share-scope check on /f/ or /sha256sum/. The
+//     share scope (public/unlisted/private + friends) belongs to the P2P
+//     channel, where the caller is an external peer.
+//   - Presentation follows the collection-level convention already used by
+//     controller/anon.go: X-PSK header or ?psk= query.
+//   - A valid admin token is admitted as well: it is the operator's existing
+//     credential for this same node (PEERDRIVE_ADMIN_TOKEN or the registration
+//     server), and it is what the browser panel presents. Without it, panel
+//     downloads break the moment an operator sets PeerPSK.
+//   - psk == "" leaves the gate off. PeerPSK unset is the historical default
+//     (no key gate anywhere), and keeping those deployments working matters
+//     more than tightening them by surprise.
+func PSKGate(auth *Authenticator, psk string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if psk == "" {
+			c.Next()
+			return
+		}
+		got := c.GetHeader("X-PSK")
+		if got == "" {
+			got = c.Query("psk")
+		}
+		if got != "" && constantTimeEqual(got, psk) {
+			c.Next()
+			return
+		}
+		if auth != nil && auth.IsValidAdminCredential(bearerToken(c)) {
+			c.Next()
+			return
+		}
+		// 401 = authentication failure (no/invalid credential), matching the
+		// AuthRequired vocabulary. 404 would hide "is the file even there",
+		// which is exactly the ambiguity this gate exists to remove.
+		c.AbortWithStatusJSON(http.StatusUnauthorized,
+			gin.H{"error": "psk required or invalid"})
+	}
+}
+
+// bearerToken extracts the bearer credential from an Authorization header, or ""
+// if the header is missing, empty, or not in "Bearer <token>" form.
+func bearerToken(c *gin.Context) string {
+	auth := c.GetHeader("Authorization")
+	if auth == "" {
+		return ""
+	}
+	parts := strings.SplitN(auth, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") || parts[1] == "" {
+		return ""
+	}
+	return parts[1]
+}
+
+// IsValidAdminCredential reports whether token is a valid admin credential for
+// this authenticator — the same two backends AuthRequired uses: local
+// PEERDRIVE_ADMIN_TOKEN, or the registration server's /auth/whoami.
+func (a *Authenticator) IsValidAdminCredential(token string) bool {
+	if token == "" || a == nil {
+		return false
+	}
+	if a.regServerURL == "" {
+		return a.adminToken != "" && constantTimeEqual(token, a.adminToken)
+	}
+	username, _ := a.validateToken(token)
+	return username != ""
+}
+
 // AuthOptional validates Bearer token (if present), sets authenticated, username, and role in the Gin context.
 func (a *Authenticator) AuthOptional() gin.HandlerFunc {
 	return func(c *gin.Context) {

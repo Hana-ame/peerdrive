@@ -167,6 +167,12 @@ func (rt *Router) Engine() *gin.Engine {
 	// requires Bearer token (F1: previously AuthRequired had 0 call sites, all file
 	// read/write/delete endpoints were anonymously accessible).
 	authRequired := rt.authRequired
+	// HTTP access model: HTTP is the node's own server, so its credential is the
+	// node's PSK and a PSK holder gets FULL access — no share-scope check. The
+	// share scope (public/unlisted/private + friends) is the P2P channel's model,
+	// where the caller is an external peer. PeerPSK unset = gate off (historical
+	// default; see PSKGate).
+	pskGate := rt.pskGate
 
 	syncCtrl := rt.initControllers()
 
@@ -237,26 +243,32 @@ func (rt *Router) Engine() *gin.Engine {
 			eg.GET("/status", authRequired, controller.EmbedStatus)
 		}
 	}
-	r.GET("/sha256sum/:sha256", controller.DownloadBySHA256Local)
-	r.HEAD("/sha256sum/:sha256", controller.DownloadBySHA256Local)
-	r.GET("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
-	r.HEAD("/sha256sum/:sha256/:filename", controller.DownloadBySHA256Local)
+	r.GET("/sha256sum/:sha256", pskGate, controller.DownloadBySHA256Local)
+	r.HEAD("/sha256sum/:sha256", pskGate, controller.DownloadBySHA256Local)
+	r.GET("/sha256sum/:sha256/:filename", pskGate, controller.DownloadBySHA256Local)
+	r.HEAD("/sha256sum/:sha256/:filename", pskGate, controller.DownloadBySHA256Local)
 
 	// Canonical self-contained content-addressed URLs for SHA256 files and Collections
 	// (invariant #2, Issue #410 — restored after the 2026-10-17 excision d2d2830):
 	//   GET/HEAD /f/:sha256[/:filename] — direct file access by SHA256 (with Range, ETag, ?meta=1)
 	//   GET      /c/:hash[/*filepath]   — direct collection manifest or entry access by SHA256
-	r.GET("/f/:sha256", controller.DirectFileBySHA256)
-	r.HEAD("/f/:sha256", controller.DirectFileBySHA256)
-	r.GET("/f/:sha256/:filename", controller.DirectFileBySHA256)
-	r.HEAD("/f/:sha256/:filename", controller.DirectFileBySHA256)
+	//
+	// pskGate on the file outlets only. /c/ is deliberately NOT gated here: a
+	// collection carries its own visibility/PSK/passcode policy (see
+	// controller/anon.go GetAnonCollection), and adding the node-level PSK on
+	// top would break collections shared between nodes whose operators never
+	// exchanged a node PSK.
+	r.GET("/f/:sha256", pskGate, controller.DirectFileBySHA256)
+	r.HEAD("/f/:sha256", pskGate, controller.DirectFileBySHA256)
+	r.GET("/f/:sha256/:filename", pskGate, controller.DirectFileBySHA256)
+	r.HEAD("/f/:sha256/:filename", pskGate, controller.DirectFileBySHA256)
 	r.GET("/c/:hash", controller.DirectCollectionByHash)
 	r.GET("/c/:hash/*filepath", controller.DirectCollectionByHash)
-	r.GET("/ipfs/:cid", controller.DownloadByCID)
+	r.GET("/ipfs/:cid", pskGate, controller.DownloadByCID)
 
 	// Universal multi-protocol download endpoints.
-	r.GET("/download/:hash", controller.UniversalDownload)
-	r.GET("/download/:hash/sources", controller.UniversalDownloadSources)
+	r.GET("/download/:hash", pskGate, controller.UniversalDownload)
+	r.GET("/download/:hash/sources", pskGate, controller.UniversalDownloadSources)
 	r.POST("/download/:hash/refresh", authRequired, controller.UniversalDownloadRefresh)
 
 	// P2P routes (batch 2 simplification: libp2p legacy stack endpoints removed, kept auth status/WebRTC info/port forwarding)
@@ -387,17 +399,21 @@ func (rt *Router) Engine() *gin.Engine {
 		anon.GET("/history/:hash", controller.GetAnonCollectionHistory)
 	}
 
-	// File management (browse/list/verify read-only open; write operations with auth)
+	// File management (browse/list/verify read-only open; write operations with auth).
+	// pskGate only on the anonymous read-only routes: the write routes already
+	// carry authRequired (Bearer), and stacking the node PSK on top would break
+	// panel uploads for operators who authenticate with a token but do not hold
+	// the node PSK.
 	files := r.Group("/files")
 	{
-		files.GET("", controller.ListFiles)
+		files.GET("", pskGate, controller.ListFiles)
 		files.GET("/search", authRequired, controller.SearchLocalFiles)
 		files.POST("/upload", authRequired, controller.UploadFile)
 		files.POST("/register_local", authRequired, controller.RegisterLocalFile)
 		files.POST("/register_url", authRequired, controller.RegisterURL)
 		files.POST("/register_folder", authRequired, controller.RegisterFolder)
-		files.GET("/verify/:hash", controller.VerifyFile)
-		files.GET("/browse", controller.BrowseDir)
+		files.GET("/verify/:hash", pskGate, controller.VerifyFile)
+		files.GET("/browse", pskGate, controller.BrowseDir)
 		files.DELETE("/:hash", authRequired, controller.DeleteFile)
 		files.POST("/copy", authRequired, controller.CopyFile)
 		files.POST("/diff", authRequired, controller.DiffVersions)
