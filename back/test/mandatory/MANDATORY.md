@@ -56,6 +56,17 @@ runner 把文本文件 checkout 成 CRLF 时，内容一字未动但字节全变
 - 性能/时序相关（flaky，会训练出「红了就跳过」的坏习惯）
 - 需要外部网络或人工准备数据的验收
 
+## 现在有哪些
+
+| 文件 | 钉住什么 |
+| | |
+| `test/mandatory/security_defaults_mandatory_test.go` | 安全默认：SSRF 闸门默认拒绝 12 个内网/元数据目标；URL scheme 白名单；`NewSafeClient` 一定带 Transport + Timeout；`MaxJSONBodyBytes` 默认 > 0 |
+| `internal/transport/peerjs_fetch_mandatory_test.go` | **产品的根**：对端经 P2P 连接发 `req` 帧、传 sha256，必须取回真实文件的字节（整文件 + 分片两个用例） |
+
+> 注意第二条不在 `test/mandatory/` 目录下 —— mandatory 类别是**由 build tag + manifest 定义**的，
+> 不绑定目录。这条测试要用 `internal/transport` 的包内符号（`serveFile`、`dispatchFrame`、
+> `fileIndex`）才能真正端到端，所以它就住在被测包的旁边；manifest 是它进这个类别的凭证。
+
 ## 怎么加一条
 
 ```bash
@@ -78,6 +89,7 @@ go test -tags "nosqlite mandatory" ./test/mandatory/ -count=1 -v
 
 AI agent 不得自行编辑以下任何内容：
 - `test/mandatory/*_mandatory_test.go`（除新增）
+- `internal/transport/peerjs_fetch_mandatory_test.go` —— 也是 mandatory 成员，只是住在被测包旁边
 - `test/mandatory/manifest.sha256`
 - `test/mandatory/verify_test.go`
 - `test/mandatory/MANDATORY.md`
