@@ -229,25 +229,19 @@ func TestMandatory_HTTPGateGrantsFullAccess(t *testing.T) {
 		}
 	})
 
-	// 本地文件索引枚举也算出口：能列名 = 能按名取。
-	t.Run("files-index-enumeration", func(t *testing.T) {
-		w := doGet(t, engine, "/files", pskHeader)
-		if w.Code != http.StatusOK {
-			t.Fatalf("/files 持 PSK 必须 200；实际 %d", w.Code)
+	// 边界：门禁**只覆盖文件字节出口**，不覆盖 /files 索引枚举。
+	// 这是有意的范围，不是遗漏——hash 本身不构成泄漏，把它变成字节还需要
+	// PSK；把 /files 关上门会打断运营者的目录浏览和
+	// scripts/netdisk-traversal-probe.sh（它按 PSK 未配置的面板假设去
+	// GET /files/browse）。这里把范围双向钉住，防止以后被悄悄扩宽或收窄。
+	t.Run("boundary-files-index-not-gated", func(t *testing.T) {
+		if w := doGet(t, engine, "/files", nil); w.Code != http.StatusOK {
+			t.Fatalf("/files 应保持开放（门禁只管字节出口）；实际 %d，body=%.140q",
+				w.Code, w.Body.String())
 		}
-		var items []map[string]any
-		if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
-			t.Fatalf("/files 不是 JSON 数组：%v", err)
-		}
-		if len(items) == 0 {
-			t.Fatalf("/files 返回空列表，但库里刚注册了一个文件")
-		}
-		if !strings.Contains(w.Body.String(), hash) {
-			t.Fatalf("/files 清单里没有刚注册的文件 hash %s\nbody=%.200q", hash, w.Body.String())
-		}
-		// 同一清单对无凭据调用方必须关门。
-		if w2 := doGet(t, engine, "/files", nil); w2.Code != http.StatusUnauthorized {
-			t.Fatalf("/files 无凭据必须 401；实际 %d（索引枚举被裸奔了）", w2.Code)
+		// 对照：同一个 hash 走字节出口就必须有凭据。
+		if w := doGet(t, engine, "/f/"+hash, nil); w.Code != http.StatusUnauthorized {
+			t.Fatalf("/f/ 必须关门；实际 %d（范围被收窄了）", w.Code)
 		}
 	})
 }

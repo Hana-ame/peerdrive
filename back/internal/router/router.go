@@ -400,20 +400,22 @@ func (rt *Router) Engine() *gin.Engine {
 	}
 
 	// File management (browse/list/verify read-only open; write operations with auth).
-	// pskGate only on the anonymous read-only routes: the write routes already
-	// carry authRequired (Bearer), and stacking the node PSK on top would break
-	// panel uploads for operators who authenticate with a token but do not hold
-	// the node PSK.
+	// pskGate is deliberately NOT attached to the /files group: it only guards the
+	// file-BYTE outlets (/f/, /sha256sum/, /download/, /ipfs/). /files returns
+	// index metadata — filenames and hashes — and a hash is useless without the
+	// PSK that turns it into bytes, so the enumeration itself is not the leak.
+	// Keeping it open also keeps the operator's directory browsing and
+	// scripts/netdisk-traversal-probe.sh working.
 	files := r.Group("/files")
 	{
-		files.GET("", pskGate, controller.ListFiles)
+		files.GET("", controller.ListFiles)
 		files.GET("/search", authRequired, controller.SearchLocalFiles)
 		files.POST("/upload", authRequired, controller.UploadFile)
 		files.POST("/register_local", authRequired, controller.RegisterLocalFile)
 		files.POST("/register_url", authRequired, controller.RegisterURL)
 		files.POST("/register_folder", authRequired, controller.RegisterFolder)
-		files.GET("/verify/:hash", pskGate, controller.VerifyFile)
-		files.GET("/browse", pskGate, controller.BrowseDir)
+		files.GET("/verify/:hash", controller.VerifyFile)
+		files.GET("/browse", controller.BrowseDir)
 		files.DELETE("/:hash", authRequired, controller.DeleteFile)
 		files.POST("/copy", authRequired, controller.CopyFile)
 		files.POST("/diff", authRequired, controller.DiffVersions)
