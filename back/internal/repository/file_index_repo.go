@@ -240,7 +240,9 @@ func RegisterFile(rec FileRecord) (int64, error) {
 		(hash, path, name, size, deleted, seq, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin, remote_url)
 		VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(hash) DO UPDATE SET
-			path=excluded.path, name=excluded.name, size=excluded.size,
+			path=excluded.path,
+			name=CASE WHEN file_index.name != '' THEN file_index.name ELSE excluded.name END,
+			size=excluded.size,
 			deleted=0, seq=excluded.seq,
 			uploader_peer_id=CASE WHEN excluded.uploader_peer_id != '' THEN excluded.uploader_peer_id ELSE file_index.uploader_peer_id END,
 			is_inbox=excluded.is_inbox,

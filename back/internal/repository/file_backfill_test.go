@@ -196,6 +196,14 @@ func TestRegisterFile_DualWritesWithUnifiedOrigin(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, providers, 1)
 
+	// The index is authoritative, so it must honor the same fill-only rule: an
+	// empty incoming name must not blank the stored one. Otherwise the mirror and
+	// the index disagree on filename during the deprecation window, and the name
+	// is lost for good once Step 3 drops file_meta.
+	fi, err = GetFileIndex(hash)
+	require.NoError(t, err)
+	assert.Equal(t, "unified.bin", fi.Name, "empty RegisterFile.Name must not blank the indexed name")
+
 	// Index-only writes (P2P sync) must not resurrect legacy rows.
 	syncHash := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	_, err = UpsertFileIndex(syncHash, "/remote/path.bin", "path.bin", 7, false)
