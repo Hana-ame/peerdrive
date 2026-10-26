@@ -62,6 +62,14 @@ func TestLayerDependencies_TransportDoesNotImportServiceOrController(t *testing.
 			continue
 		}
 		path := filepath.Join(transportDir, fi.Name())
+		if hasMandatoryBuildTag(path) {
+			// mandatory 类别的文件从不进入可部署二进制（mandatory 这个 build tag 只由
+			// mandatory CI job 显式打开），所以它不在生产的依赖图里，不视为分层违规。
+			// 但这类测试必须走真实装配（把 service.NodeShare 接到 transport 的
+			// SetShareGate/SetShareProvider 上）才有意义——用 lambda 替身重实现一遍
+			// 权限逻辑等于自证，钉不住任何东西。所以给 mandatory 留这个口子。
+			continue
+		}
 		f, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
 		if err != nil {
 			t.Fatalf("ParseFile(%s): %v", path, err)
@@ -108,4 +116,20 @@ func TestLayerDependencies_RepositoryDoesNotImportHigherLayers(t *testing.T) {
 			}
 		}
 	}
+}
+
+// hasMandatoryBuildTag 报告文件是否带 //go:build mandatory 约束。
+// 这类文件只在显式打 mandatory 标签时才会编译（mandatory CI job），
+// 普通 go build / go test ./... 一律排除，因此不进入生产的依赖图。
+func hasMandatoryBuildTag(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "//go:build") {
+			return strings.Contains(line, "mandatory")
+		}
+	}
+	return false
 }

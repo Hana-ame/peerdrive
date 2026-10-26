@@ -62,6 +62,7 @@ runner 把文本文件 checkout 成 CRLF 时，内容一字未动但字节全变
 | | |
 | `test/mandatory/security_defaults_mandatory_test.go` | 安全默认：SSRF 闸门默认拒绝 12 个内网/元数据目标；URL scheme 白名单；`NewSafeClient` 一定带 Transport + Timeout；`MaxJSONBodyBytes` 默认 > 0 |
 | `internal/transport/peerjs_fetch_mandatory_test.go` | **产品的根**：对端经 P2P 连接发 `req` 帧、传 sha256，必须取回真实文件的字节（整文件 + 分片两个用例） |
+| `internal/transport/visibility_matrix_mandatory_test.go` | **权限语义**：公/不列出/私有三档在「列不列」和「给不给」上的分工——陌生人清单只见 public；unlisted 不列出但可取；private 陌生人拒、好友给；不存在的 hash 拒；PSK 是准入不是文件私钥；合集 PSK 未带 token 必须锁住条目 |
 
 > 注意第二条不在 `test/mandatory/` 目录下 —— mandatory 类别是**由 build tag + manifest 定义**的，
 > 不绑定目录。这条测试要用 `internal/transport` 的包内符号（`serveFile`、`dispatchFrame`、
@@ -90,6 +91,7 @@ go test -tags "nosqlite mandatory" ./test/mandatory/ -count=1 -v
 AI agent 不得自行编辑以下任何内容：
 - `test/mandatory/*_mandatory_test.go`（除新增）
 - `internal/transport/peerjs_fetch_mandatory_test.go` —— 也是 mandatory 成员，只是住在被测包旁边
+- `internal/transport/visibility_matrix_mandatory_test.go` —— 同上，权限语义的 mandatory 成员
 - `test/mandatory/manifest.sha256`
 - `test/mandatory/verify_test.go`
 - `test/mandatory/MANDATORY.md`
