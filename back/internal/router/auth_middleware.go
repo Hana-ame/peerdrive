@@ -66,8 +66,15 @@ func NewAuthenticator(regServerURL, adminToken string) *Authenticator {
 func (a *Authenticator) authDisabled() bool { return a.regServerURL == "" && a.adminToken == "" }
 
 // PSKGate returns the node-level credential gate for the anonymous
-// file-content outlets (/f/, /sha256sum/, /download/, /ipfs/) and the local
-// file-index enumeration routes (/files, /files/browse, /files/verify/:hash).
+// file-content (byte) outlets: /f/, /sha256sum/, /download/, /ipfs/.
+//
+// Scope is deliberately the bytes only, not the file index. /files and
+// /files/browse return filenames and hashes; a hash cannot become bytes without
+// this gate, so the enumeration itself is not the leak. Keeping the index open
+// also keeps the operator's directory browsing and
+// scripts/netdisk-traversal-probe.sh working. The boundary is pinned in both
+// directions by internal/router/http_psk_gate_mandatory_test.go
+// (boundary-files-index-not-gated).
 //
 // Design (peerdrive HTTP access model):
 //
