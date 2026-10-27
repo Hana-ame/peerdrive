@@ -524,3 +524,26 @@ Three levels need two more "usable by humans" entry points (2026-09-22):
 - `back/internal/service/peerpull_test.go` `TestFetchManifest`: The fallback path itself——
   manifest fetch, size limit `maxBytes` effective, invalid hash errors, **peer rejection (private
   blocked by ShareGate) must propagate** rather than swallowed as "empty collection".
+
+## 13. 去中心化直连与免信令拓扑演进（2026-10）
+
+> 来源：2026-10 用户指示与无中转网络需求。在缺乏外部公共 MQTT Broker 或中心化注册服务时，支持两端通过二维码扫描或连接字符串快速达成端到端直连，并利用仓库内自包含的中继服务与信令服务实现自给自足。
+
+### 13.1 二维码与连接字符串直连（无 MQTT 依赖）
+
+- **痛点**：传统模式依赖公共 MQTT Broker 广播房间碰撞（`MQTT_COLLECTIONS` / `PresenceRoom`）。在公网 Broker 不可用、纯局域网环境或用户希望直接点对点传达节点时，广播房间方案冗余且受限。
+- **直连字符串规范**：
+  - 格式：`peerdrive://peer/<peerId>?host=<host>&port=<port>&path=<path>&key=<key>&secure=<bool>&psk=<psk>`
+  - 将连接所需的全部参数（目标节点 ID、信令主机/端口、路径、API Key、TLS 开关及 PSK 质询密钥）一次性紧凑编码，支持直接粘贴或扫码。
+- **前端零依赖矢量二维码生成**：
+  - 采用纯 JS 原生实现的 `front/src/utils/qr.js`（GF(2^8) Reed-Solomon 纠错与 Model 2 矩阵），输出高清晰度 SVG，无需安装外部二维码依赖库。
+  - 在 `front/src/lib/PeerJSConnect.jsx` 中集成扫描/粘贴解析逻辑：用户输入目标连接字符串时自动提取参数并建立 WebRTC DataChannel。
+
+### 13.2 仓库内置中继（Relay）与自托管信令架构
+
+- **自包含定位**：
+  - 中转注册服务长在 `back/signalserver/regserver/handlers_relay.go`，持久化至 `relay_nodes` 表。
+  - 运行方式：主二进制子命令 `peerdrive reg`（默认 `:4000`）独立运行注册与中转服务；`peerdrive all` 则同端口拉起主网盘、信令与中继。
+  - 信令服务器长在 `back/signalserver/`，可使用 `peerdrive signal` 独立启动。
+  - 彻底规避外部基础设施依赖，实现任意物理环境下的即开即用。
+

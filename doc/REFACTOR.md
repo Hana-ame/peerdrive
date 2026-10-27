@@ -1229,3 +1229,73 @@ go test -tags "nosqlite integration" ./test/integration/ -count=1 -p 1
 - **`back/internal/transport/conn.go` (696 行)**：WebRTC DataChannel 最小并发内核。所有业务 Verb 早已抽离至 `inbound.go`/`outbound.go`，内核仅剩 `sync.Mutex` 与原子 Expect 管道，再拆会引发死锁与竞态。
 - **`front/src/platform/transport-ws/client.js` (687 行)**：浏览器端唯一 WS 单例客户端，维护事件循环与二进制分片成对配对（`binaryExpect`），拆散会导致模块循环引用与流帧错位。
 
+## 10. 全栈审计闭环、类型化错误与无中心网络直连演进（2026-10）
+
+> 背景：针对近期全栈安全与架构审计（Issue #431 ~ #437）及无中转、无公共 MQTT 服务等极端离线/去中心化场景，推进全链路工程加固与文档沉淀。
+> 核心目标：完成 100% 审计问题闭环（0 Open Issues, 0 Open PRs），打通纯客户端零依赖二维码直连，理清仓库内置中转/信令服务，落地统一类型化错误体系与 RBAC 访问控制。
+
+### 10.1 GitHub Actions 外部网络连通性实测与探针落地（Issue #437, PR #438）
+
+针对“GitHub Actions 是否存在外部网络隔离”的疑问，进行了系统的自动化网络探针验证：
+- **实测探针**：在 `scripts/network_probe.go` 中实现全协议连通性检测套件，并在 `.github/workflows/ci.yml` 中集成 `network-probe` 步骤。
+- **实测结果（Ubuntu-latest 运行器实测绿灯）**：
+  - **DNS 域名解析**：成功解析 `google.com` (142.251.42.238) 与公共 MQTT Broker `broker.hivemq.com` (3.73.165.178)。
+  - **TCP 1883 连通**：`broker.hivemq.com:1883` 握手耗时 165ms，链路畅通。
+  - **TLS 443 (HTTPS) 连通**：`google.com:443` 完成 TLS 1.3 握手，耗时 13ms。
+  - **UDP STUN (RFC 5389) 连通**：向 `stun.l.google.com:19302` 发送 Binding Request，成功接收 Binding Success Response 并提取到当前 Runner 的反射公网 IP 与映射端口（耗时 128ms）。
+- **结论与约束**：GitHub Actions 容器具备完整的公网出网能力（包括 WebRTC 所需的 UDP STUN 穿透）。CI 单元测试默认跳过外网仅为保证本地与沙箱构建的幂等性与确定性，并非环境网络限制。
+
+### 10.2 去中心化直连：二维码与连接字符串免 MQTT 直连（PR #439）
+
+针对没有公共 MQTT Broker 或中心中转服务器的局域网/离线对等传输场景，构建了纯客户端直连能力：
+- **零依赖纯 JS 二维码引擎**：
+  - 新增 `front/src/utils/qr.js`：自主实现 QR Code Model 2 Byte 模式生成算法，包含 Galois Field $GF(2^8)$ 下的 Reed-Solomon 纠错码生成器，直接生成高精度 SVG path 矢量路径，零引入任何第三方 npm 依赖。
+  - 单元测试覆盖：`front/tests/qr.test.js` 验证矩阵尺寸、纠错码掩码及 SVG 导出契约。
+- **直连 URI 规范与智能识别**：
+  - 格式规范：`peerdrive://peer/<peerId>?host=<host>&port=<port>&path=<path>&key=<key>&secure=<bool>&psk=<psk>`。
+  - 组件联动：`front/src/components/QRCodeModal.jsx` 提供一键生成展示当前节点专属直连二维码与 URI 复制功能；`front/src/lib/PeerJSConnect.jsx` 在目标节点输入框中对该格式进行实时拦截与自动反序列化，一键填充信令端点与 PSK 密钥，实现完全无需 MQTT 广播房间的对等直连。
+
+### 10.3 仓库内置中转服务（Relay）与自托管信令架构核查
+
+针对自托管与内网私有部署需求，确认仓库内已完备内置信令与中继中转服务，无需依赖任何外部第三方托管：
+- **中转登记服务（Relay Server）**：
+  - 源码位置：`back/signalserver/regserver/handlers_relay.go`。
+  - 存储持久化：`back/signalserver/regserver/db.go` 中建有 `relay_nodes` 表，跟踪活跃中继节点的 `peer_id`、`addrs`、`storage_mb`、`load_pct`、`version` 与心跳时间。
+  - 开放接口：`POST /p2p/relay/register`（中继节点登记/自荐更新）、`POST /p2p/relay/heartbeat`（心跳保活）、`GET /p2p/relay/list`（查询活跃可用中继池）。
+  - CLI 子命令集成：
+    - `peerdrive reg`：独立运行注册、认证与中继登记服务（默认端口 `:4000`）。
+    - `peerdrive all`：同端口一键拉起存储主服务、PeerJS 兼容信令与注册中继服务。
+- **PeerJS 兼容信令服务（Signaling Server）**：
+  - 独立模块：`back/signalserver/`（支持二进制 `cmd/peersignal` 与 CLI 子命令 `peerdrive signal`），提供标准 PeerJS WebSocket 信令协议及基于 HTTP 的房间发现接口。
+
+### 10.4 后端统一类型化错误体系（AppError）（Issue #435, PR #439）
+
+- **问题背景**：既有后端错误处理以裸字符串 `gin.H{"error": err.Error()}` 为主，容易泄露内部数据库驱动或底层操作系统路径细节，且缺乏结构化错误代码。
+- **设计与实现**：
+  - 新建 `back/internal/apperr/apperr.go`，定义统一结构体 `AppError`：
+    - 提供 `Code`（标准错误码字符串）、`Message`（脱敏安全文案）、`LegacyMsg`（兼容既有客户端解析使用的 `json:"error"` 字段）与 `StatusCode`（HTTP 状态码）。
+    - 提供 `Sanitize` 过滤脱敏能力，自动拦截并替换 SQLite 约束报错、磁盘绝对路径以及 TCP Socket 裸报错。
+    - 预置标准错误码：`CodeInvalidArgument` (`INVALID_ARGUMENT`), `CodeNotFound` (`NOT_FOUND`), `CodeUnauthorized` (`UNAUTHORIZED`), `CodeForbidden` (`FORBIDDEN`), `CodeConflict` (`CONFLICT`), `CodeInternal` (`INTERNAL_ERROR`)。
+  - 接入控制器层：在 `back/internal/controller/errors.go` 落地 `writeAppError`，统一向 Gin 上下文写入标准错误响应并终止链路。
+
+### 10.5 细粒度角色访问控制体系（RBAC）（Issue #433, PR #439）
+
+- **角色分层定义**：在 `back/internal/router/auth_middleware.go` 中定义标准四级角色常量：
+  - `RoleAdmin` (`"admin"`)：最高管理员，拥有系统配置、节点反注册、中继管理全部权限；
+  - `RoleOperator` (`"operator"`)：节点运营者，拥有存储边界配置、共享目录分配、端口转发管理权限；
+  - `RoleMember` (`"member"`)：已注册正式成员，拥有网盘浏览、私有合集访问与受限内容解锁权限；
+  - `RoleViewer` (`"viewer"`)：访客与只读消费端，仅允许访问公开共享内容。
+- **权限判定中间件**：`RequireRole(allowedRoles ...string)` 遵循层级继承原则（`admin` 包含所有下级权限），未授权请求直接拦截并返回标准 403 `AppError`。
+- **主权与联邦双轨兼容**：完全继承 Phase 7 的主权架构原则——无中心服务时节点依靠本地 PSK 享有完整运营权限；接入注册中心后依据 JWT Claims 平滑映射对应角色。
+
+### 10.6 前端错误边界与离线网络状态感知（Issue #436, PR #439）
+
+- **组件级错误边界恢复**：`front/src/components/ErrorBoundary.jsx` 实现局部组件渲染异常拦截，捕获 React 运行时崩溃后展示折叠堆栈诊断视图，并提供 `resetError` 原地重试恢复能力，避免单个渲染异常导致整页白屏和操作上下文丢失。
+- **全局网络离线感知**：`front/src/App.jsx` 挂载全局 `online`/`offline` 监听器，网络断开时在顶部展示非阻塞琥珀色离线提示横幅，网络恢复后平滑隐藏，提升弱网与离线环境下的用户交互确定性。
+
+### 10.7 数据库迁移基线与前端凭证安全隔离核验（Issue #432, #434）
+
+- **数据库迁移机制**：核验 `back/internal/repository/db.go` 与 `back/internal/repository/db_migration_test.go`，系统建有 `schema_migrations` 版本表，采用 SQLite `PRAGMA user_version` 确保表结构升级脚本幂等执行，全局连接池强制启用 WAL 模式以规避高并发下的写锁竞争。
+- **单文件面板凭证安全隔离**：核验 `front/src/platform/shared/nodePSK.js` 与 `front/src/platform/transport-ws/client.js`，确保构建产物单文件面板 `dist/panel.html` 采用 `sessionStorage` 隔离凭据，防止在多标签页或跨节点切换场景下出现 Token 状态污染。
+
+
