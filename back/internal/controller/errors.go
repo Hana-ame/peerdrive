@@ -53,3 +53,17 @@ func writeClientError(c *gin.Context, status int, err error, fallback string) {
 	}
 	c.JSON(status, gin.H{"error": sanitizeErr(err, fallback)})
 }
+
+// writeAppError responds using a typed AppError (Issue #435), preserving the JSON "error" key.
+func writeAppError(c *gin.Context, appErr *apperr.AppError) {
+	if appErr == nil {
+		writeInternalError(c, nil)
+		return
+	}
+	status := appErr.HTTPStatus
+	if status == 0 {
+		status = http.StatusInternalServerError
+	}
+	c.JSON(status, appErr)
+}
+
