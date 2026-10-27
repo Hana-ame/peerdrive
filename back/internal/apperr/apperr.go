@@ -59,3 +59,49 @@ func Sanitize(err error, fallback string) string {
 	}
 	return msg
 }
+
+// Common application error codes for structured error responses (Issue #435).
+const (
+	CodeInternal        = "INTERNAL_ERROR"
+	CodeInvalidArgument = "INVALID_ARGUMENT"
+	CodeNotFound        = "NOT_FOUND"
+	CodeUnauthorized    = "UNAUTHORIZED"
+	CodeForbidden       = "FORBIDDEN"
+	CodeConflict        = "CONFLICT"
+)
+
+// AppError represents a typed application error with code, HTTP status, and safe client message.
+// The JSON key is "error" to maintain 100% backward compatibility with existing client error parsing.
+type AppError struct {
+	Code       string `json:"code,omitempty"`
+	Message    string `json:"error"`
+	HTTPStatus int    `json:"-"`
+	Details    any    `json:"details,omitempty"`
+}
+
+// Error implements the standard error interface.
+func (e *AppError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
+// New creates a new typed AppError.
+func New(httpStatus int, code string, msg string) *AppError {
+	return &AppError{
+		HTTPStatus: httpStatus,
+		Code:       code,
+		Message:    msg,
+	}
+}
+
+// Wrap creates an AppError by sanitizing an underlying error against driver/OS/socket internals.
+func Wrap(httpStatus int, code string, err error, fallback string) *AppError {
+	return &AppError{
+		HTTPStatus: httpStatus,
+		Code:       code,
+		Message:    Sanitize(err, fallback),
+	}
+}
+

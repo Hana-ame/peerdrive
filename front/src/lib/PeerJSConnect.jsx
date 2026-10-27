@@ -15,6 +15,7 @@ import { STORAGE_KEY_PANEL_PREFS } from '../platform/shared/storageKeys';
 import { useI18n } from '../context/I18nContext';
 import NodeMarketCard from '../features/node/components/NodeMarketCard';
 import NodeBannerPickerModal from '../features/node/components/NodeBannerPickerModal';
+import QRCodeModal from '../components/QRCodeModal';
 
 const DEFAULT_SIG = {
   host: 'peersignal.moonchan.xyz',
@@ -70,6 +71,32 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
   const [showAdvancedSig, setShowAdvancedSig] = useState(false);
   const [viewMode, setViewMode] = useState('card');
   const [bannerModalPeerId, setBannerModalPeerId] = useState(null);
+  const [showQRModal, setShowQRModal] = useState(false);
+
+  const handleTargetChange = (val) => {
+    const raw = (val || '').trim();
+    if (raw.startsWith('peerdrive://peer/')) {
+      try {
+        const withoutScheme = raw.slice('peerdrive://peer/'.length);
+        const [idPart, queryPart] = withoutScheme.split('?');
+        const parsedId = decodeURIComponent(idPart || '');
+        setTargetPeerId(parsedId);
+        if (queryPart) {
+          const params = new URLSearchParams(queryPart);
+          const h = params.get('host');
+          const p = params.get('port');
+          const k = params.get('psk');
+          if (h) setSigHost(h);
+          if (p) setSigPort(p);
+          if (k) setPsk(k);
+        }
+        return;
+      } catch (e) {
+        /* fallback to raw input */
+      }
+    }
+    setTargetPeerId(val);
+  };
 
 
   // Dial core: connect directly by the passed peerId (doesn't depend on state;
@@ -334,10 +361,23 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
       />
 
       <div>
-        {!compact && <label className="block text-xs text-gray-500 mb-1">{t('connect.targetPeer')}</label>}
+        {!compact && (
+          <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+            <label>{t('connect.targetPeer')}</label>
+            <button
+              type="button"
+              onClick={() => setShowQRModal(true)}
+              className="text-brand-400 hover:text-brand-300 flex items-center gap-1 transition-colors text-[11px]"
+              title="生成我的节点直连二维码或复制连接字符串"
+            >
+              <span>📱</span>
+              <span>我的二维码与连接串</span>
+            </button>
+          </div>
+        )}
         <div className="flex gap-2">
-          <input value={targetPeerId} onChange={e => setTargetPeerId(e.target.value)}
-            placeholder="peerdrive-xxxxxxxx"
+          <input value={targetPeerId} onChange={e => handleTargetChange(e.target.value)}
+            placeholder="peerdrive-xxxxxxxx 或粘贴 peerdrive:// 连接字符串"
             className={inputCls + ' flex-1'}
             onKeyDown={e => { if (e.key === 'Enter') handleConnect(); }} />
           <input value={psk} onChange={e => setPsk(e.target.value)}
@@ -358,6 +398,15 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
           )}
         </div>
       </div>
+
+      <QRCodeModal
+        isOpen={showQRModal}
+        onClose={() => setShowQRModal(false)}
+        peerId={myIdRef.current}
+        sigHost={sigHost}
+        sigPort={sigPort}
+        psk={psk}
+      />
 
       <div className="text-xs">
         {pdStatus === 'connecting' && <span className="text-yellow-400">{t('connect.connecting')}</span>}

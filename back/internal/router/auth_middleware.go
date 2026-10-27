@@ -366,6 +366,14 @@ func (a *Authenticator) queryWhoami(token string) (string, string) {
 	return result.Username, result.Role
 }
 
+// Standard role constants for RBAC access control (Issue #433, FULLSTACK-AUDIT §2).
+const (
+	RoleAdmin    = "admin"
+	RoleOperator = "operator"
+	RoleMember   = "member"
+	RoleViewer   = "viewer"
+)
+
 // RequireRole enforces role-based access control (RBAC, FULLSTACK-AUDIT §2 item 2)
 // after AuthRequired has authenticated the request.
 //

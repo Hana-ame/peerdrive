@@ -10,11 +10,11 @@ import React from 'react';
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, error: null };
   }
 
-  static getDerivedStateFromError() {
-    return { hasError: true };
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
   }
 
   componentDidCatch(error, info) {
@@ -22,8 +22,22 @@ export default class ErrorBoundary extends React.Component {
     console.error('[ErrorBoundary] render error caught:', error, info?.componentStack ?? '');
   }
 
+  handleReset = () => {
+    this.setState({ hasError: false, error: null });
+    if (typeof this.props.onReset === 'function') {
+      try {
+        this.props.onReset();
+      } catch (e) {
+        console.error('[ErrorBoundary] onReset error:', e);
+      }
+    }
+  };
+
   render() {
     if (this.state.hasError) {
+      if (typeof this.props.fallback === 'function') {
+        return this.props.fallback({ error: this.state.error, resetError: this.handleReset });
+      }
       return (
         <div className="p-8 h-full flex items-center justify-center">
           <div className="max-w-md w-full rounded-2xl border border-red-400/20 bg-white/[0.03] p-8 text-center">
@@ -33,15 +47,24 @@ export default class ErrorBoundary extends React.Component {
               <span className="ml-2 text-sm font-normal text-gray-400">Something went wrong</span>
             </h2>
             <p className="text-sm text-gray-400 mb-6">
-              此页面遇到未捕获异常。导航仍可用，可尝试刷新；问题持续请查看浏览器控制台。
+              此页面遇到未捕获异常。导航仍可用，可尝试局部重试或刷新页面。
             </p>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-medium transition-colors focus:outline-none"
-            >
-              刷新页面 · Reload
-            </button>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={this.handleReset}
+                className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-medium transition-colors focus:outline-none"
+              >
+                重试 · Try Again
+              </button>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 rounded-lg bg-white/[0.08] hover:bg-white/[0.12] text-gray-200 text-sm font-medium transition-colors focus:outline-none"
+              >
+                刷新页面 · Reload
+              </button>
+            </div>
           </div>
         </div>
       );

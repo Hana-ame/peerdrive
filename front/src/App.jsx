@@ -203,9 +203,16 @@ export default function App() {
   const [isWsOpen, setIsWsOpen] = React.useState(ws.getStatus() === 'open');
   const [peerSession, setPeerSession] = React.useState(() => getNodeSession());
   const [drawerOpen, setDrawerOpen] = React.useState(false);
+  const [isOnline, setIsOnline] = React.useState(() =>
+    typeof navigator !== 'undefined' && 'onLine' in navigator ? navigator.onLine : true
+  );
 
   useEffect(() => {
     registerSW();
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
     const offWs = ws.onStatus((status) => {
       setIsWsOpen(status === 'open');
     });
@@ -213,6 +220,8 @@ export default function App() {
       setPeerSession(sess);
     });
     return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
       offWs();
       offNode();
     };
@@ -235,6 +244,16 @@ export default function App() {
               peerId={peerSession?.peerId}
               navItems={currentNav}
             />
+
+            {!isOnline && (
+              <div
+                role="status"
+                className="bg-amber-500/20 border-b border-amber-500/30 text-amber-200 text-xs px-4 py-1.5 flex items-center justify-center gap-2 text-center shrink-0"
+              >
+                <span>⚠️</span>
+                <span>网络连接已中断，正在等待网络恢复 · Offline</span>
+              </div>
+            )}
 
             <MobileNavDrawer
               isOpen={drawerOpen}

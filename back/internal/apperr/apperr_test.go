@@ -72,3 +72,21 @@ func TestSanitize_WrappedErrorsStillScrubbed(t *testing.T) {
 		t.Fatalf("Sanitize(wrapped driver error) = %q, want the fallback", got)
 	}
 }
+
+// TestAppError_Serialization verifies that AppError formats json with "error" field for backward compatibility.
+// Discovery context: Issue #435 typed application error system.
+func TestAppError_Serialization(t *testing.T) {
+	appErr := New(400, CodeInvalidArgument, "bad path")
+	if appErr.Error() != "bad path" {
+		t.Fatalf("appErr.Error() = %q, want 'bad path'", appErr.Error())
+	}
+	if appErr.HTTPStatus != 400 || appErr.Code != CodeInvalidArgument {
+		t.Fatalf("unexpected AppError fields: %+v", appErr)
+	}
+
+	wrapped := Wrap(500, CodeInternal, errors.New("database is locked"), "system busy")
+	if wrapped.Message != "system busy" {
+		t.Fatalf("wrapped.Message = %q, want sanitized fallback", wrapped.Message)
+	}
+}
+
