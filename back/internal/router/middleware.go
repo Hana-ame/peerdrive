@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -306,15 +307,31 @@ func RateLimit(rps float64, burst int) gin.HandlerFunc {
 // Only application/json-ish bodies are capped: multipart uploads, raw file
 // streams, and the WebRTC/WS forwarding paths must not be truncated here, they
 // have their own size handling. maxBytes <= 0 disables the cap.
+//
+// 为什么在 middleware 里加 Content-Length 预检：MaxBytesReader 超限只会把
+// *http.MaxBytesError 上抛，最终由 handler 的 c.JSON(400) 返回——语义不对（请求体
+// 过大应该是 413 而不是 400）。Content-Length 声明超限时可以在任何 handler 之前拒
+// 掉，给出确定的 413；声明缺失或谎报的请求仍由 MaxBytesReader 按真实字节数兜底。
+//
+// 注意 ResponseWriter 仍然必须传 c.Writer（不能传 nil）：Go 的 MaxBytesReader 在
+// 超限时会调 w.requestTooLarge() 让服务端在这次响应之后断开连接，避免还在往
+// keep-alive 连接里灌数据的客户端继续占用带宽和内核缓冲。传 nil 会丢掉这个信号。
 func LimitJSONBody(maxBytes int64) gin.HandlerFunc {
 	if maxBytes <= 0 {
 		return func(c *gin.Context) { c.Next() }
 	}
 	return func(c *gin.Context) {
 		ct := strings.ToLower(c.Request.Header.Get("Content-Type"))
-		if strings.Contains(ct, "json") {
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		if !strings.Contains(ct, "json") {
+			c.Next()
+			return
 		}
+		if cl, err := strconv.ParseInt(c.Request.Header.Get("Content-Length"), 10, 64); err == nil && cl > maxBytes {
+			log.LogWarn("router: reject %s %s, body %d bytes > %d", c.Request.Method, c.Request.URL.Path, cl, maxBytes)
+			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
 		c.Next()
 	}
 }
