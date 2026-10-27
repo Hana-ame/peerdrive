@@ -88,8 +88,16 @@ func (m *DisplayManager) Register(sess Session, id, channel, name string) *Displ
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// sess 来自活跃的 WS 连接，今天恒非 nil；但不假设它——id 为空时 sess.ID()
+	// 会把整个 transport goroutine panic 掉（Unregister/Cast/Control/Clear 都已经有
+	// nil guard，只有 Register 没有）。取不到 id 就退化成空串，调用方拿到的是合法
+	// 的非 nil screen，不会在 screen.Channel 上再炸一次。
+	sid := ""
+	if sess != nil {
+		sid = sess.ID()
+	}
 	if id == "" {
-		id = sess.ID()
+		id = sid
 	}
 	if channel == "" {
 		channel = "default"
@@ -100,7 +108,7 @@ func (m *DisplayManager) Register(sess Session, id, channel, name string) *Displ
 
 	screen := &DisplayScreen{
 		ID:           id,
-		SessionID:    sess.ID(),
+		SessionID:    sid,
 		Name:         name,
 		Channel:      channel,
 		RegisteredAt: time.Now(),

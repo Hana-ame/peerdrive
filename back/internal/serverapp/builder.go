@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"peerdrive/internal/collection"
 	"peerdrive/internal/config"
 	"peerdrive/internal/echcore"
 	"peerdrive/internal/echproxy"
@@ -97,6 +98,17 @@ func buildRouter(cfg *config.Config) (http.Handler, func(), RouterInfo, error) {
 	// Set it before the backfill below so a disabled mirror is never only partly
 	// in effect while startup writes happen.
 	repository.SetLegacyMetaMirror(cfg.LegacyMetaMirror)
+
+	// Issue #378 follow-up: collection entries are peer-supplied, so their url
+	// alternatives go through urlguard by default (loopback / RFC1918 / IMDS are
+	// rejected, and the fallback client dials through SafeDialContext). Set before
+	// any fetch path can run, same ordering rule as the mirror above. Operators with
+	// self-hosted collections on a private range opt out with
+	// PEERDRIVE_GUARD_COLLECTION_FETCH=0.
+	collection.SetGuardCollectionFetch(cfg.GuardCollectionFetch)
+	if !cfg.GuardCollectionFetch {
+		log.LogWarn("main: collection url SSRF guard DISABLED (PEERDRIVE_GUARD_COLLECTION_FETCH=0) — collection entries may reach internal network targets")
+	}
 
 	// Issue #405: one-time (idempotent) upgrade pass — import pre-#405
 	// file_meta/file_providers rows into the authoritative file_index so

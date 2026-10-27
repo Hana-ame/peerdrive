@@ -109,6 +109,7 @@ func TestEntry_SourceMetadataRoundTrip(t *testing.T) {
 // 发现背景: 这是 twitter-pic 整合与任何远端集合消费方的核心语义，
 // 也是文件源访问监视的轨迹来源——断言 Recent 的顺序就是断言降级路径。
 func TestEntry_Fetch_PriorityAndFallback(t *testing.T) {
+	disableSSRFGuard(t) // httptest 监听 127.0.0.1；本用例只验降级顺序，不验 SSRF
 	var shaCalled, echCalled bool
 	openSHA := func(ctx context.Context, sha string) (io.ReadCloser, error) {
 		shaCalled = true
@@ -157,6 +158,7 @@ func TestEntry_Fetch_PriorityAndFallback(t *testing.T) {
 // TestEntry_Fetch_PrivateLast verifies private.url is the last resort and is used
 // only when everything above it failed.
 func TestEntry_Fetch_PrivateLast(t *testing.T) {
+	disableSSRFGuard(t) // httptest 监听 127.0.0.1；本用例只验 private.url 优先级，不验 SSRF
 	privSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("private-bytes"))
 	}))
@@ -204,6 +206,7 @@ func TestEntry_Fetch_AllFail(t *testing.T) {
 // TestEntry_Fetch_RemoteOnlyWithoutOpenSHA verifies an entry without a sha can be
 // fetched purely from its remote alternative even when no SHAOpener is configured.
 func TestEntry_Fetch_RemoteOnlyWithoutOpenSHA(t *testing.T) {
+	disableSSRFGuard(t) // httptest 监听 127.0.0.1；本用例只验「无 sha 时走远端备选」，不验 SSRF
 	urlSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("remote"))
 	}))

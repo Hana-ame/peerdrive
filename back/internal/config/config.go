@@ -55,6 +55,23 @@ type Config struct {
 	// deleted in Step 3. Rollback is simply setting it back to 1.
 	LegacyMetaMirror bool
 
+	// GuardCollectionFetch runs urlguard over the url alternatives of collection
+	// entries (PEERDRIVE_GUARD_COLLECTION_FETCH, default true).
+	//
+	// Why default on: an entry's Source.URL / ECHURL / Private.URL comes in through
+	// collection.New's JSON parse, and collections are peer-supplied — anyone with
+	// permission to create an anonymous collection can ship an entry and the node
+	// turns it into an outbound HTTP request. collection.validateSourceURL only
+	// checks scheme + host, so https://169.254.169.254/ and https://127.0.0.1:8080/admin
+	// sail through as-is. With this on, collection.fetchHTTP rejects internal
+	// targets and the fallback client dials through SafeDialContext, which also
+	// blocks the 302-to-internal and DNS-rebinding cases.
+	//
+	// Set to 0 for the one legitimate case this breaks: a self-hosted image host
+	// on a private range referenced by your own collections. The opt-out is
+	// deliberate rather than a hard block, same shape as LegacyMetaMirror.
+	GuardCollectionFetch bool
+
 	AllowedOrigins     string
 	RegistrationServer string
 	Operator           string // PEERDRIVE_OPERATOR: node owner username for anonymous collection ownership
@@ -531,6 +548,7 @@ func DefaultConfig() *Config {
 		StorageDir:               "./storage",
 		StorageEnable:            true,
 		LegacyMetaMirror:         true,
+		GuardCollectionFetch:     true,
 		AllowedOrigins:           "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev",
 		RegistrationServer:       "",
 		Operator:                 "",
@@ -654,6 +672,7 @@ func Load() *Config {
 		StorageDir:          getEnv("PEERDRIVE_STORAGE", "./storage"),
 		StorageEnable:       getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
 		LegacyMetaMirror:    getEnvBool("PEERDRIVE_LEGACY_META_MIRROR", true),
+		GuardCollectionFetch: getEnvBool("PEERDRIVE_GUARD_COLLECTION_FETCH", true),
 		AllowedOrigins:      getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev"),
 		RegistrationServer:  getEnv("PEERDRIVE_REG_SERVER", ""),
 		Operator:            getEnv("PEERDRIVE_OPERATOR", ""),
