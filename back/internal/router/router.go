@@ -30,6 +30,7 @@ import (
 	"net/http/httptest"
 	"strings"
 
+	_ "peerdrive/docs"
 	"peerdrive/internal/config"
 	"peerdrive/internal/controller"
 	"peerdrive/internal/log"
