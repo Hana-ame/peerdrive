@@ -3,8 +3,8 @@ import * as ws from '../../platform/transport-ws';
 import { getNodeSession, onNodeSession } from '../../lib/nodeSession';
 import { previewBlobCache, previewLimit } from '../../lib/cache';
 import { swControlled, ensureSWReady } from '../../platform/shared/swBridge';
-
-const STORAGE_KEY_API_BASE = 'peerdrive.api_base';
+import { STORAGE_KEY_API_BASE } from '../../platform/shared/storageKeys';
+import { withPSKQuery } from '../../platform/shared/nodePSK';
 
 /**
  * FileThumbnail renders lazy-loaded image and video thumbnails for files via content-addressed SHA-256.
@@ -92,7 +92,7 @@ export default function FileThumbnail({
         } else if (ws.getStatus() === 'open') {
           const rawBase = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_API_BASE) || '' : '';
           const apiBase = rawBase.replace(/\/+$/, '');
-          return `${apiBase}/sha256sum/${encodeURIComponent(sha)}/${encodeURIComponent(filename || 'video.mp4')}`;
+          return withPSKQuery(`${apiBase}/sha256sum/${encodeURIComponent(sha)}/${encodeURIComponent(filename || 'video.mp4')}`);
         }
       }
 

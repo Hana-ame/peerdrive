@@ -32,6 +32,16 @@ export const STORAGE_KEY_AUTH_KEY = 'peerdrive_auth_key';
 export const STORAGE_KEY_AUTH_HEADER_ENABLED = 'peerdrive_auth_header_enabled';
 
 /**
+ * peerdrive_node_psk: Pre-shared key of the node that serves the HTTP API plane.
+ * The HTTP server is the node's own (same process and port as the admin panel),
+ * so its credential is the node's own PeerPSK — not a peer identity. Used by
+ * platform/shared/nodePSK.js to attach X-PSK / ?psk= to the file byte outlets
+ * (/f/, /sha256sum/, /download/, /ipfs/) that PSKGate guards.
+ * Empty or absent = the node has no PeerPSK configured = the gate is off.
+ */
+export const STORAGE_KEY_NODE_PSK = 'peerdrive_node_psk';
+
+/**
  * peerdrive.panel.v1: PeerJS connection preferences and history cache for the consumer panel.
  * Version suffix '.v1' enables non-breaking migrations when schemas change.
  */
@@ -43,5 +53,6 @@ export const ALL_STORAGE_KEYS = [
   STORAGE_KEY_AUTH_TOKEN,
   STORAGE_KEY_AUTH_KEY,
   STORAGE_KEY_AUTH_HEADER_ENABLED,
+  STORAGE_KEY_NODE_PSK,
   STORAGE_KEY_PANEL_PREFS,
 ];

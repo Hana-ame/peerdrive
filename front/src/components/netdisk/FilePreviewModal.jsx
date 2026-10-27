@@ -14,6 +14,7 @@ import { kindOf, mimeOf, MAX_TEXT_PREVIEW_BYTES } from '../../platform/shared/mi
 import { swControlled, ensureSWReady } from '../../platform/shared/swBridge';
 import { getNodeSession } from '../../lib/nodeSession';
 import { STORAGE_KEY_API_BASE } from '../../platform/shared/storageKeys';
+import { withPSKQuery } from '../../platform/shared/nodePSK';
 
 export default function FilePreviewModal({
   file, // { hash, filename, size, mime_type, ... }
@@ -98,7 +99,9 @@ export default function FilePreviewModal({
             // 本地 WS/HTTP 模式：直接走原生 206 Range 点播（即时起播，零内存占用）
             const rawBase = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_API_BASE) || '' : '';
             const apiBase = rawBase.replace(/\/+$/, '');
-            const localStreamUrl = `${apiBase}/sha256sum/${encodeURIComponent(file.hash)}/${encodeURIComponent(filename)}`;
+            // /sha256sum/ 同样由 PSKGate 把守；<video> 加不了自定义请求头，
+            // 只能走后端支持的 ?psk= 查询参数。
+            const localStreamUrl = withPSKQuery(`${apiBase}/sha256sum/${encodeURIComponent(file.hash)}/${encodeURIComponent(filename)}`);
             setIsStream(true);
             setBlobUrl(localStreamUrl);
             setLoading(false);

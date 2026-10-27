@@ -5,7 +5,9 @@ import {
   STORAGE_KEY_API_BASE,
   STORAGE_KEY_AUTH_TOKEN,
   STORAGE_KEY_REG_SERVER_URL,
+  STORAGE_KEY_NODE_PSK,
 } from '../../../platform/shared/storageKeys';
+import { readNodePSK, saveNodePSK } from '../../../platform/shared/nodePSK';
 
 function getApiBase() {
   return localStorage.getItem(STORAGE_KEY_API_BASE) || 'https://wsl-3000.moonchan.xyz';
@@ -23,6 +25,10 @@ export default function Settings() {
   const [password, setPassword] = useState('');
   const [authUser, setAuthUser] = useState('');
   const [authErr, setAuthErr] = useState('');
+
+  // Node PSK (HTTP gate on the file byte outlets)
+  const [pskInput, setPskInput] = useState(readNodePSK());
+  const [pskMsg, setPskMsg] = useState('');
 
   const testPing = useCallback(async () => {
     if (ws.getStatus() !== 'open') {
@@ -45,6 +51,22 @@ export default function Settings() {
     localStorage.setItem(STORAGE_KEY_API_BASE, url.startsWith('http') ? url : 'https://' + url);
     setErr('Backend address saved. Please refresh the page to take effect.');
     setTimeout(() => window.location.reload(), 800);
+  };
+
+  // PSK 只影响文件字节出口（/f/ /sha256sum/ /download/ /ipfs/）的取字节请求，
+  // 不影响 admin 帧；所以存完不用刷新页面。
+  const savePsk = () => {
+    const v = pskInput.trim();
+    saveNodePSK(v);
+    setPskMsg(v ? 'PSK saved. New downloads will send it automatically.' : 'PSK cleared.');
+    setTimeout(() => setPskMsg(''), 4000);
+  };
+
+  const clearPsk = () => {
+    saveNodePSK('');
+    setPskInput('');
+    setPskMsg('PSK cleared. Downloads will be refused until you enter it again.');
+    setTimeout(() => setPskMsg(''), 4000);
   };
 
   const regCall = async (path, body) => {
@@ -140,6 +162,37 @@ export default function Settings() {
               </span>
               <button onClick={testPing} className="text-gray-500 hover:text-white ml-1">Retry</button>
             </div>
+          </section>
+        )}
+
+        {connMode === 'ws' && (
+          <section className="card-surface p-5 space-y-3">
+            <h2 className="text-sm font-semibold text-gray-200">Node PSK (HTTP Gate)</h2>
+            <div>
+              <label className={label}>Node Pre-Shared Key</label>
+              <div className="flex gap-2">
+                <input type="password" value={pskInput} onChange={e => setPskInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') savePsk(); }}
+                  placeholder="empty = gate off" className={input + ' flex-1'} />
+                <button onClick={savePsk} className="btn-brand">Save</button>
+                <button onClick={clearPsk} className="btn-ghost">Clear</button>
+              </div>
+            </div>
+            {pskMsg && <p className="text-xs text-green-400">{pskMsg}</p>}
+            <p className="text-xs text-gray-600">
+              The HTTP server is this node's own, so its credential is the node's PeerPSK
+              (server config <code>PeerPSK</code> / env <code>PEERDRIVE_PEER_PSK</code>).
+              Stored at <code>{STORAGE_KEY_NODE_PSK}</code>.
+              Sent as <code>X-PSK</code> on downloads, and as <code>?psk=</code> on video
+              streaming URLs that cannot carry a custom header. Empty leaves the gate off,
+              which is the historical default.
+            </p>
+            <p className="text-xs text-gray-700">
+              If the node answers 401 instead, the panel pops an input box on the first
+              download and remembers the key. The admin token (if set) is also accepted
+              by the gate, so a token-authenticated operator is not blocked by their
+              own PeerPSK.
+            </p>
           </section>
         )}
 

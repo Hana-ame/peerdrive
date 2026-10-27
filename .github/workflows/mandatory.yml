@@ -1,0 +1,51 @@
+name: Mandatory tests
+
+# mandatory 类别的 CI gate。这个文件本身也在 test/mandatory/manifest.sha256 里，
+# 所以删除或改弱它会被 TestMandatory_ManifestIntegrity 检出（哈希不匹配）。
+#
+# 两个 job 分工：
+#   manifest   —— 无条件跑。校验 manifest 哈希 + MANDATORY 标记，
+#                 用默认 tag 集跑（不带 mandatory 标签），所以即使 mandatory
+#                 标签下的测试全被删了、本 workflow 被绕过了，这个 job 仍然会红。
+#                 这也是「agent 改不动 mandatory 测试」这一条的执行点。
+#   mandatory  —— 人工核验 gate。带 -tags mandatory 跑真正的验收测试，
+#                 目标环境 mandatory-tests 配了 required_reviewers，
+#                 需要人工点 Approve 才会真的跑。这是「特殊类需要人工核验」的落点。
+
+on:
+  push:
+    branches: [main, master, refactor]
+  pull_request:
+    branches: [main, master, refactor]
+
+permissions:
+  contents: read
+
+jobs:
+  manifest:
+    name: manifest integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: back/go.mod
+          cache: true
+      - name: 校验 manifest（默认套件，不带 mandatory 标签）
+        working-directory: back
+        run: go test -tags nosqlite ./test/mandatory/ -run TestMandatory_ManifestIntegrity -count=1 -v
+
+  mandatory:
+    name: mandatory suite (human review)
+    runs-on: ubuntu-latest
+    environment: mandatory-tests
+    needs: manifest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: back/go.mod
+          cache: true
+      - name: 跑 mandatory 类别（需人工 Approve 环境后才会执行）
+        working-directory: back
+        run: go test -tags "nosqlite mandatory" ./test/mandatory/ -count=1 -v

@@ -8,6 +8,7 @@ import {
   STORAGE_KEY_AUTH_KEY,
   STORAGE_KEY_AUTH_HEADER_ENABLED,
 } from '../shared/storageKeys.js'
+import { buildAuthHeaders, requestCredential, shouldPromptOnUnauthorized } from '../shared/nodePSK.js'
 import { getNodeSession, onNodeSession } from '../../lib/nodeSession.js'
 import {
   parseFrame,
@@ -827,7 +828,20 @@ export async function httpDownload(hash, { name = '', onProgress = null, signal 
   })
   globalProgressHub.startTask(task.id, -1)
   try {
-    const resp = await fetch(url, { signal })
+    // /f/ 由后端的 PSKGate 把守：带了 node PSK（X-PSK）或有效的管理员令牌才能取字节。
+    // 401 说明这台 node 设了 PeerPSK 而面板还没凭据 —— 弹一次输入框，存下来，重试一次。
+    // 已经存过 PSK 却仍然 401 说明钥匙输错了：不再弹（弹了也只会重复失败），
+    // 直接报「去 Settings 改」。同时也保证一批并发下载只弹一次：第一个成功的
+    // 输入持久化后，同批其余下载看到已保存的 PSK 就跳过弹框。
+    let resp = await fetch(url, { headers: buildAuthHeaders(), signal })
+    if (resp.status === 401) {
+      if (resp.body && resp.body.cancel) resp.body.cancel()
+      if (shouldPromptOnUnauthorized()) {
+        const psk = await requestCredential('这台 node 要求 PSK 才能下载文件')
+        if (psk) resp = await fetch(url, { headers: buildAuthHeaders(), signal })
+      }
+      if (resp.status === 401) throw new Error('需要 node PSK 才能下载（Settings → Node PSK）')
+    }
     if (!resp.ok) {
       throw new Error(`HTTP ${resp.status} fetching /f/${hash.slice(0, 12)}`)
     }
