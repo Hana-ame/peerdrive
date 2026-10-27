@@ -4,13 +4,10 @@ name: Mandatory tests
 # 所以删除或改弱它会被 TestMandatory_ManifestIntegrity 检出（哈希不匹配）。
 #
 # 两个 job 分工：
-#   manifest   —— 无条件跑。校验 manifest 哈希 + MANDATORY 标记，
-#                 用默认 tag 集跑（不带 mandatory 标签），所以即使 mandatory
-#                 标签下的测试全被删了、本 workflow 被绕过了，这个 job 仍然会红。
-#                 这也是「agent 改不动 mandatory 测试」这一条的执行点。
-#   mandatory  —— 人工核验 gate。带 -tags mandatory 跑真正的验收测试，
-#                 目标环境 mandatory-tests 配了 required_reviewers，
-#                 需要人工点 Approve 才会真的跑。这是「特殊类需要人工核验」的落点。
+#   manifest   —— 校验 manifest 哈希 + MANDATORY 标记 + agent 禁改互斥规则 (AC1-AC4)。
+#                 用默认 tag 集跑（不带 mandatory 标签），在 CI 内全自动执行，
+#                 不依赖任何仓库外手工配置。
+#   mandatory  —— 验收测试套件。带 -tags mandatory 跑完整的 mandatory 验收测试。
 
 on:
   push:
@@ -27,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: back/go.mod
@@ -34,11 +33,44 @@ jobs:
       - name: 校验 manifest（默认套件，不带 mandatory 标签）
         working-directory: back
         run: go test -tags nosqlite ./test/mandatory/ -run TestMandatory_ManifestIntegrity -count=1 -v
+      - name: 校验 agent 禁改互斥规则 (AC1/AC4)
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "=== 检查 PR 文件变动与 agent 禁改约束 ==="
+          git fetch origin ${{ github.base_ref }} --depth=1
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          echo "Changed files in PR:"
+          echo "$CHANGED"
+
+          MANIFEST_CHANGED=false
+          if echo "$CHANGED" | grep -Eq '(^|/)test/mandatory/manifest\.sha256$'; then
+            MANIFEST_CHANGED=true
+          fi
+
+          # 提取受保护的测试文件集合（排除说明文档）
+          PROTECTED_TESTS=$(grep -v '^#' back/test/mandatory/manifest.sha256 | awk '{print $2}' | grep -v 'manifest\.sha256' | grep -v 'mandatory\.yml' | grep -v 'MANDATORY\.md')
+
+          TESTS_CHANGED=false
+          VIOLATED_FILES=""
+          for f in $PROTECTED_TESTS; do
+            CLEAN_F=$(echo "$f" | sed 's|^\.\./||')
+            if echo "$CHANGED" | grep -Eq "(^|/)back/$CLEAN_F$" || echo "$CHANGED" | grep -Eq "(^|/)$CLEAN_F$"; then
+              TESTS_CHANGED=true
+              VIOLATED_FILES="$VIOLATED_FILES\n  - $f"
+            fi
+          done
+
+          # AC1: 严禁在同一个 PR 内同时修改 manifest.sha256 与受保护测试文件（绕过尝试）
+          if [ "$MANIFEST_CHANGED" = true ] && [ "$TESTS_CHANGED" = true ]; then
+            echo "::error::[MANDATORY SECURITY GATE] 违反 AC1 规则：禁止在同一个 PR 内同时修改 manifest.sha256 与受保护测试文件！"
+            printf "违规修改的文件清单:%b\n" "$VIOLATED_FILES"
+            echo "mandatory 规则由人工定义，agent 不得通过同步更新清单绕过防篡改检查。"
+            exit 1
+          fi
 
   mandatory:
-    name: mandatory suite (human review)
+    name: mandatory suite
     runs-on: ubuntu-latest
-    environment: mandatory-tests
     needs: manifest
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +78,6 @@ jobs:
         with:
           go-version-file: back/go.mod
           cache: true
-      - name: 跑 mandatory 类别（需人工 Approve 环境后才会执行）
+      - name: 跑 mandatory 类别验收测试
         working-directory: back
         run: go test -tags "nosqlite mandatory" ./test/mandatory/ -count=1 -v

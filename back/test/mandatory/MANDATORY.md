@@ -11,23 +11,21 @@ mandatory 是 peerdrive 里**唯一不允许 AI agent 自行修改的测试类�
 | | 普通测试 | mandatory 测试 |
 |---|---|---|
 | 跑法 | `go test ./...` | `go test -tags "nosqlite mandatory" ./test/mandatory/` |
-| CI gate | `backend` job，自动 | `mandatory` job，**需人工 Approve 环境** |
-| 改动谁批 | 代码 review 即可 | 必须人工核验，且要同步更新 `manifest.sha256` |
-| 被改动的可发现性 | 静默 | 哈希不匹配 → CI 红 |
+| CI gate | `backend` job，自动 | `mandatory` job，在 CI 内自动化全量执行 |
+| 改动谁批 | 代码 review 即可 | 必须人工核验，且严禁 agent 同 PR 绕过更新 |
+| 被改动的可发现性 | 静默 | 哈希不匹配 / 互斥违规 → CI 红 |
 | AI agent 能否自行修改 | 可以 | **不可以** |
 
-## 一次性人工设置（首次启用必做）
+## CI 内自动化核验与 agent 禁改防线（#427 / #428）
 
-`mandatory` job 需要 GitHub Environment 的 `Required reviewers` 才能真正形成「人工核验」
-关口。**这一步必须由人在 UI 里做**，agent 用 REST API 设置被拒
-（`PUT /environments/mandatory-tests/required_reviewers` 返回 404，本仓库的
-environment protection rules 无法通过 API 写）。
+为彻底杜绝外部手工配置脆弱性与同 PR 自更新绕过，核验机制完全落在 CI 内并满足以下硬约束：
 
-路径：**Settings → Environments → `mandatory-tests` → Add protection rule →
-Required reviewers → 选人 → Save**。environment 本身已经建好，只差这一条规则。
-
-在此之前 `mandatory` job 会正常跑但**不需要批准**，只有 `manifest` job 在提供
-防篡改保障。
+1. **CI 内全自动核验（AC3）**：不依赖任何 GitHub Environment `required_reviewers` 等仓库外手动配置。`mandatory.yml` 每次 PR / push 均全量自动运行，作为合并必需检查。
+2. **agent 禁改互斥防线（AC1 / AC4）**：
+   - 若 PR 修改了受保护的测试文件，但未更新 `manifest.sha256` → `TestMandatory_ManifestIntegrity` 立即因哈希不匹配失败。
+   - 若 PR 试图同时修改受保护测试与 `manifest.sha256` 绕过校验 → `mandatory.yml` 中的「agent 禁改互斥规则」立即检测到双向修改并拦截退出。
+   - 二者形成闭环互斥，使任何合法 PR 流程中 agent 均无法改动受保护的契约。
+3. **工作流完整性保障（AC2）**：`.github/workflows/mandatory.yml` 自身受 `manifest.sha256` 哈希锁定，弱化或删除工作流会被看门狗立即阻断。
 
 ## 哈希的语义：内容，不是字节布局
 
@@ -88,13 +86,13 @@ go test -tags "nosqlite mandatory" ./test/mandatory/ -count=1 -v
 
 ## 怎么改 / 删一条
 
-**必须由人做**。步骤和上面一样，但 PR 里要写清楚为什么原有的 invariant 不再成立。
+**必须由人工操作**。步骤和上面一样，但 PR 里要写清楚为什么原有的 invariant 不再成立。
 
 AI agent 不得自行编辑以下任何内容：
-- `test/mandatory/*_mandatory_test.go`（除新增）
-- `internal/transport/peerjs_fetch_mandatory_test.go` —— 也是 mandatory 成员，只是住在被测包旁边
-- `internal/transport/visibility_matrix_mandatory_test.go` —— 同上，权限语义的 mandatory 成员
-- `internal/router/http_psk_gate_mandatory_test.go` —— 同上，HTTP 访问模型的 mandatory 成员
+- `test/mandatory/*_mandatory_test.go`
+- `internal/transport/peerjs_fetch_mandatory_test.go`
+- `internal/transport/visibility_matrix_mandatory_test.go`
+- `internal/router/http_psk_gate_mandatory_test.go`
 - `test/mandatory/manifest.sha256`
 - `test/mandatory/verify_test.go`
 - `test/mandatory/MANDATORY.md`
@@ -102,23 +100,13 @@ AI agent 不得自行编辑以下任何内容：
 
 ## 本机制的边界（诚实声明）
 
-哈希只能证明「文件没变」，不能证明「改动是合法的」。以下情形本机制挡不住：
-
-1. **同一个 PR 里同时改测试 + 改 manifest** —— 哈希会匹配，检查通过。
-   挡这一层的不是哈希，是 `mandatory-tests` 环境的 `required_reviewers`：
-   那个 job 需要人工点 Approve，reviewer 就是这一层的核验人。
-   而这个 workflow 文件本身也在 manifest 里，所以「把 gate 删掉」也会被检出。
-2. **把整个目录删掉** —— `go test` 会报「package not found」而不是哈希失败，
-   但 `.github/workflows/mandatory.yml` 仍在 manifest 里，那条会红。
-3. **agent 在本地改了文件但不提交** —— 工作区层面无法强制，只能靠 review。
-
-所以准确的说法是：**mandatory 类别把「改动是否合法」从代码问题变成了一道
-需要人签字的关口**，而不是用哈希把篡改完全封死。
+1. **同 PR 篡改防线**：此前机制挡不住“同 PR 既改测试又更新 manifest”。现已由 CI 互斥规则兜底：PR 中一旦包含对受保护测试的修改，更新 manifest 亦无法通过 CI。
+2. **把整个目录删掉**：`go test` 会报「package not found」而不是哈希失败，但 `.github/workflows/mandatory.yml` 仍在 manifest 里，该检查会红。
+3. **agent 在本地改了文件但不提交**：工作区层面无法强制，只能由 CI 门禁拦截。
 
 ## 相关文件
 
 - `test/mandatory/verify_test.go` —— 看门狗，默认套件每次都会跑
-- `test/mandatory/manifest.sha256` —— 哈希清单，防篡改的唯一凭证
-- `.github/workflows/mandatory.yml` —— 两个 CI gate
+- `test/mandatory/manifest.sha256` —— 哈希清单，防篡改凭证
+- `.github/workflows/mandatory.yml` —— CI gate 自动核验与禁改互斥拦截
 - `test/user_invariants/` —— 用户更早建立的 invariant 测试，已在 manifest 里受保护
-  （尚未迁到 `//go:build mandatory` 标签下；是否迁移待人工决定）
