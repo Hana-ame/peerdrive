@@ -199,6 +199,20 @@ function Nav({ onOpenDrawer, isOpen, navItems }) {
   );
 }
 
+function OfflineBanner({ isOnline }) {
+  const { t } = useI18n();
+  if (isOnline) return null;
+  return (
+    <div
+      role="status"
+      className="bg-amber-500/20 border-b border-amber-500/30 text-amber-200 text-xs px-4 py-1.5 flex items-center justify-center gap-2 text-center shrink-0"
+    >
+      <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+      <span>{t('offline.banner')}</span>
+    </div>
+  );
+}
+
 export default function App() {
   const [isWsOpen, setIsWsOpen] = React.useState(ws.getStatus() === 'open');
   const [peerSession, setPeerSession] = React.useState(() => getNodeSession());
@@ -245,15 +259,7 @@ export default function App() {
               navItems={currentNav}
             />
 
-            {!isOnline && (
-              <div
-                role="status"
-                className="bg-amber-500/20 border-b border-amber-500/30 text-amber-200 text-xs px-4 py-1.5 flex items-center justify-center gap-2 text-center shrink-0"
-              >
-                <span>⚠️</span>
-                <span>网络连接已中断，正在等待网络恢复 · Offline</span>
-              </div>
-            )}
+            <OfflineBanner isOnline={isOnline} />
 
             <MobileNavDrawer
               isOpen={drawerOpen}

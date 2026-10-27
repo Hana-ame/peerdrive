@@ -70,6 +70,19 @@ export const DICTIONARY = {
     'banner.save': '应用横幅',
     'banner.cancel': '取消',
     'banner.reset': '恢复默认',
+    // QR Code modal
+    'qr.title': '节点直连二维码与连接串',
+    'qr.desc': '在无公共 MQTT 或离线局域网环境下，对方扫描此二维码或粘贴输入下方字符串即可直连。',
+    'qr.failed': '二维码生成失败',
+    'qr.tokenLabel': '连接字符串 (Peer Token)',
+    'qr.copied': '✓ 已复制连接串',
+    'qr.copy': '📋 复制连接字符串',
+    'qr.downloadSvg': '⬇️ 下载 SVG 图像',
+    'qr.close': '关闭',
+    // Offline banner
+    'offline.banner': '当前网络已断开，正处于离线模式。部分云端与跨节点直连功能可能受限。',
+    // Connect token parsed
+    'connect.tokenParsed': '已自动识别直连连接串',
   },
   en: {
     'lang.name': 'English',
@@ -141,6 +154,19 @@ export const DICTIONARY = {
     'banner.save': 'Apply Banner',
     'banner.cancel': 'Cancel',
     'banner.reset': 'Reset Default',
+    // QR Code modal
+    'qr.title': 'Direct Connect QR & Token',
+    'qr.desc': 'In offline local networks without MQTT, scan this QR code or paste the connection string below to connect directly.',
+    'qr.failed': 'Failed to generate QR code',
+    'qr.tokenLabel': 'Connection Token (Peer Token)',
+    'qr.copied': '✓ Token Copied',
+    'qr.copy': '📋 Copy Connection Token',
+    'qr.downloadSvg': '⬇️ Download SVG Image',
+    'qr.close': 'Close',
+    // Offline banner
+    'offline.banner': 'Network connection lost. Operating in offline mode. Some cloud and cross-node features may be limited.',
+    // Connect token parsed
+    'connect.tokenParsed': 'Direct connection token recognized',
   },
 };
 

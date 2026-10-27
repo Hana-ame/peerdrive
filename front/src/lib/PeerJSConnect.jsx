@@ -72,6 +72,7 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
   const [viewMode, setViewMode] = useState('card');
   const [bannerModalPeerId, setBannerModalPeerId] = useState(null);
   const [showQRModal, setShowQRModal] = useState(false);
+  const [tokenParsedBadge, setTokenParsedBadge] = useState(false);
 
   const handleTargetChange = (val) => {
     const raw = (val || '').trim();
@@ -90,6 +91,8 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
           if (p) setSigPort(p);
           if (k) setPsk(k);
         }
+        setTokenParsedBadge(true);
+        setTimeout(() => setTokenParsedBadge(false), 4000);
         return;
       } catch (e) {
         /* fallback to raw input */
@@ -368,16 +371,16 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
               type="button"
               onClick={() => setShowQRModal(true)}
               className="text-brand-400 hover:text-brand-300 flex items-center gap-1 transition-colors text-[11px]"
-              title="生成我的节点直连二维码或复制连接字符串"
+              title={t('qr.title')}
             >
               <span>📱</span>
-              <span>我的二维码与连接串</span>
+              <span>{t('qr.title')}</span>
             </button>
           </div>
         )}
         <div className="flex gap-2">
           <input value={targetPeerId} onChange={e => handleTargetChange(e.target.value)}
-            placeholder="peerdrive-xxxxxxxx 或粘贴 peerdrive:// 连接字符串"
+            placeholder="peerdrive-xxxxxxxx / peerdrive://..."
             className={inputCls + ' flex-1'}
             onKeyDown={e => { if (e.key === 'Enter') handleConnect(); }} />
           <input value={psk} onChange={e => setPsk(e.target.value)}
@@ -397,6 +400,12 @@ export default function PeerJSConnect({ compact = false, onConnected = null }) {
             </button>
           )}
         </div>
+        {tokenParsedBadge && (
+          <div className="mt-1.5 text-[11px] text-emerald-400 flex items-center gap-1.5">
+            <span>✨</span>
+            <span>{t('connect.tokenParsed')}: <code className="font-mono text-emerald-300">{targetPeerId}</code></span>
+          </div>
+        )}
       </div>
 
       <QRCodeModal
