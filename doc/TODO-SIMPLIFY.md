@@ -5,7 +5,7 @@
 | # | Item | Status | Risk |
 |---|------|--------|------|
 | M1 | `AnonEntry` old format | ✅ Removed | Low |
-| M2 | `file_meta` + `file_providers` tables | 🚧 Step 1/3 landed (#405), 停写/删表未做 | Highest |
+| M2 | `file_meta` + `file_providers` tables | 🚧 Step 1/2 landed (#405), Step 3 删表未做 | Highest |
 
 ### M2 分步迁移方案：`file_meta` + `file_providers` → `file_index`
 
@@ -19,12 +19,12 @@ IPFS pin ×2 / universal downloader / transport write-file / transport upload-se
 
 **目标 schema（Step 3 完成后）**：
 - `file_index` 为唯一权威：`hash, path, name, size, kind, mime_type, gziped, cid, seq,
-  deleted, created_at, updated_at, uploader_peer_id, is_inbox, origin`。
+  deleted, created_at, updated_at, uploader_peer_id, is_inbox, origin, remote_url`。
 - 删除 `file_meta`、`file_providers` 两表，以及 `repository/file_repo.go`、
   `model.FileMeta` / `model.FileProvider`、`Insert/Get/Update/Delete*` 旧方法。
 - URL 注册（`POST /files/register_url`）的 http provider 没有本地路径，不能塞进
-  `file_index.path`；单独迁移到 `file_index.remote_url`（或独立 `remote_providers` 表）后
-  才能删 `file_providers`。
+  `file_index.path`；已迁移到 `file_index.remote_url`（Step 2，见下），因此
+  `file_providers` 不再有真实读方，可以在 Step 3 删除。
 
 **Step 1（本 PR 已落地，#405）—— 建立单一写入口 + 回填 + 读路径切换，双写标记**：
 1. `file_index` 增列 `kind / mime_type / gziped / cid / origin`（沿用「CREATE 全列 +
@@ -53,19 +53,43 @@ IPFS pin ×2 / universal downloader / transport write-file / transport upload-se
 5. 测试：`repository/file_backfill_test.go`（旧 schema 升级 + 幂等 + 不删数据）、
    `service/file_convergence_test.go`（index 与镜像不一致时以 index 为准、删除双轨一致）。
 
-**Step 2（下一步，停写镜像）**：
-- 观察一个发布周期：`sqlite3 peerdrive.db "SELECT origin, COUNT(*) FROM file_index GROUP BY 1"`
-  与 `SELECT COUNT(*) FROM file_meta` 做基线；确认没有新增 `origin='legacy'` 的本地文件
-  行、`file_meta` 行数不再增长。
-- 给 `RegisterFile` 的镜像写加开关 `PEERDRIVE_LEGACY_META_MIRROR=0`（默认仍开），先在
-  CI/测试里关掉跑全绿，再在灰度节点关掉。
-- 完成 URL provider 模型：`register_url` 写 `file_index.remote_url`，`ReadFile`/
-  `HTTPURLFetcher` 改读该列；这是 `file_providers` 的最后一块真实读方。
-- `GetMeta` / `GetMetaByCID` 去掉 `file_meta` 兜底（回填已保证旧库完整）；
-  把 `CheckFileIndexConsistency` 接进启动自检/运维命令，断言 `onlyInMeta=0`
-  （URL-only 行除外）。
+**Step 2（本 PR 已落地，停写镜像）—— 全部改动如下，逐条可回滚**：
+1. `PEERDRIVE_LEGACY_META_MIRROR`（默认 `1`）→ `repository.SetLegacyMetaMirror`。设为 `0`
+   时 `RegisterFile` 不再写 `file_meta` / `file_providers`，`file_index` 写入不受影响。
+   回滚：设回 `1` 重启即可。
+2. `file_index` 增列 `remote_url`（同样的「CREATE 全列 + ALTER 忽略 duplicate column」）。
+   URL 注册走 `RegisterFile(FileRecord{RemoteURL: rawURL})` 统一写：写本地成功则
+   `path=fullPath` + `remote_url`，失败则 `path=''`（URL-only 行，语义与老的
+   `provider_type='http'` 一致）。`remote_url` 采用 **first-writer-wins**：同 hash
+   的多条 URL 内容等价，后写入不比先写入更正确，覆盖反而可能丢掉仍可访问的地址。
+3. 读方切换：`FileService.ReadFile` 与 `downloader.HTTPURLFetcher` 优先读
+   `file_index.remote_url`，再兜底 legacy `file_providers` 的 http 行（废弃窗口内的老库
+   仍可达），重复 URL 去重；SSRF 闸门与大小上限不变。
+4. `GetMeta` / `GetMetaByCID` 去掉 `file_meta` 兜底，index 唯一来源；保持旧仓库的
+   `(nil, nil)` 未命中约定。空 `path` 不再等于未索引。
+5. 新增 `repository.BackfillRemoteURLsFromLegacy()`：把老库 `provider_type='http'` 的
+   行迁到 `file_index.remote_url`（已有行就地 UPDATE 空值；纯 URL 行新建 `path=''`
+   的 index 行，`origin='legacy_backfill'`），忽略 `available=0`，同 hash 取 id 最小者，
+   幂等。与 Step 1 的回填分开：那一步按设计拒绝索引无法本地服务的行，而 URL-only
+   行恰恰没有本地字节。
+6. 启动自检：`serverapp/builder.go` 依次跑本地回填 → URL 回填 →
+   `CheckFileIndexConsistency`，`onlyInMeta != 0` 时 `LogWarn`（不中断启动，允许人工
+   迁移中途状态）。
+7. 测试：`repository/file_backfill_test.go`（镜像关断写旧表、`remote_url` 先到先得、
+   URL 回填四条契约）、`service/file_convergence_test.go`（无 index 行的 legacy 元数据
+   不可读、URL-only 行可被 `GetMeta` 读到、`ListAll` 投影 `provider_type='http'`）、
+   `downloader/universal_downloader_test.go`（`urlsFor` 的顺序/去重/忽略不可用/老库兼容
+   + 仅 `remote_url` 也能端到端拉到字节）。
+8. **观察一个发布周期再做 Step 3**：
+   `sqlite3 peerdrive.db "SELECT origin, COUNT(*) FROM file_index GROUP BY 1"` 与
+   `SELECT COUNT(*) FROM file_meta` 做基线；灰度节点关 `PEERDRIVE_LEGACY_META_MIRROR=0`
+   后确认 `file_meta` 行数不再增长、`file_index` 行数与 `origin='unified'` 正常增长。
 
 **Step 3（删表，单独 PR + release note）**：
+- 前置：`FileService.CopyFile`（`POST /files/copy`，WebDAV MOVE 等价）目前用
+  `InsertFileProvider(hash, "local", relPath)` 表达「同一 hash 的第二个本地副本」，而
+  `file_index` 每个 hash 只有一个 `path`，直接改写会把索引指向副本、丢掉原始路径。
+  需要先定模型（多副本表，或接受「副本即新 canonical path」），本步不做。
 - 删除前 dry-run：`sqlite3 peerdrive.db ".dump file_meta file_providers" > backup-m2.sql`，
   再跑一次 `BackfillFileIndexFromLegacy` 确认 `imported=0`。
 - 新 `initTables` 不再 `CREATE TABLE file_meta/file_providers`；删 `file_repo.go`、

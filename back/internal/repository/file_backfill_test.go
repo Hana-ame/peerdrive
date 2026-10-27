@@ -196,6 +196,14 @@ func TestRegisterFile_DualWritesWithUnifiedOrigin(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, providers, 1)
 
+	// The index is authoritative, so it must honor the same fill-only rule: an
+	// empty incoming name must not blank the stored one. Otherwise the mirror and
+	// the index disagree on filename during the deprecation window, and the name
+	// is lost for good once Step 3 drops file_meta.
+	fi, err = GetFileIndex(hash)
+	require.NoError(t, err)
+	assert.Equal(t, "unified.bin", fi.Name, "empty RegisterFile.Name must not blank the indexed name")
+
 	// Index-only writes (P2P sync) must not resurrect legacy rows.
 	syncHash := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	_, err = UpsertFileIndex(syncHash, "/remote/path.bin", "path.bin", 7, false)
@@ -203,4 +211,132 @@ func TestRegisterFile_DualWritesWithUnifiedOrigin(t *testing.T) {
 	meta, err = GetFileMeta(syncHash)
 	require.NoError(t, err)
 	assert.Nil(t, meta, "UpsertFileIndex stays index-only; only RegisterFile mirrors")
+}
+
+// 发现背景（Issue #405 Step 2）：file_index 已经是权威存储，file_meta /
+// file_providers 只是废弃窗口内的兼容镜像。PEERDRIVE_LEGACY_META_MIRROR=0 是
+// 灰度闸门——关掉后 RegisterFile 必须只剩 file_index 一条写入，否则 Step 3 的
+// DROP TABLE 会直接丢数据。本用例把闸门行为钉死。
+func TestRegisterFile_MirrorOffSkipsLegacyTables(t *testing.T) {
+	initTestDB(t)
+	require.True(t, LegacyMetaMirrorEnabled(), "mirror must default on")
+	t.Cleanup(func() { SetLegacyMetaMirror(true) })
+
+	onHash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	_, err := RegisterFile(FileRecord{Hash: onHash, Path: "/tmp/on.bin", Name: "on.bin", Size: 5, ProviderPath: "aa/" + onHash})
+	require.NoError(t, err)
+	_, err = GetFileMeta(onHash)
+	require.NoError(t, err)
+	providers, err := GetFileProviders(onHash)
+	require.NoError(t, err)
+	assert.Len(t, providers, 1, "mirror on writes the legacy provider row")
+
+	SetLegacyMetaMirror(false)
+	offHash := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	_, err = RegisterFile(FileRecord{Hash: offHash, Path: "/tmp/off.bin", Name: "off.bin", Size: 5, ProviderPath: "bb/" + offHash})
+	require.NoError(t, err)
+
+	idx, err := GetFileIndex(offHash)
+	require.NoError(t, err)
+	require.NotNil(t, idx)
+	assert.Equal(t, FileOriginUnified, idx.Origin, "index write must not be gated by the mirror")
+	assert.Equal(t, "/tmp/off.bin", idx.Path)
+
+	meta, err := GetFileMeta(offHash)
+	require.NoError(t, err)
+	assert.Nil(t, meta, "mirror off must not write file_meta")
+	providers, err = GetFileProviders(offHash)
+	require.NoError(t, err)
+	assert.Empty(t, providers, "mirror off must not write file_providers")
+}
+
+// 发现背景（Issue #405 Step 2）：同一个 hash 的多条 URL 注册内容等价，先写入的
+// URL 不比后写入的更正确，覆盖会丢掉可能仍可访问的地址。remote_url 因此是
+// 先到先得；本用例锁定这个取舍，防止以后有人顺手改成 last-writer-wins。
+func TestRegisterFile_RemoteURLFirstWriterWins(t *testing.T) {
+	initTestDB(t)
+
+	hash := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	_, err := RegisterFile(FileRecord{Hash: hash, Name: "r.bin", Size: 1, RemoteURL: "https://a.example/1"})
+	require.NoError(t, err)
+	_, err = RegisterFile(FileRecord{Hash: hash, Name: "r.bin", Size: 1, RemoteURL: "https://b.example/2"})
+	require.NoError(t, err)
+
+	idx, err := GetFileIndex(hash)
+	require.NoError(t, err)
+	require.NotNil(t, idx)
+	assert.Equal(t, "https://a.example/1", idx.RemoteURL, "the first registered URL must be kept")
+
+	// 空的 remote_url 不得把已有值冲掉（ON CONFLICT 的 CASE 分支）。
+	_, err = RegisterFile(FileRecord{Hash: hash, Name: "r.bin", Size: 1})
+	require.NoError(t, err)
+	idx, err = GetFileIndex(hash)
+	require.NoError(t, err)
+	require.NotNil(t, idx)
+	assert.Equal(t, "https://a.example/1", idx.RemoteURL)
+}
+
+// 发现背景（Issue #405 Step 2）：老库里的 URL 注册只存在 file_providers 的
+// provider_type='http' 行里，且大多没有本地字节（file_index 回填按设计拒绝索引
+// 无法本地服务的行），所以它们一直是 file_providers 的专属住户。Step 2 要把这条
+// 腿迁到 file_index.remote_url，本用例锁定「填已有行 / 补索引缺失的纯 URL 行 /
+// 忽略不可用 provider / 幂等」四条契约。
+func TestBackfillRemoteURLsFromLegacy(t *testing.T) {
+	initTestDB(t)
+
+	existingHash := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	urlOnlyHash := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	unavailableHash := "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+	// 已在 file_index、remote_url 为空：应被 UPDATE 填上。
+	_, err := RegisterFile(FileRecord{Hash: existingHash, Path: "/tmp/x.bin", Name: "x.bin", Size: 3})
+	require.NoError(t, err)
+	// 纯 URL 注册：index 里完全没有行，也没有本地字节。file_providers.hash 有指向
+	// file_meta 的外键，所以先补 legacy 元数据行（existingHash 已由 RegisterFile
+	// 的镜像写入建好）。
+	insertLegacyMeta := func(hash, name string) {
+		require.NoError(t, InsertFileMeta(&model.FileMeta{Hash: hash, Size: 2, Filename: name, Type: model.FileTypeBlob}))
+	}
+	insertLegacyMeta(urlOnlyHash, "remote-old.bin")
+	insertLegacyMeta(unavailableHash, "dead-old.bin")
+	insertLegacyHTTP := func(hash, url string) {
+		_, err := GetDB().Exec(`INSERT INTO file_providers (hash, provider_type, path, available) VALUES (?, 'http', ?, 1)`, hash, url)
+		require.NoError(t, err)
+	}
+	insertLegacyHTTP(existingHash, "https://e.example/x.bin")
+	insertLegacyHTTP(urlOnlyHash, "https://first.example/f.bin")
+	insertLegacyHTTP(urlOnlyHash, "https://second.example/f.bin") // 同 hash 第二条：必须被忽略
+	insertLegacyHTTP(unavailableHash, "https://dead.example/f.bin")
+	_, err = GetDB().Exec(`UPDATE file_providers SET available = 0 WHERE path = 'https://dead.example/f.bin'`)
+	require.NoError(t, err)
+
+	st, err := BackfillRemoteURLsFromLegacy()
+	require.NoError(t, err)
+	assert.Equal(t, 1, st.Filled, "the existing index row must be filled in place")
+	assert.Equal(t, 1, st.Imported, "the url-only legacy row must be indexed")
+
+	fi, err := GetFileIndex(urlOnlyHash)
+	require.NoError(t, err)
+	require.NotNil(t, fi)
+	assert.Equal(t, "https://first.example/f.bin", fi.RemoteURL, "lowest-id provider must win")
+	assert.Equal(t, "", fi.Path, "a url-only registration has no local bytes")
+	assert.Equal(t, FileOriginBackfill, fi.Origin)
+	assert.Equal(t, model.FileTypeBlob, fi.Kind)
+	assert.False(t, fi.Deleted)
+
+	fi2, err := GetFileIndex(existingHash)
+	require.NoError(t, err)
+	require.NotNil(t, fi2)
+	assert.Equal(t, "https://e.example/x.bin", fi2.RemoteURL)
+	assert.Equal(t, "/tmp/x.bin", fi2.Path, "the local path must survive the URL backfill")
+
+	fi3, err := GetFileIndex(unavailableHash)
+	assert.Nil(t, fi3, "an unavailable provider must not create an index row")
+	assert.ErrorIs(t, err, sql.ErrNoRows)
+
+	// 幂等：再跑一遍不得重复填、不得重复建。
+	st2, err := BackfillRemoteURLsFromLegacy()
+	require.NoError(t, err)
+	assert.Equal(t, 0, st2.Filled)
+	assert.Equal(t, 0, st2.Imported)
 }

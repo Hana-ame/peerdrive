@@ -3,6 +3,7 @@ package service
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -47,19 +48,26 @@ func NewFileService(cfg *config.Config) *FileService {
 
 // GetMeta looks up file metadata by hash (M2 convergence: the download controller previously called repository.GetFileMeta directly).
 //
-// Issue #405 read convergence: file_index is consulted first and is authoritative;
-// file_meta is now a compatibility mirror (RegisterFile) and remains only as a
-// fallback for rows from a pre-#405 database that the startup backfill skipped
-// (e.g. bytes already gone). Same order for every metadata consumer below.
+// Issue #405 Step 2: file_index is the **only** source of truth. The old
+// file_meta fallback was dropped — the startup backfill
+// (repository.BackfillFileIndexFromLegacy) already imports every legacy row
+// whose bytes still exist, and a row whose bytes are gone cannot be served by
+// any consumer, so projecting it was pure metadata noise. file_index also keeps
+// the empty-path convention for URL-only and P2P-synced rows, so there is no
+// `fi.Path != ""` guard: path emptiness no longer means "not indexed".
+//
+// Returns (nil, nil) when the hash is not indexed — the convention the legacy
+// repository.GetFileMeta used and every caller of GetMeta relies on (a missing
+// file is not a lookup error).
 func (s *FileService) GetMeta(hash string) (*model.FileMeta, error) {
-	if fi, fiErr := repository.GetFileIndex(hash); fiErr == nil && fi != nil && fi.Path != "" {
-		return metaFromIndex(fi), nil
+	fi, err := repository.GetFileIndex(hash)
+	if err == sql.ErrNoRows || fi == nil {
+		return nil, nil
 	}
-	meta, err := repository.GetFileMeta(hash)
-	if err == nil && meta != nil {
-		return meta, nil
+	if err != nil {
+		return nil, err
 	}
-	return meta, err
+	return metaFromIndex(fi), nil
 }
 
 // metaFromIndex projects the unified index row onto the model.FileMeta shape the
@@ -112,12 +120,17 @@ func (s *FileService) GetLocalPath(hash string) (string, error) {
 }
 
 // GetMetaByCID looks up file metadata by IPFS CID (M2 convergence: the download controller DownloadByCID).
-// Issue #405: index-first; file_meta is only the legacy fallback.
+// Issue #405 Step 2: index-first with the file_meta fallback removed (same
+// reasoning as GetMeta). Same (nil, nil) convention on a miss.
 func (s *FileService) GetMetaByCID(cid string) (*model.FileMeta, error) {
-	if fi, fiErr := repository.GetFileIndexByCID(cid); fiErr == nil && fi != nil {
-		return metaFromIndex(fi), nil
+	fi, err := repository.GetFileIndexByCID(cid)
+	if err == sql.ErrNoRows || fi == nil {
+		return nil, nil
 	}
-	return repository.GetFileMetaByCID(cid)
+	if err != nil {
+		return nil, err
+	}
+	return metaFromIndex(fi), nil
 }
 
 // ListAll lists all blob files (M2 convergence: the file controller ListFiles previously called repository.ListAllFiles directly).
@@ -134,12 +147,23 @@ func (s *FileService) ListAll(sortBy string) ([]model.FileListItem, error) {
 	items := make([]model.FileListItem, 0, len(idxList))
 	seen := make(map[string]bool, len(idxList))
 	for _, fi := range idxList {
-		if fi.IsInbox || fi.Path == "" {
+		// Skip inbox (quarantine) rows, and rows with neither a local path nor a
+		// remote URL — those are un-servable index stubs.
+		if fi.IsInbox || (fi.Path == "" && fi.RemoteURL == "") {
 			continue
 		}
 		mimeType := fi.MimeType
 		if mimeType == "" {
 			mimeType = "application/octet-stream"
+		}
+		// Issue #405 Step 2: a row whose only leg is remote_url is an http
+		// provider, not a local one. URL-only registrations used to be listed
+		// through the file_providers join; the index projection must report the
+		// same provider type or the API would start lying about where the bytes
+		// live.
+		providerType, providerPath := "local", fi.Path
+		if providerPath == "" && fi.RemoteURL != "" {
+			providerType, providerPath = "http", fi.RemoteURL
 		}
 		items = append(items, model.FileListItem{
 			Hash:         fi.Hash,
@@ -148,8 +172,8 @@ func (s *FileService) ListAll(sortBy string) ([]model.FileListItem, error) {
 			MimeType:     mimeType,
 			CreatedAt:    fi.CreatedAt,
 			Type:         model.FileTypeBlob,
-			ProviderType: "local",
-			ProviderPath: fi.Path,
+			ProviderType: providerType,
+			ProviderPath: providerPath,
 		})
 		seen[fi.Hash] = true
 	}
@@ -416,6 +440,8 @@ func (s *FileService) ReadFile(hash string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("db lookup: %w", err)
 	}
+	var localPaths []string
+	var legacyURLs []string
 	for _, p := range providers {
 		if p.ProviderType == "local" && p.Available {
 			path := p.Path
@@ -423,35 +449,63 @@ func (s *FileService) ReadFile(hash string) ([]byte, error) {
 				path = filepath.Join(s.storageDir, path)
 			}
 			if s.isPathAllowed(path) {
-				f, err := s.openAllowed(path)
-				if err == nil {
-					data, readErr := io.ReadAll(f)
-					_ = f.Close()
-					if readErr == nil {
-						return data, nil
-					}
-				}
+				localPaths = append(localPaths, path)
 			}
 		}
 		if p.ProviderType == "http" && p.Available {
-			if err := urlguard.GuardExternalURL(p.Path); err == nil {
-				client := urlguard.NewSafeClient(15 * time.Second)
-				resp, err := client.Get(p.Path)
-				if err == nil {
-					maxBytes := s.cfg.MaxUploadBytes
-					if maxBytes <= 0 {
-						maxBytes = 100 * 1024 * 1024
-					}
-					data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
-					_ = resp.Body.Close()
-					if readErr == nil && len(data) > 0 {
-						return data, nil
-					}
-				}
-			}
+			legacyURLs = append(legacyURLs, p.Path)
+		}
+	}
+	for _, path := range localPaths {
+		f, err := s.openAllowed(path)
+		if err != nil {
+			continue
+		}
+		data, readErr := io.ReadAll(f)
+		_ = f.Close()
+		if readErr == nil {
+			return data, nil
+		}
+	}
+
+	// Issue #405 Step 2: remote URLs are now carried by file_index.remote_url.
+	// Legacy file_providers rows with provider_type='http' (pre-#405 databases, or
+	// mirrors written while PEERDRIVE_LEGACY_META_MIRROR is still on) are tried
+	// too, so an upgrade never loses URL reachability inside the deprecation
+	// window. The index URL goes first — it is authoritative.
+	if fi, fiErr := repository.GetFileIndex(hash); fiErr == nil && fi != nil && fi.RemoteURL != "" {
+		legacyURLs = append([]string{fi.RemoteURL}, legacyURLs...)
+	}
+	for _, rawURL := range legacyURLs {
+		if data, ok := s.fetchRemoteURL(rawURL); ok {
+			return data, nil
 		}
 	}
 	return nil, fmt.Errorf("file %s not found", hash)
+}
+
+// fetchRemoteURL downloads a hash's bytes from one registered URL, guarded
+// against SSRF and capped at MaxUploadBytes. Returns (nil, false) on any failure
+// so the caller can fall through to the next candidate.
+func (s *FileService) fetchRemoteURL(rawURL string) ([]byte, bool) {
+	if err := urlguard.GuardExternalURL(rawURL); err != nil {
+		log.LogWarn("file-svc: blocked unsafe remote URL for fetch: %v", err)
+		return nil, false
+	}
+	resp, err := urlguard.NewSafeClient(15 * time.Second).Get(rawURL)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+	maxBytes := s.cfg.MaxUploadBytes
+	if maxBytes <= 0 {
+		maxBytes = 100 * 1024 * 1024
+	}
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	if readErr != nil || len(data) == 0 {
+		return nil, false
+	}
+	return data, true
 }
 
 // MaxUploadBytes returns the maximum upload bytes based on authentication status.

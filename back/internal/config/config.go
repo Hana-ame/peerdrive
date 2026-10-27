@@ -45,6 +45,16 @@ type Config struct {
 	StorageDir    string
 	StorageEnable bool
 
+	// LegacyMetaMirror keeps the file_meta/file_providers compatibility writes in
+	// repository.RegisterFile alive (PEERDRIVE_LEGACY_META_MIRROR, default true).
+	//
+	// Issue #405 Step 2 (doc/TODO-SIMPLIFY.md M2): file_index is authoritative, so
+	// the legacy tables are only a deprecation-window mirror for pre-#405 readers
+	// and operator scripts. Turning it off (0) is the gray-rollout gate that proves
+	// nothing still reads the legacy tables; the tables and their model types are
+	// deleted in Step 3. Rollback is simply setting it back to 1.
+	LegacyMetaMirror bool
+
 	AllowedOrigins     string
 	RegistrationServer string
 	Operator           string // PEERDRIVE_OPERATOR: node owner username for anonymous collection ownership
@@ -520,6 +530,7 @@ func DefaultConfig() *Config {
 		DBPath:                   "./peerdrive.db",
 		StorageDir:               "./storage",
 		StorageEnable:            true,
+		LegacyMetaMirror:         true,
 		AllowedOrigins:           "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev",
 		RegistrationServer:       "",
 		Operator:                 "",
@@ -642,6 +653,7 @@ func Load() *Config {
 		DBPath:              resolveMainDBPath(),
 		StorageDir:          getEnv("PEERDRIVE_STORAGE", "./storage"),
 		StorageEnable:       getEnvBool("PEERDRIVE_STORAGE_ENABLE", true),
+		LegacyMetaMirror:    getEnvBool("PEERDRIVE_LEGACY_META_MIRROR", true),
 		AllowedOrigins:      getEnv("PEERDRIVE_ALLOWED_ORIGINS", "http://localhost:5173,https://peerdrive.moonchan.xyz,https://peerdrive.pages.dev"),
 		RegistrationServer:  getEnv("PEERDRIVE_REG_SERVER", ""),
 		Operator:            getEnv("PEERDRIVE_OPERATOR", ""),

@@ -187,7 +187,7 @@ func SearchFileIndex(q SearchQuery) ([]FileIndex, int64, error) {
 		orderClause = fmt.Sprintf("ORDER BY %s %s, seq DESC", orderCol, orderDir)
 	}
 
-	query := fmt.Sprintf("SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin "+
+	query := fmt.Sprintf("SELECT hash, path, name, size, deleted, seq, created_at, updated_at, uploader_peer_id, is_inbox, kind, mime_type, gziped, cid, origin, remote_url "+
 		"FROM file_index WHERE %s %s LIMIT ? OFFSET ?", where, orderClause)
 
 	rows, err := db.Query(query, append(args, limit, offset)...)

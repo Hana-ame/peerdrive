@@ -489,3 +489,125 @@ func TestClearLocalCache_InvalidHashNoPanic(t *testing.T) {
 		d.ClearLocalCache(h) // must not panic
 	}
 }
+
+// 发现背景（Issue #405 Step 2）：URL provider 的权威存储从 file_providers 的
+// provider_type='http' 行迁到 file_index.remote_url（RegisterURL 已改走
+// RegisterFile 统一写）。本用例钉死读取顺序：index 优先、legacy 行只作废弃窗口
+// 内的兜底、重复 URL 去重、不可用行忽略，以及「老库里只有 legacy 行」的升级兼容。
+func TestHTTPURLFetcher_URLsFromIndexAndLegacyFallback(t *testing.T) {
+	if err := repository.InitDB(":memory:"); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+	t.Cleanup(func() { _ = repository.CloseDB() })
+
+	mk := func(c byte) string { return strings.Repeat(string(c), 64) }
+	hashA := mk('a') // index remote_url + 同一条 legacy 行 → 去重，index 先
+	hashB := mk('b') // index remote_url + 另一条 legacy 行 → index 先，legacy 兜底
+	hashC := mk('c') // 只有 legacy 行（老库）→ 仍可解析
+	hashD := mk('d') // legacy 行 available=0 → 必须忽略
+
+	// hashA / hashB 走统一写：file_index 拿到 remote_url，file_meta 镜像拿到元数据。
+	for _, h := range []string{hashA, hashB} {
+		_, err := repository.RegisterFile(repository.FileRecord{Hash: h, Name: h + ".bin", Size: 1, RemoteURL: "https://first.example/" + h})
+		if err != nil {
+			t.Fatalf("RegisterFile(%s): %v", h, err)
+		}
+	}
+	// legacy file_providers 行（file_meta 是外键上游，先补；hashA/hashB 的
+	// file_meta 已由 RegisterFile 的镜像写入建好，所以用 OR IGNORE）。
+	legacy := func(hash, url string) {
+		if _, err := repository.GetDB().Exec(`INSERT OR IGNORE INTO file_meta (hash, size, filename, type) VALUES (?, 1, ?, 'blob')`, hash, hash+".bin"); err != nil {
+			t.Fatalf("insert file_meta(%s): %v", hash, err)
+		}
+		if err := repository.InsertFileProvider(hash, "http", url); err != nil {
+			t.Fatalf("InsertFileProvider(%s): %v", hash, err)
+		}
+	}
+	legacy(hashA, "https://first.example/"+hashA) // 与 index 相同 → 必须去重
+	legacy(hashB, "https://second.example/"+hashB)
+	legacy(hashC, "https://only-legacy.example/"+hashC)
+	legacy(hashD, "https://dead.example/"+hashD)
+	// MarkProviderUnavailable 收的是 provider id，这里按 path 定位更直接。
+	if _, err := repository.GetDB().Exec(`UPDATE file_providers SET available = 0 WHERE path = ?`, "https://dead.example/"+hashD); err != nil {
+		t.Fatalf("mark provider unavailable: %v", err)
+	}
+
+	f := &HTTPURLFetcher{}
+	// 无索引行、无任何 provider → 空
+	urls, err := f.urlsFor(mk('e'))
+	if err != nil || len(urls) != 0 {
+		t.Fatalf("urlsFor(nothing) = %v, %v; want empty", urls, err)
+	}
+	// index + 重复 legacy 行
+	urls, err = f.urlsFor(hashA)
+	if err != nil {
+		t.Fatalf("urlsFor(hashA): %v", err)
+	}
+	if len(urls) != 1 || urls[0] != "https://first.example/"+hashA {
+		t.Fatalf("urlsFor(hashA) = %v; want the single index URL (deduped)", urls)
+	}
+	// index 先，legacy 兜底
+	urls, err = f.urlsFor(hashB)
+	if err != nil {
+		t.Fatalf("urlsFor(hashB): %v", err)
+	}
+	if len(urls) != 2 || urls[0] != "https://first.example/"+hashB || urls[1] != "https://second.example/"+hashB {
+		t.Fatalf("urlsFor(hashB) = %v; want index first, then the legacy row", urls)
+	}
+	// 老库只有 legacy 行
+	urls, err = f.urlsFor(hashC)
+	if err != nil {
+		t.Fatalf("urlsFor(hashC): %v", err)
+	}
+	if len(urls) != 1 || urls[0] != "https://only-legacy.example/"+hashC {
+		t.Fatalf("urlsFor(hashC) = %v; the legacy-only row must still resolve", urls)
+	}
+	// 不可用 provider 被忽略
+	urls, err = f.urlsFor(hashD)
+	if err != nil || len(urls) != 0 {
+		t.Fatalf("urlsFor(hashD) = %v, %v; an unavailable provider must be dropped", urls, err)
+	}
+}
+
+// TestHTTPURLFetcher_FetchFromIndexRemoteURL 端到端确认：只写了 file_index.remote_url、
+// file_providers 里没有对应行时，Fetch 仍然拉得到字节——Step 3 删除 file_providers
+// 前这条路径必须已经成立。
+func TestHTTPURLFetcher_FetchFromIndexRemoteURL(t *testing.T) {
+	if err := repository.InitDB(":memory:"); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+	t.Cleanup(func() { _ = repository.CloseDB() })
+
+	data := []byte("served from file_index.remote_url")
+	hash := sha256.Sum256(data)
+	hashStr := hex.EncodeToString(hash[:])
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+
+	_, err := repository.RegisterFile(repository.FileRecord{Hash: hashStr, Name: hashStr, Size: int64(len(data)), RemoteURL: server.URL})
+	if err != nil {
+		t.Fatalf("RegisterFile: %v", err)
+	}
+	providers, err := repository.GetFileProviders(hashStr)
+	if err != nil {
+		t.Fatalf("GetFileProviders: %v", err)
+	}
+	if len(providers) != 0 {
+		t.Fatalf("precondition: the test must not have a legacy http provider row, got %v", providers)
+	}
+
+	// httptest 绑 127.0.0.1，被 SSRF 双层防护合法拦截；这里只验证从 remote_url 取
+	// 到字节这条路径，临时放行闸门（闸门行为见 TestHTTPURLFetcher_BlocksInternalURL）。
+	defer allowLoopbackProviderURL(t)()
+	f := &HTTPURLFetcher{httpClient: server.Client()}
+	got, err := f.Fetch(context.Background(), hashStr)
+	if err != nil {
+		t.Fatalf("Fetch from remote_url failed: %v", err)
+	}
+	if string(got) != string(data) {
+		t.Errorf("expected %q, got %q", data, got)
+	}
+}

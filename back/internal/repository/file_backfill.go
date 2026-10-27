@@ -137,3 +137,118 @@ func BackfillFileIndexFromLegacy(storageDir string) (BackfillStats, error) {
 	}
 	return st, nil
 }
+
+// RemoteURLBackfillStats reports what the URL-provider migration pass did.
+type RemoteURLBackfillStats struct {
+	// Filled is the number of existing file_index rows whose remote_url was empty
+	// and got populated from a legacy file_providers row.
+	Filled int
+	// Imported is the number of URL-only legacy rows (http provider, no local
+	// bytes) that had no file_index row at all and were newly indexed with an
+	// empty path and their remote_url set.
+	Imported int
+}
+
+// BackfillRemoteURLsFromLegacy migrates pre-Issue-#405 `file_providers` rows with
+// provider_type='http' into file_index.remote_url (Issue #405 Step 2).
+//
+// Why a separate pass instead of extending BackfillFileIndexFromLegacy: that pass
+// deliberately refuses to index rows whose bytes it cannot serve, which excluded
+// exactly the URL-only registrations this migration is about — a URL registration
+// *is* servable, through the URL, just not from local disk. Kept apart so the two
+// sets of skip rules stay readable.
+//
+// Runs after the local backfill on every startup, is idempotent, and never
+// deletes or rewrites file_meta/file_providers, so rolling back to the previous
+// binary is safe. First provider wins per hash (ORDER BY id ASC), matching
+// RegisterFile's first-writer-wins rule for remote_url.
+func BackfillRemoteURLsFromLegacy() (RemoteURLBackfillStats, error) {
+	var st RemoteURLBackfillStats
+	if db == nil {
+		return st, fmt.Errorf("backfill remote_url: database not initialized")
+	}
+
+	type urlRow struct {
+		hash, url string
+	}
+	rows, err := db.Query(`SELECT hash, path FROM file_providers
+		WHERE provider_type = 'http' AND available = 1
+		ORDER BY id ASC`)
+	if err != nil {
+		return st, fmt.Errorf("query legacy http providers: %w", err)
+	}
+	var pending []urlRow
+	for rows.Next() {
+		var r urlRow
+		if err := rows.Scan(&r.hash, &r.url); err != nil {
+			_ = rows.Close()
+			return st, fmt.Errorf("scan legacy http providers: %w", err)
+		}
+		if r.hash == "" || r.url == "" {
+			continue
+		}
+		pending = append(pending, r)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return st, fmt.Errorf("iterate legacy http providers: %w", err)
+	}
+	_ = rows.Close()
+	if len(pending) == 0 {
+		return st, nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return st, fmt.Errorf("begin remote_url backfill tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var last sql.NullInt64
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM file_index`).Scan(&last); err != nil {
+		return st, fmt.Errorf("read file_index max seq: %w", err)
+	}
+	seq := last.Int64
+	seen := make(map[string]bool, len(pending))
+	for _, r := range pending {
+		if seen[r.hash] { // first provider per hash wins
+			continue
+		}
+		seen[r.hash] = true
+
+		var exists bool
+		err := tx.QueryRow(`SELECT 1 FROM file_index WHERE hash = ?`, r.hash).Scan(&exists)
+		if err != nil && err != sql.ErrNoRows {
+			_ = tx.Rollback()
+			return st, fmt.Errorf("check file_index %s: %w", r.hash, err)
+		}
+		if exists {
+			res, err := tx.Exec(`UPDATE file_index SET remote_url = ?, updated_at = CURRENT_TIMESTAMP
+				WHERE hash = ? AND remote_url = ''`, r.url, r.hash)
+			if err != nil {
+				return st, fmt.Errorf("backfill remote_url %s: %w", r.hash, err)
+			}
+			if n, _ := res.RowsAffected(); n > 0 {
+				st.Filled++
+			}
+			continue
+		}
+
+		seq++
+		if _, err := tx.Exec(`INSERT INTO file_index
+			(hash, path, name, size, deleted, seq, kind, remote_url, origin)
+			VALUES (?, '', '', 0, 0, ?, ?, ?, ?)`,
+			r.hash, seq, model.FileTypeBlob, r.url, FileOriginBackfill); err != nil {
+			return st, fmt.Errorf("backfill remote_url row %s: %w", r.hash, err)
+		}
+		st.Imported++
+	}
+
+	if err := tx.Commit(); err != nil {
+		return st, fmt.Errorf("commit remote_url backfill tx: %w", err)
+	}
+	if st.Filled > 0 || st.Imported > 0 {
+		log.LogInfo("db: remote_url backfill: filled=%d imported=%d", st.Filled, st.Imported)
+	}
+	return st, nil
+}
