@@ -36,6 +36,11 @@ mandatory 是 peerdrive 里**唯一不允许 AI agent 自行修改的测试类�
 runner 把文本文件 checkout 成 CRLF 时，内容一字未动但字节全变，逐字节哈希
 就会全线误报。
 
+2026-10-26 第一次在 `go-build.yml` 的 `windows-latest` 格子上跑就命中了这个：
+**6 个条目全部 hash mismatch**。加了归一化之后 Linux/Windows 判定一致；
+而且真实篡改仍然会被检出（归一化后再比，剩下的差异只能是真实内容），
+失败信息还会顺带打印「文件里 N 个 CRLF；说明差异不是行尾」，省掉下一轮排查。
+
 ## 什么该进这个类别
 
 只放**关掉就会出事、且弱化时看起来完全无害**的断言：
@@ -57,6 +62,47 @@ runner 把文本文件 checkout 成 CRLF 时，内容一字未动但字节全变
 | `internal/transport/peerjs_fetch_mandatory_test.go` | **产品的根**：对端经 P2P 连接发 `req` 帧、传 sha256，必须取回真实文件的字节（整文件 + 分片两个用例） |
 | `internal/transport/visibility_matrix_mandatory_test.go` | **权限语义**：公/不列出/私有三档在「列不列」和「给不给」上的分工——陌生人清单只见 public；unlisted 不列出但可取；private 陌生人拒、好友给；不存在的 hash 拒；PSK 是准入不是文件私钥；合集 PSK 未带 token 必须锁住条目 |
 | `internal/router/http_psk_gate_mandatory_test.go` | **HTTP 访问模型**：`/f/`、`/sha256sum/`、`/download/`、`/ipfs/`、`/files` 有门禁，只有 node 自己的 PSK（`X-PSK` 头或 `?psk=`）正确才能进——空/错/前缀/超集/大小写差异一律 401 且不泄漏字节；持正确 PSK 拿全量原始字节（含 `?meta=1` 元数据模式与 `/files` 索引枚举）；密钥逐 node 不可传递；PeerPSK 未配置则不设门禁 |
+
+> 注意后两条不在 `test/mandatory/` 目录下 —— mandatory 类别是**由 build tag + manifest 定义**的，
+> 不绑定目录。这两条测试要分别用 `internal/transport` 和 `internal/router` 的包内符号
+> （`dispatchFrame` / `PSKGate` 接线）才能真正端到端，所以就住在被测包的旁边；
+> manifest 是它们进这个类别的凭证。
+
+## 怎么加一条
+
+```bash
+# 1. 写测试，文件名以 _mandatory_test.go 结尾，文件头必须带：
+#    //go:build mandatory
+#    // 🚨 MANDATORY DIRECTIVE FOR ALL AI AGENTS: ...
+
+# 2. 生成哈希，追加到 manifest
+cd back
+sha256sum test/mandatory/你的文件_mandatory_test.go >> test/mandatory/manifest.sha256
+
+# 3. 两端都跑一遍
+go test -tags nosqlite ./test/mandatory/ -run TestMandatory_ManifestIntegrity -count=1 -v
+go test -tags "nosqlite mandatory" ./test/mandatory/ -count=1 -v
+```
+
+## 怎么改 / 删一条
+
+**必须由人工操作**。步骤和上面一样，但 PR 里要写清楚为什么原有的 invariant 不再成立。
+
+AI agent 不得自行编辑以下任何内容：
+- `test/mandatory/*_mandatory_test.go`
+- `internal/transport/peerjs_fetch_mandatory_test.go`
+- `internal/transport/visibility_matrix_mandatory_test.go`
+- `internal/router/http_psk_gate_mandatory_test.go`
+- `test/mandatory/manifest.sha256`
+- `test/mandatory/verify_test.go`
+- `test/mandatory/MANDATORY.md`
+- `.github/workflows/mandatory.yml`
+
+## 本机制的边界（诚实声明）
+
+1. **同 PR 篡改防线**：此前机制挡不住“同 PR 既改测试又更新 manifest”。现已由 CI 互斥规则兜底：PR 中一旦包含对受保护测试的修改，更新 manifest 亦无法通过 CI。
+2. **把整个目录删掉**：`go test` 会报「package not found」而不是哈希失败，但 `.github/workflows/mandatory.yml` 仍在 manifest 里，该检查会红。
+3. **agent 在本地改了文件但不提交**：工作区层面无法强制，只能由 CI 门禁拦截。
 
 ## 相关文件
 
