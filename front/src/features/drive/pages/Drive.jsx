@@ -94,11 +94,13 @@ export default function Drive() {
   const handleDrop = async (e) => {
     e.preventDefault();
     setIsDraggingOver(false);
-    const dropped = e.dataTransfer?.files?.[0];
-    if (!dropped || peerSession?.client) return;
+    const droppedFiles = Array.from(e.dataTransfer?.files || []);
+    if (droppedFiles.length === 0 || peerSession?.client) return;
     setBusy(true);
     try {
-      await ws.upload(dropped, dropped.name, 'file', '/files/upload');
+      for (const file of droppedFiles) {
+        await ws.upload(file, file.name, 'file', '/files/upload');
+      }
       await load();
     } catch (ex) {
       setErr(ex?.message || String(ex));
