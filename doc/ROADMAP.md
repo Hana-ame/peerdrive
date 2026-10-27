@@ -69,6 +69,8 @@ connections self-heal after disconnection; connection count has a cap; state is 
   and the detailed list is obtained peer-to-peer via the `share` frame after direct connection — the list contains hashes of publicly visible content only,
   no longer equivalent to broadcasting "what this node holds" to the entire network.
 - MQTT discovery (public broker) does not add a presence room: opening a global room on a public broker is equivalent to broadcasting this node to the public internet.
+- **Direct Connect via QR / URI Token (2026-10)**: For zero-broker / offline / local-network setups, nodes generate in-memory SVG QR codes and `peerdrive://peer/...` connection tokens directly, enabling out-of-band peer exchange without MQTT room discovery.
+
 
 **Done in this phase (2026-09-20 Netdisk Goal M1)**
 - User-facing **node directory**: `service.NodeDirectory` + `GET /peerjs/nodes` (online ∪ joined, offline also retained, avoiding the illusion of "a node I added disappeared"),
@@ -156,6 +158,8 @@ Previously only had defensive `IsPathAllowed` (rejecting unauthorized paths), wi
 - **Cross-Node Identity Verification** (`back/internal/service/nodeshare.go` & `serverapp`, `API-DESIGN.md` §8):
   - `NodeShare.SetTokenVerifier` wired to `Authenticator.ValidateToken` via registration server `GET /auth/whoami`.
   - Token verified requester checked against `coll.CanView(requester)`. If matched, restricted/private collections are unlocked and returned in `share-resp` frames.
+- **Role-Based Access Control (RBAC, 2026-10)** (`back/internal/router/auth_middleware.go`):
+  - Standardized four-tier hierarchy `RoleAdmin` > `RoleOperator` > `RoleMember` > `RoleViewer` with `RequireRole` middleware, aligning sovereign node PSK access with federated identity tokens.
 - **Dual-Track Invariant Preserved**:
   - Standalone/sovereign nodes without registration servers operate 100% offline via peerId + PSK admission without any regression.
 - **Future extensions (Phase 8)**: Traffic statistics anti-fraud & Ed25519 countersigning (`API-DESIGN.md` §7).
