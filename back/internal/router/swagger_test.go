@@ -18,7 +18,8 @@ import (
 func TestSwaggerDocJSON(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.DisableSwagger = false
-	rt := New(cfg, Deps{})
+	rt, err := NewRouter(Deps{Cfg: cfg})
+	require.NoError(t, err)
 	engine := rt.Engine()
 
 	req := httptest.NewRequest(http.MethodGet, "/swagger/doc.json", nil)
@@ -27,7 +28,7 @@ func TestSwaggerDocJSON(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code, "GET /swagger/doc.json must return 200 OK")
 	var doc map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &doc)
+	err = json.Unmarshal(w.Body.Bytes(), &doc)
 	require.NoError(t, err, "body must be valid JSON")
 	assert.Equal(t, "2.0", doc["swagger"], "swagger version must be 2.0")
 	info, ok := doc["info"].(map[string]interface{})
@@ -40,7 +41,8 @@ func TestSwaggerDocJSON(t *testing.T) {
 func TestSwaggerDocJSON_Disabled(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.DisableSwagger = true
-	rt := New(cfg, Deps{})
+	rt, err := NewRouter(Deps{Cfg: cfg})
+	require.NoError(t, err)
 	engine := rt.Engine()
 
 	req := httptest.NewRequest(http.MethodGet, "/swagger/doc.json", nil)
