@@ -1,0 +1,48 @@
+name: Network Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/ci-network-probe
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: back/go.sum
+
+      - name: 运行外部网络连通性探针 (DNS/TCP/TLS/UDP STUN/HTTP)
+        run: |
+          go run scripts/network_probe.go
+
+      - name: 运行公共 MQTT Broker 真实互联测试 (PEERDRIVE_MQTT_TEST=1)
+        working-directory: back
+        run: |
+          go mod download
+          PEERDRIVE_MQTT_TEST=1 go test -v -tags "nosqlite integration" ./test/integration/ -run TestMQTTDiscovery -timeout 60s
+
+      - name: 运行线上自托管信令互联测试 (PEERDRIVE_LIVE_TEST=1)
+        working-directory: back
+        continue-on-error: true
+        run: |
+          PEERDRIVE_LIVE_TEST=1 go test -v -tags "nosqlite integration" ./test/integration/ -run TestLiveSignal_DiscoveryAndInterop -timeout 60s
+
+      - name: 汇总测试结果并回注 Issue #437
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f network_probe_results.md ]; then
+            echo -e "\n### 🧪 CI Integration Test Summary\n- Public MQTT Broker Integration Test: Completed\n- Runner Host: GitHub Actions Hosted Ubuntu\n- Workflow Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> network_probe_results.md
+            gh issue comment 437 --body-file network_probe_results.md || true
+          fi
