@@ -125,7 +125,7 @@ IPFS pin ×2 / universal downloader / transport write-file / transport upload-se
 
 | # | Item | Status | Risk |
 |---|------|--------|------|
-| F1 | `Explorer.jsx` merge into `AnonExplorer` | ❌ Not done | Medium |
+| F1 | `Explorer.jsx` merge into `AnonExplorer` | ✅ Both removed (superseded by Netdisk IA in `ae21664`) | Medium |
 | F2 | `CollectionBuilder.jsx` | ✅ Removed | Low |
 | F3 | `AnonCollectionManager.jsx` | ✅ Removed | Low |
 | F4 | Navbar search "files" section | ✅ Removed | Low |

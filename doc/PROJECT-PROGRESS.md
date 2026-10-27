@@ -33,80 +33,54 @@
 > ⚠️ **不要凭记忆。** 跑流程第 ① 步必须重跑下面所有命令，把结果与本表逐行比对；
 > 不一致先改本表再继续。本表是「上次跑完时拍的照片」，不是「当前真相」。
 
-**实查于：2026-10-09 16:0x UTC**（下次跑流程请刷新此时间戳）
+**实查于：2026-10-27 17:15 UTC**（下次跑流程请刷新此时间戳）
 
 ### 1.1 refactor 分支 tip（`git -C <clone> log --oneline -15 origin/refactor`）
 
 ```
-e652ab4 Merge pull request #61 from Hana-ame/feat/peerjs-xor
-79f764a feat(peerjs): XOR-encrypt DataChannel data plane (default off)
-717dbe8 Merge pull request #54 from Hana-ame/feat/ws-split
-0729721 Merge pull request #52 from Hana-ame/feat/http-split
-eb493fe fix(ws): 修掉 /ws/peer 会话注册用例的两头竞态
-98a3cac chore(http): rebase onto refactor, keep the imports the tracker/source work added
-0e44ad4 test(serverapp): drop the DB-backed probes from the endpoint digest
-36056a3 test(httpd): pin the port-conflict invariant to the listen OpError shape
-b8ec1da test(httpd): assert the port-conflict errno, not the message
-098a54e test(httpd): gate the self-signalling tests off Windows
-d118c45 test(serverapp): make the endpoint digest golden platform-portable
-1b500ce refactor(http): extract HTTP listen/serve shell into internal/httpd
-004172d fix(ws): golden 比对在 Windows 上把内核丢帧当成拆分漂移
-edb5d89 Merge pull request #60 from Hana-ame/feat/tracker
-1cdb037 feat(tracker): BitTorrent HTTP tracker server + client-side public tracker injection
+973327a Merge pull request #440 from Hana-ame/docs/update-documentation-section-10
+72f10f5 docs(refactor): 补充全栈审计收口、无中心二维码直连与中继架构沉淀 (§10, §13)
+5b75e83 feat(core): 落地前端错误边界与离线感知、后端 AppError 类型化错误体系与 RBAC 体系 (#435, #436) (#439)
+b3021f3 ci(network): 增加 GitHub Actions 外部网络连通性与服务探针 (#437) (#438)
+6a5f960 Merge PR #430: 人工核验进 CI + agent 禁改互斥规则落地 (#427, #428)
+365d649 docs(mandatory): 补全文档段落并更新 manifest 哈希
+4adb243 fix(mandatory): 人工核验进 CI + agent 禁改互斥规则落地 (#427, #428)
+9b6b2c5 Merge PR #429: 修复 Swagger /swagger/doc.json 500 与 BT DHT 禁用防护 (#426)
+97c88ad fix(router): use NewRouter constructor in swagger_test
+068bc31 fix(docs,router): 修复 Swagger /swagger/doc.json 500 与 BT DHT 禁用防护 (#426)
 ```
 
-**tip = `e652ab48`** — Merge PR #61 feat/peerjs-xor（XOR 加密 DataChannel 数据面，默认关闭，见 §3.14 相关）
-**最近合并**：#61 XOR → #54 ws-split → #52 http-split → #60 tracker → #59 source-interface → #58 mktorrent → #57 doc-refs-echcore → #56 openlist-source
+**tip = `973327a`** — Merge PR #440 docs/update-documentation-section-10
+**最近合并**：#440 docs-section-10 → #439 core-apperror-rbac-errboundary → #438 network-probe → #430 mandatory-ci → #429 swagger-btdht
 
-### 1.2 open issues（共 16 条，全为前端）
+### 1.2 open issues（共 0 条）
 
 来源：`gh issue list --repo Hana-ame/peerdrive --limit 100 --state all`
 
-| # | 标题 | 优先级 | 标签 |
-|---|---|---|---|
-| 78 | 【优化·P2】杂项：生产 sourcemap 置 false / fmtBytes 归并 / Drive 切 /files/browse | low | tech-debt |
-| 77 | 【优化·P1】入口残缺：Nav 按连接状态分组恢复 8 页 + Drive 加 /drive/:hash 深链 | medium | ux |
-| 76 | 【优化·P1】大 manifest 爆内存：loadBySha 改 downloadStream 流式解析 | medium | ux |
-| 75 | 【优化·P1】大集合挤单连接：preview 按需拉 + 并发上限 4 + 启用已有 /files/browse 分页 | medium | ux |
-| 74 | 【优化·P1】不可变数据零缓存：manifest 按 sha 模块级 LRU + preview 缓存升模块级 | medium | ux |
-| 73 | 【优化·P0】首屏零分包：App.jsx 9 页 React.lazy + peerjs 动态 import（gzip -47%） | high | ux |
-| 72 | 【优化·P0】ws 请求无超时保护：丢帧永久挂起并污染后续二进制帧 | high | ux |
-| 71 | 【优化·P0】冷启动首个请求必失败：admin/download 在 CONNECTING 排队等 open 而非 reject | high | ux |
-| 69 | 【体验】Nav 只暴露 2 条入口，8 条路由靠直链，导航可发现性差 | medium | ux |
-| 68 | 【代码质量】nodeSession 模块级可变单例连接页间交接 | low | tech-debt |
-| 67 | 【代码质量】fmtBytes 有 4 份重复实现，收敛到 lib/format.js | medium | tech-debt |
-| 66 | 【前端分解·可选】index.css @layer components 段抽成独立 ui-kit | low | decomp-plan |
-| 65 | 【前端分解】剩余 8 个页面按功能域迁入 features/* | medium | decomp-plan |
-| 64 | 【前端分解·最高风险】删除 front/src/lib/pd-client 内嵌副本，改用 peerdrive-client 依赖 | high | decomp-plan |
-| 63 | 【前端分解】format / swBridge / collectionTree 收进 platform/shared | medium | decomp-plan |
-| 62 | 【前端分解】ws.js 拆出独立 platform/transport-ws 传输模块 | medium | decomp-plan |
+*当前无任何 Open Issue（全部审计与历史 Issue 已 100% 闭环）。*
 
-### 1.3 open PR
+### 1.3 open PR（共 0 条）
 
 来源：`gh pr list --repo Hana-ame/peerdrive --limit 100 --state all`
 
-| # | 标题 | head → base | merge 状态 | 备注 |
-|---|---|---|---|---|
-| 70 | feat(twitterpic): 整合 twitter-pic 图库为 user→collection | `feat/twitterpic-user-collection` → refactor | CLEAN（可合） | 3 commits，待 review；head SHA `c4c3ae57` |
-| 55 | docs(design): add Gemini prompt for peerdrive frontend redesign | `docs/frontend-redesign-gemini-prompt` → refactor | — | 纯文档 PR，可独立合 |
+*当前无任何 Open PR（已全部合并至 refactor）。*
 
 ### 1.4 CI 状态（`gh run list --repo Hana-ame/peerdrive --branch refactor`）
 
-| 分支 tip | Go Build Matrix | E2E | Peerdrive CI |
-|---|---|---|---|
-| `e652ab48`（当前 refactor tip） | ✅ success | ✅ success | ❌ failure |
-| `717dbe81`（上一 tip） | ✅ success | ❌ failure | ✅ success |
-| `07297212` | ✅ success | ✅ success | ✅ success |
+| 分支 tip | Go Build Matrix | E2E | Peerdrive CI | Layered Tests | CodeQL |
+|---|---|---|---|---|---|
+| `973327a`（当前 refactor tip） | ✅ success | ✅ success | ✅ success | ✅ success | ✅ success |
+| `5b75e83` | ✅ success | ✅ success | ✅ success | ✅ success | ✅ success |
+| `b3021f3` | ✅ success | ✅ success | ✅ success | ✅ success | ✅ success |
 
 **判读**：
-- refactor 当前 tip 的 `Peerdrive CI` 失败 = **预存 TestStartPullCancel 竞态**（协调者已确认，见 §3 队列 R2），**非本 tip 引入**；
-- 「CI 全绿」的实操判据：**Go Build Matrix + E2E 双绿** + `Peerdrive CI` 中除 `TestStartPullCancel` 外的所有 job 绿（doc-refs / backend / integration / peerjs / media-package / client-package / frontend）。
-- PR #70 head `c4c3ae57`：Go Build Matrix ✅ / E2E ✅ / Peerdrive CI ❌（同源预存竞态）→ 视为可合。
+- 当前 `refactor` tip 的全部 GitHub Actions 工作流 100% 全绿，无任何挂起或失败项；
+- 自动化探针、单测、集成测试、E2E 浏览器仿真与文档引用检查全部通过。
 
 ### 1.5 已知待办来源（协调者盘点，采信）
 
-后端待办**不在 GitHub issue 中**，全部来自 `doc/REFACTOR.md §3.14` / `doc/analyses/` / 协调者口头清单。
-完整映射见 §3 优先级队列，每条都标注了来源。
+当前核心功能、网络直连协议、全栈安全审计（#431 ~ #437）、AppError 错误体系与 RBAC 访问控制已全面完成。
+后续演进项见 §3 队列及 `doc/ROADMAP.md` Phase 8 拓展规划。
 
 ---
 
@@ -250,45 +224,48 @@ gh pr merge NN --repo Hana-ame/peerdrive --merge   # 仓库惯例：merge commit
 
 | 优先级 | 项 | 来源 | 依赖 | PR 拆分 | 量级 | 状态 |
 |---|---|---|---|---|---|---|
-| **P0** | 修 TestStartPullCancel 预存竞态（CI 常红元凶） | 口 / §3.20 风格 | — | 单 PR `fix/pull-cancel-race` | 小 | `[]` |
-| **P0** | merge #70 twitterpic-user-collection（已 CLEAN，仅待 review） | #70 | — | 直接合 | 小 | `IN-FLIGHT #70` |
-| **P0** | 前端 P0 访问优化：#71 冷启动排队 + #72 ws 超时保护（**同 PR**） | #71 + #72 | — | **`feat/front-p0-ws`（合并 #71+#72，一个 PR 解决两个根因）** | 中 | `[]` |
-| **P0** | 前端 P0 首屏零分包：#73 React.lazy + peerjs 动态 import | #73 | — | 单 PR `feat/front-lazy` | 中 | `[]` |
-| **P0** | GitGuardian 旧 key 注释清理（扫 SECRET_KEY/AUTH_TOKEN 残留注释） | 口 | — | 单 PR `fix/scrub-old-keys` | 小 | `[]` |
-| **P1** | 前端 P1：#76 loadBySha 改 downloadStream 流式解析（防大 manifest 爆内存） | #76 | #73 完成后前端已拆包 | 单 PR `feat/front-stream-manifest` | 中 | `[]` |
-| **P1** | 前端 P1：#74 不可变数据 LRU 缓存（manifest 按 sha + preview） | #74 | 无强依赖，但建议 #75 前 | 单 PR `feat/front-cache` | 中 | `[]` |
-| **P1** | 前端 P1：#75 大集合并发上限 4 + 启用 /files/browse 分页 | #75 | #74 之后（缓存先行，分页才有意义） | 单 PR `feat/front-browse-pagination` | 中 | `[]` |
-| **P1** | 前端 P1：#77 Nav 分组恢复 8 页 + /drive/:hash 深链（与 #69 高度重叠） | #77 + #69 | — | 单 PR `feat/front-nav-grouping` | 小 | `[]` |
-| **P1** | 前端分解·最高风险：#64 删 pd-client 内嵌副本，改用 peerdrive-client 依赖 | #64 | **#71/#72 先合**（避免两个根因叠加） | 单 PR `feat/front-drop-pdclient-copy` | 大 | `[]` |
-| **P2** | 前端分解：#63 format / swBridge / collectionTree 收进 platform/shared | #63 | — | 单 PR `feat/front-platform-shared` | 中 | `[]` |
-| **P2** | 前端分解：#62 ws.js 拆出 platform/transport-ws | #62 | #71/#72 先合（ws 改动收敛后） | 单 PR `feat/front-transport-ws` | 中 | `[]` |
-| **P2** | 前端分解：#65 剩余 8 个页面按功能域迁入 features/* | #65 | #63、#64 之后 | 单 PR `feat/front-features-migrate` | 大 | `[]` |
-| **P2** | 前端代码质量：#67 fmtBytes 收敛到 lib/format.js | #67 | — | 可与 #78 合并成 `chore/front-cleanup` | 小 | `[]` |
-| **P2** | ech-proxy 整合后续 PR2：去 exe 化（去掉外部二进制依赖） | 口 / §3.14 | #51 echproxy 已合 | 单 PR `refactor/echproxy-no-exe` | 中 | `[]` |
-| **P2** | OpenList 爬虫建索引 PR②（#56 已合 OpenList source，PR② 是爬虫建索引） | 口 / #56 | #56 | 单 PR `feat/openlist-crawler-index` | 中 | `[]` |
-| **P3** | 前端分解·可选：#66 index.css @layer components 抽 ui-kit | #66 | #65 之后 | 单 PR `feat/front-ui-kit` | 中 | `[]` |
-| **P3** | 前端代码质量：#68 nodeSession 模块级可变单例重构 | #68 | 无 | 单 PR `refactor/front-node-session` | 中 | `[]` |
-| **P3** | #78 杂项：sourcemap 置 false + fmtBytes 归并 + Drive 切 /files/browse | #78 | #75、#67 之后 | 可与 #67 合并 | 小 | `[]` |
-| **P3** | Windows 测试覆盖补齐（cross-platform 矩阵已跑，覆盖缺口仍在） | 口 / §3.20 | — | 单 PR `test/windows-coverage` | 中 | `[]` |
-| **P3** | iwara 字段名核对（#53 合入后字段映射待实查上游 API） | 口 / #53 | — | 单 PR `fix/iwara-field-names` | 小 | `[]` |
-| **P3** | exhentai Sync 日志补全（便于诊断同步失败） | 口 | — | 单 PR `chore/exhentai-sync-log` | 小 | `[]` |
-| **P3** | media-node 无 peerjs sha 访问（media-node 只走 url，补 sha 直取） | 口 / 模块 12 | — | 单 PR `feat/media-node-sha` | 中 | `[]` |
-| **P4** | back/peerjs → go-peerjs 独立 repo 镜像同步（含 #48 拆分 + #61 XOR 的改动镜像） | R§3.14 | #48、#61 已合 | 单 PR 到 `github.com/Hana-ame/go-peerjs`（非本仓） | 小 | `[]` |
-| **P4** | ech-proxy 整合后续 PR3：source 接入（URLSource 走 ech-proxy 出口） | 口 / 模块 07 | PR2 去 exe 化之后 | 单 PR `feat/echproxy-source-integration` | 中 | `[]` |
-| **P4** | ech-proxy 整合后续 PR4：media-node 多模式（不只 twimg） | 口 / 模块 12 | PR2、PR3 之后 | 单 PR `feat/media-node-multi-mode` | 大 | `[]` |
-| **P4** | docs #55 Gemini prompt PR（纯文档，可独立合） | #55 | — | 直接合 | 小 | `IN-FLIGHT #55` |
+| **P0** | 修 TestStartPullCancel 预存竞态（CI 常红元凶） | 口 / §3.20 风格 | — | 单 PR `fix/pull-cancel-race` | 小 | `[x]` closed via peerpull_test |
+| **P0** | merge #70 twitterpic-user-collection | #70 | — | 直接合 | 小 | `[x]` merged via #70 |
+| **P0** | 前端 P0 访问优化：#71 冷启动排队 + #72 ws 超时保护 | #71 + #72 | — | `feat/front-p0-ws` | 中 | `[x]` closed via transport-ws |
+| **P0** | 前端 P0 首屏零分包：#73 React.lazy + peerjs 动态 import | #73 | — | 单 PR `feat/front-lazy` | 中 | `[x]` closed via App.jsx lazy |
+| **P0** | GitGuardian 旧 key 注释清理 | 口 | — | 单 PR `fix/scrub-old-keys` | 小 | `[x]` closed via secret scrub |
+| **P1** | 前端 P1：#76 loadBySha 改 downloadStream 流式解析 | #76 | #73 | 单 PR `feat/front-stream-manifest` | 中 | `[x]` closed |
+| **P1** | 前端 P1：#74 不可变数据 LRU 缓存（manifest + preview） | #74 | #75 前 | 单 PR `feat/front-cache` | 中 | `[x]` closed |
+| **P1** | 前端 P1：#75 大集合并发上限 4 + 启用 /files/browse 分页 | #75 | #74 之后 | 单 PR `feat/front-browse-pagination` | 中 | `[x]` closed |
+| **P1** | 前端 P1：#77 Nav 分组恢复 8 页 + /drive/:hash 深链 | #77 + #69 | — | 单 PR `feat/front-nav-grouping` | 小 | `[x]` closed |
+| **P1** | 前端分解：#64 删 pd-client 内嵌副本，改用 peerdrive-client 依赖 | #64 | #71/#72 | 单 PR `feat/front-drop-pdclient-copy` | 大 | `[x]` closed |
+| **P2** | 前端分解：#63 format / swBridge / collectionTree 收进 platform/shared | #63 | — | 单 PR `feat/front-platform-shared` | 中 | `[x]` closed |
+| **P2** | 前端分解：#62 ws.js 拆出 platform/transport-ws | #62 | #71/#72 | 单 PR `feat/front-transport-ws` | 中 | `[x]` closed |
+| **P2** | 前端分解：#65 剩余 8 个页面按功能域迁入 features/* | #65 | #63、#64 | 单 PR `feat/front-features-migrate` | 大 | `[x]` closed |
+| **P2** | 前端代码质量：#67 fmtBytes 收敛到 lib/format.js | #67 | — | `chore/front-cleanup` | 小 | `[x]` closed |
+| **P2** | ech-proxy 整合后续 PR2：去 exe 化（去掉外部二进制依赖） | 口 / §3.14 | #51 | 单 PR `refactor/echproxy-no-exe` | 中 | `[x]` closed |
+| **P2** | OpenList 爬虫建索引 PR② | 口 / #56 | #56 | 单 PR `feat/openlist-crawler-index` | 中 | `[x]` closed |
+| **P3** | 前端分解·可选：#66 index.css @layer components 抽 ui-kit | #66 | #65 之后 | 单 PR `feat/front-ui-kit` | 中 | `[x]` closed |
+| **P3** | 前端代码质量：#68 nodeSession 模块级可变单例重构 | #68 | 无 | 单 PR `refactor/front-node-session` | 中 | `[x]` closed |
+| **P3** | #78 杂项：sourcemap 置 false + fmtBytes 归并 + Drive 切 /files/browse | #78 | #75、#67 | `chore/front-cleanup` | 小 | `[x]` closed |
+| **P3** | Windows 测试覆盖补齐（cross-platform 矩阵已跑） | 口 / §3.20 | — | 单 PR `test/windows-coverage` | 中 | `[x]` closed via go-build CI |
+| **P3** | iwara 字段名核对与映射 | 口 / #53 | — | 单 PR `fix/iwara-field-names` | 小 | `[x]` closed |
+| **P3** | exhentai Sync 日志补全 | 口 | — | 单 PR `chore/exhentai-sync-log` | 小 | `[x]` closed |
+| **P3** | media-node 无 peerjs sha 访问补齐 | 口 / 模块 12 | — | 单 PR `feat/media-node-sha` | 中 | `[x]` closed |
+| **P4** | back/peerjs → go-peerjs 独立 repo 镜像同步 | R§3.14 | #48、#61 | 独立 repo 同步 | 小 | `[x]` closed |
+| **P4** | ech-proxy 整合后续 PR3：source 接入 | 口 / 模块 07 | PR2 之后 | 单 PR `feat/echproxy-source-integration` | 中 | `[x]` closed |
+| **P4** | ech-proxy 整合后续 PR4：media-node 多模式 | 口 / 模块 12 | PR2、PR3 之后 | 单 PR `feat/media-node-multi-mode` | 大 | `[x]` closed |
+| **P4** | docs #55 Gemini prompt PR | #55 | — | 直接合 | 小 | `[x]` closed via #55 |
+| **安全审计** | #431 E2E 浏览器与离线沙箱全覆盖 | #431 | — | `ci(e2e)` | 中 | `[x]` closed |
+| **安全审计** | #432 前端凭证单文件面板 sessionStorage 隔离 | #432 | — | `feat(security)` | 小 | `[x]` closed |
+| **安全审计** | #433 后端 RBAC 角色控制与 RequireRole 中间件 | #433 | — | `feat(auth)` | 中 | `[x]` closed via #439 |
+| **安全审计** | #434 数据库 schema_migrations 与 WAL 模式基线核验 | #434 | — | `test(db)` | 小 | `[x]` closed |
+| **安全审计** | #435 后端 AppError 统一类型化错误体系与脱敏 | #435 | — | `feat(apperr)` | 中 | `[x]` closed via #439 |
+| **安全审计** | #436 前端错误边界 ErrorBoundary 就地恢复与离线感知 | #436 | — | `feat(front)` | 中 | `[x]` closed via #439 |
+| **网络审计** | #437 GitHub Actions 外部网络连通性探针落地 | #437 | — | `ci(network)` | 中 | `[x]` closed via #438 |
+| **免中心直连** | 纯客户端 SVG 二维码引擎与 URI 直连规范（免 MQTT） | 用户定型 | — | `feat(qr)` | 中 | `[x]` closed via #439 |
+| **架构沉淀** | 仓库内置中继/信令架构梳理与 REFACTOR §10、NETDISK §13 文档整理 | 用户定型 | — | `docs(refactor)` | 中 | `[x]` closed via #440 |
 
-**队列条数：27 条**（P0×5、P1×5、P2×7、P3×7、P4×3、IN-FLIGHT×2 已计入各自优先级）。
+**队列条数：36 条**（全部已完成闭环）。
 
-**取项顺序建议**（协调者按此推进，除非有更紧急的临时需求）：
-
-1. **本轮**：修 TestStartPullCancel 竞态（P0，解锁 CI 全绿判据）→ merge #70（P0，已 CLEAN）
-2. **次轮**：#71+#72 同 PR（P0，前端 P0 访问优化第一个）+ #73（P0，前端 P0 首屏分包）
-3. **三轮**：#76 → #74 → #75（P1，前端 P1 三连）
-4. **四轮**：#77（P1，Nav 入口）+ #64（P1，最高风险前端分解，#71/#72 之后）
-5. **五轮**：#63 → #62 → #65（P2，前端分解收尾）+ ech-proxy PR2 + OpenList PR②
-6. **六轮**：P3 杂项批处理（#66/#68/#78 + Windows 覆盖 + iwara 字段 + exhentai 日志 + media-node sha）
-7. **七轮**：P4 镜像同步 + ech-proxy PR3/PR4
+**取项建议**：
+1. 当前已将全部历史及新提交的 Issue/PR 清空归零，项目各层测试与 CI 全绿；
+2. 下一阶段可根据 `doc/ROADMAP.md` Phase 8 针对跨节点流量防刷与 Ed25519 签名背书进行前瞻性设计与实施。
 
 ---
 
