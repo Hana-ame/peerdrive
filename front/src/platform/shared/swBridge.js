@@ -83,18 +83,26 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
           if (abortCtrl.signal.aborted) break;
           bytesSent += chunk.byteLength;
           const buf = chunk.slice().buffer;
-          port.postMessage({ chunk: buf }, [buf]);
+          try {
+            port.postMessage({ chunk: buf }, [buf]);
+          } catch {
+            break; // port closed by consumer
+          }
         }
         if (!abortCtrl.signal.aborted) {
           const sec = (performance.now() - t0) / 1000;
           const mbps = sec > 0 ? (bytesSent / sec / (1024 * 1024)).toFixed(2) : '0';
           console.log(`[swBridge] Stream done: hash=${d.hash?.slice(0, 8)} sent=${bytesSent} bytes in ${sec.toFixed(2)}s (${mbps} MB/s)`);
-          port.postMessage({ done: true });
+          try {
+            port.postMessage({ done: true });
+          } catch { /* channel closed */ }
         }
       } catch (e) {
         if (!abortCtrl.signal.aborted) {
           console.warn(`[swBridge] Stream error: hash=${d.hash?.slice(0, 8)}`, e);
-          port.postMessage({ error: e?.message || String(e) });
+          try {
+            port.postMessage({ error: e?.message || String(e) });
+          } catch { /* channel closed */ }
         }
       }
     })();

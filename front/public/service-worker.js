@@ -33,7 +33,7 @@ self.addEventListener('fetch', (event) => {
 
   /* 断点续传：伪造 fetch，把 PeerJS 流喂给 img/video/audio（支持 Range） */
   if (url.pathname.includes('/swdrive/')) {
-    event.respondWith(servePeerDriveStream(event.request));
+    event.respondWith(servePeerDriveStream(event.request, event.clientId));
     return;
   }
 
@@ -143,7 +143,7 @@ function guessMimeSw(name) {
   return map[ext] || 'application/octet-stream';
 }
 
-function servePeerDriveStream(request) {
+function servePeerDriveStream(request, clientId) {
   return new Promise((resolve) => {
     const url = new URL(request.url);
     // /peerdrive/swdrive/<hash> 或 /swdrive/<hash>：取最后一段（去掉路径前缀）
@@ -172,8 +172,19 @@ function servePeerDriveStream(request) {
     }
     const peerSize = reqLen != null ? reqLen : -1; // 向页面要的字节数（-1=到末尾）
 
-    self.clients.matchAll({ includeUncontrolled: true }).then((clients) => {
-      if (!clients.length) {
+    const pickClient = async () => {
+      if (clientId) {
+        try {
+          const c = await self.clients.get(clientId);
+          if (c) return c;
+        } catch { /* ignore */ }
+      }
+      const list = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+      return list[0] || null;
+    };
+
+    pickClient().then((targetClient) => {
+      if (!targetClient) {
         resolve(new Response('no peer connection', { status: 502 }));
         return;
       }
@@ -195,8 +206,8 @@ function servePeerDriveStream(request) {
           else if (m.chunk) ctrl.enqueue(new Uint8Array(m.chunk));
         } catch (e) { /* stream 已关闭 */ }
       };
-      // 只发给第一个 client（当前持有 PeerJS 连接的页面）
-      clients[0].postMessage(
+      // 发给请求发起页面（当前持有 PeerJS 连接的页面）
+      targetClient.postMessage(
         { type: 'pd-fetch', hash, name, offset, size: peerSize, port: chan.port2 },
         [chan.port2]
       );
