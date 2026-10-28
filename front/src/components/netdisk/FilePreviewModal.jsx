@@ -78,7 +78,8 @@ export default function FilePreviewModal({
         // 2. 若在本地 WS/HTTP 模式且有 apiBase / 相对地址可达：
         //    直接构造 /sha256sum/:hash/:name 进行原生 HTTP 206 Range 流式点播。
         // 3. 仅当上述流式路径不可行时，才回退全量 fetchBlob。
-        const isMedia = kind === 'video' || kind === 'audio';
+        // 包括 video、audio 以及支持流式渐进解码渲染的 image (如 Progressive JPG)。
+        const isMedia = kind === 'video' || kind === 'audio' || kind === 'image';
         const hasPeerClient = Boolean(getNodeSession()?.client);
 
         if (isMedia) {
@@ -267,7 +268,21 @@ export default function FilePreviewModal({
                   src={blobUrl}
                   alt={filename}
                   className="max-w-full max-h-full object-contain select-none transition-transform shadow-2xl"
-                  onError={() => {
+                  onError={async () => {
+                    if (fetchBlob && !blobUrl.startsWith('blob:')) {
+                      try {
+                        setLoading(true);
+                        setIsStream(false);
+                        const data = await fetchBlob(file.hash);
+                        const b = data instanceof Blob ? data : new Blob([data], { type: effectiveMime || 'image/jpeg' });
+                        const nextUrl = URL.createObjectURL(b);
+                        setBlobUrl(nextUrl);
+                        setLoading(false);
+                        return;
+                      } catch {
+                        setLoading(false);
+                      }
+                    }
                     setError('图片解码或显示失败，文件数据可能不完整。');
                   }}
                 />

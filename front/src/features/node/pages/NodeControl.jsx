@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as ws from '../../../platform/transport-ws';
 import { getNodeSession, clearNodeSession } from '../../../lib/nodeSession';
+import { swControlled } from '../../../platform/shared/swBridge';
 import { kindOf, mimeOf } from '../../../platform/shared/mime';
 import NodeGuestView from '../components/NodeGuestView';
 import NodeDisconnectedView from '../components/NodeDisconnectedView';
@@ -112,6 +113,12 @@ export default function NodeControl() {
     }
     if (kind === 'image') {
       setViewer({ scale: 1, x: 0, y: 0 });
+      // 若 Service Worker 激活受控，直接走 swdrive 流式管道实现原生 Progressive 逐行扫描与渐进加载
+      if (swControlled()) {
+        const url = `${import.meta.env.BASE_URL}swdrive/${encodeURIComponent(item.hash)}?name=${encodeURIComponent(name)}${item.size ? '&size=' + item.size : ''}`;
+        setPreview({ hash: item.hash, name, kind, loading: false, error: '', text: '', url, imgIndex: imgIdx });
+        return;
+      }
       const total = item.size || 0;
       setPreview({ hash: item.hash, name, kind, loading: true, error: '', text: '', url: '', progress: { loaded: 0, total }, imgIndex: imgIdx });
       const chunks = [];
