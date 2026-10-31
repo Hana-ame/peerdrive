@@ -53,7 +53,25 @@ type Session struct {
 	onMessage func(Frame)
 	onClose   func()
 	closeOnce sync.Once
+
+	// pending holds frames that arrived before OnMessage registered a callback.
+	//
+	// New starts readLoop immediately, but the caller can only register the
+	// callback afterwards (peerjs bindConn registers it inside bindConnInternal,
+	// i.e. after transport.NewWSSession returned). Dropping what lands in that
+	// window loses the peer's very first frame — for a browser that is its
+	// first req/upload, after which it waits for a reply that can never come.
+	// Observed as a hang rather than a failure: CI integration
+	// TestFrameVerbs_UploadAndSync sat 8m33s on a blocked ReadMessage.
+	//
+	// Bounded so a client that floods before registering cannot grow this
+	// without limit; the peer cannot legitimately have more than a handful of
+	// frames in flight before the callback exists.
+	pending []Frame
 }
+
+// maxPendingFrames bounds the pre-callback backlog (see Session.pending).
+const maxPendingFrames = 64
 
 // New wraps an already-upgraded socket and starts the read loop and the
 // heartbeat. It never returns an error: a socket that cannot be wrapped has
@@ -161,12 +179,21 @@ func (s *Session) SendFrame(header any, body []byte) error {
 	return nil
 }
 
-// OnMessage registers the inbound callback. Registered under sendMu because
-// it is read from readLoop, which needs a synchronized handoff.
+// OnMessage registers the inbound callback and replays any frames that arrived
+// before registration (see Session.pending).
+//
+// The replay runs outside sendMu on purpose: the callback may itself write to
+// this session (SendJSON), which needs the same mutex — replaying under the
+// lock would deadlock on the first verb that answers.
 func (s *Session) OnMessage(f func(Frame)) {
 	s.sendMu.Lock()
 	s.onMessage = f
+	pending := s.pending
+	s.pending = nil
 	s.sendMu.Unlock()
+	for _, fr := range pending {
+		f(fr)
+	}
 }
 
 // OnClose registers the teardown callback. Fired exactly once, after the
@@ -198,6 +225,9 @@ func (s *Session) Close() {
 
 // readLoop is the inbound scheduler: it reads frames and dispatches them. Any
 // read error ends the loop and therefore the session.
+//
+// Frames that arrive before OnMessage registers a callback are buffered rather
+// than dropped — see Session.pending for why the window is unavoidable.
 func (s *Session) readLoop() {
 	defer s.Close()
 	for {
@@ -205,11 +235,17 @@ func (s *Session) readLoop() {
 		if err != nil {
 			return
 		}
+		fr := MessageToFrame(mt, data)
 		s.sendMu.Lock()
 		f := s.onMessage
-		s.sendMu.Unlock()
-		if f != nil {
-			f(MessageToFrame(mt, data))
+		if f == nil {
+			if len(s.pending) < maxPendingFrames {
+				s.pending = append(s.pending, fr)
+			}
+			s.sendMu.Unlock()
+			continue
 		}
+		s.sendMu.Unlock()
+		f(fr)
 	}
 }
