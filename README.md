@@ -33,7 +33,7 @@ Rather than relying on legacy single-network DHTs, Peerdrive interconnects nodes
 |----|------|
 | HTTP | Gin |
 | P2P | PeerJS signaling + WebRTC DataChannel (`back/peerjs/` go-peerjs; discovery: MQTT / self-hosted HTTP) |
-| BT (optional plugin) | `github.com/Hana-ame/go-peerdrive-bt` (back/p2p_bt, standalone library, **off by default**, opt-in via `PEERDRIVE_BT_ENABLE`) |
+| BT (optional plugin) | `github.com/Hana-ame/go-peerdrive-bt` (back/p2p_bt, standalone library, **off by default**, opt-in via `PEERDRIVE_BT_ENABLE`; when enabled the runtime is loaded on demand from `peerdrive_bt.dll`, otherwise it is not mapped into the process at all) |
 | IPFS (optional plugin) | Public gateway fallback for retrieval (**off by default**: `PEERDRIVE_IPFS_ENABLE`, `PEERDRIVE_IPFS_GATEWAY_ENABLE`) |
 | Optional modules | Iwara (`PEERDRIVE_IWARA_ENABLE`) and the WebDAV / SMB source evaluations — optional / experimental, outside the default netdisk path |
 | Admin surface | Local WS admin verb (frontend all goes through `front/src/ws.js`) |
@@ -246,7 +246,7 @@ peerdrive
 | `PEERDRIVE_STORAGE_ENABLE` | true | Storage enabled |
 | `PEERDRIVE_MAX_UPLOAD_BYTES` | 100MB | Single-file upload cap |
 | `PEERDRIVE_MAX_UPLOAD_ANON_BYTES` | 10MB | Anonymous upload cap |
-| `PEERDRIVE_BT_DHT_ENABLE` / `PEERDRIVE_BT_DHT_LISTEN` | false / :6881 | BT DHT listener (default off — DHT init blocks startup; standalone library go-peerdrive-bt, optional plugin — the DHT *retrieval* stage itself is gated by `PEERDRIVE_BT_ENABLE`) |
+| `PEERDRIVE_BT_DHT_ENABLE` / `PEERDRIVE_BT_DHT_LISTEN` | false / :6881 | BT DHT listener (default off — DHT init blocks startup; standalone library go-peerdrive-bt, optional plugin). Has effect only together with `PEERDRIVE_BT_ENABLE`: the flag starts the DHT inside the loaded runtime, it does not load the runtime by itself |
 | `PEERDRIVE_IPFS_GATEWAY_ENABLE` / `PEERDRIVE_IPFS_GATEWAYS` | true / three gateways | IPFS gateway fallback (optional plugin — the *retrieval* stage is gated by `PEERDRIVE_IPFS_ENABLE`) |
 | `PEERDRIVE_WEBRTC_STUN` / `PEERDRIVE_WEBRTC_TURN` | stun.l.google.com / - | ICE servers |
 | `PEERDRIVE_PEERJS_ENABLE` | true | PeerJS signaling (interconnect layer) |
@@ -275,7 +275,7 @@ peerdrive
 | `PEERDRIVE_MAX_CONCURRENT_STREAMS` | 8 | QoS maximum concurrent outgoing data streams per node |
 | `PEERDRIVE_MAX_UPLOAD_SPEED` | 0 | QoS upload speed limit in bytes/sec (token bucket throttler; 0 = unlimited) |
 | `PEERDRIVE_PORTFWD_ENABLE` | false | Opt-in port forwarding capability switch |
-| `PEERDRIVE_BT_ENABLE` | false | Opt-in BitTorrent protocol capability switch |
+| `PEERDRIVE_BT_ENABLE` | false | Opt-in BitTorrent master switch. When on, the BT runtime is loaded on demand from `peerdrive_bt.dll` (`make build-bt-dll`, shipped next to the exe or under the exe's `dist/`); when off, the torrent stack is never loaded |
 | `PEERDRIVE_IPFS_ENABLE` | false | Opt-in IPFS protocol capability switch |
 | `PEERDRIVE_EMBEDDING_ENABLE` | **false** | Opt-in standalone EmbeddingGemma embeddings. Default off: enabling it makes the node ship text to an operator-configured inference service (`llama-server --embedding`, or Ollama's OpenAI-compatible layer) and register `/embedding/v1/*`. peerdrive never loads a model or runs inference itself — `doc/modules/embedding/README.md`, `scripts/start-embeddinggemma.bat` |
 | `PEERDRIVE_EMBEDDING_URL` | http://127.0.0.1:8080/v1/embeddings | Full embeddings endpoint (not a base URL — the client POSTs to exactly this string) |

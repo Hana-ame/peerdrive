@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Hana-ame/go-peerdrive-bt"
+	"peerdrive/internal/btloader"
 	"peerdrive/internal/log"
 	"peerdrive/internal/model"
 	"peerdrive/internal/provider"
@@ -121,27 +121,37 @@ func (f *LocalFetcher) Fetch(_ context.Context, hash string) ([]byte, error) {
 
 // BTDHTFetcher uses the BitTorrent DHT HTTP bridge to discover peers and
 // fetch the file via HTTP.
+//
+// The bridge itself lives inside the BT runtime (peerdrive_bt.dll): it owns the
+// DHT socket and speaks the provider wire protocol. The host side only holds the
+// runtime handle and maps a hash to bytes.
 type BTDHTFetcher struct {
-	bridge *p2p_bt.BTBridge
-	dhtSvc *p2p_bt.BTDHTService
+	client *btloader.Client
 }
 
-// NewBTDHTFetcher creates a BitTorrent DHT-based fetcher.
-func NewBTDHTFetcher(dhtSvc *p2p_bt.BTDHTService, storageDir string) *BTDHTFetcher {
-	return &BTDHTFetcher{
-		bridge: p2p_bt.NewBTBridge(dhtSvc, storageDir),
-		dhtSvc: dhtSvc,
-	}
+// NewBTDHTFetcher creates a BitTorrent DHT-based fetcher. A nil client (BT
+// disabled, or the runtime could not be loaded) yields an unavailable fetcher.
+func NewBTDHTFetcher(client *btloader.Client) *BTDHTFetcher {
+	return &BTDHTFetcher{client: client}
 }
 
 func (f *BTDHTFetcher) Name() string { return "btdht" }
 
 func (f *BTDHTFetcher) IsAvailable() bool {
-	return f.dhtSvc != nil && f.dhtSvc.Server != nil
+	return f.client != nil && f.client.DHTStatus().Available
 }
 
 func (f *BTDHTFetcher) Fetch(ctx context.Context, hash string) ([]byte, error) {
-	return f.bridge.FetchFile(ctx, hash)
+	if f.client == nil {
+		return nil, fmt.Errorf("btdht: BT runtime unavailable")
+	}
+	// The call is synchronous across the ABI and cannot be cancelled from this
+	// side; the runtime bounds it internally (bridgeFetchTimeout). Surface a
+	// cancelled caller context before spending the round trip.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return f.client.FetchFile(hash)
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +303,7 @@ type UniversalDownloader struct {
 
 // NewUniversalDownloader creates a universal downloader that tries multiple protocols in priority order.
 func NewUniversalDownloader(
-	btSvc *p2p_bt.BTDHTService,
+	btClient *btloader.Client,
 	storageDir string,
 	order string,
 	timeout time.Duration,
@@ -304,12 +314,12 @@ func NewUniversalDownloader(
 		timeout:      timeout,
 		ipfsProvider: ipfsProvider,
 	}
-	d.fetchers = d.buildFetchers(order, btSvc)
+	d.fetchers = d.buildFetchers(order, btClient)
 	return d
 }
 
 // buildFetchers builds the ordered fetcher list from a comma-separated string.
-func (d *UniversalDownloader) buildFetchers(order string, btSvc *p2p_bt.BTDHTService) []ProtocolFetcher {
+func (d *UniversalDownloader) buildFetchers(order string, btClient *btloader.Client) []ProtocolFetcher {
 	names := strings.Split(order, ",")
 	for i := range names {
 		names[i] = strings.TrimSpace(names[i])
@@ -333,7 +343,7 @@ func (d *UniversalDownloader) buildFetchers(order string, btSvc *p2p_bt.BTDHTSer
 			return &IPFSGatewayFetcher{provider: d.ipfsProvider}
 		},
 		"btdht": func() ProtocolFetcher {
-			return NewBTDHTFetcher(btSvc, d.storageDir)
+			return NewBTDHTFetcher(btClient)
 		},
 		"http": func() ProtocolFetcher {
 			// M5 + SSRF guard: URL provider uses urlguard.NewSafeClient with timeout

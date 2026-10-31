@@ -5,12 +5,11 @@ GO ?= go
 TAGS = nosqlite
 SUBMODULES = signalframe peerjs signalserver p2p_bt
 
-.PHONY: run build build-server build-win build-win7 test test-race test-submodules vet clean
+.PHONY: run build build-server build-win build-win7 build-bt-dll build-win-bt test test-race test-submodules vet clean
 
 # 默认运行单二进制 serve 子命令（等价于旧 cmd/server）
 run:
 	$(GO) run -tags $(TAGS) ./cmd/peerdrive/ serve
-
 # 构建统一单二进制 peerdrive（涵盖 serve / signal / reg / all / hub / tun / mcp）
 build:
 	$(GO) build -tags $(TAGS) -buildvcs=false -ldflags="-s -w" -o peerdrive ./cmd/peerdrive/
@@ -25,6 +24,34 @@ build-server:
 # 默认 amd64；32 位老机器（含 Win7 x86）用 build-win7。
 build-win:
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -tags $(TAGS) -buildvcs=false -ldflags="-s -w" -o peerdrive-win.exe ./cmd/peerdrive-win/
+
+# ---- BT 运行时：按需加载的动态库 ----------------------------------------
+# torrent 栈不再静态链接进主二进制：它被编成 peerdrive_bt.dll，主程序仅在
+# PEERDRIVE_BT_ENABLE=1 时 LoadLibrary 它（见 internal/btloader 与
+# p2p_bt/cmd/btbridge）。默认 off 时进程里根本不存在 BT 运行时。
+#
+# 三个非显然的约束，改之前先读：
+#   1. CXX 必须指向 mingw 的 C++ 前端。anacrolix/go-libutp 是 C++ 代码，只设
+#      CC 会让 cgo 回落到宿主机 g++，报 "unrecognized command-line option
+#      '-mthreads'"（这个错和源码无关，别去改 CGO_CFLAGS）。
+#   2. CGO_LDFLAGS 必须带 -static。否则产物依赖 libwinpthread-1.dll /
+#      libgcc_s_seh-1.dll / libstdc++-6.dll，宿主 LoadLibrary 时报
+#      "The specified module could not be found"（看不出缺哪个）。
+#   3. 主程序用 CGO_ENABLED=0 构建也没关系：载入 DLL 不需要 cgo。
+BT_GOOS   ?= windows
+BT_GOARCH ?= amd64
+BT_CC     ?= x86_64-w64-mingw32-gcc
+BT_CXX    ?= x86_64-w64-mingw32-g++
+BT_DLL    ?= peerdrive_bt.dll
+
+build-bt-dll:
+	cd p2p_bt && CGO_ENABLED=1 GOOS=$(BT_GOOS) GOARCH=$(BT_GOARCH) CC=$(BT_CC) CXX=$(BT_CXX) CGO_LDFLAGS="-static -static-libgcc -static-libstdc++" $(GO) build -buildmode=c-shared -trimpath -buildvcs=false -ldflags="-s -w" -o ../$(BT_DLL) ./cmd/btbridge
+	@ls -l $(BT_DLL)
+
+# 发布用：exe + 同目录的 DLL（btloader 只找 exe 同级与 exe/dist，
+# 不搜 CWD —— 见 resolveDLLPath 里的 DLL 劫持说明）。
+build-win-bt: build-win build-bt-dll
+	@echo "built peerdrive-win.exe + $(BT_DLL); ship them side by side"
 
 # Windows 7 入口（托盘版）：用 XTLS/go-win7 补丁版 SDK 构建，产物兼容
 # Win7~11（386 为主 + amd64）。官方 Go 1.21.5+ 运行时在 Win7 启动即崩
@@ -58,5 +85,5 @@ vet:
 	done
 
 clean:
-	rm -f peerdrive peerdrive.exe server peerdrive-win.exe
+	rm -f peerdrive peerdrive.exe server peerdrive-win.exe $(BT_DLL)
 	rm -rf dist

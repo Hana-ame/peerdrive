@@ -122,9 +122,14 @@ func TestLocalFetcher_IsAvailable(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBTDHTFetcher_NotAvailable(t *testing.T) {
-	f := &BTDHTFetcher{dhtSvc: nil}
+	f := &BTDHTFetcher{client: nil}
 	if f.IsAvailable() {
-		t.Error("expected unavailable when btSvc is nil")
+		t.Error("expected unavailable when the BT runtime handle is nil")
+	}
+	// A nil handle must also fail the fetch, not panic on it: BT disabled is the
+	// default configuration, so this is the path most installs take.
+	if _, err := f.Fetch(context.Background(), "0000000000000000000000000000000000000000000000000000000000000000"); err == nil {
+		t.Error("expected error when fetching without a BT runtime")
 	}
 }
 

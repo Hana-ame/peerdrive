@@ -125,8 +125,44 @@ jobs:
           name: peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}
           path: back/out/peerdrive-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
 
+  # BT 运行时（peerdrive_bt.dll）：Windows 专有、按需加载，主 exe 里不含它。
+  # 单独一个 ubuntu 任务交叉编译，而不是在 windows-latest 上跑：后者没有现成的
+  # mingw C++ 工具链，装一次几分钟；ubuntu 的 gcc/g++-mingw-w64 装完即可用。
+  bt-dll:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: back/p2p_bt/go.sum
+
+      - name: Install mingw-w64 (C and C++)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+
+      - name: Build peerdrive_bt.dll
+        working-directory: back/p2p_bt
+        env:
+          CGO_ENABLED: 1
+          GOOS: windows
+          GOARCH: amd64
+          CC: x86_64-w64-mingw32-gcc
+          CXX: x86_64-w64-mingw32-g++
+          CGO_LDFLAGS: -static -static-libgcc -static-libstdc++
+        run: go build -buildmode=c-shared -trimpath -buildvcs=false -ldflags="-s -w" -o ../../dist/peerdrive_bt.dll ./cmd/btbridge
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peerdrive-bt-dll
+          path: dist/peerdrive_bt.dll
+
   release:
-    needs: [build]
+    needs: [build, bt-dll]
     # tag 推送才发 release；手动 dispatch 默认 dry_run（只验证门禁跑得通）。
     if: ${{ github.event_name == 'push' || !inputs.dry_run }}
     runs-on: ubuntu-latest
@@ -150,6 +186,9 @@ jobs:
           # v0.3.0 起只有一个二进制（信令与注册服务是其子命令），
           # 所以只剩 peerdrive-* 一类资产。
           find . -type f -name 'peerdrive-*' -exec cp -v {} dist/ \;
+          # BT 运行时单独一个文件（下划线命名，不参与 latest.json 的平台解析），
+          # 但必须随发布走：没有它 PEERDRIVE_BT_ENABLE=1 只会得到 503。
+          find . -type f -name 'peerdrive_bt.dll' -exec cp -v {} dist/ \;
           ls -l dist
 
       # 生成校验与清单资产（自动更新的数据源，见 back/internal/update）：
@@ -164,7 +203,7 @@ jobs:
       - name: 生成 checksums.txt + latest.json
         run: |
           set -eu
-          (cd dist && sha256sum peerdrive-* > checksums.txt)
+          (cd dist && sha256sum peerdrive-* peerdrive_bt.dll > checksums.txt)
           python3 - <<'PY'
           import hashlib, json, os
           ver = "${{ github.event.inputs.tag || github.ref_name }}"
