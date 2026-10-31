@@ -549,29 +549,67 @@ func TestFetchTrackerList_AllFail(t *testing.T) {
 	}
 }
 
+// TestFetchTrackerList_Timeout pins "the caller's context bounds the fetch".
+//
+// This used to be inferred from wall clock: with a 100ms deadline it required
+// elapsed >= 80ms. That is not an observable property of the code: on a loaded
+// CI runner the deadline fired at 62ms (the request error was still a genuine
+// "context deadline exceeded") so the test went red while the behaviour was
+// correct. Wall clock belongs to the runner, not to us; assert the contract:
+//   - the request really reached the server (a dial error would make every
+//     other assertion vacuously true)
+//   - fetchTrackerList returns while the handler is still blocked
+//   - it returned because the context expired, not via an early error path
+//   - and it cannot block forever (upper bound only: overshooting on a slow
+//     runner is harmless, ignoring the context is not)
 func TestFetchTrackerList_Timeout(t *testing.T) {
-	// Server that never responds.
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Block forever — context timeout will cancel the request.
-		<-r.Context().Done()
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-r.Context().Done():
+			// Normal path: the client gave up on the request.
+		case <-release:
+			// Teardown. Reached only when the fetch ignored the context, in
+			// which case the client still holds this request open and
+			// srv.Close() would otherwise block until the go test timeout.
+		}
 	}))
 	defer srv.Close()
+	defer close(release) // LIFO: runs before srv.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	// The bound is deliberately loose: what is under test is that the caller's
+	// context reaches the request at all, not that it fires at a particular
+	// instant. A tight deadline lets a stalled runner expire the context
+	// before the request is dispatched, which shows up as "no request" and
+	// would be a flake of its own.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	start := time.Now()
-	result := fetchTrackerList(ctx, []string{srv.URL})
-	elapsed := time.Since(start)
+	done := make(chan []string, 1)
+	go func() { done <- fetchTrackerList(ctx, []string{srv.URL}) }()
 
-	if len(result) > 0 {
-		t.Errorf("fetchTrackerList (timeout) returned trackers: %v", result)
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("request never reached the test server; cannot judge the timeout")
 	}
-	if elapsed < 80*time.Millisecond {
-		t.Errorf("fetchTrackerList returned too quickly (%v), timeout may not work", elapsed)
-	}
-	if elapsed > 500*time.Millisecond {
-		t.Errorf("fetchTrackerList took too long (%v), should respect context timeout", elapsed)
+
+	select {
+	case result := <-done:
+		if len(result) > 0 {
+			t.Errorf("fetchTrackerList (timeout) returned trackers: %v", result)
+		}
+		if err := ctx.Err(); err != context.DeadlineExceeded {
+			t.Errorf("ctx.Err() = %v after fetch, want context.DeadlineExceeded: "+
+				"fetchTrackerList must be bounded by the caller's context", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("fetchTrackerList ignored the context deadline (still blocked after 5s)")
 	}
 }
 
