@@ -35,6 +35,21 @@ func newWSVerbClient(t *testing.T, srvURL string) *wsVerbClient {
 	return &wsVerbClient{t: t, conn: conn}
 }
 
+// readMessage 在 deadline 内读一帧，超时返回错误。
+//
+// 发现背景：gorilla 的 ReadMessage 是阻塞调用，只在
+// `for time.Now().Before(deadline)` 的循环条件里检查超时是拦不住它的——
+// 服务端不回帧时循环体永不返回，测试会一直挂到 go test 的全局超时
+// （默认 10 分钟）而不是在预期时间内失败。2026-10-31 CI 上
+// TestFrameVerbs_UploadAndSync 因此卡满 600s，goroutine 栈停在 ReadMessage。
+// 必须把 deadline 下推到 socket，阻塞读才会按时返回错误。
+func readMessage(conn *websocket.Conn, deadline time.Time) (int, []byte, error) {
+	if err := conn.SetReadDeadline(deadline); err != nil {
+		return 0, nil, err
+	}
+	return conn.ReadMessage()
+}
+
 // call Sends request and waits for response with same reqId (ignoring intermediate binary chunks, returns last text frame).
 func (c *wsVerbClient) call(req map[string]any) map[string]any {
 	c.t.Helper()
@@ -44,7 +59,7 @@ func (c *wsVerbClient) call(req map[string]any) map[string]any {
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		_, data, err := c.conn.ReadMessage()
+		_, data, err := readMessage(c.conn, deadline)
 		if err != nil {
 			c.t.Fatalf("read: %v", err)
 		}
@@ -93,7 +108,7 @@ func (c *wsVerbClient) uploadStream(name string, content []byte) map[string]any 
 		// Wait for ack (chunk written) or uploaded (overall complete)
 		deadline := time.Now().Add(30 * time.Second)
 		for time.Now().Before(deadline) {
-			_, data, err := c.conn.ReadMessage()
+			_, data, err := readMessage(c.conn, deadline)
 			if err != nil {
 				c.t.Fatalf("upload read: %v", err)
 			}
@@ -241,7 +256,7 @@ func (c *wsVerbClient) download(hash string, want []byte) []byte {
 	var got []byte
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		mt, data, err := c.conn.ReadMessage()
+		mt, data, err := readMessage(c.conn, deadline)
 		if err != nil {
 			c.t.Fatalf("download read: %v", err)
 		}
@@ -319,7 +334,7 @@ func TestFrameVerbs_UploadSharded(t *testing.T) {
 		// Wait for ack or uploaded
 		deadline := time.Now().Add(20 * time.Second)
 		for time.Now().Before(deadline) {
-			_, data, err := c.conn.ReadMessage()
+			_, data, err := readMessage(c.conn, deadline)
 			if err != nil {
 				t.Fatalf("read: %v", err)
 			}
@@ -396,7 +411,7 @@ func TestFrameVerbs_UploadResumeOverWS(t *testing.T) {
 		}
 		deadline := time.Now().Add(20 * time.Second)
 		for time.Now().Before(deadline) {
-			_, data, err := c.conn.ReadMessage()
+			_, data, err := readMessage(c.conn, deadline)
 			if err != nil {
 				t.Fatalf("read: %v", err)
 			}
@@ -453,7 +468,7 @@ func TestFrameVerbs_UploadResumeOverWS(t *testing.T) {
 		}
 		deadline := time.Now().Add(20 * time.Second)
 		for time.Now().Before(deadline) {
-			_, data, err := c2.conn.ReadMessage()
+			_, data, err := readMessage(c2.conn, deadline)
 			if err != nil {
 				t.Fatalf("read: %v", err)
 			}
@@ -529,5 +544,41 @@ func TestFrameVerbs_Delete(t *testing.T) {
 	info := c.call(map[string]any{"type": "info", "hash": hash, "reqId": "d5"})
 	if info["type"] != "err" {
 		t.Fatalf("info on deleted file should return err: %v", info)
+	}
+}
+
+// TestWSFirstFrameSurvivesBindWindow 首帧落在 NewWSSession → BindLocal 的窗口内
+// 时，仍然必须被处理。
+//
+// 发现背景：wsconn.New 一返回就启动 readLoop，而调用方只能在这之后注册
+// OnMessage（PeerJSService.bindConnInternal 里注册）。浏览器连上即发首帧，
+// 正好落进这个窗口；原实现「回调未注册就读到 → 静默丢弃」，对端只能等到
+// 超时。2026-10-31 CI 上 TestFrameVerbs_UploadAndSync 因此卡在 ReadMessage
+// 上 8m33s（客户端的 deadline 只在循环条件里检查，拦不住阻塞读）。
+//
+// 这里用 sleep 把窗口拉长到必然命中，把它从「偶发」变成确定性回归。
+func TestWSFirstFrameSurvivesBindWindow(t *testing.T) {
+	storage := t.TempDir()
+	svc := newService(t, randID("it-wfb"), storage, false, nil)
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		sess := transport.NewWSSession("local", conn)
+		// 真实链路上这段耗时是 bindConnInternal 的建表与加锁；这里显式放大，
+		// 保证客户端的首帧一定在 OnMessage 注册之前到达。
+		time.Sleep(300 * time.Millisecond)
+		svc.BindLocal(sess)
+	}))
+	defer srv.Close()
+
+	c := newWSVerbClient(t, srv.URL)
+	// dial 返回后立即发首帧——不等服务端 bind。
+	list := c.call(map[string]any{"type": "list", "reqId": "w1"})
+	if list["type"] != "list-resp" {
+		t.Fatalf("first frame arriving inside the bind window was lost: %v", list)
 	}
 }

@@ -399,25 +399,106 @@ func TestReadErrorClosesSession(t *testing.T) {
 	}
 }
 
-func TestOnMessageUnsetDeliversNothing(t *testing.T) {
-	// 发现背景：readLoop 在回调未注册时静默丢弃，不能 panic——
-	// 拆分前的行为如此，管理面会话在回调注册前就可能收到帧。
+func TestOnMessageBuffersFramesUntilRegistered(t *testing.T) {
+	// 发现背景：New 立刻启动 readLoop，而调用方（peerjs bindConnInternal）
+	// 只能在 NewWSSession 返回之后注册 OnMessage。浏览器连上即发首帧时正好
+	// 落进这个窗口：原实现静默丢弃，对端只能等到超时——CI integration
+	// TestFrameVerbs_UploadAndSync 因此卡在 ReadMessage 上 8m33s。
+	// 这里钉住「窗口内的帧被缓冲、注册后按 FIFO 回放」。
 	fc := newFakeConn()
 	s := New("t", fc, Options{})
 	defer s.Close()
 
-	// no callback registered: the frame must be consumed and dropped
-	// silently, without panicking or blocking the loop.
-	fc.push(readResult{opcode: OpcodeText, data: []byte(`{"type":"req"}`)})
-	awaitReads(t, fc, 1)
+	fc.push(readResult{opcode: OpcodeText, data: []byte(`{"type":"req","reqId":"early-1"}`)})
+	fc.push(readResult{opcode: OpcodeText, data: []byte(`{"type":"data","reqId":"early-2"}`)})
+	awaitReads(t, fc, 2)
+	awaitPending(t, s, 2)
 
-	// the loop is still alive and will dispatch to a callback registered later
-	ch := make(chan Frame, 1)
-	s.OnMessage(func(f Frame) { ch <- f })
+	got := make(chan Frame, 4)
+	s.OnMessage(func(f Frame) { got <- f })
+
+	first := awaitFrame(t, got)
+	if !bytes.Contains(first.Data, []byte("early-1")) {
+		t.Fatalf("first replayed frame = %s, want early-1 (FIFO order)", first.Data)
+	}
+	second := awaitFrame(t, got)
+	if !bytes.Contains(second.Data, []byte("early-2")) {
+		t.Fatalf("second replayed frame = %s, want early-2 (FIFO order)", second.Data)
+	}
+
+	// 注册之后到达的帧照常实时分发，不再进缓冲。
 	fc.push(readResult{opcode: OpcodeText, data: []byte(`{"type":"meta"}`)})
-	f := awaitFrame(t, ch)
+	live := awaitFrame(t, got)
+	if !bytes.Contains(live.Data, []byte(`"meta"`)) {
+		t.Fatalf("live frame after registration = %s", live.Data)
+	}
+
+	s.sendMu.Lock()
+	leftover := len(s.pending)
+	s.sendMu.Unlock()
+	if leftover != 0 {
+		t.Fatalf("pending backlog not drained after replay: %d", leftover)
+	}
+}
+
+// TestOnMessageBacklogIsBounded 上限保护：回调迟迟不注册时，缓冲区不能无限
+// 增长（否则连上就不注册的客户端可以逼服务端吃内存）。超出部分丢弃，
+// 但不阻塞读循环。
+func TestOnMessageBacklogIsBounded(t *testing.T) {
+	fc := newFakeConn()
+	s := New("t", fc, Options{})
+	defer s.Close()
+
+	total := maxPendingFrames + 8
+	for i := 0; i < total; i++ {
+		fc.push(readResult{opcode: OpcodeText, data: []byte(`{"type":"req"}`)})
+	}
+	awaitReads(t, fc, total)
+	awaitPending(t, s, maxPendingFrames)
+
+	s.sendMu.Lock()
+	n := len(s.pending)
+	s.sendMu.Unlock()
+	if n != maxPendingFrames {
+		t.Fatalf("backlog = %d, want the cap %d", n, maxPendingFrames)
+	}
+
+	// 读循环在丢满之后仍然活着：注册回调后仍能收到新帧。
+	//
+	// 通道必须能装下整批回放：OnMessage 是同步回放（在调用方 goroutine 里），
+	// 容量不足会让回放自己堵住——这正是本用例第一版写成 cap=1 时踩到的死锁。
+	got := make(chan Frame, maxPendingFrames+8)
+	s.OnMessage(func(f Frame) { got <- f })
+	if n := len(got); n != maxPendingFrames {
+		t.Fatalf("replayed %d frames, want the whole backlog %d", n, maxPendingFrames)
+	}
+	// 先把回放批次排空，后面读到的才是注册之后的新帧。
+	for i := 0; i < maxPendingFrames; i++ {
+		<-got
+	}
+
+	fc.push(readResult{opcode: OpcodeText, data: []byte(`{"type":"meta"}`)})
+	f := awaitFrame(t, got)
 	if !bytes.Contains(f.Data, []byte(`"meta"`)) {
-		t.Fatalf("late-registered callback got %+v", f)
+		t.Fatalf("live frame after a saturated backlog = %s", f.Data)
+	}
+}
+
+// awaitPending 等到会话缓冲了 n 个「回调注册前」的帧。
+func awaitPending(t *testing.T, s *Session, want int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		s.sendMu.Lock()
+		n := len(s.pending)
+		s.sendMu.Unlock()
+		if n >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("buffered %d of %d pre-callback frames", n, want)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

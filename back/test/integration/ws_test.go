@@ -57,7 +57,7 @@ func TestLocalWSSessionFetch(t *testing.T) {
 	var got []byte
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
-		mt, data, err := conn.ReadMessage()
+		mt, data, err := readMessage(conn, deadline)
 		if err != nil {
 			t.Fatalf("read: %v", err)
 		}
@@ -134,7 +134,7 @@ func TestLocalWSSession_FetchFromPeerReuse(t *testing.T) {
 	deadline := time.Now().Add(30 * time.Second)
 	sent := 0
 	for time.Now().Before(deadline) {
-		mt, data, err := conn.ReadMessage()
+		mt, data, err := readMessage(conn, deadline)
 		if err != nil {
 			t.Fatalf("read: %v", err)
 		}
