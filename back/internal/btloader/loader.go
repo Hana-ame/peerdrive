@@ -411,9 +411,9 @@ func (c *Client) pumpCompletions() {
 		case <-ticker.C:
 			var events []Completion
 			if err := c.decode("drain_completions", nil, &events); err != nil {
-				// The runtime is gone (DLL unloaded / process shutting down):
+				// The runtime is gone (closed / unloaded / process shutting down):
 				// stop polling instead of logging once per tick forever.
-				if len(events) == 0 && isUnavailable(err) {
+				if isUnavailable(err) {
 					return
 				}
 				log.LogWarn("btloader: drain_completions: %v", err)

@@ -45,7 +45,7 @@ type dllTransport struct {
 	procVer   *syscall.LazyProc
 
 	handle int32
-	mu     sync.Mutex
+	mu     sync.RWMutex
 	path   string
 }
 
@@ -144,13 +144,15 @@ func (t *dllTransport) Call(op string, args any) (json.RawMessage, error) {
 		}
 	}
 
-	// The runtime serialises on its side where it matters (client mutexes); this
-	// lock only protects the handle, so a concurrent Close cannot free it
-	// mid-call.
-	t.mu.Lock()
+	// RWMutex, not Mutex: the runtime is thread-safe on its side (client mutexes),
+	// and one slow op must not stall the others — a bridge_fetch can block for up
+	// to 90s, and holding an exclusive lock would freeze /bt/downloads behind it.
+	// The lock only guarantees the handle is not cleared by a concurrent Close
+	// while a call is in flight.
+	t.mu.RLock()
 	h := t.handle
 	if h == 0 {
-		t.mu.Unlock()
+		t.mu.RUnlock()
 		return nil, ErrUnavailable
 	}
 	r, _, callErr := t.procCall.Call(
@@ -158,7 +160,7 @@ func (t *dllTransport) Call(op string, args any) (json.RawMessage, error) {
 		uintptr(unsafe.Pointer(opPtr)),
 		uintptr(unsafe.Pointer(argsPtr)),
 	)
-	t.mu.Unlock()
+	t.mu.RUnlock()
 
 	if r == 0 {
 		return nil, fmt.Errorf("%s: runtime call failed: %s", op, t.lastError(callErr))
