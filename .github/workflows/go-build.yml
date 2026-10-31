@@ -167,6 +167,11 @@ jobs:
       # 父模块的集成测试带 //go:build integration，日常 job 不覆盖；
       # 它是唯一会编译 back/go.mod 里 require/replace 与 ./signalserver
       # 是否匹配的地方（2026-10-04 那条坏 replace 就藏在这里）。
+      #
+      # -timeout 240s：这套用例跑真实 WS/信令链路，挂死时靠 Go 默认 10 分钟
+      # 兜底，等于每次红都白烧十分钟 runner（2026-10-31 实测
+      # TestFrameVerbs_UploadAndSync 卡满 600s）。正常路径全套约 1~2 分钟，
+      # 4 分钟仍留足慢 runner 的余量，且挂死照样打印完整 goroutine 栈。
       - name: Vet integration tests
         working-directory: back
         env:
@@ -177,7 +182,7 @@ jobs:
         working-directory: back
         env:
           CGO_ENABLED: 0
-        run: go test -tags 'integration nosqlite' -count=1 ./test/integration/
+        run: go test -tags 'integration nosqlite' -count=1 -timeout 240s ./test/integration/
 
       - name: Test p2p_bt
         working-directory: back/p2p_bt
