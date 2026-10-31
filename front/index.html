@@ -16,6 +16,16 @@
     />
     <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <!--
+      PWA manifest：恢复引用，但不带 crossorigin 属性。
+      背景：2026-10-28 那次为了排查 manifest 请求失败，直接把整个 <link> 删了，
+      文件 front/public/manifest.json 却还留着（继续被打进 dist），结果是 PWA
+      安装能力静默消失。失败的真实原因是 crossorigin="use-credentials"：它让浏览器
+      用「CORS + 带凭据」的模式去取 manifest，而静态托管通常不回
+      Access-Control-Allow-Credentials，取不到就报错。HTML 规范里 manifest 的
+      fetch 本来就是 credentials mode = omit，去掉该属性即回到默认语义。
+    -->
+    <link rel="manifest" href="./manifest.json" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
