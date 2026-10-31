@@ -107,6 +107,62 @@ jobs:
           name: peerdrive-win7-patched
           path: back/dist/peerdrive-win7-*.exe
 
+  # BT 运行时以 c-shared 形式单独构建（back/p2p_bt/cmd/btbridge → peerdrive_bt.dll）。
+  # 主矩阵与 submodules 都用 CGO_ENABLED=0，覆盖不到这条路径：导出符号被改名、
+  # cgo 导出被删、产物重新变成动态链接 mingw 运行时，只有真编一次才会红。
+  bt-dll:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: back/p2p_bt/go.sum
+
+      # go-libutp 是 C++：缺 g++ 前端时 cgo 会回落到宿主 g++，报
+      # "unrecognized command-line option '-mthreads'"（与本仓库代码无关）。
+      - name: Install mingw-w64 (C and C++)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+
+      - name: Build peerdrive_bt.dll
+        working-directory: back/p2p_bt
+        env:
+          CGO_ENABLED: 1
+          GOOS: windows
+          GOARCH: amd64
+          CC: x86_64-w64-mingw32-gcc
+          CXX: x86_64-w64-mingw32-g++
+          CGO_LDFLAGS: -static -static-libgcc -static-libstdc++
+        run: go build -buildmode=c-shared -trimpath -buildvcs=false -ldflags="-s -w" -o ../../dist/peerdrive_bt.dll ./cmd/btbridge
+
+      - name: Verify exports and static runtime
+        run: |
+          set -e
+          for sym in pd_bt_open pd_bt_call pd_bt_close pd_bt_free pd_bt_last_error pd_bt_version; do
+            if ! x86_64-w64-mingw32-objdump -p dist/peerdrive_bt.dll | grep -q "$sym"; then
+              echo "::error::peerdrive_bt.dll is missing export $sym"
+              exit 1
+            fi
+          done
+          # 动态依赖只能是系统 DLL。一旦 CGO_LDFLAGS 掉了 -static，产物会需要
+          # libwinpthread-1.dll / libgcc_s_seh-1.dll / libstdc++-6.dll，宿主
+          # LoadLibrary 只会报 "The specified module could not be found"。
+          if x86_64-w64-mingw32-objdump -p dist/peerdrive_bt.dll | grep -E "libwinpthread|libgcc_s|libstdc[+][+]"; then
+            echo "::error::peerdrive_bt.dll depends on mingw runtime DLLs; add -static to CGO_LDFLAGS"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peerdrive-bt-dll
+          path: dist/peerdrive_bt.dll
+
   # 独立 go.mod 的子模块（doc/testing 的盲区清单里有它们）：
   # signalserver（信令，含 wss 与 CORS 用例）与 p2p_bt（BT/DHT）。
   # 主 CI 只跑 back 主模块，这两个**改坏了 Peerdrive CI 照样绿**；

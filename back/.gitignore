@@ -1,3 +1,9 @@
 main
 /p2p-test
 .gocache/
+
+# BT 运行时（make build-bt-dll 的产物）：22MB 的按需加载 DLL，不进仓库。
+# 发布件与 exe 同目录（internal/btloader 只找 exe 同级与 exe/dist）。
+peerdrive_bt.dll
+*.dll
+peerdrive_bt.h

@@ -54,6 +54,16 @@ func NewBTClient(dataDir string) *BTClient {
 	return newBTClient(dataDir, "")
 }
 
+// NewBTClientWithListenAddr creates a BT client bound to listenAddr
+// (":0" = random port, "" = library default).
+//
+// Exported for btservice: when the runtime runs inside the DLL, the host must be
+// able to pin the peer port (firewall rules, multiple instances) instead of
+// inheriting the library default.
+func NewBTClientWithListenAddr(dataDir, listenAddr string) *BTClient {
+	return newBTClient(dataDir, listenAddr)
+}
+
 // newBTClient creates a BT client instance with an optional listen address (":0" = random port).
 func newBTClient(dataDir string, listenAddr string) *BTClient {
 	if dataDir == "" {

@@ -327,7 +327,13 @@ func (s *PeerJSService) computeLocalCaps() []string {
 		if s.cfg.PortFwdEnable || s.cfg.ForwardRules != "" {
 			caps = append(caps, CapForward)
 		}
-		if s.cfg.BTEnable || s.cfg.BTDHTEnabled {
+		// CapBT is advertised only when the BT runtime will actually run.
+		//
+		// 发现背景：这里原本是 BTEnable || BTDHTEnabled。BTEnable 过去只管这条宣告、
+		// 不控制客户端创建，所以两者都能「宣告成功」；现在 BTEnable 是唯一的加载
+		// 开关（router 里 gate 住 btloader.Open），单开 BTDHT_ENABLE 不再拉起任何
+		// 东西 —— 继续按 OR 宣告就是对外撒谎。
+		if s.cfg.BTEnable {
 			caps = append(caps, CapBT)
 		}
 		if s.cfg.IPFSEnable {

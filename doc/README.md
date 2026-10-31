@@ -186,7 +186,7 @@ cd front && npm run build
 | `PEERDRIVE_MQTT_ENABLE` | `false` | Enable MQTT content shard room discovery |
 | `PEERDRIVE_MQTT_BROKER` | `tcp://broker.emqx.io:1883` | Public MQTT broker address |
 | `PEERDRIVE_MQTT_COLLECTIONS` | Empty | Comma-separated collection hash shards to watch on MQTT |
-| `PEERDRIVE_BT_ENABLE` | `false` | Opt-in master switch for BitTorrent integration |
+| `PEERDRIVE_BT_ENABLE` | `false` | Opt-in master switch for BitTorrent. When on, the runtime is loaded on demand from `peerdrive_bt.dll` (`make build-bt-dll`, next to the exe); when off, the torrent stack is never loaded |
 | `PEERDRIVE_BT_DHT_ENABLE` | `false` | Enable BitTorrent mainline DHT |
 | `PEERDRIVE_IPFS_ENABLE` | `false` | Opt-in master switch for IPFS bridge |
 | `PEERDRIVE_IPFS_GATEWAY_ENABLE` | `true` | Enable public IPFS HTTP gateways fallback |

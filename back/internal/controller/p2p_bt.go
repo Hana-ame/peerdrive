@@ -1,8 +1,12 @@
 // Package controller provides HTTP handlers for BitTorrent download and seeding endpoints.
+//
+// 发现背景：这些 handler 之前直接调用 p2p_bt.BTClient（torrent 栈静态链接进主程序）。
+// 「按需加载」之后，BT 运行时活在 peerdrive_bt.dll 里，主程序只持有
+// internal/btloader.Client —— 它把每次调用编组成一个 JSON op 过 ABI。签名与语义
+// 保持不变，改动集中在初始化与 BTSeedCollection（后者不再需要自己造 metainfo）。
 package controller
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,20 +14,20 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Hana-ame/go-peerdrive-bt"
+	"peerdrive/internal/btloader"
 	"peerdrive/internal/log"
 	"peerdrive/internal/pathutil"
 	"peerdrive/pkg/hashutil"
 
-	"github.com/anacrolix/torrent/bencode"
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/gin-gonic/gin"
 )
 
-var btClient *p2p_bt.BTClient
+var btClient *btloader.Client
 
-// InitBTClient injects BTClient instance for BitTorrent download handlers.
-func InitBTClient(c *p2p_bt.BTClient) {
+// InitBTClient injects the BT runtime handle for BitTorrent download handlers.
+// nil means BT is not enabled for this process (PEERDRIVE_BT_ENABLE unset) and
+// every /bt/* endpoint answers 503.
+func InitBTClient(c *btloader.Client) {
 	log.LogDebug("ctrl-p2p: InitBTClient")
 	btClient = c
 }
@@ -64,13 +68,13 @@ func BTTorrentUpload(c *gin.Context) {
 		return
 	}
 
-	log.LogInfo("ctrl-p2p: BTTorrentUpload started %q (infohash=%s)", meta.Name, meta.InfoHashHex)
+	log.LogInfo("ctrl-p2p: BTTorrentUpload started %q (infohash=%s)", meta.Name, meta.InfoHash)
 	c.JSON(http.StatusOK, gin.H{
-		"infohash": meta.InfoHashHex,
+		"infohash": meta.InfoHash,
 		"name":     meta.Name,
 		"files":    len(meta.Files),
 		"total":    meta.TotalSize,
-		"pieces":   len(meta.Pieces),
+		"pieces":   meta.PieceCount,
 		"status":   "downloading",
 	})
 }
@@ -99,9 +103,9 @@ func BTMagnetResolve(c *gin.Context) {
 		return
 	}
 
-	log.LogInfo("ctrl-p2p: BTMagnetResolve started %q (infohash=%s)", meta.Name, meta.InfoHashHex)
+	log.LogInfo("ctrl-p2p: BTMagnetResolve started %q (infohash=%s)", meta.Name, meta.InfoHash)
 	c.JSON(http.StatusOK, gin.H{
-		"infohash":     meta.InfoHashHex,
+		"infohash":     meta.InfoHash,
 		"display_name": meta.Name,
 		"trackers":     meta.AnnounceList,
 		"status":       "downloading",
@@ -340,7 +344,9 @@ func BTSeedCollection(c *gin.Context) {
 	}
 	coll.NormalizeEntries()
 
-	// Create a temp directory and write collection files for BuildFromFilePath.
+	// Stage the collection under a temp root so the torrent builder has a real
+	// directory tree to walk. The BT runtime does the hashing, the piece layout
+	// and the copy into its data dir (see btservice "create_and_seed").
 	tmpDir, err := os.MkdirTemp("", "peerdrive-seed-")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create temp dir"})
@@ -401,66 +407,25 @@ func BTSeedCollection(c *gin.Context) {
 		}
 	}
 
-	// Build torrent metainfo from file structure
-	info := &metainfo.Info{
+	// Build + copy + seed in one call: the runtime walks rootDir, hashes pieces,
+	// copies the tree into its data dir (so it can verify and serve immediately)
+	// and registers the torrent. PieceLength stays 256 KiB to keep infohashes
+	// stable against seeds created by earlier versions.
+	meta, err := btClient.CreateAndSeed(btloader.CreateAndSeedOptions{
+		Path:        rootDir,
+		Name:        name,
 		PieceLength: 256 * 1024,
-	}
-	if err := info.BuildFromFilePath(rootDir); err != nil {
-		writeInternalError(c, err)
-		return
-	}
-
-	mi := metainfo.MetaInfo{
-		InfoBytes: bencode.MustMarshal(info),
-	}
-	var buf bytes.Buffer
-	if err := mi.Write(&buf); err != nil {
-		writeInternalError(c, err)
-		return
-	}
-	torrentBytes := buf.Bytes()
-	ih := mi.HashInfoBytes().HexString()
-
-	// Write files to BT data directory so the library can immediately verify and complete
-	dataRoot := filepath.Join(btClient.GetDownloadDir(), name)
-	if err := os.MkdirAll(dataRoot, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create bt data dir"})
-		return
-	}
-	for _, entry := range coll.Entries {
-		h := entry.GetPrimaryHash()
-		srcPath := filepath.Join(storageDir, h[:2], h)
-		dstPath := filepath.Join(dataRoot, entry.Path)
-		if !pathutil.Within(dataRoot, dstPath) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid entry path"})
-			return
-		}
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
-			writeInternalError(c, err)
-			return
-		}
-		src, _ := os.ReadFile(srcPath)
-		// #nosec G703 -- 同上：entry.Path 创建时已校验（相对 + 无 ".."），
-		// Join(dataRoot, path) 不逃逸；srcPath 由存储内 hash 构成。
-		if err := os.WriteFile(dstPath, src, 0644); err != nil {
-			writeInternalError(c, err)
-			return
-		}
-	}
-
-	// Add seed (library will verify existing files and mark as complete)
-	btClient.SetAutoSeed(ih)
-	meta, err := btClient.AddTorrentBytes(torrentBytes)
+	})
 	if err != nil {
-		btClient.SetAutoSeed(ih) // May duplicate but harmless; cleanup is not handled separately at the handler level
+		log.LogError("ctrl-p2p: BTSeedCollection create_and_seed failed: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
 	log.LogInfo("ctrl-p2p: BTSeedCollection created torrent %s (%s) from collection %s, auto-seeding",
-		ih, meta.Name, req.CollectionHash)
+		meta.InfoHash, meta.Name, req.CollectionHash)
 	c.JSON(http.StatusOK, gin.H{
-		"infohash": ih,
+		"infohash": meta.InfoHash,
 		"name":     meta.Name,
 		"files":    len(meta.Files),
 		"total":    meta.TotalSize,

@@ -3,21 +3,40 @@ package controller
 
 import (
 	"encoding/base64"
-	"encoding/hex"
-	"fmt"
 	"net/http"
 
-	"github.com/Hana-ame/go-peerdrive-bt"
 	"github.com/gin-gonic/gin"
+	"peerdrive/internal/btloader"
 	"peerdrive/internal/log"
 )
 
-var btSvc *p2p_bt.BTDHTService
+// btDHTSt is the DHT availability snapshot taken at init. The DHT itself now
+// lives inside the BT runtime (peerdrive_bt.dll), so the host only keeps this
+// plus the shared btClient handle.
+var btDHTSt btloader.DHTStatus
 
-// InitBTController injects BTDHTService instance for BitTorrent DHT handlers.
-func InitBTController(svc *p2p_bt.BTDHTService) {
+// InitBTController injects the BT runtime for DHT handlers.
+//
+// 发现背景：DHT 之前由 router 在启动路径上创建（PEERDRIVE_BT_DHT_ENABLE 默认 false，
+// 但 p2p_bt.NewBTDHT 会 bootstrap 公共路由并 sleep 1s）。现在 DHT 只在 BT 运行时被
+// 按需加载、且 DHTEnabled 时才存在；这里把「有没有 DHT」在装配期定死，免得每个
+// 请求都往 DLL 里问一次。
+func InitBTController(svc *btloader.Client) {
 	log.LogDebug("ctrl-p2p: InitBTController")
-	btSvc = svc
+	btClient = svc // shared handle: BT client and DHT are one runtime now
+	btDHTSt = btloader.DHTStatus{}
+	if svc == nil {
+		return
+	}
+	btDHTSt = svc.DHTStatus()
+	if !btDHTSt.Available && btDHTSt.Error != "" {
+		log.LogWarn("ctrl-p2p: BT DHT unavailable: %s", btDHTSt.Error)
+	}
+}
+
+// dhtReady reports whether DHT-backed endpoints can serve.
+func dhtReady() bool {
+	return btClient != nil && btDHTSt.Available
 }
 
 // --- BitTorrent DHT handlers ---
@@ -25,23 +44,27 @@ func InitBTController(svc *p2p_bt.BTDHTService) {
 // BTDHTStatus handles GET /bt/status, returns BitTorrent DHT node status.
 func BTDHTStatus(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTDHTStatus")
-	if btSvc == nil || btSvc.Server == nil {
+	if !dhtReady() {
 		log.LogInfo("ctrl-p2p: BTDHTStatus disabled")
-		c.JSON(http.StatusOK, gin.H{"enabled": false})
+		resp := gin.H{"enabled": false}
+		if btDHTSt.Error != "" {
+			resp["reason"] = btDHTSt.Error
+		}
+		c.JSON(http.StatusOK, resp)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"enabled":     true,
-		"listen_addr": btSvc.Server.Addr().String(),
-		"num_nodes":   btSvc.NumNodes(),
-		"node_id":     fmt.Sprintf("%x", btSvc.NodeID),
+		"listen_addr": btDHTSt.ListenAddr,
+		"num_nodes":   btDHTSt.NumNodes,
+		"node_id":     btDHTSt.NodeID,
 	})
 }
 
 // BTAnnounce handles POST /bt/announce, announces the specified hash on BitTorrent DHT.
 func BTAnnounce(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTAnnounce")
-	if btSvc == nil || btSvc.Server == nil {
+	if !dhtReady() {
 		log.LogError("ctrl-p2p: BTAnnounce BT DHT not enabled")
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
 		return
@@ -54,7 +77,7 @@ func BTAnnounce(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
-	if err := btSvc.Announce(req.Hash); err != nil {
+	if err := btClient.DHTAnnounce(req.Hash); err != nil {
 		log.LogError("ctrl-p2p: BTAnnounce %s failed: %v", req.Hash, err)
 		writeInternalError(c, err)
 		return
@@ -66,7 +89,7 @@ func BTAnnounce(c *gin.Context) {
 // BTFindProviders handles POST /bt/find, finds peers holding the specified hash on BitTorrent DHT.
 func BTFindProviders(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BTFindProviders")
-	if btSvc == nil || btSvc.Server == nil {
+	if !dhtReady() {
 		log.LogError("ctrl-p2p: BTFindProviders BT DHT not enabled")
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
 		return
@@ -79,7 +102,7 @@ func BTFindProviders(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
-	peers, err := btSvc.FindProviders(req.Hash)
+	peers, err := btClient.DHTFindProviders(req.Hash)
 	if err != nil {
 		log.LogError("ctrl-p2p: BTFindProviders %s failed: %v", req.Hash, err)
 		writeInternalError(c, err)
@@ -98,7 +121,7 @@ func BTFindProviders(c *gin.Context) {
 // BEP44Put handles POST /bt/bep44/put, stores immutable data on BT DHT via BEP 44.
 func BEP44Put(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BEP44Put")
-	if btSvc == nil || btSvc.Server == nil {
+	if !dhtReady() {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
 		return
 	}
@@ -130,17 +153,18 @@ func BEP44Put(c *gin.Context) {
 		return
 	}
 
-	// Immutable put.
-	target, err := btSvc.PutImmutable(rawData)
+	// Immutable put. The runtime hands back the 40-char hex target directly: the
+	// [20]byte never has to cross the boundary.
+	target, err := btClient.BEP44Put(rawData)
 	if err != nil {
 		log.LogError("ctrl-p2p: BEP44Put failed: %v", err)
 		writeInternalError(c, err)
 		return
 	}
 
-	log.LogInfo("ctrl-p2p: BEP44Put immutable target=%x size=%d", target, len(rawData))
+	log.LogInfo("ctrl-p2p: BEP44Put immutable target=%s size=%d", target, len(rawData))
 	c.JSON(http.StatusOK, gin.H{
-		"target":  hex.EncodeToString(target[:]),
+		"target":  target,
 		"size":    len(rawData),
 		"mutable": false,
 	})
@@ -149,7 +173,7 @@ func BEP44Put(c *gin.Context) {
 // BEP44Get handles POST /bt/bep44/get, reads immutable data from BT DHT via BEP 44.
 func BEP44Get(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BEP44Get")
-	if btSvc == nil || btSvc.Server == nil {
+	if !dhtReady() {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
 		return
 	}
@@ -163,23 +187,14 @@ func BEP44Get(c *gin.Context) {
 		return
 	}
 
-	raw, err := hex.DecodeString(req.Target)
-	if err != nil || len(raw) != 20 {
-		log.LogWarn("ctrl-p2p: BEP44Get bad hex: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid hex encoding"})
-		return
-	}
-	var target [20]byte
-	copy(target[:], raw)
-
-	data, err := btSvc.GetImmutable(target)
+	data, err := btClient.BEP44Get(req.Target)
 	if err != nil {
 		log.LogError("ctrl-p2p: BEP44Get failed: %v", err)
 		c.JSON(http.StatusNotFound, gin.H{"error": sanitizeErr(err, "request failed")})
 		return
 	}
 
-	log.LogInfo("ctrl-p2p: BEP44Get target=%x size=%d", target, len(data))
+	log.LogInfo("ctrl-p2p: BEP44Get target=%s size=%d", req.Target, len(data))
 	c.JSON(http.StatusOK, gin.H{
 		"data": base64.StdEncoding.EncodeToString(data),
 		"size": len(data),
@@ -191,26 +206,21 @@ func BEP44Get(c *gin.Context) {
 // BEP51Sample handles GET /bt/bep51/sample, collects infohash samples from DHT via BEP 51.
 func BEP51Sample(c *gin.Context) {
 	log.LogDebug("ctrl-p2p: BEP51Sample")
-	if btSvc == nil || btSvc.Server == nil {
+	if !dhtReady() {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "BT DHT not enabled"})
 		return
 	}
 
-	samples, err := btSvc.DiscoverInfohashes(200)
+	hexSamples, err := btClient.BEP51Sample(200)
 	if err != nil {
 		log.LogError("ctrl-p2p: BEP51Sample failed: %v", err)
 		writeInternalError(c, err)
 		return
 	}
 
-	hexSamples := make([]string, len(samples))
-	for i, s := range samples {
-		hexSamples[i] = hex.EncodeToString(s[:])
-	}
-
-	log.LogInfo("ctrl-p2p: BEP51Sample collected %d infohashes", len(samples))
+	log.LogInfo("ctrl-p2p: BEP51Sample collected %d infohashes", len(hexSamples))
 	c.JSON(http.StatusOK, gin.H{
 		"samples": hexSamples,
-		"count":   len(samples),
+		"count":   len(hexSamples),
 	})
 }

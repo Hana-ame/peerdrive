@@ -31,7 +31,7 @@ Peerdrive 不再依赖传统的单网络 DHT，而是通过 **PeerJS 信令 + We
 |----|------|
 | HTTP | Gin |
 | P2P | PeerJS 信令 + WebRTC DataChannel（`back/peerjs/` go-peerjs；发现：MQTT / 自托管 HTTP） |
-| BT | `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt，独立库，通过 `PEERDRIVE_BT_ENABLE` 可选启用） |
+| BT | `github.com/Hana-ame/go-peerdrive-bt`（back/p2p_bt，独立库，通过 `PEERDRIVE_BT_ENABLE` 可选启用；启用时运行时从 `peerdrive_bt.dll` 按需加载，默认完全不载入） |
 | 管理面 | 本地 WS admin verb（前端全部走 `front/src/ws.js`） |
 | 消费端 | `packages/peerdrive-client`（零依赖纯浏览器消费端，走 `share`/`req` 帧；`packages/peerdrive-media` 是面向 img/video 的 URL 代理） |
 | 存储 | SQLite + 内容寻址文件系统（磁盘原始 SHA 文件，带数据库支撑的文件名映射） |
@@ -267,7 +267,7 @@ peerdrive
 | `PEERDRIVE_MAX_CONCURRENT_STREAMS` | 8 | QoS 每个节点最大并发传出数据流数 |
 | `PEERDRIVE_MAX_UPLOAD_SPEED` | 0 | QoS 上传限速，单位字节/秒（令牌桶限流器；0 = 不限速） |
 | `PEERDRIVE_PORTFWD_ENABLE` | false | 端口转发功能可选开关 |
-| `PEERDRIVE_BT_ENABLE` | false | BitTorrent 协议能力可选开关 |
+| `PEERDRIVE_BT_ENABLE` | false | BitTorrent 协议能力总开关。开启后才按需加载 `peerdrive_bt.dll`（`make build-bt-dll` 产出，需与 exe 同目录或放到 exe 同级 `dist/`）；关闭时 torrent 栈不进进程 |
 | `PEERDRIVE_IPFS_ENABLE` | false | IPFS 协议能力可选开关 |
 | `PEERDRIVE_ANON_POLICY` | open | 匿名对端策略（`open`、`share_only`、`deny`） |
 | `PEERDRIVE_PEER_BLOCKLIST` | - | 逗号分隔的黑名单节点 ID 列表 |
