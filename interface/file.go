@@ -1,7 +1,14 @@
 // Package iface holds the cross-module contracts of peerdrive.
 package iface
 
-import "time"
+import (
+	"context"
+	"errors"
+	"time"
+)
+
+// ErrNotFound is returned by Store.Stat when no entry exists for the hash.
+var ErrNotFound = errors.New("iface: hash not found")
 
 // FileMetadata describes one file resolved from a content hash.
 //
@@ -26,4 +33,29 @@ type FileMetadata struct {
 	Btime time.Time
 	// Atime is unreliable: relatime updates it rarely, noatime never.
 	Atime time.Time
+}
+
+// Store is the hash-to-file model: a content hash is the identity, paths are
+// where that content currently lives.
+type Store interface {
+	// Stat returns the metadata for one content hash. The argument is a hash,
+	// not a path; a missing entry returns ErrNotFound.
+	Stat(ctx context.Context, hash string) (FileMetadata, error)
+
+	// Scan walks root and reports every file it finds without recording
+	// anything. Returning a non-nil error from fn stops the walk.
+	Scan(ctx context.Context, root string, fn func(FileMetadata) error) error
+
+	// Index walks root and records what it finds. Repeating it on an unchanged
+	// tree creates no new entries.
+	Index(ctx context.Context, root string) (IndexResult, error)
+}
+
+// IndexResult counts what one Index call did.
+type IndexResult struct {
+	Added   int
+	Updated int
+	Removed int
+	Skipped int
+	Failed  int
 }

@@ -8,7 +8,16 @@
 
 TODO：
 
+```go
+func Stat(sha string) (FileMetadata, error)      // 按 hash 取元数据
+func Index(root string) ([]FileMetadata, error)  // 扫描并登记，幂等
+func Scan(root string) ([]FileMetadata, error)   // 只扫描，不登记
 
+```
+
+包括sqlite3的持久化实现，缓存，等。
+
+以及测试CICD，gh actions，都做好。
 
 ### FileMetadata
 
@@ -16,7 +25,7 @@ TODO：
 | ---------- | --------- | --------------------------------------------------------------------------------------------- |
 | `SHA256`   | string    | 内容哈希，内容身份                                                                                     |
 | `Filename` | string    | 文件名（不含路径）                                                                                     |
-| `FullPath` | string    | 内容当前所在路径，不是句柄                                                                                 |
+| `FullPath` | string    | 内容当前所在路径，不是句柄，绝对路径                                                                            |
 | `MimeType` | string    | MIME 类型                                                                                       |
 | `Size`     | int64     | 内容字节数                                                                                         |
 | `Ctime`    | time.Time | inode 元数据变化时更新：写内容、`chmod`、`chown`、改 mtime、增删硬链接。用户态**不可改**；改内容再把 mtime 写回原值会顶起它，四个时间戳里只有它露破绽 |
@@ -27,3 +36,4 @@ TODO：
 #### win / linux 兼容
 
 - [ ] FileMetadata
+
