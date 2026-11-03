@@ -50,7 +50,19 @@ func List(root string) ([]FileMetadata, error)   // 只访问sqlite3中持久化
 #### win / linux 兼容
 
 - [x] FileMetadata
-  - Linux：`statx` 取 Btime（`syscall.Stat_t` 里没有），失败退回 `Stat_t` 的 Ctim/Mtim/Atim。
-  - Windows：`GetFileInformationByHandleEx(FILE_BASIC_INFO)` 取 ChangeTime 当 Ctime、CreationTime 当 Btime；失败退回 `Win32FileAttributeData`，此时 Ctime 留零。
-  - 其余平台：只有 Mtime。
-  - 注意 `FILE_BASIC_INFO` 是 40 字节（四个 FILETIME + `FileAttributes`）：少给 4 字节会得到 `ERROR_BAD_LENGTH`，而不是截断的数据。
+- [x] Windows：`syscall.NewLazyDLL("kernel32.dll")` 直调，不用 cgo、不引 `x/sys/windows`。三档降级：
+
+  | 档 | API | 最低系统 | 拿到几个时间 |
+  | -- | --- | -------- | ------------ |
+  | 1 | `GetFileInformationByHandleEx(FileBasicInfo)` | Vista / Server 2008 | 四个（含 ChangeTime、CreationTime） |
+  | 2 | `GetFileInformationByHandle` | NT 4.0 | 三个，缺 ChangeTime |
+  | 3 | `Win32FileAttributeData`（`os.FileInfo` 自带） | 一直有 | 三个，缺 ChangeTime |
+
+  - `LazyProc.Call` 找不到符号会 panic，所以统一走 `safeCallProc`：先 `Find()` 再 `Call()`，缺符号按失败处理。
+  - `FILE_BASIC_INFO` 是 **40 字节**（四个 FILETIME + `FileAttributes`）。386 下 Go 对 int64 只做 4 字节对齐，不加尾部填充会缩成 36，Windows 直接返回 `ERROR_BAD_LENGTH`——不是截断数据，是整个调用失败、四个时间静默变零。文件里用两个数组长度断言把尺寸钉死，偏大偏小都编译不过。
+  - FILETIME 换算用标准库 `Filetime.Nanoseconds()`，不自己算 1601→1970 的偏移。
+- [x] Linux：`statx` 一次拿全四个，`syscall.Stat_t` 兜底（老内核 `ENOSYS` 时保住三个，缺 Btime）。只认 `statx` 返回的 mask 位：文件系统没记 Btime 时读它是零值，不是 1970。
+- [x] 其余平台：只有 Mtime。
+- Win7 分两层看，别混：
+  - **源码层**：只用 Vista 就有的 API（`GetFileInformationByHandleEx` 是 Vista+），386/amd64 的结构体布局都钉死，所以 Win7 在覆盖范围内。
+  - **运行时层**：官方 Go 1.21.5+ 把熵源换成 `bcryptprimitives.dll!ProcessPrng`（Win8+ 才有），Win7 上**启动阶段**就崩（`Exception 0xc0000005, PC=0x0 in asmstdcall`），业务代码没机会跑。解法不是降级，是用 [XTLS/go-win7](https://github.com/XTLS/go-win7) 的同版本补丁 SDK 出 Windows 产物——它把随机数/控制台/文件系统调用换回 Win7 有实现的版本，版本号跟着官方走。Xray 的 `release-win7.yml` 直接把 `GOROOT` 内容替换掉；ech-proxy 解到 `/tmp` 再指 `GOROOT` + `GOTOOLCHAIN=local`。本仓 CI 的 `win7` job 用的是后者。

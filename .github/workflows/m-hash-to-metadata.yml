@@ -57,5 +57,60 @@ jobs:
           go-version-file: go.mod
           cache: false
       - run: GOOS=windows GOARCH=amd64 go build ./...
+      # 32 位不是凑数：Win7 时代 386 装机量不小，而且 386 下 int64 的对齐规则
+      # 和 amd64 不一样，FILE_BASIC_INFO 的 40 字节只有在 386 上才会露馅。
+      - run: GOOS=windows GOARCH=386 go build ./...
+      - run: GOOS=linux GOARCH=amd64 go build ./...
       - run: GOOS=linux GOARCH=arm64 go build ./...
+      - run: GOOS=linux GOARCH=386 go build ./...
       - run: GOOS=darwin GOARCH=arm64 go build ./...
+
+  # Win7 是工具链问题，不是代码问题：官方 Go 1.21.5+ 把熵源换成
+  # bcryptprimitives.dll!ProcessPrng（Win8+ 才有），Win7 上启动即崩
+  # （Exception 0xc0000005, PC=0x0 in asmstdcall），业务代码根本没机会跑。
+  # XTLS/go-win7 是同版本补丁 SDK：随机数、控制台、文件系统调用换回 Win7 有的实现，
+  # 版本号跟官方走，不是降级。Xray（release-win7.yml 里直接替换 GOROOT）与
+  # ech-proxy 都这么出 Windows 产物。
+  #
+  # 本仓没有可执行产物，所以这一关做到的是：用 Win7 可用的工具链把
+  # windows/386 与 windows/amd64 编出来，并把测试二进制链接一遍——
+  # 证明这套代码在 Win7 目标下没有拦路的东西。
+  win7:
+    name: windows 7 (patched Go SDK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup XTLS/go-win7
+        run: |
+          set -euo pipefail
+          GOSDK="${RUNNER_TEMP}/go-win7"
+          ZIP="${RUNNER_TEMP}/go-win7.zip"
+          mkdir -p "$GOSDK"
+          # 取 latest 而不是钉死某个 patch 号：它的版本必须 >= go.mod 的 go 指令，
+          # 钉死了迟早会和 go.mod 打架。低于要求时下一步会明确报错。
+          curl -fsSL -o "$ZIP" \
+            "https://github.com/XTLS/go-win7/releases/latest/download/go-for-win7-linux-amd64.zip"
+          unzip -q "$ZIP" -d "$GOSDK"
+          GO_BIN="$(find "$GOSDK" -type f -path '*/bin/go' | head -n1)"
+          if [ -z "$GO_BIN" ]; then
+            echo "::error::go binary not found in the go-win7 archive"
+            exit 1
+          fi
+          echo "$(dirname "$GO_BIN")" >> "$GITHUB_PATH"
+          echo "GOROOT=$(dirname "$(dirname "$GO_BIN")")" >> "$GITHUB_ENV"
+          # 别让补丁 SDK 去下载官方工具链把自己换掉。
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+
+      - name: Show toolchain
+        run: go version
+
+      - name: Build for Windows 7 (386 + amd64)
+        run: |
+          GOOS=windows GOARCH=386   CGO_ENABLED=0 go build ./...
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...
+
+      - name: Link test binaries
+        run: |
+          GOOS=windows GOARCH=386   CGO_ENABLED=0 go test -c -o /dev/null ./metadata
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -c -o /dev/null ./metadata
