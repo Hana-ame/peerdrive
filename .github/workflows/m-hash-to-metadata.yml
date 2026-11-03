@@ -1,0 +1,60 @@
+name: m/hash-to-metadata
+
+# 这个模块自带 go.mod；索引仓没有主仓的 ci.yml，所以它必须自带一条流水线。
+on:
+  push:
+    branches: [m/hash-to-metadata]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # race detector 需要 cgo；windows runner 没有 gcc，开了必红。
+          - os: ubuntu-latest
+            race: true
+          - os: macos-latest
+            race: true
+          - os: windows-latest
+            race: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # 跟着 go.mod 的 go 指令走，别在流水线里另写一个版本号。
+          go-version-file: go.mod
+          cache: false
+      - run: go vet ./...
+      - name: gofmt
+        shell: bash
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "these files need gofmt:"
+            echo "$out"
+            exit 1
+          fi
+      - name: go test -race
+        if: ${{ matrix.race }}
+        run: go test -race -count=1 ./...
+      - name: go test
+        if: ${{ !matrix.race }}
+        run: go test -count=1 ./...
+
+  cross-build:
+    name: cross-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: GOOS=windows GOARCH=amd64 go build ./...
+      - run: GOOS=linux GOARCH=arm64 go build ./...
+      - run: GOOS=darwin GOARCH=arm64 go build ./...
