@@ -11,7 +11,7 @@ TODO：
 ```go
 func Stat(sha string) (FileMetadata, error)      // 按 hash 取元数据
 func Index(root string) ([]FileMetadata, error)  // 扫描并登记，幂等
-func Scan(root string) ([]FileMetadata, error)   // 只扫描，不登记
+func Scan(root string) ([]FileMetadata, error)   // 只在数据库中取数据
 
 ```
 
@@ -36,4 +36,3 @@ func Scan(root string) ([]FileMetadata, error)   // 只扫描，不登记
 #### win / linux 兼容
 
 - [ ] FileMetadata
-
