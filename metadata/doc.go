@@ -11,16 +11,18 @@
 // # Directories are files too
 //
 // A directory has no byte stream of its own, so its content is defined as the
-// JSON encoding of its direct children ([]iface.FileMetadata, ordered by Ctime
-// descending, Filename ascending as the tie break), and its SHA256 is the hash
-// of those bytes. A directory hash therefore pins the whole subtree below it,
-// and List(dir) returns exactly the slice that was hashed - re-encoding it
-// must reproduce the parent's hash.
+// JSON array of its children's SHA256, sorted as strings:
 //
-// Because the manifest is the literal JSON of FileMetadata, everything in
-// that struct is part of the identity, including FullPath and the timestamps.
-// The same tree copied to another path hashes differently. That is what the
-// contract in AGENTS.md asks for; it is not a portable git-tree style hash.
+//	["00ab...", "7f12...", "ff00..."]
+//
+// Its own SHA256 is the hash of those bytes. A directory hash therefore pins
+// the whole subtree below it, and only that: no paths, no timestamps, no scan
+// order. Copy the tree somewhere else and it keeps its identity - the same
+// property that makes git trees movable.
+//
+// List(dir) returns the children in ctime order, which is what a reader wants
+// to see, not the order that was hashed. To verify a directory, take the
+// SHA256 out of its children, sort them, JSON-encode, and hash that.
 //
 // # Identity vs. location
 //

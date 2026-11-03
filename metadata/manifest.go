@@ -8,37 +8,24 @@ import (
 	"github.com/Hana-ame/peerdrive/interface"
 )
 
-// encodeManifest returns the canonical bytes of a directory's content: the
-// JSON encoding of its direct children, ordered by Ctime descending.
+// encodeManifest returns the canonical bytes of a directory's content: the JSON
+// array of its children's SHA256, sorted as strings.
 //
-// Ctime is unique per inode, so ties only happen for files created inside the
-// same filesystem clock tick. Filename (then FullPath) breaks those
-// deterministically, otherwise the same tree could hash differently between
-// runs and the directory would lose its identity.
+// 身份只看内容，不看摆放：时间戳、绝对路径、子项从哪个方向扫出来，都不进哈希。
+// 同一棵树复制到别的路径、换台机器，hash 不变。排序用字典序就够了——哈希本身
+// 没有先后，任何全序都能把"同一批哈希"归一到同一个字节串。
 //
-// An empty directory must encode as "[]", never "null": the two are different
-// contents and would give different hashes.
+// 空目录编码成 "[]"，不是 "null"：两者是不同的内容，hash 也不同。
 func encodeManifest(children []iface.FileMetadata) ([]byte, error) {
-	ordered := orderedByCtimeDesc(children)
-	b, err := json.Marshal(ordered)
+	hashes := make([]string, len(children))
+	for i, child := range children {
+		hashes[i] = child.SHA256
+	}
+	sort.Strings(hashes)
+
+	b, err := json.Marshal(hashes)
 	if err != nil {
 		return nil, fmt.Errorf("metadata: encode manifest: %w", err)
 	}
 	return b, nil
-}
-
-func orderedByCtimeDesc(children []iface.FileMetadata) []iface.FileMetadata {
-	ordered := make([]iface.FileMetadata, len(children))
-	copy(ordered, children)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		a, b := ordered[i], ordered[j]
-		if !a.Ctime.Equal(b.Ctime) {
-			return a.Ctime.After(b.Ctime)
-		}
-		if a.Filename != b.Filename {
-			return a.Filename < b.Filename
-		}
-		return a.FullPath < b.FullPath
-	})
-	return ordered
 }

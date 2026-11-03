@@ -29,16 +29,18 @@ const DirMimeType = "inode/directory"
 // children, so a half-indexed tree would publish hashes that never existed on
 // disk.
 //
-// Re-running Index on an unchanged tree produces an identical result. Files
-// whose persisted ctime, mtime and size still match the file on disk are not
-// read again - not just for speed, but because reading a file bumps its atime,
-// and atime is part of the manifest that gives a directory its hash. Without
-// that shortcut, every scan would quietly change the identity of every
-// directory it touched.
+// Re-running Index on an unchanged tree yields the same hashes. A directory's
+// hash is the sorted list of its children's hashes, so it carries no timestamps
+// and no absolute paths: reading a file (which bumps its atime, and atime is in
+// the row) cannot move the identity of the directory above it.
+//
+// Files whose persisted ctime, mtime and size still match the ones on disk are
+// not read again. That is now purely about not re-hashing unchanged gigabytes;
+// ctime decides, because user space cannot set it back.
 //
 // Entries previously registered under root but no longer present on disk are
-// dropped, so List keeps agreeing with the manifest that produced the parent's
-// hash.
+// dropped, so List keeps showing the same set that was hashed into the
+// parent's manifest.
 //
 // It returns every registered entry, root included, ordered by path.
 func (s *Store) Index(root string) ([]iface.FileMetadata, error) {
@@ -128,7 +130,7 @@ func (sc *scan) walk(dir string, fi fs.FileInfo) ([]iface.FileMetadata, error) {
 		}
 	}
 
-	self, err := dirMeta(dir, fi, children, sc.cache[dir])
+	self, err := dirMeta(dir, fi, children)
 	if err != nil {
 		return nil, err
 	}
@@ -197,23 +199,13 @@ func unchanged(prev iface.FileMetadata, fi fs.FileInfo, ts timestamps) bool {
 // dirMeta turns an already-registered child list into the directory's own
 // metadata. Size is the length of the manifest: the directory's content is
 // exactly those bytes, so this is its real size, not a child count.
-func dirMeta(dir string, fi fs.FileInfo, children []iface.FileMetadata, prev iface.FileMetadata) (iface.FileMetadata, error) {
+func dirMeta(dir string, fi fs.FileInfo, children []iface.FileMetadata) (iface.FileMetadata, error) {
 	manifest, err := encodeManifest(children)
 	if err != nil {
 		return iface.FileMetadata{}, err
 	}
 	sum := sha256.Sum256(manifest)
 	ts := times(dir, fi)
-
-	// Listing a directory is itself a read, so the atime sampled above is
-	// already older than the one this scan is about to produce. Keep the value
-	// recorded before the first read instead: otherwise every scan would bump
-	// every directory's atime, the manifest would change, and the directory
-	// would appear to have new content every time it was indexed.
-	if prev.IsDir && !prev.Ctime.IsZero() &&
-		prev.Ctime.Equal(ts.Ctime) && prev.Mtime.Equal(ts.Mtime) {
-		ts.Atime = prev.Atime
-	}
 
 	return iface.FileMetadata{
 		SHA256:   hex.EncodeToString(sum[:]),

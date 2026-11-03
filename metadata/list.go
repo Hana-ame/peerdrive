@@ -10,11 +10,14 @@ import (
 
 // List returns what is persisted for root, without touching the filesystem.
 //
-// For a directory it returns the direct children in manifest order: the same
-// slice that was hashed into the directory's own SHA256, so a caller can
-// re-encode it to check the directory's identity. For a file it returns that
-// one entry. An unregistered path yields an empty slice, not an error: "not
-// indexed yet" and "indexed, empty" look the same from here.
+// For a directory it returns the direct children, newest ctime first - a read
+// order for humans, not the order that produced the directory's hash. To check
+// identity, collect the children's SHA256, sort them as strings, and hash the
+// JSON array of that list.
+//
+// For a file it returns that one entry. An unregistered path yields an empty
+// slice, not an error: "not indexed yet" and "indexed, empty" look the same
+// from here.
 func (s *Store) List(root string) ([]iface.FileMetadata, error) {
 	dir, err := normalizePath(root)
 	if err != nil {

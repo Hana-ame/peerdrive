@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -113,7 +114,12 @@ func TestIndexRegistersTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	manifest, err := json.Marshal(children)
+	hashes := make([]string, len(children))
+	for i, c := range children {
+		hashes[i] = c.SHA256
+	}
+	sort.Strings(hashes)
+	manifest, err := json.Marshal(hashes)
 	if err != nil {
 		t.Fatalf("marshal children: %v", err)
 	}
@@ -362,29 +368,42 @@ func TestNormalizePathIsAbsolute(t *testing.T) {
 	}
 }
 
-func TestManifestOrdersByCtimeDescending(t *testing.T) {
+// 顺序不进哈希：同一批子项，无论以什么顺序喂进来、时间戳差多少、路径在哪，
+// manifest 逐字节相同。测试证这一点，顺便钉住"按字符串升序"。
+func TestManifestIsOrderAndMetadataIndependent(t *testing.T) {
 	base := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
-	children := []iface.FileMetadata{
-		{Filename: "old.txt", FullPath: "/t/old.txt", Ctime: base},
-		{Filename: "new.txt", FullPath: "/t/new.txt", Ctime: base.Add(2 * time.Hour)},
-		{Filename: "mid.txt", FullPath: "/t/mid.txt", Ctime: base.Add(time.Hour)},
-		// Same instant as mid.txt: filename breaks the tie.
-		{Filename: "aaa.txt", FullPath: "/t/aaa.txt", Ctime: base.Add(time.Hour)},
+	a := []iface.FileMetadata{
+		{SHA256: "ff00", Filename: "z.txt", FullPath: "/x/z.txt", Ctime: base, Size: 10},
+		{SHA256: "0011", Filename: "a.txt", FullPath: "/x/a.txt", Ctime: base.Add(time.Hour)},
+		{SHA256: "7f7f", Filename: "m.txt", FullPath: "/x/m.txt", Ctime: base.Add(2 * time.Hour)},
+	}
+	b := []iface.FileMetadata{
+		// 反过来喂，元数据也全不一样。
+		{SHA256: "7f7f", Filename: "renamed.bin", FullPath: "/elsewhere/deep/path", Size: 999},
+		{SHA256: "ff00", Filename: "whatever", Mtime: base.Add(-time.Hour)},
+		{SHA256: "0011", Filename: "a.txt", IsDir: true},
 	}
 
-	manifest, err := encodeManifest(children)
+	ma, err := encodeManifest(a)
 	if err != nil {
-		t.Fatalf("encodeManifest: %v", err)
+		t.Fatalf("encodeManifest(a): %v", err)
 	}
-	var decoded []iface.FileMetadata
-	if err := json.Unmarshal(manifest, &decoded); err != nil {
+	mb, err := encodeManifest(b)
+	if err != nil {
+		t.Fatalf("encodeManifest(b): %v", err)
+	}
+	if string(ma) != string(mb) {
+		t.Fatalf("manifest depends on order or metadata: a = %s, b = %s", ma, mb)
+	}
+
+	var got []string
+	if err := json.Unmarshal(ma, &got); err != nil {
 		t.Fatalf("decode manifest: %v", err)
 	}
-
-	want := []string{"new.txt", "aaa.txt", "mid.txt", "old.txt"}
-	for i, name := range want {
-		if decoded[i].Filename != name {
-			t.Fatalf("manifest order = %v, want %v", names(decoded), want)
+	want := []string{"0011", "7f7f", "ff00"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("manifest = %v, want %v", got, want)
 		}
 	}
 }
@@ -399,10 +418,12 @@ func TestManifestIsEmptyArrayNotNull(t *testing.T) {
 	}
 }
 
-func names(metas []iface.FileMetadata) []string {
-	out := make([]string, len(metas))
-	for i, m := range metas {
-		out[i] = m.Filename
+// atime 会被"读"本身改掉（列目录算一次读），它不进哈希，也不该进比较。
+func withoutAtime(metas []iface.FileMetadata) []iface.FileMetadata {
+	out := make([]iface.FileMetadata, len(metas))
+	copy(out, metas)
+	for i := range out {
+		out[i].Atime = time.Time{}
 	}
 	return out
 }
