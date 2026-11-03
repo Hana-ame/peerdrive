@@ -31,11 +31,19 @@
 // # Limits worth knowing
 //
 //   - Symlinks and other irregular files are skipped: they carry no content of
-//     their own, and following them invites cycles.
+//     their own, and following them invites cycles. Using one as the root of
+//     Index reports errors.ErrUnsupportedType instead of guessing.
 //   - Index is a full scan of root. Rows previously registered under a
 //     directory but gone from disk are removed, so List keeps matching the
 //     manifest. Nothing is deleted unless the scan of that subtree succeeded.
 //   - Timestamps are stored as UnixNano in UTC. Btime needs statx on Linux and
 //     FILE_BASIC_INFO on Windows; where the kernel cannot tell, the field stays
 //     zero rather than being faked.
+//
+// # Errors
+//
+// The sentinels live in github.com/Hana-ame/peerdrive/errors, not here, so a
+// caller can classify a failure without linking this package's SQLite driver.
+// The names are re-exported below as aliases of the same values, which means
+// errors.Is matches either spelling.
 package metadata

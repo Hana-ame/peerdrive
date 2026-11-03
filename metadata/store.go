@@ -2,7 +2,6 @@ package metadata
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -14,6 +13,7 @@ import (
 	// Registers the pure-Go SQLite driver under the name "sqlite".
 	_ "modernc.org/sqlite"
 
+	peererr "github.com/Hana-ame/peerdrive/errors"
 	"github.com/Hana-ame/peerdrive/interface"
 )
 
@@ -21,12 +21,14 @@ import (
 // the default store used by the package-level Stat/Index/List.
 const EnvDatabase = "PEERDRIVE_METADATA_DB"
 
-// ErrNotFound is returned by Stat when no path holds the requested content.
-var ErrNotFound = errors.New("metadata: not found")
-
-// ErrInvalidHash is returned when a caller passes something that is not a
-// SHA256 in hex.
-var ErrInvalidHash = errors.New("metadata: invalid sha256")
+// 错误的本体在 errors 包，这里只是别名：只依赖 metadata 的调用方不必再引一个包，
+// 判断方式不变（errors.Is 认的是同一个值）。
+var (
+	ErrNotFound        = peererr.ErrNotFound
+	ErrInvalidHash     = peererr.ErrInvalidHash
+	ErrInvalidPath     = peererr.ErrInvalidPath
+	ErrUnsupportedType = peererr.ErrUnsupportedType
+)
 
 // schema is applied on every Open, so opening an older database upgrades it.
 //
@@ -75,7 +77,7 @@ type Store struct {
 // Open opens (creating if needed) the database at path and applies the schema.
 func Open(path string) (*Store, error) {
 	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("metadata: empty database path")
+		return nil, fmt.Errorf("%w: empty database path", peererr.ErrInvalidPath)
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -292,7 +294,7 @@ func boolInt(b bool) int64 {
 // directory.
 func normalizePath(p string) (string, error) {
 	if strings.TrimSpace(p) == "" {
-		return "", errors.New("metadata: empty path")
+		return "", fmt.Errorf("%w: empty path", peererr.ErrInvalidPath)
 	}
 	abs, err := filepath.Abs(p)
 	if err != nil {
