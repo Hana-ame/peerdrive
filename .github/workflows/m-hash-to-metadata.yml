@@ -37,6 +37,7 @@ jobs:
           if [ -n "$out" ]; then
             echo "these files need gofmt:"
             echo "$out"
+            gofmt -d $out | head -200
             exit 1
           fi
       - name: go test -race

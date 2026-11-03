@@ -1,0 +1,3 @@
+# Windows 上 core.autocrlf 默认是 true，签出会把 .go 变成 CRLF，gofmt 随即全盘报红。
+# 仓库统一用 LF，别让行尾跟着平台走。
+* text=auto eol=lf
