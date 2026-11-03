@@ -125,6 +125,15 @@ func TestIndexRegistersTree(t *testing.T) {
 	if byName[root].MimeType != DirMimeType {
 		t.Errorf("directory MimeType = %q, want %q", byName[root].MimeType, DirMimeType)
 	}
+	if !byName[root].IsDir {
+		t.Error("root is not marked IsDir")
+	}
+	if !byName[filepath.Join(root, "sub")].IsDir {
+		t.Error("sub is not marked IsDir")
+	}
+	if byName[a].IsDir {
+		t.Error("a.txt is marked IsDir")
+	}
 	if byName[root].Size != int64(len(manifest)) {
 		t.Errorf("directory Size = %d, want manifest length %d", byName[root].Size, len(manifest))
 	}
@@ -211,6 +220,9 @@ func TestListOnAFileRootReturnsIt(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].FullPath != a {
 		t.Fatalf("List(file) = %+v, want the file itself", got)
+	}
+	if got[0].IsDir {
+		t.Error("List(file) returned an entry marked IsDir")
 	}
 }
 

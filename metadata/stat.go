@@ -22,12 +22,12 @@ func (s *Store) Stat(sha string) (iface.FileMetadata, error) {
 		`SELECT `+selectColumns+` FROM files WHERE sha256 = ? ORDER BY ctime DESC, full_path ASC LIMIT 1`,
 		hash,
 	)
-	e, err := scanEntry(row.Scan)
+	m, err := scanMeta(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return iface.FileMetadata{}, fmt.Errorf("%w: sha256 %s", ErrNotFound, hash)
 	}
 	if err != nil {
 		return iface.FileMetadata{}, fmt.Errorf("metadata: stat %s: %w", hash, err)
 	}
-	return e.meta, nil
+	return m, nil
 }

@@ -56,14 +56,6 @@ CREATE INDEX IF NOT EXISTS files_parent ON files(parent);
 // selectColumns is the fixed column order every read below shares.
 const selectColumns = `full_path, sha256, filename, mime_type, size, ctime, mtime, btime, atime, is_dir`
 
-// entry pairs the contract type with the one fact the contract cannot carry:
-// whether this row is a directory. Directories are advertised through
-// MimeType, but that is a display string, not something to branch on.
-type entry struct {
-	meta iface.FileMetadata
-	dir  bool
-}
-
 // Store is an open metadata database.
 //
 // It is safe for concurrent use; the pool is capped at one connection because
@@ -243,20 +235,19 @@ ON CONFLICT(full_path) DO UPDATE SET
 	parent    = excluded.parent
 `
 
-func encodeEntry(e entry) []any {
-	m := e.meta
+func encodeMeta(m iface.FileMetadata) []any {
 	return []any{
 		m.FullPath, m.SHA256, m.Filename,
 		m.MimeType, m.Size,
 		encodeTime(m.Ctime), encodeTime(m.Mtime), encodeTime(m.Btime), encodeTime(m.Atime),
-		boolInt(e.dir),
+		boolInt(m.IsDir),
 		filepath.Dir(m.FullPath),
 	}
 }
 
-func scanEntry(scan func(dest ...any) error) (entry, error) {
+func scanMeta(scan func(dest ...any) error) (iface.FileMetadata, error) {
 	var (
-		e                          entry
+		m                          iface.FileMetadata
 		fullPath, sha, filename    string
 		mimeType                   string
 		size                       int64
@@ -264,21 +255,21 @@ func scanEntry(scan func(dest ...any) error) (entry, error) {
 		isDir                      int64
 	)
 	if err := scan(&fullPath, &sha, &filename, &mimeType, &size, &ctime, &mtime, &btime, &atime, &isDir); err != nil {
-		return entry{}, err
+		return iface.FileMetadata{}, err
 	}
-	e.dir = isDir != 0
-	e.meta = iface.FileMetadata{
+	m = iface.FileMetadata{
 		SHA256:   sha,
 		Filename: filename,
 		FullPath: fullPath,
 		MimeType: mimeType,
 		Size:     size,
+		IsDir:    isDir != 0,
 		Ctime:    decodeTime(ctime),
 		Mtime:    decodeTime(mtime),
 		Btime:    decodeTime(btime),
 		Atime:    decodeTime(atime),
 	}
-	return e, nil
+	return m, nil
 }
 
 func boolInt(b bool) int64 {

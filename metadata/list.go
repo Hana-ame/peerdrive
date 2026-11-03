@@ -36,10 +36,10 @@ func (s *Store) List(root string) ([]iface.FileMetadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	if self.dir {
+	if self.IsDir {
 		return []iface.FileMetadata{}, nil
 	}
-	return []iface.FileMetadata{self.meta}, nil
+	return []iface.FileMetadata{self}, nil
 }
 
 func (s *Store) children(dir string) ([]iface.FileMetadata, error) {
@@ -54,11 +54,11 @@ func (s *Store) children(dir string) ([]iface.FileMetadata, error) {
 
 	out := make([]iface.FileMetadata, 0, 16)
 	for rows.Next() {
-		e, err := scanEntry(rows.Scan)
+		m, err := scanMeta(rows.Scan)
 		if err != nil {
 			return nil, fmt.Errorf("metadata: list %s: %w", dir, err)
 		}
-		out = append(out, e.meta)
+		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("metadata: list %s: %w", dir, err)
@@ -66,14 +66,14 @@ func (s *Store) children(dir string) ([]iface.FileMetadata, error) {
 	return out, nil
 }
 
-func (s *Store) byPath(path string) (entry, error) {
+func (s *Store) byPath(path string) (iface.FileMetadata, error) {
 	row := s.db.QueryRow(`SELECT `+selectColumns+` FROM files WHERE full_path = ?`, path)
-	e, err := scanEntry(row.Scan)
+	m, err := scanMeta(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
-		return entry{}, fmt.Errorf("%w: path %s", ErrNotFound, path)
+		return iface.FileMetadata{}, fmt.Errorf("%w: path %s", ErrNotFound, path)
 	}
 	if err != nil {
-		return entry{}, fmt.Errorf("metadata: lookup %s: %w", path, err)
+		return iface.FileMetadata{}, fmt.Errorf("metadata: lookup %s: %w", path, err)
 	}
-	return e, nil
+	return m, nil
 }

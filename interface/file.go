@@ -14,6 +14,11 @@ type FileMetadata struct {
 	FullPath string
 	MimeType string
 	Size     int64
+	// IsDir marks a directory. A directory has no byte stream of its own: its
+	// content is the JSON manifest of its children, so SHA256 hashes that
+	// manifest and Size is its length. MimeType says inode/directory as well,
+	// but that is a display string - branch on this field, not on that one.
+	IsDir bool
 	// Ctime is the only timestamp that carries evidence: user space has no call
 	// to set it, so a content change followed by restoring Mtime still pushes
 	// Ctime forward.
