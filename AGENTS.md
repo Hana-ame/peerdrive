@@ -2,6 +2,8 @@
 
 > 本机不进行测试，所有测试写gh action做CI/CD并检查。
 
+## &#x20;hash to files
+
 ## 1. 仓库定位
 
 peerdrive 原先是一个 monorepo，拆分方式是**按模块拆分**：一个模块 = 一个可独立构建、  
@@ -41,3 +43,25 @@ peerdrive 原先是一个 monorepo，拆分方式是**按模块拆分**：一个
 | `main`     | 本分支：入口 / 索引，无实现代码   |
 | `refactor` | 拆分前的开发主干（历史实现，只读）   |
 | `legacy`   | 更早的封印版本（2026-05，只读） |
+
+## interface
+
+TODO：
+
+### FileMetadata
+
+| Field      | Type      | 说明                                                                                            |
+| ---------- | --------- | --------------------------------------------------------------------------------------------- |
+| `SHA256`   | string    | 内容哈希，内容身份                                                                                     |
+| `Filename` | string    | 文件名（不含路径）                                                                                     |
+| `FullPath` | string    | 内容当前所在路径，不是句柄                                                                                 |
+| `MimeType` | string    | MIME 类型                                                                                       |
+| `Size`     | int64     | 内容字节数                                                                                         |
+| `Ctime`    | time.Time | inode 元数据变化时更新：写内容、`chmod`、`chown`、改 mtime、增删硬链接。用户态**不可改**；改内容再把 mtime 写回原值会顶起它，四个时间戳里只有它露破绽 |
+| `Mtime`    | time.Time | 内容写入时更新。可被 `touch -m` / `utimes` 改写；`rsync` / `make` 的增量依据，不是篡改证据                             |
+| `Btime`    | time.Time | inode 创建时写一次。Linux 用户态不可设（`debugfs` 可绕），NTFS 可设；仅 `statx` 暴露，`syscall.Stat_t` 里没有             |
+| `Atime`    | time.Time | 读取内容时更新。`relatime` 下更新条件宽松、`noatime` 下永不更新，不可信                                                |
+
+#### win / linux 兼容
+
+- [ ] FileMetadata

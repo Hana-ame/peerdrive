@@ -1,0 +1,29 @@
+// Package iface holds the cross-module contracts of peerdrive.
+package iface
+
+import "time"
+
+// FileMetadata describes one file resolved from a content hash.
+//
+// FullPath is where the content currently lives, not a handle: opening it is
+// the caller's concern. Size is the byte count of the content, so a caller can
+// size a read buffer without stat-ing again.
+type FileMetadata struct {
+	SHA256   string
+	Filename string
+	FullPath string
+	MimeType string
+	Size     int64
+	// Ctime is the only timestamp that carries evidence: user space has no call
+	// to set it, so a content change followed by restoring Mtime still pushes
+	// Ctime forward.
+	Ctime time.Time
+	// Mtime is writable by anyone (touch -m, utimes); rsync and make read it as
+	// "rebuild needed", not as proof of anything.
+	Mtime time.Time
+	// Btime is inode birth time: written once, not settable from user space on
+	// Linux (debugfs aside), settable on NTFS, only exposed via statx.
+	Btime time.Time
+	// Atime is unreliable: relatime updates it rarely, noatime never.
+	Atime time.Time
+}
