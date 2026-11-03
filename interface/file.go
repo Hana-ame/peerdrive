@@ -1,4 +1,8 @@
-// Package iface holds the cross-module contracts of peerdrive.
+// Package iface holds the cross-module contracts of peerdrive: the metadata
+// shape a caller receives, and the sentinel errors it may need to classify.
+//
+// It is the only package a consumer of this module has to import, and it
+// depends on nothing - not even the storage engine behind it.
 package iface
 
 import "time"

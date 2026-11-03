@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	peererr "github.com/Hana-ame/peerdrive/errors"
 	"github.com/Hana-ame/peerdrive/interface"
 )
 
@@ -374,7 +373,7 @@ func TestIndexSkipsSymlinks(t *testing.T) {
 
 	// 以链接本身为 root 时不该硬着头皮跟进去，而是明确报"不支持的类型"。
 	_, err = s.Index(filepath.Join(root, "link.txt"))
-	if !errors.Is(err, peererr.ErrUnsupportedType) {
+	if !errors.Is(err, iface.ErrUnsupportedType) {
 		t.Fatalf("Index(symlink) = %v, want errors.ErrUnsupportedType", err)
 	}
 }
@@ -458,16 +457,16 @@ func withoutAtime(metas []iface.FileMetadata) []iface.FileMetadata {
 func TestErrorsMatchSharedSentinels(t *testing.T) {
 	s := newStore(t)
 
-	if _, err := s.Stat(strings.Repeat("b", 64)); !errors.Is(err, peererr.ErrNotFound) {
+	if _, err := s.Stat(strings.Repeat("b", 64)); !errors.Is(err, iface.ErrNotFound) {
 		t.Errorf("Stat(unknown) = %v, want errors.ErrNotFound", err)
 	}
-	if _, err := s.Stat("nope"); !errors.Is(err, peererr.ErrInvalidHash) {
+	if _, err := s.Stat("nope"); !errors.Is(err, iface.ErrInvalidHash) {
 		t.Errorf("Stat(bad hash) = %v, want errors.ErrInvalidHash", err)
 	}
-	if _, err := s.Index("   "); !errors.Is(err, peererr.ErrInvalidPath) {
+	if _, err := s.Index("   "); !errors.Is(err, iface.ErrInvalidPath) {
 		t.Errorf("Index(blank path) = %v, want errors.ErrInvalidPath", err)
 	}
-	if _, err := Open("  "); !errors.Is(err, peererr.ErrInvalidPath) {
+	if _, err := Open("  "); !errors.Is(err, iface.ErrInvalidPath) {
 		t.Errorf("Open(blank path) = %v, want errors.ErrInvalidPath", err)
 	}
 }

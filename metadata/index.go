@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"sort"
 
-	peererr "github.com/Hana-ame/peerdrive/errors"
 	"github.com/Hana-ame/peerdrive/interface"
 )
 
@@ -75,7 +74,7 @@ func (s *Store) Index(root string) ([]iface.FileMetadata, error) {
 		}
 		entries = []iface.FileMetadata{m}
 	default:
-		return nil, fmt.Errorf("%w: %s (%s)", peererr.ErrUnsupportedType, root, fi.Mode().Type())
+		return nil, fmt.Errorf("%w: %s (%s)", iface.ErrUnsupportedType, root, fi.Mode().Type())
 	}
 
 	if err := s.commit(entries, prune); err != nil {

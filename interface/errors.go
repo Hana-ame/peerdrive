@@ -1,14 +1,12 @@
-// Package errors 收纳跨模块共用的哨兵错误。
-//
-// 这些值单独成包，是为了让调用方判断"是没找到，还是真出错了"时不必 import
-// metadata——那个包会把 SQLite 驱动一起链进来。约定两条：
-//
-//   - 判断一律用标准库的 errors.Is(err, errors.ErrNotFound)；
-//   - 实现侧一律用 fmt.Errorf("...: %w", ErrXxx) 包装，别用字符串比对。
-package errors
+package iface
 
 import "errors"
 
+// 契约层的哨兵错误。调用方只 import interface/ 就能判断失败类型，
+// 不必 import metadata——那会把 SQLite 驱动一起链进二进制。
+//
+// 约定两条：判断一律用标准库的 errors.Is，实现侧一律用
+// fmt.Errorf("...: %w", ErrXxx) 包装，别拼字符串给调用方猜。
 var (
 	// ErrNotFound 表示按内容哈希或按路径都没查到已登记的条目。
 	ErrNotFound = errors.New("peerdrive: not found")

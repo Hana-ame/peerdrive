@@ -48,7 +48,7 @@
 //
 // # Errors
 //
-// The sentinels live in github.com/Hana-ame/peerdrive/errors, not here, so a
+// The sentinels live in github.com/Hana-ame/peerdrive/interface, not here, so a
 // caller can classify a failure without linking this package's SQLite driver.
 // The names are re-exported below as aliases of the same values, which means
 // errors.Is matches either spelling.

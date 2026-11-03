@@ -8,7 +8,7 @@
 
 已实现，见 `metadata/`（package `metadata`）。`interface/` 保持纯契约：只有 `FileMetadata`，不引入 sqlite 依赖，免得只想用结构体的模块都被拖进一个数据库驱动。
 
-错误单独成包：`errors/`（package `errors`）。调用方判断"是没找到还是真出错"时只 import 它，不用为了 `errors.Is` 去链 SQLite。`metadata` 里保留同名别名指向同一批值，所以 `metadata.ErrNotFound` 照旧可用，两边 `errors.Is` 都认。
+契约都在 `interface/`（package `iface`）里：`FileMetadata` 和四个错误哨兵。调用方判断"是没找到还是真出错"时只 import 它，不用为了 `errors.Is` 去链 SQLite。`metadata` 里保留同名别名指向同一批值，所以 `metadata.ErrNotFound` 照旧可用，两边 `errors.Is` 都认。
 
 ### API
 
@@ -31,7 +31,7 @@ func List(root string) ([]FileMetadata, error)   // 只访问sqlite3中持久化
 - **`Index`**：先把整棵树读完，再单事务写入，失败不留半套数据；重复扫描得到的哈希不变。目录下已从磁盘消失的行会被删掉，否则 `List` 会和 manifest 对不上。符号链接、设备等一律跳过：它们没有自己的内容，跟进去还会绕圈。
 - **不重读**：(size, mtime, ctime) 都没变的文件直接复用已登记的哈希、不再读——纯粹为了别每次把几个 G 重新算一遍。ctime 拿不到的平台上这条捷径关闭，宁可重算。atime 不在身份里，所以读不读它都不会让上层目录的 hash 漂。
 - **时间戳**：统一存 UTC 的 UnixNano；取不到就留零值，不拿别的字段顶替。
-- **错误**：`ErrNotFound`、`ErrInvalidHash`、`ErrInvalidPath`、`ErrUnsupportedType` 定义在 `errors` 包，实现侧一律 `fmt.Errorf("...: %w", ...)` 包装，别拼字符串给调用方猜。
+- **错误**：`ErrNotFound`、`ErrInvalidHash`、`ErrInvalidPath`、`ErrUnsupportedType` 定义在 `interface` 包（`iface.ErrNotFound` 等），实现侧一律 `fmt.Errorf("...: %w", ...)` 包装，别拼字符串给调用方猜。
 
 ### 已知取舍
 
