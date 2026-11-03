@@ -114,12 +114,12 @@ func TestIndexRegistersTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	hashes := make([]string, len(children))
+	paths := make([]string, len(children))
 	for i, c := range children {
-		hashes[i] = c.SHA256
+		paths[i] = c.FullPath
 	}
-	sort.Strings(hashes)
-	manifest, err := json.Marshal(hashes)
+	sort.Strings(paths)
+	manifest, err := json.Marshal(paths)
 	if err != nil {
 		t.Fatalf("marshal children: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestEmptyDirectoryHashesToEmptyManifest(t *testing.T) {
 	}
 }
 
-func TestContentChangeMovesTheHash(t *testing.T) {
+func TestContentChangeMovesFileHashOnly(t *testing.T) {
 	root, a, _ := traceTree(t)
 	s := newStore(t)
 	before, err := s.Index(root)
@@ -323,8 +323,30 @@ func TestContentChangeMovesTheHash(t *testing.T) {
 	if beforeByPath[a].SHA256 == afterByPath[a].SHA256 {
 		t.Error("file hash did not change with its content")
 	}
-	if beforeByPath[root].SHA256 == afterByPath[root].SHA256 {
-		t.Error("directory hash did not follow its child's content")
+	// 清单存的是路径，内容变了不影响结构，父目录的 hash 必须原地不动。
+	// 这是设计边界，不是遗漏——写死在这里，免得以后被当成 bug 修回去。
+	if beforeByPath[root].SHA256 != afterByPath[root].SHA256 {
+		t.Errorf("directory hash followed a child's content: %s -> %s", beforeByPath[root].SHA256, afterByPath[root].SHA256)
+	}
+}
+
+// 结构变了才算变：多一个文件，父目录的 hash 必须动。
+func TestAddingFileMovesDirectoryHash(t *testing.T) {
+	root, _, _ := traceTree(t)
+	s := newStore(t)
+	before, err := s.Index(root)
+	if err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+
+	writeFile(t, filepath.Join(root, "c.txt"), "third")
+	after, err := s.Index(root)
+	if err != nil {
+		t.Fatalf("re-Index: %v", err)
+	}
+
+	if indexed(before)[root].SHA256 == indexed(after)[root].SHA256 {
+		t.Error("directory hash did not change when a child was added")
 	}
 }
 
@@ -368,20 +390,23 @@ func TestNormalizePathIsAbsolute(t *testing.T) {
 	}
 }
 
-// 顺序不进哈希：同一批子项，无论以什么顺序喂进来、时间戳差多少、路径在哪，
-// manifest 逐字节相同。测试证这一点，顺便钉住"按字符串升序"。
-func TestManifestIsOrderAndMetadataIndependent(t *testing.T) {
+// 清单是绝对路径的字符串数组：顺序不进哈希，其余元数据也不进，但路径本身进。
+func TestManifestIsSortedPaths(t *testing.T) {
 	base := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 	a := []iface.FileMetadata{
 		{SHA256: "ff00", Filename: "z.txt", FullPath: "/x/z.txt", Ctime: base, Size: 10},
 		{SHA256: "0011", Filename: "a.txt", FullPath: "/x/a.txt", Ctime: base.Add(time.Hour)},
-		{SHA256: "7f7f", Filename: "m.txt", FullPath: "/x/m.txt", Ctime: base.Add(2 * time.Hour)},
+		{SHA256: "7f7f", FullPath: "/x/m", IsDir: true},
 	}
+	// 打乱顺序，哈希与时间戳也全换掉——manifest 不该动。
 	b := []iface.FileMetadata{
-		// 反过来喂，元数据也全不一样。
-		{SHA256: "7f7f", Filename: "renamed.bin", FullPath: "/elsewhere/deep/path", Size: 999},
-		{SHA256: "ff00", Filename: "whatever", Mtime: base.Add(-time.Hour)},
-		{SHA256: "0011", Filename: "a.txt", IsDir: true},
+		{SHA256: "9999", Filename: "renamed", FullPath: "/x/m", Size: 1},
+		{SHA256: "0000", FullPath: "/x/z.txt", Mtime: base.Add(-time.Hour)},
+		{SHA256: "1234", FullPath: "/x/a.txt"},
+	}
+	// 路径变了，manifest 必须不同。
+	c := []iface.FileMetadata{
+		{FullPath: "/x/a.txt"}, {FullPath: "/x/m"}, {FullPath: "/y/z.txt"},
 	}
 
 	ma, err := encodeManifest(a)
@@ -393,18 +418,26 @@ func TestManifestIsOrderAndMetadataIndependent(t *testing.T) {
 		t.Fatalf("encodeManifest(b): %v", err)
 	}
 	if string(ma) != string(mb) {
-		t.Fatalf("manifest depends on order or metadata: a = %s, b = %s", ma, mb)
+		t.Fatalf("manifest depends on order or non-path metadata: a = %s, b = %s", ma, mb)
 	}
 
 	var got []string
 	if err := json.Unmarshal(ma, &got); err != nil {
 		t.Fatalf("decode manifest: %v", err)
 	}
-	want := []string{"0011", "7f7f", "ff00"}
+	want := []string{"/x/a.txt", "/x/m", "/x/z.txt"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("manifest = %v, want %v", got, want)
 		}
+	}
+
+	mc, err := encodeManifest(c)
+	if err != nil {
+		t.Fatalf("encodeManifest(c): %v", err)
+	}
+	if string(ma) == string(mc) {
+		t.Fatal("manifest ignored a path change")
 	}
 }
 

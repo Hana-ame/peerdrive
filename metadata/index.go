@@ -30,9 +30,9 @@ const DirMimeType = "inode/directory"
 // disk.
 //
 // Re-running Index on an unchanged tree yields the same hashes. A directory's
-// hash is the sorted list of its children's hashes, so it carries no timestamps
-// and no absolute paths: reading a file (which bumps its atime, and atime is in
-// the row) cannot move the identity of the directory above it.
+// hash is the sorted list of its children's paths, so neither content nor
+// timestamps feed it: reading a file (which bumps its atime) cannot move the
+// identity of the directory above it.
 //
 // Files whose persisted ctime, mtime and size still match the ones on disk are
 // not read again. That is now purely about not re-hashing unchanged gigabytes;

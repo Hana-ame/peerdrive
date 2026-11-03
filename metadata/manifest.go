@@ -9,21 +9,23 @@ import (
 )
 
 // encodeManifest returns the canonical bytes of a directory's content: the JSON
-// array of its children's SHA256, sorted as strings.
+// array of its children's absolute paths, sorted as strings.
 //
-// 身份只看内容，不看摆放：时间戳、绝对路径、子项从哪个方向扫出来，都不进哈希。
-// 同一棵树复制到别的路径、换台机器，hash 不变。排序用字典序就够了——哈希本身
-// 没有先后，任何全序都能把"同一批哈希"归一到同一个字节串。
+//	["/data/photos/a.jpg", "/data/photos/raw"]
 //
-// 空目录编码成 "[]"，不是 "null"：两者是不同的内容，hash 也不同。
+// 存路径，不存哈希：目录记的是"这一层挂了哪些位置"。于是子文件改了内容，
+// 父目录的 hash 不变——身份逐层下放到文件自己；只有增、删、改名、搬家这类
+// 改变目录结构的事，才会顶起它。
+//
+// 排序用字典序，和扫描顺序无关；空目录编码成 "[]"，不是 "null"。
 func encodeManifest(children []iface.FileMetadata) ([]byte, error) {
-	hashes := make([]string, len(children))
+	paths := make([]string, len(children))
 	for i, child := range children {
-		hashes[i] = child.SHA256
+		paths[i] = child.FullPath
 	}
-	sort.Strings(hashes)
+	sort.Strings(paths)
 
-	b, err := json.Marshal(hashes)
+	b, err := json.Marshal(paths)
 	if err != nil {
 		return nil, fmt.Errorf("metadata: encode manifest: %w", err)
 	}

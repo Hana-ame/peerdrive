@@ -11,18 +11,18 @@
 // # Directories are files too
 //
 // A directory has no byte stream of its own, so its content is defined as the
-// JSON array of its children's SHA256, sorted as strings:
+// JSON array of its children's absolute paths, sorted as strings:
 //
-//	["00ab...", "7f12...", "ff00..."]
+//	["/data/photos/a.jpg", "/data/photos/raw"]
 //
-// Its own SHA256 is the hash of those bytes. A directory hash therefore pins
-// the whole subtree below it, and only that: no paths, no timestamps, no scan
-// order. Copy the tree somewhere else and it keeps its identity - the same
-// property that makes git trees movable.
+// Its own SHA256 is the hash of those bytes. The manifest holds locations, not
+// content: editing a child leaves its parent's hash alone, while adding,
+// removing, renaming or moving one moves it. Identity is per file; structure is
+// per directory.
 //
 // List(dir) returns the children in ctime order, which is what a reader wants
 // to see, not the order that was hashed. To verify a directory, take the
-// SHA256 out of its children, sort them, JSON-encode, and hash that.
+// FullPath out of its children, sort them, JSON-encode, and hash that.
 //
 // # Identity vs. location
 //
