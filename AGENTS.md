@@ -25,9 +25,9 @@ func List(root string) ([]FileMetadata, error)   // 只访问sqlite3中持久化
 
 - **存储**：SQLite（`modernc.org/sqlite`，纯 Go，无 cgo）。表 `files` 以 `full_path` 为主键——一个路径同时只装一份内容；`sha256`、`parent` 各建索引。同一份内容可以有多条路径，`Stat` 取 ctime 最新的那条。
 - **路径**：入库前一律转绝对路径，`FullPath` 不依赖调用方的 cwd。
-- **目录**：`IsDir` 为真，内容是**直接子项绝对路径组成的 JSON 数组**，按字符串升序：`["/data/photos/a.jpg","/data/photos/raw"]`。`Size` = 这段 JSON 的字节数，`MimeType` = `inode/directory`。空目录编码成 `[]` 而不是 `null`，两者 hash 不同。
+- **目录**：`IsDir` 为真，内容是**直接子项绝对路径组成的 JSON 数组**，按扫描顺序：`["/data/photos/a.jpg","/data/photos/raw"]`。代码里不做额外排序，顺序就是 `os.ReadDir` 给的（名字升序），所以重复扫描一致。`Size` = 这段 JSON 的字节数，`MimeType` = `inode/directory`。空目录编码成 `[]` 而不是 `null`，两者 hash 不同。
   只收路径的后果：清单记的是"这一层挂了哪些位置"，不记内容。子文件改了内容，父目录的 hash 不动；增、删、改名、搬家才动它。
-- **`List(dir)`** 返回直接子项，按 ctime 降序——那是给人看的顺序，不是被哈希的顺序。要核对父目录身份：把这些条目的 `FullPath` 抽出来排序、JSON 一遍、取哈希。`List(file)` 返回它自己；没登记过的路径返回空切片，不是错误。
+- **`List(dir)`** 返回直接子项，按 ctime 降序——那是给人看的顺序，不是被哈希的顺序。要核对父目录身份：把这些条目的 `FullPath` 抽出来，按扫描顺序摆好（同目录下按路径排序即可复现）、JSON 一遍、取哈希。`List(file)` 返回它自己；没登记过的路径返回空切片，不是错误。
 - **`Index`**：先把整棵树读完，再单事务写入，失败不留半套数据；重复扫描得到的哈希不变。目录下已从磁盘消失的行会被删掉，否则 `List` 会和 manifest 对不上。符号链接、设备等一律跳过：它们没有自己的内容，跟进去还会绕圈。
 - **不重读**：(size, mtime, ctime) 都没变的文件直接复用已登记的哈希、不再读——纯粹为了别每次把几个 G 重新算一遍。ctime 拿不到的平台上这条捷径关闭，宁可重算。atime 不在身份里，所以读不读它都不会让上层目录的 hash 漂。
 - **时间戳**：统一存 UTC 的 UnixNano；取不到就留零值，不拿别的字段顶替。
@@ -39,7 +39,8 @@ func List(root string) ([]FileMetadata, error)   // 只访问sqlite3中持久化
 
 - 内容变了，父目录 hash 不变——要判断"内容变没变"，看文件自己的 `SHA256`；
 - 元数据变了（`chmod`、`touch`），父目录 hash 也不变——看那一行的 `Ctime`；
-- 整棵树搬到别的路径，所有目录 hash 全变，因为清单里存的就是绝对路径。
+- 整棵树搬到别的路径，所有目录 hash 全变，因为清单里存的就是绝对路径；
+- 顺序也是身份的一部分：同一批子项换个顺序写，hash 就不同。
 
 这是明确选定的语义：目录表示"这一层有哪些位置"，文件才承担内容身份。
 

@@ -11,7 +11,7 @@
 // # Directories are files too
 //
 // A directory has no byte stream of its own, so its content is defined as the
-// JSON array of its children's absolute paths, sorted as strings:
+// JSON array of its children's absolute paths, in scan order:
 //
 //	["/data/photos/a.jpg", "/data/photos/raw"]
 //
@@ -19,6 +19,10 @@
 // content: editing a child leaves its parent's hash alone, while adding,
 // removing, renaming or moving one moves it. Identity is per file; structure is
 // per directory.
+//
+// The array is not sorted. os.ReadDir hands children back by name, so the order
+// is name order in practice and two scans agree; but the rule is "whatever the
+// scan produced", not "alphabetical".
 //
 // List(dir) returns the children in ctime order, which is what a reader wants
 // to see, not the order that was hashed. To verify a directory, take the

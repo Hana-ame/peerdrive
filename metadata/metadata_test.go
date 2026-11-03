@@ -114,6 +114,8 @@ func TestIndexRegistersTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
+	// List 按 ctime 降序返回，manifest 按扫描顺序（同目录下等价于路径序），
+	// 所以这里排一下才能对齐；同前缀的兄弟节点，比路径就是比文件名。
 	paths := make([]string, len(children))
 	for i, c := range children {
 		paths[i] = c.FullPath
@@ -390,48 +392,38 @@ func TestNormalizePathIsAbsolute(t *testing.T) {
 	}
 }
 
-// 清单是绝对路径的字符串数组：顺序不进哈希，其余元数据也不进，但路径本身进。
-func TestManifestIsSortedPaths(t *testing.T) {
+// 清单就是"路径数组，按交进来的顺序"：不排序、不改写。
+func TestManifestKeepsGivenOrder(t *testing.T) {
 	base := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 	a := []iface.FileMetadata{
-		{SHA256: "ff00", Filename: "z.txt", FullPath: "/x/z.txt", Ctime: base, Size: 10},
-		{SHA256: "0011", Filename: "a.txt", FullPath: "/x/a.txt", Ctime: base.Add(time.Hour)},
-		{SHA256: "7f7f", FullPath: "/x/m", IsDir: true},
-	}
-	// 打乱顺序，哈希与时间戳也全换掉——manifest 不该动。
-	b := []iface.FileMetadata{
-		{SHA256: "9999", Filename: "renamed", FullPath: "/x/m", Size: 1},
-		{SHA256: "0000", FullPath: "/x/z.txt", Mtime: base.Add(-time.Hour)},
-		{SHA256: "1234", FullPath: "/x/a.txt"},
-	}
-	// 路径变了，manifest 必须不同。
-	c := []iface.FileMetadata{
-		{FullPath: "/x/a.txt"}, {FullPath: "/x/m"}, {FullPath: "/y/z.txt"},
+		{SHA256: "aa", FullPath: "/x/z.txt", Ctime: base},
+		{SHA256: "bb", FullPath: "/x/a.txt", Size: 10},
+		{SHA256: "cc", FullPath: "/x/m", IsDir: true},
 	}
 
 	ma, err := encodeManifest(a)
 	if err != nil {
-		t.Fatalf("encodeManifest(a): %v", err)
+		t.Fatalf("encodeManifest: %v", err)
 	}
+	const want = `["/x/z.txt","/x/a.txt","/x/m"]`
+	if string(ma) != want {
+		t.Fatalf("manifest = %s, want %s", ma, want)
+	}
+
+	// 换顺序就是另一份内容，hash 也跟着变。
+	b := []iface.FileMetadata{a[1], a[0], a[2]}
 	mb, err := encodeManifest(b)
 	if err != nil {
 		t.Fatalf("encodeManifest(b): %v", err)
 	}
-	if string(ma) != string(mb) {
-		t.Fatalf("manifest depends on order or non-path metadata: a = %s, b = %s", ma, mb)
+	if string(ma) == string(mb) {
+		t.Fatal("manifest ignored a reordering")
 	}
 
-	var got []string
-	if err := json.Unmarshal(ma, &got); err != nil {
-		t.Fatalf("decode manifest: %v", err)
+	// 路径变了，manifest 也必须不同。
+	c := []iface.FileMetadata{
+		{FullPath: "/x/z.txt"}, {FullPath: "/x/a.txt"}, {FullPath: "/y/m"},
 	}
-	want := []string{"/x/a.txt", "/x/m", "/x/z.txt"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("manifest = %v, want %v", got, want)
-		}
-	}
-
 	mc, err := encodeManifest(c)
 	if err != nil {
 		t.Fatalf("encodeManifest(c): %v", err)
