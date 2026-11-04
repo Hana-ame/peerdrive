@@ -223,7 +223,7 @@ type Conn struct {
 	streamGen uint32
 	reasm     Reassembler
 
-	onMsg chan Frame
+	onMsg  chan Frame
 	closed atomic.Bool
 	done   chan struct{}
 	once   sync.Once
