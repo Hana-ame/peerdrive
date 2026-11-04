@@ -1,0 +1,133 @@
+name: webrtc
+
+# monorepo：webrtc 依赖 peerjs（信号层），因此 peerjs/** 变化也要跑这条。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'webrtc/**'
+      - 'peerjs/**'
+      - 'go.work'
+      - '.github/workflows/webrtc.yml'
+  pull_request:
+    paths:
+      - 'webrtc/**'
+      - 'peerjs/**'
+      - 'go.work'
+      - '.github/workflows/webrtc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: webrtc
+
+jobs:
+  test:
+    name: test · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: webrtc/go.mod
+          cache: true
+      - name: gofmt 检查
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未格式化："
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test ./... -race -v
+      - name: go build
+        run: go build ./...
+
+  cross-build:
+    name: cross · ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: webrtc/go.mod
+          cache: true
+      - name: build
+        run: go build ./...
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+
+  e2e:
+    name: e2e · html ↔ go (datachannel)
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: webrtc/go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 安装 Chromium
+        working-directory: webrtc/e2e
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: demo 需要本地 peerjs.min.js（信令库）
+        run: cp ../peerjs/peerjs.min.js ./peerjs.min.js
+      - name: 起 webrtc-node + 静态服务并跑 e2e
+        run: |
+          set -euo pipefail
+          go build -o /tmp/webrtc-node ./cmd/webrtc-node
+          /tmp/webrtc-node > webrtc.log 2>&1 &
+          NODE_PID=$!
+          python3 -m http.server 8792 --bind 127.0.0.1 > http.log 2>&1 &
+          HTTP_PID=$!
+          trap 'kill $NODE_PID $HTTP_PID 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 60); do
+            if grep -q "PEER ID" webrtc.log; then break; fi
+            sleep 1
+          done
+          grep -A2 "PEER ID" webrtc.log
+
+          for i in $(seq 1 20); do
+            if curl -sf -o /dev/null http://127.0.0.1:8792/index.html; then break; fi
+            sleep 1
+          done
+
+          node e2e/connect.mjs
+        env:
+          PEER_LOG: webrtc.log
+          DEMO_URL: http://127.0.0.1:8792/index.html
+      - name: 失败时回看日志
+        if: failure()
+        run: |
+          echo "--- webrtc.log ---"
+          tail -120 webrtc.log || true
+          echo "--- http.log ---"
+          cat http.log || true
