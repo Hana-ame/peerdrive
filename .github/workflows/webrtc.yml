@@ -122,7 +122,17 @@ jobs:
             sleep 1
           done
 
-          node e2e/connect.mjs
+          # 内层日志要沿嵌套链接逐层点开才看得到，run/annotation 里只有一行
+          # exit code 1。这里把 e2e 输出既进 stdout，也拼成一句 annotation。
+          set +e
+          node e2e/connect.mjs 2>&1 | tee e2e.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            flat=$(tr '\n' '~' < e2e.log | head -c 4000)
+            echo "::error title=e2e 失败::${flat}"
+          fi
+          exit "$rc"
         env:
           PEER_LOG: webrtc.log
           DEMO_URL: http://127.0.0.1:8792/index.html
