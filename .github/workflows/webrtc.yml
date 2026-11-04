@@ -133,3 +133,8 @@ jobs:
           tail -120 webrtc.log || true
           echo "--- http.log ---"
           cat http.log || true
+          echo "--- 环境自检 ---"
+          node -e "console.log('node', process.version)"
+          ls -l peerjs.min.js || true
+          curl -sS -o /dev/null -w "http %{http_code}\n" http://127.0.0.1:8792/index.html || true
+          curl -sS -o /dev/null -w "signal https %{http_code}\n" https://0.peerjs.com/ || true
