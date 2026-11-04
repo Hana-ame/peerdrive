@@ -1,4 +1,4 @@
-name: m/hash-to-metadata
+name: h2f
 
 # 这个模块自带 go.mod；索引仓没有主仓的 ci.yml，所以它必须自带一条流水线。
 on:
