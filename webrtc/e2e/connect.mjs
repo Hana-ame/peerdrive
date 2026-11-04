@@ -1,6 +1,6 @@
 // e2e：从 webrtc.log 抓 PEER ID，用 Chromium 打开 demo，走完整链路：
-//   1. 浏览器用原生 RTCPeerConnection 发 offer（信令借 PeerJS）
-//   2. webrtc-node 应答，DataChannel 打开
+//   1. 浏览器用 peer.connect() 建连（SDP/ICE 全交给 PeerJS 的信令层）
+//   2. webrtc-node 通过 RegisterTransport 接管 OFFER，自己建 PeerConnection
 //   3. 发 control ping → 等到 pong（证明双向）
 //   4. 发 metadata → 等到 ack
 //   5. 发 8 MiB 随机块 + sha256 → 等到 check 回执

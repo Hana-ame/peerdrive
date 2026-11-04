@@ -164,7 +164,9 @@
   var MAX_PAYLOAD = 64 * 1024;
   var CHUNK_OVERHEAD = 9;
 
-  var peer = null, peerId = "", pc = null, dc = null;
+  // dc 是 PeerJS 的 DataConnection 包装（serialization: binary），
+  // 它内部持有 RTCPeerConnection，不需要我们单独维护 pc。
+  var peer = null, peerId = "", dc = null;
   var streamGen = 0, pingAt = 0;
 
   function now() { return new Date().toLocaleTimeString("zh-CN", { hour12: false }); }
@@ -333,114 +335,32 @@
     }
     toast("");
     log("", "开始建连 → " + id);
+    setChip(chipPC, "warn", "connect…");
 
-    pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "turn:0.peerjs.com:3478", username: "peerjs", credential: "peerjsp" }
-      ]
-    });
-    setChip(chipPC, "warn", "peerconnection…");
-
-    dc = pc.createDataChannel("peerdrive", { ordered: true });
-    dc.binaryType = "arraybuffer";
-    bindDC();
-
-    pc.onicecandidate = function (ev) {
-      if (!ev.candidate) { return; }
-      var c = ev.candidate;
-      peer.socket.send({
-        type: "CANDIDATE",
-        payload: {
-          type: "data",
-          connectionId: dc.label,
-          candidate: {
-            candidate: c.candidate,
-            sdpMid: c.sdpMid,
-            sdpMLineIndex: c.sdpMLineIndex,
-            usernameFragment: c.usernameFragment
-          }
-        },
-        dst: id
-      });
-    };
-
-    pc.oniceconnectionstatechange = function () {
-      log("", "ICE · " + pc.iceConnectionState);
-      if (pc.iceConnectionState === "failed") { setChip(chipPC, "bad", "ice failed"); }
-    };
-
-    pc.createOffer().then(function (offer) {
-      return pc.setLocalDescription(offer);
-    }).then(function () {
-      // 关键：用 PeerJS 的 socket 把 offer 塞给对方，connectionId 用 dc.label。
-      peer.socket.send({
-        type: "OFFER",
-        payload: {
-          type: "data",
-          connectionId: dc.label,
-          label: dc.label,
-          serialization: "binary",
-          reliable: true,
-          sdp: { type: "offer", sdp: pc.localDescription.sdp }
-        },
-        dst: id
-      });
-      log("", "已发 offer · label=" + dc.label);
-      setChip(chipPC, "ok", "offer sent");
-    }).catch(function (e) {
-      log("e", "createOffer 失败 · " + e.message);
-      toast("建连失败：" + e.message);
-    });
-
-    // 接住对方的 answer 与 candidate：hookSignal 已经挂在 socket 上，
-    // 这里不要再动 socket 的监听器，否则会拆掉 PeerJS 自己的。
-  }
-
-  // 直接监听信令 socket，拿 ANSWER / CANDIDATE。
-  function hookSignal() {
-    if (!peer || !peer.socket) { return; }
-    peer.socket.on("message", function (msg) {
-      if (!msg || !pc) { return; }
-      if (msg.type === "ANSWER") {
-        var sdp = msg.payload && msg.payload.sdp;
-        if (!sdp || sdp.type !== "answer") { return; }
-        pc.setRemoteDescription({ type: "answer", sdp: sdp.sdp })
-          .then(function () { setChip(chipPC, "ok", "pc connected"); log("o", "已应用 answer"); })
-          .catch(function (e) { log("e", "setRemoteDescription 失败 · " + e.message); });
-      } else if (msg.type === "CANDIDATE") {
-        var c = msg.payload && msg.payload.candidate;
-        if (!c) { return; }
-        pc.addIceCandidate({
-          candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex
-        }).catch(function (e) { log("w", "addIceCandidate · " + e.message); });
-      }
-    });
-  }
-
-  function bindDC() {
-    setChip(chipDC, "warn", "datachannel…");
-    dc.onopen = function () {
+    // 用 PeerJS 的 connect() 建连：它负责 SDP 交换（OFFER/ANSWER/CANDIDATE），
+    // 我们只关心通道建好之后在上面跑的帧。serialization 选 binary，
+    // 这样 conn.send(Uint8Array) 就是原始二进制，不会被 JSON 包一层。
+    var conn = peer.connect(id, { serialization: "binary", reliable: true });
+    dc = conn;
+    conn.on("open", function () {
+      setChip(chipPC, "ok", "pc connected");
       setChip(chipDC, "ok", "datachannel open");
       setEnabled(true);
-      log("o", "DataChannel 就绪");
+      log("o", "DataChannel 就绪 · " + conn.peer);
       sendHelperHello();
-    };
-    dc.onclose = function () {
-      setChip(chipDC, "", "datachannel closed");
-      setEnabled(false);
-      log("w", "DataChannel 关闭");
-    };
-    dc.onerror = function (e) { log("e", "datachannel 错误 · " + ((e && e.message) || e)); };
-    dc.onmessage = function (ev) {
-      if (typeof ev.data === "string") { log("e", "意外的文本帧（应全为二进制）"); return; }
-      var f = decode(new Uint8Array(ev.data));
+    });
+    conn.on("data", function (data) {
+      var bytes;
+      if (data instanceof ArrayBuffer) { bytes = new Uint8Array(data); }
+      else if (data && data.buffer) { bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength); }
+      else { log("e", "意外的数据类型（应全为二进制）"); return; }
+      var f = decode(bytes);
       if (!f) { return; }
       var text;
       if (f.kind === KIND.DATA) {
-        text = "[" + f.data.length + " 字节二进制] sha256 暂不计";
+        text = "[" + f.data.length + " 字节二进制]";
       } else {
-        try { text = JSON.stringify(JSON.parse(dec.decode(f.data)), null, 0); }
+        try { text = JSON.stringify(JSON.parse(dec.decode(f.data))); }
         catch (e) { text = dec.decode(f.data); }
       }
       render(f.kind, f.stream, text, "in");
@@ -453,7 +373,16 @@
           pingAt = 0;
         }
       }
-    };
+    });
+    conn.on("close", function () {
+      setChip(chipDC, "", "datachannel closed");
+      setEnabled(false);
+      log("w", "DataChannel 关闭");
+    });
+    conn.on("error", function (e) {
+      log("e", "通道错误 · " + ((e && e.message) || e));
+      toast("建连失败：" + ((e && e.message) || e));
+    });
   }
 
   function sendHelperHello() {
@@ -546,8 +475,7 @@
 
   function closeAll() {
     if (dc) { try { dc.close(); } catch (e) {} }
-    if (pc) { try { pc.close(); } catch (e) {} }
-    dc = null; pc = null;
+    dc = null;
     setEnabled(false);
     setChip(chipDC, "", "datachannel");
     setChip(chipPC, "", "peerconnection");
@@ -579,9 +507,6 @@
   log("", "页面就绪");
   makePeer();
   setEnabled(false);
-  var t = setInterval(function () {
-    if (peer && peer.socket) { hookSignal(); clearInterval(t); }
-  }, 200);
 })();
 </script>
 </body>
