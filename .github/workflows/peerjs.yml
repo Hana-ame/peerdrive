@@ -3,7 +3,6 @@ name: peerjs
 # monorepo：h2f 与 peerjs 各自一个 Go module，靠 paths 过滤各跑各的。
 on:
   push:
-    branches: [main]
     paths:
       - 'peerjs/**'
       - 'go.work'
