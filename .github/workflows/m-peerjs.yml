@@ -6,9 +6,12 @@ on:
   pull_request:
     branches: [m/peerjs]
 
+permissions:
+  contents: read
+
 jobs:
-  static-check:
-    name: static check · ${{ matrix.os }}
+  test:
+    name: test · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -16,22 +19,89 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test ./... -v
+      - name: go build
+        run: go build ./...
+
+  cross-build:
+    name: cross · ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build
+        run: go build ./...
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+
+  e2e:
+    name: e2e · html ↔ go
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-      - name: 校验页面、内联脚本与契约
-        run: node check.mjs
-
-  cloud-signal:
-    name: 0.peerjs.com 可达
-    runs-on: ubuntu-latest
-    steps:
-      - name: 取一个 id，确认公共信令活着
-        shell: bash
+          node-version: "22"
+      - name: 安装 Chromium
+        working-directory: e2e
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: 起 peer + 静态服务并跑 e2e
         run: |
           set -euo pipefail
-          code=$(curl -sS -o /tmp/id.txt -w '%{http_code}' \
-            --max-time 20 "https://0.peerjs.com/peerjs/id?ts=$(date +%s)000")
-          echo "http=$code id=$(cat /tmp/id.txt)"
-          test "$code" = "200"
-          test -s /tmp/id.txt
+          go build -o /tmp/peerjs-node ./cmd/peerjs-node
+          /tmp/peerjs-node > peer.log 2>&1 &
+          PEER_PID=$!
+          python3 -m http.server 8791 --bind 127.0.0.1 > http.log 2>&1 &
+          HTTP_PID=$!
+          trap 'kill $PEER_PID $HTTP_PID 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 60); do
+            if grep -q "PEER ID" peer.log; then break; fi
+            sleep 1
+          done
+          grep -A2 "PEER ID" peer.log
+
+          for i in $(seq 1 20); do
+            if curl -sf -o /dev/null http://127.0.0.1:8791/index.html; then break; fi
+            sleep 1
+          done
+
+          node e2e/connect.mjs
+        env:
+          PEER_LOG: peer.log
+          DEMO_URL: http://127.0.0.1:8791/index.html
+      - name: 失败时回看 peer 日志
+        if: failure()
+        run: |
+          echo "--- peer.log ---"
+          cat peer.log || true
+          echo "--- http.log ---"
+          cat http.log || true
