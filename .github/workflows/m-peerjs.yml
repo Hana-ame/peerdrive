@@ -1,0 +1,37 @@
+name: m/peerjs
+
+on:
+  push:
+    branches: [m/peerjs]
+  pull_request:
+    branches: [m/peerjs]
+
+jobs:
+  static-check:
+    name: static check · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 校验页面、内联脚本与契约
+        run: node check.mjs
+
+  cloud-signal:
+    name: 0.peerjs.com 可达
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取一个 id，确认公共信令活着
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/id.txt -w '%{http_code}' \
+            --max-time 20 "https://0.peerjs.com/peerjs/id?ts=$(date +%s)000")
+          echo "http=$code id=$(cat /tmp/id.txt)"
+          test "$code" = "200"
+          test -s /tmp/id.txt
