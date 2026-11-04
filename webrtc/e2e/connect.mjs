@@ -17,8 +17,25 @@ const demoURL = process.env.DEMO_URL || "http://127.0.0.1:8792/index.html";
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 function log(...a) { console.log("[e2e]", ...a); }
+
+function readTail(path, n) {
+  try {
+    const t = fs.readFileSync(path, "utf8");
+    return t.length > n ? t.slice(-n) : t;
+  } catch (e) {
+    return "(读不到 " + path + ": " + e.message + ")";
+  }
+}
 function fail(msg) {
   console.error("E2E FAIL: " + msg);
+  // CI 上 step 日志要沿嵌套链接点好几层才看得到，
+  // 这里把失败点写进 GITHUB_STEP_SUMMARY，run 详情页直接能读。
+  const s = process.env.GITHUB_STEP_SUMMARY;
+  if (s) {
+    try {
+      fs.appendFileSync(s, "### E2E FAIL\n\n```\n" + msg + "\n```\n");
+    } catch (e) { /* summary 写不进去不影响主流程 */ }
+  }
   process.exit(1);
 }
 
@@ -65,17 +82,24 @@ await page.fill("#peerId", goID);
 await page.click("#connectBtn");
 
 let dcOpen = false;
+let lastChip = "";
 for (let i = 0; i < 45; i++) {
-  const chip = (await page.textContent("#chipDC")) || "";
-  if (chip.includes("open")) { dcOpen = true; break; }
-  if ((i + 1) % 15 === 0) { log(`  等 DataChannel… ${i + 1}s · ${chip.trim()}`); }
+  lastChip = ((await page.textContent("#chipDC")) || "").trim();
+  if (lastChip.includes("open")) { dcOpen = true; break; }
+  if ((i + 1) % 15 === 0) { log(`  等 DataChannel… ${i + 1}s · ${lastChip}`); }
   await page.waitForTimeout(1000);
 }
 if (!dcOpen) {
-  const state = await page.textContent("#logbox");
+  const state = (await page.textContent("#logbox")) || "";
+  const signalChip = ((await page.textContent("#chipSignal")) || "").trim();
   console.error(state);
   await browser.close();
-  fail("45s 内 DataChannel 没打开");
+  fail(
+    "45s 内 DataChannel 没打开\n" +
+    "chipSignal=" + signalChip + " chipDC=" + lastChip + "\n" +
+    "--- 页面日志 ---\n" + state.slice(-3000) +
+    "\n--- go 侧日志 ---\n" + readTail(logPath, 4000),
+  );
 }
 log("DataChannel 已打开");
 
@@ -156,3 +180,9 @@ const summary = {
 await browser.close();
 console.log(JSON.stringify(summary, null, 2));
 console.log("E2E OK");
+if (process.env.GITHUB_STEP_SUMMARY) {
+  fs.appendFileSync(
+    process.env.GITHUB_STEP_SUMMARY,
+    "### E2E OK\n\n```json\n" + JSON.stringify(summary, null, 2) + "\n```\n",
+  );
+}
