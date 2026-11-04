@@ -3,7 +3,6 @@ name: webrtc
 # monorepo：webrtc 依赖 peerjs（信号层），因此 peerjs/** 变化也要跑这条。
 on:
   push:
-    branches: [main]
     paths:
       - 'webrtc/**'
       - 'peerjs/**'
