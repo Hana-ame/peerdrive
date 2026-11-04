@@ -201,7 +201,7 @@
 
 <section id="connect">
   <div class="shead"><span class="num">01</span><h2>连上信令，拿到一个 id</h2></div>
-  <p class="sub">页面加载就会向 <code class="inl">0.peerjs.com</code> 注册。把本端 id 复制给另一端，或者在下面填对方的 id 主动连过去。两端都用这一页即可。</p>
+  <p class="sub">页面加载就会向 <code class="inl">0.peerjs.com</code> 注册，<code class="inl">open</code> 后拿到本端 id。把 id 给另一端，由一端填进去主动连出，另一端被动接入即可。两端都用这一页，<b>不需要互填</b>。</p>
 
   <div class="panel">
     <h4>本端 / signaling</h4>
@@ -225,7 +225,7 @@
     <div class="row">
       <div class="grow">
         <label class="lab" for="peerId">远端 peer id</label>
-        <input class="txt" id="peerId" type="text" autocomplete="off" spellcheck="false" placeholder="粘贴对方的 id，例如 7d7f46ab-e2da-4b43-...">
+        <input class="txt" id="peerId" type="text" autocomplete="off" spellcheck="false" placeholder="粘贴对方页面 open 后显示的 id，例如 7d7f46ab-e2da-4b43-...">
       </div>
       <div class="ctl"><button class="btn primary" id="connectBtn" type="button">连接</button></div>
     </div>
@@ -246,7 +246,7 @@
 
   <div class="note ok">
     <p class="t">怎么测</p>
-    <p>开两个标签页（或两台设备），各自拿到一个 id；A 填 B 的 id 点「连接」，B 会收到被动接入。之后两边都能发、都能收。若 <code class="inl">file://</code> 下连不上，用 <code class="inl">python -m http.server</code> 起个本地静态服务再打开。</p>
+    <p>开两个标签页（或两台设备），各自等 <code class="inl">open</code> 拿到 id；只需<b>一端</b>填另一端的 id 点「连接」，另一端会收到被动接入。之后两边共用同一条全双工通道，都能发、都能收，<b>不用互填</b>——两端同时主动连反而会撞出第二条连接。若 <code class="inl">file://</code> 下连不上，用 <code class="inl">python -m http.server</code> 起个本地静态服务再打开。</p>
   </div>
 </section>
 
@@ -283,14 +283,14 @@
     <tr><th style="width:170px">参数</th><th style="width:210px">值</th><th>作用</th></tr>
     <tr><td class="mono">host</td><td class="mono">0.peerjs.com</td><td>信令主机。备用 <code class="inl">peersignal.moonchan.xyz</code>（自建 PeerServer）。</td></tr>
     <tr><td class="mono">port</td><td class="mono">443</td><td>云 PeerServer 只跑 443，端口被网络挡住就换自建服务。</td></tr>
-    <tr><td class="mono">path</td><td class="mono">/</td><td>PeerServer 挂载路径；取 id 的 HTTP 端点因此是 <code class="inl">/peerjs/id</code>。</td></tr>
+    <tr><td class="mono">path</td><td class="mono">/</td><td>PeerServer 挂载路径；<code class="inl">/peerjs/id</code> 返回<b>候选 id</b>，只供本端注册，不是在线 peer 列表。</td></tr>
     <tr><td class="mono">secure</td><td class="mono">true</td><td>用 <code class="inl">https</code> / <code class="inl">wss</code>。HTTPS 页面下必须开，否则混合内容被拦。</td></tr>
     <tr><td class="mono">key</td><td class="mono">peerjs</td><td>云服务器的 API key，只有 <code class="inl">0.peerjs.com</code> 需要；自建服务不用。</td></tr>
     <tr><td class="mono">serialization</td><td class="mono">json</td><td>连接选项，不是 Peer 选项。明确按 JSON 收发，载荷就是字符串。</td></tr>
   </table>
 
   <h3>最小实现</h3>
-<pre><span class="c">// 两端都跑这段；id 由信令服务器分配</span>
+<pre><span class="c">// 两端都跑这段；open 拿到的是本端已注册的 id</span>
 <span class="k">const</span> peer = <span class="k">new</span> Peer({ host:<span class="s">'0.peerjs.com'</span>, port:443, path:<span class="s">'/'</span>,
                        secure:<span class="k">true</span>, key:<span class="s">'peerjs'</span> });
 
@@ -310,6 +310,11 @@ bind(conn);
     <p class="t">库是本地的</p>
     <p><code class="inl">peerjs.min.js</code>（PeerJS 1.5.5，86,948 B）直接放在分支里，页面不依赖 unpkg / jsdelivr 才能加载；万一本地文件缺失，才回落到公共 CDN。信令服务器仍然要联网。</p>
   </div>
+
+  <div class="note">
+    <p class="t">id 从哪来</p>
+    <p><code class="inl">GET /peerjs/id</code> 返回的是<b>候选 id</b>：每次一个新 UUID，背后没有在线 peer，只给 <code class="inl">new Peer()</code> 注册用。要填的是另一端 <code class="inl">peer.on('open')</code> 拿到、<b>已经注册成功</b>的 id；把 curl 拿到的候选串填进输入框，只会得到 <code class="inl">peer-unavailable</code>。CI 里 curl 这个端点只为探活，不拿它建连。</p>
+  </div>
 </section>
 
 <section id="flow">
@@ -317,15 +322,15 @@ bind(conn);
   <p class="sub">信令只在前三步出现。通道一旦建立，PeerServer 就不在数据的路径上了——这也是「互传」和「经服务器转发」的区别。</p>
 
   <div class="flow">
-    <div class="step"><div class="i">01</div><h5>注册</h5><p><code class="inl">new Peer()</code> 向 <code class="inl">/peerjs/id</code> 要一个 UUID，开 wss 长连接。</p></div>
+    <div class="step"><div class="i">01</div><h5>注册</h5><p><code class="inl">new Peer()</code> 向 <code class="inl">/peerjs/id</code> 要一个候选 UUID 并注册，开 wss 长连接。</p></div>
     <div class="step"><div class="i">02</div><h5>寻址</h5><p>A 拿 B 的 id 调 <code class="inl">peer.connect(B)</code>，请求经信令转给 B。</p></div>
     <div class="step"><div class="i">03</div><h5>协商</h5><p>交换 SDP / ICE；默认 ICE 含 STUN 与 <code class="inl">turn:0.peerjs.com:3478</code>。</p></div>
     <div class="step"><div class="i">04</div><h5>通道</h5><p>DataChannel 打开，两端各持一个 <code class="inl">conn</code>，<code class="inl">open</code> 事件就绪。</p></div>
-    <div class="step"><div class="i">05</div><h5>互传</h5><p><code class="inl">conn.send(text)</code> 点对点直达，对端 <code class="inl">data</code> 事件收到字符串。</p></div>
+    <div class="step"><div class="i">05</div><h5>互传</h5><p>同一条 <code class="inl">conn</code> 全双工：两端都能 <code class="inl">send</code> / <code class="inl">on('data')</code>，不用互填 id。</p></div>
   </div>
 
   <div class="grid g2" style="margin-top:16px">
-    <div class="card"><h4>谁在传</h4><p>两端是对等的：主动连的一方和被动接的一方都绑同一套 <code class="inl">open / data / close / error</code>，所以谁都能先发。</p></div>
+    <div class="card"><h4>谁在传</h4><p>一条 DataChannel 就是全双工的：主动连的一方和被动接的一方都绑同一套 <code class="inl">open / data / close / error</code>，所以谁都能先发，不用两端互填 id。</p></div>
     <div class="card"><h4>谁不在传</h4><p>PeerServer 只做 id 分配与信令转发；字符串走 DTLS 加密的 DataChannel，不经它，也不落盘。</p></div>
   </div>
 </section>
@@ -338,6 +343,7 @@ bind(conn);
     <tr><th style="width:230px">边界</th><th>含义</th></tr>
     <tr><td class="mono">公共信令无认证</td><td><code class="inl">0.peerjs.com</code> 是免费公共服务，id 随机分配、不校验身份。任何知道 id 的人都能连进来；不要用它传敏感内容。</td></tr>
     <tr><td class="mono">id 不是身份</td><td>每次新建 peer 都换一个 UUID，重连也可能变。要认人得在连接 <code class="inl">metadata</code> 里带自己的标识，别拿 id 当账号。</td></tr>
+    <tr><td class="mono">候选 id 不是连接目标</td><td><code class="inl">/peerjs/id</code> 返回的 UUID 只用于本端注册，背后没有在线 peer；填它去连接必然 <code class="inl">peer-unavailable</code>。要填的是另一端 <code class="inl">open</code> 后显示的 id。</td></tr>
     <tr><td class="mono">跨 NAT 依赖 TURN</td><td>对称 NAT / 严格防火墙下直连会失败，流量要走默认 TURN。TURN 不可用时只剩「拿到 id 但连不上」。</td></tr>
     <tr><td class="mono">只传字符串</td><td>没有文件分片、没有媒体流、没有二进制协议。要传文件得另定编码（base64 或 Blob）与分块。</td></tr>
     <tr><td class="mono">生产换自建 PeerServer</td><td>页面里「信令」下拉可切到 <code class="inl">peersignal.moonchan.xyz</code>；自建服务不需要 <code class="inl">key</code>，路径按部署调整。</td></tr>

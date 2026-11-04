@@ -16,7 +16,7 @@ conn.send(text)                                 // 发字符串
 conn.on('data', text => …)                      // 收字符串
 ```
 
-两端绑定到同一套 `open / data / close / error`，主动方与被动方都能先发。
+一端 `peer.connect(id)` 主动连、另一端 `peer.on('connection')` 被动接，两端共用同一条全双工 DataConnection，都能先发；不需要互填 id。
 
 ### 配置
 
@@ -24,7 +24,7 @@ conn.on('data', text => …)                      // 收字符串
 | -------------- | ------------------------ | ----------------------------------------------------------- |
 | `host`         | `0.peerjs.com`           | 云信令。备用 `peersignal.moonchan.xyz`（自建 PeerServer）    |
 | `port`         | `443`                    | 云 PeerServer 只跑 443                                      |
-| `path`         | `/`                      | 取 id 的 HTTP 端点是 `/peerjs/id`                           |
+| `path`         | `/`                      | `/peerjs/id` 返回候选 id，只供本端注册                           |
 | `secure`       | `true`                   | https / wss；HTTPS 页面下必须开                             |
 | `key`          | `peerjs`                 | 只有 `0.peerjs.com` 需要，自建服务不用                      |
 | `serialization`| `json`                   | `connect()` 的选项，不是 `Peer()` 的选项；载荷是字符串      |
@@ -34,6 +34,8 @@ conn.on('data', text => …)                      // 收字符串
 ### 约定
 
 - 载荷只有字符串；不做文件分片、媒体流、二进制协议。
+- **id 从哪来**：`GET https://0.peerjs.com/peerjs/id` 返回的是**候选 id**——每次一个新 UUID，背后没有在线 peer，只供 `new Peer()` 注册时用。连接目标必须是另一端 `peer.on('open')` 拿到、已经注册成功的 id；把候选串填进 `peerId` 只会得到 `peer-unavailable`。CI 里 curl 这个端点只为探活，不拿它建连。
+- **一条通道，两端都能发**：一端 `peer.connect(id)` 主动连、另一端 `peer.on('connection')` 被动接，共用同一条全双工 `DataConnection`，两端都能 `send` / `on('data')`。**不需要互填、也不要互填**：两端同时主动连会撞出第二条连接。
 - 对端字符串不可信：消息与日志一律 `textContent`，不拼 `innerHTML`。
 - 库本地优先，CDN 仅兜底；**信令仍然要联网**。
 - `error` / `disconnected` / `close` 都要处理，断线用 `peer.reconnect()`。
