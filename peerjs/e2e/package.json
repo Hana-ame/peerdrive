@@ -1,0 +1,9 @@
+{
+  "name": "peerjs-e2e",
+  "private": true,
+  "type": "module",
+  "description": "从 peer.log 抓 PEER ID，用 Chromium 打开 demo 验证与 Go peer 的字符串往返",
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}

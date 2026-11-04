@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>m/peerjs · clean demo</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#fff; --ink:#16181d; --ink2:#3d4552; --muted:#6b7483;
+    --line:#e4e7ed; --line2:#d3d8e0;
+    --accent:#3b5bdb; --accent-soft:#eef1ff;
+    --teal:#0b7285; --teal-soft:#e6f5f7;
+    --rose:#a4343a;
+    --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.7}
+  .wrap{max-width:780px;margin:0 auto;padding:36px 22px 60px}
+  h1{margin:0 0 6px;font-size:24px;letter-spacing:-.01em;font-weight:600}
+  h1 code{font-family:var(--mono);font-size:.82em;background:var(--accent-soft);color:var(--accent);padding:.1em .34em;border-radius:6px}
+  .lede{margin:0 0 22px;color:var(--ink2);font-size:14.5px}
+  .lede b{font-weight:600}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:0 0 14px}
+  .card h2{margin:0 0 12px;font-size:11.5px;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:500}
+  .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .grow{flex:1 1 260px;min-width:0}
+  label{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 5px}
+  input{width:100%;font-family:var(--mono);font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--line2);border-radius:8px;padding:9px 11px;outline:none}
+  input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  button{font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--line2);background:var(--surface);color:var(--ink2);border-radius:8px;padding:9px 14px;white-space:nowrap}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{background:#2f4bc0;color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .pid{font-family:var(--mono);font-size:12.6px;background:#f0f2f7;border:1px solid var(--line);border-radius:7px;padding:6px 10px;word-break:break-all}
+  .pid.on{background:var(--teal-soft);border-color:#cfe9ed;color:var(--teal)}
+  .msgs{height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:9px;padding:4px 2px}
+  .msgs .empty{margin:auto;color:var(--muted);font-size:13px;text-align:center;line-height:1.9}
+  .msgs .empty code{font-family:var(--mono);font-size:11.5px;background:#eef0f4;padding:.1em .34em;border-radius:4px}
+  .msg{max-width:82%;border-radius:10px;padding:8px 12px;border:1px solid transparent}
+  .msg.out{align-self:flex-end;background:var(--accent-soft);border-color:#dbe1ff}
+  .msg.in{align-self:flex-start;background:var(--teal-soft);border-color:#cfe9ed}
+  .msg .meta{display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);font-size:10px;color:var(--muted);margin:0 0 3px}
+  .msg .body{white-space:pre-wrap;word-break:break-word;font-size:13.6px}
+  pre.log{margin:0;background:#12151c;color:#d8dde8;border-radius:9px;padding:11px 13px;font-family:var(--mono);font-size:11.4px;line-height:1.7;height:150px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
+  pre.log .w{color:#e8c07d}
+  pre.log .e{color:#f19ba0}
+  pre.log .o{color:#89d9c4}
+  .toast{min-height:1.4em;margin:9px 0 0;font-size:12.5px;color:var(--rose)}
+  .hint{margin:0;font-size:12.4px;color:var(--muted);font-family:var(--mono)}
+  table{width:100%;border-collapse:collapse;font-size:12.6px}
+  td{padding:6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  td:first-child{font-family:var(--mono);color:var(--accent);width:140px}
+  td code{font-family:var(--mono);font-size:11.6px;background:#eef0f4;padding:.1em .34em;border-radius:4px}
+  footer{margin-top:26px;font-size:11.8px;color:var(--muted);font-family:var(--mono)}
+</style>
+<script src="./peerjs.min.js"></script>
+<script>
+  if (typeof Peer !== "undefined") { window.__LOCAL_LIB__ = true; }
+  else { document.write('<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"><\/script>'); }
+</script>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>m/peerjs · <code>clean demo</code></h1>
+  <p class="lede">
+    本机 <b>peerdrive</b> 启动后会在 log 里打一条 <b>PEER ID</b>，把那条串填进下面的输入框就能连到它。
+    页面不需要知道任何 IP 或端口。
+  </p>
+
+  <div class="card">
+    <h2>本端 / signaling</h2>
+    <div class="row">
+      <div class="grow"><span class="pid" id="myId">等待分配 id…</span></div>
+      <button id="copyId" type="button">复制</button>
+      <button id="rebuild" type="button">重建</button>
+    </div>
+    <p class="hint" id="libHint" style="margin-top:9px">PeerJS 库：本地 peerjs.min.js</p>
+  </div>
+
+  <div class="card">
+    <h2>连接 / connect</h2>
+    <div class="row">
+      <div class="grow">
+        <label for="peerId">对端 PEER ID（从 peerdrive 的 log 里读）</label>
+        <input id="peerId" type="text" autocomplete="off" spellcheck="false" placeholder="例如 913c75bb-acf8-4e8b-ae31-a9f8706b8268">
+      </div>
+      <button class="primary" id="connectBtn" type="button">连接</button>
+    </div>
+    <p class="toast" id="toast" role="status"></p>
+    <p class="hint" id="connText">0 条通道</p>
+  </div>
+
+  <div class="card">
+    <h2>互传字符串 / data</h2>
+    <div class="msgs" id="msgs">
+      <div class="empty" id="emptyHint">
+        连上之后在这里收发字符串。<br>
+        <code>conn.send(text)</code> → <code>conn.on('data')</code>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="grow"><input id="msgInput" type="text" autocomplete="off" placeholder="输入字符串，回车发送"></div>
+      <button class="primary" id="sendBtn" type="button" disabled>发送</button>
+      <button id="clearBtn" type="button">清空</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>事件 / events</h2>
+    <pre class="log" id="logbox" aria-live="polite"></pre>
+  </div>
+
+  <div class="card">
+    <h2>约定 / contract</h2>
+    <table>
+      <tr><td>信令</td><td><code>0.peerjs.com</code> · 443 · path <code>/</code> · key <code>peerjs</code> · secure</td></tr>
+      <tr><td>序列化</td><td><code>serialization: "json"</code>，必须与 Go 侧一致；Go 发的是二进制帧</td></tr>
+      <tr><td>id 来源</td><td>peerdrive 启动时向 PeerServer 要的候选串，注册成功后打在 log 里</td></tr>
+      <tr><td>方向</td><td>peerdrive 不监听端口，浏览器主动 <code>connect</code>；一条 DataChannel 全双工</td></tr>
+      <tr><td>并发</td><td>多个页面/设备可同时连同一个 id，各自一条通道</td></tr>
+      <tr><td>本端 id</td><td>仅用于显示；连接对端不需要把自己的 id 给对方</td></tr>
+    </table>
+  </div>
+
+  <footer>peerdrive · m/peerjs · 浏览器只做出站连接</footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var myIdEl = $("myId"), peerIdInput = $("peerId"), connectBtn = $("connectBtn");
+  var connText = $("connText"), toastEl = $("toast"), msgs = $("msgs"), emptyHint = $("emptyHint");
+  var msgInput = $("msgInput"), sendBtn = $("sendBtn"), clearBtn = $("clearBtn"), logbox = $("logbox");
+
+  var peer = null, conn = null, myId = "";
+
+  if (!window.__LOCAL_LIB__) { $("libHint").textContent = "PeerJS 库：公共 CDN（本地文件缺失）"; }
+
+  function now() { return new Date().toLocaleTimeString("zh-CN", { hour12: false }); }
+
+  function log(kind, text) {
+    var line = document.createElement("div");
+    line.className = kind;
+    line.textContent = now() + "  " + text;
+    logbox.appendChild(line);
+    while (logbox.childNodes.length > 120) { logbox.removeChild(logbox.firstChild); }
+    logbox.scrollTop = logbox.scrollHeight;
+  }
+
+  function toast(t) { toastEl.textContent = t || ""; }
+
+  function render(text, dir, who) {
+    if (emptyHint && emptyHint.parentNode) { emptyHint.hidden = true; }
+    var el = document.createElement("div");
+    el.className = "msg " + dir;
+    var meta = document.createElement("div");
+    meta.className = "meta";
+    var w = document.createElement("span");
+    w.textContent = dir === "out" ? "我 → " + who : who + " → 我";
+    var t = document.createElement("span");
+    t.textContent = now();
+    meta.appendChild(w);
+    meta.appendChild(t);
+    var body = document.createElement("div");
+    body.className = "body";
+    body.textContent = text;
+    el.appendChild(meta);
+    el.appendChild(body);
+    msgs.appendChild(el);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function setConn(open, who) {
+    connText.textContent = open ? "通道已就绪 · " + who : (who ? "连接中 · " + who : "0 条通道");
+    sendBtn.disabled = !open;
+  }
+
+  function bind(c) {
+    conn = c;
+    setConn(false, c.peer);
+    c.on("open", function () {
+      if (conn !== c) { return; }
+      setConn(true, c.peer);
+      log("o", "DataChannel 就绪 · " + c.peer);
+    });
+    c.on("data", function (data) {
+      var text = typeof data === "string" ? data : JSON.stringify(data);
+      render(text, "in", c.peer);
+      log("", "← " + c.peer + " · " + text.length + " 字符");
+    });
+    c.on("close", function () {
+      if (conn === c) { conn = null; setConn(false, ""); }
+      log("w", "通道关闭 · " + c.peer);
+    });
+    c.on("error", function (e) {
+      log("e", "通道错误 · " + ((e && e.message) || e));
+    });
+  }
+
+  function makePeer() {
+    if (peer) { try { peer.destroy(); } catch (e) {} }
+    conn = null;
+    myId = "";
+    myIdEl.textContent = "等待分配 id…";
+    myIdEl.className = "pid";
+    setConn(false, "");
+    var p = new Peer({
+      host: "0.peerjs.com", port: 443, path: "/", secure: true, key: "peerjs", debug: 1
+    });
+    peer = p;
+    p.on("open", function (id) {
+      if (p !== peer) { return; }
+      myId = id;
+      myIdEl.textContent = id;
+      myIdEl.className = "pid on";
+      log("o", "本端注册成功 · " + id);
+    });
+    p.on("connection", function (c) {
+      if (p !== peer) { return; }
+      log("", "被动接入 · " + c.peer);
+      bind(c);
+    });
+    p.on("disconnected", function () {
+      if (p !== peer) { return; }
+      log("w", "信令断开，1.5s 后重连");
+      setTimeout(function () { if (p === peer) { try { p.reconnect(); } catch (e) {} } }, 1500);
+    });
+    p.on("error", function (e) {
+      if (p !== peer) { return; }
+      log("e", "peer 错误 · " + ((e && e.type) || "") + " " + ((e && e.message) || ""));
+      if (e && e.type === "peer-unavailable") { toast("对方不在线，或 id 写错了"); }
+    });
+  }
+
+  function connectTo() {
+    var id = peerIdInput.value.trim();
+    if (!id) { toast("先填 log 里的 PEER ID"); return; }
+    if (!peer || !myId) { toast("本端还没注册完成，稍等"); return; }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      toast("看起来不是 PeerJS 分配的 id（应形如 8-4-4-4-12）");
+      return;
+    }
+    toast("");
+    log("", "connect → " + id);
+    bind(peer.connect(id, { serialization: "json" }));
+  }
+
+  function send() {
+    var text = msgInput.value;
+    if (text === "") { return; }
+    if (!conn || !conn.open) { toast("通道还没就绪"); return; }
+    try {
+      conn.send(text);
+      render(text, "out", conn.peer);
+      log("", "→ " + conn.peer + " · " + text.length + " 字符");
+      msgInput.value = "";
+      toast("");
+    } catch (e) {
+      toast("发送失败：" + e.message);
+    }
+  }
+
+  connectBtn.addEventListener("click", connectTo);
+  peerIdInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { connectTo(); } });
+  sendBtn.addEventListener("click", send);
+  msgInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); send(); } });
+  clearBtn.addEventListener("click", function () {
+    Array.prototype.forEach.call(msgs.querySelectorAll(".msg"), function (n) { n.remove(); });
+    if (emptyHint) { emptyHint.hidden = false; }
+  });
+  $("rebuild").addEventListener("click", function () { toast(""); makePeer(); });
+  $("copyId").addEventListener("click", function () {
+    if (!myId) { return; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(myId).then(function () { toast("已复制"); }, function () { toast("复制失败"); });
+    }
+  });
+
+  log("", "页面就绪");
+  makePeer();
+})();
+</script>
+</body>
+</html>
