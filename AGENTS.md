@@ -4,44 +4,52 @@
 
 ## peerjs
 
-用 `0.peerjs.com` 公共 PeerServer 做信令，浏览器之间建 WebRTC DataChannel，**只互传字符串**。入口 `index.html`（可玩客户端 + 可视化说明），`peerjs.min.js` 是 vendored 的 PeerJS 1.5.5，页面不依赖 CDN 才能加载。
+本机进程当 PeerJS peer：纯出站连 `0.peerjs.com`，拿一个 id 打在日志里，浏览器用这个 id 连过来互传字符串。**不监听任何端口，不提供 http / ws 接口。**
 
-### API
+- `cmd/peerjs-node` — 入口，启动后打印 `PEER ID`
+- `peerjs/` — 客户端实现（信令 + WebRTC 应答 + DataChannel）
+- `index.html` — 浏览器侧 clean demo，标准 PeerJS 用法
+- `e2e/connect.mjs` — CI 用：从 `peer.log` 抓 id，Playwright 打开 demo，断言收到回显
 
-```js
-new Peer({ host, port, path, secure, key })     // 注册到信令，拿到本端 id
-peer.on('connection', conn => …)                // 被动接入
-peer.connect(id, { serialization: 'json' })     // 主动连出去
-conn.send(text)                                 // 发字符串
-conn.on('data', text => …)                      // 收字符串
+### 契约
+
+```go
+c, err := peerjs.Dial(ctx, peerjs.Config{})  // 取候选 id → wss 注册 → 等 OPEN
+id := c.ID()                                 // 就是打进日志的那条串
+c.OnMessage = func(remote, text string) {    // 收到字符串
+    c.Send(remote, "echo: "+text)            // 回一条
+}
 ```
 
-一端 `peer.connect(id)` 主动连、另一端 `peer.on('connection')` 被动接，两端共用同一条全双工 DataConnection，都能先发；不需要互填 id。
+浏览器侧不需要任何私有协议：
 
-### 配置
-
-| 参数           | 值                       | 说明                                                        |
-| -------------- | ------------------------ | ----------------------------------------------------------- |
-| `host`         | `0.peerjs.com`           | 云信令。备用 `peersignal.moonchan.xyz`（自建 PeerServer）    |
-| `port`         | `443`                    | 云 PeerServer 只跑 443                                      |
-| `path`         | `/`                      | `/peerjs/id` 返回候选 id，只供本端注册                           |
-| `secure`       | `true`                   | https / wss；HTTPS 页面下必须开                             |
-| `key`          | `peerjs`                 | 只有 `0.peerjs.com` 需要，自建服务不用                      |
-| `serialization`| `json`                   | `connect()` 的选项，不是 `Peer()` 的选项；载荷是字符串      |
-
-`.env`：`PEERDRIVE_PEERJS_URL=https://0.peerjs.com`、`PEERDRIVE_SERVER_URL=https://peersignal.moonchan.xyz`。页面「信令」下拉可切换两者。
+```js
+const conn = peer.connect(id, { serialization: 'json' });
+conn.on('open', () => conn.send('hello'));
+conn.on('data', text => console.log(text));
+```
 
 ### 约定
 
-- 载荷只有字符串；不做文件分片、媒体流、二进制协议。
-- **id 从哪来**：`GET https://0.peerjs.com/peerjs/id` 返回的是**候选 id**——每次一个新 UUID，背后没有在线 peer，只供 `new Peer()` 注册时用。连接目标必须是另一端 `peer.on('open')` 拿到、已经注册成功的 id；把候选串填进 `peerId` 只会得到 `peer-unavailable`。CI 里 curl 这个端点只为探活，不拿它建连。
-- **一条通道，两端都能发**：一端 `peer.connect(id)` 主动连、另一端 `peer.on('connection')` 被动接，共用同一条全双工 `DataConnection`，两端都能 `send` / `on('data')`。**不需要互填、也不要互填**：两端同时主动连会撞出第二条连接。
-- 对端字符串不可信：消息与日志一律 `textContent`，不拼 `innerHTML`。
-- 库本地优先，CDN 仅兜底；**信令仍然要联网**。
-- `error` / `disconnected` / `close` 都要处理，断线用 `peer.reconnect()`。
-- 公共信令无认证、id 随机分配，**id 不是身份**；生产换自建 PeerServer。
+- **只出站**：不监听端口，只连 `0.peerjs.com:443`。防火墙只放行出站即可。
+- **id 从 log 读**：`PEER ID` 那一行。`/peerjs/id` 返回的就是最终 id（`OPEN` 不回传 id），每次启动都是新串，wss 断开即失效。
+- **serialization 必须两边一致**：目前只支持 `json`。PeerJS 的 json serializer 发送时是 `TextEncoder.encode(JSON.stringify(x))`，即**二进制帧**；Go 侧必须 `dc.Send([]byte(...))`，用 text frame 会被浏览器 `TextDecoder.decode(string)` 抛错并静默丢弃。
+- **一条通道全双工**：浏览器主动 `connect`，Go 侧回 `ANSWER`；两端都能发能收，不需要互填 id。
+- **并发**：一个 id 可被多个浏览器同时连接，每个连接一个 `PeerConnection` + `DataChannel`，`peerjs` 用 `map[connectionId]*session` 管理，没有计数上限。
+- **消息只是数据**：浏览器发来的字符串不做任何解释，只按 UTF-8 字符串处理。
+- 公共信令无认证，id 不是身份；生产换自建 PeerServer（`PEERDRIVE_SERVER_URL`）。
+
+### 信令消息
+
+| 消息 | 结构 |
+| --- | --- |
+| `OPEN` | `{"type":"OPEN"}`，无 payload |
+| `OFFER` | `payload={type:"data",connectionId,label,serialization,sdp:{type:"offer",sdp}}` + `src` |
+| `ANSWER` | `payload={sdp:{type:"answer",sdp},type:"data",connectionId}` + `dst` |
+| `CANDIDATE` | `payload={candidate:{candidate,sdpMLineIndex,sdpMid},type:"data",connectionId}` |
+| 心跳 | 每 5 秒 `{"type":"HEARTBEAT"}` |
 
 ### 链接
 
-- 本页 ↔ `m/hash-to-metadata` 的实现说明页 `../hash-to-metadata-impl.html`（工作区根目录，非仓库文件）。
-- 详细说明放在 `index.html`，这里只留契约。
+- 相邻模块说明页：`../hash-to-metadata-impl.html`（工作区根目录，非仓库文件）
+- 图文说明在 `index.html`，这里只留契约。

@@ -1,0 +1,11 @@
+# 构建产物
+/peerjs-node
+/peerjs-node.exe
+
+# e2e 依赖
+/e2e/node_modules/
+/e2e/package-lock.json
+
+# 运行日志
+/peer.log
+/http.log

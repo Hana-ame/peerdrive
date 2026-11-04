@@ -3,660 +3,265 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>peerdrive · m/peerjs · 互传字符串</title>
+<title>m/peerjs · clean demo</title>
 <style>
   :root{
-    --bg:#f6f7f9; --surface:#fff; --ink:#16181d; --ink-2:#3d4552; --muted:#6b7483;
-    --line:#e4e7ed; --line-2:#d3d8e0;
+    --bg:#f6f7f9; --surface:#fff; --ink:#16181d; --ink2:#3d4552; --muted:#6b7483;
+    --line:#e4e7ed; --line2:#d3d8e0;
     --accent:#3b5bdb; --accent-soft:#eef1ff;
     --teal:#0b7285; --teal-soft:#e6f5f7;
-    --amber:#a65a00; --amber-soft:#fdf3e3;
-    --rose:#a4343a; --rose-soft:#fceeef;
-    --mono:"JetBrains Mono","SFMono-Regular",ui-monospace,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    --rose:#a4343a;
+    --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","Microsoft YaHei",sans-serif;
   }
   *{box-sizing:border-box}
-  html{scroll-behavior:smooth}
-  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.72;-webkit-font-smoothing:antialiased}
-  a{color:var(--accent);text-decoration:none}
-  a:hover{text-decoration:underline}
-  .wrap{max-width:1060px;margin:0 auto;padding:0 28px}
-
-  header.hero{padding:60px 0 36px;border-bottom:1px solid var(--line)}
-  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 14px}
-  h1{margin:0;font-size:38px;line-height:1.24;letter-spacing:-.02em;font-weight:640}
-  h1 code{font-family:var(--mono);font-size:.84em;background:var(--accent-soft);color:var(--accent);padding:.08em .34em;border-radius:6px}
-  .lede{margin:18px 0 0;max-width:64ch;color:var(--ink-2);font-size:17px}
-  .lede b{font-weight:620;color:var(--ink)}
-  .facts{display:flex;flex-wrap:wrap;margin:30px 0 0;border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}
-  .fact{flex:1 1 148px;padding:14px 18px;border-right:1px solid var(--line)}
-  .fact:last-child{border-right:0}
-  .fact dt{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0}
-  .fact dd{margin:4px 0 0;font-size:15px;font-weight:600}
-  .fact dd small{display:block;font-weight:400;font-size:12.5px;color:var(--muted)}
-
-  nav.toc{position:sticky;top:0;z-index:20;background:rgba(246,247,249,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
-  nav.toc ul{display:flex;gap:4px;list-style:none;margin:0 auto;padding:9px 28px;max-width:1060px;overflow-x:auto;scrollbar-width:none}
-  nav.toc ul::-webkit-scrollbar{display:none}
-  nav.toc a{display:block;white-space:nowrap;font-size:13px;color:var(--muted);padding:5px 11px;border-radius:7px;font-family:var(--mono)}
-  nav.toc a:hover{background:var(--surface);color:var(--ink);text-decoration:none}
-  nav.toc a.ext{color:var(--accent)}
-
-  section{padding:50px 0;border-bottom:1px solid var(--line)}
-  section:last-of-type{border-bottom:0}
-  .shead{display:flex;align-items:baseline;gap:14px;margin:0 0 8px}
-  .num{font-family:var(--mono);font-size:12px;color:var(--accent);border:1px solid var(--line-2);border-radius:6px;padding:2px 7px;background:var(--surface)}
-  h2{margin:0;font-size:25px;letter-spacing:-.015em;font-weight:640}
-  .sub{margin:0 0 24px;color:var(--muted);max-width:72ch}
-  h3{font-size:16px;margin:28px 0 10px}
-  p{margin:0 0 14px;max-width:76ch}
-  ul.tight{margin:0 0 14px;padding-left:20px;max-width:76ch}
-  ul.tight li{margin:6px 0}
-
-  .panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:0 0 14px}
-  .panel h4{margin:0 0 12px;font-size:12px;font-family:var(--mono);color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-weight:500}
-  .grid{display:grid;gap:14px}
-  .g2{grid-template-columns:repeat(2,1fr)}
-  .g3{grid-template-columns:repeat(3,1fr)}
-  @media (max-width:880px){.g3,.g2{grid-template-columns:1fr}}
-  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
-  .card h4{margin:0 0 6px;font-size:13.5px;font-family:var(--mono);color:var(--accent)}
-  .card p{margin:0;font-size:14px;color:var(--ink-2)}
-
-  .bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-  .state{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12.5px;padding:5px 11px;border-radius:999px;background:#eef0f4;color:var(--ink-2);white-space:nowrap}
-  .state .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
-  .state[data-s="connecting"] .dot{background:var(--amber)}
-  .state[data-s="connecting"]{background:var(--amber-soft);color:var(--amber)}
-  .state[data-s="online"] .dot{background:var(--teal);box-shadow:0 0 0 3px rgba(11,114,133,.14)}
-  .state[data-s="online"]{background:var(--teal-soft);color:var(--teal)}
-  .state[data-s="error"] .dot{background:var(--rose)}
-  .state[data-s="error"]{background:var(--rose-soft);color:var(--rose)}
-  .pid{font-family:var(--mono);font-size:14px;background:#f0f2f7;border:1px solid var(--line);border-radius:8px;padding:6px 11px;word-break:break-all;color:var(--ink)}
-  .pid.empty{color:var(--muted)}
-  .spacer{flex:1 1 auto}
-
-  label.lab{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
-  input.txt,select.sel{font-family:var(--mono);font-size:13.5px;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:8px;padding:9px 12px;outline:none;min-width:0}
-  input.txt:focus,select.sel:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-  input.txt{width:100%}
-  .row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
-  .row .grow{flex:1 1 260px}
-  .row .ctl{flex:0 0 auto}
-  button.btn{font-family:var(--sans);font-size:13.5px;font-weight:560;cursor:pointer;border-radius:8px;padding:9px 16px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);white-space:nowrap}
-  button.btn:hover{border-color:var(--accent);color:var(--accent)}
-  button.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-  button.btn.primary:hover{background:#2f4bc0;color:#fff}
-  button.btn:disabled{opacity:.45;cursor:not-allowed}
-  .hintline{font-size:12.8px;color:var(--muted);margin:10px 0 0;font-family:var(--mono)}
-  .toast{font-size:13px;color:var(--rose);margin:10px 0 0;min-height:1.4em}
-
-  .chat{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-  .chat .chead{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line);background:#fbfbfd;font-family:var(--mono);font-size:12px;color:var(--muted);flex-wrap:wrap}
-  .chat .chead b{color:var(--ink);font-weight:600}
-  .msgs{height:300px;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
-  .msgs .empty{margin:auto;text-align:center;color:var(--muted);font-size:13.5px;line-height:1.9}
-  .msgs .empty code{font-family:var(--mono);background:#eef0f4;padding:.1em .4em;border-radius:5px}
-  .msg{max-width:78%;border-radius:11px;padding:9px 13px;border:1px solid transparent}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.7}
+  .wrap{max-width:780px;margin:0 auto;padding:36px 22px 60px}
+  h1{margin:0 0 6px;font-size:24px;letter-spacing:-.01em;font-weight:600}
+  h1 code{font-family:var(--mono);font-size:.82em;background:var(--accent-soft);color:var(--accent);padding:.1em .34em;border-radius:6px}
+  .lede{margin:0 0 22px;color:var(--ink2);font-size:14.5px}
+  .lede b{font-weight:600}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:0 0 14px}
+  .card h2{margin:0 0 12px;font-size:11.5px;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:500}
+  .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .grow{flex:1 1 260px;min-width:0}
+  label{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 5px}
+  input{width:100%;font-family:var(--mono);font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--line2);border-radius:8px;padding:9px 11px;outline:none}
+  input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  button{font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--line2);background:var(--surface);color:var(--ink2);border-radius:8px;padding:9px 14px;white-space:nowrap}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{background:#2f4bc0;color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .pid{font-family:var(--mono);font-size:12.6px;background:#f0f2f7;border:1px solid var(--line);border-radius:7px;padding:6px 10px;word-break:break-all}
+  .pid.on{background:var(--teal-soft);border-color:#cfe9ed;color:var(--teal)}
+  .msgs{height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:9px;padding:4px 2px}
+  .msgs .empty{margin:auto;color:var(--muted);font-size:13px;text-align:center;line-height:1.9}
+  .msgs .empty code{font-family:var(--mono);font-size:11.5px;background:#eef0f4;padding:.1em .34em;border-radius:4px}
+  .msg{max-width:82%;border-radius:10px;padding:8px 12px;border:1px solid transparent}
   .msg.out{align-self:flex-end;background:var(--accent-soft);border-color:#dbe1ff}
   .msg.in{align-self:flex-start;background:var(--teal-soft);border-color:#cfe9ed}
-  .msg .meta{display:flex;gap:10px;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:0 0 4px}
-  .msg.out .meta .who{color:var(--accent)}
-  .msg.in .meta .who{color:var(--teal)}
-  .msg .body{font-size:14.2px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:var(--ink)}
-  .composer{display:flex;gap:10px;padding:12px 16px;border-top:1px solid var(--line);background:#fbfbfd;flex-wrap:wrap}
-  .composer input{flex:1 1 300px}
-
-  .logbox{background:#12151c;color:#d8dde8;border-radius:10px;padding:12px 14px;font-family:var(--mono);font-size:11.8px;line-height:1.75;height:170px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
-  .logbox .l-ok{color:#89d9c4}
-  .logbox .l-data{color:#a5b4fc}
-  .logbox .l-warn{color:#e8c07d}
-  .logbox .l-err{color:#f19ba0}
-  .logbox .l-dim{color:#7d8798}
-  .logbox .l-time{color:#6b7483}
-
-  pre{background:#12151c;color:#e6e9f0;border-radius:11px;padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:12.6px;line-height:1.72;margin:0 0 6px}
-  pre .c{color:#8b96a8}
-  pre .k{color:#a5b4fc}
-  pre .s{color:#89d9c4}
-  .cap{font-size:12.5px;color:var(--muted);margin:0 0 20px;font-family:var(--mono)}
-  code.inl{font-family:var(--mono);font-size:.9em;background:#eef0f4;color:#2b3240;padding:.1em .36em;border-radius:5px;border:1px solid var(--line)}
-
-  .flow{display:grid;grid-template-columns:repeat(5,1fr);background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-  @media (max-width:920px){.flow{grid-template-columns:1fr}}
-  .step{padding:16px;border-right:1px solid var(--line)}
-  .step:last-child{border-right:0}
-  .step .i{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.1em}
-  .step h5{margin:6px 0;font-size:13.5px;font-weight:640}
-  .step p{margin:0;font-size:12.8px;color:var(--muted);line-height:1.6}
-
-  table{width:100%;border-collapse:separate;border-spacing:0;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13.6px}
-  th,td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
-  th{background:#fbfbfd;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500}
+  .msg .meta{display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);font-size:10px;color:var(--muted);margin:0 0 3px}
+  .msg .body{white-space:pre-wrap;word-break:break-word;font-size:13.6px}
+  pre.log{margin:0;background:#12151c;color:#d8dde8;border-radius:9px;padding:11px 13px;font-family:var(--mono);font-size:11.4px;line-height:1.7;height:150px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
+  pre.log .w{color:#e8c07d}
+  pre.log .e{color:#f19ba0}
+  pre.log .o{color:#89d9c4}
+  .toast{min-height:1.4em;margin:9px 0 0;font-size:12.5px;color:var(--rose)}
+  .hint{margin:0;font-size:12.4px;color:var(--muted);font-family:var(--mono)}
+  table{width:100%;border-collapse:collapse;font-size:12.6px}
+  td{padding:6px 0;border-bottom:1px solid var(--line);vertical-align:top}
   tr:last-child td{border-bottom:0}
-  td.mono{font-family:var(--mono);font-size:12.4px;color:var(--ink-2)}
-
-  .note{border-left:3px solid var(--amber);background:var(--amber-soft);border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0}
-  .note .t{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--amber);margin:0 0 6px}
-  .note p{margin:0;font-size:14px;color:#4a3a25}
-  .note.ok{border-left-color:var(--teal);background:var(--teal-soft)}
-  .note.ok .t{color:var(--teal)}
-  .note.ok p{color:#144b56}
-
-  .links{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  @media (max-width:880px){.links{grid-template-columns:1fr}}
-  .linkcard{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
-  .linkcard .h{font-family:var(--mono);font-size:12px;color:var(--accent);margin:0 0 4px}
-  .linkcard .d{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
-  .linkcard ul{margin:0;padding-left:18px;font-size:13.2px}
-  .linkcard li{margin:5px 0}
-  .linkcard code{font-family:var(--mono);font-size:11.8px;color:var(--muted)}
-
-  footer{padding:34px 0 54px;color:var(--muted);font-size:12.8px;font-family:var(--mono)}
-  footer .row{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  td:first-child{font-family:var(--mono);color:var(--accent);width:140px}
+  td code{font-family:var(--mono);font-size:11.6px;background:#eef0f4;padding:.1em .34em;border-radius:4px}
+  footer{margin-top:26px;font-size:11.8px;color:var(--muted);font-family:var(--mono)}
 </style>
 <script src="./peerjs.min.js"></script>
 <script>
-  // 本地库缺失时兜底走公共 CDN；页面本身不依赖 CDN 才能跑。
-  if (typeof Peer !== "undefined") {
-    window.__PEERJS_LOCAL__ = true;
-  } else {
-    document.write('<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"><\/script>');
-  }
+  if (typeof Peer !== "undefined") { window.__LOCAL_LIB__ = true; }
+  else { document.write('<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"><\/script>'); }
 </script>
 </head>
 <body>
+<div class="wrap">
 
-<header class="hero">
-  <div class="wrap">
-    <p class="kicker">peerdrive · 模块 m/peerjs</p>
-    <h1>两个页面，一根<br><code>DataChannel</code>，互传字符串</h1>
-    <p class="lede">
-      用 <b>0.peerjs.com</b> 做信令，浏览器之间直接建 WebRTC 数据通道。信令只负责交换 id 和 SDP，
-      <b>字符串本身不经过服务器</b>。这一页既是能跑的客户端，也是 <code class="inl">m/peerjs</code> 分支的入口。
-    </p>
-    <dl class="facts">
-      <div class="fact"><dt>信令</dt><dd>0.peerjs.com<small>公共 PeerServer · 443</small></dd></div>
-      <div class="fact"><dt>库</dt><dd>1.5.5<small>vendored · 86 KB</small></dd></div>
-      <div class="fact"><dt>通道</dt><dd>DataChannel<small>serialization=json</small></dd></div>
-      <div class="fact"><dt>载荷</dt><dd>string<small>只传字符串</small></dd></div>
-      <div class="fact"><dt>分支</dt><dd>m/peerjs<small>双向链接到说明页</small></dd></div>
-    </dl>
-  </div>
-</header>
+  <h1>m/peerjs · <code>clean demo</code></h1>
+  <p class="lede">
+    本机 <b>peerdrive</b> 启动后会在 log 里打一条 <b>PEER ID</b>，把那条串填进下面的输入框就能连到它。
+    页面不需要知道任何 IP 或端口。
+  </p>
 
-<nav class="toc">
-  <ul>
-    <li><a href="#connect">01 拿到 id</a></li>
-    <li><a href="#chat">02 互传字符串</a></li>
-    <li><a href="#config">03 配置</a></li>
-    <li><a href="#flow">04 链路</a></li>
-    <li><a href="#limits">05 边界</a></li>
-    <li><a href="#links">06 链接</a></li>
-    <li><a class="ext" href="https://github.com/Hana-ame/peerdrive/tree/m/hash-to-metadata">↗ m/hash-to-metadata</a></li>
-  </ul>
-</nav>
-
-<main class="wrap">
-
-<section id="connect">
-  <div class="shead"><span class="num">01</span><h2>连上信令，拿到一个 id</h2></div>
-  <p class="sub">页面加载就会向 <code class="inl">0.peerjs.com</code> 注册，<code class="inl">open</code> 后拿到本端 id。把 id 给另一端，由一端填进去主动连出，另一端被动接入即可。两端都用这一页，<b>不需要互填</b>。</p>
-
-  <div class="panel">
-    <h4>本端 / signaling</h4>
-    <div class="bar">
-      <span class="state" id="signalState" data-s="connecting"><span class="dot"></span><span id="signalText">连接中…</span></span>
-      <span class="pid empty" id="myId">等待分配 id…</span>
-      <button class="btn" id="copyId" type="button">复制 id</button>
-      <span class="spacer"></span>
-      <label class="lab" for="serverSel" style="margin:0">信令</label>
-      <select class="sel" id="serverSel">
-        <option value="cloud">0.peerjs.com</option>
-        <option value="self">peersignal.moonchan.xyz</option>
-      </select>
-      <button class="btn" id="rebuild" type="button">重建 peer</button>
+  <div class="card">
+    <h2>本端 / signaling</h2>
+    <div class="row">
+      <div class="grow"><span class="pid" id="myId">等待分配 id…</span></div>
+      <button id="copyId" type="button">复制</button>
+      <button id="rebuild" type="button">重建</button>
     </div>
-    <p class="hintline" id="libHint">PeerJS 库：本地 peerjs.min.js</p>
+    <p class="hint" id="libHint" style="margin-top:9px">PeerJS 库：本地 peerjs.min.js</p>
   </div>
 
-  <div class="panel">
-    <h4>连到另一端 / connect</h4>
+  <div class="card">
+    <h2>连接 / connect</h2>
     <div class="row">
       <div class="grow">
-        <label class="lab" for="peerId">远端 peer id</label>
-        <input class="txt" id="peerId" type="text" autocomplete="off" spellcheck="false" placeholder="粘贴对方页面 open 后显示的 id，例如 7d7f46ab-e2da-4b43-...">
+        <label for="peerId">对端 PEER ID（从 peerdrive 的 log 里读）</label>
+        <input id="peerId" type="text" autocomplete="off" spellcheck="false" placeholder="例如 913c75bb-acf8-4e8b-ae31-a9f8706b8268">
       </div>
-      <div class="ctl"><button class="btn primary" id="connectBtn" type="button">连接</button></div>
-    </div>
-    <div class="row" style="margin-top:14px">
-      <div class="grow">
-        <label class="lab" for="targetSel">发送目标（已建立的通道）</label>
-        <select class="sel" id="targetSel" style="width:100%"><option value="">（无）</option></select>
-      </div>
-      <div class="ctl"><span class="state" id="connState" data-s="idle"><span class="dot"></span><span id="connText">0 条通道</span></span></div>
+      <button class="primary" id="connectBtn" type="button">连接</button>
     </div>
     <p class="toast" id="toast" role="status"></p>
+    <p class="hint" id="connText">0 条通道</p>
   </div>
 
-  <div class="panel">
-    <h4>事件日志 / events</h4>
-    <div class="logbox" id="logbox" aria-live="polite"></div>
-  </div>
-
-  <div class="note ok">
-    <p class="t">怎么测</p>
-    <p>开两个标签页（或两台设备），各自等 <code class="inl">open</code> 拿到 id；只需<b>一端</b>填另一端的 id 点「连接」，另一端会收到被动接入。之后两边共用同一条全双工通道，都能发、都能收，<b>不用互填</b>——两端同时主动连反而会撞出第二条连接。若 <code class="inl">file://</code> 下连不上，用 <code class="inl">python -m http.server</code> 起个本地静态服务再打开。</p>
-  </div>
-</section>
-
-<section id="chat">
-  <div class="shead"><span class="num">02</span><h2>互传字符串</h2></div>
-  <p class="sub">发送走 <code class="inl">conn.send(text)</code>，接收走 <code class="inl">conn.on('data', …)</code>。收到的内容一律用 <code class="inl">textContent</code> 渲染，不当 HTML 解析——对端字符串是不可信输入。</p>
-
-  <div class="chat">
-    <div class="chead">
-      <span>当前目标 <b id="chatTarget">（未连接）</b></span>
-      <span class="spacer"></span>
-      <span>双向 · UTF-8 字符串</span>
-    </div>
+  <div class="card">
+    <h2>互传字符串 / data</h2>
     <div class="msgs" id="msgs">
       <div class="empty" id="emptyHint">
-        还没有消息。<br>建立通道后，在下面输入任意字符串，回车或点「发送」。<br>
+        连上之后在这里收发字符串。<br>
         <code>conn.send(text)</code> → <code>conn.on('data')</code>
       </div>
     </div>
-    <div class="composer">
-      <input class="txt" id="msgInput" type="text" autocomplete="off" placeholder="输入要发送的字符串，回车发送…">
-      <button class="btn primary" id="sendBtn" type="button">发送</button>
-      <button class="btn" id="clearBtn" type="button">清空</button>
+    <div class="row" style="margin-top:10px">
+      <div class="grow"><input id="msgInput" type="text" autocomplete="off" placeholder="输入字符串，回车发送"></div>
+      <button class="primary" id="sendBtn" type="button" disabled>发送</button>
+      <button id="clearBtn" type="button">清空</button>
     </div>
   </div>
-  <p class="hintline">换行用 Ctrl / ⌘ + Enter 插入；单条消息没有长度限制，但公共信令不负责转发内容，超大字符串受浏览器 DataChannel 缓冲限制。</p>
-</section>
 
-<section id="config">
-  <div class="shead"><span class="num">03</span><h2>配置：就这五个参数</h2></div>
-  <p class="sub">PeerJS 客户端的默认值正好就是云信令，但这里全部显式写出来，免得换自建服务器时不知道改哪个。<code class="inl">.env</code> 里的 <code class="inl">PEERDRIVE_PEERJS_URL</code> 与 <code class="inl">PEERDRIVE_SERVER_URL</code> 分别对应下表两行。</p>
-
-  <table>
-    <tr><th style="width:170px">参数</th><th style="width:210px">值</th><th>作用</th></tr>
-    <tr><td class="mono">host</td><td class="mono">0.peerjs.com</td><td>信令主机。备用 <code class="inl">peersignal.moonchan.xyz</code>（自建 PeerServer）。</td></tr>
-    <tr><td class="mono">port</td><td class="mono">443</td><td>云 PeerServer 只跑 443，端口被网络挡住就换自建服务。</td></tr>
-    <tr><td class="mono">path</td><td class="mono">/</td><td>PeerServer 挂载路径；<code class="inl">/peerjs/id</code> 返回<b>候选 id</b>，只供本端注册，不是在线 peer 列表。</td></tr>
-    <tr><td class="mono">secure</td><td class="mono">true</td><td>用 <code class="inl">https</code> / <code class="inl">wss</code>。HTTPS 页面下必须开，否则混合内容被拦。</td></tr>
-    <tr><td class="mono">key</td><td class="mono">peerjs</td><td>云服务器的 API key，只有 <code class="inl">0.peerjs.com</code> 需要；自建服务不用。</td></tr>
-    <tr><td class="mono">serialization</td><td class="mono">json</td><td>连接选项，不是 Peer 选项。明确按 JSON 收发，载荷就是字符串。</td></tr>
-  </table>
-
-  <h3>最小实现</h3>
-<pre><span class="c">// 两端都跑这段；open 拿到的是本端已注册的 id</span>
-<span class="k">const</span> peer = <span class="k">new</span> Peer({ host:<span class="s">'0.peerjs.com'</span>, port:443, path:<span class="s">'/'</span>,
-                       secure:<span class="k">true</span>, key:<span class="s">'peerjs'</span> });
-
-peer.on(<span class="s">'open'</span>, id =&gt; { <span class="c">/* 把 id 给对方 */</span> });
-peer.on(<span class="s">'connection'</span>, conn =&gt; bind(conn));   <span class="c">// 被动接入</span>
-
-<span class="k">const</span> conn = peer.connect(remoteId, { serialization:<span class="s">'json'</span> });
-bind(conn);
-
-<span class="k">function</span> bind(conn) {
-  conn.on(<span class="s">'open'</span>, () =&gt; conn.send(<span class="s">'hello'</span>));  <span class="c">// 发字符串</span>
-  conn.on(<span class="s">'data'</span>, text =&gt; console.log(text));          <span class="c">// 收字符串</span>
-}</pre>
-  <p class="cap">index.html · 完整版另含 error / disconnected / close 处理、多通道切换与事件日志</p>
-
-  <div class="note">
-    <p class="t">库是本地的</p>
-    <p><code class="inl">peerjs.min.js</code>（PeerJS 1.5.5，86,948 B）直接放在分支里，页面不依赖 unpkg / jsdelivr 才能加载；万一本地文件缺失，才回落到公共 CDN。信令服务器仍然要联网。</p>
+  <div class="card">
+    <h2>事件 / events</h2>
+    <pre class="log" id="logbox" aria-live="polite"></pre>
   </div>
 
-  <div class="note">
-    <p class="t">id 从哪来</p>
-    <p><code class="inl">GET /peerjs/id</code> 返回的是<b>候选 id</b>：每次一个新 UUID，背后没有在线 peer，只给 <code class="inl">new Peer()</code> 注册用。要填的是另一端 <code class="inl">peer.on('open')</code> 拿到、<b>已经注册成功</b>的 id；把 curl 拿到的候选串填进输入框，只会得到 <code class="inl">peer-unavailable</code>。CI 里 curl 这个端点只为探活，不拿它建连。</p>
-  </div>
-</section>
-
-<section id="flow">
-  <div class="shead"><span class="num">04</span><h2>一条字符串走过的路</h2></div>
-  <p class="sub">信令只在前三步出现。通道一旦建立，PeerServer 就不在数据的路径上了——这也是「互传」和「经服务器转发」的区别。</p>
-
-  <div class="flow">
-    <div class="step"><div class="i">01</div><h5>注册</h5><p><code class="inl">new Peer()</code> 向 <code class="inl">/peerjs/id</code> 要一个候选 UUID 并注册，开 wss 长连接。</p></div>
-    <div class="step"><div class="i">02</div><h5>寻址</h5><p>A 拿 B 的 id 调 <code class="inl">peer.connect(B)</code>，请求经信令转给 B。</p></div>
-    <div class="step"><div class="i">03</div><h5>协商</h5><p>交换 SDP / ICE；默认 ICE 含 STUN 与 <code class="inl">turn:0.peerjs.com:3478</code>。</p></div>
-    <div class="step"><div class="i">04</div><h5>通道</h5><p>DataChannel 打开，两端各持一个 <code class="inl">conn</code>，<code class="inl">open</code> 事件就绪。</p></div>
-    <div class="step"><div class="i">05</div><h5>互传</h5><p>同一条 <code class="inl">conn</code> 全双工：两端都能 <code class="inl">send</code> / <code class="inl">on('data')</code>，不用互填 id。</p></div>
+  <div class="card">
+    <h2>约定 / contract</h2>
+    <table>
+      <tr><td>信令</td><td><code>0.peerjs.com</code> · 443 · path <code>/</code> · key <code>peerjs</code> · secure</td></tr>
+      <tr><td>序列化</td><td><code>serialization: "json"</code>，必须与 Go 侧一致；Go 发的是二进制帧</td></tr>
+      <tr><td>id 来源</td><td>peerdrive 启动时向 PeerServer 要的候选串，注册成功后打在 log 里</td></tr>
+      <tr><td>方向</td><td>peerdrive 不监听端口，浏览器主动 <code>connect</code>；一条 DataChannel 全双工</td></tr>
+      <tr><td>并发</td><td>多个页面/设备可同时连同一个 id，各自一条通道</td></tr>
+      <tr><td>本端 id</td><td>仅用于显示；连接对端不需要把自己的 id 给对方</td></tr>
+    </table>
   </div>
 
-  <div class="grid g2" style="margin-top:16px">
-    <div class="card"><h4>谁在传</h4><p>一条 DataChannel 就是全双工的：主动连的一方和被动接的一方都绑同一套 <code class="inl">open / data / close / error</code>，所以谁都能先发，不用两端互填 id。</p></div>
-    <div class="card"><h4>谁不在传</h4><p>PeerServer 只做 id 分配与信令转发；字符串走 DTLS 加密的 DataChannel，不经它，也不落盘。</p></div>
-  </div>
-</section>
-
-<section id="limits">
-  <div class="shead"><span class="num">05</span><h2>边界与取舍</h2></div>
-  <p class="sub">这是一个连通性验证模块，不是传输层。写下来的目的是让下一个改它的人知道哪里会响。</p>
-
-  <table>
-    <tr><th style="width:230px">边界</th><th>含义</th></tr>
-    <tr><td class="mono">公共信令无认证</td><td><code class="inl">0.peerjs.com</code> 是免费公共服务，id 随机分配、不校验身份。任何知道 id 的人都能连进来；不要用它传敏感内容。</td></tr>
-    <tr><td class="mono">id 不是身份</td><td>每次新建 peer 都换一个 UUID，重连也可能变。要认人得在连接 <code class="inl">metadata</code> 里带自己的标识，别拿 id 当账号。</td></tr>
-    <tr><td class="mono">候选 id 不是连接目标</td><td><code class="inl">/peerjs/id</code> 返回的 UUID 只用于本端注册，背后没有在线 peer；填它去连接必然 <code class="inl">peer-unavailable</code>。要填的是另一端 <code class="inl">open</code> 后显示的 id。</td></tr>
-    <tr><td class="mono">跨 NAT 依赖 TURN</td><td>对称 NAT / 严格防火墙下直连会失败，流量要走默认 TURN。TURN 不可用时只剩「拿到 id 但连不上」。</td></tr>
-    <tr><td class="mono">只传字符串</td><td>没有文件分片、没有媒体流、没有二进制协议。要传文件得另定编码（base64 或 Blob）与分块。</td></tr>
-    <tr><td class="mono">生产换自建 PeerServer</td><td>页面里「信令」下拉可切到 <code class="inl">peersignal.moonchan.xyz</code>；自建服务不需要 <code class="inl">key</code>，路径按部署调整。</td></tr>
-    <tr><td class="mono">页面需安全上下文</td><td>HTTPS 或 <code class="inl">localhost</code> 下最稳；<code class="inl">file://</code> 在部分浏览器会拦 WebRTC，起本地静态服务即可。</td></tr>
-    <tr><td class="mono">对端内容不可信</td><td>消息用 <code class="inl">textContent</code> 渲染，日志同理；不拼接 <code class="inl">innerHTML</code>，避免把收到的字符串当脚本执行。</td></tr>
-  </table>
-
-  <div class="note" style="margin-top:24px">
-    <p class="t">一句话</p>
-    <p>这个分支只回答一个问题：<b>0.peerjs.com 能不能把两个页面连起来、把字符串送过去</b>。其余——身份、可靠传输、文件——都属于别的模块。</p>
-  </div>
-</section>
-
-<section id="links">
-  <div class="shead"><span class="num">06</span><h2>HTML 与 m/peerjs 的双向链接</h2></div>
-  <p class="sub">这一页就躺在 <code class="inl">m/peerjs</code> 分支根目录，是分支的入口；说明页反过来也挂了指向这里的链接。两套载体分工照旧：AGENTS.md 放契约，HTML 放说明。</p>
-
-  <div class="links">
-    <div class="linkcard">
-      <p class="h">m/peerjs · 本模块</p>
-      <p class="d">可玩客户端 + 可视化说明，即当前页面。</p>
-      <ul>
-        <li><a href="https://github.com/Hana-ame/peerdrive/tree/m/peerjs">GitHub 分支 m/peerjs</a> <code>tree/m/peerjs</code></li>
-        <li><a href="./index.html">本页（相对路径）</a> <code>peerdrive/index.html</code></li>
-        <li><a href="./peerjs.min.js">本地 PeerJS 1.5.5</a> <code>peerjs.min.js</code></li>
-      </ul>
-    </div>
-    <div class="linkcard">
-      <p class="h">m/hash-to-metadata · 相邻模块</p>
-      <p class="d">按 hash 找文件；那份 HTML 里也加了回到这里的入口。</p>
-      <ul>
-        <li><a href="../hash-to-metadata-impl.html">实现说明页（本地）</a> <code>../hash-to-metadata-impl.html</code></li>
-        <li><a href="https://github.com/Hana-ame/peerdrive/tree/m/hash-to-metadata">GitHub 分支 m/hash-to-metadata</a></li>
-        <li><a href="./AGENTS.md">本分支契约</a> <code>AGENTS.md</code></li>
-      </ul>
-    </div>
-  </div>
-</section>
-
-</main>
-
-<footer class="wrap">
-  <div class="row">
-    <span>peerdrive · m/peerjs · 0.peerjs.com + DataChannel</span>
-    <span><a href="https://github.com/Hana-ame/peerdrive/tree/m/peerjs">branch m/peerjs</a> · <a href="../hash-to-metadata-impl.html">hash-to-metadata impl</a></span>
-  </div>
-</footer>
+  <footer>peerdrive · m/peerjs · 浏览器只做出站连接</footer>
+</div>
 
 <script>
 (function () {
   "use strict";
 
-  var SERVERS = {
-    cloud: { host: "0.peerjs.com", port: 443, path: "/", secure: true, key: "peerjs" },
-    self:  { host: "peersignal.moonchan.xyz", port: 443, path: "/", secure: true }
-  };
-
-  var ERR_TEXT = {
-    "browser-incompatible": "浏览器不支持 WebRTC",
-    "disconnected": "与信令服务器断开",
-    "invalid-id": "id 不合法（只能字母数字，中间允许 - _）",
-    "invalid-key": "API key 不被接受",
-    "network": "网络错误",
-    "peer-is-taken": "这个 id 已被占用",
-    "server-error": "信令服务器内部错误",
-    "socket-error": "WebSocket 出错",
-    "socket-closed": "WebSocket 已关闭",
-    "ssl-unavailable": "该服务器不支持 SSL",
-    "unavailable-id": "这个 id 现在不可用",
-    "peer-unavailable": "对方不在线 / 找不到这个 id",
-    "webrtc": "WebRTC 协商失败"
-  };
-
   var $ = function (id) { return document.getElementById(id); };
-  var signalState = $("signalState"), signalText = $("signalText"), myIdEl = $("myId");
-  var serverSel = $("serverSel"), rebuildBtn = $("rebuild"), copyBtn = $("copyId");
-  var peerIdInput = $("peerId"), connectBtn = $("connectBtn"), targetSel = $("targetSel");
-  var connState = $("connState"), connText = $("connText"), toastEl = $("toast");
-  var msgList = $("msgs"), emptyHint = $("emptyHint"), msgInput = $("msgInput");
-  var sendBtn = $("sendBtn"), clearBtn = $("clearBtn"), chatTarget = $("chatTarget");
-  var logbox = $("logbox"), libHint = $("libHint");
+  var myIdEl = $("myId"), peerIdInput = $("peerId"), connectBtn = $("connectBtn");
+  var connText = $("connText"), toastEl = $("toast"), msgs = $("msgs"), emptyHint = $("emptyHint");
+  var msgInput = $("msgInput"), sendBtn = $("sendBtn"), clearBtn = $("clearBtn"), logbox = $("logbox");
 
-  var peer = null;
-  var conns = new Map();
-  var activeId = "";
-  var myId = "";
-  var reconnectTimer = null;
+  var peer = null, conn = null, myId = "";
 
-  $("libHint").textContent = "PeerJS 库：" +
-    (window.__PEERJS_LOCAL__ ? "本地 peerjs.min.js" : "公共 CDN（本地文件缺失）");
+  if (!window.__LOCAL_LIB__) { $("libHint").textContent = "PeerJS 库：公共 CDN（本地文件缺失）"; }
 
-  function now() {
-    return new Date().toLocaleTimeString("zh-CN", { hour12: false });
-  }
+  function now() { return new Date().toLocaleTimeString("zh-CN", { hour12: false }); }
 
   function log(kind, text) {
     var line = document.createElement("div");
-    var t = document.createElement("span");
-    t.className = "l-time";
-    t.textContent = now() + "  ";
-    var b = document.createElement("span");
-    b.className = "l-" + kind;
-    b.textContent = text;
-    line.appendChild(t);
-    line.appendChild(b);
+    line.className = kind;
+    line.textContent = now() + "  " + text;
     logbox.appendChild(line);
-    while (logbox.childNodes.length > 160) { logbox.removeChild(logbox.firstChild); }
+    while (logbox.childNodes.length > 120) { logbox.removeChild(logbox.firstChild); }
     logbox.scrollTop = logbox.scrollHeight;
   }
 
-  function toast(text) {
-    toastEl.textContent = text || "";
-  }
+  function toast(t) { toastEl.textContent = t || ""; }
 
-  function setSignal(state, text) {
-    signalState.setAttribute("data-s", state);
-    signalText.textContent = text;
-  }
-
-  function renderConns() {
-    var ids = Array.from(conns.keys());
-    targetSel.innerHTML = "";
-    if (!ids.length) {
-      var o = document.createElement("option");
-      o.value = "";
-      o.textContent = "（无）";
-      targetSel.appendChild(o);
-      activeId = "";
-    } else {
-      if (!conns.has(activeId)) { activeId = ids[0]; }
-      ids.forEach(function (id) {
-        var opt = document.createElement("option");
-        opt.value = id;
-        opt.textContent = id;
-        opt.selected = (id === activeId);
-        targetSel.appendChild(opt);
-      });
-    }
-    targetSel.value = activeId;
-    connText.textContent = ids.length + " 条通道";
-    connState.setAttribute("data-s", ids.length ? "online" : "idle");
-    chatTarget.textContent = activeId || "（未连接）";
-    sendBtn.disabled = !activeId;
-  }
-
-  function renderMessage(text, dir, who) {
+  function render(text, dir, who) {
     if (emptyHint && emptyHint.parentNode) { emptyHint.hidden = true; }
     var el = document.createElement("div");
     el.className = "msg " + dir;
-
     var meta = document.createElement("div");
     meta.className = "meta";
     var w = document.createElement("span");
-    w.className = "who";
     w.textContent = dir === "out" ? "我 → " + who : who + " → 我";
     var t = document.createElement("span");
-    t.className = "t";
     t.textContent = now();
     meta.appendChild(w);
     meta.appendChild(t);
-
     var body = document.createElement("div");
     body.className = "body";
     body.textContent = text;
-
     el.appendChild(meta);
     el.appendChild(body);
-    msgList.appendChild(el);
-    msgList.scrollTop = msgList.scrollHeight;
+    msgs.appendChild(el);
+    msgs.scrollTop = msgs.scrollHeight;
   }
 
-  function bindConn(conn, dir) {
-    var id = conn.peer;
-    var prev = conns.get(id);
-    if (prev && prev !== conn) { try { prev.close(); } catch (e) {} }
-    conns.set(id, conn);
-    activeId = id;
-    renderConns();
-    log("ok", (dir === "in" ? "被动接入" : "主动连出") + " · " + id);
+  function setConn(open, who) {
+    connText.textContent = open ? "通道已就绪 · " + who : (who ? "连接中 · " + who : "0 条通道");
+    sendBtn.disabled = !open;
+  }
 
-    conn.on("open", function () {
-      log("ok", "DataChannel 就绪 · " + id);
-      if (conns.get(id) === conn) { renderConns(); }
+  function bind(c) {
+    conn = c;
+    setConn(false, c.peer);
+    c.on("open", function () {
+      if (conn !== c) { return; }
+      setConn(true, c.peer);
+      log("o", "DataChannel 就绪 · " + c.peer);
     });
-
-    conn.on("data", function (data) {
-      var text = (typeof data === "string") ? data : JSON.stringify(data);
-      renderMessage(text, "in", id);
-      log("data", "← " + id + " · " + text.length + " 字符");
+    c.on("data", function (data) {
+      var text = typeof data === "string" ? data : JSON.stringify(data);
+      render(text, "in", c.peer);
+      log("", "← " + c.peer + " · " + text.length + " 字符");
     });
-
-    conn.on("close", function () {
-      if (conns.get(id) === conn) {
-        conns.delete(id);
-        if (activeId === id) { activeId = conns.size ? Array.from(conns.keys())[0] : ""; }
-        renderConns();
-      }
-      log("warn", "通道关闭 · " + id);
+    c.on("close", function () {
+      if (conn === c) { conn = null; setConn(false, ""); }
+      log("w", "通道关闭 · " + c.peer);
     });
-
-    conn.on("error", function (err) {
-      log("err", "通道错误 · " + id + " · " + ((err && err.message) || err));
+    c.on("error", function (e) {
+      log("e", "通道错误 · " + ((e && e.message) || e));
     });
   }
 
-  function makePeer(which) {
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  function makePeer() {
     if (peer) { try { peer.destroy(); } catch (e) {} }
-    conns.clear();
-    activeId = "";
+    conn = null;
     myId = "";
-    renderConns();
     myIdEl.textContent = "等待分配 id…";
-    myIdEl.className = "pid empty";
-    setSignal("connecting", "连接中…");
-
-    if (typeof Peer === "undefined") {
-      setSignal("error", "库未加载");
-      log("err", "PeerJS 库没加载：本地 peerjs.min.js 缺失且 CDN 不可达");
-      return;
-    }
-
-    var cfg = SERVERS[which] || SERVERS.cloud;
-    var opts = { host: cfg.host, port: cfg.port, path: cfg.path, secure: cfg.secure, debug: 1 };
-    if (cfg.key) { opts.key = cfg.key; }
-
-    log("dim", "信令 → " + (cfg.secure ? "https://" : "http://") + cfg.host + ":" + cfg.port + cfg.path + " · key=" + (cfg.key || "(none)"));
-
-    var p;
-    try {
-      p = new Peer(opts);
-    } catch (e) {
-      setSignal("error", "初始化失败");
-      log("err", "new Peer 抛错 · " + e.message);
-      return;
-    }
+    myIdEl.className = "pid";
+    setConn(false, "");
+    var p = new Peer({
+      host: "0.peerjs.com", port: 443, path: "/", secure: true, key: "peerjs", debug: 1
+    });
     peer = p;
-
     p.on("open", function (id) {
       if (p !== peer) { return; }
       myId = id;
       myIdEl.textContent = id;
-      myIdEl.className = "pid";
-      setSignal("online", "信令已连接");
-      log("ok", "open · 本端 id = " + id);
+      myIdEl.className = "pid on";
+      log("o", "本端注册成功 · " + id);
     });
-
-    p.on("connection", function (conn) {
+    p.on("connection", function (c) {
       if (p !== peer) { return; }
-      bindConn(conn, "in");
+      log("", "被动接入 · " + c.peer);
+      bind(c);
     });
-
     p.on("disconnected", function () {
       if (p !== peer) { return; }
-      setSignal("connecting", "重连中…");
-      log("warn", "disconnected · 1.5s 后 reconnect()");
-      if (reconnectTimer) { clearTimeout(reconnectTimer); }
-      reconnectTimer = setTimeout(function () {
-        reconnectTimer = null;
-        if (p !== peer || p.destroyed) { return; }
-        try { p.reconnect(); log("dim", "reconnect() 已发出"); }
-        catch (e) { log("err", "reconnect 失败 · " + e.message); }
-      }, 1500);
+      log("w", "信令断开，1.5s 后重连");
+      setTimeout(function () { if (p === peer) { try { p.reconnect(); } catch (e) {} } }, 1500);
     });
-
-    p.on("close", function () {
+    p.on("error", function (e) {
       if (p !== peer) { return; }
-      setSignal("error", "已关闭");
-      log("warn", "peer closed");
-    });
-
-    p.on("error", function (err) {
-      if (p !== peer) { return; }
-      var type = (err && err.type) || "unknown";
-      var desc = ERR_TEXT[type] || ((err && err.message) || String(err));
-      setSignal("error", desc);
-      log("err", "peer error · " + type + " · " + desc);
-      if (type === "unavailable-id") { toast("对方不在线，或 id 写错了"); }
+      log("e", "peer 错误 · " + ((e && e.type) || "") + " " + ((e && e.message) || ""));
+      if (e && e.type === "peer-unavailable") { toast("对方不在线，或 id 写错了"); }
     });
   }
 
   function connectTo() {
     var id = peerIdInput.value.trim();
-    if (!id) { toast("先填对方的 peer id"); return; }
-    if (!peer || !myId) { toast("本端还没连上信令，稍等或点「重建 peer」"); return; }
-    if (id === myId) { toast("这是自己的 id，请填另一端的 id"); return; }
-    if (conns.has(id)) { activeId = id; renderConns(); toast("已切到既有通道 " + id); return; }
-    toast("");
-    log("dim", "connect → " + id);
-    try {
-      var conn = peer.connect(id, { serialization: "json" });
-      if (!conn) { toast("连接创建失败"); return; }
-      bindConn(conn, "out");
-      peerIdInput.value = "";
-    } catch (e) {
-      log("err", "connect 抛错 · " + e.message);
-      toast("连接失败：" + e.message);
+    if (!id) { toast("先填 log 里的 PEER ID"); return; }
+    if (!peer || !myId) { toast("本端还没注册完成，稍等"); return; }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      toast("看起来不是 PeerJS 分配的 id（应形如 8-4-4-4-12）");
+      return;
     }
+    toast("");
+    log("", "connect → " + id);
+    bind(peer.connect(id, { serialization: "json" }));
   }
 
   function send() {
     var text = msgInput.value;
     if (text === "") { return; }
-    var conn = conns.get(activeId);
-    if (!conn || !conn.open) { toast("通道还没就绪，等 DataChannel open 再发"); return; }
+    if (!conn || !conn.open) { toast("通道还没就绪"); return; }
     try {
       conn.send(text);
-      renderMessage(text, "out", activeId);
-      log("data", "→ " + activeId + " · " + text.length + " 字符");
+      render(text, "out", conn.peer);
+      log("", "→ " + conn.peer + " · " + text.length + " 字符");
       msgInput.value = "";
       toast("");
     } catch (e) {
-      log("err", "send 失败 · " + e.message);
       toast("发送失败：" + e.message);
     }
   }
@@ -664,46 +269,21 @@ bind(conn);
   connectBtn.addEventListener("click", connectTo);
   peerIdInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { connectTo(); } });
   sendBtn.addEventListener("click", send);
-  msgInput.addEventListener("keydown", function (e) {
-    if (e.key === "Enter" && !(e.ctrlKey || e.metaKey || e.shiftKey)) { e.preventDefault(); send(); }
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      var s = msgInput.selectionStart;
-      msgInput.value = msgInput.value.slice(0, s) + "\n" + msgInput.value.slice(msgInput.selectionEnd);
-      msgInput.selectionStart = msgInput.selectionEnd = s + 1;
+  msgInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); send(); } });
+  clearBtn.addEventListener("click", function () {
+    Array.prototype.forEach.call(msgs.querySelectorAll(".msg"), function (n) { n.remove(); });
+    if (emptyHint) { emptyHint.hidden = false; }
+  });
+  $("rebuild").addEventListener("click", function () { toast(""); makePeer(); });
+  $("copyId").addEventListener("click", function () {
+    if (!myId) { return; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(myId).then(function () { toast("已复制"); }, function () { toast("复制失败"); });
     }
   });
-  clearBtn.addEventListener("click", function () {
-    Array.from(msgList.querySelectorAll(".msg")).forEach(function (n) { n.remove(); });
-    if (emptyHint) { emptyHint.hidden = false; }
-    toast("");
-  });
-  targetSel.addEventListener("change", function () {
-    activeId = targetSel.value;
-    renderConns();
-  });
-  serverSel.addEventListener("change", function () { makePeer(serverSel.value); });
-  rebuildBtn.addEventListener("click", function () { toast(""); makePeer(serverSel.value); });
-  copyBtn.addEventListener("click", function () {
-    if (!myId) { toast("还没有 id"); return; }
-    var done = function () { toast("已复制 " + myId); log("ok", "id 已复制"); };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(myId).then(done, function () { fallbackCopy(done); });
-    } else { fallbackCopy(done); }
-  });
-  function fallbackCopy(done) {
-    var tmp = document.createElement("textarea");
-    tmp.value = myId;
-    document.body.appendChild(tmp);
-    tmp.select();
-    try { document.execCommand("copy"); done(); }
-    catch (e) { toast("复制失败，请手动选中 id"); }
-    document.body.removeChild(tmp);
-  }
 
-  renderConns();
-  log("dim", "页面就绪 · 打开两个标签页即可互传字符串");
-  makePeer("cloud");
+  log("", "页面就绪");
+  makePeer();
 })();
 </script>
 </body>
