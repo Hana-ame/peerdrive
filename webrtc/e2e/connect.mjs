@@ -122,6 +122,9 @@ log("control 往返 OK ·", rtt.trim());
 
 // ---- 5. metadata → ack ----
 
+// RTT 之前成功只证明对端回了 pong。这里等的 ack 是另一条独立路径
+// （Go 侧 KindMetadata 分支），而且 ack 与 pong 共用同一个帧协议，
+// 所以失败时要把入站帧全列出来，看是没发、没解、还是没画上去。
 const beforeMeta = await page.locator("#msgs .msg.in").count();
 await page.click("#metaBtn");
 let sawAck = false;
@@ -130,7 +133,20 @@ for (let i = 0; i < 20; i++) {
   if (kinds.includes("ack")) { sawAck = true; break; }
   await page.waitForTimeout(500);
 }
-if (!sawAck) { await browser.close(); fail("metadata 没有收到 ack"); }
+if (!sawAck) {
+  const state = (await page.textContent("#logbox")) || "";
+  const inKinds = await page.locator("#msgs .msg.in .k").allTextContents();
+  const outKinds = await page.locator("#msgs .msg.out .k").allTextContents();
+  console.error(state);
+  await browser.close();
+  fail(
+    "metadata 没有收到 ack\n" +
+    "in=" + JSON.stringify(inKinds) + " out=" + JSON.stringify(outKinds) +
+    " (beforeMeta=" + beforeMeta + ")\n" +
+    "--- 页面日志 ---\n" + state.slice(-3000) +
+    "\n--- go 侧日志 ---\n" + readTail(logPath, 4000),
+  );
+}
 log("metadata → ack OK");
 
 // ---- 6. 8 MiB 大块 + sha256 ----
