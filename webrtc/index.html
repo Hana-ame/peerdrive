@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>m/webrtc · DataChannel over PeerJS signaling</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#fff; --ink:#16181d; --ink2:#3d4552; --muted:#6b7483;
+    --line:#e4e7ed; --line2:#d3d8e0;
+    --accent:#3b5bdb; --accent-soft:#eef1ff;
+    --teal:#0b7285; --teal-soft:#e6f5f7;
+    --amber:#8a5a00; --amber-soft:#fdf5e2;
+    --rose:#a4343a; --rose-soft:#fdeced;
+    --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.7}
+  .wrap{max-width:820px;margin:0 auto;padding:36px 22px 60px}
+  h1{margin:0 0 6px;font-size:24px;letter-spacing:-.01em;font-weight:600}
+  h1 code{font-family:var(--mono);font-size:.8em;background:var(--accent-soft);color:var(--accent);padding:.1em .34em;border-radius:6px}
+  .lede{margin:0 0 22px;color:var(--ink2);font-size:14.5px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:0 0 14px}
+  .card h2{margin:0 0 12px;font-size:11.5px;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:500}
+  .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .grow{flex:1 1 260px;min-width:0}
+  label{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 5px}
+  input{width:100%;font-family:var(--mono);font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--line2);border-radius:8px;padding:9px 11px;outline:none}
+  input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  button{font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--line2);background:var(--surface);color:var(--ink2);border-radius:8px;padding:9px 14px;white-space:nowrap}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{background:#2f4bc0;color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .pid{font-family:var(--mono);font-size:12.6px;background:#f0f2f7;border:1px solid var(--line);border-radius:7px;padding:6px 10px;word-break:break-all}
+  .pid.on{background:var(--teal-soft);border-color:#cfe9ed;color:var(--teal)}
+  .chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+  .chip{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--line2);color:var(--muted);background:#fafbfc}
+  .chip.ok{background:var(--teal-soft);border-color:#cfe9ed;color:var(--teal)}
+  .chip.warn{background:var(--amber-soft);border-color:#f0e0b8;color:var(--amber)}
+  .chip.bad{background:var(--rose-soft);border-color:#f5cfd1;color:var(--rose)}
+  .msgs{height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:4px 2px}
+  .msgs .empty{margin:auto;color:var(--muted);font-size:13px;text-align:center;line-height:1.9}
+  .msgs .empty code{font-family:var(--mono);font-size:11.5px;background:#eef0f4;padding:.1em .34em;border-radius:4px}
+  .msg{max-width:88%;border-radius:10px;padding:7px 11px;border:1px solid transparent;font-size:12.8px}
+  .msg.out{align-self:flex-end;background:var(--accent-soft);border-color:#dbe1ff}
+  .msg.in{align-self:flex-start;background:var(--teal-soft);border-color:#cfe9ed}
+  .msg .meta{display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);font-size:10px;color:var(--muted);margin:0 0 2px}
+  .msg .body{white-space:pre-wrap;word-break:break-word}
+  .msg .k{font-family:var(--mono);font-size:9.5px;padding:1px 5px;border-radius:4px;background:#e7eaf2;color:var(--ink2);margin-right:5px}
+  pre.log{margin:0;background:#12151c;color:#d8dde8;border-radius:9px;padding:11px 13px;font-family:var(--mono);font-size:11.4px;line-height:1.7;height:170px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
+  pre.log .w{color:#e8c07d}
+  pre.log .e{color:#f19ba0}
+  pre.log .o{color:#89d9c4}
+  .toast{min-height:1.4em;margin:9px 0 0;font-size:12.5px;color:var(--rose)}
+  .hint{margin:0;font-size:12.4px;color:var(--muted);font-family:var(--mono)}
+  table{width:100%;border-collapse:collapse;font-size:12.6px}
+  td{padding:6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  td:first-child{font-family:var(--mono);color:var(--accent);width:150px}
+  td code{font-family:var(--mono);font-size:11.6px;background:#eef0f4;padding:.1em .34em;border-radius:4px}
+  footer{margin-top:26px;font-size:11.8px;color:var(--muted);font-family:var(--mono)}
+</style>
+<script src="./peerjs.min.js"></script>
+<script>
+  if (typeof Peer !== "undefined") { window.__LOCAL_LIB__ = true; }
+  else { document.write('<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"><\/script>'); }
+</script>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>m/webrtc · <code>DataChannel</code></h1>
+  <p class="lede">
+    <code>peerjs</code> 只借信令。<b>WebRTC 与 DataChannel 由这里自己建</b>，通道上跑的是
+    带类型的二进制帧：控制信号、metadata、文件本体、校验都能传。
+  </p>
+
+  <div class="card">
+    <h2>本端 / signaling</h2>
+    <div class="row">
+      <div class="grow"><span class="pid" id="myId">等待分配 id…</span></div>
+      <button id="copyId" type="button">复制</button>
+      <button id="rebuild" type="button">重建</button>
+    </div>
+    <p class="hint" id="libHint" style="margin-top:9px">PeerJS 库：本地 peerjs.min.js</p>
+  </div>
+
+  <div class="card">
+    <h2>连接 / connect</h2>
+    <div class="row">
+      <div class="grow">
+        <label for="peerId">对端 PEER ID（从 webrtc-node 的 log 里读）</label>
+        <input id="peerId" type="text" autocomplete="off" spellcheck="false" placeholder="例如 913c75bb-acf8-4e8b-ae31-a9f8706b8268">
+      </div>
+      <button class="primary" id="connectBtn" type="button">连接</button>
+      <button id="closeBtn" type="button" disabled>断开</button>
+    </div>
+    <div class="chips">
+      <span class="chip" id="chipSignal">signaling</span>
+      <span class="chip" id="chipPC">peerconnection</span>
+      <span class="chip" id="chipDC">datachannel</span>
+      <span class="chip" id="chipRTT">rtt</span>
+    </div>
+    <p class="toast" id="toast" role="status"></p>
+  </div>
+
+  <div class="card">
+    <h2>通道 / frames</h2>
+    <div class="msgs" id="msgs">
+      <div class="empty" id="emptyHint">
+        连上之后在这里看双向帧。<br>
+        <code>send(Kind, stream, bytes)</code> → <code>onmessage</code>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="grow"><input id="msgInput" type="text" autocomplete="off" placeholder="输入文本，回车按 KindData 发送"></div>
+      <button class="primary" id="sendBtn" type="button" disabled>发文本</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="pingBtn" type="button" disabled>Ping（控制帧）</button>
+      <button id="metaBtn" type="button" disabled>发 metadata</button>
+      <button id="blobBtn" type="button" disabled>发 8 MiB 随机块</button>
+      <button id="fileBtn" type="button" disabled>选文件发送</button>
+      <input id="fileInput" type="file" hidden>
+      <button id="clearBtn" type="button">清空</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>事件 / events</h2>
+    <pre class="log" id="logbox" aria-live="polite"></pre>
+  </div>
+
+  <div class="card">
+    <h2>帧格式 / wire format</h2>
+    <table>
+      <tr><td>帧头</td><td><code>kind(1 byte)</code> + <code>stream(4 bytes, 大端)</code></td></tr>
+      <tr><td>分片</td><td>超过 64 KiB 时切块，正文前缀 <code>flag(1)+seq(4)+total(4)</code></td></tr>
+      <tr><td>Kind</td><td><code>1 hello</code> <code>2 control</code> <code>3 metadata</code> <code>4 data</code> <code>5 check</code> <code>6 ack</code> <code>7 error</code></td></tr>
+      <tr><td>信令</td><td>PeerJS 只负责 OFFER/ANSWER/CANDIDATE，之后与它无关</td></tr>
+      <tr><td>方向</td><td>webrtc-node 不监听端口，浏览器主动 connect；一条通道全双工</td></tr>
+      <tr><td>序列化</td><td>自定义二进制帧，<b>不走 PeerJS 的 json serializer</b></td></tr>
+    </table>
+  </div>
+
+  <footer>peerdrive · m/webrtc · 信令走 PeerJS，数据走自建 DataChannel</footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var myIdEl = $("myId"), peerIdInput = $("peerId");
+  var connectBtn = $("connectBtn"), closeBtn = $("closeBtn");
+  var sendBtn = $("sendBtn"), msgInput = $("msgInput"), msgs = $("msgs"), emptyHint = $("emptyHint");
+  var logbox = $("logbox"), toastEl = $("toast");
+  var chipSignal = $("chipSignal"), chipPC = $("chipPC"), chipDC = $("chipDC"), chipRTT = $("chipRTT");
+
+  var KIND = { HELLO:1, CONTROL:2, METADATA:3, DATA:4, CHECK:5, ACK:6, ERROR:7 };
+  var KIND_NAME = { 1:"hello", 2:"control", 3:"metadata", 4:"data", 5:"check", 6:"ack", 7:"error" };
+  var MAX_PAYLOAD = 64 * 1024;
+  var CHUNK_OVERHEAD = 9;
+
+  var peer = null, peerId = "", pc = null, dc = null;
+  var streamGen = 0, pingAt = 0;
+
+  function now() { return new Date().toLocaleTimeString("zh-CN", { hour12: false }); }
+
+  function log(kind, text) {
+    var line = document.createElement("div");
+    line.className = kind;
+    line.textContent = now() + "  " + text;
+    logbox.appendChild(line);
+    while (logbox.childNodes.length > 150) { logbox.removeChild(logbox.firstChild); }
+    logbox.scrollTop = logbox.scrollHeight;
+  }
+
+  function toast(t) { toastEl.textContent = t || ""; }
+
+  function setChip(el, state, text) {
+    el.className = "chip" + (state ? " " + state : "");
+    if (text) { el.textContent = text; }
+  }
+
+  function nextStream() { return ++streamGen; }
+
+  // ---- 帧编解码：必须与 Go 侧 frame.go 完全一致 ----
+
+  function encode(kind, stream, bytes) {
+    var out = [];
+    if (bytes.length <= MAX_PAYLOAD) {
+      var b = new Uint8Array(5 + bytes.length);
+      b[0] = kind;
+      new DataView(b.buffer).setUint32(1, stream, false);
+      b.set(bytes, 5);
+      out.push(b);
+      return out;
+    }
+    var chunk = MAX_PAYLOAD - CHUNK_OVERHEAD;
+    var total = Math.ceil(bytes.length / chunk);
+    for (var seq = 0; seq < total; seq++) {
+      var lo = seq * chunk, hi = Math.min(lo + chunk, bytes.length);
+      var buf = new Uint8Array(5 + CHUNK_OVERHEAD + (hi - lo));
+      var v = new DataView(buf.buffer);
+      buf[0] = kind;
+      v.setUint32(1, stream, false);
+      buf[5] = 1;
+      v.setUint32(6, seq, false);
+      v.setUint32(10, total, false);
+      buf.set(bytes.subarray(lo, hi), 5 + CHUNK_OVERHEAD);
+      out.push(buf);
+    }
+    return out;
+  }
+
+  var asm = { stream: 0, kind: 0, total: 0, parts: [], got: 0 };
+  function resetAsm() { asm = { stream: 0, kind: 0, total: 0, parts: [], got: 0 }; }
+
+  function decode(buf) {
+    var v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    var kind = buf[0], stream = v.getUint32(1, false);
+    if (buf.length <= 5 || buf[5] !== 1) {
+      var body = buf.subarray(5);
+      resetAsm();
+      return { kind: kind, stream: stream, data: body };
+    }
+    if (buf.length < 5 + CHUNK_OVERHEAD) { return null; }
+    var seq = v.getUint32(6, false), total = v.getUint32(10, false);
+    var piece = buf.subarray(5 + CHUNK_OVERHEAD);
+    if (asm.total === 0 || asm.total !== total || asm.stream !== stream || asm.kind !== kind) {
+      resetAsm();
+      asm.stream = stream; asm.kind = kind; asm.total = total;
+      asm.parts = new Array(total); asm.got = 0;
+    }
+    if (!asm.parts[seq]) { asm.parts[seq] = piece.slice(); asm.got++; }
+    if (asm.got !== asm.total) { return null; }
+    var size = 0;
+    for (var i = 0; i < asm.total; i++) { size += asm.parts[i].length; }
+    var all = new Uint8Array(size), off = 0;
+    for (var j = 0; j < asm.total; j++) { all.set(asm.parts[j], off); off += asm.parts[j].length; }
+    var f = { kind: asm.kind, stream: asm.stream, data: all };
+    resetAsm();
+    return f;
+  }
+
+  var enc = new TextEncoder(), dec = new TextDecoder();
+
+  function sendFrame(kind, stream, bytes) {
+    if (!dc || dc.readyState !== "open") { toast("通道还没就绪"); return false; }
+    var frames = encode(kind, stream, bytes);
+    for (var i = 0; i < frames.length; i++) { dc.send(frames[i]); }
+    return true;
+  }
+
+  function sendJSON(kind, stream, obj) {
+    return sendFrame(kind, stream || nextStream(), enc.encode(JSON.stringify(obj)));
+  }
+
+  // ---- UI ----
+
+  function render(kind, stream, text, dir) {
+    if (emptyHint && emptyHint.parentNode) { emptyHint.hidden = true; }
+    var el = document.createElement("div");
+    el.className = "msg " + dir;
+    var meta = document.createElement("div");
+    meta.className = "meta";
+    var left = document.createElement("span");
+    var k = document.createElement("span");
+    k.className = "k";
+    k.textContent = KIND_NAME[kind] || ("kind" + kind);
+    left.appendChild(k);
+    left.appendChild(document.createTextNode("stream " + stream));
+    var right = document.createElement("span");
+    right.textContent = now();
+    meta.appendChild(left); meta.appendChild(right);
+    var body = document.createElement("div");
+    body.className = "body";
+    body.textContent = text;
+    el.appendChild(meta); el.appendChild(body);
+    msgs.appendChild(el);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function setEnabled(open) {
+    [sendBtn, $("pingBtn"), $("metaBtn"), $("blobBtn"), $("fileBtn")].forEach(function (b) { b.disabled = !open; });
+    closeBtn.disabled = !open;
+    connectBtn.disabled = open;
+  }
+
+  // ---- 信令：PeerJS 只用来搬 SDP ----
+
+  function makePeer() {
+    if (peer) { try { peer.destroy(); } catch (e) {} }
+    peerId = "";
+    myIdEl.textContent = "等待分配 id…";
+    myIdEl.className = "pid";
+    setChip(chipSignal, "", "signaling");
+    var p = new Peer({ host: "0.peerjs.com", port: 443, path: "/", secure: true, key: "peerjs", debug: 1 });
+    peer = p;
+    p.on("open", function (id) {
+      if (p !== peer) { return; }
+      peerId = id;
+      myIdEl.textContent = id;
+      myIdEl.className = "pid on";
+      setChip(chipSignal, "ok", "signaling ok");
+      log("o", "信令就绪 · " + id);
+    });
+    p.on("error", function (e) {
+      if (p !== peer) { return; }
+      log("e", "peer 错误 · " + ((e && e.type) || "") + " " + ((e && e.message) || ""));
+      if (e && e.type === "peer-unavailable") { toast("对方不在线，或 id 写错了"); }
+    });
+    p.on("disconnected", function () {
+      if (p !== peer) { return; }
+      setChip(chipSignal, "warn", "signaling lost");
+      log("w", "信令断开，1.5s 后重连");
+      setTimeout(function () { if (p === peer) { try { p.reconnect(); } catch (e) {} } }, 1500);
+    });
+  }
+
+  // ---- 自己建 PeerConnection ----
+
+  function connectTo() {
+    var id = peerIdInput.value.trim();
+    if (!id) { toast("先填 log 里的 PEER ID"); return; }
+    if (!peer || !peerId) { toast("本端还没注册完成，稍等"); return; }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      toast("看起来不是 PeerJS 分配的 id（应形如 8-4-4-4-12）");
+      return;
+    }
+    toast("");
+    log("", "开始建连 → " + id);
+
+    pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "turn:0.peerjs.com:3478", username: "peerjs", credential: "peerjsp" }
+      ]
+    });
+    setChip(chipPC, "warn", "peerconnection…");
+
+    dc = pc.createDataChannel("peerdrive", { ordered: true });
+    dc.binaryType = "arraybuffer";
+    bindDC();
+
+    pc.onicecandidate = function (ev) {
+      if (!ev.candidate) { return; }
+      var c = ev.candidate;
+      peer.socket.send({
+        type: "CANDIDATE",
+        payload: {
+          type: "data",
+          connectionId: dc.label,
+          candidate: {
+            candidate: c.candidate,
+            sdpMid: c.sdpMid,
+            sdpMLineIndex: c.sdpMLineIndex,
+            usernameFragment: c.usernameFragment
+          }
+        },
+        dst: id
+      });
+    };
+
+    pc.oniceconnectionstatechange = function () {
+      log("", "ICE · " + pc.iceConnectionState);
+      if (pc.iceConnectionState === "failed") { setChip(chipPC, "bad", "ice failed"); }
+    };
+
+    pc.createOffer().then(function (offer) {
+      return pc.setLocalDescription(offer);
+    }).then(function () {
+      // 关键：用 PeerJS 的 socket 把 offer 塞给对方，connectionId 用 dc.label。
+      peer.socket.send({
+        type: "OFFER",
+        payload: {
+          type: "data",
+          connectionId: dc.label,
+          label: dc.label,
+          serialization: "binary",
+          reliable: true,
+          sdp: { type: "offer", sdp: pc.localDescription.sdp }
+        },
+        dst: id
+      });
+      log("", "已发 offer · label=" + dc.label);
+      setChip(chipPC, "ok", "offer sent");
+    }).catch(function (e) {
+      log("e", "createOffer 失败 · " + e.message);
+      toast("建连失败：" + e.message);
+    });
+
+    // 接住对方的 answer 与 candidate：hookSignal 已经挂在 socket 上，
+    // 这里不要再动 socket 的监听器，否则会拆掉 PeerJS 自己的。
+  }
+
+  // 直接监听信令 socket，拿 ANSWER / CANDIDATE。
+  function hookSignal() {
+    if (!peer || !peer.socket) { return; }
+    peer.socket.on("message", function (msg) {
+      if (!msg || !pc) { return; }
+      if (msg.type === "ANSWER") {
+        var sdp = msg.payload && msg.payload.sdp;
+        if (!sdp || sdp.type !== "answer") { return; }
+        pc.setRemoteDescription({ type: "answer", sdp: sdp.sdp })
+          .then(function () { setChip(chipPC, "ok", "pc connected"); log("o", "已应用 answer"); })
+          .catch(function (e) { log("e", "setRemoteDescription 失败 · " + e.message); });
+      } else if (msg.type === "CANDIDATE") {
+        var c = msg.payload && msg.payload.candidate;
+        if (!c) { return; }
+        pc.addIceCandidate({
+          candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex
+        }).catch(function (e) { log("w", "addIceCandidate · " + e.message); });
+      }
+    });
+  }
+
+  function bindDC() {
+    setChip(chipDC, "warn", "datachannel…");
+    dc.onopen = function () {
+      setChip(chipDC, "ok", "datachannel open");
+      setEnabled(true);
+      log("o", "DataChannel 就绪");
+      sendHelperHello();
+    };
+    dc.onclose = function () {
+      setChip(chipDC, "", "datachannel closed");
+      setEnabled(false);
+      log("w", "DataChannel 关闭");
+    };
+    dc.onerror = function (e) { log("e", "datachannel 错误 · " + ((e && e.message) || e)); };
+    dc.onmessage = function (ev) {
+      if (typeof ev.data === "string") { log("e", "意外的文本帧（应全为二进制）"); return; }
+      var f = decode(new Uint8Array(ev.data));
+      if (!f) { return; }
+      var text;
+      if (f.kind === KIND.DATA) {
+        text = "[" + f.data.length + " 字节二进制] sha256 暂不计";
+      } else {
+        try { text = JSON.stringify(JSON.parse(dec.decode(f.data)), null, 0); }
+        catch (e) { text = dec.decode(f.data); }
+      }
+      render(f.kind, f.stream, text, "in");
+
+      if (f.kind === KIND.CONTROL) {
+        var body;
+        try { body = JSON.parse(dec.decode(f.data)); } catch (e) { body = null; }
+        if (body && body.action === "pong" && pingAt) {
+          setChip(chipRTT, "ok", "rtt " + (Date.now() - pingAt) + "ms");
+          pingAt = 0;
+        }
+      }
+    };
+  }
+
+  function sendHelperHello() {
+    sendJSON(KIND.HELLO, 0, { role: "client", version: 1, proto: "peerdrive/webrtc", ua: navigator.userAgent });
+  }
+
+  // ---- 发送 ----
+
+  function sendText() {
+    var t = msgInput.value;
+    if (!t) { return; }
+    var s = nextStream();
+    if (sendFrame(KIND.DATA, s, enc.encode(t))) {
+      render(KIND.DATA, s, t, "out");
+      msgInput.value = "";
+    }
+  }
+
+  $("pingBtn").addEventListener("click", function () {
+    pingAt = Date.now();
+    var s = nextStream();
+    sendJSON(KIND.CONTROL, s, { action: "ping", at: pingAt });
+    render(KIND.CONTROL, s, "{action: ping}", "out");
+  });
+
+  $("metaBtn").addEventListener("click", function () {
+    var s = nextStream();
+    var entries = [
+      { path: "docs/readme.md", name: "readme.md", size: 1024, mode: 420, is_dir: false, mtime: Date.now() * 1000, sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+      { path: "docs/img", name: "img", size: 0, mode: 493, is_dir: true, mtime: Date.now() * 1000 }
+    ];
+    sendJSON(KIND.METADATA, s, { root: "/demo", entries: entries, total_bytes: 1024, count: entries.length, at: Date.now() });
+    render(KIND.METADATA, s, entries.length + " 条清单", "out");
+  });
+
+  $("blobBtn").addEventListener("click", function () {
+    var size = 8 * 1024 * 1024;
+    var buf = new Uint8Array(size);
+    if (window.crypto && crypto.getRandomValues) {
+      for (var off = 0; off < size; off += 65536) {
+        crypto.getRandomValues(buf.subarray(off, Math.min(off + 65536, size)));
+      }
+    } else {
+      for (var i = 0; i < size; i++) { buf[i] = (i * 31) & 255; }
+    }
+    var s = nextStream();
+    log("", "开始发 " + (size / 1048576) + " MiB 随机块 · stream " + s);
+    if (sendFrame(KIND.DATA, s, buf)) {
+      render(KIND.DATA, s, size + " 字节随机二进制", "out");
+      var digest = "";
+      if (window.crypto && crypto.subtle) {
+        crypto.subtle.digest("SHA-256", buf).then(function (h) {
+          digest = Array.prototype.map.call(new Uint8Array(h), function (b) {
+            return b.toString(16).padStart(2, "0");
+          }).join("");
+          sendJSON(KIND.CHECK, s, { stream: s, algo: "sha256", digest: digest, size: size });
+          render(KIND.CHECK, s, "sha256 " + digest.slice(0, 16) + "…", "out");
+        });
+      }
+    }
+  });
+
+  $("fileBtn").addEventListener("click", function () { $("fileInput").click(); });
+  $("fileInput").addEventListener("change", function () {
+    var file = this.files && this.files[0];
+    if (!file) { return; }
+    var s = nextStream();
+    log("", "开始发文件 · " + file.name + " · " + file.size + " 字节 · stream " + s);
+    file.arrayBuffer().then(function (ab) {
+      var bytes = new Uint8Array(ab);
+      sendJSON(KIND.METADATA, s, {
+        root: file.name,
+        entries: [{ path: file.name, name: file.name, size: file.size, mode: 420, is_dir: false, mtime: file.lastModified * 1000 }],
+        total_bytes: file.size, count: 1, at: Date.now()
+      });
+      render(KIND.METADATA, s, file.name + " · " + file.size + " 字节", "out");
+      sendFrame(KIND.DATA, s, bytes);
+      render(KIND.DATA, s, file.size + " 字节文件内容", "out");
+      if (window.crypto && crypto.subtle) {
+        crypto.subtle.digest("SHA-256", bytes).then(function (h) {
+          var digest = Array.prototype.map.call(new Uint8Array(h), function (b) {
+            return b.toString(16).padStart(2, "0");
+          }).join("");
+          sendJSON(KIND.CHECK, s, { stream: s, path: file.name, algo: "sha256", digest: digest, size: file.size });
+          render(KIND.CHECK, s, "sha256 " + digest.slice(0, 16) + "…", "out");
+        });
+      }
+    });
+  });
+
+  function closeAll() {
+    if (dc) { try { dc.close(); } catch (e) {} }
+    if (pc) { try { pc.close(); } catch (e) {} }
+    dc = null; pc = null;
+    setEnabled(false);
+    setChip(chipDC, "", "datachannel");
+    setChip(chipPC, "", "peerconnection");
+  }
+
+  connectBtn.addEventListener("click", connectTo);
+  peerIdInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { connectTo(); } });
+  sendBtn.addEventListener("click", sendText);
+  msgInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); sendText(); } });
+  closeBtn.addEventListener("click", closeAll);
+  $("clearBtn").addEventListener("click", function () {
+    Array.prototype.forEach.call(msgs.querySelectorAll(".msg"), function (n) { n.remove(); });
+    if (emptyHint) { emptyHint.hidden = false; }
+  });
+  $("rebuild").addEventListener("click", function () {
+    closeAll();
+    setEnabled(false);
+    makePeer();
+  });
+  $("copyId").addEventListener("click", function () {
+    if (!peerId) { return; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(peerId).then(function () { toast("已复制"); }, function () { toast("复制失败"); });
+    }
+  });
+
+  if (!window.__LOCAL_LIB__) { $("libHint").textContent = "PeerJS 库：公共 CDN（本地文件缺失）"; }
+
+  log("", "页面就绪");
+  makePeer();
+  setEnabled(false);
+  var t = setInterval(function () {
+    if (peer && peer.socket) { hookSignal(); clearInterval(t); }
+  }, 200);
+})();
+</script>
+</body>
+</html>

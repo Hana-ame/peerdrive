@@ -72,9 +72,12 @@ type Client struct {
 	conn *websocket.Conn
 	wmu  sync.Mutex
 
-	mu       sync.Mutex
-	sessions map[string]*session // connectionId → session
-	byPeer   map[string]*session // 对端 id → session
+	mu        sync.Mutex
+	sessions  map[string]*session   // connectionId → session（默认应答模式）
+	byPeer    map[string]*session   // 对端 id → session
+	transport Transport             // 非 nil 时接管全部 OFFER，sessions 不再使用
+	trans     map[string]*signalOut // connectionId → 该 Transport 的出口
+	peers     map[string]string     // connectionId → 对端 id（Transport 模式下的路由表）
 
 	ready     chan struct{}
 	readyOnce sync.Once
@@ -151,6 +154,8 @@ func Dial(ctx context.Context, cfg Config) (*Client, error) {
 		conn:     conn,
 		sessions: make(map[string]*session),
 		byPeer:   make(map[string]*session),
+		trans:    make(map[string]*signalOut),
+		peers:    make(map[string]string),
 		ready:    make(chan struct{}),
 		closed:   make(chan struct{}),
 	}
@@ -205,6 +210,8 @@ func (c *Client) Close() error {
 		}
 		c.sessions = map[string]*session{}
 		c.byPeer = map[string]*session{}
+		c.trans = map[string]*signalOut{}
+		c.peers = map[string]string{}
 		c.mu.Unlock()
 		err = c.conn.Close()
 	})
@@ -227,9 +234,9 @@ func (c *Client) readLoop() {
 		case "OPEN":
 			c.readyOnce.Do(func() { close(c.ready) })
 		case "OFFER":
-			go c.handleOffer(m)
+			go c.routeOffer(m)
 		case "CANDIDATE":
-			c.handleCandidate(m)
+			c.routeCandidate(m)
 		case "HEARTBEAT":
 		case "ID-TAKEN", "ERROR":
 			c.log.Printf("服务器拒绝 %s: %.300s", m.Type, string(m.Payload))
@@ -243,19 +250,82 @@ func (c *Client) heartbeat() {
 	for {
 		select {
 		case <-t.C:
-			c.write(map[string]any{"type": "HEARTBEAT"})
+			c.writeAsync(map[string]any{"type": "HEARTBEAT"})
 		case <-c.closed:
 			return
 		}
 	}
 }
 
-func (c *Client) write(v any) {
+func (c *Client) write(v any) error {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
-	if err := c.conn.WriteJSON(v); err != nil {
+	return c.conn.WriteJSON(v)
+}
+
+func (c *Client) writeAsync(v any) {
+	if err := c.write(v); err != nil {
 		c.log.Printf("信令写失败: %v", err)
 	}
+}
+
+// routeOffer 决定这个 OFFER 归谁处理：有 Transport 就交出去，否则走默认应答。
+func (c *Client) routeOffer(m message) {
+	c.mu.Lock()
+	t := c.transport
+	c.mu.Unlock()
+	if t == nil {
+		c.handleOffer(m)
+		return
+	}
+
+	var p offerPayload
+	if err := json.Unmarshal(m.Payload, &p); err != nil {
+		c.log.Printf("解析 OFFER 失败: %v", err)
+		return
+	}
+
+	sig := c.newSignal()
+	c.mu.Lock()
+	c.trans[p.ConnectionID] = sig
+	c.peers[p.ConnectionID] = m.Src
+	c.mu.Unlock()
+
+	t.Accept(Offer{
+		Remote:        m.Src,
+		ConnectionID:  p.ConnectionID,
+		Label:         p.Label,
+		Serialization: p.Serialization,
+		SDP:           p.SDP.SDP,
+	}, sig)
+}
+
+// routeCandidate 把 CANDIDATE 交给对应连接。Transport 模式下走 Transport，
+// 否则走默认应答模式里的 session。
+func (c *Client) routeCandidate(m message) {
+	c.mu.Lock()
+	t := c.transport
+	c.mu.Unlock()
+	if t == nil {
+		c.handleCandidate(m)
+		return
+	}
+
+	var p candidatePayload
+	if err := json.Unmarshal(m.Payload, &p); err != nil {
+		return
+	}
+	init := webrtc.ICECandidateInit{Candidate: p.Candidate.Candidate}
+	if p.Candidate.SDPMid != nil {
+		init.SDPMid = p.Candidate.SDPMid
+	}
+	if p.Candidate.SDPMLineIndex != nil {
+		init.SDPMLineIndex = p.Candidate.SDPMLineIndex
+	}
+	if p.Candidate.UsernameFragment != nil {
+		init.UsernameFragment = p.Candidate.UsernameFragment
+	}
+	t.Offer(p.ConnectionID, init)
 }
 
 func (c *Client) handleOffer(m message) {
@@ -284,7 +354,7 @@ func (c *Client) handleOffer(m message) {
 		if cand == nil {
 			return
 		}
-		c.write(map[string]any{
+		c.writeAsync(map[string]any{
 			"type": "CANDIDATE",
 			"payload": map[string]any{
 				"type":         "data",
@@ -343,7 +413,7 @@ func (c *Client) handleOffer(m message) {
 		return
 	}
 
-	c.write(map[string]any{
+	c.writeAsync(map[string]any{
 		"type": "ANSWER",
 		"payload": map[string]any{
 			"sdp":          map[string]any{"type": "answer", "sdp": pc.LocalDescription().SDP},

@@ -1,0 +1,12 @@
+{
+  "name": "webrtc-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Playwright e2e：浏览器 DataChannel ↔ webrtc-node",
+  "scripts": {
+    "test": "node connect.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}
