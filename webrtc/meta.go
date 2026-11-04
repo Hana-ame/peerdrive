@@ -13,15 +13,18 @@ import (
 )
 
 // FileInfo 是文件或目录的 metadata。
+//
+// Path 是相对路径（用 / 分隔）；Size 对目录为 0；Mode 是权限位；
+// MTime 是 Unix 微秒；SHA 是文件内容的 sha256 十六进制（目录为空）。
 type FileInfo struct {
-	Path  string `json:"path"`            // 相对路径，用 / 分隔
-	Name  string `json:"name"`            //
-	Size  int64  `json:"size"`            // 目录为 0
-	Mode  uint32 `json:"mode"`            // 权限位
-	IsDir bool   `json:"is_dir"`          //
-	MTime int64  `json:"mtime"`           // Unix 微秒
-	Mime  string `json:"mime,omitempty"`  //
-	SHA   string `json:"sha256,omitempty"` // 文件内容的 sha256（十六进制）
+	Path  string `json:"path"`
+	Name  string `json:"name"`
+	Size  int64  `json:"size"`
+	Mode  uint32 `json:"mode"`
+	IsDir bool   `json:"is_dir"`
+	MTime int64  `json:"mtime"`
+	Mime  string `json:"mime,omitempty"`
+	SHA   string `json:"sha256,omitempty"`
 }
 
 // Manifest 是一次传输里所有条目的清单。
@@ -44,28 +47,28 @@ func NewManifest(root string, entries []FileInfo) *Manifest {
 	return m
 }
 
-// Check 是一条校验结果。
+// Check 是一条校验结果。Algo 目前只有 sha256；OK 仅在回执中出现。
 type Check struct {
 	Stream  uint32 `json:"stream"`
 	Path    string `json:"path,omitempty"`
-	Algo    string `json:"algo"`             // 目前只有 sha256
-	Digest  string `json:"digest"`           // 十六进制
-	Size    int64  `json:"size,omitempty"`   // 被校验内容的字节数
-	OK      *bool  `json:"ok,omitempty"`     // 若是回执，带上对端比对结果
-	Note    string `json:"note,omitempty"`   //
+	Algo    string `json:"algo"`
+	Digest  string `json:"digest"`
+	Size    int64  `json:"size,omitempty"`
+	OK      *bool  `json:"ok,omitempty"`
+	Note    string `json:"note,omitempty"`
 	Elapsed int64  `json:"elapsed_ms,omitempty"`
 }
 
 // ControlAction 是控制信号的取值。
 const (
-	ActionBegin   = "begin"   // 传输开始
-	ActionProgress = "progress" // 进度
-	ActionPause   = "pause"   //
-	ActionResume  = "resume"  //
-	ActionCancel  = "cancel"  //
-	ActionEnd     = "end"     // 传输结束
-	ActionPing    = "ping"    //
-	ActionPong    = "pong"    //
+	ActionBegin    = "begin"
+	ActionProgress = "progress"
+	ActionPause    = "pause"
+	ActionResume   = "resume"
+	ActionCancel   = "cancel"
+	ActionEnd      = "end"
+	ActionPing     = "ping"
+	ActionPong     = "pong"
 )
 
 // HashFile 计算文件的 sha256 与大小。
