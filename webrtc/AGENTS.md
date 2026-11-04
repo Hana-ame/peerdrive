@@ -91,3 +91,7 @@ flag(1)=1 + seq(4) + total(4) + data
 
 - 上层索引：`../AGENTS.md`
 - 信令契约：`../peerjs/AGENTS.md`
+
+## CI
+
+`webrtc/**`、`peerjs/**` 或 `go.work` 变化时跑；push 不限分支，分支上直接能看到结果。
