@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      Pure Static HTML Interface Security Policy:
+      This SPA runs 100% as static HTML/JS/CSS (compatible with any static host, CDN, or file://)
+      and communicates with PeerDrive nodes strictly over PeerJS (WebRTC), WebSocket (/ws/peer, /ws/data),
+      and HTTP (/f/:sha256, /c/:hash).
+      The meta Content-Security-Policy below ensures browser-level script/plugin/base-uri lockdown
+      even when deployed without the Go backend's HTTP SecurityHeaders middleware.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' data: blob: https: http:; connect-src 'self' ws: wss: http: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self';"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <!--
+      PWA manifest：恢复引用，但不带 crossorigin 属性。
+      背景：2026-10-28 那次为了排查 manifest 请求失败，直接把整个 <link> 删了，
+      文件 front/public/manifest.json 却还留着（继续被打进 dist），结果是 PWA
+      安装能力静默消失。失败的真实原因是 crossorigin="use-credentials"：它让浏览器
+      用「CORS + 带凭据」的模式去取 manifest，而静态托管通常不回
+      Access-Control-Allow-Credentials，取不到就报错。HTML 规范里 manifest 的
+      fetch 本来就是 credentials mode = omit，去掉该属性即回到默认语义。
+    -->
+    <link rel="manifest" href="./manifest.json" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>Peerdrive</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

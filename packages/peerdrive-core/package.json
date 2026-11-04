@@ -1,0 +1,38 @@
+{
+  "name": "peerdrive-core",
+  "version": "0.1.0",
+  "description": "Single source of truth for Peerdrive frame protocol, incremental SHA-256, canonical URLs, frame dispatcher, and multi-transport queue/progress hub",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "peerdrive",
+    "peerjs",
+    "webrtc",
+    "statemachine",
+    "protocol",
+    "queue",
+    "progress"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./protocol": "./src/protocol.js",
+    "./sha256": "./src/sha256.js",
+    "./dispatcher": "./src/dispatcher.js",
+    "./url": "./src/url.js",
+    "./queue": "./src/queue.js",
+    "./security": "./src/security.js"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "test": "node --test test/core.test.mjs test/security.test.mjs test/protocol-ssot.test.mjs",
+    "test:ssot": "node --test test/protocol-ssot.test.mjs"
+  },
+  "types": "./src/index.d.ts"
+}

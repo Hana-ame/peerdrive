@@ -1,0 +1,3900 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Peerdrive · 分布式云网盘公共面板</title>
+<!--
+  dist/panel.html — peerdrive 的**公共面板**（由 scripts/build-panel.mjs 生成，勿手改）。
+
+  形态：单个 HTML 文件，双击（file://）或丢到任意静态托管都能用，
+        **不需要本地起 http 服务、不需要自己的后端**。面板通过 PeerJS 拨号
+        直连 peerdrive 节点（浏览器 ↔ 节点之间是 WebRTC DataChannel），
+        走 share 帧看共享清单、走 req 帧拉内容并逐块校验 sha256。
+
+  常用 URL 参数（便于把「连某个节点的面板」当成链接发出去）：
+    ?node=<peer id>           要连的节点 id
+    &host=&port=&path=&key=    信令参数
+    &secure=0                 ws:// 自托管信令（默认 1 = wss）
+    &auto=1                   打开即自动连接
+
+  依赖只有一项：CDN 上的 peerjs（本包自身零依赖）。
+-->
+<!--
+  依赖：peerjs（本包自身零依赖，但要用 PeerJS 的信令与连接语义）。
+  这里按「同目录 vendored 副本 → jsdelivr → unpkg」顺序回退加载，
+  全部失败时面板仍会正常工作，只是点连接会给出明确提示。
+  想彻底离线：`npm run vendor:peerjs`（把 peerjs.min.js 下到 dist/ 同目录）。
+-->
+<script>
+// peerjs 加载器：多源回退。
+// 为什么要回退：unpkg 在国内常被墙/超时；只挂一个 CDN 会把「公用面板」变成
+// 「看运气的面板」。同目录副本优先是给离线/内网部署留的后路，**文件不存在时
+// 会因为 404 触发 onerror 而自动走下一个源**，不需要额外判断。
+;(function () {
+  var SOURCES = [
+    './peerjs.min.js',
+    'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js',
+    'https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js',
+  ]
+  var i = 0
+  function settle(ok, src) {
+    window.__peerjsOK = ok
+    window.__peerjsSrc = src
+    document.documentElement.setAttribute('data-peerjs', ok ? 'ready' : 'missing')
+    try { window.dispatchEvent(new CustomEvent('peerjs-ready', { detail: { ok: ok, src: src } })) } catch (e) {}
+  }
+  function next() {
+    if (i >= SOURCES.length) return settle(false, null)
+    var src = SOURCES[i++]
+    var el = document.createElement('script')
+    el.src = src
+    el.async = false
+    el.onload = function () { settle(true, src) }
+    el.onerror = function () { next() }
+    document.head.appendChild(el)
+  }
+  next()
+})()
+</script>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d0e12; --panel: #15171e; --panel-2: #1c1f28;
+    --line: #262936; --line-2: #323646;
+    --fg: #e4e4e7; --fg-dim: #a1a1aa; --fg-faint: #71717a;
+    --accent: #6366f1; --accent-2: #4f46e5;
+    --ok: #10b981; --warn: #f59e0b; --err: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    background-image: radial-gradient(ellipse 85% 40% at 50% -10%, rgba(99, 102, 241, 0.14), transparent);
+    background-attachment: fixed;
+    font: 14px/1.55 "Inter", ui-sans-serif, system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  a { color: #818cf8; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 20px 20px 48px; }
+  header {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--line);
+  }
+  h1 {
+    font-size: 18px; font-weight: 700; margin: 0; letter-spacing: -.01em;
+    background: linear-gradient(90deg, #a5b4fc, #6366f1, #38bdf8);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .tag {
+    font-size: 11px; padding: 2px 9px; border-radius: 999px;
+    border: 1px solid var(--line-2); background: rgba(255,255,255,0.03); color: var(--fg-dim);
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px; margin-bottom: 14px;
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.04), 0 10px 28px -14px rgba(0,0,0,0.55);
+  }
+  .card > h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--fg-dim); font-weight: 600; margin: 0 0 12px; display: flex; align-items: center; gap: 6px;
+  }
+  label { display: block; font-size: 11px; color: var(--fg-dim); margin-bottom: 4px; font-weight: 500; }
+  input, select {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 8px;
+    padding: 8px 11px; color: var(--fg); font: inherit; font-size: 13px; transition: border-color .15s;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99,102,241,0.2); }
+  input[type=checkbox] { width: auto; }
+  button {
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    border: 1px solid rgba(255,255,255,0.14); color: #ffffff; font-weight: 500;
+    border-radius: 8px; padding: 8px 15px; font: inherit; font-size: 13px; cursor: pointer;
+    transition: all .15s;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.ghost { background: rgba(255,255,255,0.04); border-color: var(--line-2); color: var(--fg-dim); }
+  button.ghost:hover:not(:disabled) { background: rgba(255,255,255,0.09); color: var(--fg); }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  button.tiny { padding: 3px 8px; font-size: 11px; border-radius: 6px; }
+  .grid { display: grid; gap: 10px; }
+  .g-main { display: grid; grid-template-columns: 310px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .g-main { grid-template-columns: 1fr; } }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  .row > .f { flex: 1 1 130px; min-width: 110px; }
+  .row > .auto { flex: 0 0 auto; }
+  .grow { flex: 1 1 auto; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
+  .dim { color: var(--fg-dim); } .faint { color: var(--fg-faint); }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+  .empty { color: var(--fg-faint); padding: 20px 8px; font-size: 13px; text-align: center; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; vertical-align: middle; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-faint); font-weight: 600; }
+  tbody tr:hover td { background: rgba(255,255,255,0.025); }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  .node {
+    display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-radius: 10px;
+    border: 1px solid transparent; cursor: pointer; margin-bottom: 5px; background: var(--panel-2);
+    transition: all .15s;
+  }
+  .node:hover { border-color: var(--line-2); }
+  .node.sel { border-color: var(--accent); background: rgba(99, 102, 241, 0.14); }
+  .node .nm { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-faint); flex: 0 0 auto; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 8px rgba(16,185,129,0.5); }
+  .dot.wait { background: var(--warn); animation: pulse 1.2s infinite; }
+  .dot.bad { background: var(--err); }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,0.07); overflow: hidden; margin-top: 5px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); transition: width .18s linear; }
+  details { margin-top: 10px; }
+  summary {
+    cursor: pointer; color: var(--fg-dim); font-size: 12px; font-weight: 500;
+    user-select: none; padding: 4px 0;
+  }
+  summary:hover { color: var(--fg); }
+  .adv-panel {
+    margin-top: 10px; padding: 12px; border-radius: 10px;
+    background: rgba(255,255,255,0.02); border: 1px solid var(--line);
+  }
+  #log {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 10px;
+    height: 140px; overflow: auto; white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
+  }
+  .preview { margin-top: 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .preview img, .preview video { max-width: 100%; max-height: 360px; border-radius: 8px; }
+  .preview pre { margin: 0; max-height: 280px; overflow: auto; font-size: 12px; }
+  .hint { font-size: 12px; color: var(--fg-faint); margin-top: 8px; line-height: 1.6; }
+  #shares h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--fg-faint); font-weight: 600; margin: 12px 0 6px;
+  }
+  .sep { height: 1px; background: var(--line); margin: 12px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>☁️ peerdrive panel</h1>
+    <span class="tag">分布式网盘</span>
+    <span class="tag">WebRTC 直连 · 零后端</span>
+    <span class="tag mono" id="build-id">bundle 476a7527</span>
+    <span class="grow"></span>
+    <span class="mono dim" style="display:flex;align-items:center;gap:6px">
+      我的节点 id：<span id="my-id">（未连接）</span>
+      <button id="btn-copy-id" class="tiny ghost" title="复制给节点运营者，加进好友名单后才能拿到 private 内容">复制</button>
+      <button id="btn-new-id" class="tiny ghost" title="换一个 id（换了之后好友名单里的旧 id 就失效了）">换一个</button>
+    </span>
+  </header>
+
+  <!-- 1 · 极简连接栏（认知负荷降低：主界面仅保留节点ID、可选访问密码与一键搜索，底层信令收折进高级抽屉） -->
+  <div class="card">
+    <h2>🌐 快速连接共享节点</h2>
+    <div class="row">
+      <div class="f grow" style="flex:2 1 260px">
+        <label>目标节点 ID（或点击右侧「自动搜索」直接点选在线节点）</label>
+        <input id="in-node" class="mono" placeholder="输入 peerdrive-xxxxxxxx 或点击自动搜索">
+      </div>
+      <div class="f" style="flex:1 1 160px">
+        <label>访问密码 / 预共享密钥（公开节点留空）</label>
+        <input id="in-psk" type="password" autocomplete="off" placeholder="公开免密节点无需填写">
+      </div>
+      <div class="f auto"><label>&nbsp;</label><button id="btn-connect">🚀 连接网盘</button></div>
+      <div class="f auto"><label>&nbsp;</label><button id="btn-discover" class="ghost">🔍 自动搜索在线节点</button></div>
+    </div>
+
+    <details>
+      <summary>⚙️ 高级信令服务器参数与连接说明（默认已预置官方信令，通常无需修改）</summary>
+      <div class="adv-panel">
+        <div class="row">
+          <div class="f" style="flex:1 1 150px">
+            <label>信令 host</label>
+            <input id="in-host" value="peersignal.moonchan.xyz">
+          </div>
+          <div class="f" style="flex:0 1 88px">
+            <label>port</label>
+            <input id="in-port" value="443" inputmode="numeric">
+          </div>
+          <div class="f" style="flex:0 1 80px">
+            <label>path</label>
+            <input id="in-path" value="/">
+          </div>
+          <div class="f" style="flex:0 1 120px">
+            <label>key</label>
+            <input id="in-key" value="pd-signal-1edf5e05e4a52b7351392574">
+          </div>
+          <div class="f auto" style="flex:0 0 auto">
+            <label>&nbsp;</label>
+            <label style="display:flex;align-items:center;gap:6px;color:var(--fg-dim);font-size:12px;white-space:nowrap">
+              <input id="in-secure" type="checkbox" checked> wss
+            </label>
+          </div>
+          <div class="f" style="flex:1 1 150px">
+            <label>信令 token（可留空）</label>
+            <input id="in-token" type="password" autocomplete="off" placeholder="信令开了 token 白名单才要填">
+          </div>
+        </div>
+        <div class="hint">
+          自托管信令填节点启动时用的 PEERDRIVE_PEERJS_*，并取消勾选 wss（多为 ws://）。
+          也可以用链接直接带参数：<span class="mono">?node=&lt;id&gt;&amp;host=&amp;port=&amp;secure=0</span>
+          <br>
+          <b>自动搜索</b>：向上面这个信令问「现在有哪些节点在线」（信令 REST <span class="mono">GET /discover/nodes</span>），
+          结果出现在左栏「在线节点」。这一步是跨域请求，信令没给 <span class="mono">Access-Control-Allow-Origin</span>
+          时浏览器会把它连状态码一起吞掉——失败信息里会点名这件事。
+          <br>
+          <b>预共享密钥</b>：节点用 <span class="mono">PEERDRIVE_PSK</span> 开了门禁时才需要——
+          连上后如果提示 <span class="mono">psk required</span>，说明你没填或填错了。
+          密钥<b>不会</b>被写回地址栏、也不会存进「最近连接」，只留在这一页的输入框里。
+          <br>
+          <b>信令 token</b>：信令用 <span class="mono">peersignal --tokens</span>（或 <span class="mono">PEERJS_TOKENS</span>）
+          开了注册白名单时才需要——留空则本面板<b>不发送</b>该字段（走 peerjs 默认随机 token，
+          与未开启白名单时的旧行为一致）。填错/没填的表现是握手直接被拒（<span class="mono">bad handshake</span>），
+          因为白名单在 HTTP 升级层拦截，拿不到更细的报错。此字段与预共享密钥同待遇：
+          <b>不</b>回写地址栏、<b>不</b>存「最近连接」。
+          <br>
+          <b>我的节点 id</b>（右上角）：固定不变，存在这台浏览器里。节点运营者要把它填进
+          好友名单，你才拿得到 <span class="mono">private</span> 级别的内容 —— id 每次都随机的话，
+          名单等于没填。
+          <br>
+          <b>分享链接</b>：清单每行都有「链接」按钮，生成一条
+          <span class="mono">?node=&amp;hash=</span> 的链接，对应 <span class="mono">unlisted</span> 级别：
+          内容不出现在清单里，但拿到链接的人凭 hash 取得到。链接同样<b>不含</b>密钥。
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div class="g-main">
+    <!-- 2 · 节点导航栏（左栏：已连接 / 在线广场 / 最近访问） -->
+    <div class="card">
+      <h2>💻 已连接节点</h2>
+      <div id="nodes"><div class="empty">还没有连接任何节点。</div></div>
+      <div class="sep"></div>
+      <h2>🟢 在线节点广场（一键点选）</h2>
+      <div id="discovered"><div class="empty">点上面的「自动搜索在线节点」，即刻列出在线共享源。</div></div>
+      <div class="sep"></div>
+      <h2>🕘 最近访问</h2>
+      <div id="recent"><div class="empty">暂无记录。</div></div>
+    </div>
+
+    <!-- 3 · 主网盘浏览区（右栏：文件与合集清单 + 内联预览 + 实时传输进度） -->
+    <div>
+      <div class="card">
+        <h2>📁 节点共享文件与合集</h2>
+        <div id="linked"></div>
+        <div id="shares"><div class="empty">👈 请先在左侧点选一个在线节点，即可像普通网盘一样浏览、在线预览或一键保存文件。</div></div>
+        <div id="preview"></div>
+      </div>
+
+      <!-- 4 · 传输任务（紧随文件区下方，直观查看流式下载与 SHA-256 校验进度） -->
+      <div class="card">
+        <h2>⚡ 传输与校验队列</h2>
+        <div id="tasks"><div class="empty">没有进行中的传输。</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5 · 高级功能折叠区：向节点上传/离线抓取 & 底层帧协议诊断日志 -->
+  <div class="card">
+    <details>
+      <summary>📤 向当前节点投递文件 / 远程 URL 离线入库（写操作 · 展开使用）</summary>
+      <div class="adv-panel">
+        <div class="row">
+          <div class="f grow" style="flex:2 1 260px">
+            <label>本地文件（按住 Ctrl 可多选）</label>
+            <input id="in-file" type="file" multiple>
+          </div>
+          <div class="f auto"><label>&nbsp;</label><button id="btn-put">本地入库</button></div>
+        </div>
+        <div class="hint">
+          走协议的 <span class="mono">upload</span> 动词：内容按 64KB 分片、由<b>节点说了算</b>节奏（它回一片授权才发下一片），
+          入库成功后节点返回内容的 <span class="mono">sha256</span>——这就是之后能按它取回的地址。
+          同一个 chrome/Safari 标签页里不要同时往一个节点传两个文件：一条连接上同时只能有一个上传流。
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="row">
+          <div class="f grow" style="flex:3 1 320px">
+            <label>网络地址（URL）</label>
+            <input id="in-url" class="mono" placeholder="https://example.com/some-file.zip">
+          </div>
+          <div class="f" style="flex:1 1 150px">
+            <label>存成什么名字（可留空）</label>
+            <input id="in-url-name" placeholder="留空则按 URL 推">
+          </div>
+          <div class="f auto"><label>&nbsp;</label><button id="btn-pull">网络入库</button></div>
+        </div>
+        <div class="hint">
+          走协议的 <span class="mono">pull</span> 动词：让<b>节点替你</b>去抓这个地址并入库，适合你手上只有链接、
+          或内容在大网另一端的场景。节点侧有 SSRF 防护——只接受公网 <span class="mono">http/https</span>，
+          内网/本机地址、带用户名密码的 URL、跳到内网的重定向都会被拒，也都有大小上限。
+          这类拒绝是<b>预期行为</b>，错误信息按原话透传。
+          <br>
+          ⚠️ 入库是<b>写操作</b>：节点开了 PSK 门禁时必须先在上面填对密钥，否则会被回
+          <span class="mono">PSK_REQUIRED</span>；节点没开共享写入、磁盘满或被限流时也会直接回错误。
+        </div>
+      </div>
+    </details>
+
+    <div class="sep"></div>
+
+    <details>
+      <summary>🛠️ 底层 WebRTC / 信令诊断日志（开发者与排障使用）</summary>
+      <div class="adv-panel">
+        <div id="log"></div>
+      </div>
+    </details>
+  </div>
+
+</div>
+
+<script>// ===== 以下由 scripts/build-panel.mjs 从 peerdrive-core 与 src/ 内联生成，勿手改 =====
+;(function () {
+'use strict'
+// ---- peerdrive-core/src/sha256.js ----
+// sha256.js — zero-dependency SHA-256 (incremental), the single source of truth
+// for content-address verification (Issue #396 SSOT; relocated from
+// packages/peerdrive-client/src/sha256.js so the panel, front and media all use
+// this one copy — build-panel.mjs inlines it first in the bundle topology).
+//
+// Why implement our own instead of just using WebCrypto: `crypto.subtle.digest()` is **one-shot**
+// — it must have the entire content in memory before computing the digest, which directly conflicts
+// with this package's streaming interface (stream()'s selling point is not keeping content in memory).
+// The Go side's /peerjs/fetch semantics are "verify sha256 after reading a full request, error if mismatch",
+// the consumer side must provide the same guarantee, which requires computing while receiving.
+//
+// Another side effect is cost: WebCrypto is only available in **secure contexts** (https / localhost),
+// the pure JS implementation runs on any http page (demo can be verified with just `python -m http.server`).
+//
+// Performance: pure JS is about 30–80 MB/s. The one-shot interface sha256Hex() prefers WebCrypto
+// (an order of magnitude faster), the streaming interface uses the incremental implementation here;
+// both paths cross-validate in tests (including 63/64/65 byte block-boundary lengths).
+
+const K = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+])
+
+const H0 = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
+
+/** Incremental SHA-256. update() can be called any number of times (block boundaries handled automatically), digestHex() is re-callable. */
+class Sha256 {
+  constructor() {
+    this.h = Int32Array.from(H0)
+    this.buf = new Uint8Array(64)
+    this.bufLen = 0
+    this.total = 0 // number of **bytes** fed (not block count)
+    this._w = new Int32Array(64)
+  }
+
+  /** update appends a chunk of content. Accepts Uint8Array / ArrayBuffer / TypedArray. */
+  update(data) {
+    const bytes = toBytes(data)
+    this.total += bytes.length
+    let off = 0
+    // First fill the remaining half-block from last time
+    if (this.bufLen > 0) {
+      const take = Math.min(64 - this.bufLen, bytes.length)
+      this.buf.set(bytes.subarray(0, take), this.bufLen)
+      this.bufLen += take
+      off = take
+      if (this.bufLen === 64) {
+        this._block(this.buf, 0)
+        this.bufLen = 0
+      }
+    }
+    // Full blocks computed directly (no copy)
+    while (off + 64 <= bytes.length) {
+      this._block(bytes, off)
+      off += 64
+    }
+    // Leave the tail
+    if (off < bytes.length) {
+      this.buf.set(bytes.subarray(off), 0)
+      this.bufLen = bytes.length - off
+    }
+    return this
+  }
+
+  /**
+   * digestHex outputs 64-character lowercase hex digest.
+   * Re-callable: internally snapshots h before padding/compression, object state unchanged after call
+   * (caller may recompute once in an error branch for logging).
+   */
+  digestHex() {
+    const saved = this.h.slice()
+    const savedBufLen = this.bufLen
+    const savedTotal = this.total
+    try {
+      const bitLen = this.total * 8
+      // Pad with 0x80 + length: reserve 8 bytes for 64-bit length. If bufLen>=56, not enough space, need two blocks
+      const padLen = this.bufLen < 56 ? 64 : 128
+      const pad = new Uint8Array(padLen)
+      pad.set(this.buf.subarray(0, this.bufLen), 0)
+      pad[this.bufLen] = 0x80
+      const dv = new DataView(pad.buffer)
+      // bitLen split as "high bits = floor(total / 2^29)" to avoid total*8 overflowing 2^53
+      dv.setUint32(padLen - 8, Math.floor(this.total / 536870912))
+      dv.setUint32(padLen - 4, bitLen >>> 0)
+      for (let i = 0; i < padLen; i += 64) this._block(pad, i)
+
+      let out = ''
+      for (let i = 0; i < 8; i++) out += (this.h[i] >>> 0).toString(16).padStart(8, '0')
+      return out
+    } finally {
+      this.h.set(saved)
+      this.bufLen = savedBufLen
+      this.total = savedTotal
+    }
+  }
+
+  _block(p, off) {
+    const w = this._w
+    for (let i = 0; i < 16; i++) {
+      w[i] = (p[off + 4 * i] << 24) | (p[off + 4 * i + 1] << 16) | (p[off + 4 * i + 2] << 8) | p[off + 4 * i + 3]
+    }
+    for (let i = 16; i < 64; i++) {
+      const x = w[i - 15]
+      const y = w[i - 2]
+      const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3)
+      const s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10)
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0
+    }
+    const h = this.h
+    let a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7]
+    for (let i = 0; i < 64; i++) {
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7))
+      const ch = (e & f) ^ (~e & g)
+      const t1 = (hh + S1 + ch + K[i] + w[i]) | 0
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10))
+      const maj = (a & b) ^ (a & c) ^ (b & c)
+      const t2 = (S0 + maj) | 0
+      hh = g
+      g = f
+      f = e
+      e = (d + t1) | 0
+      d = c
+      c = b
+      b = a
+      a = (t1 + t2) | 0
+    }
+    h[0] = (h[0] + a) | 0
+    h[1] = (h[1] + b) | 0
+    h[2] = (h[2] + c) | 0
+    h[3] = (h[3] + d) | 0
+    h[4] = (h[4] + e) | 0
+    h[5] = (h[5] + f) | 0
+    h[6] = (h[6] + g) | 0
+    h[7] = (h[7] + hh) | 0
+  }
+}
+
+function toBytes(data) {
+  if (data instanceof Uint8Array) return data
+  if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) return new Uint8Array(data)
+  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  }
+  throw new TypeError('peerdrive-core: sha256 expects bytes')
+}
+
+/**
+ * sha256Hex one-shot digest: prefers WebCrypto (fast), falls back to pure JS when unavailable.
+ * The two paths don't mix within a single call, results are consistent (cross-checked by length in tests).
+ */
+async function sha256Hex(bytes) {
+  const subtle = globalThis.crypto && globalThis.crypto.subtle
+  if (subtle && typeof subtle.digest === 'function') {
+    try {
+      const digest = await subtle.digest('SHA-256', toBytes(bytes))
+      const view = new Uint8Array(digest)
+      let out = ''
+      for (let i = 0; i < view.length; i++) out += view[i].toString(16).padStart(2, '0')
+      return out
+    } catch {
+      // Some environments (old Safari / non-secure context) throw: silently fall back to pure JS
+    }
+  }
+  return new Sha256().update(bytes).digestHex()
+}
+// ---- peerdrive-core/src/security.js ----
+// security.js — defensive sanitizers & permission guards for untrusted input
+// crossing into the UI (CollectionView manifests, share frames, signal URLs).
+//
+// Why this module exists (collection-view red-team hardening, Issue #404):
+//  1. Collection manifests arrive from arbitrary peers; before this file,
+//     rendering them meant trusting their shape — that leaks prototype
+//     pollution ("__proto__"), deep JSON nesting bombs, "../" traversal paths
+//     and Bidi/control-character spoofing into the page.
+//  2. A ?signal= URL pasted into a share link would otherwise let a peer make
+//     the browser dial arbitrary hosts; validateSignalOrApiUrl gates it.
+//  3. WebRTC must never carry admin verbs (AGENTS.md: admin is local-WS only);
+//     evaluateAdminPermission enforces that boundary on the client side.
+// The Go side has its own hardening (urlguard, pathutil, apperr); this module
+// is the browser-side complement, not a substitute.
+
+/** Upper bound for a collection manifest JSON document (defense against bombs). */
+const MAX_MANIFEST_BYTES = 8 * 1024 * 1024
+
+// Characters that can spoof or hide text in the UI: C0 controls plus Unicode
+// bidi overrides/isolates and zero-width joiners. Stripped everywhere untrusted
+// strings are displayed.
+function stripUnsafeChars(s) {
+  return String(s).replace(/[\u0000-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, '')
+}
+
+/** Truncate-and-clean arbitrary text for display; never rendered raw after this. */
+function sanitizeUntrustedText(text, maxLen = 512) {
+  const clean = stripUnsafeChars(text == null ? '' : text)
+  return clean.slice(0, maxLen)
+}
+
+/** Safe file name for the browser download bar: basename only, no path, no controls. */
+function sanitizeFilename(name, fallback = 'file') {
+  const base = String(name == null ? '' : name).split(/[\\/]/).pop()
+  const clean = stripUnsafeChars(base).slice(0, 255)
+  return clean || fallback
+}
+
+/** Collection entry path: relative only — drops leading slashes and any ".." traversal. */
+function sanitizeRelativePath(p, maxLen = 4096) {
+  const parts = String(p == null ? '' : p)
+    .replace(/\\/g, '/')
+    .split('/')
+  const clean = []
+  for (const seg of parts) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') continue // traversal: refuse, never pass through
+    clean.push(stripUnsafeChars(seg).slice(0, 255))
+  }
+  return clean.join('/').slice(0, maxLen)
+}
+
+/**
+ * safeJsonParse parses untrusted JSON with three hard caps, then walks the
+ * result to reject prototype-pollution keys (__proto__ / constructor /
+ * prototype as own keys) and deep nesting bombs. throwOnError:true converts a
+ * rejection into an exception (callers that can fall back pass false and get null).
+ */
+function safeJsonParse(text, { maxBytes = MAX_MANIFEST_BYTES, throwOnError = false } = {}) {
+  const fail = (msg) => {
+    if (throwOnError) throw new Error(msg)
+    return null
+  }
+  if (typeof text !== 'string') return fail('safeJsonParse: non-string input')
+  if (text.length > maxBytes) return fail(`safeJsonParse: document exceeds ${maxBytes} bytes`)
+
+  let value
+  try {
+    value = JSON.parse(text)
+  } catch (e) {
+    return fail(`safeJsonParse: invalid JSON (${e.message})`)
+  }
+
+  // Walk: depth <= 64, node count <= 20k, no dangerous own keys.
+  let nodes = 0
+  const walk = (v, depth) => {
+    if (depth > 64) throw new Error('safeJsonParse: nesting too deep')
+    nodes += 1
+    if (nodes > 20000) throw new Error('safeJsonParse: too many nodes')
+    if (Array.isArray(v)) {
+      for (const item of v) walk(item, depth + 1)
+      return
+    }
+    if (v && typeof v === 'object') {
+      for (const k of Object.keys(v)) {
+        if (k === '__proto__' || k === 'constructor' || k === 'prototype') {
+          throw new Error(`safeJsonParse: dangerous key "${k}"`)
+        }
+        walk(v[k], depth + 1)
+      }
+    }
+  }
+  try {
+    walk(value, 0)
+  } catch (e) {
+    return fail(e.message)
+  }
+  return value
+}
+
+/** Prompt-injection markers in text that ends up in an LLM/system context. */
+function detectPromptInjection(text) {
+  const s = String(text || '')
+  return /(ignore|disregard|forget|overwrite|override|repeat)\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?|messages)/i.test(s) ||
+    /(system|developer)\s+(prompt|message)/i.test(s) ||
+    /you\s+are\s+now\s+[\w-]+/i.test(s) ||
+    /jailbreak|DO\s+NOT\s+REVEAL/i.test(s)
+}
+
+/** Preview allow-list: only renderable media/text types are echoed back (blocks SVG XSS). */
+function safePreviewMime(mime) {
+  const m = String(mime || '').trim().toLowerCase()
+  if (m === 'image/svg+xml' || m.startsWith('image/svg')) return null
+  if (/^(image|video|audio)\/[a-z0-9.+-]+$/.test(m)) return m
+  if (m === 'text/plain' || m === 'text/markdown' || m === 'application/json' || m === 'application/pdf') return m
+  return null
+}
+
+/**
+ * validateSignalOrApiUrl gates the ?signal= / ?url= param before a PeerJS dial:
+ * https/wss are always accepted, http/ws only for loopback (dev), credentials
+ * are rejected outright, and the result exposes a parsed URL for dial options.
+ */
+function validateSignalOrApiUrl(url) {
+  const raw = String(url || '').trim()
+  if (!raw) return { valid: false, reason: 'empty' }
+  let parsed
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return { valid: false, reason: 'unparseable' }
+  }
+  const scheme = parsed.protocol
+  if (scheme !== 'https:' && scheme !== 'wss:' && scheme !== 'http:' && scheme !== 'ws:') {
+    return { valid: false, reason: `scheme ${scheme} not allowed` }
+  }
+  if (parsed.username || parsed.password) {
+    return { valid: false, reason: 'credentials not allowed' }
+  }
+  if ((scheme === 'http:' || scheme === 'ws:') && !isLoopback(parsed.hostname)) {
+    return { valid: false, reason: 'plaintext only for loopback' }
+  }
+  return { valid: true, url: parsed }
+}
+
+function isLoopback(hostname) {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]'
+}
+
+/**
+ * sanitizeCollectionManifest returns a sanitizing DEEP COPY of a collection
+ * manifest. Every string (names, paths, hashes, mime types, Bidi/control) is
+ * cleaned, "../"-traversal paths are refused, dangerous keys (__proto__ /
+ * constructor / prototype) never survive, and the entry count is capped.
+ * All OTHER keys (hash, files, size, version, ...) pass through untouched:
+ * the shared-manifest consumers (CollectionView page, client.js
+ * sanitizePeerCollections merge `{...c, ...clean}`) rely on the copy having
+ * exactly the input's key set — front/tests/ws.test.js pins that a remote
+ * collection keeps its hash and files fields byte-for-byte.
+ *
+ * Two derived fields are omitted when empty so the merge can't add keys the
+ * caller didn't have: `entries` is only emitted when it has surviving entries,
+ * and `friendly_name` only when it differs from `name`.
+ */
+function sanitizeCollectionManifest(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {}
+  const out = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue
+    if (k === 'name') { out.name = sanitizeUntrustedText(v, 256); continue }
+    if (k === 'friendly_name') { out.friendly_name = sanitizeUntrustedText(v, 256); continue }
+    if (k === 'description') { out.description = sanitizeUntrustedText(v, 1024); continue }
+    out[k] = v
+  }
+  // friendly_name 与 name 相同时不再重复登记（client.js 的 {...c, ...clean}
+  // 合并会因此多出键，ws.test 的 toEqual 会红）。
+  if (typeof out.friendly_name === 'string' && out.friendly_name === out.name) {
+    delete out.friendly_name
+  }
+  if (!Array.isArray(out.entries)) return out
+  const kept = []
+  for (const e of out.entries) {
+    if (kept.length >= 5000) break
+    if (!e || typeof e !== 'object') continue
+    const path = sanitizeRelativePath(e.path || e.filepath || '')
+    if (!path) continue
+    const entry = {}
+    for (const [ek, ev] of Object.entries(e)) {
+      if (ek === '__proto__' || ek === 'constructor' || ek === 'prototype') continue
+      if (ek === 'path' || ek === 'filepath') { entry[ek] = path; continue }
+      if (ek === 'name' || ek === 'filename') { entry[ek] = sanitizeFilename(ev, 'file'); continue }
+      if (ek === 'mime_type' || ek === 'mime') { entry[ek] = sanitizeUntrustedText(ev, 128); continue }
+      if (ek === 'size' || ek === 'total') {
+        entry[ek] = Number.isFinite(ev) && ev >= 0 ? Math.min(Math.floor(ev), Number.MAX_SAFE_INTEGER) : 0
+        continue
+      }
+      // sha / hash / preview 是内容地址与缩略图地址：保留原值（小写、限长），
+      // 长度校验不拦 mock/测试里的非 64-hex 短值（64hex 校验在取回入口做）。
+      if (ek === 'sha' || ek === 'hash' || ek === 'preview') {
+        entry[ek] = sanitizeUntrustedText(ev, 64).toLowerCase()
+        continue
+      }
+      entry[ek] = ev
+    }
+    kept.push(entry)
+  }
+  if (kept.length > 0) out.entries = kept
+  else delete out.entries
+  return out
+}
+
+/** Permission denial thrown by evaluateAdminPermission when a verb is not allowed. */
+class PermissionError extends Error {
+  constructor(reason, code) {
+    super(reason)
+    this.name = 'PermissionError'
+    this.reason = reason
+    this.code = code
+  }
+}
+
+/**
+ * evaluateAdminPermission(transport, method, path) — the client-side admin
+ * boundary. Over WebRTC ('peerjs') every READ degrades safely (shares() reads
+ * + the safe-fallback handlers in client.js admin(), including null for
+ * not-locally-available stats — pinned by front/tests/ws.test.js), so only
+ * WRITE verbs are refused: mutations stay on the local WS admin plane.
+ */
+function evaluateAdminPermission(transport, method, path) {
+  const m = String(method || 'GET').toUpperCase()
+  if (transport !== 'peerjs') return { allowed: true }
+  if (m === 'GET') return { allowed: true }
+  return {
+    allowed: false,
+    reason: `admin verb ${m} is restricted to the local session (WebRTC exposes a read-only share surface)`,
+    code: 'LOCAL_ONLY',
+  }
+}
+// ---- peerdrive-core/src/protocol.js ----
+// protocol.js — Single Source of Truth (peerdrive-core) for Peerdrive frame protocol,
+// binary chunk codecs, v2 envelopes (#378), and 32-byte self-routing binary headers (#378 A7).
+//
+// Shared by peerdrive-client, peerdrive-media, and front/ (Issue #396).
+
+
+const PROTOCOL_VERSION = 1
+
+// MAX_FILE_BYTES matches Go-side maxPeerFetchSize (8GB).
+const MAX_FILE_BYTES = 8 * 1024 * 1024 * 1024
+
+// DEFAULT_MAX_BUFFER_BYTES browser-side in-memory assembly gate (256MB).
+const DEFAULT_MAX_BUFFER_BYTES = 256 * 1024 * 1024
+
+// UPLOAD_CHUNK and CHUNK_SIZE match Go-side 64KB transfer slice size.
+const UPLOAD_CHUNK = 64 * 1024
+const CHUNK_SIZE = 64 * 1024
+
+// CLIENT_CAPABILITIES declared in psk-auth / cap frames (Issue #213).
+const CLIENT_CAPABILITIES = ['req', 'share', 'index', 'pull']
+
+// PSK_REQUIRED machine-readable error code returned by Go-side PSK gate.
+const PSK_REQUIRED = 'PSK_REQUIRED'
+
+const HASH_RE = /^[0-9a-f]{64}$/
+
+function isValidHash(hash) {
+  return typeof hash === 'string' && HASH_RE.test(hash)
+}
+
+let _reqSeq = 0
+function nextReqId() {
+  _reqSeq = (_reqSeq + 1) & 0xfffff
+  return `${Date.now().toString(36)}-${_reqSeq.toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function reqFrame(hash, { offset = 0, size = -1, reqId } = {}) {
+  return JSON.stringify({ type: 'req', hash, offset, size, reqId })
+}
+
+function shareFrame(reqId) {
+  return JSON.stringify({ type: 'share', reqId })
+}
+
+function pskAuthFrame(psk, capabilities = CLIENT_CAPABILITIES) {
+  const payload = { type: 'psk-auth', psk: String(psk ?? '') }
+  if (Array.isArray(capabilities) && capabilities.length > 0) {
+    payload.capabilities = capabilities
+  }
+  return JSON.stringify(payload)
+}
+
+function capFrame(capabilities = CLIENT_CAPABILITIES) {
+  return JSON.stringify({ type: 'cap', capabilities: capabilities || CLIENT_CAPABILITIES })
+}
+
+function uploadFrame(reqId, name, size, offset = 0) {
+  return JSON.stringify({
+    type: 'upload', name, size, offset, reqId,
+  })
+}
+
+function pullFrame(reqId, url, name = '') {
+  return JSON.stringify({ type: 'pull', url, name, reqId })
+}
+
+function makeUrlRequest(url, reqId) {
+  return JSON.stringify({ type: 'url', url, reqId, v: PROTOCOL_VERSION })
+}
+
+// v2 unified envelope builder (#378 A4): {"event":"file.meta","req_id":"...","code":0,"data":{...}}
+const EVENT_TO_TYPE = {
+  'file.req': 'req',
+  'file.meta': 'meta',
+  'file.data': 'data',
+  'file.done': 'done',
+  'file.err': 'err',
+  'share.req': 'share',
+  'share.resp': 'share-resp',
+  'auth.psk': 'psk-auth',
+  'auth.psk_ok': 'psk-ok',
+  'auth.psk_err': 'psk-err',
+  'admin.request': 'admin',
+  'admin.response': 'admin-resp',
+  'admin.binary': 'admin-bin',
+  'tunnel.open': 'fwd-open',
+  'tunnel.auth': 'fwd-auth',
+  'tunnel.data': 'fwd-data',
+  'tunnel.close': 'fwd-close',
+}
+
+function makeEnvelope(event, reqId, data = {}, code = 0) {
+  return JSON.stringify({
+    event,
+    req_id: reqId || '',
+    code,
+    data: data || {},
+  })
+}
+
+// parseFrame parses a control text frame using safeJsonParse (protecting against
+// Prototype Pollution __proto__/constructor/prototype, deep nesting bombs, and oversized frames).
+// Preserves exact shape for v1 {"type":...} frames (so deepEqual assertions pass),
+// and transparently normalizes v2 {"event":...,"req_id":...,"data":{...}} envelopes (#378).
+function parseFrame(text) {
+  if (typeof text !== 'string') return null
+  const o = safeJsonParse(text, { maxBytes: MAX_MANIFEST_BYTES, throwOnError: false })
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null
+  if (typeof o.type === 'string') return o
+  if (typeof o.event === 'string') {
+    const mappedType = EVENT_TO_TYPE[o.event] || o.event.replace(/\./g, '-')
+    const dataObj = o.data && typeof o.data === 'object' && !Array.isArray(o.data) ? o.data : {}
+    const out = { ...dataObj, ...o, type: mappedType }
+    if (o.req_id && !out.reqId) out.reqId = o.req_id
+    return out
+  }
+  return null
+}
+
+function isBinaryFrame(data) {
+  if (typeof data === 'string') return false
+  if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) return true
+  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(data)) return true
+  if (typeof Blob !== 'undefined' && data instanceof Blob) return true
+  return false
+}
+
+function toUint8Array(data) {
+  if (data instanceof Uint8Array) return data
+  if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) return new Uint8Array(data)
+  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  }
+  throw new TypeError('peerdrive-core: unsupported binary frame type')
+}
+
+// 32-byte binary frame header (#378 A7):
+// [0..4]:   "PD02" magic (0x50, 0x44, 0x30, 0x32)
+// [4..20]:  req_id ASCII padded with NUL (16 bytes)
+// [20..28]: offset uint64 big-endian (8 bytes)
+// [28..32]: flags uint32 big-endian (4 bytes)
+// Followed immediately by raw payload bytes.
+function encodeBinaryHeader32(reqId, offset, payload, flags = 0) {
+  const body = toUint8Array(payload)
+  const out = new Uint8Array(32 + body.byteLength)
+  out[0] = 0x50 // 'P'
+  out[1] = 0x44 // 'D'
+  out[2] = 0x30 // '0'
+  out[3] = 0x32 // '2'
+  const idStr = String(reqId || '').slice(0, 16)
+  for (let i = 0; i < idStr.length; i++) {
+    out[4 + i] = idStr.charCodeAt(i) & 0xff
+  }
+  const dv = new DataView(out.buffer, out.byteOffset, 32)
+  const hi = Math.floor(Number(offset || 0) / 4294967296) >>> 0
+  const lo = Number(offset || 0) >>> 0
+  dv.setUint32(20, hi, false)
+  dv.setUint32(24, lo, false)
+  dv.setUint32(28, flags >>> 0, false)
+  out.set(body, 32)
+  return out
+}
+
+function decodeBinaryHeader32(data) {
+  const bytes = toUint8Array(data)
+  if (
+    bytes.byteLength < 32 ||
+    bytes[0] !== 0x50 ||
+    bytes[1] !== 0x44 ||
+    bytes[2] !== 0x30 ||
+    bytes[3] !== 0x32
+  ) {
+    return null
+  }
+  let reqId = ''
+  for (let i = 4; i < 20; i++) {
+    if (bytes[i] === 0) break
+    reqId += String.fromCharCode(bytes[i])
+  }
+  if (!reqId) return null
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, 32)
+  const hi = dv.getUint32(20, false)
+  const lo = dv.getUint32(24, false)
+  const offset = hi * 4294967296 + lo
+  const flags = dv.getUint32(28, false)
+  const payload = bytes.subarray(32)
+  return { reqId, offset, flags, payload }
+}
+
+function concatChunks(chunks, total = -1) {
+  if (chunks.length === 1) return chunks[0]
+  let len = 0
+  for (const c of chunks) len += c.byteLength
+  const n = total >= 0 ? total : len
+  const out = new Uint8Array(n)
+  let off = 0
+  for (const c of chunks) {
+    if (off + c.byteLength > n) break
+    out.set(c, off)
+    off += c.byteLength
+  }
+  return off === n ? out : out.subarray(0, off)
+}
+
+const EXT_MIME = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp',
+  mp4: 'video/mp4', webm: 'video/webm', ogg: 'video/ogg', mov: 'video/quicktime',
+  mkv: 'video/x-matroska', mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac',
+  m4a: 'audio/mp4', pdf: 'application/pdf', zip: 'application/zip',
+  txt: 'text/plain;charset=utf-8', md: 'text/markdown;charset=utf-8',
+  json: 'application/json', csv: 'text/csv;charset=utf-8',
+}
+
+// Unified guessMime supporting both (name, fallback) and (url, contentTypeHeader).
+function guessMime(nameOrUrl, contentTypeOrFallback = 'application/octet-stream') {
+  if (typeof contentTypeOrFallback === 'string' && contentTypeOrFallback.trim()) {
+    const ct = contentTypeOrFallback.split(';')[0].trim().toLowerCase()
+    if (ct !== 'application/octet-stream' && /^[a-z]+\/[a-z0-9.+-]+$/.test(ct)) {
+      return ct
+    }
+  }
+  const clean = String(nameOrUrl || '').split('?')[0].split('#')[0]
+  const dotIdx = clean.lastIndexOf('.')
+  const ext = dotIdx >= 0 ? clean.slice(dotIdx + 1).toLowerCase() : ''
+  if (ext && EXT_MIME[ext]) {
+    return EXT_MIME[ext]
+  }
+  return contentTypeOrFallback || 'application/octet-stream'
+}
+
+function baseName(p) {
+  const s = String(p || '')
+  const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'))
+  return i >= 0 ? s.slice(i + 1) : s
+}
+
+// ---- peerdrive-core/src/url.js ----
+// url.js — canonical self-contained URL generation/parsing (invariant #2 SSOT).
+//
+// Two URL dialects, both uniquely address a SHA256 file or a Collection:
+//   SPA  mode  ->  <base>#/f/<sha256>?peer=<peerId>&name=<filename>  (hash routes)
+//   HTTP mode  ->  <base>/f/<sha256>[/<filename>]                    (backend direct)
+//                 <base>/c/<hash>[/<entryPath>]                      (collection manifest/entry)
+//
+// parseDirectTarget accepts any of: a bare 64-hex hash (+kind hint), a SPA hash
+// route, a legacy /api/v1/... route, the public panel link (?node=&hash=), so
+// collection/file deep links can be pasted anywhere and still resolve to the
+// right content. The backend /f/ /c/ handlers are a known gap on the mainline
+// (excised 2026-10-17) — this module stays as the contract for when they land.
+
+
+// Named URL_HASH_RE (not HASH_RE): build-panel.mjs inlines every core file into
+// one flat IIFE scope, and protocol.js already owns a top-level HASH_RE.
+const URL_HASH_RE = /\b[0-9a-f]{64}\b/
+
+function baseNoSlash(baseUrl) {
+  return String(baseUrl || '').replace(/\/+$/, '')
+}
+
+function queryString(params) {
+  const qs = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') qs.set(k, String(v))
+  }
+  const s = qs.toString()
+  return s ? `?${s}` : ''
+}
+
+// buildFileUrl hash param is trusted (a 64-hex sha256 from file_index); only the
+// query values are untrusted user data, so only those go through URLSearchParams
+// (spaces become '+' in the SPA link, matching the pinned core tests).
+function buildFileUrl(hash, { baseUrl = '', peerId = '', filename = '', mode = 'spa' } = {}) {
+  const base = baseNoSlash(baseUrl)
+  if (mode === 'http') {
+    return filename ? `${base}/f/${hash}/${filename}` : `${base}/f/${hash}`
+  }
+  return `${base}#/f/${hash}${queryString({ peer: peerId, name: filename })}`
+}
+
+function buildCollectionUrl(hash, { baseUrl = '', peerId = '', name = '', entryPath = '', mode = 'spa' } = {}) {
+  const base = baseNoSlash(baseUrl)
+  if (mode === 'http') {
+    return entryPath ? `${base}/c/${hash}/${entryPath}` : `${base}/c/${hash}`
+  }
+  return `${base}#/c/${hash}${queryString({ peer: peerId, name })}`
+}
+
+/**
+ * parseDirectTarget resolves any pasted target to {kind, route, hash, peerId?,
+ * filename?, entryPath?}. The bare-hash form needs a kind hint ('file' | 'collection');
+ * every URL form carries enough information to infer kind from the path shape.
+ */
+function parseDirectTarget(input, hint = '') {
+  const str = String(input || '').trim()
+  const qIdx = str.indexOf('?')
+  const pathPart = qIdx >= 0 ? str.slice(0, qIdx) : str
+  const query = qIdx >= 0 ? new URLSearchParams(str.slice(qIdx + 1)) : new URLSearchParams()
+
+  const hash = (str.match(URL_HASH_RE) || [])[0] || ''
+
+  // Normalize to a route-ish string: drop scheme/host, keep the fragment path.
+  let route = pathPart
+  const fragIdx = route.indexOf('#')
+  if (fragIdx >= 0) route = route.slice(fragIdx + 1)
+  route = route.replace(/^https?:\/\/[^/]+/, '').replace(/^\/+/, '')
+
+  let kind = hint
+  if (/^f\//.test(route)) kind = 'file'
+  else if (/^c\//.test(route)) kind = 'collection'
+  else if (/\/(f|c)\/[0-9a-f]{64}(\/|$)/.test(pathPart) && !kind) {
+    // legacy /api/v1/f/... or /api/v1/c/... forms
+    kind = /\/f\/[0-9a-f]{64}/.test(pathPart) ? 'file' : 'collection'
+  } else if ((/panel/.test(pathPart)) && query.get('hash') && !kind) {
+    kind = 'file' // public panel deep link carries ?node=&hash=
+  }
+  kind = kind === 'collection' ? 'collection' : kind === 'file' ? 'file' : ''
+
+  const peerId = query.get('peer') || query.get('node') || ''
+  const filename = query.get('name') || ''
+
+  let entryPath = ''
+  if (kind === 'collection') {
+    // Both the SPA form (c/<hash>/<rest>) and the legacy /api/v1/c/<hash>/<rest>
+    // form carry the entry path right after the collection hash.
+    const m = route.match(/(?:^|\/)c\/[0-9a-f]{64}\/(.+)$/)
+    if (m && m[1]) {
+      const normalizedSlashes = m[1].replace(/%2f/gi, '/').replace(/%5c/gi, '/')
+      const decodedSegs = normalizedSlashes.split('/').map((seg) => {
+        try {
+          return decodeURIComponent(seg)
+        } catch {
+          return seg
+        }
+      })
+      entryPath = sanitizeRelativePath(decodedSegs.join('/'))
+    }
+  }
+
+  const out = { kind }
+  if (hash) out.hash = hash
+  if (kind === 'file' && hash) out.route = `/f/${hash}`
+  if (kind === 'collection' && hash) out.route = `/c/${hash}`
+  if (peerId) out.peerId = peerId
+  if (filename) out.filename = filename
+  if (entryPath) out.entryPath = entryPath
+  return out
+}
+// ---- peerdrive-core/src/dispatcher.js ----
+// dispatcher.js — Connection-level frame dispatcher and slot manager (Single Source of Truth).
+//
+// Supports BOTH:
+//   1. v2 32-byte self-routing binary headers ("PD02" + reqId + offset + flags, #378 A7),
+//      allowing out-of-order / interleaved binary chunks from multiple concurrent requests
+//      to route directly by reqId without head-of-line blocking;
+//   2. v1 contiguous data/admin-bin text header + binary payload via connection-level _expect.
+
+class FrameDispatcher {
+  constructor(options = {}) {
+    this.options = options
+    this._pending = new Map() // reqId -> handler record
+    this._expect = null       // v1 connection-level expect: attached binary block routing
+  }
+
+  register(reqId, handler) {
+    this._pending.set(reqId, handler)
+  }
+
+  unregister(reqId) {
+    this._pending.delete(reqId)
+    if (this._expect?.reqId === reqId) {
+      this._expect = null
+    }
+  }
+
+  has(reqId) {
+    return this._pending.has(reqId)
+  }
+
+  get(reqId) {
+    return this._pending.get(reqId)
+  }
+
+  handleIncoming(data) {
+    if (isBinaryFrame(data)) {
+      const bytes = toUint8Array(data)
+
+      // 1. Check v2 32-byte self-routing header ("PD02") first — completely order-independent!
+      const hdr32 = decodeBinaryHeader32(bytes)
+      if (hdr32 && this._pending.has(hdr32.reqId)) {
+        const h = this._pending.get(hdr32.reqId)
+        if (this._expect?.reqId === hdr32.reqId) {
+          this._expect = null
+        }
+        if (h && typeof h.onDataChunk === 'function') {
+          h.onDataChunk(hdr32.payload, {
+            reqId: hdr32.reqId,
+            offset: hdr32.offset,
+            size: hdr32.payload.byteLength,
+            flags: hdr32.flags,
+          })
+          return true
+        }
+      }
+
+      // 2. Fallback to v1 connection-level contiguous expect slot
+      if (!this._expect) {
+        return false // orphan binary chunk
+      }
+      const exp = this._expect
+      exp.got = (exp.got || 0) + bytes.byteLength
+      if (!exp.size || exp.got >= exp.size) {
+        this._expect = null
+      }
+      const h = this._pending.get(exp.reqId)
+      if (h && typeof h.onDataChunk === 'function') {
+        h.onDataChunk(bytes, exp)
+        return true
+      }
+      return false
+    }
+
+    const frame = parseFrame(data)
+    if (!frame) return false
+
+    // If frame declares incoming binary block (data or admin-bin header)
+    if ((frame.type === 'data' || frame.type === 'admin-bin') && frame.reqId) {
+      if (frame.size > 0) {
+        this._expect = {
+          type: frame.type,
+          reqId: frame.reqId,
+          offset: frame.offset || 0,
+          size: frame.size,
+          got: 0,
+        }
+      } else {
+        this._expect = null
+      }
+      const h = this._pending.get(frame.reqId)
+      if (h && typeof h.onDataHeader === 'function') {
+        h.onDataHeader(frame)
+      }
+      return true
+    }
+
+    if (frame.reqId && this._pending.has(frame.reqId)) {
+      const h = this._pending.get(frame.reqId)
+      if (typeof h.onControlFrame === 'function') {
+        h.onControlFrame(frame)
+        return true
+      }
+    }
+
+    return false
+  }
+
+  closeAll(err) {
+    for (const [, h] of this._pending.entries()) {
+      if (typeof h.onError === 'function') {
+        h.onError(err || new Error('connection closed'))
+      }
+    }
+    this._pending.clear()
+    this._expect = null
+  }
+}
+
+// ---- peerdrive-core/src/queue.js ----
+// queue.js — real-time transfer progress hub + order-independent transport queue
+// (invariant #3 SSOT). Transfers.jsx / client.js / the panel all consume the two
+// singleton instances exported at the bottom.
+//
+// Why order-independent: PeerJS, WS and HTTP downloads/upload on the same file
+// hash can race; the queue guarantees per-lane serialization with priority, and
+// a cancelled task never blocks the next one (the 2026-09 queueing-abort bug
+// class this module exists to prevent — see REFACTOR §3.12).
+
+let __id = 0
+const nextId = () => `t${++__id}`
+
+function nowMs() {
+  return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
+}
+
+const ACTIVE = new Set(['queued', 'running'])
+
+/**
+ * TransferProgressHub keeps a live task list with pct / EWMA rate and notifies
+ * subscribers on every mutation (getSnapshot() feeds React state in Transfers).
+ */
+class TransferProgressHub {
+  constructor() {
+    this._tasks = new Map() // id -> task
+    this._subs = new Set()
+    this._totalCompleted = 0
+  }
+
+  _notify() {
+    for (const cb of this._subs) {
+      try {
+        cb(this.getSnapshot())
+      } catch {
+        // a broken subscriber must not corrupt hub state
+      }
+    }
+  }
+
+  _emit(task) {
+    this._tasks.set(task.id, task)
+    this._notify()
+  }
+
+  createTask(meta = {}) {
+    const task = {
+      id: nextId(),
+      kind: meta.kind || 'download',
+      transport: meta.transport || '',
+      hash: meta.hash || '',
+      name: meta.name || '',
+      peerId: meta.peerId || '',
+      total: typeof meta.total === 'number' ? meta.total : -1,
+      received: 0,
+      status: 'queued',
+      pct: 0,
+      error: '',
+      rateBps: 0,
+      startedAt: 0,
+      endedAt: 0,
+    }
+    this._emit(task)
+    return task
+  }
+
+  startTask(id, total) {
+    const t = this._tasks.get(id)
+    if (!t) return
+    if (typeof total === 'number') t.total = total
+    t.status = 'running'
+    t.startedAt = nowMs()
+    this._emit(t)
+  }
+
+  updateProgress(id, received, total) {
+    const t = this._tasks.get(id)
+    if (!t) return
+    if (typeof total === 'number') t.total = total
+    t.received = Math.max(0, received)
+    if (t.status === 'queued') {
+      t.status = 'running'
+      if (!t.startedAt) t.startedAt = nowMs()
+    }
+    t.pct = t.total > 0 ? Math.min(100, Math.round((t.received / t.total) * 100)) : 0
+    // EWMA transfer rate: instantaneous rate smoothed 70/30 so the progress bar
+    // does not jitter on chunk-boundary bursts (format.js RateTracker semantics).
+    const elapsed = nowMs() - (t.startedAt || nowMs())
+    if (elapsed > 20 && t.received > 0) {
+      const inst = (t.received / elapsed) * 1000
+      t.rateBps = t.rateBps ? t.rateBps * 0.7 + inst * 0.3 : inst
+    }
+    this._emit(t)
+  }
+
+  completeTask(id, extra = {}) {
+    const t = this._tasks.get(id)
+    if (!t) return
+    if (typeof extra.received === 'number') t.received = extra.received
+    if (typeof extra.total === 'number') t.total = extra.total
+    t.status = 'done'
+    t.pct = 100
+    t.endedAt = nowMs()
+    this._totalCompleted += 1
+    this._emit(t)
+  }
+
+  failTask(id, err) {
+    const t = this._tasks.get(id)
+    if (!t) return
+    t.status = 'error'
+    t.error = err ? String(err.message || err) : 'failed'
+    t.endedAt = nowMs()
+    this._emit(t)
+  }
+
+  cancelTask(id) {
+    const t = this._tasks.get(id)
+    if (!t || t.status === 'done') return
+    t.status = 'cancelled'
+    t.endedAt = nowMs()
+    this._totalCompleted += 1
+    this._emit(t)
+  }
+
+  clearCompleted() {
+    for (const t of this._tasks.values()) {
+      if (t.status === 'done' || t.status === 'error' || t.status === 'cancelled') {
+        this._tasks.delete(t.id)
+      }
+    }
+    this._totalCompleted = 0
+    this._notify()
+  }
+
+  getTasks() {
+    return [...this._tasks.values()]
+  }
+
+  getSnapshot() {
+    const tasks = [...this._tasks.values()]
+    return {
+      totalActive: tasks.filter((t) => ACTIVE.has(t.status)).length,
+      totalCompleted: this._totalCompleted,
+      tasks,
+    }
+  }
+
+  subscribe(cb) {
+    this._subs.add(cb)
+    cb(this.getSnapshot())
+    return () => this._subs.delete(cb)
+  }
+}
+
+/**
+ * AsyncQueueLane serializes async work with a concurrency cap and priority
+ * ordering: the highest-priority *waiting* task always runs next, while the
+ * active task is never interrupted (test pins t1 -> t3-high -> t2-low).
+ */
+class AsyncQueueLane {
+  constructor(concurrency = 1) {
+    this.limit = Math.max(1, concurrency)
+    this.active = 0
+    this._waiting = [] // { fn, priority, resolve, reject, signal, started }
+  }
+
+  enqueue(fn, { priority = 0, signal = null } = {}) {
+    return new Promise((resolve, reject) => {
+      const item = { fn, priority, resolve, reject, signal, started: false }
+      if (signal && signal.aborted) {
+        reject(signal.reason || new Error('Aborted'))
+        return
+      }
+      if (signal) {
+        // Abort while still queued: settle immediately and skip execution so a
+        // cancelled task can never block the lane (order-independence).
+        item.onAbort = () => {
+          if (!item.started) {
+            item.aborted = true
+            reject(signal.reason || new Error('Aborted'))
+            this._tick()
+          }
+        }
+        signal.addEventListener('abort', item.onAbort, { once: true })
+      }
+      this._waiting.push(item)
+      this._tick()
+    })
+  }
+
+  _pick() {
+    let best = -1
+    let bestPriority = -Infinity
+    for (let i = 0; i < this._waiting.length; i++) {
+      const it = this._waiting[i]
+      if (it.aborted) continue
+      if (it.priority > bestPriority) {
+        bestPriority = it.priority
+        best = i
+      }
+    }
+    return best >= 0 ? this._waiting.splice(best, 1)[0] : null
+  }
+
+  _tick() {
+    while (this.active < this.limit) {
+      const item = this._pick()
+      if (!item) return
+      if (item.aborted) continue // already rejected; keep draining
+      this.active += 1
+      item.started = true
+      if (item.signal) item.signal.removeEventListener('abort', item.onAbort)
+      // 槽位空闲时**同步**启动 fn：client.js 的 upload 走
+      // uploadSerialLane.enqueue(() => sendOne())，测试在 upload() 返回后立即读
+      // sock.sent[0]——若 fn 被压进微任务，第一帧还没发出去（ws.test.js 上传用例
+      // 的同步断言正是靠这个时序）。异常与结果仍异步 settle。
+      let settled = false
+      const settle = (fn) => {
+        if (settled) return
+        settled = true
+        this.active -= 1
+        this._tick()
+        fn()
+      }
+      let r
+      try {
+        r = item.fn()
+      } catch (e) {
+        settle(() => item.reject(e))
+        continue
+      }
+      Promise.resolve(r).then(
+        (v) => settle(() => item.resolve(v)),
+        (e) => settle(() => item.reject(e))
+      )
+    }
+  }
+}
+
+/**
+ * TransportQueue runs transfers per-lane (serialized by laneKey) with a
+ * per-transport concurrency cap, wiring progress into a TransferProgressHub and
+ * isolating cancellations (abort never leaks into the next queued transfer).
+ */
+class TransportQueue {
+  constructor({ progressHub = null, wsConcurrency = 1, peerjsConcurrency = 1, httpConcurrency = 2 } = {}) {
+    this.hub = progressHub || new TransferProgressHub()
+    this._lanes = new Map() // laneKey -> AsyncQueueLane
+    this._slots = { ws: wsConcurrency, peerjs: peerjsConcurrency, http: httpConcurrency }
+    this._active = { ws: 0, peerjs: 0, http: 0 }
+    this._waiting = [] // { transport, resolve, release } parkers for full transports
+  }
+
+  _lane(key) {
+    let lane = this._lanes.get(key)
+    if (!lane) {
+      lane = new AsyncQueueLane(1) // per-lane serial: same lane never overlaps
+      this._lanes.set(key, lane)
+    }
+    return lane
+  }
+
+  _drain(transport) {
+    while (this._active[transport] < this._slots[transport] && this._waiting.length > 0) {
+      const i = this._waiting.findIndex((w) => w.transport === transport)
+      if (i < 0) return
+      const w = this._waiting.splice(i, 1)[0]
+      this._active[transport] += 1
+      w.release()
+    }
+  }
+
+  /**
+   * acquire a per-transport slot. The returned release() decrements the slot
+   * and wakes the next parker; waiters parking here never hold a lane.
+   */
+  _acquire(transport, signal) {
+    return new Promise((resolve, reject) => {
+      if (signal && signal.aborted) {
+        reject(signal.reason || new Error('Aborted'))
+        return
+      }
+      const release = () => {
+        this._active[transport] -= 1
+        this._drain(transport)
+      }
+      if (this._active[transport] < this._slots[transport]) {
+        this._active[transport] += 1
+        resolve(release)
+        return
+      }
+      const waiter = {
+        transport,
+        release: () => resolve(release),
+      }
+      this._waiting.push(waiter)
+      if (signal) {
+        signal.addEventListener(
+          'abort',
+          () => {
+            const i = this._waiting.indexOf(waiter)
+            if (i >= 0) {
+              this._waiting.splice(i, 1)
+              reject(signal.reason || new Error('Aborted'))
+            }
+          },
+          { once: true }
+        )
+      }
+    })
+  }
+
+  runTransfer(taskMeta, workFn) {
+    const task = this.hub.createTask(taskMeta)
+    const laneKey = taskMeta.laneKey || `${task.transport || 'peerjs'}-${task.kind || 'download'}`
+    const transport = this._slots[task.transport] !== undefined ? task.transport : 'peerjs'
+
+    return new Promise((resolve, reject) => {
+      const inLane = async () => {
+        const doRelease = await this._acquire(transport, taskMeta.signal)
+        try {
+          const reportProgress = (received, total) => this.hub.updateProgress(task.id, received, total)
+          const value = await workFn({ reportProgress })
+          this.hub.completeTask(task.id)
+          resolve(value)
+        } catch (err) {
+          if (taskMeta.signal && taskMeta.signal.aborted) {
+            this.hub.cancelTask(task.id)
+          } else {
+            this.hub.failTask(task.id, err)
+          }
+          reject(err)
+        } finally {
+          doRelease()
+        }
+      }
+
+      this._lane(laneKey)
+        .enqueue(inLane, { priority: taskMeta.priority || 0, signal: taskMeta.signal })
+        .catch((err) => {
+          // Lane rejected: aborted while still queued — mark the hub task
+          // cancelled (never blocking the next lane item) and settle the
+          // transfer promise with the abort reason.
+          if (task.status === 'queued' || (taskMeta.signal && taskMeta.signal.aborted)) {
+            this.hub.cancelTask(task.id)
+          }
+          reject(err)
+        })
+    })
+  }
+}
+
+/** Global singletons consumed by the frontend (client.js / Transfers.jsx) via shared/index. */
+const globalProgressHub = new TransferProgressHub()
+const globalTransportQueue = new TransportQueue({
+  wsConcurrency: 1,
+  peerjsConcurrency: 2,
+  httpConcurrency: 2,
+})
+// ---- src/client.js ----
+// client.js — peerdrive pure browser consumer: connects to a peerdrive node, lists its shared
+// content and fetches files. **Zero dependencies**, no local backend required.
+//
+// Positioning (complements the back /peerjs/* client path):
+//   - Backend nodes (Go) interconnect using the same frame protocol, are "producers/holders";
+//   - This package is a **pure consumer**: a browser page (or any environment with WebRTC DataChannel)
+//     connects directly to a node, uses share frames to see the manifest, and req frames to fetch content.
+//     Corresponds to the requirement "webrtc pure client consumer, can fetch files from this p2p network".
+//
+// Transport-agnostic design: this class doesn't know PeerJS. It only requires the passed-in object to satisfy
+//   { on(type, cb), send(data), open?: boolean, close?() }
+// —— PeerJS's DataConnection naturally satisfies this. Benefits:
+//   1. Package has zero dependencies, doesn't add peerjs to the consumer's bundle size;
+//   2. Tests can cover the entire state machine with fake connections (no real WebRTC/signaling server needed);
+//   3. Future transport swaps (raw RTCPeerConnection / WebTransport) don't require changing this file.
+//
+// Frame protocol details in src/protocol.js header comments (aligned word-for-word with Go-side conn.go).
+
+// Note: don't re-export PSK_REQUIRED here — index.js is
+// `export * from './protocol.js'` + `export * from './client.js'`, star-exporting the same name
+// from two places creates "ambiguous export" and actually disappears from the package entry.
+
+/** Error codes. UI branches by code, don't match message text. */
+const ERR = {
+  INVALID_HASH: 'INVALID_HASH', // hash not 64 lowercase hex (blocked locally, no request sent)
+  TOO_LARGE: 'TOO_LARGE', // exceeds maxBufferBytes / protocol limit 8GB
+  HASH_MISMATCH: 'HASH_MISMATCH', // content doesn't match hash (peer data corrupted or tampered)
+  INCOMPLETE: 'INCOMPLETE', // bytes declared in peer's done don't match actual received
+  TIMEOUT: 'TIMEOUT', // idle timeout (peer stuck/connection half-dead)
+  CLOSED: 'CLOSED', // connection closed
+  PROTOCOL: 'PROTOCOL', // frame invalid (peer implements a different protocol)
+  PEER: 'PEER', // peer returned err frame (not found / unauthorized / read failure…)
+  CANCELLED: 'CANCELLED', // local cancellation (abort / early break in iteration)
+  // PSK_REQUIRED: peer has pre-shared key auth, and we didn't present (or presented wrong) one.
+  // Separate code because its remediation is "enter the key", completely different from "file not found".
+  PSK_REQUIRED: 'PSK_REQUIRED',
+}
+
+class PeerDriveError extends Error {
+  constructor(message, code = ERR.PROTOCOL, extra = {}) {
+    super(message)
+    this.name = 'PeerDriveError'
+    this.code = code
+    Object.assign(this, extra)
+  }
+}
+
+const DEFAULTS = {
+  // Idle timeout: how long without receiving any frame for this request before declaring dead.
+  // Go-side is 5 minutes (server patience), consumer side takes smaller — users staring at a
+  // frozen progress bar for 5 minutes is worse UX.
+  idleTimeoutMs: 120_000,
+  openTimeoutMs: 20_000,
+  verbTimeoutMs: 15_000, // same as Go-side verbWaitTimeout (share-type small JSON responses)
+  maxBufferBytes: DEFAULT_MAX_BUFFER_BYTES,
+}
+
+/**
+ * ChunkQueue bridges "push-mode" frame callbacks into "pull-mode" async iteration.
+ * stream() uses it for backpressure: if the consumer doesn't take, chunks stay in the queue
+ * (instead of infinitely filling memory).
+ */
+class ChunkQueue {
+  constructor() {
+    this.buf = []
+    this.pending = []
+    this.state = 'open'
+    this.err = null
+  }
+
+  push(v) {
+    if (this.state !== 'open') return
+    const w = this.pending.shift()
+    if (w) w({ value: v, done: false })
+    else this.buf.push(v)
+  }
+
+  close() {
+    this._settle(null)
+  }
+
+  abort(err) {
+    // On failure discard cached chunks: no one will consume them, keeping them only holds memory
+    // (typical scenario: TOO_LARGE triggers mid-stream, queue may already hold tens of MB)
+    this.buf.length = 0
+    this._settle(err)
+  }
+
+  _settle(err) {
+    if (this.state !== 'open') return
+    this.state = err ? 'failed' : 'ended'
+    this.err = err
+    while (this.pending.length) this.pending.shift()({ value: undefined, done: true, err })
+  }
+
+  shift() {
+    if (this.buf.length) return Promise.resolve({ value: this.buf.shift(), done: false })
+    if (this.state !== 'open') return Promise.resolve({ value: undefined, done: true, err: this.err })
+    return new Promise((res) => this.pending.push(res))
+  }
+}
+
+/** Consumer client: one instance per connection. */
+class PeerDriveClient {
+  constructor(conn, opts = {}) {
+    if (!conn || typeof conn.send !== 'function' || typeof conn.on !== 'function') {
+      throw new TypeError('peerdrive-client: conn must implement { on(type, cb), send(data) }')
+    }
+    this.conn = conn
+    this.opts = { ...DEFAULTS, ...opts }
+    this.peerId = conn.peer || conn.peerId || opts.peerId || ''
+    this.stats = { requests: 0, chunks: 0, bytes: 0, failures: 0 }
+
+    // PSK auth state (doc/NETDISK.md "PSK Auth"):
+    //   none = no key configured (if peer has auth, will receive PSK_REQUIRED error)
+    //   sent = presented, waiting for peer acknowledgment (don't wait for it before sending business frames,
+    //          rely on DataChannel ordering)
+    //   ok   = peer accepted; err = peer rejected (wrong key), pskError is its msg
+    this.psk = typeof opts.psk === 'string' ? opts.psk : ''
+    this.pskState = this.psk ? 'pending' : 'none'
+    this.pskError = null
+    // Resolvers waiting for the gate (see _awaitPskGate). Kept as a set because several
+    // verbs may be issued back-to-back before the gate opens.
+    this._pskGateWaiters = new Set()
+
+    this._pend = new Map() // reqId → fetch state
+    this._verbs = new Map() // reqId → one-shot response wait slot (share/pull etc.)
+    this._uploads = new Map() // reqId → upload session (local ingest)
+    this._expect = null // connection-level expect: next binary block belongs to whom (see protocol.js constraint 2)
+    this._openWaiters = []
+    this._closeErr = null
+    this._openState = conn.open === true ? true : null // null = unknown
+    this._ownedPeer = null
+    this._bind()
+    // Connections already open when passed in won't fire 'open' event again, send here to compensate
+    if (conn.open === true) this._sendPskAuth()
+  }
+
+  /**
+   * _sendPskAuth presents pre-shared key (only if configured, and must be the first frame from this side).
+   * See protocol.js's pskAuthFrame comments: relies on DataChannel ordering, don't wait for acknowledgment.
+   */
+  _sendPskAuth() {
+    if (!this.psk || this.pskState !== 'pending') return
+    // ⚠️ 顺序很重要（2026-10-06 实测踩到）：必须**先**置 'sent' 再 send。
+    // 反过来写（先 send 后置 'sent'）时，如果对端的回执是**同步**到达的
+    // （假连接就是如此：send() 里直接 emit('data')），
+    // psk-ok 的处理会把 pskState 置成 'ok'，紧接着又被这一行覆盖回 'sent' ——
+    // 门禁状态被自己抹掉，之后所有动词都以为门禁还开着，一直等到超时。
+    // 真实 WebRTC 下回执是异步的，所以这个 bug 只在同步回执下暴露，更难察觉。
+    this.pskState = 'sent'
+    try {
+      this.conn.send(pskAuthFrame(this.psk, this.opts.capabilities || CLIENT_CAPABILITIES))
+    } catch {
+      this.pskState = 'none' // can't send, treat as not configured: let peer tell us via err
+    }
+  }
+
+  get isOpen() {
+    return this._openState === true && !this._closeErr
+  }
+
+  /**
+   * localPeerId our temporary id on signaling — UI displays "who am I" using this.
+   *
+   * Discovery: the panel first version displayed `conn.peer` as its own id, but the screen showed the
+   * peer's node name (DataConnection.peer refers to the **remote**). When using connectToPeer to
+   * connect, our local Peer is held by this class, so we get it from there; when not created by this class
+   * (externally passed conn), can only return empty string, caller should hold the Peer instance themselves.
+   */
+  get localPeerId() {
+    return (this._ownedPeer && this._ownedPeer.id) || ''
+  }
+
+  /** ready waits for connection ready. Resolves immediately if already ready. */
+  ready(timeoutMs = this.opts.openTimeoutMs) {
+    if (this._closeErr) return Promise.reject(this._closeErr)
+    if (this._openState === true) return Promise.resolve(this)
+    return new Promise((resolve, reject) => {
+      const entry = { resolve, reject, timer: null }
+      this._openWaiters.push(entry)
+      if (timeoutMs > 0) {
+        entry.timer = setTimeout(() => {
+          this._openWaiters = this._openWaiters.filter((w) => w !== entry)
+          reject(new PeerDriveError(`Connection not established within ${timeoutMs}ms`, ERR.TIMEOUT))
+        }, timeoutMs)
+      }
+    })
+  }
+
+  /**
+   * shares queries peer's share manifest (the last step of "node marketplace → join node → see file links").
+   * Returns {collections, files, dirs, total}.
+   *
+   * Semantics reminder: empty manifest is a **valid result** (peer hasn't enabled sharing / declared
+   * any directories), not an error — UI should render "this node has no shared content". Peer really
+   * fails only via PEER/TIMEOUT.
+   */
+  async shares({ timeoutMs = this.opts.verbTimeoutMs } = {}) {
+    const reqId = nextReqId()
+    const frame = await this._requestVerb(reqId, shareFrame(reqId), timeoutMs)
+    if (!frame || frame.type !== 'share-resp') {
+      throw new PeerDriveError('Peer share response format abnormal (peer may not be a peerdrive node)', ERR.PROTOCOL)
+    }
+    const collections = Array.isArray(frame.collections) ? frame.collections : []
+    const files = Array.isArray(frame.files) ? frame.files : []
+    return {
+      peerId: this.peerId,
+      collections,
+      files,
+      dirs: Array.isArray(frame.dirs) ? frame.dirs : [],
+      total: Number.isFinite(frame.total) ? frame.total : collections.length + files.length,
+    }
+  }
+
+  /**
+   * put puts content into the node's library (**local ingest**).
+   *
+   * Uses Go-side upload verb: send header → wait meta → send binary chunks → wait ack,
+   * progressing chunk by chunk until server returns uploaded{hash,size,path}. The back-and-forth
+   * acknowledgment rather than one-shot: the receiver needs to flush to disk at its own pace
+   * (flow control is the receiver's call, see protocol.js's uploadFrame comments), and only one
+   * upload can be in progress on this connection at a time.
+   *
+   * Returns {hash,size,name,path} — hash is the content address, can fetch back with fetch() later.
+   * Note default maxPutBytes gate: for oversized content, slice it yourself first or use another channel.
+   *
+   * @param {Uint8Array|ArrayBuffer|Blob|File} data
+   * @param {{name?:string,onProgress?:(sent:number,total:number)=>void,
+   *          signal?:AbortSignal,timeoutMs?:number,chunkTimeoutMs?:number}} [opts]
+   */
+  async put(data, opts = {}) {
+    const bytes = await readableBytes(data)
+    const name = opts.name || (typeof data === 'object' && data !== null && data.name) || 'upload.bin'
+    const { onProgress, signal, chunkTimeoutMs = this.opts.verbTimeoutMs } = opts
+    if (this._closeErr) throw this._closeErr
+    if (signal && signal.aborted) throw new PeerDriveError('Cancelled', ERR.CANCELLED)
+
+    const reqId = nextReqId()
+    const state = { reqId, emit: null, timer: null }
+    // One round = one server frame for this upload. Each round times out separately: overall timeout
+    // can't distinguish "slow" from "stuck", and their remediation is completely different (slow can keep
+    // waiting, stuck must error and retry).
+    const round = () =>
+      new Promise((resolve, reject) => {
+        state.emit = { resolve, reject }
+        state.timer = setTimeout(() => {
+          this._uploads.delete(reqId)
+          state.emit = null
+          reject(new PeerDriveError(`Upload ${chunkTimeoutMs}ms no response`, ERR.TIMEOUT))
+        }, chunkTimeoutMs)
+      })
+    const stopRound = () => {
+      if (state.timer) clearTimeout(state.timer)
+      state.timer = null
+      state.emit = null
+      this._uploads.delete(reqId)
+    }
+    this._uploads.set(reqId, state)
+
+    let offset = 0
+    const size = bytes.byteLength
+    // Cancellation: fail the "in-flight round" immediately. Previously only checked signal once at entry,
+    // result: UI cancel button after transfer starts was useless (had to wait full round to take effect,
+    // looked like it was stuck).
+    const onAbort = signal
+      ? () => {
+          const u = this._uploads.get(reqId)
+          if (u) this._failUpload(u, new PeerDriveError('Cancelled', ERR.CANCELLED))
+        }
+      : null
+    if (onAbort) signal.addEventListener('abort', onAbort, { once: true })
+    try {
+      // First frame header. size=0 (empty file) → server directly returns uploaded, skips meta.
+      await this._send(uploadFrame(reqId, name, size, 0))
+      for (;;) {
+        const frame = await round()
+        if (state.timer) clearTimeout(state.timer)
+        state.timer = null
+        state.emit = null
+
+        if (frame.type === 'err') {
+          const code = frame.code === ERR.PSK_REQUIRED ? ERR.PSK_REQUIRED : ERR.PEER
+          throw new PeerDriveError(frame.msg || 'Upload failed', code)
+        }
+        if (frame.type === 'uploaded') {
+          stopRound()
+          return {
+            hash: frame.hash || '',
+            size: Number(frame.total) || size,
+            name: frame.name || name,
+            path: frame.path || '',
+          }
+        }
+        if (frame.type === 'meta') {
+          // Server authorization: from here write n bytes (it decides granularity, follows UPLOAD_CHUNK).
+          // Its offset is authoritative — if same content was partially sent before, server requests
+          // continuation from the contiguous write breakpoint; self-incrementing writes bytes to the wrong
+          // position, producing a mismatched duplicate (and hangs in a place where we're not even at fault).
+          const srv = Number(frame.offset)
+          if (Number.isFinite(srv) && srv >= 0) offset = srv
+          if (offset > size) throw new PeerDriveError(`Server requests resume from ${offset}, but content is only ${size} bytes`, ERR.PROTOCOL)
+          const n = Math.min(UPLOAD_CHUNK, size - offset)
+          if (n <= 0) throw new PeerDriveError('Server meta offset exceeds file size', ERR.PROTOCOL)
+          this.conn.send(bytes.subarray(offset, offset + n))
+          offset += n
+          this.stats.chunks++
+          this.stats.bytes += n
+          if (onProgress) onProgress(offset, size)
+          continue // wait for this chunk's ack (or last chunk's uploaded)
+        }
+        if (frame.type === 'ack') {
+          if (offset >= size) continue // last chunk's completion acknowledgment not arrived yet, keep waiting
+          await this._send(uploadFrame(reqId, name, size, offset))
+          continue
+        }
+        throw new PeerDriveError(`Upload interrupted by unknown frame: ${frame.type}`, ERR.PROTOCOL)
+      }
+    } catch (e) {
+      stopRound()
+      throw e instanceof Error ? e : new Error(String(e))
+    } finally {
+      if (onAbort) signal.removeEventListener('abort', onAbort)
+    }
+  }
+
+  /**
+   * pull asks node to fetch a URL for you and ingest (**network ingest**).
+   *
+   * Typical scenario: panel has only a link, no content (or content is on the other end of the net),
+   * let a network-capable node fetch it. Node side does SSRF protection (public http/https only,
+   * no internal/localhost, per-hop redirect validation) with size limits, so these failures are
+   * **expected behavior**, not bugs — error messages pass through directly to caller.
+   *
+   * @param {string} url
+   * @param {{name?:string,timeoutMs?:number}} [opts]
+   * @returns {Promise<{hash:string,size:number,name:string,path:string}>}
+   */
+  async pull(url, opts = {}) {
+    if (typeof url !== 'string' || !url.trim()) {
+      throw new PeerDriveError('pull requires a non-empty URL', ERR.INVALID_HASH)
+    }
+    const reqId = nextReqId()
+    const frame = await this._requestVerb(reqId, pullFrame(reqId, url.trim(), opts.name || ''), opts.timeoutMs || this.opts.verbTimeoutMs)
+    if (!frame || frame.type !== 'pulled') {
+      throw new PeerDriveError('Peer pull response format abnormal (version too old?)', ERR.PROTOCOL)
+    }
+    return { hash: frame.hash, size: Number(frame.total) || 0, name: frame.name || '', path: frame.path || '' }
+  }
+
+  /**
+   * stream streaming fetch: yields Uint8Array chunks one by one, **doesn't keep entire content in memory**.
+   * Suitable for large files (with File System Access API / StreamSaver for direct disk write).
+   *
+   * Full request (offset=0 without size) verifies sha256 at end, throws HASH_MISMATCH on mismatch —
+   * verification is incremental (see sha256.js), no need to look back at previous chunks.
+   *
+   * opts: {offset, size, maxBytes, onProgress(received, total), signal}
+   * Consumer-side early break cancels this request (subsequent arriving chunks are discarded).
+   */
+  async *stream(hash, opts = {}) {
+    this._assertHash(hash)
+    const { offset = 0, size = -1, signal } = opts
+    // Already-aborted signal: reject **before sending request**. Sending first then checking wastes a fetch
+    // (and peer keeps sending to done, wasting bandwidth).
+    if (signal && signal.aborted) throw new PeerDriveError('Cancelled', ERR.CANCELLED)
+    const reqId = nextReqId()
+    const p = this._startFetch(reqId, hash, { ...opts, offset, size })
+
+    if (signal) {
+      p.signal = signal
+      p.onAbort = () => this._cancel(reqId, new PeerDriveError('Cancelled', ERR.CANCELLED))
+      signal.addEventListener('abort', p.onAbort, { once: true })
+    }
+
+    try {
+      for (;;) {
+        const { value, done, err } = await p.queue.shift()
+        if (done) {
+          if (err) throw err
+          return
+        }
+        yield value
+      }
+    } finally {
+      // On normal end/failure _pend no longer has it, this is idempotent cleanup fallback;
+      // consumer-side early break also reaches here, releasing cached chunks with the request.
+      // Failure counting is handled by _failPending, don't double-count here (user-initiated cancel doesn't count).
+      this._cancel(reqId, new PeerDriveError('Cancelled', ERR.CANCELLED))
+    }
+  }
+
+  /**
+   * fetch fetch entire content (Uint8Array). Equivalent to collecting all of stream().
+   * Has memory gate: exceeding maxBytes (default 256MB) throws TOO_LARGE — use stream() for large files.
+   */
+  async fetch(hash, opts = {}) {
+    const chunks = []
+    let received = 0
+    for await (const chunk of this.stream(hash, opts)) {
+      chunks.push(chunk)
+      received += chunk.byteLength
+    }
+    return concatChunks(chunks, received)
+  }
+
+  /** fetchBlob fetch as Blob (for browser preview/playback; MIME can be guessed from name). */
+  async fetchBlob(hash, { name = '', mime = '', ...opts } = {}) {
+    const bytes = await this.fetch(hash, opts)
+    return new Blob([bytes], { type: mime || guessMime(name) })
+  }
+
+  /** fetchText fetch as text (utf-8). */
+  async fetchText(hash, opts = {}) {
+    const bytes = await this.fetch(hash, opts)
+    return new TextDecoder('utf-8').decode(bytes)
+  }
+
+  /**
+   * saveAs triggers browser download. Uses Blob + <a download>, so **entire content is in memory**;
+   * shares the same maxBytes gate as fetch. Use stream() for oversized files and write to disk yourself.
+   */
+  async saveAs(hash, filename = '', opts = {}) {
+    if (typeof document === 'undefined') {
+      throw new PeerDriveError('saveAs requires DOM environment', ERR.PROTOCOL)
+    }
+    const blob = await this.fetchBlob(hash, { name: filename, ...opts })
+    const url = URL.createObjectURL(blob)
+    try {
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename || hash.slice(0, 12)
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    } finally {
+      // Immediate revoke causes some browsers (Safari) to cancel download: give some margin
+      setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    }
+    return blob.size
+  }
+
+  /** Convenience method: directly fetch and save a share manifest entry/file (auto-extracts filename). */
+  async saveShare(item, opts = {}) {
+    if (!item || !item.hash) throw new PeerDriveError('saveShare requires an entry with hash', ERR.PROTOCOL)
+    const name = baseNameOf(item.name || item.path || '')
+    return this.saveAs(item.hash, name, opts)
+  }
+
+  /** close closes the connection (if this instance created the Peer object, destroy it too). */
+  close() {
+    this._unbind()
+    this._failAll(new PeerDriveError('Connection closed', ERR.CLOSED))
+    try {
+      if (typeof this.conn.close === 'function') this.conn.close()
+    } catch {
+      /* connection already dead */
+    }
+    if (this._ownedPeer && typeof this._ownedPeer.destroy === 'function') {
+      try {
+        this._ownedPeer.destroy()
+      } catch {
+        /* already destroyed */
+      }
+    }
+    this._openState = false
+    // Wake anyone blocked on the PSK gate: on close the gate will never open,
+    // so leaving them pending would hang the caller until its own timeout.
+    this._settlePskGate(this._closeErr || new PeerDriveError(
+      'connection closed before the psk gate opened', ERR.NETWORK))
+  }
+
+  // ── Internal: connection binding and frame dispatch ────────────────────────────────────────
+
+  _bind() {
+    this._onData = (data) => {
+      // Frame order IS protocol semantics (see protocol.js constraint 2), must process synchronously, no queuing
+      try {
+        if (isBinaryFrame(data)) this._onChunk(data)
+        else this._onText(data)
+      } catch (e) {
+        this.stats.failures++
+        this._failAll(e instanceof Error ? e : new Error(String(e)))
+      }
+    }
+    this._onOpen = () => {
+      this._openState = true
+      // PSK: must be presented **before any business frame** (including first request after ready()).
+      // Placed before flush because flush resolves waiters whose subsequent sends are queued after
+      // this send — order IS auth semantics.
+      this._sendPskAuth()
+      this._flushOpenWaiters(null)
+    }
+    this._onClose = () => this._failAll(new PeerDriveError('Connection closed', ERR.CLOSED))
+    this._onError = (err) => {
+      const msg = err && (err.message || err.type) ? err.message || err.type : String(err)
+      this._failAll(new PeerDriveError(`Connection error: ${msg}`, ERR.CLOSED))
+    }
+    this.conn.on('data', this._onData)
+    this.conn.on('open', this._onOpen)
+    this.conn.on('close', this._onClose)
+    this.conn.on('error', this._onError)
+  }
+
+  _unbind() {
+    const off = this.conn.off || this.conn.removeListener
+    if (typeof off !== 'function') return
+    off.call(this.conn, 'data', this._onData)
+    off.call(this.conn, 'open', this._onOpen)
+    off.call(this.conn, 'close', this._onClose)
+    off.call(this.conn, 'error', this._onError)
+  }
+
+  _flushOpenWaiters(err) {
+    const waiters = this._openWaiters
+    this._openWaiters = []
+    for (const w of waiters) {
+      if (w.timer) clearTimeout(w.timer)
+      if (err) w.reject(err)
+      else w.resolve(this)
+    }
+  }
+
+  _onText(text) {
+    const frame = parseFrame(text)
+    if (!frame) return // not this protocol's frame: ignore (same connection may have other purposes)
+    switch (frame.type) {
+      case 'meta': {
+        // meta is ambiguous: could be "fetch ready" or "upload chunk authorized".
+        // Route by reqId ownership — misrouting makes uploader wait for timeout, or fetcher gets unknown frame.
+        const u = frame.reqId ? this._uploads.get(frame.reqId) : null
+        return u ? this._settleUpload(u, frame) : this._onMeta(frame)
+      }
+      case 'ack':
+      case 'uploaded': {
+        const u = frame.reqId ? this._uploads.get(frame.reqId) : null
+        if (u) return this._settleUpload(u, frame)
+        return // not ours: forward compatibility, ignore
+      }
+      case 'data':
+        return this._onDataHead(frame)
+      case 'done':
+        return this._onDone(frame)
+      case 'err':
+        return this._onErr(frame)
+      case 'share-resp':
+      case 'pulled':
+        return this._onVerbReply(frame)
+      case 'cap': {
+        try {
+          this.conn.send(capFrame(this.opts.capabilities || CLIENT_CAPABILITIES))
+        } catch {}
+        return
+      }
+      case 'psk-ok':
+        this.pskState = 'ok'
+        this.pskError = null
+        this._settlePskGate(null)
+        return
+      case 'psk-err':
+        this.pskState = 'err'
+        this.pskError = frame.msg || 'psk: peer rejected the key'
+        this._settlePskGate(new PeerDriveError(
+          `psk: peer rejected the key: ${this.pskError}`, ERR.PSK_REQUIRED))
+        return
+      default:
+        // Forward compatibility for unknown frame types only holds for frames "not about me".
+        // Unknown frames **carrying my pending reqId** must error: peer replied with an unknown type
+        // at my explicitly requested response slot, the only reasonable explanation is protocol version
+        // mismatch. If ignored here, caller only sees TIMEOUT ("peer is stuck"), while the real cause
+        // is peer speaking a different language — debugging direction completely wrong.
+        return this._rejectOwner(frame.reqId, (t) => new PeerDriveError(
+          `Peer responded with unknown frame ${t} (protocol version mismatch?)`,
+          ERR.PROTOCOL,
+        ))
+    }
+  }
+
+  /**
+   * _rejectOwner finds the waiting session by reqId and makes it fail.
+   *
+   * All three wait slots (upload step/one-shot verb/fetch) may hold the same reqId space,
+   * so check them in order here; if none found, it's a late or unrelated frame, ignore.
+   */
+  _rejectOwner(reqId, makeErr) {
+    if (!reqId) return
+    const u = this._uploads.get(reqId)
+    if (u) return this._failUpload(u, makeErr(u.reqId))
+    const v = this._verbs.get(reqId)
+    if (v) return this._settleVerb(reqId, null, makeErr(reqId))
+    const p = this._pend.get(reqId)
+    if (p) return this._failPending(p, makeErr(reqId))
+  }
+
+  _onMeta(frame) {
+    const p = this._pend.get(frame.reqId)
+    if (!p) return
+    p.touch()
+    const total = Number(frame.total)
+    // total of -1 means peer also can't determine size (multi-source origin-pull scenario) — not an error
+    if (Number.isFinite(total) && total > MAX_FILE_BYTES) {
+      return this._failPending(p, new PeerDriveError(`Peer declares file ${total} bytes, exceeds protocol limit`, ERR.TOO_LARGE))
+    }
+    if (Number.isFinite(total) && total > p.maxBytes) {
+      return this._failPending(
+        p,
+        new PeerDriveError(
+          `File ${total} bytes exceeds local memory gate ${p.maxBytes} (use stream() for streaming disk write, or increase maxBytes)`,
+          ERR.TOO_LARGE,
+        ),
+      )
+    }
+    p.total = Number.isFinite(total) ? total : -1
+    this._reportProgress(p)
+  }
+
+  _onDataHead(frame) {
+    const p = this._pend.get(frame.reqId)
+    if (!p) {
+      this._expect = null // late frame (cancelled/ended): discard and clear expect
+      return
+    }
+    p.touch()
+    const size = Number(frame.size)
+    // Same limit as Go-side H6: block size must be positive and not exceed protocol limit, otherwise
+    // it's malicious/wrong protocol
+    if (!Number.isFinite(size) || size <= 0 || size > MAX_FILE_BYTES) {
+      return this._failPending(p, new PeerDriveError(`Invalid data block size ${frame.size}`, ERR.PROTOCOL))
+    }
+    p.blockSize = size
+    p.blockGot = 0
+    // Connection-level expect: attach the following binary block to this request
+    this._expect = p
+  }
+
+  _onChunk(data) {
+    const p = this._expect
+    if (!p) return // data block without preceding data header: not protocol content, discard
+    const bytes = toUint8Array(data)
+    // Note: **don't** store the block in request state here. Blocks only enter the bounded queue
+    // (backpressure), consumed by the consumer — "streaming" benefit is all here; storing an extra
+    // copy in state equals reverting to keeping everything in memory.
+    p.queue.push(bytes)
+    p.received += bytes.byteLength
+    p.blockGot += bytes.byteLength
+    if (p.blockGot >= p.blockSize) this._expect = null
+    this.stats.chunks++
+    this.stats.bytes += bytes.byteLength
+    p.touch()
+    if (p.hasher) p.hasher.update(bytes)
+    this._reportProgress(p)
+    if (p.maxBytes > 0 && p.received > p.maxBytes) {
+      this._failPending(
+        p,
+        new PeerDriveError(`Content exceeds local memory gate ${p.maxBytes} (use stream())`, ERR.TOO_LARGE),
+      )
+    }
+  }
+
+  _onDone(frame) {
+    const p = this._pend.get(frame.reqId)
+    if (!p) return
+    p.touch()
+    const declared = Number(frame.size)
+    // Same integrity gate as Go-side: peer sending early done returns truncated content as success (silent corruption)
+    if (Number.isFinite(declared) && declared >= 0 && p.received !== declared) {
+      return this._failPending(
+        p,
+        new PeerDriveError(`Incomplete transfer: received ${p.received} bytes, peer declared ${declared} bytes`, ERR.INCOMPLETE, {
+          received: p.received,
+          declared,
+        }),
+      )
+    }
+    if (p.verify && p.hasher) {
+      const got = p.hasher.digestHex()
+      if (got !== p.hash) {
+        return this._failPending(
+          p,
+          new PeerDriveError(`Content doesn't match hash (expected ${p.hash}, got ${got})`, ERR.HASH_MISMATCH, {
+            expected: p.hash,
+            actual: got,
+          }),
+        )
+      }
+    }
+    this._finishPending(p)
+  }
+
+  _onErr(frame) {
+    const msg = frame.msg || 'Peer returned error'
+    // err frame may carry code (Go-side auth returns PSK_REQUIRED). Classify by code not text:
+    // text changes with versions, code is part of the protocol.
+    const code = frame.code === ERR.PSK_REQUIRED ? ERR.PSK_REQUIRED : ERR.PEER
+    const err = () => new PeerDriveError(msg, code)
+    // err frame's reqId may belong to fetch, one-shot verb, or upload — check all three,
+    // missing upload means put() hangs until timeout instead of immediately delivering server's rejection reason.
+    if (frame.reqId) {
+      const u = this._uploads.get(frame.reqId)
+      if (u) return this._settleUpload(u, frame)
+      const v = this._verbs.get(frame.reqId)
+      if (v) return this._settleVerb(frame.reqId, null, err())
+      const p = this._pend.get(frame.reqId)
+      if (p) return this._failPending(p, err())
+    }
+  }
+
+  _settleUpload(state, frame) {
+    if (state.timer) {
+      clearTimeout(state.timer)
+      state.timer = null
+    }
+    state.emit?.resolve(frame)
+    state.emit = null
+  }
+
+  /** _failUpload makes upload step end with error, also cancels this round's timer. */
+  _failUpload(state, err) {
+    if (state.timer) {
+      clearTimeout(state.timer)
+      state.timer = null
+    }
+    this._uploads.delete(state.reqId)
+    state.emit?.reject(err)
+    state.emit = null
+  }
+
+  _onVerbReply(frame) {
+    if (!frame.reqId) return
+    this._settleVerb(frame.reqId, frame, null)
+  }
+
+  // ── Internal: request lifecycle ───────────────────────────────────────────────────────────
+
+  _assertHash(hash) {
+    if (!isValidHash(hash)) {
+      throw new PeerDriveError(
+        `hash must be 64 lowercase hex sha256, received ${JSON.stringify(hash)}`,
+        ERR.INVALID_HASH,
+      )
+    }
+  }
+
+  /**
+   * _awaitPskGate resolves once the peer's gate has opened, rejects if it closed or was rejected.
+   *
+   * Why this exists (2026-10-06): psk-auth is fire-and-forget — _sendPskAuth sends it and only
+   * records pskState='sent', with no acknowledgment wait. The server rejects every "make me work"
+   * verb until it has processed that frame (conn.go: pskGate). So a verb issued right after open
+   * can arrive first and get bounced with PSK_REQUIRED, even though the key was correct and
+   * the DataChannel is up. DataChannel ordering only guarantees order *between the two ends once
+   * frames are queued*, not that our psk-auth has been consumed before we send a verb.
+   * This is exactly the race the CI comment called out on 2026-10-04; the comment's "correct fix"
+   * (confirm the gate before sending subsequent verbs) is what this implements.
+   *
+   * Only waits when a psk is actually configured and the gate hasn't settled yet — a peer with
+   * no psk gate is unaffected, and an already-open gate resolves synchronously on the microtask queue.
+   */
+  _awaitPskGate() {
+    if (!this.psk) return Promise.resolve()
+    if (this.pskState === 'ok' || this.pskState === 'none') return Promise.resolve()
+    if (this.pskState === 'err') {
+      return Promise.reject(new PeerDriveError(
+        `psk: peer rejected the key: ${this.pskError}`, ERR.PSK_REQUIRED))
+    }
+    return new Promise((resolve, reject) => {
+      this._pskGateWaiters.add({ resolve, reject })
+    })
+  }
+
+  _settlePskGate(err) {
+    if (this._pskGateWaiters.size === 0) return
+    const waiters = [...this._pskGateWaiters]
+    this._pskGateWaiters.clear()
+    for (const w of waiters) { if (err) w.reject(err); else w.resolve() }
+  }
+
+  /**
+   * 发送一个文本帧。门禁未开时**返回 Promise**，需要 await。
+   *
+   * 注意同步性：无 psk、或门禁已开时走下面的同步分支立即 send 并返回 null。
+   * 这是被测试钉住的契约（test/client.test.mjs「req 帧当场发出」）：
+   * 帧必须当场送达，不能被塞进微任务队列，否则所有「发完立刻断言」的测试全部失效。
+   */
+  _send(frameText) {
+    if (this._closeErr) throw this._closeErr
+    const gate = this._pskGatePending() ? this._awaitPskGate() : null
+    if (gate === null) { // 门禁无需等待：保持原来的同步语义
+      this.conn.send(frameText)
+      return null
+    }
+    return gate.then(() => {
+      if (this._closeErr) throw this._closeErr
+      this.conn.send(frameText)
+    })
+  }
+
+  /** 门禁是否还没落定（需要等 psk-ok / psk-err）。 */
+  _pskGatePending() {
+    if (!this.psk) return false
+    return this.pskState === 'pending' || this.pskState === 'sent'
+  }
+
+  _startFetch(reqId, hash, opts) {
+    const { offset = 0, size = -1, maxBytes, onProgress } = opts
+    const p = {
+      reqId,
+      hash,
+      offset,
+      size,
+      queue: new ChunkQueue(),
+      received: 0,
+      total: -1,
+      blockSize: 0,
+      blockGot: 0,
+      // Only verify content-address for "full requests": range request fragments don't equal the entire
+      // content's digest (same condition as Go-side fetchReader.verify)
+      verify: offset === 0 && size < 0,
+      hasher: null,
+      maxBytes: Number.isFinite(maxBytes) ? maxBytes : this.opts.maxBufferBytes,
+      onProgress,
+      idleTimer: null,
+      onAbort: null,
+      settledBy: null,
+    }
+    if (p.verify) p.hasher = new Sha256()
+    p.touch = () => this._armIdle(p)
+    this._pend.set(reqId, p)
+    this._armIdle(p)
+    this.stats.requests++
+    // 注意：**必须同步**返回 p（调用方 stream() 要立刻读 p.queue / 挂 p.onAbort），
+    // 所以这里不 await _send，而是把它挂成后台任务：
+    // 门禁未开时 req 帧会晚一点发出，这正是我们想要的（先等 psk-ok）；
+    // 门禁已开/无门禁时 _send 同步发出，行为与改动前完全一致。
+    const sendReq = this._send(reqFrame(hash, { offset, size, reqId }))
+    if (sendReq) {
+      sendReq.catch((e) => {
+        this._cancel(reqId, e instanceof Error ? e : new Error(String(e)))
+      })
+    }
+    return p
+  }
+
+  _armIdle(p) {
+    if (p.idleTimer) clearTimeout(p.idleTimer)
+    p.idleTimer = setTimeout(() => {
+      this._failPending(
+        p,
+        new PeerDriveError(`Fetch ${p.hash.slice(0, 12)}… idle timeout (${this.opts.idleTimeoutMs}ms no data)`, ERR.TIMEOUT),
+      )
+    }, this.opts.idleTimeoutMs)
+  }
+
+  _reportProgress(p) {
+    if (typeof p.onProgress === 'function') {
+      try {
+        p.onProgress(p.received, p.total, p.hash)
+      } catch {
+        /* progress callback errors shouldn't affect transfer */
+      }
+    }
+  }
+
+  _finishPending(p) {
+    if (p.settledBy) return
+    p.settledBy = 'done'
+    this._detach(p)
+    p.queue.close()
+  }
+
+  _failPending(p, err) {
+    if (p.settledBy) return
+    p.settledBy = 'fail'
+    this.stats.failures++
+    this._detach(p)
+    p.queue.abort(err)
+  }
+
+  _cancel(reqId, err) {
+    const p = this._pend.get(reqId)
+    if (!p) return
+    if (p.settledBy) return
+    p.settledBy = 'cancel'
+    this._detach(p)
+    p.queue.abort(err)
+  }
+
+  _detach(p) {
+    if (p.idleTimer) {
+      clearTimeout(p.idleTimer)
+      p.idleTimer = null
+    }
+    if (p.onAbort && p.signal) p.signal.removeEventListener('abort', p.onAbort)
+    // Gotcha: don't wait for peer to stop sending. Protocol has no "cancel" frame, peer continues
+    // sending this request to completion, we just drop subsequent frames (_expect/_pend no longer find it).
+    // To truly interrupt, must close the connection.
+    if (this._expect === p) this._expect = null
+    this._pend.delete(p.reqId)
+  }
+
+  _failAll(err) {
+    this._closeErr = this._closeErr || err
+    this._openState = false
+    this._flushOpenWaiters(err)
+    for (const [, v] of this._verbs) {
+      if (v.timer) clearTimeout(v.timer)
+      v.reject(err)
+    }
+    this._verbs.clear()
+    for (const p of [...this._pend.values()]) this._failPending(p, err)
+    // In-flight uploads must also end with error: otherwise put() waits for its own timeout,
+    // while the real cause (connection dead) is masked as TIMEOUT, debugging in completely wrong direction.
+    for (const u of [...this._uploads.values()]) {
+      clearTimeout(u.timer)
+      u.emit?.reject(err)
+      u.emit = null
+    }
+    this._uploads.clear()
+  }
+
+  _settleVerb(reqId, frame, err) {
+    const v = this._verbs.get(reqId)
+    if (!v) return
+    this._verbs.delete(reqId)
+    if (v.timer) clearTimeout(v.timer)
+    if (err) v.reject(err)
+    else v.resolve(frame)
+  }
+
+  // async：同上，_send 可能在等 PSK 门禁。
+  // ⚠️ 注意：`await` 放在 new Promise 的 executor 里是不行的——executor 本身不是 async
+  // 函数（acorn 会直接报 "Cannot use keyword 'await' outside an async function"）。
+  // 所以改成：先把请求登记进 _verbs（同步，超时计时立刻开始），再把发送挂成后台任务，
+  // 发送失败时再走原来那套清理 + reject。语义与之前一致，且不丢超时保护。
+  _requestVerb(reqId, frameText, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const entry = { resolve, reject, timer: null }
+      this._verbs.set(reqId, entry)
+      entry.timer = setTimeout(() => {
+        this._verbs.delete(reqId)
+        reject(new PeerDriveError(`Peer ${timeoutMs}ms no response`, ERR.TIMEOUT))
+      }, timeoutMs)
+      const sent = this._send(frameText)
+      if (sent) {
+        sent.catch((e) => {
+          this._verbs.delete(reqId)
+          clearTimeout(entry.timer)
+          reject(e instanceof Error ? e : new Error(String(e)))
+        })
+        return
+      }
+      // sent === null：无门禁或门禁已开，_send 已同步把帧发出去了，
+      // 不会失败，无需额外处理。
+    })
+  }
+}
+
+/**
+ * readableBytes normalizes various "content sources" to Uint8Array.
+ *
+ * Supported types cover what humans actually put in: typed array / ArrayBuffer /
+ * Blob / File / string. File is the only entry point for the panel's "select file upload" path.
+ */
+async function readableBytes(data) {
+  if (data instanceof Uint8Array) return data
+  if (data instanceof ArrayBuffer) return new Uint8Array(data)
+  if (typeof data === 'string') return new TextEncoder().encode(data)
+  // Blob / File / Response and any Blob-like proxy: duck-type by "has arrayBuffer()"
+  // instead of instanceof Blob —— cross-realm (iframe / unit test proxies)
+  // instanceof fails, but "can get bytes" is the only contract we care about here.
+  if (data && typeof data === 'object' && typeof data.arrayBuffer === 'function') {
+    return new Uint8Array(await data.arrayBuffer())
+  }
+  throw new TypeError('put: data must be Uint8Array / ArrayBuffer / Blob / File / string')
+}
+
+/**
+ * discoverNodes asks self-hosted signaling "which nodes are online now" — consumer-side auto-discovery entry.
+ *
+ * Uses signaling's REST discovery endpoint GET /discover/nodes (built-in discovery, replacing public MQTT broker).
+ * Returns [{peerId,lastSeen,nodeType,collections,uptime,loadInfo}].
+ *
+ * ⚠️ An unavoidable prerequisite: **signaling must serve cross-origin responses**. The panel is a public
+ * static page, file:// gives origin `null`, hosted on Pages is another domain, and this step is a cross-origin
+ * request — if signaling doesn't have Access-Control-Allow-Origin, the browser fails at the fetch level,
+ * with no status code at all (NetworkError). This is the most common reason auto-discovery doesn't work,
+ * so when it fails independently it needs a clear message (see NOT_CORS handling below).
+ *
+ * @param {{host:string,port?:number|string,secure?:boolean}} sig
+ * @param {{coll?:string,timeoutMs?:number}} [opts]
+ */
+async function discoverNodes(sig, opts = {}) {
+  const host = sig?.host
+  if (!host) throw new PeerDriveError('discoverNodes requires signaling host', ERR.PROTOCOL)
+  const port = sig.port === undefined || sig.port === '' ? (sig.secure === false ? 80 : 443) : Number(sig.port)
+  const scheme = sig.secure === false ? 'http' : 'https'
+  const timeoutMs = opts.timeoutMs || 8000
+  const q = opts.coll ? `?coll=${encodeURIComponent(opts.coll)}` : ''
+
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await fetch(`${scheme}://${host}:${port}/discover/nodes${q}`, { signal: ctrl.signal, mode: 'cors' })
+    if (!res.ok) throw new PeerDriveError(`Discovery service returned HTTP ${res.status}`, ERR.PEER)
+    const body = await res.json()
+    return Array.isArray(body?.nodes) ? body.nodes : []
+  } catch (e) {
+    if (e instanceof PeerDriveError) throw e
+    // CORS failure in browser is just a TypeError, no status code — without pointing this out,
+    // users only think "signaling is down" and repeatedly debug a healthy signaling.
+    throw new PeerDriveError(
+      `Auto-discovery failed: ${e?.message || e}. Most common cause is signaling missing cross-origin response header (Access-Control-Allow-Origin)` +
+        `— panel is at origin ${typeof location !== 'undefined' ? location.origin : '(unknown)'}, this is a cross-origin request.` +
+        'Please upgrade signaling to latest go-peerserver (CORS enabled since 2026-09-20), or add the header at reverse proxy layer.',
+      ERR.PEER,
+    )
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * connect wraps an established connection, waits for ready then returns client.
+ * This is the most commonly used entry: `const client = await connect(dataConnection)`
+ */
+async function connect(conn, opts = {}) {
+  const client = new PeerDriveClient(conn, opts)
+  try {
+    await client.ready(opts.openTimeoutMs)
+  } catch (e) {
+    client.close()
+    throw e
+  }
+  return client
+}
+
+/**
+ * connectToPeer convenience entry: provide PeerJS constructor and peer node id, one step to connect.
+ *
+ * This package doesn't import peerjs (keeping zero dependencies, not polluting consumer bundle size),
+ * so the constructor is passed by the caller — in browser it's the global `Peer` (CDN <script> or `import Peer from 'peerjs'`).
+ *
+ * ⚠️ serialization must be 'raw': only raw mode sends string as text frame, ArrayBuffer as binary frame,
+ * replicating Go-side "text frame=JSON header / binary frame=data block" semantics
+ * (see back/internal/transport/conn.go header). Default binary serialization causes
+ * data blocks to be wrapped by peerjs's own chunker, which peer can't parse.
+ */
+/**
+ * randomPeerId generates our temporary peer id, character set consistent with server /peerjs/id.
+ *
+ * Why not wait for signaling to assign: PeerJS without id in `new Peer(opts)` sends
+ * `GET {scheme}://{host}:{port}/{path}{key}/id` to signaling for an id.
+ * But consumer-side is a **public static panel** —— file:// gives origin `null`, hosted on
+ * Pages/CDN is another domain, this step is definitely cross-origin. Without Access-Control-Allow-Origin,
+ * the response is swallowed by same-origin policy, PeerJS only reports a vague
+ * `server-error: Could not get an ID from the server`, from this error you can't tell it's CORS
+ * (the online peersignal.moonchan.xyz deployment is exactly the pre-CORS version).
+ *
+ * Self-generating id completely skips this request: signaling only forwards OFFER, doesn't care who sets
+ * the id, plus saves a round trip. Convention: if caller doesn't provide peerOptions.id, use randomly
+ * generated one here.
+ *
+ * Character set aligned with back/signalserver's randomID() (lowercase letters + digits, 16 chars);
+ * if it actually collides with existing id, signaling returns ID-TAKEN, PeerJS reports error, just retry.
+ */
+function randomPeerId() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  let out = ''
+  for (let i = 0; i < 16; i++) out += chars[Math.floor(Math.random() * chars.length)]
+  return out
+}
+
+async function connectToPeer(PeerCtor, peerId, { peerOptions = {}, connOptions = {}, ...opts } = {}) {
+  if (typeof PeerCtor !== 'function') {
+    // Use double quotes instead of single quotes: the message text contains a bare apostrophe in "PeerJS's",
+    // writing it into a single-quoted string would prematurely close the string, causing the entire file to throw
+    // "missing ) after argument list", while node reports the line number pointing to where the engine gave up
+    // (this throw itself). The real issue is the apostrophe in the middle of the string.
+    throw new TypeError("peerdrive-client: connectToPeer requires PeerJS's Peer constructor")
+  }
+  // id must go as **positional parameter**: empirically peerjs@1.5.5 ignores `new Peer({..., id})`
+  // options.id (still GETs /{path}{key}/id), only `new Peer(id, opts)` works. Provide both positional
+  // args for compatibility with other implementations.
+  const myId = peerOptions.id || randomPeerId()
+  const peer = new PeerCtor(myId, { ...peerOptions, id: myId })
+  try {
+    await new Promise((resolve, reject) => {
+      const onOpen = () => {
+        peer.off?.('error', onError)
+        resolve()
+      }
+      const onError = (e) => {
+        peer.off?.('open', onOpen)
+        reject(new PeerDriveError(`Signaling failed: ${e?.message || e?.type || e}`, ERR.CLOSED))
+      }
+      peer.on('open', onOpen)
+      peer.on('error', onError)
+    })
+    const conn = peer.connect(peerId, { serialization: 'raw', reliable: true, ...connOptions })
+    const client = new PeerDriveClient(conn, { ...opts, peerId })
+    client._ownedPeer = peer
+    await client.ready(opts.openTimeoutMs)
+    return client
+  } catch (e) {
+    try {
+      peer.destroy()
+    } catch {
+      /* already destroyed */
+    }
+    throw e
+  }
+}
+
+// ---- 导出（对应 src/index.js 的 export *） ----
+  const api = { AsyncQueueLane, CHUNK_SIZE, CLIENT_CAPABILITIES, DEFAULT_MAX_BUFFER_BYTES, ERR, EVENT_TO_TYPE, FrameDispatcher, MAX_FILE_BYTES, MAX_MANIFEST_BYTES, PROTOCOL_VERSION, PSK_REQUIRED, PeerDriveClient, PeerDriveError, PermissionError, Sha256, TransferProgressHub, TransportQueue, UPLOAD_CHUNK, baseName, buildCollectionUrl, buildFileUrl, capFrame, concatChunks, connect, connectToPeer, decodeBinaryHeader32, detectPromptInjection, discoverNodes, encodeBinaryHeader32, evaluateAdminPermission, globalProgressHub, globalTransportQueue, guessMime, isBinaryFrame, isValidHash, makeEnvelope, makeUrlRequest, nextReqId, parseDirectTarget, parseFrame, pskAuthFrame, pullFrame, reqFrame, safeJsonParse, safePreviewMime, sanitizeCollectionManifest, sanitizeFilename, sanitizeRelativePath, sanitizeUntrustedText, sha256Hex, shareFrame, toUint8Array, uploadFrame, validateSignalOrApiUrl }
+  if (typeof window !== 'undefined') { window.PeerDrive = api }
+  if (typeof globalThis !== 'undefined') { globalThis.PeerDriveBuiltin = api }
+})()</script>
+<script>// app.js — 公共面板的 UI 逻辑（普通脚本，不是 module：产物要在 file:// 下能跑）。
+// panel/app.js — Core identity, signaling dial, share manifest & deep-link controller (<600 lines, Issue #404).
+// UI list rendering and transfer task handlers are modularized in panel/app-transfers.js.
+;(function () {
+  'use strict'
+
+  var LS_KEY = 'peerdrive.panel.v1'
+  // 项目公共信令：节点与面板的默认值必须一致，否则互相找不到
+  // （两个信令各是一张节点表，discover 也搜不到对方）。
+  var DEFAULT_SIG = {
+    host: 'peersignal.moonchan.xyz',
+    port: 443,
+    path: '/',
+    key: 'pd-signal-1edf5e05e4a52b7351392574',
+    secure: true,
+  }
+  var MAX_RECENT = 8
+  var PREVIEW_MAX_BYTES = 2 * 1024 * 1024 // 预览只给小文件，大的直接存盘
+  // put() 会把整个内容读进浏览器内存再按 64KB 分片推出去——超过这个量要先提醒，
+  // 否则用户会在"大文件传到一半标签页崩了"之后才知道代价。
+  var PUT_WARN_BYTES = 256 * 1024 * 1024
+  // 入库一轮的分片绝大部分是毫秒级，但接收方要落盘；给足余量，别把慢当成死
+  var PUT_CHUNK_TIMEOUT_MS = 30 * 1000
+
+  // 任务类型。写方向（put/pull）和读方向（get）混在一张表里，必须能一眼分开——
+  // 它们的失败含义完全不同：下载失败是"拿不到"，入库失败是"写不进去"。
+  var KIND = { get: '下载', put: '本地入库', pull: '网络入库' }
+
+  var sessions = new Map() // nodeId -> {id, client, status, snapshot, error}
+
+  // 本面板的**稳定身份**。
+  //
+  // 为什么必须自己固定一个：节点侧的 private 级别按「对端 peer id 在不在好友
+  // 名单里」判，而 peerjs 默认每次 `new Peer` 都随机生成一个 id —— 运营者在名单
+  // 里填一个下次打开就变的 id 等于没填，private 会退化成"谁都拿不到，包括你
+  // 答应给的那个人"。所以这里生成一次、存进 localStorage：一个浏览器 = 一个
+  // 固定的来访者，名字才填得进去。
+  var myId = lsRead().myId || ''
+  // 这里只能用 persistMyId（不渲染）：`var $ = …` 还排在后面没赋值，此刻碰 DOM
+  // 会抛 "TypeError: $ is not a function" 并中断整个 IIFE —— 面板整页失效，
+  // 而错误信息跟"没有固定 id"完全看不出关系。
+  if (!myId) { myId = newPanelId(); persistMyId(myId) }
+
+  // 端到端自检用的出口：让脚本能复用面板**已经建立**的那条连接，而不是再拨一次。
+  // 为什么要复用：第二次握手在部分环境（CI 的同机 loopback）并不总是成功，而
+  // 自检要验的是「sha256 是否与清单一致」，不是「能不能连第二次」。
+  if (typeof window !== 'undefined') {
+    window.__panel = {
+      sessions: sessions,
+      current: function () { return current },
+      get: function (id) { return sessions.get(id) },
+      // 端到端自检用：让脚本能驱动这些动作，而不必依赖 DOM 点击的细节。
+      connect: connect,
+      discoverNow: discoverNow,
+      putFiles: putFiles,
+      pullUrl: pullUrl,
+      // 稳定身份与分享链接（自检要能直接读到，而不是靠解析 DOM）
+      myId: function () { return myId },
+      shareLink: shareLink,
+      // 链接带来的那条内容识别结果（自检用：'file' / 'collection'）
+      linkedKind: function () { return linkedKind },
+    }
+  }
+  var current = null // 当前选中的 nodeId
+  var tasks = [] // 传输任务（最新的在前）
+  // pendingHash 由分享链接（?hash=<64hex>）带来。它特意**不**依赖清单：unlisted
+  // 的内容按定义就不在清单里（见 renderLinked）。
+  var pendingHash = ''
+  // 链接带来的那条到底是**文件**还是**合集**。
+  // 合集 manifest（entries 清单）本身就是按内容寻址存的一份 JSON，hash 就是它的
+  // sha256，所以合集 hash 同样能被 req 取回——取回来的就是条目清单。识别方式：
+  // 清单里命中就直接用，清单里没有（unlisted）就取回来看看是不是 manifest。
+  var linkedKind = '' // 'file' | 'collection'
+  var linkedColl = null // {name, entries:[{path,hash}], fromList}
+  var linkedFor = '' // 已识别过的 "<nodeId>:<hash>"，换节点或换链接才重来
+  var linkedBusy = false // 识别中（防止清单每刷新一次就重复取回）
+  var LINK_SNIFF_BYTES = 2 * 1024 * 1024 // 嗅探上限：manifest 通常几 KB
+
+  // ── 小工具 ────────────────────────────────────────────────────────────
+  var $ = function (id) { return document.getElementById(id) }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+    })
+  }
+
+  function fmtBytes(n) {
+    n = Number(n) || 0
+    if (n < 1024) return n + ' B'
+    var units = ['KB', 'MB', 'GB', 'TB'], i = -1
+    do { n /= 1024; i++ } while (n >= 1024 && i < units.length - 1)
+    return n.toFixed(n < 10 ? 1 : 0) + ' ' + units[i]
+  }
+
+  function fmtRate(bytesPerSec) {
+    return fmtBytes(bytesPerSec) + '/s'
+  }
+
+  function log(msg, cls) {
+    var box = $('log')
+    if (!box) return
+    var el = document.createElement('div')
+    if (cls) el.className = cls
+    el.textContent = '[' + new Date().toLocaleTimeString('zh-CN', { hour12: false }) + '] ' + msg
+    box.appendChild(el)
+    box.scrollTop = box.scrollHeight
+  }
+
+  function lsRead() {
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}') } catch (e) { return {} }
+  }
+
+  function lsWrite(obj) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(obj)) } catch (e) { /* 隐私模式：忽略 */ }
+  }
+
+  function params() {
+    return new URLSearchParams(location.search)
+  }
+
+  // 面板 id 用 pd-panel- 前缀：运营者在节点日志/好友名单里能一眼认出"这是个面板
+  // 而不是另一个节点"。字符集受 peerjs 的 id 校验约束（字母数字，分隔符只认 - 和 _）。
+  function newPanelId() {
+    return 'pd-panel-' + Math.random().toString(36).slice(2, 10)
+  }
+
+  // persistMyId 只落盘；saveMyId = 落盘 + 重画界面。分开是因为启动早期（$ 还没
+  // 赋值）只能做前者，见顶部 myId 初始化处的注释。
+  function persistMyId(id) {
+    myId = id
+    var st = lsRead()
+    st.myId = id
+    lsWrite(st)
+  }
+
+  function saveMyId(id) {
+    persistMyId(id)
+    renderMyId()
+  }
+
+  function renderMyId() {
+    var el = $('my-id')
+    if (!el) return
+    el.textContent = myId
+    el.className = 'ok'
+  }
+
+  // 分享链接 —— unlisted 的落地方式。
+  //
+  // unlisted 的语义是"不出现在共享清单里，但知道 hash 就能取回"。这句话要能被
+  // 用起来，就得有个"把 hash 交给别人"的动作，否则用户只能口头传一串 64 位
+  // 十六进制。链接里带 node + hash（外加当前信令参数，面板状态本来就在 URL 里），
+  // 对方打开即连（auto=1）、连上就能取。
+  //
+  // **绝不带 psk**：密钥不能被历史记录/分享目标带走（见 pskOfForm 注释）。
+  // 需要门禁的节点，收到链接的人得自己向运营者要密钥。
+  function shareLink(nodeId, hash) {
+    var q = params()
+    q.set('node', nodeId)
+    q.set('hash', hash)
+    q.set('auto', '1')
+    q.delete('psk')
+    q.delete('token') // 信令凭据同样不带（见 tokenOfForm 注释）
+    // file:// 下 location.origin 是字符串 "null"，拼出来不能用，直接用 href 去参数
+    var base = String(location.href).split('#')[0].split('?')[0]
+    return base + '?' + q.toString()
+  }
+
+  // 复制链接。file:// 不是 secure context，navigator.clipboard 常常不存在或被拒，
+  // 所以留两级退路：剪贴板 API → execCommand → 把链接打进日志让用户自己复制。
+  // 不做退路的话，"点复制没反应"在 file:// 下是常态而不是意外。
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text)
+        return true
+      }
+    } catch (e) { /* 继续降级 */ }
+    try {
+      var ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.top = '-1000px'
+      document.body.appendChild(ta)
+      ta.select()
+      var done = document.execCommand('copy')
+      ta.remove()
+      if (done) return true
+    } catch (e) { /* 继续降级 */ }
+    return false
+  }
+
+  async function copyShareLink(nodeId, hash, label) {
+    var link = shareLink(nodeId, hash)
+    if (await copyText(link)) {
+      log('已复制' + (label ? '「' + label + '」的' : '') + '分享链接（不含密钥）', 'ok')
+    } else {
+      log('复制失败（file:// 下浏览器常不让访问剪贴板），链接如下，手动复制：', 'warn')
+      log(link, 'warn')
+    }
+  }
+
+  function sigOfForm() {
+    return {
+      host: $('in-host').value.trim() || DEFAULT_SIG.host,
+      port: Number($('in-port').value.trim() || DEFAULT_SIG.port),
+      path: $('in-path').value.trim() || DEFAULT_SIG.path,
+      key: $('in-key').value.trim() || DEFAULT_SIG.key,
+      secure: $('in-secure').checked,
+    }
+  }
+
+  // 预共享密钥：**不**进地址栏、**不**进 localStorage。
+  // 理由：地址栏会被历史记录/截图/分享带走，localStorage 是明文且跨会话常驻；
+  // 而密钥一旦泄露，等于这个节点对所有拿到它的人开门。所以它只活在当前页面的
+  // 输入框里，刷新即丢（真要长期保存请用密码管理器）。
+  // 反向是允许的：链接里带 psk= 可以预填（方便一次性分享），但读完立刻从
+  // URL 里抹掉，不让它在地址栏里停留。
+  function pskOfForm() {
+    return $('in-psk') ? $('in-psk').value : ''
+  }
+
+  // 信令 token：与 psk 同一档待遇——**不进地址栏、不进 localStorage / 最近连接**。
+  // 它是信令白名单（部署侧 peersignal --tokens / PEERJS_TOKENS）的凭据，泄露
+  // 等于把「能连上这台信令冒充任意节点收发消息」的钥匙发出去了（2026-08-18
+  // 评审记录：白名单存在的原因就是任意 token 可冒充节点）。链接里带 token=
+  // 允许预填（一次性分享），读完立刻从 URL 抹掉，与 psk 同机制。
+  // 空 = 不发送该字段（见 peerOptions 里「字段必须缺席」的实测依据）。
+  function tokenOfForm() {
+    return ($('in-token') ? $('in-token').value : '').trim()
+  }
+
+  // 面板状态回写地址栏 —— 让用户能直接复制「连这个节点的面板」链接
+  function syncURL() {
+    var q = params()
+    var sig = sigOfForm()
+    q.set('host', sig.host)
+    q.set('port', String(sig.port))
+    q.set('path', sig.path)
+    q.set('key', sig.key)
+    q.set('secure', sig.secure ? '1' : '0')
+    q.delete('psk') // 密钥绝不回写地址栏（见 pskOfForm 注释）
+    q.delete('token') // 信令 token 同理（见 tokenOfForm 注释）
+    if ($('in-node').value.trim()) q.set('node', $('in-node').value.trim())
+    else q.delete('node')
+    try { history.replaceState(null, '', location.pathname + '?' + q.toString()) } catch (e) { /* file:// 下可能不让改 */ }
+  }
+
+  function remember(nodeId, sig) {
+    var st = lsRead()
+    var recent = (st.recent || []).filter(function (r) { return r.id !== nodeId })
+    recent.unshift({ id: nodeId, sig: sig, at: Date.now() })
+    st.recent = recent.slice(0, MAX_RECENT)
+    lsWrite(st)
+    renderRecent()
+  }
+
+  // app-transfers.js — 面板的 UI 列表渲染与传输任务处理（Issue #404 模块化拆分的第二个 part）。
+// 由 scripts/build-panel.mjs 内联进 /*__PANEL_TRANSFERS_PART__*/ 占位处；与 app.js / app-shares.js 共享
+// 同一个 IIFE 作用域（sessions/current/tasks/$/log 等都在那个作用域里）。
+// 从 v1.0-rc 快照重建：快照把旧 app.js 拆成三个文件，但这两个 part 文件没进 zip。
+// 内容逐字取自拆分前的 refactor@06d83eb app.js（渲染 + 读写动作段）。
+
+function statusClass(st) {
+  return st === 'online' ? 'on' : st === 'connecting' ? 'wait' : st === 'error' ? 'bad' : ''
+}
+
+function renderNodes() {
+  var box = $('nodes')
+  if (!sessions.size) { box.innerHTML = '<div class="empty">还没有连接任何节点。</div>'; return }
+  box.innerHTML = ''
+  sessions.forEach(function (s) {
+    var row = document.createElement('div')
+    row.className = 'node' + (s.id === current ? ' sel' : '')
+    var n = s.snapshot ? s.snapshot.total : null
+    row.innerHTML =
+      '<span class="dot ' + statusClass(s.status) + '"></span>' +
+      '<span class="nm mono" title="' + esc(s.id) + '">' + esc(s.id) + '</span>' +
+      '<span class="faint" style="font-size:11px">' + (n == null ? '' : n + ' 项') + '</span>'
+    row.addEventListener('click', function () { select(s.id) })
+
+    var close = document.createElement('button')
+    close.className = 'tiny ghost'
+    close.textContent = '×'
+    close.title = '断开'
+    close.addEventListener('click', function (ev) { ev.stopPropagation(); disconnect(s.id) })
+    row.appendChild(close)
+    box.appendChild(row)
+  })
+}
+
+function renderRecent() {
+  var box = $('recent')
+  var recent = (lsRead().recent || [])
+  if (!recent.length) { box.innerHTML = '<div class="empty">暂无记录。</div>'; return }
+  box.innerHTML = ''
+  recent.forEach(function (r) {
+    var row = document.createElement('div')
+    row.className = 'node'
+    row.innerHTML =
+      '<span class="nm mono" title="' + esc(r.id) + '">' + esc(r.id) + '</span>' +
+      '<span class="faint" style="font-size:11px">' + esc(r.sig.host || '') + '</span>'
+    row.addEventListener('click', function () {
+      $('in-node').value = r.id
+      if (r.sig) {
+        $('in-host').value = r.sig.host || ''
+        $('in-port').value = r.sig.port || 443
+        $('in-path').value = r.sig.path || '/'
+        $('in-key').value = r.sig.key || DEFAULT_SIG.key
+        $('in-secure').checked = r.sig.secure !== false
+      }
+      connect()
+    })
+    box.appendChild(row)
+  })
+}
+
+function renderTasks() {
+  var box = $('tasks')
+  if (!tasks.length) { box.innerHTML = '<div class="empty">没有进行中的传输。</div>'; return }
+  var html = '<table><thead><tr><th>文件</th><th>类型</th><th>节点</th><th class="num">进度</th><th class="num">速率</th><th>状态</th><th></th></tr></thead><tbody>'
+  tasks.forEach(function (t) {
+    var pct = t.total > 0 ? Math.min(100, (t.received / t.total) * 100) : 0
+    // 写方向完成后的 hash 就是它的内容地址——显示出来，用户才知道接下来能拿什么取回
+    var addr = t.kind !== 'get' && t.hash
+      ? '<div class="faint mono" style="font-size:11px" title="' + esc(t.hash) + '">' + esc(t.hash.slice(0, 16)) + '…</div>'
+      : ''
+    html += '<tr>' +
+      '<td class="mono">' + esc(t.name || String(t.hash).slice(0, 12)) + addr + '</td>' +
+      '<td class="faint">' + esc(KIND[t.kind] || t.kind || '') + '</td>' +
+      '<td class="faint mono" style="font-size:11px">' + esc(t.node || t.from) + '</td>' +
+      '<td class="num">' + (t.total > 0 ? fmtBytes(t.received) + ' / ' + fmtBytes(t.total) : fmtBytes(t.received)) +
+      '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div></td>' +
+      '<td class="num faint">' + (t.state === 'running' ? esc(fmtRate(t.rate)) : '—') + '</td>' +
+      '<td class="' + (t.state === 'done' ? 'ok' : t.state === 'error' || t.state === 'cancelled' ? 'err' : 'dim') + '">' +
+      esc(t.state === 'done' ? '完成' : t.state === 'running' ? '进行中' : t.state === 'cancelled' ? '已取消' : t.state === 'error' ? '失败' : t.state) +
+      (t.error ? '<div class="faint" style="font-size:11px">' + esc(t.error) + '</div>' : '') + '</td>' +
+      '<td class="num">' + (t.state === 'running'
+        ? (t.ctrl ? '<button class="tiny ghost" data-cancel="' + t.id + '">取消</button>' : '')
+        : (t.state === 'done'
+          ? (t.kind !== 'get' && t.hash
+            ? '<button class="tiny ghost" data-verify="' + t.id + '">取回校验</button>'
+            : '<span class="faint" style="font-size:11px">sha256 已校验</span>')
+          : '')) + '</td>' +
+      '</tr>'
+  })
+  box.innerHTML = html + '</tbody></table>'
+  Array.prototype.forEach.call(box.querySelectorAll('[data-cancel]'), function (btn) {
+    btn.addEventListener('click', function () {
+      var t = tasks.find(function (x) { return x.id === btn.getAttribute('data-cancel') })
+      if (t && t.ctrl) t.ctrl.abort()
+    })
+  })
+  Array.prototype.forEach.call(box.querySelectorAll('[data-verify]'), function (btn) {
+    btn.addEventListener('click', function () {
+      var t = tasks.find(function (x) { return x.id === btn.getAttribute('data-verify') })
+      if (t) verifyRoundTrip(t)
+    })
+  })
+}
+
+/**
+ * renderDiscovered 渲染「自动搜索」的结果。
+ *
+ * 失败也要渲染：搜索失败的三种原因（信令没开 CORS / 端点不可达 / 真的没节点）
+ * 在界面上长得一模一样——一个空列表。把它们拆成三句人话，用户才不用猜。
+ */
+function renderDiscovered(nodes, err) {
+  var box = $('discovered')
+  if (err) {
+    var msg = err.message || String(err)
+    var cors = /Access-Control-Allow-Origin/.test(msg)
+    var hint = cors
+      ? '这一步是<b>跨域请求</b>（本页原点是 <span class="mono">' + esc(String(location.origin)) + '</span>），' +
+        '信令必须回 <span class="mono">Access-Control-Allow-Origin</span>，浏览器才会把响应交出来。' +
+        '自托管信令请升到 2026-09-20 之后的 go-peerserver（已放开 CORS），或在反代层补这个头。' +
+        '<b>在此之前自动发现用不了，但手动连节点完全不受影响</b>——只是在下面的「节点 peer id」里手填。'
+      : '信令 REST 端点没答上来。请确认 host/port 与节点配的信令一致；' +
+        '另外本页是 HTTPS 而信令是 <span class="mono">http://</span> 时，浏览器会按「混合内容」拦掉这次请求。'
+    box.innerHTML = '<div class="empty err">自动搜索失败：' + esc(msg) + '</div><div class="hint">' + hint + '</div>'
+    return
+  }
+  if (!nodes || !nodes.length) {
+    box.innerHTML = '<div class="empty">信令上没有在线节点。</div>' +
+      '<div class="hint">空的列表不代表信令坏了：节点要主动向信令 announce 才会出现在这里。' +
+      '确认节点配了 <span class="mono">PEERDRIVE_DISCOVERY_*</span>，且它确实连着这个信令。</div>'
+    return
+  }
+  box.innerHTML = ''
+  nodes.forEach(function (n) {
+    var row = document.createElement('div')
+    row.className = 'node'
+    var ago = n.lastSeen ? Math.max(0, Math.round(Date.now() / 1000 - Number(n.lastSeen))) : null
+    row.innerHTML =
+      '<span class="dot on"></span>' +
+      '<span class="nm mono" title="' + esc(n.peerId) + '">' + esc(n.peerId) + '</span>' +
+      '<span class="faint" style="font-size:11px">' +
+      (n.nodeType ? esc(n.nodeType) + ' · ' : '') +
+      (n.collections && n.collections.length ? n.collections.length + ' 集合 · ' : '') +
+      (ago == null ? '' : ago + 's 前') +
+      '</span>'
+    row.title = '点击连接该节点'
+    row.addEventListener('click', function () {
+      $('in-node').value = n.peerId
+      syncURL()
+      connect()
+    })
+    box.appendChild(row)
+  })
+}
+
+function updateShares() {
+  var s = sessions.get(current)
+  var box = $('shares')
+  $('preview').innerHTML = ''
+  renderLinked(s)
+  if (!s) { box.innerHTML = '<div class="empty">先在左侧选一个节点。</div>'; return }
+  if (s.status === 'connecting') { box.innerHTML = '<div class="empty">连接中…</div>'; return }
+  if (s.status === 'error') { box.innerHTML = '<div class="empty err">连接失败：' + esc(s.error) + '</div>'; return }
+  if (!s.snapshot) { box.innerHTML = '<div class="empty">还没有清单。</div>'; return }
+
+  var snap = s.snapshot
+  if (!snap.total) {
+    // 空清单有两种成因，现象一模一样，修复动作却相反，所以必须在这里点名：
+    //   1) 节点开了 PSK 门禁而本页面没填密钥 —— share 帧被 pskGate 挡住，返回空清单；
+    //   2) 节点真的没开对外共享 / 没声明共享目录。
+    // 原来只写「未开启对外共享」，会让第 1 种情况的用户去改节点配置（改不对），
+    // 而正确动作只是在上方「预共享密钥」框里填一次。
+    // 为什么门禁不会回 PSK_REQUIRED：psk.go 的 servedVerbs 挡的是「对端让我做事」的动词，
+    // share 的**响应帧**不在名单里，所以这里只能表现为「拿不到内容」而不是「报错」。
+    var pskFilled = !!(pskOfForm() && pskOfForm().trim())
+    box.innerHTML = '<div class="empty">该节点没有共享内容。'
+      + (pskFilled
+          ? '<br><br>你填了密钥但仍拿不到清单：确认密钥与运营者给的一致，'
+            + '且该节点确实声明了共享目录。'
+          : '<br><br>两种可能：① 节点开了预共享密钥门禁——在「预共享密钥」框里填同一个密钥再连一次；'
+            + '② 节点确实没有对外共享内容。')
+      + '</div>'
+    return
+  }
+
+  var html = ''
+  if (snap.files && snap.files.length) {
+    html += '<h2 style="margin-top:2px">单独文件</h2><table><thead><tr><th>名称</th><th class="num">大小</th><th>hash</th><th style="width:210px"></th></tr></thead><tbody>'
+    snap.files.forEach(function (f, i) {
+      html += '<tr>' +
+        '<td>' + esc(f.path || f.name) + '</td>' +
+        '<td class="num faint">' + (f.size ? esc(fmtBytes(f.size)) : '—') + '</td>' +
+        '<td class="mono faint" style="font-size:11px">' + esc(String(f.hash).slice(0, 12)) + '…</td>' +
+        '<td class="num">' +
+        '<button class="small" data-save="' + i + '">保存</button> ' +
+        '<button class="small ghost" data-peek="' + i + '">预览</button> ' +
+        '<button class="small ghost" data-link="' + i + '" title="生成一条分享链接：不在清单里也能凭 hash 取回（unlisted）">链接</button>' +
+        '</td></tr>'
+    })
+    html += '</tbody></table>'
+  }
+  if (snap.collections && snap.collections.length) {
+    html += '<h2 style="margin-top:16px">合集</h2>'
+    snap.collections.forEach(function (c, ci) {
+      var entries = Array.isArray(c.entries) ? c.entries : []
+      // 整包一条链接：合集 manifest 本身能凭 hash 取回，所以对方不在清单里也能拿到
+      html += '<details><summary>' + esc(c.name || String(c.hash).slice(0, 12) + '…') + ' · ' + entries.length + ' 个条目' +
+        ' <button class="small ghost" data-coll-link="' + ci + '" title="生成这个合集的分享链接（整包一条）">链接</button></summary>'
+      html += '<table><thead><tr><th>路径</th><th class="num">大小</th><th style="width:210px"></th></tr></thead><tbody>'
+      entries.forEach(function (e, ei) {
+        html += '<tr>' +
+          '<td>' + esc(e.path) + '</td>' +
+          '<td class="num faint">' + (e.size ? esc(fmtBytes(e.size)) : '—') + '</td>' +
+          '<td class="num">' +
+          '<button class="small" data-csave="' + ci + ':' + ei + '">保存</button> ' +
+          '<button class="small ghost" data-cpeek="' + ci + ':' + ei + '">预览</button> ' +
+          '<button class="small ghost" data-clink="' + ci + ':' + ei + '" title="生成一条分享链接：不在清单里也能凭 hash 取回（unlisted）">链接</button>' +
+          '</td></tr>'
+      })
+      html += '</tbody></table></details>'
+    })
+  }
+  box.innerHTML = html
+
+  // stop=true 用于"按钮嵌在 <summary> 里"的情形：不拦住的话点按钮会顺手把
+  // details 展开/收起（合集标题行就是这种）。
+  var bind = function (attr, handler, stop) {
+    Array.prototype.forEach.call(box.querySelectorAll('[' + attr + ']'), function (el) {
+      el.addEventListener('click', function (e) {
+        if (stop) { e.preventDefault(); e.stopPropagation() }
+        handler(el.getAttribute(attr))
+      })
+    })
+  }
+  var findFile = function (i) { return snap.files[Number(i)] }
+  var findEntry = function (ref) {
+    var p = ref.split(':')
+    return (snap.collections[Number(p[0])].entries || [])[Number(p[1])]
+  }
+  bind('data-save', function (v) { download(s, findFile(v)) })
+  bind('data-peek', function (v) { preview(s, findFile(v)) })
+  bind('data-csave', function (v) { download(s, findEntry(v)) })
+  bind('data-cpeek', function (v) { preview(s, findEntry(v)) })
+  bind('data-link', function (v) {
+    var f = findFile(v)
+    copyShareLink(s.id, f.hash, String(f.path || f.name || ''))
+  })
+  bind('data-clink', function (v) {
+    var e = findEntry(v)
+    copyShareLink(s.id, e.hash, String(e.path || ''))
+  })
+  bind('data-coll-link', function (v) {
+    var c = snap.collections[Number(v)]
+    copyShareLink(s.id, c.hash, String(c.name || c.hash))
+  }, true)
+}
+
+function select(id) {
+  current = id
+  renderNodes()
+  updateShares()
+}
+
+function saveBlob(blob, name) {
+  var url = URL.createObjectURL(blob)
+  var a = document.createElement('a')
+  a.href = url
+  a.download = name || 'download'
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // 立刻 revoke 会让部分浏览器（Safari）取消下载，给足余量
+  setTimeout(function () { URL.revokeObjectURL(url) }, 30000)
+}
+
+function addTask(t) {
+  tasks.unshift(t)
+  renderTasks()
+  return t
+}
+
+async function download(s, item) {
+  if (!s || !s.client || !item || !item.hash) return
+  var name = String(item.name || item.path || item.hash).split('/').pop()
+  var started = Date.now()
+  var ctrl = new AbortController()
+  var t = addTask({
+    id: 't' + Date.now() + Math.random().toString(36).slice(2, 6),
+    hash: item.hash, name: name, from: s.id, node: s.id, kind: 'get',
+    received: 0, total: -1, rate: 0, state: 'running', ctrl: ctrl, error: null,
+  })
+  var tick = setInterval(function () {
+    if (t.state !== 'running') return
+    t.rate = Math.round(t.received / Math.max(1, (Date.now() - started) / 1000))
+    renderTasks()
+  }, 500)
+  try {
+    log('拉取 ' + name + ' …')
+    var bytes = await s.client.fetch(item.hash, {
+      signal: ctrl.signal,
+      onProgress: function (received, total) {
+        t.received = received
+        t.total = total > 0 ? total : t.total
+        renderTasks()
+      },
+    })
+    t.received = bytes.byteLength
+    t.state = 'done'
+    saveBlob(new Blob([bytes], { type: (window.PeerDrive.guessMime || function () { return '' })(name) }), name)
+    log('完成：' + name + '（' + fmtBytes(bytes.byteLength) + '，sha256 已校验）', 'ok')
+  } catch (e) {
+    t.state = e.name === 'AbortError' || (e.code === window.PeerDrive.ERR.CANCELLED) ? 'cancelled' : 'error'
+    t.error = e.message || String(e)
+    log('拉取失败：' + t.error + (e.code ? '（' + e.code + '）' : ''), t.state === 'cancelled' ? 'warn' : 'err')
+    if (e.code === window.PeerDrive.ERR.HASH_MISMATCH) log('内容与 hash 不符——对端数据损坏或被篡改，已丢弃', 'err')
+    if (e.code === window.PeerDrive.ERR.TOO_LARGE) log('超过内存闸（默认 256MB）', 'warn')
+  } finally {
+    clearInterval(tick)
+    renderTasks()
+  }
+}
+
+async function preview(s, item) {
+  if (!s || !s.client || !item || !item.hash) return
+  var box = $('preview')
+  var name = String(item.name || item.path || item.hash).split('/').pop()
+  var mime = (window.PeerDrive.guessMime || function () { return '' })(name)
+  box.innerHTML = '<div class="preview faint">加载预览…</div>'
+  try {
+    if (/^image\//.test(mime)) {
+      var blob = await s.client.fetchBlob(item.hash, { name: name })
+      var url = URL.createObjectURL(blob)
+      box.innerHTML = '<div class="preview"><img src="' + esc(url) + '" alt="' + esc(name) + '"></div>'
+    } else if (/^video\//.test(mime) || /^audio\//.test(mime)) {
+      var vblob = await s.client.fetchBlob(item.hash, { name: name })
+      box.innerHTML = '<div class="preview"><video src="' + esc(URL.createObjectURL(vblob)) + '" controls></video></div>'
+    } else {
+      var text = await s.client.fetchText(item.hash, { maxBytes: PREVIEW_MAX_BYTES })
+      box.innerHTML = '<div class="preview mono"><pre>' + esc(text.slice(0, 200000)) + '</pre></div>'
+    }
+    log('预览 ' + name, 'ok')
+  } catch (e) {
+    box.innerHTML = '<div class="preview err">预览失败：' + esc(e.message || String(e)) + '</div>'
+    log('预览失败：' + (e.message || String(e)), 'err')
+  }
+}
+
+async function discoverNow() {
+  var sig = sigOfForm()
+  var btn = $('btn-discover')
+  btn.disabled = true
+  $('discovered').innerHTML = '<div class="empty">正在向 ' + esc(sig.host + ':' + sig.port) + ' 询问…</div>'
+  log('向信令询问在线节点：' + sig.host + ':' + sig.port)
+  try {
+    var nodes = await window.PeerDrive.discoverNodes(sig, { timeoutMs: 8000 })
+    renderDiscovered(nodes, null)
+    if (nodes.length) {
+      log('在线节点 ' + nodes.length + ' 个：' + nodes.map(function (n) { return n.peerId }).join('、'), 'ok')
+    } else {
+      log('信令上没有在线节点（空列表≠信令坏了：节点要主动 announce 才会出现）', 'warn')
+    }
+  } catch (e) {
+    renderDiscovered([], e)
+    log('自动搜索失败：' + (e.message || e) + (e.code ? '（' + e.code + '）' : ''), 'err')
+  } finally {
+    btn.disabled = false
+  }
+}
+
+function activeNode() {
+  var s = sessions.get(current)
+  if (!s) { log('先在左栏选中一个节点', 'err'); return null }
+  if (s.status !== 'online' || !s.client) {
+    log('节点 ' + s.id + ' 还不是在线状态（' + s.status + '）', 'err')
+    return null
+  }
+  return s
+}
+
+function newTask(s, name, kind, total) {
+  return addTask({
+    id: 't' + Date.now() + Math.random().toString(36).slice(2, 6),
+    hash: '', name: name, from: s.id, node: s.id, kind: kind,
+    received: 0, total: total || 0, rate: 0, state: 'running', ctrl: new AbortController(), error: null,
+  })
+}
+
+function tickRate(t, started) {
+  var h = setInterval(function () {
+    if (t.state !== 'running') return
+    t.rate = Math.round(t.received / Math.max(1, (Date.now() - started) / 1000))
+    renderTasks()
+  }, 500)
+  return function () { clearInterval(h) }
+}
+
+function settleWrite(t, e, what) {
+  t.state = (e && (e.name === 'AbortError' || e.code === window.PeerDrive.ERR.CANCELLED)) ? 'cancelled' : 'error'
+  t.error = (e && e.message) || String(e)
+  log(what + '失败：' + t.error + (e && e.code ? '（' + e.code + '）' : ''), t.state === 'cancelled' ? 'warn' : 'err')
+  if (!e || !e.code) return
+  if (pskHint(e)) log(pskHint(e), 'warn')
+  if (e.code === window.PeerDrive.ERR.TIMEOUT) {
+    log('节点在分片超时窗口内没回应。常见原因：它此刻正忙（磁盘/别的在传），或这条连接已经半死——重连一次最快。', 'warn')
+  }
+}
+
+async function putFiles() {
+  var s = activeNode()
+  if (!s) return
+  var files = Array.prototype.slice.call($('in-file').files || [])
+  if (!files.length) { log('先选至少一个本地文件', 'err'); return }
+  // 串行执行：一条 DataChannel 上同时只能有一个 upload 流（服务端按连接级槽位
+  // 管理），并行会在第二份的第一帧就收到 "already in progress"。
+  for (var i = 0; i < files.length; i++) await putOne(s, files[i])
+  await loadShares(s)
+}
+
+async function putOne(s, file) {
+  var name = file.name || ('upload-' + Date.now())
+  var size = file.size || 0
+  var started = Date.now()
+  var t = newTask(s, name, 'put', size)
+  var stop = tickRate(t, started)
+  try {
+    if (size > PUT_WARN_BYTES) {
+      log(name + ' 有 ' + fmtBytes(size) + '：put 会先把整个内容读进浏览器内存，超大文件建议先本地切片', 'warn')
+    }
+    log('入库 ' + name + '（' + fmtBytes(size) + '）…')
+    var res = await s.client.put(file, {
+      name: name,
+      signal: t.ctrl.signal,
+      chunkTimeoutMs: PUT_CHUNK_TIMEOUT_MS,
+      onProgress: function (sent, total) {
+        t.received = sent
+        if (total > 0) t.total = total
+        renderTasks()
+      },
+    })
+    t.hash = res.hash
+    t.received = res.size
+    t.total = res.size
+    t.state = 'done'
+    log('入库完成：' + res.name + ' → sha256 ' + res.hash + '（' + fmtBytes(res.size) + '）', 'ok')
+    log('这条内容之后在任何地方都能用这个 hash 取回；要立刻验证，点任务里的「取回校验」。', 'ok')
+  } catch (e) {
+    settleWrite(t, e, '入库 ' + name)
+  } finally {
+    stop()
+    renderTasks()
+  }
+}
+
+async function pullUrl() {
+  var s = activeNode()
+  if (!s) return
+  var url = ($('in-url').value || '').trim()
+  if (!url) { log('先填一个 URL', 'err'); return }
+  if (!/^https?:\/\//i.test(url)) {
+    log('URL 必须是 http:// 或 https:// 开头——节点侧的 SSRF 防护也只放行这两种协议', 'err')
+    return
+  }
+  var want = ($('in-url-name').value || '').trim()
+  var started = Date.now()
+  var t = newTask(s, want || url.split('/').pop() || url, 'pull', 0)
+  var stop = tickRate(t, started)
+  try {
+    log('让节点抓取 ' + url + ' …')
+    var res = await s.client.pull(url, { name: want })
+    t.hash = res.hash
+    t.received = res.size
+    t.total = res.size
+    t.state = 'done'
+    log('网络入库完成：' + res.name + ' → sha256 ' + res.hash + '（' + fmtBytes(res.size) + '）', 'ok')
+  } catch (e) {
+    settleWrite(t, e, '抓取 ' + url)
+    // pull 的绝大多数 err 是节点主动拒绝（SSRF/超限/404）——那是节点在保护自己，
+    // 不是故障。把这句话说清楚，省得用户反复重试同一个注定失败的地址。
+    if (e && e.code === window.PeerDrive.ERR.PEER) {
+      log('这是节点的策略性拒绝（不是网络故障）：换一个公网可访问的地址再来。', 'warn')
+    }
+  } finally {
+    stop()
+    renderTasks()
+  }
+}
+
+async function verifyRoundTrip(t) {
+  var s = sessions.get(t.node)
+  if (!s || !s.client) { log('该节点已断开，无法取回校验', 'err'); return }
+  try {
+    log('取回校验 ' + t.hash.slice(0, 12) + '…')
+    var bytes = await s.client.fetch(t.hash)
+    var hex = await window.PeerDrive.sha256Hex(bytes)
+    hex === t.hash
+      ? log('取回校验通过：拉回 ' + fmtBytes(bytes.byteLength) + '，sha256 与入库返回值一致', 'ok')
+      : log('取回校验失败：期望 ' + t.hash + '，实得 ' + hex, 'err')
+  } catch (e) {
+    log('取回校验失败：' + (e.message || e) + (e.code ? '（' + e.code + '）' : ''), 'err')
+    if (pskHint(e)) log(pskHint(e), 'warn')
+  }
+}
+
+
+  // app-shares.js — 分享链接（deep-link）控制器：链接带来的那条内容（file / collection）的
+// 识别与取回 UI（Issue #404 模块化拆分的第三个 part）。
+// 由 scripts/build-panel.mjs 内联进 /*__PANEL_SHARES_PART__*/ 占位处。
+// 从 v1.0-rc 快照重建：内容逐字取自拆分前的 refactor@06d83eb app.js。
+
+//
+// unlisted 的定义就是**不出现在清单里**、但凭 hash 可取。所以拿到链接的人连上
+// 节点后，清单里多半没有它——不给单独入口的话，他看到"该节点没有共享内容"
+// 就走了，而东西其实一直拿得到。这条也正是"链接分享"这个语义的落点。
+function renderLinked(s) {
+  var box = $('linked')
+  if (!box) return
+  if (!pendingHash) { box.innerHTML = ''; return }
+  var h = pendingHash
+  var short = h.slice(0, 16) + '…'
+  if (!s || s.status !== 'online') {
+    box.innerHTML = '<div class="empty">链接里带着一个 hash（<span class="mono">' +
+      esc(short) + '</span>），连上节点后即可取回。</div>'
+    return
+  }
+  // 清单还没到就先别判断：此刻既不知道它是文件还是合集，判断了也不会重来
+  // （linkedFor 已记过账），会把"合集链接"误判成文件。
+  if (!s.snapshot) {
+    box.innerHTML = '<div class="empty">正在获取对方的共享清单…</div>'
+    return
+  }
+  var key = s.id + ':' + h
+  if (linkedFor !== key) {
+    if (!linkedBusy) { linkedBusy = true; resolveLinked(s, key) }
+    // 占位必须**在它跑完之后再判一次**：命中清单那条路是同步走完的（里面已经
+    // 自己重画过一次），无条件写占位会把刚画好的表格覆盖成"正在识别…"。
+    if (linkedFor !== key) {
+      box.innerHTML = '<div class="empty">正在识别链接里的内容…</div>'
+      return
+    }
+  }
+  if (linkedKind === 'collection' && linkedColl) { renderLinkedColl(s, h); return }
+  var named = nameForHash(s, h)
+  box.innerHTML =
+    '<div class="hint">这条内容来自分享链接：<span class="mono">' + esc(short) + '</span>' +
+    (named ? '（清单里叫 ' + esc(named) + '）' : '（清单里没有它 —— unlisted 就是这个意思：不列出，但知道 hash 就能取）') +
+    '</div>' +
+    '<div class="row">' +
+    '<button class="small" id="btn-linked-get">取回</button> ' +
+    '<button class="small ghost" id="btn-linked-copy">复制链接</button>' +
+    '</div>'
+  $('btn-linked-get').addEventListener('click', function () {
+    download(s, { hash: h, name: named || h })
+  })
+  $('btn-linked-copy').addEventListener('click', function () {
+    copyShareLink(s.id, h, named || '')
+  })
+}
+
+// resolveLinked 判断链接里那条是文件还是合集（结果写进 linkedKind/linkedColl）。
+//
+// 为什么"取回来看"是可行且必要的：合集 manifest 就是一份按内容寻址存的 JSON，
+// 而 unlisted 合集按定义不在清单里——不取就永远只能说"清单里没有它"，拿到链接
+// 的人依然什么都看不到。取回失败（private / 断线）一律按文件处理：那样「取回」
+// 会把服务端的真实原因显示出来，比这里猜一个原因强。
+async function resolveLinked(s, key) {
+  try {
+    var snap = s && s.snapshot
+    var cs = (snap && snap.collections) || []
+    for (var i = 0; i < cs.length; i++) {
+      if (cs[i].hash !== pendingHash) continue
+      linkedKind = 'collection'
+      linkedColl = {
+        name: cs[i].name || cs[i].friendly_name || '',
+        entries: (cs[i].entries || []).map(manifestEntry),
+        fromList: true,
+      }
+      linkedFor = key
+      return
+    }
+    var inFiles = ((snap && snap.files) || []).filter(function (f) { return f.hash === pendingHash })
+    if (inFiles.length) {
+      linkedKind = 'file'
+      linkedColl = null
+      linkedFor = key
+      return
+    }
+    var bytes = await s.client.fetch(pendingHash, { maxBytes: LINK_SNIFF_BYTES })
+    var obj = null
+    try { obj = JSON.parse(new TextDecoder().decode(bytes)) } catch (e) { obj = null }
+    if (obj && Array.isArray(obj.entries)) {
+      linkedKind = 'collection'
+      linkedColl = {
+        name: obj.friendly_name || '',
+        entries: obj.entries.map(manifestEntry).filter(function (e) { return e.hash }),
+        fromList: false,
+      }
+    } else {
+      linkedKind = 'file'
+      linkedColl = null
+    }
+    linkedFor = key
+  } catch (e) {
+    linkedKind = 'file'
+    linkedColl = null
+    // 也记上账：否则清单每刷新一次就重取一次，失败时会一直转圈
+    linkedFor = key
+  } finally {
+    linkedBusy = false
+    renderLinked(s)
+  }
+}
+
+// manifestEntry 把 manifest 的条目统一成 {path, hash}：新格式是 providers[]，
+// 老格式直接给 hash（panel 侧两种都要认，链接可能是老节点生成的）。
+function manifestEntry(e) {
+  var h = ''
+  if (e) h = e.hash || ((e.providers || [])[0] || {}).value || ''
+  return { path: (e && e.path) || '', hash: String(h || '') }
+}
+
+// renderLinkedColl 把链接带来的合集单独列在清单上方（条目可逐条保存/预览/再分享）。
+function renderLinkedColl(s, h) {
+  var box = $('linked')
+  var entries = linkedColl.entries || []
+  var title = linkedColl.name || (h.slice(0, 12) + '…')
+  var html = '<div class="hint">这条链接指向一个<b>合集</b>：' + esc(title) +
+    '（' + entries.length + ' 个条目）'
+  if (!linkedColl.fromList) {
+    html += ' —— 它不在对方的共享清单里，是凭 hash 取到的（unlisted 就是这个意思：不列出，但知道 hash 就能取）'
+  }
+  html += '</div>'
+  if (!entries.length) {
+    html += '<div class="empty">这个合集没有条目。</div>'
+  } else {
+    html += '<table><thead><tr><th>路径</th><th style="width:210px"></th></tr></thead><tbody>'
+    entries.forEach(function (e, i) {
+      html += '<tr><td>' + esc(e.path || e.hash) + '</td>' +
+        '<td class="num">' +
+        '<button class="small" data-lsave="' + i + '">保存</button> ' +
+        '<button class="small ghost" data-lpeek="' + i + '">预览</button> ' +
+        '<button class="small ghost" data-llink="' + i + '">链接</button>' +
+        '</td></tr>'
+    })
+    html += '</tbody></table>'
+  }
+  html += '<div class="row">' +
+    '<button class="small ghost" id="btn-linked-copy">复制链接</button>' +
+    '</div>' +
+    '<div class="hint faint">面板只能逐条存到浏览器；要整包存进自己的节点，用管理台的「保存整个合集」（教程第五章）。</div>'
+  box.innerHTML = html
+
+  var at = function (i) { return (linkedColl.entries || [])[i] }
+  var bindL = function (attr, fn) {
+    Array.prototype.forEach.call(box.querySelectorAll('[' + attr + ']'), function (el) {
+      el.addEventListener('click', function () { fn(Number(el.getAttribute(attr))) })
+    })
+  }
+  bindL('data-lsave', function (i) { download(s, at(i)) })
+  bindL('data-lpeek', function (i) { preview(s, at(i)) })
+  bindL('data-llink', function (i) {
+    var e = at(i)
+    copyShareLink(s.id, e.hash, String(e.path || ''))
+  })
+  $('btn-linked-copy').addEventListener('click', function () { copyShareLink(s.id, h, title) })
+}
+
+// nameForHash 在已拿到的清单里找 hash 对应的名字（只为显示，找不到不算错）。
+function nameForHash(s, h) {
+  var snap = s && s.snapshot
+  if (!snap) return ''
+  var f = (snap.files || []).filter(function (x) { return x.hash === h })[0]
+  if (f) return String(f.path || f.name || '')
+  var cs = snap.collections || []
+  for (var i = 0; i < cs.length; i++) {
+    var e = (cs[i].entries || []).filter(function (x) { return x.hash === h })[0]
+    if (e) return String(e.path || '')
+  }
+  return ''
+}
+
+
+  function peerOptions(sig, token) {
+    // secure 必须显式传：自托管信令常用 ws://，peerjs 默认 secure=true 会去连 wss://，
+    // 表现为「连不上但不报错」——最常见的踩坑点。
+    // id 用固定的 myId（见顶部注释）：private 级别的好友名单是按这个 id 判的。
+    //
+    // token 是信令白名单（peersignal --tokens / PEERJS_TOKENS）的**发送口**（审计 A-2）。
+    // ⚠️ 空时必须**整个字段缺席**，不能传空串也不能传 undefined：
+    //   实测 dist/peerjs.min.js 里 Peer 的默认值是 `{token: randomToken(), ...用户选项}`，
+    //   显式给 `token: ''` 会**覆盖**那个随机值，WS URL 拼成 `&token=`，而信令
+    //   （signalserver HandleWS）对空 token 直接回 "No id, token, or key supplied"——
+    //   连**没开白名单**的信令都连不上。字段缺席才会落到 peerjs 的随机 token 老路，
+    //   默认行为与改动前逐字节一致（白名单关着时服务端根本不读这个值）。
+    var opts = {
+      host: sig.host, port: sig.port, path: sig.path,
+      key: sig.key, secure: sig.secure, debug: 1, id: myId,
+    }
+    if (token) opts.token = token
+    return opts
+  }
+
+  // idTaken 判断「连不上」是不是因为本端 id 被占用。
+  // peerjs 报的类型是 unavailable-id（文案常是 ID "xxx" is taken）。不认出来的话
+  // 用户会往网络/信令方向排查，而真实原因多半是他自己另开了一个面板页。
+  function idTaken(e) {
+    var m = String((e && e.message) || '')
+    return /unavailable-id|is taken|already/i.test(m)
+  }
+
+  // peerjs 由加载器异步注入，可能还没到位；这里给出明确状态而不是「点了没反应」
+  function peerReady() { return typeof window.Peer !== 'undefined' }
+  function peerMissingHint() {
+    return window.__peerjsOK === false
+      ? 'peerjs 加载失败（同目录副本 / jsdelivr / unpkg 都没取到）。离线环境请先 `npm run vendor:peerjs` 把 peerjs.min.js 放到本页面同目录。'
+      : 'peerjs 还在加载中，稍等再点一次。'
+  }
+
+  // 本页跑在 HTTPS（GitHub Pages 强制 HTTPS）时，浏览器会把 ws:// 当「混合内容」
+  // 直接拦掉，PeerJS 侧只表现为连不上、没有任何可用提示——这里提前说清楚。
+  function mixedContent() {
+    return location.protocol === 'https:' && !$('in-secure').checked
+  }
+  function mixedContentHint() {
+    return '本页是 HTTPS，浏览器会按「混合内容」拦掉 ws:// 信令（本机 localhost 的 ws:// ' +
+      '多数浏览器仍放行，局域网 IP 一律拦）。请改用 wss：勾选上面的 wss（或链接里 secure=1），' +
+      '自托管信令用 `peersignal -tls-cert cert.pem -tls-key key.pem`，或在信令前挂 TLS 反代。'
+  }
+
+  // pskHint 门禁提示。对端回 PSK_REQUIRED 时，用户的修复动作是「去填密钥」，
+  // 而不是排查网络——不加这句，绝大多数人会以为是节点离线（典型误判）。
+  function pskHint(e) {
+    if (!e || e.code !== window.PeerDrive.ERR.PSK_REQUIRED) return null
+    return '该节点开了预共享密钥门禁（节点侧 PEERDRIVE_PSK）：在「预共享密钥」框里填' +
+      '同一个密钥再连一次。拿不到密钥就只能找节点运营者要——门禁本来就是为了' +
+      '拦住没钥匙的人。'
+  }
+
+  // dial 拨一次号。单独抽出来是为了 id 冲突时能原样重试一次（见 connect）。
+  // token 单独成参（不进 sig）：sig 会被 remember() 存进 localStorage，
+  // 凭据不能跟着「最近连接」落盘（同 psk 的理由，见 tokenOfForm）。
+  function dial(nodeId, sig, psk, token) {
+    return window.PeerDrive.connectToPeer(window.Peer, nodeId, {
+      peerOptions: peerOptions(sig, token),
+      idleTimeoutMs: 60 * 1000,
+      psk: psk, // 空串 = 不出示（对端没开门禁时完全无感）
+    })
+  }
+
+  async function connect() {
+    if (!peerReady()) { log(peerMissingHint(), 'err'); return }
+    var nodeId = $('in-node').value.trim()
+    if (!nodeId) { log('请先填节点 peer id', 'err'); return }
+    if (sessions.has(nodeId)) { select(nodeId); return }
+    if (mixedContent()) { log(mixedContentHint(), 'err'); return }
+
+    var sig = sigOfForm()
+    syncURL()
+    var s = { id: nodeId, client: null, status: 'connecting', snapshot: null, error: null }
+    sessions.set(nodeId, s)
+    current = nodeId
+    renderNodes()
+    updateShares()
+    try {
+      log('连接信令 ' + sig.host + ':' + sig.port + ' 并拨号 ' + nodeId + ' …')
+      var psk = pskOfForm()
+      var token = tokenOfForm()
+      if (token) log('信令 token 已出示（' + token.length + ' 字符，不回写地址栏）')
+      var client
+      try {
+        client = await dial(nodeId, sig, psk, token)
+      } catch (e) {
+        // 本端 id 撞了（自己另开一个面板页、或 localStorage 被复制到别处）：
+        // 换一个 id 重试一次。不重试的话界面上只有"信令失败"，指向完全错误的方向。
+        if (!idTaken(e)) throw e
+        log('我的节点 id ' + myId + ' 已被占用（多半是你自己另开了一个面板），换一个再连', 'warn')
+        saveMyId(newPanelId())
+        client = await dial(nodeId, sig, psk, token)
+      }
+      s.client = client
+      s.status = 'online'
+      // 我的 id 是**自己带上去**的固定 id，不从连接结果里取——连接结果里的
+      // localPeerId 只是"这次实际用上的"，冲突时会和保存的那个不一致。
+      renderMyId()
+      log('已建立 WebRTC 直连', 'ok')
+      remember(nodeId, sig)
+      renderNodes()
+      await loadShares(s)
+    } catch (e) {
+      s.status = 'error'
+      s.error = e.message || String(e)
+      log('连接失败：' + s.error + (e.code ? '（' + e.code + '）' : ''), 'err')
+      if (e.code === window.PeerDrive.ERR.TIMEOUT) {
+        log('提示：对方节点离线、peer id 写错，或信令配置不同（host/port/path/key/secure）', 'warn')
+      }
+      // 白名单拒绝发生在 **HTTP 升级层**（signalserver 回 400 "Invalid token
+      // provided"），WebSocket API 不会把响应体递给 JS —— 面板只能看到 bad
+      // handshake 一类无差别错误。不点名 token 的话，开了白名单的信令上，
+      // 用户会往「节点离线」方向排查（正是这条防线最难自查的失败形态）。
+      if (/handshake|signalling|socket/i.test(String((e && e.message) || '')) && !tokenOfForm()) {
+        log('若信令开了 token 白名单（peersignal --tokens / PEERJS_TOKENS）：' +
+          '在「信令 token」框里填白名单里的值再连。token 留空时本面板不会发送该字段。', 'warn')
+      }
+      if (pskHint(e)) log(pskHint(e), 'warn')
+      renderNodes()
+      updateShares()
+    }
+  }
+
+  function disconnect(id) {
+    var s = sessions.get(id)
+    if (!s) return
+    if (s.client) { try { s.client.close() } catch (e) { /* 已关闭 */ } }
+    sessions.delete(id)
+    if (current === id) current = sessions.size ? sessions.keys().next().value : null
+    log('已断开 ' + id)
+    renderNodes()
+    updateShares()
+  }
+
+  async function loadShares(s) {
+    if (!s || !s.client) return
+    try {
+      s.snapshot = await s.client.shares()
+      log('清单：' + (s.snapshot.collections || []).length + ' 合集 · ' + (s.snapshot.files || []).length + ' 文件', 'ok')
+      renderNodes()
+      if (current === s.id) updateShares()
+    } catch (e) {
+      s.error = e.message || String(e)
+      log('获取清单失败：' + s.error + (e.code ? '（' + e.code + '）' : ''), 'err')
+      if (pskHint(e)) log(pskHint(e), 'warn')
+      renderNodes()
+      if (current === s.id) updateShares()
+    }
+  }
+
+  // ── 启动 ──────────────────────────────────────────────────────────────
+  function boot() {
+    var q = params()
+    if (q.get('host')) $('in-host').value = q.get('host')
+    if (q.get('port')) $('in-port').value = q.get('port')
+    if (q.get('path')) $('in-path').value = q.get('path')
+    if (q.get('key')) $('in-key').value = q.get('key')
+    if (q.get('secure') !== null) $('in-secure').checked = q.get('secure') !== '0'
+    if (q.get('node')) $('in-node').value = q.get('node')
+    // psk= 允许预填（一次性分享链接），但读完立即从地址栏抹掉
+    if (q.get('psk')) {
+      $('in-psk').value = q.get('psk')
+      q.delete('psk')
+      try { history.replaceState(null, '', location.pathname + '?' + q.toString()) } catch (e) { /* file:// 下可能不让改 */ }
+      log('已从链接读入预共享密钥，并将其从地址栏移除（不留在历史记录里）', 'warn')
+    }
+    // token= 同理：信令白名单凭据可经链接预填，读完即从地址栏抹掉（见 tokenOfForm）
+    if (q.get('token')) {
+      $('in-token').value = q.get('token')
+      q.delete('token')
+      try { history.replaceState(null, '', location.pathname + '?' + q.toString()) } catch (e) { /* file:// 下可能不让改 */ }
+      log('已从链接读入信令 token，并将其从地址栏移除（不留在历史记录里）', 'warn')
+    }
+
+    // 分享链接带来的 hash（unlisted 的取回入口）
+    var hq = (q.get('hash') || '').trim()
+    if (hq) {
+      if (/^[0-9a-f]{64}$/i.test(hq)) {
+        pendingHash = hq
+        log('链接里带着一个 hash（' + hq.slice(0, 16) + '…），连上节点后即可取回', 'ok')
+      } else {
+        log('链接里的 hash 不是 64 位十六进制，已忽略：' + hq.slice(0, 32), 'warn')
+      }
+    }
+
+    $('btn-connect').addEventListener('click', connect)
+    $('btn-discover').addEventListener('click', discoverNow)
+    $('btn-put').addEventListener('click', putFiles)
+    $('btn-pull').addEventListener('click', pullUrl)
+    if ($('btn-copy-id')) $('btn-copy-id').addEventListener('click', function () {
+      copyText(myId).then(function (done) {
+        done ? log('已复制我的节点 id：' + myId + ' —— 把它给节点运营者，加进好友名单就能拿到 private 内容', 'ok')
+          : log('复制失败，我的节点 id：' + myId, 'warn')
+      })
+    })
+    if ($('btn-new-id')) $('btn-new-id').addEventListener('click', function () {
+      var old = myId
+      saveMyId(newPanelId())
+      log('已更换我的节点 id：' + old + ' → ' + myId +
+        '（改了之后，运营者好友名单里的旧 id 就失效了，记得把新的给他）', 'warn')
+    })
+    $('in-url').addEventListener('keydown', function (e) { if (e.key === 'Enter') pullUrl() })
+    $('in-node').addEventListener('keydown', function (e) { if (e.key === 'Enter') connect() })
+    $('in-secure').addEventListener('change', function () {
+      syncURL()
+      if (!mixedContent()) log('信令走 wss，与 HTTPS 页面兼容', 'ok')
+    })
+    ;['in-host', 'in-port', 'in-path', 'in-key'].forEach(function (id) {
+      $(id).addEventListener('change', syncURL)
+    })
+
+    renderRecent()
+    renderTasks()
+    renderMyId()
+    renderLinked(sessions.get(current))
+    log('就绪。本面板是单个静态文件，不需要本地后端。')
+    // HTTPS 托管（GitHub Pages）下 ws:// 必被拦，开局就讲明白，别等用户点了没反应
+    if (mixedContent()) log(mixedContentHint(), 'warn')
+
+    window.addEventListener('peerjs-ready', function (e) {
+      if (e.detail && e.detail.ok) log('peerjs 已加载（' + e.detail.src + '）', 'ok')
+      else log(peerMissingHint(), 'err')
+    })
+
+    if (q.get('auto') === '1' && $('in-node').value.trim()) {
+      // auto=1 时页面可能还没拿到 peerjs，等它到位再连
+      if (peerReady()) connect()
+      else window.addEventListener('peerjs-ready', function once(e) {
+        window.removeEventListener('peerjs-ready', once)
+        if (e.detail && e.detail.ok) connect()
+      })
+    }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot)
+  else boot()
+})()
+</script>
+</body>
+</html>

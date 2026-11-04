@@ -1,0 +1,148 @@
+import React from 'react';
+import { fmtBytes } from '../../../platform/shared/format';
+import FileThumbnail from '../../../components/netdisk/FileThumbnail';
+
+export default function DriveGridView({
+  files,
+  deepHash,
+  fileTags,
+  getFileIcon,
+  openTagEditor,
+  setPreviewFile,
+  setInspectedFile,
+  onDownload,
+  openCastModal,
+  onCopyDeepLink,
+  copiedHash,
+  onShare,
+  onDelete,
+  onContextMenu,
+}) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+      {files.map((f, i) => {
+        const isTarget = deepHash && f.hash === deepHash;
+        const tags = fileTags[f.hash] || [];
+        const icon = getFileIcon(f);
+        const ext = (f.filename || '').split('.').pop().toLowerCase();
+        const isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext) || f.mime_type?.startsWith('image/');
+        const isVid = ['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext) || f.mime_type?.startsWith('video/');
+
+        return (
+          <div
+            key={f.hash || i}
+            onContextMenu={(e) => onContextMenu?.(e, f)}
+            className={`card-surface p-3 sm:p-4 rounded-xl border transition-all flex flex-col justify-between group cursor-pointer ${
+              isTarget
+                ? 'border-brand-500 bg-brand-500/10'
+                : 'border-white/[0.06] hover:border-brand-500/40'
+            }`}
+          >
+            <div>
+              {/* Thumbnail / Icon banner */}
+              <div
+                className="relative w-full h-32 rounded-lg bg-black/30 border border-white/[0.04] mb-2.5 flex items-center justify-center overflow-hidden group/thumb"
+                onClick={() => setPreviewFile(f)}
+              >
+                {isImg || isVid ? (
+                  <div className="w-full h-full flex items-center justify-center relative">
+                    <FileThumbnail
+                      sha={f.hash || f.sha}
+                      filename={f.filename}
+                      mimeType={f.mime_type}
+                      fallbackIcon={isVid ? '🎬' : icon}
+                      className="w-full h-full"
+                    />
+                    <div className="absolute inset-0 bg-brand-500/10 opacity-0 group-hover/thumb:opacity-100 flex items-center justify-center transition-opacity text-xs font-medium text-brand-300">
+                      {isVid ? 'Play Video' : 'Click to Preview'}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-white/[0.02]">
+                    <span className="text-3xl mb-1">{icon}</span>
+                    <span className="text-[10px] text-gray-400 font-mono uppercase tracking-wider">{ext || 'file'}</span>
+                  </div>
+                )}
+
+                <div className="absolute top-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setInspectedFile?.(f);
+                    }}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 hover:bg-black/90 text-gray-200"
+                    title="文件与分布式节点详情"
+                  >
+                    ⓘ
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openTagEditor(f);
+                    }}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 hover:bg-black/90 text-gray-300"
+                    title="Manage Tags"
+                  >
+                    🏷️
+                  </button>
+                </div>
+              </div>
+
+              <h3
+                className="font-medium text-xs text-gray-200 truncate hover:text-brand-300 transition-colors"
+                title={f.filename}
+                onClick={() => setPreviewFile(f)}
+              >
+                {f.filename}
+              </h3>
+              <div className="flex items-center justify-between text-[11px] text-gray-500 mt-1">
+                <span>{fmtBytes(f.size)}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setInspectedFile?.(f);
+                  }}
+                  className="text-[10px] text-emerald-400/80 hover:text-emerald-300 flex items-center gap-0.5"
+                  title="点击查看完整 SHA-256 指纹与存储状态"
+                >
+                  <span>✓ 已校验</span>
+                </button>
+              </div>
+              {tags.length > 0 && (
+                <div className="flex gap-1 flex-wrap mt-2">
+                  {tags.map((t, ti) => (
+                    <span key={ti} className="text-[10px] px-1.5 py-0.2 rounded bg-brand-500/10 text-brand-300">
+                      #{t}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 pt-2 border-t border-white/[0.04] flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setPreviewFile(f)}
+                  className="text-[11px] text-brand-400 hover:text-brand-300 font-medium"
+                >
+                  Preview
+                </button>
+                <span className="text-gray-600 text-xs">•</span>
+                <button onClick={() => onDownload(f)} className="text-[11px] text-gray-400 hover:text-gray-200">Download</button>
+              </div>
+              <div className="flex items-center gap-1">
+                <button onClick={() => openCastModal(f)} className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-brand-300" title="Cast to screen">Cast</button>
+                <button onClick={() => onCopyDeepLink(f)} className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300">
+                  {copiedHash === f.hash ? 'Copied' : 'Link'}
+                </button>
+                <button onClick={() => onShare(f)} className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.1] text-gray-300">Share</button>
+                <button onClick={() => onDelete(f)} className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-red-500/20 text-red-400">✕</button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
