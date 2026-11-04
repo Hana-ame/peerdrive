@@ -37,6 +37,7 @@ jobs:
         with:
           go-version-file: webrtc/go.mod
           cache: true
+          cache-dependency-path: webrtc/go.sum
       - name: gofmt 检查
         shell: bash
         run: |
@@ -70,6 +71,7 @@ jobs:
         with:
           go-version-file: webrtc/go.mod
           cache: true
+          cache-dependency-path: webrtc/go.sum
       - name: build
         run: go build ./...
         env:
@@ -88,6 +90,7 @@ jobs:
         with:
           go-version-file: webrtc/go.mod
           cache: true
+          cache-dependency-path: webrtc/go.sum
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
