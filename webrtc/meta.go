@@ -71,7 +71,8 @@ const (
 	ActionPong     = "pong"
 )
 
-// HashFile 计算文件的 sha256 与大小。
+// HashFile 计算文件的 sha256 与大小。size 取实际读到的字节数，
+// 这样即使文件在读取过程中被追加，两者也是一致的。
 func HashFile(path string) (digest string, size int64, err error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -79,10 +80,6 @@ func HashFile(path string) (digest string, size int64, err error) {
 	}
 	defer f.Close()
 
-	st, err := f.Stat()
-	if err != nil {
-		return "", 0, err
-	}
 	h := sha256.New()
 	n, err := io.Copy(h, f)
 	if err != nil {
