@@ -154,10 +154,15 @@ jobs:
         env:
           PEER_LOG: webrtc.log
           DEMO_URL: http://127.0.0.1:8792/index.html
+          PION_LOG: "1"
       - name: 失败时回看日志
         if: failure()
         run: |
-          echo "--- webrtc.log ---"
+          echo "--- e2e/FAIL.txt ---"
+          cat e2e/FAIL.txt 2>/dev/null || echo "(无)"
+          echo "--- webrtc.log 前 80 行 ---"
+          head -80 webrtc.log || true
+          echo "--- webrtc.log 尾 120 行 ---"
           tail -120 webrtc.log || true
           echo "--- http.log ---"
           cat http.log || true
@@ -175,6 +180,7 @@ jobs:
           name: last-run
           path: |
             webrtc/e2e/LAST-RUN.txt
+            webrtc/e2e/FAIL.txt
             webrtc/e2e.log
             webrtc/webrtc.log
           if-no-files-found: warn
