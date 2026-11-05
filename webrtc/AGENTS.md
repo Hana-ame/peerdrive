@@ -77,7 +77,7 @@ flag(1)=1 + seq(4) + total(4) + data
 ### 约定
 
 - **只出站**：不监听端口，只连 `0.peerjs.com:443`。
-- **全二进制**：所有帧都走 `dc.send(Uint8Array)` / `dc.Send([]byte)`。PeerJS 的 json serializer 会把数据包成 `TextEncoder.encode(JSON.stringify(x))`，这里**不用**它，`serialization: "binary"`。
+- **全二进制**：所有帧都走 `dc.send(Uint8Array)` / `dc.Send([]byte)`。PeerJS 的 json serializer 会把数据包成 `TextEncoder.encode(JSON.stringify(x))`，这里**不用**它；`serialization` 必须显式写 `"raw"`。`"binary"` 走 BinaryPack，会在 `_send` 里 `chunker.chunk()` 给每帧套 `__peerData` 头、超过 16300 字节自动二次分片，还会因 `_open` 未置位而静默丢包——`"raw"` 才是一字节不改的原样发送。
 - **分片必须可靠**：DataChannel 用 `ordered: true`，否则重组会错位。
 - **重组按 stream 独立**：一个连接一个 `Reassembler`，乱序到达会自动归位。
 - **接收队列有上限**（64 帧），满了丢帧并打日志，避免阻塞 SCTP 读循环。

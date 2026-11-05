@@ -92,7 +92,8 @@ let dcOpen = false;
 let lastChip = "";
 for (let i = 0; i < 45; i++) {
   lastChip = ((await page.textContent("#chipDC")) || "").trim();
-  if (lastChip.includes("open")) { dcOpen = true; break; }
+  // "closed" 里也含 "open"，必须按整词判。
+  if (lastChip === "datachannel open") { dcOpen = true; break; }
   if ((i + 1) % 15 === 0) { log(`  等 DataChannel… ${i + 1}s · ${lastChip}`); }
   await page.waitForTimeout(1000);
 }

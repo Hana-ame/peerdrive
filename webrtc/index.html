@@ -338,9 +338,12 @@
     setChip(chipPC, "warn", "connect…");
 
     // 用 PeerJS 的 connect() 建连：它负责 SDP 交换（OFFER/ANSWER/CANDIDATE），
-    // 我们只关心通道建好之后在上面跑的帧。serialization 选 binary，
-    // 这样 conn.send(Uint8Array) 就是原始二进制，不会被 JSON 包一层。
-    var conn = peer.connect(id, { serialization: "binary", reliable: true });
+    // 我们只关心通道建好之后在上面跑的帧。serialization 必须是 "raw"：
+    // "binary" 走 BinaryPack，它会在 _send 里 chunker.chunk() 给每个帧套上
+    // __peerData 的 5 字节头，还在 16300 字节处自动二次分片，并且要等
+    // _open 才放行。我们的 64 KiB 帧会被它拆碎、也没法连上 Go 侧的
+    // ChunkHeader。"raw" 则原样 dc.send，一字节不改。
+    var conn = peer.connect(id, { serialization: "raw", reliable: true });
     dc = conn;
     conn.on("open", function () {
       setChip(chipPC, "ok", "pc connected");

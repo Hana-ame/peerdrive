@@ -279,12 +279,25 @@ func (c *Conn) attach(dc *pion.DataChannel) {
 
 // sendHello 声明角色与协议版本，对端据此判断能不能用扩展帧。
 func (c *Conn) sendHello() {
-	if err := c.SendJSON(KindHello, 0, map[string]any{
-		"role":    string(c.role),
-		"version": 1,
-		"proto":   "peerdrive/webrtc",
-	}); err != nil {
-		c.log.Printf("发 hello 失败 · %s: %v", c.remote, err)
+	// dc 刚 attach、SCTP 还没握手完时 Send 会返回 io.ErrClosedPipe，
+	// 这时重试几次；对端先发的帧多半也就错过了，所以按错误重发而不是
+	// 只在 OnOpen 触发一次。
+	for i := 0; i < 20; i++ {
+		if err := c.SendJSON(KindHello, 0, map[string]any{
+			"role":    string(c.role),
+			"version": 1,
+			"proto":   "peerdrive/webrtc",
+		}); err == nil {
+			return
+		} else if i == 19 {
+			c.log.Printf("发 hello 一直失败 · %s: %v", c.remote, err)
+			return
+		}
+		select {
+		case <-c.done:
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 }
 
