@@ -374,16 +374,25 @@ func (c *Conn) attach(dc *pion.DataChannel) {
 	c.dc = dc
 	c.mu.Unlock()
 
-	// 通道已打开就立刻发握手，不等 OnOpen 回调。在 datachannel transport 下
-	// OnOpen 是在 handleDataChannel 里被 OnMessage 顺带触发的，首个入站消息
-	// 之前不会响——对端若先发 metadata，这批帧就会在 dc 为 nil 时被丢掉。
-	// 重复发一条 hello 无害，所以两条路径都保留。
-	c.sendHello()
-
+	// 这里只注册回调，不做任何阻塞操作。
+	//
+	// 教训：曾经在这个位置直接 sendHello()，而 pion 的 dc.Send 在通道
+	// 还没 open 时是「立刻返回 io.ErrClosedPipe」，我们的重试循环一跑
+	// 就是 2s。attach 是在 pion 的 OnDataChannel 回调里同步执行的，这一
+	// 卡直接让后面的 OnOpen / OnMessage 晚了 2s 才挂上，SCTP 读循环也跟
+	// 着停摆——表现就是「页面显示 open，go 侧一个字节都读不到」。
 	dc.OnOpen(func() {
-		c.log.Printf("DataChannel 就绪 · %s", c.remote)
+		c.log.Printf("DataChannel 就绪 · %s · %s", c.remote, dc.ReadyState())
 		c.sendHello()
 	})
+
+	dc.OnClose(func() {
+		c.log.Printf("DataChannel 关闭 · %s", c.remote)
+		c.fail(ErrClosed)
+	})
+
+	// 通道已经是 open 状态时 OnOpen 会被立即回调（pion 内部判断
+	// ReadyState == open 就 go handler），所以不需要再手动补一次。
 
 	dc.OnMessage(func(m pion.DataChannelMessage) {
 		h, err := ParseChunk(m.Data)
@@ -408,34 +417,19 @@ func (c *Conn) attach(dc *pion.DataChannel) {
 			c.log.Printf("接收队列已满，丢弃 %s stream=%d len=%d", f.Kind, f.Stream, len(f.Data))
 		}
 	})
-
-	dc.OnClose(func() {
-		c.log.Printf("DataChannel 关闭 · %s", c.remote)
-		c.fail(ErrClosed)
-	})
 }
 
 // sendHello 声明角色与协议版本，对端据此判断能不能用扩展帧。
+//
+// 只在 OnOpen 里调用：那时 pion 的 ReadyState 已经是 open，dc.Send 不会
+// 返回 io.ErrClosedPipe，也就不需要再套一层重试。
 func (c *Conn) sendHello() {
-	// dc 刚 attach、SCTP 还没握手完时 Send 会返回 io.ErrClosedPipe，
-	// 这时重试几次；对端先发的帧多半也就错过了，所以按错误重发而不是
-	// 只在 OnOpen 触发一次。
-	for i := 0; i < 20; i++ {
-		if err := c.SendJSON(KindHello, 0, map[string]any{
-			"role":    string(c.role),
-			"version": 1,
-			"proto":   "peerdrive/webrtc",
-		}); err == nil {
-			return
-		} else if i == 19 {
-			c.log.Printf("发 hello 一直失败 · %s: %v", c.remote, err)
-			return
-		}
-		select {
-		case <-c.done:
-			return
-		case <-time.After(100 * time.Millisecond):
-		}
+	if err := c.SendJSON(KindHello, 0, map[string]any{
+		"role":    string(c.role),
+		"version": 1,
+		"proto":   "peerdrive/webrtc",
+	}); err != nil {
+		c.log.Printf("发 hello 失败 · %s: %v", c.remote, err)
 	}
 }
 
