@@ -1,0 +1,183 @@
+diff --git a/webrtc/cmd/webrtc-node/main.go b/webrtc/cmd/webrtc-node/main.go
+index 35b7d1a..8eb149a 100644
+--- a/webrtc/cmd/webrtc-node/main.go
++++ b/webrtc/cmd/webrtc-node/main.go
+@@ -22,8 +22,9 @@ func main() {
+ 	logger := log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
+ 
+ 	srv, err := webrtc.Listen(context.Background(), webrtc.Config{
+-		Logger: logger,
+-		OnConn: handle,
++		Logger:  logger,
++		OnConn:  handle,
++		PionLog: os.Getenv("PION_LOG") != "",
+ 	})
+ 	if err != nil {
+ 		logger.Fatalf("启动失败: %v", err)
+diff --git a/webrtc/conn.go b/webrtc/conn.go
+index a2939d2..7675899 100644
+--- a/webrtc/conn.go
++++ b/webrtc/conn.go
+@@ -12,6 +12,7 @@ import (
+ 	"time"
+ 
+ 	"github.com/Hana-ame/peerdrive/peerjs"
++	"github.com/pion/logging"
+ 	pion "github.com/pion/webrtc/v4"
+ )
+ 
+@@ -28,6 +29,9 @@ type Config struct {
+ 	Logger *log.Logger
+ 	// OnConn 在一条 DataChannel 就绪时触发。
+ 	OnConn func(*Conn)
++	// PionLog 让 pion 自己的日志（DTLS / SCTP / datachannel 状态机）落到
++	// 同一个 logger 上。默认关闭；排查握手问题时置 true 很值。
++	PionLog bool
+ }
+ 
+ // Server 是一个等浏览器连进来的接收端。
+@@ -44,8 +48,10 @@ type Server struct {
+ 	pending map[string]*pion.PeerConnection
+ 	// cands：候选早于 PeerConnection 到达时的暂存。
+ 	cands map[string][]pion.ICECandidateInit
+-	stop  sync.Once
+-	done  chan struct{}
++	// loggerFactory 非空时，pion 内部日志也走同一个 writer。
++	loggerFactory *logging.DefaultLoggerFactory
++	stop          sync.Once
++	done          chan struct{}
+ }
+ 
+ // Listen 注册到 PeerJS 信令并开始接收连接。返回后即可从 ID() 取到标识符。
+@@ -74,6 +80,11 @@ func Listen(ctx context.Context, cfg Config) (*Server, error) {
+ 		cands:   make(map[string][]pion.ICECandidateInit),
+ 		done:    make(chan struct{}),
+ 	}
++	if cfg.PionLog {
++		s.loggerFactory = logging.NewDefaultLoggerFactory()
++		s.loggerFactory.Writer = cfg.Logger.Writer()
++		s.loggerFactory.LogLevel = logging.LogLevelDebug
++	}
+ 	sig.RegisterTransport(s)
+ 	return s, nil
+ }
+@@ -83,7 +94,20 @@ func (s *Server) ID() string { return s.sig.ID() }
+ 
+ // Accept 实现 peerjs.Transport。
+ func (s *Server) Accept(o peerjs.Offer, sig peerjs.Signal) {
+-	pc, err := pion.NewPeerConnection(pion.Configuration{ICEServers: s.cfg.ICEServers})
++	var api *pion.API
++	if s.loggerFactory != nil {
++		// settingEngine / API 每连接新建一份，避免共享状态。
++		se := pion.SettingEngine{}
++		se.LoggerFactory = s.loggerFactory
++		api = pion.NewAPI(pion.WithSettingEngine(se))
++	}
++	pc, err := pion.NewPeerConnection(pion.Configuration{ICEServers: s.cfg.ICEServers},
++		func() []pion.Option {
++			if api != nil {
++				return []pion.Option{pion.WithAPI(api)}
++			}
++			return nil
++		}()...)
+ 	if err != nil {
+ 		s.log.Printf("创建 PeerConnection 失败: %v", err)
+ 		return
+diff --git a/webrtc/e2e/connect.mjs b/webrtc/e2e/connect.mjs
+index fa721c8..34139b9 100644
+--- a/webrtc/e2e/connect.mjs
++++ b/webrtc/e2e/connect.mjs
+@@ -18,22 +18,37 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+ 
+ function log(...a) { console.log("[e2e]", ...a); }
+ 
+-function readTail(path, n) {
++// 只把尾部几十行塞进 annotation，完整版进 FAIL.txt。
++function goTail() {
+   try {
+-    const t = fs.readFileSync(path, "utf8");
+-    return t.length > n ? t.slice(-n) : t;
++    const t = fs.readFileSync(logPath, "utf8");
++    return t.split(/\r?\n/).slice(-12).join("\n");
+   } catch (e) {
+-    return "(读不到 " + path + ": " + e.message + ")";
++    return "(读不到 " + logPath + ")";
+   }
+ }
++
++// 完整现场落盘，不塞进 annotation。
++// GitHub 对 annotation 正文有 4 KB 上限，超出的部分会被静默截断——
++// 而这轮排查最需要的恰恰是 webrtc.log 里那几行 pion 的状态迁移。
++// 所以：完整内容进 e2e/FAIL.txt（随 artifact 上传），annotation 只留指针。
++function dump(title, body) {
++  try {
++    fs.appendFileSync("e2e/FAIL.txt", "\n===== " + title + " =====\n" + body + "\n");
++  } catch (e) { /* 落不了盘也不影响主流程 */ }
++}
++
+ function fail(msg) {
+   console.error("E2E FAIL: " + msg);
+-  // CI 上 step 日志要沿嵌套链接点好几层才看得到，
+-  // 这里把失败点写进 GITHUB_STEP_SUMMARY，run 详情页直接能读。
++  dump("FAIL", msg);
++  // 完整版另存一份，方便直接看整段日志
++  dump("webrtc.log（全文）", (() => {
++    try { return fs.readFileSync(logPath, "utf8"); } catch (e) { return "(读不到)"; }
++  })());
+   const s = process.env.GITHUB_STEP_SUMMARY;
+   if (s) {
+     try {
+-      fs.appendFileSync(s, "### E2E FAIL\n\n```\n" + msg + "\n```\n");
++      fs.appendFileSync(s, "### E2E FAIL\n\n```\n" + msg + "\n```\n\n完整现场见 artifact `last-run` 里的 `e2e/FAIL.txt`。\n");
+     } catch (e) { /* summary 写不进去不影响主流程 */ }
+   }
+   process.exit(1);
+@@ -60,7 +75,7 @@ while (Date.now() < deadline) {
+   await new Promise((r) => setTimeout(r, 1000));
+ }
+ if (!goID) {
+-  fail(`90s 内没能从 ${logPath} 读到 PEER ID\n--- go 侧日志 ---\n` + readTail(logPath, 8000));
++  fail(`90s 内没能从 ${logPath} 读到 PEER ID\n--- go 侧日志 ---\n` + goTail());
+ }
+ log("go peer id:", goID);
+ 
+@@ -106,7 +121,7 @@ if (!dcOpen) {
+     "45s 内 DataChannel 没打开\n" +
+     "chipSignal=" + signalChip + " chipDC=" + lastChip + "\n" +
+     "--- 页面日志 ---\n" + state.slice(-3000) +
+-    "\n--- go 侧日志 ---\n" + readTail(logPath, 8000),
++    "\n--- go 侧日志 ---\n" + goTail(),
+   );
+ }
+ // 探针已达成，撤掉：第 20 轮用它确认了「DataChannel 能打开」，
+@@ -131,7 +146,7 @@ if (!rtt.includes("rtt")) {
+     "没收到 pong\n" +
+     "in=" + JSON.stringify(inKinds) + " out=" + JSON.stringify(outKinds) + "\n" +
+     "--- 页面日志 ---\n" + state.slice(-3000) +
+-    "\n--- go 侧日志 ---\n" + readTail(logPath, 8000),
++    "\n--- go 侧日志 ---\n" + goTail(),
+   );
+ }
+ log("control 往返 OK ·", rtt.trim());
+@@ -160,7 +175,7 @@ if (!sawAck) {
+     "in=" + JSON.stringify(inKinds) + " out=" + JSON.stringify(outKinds) +
+     " (beforeMeta=" + beforeMeta + ")\n" +
+     "--- 页面日志 ---\n" + state.slice(-3000) +
+-    "\n--- go 侧日志 ---\n" + readTail(logPath, 8000),
++    "\n--- go 侧日志 ---\n" + goTail(),
+   );
+ }
+ log("metadata → ack OK");
+diff --git a/webrtc/go.mod b/webrtc/go.mod
+index c6bad0d..014bdf4 100644
+--- a/webrtc/go.mod
++++ b/webrtc/go.mod
+@@ -14,7 +14,7 @@ require (
+ 	github.com/pion/dtls/v3 v3.1.15 // indirect
+ 	github.com/pion/ice/v4 v4.4.8 // indirect
+ 	github.com/pion/interceptor v0.1.51 // indirect
+-	github.com/pion/logging v0.2.4 // indirect
++	github.com/pion/logging v0.2.4
+ 	github.com/pion/mdns/v2 v2.2.2 // indirect
+ 	github.com/pion/randutil v0.1.0 // indirect
+ 	github.com/pion/rtcp v1.2.20 // indirect
