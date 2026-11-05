@@ -22,17 +22,19 @@ import (
 // 看到「没收到帧」。这里把两边的编解码直接对着喂，谁动了协议就立刻红。
 
 // parCase 是一条编码用例：Go 与 JS 各自编码，输出必须逐字节相同。
+// Data 是 base64 的原始正文。
 type parCase struct {
 	Name   string `json:"name"`
 	Kind   uint8  `json:"kind"`
 	Stream uint32 `json:"stream"`
-	Data   string `json:"data"` // base64
+	Data   string `json:"data"`
 }
 
 // decCase 是一条解码用例：把同一批帧分别喂给 Go 与 JS，期望结果一致。
+// Frames 里的每一项都是一帧 base64。
 type decCase struct {
 	Name   string   `json:"name"`
-	Frames []string `json:"frames"` // base64
+	Frames []string `json:"frames"`
 }
 
 type parityInput struct {

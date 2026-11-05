@@ -335,11 +335,12 @@ func TestAcceptOnConnIsAsync(t *testing.T) {
 	p := newPeer(t, "dc_async")
 	defer p.pc.Close()
 
+	// 模拟用户回调长时间不返回（cmd 的 handle 就是个无限循环）。
 	block := make(chan struct{})
 	entered := make(chan struct{}, 1)
 	srv.cfg.OnConn = func(c *Conn) {
 		entered <- struct{}{}
-		<-block // 模拟用户回调长时间不返回
+		<-block
 	}
 
 	// 候选回调同样要早于 Accept 挂上。

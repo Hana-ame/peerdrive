@@ -309,8 +309,11 @@ func TestParseChunkBodyStartingWithOne(t *testing.T) {
 	// 将来若要改协议能立刻看到影响面。
 	b := make([]byte, headerSize+chunkOverhead)
 	b[0] = byte(KindData)
-	b[headerSize] = 1             // 分片标志
-	// seq = 0（第 6..9 字节全 0），total = 0（第 10..13 字节全 0）
+	// 分片标志位；后面 seq 与 total 都留 0（第 6..13 字节全 0）。
+	// 注意别在这里写行尾注释：几行相邻的行尾注释在 gofmt 眼里是一张
+	// 需要按列对齐的表格，手工空格对不上就会 gofmt -l 报未格式化，
+	// CI 第一步就退出，go test 根本不跑——这已经踩过一次。
+	b[headerSize] = 1
 	h, err := ParseChunk(b)
 	if err != nil {
 		t.Fatalf("ParseChunk: %v", err)
