@@ -38,6 +38,12 @@ jobs:
           go-version-file: webrtc/go.mod
           cache: true
           cache-dependency-path: webrtc/go.sum
+      # frame_parity_test.go 要起 node 跑 frame.js 跟 Go 对拍。
+      # 不装 node 的话那些用例会 t.Skip——跳过比失败更危险，等于协议
+      # 漂移了也没人知道，所以这里必须显式装。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: gofmt 检查
         shell: bash
         run: |
@@ -50,7 +56,38 @@ jobs:
       - name: go vet
         run: go vet ./...
       - name: go test
-        run: go test ./... -race -v
+        shell: bash
+        run: |
+          # 失败时把输出压成一条 annotation。job logs 要登录才看得到，
+          # annotations 接口匿名可读——否则失败了只有一行
+          # "Process completed with exit code 1"，什么都定位不了。
+          set +e
+          go test ./... -race -v > /tmp/test.log 2>&1
+          rc=$?
+          set -e
+          tail -200 /tmp/test.log
+          if [ "$rc" -ne 0 ]; then
+            flat=$(grep -E "^(=== RUN|--- (FAIL|SKIP)|    |FAIL|panic)" /tmp/test.log \
+              | head -c 3800 | tr '\n' '~')
+            echo "::error title=go test 失败::${flat}"
+            exit "$rc"
+          fi
+      # 对拍用例找不到 node 会自己 skip。CI 上不允许 skip：装了 node 还
+      # 跳过，说明 LookPath 或 PATH 出了问题，那比测试红更糟——它安静地
+      # 让「两边协议一致」这个结论失效了。
+      - name: 确认对拍用例真的跑了
+        shell: bash
+        run: |
+          go test -run 'TestFrameParity' -v -count=1 ./ 2>&1 | tee /tmp/parity.log
+          if grep -q -- "--- SKIP" /tmp/parity.log; then
+            echo "::error title=对拍被跳过::TestFrameParity* 里有 skip，CI 上不允许"
+            grep -n -- "--- SKIP" -A3 /tmp/parity.log
+            exit 1
+          fi
+          if ! grep -q -- "--- PASS" /tmp/parity.log; then
+            echo "::error title=对拍没跑::没看到任何 PASS 行"
+            exit 1
+          fi
       - name: go build
         run: go build ./...
 
