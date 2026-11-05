@@ -2,6 +2,7 @@ package webrtc
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -207,10 +208,10 @@ func (s *Server) diag(connectionID string, phase string) {
 			}
 			s.mu.Lock()
 			pc := s.pending[connectionID]
-			var open bool
+			var dc *pion.DataChannel
 			for c := range s.live {
 				if c.id == connectionID {
-					pc, open = c.pc, true
+					pc, dc = c.pc, c.dc
 					break
 				}
 			}
@@ -218,30 +219,22 @@ func (s *Server) diag(connectionID string, phase string) {
 			if pc == nil {
 				continue
 			}
-			if open && pc.ConnectionState() == pion.PeerConnectionStateConnected {
-				return
-			}
+			// 以前这里只要「已 track 且 conn connected」就直接 return，
+			// 结果最需要看的 dc.ReadyState() 一次都没打出来过——日志里
+			// 只剩 OnDataChannel 和「接入」，看不出通道究竟开没开。
 			s.log.Printf("诊断 · %s · %s · sig=%s ice=%s gather=%s conn=%s",
 				phase, connectionID,
 				pc.SignalingState(), pc.ICEConnectionState(),
 				pc.ICEGatheringState(), pc.ConnectionState())
-			if pc != nil {
-				s.mu.Lock()
-				var dc *pion.DataChannel
-				for c := range s.live {
-					if c.id == connectionID {
-						dc = c.dc
-						break
-					}
-				}
-				s.mu.Unlock()
-				if dc != nil {
-					// pion 的 dc.Send 只看这个 ReadyState，不是 open 就
-					// 立刻返回 io.ErrClosedPipe，不会等。
-					s.log.Printf("   dc=%s id=%v", dc.ReadyState(), dc.ID())
-				} else {
-					s.log.Printf("   dc=<nil>（OnDataChannel 还没回）")
-				}
+			if dc == nil {
+				s.log.Printf("   dc=<nil>（OnDataChannel 还没回）")
+				continue
+			}
+			// pion 的 dc.Send 只认这个 ReadyState，不是 open 就立刻返回
+			// io.ErrClosedPipe，不会等。它不是 open 就是发不出去。
+			s.log.Printf("   dc=%s id=%v", dc.ReadyState(), dc.ID())
+			if dc.ReadyState() == pion.DataChannelStateOpen {
+				return
 			}
 		}
 	}()
@@ -374,6 +367,13 @@ func (c *Conn) attach(dc *pion.DataChannel) {
 	c.dc = dc
 	c.mu.Unlock()
 
+	// 记下挂回调那一刻的状态。pion 的 handleOpen 顺序是
+	//   setReadyState(Open) → onOpen() → go readLoop()
+	// 所以如果这里打印的不是 connecting，说明 handleOpen 已经跑过、
+	// onOpen 已经错过了我们（handler 当时还是 nil）。这一行是判断
+	// 「回调挂晚了」还是「回调挂了但没被触发」的唯一直接证据。
+	c.log.Printf("   attach · %s · 注册时 dc.ReadyState=%s", c.remote, dc.ReadyState())
+
 	// 这里只注册回调，不做任何阻塞操作。
 	//
 	// 教训：曾经在这个位置直接 sendHello()，而 pion 的 dc.Send 在通道
@@ -395,6 +395,10 @@ func (c *Conn) attach(dc *pion.DataChannel) {
 	// ReadyState == open 就 go handler），所以不需要再手动补一次。
 
 	dc.OnMessage(func(m pion.DataChannelMessage) {
+		// 进来就留痕。之前这里第一句是 ParseChunk，解析失败只打「坏帧」
+		// 或干脆 return，于是「读循环到底有没有收到字节」和「收到了但
+		// 解不开」在日志上完全一样，没法区分。
+		c.log.Printf("   ← %d 字节 · %s", len(m.Data), hexHead(m.Data, 6))
 		h, err := ParseChunk(m.Data)
 		if err != nil {
 			c.log.Printf("坏帧 · %s: %v", c.remote, err)
@@ -547,4 +551,18 @@ func (c *Conn) Close() error {
 		return pc.Close()
 	}
 	return nil
+}
+
+// hexHead 取前 n 个字节的十六进制，用于日志里辨认帧类型。
+//
+// 排查「页面发了、Go 侧收不到」这类问题时，光有长度不够——首字节是
+// Kind，第 6 字节是分片标志，看到这两处就能判断是没收到还是解错了。
+func hexHead(b []byte, n int) string {
+	if len(b) < n {
+		n = len(b)
+	}
+	if n == 0 {
+		return "(空)"
+	}
+	return hex.EncodeToString(b[:n])
 }
