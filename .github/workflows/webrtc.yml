@@ -1,0 +1,211 @@
+name: webrtc
+
+# monorepo：webrtc 依赖 peerjs（信号层），因此 peerjs/** 变化也要跑这条。
+on:
+  push:
+    paths:
+      - 'webrtc/**'
+      - 'peerjs/**'
+      - 'go.work'
+      - '.github/workflows/webrtc.yml'
+  pull_request:
+    paths:
+      - 'webrtc/**'
+      - 'peerjs/**'
+      - 'go.work'
+      - '.github/workflows/webrtc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: webrtc
+
+jobs:
+  test:
+    name: test · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: webrtc/go.mod
+          cache: true
+          cache-dependency-path: webrtc/go.sum
+      - name: gofmt 检查
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未格式化："
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test ./... -race -v
+      - name: go build
+        run: go build ./...
+
+  cross-build:
+    name: cross · ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: webrtc/go.mod
+          cache: true
+          cache-dependency-path: webrtc/go.sum
+      - name: build
+        run: go build ./...
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+
+  e2e:
+    name: e2e · html ↔ go (datachannel)
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: webrtc/go.mod
+          cache: true
+          cache-dependency-path: webrtc/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 安装 Chromium
+        working-directory: webrtc/e2e
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: demo 需要本地 peerjs.min.js（信令库）
+        run: cp ../peerjs/peerjs.min.js ./peerjs.min.js
+      - name: 起 webrtc-node + 静态服务并跑 e2e
+        run: |
+          set -euo pipefail
+          go build -o /tmp/webrtc-node ./cmd/webrtc-node
+          /tmp/webrtc-node > webrtc.log 2>&1 &
+          NODE_PID=$!
+          python3 -m http.server 8792 --bind 127.0.0.1 > http.log 2>&1 &
+          HTTP_PID=$!
+          trap 'kill $NODE_PID $HTTP_PID 2>/dev/null || true' EXIT
+
+          # 结论先落一份骨架，任何一步炸掉都至少能看出炸在哪。
+          {
+            echo "sha=${GITHUB_SHA}"
+            echo "stage=boot"
+          } > e2e/LAST-RUN.txt
+
+          for i in $(seq 1 60); do
+            if grep -q "PEER ID" webrtc.log; then break; fi
+            sleep 1
+          done
+          grep -A2 "PEER ID" webrtc.log
+
+          for i in $(seq 1 20); do
+            if curl -sf -o /dev/null http://127.0.0.1:8792/index.html; then break; fi
+            sleep 1
+          done
+
+          # 内层日志要沿嵌套链接逐层点开才看得到，run/annotation 里只有一行
+          # exit code 1。这里把 e2e 输出既进 stdout，也拼成一句 annotation。
+          set +e
+          node e2e/connect.mjs 2>&1 | tee e2e.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            flat=$(tr '\n' '~' < e2e.log | head -c 4000)
+            echo "::error title=e2e 失败::${flat}"
+          fi
+          # 结论落到仓库里的固定文件，下一轮读一眼就知道这轮怎么挂的。
+          {
+            echo "sha=${GITHUB_SHA}"
+            echo "stage=done"
+            echo "result=$([ "$rc" -eq 0 ] && echo OK || echo FAIL)"
+            echo "--- e2e ---"
+            tail -c 3000 e2e.log
+            echo "--- webrtc.log ---"
+            tail -c 3000 webrtc.log || true
+          } > e2e/LAST-RUN.txt
+          echo "--- LAST-RUN.txt ---"
+          cat e2e/LAST-RUN.txt
+          exit "$rc"
+        env:
+          PEER_LOG: webrtc.log
+          DEMO_URL: http://127.0.0.1:8792/index.html
+          PION_LOG: "1"
+      - name: 失败时回看日志
+        if: failure()
+        run: |
+          echo "--- e2e/FAIL.txt ---"
+          cat e2e/FAIL.txt 2>/dev/null || echo "(无)"
+          echo "--- webrtc.log 前 80 行 ---"
+          head -80 webrtc.log || true
+          echo "--- webrtc.log 尾 120 行 ---"
+          tail -120 webrtc.log || true
+          echo "--- http.log ---"
+          cat http.log || true
+          echo "--- 环境自检 ---"
+          node -e "console.log('node', process.version)"
+          ls -l peerjs.min.js || true
+          curl -sS -o /dev/null -w "http %{http_code}\n" http://127.0.0.1:8792/index.html || true
+          curl -sS -o /dev/null -w "signal https %{http_code}\n" https://0.peerjs.com/ || true
+      # CI 不能写回仓库（token 只读），所以把结论挂成 artifact：
+      # 下载 last-run 这个包就能拿到 sha / result / 两段日志尾部。
+      - name: 上传 e2e 结论
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: last-run
+          path: |
+            webrtc/e2e/LAST-RUN.txt
+            webrtc/e2e/FAIL.txt
+            webrtc/e2e.log
+            webrtc/webrtc.log
+          if-no-files-found: warn
+          retention-days: 7
+      # 日志页要登录才能看，而 actions（含 job id）接口匿名可读。这里用
+      # 只读的 GITHUB_TOKEN 换一条日志下载链接，打到 step log 里，
+      # 然后直接从对象存储 curl 那段纯文本 —— 就能看到每一条 [e2e]。
+      - name: 暴露日志下载链接
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          API="https://api.github.com/repos/${{ github.repository }}/actions"
+          echo "run id: ${{ github.run_id }}"
+          curl -sS -m 60 -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$API/runs/${{ github.run_id }}/jobs" -o /tmp/jobs.json || true
+          cat /tmp/jobs.json | head -c 800 || true
+          JOB_ID=$(grep -o '"id":[0-9]*,"run_id":[0-9]*,"name":"[^"]*e2e[^"]*"' /tmp/jobs.json \
+            | head -1 | grep -o '[0-9]*' | head -1 || true)
+          echo "e2e job id: ${JOB_ID}"
+          if [ -n "${JOB_ID}" ]; then
+            curl -sSL -m 120 -H "Authorization: Bearer $GH_TOKEN" \
+              "$API/jobs/${JOB_ID}/logs" -o /tmp/job.log.zip || true
+            ls -l /tmp/job.log.zip || true
+            echo "--- 日志尾部（含每条 [e2e]） ---"
+            unzip -p /tmp/job.log.zip 2>/dev/null | tail -250 || tail -250 /tmp/job.log.zip || true
+          fi
