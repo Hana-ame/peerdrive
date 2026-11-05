@@ -298,8 +298,14 @@ func (s *Server) Offer(connectionID string, cand pion.ICECandidateInit) {
 	if target == nil && pc == nil {
 		// 两者都没有：连 Accept 都还没跑到，先存着。
 		s.cands[connectionID] = append(s.cands[connectionID], cand)
+		// len() 必须在解锁之前算：解锁之后再读 s.cands[connectionID]
+		// 就是一次无锁的 map 读，而 Accept 那边的 flushCandidates 正在
+		// 拿写锁 delete 同一个 key——-race 会在 TestAcceptCompletesHandshake
+		// 上直接报 data race。这条路径本身就是「候选比 offer 先到」，
+		// 恰恰是最容易和 flushCandidates 撞上的时刻。
+		n := len(s.cands[connectionID])
 		s.mu.Unlock()
-		s.log.Printf("候选提前到达，暂存 · conn=%s（已有 %d 条）", connectionID, len(s.cands[connectionID]))
+		s.log.Printf("候选提前到达，暂存 · conn=%s（已有 %d 条）", connectionID, n)
 		return
 	}
 	s.mu.Unlock()
