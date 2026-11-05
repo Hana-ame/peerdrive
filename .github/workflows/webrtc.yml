@@ -132,6 +132,17 @@ jobs:
             flat=$(tr '\n' '~' < e2e.log | head -c 4000)
             echo "::error title=e2e 失败::${flat}"
           fi
+          # 结论落到仓库里的固定文件，下一轮读一眼就知道这轮怎么挂的。
+          {
+            echo "sha=${GITHUB_SHA}"
+            echo "result=$([ "$rc" -eq 0 ] && echo OK || echo FAIL)"
+            echo "--- e2e ---"
+            tail -c 3000 e2e.log
+            echo "--- webrtc.log ---"
+            tail -c 3000 webrtc.log || true
+          } > e2e/LAST-RUN.txt
+          echo "--- LAST-RUN.txt ---"
+          cat e2e/LAST-RUN.txt
           exit "$rc"
         env:
           PEER_LOG: webrtc.log
