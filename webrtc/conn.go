@@ -244,9 +244,11 @@ func (s *Server) diag(connectionID string, phase string) {
 			s.mu.Lock()
 			pc := s.pending[connectionID]
 			var dc *pion.DataChannel
+			var inP, inB int64
 			for c := range s.live {
 				if c.id == connectionID {
 					pc, dc = c.pc, c.dc
+					inP, inB = c.inPkts.Load(), c.inBytes.Load()
 					break
 				}
 			}
@@ -267,8 +269,10 @@ func (s *Server) diag(connectionID string, phase string) {
 			}
 			// pion 的 dc.Send 只认这个 ReadyState，不是 open 就立刻返回
 			// io.ErrClosedPipe，不会等。它不是 open 就是发不出去。
-			s.log.Printf("   dc=%s id=%v", dc.ReadyState(), dc.ID())
-			if dc.ReadyState() == pion.DataChannelStateOpen {
+			// 入站计数一起打：出站通、入站不通时，只有这个数能说明
+			// readLoop 到底有没有拿到字节。
+			s.log.Printf("   dc=%s id=%v · 入站 %d 帧/%d 字节", dc.ReadyState(), dc.ID(), inP, inB)
+			if dc.ReadyState() == pion.DataChannelStateOpen && inP > 0 {
 				return
 			}
 		}
@@ -395,6 +399,11 @@ type Conn struct {
 	once   sync.Once
 	err    error
 	mu     sync.Mutex
+
+	// inBytes / inPkts 只用于诊断：出站通、入站不通时，靠它区分
+	// 「readLoop 根本没收到字节」和「收到了但被我们丢了」。
+	inBytes atomic.Int64
+	inPkts  atomic.Int64
 }
 
 func (c *Conn) attach(dc *pion.DataChannel) {
@@ -426,6 +435,13 @@ func (c *Conn) attach(dc *pion.DataChannel) {
 		c.fail(ErrClosed)
 	})
 
+	// readLoop 里 ReadDataChannel 出错会走 onError + onClose。之前没挂
+	// OnError，读循环一挂就是静默的——出站能发、入站永远收不到，正好
+	// 是「页面收得到 hello、Go 收不到 ping」这种单向不通的样子。
+	dc.OnError(func(err error) {
+		c.log.Printf("DataChannel 读错误 · %s: %v", c.remote, err)
+	})
+
 	// 通道已经是 open 状态时 OnOpen 会被立即回调（pion 内部判断
 	// ReadyState == open 就 go handler），所以不需要再手动补一次。
 
@@ -434,6 +450,8 @@ func (c *Conn) attach(dc *pion.DataChannel) {
 		// 或干脆 return，于是「读循环到底有没有收到字节」和「收到了但
 		// 解不开」在日志上完全一样，没法区分。
 		c.log.Printf("   ← %d 字节 · %s", len(m.Data), hexHead(m.Data, 6))
+		c.inPkts.Add(1)
+		c.inBytes.Add(int64(len(m.Data)))
 		h, err := ParseChunk(m.Data)
 		if err != nil {
 			c.log.Printf("坏帧 · %s: %v", c.remote, err)

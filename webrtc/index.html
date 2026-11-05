@@ -251,9 +251,23 @@
   var enc = new TextEncoder(), dec = new TextDecoder();
 
   function sendFrame(kind, stream, bytes) {
-    if (!dc || dc.readyState !== "open") { toast("通道还没就绪"); return false; }
+    // PeerJS 的 DataConnection 没有 readyState 属性，它是布尔字段 open
+    // （1.5.x 里 peerjs 的 DataConnection 用 this.open 表示状态机）。
+    // 以前写的是 dc.readyState !== "open"，那是个恒为 true 的判断——
+    // sendFrame 永远在 return false，一个字节都发不出去；而 pingBtn 的
+    // 处理函数不看返回值还照画 render，日志上就表现为「发出去了」。
+    if (!dc) { toast("通道还没就绪"); return false; }
+    var isOpen = (typeof dc.open === "boolean")
+      ? dc.open
+      : (dc.readyState === "open" || (dc._dc && dc._dc.readyState === "open"));
+    if (!isOpen) { toast("通道还没就绪"); return false; }
     var frames = encode(kind, stream, bytes);
-    for (var i = 0; i < frames.length; i++) { dc.send(frames[i]); }
+    try {
+      for (var i = 0; i < frames.length; i++) { dc.send(frames[i]); }
+    } catch (e) {
+      log("e", "发送失败 · " + ((e && e.message) || e));
+      return false;
+    }
     return true;
   }
 
@@ -446,8 +460,14 @@
   $("pingBtn").addEventListener("click", function () {
     pingAt = Date.now();
     var s = nextStream();
-    sendJSON(KIND.CONTROL, s, { action: "ping", at: pingAt });
-    render(KIND.CONTROL, s, "{action: ping}", "out");
+    // 只在真发出去时才记一条 out。以前不管发没发都 render，日志上
+    // 会显示「发了 control」，实际上一帧都没上链，把排查带偏过。
+    if (sendJSON(KIND.CONTROL, s, { action: "ping", at: pingAt })) {
+      render(KIND.CONTROL, s, "{action: ping}", "out");
+    } else {
+      log("e", "ping 没发出去 · 通道未就绪");
+      pingAt = 0;
+    }
   });
 
   $("metaBtn").addEventListener("click", function () {
@@ -456,8 +476,11 @@
       { path: "docs/readme.md", name: "readme.md", size: 1024, mode: 420, is_dir: false, mtime: Date.now() * 1000, sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
       { path: "docs/img", name: "img", size: 0, mode: 493, is_dir: true, mtime: Date.now() * 1000 }
     ];
-    sendJSON(KIND.METADATA, s, { root: "/demo", entries: entries, total_bytes: 1024, count: entries.length, at: Date.now() });
-    render(KIND.METADATA, s, entries.length + " 条清单", "out");
+    if (sendJSON(KIND.METADATA, s, { root: "/demo", entries: entries, total_bytes: 1024, count: entries.length, at: Date.now() })) {
+      render(KIND.METADATA, s, entries.length + " 条清单", "out");
+    } else {
+      log("e", "metadata 没发出去 · 通道未就绪");
+    }
   });
 
   $("blobBtn").addEventListener("click", function () {
