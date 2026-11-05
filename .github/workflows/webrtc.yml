@@ -179,3 +179,41 @@ jobs:
             webrtc/webrtc.log
           if-no-files-found: warn
           retention-days: 7
+      # 日志页要登录才能看，而 actions（含 job id）接口匿名可读。这里用
+      # 只读的 GITHUB_TOKEN 换一条日志下载链接，打到 step log 里，
+      # 然后直接从对象存储 curl 那段纯文本 —— 就能看到每一条 [e2e]。
+      - name: 暴露日志下载链接
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "job_id: ${{ github.job }} / run ${{ github.run_id }}"
+          curl -sS -m 60 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            > /tmp/jobs.json || true
+          python3 - <<'PY' || true
+          import json, sys
+          try:
+              data = json.load(open("/tmp/jobs.json"))
+          except Exception as e:
+              print("JOBS-API-FAIL", e); sys.exit(0)
+          for j in data.get("jobs", []):
+              print("JOB", j.get("id"), j.get("name"), j.get("conclusion"))
+          PY
+            # 拉日志 zip 并原样打印（纯文本，末段是 e2e 输出）
+          JOB_ID=$(python3 -c "
+          import json
+          d=json.load(open('/tmp/jobs.json'))
+          for j in d.get('jobs',[]):
+              if 'e2e' in j.get('name',''): print(j['id']); break
+          " 2>/dev/null || true)
+          echo "e2e job id: ${JOB_ID}"
+          if [ -n "${JOB_ID}" ]; then
+            curl -sSL -m 120 -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/jobs/${JOB_ID}/logs" \
+              -o /tmp/job.log.zip || true
+            ls -l /tmp/job.log.zip || true
+            unzip -p /tmp/job.log.zip 2>/dev/null | tail -200 || tail -200 /tmp/job.log.zip || true
+          fi
