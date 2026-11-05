@@ -409,10 +409,14 @@ func TestFrameParityDisorder(t *testing.T) {
 	}
 }
 
-// TestFrameParityEmptyFramesFile 保证了 node 侧能读到 frame.js。
+// TestFrameParityFrameJSExists 保证 node 侧能读到 frame.js，
+// 且 index.html 确实引用的是它。
 //
-// 如果没有 frame.js（比如打包时漏了），上面所有用例都会以
-// 「Cannot find module」失败，报错指向 node 而不是缺文件。
+// 前半段防「打包漏文件」：缺了的话上面所有用例只会报
+// 「Cannot find module」，报错指向 node 而不是「少了 frame.js」。
+// 后半段防的是更隐蔽的情况：index.html 里又冒出一份自己的 encode，
+// 那 frame.js 就成了从未被页面加载的死代码——对拍永远绿，页面却
+// 在用另一套实现，等于这道防线整个失效。
 func TestFrameParityFrameJSExists(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -427,6 +431,27 @@ func TestFrameParityFrameJSExists(t *testing.T) {
 	for _, needle := range []string{"MAX_PAYLOAD", "CHUNK_OVERHEAD", "HEADER_SIZE"} {
 		if !strings.Contains(string(b), needle) {
 			t.Errorf("frame.js 里找不到 %s", needle)
+		}
+	}
+
+	// index.html 必须真的引用 frame.js。
+	html, err := os.ReadFile(filepath.Join(wd, "index.html"))
+	if err != nil {
+		t.Fatalf("读不到 index.html: %v", err)
+	}
+	page := string(html)
+	if !strings.Contains(page, `src="./frame.js"`) {
+		t.Error("index.html 没有 <script src=\"./frame.js\">，页面不会加载对拍的那份实现")
+	}
+	if !strings.Contains(page, "PDFrame") {
+		t.Error("index.html 没用到 window.PDFrame")
+	}
+	// 页面里不该再有一份 DataView(...).setUint32(1, stream 之类的编码实现：
+	// 只要出现了，就说明有人把它抄回去了，而对拍测的是 frame.js——
+	// 两套实现会各自漂移，这道防线也就名存实亡。
+	for _, forbidden := range []string{"setUint32(1, stream", "new Uint8Array(5 + CHUNK_OVERHEAD"} {
+		if strings.Contains(page, forbidden) {
+			t.Errorf("index.html 里又出现了一份编码实现（%q），应只保留 frame.js 那一份", forbidden)
 		}
 	}
 }
