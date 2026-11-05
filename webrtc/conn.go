@@ -83,7 +83,9 @@ func Listen(ctx context.Context, cfg Config) (*Server, error) {
 	if cfg.PionLog {
 		f := logging.NewDefaultLoggerFactory()
 		f.Writer = cfg.Logger.Writer()
-		f.DefaultLogLevel = logging.LogLevelDebug
+		// DEBUG 会被 mdns / turnc / sctp 刷屏，把真正关心的状态迁移冲掉。
+		// 这里只放 ERROR：连接失败、SCTP 关联异常之类才会落下来。
+		f.DefaultLogLevel = logging.LogLevelError
 		s.loggerFactory = f
 	}
 	sig.RegisterTransport(s)
@@ -223,6 +225,24 @@ func (s *Server) diag(connectionID string, phase string) {
 				phase, connectionID,
 				pc.SignalingState(), pc.ICEConnectionState(),
 				pc.ICEGatheringState(), pc.ConnectionState())
+			if pc != nil {
+				s.mu.Lock()
+				var dc *pion.DataChannel
+				for c := range s.live {
+					if c.id == connectionID {
+						dc = c.dc
+						break
+					}
+				}
+				s.mu.Unlock()
+				if dc != nil {
+					// pion 的 dc.Send 只看这个 ReadyState，不是 open 就
+					// 立刻返回 io.ErrClosedPipe，不会等。
+					s.log.Printf("   dc=%s id=%v", dc.ReadyState(), dc.ID())
+				} else {
+					s.log.Printf("   dc=<nil>（OnDataChannel 还没回）")
+				}
+			}
 		}
 	}()
 }
