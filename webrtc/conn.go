@@ -152,9 +152,21 @@ func (s *Server) Accept(o peerjs.Offer, sig peerjs.Signal) {
 		s.log.Printf("收到 DataChannel · %s · label=%s", o.ConnectionID, dc.Label())
 		conn.attach(dc)
 		s.track(conn)
+		// pion 的接收路径是：
+		//   <-onDataChannel(dc)         // 等我们这个回调返回
+		//   dc.handleOpen(raw, true, …)  // 之后才 setReadyState(Open)
+		// 所以这个回调必须尽快返回。OnConn 是用户回调，里面通常是
+		// 「for { Next() }」这种死循环——同步调用就等于永远不返回，
+		// handleOpen 永不执行，dc 永远 connecting：ICE 通、pc connected，
+		// 但浏览器发的 DCEP 永远等不到应答。必须扔进自己的 goroutine。
 		if s.cfg.OnConn != nil {
-			s.cfg.OnConn(conn)
+			go s.cfg.OnConn(conn)
 		}
+		// 顺带确认：回调返回后 handleOpen 应当很快把状态推到 open。
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			s.log.Printf("   +300ms · %s · dc.ReadyState=%s", o.ConnectionID, dc.ReadyState())
+		}()
 	})
 
 	pc.OnConnectionStateChange(func(st pion.PeerConnectionState) {
