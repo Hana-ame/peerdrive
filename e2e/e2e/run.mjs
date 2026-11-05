@@ -119,12 +119,14 @@ log(`4/5 首次下载完成并校验通过 · ${first.download.doneChunks}/${fir
 
 // ---- 4. 断点续传：暂停 → 重建第 2 条通道 → 继续 ----
 
+// 参数必须显式传进页面：page.evaluate 的函数是在页面里重新绑定的，
+// 外面模块作用域里的常量（PAUSE_AFTER_MS）在那边不存在。
 await page.evaluate(
-  (i) => {
+  ([i, pauseMs]) => {
     window.__PEERDRIVE_E2E.startDownload(i);
-    setTimeout(() => window.__PEERDRIVE_E2E.pause(), PAUSE_AFTER_MS);
+    setTimeout(() => window.__PEERDRIVE_E2E.pause(), pauseMs);
   },
-  index,
+  [index, PAUSE_AFTER_MS],
 );
 
 try {

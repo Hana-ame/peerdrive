@@ -87,6 +87,21 @@ function onFrame(f) {
 
 // ---- 连接 ----
 
+// ensurePeer 在页面加载时就注册一次：本页 id 先亮出来，e2e 脚本与人工
+// 都能在「还没填对端 id」时确认信令本身是通的。连接时复用同一个 peer，
+// 避免点两次连接就注册两个 peer、泄漏旧连接。
+async function ensurePeer() {
+  if (peer && peer.open) return peer;
+  peer = createPeer(log);
+  setPhase("peerjs");
+  E2E.myId = await waitPeerOpen(peer);
+  ui.myId.textContent = E2E.myId;
+  ui.myId.className = "pid on";
+  setChip(ui.chipSignal, "on", "peerjs ok");
+  log("o", "PeerJS 注册完成 · " + E2E.myId);
+  return peer;
+}
+
 async function connect() {
   const goID = ui.peerId.value.trim();
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(goID)) {
@@ -94,15 +109,9 @@ async function connect() {
     return;
   }
   ui.connectBtn.disabled = true;
-  setPhase("peerjs");
 
   try {
-    peer = createPeer(log);
-    E2E.myId = await waitPeerOpen(peer);
-    ui.myId.textContent = E2E.myId;
-    ui.myId.className = "pid on";
-    setChip(ui.chipSignal, "on", "peerjs ok");
-    log("o", "PeerJS 注册完成 · " + E2E.myId);
+    await ensurePeer();
 
     setPhase("signaling");
     conn = await connectSignaling(peer, goID);
@@ -252,6 +261,12 @@ function renderDownload(s) {
 // ---- 交互 ----
 
 ui.connectBtn.addEventListener("click", connect);
+
+// 页面加载即注册 PeerJS：先拿到本页 id 再等用户填对端 id。
+ensurePeer().catch((e) => {
+  log("e", "PeerJS 注册失败 · " + (e?.message || e));
+  setPhase("peerjs-error");
+});
 ui.pauseBtn.addEventListener("click", () => {
   downloader?.pause();
   log("w", "已暂停：不再发新块，在飞的块会收完");
