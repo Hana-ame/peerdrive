@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Hana-ame/peerdrive/peerjs"
+	"github.com/pion/logging"
 	pion "github.com/pion/webrtc/v4"
 )
 
@@ -28,6 +29,9 @@ type Config struct {
 	Logger *log.Logger
 	// OnConn 在一条 DataChannel 就绪时触发。
 	OnConn func(*Conn)
+	// PionLog 让 pion 自己的日志（DTLS / SCTP / datachannel 状态机）落到
+	// 同一个 logger 上。默认关闭；排查握手问题时置 true 很值。
+	PionLog bool
 }
 
 // Server 是一个等浏览器连进来的接收端。
@@ -44,8 +48,10 @@ type Server struct {
 	pending map[string]*pion.PeerConnection
 	// cands：候选早于 PeerConnection 到达时的暂存。
 	cands map[string][]pion.ICECandidateInit
-	stop  sync.Once
-	done  chan struct{}
+	// loggerFactory 非空时，pion 内部日志也走同一个 writer。
+	loggerFactory *logging.DefaultLoggerFactory
+	stop          sync.Once
+	done          chan struct{}
 }
 
 // Listen 注册到 PeerJS 信令并开始接收连接。返回后即可从 ID() 取到标识符。
@@ -74,6 +80,11 @@ func Listen(ctx context.Context, cfg Config) (*Server, error) {
 		cands:   make(map[string][]pion.ICECandidateInit),
 		done:    make(chan struct{}),
 	}
+	if cfg.PionLog {
+		s.loggerFactory = logging.NewDefaultLoggerFactory()
+		s.loggerFactory.Writer = cfg.Logger.Writer()
+		s.loggerFactory.LogLevel = logging.LogLevelDebug
+	}
 	sig.RegisterTransport(s)
 	return s, nil
 }
@@ -83,7 +94,20 @@ func (s *Server) ID() string { return s.sig.ID() }
 
 // Accept 实现 peerjs.Transport。
 func (s *Server) Accept(o peerjs.Offer, sig peerjs.Signal) {
-	pc, err := pion.NewPeerConnection(pion.Configuration{ICEServers: s.cfg.ICEServers})
+	var api *pion.API
+	if s.loggerFactory != nil {
+		// settingEngine / API 每连接新建一份，避免共享状态。
+		se := pion.SettingEngine{}
+		se.LoggerFactory = s.loggerFactory
+		api = pion.NewAPI(pion.WithSettingEngine(se))
+	}
+	pc, err := pion.NewPeerConnection(pion.Configuration{ICEServers: s.cfg.ICEServers},
+		func() []pion.Option {
+			if api != nil {
+				return []pion.Option{pion.WithAPI(api)}
+			}
+			return nil
+		}()...)
 	if err != nil {
 		s.log.Printf("创建 PeerConnection 失败: %v", err)
 		return

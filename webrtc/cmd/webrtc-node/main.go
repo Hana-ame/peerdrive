@@ -22,8 +22,9 @@ func main() {
 	logger := log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
 
 	srv, err := webrtc.Listen(context.Background(), webrtc.Config{
-		Logger: logger,
-		OnConn: handle,
+		Logger:  logger,
+		OnConn:  handle,
+		PionLog: os.Getenv("PION_LOG") != "",
 	})
 	if err != nil {
 		logger.Fatalf("启动失败: %v", err)

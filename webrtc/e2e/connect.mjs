@@ -18,22 +18,37 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 function log(...a) { console.log("[e2e]", ...a); }
 
-function readTail(path, n) {
+// 只把尾部几十行塞进 annotation，完整版进 FAIL.txt。
+function goTail() {
   try {
-    const t = fs.readFileSync(path, "utf8");
-    return t.length > n ? t.slice(-n) : t;
+    const t = fs.readFileSync(logPath, "utf8");
+    return t.split(/\r?\n/).slice(-12).join("\n");
   } catch (e) {
-    return "(读不到 " + path + ": " + e.message + ")";
+    return "(读不到 " + logPath + ")";
   }
 }
+
+// 完整现场落盘，不塞进 annotation。
+// GitHub 对 annotation 正文有 4 KB 上限，超出的部分会被静默截断——
+// 而这轮排查最需要的恰恰是 webrtc.log 里那几行 pion 的状态迁移。
+// 所以：完整内容进 e2e/FAIL.txt（随 artifact 上传），annotation 只留指针。
+function dump(title, body) {
+  try {
+    fs.appendFileSync("e2e/FAIL.txt", "\n===== " + title + " =====\n" + body + "\n");
+  } catch (e) { /* 落不了盘也不影响主流程 */ }
+}
+
 function fail(msg) {
   console.error("E2E FAIL: " + msg);
-  // CI 上 step 日志要沿嵌套链接点好几层才看得到，
-  // 这里把失败点写进 GITHUB_STEP_SUMMARY，run 详情页直接能读。
+  dump("FAIL", msg);
+  // 完整版另存一份，方便直接看整段日志
+  dump("webrtc.log（全文）", (() => {
+    try { return fs.readFileSync(logPath, "utf8"); } catch (e) { return "(读不到)"; }
+  })());
   const s = process.env.GITHUB_STEP_SUMMARY;
   if (s) {
     try {
-      fs.appendFileSync(s, "### E2E FAIL\n\n```\n" + msg + "\n```\n");
+      fs.appendFileSync(s, "### E2E FAIL\n\n```\n" + msg + "\n```\n\n完整现场见 artifact `last-run` 里的 `e2e/FAIL.txt`。\n");
     } catch (e) { /* summary 写不进去不影响主流程 */ }
   }
   process.exit(1);
@@ -60,7 +75,7 @@ while (Date.now() < deadline) {
   await new Promise((r) => setTimeout(r, 1000));
 }
 if (!goID) {
-  fail(`90s 内没能从 ${logPath} 读到 PEER ID\n--- go 侧日志 ---\n` + readTail(logPath, 8000));
+  fail(`90s 内没能从 ${logPath} 读到 PEER ID\n--- go 侧日志 ---\n` + goTail());
 }
 log("go peer id:", goID);
 
@@ -106,7 +121,7 @@ if (!dcOpen) {
     "45s 内 DataChannel 没打开\n" +
     "chipSignal=" + signalChip + " chipDC=" + lastChip + "\n" +
     "--- 页面日志 ---\n" + state.slice(-3000) +
-    "\n--- go 侧日志 ---\n" + readTail(logPath, 8000),
+    "\n--- go 侧日志 ---\n" + goTail(),
   );
 }
 // 探针已达成，撤掉：第 20 轮用它确认了「DataChannel 能打开」，
@@ -131,7 +146,7 @@ if (!rtt.includes("rtt")) {
     "没收到 pong\n" +
     "in=" + JSON.stringify(inKinds) + " out=" + JSON.stringify(outKinds) + "\n" +
     "--- 页面日志 ---\n" + state.slice(-3000) +
-    "\n--- go 侧日志 ---\n" + readTail(logPath, 8000),
+    "\n--- go 侧日志 ---\n" + goTail(),
   );
 }
 log("control 往返 OK ·", rtt.trim());
@@ -160,7 +175,7 @@ if (!sawAck) {
     "in=" + JSON.stringify(inKinds) + " out=" + JSON.stringify(outKinds) +
     " (beforeMeta=" + beforeMeta + ")\n" +
     "--- 页面日志 ---\n" + state.slice(-3000) +
-    "\n--- go 侧日志 ---\n" + readTail(logPath, 8000),
+    "\n--- go 侧日志 ---\n" + goTail(),
   );
 }
 log("metadata → ack OK");
