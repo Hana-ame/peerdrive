@@ -19,3 +19,6 @@
 **/webrtc.log
 **/http.log
 *.db
+
+# 本地截图（演示/排查用）
+/browser-screenshots/
