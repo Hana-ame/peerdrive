@@ -22,7 +22,10 @@ function log(...a) { console.log("[e2e]", ...a); }
 function goTail() {
   try {
     const t = fs.readFileSync(logPath, "utf8");
-    return t.split(/\r?\n/).slice(-12).join("\n");
+    // 12 行不够：diag 每 2s 打两行，12 行只剩最后 3 轮诊断，
+    // 而「dc=connecting 从第几轮开始就没变过」恰恰是要看的。
+    // 完整日志照旧进 e2e/FAIL.txt，annotation 只承受 4KB 以内。
+    return t.split(/\r?\n/).slice(-40).join("\n");
   } catch (e) {
     return "(读不到 " + logPath + ")";
   }
@@ -85,7 +88,10 @@ const launchOpts = process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } 
 const browser = await chromium.launch(launchOpts);
 const page = await browser.newPage();
 page.on("console", (msg) => {
-  if (msg.type() === "error") { log("[page console]", msg.text()); }
+  // 不再只收 error：定位 SCTP/DTLS 卡住时，浏览器往往在 warning 级别
+  // 打一串 "Failed to ..." ，只看 error 会漏掉现场。
+  const t = msg.type();
+  if (t === "error" || t === "warning") { log(`[page console:${t}]`, msg.text()); }
 });
 page.on("pageerror", (err) => log("[page error]", err.message));
 

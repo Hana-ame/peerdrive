@@ -350,6 +350,28 @@
       setChip(chipDC, "ok", "datachannel open");
       setEnabled(true);
       log("o", "DataChannel 就绪 · " + conn.peer);
+      // PeerJS 的 open 事件只说明它自己的 DataConnection 状态机转到了
+      // open，不等于底层 RTCDataChannel 真的开了。Go 侧日志里 dc 一直停
+      // 在 connecting（十几秒不变），说明 SCTP 那一层根本没通——所以这里
+      // 必须把 _dc 的原生 readyState / binaryType / bufferedAmount 打出来，
+      // 否则「页面说 open、对端说 connecting」永远对不上。
+      try {
+        var raw = conn._dc || conn.dataChannel || null;
+        if (raw) {
+          log("", "底层 dc · readyState=" + raw.readyState +
+            " binaryType=" + raw.binaryType +
+            " buffered=" + raw.bufferedAmount +
+            " label=" + raw.label);
+        } else {
+          log("w", "拿不到底层 RTCDataChannel（PeerJS 字段名变了？）");
+        }
+        var pcx = conn.peerConnection || null;
+        if (pcx) {
+          log("", "底层 pc · conn=" + pcx.connectionState +
+            " ice=" + pcx.iceConnectionState +
+            " sig=" + pcx.signalingState);
+        }
+      } catch (e) { log("w", "读底层状态失败 · " + e); }
       sendHelperHello();
     });
     conn.on("data", function (data) {
