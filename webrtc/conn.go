@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -85,8 +86,18 @@ func Listen(ctx context.Context, cfg Config) (*Server, error) {
 		f := logging.NewDefaultLoggerFactory()
 		f.Writer = cfg.Logger.Writer()
 		// DEBUG 会被 mdns / turnc / sctp 刷屏，把真正关心的状态迁移冲掉。
-		// 这里只放 ERROR：连接失败、SCTP 关联异常之类才会落下来。
-		f.DefaultLogLevel = logging.LogLevelError
+		// 但只放 ERROR 又太低：SCTP/DCEP 握手不上时，pion 往往只在 WARN
+		// 上说话，DC 就那样静悄悄停在 connecting。默认 WARN，需要时用
+		// PION_LOG_LEVEL 覆盖（error / warn / info / debug）。
+		f.DefaultLogLevel = logging.LogLevelWarn
+		switch os.Getenv("PION_LOG_LEVEL") {
+		case "error":
+			f.DefaultLogLevel = logging.LogLevelError
+		case "info":
+			f.DefaultLogLevel = logging.LogLevelInfo
+		case "debug":
+			f.DefaultLogLevel = logging.LogLevelDebug
+		}
 		s.loggerFactory = f
 	}
 	sig.RegisterTransport(s)
@@ -166,6 +177,18 @@ func (s *Server) Accept(o peerjs.Offer, sig peerjs.Signal) {
 		s.log.Printf("SetRemoteDescription 失败: %v", err)
 		_ = pc.Close()
 		return
+	}
+	// SCTP 段是 DataChannel 的前提。ICE 能通但 dc 永远 connecting 时，
+	// 最可能的就是 offer 里 m=application 那几行没被正确解析（sctp-port、
+	// max-message-size、fmtp）。把原始行打出来，一眼能看出是缺了还是畸形。
+	s.log.Printf("offer 的 SCTP 段 · %s:", o.ConnectionID)
+	for _, line := range strings.Split(o.SDP, "\r\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "m=application") || strings.HasPrefix(t, "a=sctp") ||
+			strings.HasPrefix(t, "a=max-message-size") || strings.HasPrefix(t, "a=fmtp") ||
+			strings.HasPrefix(t, "a=group") || t == "m=application" {
+			s.log.Printf("   %s", t)
+		}
 	}
 	// remote description 就位后补加之前暂存的候选。
 	s.flushCandidates(o.ConnectionID, pc)
