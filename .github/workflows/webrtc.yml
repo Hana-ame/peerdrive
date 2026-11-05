@@ -187,33 +187,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "job_id: ${{ github.job }} / run ${{ github.run_id }}"
-          curl -sS -m 60 \
-            -H "Authorization: Bearer $GH_TOKEN" \
+          API="https://api.github.com/repos/${{ github.repository }}/actions"
+          echo "run id: ${{ github.run_id }}"
+          curl -sS -m 60 -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
-            > /tmp/jobs.json || true
-          python3 - <<'PY' || true
-          import json, sys
-          try:
-              data = json.load(open("/tmp/jobs.json"))
-          except Exception as e:
-              print("JOBS-API-FAIL", e); sys.exit(0)
-          for j in data.get("jobs", []):
-              print("JOB", j.get("id"), j.get("name"), j.get("conclusion"))
-          PY
-            # 拉日志 zip 并原样打印（纯文本，末段是 e2e 输出）
-          JOB_ID=$(python3 -c "
-          import json
-          d=json.load(open('/tmp/jobs.json'))
-          for j in d.get('jobs',[]):
-              if 'e2e' in j.get('name',''): print(j['id']); break
-          " 2>/dev/null || true)
+            "$API/runs/${{ github.run_id }}/jobs" -o /tmp/jobs.json || true
+          cat /tmp/jobs.json | head -c 800 || true
+          JOB_ID=$(grep -o '"id":[0-9]*,"run_id":[0-9]*,"name":"[^"]*e2e[^"]*"' /tmp/jobs.json \
+            | head -1 | grep -o '[0-9]*' | head -1 || true)
           echo "e2e job id: ${JOB_ID}"
           if [ -n "${JOB_ID}" ]; then
             curl -sSL -m 120 -H "Authorization: Bearer $GH_TOKEN" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/jobs/${JOB_ID}/logs" \
-              -o /tmp/job.log.zip || true
+              "$API/jobs/${JOB_ID}/logs" -o /tmp/job.log.zip || true
             ls -l /tmp/job.log.zip || true
-            unzip -p /tmp/job.log.zip 2>/dev/null | tail -200 || tail -200 /tmp/job.log.zip || true
+            echo "--- 日志尾部（含每条 [e2e]） ---"
+            unzip -p /tmp/job.log.zip 2>/dev/null | tail -250 || tail -250 /tmp/job.log.zip || true
           fi
