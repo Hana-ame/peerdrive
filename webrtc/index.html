@@ -62,6 +62,7 @@
   td code{font-family:var(--mono);font-size:11.6px;background:#eef0f4;padding:.1em .34em;border-radius:4px}
   footer{margin-top:26px;font-size:11.8px;color:var(--muted);font-family:var(--mono)}
 </style>
+<script src="./frame.js"></script>
 <script src="./peerjs.min.js"></script>
 <script>
   if (typeof Peer !== "undefined") { window.__LOCAL_LIB__ = true; }
@@ -159,10 +160,13 @@
   var logbox = $("logbox"), toastEl = $("toast");
   var chipSignal = $("chipSignal"), chipPC = $("chipPC"), chipDC = $("chipDC"), chipRTT = $("chipRTT");
 
-  var KIND = { HELLO:1, CONTROL:2, METADATA:3, DATA:4, CHECK:5, ACK:6, ERROR:7 };
-  var KIND_NAME = { 1:"hello", 2:"control", 3:"metadata", 4:"data", 5:"check", 6:"ack", 7:"error" };
-  var MAX_PAYLOAD = 64 * 1024;
-  var CHUNK_OVERHEAD = 9;
+  // 协议常量与编解码都搬到了 frame.js：那边的 encode/decode 是被
+  // frame_parity_test.go 直接拿来和 Go 对拍的同一份代码，页面里再留
+  // 一份副本就等于有两个「真相」，改了一处另一处不会动。
+  var P = window.PDFrame;
+  if (!P) { throw new Error("frame.js 没加载成功（协议编解码不可用）"); }
+  var KIND = P.KIND;
+  var KIND_NAME = P.KIND_NAME;
 
   // dc 是 PeerJS 的 DataConnection 包装（serialization: binary），
   // 它内部持有 RTCPeerConnection，不需要我们单独维护 pc。
@@ -189,64 +193,14 @@
 
   function nextStream() { return ++streamGen; }
 
-  // ---- 帧编解码：必须与 Go 侧 frame.go 完全一致 ----
+  // ---- 帧编解码：实现在 frame.js，与 Go 侧 frame.go 对拍 ----
 
-  function encode(kind, stream, bytes) {
-    var out = [];
-    if (bytes.length <= MAX_PAYLOAD) {
-      var b = new Uint8Array(5 + bytes.length);
-      b[0] = kind;
-      new DataView(b.buffer).setUint32(1, stream, false);
-      b.set(bytes, 5);
-      out.push(b);
-      return out;
-    }
-    var chunk = MAX_PAYLOAD - CHUNK_OVERHEAD;
-    var total = Math.ceil(bytes.length / chunk);
-    for (var seq = 0; seq < total; seq++) {
-      var lo = seq * chunk, hi = Math.min(lo + chunk, bytes.length);
-      var buf = new Uint8Array(5 + CHUNK_OVERHEAD + (hi - lo));
-      var v = new DataView(buf.buffer);
-      buf[0] = kind;
-      v.setUint32(1, stream, false);
-      buf[5] = 1;
-      v.setUint32(6, seq, false);
-      v.setUint32(10, total, false);
-      buf.set(bytes.subarray(lo, hi), 5 + CHUNK_OVERHEAD);
-      out.push(buf);
-    }
-    return out;
-  }
+  function encode(kind, stream, bytes) { return P.encode(kind, stream, bytes); }
 
-  var asm = { stream: 0, kind: 0, total: 0, parts: [], got: 0 };
-  function resetAsm() { asm = { stream: 0, kind: 0, total: 0, parts: [], got: 0 }; }
+  var asm = P.newAssembler();
+  function resetAsm() { P.resetAsm(asm); }
 
-  function decode(buf) {
-    var v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-    var kind = buf[0], stream = v.getUint32(1, false);
-    if (buf.length <= 5 || buf[5] !== 1) {
-      var body = buf.subarray(5);
-      resetAsm();
-      return { kind: kind, stream: stream, data: body };
-    }
-    if (buf.length < 5 + CHUNK_OVERHEAD) { return null; }
-    var seq = v.getUint32(6, false), total = v.getUint32(10, false);
-    var piece = buf.subarray(5 + CHUNK_OVERHEAD);
-    if (asm.total === 0 || asm.total !== total || asm.stream !== stream || asm.kind !== kind) {
-      resetAsm();
-      asm.stream = stream; asm.kind = kind; asm.total = total;
-      asm.parts = new Array(total); asm.got = 0;
-    }
-    if (!asm.parts[seq]) { asm.parts[seq] = piece.slice(); asm.got++; }
-    if (asm.got !== asm.total) { return null; }
-    var size = 0;
-    for (var i = 0; i < asm.total; i++) { size += asm.parts[i].length; }
-    var all = new Uint8Array(size), off = 0;
-    for (var j = 0; j < asm.total; j++) { all.set(asm.parts[j], off); off += asm.parts[j].length; }
-    var f = { kind: asm.kind, stream: asm.stream, data: all };
-    resetAsm();
-    return f;
-  }
+  function decode(buf) { return P.decode(asm, buf); }
 
   var enc = new TextEncoder(), dec = new TextDecoder();
 
