@@ -101,7 +101,7 @@
       <span class="chip" id="chipSignal">signaling</span>
       <span class="chip" id="chipPC">peerconnection</span>
       <span class="chip" id="chipDC">datachannel</span>
-      <span class="chip" id="chipRTT">rtt</span>
+      <span class="chip" id="chipRTT">rtt --</span>
     </div>
     <p class="toast" id="toast" role="status"></p>
   </div>
@@ -353,12 +353,29 @@
       sendHelperHello();
     });
     conn.on("data", function (data) {
+      // 先留痕：这一行证明「DataChannel 上真的有字节进来」。之前排查卡在
+      // 「go 侧说发了、页面说没收到」，双方都没有可用于对齐的原始证据——
+      // 只有这个 log 能判定是没收到、还是收到了但 decode 把它们吞了。
+      var nbytes = (data && data.byteLength != null) ? data.byteLength
+        : (data instanceof ArrayBuffer ? data.byteLength : -1);
+      var head = "";
+      try {
+        var probe = data instanceof ArrayBuffer ? new Uint8Array(data)
+          : (data && data.buffer ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null);
+        if (probe) {
+          head = Array.prototype.map.call(probe.subarray(0, 6), function (b) {
+            return b.toString(16).padStart(2, "0");
+          }).join(" ");
+        }
+      } catch (e) { head = "(读不出)"; }
+      log("", "← 收到 " + nbytes + " 字节 · [" + head + "]");
+
       var bytes;
       if (data instanceof ArrayBuffer) { bytes = new Uint8Array(data); }
       else if (data && data.buffer) { bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength); }
       else { log("e", "意外的数据类型（应全为二进制）"); return; }
       var f = decode(bytes);
-      if (!f) { return; }
+      if (!f) { log("e", "decode 没解出完整帧（" + bytes.length + " 字节）"); return; }
       var text;
       if (f.kind === KIND.DATA) {
         text = "[" + f.data.length + " 字节二进制]";

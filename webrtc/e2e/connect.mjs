@@ -130,13 +130,17 @@ log("DataChannel 已打开");
 
 // ---- 4. control ping → pong ----
 await page.click("#pingBtn");
+// 必须匹配 "rtt <数字>ms"：chip 的初始占位文本是 "rtt --"，
+// 只要还含 "rtt" 就算成功的话，这步永远通过、什么也没验证——
+// 前几轮就是被这个假断言带着，把「页面根本没收到任何入站帧」看成
+// 「control 往返 OK」，一路怀疑到 metadata 上去。
 let rtt = "";
 for (let i = 0; i < 20; i++) {
   rtt = (await page.textContent("#chipRTT")) || "";
-  if (rtt.includes("rtt")) { break; }
+  if (/rtt\s+\d+ms/.test(rtt)) { break; }
   await page.waitForTimeout(500);
 }
-if (!rtt.includes("rtt")) {
+if (!/rtt\s+\d+ms/.test(rtt)) {
   const state = (await page.textContent("#logbox")) || "";
   const inKinds = await page.locator("#msgs .msg.in .k").allTextContents();
   const outKinds = await page.locator("#msgs .msg.out .k").allTextContents();
@@ -144,6 +148,7 @@ if (!rtt.includes("rtt")) {
   await browser.close();
   fail(
     "没收到 pong\n" +
+    "chipRTT=" + JSON.stringify(rtt) + "\n" +
     "in=" + JSON.stringify(inKinds) + " out=" + JSON.stringify(outKinds) + "\n" +
     "--- 页面日志 ---\n" + state.slice(-3000) +
     "\n--- go 侧日志 ---\n" + goTail(),
