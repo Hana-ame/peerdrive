@@ -233,7 +233,7 @@ function renderDownload(s) {
   ui.dlBar.querySelector("i").style.width =
     (s.size ? Math.min(100, (s.doneBytes / s.size) * 100) : 0).toFixed(1) + "%";
   ui.dlBytes.textContent = `${fmtBytes(s.doneBytes)} / ${fmtBytes(s.size)}`;
-  ui.dlChunks.textContent = `块 ${s.doneChunks} / ${s.totalChunks}（在飞 ${s.inflight}）`;
+  ui.dlChunks.textContent = `block ${s.doneChunks} / ${s.totalChunks} · ${s.inflight} in flight`;
   ui.dlState.textContent = s.state;
   ui.dlSpeed.textContent = fmtSpeed(s.bytesPerSec);
 

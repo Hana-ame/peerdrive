@@ -226,7 +226,7 @@ export class Downloader {
 
     chunk.timer = setTimeout(() => {
       if (!this.streams.has(chunk.stream)) return;
-      this.lastError = `块 ${chunk.offset} 超时`;
+      this.lastError = `block ${chunk.offset} timed out`;
       this._finishStream(chunk.stream, this.chunks.indexOf(chunk), false);
     }, REQUEST_TIMEOUT);
   }
