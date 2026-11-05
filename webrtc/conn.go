@@ -93,19 +93,22 @@ func Listen(ctx context.Context, cfg Config) (*Server, error) {
 // ID 返回本端在 PeerJS 上的标识符（就是打在日志里的那条串）。
 func (s *Server) ID() string { return s.sig.ID() }
 
-// apiOptions 在开启 PionLog 时挂上带 loggerFactory 的 SettingEngine。
-func (s *Server) apiOptions() []pion.Option {
+// newPC 建一条 PeerConnection。开启 PionLog 时挂上自定义 SettingEngine，
+// 让 pion 的 SCTP/DTLS/datachannel 日志也进 webrtc.log。
+func (s *Server) newPC() (*pion.PeerConnection, error) {
+	cfg := pion.Configuration{ICEServers: s.cfg.ICEServers}
 	if s.loggerFactory == nil {
-		return nil
+		return pion.NewPeerConnection(cfg)
 	}
 	se := pion.SettingEngine{}
 	se.LoggerFactory = s.loggerFactory
-	return []pion.Option{pion.WithSettingEngine(se)}
+	api := pion.NewAPI(pion.WithSettingEngine(se))
+	return api.NewPeerConnection(cfg)
 }
 
 // Accept 实现 peerjs.Transport。
 func (s *Server) Accept(o peerjs.Offer, sig peerjs.Signal) {
-	pc, err := pion.NewPeerConnection(pion.Configuration{ICEServers: s.cfg.ICEServers}, s.apiOptions()...)
+	pc, err := s.newPC()
 	if err != nil {
 		s.log.Printf("创建 PeerConnection 失败: %v", err)
 		return
