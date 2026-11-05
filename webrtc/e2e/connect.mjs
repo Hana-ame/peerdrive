@@ -108,10 +108,11 @@ if (!dcOpen) {
     "\n--- go 侧日志 ---\n" + readTail(logPath, 4000),
   );
 }
-await browser.close();
-fail("LAUNCH OK · DataChannel 已打开");
-// ---- 4. control ping → pong ----
+// 探针已达成，撤掉：第 20 轮用它确认了「DataChannel 能打开」，
+// 现在让流程继续往下跑到 ping。
+log("DataChannel 已打开");
 
+// ---- 4. control ping → pong ----
 await page.click("#pingBtn");
 let rtt = "";
 for (let i = 0; i < 20; i++) {
@@ -120,10 +121,17 @@ for (let i = 0; i < 20; i++) {
   await page.waitForTimeout(500);
 }
 if (!rtt.includes("rtt")) {
-  const state = await page.textContent("#logbox");
+  const state = (await page.textContent("#logbox")) || "";
+  const inKinds = await page.locator("#msgs .msg.in .k").allTextContents();
+  const outKinds = await page.locator("#msgs .msg.out .k").allTextContents();
   console.error(state);
   await browser.close();
-  fail("没收到 pong");
+  fail(
+    "没收到 pong\n" +
+    "in=" + JSON.stringify(inKinds) + " out=" + JSON.stringify(outKinds) + "\n" +
+    "--- 页面日志 ---\n" + state.slice(-3000) +
+    "\n--- go 侧日志 ---\n" + readTail(logPath, 6000),
+  );
 }
 log("control 往返 OK ·", rtt.trim());
 
