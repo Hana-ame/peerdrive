@@ -264,13 +264,15 @@ func TestAcceptBidirectionalFrames(t *testing.T) {
 	}
 
 	// 服务端 → 浏览器：一条 ack。
+	//
+	// 这里不能用 readFrame 直接读「下一帧」：服务端连上就先发一条 hello，
+	// 而 hello 与这条 ack 是两条独立的发送，不保证 ack 已经排在 hello 后面
+	// 完事——直接读会偶发拿到 hello（本地跑时大约每十次就有一次），
+	// 断言就变成「kind = hello，want ack」。所以要按 kind 跳过无关帧。
 	if err := conn.SendJSON(KindAck, got.Stream, map[string]any{"ok": true}); err != nil {
 		t.Fatalf("SendJSON: %v", err)
 	}
-	ack := readFrame(t, p.dc, 10*time.Second)
-	if ack.Kind != KindAck {
-		t.Errorf("kind = %s，want ack", ack.Kind)
-	}
+	ack := readFrameOf(t, p.dc, KindAck, 10*time.Second)
 	if ack.Stream != 7 {
 		t.Errorf("ack stream = %d，want 7", ack.Stream)
 	}
@@ -490,6 +492,28 @@ func readFrameErr(dc *pion.DataChannel, d time.Duration) (Frame, error) {
 			return f, nil
 		case <-deadline.C:
 			return Frame{}, errors.New("读帧超时")
+		}
+	}
+}
+
+// readFrameOf 读到指定 kind 的帧为止，跳过途中的其它帧。
+//
+// 单条连接上服务端可能先发 hello 再发被测的那条，谁先到不保证；
+// 用 readFrame 直接读下一帧会偶发拿到 hello。
+func readFrameOf(t *testing.T, dc *pion.DataChannel, want Kind, d time.Duration) Frame {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for {
+		left := time.Until(deadline)
+		if left <= 0 {
+			t.Fatalf("%v 内没读到 %s 帧", d, want)
+		}
+		f, err := readFrameErr(dc, left)
+		if err != nil {
+			t.Fatalf("等 %s 帧: %v", want, err)
+		}
+		if f.Kind == want {
+			return f
 		}
 	}
 }
