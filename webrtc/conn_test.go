@@ -204,21 +204,23 @@ func TestConnMessagesNeverClosed(t *testing.T) {
 }
 
 func TestHexHead(t *testing.T) {
+	// n 大于长度时取全长；空输入与空切片返回占位；NUL 与高位字节都要保留。
 	cases := []struct {
+		name string
 		in   []byte
 		n    int
 		want string
 	}{
-		{[]byte{0x01, 0x00, 0x00, 0x00, 0x01, 0x7b}, 6, "01000000017b"},
-		{[]byte{0x01, 0x00}, 6, "0100"},        // n 大于长度时取全长
-		{nil, 6, "(空)"},                        // 空输入
-		{[]byte{}, 3, "(空)"},                  // 空切片
-		{[]byte{0xff, 0x00}, 2, "ff00"},        // 高位字节与 NUL 都要保留
-		{[]byte{0x01, 0x02, 0x03}, 0, "(空)"},  // n == 0
+		{"整帧头", []byte{0x01, 0x00, 0x00, 0x00, 0x01, 0x7b}, 6, "01000000017b"},
+		{"n 超过长度", []byte{0x01, 0x00}, 6, "0100"},
+		{"nil", nil, 6, "(空)"},
+		{"空切片", []byte{}, 3, "(空)"},
+		{"高位字节", []byte{0xff, 0x00}, 2, "ff00"},
+		{"n 为 0", []byte{0x01, 0x02, 0x03}, 0, "(空)"},
 	}
 	for _, c := range cases {
 		if got := hexHead(c.in, c.n); got != c.want {
-			t.Errorf("hexHead(%v, %d) = %q，want %q", c.in, c.n, got, c.want)
+			t.Errorf("%s: hexHead(%v, %d) = %q，want %q", c.name, c.in, c.n, got, c.want)
 		}
 	}
 }
