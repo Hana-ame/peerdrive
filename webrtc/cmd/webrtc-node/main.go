@@ -77,18 +77,25 @@ func handle(c *webrtc.Conn) {
 			}
 			_ = json.Unmarshal(f.Data, &body)
 			if body.Action == webrtc.ActionPing {
-				_ = c.SendControl(f.Stream, webrtc.ActionPong, nil)
+				if err := c.SendControl(f.Stream, webrtc.ActionPong, nil); err != nil {
+					log.Printf("回 pong 失败 stream=%d: %v", f.Stream, err)
+				}
 			}
 
 		case webrtc.KindMetadata:
 			lastMeta = string(f.Data)
 			log.Printf("← metadata · %s", truncate(lastMeta, 400))
-			// 回一个 ack，让对端知道清单已收到。
-			_ = c.SendJSON(webrtc.KindAck, f.Stream, map[string]any{
+			// 回一个 ack，让对端知道清单已收到。发送失败必须留痕：这里吞掉
+			// 错误的话，对端只会表现为「ack 没来」，排不出是哪一端的问题。
+			if err := c.SendJSON(webrtc.KindAck, f.Stream, map[string]any{
 				"stream": f.Stream,
 				"kind":   "metadata",
 				"ok":     true,
-			})
+			}); err != nil {
+				log.Printf("回 metadata ack 失败 stream=%d: %v", f.Stream, err)
+			} else {
+				log.Printf("→ ack · stream=%d", f.Stream)
+			}
 
 		case webrtc.KindData:
 			received += int64(len(f.Data))
@@ -106,14 +113,16 @@ func handle(c *webrtc.Conn) {
 			var chk webrtc.Check
 			_ = json.Unmarshal(f.Data, &chk)
 			ok := chk.Digest != ""
-			_ = c.SendJSON(webrtc.KindCheck, f.Stream, webrtc.Check{
+			if err := c.SendJSON(webrtc.KindCheck, f.Stream, webrtc.Check{
 				Stream: f.Stream,
 				Path:   chk.Path,
 				Algo:   chk.Algo,
 				Digest: chk.Digest,
 				OK:     &ok,
 				Note:   "ack from webrtc-node",
-			})
+			}); err != nil {
+				log.Printf("回 check 失败 stream=%d: %v", f.Stream, err)
+			}
 
 		case webrtc.KindAck:
 			log.Printf("← ack · %s", pretty(f.Data))

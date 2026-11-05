@@ -236,14 +236,15 @@ func (c *Conn) attach(dc *pion.DataChannel) {
 	c.dc = dc
 	c.mu.Unlock()
 
+	// 通道已打开就立刻发握手，不等 OnOpen 回调。在 datachannel transport 下
+	// OnOpen 是在 handleDataChannel 里被 OnMessage 顺带触发的，首个入站消息
+	// 之前不会响——对端若先发 metadata，这批帧就会在 dc 为 nil 时被丢掉。
+	// 重复发一条 hello 无害，所以两条路径都保留。
+	c.sendHello()
+
 	dc.OnOpen(func() {
 		c.log.Printf("DataChannel 就绪 · %s", c.remote)
-		// 握手：声明角色与协议版本，对端据此判断能不能用扩展帧。
-		_ = c.SendJSON(KindHello, 0, map[string]any{
-			"role":    string(c.role),
-			"version": 1,
-			"proto":   "peerdrive/webrtc",
-		})
+		c.sendHello()
 	})
 
 	dc.OnMessage(func(m pion.DataChannelMessage) {
@@ -274,6 +275,17 @@ func (c *Conn) attach(dc *pion.DataChannel) {
 		c.log.Printf("DataChannel 关闭 · %s", c.remote)
 		c.fail(ErrClosed)
 	})
+}
+
+// sendHello 声明角色与协议版本，对端据此判断能不能用扩展帧。
+func (c *Conn) sendHello() {
+	if err := c.SendJSON(KindHello, 0, map[string]any{
+		"role":    string(c.role),
+		"version": 1,
+		"proto":   "peerdrive/webrtc",
+	}); err != nil {
+		c.log.Printf("发 hello 失败 · %s: %v", c.remote, err)
+	}
 }
 
 // Remote 返回对端 PeerJS id。

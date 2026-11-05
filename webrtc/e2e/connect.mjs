@@ -41,20 +41,27 @@ function fail(msg) {
 
 // ---- 1. 抓 go 侧 id ----
 
+// 抓不到 id 也要继续往下判：webrtc.log 是同一进程的 stdout+stderr，
+// 而 log.Printf 的标记只证明「进程起来了」。真挂在这里，八成是信令没
+// 连上——那种情况下页面侧同样建不了连，把日志头部带出去比一个 LAUNCH
+// FAILED 有用。
 let goID = "";
+let logTextAtBoot = "";
 const deadline = Date.now() + 90_000;
 while (Date.now() < deadline) {
   if (fs.existsSync(logPath)) {
-    const text = fs.readFileSync(logPath, "utf8");
-    const marker = text.indexOf("PEER ID");
+    logTextAtBoot = fs.readFileSync(logPath, "utf8");
+    const marker = logTextAtBoot.indexOf("PEER ID");
     if (marker >= 0) {
-      const m = text.slice(marker).match(UUID);
+      const m = logTextAtBoot.slice(marker).match(UUID);
       if (m) { goID = m[0]; break; }
     }
   }
   await new Promise((r) => setTimeout(r, 1000));
 }
-if (!goID) { fail(`90s 内没能从 ${logPath} 读到 PEER ID`); }
+if (!goID) {
+  fail(`90s 内没能从 ${logPath} 读到 PEER ID\n--- go 侧日志 ---\n` + readTail(logPath, 4000));
+}
 log("go peer id:", goID);
 
 // ---- 2. 打开页面 ----
@@ -101,8 +108,8 @@ if (!dcOpen) {
     "\n--- go 侧日志 ---\n" + readTail(logPath, 4000),
   );
 }
-log("DataChannel 已打开");
-
+await browser.close();
+fail("LAUNCH OK · DataChannel 已打开");
 // ---- 4. control ping → pong ----
 
 await page.click("#pingBtn");
