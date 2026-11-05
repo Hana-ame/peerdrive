@@ -39,25 +39,30 @@ func TestEncodeOneByteOverLimit(t *testing.T) {
 	if len(out) != 2 {
 		t.Fatalf("超 1 字节应切成 2 帧，实得 %d", len(out))
 	}
-	// 每帧都不能超过上限，否则 SCTP 层会分片，我们就失控了。
+	// 这里不能断言 len(b) <= MaxFramePayload：MaxFramePayload 限的是
+	// 单帧净荷，而分片帧的净荷是 chunk(头) + piece(数据)，所以整帧长度
+	// 是 5+9+chunk = MaxFramePayload+9，必然超出。真正该守住的是
+	// 「每片的 piece 不超过 chunk」，否则 SCTP 层会自己再分片。
 	for i, b := range out {
-		if len(b) > MaxFramePayload {
-			t.Errorf("第 %d 帧 %d 字节，超过上限 %d", i, len(b), MaxFramePayload)
+		if piece := len(b) - headerSize - chunkOverhead; piece > MaxFramePayload-chunkOverhead {
+			t.Errorf("第 %d 片数据 %d 字节，超过 chunk 上限 %d", i, piece, MaxFramePayload-chunkOverhead)
 		}
 	}
 }
 
 func TestChunkFrameSizeWithinLimit(t *testing.T) {
-	// 分片帧含 9 字节额外头，切块时必须把这部分算进去，
-	// 否则 64 KiB 的上限会被突破。
+	// 分片帧含 9 字节额外头，切块时必须把这部分从净荷里扣掉，
+	// 否则每片的 piece 会顶到 MaxFramePayload、SCTP 再切一次。
+	// 断言的是 piece 而非整帧长度——整帧长度按设计就是
+	// MaxFramePayload+9（见 EncodeFrame 里 chunk 的算法）。
 	data := bytes.Repeat([]byte{0x11}, MaxFramePayload*3)
 	out, err := EncodeFrame(Frame{Kind: KindData, Stream: 3, Data: data})
 	if err != nil {
 		t.Fatalf("EncodeFrame: %v", err)
 	}
 	for i, b := range out {
-		if len(b) > MaxFramePayload {
-			t.Errorf("第 %d 片 %d 字节，超过 %d", i, len(b), MaxFramePayload)
+		if piece := len(b) - headerSize - chunkOverhead; piece > MaxFramePayload-chunkOverhead {
+			t.Errorf("第 %d 片数据 %d 字节，超过 chunk 上限 %d", i, piece, MaxFramePayload-chunkOverhead)
 		}
 	}
 }

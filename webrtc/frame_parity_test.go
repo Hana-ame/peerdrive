@@ -115,11 +115,8 @@ func runParity(t *testing.T, in parityInput) parityOutput {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	if len(payload) > 32*1024 {
-		// 走 stdin 就是为绕开这个；真的超了说明用例设计有问题。
-		t.Fatalf("输入 %d 字节，超过 32 KiB 上限", len(payload))
-	}
-
+	// 走 stdin 就是为了不受长度限制（argv 在 Windows 上约 32 KB）。
+	// 一次多片用例的 base64 就有几百 KB 到 1 MB，所以这里不能设上限。
 	cmd := exec.Command(node, script)
 	cmd.Stdin = bytes.NewReader(payload)
 	cmd.Dir = wd

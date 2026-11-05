@@ -23,10 +23,14 @@ function bytesToB64(u8) {
 }
 
 function main() {
+  // Go 侧结构体带 omitempty 时，空的 encode/decode 会被省掉，
+  // 所以这里必须容忍字段缺席（例如只测常量的那一组输入就是 {}）。
   const input = JSON.parse(readFileSync(0, "utf8"));
+  const encodeCases = input.encode || [];
+  const decodeCases = input.decode || [];
   const out = { cases: [] };
 
-  for (const c of input.encode) {
+  for (const c of encodeCases) {
     const bytes = b64ToBytes(c.data);
     const frames = F.encode(c.kind, c.stream, bytes);
     out.cases.push({
@@ -37,7 +41,7 @@ function main() {
 
   // decode 的每一组用例共用自己的一份 asm（相当于一条独立连接），
   // 保证组装状态不会跨用例泄漏。
-  for (const c of input.decode) {
+  for (const c of decodeCases) {
     const asm = F.newAssembler();
     const got = [];
     for (const raw of c.frames) {
