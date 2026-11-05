@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>m/e2e · collection → sha256 → 分块下载</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#fff; --ink:#16181d; --ink2:#3d4552; --muted:#6b7483;
+    --line:#e4e7ed; --line2:#d3d8e0; --accent:#3b5bdb; --accent-soft:#eef1ff;
+    --ok:#0b7285; --ok-soft:#e6f5f7; --bad:#a4343a; --bad-soft:#fdeced;
+    --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.65}
+  .wrap{max-width:900px;margin:0 auto;padding:28px 20px 60px}
+  h1{margin:0 0 4px;font-size:22px;font-weight:600;letter-spacing:-.01em}
+  h1 code{font-family:var(--mono);font-size:.8em;background:var(--accent-soft);color:var(--accent);padding:.1em .34em;border-radius:6px}
+  .lede{margin:0 0 18px;color:var(--ink2);font-size:13.5px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 12px}
+  .card h2{margin:0 0 10px;font-size:11px;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:500}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .grow{flex:1 1 280px;min-width:0}
+  input{width:100%;font-family:var(--mono);font-size:13px;border:1px solid var(--line2);border-radius:8px;padding:8px 10px;outline:none}
+  input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  button{font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--line2);background:var(--surface);color:var(--ink2);border-radius:8px;padding:8px 13px}
+  button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .chip{font-family:var(--mono);font-size:11.5px;padding:3px 8px;border-radius:999px;border:1px solid var(--line2);color:var(--muted);background:var(--surface)}
+  .chip.on{border-color:#cfe9ed;background:var(--ok-soft);color:var(--ok)}
+  .chip.warn{border-color:#f0dfbf;background:#fdf6e7;color:#8a6d1f}
+  .chip.bad{border-color:#f3cccc;background:var(--bad-soft);color:var(--bad)}
+  .mono{font-family:var(--mono);font-size:12px;word-break:break-all}
+  .pid{font-family:var(--mono);font-size:12.5px;background:#f0f2f7;border:1px solid var(--line);border-radius:7px;padding:5px 9px;word-break:break-all}
+  .pid.on{background:var(--ok-soft);border-color:#cfe9ed;color:var(--ok)}
+  table{width:100%;border-collapse:collapse;font-size:12.8px}
+  th,td{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-weight:500;font-size:11px;color:var(--muted);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase}
+  tr:last-child td{border-bottom:0}
+  td.n{font-family:var(--mono);white-space:nowrap}
+  td .sha{font-family:var(--mono);font-size:11px;color:var(--muted);word-break:break-all}
+  .bar{height:10px;background:#eef0f4;border-radius:999px;overflow:hidden;margin:8px 0 6px}
+  .bar > i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+  .bar.done > i{background:var(--ok)}
+  .bar.bad > i{background:var(--bad)}
+  .stat{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .verify{margin-top:8px;font-family:var(--mono);font-size:12px;padding:7px 10px;border-radius:8px;border:1px solid var(--line);color:var(--muted);background:#fafbfc}
+  .verify.ok{border-color:#cfe9ed;background:var(--ok-soft);color:var(--ok)}
+  .verify.bad{border-color:#f3cccc;background:var(--bad-soft);color:var(--bad)}
+  pre.log{margin:0;background:#12151c;color:#d8dde8;border-radius:9px;padding:10px 12px;font-family:var(--mono);font-size:11.4px;line-height:1.65;height:190px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
+  pre.log .w{color:#e8c07d}
+  pre.log .e{color:#f19ba0}
+  pre.log .o{color:#89d9c4}
+  .hint{font-size:12px;color:var(--muted);margin:6px 0 0}
+  .hidden{display:none}
+</style>
+<script src="/assets/peerjs.min.js"></script>
+<script src="/assets/frame.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1><code>m/e2e</code> · collection → sha256 → 分块下载</h1>
+  <p class="lede">第 1 条通道（PeerJS）只搬信令；第 2 条通道（WebRTC DataChannel）取 collection、按 sha256 分块并行下载并校验。</p>
+
+  <div class="card">
+    <h2>1 · 连接节点</h2>
+    <div class="row">
+      <div class="grow">
+        <label for="peerId" class="hint">节点 log 里的 PEER ID</label>
+        <input id="peerId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" spellcheck="false">
+      </div>
+      <button id="connectBtn" class="primary" type="button">连接</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <span class="hint">本页 PeerJS id：</span><span id="myId" class="pid">等待注册…</span>
+    </div>
+    <div class="chips">
+      <span class="chip" id="chipSignal">peerjs 信令</span>
+      <span class="chip" id="chipPC">第 2 条 PeerConnection</span>
+      <span class="chip" id="chipData">数据通道</span>
+      <span class="chip" id="chipColl">collection</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2 · collection（每条含 sha256）</h2>
+    <div id="collHead" class="hint">连接后自动获取。</div>
+    <table id="fileTable" class="hidden">
+      <thead><tr><th>文件</th><th>大小</th><th>sha256</th><th></th></tr></thead>
+      <tbody id="fileList"></tbody>
+    </table>
+  </div>
+
+  <div class="card hidden" id="dlCard">
+    <h2>3 · 下载（分块并行 / 可续传 / sha256 校验）</h2>
+    <div class="row">
+      <div class="grow"><span id="dlName" class="mono">—</span></div>
+      <span class="hint">并行</span>
+      <input id="threads" type="number" min="1" max="8" value="4" style="width:64px">
+      <button id="pauseBtn" type="button" disabled>暂停</button>
+      <button id="resumeBtn" type="button" disabled>继续</button>
+      <button id="reconnectBtn" type="button">重建数据通道</button>
+    </div>
+    <div class="hint" style="margin-top:6px">请求用的 sha256：<span id="dlSha" class="mono">—</span></div>
+    <div class="bar" id="dlBar"><i></i></div>
+    <div class="stat">
+      <span id="dlBytes">0 B / 0 B</span>
+      <span id="dlChunks">块 0 / 0</span>
+      <span id="dlState">idle</span>
+      <span id="dlSpeed"></span>
+    </div>
+    <div class="verify" id="dlVerify">尚未校验</div>
+  </div>
+
+  <div class="card">
+    <h2>log</h2>
+    <pre class="log" id="log"></pre>
+  </div>
+</div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

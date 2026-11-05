@@ -1,0 +1,109 @@
+name: e2e
+
+# e2e 模块同时依赖 h2f / peerjs / webrtc，任何一方变化都要重跑整链路。
+on:
+  push:
+    paths:
+      - 'e2e/**'
+      - 'h2f/**'
+      - 'peerjs/**'
+      - 'webrtc/**'
+      - 'go.work'
+      - '.github/workflows/e2e.yml'
+  pull_request:
+    paths:
+      - 'e2e/**'
+      - 'h2f/**'
+      - 'peerjs/**'
+      - 'webrtc/**'
+      - 'go.work'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: e2e/go.mod
+          cache: true
+          cache-dependency-path: e2e/go.sum
+      - name: go vet + go test
+        working-directory: e2e
+        run: |
+          go vet ./...
+          go test ./...
+
+  e2e:
+    name: e2e · 浏览器 ↔ 节点全链路
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: e2e/go.mod
+          cache: true
+          cache-dependency-path: e2e/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 安装 Chromium
+        working-directory: e2e/e2e
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: 造测试数据（64 MiB + 小文件，保证暂停/续传有可观测窗口）
+        run: |
+          mkdir -p /tmp/pd-e2e-share
+          python3 - <<'PY'
+          import hashlib
+          data = bytes((i * 17 + 3) & 0xFF for i in range(64 * 1024 * 1024 + 777))
+          open('/tmp/pd-e2e-share/huge.bin', 'wb').write(data)
+          open('/tmp/pd-e2e-share/note.txt', 'wb').write(b'hello e2e\n')
+          print('huge.bin sha', hashlib.sha256(data).hexdigest())
+          PY
+
+      - name: 起节点并跑 e2e
+        run: |
+          set -euo pipefail
+          go build -o /tmp/peerdrive ./e2e/cmd/peerdrive
+          /tmp/peerdrive \
+            -share /tmp/pd-e2e-share \
+            -db /tmp/pd-e2e/meta.db \
+            -http 127.0.0.1:8791 \
+            -repo "$PWD" \
+            > /tmp/pd-e2e.log 2>&1 &
+          NODE_PID=$!
+          trap 'kill $NODE_PID 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 90); do
+            if grep -q "PEER ID" /tmp/pd-e2e.log; then break; fi
+            sleep 1
+          done
+          grep -A2 "PEER ID" /tmp/pd-e2e.log
+
+          for i in $(seq 1 30); do
+            if curl -sf -o /dev/null http://127.0.0.1:8791/healthz; then break; fi
+            sleep 1
+          done
+
+          set +e
+          node e2e/e2e/run.mjs 2>&1 | tee /tmp/e2e.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            flat=$(tr '\n' '~' < /tmp/e2e.log | head -c 4000)
+            echo "::error title=e2e 失败::${flat}"
+            echo "--- 节点日志 ---"
+            tail -200 /tmp/pd-e2e.log
+            exit "$rc"
+          fi
