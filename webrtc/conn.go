@@ -40,8 +40,12 @@ type Server struct {
 	sig  *peerjs.Client
 	mu   sync.Mutex
 	live map[*Conn]struct{}
-	stop sync.Once
-	done chan struct{}
+	// pending：connectionID → 已建好的 PeerConnection（等 DataChannel）。
+	pending map[string]*pion.PeerConnection
+	// cands：候选早于 PeerConnection 到达时的暂存。
+	cands map[string][]pion.ICECandidateInit
+	stop  sync.Once
+	done  chan struct{}
 }
 
 // Listen 注册到 PeerJS 信令并开始接收连接。返回后即可从 ID() 取到标识符。
@@ -62,11 +66,13 @@ func Listen(ctx context.Context, cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:  cfg,
-		log:  cfg.Logger,
-		sig:  sig,
-		live: make(map[*Conn]struct{}),
-		done: make(chan struct{}),
+		cfg:     cfg,
+		log:     cfg.Logger,
+		sig:     sig,
+		live:    make(map[*Conn]struct{}),
+		pending: make(map[string]*pion.PeerConnection),
+		cands:   make(map[string][]pion.ICECandidateInit),
+		done:    make(chan struct{}),
 	}
 	sig.RegisterTransport(s)
 	return s, nil
@@ -104,6 +110,7 @@ func (s *Server) Accept(o peerjs.Offer, sig peerjs.Signal) {
 	})
 
 	pc.OnDataChannel(func(dc *pion.DataChannel) {
+		s.log.Printf("收到 DataChannel · %s · label=%s", o.ConnectionID, dc.Label())
 		conn.attach(dc)
 		s.track(conn)
 		if s.cfg.OnConn != nil {
@@ -112,11 +119,16 @@ func (s *Server) Accept(o peerjs.Offer, sig peerjs.Signal) {
 	})
 
 	pc.OnConnectionStateChange(func(st pion.PeerConnectionState) {
+		s.log.Printf("连接状态 · %s · %s", o.ConnectionID, st)
 		switch st {
 		case pion.PeerConnectionStateFailed, pion.PeerConnectionStateClosed:
 			conn.fail(ErrClosed)
 			sig.Release(o.ConnectionID)
 		}
+	})
+
+	pc.OnICEConnectionStateChange(func(st pion.ICEConnectionState) {
+		s.log.Printf("ICE 状态 · %s · %s", o.ConnectionID, st)
 	})
 
 	if err := pc.SetRemoteDescription(pion.SessionDescription{
@@ -127,6 +139,8 @@ func (s *Server) Accept(o peerjs.Offer, sig peerjs.Signal) {
 		_ = pc.Close()
 		return
 	}
+	// remote description 就位后补加之前暂存的候选。
+	s.flushCandidates(o.ConnectionID, pc)
 
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
@@ -146,9 +160,54 @@ func (s *Server) Accept(o peerjs.Offer, sig peerjs.Signal) {
 		return
 	}
 	s.log.Printf("已应答 offer · %s · label=%s · ser=%s", o.Remote, o.Label, o.Serialization)
+	s.diag(o.ConnectionID, "已应答 offer，等候选/通道")
+}
+
+// diag 周期性把一条连接的内部状态打到日志里。
+//
+// ICE 握不上手时，外部能看到的只有「页面说 open、Go 侧没反应」。这里每
+// 2s 打一次 signaling/ice/gathering 状态与已收候选数，直到通道打开，
+// 失败时日志尾部就能直接看出卡在 ice 还是 gathering。
+func (s *Server) diag(connectionID string, phase string) {
+	go func() {
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for i := 0; i < 20; i++ {
+			select {
+			case <-t.C:
+			case <-s.done:
+				return
+			}
+			s.mu.Lock()
+			pc := s.pending[connectionID]
+			var open bool
+			for c := range s.live {
+				if c.id == connectionID {
+					pc, open = c.pc, true
+					break
+				}
+			}
+			s.mu.Unlock()
+			if pc == nil {
+				continue
+			}
+			if open && pc.ConnectionState() == pion.PeerConnectionStateConnected {
+				return
+			}
+			s.log.Printf("诊断 · %s · %s · sig=%s ice=%s gather=%s conn=%s",
+				phase, connectionID,
+				pc.SignalingState(), pc.ICEConnectionState(),
+				pc.ICEGatheringState(), pc.ConnectionState())
+		}
+	}()
 }
 
 // Offer 实现 peerjs.Transport：收到 ICE candidate。
+//
+// 候选可能早于 DataChannel 到达：此时 live 里还没有这条连接，按 id 直接
+// 找不到目标。以前这种候选被静默丢弃，浏览器侧的 ICE 就永远握不上手
+// ——表现为页面显示 datachannel open、但 Go 侧一个字节都读不到。
+// 现在先把候选按 connectionID 暂存，等 Accept 里建好 PeerConnection 再补加。
 func (s *Server) Offer(connectionID string, cand pion.ICECandidateInit) {
 	s.mu.Lock()
 	var target *Conn
@@ -158,23 +217,55 @@ func (s *Server) Offer(connectionID string, cand pion.ICECandidateInit) {
 			break
 		}
 	}
-	s.mu.Unlock()
-	if target == nil {
+	pc := s.pending[connectionID]
+	if target == nil && pc == nil {
+		// 两者都没有：连 Accept 都还没跑到，先存着。
+		s.cands[connectionID] = append(s.cands[connectionID], cand)
+		s.mu.Unlock()
+		s.log.Printf("候选提前到达，暂存 · conn=%s（已有 %d 条）", connectionID, len(s.cands[connectionID]))
 		return
 	}
-	if err := target.pc.AddICECandidate(cand); err != nil {
-		s.log.Printf("AddICECandidate: %v", err)
+	s.mu.Unlock()
+
+	if target != nil {
+		pc = target.pc
+	}
+	if err := pc.AddICECandidate(cand); err != nil {
+		s.log.Printf("AddICECandidate · conn=%s: %v", connectionID, err)
+		return
+	}
+	s.log.Printf("候选已加入 · conn=%s", connectionID)
+}
+
+// flushCandidates 把暂存的候选补加到刚建好的 PeerConnection 上。
+func (s *Server) flushCandidates(connectionID string, pc *pion.PeerConnection) {
+	s.mu.Lock()
+	pending := s.cands[connectionID]
+	delete(s.cands, connectionID)
+	s.pending[connectionID] = pc
+	s.mu.Unlock()
+	if len(pending) == 0 {
+		return
+	}
+	s.log.Printf("补加暂存候选 · conn=%s · %d 条", connectionID, len(pending))
+	for _, c := range pending {
+		if err := pc.AddICECandidate(c); err != nil {
+			s.log.Printf("补加候选失败 · conn=%s: %v", connectionID, err)
+		}
 	}
 }
 
 func (s *Server) track(c *Conn) {
 	s.mu.Lock()
 	s.live[c] = struct{}{}
+	delete(s.pending, c.id)
 	s.mu.Unlock()
 	go func() {
 		<-c.done
 		s.mu.Lock()
 		delete(s.live, c)
+		delete(s.pending, c.id)
+		delete(s.cands, c.id)
 		s.mu.Unlock()
 	}()
 }
@@ -195,6 +286,8 @@ func (s *Server) Close() error {
 			_ = c.Close()
 		}
 		s.live = map[*Conn]struct{}{}
+		s.pending = map[string]*pion.PeerConnection{}
+		s.cands = map[string][]pion.ICECandidateInit{}
 		s.mu.Unlock()
 	})
 	return s.sig.Close()

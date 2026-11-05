@@ -60,7 +60,7 @@ while (Date.now() < deadline) {
   await new Promise((r) => setTimeout(r, 1000));
 }
 if (!goID) {
-  fail(`90s 内没能从 ${logPath} 读到 PEER ID\n--- go 侧日志 ---\n` + readTail(logPath, 4000));
+  fail(`90s 内没能从 ${logPath} 读到 PEER ID\n--- go 侧日志 ---\n` + readTail(logPath, 8000));
 }
 log("go peer id:", goID);
 
@@ -106,7 +106,7 @@ if (!dcOpen) {
     "45s 内 DataChannel 没打开\n" +
     "chipSignal=" + signalChip + " chipDC=" + lastChip + "\n" +
     "--- 页面日志 ---\n" + state.slice(-3000) +
-    "\n--- go 侧日志 ---\n" + readTail(logPath, 4000),
+    "\n--- go 侧日志 ---\n" + readTail(logPath, 8000),
   );
 }
 // 探针已达成，撤掉：第 20 轮用它确认了「DataChannel 能打开」，
@@ -131,7 +131,7 @@ if (!rtt.includes("rtt")) {
     "没收到 pong\n" +
     "in=" + JSON.stringify(inKinds) + " out=" + JSON.stringify(outKinds) + "\n" +
     "--- 页面日志 ---\n" + state.slice(-3000) +
-    "\n--- go 侧日志 ---\n" + readTail(logPath, 6000),
+    "\n--- go 侧日志 ---\n" + readTail(logPath, 8000),
   );
 }
 log("control 往返 OK ·", rtt.trim());
@@ -160,7 +160,7 @@ if (!sawAck) {
     "in=" + JSON.stringify(inKinds) + " out=" + JSON.stringify(outKinds) +
     " (beforeMeta=" + beforeMeta + ")\n" +
     "--- 页面日志 ---\n" + state.slice(-3000) +
-    "\n--- go 侧日志 ---\n" + readTail(logPath, 4000),
+    "\n--- go 侧日志 ---\n" + readTail(logPath, 8000),
   );
 }
 log("metadata → ack OK");
