@@ -2,11 +2,12 @@
 // persistent, content-addressed map from SHA256 to the file that currently
 // holds that content.
 //
-// # The three calls
+// # The calls
 //
-//	Stat(sha)    resolve a hash to one FileMetadata
-//	Index(root)  scan root and register everything under it, idempotently
-//	List(root)   read back what is persisted, without touching the filesystem
+//	Stat(sha)         resolve a hash to one FileMetadata
+//	Index(root)       scan root and register everything under it, idempotently
+//	List(root)        read back what is persisted, without touching the filesystem
+//	Collection(paths) resolve a list of registered paths to their metadata
 //
 // # Directories are files too
 //

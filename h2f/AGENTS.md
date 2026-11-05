@@ -11,6 +11,7 @@ func Stat(sha string) (FileMetadata, error)      // 按 hash 取元数据
 func Index(root string) ([]FileMetadata, error)  // 扫描并登记，幂等
 // 如果是文件夹，那么登记的文件 = 其下属[]FileMetadata json之后的hash。json的顺序按照ctime降序排列
 func List(root string) ([]FileMetadata, error)   // 只访问sqlite3中持久化的部分，列出
+func Collection(paths []string) ([]FileMetadata, error) // 集合 = 已登记路径的 []string；按序回查元数据，缺一条即 ErrNotFound
 ```
 
 
