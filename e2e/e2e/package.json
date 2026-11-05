@@ -1,0 +1,12 @@
+{
+  "name": "peerdrive-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Playwright e2e：浏览器 ↔ ./peerdrive（PeerJS 信令 + 自建 WebRTC + collection/分块下载）",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}

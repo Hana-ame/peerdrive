@@ -3,6 +3,9 @@
 /peerjs/peerjs-node.exe
 /webrtc/webrtc-node
 /webrtc/webrtc-node.exe
+# e2e 节点二进制（go build -o ./peerdrive ./e2e/cmd/peerdrive）
+/peerdrive
+/peerdrive.exe
 
 # e2e 依赖
 **/node_modules/

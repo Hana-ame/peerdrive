@@ -1,6 +1,7 @@
 go 1.26.0
 
 use (
+	./e2e
 	./h2f
 	./peerjs
 	./webrtc

@@ -87,6 +87,15 @@ flag(1)=1 + seq(4) + total(4) + data
 
 `webrtc` 通过 `peerjs.RegisterTransport(srv)` 接管入站 OFFER。接管后 `peerjs` 不再为该连接建 `PeerConnection`，`OnMessage` 也不会触发——字符串回显那套只属于 `peerjs/cmd/peerjs-node`。
 
+信令入口有两个：
+
+- `Listen(ctx, cfg)` = `peerjs.Dial` + `Open`：自己注册 id 并接管 OFFER（本模块 demo / cmd 用）；
+- `New(sig, cfg)` / `Open(sig, cfg)`：复用一条**已注册**的 PeerJS 客户端。区别只在于
+  是否 `RegisterTransport`——`New` 不接管，留给「双通道」场景：第 1 条 PeerJS 通道
+  保持字符串模式只搬 SDP，调用方解析出 offer 后直接调 `Server.Accept(offer, 自己的
+  peerjs.Signal)`，answer/candidate 原路写回第 1 条通道，第 2 条 PeerConnection 的
+  SDP 完全不经过 PeerJS 服务器。见 `../e2e/AGENTS.md`。
+
 ### 链接
 
 - 上层索引：`../AGENTS.md`

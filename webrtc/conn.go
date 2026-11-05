@@ -61,9 +61,6 @@ func Listen(ctx context.Context, cfg Config) (*Server, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
 	}
-	if cfg.ICEServers == nil {
-		cfg.ICEServers = peerjs.NewICEServers()
-	}
 	if cfg.PeerJS.Logger == nil {
 		cfg.PeerJS.Logger = cfg.Logger
 	}
@@ -71,6 +68,42 @@ func Listen(ctx context.Context, cfg Config) (*Server, error) {
 	sig, err := peerjs.Dial(ctx, cfg.PeerJS)
 	if err != nil {
 		return nil, err
+	}
+	return Open(sig, cfg)
+}
+
+// Open 用一条已注册的 PeerJS 客户端装配 Server，并接管它的全部入站 OFFER。
+//
+// 与 Listen 的等价关系是：Listen = Dial + Open。
+func Open(sig *peerjs.Client, cfg Config) (*Server, error) {
+	s, err := New(sig, cfg)
+	if err != nil {
+		return nil, err
+	}
+	sig.RegisterTransport(s)
+	return s, nil
+}
+
+// New 用一条已注册的 PeerJS 客户端装配 Server，但**不**接管它的 OFFER。
+//
+// 与 Open 的差别就在这一行 RegisterTransport：不接管时，PeerJS 客户端保持
+// 默认模式——浏览器用 peer.connect() 建的通道仍然是「字符串」通道，
+// OFFER 不经过本 Server。这正是「双通道」场景要的：
+//
+//  1. 第一条 PeerJS 数据通道只搬信令（offer / answer / candidate 都是 JSON
+//     字符串），由调用方在 OnMessage 里自己解析；
+//  2. 调用方拿解析出的 SDP 调 Accept，用自己实现的 peerjs.Signal 把
+//     answer/candidate 写回第一条通道，于是第二条 PeerConnection 的信令
+//     完全不经过 PeerJS 服务器。
+func New(sig *peerjs.Client, cfg Config) (*Server, error) {
+	if sig == nil {
+		return nil, errors.New("webrtc: 需要一个已注册的 PeerJS 客户端")
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
+	}
+	if cfg.ICEServers == nil {
+		cfg.ICEServers = peerjs.NewICEServers()
 	}
 
 	s := &Server{
@@ -100,7 +133,6 @@ func Listen(ctx context.Context, cfg Config) (*Server, error) {
 		}
 		s.loggerFactory = f
 	}
-	sig.RegisterTransport(s)
 	return s, nil
 }
 
